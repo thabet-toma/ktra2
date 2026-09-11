@@ -676,6 +676,10 @@ class Engagement(models.Model):
         SUSPENDED = "suspended", "معلق"
         REVOKED = "revoked", "ملغى"
 
+    class Kind(models.TextChoices):
+        STANDARD = "standard", "عادي"
+        ONBOARDING = "onboarding", "تهيئة مؤقتة"
+
     employee = models.ForeignKey(
         PlatformEmployee,
         on_delete=models.CASCADE,
@@ -752,6 +756,47 @@ class Engagement(models.Model):
         blank=True,
         default="",
         verbose_name="سبب الإلغاء",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.STANDARD,
+        verbose_name="نوع الارتباط",
+        help_text="onboarding يتخطّى شرط الأساس المعتمد لفترة محدودة موسومة ومؤرَّخة.",
+    )
+    onboarding_expires_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="انتهاء التهيئة المؤقتة",
+        help_text="إلزامي لـkind=onboarding — أقصاه MAX_ONBOARDING_DAYS من الإسناد.",
+    )
+    ended_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="تاريخ الانتهاء",
+        help_text="طابعُ نهاية الارتباط العامّ (إلغاءً كان أو نقلاً) — يرافق `end_reason` دوماً.",
+    )
+    end_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="سبب الانتهاء",
+    )
+    predecessor = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="successors",
+        verbose_name="الارتباط السابق",
+        help_text="الارتباط الذي حلّ هذا محلّه عبر `transfer_engagement` — تاريخ النقل يبقى مقروءاً.",
+    )
+    capacity_override_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="سبب تجاوز الطاقة",
+        help_text="يُملأ فقط حين يُسند/يُنقل الموظف رغم تجاوز `capacity_target`.",
     )
     created_at = models.DateTimeField(
         auto_now_add=True,
@@ -2115,4 +2160,258 @@ class JobApplicantInvitation(models.Model):
     @property
     def is_live(self) -> bool:
         return not self.is_consumed
+
+
+# ==============================================================================
+# التذكرة 210-B: صحة الدفاتر والتشغيل، والإسناد والطاقة، والاكتساب
+# ==============================================================================
+
+#: أقصى أيام صلاحية إسناد onboarding مؤقت — يوثّقه `assign_platform_employee`.
+MAX_ONBOARDING_DAYS = 14
+
+
+class CompanyHealthCheck(models.Model):
+    """فحص صحة الدفاتر والتشغيل لشركة زبون — منفصل تماماً عن درجتي «صحة الخدمة»
+    و«تعاون الزبون» اللتين تحسبهما `calculate_two_health_scores` (م٧).
+
+    `kind=baseline` هو الفحص التأسيسي الذي يفتح باب الإسناد التشغيلي (غير onboarding)،
+    و`kind=monthly` لقطة شهرية لاحقة بنفس البنية. الفحص المعتمد **غير قابل للتعديل**؛
+    فحصٌ جديدٌ لنفس الشركة صفٌّ جديد يحفظ التاريخ — «الأساس الحالي» هو أحدث فحصٍ
+    تأسيسي معتمد، لا تعديلاً على صفٍّ واحد.
+    """
+
+    class Kind(models.TextChoices):
+        BASELINE = "baseline", "تأسيسي"
+        MONTHLY = "monthly", "شهري"
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "مسودة"
+        APPROVED = "approved", "معتمد"
+
+    class Complexity(models.TextChoices):
+        LOW = "low", "منخفض"
+        MEDIUM = "medium", "متوسط"
+        HIGH = "high", "مرتفع"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_health_checks",
+        verbose_name="الشركة",
+    )
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.BASELINE, verbose_name="نوع الفحص")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="الحالة")
+    period = models.DateField(
+        verbose_name="الفترة",
+        help_text="أول يوم في الشهر للفحص الشهري، أو تاريخ الفحص نفسه للتأسيسي.",
+    )
+    complexity = models.CharField(
+        max_length=10,
+        choices=Complexity.choices,
+        blank=True,
+        default="",
+        verbose_name="تقدير التعقيد",
+        help_text="تقدير السوبر أدمن لحمل الشركة — إلزامي قبل الاعتماد.",
+    )
+    notes = models.TextField(blank=True, default="", verbose_name="ملاحظات")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشأه",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="اعتمده",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت الاعتماد")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "فحص صحة الشركة"
+        verbose_name_plural = "فحوص صحة الشركات"
+        ordering = ["-period", "-created_at"]
+        indexes = [
+            models.Index(fields=["tenant", "kind", "-period"]),
+            models.Index(fields=["tenant", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant}: {self.get_kind_display()} ({self.get_status_display()})"
+
+
+class CompanyHealthCheckItem(models.Model):
+    """بند واحد داخل فحص صحة الشركة — دليل، مصدر، مسؤول، وموعد لكل بند.
+
+    `code` من كتالوجٍ ثابتٍ في الكود (`platform_ops.services.HEALTH_CHECK_ITEM_CATALOG`)
+    لا من إدخال حرّ. فرادة (check, code) **غير مشروطة**.
+    """
+
+    class ItemStatus(models.TextChoices):
+        HEALTHY = "healthy", "سليم"
+        FOLLOW_UP = "follow_up", "يحتاج متابعة"
+        RISK = "risk", "خطر"
+        NOT_APPLICABLE = "not_applicable", "لا ينطبق"
+
+    class Source(models.TextChoices):
+        AUTO = "auto", "آلي"
+        MANUAL = "manual", "يدوي"
+
+    health_check = models.ForeignKey(
+        CompanyHealthCheck,
+        on_delete=models.CASCADE,
+        related_name="items",
+        verbose_name="الفحص",
+    )
+    code = models.CharField(max_length=50, verbose_name="رمز البند")
+    status = models.CharField(
+        max_length=20, choices=ItemStatus.choices, default=ItemStatus.FOLLOW_UP, verbose_name="حالة البند",
+    )
+    evidence_value = models.DecimalField(
+        max_digits=14, decimal_places=2, null=True, blank=True, verbose_name="قيمة الدليل الرقمي",
+    )
+    evidence_note = models.CharField(max_length=500, blank=True, default="", verbose_name="ملاحظة الدليل")
+    source = models.CharField(max_length=10, choices=Source.choices, default=Source.MANUAL, verbose_name="مصدر القياس")
+    mandatory = models.BooleanField(default=True, verbose_name="إلزامي للاعتماد")
+    action = models.CharField(max_length=500, blank=True, default="", verbose_name="الإجراء المطلوب")
+    owner = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="المسؤول",
+    )
+    due_date = models.DateField(null=True, blank=True, verbose_name="الموعد")
+    work_order = models.ForeignKey(
+        WorkOrder,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="health_check_items",
+        verbose_name="أمر العمل المرتبط",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "بند فحص صحة الشركة"
+        verbose_name_plural = "بنود فحوص صحة الشركات"
+        constraints = [
+            models.UniqueConstraint(fields=["health_check", "code"], name="platform_ops_health_item_check_code_uniq"),
+        ]
+        indexes = [
+            models.Index(fields=["health_check", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.health_check_id}: {self.code} ({self.get_status_display()})"
+
+
+class CustomerAcquisition(models.Model):
+    """من جلب الشركة كزبون — مستقلّ عمّن يخدمها (`Engagement`) وعمّن نفّذ العمل.
+
+    صفٌّ واحدٌ لكل شركة (فرادة غير مشروطة عبر `OneToOneField`، كنمط `ServiceSubscription`)،
+    ونقل الخدمة لا يغيّره أبداً.
+    """
+
+    tenant = models.OneToOneField(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="customer_acquisition",
+        verbose_name="الشركة",
+    )
+    acquired_by = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.PROTECT,
+        related_name="acquired_customers",
+        verbose_name="جالب العميل",
+    )
+    acquired_at = models.DateField(verbose_name="تاريخ الاكتساب")
+    note = models.CharField(max_length=500, blank=True, default="", verbose_name="ملاحظة")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="سجّلها",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "اكتساب عميل"
+        verbose_name_plural = "اكتسابات العملاء"
+
+    def __str__(self):
+        return f"{self.tenant}: جلبه {self.acquired_by}"
+
+
+class PlatformOperationEvent(models.Model):
+    """سجلّ تدقيق غير قابل للمحو موحَّد لعمليات الإسناد والصحة والاكتساب (التذكرة 210-B).
+
+    نموذجٌ عامّ واحد بدل نماذج لكل نطاق — يحمل `tenant` مباشرة (خلافاً لـ
+    `ServiceSubscriptionEvent` المشتقة عبر `subscription.tenant`) لأنّ بعض
+    مصادره (الإسناد) لا اشتراك ثابتاً يملكها الحدث نفسه. `subject_id` معرّف
+    الصفّ المتأثر (ارتباط/فحص/اكتساب) بلا FK عام كي لا يتوسّع القفل عبر نماذج
+    مختلفة. لا مسار تعديل أو حذف عليه عمداً.
+    """
+
+    class Domain(models.TextChoices):
+        ENGAGEMENT = "engagement", "الإسناد"
+        HEALTH_CHECK = "health_check", "فحص الصحة"
+        ACQUISITION = "acquisition", "اكتساب العميل"
+
+    class Action(models.TextChoices):
+        ASSIGNED = "assigned", "إسناد"
+        TRANSFERRED = "transferred", "نقل"
+        SUSPENDED = "suspended", "تعليق"
+        RESUMED = "resumed", "استئناف"
+        REVOKED = "revoked", "إلغاء"
+        HEALTH_CHECK_APPROVED = "health_check_approved", "اعتماد فحص صحة"
+        HEALTH_CHECK_ITEM_CONVERTED = "health_check_item_converted", "تحويل بند إلى أمر عمل"
+        ACQUISITION_SET = "acquisition_set", "تسجيل اكتساب"
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="platform_operation_events",
+        verbose_name="الشركة",
+    )
+    domain = models.CharField(max_length=20, choices=Domain.choices, verbose_name="النطاق")
+    action = models.CharField(max_length=40, choices=Action.choices, verbose_name="الإجراء")
+    subject_id = models.PositiveIntegerField(verbose_name="معرّف الصفّ المتأثر")
+    reason = models.CharField(max_length=500, blank=True, default="", verbose_name="السبب")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="platform_operation_events",
+        verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث عملية منصّة"
+        verbose_name_plural = "أحداث عمليات المنصة"
+        indexes = [
+            models.Index(fields=["tenant", "domain", "-created_at"]),
+            models.Index(fields=["domain", "subject_id", "-created_at"]),
+            models.Index(fields=["correlation_id"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant}: {self.get_action_display()}"
 

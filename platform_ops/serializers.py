@@ -11,8 +11,12 @@ from tenants.models import Tenant
 
 from .models import (
     MAX_SERVICE_TRIAL_DAYS,
+    CompanyHealthCheck,
+    CompanyHealthCheckItem,
+    CustomerAcquisition,
     DailyRating,
     DailyRatingToken,
+    Engagement,
     IntegrationKey,
     JobApplicant,
     JobApplicantInvitation,
@@ -21,6 +25,7 @@ from .models import (
     PlatformActivityLog,
     PlatformEmployee,
     PlatformNotification,
+    PlatformOperationEvent,
     PlatformRecruiter,
     PolicyProfile,
     ServiceSubscription,
@@ -785,3 +790,172 @@ class JobApplicantInvitationSerializer(serializers.ModelSerializer):
             "created_at",
         ]
         read_only_fields = fields
+
+
+# ==============================================================================
+# التذكرة 210-B: فحص صحة الشركة، والإسناد والطاقة، واكتساب العميل
+# ==============================================================================
+
+
+class CompanyHealthCheckItemSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    source_display = serializers.CharField(source="get_source_display", read_only=True)
+    owner_name = serializers.CharField(source="owner.get_full_name", read_only=True, default="")
+
+    class Meta:
+        model = CompanyHealthCheckItem
+        fields = [
+            "id",
+            "health_check",
+            "code",
+            "status",
+            "status_display",
+            "evidence_value",
+            "evidence_note",
+            "source",
+            "source_display",
+            "mandatory",
+            "action",
+            "owner",
+            "owner_name",
+            "due_date",
+            "work_order",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id", "health_check", "code", "source", "mandatory", "work_order", "created_at", "updated_at",
+        ]
+
+
+class CompanyHealthCheckSerializer(serializers.ModelSerializer):
+    company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    complexity_display = serializers.CharField(source="get_complexity_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.get_full_name", read_only=True, default="")
+    approved_by_name = serializers.CharField(source="approved_by.get_full_name", read_only=True, default="")
+    items = CompanyHealthCheckItemSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = CompanyHealthCheck
+        fields = [
+            "id",
+            "tenant",
+            "company_name",
+            "kind",
+            "kind_display",
+            "status",
+            "status_display",
+            "period",
+            "complexity",
+            "complexity_display",
+            "notes",
+            "created_by",
+            "created_by_name",
+            "approved_by",
+            "approved_by_name",
+            "approved_at",
+            "items",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id", "tenant", "status", "created_by", "approved_by", "approved_at", "items", "created_at", "updated_at",
+        ]
+
+
+class CreateHealthCheckDraftSerializer(serializers.Serializer):
+    tenant = serializers.IntegerField(min_value=1)
+    kind = serializers.ChoiceField(choices=CompanyHealthCheck.Kind.choices, required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class UpdateHealthCheckSerializer(serializers.Serializer):
+    complexity = serializers.ChoiceField(choices=CompanyHealthCheck.Complexity.choices, required=False)
+    notes = serializers.CharField(required=False, allow_blank=True)
+
+
+class UpdateHealthCheckItemSerializer(serializers.Serializer):
+    status = serializers.ChoiceField(choices=CompanyHealthCheckItem.ItemStatus.choices, required=False)
+    evidence_value = serializers.DecimalField(max_digits=14, decimal_places=2, required=False, allow_null=True)
+    evidence_note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    action = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    owner = serializers.PrimaryKeyRelatedField(
+        queryset=get_user_model().objects.all(), required=False, allow_null=True,
+    )
+    due_date = serializers.DateField(required=False, allow_null=True)
+
+
+class EngagementSerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True)
+    company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+
+    class Meta:
+        model = Engagement
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "tenant",
+            "company_name",
+            "status",
+            "status_display",
+            "kind",
+            "kind_display",
+            "onboarding_expires_at",
+            "assigned_by",
+            "assigned_at",
+            "suspended_at",
+            "suspension_reason",
+            "revoked_at",
+            "revocation_reason",
+            "ended_at",
+            "end_reason",
+            "predecessor",
+            "capacity_override_reason",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class AssignEngagementSerializer(serializers.Serializer):
+    tenant = serializers.IntegerField(min_value=1)
+    employee = serializers.IntegerField(min_value=1)
+    kind = serializers.ChoiceField(choices=Engagement.Kind.choices, required=False)
+    capacity_override_reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class TransferEngagementSerializer(serializers.Serializer):
+    to_employee = serializers.IntegerField(min_value=1)
+    reason = serializers.CharField(required=True, allow_blank=False, max_length=500)
+    capacity_override_reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+class CustomerAcquisitionSerializer(serializers.ModelSerializer):
+    acquired_by_name = serializers.CharField(source="acquired_by.user.get_full_name", read_only=True)
+
+    class Meta:
+        model = CustomerAcquisition
+        fields = [
+            "id",
+            "tenant",
+            "acquired_by",
+            "acquired_by_name",
+            "acquired_at",
+            "note",
+            "created_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["id", "tenant", "created_by", "created_at", "updated_at"]
+
+
+class SetCustomerAcquisitionSerializer(serializers.Serializer):
+    tenant = serializers.IntegerField(min_value=1)
+    acquired_by = serializers.IntegerField(min_value=1)
+    acquired_at = serializers.DateField(required=False)
+    note = serializers.CharField(required=False, allow_blank=True, max_length=500)

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **733**
+عدد النقاط: **751**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -544,6 +544,7 @@
 | `/api/platform/development-notes/{pk}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/{comment_id}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
+| `/api/platform/ops/acquisition/` | `CustomerAcquisitionView` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
@@ -555,6 +556,23 @@
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/assign/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/candidates/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/{pk}/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/{pk}/resume/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/{pk}/revoke/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/{pk}/suspend/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/engagements/{pk}/transfer/` | `EngagementViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/compare/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/create-draft/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/approve/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/item-to-work-order/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/refresh/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/update-item/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/health-checks/{pk}/update/` | `CompanyHealthCheckViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/intake/` | `WorkOrderIntakeView` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/issue/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |

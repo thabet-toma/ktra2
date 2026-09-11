@@ -20,6 +20,7 @@ from partners.models import Partner
 from platform_ops.models import (
     Engagement,
     PlatformEmployee,
+    PlatformOperationEvent,
     ServiceSubscription,
     ServiceSubscriptionEvent,
     ServiceSubscriptionPolicy,
@@ -55,6 +56,7 @@ from platform_ops.services import (
     update_subscription_policy_draft,
     withdraw_scheduled_service_cancellation,
 )
+from platform_ops.tests.test_health_and_capacity import _approve_baseline
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -297,7 +299,8 @@ class SubscriptionLifecycleServiceTests(TestCase):
             username="lifecycle_employee", email="lifecycle_employee@example.test", password="x",
         )
         self.employee = PlatformEmployee.objects.create(
-            user=self.employee_user, specialty="data_entry", status=PlatformEmployee.Status.ACTIVE,
+            user=self.employee_user, specialty="data_entry", capacity_target=10,
+            status=PlatformEmployee.Status.ACTIVE,
         )
         self.tenant, self.platform_tenant = _make_platform_tenant_pair(2300)
         self.customer = Partner.objects.create(
@@ -522,19 +525,30 @@ class SubscriptionLifecycleServiceTests(TestCase):
 
     def test_suspension_suspends_engagements_without_deleting_history(self):
         subscription = activate_paid_subscription(tenant=self.tenant, billing_customer=self.customer, actor=self.admin)
+        _approve_baseline(self.tenant, actor=self.admin)
         engagement = assign_platform_employee(employee=self.employee, tenant=self.tenant)
         suspend_service_subscription(subscription=subscription, reason="تأخر سداد", actor=self.admin)
         engagement.refresh_from_db()
         self.assertEqual(engagement.status, Engagement.Status.SUSPENDED)
+        # تعليقُ الاشتراك يعلّق ارتباطاتٍ فعلاً، فلا يجوز أن يخلو سجلّ 210-B الموحّد منه.
+        suspension_event = PlatformOperationEvent.objects.get(
+            domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+            action=PlatformOperationEvent.Action.SUSPENDED,
+            subject_id=engagement.pk,
+        )
+        self.assertEqual(suspension_event.actor_id, self.admin.pk)
+        self.assertEqual(suspension_event.details["source"], "subscription_deactivation")
         with self.assertRaises(EngagementError):
             assign_platform_employee(employee=self.employee, tenant=self.tenant)
 
     def test_resume_restores_only_the_engagements_that_this_suspension_suspended(self):
         subscription = activate_paid_subscription(tenant=self.tenant, billing_customer=self.customer, actor=self.admin)
+        _approve_baseline(self.tenant, actor=self.admin)
         restored = assign_platform_employee(employee=self.employee, tenant=self.tenant)
         other_employee = PlatformEmployee.objects.create(
             user=User.objects.create_user(username="resume_other", email="resume_other@example.test", password="x"),
             specialty="data_entry",
+            capacity_target=10,
             status=PlatformEmployee.Status.ACTIVE,
         )
         stays_suspended = assign_platform_employee(employee=other_employee, tenant=self.tenant)
@@ -554,9 +568,17 @@ class SubscriptionLifecycleServiceTests(TestCase):
         ).latest("pk")
         self.assertEqual(event.details["resumed_engagement_ids"], [restored.pk])
         self.assertEqual(event.details["failed_engagements"], [])
+        # الاستئنافُ فعلُ فاعلٍ معروف: حدثُ الارتباط يحمله لا `None`.
+        resume_event = PlatformOperationEvent.objects.get(
+            domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+            action=PlatformOperationEvent.Action.RESUMED,
+            subject_id=restored.pk,
+        )
+        self.assertEqual(resume_event.actor_id, self.admin.pk)
 
     def test_resume_records_engagements_it_could_not_restore_instead_of_failing_whole(self):
         subscription = activate_paid_subscription(tenant=self.tenant, billing_customer=self.customer, actor=self.admin)
+        _approve_baseline(self.tenant, actor=self.admin)
         engagement = assign_platform_employee(employee=self.employee, tenant=self.tenant)
         suspend_service_subscription(subscription=subscription, reason="تأخر سداد", actor=self.admin)
         offboard_platform_employee(employee=self.employee, actor=self.admin)
@@ -1247,7 +1269,8 @@ class SubscriptionAssignmentEligibilityApiTests(TestCase):
             username="eligibility_employee", email="eligibility_employee@example.test", password="x",
         )
         self.employee = PlatformEmployee.objects.create(
-            user=self.employee_user, specialty="data_entry", status=PlatformEmployee.Status.ACTIVE,
+            user=self.employee_user, specialty="data_entry", capacity_target=10,
+            status=PlatformEmployee.Status.ACTIVE,
         )
         self.tenant, self.platform_tenant = _make_platform_tenant_pair(2500)
         self.customer = Partner.objects.create(
@@ -1277,6 +1300,7 @@ class SubscriptionAssignmentEligibilityApiTests(TestCase):
 
     def test_trial_tenant_is_eligible_for_assignment(self):
         start_service_trial(tenant=self.tenant, actor=self.admin)
+        _approve_baseline(self.tenant, actor=self.admin)
         engagement = assign_platform_employee(employee=self.employee, tenant=self.tenant)
         self.assertEqual(engagement.status, Engagement.Status.ACTIVE)
 
@@ -1293,7 +1317,8 @@ class ServiceEligibilityInternalSurfacesTests(TestCase):
             username="surfaces_employee", email="surfaces_employee@example.test", password="x",
         )
         self.employee = PlatformEmployee.objects.create(
-            user=self.employee_user, specialty="data_entry", status=PlatformEmployee.Status.ACTIVE,
+            user=self.employee_user, specialty="data_entry", capacity_target=10,
+            status=PlatformEmployee.Status.ACTIVE,
         )
         billing_tenant = Tenant.objects.create(TenantID=2700, CompanyName="Surfaces Billing Tenant")
         customer = Partner.objects.create(tenant=billing_tenant, name="Surfaces Customer", partner_type="Customer")
@@ -1311,6 +1336,7 @@ class ServiceEligibilityInternalSurfacesTests(TestCase):
         cancelled = activate_paid_subscription(tenant=self.cancelled, billing_customer=customer, actor=self.manager)
 
         for tenant in (self.active, self.expired_trial, self.cancelled):
+            _approve_baseline(tenant, actor=self.manager)
             assign_platform_employee(employee=self.employee, tenant=tenant, assigned_by=self.manager)
             WorkOrder.objects.create(
                 tenant=tenant, assignee=self.employee, title=f"WO {tenant.CompanyName}",
@@ -1369,6 +1395,7 @@ class SubscriptionDashboardEligibilityTests(TestCase):
         self.employee = PlatformEmployee.objects.create(
             user=self.employee_user,
             specialty="data_entry",
+            capacity_target=10,
             status=PlatformEmployee.Status.ACTIVE,
         )
         self.billing_tenant = Tenant.objects.create(TenantID=2600, CompanyName="Dashboard Billing Tenant")
@@ -1396,6 +1423,7 @@ class SubscriptionDashboardEligibilityTests(TestCase):
         )
 
         expired_subscription = start_service_trial(tenant=self.expired_trial, actor=self.manager)
+        _approve_baseline(self.expired_trial, actor=self.manager)
         assign_platform_employee(employee=self.employee, tenant=self.expired_trial, assigned_by=self.manager)
         WorkOrder.objects.create(
             tenant=self.expired_trial,
@@ -1409,6 +1437,8 @@ class SubscriptionDashboardEligibilityTests(TestCase):
 
         start_service_trial(tenant=self.valid_trial, actor=self.manager)
         activate_paid_subscription(tenant=self.active, billing_customer=self.customer, actor=self.manager)
+        _approve_baseline(self.valid_trial, actor=self.manager)
+        _approve_baseline(self.active, actor=self.manager)
         assign_platform_employee(employee=self.employee, tenant=self.valid_trial, assigned_by=self.manager)
         assign_platform_employee(employee=self.employee, tenant=self.active, assigned_by=self.manager)
 

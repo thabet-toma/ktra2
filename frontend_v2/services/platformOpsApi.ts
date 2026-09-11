@@ -400,3 +400,195 @@ export const searchPolicyBillingProducts = (policyId: number, query: string) =>
   apiGetObject<BillingProductOption[]>(
     `platform/ops/subscription-policies/${policyId}/billing-products/${buildCleanQueryString({ q: query })}`,
   );
+
+/**
+ * فحص صحة الدفاتر والتشغيل والإسناد/الطاقة واكتساب العميل (التذكرة 210-B).
+ *
+ * منفصلةٌ تماماً عن `CompanyHealthData`/`calculate_two_health_scores` أعلاه —
+ * تلك درجتان مشتقّتان حيّاً لا تُخزَّنان، وهذه سجلّاتٌ معتمدة يبقى تاريخها.
+ */
+export type HealthCheckKind = "baseline" | "monthly";
+export type HealthCheckStatus = "draft" | "approved";
+export type HealthCheckComplexity = "" | "low" | "medium" | "high";
+export type HealthCheckItemStatus = "healthy" | "follow_up" | "risk" | "not_applicable";
+export type HealthCheckItemSource = "auto" | "manual";
+
+export interface CompanyHealthCheckItemRow {
+  id: number;
+  health_check: number;
+  code: string;
+  status: HealthCheckItemStatus;
+  status_display: string;
+  evidence_value: string | null;
+  evidence_note: string;
+  source: HealthCheckItemSource;
+  source_display: string;
+  mandatory: boolean;
+  action: string;
+  owner: number | null;
+  owner_name: string;
+  due_date: string | null;
+  work_order: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CompanyHealthCheckRow {
+  id: number;
+  tenant: number;
+  company_name: string;
+  kind: HealthCheckKind;
+  kind_display: string;
+  status: HealthCheckStatus;
+  status_display: string;
+  period: string;
+  complexity: HealthCheckComplexity;
+  complexity_display: string;
+  notes: string;
+  created_by: number | null;
+  created_by_name: string;
+  approved_by: number | null;
+  approved_by_name: string;
+  approved_at: string | null;
+  items: CompanyHealthCheckItemRow[];
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UpdateHealthCheckItemInput {
+  status?: HealthCheckItemStatus;
+  evidence_value?: string | number | null;
+  evidence_note?: string;
+  action?: string;
+  owner?: number | null;
+  due_date?: string | null;
+}
+
+export const listHealthChecks = async (company: number): Promise<CompanyHealthCheckRow[]> =>
+  unwrapRows(
+    await apiGetObject<{ results: CompanyHealthCheckRow[]; count?: number } | CompanyHealthCheckRow[]>(
+      `platform/ops/health-checks/${buildCleanQueryString({ company })}`,
+    ),
+  );
+
+export const createHealthCheckDraft = (tenant: number, kind?: HealthCheckKind, notes?: string) =>
+  apiPostObject<CompanyHealthCheckRow>("platform/ops/health-checks/create-draft/", { tenant, kind, notes });
+
+export const updateHealthCheck = (id: number, input: { complexity?: HealthCheckComplexity; notes?: string }) =>
+  apiPostObject<CompanyHealthCheckRow>(`platform/ops/health-checks/${id}/update/`, input);
+
+export const refreshHealthCheckAutoItems = (id: number) =>
+  apiPostObject<CompanyHealthCheckRow>(`platform/ops/health-checks/${id}/refresh/`, {});
+
+export const approveHealthCheck = (id: number) =>
+  apiPostObject<CompanyHealthCheckRow>(`platform/ops/health-checks/${id}/approve/`, {});
+
+export const updateHealthCheckItem = (checkId: number, itemId: number, input: UpdateHealthCheckItemInput) =>
+  apiPostObject<CompanyHealthCheckItemRow>(`platform/ops/health-checks/${checkId}/update-item/`, {
+    item: itemId, ...input,
+  });
+
+export const convertHealthCheckItemToWorkOrder = (checkId: number, itemId: number) =>
+  apiPostObject<WorkOrderRow>(`platform/ops/health-checks/${checkId}/item-to-work-order/`, { item: itemId });
+
+export interface HealthBaselineComparison {
+  baseline: CompanyHealthCheckRow | null;
+  current: CompanyHealthCheckRow | null;
+  changes: { code: string; from_status: HealthCheckItemStatus | null; to_status: HealthCheckItemStatus }[];
+}
+
+export const compareHealthBaseline = (company: number) =>
+  apiGetObject<HealthBaselineComparison>(`platform/ops/health-checks/compare/${buildCleanQueryString({ company })}`);
+
+export type EngagementStatus = "active" | "suspended" | "revoked";
+export type EngagementKind = "standard" | "onboarding";
+
+export interface EngagementRow {
+  id: number;
+  employee: number;
+  employee_name: string;
+  tenant: number;
+  company_name: string;
+  status: EngagementStatus;
+  status_display: string;
+  kind: EngagementKind;
+  kind_display: string;
+  onboarding_expires_at: string | null;
+  assigned_by: number | null;
+  assigned_at: string;
+  suspended_at: string | null;
+  suspension_reason: string;
+  revoked_at: string | null;
+  revocation_reason: string;
+  ended_at: string | null;
+  end_reason: string;
+  predecessor: number | null;
+  capacity_override_reason: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listEngagements = async (company: number): Promise<EngagementRow[]> =>
+  unwrapRows(
+    await apiGetObject<{ results: EngagementRow[]; count?: number } | EngagementRow[]>(
+      `platform/ops/engagements/${buildCleanQueryString({ company })}`,
+    ),
+  );
+
+export const assignPlatformEmployee = (
+  tenant: number, employee: number, kind?: EngagementKind, capacityOverrideReason?: string,
+) =>
+  apiPostObject<EngagementRow>("platform/ops/engagements/assign/", {
+    tenant, employee, kind, capacity_override_reason: capacityOverrideReason || undefined,
+  });
+
+export const transferEngagement = (
+  engagementId: number, toEmployee: number, reason: string, capacityOverrideReason?: string,
+) =>
+  apiPostObject<EngagementRow>(`platform/ops/engagements/${engagementId}/transfer/`, {
+    to_employee: toEmployee, reason, capacity_override_reason: capacityOverrideReason || undefined,
+  });
+
+export const suspendEngagement = (engagementId: number, reason: string) =>
+  apiPostObject<EngagementRow>(`platform/ops/engagements/${engagementId}/suspend/`, { reason });
+
+export const resumeEngagement = (engagementId: number) =>
+  apiPostObject<EngagementRow>(`platform/ops/engagements/${engagementId}/resume/`, {});
+
+export const revokeEngagement = (engagementId: number, reason: string) =>
+  apiPostObject<EngagementRow>(`platform/ops/engagements/${engagementId}/revoke/`, { reason });
+
+export interface AssignmentCandidateRow {
+  employee: number;
+  employee_name: string;
+  specialty: string;
+  load: number;
+  capacity_target: string;
+  remaining: string;
+  active_engagements_count: number;
+  projected_load_if_assigned: number;
+  would_exceed_capacity: boolean;
+}
+
+export const listAssignmentCandidates = (company: number) =>
+  apiGetObject<AssignmentCandidateRow[]>(`platform/ops/engagements/candidates/${buildCleanQueryString({ company })}`);
+
+export interface CustomerAcquisitionRow {
+  id: number;
+  tenant: number;
+  acquired_by: number;
+  acquired_by_name: string;
+  acquired_at: string;
+  note: string;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const getCustomerAcquisition = (company: number) =>
+  apiGetObject<CustomerAcquisitionRow | null>(`platform/ops/acquisition/${buildCleanQueryString({ company })}`);
+
+export const setCustomerAcquisition = (tenant: number, acquiredBy: number, acquiredAt?: string, note?: string) =>
+  apiPostObject<CustomerAcquisitionRow>("platform/ops/acquisition/", {
+    tenant, acquired_by: acquiredBy, acquired_at: acquiredAt || undefined, note: note || undefined,
+  });

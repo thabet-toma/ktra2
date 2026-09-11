@@ -39,6 +39,7 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.terminology",         # term(tenant, key) — اسمُ المستند بمعجم الشركة لا حرفياً (م٧)
     "core.tenant_utils",        # get_tenant — المصدر الواحد لحلّ شركة المستخدم على نقاط م٧ الموجَّهة للزبون
     "hr.models",                # UserDevice لقراءة طابع آخر ظهور (last_active_at) في لوحة العمليات المنصية (م٦)
+    "inventory.fifo",           # pending_provisional_layers لبند صحة «طبقات مخزون مؤقتة» (210-B)
     "inventory.models",         # Product لأصناف الخدمات في سطور الفاتورة (م٨-أ)
     "partners.models",          # Partner لعميل الفوترة billing_customer (م٨-أ)
     "sales.models",             # SalesInvoice وSalesSettings لفاتورة الفوترة (م٨-أ)

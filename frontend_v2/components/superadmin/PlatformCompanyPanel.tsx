@@ -21,6 +21,8 @@ import { formatNumber } from "../../utils/formatNumber";
 // المستند والصفحة العامة — لا صيغة ثالثة تخصّ لوحة المنصة.
 import { actionMeta, entityLabel, formatActivityTime } from "../activity/activityMeta";
 import { ServiceSubscriptionSection } from "../platform/ServiceSubscriptionSection";
+import { CompanyHealthCheckSection } from "../platform/CompanyHealthCheckSection";
+import { EngagementAssignmentSection } from "../platform/EngagementAssignmentSection";
 
 /** لوحة تحكم الشركة — سوبر أدمن المنصة فقط.
  * كانت صلاحيات المنصة موزّعة على «إدارة الشركة» (نافذة المدير) فلا يطال السوبر
@@ -412,6 +414,10 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
               </section>
 
               <ServiceSubscriptionSection companyId={companyId} />
+
+              <CompanyHealthCheckSection companyId={companyId} />
+
+              <EngagementAssignmentSection companyId={companyId} />
 
               <section aria-label="وحدات الشركة المرخَّصة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">الوحدات المرخَّصة</h3>

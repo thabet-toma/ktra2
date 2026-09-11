@@ -37,6 +37,7 @@ from platform_ops.models import (
     AgentGrantedMembership,
     Engagement,
     PlatformEmployee,
+    PlatformOperationEvent,
     ServiceSubscription,
 )
 from platform_ops.services import (
@@ -50,6 +51,7 @@ from platform_ops.services import (
     revoke_engagement,
     suspend_engagement,
 )
+from platform_ops.tests.test_health_and_capacity import _approve_baseline
 
 User = get_user_model()
 
@@ -84,6 +86,8 @@ class EngagementLifecycleTest(TestCase):
             plan="growth",
             included_quota=500,
         )
+        # 210-B: الإسناد العادي يلزمه فحصٌ تأسيسيٌّ معتمد.
+        _approve_baseline(self.tenant, actor=self.admin_user)
 
     def test_active_service_assignment_creates_manager_membership_and_tracks_exact_row(self):
         """إسناد الخدمة النشطة ينشئ عضوية manager ويسجل created_membership=True ويتتبع الصف بدقة."""
@@ -294,6 +298,25 @@ class EngagementLifecycleTest(TestCase):
         # لم تتغير updated_at لعدم إعادة حفظ الصف دون داعٍ
         self.assertEqual(self.employee.updated_at, first_updated_at)
 
+    def test_offboarding_writes_a_revoked_operation_event_for_each_engagement(self):
+        """المغادرة تلغي ارتباطات الموظف، وسجلّ 210-B الموحّد يجب أن يرى كلّ إلغاءٍ منها."""
+        engagement = assign_platform_employee(
+            employee=self.employee,
+            tenant=self.tenant,
+            assigned_by=self.admin_user,
+        )
+
+        offboard_platform_employee(employee=self.employee, actor=self.admin_user, reason="استقالة")
+
+        event = PlatformOperationEvent.objects.get(
+            domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+            action=PlatformOperationEvent.Action.REVOKED,
+            subject_id=engagement.pk,
+        )
+        self.assertEqual(event.actor_id, self.admin_user.pk)
+        self.assertEqual(event.tenant_id, self.tenant.pk)
+        self.assertEqual(event.details["source"], "employee_offboarding")
+
 
 class AgentGrantedMembershipIntegrationTest(TestCase):
     """اختبارات تكامل سجل AgentGrantedMembership عبر نقاط API الحقيقية للشركة."""
@@ -305,6 +328,7 @@ class AgentGrantedMembershipIntegrationTest(TestCase):
             tenant=self.tenant,
             status=ServiceSubscription.Status.ACTIVE,
         )
+        _approve_baseline(self.tenant)
 
         # مستخدم وكيل منصة
         self.agent_user = User.objects.create_user(
@@ -317,6 +341,7 @@ class AgentGrantedMembershipIntegrationTest(TestCase):
         self.employee = PlatformEmployee.objects.create(
             user=self.agent_user,
             specialty="ops",
+            capacity_target=10,
             status=PlatformEmployee.Status.ACTIVE,
         )
 
@@ -451,6 +476,7 @@ class ConcurrencyLockOrderTest(TransactionTestCase):
         self.employee = PlatformEmployee.objects.create(
             user=self.staff_user,
             specialty="ops",
+            capacity_target=10,
             status=PlatformEmployee.Status.ACTIVE,
         )
         self.tenant = Tenant.objects.create(TenantID=910, CompanyName="Conc Co")
@@ -459,6 +485,7 @@ class ConcurrencyLockOrderTest(TransactionTestCase):
             status=ServiceSubscription.Status.ACTIVE,
             plan="growth",
         )
+        _approve_baseline(self.tenant, actor=self.admin_user)
 
     @skipUnlessDBFeature("has_select_for_update")
     def test_concurrent_assignments_for_same_employee_and_tenant(self):
@@ -555,6 +582,9 @@ DECLARED_LOCK_ORDER = (
     "ServiceSubscriptionPolicy",
     "IntegrationKey",
     "ServiceSubscription",
+    "CompanyHealthCheck",
+    "CompanyHealthCheckItem",
+    "CustomerAcquisition",
     "PlatformEmployee",
     "Engagement",
     "WorkOrder",

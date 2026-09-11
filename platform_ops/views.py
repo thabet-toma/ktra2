@@ -39,12 +39,17 @@ from .services import (
     RatingTokenGone,
     RatingTokenNotFound,
     WorkOrderError,
+    approve_health_check,
+    assign_platform_employee,
     calculate_employee_performance,
     calculate_employee_ratings_summary,
     calculate_two_health_scores,
     capture_performance_snapshot,
     close_job_posting,
+    compare_health_baseline,
+    convert_health_check_item_to_work_order,
     create_applicant_invitation,
+    create_health_check_draft,
     create_job_posting,
     create_platform_recruiter,
     activate_paid_subscription,
@@ -53,30 +58,39 @@ from .services import (
     create_subscription_policy_draft,
     generate_daily_rating_token,
     generate_integration_key,
+    get_customer_acquisition,
     get_my_books_tab_data,
     get_tenant_quota_usage,
     get_platform_dashboard_summary,
     eligible_service_tenant_ids,
     invitation_public_url,
+    list_assignment_candidates,
     rank_employees_performance,
     rate_applicant,
     receive_channel_work_order,
+    refresh_health_check_auto_items,
     regenerate_job_posting_token,
     reopen_job_posting,
     resolve_daily_rating_token,
     rating_public_url,
+    resume_engagement,
     resume_service_subscription,
+    revoke_engagement,
     revoke_integration_key,
     revoke_platform_recruiter,
     rotate_integration_key,
     schedule_service_subscription_cancellation,
     search_platform_billing_customers,
+    set_customer_acquisition,
     start_service_trial,
     submit_daily_rating,
     suspend_engagement,
     suspend_service_subscription,
+    transfer_engagement,
     transition_applicant_status,
     update_daily_rating,
+    update_health_check,
+    update_health_check_item,
     update_subscription_policy_draft,
     update_subscription_commercial_settings,
     withdraw_scheduled_service_cancellation,
@@ -90,6 +104,8 @@ from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 from core.platform_admin_api import IsPlatformAdmin
 
 from .models import (
+    CompanyHealthCheck,
+    CompanyHealthCheckItem,
     DailyRating,
     Engagement,
     IntegrationKey,
@@ -114,9 +130,15 @@ from .permissions import (
 )
 from .public_hiring.cv_validation import guess_cv_content_type
 from .serializers import (
+    AssignEngagementSerializer,
+    CompanyHealthCheckItemSerializer,
+    CompanyHealthCheckSerializer,
+    CreateHealthCheckDraftSerializer,
+    CustomerAcquisitionSerializer,
     DailyRatingCreateSerializer,
     DailyRatingSerializer,
     DailyRatingUpdateSerializer,
+    EngagementSerializer,
     GenerateRatingLinkSerializer,
     IntegrationKeySerializer,
     JobApplicantSerializer,
@@ -131,6 +153,7 @@ from .serializers import (
     ActivatePaidNewSubscriptionSerializer,
     ActivatePaidSubscriptionSerializer,
     ActivateSubscriptionPolicySerializer,
+    SetCustomerAcquisitionSerializer,
     ServiceSubscriptionCancelSerializer,
     ServiceSubscriptionEventSerializer,
     ServiceSubscriptionSerializer,
@@ -140,6 +163,9 @@ from .serializers import (
     StartServiceTrialSerializer,
     SubscriptionReasonSerializer,
     SubscriptionBillingRecordSerializer,
+    TransferEngagementSerializer,
+    UpdateHealthCheckItemSerializer,
+    UpdateHealthCheckSerializer,
     WorkOrderSerializer,
 )
 
@@ -1683,6 +1709,319 @@ class CompanyHealthView(APIView):
             "company_name": tenant.CompanyName,
             "health_scores": calculate_two_health_scores(tenant),
         }, status=status.HTTP_200_OK)
+
+
+# ==============================================================================
+# التذكرة 210-B: فحص صحة الشركة، والإسناد والطاقة، واكتساب العميل
+# ==============================================================================
+
+
+class CompanyHealthCheckViewSet(viewsets.ReadOnlyModelViewSet):
+    """فحوص صحة الدفاتر والتشغيل (baseline/monthly) — مدير العمليات وحده.
+
+    منفصلةٌ تماماً عن `CompanyHealthView` (درجتا «صحة الخدمة» و«تعاون الزبون»
+    المشتقّتان حيّاً من `calculate_two_health_scores`) — هذه سجلّاتٌ معتمدة
+    تُخزَّن وتاريخها يبقى.
+    """
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = CompanyHealthCheckSerializer
+    queryset = (
+        CompanyHealthCheck.objects.select_related("tenant", "created_by", "approved_by")
+        .prefetch_related("items", "items__owner")
+        .all()
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            try:
+                qs = qs.filter(tenant_id=int(company_id))
+            except (TypeError, ValueError):
+                raise ValidationError({"company": ["يجب أن يكون معرّف الشركة رقماً صحيحاً."]})
+        kind = self.request.query_params.get("kind")
+        if kind:
+            qs = qs.filter(kind=kind)
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="create-draft")
+    def create_draft(self, request):
+        payload = CreateHealthCheckDraftSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(pk=payload.validated_data["tenant"])
+        except Tenant.DoesNotExist:
+            return Response({"tenant": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            check = create_health_check_draft(
+                tenant=tenant,
+                kind=payload.validated_data.get("kind", CompanyHealthCheck.Kind.BASELINE),
+                notes=payload.validated_data.get("notes", ""),
+                actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(check).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update")
+    def update_check(self, request, pk=None):
+        payload = UpdateHealthCheckSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            check = update_health_check(check=self.get_object(), **payload.validated_data)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(check).data)
+
+    @action(detail=True, methods=["post"], url_path="refresh")
+    def refresh(self, request, pk=None):
+        try:
+            check = refresh_health_check_auto_items(check=self.get_object())
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(check).data)
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        try:
+            check = approve_health_check(
+                check=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(check).data)
+
+    def _get_owned_item(self, check, item_id):
+        item = CompanyHealthCheckItem.objects.filter(pk=item_id, health_check=check).first()
+        if item is None:
+            raise Http404("بند الفحص غير موجود في هذا الفحص.")
+        return item
+
+    @action(detail=True, methods=["post"], url_path="update-item")
+    def update_item(self, request, pk=None):
+        check = self.get_object()
+        item_id = request.data.get("item")
+        if not item_id:
+            return Response({"item": ["هذا الحقل مطلوب."]}, status=status.HTTP_400_BAD_REQUEST)
+        item = self._get_owned_item(check, item_id)
+        payload = UpdateHealthCheckItemSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            updated = update_health_check_item(item=item, **payload.validated_data)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(CompanyHealthCheckItemSerializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="item-to-work-order")
+    def item_to_work_order(self, request, pk=None):
+        check = self.get_object()
+        item_id = request.data.get("item")
+        if not item_id:
+            return Response({"item": ["هذا الحقل مطلوب."]}, status=status.HTTP_400_BAD_REQUEST)
+        item = self._get_owned_item(check, item_id)
+        try:
+            work_order = convert_health_check_item_to_work_order(
+                item=item, actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(WorkOrderSerializer(work_order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="compare")
+    def compare(self, request):
+        company_id = request.query_params.get("company")
+        if not company_id:
+            return Response({"company": ["هذا الحقل مطلوب."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tenant = Tenant.objects.get(pk=int(company_id))
+        except (Tenant.DoesNotExist, TypeError, ValueError):
+            return Response({"company": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        result = compare_health_baseline(tenant=tenant)
+        return Response({
+            "baseline": self.get_serializer(result["baseline"]).data if result["baseline"] else None,
+            "current": self.get_serializer(result["current"]).data if result["current"] else None,
+            "changes": result["changes"],
+        })
+
+
+class EngagementViewSet(viewsets.ReadOnlyModelViewSet):
+    """ارتباطات موظفي المنصة وأفعال الإسناد/النقل/التعليق/الاستئناف/الإلغاء — مدير العمليات وحده."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = EngagementSerializer
+    queryset = Engagement.objects.select_related("employee__user", "tenant", "predecessor").all().order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            try:
+                qs = qs.filter(tenant_id=int(company_id))
+            except (TypeError, ValueError):
+                raise ValidationError({"company": ["يجب أن يكون معرّف الشركة رقماً صحيحاً."]})
+        employee_id = self.request.query_params.get("employee")
+        if employee_id:
+            try:
+                qs = qs.filter(employee_id=int(employee_id))
+            except (TypeError, ValueError):
+                raise ValidationError({"employee": ["يجب أن يكون معرّف الموظف رقماً صحيحاً."]})
+        status_param = self.request.query_params.get("status")
+        if status_param:
+            if status_param not in Engagement.Status.values:
+                raise ValidationError({"status": ["حالة ارتباط غير معروفة."]})
+            qs = qs.filter(status=status_param)
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="assign")
+    def assign(self, request):
+        payload = AssignEngagementSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            employee = PlatformEmployee.objects.get(pk=payload.validated_data["employee"])
+        except PlatformEmployee.DoesNotExist:
+            return Response({"employee": ["موظف العمليات غير موجود."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tenant = Tenant.objects.get(pk=payload.validated_data["tenant"])
+        except Tenant.DoesNotExist:
+            return Response({"tenant": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            engagement = assign_platform_employee(
+                employee=employee,
+                tenant=tenant,
+                assigned_by=request.user,
+                kind=payload.validated_data.get("kind", Engagement.Kind.STANDARD),
+                capacity_override_reason=payload.validated_data.get("capacity_override_reason", ""),
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(engagement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="transfer")
+    def transfer(self, request, pk=None):
+        payload = TransferEngagementSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            to_employee = PlatformEmployee.objects.get(pk=payload.validated_data["to_employee"])
+        except PlatformEmployee.DoesNotExist:
+            return Response({"to_employee": ["موظف العمليات غير موجود."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            engagement = transfer_engagement(
+                engagement=self.get_object(),
+                to_employee=to_employee,
+                reason=payload.validated_data["reason"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+                capacity_override_reason=payload.validated_data.get("capacity_override_reason", ""),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(engagement).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="suspend")
+    def suspend(self, request, pk=None):
+        payload = SubscriptionReasonSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            engagement = suspend_engagement(
+                engagement=self.get_object(),
+                reason=payload.validated_data["reason"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(engagement).data)
+
+    @action(detail=True, methods=["post"], url_path="resume")
+    def resume(self, request, pk=None):
+        try:
+            engagement = resume_engagement(
+                engagement=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(engagement).data)
+
+    @action(detail=True, methods=["post"], url_path="revoke")
+    def revoke(self, request, pk=None):
+        payload = SubscriptionReasonSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            engagement = revoke_engagement(
+                engagement=self.get_object(),
+                revoked_by=request.user,
+                reason=payload.validated_data["reason"],
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(engagement).data)
+
+    @action(detail=False, methods=["get"], url_path="candidates")
+    def candidates(self, request):
+        company_id = request.query_params.get("company")
+        if not company_id:
+            return Response({"company": ["هذا الحقل مطلوب."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tenant = Tenant.objects.get(pk=int(company_id))
+        except (Tenant.DoesNotExist, TypeError, ValueError):
+            return Response({"company": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        candidates = list_assignment_candidates(tenant=tenant)
+        return Response([
+            {
+                "employee": row["employee"].pk,
+                "employee_name": row["employee"].user.get_full_name() or row["employee"].user.username,
+                "specialty": row["employee"].specialty,
+                "load": row["load"],
+                "capacity_target": row["capacity_target"],
+                "remaining": row["remaining"],
+                "active_engagements_count": row["active_engagements_count"],
+                "projected_load_if_assigned": row["projected_load_if_assigned"],
+                "would_exceed_capacity": row["would_exceed_capacity"],
+            }
+            for row in candidates
+        ])
+
+
+class CustomerAcquisitionView(APIView):
+    """من جلب الشركة كزبون — مستقلّ عن مَن يخدمها الآن؛ مدير العمليات وحده."""
+
+    permission_classes = [IsPlatformOperationsManager]
+
+    def get(self, request):
+        company_id = request.query_params.get("company")
+        if not company_id:
+            return Response({"company": ["هذا الحقل مطلوب."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            tenant_id = int(company_id)
+        except (TypeError, ValueError):
+            return Response({"company": ["يجب أن يكون معرّف الشركة رقماً صحيحاً."]}, status=status.HTTP_400_BAD_REQUEST)
+        record = get_customer_acquisition(tenant_id)
+        if record is None:
+            return Response(None)
+        return Response(CustomerAcquisitionSerializer(record).data)
+
+    def post(self, request):
+        payload = SetCustomerAcquisitionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            tenant = Tenant.objects.get(pk=payload.validated_data["tenant"])
+        except Tenant.DoesNotExist:
+            return Response({"tenant": ["الشركة غير موجودة."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            record = set_customer_acquisition(
+                tenant=tenant,
+                acquired_by=payload.validated_data["acquired_by"],
+                acquired_at=payload.validated_data.get("acquired_at"),
+                note=payload.validated_data.get("note", ""),
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(CustomerAcquisitionSerializer(record).data, status=status.HTTP_200_OK)
 
 
 class PlatformRecruiterViewSet(viewsets.ModelViewSet):

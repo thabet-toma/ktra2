@@ -1,7 +1,8 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة، والتذكرة 210-B).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-Tenant -> ServiceSubscriptionPolicy -> IntegrationKey -> ServiceSubscription -> PlatformEmployee -> Engagement -> WorkOrder
+Tenant -> ServiceSubscriptionPolicy -> IntegrationKey -> ServiceSubscription -> CompanyHealthCheck
+-> CompanyHealthCheckItem -> CustomerAcquisition -> PlatformEmployee -> Engagement -> WorkOrder
 -> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
@@ -28,8 +29,12 @@ from hr.models import AttendanceDay, UserDevice
 from tenants.models import Currency, Tenant, UserCompanyMembership
 
 from .models import (
+    MAX_ONBOARDING_DAYS,
     MAX_SERVICE_TRIAL_DAYS,
     AgentGrantedMembership,
+    CompanyHealthCheck,
+    CompanyHealthCheckItem,
+    CustomerAcquisition,
     DailyRating,
     DailyRatingToken,
     Engagement,
@@ -41,6 +46,7 @@ from .models import (
     PlatformActivityLog,
     PlatformEmployee,
     PlatformNotification,
+    PlatformOperationEvent,
     PlatformRecruiter,
     PolicyProfile,
     ServiceSubscriptionEvent,
@@ -992,7 +998,7 @@ def resume_service_subscription(*, subscription, actor=None, correlation_id: str
     resumed_engagement_ids, failed_engagements = [], []
     for engagement_id in to_resume:
         try:
-            resume_engagement(engagement=engagement_id)
+            resume_engagement(engagement=engagement_id, actor=actor, correlation_id=correlation_id)
             resumed_engagement_ids.append(engagement_id)
         except PlatformOpsError as exc:
             failed_engagements.append({"engagement": engagement_id, "code": exc.code})
@@ -1398,13 +1404,21 @@ def _execute_suspend(locked_eng: Engagement, reason: str = "") -> Engagement:
 
 
 def _execute_revoke(
-    locked_eng: Engagement, revoked_by=None, reason: str = ""
+    locked_eng: Engagement, revoked_by=None, reason: str = "", end_reason: str | None = None,
 ) -> Engagement:
-    """تنفيذ الإلغاء على ارتباط مقفول مسبقاً دون إعادة طلب الأقفال."""
+    """تنفيذ الإلغاء على ارتباط مقفول مسبقاً دون إعادة طلب الأقفال.
+
+    `ended_at`/`end_reason` (210-B) طابعُ نهاية الارتباط العامّ — يُكتب في كل مسار
+    إلغاءٍ مهما كان مصدره (مباشر، نقل، مغادرة موظف، أو تعليق اشتراك)، بينما
+    `revoked_at`/`revocation_reason` يبقيان الحقل التاريخي المحدَّد.
+    """
+    now = timezone.now()
     locked_eng.status = Engagement.Status.REVOKED
-    locked_eng.revoked_at = timezone.now()
+    locked_eng.revoked_at = now
     locked_eng.revoked_by = revoked_by
     locked_eng.revocation_reason = str(reason)[:2000]
+    locked_eng.ended_at = now
+    locked_eng.end_reason = str(end_reason if end_reason is not None else reason)[:500]
 
     if locked_eng.managed_membership_id:
         target_mem = (
@@ -1427,6 +1441,8 @@ def _execute_revoke(
             "revoked_at",
             "revoked_by",
             "revocation_reason",
+            "ended_at",
+            "end_reason",
             "managed_membership",
             "updated_at",
         ]
@@ -1440,6 +1456,9 @@ def assign_platform_employee(
     employee: PlatformEmployee,
     tenant: Tenant,
     assigned_by=None,
+    kind: str = Engagement.Kind.STANDARD,
+    capacity_override_reason: str = "",
+    correlation_id: str = "",
 ) -> Engagement:
     """إسناد موظف منصة لشركة زبون.
 
@@ -1449,6 +1468,10 @@ def assign_platform_employee(
     3. فرادة الارتباط النشط تُفرض تحت قفل داخل معاملة ذرية.
     4. يوفر دور 'manager' للوكيل: إذا وُجدت عضوية قائمة بدور آخر، يُحفظ دورها السابق
        وتُرقى إلى 'manager'؛ أما إذا لم توجد، تُنشأ عضوية 'manager' جديدة ويسجل created_membership=True.
+    5. (210-B) بلا فحصٍ تأسيسي معتمد يُرفض الإسناد العادي — استثناءً لـ`kind=onboarding`
+       الموسوم والمؤرَّخ بحدٍّ أقصى `MAX_ONBOARDING_DAYS`. والطاقة المتوقّعة بعد الإسناد
+       (حِملُ الموظف الحالي + وحدات حِمل هذه الشركة) تُرفض إن تجاوزت `capacity_target`
+       بلا `capacity_override_reason`.
     """
     tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
     emp_pk = getattr(employee, "pk", employee)
@@ -1489,6 +1512,27 @@ def assign_platform_employee(
             "يوجد ارتباط نشط بالفعل لهذا الموظف مع هذه الشركة.",
         )
 
+    kind = kind or Engagement.Kind.STANDARD
+    if kind not in Engagement.Kind.values:
+        raise EngagementError("invalid_kind", f"نوع الارتباط غير صالح: {kind}")
+
+    onboarding_expires_at = None
+    if kind == Engagement.Kind.ONBOARDING:
+        onboarding_expires_at = timezone.now() + datetime.timedelta(days=MAX_ONBOARDING_DAYS)
+    elif latest_approved_baseline(tenant_obj) is None:
+        raise EngagementError(
+            "baseline_required",
+            "يلزم فحص صحة تأسيسي معتمد قبل الإسناد التشغيلي؛ استخدم إسناد onboarding مؤقتاً بدلاً منه.",
+        )
+
+    capacity_override_reason = str(capacity_override_reason or "").strip()
+    projected_load = Decimal(employee_capacity_snapshot(locked_employee)["load"]) + Decimal(_tenant_load_units(tenant_obj))
+    if _would_exceed_capacity(locked_employee.capacity_target, projected_load) and not capacity_override_reason:
+        raise EngagementConflict(
+            "capacity_exceeded",
+            "إسناد هذه الشركة يتجاوز الطاقة المستهدفة للموظف؛ أضف سبب تجاوز للمتابعة.",
+        )
+
     # 4. قفل والتعامل مع عضوية الشركة
     existing_membership = (
         UserCompanyMembership.objects.select_for_update()
@@ -1517,9 +1561,21 @@ def assign_platform_employee(
         tenant=tenant_obj,
         status=Engagement.Status.ACTIVE,
         assigned_by=assigned_by,
+        kind=kind,
+        onboarding_expires_at=onboarding_expires_at,
+        capacity_override_reason=capacity_override_reason,
         created_membership=created_membership,
         managed_membership=membership,
         previous_role=previous_role,
+    )
+    _log_operation_event(
+        tenant_obj,
+        domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+        action=PlatformOperationEvent.Action.ASSIGNED,
+        subject_id=engagement.pk,
+        actor=assigned_by,
+        correlation_id=correlation_id,
+        details={"employee_id": locked_employee.pk, "kind": kind},
     )
 
     return engagement
@@ -1530,6 +1586,8 @@ def suspend_engagement(
     *,
     engagement: Engagement,
     reason: str = "",
+    actor=None,
+    correlation_id: str = "",
 ) -> Engagement:
     """تعليق ارتباط موظف المنصة مؤقتاً.
 
@@ -1553,13 +1611,25 @@ def suspend_engagement(
     if locked.status != Engagement.Status.ACTIVE:
         raise EngagementConflict("not_active", "الارتباط ليس نشطاً ليتم تعليقه.")
 
-    return _execute_suspend(locked, reason=reason)
+    result = _execute_suspend(locked, reason=reason)
+    _log_operation_event(
+        result.tenant_id,
+        domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+        action=PlatformOperationEvent.Action.SUSPENDED,
+        subject_id=result.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+        reason=reason,
+    )
+    return result
 
 
 @transaction.atomic
 def resume_engagement(
     *,
     engagement: Engagement,
+    actor=None,
+    correlation_id: str = "",
 ) -> Engagement:
     """استئناف ارتباط معلق.
 
@@ -1657,6 +1727,14 @@ def resume_engagement(
             "updated_at",
         ]
     )
+    _log_operation_event(
+        locked.tenant_id,
+        domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+        action=PlatformOperationEvent.Action.RESUMED,
+        subject_id=locked.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+    )
 
     return locked
 
@@ -1667,6 +1745,7 @@ def revoke_engagement(
     engagement: Engagement,
     revoked_by=None,
     reason: str = "",
+    correlation_id: str = "",
 ) -> Engagement:
     """إلغاء ارتباط موظف المنصة نهائياً.
 
@@ -1687,7 +1766,17 @@ def revoke_engagement(
     if locked.status == Engagement.Status.REVOKED:
         raise EngagementConflict("already_revoked", "الارتباط ملغى سابقاً.")
 
-    return _execute_revoke(locked, revoked_by=revoked_by, reason=reason)
+    result = _execute_revoke(locked, revoked_by=revoked_by, reason=reason)
+    _log_operation_event(
+        result.tenant_id,
+        domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+        action=PlatformOperationEvent.Action.REVOKED,
+        subject_id=result.pk,
+        actor=revoked_by,
+        correlation_id=correlation_id,
+        reason=reason,
+    )
+    return result
 
 
 @transaction.atomic
@@ -1756,6 +1845,18 @@ def deactivate_service_subscription(
     for eng in active_engagements:
         _execute_suspend(eng, reason=reason)
         suspended_engagement_ids.append(eng.pk)
+        # التعليقُ عبر الاشتراك يكتب حدثَ الارتباط نفسه الذي يكتبه `suspend_engagement`:
+        # سجلُّ 210-B الموحّد لا يعرف مَن علّق الارتباط إن سكت هذا المسار.
+        _log_operation_event(
+            locked_sub.tenant_id,
+            domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+            action=PlatformOperationEvent.Action.SUSPENDED,
+            subject_id=eng.pk,
+            actor=actor,
+            correlation_id=correlation_id,
+            reason=reason,
+            details={"source": "subscription_deactivation", "subscription_id": locked_sub.pk},
+        )
 
     _log_subscription_event(
         locked_sub,
@@ -1789,6 +1890,7 @@ def offboard_platform_employee(
     employee: PlatformEmployee,
     actor=None,
     reason: str = "إنهاء خدمة موظف المنصة (مغادرة)",
+    correlation_id: str = "",
 ) -> PlatformEmployee:
     """إنهاء خدمة موظف المنصة (مغادرة) بعملية واحدة idempotent.
 
@@ -1819,6 +1921,18 @@ def offboard_platform_employee(
             eng,
             revoked_by=actor,
             reason=reason,
+        )
+        # كالتعليق عبر الاشتراك: الإلغاءُ عبر المغادرة يكتب حدثَ `revoke_engagement` نفسه،
+        # وإلا اختفت شركاتٌ من خدمة موظفٍ بلا أثرٍ في السجل الموحّد.
+        _log_operation_event(
+            eng.tenant_id,
+            domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+            action=PlatformOperationEvent.Action.REVOKED,
+            subject_id=eng.pk,
+            actor=actor,
+            correlation_id=correlation_id,
+            reason=reason,
+            details={"source": "employee_offboarding", "employee_id": locked_employee.pk},
         )
 
     return locked_employee
@@ -5841,3 +5955,659 @@ def accept_applicant_invitation(
     locked_inv.save(update_fields=["accepted_at"])
 
     return user, employee, locked_applicant
+
+
+# ==============================================================================
+# التذكرة 210-B: فحص صحة الدفاتر والتشغيل، والإسناد والطاقة، واكتساب العميل
+# ==============================================================================
+
+
+class HealthCheckError(PlatformOpsError):
+    """خطأ في عمليات فحص صحة الشركة."""
+
+
+class HealthCheckConflict(HealthCheckError):
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+class AcquisitionError(PlatformOpsError):
+    """خطأ في تسجيل اكتساب العميل."""
+
+
+class AcquisitionConflict(AcquisitionError):
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+#: كتالوج بنود فحص صحة الشركة — ثابتٌ في الكود لا إدخالاً حرّاً (§٦، §١١).
+#: `auto=True` تعني أن `_compute_auto_health_evidence` تملأ دليله عند الإنشاء/التحديث،
+#: وغير الآلي يبدأ `FOLLOW_UP` بلا دليل حتى يُدخله السوبر أدمن يدوياً.
+HEALTH_CHECK_ITEM_CATALOG: dict[str, dict] = {
+    "opening_balance_completeness": {"label": "اكتمال القيد الافتتاحي", "mandatory": True, "auto": False},
+    "unposted_sales_documents": {"label": "مستندات مبيعات غير مرحَّلة", "mandatory": True, "auto": True},
+    "bank_reconciliation": {"label": "مطابقة الحسابات البنكية", "mandatory": True, "auto": False},
+    "receivables_aging": {"label": "تقادم ذمم العملاء", "mandatory": False, "auto": True},
+    "fiscal_periods": {"label": "ضبط الفترات المالية", "mandatory": True, "auto": False},
+    "inventory_provisional_layers": {"label": "طبقات تكلفة مخزون مؤقتة", "mandatory": False, "auto": True},
+    "review_errors": {"label": "أخطاء مراجعة سابقة", "mandatory": False, "auto": False},
+}
+
+#: وحدات حِمل الشركة حسب تعقيد أحدث فحصٍ تأسيسي معتمد لها — ثابتٌ واحد موثَّق (§٦).
+#: شركة onboarding أو بلا فحصٍ تأسيسي بعد تُحتسب بوسط `medium` حتى يُعتمد فحصها.
+CAPACITY_LOAD_UNITS: dict[str, int] = {
+    CompanyHealthCheck.Complexity.LOW: 1,
+    CompanyHealthCheck.Complexity.MEDIUM: 2,
+    CompanyHealthCheck.Complexity.HIGH: 3,
+}
+DEFAULT_CAPACITY_LOAD_UNITS = CAPACITY_LOAD_UNITS[CompanyHealthCheck.Complexity.MEDIUM]
+
+
+def _log_operation_event(
+    tenant,
+    *,
+    domain: str,
+    action: str,
+    subject_id: int,
+    actor=None,
+    correlation_id: str = "",
+    reason: str = "",
+    details: dict | None = None,
+):
+    """حدثُ تدقيقٍ واحد غير قابل للمحو لعمليات الإسناد/الصحة/الاكتساب — نمط `_log_subscription_event`."""
+    return PlatformOperationEvent.objects.create(
+        tenant_id=getattr(tenant, "pk", tenant),
+        domain=domain,
+        action=action,
+        subject_id=subject_id,
+        reason=str(reason or "")[:500],
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def _compute_auto_health_evidence(tenant_obj: Tenant) -> dict[str, dict]:
+    """يحسب أدلة البنود الآلية فقط — قراءةٌ صرفة بلا أي كتابة.
+
+    كل بندٍ لا يمكن قياسُه بأمانٍ هنا (افتتاحية قد تُنشئ صفاً بصمت، مطابقة بنكية،
+    فترات مالية، أخطاء مراجعة تلزمها بيانات بوابة المحاسب) يبقى **يدوياً** عمداً —
+    القرار المسجَّل في تقرير التسليم لا تخميناً.
+    """
+    from sales.models import SalesInvoice
+
+    evidence: dict[str, dict] = {}
+
+    unposted_count = (
+        SalesInvoice.objects.filter(tenant=tenant_obj)
+        .exclude(status=SalesInvoice.STATUS_POSTED)
+        .count()
+    )
+    evidence["unposted_sales_documents"] = {
+        "evidence_value": Decimal(unposted_count),
+        "evidence_note": f"{unposted_count} {term(tenant_obj, 'doc.sales_invoice')} غير مرحَّلة",
+        "status": (
+            CompanyHealthCheckItem.ItemStatus.HEALTHY if unposted_count == 0
+            else CompanyHealthCheckItem.ItemStatus.RISK if unposted_count > 10
+            else CompanyHealthCheckItem.ItemStatus.FOLLOW_UP
+        ),
+    }
+
+    today = timezone.localdate()
+    overdue_count = (
+        SalesInvoice.objects.filter(tenant=tenant_obj, status=SalesInvoice.STATUS_POSTED)
+        .filter(Q(due_date__lt=today) | Q(due_date__isnull=True, invoice_date__lt=today))
+        .exclude(amount_paid__gte=models.F("grand_total"))
+        .count()
+    )
+    evidence["receivables_aging"] = {
+        "evidence_value": Decimal(overdue_count),
+        "evidence_note": f"{overdue_count} فاتورة متأخرة السداد",
+        "status": (
+            CompanyHealthCheckItem.ItemStatus.HEALTHY if overdue_count == 0
+            else CompanyHealthCheckItem.ItemStatus.RISK if overdue_count > 5
+            else CompanyHealthCheckItem.ItemStatus.FOLLOW_UP
+        ),
+    }
+
+    from inventory.fifo import pending_provisional_layers
+
+    layers_count = len(pending_provisional_layers(tenant_id=tenant_obj.pk))
+    evidence["inventory_provisional_layers"] = {
+        "evidence_value": Decimal(layers_count),
+        "evidence_note": f"{layers_count} طبقة تكلفة مؤقتة معلَّقة",
+        "status": (
+            CompanyHealthCheckItem.ItemStatus.HEALTHY if layers_count == 0
+            else CompanyHealthCheckItem.ItemStatus.RISK if layers_count > 20
+            else CompanyHealthCheckItem.ItemStatus.FOLLOW_UP
+        ),
+    }
+    return evidence
+
+
+@transaction.atomic
+def create_health_check_draft(
+    *,
+    tenant,
+    kind: str = CompanyHealthCheck.Kind.BASELINE,
+    period=None,
+    notes: str = "",
+    actor=None,
+) -> CompanyHealthCheck:
+    """ينشئ فحص صحة مسودة لشركةٍ مؤهَّلة للخدمة وحدها — يملأ البنود الآلية فوراً.
+
+    فحصٌ جديدٌ صفٌّ جديدٌ دوماً (لا تعديل على صفّ سابق) — التاريخ يبقى كاملاً.
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.filter(pk=tenant).first()
+    if tenant_obj is None:
+        raise HealthCheckError("tenant_not_found", "الشركة غير موجودة.")
+    if tenant_obj.pk not in set(eligible_service_tenant_ids()):
+        raise HealthCheckError(
+            "subscription_not_eligible", "خدمة المتابعة والإدخال غير مؤهَّلة لهذه الشركة.",
+        )
+    if kind not in CompanyHealthCheck.Kind.values:
+        raise HealthCheckError("invalid_kind", f"نوع الفحص غير صالح: {kind}")
+
+    check_period = period or timezone.localdate()
+    if kind == CompanyHealthCheck.Kind.MONTHLY:
+        check_period = check_period.replace(day=1)
+
+    check = CompanyHealthCheck.objects.create(
+        tenant=tenant_obj,
+        kind=kind,
+        status=CompanyHealthCheck.Status.DRAFT,
+        period=check_period,
+        notes=str(notes or ""),
+        created_by=actor if getattr(actor, "pk", None) else None,
+    )
+    auto_evidence = _compute_auto_health_evidence(tenant_obj)
+    for code, meta in HEALTH_CHECK_ITEM_CATALOG.items():
+        signal = auto_evidence.get(code) if meta["auto"] else None
+        CompanyHealthCheckItem.objects.create(
+            health_check=check,
+            code=code,
+            status=signal["status"] if signal else CompanyHealthCheckItem.ItemStatus.FOLLOW_UP,
+            evidence_value=signal["evidence_value"] if signal else None,
+            evidence_note=signal["evidence_note"] if signal else "",
+            source=CompanyHealthCheckItem.Source.AUTO if meta["auto"] else CompanyHealthCheckItem.Source.MANUAL,
+            mandatory=meta["mandatory"],
+        )
+    return check
+
+
+ALLOWED_HEALTH_CHECK_UPDATE_FIELDS = frozenset({"complexity", "notes", "period"})
+
+
+@transaction.atomic
+def update_health_check(*, check, **changes) -> CompanyHealthCheck:
+    """يعدّل حقول الفحص نفسه (التعقيد والملاحظات) على مسودة — التعقيد إلزامي قبل الاعتماد."""
+    unknown = set(changes) - ALLOWED_HEALTH_CHECK_UPDATE_FIELDS
+    if unknown:
+        raise HealthCheckError("unsupported_field", f"حقل غير مسموح بتعديله: {', '.join(sorted(unknown))}")
+    if changes.get("complexity") and changes["complexity"] not in CompanyHealthCheck.Complexity.values:
+        raise HealthCheckError("invalid_complexity", f"تعقيد غير صالح: {changes['complexity']}")
+
+    check_pk = getattr(check, "pk", check)
+    locked_check = CompanyHealthCheck.objects.select_for_update().get(pk=check_pk)
+    if locked_check.status != CompanyHealthCheck.Status.DRAFT:
+        raise HealthCheckConflict("health_check_immutable", "لا يمكن تعديل فحصٍ معتمد.")
+    for field, value in changes.items():
+        setattr(locked_check, field, value)
+    locked_check.save(update_fields=[*changes.keys(), "updated_at"])
+    return locked_check
+
+
+@transaction.atomic
+def refresh_health_check_auto_items(*, check) -> CompanyHealthCheck:
+    """يعيد حساب البنود الآلية فقط على مسودة — لا يمسّ البنود اليدوية ولا يعمل على فحصٍ معتمد."""
+    check_pk = getattr(check, "pk", check)
+    locked_check = CompanyHealthCheck.objects.select_for_update().get(pk=check_pk)
+    if locked_check.status != CompanyHealthCheck.Status.DRAFT:
+        raise HealthCheckConflict("health_check_immutable", "لا يمكن تحديث بنود فحصٍ معتمد.")
+    tenant_obj = Tenant.objects.get(pk=locked_check.tenant_id)
+    auto_evidence = _compute_auto_health_evidence(tenant_obj)
+    now = timezone.now()
+    for code, signal in auto_evidence.items():
+        CompanyHealthCheckItem.objects.filter(health_check=locked_check, code=code).update(
+            status=signal["status"],
+            evidence_value=signal["evidence_value"],
+            evidence_note=signal["evidence_note"],
+            updated_at=now,
+        )
+    return locked_check
+
+
+ALLOWED_HEALTH_ITEM_UPDATE_FIELDS = frozenset({
+    "status", "evidence_value", "evidence_note", "action", "owner", "due_date",
+})
+
+
+@transaction.atomic
+def update_health_check_item(*, item, **changes) -> CompanyHealthCheckItem:
+    """يعدّل بنداً واحداً على مسودة — الفحص المعتمد غير قابل للتعديل."""
+    unknown = set(changes) - ALLOWED_HEALTH_ITEM_UPDATE_FIELDS
+    if unknown:
+        raise HealthCheckError("unsupported_field", f"حقل غير مسموح بتعديله: {', '.join(sorted(unknown))}")
+    if "status" in changes and changes["status"] not in CompanyHealthCheckItem.ItemStatus.values:
+        raise HealthCheckError("invalid_item_status", f"حالة بند غير صالحة: {changes['status']}")
+
+    item_pk = getattr(item, "pk", item)
+    locked_item = CompanyHealthCheckItem.objects.select_for_update().get(pk=item_pk)
+    check_status = (
+        CompanyHealthCheck.objects.filter(pk=locked_item.health_check_id).values_list("status", flat=True).first()
+    )
+    if check_status != CompanyHealthCheck.Status.DRAFT:
+        raise HealthCheckConflict("health_check_immutable", "لا يمكن تعديل بندٍ في فحصٍ معتمد.")
+
+    for field, value in changes.items():
+        setattr(locked_item, field, value)
+    locked_item.save(update_fields=[*changes.keys(), "updated_at"])
+    return locked_item
+
+
+def latest_approved_baseline(tenant) -> CompanyHealthCheck | None:
+    """أحدث فحصٍ تأسيسيٍّ معتمد لشركة — «الأساس الحالي» في كل مكانٍ يُستعمل فيه."""
+    tenant_id = getattr(tenant, "pk", tenant)
+    return (
+        CompanyHealthCheck.objects.filter(
+            tenant_id=tenant_id,
+            kind=CompanyHealthCheck.Kind.BASELINE,
+            status=CompanyHealthCheck.Status.APPROVED,
+        )
+        .order_by("-approved_at")
+        .first()
+    )
+
+
+@transaction.atomic
+def approve_health_check(*, check, actor=None, correlation_id: str = "") -> CompanyHealthCheck:
+    """يعتمد فحصاً — ذرّيّ ومقفول، ويرفض بوضوح نقص الدليل أو التعقيد قبل الاعتماد."""
+    check_pk = getattr(check, "pk", check)
+    locked_check = CompanyHealthCheck.objects.select_for_update().get(pk=check_pk)
+    if locked_check.status == CompanyHealthCheck.Status.APPROVED:
+        raise HealthCheckConflict("already_approved", "الفحص معتمد بالفعل.")
+    if not locked_check.complexity:
+        raise HealthCheckError("complexity_required", "قدّر تعقيد الشركة قبل اعتماد الفحص.")
+
+    missing = list(
+        locked_check.items.filter(mandatory=True, evidence_value__isnull=True)
+        .filter(Q(evidence_note__isnull=True) | Q(evidence_note=""))
+        .values_list("code", flat=True)
+    )
+    if missing:
+        raise HealthCheckError(
+            "evidence_missing", f"بنود إلزامية بلا دليل رقمي أو ملاحظة: {', '.join(missing)}",
+        )
+
+    locked_check.status = CompanyHealthCheck.Status.APPROVED
+    locked_check.approved_by = actor if getattr(actor, "pk", None) else None
+    locked_check.approved_at = timezone.now()
+    locked_check.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+    _log_operation_event(
+        locked_check.tenant_id,
+        domain=PlatformOperationEvent.Domain.HEALTH_CHECK,
+        action=PlatformOperationEvent.Action.HEALTH_CHECK_APPROVED,
+        subject_id=locked_check.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"kind": locked_check.kind, "complexity": locked_check.complexity},
+    )
+    return locked_check
+
+
+#: رمزُ البند ← نوعُ أمر العمل الأنسب لمعالجته — تقريبٌ معقول لا حسمٌ نهائي (خارج 210-B تدقيقه).
+_HEALTH_ITEM_WORK_ORDER_KIND = {
+    "opening_balance_completeness": WorkOrder.Kind.DATA_ENTRY,
+    "unposted_sales_documents": WorkOrder.Kind.DATA_ENTRY,
+    "bank_reconciliation": WorkOrder.Kind.REVIEW,
+    "receivables_aging": WorkOrder.Kind.REVIEW,
+    "fiscal_periods": WorkOrder.Kind.ADMIN_DIRECTIVE,
+    "inventory_provisional_layers": WorkOrder.Kind.REVIEW,
+    "review_errors": WorkOrder.Kind.REVIEW,
+}
+
+
+@transaction.atomic
+def convert_health_check_item_to_work_order(*, item, actor=None, correlation_id: str = "") -> WorkOrder:
+    """يحوّل بند FOLLOW_UP/RISK إلى أمر عمل ويربطه — تكرار الاستدعاء idempotent يعيد نفس الأمر."""
+    item_pk = getattr(item, "pk", item)
+    locked_item = CompanyHealthCheckItem.objects.select_for_update().get(pk=item_pk)
+    if locked_item.work_order_id:
+        return locked_item.work_order
+    if locked_item.status not in (CompanyHealthCheckItem.ItemStatus.FOLLOW_UP, CompanyHealthCheckItem.ItemStatus.RISK):
+        raise HealthCheckError("item_not_convertible", "لا يجوز تحويل بندٍ سليم أو غير منطبق إلى أمر عمل.")
+
+    check = CompanyHealthCheck.objects.select_related("tenant").get(pk=locked_item.health_check_id)
+    label = HEALTH_CHECK_ITEM_CATALOG.get(locked_item.code, {}).get("label", locked_item.code)
+    work_order = create_work_order(
+        tenant=check.tenant,
+        title=f"معالجة بند صحة: {label}",
+        kind=_HEALTH_ITEM_WORK_ORDER_KIND.get(locked_item.code, WorkOrder.Kind.ADMIN_DIRECTIVE),
+        source=WorkOrder.Source.ADMIN,
+        description=locked_item.evidence_note or locked_item.action or "",
+        created_by=actor if getattr(actor, "pk", None) else None,
+    )
+    locked_item.work_order = work_order
+    locked_item.save(update_fields=["work_order", "updated_at"])
+    _log_operation_event(
+        check.tenant_id,
+        domain=PlatformOperationEvent.Domain.HEALTH_CHECK,
+        action=PlatformOperationEvent.Action.HEALTH_CHECK_ITEM_CONVERTED,
+        subject_id=locked_item.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"code": locked_item.code, "work_order_id": work_order.pk},
+    )
+    return work_order
+
+
+def compare_health_baseline(*, tenant) -> dict:
+    """يقارن آخر فحصين تأسيسيين معتمدين بنداً بنداً — قراءةٌ صرفة لا تُنسَب لأي موظف (§٦)."""
+    tenant_id = getattr(tenant, "pk", tenant)
+    approved = list(
+        CompanyHealthCheck.objects.filter(
+            tenant_id=tenant_id,
+            kind=CompanyHealthCheck.Kind.BASELINE,
+            status=CompanyHealthCheck.Status.APPROVED,
+        )
+        .order_by("-approved_at")[:2]
+    )
+    if not approved:
+        return {"baseline": None, "current": None, "changes": []}
+
+    current = approved[0]
+    baseline = approved[1] if len(approved) > 1 else None
+    current_items = {row.code: row for row in current.items.all()}
+    baseline_items = {row.code: row for row in baseline.items.all()} if baseline else {}
+
+    changes = []
+    for code, row in current_items.items():
+        previous = baseline_items.get(code)
+        previous_status = previous.status if previous else None
+        if previous_status != row.status:
+            changes.append({"code": code, "from_status": previous_status, "to_status": row.status})
+    return {"baseline": baseline, "current": current, "changes": changes}
+
+
+def _tenant_load_units_map(tenant_ids) -> dict[int, int]:
+    """وحدات حِمل عدّة شركات باستعلامٍ واحد — الصيغةُ الجمعيّة لـ`_tenant_load_units` (§٦).
+
+    شاشةُ الإسناد تقيس كلّ موظفٍ على كلّ شركات ارتباطاته النشطة، فحسابُ الوحدات
+    شركةً شركةً يعني استعلاماً لكلّ ارتباطٍ لكلّ موظف. هنا استعلامٌ واحدٌ للجميع.
+    """
+    ids = {getattr(tenant_id, "pk", tenant_id) for tenant_id in tenant_ids}
+    if not ids:
+        return {}
+    complexity_by_tenant: dict[int, str] = {}
+    rows = (
+        CompanyHealthCheck.objects.filter(
+            tenant_id__in=ids,
+            kind=CompanyHealthCheck.Kind.BASELINE,
+            status=CompanyHealthCheck.Status.APPROVED,
+        )
+        .order_by("tenant_id", "-approved_at")
+        .values_list("tenant_id", "complexity")
+    )
+    for tenant_id, complexity in rows:
+        # الترتيبُ يضع أحدثَ معتمدٍ أولاً، فأوّلُ صفٍّ لكلّ شركة هو أساسُها الحالي.
+        complexity_by_tenant.setdefault(tenant_id, complexity)
+    return {
+        tenant_id: CAPACITY_LOAD_UNITS.get(
+            complexity_by_tenant.get(tenant_id) or "", DEFAULT_CAPACITY_LOAD_UNITS,
+        )
+        for tenant_id in ids
+    }
+
+
+def _tenant_load_units(tenant) -> int:
+    """وحدات حِمل شركة من تعقيد أحدث فحصٍ تأسيسي معتمد لها — وسطٌ إن لم يوجد بعد (§٦)."""
+    tenant_id = getattr(tenant, "pk", tenant)
+    return _tenant_load_units_map([tenant_id])[tenant_id]
+
+
+def _would_exceed_capacity(capacity_target, projected_load) -> bool:
+    """هل يتجاوز الحِملُ المتوقَّع طاقةَ الموظف المستهدفة؟
+
+    `capacity_target` صفراً يعني «لم تُضبط بعد» لا «طاقته صفر» — وهو **افتراضُ
+    النموذج** ولا واجهةَ كتابةٍ تضبطه (`PlatformEmployeeViewSet` للقراءة فقط)،
+    وهو معناه نفسُه في حجم العيّنة (`_axis_*`) وفي كشف الحمل الزائد بشريط التدخّل.
+    بغير هذا يُرفض كلُّ إسنادٍ لكلّ موظفٍ حقيقيٍّ برمز `capacity_exceeded` ويُطلب
+    سببُ تجاوزٍ في كلّ مرة — والاختبارات وحدها تنجو لأنها تضبط الطاقة صراحةً.
+    """
+    target = Decimal(capacity_target or 0)
+    if target <= 0:
+        return False
+    return Decimal(projected_load) > target
+
+
+def employee_capacity_snapshot(employee, *, load_units_by_tenant: dict[int, int] | None = None) -> dict:
+    """حِمل موظف المنصة الحالي وباقي طاقته — مجموع وحدات حِمل شركات ارتباطاته النشطة.
+
+    `load_units_by_tenant` خريطةٌ محسوبةٌ مسبقاً تمرّرها القوائم كي لا يتكرّر استعلامُ
+    وحدات الحِمل لكلّ موظف.
+    """
+    employee_id = getattr(employee, "pk", employee)
+    active_tenant_ids = list(
+        Engagement.objects.filter(employee_id=employee_id, status=Engagement.Status.ACTIVE)
+        .values_list("tenant_id", flat=True)
+    )
+    load_units = (
+        load_units_by_tenant if load_units_by_tenant is not None else _tenant_load_units_map(active_tenant_ids)
+    )
+    load = sum(load_units.get(tenant_id, DEFAULT_CAPACITY_LOAD_UNITS) for tenant_id in active_tenant_ids)
+    capacity_target = (
+        PlatformEmployee.objects.filter(pk=employee_id).values_list("capacity_target", flat=True).first()
+        or Decimal("0.00")
+    )
+    return {
+        "load": load,
+        "capacity_target": capacity_target,
+        "remaining": Decimal(capacity_target) - Decimal(load),
+        "active_engagements_count": len(active_tenant_ids),
+    }
+
+
+def list_assignment_candidates(*, tenant) -> list[dict]:
+    """موظفو المنصة النشطون مع حِملهم الحالي وأثر إسناد هذه الشركة عليهم — لشاشة الإسناد.
+
+    عددُ الاستعلامات ثابتٌ (موظفون، ارتباطاتهم، وحدات حِمل شركاتهم) مهما كثر الطرفان.
+    """
+    tenant_obj = tenant if isinstance(tenant, Tenant) else Tenant.objects.get(pk=tenant)
+    employees = list(
+        PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE).select_related("user")
+    )
+    engagement_rows = list(
+        Engagement.objects.filter(
+            employee_id__in=[employee.pk for employee in employees],
+            status=Engagement.Status.ACTIVE,
+        ).values_list("employee_id", "tenant_id")
+    )
+    load_units = _tenant_load_units_map({tenant_id for _, tenant_id in engagement_rows} | {tenant_obj.pk})
+    tenant_load = load_units[tenant_obj.pk]
+
+    tenants_by_employee: dict[int, list[int]] = {}
+    for employee_id, tenant_id in engagement_rows:
+        tenants_by_employee.setdefault(employee_id, []).append(tenant_id)
+
+    candidates = []
+    for employee in employees:
+        served_tenant_ids = tenants_by_employee.get(employee.pk, [])
+        load = sum(
+            load_units.get(tenant_id, DEFAULT_CAPACITY_LOAD_UNITS) for tenant_id in served_tenant_ids
+        )
+        capacity_target = employee.capacity_target or Decimal("0.00")
+        projected_load = load + tenant_load
+        candidates.append({
+            "employee": employee,
+            "load": load,
+            "capacity_target": capacity_target,
+            "remaining": Decimal(capacity_target) - Decimal(load),
+            "active_engagements_count": len(served_tenant_ids),
+            "projected_load_if_assigned": projected_load,
+            "would_exceed_capacity": _would_exceed_capacity(capacity_target, projected_load),
+        })
+    return candidates
+
+
+@transaction.atomic
+def transfer_engagement(
+    *,
+    engagement,
+    to_employee,
+    reason: str,
+    actor=None,
+    correlation_id: str = "",
+    capacity_override_reason: str = "",
+) -> Engagement:
+    """ينقل شركة من ارتباطٍ قائم إلى موظفٍ آخر بمعاملة واحدة — يُغلق القديم عبر مسار
+    الإلغاء الرسمي (قواعد العضوية نفسها) وينشئ جديداً بـ`predecessor`. لا يمسّ الاكتساب.
+
+    ترتيب القفل: Subscription -> PlatformEmployee -> Engagement -> UserCompanyMembership
+    (نفس ترتيب `assign_platform_employee`).
+    """
+    reason = str(reason or "").strip()
+    if not reason:
+        raise EngagementError("reason_required", "سبب النقل مطلوب.")
+
+    eng_pk = getattr(engagement, "pk", engagement)
+    pre_eng = Engagement.objects.filter(pk=eng_pk).values("tenant_id", "kind").first()
+    if not pre_eng:
+        raise EngagementError("not_found", "الارتباط غير موجود.")
+
+    subscription = ServiceSubscription.objects.select_for_update().filter(tenant_id=pre_eng["tenant_id"]).first()
+    if not is_service_subscription_eligible(subscription):
+        raise EngagementError("subscription_not_active", "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.")
+
+    emp_pk = getattr(to_employee, "pk", to_employee)
+    locked_employee = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
+    if locked_employee.status != PlatformEmployee.Status.ACTIVE:
+        raise EngagementError("employee_not_active", "موظف عمليات المنصة غير نشط.")
+
+    locked_old = Engagement.objects.select_for_update().get(pk=eng_pk)
+    if locked_old.status == Engagement.Status.REVOKED:
+        raise EngagementConflict("already_revoked", "الارتباط ملغى نهائياً ولا يمكن نقله.")
+    # المعلَّقُ لا يُنقل: النقلُ كان يُخرج ارتباطاً نشطاً من معلَّقٍ بصمت، فيعود
+    # الموظفُ الجديد يخدم شركةً عُلّقت خدمتُها عمداً.
+    if locked_old.status != Engagement.Status.ACTIVE:
+        raise EngagementConflict("not_active", "الارتباط معلَّق؛ استأنفه أو ألغه بدل نقله.")
+    if locked_old.employee_id == locked_employee.pk:
+        raise EngagementError("same_employee", "الموظف المستهدف هو نفسه الحالي.")
+
+    tenant_obj = Tenant.objects.get(pk=pre_eng["tenant_id"])
+    capacity_override_reason = str(capacity_override_reason or "").strip()
+    projected_load = Decimal(employee_capacity_snapshot(locked_employee)["load"]) + Decimal(_tenant_load_units(tenant_obj))
+    if _would_exceed_capacity(locked_employee.capacity_target, projected_load) and not capacity_override_reason:
+        raise EngagementConflict(
+            "capacity_exceeded",
+            "نقل هذه الشركة يتجاوز الطاقة المستهدفة للموظف الجديد؛ أضف سبب تجاوز للمتابعة.",
+        )
+
+    _execute_revoke(locked_old, revoked_by=actor, reason=reason, end_reason=f"نُقل: {reason}")
+
+    existing_membership = (
+        UserCompanyMembership.objects.select_for_update()
+        .filter(user_id=locked_employee.user_id, tenant=tenant_obj)
+        .first()
+    )
+    if existing_membership is None:
+        membership = UserCompanyMembership.objects.create(user_id=locked_employee.user_id, tenant=tenant_obj, role="manager")
+        created_membership, previous_role = True, ""
+    else:
+        membership = existing_membership
+        created_membership = False
+        previous_role = existing_membership.role
+        if existing_membership.role != "manager":
+            existing_membership.role = "manager"
+            existing_membership.save(update_fields=["role"])
+
+    # مهلةُ التهيئة لا تُستأنف بالنقل — النقلُ تغييرُ موظفٍ لا استثناءٌ جديدٌ من شرط
+    # الأساس المعتمد؛ استئنافُها كان يجعل «لا إسناد بلا أساس» قابلاً للتجاوز بلا نهاية.
+    onboarding_expires_at = (
+        locked_old.onboarding_expires_at if pre_eng["kind"] == Engagement.Kind.ONBOARDING else None
+    )
+    new_engagement = Engagement.objects.create(
+        employee=locked_employee,
+        tenant=tenant_obj,
+        status=Engagement.Status.ACTIVE,
+        assigned_by=actor,
+        kind=pre_eng["kind"],
+        onboarding_expires_at=onboarding_expires_at,
+        created_membership=created_membership,
+        managed_membership=membership,
+        previous_role=previous_role,
+        predecessor_id=locked_old.pk,
+        capacity_override_reason=capacity_override_reason,
+    )
+    _log_operation_event(
+        tenant_obj,
+        domain=PlatformOperationEvent.Domain.ENGAGEMENT,
+        action=PlatformOperationEvent.Action.TRANSFERRED,
+        subject_id=new_engagement.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+        reason=reason,
+        details={
+            "from_engagement_id": locked_old.pk,
+            "from_employee_id": locked_old.employee_id,
+            "to_employee_id": locked_employee.pk,
+        },
+    )
+    return new_engagement
+
+
+def get_customer_acquisition(tenant) -> CustomerAcquisition | None:
+    tenant_id = getattr(tenant, "pk", tenant)
+    return CustomerAcquisition.objects.select_related("acquired_by__user").filter(tenant_id=tenant_id).first()
+
+
+@transaction.atomic
+def set_customer_acquisition(
+    *,
+    tenant,
+    acquired_by,
+    acquired_at=None,
+    note: str = "",
+    actor=None,
+    correlation_id: str = "",
+) -> CustomerAcquisition:
+    """يسجّل أو يعدّل من جلب الشركة كزبون — صفٌّ واحدٌ لكل شركة، مستقلٌّ عن من يخدمها الآن."""
+    tenant_obj = Tenant.objects.select_for_update().get(pk=getattr(tenant, "pk", tenant))
+    emp_pk = getattr(acquired_by, "pk", acquired_by)
+    employee = PlatformEmployee.objects.filter(pk=emp_pk).first()
+    if employee is None:
+        raise AcquisitionError("employee_not_found", "موظف العمليات غير موجود.")
+
+    acquired_at = acquired_at or timezone.localdate()
+    note = str(note or "")[:500]
+    existing = CustomerAcquisition.objects.filter(tenant_id=tenant_obj.pk).first()
+    if existing is None:
+        try:
+            with transaction.atomic():
+                record = CustomerAcquisition.objects.create(
+                    tenant=tenant_obj,
+                    acquired_by=employee,
+                    acquired_at=acquired_at,
+                    note=note,
+                    created_by=actor if getattr(actor, "pk", None) else None,
+                )
+        except IntegrityError:
+            raise AcquisitionConflict("acquisition_conflict", "يوجد سجلّ اكتساب لهذه الشركة بالفعل؛ أعد التحميل.")
+        change_kind = "created"
+    else:
+        record = CustomerAcquisition.objects.select_for_update().get(pk=existing.pk)
+        record.acquired_by = employee
+        record.acquired_at = acquired_at
+        record.note = note
+        record.save(update_fields=["acquired_by", "acquired_at", "note", "updated_at"])
+        change_kind = "updated"
+
+    _log_operation_event(
+        tenant_obj,
+        domain=PlatformOperationEvent.Domain.ACQUISITION,
+        action=PlatformOperationEvent.Action.ACQUISITION_SET,
+        subject_id=record.pk,
+        actor=actor,
+        correlation_id=correlation_id,
+        details={"acquired_by": employee.pk, "acquired_at": acquired_at.isoformat(), "change": change_kind},
+    )
+    return record
