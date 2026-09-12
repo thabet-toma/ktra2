@@ -8,6 +8,8 @@
 - فحص نوع السيرة الذاتية بالبايتات الحقيقية
 - لا وجود لحساب المستخدم User قبل قبول الدعوة
 - رابط الدعوة المستهلك أو المنتهي يرد 410، وغير الموجود يرد 404
+- وقبولُ الدعوة **يُصدر جلسةَ دخولٍ فوراً** (`hr.auth_api.issue_login_session`):
+  الرمزُ المهشَّرُ أُثبت واستُهلك، فبقاءُ الحساب بلا جلسةٍ بابٌ مسدودٌ لا احتياط
 """
 import logging
 
@@ -18,6 +20,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.media_views import MediaUploadError, upload_media_file
+from hr.auth_api import issue_login_session
 from platform_ops.services import (
     accept_applicant_invitation,
     resolve_public_invitation,
@@ -219,11 +222,17 @@ class PublicInvitationAcceptView(APIView):
                 status=status.HTTP_410_GONE,
             )
 
+        # **الدعوةُ تُدخِله لا تُخبره فقط**: الرمزُ المهشَّر أُثبت واستُهلك للتوّ،
+        # فطلبُ كلمةِ سرٍّ ثانيةً بعد سطرين إجراءٌ بلا فائدةٍ أمنيّة وبابٌ مسدودٌ عملياً —
+        # المتقدّمُ لا يعرف أين شاشةُ الدخول ولا أنّ اسمَ المستخدم يصلح فيها.
+        session = issue_login_session(request, user)
         return Response(
             {
                 "detail": "تم قبول الدعوة وإنشاء الحساب بنجاح.",
                 "username": user.username,
                 "applicant_status": applicant.status,
+                "token": session["token"],
+                "user": session["user"],
             },
             status=status.HTTP_200_OK,
         )

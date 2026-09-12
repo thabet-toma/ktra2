@@ -157,15 +157,22 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onNavigateToSignup, onGoTo
               <div className="space-y-2">
                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
                   <Mail className="w-4 h-4" />
-                  البريد الإلكتروني
+                  البريد الإلكتروني أو اسم المستخدم
                 </label>
                 <div className="relative">
+                  {/* 211-B: **ليس `type="email"`.** الخادمُ يقبل الاثنين
+                      (`Q(username__iexact=…) | Q(email__iexact=…)` في
+                      `hr/auth_api.py`)، وموظّفُ المنصّة الذي عُيِّن عبر دعوةِ
+                      التوظيف يملك **اسمَ مستخدمٍ لا بريداً** — و`type="email"`
+                      داخلَ `<form>` يجعل المتصفّحَ نفسَه يرفض إرسالَ القيمة قبل
+                      أن تصل الخادمَ أصلاً، فيبدو الحسابُ سليماً وبابُه مقفلاً. */}
                   <input
-                    type="email"
+                    type="text"
+                    autoComplete="username"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     className="block w-full px-5 py-4 text-gray-900 dark:text-gray-200 bg-gray-50/50 dark:bg-gray-700/50 rounded-xl border border-gray-200 dark:border-gray-600 focus:ring-2 focus:ring-blue-500 focus:border-transparent backdrop-blur-sm placeholder-gray-400 dark:placeholder-gray-500 transition duration-300"
-                    placeholder="example@email.com"
+                    placeholder="example@email.com أو اسم المستخدم"
                     required
                   />
                 </div>

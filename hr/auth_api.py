@@ -203,6 +203,35 @@ def _login_clear_failures(*keys: str) -> None:
     cache.delete_many(list(keys))
 
 
+def issue_login_session(request, user) -> Dict[str, Any]:
+    """يُصدر جلسةَ دخولٍ كاملةً لمستخدمٍ **تحقّقت هويّتُه سلفاً**: جهازاً ورمزاً وحمولةَ مستخدم.
+
+    مستخرَجةٌ من `login_view` لا منسوخةٌ عنه. الداعي أنّ قبولَ دعوةِ التوظيف المنصيّ
+    (`platform_ops.public_hiring`) يُنشئ الحسابَ ثم يحتاج أن يُدخل صاحبَه في النَّفَس
+    نفسِه — وكان يردّ اسمَ المستخدم ولا يردّ جلسة، فيقف الموظّفُ الجديد أمام بابٍ لا
+    يعرف مكانَه. ونسخةٌ ثانيةٌ من إنشاء الجهاز والمرآة وسجلّ الجلسة كانت ستتباعد عن
+    الأصل عند أوّل تعديلٍ على أيٍّ من الثلاثة.
+
+    **لا تتحقّق من كلمة السرّ ولا من `is_active`**: من يستدعيها أثبت الهويّةَ بطريقته —
+    `login_view` بكلمة سرٍّ، وقبولُ الدعوة برمزٍ مهشَّرٍ يُستهلَك مرّةً واحدة.
+    """
+    from core.tenant_utils import _get_client_ip
+    from hr.device_utils import derive_device_name
+    from hr.models import UserDevice
+
+    raw_ua = request.META.get("HTTP_USER_AGENT", "")
+    device = UserDevice.objects.create(
+        user=user,
+        device_name=derive_device_name(raw_ua),
+        user_agent=raw_ua,
+        ip_address=_get_client_ip(request),
+        last_active_at=timezone.now(),
+    )
+    _sync_user_mirror(user)
+    _log_session_event(request, user, "login")
+    return {"token": device.key, "user": _user_payload(user)}
+
+
 @csrf_exempt
 def login_view(request):
     if request.method != "POST":
@@ -240,24 +269,7 @@ def login_view(request):
             {"detail": "Account not approved", "code": "NOT_APPROVED"},
             status=403,
         )
-    from core.tenant_utils import _get_client_ip
-    from hr.device_utils import derive_device_name
-    from hr.models import UserDevice
-
-    raw_ua = request.META.get("HTTP_USER_AGENT", "")
-    ip = _get_client_ip(request)
-    dev_name = derive_device_name(raw_ua)
-
-    device = UserDevice.objects.create(
-        user=user,
-        device_name=dev_name,
-        user_agent=raw_ua,
-        ip_address=ip,
-        last_active_at=timezone.now(),
-    )
-    _sync_user_mirror(user)
-    _log_session_event(request, user, "login")
-    return JsonResponse({"token": device.key, "user": _user_payload(user)})
+    return JsonResponse(issue_login_session(request, user))
 
 
 @csrf_exempt

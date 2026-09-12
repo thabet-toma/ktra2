@@ -46,6 +46,7 @@ const PublicJobPage = React.lazy(() => import('./components/employee-ops/PublicJ
 const PlatformPublicJobPage = React.lazy(() => import('./components/platform-hiring/PlatformPublicJobPage').then((module) => ({ default: module.PlatformPublicJobPage })));
 const PlatformInvitationPage = React.lazy(() => import('./components/platform-hiring/PlatformInvitationPage').then((module) => ({ default: module.PlatformInvitationPage })));
 const PublicRatingPage = React.lazy(() => import('./components/my-agent/PublicRatingPage').then((module) => ({ default: module.PublicRatingPage })));
+const StaffLoginPage = React.lazy(() => import('./components/platform/StaffLoginPage').then((module) => ({ default: module.StaffLoginPage })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
@@ -171,11 +172,23 @@ const ApplicationBoundary: React.FC = () => {
     location.pathname.startsWith('/accountant/profile') ||
     location.pathname.startsWith('/accountant/engagements');
 
-  if (currentUser && companies.length === 0 && !accountantTenantlessPath) {
+  // **موظّفُ المنصّة لا شركةَ له بالضرورة** (211-C): عضويّاتُه تأتي بالإسناد لا
+  // بالتسجيل، و`accept_applicant_invitation` لا يُنشئ عضويّةً أصلاً — بخلاف نظيرتها
+  // في `employee_ops`. فمن عُيِّن اليومَ ولم يُسنَد بعدُ كان يهبط على **«أنشئ شركتك
+  // الأولى»**: نموذجُ تأسيسِ شركةٍ لا يخصّه وطريقٌ مسدود. ومساراتُ المنصّة هذه لا
+  // تقرأ شركةَ جلسةٍ إطلاقاً، فتمريرُها بلا شركةٍ لا يكسر شيئاً — تماماً كاستثناء
+  // المحاسب أعلاه، وبالحجّة نفسِها.
+  const platformTenantlessPath =
+    location.pathname.startsWith('/platform/employee-space') ||
+    location.pathname.startsWith('/platform/hiring');
+
+  const tenantlessPath = accountantTenantlessPath || platformTenantlessPath;
+
+  if (currentUser && companies.length === 0 && !tenantlessPath) {
     return <FirstCompanyOnboarding />;
   }
 
-  if (currentUser && !currentCompany && !accountantTenantlessPath) {
+  if (currentUser && !currentCompany && !tenantlessPath) {
     return null;
   }
 
@@ -227,6 +240,12 @@ root.render(
           {/* توظيف المنصة: رابط وظيفة عامة · قبول دعوة توظيف — خارج المصادقة والشركة (#207 م٨) */}
           <Route path="/careers/job/:token" element={<ToastProvider><ConfirmProvider><PlatformPublicJobPage /></ConfirmProvider></ToastProvider>} />
           <Route path="/careers/invite/:token" element={<ToastProvider><PlatformInvitationPage /></ToastProvider>} />
+
+          {/* بابُ دخول فريق المنصّة — مسارٌ خصوصيٌّ غيرُ مذكورٍ في صفحة الهبوط ولا في
+              `PublicNavbar` بقرار المالك، وخارجَ شجرة المزوّدات كبقيّة الصفحات
+              القائمة بذاتها: يُثبت الهويّة ثمّ ينتقل انتقالاً كاملاً إلى مساحة
+              الموظّف، فلا يمرّ بـ`roleDefault` في `App.tsx` الذي لا يعرفه (211-C). */}
+          <Route path="/staff" element={<StaffLoginPage />} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

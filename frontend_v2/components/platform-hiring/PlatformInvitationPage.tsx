@@ -110,7 +110,21 @@ export const PlatformInvitationPage: React.FC = () => {
         setFormError(firstApiErrorMessage(data, "تعذّر إنشاء الحساب."));
         return;
       }
-      setAcceptance(data as InvitationAcceptance);
+      const accepted = data as InvitationAcceptance;
+      // **211-A — الجلسةُ تُحفَظ بمفتاحَي الدخول نفسِهما** (`authService.loginUser`)
+      // لا بمفتاحٍ ثالثٍ يعرفه هذا الملفُّ وحدَه: `restApi` يقرأ `token` و`userId`
+      // من هنا في كلّ نداءٍ تالٍ، فمفتاحٌ مختلفٌ يعني حساباً أُنشئ وجلسةً تُهدَر.
+      if (accepted?.token) {
+        try {
+          window.localStorage.setItem("token", accepted.token);
+          if (accepted.user?.id) {
+            window.localStorage.setItem("userId", String(accepted.user.id));
+          }
+        } catch {
+          // تخزينٌ محليٌّ محجوبٌ (تصفّحٌ خاصّ) — تبقى شاشةُ النجاح ويدخل يدوياً.
+        }
+      }
+      setAcceptance(accepted);
       setPhase("accepted");
     } catch {
       setFormError("تعذّر الاتصال بالخادم. تحقّق من اتصالك وأعد المحاولة.");
@@ -168,7 +182,11 @@ export const PlatformInvitationPage: React.FC = () => {
           <div className="py-8 text-center space-y-4" role="status">
             <CheckCircle2 className="h-12 w-12 mx-auto text-emerald-500" />
             <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">أهلاً بك في فريق كترا</h1>
-            <p className="text-sm text-slate-600 dark:text-slate-400">أُنشئ حسابك. ادخل باسم المستخدم:</p>
+            <p className="text-sm text-slate-600 dark:text-slate-400">
+              {acceptance.token
+                ? "أُنشئ حسابك ودخلتَ بالفعل. احفظ اسم المستخدم لدخولك القادم:"
+                : "أُنشئ حسابك. ادخل باسم المستخدم:"}
+            </p>
             <p
               dir="ltr"
               className="mx-auto max-w-xs rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/60 p-3 font-mono text-base font-bold text-slate-900 dark:text-slate-100 select-all"
@@ -176,10 +194,10 @@ export const PlatformInvitationPage: React.FC = () => {
               {acceptance.username}
             </p>
             <a
-              href="/"
+              href={acceptance.token ? "/platform/employee-space" : "/"}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
             >
-              تسجيل الدخول
+              {acceptance.token ? "ادخل إلى مساحتك" : "تسجيل الدخول"}
             </a>
           </div>
         )}

@@ -148,6 +148,9 @@ export interface InvitationAcceptance {
   detail: string;
   username: string;
   applicant_status: string;
+  /** 211-A: جلسةٌ جاهزةٌ يُصدرها القبولُ نفسُه — الرمزُ المهشَّرُ أُثبت واستُهلك للتوّ. */
+  token: string;
+  user: { id: string; name: string; email: string } & Record<string, unknown>;
 }
 
 export const getPlatformStaffCapabilities = () =>

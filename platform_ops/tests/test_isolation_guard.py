@@ -38,6 +38,7 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
     "core.terminology",         # term(tenant, key) — اسمُ المستند بمعجم الشركة لا حرفياً (م٧)
     "core.tenant_utils",        # get_tenant — المصدر الواحد لحلّ شركة المستخدم على نقاط م٧ الموجَّهة للزبون
+    "hr.auth_api",              # issue_login_session — قبولُ الدعوة يُدخل صاحبَه بالمسار نفسِه الذي يسلكه الدخولُ العادي، لا بنسخةٍ ثانيةٍ منه (211-A)
     "hr.models",                # UserDevice لقراءة طابع آخر ظهور (last_active_at) في لوحة العمليات المنصية (م٦)
     "inventory.fifo",           # pending_provisional_layers لبند صحة «طبقات مخزون مؤقتة» (210-B)
     "inventory.models",         # Product لأصناف الخدمات في سطور الفاتورة (م٨-أ)
