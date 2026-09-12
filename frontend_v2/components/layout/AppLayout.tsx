@@ -18,6 +18,7 @@ import {
   BranchSwitcher,
 } from './BranchSwitcher';
 import { KitCalculatorButton } from '../kit';
+import { PlanLimitReachedGuard } from '../PlanLimitReachedGuard';
 import { ActionBarRail } from './ActionBarRail';
 import { QuickAccessBar } from './QuickAccessBar';
 import { GlobalContextMenu } from './GlobalContextMenu';
@@ -294,6 +295,13 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </main>
         </div>
       </div>
+
+      {/* 211-P: «بلغتَ حدَّ خطّتك» — هنا لا في قشرةِ مكتب المحاسب وحدَها.
+          `enforce_limits` يُرفَع من نقاط إنشاء الفواتير والمنتجات والأطراف
+          وغيرِها، وكلُّها تُصيَّر **داخل هذه القشرة**؛ فحارسٌ يسكن قشرةَ المكتب
+          فقط هو بابٌ بلا طارق: الرسالةُ تبقى toast يقول «رقِّ الخطة» بلا وجهة
+          لكلّ مستخدمٍ في التطبيق الرئيس — وهم جمهورُ الحدّ كلُّه تقريباً. */}
+      <PlanLimitReachedGuard />
 
       {/* مرشد رحلة الاستيراد — يرافق المستخدم في كل الشاشات حتى الفاتورة الدولية */}
       <ImportJourneyGuide />

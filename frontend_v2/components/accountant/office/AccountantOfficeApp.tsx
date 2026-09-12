@@ -5,6 +5,7 @@ import type { User } from '../../../types';
 import { ClientBooksPanel } from '../../office/ClientBooksPanel';
 import { AccountantProfilePage } from '../AccountantProfilePage';
 import { EngagementRevokedGuard } from '../EngagementRevokedGuard';
+import { PlanLimitReachedGuard } from '../../PlanLimitReachedGuard';
 import { OfficeAgendaPage } from './OfficeAgendaPage';
 import { OfficeClientFilePage } from './OfficeClientFilePage';
 import { OfficeClientsPage } from './OfficeClientsPage';
@@ -227,6 +228,8 @@ export const AccountantOfficeApp: React.FC<{
 
           {/* إلغاء الشركة لارتباطنا أثناء العمل ⇒ حوار مانع وعودة لقائمة الزبائن */}
           <EngagementRevokedGuard onReturn={() => { setClient(null); go('dashboard'); }} />
+          {/* 211-P: بلغ دفترُ العميل حدَّ خطّته ⇒ حوارٌ يقود إلى «خطّتي» */}
+          <PlanLimitReachedGuard />
         </div>
       </div>
     </div>

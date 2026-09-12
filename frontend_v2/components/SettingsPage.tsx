@@ -19,6 +19,7 @@ import { useConfirm } from '../contexts/ConfirmContext';
 import { useSimpleUi } from '../hooks/useSimpleUi';
 import { humanizeThrown } from '../utils/drfError';
 import { formatDateTimeValue } from '../utils/formatDate';
+import { MyPlanCard } from './MyPlanCard';
 import {
     listLoginDevices,
     evictLoginDevice,
@@ -145,6 +146,14 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     // مزامنة حقل الإدخال مع القيمة القادمة من الخادم بعد المزامنة الأوّلية.
     useEffect(() => { setIdleInput(String(idleTimeoutMinutes)); }, [idleTimeoutMinutes]);
 
+    // 211-P: حارسُ حدّ الخطّة يقود إلى `/settings#my-plan` — تنقّلٌ داخل نفس
+    // الـSPA لا يُحرّك تمرير المتصفّح تلقائياً كما يفعل تحميلُ صفحةٍ كاملة.
+    useEffect(() => {
+        if (window.location.hash === '#my-plan') {
+            document.getElementById('my-plan')?.scrollIntoView({ behavior: 'smooth' });
+        }
+    }, []);
+
     // اعتماد قيمة الحقل: يقصّها ضمن النطاق ويحفظها خادمياً؛ الفارغ/غير الرقمي يُعاد للحالي.
     const commitIdleTimeout = () => {
         const n = Number(idleInput);
@@ -234,6 +243,12 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                     {message.text}
                 </div>
             )}
+
+            {/* 211-O: «خطّتي» — بطاقةٌ جديدةٌ بـTailwind لا بالأنماط المضمَّنة
+                القديمة في هذا الملف، ومعرّفُها `my-plan` مقصدُ حارس حدّ الخطّة. */}
+            <div id="my-plan" className="mb-4">
+                <MyPlanCard />
+            </div>
 
             {/* المعلومات الشخصية والمهنية */}
             <form onSubmit={handleProfileUpdate}>

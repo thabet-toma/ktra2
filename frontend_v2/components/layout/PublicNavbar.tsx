@@ -1,10 +1,11 @@
 import React from "react";
 import { Link, useLocation } from "react-router-dom";
-import { ArrowUpLeft, Images, Info, Phone, ShoppingBag } from "lucide-react";
+import { ArrowUpLeft, Images, Info, Phone, ShoppingBag, Tag } from "lucide-react";
 import { LogoIcon } from "../icons/LogoIcon";
 
 const NAV_ITEMS = [
   { to: "/about-us", label: "عن المنصة", icon: Info },
+  { to: "/pricing", label: "الأسعار", icon: Tag },
   { to: "/contact", label: "تواصل معنا", icon: Phone },
   { to: "/gallery", label: "المعرض", icon: Images },
 ];

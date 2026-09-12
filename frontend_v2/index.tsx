@@ -51,6 +51,9 @@ const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPag
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
 const StoreCategoryPage = React.lazy(() => import('./components/store/StoreCategoryPage').then((module) => ({ default: module.StoreCategoryPage })));
+// 211-N: صفحةُ الأسعار العامّة — قائمةٌ بذاتها كصفحة المتجر، بلا مصادقةٍ ولا
+// شركةِ جلسة، فزائرٌ يقرأ السعر قبل التسجيل لا ينتظر إقلاع مساحة عمل.
+const PricingPage = React.lazy(() => import('./components/PricingPage').then((module) => ({ default: module.PricingPage })));
 
 const PublicStoreShell: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { slug = 'default' } = useParams();
@@ -229,6 +232,9 @@ root.render(
           <Route path="/store/:slug/p/:productId" element={<PublicStoreShell><StoreProductRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/c/:collectionSlug" element={<PublicStoreShell><StoreCampaignRoute /></PublicStoreShell>} />
           <Route path="/store/:slug/cat/:categoryParam" element={<PublicStoreShell><StoreCategoryRoute /></PublicStoreShell>} />
+
+          {/* 211-N: صفحةُ الأسعار العامّة — قائمةٌ بذاتها بلا شجرة المزوّدات */}
+          <Route path="/pricing" element={<PricingPage />} />
 
           {/* متابعة الموظفين: دعوةُ موظف · وظيفةٌ عامّة — بلا مصادقةٍ ولا شركةِ جلسة */}
           <Route path="/join/:token" element={<ToastProvider><PublicJoinPage /></ToastProvider>} />

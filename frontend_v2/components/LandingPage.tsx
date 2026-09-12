@@ -1,4 +1,5 @@
 import React from "react";
+import { Link } from "react-router-dom";
 import {
   ArrowLeft,
   ArrowUpLeft,
@@ -23,6 +24,8 @@ import {
   Warehouse,
 } from "lucide-react";
 import { PublicNavbar } from "./layout/PublicNavbar";
+import { usePublicPricing } from "../hooks/usePublicPricing.ts";
+import { formatNumber } from "../utils/formatNumber.ts";
 
 interface LandingPageProps {
   onLogin: () => void;
@@ -70,6 +73,49 @@ const FEATURES: { icon: React.ElementType; title: string; desc: string; accent: 
 ];
 
 const TRUST_POINTS = ["واجهة عربية كاملة", "تعدّد الشركات والفروع", "عزل آمن لبيانات كل شركة"];
+
+/**
+ * 211-N: معاينةُ الأسعار الثلاثة من نقطة `/api/pricing/plans/` نفسِها — لا
+ * رقمَ مكتوباً هنا. تختفي القسمُ كاملاً أثناء التحميل وبعد الفشل بدل بطاقاتٍ
+ * بسعرٍ صفريٍّ كاذب؛ الهبوطُ صفحةٌ تسويقيّة لا تستحقّ حالةَ تحميلٍ ظاهرة.
+ */
+const PricingPreviewSection: React.FC = () => {
+  const { data, loading, error } = usePublicPricing();
+  if (loading || error || !data || data.plans.length === 0) return null;
+
+  return (
+    <section className="bg-slate-50 py-20 dark:bg-slate-950/40 lg:py-24">
+      <div className="mx-auto max-w-7xl px-5 sm:px-8 lg:px-10">
+        <div className="flex flex-wrap items-end justify-between gap-4">
+          <div>
+            <span className="text-sm font-extrabold text-blue-600 dark:text-blue-400">خطط تناسب كل مرحلة</span>
+            <h2 className="mt-2 text-3xl font-black leading-tight tracking-tight text-slate-950 sm:text-4xl dark:text-white">أسعار واضحة بلا مفاجآت.</h2>
+          </div>
+          <Link to="/pricing" className="group inline-flex items-center gap-2 text-sm font-extrabold text-blue-600 transition hover:text-blue-700 dark:text-blue-400">
+            كل التفاصيل والمقارنة الكاملة
+            <ArrowUpLeft className="h-4 w-4 transition-transform group-hover:-translate-x-0.5 group-hover:-translate-y-0.5" />
+          </Link>
+        </div>
+
+        <div className="mt-10 grid gap-4 md:grid-cols-3">
+          {data.plans.map((plan) => (
+            <Link
+              key={plan.key}
+              to="/pricing"
+              className="rounded-2xl border border-slate-200 bg-white p-6 transition duration-300 hover:-translate-y-1 hover:border-blue-200 hover:shadow-xl hover:shadow-slate-900/5 dark:border-white/10 dark:bg-slate-900/60 dark:hover:border-blue-400/30"
+            >
+              <h3 className="text-base font-extrabold text-slate-900 dark:text-white">{plan.label}</h3>
+              <div className="mt-3 flex items-end gap-1.5">
+                <span className="text-3xl font-black text-slate-950 dark:text-white">{formatNumber(plan.price)}</span>
+                <span className="pb-0.5 text-sm font-bold text-slate-500 dark:text-slate-400">{plan.currency_symbol} / شهرياً</span>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+};
 
 export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSignup, onGoToStore }) => (
   <div dir="rtl" className="min-h-screen overflow-hidden bg-[#f7f9fc] font-sans text-slate-950 selection:bg-blue-200 dark:bg-slate-950 dark:text-white dark:selection:bg-blue-800">
@@ -296,6 +342,8 @@ export const LandingPage: React.FC<LandingPageProps> = ({ onLogin, onSignup, onG
           </div>
         </div>
       </section>
+
+      <PricingPreviewSection />
 
       <section className="bg-white py-16 dark:bg-slate-950">
         <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-8 px-5 sm:px-8 md:flex-row lg:px-10">

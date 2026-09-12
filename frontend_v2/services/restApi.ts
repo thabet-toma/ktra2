@@ -6,7 +6,7 @@
 import { clientLogger } from "./logger";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
-import { emitEngagementRevoked, emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
+import { emitEngagementRevoked, emitPlanLimitReached, emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
 import { isUserActivityRequest, writeLastActivity } from "../utils/idleSession";
 import {
   remainingRequestBudgetMs,
@@ -269,6 +269,15 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
   const responseCode = (data as { code?: string } | null)?.code;
   if (responseCode === "engagement_revoked" || responseCode === "engagement_inactive") {
     emitEngagementRevoked();
+  }
+  // T-PLANLIMITS (211-P): `enforce_limits` يرفع {"plan_limit": "...", "limit_key": "..."}
+  // — يحمل الحدث نفس الرسالة كي يعرض الحارس رابطاً حقيقياً إلى «خطّتي».
+  const planLimitMessage = (data as { plan_limit?: string } | null)?.plan_limit;
+  if (typeof planLimitMessage === "string") {
+    emitPlanLimitReached({
+      message: planLimitMessage,
+      limitKey: (data as { limit_key?: string } | null)?.limit_key,
+    });
   }
   // الخطأ الداخلي بلا مسار = بلاغ لا يمكن تشخيصه («بضرب إيرور» — أيّ نداء؟).
   // و`error` يرسله الخادم في وضع التطوير وحده = نوع الاستثناء ونصّه.
