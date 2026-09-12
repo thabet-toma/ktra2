@@ -3302,3 +3302,140 @@ class PerformanceReviewRequest(models.Model):
         scope = self.axis or "النتيجة المركّبة"
         return f"{self.employee}: اعتراض {self.period_year}/{self.period_month} على {scope}"
 
+
+class PlatformMeeting(models.Model):
+    """اجتماعٌ ينشئه السوبر أدمن لموظفي عمليات المنصة (م٥ من #211).
+
+    استثناءٌ متعمَّد آخر من قاعدة `tenant` FK كـ`PlatformEmployee`: الاجتماع
+    ملكٌ للمنصة نفسها لا لشركة زبون، وجمهورُه موظفو عمليات المنصة حصراً —
+    لا صلة له بموظفي شركة زبون ولا بحضور العمل اليومي في `hr.attendance`
+    (دفترٌ مستقلٌّ تماماً، هذه التذكرة لا تلمسه).
+
+    `meeting_link` يُدخَل لحظة الإنشاء ويبقى على الصف نفسه لا نسخةً في كل صفّ
+    حضور: تعديلُه يغيّر الرابط الذي يُرسَل إليه الموظف عند الدخول لاحقاً، ولا
+    داعي لمزامنته لأن صفوف الحضور لا تخزّنه أصلاً.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "مجدول"
+        CANCELLED = "cancelled", "ملغى"
+        FINISHED = "finished", "منتهٍ"
+
+    title = models.CharField(max_length=255, verbose_name="عنوان الاجتماع")
+    agenda = models.TextField(blank=True, default="", verbose_name="جدول الأعمال")
+    start = models.DateTimeField(verbose_name="بداية الاجتماع")
+    end = models.DateTimeField(verbose_name="نهاية الاجتماع")
+    meeting_link = models.URLField(max_length=500, verbose_name="رابط الاجتماع")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SCHEDULED,
+        verbose_name="الحالة",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشأه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "اجتماع منصة"
+        verbose_name_plural = "اجتماعات المنصة"
+        constraints = [
+            # قيدٌ على القاعدة نفسِها لا `clean()` وحده: `clean()` لا يحمي
+            # `bulk_create` ولا كتابةً مباشرة، وبدايةٌ بعد نهاية تُفسد حساب
+            # مدة الاجتماع ونافذة تسجيل الحضور لاحقاً بصمت.
+            models.CheckConstraint(
+                condition=models.Q(end__gt=models.F("start")),
+                name="platform_ops_meeting_end_after_start",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "start"]),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.start:%Y-%m-%d %H:%M})"
+
+
+class PlatformMeetingAttendance(models.Model):
+    """حضورُ موظّف منصة عن اجتماعٍ بعينه — صفٌّ واحدٌ لكل (اجتماع، موظف).
+
+    **قرار الدعوة:** تُنشأ صفوف الحضور **مقدَّماً** لكل موظّف مدعوّ لحظة تحديد
+    قائمة المدعوّين، بحالة افتراضية «غائب» — لا عند أول تفاعل من الموظف. السبب:
+    طلبُ المالك نفسُه هو معرفة «مين ما حضر»؛ فاجتماعٌ فيه ٢٥ مدعوّاً وثلاثة
+    حاضرين يجب أن يظهر في الدفتر ٢٢ صفَّ غياب صريحاً، لا فراغاً يُستنتَج بطرح
+    عددين لاحقاً. البديل (إنشاء الصف عند أول تفاعل مع قائمة مدعوّين منفصلة)
+    يفقد هذه القراءة المباشرة ويحتاج جدولاً ثالثاً بلا فائدة إضافية.
+
+    الحالةُ الافتراضية «غائب» حكمٌ مبدئي لا نهائي: هذه التذكرة لا توصّل هذا
+    الحقل بمحور «الانتظام» في تقييم الأداء (تذكرة لاحقة)، وأيّ قراءة مستقبلية
+    له يجب ألا تُحتسَب قبل انقضاء وقت الاجتماع (`meeting.end`) — قراءتُه قبل
+    ذلك تُعاقب موظفاً لم يحِن دوره بعد.
+
+    الحالاتُ الخمس متمايزةٌ عمداً لا بوليانَين: عذرٌ لم يُبتّ فيه («معلّق») لا
+    يرفع العقوبة ولا يُسقطها، والبتُّ لاحقاً يحوّله إلى مقبول أو مرفوض دون أن
+    يفقد الصفُّ نصَّ طلب الموظّف الأصلي (`excuse_note`).
+    """
+
+    class Status(models.TextChoices):
+        ATTENDED = "attended", "حضر"
+        ABSENT = "absent", "غائب"
+        EXCUSED_PENDING = "excused_pending", "عذر بانتظار البتّ"
+        EXCUSED_ACCEPTED = "excused_accepted", "عذر مقبول"
+        EXCUSED_REJECTED = "excused_rejected", "عذر مرفوض"
+
+    meeting = models.ForeignKey(
+        PlatformMeeting,
+        on_delete=models.CASCADE,
+        related_name="attendances",
+        verbose_name="الاجتماع",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="meeting_attendances",
+        verbose_name="الموظف",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.ABSENT,
+        verbose_name="الحالة",
+    )
+    checked_in_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت تسجيل الحضور")
+    excuse_note = models.TextField(blank=True, default="", verbose_name="سبب عدم الحضور")
+    excuse_decided_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="من بتّ في العذر",
+    )
+    excuse_decided_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت البتّ في العذر")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "حضور اجتماع منصة"
+        verbose_name_plural = "حضور اجتماعات المنصة"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["meeting", "employee"],
+                name="platform_ops_meetingattendance_meeting_employee_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["employee", "status"]),
+            models.Index(fields=["meeting", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.meeting}: {self.employee} ({self.get_status_display()})"
+
