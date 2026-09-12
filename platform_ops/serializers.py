@@ -28,11 +28,18 @@ from .models import (
     PlatformOperationEvent,
     PlatformRecruiter,
     PolicyProfile,
+    ServiceDocumentType,
     ServiceSubscription,
     ServiceSubscriptionEvent,
     ServiceSubscriptionPolicy,
+    ServiceUnitCatalog,
+    ServiceUnitCatalogEntry,
+    ServiceUsageEvent,
     SubscriptionBillingRecord,
     WorkOrder,
+    WorkOrderComment,
+    WorkOrderDeliverable,
+    WorkOrderDocumentLink,
 )
 
 
@@ -291,6 +298,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
     kind_display = serializers.CharField(source="get_kind_display", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     source_display = serializers.CharField(source="get_source_display", read_only=True)
+    priority_display = serializers.CharField(source="get_priority_display", read_only=True)
     assignee_name = serializers.SerializerMethodField()
     effective_duration_seconds = serializers.SerializerMethodField()
 
@@ -306,6 +314,8 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "kind_display",
             "source",
             "source_display",
+            "priority",
+            "priority_display",
             "channel",
             "external_ref",
             "attachment_ids",
@@ -331,6 +341,7 @@ class WorkOrderSerializer(serializers.ModelSerializer):
             "kind_display",
             "source_display",
             "status_display",
+            "priority_display",
             "channel",
             "external_ref",
             "attachment_ids",
@@ -959,3 +970,228 @@ class SetCustomerAcquisitionSerializer(serializers.Serializer):
     acquired_by = serializers.IntegerField(min_value=1)
     acquired_at = serializers.DateField(required=False)
     note = serializers.CharField(required=False, allow_blank=True, max_length=500)
+
+
+# ==============================================================================
+# التذكرة 210-C: كتالوج وحدات الخدمة، ربط المستندات، ودفتر الاستخدام
+# ==============================================================================
+
+
+class WorkOrderDocumentLinkSerializer(serializers.ModelSerializer):
+    document_type_display = serializers.CharField(source="get_document_type_display", read_only=True)
+    complexity_display = serializers.CharField(source="get_complexity_display", read_only=True)
+    line_count_source_display = serializers.CharField(source="get_line_count_source_display", read_only=True)
+
+    class Meta:
+        model = WorkOrderDocumentLink
+        fields = [
+            "id",
+            "work_order",
+            "deliverable",
+            "document_type",
+            "document_type_display",
+            "document_id",
+            "line_count",
+            "line_count_source",
+            "line_count_source_display",
+            "recount_reason",
+            "complexity",
+            "complexity_display",
+            "linked_by",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id", "work_order", "deliverable", "linked_by", "created_at", "updated_at",
+            "line_count_source", "line_count_source_display", "recount_reason",
+        ]
+
+
+class LinkWorkOrderDocumentSerializer(serializers.Serializer):
+    document_type = serializers.ChoiceField(choices=ServiceDocumentType.choices)
+    document_id = serializers.IntegerField(min_value=1)
+    line_count = serializers.IntegerField(min_value=1, required=False, default=1)
+    #: سببُ إعادة احتساب مستندٍ سبق احتسابُه — مديرُ العمليات وحدَه يمرّره (`WorkOrderViewSet.link_document`).
+    recount_reason = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    complexity = serializers.ChoiceField(
+        choices=ServiceUnitCatalogEntry.Complexity.choices, required=False, allow_blank=True,
+    )
+
+
+class WorkOrderDeliverableSerializer(serializers.ModelSerializer):
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    review_status_display = serializers.CharField(source="get_review_status_display", read_only=True)
+    rejection_category_display = serializers.CharField(source="get_rejection_category_display", read_only=True)
+    document_links = WorkOrderDocumentLinkSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = WorkOrderDeliverable
+        fields = [
+            "id",
+            "tenant",
+            "work_order",
+            "kind",
+            "kind_display",
+            "review_status",
+            "review_status_display",
+            "content",
+            "payload",
+            "file_url",
+            "content_snapshot",
+            "rejection_reason",
+            "rejection_category",
+            "rejection_category_display",
+            "reviewed_by",
+            "reviewed_at",
+            "submitted_by",
+            "document_links",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = [
+            "id", "tenant", "work_order", "review_status", "review_status_display", "content_snapshot",
+            "rejection_reason", "rejection_category", "rejection_category_display",
+            "reviewed_by", "reviewed_at", "submitted_by", "document_links", "created_at", "updated_at",
+        ]
+
+
+class SubmitWorkOrderDeliverableSerializer(serializers.Serializer):
+    kind = serializers.ChoiceField(choices=WorkOrderDeliverable.Kind.choices, required=False)
+    content = serializers.CharField(required=False, allow_blank=True)
+    payload = serializers.JSONField(required=False)
+    file_url = serializers.CharField(required=False, allow_blank=True, max_length=500)
+    document_link_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False, default=list,
+    )
+
+
+class ReviewWorkOrderDeliverableSerializer(serializers.Serializer):
+    review_status = serializers.ChoiceField(choices=WorkOrderDeliverable.ReviewStatus.choices)
+    rejection_reason = serializers.CharField(required=False, allow_blank=True)
+    rejection_category = serializers.ChoiceField(
+        choices=WorkOrderDeliverable.RejectionCategory.choices, required=False, allow_blank=True,
+    )
+
+    def validate(self, attrs):
+        if attrs.get("review_status") == WorkOrderDeliverable.ReviewStatus.REJECTED:
+            if not attrs.get("rejection_reason", "").strip():
+                raise serializers.ValidationError({"rejection_reason": ["سبب الرفض إلزامي عند الرفض."]})
+            if not attrs.get("rejection_category"):
+                raise serializers.ValidationError({"rejection_category": ["تصنيف سبب الرفض إلزامي عند الرفض."]})
+        return attrs
+
+
+class WorkOrderCommentSerializer(serializers.ModelSerializer):
+    author_name = serializers.CharField(source="author.get_full_name", read_only=True)
+    visibility_display = serializers.CharField(source="get_visibility_display", read_only=True)
+
+    class Meta:
+        model = WorkOrderComment
+        fields = [
+            "id", "tenant", "work_order", "visibility", "visibility_display",
+            "author", "author_name", "content", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "tenant", "work_order", "author", "author_name", "visibility_display", "created_at", "updated_at"]
+
+
+class AddWorkOrderCommentSerializer(serializers.Serializer):
+    content = serializers.CharField(allow_blank=False)
+    visibility = serializers.ChoiceField(choices=WorkOrderComment.Visibility.choices)
+
+
+class TransitionWorkOrderStatusSerializer(serializers.Serializer):
+    target_status = serializers.ChoiceField(choices=WorkOrder.Status.choices)
+
+
+class CreateWorkOrderSerializer(serializers.Serializer):
+    tenant = serializers.IntegerField(min_value=1)
+    title = serializers.CharField(allow_blank=False, max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True)
+    kind = serializers.ChoiceField(choices=WorkOrder.Kind.choices, required=False)
+    priority = serializers.ChoiceField(choices=WorkOrder.Priority.choices, required=False)
+    assignee = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+
+
+class AssignWorkOrderSerializer(serializers.Serializer):
+    assignee = serializers.IntegerField(min_value=1, required=False, allow_null=True)
+
+
+class ChangeWorkOrderPrioritySerializer(serializers.Serializer):
+    priority = serializers.ChoiceField(choices=WorkOrder.Priority.choices)
+
+
+class ServiceUnitCatalogEntrySerializer(serializers.ModelSerializer):
+    document_type_display = serializers.CharField(source="get_document_type_display", read_only=True)
+
+    class Meta:
+        model = ServiceUnitCatalogEntry
+        fields = [
+            "id", "catalog", "document_type", "document_type_display", "base_units", "per_line_weight",
+            "complexity_low_add", "complexity_medium_add", "complexity_high_add", "created_at", "updated_at",
+        ]
+        read_only_fields = ["id", "catalog", "document_type_display", "created_at", "updated_at"]
+
+
+class ServiceUnitCatalogSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    effective_state = serializers.SerializerMethodField()
+    entries = ServiceUnitCatalogEntrySerializer(many=True, read_only=True)
+
+    class Meta:
+        model = ServiceUnitCatalog
+        fields = [
+            "id", "version", "status", "status_display", "effective_state", "activation_reason",
+            "effective_from", "effective_to", "created_by", "activated_by", "activated_at", "entries",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = [
+            "id", "version", "status", "status_display", "effective_state", "activation_reason",
+            "effective_from", "effective_to", "created_by", "activated_by", "activated_at", "entries",
+            "created_at", "updated_at",
+        ]
+
+    def get_effective_state(self, obj):
+        return obj.effective_state()
+
+
+class CatalogEntryInputSerializer(serializers.Serializer):
+    document_type = serializers.ChoiceField(choices=ServiceDocumentType.choices)
+    base_units = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=Decimal("0.00"))
+    per_line_weight = serializers.DecimalField(max_digits=8, decimal_places=4, required=False, default=Decimal("0.00"))
+    complexity_low_add = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=Decimal("0.00"))
+    complexity_medium_add = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=Decimal("0.00"))
+    complexity_high_add = serializers.DecimalField(max_digits=8, decimal_places=2, required=False, default=Decimal("0.00"))
+
+
+class UpdateServiceUnitCatalogEntriesSerializer(serializers.Serializer):
+    entries = CatalogEntryInputSerializer(many=True)
+
+
+class ActivateServiceUnitCatalogSerializer(serializers.Serializer):
+    activation_reason = serializers.CharField(allow_blank=False, max_length=500)
+    effective_from = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class ServiceUsageEventSerializer(serializers.ModelSerializer):
+    source_type_display = serializers.CharField(source="get_source_type_display", read_only=True)
+    event_type_display = serializers.CharField(source="get_event_type_display", read_only=True)
+    #: الخادمُ هو من يسمّي مصدرَ العدد — شاشةُ الدفتر تعرضه ولا تترجمه بجدولٍ ثانٍ يتباعد.
+    line_count_source_display = serializers.CharField(source="get_line_count_source_display", read_only=True)
+    employee_name = serializers.CharField(source="employee.user.get_full_name", read_only=True, default="")
+    company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+
+    class Meta:
+        model = ServiceUsageEvent
+        fields = [
+            "id", "tenant", "company_name", "subscription", "work_order", "deliverable", "document_link",
+            "event_type", "event_type_display", "source_type", "source_type_display", "source_id",
+            "line_count_snapshot", "line_count_source", "line_count_source_display", "catalog_version", "units",
+            "chargeable_to_customer", "creditable_to_employee",
+            "employee", "employee_name", "approved_by", "approved_at", "period_start", "period_end",
+            "idempotency_key", "reversed_event", "reason", "correlation_id", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class ReverseUsageEventSerializer(serializers.Serializer):
+    reason = serializers.CharField(allow_blank=False, max_length=500)

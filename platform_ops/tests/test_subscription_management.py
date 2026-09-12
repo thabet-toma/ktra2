@@ -82,8 +82,42 @@ def _make_platform_tenant_pair(prefix: int):
     return tenant, platform_tenant
 
 
+def _activate_unit_catalog(actor=None):
+    """كتالوجُ وحداتٍ سارٍ — **لا تُفعَّل خدمةٌ بلا واحد** (القصة ١٨ من #210).
+
+    الكتالوج عامٌّ للمنصّة لا لكلّ شركة، فيكفي واحدٌ لكلّ اختبار؛ ويُعاد الساري
+    إن وُجد بدل إنشاء نسخةٍ ثانيةٍ بلا داعٍ. الاستيراداتُ داخل الدالّة كي لا
+    تتضخّم قوائمُ الاستيراد أعلاه بأسماءٍ لا يستعملها إلا هذا المُهيِّئ.
+    """
+    from platform_ops.models import ServiceDocumentType
+    from platform_ops.services import (
+        activate_service_unit_catalog,
+        create_service_unit_catalog_draft,
+        get_active_service_unit_catalog,
+        update_service_unit_catalog_entries,
+    )
+
+    existing = get_active_service_unit_catalog()
+    if existing is not None:
+        return existing
+    draft = create_service_unit_catalog_draft(actor=actor)
+    update_service_unit_catalog_entries(
+        catalog=draft,
+        entries=[{
+            "document_type": ServiceDocumentType.SALES_INVOICE,
+            "base_units": Decimal("1.00"),
+            "per_line_weight": Decimal("0.50"),
+        }],
+        actor=actor,
+    )
+    return activate_service_unit_catalog(
+        catalog=draft, actor=actor, activation_reason="كتالوج وحداتٍ للاختبارات",
+    )
+
+
 class SubscriptionPolicyServiceTests(TestCase):
     def setUp(self):
+        _activate_unit_catalog()
         self.admin = User.objects.create_superuser(
             username="policy_admin", email="policy_admin@example.test", password="x",
         )
@@ -292,6 +326,7 @@ class SubscriptionPolicyServiceTests(TestCase):
 
 class SubscriptionLifecycleServiceTests(TestCase):
     def setUp(self):
+        _activate_unit_catalog()
         self.admin = User.objects.create_superuser(
             username="lifecycle_admin", email="lifecycle_admin@example.test", password="x",
         )
@@ -908,6 +943,7 @@ class SubscriptionBillingCommandOrderTests(TestCase):
 
 class SubscriptionManagementApiTests(TestCase):
     def setUp(self):
+        _activate_unit_catalog()
         self.client = APIClient()
         self.admin = User.objects.create_superuser(
             username="api_admin", email="api_admin@example.test", password="x",
@@ -1262,6 +1298,7 @@ class SubscriptionAssignmentEligibilityApiTests(TestCase):
     """أهلية الإسناد ولوحة القيادة تُشتق من `is_service_active` وحده."""
 
     def setUp(self):
+        _activate_unit_catalog()
         self.admin = User.objects.create_superuser(
             username="eligibility_admin", email="eligibility_admin@example.test", password="x",
         )
@@ -1309,6 +1346,7 @@ class ServiceEligibilityInternalSurfacesTests(TestCase):
     """§١: أوامر العمل وصحة الشركة لا تدخلها شركةٌ بلا اشتراكٍ مؤهَّل — للمدير والموظف."""
 
     def setUp(self):
+        _activate_unit_catalog()
         self.client = APIClient()
         self.manager = User.objects.create_superuser(
             username="surfaces_manager", email="surfaces_manager@example.test", password="x",
@@ -1382,6 +1420,7 @@ class ServiceEligibilityInternalSurfacesTests(TestCase):
 
 class SubscriptionDashboardEligibilityTests(TestCase):
     def setUp(self):
+        _activate_unit_catalog()
         self.manager = User.objects.create_superuser(
             username="dashboard_eligibility_manager",
             email="dashboard_eligibility_manager@example.test",

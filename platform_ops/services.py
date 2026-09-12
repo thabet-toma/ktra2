@@ -1,9 +1,9 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة، والتذكرة 210-B).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة، والتذكرتان 210-B و210-C).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-Tenant -> ServiceSubscriptionPolicy -> IntegrationKey -> ServiceSubscription -> CompanyHealthCheck
+Tenant -> ServiceSubscriptionPolicy -> ServiceUnitCatalog -> IntegrationKey -> ServiceSubscription -> CompanyHealthCheck
 -> CompanyHealthCheckItem -> CustomerAcquisition -> PlatformEmployee -> Engagement -> WorkOrder
--> WorkOrderDeliverable -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
+-> WorkOrderDeliverable -> WorkOrderDocumentLink -> ServiceUsageEvent -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
 import calendar
@@ -17,7 +17,7 @@ import secrets
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import IntegrityError, models, transaction
-from django.db.models import Avg, Max, Q
+from django.db.models import Avg, Max, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -49,14 +49,21 @@ from .models import (
     PlatformOperationEvent,
     PlatformRecruiter,
     PolicyProfile,
+    ServiceDocumentType,
     ServiceSubscriptionEvent,
     ServiceSubscriptionPolicyEvent,
     ServiceSubscriptionPolicy,
     ServiceSubscription,
+    ServiceUnitCatalog,
+    ServiceUnitCatalogEntry,
+    ServiceUnitCatalogEvent,
+    ServiceUsageEvent,
     SubscriptionBillingRecord,
     WorkOrder,
     WorkOrderComment,
     WorkOrderDeliverable,
+    WorkOrderDocumentLink,
+    LineCountSource,
 )
 
 logger = logging.getLogger(__name__)
@@ -776,6 +783,7 @@ def start_service_trial(
         raise SubscriptionManagementError("subscription_policy_missing", "فعّل سياسة اشتراك قبل بدء تجربة.")
     if not active_policy.trial_days:
         raise SubscriptionManagementError("trial_not_configured", "السياسة الفعالة لا تمنح أيام تجربة.")
+    _require_active_service_unit_catalog()
 
     now = timezone.now()
     try:
@@ -859,6 +867,7 @@ def activate_paid_subscription(
         raise SubscriptionManagementError(
             "subscription_policy_missing", "فعّل سياسة اشتراك قبل إنشاء اشتراك خدمة جديد.",
         )
+    _require_active_service_unit_catalog()
 
     billing_tenant_id = active_policy.billing_tenant_id if needs_fresh_snapshot else locked.billing_tenant_id
     if billing_customer is None:
@@ -2023,6 +2032,7 @@ def create_work_order(
     source: str = WorkOrder.Source.STAFF,
     description: str = "",
     assignee: PlatformEmployee | None = None,
+    priority: str = WorkOrder.Priority.NORMAL,
     received_at=None,
     created_by=None,
     custom_policy: dict | None = None,
@@ -2040,6 +2050,9 @@ def create_work_order(
 
     if source not in WorkOrder.Source.values:
         raise WorkOrderError("invalid_source", f"مصدر أمر العمل غير صالح: {source}")
+
+    if priority not in WorkOrder.Priority.values:
+        raise WorkOrderError("invalid_priority", f"أولوية أمر العمل غير صالحة: {priority}")
 
     locked_assignee = None
     if assignee:
@@ -2060,6 +2073,7 @@ def create_work_order(
         kind=kind,
         source=source,
         assignee=locked_assignee,
+        priority=priority,
         status=WorkOrder.Status.RECEIVED,
         received_at=rec_at,
         policy_snapshot=policy_snapshot,
@@ -2220,8 +2234,16 @@ def submit_work_order_deliverable(
     payload: dict | None = None,
     file_url: str = "",
     submitted_by=None,
+    document_link_ids: list[int] | None = None,
 ) -> WorkOrderDeliverable:
-    """تسليم مخرج لأمر العمل مع حفظ لقطة ثابتة غير قابلة للتعديل اللاحق."""
+    """تسليم مخرج لأمر العمل مع حفظ لقطة ثابتة غير قابلة للتعديل اللاحق.
+
+    `document_link_ids` (٢١٠-ج، القصة ٣٦): روابطُ مستنداتٍ **موجودةٌ سلفاً**
+    (`link_work_order_document`) تُعاد تعليقُها على هذا المُسلَّم. إعادةُ تسليمٍ
+    بعد رفضٍ بسبب خطأ الموظف تُعيد **نفس** معرّفات الروابط لا روابطَ جديدة، فيبقى
+    مفتاح idempotency لدفتر الاستخدام واحداً ولا يُحتسب المصدر مرتين؛ ربطٌ جديدٌ
+    (بمعرّف مستندٍ آخر) هو ما يمثّل طلباً جديداً قابلاً للاحتساب من جديد.
+    """
     if kind not in WorkOrderDeliverable.Kind.values:
         raise WorkOrderError("invalid_kind", f"نوع المُسلَّم غير صالح: {kind}")
 
@@ -2246,6 +2268,20 @@ def submit_work_order_deliverable(
         content_snapshot=content_snapshot,
         submitted_by=submitted_by,
     )
+
+    if document_link_ids:
+        locked_links = list(
+            WorkOrderDocumentLink.objects.select_for_update().filter(
+                pk__in=document_link_ids, work_order_id=work_order.pk,
+            )
+        )
+        found_ids = {link.pk for link in locked_links}
+        missing = [lid for lid in document_link_ids if lid not in found_ids]
+        if missing:
+            raise WorkOrderDocumentLinkError(
+                "document_link_not_found", f"روابط مستندات غير موجودة لهذا الأمر: {missing}",
+            )
+        WorkOrderDocumentLink.objects.filter(pk__in=found_ids).update(deliverable=deliv)
 
     if submitted_by:
         emp = getattr(submitted_by, "platform_employee", None)
@@ -2272,8 +2308,14 @@ def review_work_order_deliverable(
     review_status: str,
     reviewed_by,
     rejection_reason: str = "",
+    rejection_category: str = "",
 ) -> WorkOrderDeliverable:
-    """مراجعة مُسلَّم أمر العمل (قبول أو رفض مع سبب صريح)."""
+    """مراجعة مُسلَّم أمر العمل (قبول أو رفض مع سبب صريح).
+
+    `rejection_category` (٢١٠-ج، القصة ١٤) اختياريٌّ هنا على مستوى الخدمة كي لا
+    ينكسر مسارٌ قديم كان يرفض بسببٍ نصّيٍّ وحده؛ نقطةُ الكتابة الجديدة في الواجهة
+    (`WorkOrderViewSet.review_deliverable`) هي التي تفرضه إلزامياً عند الرفض.
+    """
     if review_status not in (
         WorkOrderDeliverable.ReviewStatus.APPROVED,
         WorkOrderDeliverable.ReviewStatus.REJECTED,
@@ -2286,18 +2328,23 @@ def review_work_order_deliverable(
     if review_status == WorkOrderDeliverable.ReviewStatus.REJECTED and not (rejection_reason and rejection_reason.strip()):
         raise WorkOrderError("rejection_reason_required", "سبب الرفض إلزامي عند رفض المُسلَّم.")
 
+    if rejection_category and rejection_category not in WorkOrderDeliverable.RejectionCategory.values:
+        raise WorkOrderError("invalid_rejection_category", f"تصنيف سبب الرفض غير صالح: {rejection_category}")
+
     deliv_pk = getattr(deliverable, "pk", deliverable)
     locked_deliv = WorkOrderDeliverable.objects.select_for_update().get(pk=deliv_pk)
     locked_deliv.review_status = review_status
     locked_deliv.reviewed_by = reviewed_by
     locked_deliv.reviewed_at = timezone.now()
     locked_deliv.rejection_reason = (rejection_reason or "").strip()
+    locked_deliv.rejection_category = rejection_category if review_status == WorkOrderDeliverable.ReviewStatus.REJECTED else ""
     locked_deliv.save(
         update_fields=[
             "review_status",
             "reviewed_by",
             "reviewed_at",
             "rejection_reason",
+            "rejection_category",
             "updated_at",
         ]
     )
@@ -6611,3 +6658,698 @@ def set_customer_acquisition(
         details={"acquired_by": employee.pk, "acquired_at": acquired_at.isoformat(), "change": change_kind},
     )
     return record
+
+
+# ==============================================================================
+# التذكرة 210-C: كتالوج وحدات الخدمة، ربط المستندات، ودفتر الاستخدام
+# ==============================================================================
+
+
+class ServiceUnitCatalogError(PlatformOpsError):
+    """خطأ في كتالوج وحدات الخدمة."""
+
+
+class ServiceUnitCatalogConflict(ServiceUnitCatalogError):
+    def __init__(self, code: str, detail: str, status_code: int = 409):
+        super().__init__(code, detail, status_code=status_code)
+
+
+class WorkOrderDocumentLinkError(WorkOrderError):
+    """خطأ في ربط مستند بأمر عمل."""
+
+
+class UsageLedgerError(PlatformOpsError):
+    """خطأ في توليد أو عكس حدث استخدام دفتر الوحدات."""
+
+
+def _catalog_event_details(catalog: ServiceUnitCatalog) -> dict:
+    return {
+        "status": catalog.status,
+        "effective_from": catalog.effective_from.isoformat() if catalog.effective_from else None,
+        "entries": [
+            {
+                "document_type": row["document_type"],
+                "base_units": str(row["base_units"]),
+                "per_line_weight": str(row["per_line_weight"]),
+                "complexity_low_add": str(row["complexity_low_add"]),
+                "complexity_medium_add": str(row["complexity_medium_add"]),
+                "complexity_high_add": str(row["complexity_high_add"]),
+            }
+            for row in catalog.entries.values(
+                "document_type", "base_units", "per_line_weight",
+                "complexity_low_add", "complexity_medium_add", "complexity_high_add",
+            ).order_by("document_type")
+        ],
+    }
+
+
+def _log_catalog_event(catalog, *, action, actor=None, correlation_id="", details=None):
+    """حدثُ تدقيقٍ للكتالوج داخل معاملة الكتابة نفسها — لا مسار تعديل أو حذف له."""
+    return ServiceUnitCatalogEvent.objects.create(
+        catalog=catalog,
+        action=action,
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def get_active_service_unit_catalog(at=None) -> ServiceUnitCatalog | None:
+    """نسخةُ الكتالوج الساريةُ الآن — عبر `effective_state` لا `status` وحده."""
+    moment = at or timezone.now()
+    for candidate in ServiceUnitCatalog.objects.filter(status=ServiceUnitCatalog.Status.ACTIVE).order_by("-version"):
+        if candidate.effective_state(moment) == "current":
+            return candidate
+    return None
+
+
+def _require_active_service_unit_catalog() -> ServiceUnitCatalog:
+    """**لا تُفعَّل خطةٌ بلا كتالوج وحداتٍ صالح** (القصة ١٨).
+
+    البوّابةُ هنا لا عند الاعتماد: كتالوجٌ غائبٌ يُكتشَف لحظةَ اعتماد أوّل مُسلَّم
+    يعني أنّ الخدمةَ فُعِّلت وأُسند موظّفٌ وأُنجز عملٌ كامل ثم تبيّن أنّ احتسابَه
+    غيرُ معرَّف — وهو عينُ ما تمنعه القصة. فيُرفض التفعيل نفسُه.
+    """
+    catalog = get_active_service_unit_catalog()
+    if catalog is None:
+        raise SubscriptionManagementError(
+            "service_unit_catalog_required",
+            "انشر كتالوج وحدات خدمةٍ ساريًا قبل تفعيل الخدمة؛ لا يبدأ احتسابٌ غيرُ محدَّد.",
+        )
+    return catalog
+
+
+def _observe_document_line_count(*, tenant_id: int, document_type: str, document_id: int) -> int | None:
+    """يرصد عددَ بنود المستند من مصدره الرسميّ، ويتحقّق أنّه يخصّ الشركة نفسَها.
+
+    يعيد `None` حين يكون النوعُ غيرَ قابلٍ للرصد من هنا — أي أنّ app صاحبَ المستند
+    خارجَ القائمة البيضاء لحارس العزل (`accounting` و`logistics` و`import_file`)؛
+    فالعددُ يبقى تصريحاً موسوماً `declared` بدل أن نمدّ يدَنا إلى جداول غيرنا أو
+    نلتفّ على الحارس بـ`apps.get_model`. وما دام `sales` في القائمة، فلا عذرَ
+    لتصديق رقمٍ مكتوبٍ عن فاتورةِ بيعٍ نستطيع عدَّها.
+
+    ويرفع خطأً إن كان المستندُ غيرَ موجودٍ أو لشركةٍ أخرى: لا FK هنا فلا نزاهةَ
+    مرجعيّةً تحرسه، ورقمُ مستندٍ من شركةٍ أخرى يُفوتِر هذه الشركةَ بعمل تلك.
+    """
+    if document_type != ServiceDocumentType.SALES_INVOICE:
+        return None
+    from sales.models import SalesInvoice
+
+    invoice = SalesInvoice.objects.filter(pk=document_id).only("id", "tenant_id").first()
+    if invoice is None:
+        raise WorkOrderDocumentLinkError("document_not_found", "المستند غير موجود.")
+    if invoice.tenant_id != tenant_id:
+        raise WorkOrderDocumentLinkError(
+            "document_tenant_mismatch", "المستند يخصّ شركةً أخرى؛ لا يُربط بأمر عملِ هذه الشركة.",
+        )
+    return invoice.lines.count()
+
+
+def _ledger_chargeable_total(subscription: ServiceSubscription, *, exclude_event_id: int | None = None) -> Decimal:
+    """صافي وحدات الدفتر المحتسَبة على العميل **لدورة الاشتراك الجارية** (استخدامٌ ناقص عكس).
+
+    **الحصرُ بالدورة ليس تفصيلاً:** `consumed_quota` يُصفَّر كلَّ دورةٍ عند التدوير
+    (`bill_subscription_for_period`)، فمجموعٌ لكلّ الزمن يجعل الكسورَ تتراكم عبر
+    الدورات فتُبتلع أحداثٌ جديدة — مجموعٌ تاريخيٌّ 10.50 وحدثٌ بنصف وحدة يُنتج
+    `تقريب(11.00) − تقريب(10.50) = 0` فلا يستهلك الحدثُ شيئاً أبداً. والحصرُ نفسُه
+    يمنع أن يخصم عكسُ حدثٍ من دورةٍ **فُوترت سلفاً** من عدّاد الدورة الجارية
+    (§٢٧٠: لا إعادة حسابٍ رجعيّة) — حدثُ العكس يحمل دورةَ أصله لا الدورةَ الجارية.
+    """
+    qs = ServiceUsageEvent.objects.filter(
+        subscription_id=subscription.pk,
+        chargeable_to_customer=True,
+        period_start=subscription.period_start,
+        period_end=subscription.period_end,
+    )
+    if exclude_event_id is not None:
+        qs = qs.exclude(pk=exclude_event_id)
+    total = Decimal("0.00")
+    for row in qs.values("event_type").annotate(units_sum=Sum("units")):
+        amount = row["units_sum"] or Decimal("0.00")
+        if row["event_type"] == ServiceUsageEvent.EventType.USAGE:
+            total += amount
+        else:
+            total -= amount
+    return total
+
+
+@transaction.atomic
+def create_service_unit_catalog_draft(*, actor=None, correlation_id: str = "", cloned_from=None) -> ServiceUnitCatalog:
+    """ينشئ نسخة مسودة جديدة من كتالوج وحدات الخدمة — بلا بنود بعد.
+
+    لا `select_for_update` لحساب رقم النسخة، كنمط `create_subscription_policy_draft`:
+    قفلُ مدى فارغ على MySQL يأخذ gap lock فتتشابك معاملتان تُدرجان معاً. القيدُ
+    الفريد على `version` هو الحارس.
+    """
+    last_version = ServiceUnitCatalog.objects.aggregate(Max("version"))["version__max"] or 0
+    try:
+        with transaction.atomic():
+            catalog = ServiceUnitCatalog.objects.create(
+                version=last_version + 1,
+                status=ServiceUnitCatalog.Status.DRAFT,
+                created_by=actor if getattr(actor, "pk", None) else None,
+            )
+    except IntegrityError:
+        raise ServiceUnitCatalogConflict("catalog_version_conflict", "تعذر إنشاء نسخة كتالوج جديدة؛ أعد المحاولة.")
+    details = {"after": _catalog_event_details(catalog)}
+    if cloned_from is not None:
+        details["source_catalog_id"] = cloned_from.pk
+    _log_catalog_event(
+        catalog,
+        action=(
+            ServiceUnitCatalogEvent.Action.CLONED if cloned_from is not None
+            else ServiceUnitCatalogEvent.Action.CREATED
+        ),
+        actor=actor,
+        correlation_id=correlation_id,
+        details=details,
+    )
+    return catalog
+
+
+def clone_service_unit_catalog_to_draft(*, catalog, actor=None, correlation_id: str = "") -> ServiceUnitCatalog:
+    """ينسخ نسخة نشطة أو منتهية (وبنودها) إلى مسودة جديدة قابلة للتعديل."""
+    source = ServiceUnitCatalog.objects.prefetch_related("entries").get(pk=getattr(catalog, "pk", catalog))
+    draft = create_service_unit_catalog_draft(actor=actor, correlation_id=correlation_id, cloned_from=source)
+    for entry in source.entries.all():
+        ServiceUnitCatalogEntry.objects.create(
+            catalog=draft,
+            document_type=entry.document_type,
+            base_units=entry.base_units,
+            per_line_weight=entry.per_line_weight,
+            complexity_low_add=entry.complexity_low_add,
+            complexity_medium_add=entry.complexity_medium_add,
+            complexity_high_add=entry.complexity_high_add,
+        )
+    return draft
+
+
+def _validate_catalog_entry_decimal(value, field_name: str) -> Decimal:
+    try:
+        result = Decimal(str(value if value is not None else "0"))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ServiceUnitCatalogError(field_name, f"قيمة {field_name} غير صالحة.")
+    if not result.is_finite() or result < Decimal("0.00"):
+        raise ServiceUnitCatalogError(field_name, f"قيمة {field_name} يجب أن تكون صفراً أو أكبر.")
+    return result
+
+
+@transaction.atomic
+def update_service_unit_catalog_entries(
+    *, catalog, entries: list[dict], actor=None, correlation_id: str = "",
+) -> ServiceUnitCatalog:
+    """يستبدل بنود مسودة الكتالوج دفعة واحدة — النسخة النشطة أو المنتهية غير قابلة للتعديل.
+
+    `entries`: قائمة قواميس {document_type, base_units, per_line_weight,
+    complexity_low_add, complexity_medium_add, complexity_high_add}. أساسُ الوحدة
+    ووزنُ السطر وإضافات التعقيد من هذه الواجهة المخصّصة لا مدفونةً في الكود (القصة ١٧).
+    """
+    locked = ServiceUnitCatalog.objects.select_for_update().get(pk=getattr(catalog, "pk", catalog))
+    if locked.status != ServiceUnitCatalog.Status.DRAFT:
+        raise ServiceUnitCatalogConflict("catalog_immutable", "لا يمكن تعديل كتالوج مفعّل أو منتهٍ.")
+
+    before = _catalog_event_details(locked)
+    seen_types = set()
+    validated = []
+    for row in entries or []:
+        doc_type = row.get("document_type")
+        if doc_type not in ServiceDocumentType.values:
+            raise ServiceUnitCatalogError("invalid_document_type", f"نوع مستند غير صالح: {doc_type}")
+        if doc_type in seen_types:
+            raise ServiceUnitCatalogError("duplicate_document_type", f"نوع المستند مكرر في الكتالوج: {doc_type}")
+        seen_types.add(doc_type)
+        validated.append({
+            "document_type": doc_type,
+            "base_units": _validate_catalog_entry_decimal(row.get("base_units"), "base_units").quantize(Decimal("0.01")),
+            "per_line_weight": _validate_catalog_entry_decimal(
+                row.get("per_line_weight"), "per_line_weight"
+            ).quantize(Decimal("0.0001")),
+            "complexity_low_add": _validate_catalog_entry_decimal(
+                row.get("complexity_low_add"), "complexity_low_add"
+            ).quantize(Decimal("0.01")),
+            "complexity_medium_add": _validate_catalog_entry_decimal(
+                row.get("complexity_medium_add"), "complexity_medium_add"
+            ).quantize(Decimal("0.01")),
+            "complexity_high_add": _validate_catalog_entry_decimal(
+                row.get("complexity_high_add"), "complexity_high_add"
+            ).quantize(Decimal("0.01")),
+        })
+
+    locked.entries.all().delete()
+    for row in validated:
+        ServiceUnitCatalogEntry.objects.create(catalog=locked, **row)
+
+    _log_catalog_event(
+        locked, action=ServiceUnitCatalogEvent.Action.UPDATED, actor=actor, correlation_id=correlation_id,
+        details={"before": before, "after": _catalog_event_details(locked)},
+    )
+    return locked
+
+
+@transaction.atomic
+def activate_service_unit_catalog(
+    *, catalog, actor=None, activation_reason: str = "", correlation_id: str = "", effective_from=None,
+) -> ServiceUnitCatalog:
+    """يفعّل مسودة كتالوج بسبب إلزامي وبنودٍ غير فارغة (القصة ١٨).
+
+    يمنع تفعيل كتالوج بلا بنود صراحةً — لا يبدأ احتساب غير محدد. على نمط
+    `activate_subscription_policy`: منعُ التداخل تحت قفل صريح على كل الصفوف
+    لا بقيد شرطي تتجاهله MySQL، وتغيير النسخة يسري على الفترات القادمة فقط.
+    """
+    activation_reason = str(activation_reason or "").strip()
+    if not activation_reason:
+        raise ServiceUnitCatalogError("activation_reason_required", "سبب التفعيل مطلوب.")
+
+    locked_catalogs = list(ServiceUnitCatalog.objects.select_for_update().order_by("pk"))
+    locked = next((row for row in locked_catalogs if row.pk == getattr(catalog, "pk", catalog)), None)
+    if locked is None:
+        raise ServiceUnitCatalogError("catalog_not_found", "كتالوج وحدات الخدمة غير موجود.")
+    if locked.status != ServiceUnitCatalog.Status.DRAFT:
+        raise ServiceUnitCatalogConflict("catalog_not_draft", "لا يمكن تفعيل هذا الكتالوج مرة أخرى.")
+    if not locked.entries.exists():
+        raise ServiceUnitCatalogError("catalog_empty", "لا يمكن تفعيل كتالوج بلا بنود.")
+
+    now = timezone.now()
+    starts_at = effective_from or now
+    if timezone.is_naive(starts_at):
+        starts_at = timezone.make_aware(starts_at)
+    if starts_at < now - datetime.timedelta(minutes=1):
+        raise ServiceUnitCatalogError("effective_from_in_past", "تاريخ السريان لا يكون في الماضي.")
+    starts_at = max(starts_at, now)
+
+    active_rows = [
+        row for row in locked_catalogs
+        if row.pk != locked.pk and row.status == ServiceUnitCatalog.Status.ACTIVE
+    ]
+    later = [row for row in active_rows if row.effective_from and row.effective_from >= starts_at]
+    if later:
+        raise ServiceUnitCatalogConflict(
+            "catalog_overlap",
+            f"النسخة v{later[0].version} تسري من تاريخ لاحق أو مساوٍ؛ اختر تاريخ سريان بعده.",
+        )
+    superseded = []
+    for previous in active_rows:
+        if previous.effective_to is None or previous.effective_to > starts_at:
+            previous.effective_to = starts_at
+            previous.save(update_fields=["effective_to", "updated_at"])
+            superseded.append(previous.pk)
+
+    locked.status = ServiceUnitCatalog.Status.ACTIVE
+    locked.effective_from = starts_at
+    locked.effective_to = None
+    locked.activated_at = now
+    locked.activated_by = actor if getattr(actor, "pk", None) else None
+    locked.activation_reason = activation_reason
+    locked.save(update_fields=[
+        "status", "effective_from", "effective_to", "activated_at", "activated_by", "activation_reason", "updated_at",
+    ])
+    _log_catalog_event(
+        locked, action=ServiceUnitCatalogEvent.Action.ACTIVATED, actor=actor, correlation_id=correlation_id,
+        details={
+            "reason": activation_reason,
+            "effective_from": starts_at.isoformat(),
+            "superseded_catalog_ids": superseded,
+        },
+    )
+    for row in locked_catalogs:
+        if (
+            row.pk != locked.pk
+            and row.status == ServiceUnitCatalog.Status.ACTIVE
+            and row.effective_to is not None
+            and row.effective_to <= now
+        ):
+            row.status = ServiceUnitCatalog.Status.RETIRED
+            row.save(update_fields=["status", "updated_at"])
+            _log_catalog_event(
+                row, action=ServiceUnitCatalogEvent.Action.RETIRED, actor=actor, correlation_id=correlation_id,
+                details={"reason": activation_reason, "effective_to": row.effective_to.isoformat()},
+            )
+    return locked
+
+
+@transaction.atomic
+def link_work_order_document(
+    *,
+    work_order: WorkOrder,
+    document_type: str,
+    document_id,
+    line_count: int = 1,
+    complexity: str = "",
+    linked_by=None,
+    recount_reason: str = "",
+) -> WorkOrderDocumentLink:
+    """ربطُ مستندٍ مُدخَل بأمر عمل تمهيداً لتسليمه (القصة ٣٦).
+
+    **لا يغيّر قواعد المستند نفسه ولا يلتفّ على مساره المحاسبي أو المخزوني
+    الرسمي** — مرجعٌ للاحتساب فقط، بلا FK لتنوّع نماذج المستندات الممكنة.
+    """
+    if document_type not in ServiceDocumentType.values:
+        raise WorkOrderDocumentLinkError("invalid_document_type", f"نوع مستند غير صالح: {document_type}")
+    try:
+        doc_id = int(document_id)
+    except (TypeError, ValueError):
+        raise WorkOrderDocumentLinkError("invalid_document_id", "معرّف المستند غير صالح.")
+    if doc_id <= 0:
+        raise WorkOrderDocumentLinkError("invalid_document_id", "معرّف المستند غير صالح.")
+    try:
+        count = int(line_count)
+    except (TypeError, ValueError):
+        raise WorkOrderDocumentLinkError("invalid_line_count", "عدد البنود غير صالح.")
+    if count <= 0:
+        raise WorkOrderDocumentLinkError("invalid_line_count", "عدد البنود يجب أن يكون أكبر من صفر.")
+    if complexity and complexity not in ServiceUnitCatalogEntry.Complexity.values:
+        raise WorkOrderDocumentLinkError("invalid_complexity", f"قيمة تعقيد غير صالحة: {complexity}")
+
+    wo = WorkOrder.objects.select_related("tenant").get(pk=getattr(work_order, "pk", work_order))
+
+    # **لقطةٌ تُرصد لا تُصدَّق**: العددُ المُصرَّح به يحدّد إنجازَ الموظّف نفسِه وفاتورةَ
+    # العميل معاً، فما أمكن رصدُه من المستند يغلب ما كُتب في الطلب.
+    observed = _observe_document_line_count(
+        tenant_id=wo.tenant_id, document_type=document_type, document_id=doc_id,
+    )
+    if observed is None:
+        line_count_source = LineCountSource.DECLARED
+    else:
+        line_count_source = LineCountSource.OBSERVED
+        count = observed
+
+    # **إعادةُ الاحتساب طلبٌ جديدٌ يعتمده المدير** (المواصفة §٤): منعُ الاحتساب
+    # المضاعف كان يقوم على اصطلاحِ «أعِد استخدام الرابط» وحدَه، فرابطٌ ثانٍ على
+    # المستند نفسِه يُفوتِره مرّةً أخرى ويمنح الموظّفَ إنجازاً ثانياً بلا أيّ حارس.
+    recount_reason = str(recount_reason or "").strip()
+    # **المصدرُ لا الطلب**: §١٦٧ تقول «المصدر الواحد لا يُحتسب مرتين حتى مع إعادة
+    # الطلب» — فالحصرُ بأمر العمل كان يترك البابَ مفتوحاً على مصراعيه: نفسُ الفاتورة
+    # تُربط بأمر عملٍ **ثانٍ** فتُفوتَر مرّةً أخرى ويُمنح الموظّفُ إنجازاً ثانياً بلا
+    # سببٍ ولا اعتمادِ مدير. والعزلُ بالشركة لا بالمنصّة: فاتورةُ شركةٍ لا تُقاس بأرقام غيرها.
+    # وحدثٌ **عُكس** لم يبقَ محتسَباً، فالمستندُ يُربط من جديدٍ بلا سببٍ مكتوب.
+    already_charged = ServiceUsageEvent.objects.filter(
+        tenant_id=wo.tenant_id,
+        source_type=document_type,
+        source_id=doc_id,
+        event_type=ServiceUsageEvent.EventType.USAGE,
+        reversals__isnull=True,
+    ).exists()
+    if already_charged and not recount_reason:
+        raise WorkOrderDocumentLinkError(
+            "document_already_charged",
+            "هذا المستند احتُسب سلفاً لأمر العمل؛ إعادةُ احتسابه طلبٌ جديدٌ يعتمده مديرُ العمليات بسببٍ مكتوب.",
+            status_code=409,
+        )
+
+    link = WorkOrderDocumentLink.objects.create(
+        tenant=wo.tenant,
+        work_order=wo,
+        document_type=document_type,
+        document_id=doc_id,
+        line_count=count,
+        line_count_source=line_count_source,
+        recount_reason=recount_reason[:500],
+        complexity=complexity,
+        linked_by=linked_by if getattr(linked_by, "pk", None) else None,
+    )
+
+    if linked_by:
+        emp = getattr(linked_by, "platform_employee", None)
+        if not emp:
+            emp = PlatformEmployee.objects.filter(user=linked_by).first()
+        if emp:
+            log_platform_activity(
+                employee=emp,
+                tenant=wo.tenant,
+                action=PlatformActivityLog.Action.DOCUMENT_LINKED,
+                entity_type="work_order_document_link",
+                entity_id=link.pk,
+                description=f"ربط مستند ({link.get_document_type_display()} #{doc_id}) بأمر العمل '{wo.title}'",
+                details={"work_order_id": wo.pk, "document_type": document_type, "document_id": doc_id},
+            )
+
+    return link
+
+
+def _classify_usage_flags(work_order: WorkOrder) -> tuple[bool, bool]:
+    """علما الاحتساب (القصة ١٦): هل يستهلك حصة العميل؟ هل يمنح إنجاز الموظف؟
+
+    مستندٌ وصل عبر قناةٍ (source=channel، أي أنشأه العميل بنفسه) يستهلك حصةَ
+    العميل دوماً — الاستهلاكُ عن معالجة عمله لا عن هويّة كاتبه — لكنه **لا يمنح
+    الموظفَ إنجازاً** إلا إذا كان أمر العمل مراجعةً (kind=review) بوزنٍ مستقل.
+    """
+    customer_originated = work_order.source == WorkOrder.Source.CHANNEL
+    chargeable_to_customer = True
+    creditable_to_employee = (not customer_originated) or work_order.kind == WorkOrder.Kind.REVIEW
+    return chargeable_to_customer, creditable_to_employee
+
+
+def _apply_usage_event_to_quota(subscription: ServiceSubscription, *, event: ServiceUsageEvent):
+    """يحدّث `consumed_quota` من **مجموع الدفتر** لا بتقريب كلّ حدثٍ على حدة.
+
+    تقريبُ كلّ حدثٍ وحدَه إلى عددٍ صحيح كان يبتلع الكسورَ بلا أثر: كتالوجٌ وزنُه
+    `0.05` للسطر على فاتورةِ ثلاثةِ بنودٍ يُنتج `0.15` وحدة ⇒ تُقرَّب إلى صفر،
+    فيُنجَز العملُ ولا يُستهلَك شيءٌ من الحصّة مهما تكرّر. فيُحسب الفرقُ بين تقريب
+    المجموع قبل الحدث وبعده: تتراكم الكسورُ وتظهر عند عبورها الوحدةَ الكاملة.
+
+    والعكسُ يُطرح تلقائياً لأنّه حدثُ `reversal` داخل المجموع نفسِه — لا حسابَ
+    منفصلاً له فلا يختلّ التماثل. والقفلُ محرَزٌ سلفاً في المعاملة نفسِها.
+    """
+    if not event.chargeable_to_customer:
+        return
+    locked_sub = ServiceSubscription.objects.select_for_update().get(pk=subscription.pk)
+    before = _ledger_chargeable_total(locked_sub, exclude_event_id=event.pk)
+    after = _ledger_chargeable_total(locked_sub)
+    delta = int(after.to_integral_value(rounding=ROUND_HALF_UP)) - int(
+        before.to_integral_value(rounding=ROUND_HALF_UP)
+    )
+    if delta == 0:
+        return
+    locked_sub.consumed_quota = max(0, locked_sub.consumed_quota + delta)
+    locked_sub.save(update_fields=["consumed_quota", "updated_at"])
+
+
+@transaction.atomic
+def generate_usage_events_for_deliverable(
+    *, deliverable: WorkOrderDeliverable, reviewed_by, correlation_id: str = "",
+) -> list[ServiceUsageEvent]:
+    """يولّد أحداث دفتر الاستخدام من روابط مستندات مُسلَّمٍ **مُعتمَد** (القصص ١٦-١٩، ٥٦، ٥٨).
+
+    لا وحدات قبل اعتماد السوبر أدمن: هذه الدالّة تُستدعى فقط بعد اعتماد المُسلَّم
+    (انظر `approve_work_order_deliverable_with_usage`). مفتاحُ idempotency مبنيٌّ
+    على معرّف رابط المستند نفسِه لا على المُسلَّم أو الطلب: رابطٌ واحدٌ ينتج حدثاً
+    واحداً مهما تكرّرت المراجعة أو انقطعت الشبكة — وهو ما يمنع الاحتساب المضاعف
+    عند إعادة العمل بسبب خطأ الموظف (الرابطُ نفسُه يُعاد استخدامه لا يُعاد إنشاؤه).
+
+    ترتيب القفل: ServiceSubscription — لا تُقفَل روابطُ المستندات ولا الكتالوج هنا.
+    """
+    wo = deliverable.work_order
+    subscription = ServiceSubscription.objects.select_for_update().filter(tenant_id=wo.tenant_id).first()
+    if subscription is None or not is_service_subscription_eligible(subscription):
+        raise UsageLedgerError(
+            "subscription_not_active", "خدمة المتابعة والإدخال غير نشطة لهذه الشركة.", status_code=403,
+        )
+
+    links = list(deliverable.document_links.all())
+    if not links:
+        return []
+
+    catalog = get_active_service_unit_catalog()
+    if catalog is None:
+        raise UsageLedgerError(
+            "service_unit_catalog_required",
+            "لا يوجد كتالوج وحدات خدمة نشط؛ لا يبدأ احتساب الوحدات بلا كتالوج صالح.",
+        )
+    entries_by_type = {entry.document_type: entry for entry in catalog.entries.all()}
+
+    chargeable_to_customer, creditable_to_employee = _classify_usage_flags(wo)
+    now = timezone.now()
+    created_events: list[ServiceUsageEvent] = []
+
+    for link in links:
+        entry = entries_by_type.get(link.document_type)
+        if entry is None:
+            raise UsageLedgerError(
+                "catalog_entry_missing_for_document_type",
+                f"لا بند في الكتالوج النشط لنوع المستند: {link.document_type}",
+            )
+        idempotency_key = f"platform_ops:usage:doclink:{link.pk}"
+        existing = ServiceUsageEvent.objects.filter(idempotency_key=idempotency_key).first()
+        if existing is not None:
+            created_events.append(existing)
+            continue
+
+        units = entry.units_for(link.line_count, link.complexity)
+        try:
+            with transaction.atomic():
+                event = ServiceUsageEvent.objects.create(
+                    tenant=wo.tenant,
+                    subscription=subscription,
+                    work_order=wo,
+                    deliverable=deliverable,
+                    document_link=link,
+                    event_type=ServiceUsageEvent.EventType.USAGE,
+                    source_type=link.document_type,
+                    source_id=link.document_id,
+                    line_count_snapshot=link.line_count,
+                    # مصدرُ العدد يُثبَّت على الحدث كما يُثبَّت العددُ نفسُه: مَن يراجع
+                    # اعتراضاً على الوحدات لاحقاً يحتاج أن يعرف هل رُصد أم صُرِّح به.
+                    line_count_source=link.line_count_source,
+                    catalog_version=catalog.version,
+                    units=units,
+                    chargeable_to_customer=chargeable_to_customer,
+                    creditable_to_employee=creditable_to_employee,
+                    employee=wo.assignee,
+                    approved_by=reviewed_by if getattr(reviewed_by, "pk", None) else None,
+                    approved_at=now,
+                    period_start=subscription.period_start,
+                    period_end=subscription.period_end,
+                    idempotency_key=idempotency_key,
+                    correlation_id=str(correlation_id or "")[:64],
+                )
+        except IntegrityError:
+            # تسابقٌ نادر على نفس مفتاح idempotency: الفائزُ الآخر أنشأ الصفّ، فنقرؤه بدل تكراره.
+            created_events.append(ServiceUsageEvent.objects.get(idempotency_key=idempotency_key))
+            continue
+
+        _apply_usage_event_to_quota(subscription, event=event)
+        created_events.append(event)
+
+    return created_events
+
+
+@transaction.atomic
+def approve_work_order_deliverable_with_usage(
+    *, deliverable: WorkOrderDeliverable, reviewed_by, correlation_id: str = "",
+) -> tuple[WorkOrderDeliverable, list[ServiceUsageEvent]]:
+    """يعتمد مُسلَّماً ويولّد أحداث دفتر استخدامه في معاملة ذرّية واحدة.
+
+    ترتيب القفل: ServiceSubscription -> WorkOrderDeliverable. الاشتراكُ يُقفَل
+    هنا **أولاً** كي لا يخالف تركيبُ `review_work_order_deliverable` (يقفل
+    WorkOrderDeliverable وحده) مع `generate_usage_events_for_deliverable` (يقفل
+    ServiceSubscription وحده) الترتيبَ المعلَن — كلُّ دالّةٍ على حدةٍ تقفل نموذجاً
+    واحداً فسلامتُها الذاتيةُ لا تكفي عند التركيب.
+    """
+    deliv_pk = getattr(deliverable, "pk", deliverable)
+    preliminary = WorkOrderDeliverable.objects.select_related("work_order").get(pk=deliv_pk)
+    ServiceSubscription.objects.select_for_update().filter(tenant_id=preliminary.work_order.tenant_id).first()
+
+    updated = review_work_order_deliverable(
+        deliverable=preliminary,
+        review_status=WorkOrderDeliverable.ReviewStatus.APPROVED,
+        reviewed_by=reviewed_by,
+    )
+    events = generate_usage_events_for_deliverable(
+        deliverable=updated, reviewed_by=reviewed_by, correlation_id=correlation_id,
+    )
+    return updated, events
+
+
+@transaction.atomic
+def reverse_usage_event(
+    *, usage_event: ServiceUsageEvent, reason: str, actor=None, correlation_id: str = "",
+) -> ServiceUsageEvent:
+    """يعكس حدث استخدامٍ سابقاً — لا حذف ولا أرقام سالبة مجهولة (القصص ١٩، ٥٨).
+
+    ترتيب القفل: ServiceSubscription -> ServiceUsageEvent.
+    """
+    reason = str(reason or "").strip()
+    if not reason:
+        raise UsageLedgerError("reversal_reason_required", "سبب العكس مطلوب.")
+
+    ue_pk = getattr(usage_event, "pk", usage_event)
+    preliminary = ServiceUsageEvent.objects.get(pk=ue_pk)
+    subscription = ServiceSubscription.objects.select_for_update().get(pk=preliminary.subscription_id)
+    locked = ServiceUsageEvent.objects.select_for_update().get(pk=ue_pk)
+
+    if locked.event_type != ServiceUsageEvent.EventType.USAGE:
+        raise UsageLedgerError("not_reversible", "لا يمكن عكس حدثٍ ليس من نوع استخدام.")
+    if ServiceUsageEvent.objects.filter(reversed_event_id=locked.pk).exists():
+        raise UsageLedgerError("already_reversed", "هذا الحدث معكوسٌ بالفعل.")
+
+    idempotency_key = f"platform_ops:usage:reversal:{locked.pk}"
+    reversal = ServiceUsageEvent.objects.create(
+        tenant=locked.tenant,
+        subscription=subscription,
+        work_order_id=locked.work_order_id,
+        deliverable_id=locked.deliverable_id,
+        document_link_id=locked.document_link_id,
+        event_type=ServiceUsageEvent.EventType.REVERSAL,
+        source_type=locked.source_type,
+        source_id=locked.source_id,
+        line_count_snapshot=locked.line_count_snapshot,
+        # مصدرُ العدد ينتقل مع العكس: دفترٌ يعكس حدثاً مرصوداً ويسجّله «مُصرَّحاً به»
+        # يكذب على من يراجع اعتراضاً على الوحدات.
+        line_count_source=locked.line_count_source,
+        catalog_version=locked.catalog_version,
+        units=locked.units,
+        chargeable_to_customer=locked.chargeable_to_customer,
+        creditable_to_employee=locked.creditable_to_employee,
+        employee=locked.employee,
+        approved_by=actor if getattr(actor, "pk", None) else None,
+        approved_at=timezone.now(),
+        period_start=locked.period_start,
+        period_end=locked.period_end,
+        idempotency_key=idempotency_key,
+        reversed_event=locked,
+        reason=reason[:500],
+        correlation_id=str(correlation_id or "")[:64],
+    )
+    _apply_usage_event_to_quota(subscription, event=reversal)
+    return reversal
+
+
+@transaction.atomic
+def change_work_order_priority(*, work_order: WorkOrder, priority: str, changed_by=None) -> WorkOrder:
+    """تعديل أولوية أمر عمل — لترتيب طابور الموظف (القصة ٣٤)."""
+    if priority not in WorkOrder.Priority.values:
+        raise WorkOrderError("invalid_priority", f"أولوية أمر العمل غير صالحة: {priority}")
+    locked = WorkOrder.objects.select_for_update().get(pk=getattr(work_order, "pk", work_order))
+    previous_priority = locked.priority
+    locked.priority = priority
+    locked.save(update_fields=["priority", "updated_at"])
+
+    if changed_by:
+        emp = getattr(changed_by, "platform_employee", None)
+        if not emp:
+            emp = PlatformEmployee.objects.filter(user=changed_by).first()
+        if emp:
+            log_platform_activity(
+                employee=emp,
+                tenant=locked.tenant,
+                action=PlatformActivityLog.Action.WORK_ORDER_PRIORITY_CHANGED,
+                entity_type="work_order",
+                entity_id=locked.pk,
+                description=f"تغيير أولوية أمر العمل '{locked.title}' إلى {locked.get_priority_display()}",
+                details={"from_priority": previous_priority, "to_priority": priority},
+            )
+
+    return locked
+
+
+#: ترتيبُ الأولويّة للطابور الموحَّد — الأعلى قيمةً أولاً، ثم الأجل الأقرب.
+WORK_ORDER_PRIORITY_RANK: dict[str, int] = {
+    WorkOrder.Priority.URGENT: 3,
+    WorkOrder.Priority.HIGH: 2,
+    WorkOrder.Priority.NORMAL: 1,
+    WorkOrder.Priority.LOW: 0,
+}
+
+
+def list_employee_work_order_queue(user):
+    """طابورٌ موحَّدٌ للموظف عبر شركاته، مرتَّبٌ بالأولوية ثم الأجل (القصة ٣٤).
+
+    الشركاتُ تُشتقّ من ارتباطاته النشطة والمؤهَّلة للخدمة وحدها — لا معامل شركةٍ
+    من الطلب. الأوامرُ المغلقة أو الملغاة لا تدخل الطابور.
+    """
+    engaged_tenant_ids = Engagement.objects.filter(
+        employee__user=user, status=Engagement.Status.ACTIVE, tenant_id__in=eligible_service_tenant_ids(),
+    ).values_list("tenant_id", flat=True)
+    qs = (
+        WorkOrder.objects.select_related("tenant", "assignee__user")
+        .filter(assignee__user=user, tenant_id__in=engaged_tenant_ids)
+        .exclude(status__in=[WorkOrder.Status.CLOSED, WorkOrder.Status.CANCELLED])
+    )
+    rows = list(qs)
+    rows.sort(
+        key=lambda wo: (
+            -WORK_ORDER_PRIORITY_RANK.get(wo.priority, 0),
+            wo.deadline_at or datetime.datetime.max.replace(tzinfo=datetime.timezone.utc),
+        )
+    )
+    return rows

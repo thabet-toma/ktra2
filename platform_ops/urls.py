@@ -17,6 +17,8 @@ from .views import (
     PlatformRecruiterViewSet,
     PolicyProfileViewSet,
     ServiceSubscriptionViewSet,
+    ServiceUnitCatalogViewSet,
+    ServiceUsageEventViewSet,
     SubscriptionPolicyViewSet,
     SubscriptionBillingRecordViewSet,
     WorkOrderIntakeView,
@@ -39,6 +41,8 @@ router.register("job-postings", JobPostingViewSet, basename="platform-ops-job-po
 router.register("job-applicants", JobApplicantViewSet, basename="platform-ops-job-applicants")
 router.register("health-checks", CompanyHealthCheckViewSet, basename="platform-ops-health-checks")
 router.register("engagements", EngagementViewSet, basename="platform-ops-engagements")
+router.register("service-unit-catalogs", ServiceUnitCatalogViewSet, basename="platform-ops-service-unit-catalogs")
+router.register("usage-events", ServiceUsageEventViewSet, basename="platform-ops-usage-events")
 
 urlpatterns = [
     path("companies/<int:tenant_id>/health/", CompanyHealthView.as_view(), name="platform-ops-company-health"),

@@ -17,8 +17,14 @@ import { DrilldownModal } from "./DrilldownModal";
 import { EmployeeCard } from "./EmployeeCard";
 import { InterventionRail } from "./InterventionRail";
 import { PlatformNotificationBell } from "./PlatformNotificationBell";
+import { ServiceUnitCatalogPanel } from "./ServiceUnitCatalogPanel";
+import { ServiceUsageLedgerPanel } from "./ServiceUsageLedgerPanel";
+import { WorkOrdersPanel } from "./WorkOrdersPanel";
+
+type DashboardTab = "overview" | "work_orders" | "catalog" | "usage_ledger";
 
 export const PlatformOpsDashboard: React.FC = () => {
+  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
   const [data, setData] = useState<PlatformOpsDashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -225,6 +231,52 @@ export const PlatformOpsDashboard: React.FC = () => {
         </div>
       </header>
 
+      {/* تبويبات لوحة عمليات المنصة */}
+      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1 mb-6">
+        <button
+          type="button"
+          onClick={() => setActiveTab("overview")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "overview" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          اللوحة
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("work_orders")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "work_orders" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          أوامر العمل
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("catalog")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "catalog" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          كتالوج وحدات الخدمة
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("usage_ledger")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "usage_ledger" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          دفتر الاستخدام
+        </button>
+      </div>
+
+      {activeTab === "work_orders" && <WorkOrdersPanel />}
+      {activeTab === "catalog" && <ServiceUnitCatalogPanel />}
+      {activeTab === "usage_ledger" && <ServiceUsageLedgerPanel />}
+
+      {activeTab === "overview" && (
+        <>
       {/* خطأ التحميل إن وجد */}
       {error && (
         <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-800 flex items-center justify-between">
@@ -374,6 +426,8 @@ export const PlatformOpsDashboard: React.FC = () => {
         employeeId={activityModal.employeeId}
         employeeName={activityModal.employeeName}
       />
+        </>
+      )}
     </div>
   );
 };

@@ -580,6 +580,7 @@ class ConcurrencyLockOrderTest(TransactionTestCase):
 DECLARED_LOCK_ORDER = (
     "Tenant",
     "ServiceSubscriptionPolicy",
+    "ServiceUnitCatalog",
     "IntegrationKey",
     "ServiceSubscription",
     "CompanyHealthCheck",
@@ -589,6 +590,8 @@ DECLARED_LOCK_ORDER = (
     "Engagement",
     "WorkOrder",
     "WorkOrderDeliverable",
+    "WorkOrderDocumentLink",
+    "ServiceUsageEvent",
     "UserCompanyMembership",
     "DailyRating",
     "JobPosting",

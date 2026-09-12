@@ -944,6 +944,12 @@ class WorkOrder(models.Model):
         WAITING_CUSTOMER = "waiting_customer", "بانتظار العميل"
         CANCELLED = "cancelled", "ملغى"
 
+    class Priority(models.TextChoices):
+        LOW = "low", "منخفضة"
+        NORMAL = "normal", "عادية"
+        HIGH = "high", "مرتفعة"
+        URGENT = "urgent", "عاجلة"
+
     tenant = models.ForeignKey(
         Tenant,
         on_delete=models.CASCADE,
@@ -979,6 +985,13 @@ class WorkOrder(models.Model):
         related_name="assigned_work_orders",
         verbose_name="المسؤول",
         help_text="مسؤول واحد فقط عن أمر العمل (يقبل فارغاً = في الطابور)",
+    )
+    priority = models.CharField(
+        max_length=10,
+        choices=Priority.choices,
+        default=Priority.NORMAL,
+        verbose_name="الأولوية",
+        help_text="لترتيب طابور الموظف — القصة ٣٤ من #210 (أولوية ثم أجل).",
     )
     status = models.CharField(
         max_length=30,
@@ -1105,6 +1118,7 @@ class WorkOrder(models.Model):
             models.Index(fields=["assignee", "status"]),
             models.Index(fields=["tenant", "created_at"]),
             models.Index(fields=["channel", "external_ref"]),
+            models.Index(fields=["assignee", "priority", "deadline_at"]),
         ]
 
     def __str__(self):
@@ -1153,6 +1167,11 @@ class WorkOrderDeliverable(models.Model):
         PENDING = "pending", "بانتظار المراجعة"
         APPROVED = "approved", "مقبول"
         REJECTED = "rejected", "مرفوض"
+
+    class RejectionCategory(models.TextChoices):
+        EMPLOYEE_ERROR = "employee_error", "خطأ الموظف"
+        CUSTOMER_NEW_INFO = "customer_new_info", "معلومات جديدة من العميل"
+        OTHER = "other", "أخرى"
 
     tenant = models.ForeignKey(
         Tenant,
@@ -1204,6 +1223,18 @@ class WorkOrderDeliverable(models.Model):
         blank=True,
         default="",
         verbose_name="سبب الرفض",
+    )
+    rejection_category = models.CharField(
+        max_length=20,
+        choices=RejectionCategory.choices,
+        blank=True,
+        default="",
+        verbose_name="تصنيف سبب الرفض",
+        help_text=(
+            "إلزامي مع سبب الرفض المكتوب (٢١٠-ج، القصة ١٤): employee_error يمنع خصم "
+            "حصة العميل ثانيةً ومنح إنجاز الموظف ثانيةً عند إعادة العمل، وcustomer_new_info "
+            "يجيز احتساب وحدات جديدة إن اعتمدها السوبر أدمن كطلب جديد."
+        ),
     )
     reviewed_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -1592,6 +1623,9 @@ class PlatformActivityLog(models.Model):
         DELIVERABLE_SUBMIT = "deliverable_submit", "تقديم مُسلَّم"
         DELIVERABLE_REVIEW = "deliverable_review", "مراجعة مُسلَّم"
         COMMENT_ADDED = "comment_added", "إضافة تعليق"
+        WORK_ORDER_ASSIGNED = "work_order_assigned", "إسناد أمر عمل"
+        WORK_ORDER_PRIORITY_CHANGED = "work_order_priority_changed", "تغيير أولوية أمر عمل"
+        DOCUMENT_LINKED = "document_linked", "ربط مستند بأمر عمل"
         ENGAGEMENT_ASSIGNED = "engagement_assigned", "إسناد ارتباط"
         ENGAGEMENT_SUSPENDED = "engagement_suspended", "تعليق ارتباط"
         ENGAGEMENT_REVOKED = "engagement_revoked", "إلغاء ارتباط"
@@ -2414,4 +2448,328 @@ class PlatformOperationEvent(models.Model):
 
     def __str__(self):
         return f"{self.tenant}: {self.get_action_display()}"
+
+
+# ==============================================================================
+# التذكرة 210-C: كتالوج وحدات الخدمة، ربط المستندات، ودفتر الاستخدام
+# ==============================================================================
+
+
+class ServiceDocumentType(models.TextChoices):
+    """أنواع المستندات/العمليات القابلة للاحتساب — قائمة §٤ من مواصفة #210 حرفياً."""
+
+    SALES_INVOICE = "sales_invoice", "فاتورة بيع"
+    PURCHASE_INVOICE = "purchase_invoice", "فاتورة شراء"
+    RECEIPT_OR_PAYMENT = "receipt_or_payment", "سند قبض/صرف أو دفعة"
+    JOURNAL_ENTRY = "journal_entry", "قيد يومية"
+    SALES_OR_PURCHASE_ORDER = "sales_or_purchase_order", "أمر بيع/شراء"
+    INVENTORY_DOCUMENT = "inventory_document", "مستند مخزون/جرد"
+    BANK_RECONCILIATION = "bank_reconciliation", "تسوية بنكية"
+    IMPORT_FILE_ROW = "import_file_row", "ملف إدخال"
+    REPORT_OR_CHECK_OR_SUPPORT = "report_or_check_or_support", "تقرير أو فحص أو دعم"
+
+
+class LineCountSource(models.TextChoices):
+    """من أين جاء عددُ البنود الذي تُحسب عليه الوحدات.
+
+    المواصفة تقول «**لقطة** عدد البنود» — واللقطةُ تُرصد من المستند لا يُصرَّح بها.
+    فما استطاع `platform_ops` رصدَه من مصدره الرسميّ يُوسم `observed`، وما لم
+    يستطع (نوعٌ يملكه app خارج القائمة البيضاء لحارس العزل) يبقى `declared`
+    ظاهراً للمعتمِد بوضوح — لأنّ الرقمَ المصرَّح به يحدّد إنجازَ الموظّف نفسِه
+    وفاتورةَ العميل معاً، فلا يُخلط بما رُصد.
+    """
+
+    OBSERVED = "observed", "مرصود من المستند"
+    DECLARED = "declared", "مُصرَّح به"
+
+
+class ServiceUnitCatalog(models.Model):
+    """نسخة مؤرَّخة من كتالوج وحدات الخدمة (القصص ١٦-١٨ من #210).
+
+    على نمط `ServiceSubscriptionPolicy`: النسخة النشطة أو المنتهية لا تُعدَّل أبداً؛
+    تُستنسخ إلى مسودة جديدة ثم تُفعَّل. `effective_from` يجعل تغيير النسخة يسري على
+    الفترات القادمة فقط، لا بأثر رجعي على وحدات مُحتسَبة بالفعل.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "مسودة"
+        ACTIVE = "active", "نشطة"
+        RETIRED = "retired", "منتهية"
+
+    version = models.PositiveIntegerField(unique=True, verbose_name="رقم النسخة")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="الحالة",
+    )
+    activation_reason = models.CharField(
+        max_length=500, blank=True, default="", verbose_name="سبب التفعيل",
+        help_text="إلزامي لحظة تفعيل المسودة؛ يبقى في الصف بعد التفعيل.",
+    )
+    effective_from = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة من")
+    effective_to = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة إلى")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="أنشأها",
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="فعّلها",
+    )
+    activated_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت التفعيل")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        ordering = ["-version"]
+        verbose_name = "كتالوج وحدات الخدمة"
+        verbose_name_plural = "كتالوجات وحدات الخدمة"
+
+    def __str__(self):
+        return f"كتالوج الوحدات v{self.version} ({self.get_status_display()})"
+
+    def effective_state(self, at=None) -> str:
+        """draft / scheduled / current / retired — من نافذة السريان لا من حقل الحالة وحده."""
+        if self.status == self.Status.DRAFT:
+            return "draft"
+        if self.status == self.Status.RETIRED:
+            return "retired"
+        moment = at or timezone.now()
+        if self.effective_from and self.effective_from > moment:
+            return "scheduled"
+        if self.effective_to and self.effective_to <= moment:
+            return "retired"
+        return "current"
+
+
+class ServiceUnitCatalogEntry(models.Model):
+    """وزنُ وحدةٍ واحدة لنوع مستندٍ بعينه ضمن نسخة كتالوج (القصة ١٧).
+
+    الصيغة المعلنة في المواصفة §٤:
+    `وحدات الحدث = وحدات أساس النوع + (الكمية الموثقة × وزن الوحدة) + إضافات تعقيد معتمدة`
+    """
+
+    class Complexity(models.TextChoices):
+        LOW = "low", "منخفض"
+        MEDIUM = "medium", "متوسط"
+        HIGH = "high", "مرتفع"
+
+    catalog = models.ForeignKey(
+        ServiceUnitCatalog, on_delete=models.CASCADE, related_name="entries", verbose_name="الكتالوج",
+    )
+    document_type = models.CharField(
+        max_length=30, choices=ServiceDocumentType.choices, verbose_name="نوع المستند/العملية",
+    )
+    base_units = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="أساس الوحدة",
+    )
+    per_line_weight = models.DecimalField(
+        max_digits=8, decimal_places=4, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="وزن السطر/الكمية",
+    )
+    complexity_low_add = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="إضافة تعقيد منخفض",
+    )
+    complexity_medium_add = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="إضافة تعقيد متوسط",
+    )
+    complexity_high_add = models.DecimalField(
+        max_digits=8, decimal_places=2, default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="إضافة تعقيد مرتفع",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "بند كتالوج وحدات الخدمة"
+        verbose_name_plural = "بنود كتالوج وحدات الخدمة"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["catalog", "document_type"], name="platform_ops_catalog_entry_type_uniq",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.catalog}: {self.get_document_type_display()}"
+
+    def units_for(self, line_count, complexity: str = "") -> Decimal:
+        quantity = Decimal(max(int(line_count or 0), 0))
+        units = self.base_units + (quantity * self.per_line_weight)
+        if complexity == self.Complexity.LOW:
+            units += self.complexity_low_add
+        elif complexity == self.Complexity.MEDIUM:
+            units += self.complexity_medium_add
+        elif complexity == self.Complexity.HIGH:
+            units += self.complexity_high_add
+        return units.quantize(Decimal("0.01"))
+
+
+class ServiceUnitCatalogEvent(models.Model):
+    """سجلّ تدقيق غير قابل للمحو لكل كتابة على نسخ كتالوج وحدات الخدمة."""
+
+    class Action(models.TextChoices):
+        CREATED = "created", "إنشاء مسودة"
+        UPDATED = "updated", "تعديل مسودة"
+        CLONED = "cloned", "استنساخ مسودة"
+        ACTIVATED = "activated", "تفعيل نسخة"
+        RETIRED = "retired", "إنهاء نسخة"
+
+    catalog = models.ForeignKey(
+        ServiceUnitCatalog, on_delete=models.PROTECT, related_name="events", verbose_name="الكتالوج",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="الإجراء")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث كتالوج وحدات الخدمة"
+        verbose_name_plural = "أحداث كتالوج وحدات الخدمة"
+        indexes = [models.Index(fields=["catalog", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.catalog_id}: {self.get_action_display()}"
+
+
+class WorkOrderDocumentLink(models.Model):
+    """ربطُ مستندٍ حقيقيّ (فاتورة، قيد، سند...) بأمر عمل لاحتساب وحداته (القصة ٣٦).
+
+    لا FK إلى نموذج المستند الفعلي لأنه يتنوّع (SalesInvoice/PurchaseInvoice/...)؛
+    `document_type` + `document_id` مرجعٌ عامٌّ بلا قيد نزاهةٍ مرجعيّ، كنمط
+    `PlatformOperationEvent.subject_id`. الربطُ **لا يغيّر قواعد المستند نفسه** ولا
+    يلتفّ على مساره المحاسبي أو المخزوني الرسمي — هو مرجعٌ للاحتساب فقط.
+
+    الصفُّ نفسُه يُعاد استخدامه (لا يُعاد إنشاؤه) عند إعادة تسليمٍ بسبب خطأ الموظف؛
+    فيبقى مفتاح idempotency لدفتر الاستخدام (مبنيّاً على معرّف هذا الرابط) واحداً
+    لا يتكرّر. رابطٌ جديدٌ بمعرّف مستندٍ جديد (أو بقرار السوبر أدمن الصريح) يمثّل
+    طلباً جديداً قابلاً للاحتساب من جديد.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="platform_work_order_document_links", verbose_name="الشركة",
+    )
+    work_order = models.ForeignKey(
+        WorkOrder, on_delete=models.CASCADE, related_name="document_links", verbose_name="أمر العمل",
+    )
+    deliverable = models.ForeignKey(
+        WorkOrderDeliverable, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="document_links", verbose_name="المُسلَّم",
+        help_text="يُملأ عند تسليم أمر العمل بهذا الرابط.",
+    )
+    document_type = models.CharField(max_length=30, choices=ServiceDocumentType.choices, verbose_name="نوع المستند")
+    document_id = models.PositiveIntegerField(verbose_name="معرّف المستند")
+    line_count = models.PositiveIntegerField(default=1, verbose_name="عدد البنود الموثقة")
+    line_count_source = models.CharField(
+        max_length=10, choices=LineCountSource.choices, default=LineCountSource.DECLARED,
+        verbose_name="مصدر عدد البنود",
+    )
+    recount_reason = models.CharField(
+        max_length=500, blank=True, default="", verbose_name="سبب إعادة الاحتساب",
+        help_text="إلزامي حين يكون المستند نفسُه قد احتُسب سلفاً لأمر العمل — طلبٌ جديد يعتمده مدير العمليات.",
+    )
+    complexity = models.CharField(
+        max_length=10, choices=ServiceUnitCatalogEntry.Complexity.choices, blank=True, default="", verbose_name="التعقيد",
+    )
+    linked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="ربطه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الربط")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "ربط مستند بأمر عمل"
+        verbose_name_plural = "روابط المستندات بأوامر العمل"
+        indexes = [
+            models.Index(fields=["work_order"]),
+            models.Index(fields=["document_type", "document_id"]),
+            models.Index(fields=["deliverable"]),
+        ]
+
+    def __str__(self):
+        return f"{self.work_order}: {self.get_document_type_display()} #{self.document_id}"
+
+
+class ServiceUsageEvent(models.Model):
+    """دفترُ استخدامٍ غيرُ قابلٍ للمحو (القصص ١٦، ١٩، ٥٦، ٥٨ من #210).
+
+    `ServiceSubscription.consumed_quota` يصير projection يُحدَّث من هذا الدفتر لا
+    مصدرَ الحقيقة (§١٣ من المواصفة). لا مسار تعديل أو حذف عليه — الإلغاء أو العكس
+    حدثٌ جديدٌ من نوع `reversal` يشير إلى الأصل عبر `reversed_event`.
+    """
+
+    class EventType(models.TextChoices):
+        USAGE = "usage", "استخدام"
+        REVERSAL = "reversal", "عكس"
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="platform_service_usage_events", verbose_name="الشركة",
+    )
+    subscription = models.ForeignKey(
+        ServiceSubscription, on_delete=models.PROTECT, related_name="usage_events", verbose_name="اشتراك الخدمة",
+    )
+    work_order = models.ForeignKey(
+        WorkOrder, on_delete=models.PROTECT, related_name="usage_events", verbose_name="أمر العمل",
+    )
+    deliverable = models.ForeignKey(
+        WorkOrderDeliverable, on_delete=models.PROTECT, related_name="usage_events", verbose_name="المُسلَّم",
+    )
+    document_link = models.ForeignKey(
+        WorkOrderDocumentLink, on_delete=models.PROTECT, related_name="usage_events", verbose_name="ربط المستند",
+    )
+    event_type = models.CharField(
+        max_length=10, choices=EventType.choices, default=EventType.USAGE, verbose_name="نوع الحدث",
+    )
+    source_type = models.CharField(max_length=30, choices=ServiceDocumentType.choices, verbose_name="نوع مصدر الوحدة")
+    source_id = models.PositiveIntegerField(verbose_name="معرّف المصدر")
+    line_count_snapshot = models.PositiveIntegerField(verbose_name="لقطة عدد البنود")
+    line_count_source = models.CharField(
+        max_length=10, choices=LineCountSource.choices, default=LineCountSource.DECLARED,
+        verbose_name="مصدر عدد البنود",
+        help_text="هل رُصد العددُ من المستند أم صُرِّح به؟ — يُراجَع عليه أيُّ اعتراضٍ على الوحدات.",
+    )
+    catalog_version = models.PositiveIntegerField(verbose_name="نسخة الكتالوج المستعملة")
+    units = models.DecimalField(max_digits=10, decimal_places=2, verbose_name="الوحدات")
+    chargeable_to_customer = models.BooleanField(verbose_name="يستهلك حصة العميل")
+    creditable_to_employee = models.BooleanField(verbose_name="يدخل إنجاز الموظف")
+    employee = models.ForeignKey(
+        PlatformEmployee, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="usage_events", verbose_name="الموظف المنفّذ",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="المعتمِد",
+    )
+    approved_at = models.DateTimeField(verbose_name="وقت الاعتماد")
+    period_start = models.DateField(null=True, blank=True, verbose_name="بداية الدورة المنسوبة")
+    period_end = models.DateField(null=True, blank=True, verbose_name="نهاية الدورة المنسوبة")
+    idempotency_key = models.CharField(max_length=128, unique=True, verbose_name="مفتاح idempotency")
+    reversed_event = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="reversals", verbose_name="الحدث المعكوس",
+    )
+    reason = models.CharField(max_length=500, blank=True, default="", verbose_name="السبب")
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث استخدام خدمة"
+        verbose_name_plural = "أحداث استخدام الخدمة"
+        indexes = [
+            models.Index(fields=["tenant", "-created_at"]),
+            models.Index(fields=["subscription", "-created_at"]),
+            models.Index(fields=["work_order"]),
+            models.Index(fields=["source_type", "source_id"]),
+            models.Index(fields=["employee", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.tenant}: {self.get_event_type_display()} {self.units}و"
 

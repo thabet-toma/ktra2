@@ -98,6 +98,26 @@ from .services import (
     is_platform_recruiter,
     preview_subscription_policy,
     search_policy_billing_products,
+    activate_service_unit_catalog,
+    add_work_order_comment,
+    approve_work_order_deliverable_with_usage,
+    assign_work_order,
+    change_work_order_priority,
+    clone_service_unit_catalog_to_draft,
+    create_service_unit_catalog_draft,
+    create_work_order,
+    get_active_service_unit_catalog,
+    link_work_order_document,
+    list_employee_work_order_queue,
+    log_platform_activity,
+    list_work_order_comments,
+    review_work_order_deliverable,
+    reverse_usage_event,
+    submit_work_order_deliverable,
+    transition_work_order_status,
+    update_service_unit_catalog_entries,
+    WORK_ORDER_TRANSITIONS,
+    WorkOrderTransitionError,
 )
 from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 
@@ -120,8 +140,12 @@ from .models import (
     ServiceSubscription,
     ServiceSubscriptionEvent,
     ServiceSubscriptionPolicy,
+    ServiceUnitCatalog,
+    ServiceUsageEvent,
     SubscriptionBillingRecord,
     WorkOrder,
+    WorkOrderComment,
+    WorkOrderDeliverable,
 )
 from .permissions import (
     IsPlatformOperationsManager,
@@ -167,6 +191,22 @@ from .serializers import (
     UpdateHealthCheckItemSerializer,
     UpdateHealthCheckSerializer,
     WorkOrderSerializer,
+    ActivateServiceUnitCatalogSerializer,
+    AddWorkOrderCommentSerializer,
+    AssignWorkOrderSerializer,
+    ChangeWorkOrderPrioritySerializer,
+    CreateWorkOrderSerializer,
+    LinkWorkOrderDocumentSerializer,
+    ReverseUsageEventSerializer,
+    ReviewWorkOrderDeliverableSerializer,
+    ServiceUnitCatalogSerializer,
+    ServiceUsageEventSerializer,
+    SubmitWorkOrderDeliverableSerializer,
+    TransitionWorkOrderStatusSerializer,
+    UpdateServiceUnitCatalogEntriesSerializer,
+    WorkOrderCommentSerializer,
+    WorkOrderDeliverableSerializer,
+    WorkOrderDocumentLinkSerializer,
 )
 
 
@@ -869,6 +909,394 @@ class WorkOrderViewSet(viewsets.ReadOnlyModelViewSet):
             base_qs = base_qs.filter(status=WorkOrder.Status.CANCELLED)
 
         return base_qs
+
+    # --------------------------------------------------------------------
+    # التذكرة 210-C: أفعالُ الكتابة — الإنشاء، الإسناد، الانتقال، المُسلَّمات
+    # ومراجعتها، ربطُ المستندات، التعليقات، والأولوية.
+    # --------------------------------------------------------------------
+
+    def _require_assignee_or_manager(self, request, work_order):
+        """المسؤولُ المُسنَد نفسُه أو مديرُ العمليات — لا موظّفٌ آخر."""
+        if IsPlatformOperationsManager().has_permission(request, self):
+            return
+        user = request.user
+        if work_order.assignee and work_order.assignee.user_id == user.pk:
+            return
+        raise PermissionDenied("هذا الإجراء متاح لمسؤول أمر العمل أو مدير العمليات فقط.")
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_order(self, request):
+        """فتحُ أمر عمل — مدير العمليات وحده (القصة ١٣)."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "فتح أمر عمل متاح لمدير العمليات فقط.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = CreateWorkOrderSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        try:
+            tenant = Tenant.objects.get(pk=data["tenant"], pk__in=eligible_service_tenant_ids())
+        except Tenant.DoesNotExist:
+            return Response(
+                {"detail": "الشركة غير موجودة أو خدمة الإدخال غير مفعّلة لها.", "code": "subscription_not_eligible"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        assignee = None
+        if data.get("assignee"):
+            assignee = PlatformEmployee.objects.filter(pk=data["assignee"]).first()
+            if assignee is None:
+                return Response({"assignee": ["موظف المنصة غير موجود."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            work_order = create_work_order(
+                tenant=tenant,
+                title=data["title"],
+                description=data.get("description", ""),
+                kind=data.get("kind", WorkOrder.Kind.DATA_ENTRY),
+                priority=data.get("priority", WorkOrder.Priority.NORMAL),
+                source=WorkOrder.Source.ADMIN,
+                assignee=assignee,
+                created_by=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(work_order).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["get"], url_path="queue")
+    def queue(self, request):
+        """طابورُ الموظّف الموحَّد عبر شركاته، مرتَّبٌ بالأولوية ثم الأجل (القصة ٣٤)."""
+        rows = list_employee_work_order_queue(request.user)
+        return Response(self.get_serializer(rows, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign(self, request, pk=None):
+        """إسنادُ مسؤولٍ واحد أو إعادةٌ للطابور — مدير العمليات وحده."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "الإسناد متاح لمدير العمليات فقط.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        work_order = self.get_object()
+        payload = AssignWorkOrderSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        assignee = None
+        assignee_id = payload.validated_data.get("assignee")
+        if assignee_id:
+            assignee = PlatformEmployee.objects.filter(pk=assignee_id).first()
+            if assignee is None:
+                return Response({"assignee": ["موظف المنصة غير موجود."]}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            updated = assign_work_order(work_order=work_order, assignee=assignee)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        actor_emp = getattr(request.user, "platform_employee", None) or PlatformEmployee.objects.filter(
+            user=request.user
+        ).first()
+        if actor_emp:
+            log_platform_activity(
+                employee=actor_emp,
+                tenant=updated.tenant,
+                action=PlatformActivityLog.Action.WORK_ORDER_ASSIGNED,
+                entity_type="work_order",
+                entity_id=updated.pk,
+                description=(
+                    f"إسناد أمر العمل '{updated.title}' إلى {assignee.user.get_full_name()}"
+                    if assignee else f"إعادة أمر العمل '{updated.title}' للطابور"
+                ),
+                details={"assignee_id": assignee.pk if assignee else None},
+            )
+        return Response(self.get_serializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="change-priority")
+    def change_priority(self, request, pk=None):
+        """تعديل أولوية أمر العمل — مدير العمليات وحده."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "تعديل الأولوية متاح لمدير العمليات فقط.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        work_order = self.get_object()
+        payload = ChangeWorkOrderPrioritySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            updated = change_work_order_priority(
+                work_order=work_order, priority=payload.validated_data["priority"], changed_by=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="transition")
+    def transition(self, request, pk=None):
+        """نقلُ حالة أمر العمل ضمن الحالات المسموحة وحدها (القصة ٣٥).
+
+        Optimistic conflict handling: `expected_updated_at` اختياريّ؛ إن أُرسل
+        ولم يطابق آخرَ تحديثٍ محفوظ تُردّ 409 مع النسخة الحالية بدل الكتابة فوق تغييرٍ لم يره طالبُه.
+        """
+        work_order = self.get_object()
+        self._require_assignee_or_manager(request, work_order)
+        payload = TransitionWorkOrderStatusSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        expected_updated_at = request.data.get("expected_updated_at")
+        if expected_updated_at:
+            from django.utils.dateparse import parse_datetime
+            expected_dt = parse_datetime(str(expected_updated_at))
+            if expected_dt and work_order.updated_at != expected_dt:
+                return Response(
+                    {
+                        "detail": "تغيّرت حالة أمر العمل منذ آخر قراءة؛ أعد تحميل النسخة الحالية.",
+                        "code": "conflict_stale_version",
+                        "current": self.get_serializer(work_order).data,
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
+        try:
+            updated = transition_work_order_status(
+                work_order=work_order, target_status=payload.validated_data["target_status"],
+            )
+        except WorkOrderTransitionError as exc:
+            return Response(
+                {
+                    "detail": exc.detail,
+                    "code": exc.code,
+                    "allowed_next": sorted(WORK_ORDER_TRANSITIONS.get(work_order.status, set())),
+                },
+                status=exc.status_code,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(updated).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="comments")
+    def comments(self, request, pk=None):
+        work_order = self.get_object()
+        if request.method == "GET":
+            rows = list_work_order_comments(work_order=work_order, for_client=False)
+            return Response(WorkOrderCommentSerializer(rows, many=True).data)
+
+        self._require_assignee_or_manager(request, work_order)
+        payload = AddWorkOrderCommentSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            comment = add_work_order_comment(
+                work_order=work_order,
+                author=request.user,
+                content=payload.validated_data["content"],
+                visibility=payload.validated_data["visibility"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(WorkOrderCommentSerializer(comment).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="link-document")
+    def link_document(self, request, pk=None):
+        """ربطُ مستندٍ مُدخَل بأمر العمل (القصة ٣٦)."""
+        work_order = self.get_object()
+        self._require_assignee_or_manager(request, work_order)
+        payload = LinkWorkOrderDocumentSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = dict(payload.validated_data)
+        # «طلبٌ جديدٌ **يعتمده السوبر أدمن**» (المواصفة §٤): إعادةُ احتساب مستندٍ
+        # محتسَبٍ سلفاً ليست قراراً يمنحه الموظّفُ المنفّذ لنفسه.
+        if data.get("recount_reason") and not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {
+                    "detail": "إعادةُ احتساب مستندٍ محتسَبٍ سلفاً متاحةٌ لمدير العمليات وحدَه.",
+                    "code": "manager_only",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            link = link_work_order_document(
+                work_order=work_order,
+                linked_by=request.user,
+                **data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(WorkOrderDocumentLinkSerializer(link).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get"], url_path="document-links")
+    def document_links(self, request, pk=None):
+        work_order = self.get_object()
+        rows = work_order.document_links.select_related("linked_by").order_by("-created_at")
+        return Response(WorkOrderDocumentLinkSerializer(rows, many=True).data)
+
+    @action(detail=True, methods=["get", "post"], url_path="deliverables")
+    def deliverables(self, request, pk=None):
+        work_order = self.get_object()
+        if request.method == "GET":
+            rows = work_order.deliverables.select_related("reviewed_by", "submitted_by").prefetch_related(
+                "document_links"
+            ).order_by("-created_at")
+            return Response(WorkOrderDeliverableSerializer(rows, many=True).data)
+
+        self._require_assignee_or_manager(request, work_order)
+        payload = SubmitWorkOrderDeliverableSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        try:
+            deliverable = submit_work_order_deliverable(
+                work_order=work_order,
+                kind=data.get("kind", WorkOrderDeliverable.Kind.NOTE),
+                content=data.get("content", ""),
+                payload=data.get("payload"),
+                file_url=data.get("file_url", ""),
+                submitted_by=request.user,
+                document_link_ids=data.get("document_link_ids") or None,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(WorkOrderDeliverableSerializer(deliverable).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path=r"deliverables/(?P<deliverable_id>\d+)/review")
+    def review_deliverable(self, request, pk=None, deliverable_id=None):
+        """اعتمادٌ أو ردٌّ بسببٍ مصنَّفٍ ومكتوب — مدير العمليات وحده (القصة ١٤).
+
+        الاعتمادُ يولّد أحداث دفتر الاستخدام من روابط المستندات المُسلَّمة، ذرّياً
+        مع تغيير حالة المُسلَّم.
+        """
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "مراجعة التسليم متاحة لمدير العمليات فقط.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        work_order = self.get_object()
+        deliverable = WorkOrderDeliverable.objects.filter(pk=deliverable_id, work_order=work_order).first()
+        if deliverable is None:
+            raise Http404("المُسلَّم غير موجود لهذا الأمر.")
+        if deliverable.review_status != WorkOrderDeliverable.ReviewStatus.PENDING:
+            return Response(
+                {
+                    "detail": "هذا المُسلَّم رُوجع بالفعل؛ لا مراجعة مكررة.",
+                    "code": "already_reviewed",
+                    "current": WorkOrderDeliverableSerializer(deliverable).data,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+        payload = ReviewWorkOrderDeliverableSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        correlation_id = _resolve_correlation_id(request)
+        try:
+            if data["review_status"] == WorkOrderDeliverable.ReviewStatus.APPROVED:
+                updated, events = approve_work_order_deliverable_with_usage(
+                    deliverable=deliverable, reviewed_by=request.user, correlation_id=correlation_id,
+                )
+                return Response({
+                    "deliverable": WorkOrderDeliverableSerializer(updated).data,
+                    "usage_events": ServiceUsageEventSerializer(events, many=True).data,
+                })
+            updated = review_work_order_deliverable(
+                deliverable=deliverable,
+                review_status=WorkOrderDeliverable.ReviewStatus.REJECTED,
+                reviewed_by=request.user,
+                rejection_reason=data.get("rejection_reason", ""),
+                rejection_category=data.get("rejection_category", ""),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(WorkOrderDeliverableSerializer(updated).data)
+
+
+class ServiceUnitCatalogViewSet(viewsets.ReadOnlyModelViewSet):
+    """كتالوج وحدات الخدمة بنسخٍ مؤرَّخة — مدير العمليات وحده (القصص ١٦-١٨)."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = ServiceUnitCatalogSerializer
+    queryset = ServiceUnitCatalog.objects.prefetch_related("entries").all()
+
+    @action(detail=False, methods=["post"], url_path="draft")
+    def draft(self, request):
+        catalog = create_service_unit_catalog_draft(
+            actor=request.user, correlation_id=_resolve_correlation_id(request),
+        )
+        return Response(self.get_serializer(catalog).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        try:
+            draft = clone_service_unit_catalog_to_draft(
+                catalog=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(draft).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update-entries")
+    def update_entries(self, request, pk=None):
+        payload = UpdateServiceUnitCatalogEntriesSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            catalog = update_service_unit_catalog_entries(
+                catalog=self.get_object(),
+                entries=payload.validated_data["entries"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(catalog).data)
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        payload = ActivateServiceUnitCatalogSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            catalog = activate_service_unit_catalog(
+                catalog=self.get_object(),
+                actor=request.user,
+                activation_reason=payload.validated_data["activation_reason"],
+                effective_from=payload.validated_data.get("effective_from"),
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(catalog).data)
+
+    @action(detail=False, methods=["get"], url_path="active")
+    def active(self, request):
+        catalog = get_active_service_unit_catalog()
+        if catalog is None:
+            return Response({"detail": "لا يوجد كتالوج وحدات خدمة نشط حالياً."}, status=status.HTTP_404_NOT_FOUND)
+        return Response(self.get_serializer(catalog).data)
+
+
+class ServiceUsageEventViewSet(viewsets.ReadOnlyModelViewSet):
+    """دفترُ استخدامٍ غيرُ قابلٍ للمحو — مدير العمليات وحده (القصة ١٩، ٥٦)."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = ServiceUsageEventSerializer
+    queryset = ServiceUsageEvent.objects.select_related("tenant", "employee__user", "approved_by").all()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            try:
+                qs = qs.filter(tenant_id=int(company_id))
+            except (TypeError, ValueError):
+                raise ValidationError({"company": ["يجب أن يكون معرّف الشركة رقماً صحيحاً."]})
+        work_order_id = self.request.query_params.get("work_order")
+        if work_order_id:
+            qs = qs.filter(work_order_id=work_order_id)
+        return qs
+
+    @action(detail=True, methods=["post"], url_path="reverse")
+    def reverse(self, request, pk=None):
+        payload = ReverseUsageEventSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            reversal = reverse_usage_event(
+                usage_event=self.get_object(),
+                reason=payload.validated_data["reason"],
+                actor=request.user,
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(reversal).data, status=status.HTTP_201_CREATED)
 
 
 class PolicyProfileViewSet(viewsets.ReadOnlyModelViewSet):

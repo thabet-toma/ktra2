@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **751**
+عدد النقاط: **771**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -602,6 +602,13 @@
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/active/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/draft/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/{pk}/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/{pk}/activate/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/{pk}/clone/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/service-unit-catalogs/{pk}/update-entries/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/draft/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/{pk}/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
@@ -622,8 +629,21 @@
 | `/api/platform/ops/subscriptions/{pk}/suspend/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/update-settings/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/withdraw-cancellation/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/usage-events/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/usage-events/{pk}/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/usage-events/{pk}/reverse/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/create/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/queue/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/assign/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/change-priority/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/comments/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/deliverables/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/deliverables/{deliverable_id}/review/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/document-links/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/link-document/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/work-orders/{pk}/transition/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/super-admins/` | `platform_super_admins` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/<int:pk>/` | `platform_super_admin_detail` | `core/platform_admin_api.py` |
 | `/api/platform/users/<int:pk>/set-active/` | `platform_user_set_active` | `core/platform_admin_api.py` |
