@@ -27,6 +27,7 @@ import { IntegrationKeysPanel } from "./IntegrationKeysPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
 import { ProfitabilityPanel } from "./ProfitabilityPanel";
 import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
+import { MeetingsPanel } from "./MeetingsPanel";
 import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
 import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
 import { countPresent, derivePresence, sortByPresence } from "../../utils/roomPresence";
@@ -35,7 +36,7 @@ import { formatLastActive } from "../../utils/lastActiveFormat";
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
   | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys" | "champions"
-  | "profitability" | "review_requests" | "workspace_room";
+  | "profitability" | "review_requests" | "workspace_room" | "meetings";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -376,6 +377,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         >
           اعتراضات الأداء
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("meetings")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "meetings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          الاجتماعات
+        </button>
       </div>
 
       {activeTab === "work_orders" && <WorkOrdersPanel />}
@@ -388,6 +398,7 @@ export const PlatformOpsDashboard: React.FC = () => {
       {activeTab === "champions" && <ChampionsPanel />}
       {activeTab === "profitability" && <ProfitabilityPanel />}
       {activeTab === "review_requests" && <PerformanceReviewRequestsPanel />}
+      {activeTab === "meetings" && <MeetingsPanel />}
 
       {activeTab === "workspace_room" && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm">

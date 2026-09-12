@@ -10,8 +10,9 @@ import { WorkOrdersPanel } from "./WorkOrdersPanel";
 import { EmployeeSelfWalletCard } from "./EmployeeSelfWalletCard";
 import { EmployeeCompaniesPanel } from "./EmployeeCompaniesPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
+import { MyMeetingsPanel } from "./MyMeetingsPanel";
 
-type EmployeeTab = "queue" | "companies" | "wallet" | "champions";
+type EmployeeTab = "queue" | "companies" | "wallet" | "champions" | "meetings";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه المساحة لموظفي عمليات المنصة فقط.", "تعذّر تحميل مساحتك.");
@@ -135,11 +136,21 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
         >
           Champions
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("meetings")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            tab === "meetings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          اجتماعاتي
+        </button>
       </div>
 
       {tab === "queue" && <WorkOrdersPanel />}
       {tab === "companies" && <EmployeeCompaniesPanel />}
       {tab === "champions" && <ChampionsPanel />}
+      {tab === "meetings" && <MyMeetingsPanel />}
       {tab === "wallet" && (
         profileLoading ? (
           <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
