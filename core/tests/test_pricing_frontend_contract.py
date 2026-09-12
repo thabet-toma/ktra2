@@ -31,6 +31,13 @@ class PricingFrontendContractTest(TestCase):
         ).read_text(encoding="utf-8")
         self.public_pricing_source = (repo_root / "core" / "public_pricing.py").read_text(encoding="utf-8")
         self.plans_source = (repo_root / "core" / "plans.py").read_text(encoding="utf-8")
+        self.plan_usage_api_source = (
+            repo_root / "core" / "plan_usage_api.py"
+        ).read_text(encoding="utf-8")
+        self.urls_source = (repo_root / "core" / "urls.py").read_text(encoding="utf-8")
+        self.pricing_api_source = (
+            frontend / "services" / "pricingApi.ts"
+        ).read_text(encoding="utf-8")
 
     # ── مفاتيح الحمولة موجودةٌ فعلاً في الخادم ──────────────────────────────
 
@@ -55,6 +62,57 @@ class PricingFrontendContractTest(TestCase):
                 f'"{key}"', self.plans_source,
                 f"مفتاحُ الإضافة «{key}» غيرُ موجودٍ فعلاً في DATA_ENTRY_ADDON.",
             )
+
+    def test_the_usage_bar_reads_keys_the_server_really_sends(self):
+        """مفاتيحُ صفّ الاستهلاك موجودةٌ فعلاً في إسقاط `tenant_usage_rows`.
+
+        `tsc` يفحص الواجهةَ المكتوبةَ في `pricingApi.ts` لا الحمولةَ الحقيقيّة:
+        مفتاحٌ يُعاد تسميتُه في الخادم يبقى النوعُ صحيحاً والشريطُ يقرأ
+        `undefined` — فيُرسَم صفراً بلا خطأٍ في وحدة التحكّم ولا اختبارٍ أحمر.
+        """
+        for key in ("limit", "usage", "period_label", "unit", "label", "key"):
+            self.assertIn(
+                f'"{key}"', self.plans_source,
+                f"مفتاحُ «{key}» غيرُ موجودٍ فعلاً في tenant_usage_rows.",
+            )
+        for key in ("plan", "plan_label", "limits"):
+            self.assertIn(
+                f'"{key}"', self.plan_usage_api_source,
+                f"مفتاحُ «{key}» غيرُ موجودٍ فعلاً في my_plan_usage.",
+            )
+
+    def test_the_usage_endpoint_the_client_calls_is_actually_registered(self):
+        """المسارُ الذي ينادَى موجودٌ في `core/urls.py` — لا 404 صامتاً في بطاقة."""
+        self.assertIn("my-plan/usage/", self.pricing_api_source)
+        self.assertIn("api/my-plan/usage/", self.urls_source)
+
+    def test_my_plan_card_reads_the_effective_limit_not_the_public_plan_default(self):
+        """البطاقةُ تقرأ حدودَها من نقطة الاستهلاك لا من حمولة الأسعار العامّة.
+
+        العامّةُ تعرف `PLAN_DEFAULTS` وحدَها ولا تعرف الشركة، فشركةٌ رُفع لها
+        حدٌّ بـ`TenantLimit` كانت ترى رقمَ الخطّة لا رقمَها ثمّ تُمنَع عند رقمٍ
+        غيرِ الذي قرأته. الرجوعُ إلى `planRow.limits` مصدراً أوّلَ هو بعينه ذلك
+        العطب.
+        """
+        self.assertIn("useMyPlanUsage", self.my_plan_card_source)
+        self.assertRegex(
+            self.my_plan_card_source, r"usage\.limits\.map",
+            "البطاقةُ لا تُصيّر صفوفَ الاستهلاك — الشريطُ غيرُ مركَّب.",
+        )
+
+    def test_the_usage_bar_width_is_a_tailwind_class_not_an_inline_style(self):
+        """لا `style=` في البطاقة، وعرضُ الشريط من السُلَّم المشترك.
+
+        قاعدتان لا يمسكهما `tsc` ولا `npm test` (لا أحدَهما يُصيّر JSX):
+        الأنماطُ السطريّةُ ممنوعةٌ في هذا المستودع، **وصنفٌ مبنيٌّ وقتَ التشغيل
+        مثل `w-[${n}%]` لا يراه ماسحُ Tailwind** فيبقى الشريطُ بعرض صفرٍ بلا أيّ
+        خطأ — عطبٌ بصريٌّ صامتٌ تماماً.
+        """
+        self.assertNotIn(
+            "style={{", self.my_plan_card_source,
+            "نمطٌ سطريٌّ في بطاقة «خطّتي» — القاعدة Tailwind وحدَه.",
+        )
+        self.assertIn("barWidthClass", self.my_plan_card_source)
 
     # ── لا سعرَ مكتوبٌ حرفيّاً ────────────────────────────────────────────
 

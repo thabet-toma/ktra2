@@ -20,7 +20,8 @@ from rest_framework.routers import DefaultRouter
 
 from core import (
     assistant_views, agent_db_view, dashboard_api, health, media_views,
-    permissions_api, platform_admin_api, public_pricing, reports_api, scan,
+    permissions_api, plan_usage_api, platform_admin_api, public_pricing,
+    reports_api, scan,
     whatsapp_views,
 )
 from core.activity_views import ActivityLogViewSet
@@ -84,6 +85,9 @@ urlpatterns = [
     # T-PLANPRICE: صفحة الأسعار العامة — بلا مصادقة وبلا شركة، كل كودها في
     # core/public_pricing.py على نمط store/docshare.
     path('api/pricing/plans/', public_pricing.public_pricing_plans),
+    # «خطّتي»: حدودُ شركةِ الطالب واستهلاكُها لعضوٍ فيها — ثالثةُ ثلاثٍ
+    # بين الأسعار العامّة (بلا مصادقة) ولوحة المنصّة (كلُّ الشركات).
+    path('api/my-plan/usage/', plan_usage_api.my_plan_usage),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),
     # التنقيب قبل التشغيل: `<str:key>` يبتلع «drill» لو جاء بعده،

@@ -20,6 +20,9 @@ class DashboardShellContractTest(TestCase):
         self.hero_strip_source = (
             repo_root / "frontend_v2" / "components" / "platform" / "DashboardHeroStrip.tsx"
         ).read_text(encoding="utf-8")
+        self.bar_width_source = (
+            repo_root / "frontend_v2" / "utils" / "barWidth.ts"
+        ).read_text(encoding="utf-8")
         self.target_bars_source = (
             repo_root / "frontend_v2" / "components" / "platform" / "TeamTargetBars.tsx"
         ).read_text(encoding="utf-8")
@@ -75,7 +78,18 @@ class DashboardShellContractTest(TestCase):
         self.assertIn("لم تُضبط", self.target_bars_source)
 
     def test_team_target_bars_clips_the_bar_width_but_keeps_the_overflow_number(self):
-        self.assertIn("Math.min(100", self.target_bars_source)
+        """القصُّ في السُلَّم المشترك، والفائضُ باقٍ في الرقم داخل المكوّن.
+
+        كان السُلَّمُ يسكن `TeamTargetBars.tsx` نفسَه حتى لزم شريطٌ ثانٍ في
+        «خطّتي»، فانتقل إلى `utils/barWidth.ts` أداةً واحدة. والحارسُ يتبع القصَّ
+        إلى حيث هو بدل أن يبقى يفتّش عنه في ملفٍّ لم يعد يملكه — تأكيدٌ يحرس
+        موضعاً قديماً يسقط عند إعادة تنظيمٍ سليمةٍ ويمرّ عند عطبٍ حقيقيّ.
+        """
+        self.assertIn("Math.min(100", self.bar_width_source)
+        self.assertIn(
+            "barWidthClass", self.target_bars_source,
+            "شريطُ المستهدفات لا يستعمل سُلَّمَ العرض المشترك — نسخةٌ ثانيةٌ تتباعد بصمت.",
+        )
         self.assertRegex(
             self.target_bars_source,
             r"isOverloaded[\s\S]{0,800}formatNumber\(percent",

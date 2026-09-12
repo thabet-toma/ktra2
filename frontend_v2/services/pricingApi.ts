@@ -48,3 +48,30 @@ export interface PublicPricingResponse {
 export async function fetchPublicPricing(): Promise<PublicPricingResponse> {
   return apiGetObject<PublicPricingResponse>('pricing/plans/');
 }
+
+/** صفُّ حدٍّ في «خطّتي»: الحدُّ **الفعّال** للشركة واستهلاكُها منه. */
+export interface MyPlanLimitUsage {
+  key: string;
+  label: string;
+  unit: string;
+  period: string;
+  period_label: string;
+  /** عددٌ = الحدّ · `null` = بلا حدّ · `0` = غير متاح. */
+  limit: number | null;
+  usage: number;
+}
+
+export interface MyPlanUsageResponse {
+  plan: string;
+  plan_label: string;
+  limits: MyPlanLimitUsage[];
+}
+
+/**
+ * `GET /api/my-plan/usage/` — مصادَقةٌ ومقيَّدةٌ بشركة الطالب
+ * (`core/plan_usage_api.py`). **حدودُها الفعّالةُ لا افتراضاتُ الخطّة**: شركةٌ
+ * رُفع لها حدٌّ بـ`TenantLimit` تراه هنا، ولا تراه في حمولة الأسعار العامّة.
+ */
+export async function fetchMyPlanUsage(): Promise<MyPlanUsageResponse> {
+  return apiGetObject<MyPlanUsageResponse>('my-plan/usage/');
+}

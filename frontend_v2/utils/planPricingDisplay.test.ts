@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   buildLimitComparisonRows,
   buildModuleComparisonRows,
+  buildPlanUsageBar,
   formatPlanLimitValue,
 } from './planPricingDisplay.ts';
 import type { PublicPlan } from '../services/pricingApi.ts';
@@ -44,4 +45,40 @@ test('buildModuleComparisonRows: اتّحاد مفاتيح الوحدات عبر
   assert.equal(rows.length, 2);
   assert.deepEqual(byKey.hr_suite.enabledByPlan, { Basic: false, Pro: true, Enterprise: true });
   assert.deepEqual(byKey.advanced_reports.enabledByPlan, { Basic: false, Pro: false, Enterprise: true });
+});
+
+test('buildPlanUsageBar: `null` بلا حدّ فلا شريطَ ولا قسمةَ على عدم', () => {
+  const bar = buildPlanUsageBar(4200, null);
+  assert.equal(bar.unbounded, true);
+  assert.equal(bar.percent, 0);
+  assert.equal(bar.remaining, null);
+  assert.ok(Number.isFinite(bar.rawPercent));
+});
+
+test('buildPlanUsageBar: `0` غير متاح — لا صفرٌ يُقرأ «بلا استهلاك»', () => {
+  const bar = buildPlanUsageBar(0, 0);
+  assert.equal(bar.unavailable, true);
+  assert.equal(bar.tone, 'over');
+  assert.ok(!Number.isNaN(bar.rawPercent));
+});
+
+test('buildPlanUsageBar: الفائضُ يُقصّ في الشريط ويبقى في الرقم', () => {
+  const bar = buildPlanUsageBar(320, 200);
+  assert.equal(bar.percent, 100);
+  assert.equal(bar.rawPercent, 160);
+  assert.equal(bar.tone, 'over');
+  assert.equal(bar.remaining, 0, 'بقي لك سالبٌ ليس رقماً يُقرأ');
+});
+
+test('buildPlanUsageBar: حدودُ النبرة عند ٨٠٪ و١٠٠٪ بالضبط', () => {
+  assert.equal(buildPlanUsageBar(159, 200).tone, 'ok');
+  assert.equal(buildPlanUsageBar(160, 200).tone, 'warning');
+  assert.equal(buildPlanUsageBar(199, 200).tone, 'warning');
+  assert.equal(buildPlanUsageBar(200, 200).tone, 'over');
+});
+
+test('buildPlanUsageBar: الباقي فرقٌ حقيقيّ لا نسبة', () => {
+  const bar = buildPlanUsageBar(180, 200);
+  assert.equal(bar.remaining, 20);
+  assert.equal(bar.percent, 90);
 });

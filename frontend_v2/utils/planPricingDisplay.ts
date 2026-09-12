@@ -68,3 +68,51 @@ export function buildModuleComparisonRows(plans: PublicPlan[]): ModuleComparison
     ),
   }));
 }
+
+/**
+ * حالةُ شريط الاستهلاك لحدٍّ واحد. `percent` مقصوصةٌ في [0,100] لرسم الشريط،
+ * و`rawPercent` تحمل الفائضَ كما هو.
+ */
+export interface PlanUsageBar {
+  /** `true` حين لا شريطَ يُرسم أصلاً: بلا حدّ، أو غير متاح. */
+  unbounded: boolean;
+  unavailable: boolean;
+  percent: number;
+  rawPercent: number;
+  /** `warning` من 80%، و`over` عند بلوغ الحدّ أو تجاوزه. */
+  tone: 'ok' | 'warning' | 'over';
+  remaining: number | null;
+}
+
+/**
+ * شريطُ استهلاكٍ واحد — دالّةٌ خالصةٌ لأنّ `npm test` هنا لا يُصيّر مكوّناً:
+ * منطقٌ داخل `useMemo` في البطاقة لا يفحصه شيء، والأرقامُ المعروضة هنا هي التي
+ * يقرؤها المستخدمُ قبل أن يُمنَع من الإنشاء.
+ *
+ * ثلاثةُ قراراتٍ مقصودة:
+ * - **`null` بلا حدّ و`0` غير متاح** — نفسُ الثلاثيّة في `core/plans.py`؛ قسمةٌ
+ *   على أيٍّ منهما تُنتج `Infinity` أو `NaN` فيُرسم شريطٌ بلا معنى.
+ * - **الفائقُ يُقصّ في الشريط لا في الرقم.** بلوغُ 320 من 200 (حدٌّ خُفّض بعد
+ *   الاستهلاك) يبقى «320 من 200» في النصّ وشريطاً ممتلئاً — لا 100% تُقرأ
+ *   «على الحدّ تماماً».
+ * - **`remaining` لا تنزل تحت الصفر** — «بقي لك -120» ليس رقماً يُقرأ.
+ */
+export function buildPlanUsageBar(usage: number, limit: number | null): PlanUsageBar {
+  if (limit === null) {
+    return { unbounded: true, unavailable: false, percent: 0, rawPercent: 0, tone: 'ok', remaining: null };
+  }
+  if (limit === 0) {
+    return { unbounded: false, unavailable: true, percent: 0, rawPercent: 0, tone: 'over', remaining: 0 };
+  }
+  const rawPercent = (usage / limit) * 100;
+  const percent = Math.max(0, Math.min(100, rawPercent));
+  const tone: PlanUsageBar['tone'] = rawPercent >= 100 ? 'over' : rawPercent >= 80 ? 'warning' : 'ok';
+  return {
+    unbounded: false,
+    unavailable: false,
+    percent,
+    rawPercent,
+    tone,
+    remaining: Math.max(0, limit - usage),
+  };
+}
