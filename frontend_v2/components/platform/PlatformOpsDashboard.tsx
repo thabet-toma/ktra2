@@ -27,6 +27,7 @@ import { IntegrationKeysPanel } from "./IntegrationKeysPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
 import { ProfitabilityPanel } from "./ProfitabilityPanel";
 import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
+import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
 
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
@@ -65,6 +66,9 @@ export const PlatformOpsDashboard: React.FC = () => {
     employeeId: null,
     employeeName: null,
   });
+
+  // ضبطُ مستهدفَي موظّف — الحقلان اللذان كانا يُعرضان ولا يُضبطان (210-ز).
+  const [targetsModal, setTargetsModal] = useState<{ employeeId: number; employeeName: string } | null>(null);
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -467,6 +471,7 @@ export const PlatformOpsDashboard: React.FC = () => {
                       employeeName: name,
                     })
                   }
+                  onEditTargets={(id, name) => setTargetsModal({ employeeId: id, employeeName: name })}
                 />
               ))}
             </div>
@@ -506,6 +511,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         employeeId={activityModal.employeeId}
         employeeName={activityModal.employeeName}
       />
+
+      {targetsModal && (
+        <EmployeeTargetsModal
+          employeeId={targetsModal.employeeId}
+          employeeName={targetsModal.employeeName}
+          onClose={() => setTargetsModal(null)}
+          onSaved={() => void loadDashboard()}
+        />
+      )}
         </>
       )}
     </div>

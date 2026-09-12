@@ -115,6 +115,8 @@ from .services import (
     request_performance_review,
     recapture_performance_after_accepted_review,
     resolve_performance_review,
+    set_employee_targets,
+    suggest_monthly_units_targets,
     list_employee_work_order_queue,
     log_platform_activity,
     list_work_order_comments,
@@ -388,6 +390,56 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
         return Response(list_employee_engaged_companies(request.user))
+
+    @action(detail=True, methods=["get", "patch"], url_path="targets")
+    def targets(self, request, pk=None):
+        """مستهدفا الموظّف: قراءتُهما لصاحبهما وللمدير، وضبطُهما للمدير وحدَه.
+
+        هذان الحقلان كانا بلا بابٍ في النظام كلِّه — لا شاشة ولا نقطة ولا `admin.py` —
+        فيُضبطان من الـshell أو لا يُضبطان. ومعنى ذلك أنّ مقامَ درجةِ كلّ موظّفٍ حقيقيٍّ
+        صفرٌ، وأنّ حارسَ طاقة الإسناد مُطفأٌ للجميع.
+
+        والضبطُ للمدير وحدَه: الموظّفُ الذي يخفض مقامَه يرفع درجتَه، ودرجتُه مالٌ في
+        المحفظة. أمّا القراءةُ فمشروعةٌ لصاحبها — `get_queryset` يضيّق غيرَ المدير على
+        صفّه، فلا يقرأ أحدٌ مستهدفَ غيره.
+
+        و`GET` يُرفق للمدير وحدَه ثلاثةَ مقاديرَ مقترحةٍ **مشتقّةٍ من إنتاجٍ وقع
+        فعلاً** (أشهرُ الموظّف المكتملة، أو توزيعُ زملائه إن كان جديداً) — لا
+        ثوابتَ مخترَعة؛ وتصل الموظّفَ نفسَه `null` لأنّ بديلَ الزملاء أرقامُ غيره.
+        """
+        employee = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if request.method.upper() == "PATCH":
+            if not is_manager:
+                return Response(
+                    {"detail": "ضبطُ المستهدفات لمدير العمليات وحده.", "code": "manager_only"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+            try:
+                employee = set_employee_targets(
+                    employee=employee,
+                    capacity_target=request.data.get("capacity_target"),
+                    monthly_units_target=request.data.get("monthly_units_target"),
+                    actor=request.user,
+                )
+            except PlatformOpsError as exc:
+                return _service_error(exc)
+
+        return Response(
+            {
+                "employee_id": employee.pk,
+                "employee_name": employee.user.username if employee.user else "",
+                # **`str` لا `Decimal` خامّاً**: هذه حمولةٌ مكتوبةٌ باليد لا تمرّ
+                # بمُسلسِل، ومُرمِّزُ DRF يحوّل `Decimal` إلى `float` — فيصل الواجهةَ
+                # `0.0` لا `"0.00"`، و`String.trim()` عليه يرمي في المتصفّح.
+                "capacity_target": str(employee.capacity_target),
+                "monthly_units_target": str(employee.monthly_units_target),
+                # **المقاديرُ للمدير وحدَه**: بديلُ الزملاء يشتقّها من إنتاج زملاءِ
+                # الموظّف، و§١٠ تمنع أرقامَ غيره عنه. فتصل الموظّفَ `null` لا رقماً.
+                "monthly_units_suggestion": suggest_monthly_units_targets(employee) if is_manager else None,
+            },
+            status=status.HTTP_200_OK,
+        )
 
     @action(detail=True, methods=["get"], url_path="performance")
     def performance(self, request, pk=None):

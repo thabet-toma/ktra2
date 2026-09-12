@@ -6,12 +6,14 @@ interface EmployeeCardProps {
   employee: PlatformDashboardEmployee;
   onDrilldown: (filter: { assignee: number; metric?: "active" | "overdue"; status?: string }) => void;
   onViewActivity: (employeeId: number, employeeName: string) => void;
+  onEditTargets: (employeeId: number, employeeName: string) => void;
 }
 
 export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   employee,
   onDrilldown,
   onViewActivity,
+  onEditTargets,
 }) => {
   const lastActiveBadge = getLastActiveBadge(employee.last_active_at);
   const isOverloaded = employee.active_work_orders_count > employee.capacity_target;
@@ -174,13 +176,24 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
           <span>←</span>
         </button>
 
-        <button
-          type="button"
-          onClick={() => onDrilldown({ assignee: employee.id })}
-          className="text-xs text-slate-500 hover:text-slate-800 transition"
-        >
-          كل الأوامر
-        </button>
+        <div className="flex items-center gap-3">
+          {/* الهدفُ أعلاه كان رقماً يُعرض ولا يُضبط: لا نقطةَ كتابةٍ له في النظام
+              كلِّه قبل 210-ز، فيبقى صفراً لكلّ موظّفٍ حقيقيّ. */}
+          <button
+            type="button"
+            onClick={() => onEditTargets(employee.id, employee.name)}
+            className="text-xs text-slate-500 hover:text-slate-800 transition"
+          >
+            ضبط المستهدفات
+          </button>
+          <button
+            type="button"
+            onClick={() => onDrilldown({ assignee: employee.id })}
+            className="text-xs text-slate-500 hover:text-slate-800 transition"
+          >
+            كل الأوامر
+          </button>
+        </div>
       </div>
     </div>
   );

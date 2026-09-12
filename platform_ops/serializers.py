@@ -63,6 +63,7 @@ class PlatformEmployeeSerializer(serializers.ModelSerializer):
             "email",
             "specialty",
             "capacity_target",
+            "monthly_units_target",
             "status",
             "created_at",
             "updated_at",

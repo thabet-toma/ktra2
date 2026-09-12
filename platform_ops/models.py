@@ -158,6 +158,23 @@ class PlatformEmployee(models.Model):
         default=Decimal("0.00"),
         validators=[MinValueValidator(Decimal("0.00"))],
         verbose_name="مستهدف السعة الموزون",
+        help_text=(
+            "طاقةُ الإسناد: تُقارَن بمجموع وحدات حِمل الشركات المرتبطة (١/٢/٣ للشركة) "
+            "وبعدد أوامر العمل النشطة في شريط التدخّل. صفرٌ يعني «لم تُضبط» لا «طاقةَ صفر»."
+        ),
+    )
+    monthly_units_target = models.DecimalField(
+        max_digits=10,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00"))],
+        verbose_name="مقام الإنجاز الشهري (وحدات)",
+        help_text=(
+            "سقفُ مقامِ محور «إنجاز العمل» بوحدات الكتالوج شهرياً. صفرٌ يعني «لم يُضبط» "
+            "فيكون المقامُ وحداتِ المُسنَد كلَّها. **لا يُخلط بـ`capacity_target`**: ذاك "
+            "يُقاس بالشركات الموزونة وبعدد الأوامر، وهذا بوحدات المستندات — سُلَّمان "
+            "لا يجتمعان في رقمٍ واحد، ورقمٌ صالحٌ لأحدهما يُعطِّل الآخر بصمت."
+        ),
     )
     status = models.CharField(
         max_length=20,

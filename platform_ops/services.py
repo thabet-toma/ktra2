@@ -4260,16 +4260,13 @@ def calculate_employee_pilot_performance(
     usage_qs = filter_local_date_range(usage_qs, "approved_at", date_from=start_date, date_to=end_date)
     approved_creditable_units = Decimal("0.00")
     for row in usage_qs.values("event_type").annotate(units_sum=Sum("units")):
-        amount = row["units_sum"] or Decimal("0.00")
-        if row["event_type"] == ServiceUsageEvent.EventType.USAGE:
-            approved_creditable_units += amount
-        else:
-            approved_creditable_units -= amount
+        approved_creditable_units += signed_usage_units(row["event_type"], row["units_sum"])
 
-    assigned_qs = WorkOrder.objects.filter(
-        assignee=employee, tenant_id__in=standard_tenant_ids,
-    ).exclude(status=WorkOrder.Status.WAITING_CUSTOMER)
-    assigned_qs = filter_local_date_range(assigned_qs, "received_at", date_from=start_date, date_to=end_date)
+    assigned_units_map, uncatalogued_map = assigned_eligible_units_by_employee(
+        [employee.pk],
+        {(employee.pk, tenant_id) for tenant_id in standard_tenant_ids},
+        date_from=start_date, date_to=end_date,
+    )
 
     # **المقامُ بالوحدات لا بعددِ الأوامر**: البسطُ مجموعُ `units` من دفتر الاستخدام،
     # فمقامٌ بعددِ الصفوف يقيس جنساً آخر — أمرُ عملٍ واحدٌ بعشرِ وحداتٍ يُنتج 1000%
@@ -4279,30 +4276,28 @@ def calculate_employee_pilot_performance(
     # مصدرَي الحقيقة. وروابطُ المستندات تُنشأ «تمهيداً للتسليم» و`deliverable` فيها
     # يُملأ لحظةَ التسليم — فهي نطاقُ العملِ المُسند لا أثرُ المُنجَز، ولذلك يبقى
     # عملٌ أُسند ولم يُسلَّم حاضراً في المقام كما يقتضي المحور.
-    assigned_wo_ids = list(assigned_qs.values_list("pk", flat=True))
-    catalog = get_active_service_unit_catalog()
-    entries_by_type = (
-        {entry.document_type: entry for entry in catalog.entries.all()} if catalog is not None else {}
-    )
-    assigned_eligible_units = Decimal("0.00")
-    uncatalogued_links = 0
-    if assigned_wo_ids:
-        for link in WorkOrderDocumentLink.objects.filter(work_order_id__in=assigned_wo_ids).only(
-            "document_type", "line_count", "complexity",
-        ):
-            entry = entries_by_type.get(link.document_type)
-            if entry is None:
-                # لا يُطرح صامتاً: بندٌ بلا نظيرٍ في الكتالوج يصغّر المقامَ فيرفع الدرجة،
-                # فيُعدُّ ويُعرض مع النتيجة ليُقرأ النقصُ بدل أن يُجمَّل.
-                uncatalogued_links += 1
-                continue
-            assigned_eligible_units += entry.units_for(link.line_count, link.complexity)
+    assigned_eligible_units = assigned_units_map[employee.pk]
+    uncatalogued_links = uncatalogued_map[employee.pk]
 
-    capacity_target = employee.capacity_target or Decimal("0.00")
-    if capacity_target > Decimal("0.00"):
-        eligible_target_units = min(capacity_target, assigned_eligible_units)
+    # **المقياسُ المجمَّدُ يغلب الحيَّ**: لقطةٌ تُعاد (`recapture`) تُحسب على المستهدَف
+    # الذي كان ساريَ الشهرَ نفسَه لا على اليوم — وإلاّ رفع ضبطُ مستهدَفٍ اليوم درجةَ
+    # شهرٍ أُغلق ودُفع، وهو بعينه «لا أثر رجعي» (210-د). والقراءةُ الحيّةُ للشهر
+    # الجاري تقرأ الحقلَ لأنّه لم يُجمَّد بعد.
+    frozen_target = (policy_dict or {}).get("monthly_units_target")
+    if frozen_target is not None:
+        employee_units_target = Decimal(str(frozen_target))
     else:
-        # capacity_target == 0 يعني «لم تُضبط بعد» لا «طاقة صفر» (قرار 210-B).
+        employee_units_target = employee.monthly_units_target or Decimal("0.00")
+
+    # **مقامُ الوحدات له حقلُه، لا `capacity_target`.** ذاك الحقلُ يُقاس بمجموع وحدات
+    # حِمل الشركات المرتبطة (١/٢/٣ للشركة) وبعدد أوامر العمل النشطة — أرقامٌ آحادُها
+    # عشرات، ووحداتُ المستندات في الشهر مئات. فرقمٌ صالحٌ لأحد السُلَّمين يُعطّل الآخر
+    # بصمت: قيمةُ إسنادٍ معقولةٌ (١٠) تقصّ المقامَ إلى ١٠ وحداتٍ فترفع الدرجة، وقيمةُ
+    # وحداتٍ معقولةٌ (٢٠٠) تُطفئ حارسَ الإسناد وكاشفَ الحمل الزائد إلى الأبد (210-ز).
+    if employee_units_target > Decimal("0.00"):
+        eligible_target_units = min(employee_units_target, assigned_eligible_units)
+    else:
+        # صفرٌ يعني «لم يُضبط بعد» لا «طاقة صفر» (قرار 210-B، منقولٌ إلى حقله في 210-ز).
         eligible_target_units = assigned_eligible_units
 
     completion_numerator = float(max(Decimal("0.00"), approved_creditable_units))
@@ -4530,7 +4525,13 @@ def capture_pilot_performance_snapshot(
     if policy_dict is None:
         if evaluation_policy is None:
             evaluation_policy = get_active_performance_evaluation_policy(specialty=locked_emp.specialty)
-        policy_dict = _pilot_policy_dict(evaluation_policy, locked_emp.specialty)
+        # **المستهدَفُ جزءٌ من مقياس الشهر فيُجمَّد معه.** الأوزانُ وحدَها لا تكفي:
+        # مقامُ محور الإنجاز مقصوصٌ بـ`monthly_units_target`، فتركُه حيّاً يعني أنّ
+        # ضبطَه اليومَ يُعيد تسعيرَ كلّ شهرٍ يُعاد التقاطُه — «لا أثر رجعي» (210-د).
+        policy_dict = {
+            **_pilot_policy_dict(evaluation_policy, locked_emp.specialty),
+            "monthly_units_target": str(locked_emp.monthly_units_target or Decimal("0.00")),
+        }
 
     perf_result = calculate_employee_pilot_performance(
         employee=locked_emp, period_year=period_year, period_month=period_month, policy_dict=policy_dict,
@@ -7919,12 +7920,25 @@ def _tenant_load_units(tenant) -> int:
     return _tenant_load_units_map([tenant_id])[tenant_id]
 
 
+def signed_usage_units(event_type, units) -> Decimal:
+    """إشارةُ وحدات حدث استخدامٍ — تُقرأ من **نوعه** لا من رقمه.
+
+    `REVERSAL` يخزّن وحداتِه موجبةً كالأصل تماماً (`reverse_usage_event`)، فجمعٌ
+    ساذجٌ يَعدّ العكسَ استهلاكاً ثانياً. والقاعدةُ تُقرأ في أكثر من موضعٍ (محورُ
+    الإنجاز، اقتراحُ المقام، الربحيّة) فعُرّفت مرّةً واحدةً تُستدعى.
+    """
+    amount = Decimal(units or 0)
+    return amount if event_type == ServiceUsageEvent.EventType.USAGE else -amount
+
+
 def _would_exceed_capacity(capacity_target, projected_load) -> bool:
     """هل يتجاوز الحِملُ المتوقَّع طاقةَ الموظف المستهدفة؟
 
     `capacity_target` صفراً يعني «لم تُضبط بعد» لا «طاقته صفر» — وهو **افتراضُ
-    النموذج** ولا واجهةَ كتابةٍ تضبطه (`PlatformEmployeeViewSet` للقراءة فقط)،
-    وهو معناه نفسُه في حجم العيّنة (`_axis_*`) وفي كشف الحمل الزائد بشريط التدخّل.
+    النموذج**، ومعناه نفسُه في مقام «الإنتاجية المنجزة» (#207) وفي كشف الحمل
+    الزائد بشريط التدخّل. وتُضبط منذ 210-ز عبر
+    `set_employee_targets` (`PATCH /employees/{id}/targets/`) لا من الـshell وحدَه؛
+    أمّا مقامُ محور الإنجاز فله حقلُه `monthly_units_target` على سُلَّمٍ آخر.
     بغير هذا يُرفض كلُّ إسنادٍ لكلّ موظفٍ حقيقيٍّ برمز `capacity_exceeded` ويُطلب
     سببُ تجاوزٍ في كلّ مرة — والاختبارات وحدها تنجو لأنها تضبط الطاقة صراحةً.
     """
@@ -7959,6 +7973,219 @@ def employee_capacity_snapshot(employee, *, load_units_by_tenant: dict[int, int]
         "remaining": Decimal(capacity_target) - Decimal(load),
         "active_engagements_count": len(active_tenant_ids),
     }
+
+
+#: كم شهراً مكتملاً يُقرأ لاشتقاق مقاديرِ مقام الإنجاز الثلاثة.
+MONTHLY_UNITS_TARGET_LOOKBACK_MONTHS = 3
+
+
+def assigned_eligible_units_by_employee(
+    employee_ids, employee_tenant_pairs, *, date_from, date_to,
+) -> tuple[dict[int, Decimal], dict[int, int]]:
+    """وحداتُ العمل **المُسنَد** لكلّ موظّفٍ في مدىً — مقامُ محور الإنجاز عينُه.
+
+    مصدرُ حقيقةٍ واحدٌ يستدعيه المحورُ نفسُه واقتراحُ المستهدَف معاً: اقتراحٌ
+    يُشتقّ من البسط (الوحداتِ المعتمدة) بدل المقام يقع دائماً **دونه**، فيَربِط
+    عبر `min()` ويرفع كلَّ درجةٍ بلا عملٍ إضافيٍّ واحد.
+
+    والرابطُ بلا نظيرٍ في الكتالوج **يُعدّ ولا يُطرح صامتاً**: طرحُه يصغّر المقامَ
+    فيرفع الدرجة، فيُعرض العددُ مع النتيجة ليُقرأ النقصُ بدل أن يُجمَّل.
+    """
+    ids = list(employee_ids)
+    units: dict[int, Decimal] = {employee_id: Decimal("0.00") for employee_id in ids}
+    uncatalogued: dict[int, int] = {employee_id: 0 for employee_id in ids}
+    pairs = set(employee_tenant_pairs)
+    if not ids or not pairs:
+        return units, uncatalogued
+
+    assigned_qs = WorkOrder.objects.filter(
+        assignee_id__in=ids, tenant_id__in={tenant_id for _, tenant_id in pairs},
+    ).exclude(status=WorkOrder.Status.WAITING_CUSTOMER)
+    assigned_qs = filter_local_date_range(assigned_qs, "received_at", date_from=date_from, date_to=date_to)
+    # الشركةُ تُقابَل بصاحبها: مجموعةُ الشركات اتّحادُ الجميع، فبلا هذا الشرط يُنسب
+    # عملُ شركةٍ إلى موظّفٍ لا ارتباطَ `standard` له بها.
+    owner_by_work_order = {
+        pk: assignee_id
+        for pk, assignee_id, tenant_id in assigned_qs.values_list("pk", "assignee_id", "tenant_id")
+        if (assignee_id, tenant_id) in pairs
+    }
+    if not owner_by_work_order:
+        return units, uncatalogued
+
+    catalog = get_active_service_unit_catalog()
+    entries_by_type = (
+        {entry.document_type: entry for entry in catalog.entries.all()} if catalog is not None else {}
+    )
+    for link in WorkOrderDocumentLink.objects.filter(work_order_id__in=owner_by_work_order).only(
+        "work_order_id", "document_type", "line_count", "complexity",
+    ):
+        owner = owner_by_work_order[link.work_order_id]
+        entry = entries_by_type.get(link.document_type)
+        if entry is None:
+            uncatalogued[owner] += 1
+            continue
+        units[owner] += entry.units_for(link.line_count, link.complexity)
+    return units, uncatalogued
+
+
+def _monthly_units_samples(employee_ids, months) -> dict[int, list[Decimal]]:
+    """وحداتُ العمل **المُسنَد** لكلّ موظّفٍ في كلّ شهرٍ من قائمةٍ.
+
+    المستهدَفُ سقفٌ على **المقام**، فعيّنتُه من جنس المقام: وحداتِ المُسنَد لا
+    وحداتِ المعتمَد. والمعتمَدُ بسطٌ يقع دائماً دون المقام، فاقتراحٌ مبنيٌّ عليه
+    يَربِط عبر `min()` في كلّ شهرٍ ويرفع كلَّ درجةٍ بلا عملٍ إضافيٍّ واحد.
+
+    والشركاتُ محصورةٌ بارتباطات `standard` لكلّ موظّفٍ على حدةٍ كما في المحور (§٥
+    تستبعد `onboarding`). والاستعلامُ مجمَّعٌ للجميع لأنّ بديلَ الزملاء يمرّ على
+    كلّ موظّفٍ نشطٍ في كلّ نداء `GET`، فحلقةٌ لكلّ موظّفٍ تضرب الاستعلاماتِ في عددهم.
+    """
+    ids = list(employee_ids)
+    samples: dict[int, list[Decimal]] = {employee_id: [] for employee_id in ids}
+    if not ids:
+        return samples
+    pairs = set(
+        Engagement.objects.filter(
+            employee_id__in=ids, kind=Engagement.Kind.STANDARD,
+        ).values_list("employee_id", "tenant_id")
+    )
+    if not pairs:
+        return samples
+
+    for year, month in months:
+        totals, _ = assigned_eligible_units_by_employee(
+            ids, pairs,
+            date_from=datetime.date(year, month, 1),
+            date_to=datetime.date(year, month, calendar.monthrange(year, month)[1]),
+        )
+        for employee_id, total in totals.items():
+            if total > Decimal("0.00"):
+                samples[employee_id].append(total)
+    return samples
+
+
+def _complete_months_before(year: int, month: int, count: int) -> list[tuple[int, int]]:
+    """الأشهرُ المكتملةُ السابقةُ لشهرٍ — الشهرُ الجاري ناقصٌ فلا يُقاس عليه."""
+    months: list[tuple[int, int]] = []
+    y, m = year, month
+    for _ in range(count):
+        m -= 1
+        if m == 0:
+            y, m = y - 1, 12
+        months.append((y, m))
+    return months
+
+
+def suggest_monthly_units_targets(employee, *, at=None) -> dict:
+    """ثلاثةُ مقاديرَ لمقام الإنجاز، **مشتقّةٌ من إنتاجٍ وقع فعلاً** لا من ثوابتَ مخترَعة.
+
+    مقامُ درجةٍ رقمٌ يقرّر راتباً وترتيباً، ورقمٌ مخترَعٌ فيه يصنع درجةً مخترَعة.
+    فالمقاديرُ تُقرأ من أشهر الموظّف المكتملة **بوحدات العمل المُسنَد** (جنسِ المقام
+    نفسِه لا جنسِ البسط): الأدنى أضعفُ شهرٍ، والمتوسّط وسيطُها، والأعلى أقواها.
+    فـ«الأعلى» يعني «كشهرِك الأقوى» — أشدُّها لا أيسرُها — لا رقماً من الهواء.
+
+    وحين لا تاريخَ للموظّف بعد — أوّلُ شهرٍ له — تُشتقّ من توزيع زملائه للأشهر
+    نفسِها (`basis="peers"`). وإن كانت المنصّةُ كلُّها بلا تاريخ، تعود
+    `targets=None` بـ`basis="no_history"`: **لا تُخترع أرقام** — يكتب المديرُ رقمَه
+    بيده أو يترك الحقلَ صفراً فيكون المقامُ وحداتِ المُسنَد كلَّها.
+    """
+    moment = at or timezone.localtime()
+    months = _complete_months_before(moment.year, moment.month, MONTHLY_UNITS_TARGET_LOOKBACK_MONTHS)
+    employee_id = getattr(employee, "pk", employee)
+
+    samples = _monthly_units_samples([employee_id], months)[employee_id]
+    basis = "self"
+    if not samples:
+        basis = "peers"
+        peer_ids = list(
+            PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE)
+            .exclude(pk=employee_id).values_list("pk", flat=True)
+        )
+        for peer_samples in _monthly_units_samples(peer_ids, months).values():
+            samples.extend(peer_samples)
+    if not samples:
+        return {
+            "basis": "no_history",
+            "months": [{"year": year, "month": month} for (year, month) in months],
+            "targets": None,
+        }
+
+    ordered = sorted(samples)
+    middle = ordered[len(ordered) // 2] if len(ordered) % 2 else (
+        (ordered[len(ordered) // 2 - 1] + ordered[len(ordered) // 2]) / Decimal("2")
+    )
+
+    def quantize(value):
+        return Decimal(value).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return {
+        "basis": basis,
+        "months": [{"year": year, "month": month} for (year, month) in months],
+        "targets": {
+            "low": float(quantize(ordered[0])),
+            "medium": float(quantize(middle)),
+            "high": float(quantize(ordered[-1])),
+        },
+        "sample_count": len(ordered),
+    }
+
+
+def set_employee_targets(
+    *, employee, capacity_target=None, monthly_units_target=None, actor=None,
+) -> PlatformEmployee:
+    """ضبطُ مستهدفَي الموظّف — الحقلان الوحيدان اللذان لم يكن لهما بابٌ في النظام.
+
+    كلاهما كان يُملأ من الـshell وحدَه: `PlatformEmployeeViewSet` للقراءة فقط، ولا
+    `admin.py` في التطبيق، ولا حقلَ تحريرٍ في أيّ شاشة — فمقامُ درجةِ الموظّف وطاقةُ
+    إسناده صفرٌ لكلّ موظّفٍ حقيقيّ إلى الأبد.
+
+    **ولا يُمرَّران معاً بلا تمييز**: `capacity_target` يُقاس بالشركات الموزونة وبعدد
+    الأوامر، و`monthly_units_target` بوحدات المستندات — فكلٌّ يُضبط وحدَه ويُسجَّل
+    وحدَه، ومن يمرّر `None` لا يمسّ حقلَه.
+
+    وتغييرُ أيٍّ منهما يغيّر درجةً ومحفظةً وشريطَ تدخّل، فلا يمرّ بلا أثر: `قبلُ وبعدُ`
+    في `PlatformActivityLog`.
+    """
+    updates: dict[str, Decimal] = {}
+    for field_name, raw in (
+        ("capacity_target", capacity_target),
+        ("monthly_units_target", monthly_units_target),
+    ):
+        if raw is None:
+            continue
+        try:
+            value = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            raise PlatformOpsError("invalid_target", f"قيمةُ «{field_name}» ليست رقماً.")
+        if value < Decimal("0.00"):
+            raise PlatformOpsError("invalid_target", "المستهدَفُ لا يكون سالباً.")
+        updates[field_name] = value.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    if not updates:
+        raise PlatformOpsError("no_target_provided", "لم يُمرَّر أيُّ مستهدَفٍ لضبطه.")
+
+    with transaction.atomic():
+        locked = PlatformEmployee.objects.select_for_update().get(pk=getattr(employee, "pk", employee))
+        before = {name: getattr(locked, name) for name in updates}
+        for name, value in updates.items():
+            setattr(locked, name, value)
+        locked.save(update_fields=[*updates, "updated_at"])
+
+        # داخلَ المعاملة: سجلٌّ يفشل بعد حفظٍ مُعتمَدٍ يترك مقاماً تغيّر بلا
+        # «قبلُ وبعدُ»، فتصير كلُّ درجةٍ حُسبت قبله غيرَ قابلةٍ للمراجعة.
+        log_platform_activity(
+            employee=locked,
+            action=PlatformActivityLog.Action.OTHER,
+            description="ضبطُ مستهدفات الموظّف",
+            entity_type="employee_targets",
+            entity_id=locked.pk,
+            details={
+                "operation": "set_employee_targets",
+                "actor_user_id": getattr(actor, "pk", None),
+                "before": {name: str(value) for name, value in before.items()},
+                "after": {name: str(value) for name, value in updates.items()},
+            },
+        )
+    return locked
 
 
 def list_assignment_candidates(*, tenant) -> list[dict]:
@@ -8292,11 +8519,7 @@ def _ledger_chargeable_total(subscription: ServiceSubscription, *, exclude_event
         qs = qs.exclude(pk=exclude_event_id)
     total = Decimal("0.00")
     for row in qs.values("event_type").annotate(units_sum=Sum("units")):
-        amount = row["units_sum"] or Decimal("0.00")
-        if row["event_type"] == ServiceUsageEvent.EventType.USAGE:
-            total += amount
-        else:
-            total -= amount
+        total += signed_usage_units(row["event_type"], row["units_sum"])
     return total
 
 
@@ -8927,9 +9150,7 @@ def _chargeable_units_in_month(tenant_ids, year: int, month: int) -> dict:
     )
     totals: dict = {}
     for tenant_id, event_type, units in qs.values_list("tenant_id", "event_type", "units"):
-        amount = Decimal(str(units or 0))
-        sign = 1 if event_type == ServiceUsageEvent.EventType.USAGE else -1
-        totals[tenant_id] = totals.get(tenant_id, Decimal("0")) + sign * amount
+        totals[tenant_id] = totals.get(tenant_id, Decimal("0")) + signed_usage_units(event_type, units)
     return totals
 
 
@@ -9058,11 +9279,10 @@ def compute_customer_profitability(
     employee_total_units: dict = {}
     tenant_employee_units: dict = {}
     for tenant_id, employee_id, units, chargeable, creditable, event_type in events:
-        # **العكسُ يطرح لا يضيف**: `REVERSAL` يخزّن وحداتِه موجبةً كالأصل تماماً
-        # (`reverse_service_usage_event` ينسخ `units` كما هي)، فجمعُها بلا إشارةٍ
-        # كان يُظهر شركةً عُكست وحداتُها وقد استهلكت ضِعفَها، ويشحن عليها تجاوزاً
-        # لم يقع. والإشارةُ هنا هي نفسُها إشارةُ `_net_units_for_...` في الدفتر.
-        amount = Decimal(str(units or 0)) * (1 if event_type == ServiceUsageEvent.EventType.USAGE else -1)
+        # **العكسُ يطرح لا يضيف**: `REVERSAL` يخزّن وحداتِه موجبةً كالأصل تماماً،
+        # فجمعُها بلا إشارةٍ كان يُظهر شركةً عُكست وحداتُها وقد استهلكت ضِعفَها،
+        # ويشحن عليها تجاوزاً لم يقع. والقاعدةُ في `signed_usage_units` وحدَها.
+        amount = signed_usage_units(event_type, units)
         if chargeable:
             chargeable_units[tenant_id] = chargeable_units.get(tenant_id, Decimal("0")) + amount
         if creditable and employee_id:

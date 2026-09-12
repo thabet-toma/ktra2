@@ -158,6 +158,56 @@ class PilotScenarioBase(TestCase):
         self.product = Product.objects.create(tenant=self.tenant, sku="PILOT-SVC-1", name_ar="خدمة pilot", is_service=True)
         self._invoice_seq = 0
 
+    # بيئةُ وزنِ السطر الموجب: كانت داخل `PilotCompletionDenominatorInUnitsTest` وحدَه،
+    # فلمّا لزمت اختباراتِ المستهدفات (210-ز) رُفعت إلى الأساس — لأنّ نسخَها هناك يفتح
+    # مصدرَي حقيقةٍ لبيئةٍ واحدة، ووراثةَ صنفِ اختبارٍ تُعيد تشغيلَ اختباراتِه في وارثه.
+    def _activate_multi_unit_catalog(self, *, per_line_weight=Decimal("0.50")):
+        draft = create_service_unit_catalog_draft(actor=self.admin)
+        update_service_unit_catalog_entries(
+            catalog=draft,
+            entries=[{
+                "document_type": ServiceDocumentType.SALES_INVOICE,
+                "base_units": Decimal("1.00"), "per_line_weight": per_line_weight,
+            }],
+            actor=self.admin,
+        )
+        return activate_service_unit_catalog(
+            catalog=draft, actor=self.admin, activation_reason="وزنُ سطرٍ موجبٌ للوحدات",
+        )
+
+    def _work_order_with_lines(self, *, received_at, line_count, approve):
+        """أمرُ عملٍ بفاتورةٍ ذاتِ بنودٍ متعددة؛ `approve=False` يتركه مُسنَداً غيرَ مُسلَّم."""
+        self._invoice_seq += 1
+        wo = create_work_order(
+            tenant=self.tenant, title=f"أمر عمل وحدات {self._invoice_seq}", received_at=received_at,
+        )
+        wo = assign_work_order(work_order=wo, assignee=self.employee)
+        invoice = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number=f"INV-UNITS-{self._invoice_seq}", customer=self.customer,
+            invoice_date=received_at.date(), currency=self.currency,
+        )
+        for _ in range(line_count):
+            SalesInvoiceLine.objects.create(
+                tenant=self.tenant, invoice=invoice, product=self.product,
+                quantity=Decimal("1"), unit_price=Decimal("10"),
+            )
+        link = link_work_order_document(
+            work_order=wo, document_type=ServiceDocumentType.SALES_INVOICE, document_id=invoice.pk,
+        )
+        # العددُ يُرصد من الفاتورة نفسِها لا يُصدَّق تصريحاً؛ فتوقُّعُ الوحدات أدناه
+        # **مشتقٌّ** من هذا الرقم لا مُختَرَعٌ في رأس الاختبار.
+        self.assertEqual(link.line_count, line_count)
+        if not approve:
+            return wo, link
+        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.SCREENING, now=received_at)
+        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.DATA_ENTRY, now=received_at)
+        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.REVIEW, now=received_at)
+        deliverable = submit_work_order_deliverable(
+            work_order=wo, document_link_ids=[link.pk], submitted_by=self.staff_user,
+        )
+        approve_work_order_deliverable_with_usage(deliverable=deliverable, reviewed_by=self.admin)
+        return wo, link
+
     def _approve_one_deliverable(self, *, received_at, reject=False, rejection_category=""):
         """يُنتج أمرَ عملٍ واحداً معتمَداً (أو مرفوضاً) بحدث استخدامٍ واحد إن اعتُمد."""
         self._invoice_seq += 1
@@ -229,7 +279,7 @@ class PilotPerformanceCalculationTest(PilotScenarioBase):
             employee=self.employee, period_year=now.year, period_month=now.month,
         )
         completion_axis = result["axes"]["task_completion"]
-        # capacity_target == 0 يعني «لم تُضبط بعد» — المقام هو العمل المسنَد وحده (2).
+        # `monthly_units_target == 0` يعني «لم يُضبط بعد» — المقام هو العمل المسنَد وحده (2).
         self.assertEqual(completion_axis["denominator"], 2.0)
         self.assertEqual(completion_axis["numerator"], 2.0)
 
@@ -855,52 +905,6 @@ class PilotCompletionDenominatorInUnitsTest(PilotScenarioBase):
     النسخةَ نفسَها فلا يُصنَع فرقٌ مفتعلٌ بين نسختين يُنجح الاختبارَ لغير سببه.
     """
 
-    def _activate_multi_unit_catalog(self, *, per_line_weight=Decimal("0.50")):
-        draft = create_service_unit_catalog_draft(actor=self.admin)
-        update_service_unit_catalog_entries(
-            catalog=draft,
-            entries=[{
-                "document_type": ServiceDocumentType.SALES_INVOICE,
-                "base_units": Decimal("1.00"), "per_line_weight": per_line_weight,
-            }],
-            actor=self.admin,
-        )
-        return activate_service_unit_catalog(
-            catalog=draft, actor=self.admin, activation_reason="وزنُ سطرٍ موجبٌ للوحدات",
-        )
-
-    def _work_order_with_lines(self, *, received_at, line_count, approve):
-        """أمرُ عملٍ بفاتورةٍ ذاتِ بنودٍ متعددة؛ `approve=False` يتركه مُسنَداً غيرَ مُسلَّم."""
-        self._invoice_seq += 1
-        wo = create_work_order(
-            tenant=self.tenant, title=f"أمر عمل وحدات {self._invoice_seq}", received_at=received_at,
-        )
-        wo = assign_work_order(work_order=wo, assignee=self.employee)
-        invoice = SalesInvoice.objects.create(
-            tenant=self.tenant, invoice_number=f"INV-UNITS-{self._invoice_seq}", customer=self.customer,
-            invoice_date=received_at.date(), currency=self.currency,
-        )
-        for _ in range(line_count):
-            SalesInvoiceLine.objects.create(
-                tenant=self.tenant, invoice=invoice, product=self.product,
-                quantity=Decimal("1"), unit_price=Decimal("10"),
-            )
-        link = link_work_order_document(
-            work_order=wo, document_type=ServiceDocumentType.SALES_INVOICE, document_id=invoice.pk,
-        )
-        # العددُ يُرصد من الفاتورة نفسِها لا يُصدَّق تصريحاً؛ فتوقُّعُ الوحدات أدناه
-        # **مشتقٌّ** من هذا الرقم لا مُختَرَعٌ في رأس الاختبار.
-        self.assertEqual(link.line_count, line_count)
-        if not approve:
-            return wo, link
-        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.SCREENING, now=received_at)
-        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.DATA_ENTRY, now=received_at)
-        wo = transition_work_order_status(work_order=wo, target_status=WorkOrder.Status.REVIEW, now=received_at)
-        deliverable = submit_work_order_deliverable(
-            work_order=wo, document_link_ids=[link.pk], submitted_by=self.staff_user,
-        )
-        approve_work_order_deliverable_with_usage(deliverable=deliverable, reviewed_by=self.admin)
-        return wo, link
 
     def test_half_the_assigned_units_scores_fifty_not_a_capped_hundred(self):
         self._activate_multi_unit_catalog()
@@ -922,8 +926,10 @@ class PilotCompletionDenominatorInUnitsTest(PilotScenarioBase):
 
     def test_work_beyond_capacity_is_surfaced_not_folded_into_a_hundred(self):
         self._activate_multi_unit_catalog()
-        self.employee.capacity_target = Decimal("1.00")
-        self.employee.save(update_fields=["capacity_target"])
+        # حقلُ المقام هو `monthly_units_target` لا `capacity_target`: ذاك يُقاس
+        # بالشركات الموزونة وبعدد الأوامر، فقيمةٌ صالحةٌ له تقصّ هذا المقامَ بصمت (210-ز).
+        self.employee.monthly_units_target = Decimal("1.00")
+        self.employee.save(update_fields=["monthly_units_target"])
         now = timezone.now()
         self._work_order_with_lines(
             received_at=now - datetime.timedelta(minutes=5), line_count=3, approve=True,

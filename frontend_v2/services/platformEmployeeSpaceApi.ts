@@ -15,7 +15,10 @@ export interface MyPlatformEmployeeProfile {
   username: string;
   email: string;
   specialty: string;
+  /** طاقةُ الإسناد — بالشركات الموزونة وبعدد الأوامر. */
   capacity_target: string;
+  /** مقامُ محور الإنجاز — بوحدات الكتالوج شهرياً؛ سُلَّمٌ آخرُ لا يُخلط بما فوقه. */
+  monthly_units_target: string;
   status: PlatformEmployeeStatus;
   created_at: string;
   updated_at: string;
