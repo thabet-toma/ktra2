@@ -2430,3 +2430,143 @@ tbody td {
     color: #666;
   }
 } 
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   قشرةُ سطح المنصّة — السماويّ (#211 م٣)
+   ═══════════════════════════════════════════════════════════════════════════
+   بقرار المالك: السماويُّ يغطّي **كامل** موديول المنصّة (لوحةُ السوبر أدمن ·
+   بابُ المتابعة · مساحةُ الموظّف · الاجتماعات · الغرفة) ولا يتجاوزه إلى
+   شاشات شركات الزبائن.
+
+   **والتنفيذُ بإعادة تعريف الرموز لا بتعديل المكوّنات**: كلُّ مكوّنٍ في
+   المستودع يقرأ `var(--color-primary)` أصلاً (ومنه أدواتُ Tailwind v4 التي
+   تُترجَم إلى المتغيّر نفسِه)، فإعادةُ تعريفه على الغلاف تصبغ الشجرةَ كلَّها
+   بلا لمسِ ملفٍّ واحدٍ من ملفّات المكوّنات — ولا تسرّب حرفاً واحداً خارج
+   الغلاف. البديلُ (تمريرُ أصنافٍ سماويّةٍ يدوياً في كلّ مكوّن) يعني تعديلَ
+   عشرات الملفّات المحجوزة، ويترك كلَّ مكوّنٍ جديدٍ أزرقَ حتى يتذكّره أحد.
+
+   والقيمُ مأخوذةٌ من نماذج المالك البصريّة لا مخترَعة. */
+.platform-surface {
+  --color-primary: #1fa3e8;
+  --color-primary-hover: #0e85c4;
+  --color-primary-emphasis: #0b6fa4;
+  --color-primary-foreground: #ffffff;
+
+  --color-surface-2: #f2f9fe;
+  --color-surface-3: #e6f4fd;
+  --color-border: #d7ebf9;
+
+  /* رموزٌ لا نظيرَ لها في الجذر — خاصّةٌ بسطح المنصّة وحدَه. */
+  --pf-canvas: #eaf6fd;           /* أرضيّةُ الصفحة خلف البطاقات */
+  --pf-glow: #38bdf8;             /* توهّجُ الغرفة والحوافّ الحيّة */
+  --pf-hot-from: #e8455f;         /* بطاقةُ الرقم الكبير (مبيعاتُ اليوم) */
+  --pf-hot-to: #f2789a;
+
+  /* أضواءُ الحالة الثلاثة — معناها ثابتٌ في الغرفة وفي كلّ بطاقةِ موظّف. */
+  --pf-online: #22c55e;
+  --pf-meeting: #f59e0b;
+  --pf-offline: #ef4444;
+
+  background: var(--pf-canvas);
+  color: var(--color-text);
+}
+
+/* الوضعُ الداكن: تُعاد صياغةُ الأرضيّة والحدّ وحدَهما، ويُفتَّح السماويُّ كي
+   يبقى مقروءاً فوق سطحٍ داكن — كما فُتِّح `--color-primary-emphasis` في الجذر
+   وللسبب نفسِه بالضبط. */
+.dark .platform-surface {
+  --color-primary: #38bdf8;
+  --color-primary-hover: #0ea5e9;
+  --color-primary-emphasis: #7dd3fc;
+  --color-primary-foreground: #06283a;
+
+  --color-surface-2: #10202e;
+  --color-surface-3: #16304333;
+  --color-border: #1e3f57;
+
+  --pf-canvas: #071a26;
+  --pf-glow: #22d3ee;
+}
+
+/* ── سُلَّما اللون داخل سطح المنصّة ───────────────────────────────────────────
+   شاشاتُ المنصّة مكتوبةٌ بأدوات Tailwind الحرفيّة — 864 استعمالاً لـslate/blue
+   مقابل 14 للرموز الدلاليّة — فإعادةُ تعريف `--color-primary` وحدَها ما كانت
+   لتصبغ منها إلاّ أربعةَ عشرَ موضعاً.
+
+   **والطريقُ المباشرُ مسدودٌ بحكم الأداة، لا بالرأي**: الأداةُ تُترجَم إلى
+   `background-color: var(--color-slate-50)`، لكنّ Tailwind v4 **يحذف** أيّ
+   `--color-*` يُعرَّف خارج `@theme` — جُرِّب فلم تصل الكتلةُ إلى الـCSS المخدوم
+   إطلاقاً (0 مطابقة في المخرَج). فلم يبقَ إلاّ تجاوزُ الأدوات أنفسِها داخلَ
+   الغلاف، بقيمٍ حرفيّةٍ لا بمتغيّرات النطاق المحجوز.
+
+   والتجاوزُ **خارجَ الطبقات عمداً**: أدواتُ Tailwind تسكن `@layer utilities`،
+   والقاعدةُ غيرُ المُطبَّقة تغلب المُطبَّقةَ مهما تساوت النوعيّة — وهي الوسيلةُ
+   الوحيدةُ لصبغ ملفّاتٍ محجوزةٍ لمهمّةٍ أخرى بلا لمسها.
+
+   والقائمةُ **مسحٌ للمستعمَل فعلاً** لا تخمين؛ فصنفٌ جديدٌ خارجَها يبقى على
+   لونه الأصليّ — وذلك مقصود: يُرى فيُضاف، ولا يُصبَغ ما لم يُقصد. */
+
+.platform-surface .bg-blue-100 { background-color: oklch(95.1% 0.026 236.824); }
+.platform-surface .bg-blue-50 { background-color: oklch(97.7% 0.013 236.62); }
+.platform-surface .bg-blue-50\/40 { background-color: color-mix(in oklab, oklch(97.7% 0.013 236.62) 40%, transparent); }
+.platform-surface .bg-blue-50\/70 { background-color: color-mix(in oklab, oklch(97.7% 0.013 236.62) 70%, transparent); }
+.platform-surface .bg-blue-600 { background-color: oklch(58.8% 0.158 241.966); }
+.platform-surface .bg-blue-700 { background-color: oklch(50% 0.134 242.749); }
+.platform-surface .bg-blue-900\/60 { background-color: color-mix(in oklab, oklch(39.1% 0.09 240.876) 60%, transparent); }
+.platform-surface .bg-blue-950\/30 { background-color: color-mix(in oklab, oklch(29.3% 0.066 243.157) 30%, transparent); }
+.platform-surface .bg-sky-100 { background-color: oklch(95.1% 0.026 236.824); }
+.platform-surface .bg-sky-50 { background-color: oklch(97.7% 0.013 236.62); }
+.platform-surface .bg-sky-500\/10 { background-color: color-mix(in oklab, oklch(68.5% 0.169 237.323) 10%, transparent); }
+.platform-surface .bg-sky-600 { background-color: oklch(58.8% 0.158 241.966); }
+.platform-surface .bg-sky-700 { background-color: oklch(50% 0.134 242.749); }
+.platform-surface .bg-slate-100 { background-color: oklch(96.2% 0.016 232); }
+.platform-surface .bg-slate-200 { background-color: oklch(92.5% 0.028 232); }
+.platform-surface .bg-slate-50 { background-color: oklch(98.2% 0.008 232); }
+.platform-surface .bg-slate-50\/60 { background-color: color-mix(in oklab, oklch(98.2% 0.008 232) 60%, transparent); }
+.platform-surface .bg-slate-50\/70 { background-color: color-mix(in oklab, oklch(98.2% 0.008 232) 70%, transparent); }
+.platform-surface .bg-slate-700 { background-color: oklch(41% 0.058 232); }
+.platform-surface .bg-slate-800 { background-color: oklch(31% 0.05 232); }
+.platform-surface .bg-slate-800\/40 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 40%, transparent); }
+.platform-surface .bg-slate-800\/60 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 60%, transparent); }
+.platform-surface .bg-slate-800\/80 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 80%, transparent); }
+.platform-surface .bg-slate-900 { background-color: oklch(23% 0.042 232); }
+.platform-surface .bg-slate-900\/40 { background-color: color-mix(in oklab, oklch(23% 0.042 232) 40%, transparent); }
+.platform-surface .bg-slate-900\/50 { background-color: color-mix(in oklab, oklch(23% 0.042 232) 50%, transparent); }
+.platform-surface .bg-slate-950 { background-color: oklch(16% 0.035 232); }
+.platform-surface .border-blue-200 { border-color: oklch(90.1% 0.058 230.902); }
+.platform-surface .border-blue-300 { border-color: oklch(82.8% 0.111 230.318); }
+.platform-surface .border-blue-400 { border-color: oklch(74.6% 0.16 232.661); }
+.platform-surface .border-blue-800 { border-color: oklch(44.3% 0.11 240.79); }
+.platform-surface .border-sky-200 { border-color: oklch(90.1% 0.058 230.902); }
+.platform-surface .border-sky-500 { border-color: oklch(68.5% 0.169 237.323); }
+.platform-surface .border-slate-100 { border-color: oklch(96.2% 0.016 232); }
+.platform-surface .border-slate-200 { border-color: oklch(92.5% 0.028 232); }
+.platform-surface .border-slate-200\/50 { border-color: color-mix(in oklab, oklch(92.5% 0.028 232) 50%, transparent); }
+.platform-surface .border-slate-300 { border-color: oklch(87% 0.04 232); }
+.platform-surface .border-slate-700 { border-color: oklch(41% 0.058 232); }
+.platform-surface .border-slate-700\/60 { border-color: color-mix(in oklab, oklch(41% 0.058 232) 60%, transparent); }
+.platform-surface .border-slate-800 { border-color: oklch(31% 0.05 232); }
+.platform-surface .divide-slate-100 > :not(:last-child) { border-color: oklch(96.2% 0.016 232); }
+.platform-surface .divide-slate-800\/80 > :not(:last-child) { border-color: color-mix(in oklab, oklch(31% 0.05 232) 80%, transparent); }
+.platform-surface .ring-blue-500 { --tw-ring-color: oklch(68.5% 0.169 237.323); }
+.platform-surface .ring-sky-500\/20 { --tw-ring-color: color-mix(in oklab, oklch(68.5% 0.169 237.323) 20%, transparent); }
+.platform-surface .text-blue-200 { color: oklch(90.1% 0.058 230.902); }
+.platform-surface .text-blue-300 { color: oklch(82.8% 0.111 230.318); }
+.platform-surface .text-blue-400 { color: oklch(74.6% 0.16 232.661); }
+.platform-surface .text-blue-600 { color: oklch(58.8% 0.158 241.966); }
+.platform-surface .text-blue-700 { color: oklch(50% 0.134 242.749); }
+.platform-surface .text-blue-800 { color: oklch(44.3% 0.11 240.79); }
+.platform-surface .text-blue-900 { color: oklch(39.1% 0.09 240.876); }
+.platform-surface .text-sky-400 { color: oklch(74.6% 0.16 232.661); }
+.platform-surface .text-sky-600 { color: oklch(58.8% 0.158 241.966); }
+.platform-surface .text-sky-700 { color: oklch(50% 0.134 242.749); }
+.platform-surface .text-sky-800 { color: oklch(44.3% 0.11 240.79); }
+.platform-surface .text-slate-100 { color: oklch(96.2% 0.016 232); }
+.platform-surface .text-slate-200 { color: oklch(92.5% 0.028 232); }
+.platform-surface .text-slate-300 { color: oklch(87% 0.04 232); }
+.platform-surface .text-slate-400 { color: oklch(72% 0.05 232); }
+.platform-surface .text-slate-500 { color: oklch(60% 0.055 232); }
+.platform-surface .text-slate-600 { color: oklch(50% 0.06 232); }
+.platform-surface .text-slate-700 { color: oklch(41% 0.058 232); }
+.platform-surface .text-slate-800 { color: oklch(31% 0.05 232); }
+.platform-surface .text-slate-900 { color: oklch(23% 0.042 232); }

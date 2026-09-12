@@ -197,7 +197,7 @@ export const PlatformOpsDashboard: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8" dir="rtl">
+    <div className="platform-surface min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8" dir="rtl">
       {/* 1. ترويسة الصفحة */}
       <header className="flex flex-wrap items-center justify-between gap-4 pb-6 mb-6 border-b border-slate-200">
         <div>

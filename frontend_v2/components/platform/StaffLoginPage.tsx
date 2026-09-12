@@ -66,7 +66,7 @@ export const StaffLoginPage: React.FC = () => {
   return (
     <div
       dir="rtl"
-      className="min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 py-10"
+      className="platform-surface min-h-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 px-4 py-10"
     >
       <div className="w-full max-w-sm rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-7 shadow-xl">
         <div className="flex flex-col items-center gap-2 pb-6 text-center">

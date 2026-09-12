@@ -59,7 +59,7 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
 
   if (capabilitiesLoading) {
     return (
-      <div className="py-20 flex items-center justify-center gap-2 text-slate-500" dir="rtl">
+      <div className="platform-surface py-20 flex items-center justify-center gap-2 text-slate-500" dir="rtl">
         <Loader2 className="h-5 w-5 animate-spin" />
         <span className="text-sm">جارٍ التحقّق من صلاحيّاتك...</span>
       </div>
@@ -68,7 +68,7 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
 
   if (!allowed) {
     return (
-      <div className="py-20 text-center bg-white rounded-xl border border-slate-200" dir="rtl">
+      <div className="platform-surface py-20 text-center bg-white rounded-xl border border-slate-200" dir="rtl">
         <p className="text-sm font-bold text-slate-700">هذه المساحة مخصّصةٌ لموظّفي عمليات المنصة.</p>
         <p className="text-xs text-slate-500 mt-1">إن كنت تظنّ هذا خطأً فراجع مدير عمليات المنصة.</p>
       </div>
@@ -76,7 +76,7 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
   }
 
   return (
-    <div className="p-6" dir="rtl">
+    <div className="platform-surface p-6" dir="rtl">
       <header className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-lg font-bold text-slate-900">مساحتي — عمليات المنصة</h1>
