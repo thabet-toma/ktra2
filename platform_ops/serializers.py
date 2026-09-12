@@ -30,6 +30,8 @@ from .models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformMeeting,
+    PlatformMeetingAttendance,
     PlatformNotification,
     PlatformOperationEvent,
     PlatformRecruiter,
@@ -416,6 +418,113 @@ class PerformanceReviewRequestSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+
+class PlatformMeetingAttendanceSerializer(serializers.ModelSerializer):
+    """صفُّ حضورٍ واحد — «كلّه محفوظ» الذي طلبه المالك: قراءةٌ فقط من الواجهة."""
+
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    excuse_decided_by_name = serializers.CharField(
+        source="excuse_decided_by.username", read_only=True, default="",
+    )
+
+    class Meta:
+        model = PlatformMeetingAttendance
+        fields = [
+            "id",
+            "meeting",
+            "employee",
+            "employee_name",
+            "status",
+            "status_display",
+            "checked_in_at",
+            "excuse_note",
+            "excuse_decided_by_name",
+            "excuse_decided_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class PlatformMeetingSerializer(serializers.ModelSerializer):
+    """اجتماعُ منصّةٍ — قراءةٌ فقط من الواجهة؛ الكتابةُ عبر مُسلسِلات الأفعال أدناه."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+    invited_count = serializers.SerializerMethodField()
+    my_attendance_status = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PlatformMeeting
+        fields = [
+            "id",
+            "title",
+            "agenda",
+            "start",
+            "end",
+            "meeting_link",
+            "status",
+            "status_display",
+            "created_by_name",
+            "invited_count",
+            "my_attendance_status",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_invited_count(self, obj):
+        return obj.attendances.count()
+
+    def get_my_attendance_status(self, obj):
+        """حالةُ **صاحبِ الجلسة نفسِه** في هذا الاجتماع — لا موظّفٌ آخر مهما طُلب."""
+        request = self.context.get("request")
+        user = getattr(request, "user", None) if request is not None else None
+        if not user or not getattr(user, "is_authenticated", False):
+            return None
+        row = obj.attendances.filter(employee__user=user).first()
+        return row.status if row is not None else None
+
+
+class CreatePlatformMeetingSerializer(serializers.Serializer):
+    """إنشاءُ اجتماعٍ — كلُّ الحقول إلزاميّة عدا جدول الأعمال."""
+
+    title = serializers.CharField(max_length=255)
+    agenda = serializers.CharField(required=False, allow_blank=True, default="")
+    start = serializers.DateTimeField()
+    end = serializers.DateTimeField()
+    meeting_link = serializers.URLField(max_length=500)
+
+
+class UpdatePlatformMeetingSerializer(serializers.Serializer):
+    """تعديلُ اجتماعٍ — كلُّ الحقول اختياريّة (تعديلٌ جزئيّ)، ولا حقل حالة هنا."""
+
+    title = serializers.CharField(max_length=255, required=False)
+    agenda = serializers.CharField(required=False, allow_blank=True)
+    start = serializers.DateTimeField(required=False)
+    end = serializers.DateTimeField(required=False)
+    meeting_link = serializers.URLField(max_length=500, required=False)
+
+
+class InviteToMeetingSerializer(serializers.Serializer):
+    """قائمةُ معرّفات موظّفي المنصّة المدعوّين — الفعل idempotent في الخدمة."""
+
+    employees = serializers.ListField(child=serializers.IntegerField(), allow_empty=False)
+
+
+class SubmitMeetingExcuseSerializer(serializers.Serializer):
+    """اعتذارُ الموظّف — السببُ إلزاميّ."""
+
+    note = serializers.CharField(max_length=2000, allow_blank=False)
+
+
+class DecideMeetingExcuseSerializer(serializers.Serializer):
+    """بتُّ المدير في عذرٍ معلّق — بمعرّف صفّ الحضور المطلوب البتّ فيه."""
+
+    attendance = serializers.IntegerField()
+    accepted = serializers.BooleanField()
 
 
 class IntegrationKeySerializer(serializers.ModelSerializer):

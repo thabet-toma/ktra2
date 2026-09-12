@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **807**
+عدد النقاط: **817**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -608,6 +608,16 @@
 | `/api/platform/ops/job-postings/{pk}/close/` | `JobPostingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-postings/{pk}/regenerate-link/` | `JobPostingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-postings/{pk}/reopen/` | `JobPostingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/create/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/attendance/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/cancel/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/check-in/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/decide-excuse/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/excuse/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/invite/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/meetings/{pk}/update/` | `PlatformMeetingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/mark-all-read/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/unread-count/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |

@@ -20,6 +20,7 @@ import re
 
 from django.contrib.auth import get_user_model
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.permissions import OperandHolder
 from rest_framework.test import APIClient
 
@@ -33,6 +34,8 @@ from platform_ops.models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformMeeting,
+    PlatformMeetingAttendance,
     PlatformNotification,
     ServiceSubscription,
     WorkOrder,
@@ -211,6 +214,18 @@ EXCUSED_ROUTES = {
         "فعلٌ تفصيليٌّ (POST) بـpk — لمدير العمليات وحده.",
     "/api/platform/ops/performance-review-requests/1/resolve/":
         "فعلٌ تفصيليٌّ (POST) بـpk — لمدير العمليات وحده.",
+    "/api/platform/ops/meetings/create/":
+        "فعلُ إنشاءٍ (POST) — مدير العمليات وحده (`_require_manager`).",
+    "/api/platform/ops/meetings/1/update/":
+        "فعلٌ تفصيليٌّ (POST) — مدير العمليات وحده.",
+    "/api/platform/ops/meetings/1/cancel/":
+        "فعلٌ تفصيليٌّ (POST) — مدير العمليات وحده.",
+    "/api/platform/ops/meetings/1/invite/":
+        "فعلٌ تفصيليٌّ (POST) — مدير العمليات وحده؛ لا صفَّ فرديّاً يُملَك بل قائمةُ مدعوّين.",
+    "/api/platform/ops/meetings/1/attendance/":
+        "فعلٌ تفصيليٌّ (GET) — دفترُ الحضور كاملاً لمدير العمليات وحده.",
+    "/api/platform/ops/meetings/1/decide-excuse/":
+        "فعلٌ تفصيليٌّ (POST) — مدير العمليات وحده.",
 }
 
 #: المسارات التي يُنفَّذ عليها فحصُ «لا صفَّ زميل» فعلياً في هذه المجموعة —
@@ -234,6 +249,10 @@ EXERCISED_ROUTES = frozenset({
     "/api/platform/ops/activity-logs/1/",
     "/api/platform/ops/performance-review-requests/",
     "/api/platform/ops/performance-review-requests/1/",
+    "/api/platform/ops/meetings/",
+    "/api/platform/ops/meetings/1/",
+    "/api/platform/ops/meetings/1/check-in/",
+    "/api/platform/ops/meetings/1/excuse/",
 })
 # `champions/` مذكورةٌ في القائمتين معاً بقصد: هي مُستثناةٌ من فحص الملكيّة
 # (لوحةٌ جماعيّة لا صفَّ فرديّاً) لكنّ الاختبار يستدعيها فعلياً ليثبت أنّها
@@ -365,6 +384,22 @@ class _StaffScopeFixture(TestCase):
         )
         cls.review_b = PerformanceReviewRequest.objects.create(
             employee=cls.employee_b, period_year=2026, period_month=1, reason="اعتراضٌ — ب",
+        )
+
+        now = timezone.now()
+        cls.meeting_a = PlatformMeeting.objects.create(
+            title="اجتماعٌ — أ", start=now, end=now + datetime.timedelta(hours=1),
+            meeting_link="https://meet.example.test/a",
+        )
+        cls.meeting_b = PlatformMeeting.objects.create(
+            title="اجتماعٌ — ب", start=now, end=now + datetime.timedelta(hours=1),
+            meeting_link="https://meet.example.test/b",
+        )
+        cls.attendance_a = PlatformMeetingAttendance.objects.create(
+            meeting=cls.meeting_a, employee=cls.employee_a,
+        )
+        cls.attendance_b = PlatformMeetingAttendance.objects.create(
+            meeting=cls.meeting_b, employee=cls.employee_b,
         )
 
     def setUp(self):
@@ -505,6 +540,63 @@ class PerformanceReviewRequestsScopeTest(_StaffScopeFixture):
         self.assertEqual(
             self.client.get(f"/api/platform/ops/performance-review-requests/{self.review_a.pk}/").status_code, 200,
         )
+
+
+class MeetingsScopeTest(_StaffScopeFixture):
+    """`meetings/` — الملكيّةُ مشتقّةٌ من صفوف الحضور لا من عمود على النموذج نفسه.
+
+    خلافاً لبقيّة الموارد هنا، اجتماعٌ واحدٌ قد يدعو موظّفَين معاً فلا يصحّ فحصُ
+    «صفّان منفصلان لا يتقاطعان» — الثابتةُ الحارسة هنا اجتماعان منفصلان تماماً،
+    كلٌّ منهما مدعوٌّ إليه موظّفٌ واحد فقط، فيثبت عزل الرؤية والدخول والاعتذار معاً.
+    """
+
+    def test_list_hides_a_colleague_meeting(self):
+        self.client.force_authenticate(self.user_a)
+        ids = self._ids(self.client.get("/api/platform/ops/meetings/"))
+        self.assertIn(self.meeting_a.pk, ids)
+        self.assertNotIn(self.meeting_b.pk, ids)
+
+    def test_list_shows_both_to_the_manager(self):
+        self.client.force_authenticate(self.manager)
+        ids = self._ids(self.client.get("/api/platform/ops/meetings/"))
+        self.assertIn(self.meeting_a.pk, ids)
+        self.assertIn(self.meeting_b.pk, ids)
+
+    def test_detail_404s_on_a_colleague_meeting(self):
+        self.client.force_authenticate(self.user_a)
+        self.assertEqual(
+            self.client.get(f"/api/platform/ops/meetings/{self.meeting_b.pk}/").status_code, 404,
+        )
+        self.assertEqual(
+            self.client.get(f"/api/platform/ops/meetings/{self.meeting_a.pk}/").status_code, 200,
+        )
+
+    def test_check_in_cannot_be_performed_on_a_meeting_not_invited_to(self):
+        """(ب) لا يستطيع الدخولَ على اجتماع (أ) — 404 يمنعه قبل بلوغ الخدمة أصلاً."""
+        self.client.force_authenticate(self.user_b)
+        response = self.client.post(f"/api/platform/ops/meetings/{self.meeting_a.pk}/check-in/")
+        self.assertEqual(response.status_code, 404, response.content)
+        self.attendance_a.refresh_from_db()
+        self.assertEqual(self.attendance_a.status, PlatformMeetingAttendance.Status.ABSENT)
+
+    def test_check_in_records_only_the_caller_own_row(self):
+        self.client.force_authenticate(self.user_a)
+        response = self.client.post(f"/api/platform/ops/meetings/{self.meeting_a.pk}/check-in/")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data["meeting_link"], self.meeting_a.meeting_link)
+        self.attendance_a.refresh_from_db()
+        self.assertEqual(self.attendance_a.status, PlatformMeetingAttendance.Status.ATTENDED)
+        self.attendance_b.refresh_from_db()
+        self.assertEqual(self.attendance_b.status, PlatformMeetingAttendance.Status.ABSENT)
+
+    def test_excuse_cannot_be_submitted_on_a_meeting_not_invited_to(self):
+        self.client.force_authenticate(self.user_b)
+        response = self.client.post(
+            f"/api/platform/ops/meetings/{self.meeting_a.pk}/excuse/", {"note": "سببٌ."},
+        )
+        self.assertEqual(response.status_code, 404, response.content)
+        self.attendance_a.refresh_from_db()
+        self.assertEqual(self.attendance_a.status, PlatformMeetingAttendance.Status.ABSENT)
 
 
 class EmployeesScopeTest(_StaffScopeFixture):

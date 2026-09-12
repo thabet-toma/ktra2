@@ -13,6 +13,7 @@ from .views import (
     PlatformActivityLogViewSet,
     PlatformDashboardView,
     PlatformEmployeeViewSet,
+    PlatformMeetingViewSet,
     PlatformNotificationViewSet,
     PlatformRecruiterViewSet,
     PolicyProfileViewSet,
@@ -65,6 +66,7 @@ router.register(
     PerformanceReviewRequestViewSet,
     basename="platform-ops-performance-review-requests",
 )
+router.register("meetings", PlatformMeetingViewSet, basename="platform-ops-meetings")
 
 urlpatterns = [
     path("companies/<int:tenant_id>/health/", CompanyHealthView.as_view(), name="platform-ops-company-health"),

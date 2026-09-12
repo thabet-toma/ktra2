@@ -45,14 +45,18 @@ from .services import (
     calculate_employee_performance,
     calculate_employee_ratings_summary,
     calculate_two_health_scores,
+    cancel_platform_meeting,
     capture_performance_snapshot,
+    check_in_to_meeting,
     close_job_posting,
     compare_health_baseline,
     convert_health_check_item_to_work_order,
     create_applicant_invitation,
     create_health_check_draft,
     create_job_posting,
+    create_platform_meeting,
     create_platform_recruiter,
+    decide_meeting_excuse,
     activate_paid_subscription,
     activate_subscription_policy,
     clone_subscription_policy_to_draft,
@@ -65,6 +69,7 @@ from .services import (
     get_platform_dashboard_summary,
     eligible_service_tenant_ids,
     invitation_public_url,
+    invite_employees_to_meeting,
     list_assignment_candidates,
     rank_employees_performance,
     rate_applicant,
@@ -85,6 +90,7 @@ from .services import (
     set_customer_acquisition,
     start_service_trial,
     submit_daily_rating,
+    submit_meeting_excuse,
     suspend_engagement,
     suspend_service_subscription,
     transfer_engagement,
@@ -92,6 +98,7 @@ from .services import (
     update_daily_rating,
     update_health_check,
     update_health_check_item,
+    update_platform_meeting,
     update_subscription_policy_draft,
     update_subscription_commercial_settings,
     withdraw_scheduled_service_cancellation,
@@ -173,6 +180,8 @@ from .models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformMeeting,
+    PlatformMeetingAttendance,
     PlatformNotification,
     PlatformRecruiter,
     PolicyProfile,
@@ -207,6 +216,13 @@ from .serializers import (
     OpenPerformanceReviewSerializer,
     PerformanceReviewRequestSerializer,
     ResolvePerformanceReviewSerializer,
+    CreatePlatformMeetingSerializer,
+    DecideMeetingExcuseSerializer,
+    InviteToMeetingSerializer,
+    PlatformMeetingAttendanceSerializer,
+    PlatformMeetingSerializer,
+    SubmitMeetingExcuseSerializer,
+    UpdatePlatformMeetingSerializer,
     JobApplicantSerializer,
     JobPostingSerializer,
     PerformanceSnapshotSerializer,
@@ -3342,3 +3358,168 @@ class PlatformStaffCapabilitiesView(APIView):
             },
             status=status.HTTP_200_OK,
         )
+
+
+class PlatformMeetingViewSet(viewsets.ReadOnlyModelViewSet):
+    """اجتماعاتُ المنصّة — إنشاءٌ ودعوةٌ وبتٌّ لمدير العمليات، ودخولٌ واعتذارٌ للموظّف (211-F).
+
+    **النطاقُ يفرّق بين جمهورين تحت حارسٍ واحد** كـ`PerformanceReviewRequestViewSet`:
+    المديرُ يرى كلَّ الاجتماعات بحكم موقعه، والموظّفُ يرى اجتماعاتِه المدعوَّ إليها
+    وحدَها — مشتقّةً من صفوف الحضور (`attendances__employee__user`) لا من معاملٍ
+    في الطلب، فلا سبيل لتمرير اجتماعِ زميلٍ والوصول إليه.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+    serializer_class = PlatformMeetingSerializer
+    queryset = PlatformMeeting.objects.all().order_by("-start")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(attendances__employee__user=self.request.user).distinct()
+
+    def _require_manager(self, request):
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "هذا الإجراء متاح لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    def _current_employee(self, request):
+        employee = PlatformEmployee.objects.filter(user=request.user).first()
+        if employee is None:
+            return None, Response(
+                {"detail": "لا ملفَّ موظّف منصّةٍ مرتبطٌ بحسابك.", "code": "not_a_platform_employee"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return employee, None
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_meeting(self, request):
+        """إنشاءُ اجتماعٍ — مدير العمليات وحده («أنشئ اجتماع كسوبر أدمن»)."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        payload = CreatePlatformMeetingSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            meeting = create_platform_meeting(created_by=request.user, **payload.validated_data)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(meeting).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update")
+    def update_meeting(self, request, pk=None):
+        """تعديلُ حقول اجتماعٍ أساسيّة — لا الحالة؛ الإلغاءُ من `cancel` وحدها."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        payload = UpdatePlatformMeetingSerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            meeting = update_platform_meeting(meeting=self.get_object(), **payload.validated_data)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(meeting).data)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        """إلغاءُ اجتماعٍ — يرفض بعدها الدخولَ والاعتذارَ الجديد (رقابةٌ في الخدمة لا النموذج)."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        meeting = cancel_platform_meeting(meeting=self.get_object(), actor=request.user)
+        return Response(self.get_serializer(meeting).data)
+
+    @action(detail=True, methods=["post"], url_path="invite")
+    def invite(self, request, pk=None):
+        """تحديدُ قائمة المدعوّين — يُنشئ صفوفَ حضورٍ «غائب» افتراضيّةً، idempotent."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        payload = InviteToMeetingSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            meeting = invite_employees_to_meeting(
+                meeting=self.get_object(), employee_ids=payload.validated_data["employees"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(meeting).data)
+
+    @action(detail=True, methods=["get"], url_path="attendance")
+    def attendance(self, request, pk=None):
+        """دفترُ الحضور الكامل — «كلّه محفوظ» الذي طلبه المالك؛ مدير العمليات وحده."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        rows = (
+            self.get_object().attendances
+            .select_related("employee__user", "excuse_decided_by")
+            .order_by("employee__user__username")
+        )
+        return Response(PlatformMeetingAttendanceSerializer(rows, many=True).data)
+
+    @action(detail=True, methods=["post"], url_path="decide-excuse")
+    def decide_excuse(self, request, pk=None):
+        """بتُّ المدير في عذرٍ معلّق — قبولاً أو رفضاً، مدير العمليات وحده."""
+        denial = self._require_manager(request)
+        if denial is not None:
+            return denial
+        payload = DecideMeetingExcuseSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        attendance = PlatformMeetingAttendance.objects.filter(
+            pk=payload.validated_data["attendance"], meeting=self.get_object(),
+        ).first()
+        if attendance is None:
+            return Response(
+                {"detail": "صفُّ الحضور غير موجود في هذا الاجتماع.", "code": "attendance_not_found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            updated = decide_meeting_excuse(
+                attendance=attendance, accepted=payload.validated_data["accepted"], actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(PlatformMeetingAttendanceSerializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="check-in")
+    def check_in(self, request, pk=None):
+        """«يحطّ دخول» — تسجيلُ الحضور وإرجاعُ رابط الاجتماع معاً، فعلٌ واحدٌ لا فعلين.
+
+        الموظّفُ يُشتقّ من الجلسة (`request.user`) لا من معاملٍ يمكن تزويرُه، فلا
+        سبيل لتسجيل حضورٍ باسم زميل. و`get_object()` هنا محكومٌ بـ`get_queryset()`
+        المضيَّقة فوق: اجتماعٌ لم يُدعَ إليه الموظّفُ يردّ 404 قبل بلوغ الخدمة أصلاً.
+        """
+        employee, denial = self._current_employee(request)
+        if denial is not None:
+            return denial
+        meeting = self.get_object()
+        try:
+            attendance = check_in_to_meeting(meeting=meeting, employee=employee)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response({
+            "status": attendance.status,
+            "checked_in_at": attendance.checked_in_at,
+            "meeting_link": meeting.meeting_link,
+        })
+
+    @action(detail=True, methods=["post"], url_path="excuse")
+    def excuse(self, request, pk=None):
+        """اعتذارُ الموظّف — نفسُ اشتقاقِ الهويّة والنطاق أعلاه بالضبط."""
+        employee, denial = self._current_employee(request)
+        if denial is not None:
+            return denial
+        payload = SubmitMeetingExcuseSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            attendance = submit_meeting_excuse(
+                meeting=self.get_object(), employee=employee, note=payload.validated_data["note"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(PlatformMeetingAttendanceSerializer(attendance).data)

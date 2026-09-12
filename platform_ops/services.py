@@ -55,6 +55,8 @@ from .models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformMeeting,
+    PlatformMeetingAttendance,
     PlatformNotification,
     PlatformOperationEvent,
     PlatformRecruiter,
@@ -9673,6 +9675,231 @@ def recapture_performance_after_accepted_review(*, review_request, actor=None) -
         },
     )
     return snapshot
+
+
+#: نافذةُ تسجيل الحضور: من ربع ساعةٍ قبل البداية حتى النهاية. مبكّرةٌ بما يكفي
+#: لموظّفٍ فتح الرابطَ قبل الموعد بدقائق كما يفعل الجميع، لكنّها ترفض تسجيلاً
+#: اليوم على اجتماعِ الشهر القادم أو تسجيلاً متأخّراً بعد أن انتهى الاجتماعُ فعلياً
+#: — النافذةُ هي ما يمنح دفترَ الحضور معناه (211-F، دَينُ 211-E المُحال).
+MEETING_CHECK_IN_EARLY_WINDOW_MINUTES = 15
+
+
+def create_platform_meeting(*, title: str, start, end, meeting_link: str, agenda: str = "", created_by=None):
+    """إنشاءُ اجتماعِ منصّةٍ — السوبر أدمن وحده («أنشئ اجتماع كسوبر أدمن» — #211 م٥).
+
+    التحقّقُ هنا استباقيٌّ لا بديلٌ عن `CheckConstraint(end__gt=start)` في القاعدة:
+    رسالةٌ عربيّةٌ مفهومة بدل `IntegrityError` خام لو وصل الطلبُ بلا تحقّق مُسلسِل.
+    """
+    title = str(title or "").strip()
+    if not title:
+        raise PlatformOpsError("title_required", "عنوان الاجتماع مطلوب.")
+    meeting_link = str(meeting_link or "").strip()
+    if not meeting_link:
+        raise PlatformOpsError("meeting_link_required", "رابط الاجتماع مطلوب.")
+    if not start or not end:
+        raise PlatformOpsError("start_end_required", "بداية الاجتماع ونهايته مطلوبتان.")
+    if end <= start:
+        raise PlatformOpsError("meeting_end_before_start", "نهاية الاجتماع يجب أن تكون بعد بدايته.")
+    return PlatformMeeting.objects.create(
+        title=title, agenda=str(agenda or ""), start=start, end=end,
+        meeting_link=meeting_link, created_by=created_by,
+    )
+
+
+def update_platform_meeting(*, meeting, **fields):
+    """تعديلُ حقولِ اجتماعٍ أساسيّة — لا الحالة؛ الإلغاءُ من `cancel_platform_meeting` وحدها."""
+    with transaction.atomic():
+        locked = PlatformMeeting.objects.select_for_update().get(pk=meeting.pk)
+        start = fields.get("start", locked.start)
+        end = fields.get("end", locked.end)
+        if end <= start:
+            raise PlatformOpsError("meeting_end_before_start", "نهاية الاجتماع يجب أن تكون بعد بدايته.")
+        for field in ("title", "agenda", "start", "end", "meeting_link"):
+            if field in fields:
+                setattr(locked, field, fields[field])
+        locked.save()
+    return locked
+
+
+def cancel_platform_meeting(*, meeting, actor=None):
+    """إلغاءُ اجتماعٍ — idempotent، فتكرارُ الإلغاء لا يخطئ.
+
+    الإلغاءُ هو ما يمنع الدخولَ والاعتذارَ الجديد لاحقاً (`check_in_to_meeting`
+    و`submit_meeting_excuse` يتحقّقان من هذه الحالة صراحةً — النموذجُ لا يفرضها).
+
+    **ويُقيَّد على دفتر كلِّ مدعوٍّ لا مرّةً واحدة**: `PlatformActivityLog` يلزمه
+    موظّفٌ (لا صفَّ بلا `employee`)، والمديرُ الملغي قد لا يملك ملفَّ موظّفٍ أصلاً
+    — فالفاعلُ في `details.actor_user_id` كما في بتّ الأعذار. والفائدةُ مزدوجة:
+    «كلُّه محفوظ» للسوبر أدمن، والمدعوُّ يرى في سجلّه أنّ اجتماعَه أُلغي بدل أن
+    يجد اجتماعاً صامتاً لا يقبل دخولَه.
+
+    والتكرارُ لا يكتب سجلّاً ثانياً: الحارسُ على الحالة يشمل التقييدَ نفسَه.
+    """
+    logged_rows = []
+    with transaction.atomic():
+        locked = PlatformMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked.status != PlatformMeeting.Status.CANCELLED:
+            locked.status = PlatformMeeting.Status.CANCELLED
+            locked.save(update_fields=["status", "updated_at"])
+            logged_rows = list(
+                PlatformMeetingAttendance.objects.filter(meeting=locked).select_related("employee")
+            )
+    for row in logged_rows:
+        log_platform_activity(
+            employee=row.employee,
+            action=PlatformActivityLog.Action.OTHER,
+            description=f"إلغاءُ اجتماع: {locked.title}",
+            entity_type="platform_meeting",
+            entity_id=locked.pk,
+            details={
+                "operation": "cancel_platform_meeting",
+                "actor_user_id": getattr(actor, "pk", None),
+            },
+        )
+    return locked
+
+
+def invite_employees_to_meeting(*, meeting, employee_ids: list[int]):
+    """تحديدُ قائمةِ المدعوّين — ينشئ صفَّ حضورٍ «غائب» لكلّ مدعوٍّ **جديد** فقط.
+
+    **Idempotent عمداً**: إعادةُ دعوة موظّفٍ مدعوٍّ بالفعل فعلٌ بشريٌّ عاديّ
+    (نسيانٌ ثمّ محاولةٌ ثانية) لا خطأً برمجيّاً، فلا يصحّ أن يردّ 500 ولا يُكرَّر صفّ.
+    القفلُ على صفّ الاجتماع (`select_for_update`) يسلسل نداءَين متزامنَين لنفس
+    الاجتماع فيمنع السباقَ عملياً؛ ومع ذلك يبقى القيدُ الفريدُ في القاعدة خطَّ
+    الدفاع الأخير لسباقٍ حقيقيٍّ نادرٍ يتجاوز القفل (إعادةُ محاولةٍ بعد قطع اتصالٍ
+    مثلاً) — ويُتجاوَز الصفُّ المصطدمُ **وحدَه** بـ`ignore_conflicts` لا بالتراجع
+    عن الدفعة كلِّها.
+    """
+    ids = list(dict.fromkeys(employee_ids or []))
+    if not ids:
+        raise PlatformOpsError("employee_ids_required", "قائمةُ المدعوّين مطلوبة.")
+    with transaction.atomic():
+        locked = PlatformMeeting.objects.select_for_update().get(pk=meeting.pk)
+        existing_ids = set(
+            PlatformMeetingAttendance.objects.filter(meeting=locked, employee_id__in=ids)
+            .values_list("employee_id", flat=True)
+        )
+        new_ids = [pk for pk in ids if pk not in existing_ids]
+        if new_ids:
+            valid_ids = set(PlatformEmployee.objects.filter(pk__in=new_ids).values_list("pk", flat=True))
+            missing = sorted(set(new_ids) - valid_ids)
+            if missing:
+                raise PlatformOpsError(
+                    "employee_not_found", f"موظّفو منصّةٍ غير موجودين: {missing}",
+                )
+            # `ignore_conflicts` لا التقاطُ `IntegrityError`: الالتقاطُ يتراجع عن
+            # **الدفعة كلِّها** (نقطةُ الحفظ تُرجِع العبارةَ الواحدة بتمامها)، فلو
+            # اصطدم مدعوٌّ واحدٌ من خمسةٍ ضاع الأربعةُ الباقون **بصمتٍ والطلبُ ناجح**
+            # — أي أنّ حارسَ السباق يتحوّل إلى فقدانِ دعواتٍ لا إلى حمايةٍ منه.
+            # و`ignore_conflicts` يتخطّى الصفَّ المصطدمَ وحدَه في القاعدة نفسِها.
+            PlatformMeetingAttendance.objects.bulk_create(
+                [PlatformMeetingAttendance(meeting=locked, employee_id=pk) for pk in new_ids],
+                ignore_conflicts=True,
+            )
+    return locked
+
+
+def check_in_to_meeting(*, meeting, employee, now=None):
+    """«يحطّ دخول» — تُعيد صفَّ الحضور المحدَّث ليقرأ المستدعي رابطَ الاجتماع منه.
+
+    فعلٌ واحدٌ لا فعلين: تسجيلُ الحضور وقراءةُ الرابط طلبٌ واحد، لا نقطتان
+    منفصلتان قد ينسى العميلُ ثانيتَهما.
+    """
+    now = now or timezone.now()
+    with transaction.atomic():
+        locked_meeting = PlatformMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked_meeting.status == PlatformMeeting.Status.CANCELLED:
+            raise PlatformOpsError("meeting_cancelled", "هذا الاجتماعُ ملغى.")
+        window_start = locked_meeting.start - datetime.timedelta(minutes=MEETING_CHECK_IN_EARLY_WINDOW_MINUTES)
+        if now < window_start or now > locked_meeting.end:
+            raise PlatformOpsError(
+                "outside_check_in_window", "تسجيلُ الحضور متاحٌ فقط قُبيل الاجتماع أو خلاله.",
+            )
+        attendance = (
+            PlatformMeetingAttendance.objects.select_for_update()
+            .filter(meeting=locked_meeting, employee=employee)
+            .first()
+        )
+        if attendance is None:
+            raise PlatformOpsError("not_invited", "أنتَ غيرُ مدعوٍّ لهذا الاجتماع.")
+        attendance.status = PlatformMeetingAttendance.Status.ATTENDED
+        attendance.checked_in_at = now
+        attendance.save(update_fields=["status", "checked_in_at", "updated_at"])
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"تسجيلُ حضور اجتماع: {locked_meeting.title}",
+        entity_type="platform_meeting_attendance",
+        entity_id=attendance.pk,
+        details={"operation": "check_in_to_meeting", "meeting_id": locked_meeting.pk},
+    )
+    return attendance
+
+
+def submit_meeting_excuse(*, meeting, employee, note: str):
+    """اعتذارُ الموظّف عن اجتماع — الحالةُ تصير «معلّق» دوماً، لا «مقبول» أبداً من هنا."""
+    note = str(note or "").strip()
+    if not note:
+        raise PlatformOpsError("excuse_note_required", "سببُ الاعتذار مطلوب.")
+    with transaction.atomic():
+        locked_meeting = PlatformMeeting.objects.select_for_update().get(pk=meeting.pk)
+        if locked_meeting.status == PlatformMeeting.Status.CANCELLED:
+            raise PlatformOpsError("meeting_cancelled", "هذا الاجتماعُ ملغى.")
+        attendance = (
+            PlatformMeetingAttendance.objects.select_for_update()
+            .filter(meeting=locked_meeting, employee=employee)
+            .first()
+        )
+        if attendance is None:
+            raise PlatformOpsError("not_invited", "أنتَ غيرُ مدعوٍّ لهذا الاجتماع.")
+        if attendance.status == PlatformMeetingAttendance.Status.ATTENDED:
+            raise PlatformOpsError("already_attended", "سجّلتَ حضورَك بالفعل — لا اعتذارَ بعد الحضور.")
+        attendance.status = PlatformMeetingAttendance.Status.EXCUSED_PENDING
+        attendance.excuse_note = note
+        # بتٌّ سابقٌ (إن وُجد من اعتذارٍ أقدم) يُمحى: اعتذارٌ جديدٌ يفتح باباً جديداً
+        # للبتّ، لا يرث قراراً على نصٍّ مختلف.
+        attendance.excuse_decided_by = None
+        attendance.excuse_decided_at = None
+        attendance.save(
+            update_fields=["status", "excuse_note", "excuse_decided_by", "excuse_decided_at", "updated_at"],
+        )
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"اعتذارٌ عن اجتماع: {locked_meeting.title}",
+        entity_type="platform_meeting_attendance",
+        entity_id=attendance.pk,
+        details={"operation": "submit_meeting_excuse", "meeting_id": locked_meeting.pk},
+    )
+    return attendance
+
+
+def decide_meeting_excuse(*, attendance, accepted: bool, actor=None):
+    """بتُّ مديرِ العمليات في عذرٍ معلّق — قبولاً أو رفضاً، مسجَّلاً بفاعله ووقته."""
+    with transaction.atomic():
+        locked = PlatformMeetingAttendance.objects.select_for_update().get(pk=attendance.pk)
+        if locked.status != PlatformMeetingAttendance.Status.EXCUSED_PENDING:
+            raise PlatformOpsError("excuse_not_pending", "لا عذرَ معلّقاً على هذا الصفّ ليُبتَّ فيه.")
+        locked.status = (
+            PlatformMeetingAttendance.Status.EXCUSED_ACCEPTED if accepted
+            else PlatformMeetingAttendance.Status.EXCUSED_REJECTED
+        )
+        locked.excuse_decided_by = actor
+        locked.excuse_decided_at = timezone.now()
+        locked.save(update_fields=["status", "excuse_decided_by", "excuse_decided_at", "updated_at"])
+    log_platform_activity(
+        employee=locked.employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"بتٌّ في عذر اجتماع: {locked.get_status_display()}",
+        entity_type="platform_meeting_attendance",
+        entity_id=locked.pk,
+        details={
+            "operation": "decide_meeting_excuse",
+            "actor_user_id": getattr(actor, "pk", None),
+            "accepted": bool(accepted),
+        },
+    )
+    return locked
 
 
 def list_employee_engaged_companies(user) -> list[dict]:
