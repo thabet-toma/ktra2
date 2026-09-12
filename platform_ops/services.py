@@ -4503,6 +4503,7 @@ def capture_pilot_performance_snapshot(
     evaluation_policy: PerformanceEvaluationPolicy | None = None,
     captured_by=None,
     force_refresh: bool = False,
+    policy_dict: dict | None = None,
 ) -> PerformanceSnapshot:
     """التقاط لقطة شهرية بمحاور الـpilot الأربعة — idempotent، بنفس اصطلاح
     `capture_performance_snapshot` (#207) واستعمال نفس نموذج `PerformanceSnapshot`.
@@ -4511,6 +4512,11 @@ def capture_pilot_performance_snapshot(
     نسخةً ثابتةً من الأوزان وقت الالتقاط، و`evaluation_policy` يحمل فقط مرجع
     أيّ نسخة استُعملت — تعديل تلك النسخة لاحقاً (ممنوعٌ أصلاً، تُستنسخ لا تُعدَّل)
     لا يمسّ هذا الصفّ بحال.
+
+    و`policy_dict` (210-F) يُمرَّر حين تُعاد لقطةٌ قائمةٌ فتُحسب على **سياستها
+    المجمَّدة** لا على السارية اليوم: بدونه كانت `force_refresh` تقرأ السياسةَ
+    النشطةَ لحظتَها فتُعيد تسعيرَ شهرٍ قديمٍ بأوزانٍ نُشرت بعده — وهو بعينه
+    «لا أثر رجعي» الذي بُني عليه تجميدُ اللقطة.
     """
     emp_pk = getattr(employee, "pk", employee)
     locked_emp = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
@@ -4521,9 +4527,10 @@ def capture_pilot_performance_snapshot(
     if existing and not force_refresh:
         return existing
 
-    if evaluation_policy is None:
-        evaluation_policy = get_active_performance_evaluation_policy(specialty=locked_emp.specialty)
-    policy_dict = _pilot_policy_dict(evaluation_policy, locked_emp.specialty)
+    if policy_dict is None:
+        if evaluation_policy is None:
+            evaluation_policy = get_active_performance_evaluation_policy(specialty=locked_emp.specialty)
+        policy_dict = _pilot_policy_dict(evaluation_policy, locked_emp.specialty)
 
     perf_result = calculate_employee_pilot_performance(
         employee=locked_emp, period_year=period_year, period_month=period_month, policy_dict=policy_dict,
@@ -9382,6 +9389,70 @@ def resolve_performance_review(*, review_request, accepted: bool, resolution_not
         },
     )
     return locked
+
+
+def recapture_performance_after_accepted_review(*, review_request, actor=None) -> PerformanceSnapshot:
+    """إعادةُ التقاط لقطةِ شهرٍ بعد قبولِ اعتراضٍ عليه (القصة ٤٤، تتمّة 210-F).
+
+    **هذه هي الخطوةُ التي كان وعدُها معلَّقاً في الهواء.** `resolve_performance_review`
+    لا تمسّ الدرجةَ عمداً — «القبولُ يعني تصحيحاً عند المصدر ثمّ تُعاد اللقطة» —
+    لكنّ «تُعاد اللقطة» لم يكن لها مسارٌ واحدٌ في النظام: `force_refresh` موجودةٌ
+    في `capture_pilot_performance_snapshot` ولا تستدعيها إلا دالّةُ الإغلاق، والإغلاقُ
+    نفسُه idempotent فلا يُعيد الحساب. فكان قبولُ الاعتراض فعلاً بلا أثرٍ إلى الأبد.
+
+    **والصلاحيةُ مقيَّدةٌ بالمبرِّر لا بالرتبة وحدَها**: لا تُعاد لقطةٌ إلا ولها
+    اعتراضٌ **مقبولٌ** على الشهر نفسِه. فإعادةُ الالتقاط ليست زرّاً يرفع درجةً
+    متى شاء المدير، بل أثرُ قرارٍ مكتوبٍ مُعلَّلٍ مسجَّلٍ في `PerformanceReviewRequest`.
+
+    **ولا تُمسّ المحفظة.** أسطرُ الشهر قد تكون `PAID`، وتصحيحُها بابُه الظاهرُ
+    `adjust_wallet_line` الذي يُنشئ سطرَ تسويةٍ يُرى — لا كتابةٌ فوق سطرٍ مدفوع.
+    فتعديلُ الدرجةِ هنا يُعيد الرقمَ ويترك المالَ لمساره المُدقَّق.
+    """
+    with transaction.atomic():
+        locked = PerformanceReviewRequest.objects.select_for_update().get(pk=review_request.pk)
+        if locked.status != PerformanceReviewRequest.Status.ACCEPTED:
+            raise PlatformOpsError(
+                "review_request_not_accepted",
+                "لا تُعاد اللقطة إلا بعد قبول الاعتراض — القبولُ هو مبرّرُ إعادة الحساب.",
+            )
+        employee = locked.employee
+        # **السياسةُ تبقى سياسةَ الشهر لا سياسةَ اليوم.** بلا تمرير النسخة المجمَّدة
+        # كانت `force_refresh` تُعيد قراءةَ السياسة النشطة لحظتَها، فاعتراضٌ يُقبَل
+        # اليوم يُعيد تسعيرَ آذار بأوزانٍ نُشرت في نيسان ويمحو نسخةَ آذار المجمَّدة —
+        # وتجميدُ اللقطة إنّما بُني ليمنع هذا بالضبط (210-D: «لا أثر رجعي»).
+        # التصحيحُ يمسّ **البيانات** لا المقياس.
+        frozen = PerformanceSnapshot.objects.filter(
+            employee=employee, period_year=locked.period_year, period_month=locked.period_month,
+        ).first()
+        before = frozen.composite_score if frozen is not None else None
+        snapshot = capture_pilot_performance_snapshot(
+            employee=employee,
+            period_year=locked.period_year,
+            period_month=locked.period_month,
+            evaluation_policy=frozen.evaluation_policy if frozen is not None else None,
+            policy_dict=dict(frozen.policy_snapshot) if frozen is not None and frozen.policy_snapshot else None,
+            captured_by=actor,
+            force_refresh=True,
+        )
+
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=(
+            f"إعادةُ التقاط لقطة {locked.period_year}/{locked.period_month} بعد قبول اعتراض"
+        ),
+        entity_type="performance_snapshot",
+        entity_id=snapshot.pk,
+        details={
+            "operation": "recapture_performance_after_accepted_review",
+            "actor_user_id": getattr(actor, "pk", None),
+            "review_request_id": locked.pk,
+            # الرقمان معاً: تغييرُ درجةٍ بلا «قبلُ وبعدُ» في السجلّ لا يُراجَع.
+            "composite_before": str(before) if before is not None else None,
+            "composite_after": str(snapshot.composite_score) if snapshot.composite_score is not None else None,
+        },
+    )
+    return snapshot
 
 
 def list_employee_engaged_companies(user) -> list[dict]:

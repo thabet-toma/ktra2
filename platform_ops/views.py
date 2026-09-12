@@ -113,6 +113,7 @@ from .services import (
     build_champions_board,
     compute_customer_profitability,
     request_performance_review,
+    recapture_performance_after_accepted_review,
     resolve_performance_review,
     list_employee_work_order_queue,
     log_platform_activity,
@@ -1042,6 +1043,35 @@ class PerformanceReviewRequestViewSet(viewsets.ReadOnlyModelViewSet):
         except PlatformOpsError as exc:
             return _service_error(exc)
         return Response(self.get_serializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="recapture")
+    def recapture(self, request, pk=None):
+        """إعادةُ التقاط لقطة الشهر بعد قبول الاعتراض — الخطوةُ الثانيةُ من القبول.
+
+        الردُّ بالقبول لا يمسّ الدرجة (وهذا مقصود: وإلاّ صار الاعتراضُ باباً خلفيّاً
+        يرفع به الموظّفُ درجتَه). فالتصحيحُ يقع عند المصدر — رابطُ مستندٍ يُعاد
+        تقييمُه، أو حدثُ استخدامٍ يُعكس، أو تصنيفُ رفضٍ يُصحَّح — ثمّ تُطلب هذه
+        النقطةُ فتُعاد اللقطة على البيانات المصحَّحة.
+
+        ولها مبرّرٌ مسجَّلٌ لا رتبةٌ وحدَها: طلبٌ **مقبولٌ** على الشهر نفسِه شرطُ
+        قبولها، وإلاّ 400 بـ`review_request_not_accepted`.
+        """
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "إعادةُ اللقطة لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            snapshot = recapture_performance_after_accepted_review(
+                review_request=self.get_object(), actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        # **المُسلسِلُ القائمُ لا حمولةٌ مكتوبةٌ باليد**: فعلا `open`/`resolve` المجاوران
+        # يمرّان بمُسلسِلهما، وحمولةٌ يدويّةٌ هنا تُعيد كتابةَ حقولٍ يُصدّرها
+        # `PerformanceSnapshotSerializer` سلفاً — ثمّ تنحرف عنه في نوعِ `composite_score`
+        # (`Decimal` يُصيَّر رقماً لا نصّاً) بلا ما يُمسكها.
+        return Response(PerformanceSnapshotSerializer(snapshot).data, status=status.HTTP_200_OK)
 
 
 class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):

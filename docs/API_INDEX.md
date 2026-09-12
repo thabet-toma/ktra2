@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **805**
+عدد النقاط: **806**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -622,6 +622,7 @@
 | `/api/platform/ops/performance-review-requests/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-review-requests/open/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-review-requests/{pk}/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-review-requests/{pk}/recapture/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-review-requests/{pk}/resolve/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/capture/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |

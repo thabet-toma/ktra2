@@ -109,6 +109,47 @@ export const listMyPerformanceReviewRequests = async (): Promise<PerformanceRevi
     >("platform/ops/performance-review-requests/"),
   );
 
+/**
+ * اسمٌ ثانٍ لنفس النداء لا نسخةٌ ثانيةٌ منه: الخادمُ (`get_queryset`) هو من يفرّق
+ * الجمهورَ — مديرُ العمليات يرى كلَّ الاعتراضات، والموظّفُ اعتراضاتِه هو وحدَه.
+ * فدالّتان بنفس المسار والنوع كانتا ستنحرفان عند أوّل تعديلٍ يُنسى في إحداهما.
+ * وبقاءُ الاسمين يُبقي كلَّ موضعِ نداءٍ صادقاً عن جمهوره.
+ *
+ * وهذه القراءةُ الإداريّةُ كانت بلا مستدعٍ إطلاقاً — فلا شاشةَ لمدير العمليات
+ * يردّ منها على اعتراض موظّف (التذكرة 210-F).
+ */
+export const listPerformanceReviewRequestsForManager = listMyPerformanceReviewRequests;
+
+/**
+ * ردُّ مدير العمليات على اعتراض — قبولاً أو رفضاً، بردٍّ مكتوبٍ إلزامياً في
+ * الحالتين. `accepted` مطابقةً حرفيّاً لـ`ResolvePerformanceReviewSerializer`
+ * الخادميّ (`platform_ops/serializers.py`) — لا حقل `status` هنا.
+ */
+export const resolvePerformanceReviewRequest = (
+  id: number,
+  input: { accepted: boolean; resolution_note: string },
+) => apiPostObject<PerformanceReviewRequestRow>(`platform/ops/performance-review-requests/${id}/resolve/`, input);
+
+export interface RecapturedSnapshot {
+  id: number;
+  employee: number;
+  employee_name: string;
+  period_year: number;
+  period_month: number;
+  status: string;
+  /** `Decimal` يصل **رقماً** لا نصّاً: مُرمِّزُ DRF يحوّله `float`. */
+  composite_score: number | null;
+  sample_size: number;
+}
+
+/**
+ * الخطوةُ الثانيةُ من القبول: تُعاد اللقطةُ على البيانات **بعد** تصحيحها عند
+ * المصدر. القبولُ وحدَه لا يمسّ الدرجة عمداً — وبلا هذا الزرّ كان يبقى وعداً
+ * بلا أثر، إذ لا مسارَ آخرَ في النظام يستدعي `force_refresh`.
+ */
+export const recapturePerformanceAfterAcceptedReview = (id: number) =>
+  apiPostObject<RecapturedSnapshot>(`platform/ops/performance-review-requests/${id}/recapture/`, {});
+
 /** الموظّفُ يُشتقّ من الجلسة لا من الحمولة — لا يفتح أحدٌ اعتراضاً باسم غيره. */
 export const openPerformanceReviewRequest = (input: {
   period_year: number;

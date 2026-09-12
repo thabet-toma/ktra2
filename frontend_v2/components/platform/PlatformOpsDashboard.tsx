@@ -26,11 +26,12 @@ import { EmployeeWalletPanel } from "./EmployeeWalletPanel";
 import { IntegrationKeysPanel } from "./IntegrationKeysPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
 import { ProfitabilityPanel } from "./ProfitabilityPanel";
+import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
 
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
   | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys" | "champions"
-  | "profitability";
+  | "profitability" | "review_requests";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -332,6 +333,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         >
           الربحيّة
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("review_requests")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "review_requests" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          اعتراضات الأداء
+        </button>
       </div>
 
       {activeTab === "work_orders" && <WorkOrdersPanel />}
@@ -343,6 +353,7 @@ export const PlatformOpsDashboard: React.FC = () => {
       {activeTab === "integration_keys" && <IntegrationKeysPanel />}
       {activeTab === "champions" && <ChampionsPanel />}
       {activeTab === "profitability" && <ProfitabilityPanel />}
+      {activeTab === "review_requests" && <PerformanceReviewRequestsPanel />}
 
       {activeTab === "overview" && (
         <>
