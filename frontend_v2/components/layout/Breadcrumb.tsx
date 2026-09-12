@@ -11,6 +11,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'platform-ops': 'مركز قيادة كترا',
   'platform-hiring': 'التوظيف المنصّي',
   'platform-billing': 'فواتير خدمة المتابعة',
+  'platform-employee-space': 'مساحتي — عمليات المنصة',
   'my-agent': 'من يمسك دفاتري',
   tasks: 'مهامي',
   'task-management': 'إدارة المهام',

@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   addWorkOrderComment,
+  assignWorkOrder,
+  changeWorkOrderPriority,
   createWorkOrder,
   getEmployeeWorkOrderQueue,
   linkWorkOrderDocument,
@@ -22,14 +24,27 @@ import {
   WorkOrderDocumentLinkRow,
   WORK_ORDER_STATUS_LABELS,
   WORK_ORDER_TRANSITIONS,
+  WorkOrderPriority,
   WorkOrderStatus,
 } from "../../services/platformWorkOrdersApi";
+import { listAssignmentCandidates, type AssignmentCandidateRow } from "../../services/platformOpsApi";
 import { CompanyPicker } from "./CompanyPicker";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { useAuth } from "../../contexts/AuthContext";
+import { usePlatformStaffCapabilitiesState } from "../../hooks/usePlatformStaffCapabilities";
+
+/** خياراتُ نموذج الأولويّة وحدها — عرضُ صفٍّ قائمٍ يبقى من `priority_display` الخادميّ. */
+const PRIORITY_OPTION_LABELS: Record<WorkOrderPriority, string> = {
+  low: "منخفضة",
+  normal: "عادية",
+  high: "مرتفعة",
+  urgent: "عاجلة",
+};
+const PRIORITY_OPTIONS: WorkOrderPriority[] = ["low", "normal", "high", "urgent"];
 
 /**
  * ألوانٌ فقط — **لا تسميات**. اسمُ الأولوية يأتي من الخادم (`priority_display`)
@@ -68,8 +83,9 @@ function formatDateTime(value: string | null | undefined): string {
 
 const WorkOrderDetail: React.FC<{
   workOrder: WorkOrderDetailRow;
+  isManager: boolean;
   onChanged: (updated: WorkOrderDetailRow) => void;
-}> = ({ workOrder, onChanged }) => {
+}> = ({ workOrder, isManager, onChanged }) => {
   const toast = useToast();
   const confirm = useConfirm();
   const [comments, setComments] = useState<WorkOrderCommentRow[]>([]);
@@ -78,6 +94,12 @@ const WorkOrderDetail: React.FC<{
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+
+  const [candidates, setCandidates] = useState<AssignmentCandidateRow[]>([]);
+  const [assigneeChoice, setAssigneeChoice] = useState<string>("");
+  const [busyAssign, setBusyAssign] = useState(false);
+  const [priorityChoice, setPriorityChoice] = useState<WorkOrderPriority>(workOrder.priority);
+  const [busyPriority, setBusyPriority] = useState(false);
 
   const [newComment, setNewComment] = useState("");
   const [commentVisibility, setCommentVisibility] = useState<"internal" | "client_visible">("internal");
@@ -126,8 +148,52 @@ const WorkOrderDetail: React.FC<{
   useEffect(() => {
     loadDetail();
     setSelectedLinkIds([]);
+    setPriorityChoice(workOrder.priority);
+    setAssigneeChoice(workOrder.assignee ? String(workOrder.assignee) : "");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workOrder.id]);
+
+  useEffect(() => {
+    if (!isManager) {
+      setCandidates([]);
+      return;
+    }
+    let cancelled = false;
+    listAssignmentCandidates(workOrder.tenant)
+      .then((rows) => { if (!cancelled) setCandidates(rows); })
+      .catch(() => { if (!cancelled) setCandidates([]); });
+    return () => { cancelled = true; };
+  }, [isManager, workOrder.tenant]);
+
+  const handleAssign = async () => {
+    setBusyAssign(true);
+    setError(null);
+    try {
+      const updated = await assignWorkOrder(workOrder.id, assigneeChoice ? Number(assigneeChoice) : null);
+      onChanged(updated);
+      toast(assigneeChoice ? "تم إسناد أمر العمل." : "أُعيد أمر العمل إلى الطابور.", "success");
+    } catch (err: unknown) {
+      toast(describeError(err, "تعذّر إسناد أمر العمل."), "error");
+    } finally {
+      setBusyAssign(false);
+    }
+  };
+
+  const handleChangePriority = async () => {
+    if (priorityChoice === workOrder.priority) return;
+    setBusyPriority(true);
+    setError(null);
+    try {
+      const updated = await changeWorkOrderPriority(workOrder.id, priorityChoice);
+      onChanged(updated);
+      toast("تم تعديل الأولوية.", "success");
+    } catch (err: unknown) {
+      toast(describeError(err, "تعذّر تعديل الأولوية."), "error");
+      setPriorityChoice(workOrder.priority);
+    } finally {
+      setBusyPriority(false);
+    }
+  };
 
   const handleTransition = async (target: WorkOrderStatus) => {
     setBusyTransition(target);
@@ -290,6 +356,57 @@ const WorkOrderDetail: React.FC<{
       {notice && (
         <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
           {notice}
+        </div>
+      )}
+
+      {/* الإسناد والأولوية — مدير العمليات وحده (القصص ١٣، ٣٤) */}
+      {isManager && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4">
+          <h3 className="text-xs font-bold text-slate-700 mb-2">الإسناد والأولوية</h3>
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={assigneeChoice}
+              onChange={(e) => setAssigneeChoice(e.target.value)}
+              className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg min-w-[180px]"
+            >
+              <option value="">بلا مسؤول (طابور)</option>
+              {candidates.map((c) => (
+                <option key={c.employee} value={c.employee}>
+                  {c.employee_name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleAssign}
+              disabled={busyAssign}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+            >
+              {busyAssign ? "..." : "إسناد"}
+            </button>
+            <select
+              value={priorityChoice}
+              onChange={(e) => setPriorityChoice(e.target.value as WorkOrderPriority)}
+              className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            >
+              {PRIORITY_OPTIONS.map((p) => (
+                <option key={p} value={p}>
+                  {PRIORITY_OPTION_LABELS[p]}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={handleChangePriority}
+              disabled={busyPriority || priorityChoice === workOrder.priority}
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+            >
+              {busyPriority ? "..." : "حفظ الأولوية"}
+            </button>
+          </div>
+          <p className="text-[10px] text-slate-400 mt-1">
+            المسؤول الحالي: {workOrder.assignee_name || "بلا مسؤول"} — الأولوية الحالية: {workOrder.priority_display}
+          </p>
         </div>
       )}
 
@@ -631,6 +748,15 @@ const NewWorkOrderForm: React.FC<{ onCreated: () => void }> = ({ onCreated }) =>
 };
 
 export const WorkOrdersPanel: React.FC = () => {
+  const { currentUser } = useAuth();
+  // فشلُ نداء القدرات لا يُترجَم إلى «لستَ مديراً»: أفعالُ المدير تُخفى، لكنّ سبباً
+  // وزرَّ إعادةِ محاولةٍ يظهران — وإلا اختفت أزرارُ الإنشاء والإسناد بلا تفسير.
+  const { capabilities, failed: capabilitiesFailed, reload: reloadCapabilities } =
+    usePlatformStaffCapabilitiesState(
+      currentUser?.id ? String(currentUser.id) : undefined,
+      !!currentUser?.isSuperAdmin,
+    );
+  const isManager = capabilities.is_platform_admin;
   const [queue, setQueue] = useState<WorkOrderDetailRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -673,15 +799,29 @@ export const WorkOrdersPanel: React.FC = () => {
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-bold text-slate-800">طابور أوامر العمل</h2>
-            <button
-              type="button"
-              onClick={() => setShowCreate((v) => !v)}
-              className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
-            >
-              {showCreate ? "إخفاء" : "+ جديد"}
-            </button>
+            {isManager && (
+              <button
+                type="button"
+                onClick={() => setShowCreate((v) => !v)}
+                className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
+              >
+                {showCreate ? "إخفاء" : "+ جديد"}
+              </button>
+            )}
           </div>
           {error && <p className="text-xs text-rose-600 mb-2">{error}</p>}
+          {capabilitiesFailed && (
+            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+              <span>تعذّر التحقّق من صلاحيّاتك، فأفعالُ مدير العمليات مخفيّةٌ مؤقّتاً.</span>
+              <button
+                type="button"
+                onClick={reloadCapabilities}
+                className="px-2 py-1 font-bold bg-amber-100 hover:bg-amber-200 rounded-lg"
+              >
+                إعادة المحاولة
+              </button>
+            </div>
+          )}
           {loading ? (
             <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
           ) : queue.length === 0 ? (
@@ -717,7 +857,7 @@ export const WorkOrdersPanel: React.FC = () => {
             </ul>
           )}
         </div>
-        {showCreate && <NewWorkOrderForm onCreated={loadQueue} />}
+        {isManager && showCreate && <NewWorkOrderForm onCreated={loadQueue} />}
       </div>
 
       <div className="lg:col-span-2">
@@ -726,7 +866,7 @@ export const WorkOrdersPanel: React.FC = () => {
             اختر أمر عملٍ من الطابور لعرض تفاصيله
           </div>
         ) : (
-          <WorkOrderDetail workOrder={selected} onChanged={handleChanged} />
+          <WorkOrderDetail workOrder={selected} isManager={isManager} onChanged={handleChanged} />
         )}
       </div>
     </div>

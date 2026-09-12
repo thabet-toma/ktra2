@@ -23,10 +23,11 @@ import { WorkOrdersPanel } from "./WorkOrdersPanel";
 import { PilotSettingsPanel } from "./PilotSettingsPanel";
 import { CompensationMonthClosePanel } from "./CompensationMonthClosePanel";
 import { EmployeeWalletPanel } from "./EmployeeWalletPanel";
+import { IntegrationKeysPanel } from "./IntegrationKeysPanel";
 
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
-  | "pilot_settings" | "compensation_close" | "wallet";
+  | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -301,6 +302,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         >
           محفظة الموظف
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("integration_keys")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "integration_keys" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          مفاتيح قنوات الإدخال
+        </button>
       </div>
 
       {activeTab === "work_orders" && <WorkOrdersPanel />}
@@ -309,6 +319,7 @@ export const PlatformOpsDashboard: React.FC = () => {
       {activeTab === "pilot_settings" && <PilotSettingsPanel />}
       {activeTab === "compensation_close" && <CompensationMonthClosePanel />}
       {activeTab === "wallet" && <EmployeeWalletPanel />}
+      {activeTab === "integration_keys" && <IntegrationKeysPanel />}
 
       {activeTab === "overview" && (
         <>

@@ -4981,7 +4981,7 @@ def adjust_wallet_line(
 
 
 def get_employee_wallet_summary(*, employee: PlatformEmployee, period_year: int, period_month: int) -> dict:
-    """محفظة الموظف لشهرٍ واحد: مؤكَّد/معلَّق مع فتح مصدر كلّ سطر (§٧، §٨)."""
+    """محفظة الموظف لشهرٍ واحد: مؤكَّد/معلَّق/متوقَّع مع فتح مصدر كلّ سطر (§٧، §٨)."""
     salary_lines = list(
         EmployeeSalaryLine.objects.filter(
             employee=employee, period_year=period_year, period_month=period_month,
@@ -5011,6 +5011,10 @@ def get_employee_wallet_summary(*, employee: PlatformEmployee, period_year: int,
         "totals": {
             "confirmed": salary_confirmed + commission_confirmed,
             "pending": salary_pending + commission_pending,
+            # §٧ تطلب ثلاثةَ أرقامٍ لا اثنين: «مؤكد، معلق، متوقع». والمتوقَّعُ حصيلةُ
+            # الشهر **لو تحقّق كلُّ شرطٍ ناقص** — مشتقٌّ لا مُخترَع، و`REVERSED`
+            # خارجَه كما هو خارجُ الآخرَين: سطرٌ عُكس ليس مبلغاً يُنتظَر.
+            "expected": salary_confirmed + commission_confirmed + salary_pending + commission_pending,
         },
     }
 

@@ -307,8 +307,25 @@ export interface PilotAxisBreakdown {
   applicable: boolean;
   weight: number;
   weight_pct: number;
+  /**
+   * الوزنُ **كما وضعته السياسة** قبل إعادة التوزيع — يعلنه الخادم لأنّ الفعليَّ
+   * وحدَه يُخفي أنّ محوراً غيرَ منطبقٍ أُسقط ووُزّع وزنُه، فيقرأ الموظّفُ وزناً لم
+   * تضعه السياسةُ قطّ ولا يعرف أنّ محوراً غاب (التذكرة 210-D، §٥).
+   */
+  weight_original: number;
+  weight_original_pct: number;
   score: number;
   score_pct: number;
+  /**
+   * النسبةُ الخامُّ لمحور إنجاز العمل قبل القصّ عند 100 — منها يُقرأ الفائضُ فوق
+   * الطاقة. لا تصل إلا لهذا المحور، و`null` حين لا مقامَ له.
+   */
+  raw_percent?: number | null;
+  /**
+   * روابطُ مستنداتٍ من نوعٍ لا بندَ له في الكتالوج النشط: مقامٌ ناقصٌ يرفع الدرجةَ
+   * بغير حقّ، فيُعرَض تحذيراً بدل أن يُطرح صامتاً. لمحور إنجاز العمل وحدَه.
+   */
+  uncatalogued_document_links?: number;
   weighted_contribution: number;
   numerator: number;
   denominator: number;
@@ -339,7 +356,8 @@ export interface EmployeeWalletSummary {
   employee_id: number;
   period_year: number;
   period_month: number;
-  totals: { confirmed: string; pending: string };
+  /** §٧: ثلاثةُ أرقام. `expected` = المؤكَّد + المعلَّق، أي حصيلةُ الشهر لو تحقّق كلُّ شرطٍ ناقص. */
+  totals: { confirmed: string; pending: string; expected: string };
   salary_lines: EmployeeSalaryLineRow[];
   commission_lines: AcquisitionCommissionLineRow[];
 }

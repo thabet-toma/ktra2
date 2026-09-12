@@ -3,8 +3,6 @@ import { Loader2, RotateCcw, Search, Wallet } from "lucide-react";
 
 import { getPlatformOpsDashboard } from "../../services/platformOpsApi";
 import {
-  PILOT_AXES,
-  PILOT_AXIS_LABELS,
   WALLET_LINE_NEXT_STATUS,
   WALLET_LINE_STATUS_LABEL,
   adjustCommissionLine,
@@ -24,6 +22,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { PilotAxesTable } from "./PilotAxesTable";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 
 const displayError = (cause: unknown): string =>
@@ -260,40 +259,7 @@ export const EmployeeWalletPanel: React.FC = () => {
           {performance.composite_score !== null && (
             <p className="text-sm font-bold">النتيجة المركّبة: {formatNumber(performance.composite_score)}%</p>
           )}
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-slate-200 text-slate-500">
-                  <th className="py-1.5 pr-2 text-right">المحور</th>
-                  <th className="py-1.5 px-2 text-right">منطبق</th>
-                  <th className="py-1.5 px-2 text-right">البسط</th>
-                  <th className="py-1.5 px-2 text-right">المقام</th>
-                  <th className="py-1.5 px-2 text-right">النتيجة</th>
-                  <th className="py-1.5 px-2 text-right">الوزن</th>
-                  <th className="py-1.5 px-2 text-right">المساهمة</th>
-                  <th className="py-1.5 px-2 text-right">الاستبعادات</th>
-                </tr>
-              </thead>
-              <tbody>
-                {PILOT_AXES.map((axis) => {
-                  const detail = performance.axes[axis];
-                  if (!detail) return null;
-                  return (
-                    <tr key={axis} className="border-b border-slate-100">
-                      <td className="py-1.5 pr-2 font-medium">{PILOT_AXIS_LABELS[axis]}</td>
-                      <td className="py-1.5 px-2">{detail.applicable ? "نعم" : "لا"}</td>
-                      <td className="py-1.5 px-2">{formatNumber(detail.numerator)}</td>
-                      <td className="py-1.5 px-2">{formatNumber(detail.denominator)}</td>
-                      <td className="py-1.5 px-2">{formatNumber(detail.score_pct)}%</td>
-                      <td className="py-1.5 px-2">{formatNumber(detail.weight_pct)}%</td>
-                      <td className="py-1.5 px-2">{formatNumber(detail.weighted_contribution)}</td>
-                      <td className="py-1.5 px-2">{detail.exclusions.length ? detail.exclusions.join("، ") : "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+          <PilotAxesTable performance={performance} />
         </div>
       )}
     </section>

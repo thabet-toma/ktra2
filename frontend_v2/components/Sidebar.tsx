@@ -618,6 +618,23 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             </div>
           )}
 
+          {/* التذكرة 210-E، §١: مساحةُ موظّف عمليات المنصة — أكبرُ بابٍ ميّتٍ في
+              المواصفة، طبقةُ الصلاحيّات جاهزةٌ منذ #207 ولا مدخل لها. نفسُ نمط
+              مسؤول التوظيف أعلاه بالحرف. */}
+          {!user.isSuperAdmin && platformStaff.is_platform_employee && (
+            <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-1 dark:border-blue-900 dark:bg-blue-950/20">
+              <button
+                type="button"
+                onClick={() => { setView("platform-employee-space"); if (isMobile) setIsMobileMenuOpen(false); }}
+                className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-employee-space") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}
+                title="مساحتي — عمليات المنصة"
+              >
+                <ClipboardList className="h-5 w-5 flex-shrink-0" />
+                {showText && <span className="font-bold">مساحتي — عمليات المنصة</span>}
+              </button>
+            </div>
+          )}
+
           {/* ISSUE #83: بيان الشريط — حين يوجد بيانٌ لهذا القالب يُرسَم الشريط
               **منه** بدلاً من مجموعات القالب اليدوية أدناه (المصدر الجذري الذي
               فتحته التذكرة: مجموعاتٌ مكتوبةٌ لتاجر، والقالب يحذف منها فيبقى

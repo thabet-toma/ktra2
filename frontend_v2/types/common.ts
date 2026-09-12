@@ -14,6 +14,7 @@ export type AppView =
     | "platform-ops"
     | "platform-hiring"
     | "platform-billing"
+    | "platform-employee-space"
     | "my-agent"
     | "tasks"
     | "task-management"

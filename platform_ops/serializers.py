@@ -381,6 +381,8 @@ class IntegrationKeySerializer(serializers.ModelSerializer):
     """
 
     company_name = serializers.CharField(source="tenant.CompanyName", read_only=True)
+    channel_display = serializers.CharField(source="get_channel_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = IntegrationKey
@@ -389,7 +391,9 @@ class IntegrationKeySerializer(serializers.ModelSerializer):
             "tenant",
             "company_name",
             "channel",
+            "channel_display",
             "status",
+            "status_display",
             "name",
             "revoked_at",
             "revocation_reason",

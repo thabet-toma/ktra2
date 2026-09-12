@@ -3,6 +3,7 @@ import {
   activateServiceUnitCatalog,
   cloneServiceUnitCatalog,
   createServiceUnitCatalogDraft,
+  getActiveServiceUnitCatalog,
   listServiceUnitCatalogs,
   SERVICE_DOCUMENT_TYPE_LABELS,
   SERVICE_DOCUMENT_TYPES,
@@ -71,6 +72,7 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [activeCatalogId, setActiveCatalogId] = useState<number | null>(null);
   const [form, setForm] = useState<Record<ServiceDocumentType, EntryFormRow>>(buildFormFromCatalog(null));
   const [savingEntries, setSavingEntries] = useState(false);
   const [activationReason, setActivationReason] = useState("");
@@ -90,8 +92,11 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
       const rows = await listServiceUnitCatalogs();
       const sorted = [...rows].sort((a, b) => b.version - a.version);
       setCatalogs(sorted);
+      // النسخةُ السارية الآن — لا أحدث نسخةٍ بالإصدار، فقد تكون مسودةً غيرَ مفعَّلة بعد.
+      const active = await getActiveServiceUnitCatalog().catch(() => null);
+      setActiveCatalogId(active?.id ?? null);
       if (!keepSelection || !sorted.some((c) => c.id === selectedId)) {
-        setSelectedId(sorted[0]?.id ?? null);
+        setSelectedId(active?.id ?? sorted[0]?.id ?? null);
       }
     } catch (err: unknown) {
       setError(describeError(err, "تعذّر تحميل كتالوج وحدات الخدمة."));
@@ -214,7 +219,9 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                   }`}
                 >
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">نسخة #{c.version}</span>
+                    <span className="text-xs font-bold text-slate-800">
+                      نسخة #{c.version} {c.id === activeCatalogId && "★"}
+                    </span>
                     <span
                       className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
                         EFFECTIVE_STATE_STYLES[c.effective_state] || "bg-slate-100 text-slate-600"
@@ -223,7 +230,9 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                       {EFFECTIVE_STATE_LABELS[c.effective_state] || c.effective_state}
                     </span>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">{c.entries.length} بند</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">
+                    {c.entries.length} بند{c.id === activeCatalogId ? " — الساريةُ حالياً على الاحتساب" : ""}
+                  </div>
                 </button>
               </li>
             ))}

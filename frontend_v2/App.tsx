@@ -80,6 +80,7 @@ const PlatformOpsDashboard = lazyPage(() => import("./components/platform/Platfo
 const MyAgentBooksPage = lazyPage(() => import("./components/my-agent/MyAgentBooksPage").then((m) => ({ default: m.MyAgentBooksPage })));
 const PlatformHiringScreen = lazyPage(() => import("./components/platform-hiring/PlatformHiringScreen").then((m) => ({ default: m.PlatformHiringScreen })));
 const BillingRecordsScreen = lazyPage(() => import("./components/platform/BillingRecordsScreen").then((m) => ({ default: m.BillingRecordsScreen })));
+const PlatformEmployeeWorkspace = lazyPage(() => import("./components/platform/PlatformEmployeeWorkspace").then((m) => ({ default: m.PlatformEmployeeWorkspace })));
 const TaskManagement = lazyPage(() => import("./components/TaskManagement").then((m) => ({ default: m.TaskManagement })));
 const UserManagement = lazyPage(() => import("./components/UserManagement").then((m) => ({ default: m.UserManagement })));
 const ActivityLogPage = lazyPage(() => import("./components/ActivityLogPage").then((m) => ({ default: m.ActivityLogPage })));
@@ -242,6 +243,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "platform-ops": "/super-admin/platform-ops",
   "platform-billing": "/super-admin/platform-billing",
   "platform-hiring": "/platform/hiring",
+  "platform-employee-space": "/platform/employee-space",
   "my-agent": "/my-agent",
   tasks: "/tasks",
   "task-management": "/task-management",
@@ -1714,6 +1716,12 @@ const App: React.FC = () => {
 
       case "platform-hiring":
         return <PlatformHiringScreen canManageRecruiters={!!currentUser!.isSuperAdmin} />;
+
+      // 210-E §١: مساحةُ موظّف عمليات المنصة. لا حارسَ `isSuperAdmin` هنا عمداً —
+      // جمهورُها موظّفٌ ليس سوبر أدمن، والمكوّنُ نفسُه يحسم الصلاحيّة عبر
+      // `usePlatformStaffCapabilitiesState` (تحميلٌ ثمّ سماحٌ أو رفض).
+      case "platform-employee-space":
+        return <PlatformEmployeeWorkspace />;
 
       case "dashboard": {
         // ISSUE #87: شاشتا بداية القالبين — تسبقان فرع isManager فكلا القالبين
