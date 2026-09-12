@@ -22,6 +22,17 @@ _single_tenant_cache: Tenant | None = None
 _single_tenant_checked: bool = False
 
 
+def _resolve_the_only_tenant():
+    """الشركةُ الوحيدةُ في القاعدة، أو `None` إن لم تكن وحيدة.
+
+    استعلامٌ **واحد** يجيب السؤالين معاً — «كم شركة؟» و«أيُّها؟» — بعددِ الرحلات
+    الذي كان يكلّفه `count()` وحدَه: شريحةُ صفَّين تكفي للتمييز بين صفرٍ وواحدٍ
+    وأكثر، وتحمل الصفَّ نفسَه فلا تلزم رحلةٌ ثانيةٌ لجلبه.
+    """
+    rows = list(Tenant.objects.all()[:2])
+    return rows[0] if len(rows) == 1 else None
+
+
 def get_tenant(request=None, *, raise_on_missing: bool = False):
     global _single_tenant_cache, _single_tenant_checked
 
@@ -97,26 +108,27 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
     # If there's exactly ONE tenant in the entire DB, use it automatically.
     # This preserves backward compatibility for single-tenant deployments.
     if not _single_tenant_checked:
-        count = Tenant.objects.count()
-        if count == 1:
-            _single_tenant_cache = Tenant.objects.first()
+        _single_tenant_cache = _resolve_the_only_tenant()
         _single_tenant_checked = True
 
     if _single_tenant_cache is not None:
-        # Re-verify it's still the only one (invalidate cache if more were added).
-        # P2-2 (SCALABILITY_AUDIT §1.5): هذا العدّ كان يُنفَّذ على **كل** طلب في
-        # النشر أحادي الشركة (الحالة الشائعة) — استعلام كامل على جدول الشركات
-        # لمجرد تأكيد ما لا يتغيّر إلا عند إنشاء شركة. الآن يُعاد التحقق مرة لكل
-        # طلب لا مرة لكل استدعاء، وإنشاء الشركة الثانية يبطل الكاش في الطلب التالي.
+        # يُعاد التحقق مرة لكل طلب لا مرة لكل استدعاء (P2-2، SCALABILITY_AUDIT §1.5):
+        # كان العدّ يُنفَّذ على **كل** طلب في النشر أحادي الشركة لمجرد تأكيد ما لا
+        # يتغيّر إلا عند إنشاء شركة.
+        #
+        # **والتحقّق يسأل عن الهويّة لا عن العدد.** العدُّ وحدَه لا يقول أيَّ شركةٍ
+        # هي: تُحذف الوحيدةُ وتُنشأ غيرُها فيبقى العددُ واحداً ويظلّ الكاشُ يسلّم
+        # الكائنَ المحذوف، فيُنسَب كلُّ ما يُكتب بعدها إلى شركةٍ لا وجودَ لها —
+        # وأوّلُ ضحاياه `log_activity` يكتب `ActivityLog` بمفتاحٍ أجنبيٍّ معلَّق.
+        # و`_resolve_the_only_tenant()` بكلفة `count()` نفسِها ويعيد الصفَّ معه.
         recheck_done = getattr(request, '_single_tenant_rechecked', False) if request is not None else False
-        if recheck_done or Tenant.objects.count() == 1:
+        if not recheck_done:
+            _single_tenant_cache = _resolve_the_only_tenant()
+        if _single_tenant_cache is not None:
             if request is not None:
                 request._single_tenant_rechecked = True
                 _validate_user_tenant_access(request, _single_tenant_cache)
             return _single_tenant_cache
-        else:
-            # Multiple tenants now exist — disable auto-resolve
-            _single_tenant_cache = None
 
     # ── 4. No tenant resolved ──
     logger.warning(
