@@ -33,6 +33,9 @@ import { EmployeeProfileDrawer } from "./EmployeeProfileDrawer";
 import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
 import { countPresent, derivePresence, sortByPresence } from "../../utils/roomPresence";
 import { formatLastActive } from "../../utils/lastActiveFormat";
+import { DashboardHeroStrip } from "./DashboardHeroStrip";
+import { TeamTargetBars } from "./TeamTargetBars";
+import { LayoutDashboard, ClipboardList, DoorOpen, CalendarClock } from "lucide-react";
 
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
@@ -226,7 +229,10 @@ export const PlatformOpsDashboard: React.FC = () => {
   };
 
   return (
-    <div className="platform-surface min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8" dir="rtl">
+    <div
+      className="platform-surface min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8 pb-24 md:pb-6 lg:pb-8"
+      dir="rtl"
+    >
       {/* 1. ترويسة الصفحة */}
       <header className="flex flex-wrap items-center justify-between gap-4 pb-6 mb-6 border-b border-slate-200">
         <div>
@@ -274,8 +280,9 @@ export const PlatformOpsDashboard: React.FC = () => {
         </div>
       </header>
 
-      {/* تبويبات لوحة عمليات المنصة */}
-      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1 mb-6">
+      {/* تبويبات لوحة عمليات المنصة — في العرض الواسع فقط؛ الضيّقُ له الشريطُ
+          السفليُّ العائم أدناه بأربعة تبويباتٍ لا ثلاثةَ عشر. */}
+      <div className="hidden md:inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1 mb-6">
         <button
           type="button"
           onClick={() => setActiveTab("overview")}
@@ -395,6 +402,58 @@ export const PlatformOpsDashboard: React.FC = () => {
         </button>
       </div>
 
+      {/* شريطُ التنقّل السفليُّ العائم — بديلُ صفِّ التبويبات في العرض الضيّق وحدَه
+          (دون md)؛ أربعةُ تبويباتٍ فقط لا ثلاثةَ عشر. */}
+      <nav
+        dir="rtl"
+        className="md:hidden fixed bottom-0 inset-x-0 z-30 flex items-stretch justify-around bg-white border-t border-slate-200 shadow-[0_-2px_8px_rgba(0,0,0,0.06)]"
+      >
+        <button
+          type="button"
+          onClick={() => setActiveTab("overview")}
+          aria-label="نظرة عامّة"
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-bold transition ${
+            activeTab === "overview" ? "text-blue-700" : "text-slate-500"
+          }`}
+        >
+          <LayoutDashboard className="w-5 h-5" />
+          نظرة عامّة
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("work_orders")}
+          aria-label="أوامر العمل"
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-bold transition ${
+            activeTab === "work_orders" ? "text-blue-700" : "text-slate-500"
+          }`}
+        >
+          <ClipboardList className="w-5 h-5" />
+          أوامر العمل
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("workspace_room")}
+          aria-label="مساحة العمل"
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-bold transition ${
+            activeTab === "workspace_room" ? "text-blue-700" : "text-slate-500"
+          }`}
+        >
+          <DoorOpen className="w-5 h-5" />
+          مساحة العمل
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("meetings")}
+          aria-label="الاجتماعات"
+          className={`flex-1 flex flex-col items-center gap-0.5 py-2 text-[11px] font-bold transition ${
+            activeTab === "meetings" ? "text-blue-700" : "text-slate-500"
+          }`}
+        >
+          <CalendarClock className="w-5 h-5" />
+          الاجتماعات
+        </button>
+      </nav>
+
       {activeTab === "work_orders" && <WorkOrdersPanel />}
       {activeTab === "catalog" && <ServiceUnitCatalogPanel />}
       {activeTab === "usage_ledger" && <ServiceUsageLedgerPanel />}
@@ -425,6 +484,23 @@ export const PlatformOpsDashboard: React.FC = () => {
 
       {activeTab === "overview" && (
         <>
+          {/* شريطُ الأرقام العلويّ وملخّصُ أداء الفريق — كلُّ رقمٍ فيهما من
+              حمولة اللوحة نفسِها (`data`)، لا رقمَ مخترَعاً ولا مالياً.
+
+              **ولا يُرسَمان قبل وصول الحمولة**: صفرٌ بخطٍّ عريضٍ أثناء التحميل
+              أو بعد فشلِه يُقرأ «لا أمرَ عملٍ متأخّراً» — وهو خبرٌ لم يقله أحد.
+              الغيابُ أصدقُ من رقمٍ لم يُحسَب بعد. */}
+          {data && (
+            <>
+              <DashboardHeroStrip
+                employees={data.employees || []}
+                presentCount={countPresent(roomOccupants)}
+                totalCount={roomOccupants.length}
+              />
+              <TeamTargetBars employees={data.employees || []} />
+            </>
+          )}
+
       {/* خطأ التحميل إن وجد */}
       {error && (
         <div className="mb-6 p-4 bg-rose-50 border border-rose-200 rounded-xl text-sm text-rose-800 flex items-center justify-between">
