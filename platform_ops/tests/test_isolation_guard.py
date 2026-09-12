@@ -36,6 +36,7 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     "core.models",              # TenantAsset للمرفقات، وActivityLog لسجل «من يمسك دفاتري» (م٧)
     "core.platform_admin_api",  # IsPlatformAdmin لحراسة الصلاحيات
     "core.signals",             # company_member_changed إشارة تغيير عضوية الشركة
+    "core.urls",                # urlpatterns — حارسُ العزل (211-D) يعدّ المساراتِ من الـURLconf الحقيقيّ لا من قائمةٍ يدويّة: القائمةُ اليدويّةُ تتقادم بصمتٍ فيمرّ مسارٌ جديدٌ بلا حارس
     "core.terminology",         # term(tenant, key) — اسمُ المستند بمعجم الشركة لا حرفياً (م٧)
     "core.tenant_utils",        # get_tenant — المصدر الواحد لحلّ شركة المستخدم على نقاط م٧ الموجَّهة للزبون
     "hr.auth_api",              # issue_login_session — قبولُ الدعوة يُدخل صاحبَه بالمسار نفسِه الذي يسلكه الدخولُ العادي، لا بنسخةٍ ثانيةٍ منه (211-A)
