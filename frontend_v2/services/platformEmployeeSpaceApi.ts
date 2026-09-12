@@ -122,3 +122,33 @@ export const openPerformanceReviewRequest = (input: {
     axis: input.axis || "",
     reason: input.reason,
   });
+
+// ==============================================================================
+// KTRA Champions (§١٠)
+// ==============================================================================
+
+export interface ChampionEntry {
+  employee_id: number;
+  employee_name: string;
+  /** رقمُ الفئة بوحدتها — **لا مبلغَ أبداً**: الاكتسابُ عددُ عملاء لا قيمةُ عمولة. */
+  value: number;
+  /** الدليلُ نصّاً: الفئة والفترة ومصدرُ الرقم، بلا اسم عميلٍ ولا راتب. */
+  evidence: string;
+}
+
+export interface ChampionCategory {
+  category: string;
+  category_label: string;
+  unit: string;
+  /** القمّةُ وحدَها — §١٠ تمنع «ترتيب الأسوأ»، وقائمةٌ كاملةٌ تُنتجه ضمناً. */
+  entries: ChampionEntry[];
+}
+
+export interface ChampionsBoard {
+  period_year: number;
+  period_month: number;
+  categories: ChampionCategory[];
+}
+
+export const getChampionsBoard = (year: number, month: number) =>
+  apiGetObject<ChampionsBoard>(`platform/ops/champions/?year=${year}&month=${month}`);

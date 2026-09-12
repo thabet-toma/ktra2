@@ -23,7 +23,7 @@ from django.db.models import Avg, Max, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
-from core.date_ranges import filter_local_date_range
+from core.date_ranges import day_bounds, filter_local_date_range
 from core.activity import describe_activity_changes
 from core.models import ActivityLog
 from core.terminology import term
@@ -8829,6 +8829,473 @@ WORK_ORDER_PRIORITY_RANK: dict[str, int] = {
     WorkOrder.Priority.NORMAL: 1,
     WorkOrder.Priority.LOW: 0,
 }
+
+
+# ==============================================================================
+# ربحيّةُ العميل ومطابقةُ الخطة — Customer Profitability / Plan Fit (§٩)
+# ==============================================================================
+
+PROFITABILITY_PROFITABLE = "profitable"
+PROFITABILITY_WATCH = "watch"
+PROFITABILITY_REPRICE = "reprice_or_upgrade"
+PROFITABILITY_LOSING = "losing"
+
+PROFITABILITY_LABELS = {
+    PROFITABILITY_PROFITABLE: "مربح",
+    PROFITABILITY_WATCH: "يحتاج مراقبة",
+    PROFITABILITY_REPRICE: "يحتاج إعادة تسعير أو ترقية",
+    PROFITABILITY_LOSING: "خاسر",
+}
+
+#: عتباتُ الهامش كنسبةٍ من الإيراد — قواعدُ deterministic قابلةٌ للضبط كما تطلب §٩.
+PROFITABILITY_MARGIN_HEALTHY = Decimal("0.35")
+PROFITABILITY_MARGIN_WATCH = Decimal("0.15")
+
+#: اقتراحاتُ مطابقة الخطة الخمسةُ بنصّ §٩ — رموزٌ ثابتةٌ تقرؤها الواجهة.
+PLAN_FIT_UPGRADE = "upgrade_plan"
+PLAN_FIT_EXTRA_UNITS = "buy_extra_units"
+PLAN_FIT_ADJUST_SLA = "adjust_sla"
+PLAN_FIT_REQUEST_DATA = "request_customer_data"
+PLAN_FIT_HEALTH_PLAN = "health_remediation_plan"
+
+PLAN_FIT_LABELS = {
+    PLAN_FIT_UPGRADE: "ترقية الخطة",
+    PLAN_FIT_EXTRA_UNITS: "شراء وحدات إضافية",
+    PLAN_FIT_ADJUST_SLA: "تعديل الـSLA",
+    PLAN_FIT_REQUEST_DATA: "طلب بيانات من العميل",
+    PLAN_FIT_HEALTH_PLAN: "خطة علاج للصحة",
+}
+
+#: «استهلاكٌ مرتفعٌ **متكرّر**» (§٩) — شهرٌ واحدٌ حدثٌ، وشهران نمط.
+PLAN_FIT_REPEAT_MONTHS = 2
+
+
+def classify_profitability(*, revenue: Decimal, total_cost: Decimal) -> str:
+    """تصنيفُ الربحيّة بقاعدةٍ واحدةٍ لا باجتهادٍ في كلّ موضع.
+
+    الخسارةُ أوّلاً مهما كان الإيراد؛ ثمّ الهامشُ **نسبةً لا مبلغاً** — فشركةٌ تدفع
+    ٣٠٠ وتكلّف ٢٥٠ ليست كأخرى تدفع ٣٠٠٠ وتكلّف ٢٩٥٠ وإن تساوى الفرقُ عددياً.
+    وإيرادٌ صفريٌّ بتكلفةٍ موجبةٍ خاسرٌ لا «مراقب»: القسمةُ على صفرٍ لا تُموِّه حقيقة.
+    """
+    margin = revenue - total_cost
+    if margin < 0:
+        return PROFITABILITY_LOSING
+    if revenue <= 0:
+        return PROFITABILITY_PROFITABLE if total_cost <= 0 else PROFITABILITY_LOSING
+    ratio = margin / revenue
+    if ratio >= PROFITABILITY_MARGIN_HEALTHY:
+        return PROFITABILITY_PROFITABLE
+    if ratio >= PROFITABILITY_MARGIN_WATCH:
+        return PROFITABILITY_WATCH
+    return PROFITABILITY_REPRICE
+
+
+def _monthly_base_salary_for(employee_id: int, at: datetime.datetime | None = None) -> Decimal:
+    """الراتبُ الأساسيُّ الشهريُّ من سياسة التعويض السارية — الخاصّةُ بالموظّف أوّلاً.
+
+    ولا قاعدةَ اختيارٍ ثانيةً هنا: `get_active_employee_compensation_policy` هي
+    مَن يُرجّح الخاصّةَ على العامّة ويحترم نافذةَ السريان، و`get_default_...` هي
+    مَن يقرأ الافتراضيّاتِ من تعريف الحقول. كلاهما من 210-D، ونسخُ منطقِهما هنا
+    كان سيُنشئ مصدرَ حقيقةٍ ثالثاً للراتب.
+    """
+    policy = get_active_employee_compensation_policy(employee_id, at=at)
+    if policy is not None:
+        return Decimal(str(policy.base_salary))
+    return Decimal(str(get_default_compensation_policy_dict()["base_salary"]))
+
+
+def _chargeable_units_in_month(tenant_ids, year: int, month: int) -> dict:
+    """وحداتُ العميل المحسوبةُ عليه في شهرٍ محلّيّ — بلا `__year`/`__month`.
+
+    `approved_at` عمودُ وقتٍ لا تاريخ، ومقارنتُه بسنةٍ أو شهرٍ تمرّ في MySQL عبر
+    `CONVERT_TZ`، وجداولُ المناطق الزمنيّة فارغةٌ هنا فتعود **صفرَ صفوف** بصمت.
+    فالمدى المحلّيُّ الصريح عبر `core.date_ranges` هو الطريقُ الوحيد.
+    """
+    _, last_day = calendar.monthrange(year, month)
+    qs = ServiceUsageEvent.objects.filter(tenant_id__in=tenant_ids, chargeable_to_customer=True)
+    qs = filter_local_date_range(
+        qs, "approved_at",
+        date_from=datetime.date(year, month, 1),
+        date_to=datetime.date(year, month, last_day),
+    )
+    totals: dict = {}
+    for tenant_id, event_type, units in qs.values_list("tenant_id", "event_type", "units"):
+        amount = Decimal(str(units or 0))
+        sign = 1 if event_type == ServiceUsageEvent.EventType.USAGE else -1
+        totals[tenant_id] = totals.get(tenant_id, Decimal("0")) + sign * amount
+    return totals
+
+
+def build_plan_fit_suggestions(*, subscription, consumed_units, previous_consumed_units, health) -> list[dict]:
+    """اقتراحاتُ مطابقة الخطة — قواعدُ deterministic لا تنفّذ نفسَها (§٩).
+
+    خمسُ قواعدَ بنصّ المواصفة، ولكلٍّ دليلُها في الصفّ نفسِه: «كل رقم قابل للفتح
+    إلى مصادره». والترقيةُ تنفصل عن شراء الوحدات بالتكرار لا بالمقدار — تجاوزٌ
+    في شهرٍ يُشترى، وتجاوزٌ في شهرين يُرقّى.
+
+    **ولا فعلَ هنا ولا سعرَ يتغيّر**: «الاقتراح لا ينفذ نفسه ولا يغير سعراً أو
+    اشتراكاً دون تأكيد السوبر أدمن» — فهذه الدالّةُ قراءةٌ محضة، ونقطةُ الـAPI
+    التي تحملها `GET` وحدَها.
+    """
+    suggestions: list[dict] = []
+    included = Decimal(str(subscription.included_quota or 0))
+
+    if included > 0 and consumed_units >= included and previous_consumed_units >= included:
+        suggestions.append({
+            "code": PLAN_FIT_UPGRADE,
+            "label": PLAN_FIT_LABELS[PLAN_FIT_UPGRADE],
+            "reason": f"استهلاكٌ بلغ الحصّة في {PLAN_FIT_REPEAT_MONTHS} شهرين متتاليين.",
+            "evidence": {
+                "included_quota": float(included),
+                "consumed_units": float(consumed_units),
+                "previous_consumed_units": float(previous_consumed_units),
+            },
+        })
+    elif included > 0 and consumed_units > included:
+        suggestions.append({
+            "code": PLAN_FIT_EXTRA_UNITS,
+            "label": PLAN_FIT_LABELS[PLAN_FIT_EXTRA_UNITS],
+            "reason": "تجاوزٌ في هذا الشهر وحدَه — وحداتٌ إضافيّةٌ أرخصُ من ترقيةٍ مبكّرة.",
+            "evidence": {
+                "included_quota": float(included),
+                "consumed_units": float(consumed_units),
+                "overage_units": float(consumed_units - included),
+            },
+        })
+
+    service_rows = {row["reason_key"]: row for row in (health or {}).get("service_health", {}).get("breakdown", [])}
+    customer_rows = {row["reason_key"]: row for row in (health or {}).get("customer_cooperation", {}).get("breakdown", [])}
+
+    sla_row = service_rows.get("sla_breaches")
+    if sla_row and sla_row.get("count"):
+        suggestions.append({
+            "code": PLAN_FIT_ADJUST_SLA,
+            "label": PLAN_FIT_LABELS[PLAN_FIT_ADJUST_SLA],
+            "reason": "أعمالٌ تجاوزت الأجل المتّفَق عليه — الأجلُ نفسُه قد يكون غيرَ واقعيّ.",
+            "evidence": {"sla_breaches": sla_row.get("count")},
+        })
+
+    waiting = sum(int(customer_rows.get(key, {}).get("count") or 0) for key in ("waiting_customer", "long_waiting", "pending_comments"))
+    if waiting:
+        suggestions.append({
+            "code": PLAN_FIT_REQUEST_DATA,
+            "label": PLAN_FIT_LABELS[PLAN_FIT_REQUEST_DATA],
+            "reason": "أعمالٌ متوقّفةٌ بانتظار العميل — البياناتُ الناقصةُ هي العُنق.",
+            "evidence": {key: int(customer_rows.get(key, {}).get("count") or 0) for key in ("waiting_customer", "long_waiting", "pending_comments")},
+        })
+
+    service_score = (health or {}).get("service_health", {}).get("score")
+    if service_score is not None and service_score < 70:
+        suggestions.append({
+            "code": PLAN_FIT_HEALTH_PLAN,
+            "label": PLAN_FIT_LABELS[PLAN_FIT_HEALTH_PLAN],
+            "reason": "صحّةُ الخدمة دون الحدّ المقبول — خطّةُ علاجٍ قبل أيّ قرارِ تسعير.",
+            "evidence": {"service_health_score": service_score},
+        })
+    return suggestions
+
+
+def compute_customer_profitability(
+    *, period_year: int, period_month: int, allocated_expenses_per_tenant=None, with_suggestions: bool = True,
+) -> list[dict]:
+    """ربحيّةُ كلّ شركةِ خدمةٍ لشهرٍ واحد (§٩) — مؤشّرٌ تشغيليٌّ **منفصلٌ** عن صحّة
+    الشركة وعن تقييم الموظّف.
+
+    **الإيراد**: رسمُ الاشتراك الشهريُّ زائدَ الوحداتِ فوق الحصّة بسعر التجاوز،
+    مقروءاً من `ServiceSubscription` نفسِه لا من تقدير.
+
+    **التكلفةُ البشريّة**: «تقديريّةٌ مبنيّةٌ على الوحدات المعتمدة وتكلفة الوحدة/الوقت»
+    بنصّ §٩، ومصدرُها `EmployeeCompensationPolicy` الذي أنشأته 210-D: راتبُ الموظّف
+    الشهريُّ مقسوماً على **كلّ** ما أنتجه من وحداتٍ ذلك الشهر يعطي تكلفةَ الوحدة،
+    ثمّ تُضرب في وحدات هذه الشركة منه. موظّفٌ أنتج مئةَ وحدةٍ براتب ٥٠٠ تكلفةُ
+    وحدته ٥، وشركةٌ استهلكت عشرين منه تكلّف ١٠٠.
+
+    **وموظّفٌ بصفر وحداتٍ لا يُوزَّع راتبُه على أحد**: لا قسمةَ على صفر، ولا تكلفةَ
+    تُلصَق بشركةٍ لم تستهلك منه شيئاً.
+
+    **والنفقاتُ المخصَّصة مُدخَلٌ لا مُشتَقّ**: لا مصدرَ لها في المستودع، فتُمرَّر
+    صراحةً وتكون صفراً حين لا تُمرَّر — رقمٌ مُختلَقٌ هنا كان سيُنتج تصنيفاً يبدو
+    دقيقاً وهو تخمين.
+
+    **وسياسةُ الراتب تُقرأ بلحظةٍ داخل الشهر المحسوب** لا بلحظة العرض: حسابُ آذار
+    بعد ترقيةِ راتبٍ في نيسان يجب أن يبقى كما كان، وإلا تغيّر تاريخٌ مُغلَق.
+    """
+    extra = Decimal(str(allocated_expenses_per_tenant or "0"))
+    eligible = list(eligible_service_tenant_ids())
+    if not eligible:
+        return []
+
+    subs = {
+        sub.tenant_id: sub
+        for sub in ServiceSubscription.objects.filter(tenant_id__in=eligible).select_related("tenant")
+    }
+    if not subs:
+        return []
+
+    _, last_day = calendar.monthrange(period_year, period_month)
+    start_date = datetime.date(period_year, period_month, 1)
+    end_date = datetime.date(period_year, period_month, last_day)
+    _, period_end_moment = day_bounds(start_date, end_date)
+    period_moment = period_end_moment - datetime.timedelta(seconds=1)
+
+    # وحداتُ الشهر المعتمدة، مفصولةً: ما يستهلك حصّةَ العميل (للإيراد) وما يدخل
+    # إنجازَ الموظّف (للتكلفة) — عَلَمان مستقلّان في `ServiceUsageEvent` عمداً.
+    events = filter_local_date_range(
+        ServiceUsageEvent.objects.filter(tenant_id__in=eligible),
+        "approved_at", date_from=start_date, date_to=end_date,
+    ).values_list(
+        "tenant_id", "employee_id", "units", "chargeable_to_customer", "creditable_to_employee", "event_type",
+    )
+
+    chargeable_units: dict = {}
+    employee_total_units: dict = {}
+    tenant_employee_units: dict = {}
+    for tenant_id, employee_id, units, chargeable, creditable, event_type in events:
+        # **العكسُ يطرح لا يضيف**: `REVERSAL` يخزّن وحداتِه موجبةً كالأصل تماماً
+        # (`reverse_service_usage_event` ينسخ `units` كما هي)، فجمعُها بلا إشارةٍ
+        # كان يُظهر شركةً عُكست وحداتُها وقد استهلكت ضِعفَها، ويشحن عليها تجاوزاً
+        # لم يقع. والإشارةُ هنا هي نفسُها إشارةُ `_net_units_for_...` في الدفتر.
+        amount = Decimal(str(units or 0)) * (1 if event_type == ServiceUsageEvent.EventType.USAGE else -1)
+        if chargeable:
+            chargeable_units[tenant_id] = chargeable_units.get(tenant_id, Decimal("0")) + amount
+        if creditable and employee_id:
+            employee_total_units[employee_id] = employee_total_units.get(employee_id, Decimal("0")) + amount
+            key = (tenant_id, employee_id)
+            tenant_employee_units[key] = tenant_employee_units.get(key, Decimal("0")) + amount
+
+    salaries = {
+        employee_id: _monthly_base_salary_for(employee_id, at=period_moment)
+        for employee_id in employee_total_units
+    }
+
+    previous_units: dict = {}
+    if with_suggestions:
+        prev_year, prev_month = (period_year - 1, 12) if period_month == 1 else (period_year, period_month - 1)
+        previous_units = _chargeable_units_in_month(list(subs), prev_year, prev_month)
+
+    rows = []
+    for tenant_id, sub in subs.items():
+        included = Decimal(str(sub.included_quota or 0))
+        consumed = chargeable_units.get(tenant_id, Decimal("0"))
+        overage_units = max(consumed - included, Decimal("0"))
+        revenue = Decimal(str(sub.monthly_fee or 0)) + overage_units * Decimal(str(sub.overage_unit_price or 0))
+
+        human_cost = Decimal("0.00")
+        contributors = []
+        for (row_tenant, employee_id), units in tenant_employee_units.items():
+            if row_tenant != tenant_id:
+                continue
+            produced = employee_total_units.get(employee_id, Decimal("0"))
+            if produced <= 0:
+                continue
+            unit_cost = salaries.get(employee_id, Decimal("0")) / produced
+            share = (unit_cost * units).quantize(Decimal("0.01"))
+            human_cost += share
+            contributors.append({
+                "employee_id": employee_id,
+                "units": float(units),
+                "unit_cost": float(unit_cost.quantize(Decimal("0.01"))),
+                "cost": float(share),
+            })
+
+        total_cost = human_cost + extra
+        margin = revenue - total_cost
+        state = classify_profitability(revenue=revenue, total_cost=total_cost)
+        suggestions = []
+        if with_suggestions:
+            suggestions = build_plan_fit_suggestions(
+                subscription=sub,
+                consumed_units=consumed,
+                previous_consumed_units=previous_units.get(tenant_id, Decimal("0")),
+                health=calculate_two_health_scores(sub.tenant),
+            )
+        rows.append({
+            "tenant_id": tenant_id,
+            "company_name": sub.tenant.CompanyName,
+            "period_year": period_year,
+            "period_month": period_month,
+            "revenue": float(revenue.quantize(Decimal("0.01"))),
+            "monthly_fee": float(Decimal(str(sub.monthly_fee or 0))),
+            "included_quota": float(included),
+            "chargeable_units": float(consumed),
+            "overage_units": float(overage_units),
+            "human_cost": float(human_cost.quantize(Decimal("0.01"))),
+            "allocated_expenses": float(extra),
+            "total_cost": float(total_cost.quantize(Decimal("0.01"))),
+            "margin": float(margin.quantize(Decimal("0.01"))),
+            "margin_pct": float((margin / revenue * 100).quantize(Decimal("0.01"))) if revenue > 0 else None,
+            "state": state,
+            "state_label": PROFITABILITY_LABELS[state],
+            # «كل رقم قابل للفتح إلى مصادره» (§٩) — مساهمةُ كلّ موظّفٍ ووحداتُه.
+            "contributors": sorted(contributors, key=lambda row: -row["cost"]),
+            "suggestions": suggestions,
+        })
+    rows.sort(key=lambda row: row["margin"])
+    return rows
+
+
+# ==============================================================================
+# KTRA Champions (§١٠) — لوحةٌ إيجابيّةٌ شهريّةٌ بستّ فئات
+# ==============================================================================
+
+CHAMPION_CATEGORY_QUALITY = "quality"
+CHAMPION_CATEGORY_SLA = "sla"
+CHAMPION_CATEGORY_SATISFACTION = "satisfaction"
+CHAMPION_CATEGORY_COMPLETION = "approved_completion"
+CHAMPION_CATEGORY_ACQUISITION = "paid_acquisition"
+CHAMPION_CATEGORY_IMPROVEMENT = "documented_improvement"
+
+CHAMPION_CATEGORY_LABELS = {
+    CHAMPION_CATEGORY_QUALITY: "الجودة",
+    CHAMPION_CATEGORY_SLA: "الالتزام بالـSLA",
+    CHAMPION_CATEGORY_SATISFACTION: "رضا العملاء",
+    CHAMPION_CATEGORY_COMPLETION: "الإنجاز المعتمد",
+    CHAMPION_CATEGORY_ACQUISITION: "الاكتساب المدفوع",
+    CHAMPION_CATEGORY_IMPROVEMENT: "التحسّن الموثّق",
+}
+
+# أربعُ فئاتٍ تقابل محاورَ الـpilot مباشرةً — **لا الدرجةَ المركّبة**، فـ§١٠ تمنع
+# «استخدام الدرجة المركبة وحدها»، وفئةٌ لكلّ محورٍ تُظهر أين برع كلُّ واحدٍ بعينه.
+CHAMPION_AXIS_CATEGORIES = {
+    CHAMPION_CATEGORY_QUALITY: PILOT_AXIS_QUALITY,
+    CHAMPION_CATEGORY_SLA: PILOT_AXIS_SLA,
+    CHAMPION_CATEGORY_SATISFACTION: PILOT_AXIS_SATISFACTION,
+    CHAMPION_CATEGORY_COMPLETION: PILOT_AXIS_TASK_COMPLETION,
+}
+
+#: حدُّ التحسّن الذي يُعدّ «موثّقاً» — نقاطٌ مئويّةٌ على الدرجة المركّبة بين شهرين.
+CHAMPION_IMPROVEMENT_MIN_DELTA = Decimal("5.00")
+
+#: كم اسماً يُعرض لكلّ فئة. **قِمّةٌ فقط**: §١٠ تمنع «ترتيب الأسوأ»، وقائمةٌ كاملةٌ
+#: مرتَّبةٌ تنتج ترتيبَ الأسوأ ضمناً مهما سُمّيت.
+CHAMPION_TOP_N = 3
+
+
+def build_champions_board(*, period_year: int, period_month: int, top_n: int = CHAMPION_TOP_N) -> dict:
+    """لوحةُ Champions لشهرٍ واحد (§١٠).
+
+    **ما لا يظهر فيها، بنصّ المواصفة**: «لا رواتب، لا قيم عمولات، لا أسماء عملاء،
+    لا ترتيب للأسوأ، ولا دخول لمن لا يملك حد العينة». فالاكتسابُ يُعَدّ **عدداً**
+    لا مبلغاً، ولا اسمَ شركةٍ في أيّ دليل، ولا تُعاد إلا القمّةُ لكلّ فئة.
+
+    و«التحسّن الموثّق» — الفئةُ السادسة التي لا تعرّفها المواصفة — يُقرأ هنا **فرقَ
+    الدرجة المركّبة بين هذا الشهر والذي قبله** بما لا يقلّ عن
+    `CHAMPION_IMPROVEMENT_MIN_DELTA` نقطة. والدليلُ هو الرقمان نفساهما، ولقطتاهما
+    المجمَّدتان قائمتان — فهو «موثّق» بالمعنى الحرفيّ لا بتقديرٍ بشريّ. وهذا
+    اجتهادٌ مُعلَنٌ لا نصٌّ منقول: إن أراد المالكُ تعريفاً آخر فمكانُه هنا وحدَه.
+    """
+    employees = list(
+        PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE).select_related("user")
+    )
+    if not employees:
+        return {"period_year": period_year, "period_month": period_month, "categories": []}
+
+    prev_year, prev_month = (period_year, period_month - 1) if period_month > 1 else (period_year - 1, 12)
+
+    # حسابٌ حيٌّ لكلّ موظّف: اللقطةُ المجمَّدة تحفظ الدرجةَ المركّبة وحجمَ العينة
+    # ولا تحفظ المحاورَ مفصَّلةً، والفئاتُ محاورُ لا مركَّب. عددُ موظّفي الـpilot
+    # صغيرٌ بحكم المرحلة، وإن كبر فمكانُ العلاج لقطةٌ تحفظ المحاور لا كاشٌ هنا.
+    per_employee: dict[int, dict] = {}
+    for employee in employees:
+        try:
+            per_employee[employee.pk] = calculate_employee_pilot_performance(
+                employee=employee, period_year=period_year, period_month=period_month,
+            )
+        except Exception:  # noqa: BLE001 — موظّفٌ بلا بياناتٍ لا يُسقط اللوحةَ لبقيّة الفريق
+            continue
+
+    names = {e.pk: e.user.username for e in employees}
+    categories: list[dict] = []
+
+    for category, axis in CHAMPION_AXIS_CATEGORIES.items():
+        entries = []
+        for employee_pk, result in per_employee.items():
+            # **حدُّ العينة شرطُ دخول**: لا مركزَ لمن لا دليلَ كافٍ عليه.
+            if result.get("status") != PerformanceSnapshot.Status.CALCULATED:
+                continue
+            detail = (result.get("axes") or {}).get(axis)
+            if not detail or not detail.get("applicable"):
+                continue
+            score = Decimal(str(detail.get("score_pct") or 0))
+            entries.append({
+                "employee_id": employee_pk,
+                "employee_name": names.get(employee_pk, ""),
+                "value": float(score),
+                "evidence": (
+                    f"{detail.get('numerator')} من {detail.get('denominator')} "
+                    f"خلال {period_year}/{period_month}"
+                ),
+            })
+        entries.sort(key=lambda row: -row["value"])
+        categories.append({
+            "category": category,
+            "category_label": CHAMPION_CATEGORY_LABELS[category],
+            "unit": "%",
+            "entries": entries[:top_n],
+        })
+
+    # الاكتسابُ المدفوع: **عدداً لا مبلغاً**، وبلا اسم شركة.
+    paid_counts: dict[int, int] = {}
+    for row in AcquisitionCommissionLine.objects.filter(
+        period_year=period_year,
+        period_month=period_month,
+        status__in=[WalletLineStatus.APPROVED, WalletLineStatus.PAYABLE, WalletLineStatus.PAID],
+    ).values_list("employee_id", flat=True):
+        paid_counts[row] = paid_counts.get(row, 0) + 1
+    acquisition_entries = [
+        {
+            "employee_id": pk,
+            "employee_name": names.get(pk, ""),
+            "value": float(count),
+            "evidence": f"{count} عميلاً باستحقاقٍ مؤكَّدٍ في {period_year}/{period_month}",
+        }
+        for pk, count in paid_counts.items()
+        if pk in names
+    ]
+    acquisition_entries.sort(key=lambda row: -row["value"])
+    categories.append({
+        "category": CHAMPION_CATEGORY_ACQUISITION,
+        "category_label": CHAMPION_CATEGORY_LABELS[CHAMPION_CATEGORY_ACQUISITION],
+        "unit": "عميل",
+        "entries": acquisition_entries[:top_n],
+    })
+
+    # التحسّنُ الموثّق: فرقُ الدرجة المركّبة عن الشهر السابق.
+    previous = {
+        row.employee_id: row.composite_score
+        for row in PerformanceSnapshot.objects.filter(
+            period_year=prev_year, period_month=prev_month, status=PerformanceSnapshot.Status.CALCULATED,
+        )
+        if row.composite_score is not None
+    }
+    improvement_entries = []
+    for employee_pk, result in per_employee.items():
+        if result.get("status") != PerformanceSnapshot.Status.CALCULATED:
+            continue
+        current = result.get("composite_score")
+        before = previous.get(employee_pk)
+        if current is None or before is None:
+            continue
+        delta = Decimal(str(current)) - Decimal(str(before))
+        if delta < CHAMPION_IMPROVEMENT_MIN_DELTA:
+            continue
+        improvement_entries.append({
+            "employee_id": employee_pk,
+            "employee_name": names.get(employee_pk, ""),
+            "value": float(delta),
+            "evidence": (
+                f"من {before}% في {prev_year}/{prev_month} إلى {current}% في {period_year}/{period_month}"
+            ),
+        })
+    improvement_entries.sort(key=lambda row: -row["value"])
+    categories.append({
+        "category": CHAMPION_CATEGORY_IMPROVEMENT,
+        "category_label": CHAMPION_CATEGORY_LABELS[CHAMPION_CATEGORY_IMPROVEMENT],
+        "unit": "نقطة",
+        "entries": improvement_entries[:top_n],
+    })
+
+    return {"period_year": period_year, "period_month": period_month, "categories": categories}
 
 
 def request_performance_review(*, employee, period_year: int, period_month: int, axis: str = "", reason: str):

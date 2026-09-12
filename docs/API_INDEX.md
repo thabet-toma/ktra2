@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **803**
+عدد النقاط: **805**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -549,6 +549,7 @@
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/{pk}/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/champions/` | `ChampionsBoardView` | `platform_ops/views.py` |
 | `/api/platform/ops/commission-lines/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/commission-lines/{pk}/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/commission-lines/{pk}/adjust/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
@@ -627,6 +628,7 @@
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/profitability/` | `CustomerProfitabilityView` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/salary-lines/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |

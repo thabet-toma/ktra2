@@ -12,6 +12,7 @@
 """
 import re
 import uuid
+from decimal import Decimal, InvalidOperation
 
 import requests
 from django.db.models import Count, IntegerField, OuterRef, Subquery, Value
@@ -109,6 +110,8 @@ from .services import (
     get_active_service_unit_catalog,
     link_work_order_document,
     list_employee_engaged_companies,
+    build_champions_board,
+    compute_customer_profitability,
     request_performance_review,
     resolve_performance_review,
     list_employee_work_order_queue,
@@ -885,6 +888,91 @@ class SubscriptionBillingRecordViewSet(viewsets.ReadOnlyModelViewSet):
         if company_id:
             qs = qs.filter(subscription__tenant_id=company_id)
         return qs
+
+
+class ChampionsBoardView(APIView):
+    """لوحةُ KTRA Champions لشهرٍ واحد (§١٠).
+
+    **جمهورُها موظّفو المنصّة المسجَّلون** لا السوبر أدمن وحدَه — وهذا نصُّ §١٠:
+    «الجمهور الافتراضي موظفو المنصة المسجلون». ولا معاملَ موظّفٍ ولا شركةٍ: اللوحةُ
+    شهريّةٌ للفريق كلِّه، والشهرُ وحدَه ما يُختار.
+
+    ولا شيءَ فيها من المحظور: لا رواتب، ولا قيمَ عمولات (الاكتسابُ عددٌ لا مبلغ)،
+    ولا أسماءَ عملاء، ولا ترتيبَ للأسوأ (قِمّةٌ فقط)، ولا دخولَ لمن دون حدّ العينة.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def get(self, request):
+        now = timezone.now()
+        try:
+            year = int(request.query_params.get("year") or now.year)
+            month = int(request.query_params.get("month") or now.month)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "السنة والشهر يجب أن يكونا رقمين.", "code": "invalid_period"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month <= 12:
+            return Response(
+                {"detail": "الشهر بين 1 و12.", "code": "invalid_period"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(build_champions_board(period_year=year, period_month=month))
+
+
+class CustomerProfitabilityView(APIView):
+    """ربحيّةُ العميل ومطابقةُ الخطة لشهرٍ واحد (§٩).
+
+    **جمهورُها مديرُ العمليات وحدَه**: الصفُّ يحمل إيرادَ الشركة وتكلفتَها البشريّةَ
+    المشتقّةَ من رواتب الموظفين، وهي بالضبط ما تمنعه §١٠ عن لوحة الموظفين. فلا
+    `IsPlatformOperationsStaff` هنا.
+
+    **و`GET` وحدَها**: «الاقتراح لا ينفذ نفسه ولا يغير سعراً أو اشتراكاً دون تأكيد
+    السوبر أدمن» — فلا فعلَ يُشتَقُّ من هذه النقطة، والترقيةُ تبقى قراراً يدوياً
+    عبر مسار الاشتراك القائم.
+    """
+
+    permission_classes = [IsPlatformOperationsManager]
+
+    def get(self, request):
+        now = timezone.now()
+        try:
+            year = int(request.query_params.get("year") or now.year)
+            month = int(request.query_params.get("month") or now.month)
+        except (TypeError, ValueError):
+            return Response(
+                {"detail": "السنة والشهر يجب أن يكونا رقمين.", "code": "invalid_period"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not 1 <= month <= 12:
+            return Response(
+                {"detail": "الشهر بين 1 و12.", "code": "invalid_period"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw_expenses = request.query_params.get("allocated_expenses")
+        try:
+            expenses = Decimal(str(raw_expenses)) if raw_expenses not in (None, "") else Decimal("0")
+        except (InvalidOperation, ValueError):
+            return Response(
+                {"detail": "النفقات المخصّصة يجب أن تكون رقماً.", "code": "invalid_allocated_expenses"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if expenses < 0:
+            return Response(
+                {"detail": "النفقات المخصّصة لا تكون سالبة.", "code": "invalid_allocated_expenses"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        rows = compute_customer_profitability(
+            period_year=year, period_month=month, allocated_expenses_per_tenant=expenses,
+        )
+        return Response({
+            "period_year": year,
+            "period_month": month,
+            "allocated_expenses_per_tenant": float(expenses),
+            "rows": rows,
+        })
+
 
 
 class PerformanceReviewRequestViewSet(viewsets.ReadOnlyModelViewSet):

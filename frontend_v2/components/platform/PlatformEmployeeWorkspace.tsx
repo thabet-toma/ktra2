@@ -9,8 +9,9 @@ import { PlatformNotificationBell } from "./PlatformNotificationBell";
 import { WorkOrdersPanel } from "./WorkOrdersPanel";
 import { EmployeeSelfWalletCard } from "./EmployeeSelfWalletCard";
 import { EmployeeCompaniesPanel } from "./EmployeeCompaniesPanel";
+import { ChampionsPanel } from "./ChampionsPanel";
 
-type EmployeeTab = "queue" | "companies" | "wallet";
+type EmployeeTab = "queue" | "companies" | "wallet" | "champions";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه المساحة لموظفي عمليات المنصة فقط.", "تعذّر تحميل مساحتك.");
@@ -125,10 +126,20 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
         >
           محفظتي وتقييمي
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("champions")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            tab === "champions" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          Champions
+        </button>
       </div>
 
       {tab === "queue" && <WorkOrdersPanel />}
       {tab === "companies" && <EmployeeCompaniesPanel />}
+      {tab === "champions" && <ChampionsPanel />}
       {tab === "wallet" && (
         profileLoading ? (
           <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
