@@ -5485,6 +5485,11 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             "username": emp.user.username,
             "email": emp.user.email,
             "specialty": emp.specialty,
+            # الصورةُ والمسمّى هنا لا في نقطةِ الموظّف وحدَها: الغرفةُ والبطاقةُ
+            # تُرسمان من هذه الحمولة، فحقلٌ غائبٌ عنها يعني وجهاً بأحرفٍ أولى
+            # وصورةً محفوظةً لا يراها أحد.
+            "photo_url": emp.photo_url,
+            "job_title": emp.job_title,
             "capacity_target": float(emp.capacity_target),
             "status": emp.status,
             "active_work_orders_count": active_count,
@@ -8185,6 +8190,73 @@ def set_employee_targets(
                 "actor_user_id": getattr(actor, "pk", None),
                 "before": {name: str(value) for name, value in before.items()},
                 "after": {name: str(value) for name, value in updates.items()},
+            },
+        )
+    return locked
+
+
+def set_employee_profile_card(
+    *, employee, photo_url=None, phone=None, job_title=None, is_manager: bool, actor=None,
+) -> PlatformEmployee:
+    """ضبطُ حقول بطاقة الموظّف الشخصيّة الثلاثة (211-Q).
+
+    `job_title` لمدير العمليات وحده — عنوانُ العرض تعيينُ صاحب العمل ويظهر على
+    لوحة الفريق، خلافاً لـ`specialty` المفتاحيّ. أمّا `photo_url` و`phone` فبياناتُ
+    الموظّف هو، يضبطهما بنفسه أو مديرُه. ومن يمرّر `None` لا يمسّ حقلَه.
+    """
+    if job_title is not None and not is_manager:
+        raise PlatformOpsError(
+            "job_title_is_manager_only", "المسمّى الوظيفي لمدير العمليات وحده.", status_code=403,
+        )
+
+    updates: dict[str, str] = {}
+    for field_name, raw in (
+        ("photo_url", photo_url),
+        ("phone", phone),
+        ("job_title", job_title),
+    ):
+        if raw is None:
+            continue
+        updates[field_name] = str(raw).strip()
+
+    if not updates:
+        raise PlatformOpsError("no_field_provided", "لم يُمرَّر أيُّ حقلٍ لضبطه.")
+
+    # **القيدُ المُعلَن في النموذج لا يُنفَّذ من تلقائه**: `save()` لا يستدعي
+    # المدقّقات، فيبقى `max_length` و`URLField` توثيقاً لا حارساً. وSQLite في
+    # الاختبارات يبتلع الطويلَ صامتاً بينما MySQL يردّ 1406 في وجه المستخدم —
+    # فالعيبُ يمرّ أخضرَ هنا ويقع هناك. نُشغّل مدقّقَ الحقل نفسِه فيُردّ 400
+    # برسالةٍ عربيّةٍ بدل خمسمئةٍ صامتة.
+    from django.core.exceptions import ValidationError as DjangoValidationError
+
+    for name, value in updates.items():
+        field = PlatformEmployee._meta.get_field(name)
+        try:
+            field.clean(value, None)
+        except DjangoValidationError as exc:
+            raise PlatformOpsError(
+                "invalid_profile_field",
+                f"قيمةٌ غير صالحة للحقل «{field.verbose_name}»: " + "، ".join(exc.messages),
+            ) from exc
+
+    with transaction.atomic():
+        locked = PlatformEmployee.objects.select_for_update().get(pk=getattr(employee, "pk", employee))
+        before = {name: getattr(locked, name) for name in updates}
+        for name, value in updates.items():
+            setattr(locked, name, value)
+        locked.save(update_fields=[*updates, "updated_at"])
+
+        log_platform_activity(
+            employee=locked,
+            action=PlatformActivityLog.Action.OTHER,
+            description="ضبطُ بطاقة الموظّف الشخصيّة",
+            entity_type="employee_profile_card",
+            entity_id=locked.pk,
+            details={
+                "operation": "set_employee_profile_card",
+                "actor_user_id": getattr(actor, "pk", None),
+                "before": before,
+                "after": updates,
             },
         )
     return locked

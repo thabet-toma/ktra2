@@ -174,6 +174,11 @@ EXCUSED_ROUTES = {
         "فعلٌ تفصيليٌّ بـpk — نفس عزل `activity/` أعلاه بالضبط.",
     "/api/platform/ops/employees/1/targets/":
         "فعلٌ تفصيليٌّ بـpk، والقراءةُ منه مضيَّقةٌ بنفس `get_queryset()`؛ والكتابةُ (PATCH) للمدير وحده أصلاً.",
+    "/api/platform/ops/employees/1/profile-card/":
+        "فعلٌ تفصيليٌّ بـpk يعتمد `get_object()` على نفس `get_queryset()` المضيَّقة — لا صفَّ "
+        "زميلٍ يُكتَب. وحقلُ `job_title` مرفوضٌ 403 صراحةً من الخدمة لغير المدير حتى على صفّ الموظّف نفسِه.",
+    "/api/platform/ops/employees/1/photo/":
+        "فعلٌ تفصيليٌّ بـpk وكتابةٌ (POST) — نفس عزل `profile-card/` أعلاه بالضبط عبر `get_object()`.",
     "/api/platform/ops/employees/1/wallet/":
         "فعلٌ تفصيليٌّ بـpk — نفس عزل `activity/` أعلاه بالضبط.",
     "/api/platform/ops/work-orders/create/":

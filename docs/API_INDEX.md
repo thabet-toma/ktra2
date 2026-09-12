@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **817**
+عدد النقاط: **819**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -571,7 +571,9 @@
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/photo/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/pilot-performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/profile-card/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/targets/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/wallet/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/engagements/` | `EngagementViewSet` | `platform_ops/views.py` |

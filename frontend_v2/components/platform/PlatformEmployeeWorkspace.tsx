@@ -11,6 +11,7 @@ import { EmployeeSelfWalletCard } from "./EmployeeSelfWalletCard";
 import { EmployeeCompaniesPanel } from "./EmployeeCompaniesPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
 import { MyMeetingsPanel } from "./MyMeetingsPanel";
+import { MyProfileCard } from "./MyProfileCard";
 
 type EmployeeTab = "queue" | "companies" | "wallet" | "champions" | "meetings";
 
@@ -98,6 +99,8 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
           </button>
         </div>
       )}
+
+      {profile && <MyProfileCard profile={profile} onSaved={() => void loadProfile()} />}
 
       <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1 mb-6">
         <button

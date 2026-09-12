@@ -24,10 +24,12 @@ from rest_framework import status, viewsets
 
 from rest_framework.decorators import action
 from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.media_views import MediaUploadError, MediaUploadThrottle, upload_media_file
 from core.models import TenantAsset
 from core.tenant_utils import get_tenant
 from tenants.models import Tenant, UserCompanyMembership
@@ -123,6 +125,7 @@ from .services import (
     recapture_performance_after_accepted_review,
     resolve_performance_review,
     set_employee_targets,
+    set_employee_profile_card,
     suggest_monthly_units_targets,
     list_employee_work_order_queue,
     log_platform_activity,
@@ -456,6 +459,62 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
+
+    @action(detail=True, methods=["patch"], url_path="profile-card")
+    def profile_card(self, request, pk=None):
+        """بطاقةُ الموظّف الشخصيّة: صورتُه وهاتفُه ومسمّاه الوظيفيّ (211-Q).
+
+        `get_queryset` يضيّق غيرَ المدير على صفّه وحدَه — فموظّفٌ يحاول بطاقةَ
+        زميله يصطدم بـ404 قبل أن يصل هذا الفعل أصلاً. أمّا `job_title` فيُرفض
+        403 من الخدمة حتى لصاحب الصفّ نفسِه إن لم يكن مديراً: المسمّى تعيينُ
+        صاحب العمل لا بياناتٌ شخصيّة.
+        """
+        employee = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        try:
+            employee = set_employee_profile_card(
+                employee=employee,
+                photo_url=request.data.get("photo_url"),
+                phone=request.data.get("phone"),
+                job_title=request.data.get("job_title"),
+                is_manager=is_manager,
+                actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(PlatformEmployeeSerializer(employee).data, status=status.HTTP_200_OK)
+
+    @action(
+        detail=True, methods=["post"], url_path="photo",
+        parser_classes=[MultiPartParser, FormParser], throttle_classes=[MediaUploadThrottle],
+    )
+    def photo(self, request, pk=None):
+        """رفعُ صورة الموظّف وحفظُ رابطها في الصفّ في العمليّة نفسِها (211-Q).
+
+        `tenant=None` مقصود: صورةُ موظّفِ المنصّة ليست أصلاً لأيّ شركة، ولو مرّ
+        الرفعُ بالنقطة العامّة `/api/media/upload/` لحُمِّلت شركةٌ بريئةٌ بايتاتِها
+        في نشرٍ أحاديّ الشركة (`get_tenant` يحلّ تلك الشركةَ تلقائياً).
+        """
+        employee = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response(
+                {"detail": "حقل file مطلوب.", "code": "missing_file"}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            photo_url = upload_media_file(
+                upload, folder="ktra_platform_employee_photos", tenant=None, uploaded_by=request.user,
+            )
+        except MediaUploadError as exc:
+            return Response({"detail": exc.detail, "code": "upload_failed"}, status=exc.status_code)
+        try:
+            employee = set_employee_profile_card(
+                employee=employee, photo_url=photo_url, is_manager=is_manager, actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response({"photo_url": employee.photo_url}, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["get"], url_path="performance")
     def performance(self, request, pk=None):

@@ -7,6 +7,15 @@ interface EmployeeCardProps {
   onDrilldown: (filter: { assignee: number; metric?: "active" | "overdue"; status?: string }) => void;
   onViewActivity: (employeeId: number, employeeName: string) => void;
   onEditTargets: (employeeId: number, employeeName: string) => void;
+  /** نقرةٌ على الوجه تفتح ملفّ الموظّف الـ360 (211-J). */
+  onOpenProfile: (employeeId: number) => void;
+}
+
+function initialsOf(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "؟";
+  if (parts.length === 1) return parts[0].slice(0, 2);
+  return `${parts[0][0]}${parts[1][0]}`;
 }
 
 export const EmployeeCard: React.FC<EmployeeCardProps> = ({
@@ -14,6 +23,7 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   onDrilldown,
   onViewActivity,
   onEditTargets,
+  onOpenProfile,
 }) => {
   const lastActiveBadge = getLastActiveBadge(employee.last_active_at);
   const isOverloaded = employee.active_work_orders_count > employee.capacity_target;
@@ -34,16 +44,34 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
       {/* الرأس: اسم الموظف والتخصص وحالة النشاط */}
       <div>
         <div className="flex items-start justify-between gap-2 mb-2.5">
-          <div className="flex-1 min-w-0">
-            <h4 className="text-base font-bold text-slate-900 truncate">{employee.name}</h4>
-            <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-              <span className="font-mono text-slate-400">@{employee.username}</span>
-              <span>•</span>
-              <span className="px-2 py-0.5 font-medium bg-slate-100 text-slate-700 rounded-md">
-                {employee.specialty}
+          <button
+            type="button"
+            onClick={() => onOpenProfile(employee.id)}
+            title="فتح ملف الموظّف"
+            className="flex flex-1 min-w-0 items-center gap-2 text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg group"
+          >
+            {employee.photo_url ? (
+              <img
+                src={employee.photo_url}
+                alt={employee.name}
+                className="h-9 w-9 shrink-0 rounded-full object-cover bg-slate-100"
+              />
+            ) : (
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
+                {initialsOf(employee.name)}
               </span>
-            </div>
-          </div>
+            )}
+            <span className="flex-1 min-w-0">
+              <h4 className="text-base font-bold text-slate-900 truncate group-hover:text-blue-700">{employee.name}</h4>
+              <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
+                <span className="font-mono text-slate-400">@{employee.username}</span>
+                <span>•</span>
+                <span className="px-2 py-0.5 font-medium bg-slate-100 text-slate-700 rounded-md">
+                  {employee.specialty}
+                </span>
+              </div>
+            </span>
+          </button>
 
           <span
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full border ${lastActiveBadge.className}`}

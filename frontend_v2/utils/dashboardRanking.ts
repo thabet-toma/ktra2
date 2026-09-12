@@ -20,6 +20,10 @@ export interface PlatformDashboardEmployee {
   username?: string;
   email?: string;
   specialty: string;
+  /** رابطُ صورة الموظّف (211-Q) — فارغٌ يعني «أحرفٌ أولى» لا «لا موظّف». */
+  photo_url?: string;
+  /** عنوانُ العرض؛ منفصلٌ عن `specialty` المفتاحيّ عمداً. */
+  job_title?: string;
   capacity_target: number;
   status: string;
   active_work_orders_count: number;

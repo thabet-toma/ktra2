@@ -21,6 +21,8 @@ export interface RoomOccupant {
   id: number;
   name: string;
   role: string;
+  /** صورةُ الموظّف (211-Q). غيابُها يُعيد الأحرفَ الأولى — لا فراغاً. */
+  photoUrl?: string;
   presence: RoomPresence;
   /** نصُّ آخر ظهورٍ جاهزاً للعرض — يُحسَب عند المُستدعي بالأداة القائمة. */
   lastActiveLabel: string;
@@ -70,9 +72,17 @@ const OccupantBadge: React.FC<OccupantBadgeProps> = ({ occupant, onSelect }) => 
     title={`${occupant.name} — ${PRESENCE_LABEL[occupant.presence]} · ${occupant.lastActiveLabel}`}
   >
     <span className="relative">
-      <span className="flex items-center justify-center w-11 h-11 rounded-full bg-white text-sky-800 font-bold text-sm shadow-md ring-2 ring-white">
-        {initialsOf(occupant.name)}
-      </span>
+      {occupant.photoUrl ? (
+        <img
+          src={occupant.photoUrl}
+          alt={occupant.name}
+          className="w-11 h-11 rounded-full object-cover shadow-md ring-2 ring-white bg-white"
+        />
+      ) : (
+        <span className="flex items-center justify-center w-11 h-11 rounded-full bg-white text-sky-800 font-bold text-sm shadow-md ring-2 ring-white">
+          {initialsOf(occupant.name)}
+        </span>
+      )}
       <span
         className={`absolute -bottom-0.5 -left-0.5 w-3.5 h-3.5 rounded-full ring-2 ring-white ${PRESENCE_DOT[occupant.presence]}`}
         aria-hidden="true"
@@ -176,6 +186,9 @@ export const WorkspaceRoom: React.FC<WorkspaceRoomProps> = ({
                   title={`${occupant.name} — ${PRESENCE_LABEL[occupant.presence]}`}
                 >
                   <span className={`w-2.5 h-2.5 rounded-full ${PRESENCE_DOT[occupant.presence]}`} aria-hidden="true" />
+                  {occupant.photoUrl && (
+                    <img src={occupant.photoUrl} alt="" className="w-5 h-5 rounded-full object-cover" />
+                  )}
                   <span className="text-xs font-bold text-slate-800">{occupant.name}</span>
                   <span className="text-[10px] text-slate-500">{occupant.role || "—"}</span>
                 </button>

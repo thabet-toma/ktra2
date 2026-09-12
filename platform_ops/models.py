@@ -176,6 +176,31 @@ class PlatformEmployee(models.Model):
             "لا يجتمعان في رقمٍ واحد، ورقمٌ صالحٌ لأحدهما يُعطِّل الآخر بصمت."
         ),
     )
+    photo_url = models.URLField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="رابط الصورة",
+        help_text="رابطُ Cloudinary لصورة الموظّف — لا ملفَّ محلّياً؛ المستودعُ كلُّه يخزّن روابطَ Cloudinary.",
+    )
+    phone = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        verbose_name="الهاتف",
+    )
+    job_title = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="المسمّى الوظيفي",
+        help_text=(
+            "عنوانُ العرض على البطاقة — **حقلٌ منفصلٌ عن `specialty` عمداً**. `specialty` "
+            "مفتاحُ سياسة يُطابَق بـ`PolicyProfile.specialty` في احتساب الأداء، فإعادةُ "
+            "استعمالِه ليقرأ أجملَ على اللوحة تُبدّل سياسةَ تقييم الموظّف بصمت ودرجتُه "
+            "مالٌ في محفظته. هذا الحقلُ عرضٌ صِرفٌ لا يحمل أيَّ أثرٍ حسابيّ."
+        ),
+    )
     status = models.CharField(
         max_length=20,
         choices=Status.choices,

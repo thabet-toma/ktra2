@@ -29,6 +29,7 @@ import { ProfitabilityPanel } from "./ProfitabilityPanel";
 import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
 import { MeetingsPanel } from "./MeetingsPanel";
 import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
+import { EmployeeProfileDrawer } from "./EmployeeProfileDrawer";
 import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
 import { countPresent, derivePresence, sortByPresence } from "../../utils/roomPresence";
 import { formatLastActive } from "../../utils/lastActiveFormat";
@@ -73,6 +74,9 @@ export const PlatformOpsDashboard: React.FC = () => {
 
   // ضبطُ مستهدفَي موظّف — الحقلان اللذان كانا يُعرضان ولا يُضبطان (210-ز).
   const [targetsModal, setTargetsModal] = useState<{ employeeId: number; employeeName: string } | null>(null);
+
+  // ملفُّ الموظّف الـ360 (211-J) — يُفتح من نقرةٍ على وجهِه في البطاقة أو على مقعده في الغرفة.
+  const [profileDrawer, setProfileDrawer] = useState<{ employeeId: number; employeeName: string } | null>(null);
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -125,7 +129,10 @@ export const PlatformOpsDashboard: React.FC = () => {
     const rows = employees.map((employee) => ({
       id: employee.id,
       name: employee.name,
-      role: employee.specialty || "",
+      // المسمّى قبل التخصّص: `specialty` مفتاحُ سياسةِ تقييمٍ لا عنوانُ عرض،
+      // وقراءتُه على وجه الموظّف تُظهر مفتاحاً تقنيّاً مكان وظيفته.
+      role: employee.job_title || employee.specialty || "",
+      photoUrl: employee.photo_url || undefined,
       presence: derivePresence(employee, inMeeting, employee.id),
       lastActiveLabel: formatLastActive(employee.last_active_at),
     }));
@@ -409,7 +416,7 @@ export const PlatformOpsDashboard: React.FC = () => {
             onSelectEmployee={(employeeId) => {
               const employee = roomOccupants.find((o) => o.id === employeeId);
               if (employee) {
-                setActivityModal({ isOpen: true, employeeId, employeeName: employee.name });
+                setProfileDrawer({ employeeId, employeeName: employee.name });
               }
             }}
           />
@@ -529,6 +536,7 @@ export const PlatformOpsDashboard: React.FC = () => {
                     })
                   }
                   onEditTargets={(id, name) => setTargetsModal({ employeeId: id, employeeName: name })}
+                  onOpenProfile={(id) => setProfileDrawer({ employeeId: id, employeeName: emp.name })}
                 />
               ))}
             </div>
@@ -578,6 +586,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         />
       )}
         </>
+      )}
+
+      {profileDrawer && (
+        <EmployeeProfileDrawer
+          employeeId={profileDrawer.employeeId}
+          employeeName={profileDrawer.employeeName}
+          onClose={() => setProfileDrawer(null)}
+          onSaved={() => void loadDashboard()}
+        />
       )}
     </div>
   );

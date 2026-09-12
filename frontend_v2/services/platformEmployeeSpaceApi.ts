@@ -19,6 +19,11 @@ export interface MyPlatformEmployeeProfile {
   capacity_target: string;
   /** مقامُ محور الإنجاز — بوحدات الكتالوج شهرياً؛ سُلَّمٌ آخرُ لا يُخلط بما فوقه. */
   monthly_units_target: string;
+  /** رابطُ Cloudinary — يُضبط عبر `platformEmployeeProfileApi.ts` (211-Q). */
+  photo_url: string;
+  phone: string;
+  /** عنوانُ العرض — منفصلٌ عن `specialty` المفتاحيّ عمداً. */
+  job_title: string;
   status: PlatformEmployeeStatus;
   created_at: string;
   updated_at: string;
