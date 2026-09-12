@@ -156,6 +156,41 @@ class TenantLimit(models.Model):
         return f"{self.tenant_id}:{self.limit_key}={value}"
 
 
+class PlanPricing(models.Model):
+    """T-PLANPRICE: تجاوز سعر خطةٍ عن افتراض `core.plans.PLAN_PRICING_DEFAULTS`.
+
+    نفس نمط `TenantLimit` تماماً لكن على مستوى الخطة لا الشركة (كل مشتركي خطةٍ
+    يدفعون سعراً واحداً): الافتراضات في الكود، وهذا الجدول يحمل **الفروق فقط**
+    كما يضبطها سوبر أدمن المنصة. غياب السطر = «كما يقول الكود»، فحذفُه استعادةٌ
+    للسعر الافتراضي الحالي — لا تصفير، ولا تجميد سعرٍ قديم حين يتغيّر الافتراض.
+    """
+
+    id = models.AutoField(primary_key=True)
+    plan_key = models.CharField(max_length=40, db_column="PlanKey")
+    monthly_price = models.DecimalField(
+        max_digits=10, decimal_places=2, db_column="MonthlyPrice",
+    )
+    note = models.CharField(max_length=120, blank=True, default="", db_column="Note")
+    updated_by = models.ForeignKey(
+        "auth.User",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="updated_plan_pricing",
+        db_column="UpdatedBy_UserID",
+    )
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
+
+    class Meta:
+        db_table = "plan_pricing"
+        constraints = [
+            models.UniqueConstraint(fields=["plan_key"], name="uniq_plan_pricing_key"),
+        ]
+
+    def __str__(self):
+        return f"{self.plan_key}={self.monthly_price}"
+
+
 class AssistantLesson(models.Model):
     """درس سلوكي عام يتعلّمه المساعد الذكي من تصحيح إنسان له أثناء محادثة.
 

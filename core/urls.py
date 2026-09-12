@@ -20,7 +20,8 @@ from rest_framework.routers import DefaultRouter
 
 from core import (
     assistant_views, agent_db_view, dashboard_api, health, media_views,
-    permissions_api, platform_admin_api, reports_api, scan, whatsapp_views,
+    permissions_api, platform_admin_api, public_pricing, reports_api, scan,
+    whatsapp_views,
 )
 from core.activity_views import ActivityLogViewSet
 from core.platform_admin_api import DevelopmentNoteViewSet, PlatformRouter
@@ -80,6 +81,9 @@ urlpatterns = [
     # داخليّاتُ الـapps ليست واجهاتٍ عامّة (عقدُ `.importlinter`).
     path('api/lookup/products/', include('inventory.urls_lookup')),
     path('api/dashboard/', dashboard_api.trade_dashboard),
+    # T-PLANPRICE: صفحة الأسعار العامة — بلا مصادقة وبلا شركة، كل كودها في
+    # core/public_pricing.py على نمط store/docshare.
+    path('api/pricing/plans/', public_pricing.public_pricing_plans),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),
     # التنقيب قبل التشغيل: `<str:key>` يبتلع «drill» لو جاء بعده،
@@ -92,6 +96,7 @@ urlpatterns = [
     path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
     path('api/platform/companies/<int:pk>/modules/', platform_admin_api.platform_company_modules),
     path('api/platform/companies/<int:pk>/limits/', platform_admin_api.platform_company_limits),
+    path('api/platform/plan-pricing/', platform_admin_api.platform_plan_pricing),
     path('api/platform/companies/<int:pk>/activity/', platform_admin_api.platform_company_activity),
     path('api/platform/accountant-workspace/', platform_admin_api.platform_accountant_workspace),
     path('api/platform/accountants/pending/', platform_admin_api.platform_accountants_pending),

@@ -14,6 +14,7 @@
 import logging
 from dataclasses import dataclass
 from datetime import timedelta
+from decimal import Decimal
 from typing import Callable
 
 from django.core.cache import cache
@@ -419,6 +420,118 @@ TRIAL_PERIOD_DAYS = 14
 # «قاربت على الانتهاء» = هذا العدد من الأيام أو أقل. نافذة التذكير الأخيرة قبل
 # أن يصير الحساب للقراءة فقط، ويقرأها الشريط داخل التطبيق ولوحة المنصة معاً.
 EXPIRY_WARNING_DAYS = 7
+
+# T-PLANPRICE: سعر الخطة مصدر حقيقة واحد — نفس نمط PLAN_DEFAULTS/TenantLimit
+# تماماً: السعر الافتراضي هنا في الكود، وجدول PlanPricing (core.models) يحمل
+# تجاوزاً لكل خطة، فحذف صفه يعيد هذا الرقم لا صفراً. Trial **ليست فيه إطلاقاً**:
+# خطة لا تُباع، وإعطاؤها صفراً يجعلها تبدو مجانية معروضة لا مخفية.
+PLAN_PRICING_DEFAULTS = {
+    "Basic": Decimal("60"),
+    "Pro": Decimal("100"),
+    "Enterprise": Decimal("200"),
+}
+
+# الاسم العربي المعروض لكل خطة، وترتيب عرضها على صفحة الأسعار العامة — مصدر
+# واحد: لا تُكتب هذه النصوص في الواجهة ولا في أي مُسلسِل مرة أخرى.
+PLAN_LABELS = {
+    "Basic": "الأساسية",
+    "Pro": "المتقدمة",
+    "Enterprise": "المتخصصة",
+}
+PUBLIC_PLAN_ORDER = ("Basic", "Pro", "Enterprise")
+
+# خدمة الإدخال تُشترى فوق أي خطة — سعرٌ واحد وعددُ عمليات متضمَّن واحد، لا سلّم.
+DATA_ENTRY_ADDON = {
+    "key": "data_entry",
+    "label": "خدمة الإدخال",
+    "price": Decimal("300"),
+    "included_operations": 300,
+    # سعر العملية الزائدة عن الـ300 لم يحسمه المالك بعد — لا نخترع رقماً هنا؛
+    # الواجهة تُخفي هذا الحقل حين يكون None بدل طباعة «0 ₪».
+    "extra_operation_price": None,
+}
+
+PLAN_CURRENCY = "ILS"
+PLAN_CURRENCY_SYMBOL = "₪"
+
+_PLAN_PRICING_CACHE_KEY = "plan_pricing:overrides"
+
+
+def plan_pricing_overrides() -> dict:
+    """{plan_key: السعر الشهري} من تجاوزات PlanPricing — استعلامٌ واحدٌ مخزَّنٌ مؤقتاً.
+
+    جدولٌ صغيرٌ تقرؤه نقطة الأسعار العامة بلا مصادقة على كل فتحة زائر، فكاشُّه
+    يقيه من ضربٍ على كل طلب — على غرار `tenant_overrides` لكن بلا مفتاح شركة،
+    لأن السعر يخصّ الخطة كلها لا شركة بعينها.
+    """
+    from core.models import PlanPricing
+
+    cached = cache.get(_PLAN_PRICING_CACHE_KEY)
+    if cached is None:
+        cached = dict(PlanPricing.objects.values_list("plan_key", "monthly_price"))
+        cache.set(_PLAN_PRICING_CACHE_KEY, cached, timeout=_CACHE_TTL_SECONDS)
+    return cached
+
+
+def invalidate_plan_pricing_cache() -> None:
+    cache.delete(_PLAN_PRICING_CACHE_KEY)
+
+
+def plan_price(plan: str, overrides: dict | None = None):
+    """السعر الشهري الفعّال: تجاوز `PlanPricing` إن وُجد، وإلا افتراض الكود،
+    وإلا `None` لخطةٍ لا تُباع (Trial أو مفتاحٌ مجهول).
+
+    `overrides` تُمرَّر حين يكون المستدعي قد قرأها **مرّةً واحدةً** لعدّة خطط:
+    النداءُ بلا وسيطٍ يقرأ الجدول في كلّ مرّة، فحلقةٌ على ثلاث خططٍ تصير ثلاثَ
+    قراءاتٍ لا واحدة. والكاشُ لا يُنقذ: `IGNORE_EXCEPTIONS` تجعل انقطاعَ Redis
+    يسقط إلى القاعدة صامتاً، فتصير النقطةُ **العامّةُ بلا مصادقة** ثلاثةَ
+    استعلاماتٍ لكلّ زائر.
+    """
+    if overrides is None:
+        overrides = plan_pricing_overrides()
+    if plan in overrides:
+        return overrides[plan]
+    return PLAN_PRICING_DEFAULTS.get(plan)
+
+
+def public_plan_rows() -> list[dict]:
+    """صفٌّ لكل خطةٍ معروضة: سعرها وحدودها ووحداتها — تقرأه نقطة الأسعار العامة.
+
+    كل رقمٍ هنا مقروءٌ من `PLAN_DEFAULTS` و`MODULES` مباشرةً لا منسوخاً بيد: حدٌّ
+    يُضاف غداً أو وحدةٌ تُرخَّص لخطةٍ جديدة تظهران هنا وحدهما بلا تعديلٍ ثانٍ.
+    `Trial` مستثناة من المخرج — خطةٌ لا تُباع لا تظهر في صفحة أسعار.
+    """
+    from core.modules import MODULES
+
+    # قراءةٌ واحدةٌ للتجاوزات تخدم الخطط كلَّها — لا قراءةً داخل الحلقة.
+    overrides = plan_pricing_overrides()
+    rows = []
+    for plan in PUBLIC_PLAN_ORDER:
+        defaults = PLAN_DEFAULTS[plan]
+        rows.append({
+            "key": plan,
+            "label": PLAN_LABELS[plan],
+            "price": plan_price(plan, overrides),
+            "currency": PLAN_CURRENCY,
+            "currency_symbol": PLAN_CURRENCY_SYMBOL,
+            "limits": [
+                {
+                    "key": key,
+                    "label": spec.label,
+                    "unit": spec.unit,
+                    "period": spec.period,
+                    "period_label": PERIOD_LABELS[spec.period],
+                    "value": defaults.get(key),
+                }
+                for key, spec in LIMITS.items()
+            ],
+            "modules": [
+                {"key": key, "label": definition["label"]}
+                for key, definition in MODULES.items()
+                if plan in definition["plans"]
+            ],
+        })
+    return rows
 
 
 def _tenant_id(tenant):

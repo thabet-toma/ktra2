@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **819**
+عدد النقاط: **821**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -692,9 +692,11 @@
 | `/api/platform/ops/work-orders/{pk}/document-links/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/link-document/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/transition/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/plan-pricing/` | `platform_plan_pricing` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/` | `platform_super_admins` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/<int:pk>/` | `platform_super_admin_detail` | `core/platform_admin_api.py` |
 | `/api/platform/users/<int:pk>/set-active/` | `platform_user_set_active` | `core/platform_admin_api.py` |
+| `/api/pricing/plans/` | `public_pricing_plans` | `core/public_pricing.py` |
 | `/api/realestate/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/realestate/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/realestate/buildings/` | `BuildingViewSet` | `realestate/views.py` |

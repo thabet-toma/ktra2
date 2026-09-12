@@ -21,14 +21,15 @@ from accounting.models import AccountingAuditLog
 from core.activity import log_activity
 from core.import_access import is_super_admin, super_admin_emails
 from core.models import (
-    ActivityLog, DevelopmentNote, DevelopmentNoteComment, TenantAsset,
-    TenantLimit, TenantModule,
+    ActivityLog, DevelopmentNote, DevelopmentNoteComment, PlanPricing,
+    TenantAsset, TenantLimit, TenantModule,
 )
 from core.modules import MODULES, invalidate_module_cache
 from core.plans import (
-    LIMITS, bulk_overrides, bulk_usage, invalidate_limit_cache, limit_rows,
-    limit_value, near_limit_rows, plan_default, subscription_expiry,
-    trial_end_date,
+    LIMITS, PLAN_LABELS, PLAN_PRICING_DEFAULTS, bulk_overrides, bulk_usage,
+    invalidate_limit_cache, invalidate_plan_pricing_cache, limit_rows,
+    limit_value, near_limit_rows, plan_default, plan_pricing_overrides,
+    subscription_expiry, trial_end_date,
 )
 from tenants.models import Branch, Tenant, UserCompanyMembership
 
@@ -741,6 +742,82 @@ def platform_company_limits(request, pk):
         tenant.pk, limit_key, reset, new_value, request.user.pk,
     )
     return Response({'plan': tenant.SubscriptionPlan, 'results': limit_rows(tenant)})
+
+
+class PlanPricingWriteSerializer(serializers.Serializer):
+    """ضبط سعر خطة: قيمةٌ صريحة، أو مساواتها بالافتراض فتُحذف كتجاوز."""
+
+    plan_key = serializers.ChoiceField(choices=tuple(PLAN_PRICING_DEFAULTS))
+    monthly_price = serializers.DecimalField(
+        max_digits=10, decimal_places=2, min_value=0,
+    )
+    note = serializers.CharField(
+        required=False, allow_blank=True, default='', max_length=120,
+        trim_whitespace=True,
+    )
+
+
+def _plan_pricing_rows():
+    """صفٌّ لكل خطةٍ معروضة: الافتراضي والتجاوز والسعر الفعّال — للوحة المنصة."""
+    overrides = plan_pricing_overrides()
+    rows = []
+    for plan_key, default_price in PLAN_PRICING_DEFAULTS.items():
+        has_override = plan_key in overrides
+        rows.append({
+            'plan_key': plan_key,
+            'label': PLAN_LABELS.get(plan_key, plan_key),
+            'default_price': default_price,
+            'override': overrides.get(plan_key) if has_override else None,
+            'has_override': has_override,
+            'effective_price': overrides[plan_key] if has_override else default_price,
+        })
+    return rows
+
+
+@api_view(['GET', 'PUT'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_plan_pricing(request):
+    """أسعار الخطط: قراءتها مع الافتراض والتجاوز (GET)، وضبط/استعادة سعر (PUT).
+
+    لا شركة هنا — السعر يخصّ الخطة كلها، فلا سجل نشاطٍ يربطه بشركة بعينها؛
+    نفس نمط `platform_super_admins` (منح/سحب) الذي يكتفي بسطر `logger.info`
+    لأفعالٍ عابرة للشركات بلا `ActivityLog`/`AccountingAuditLog` (كلاهما يلزمه
+    `tenant` غير قابل لأن يكون فارغاً).
+    """
+    if request.method == 'GET':
+        return Response({'results': _plan_pricing_rows()})
+
+    serializer = PlanPricingWriteSerializer(data=request.data)
+    serializer.is_valid(raise_exception=True)
+    plan_key = serializer.validated_data['plan_key']
+    monthly_price = serializer.validated_data['monthly_price']
+    note = serializer.validated_data['note']
+    default_price = PLAN_PRICING_DEFAULTS[plan_key]
+
+    with transaction.atomic():
+        if monthly_price == default_price:
+            # مساواة السعر بالافتراض = استعادة — حذف الصف لا كتابة نسخة منه،
+            # وإلا تجمّد السعر عند قيمة قديمة حين يتغيّر افتراض الكود لاحقاً.
+            PlanPricing.objects.filter(plan_key=plan_key).delete()
+            new_price = default_price
+        else:
+            PlanPricing.objects.update_or_create(
+                plan_key=plan_key,
+                defaults={
+                    'monthly_price': monthly_price,
+                    'note': note,
+                    'updated_by': request.user,
+                },
+            )
+            new_price = monthly_price
+        transaction.on_commit(invalidate_plan_pricing_cache)
+
+    logger.info(
+        'platform plan price set plan=%s value=%s by_user=%s',
+        plan_key, new_price, request.user.pk,
+    )
+    return Response({'results': _plan_pricing_rows()})
 
 
 def _member_rows(tenant):
