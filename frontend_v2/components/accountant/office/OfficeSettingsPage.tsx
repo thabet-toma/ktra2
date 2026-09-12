@@ -8,6 +8,7 @@ import {
 } from '../../../services/accountantPracticeApi';
 import { useToast } from '../../../contexts/ToastContext';
 import { OfficeCard, OfficeError, OfficeField, OfficeInput, OfficeSkeleton } from './OfficeUi';
+import { MyPlanCard } from '../../MyPlanCard';
 
 /**
  * إعدادات المكتب — ما لا يُقرَّر لكل زبون على حدة: أنواع الخدمات التي يقدّمها
@@ -85,7 +86,17 @@ export const OfficeSettingsPage: React.FC = () => {
   // النوع المستعمَل في برنامج قائم يبقى محفوظاً على البرنامج نفسه؛ حذفه هنا يمنع
   // اختياره مستقبلاً فقط، ولا يُعدّل برنامجاً قديماً.
   return (
-    <form onSubmit={save} className="max-w-3xl space-y-6">
+    <div className="max-w-3xl space-y-6">
+      {/* 211-P: مقصدُ زرّ «عرض خطّتي» في هذه القشرة. وحدودُ المكتب هي التي
+          تُفرَض على دفاتر زبائنه (`_billing_tenant` في `core/plans.py` تُرجع
+          المكتبَ للدفتر المُدار)، فبلوغُ الحدّ داخل دفترِ زبونٍ خطّةُ المكتب —
+          وهذه هي الشاشةُ التي تعرضها. **خارجَ النموذج** لا داخلَه: بطاقةٌ في
+          جوف نموذجِ حفظِ إعداداتٍ أخرى خلطُ نيّتين. */}
+      <div id="my-plan">
+        <MyPlanCard />
+      </div>
+
+      <form onSubmit={save} className="space-y-6">
       {formError && <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-bold text-red-700">{formError}</p>}
 
       <OfficeCard title="مواعيد البرامج">
@@ -148,7 +159,8 @@ export const OfficeSettingsPage: React.FC = () => {
       <button type="submit" disabled={saving} className="rounded-xl bg-indigo-700 px-6 py-3 font-bold text-white disabled:opacity-50">
         {saving ? 'جارٍ الحفظ…' : 'حفظ الإعدادات'}
       </button>
-    </form>
+      </form>
+    </div>
   );
 };
 

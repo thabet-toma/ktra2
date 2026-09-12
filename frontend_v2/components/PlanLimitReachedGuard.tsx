@@ -4,12 +4,26 @@ import { useNavigate } from 'react-router-dom';
 
 import { PLAN_LIMIT_REACHED_EVENT, type PlanLimitReachedDetail } from '../utils/sessionEvents';
 
+interface PlanLimitReachedGuardProps {
+  /**
+   * فتحُ «خطّتي» في القشرة المُضيفة. يُترَك فارغاً في التطبيق الرئيس فيُستعمل
+   * `navigate('/settings#my-plan')`.
+   *
+   * **ولا يُترَك فارغاً في قشرة مكتب المحاسب**: تلك تتنقّل بـ`pushState` وتقرأ
+   * المسارَ على `popstate` وحدَه، و`navigate` من react-router لا تُطلقه — فيتغيّر
+   * العنوانُ ولا يتغيّر المعروض. وأسوأُ من ذلك أنّ `App.tsx` تُرجع قشرةَ المكتب
+   * **باكراً** لحساب المحاسب، فمسارُ `/settings` لا يُصيَّر له أصلاً ويسقط
+   * محلّلُ المسار هناك إلى لوحة المكتب.
+   */
+  onViewPlan?: () => void;
+}
+
 /**
  * 211-P — بلغتَ حدَّ خطّتك: تنبيهٌ يحمل رسالة الخادم حرفياً (لا إعادة صياغة)
  * مع طريقٍ فعليٍّ إلى «خطّتي»، بدل toast يقول «رقِّ الخطة» بلا وجهة.
  * على نمط `EngagementRevokedGuard` بالضبط — نفس الحوار المانع عبر `createPortal`.
  */
-export const PlanLimitReachedGuard: React.FC = () => {
+export const PlanLimitReachedGuard: React.FC<PlanLimitReachedGuardProps> = ({ onViewPlan }) => {
   const navigate = useNavigate();
   const [detail, setDetail] = useState<PlanLimitReachedDetail | null>(null);
 
@@ -35,7 +49,11 @@ export const PlanLimitReachedGuard: React.FC = () => {
         <div className="mt-6 flex gap-3">
           <button
             type="button"
-            onClick={() => { setDetail(null); navigate('/settings#my-plan'); }}
+            onClick={() => {
+              setDetail(null);
+              if (onViewPlan) onViewPlan();
+              else navigate('/settings#my-plan');
+            }}
             className="flex-1 rounded-xl bg-blue-600 px-5 py-3 font-black text-white transition hover:bg-blue-700"
           >
             عرض خطّتي

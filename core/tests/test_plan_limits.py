@@ -245,3 +245,69 @@ class PlatformLimitApiTest(APITestCase):
             self.url(), {"limit_key": "made.up", "max_value": 5}, format="json",
         )
         self.assertEqual(response.status_code, 400, response.content)
+
+
+class LimitMessagePointsAtADoorTheUserCanOpenTest(APITestCase):
+    """رسالةُ بلوغ الحدّ كما يقرؤها **مستخدمُ الشركة** — لا موظّفُ المنصّة.
+
+    الرسالةُ ليست سطرَ سجلّ: `enforce_limits` يرفعها في `plan_limit` فتظهر منذ
+    211-P في حوارٍ كامل أمام من مُنع من الإنشاء. وهي آخرُ ما يقرؤه قبل أن
+    يتوقّف، فكلُّ كلمةٍ فيها إمّا تدلّه على مخرجٍ أو تحبسه.
+
+    ومقياسُ السوق واحد (Odoo · Zoho Books · QuickBooks · Xero): تُذكَر الحقيقةُ
+    ثمّ **فعلٌ واحدٌ يملكه الزبونُ نفسُه** — ولا واحدٌ منها يحيل الزبونَ إلى
+    لوحة إدارة المزوّد الداخليّة.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.basic = Tenant.objects.create(
+            CompanyName="شركة أساسية", SubscriptionPlan="Basic", Status="Active",
+        )
+        cls.trial = Tenant.objects.create(
+            CompanyName="شركة تجريبية", SubscriptionPlan="Trial", Status="Active",
+        )
+
+    def _message(self, tenant):
+        from core.plans import limit_exceeded_message
+        return limit_exceeded_message(tenant, "sales.invoices", 200)
+
+    def test_it_does_not_send_the_customer_to_a_door_only_ktra_can_open(self):
+        """«لوحة المنصة» شاشةُ كترا خلفَ `IsPlatformAdmin` — لا يفتحها زبونٌ أبداً.
+
+        رسالةٌ تقول له «ارفع الحدّ من لوحة المنصة» تصف طريقاً غيرَ موجودٍ في
+        حسابه: يبحث عنه فلا يجده، فيقرأ العجزَ عيباً في فهمه لا في الرسالة.
+        """
+        message = self._message(self.basic)
+        self.assertNotIn(
+            "لوحة المنصة", message,
+            "الرسالةُ تحيل زبوناً إلى شاشةٍ لا يملك صلاحيّةَ فتحها.",
+        )
+
+    def test_it_names_the_plan_in_arabic_not_by_its_english_key(self):
+        """`PLAN_LABELS` موجودةٌ منذ 211-M لهذا بالضبط.
+
+        مفتاحُ الخطّة قيمةُ قاعدةِ بيانات (`Basic`)، وطباعتُه داخل نثرٍ عربيٍّ
+        تُظهر داخلَ النظام لمن لا شأنَ له به — والاسمُ العربيُّ معروضٌ له في
+        صفحة الأسعار وفي «خطّتي»، فيقرأ اسمين لخطّةٍ واحدة.
+        """
+        message = self._message(self.basic)
+        self.assertIn("الأساسية", message)
+        self.assertNotIn("Basic", message)
+
+    def test_the_trial_company_gets_an_arabic_name_too(self):
+        """التجريبيّةُ مخفيّةٌ عن العرض، لا عن الرسائل.
+
+        هي **مستبعدةٌ عمداً** من `PUBLIC_PLAN_ORDER` و`PLAN_PRICING_DEFAULTS`
+        (خطّةٌ لا تُباع)، فمن السهل أن تُنسى في جدول الأسماء — وشركةٌ تجريبيّةٌ
+        تبلغ حدَّها تقرأ كلمة `Trial` عاريةً في منتصف جملةٍ عربيّة.
+        """
+        message = self._message(self.trial)
+        self.assertNotIn("Trial", message)
+
+    def test_it_still_says_which_limit_and_how_much(self):
+        """ما تحسّنَ في الصياغة لا يُفقِد ما كان صحيحاً: الحدُّ ورقمُه ودورتُه."""
+        message = self._message(self.basic)
+        self.assertIn("فواتير البيع", message)
+        self.assertIn("200", message)
+        self.assertIn("شهرياً", message)

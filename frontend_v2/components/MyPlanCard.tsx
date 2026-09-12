@@ -96,8 +96,14 @@ export const MyPlanCard: React.FC = () => {
 
   if (!currentCompany) return null;
 
-  const isTrial = currentCompany.SubscriptionPlan === 'Trial';
-  const planRow = !isTrial ? pricing?.plans.find((p) => p.key === currentCompany.SubscriptionPlan) : undefined;
+  // **الخطّةُ من الخادم لا من صفّ الشركة.** `SubscriptionPlan` على الصفّ ليس
+  // دائماً الخطّةَ المفروضة: `_billing_tenant` في `core/plans.py` تُرجع **المكتبَ**
+  // لدفترِ زبونٍ مُدار، فحدودُ الدفتر حدودُ خطّةِ المكتب. قراءةُ الاسم والسعر من
+  // الصفّ وقراءةُ الحدود من الخادم تُخرج بطاقةً تناقض نفسَها: عنوانُ خطّةٍ
+  // وأرقامُ خطّةٍ أخرى. و`usage.plan` هو المفتاحُ الذي يفرضه `enforce_limits`.
+  const planKey = usage?.plan ?? currentCompany.SubscriptionPlan;
+  const isTrial = planKey === 'Trial';
+  const planRow = !isTrial ? pricing?.plans.find((p) => p.key === planKey) : undefined;
   const daysLeft = currentCompany.subscription_days_left;
   const endsAt = currentCompany.subscription_ends_at;
 
@@ -107,7 +113,7 @@ export const MyPlanCard: React.FC = () => {
         <div>
           <p className="text-sm font-extrabold text-blue-600 dark:text-blue-400">خطّة الاشتراك</p>
           <h3 className="mt-1 text-xl font-black text-slate-950 dark:text-white">
-            {isTrial ? 'الخطّة التجريبيّة' : planRow?.label ?? usage?.plan_label ?? currentCompany.SubscriptionPlan}
+            {isTrial ? 'الخطّة التجريبيّة' : usage?.plan_label ?? planRow?.label ?? planKey}
           </h3>
         </div>
 

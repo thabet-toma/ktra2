@@ -86,6 +86,23 @@ class PlanTablesStayInStepTest(APITestCase):
         for plan in PUBLIC_PLAN_ORDER:
             self.assertIn(plan, PLAN_PRICING_DEFAULTS, "خطّةٌ معروضةٌ بلا سعر.")
 
+    def test_every_plan_the_engine_can_enforce_has_an_arabic_name(self):
+        """الشرطُ على `PLAN_DEFAULTS` لا على المسعَّرة وحدَها — وهنا وقع العطب.
+
+        الحارسُ فوق يمرّ على `PLAN_PRICING_DEFAULTS`، والتجريبيّةُ **مستبعدةٌ
+        منها عمداً** (خطّةٌ لا تُباع) — فبقيت بلا اسمٍ عربيٍّ ولم يُسقط ذلك
+        شيئاً، حتّى ظهرت كلمة `Trial` عاريةً في رسالة بلوغ الحدّ أمام زبون.
+
+        و`_plan_of` تُرجع دائماً مفتاحاً من `PLAN_DEFAULTS` (والمجهولةُ تُعامَل
+        «الأساسية»)، فكلُّ مفتاحٍ فيها نصٌّ يُطبَع لمستخدمٍ يوماً ما: الشرطُ
+        الصحيح أنّ **ما يستطيع المحرّكُ فرضَه يستطيع أن يسمّيَه**.
+        """
+        for plan in PLAN_DEFAULTS:
+            self.assertIn(
+                plan, PLAN_LABELS,
+                "خطّةٌ يفرضها المحرّك بلا اسمٍ عربيّ — مفتاحُها سيُطبَع لمستخدم.",
+            )
+
     def test_the_hidden_trial_is_never_displayed(self):
         self.assertIn("Trial", PLAN_DEFAULTS, "شرطُ الاختبار: التجريبيّةُ قائمة.")
         self.assertNotIn("Trial", PUBLIC_PLAN_ORDER)

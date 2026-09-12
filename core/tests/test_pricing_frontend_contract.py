@@ -29,6 +29,12 @@ class PricingFrontendContractTest(TestCase):
         self.app_layout_source = (
             frontend / "components" / "layout" / "AppLayout.tsx"
         ).read_text(encoding="utf-8")
+        self.limit_guard_source = (
+            frontend / "components" / "PlanLimitReachedGuard.tsx"
+        ).read_text(encoding="utf-8")
+        self.office_settings_source = (
+            frontend / "components" / "accountant" / "office" / "OfficeSettingsPage.tsx"
+        ).read_text(encoding="utf-8")
         self.public_pricing_source = (repo_root / "core" / "public_pricing.py").read_text(encoding="utf-8")
         self.plans_source = (repo_root / "core" / "plans.py").read_text(encoding="utf-8")
         self.plan_usage_api_source = (
@@ -175,6 +181,53 @@ class PricingFrontendContractTest(TestCase):
         # وقشرةُ مكتب المحاسب أيضاً — دفترُ العميل يبلغ حدَّه كما تبلغه الشركة.
         self.assertRegex(self.accountant_office_app_source, r"<EngagementRevokedGuard[\s/>]")
         self.assertRegex(self.accountant_office_app_source, r"<PlanLimitReachedGuard[\s/>]")
+
+    def test_the_office_shell_escape_hatch_lands_somewhere_real(self):
+        """زرُّ «عرض خطّتي» في قشرة المكتب يفتح شاشةً فيها البطاقةُ فعلاً.
+
+        عطبان متراكبان جعلا الزرَّ بلا وجهةٍ لجمهور المكتب كلِّه:
+
+        - `App.tsx` تُرجع `AccountantOfficeApp` **باكراً** لحساب المحاسب، فمسارُ
+          `/settings` لا يُصيَّر له أصلاً؛ ومحلّلُ المسار في قشرة المكتب يقبل
+          `/office/...` وحدَه ويسقط إلى لوحة المكتب لغيره.
+        - وقشرةُ المكتب تتنقّل بـ`pushState` وتقرأ المسارَ على `popstate` وحدَه،
+          و`navigate` من react-router لا تُطلقه — فيتغيّر العنوانُ ولا يتغيّر
+          المعروض.
+
+        فكانت النتيجةُ: يُمنَع من الإنشاء، يضغط «عرض خطّتي»، فيجد نفسَه على لوحة
+        المكتب بلا خطّةٍ ولا تفسير — وهو بعينه «toast بلا وجهة» الذي وُجدت 211-P
+        لإزالته، عائداً من باب مراجعتي أنا حين أوجبتُ تركيبَ الحارس هنا بلا أن
+        أتحقّق من وجود مقصدٍ له.
+        """
+        self.assertIn(
+            "onViewPlan", self.limit_guard_source,
+            "الحارسُ لا يقبل وجهةً محقونة — قشرةُ المكتب لا تسمع react-router.",
+        )
+        self.assertRegex(
+            self.accountant_office_app_source, r"<PlanLimitReachedGuard\s+onViewPlan=",
+            "قشرةُ المكتب تركّب الحارسَ بلا وجهتها هي، فالزرُّ يقود إلى لوحة المكتب.",
+        )
+        # **مركَّبةٌ لا مستوردة**: سطرُ الاستيراد وحدَه يُبقي الاسمَ في الملفّ،
+        # فتأكيدٌ على الاسم يبقى أخضرَ والمكوّنُ محذوفٌ من الشجرة — وهو تأكيدٌ
+        # لا يستطيع السقوطَ للسبب الذي يحمله اسمُه.
+        self.assertRegex(
+            self.office_settings_source, r"<MyPlanCard[\s/>]",
+            "إعداداتُ المكتب بلا «خطّتي» **مركَّبةً** — الوجهةُ موجودةٌ والشاشةُ فارغة.",
+        )
+        self.assertIn('id="my-plan"', self.office_settings_source)
+
+    def test_the_card_shows_the_plan_that_is_actually_enforced(self):
+        """مفتاحُ الخطّة من حمولة الخادم لا من `SubscriptionPlan` على صفّ الشركة.
+
+        `_billing_tenant` في `core/plans.py` تُرجع **المكتبَ** لدفترِ زبونٍ مُدار،
+        فحدودُ الدفتر حدودُ خطّةِ المكتب. وقراءةُ الاسم والسعر من الصفّ مع قراءة
+        الحدود من الخادم تُخرج بطاقةً تناقض نفسَها: عنوانُ خطّةٍ وأرقامُ أخرى،
+        ولا خطأَ في أيّ مكان.
+        """
+        self.assertRegex(
+            self.my_plan_card_source, r"const planKey = usage\?\.plan",
+            "البطاقةُ تشتقّ خطّتَها من صفّ الشركة لا من الخطّة المفروضة.",
+        )
 
     def test_every_featured_limit_key_on_the_card_really_exists_on_the_server(self):
         """مفاتيحُ الحدود المختارةُ للبطاقة تُطابق `LIMITS` في `core/plans.py`.

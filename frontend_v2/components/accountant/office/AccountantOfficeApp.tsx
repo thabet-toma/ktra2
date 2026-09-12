@@ -229,7 +229,7 @@ export const AccountantOfficeApp: React.FC<{
           {/* إلغاء الشركة لارتباطنا أثناء العمل ⇒ حوار مانع وعودة لقائمة الزبائن */}
           <EngagementRevokedGuard onReturn={() => { setClient(null); go('dashboard'); }} />
           {/* 211-P: بلغ دفترُ العميل حدَّ خطّته ⇒ حوارٌ يقود إلى «خطّتي» */}
-          <PlanLimitReachedGuard />
+          <PlanLimitReachedGuard onViewPlan={() => go('settings')} />
         </div>
       </div>
     </div>
