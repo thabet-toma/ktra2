@@ -8,8 +8,9 @@ import { describePlatformOpsError } from "../../utils/platformSubscriptionManage
 import { PlatformNotificationBell } from "./PlatformNotificationBell";
 import { WorkOrdersPanel } from "./WorkOrdersPanel";
 import { EmployeeSelfWalletCard } from "./EmployeeSelfWalletCard";
+import { EmployeeCompaniesPanel } from "./EmployeeCompaniesPanel";
 
-type EmployeeTab = "queue" | "wallet";
+type EmployeeTab = "queue" | "companies" | "wallet";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه المساحة لموظفي عمليات المنصة فقط.", "تعذّر تحميل مساحتك.");
@@ -78,7 +79,7 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
       <header className="flex items-center justify-between mb-6">
         <div>
           <h1 className="text-lg font-bold text-slate-900">مساحتي — عمليات المنصة</h1>
-          <p className="text-xs text-slate-500">طابورُ أعمالك عبر شركات ارتباطاتك، وتقييمُك ومحفظتُك.</p>
+          <p className="text-xs text-slate-500">طابورُ أعمالك، وشركاتُ ارتباطاتك بحصصها وبنودِ صحّتها، وتقييمُك ومحفظتُك.</p>
         </div>
         <PlatformNotificationBell />
       </header>
@@ -108,6 +109,15 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setTab("companies")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            tab === "companies" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          شركاتي
+        </button>
+        <button
+          type="button"
           onClick={() => setTab("wallet")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
             tab === "wallet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
@@ -118,6 +128,7 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
       </div>
 
       {tab === "queue" && <WorkOrdersPanel />}
+      {tab === "companies" && <EmployeeCompaniesPanel />}
       {tab === "wallet" && (
         profileLoading ? (
           <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>

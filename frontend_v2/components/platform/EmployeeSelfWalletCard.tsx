@@ -15,6 +15,12 @@ import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 import { PilotAxesTable } from "./PilotAxesTable";
+import {
+  listMyPerformanceReviewRequests,
+  openPerformanceReviewRequest,
+  type PerformanceReviewRequestRow,
+} from "../../services/platformEmployeeSpaceApi";
+import { useToast } from "../../contexts/ToastContext";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لاستعراض هذه المحفظة.", "تعذّر تحميل البيانات.");
@@ -46,6 +52,10 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
   const [performance, setPerformance] = useState<EmployeePilotPerformance | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
+  const [reviews, setReviews] = useState<PerformanceReviewRequestRow[]>([]);
+  const [reviewReason, setReviewReason] = useState("");
+  const [submittingReview, setSubmittingReview] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -57,6 +67,8 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
       ]);
       setWallet(walletData);
       setPerformance(perfData);
+      // اعتراضاتي — فشلُها لا يُسقط المحفظةَ ولا التقييم؛ قائمةٌ فارغةٌ أهونُ من شاشةٍ ساقطة.
+      setReviews(await listMyPerformanceReviewRequests().catch(() => []));
     } catch (cause) {
       setError(displayError(cause));
       setWallet(null);
@@ -69,6 +81,26 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
   useEffect(() => { void load(); }, [load]);
 
   const lines: WalletLine[] = [...(wallet?.salary_lines ?? []), ...(wallet?.commission_lines ?? [])];
+
+  const periodReviews = reviews.filter((r) => r.period_year === year && r.period_month === month);
+  const openReview = periodReviews.find((r) => r.status === "open") ?? null;
+  const resolvedReviews = periodReviews.filter((r) => r.status !== "open");
+
+  const submitReview = async () => {
+    setSubmittingReview(true);
+    try {
+      const created = await openPerformanceReviewRequest({
+        period_year: year, period_month: month, reason: reviewReason.trim(),
+      });
+      setReviews((prev) => [created, ...prev]);
+      setReviewReason("");
+      toast("أُرسل طلبُ المراجعة.", "success");
+    } catch (cause) {
+      toast(displayError(cause), "error");
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   return (
     <section className="space-y-4" dir="rtl">
@@ -187,6 +219,47 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
                 <p className="text-sm font-bold">النتيجة المركّبة: {formatNumber(performance.composite_score)}%</p>
               )}
               <PilotAxesTable performance={performance} />
+
+              {/* القصة ٤٤: طلبُ مراجعةِ نتيجةٍ بسبب. **لا يرفع الدرجةَ**: يفتح مساراً
+                  بشريّاً يصحّح فيه المديرُ بيانةً أو تصنيفاً عند المصدر ثمّ تُعاد اللقطة. */}
+              <div className="mt-3 border-t border-slate-100 pt-3">
+                <h4 className="mb-1.5 text-xs font-bold text-slate-700">أعترض على هذه النتيجة</h4>
+                {openReview ? (
+                  <p className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-[11px] text-sky-800">
+                    لديك اعتراضٌ مفتوحٌ على هذه الفترة بانتظار ردّ مدير العمليات: «{openReview.reason}»
+                  </p>
+                ) : (
+                  <div className="flex flex-wrap items-start gap-2">
+                    <input
+                      type="text"
+                      value={reviewReason}
+                      onChange={(event) => setReviewReason(event.target.value)}
+                      placeholder="سبب الاعتراض — خطأُ بياناتٍ أو تصنيف"
+                      className="min-w-[240px] flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void submitReview()}
+                      disabled={submittingReview || !reviewReason.trim()}
+                      className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                    >
+                      {submittingReview ? "..." : "أرسل الطلب"}
+                    </button>
+                  </div>
+                )}
+                {resolvedReviews.length > 0 && (
+                  <ul className="mt-2 space-y-1">
+                    {resolvedReviews.map((row) => (
+                      <li key={row.id} className="rounded-lg bg-slate-50 p-2 text-[11px] text-slate-600">
+                        <span className={`ml-1 rounded-full px-2 py-0.5 font-bold ${row.status === "accepted" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                          {row.status_display}
+                        </span>
+                        «{row.reason}» — {row.resolution_note || "بلا ردٍّ مكتوب"}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           )}
         </>

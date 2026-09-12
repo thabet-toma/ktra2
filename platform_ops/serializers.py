@@ -21,6 +21,7 @@ from .models import (
     EmployeeCompensationPolicy,
     EmployeeSalaryLine,
     IntegrationKey,
+    PerformanceReviewRequest,
     JobApplicant,
     JobApplicantInvitation,
     JobPosting,
@@ -370,6 +371,50 @@ class WorkOrderSerializer(serializers.ModelSerializer):
 
     def get_effective_duration_seconds(self, obj):
         return obj.calculate_effective_duration_seconds()
+
+
+class OpenPerformanceReviewSerializer(serializers.Serializer):
+    """مدخلاتُ فتح اعتراض — الموظّفُ يُشتقّ من الجلسة لا من الحمولة (القصة ٤٤)."""
+
+    period_year = serializers.IntegerField(min_value=2000, max_value=2100)
+    period_month = serializers.IntegerField(min_value=1, max_value=12)
+    axis = serializers.CharField(max_length=50, required=False, allow_blank=True, default="")
+    reason = serializers.CharField(max_length=2000, allow_blank=False)
+
+
+class ResolvePerformanceReviewSerializer(serializers.Serializer):
+    """ردُّ المدير: قبولٌ أو رفض، وردٌّ مكتوبٌ في الحالتين."""
+
+    accepted = serializers.BooleanField()
+    resolution_note = serializers.CharField(max_length=500, allow_blank=False)
+
+
+class PerformanceReviewRequestSerializer(serializers.ModelSerializer):
+    """اعتراضُ موظّفٍ على نتيجةِ شهر (القصة ٤٤) — قراءةٌ فقط من الواجهة."""
+
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    resolved_by_name = serializers.CharField(source="resolved_by.username", read_only=True, default="")
+
+    class Meta:
+        model = PerformanceReviewRequest
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "period_year",
+            "period_month",
+            "axis",
+            "reason",
+            "status",
+            "status_display",
+            "resolution_note",
+            "resolved_by_name",
+            "resolved_at",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = fields
 
 
 class IntegrationKeySerializer(serializers.ModelSerializer):

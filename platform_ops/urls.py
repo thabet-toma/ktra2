@@ -24,6 +24,7 @@ from .views import (
     WorkOrderIntakeView,
     WorkOrderViewSet,
     AcquisitionCommissionLineViewSet,
+    PerformanceReviewRequestViewSet,
     CompensationMonthCloseView,
     EmployeeCompensationPolicyViewSet,
     EmployeeSalaryLineViewSet,
@@ -57,6 +58,11 @@ router.register(
 )
 router.register("salary-lines", EmployeeSalaryLineViewSet, basename="platform-ops-salary-lines")
 router.register("commission-lines", AcquisitionCommissionLineViewSet, basename="platform-ops-commission-lines")
+router.register(
+    "performance-review-requests",
+    PerformanceReviewRequestViewSet,
+    basename="platform-ops-performance-review-requests",
+)
 
 urlpatterns = [
     path("companies/<int:tenant_id>/health/", CompanyHealthView.as_view(), name="platform-ops-company-health"),

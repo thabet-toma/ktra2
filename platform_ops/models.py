@@ -3226,3 +3226,62 @@ class AcquisitionCommissionLine(models.Model):
     def __str__(self):
         return f"{self.acquisition}: عمولة {self.period_year}/{self.period_month} ({self.get_status_display()})"
 
+
+class PerformanceReviewRequest(models.Model):
+    """طلبُ موظّفٍ مراجعةَ نتيجةِ شهرٍ بسببٍ مكتوب (القصة ٤٤).
+
+    **لا تعديلَ على الدرجة من هنا.** الدرجةُ تُحسب من الأعمال وتُجمَّد في
+    `PerformanceSnapshot`؛ وهذا صفُّ اعتراضٍ يفتح مساراً بشريّاً: يقرأه مديرُ
+    العمليات فيصحّح بيانةً أو تصنيفَ ردٍّ عند المصدر، ثمّ تُعاد اللقطة. فصلٌ
+    مقصود — وإلا صار «طلبُ المراجعة» باباً خلفيّاً يرفع به الموظّفُ درجتَه.
+
+    ولا حذفَ لصفٍّ منها: الاعتراضُ وردُّه تاريخٌ يُقرأ لاحقاً، كسائر ما في الوحدة.
+    """
+
+    class Status(models.TextChoices):
+        OPEN = "open", "مفتوح"
+        ACCEPTED = "accepted", "قُبل وصُحِّح"
+        REJECTED = "rejected", "مرفوض"
+
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="performance_review_requests",
+        verbose_name="الموظف",
+    )
+    period_year = models.PositiveSmallIntegerField(verbose_name="سنة الفترة")
+    period_month = models.PositiveSmallIntegerField(verbose_name="شهر الفترة")
+    # محورٌ بعينه أو فارغٌ للنتيجة المركّبة كلِّها — نصٌّ لا choices لأنّ المحاور
+    # تسكن السياسة (`PerformanceEvaluationPolicy`) وتتغيّر بنسخةٍ لا بهجرة.
+    axis = models.CharField(max_length=50, blank=True, default="", verbose_name="المحور")
+    reason = models.TextField(verbose_name="سبب الاعتراض")
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.OPEN, verbose_name="حالة الطلب",
+    )
+    resolution_note = models.CharField(
+        max_length=500, blank=True, default="", verbose_name="ردّ المدير",
+    )
+    resolved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="من ردّ",
+    )
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ الردّ")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "طلب مراجعة نتيجة"
+        verbose_name_plural = "طلبات مراجعة النتائج"
+        indexes = [
+            models.Index(fields=["employee", "period_year", "period_month"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        scope = self.axis or "النتيجة المركّبة"
+        return f"{self.employee}: اعتراض {self.period_year}/{self.period_month} على {scope}"
+

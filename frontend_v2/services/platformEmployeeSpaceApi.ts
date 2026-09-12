@@ -5,7 +5,7 @@
  * بنفسه (تُرجِع صفَّه وحدَه لغير المدير، `get_queryset` في `PlatformEmployeeViewSet`)،
  * لا بابَ مديرٍ ميّت.
  */
-import { apiGetObject } from "./restApi";
+import { apiGetObject, apiPostObject } from "./restApi";
 
 export type PlatformEmployeeStatus = "active" | "on_leave" | "offboarded";
 
@@ -46,3 +46,79 @@ export const getMyPlatformEmployeeProfile = async (
   );
   return rows.find((row) => String(row.user) === String(currentUserId)) ?? null;
 };
+
+// ==============================================================================
+// شركاتُ الموظّف: الحصّةُ وبنودُ الصحّة المُسنَدةُ إليه (القصّتان ٣٩ و٤٠)
+// ==============================================================================
+
+export interface EmployeeCompanyHealthItem {
+  id: number;
+  code: string;
+  status: string;
+  status_display: string;
+  mandatory: boolean;
+  action: string;
+  evidence_note: string;
+  due_date: string | null;
+  work_order_id: number | null;
+}
+
+export interface EmployeeEngagedCompanyRow {
+  tenant_id: number;
+  company_name: string;
+  subscription_status: string;
+  included_quota: number;
+  consumed_quota: number;
+  /** كميّةٌ لا تكون سالبة؛ التجاوزُ يُقرأ من `over_quota` لا من رصيدٍ بالسالب. */
+  remaining_quota: number;
+  over_quota: number;
+  health_items: EmployeeCompanyHealthItem[];
+}
+
+/** الشركاتُ تُشتقّ من ارتباطات المستدعي خادمياً — لا يقبل المسارُ معرّفَ شركةٍ إطلاقاً. */
+export const listMyEngagedCompanies = () =>
+  apiGetObject<EmployeeEngagedCompanyRow[]>("platform/ops/employees/my-companies/");
+
+// ==============================================================================
+// اعتراضُ الموظّف على نتيجة شهر (القصة ٤٤)
+// ==============================================================================
+
+export type PerformanceReviewStatus = "open" | "accepted" | "rejected";
+
+export interface PerformanceReviewRequestRow {
+  id: number;
+  employee: number;
+  employee_name: string;
+  period_year: number;
+  period_month: number;
+  axis: string;
+  reason: string;
+  status: PerformanceReviewStatus;
+  status_display: string;
+  resolution_note: string;
+  resolved_by_name: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listMyPerformanceReviewRequests = async (): Promise<PerformanceReviewRequestRow[]> =>
+  unwrapRows(
+    await apiGetObject<
+      { results: PerformanceReviewRequestRow[]; count?: number } | PerformanceReviewRequestRow[]
+    >("platform/ops/performance-review-requests/"),
+  );
+
+/** الموظّفُ يُشتقّ من الجلسة لا من الحمولة — لا يفتح أحدٌ اعتراضاً باسم غيره. */
+export const openPerformanceReviewRequest = (input: {
+  period_year: number;
+  period_month: number;
+  axis?: string;
+  reason: string;
+}) =>
+  apiPostObject<PerformanceReviewRequestRow>("platform/ops/performance-review-requests/open/", {
+    period_year: input.period_year,
+    period_month: input.period_month,
+    axis: input.axis || "",
+    reason: input.reason,
+  });

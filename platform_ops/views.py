@@ -108,6 +108,9 @@ from .services import (
     create_work_order,
     get_active_service_unit_catalog,
     link_work_order_document,
+    list_employee_engaged_companies,
+    request_performance_review,
+    resolve_performance_review,
     list_employee_work_order_queue,
     log_platform_activity,
     list_work_order_comments,
@@ -160,6 +163,7 @@ from .models import (
     JobPosting,
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
+    PerformanceReviewRequest,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
@@ -194,6 +198,9 @@ from .serializers import (
     EngagementSerializer,
     GenerateRatingLinkSerializer,
     IntegrationKeySerializer,
+    OpenPerformanceReviewSerializer,
+    PerformanceReviewRequestSerializer,
+    ResolvePerformanceReviewSerializer,
     JobApplicantSerializer,
     JobPostingSerializer,
     PerformanceSnapshotSerializer,
@@ -356,6 +363,27 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
         if IsPlatformOperationsManager().has_permission(self.request, self):
             return qs
         return qs.filter(user=self.request.user)
+
+    @action(detail=False, methods=["get"], url_path="my-companies")
+    def my_companies(self, request):
+        """شركاتُ ارتباطات الموظّف النشطة: حصّتُها وبنودُ الصحّة المُسنَدةُ إليه (القصّتان ٣٩، ٤٠).
+
+        `detail=False` ولا تقبل معرّفَ موظّفٍ ولا معرّفَ شركة: النطاقُ **هو المستدعي**
+        نفسُه (`request.user`) والشركاتُ تُشتقّ من ارتباطاته. فمديرُ العمليات يرى
+        شركاتِ ارتباطاته هو إن وُجدت، لا شركاتِ الجميع — وهذه قراءةٌ ذاتيّةٌ لا
+        سطحٌ إداريّ؛ السطحُ الإداريُّ في `dashboard/` و`work-orders/`.
+        """
+        params = request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        return Response(list_employee_engaged_companies(request.user))
 
     @action(detail=True, methods=["get"], url_path="performance")
     def performance(self, request, pk=None):
@@ -857,6 +885,75 @@ class SubscriptionBillingRecordViewSet(viewsets.ReadOnlyModelViewSet):
         if company_id:
             qs = qs.filter(subscription__tenant_id=company_id)
         return qs
+
+
+class PerformanceReviewRequestViewSet(viewsets.ReadOnlyModelViewSet):
+    """اعتراضاتُ الموظفين على نتائجهم (القصة ٤٤).
+
+    **النطاقُ يفرّق بين جمهورين تحت حارسٍ واحد**: مديرُ العمليات يرى كلَّ
+    الاعتراضات (هو من يردّ عليها)، والموظّفُ يرى اعتراضاتِه هو وحدَه — كما في
+    `PlatformEmployeeViewSet`. ولا معاملَ موظّفٍ من الطلب لغير المدير: لو قُبل
+    لقرأ موظّفٌ اعتراضَ زميلِه وسببَه.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+    serializer_class = PerformanceReviewRequestSerializer
+    queryset = (
+        PerformanceReviewRequest.objects.select_related("employee__user", "resolved_by")
+        .all()
+        .order_by("-created_at")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            employee_id = self.request.query_params.get("employee")
+            return qs.filter(employee_id=employee_id) if employee_id else qs
+        return qs.filter(employee__user=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="open")
+    def open_request(self, request):
+        """فتحُ اعتراضٍ — الموظّفُ على نتيجته هو، لا على نتيجةِ غيره."""
+        employee = PlatformEmployee.objects.filter(user=request.user).first()
+        if employee is None:
+            return Response(
+                {"detail": "لا ملفَّ موظّف منصّةٍ مرتبطٌ بحسابك.", "code": "not_a_platform_employee"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = OpenPerformanceReviewSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            created = request_performance_review(
+                employee=employee,
+                period_year=payload.validated_data["period_year"],
+                period_month=payload.validated_data["period_month"],
+                axis=payload.validated_data.get("axis", ""),
+                reason=payload.validated_data["reason"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(created).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="resolve")
+    def resolve(self, request, pk=None):
+        """ردُّ مدير العمليات — قبولاً أو رفضاً، بردٍّ مكتوبٍ في الحالتين."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "الردُّ على الاعتراضات لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = ResolvePerformanceReviewSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            updated = resolve_performance_review(
+                review_request=self.get_object(),
+                accepted=payload.validated_data["accepted"],
+                resolution_note=payload.validated_data["resolution_note"],
+                actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(updated).data)
 
 
 class IntegrationKeyViewSet(viewsets.ReadOnlyModelViewSet):

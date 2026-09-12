@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **798**
+عدد النقاط: **803**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -565,6 +565,7 @@
 | `/api/platform/ops/compensation/close/` | `CompensationMonthCloseView` | `platform_ops/views.py` |
 | `/api/platform/ops/dashboard/` | `PlatformDashboardView` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/my-companies/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
@@ -617,6 +618,10 @@
 | `/api/platform/ops/performance-evaluation-policies/{pk}/clone/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-evaluation-policies/{pk}/preview/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-evaluation-policies/{pk}/update-draft/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-review-requests/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-review-requests/open/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-review-requests/{pk}/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-review-requests/{pk}/resolve/` | `PerformanceReviewRequestViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/capture/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |

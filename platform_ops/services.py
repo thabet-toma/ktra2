@@ -51,6 +51,7 @@ from .models import (
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
     PerformanceEvaluationPolicyEvent,
+    PerformanceReviewRequest,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
@@ -8828,6 +8829,181 @@ WORK_ORDER_PRIORITY_RANK: dict[str, int] = {
     WorkOrder.Priority.NORMAL: 1,
     WorkOrder.Priority.LOW: 0,
 }
+
+
+def request_performance_review(*, employee, period_year: int, period_month: int, axis: str = "", reason: str):
+    """اعتراضُ الموظّف على نتيجةِ شهرٍ بسببٍ مكتوب (القصة ٤٤).
+
+    **السببُ إلزاميّ**: «طلب مراجعة نتيجة **مع سبب**» — وطلبٌ بلا سببٍ لا يُصحّح
+    خطأَ بياناتٍ ولا تصنيفاً، بل يفتح صفّاً لا يعرف المديرُ ماذا يفعل به.
+
+    **وطلبٌ مفتوحٌ واحدٌ لكلّ (موظّف، فترة، محور)**: الحارسُ في الخدمة لا في قيدٍ
+    شرطيّ — MySQL تتجاهل القيودَ الشرطيّة بصمت، وقد سبق أن كلّف ذلك هذا المستودعَ
+    قيداً ظنَّه قائماً. والطلبُ المردودُ لا يمنع طلباً جديداً: الردُّ قد يكشف بياناتٍ
+    جديدة.
+    """
+    reason = str(reason or "").strip()
+    if not reason:
+        raise PlatformOpsError("reason_required", "سبب طلب المراجعة مطلوب.")
+    axis = str(axis or "").strip()
+    with transaction.atomic():
+        existing = (
+            PerformanceReviewRequest.objects.select_for_update()
+            .filter(
+                employee=employee,
+                period_year=period_year,
+                period_month=period_month,
+                axis=axis,
+                status=PerformanceReviewRequest.Status.OPEN,
+            )
+            .first()
+        )
+        if existing is not None:
+            raise PlatformOpsError(
+                "review_request_already_open",
+                "لديك طلبُ مراجعةٍ مفتوحٌ لهذه الفترة بالفعل.",
+            )
+        created = PerformanceReviewRequest.objects.create(
+            employee=employee,
+            period_year=period_year,
+            period_month=period_month,
+            axis=axis,
+            reason=reason,
+        )
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"طلبُ مراجعة نتيجة {period_year}/{period_month} — {reason[:200]}",
+        entity_type="performance_review_request",
+        entity_id=created.pk,
+        details={"operation": "request_performance_review", "axis": axis},
+    )
+    return created
+
+
+def resolve_performance_review(*, review_request, accepted: bool, resolution_note: str, actor=None):
+    """ردُّ مدير العمليات على اعتراض: قبولٌ مع تصحيحٍ عند المصدر، أو رفضٌ مُعلَّل.
+
+    **ولا يمسّ هذا الفعلُ الدرجةَ إطلاقاً.** القبولُ يعني أنّ المديرَ سيصحّح بيانةً
+    أو تصنيفَ ردٍّ عند مصدره ثمّ تُعاد اللقطة — فلو رفع هذا الفعلُ الدرجةَ مباشرةً
+    لصار طلبُ المراجعة باباً خلفيّاً يلتفّ على الحساب من الأعمال.
+    """
+    note = str(resolution_note or "").strip()
+    if not note:
+        raise PlatformOpsError("resolution_note_required", "ردُّ المدير مطلوب.")
+    with transaction.atomic():
+        locked = PerformanceReviewRequest.objects.select_for_update().get(pk=review_request.pk)
+        if locked.status != PerformanceReviewRequest.Status.OPEN:
+            raise PlatformOpsError("review_request_not_open", "هذا الطلبُ مردودٌ عليه سلفاً.")
+        locked.status = (
+            PerformanceReviewRequest.Status.ACCEPTED if accepted else PerformanceReviewRequest.Status.REJECTED
+        )
+        locked.resolution_note = note
+        locked.resolved_by = actor
+        locked.resolved_at = timezone.now()
+        locked.save(update_fields=["status", "resolution_note", "resolved_by", "resolved_at", "updated_at"])
+    log_platform_activity(
+        employee=locked.employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"ردٌّ على اعتراض {locked.period_year}/{locked.period_month}: {locked.get_status_display()}",
+        entity_type="performance_review_request",
+        entity_id=locked.pk,
+        details={
+            "operation": "resolve_performance_review",
+            "actor_user_id": getattr(actor, "pk", None),
+            "accepted": bool(accepted),
+        },
+    )
+    return locked
+
+
+def list_employee_engaged_companies(user) -> list[dict]:
+    """شركاتُ ارتباطات الموظّف النشطة، ولكلٍّ حصّتُها وبنودُ الصحّة المُسنَدةُ إليه.
+
+    القصّتان ٣٩ و٤٠: «أريد رؤية بنود صحة الشركة **المطلوب مني** علاجها» و«أريد رؤية
+    وحدات الشركة المستخدمة والمتبقية **لكي لا أعد العميل بخدمة تتجاوز خطته**».
+
+    **الشركاتُ تُشتقّ من الارتباطات لا من الطلب** — كسائر مسارات الوحدة: لا يقبل
+    المسارُ معرّفَ شركةٍ، فلا يُفتح البابُ الذي أُغلق. والبنودُ تُضيَّق على
+    `owner=user` وعلى الحالتين اللتين تطلبان عملاً (`follow_up`/`risk`): بندٌ سليمٌ
+    أو لا ينطبق ليس «مطلوباً منه علاجُه»، وبندُ زميلٍ ليس شغلَه.
+
+    ومصدرُ البنود **أحدثُ فحصٍ معتمد** لكلّ شركة: المسودّةُ قد تُعدَّل أو تُلغى،
+    فعرضُها يُحمّل الموظّفَ عملاً لم يُعتمد بعد.
+    """
+    eligible = list(eligible_service_tenant_ids())
+    engagements = (
+        Engagement.objects.filter(
+            employee__user=user, status=Engagement.Status.ACTIVE, tenant_id__in=eligible,
+        )
+        .select_related("tenant")
+        .order_by("tenant__CompanyName")
+    )
+    tenant_ids = [e.tenant_id for e in engagements]
+    if not tenant_ids:
+        return []
+
+    subs = {
+        sub.tenant_id: sub
+        for sub in ServiceSubscription.objects.filter(tenant_id__in=tenant_ids)
+    }
+
+    # أحدثُ فحصٍ معتمدٍ لكلّ شركة — صفٌّ واحدٌ لكلّ شركةٍ لا كلُّ تاريخها.
+    latest_check_id: dict[int, int] = {}
+    for row in (
+        CompanyHealthCheck.objects.filter(
+            tenant_id__in=tenant_ids, status=CompanyHealthCheck.Status.APPROVED,
+        )
+        .order_by("tenant_id", "-approved_at", "-pk")
+        .values_list("tenant_id", "pk", named=False)
+    ):
+        latest_check_id.setdefault(row[0], row[1])
+
+    items_by_tenant: dict[int, list[dict]] = {}
+    if latest_check_id:
+        actionable = [
+            CompanyHealthCheckItem.ItemStatus.FOLLOW_UP,
+            CompanyHealthCheckItem.ItemStatus.RISK,
+        ]
+        for item in (
+            CompanyHealthCheckItem.objects.filter(
+                health_check_id__in=list(latest_check_id.values()),
+                owner=user,
+                status__in=actionable,
+            )
+            .select_related("health_check")
+            .order_by("due_date", "pk")
+        ):
+            items_by_tenant.setdefault(item.health_check.tenant_id, []).append({
+                "id": item.pk,
+                "code": item.code,
+                "status": item.status,
+                "status_display": item.get_status_display(),
+                "mandatory": item.mandatory,
+                "action": item.action,
+                "evidence_note": item.evidence_note,
+                "due_date": item.due_date,
+                "work_order_id": item.work_order_id,
+            })
+
+    rows = []
+    for engagement in engagements:
+        sub = subs.get(engagement.tenant_id)
+        included = int(getattr(sub, "included_quota", 0) or 0)
+        consumed = int(getattr(sub, "consumed_quota", 0) or 0)
+        rows.append({
+            "tenant_id": engagement.tenant_id,
+            "company_name": engagement.tenant.CompanyName,
+            "subscription_status": getattr(sub, "status", "") or "",
+            "included_quota": included,
+            "consumed_quota": consumed,
+            # **لا سالب**: التجاوزُ يُقرأ من `over_quota` لا من رصيدٍ بالسالب، وإلا
+            # قرأ الموظّفُ «-٧ متبقّية» وهي ليست كميّةً متبقّيةً بل زيادةً مستهلَكة.
+            "remaining_quota": max(included - consumed, 0),
+            "over_quota": max(consumed - included, 0),
+            "health_items": items_by_tenant.get(engagement.tenant_id, []),
+        })
+    return rows
 
 
 def list_employee_work_order_queue(user):

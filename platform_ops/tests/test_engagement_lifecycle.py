@@ -597,6 +597,7 @@ DECLARED_LOCK_ORDER = (
     "MonthlyCompensationClose",
     "EmployeeSalaryLine",
     "AcquisitionCommissionLine",
+    "PerformanceReviewRequest",
     "UserCompanyMembership",
     "DailyRating",
     "JobPosting",
