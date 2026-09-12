@@ -28,11 +28,14 @@ import { ChampionsPanel } from "./ChampionsPanel";
 import { ProfitabilityPanel } from "./ProfitabilityPanel";
 import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
 import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
+import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
+import { countPresent, derivePresence, sortByPresence } from "../../utils/roomPresence";
+import { formatLastActive } from "../../utils/lastActiveFormat";
 
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
   | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys" | "champions"
-  | "profitability" | "review_requests";
+  | "profitability" | "review_requests" | "workspace_room";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -110,6 +113,24 @@ export const PlatformOpsDashboard: React.FC = () => {
   }, [data?.employees]);
 
   // فلترة الموظفين المعروضين
+  // سكّانُ الغرفة: كلُّ الموظّفين لا المفلترين — الغرفةُ لوحةُ حضورٍ لا نتيجةَ
+  // بحث، وإخفاءُ زميلٍ لأنّ كلمةَ بحثٍ لا تطابقه يجعل «من يعمل الآن» كذبة.
+  // وحالةُ الاجتماع (الأصفر) لها دفترُها منذ 211-F، لكنّ حمولةَ اللوحة لا تحمل
+  // بعدُ «من هو داخلَ اجتماعٍ الآن» — تلك شاشةُ الاجتماعات (211-G). فتُمرَّر
+  // `null` صراحةً: ضوءٌ أصفرُ مُخترَعٌ من النشاط وحدَه يكذب على من يقرأ اللوحة.
+  const roomOccupants = useMemo<RoomOccupant[]>(() => {
+    const employees = data?.employees || [];
+    const inMeeting: ReadonlySet<number> | null = null;
+    const rows = employees.map((employee) => ({
+      id: employee.id,
+      name: employee.name,
+      role: employee.specialty || "",
+      presence: derivePresence(employee, inMeeting, employee.id),
+      lastActiveLabel: formatLastActive(employee.last_active_at),
+    }));
+    return sortByPresence(rows);
+  }, [data?.employees]);
+
   const filteredEmployees = useMemo(() => {
     return sortedEmployees.filter((emp) => {
       if (specialtyFilter && emp.specialty !== specialtyFilter) {
@@ -258,6 +279,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab("workspace_room")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "workspace_room" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          مساحة العمل
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab("work_orders")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
             activeTab === "work_orders" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
@@ -358,6 +388,22 @@ export const PlatformOpsDashboard: React.FC = () => {
       {activeTab === "champions" && <ChampionsPanel />}
       {activeTab === "profitability" && <ProfitabilityPanel />}
       {activeTab === "review_requests" && <PerformanceReviewRequestsPanel />}
+
+      {activeTab === "workspace_room" && (
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm">
+          <WorkspaceRoom
+            occupants={roomOccupants}
+            screenTitle={`${countPresent(roomOccupants)} على المنصّة الآن`}
+            screenSubtitle="مساحة عمل كترا"
+            onSelectEmployee={(employeeId) => {
+              const employee = roomOccupants.find((o) => o.id === employeeId);
+              if (employee) {
+                setActivityModal({ isOpen: true, employeeId, employeeName: employee.name });
+              }
+            }}
+          />
+        </div>
+      )}
 
       {activeTab === "overview" && (
         <>

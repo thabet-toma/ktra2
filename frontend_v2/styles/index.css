@@ -2570,3 +2570,191 @@ tbody td {
 .platform-surface .text-slate-700 { color: oklch(41% 0.058 232); }
 .platform-surface .text-slate-800 { color: oklch(31% 0.05 232); }
 .platform-surface .text-slate-900 { color: oklch(23% 0.042 232); }
+
+
+/* ══ غرفةُ مساحة العمل ══════════════════════════════════════════════════════
+   غرفةٌ إيزومتريّةٌ بطاولةٍ مركزيّةٍ ومقاعدَ حولها، كنموذج المالك البصريّ.
+
+   **العمقُ بالتحجيم لا بـ`translateZ`**: المقعدُ الأماميُّ أكبرُ والخلفيُّ أصغر،
+   وهو ما تفعله العينُ فعلاً — أمّا الدورانُ ثلاثيُّ الأبعاد الحقيقيّ فيُميل
+   وجوهَ البطاقات فتصير أسماءُ الموظّفين مائلةً لا تُقرأ، والغرضُ من الغرفة أن
+   تُقرأ بلمحة.
+
+   والمواضعُ أصنافٌ ثابتةٌ مولَّدةٌ لا `style` سطريّ: قاعدةُ المستودع Tailwind
+   وحدَها، وعددُ المقاعد محدودٌ بطبيعته فلا تتقادم الأصناف. */
+.pf-room {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  /* أرضيّةٌ دنيا بالارتفاع لا بالنسبة وحدَها: مواضعُ المقاعد نِسَبٌ من الارتفاع
+     بينما ارتفاعُ بطاقةِ المقعد **ثابتٌ بالخطّ** (ثلاثةُ أسطر: اسمٌ ودورٌ وحالة)
+     — فكلّما ضاقت اللوحةُ قصُر الارتفاعُ وحدَه واقتربت البطاقاتُ حتى تتراكب.
+     قِيس ذلك فعلاً: عند عرض ٥٤١ بكسل كان المقعدان ٢ و٣ يتراكبان ٦٨×٣٣ بكسل،
+     أي أنّ سطرَي الدور والحالة لأحدهما مُغطَّيان تماماً. والحدُّ الأدنى محسوبٌ
+     لا مُخمَّن: أضيقُ فارقٍ رأسيٍّ بين مقعدين متجاورين هو 19.16% من الارتفاع،
+     ومجموعُ نصفَي ارتفاعهما ≈ ٩٧ بكسل، فيلزم ارتفاعٌ ≥ ٥٠٥؛ و34rem تتركه
+     بهامشٍ لا على الحدّ. يحرسه `platform_ops/tests/test_workspace_room.py`. */
+  /* وسقفٌ كذلك: نسبةُ 16/10 على شاشةٍ بعرض ١٦٠٠ تعطي غرفةً بارتفاع ألف بكسل
+     تبتلع اللوحةَ كلَّها. والسقفُ لا يُعيد التراكب: الفارقُ الرأسيُّ عند 40rem
+     يبقى ١٢٢ بكسل فوق الـ١١٥ المطلوبة، والعرضُ هناك واسعٌ أصلاً. */
+  min-height: 34rem;
+  max-height: 40rem;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(60% 45% at 50% 57%, rgba(255, 255, 255, 0.95), transparent 70%),
+    radial-gradient(120% 85% at 50% 4%, color-mix(in oklab, var(--pf-glow) 34%, transparent), transparent 62%),
+    linear-gradient(180deg, #dcefff 0%, #bfe0f7 52%, #9fcdef 100%);
+}
+
+/* أرضيّةٌ بحلقاتٍ متحدةِ المركز — توهّجُ النموذج نفسُه، مرسومٌ لا مستورَداً. */
+.pf-room-floor {
+  position: absolute;
+  inset: 22% 6% 6% 6%;
+  border-radius: 50%;
+  background:
+    radial-gradient(closest-side, color-mix(in oklab, var(--pf-glow) 28%, transparent), transparent 72%);
+  box-shadow:
+    0 0 0 1px color-mix(in oklab, var(--pf-glow) 35%, transparent) inset,
+    0 0 60px color-mix(in oklab, var(--pf-glow) 30%, transparent);
+}
+
+/* الطاولةُ المركزيّةُ وشاشتُها. */
+.pf-room-table {
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  width: 34%;
+  aspect-ratio: 5 / 2;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: linear-gradient(180deg, #ffffff 0%, #d8effc 55%, #a9d6f2 100%);
+  box-shadow:
+    0 0 0 2px color-mix(in oklab, var(--pf-glow) 60%, transparent),
+    0 0 28px 2px color-mix(in oklab, var(--pf-glow) 45%, transparent),
+    0 22px 46px -14px color-mix(in oklab, var(--pf-glow) 70%, transparent);
+}
+
+/* حلقتان حول الطاولة — توهّجُ النموذج البصريّ، مرسومٌ بالحدود لا بصورة. */
+.pf-room-halo {
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  width: 52%;
+  aspect-ratio: 5 / 2;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--pf-glow) 55%, transparent);
+  box-shadow: 0 0 30px color-mix(in oklab, var(--pf-glow) 35%, transparent);
+}
+
+.pf-room-halo-2 {
+  position: absolute;
+  left: 50%;
+  top: 57%;
+  width: 68%;
+  aspect-ratio: 5 / 2;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  border: 1px solid color-mix(in oklab, var(--pf-glow) 30%, transparent);
+}
+
+.pf-room-screen {
+  position: absolute;
+  left: 50%;
+  top: 49%;
+  width: 20%;
+  transform: translate(-50%, -50%);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.75rem;
+  background: color-mix(in oklab, #ffffff 88%, var(--pf-glow));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--pf-glow) 50%, transparent),
+              0 10px 30px -8px color-mix(in oklab, var(--pf-glow) 60%, transparent);
+}
+
+/* المقعدُ: موضعُه من الأصناف المولَّدة، وحجمُه من عمقه. */
+.pf-seat {
+  position: absolute;
+  transform: translate(-50%, -50%) scale(var(--pf-depth));
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.25rem;
+  /* نسبةٌ من عرض الغرفة لا مقاسٌ ثابت: الغرفةُ ذاتُ نسبةٍ باطنيّة (16/10)
+     فتتغيّر أبعادُها مع الحاوية، ومقعدٌ بعرضٍ ثابتٍ يتراكب على جاره كلّما
+     ضاقت اللوحة — والتراكبُ يخفي اسماً، وهو أسوأُ ما يفعله لوحُ حضور. */
+  width: 12%;
+  /* 4rem لا 4.5: عند ٥٤١ بكسل كان المقعدان ٣ و٤ يتلامسان أفقيّاً (فارقُهما
+     78.6 بكسل ومجموعُ نصفَي عرضهما 79.7)، فالنصفُ الزائدُ كان يقصّ حرفاً. */
+  min-width: 4rem;
+}
+
+.pf-seat-badge {
+  border-radius: 0.6rem;
+  padding: 0.3rem 0.5rem;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 10px -2px rgba(9, 60, 90, 0.35);
+  text-align: center;
+  width: 100%;
+}
+
+/* المقعدُ الفارغ **يبقى فارغاً**: النموذجُ البصريُّ يُجلِس الغائبَ على كرسيّه
+   بضوءٍ أحمر، فيقرأ حضوراً لا وجودَ له. الرماديُّ الباهتُ أصدق. */
+.pf-seat-empty { opacity: 0.45; filter: grayscale(0.55); }
+
+/* ── الغرفةُ الضيّقة: شبكةٌ لا حلقة ──────────────────────────────────────────
+   حلقةٌ من عشر بطاقاتٍ تحمل أسماءً لا تتّسع في غرفةٍ أضيقَ من ٥٤١ بكسل — قِيس
+   ذلك على ثمانية عروض: نظيفةٌ من ٥٤١ فصاعداً، ومتراكبةٌ عند ٤٨٠ و٣٦٠ و٣٢٠.
+   فبدل أن تُضغط الحلقةُ حتى تُخفي اسماً، تُستبدل بشبكةِ بطاقاتٍ تُظهر الجميع:
+   الغرضُ «من يعمل الآن» يبقى، والطاولةُ الإيزومتريّةُ هي ما يُضحّى به — وهي
+   الزينةُ لا الوظيفة.
+
+   و**استعلامُ حاوية لا استعلامُ شاشة**: عرضُ الغرفة يحدّده عرضُ لوحها لا عرضُ
+   النافذة (شريطٌ جانبيٌّ مفتوحٌ يقضم مئتي بكسل)، فقياسُ النافذة يُبقي الحلقةَ
+   متراكبةً على شاشةٍ عريضةٍ بلوحٍ ضيّق. */
+.pf-room-shell { container-type: inline-size; }
+
+@container (max-width: 33.8rem) {
+  .pf-room {
+    aspect-ratio: auto;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(6.5rem, 1fr));
+    gap: 0.75rem;
+    padding: 0.875rem;
+    align-content: start;
+  }
+
+  /* الزينةُ تُطفأ: طاولةٌ وحلقاتٌ وأرضيّةٌ مطلقةُ الموضع داخل شبكةٍ تفسدها. */
+  .pf-room-floor,
+  .pf-room-halo,
+  .pf-room-halo-2,
+  .pf-room-table { display: none; }
+
+  .pf-room-screen {
+    position: static;
+    transform: none;
+    width: auto;
+    grid-column: 1 / -1;
+  }
+
+  .pf-seat {
+    position: static;
+    transform: none;
+    width: auto;
+    min-width: 0;
+    z-index: auto;
+  }
+}
+
+
+.pf-seat-0 { left: 50.00%; top: 21.00%; --pf-depth: 0.8; z-index: 210; }
+.pf-seat-1 { left: 73.51%; top: 26.92%; --pf-depth: 0.838; z-index: 269; }
+.pf-seat-2 { left: 88.04%; top: 42.42%; --pf-depth: 0.938; z-index: 424; }
+.pf-seat-3 { left: 88.04%; top: 61.58%; --pf-depth: 1.062; z-index: 615; }
+.pf-seat-4 { left: 73.51%; top: 77.08%; --pf-depth: 1.162; z-index: 770; }
+.pf-seat-5 { left: 50.00%; top: 83.00%; --pf-depth: 1.2; z-index: 830; }
+.pf-seat-6 { left: 26.49%; top: 77.08%; --pf-depth: 1.162; z-index: 770; }
+.pf-seat-7 { left: 11.96%; top: 61.58%; --pf-depth: 1.062; z-index: 615; }
+.pf-seat-8 { left: 11.96%; top: 42.42%; --pf-depth: 0.938; z-index: 424; }
+.pf-seat-9 { left: 26.49%; top: 26.92%; --pf-depth: 0.838; z-index: 269; }
