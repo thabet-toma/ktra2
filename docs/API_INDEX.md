@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **771**
+عدد النقاط: **798**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -549,13 +549,28 @@
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/{pk}/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/commission-lines/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/commission-lines/{pk}/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/commission-lines/{pk}/adjust/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/commission-lines/{pk}/reverse/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/commission-lines/{pk}/transition/` | `AcquisitionCommissionLineViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/companies/<int:tenant_id>/health/` | `CompanyHealthView` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/draft/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/{pk}/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/{pk}/activate/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/{pk}/clone/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/{pk}/preview/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation-policies/{pk}/update-draft/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/compensation/close/` | `CompensationMonthCloseView` | `platform_ops/views.py` |
 | `/api/platform/ops/dashboard/` | `PlatformDashboardView` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/pilot-performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/wallet/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/engagements/` | `EngagementViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/engagements/assign/` | `EngagementViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/engagements/candidates/` | `EngagementViewSet` | `platform_ops/views.py` |
@@ -595,6 +610,13 @@
 | `/api/platform/ops/notifications/unread-count/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/{pk}/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/notifications/{pk}/mark-read/` | `PlatformNotificationViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/draft/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/{pk}/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/{pk}/activate/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/{pk}/clone/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/{pk}/preview/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/performance-evaluation-policies/{pk}/update-draft/` | `PerformanceEvaluationPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/capture/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
@@ -602,6 +624,11 @@
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/salary-lines/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/salary-lines/{pk}/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/salary-lines/{pk}/adjust/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/salary-lines/{pk}/reverse/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/salary-lines/{pk}/transition/` | `EmployeeSalaryLineViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/service-unit-catalogs/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/service-unit-catalogs/active/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/service-unit-catalogs/draft/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |

@@ -118,19 +118,48 @@ from .services import (
     update_service_unit_catalog_entries,
     WORK_ORDER_TRANSITIONS,
     WorkOrderTransitionError,
+    MonthCloseBlockedError,
+    PerformanceEvaluationPolicyConflict,
+    PerformanceEvaluationPolicyError,
+    EmployeeCompensationPolicyConflict,
+    EmployeeCompensationPolicyError,
+    WalletConflict,
+    WalletError,
+    activate_employee_compensation_policy,
+    activate_performance_evaluation_policy,
+    adjust_wallet_line,
+    calculate_employee_pilot_performance,
+    clone_employee_compensation_policy_to_draft,
+    clone_performance_evaluation_policy_to_draft,
+    close_compensation_month,
+    create_employee_compensation_policy_draft,
+    create_performance_evaluation_policy_draft,
+    get_employee_wallet_summary,
+    preview_compensation_month_close,
+    preview_employee_compensation_policy,
+    preview_performance_evaluation_policy,
+    reverse_wallet_line,
+    transition_wallet_line,
+    update_employee_compensation_policy_draft,
+    update_performance_evaluation_policy_draft,
 )
 from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 
 from core.platform_admin_api import IsPlatformAdmin
 
 from .models import (
+    AcquisitionCommissionLine,
     CompanyHealthCheck,
     CompanyHealthCheckItem,
     DailyRating,
     Engagement,
+    EmployeeCompensationPolicy,
+    EmployeeSalaryLine,
     IntegrationKey,
     JobApplicant,
     JobPosting,
+    MonthlyCompensationClose,
+    PerformanceEvaluationPolicy,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
@@ -207,6 +236,18 @@ from .serializers import (
     WorkOrderCommentSerializer,
     WorkOrderDeliverableSerializer,
     WorkOrderDocumentLinkSerializer,
+    AcquisitionCommissionLineSerializer,
+    ActivatePolicySerializer,
+    AdjustWalletLineSerializer,
+    CloseCompensationMonthSerializer,
+    DraftEmployeeCompensationPolicySerializer,
+    DraftPerformanceEvaluationPolicySerializer,
+    EmployeeCompensationPolicySerializer,
+    EmployeeSalaryLineSerializer,
+    MonthlyCompensationCloseSerializer,
+    PerformanceEvaluationPolicySerializer,
+    ReverseWalletLineSerializer,
+    TransitionWalletLineSerializer,
 )
 
 
@@ -412,6 +453,84 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
         )[:PLATFORM_ACTIVITY_PAGE_CAP]
         serializer = PlatformActivityLogSerializer(logs, many=True)
         return Response(serializer.data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="pilot-performance")
+    def pilot_performance(self, request, pk=None):
+        """تفصيل محاور الـpilot الأربعة (40/30/20/10) — «كيف يُحسب تقييمي؟» (210-D، §٥).
+
+        نفس قاعدة عزل `performance` أعلاه بالضبط: مدير العمليات أو الموظف نفسه.
+        """
+        params = request.query_params
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+
+        emp = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if not is_manager and emp.user_id != request.user.id:
+            return Response(
+                {"detail": "غير مصرح لك باستعراض تقييم موظف آخر."}, status=status.HTTP_403_FORBIDDEN,
+            )
+
+        now = timezone.now()
+        year, month, period_error = _resolve_period(
+            params.get("year") or params.get("period_year") or now.year,
+            params.get("month") or params.get("period_month") or now.month,
+        )
+        if period_error:
+            return Response({"detail": period_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        perf_data = calculate_employee_pilot_performance(employee=emp, period_year=year, period_month=month)
+        return Response(perf_data, status=status.HTTP_200_OK)
+
+    @action(detail=True, methods=["get"], url_path="wallet")
+    def wallet(self, request, pk=None):
+        """محفظة الموظف الشهرية: مؤكَّد/معلَّق مع فتح مصدر كلّ سطر (210-D، §٧، §٨)."""
+        emp = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if not is_manager and emp.user_id != request.user.id:
+            return Response(
+                {"detail": "غير مصرح لك باستعراض محفظة موظف آخر."}, status=status.HTTP_403_FORBIDDEN,
+            )
+        now = timezone.now()
+        params = request.query_params
+        # المحفظةُ تقرأ سطوراً مالية مشتقّةً من ارتباطات الموظّف بالشركات، فتلزمها
+        # قاعدةُ العزل نفسُها التي تحرس `performance`: الشركاتُ تُشتق من الارتباطات
+        # حصراً، ووسيطُ شركةٍ صريحٌ من الطلب يُرفض بـ400 لا يُتجاهل بصمت.
+        for forbidden_key in CROSS_TENANT_FROM_REQUEST_KEYS:
+            if forbidden_key in params:
+                return Response(
+                    {
+                        "detail": "تحديد الشركات غير مسموح؛ تُشتق الشركات تلقائياً من الارتباطات.",
+                        "code": "cross_tenant_query_disallowed_from_request",
+                    },
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+        year, month, period_error = _resolve_period(
+            params.get("year") or params.get("period_year") or now.year,
+            params.get("month") or params.get("period_month") or now.month,
+        )
+        if period_error:
+            return Response({"detail": period_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        summary = get_employee_wallet_summary(employee=emp, period_year=year, period_month=month)
+        return Response({
+            "employee_id": summary["employee_id"],
+            "period_year": summary["period_year"],
+            "period_month": summary["period_month"],
+            "totals": {
+                "confirmed": str(summary["totals"]["confirmed"]),
+                "pending": str(summary["totals"]["pending"]),
+            },
+            "salary_lines": EmployeeSalaryLineSerializer(summary["salary_lines"], many=True).data,
+            "commission_lines": AcquisitionCommissionLineSerializer(summary["commission_lines"], many=True).data,
+        }, status=status.HTTP_200_OK)
 
 
 
@@ -1383,6 +1502,278 @@ class PerformanceSnapshotViewSet(viewsets.ReadOnlyModelViewSet):
         return Response(
             PerformanceSnapshotSerializer(snapshot).data,
             status=status.HTTP_200_OK if existed else status.HTTP_201_CREATED,
+        )
+
+
+# ==============================================================================
+# التذكرة 210-D: سياسة تقييم الـpilot، سياسة التعويض، والمحفظة
+# ==============================================================================
+
+
+class PerformanceEvaluationPolicyViewSet(viewsets.ReadOnlyModelViewSet):
+    """نسخ سياسة تقييم الـpilot (40/30/20/10) — مدير العمليات وحده (§٥، §٨)."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = PerformanceEvaluationPolicySerializer
+    queryset = PerformanceEvaluationPolicy.objects.all()
+
+    @action(detail=False, methods=["post"], url_path="draft")
+    def draft(self, request):
+        payload = DraftPerformanceEvaluationPolicySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = create_performance_evaluation_policy_draft(
+                actor=request.user, correlation_id=_resolve_correlation_id(request), **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        try:
+            draft = clone_performance_evaluation_policy_to_draft(
+                policy=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(draft).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update-draft")
+    def update_draft(self, request, pk=None):
+        payload = DraftPerformanceEvaluationPolicySerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = update_performance_evaluation_policy_draft(
+                policy=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+                **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data)
+
+    @action(detail=True, methods=["post"], url_path="preview")
+    def preview(self, request, pk=None):
+        try:
+            result = preview_performance_evaluation_policy(policy=self.get_object())
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response({
+            "draft": self.get_serializer(result["draft"]).data,
+            "active": self.get_serializer(result["active"]).data if result["active"] else None,
+            "diff": result["diff"],
+            "note": result["note"],
+        })
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        payload = ActivatePolicySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = activate_performance_evaluation_policy(
+                policy=self.get_object(), actor=request.user,
+                activation_reason=payload.validated_data["activation_reason"],
+                effective_from=payload.validated_data.get("effective_from"),
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data)
+
+
+class EmployeeCompensationPolicyViewSet(viewsets.ReadOnlyModelViewSet):
+    """نسخ سياسة تعويض الموظف — مدير العمليات وحده (§٧، §٨)."""
+
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = EmployeeCompensationPolicySerializer
+    queryset = EmployeeCompensationPolicy.objects.select_related("employee__user").all()
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        employee_id = self.request.query_params.get("employee")
+        if employee_id:
+            qs = qs.filter(employee_id=employee_id)
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="draft")
+    def draft(self, request):
+        payload = DraftEmployeeCompensationPolicySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = create_employee_compensation_policy_draft(
+                actor=request.user, correlation_id=_resolve_correlation_id(request), **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="clone")
+    def clone(self, request, pk=None):
+        try:
+            draft = clone_employee_compensation_policy_to_draft(
+                policy=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(draft).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="update-draft")
+    def update_draft(self, request, pk=None):
+        payload = DraftEmployeeCompensationPolicySerializer(data=request.data, partial=True)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = update_employee_compensation_policy_draft(
+                policy=self.get_object(), actor=request.user, correlation_id=_resolve_correlation_id(request),
+                **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data)
+
+    @action(detail=True, methods=["post"], url_path="preview")
+    def preview(self, request, pk=None):
+        try:
+            result = preview_employee_compensation_policy(policy=self.get_object())
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response({
+            "draft": self.get_serializer(result["draft"]).data,
+            "active": self.get_serializer(result["active"]).data if result["active"] else None,
+            "diff": result["diff"],
+            "note": result["note"],
+        })
+
+    @action(detail=True, methods=["post"], url_path="activate")
+    def activate(self, request, pk=None):
+        payload = ActivatePolicySerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            policy = activate_employee_compensation_policy(
+                policy=self.get_object(), actor=request.user,
+                activation_reason=payload.validated_data["activation_reason"],
+                effective_from=payload.validated_data.get("effective_from"),
+                correlation_id=_resolve_correlation_id(request),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(policy).data)
+
+
+class _WalletLineActionsMixin:
+    """أفعالُ الانتقال/العكس/التسوية المشتركة بين سطور الراتب وعمولة الاكتساب."""
+
+    wallet_kind: str = ""
+
+    @action(detail=True, methods=["post"], url_path="transition")
+    def transition(self, request, pk=None):
+        payload = TransitionWalletLineSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            line = transition_wallet_line(
+                kind=self.wallet_kind, line=self.get_object(),
+                to_status=payload.validated_data["to_status"], actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(line).data)
+
+    @action(detail=True, methods=["post"], url_path="reverse")
+    def reverse(self, request, pk=None):
+        payload = ReverseWalletLineSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            line = reverse_wallet_line(
+                kind=self.wallet_kind, line=self.get_object(),
+                reason=payload.validated_data["reason"], actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(line).data)
+
+    @action(detail=True, methods=["post"], url_path="adjust")
+    def adjust(self, request, pk=None):
+        payload = AdjustWalletLineSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            line = adjust_wallet_line(
+                kind=self.wallet_kind, line=self.get_object(),
+                amount=payload.validated_data["amount"], reason=payload.validated_data["reason"],
+                actor=request.user,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(line).data, status=status.HTTP_201_CREATED)
+
+
+class EmployeeSalaryLineViewSet(_WalletLineActionsMixin, viewsets.ReadOnlyModelViewSet):
+    """سطور رواتب الموظفين — مدير العمليات وحده. لا مسار حذف (§٧: لا حذف لسطرٍ ماليٍّ أبداً)."""
+
+    wallet_kind = "salary"
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = EmployeeSalaryLineSerializer
+    queryset = EmployeeSalaryLine.objects.select_related("employee__user").all().order_by("-period_year", "-period_month")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        employee_id = self.request.query_params.get("employee")
+        if employee_id:
+            qs = qs.filter(employee_id=employee_id)
+        return qs
+
+
+class AcquisitionCommissionLineViewSet(_WalletLineActionsMixin, viewsets.ReadOnlyModelViewSet):
+    """سطور عمولات الاكتساب — مدير العمليات وحده. لا مسار حذف (§٧: لا حذف لسطرٍ ماليٍّ أبداً)."""
+
+    wallet_kind = "commission"
+    permission_classes = [IsPlatformOperationsManager]
+    serializer_class = AcquisitionCommissionLineSerializer
+    queryset = (
+        AcquisitionCommissionLine.objects.select_related("employee__user", "acquisition__tenant")
+        .all().order_by("-period_year", "-period_month")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        employee_id = self.request.query_params.get("employee")
+        if employee_id:
+            qs = qs.filter(employee_id=employee_id)
+        company_id = self.request.query_params.get("company")
+        if company_id:
+            qs = qs.filter(acquisition__tenant_id=company_id)
+        return qs
+
+
+class CompensationMonthCloseView(APIView):
+    """معاينةُ إغلاق الشهر ثمّ إغلاقُه idempotently — مدير العمليات وحده (§٥، §٧)."""
+
+    permission_classes = [IsPlatformOperationsManager]
+
+    def get(self, request):
+        payload = CloseCompensationMonthSerializer(data=request.query_params)
+        payload.is_valid(raise_exception=True)
+        result = preview_compensation_month_close(**payload.validated_data)
+        return Response({
+            "already_closed": result["already_closed"],
+            "close": MonthlyCompensationCloseSerializer(result["close"]).data if result["close"] else None,
+            "blockers": result["blockers"],
+            "eligible_employees": result["eligible_employees"],
+            "review_grace_period_hours": result["review_grace_period_hours"],
+        })
+
+    def post(self, request):
+        payload = CloseCompensationMonthSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            close, created = close_compensation_month(
+                actor=request.user, correlation_id=_resolve_correlation_id(request), **payload.validated_data,
+            )
+        except MonthCloseBlockedError as exc:
+            return Response({"detail": exc.detail, "code": exc.code, "blockers": exc.blockers}, status=exc.status_code)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(
+            MonthlyCompensationCloseSerializer(close).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )
 
 

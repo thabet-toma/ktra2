@@ -1464,6 +1464,19 @@ class PerformanceSnapshot(models.Model):
         related_name="snapshots",
         verbose_name="ملف السياسة المعتمد",
     )
+    evaluation_policy = models.ForeignKey(
+        "PerformanceEvaluationPolicy",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="snapshots",
+        verbose_name="سياسة تقييم الـpilot المعتمدة (210-D)",
+        help_text=(
+            "تُملأ فقط للقطات المُلتقَطة عبر محاور الـpilot الأربعة؛ وأوزانُها تُقرأ من "
+            "النسخة المشار إليها هنا لا من نسبةٍ ثابتة. فارغة للقطات #207 القديمة "
+            "بمحاورها الخمسة (policy_profile وحده)."
+        ),
+    )
     policy_snapshot = models.JSONField(
         default=dict,
         blank=True,
@@ -2772,4 +2785,444 @@ class ServiceUsageEvent(models.Model):
 
     def __str__(self):
         return f"{self.tenant}: {self.get_event_type_display()} {self.units}و"
+
+
+# ==============================================================================
+# التذكرة 210-D: سياسة تقييم الـpilot (40/30/20/10)، تعويض الموظف، والمحفظة
+# ==============================================================================
+
+
+class PerformanceEvaluationPolicy(models.Model):
+    """نسخة مؤرَّخة من سياسة تقييم أداء موظف الإدخال في الـpilot (§٥، §٨).
+
+    على نمط `ServiceSubscriptionPolicy` و`ServiceUnitCatalog` تماماً: النسخة
+    النشطة أو المنتهية لا تُعدَّل أبداً؛ تُستنسخ إلى مسودة جديدة ثم تُفعَّل بسبب
+    إلزامي وتاريخ سريان. هذه **سياسةٌ ثانيةٌ مستقلّةٌ** عن `PolicyProfile` (م٥ #207)
+    عمداً: `PolicyProfile` تبقى بمحاورها الخمسة القديمة دون تعديل — لا يُعاد حساب
+    لقطاتها ولا يُغيَّر معنى `DEFAULT_AXIS_WEIGHTS` بأثرٍ رجعي. هذه السياسة تحمل
+    المحاور الأربعة الجديدة (إنجاز 40٪ · جودة 30٪ · SLA 20٪ · رضا 10٪) وتبدأ من
+    أوّل فترة فعّالة بعد نشرها (§١٣).
+
+    `specialty` نطاق النسخة كحال `ServiceSubscriptionPolicy.plan`: فارغ = عامة
+    لكل التخصصات، أو اسم تخصص بعينه يغلب العامة.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "مسودة"
+        ACTIVE = "active", "نشطة"
+        RETIRED = "retired", "منتهية"
+
+    version = models.PositiveIntegerField(unique=True, verbose_name="رقم النسخة")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="الحالة",
+    )
+    specialty = models.CharField(
+        max_length=100,
+        blank=True,
+        default="",
+        verbose_name="نطاق التخصص",
+        help_text="فارغ = نسخة عامة لكل التخصصات؛ اسم تخصص = نسخة خاصة به تغلب العامة.",
+    )
+    weights = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="أوزان المحاور الأربعة",
+        help_text=(
+            "task_completion, quality_accuracy, sla_adherence, customer_satisfaction. "
+            "مجموعُ المكتوب هنا مئةٌ بالضبط، يُرفض غيرُه لحظةَ حفظ المسودة أو تفعيلها. "
+            "وإسقاطُ المحور غير المنطبق وإعادةُ توزيع وزنه بالتناسب يقعان لحظةَ "
+            "الحساب لا لحظةَ الكتابة، فلا يُغيّران ما يُخزَّن في هذا الحقل."
+        ),
+    )
+    targets = models.JSONField(
+        default=dict,
+        blank=True,
+        verbose_name="مستهدفات إضافية",
+        help_text="حقلٌ typed محجوزٌ لمستهدفاتٍ مستقبليةٍ فوق النسب المئوية — فارغٌ في الـpilot.",
+    )
+    min_sample_size = models.PositiveIntegerField(
+        default=5,
+        verbose_name="الحد الأدنى لحجم العينة",
+        help_text="عدد المُسلَّمات المراجَعة في الفترة؛ دونه تكون الحالة insufficient_data صراحة لا صفراً.",
+    )
+    review_grace_period_hours = models.PositiveIntegerField(
+        default=48,
+        verbose_name="مهلة المراجعة قبل الإغلاق (ساعات)",
+        help_text="مهلة إعلامية تُعرض في معاينة إغلاق الشهر؛ التسليمات المعلَّقة تبقى تمنع الإغلاق دوماً.",
+    )
+    activation_reason = models.CharField(
+        max_length=500,
+        blank=True,
+        default="",
+        verbose_name="سبب التفعيل",
+        help_text="إلزامي لحظة تفعيل المسودة؛ يبقى في الصف بعد التفعيل.",
+    )
+    effective_from = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة من")
+    effective_to = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة إلى")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="أنشأها",
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="فعّلها",
+    )
+    activated_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت التفعيل")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        ordering = ["-version"]
+        verbose_name = "سياسة تقييم أداء (pilot)"
+        verbose_name_plural = "سياسات تقييم الأداء (pilot)"
+
+    def __str__(self):
+        return f"سياسة التقييم v{self.version} ({self.get_status_display()})"
+
+    def effective_state(self, at=None) -> str:
+        """draft / scheduled / current / retired — من نافذة السريان لا من حقل الحالة وحده."""
+        if self.status == self.Status.DRAFT:
+            return "draft"
+        if self.status == self.Status.RETIRED:
+            return "retired"
+        moment = at or timezone.now()
+        if self.effective_from and self.effective_from > moment:
+            return "scheduled"
+        if self.effective_to and self.effective_to <= moment:
+            return "retired"
+        return "current"
+
+
+class PerformanceEvaluationPolicyEvent(models.Model):
+    """سجلّ تدقيق غير قابل للمحو لكل كتابة على نسخ سياسة تقييم الأداء (§١١)."""
+
+    class Action(models.TextChoices):
+        CREATED = "created", "إنشاء مسودة"
+        UPDATED = "updated", "تعديل مسودة"
+        CLONED = "cloned", "استنساخ مسودة"
+        ACTIVATED = "activated", "تفعيل سياسة"
+        RETIRED = "retired", "إنهاء سياسة"
+
+    policy = models.ForeignKey(
+        PerformanceEvaluationPolicy, on_delete=models.PROTECT, related_name="events", verbose_name="سياسة التقييم",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="الإجراء")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث سياسة تقييم أداء"
+        verbose_name_plural = "أحداث سياسات تقييم الأداء"
+        indexes = [models.Index(fields=["policy", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.policy_id}: {self.get_action_display()}"
+
+
+class EmployeeCompensationPolicy(models.Model):
+    """نسخة مؤرَّخة من إعدادات تعويض موظف الإدخال (§٧، §٨).
+
+    نطاقٌ عامٌّ (`employee` فارغ = افتراضيّاتُ المنصة لكل الموظفين) أو خاصٌّ
+    بموظفٍ بعينه (يغلب العامّة). على نفس اصطلاح `ServiceSubscriptionPolicy`:
+    النسخة غير المسودة لا تُعدَّل أبداً، وتفعيل نسخةٍ لاحقة لنفس النطاق يُغلق
+    نافذة السابقة عند تاريخ سريانها.
+    """
+
+    class Status(models.TextChoices):
+        DRAFT = "draft", "مسودة"
+        ACTIVE = "active", "نشطة"
+        RETIRED = "retired", "منتهية"
+
+    version = models.PositiveIntegerField(unique=True, verbose_name="رقم النسخة")
+    status = models.CharField(
+        max_length=20, choices=Status.choices, default=Status.DRAFT, verbose_name="الحالة",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="compensation_policies",
+        verbose_name="موظف مستهدَف",
+        help_text="فارغ = افتراضيّات عامّة لكل الموظفين؛ موظفٌ محدَّد = نسخة خاصّة به تغلب العامّة.",
+    )
+    base_salary = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("500.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="الراتب الأساسي الشهري",
+    )
+    daily_hours = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("3.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="ساعات الدوام اليومية",
+    )
+    weekly_days = models.PositiveSmallIntegerField(
+        default=6,
+        validators=[MinValueValidator(1), MaxValueValidator(7)],
+        verbose_name="أيام الدوام الأسبوعية",
+    )
+    acquisition_commission_amount = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("100.00"),
+        validators=[MinValueValidator(Decimal("0.00"))], verbose_name="عمولة اكتساب العميل الشهرية",
+    )
+    acquisition_commission_months = models.PositiveSmallIntegerField(
+        default=3,
+        validators=[MinValueValidator(1)],
+        verbose_name="مدة عمولة الاكتساب (أشهر)",
+    )
+    accrual_day_of_month = models.PositiveSmallIntegerField(
+        default=1,
+        validators=[MinValueValidator(1), MaxValueValidator(28)],
+        verbose_name="يوم استحقاق الإغلاق الشهري",
+        help_text="اليوم من الشهر الذي يُفتَح فيه إغلاق مستحقات الشهر السابق — إعلاميٌّ للواجهة.",
+    )
+    activation_reason = models.CharField(
+        max_length=500, blank=True, default="", verbose_name="سبب التفعيل",
+        help_text="إلزامي لحظة تفعيل المسودة؛ يبقى في الصف بعد التفعيل.",
+    )
+    effective_from = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة من")
+    effective_to = models.DateTimeField(null=True, blank=True, verbose_name="سريان النسخة إلى")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="أنشأها",
+    )
+    activated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="فعّلها",
+    )
+    activated_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت التفعيل")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        ordering = ["-version"]
+        verbose_name = "سياسة تعويض موظف (pilot)"
+        verbose_name_plural = "سياسات تعويض الموظفين (pilot)"
+
+    def __str__(self):
+        scope = str(self.employee) if self.employee_id else "عامة"
+        return f"سياسة التعويض v{self.version} ({scope})"
+
+    def effective_state(self, at=None) -> str:
+        if self.status == self.Status.DRAFT:
+            return "draft"
+        if self.status == self.Status.RETIRED:
+            return "retired"
+        moment = at or timezone.now()
+        if self.effective_from and self.effective_from > moment:
+            return "scheduled"
+        if self.effective_to and self.effective_to <= moment:
+            return "retired"
+        return "current"
+
+
+class EmployeeCompensationPolicyEvent(models.Model):
+    """سجلّ تدقيق غير قابل للمحو لكل كتابة على نسخ سياسة التعويض (§١١)."""
+
+    class Action(models.TextChoices):
+        CREATED = "created", "إنشاء مسودة"
+        UPDATED = "updated", "تعديل مسودة"
+        CLONED = "cloned", "استنساخ مسودة"
+        ACTIVATED = "activated", "تفعيل سياسة"
+        RETIRED = "retired", "إنهاء سياسة"
+
+    policy = models.ForeignKey(
+        EmployeeCompensationPolicy, on_delete=models.PROTECT, related_name="events", verbose_name="سياسة التعويض",
+    )
+    action = models.CharField(max_length=20, choices=Action.choices, verbose_name="الإجراء")
+    actor = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="الفاعل",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    details = models.JSONField(default=dict, blank=True, verbose_name="تفاصيل بلا بيانات شخصية")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = "حدث سياسة تعويض"
+        verbose_name_plural = "أحداث سياسات التعويض"
+        indexes = [models.Index(fields=["policy", "-created_at"])]
+
+    def __str__(self):
+        return f"{self.policy_id}: {self.get_action_display()}"
+
+
+class WalletLineStatus(models.TextChoices):
+    """حالات سطر المحفظة المشتركة بين الراتب وعمولة الاكتساب (§٧)."""
+
+    PENDING = "pending", "معلّق"
+    ELIGIBLE = "eligible", "مؤهَّل"
+    APPROVED = "approved", "معتمَد"
+    PAYABLE = "payable", "قابل للصرف"
+    PAID = "paid", "مصروف"
+    REVERSED = "reversed", "معكوس"
+
+
+class MonthlyCompensationClose(models.Model):
+    """إغلاقُ مستحقّات شهرٍ واحدٍ لكلّ موظفي المنصة دفعةً واحدة (§٥، §٧).
+
+    صفٌّ واحدٌ لكل `(period_year, period_month)` بفرادةٍ غير مشروطة — هو حارسُ
+    الـidempotency الأوّل: محاولةُ إغلاقٍ ثانية لنفس الشهر تصطدم بالقيد فتعيد هذا
+    الصفَّ القائم بلا إعادة تنفيذ حلقة الإغلاق، فلا يتكرّر أيُّ سطرٍ مالي.
+    """
+
+    period_year = models.PositiveSmallIntegerField(verbose_name="سنة الإغلاق")
+    period_month = models.PositiveSmallIntegerField(verbose_name="شهر الإغلاق")
+    performance_policy = models.ForeignKey(
+        PerformanceEvaluationPolicy, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="monthly_closes", verbose_name="سياسة التقييم المستعملة",
+    )
+    employees_processed = models.PositiveIntegerField(default=0, verbose_name="عدد الموظفين المعالَجين")
+    snapshots_captured = models.PositiveIntegerField(default=0, verbose_name="عدد لقطات الأداء الملتقَطة")
+    salary_lines_created = models.PositiveIntegerField(default=0, verbose_name="عدد سطور الرواتب المنشأة")
+    commission_lines_created = models.PositiveIntegerField(default=0, verbose_name="عدد سطور العمولات المنشأة")
+    closed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="أغلقه",
+    )
+    correlation_id = models.CharField(max_length=64, blank=True, default="", verbose_name="معرّف الارتباط")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإغلاق")
+
+    class Meta:
+        verbose_name = "إغلاق مستحقّات شهر"
+        verbose_name_plural = "إغلاقات مستحقّات الأشهر"
+        constraints = [
+            models.UniqueConstraint(fields=["period_year", "period_month"], name="platform_ops_monthlyclose_period_uniq"),
+        ]
+
+    def __str__(self):
+        return f"إغلاق {self.period_year}/{self.period_month}"
+
+
+class EmployeeSalaryLine(models.Model):
+    """سطرُ راتبٍ شهريٍّ واحدٍ لموظفٍ — منفصلٌ عمداً عن سطور عمولة الاكتساب (§٧).
+
+    فرادةٌ غير مشروطة على `(employee, period_year, period_month, sequence)`:
+    `sequence=0` هو السطر الأصلي الذي يُنشئه الإغلاق الشهري، وأيُّ تصحيحٍ لاحقٍ
+    سطرُ تسويةٍ ظاهرٌ بتسلسلٍ أعلى يشير إلى الأصل عبر `adjustment_of` — **لا حذف
+    ولا تعديل على السطر الأصلي بعد إنشائه**.
+    """
+
+    employee = models.ForeignKey(
+        PlatformEmployee, on_delete=models.PROTECT, related_name="salary_lines", verbose_name="الموظف",
+    )
+    period_year = models.PositiveSmallIntegerField(verbose_name="سنة الاستحقاق")
+    period_month = models.PositiveSmallIntegerField(verbose_name="شهر الاستحقاق")
+    sequence = models.PositiveIntegerField(
+        default=0, verbose_name="تسلسل السطر", help_text="0 = السطر الأصلي؛ 1+ = سطور تسوية لاحقة.",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="المبلغ")
+    status = models.CharField(
+        max_length=20, choices=WalletLineStatus.choices, default=WalletLineStatus.PENDING, verbose_name="الحالة",
+    )
+    pending_reason = models.CharField(max_length=500, blank=True, default="", verbose_name="سبب التعليق")
+    compensation_policy = models.ForeignKey(
+        EmployeeCompensationPolicy, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="salary_lines", verbose_name="سياسة التعويض المستعملة",
+    )
+    monthly_close = models.ForeignKey(
+        MonthlyCompensationClose, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="salary_lines", verbose_name="إغلاق الشهر",
+    )
+    adjustment_of = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="adjustments", verbose_name="تسوية على",
+    )
+    reason = models.CharField(max_length=500, blank=True, default="", verbose_name="سبب التسوية/التعديل")
+    idempotency_key = models.CharField(max_length=128, unique=True, verbose_name="مفتاح idempotency")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="اعتمده",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت الاعتماد")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "سطر راتب موظف"
+        verbose_name_plural = "سطور رواتب الموظفين"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee", "period_year", "period_month", "sequence"],
+                name="platform_ops_salaryline_employee_period_seq_uniq",
+            ),
+        ]
+        indexes = [models.Index(fields=["employee", "period_year", "period_month"])]
+
+    def __str__(self):
+        return f"{self.employee}: راتب {self.period_year}/{self.period_month} ({self.get_status_display()})"
+
+
+class AcquisitionCommissionLine(models.Model):
+    """سطرُ عمولة اكتسابٍ شهريّةٍ لعميلٍ واحد — مستقلٌّ عن موظّف الخدمة (§٧).
+
+    يُنسب دوماً إلى `acquisition.acquired_by` وقتَ الإنشاء (لا يتغيّر بنقل
+    الخدمة لاحقاً). فرادةٌ غير مشروطة على `(acquisition, period_year,
+    period_month, sequence)` — العميل نفسُه لا يُنتج سطرين لنفس الشهر مهما
+    تكرّر تشغيل الإغلاق. `commission_month_index` (1..3) يحمل ترتيب الشهر ضمن
+    نافذة الاستحقاق؛ بعد `acquisition_commission_months` (افتراضياً 3) **لا
+    يُنشأ سطرٌ جديدٌ إطلاقاً** — لا حتى بمبلغ صفر — فينتهي الاستحقاق نهائياً.
+    """
+
+    acquisition = models.ForeignKey(
+        CustomerAcquisition, on_delete=models.PROTECT, related_name="commission_lines", verbose_name="اكتساب العميل",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee, on_delete=models.PROTECT, related_name="commission_lines", verbose_name="جالب العميل",
+        help_text="لقطة acquisition.acquired_by وقت إنشاء السطر — مستقلّ عن موظف الخدمة الحالي.",
+    )
+    period_year = models.PositiveSmallIntegerField(verbose_name="سنة الاستحقاق")
+    period_month = models.PositiveSmallIntegerField(verbose_name="شهر الاستحقاق")
+    sequence = models.PositiveIntegerField(
+        default=0, verbose_name="تسلسل السطر", help_text="0 = السطر الأصلي؛ 1+ = سطور تسوية لاحقة.",
+    )
+    commission_month_index = models.PositiveSmallIntegerField(
+        verbose_name="ترتيب شهر العمولة", help_text="1..acquisition_commission_months — بعدها لا يُنشأ سطر جديد.",
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2, verbose_name="المبلغ")
+    status = models.CharField(
+        max_length=20, choices=WalletLineStatus.choices, default=WalletLineStatus.PENDING, verbose_name="الحالة",
+    )
+    pending_reason = models.CharField(max_length=500, blank=True, default="", verbose_name="سبب التعليق")
+    compensation_policy = models.ForeignKey(
+        EmployeeCompensationPolicy, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="commission_lines", verbose_name="سياسة التعويض المستعملة",
+    )
+    monthly_close = models.ForeignKey(
+        MonthlyCompensationClose, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="commission_lines", verbose_name="إغلاق الشهر",
+    )
+    adjustment_of = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True, related_name="adjustments", verbose_name="تسوية على",
+    )
+    reason = models.CharField(max_length=500, blank=True, default="", verbose_name="سبب التسوية/التعديل")
+    idempotency_key = models.CharField(max_length=128, unique=True, verbose_name="مفتاح idempotency")
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="+", verbose_name="اعتمده",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت الاعتماد")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "سطر عمولة اكتساب"
+        verbose_name_plural = "سطور عمولات الاكتساب"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["acquisition", "period_year", "period_month", "sequence"],
+                name="platform_ops_commissionline_acq_period_seq_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["acquisition", "period_year", "period_month"]),
+            models.Index(fields=["employee", "period_year", "period_month"]),
+        ]
+
+    def __str__(self):
+        return f"{self.acquisition}: عمولة {self.period_year}/{self.period_month} ({self.get_status_display()})"
 

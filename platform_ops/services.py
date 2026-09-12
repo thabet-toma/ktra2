@@ -1,9 +1,11 @@
-"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة، والتذكرتان 210-B و210-C).
+"""خدمات عمليات المنصة (المراحل الأولى والثانية والثالثة والرابعة والخامسة والسادسة والسابعة والثامنة، والتذاكر 210-B و210-C و210-D).
 
 ترتيب الأقفال الصارم لمنع التعارضات والـ Deadlocks على MySQL:
-Tenant -> ServiceSubscriptionPolicy -> ServiceUnitCatalog -> IntegrationKey -> ServiceSubscription -> CompanyHealthCheck
+Tenant -> ServiceSubscriptionPolicy -> ServiceUnitCatalog -> PerformanceEvaluationPolicy
+-> EmployeeCompensationPolicy -> IntegrationKey -> ServiceSubscription -> CompanyHealthCheck
 -> CompanyHealthCheckItem -> CustomerAcquisition -> PlatformEmployee -> Engagement -> WorkOrder
--> WorkOrderDeliverable -> WorkOrderDocumentLink -> ServiceUsageEvent -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
+-> WorkOrderDeliverable -> WorkOrderDocumentLink -> ServiceUsageEvent -> MonthlyCompensationClose
+-> EmployeeSalaryLine -> AcquisitionCommissionLine -> UserCompanyMembership -> DailyRating -> JobPosting -> JobApplicantInvitation -> JobApplicant
 ملاحظة: لا يُستعمل select_related مع select_for_update لتجنب قفل جداول غير مقصودة.
 """
 import calendar
@@ -31,6 +33,7 @@ from tenants.models import Currency, Tenant, UserCompanyMembership
 from .models import (
     MAX_ONBOARDING_DAYS,
     MAX_SERVICE_TRIAL_DAYS,
+    AcquisitionCommissionLine,
     AgentGrantedMembership,
     CompanyHealthCheck,
     CompanyHealthCheckItem,
@@ -38,10 +41,16 @@ from .models import (
     DailyRating,
     DailyRatingToken,
     Engagement,
+    EmployeeCompensationPolicy,
+    EmployeeCompensationPolicyEvent,
+    EmployeeSalaryLine,
     IntegrationKey,
     JobApplicant,
     JobApplicantInvitation,
     JobPosting,
+    MonthlyCompensationClose,
+    PerformanceEvaluationPolicy,
+    PerformanceEvaluationPolicyEvent,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
@@ -59,6 +68,7 @@ from .models import (
     ServiceUnitCatalogEvent,
     ServiceUsageEvent,
     SubscriptionBillingRecord,
+    WalletLineStatus,
     WorkOrder,
     WorkOrderComment,
     WorkOrderDeliverable,
@@ -155,6 +165,41 @@ class SubscriptionManagementConflict(SubscriptionManagementError):
 
     def __init__(self, code: str, detail: str):
         super().__init__(code, detail, status_code=409)
+
+
+class PerformanceEvaluationPolicyError(PlatformOpsError):
+    """خطأ في إدارة نسخ سياسة تقييم الأداء (210-D)."""
+
+
+class PerformanceEvaluationPolicyConflict(PerformanceEvaluationPolicyError):
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+class EmployeeCompensationPolicyError(PlatformOpsError):
+    """خطأ في إدارة نسخ سياسة تعويض الموظف (210-D)."""
+
+
+class EmployeeCompensationPolicyConflict(EmployeeCompensationPolicyError):
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+class WalletError(PlatformOpsError):
+    """خطأ في محفظة الموظف أو عمولة الاكتساب (210-D)."""
+
+
+class WalletConflict(WalletError):
+    def __init__(self, code: str, detail: str):
+        super().__init__(code, detail, status_code=409)
+
+
+class MonthCloseBlockedError(PlatformOpsError):
+    """إغلاق الشهر محجوبٌ بتسليماتٍ لا تزال بانتظار المراجعة (§٥، §٧)."""
+
+    def __init__(self, code: str, detail: str, blockers: list[int] | None = None):
+        super().__init__(code, detail, status_code=409)
+        self.blockers = blockers or []
 
 
 def _validate_subscription_decimal(value, field_name: str) -> Decimal:
@@ -2819,21 +2864,57 @@ ALL_SIX_METRICS = (
     METRIC_AVERAGE_HANDLING_TIME,
 )
 
+# ==============================================================================
+# محاور سياسة تقييم الـpilot (210-D، §٥) — أربعة محاور مستقلة عن #207 عمداً.
+#
+# **لا تُخلط بـALL_PERFORMANCE_AXES/DEFAULT_AXIS_WEIGHTS أعلاه**: تلك محاور
+# #207 الخمسة القديمة وتبقى دون تعديل (§١٣: لا يُعاد بناء لقطاتها ولا يتغيّر
+# معناها بأثر رجعي). هذه سياسةٌ جديدة تُقاس بصيغٍ مختلفة تماماً (دفتر الاستخدام
+# وتصنيف الرفض بدل عدّ أوامر العمل المعتمدة)، فسُمّيت محاورها بأسماء مختلفة
+# عمداً («quality_accuracy» لا «quality») كي لا يظن قارئ policy_snapshot/axes_data
+# أنّ رقماً من نظامٍ يقارَن مباشرة برقمٍ من الآخر.
+# ==============================================================================
+PILOT_AXIS_TASK_COMPLETION = "task_completion"      # إنجاز العمل المقبول - 40%
+PILOT_AXIS_QUALITY = "quality_accuracy"             # الدقة والجودة - 30%
+PILOT_AXIS_SLA = "sla_adherence"                    # الالتزام بالـSLA - 20%
+PILOT_AXIS_SATISFACTION = "customer_satisfaction"   # رضا العملاء - 10%
+
+ALL_PILOT_PERFORMANCE_AXES = (
+    PILOT_AXIS_TASK_COMPLETION,
+    PILOT_AXIS_QUALITY,
+    PILOT_AXIS_SLA,
+    PILOT_AXIS_SATISFACTION,
+)
+
+DEFAULT_PILOT_AXIS_WEIGHTS: dict[str, Decimal] = {
+    PILOT_AXIS_TASK_COMPLETION: Decimal("40.00"),
+    PILOT_AXIS_QUALITY: Decimal("30.00"),
+    PILOT_AXIS_SLA: Decimal("20.00"),
+    PILOT_AXIS_SATISFACTION: Decimal("10.00"),
+}
+
 
 def redistribute_axis_weights(
     raw_weights: dict[str, Decimal | float | int | str],
     applicable_axes: set[str],
+    all_axes: tuple[str, ...] = ALL_PERFORMANCE_AXES,
+    default_weights: dict[str, Decimal] | None = None,
 ) -> dict[str, Decimal]:
     """إعادة توزيع الأوزان على المحاور المنطبقة بالتناسب ليكون المجموع 100.00% بالضبط.
 
     القاعدة:
     - المحور غير المنطبق يُسقط ويعاد توزيع وزنه على الباقي.
     - المجموع يبقى 100% بالضبط دون أي كسور تقريب ضائعة؛ يُضاف فرق التقريب للمحور الأكبر وزناً.
+
+    `all_axes`/`default_weights` توسيعٌ (210-D) يسمح بإعادة استعمال المنطق نفسه
+    لعوالم محاورَ أخرى (محاور الـpilot الأربعة) بلا تكرار الخوارزمية — الاستدعاء
+    القديم بلا هذين المعطيين يعمل بالضبط كما كان (محاور #207 الخمسة).
     """
+    default_weights = default_weights if default_weights is not None else DEFAULT_AXIS_WEIGHTS
     # **محورٌ منطبقٌ غائبٌ عن أوزان السياسة يأخذ وزنَه الافتراضيَّ لا صفراً**: كان
     # `axis in raw_weights` يُسقطه من التوزيع فيبقى «منطبقاً» بوزنٍ صفريّ — المجموعُ
     # يبقى ١٠٠ فيمرّ الاختبارُ المفروض، والتفصيلُ يعرض محوراً منطبقاً لا يساهم بشيء.
-    applicable = [axis for axis in ALL_PERFORMANCE_AXES if axis in applicable_axes]
+    applicable = [axis for axis in all_axes if axis in applicable_axes]
     if not applicable:
         return {}
 
@@ -2845,11 +2926,11 @@ def redistribute_axis_weights(
             elif axis == AXIS_ATTENDANCE_REGULARITY:
                 raw = raw_weights.get("attendance")
         if raw is None:
-            raw = DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00"))
+            raw = default_weights.get(axis, Decimal("0.00"))
         try:
             return Decimal(str(raw))
         except (InvalidOperation, TypeError, ValueError):
-            return DEFAULT_AXIS_WEIGHTS.get(axis, Decimal("0.00"))
+            return default_weights.get(axis, Decimal("0.00"))
 
     weights_dec = {axis: _weight_of(axis) for axis in applicable}
     total_w = sum(weights_dec.values())
@@ -3518,6 +3599,1420 @@ def capture_performance_snapshot(
     )
 
     return snapshot
+
+
+# ==============================================================================
+# التذكرة 210-D (تابع): سياسة تقييم الـpilot — إدارة النسخ (§٥، §٨، §١١)
+# ==============================================================================
+
+
+def _validate_pilot_weights(weights) -> dict[str, Decimal]:
+    """يتحقق أن أوزان المحاور الأربعة أرقامٌ غير سالبة ومجموعها 100.00% بالضبط.
+
+    فحصُ المجموع هنا **لحظة الكتابة** (مسودة/تفعيل) — منفصلٌ عن إعادة التوزيع
+    وقت الحساب الشهري (`redistribute_axis_weights`) التي تُسقط محوراً غير منطبق
+    وتعيد توزيع وزنه؛ فحصنا هنا يضمن أن ما يكتبه السوبر أدمن نفسه صحيحٌ ابتداءً.
+    """
+    weights = weights or {}
+    validated: dict[str, Decimal] = {}
+    total = Decimal("0.00")
+    for axis in ALL_PILOT_PERFORMANCE_AXES:
+        raw = weights.get(axis, DEFAULT_PILOT_AXIS_WEIGHTS[axis])
+        try:
+            dec = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            raise PerformanceEvaluationPolicyError("invalid_weight", f"وزن غير صالح للمحور {axis}.")
+        if not dec.is_finite() or dec < Decimal("0.00"):
+            raise PerformanceEvaluationPolicyError("invalid_weight", f"وزن المحور {axis} لا يكون سالباً.")
+        validated[axis] = dec
+        total += dec
+    if total != Decimal("100.00"):
+        raise PerformanceEvaluationPolicyError(
+            "weights_must_total_100",
+            f"مجموع أوزان المحاور يجب أن يساوي 100% بالضبط (الحالي {total}).",
+        )
+    return validated
+
+
+def _evaluation_policy_event_details(policy: PerformanceEvaluationPolicy) -> dict:
+    return {
+        "specialty": policy.specialty,
+        "weights": policy.weights,
+        "min_sample_size": policy.min_sample_size,
+        "review_grace_period_hours": policy.review_grace_period_hours,
+    }
+
+
+def _log_evaluation_policy_event(policy, *, action, actor=None, correlation_id="", details=None):
+    return PerformanceEvaluationPolicyEvent.objects.create(
+        policy=policy,
+        action=action,
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def get_active_performance_evaluation_policy(specialty: str = "", at: datetime.datetime | None = None):
+    """نسخة سياسة تقييم الـpilot السارية لتخصص، بنفس اصطلاح `get_active_subscription_policy`."""
+    moment = at or timezone.now()
+    in_effect = (
+        PerformanceEvaluationPolicy.objects
+        .filter(status=PerformanceEvaluationPolicy.Status.ACTIVE, effective_from__lte=moment)
+        .filter(Q(effective_to__isnull=True) | Q(effective_to__gt=moment))
+    )
+    specialty = str(specialty or "").strip()[:100]
+    if specialty:
+        specific = in_effect.filter(specialty=specialty).order_by("-version").first()
+        if specific is not None:
+            return specific
+    return in_effect.filter(specialty="").order_by("-version").first()
+
+
+def get_default_pilot_policy_dict(specialty: str = "") -> dict:
+    """قاموس سياسة الـpilot الافتراضي (جدول القيم الافتراضية) حين لا توجد نسخة منشورة بعد."""
+    return {
+        "specialty": specialty,
+        "weights": {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()},
+        "min_sample_size": 5,
+        "review_grace_period_hours": 48,
+    }
+
+
+def create_performance_evaluation_policy_draft(
+    *,
+    actor=None,
+    specialty: str = "",
+    weights=None,
+    min_sample_size=_UNSET,
+    review_grace_period_hours=_UNSET,
+    correlation_id: str = "",
+    cloned_from=None,
+) -> PerformanceEvaluationPolicy:
+    """ينشئ نسخة مسودة مؤرخة من سياسة تقييم الـpilot — لا `select_for_update`
+    لحساب رقم النسخة، كنمط `create_service_unit_catalog_draft` بالضبط.
+    """
+    validated_weights = _validate_pilot_weights(
+        weights if weights is not None else {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()}
+    )
+    if min_sample_size is _UNSET:
+        min_sample_size = PerformanceEvaluationPolicy._meta.get_field("min_sample_size").default
+    if review_grace_period_hours is _UNSET:
+        review_grace_period_hours = PerformanceEvaluationPolicy._meta.get_field("review_grace_period_hours").default
+    try:
+        min_sample_size = int(min_sample_size)
+        review_grace_period_hours = int(review_grace_period_hours)
+    except (TypeError, ValueError):
+        raise PerformanceEvaluationPolicyError("invalid_integer", "حد العينة ومهلة المراجعة أعداد صحيحة.")
+    if min_sample_size < 1 or review_grace_period_hours < 0:
+        raise PerformanceEvaluationPolicyError("invalid_integer", "حد العينة ومهلة المراجعة يجب أن تكونا صالحتين.")
+
+    last_version = PerformanceEvaluationPolicy.objects.aggregate(Max("version"))["version__max"] or 0
+    try:
+        with transaction.atomic():
+            policy = PerformanceEvaluationPolicy.objects.create(
+                version=last_version + 1,
+                status=PerformanceEvaluationPolicy.Status.DRAFT,
+                specialty=str(specialty or "").strip()[:100],
+                weights={k: str(v) for k, v in validated_weights.items()},
+                min_sample_size=min_sample_size,
+                review_grace_period_hours=review_grace_period_hours,
+                created_by=actor if getattr(actor, "pk", None) else None,
+            )
+    except IntegrityError:
+        raise PerformanceEvaluationPolicyConflict(
+            "policy_version_conflict", "تعذر إنشاء نسخة سياسة تقييم جديدة؛ أعد المحاولة.",
+        )
+    details = {"after": _evaluation_policy_event_details(policy)}
+    if cloned_from is not None:
+        details["source_policy_id"] = cloned_from.pk
+    _log_evaluation_policy_event(
+        policy,
+        action=(
+            PerformanceEvaluationPolicyEvent.Action.CLONED if cloned_from is not None
+            else PerformanceEvaluationPolicyEvent.Action.CREATED
+        ),
+        actor=actor, correlation_id=correlation_id, details=details,
+    )
+    return policy
+
+
+def clone_performance_evaluation_policy_to_draft(*, policy, actor=None, correlation_id: str = ""):
+    """ينسخ نسخة نشطة أو منتهية إلى مسودة جديدة — النسخ الأخرى لا تُعدَّل أبداً."""
+    source = PerformanceEvaluationPolicy.objects.get(pk=getattr(policy, "pk", policy))
+    return create_performance_evaluation_policy_draft(
+        actor=actor,
+        specialty=source.specialty,
+        weights=source.weights,
+        min_sample_size=source.min_sample_size,
+        review_grace_period_hours=source.review_grace_period_hours,
+        correlation_id=correlation_id,
+        cloned_from=source,
+    )
+
+
+@transaction.atomic
+def update_performance_evaluation_policy_draft(*, policy, actor=None, correlation_id: str = "", **changes):
+    """يعدّل المسودة فقط؛ النسخ النشطة والمنتهية غير قابلة للتغيير."""
+    allowed = {"specialty", "weights", "min_sample_size", "review_grace_period_hours"}
+    if set(changes) - allowed:
+        raise PerformanceEvaluationPolicyError("unsupported_field", "يوجد حقل سياسة غير مسموح بتعديله.")
+    locked = PerformanceEvaluationPolicy.objects.select_for_update().get(pk=getattr(policy, "pk", policy))
+    if locked.status != PerformanceEvaluationPolicy.Status.DRAFT:
+        raise PerformanceEvaluationPolicyConflict("policy_immutable", "لا يمكن تعديل سياسة مفعلة أو منتهية.")
+
+    before = _evaluation_policy_event_details(locked)
+    validated_weights = _validate_pilot_weights(changes.get("weights", locked.weights))
+    try:
+        min_sample_size = int(changes.get("min_sample_size", locked.min_sample_size))
+        review_grace_period_hours = int(changes.get("review_grace_period_hours", locked.review_grace_period_hours))
+    except (TypeError, ValueError):
+        raise PerformanceEvaluationPolicyError("invalid_integer", "حد العينة ومهلة المراجعة أعداد صحيحة.")
+    if min_sample_size < 1 or review_grace_period_hours < 0:
+        raise PerformanceEvaluationPolicyError("invalid_integer", "حد العينة ومهلة المراجعة يجب أن تكونا صالحتين.")
+
+    locked.specialty = str(changes.get("specialty", locked.specialty) or "").strip()[:100]
+    locked.weights = {k: str(v) for k, v in validated_weights.items()}
+    locked.min_sample_size = min_sample_size
+    locked.review_grace_period_hours = review_grace_period_hours
+    locked.save(update_fields=["specialty", "weights", "min_sample_size", "review_grace_period_hours", "updated_at"])
+    _log_evaluation_policy_event(
+        locked, action=PerformanceEvaluationPolicyEvent.Action.UPDATED, actor=actor, correlation_id=correlation_id,
+        details={"before": before, "after": _evaluation_policy_event_details(locked)},
+    )
+    return locked
+
+
+def preview_performance_evaluation_policy(*, policy) -> dict:
+    """يعيد أثر المسودة: النسخة النشطة الحالية وفروق الحقول — قراءة صرفة."""
+    draft = PerformanceEvaluationPolicy.objects.get(pk=getattr(policy, "pk", policy))
+    active = get_active_performance_evaluation_policy(specialty=draft.specialty)
+    compared_fields = ("specialty", "weights", "min_sample_size", "review_grace_period_hours")
+    diff = {}
+    for field in compared_fields:
+        draft_value = getattr(draft, field)
+        active_value = getattr(active, field) if active else None
+        if draft_value != active_value:
+            diff[field] = {"active": active_value, "draft": draft_value}
+    return {
+        "draft": draft,
+        "active": active,
+        "diff": diff,
+        "note": "معاينة فقط: لا تتغيّر أي لقطةٍ محسوبة سابقاً؛ الأثر يسري على الفترات القادمة فقط.",
+    }
+
+
+@transaction.atomic
+def activate_performance_evaluation_policy(
+    *, policy, actor=None, activation_reason: str = "", correlation_id: str = "", effective_from=None,
+) -> PerformanceEvaluationPolicy:
+    """يفعّل مسودة سياسة تقييم بسبب إلزامي — على نمط `activate_service_unit_catalog` بالضبط.
+
+    منعُ تداخل الإصدارات لكل نطاق (`specialty`) تحت قفل صريح، ورفضُ مجموع أوزانٍ
+    لا يساوي 100% (`_validate_pilot_weights` أعلاه، مُطبَّقٌ مسبقاً في الكتابة).
+    """
+    activation_reason = str(activation_reason or "").strip()
+    if not activation_reason:
+        raise PerformanceEvaluationPolicyError("activation_reason_required", "سبب التفعيل مطلوب.")
+    locked_policies = list(PerformanceEvaluationPolicy.objects.select_for_update().order_by("pk"))
+    locked = next((row for row in locked_policies if row.pk == getattr(policy, "pk", policy)), None)
+    if locked is None:
+        raise PerformanceEvaluationPolicyError("policy_not_found", "سياسة التقييم غير موجودة.")
+    if locked.status != PerformanceEvaluationPolicy.Status.DRAFT:
+        raise PerformanceEvaluationPolicyConflict("policy_not_draft", "لا يمكن تفعيل هذه السياسة مرة أخرى.")
+    _validate_pilot_weights({k: Decimal(str(v)) for k, v in (locked.weights or {}).items()})
+
+    now = timezone.now()
+    starts_at = effective_from or now
+    if timezone.is_naive(starts_at):
+        starts_at = timezone.make_aware(starts_at)
+    if starts_at < now - datetime.timedelta(minutes=1):
+        raise PerformanceEvaluationPolicyError("effective_from_in_past", "تاريخ السريان لا يكون في الماضي.")
+    starts_at = max(starts_at, now)
+
+    same_scope = [
+        row for row in locked_policies
+        if row.pk != locked.pk and row.status == PerformanceEvaluationPolicy.Status.ACTIVE
+        and row.specialty == locked.specialty
+    ]
+    later = [row for row in same_scope if row.effective_from and row.effective_from >= starts_at]
+    if later:
+        raise PerformanceEvaluationPolicyConflict(
+            "policy_overlap",
+            f"النسخة v{later[0].version} لنفس النطاق تسري من تاريخ لاحق أو مساوٍ؛ اختر تاريخ سريان بعده.",
+        )
+    superseded = []
+    for previous in same_scope:
+        if previous.effective_to is None or previous.effective_to > starts_at:
+            previous.effective_to = starts_at
+            previous.save(update_fields=["effective_to", "updated_at"])
+            superseded.append(previous.pk)
+
+    locked.status = PerformanceEvaluationPolicy.Status.ACTIVE
+    locked.effective_from = starts_at
+    locked.effective_to = None
+    locked.activated_at = now
+    locked.activated_by = actor if getattr(actor, "pk", None) else None
+    locked.activation_reason = activation_reason
+    locked.save(update_fields=[
+        "status", "effective_from", "effective_to", "activated_at", "activated_by", "activation_reason", "updated_at",
+    ])
+    _log_evaluation_policy_event(
+        locked, action=PerformanceEvaluationPolicyEvent.Action.ACTIVATED, actor=actor, correlation_id=correlation_id,
+        details={"reason": activation_reason, "effective_from": starts_at.isoformat(), "superseded_policy_ids": superseded},
+    )
+    for row in locked_policies:
+        if (
+            row.pk != locked.pk and row.status == PerformanceEvaluationPolicy.Status.ACTIVE
+            and row.effective_to is not None and row.effective_to <= now
+        ):
+            row.status = PerformanceEvaluationPolicy.Status.RETIRED
+            row.save(update_fields=["status", "updated_at"])
+            _log_evaluation_policy_event(
+                row, action=PerformanceEvaluationPolicyEvent.Action.RETIRED, actor=actor, correlation_id=correlation_id,
+                details={"reason": activation_reason, "effective_to": row.effective_to.isoformat()},
+            )
+    return locked
+
+
+# ==============================================================================
+# التذكرة 210-D (تابع): سياسة تعويض الموظف — إدارة النسخ (§٧، §٨، §١١)
+# ==============================================================================
+
+
+def _resolve_compensation_employee(employee):
+    if employee is None:
+        return None
+    emp_pk = getattr(employee, "pk", employee)
+    resolved = PlatformEmployee.objects.filter(pk=emp_pk).first()
+    if resolved is None:
+        raise EmployeeCompensationPolicyError("employee_not_found", "موظف المنصة غير موجود.")
+    return resolved
+
+
+def _validate_compensation_decimal(value, field_name: str) -> Decimal:
+    try:
+        result = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise EmployeeCompensationPolicyError(field_name, f"قيمة {field_name} غير صالحة.")
+    if not result.is_finite() or result < Decimal("0.00"):
+        raise EmployeeCompensationPolicyError(field_name, f"قيمة {field_name} يجب أن تكون صفراً أو أكبر.")
+    return result.quantize(Decimal("0.01"))
+
+
+def _compensation_policy_event_details(policy: EmployeeCompensationPolicy) -> dict:
+    return {
+        "employee_id": policy.employee_id,
+        "base_salary": str(policy.base_salary),
+        "daily_hours": str(policy.daily_hours),
+        "weekly_days": policy.weekly_days,
+        "acquisition_commission_amount": str(policy.acquisition_commission_amount),
+        "acquisition_commission_months": policy.acquisition_commission_months,
+        "accrual_day_of_month": policy.accrual_day_of_month,
+    }
+
+
+def _log_compensation_policy_event(policy, *, action, actor=None, correlation_id="", details=None):
+    return EmployeeCompensationPolicyEvent.objects.create(
+        policy=policy,
+        action=action,
+        actor=actor if getattr(actor, "pk", None) else None,
+        correlation_id=str(correlation_id or "")[:64],
+        details=details or {},
+    )
+
+
+def get_active_employee_compensation_policy(employee=None, at: datetime.datetime | None = None):
+    """نسخة سياسة التعويض السارية لموظفٍ بعينه، وإلا العامة — لا تخمين افتراضي."""
+    moment = at or timezone.now()
+    in_effect = (
+        EmployeeCompensationPolicy.objects
+        .filter(status=EmployeeCompensationPolicy.Status.ACTIVE, effective_from__lte=moment)
+        .filter(Q(effective_to__isnull=True) | Q(effective_to__gt=moment))
+    )
+    emp_id = getattr(employee, "pk", employee)
+    if emp_id:
+        specific = in_effect.filter(employee_id=emp_id).order_by("-version").first()
+        if specific is not None:
+            return specific
+    return in_effect.filter(employee__isnull=True).order_by("-version").first()
+
+
+def get_default_compensation_policy_dict() -> dict:
+    """افتراضيّات الـpilot (جدول القيم الافتراضية) حين لا توجد نسخة منشورة بعد.
+
+    **القيمُ تُقرأ من تعريف الحقول لا تُكتب هنا ثانيةً:** كانت مكتوبةً حرفيّاً
+    (500/3/6/100/3/1) وهي نفسُها defaults الحقول في `EmployeeCompensationPolicy`،
+    فصار للراتب والعمولة **مصدرا حقيقةٍ اثنان**: تعديلُ default الحقل وحدَه يُبقي
+    هذا المسارَ — مسارَ «لا سياسة منشورة بعد»، وهو مسارُ الـpilot كلِّه قبل أوّل
+    نشر — يدفع الرقمَ القديمَ بصمت، ولا اختبارٌ يكشفه لأنّ كلا الرقمين متساويان
+    اليوم. والنمطُ الصحيح مستعملٌ سلفاً في `create_employee_compensation_policy_draft`.
+    """
+    field = EmployeeCompensationPolicy._meta.get_field
+    return {
+        "base_salary": Decimal(str(field("base_salary").default)),
+        "daily_hours": Decimal(str(field("daily_hours").default)),
+        "weekly_days": field("weekly_days").default,
+        "acquisition_commission_amount": Decimal(str(field("acquisition_commission_amount").default)),
+        "acquisition_commission_months": field("acquisition_commission_months").default,
+        "accrual_day_of_month": field("accrual_day_of_month").default,
+    }
+
+
+def create_employee_compensation_policy_draft(
+    *,
+    actor=None,
+    employee=None,
+    base_salary=_UNSET,
+    daily_hours=_UNSET,
+    weekly_days=_UNSET,
+    acquisition_commission_amount=_UNSET,
+    acquisition_commission_months=_UNSET,
+    accrual_day_of_month=_UNSET,
+    correlation_id: str = "",
+    cloned_from=None,
+) -> EmployeeCompensationPolicy:
+    """ينشئ نسخة مسودة مؤرخة من سياسة تعويض — لا `select_for_update` لحساب رقم النسخة."""
+    resolved_employee = _resolve_compensation_employee(employee)
+    field = EmployeeCompensationPolicy._meta.get_field
+    if base_salary is _UNSET:
+        base_salary = field("base_salary").default
+    if daily_hours is _UNSET:
+        daily_hours = field("daily_hours").default
+    if weekly_days is _UNSET:
+        weekly_days = field("weekly_days").default
+    if acquisition_commission_amount is _UNSET:
+        acquisition_commission_amount = field("acquisition_commission_amount").default
+    if acquisition_commission_months is _UNSET:
+        acquisition_commission_months = field("acquisition_commission_months").default
+    if accrual_day_of_month is _UNSET:
+        accrual_day_of_month = field("accrual_day_of_month").default
+
+    base_salary = _validate_compensation_decimal(base_salary, "base_salary")
+    daily_hours = _validate_compensation_decimal(daily_hours, "daily_hours")
+    acquisition_commission_amount = _validate_compensation_decimal(
+        acquisition_commission_amount, "acquisition_commission_amount",
+    )
+    try:
+        weekly_days = int(weekly_days)
+        acquisition_commission_months = int(acquisition_commission_months)
+        accrual_day_of_month = int(accrual_day_of_month)
+    except (TypeError, ValueError):
+        raise EmployeeCompensationPolicyError("invalid_integer", "الحقول العددية يجب أن تكون أعداداً صحيحة.")
+    if not 1 <= weekly_days <= 7:
+        raise EmployeeCompensationPolicyError("weekly_days", "أيام الدوام الأسبوعية بين 1 و7.")
+    if acquisition_commission_months < 1:
+        raise EmployeeCompensationPolicyError("acquisition_commission_months", "مدة العمولة شهر واحد على الأقل.")
+    if not 1 <= accrual_day_of_month <= 28:
+        raise EmployeeCompensationPolicyError("accrual_day_of_month", "يوم الاستحقاق بين 1 و28.")
+
+    last_version = EmployeeCompensationPolicy.objects.aggregate(Max("version"))["version__max"] or 0
+    try:
+        with transaction.atomic():
+            policy = EmployeeCompensationPolicy.objects.create(
+                version=last_version + 1,
+                status=EmployeeCompensationPolicy.Status.DRAFT,
+                employee=resolved_employee,
+                base_salary=base_salary,
+                daily_hours=daily_hours,
+                weekly_days=weekly_days,
+                acquisition_commission_amount=acquisition_commission_amount,
+                acquisition_commission_months=acquisition_commission_months,
+                accrual_day_of_month=accrual_day_of_month,
+                created_by=actor if getattr(actor, "pk", None) else None,
+            )
+    except IntegrityError:
+        raise EmployeeCompensationPolicyConflict(
+            "policy_version_conflict", "تعذر إنشاء نسخة سياسة تعويض جديدة؛ أعد المحاولة.",
+        )
+    details = {"after": _compensation_policy_event_details(policy)}
+    if cloned_from is not None:
+        details["source_policy_id"] = cloned_from.pk
+    _log_compensation_policy_event(
+        policy,
+        action=(
+            EmployeeCompensationPolicyEvent.Action.CLONED if cloned_from is not None
+            else EmployeeCompensationPolicyEvent.Action.CREATED
+        ),
+        actor=actor, correlation_id=correlation_id, details=details,
+    )
+    return policy
+
+
+def clone_employee_compensation_policy_to_draft(*, policy, actor=None, correlation_id: str = ""):
+    source = EmployeeCompensationPolicy.objects.get(pk=getattr(policy, "pk", policy))
+    return create_employee_compensation_policy_draft(
+        actor=actor,
+        employee=source.employee_id,
+        base_salary=source.base_salary,
+        daily_hours=source.daily_hours,
+        weekly_days=source.weekly_days,
+        acquisition_commission_amount=source.acquisition_commission_amount,
+        acquisition_commission_months=source.acquisition_commission_months,
+        accrual_day_of_month=source.accrual_day_of_month,
+        correlation_id=correlation_id,
+        cloned_from=source,
+    )
+
+
+@transaction.atomic
+def update_employee_compensation_policy_draft(*, policy, actor=None, correlation_id: str = "", **changes):
+    allowed = {
+        "employee", "base_salary", "daily_hours", "weekly_days",
+        "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+    }
+    if set(changes) - allowed:
+        raise EmployeeCompensationPolicyError("unsupported_field", "يوجد حقل سياسة غير مسموح بتعديله.")
+    locked = EmployeeCompensationPolicy.objects.select_for_update().get(pk=getattr(policy, "pk", policy))
+    if locked.status != EmployeeCompensationPolicy.Status.DRAFT:
+        raise EmployeeCompensationPolicyConflict("policy_immutable", "لا يمكن تعديل سياسة مفعلة أو منتهية.")
+
+    before = _compensation_policy_event_details(locked)
+    employee = (
+        _resolve_compensation_employee(changes["employee"]) if "employee" in changes else locked.employee
+    )
+    base_salary = _validate_compensation_decimal(changes.get("base_salary", locked.base_salary), "base_salary")
+    daily_hours = _validate_compensation_decimal(changes.get("daily_hours", locked.daily_hours), "daily_hours")
+    acquisition_commission_amount = _validate_compensation_decimal(
+        changes.get("acquisition_commission_amount", locked.acquisition_commission_amount),
+        "acquisition_commission_amount",
+    )
+    try:
+        weekly_days = int(changes.get("weekly_days", locked.weekly_days))
+        acquisition_commission_months = int(
+            changes.get("acquisition_commission_months", locked.acquisition_commission_months)
+        )
+        accrual_day_of_month = int(changes.get("accrual_day_of_month", locked.accrual_day_of_month))
+    except (TypeError, ValueError):
+        raise EmployeeCompensationPolicyError("invalid_integer", "الحقول العددية يجب أن تكون أعداداً صحيحة.")
+    if not 1 <= weekly_days <= 7:
+        raise EmployeeCompensationPolicyError("weekly_days", "أيام الدوام الأسبوعية بين 1 و7.")
+    if acquisition_commission_months < 1:
+        raise EmployeeCompensationPolicyError("acquisition_commission_months", "مدة العمولة شهر واحد على الأقل.")
+    if not 1 <= accrual_day_of_month <= 28:
+        raise EmployeeCompensationPolicyError("accrual_day_of_month", "يوم الاستحقاق بين 1 و28.")
+
+    locked.employee = employee
+    locked.base_salary = base_salary
+    locked.daily_hours = daily_hours
+    locked.weekly_days = weekly_days
+    locked.acquisition_commission_amount = acquisition_commission_amount
+    locked.acquisition_commission_months = acquisition_commission_months
+    locked.accrual_day_of_month = accrual_day_of_month
+    locked.save(update_fields=[
+        "employee", "base_salary", "daily_hours", "weekly_days", "acquisition_commission_amount",
+        "acquisition_commission_months", "accrual_day_of_month", "updated_at",
+    ])
+    _log_compensation_policy_event(
+        locked, action=EmployeeCompensationPolicyEvent.Action.UPDATED, actor=actor, correlation_id=correlation_id,
+        details={"before": before, "after": _compensation_policy_event_details(locked)},
+    )
+    return locked
+
+
+def preview_employee_compensation_policy(*, policy) -> dict:
+    draft = EmployeeCompensationPolicy.objects.get(pk=getattr(policy, "pk", policy))
+    active = get_active_employee_compensation_policy(employee=draft.employee_id)
+    compared_fields = (
+        "employee_id", "base_salary", "daily_hours", "weekly_days",
+        "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+    )
+    diff = {}
+    for field in compared_fields:
+        draft_value = getattr(draft, field)
+        active_value = getattr(active, field) if active else None
+        if draft_value != active_value:
+            money = field in {"base_salary", "daily_hours", "acquisition_commission_amount"}
+            diff[field] = {
+                "active": str(active_value) if money and active_value is not None else active_value,
+                "draft": str(draft_value) if money and draft_value is not None else draft_value,
+            }
+    return {
+        "draft": draft,
+        "active": active,
+        "diff": diff,
+        "note": "معاينة فقط: لا يتغيّر أيُّ سطرِ محفظةٍ مُنشأٍ سابقاً؛ الأثر يسري على الأشهر القادمة فقط.",
+    }
+
+
+@transaction.atomic
+def activate_employee_compensation_policy(
+    *, policy, actor=None, activation_reason: str = "", correlation_id: str = "", effective_from=None,
+) -> EmployeeCompensationPolicy:
+    """يفعّل مسودة سياسة تعويض بسبب إلزامي — نطاق التداخل هنا هو الموظف المستهدَف
+    (`employee_id`، لا `specialty`)."""
+    activation_reason = str(activation_reason or "").strip()
+    if not activation_reason:
+        raise EmployeeCompensationPolicyError("activation_reason_required", "سبب التفعيل مطلوب.")
+    locked_policies = list(EmployeeCompensationPolicy.objects.select_for_update().order_by("pk"))
+    locked = next((row for row in locked_policies if row.pk == getattr(policy, "pk", policy)), None)
+    if locked is None:
+        raise EmployeeCompensationPolicyError("policy_not_found", "سياسة التعويض غير موجودة.")
+    if locked.status != EmployeeCompensationPolicy.Status.DRAFT:
+        raise EmployeeCompensationPolicyConflict("policy_not_draft", "لا يمكن تفعيل هذه السياسة مرة أخرى.")
+
+    now = timezone.now()
+    starts_at = effective_from or now
+    if timezone.is_naive(starts_at):
+        starts_at = timezone.make_aware(starts_at)
+    if starts_at < now - datetime.timedelta(minutes=1):
+        raise EmployeeCompensationPolicyError("effective_from_in_past", "تاريخ السريان لا يكون في الماضي.")
+    starts_at = max(starts_at, now)
+
+    same_scope = [
+        row for row in locked_policies
+        if row.pk != locked.pk and row.status == EmployeeCompensationPolicy.Status.ACTIVE
+        and row.employee_id == locked.employee_id
+    ]
+    later = [row for row in same_scope if row.effective_from and row.effective_from >= starts_at]
+    if later:
+        raise EmployeeCompensationPolicyConflict(
+            "policy_overlap",
+            f"النسخة v{later[0].version} لنفس النطاق تسري من تاريخ لاحق أو مساوٍ؛ اختر تاريخ سريان بعده.",
+        )
+    superseded = []
+    for previous in same_scope:
+        if previous.effective_to is None or previous.effective_to > starts_at:
+            previous.effective_to = starts_at
+            previous.save(update_fields=["effective_to", "updated_at"])
+            superseded.append(previous.pk)
+
+    locked.status = EmployeeCompensationPolicy.Status.ACTIVE
+    locked.effective_from = starts_at
+    locked.effective_to = None
+    locked.activated_at = now
+    locked.activated_by = actor if getattr(actor, "pk", None) else None
+    locked.activation_reason = activation_reason
+    locked.save(update_fields=[
+        "status", "effective_from", "effective_to", "activated_at", "activated_by", "activation_reason", "updated_at",
+    ])
+    _log_compensation_policy_event(
+        locked, action=EmployeeCompensationPolicyEvent.Action.ACTIVATED, actor=actor, correlation_id=correlation_id,
+        details={"reason": activation_reason, "effective_from": starts_at.isoformat(), "superseded_policy_ids": superseded},
+    )
+    for row in locked_policies:
+        if (
+            row.pk != locked.pk and row.status == EmployeeCompensationPolicy.Status.ACTIVE
+            and row.effective_to is not None and row.effective_to <= now
+        ):
+            row.status = EmployeeCompensationPolicy.Status.RETIRED
+            row.save(update_fields=["status", "updated_at"])
+            _log_compensation_policy_event(
+                row, action=EmployeeCompensationPolicyEvent.Action.RETIRED, actor=actor, correlation_id=correlation_id,
+                details={"reason": activation_reason, "effective_to": row.effective_to.isoformat()},
+            )
+    return locked
+
+
+# ==============================================================================
+# التذكرة 210-D (تابع): محاور تقييم الـpilot الأربعة — الحساب (§٥)
+# ==============================================================================
+
+
+def calculate_employee_pilot_performance(
+    *,
+    employee: PlatformEmployee,
+    period_year: int,
+    period_month: int,
+    policy_dict: dict | None = None,
+) -> dict:
+    """حساب أداء موظف الإدخال عبر محاور الـpilot الأربعة (40/30/20/10) — §٥.
+
+    **توسيعٌ للمحرّك القائم لا محرّكٌ ثانٍ**: يُعاد استعمال `redistribute_axis_weights`
+    (بعد تعميمها بـ`all_axes`) و`PerformanceSnapshot` و`calculate_work_order_sla`
+    نفسها؛ الجديد هنا حصراً هو مصادر البسط/المقام (دفتر الاستخدام وتصنيف الرفض
+    من 210-C) التي لا وجود لها في محرك #207 القديم إطلاقاً.
+
+    استبعاداتٌ مُنفَّذة من §٥: `onboarding` (`Engagement.kind`)، انتظار العميل
+    (عبر `WorkOrder.Status.WAITING_CUSTOMER` واستبعاد ثواني الانتظار من SLA)،
+    والعمل الذي نُقل قبل الاستحقاق (بقراءة `assignee` **الحالي** فقط — عملٌ
+    نُقل لموظفٍ آخر لم يعد يظهر أصلاً ضمن أعمال هذا الموظف).
+    **استبعاد وقت الإجازة المعتمدة TODO — سؤال مفتوح غير منفَّذ (§٦ من التذكرة):
+    لا رابط بين PlatformEmployee وموظف hr المرتبط بشركة.**
+    """
+    start_date = datetime.date(period_year, period_month, 1)
+    _, last_day = calendar.monthrange(period_year, period_month)
+    end_date = datetime.date(period_year, period_month, last_day)
+
+    if policy_dict is None:
+        p_policy = get_active_performance_evaluation_policy(specialty=employee.specialty)
+        policy_dict = _pilot_policy_dict(p_policy, employee.specialty)
+
+    min_sample_size = int(policy_dict.get("min_sample_size", 5))
+    raw_weights = policy_dict.get("weights") or {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()}
+
+    # الشركات المؤهَّلة: ارتباطاتٌ standard فقط — onboarding مستبعد (§٥).
+    standard_tenant_ids = list(
+        Engagement.objects.filter(
+            employee=employee, kind=Engagement.Kind.STANDARD,
+        ).values_list("tenant_id", flat=True)
+    )
+
+    # ── المحور ١: إنجاز العمل المقبول (40%) ──────────────────────────────
+    # **البسطُ محصورٌ بشركات المقام نفسِها**: توحيدُ الوحدة لا يكفي إن اختلف المجتمع —
+    # مقامٌ محصورٌ بارتباطات `standard` وبسطٌ يجمع كلَّ وحدات الموظّف يُدخل وحداتِ
+    # `onboarding` (المستبعدَ صراحةً في §٥) في البسط بلا نظيرٍ في المقام، فترتفع
+    # النسبةُ فوق المئة بلا عملٍ إضافيٍّ حقيقيّ.
+    usage_qs = ServiceUsageEvent.objects.filter(
+        employee=employee, creditable_to_employee=True, tenant_id__in=standard_tenant_ids,
+    )
+    usage_qs = filter_local_date_range(usage_qs, "approved_at", date_from=start_date, date_to=end_date)
+    approved_creditable_units = Decimal("0.00")
+    for row in usage_qs.values("event_type").annotate(units_sum=Sum("units")):
+        amount = row["units_sum"] or Decimal("0.00")
+        if row["event_type"] == ServiceUsageEvent.EventType.USAGE:
+            approved_creditable_units += amount
+        else:
+            approved_creditable_units -= amount
+
+    assigned_qs = WorkOrder.objects.filter(
+        assignee=employee, tenant_id__in=standard_tenant_ids,
+    ).exclude(status=WorkOrder.Status.WAITING_CUSTOMER)
+    assigned_qs = filter_local_date_range(assigned_qs, "received_at", date_from=start_date, date_to=end_date)
+
+    # **المقامُ بالوحدات لا بعددِ الأوامر**: البسطُ مجموعُ `units` من دفتر الاستخدام،
+    # فمقامٌ بعددِ الصفوف يقيس جنساً آخر — أمرُ عملٍ واحدٌ بعشرِ وحداتٍ يُنتج 1000%
+    # تُقصُّ بصمتٍ إلى 100 فتبدو طاقةً مكتملة، وأمرٌ بنصفِ وحدةٍ أُنجز كاملاً يُنتج 50%.
+    # والصيغةُ هنا **هي عينُها** التي يحتسب بها الدفترُ البسط
+    # (`ServiceUnitCatalogEntry.units_for`) لا صيغةٌ ثانيةٌ تُشتق، وإلّا عاد عيبُ
+    # مصدرَي الحقيقة. وروابطُ المستندات تُنشأ «تمهيداً للتسليم» و`deliverable` فيها
+    # يُملأ لحظةَ التسليم — فهي نطاقُ العملِ المُسند لا أثرُ المُنجَز، ولذلك يبقى
+    # عملٌ أُسند ولم يُسلَّم حاضراً في المقام كما يقتضي المحور.
+    assigned_wo_ids = list(assigned_qs.values_list("pk", flat=True))
+    catalog = get_active_service_unit_catalog()
+    entries_by_type = (
+        {entry.document_type: entry for entry in catalog.entries.all()} if catalog is not None else {}
+    )
+    assigned_eligible_units = Decimal("0.00")
+    uncatalogued_links = 0
+    if assigned_wo_ids:
+        for link in WorkOrderDocumentLink.objects.filter(work_order_id__in=assigned_wo_ids).only(
+            "document_type", "line_count", "complexity",
+        ):
+            entry = entries_by_type.get(link.document_type)
+            if entry is None:
+                # لا يُطرح صامتاً: بندٌ بلا نظيرٍ في الكتالوج يصغّر المقامَ فيرفع الدرجة،
+                # فيُعدُّ ويُعرض مع النتيجة ليُقرأ النقصُ بدل أن يُجمَّل.
+                uncatalogued_links += 1
+                continue
+            assigned_eligible_units += entry.units_for(link.line_count, link.complexity)
+
+    capacity_target = employee.capacity_target or Decimal("0.00")
+    if capacity_target > Decimal("0.00"):
+        eligible_target_units = min(capacity_target, assigned_eligible_units)
+    else:
+        # capacity_target == 0 يعني «لم تُضبط بعد» لا «طاقة صفر» (قرار 210-B).
+        eligible_target_units = assigned_eligible_units
+
+    completion_numerator = float(max(Decimal("0.00"), approved_creditable_units))
+    completion_denominator = float(eligible_target_units)
+    completion_score = None
+    completion_raw_percent = None
+    if eligible_target_units > Decimal("0.00"):
+        # الفائضُ فوق المئة يُعرض ولا يُطوى: الدرجةُ تبقى مقصوصةً عند 100 لأنّ المركَّبَ
+        # الموزونَ لا يقبل أكثر، لكنّ القصَّ وحدَه يخفي طاقةً فائضةً حقيقيّة — والفرقُ
+        # بين «أنجز المُسندَ إليه» و«أنجز ضعفَه» قرارُ إدارةٍ لا تفصيلُ حساب.
+        completion_raw_percent = (
+            approved_creditable_units / eligible_target_units * Decimal("100.00")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        completion_score = min(Decimal("100.00"), max(Decimal("0.00"), completion_raw_percent))
+
+    # ── المحور ٢: الدقة والجودة (30%) ────────────────────────────────────
+    reviewed_qs = WorkOrderDeliverable.objects.filter(
+        work_order__assignee=employee,
+        work_order__tenant_id__in=standard_tenant_ids,
+        review_status__in=[
+            WorkOrderDeliverable.ReviewStatus.APPROVED,
+            WorkOrderDeliverable.ReviewStatus.REJECTED,
+        ],
+    ).exclude(
+        review_status=WorkOrderDeliverable.ReviewStatus.REJECTED,
+        rejection_category__in=[
+            WorkOrderDeliverable.RejectionCategory.CUSTOMER_NEW_INFO,
+            WorkOrderDeliverable.RejectionCategory.OTHER,
+        ],
+    )
+    reviewed_qs = filter_local_date_range(reviewed_qs, "reviewed_at", date_from=start_date, date_to=end_date)
+    # **الاسمُ يقول ما يَعِدّ**: هذان عددا **مُسلَّمات** مُراجَعة لا وحداتِ خدمة؛ وتسميتُهما
+    # `_units` هي بعينها المزلقُ الذي أنتج خلطَ المحور الأوّل (بسطٌ بالوحدات ومقامٌ
+    # بالصفوف)، فلا تُترك لتضلّ القارئَ التالي. ودلالةُ «المراجعة الأولى» في §٥ مسألةٌ
+    # مفتوحةٌ مرفوعةٌ للمالك: إعادةُ عملٍ رُفض ثم اعتُمد تُقرأ الآن 50% لا سقوطاً في
+    # المرّة الأولى — تغييرُها تغييرُ مقياسٍ لا إصلاحُ خطأ.
+    first_reviewed_deliverables = reviewed_qs.count()
+    first_pass_approved_deliverables = reviewed_qs.filter(
+        review_status=WorkOrderDeliverable.ReviewStatus.APPROVED
+    ).count()
+    quality_score = None
+    if first_reviewed_deliverables > 0:
+        quality_score = (
+            Decimal(first_pass_approved_deliverables) / Decimal(first_reviewed_deliverables) * Decimal("100.00")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # ── المحور ٣: الالتزام بالـSLA (20%) — لا إعادة كتابة لحساب الأجل ────
+    accepted_qs = WorkOrderDeliverable.objects.filter(
+        work_order__assignee=employee,
+        work_order__tenant_id__in=standard_tenant_ids,
+        review_status=WorkOrderDeliverable.ReviewStatus.APPROVED,
+    ).select_related("work_order")
+    accepted_qs = filter_local_date_range(accepted_qs, "reviewed_at", date_from=start_date, date_to=end_date)
+    accepted_list = list(accepted_qs)
+    eligible_accepted_deliverables = len(accepted_list)
+    on_time_count = 0
+    for deliv in accepted_list:
+        sla_info = calculate_work_order_sla(work_order=deliv.work_order)
+        if not sla_info["is_overdue"]:
+            on_time_count += 1
+    sla_score = None
+    if eligible_accepted_deliverables > 0:
+        sla_score = (
+            Decimal(on_time_count) / Decimal(eligible_accepted_deliverables) * Decimal("100.00")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    # ── المحور ٤: رضا العملاء (10%) — نفس مصدر محور #207 بالضبط ─────────
+    # `service_date` عمود `DateField` صريح — لا `filter_local_date_range` هنا
+    # (تلك للحقول الزمنية `DateTimeField` وحدها)، بلا `__date` بحال.
+    ratings_qs = DailyRating.objects.filter(
+        employee=employee, tenant_id__in=standard_tenant_ids,
+        service_date__gte=start_date, service_date__lte=end_date,
+    )
+    ratings_sample_size = ratings_qs.count()
+    satisfaction_score = None
+    if ratings_sample_size >= min_sample_size:
+        avg_stars = ratings_qs.aggregate(Avg("stars"))["stars__avg"] or 0.0
+        satisfaction_score = (
+            (Decimal(str(avg_stars)) / Decimal("5.00")) * Decimal("100.00")
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    axis_raw_scores: dict[str, Decimal] = {}
+    applicable_axes: set[str] = set()
+    axis_details: dict[str, dict] = {
+        PILOT_AXIS_TASK_COMPLETION: {
+            "numerator": completion_numerator,
+            "denominator": completion_denominator,
+            "exclusions": ["onboarding", "waiting_customer", "transferred_before_due"],
+            # الدرجةُ مقصوصةٌ عند 100 والنسبةُ الخامُ كما هي — يُقرأ منها الفائضُ فوق الطاقة.
+            "raw_percent": float(completion_raw_percent) if completion_raw_percent is not None else None,
+            # روابطُ مستنداتٍ لا بندَ لها في الكتالوج النشط: مقامٌ ناقصٌ يرفع الدرجةَ بغير حقّ.
+            "uncatalogued_document_links": uncatalogued_links,
+        },
+        PILOT_AXIS_QUALITY: {
+            "numerator": first_pass_approved_deliverables,
+            "denominator": first_reviewed_deliverables,
+            "exclusions": ["customer_new_info", "other"],
+        },
+        PILOT_AXIS_SLA: {
+            "numerator": on_time_count,
+            "denominator": eligible_accepted_deliverables,
+            "exclusions": ["waiting_customer"],
+        },
+        PILOT_AXIS_SATISFACTION: {
+            "numerator": float(ratings_qs.aggregate(Sum("stars"))["stars__sum"] or 0),
+            "denominator": 5 * ratings_sample_size,
+            "exclusions": [],
+            "sample_size": ratings_sample_size,
+            "min_sample_size": min_sample_size,
+        },
+    }
+    if completion_score is not None:
+        applicable_axes.add(PILOT_AXIS_TASK_COMPLETION)
+        axis_raw_scores[PILOT_AXIS_TASK_COMPLETION] = completion_score
+    if quality_score is not None:
+        applicable_axes.add(PILOT_AXIS_QUALITY)
+        axis_raw_scores[PILOT_AXIS_QUALITY] = quality_score
+    if sla_score is not None:
+        applicable_axes.add(PILOT_AXIS_SLA)
+        axis_raw_scores[PILOT_AXIS_SLA] = sla_score
+    if satisfaction_score is not None:
+        applicable_axes.add(PILOT_AXIS_SATISFACTION)
+        axis_raw_scores[PILOT_AXIS_SATISFACTION] = satisfaction_score
+
+    redistributed_weights = redistribute_axis_weights(
+        raw_weights, applicable_axes, all_axes=ALL_PILOT_PERFORMANCE_AXES, default_weights=DEFAULT_PILOT_AXIS_WEIGHTS,
+    )
+
+    axes_breakdown = {}
+    weighted_sum = Decimal("0.00")
+    for axis in ALL_PILOT_PERFORMANCE_AXES:
+        is_app = axis in applicable_axes
+        w = redistributed_weights.get(axis, Decimal("0.00"))
+        sc = axis_raw_scores.get(axis, Decimal("0.00"))
+        contrib = (w * sc / Decimal("100.00")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        if is_app:
+            weighted_sum += contrib
+        # §٥ تطلب عرضَ «الوزن الأصلي والفعلي» معاً: الفعليُّ وحدَه يُخفي أنّ محوراً غيرَ
+        # منطبقٍ أُسقط وأُعيد توزيعُ وزنه، فيقرأ الموظّفُ وزناً لم تضعه السياسةُ قطّ
+        # ولا يعرف أنّ محوراً غاب. (هذه حلقةُ الـpilot وحدَها — لمحرّك #207 حلقتُه.)
+        original_w = Decimal(str(raw_weights.get(axis, 0) or 0))
+        axes_breakdown[axis] = {
+            "applicable": is_app,
+            "weight": w,
+            "weight_pct": float(w),
+            "weight_original": original_w,
+            "weight_original_pct": float(original_w),
+            "score": sc,
+            "score_pct": float(sc),
+            "weighted_contribution": contrib,
+            **axis_details[axis],
+        }
+
+    # حجم العينة الإجمالي: مقام محور الجودة، أشمل مقياسٍ لـ«هل عمل مراجَع هذا الشهر».
+    sample_size = first_reviewed_deliverables
+    if sample_size < min_sample_size:
+        status = PerformanceSnapshot.Status.INSUFFICIENT_DATA
+        composite_score = None
+        status_message = "بيانات غير كافية"
+    else:
+        status = PerformanceSnapshot.Status.CALCULATED
+        composite_score = min(Decimal("100.00"), max(Decimal("0.00"), weighted_sum)).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        status_message = "محسوبة"
+
+    return {
+        "status": status,
+        "status_message": status_message,
+        "composite_score": composite_score,
+        "sample_size": sample_size,
+        "min_sample_size": min_sample_size,
+        "axes": axes_breakdown,
+        "weights_sum": sum(redistributed_weights.values()) if redistributed_weights else Decimal("0.00"),
+        "policy_used": policy_dict,
+    }
+
+
+def _pilot_policy_dict(policy: PerformanceEvaluationPolicy | None, specialty: str = "") -> dict:
+    if policy is None:
+        return get_default_pilot_policy_dict(specialty)
+    return {
+        "policy_id": policy.pk,
+        "version": policy.version,
+        "specialty": policy.specialty,
+        "weights": policy.weights or {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()},
+        "min_sample_size": policy.min_sample_size,
+        "review_grace_period_hours": policy.review_grace_period_hours,
+    }
+
+
+@transaction.atomic
+def capture_pilot_performance_snapshot(
+    *,
+    employee: PlatformEmployee,
+    period_year: int,
+    period_month: int,
+    evaluation_policy: PerformanceEvaluationPolicy | None = None,
+    captured_by=None,
+    force_refresh: bool = False,
+) -> PerformanceSnapshot:
+    """التقاط لقطة شهرية بمحاور الـpilot الأربعة — idempotent، بنفس اصطلاح
+    `capture_performance_snapshot` (#207) واستعمال نفس نموذج `PerformanceSnapshot`.
+
+    **لقطة مجمَّدة لا تتغيّر بتعديل السياسة لاحقاً**: `policy_snapshot` يحمل
+    نسخةً ثابتةً من الأوزان وقت الالتقاط، و`evaluation_policy` يحمل فقط مرجع
+    أيّ نسخة استُعملت — تعديل تلك النسخة لاحقاً (ممنوعٌ أصلاً، تُستنسخ لا تُعدَّل)
+    لا يمسّ هذا الصفّ بحال.
+    """
+    emp_pk = getattr(employee, "pk", employee)
+    locked_emp = PlatformEmployee.objects.select_for_update().get(pk=emp_pk)
+
+    existing = PerformanceSnapshot.objects.filter(
+        employee=locked_emp, period_year=period_year, period_month=period_month,
+    ).first()
+    if existing and not force_refresh:
+        return existing
+
+    if evaluation_policy is None:
+        evaluation_policy = get_active_performance_evaluation_policy(specialty=locked_emp.specialty)
+    policy_dict = _pilot_policy_dict(evaluation_policy, locked_emp.specialty)
+
+    perf_result = calculate_employee_pilot_performance(
+        employee=locked_emp, period_year=period_year, period_month=period_month, policy_dict=policy_dict,
+    )
+
+    now = timezone.now()
+    if existing and force_refresh:
+        existing.status = perf_result["status"]
+        existing.composite_score = perf_result["composite_score"]
+        existing.sample_size = perf_result["sample_size"]
+        existing.policy_profile = None
+        existing.evaluation_policy = evaluation_policy
+        existing.policy_snapshot = _make_json_safe(policy_dict)
+        existing.metrics_data = {}
+        existing.axes_data = _make_json_safe(perf_result["axes"])
+        existing.rework_rate = Decimal("0.00")
+        existing.processed_sales_value = Decimal("0.00")
+        existing.captured_by = captured_by
+        existing.captured_at = now
+        existing.save()
+        return existing
+
+    snapshot = PerformanceSnapshot.objects.create(
+        employee=locked_emp,
+        period_year=period_year,
+        period_month=period_month,
+        status=perf_result["status"],
+        composite_score=perf_result["composite_score"],
+        sample_size=perf_result["sample_size"],
+        policy_profile=None,
+        evaluation_policy=evaluation_policy,
+        policy_snapshot=_make_json_safe(policy_dict),
+        metrics_data={},
+        axes_data=_make_json_safe(perf_result["axes"]),
+        rework_rate=Decimal("0.00"),
+        processed_sales_value=Decimal("0.00"),
+        captured_by=captured_by,
+        captured_at=now,
+    )
+    log_platform_activity(
+        employee=locked_emp,
+        tenant=None,
+        action=PlatformActivityLog.Action.SNAPSHOT_CAPTURED,
+        entity_type="performance_snapshot",
+        entity_id=snapshot.pk,
+        description=f"التقاط لقطة أداء (pilot) لشهر {period_year}/{period_month}",
+        details={
+            "period_year": period_year,
+            "period_month": period_month,
+            "status": snapshot.status,
+            "composite_score": str(snapshot.composite_score) if snapshot.composite_score is not None else None,
+        },
+        created_at=now,
+    )
+    return snapshot
+
+
+# ==============================================================================
+# التذكرة 210-D (تابع): المحفظة، عمولة الاكتساب، وإغلاق الشهر (§٧)
+# ==============================================================================
+
+
+def _wallet_idempotency_key(kind: str, *parts) -> str:
+    return "platform_ops:wallet:" + kind + ":" + ":".join(str(p) for p in parts)
+
+
+def _resolve_employee_compensation(employee) -> EmployeeCompensationPolicy | dict:
+    return get_active_employee_compensation_policy(employee=employee) or get_default_compensation_policy_dict()
+
+
+def _compensation_field(comp, field_name):
+    if isinstance(comp, EmployeeCompensationPolicy):
+        return getattr(comp, field_name)
+    return comp[field_name]
+
+
+def _create_salary_line_for_employee(
+    *, employee: PlatformEmployee, period_year: int, period_month: int, monthly_close: MonthlyCompensationClose,
+) -> EmployeeSalaryLine | None:
+    """سطر راتبٍ واحدٌ لموظفٍ في شهرٍ واحد — `None` إن كان موجوداً بالفعل (idempotent)."""
+    comp = _resolve_employee_compensation(employee)
+    idempotency_key = _wallet_idempotency_key("salary", employee.pk, period_year, period_month)
+    try:
+        with transaction.atomic():
+            return EmployeeSalaryLine.objects.create(
+                employee=employee,
+                period_year=period_year,
+                period_month=period_month,
+                sequence=0,
+                amount=_compensation_field(comp, "base_salary"),
+                status=WalletLineStatus.ELIGIBLE,
+                compensation_policy=comp if isinstance(comp, EmployeeCompensationPolicy) else None,
+                monthly_close=monthly_close,
+                idempotency_key=idempotency_key,
+            )
+    except IntegrityError:
+        return None
+
+
+def _subscription_paid_for_period(subscription: ServiceSubscription, period_start, period_end) -> bool:
+    """هل سُجِّل دفعُ اشتراك الشهر فعلاً؟ — «مفوتَر» ليس «مدفوع» (§٧).
+
+    يبحث عن سجلّ فوترة تتقاطع دورته مع الشهر التقويمي المطلوب، وفاتورته
+    مدفوعةٌ بالكامل. غيابُ السجلّ أو غيابُ الفاتورة (باقة صفرية) أو نقصُ الدفع
+    كلّها «غير مدفوع» — لا يُعتبر وجود `SubscriptionBillingRecord` وحده دليلَ دفع.
+
+    **تُفحَص كلُّ السجلّات المتقاطعة لا أحدثُها وحدَه:** كان `.order_by(
+    "-period_start").first()` يقرأ سجلّاً واحداً، فشهرٌ فُوتر على سجلَّين
+    (دورةٌ مقسومةٌ، أو إعادةُ فوترةٍ تصحيحيّةٌ تُنشئ سجلّاً أحدثَ بفاتورةٍ أخرى)
+    يُقرأ «غير مدفوع» ولو كان مدفوعاً بالكامل — والسطرُ يبقى `PENDING` حتى يتدخّل
+    مديرٌ يدويّاً. فيكفي **أيُّ** سجلٍّ متقاطعٍ بفاتورةٍ مسدَّدةٍ بالكامل.
+    """
+    records = (
+        SubscriptionBillingRecord.objects
+        .filter(subscription=subscription, period_start__lte=period_end, period_end__gte=period_start)
+        .select_related("invoice")
+    )
+    for record in records:
+        if record.invoice_id is None:
+            continue
+        invoice = record.invoice
+        if invoice.amount_paid >= invoice.grand_total:
+            return True
+    return False
+
+
+def _create_commission_line_for_acquisition(
+    *,
+    acquisition: CustomerAcquisition,
+    period_year: int,
+    period_month: int,
+    period_start: datetime.date,
+    period_end: datetime.date,
+    monthly_close: MonthlyCompensationClose,
+) -> AcquisitionCommissionLine | None:
+    """سطر عمولة اكتسابٍ واحدٌ لعميلٍ في شهرٍ واحد — أو لا شيء إن لم يستحق (§٧).
+
+    ثلاثة شروط: (أ) انتهت التجربة (ب) دفعُ اشتراك الشهر فعلاً (ج) الخدمة نشطة
+    حتى نهاية الفترة. (أ) و(ج) يحدّدان **هل يُنشأ سطرٌ أصلاً** (ويستهلكان أحد
+    الأشهر الثلاثة)، و(ب) يحدّد فقط **حالة** السطر (`eligible`/`pending`) لا
+    وجوده. بعد `acquisition_commission_months` سطوراً لا يُنشأ سطرٌ جديدٌ إطلاقاً.
+    """
+    subscription = getattr(acquisition.tenant, "service_subscription", None)
+    if subscription is None:
+        return None
+    # **«انتهت تجربة العميل» لا تعني «كانت له تجربة»**: `activate_paid_subscription`
+    # لا تضبط `trial_ends_at` إطلاقاً، فعميلٌ فُعِّل مدفوعاً مباشرةً يبقى الحقلُ فيه
+    # فارغاً — ورفضُ العمولة حينها يحرم جالبَه منها **إلى الأبد** عن أفضل أنواع
+    # العملاء. ولا فراغَ في الحراسة: الشرط (ب) يطلب دفعاً مسجَّلاً والشرط (ج) خدمةً
+    # نشطة، فاشتراكٌ لم تبدأ تجربتُه بعد يسقط بـ(ج) لا بهذا السطر.
+    if subscription.trial_ends_at and subscription.trial_ends_at.date() > period_end:
+        return None
+    # **`TRIAL` ليست «خدمةً نشطةً حتى نهاية الفترة»:** الشرط (ج) نشاطٌ فعليّ،
+    # والشرط (أ) انتهاءُ التجربة — فقبولُ `TRIAL` هنا يناقض (أ) نفسَه: صفٌّ
+    # بقيت حالتُه `trial` بعد انقضاء `trial_ends_at` حالةٌ بائتةٌ لا اشتراكٌ
+    # مدفوع، وعدُّها يمنح عمولةً عن شهرٍ لم تُفعَّل فيه الخدمة أصلاً.
+    if subscription.status != ServiceSubscription.Status.ACTIVE:
+        return None
+
+    comp = _resolve_employee_compensation(acquisition.acquired_by)
+    max_months = _compensation_field(comp, "acquisition_commission_months")
+    # **السطرُ المعكوس لا يستهلك شهراً من الثلاثة:** العكسُ يعني أنّ العمولةَ لم
+    # تُستحق أصلاً (اشتراكٌ أُلغي، اكتسابٌ خاطئ)، فعدُّه ضمن `existing_count`
+    # يحرم الموظّفَ شهراً استحقّه ولم يُقبض. والحالةُ `REVERSED` وحدَها تُستثنى:
+    # `PENDING` يستهلك سلفاً لأنّه استحقاقٌ قائمٌ ينتظر إثباتَ الدفع لا استحقاقاً مُلغى.
+    existing_count = (
+        AcquisitionCommissionLine.objects
+        .filter(acquisition=acquisition, sequence=0)
+        .exclude(status=WalletLineStatus.REVERSED)
+        .count()
+    )
+    if existing_count >= max_months:
+        return None
+
+    paid = _subscription_paid_for_period(subscription, period_start, period_end)
+    idempotency_key = _wallet_idempotency_key("commission", acquisition.pk, period_year, period_month)
+    try:
+        with transaction.atomic():
+            return AcquisitionCommissionLine.objects.create(
+                acquisition=acquisition,
+                employee=acquisition.acquired_by,
+                period_year=period_year,
+                period_month=period_month,
+                sequence=0,
+                commission_month_index=existing_count + 1,
+                amount=_compensation_field(comp, "acquisition_commission_amount"),
+                status=WalletLineStatus.ELIGIBLE if paid else WalletLineStatus.PENDING,
+                pending_reason="" if paid else "الدفع غير مسجل",
+                compensation_policy=comp if isinstance(comp, EmployeeCompensationPolicy) else None,
+                monthly_close=monthly_close,
+                idempotency_key=idempotency_key,
+            )
+    except IntegrityError:
+        return None
+
+
+def preview_compensation_month_close(*, period_year: int, period_month: int) -> dict:
+    """معاينةٌ بلا كتابة: هل الشهر مُغلَقٌ سلفاً؟ وما التسليمات المعلَّقة التي تمنع الإغلاق؟"""
+    existing = MonthlyCompensationClose.objects.filter(period_year=period_year, period_month=period_month).first()
+    _, last_day = calendar.monthrange(period_year, period_month)
+    period_start = datetime.date(period_year, period_month, 1)
+    period_end = datetime.date(period_year, period_month, last_day)
+    blockers = list(
+        filter_local_date_range(
+            WorkOrderDeliverable.objects.filter(review_status=WorkOrderDeliverable.ReviewStatus.PENDING),
+            "created_at", date_from=period_start, date_to=period_end,
+        ).values_list("id", flat=True)
+    )
+    active_perf_policy = get_active_performance_evaluation_policy()
+    return {
+        "already_closed": existing is not None,
+        "close": existing,
+        "blockers": blockers,
+        "eligible_employees": PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE).count(),
+        "performance_policy": active_perf_policy,
+        "review_grace_period_hours": (
+            active_perf_policy.review_grace_period_hours if active_perf_policy
+            else get_default_pilot_policy_dict()["review_grace_period_hours"]
+        ),
+    }
+
+
+@transaction.atomic
+def close_compensation_month(
+    *, period_year: int, period_month: int, actor=None, correlation_id: str = "",
+) -> tuple[MonthlyCompensationClose, bool]:
+    """يُغلق مستحقّات شهرٍ واحدٍ لكلّ الموظفين دفعةً واحدة — idempotent (§٥، §٧).
+
+    الحارسُ فرادةُ `MonthlyCompensationClose` على الفترة: استدعاءٌ ثانٍ لنفس
+    الشهر يجد الصفَّ القائم ويعود به **دون تنفيذ الحلقة مرّة أخرى** فلا يتكرّر
+    أيُّ سطرٍ مالي — لا حتى عند تسابقٍ (يُمسَك بـ`IntegrityError`). التسليماتُ
+    المعلَّقةُ المُقدَّمةُ ضمن الشهر تمنع الإغلاق صراحةً بدل أن تُغلَق بصمت.
+    """
+    existing = MonthlyCompensationClose.objects.filter(period_year=period_year, period_month=period_month).first()
+    if existing is not None:
+        return existing, False
+
+    _, last_day = calendar.monthrange(period_year, period_month)
+    period_start = datetime.date(period_year, period_month, 1)
+    period_end = datetime.date(period_year, period_month, last_day)
+
+    blockers = list(
+        filter_local_date_range(
+            WorkOrderDeliverable.objects.filter(review_status=WorkOrderDeliverable.ReviewStatus.PENDING),
+            "created_at", date_from=period_start, date_to=period_end,
+        ).values_list("id", flat=True)
+    )
+    if blockers:
+        raise MonthCloseBlockedError(
+            "pending_deliverables",
+            f"يوجد {len(blockers)} تسليماً بانتظار المراجعة قُدِّم خلال هذا الشهر؛ راجعها قبل الإغلاق.",
+            blockers=blockers,
+        )
+
+    perf_policy = get_active_performance_evaluation_policy()
+    # **ترتيبُ الأقفال يُحترم هنا يدويّاً لأنّ الحارسَ الساكن لا يراه:**
+    # `capture_pilot_performance_snapshot` تقفل `PlatformEmployee` (رتبة ١٠) وهي
+    # تُنادى بعد إنشاء صفّ `MonthlyCompensationClose` (رتبة ١٥) — أي قفلٌ أدنى بعد
+    # أعلى، نقضٌ للعقد المعلَن في رأس الملف. و`LockOrderSourceGuardTest` يفحص كلَّ
+    # دالّةٍ **على حدة** بتحليلٍ ساكن، فقفلٌ داخل دالّةٍ مُناداةٍ لا يظهر له أصلاً
+    # ولا يكسر البوّابة — فالحفاظُ عليه واجبٌ بالقراءة لا بالاختبار. تُقفل صفوفُ
+    # الموظفين أوّلاً بترتيب `pk` ثابتٍ (يمنع تشابكَ ABBA بين إغلاقَين متزامنَين)
+    # ثمّ يُنشأ صفُّ الإغلاق.
+    locked_employees = list(
+        PlatformEmployee.objects
+        .select_for_update()
+        .filter(status=PlatformEmployee.Status.ACTIVE)
+        .order_by("pk")
+    )
+    try:
+        with transaction.atomic():
+            close = MonthlyCompensationClose.objects.create(
+                period_year=period_year,
+                period_month=period_month,
+                performance_policy=perf_policy,
+                closed_by=actor if getattr(actor, "pk", None) else None,
+                correlation_id=str(correlation_id or "")[:64],
+            )
+    except IntegrityError:
+        return MonthlyCompensationClose.objects.get(period_year=period_year, period_month=period_month), False
+
+    employees_processed = 0
+    snapshots = 0
+    salary_lines = 0
+    commission_lines = 0
+    for employee in locked_employees:
+        employees_processed += 1
+        capture_pilot_performance_snapshot(
+            employee=employee, period_year=period_year, period_month=period_month,
+            evaluation_policy=perf_policy, captured_by=actor,
+        )
+        snapshots += 1
+        if _create_salary_line_for_employee(
+            employee=employee, period_year=period_year, period_month=period_month, monthly_close=close,
+        ) is not None:
+            salary_lines += 1
+
+    for acquisition in CustomerAcquisition.objects.select_related("tenant", "acquired_by"):
+        if _create_commission_line_for_acquisition(
+            acquisition=acquisition, period_year=period_year, period_month=period_month,
+            period_start=period_start, period_end=period_end, monthly_close=close,
+        ) is not None:
+            commission_lines += 1
+
+    close.employees_processed = employees_processed
+    close.snapshots_captured = snapshots
+    close.salary_lines_created = salary_lines
+    close.commission_lines_created = commission_lines
+    close.save(update_fields=[
+        "employees_processed", "snapshots_captured", "salary_lines_created", "commission_lines_created",
+    ])
+    return close, True
+
+
+def _wallet_line_model(kind: str):
+    if kind == "salary":
+        return EmployeeSalaryLine
+    if kind == "commission":
+        return AcquisitionCommissionLine
+    raise WalletError("invalid_kind", "نوع سطر المحفظة غير معروف.")
+
+
+_WALLET_ALLOWED_TRANSITIONS = {
+    WalletLineStatus.PENDING: {WalletLineStatus.ELIGIBLE},
+    WalletLineStatus.ELIGIBLE: {WalletLineStatus.APPROVED},
+    WalletLineStatus.APPROVED: {WalletLineStatus.PAYABLE},
+    WalletLineStatus.PAYABLE: {WalletLineStatus.PAID},
+}
+
+
+@transaction.atomic
+def transition_wallet_line(*, kind: str, line, to_status: str, actor=None) -> EmployeeSalaryLine | AcquisitionCommissionLine:
+    """ينقل سطر محفظةٍ (راتب أو عمولة) عبر `PENDING → ELIGIBLE → APPROVED → PAYABLE → PAID`.
+
+    **لا حذف لسطرٍ ماليٍّ أبداً** — لا مسار حذف في هذا الـmodule أصلاً.
+    """
+    model = _wallet_line_model(kind)
+    locked = model.objects.select_for_update().get(pk=getattr(line, "pk", line))
+    allowed_targets = _WALLET_ALLOWED_TRANSITIONS.get(locked.status, set())
+    if to_status not in allowed_targets:
+        raise WalletConflict(
+            "invalid_transition", f"لا يمكن الانتقال من {locked.status} إلى {to_status}.",
+        )
+    locked.status = to_status
+    if to_status == WalletLineStatus.APPROVED:
+        locked.approved_by = actor if getattr(actor, "pk", None) else None
+        locked.approved_at = timezone.now()
+        locked.save(update_fields=["status", "approved_by", "approved_at", "updated_at"])
+    else:
+        locked.save(update_fields=["status", "updated_at"])
+    return locked
+
+
+@transaction.atomic
+def reverse_wallet_line(*, kind: str, line, reason: str, actor=None) -> EmployeeSalaryLine | AcquisitionCommissionLine:
+    """يعكس سطر محفظةٍ — الحالة تصبح `REVERSED`؛ لا حذف ولا كتابة فوق الأصل."""
+    reason = str(reason or "").strip()
+    if not reason:
+        raise WalletError("reversal_reason_required", "سبب العكس مطلوب.")
+    model = _wallet_line_model(kind)
+    locked = model.objects.select_for_update().get(pk=getattr(line, "pk", line))
+    if locked.status == WalletLineStatus.REVERSED:
+        raise WalletConflict("already_reversed", "هذا السطر معكوسٌ بالفعل.")
+    if locked.status == WalletLineStatus.PAID:
+        raise WalletConflict("cannot_reverse_paid", "لا يمكن عكس سطرٍ مصروفٍ بالفعل؛ استعمل سطر تسوية.")
+    locked.status = WalletLineStatus.REVERSED
+    locked.reason = reason[:500]
+    locked.save(update_fields=["status", "reason", "updated_at"])
+    # **عكسُ سطرٍ ماليٍّ لا يمرّ بلا أثرٍ يسمّي فاعلَه**: الصفُّ يحمل السببَ ولا يحمل
+    # مَن عكس ولا متى، فيُلغى مبلغٌ مستحقٌّ لموظّفٍ بلا سجلٍّ يُراجَع. والسجلُّ
+    # يُعلَّق على موظّف السطر لأنّ `PlatformActivityLog` بنيةٌ موظَّفيّة لا عمودَ
+    # فاعلٍ فيها، فيُثبَّت الفاعلُ في `details` صراحةً لا ضمناً.
+    log_platform_activity(
+        employee=locked.employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"عكسُ سطر محفظة ({kind}) — {reason[:200]}",
+        entity_type=f"wallet_line:{kind}",
+        entity_id=locked.pk,
+        details={
+            "operation": "reverse_wallet_line",
+            "actor_user_id": getattr(actor, "pk", None),
+            "period_year": locked.period_year,
+            "period_month": locked.period_month,
+            "amount": str(locked.amount),
+        },
+    )
+    return locked
+
+
+@transaction.atomic
+def adjust_wallet_line(
+    *, kind: str, line, amount: Decimal, reason: str, actor=None,
+) -> EmployeeSalaryLine | AcquisitionCommissionLine:
+    """يُنشئ سطر تسويةٍ ظاهراً مرتبطاً بالأصل — **لا تعديل على الأصل ولا حذف** (§٧).
+
+    التصحيحُ بعد الإغلاق سطرٌ جديدٌ بتسلسلٍ أعلى؛ الأصل يبقى كما التقطه الإغلاق.
+    """
+    reason = str(reason or "").strip()
+    if not reason:
+        raise WalletError("adjustment_reason_required", "سبب التسوية مطلوب.")
+    model = _wallet_line_model(kind)
+    original = model.objects.select_for_update().get(pk=getattr(line, "pk", line))
+    next_sequence = (
+        model.objects.filter(
+            **({"employee_id": original.employee_id} if kind == "salary" else {"acquisition_id": original.acquisition_id}),
+            period_year=original.period_year,
+            period_month=original.period_month,
+        ).aggregate(Max("sequence"))["sequence__max"] or 0
+    ) + 1
+    idempotency_key = _wallet_idempotency_key(
+        "adjustment", kind, original.pk, next_sequence,
+    )
+    # **سطرُ التسوية يُولد `PENDING` غيرَ معتمَدٍ ولا يعتمد نفسَه:** كان يُولد
+    # `ELIGIBLE` وقد خُتم بـ`approved_by`/`approved_at` لحظةَ إنشائه، فمن يملك
+    # «تسوية» يمنح نفسَه مبلغاً معتمَداً بقفزةٍ فوق `PENDING → ELIGIBLE →
+    # APPROVED` — وهي السلسلةُ التي تفرضها التذكرة على كلّ سطرٍ مالي. والاعتمادُ
+    # يبقى فعلاً منفصلاً عبر `transition_wallet_line` بفاعلٍ ووقتٍ مسجَّلَين.
+    common_kwargs = dict(
+        period_year=original.period_year,
+        period_month=original.period_month,
+        sequence=next_sequence,
+        amount=amount,
+        status=WalletLineStatus.PENDING,
+        compensation_policy=original.compensation_policy,
+        monthly_close=original.monthly_close,
+        adjustment_of=original,
+        reason=reason[:500],
+        idempotency_key=idempotency_key,
+    )
+    if kind == "salary":
+        created = EmployeeSalaryLine.objects.create(employee=original.employee, **common_kwargs)
+    else:
+        created = AcquisitionCommissionLine.objects.create(
+            acquisition=original.acquisition,
+            employee=original.employee,
+            commission_month_index=original.commission_month_index,
+            **common_kwargs,
+        )
+    # التسويةُ تُدخل مبلغاً جديداً على اسم الموظّف، فيلزمها الأثرُ نفسُه الذي يلزم
+    # العكس: مَن أدخله ومتى وعلى أيّ سطرٍ أصليّ — وإلا بقي المبلغُ بلا نسبةٍ لفاعل.
+    log_platform_activity(
+        employee=created.employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"سطرُ تسوية محفظة ({kind}) — {reason[:200]}",
+        entity_type=f"wallet_line:{kind}",
+        entity_id=created.pk,
+        details={
+            "operation": "adjust_wallet_line",
+            "actor_user_id": getattr(actor, "pk", None),
+            "adjustment_of_id": original.pk,
+            "sequence": next_sequence,
+            "amount": str(amount),
+        },
+    )
+    return created
+
+
+def get_employee_wallet_summary(*, employee: PlatformEmployee, period_year: int, period_month: int) -> dict:
+    """محفظة الموظف لشهرٍ واحد: مؤكَّد/معلَّق مع فتح مصدر كلّ سطر (§٧، §٨)."""
+    salary_lines = list(
+        EmployeeSalaryLine.objects.filter(
+            employee=employee, period_year=period_year, period_month=period_month,
+        ).order_by("sequence")
+    )
+    commission_lines = list(
+        AcquisitionCommissionLine.objects.filter(
+            employee=employee, period_year=period_year, period_month=period_month,
+        ).select_related("acquisition__tenant").order_by("sequence")
+    )
+    confirmed_statuses = {WalletLineStatus.ELIGIBLE, WalletLineStatus.APPROVED, WalletLineStatus.PAYABLE, WalletLineStatus.PAID}
+
+    def _bucket(lines):
+        confirmed = sum((line.amount for line in lines if line.status in confirmed_statuses), Decimal("0.00"))
+        pending = sum((line.amount for line in lines if line.status == WalletLineStatus.PENDING), Decimal("0.00"))
+        return confirmed, pending
+
+    salary_confirmed, salary_pending = _bucket(salary_lines)
+    commission_confirmed, commission_pending = _bucket(commission_lines)
+
+    return {
+        "employee_id": employee.pk,
+        "period_year": period_year,
+        "period_month": period_month,
+        "salary_lines": salary_lines,
+        "commission_lines": commission_lines,
+        "totals": {
+            "confirmed": salary_confirmed + commission_confirmed,
+            "pending": salary_pending + commission_pending,
+        },
+    }
 
 
 # ==============================================================================

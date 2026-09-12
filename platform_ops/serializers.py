@@ -11,16 +11,21 @@ from tenants.models import Tenant
 
 from .models import (
     MAX_SERVICE_TRIAL_DAYS,
+    AcquisitionCommissionLine,
     CompanyHealthCheck,
     CompanyHealthCheckItem,
     CustomerAcquisition,
     DailyRating,
     DailyRatingToken,
     Engagement,
+    EmployeeCompensationPolicy,
+    EmployeeSalaryLine,
     IntegrationKey,
     JobApplicant,
     JobApplicantInvitation,
     JobPosting,
+    MonthlyCompensationClose,
+    PerformanceEvaluationPolicy,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
@@ -438,6 +443,7 @@ class PerformanceSnapshotSerializer(serializers.ModelSerializer):
             "composite_score",
             "sample_size",
             "policy_profile",
+            "evaluation_policy",
             "policy_snapshot",
             "metrics_data",
             "axes_data",
@@ -1194,4 +1200,132 @@ class ServiceUsageEventSerializer(serializers.ModelSerializer):
 
 
 class ReverseUsageEventSerializer(serializers.Serializer):
+    reason = serializers.CharField(allow_blank=False, max_length=500)
+
+
+# ==============================================================================
+# التذكرة 210-D: سياسة تقييم الـpilot، سياسة التعويض، والمحفظة
+# ==============================================================================
+
+
+class PerformanceEvaluationPolicySerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    effective_state = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PerformanceEvaluationPolicy
+        fields = [
+            "id", "version", "status", "status_display", "effective_state", "specialty",
+            "weights", "targets", "min_sample_size", "review_grace_period_hours",
+            "activation_reason", "effective_from", "effective_to",
+            "created_by", "activated_by", "activated_at", "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_effective_state(self, obj):
+        return obj.effective_state()
+
+
+class DraftPerformanceEvaluationPolicySerializer(serializers.Serializer):
+    specialty = serializers.CharField(required=False, allow_blank=True, max_length=100)
+    weights = serializers.DictField(required=False)
+    min_sample_size = serializers.IntegerField(required=False, min_value=1)
+    review_grace_period_hours = serializers.IntegerField(required=False, min_value=0)
+
+
+class ActivatePolicySerializer(serializers.Serializer):
+    """جسمُ تفعيلٍ مشتركٌ لأيّ سياسةٍ نسخيّة في 210-D."""
+
+    activation_reason = serializers.CharField(allow_blank=False, max_length=500)
+    effective_from = serializers.DateTimeField(required=False, allow_null=True)
+
+
+class EmployeeCompensationPolicySerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    effective_state = serializers.SerializerMethodField()
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True, default=None)
+
+    class Meta:
+        model = EmployeeCompensationPolicy
+        fields = [
+            "id", "version", "status", "status_display", "effective_state", "employee", "employee_name",
+            "base_salary", "daily_hours", "weekly_days",
+            "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+            "activation_reason", "effective_from", "effective_to",
+            "created_by", "activated_by", "activated_at", "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+    def get_effective_state(self, obj):
+        return obj.effective_state()
+
+
+class DraftEmployeeCompensationPolicySerializer(serializers.Serializer):
+    employee = serializers.IntegerField(required=False, allow_null=True)
+    base_salary = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    daily_hours = serializers.DecimalField(max_digits=4, decimal_places=2, required=False)
+    weekly_days = serializers.IntegerField(required=False, min_value=1, max_value=7)
+    acquisition_commission_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
+    acquisition_commission_months = serializers.IntegerField(required=False, min_value=1)
+    accrual_day_of_month = serializers.IntegerField(required=False, min_value=1, max_value=28)
+
+
+class EmployeeSalaryLineSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+
+    class Meta:
+        model = EmployeeSalaryLine
+        fields = [
+            "id", "employee", "employee_name", "period_year", "period_month", "sequence",
+            "amount", "status", "status_display", "pending_reason", "compensation_policy",
+            "monthly_close", "adjustment_of", "reason", "approved_by", "approved_at",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class AcquisitionCommissionLineSerializer(serializers.ModelSerializer):
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    company_name = serializers.CharField(source="acquisition.tenant.CompanyName", read_only=True)
+
+    class Meta:
+        model = AcquisitionCommissionLine
+        fields = [
+            "id", "acquisition", "company_name", "employee", "employee_name",
+            "period_year", "period_month", "sequence", "commission_month_index",
+            "amount", "status", "status_display", "pending_reason", "compensation_policy",
+            "monthly_close", "adjustment_of", "reason", "approved_by", "approved_at",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class MonthlyCompensationCloseSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = MonthlyCompensationClose
+        fields = [
+            "id", "period_year", "period_month", "performance_policy",
+            "employees_processed", "snapshots_captured", "salary_lines_created", "commission_lines_created",
+            "closed_by", "correlation_id", "created_at",
+        ]
+        read_only_fields = fields
+
+
+class CloseCompensationMonthSerializer(serializers.Serializer):
+    period_year = serializers.IntegerField(min_value=2000, max_value=2100)
+    period_month = serializers.IntegerField(min_value=1, max_value=12)
+
+
+class TransitionWalletLineSerializer(serializers.Serializer):
+    to_status = serializers.CharField()
+
+
+class ReverseWalletLineSerializer(serializers.Serializer):
+    reason = serializers.CharField(allow_blank=False, max_length=500)
+
+
+class AdjustWalletLineSerializer(serializers.Serializer):
+    amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     reason = serializers.CharField(allow_blank=False, max_length=500)

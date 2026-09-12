@@ -20,8 +20,13 @@ import { PlatformNotificationBell } from "./PlatformNotificationBell";
 import { ServiceUnitCatalogPanel } from "./ServiceUnitCatalogPanel";
 import { ServiceUsageLedgerPanel } from "./ServiceUsageLedgerPanel";
 import { WorkOrdersPanel } from "./WorkOrdersPanel";
+import { PilotSettingsPanel } from "./PilotSettingsPanel";
+import { CompensationMonthClosePanel } from "./CompensationMonthClosePanel";
+import { EmployeeWalletPanel } from "./EmployeeWalletPanel";
 
-type DashboardTab = "overview" | "work_orders" | "catalog" | "usage_ledger";
+type DashboardTab =
+  | "overview" | "work_orders" | "catalog" | "usage_ledger"
+  | "pilot_settings" | "compensation_close" | "wallet";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -269,11 +274,41 @@ export const PlatformOpsDashboard: React.FC = () => {
         >
           دفتر الاستخدام
         </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("pilot_settings")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "pilot_settings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          سياسات الأداء والتعويض
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("compensation_close")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "compensation_close" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          إغلاق الشهر
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("wallet")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "wallet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          محفظة الموظف
+        </button>
       </div>
 
       {activeTab === "work_orders" && <WorkOrdersPanel />}
       {activeTab === "catalog" && <ServiceUnitCatalogPanel />}
       {activeTab === "usage_ledger" && <ServiceUsageLedgerPanel />}
+      {activeTab === "pilot_settings" && <PilotSettingsPanel />}
+      {activeTab === "compensation_close" && <CompensationMonthClosePanel />}
+      {activeTab === "wallet" && <EmployeeWalletPanel />}
 
       {activeTab === "overview" && (
         <>

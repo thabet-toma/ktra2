@@ -23,6 +23,11 @@ from .views import (
     SubscriptionBillingRecordViewSet,
     WorkOrderIntakeView,
     WorkOrderViewSet,
+    AcquisitionCommissionLineViewSet,
+    CompensationMonthCloseView,
+    EmployeeCompensationPolicyViewSet,
+    EmployeeSalaryLineViewSet,
+    PerformanceEvaluationPolicyViewSet,
 )
 
 router = SimpleRouter()
@@ -43,11 +48,21 @@ router.register("health-checks", CompanyHealthCheckViewSet, basename="platform-o
 router.register("engagements", EngagementViewSet, basename="platform-ops-engagements")
 router.register("service-unit-catalogs", ServiceUnitCatalogViewSet, basename="platform-ops-service-unit-catalogs")
 router.register("usage-events", ServiceUsageEventViewSet, basename="platform-ops-usage-events")
+router.register(
+    "performance-evaluation-policies", PerformanceEvaluationPolicyViewSet,
+    basename="platform-ops-performance-evaluation-policies",
+)
+router.register(
+    "compensation-policies", EmployeeCompensationPolicyViewSet, basename="platform-ops-compensation-policies",
+)
+router.register("salary-lines", EmployeeSalaryLineViewSet, basename="platform-ops-salary-lines")
+router.register("commission-lines", AcquisitionCommissionLineViewSet, basename="platform-ops-commission-lines")
 
 urlpatterns = [
     path("companies/<int:tenant_id>/health/", CompanyHealthView.as_view(), name="platform-ops-company-health"),
     path("acquisition/", CustomerAcquisitionView.as_view(), name="platform-ops-acquisition"),
     path("intake/", WorkOrderIntakeView.as_view(), name="platform-ops-intake"),
     path("dashboard/", PlatformDashboardView.as_view(), name="platform-ops-dashboard"),
+    path("compensation/close/", CompensationMonthCloseView.as_view(), name="platform-ops-compensation-close"),
     path("", include(router.urls)),
 ]
