@@ -31,6 +31,7 @@ export interface PlatformDashboardEmployee {
   last_active_at: string | null;
   is_recently_active: boolean;
   is_active_now?: boolean;
+  is_in_meeting?: boolean;
   performance?: {
     status?: string;
     status_message?: string;

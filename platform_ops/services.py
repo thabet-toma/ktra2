@@ -5425,6 +5425,21 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         .annotate(latest=Max("last_active_at"))
     )
 
+    # **«في اجتماعٍ الآن» باستعلامٍ واحدٍ أيضاً**، لا مطابقةً في الحلقة: «حضر»
+    # لا «مدعوّ» (صفوفُ الحضور تُنشأ سلفاً بحالة «غائب» لكل مدعوّ)، ونافذةُ
+    # الاجتماع الحقيقية `start..end` لا نافذةُ السماح بتسجيل الدخول المبكرة،
+    # والملغى مستثنًى صراحةً كما يفعل `check_in_to_meeting`.
+    employee_ids_in_meeting_now = set(
+        PlatformMeetingAttendance.objects.filter(
+            employee_id__in=[e.pk for e in active_employees],
+            status=PlatformMeetingAttendance.Status.ATTENDED,
+            meeting__start__lte=current_time,
+            meeting__end__gte=current_time,
+        )
+        .exclude(meeting__status=PlatformMeeting.Status.CANCELLED)
+        .values_list("employee_id", flat=True)
+    )
+
     # 1. بطاقات الموظفين
     employee_cards = []
     for emp in active_employees:
@@ -5497,6 +5512,7 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             "last_active_at": last_active.isoformat() if last_active else None,
             "is_recently_active": active_recently,
             "is_active_now": active_recently,
+            "is_in_meeting": emp.pk in employee_ids_in_meeting_now,
             "performance": {
                 "status": perf.get("status"),
                 "status_message": perf.get("status_message"),

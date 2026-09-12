@@ -123,12 +123,13 @@ export const PlatformOpsDashboard: React.FC = () => {
   // فلترة الموظفين المعروضين
   // سكّانُ الغرفة: كلُّ الموظّفين لا المفلترين — الغرفةُ لوحةُ حضورٍ لا نتيجةَ
   // بحث، وإخفاءُ زميلٍ لأنّ كلمةَ بحثٍ لا تطابقه يجعل «من يعمل الآن» كذبة.
-  // وحالةُ الاجتماع (الأصفر) لها دفترُها منذ 211-F، لكنّ حمولةَ اللوحة لا تحمل
-  // بعدُ «من هو داخلَ اجتماعٍ الآن» — تلك شاشةُ الاجتماعات (211-G). فتُمرَّر
-  // `null` صراحةً: ضوءٌ أصفرُ مُخترَعٌ من النشاط وحدَه يكذب على من يقرأ اللوحة.
+  // وحالةُ الاجتماع (الأصفر) من `is_in_meeting` الذي تحسبه اللوحةُ خادميّاً من
+  // دفتر حضور الاجتماعات (حضورٌ فعليّ الآن، لا دعوة) — لا اشتقاقَ محلّيّاً.
   const roomOccupants = useMemo<RoomOccupant[]>(() => {
     const employees = data?.employees || [];
-    const inMeeting: ReadonlySet<number> | null = null;
+    const inMeeting = new Set<number>(
+      employees.filter((employee) => employee.is_in_meeting).map((employee) => employee.id)
+    );
     const rows = employees.map((employee) => ({
       id: employee.id,
       name: employee.name,

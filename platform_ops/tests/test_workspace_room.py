@@ -243,6 +243,34 @@ class SeatsDoNotOverlapTest(SimpleTestCase):
                     self.assertLessEqual(round(cy + half_h, 1), math.ceil(height))
 
 
+class RoomReceivesRealMeetingMembershipTest(SimpleTestCase):
+    """اللوحةُ تمرّر مجموعةً حقيقيّةً لعضويّة الاجتماع إلى `derivePresence` (211-H).
+
+    قبل 211-H كان `inMeeting` مُثبَّتاً على `null` بتعليقٍ يشرح أنّ الحمولةَ لا
+    تحمل «من هو في اجتماعٍ الآن» بعد. صار الحقلُ موجوداً (`is_in_meeting`)، فبقاءُ
+    `null` هنا يعني أنّ الضوءَ الأصفرَ **لن يظهر أبداً** مهما صحّ الخادمُ — عطبٌ
+    صامتٌ تماماً: لا خطأ، ولا اختبارَ خادميٍّ يكشفه، فقط غرفةٌ لا يصفرّ فيها أحد.
+    """
+
+    def test_derive_presence_receives_a_set_not_a_null_literal(self):
+        source = DASHBOARD_PATH.read_text(encoding="utf-8")
+        call = re.search(r"derivePresence\(\s*employee\s*,\s*(\w+)\s*,\s*employee\.id\s*\)", source)
+        self.assertIsNotNone(call, "لم يُعثر على استدعاء derivePresence في اللوحة.")
+        var_name = call.group(1)
+        declaration = re.search(rf"\bconst {re.escape(var_name)}\b[^;]*;", source, re.S)
+        self.assertIsNotNone(declaration, f"لم يُعثر على تعريف المتغيّر `{var_name}`.")
+        block = declaration.group(0)
+        self.assertNotIn(
+            "null", block,
+            f"`{var_name}` يُمرَّر `null` صراحةً إلى derivePresence — الضوءُ الأصفرُ "
+            f"لا يظهر أبداً مهما صحّت حمولةُ الخادم: {block!r}",
+        )
+        self.assertIn(
+            "is_in_meeting", block,
+            f"`{var_name}` لا يُبنى من `is_in_meeting` — مصدرُه ليس دفترَ الحضور: {block!r}",
+        )
+
+
 class RoomIsReachableTest(SimpleTestCase):
     """غرفةٌ مبنيّةٌ بلا تبويبٍ يفتحها كودٌ ميّت — و`tsc` يقبل مكوّناً لا يُستدعى."""
 
