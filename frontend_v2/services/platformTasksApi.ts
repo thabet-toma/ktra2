@@ -103,7 +103,7 @@ export const acceptPlatformTaskAssignment = (id: number) => apiPostObject<Platfo
 export const submitPlatformTaskAssignment = (id: number, body: string) => apiPostObject<PlatformTaskSubmission>(`${ROOT}assignments/${id}/submit/`, { body });
 export const listPlatformTaskSubmissions = () => apiGetObject<PlatformTaskSubmission[]>(`${ROOT}submissions/`);
 export const reviewPlatformTaskSubmission = (id: number, decision: PlatformTaskReviewDecision, reviewer_notes: string) => apiPostObject<PlatformTaskSubmission>(`${ROOT}submissions/${id}/review/`, { decision, reviewer_notes });
-export const listPlatformEmployeeNotes = () => apiGetObject<PlatformEmployeeNote[]>(`${ROOT}employee-notes/`);
+export const listPlatformEmployeeNotes = (employee?: number) => apiGetObject<PlatformEmployeeNote[]>(`${ROOT}employee-notes/`, { query: { employee } });
 export const createPlatformEmployeeNote = (employee: number, body: string, visibility: PlatformEmployeeNoteVisibility) => apiPostObject<PlatformEmployeeNote>(`${ROOT}employee-notes/create/`, { employee, body, visibility });
 export const listPlatformWorkspaceNotes = () => apiGetObject<PlatformWorkspaceNote[]>(`${ROOT}workspace-notes/`);
 export const createPlatformWorkspaceNote = (body: string, task?: number | null) => apiPostObject<PlatformWorkspaceNote>(`${ROOT}workspace-notes/create/`, { body, task: task ?? null });

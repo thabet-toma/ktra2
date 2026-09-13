@@ -5,6 +5,7 @@
 والدرجُ مركَّبٌ فعلاً في `PlatformOpsDashboard.tsx` — `tsc` لا يفحص شكلَ ما يصل من
 الشبكة و`npm test` لا يُصيّر مكوّناً، فما لا يحرسه اختبارٌ ساكنٌ لا يحرسه شيء.
 """
+import re
 from pathlib import Path
 
 from django.test import TestCase
@@ -45,13 +46,69 @@ class EmployeeProfileFrontendContractTest(TestCase):
             "واجهة PlatformEmployeeRow يجب أن تطابق حقول PlatformEmployeeSerializer تماماً.",
         )
 
-    def test_the_drawer_declares_all_four_tabs(self):
-        for tab_key in ("general", "performance", "wallet", "activity"):
-            self.assertIn(f'"{tab_key}"', self.drawer_source, f"التبويب «{tab_key}» غائبٌ عن الدرج.")
+    #: تبويباتٌ لا يجوز أن تختفي — الاشتقاقُ وحدَه يبقى أخضرَ لو حُذف تبويبٌ.
+    REQUIRED_TABS = ("general", "performance", "wallet", "notes", "activity")
 
-    def test_the_drawer_mounts_all_four_tab_sections(self):
-        for tab_key in ("general", "performance", "wallet", "activity"):
-            self.assertIn(f'tab === "{tab_key}"', self.drawer_source, f"قسمُ التبويب «{tab_key}» غيرُ مركَّبٍ فعلاً.")
+    def _declared_tabs(self) -> list[str]:
+        """مفاتيحُ التبويبات **مشتقّةً من `TABS` في الـTSX** لا مسرودةً هنا.
+
+        كانت مسرودةً أربعاً بيدٍ، فتبويبٌ خامسٌ يُعلَن غداً ولا يُركَّب يمرّ
+        أخضرَ — وهو بعينه درسُ 212-C: «المفاتيحُ تُشتقُّ من المصدر لا تُسرَد في
+        الحارس».
+        """
+        block = re.search(
+            r"const TABS: \{ key: ProfileTab; label: string \}\[\] = \[(?P<body>[^\]]*)\]",
+            self.drawer_source,
+        )
+        self.assertIsNotNone(block, "مصفوفةُ `TABS` في الدرج اختفت أو تغيّر شكلُها.")
+        keys = re.findall(r'key:\s*"([a-z_]+)"', block.group("body"))
+        self.assertTrue(keys, "لم يُقرأ مفتاحٌ واحدٌ من `TABS`.")
+        return keys
+
+    def test_every_tab_the_drawer_declares_is_mounted(self):
+        missing = [
+            key for key in self._declared_tabs()
+            if f'tab === "{key}"' not in self.drawer_source
+        ]
+        self.assertEqual(
+            missing, [],
+            f"تبويباتٌ مُعلَنةٌ بلا قسمٍ يُركَّب: {missing} — زرٌّ يُضغَط فلا يظهر شيء.",
+        )
+
+    def test_no_required_tab_disappeared_from_the_drawer(self):
+        declared = set(self._declared_tabs())
+        gone = [key for key in self.REQUIRED_TABS if key not in declared]
+        self.assertEqual(
+            gone, [],
+            f"تبويباتٌ واجبةٌ حُذفت من الدرج: {gone} — والاشتقاقُ وحدَه لا يمسك الحذف.",
+        )
+
+    def test_the_notes_tab_asks_the_server_for_this_employee_alone(self):
+        """‏`listPlatformEmployeeNotes(employeeId)` — بالمعرّف لا بلا معرّف.
+
+        بلا الوسيط تعيد النقطةُ ملاحظاتِ **كلِّ** الموظّفين، فيظهر في ملفِّ
+        موظّفٍ ما كُتب على زملائه: معلومةٌ خاطئةٌ في شاشةٍ تعمل، ولا خطأَ يُعلن
+        عنها. والترشيحُ في المتصفّح ليس علاجاً — الحمولةُ عبرت الشبكةَ أصلاً.
+        """
+        call = re.search(r"listPlatformEmployeeNotes\((?P<args>[^)]*)\)", self.drawer_source)
+        self.assertIsNotNone(call, "درجُ الملفّ لا ينادي قائمةَ ملاحظات الموظّف إطلاقاً.")
+        self.assertIn(
+            "employeeId", call.group("args"),
+            f"النداءُ بلا معرّفِ الموظّف: `listPlatformEmployeeNotes({call.group('args')})` — "
+            "ملفُّ موظّفٍ يعرض ملاحظاتِ الفريق كلِّه.",
+        )
+
+    def test_writing_a_note_is_behind_the_manager_capability(self):
+        """ونموذجُ الكتابة خلف صفةٍ صريحة.
+
+        الخادمُ يرفض غيرَ المدير بـ403، لكنّ نموذجاً معروضاً لمن يُرفَض فعلُه
+        بابٌ مسدود: يكتب الموظّفُ ملاحظتَه ثمّ يُقذَف برسالة منع.
+        """
+        self.assertRegex(
+            self.drawer_source,
+            r"canManage\s*&&\s*\(\s*<form onSubmit=\{saveNote\}",
+            "نموذجُ إضافة الملاحظة غيرُ محروسٍ بـ`canManage`.",
+        )
 
     def test_the_drawer_is_mounted_in_the_dashboard(self):
         self.assertIn("EmployeeProfileDrawer", self.dashboard_source)

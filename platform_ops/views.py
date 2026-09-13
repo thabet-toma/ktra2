@@ -3896,9 +3896,24 @@ class PlatformEmployeeNoteViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if IsPlatformOperationsManager().has_permission(self.request, self):
-            return qs
-        return qs.filter(employee__user=self.request.user, visibility=PlatformEmployeeNote.VISIBILITY_EMPLOYEE)
+        if not IsPlatformOperationsManager().has_permission(self.request, self):
+            qs = qs.filter(
+                employee__user=self.request.user,
+                visibility=PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+            )
+        # ‏`?employee=` — **ترشيحٌ في الخادم لا في الشاشة.** درجُ ملفِّ الموظّف
+        # يسأل عن ملاحظاتِ موظّفٍ واحد؛ وبلا هذا المرشّح كان عليه أن يجلب
+        # ملاحظاتِ **كلِّ** الموظّفين ويُسقِط ما ليس له في المتصفّح — حمولةٌ تكبر
+        # بعدد فريق كترا كلِّه لعرضِ سطرَين، ونصُّ ملاحظةٍ عن زميلٍ يعبر الشبكةَ
+        # بلا داعٍ. ولا يوسّع المرشّحُ الرؤيةَ: يُطبَّق **بعد** تضييق غير المدير.
+        raw = self.request.query_params.get("employee")
+        if raw:
+            if not str(raw).isdigit():
+                # قيمةٌ غير رقميّة تصل `filter(employee_id=…)` فترفع `ValueError`
+                # فيصير خطأَ خادمٍ 500 على مُعامِلٍ خاطئ — ٤٠٠ هي الجواب.
+                raise ValidationError({"employee": ["يجب أن يكون معرّف الموظّف رقماً صحيحاً."]})
+            qs = qs.filter(employee_id=int(raw))
+        return qs
 
     @action(detail=False, methods=["post"], url_path="create")
     def create_note(self, request):

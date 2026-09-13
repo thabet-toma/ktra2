@@ -1,5 +1,5 @@
 import React from 'react';
-import { ChevronRight, Menu, ShieldCheck } from 'lucide-react';
+import { ChevronRight, LogOut, Menu, ShieldCheck } from 'lucide-react';
 
 import type { MyPlatformEmployeeProfile } from '../../../services/platformEmployeeSpaceApi';
 import { staffNav, type StaffNavKey } from '../../../utils/staffNav';
@@ -41,6 +41,25 @@ export const StaffSidebar: React.FC<StaffSidebarProps> = ({
       <div className={`m-3 rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-3 shadow-lg shadow-black/30 ${collapsed ? 'hidden' : ''}`}>
         <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-500/15 text-sm font-extrabold text-cyan-300">{profile?.photo_url ? <img src={profile.photo_url} alt="" className="h-full w-full object-cover" /> : initialsOf(name)}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-50">{name}</p><p className="truncate text-xs text-[var(--staff-muted)]">{title}</p></div></div>
         <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-emerald-400"><span className="h-2 w-2 rounded-full bg-emerald-400" />متصل الآن</p>
+        {/* مخرجٌ إلى نظام الشركة — **وليس تزييناً.**
+
+            صار زرُّ الشريط الجانبيّ في التطبيق ينتقل إلى `/staff` انتقالاً كاملاً
+            (212-I)، وهذه القشرةُ لا تحمل شريطَ التطبيق ولا يجوز أن تحمله
+            (`test_the_staff_shell_never_imports_the_company_sidebar`). فبلا هذا
+            الزرّ تكون ضغطةٌ واحدةٌ **بلا رجعة**: الموظّفُ الذي له عضويّةٌ في شركةٍ
+            أيضاً يخرج من نظامها ولا طريقَ يعيده إلّا كتابةُ العنوان بيده — وهي
+            الحالةُ التي تمنعها بوّابةُ الجودة الرابعة: «لا حالةَ يُوصَل إليها ولا
+            يستطيع المستخدمُ الرجوعَ منها».
+
+            والانتقالُ كاملٌ لا `navigate`: الوجهةُ خارجُ موجّهِ هذه القشرة. */}
+        <button
+          type="button"
+          onClick={() => { window.location.assign('/'); }}
+          className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--staff-line)] px-3 py-2 text-xs font-bold text-[var(--staff-muted)] transition hover:bg-white/5 hover:text-cyan-300"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          نظام الشركة
+        </button>
       </div>
     </>
   );

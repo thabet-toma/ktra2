@@ -50,6 +50,79 @@ class StaffShellContractTests(TestCase):
         self.assertIn('"/staff/home"', source)
         self.assertNotIn('"/platform/employee-space"', source)
 
+    def test_the_platform_employee_sidebar_door_enters_the_staff_shell(self):
+        source = (FRONTEND / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+        marker = "{!user.isSuperAdmin && platformStaff.is_platform_employee && ("
+        start = source.find(marker)
+        self.assertNotEqual(start, -1, "مدخل موظف المنصّة فقد شرط العزل الصريح.")
+        door = source[start:source.find("\n          )}", start)]
+        violations = []
+        if '"/staff/home"' not in door:
+            violations.append("مدخل الموظف لا يوجّه إلى /staff/home")
+        if 'setView("platform-employee-space")' in door:
+            violations.append("مدخل الموظف ما زال يفتح المساحة القديمة")
+        self.assertEqual(violations, [], f"مخالفات باب الموظف: {violations}")
+
+    def test_the_platform_employee_sidebar_door_keeps_its_isolation_condition(self):
+        source = (FRONTEND / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
+        required_condition = "!user.isSuperAdmin && platformStaff.is_platform_employee"
+        violations = []
+        if required_condition not in source:
+            violations.append("شرط !user.isSuperAdmin مع is_platform_employee غير موجود حرفياً")
+        self.assertEqual(violations, [], f"مخالفات عزل باب الموظف: {violations}")
+
+    def test_the_staff_shell_contains_every_panel_mounted_by_the_legacy_workspace(self):
+        workspace_source = (FRONTEND / "components" / "platform" / "PlatformEmployeeWorkspace.tsx").read_text(encoding="utf-8")
+        mounted_components = set(re.findall(r"<([A-Z][A-Za-z0-9_]*)\b", workspace_source))
+        local_imports = set(
+            re.findall(
+                r"import\s+(?:\{\s*)?([A-Z][A-Za-z0-9_]*)[^\n]*?from\s+[\"']\./",
+                workspace_source,
+            )
+        )
+        legacy_panels = sorted(mounted_components & local_imports)
+        self.assertTrue(legacy_panels, "تعذّر اشتقاق لوحات المساحة القديمة من مصدرها.")
+
+        staff_surface_source = "\n".join(
+            source_path.read_text(encoding="utf-8") for source_path in STAFF.rglob("*.tsx")
+        )
+        missing = [
+            panel
+            for panel in legacy_panels
+            if not re.search(rf"<{re.escape(panel)}\b", staff_surface_source)
+        ]
+        self.assertEqual(
+            missing,
+            [],
+            f"لوحات المساحة القديمة غير مركّبة في قشرة /staff: {missing}",
+        )
+
+    def test_the_staff_shell_offers_a_way_back_to_the_company_system(self):
+        """البابُ إلى `/staff` لا يجوز أن يكون باتّجاهٍ واحد.
+
+        زرُّ الشريط الجانبيّ في التطبيق ينتقل انتقالاً كاملاً (212-I)، وهذه
+        القشرةُ **لا تحمل شريطَ التطبيق** بقرارٍ يحرسه
+        `test_the_staff_shell_never_imports_the_company_sidebar` — فبلا مخرجٍ
+        صريحٍ تصير ضغطةٌ واحدةٌ خروجاً من نظام الشركة بلا رجعةٍ إلّا بكتابة
+        العنوان. وهذا ما تمنعه بوّابةُ الجودة الرابعة نصّاً.
+
+        ويُقاس على القشرة كلِّها لا على ملفٍّ بعينه: نقلُ الزرّ من الشريط إلى
+        الترويسة إصلاحٌ مقبولٌ، وحذفُه ليس كذلك.
+        """
+        # يُؤكَّد على **أسماء الملفّات** لا على نصِّها: `assertRegex` على القشرة
+        # مجموعةً طبعت ١١٢ كيلوبايتاً في خبر الفشل فغرق الخبرُ في الكومة. قيس.
+        exit_pattern = re.compile(r"""window\.location\.assign\(\s*['"]/['"]\s*\)""")
+        searched = sorted(path.name for path in STAFF.rglob("*.tsx"))
+        carriers = [
+            path.name for path in STAFF.rglob("*.tsx")
+            if exit_pattern.search(path.read_text(encoding="utf-8"))
+        ]
+        self.assertNotEqual(
+            carriers, [],
+            "لا مخرجَ من قشرة الموظّف إلى نظام الشركة — بابٌ باتّجاهٍ واحد. "
+            f"فُحِص {len(searched)} ملفّاً: {searched}",
+        )
+
     def test_the_staff_shell_uses_tailwind_not_inline_styles(self):
         for source_path in STAFF.glob("*.tsx"):
             self.assertNotIn("style={{", source_path.read_text(encoding="utf-8"))

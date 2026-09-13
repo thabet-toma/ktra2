@@ -680,6 +680,81 @@ class EmployeeNotesDetailScopeTest(_PlatformTaskFixture):
         self.assertIn("ملاحظةٌ عن (ب).", bodies)
 
 
+class EmployeeNotesEmployeeFilterTest(_PlatformTaskFixture):
+    """‏`?employee=` — يضيّق القائمةَ في الخادم، **ولا يوسّع رؤيةَ أحد**.
+
+    درجُ ملفِّ الموظّف يعرض ما على موظّفٍ واحد. وبلا مرشّحٍ خادميٍّ كان عليه أن
+    يجلب ملاحظاتِ **كلِّ** الموظّفين ويُسقِط ما ليس لهذا الملفِّ في المتصفّح:
+    حمولةٌ تكبر بعدد الفريق لعرض سطرَين، ونصُّ ملاحظةٍ عن زميلٍ يعبر الشبكةَ
+    بلا داعٍ.
+
+    والخطرُ المقابلُ أنّ مُعامِلاً كهذا يصير **بابَ توسيع**: موظّفٌ يكتب معرّفَ
+    زميله فيقرأ ما عليه. فيُقاس الاتّجاهان معاً هنا.
+    """
+
+    def _bodies(self, response):
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        return {row["body"] for row in rows}
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_authenticate(self.manager)
+        for employee, body, visibility in (
+            (self.employee_a, "ملاحظةٌ ظاهرةٌ لـ(أ).", "EMPLOYEE"),
+            (self.employee_a, "ملاحظةُ إدارةٍ عن (أ).", "MANAGER_ONLY"),
+            (self.employee_b, "ملاحظةٌ ظاهرةٌ لـ(ب).", "EMPLOYEE"),
+        ):
+            self.client.post(
+                "/api/platform/ops/employee-notes/create/",
+                {"employee": employee.pk, "body": body, "visibility": visibility},
+            )
+
+    def test_the_filter_narrows_the_managers_list_to_one_employee(self):
+        response = self.client.get(
+            "/api/platform/ops/employee-notes/", {"employee": self.employee_a.pk}
+        )
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(
+            self._bodies(response),
+            {"ملاحظةٌ ظاهرةٌ لـ(أ).", "ملاحظةُ إدارةٍ عن (أ)."},
+            "المرشّحُ لم يضيّق: ملاحظاتُ زميلٍ في ملفِّ غيرِه.",
+        )
+
+    def test_the_filter_does_not_widen_what_an_employee_may_read(self):
+        """المرشّحُ يُطبَّق **بعد** تضييق غير المدير لا قبلَه.
+
+        لو طُبِّق قبلَه لكان موظّفٌ يكتب معرّفَ زميله فيقرأ ما عليه — تسريبٌ
+        يفتحه مُعامِلٌ أُضيف للعرض.
+        """
+        self.client.force_authenticate(self.user_a)
+        colleague = self.client.get(
+            "/api/platform/ops/employee-notes/", {"employee": self.employee_b.pk}
+        )
+        self.assertEqual(colleague.status_code, 200, colleague.data)
+        self.assertEqual(self._bodies(colleague), set(), "موظّفٌ قرأ ملاحظاتِ زميله بمُعامِلٍ.")
+
+        mine = self.client.get(
+            "/api/platform/ops/employee-notes/", {"employee": self.employee_a.pk}
+        )
+        self.assertEqual(
+            self._bodies(mine), {"ملاحظةٌ ظاهرةٌ لـ(أ)."},
+            "وملاحظةُ الإدارة `MANAGER_ONLY` لا تخرج بالمرشّح كذلك.",
+        )
+
+    def test_a_non_numeric_employee_is_a_bad_request_not_a_server_error(self):
+        """قيمةٌ غير رقميّة تصل `filter(employee_id=…)` فترفع `ValueError` ⇒ 500.
+
+        ورمزُ ٥٠٠ على مُعامِلٍ خاطئ يُقرأ «النظامُ معطوب» لا «طلبُك خاطئ».
+        """
+        response = self.client.get("/api/platform/ops/employee-notes/", {"employee": "abc"})
+        self.assertEqual(response.status_code, 400, response.data)
+
+    def test_no_filter_still_returns_the_whole_book_for_a_manager(self):
+        """وغيابُ المُعامِل لا يعني فراغاً: لوحةُ المهامّ تسأل بلا مرشّحٍ."""
+        response = self.client.get("/api/platform/ops/employee-notes/")
+        self.assertEqual(len(self._bodies(response)), 3)
+
+
 class EmployeeNoteVisibilityTest(_PlatformTaskFixture):
     def test_staff_cannot_see_a_manager_only_note_or_a_colleague_note(self):
         self.client.force_authenticate(self.manager)

@@ -24,6 +24,12 @@ import {
   type WalletLineStatus,
 } from "../../services/platformPilotApi";
 import { getEmployeeActivity, type PlatformActivityLog } from "../../services/platformOpsApi";
+import {
+  createPlatformEmployeeNote,
+  listPlatformEmployeeNotes,
+  type PlatformEmployeeNote,
+  type PlatformEmployeeNoteVisibility,
+} from "../../services/platformTasksApi";
 import { PilotAxesTable } from "./PilotAxesTable";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePlatformStaffCapabilitiesState } from "../../hooks/usePlatformStaffCapabilities";
@@ -32,12 +38,13 @@ import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 
-type ProfileTab = "general" | "performance" | "wallet" | "activity";
+type ProfileTab = "general" | "performance" | "wallet" | "notes" | "activity";
 
 const TABS: { key: ProfileTab; label: string }[] = [
   { key: "general", label: "عام" },
   { key: "performance", label: "الأداء" },
   { key: "wallet", label: "المحفظة" },
+  { key: "notes", label: "الملاحظات" },
   { key: "activity", label: "النشاط" },
 ];
 
@@ -144,6 +151,23 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
   const [walletMonth, setWalletMonth] = useState(now.getMonth() + 1);
 
   // تبويب «النشاط».
+  // تبويب «الملاحظات» — ملاحظاتُ المدير على **هذا** الموظّف.
+  //
+  // كانت الملاحظاتُ تُكتَب وتُقرأ في تبويبٍ آخرَ تماماً («مهامّ الموظفين»)
+  // باختيار الموظّفِ من قائمةٍ منسدلة، فمن فتح ملفَّ موظّفٍ ليقرأ ما عليه لم يجد
+  // شيئاً — وهو بلاغُ المالك حرفيّاً: «ليش مش موجوده بملفو الشخصي». والمكانُ
+  // الطبيعيُّ لما هو **على** الموظّف هو ملفُّه لا شاشةُ المهامّ.
+  //
+  // ويراها الموظّفُ نفسُه في `/staff/tasks` («ملاحظات المدير عليّ») مقصورةً على
+  // `visibility=EMPLOYEE`؛ و`MANAGER_ONLY` لا تخرج من هنا — يضيّقها الخادمُ في
+  // `PlatformEmployeeNoteViewSet.get_queryset` لا هذه الشاشة.
+  const [notes, setNotes] = useState<PlatformEmployeeNote[] | null>(null);
+  const [notesLoading, setNotesLoading] = useState(false);
+  const [notesError, setNotesError] = useState<string | null>(null);
+  const [noteBody, setNoteBody] = useState("");
+  const [noteVisibility, setNoteVisibility] = useState<PlatformEmployeeNoteVisibility>("EMPLOYEE");
+  const [noteSaving, setNoteSaving] = useState(false);
+
   const [activity, setActivity] = useState<PlatformActivityLog[] | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -185,6 +209,43 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
     loadWallet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const loadNotes = useCallback(async () => {
+    setNotesLoading(true);
+    setNotesError(null);
+    try {
+      setNotes(await listPlatformEmployeeNotes(employeeId));
+    } catch (cause) {
+      setNotesError(describePlatformOpsError(
+        cause, "لا تصريح لك بعرض ملاحظات هذا الموظّف.", "تعذّر تحميل الملاحظات.",
+      ));
+    } finally {
+      setNotesLoading(false);
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (tab !== "notes" || notes || notesLoading) return;
+    void loadNotes();
+  }, [tab, notes, notesLoading, loadNotes]);
+
+  const saveNote = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!noteBody.trim()) return;
+    setNoteSaving(true);
+    try {
+      await createPlatformEmployeeNote(employeeId, noteBody.trim(), noteVisibility);
+      toast("تمت إضافة الملاحظة.", "success");
+      setNoteBody("");
+      await loadNotes();
+    } catch (cause) {
+      toast(describePlatformOpsError(
+        cause, "كتابةُ الملاحظات لمدير العمليات وحده.", "تعذّر حفظ الملاحظة.",
+      ), "error");
+    } finally {
+      setNoteSaving(false);
+    }
+  };
 
   useEffect(() => {
     if (tab !== "activity" || activity || activityLoading) return;
@@ -597,6 +658,78 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                         })()}
                       </div>
                     ) : null}
+                  </section>
+                )}
+
+                {tab === "notes" && (
+                  <section className="space-y-4">
+                    {canManage && (
+                      <form onSubmit={saveNote} className="rounded-lg border border-slate-200 p-3">
+                        <h3 className="text-xs font-black text-slate-900">أضف ملاحظة على هذا الموظّف</h3>
+                        <textarea
+                          required
+                          value={noteBody}
+                          onChange={(event) => setNoteBody(event.target.value)}
+                          className="ktra-input mt-2 min-h-20 w-full text-xs"
+                          placeholder="ما تريد تسجيلَه على الموظّف"
+                        />
+                        <fieldset className="mt-2">
+                          <legend className="text-xs font-semibold text-slate-700">الرؤية</legend>
+                          <div className="mt-1 flex flex-wrap gap-4 text-xs text-slate-700">
+                            <label className="inline-flex items-center gap-1.5">
+                              <input
+                                type="radio"
+                                name="profile-note-visibility"
+                                checked={noteVisibility === "EMPLOYEE"}
+                                onChange={() => setNoteVisibility("EMPLOYEE")}
+                              />
+                              يراها الموظّف
+                            </label>
+                            <label className="inline-flex items-center gap-1.5">
+                              <input
+                                type="radio"
+                                name="profile-note-visibility"
+                                checked={noteVisibility === "MANAGER_ONLY"}
+                                onChange={() => setNoteVisibility("MANAGER_ONLY")}
+                              />
+                              للمدير فقط
+                            </label>
+                          </div>
+                        </fieldset>
+                        <button type="submit" disabled={noteSaving} className="ktra-btn mt-3 text-xs disabled:opacity-50">
+                          {noteSaving ? "جاري الحفظ..." : "أضف الملاحظة"}
+                        </button>
+                      </form>
+                    )}
+                    {notesLoading ? (
+                      <div className="py-8 text-center text-xs text-slate-400">جاري التحميل...</div>
+                    ) : notesError ? (
+                      <p className="text-xs text-rose-700">{notesError}</p>
+                    ) : notes && notes.length > 0 ? (
+                      <div className="space-y-2">
+                        {notes.map((note) => (
+                          <article key={note.id} className="rounded-lg border border-slate-200 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span
+                                className={`rounded-md px-2 py-0.5 text-xs font-bold ${
+                                  note.visibility === "MANAGER_ONLY"
+                                    ? "bg-rose-100 text-rose-700"
+                                    : "bg-emerald-100 text-emerald-700"
+                                }`}
+                              >
+                                {note.visibility_display}
+                              </span>
+                              <span className="text-xs text-slate-400">
+                                {note.author_name} · {formatDateTimeValue(note.created_at)}
+                              </span>
+                            </div>
+                            <p className="mt-2 whitespace-pre-wrap text-xs text-slate-700">{note.body}</p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-8 text-center text-xs text-slate-400">لا ملاحظاتٍ على هذا الموظّف بعد.</p>
+                    )}
                   </section>
                 )}
 

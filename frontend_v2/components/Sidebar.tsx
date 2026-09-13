@@ -625,8 +625,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-1 dark:border-blue-900 dark:bg-blue-950/20">
               <button
                 type="button"
-                onClick={() => { setView("platform-employee-space"); if (isMobile) setIsMobileMenuOpen(false); }}
-                className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-employee-space") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}
+                onClick={() => { window.location.assign("/staff/home"); }}
+                /* لا حالةَ «نشط» لهذا الزرّ: هو ينتقل انتقالاً كاملاً إلى `/staff`
+                   فلا يبقى هذا الشريطُ مرسوماً بعده، و`isViewActive` هنا كان
+                   فرعاً لا يُتَّخذ أبداً بعد 212-I. */
+                className="flex w-full items-center gap-2 rounded-md p-2 text-sm text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"
                 title="مساحتي — عمليات المنصة"
               >
                 <ClipboardList className="h-5 w-5 flex-shrink-0" />
