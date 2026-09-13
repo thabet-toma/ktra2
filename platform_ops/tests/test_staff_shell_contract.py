@@ -171,10 +171,12 @@ class StaffShellContractTests(TestCase):
             )
         self.assertRegex(shell_source, r"<ChampionsPanel[\s/>]")
 
-    def test_the_session_timer_ticks_every_minute_and_is_cleaned_up(self):
-        source = (STAFF / "StaffTopBar.tsx").read_text(encoding="utf-8")
-        self.assertRegex(source, r"setInterval\([\s\S]*?,\s*(?:60000|60\s*\*\s*1000)\)")
-        self.assertIn("clearInterval", source)
+    # عدّادُ الحضور: قاعدتُه كلُّها في `test_presence_frontend_contract.py` —
+    # دقّةُ الدقيقة وتنظيفُ المؤقّت على الحلقة حيث تسكن
+    # (`hooks/usePlatformPresenceHeartbeat.ts` منذ 212-N1)، وأنّ شريطَ القشرة
+    # يركّبها ولا يكتب مؤقّتاً ثانياً. وكان هنا تأكيدٌ ثانٍ على النصّ نفسِه
+    # فسقط وحدَه حين انتقلت الحلقة: نسختان من قاعدةٍ واحدةٍ تفترقان عند أوّل
+    # تعديل، وهو عينُ ما تمنعه هذه الملاحظة.
 
     def test_dates_and_numbers_go_through_the_repo_formatters(self):
         for source_path in STAFF.glob("*.tsx"):

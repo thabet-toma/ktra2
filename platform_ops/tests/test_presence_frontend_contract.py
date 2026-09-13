@@ -16,12 +16,15 @@ TOP_BAR = STAFF / "StaffTopBar.tsx"
 PANEL = STAFF / "StaffPresencePanel.tsx"
 CARD = FRONTEND / "components" / "platform" / "EmployeeCard.tsx"
 API = FRONTEND / "services" / "platformPresenceApi.ts"
+#: حلقةُ النبضة انتقلت إلى هنا في 212-N1 كي تركّبها قشرةُ الشركة أيضاً.
+BEAT_HOOK = FRONTEND / "hooks" / "usePlatformPresenceHeartbeat.ts"
+APP_LAYOUT = FRONTEND / "components" / "layout" / "AppLayout.tsx"
 
 
 class HeartbeatTicksEveryMinuteTest(TestCase):
     def test_the_counter_beats_every_minute_and_clears_its_interval(self):
         """«بدي التحديث يكون كل دقيقة للشاشة تجيب المعلومات» — نصُّ طلب المالك."""
-        source = TOP_BAR.read_text(encoding="utf-8")
+        source = BEAT_HOOK.read_text(encoding="utf-8")
         self.assertRegex(source, r"setInterval\([\s\S]*?,\s*(?:60000|60\s*\*\s*1000)\)")
         self.assertIn("clearInterval", source)
 
@@ -32,7 +35,7 @@ class HeartbeatTicksEveryMinuteTest(TestCase):
         المتصفّح من `sessionStorage` — أخضرَ في حارسِ «كلّ دقيقة» وبلا دفترٍ
         خادميٍّ إطلاقاً.
         """
-        source = TOP_BAR.read_text(encoding="utf-8")
+        source = BEAT_HOOK.read_text(encoding="utf-8")
         self.assertIn("sendPresenceHeartbeat", source)
         interval = source[source.index("setInterval"):]
         self.assertRegex(
@@ -41,9 +44,9 @@ class HeartbeatTicksEveryMinuteTest(TestCase):
         )
 
     def test_the_counter_no_longer_trusts_the_browser_clock(self):
-        source = TOP_BAR.read_text(encoding="utf-8")
         # **النداءُ لا الذِّكر**: التعليقُ أعلى المكوّن يشرح العدّادَ القديم
         # ليُفهَم سببُ استبداله، ومنعُ الاسمِ نصّاً يمنع كتابةَ ذلك الشرح.
+        source = BEAT_HOOK.read_text(encoding="utf-8") + TOP_BAR.read_text(encoding="utf-8")
         for used in ("sessionStorage.getItem", "sessionStorage.setItem", "Date.now()"):
             self.assertNotIn(
                 used, source,
@@ -53,7 +56,7 @@ class HeartbeatTicksEveryMinuteTest(TestCase):
 
     def test_a_hidden_tab_does_not_beat(self):
         """لسانٌ منسيٌّ مفتوحٌ طوالَ الليل ليس حضوراً."""
-        source = TOP_BAR.read_text(encoding="utf-8")
+        source = BEAT_HOOK.read_text(encoding="utf-8")
         self.assertIn("visibilityState", source)
 
 
@@ -141,7 +144,8 @@ class PresenceApiClientIsHonestTest(TestCase):
         self.assertEqual(set(exported), {"sendPresenceHeartbeat", "getPresenceLog"})
         consumers = "\n".join(
             path.read_text(encoding="utf-8")
-            for path in [*STAFF.glob("*.tsx"), CARD]
+            # الحلقةُ خارج `staff/` منذ 212-N1 — تركّبها قشرةُ الشركة أيضاً.
+            for path in [*STAFF.glob("*.tsx"), CARD, BEAT_HOOK]
         )
         for function in exported:
             with self.subTest(function=function):
@@ -163,3 +167,45 @@ class PresenceNumbersGoThroughTheFormattersTest(TestCase):
                     f"{path.name} يشتقّ الساعاتَ بنفسِه — التحويلُ في "
                     "`utils/presenceClock.ts` وحدَه، ونسخةٌ ثانيةٌ تعرض `2:5` مكان `02:05`.",
                 )
+
+
+class TheHeartbeatIsNotLockedInsideTheStaffShellTest(TestCase):
+    """حضورُ الموظّف كان يُسجَّل من قشرة `/staff` وحدَها (212-N1).
+
+    وهو يقضي يومَه في نظام الشركة التي يخدمها: يفتح `/staff` دقيقةً ثمّ يعمل
+    ساعاتٍ في شاشات الشركة. فكان عدّادُ حضوره يقرأ دقائقَ — **والحضورُ يدخل في
+    التقييم** (`presence_discipline_factor`)، أي خصمٌ على وقتٍ عُمِل ولم يُسجَّل
+    لأنّ الشاشةَ التي تسجّله ليست الشاشةَ التي يعمل فيها.
+    """
+
+    def test_the_company_shell_mounts_the_heartbeat(self):
+        source = APP_LAYOUT.read_text(encoding="utf-8")
+        violations = []
+        if "usePlatformPresenceHeartbeat(" not in source:
+            violations.append("قشرةُ الشركة لا تركّب النبضة — العدّادُ يقرأ صفراً ليومِ عمل")
+        if "presenceHeartbeatEnabled(" not in source:
+            violations.append("لا شرطَ على النبضة — كلُّ مستخدمِ شركةٍ ينبض كلَّ دقيقة")
+        self.assertEqual(violations, [], f"النبضةُ ما زالت حبيسةَ `/staff`: {violations}")
+
+    def test_the_staff_bar_and_the_company_shell_share_one_loop(self):
+        """نسخةٌ ثانيةٌ من الحلقة = مؤقّتان يختلفان بصمتٍ عند أوّل تعديل."""
+        top_bar = TOP_BAR.read_text(encoding="utf-8")
+        self.assertIn("usePlatformPresenceHeartbeat(", top_bar)
+        self.assertNotIn(
+            "setInterval", top_bar,
+            "شريطُ `/staff` عاد يكتب مؤقّتَه بنفسِه — حلقتان لقاعدةٍ واحدة.",
+        )
+
+    def test_the_decision_of_who_beats_is_a_tested_pure_rule(self):
+        """قاعدةٌ تُقرَّر في مكوّنٍ لا يراها `npm test` — و`tsc` لا يفحص منطقاً."""
+        rule = (FRONTEND / "utils" / "presenceHeartbeat.ts")
+        self.assertTrue(rule.exists(), "قاعدةُ «من ينبض» ليست دالّةً خالصةً قابلةً للاختبار.")
+        self.assertTrue(
+            (FRONTEND / "utils" / "presenceHeartbeat.test.ts").exists(),
+            "القاعدةُ الخالصةُ بلا اختبار — البوّابةُ لا تحرس شيئاً.",
+        )
+        source = rule.read_text(encoding="utf-8")
+        self.assertIn(
+            "isPlatformEmployee", source,
+            "شرطُ النبضة لا يذكر موظّفَ المنصّة — فهو إمّا للجميع أو لأحد.",
+        )

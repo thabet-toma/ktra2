@@ -46,6 +46,9 @@ import {
   NotebookPen,
 } from 'lucide-react';
 import { useAuth } from '../../contexts/AuthContext';
+import { usePlatformStaffCapabilitiesState } from '../../hooks/usePlatformStaffCapabilities';
+import { usePlatformPresenceHeartbeat } from '../../hooks/usePlatformPresenceHeartbeat';
+import { presenceHeartbeatEnabled } from '../../utils/presenceHeartbeat';
 import { formatDateValue } from "../../utils/formatDate";
 
 /**
@@ -160,6 +163,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const toast = useToast();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notesTarget, setNotesTarget] = useState<PlatformNoteTarget | null>(null);
+  /**
+   * حضورُ موظّف المنصّة يُسجَّل **من هنا أيضاً** (212-N1).
+   *
+   * موظّفُ كترا يقضي يومَه في نظام الشركة التي يخدمها، وكانت النبضةُ في شريط
+   * `/staff` وحدَه — فيقرأ عدّادُه دقائقَ ويُحاسَب عليها في التقييم. والقدراتُ
+   * مسؤولةٌ عن الشريط الجانبيّ أصلاً فالنداءُ مُخبَّأٌ ولا يتكرّر.
+   */
+  const { capabilities: platformStaff, loading: platformStaffPending } = usePlatformStaffCapabilitiesState(
+    user?.id ? String(user.id) : undefined, !!user?.isSuperAdmin,
+  );
+  usePlatformPresenceHeartbeat(presenceHeartbeatEnabled({
+    pending: platformStaffPending, isPlatformEmployee: platformStaff.is_platform_employee,
+  }));
 
   const openPlatformNotes = () => {
     const heading = document.querySelector<HTMLElement>('main h1, main h2, main h3')

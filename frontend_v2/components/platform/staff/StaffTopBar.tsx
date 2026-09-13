@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Menu, Search } from 'lucide-react';
 
+import { usePlatformPresenceHeartbeat } from '../../../hooks/usePlatformPresenceHeartbeat';
 import type { MyPlatformEmployeeProfile } from '../../../services/platformEmployeeSpaceApi';
-import { sendPresenceHeartbeat } from '../../../services/platformPresenceApi';
 import { formatPresenceClock } from '../../../utils/presenceClock';
 import { PlatformNotificationBell } from '../PlatformNotificationBell';
 
@@ -24,28 +24,13 @@ interface StaffTopBarProps {
  * والنبضةُ تتوقّف حين يغيب اللسان (`visibilityState`): «قعد على المنصّة» حضورٌ
  * لا لسانٌ منسيٌّ مفتوحٌ طوالَ الليل. والخادمُ يجمع الفجواتَ المتقاربةَ وحدَها،
  * فالعودةُ بعد ساعاتٍ لا تُحتسَب حضوراً.
+ *
+ * والحلقةُ نفسُها في `hooks/usePlatformPresenceHeartbeat.ts` منذ 212-N1، لأنّ
+ * قشرةَ الشركة تركّبها أيضاً: الموظّفُ يعمل هناك لا هنا.
  */
 export const StaffPresenceTimer: React.FC = () => {
-  const [seconds, setSeconds] = useState<number | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    const beat = async () => {
-      // لسانٌ مخفيٌّ لا ينبض — ولا يُصفَّر العدّادُ المعروض، فالوقتُ المسجَّل باقٍ.
-      if (document.visibilityState === 'hidden') return;
-      try {
-        const result = await sendPresenceHeartbeat();
-        if (alive && result.recorded && typeof result.active_seconds === 'number') {
-          setSeconds(result.active_seconds);
-        }
-      } catch {
-        /* فشلُ نبضةٍ لا يُفرغ العدّاد: آخرُ قيمةٍ معروفةٍ أصدقُ من صفرٍ مُلفَّق. */
-      }
-    };
-    void beat();
-    const interval = window.setInterval(() => void beat(), 60000);
-    return () => { alive = false; window.clearInterval(interval); };
-  }, []);
+  // داخلَ القشرةِ لا شرط: `StaffShell` لا يصيّر شيئاً إلّا لمن يملك بابَ المنصّة.
+  const seconds = usePlatformPresenceHeartbeat(true);
 
   return <div className="hidden rounded-xl bg-white/5 px-3 py-1.5 text-center sm:block" title="مجموع وقتك على المنصة اليوم"><p className="text-[10px] font-semibold text-[var(--staff-muted)]">حضورك اليوم</p><p className="font-mono text-sm font-extrabold text-slate-50" dir="ltr">{seconds === null ? '--:--' : formatPresenceClock(seconds)}</p></div>;
 };
