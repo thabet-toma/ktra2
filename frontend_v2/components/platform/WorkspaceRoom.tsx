@@ -1,5 +1,7 @@
 import React from "react";
 
+import { PresenceClockChip } from "./PresenceClockChip";
+
 /**
  * غرفةُ «مساحة العمل» — من يعمل الآن، بلمحةٍ واحدة (#211 م٣).
  *
@@ -26,6 +28,15 @@ export interface RoomOccupant {
   presence: RoomPresence;
   /** نصُّ آخر ظهورٍ جاهزاً للعرض — يُحسَب عند المُستدعي بالأداة القائمة. */
   lastActiveLabel: string;
+  /**
+   * مجموعُ ثواني اليوم من دفتر الخادم (212-N2) — و`undefined` حمولةٌ لا تحمله.
+   *
+   * الضوءُ يقول «الآن»، وهذا يقول «اليوم كلّه»: خبران مختلفان، ومن سُئل «قدّيش
+   * قعد» لا يجيبه ضوءٌ أخضر.
+   */
+  presenceSeconds?: number;
+  /** عتبةُ تخصّصه من السياسة النشطة — لا رقمَ مثبَّتاً في المكوّن. */
+  presenceTargetHours?: number | null;
 }
 
 /** عشرةُ مقاعد: عند اثني عشر تتراكب البطاقاتُ على جانبَي الحلقة في اللوحات
@@ -71,6 +82,8 @@ const OccupantBadge: React.FC<OccupantBadgeProps> = ({ occupant, onSelect }) => 
     className="flex flex-col items-center gap-1 w-full focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-xl"
     title={`${occupant.name} — ${PRESENCE_LABEL[occupant.presence]} · ${occupant.lastActiveLabel}`}
   >
+    {/* **فوق الصورة** — نصُّ طلب المالك: «يبين بالطاولة فوق صورتو». */}
+    <PresenceClockChip seconds={occupant.presenceSeconds} targetHours={occupant.presenceTargetHours} />
     <span className="relative">
       {occupant.photoUrl ? (
         <img

@@ -19,6 +19,10 @@ API = FRONTEND / "services" / "platformPresenceApi.ts"
 #: حلقةُ النبضة انتقلت إلى هنا في 212-N1 كي تركّبها قشرةُ الشركة أيضاً.
 BEAT_HOOK = FRONTEND / "hooks" / "usePlatformPresenceHeartbeat.ts"
 APP_LAYOUT = FRONTEND / "components" / "layout" / "AppLayout.tsx"
+#: رقاقةُ العدّاد صارت مكوّناً واحداً للموضعَين في 212-N2.
+CHIP = FRONTEND / "components" / "platform" / "PresenceClockChip.tsx"
+ROOM = FRONTEND / "components" / "platform" / "WorkspaceRoom.tsx"
+DASHBOARD = FRONTEND / "components" / "platform" / "PlatformOpsDashboard.tsx"
 
 
 class HeartbeatTicksEveryMinuteTest(TestCase):
@@ -61,31 +65,78 @@ class HeartbeatTicksEveryMinuteTest(TestCase):
 
 
 class TheCounterSitsAboveThePhotoTest(TestCase):
-    def test_the_counter_is_rendered_above_the_employee_photo_in_the_table(self):
-        """«يبين بالطاولة فوق صورتو» — فوقَها لا بجانبها ولا في مكانٍ آخر."""
-        source = CARD.read_text(encoding="utf-8")
-        self.assertIn("presenceLabel", source)
-        chip = source.find("presenceLabel}")
-        photo = source.find("employee.photo_url ?")
-        self.assertNotEqual(chip, -1, "رقاقةُ العدّاد غير موجودةٍ في بطاقة الموظّف.")
-        self.assertNotEqual(photo, -1)
-        self.assertLess(
-            chip, photo,
-            "العدّادُ مرسومٌ بعد الصورة لا فوقها — والمالك طلب «فوق صورتو».",
-        )
+    """«يبين بالطاولة فوق صورتو» — والطاولةُ عنده طاولةُ مساحة العمل (212-N2).
+
+    كانت الرقاقةُ في بطاقة الموظّف وحدَها، و**المقعدُ على الطاولة لا يحمل إلّا
+    ضوءاً**: والضوءُ يقول «الآن» ولا يقول «كم قعد اليوم» — وهو السؤالُ الذي
+    وُضع العدّادُ له، ويدخل جوابُه في التقييم. فصعدت الرقاقةُ على المقعد،
+    ومكوّناً واحداً للموضعَين لا نسختين تفترقان عند أوّل تعديلٍ للعتبة.
+    """
+
+    #: مرساةُ الصورة في كلّ موضع — تُقرأ لتُقاس الرقاقةُ **قبلها** لا بعدها.
+    PHOTO_ANCHORS = ((CARD, "employee.photo_url ?"), (ROOM, "occupant.photoUrl ?"))
+
+    def test_the_chip_is_rendered_above_the_photo_in_both_places(self):
+        violations = []
+        for source_path, anchor in self.PHOTO_ANCHORS:
+            source = source_path.read_text(encoding="utf-8")
+            chip = source.find("<PresenceClockChip")
+            photo = source.find(anchor)
+            if chip == -1:
+                violations.append(f"{source_path.name}: لا رقاقةَ عدّادٍ إطلاقاً")
+            elif photo == -1:
+                violations.append(f"{source_path.name}: مرساةُ الصورة `{anchor}` تغيّرت — الحارسُ يقيس العدم")
+            elif chip > photo:
+                violations.append(f"{source_path.name}: الرقاقةُ بعد الصورة لا فوقها")
+        self.assertEqual(violations, [], f"العدّادُ ليس فوق الوجه: {violations}")
+
+    def test_one_chip_serves_both_places(self):
+        """سلّمُ الألوانِ نسختين يفترق عند أوّل تعديلٍ للعتبة."""
+        violations = []
+        if not CHIP.exists():
+            violations.append("لا مكوّنَ رقاقةٍ مشتركاً")
+        for source_path, _ in self.PHOTO_ANCHORS:
+            source = source_path.read_text(encoding="utf-8")
+            # **الاستعمالُ لا الاستيراد**: سطرُ `import` يبقى بعد حذف الوسم،
+            # فحارسٌ على الاسم وحدَه يبقى أخضرَ ولا رقاقةَ على الشاشة.
+            if "<PresenceClockChip" not in source:
+                violations.append(f"{source_path.name}: يرسم رقاقتَه بنفسِه أو لا يرسمها")
+            if "bg-emerald-100" in source and "presence" in source.lower():
+                violations.append(f"{source_path.name}: سلّمُ ألوانِ الحضور عاد نسخةً محلّيّة")
+        self.assertEqual(violations, [], f"الرقاقةُ ليست شيئاً واحداً: {violations}")
 
     def test_a_payload_without_the_counter_is_not_shown_as_zero(self):
-        """صفرُ ثوانٍ «لم يحضر»، وغيابُ الحقل «حمولةٌ لا تحمله» — لا يُوحَّدان."""
-        source = CARD.read_text(encoding="utf-8")
-        self.assertRegex(
-            source, r"presenceSeconds === undefined[\s\S]{0,120}--:--",
-            "غيابُ الحقل يُعرَض صفراً، فتقول البطاقةُ «لم يحضر» عن موظّفٍ لا تعرف عنه شيئاً.",
-        )
+        """صفرُ ثوانٍ «لم يحضر»، وغيابُ الحقل «حمولةٌ لا تحمله» — لا يُوحَّدان.
 
-    def test_the_card_reads_the_seconds_not_a_client_side_stopwatch(self):
-        source = CARD.read_text(encoding="utf-8")
-        self.assertIn("employee.presence_seconds_today", source)
-        self.assertNotIn("setInterval", source)
+        والقاعدةُ نفسُها صارت `presenceClockLabel` الخالصةَ يختبرها `npm test`؛
+        وما يُحرَس هنا أنّ الرقاقةَ تمرّ بها ولا تنادي المُنسّقَ الخامَ فتعرض
+        `00:00` لمن لا تعرف عنه شيئاً.
+        """
+        source = CHIP.read_text(encoding="utf-8")
+        violations = []
+        if "presenceClockLabel(" not in source:
+            violations.append("الرقاقةُ لا تمرّ بقاعدة «غيابُ الحقل شُرطتان»")
+        if "formatPresenceClock(" in source:
+            violations.append("الرقاقةُ تنادي المُنسّقَ الخامَ فيصير الغيابُ صفراً")
+        if "presenceToneOf(" not in source:
+            violations.append("نبرةُ الرقاقة تُقرَّر في المكوّن — منطقٌ لا يراه `npm test`")
+        self.assertEqual(violations, [], f"الرقاقةُ تتجاوز قاعدتَها: {violations}")
+
+    def test_both_places_read_the_server_ledger_not_a_client_side_stopwatch(self):
+        violations = []
+        if "employee.presence_seconds_today" not in CARD.read_text(encoding="utf-8"):
+            violations.append("البطاقةُ لا تقرأ دفترَ الخادم")
+        dashboard = DASHBOARD.read_text(encoding="utf-8")
+        # المقعدُ لا يستقصي بنفسِه: الحمولةُ تحمل الحقلين أصلاً، فتمريرُهما
+        # يمنع نداءً ثانياً لكلّ وجهٍ حول الطاولة.
+        for field in ("presenceSeconds: employee.presence_seconds_today",
+                      "presenceTargetHours: employee.presence_target_hours"):
+            if field not in dashboard:
+                violations.append(f"اللوحةُ لا تمرّر `{field.split(':')[0]}` إلى المقعد")
+        for source_path in (CARD, ROOM, CHIP):
+            if "setInterval" in source_path.read_text(encoding="utf-8"):
+                violations.append(f"{source_path.name}: ساعةُ إيقافٍ في المتصفّح مكان دفتر الخادم")
+        self.assertEqual(violations, [], f"العدّادُ لا يقرأ الدفترَ: {violations}")
 
 
 class PresencePanelShowsTheRuleAndTheEffectTest(TestCase):
@@ -157,7 +208,7 @@ class PresenceApiClientIsHonestTest(TestCase):
 
 class PresenceNumbersGoThroughTheFormattersTest(TestCase):
     def test_no_locale_formatters_and_no_second_clock_implementation(self):
-        for path in (PANEL, CARD, TOP_BAR):
+        for path in (PANEL, CARD, TOP_BAR, CHIP, ROOM):
             source = path.read_text(encoding="utf-8")
             with self.subTest(source=path.name):
                 self.assertNotIn("toLocaleTimeString", source)

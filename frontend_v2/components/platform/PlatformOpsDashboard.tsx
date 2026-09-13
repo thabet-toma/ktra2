@@ -141,6 +141,10 @@ export const PlatformOpsDashboard: React.FC = () => {
       photoUrl: employee.photo_url || undefined,
       presence: derivePresence(employee, inMeeting, employee.id),
       lastActiveLabel: formatLastActive(employee.last_active_at),
+      // مجموعُ اليوم على المقعد نفسِه (212-N2): الضوءُ يقول «الآن» وهذا يقول
+      // «كم قعد اليوم» — والحمولةُ تحملهما معاً فلا نداءَ جديد.
+      presenceSeconds: employee.presence_seconds_today,
+      presenceTargetHours: employee.presence_target_hours,
     }));
     return sortByPresence(rows);
   }, [data?.employees]);

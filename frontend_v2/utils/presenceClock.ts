@@ -20,6 +20,39 @@ export const formatPresenceClock = (seconds: number): string => {
 };
 
 /**
+ * نصُّ الرقاقة — **وغيابُ الحقل ليس صفراً** (212-N2).
+ *
+ * صفرُ ثوانٍ خبرٌ («لم يحضر اليوم»)، وغيابُ الحقل حمولةٌ لا تحمل العدّاد. ولو
+ * وُحِّدا لقالت البطاقةُ «لم يحضر» عن موظّفٍ لا تعرف عنه شيئاً.
+ */
+export const presenceClockLabel = (seconds: number | undefined): string =>
+  seconds === undefined ? '--:--' : formatPresenceClock(seconds);
+
+/** نبرةُ الرقاقة — أربعُ حالاتٍ لا لونان. */
+export type PresenceTone = 'unknown' | 'met' | 'partial' | 'absent';
+
+/**
+ * قياسُ اليومِ على عتبته (212-N2).
+ *
+ * كانت هذه السلسلةُ الثلاثيّةُ مكتوبةً داخل `EmployeeCard.tsx`، ولمّا لزمت
+ * الطاولةَ أيضاً كانت ستصير نسختين تفترقان عند أوّل تعديلٍ للعتبة. فصارت
+ * دالّةً خالصةً يختبرها `npm test` — و`tsc` لا يفحص منطقاً ولا يصيّر مكوّناً.
+ *
+ * وعتبةُ صفرٍ تعني «الأثرُ مُطفأ» في السياسة، فيقرأ `0 >= 0` اكتفاءً: لا عتبةَ
+ * تُخالَف فلا لومَ يُعرَض. وهذا سلوكُ البطاقة قبل الاستخراج نفسُه، مُثبَّتاً
+ * باختبارٍ كي يصير أيُّ تغييرٍ له قراراً لا انزلاقاً.
+ */
+export const presenceToneOf = (
+  seconds: number | undefined,
+  targetHours: number,
+): PresenceTone => {
+  if (seconds === undefined || !Number.isFinite(seconds)) return 'unknown';
+  if (seconds >= targetHours * 3600) return 'met';
+  if (seconds > 0) return 'partial';
+  return 'absent';
+};
+
+/**
  * ثوانٍ إلى ساعاتٍ عشريّةٍ بمنزلتين — لمقارنةِ العتبة لا للعرض.
  *
  * منفصلةٌ عن `formatPresenceClock` عن قصد: `02:30` نصُّ عرضٍ لا يُقارَن بعتبةٍ،

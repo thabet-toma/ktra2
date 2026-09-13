@@ -1,8 +1,7 @@
 import React from "react";
 import { PlatformDashboardEmployee } from "../../utils/dashboardRanking";
 import { getLastActiveBadge } from "../../utils/lastActiveFormat";
-import { formatNumber } from "../../utils/formatNumber";
-import { formatPresenceClock } from "../../utils/presenceClock";
+import { PresenceClockChip } from "./PresenceClockChip";
 
 interface EmployeeCardProps {
   employee: PlatformDashboardEmployee;
@@ -12,9 +11,6 @@ interface EmployeeCardProps {
   /** نقرةٌ على الوجه تفتح ملفّ الموظّف الـ360 (211-J). */
   onOpenProfile: (employeeId: number) => void;
 }
-
-/** احتياطُ الحمولةِ القديمةِ وحدَه — العتبةُ الحقيقيّةُ تأتي من السياسةِ النشطة. */
-const PRESENCE_TARGET_FALLBACK_HOURS = 3;
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/\s+/).filter(Boolean);
@@ -31,20 +27,6 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   onOpenProfile,
 }) => {
   const lastActiveBadge = getLastActiveBadge(employee.last_active_at);
-  // صفرُ ثوانٍ وغيابُ الحقل ليسا شيئاً واحداً: الأوّلُ «لم يحضر اليوم» والثاني
-  // «حمولةٌ قديمةٌ لا تحمل العدّاد» — ولذلك يُعرَض الثاني شُرطتين لا صفراً.
-  const presenceSeconds = employee.presence_seconds_today;
-  const presenceLabel = presenceSeconds === undefined
-    ? "--:--"
-    : formatPresenceClock(presenceSeconds);
-  const presenceTarget = employee.presence_target_hours ?? PRESENCE_TARGET_FALLBACK_HOURS;
-  const presenceTone = presenceSeconds === undefined
-    ? "bg-slate-100 text-slate-400"
-    : presenceSeconds >= presenceTarget * 3600
-    ? "bg-emerald-100 text-emerald-700"
-    : presenceSeconds > 0
-    ? "bg-amber-100 text-amber-700"
-    : "bg-rose-100 text-rose-700";
   const isOverloaded = employee.active_work_orders_count > employee.capacity_target;
   const hasOverdue = employee.overdue_work_orders_count > 0;
   const score = employee.performance?.composite_score;
@@ -69,16 +51,14 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
             title="فتح ملف الموظّف"
             className="flex flex-1 min-w-0 items-center gap-2 text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg group"
           >
-            {/* **العدّادُ فوق الصورة** — نصُّ طلب المالك: «يبين بالطاولة فوق
-                صورتو». وهو مجموعُ اليوم من دفتر الخادم لا عدّادُ جلسةٍ في
-                متصفّح الموظّف، فهو رقمٌ يراه المديرُ ويعرفه التقييم. */}
+            {/* **العدّادُ فوق الصورة** — مجموعُ اليوم من دفتر الخادم لا عدّادُ
+                جلسةٍ في متصفّح الموظّف، فهو رقمٌ يراه المديرُ ويعرفه التقييم.
+                والرقاقةُ نفسُها فوق كلّ وجهٍ على طاولة مساحة العمل (212-N2). */}
             <span className="flex shrink-0 flex-col items-center gap-1">
-              <span
-                className={`rounded-md px-1.5 py-0.5 font-mono text-[10px] font-bold leading-none ${presenceTone}`}
-                title={`مجموع وقته على المنصة اليوم — المطلوب ${formatNumber(presenceTarget)} ساعات`}
-              >
-                {presenceLabel}
-              </span>
+              <PresenceClockChip
+                seconds={employee.presence_seconds_today}
+                targetHours={employee.presence_target_hours}
+              />
               {employee.photo_url ? (
                 <img
                   src={employee.photo_url}
