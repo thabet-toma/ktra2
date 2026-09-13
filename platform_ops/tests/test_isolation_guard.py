@@ -182,7 +182,16 @@ def _walk_py_files(root: Path):
         return
     if not root.is_dir():
         return
-    for entry in sorted(root.iterdir()):
+    try:
+        entries = sorted(root.iterdir())
+    except OSError:  # ومنها `PermissionError`.
+        # مجلّدٌ يرفضه نظامُ الملفّات **ليس محتوى مستودع**: `git status` نفسُه
+        # يقول عنه «could not open directory ... Permission denied»، فلا ملفَّ
+        # فيه متعقَّبٌ ولا يمكن أن يُعتمَد. وقبلَ هذا كان الحارسُ ينهار
+        # بـ`PermissionError` فلا يعمل إطلاقاً على جهازٍ فيه مجلّدُ أدواتٍ مقفل
+        # — أي أنّ التجاوزَ هنا يوسّع عملَ الحارس لا يضيّقه.
+        return
+    for entry in entries:
         if entry.name in PRUNED_DIRS:
             continue
         yield from _walk_py_files(entry)

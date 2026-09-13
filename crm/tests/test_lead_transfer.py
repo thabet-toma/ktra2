@@ -3,7 +3,7 @@ from django.test import TestCase
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import LeadPhone, LeadTransfer
-from crm.services import CrmValidationError, create_lead, transfer_lead
+from crm.services import CrmValidationError, create_lead, request_lead_transfer, transfer_lead
 
 from ._helpers import make_manager, make_staff_employee
 
@@ -61,6 +61,29 @@ class LeadTransferTest(APITestCase):
         self.lead.refresh_from_db()
         self.assertEqual(self.lead.assigned_to_id, self.bystander.pk)
 
+    def test_owner_cannot_open_a_transfer_request_on_their_own_lead(self):
+        """**البابُ المسدود**: طلبٌ من صاحب العميل يسدُّ تحويلَه هو.
+
+        بلا هذا الحارس يُنشَأ طلبٌ معلَّقٌ من الموظّف إلى نفسِه، ثمّ يرفض
+        `transfer_already_pending` كلَّ تحويلٍ لاحقٍ حتى يبتَّ أحدٌ فيه. والواجهةُ
+        كانت تصل إلى هذه الحالة فعلاً: الملكيّةُ كانت تُستنبَط من `is_me` في دليل
+        الزملاء، والدليلُ يستثني غيرَ `active`.
+        """
+        self.client.force_authenticate(user=self.owner_user)
+        res = self.client.post(
+            f"/api/platform/crm/leads/{self.lead.pk}/transfer-requests/",
+            {"to_employee": self.other.pk, "reason": "أريد تسليمه"}, format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertEqual(LeadTransfer.objects.filter(lead=self.lead).count(), 0)
+
+        # وبابُه ما زال مفتوحاً: التحويلُ المباشرُ يعمل بعد الرفض.
+        direct = self.client.post(
+            f"/api/platform/crm/leads/{self.lead.pk}/transfer/",
+            {"to_employee": self.other.pk, "reason": "أريد تسليمه"}, format="json",
+        )
+        self.assertEqual(direct.status_code, 201, direct.content)
+
     def test_old_transfer_record_stays_readable_after_transfer(self):
         self.client.force_authenticate(user=self.owner_user)
         first = self.client.post(
@@ -79,6 +102,18 @@ class LeadTransferServiceGuardTest(TestCase):
     أيضاً، فطلبٌ عبر الـview لا يثبت وحده أنّ الحارس **في الخدمة** حيٌّ فعلاً
     كما تنصّ التذكرة (§٥). هذا الاختبار يستدعي `transfer_lead` مباشرةً فيتجاوز
     المُسلسِل تماماً."""
+
+    def test_service_refuses_a_request_from_the_owner_bypassing_the_view(self):
+        """الحارسُ في الخدمة لا في الـview — كقاعدة الوحدة الرابعة."""
+        _, owner = make_staff_employee("request-guard-owner")
+        _, other = make_staff_employee("request-guard-target")
+        lead = create_lead(store_name="محل الطلب", phones=[{"raw": "0504321777", "kind": LeadPhone.Kind.PRIMARY}])
+        lead.assigned_to = owner
+        lead.save(update_fields=["assigned_to"])
+
+        with self.assertRaises(CrmValidationError):
+            request_lead_transfer(lead=lead, to_employee=other, reason="سبب", actor=owner.user)
+        self.assertEqual(LeadTransfer.objects.filter(lead=lead).count(), 0)
 
     def test_service_rejects_empty_reason_even_bypassing_the_serializer(self):
         _, owner = make_staff_employee("service-guard-owner")

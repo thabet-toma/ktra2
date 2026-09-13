@@ -362,6 +362,39 @@ class LeadTransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, view
         return Response(LeadTransferSerializer(transfer).data)
 
 
+class ColleagueDirectoryView(APIView):
+    """دليلُ الزملاء لمنتقي «تحويل إلى» — معرّفٌ واسمٌ ولا شيءَ غيرَهما.
+
+    **بلا هذه النقطة لا يستطيع موظّفٌ تحويلَ خطٍّ إلى زميل أصلاً**: النقطةُ
+    القائمةُ `/api/platform/ops/employees/` تُضيَّق لغير المدير على **صفّه هو
+    وحدَه** (`PlatformEmployeeViewSet.get_queryset`) — وذلك تضييقٌ مقصودٌ محروسٌ
+    لا يُوسَّع، لأنّه يحمل التقييمَ والمستهدفاتِ والمحفظة. فالحلُّ نقطةٌ ثانيةٌ
+    ضيّقةُ الحمولة لا توسيعُ الأولى.
+
+    ولا تُعيد إلّا `active`: من هو «في إجازة» أو «خارج الخدمة» لا يُسلَّم خطٌّ
+    يُنتظَر منه اتّصالٌ اليوم — والقائمةُ منتقي إسنادٍ لا سجلَّ موظّفين.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def get(self, request):
+        rows = (
+            PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE)
+            .select_related("user")
+            .order_by("user__first_name", "user__username")
+        )
+        me = _current_employee(request)
+        return Response([
+            {
+                "id": employee.pk,
+                "name": employee.user.get_full_name() or employee.user.username,
+                "job_title": employee.job_title,
+                "is_me": bool(me and employee.pk == me.pk),
+            }
+            for employee in rows
+        ])
+
+
 class MyLeadStatsView(APIView):
     permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
 

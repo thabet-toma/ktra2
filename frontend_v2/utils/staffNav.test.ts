@@ -17,3 +17,7 @@ test('لا يكرر جدول الموظف مفاتيح أو مسارات', () =>
   assert.equal(new Set(staffNav.map((item) => item.key)).size, staffNav.length);
   assert.equal(new Set(staffNav.map((item) => item.path)).size, staffNav.length);
 });
+
+test('يعرض جدول الموظف تبويب العملاء في مساره الصحيح', () => {
+  assert.deepEqual(staffNav.find((item) => item.key === 'crm')?.path, '/staff/crm');
+});

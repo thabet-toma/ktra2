@@ -60,7 +60,20 @@ class StaffShellContractTests(TestCase):
             "meetings": "MyMeetingsPanel",
             "performance": "EmployeeSelfWalletCard",
             "profile": "MyProfileCard",
+            "crm": "CrmPanel",
         }
+        # **والمفاتيحُ تُشتقُّ من الشريط لا تُسرَد هنا وحدَها.** كان هذا التعدادُ
+        # يمرّ على قاموسِه الخاصِّ فحسب، فحين أُضيف تبويبُ «العملاء» سابعاً إلى
+        # `staffNav.ts` بقي أخضرَ ولم يرَه — أي أنّ اسمَه «لكلِّ تبويبٍ لوحةٌ
+        # خلفه» لم يكن يستطيع السقوطَ لأجلِ ما يسمّيه. فيُطلَب أدناه أن تكون
+        # مجموعةُ مفاتيح الشريط هي مجموعةَ المفاتيح المُعدَّدة نفسَها.
+        nav_keys = set(re.findall(r"key:\s*'([a-z_]+)'", nav_source))
+        self.assertEqual(
+            nav_keys, set(expected_panels),
+            f"تبويبٌ في `staffNav.ts` بلا لوحةٍ مُعدَّدةٍ هنا: "
+            f"{sorted(nav_keys - set(expected_panels))} — أو لوحةٌ مُعدَّدةٌ بلا "
+            f"تبويب: {sorted(set(expected_panels) - nav_keys)}.",
+        )
         # **الربطُ لا مجرَّدُ الوجود**: تأكيدٌ بأنّ `<WorkOrdersPanel` موجودٌ في
         # الملفّ يبقى أخضرَ لو وُصِلت اللوحةُ بالتبويب الخطأ. فتُقتطَع أدناه فقرةُ
         # كلِّ مفتاحٍ من خريطة `panels` ويُطلَب أن تحمل لوحتَها هي.

@@ -17,6 +17,7 @@ import { WorkOrdersPanel } from '../WorkOrdersPanel';
 import { StaffHomeDashboard } from './StaffHomeDashboard';
 import { StaffSidebar } from './StaffSidebar';
 import { StaffTopBar } from './StaffTopBar';
+import { CrmPanel } from './crm/CrmPanel';
 
 /**
  * لوحةُ «لا شيء لتعرضه» — **مكوّنٌ واحدٌ لا أربعُ نسخ.**
@@ -80,6 +81,7 @@ const StaffShellContent: React.FC = () => {
     profile: profileLoading ? <StaffNotice>جارٍ تحميل ملفك...</StaffNotice>
       : profile ? <MyProfileCard profile={profile} onSaved={() => void loadProfile()} />
         : <StaffNotice>لا يوجد ملف موظف مرتبط بهذا الحساب.</StaffNotice>,
+    crm: <CrmPanel isManager={capabilities.is_platform_admin} myEmployeeId={profile?.id ?? null} />,
   };
   const content = panels[activeKey];
 

@@ -287,6 +287,19 @@ def request_lead_transfer(*, lead: Lead, to_employee, reason: str, actor) -> Lea
     if not reason:
         raise CrmValidationError("reason_required", "سببُ التحويل إلزاميّ.")
 
+    # **صاحبُ العميل لا يَطلُب، بل يُحوّل.** بلا هذا الحارس كان يستطيع فتحَ طلبٍ
+    # على عميلِ نفسِه، فيُسجَّل `from_employee == to_employee`ـه هو، **ويسدُّ
+    # بابَه**: أيُّ تحويلٍ لاحقٍ يُرفَض بـ`transfer_already_pending` حتى يبتَّ
+    # أحدٌ في طلبٍ لا معنى له. وليس هذا احتمالاً نظريّاً: الواجهةُ كانت تعرف
+    # «هل أنا صاحبُه؟» من دليل الزملاء، وذلك الدليلُ يستثني غيرَ `active`
+    # فيُسقِط الموظّفَ من دليلِ نفسِه وهو في إجازة.
+    actor_employee = getattr(actor, "platform_employee", None)
+    if actor_employee is not None and lead.assigned_to_id == actor_employee.pk:
+        raise CrmValidationError(
+            "owner_transfers_directly",
+            "أنت صاحبُ هذا العميل — حوِّله مباشرةً بلا طلب.",
+        )
+
     locked = Lead.objects.select_for_update().get(pk=lead.pk)
     already_pending = LeadTransfer.objects.select_for_update().filter(
         lead=locked, status=LeadTransfer.Status.PENDING,

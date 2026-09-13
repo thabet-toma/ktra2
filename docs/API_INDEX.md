@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **839**
+عدد النقاط: **840**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -540,6 +540,7 @@
 | `/api/platform/companies/<int:pk>/members/` | `platform_company_members` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/<int:membership_id>/` | `platform_company_member_detail` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/modules/` | `platform_company_modules` | `core/platform_admin_api.py` |
+| `/api/platform/crm/colleagues/` | `ColleagueDirectoryView` | `crm/views.py` |
 | `/api/platform/crm/leads/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/import/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/lookup/` | `LeadViewSet` | `crm/views.py` |

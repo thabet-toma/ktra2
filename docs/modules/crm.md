@@ -22,7 +22,7 @@
 | `crm/models.py` | `LeadImportBatch`، `Lead`، `LeadPhone` (مفتاحُ الفرادة)، `LeadActivity` (append-only)، `LeadTransfer` — **كلُّها بلا `tenant`** عمداً (زبائنُ كترا لا زبائن شركة)، محروسٌ بـ`crm/tests/test_crm_isolation_guard.py` |
 | `crm/phone.py` | `normalize_phone` — تطبيعُ الهاتف إلى E.164، مفتاحُ فرادةٍ مخزَّنٌ في القاعدة فلا يُعدَّل بلا هجرةِ بيانات |
 | `crm/services.py` | كلُّ الكتابة: `create_lead`/`suggest_lead`/`claim_lead`/`release_lead`/`log_activity`/`change_lead_status`/`transfer_lead`/`request_lead_transfer`/`decide_lead_transfer`/`approve_lead`/`reject_lead`/`import_leads`/`employee_lead_stats`/`manager_lead_overview` |
-| `crm/views.py` | `LeadViewSet`، `LeadTransferViewSet`، `MyLeadStatsView`، `ManagerLeadOverviewView` |
+| `crm/views.py` | `LeadViewSet`، `LeadTransferViewSet`، `MyLeadStatsView`، `ManagerLeadOverviewView`، `ColleagueDirectoryView` |
 | `crm/urls.py` | مسارات `/api/platform/crm/` |
 | `crm/tests/` | اختباراتُ الوحدة — راجع §الاختبارات (العددُ يتغيّر فلا يُكتب) |
 
@@ -68,6 +68,36 @@
 `IsPlatformOperationsManager` وحدها: `release`/`approve`/`reject`/الاستيراد/
 `stats/overview/`). لا `AllowAny` ولا نقطةَ عامّة في هذه الوحدة إطلاقاً.
 
+### `colleagues/` — ولماذا نقطةٌ ثانيةٌ لا توسيعُ الأولى
+
+`GET /api/platform/crm/colleagues/` تُعيد `{id, name, job_title, is_me}` للموظّفين
+`active` وحدَهم، وهي **مصدرُ منتقي «تحويل إلى»**. و`/api/platform/ops/employees/`
+لا تصلح له: `PlatformEmployeeViewSet.get_queryset` تُضيَّق لغير المدير على صفّه هو
+وحدَه — تضييقٌ مقصودٌ لأنّها تحمل التقييمَ والمستهدفاتِ والمحفظة. فتوسيعُها كان
+سيُسلّم ذلك كلَّه لكلِّ زميل، والحلُّ نقطةٌ ضيّقةُ الحمولة. حمولتُها محروسةٌ
+بقائمةٍ بيضاءَ صريحة في `crm/tests/test_colleague_directory.py` — فمن يستبدلها
+غداً بالمُسلسِل الكامل «لتوفير كود» يسقط عنده الحارس.
+
+## الواجهة — أين تُستهلَك هذه النقاط
+
+شاشاتُ الوحدة تحت `frontend_v2/components/platform/staff/crm/`، وتبويبُ
+«العملاء» ثانيَ الشريط في `frontend_v2/utils/staffNav.ts` (`crm`):
+
+| الملف | الغرض |
+|---|---|
+| `CrmPanel.tsx` | الحاوية: النطاقُ والترشيحُ والاستلامُ والبحثُ بالرقم، ولوحُ المدير للمدير وحدَه |
+| `CrmLeadList.tsx` | القائمةُ وبطاقةُ «بحثِ الرقم قبل الاتصال» بحالاتها الثلاث (مقفولٌ · في المخزن فيظهر «استلام» · غيرُ مسجَّل) |
+| `CrmLeadProfile.tsx` | ملفُّ العميل: الحالةُ والسجلُّ وتسجيلُ اتّصالٍ ورابطُ `wa.me` وطلبُ التحويل والإعادةُ للمخزن |
+| `CrmTransferInbox.tsx` | صندوقُ طلبات التحويل والبتُّ فيها — **بلا هذه اللوحة يصير زرُّ «طلب تحويل العميل» باباً مسدوداً** |
+| `CrmMyStats.tsx` | عدّاداتُ الموظّف من `stats/me/` — مجموعةٌ في الخادم لا محسوبةٌ في الواجهة |
+| `CrmManagerPanel.tsx` | رفعُ الأرقام بنتيجةِ دفعةٍ كاملة (مُنشأ/مكرَّر/غيرُ صالح + مَن لديه كلُّ مكرَّر)، واعتمادُ الاقتراحات ورفضُها |
+
+وعقدُها محروسٌ ساكناً في `platform_ops/tests/test_crm_ui_contract.py`:
+**تعدادُ استهلاكٍ يَعدُّ النداءَ في مكوّنٍ لا التصديرَ في عميل الـAPI.** الصيغةُ
+الأولى منه سألت «هل المسارُ مستهلَكٌ في `platformCrmApi.ts`؟» فكان الجواب نعم
+لكلِّ مسار، وخمسُ دوالَّ لا يستدعيها مكوّنٌ واحد — ومنها صندوقُ التحويل كلُّه:
+الطلبُ يُرسَل ولا يراه أحد، والحارسُ أخضر.
+
 ## قواعد لا يجوز كسرها
 
 1. **كلُّ كتابةٍ عبر `crm/services.py`** — لا كتابة من الـview مباشرةً.
@@ -95,6 +125,20 @@
    من النموذج لا يُكتب رقماً، ويحرسه
    `crm/tests/test_input_widths_fit_columns.py`. وحدُّ الدفعة
    `MAX_IMPORT_ROWS = 5000` لأنّ `import_leads` معاملةٌ ذرّيّةٌ واحدة.
+10. **كلُّ نقطةٍ في الـURLconf تصل شاشةً، أو لها عذرٌ مكتوب** — العذرُ سطرٌ في
+    `UNUSED_BY_DESIGN` داخل `platform_ops/tests/test_crm_ui_contract.py` يقول
+    **لماذا**. نقطةٌ موصولةٌ بعميل الـAPI ولا تستدعيها شاشةٌ = فعلٌ يُرسَل ولا
+    مَن يراه.
+11. **صاحبُ العميل يُحوّل ولا يَطلُب** — `request_lead_transfer` ترفض طلباً من
+    صاحب العميل نفسِه (400، `owner_transfers_directly`). بلا هذا يُنشَأ طلبٌ
+    معلَّقٌ منه إليه، ثمّ يسدّ `transfer_already_pending` **بابَه هو** حتى يبتَّ
+    أحدٌ في طلبٍ لا معنى له. والملكيّةُ في الواجهة تُقارَن بمعرّف الموظّف من
+    **ملفّه** لا بـ`is_me` في `colleagues/` — فذاك الدليلُ يعيد `active` وحدَهم،
+    فموظّفٌ في إجازةٍ يسقط من دليل نفسِه.
+12. **لا `window.prompt`/`confirm`/`alert` في شاشات المنصّة** — حوارُ المتصفّح لا
+    يُنسَّق ولا يحمل اتّجاه RTL وتحجبه بعضُ المتصفّحات صامتاً فيبدو الزرُّ
+    معطوباً؛ والسببُ يُكتَب في حقلٍ داخل الصفحة (نمطُ `ToastProvider`/
+    `ConfirmProvider` القائم).
 
 ## الاختبارات
 
@@ -106,4 +150,4 @@
 لأعمدتها** (`test_input_widths_fit_columns.py`، ومنه دليلٌ سلوكيٌّ أنّ الرفضَ 400
 لا خطأُ قاعدة، ودليلٌ أنّ الخدمة تحرس الطولَ بلا المُسلسِل) · رسمُ الهجرات
 (اعتمادٌ على `tenants` و`platform_ops`) · ثباتُ عدد الاستعلامات في نظرة المدير
-العامّة · **تعدادُ الملكيّة** لكلّ مسارات الوحدة (`test_lead_lock.py`).
+العامّة · **تعدادُ الملكيّة** لكلّ مسارات الوحدة (`test_lead_lock.py`) · **دليلُ الزملاء** بقائمةٍ بيضاءَ على الحمولة وباستثناء غيرِ النشط (`test_colleague_directory.py`) · **صاحبُ العميل لا يَطلُب تحويلاً** — عبر الـHTTP وفي الخدمة مباشرةً (`test_lead_transfer.py`).
