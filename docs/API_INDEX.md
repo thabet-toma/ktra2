@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **822**
+عدد النقاط: **839**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -540,6 +540,23 @@
 | `/api/platform/companies/<int:pk>/members/` | `platform_company_members` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/<int:membership_id>/` | `platform_company_member_detail` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/modules/` | `platform_company_modules` | `core/platform_admin_api.py` |
+| `/api/platform/crm/leads/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/import/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/lookup/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/activities/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/approve/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/claim/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/reject/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/release/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/status/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/transfer-requests/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/transfer/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/stats/me/` | `MyLeadStatsView` | `crm/views.py` |
+| `/api/platform/crm/stats/overview/` | `ManagerLeadOverviewView` | `crm/views.py` |
+| `/api/platform/crm/transfer-requests/` | `LeadTransferViewSet` | `crm/views.py` |
+| `/api/platform/crm/transfer-requests/{pk}/` | `LeadTransferViewSet` | `crm/views.py` |
+| `/api/platform/crm/transfer-requests/{pk}/decide/` | `LeadTransferViewSet` | `crm/views.py` |
 | `/api/platform/dashboard/` | `platform_dashboard` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |

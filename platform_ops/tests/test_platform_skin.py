@@ -14,12 +14,26 @@ FRONTEND = Path(__file__).resolve().parents[2] / "frontend_v2"
 INDEX_CSS = FRONTEND / "styles" / "index.css"
 PLATFORM_COMPONENTS = FRONTEND / "components" / "platform"
 
-#: الشاشاتُ الجذريّةُ لسطح المنصّة — ما عداها لوحاتٌ تسكن داخلها فترث الغلاف.
+#: الشاشاتُ الجذريّةُ لسطح المنصّة السماويّ — ما عداها لوحاتٌ تسكن داخلها فترث
+#: الغلاف. وقشرةُ الموظّف (`staff/StaffShell.tsx`) **ليست** منها عمداً: سطحٌ
+#: داكنٌ مستقلٌّ بغلافه `.staff-shell`، ويحرسه
+#: `test_staff_shell_contract.py` بتأكيدٍ صريحٍ أنّه لا يلبس `platform-surface`.
 ROOT_SCREENS = (
     "PlatformOpsDashboard.tsx",
     "PlatformEmployeeWorkspace.tsx",
     "StaffLoginPage.tsx",
 )
+
+#: أغلفةُ سطح المنصّة المسموحُ لتجاوزات السُلَّم أن تُقصَر بها، ولكلٍّ سببُه.
+#: **الغرضُ المحروسُ ليس اسمَ الغلاف بل الحصر**: قاعدةٌ بلا غلافٍ من هذه تصبغ
+#: شاشاتِ الزبائن. وإضافةُ غلافٍ هنا لا تُسكِت الحارسَ مجّاناً —
+#: `test_every_confined_scope_is_a_real_platform_surface` يُلزم أن يكون الغلافُ
+#: ملبوساً فعلاً بملفٍّ تحت `components/platform/`.
+CONFINED_SCOPES = {
+    ".platform-surface": "سطحُ المنصّة السماويُّ (#211 م٣) — لوحةُ القيادة ومساحةُ الموظّف.",
+    ".staff-shell": "قشرةُ الموظّف الداكنةُ المستقلّة (#212 212-A) — تُعيد تلوينَ اللوحاتِ "
+                    "السِّتَّ المُعادَ استعمالُها دون لمسِ ملفّاتها فتبقى فاتحةً في سطح المنصّة.",
+}
 
 
 class PlatformSkinIsConfinedTest(SimpleTestCase):
@@ -62,13 +76,43 @@ class PlatformSkinIsConfinedTest(SimpleTestCase):
                               ".bg-blue-", ".text-blue-", ".border-blue-", ".ring-blue-",
                               ".bg-sky-", ".text-sky-", ".border-sky-", ".ring-sky-")
             )
-            if is_ramp_rule and not selector.startswith(".platform-surface"):
+            if is_ramp_rule and not any(
+                selector.startswith(scope) for scope in CONFINED_SCOPES
+            ):
                 offenders.append(selector)
         self.assertEqual(
             offenders, [],
-            "تجاوزُ سُلَّمٍ خارجَ `.platform-surface` — يصبغ شاشاتِ الزبائن كلَّها: "
+            "تجاوزُ سُلَّمٍ خارجَ أغلفةِ المنصّة المعلَنة "
+            f"({', '.join(sorted(CONFINED_SCOPES))}) — يصبغ شاشاتِ الزبائن كلَّها: "
             f"{offenders}",
         )
+
+    def test_every_confined_scope_is_a_real_platform_surface(self):
+        """غلافٌ يُعلَن هنا يجب أن يكون ملبوساً فعلاً في سطح المنصّة.
+
+        بلا هذا التأكيد يصير `CONFINED_SCOPES` بابَ تهريب: من ضايقه الحارسُ
+        أعلاه يكفيه أن يعلن غلافَه الجديدَ فيمرّ — ولو كان ذلك الغلافُ مكتوباً
+        على شاشةِ مبيعاتٍ لا على شاشةِ منصّة. فالإعلانُ هنا يلزمه دليلٌ في الكود.
+        """
+        sources = {
+            path: path.read_text(encoding="utf-8")
+            for path in sorted(PLATFORM_COMPONENTS.rglob("*.tsx"))
+        }
+        for scope, reason in CONFINED_SCOPES.items():
+            with self.subTest(scope=scope):
+                # اسمُ الملفّ لا محتواه في رسالة الفشل: تجميعُ كلِّ الـTSX في
+                # `assertIn` يطبع نصفَ مجلّدٍ عند السقوط فتصير الرسالةُ عائقاً.
+                wearers = [p.name for p, src in sources.items() if scope.lstrip(".") in src]
+                self.assertTrue(
+                    wearers,
+                    f"الغلافُ {scope} معلَنٌ في `CONFINED_SCOPES` ولا يلبسه أيُّ ملفٍّ "
+                    f"من ملفّات `components/platform/` الـ{len(sources)} — إعلانٌ "
+                    "يُسكِت الحارسَ بلا سطحٍ يقابله.",
+                )
+                self.assertGreater(
+                    len(reason.strip()), 25,
+                    f"الغلافُ {scope} بلا سببٍ مكتوب — الاستثناءُ قرارٌ يُبرَّر لا سطرٌ يمرّ.",
+                )
 
     def test_the_global_primary_stays_the_company_blue(self):
         """رمزُ اللون الأساسيُّ في `@theme` يبقى أزرقَ الشركات.

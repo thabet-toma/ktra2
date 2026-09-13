@@ -47,6 +47,7 @@ const PlatformPublicJobPage = React.lazy(() => import('./components/platform-hir
 const PlatformInvitationPage = React.lazy(() => import('./components/platform-hiring/PlatformInvitationPage').then((module) => ({ default: module.PlatformInvitationPage })));
 const PublicRatingPage = React.lazy(() => import('./components/my-agent/PublicRatingPage').then((module) => ({ default: module.PublicRatingPage })));
 const StaffLoginPage = React.lazy(() => import('./components/platform/StaffLoginPage').then((module) => ({ default: module.StaffLoginPage })));
+const StaffShell = React.lazy(() => import('./components/platform/staff/StaffShell').then((module) => ({ default: module.StaffShell })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
 const StoreProductPage = React.lazy(() => import('./components/store/StoreProductPage').then((module) => ({ default: module.StoreProductPage })));
 const StoreCampaignPage = React.lazy(() => import('./components/store/StoreCampaignPage').then((module) => ({ default: module.StoreCampaignPage })));
@@ -252,6 +253,7 @@ root.render(
               القائمة بذاتها: يُثبت الهويّة ثمّ ينتقل انتقالاً كاملاً إلى مساحة
               الموظّف، فلا يمرّ بـ`roleDefault` في `App.tsx` الذي لا يعرفه (211-C). */}
           <Route path="/staff" element={<StaffLoginPage />} />
+          <Route path="/staff/*" element={<AuthProvider><StaffShell /></AuthProvider>} />
 
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />

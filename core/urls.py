@@ -110,6 +110,9 @@ urlpatterns = [
          platform_admin_api.platform_company_member_detail),
     path('api/platform/users/<int:pk>/set-active/', platform_admin_api.platform_user_set_active),
     path('api/platform/ops/', include('platform_ops.urls')),
+    # التذكرة 212-B: نواة CRM كترا الخلفيّة — زبائنُ كترا المحتملون، لا زبائن
+    # الشركات على المنصّة. app منفصل (`crm`) لا امتدادٌ لـ`platform_ops`.
+    path('api/platform/crm/', include('crm.urls')),
     # سطحُ المستأجر من الوحدة نفسِها — خارج `/api/platform/` لأنّ ذلك الجذر
     # محروسٌ بالسوبر أدمن وحده، وهذه نقاطُ صاحبِ الشركة ورابطٌ عامٌّ بلا دخول.
     path('api/my-agent/', include('platform_ops.urls_tenant')),

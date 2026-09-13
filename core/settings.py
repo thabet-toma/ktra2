@@ -126,6 +126,7 @@ INSTALLED_APPS = [
     'store.apps.StoreConfig',
     'docshare.apps.DocShareConfig',
     'platform_ops.apps.PlatformOpsConfig',
+    'crm.apps.CrmConfig',
 ]
 
 MIDDLEWARE = [

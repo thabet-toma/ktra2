@@ -20,6 +20,22 @@ PRUNED_DIRS = {
     ".agent_context", "playwright-report", "django_cache",
 }
 
+#: **عنقودُ المنصّة** — التطبيقاتُ التي تخصّ كترا نفسَها لا شركةَ زبونٍ عليها،
+#: ويُعفَى بعضُها من بعضٍ في القاعدة الأولى.
+#:
+#: الغرضُ المحفوظُ من القاعدة الأولى هو أن يبقى نظامُ الشركات قابلاً للتشغيل بلا
+#: `platform_ops` إطلاقاً. و`crm` (زبائنُ كترا المحتمَلون، #212) جزءٌ من العنقود
+#: نفسِه: لا معنى له بلا موظّفي المنصّة، وهو يحمل **مفتاحاً أجنبيّاً حقيقيّاً**
+#: إلى `platform_ops.PlatformEmployee` — أي أنّ الاعتمادَ قائمٌ في القاعدة سواءٌ
+#: كُتب سطرُ استيرادٍ أم لا. فإخفاؤه بـ`apps.get_model()` لا يُلغيه بل يجعله
+#: **غيرَ معلَن**، ويدفع كلَّ تطبيقٍ جديدٍ في العنقود إلى استنساخ صلاحيّاتٍ
+#: أمنيّةٍ بدل استيرادها — ونسخةٌ ثانيةٌ من قاعدةٍ أمنيّةٍ انحرافٌ مؤجَّل.
+#:
+#: والقيدُ الحقيقيُّ يبقى محروساً بالكامل: **لا تطبيقَ من تطبيقات الشركات
+#: يستورد شيئاً من العنقود** — يحرس الاتّجاهَ الأوّلَ هذا الملفُّ، والثاني
+#: (`crm`) `crm/tests/test_crm_isolation_guard.py`.
+PLATFORM_CLUSTER_APPS = frozenset({"platform_ops", "crm"})
+
 #: حزم المنصة التي تخضع للفحص.
 PLATFORM_PACKAGES = frozenset({
     "accountant_portal", "accounting", "after_sales", "bridge", "core",
@@ -176,7 +192,7 @@ def find_inbound_import_offenders(repo_root: Path) -> list[str]:
     """أسطر الاستيراد المخالفة للقاعدة الأولى تحت repo_root، خارج الوحدة نفسها."""
     offenders = []
     for entry in sorted(repo_root.iterdir()):
-        if entry.name in PRUNED_DIRS or entry.name == "platform_ops":
+        if entry.name in PRUNED_DIRS or entry.name in PLATFORM_CLUSTER_APPS:
             continue
         for path in _walk_py_files(entry):
             try:

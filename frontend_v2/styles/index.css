@@ -2471,6 +2471,79 @@ tbody td {
   color: var(--color-text);
 }
 
+.staff-shell {
+  --staff-bg: #0b1220;
+  --staff-panel: #111c31;
+  --staff-rail: #0a1220;
+  --staff-line: #1e2c47;
+  --staff-text: #e2e8f0;
+  --staff-muted: #94a3b8;
+  --staff-accent: #22d3ee;
+  --staff-accent-2: #3b82f6;
+}
+
+/* ── جلد اللوحات المعاد استعمالها داخل قشرة الموظف ──────────────────────────
+   اللوحات أدناه تخدم أيضاً `PlatformEmployeeWorkspace` الفاتح، لذلك لا تُمس
+   أدواتها في TSX. هذه المحددات محصورة في `.staff-shell` وخارج الطبقات مثل
+   تجاوزات `.platform-surface`: تبقى اللوحات فاتحة خارج القشرة، وتقرأ رموز
+   الجلد الداكن داخلها. يحرس القائمةَ المسحُ الحي في
+   `test_every_light_class_the_reused_panels_wear_has_a_dark_override`. */
+.staff-shell .bg-white { background-color: var(--staff-panel); }
+.staff-shell .bg-slate-50,
+.staff-shell .bg-slate-100,
+.staff-shell .bg-slate-200 { background-color: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg)); }
+.staff-shell .bg-blue-50,
+.staff-shell .bg-blue-100,
+.staff-shell .bg-sky-50,
+.staff-shell .bg-sky-100 { background-color: color-mix(in oklab, #38bdf8 14%, var(--staff-panel)); }
+.staff-shell .bg-emerald-50,
+.staff-shell .bg-emerald-100 { background-color: color-mix(in oklab, #34d399 14%, var(--staff-panel)); }
+.staff-shell .bg-amber-50,
+.staff-shell .bg-amber-100,
+.staff-shell .bg-amber-200 { background-color: color-mix(in oklab, #fbbf24 14%, var(--staff-panel)); }
+.staff-shell .bg-rose-50,
+.staff-shell .bg-rose-100,
+.staff-shell .bg-rose-200 { background-color: color-mix(in oklab, #fb7185 14%, var(--staff-panel)); }
+
+.staff-shell .hover\:bg-slate-50:hover,
+.staff-shell .hover\:bg-slate-200:hover { background-color: color-mix(in oklab, var(--staff-panel) 72%, var(--staff-text)); }
+.staff-shell .hover\:bg-blue-100:hover { background-color: color-mix(in oklab, #38bdf8 24%, var(--staff-panel)); }
+.staff-shell .hover\:bg-amber-100:hover,
+.staff-shell .hover\:bg-amber-200:hover { background-color: color-mix(in oklab, #fbbf24 24%, var(--staff-panel)); }
+.staff-shell .hover\:bg-rose-100:hover,
+.staff-shell .hover\:bg-rose-200:hover { background-color: color-mix(in oklab, #fb7185 24%, var(--staff-panel)); }
+
+.staff-shell .text-slate-400,
+.staff-shell .text-slate-500,
+.staff-shell .text-slate-600 { color: var(--staff-muted); }
+.staff-shell .text-slate-700,
+.staff-shell .text-slate-800,
+.staff-shell .text-slate-900 { color: var(--staff-text); }
+.staff-shell .text-blue-700,
+.staff-shell .text-sky-700,
+.staff-shell .text-sky-800 { color: #7dd3fc; }
+.staff-shell .text-emerald-600,
+.staff-shell .text-emerald-700,
+.staff-shell .text-emerald-800 { color: #6ee7b7; }
+.staff-shell .text-amber-500,
+.staff-shell .text-amber-600,
+.staff-shell .text-amber-700,
+.staff-shell .text-amber-800 { color: #fcd34d; }
+.staff-shell .text-rose-600,
+.staff-shell .text-rose-700,
+.staff-shell .text-rose-800 { color: #fda4af; }
+
+.staff-shell .border-slate-100,
+.staff-shell .border-slate-200 { border-color: var(--staff-line); }
+.staff-shell .border-blue-400,
+.staff-shell .border-sky-200 { border-color: color-mix(in oklab, #38bdf8 45%, var(--staff-line)); }
+.staff-shell .border-emerald-200 { border-color: color-mix(in oklab, #34d399 45%, var(--staff-line)); }
+.staff-shell .border-amber-200,
+.staff-shell .border-amber-300 { border-color: color-mix(in oklab, #fbbf24 45%, var(--staff-line)); }
+.staff-shell .border-rose-200 { border-color: color-mix(in oklab, #fb7185 45%, var(--staff-line)); }
+.staff-shell .ring-slate-100,
+.staff-shell .ring-white { --tw-ring-color: var(--staff-line); }
+
 /* الوضعُ الداكن: تُعاد صياغةُ الأرضيّة والحدّ وحدَهما، ويُفتَّح السماويُّ كي
    يبقى مقروءاً فوق سطحٍ داكن — كما فُتِّح `--color-primary-emphasis` في الجذر
    وللسبب نفسِه بالضبط. */

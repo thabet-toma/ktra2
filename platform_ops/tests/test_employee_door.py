@@ -215,13 +215,29 @@ class StaffLoginRouteIsPrivateTest(SimpleTestCase):
             )
 
     def test_the_page_lands_the_employee_on_their_own_space(self):
+        """#212 م١: الوجهةُ صارت **قشرةَ الموظّف المستقلّة** لا مساحتَه داخل قشرةِ الزبون.
+
+        كانت `/platform/employee-space` — مسارٌ يُصيَّر داخلَ تطبيق شركة الزبون،
+        فيهبط موظّفُ كترا في قشرةٍ بُنيت لعضوِ شركةٍ ويرى شريطَها. والنفيُ أدناه
+        جزءٌ من الحارس لا زينة: بلا تأكيدِ **غياب** القديم يبقى سطرٌ منسيٌّ يعيده
+        بصمتٍ وهذا الاختبارُ أخضر.
+        """
         page = STAFF_LOGIN.read_text(encoding="utf-8")
-        self.assertTrue(
-            "/platform/employee-space" in page,
-            "بابُ الفريق لا يوصل إلى مساحة الموظّف.",
+        # **الإسنادُ نفسُه لا ذكرُ المسار**: الملفُّ يشرح وجهتَه في تعليقٍ أعلاه،
+        # فتأكيدُ ورودِ النصّ يبقى أخضرَ بعد حذف الإسناد — أُثبت ذلك بالتخريب.
+        self.assertRegex(
+            page,
+            r'destination\s*=\s*"/staff/home"',
+            "بابُ الفريق لا يُسند وجهتَه إلى قشرةِ الموظّف.",
         )
-        # والوجهةُ تُقرَّر بجواب الخادم لا بتخمينٍ من الواجهة.
-        self.assertTrue("getPlatformStaffCapabilities" in page)
+        self.assertNotIn(
+            "/platform/employee-space",
+            page,
+            "بابُ الفريق ما زال يُنزل الموظّفَ في قشرةِ شركة الزبون.",
+        )
+        # والوجهةُ تُقرَّر بجواب الخادم لا بتخمينٍ من الواجهة — **النداءُ** لا
+        # اسمُه: سطرُ الاستيراد وحدَه كان يُبقي التأكيدَ أخضرَ بعد حذف الاستدعاء.
+        self.assertRegex(page, r"getPlatformStaffCapabilities\s*\(")
 
     def test_the_route_is_not_advertised_on_any_public_surface(self):
         """«خصوصيّ» شرطٌ يُفحَص: ذكرُه في الهبوط أو الشريط العامّ يُبطل الغرض."""

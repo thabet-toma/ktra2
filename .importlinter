@@ -20,6 +20,7 @@ root_packages =
     after_sales
     bridge
     core
+    crm
     device_registry
     docshare
     employee_ops
@@ -46,6 +47,7 @@ source_modules =
     after_sales
     bridge
     core
+    crm
     device_registry
     docshare
     employee_ops
@@ -129,6 +131,7 @@ source_modules =
     after_sales
     bridge
     core
+    crm
     device_registry
     docshare
     employee_ops

@@ -11,7 +11,7 @@ import { getPlatformStaffCapabilities } from "../../services/platformHiringApi";
  * `App.tsx` (`roleDefault`) الذي لا يعرف موظّفَ المنصّة، فيرسله إلى شاشةِ مهامّ
  * **شركةِ الزبون**. وذاك الملفُّ محجوزٌ لمهمّةٍ أخرى، فبدلاً من انتظاره: صفحةٌ
  * قائمةٌ بذاتها **خارجَ شجرة المزوّدات** (كصفحةِ قبول الدعوة تماماً) تُثبت الهويّة
- * ثم تنتقل انتقالاً كاملاً إلى `/platform/employee-space` — فتُعاد تهيئةُ
+ * ثم تنتقل انتقالاً كاملاً إلى `/staff/home` — فتُعاد تهيئةُ
  * `AuthProvider` من التخزين المحلّي ويهبط الموظّفُ على مساحته مباشرةً.
  *
  * **وليست بوّابةَ صلاحيّة.** الحراسةُ خادميّةٌ كما كانت (`IsPlatformOperationsStaff`
@@ -47,8 +47,8 @@ export const StaffLoginPage: React.FC = () => {
       let destination = "/";
       try {
         const capabilities = await getPlatformStaffCapabilities();
-        if (capabilities.is_platform_employee || capabilities.is_platform_recruiter) {
-          destination = "/platform/employee-space";
+        if (capabilities.is_platform_employee || capabilities.is_platform_admin) {
+          destination = "/staff/home";
         }
       } catch {
         destination = "/";
