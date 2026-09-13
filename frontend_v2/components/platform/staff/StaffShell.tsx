@@ -19,6 +19,7 @@ import { StaffPresencePanel } from './StaffPresencePanel';
 import { StaffSidebar } from './StaffSidebar';
 import { StaffTopBar } from './StaffTopBar';
 import { CrmPanel } from './crm/CrmPanel';
+import { StaffTasksPanel } from './tasks/StaffTasksPanel';
 
 /**
  * لوحةُ «لا شيء لتعرضه» — **مكوّنٌ واحدٌ لا أربعُ نسخ.**
@@ -66,7 +67,7 @@ const StaffShellContent: React.FC = () => {
   // وبناءُ عنصرِ JSX لا يشغّل مكوّنَه، فالتبويباتُ غيرُ المعروضة لا تُصيَّر.
   const panels: Record<StaffNavKey, React.ReactNode> = {
     home: <StaffHomeDashboard profile={profile} searchTerm={searchTerm} onOpenTasks={() => go('tasks')} />,
-    tasks: <WorkOrdersPanel />,
+    tasks: <div className="space-y-6"><StaffTasksPanel /><section><h2 className="mb-3 text-lg font-bold text-[var(--staff-text)]">أوامر العمل</h2><WorkOrdersPanel /></section></div>,
     companies: <EmployeeCompaniesPanel />,
     meetings: <MyMeetingsPanel />,
     // `space-y-6` لأنّ هذا التبويبَ وحدَه يحمل لوحتين: بلا الفاصلِ كانتا تتلاصقان

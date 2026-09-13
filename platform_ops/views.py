@@ -3730,7 +3730,27 @@ class PlatformTaskViewSet(viewsets.ReadOnlyModelViewSet):
 
     permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
     serializer_class = PlatformTaskSerializer
-    queryset = PlatformTask.objects.select_related("created_by").order_by("-created_at")
+    # عددُ المطالبين بمهمّةِ المجمَع **باستعلامٍ فرعيٍّ مستقلٍّ عن مرشّح النطاق**.
+    # و`Count("assignments")` يصحّ هنا اليومَ لأنّ جانغو يفتح وصلةً جديدةً لفلترٍ
+    # يأتي **بعد** `annotate` على علاقةٍ متعدّدة — أي أنّ صحّةَ الرقم معلَّقةٌ على
+    # ترتيبِ سطرين في ملفّين: هذا، وفلترُ النطاق في `get_queryset` أدناه. فلو
+    # قُدِّم الفلترُ يوماً صار العدُّ عدَّ إسنادِ المستدعي وحدَه — رقمٌ يبدو سليماً
+    # ولا يسقط له اختبارُ نطاق. والاستعلامُ الفرعيُّ لا يعتمد على ذلك الترتيب،
+    # وهو استعلامٌ واحدٌ لا غير (محروسٌ في `test_platform_tasks.py`).
+    queryset = (
+        PlatformTask.objects.select_related("created_by")
+        .annotate(
+            claimed_count_annotated=Coalesce(
+                Subquery(
+                    PlatformTaskAssignment.objects.filter(task=OuterRef("pk"))
+                    .order_by().values("task").annotate(total=Count("id")).values("total"),
+                    output_field=IntegerField(),
+                ),
+                Value(0),
+            )
+        )
+        .order_by("-created_at")
+    )
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -3912,7 +3932,11 @@ class PlatformWorkspaceNoteViewSet(viewsets.ReadOnlyModelViewSet):
 
     permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
     serializer_class = PlatformWorkspaceNoteSerializer
-    queryset = PlatformWorkspaceNote.objects.all().order_by("-created_at")
+    queryset = (
+        PlatformWorkspaceNote.objects
+        .select_related("employee", "employee__user", "task")
+        .order_by("-created_at")
+    )
 
     def get_queryset(self):
         qs = super().get_queryset()

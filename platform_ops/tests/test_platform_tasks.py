@@ -362,6 +362,102 @@ class CompletedAtOnLastAssignmentTest(_PlatformTaskFixture):
         self.assertEqual(task.status, PlatformTask.STATUS_COMPLETED)
 
 
+class PoolClaimCountIsServerTruthTest(_PlatformTaskFixture):
+    """عددُ المطالبين يأتي من الحمولة — والواجهةُ لا تستطيع عدَّه بنفسها.
+
+    قائمةُ إسنادات الموظّف مقصورةٌ عليه، وبطاقةُ المجمَع لا تُعرَض إلا لمن لا
+    إسنادَ له فيها: فالعدُّ في المتصفّح **صفرٌ بحكم البناء** لا معلومةٌ ناقصة.
+    """
+
+    def test_the_manager_sees_the_real_claim_count(self):
+        task = create_platform_task(
+            actor=self.manager, title="مهمّةُ مجمَعٍ بحدّ ثلاثة",
+            audience=PlatformTask.AUDIENCE_OPEN, claim_limit=3,
+        )
+        claim_platform_task(task=task, employee=self.employee_a)
+        claim_platform_task(task=task, employee=self.employee_b)
+
+        self.client.force_authenticate(self.manager)
+        response = self.client.get("/api/platform/ops/tasks/")
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        row = next(item for item in rows if item["id"] == task.pk)
+        self.assertEqual(row["claimed_count"], 2, row)
+
+    def test_the_third_employee_sees_the_two_claims_of_his_colleagues(self):
+        """**الفخُّ الذي يحرسه هذا الاختبار**: عدٌّ يُحسَب من زاوية المستدعي.
+
+        الموظّفُ الثالثُ لا يرى إسنادَي زميلَيه بحكم النطاق، فأيُّ عدٍّ مبنيٍّ على
+        ما يراه — في الواجهة أو في مُسلسِلٍ يقرأ `request.user` — يُخرج صفراً
+        يبدو معلومةً وهو عدمُها. والرقمُ من صفوف المهمّة نفسِها لا من نطاق قارئها.
+        """
+        task = create_platform_task(
+            actor=self.manager, title="مهمّةُ مجمَعٍ يراها الثالث",
+            audience=PlatformTask.AUDIENCE_OPEN, claim_limit=3,
+        )
+        claim_platform_task(task=task, employee=self.employee_a)
+        claim_platform_task(task=task, employee=self.employee_b)
+
+        self.client.force_authenticate(self.user_c)
+        response = self.client.get("/api/platform/ops/tasks/")
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        row = next(item for item in rows if item["id"] == task.pk)
+        self.assertEqual(
+            row["claimed_count"], 2,
+            "الموظّفُ الثالثُ يجب أن يرى مطالبةَ زميلَيه وإن لم يرَ إسنادَيهما.",
+        )
+
+    def test_a_freshly_created_task_carries_the_count_too(self):
+        """حمولةُ الإنشاء تخرج من كائنٍ بلا حسابٍ مسبق — فلا تُسقِط الحقلَ ولا ترفع خطأً."""
+        self.client.force_authenticate(self.manager)
+        response = self.client.post(
+            "/api/platform/ops/tasks/create/",
+            {"title": "مهمّةٌ للتوّ", "audience": PlatformTask.AUDIENCE_INDIVIDUAL,
+             "employee_ids": [self.employee_a.pk]},
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.data["claimed_count"], 1, response.data)
+
+    def test_the_count_does_not_add_a_query_per_row(self):
+        for index in range(4):
+            pool = create_platform_task(
+                actor=self.manager, title=f"مجمَعٌ {index}", audience=PlatformTask.AUDIENCE_OPEN,
+            )
+            claim_platform_task(task=pool, employee=self.employee_a)
+
+        self.client.force_authenticate(self.manager)
+        # استعلامٌ واحدٌ لا غير: العدُّ استعلامٌ فرعيٌّ **داخل** جملة الاختيار،
+        # فأربعُ مهامٍّ وأربعُ مطالباتٍ تُقرَأ كما تُقرَأ واحدة.
+        with self.assertNumQueries(1):
+            self.client.get("/api/platform/ops/tasks/")
+
+
+class WorkspaceNotesReachTheManagerNamedTest(_PlatformTaskFixture):
+    """ملاحظةُ الموظّف على مهمّته وُجدت ليقرأها السوبر أدمن — ومعرَّفٌ عدديٌّ لا يُقرأ."""
+
+    def test_the_manager_sees_the_writer_and_the_task_title(self):
+        task = create_platform_task(
+            actor=self.manager, title="مهمّةٌ فيها ملاحظة", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        add_platform_workspace_note(employee=self.employee_a, body="اتّصلتُ بالزبون مرّتين.", task=task)
+
+        self.client.force_authenticate(self.manager)
+        response = self.client.get("/api/platform/ops/workspace-notes/")
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        self.assertEqual(len(rows), 1, rows)
+        self.assertEqual(rows[0]["employee_name"], self.user_a.username)
+        self.assertEqual(rows[0]["task_title"], "مهمّةٌ فيها ملاحظة")
+
+    def test_a_general_note_carries_an_empty_task_title(self):
+        add_platform_workspace_note(employee=self.employee_a, body="ملاحظةٌ عمومية.", task=None)
+
+        self.client.force_authenticate(self.manager)
+        response = self.client.get("/api/platform/ops/workspace-notes/")
+        rows = response.data["results"] if isinstance(response.data, dict) else response.data
+        self.assertIsNone(rows[0]["task"])
+        self.assertEqual(rows[0]["task_title"], "")
+
+
 class _HttpScopeFixture(_PlatformTaskFixture):
     """تركيبُ مهمّتين فرديّتين لموظّفَين — **بلا اختباراتٍ في هذا الصنف**.
 

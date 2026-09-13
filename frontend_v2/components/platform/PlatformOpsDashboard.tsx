@@ -28,6 +28,7 @@ import { ChampionsPanel } from "./ChampionsPanel";
 import { ProfitabilityPanel } from "./ProfitabilityPanel";
 import { PerformanceReviewRequestsPanel } from "./PerformanceReviewRequestsPanel";
 import { MeetingsPanel } from "./MeetingsPanel";
+import { PlatformTasksAdminPanel } from "./PlatformTasksAdminPanel";
 import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
 import { EmployeeProfileDrawer } from "./EmployeeProfileDrawer";
 import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
@@ -40,7 +41,7 @@ import { LayoutDashboard, ClipboardList, DoorOpen, CalendarClock } from "lucide-
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
   | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys" | "champions"
-  | "profitability" | "review_requests" | "workspace_room" | "meetings";
+  | "profitability" | "review_requests" | "workspace_room" | "meetings" | "staff_tasks";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -313,6 +314,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab("staff_tasks")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "staff_tasks" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          مهام الموظفين
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab("catalog")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
             activeTab === "catalog" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
@@ -456,6 +466,7 @@ export const PlatformOpsDashboard: React.FC = () => {
       </nav>
 
       {activeTab === "work_orders" && <WorkOrdersPanel />}
+      {activeTab === "staff_tasks" && <PlatformTasksAdminPanel />}
       {activeTab === "catalog" && <ServiceUnitCatalogPanel />}
       {activeTab === "usage_ledger" && <ServiceUsageLedgerPanel />}
       {activeTab === "pilot_settings" && <PilotSettingsPanel />}

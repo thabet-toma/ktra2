@@ -1288,6 +1288,21 @@ class PlatformTaskSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     audience_display = serializers.CharField(source="get_audience_display", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+    claimed_count = serializers.SerializerMethodField()
+
+    def get_claimed_count(self, obj) -> int:
+        """عددُ من أُسندت إليه المهمّةُ فعلاً — **من الخادم لا من قائمة المستدعي**.
+
+        بطاقةُ مهمّةِ المجمَع تُري الموظّفَ كم زميلاً طالب بها، وقائمةُ إسناداته
+        مقصورةٌ عليه فلا تعرف من غيرِه أحداً: عدٌّ في الواجهة من تلك القائمة صفرٌ
+        بحكم البناء لا معلومةٌ ناقصة. والقيمةُ المحسوبةُ في `queryset` الـViewSet
+        مُفضَّلةٌ حين تكون موجودة، فلا استعلامَ لكلّ صفّ؛ وحمولةُ الإنشاء تخرج من
+        كائنٍ طازجٍ بلا حسابٍ مسبقٍ فتعدّ مرّةً واحدة.
+        """
+        annotated = getattr(obj, "claimed_count_annotated", None)
+        if annotated is not None:
+            return int(annotated)
+        return obj.assignments.count()
 
     class Meta:
         model = PlatformTask
@@ -1305,6 +1320,7 @@ class PlatformTaskSerializer(serializers.ModelSerializer):
             "claim_limit",
             "created_by",
             "created_by_name",
+            "claimed_count",
             "completed_at",
             "created_at",
             "updated_at",
@@ -1417,11 +1433,19 @@ class CreatePlatformEmployeeNoteSerializer(serializers.Serializer):
 
 
 class PlatformWorkspaceNoteSerializer(serializers.ModelSerializer):
-    """ملاحظةُ الموظّف نفسِه — عمومية أو على مهمّةٍ مُسندةٍ له."""
+    """ملاحظةُ الموظّف نفسِه — عمومية أو على مهمّةٍ مُسندةٍ له.
+
+    الاسمُ وعنوانُ المهمّة **للمدير لا للكاتب**: الموظّفُ يعرف نفسَه ومهامَّه،
+    وعِلّةُ وجود هذه الملاحظات في نصّ المالك أن يقرأها السوبر أدمن — ومعرّفٌ
+    عدديٌّ مجرَّدٌ لا يُقرأ.
+    """
+
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    task_title = serializers.CharField(source="task.title", read_only=True, default="")
 
     class Meta:
         model = PlatformWorkspaceNote
-        fields = ["id", "employee", "task", "body", "created_at"]
+        fields = ["id", "employee", "employee_name", "task", "task_title", "body", "created_at"]
 
 
 class CreatePlatformWorkspaceNoteSerializer(serializers.Serializer):
