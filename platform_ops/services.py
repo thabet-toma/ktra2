@@ -10688,16 +10688,32 @@ def review_platform_task_submission(
 
 
 def add_platform_employee_note(
-    *, employee: PlatformEmployee, author, body: str, visibility: str = PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+    *,
+    employee: PlatformEmployee,
+    author,
+    body: str,
+    visibility: str = PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+    task: PlatformTask | None = None,
 ) -> PlatformEmployeeNote:
-    """ملاحظةُ السوبر أدمن على موظّف — الافتراضُ آمنٌ: `EMPLOYEE` لا `MANAGER_ONLY`."""
+    """ملاحظةُ السوبر أدمن على موظّف — الافتراضُ آمنٌ: `EMPLOYEE` لا `MANAGER_ONLY`.
+
+    و`task` تربطها بمهمّةٍ بعينها. والقيدُ نظيرُ قيد `add_platform_workspace_note`
+    حرفاً بحرف: **مهمّةٌ ليست مُسندةً لهذا الموظّف مرفوضة** — ملاحظةٌ على مهمّةٍ
+    لا يراها صاحبُها تسكن في خيطٍ لا يفتحه أحد، وتُري الموظّفَ — إن كانت
+    `visibility=EMPLOYEE` — مهمّةً ليست له.
+    """
     body = str(body or "").strip()
     if not body:
         raise PlatformTaskError("body_required", "نصُّ الملاحظة مطلوب.")
     if visibility not in dict(PlatformEmployeeNote.VISIBILITY_CHOICES):
         raise PlatformTaskError("invalid_visibility", f"رؤيةٌ غيرُ صالحة: {visibility}")
+    if task is not None and not PlatformTaskAssignment.objects.filter(task=task, employee=employee).exists():
+        raise PlatformTaskError(
+            "task_not_assigned_to_employee",
+            "هذه المهمّةُ ليست مُسندةً لهذا الموظّف — لا يصحّ أن تُكتَب ملاحظةٌ له عليها.",
+        )
     note = PlatformEmployeeNote.objects.create(
-        employee=employee, author=author, body=body, visibility=visibility,
+        employee=employee, author=author, body=body, visibility=visibility, task=task,
     )
     log_platform_activity(
         employee=employee,
@@ -10709,6 +10725,7 @@ def add_platform_employee_note(
             "operation": "add_platform_employee_note",
             "actor_user_id": getattr(author, "pk", None),
             "visibility": visibility,
+            "task_id": getattr(task, "pk", None),
         },
     )
     return note

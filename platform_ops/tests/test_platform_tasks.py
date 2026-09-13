@@ -12,6 +12,7 @@ from rest_framework.test import APIClient
 from platform_ops.models import (
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformEmployeeNote,
     PlatformTask,
     PlatformTaskAssignment,
     PlatformTaskSubmission,
@@ -169,6 +170,99 @@ class SuspendedEmployeeCannotClaimTest(_PlatformTaskFixture):
             claim_platform_task(task=task, employee=self.employee_suspended)
         self.assertEqual(ctx.exception.code, "employee_not_active")
         self.assertEqual(PlatformTaskAssignment.objects.filter(task=task).count(), 0)
+
+
+class ManagerNoteOnATaskTest(_PlatformTaskFixture):
+    """ملاحظةُ المدير تُكتَب **على المهمّة** لا على صاحبها وحده (212-M3).
+
+    كان لها مكانان ولا واحدَ منهما المهمّة: `PlatformEmployeeNote` على الموظّف،
+    و`reviewer_notes` على **التسليم** أي لا وجودَ لها قبل أن يُسلّم. فمن لحظةِ
+    الإسناد إلى لحظةِ التسليم لم يكن للمدير مكانٌ يكتب فيه كلمةً واحدة — بينما
+    الموظّفُ يكتب على مهمّته منذ 212-E.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.task = create_platform_task(
+            actor=self.manager, title="مهمّةٌ عليها حديث",
+            audience=PlatformTask.AUDIENCE_INDIVIDUAL, employee_ids=[self.employee_a.pk],
+        )
+        self.other_task = create_platform_task(
+            actor=self.manager, title="مهمّةُ زميلٍ آخر",
+            audience=PlatformTask.AUDIENCE_INDIVIDUAL, employee_ids=[self.employee_b.pk],
+        )
+
+    def test_a_note_on_an_assigned_task_is_kept_with_its_task(self):
+        note = add_platform_employee_note(
+            employee=self.employee_a, author=self.manager, body="ركّز على البند الثاني.", task=self.task,
+        )
+        self.assertEqual(note.task_id, self.task.pk)
+
+    def test_a_note_on_a_task_that_is_not_this_employees_is_refused(self):
+        """ملاحظةٌ على مهمّةِ غيره تسكن خيطاً لا يفتحه، وتُريه مهمّةً ليست له."""
+        with self.assertRaises(PlatformOpsError) as caught:
+            add_platform_employee_note(
+                employee=self.employee_a, author=self.manager,
+                body="ملاحظةٌ في غير محلّها.", task=self.other_task,
+            )
+        self.assertEqual(caught.exception.code, "task_not_assigned_to_employee")
+
+    def test_a_note_without_a_task_stays_a_note_about_the_employee(self):
+        note = add_platform_employee_note(
+            employee=self.employee_a, author=self.manager, body="أداؤه هذا الشهر ممتاز.",
+        )
+        self.assertIsNone(note.task_id)
+
+    def test_the_endpoint_refuses_a_task_that_does_not_exist(self):
+        self.client.force_authenticate(self.manager)
+        response = self.client.post(
+            "/api/platform/ops/employee-notes/create/",
+            {"employee": self.employee_a.pk, "body": "على مهمّةٍ وهميّة.", "task": 10 ** 7},
+            format="json",
+        )
+        self.assertEqual(response.status_code, 404)
+        self.assertEqual(response.json().get("code"), "task_not_found")
+
+    def test_the_task_filter_narrows_and_never_widens(self):
+        """المرشِّحُ يختار مهمّةً، **ولا يمنح رؤيةً**: الموظّفُ يرى ما له وحدَه.
+
+        وما يمسكه هذا التأكيدُ بالضبط هو **بقاءُ تضييقِ الرؤية** مع المرشِّح:
+        نفسُ المهمّةِ تعطي المديرَ ملاحظتَين وتعطي صاحبَها واحدةً — فإسقاطُ شرط
+        `visibility=EMPLOYEE` يُسقِطه. ولا يدّعي الحارسُ أنّ **ترتيبَ** الشرطين
+        هو المهمّ: `.filter()` مكرَّرةٌ على النموذج نفسِه تُنتج الاستعلامَ ذاتَه
+        مهما تقدّم أحدُهما. ما يقتل هنا هو **استبدالُ** مجموعة الاستعلام لا
+        تضييقُها — أن يُكتَب `qs = PlatformEmployeeNote.objects.filter(task=…)`
+        بدل `qs = qs.filter(task_id=…)`؛ وذلك ما يسقط به هذا التأكيدُ أيضاً.
+        """
+        add_platform_employee_note(
+            employee=self.employee_a, author=self.manager, body="لك أنت.",
+            task=self.task, visibility=PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+        )
+        add_platform_employee_note(
+            employee=self.employee_a, author=self.manager, body="للإدارة وحدها.",
+            task=self.task, visibility=PlatformEmployeeNote.VISIBILITY_MANAGER_ONLY,
+        )
+
+        self.client.force_authenticate(self.manager)
+        manager_bodies = {
+            row["body"] for row in self.client.get(
+                f"/api/platform/ops/employee-notes/?task={self.task.pk}"
+            ).json()
+        }
+        self.assertEqual(manager_bodies, {"لك أنت.", "للإدارة وحدها."})
+
+        self.client.force_authenticate(self.user_a)
+        employee_rows = self.client.get(
+            f"/api/platform/ops/employee-notes/?task={self.task.pk}"
+        ).json()
+        self.assertEqual([row["body"] for row in employee_rows], ["لك أنت."])
+        self.assertEqual(employee_rows[0]["task"], self.task.pk)
+        self.assertEqual(employee_rows[0]["task_title"], self.task.title)
+
+    def test_a_non_numeric_task_filter_is_a_bad_request_not_a_server_error(self):
+        self.client.force_authenticate(self.manager)
+        response = self.client.get("/api/platform/ops/employee-notes/?task=abc")
+        self.assertEqual(response.status_code, 400)
 
 
 class ManagerNoteIsAuditedTest(_PlatformTaskFixture):

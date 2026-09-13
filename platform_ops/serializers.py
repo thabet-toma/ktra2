@@ -1416,10 +1416,14 @@ class PlatformEmployeeNoteSerializer(serializers.ModelSerializer):
 
     author_name = serializers.CharField(source="author.username", read_only=True, default="")
     visibility_display = serializers.CharField(source="get_visibility_display", read_only=True)
+    task_title = serializers.CharField(source="task.title", read_only=True, default="")
 
     class Meta:
         model = PlatformEmployeeNote
-        fields = ["id", "employee", "body", "author", "author_name", "visibility", "visibility_display", "created_at"]
+        fields = [
+            "id", "employee", "task", "task_title", "body", "author", "author_name",
+            "visibility", "visibility_display", "created_at",
+        ]
 
 
 class CreatePlatformEmployeeNoteSerializer(serializers.Serializer):
@@ -1427,6 +1431,8 @@ class CreatePlatformEmployeeNoteSerializer(serializers.Serializer):
 
     employee = serializers.IntegerField(min_value=1)
     body = serializers.CharField(allow_blank=False)
+    #: مهمّةٌ اختياريّة — الملاحظةُ بلا مهمّةٍ تبقى ملاحظةً عن الموظّف عموماً.
+    task = serializers.IntegerField(min_value=1, required=False, allow_null=True, default=None)
     visibility = serializers.ChoiceField(
         choices=PlatformEmployeeNote.VISIBILITY_CHOICES, required=False, default=PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
     )

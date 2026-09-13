@@ -3771,6 +3771,21 @@ class PlatformEmployeeNote(models.Model):
         related_name="platform_notes",
         verbose_name="الموظّف",
     )
+    #: المهمّةُ التي كُتبت الملاحظةُ عليها — `None` لملاحظةٍ عن الموظّف عموماً.
+    #:
+    #: بدونه كان المديرُ **لا يستطيع الكتابةَ على مهمّة** أصلاً: ملاحظتُه على
+    #: الموظّف، و`reviewer_notes` على **التسليم** أي لا وجودَ لها قبل أن يُسلّم.
+    #: فمن لحظة الإسناد إلى لحظة التسليم لا مكانَ لكلمةٍ واحدةٍ منه — بينما
+    #: الموظّفُ يكتب على مهمّته منذ 212-E (`PlatformWorkspaceNote.task`).
+    #: والاثنتان معاً تصنعان خيطَ حديثٍ واحداً على المهمّة.
+    task = models.ForeignKey(
+        PlatformTask,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="manager_notes",
+        verbose_name="المهمّة (اختياري)",
+    )
     body = models.TextField(verbose_name="نصّ الملاحظة")
     # الكاتبُ قد يُحذف حسابُه وتبقى ملاحظتُه — نصُّها دليلٌ ولو غاب قائلُه.
     author = models.ForeignKey(
@@ -3795,6 +3810,7 @@ class PlatformEmployeeNote(models.Model):
         ordering = ["-created_at", "-id"]
         indexes = [
             models.Index(fields=["employee", "-created_at"]),
+            models.Index(fields=["task", "-created_at"]),
         ]
 
     def __str__(self):

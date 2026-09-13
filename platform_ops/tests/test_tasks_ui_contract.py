@@ -19,7 +19,11 @@ from unittest import TestCase
 
 from django.urls import get_resolver
 
-from platform_ops.serializers import PlatformTaskSerializer, PlatformWorkspaceNoteSerializer
+from platform_ops.serializers import (
+    PlatformEmployeeNoteSerializer,
+    PlatformTaskSerializer,
+    PlatformWorkspaceNoteSerializer,
+)
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend_v2"
@@ -297,3 +301,84 @@ class TaskPanelsFollowRepoStyleTest(TestCase):
             self.assertIn(token, staff, f"لوحةُ الموظّف لا تستعمل `{token}` — القشرةُ داكنةٌ بقرار المالك.")
         offenders = [cls for cls in re.findall(r'className="([^"]*)"', staff) if "bg-white" in cls]
         self.assertEqual(offenders, [], f"سطحٌ فاتحٌ داخل القشرة الداكنة: {offenders}")
+
+
+class TheAssignedTaskCanBeOpenedTest(TestCase):
+    """«لمّا أُسند مهمّة ما بقدر أفتحها» — بلاغُ المالك، وكان صحيحاً (212-M1 · M2).
+
+    كان «جدولُ المهامّ» جدولاً للقراءة: لا `onClick` على صفٍّ ولا شاشةَ تفصيل.
+    والشيءُ الوحيدُ القابلُ للفتح **تسليمٌ**، وهو لا يوجد إلّا بعد أن يُسلّم
+    الموظّف — فمن لحظةِ الإسناد إلى لحظةِ التسليم لا شيءَ يُفتَح إطلاقاً.
+
+    ومعه (M2) كان العمودُ يعرض **عدداً** بجانب «موظّفٌ واحد» — وهي عبارةُ
+    *نطاق* الإسناد لا اسمُ أحد — فقرأها المالكُ اسمَ الموظّف ولم يكن اسماً.
+    الجدولُ كلُّه لم يكن يقول لمن أُسندت المهمّة.
+    """
+
+    def setUp(self):
+        self.admin = ADMIN.read_text(encoding="utf-8")
+
+    def test_the_row_opens_a_detail_view(self):
+        violations = []
+        if "onClick={() => openTask(task)}" not in self.admin:
+            violations.append("صفُّ الجدول لا يفتح المهمّة")
+        if "{selectedTask && <section" not in self.admin:
+            violations.append("لا درجَ تفصيلٍ للمهمّة المفتوحة")
+        if "setSelectedTaskId(null)" not in self.admin:
+            violations.append("لا مخرجَ من الدرج — حالةٌ لا يُرجَع منها")
+        self.assertEqual(violations, [], f"المهمّةُ ما زالت لا تُفتَح: {violations}")
+
+    def test_the_detail_view_names_the_people_and_shows_their_state(self):
+        """الدرجُ يقرأ حقولَ الإسناد الحقيقيّة لا عدداً مشتقّاً."""
+        required = ("assignment.employee_name", "assignment.status_display", "submission.employee_name")
+        missing = [field for field in required if field not in self.admin]
+        self.assertEqual(missing, [], f"درجُ المهمّة لا يعرض: {missing}")
+
+    def test_the_table_says_who_not_only_how_many(self):
+        violations = []
+        if "assignment.employee_name" not in self.admin:
+            violations.append("الجدولُ لا يقرأ اسمَ المُسنَد إليه")
+        if "formatNumber(taskAssignments.length)" in self.admin:
+            violations.append("عادَ عمودُ الأسماء عدّاً مجرّداً")
+        # «الجمهور» **رأسَ عمودٍ** كان يُقرأ اسمَ موظّف؛ الصادقُ «نطاق الإسناد».
+        # والتسميةُ نفسُها في نموذج الإنشاء سليمةٌ (اختيارُ نطاق)، فالمرساةُ
+        # وسمُ الرأس بعينه لا الكلمةُ أينما وقعت.
+        if '<th className="p-2">الجمهور</th>' in self.admin:
+            violations.append("رأسُ عمودِ الجدول ما زال «الجمهور» فيُقرأ اسماً")
+        self.assertEqual(violations, [], f"الجدولُ لا يقول لمن أُسندت: {violations}")
+
+
+class TheManagerWritesOnTheTaskItselfTest(TestCase):
+    """ملاحظةُ المدير كان لها مكانان، ولا واحدَ منهما المهمّة (212-M3).
+
+    `PlatformEmployeeNote` على **الموظّف**، و`reviewer_notes` على **التسليم** أي
+    لا وجودَ لها قبل أن يُسلّم. والموظّفُ يكتب على مهمّته منذ 212-E. فصار للحقل
+    `task` نظيرٌ عند المدير، وللاثنين خيطٌ واحدٌ مرتَّبٌ بالوقت.
+    """
+
+    def test_the_payload_carries_the_task_of_the_note(self):
+        """حارسُ واجهةٍ بلا نظيرٍ على الحمولة يحرس نصّاً لا سلوكاً."""
+        fields = set(PlatformEmployeeNoteSerializer().fields)
+        self.assertTrue(
+            {"task", "task_title"} <= fields,
+            f"حمولةُ الملاحظة بلا مهمّتها: {sorted(fields)}",
+        )
+
+    def test_the_admin_panel_sends_the_open_task_with_the_note(self):
+        admin = ADMIN.read_text(encoding="utf-8")
+        violations = []
+        if "createPlatformEmployeeNote(Number(taskNoteEmployee), taskNoteBody, taskNoteVisibility, selectedTask.id)" not in admin:
+            violations.append("نموذجُ الدرج لا يُرسل معرّفَ المهمّة")
+        if "threadFor(selectedTask.id)" not in admin:
+            violations.append("لا خيطَ يجمع ملاحظاتِ الطرفين على المهمّة")
+        self.assertEqual(violations, [], f"الملاحظةُ لا تُكتَب على المهمّة: {violations}")
+
+    def test_the_employee_reads_it_where_the_task_is(self):
+        """ملاحظةٌ على مهمّةٍ تُقرأ عند المهمّة، لا في قائمةٍ أسفلَ الشاشة."""
+        staff = (TASKS_UI / "StaffTasksPanel.tsx").read_text(encoding="utf-8")
+        violations = []
+        if "managerNotesFor(assignment.task)" not in staff:
+            violations.append("بطاقةُ الإسناد لا تعرض ملاحظةَ المدير على مهمّتها")
+        if "note.task ? note.task_title" not in staff:
+            violations.append("القائمةُ العامّة لا تقول على أيّ مهمّةٍ كُتبت الملاحظة")
+        self.assertEqual(violations, [], f"ملاحظةُ المدير لا تصل الموظّفَ عند مهمّته: {violations}")

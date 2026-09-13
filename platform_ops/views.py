@@ -3892,7 +3892,11 @@ class PlatformEmployeeNoteViewSet(viewsets.ReadOnlyModelViewSet):
 
     permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
     serializer_class = PlatformEmployeeNoteSerializer
-    queryset = PlatformEmployeeNote.objects.select_related("author", "employee").order_by("-created_at")
+    queryset = (
+        PlatformEmployeeNote.objects
+        .select_related("author", "employee", "task")
+        .order_by("-created_at")
+    )
 
     def get_queryset(self):
         qs = super().get_queryset()
@@ -3913,6 +3917,13 @@ class PlatformEmployeeNoteViewSet(viewsets.ReadOnlyModelViewSet):
                 # فيصير خطأَ خادمٍ 500 على مُعامِلٍ خاطئ — ٤٠٠ هي الجواب.
                 raise ValidationError({"employee": ["يجب أن يكون معرّف الموظّف رقماً صحيحاً."]})
             qs = qs.filter(employee_id=int(raw))
+        # ‏`?task=` — خيطُ الحديث على مهمّةٍ بعينها في درج تفصيلها (212-M1).
+        # ويُطبَّق **بعد** تضييق غير المدير كنظيره، فلا يوسّع رؤيةَ أحد.
+        raw_task = self.request.query_params.get("task")
+        if raw_task:
+            if not str(raw_task).isdigit():
+                raise ValidationError({"task": ["يجب أن يكون معرّف المهمّة رقماً صحيحاً."]})
+            qs = qs.filter(task_id=int(raw_task))
         return qs
 
     @action(detail=False, methods=["post"], url_path="create")
@@ -3930,12 +3941,22 @@ class PlatformEmployeeNoteViewSet(viewsets.ReadOnlyModelViewSet):
                 {"detail": "موظّفُ المنصّة غير موجود.", "code": "employee_not_found"},
                 status=status.HTTP_404_NOT_FOUND,
             )
+        task = None
+        task_id = payload.validated_data.get("task")
+        if task_id is not None:
+            task = PlatformTask.objects.filter(pk=task_id).first()
+            if task is None:
+                return Response(
+                    {"detail": "المهمّةُ غير موجودة.", "code": "task_not_found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
         try:
             note = add_platform_employee_note(
                 employee=employee,
                 author=request.user,
                 body=payload.validated_data["body"],
                 visibility=payload.validated_data["visibility"],
+                task=task,
             )
         except PlatformOpsError as exc:
             return _service_error(exc)
