@@ -236,6 +236,20 @@ EXCUSED_ROUTES = {
         "فعلٌ تفصيليٌّ (GET) — دفترُ الحضور كاملاً لمدير العمليات وحده.",
     "/api/platform/ops/meetings/1/decide-excuse/":
         "فعلٌ تفصيليٌّ (POST) — مدير العمليات وحده.",
+    "/api/platform/ops/tasks/create/":
+        "فعلُ إنشاءٍ (POST) — مدير العمليات وحده (`create_task`)، محروسٌ صراحةً بفحصٍ داخليّ.",
+    "/api/platform/ops/tasks/1/claim/":
+        "فعلٌ تفصيليٌّ بـpk، وكتابةٌ (POST)؛ محكومٌ بـ`get_object()` على نطاق «إسنادي أو مهامّ المجمَع» أصلاً.",
+    "/api/platform/ops/assignments/1/accept/":
+        "فعلٌ تفصيليٌّ بـpk يعتمد `get_object()` على `get_queryset()` المضيَّقة، ويضيف فحصَ ملكيّةٍ صريحاً ثانياً (`_require_owner`).",
+    "/api/platform/ops/assignments/1/submit/":
+        "فعلٌ تفصيليٌّ بـpk — نفس عزل `accept/` أعلاه بالضبط.",
+    "/api/platform/ops/submissions/1/review/":
+        "فعلٌ تفصيليٌّ (POST) بـpk — لمدير العمليات وحده، محروسٌ صراحةً بفحصٍ داخليّ.",
+    "/api/platform/ops/employee-notes/create/":
+        "فعلُ إنشاءٍ (POST) — مدير العمليات وحده، محروسٌ صراحةً بفحصٍ داخليّ.",
+    "/api/platform/ops/workspace-notes/create/":
+        "فعلُ إنشاءٍ (POST)؛ الموظّفُ يُشتقّ من الجلسة (`request.user`) لا من معاملٍ يمكن تزويرُه.",
 }
 
 #: المسارات التي يُنفَّذ عليها فحصُ «لا صفَّ زميل» فعلياً في هذه المجموعة —
@@ -266,6 +280,18 @@ EXERCISED_ROUTES = frozenset({
     "/api/platform/ops/meetings/1/",
     "/api/platform/ops/meetings/1/check-in/",
     "/api/platform/ops/meetings/1/excuse/",
+    # مُنفَّذٌ في `test_platform_tasks.py` (212-E): مهامّ المنصّة الداخليّة — لا
+    # `employee_ops.Task` (مهامُّ موظّفي شركةِ زبونٍ بـ`tenant` FK).
+    "/api/platform/ops/tasks/",
+    "/api/platform/ops/tasks/1/",
+    "/api/platform/ops/assignments/",
+    "/api/platform/ops/assignments/1/",
+    "/api/platform/ops/submissions/",
+    "/api/platform/ops/submissions/1/",
+    "/api/platform/ops/employee-notes/",
+    "/api/platform/ops/employee-notes/1/",
+    "/api/platform/ops/workspace-notes/",
+    "/api/platform/ops/workspace-notes/1/",
 })
 # `champions/` مذكورةٌ في القائمتين معاً بقصد: هي مُستثناةٌ من فحص الملكيّة
 # (لوحةٌ جماعيّة لا صفَّ فرديّاً) لكنّ الاختبار يستدعيها فعلياً ليثبت أنّها

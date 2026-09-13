@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **842**
+عدد النقاط: **859**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -566,6 +566,10 @@
 | `/api/platform/ops/acquisition/` | `CustomerAcquisitionView` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/assignments/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/assignments/{pk}/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/assignments/{pk}/accept/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/assignments/{pk}/submit/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/billing-records/{pk}/` | `SubscriptionBillingRecordViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/champions/` | `ChampionsBoardView` | `platform_ops/views.py` |
@@ -584,6 +588,9 @@
 | `/api/platform/ops/compensation-policies/{pk}/update-draft/` | `EmployeeCompensationPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/compensation/close/` | `CompensationMonthCloseView` | `platform_ops/views.py` |
 | `/api/platform/ops/dashboard/` | `PlatformDashboardView` | `platform_ops/views.py` |
+| `/api/platform/ops/employee-notes/` | `PlatformEmployeeNoteViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employee-notes/create/` | `PlatformEmployeeNoteViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employee-notes/{pk}/` | `PlatformEmployeeNoteViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/my-companies/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
@@ -678,6 +685,9 @@
 | `/api/platform/ops/service-unit-catalogs/{pk}/activate/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/service-unit-catalogs/{pk}/clone/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/service-unit-catalogs/{pk}/update-entries/` | `ServiceUnitCatalogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/submissions/` | `PlatformTaskSubmissionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/submissions/{pk}/` | `PlatformTaskSubmissionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/submissions/{pk}/review/` | `PlatformTaskSubmissionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/draft/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscription-policies/{pk}/` | `SubscriptionPolicyViewSet` | `platform_ops/views.py` |
@@ -698,6 +708,10 @@
 | `/api/platform/ops/subscriptions/{pk}/suspend/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/update-settings/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/withdraw-cancellation/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/create/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/{pk}/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/{pk}/claim/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/{pk}/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/{pk}/reverse/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
@@ -713,6 +727,9 @@
 | `/api/platform/ops/work-orders/{pk}/document-links/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/link-document/` | `WorkOrderViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/work-orders/{pk}/transition/` | `WorkOrderViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/workspace-notes/` | `PlatformWorkspaceNoteViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/workspace-notes/create/` | `PlatformWorkspaceNoteViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/workspace-notes/{pk}/` | `PlatformWorkspaceNoteViewSet` | `platform_ops/views.py` |
 | `/api/platform/plan-pricing/` | `platform_plan_pricing` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/` | `platform_super_admins` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/<int:pk>/` | `platform_super_admin_detail` | `core/platform_admin_api.py` |

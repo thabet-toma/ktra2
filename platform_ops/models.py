@@ -1602,6 +1602,8 @@ class PlatformNotification(models.Model):
         SLA_BREACH = "sla_breach", "تجاوز أجل"
         LOW_SCORE = "low_score", "تقييم منخفض"
         QUOTA_EXCEEDED = "quota_exceeded", "تجاوز باقة"
+        TASK_ASSIGNED = "task_assigned", "إسنادُ مهمّة"
+        TASK_SUBMISSION_REVIEWED = "task_submission_reviewed", "مراجعةُ تسليم مهمّة"
 
     recipient = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -3530,4 +3532,304 @@ class PlatformMeetingAttendance(models.Model):
 
     def __str__(self):
         return f"{self.meeting}: {self.employee} ({self.get_status_display()})"
+
+
+class PlatformTask(models.Model):
+    """مهمّةٌ لموظّفي عمليات المنصة أنفسِهم — لا تُخلَط بـ`employee_ops.Task` (212-E).
+
+    استثناءٌ متعمَّدٌ من قاعدة `tenant FK` كنظيرتها `PlatformEmployee`: هذه مهامُّ
+    فريق كترا الداخليّ لا مهامَّ موظّفي شركةٍ زبون. الحالةُ **مشتقّةٌ من الإسنادات**
+    لا حقلاً يُكتَب مباشرةً (`services.py` هو من يضبطها)، ولا توجد حالةُ `REJECTED`
+    نهائيّةً هنا بقرار المالك الصريح: الرفضُ يعيد المهمّةَ مفتوحة، فإمّا إسنادٌ
+    يعود `RETURNED` (مُسندة) أو يُحذَف (مجمَع) — لا طريقَ يقفل المهمّةَ بالرفض.
+    """
+
+    PRIORITY_LOW = "LOW"
+    PRIORITY_MEDIUM = "MEDIUM"
+    PRIORITY_HIGH = "HIGH"
+    PRIORITY_URGENT = "URGENT"
+
+    PRIORITY_CHOICES = [
+        (PRIORITY_LOW, "منخفضة"),
+        (PRIORITY_MEDIUM, "متوسطة"),
+        (PRIORITY_HIGH, "مرتفعة"),
+        (PRIORITY_URGENT, "عاجلة"),
+    ]
+
+    STATUS_OPEN = "OPEN"
+    STATUS_NEW = "NEW"
+    STATUS_IN_PROGRESS = "IN_PROGRESS"
+    STATUS_WAITING_FOR_REVIEW = "WAITING_FOR_REVIEW"
+    STATUS_COMPLETED = "COMPLETED"
+
+    STATUS_CHOICES = [
+        (STATUS_OPEN, "مجمَع بلا إسناد"),
+        (STATUS_NEW, "جديدة"),
+        (STATUS_IN_PROGRESS, "قيد التنفيذ"),
+        (STATUS_WAITING_FOR_REVIEW, "بانتظار المراجعة"),
+        (STATUS_COMPLETED, "مكتملة"),
+    ]
+
+    AUDIENCE_INDIVIDUAL = "INDIVIDUAL"
+    AUDIENCE_SPECIFIC = "SPECIFIC"
+    AUDIENCE_ALL = "ALL"
+    AUDIENCE_OPEN = "OPEN"
+
+    AUDIENCE_CHOICES = [
+        (AUDIENCE_INDIVIDUAL, "موظّفٌ واحد"),
+        (AUDIENCE_SPECIFIC, "موظّفون محدَّدون"),
+        (AUDIENCE_ALL, "كلُّ الموظّفين"),
+        (AUDIENCE_OPEN, "مجمَع — يختار الموظّف"),
+    ]
+
+    title = models.CharField(max_length=255, verbose_name="عنوان المهمّة")
+    description = models.TextField(blank=True, default="", verbose_name="الوصف")
+    priority = models.CharField(
+        max_length=20,
+        choices=PRIORITY_CHOICES,
+        default=PRIORITY_MEDIUM,
+        verbose_name="الأولوية",
+    )
+    status = models.CharField(
+        max_length=25,
+        choices=STATUS_CHOICES,
+        default=STATUS_NEW,
+        verbose_name="الحالة",
+    )
+    audience = models.CharField(
+        max_length=15,
+        choices=AUDIENCE_CHOICES,
+        verbose_name="نطاق الإسناد",
+    )
+    due_date = models.DateField(null=True, blank=True, verbose_name="تاريخ الاستحقاق")
+    claim_limit = models.PositiveIntegerField(
+        null=True,
+        blank=True,
+        verbose_name="حدُّ المطالبين",
+        help_text="لمهمّة المجمَع فقط: كم موظّفاً يجوز أن يطالب بها. لا حدّ إن ترك فارغاً.",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشئ بواسطة",
+    )
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ الاكتمال")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "مهمّة موظّف منصّة"
+        verbose_name_plural = "مهامّ موظّفي المنصّة"
+        indexes = [
+            models.Index(fields=["status", "-created_at"]),
+            models.Index(fields=["audience", "status"]),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.status})"
+
+
+class PlatformTaskAssignment(models.Model):
+    """إسنادُ مهمّةِ منصّةٍ لموظّف — لكلّ موظّفٍ حالتُه الخاصّة."""
+
+    STATUS_OFFERED = "OFFERED"
+    STATUS_ACCEPTED = "ACCEPTED"
+    STATUS_IN_PROGRESS = "IN_PROGRESS"
+    STATUS_SUBMITTED = "SUBMITTED"
+    STATUS_COMPLETED = "COMPLETED"
+    STATUS_RETURNED = "RETURNED"
+
+    STATUS_CHOICES = [
+        (STATUS_OFFERED, "مُسندةٌ لم تُقبَل بعد"),
+        (STATUS_ACCEPTED, "مقبولة"),
+        (STATUS_IN_PROGRESS, "قيد التنفيذ"),
+        (STATUS_SUBMITTED, "تم التسليم"),
+        (STATUS_COMPLETED, "مكتملة"),
+        (STATUS_RETURNED, "أُعيدت (رُفض تسليمها)"),
+    ]
+
+    task = models.ForeignKey(
+        PlatformTask,
+        on_delete=models.CASCADE,
+        related_name="assignments",
+        verbose_name="المهمّة",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="platform_task_assignments",
+        verbose_name="الموظّف",
+    )
+    status = models.CharField(
+        max_length=15,
+        choices=STATUS_CHOICES,
+        default=STATUS_OFFERED,
+        verbose_name="حالة الإسناد",
+    )
+    offered_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإسناد")
+    accepted_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ القبول")
+    submitted_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ آخر تسليم")
+    completed_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ الاكتمال")
+
+    class Meta:
+        verbose_name = "إسناد مهمّة موظّف منصّة"
+        verbose_name_plural = "إسنادات مهامّ موظّفي المنصّة"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["task", "employee"],
+                name="platform_ops_task_assignment_task_employee_uniq",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["employee", "status"]),
+            models.Index(fields=["task", "status"]),
+        ]
+
+    def __str__(self):
+        return f"إسناد {self.task_id} -> موظّف {self.employee_id} ({self.status})"
+
+
+class PlatformTaskSubmission(models.Model):
+    """تسليمُ مهمّةِ منصّةٍ من موظّفٍ مُسندٍ إليه — تتعدّد ولا تُدهَس."""
+
+    DECISION_PENDING = "PENDING"
+    DECISION_APPROVED_FULL = "APPROVED_FULL"
+    DECISION_APPROVED_PARTIAL = "APPROVED_PARTIAL"
+    DECISION_REJECTED = "REJECTED"
+
+    DECISION_CHOICES = [
+        (DECISION_PENDING, "قيد الانتظار"),
+        (DECISION_APPROVED_FULL, "قبول كامل"),
+        (DECISION_APPROVED_PARTIAL, "قبول جزئي — ما زال العمل مستمراً"),
+        (DECISION_REJECTED, "مرفوض"),
+    ]
+
+    task = models.ForeignKey(
+        PlatformTask,
+        on_delete=models.CASCADE,
+        related_name="submissions",
+        verbose_name="المهمّة",
+    )
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="platform_task_submissions",
+        verbose_name="الموظّف",
+    )
+    body = models.TextField(blank=True, default="", verbose_name="ملاحظاتُ الموظّف على التسليم")
+    decision = models.CharField(
+        max_length=20,
+        choices=DECISION_CHOICES,
+        default=DECISION_PENDING,
+        verbose_name="قرار المراجعة",
+    )
+    reviewer = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="المراجِع",
+    )
+    reviewer_notes = models.TextField(blank=True, default="", verbose_name="ملاحظات المراجِع")
+    reviewed_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ المراجعة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "تسليم مهمّة موظّف منصّة"
+        verbose_name_plural = "تسليمات مهامّ موظّفي المنصّة"
+        indexes = [
+            models.Index(fields=["task", "-created_at"]),
+            models.Index(fields=["employee", "decision"]),
+        ]
+
+    def __str__(self):
+        return f"تسليم مهمّة {self.task_id} من {self.employee_id} ({self.decision})"
+
+
+class PlatformEmployeeNote(models.Model):
+    """ملاحظةُ السوبر أدمن على موظّف منصّة — بكاتبٍ ونصٍّ ورؤيةٍ صريحة.
+
+    `visibility` ليست زينة: الشكوى الأولى في #212 كانت أنّ الموظّفَ رأى ملاحظاتِ
+    تطويرٍ ليست له، فالافتراضُ آمنٌ (`EMPLOYEE`) والاستثناءُ صريح (`MANAGER_ONLY`).
+    """
+
+    VISIBILITY_EMPLOYEE = "EMPLOYEE"
+    VISIBILITY_MANAGER_ONLY = "MANAGER_ONLY"
+
+    VISIBILITY_CHOICES = [
+        (VISIBILITY_EMPLOYEE, "يراها الموظّف"),
+        (VISIBILITY_MANAGER_ONLY, "للمدير فقط"),
+    ]
+
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="platform_notes",
+        verbose_name="الموظّف",
+    )
+    body = models.TextField(verbose_name="نصّ الملاحظة")
+    # الكاتبُ قد يُحذف حسابُه وتبقى ملاحظتُه — نصُّها دليلٌ ولو غاب قائلُه.
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="الكاتب",
+    )
+    visibility = models.CharField(
+        max_length=15,
+        choices=VISIBILITY_CHOICES,
+        default=VISIBILITY_EMPLOYEE,
+        verbose_name="الرؤية",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "ملاحظة على موظّف منصّة"
+        verbose_name_plural = "ملاحظات موظّفي المنصّة"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["employee", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"ملاحظة على {self.employee_id}"
+
+
+class PlatformWorkspaceNote(models.Model):
+    """ملاحظةُ الموظّف نفسِه — عمومية بمساحة العمل، أو على مهمّةٍ مُسندةٍ له."""
+
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        related_name="workspace_notes",
+        verbose_name="الموظّف الكاتب",
+    )
+    task = models.ForeignKey(
+        PlatformTask,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="workspace_notes",
+        verbose_name="المهمّة (اختياري)",
+    )
+    body = models.TextField(verbose_name="نصّ الملاحظة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "ملاحظة مساحة عمل"
+        verbose_name_plural = "ملاحظات مساحة العمل"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(fields=["employee", "-created_at"]),
+            models.Index(fields=["task", "-created_at"]),
+        ]
+
+    def __str__(self):
+        return f"ملاحظة {self.employee_id}" + (f" على مهمّة {self.task_id}" if self.task_id else "")
 

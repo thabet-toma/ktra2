@@ -35,6 +35,11 @@ from .models import (
     PlatformNotification,
     PlatformOperationEvent,
     PlatformRecruiter,
+    PlatformTask,
+    PlatformTaskAssignment,
+    PlatformTaskSubmission,
+    PlatformEmployeeNote,
+    PlatformWorkspaceNote,
     PolicyProfile,
     ServiceDocumentType,
     ServiceSubscription,
@@ -1269,6 +1274,161 @@ class AddWorkOrderCommentSerializer(serializers.Serializer):
 
 class TransitionWorkOrderStatusSerializer(serializers.Serializer):
     target_status = serializers.ChoiceField(choices=WorkOrder.Status.choices)
+
+
+# ==============================================================================
+# مهامّ موظّفي المنصّة وملاحظاتُهم (212-E)
+# ==============================================================================
+
+
+class PlatformTaskSerializer(serializers.ModelSerializer):
+    """مهمّةُ منصّةٍ — قراءةٌ فقط من الواجهة؛ الكتابةُ عبر `CreatePlatformTaskSerializer` والأفعال."""
+
+    priority_display = serializers.CharField(source="get_priority_display", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    audience_display = serializers.CharField(source="get_audience_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+
+    class Meta:
+        model = PlatformTask
+        fields = [
+            "id",
+            "title",
+            "description",
+            "priority",
+            "priority_display",
+            "status",
+            "status_display",
+            "audience",
+            "audience_display",
+            "due_date",
+            "claim_limit",
+            "created_by",
+            "created_by_name",
+            "completed_at",
+            "created_at",
+            "updated_at",
+        ]
+
+
+class CreatePlatformTaskSerializer(serializers.Serializer):
+    """إنشاءُ مهمّةِ منصّةٍ — «بنفس الطريقة القديمة»: فردي أو محدَّدون أو الجميع أو مجمَع."""
+
+    title = serializers.CharField(max_length=255)
+    description = serializers.CharField(required=False, allow_blank=True, default="")
+    priority = serializers.ChoiceField(choices=PlatformTask.PRIORITY_CHOICES, required=False, default=PlatformTask.PRIORITY_MEDIUM)
+    due_date = serializers.DateField(required=False, allow_null=True, default=None)
+    audience = serializers.ChoiceField(choices=PlatformTask.AUDIENCE_CHOICES)
+    employee_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False, default=list,
+    )
+    claim_limit = serializers.IntegerField(required=False, allow_null=True, default=None, min_value=1)
+
+
+class PlatformTaskAssignmentSerializer(serializers.ModelSerializer):
+    """إسنادُ مهمّةٍ لموظّف — قراءةٌ فقط؛ الانتقالُ عبر أفعال `accept`/`submit`."""
+
+    task_title = serializers.CharField(source="task.title", read_only=True)
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+
+    class Meta:
+        model = PlatformTaskAssignment
+        fields = [
+            "id",
+            "task",
+            "task_title",
+            "employee",
+            "employee_name",
+            "status",
+            "status_display",
+            "offered_at",
+            "accepted_at",
+            "submitted_at",
+            "completed_at",
+        ]
+
+
+class SubmitPlatformTaskSerializer(serializers.Serializer):
+    """تسليمُ إسنادٍ — النصُّ اختياريٌّ (قد يكون التسليمُ بلا ملاحظات)."""
+
+    body = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class PlatformTaskSubmissionSerializer(serializers.ModelSerializer):
+    """تسليمُ مهمّةٍ — قراءةٌ فقط؛ القرارُ عبر `review`."""
+
+    task_title = serializers.CharField(source="task.title", read_only=True)
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+    decision_display = serializers.CharField(source="get_decision_display", read_only=True)
+    reviewer_name = serializers.CharField(source="reviewer.username", read_only=True, default="")
+
+    class Meta:
+        model = PlatformTaskSubmission
+        fields = [
+            "id",
+            "task",
+            "task_title",
+            "employee",
+            "employee_name",
+            "body",
+            "decision",
+            "decision_display",
+            "reviewer",
+            "reviewer_name",
+            "reviewer_notes",
+            "reviewed_at",
+            "created_at",
+        ]
+
+
+class ReviewPlatformTaskSubmissionSerializer(serializers.Serializer):
+    """قرارُ مراجعة تسليمِ مهمّةٍ — الملاحظاتُ إلزاميّةٌ على الرفض والقبول الجزئي (تُفرَض في الخدمة)."""
+
+    decision = serializers.ChoiceField(
+        choices=[
+            PlatformTaskSubmission.DECISION_APPROVED_FULL,
+            PlatformTaskSubmission.DECISION_APPROVED_PARTIAL,
+            PlatformTaskSubmission.DECISION_REJECTED,
+        ],
+    )
+    reviewer_notes = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+class PlatformEmployeeNoteSerializer(serializers.ModelSerializer):
+    """ملاحظةُ السوبر أدمن على موظّف — قراءةٌ فقط؛ الكتابةُ عبر `CreatePlatformEmployeeNoteSerializer`."""
+
+    author_name = serializers.CharField(source="author.username", read_only=True, default="")
+    visibility_display = serializers.CharField(source="get_visibility_display", read_only=True)
+
+    class Meta:
+        model = PlatformEmployeeNote
+        fields = ["id", "employee", "body", "author", "author_name", "visibility", "visibility_display", "created_at"]
+
+
+class CreatePlatformEmployeeNoteSerializer(serializers.Serializer):
+    """ملاحظةٌ جديدة على موظّف — الرؤيةُ افتراضُها آمنٌ (`EMPLOYEE`)."""
+
+    employee = serializers.IntegerField(min_value=1)
+    body = serializers.CharField(allow_blank=False)
+    visibility = serializers.ChoiceField(
+        choices=PlatformEmployeeNote.VISIBILITY_CHOICES, required=False, default=PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+    )
+
+
+class PlatformWorkspaceNoteSerializer(serializers.ModelSerializer):
+    """ملاحظةُ الموظّف نفسِه — عمومية أو على مهمّةٍ مُسندةٍ له."""
+
+    class Meta:
+        model = PlatformWorkspaceNote
+        fields = ["id", "employee", "task", "body", "created_at"]
+
+
+class CreatePlatformWorkspaceNoteSerializer(serializers.Serializer):
+    """ملاحظةٌ جديدة — `task` اختياريّ: بلا قيمةٍ تعني ملاحظةً عمومية بمساحة العمل."""
+
+    body = serializers.CharField(allow_blank=False)
+    task = serializers.IntegerField(min_value=1, required=False, allow_null=True, default=None)
 
 
 class CreateWorkOrderSerializer(serializers.Serializer):

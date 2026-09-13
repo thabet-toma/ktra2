@@ -15,7 +15,7 @@ import uuid
 from decimal import Decimal, InvalidOperation
 
 import requests
-from django.db.models import Count, IntegerField, OuterRef, Subquery, Value
+from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce
 from django.http import FileResponse, Http404
 from django.urls import reverse
@@ -162,6 +162,13 @@ from .services import (
     transition_wallet_line,
     update_employee_compensation_policy_draft,
     update_performance_evaluation_policy_draft,
+    accept_platform_task_assignment,
+    add_platform_employee_note,
+    add_platform_workspace_note,
+    claim_platform_task,
+    create_platform_task,
+    review_platform_task_submission,
+    submit_platform_task,
 )
 from .throttles import ClientIpScopedThrottle, IntegrationKeyThrottle
 
@@ -189,6 +196,11 @@ from .models import (
     PlatformMeetingAttendance,
     PlatformNotification,
     PlatformRecruiter,
+    PlatformTask,
+    PlatformTaskAssignment,
+    PlatformTaskSubmission,
+    PlatformEmployeeNote,
+    PlatformWorkspaceNote,
     PolicyProfile,
     ServiceSubscription,
     ServiceSubscriptionEvent,
@@ -282,6 +294,16 @@ from .serializers import (
     PerformanceEvaluationPolicySerializer,
     ReverseWalletLineSerializer,
     TransitionWalletLineSerializer,
+    CreatePlatformEmployeeNoteSerializer,
+    CreatePlatformTaskSerializer,
+    CreatePlatformWorkspaceNoteSerializer,
+    PlatformEmployeeNoteSerializer,
+    PlatformTaskAssignmentSerializer,
+    PlatformTaskSerializer,
+    PlatformTaskSubmissionSerializer,
+    PlatformWorkspaceNoteSerializer,
+    ReviewPlatformTaskSubmissionSerializer,
+    SubmitPlatformTaskSerializer,
 )
 
 
@@ -3679,3 +3701,243 @@ class PlatformMeetingViewSet(viewsets.ReadOnlyModelViewSet):
         except PlatformOpsError as exc:
             return _service_error(exc)
         return Response(PlatformMeetingAttendanceSerializer(attendance).data)
+
+
+# ==============================================================================
+# مهامّ موظّفي المنصّة وملاحظاتُهم (212-E)
+# ==============================================================================
+
+
+def _current_platform_employee(request):
+    """ملفُّ موظّف المنصّة للمستخدم الحاليّ — أو 403 صريح، كنمط `PlatformMeetingViewSet`."""
+    employee = PlatformEmployee.objects.filter(user=request.user).first()
+    if employee is None:
+        return None, Response(
+            {"detail": "لا ملفَّ موظّف منصّةٍ مرتبطٌ بحسابك.", "code": "not_a_platform_employee"},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+    return employee, None
+
+
+class PlatformTaskViewSet(viewsets.ReadOnlyModelViewSet):
+    """مهامُّ منصّةٍ — إنشاءٌ لمدير العمليات وحده، ومطالبةُ مهامّ المجمَع للموظّف (212-E).
+
+    **لا تُخلَط بـ`employee_ops.Task`**: تلك مهامُّ موظّفي شركةِ زبونٍ (`tenant`
+    FK)، وهذه مهامُّ فريق كترا الداخليّ — استثناءٌ من قاعدة `tenant FK` كنظيرَتها
+    `PlatformEmployee`. القراءةُ للموظّف مضيَّقةٌ على إسناداته ومهامِّ المجمَع
+    المفتوحة وحدها؛ `get_queryset` بلا هذا التضييق يُري الموظّفَ مهامَّ زملائه.
+    """
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PlatformTaskSerializer
+    queryset = PlatformTask.objects.select_related("created_by").order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(
+            Q(assignments__employee__user=self.request.user) | Q(audience=PlatformTask.AUDIENCE_OPEN)
+        ).distinct()
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_task(self, request):
+        """إنشاءُ مهمّةٍ — مدير العمليات وحده («بنفس الطريقة القديمة» على مستوى الشركة)."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "إنشاءُ المهامّ متاحٌ لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = CreatePlatformTaskSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            task = create_platform_task(actor=request.user, **payload.validated_data)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(task).data, status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["post"], url_path="claim")
+    def claim(self, request, pk=None):
+        """مطالبةُ الموظّف بمهمّةِ مجمَع — `get_object()` محكومٌ بالنطاق أعلاه فلا يُطالَب بمهمّةٍ مُسندةٍ أصلاً."""
+        employee, denial = _current_platform_employee(request)
+        if denial is not None:
+            return denial
+        try:
+            assignment = claim_platform_task(task=self.get_object(), employee=employee)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(PlatformTaskAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
+
+
+class PlatformTaskAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
+    """إسناداتُ مهامّ المنصّة — قبولٌ وتسليمٌ للموظّف صاحب الإسناد وحده.
+
+    ملكيّةٌ صريحةٌ في الأفعال لا في `permission_classes` وحدها: مديرٌ يملك صفَّ
+    موظّفٍ صدفةً لا يقبل ولا يسلّم إسنادَ غيره — الفاعلُ يجب أن يكون
+    `assignment.employee.user` بعينه.
+    """
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PlatformTaskAssignmentSerializer
+    queryset = (
+        PlatformTaskAssignment.objects
+        .select_related("task", "employee", "employee__user")
+        .order_by("-offered_at")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(employee__user=self.request.user)
+
+    def _require_owner(self, request, assignment):
+        if assignment.employee.user_id != request.user.id:
+            return Response(
+                {"detail": "هذا الإسنادُ ليس لك.", "code": "not_your_assignment"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return None
+
+    @action(detail=True, methods=["post"], url_path="accept")
+    def accept(self, request, pk=None):
+        assignment = self.get_object()
+        denial = self._require_owner(request, assignment)
+        if denial is not None:
+            return denial
+        try:
+            updated = accept_platform_task_assignment(assignment=assignment, actor=request.user)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(updated).data)
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit(self, request, pk=None):
+        assignment = self.get_object()
+        denial = self._require_owner(request, assignment)
+        if denial is not None:
+            return denial
+        payload = SubmitPlatformTaskSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            submission = submit_platform_task(
+                assignment=assignment, actor=request.user, body=payload.validated_data["body"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(PlatformTaskSubmissionSerializer(submission).data, status=status.HTTP_201_CREATED)
+
+
+class PlatformTaskSubmissionViewSet(viewsets.ReadOnlyModelViewSet):
+    """تسليماتُ مهامّ المنصّة — المراجعةُ لمدير العمليات وحده."""
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PlatformTaskSubmissionSerializer
+    queryset = (
+        PlatformTaskSubmission.objects
+        .select_related("task", "employee", "employee__user", "reviewer")
+        .order_by("-created_at")
+    )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(employee__user=self.request.user)
+
+    @action(detail=True, methods=["post"], url_path="review")
+    def review(self, request, pk=None):
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "مراجعةُ التسليمات متاحةٌ لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = ReviewPlatformTaskSubmissionSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        try:
+            updated = review_platform_task_submission(
+                submission=self.get_object(), actor=request.user, **payload.validated_data,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(updated).data)
+
+
+class PlatformEmployeeNoteViewSet(viewsets.ReadOnlyModelViewSet):
+    """ملاحظاتُ السوبر أدمن على موظّفي المنصّة — يكتبها المدير، ويقرأ الموظّفُ ما `visibility=EMPLOYEE` له وحده.
+
+    الشكوى الأولى في #212 كانت أنّ الموظّفَ رأى ملاحظاتِ تطويرٍ ليست له؛
+    `MANAGER_ONLY` مستبعَدةٌ من قائمة الموظّف صراحةً، لا مضمَّنةً بالخطأ.
+    """
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PlatformEmployeeNoteSerializer
+    queryset = PlatformEmployeeNote.objects.select_related("author", "employee").order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(employee__user=self.request.user, visibility=PlatformEmployeeNote.VISIBILITY_EMPLOYEE)
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_note(self, request):
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "كتابةُ ملاحظاتٍ على الموظّفين متاحةٌ لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = CreatePlatformEmployeeNoteSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        employee = PlatformEmployee.objects.filter(pk=payload.validated_data["employee"]).first()
+        if employee is None:
+            return Response(
+                {"detail": "موظّفُ المنصّة غير موجود.", "code": "employee_not_found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        try:
+            note = add_platform_employee_note(
+                employee=employee,
+                author=request.user,
+                body=payload.validated_data["body"],
+                visibility=payload.validated_data["visibility"],
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(note).data, status=status.HTTP_201_CREATED)
+
+
+class PlatformWorkspaceNoteViewSet(viewsets.ReadOnlyModelViewSet):
+    """ملاحظاتُ مساحة عمل الموظّف — يكتبها ويقرأ ملاحظاتِه هو وحدَه؛ عمومية أو على مهمّةٍ مُسندةٍ له."""
+
+    permission_classes = [IsPlatformOperationsManager | IsPlatformOperationsStaff]
+    serializer_class = PlatformWorkspaceNoteSerializer
+    queryset = PlatformWorkspaceNote.objects.all().order_by("-created_at")
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if IsPlatformOperationsManager().has_permission(self.request, self):
+            return qs
+        return qs.filter(employee__user=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_note(self, request):
+        employee, denial = _current_platform_employee(request)
+        if denial is not None:
+            return denial
+        payload = CreatePlatformWorkspaceNoteSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        task = None
+        task_id = payload.validated_data.get("task")
+        if task_id is not None:
+            task = PlatformTask.objects.filter(pk=task_id).first()
+            if task is None:
+                return Response(
+                    {"detail": "المهمّةُ غير موجودة.", "code": "task_not_found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        try:
+            note = add_platform_workspace_note(employee=employee, body=payload.validated_data["body"], task=task)
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(self.get_serializer(note).data, status=status.HTTP_201_CREATED)

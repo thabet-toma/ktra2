@@ -61,6 +61,11 @@ from .models import (
     PlatformNotification,
     PlatformOperationEvent,
     PlatformRecruiter,
+    PlatformTask,
+    PlatformTaskAssignment,
+    PlatformTaskSubmission,
+    PlatformEmployeeNote,
+    PlatformWorkspaceNote,
     PolicyProfile,
     ServiceDocumentType,
     ServiceSubscriptionEvent,
@@ -204,6 +209,12 @@ class MonthCloseBlockedError(PlatformOpsError):
     def __init__(self, code: str, detail: str, blockers: list[int] | None = None):
         super().__init__(code, detail, status_code=409)
         self.blockers = blockers or []
+
+
+class PlatformTaskError(PlatformOpsError):
+    """خطأ في مهامّ موظّفي المنصّة أو إسناداتها أو تسليماتها (212-E)."""
+
+    pass
 
 
 def _validate_subscription_decimal(value, field_name: str) -> Decimal:
@@ -10337,3 +10348,383 @@ def list_employee_work_order_queue(user):
         )
     )
     return rows
+
+
+# ==============================================================================
+# مهامّ موظّفي المنصّة وملاحظاتُهم (212-E)
+# ==============================================================================
+#
+# استثناءٌ آخرُ متعمَّدٌ من قاعدة `tenant FK` كنظيرَتيه `PlatformEmployee` و
+# `PlatformMeeting`: هذه مهامُّ فريق كترا الداخليّ لا `employee_ops.Task` (مهامُّ
+# موظّفي شركةِ زبون بـtenant FK). قرارُ المالك الصريح: **المهمّةُ المرفوضةُ تعود
+# مفتوحة** — لا حالةَ `REJECTED` نهائيّةً هنا؛ الرفضُ يُعيد الإسنادَ `RETURNED`
+# (مُسندة) أو يحذفه (مجمَع) فترجع المهمّةُ إلى المجمَع.
+#
+# `_recompute_platform_task_status` تُشتقّ حالةَ المهمّة من إسناداتها كما وصفت
+# الورقة حرفياً: OPEN/NEW ← IN_PROGRESS ← WAITING_FOR_REVIEW ← COMPLETED. وهذه
+# الدالّةُ تُستدعى بعد **كلّ** تغييرٍ على إسنادٍ فتبقى حالةُ المهمّة قراءةً لا
+# مصدرَ حقيقةٍ يُكتب مباشرةً.
+
+
+def _assert_assignment_belongs_to_actor(*, assignment: PlatformTaskAssignment, actor) -> None:
+    """القبولُ والتسليمُ فعلا صاحبِ الإسناد — لا أحدَ يقبل أو يسلّم باسم زميله.
+
+    والتضييقُ في الـviewُ لا يُغني عن هذا: هو يحرس البابَ الواحدَ الذي كُتب له،
+    وهذه الخدمةُ تُنادى من أمرِ إدارةٍ أو مهمّةٍ مجدولةٍ أو بابٍ ثانٍ يُكتَب غداً.
+    وصلاحيّةُ المدير لا تُغني أيضاً: المديرُ يراجع ولا يسلّم عن أحد — تسليمٌ
+    بتوقيعِ غيرِ صاحبه يُفسد التقييمَ الذي يُحسَب عليه.
+    """
+    actor_employee_id = getattr(getattr(actor, "platform_employee", None), "pk", None)
+    if actor_employee_id is None or actor_employee_id != assignment.employee_id:
+        raise PlatformTaskError(
+            "not_your_assignment", "هذا الإسنادُ ليس لك — لا يقبله ولا يسلّمه إلا صاحبُه.",
+        )
+
+
+def _recompute_platform_task_status(task: "PlatformTask") -> None:
+    """يُشتقّ `task.status` من إسناداته الحاليّة — يُستدعى داخل معاملةٍ والمهمّةُ مقفلة.
+
+    ترتيبُ التقدّم: `COMPLETED` (الكلّ أُكمل) > `WAITING_FOR_REVIEW` (تسليمٌ
+    منتظِر) > `IN_PROGRESS` (مقبولٌ أو جارٍ) > `NEW`/`OPEN` (لم يبدأ أحد بعد).
+    و`RETURNED` (إسنادٌ رُفض تسليمُه) يُحسَب مع «لم يبدأ» لا مع «مكتمل» — فهو
+    عملٌ يُعاد لا عملٌ أُنجز.
+    """
+    statuses = list(
+        PlatformTaskAssignment.objects.filter(task=task).values_list("status", flat=True)
+    )
+    if not statuses:
+        task.status = PlatformTask.STATUS_OPEN if task.audience == PlatformTask.AUDIENCE_OPEN else PlatformTask.STATUS_NEW
+        task.completed_at = None
+        task.save(update_fields=["status", "completed_at", "updated_at"])
+        return
+
+    if all(s == PlatformTaskAssignment.STATUS_COMPLETED for s in statuses):
+        new_status = PlatformTask.STATUS_COMPLETED
+        completed_at = task.completed_at or timezone.now()
+    elif any(s == PlatformTaskAssignment.STATUS_SUBMITTED for s in statuses):
+        new_status = PlatformTask.STATUS_WAITING_FOR_REVIEW
+        completed_at = None
+    elif any(s in (PlatformTaskAssignment.STATUS_ACCEPTED, PlatformTaskAssignment.STATUS_IN_PROGRESS) for s in statuses):
+        new_status = PlatformTask.STATUS_IN_PROGRESS
+        completed_at = None
+    else:
+        new_status = PlatformTask.STATUS_NEW
+        completed_at = None
+
+    task.status = new_status
+    task.completed_at = completed_at
+    task.save(update_fields=["status", "completed_at", "updated_at"])
+
+
+@transaction.atomic
+def create_platform_task(
+    *,
+    actor,
+    title: str,
+    audience: str,
+    description: str = "",
+    priority: str = PlatformTask.PRIORITY_MEDIUM,
+    due_date=None,
+    employee_ids: list[int] | None = None,
+    claim_limit: int | None = None,
+) -> PlatformTask:
+    """إنشاءُ مهمّةِ منصّةٍ وإسناداتِها **في نفس المعاملة** — بنفس طريقة `employee_ops` القديمة.
+
+    `ALL` تُنشئ صفّاً لكلّ موظّفٍ `ACTIVE` (لا موقوفٍ ولا خارجَ الخدمة)، و
+    `INDIVIDUAL`/`SPECIFIC` للمذكورين بمعرّفاتهم، و`OPEN` بلا صفوفٍ حتى يطالب
+    بها موظّف (`claim_platform_task`).
+    """
+    title = str(title or "").strip()
+    if not title:
+        raise PlatformTaskError("title_required", "عنوانُ المهمّة مطلوب.")
+    if audience not in dict(PlatformTask.AUDIENCE_CHOICES):
+        raise PlatformTaskError("invalid_audience", f"نطاقُ إسنادٍ غيرُ صالح: {audience}")
+    if priority not in dict(PlatformTask.PRIORITY_CHOICES):
+        raise PlatformTaskError("invalid_priority", f"أولويّةٌ غيرُ صالحة: {priority}")
+
+    employee_ids = list(dict.fromkeys(employee_ids or []))
+
+    if audience == PlatformTask.AUDIENCE_INDIVIDUAL and len(employee_ids) != 1:
+        raise PlatformTaskError("individual_requires_one_employee", "الإسنادُ الفرديّ يلزمه موظّفٌ واحدٌ بالضبط.")
+    if audience == PlatformTask.AUDIENCE_SPECIFIC and not employee_ids:
+        raise PlatformTaskError("specific_requires_employees", "الإسنادُ المحدَّدُ يلزمه موظّفٌ واحدٌ على الأقلّ.")
+    if audience == PlatformTask.AUDIENCE_OPEN and employee_ids:
+        raise PlatformTaskError("open_task_takes_no_employees", "مهمّةُ المجمَع تُترَك بلا موظّفين محدَّدين.")
+
+    task = PlatformTask.objects.create(
+        title=title,
+        description=str(description or ""),
+        priority=priority,
+        audience=audience,
+        due_date=due_date,
+        claim_limit=claim_limit if audience == PlatformTask.AUDIENCE_OPEN else None,
+        created_by=actor,
+        status=PlatformTask.STATUS_OPEN if audience == PlatformTask.AUDIENCE_OPEN else PlatformTask.STATUS_NEW,
+    )
+
+    target_employees: list[PlatformEmployee] = []
+    if audience == PlatformTask.AUDIENCE_ALL:
+        target_employees = list(PlatformEmployee.objects.filter(status=PlatformEmployee.Status.ACTIVE))
+    elif audience in (PlatformTask.AUDIENCE_INDIVIDUAL, PlatformTask.AUDIENCE_SPECIFIC):
+        target_employees = list(PlatformEmployee.objects.filter(pk__in=employee_ids))
+        found_ids = {emp.pk for emp in target_employees}
+        missing = sorted(set(employee_ids) - found_ids)
+        if missing:
+            raise PlatformTaskError("employee_not_found", f"موظّفو منصّةٍ غير موجودين: {missing}")
+
+    if target_employees:
+        PlatformTaskAssignment.objects.bulk_create(
+            [PlatformTaskAssignment(task=task, employee=emp) for emp in target_employees]
+        )
+        for emp in target_employees:
+            create_platform_notification(
+                recipient=emp.user,
+                notification_type=PlatformNotification.NotificationType.TASK_ASSIGNED,
+                title=f"مهمّةٌ جديدة: {task.title}",
+                message=task.description or "",
+                data={"task_id": task.pk},
+            )
+
+    actor_employee = PlatformEmployee.objects.filter(user=actor).first() if actor else None
+    if actor_employee:
+        log_platform_activity(
+            employee=actor_employee,
+            action=PlatformActivityLog.Action.OTHER,
+            description=f"إنشاءُ مهمّةِ منصّة: {task.title}",
+            entity_type="platform_task",
+            entity_id=task.pk,
+            details={"operation": "create_platform_task", "audience": audience},
+        )
+    return task
+
+
+@transaction.atomic
+def claim_platform_task(*, task: PlatformTask, employee: PlatformEmployee) -> PlatformTaskAssignment:
+    """مطالبةُ موظّفٍ بمهمّةِ مجمَعٍ (`OPEN`) — إسنادٌ `ACCEPTED` مباشرةً بلا عرضٍ يُقبَل أولاً."""
+    locked_task = PlatformTask.objects.select_for_update().get(pk=task.pk)
+    if locked_task.audience != PlatformTask.AUDIENCE_OPEN:
+        raise PlatformTaskError("not_a_pool_task", "هذه المهمّةُ ليست من مهامّ المجمَع.")
+    # `ALL` تستبعد غيرَ النشط، فالمجمَعُ بلا الشرطِ نفسِه بابٌ خلفيٌّ يُدخل
+    # الموقوفَ إلى العمل من حيث مُنِع.
+    if employee.status != PlatformEmployee.Status.ACTIVE:
+        raise PlatformTaskError("employee_not_active", "لا يطالب بمهامّ المجمَع إلا موظّفٌ نشط.")
+    if PlatformTaskAssignment.objects.filter(task=locked_task, employee=employee).exists():
+        raise PlatformTaskError("already_claimed", "لديك إسنادٌ على هذه المهمّة بالفعل.")
+    if locked_task.claim_limit is not None:
+        current_count = PlatformTaskAssignment.objects.filter(task=locked_task).count()
+        if current_count >= locked_task.claim_limit:
+            raise PlatformTaskError("claim_limit_reached", "بلغت هذه المهمّةُ حدَّ المطالبين المسموح.")
+
+    now = timezone.now()
+    assignment = PlatformTaskAssignment.objects.create(
+        task=locked_task, employee=employee,
+        status=PlatformTaskAssignment.STATUS_ACCEPTED, accepted_at=now,
+    )
+    _recompute_platform_task_status(locked_task)
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"مطالبةٌ بمهمّةِ مجمَع: {locked_task.title}",
+        entity_type="platform_task",
+        entity_id=locked_task.pk,
+        details={"operation": "claim_platform_task"},
+    )
+    return assignment
+
+
+@transaction.atomic
+def accept_platform_task_assignment(*, assignment: PlatformTaskAssignment, actor) -> PlatformTaskAssignment:
+    """قبولُ إسنادٍ مُعروض — `OFFERED` ← `ACCEPTED`، **ومن صاحبِه وحدَه**."""
+    _assert_assignment_belongs_to_actor(assignment=assignment, actor=actor)
+    locked_task = PlatformTask.objects.select_for_update().get(pk=assignment.task_id)
+    locked_assignment = PlatformTaskAssignment.objects.select_for_update().get(pk=assignment.pk)
+    if locked_assignment.status != PlatformTaskAssignment.STATUS_OFFERED:
+        raise PlatformTaskError("not_offered", "هذا الإسنادُ ليس بانتظار القبول.")
+    locked_assignment.status = PlatformTaskAssignment.STATUS_ACCEPTED
+    locked_assignment.accepted_at = timezone.now()
+    locked_assignment.save(update_fields=["status", "accepted_at"])
+    _recompute_platform_task_status(locked_task)
+    log_platform_activity(
+        employee=locked_assignment.employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description=f"قبولُ إسنادِ مهمّة: {locked_task.title}",
+        entity_type="platform_task",
+        entity_id=locked_task.pk,
+        details={"operation": "accept_platform_task_assignment", "actor_user_id": getattr(actor, "pk", None)},
+    )
+    return locked_assignment
+
+
+@transaction.atomic
+def submit_platform_task(*, assignment: PlatformTaskAssignment, actor, body: str = "") -> PlatformTaskSubmission:
+    """تسليمُ إسنادٍ — `ACCEPTED`/`IN_PROGRESS`/`RETURNED` ← `SUBMITTED` + صفُّ تسليمٍ `PENDING`.
+
+    تسليمٌ ثانٍ قبل مراجعة الأوّل مرفوضٌ: لا يصحّ أن يتراكم تسليمان معلّقان لنفس
+    الإسناد فيلتبس أيُّهما يراجع المدير.
+    """
+    _assert_assignment_belongs_to_actor(assignment=assignment, actor=actor)
+    locked_task = PlatformTask.objects.select_for_update().get(pk=assignment.task_id)
+    locked_assignment = PlatformTaskAssignment.objects.select_for_update().get(pk=assignment.pk)
+    if locked_assignment.status not in (
+        PlatformTaskAssignment.STATUS_ACCEPTED,
+        PlatformTaskAssignment.STATUS_IN_PROGRESS,
+        PlatformTaskAssignment.STATUS_RETURNED,
+    ):
+        # **وهذه البوّابةُ وحدَها تمنع التسليمَ مرّتين**: أوّلُ تسليمٍ ينقل الإسنادَ
+        # إلى `SUBMITTED` وهي ليست في القائمة أعلاه، فالثاني يُرَدّ من هنا. وشرطٌ
+        # ثانٍ على وجود صفٍّ `PENDING` كان مكتوباً تحتها فحُذف: لا يُصاب أبداً
+        # (لا مراجعةَ تُبقي صفّاً `PENDING` مع حالةٍ قابلةٍ للتسليم)، وحراسةٌ لا
+        # تُصاب تُغري قارئَها بأنّ هناك تحقّقاً حيث لا تحقّق.
+        raise PlatformTaskError(
+            "cannot_submit",
+            "لا يمكن تسليمُ هذا الإسنادِ في حالته الحاليّة — قد يكون تسليمٌ سابقٌ بانتظار المراجعة.",
+        )
+
+    now = timezone.now()
+    locked_assignment.status = PlatformTaskAssignment.STATUS_SUBMITTED
+    locked_assignment.submitted_at = now
+    locked_assignment.save(update_fields=["status", "submitted_at"])
+    submission = PlatformTaskSubmission.objects.create(
+        task=locked_task, employee=locked_assignment.employee, body=str(body or ""),
+    )
+    _recompute_platform_task_status(locked_task)
+    log_platform_activity(
+        employee=locked_assignment.employee,
+        action=PlatformActivityLog.Action.DELIVERABLE_SUBMIT,
+        description=f"تسليمُ مهمّة: {locked_task.title}",
+        entity_type="platform_task_submission",
+        entity_id=submission.pk,
+        details={"operation": "submit_platform_task", "task_id": locked_task.pk},
+    )
+    return submission
+
+
+@transaction.atomic
+def review_platform_task_submission(
+    *, submission: PlatformTaskSubmission, actor, decision: str, reviewer_notes: str = "",
+) -> PlatformTaskSubmission:
+    """مراجعةُ تسليمِ مهمّةٍ — القرارُ الثالثُ «مقبولٌ بس لسّا ما خلص» لا يُقفل الإسناد.
+
+    - `APPROVED_FULL`: الإسنادُ `COMPLETED`، و`task.completed_at` عبر
+      `_recompute_platform_task_status` (لا يُضبَط إلا حين يكتمل **كلُّ** إسناد).
+    - `APPROVED_PARTIAL`: الإسنادُ يعود `IN_PROGRESS` — مقبولٌ وما زال العملُ مستمرّاً.
+    - `REJECTED`: **تعود مفتوحة** (قرارُ المالك) — الإسنادُ `RETURNED` لمهمّةٍ
+      مُسندة، ويُحذَف لمهمّةِ مجمَعٍ فترجع إلى المجمَع يطالب بها غيرُه.
+    - `reviewer_notes` إلزاميّةٌ على `REJECTED` و`APPROVED_PARTIAL`: قرارٌ يعيد
+      العملَ بلا سببٍ مكتوبٍ شكوى قادمةٌ لا مراجعة.
+    """
+    valid_decisions = (
+        PlatformTaskSubmission.DECISION_APPROVED_FULL,
+        PlatformTaskSubmission.DECISION_APPROVED_PARTIAL,
+        PlatformTaskSubmission.DECISION_REJECTED,
+    )
+    if decision not in valid_decisions:
+        raise PlatformTaskError("invalid_decision", f"قرارُ مراجعةٍ غيرُ صالح: {decision}")
+    reviewer_notes = str(reviewer_notes or "").strip()
+    if decision in (
+        PlatformTaskSubmission.DECISION_REJECTED, PlatformTaskSubmission.DECISION_APPROVED_PARTIAL,
+    ) and not reviewer_notes:
+        raise PlatformTaskError("reviewer_notes_required", "ملاحظاتُ المراجِع إلزاميّةٌ عند الرفض أو القبول الجزئي.")
+
+    locked_task = PlatformTask.objects.select_for_update().get(pk=submission.task_id)
+    locked_submission = PlatformTaskSubmission.objects.select_for_update().get(pk=submission.pk)
+    # **فحصُ القرارِ يسبق البحثَ عن الإسناد.** ورفضُ تسليمٍ في مهمّةِ مجمَعٍ يحذف
+    # الإسناد، فمراجعةُ ذلك التسليمِ مرّةً ثانيةً كانت ترفع `DoesNotExist` غيرَ
+    # معالجةٍ — خطأَ خادمٍ (500) مكان «رُوجع بالفعل» (400).
+    if locked_submission.decision != PlatformTaskSubmission.DECISION_PENDING:
+        raise PlatformTaskError("already_reviewed", "هذا التسليمُ رُوجع بالفعل.")
+    locked_assignment = (
+        PlatformTaskAssignment.objects.select_for_update()
+        .filter(task=locked_task, employee_id=submission.employee_id)
+        .first()
+    )
+    if locked_assignment is None:
+        raise PlatformTaskError(
+            "assignment_gone", "لم يبقَ إسنادٌ لهذا التسليم — أُعيدت المهمّةُ إلى المجمَع.",
+        )
+
+    locked_submission.decision = decision
+    locked_submission.reviewer = actor
+    locked_submission.reviewer_notes = reviewer_notes
+    locked_submission.reviewed_at = timezone.now()
+    locked_submission.save(update_fields=["decision", "reviewer", "reviewer_notes", "reviewed_at"])
+
+    if decision == PlatformTaskSubmission.DECISION_APPROVED_FULL:
+        locked_assignment.status = PlatformTaskAssignment.STATUS_COMPLETED
+        locked_assignment.completed_at = timezone.now()
+        locked_assignment.save(update_fields=["status", "completed_at"])
+    elif decision == PlatformTaskSubmission.DECISION_APPROVED_PARTIAL:
+        locked_assignment.status = PlatformTaskAssignment.STATUS_IN_PROGRESS
+        locked_assignment.save(update_fields=["status"])
+    else:  # REJECTED
+        if locked_task.audience == PlatformTask.AUDIENCE_OPEN:
+            locked_assignment.delete()
+        else:
+            locked_assignment.status = PlatformTaskAssignment.STATUS_RETURNED
+            locked_assignment.save(update_fields=["status"])
+
+    _recompute_platform_task_status(locked_task)
+
+    create_platform_notification(
+        recipient=locked_submission.employee.user,
+        notification_type=PlatformNotification.NotificationType.TASK_SUBMISSION_REVIEWED,
+        title=f"مراجعةُ تسليمِ مهمّة: {locked_task.title}",
+        message=reviewer_notes,
+        data={"task_id": locked_task.pk, "decision": decision},
+    )
+    log_platform_activity(
+        employee=locked_submission.employee,
+        action=PlatformActivityLog.Action.DELIVERABLE_REVIEW,
+        description=f"مراجعةُ تسليمِ مهمّة: {locked_task.title} ({decision})",
+        entity_type="platform_task_submission",
+        entity_id=locked_submission.pk,
+        details={
+            "operation": "review_platform_task_submission",
+            "actor_user_id": getattr(actor, "pk", None),
+            "decision": decision,
+        },
+    )
+    return locked_submission
+
+
+def add_platform_employee_note(
+    *, employee: PlatformEmployee, author, body: str, visibility: str = PlatformEmployeeNote.VISIBILITY_EMPLOYEE,
+) -> PlatformEmployeeNote:
+    """ملاحظةُ السوبر أدمن على موظّف — الافتراضُ آمنٌ: `EMPLOYEE` لا `MANAGER_ONLY`."""
+    body = str(body or "").strip()
+    if not body:
+        raise PlatformTaskError("body_required", "نصُّ الملاحظة مطلوب.")
+    if visibility not in dict(PlatformEmployeeNote.VISIBILITY_CHOICES):
+        raise PlatformTaskError("invalid_visibility", f"رؤيةٌ غيرُ صالحة: {visibility}")
+    note = PlatformEmployeeNote.objects.create(
+        employee=employee, author=author, body=body, visibility=visibility,
+    )
+    log_platform_activity(
+        employee=employee,
+        action=PlatformActivityLog.Action.OTHER,
+        description="ملاحظةُ إدارةٍ على موظّف",
+        entity_type="platform_employee_note",
+        entity_id=note.pk,
+        details={
+            "operation": "add_platform_employee_note",
+            "actor_user_id": getattr(author, "pk", None),
+            "visibility": visibility,
+        },
+    )
+    return note
+
+
+def add_platform_workspace_note(
+    *, employee: PlatformEmployee, body: str, task: PlatformTask | None = None,
+) -> PlatformWorkspaceNote:
+    """ملاحظةُ الموظّف نفسِه — عمومية بمساحة العمل أو على مهمّةٍ مُسندةٍ له فقط.
+
+    ملاحظةٌ على مهمّةٍ ليست مُسندةً لكاتبها مرفوضة: ليست ملاحظتَه، والوصولُ إليها
+    من الأصل قد يُنشئ إفصاحاً عن مهامّ زملائه لولا هذا التحقّق.
+    """
+    body = str(body or "").strip()
+    if not body:
+        raise PlatformTaskError("body_required", "نصُّ الملاحظة مطلوب.")
+    if task is not None and not PlatformTaskAssignment.objects.filter(task=task, employee=employee).exists():
+        raise PlatformTaskError("task_not_assigned_to_you", "هذه المهمّةُ ليست مُسندةً لك — لا يصحّ أن تكتب ملاحظةً عليها.")
+    return PlatformWorkspaceNote.objects.create(employee=employee, task=task, body=body)
