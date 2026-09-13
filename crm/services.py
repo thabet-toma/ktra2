@@ -2,9 +2,16 @@
 
 ترتيب القفل: `Lead` → `LeadTransfer` (حين يلزم قفل الاثنين معاً، `Lead` أوّلاً).
 """
+from datetime import timedelta
+
 from django.db import IntegrityError, transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
+
+# حدودُ اليوم المحلّيّ من الطبقة المشتركة — **لا `__date` أبداً**: جانغو يترجمها
+# إلى `DATE(CONVERT_TZ(...))` وجداولُ `mysql.time_zone` فارغةٌ على خادمنا فتعيد
+# `NULL` ⇒ صفرُ صفوفٍ بلا خطأٍ ولا أثرٍ في اللوج. الشرحُ كاملاً في الملفّ نفسِه.
+from core.date_ranges import local_day_start
 
 # عضويّةُ عنقود المنصّة معلَنةٌ في `platform_ops/tests/test_isolation_guard.py`
 # (`PLATFORM_CLUSTER_APPS`)، فالاستيرادُ صريحٌ لا مُخبَّأٌ بـ`apps.get_model`:
@@ -427,12 +434,38 @@ def import_leads(*, rows: list[dict], uploaded_by, file_name: str = "") -> LeadI
     return batch
 
 
+def follow_up_day_bounds() -> tuple:
+    """حدُّ «اليوم» لمتابعات العملاء — **تعريفٌ واحدٌ لا ثلاثة**.
+
+    الشاشةُ تكتب **تاريخاً** يختاره الموظّف وتُلحق به `T09:00:00` اعتباطاً، فوَحدةُ
+    الصدق هنا يومٌ لا لحظة. وكان «متأخّر» يُقاس بـ`now` في ثلاثة مواضعَ مستقلّة
+    (شارةُ البطاقة، وعدّادُ الموظّف، ومرشّحُ القائمة)، فينتج:
+
+    - موعدٌ **لليوم** لا يظهر في «متابعاتي» صباحاً: الموظّفُ يفتح متابعاتِه في
+      الثامنة فلا يرى عملَ يومِه، ثمّ يظهر في التاسعة وواحدةٍ **متأخّراً فوراً**؛
+    - و`due` (`__lte=now`) و`overdue` (`__lt=now`) مجموعتان **متطابقتان عمليّاً**:
+      ثلاثةُ أسماءٍ لسلوكَين.
+
+    فالقاعدةُ: «مستحقّة» = اليومَ أو قبلَه · «متأخّرة» = يومٌ مضى · «قادمة» = بعد
+    اليوم. ثلاثُ مجموعاتٍ متمايزةٍ فعلاً، و`overdue ⊂ due`.
+    """
+    today = timezone.localdate()
+    return local_day_start(today), local_day_start(today + timedelta(days=1))
+
+
 def employee_lead_stats(employee) -> dict:
-    """المؤشّراتُ الستّة لموظّفٍ واحد — استعلامٌ واحدٌ مجمَّع."""
-    counts = dict(
+    """مؤشّرات موظف واحد، ومنها عدّاد المتأخّر — استعلام مجمَّع واحد."""
+    start_of_today, _ = follow_up_day_bounds()
+    rows = (
         Lead.objects.filter(assigned_to=employee)
-        .values("status").annotate(n=Count("id")).values_list("status", "n")
+        .values("status")
+        .annotate(
+            n=Count("id"),
+            overdue=Count("id", filter=Q(next_follow_up_at__lt=start_of_today)),
+        )
     )
+    counts = {row["status"]: row["n"] for row in rows}
+    overdue = sum(row["overdue"] for row in rows)
     return {
         "assigned": sum(counts.values()),
         "contacted": counts.get(Lead.Status.CONTACTED, 0),
@@ -440,29 +473,37 @@ def employee_lead_stats(employee) -> dict:
         "follow_up": counts.get(Lead.Status.FOLLOW_UP, 0),
         "customer": counts.get(Lead.Status.CUSTOMER, 0),
         "not_interested": counts.get(Lead.Status.NOT_INTERESTED, 0),
+        "overdue": overdue,
     }
 
 
 def manager_lead_overview() -> dict:
-    """لكلّ موظّفٍ عددُ عملائه بحالاتهم — عددُ استعلاماتٍ ثابتٌ بلا حلقةٍ على الموظفين."""
+    """لكل موظف عداد حالاته والمتأخر، بعدد استعلامات ثابت بلا حلقة N+1."""
+    start_of_today, _ = follow_up_day_bounds()
     rows = (
         Lead.objects.filter(assigned_to__isnull=False)
         .values("assigned_to_id", "status")
-        .annotate(n=Count("id"))
+        .annotate(
+            n=Count("id"),
+            overdue=Count("id", filter=Q(next_follow_up_at__lt=start_of_today)),
+        )
     )
-    by_employee: dict[int, dict[str, int]] = {}
+    by_employee: dict[int, dict] = {}
     for row in rows:
-        by_employee.setdefault(row["assigned_to_id"], {})[row["status"]] = row["n"]
+        counts = by_employee.setdefault(row["assigned_to_id"], {"by_status": {}, "overdue": 0})
+        counts["by_status"][row["status"]] = row["n"]
+        counts["overdue"] += row["overdue"]
 
     employees = PlatformEmployee.objects.select_related("user").all()
     overview = []
     for employee in employees:
-        counts = by_employee.get(employee.pk, {})
+        counts = by_employee.get(employee.pk, {"by_status": {}, "overdue": 0})
         overview.append({
             "employee_id": employee.pk,
             "employee_name": _employee_display_name(employee),
-            "total": sum(counts.values()),
-            "by_status": counts,
+            "total": sum(counts["by_status"].values()),
+            "by_status": counts["by_status"],
+            "overdue": counts["overdue"],
         })
 
     pool_size = Lead.objects.filter(assigned_to__isnull=True, approval_status=Lead.Approval.APPROVED).count()

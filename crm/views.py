@@ -33,6 +33,7 @@ from .services import (
     claim_lead,
     decide_lead_transfer,
     employee_lead_stats,
+    follow_up_day_bounds,
     import_leads,
     log_activity,
     lookup_lead_by_phone,
@@ -97,6 +98,20 @@ def _apply_lead_filters(qs, request):
     approval = params.get("approval_status")
     if approval:
         qs = qs.filter(approval_status=approval)
+    follow_up = params.get("follow_up")
+    if follow_up:
+        # الحدُّ يومٌ لا لحظة، ومن `follow_up_day_bounds` وحدَها كي لا يتفرّق
+        # تعريفُ «متأخّر» بين المرشّح والعدّاد والشارة — راجع وثيقتَها.
+        start_of_today, start_of_tomorrow = follow_up_day_bounds()
+        if follow_up == "due":
+            qs = qs.filter(next_follow_up_at__lt=start_of_tomorrow)
+        elif follow_up == "overdue":
+            qs = qs.filter(next_follow_up_at__lt=start_of_today)
+        elif follow_up == "upcoming":
+            qs = qs.filter(next_follow_up_at__gte=start_of_tomorrow)
+        else:
+            raise ValidationError({"follow_up": ["القيمة يجب أن تكون due أو overdue أو upcoming."]})
+        qs = qs.order_by("next_follow_up_at")
     return qs
 
 

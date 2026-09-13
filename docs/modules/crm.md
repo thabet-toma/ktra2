@@ -21,8 +21,8 @@
 |---|---|
 | `crm/models.py` | `LeadImportBatch`، `Lead`، `LeadPhone` (مفتاحُ الفرادة)، `LeadActivity` (append-only)، `LeadTransfer` — **كلُّها بلا `tenant`** عمداً (زبائنُ كترا لا زبائن شركة)، محروسٌ بـ`crm/tests/test_crm_isolation_guard.py` |
 | `crm/phone.py` | `normalize_phone` — تطبيعُ الهاتف إلى E.164، مفتاحُ فرادةٍ مخزَّنٌ في القاعدة فلا يُعدَّل بلا هجرةِ بيانات |
-| `crm/services.py` | كلُّ الكتابة: `create_lead`/`suggest_lead`/`claim_lead`/`release_lead`/`log_activity`/`change_lead_status`/`transfer_lead`/`request_lead_transfer`/`decide_lead_transfer`/`approve_lead`/`reject_lead`/`import_leads`/`employee_lead_stats`/`manager_lead_overview` |
-| `crm/views.py` | `LeadViewSet`، `LeadTransferViewSet`، `MyLeadStatsView`، `ManagerLeadOverviewView`، `ColleagueDirectoryView` |
+| `crm/services.py` | كلُّ الكتابة: `create_lead`/`suggest_lead`/`claim_lead`/`release_lead`/`log_activity`/`change_lead_status`/`transfer_lead`/`request_lead_transfer`/`decide_lead_transfer`/`approve_lead`/`reject_lead`/`import_leads`/`employee_lead_stats`/`manager_lead_overview`؛ والإحصاءان يجمعان المتابعات المتأخرة بلا استعلام لكل موظف، وحدُّ «اليوم» من `follow_up_day_bounds` وحدَها (المصدرُ الواحد لمعنى «متأخّر») |
+| `crm/views.py` | `LeadViewSet` (ومن قائمته `follow_up=due|overdue|upcoming` بعد تضييق النطاق، بحدِّ **يومٍ** لا لحظةٍ فالثلاثةُ مجموعاتٌ متمايزةٌ و`overdue ⊂ due`)، `LeadTransferViewSet`، `MyLeadStatsView`، `ManagerLeadOverviewView`، `ColleagueDirectoryView` |
 | `crm/urls.py` | مسارات `/api/platform/crm/` |
 | `crm/tests/` | اختباراتُ الوحدة — راجع §الاختبارات (العددُ يتغيّر فلا يُكتب) |
 
@@ -85,12 +85,12 @@
 
 | الملف | الغرض |
 |---|---|
-| `CrmPanel.tsx` | الحاوية: النطاقُ والترشيحُ والاستلامُ والبحثُ بالرقم، ولوحُ المدير للمدير وحدَه |
-| `CrmLeadList.tsx` | القائمةُ وبطاقةُ «بحثِ الرقم قبل الاتصال» بحالاتها الثلاث (مقفولٌ · في المخزن فيظهر «استلام» · غيرُ مسجَّل) |
-| `CrmLeadProfile.tsx` | ملفُّ العميل: الحالةُ والسجلُّ وتسجيلُ اتّصالٍ ورابطُ `wa.me` وطلبُ التحويل والإعادةُ للمخزن |
+| `CrmPanel.tsx` | الحاوية: النطاقُ والترشيحُ والاستلامُ والبحثُ بالرقم، ومنها نطاق «متابعاتي» الذي يطلب المستحقّ والمتأخر من عملائي — **وتبويبُه خلف وجودِ دفترٍ شخصيّ** (`hasPersonalDesk`) لأنّ `scope=mine` بلا صفِّ موظّفٍ صفرٌ بحكم البناء، ويحرسه `test_the_follow_ups_tab_is_hidden_from_a_desk_that_cannot_have_rows`، ولوحُ المدير للمدير وحدَه |
+| `CrmLeadList.tsx` | القائمةُ وبطاقةُ «بحثِ الرقم قبل الاتصال» بحالاتها الثلاث (مقفولٌ · في المخزن فيظهر «استلام» · غيرُ مسجَّل)، وموعد المتابعة القادم مع تمييز المتأخر |
+| `CrmLeadProfile.tsx` | ملفُّ العميل: خطّ مراحل الحالة، وسجلُّ التواصل الذي يبيّن انتقال الحالة، وتسجيلُ اتّصالٍ ورابطُ `wa.me` وطلبُ التحويل والإعادةُ للمخزن |
 | `CrmTransferInbox.tsx` | صندوقُ طلبات التحويل والبتُّ فيها — **بلا هذه اللوحة يصير زرُّ «طلب تحويل العميل» باباً مسدوداً** |
 | `CrmMyStats.tsx` | عدّاداتُ الموظّف من `stats/me/` — مجموعةٌ في الخادم لا محسوبةٌ في الواجهة |
-| `CrmManagerPanel.tsx` | رفعُ الأرقام بنتيجةِ دفعةٍ كاملة (مُنشأ/مكرَّر/غيرُ صالح + مَن لديه كلُّ مكرَّر)، واعتمادُ الاقتراحات ورفضُها |
+| `CrmManagerPanel.tsx` | رفعُ الأرقام بنتيجةِ دفعةٍ كاملة (مُنشأ/مكرَّر/غيرُ صالح + مَن لديه كلُّ مكرَّر)، واعتمادُ الاقتراحات ورفضُها، وعلى بطاقةِ كلِّ موظّفٍ شارةُ «متأخرة» **حقلاً يُعرَض لا نصّاً يُلحَم في اسمه** |
 
 وعقدُها محروسٌ ساكناً في `platform_ops/tests/test_crm_ui_contract.py`:
 **تعدادُ استهلاكٍ يَعدُّ النداءَ في مكوّنٍ لا التصديرَ في عميل الـAPI.** الصيغةُ
@@ -135,7 +135,22 @@
     أحدٌ في طلبٍ لا معنى له. والملكيّةُ في الواجهة تُقارَن بمعرّف الموظّف من
     **ملفّه** لا بـ`is_me` في `colleagues/` — فذاك الدليلُ يعيد `active` وحدَهم،
     فموظّفٌ في إجازةٍ يسقط من دليل نفسِه.
-12. **لا `window.prompt`/`confirm`/`alert` في شاشات المنصّة** — حوارُ المتصفّح لا
+12. **«متأخّر» وَحدتُه يومٌ لا لحظة، وتعريفُها واحدٌ في ثلاثةِ مواضع** —
+    المرشِّحُ (`_apply_lead_filters`) وعدّادُ الموظّف (`employee_lead_stats`)
+    ولوحةُ المدير (`manager_lead_overview`) كلُّها تقرأ
+    `crm/services.py` (`follow_up_day_bounds`)، وشارةُ البطاقة في
+    `CrmLeadList.tsx` تقيس منتصفَ الليلة المحلّيّة نظيراً لها. والسببُ أنّ
+    الشاشةَ تكتب **تاريخاً** يختاره الموظّف وتُلحق به `T09:00:00` اعتباطاً: فبقياس
+    اللحظة يغيب موعدُ اليومِ عن «متابعاتي» صباحاً ثمّ يصير «متأخّراً» في التاسعة
+    وواحدة، ويصير `due` (`__lte=now`) و`overdue` (`__lt=now`) **مجموعتَين
+    متطابقتَين عمليّاً** — ثلاثةُ أسماءٍ لسلوكَين. ولا `__date` هنا أبداً: جانغو
+    تترجمها `DATE(CONVERT_TZ(...))` وجداولُ `mysql.time_zone` فارغةٌ على خادمنا
+    فتعيد `NULL` أي صفرَ صفوفٍ بلا خطأ — الحدودُ من `core/date_ranges.py`
+    (`local_day_start`). يحرسه `crm/tests/test_lead_follow_up_filters.py`
+    (`OverdueMeansOneThingEverywhereTest`) و
+    `platform_ops/tests/test_crm_ui_contract.py`
+    (`test_the_overdue_badge_measures_a_day_not_an_instant`).
+13. **لا `window.prompt`/`confirm`/`alert` في شاشات المنصّة** — حوارُ المتصفّح لا
     يُنسَّق ولا يحمل اتّجاه RTL وتحجبه بعضُ المتصفّحات صامتاً فيبدو الزرُّ
     معطوباً؛ والسببُ يُكتَب في حقلٍ داخل الصفحة (نمطُ `ToastProvider`/
     `ConfirmProvider` القائم).
@@ -150,4 +165,4 @@
 لأعمدتها** (`test_input_widths_fit_columns.py`، ومنه دليلٌ سلوكيٌّ أنّ الرفضَ 400
 لا خطأُ قاعدة، ودليلٌ أنّ الخدمة تحرس الطولَ بلا المُسلسِل) · رسمُ الهجرات
 (اعتمادٌ على `tenants` و`platform_ops`) · ثباتُ عدد الاستعلامات في نظرة المدير
-العامّة · **تعدادُ الملكيّة** لكلّ مسارات الوحدة (`test_lead_lock.py`) · **دليلُ الزملاء** بقائمةٍ بيضاءَ على الحمولة وباستثناء غيرِ النشط (`test_colleague_directory.py`) · **صاحبُ العميل لا يَطلُب تحويلاً** — عبر الـHTTP وفي الخدمة مباشرةً (`test_lead_transfer.py`).
+العامّة · **تعدادُ الملكيّة** لكلّ مسارات الوحدة (`test_lead_lock.py`) · **دليلُ الزملاء** بقائمةٍ بيضاءَ على الحمولة وباستثناء غيرِ النشط (`test_colleague_directory.py`) · **صاحبُ العميل لا يَطلُب تحويلاً** — عبر الـHTTP وفي الخدمة مباشرةً (`test_lead_transfer.py`) · **مرشِّحُ المتابعات بحدِّ يومٍ** (`test_lead_follow_up_filters.py`: موعدُ اليومِ مستحقٌّ وليس متأخّراً ولا قادماً، والثلاثةُ مجموعاتٌ متمايزةٌ فعلاً، و`NULL` ليس في أيٍّ منها، و`OverdueMeansOneThingEverywhereTest` يسأل المرشِّحَ والعدّادَين عن صفٍّ موعدُه منتصفُ ليلةِ اليوم فيلزمهم جواباً واحداً).

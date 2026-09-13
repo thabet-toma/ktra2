@@ -2,16 +2,18 @@ import React, { useState } from 'react';
 import { LockKeyhole, PhoneCall, Search, UserPlus } from 'lucide-react';
 
 import type { CrmLead, CrmLeadStatus, CrmLookup } from '../../../../services/platformCrmApi';
+import { formatDateValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
 
 export const STATUS_LABELS: Record<CrmLeadStatus, string> = {
   new: 'جديد', contacted: 'تم الاتصال', interested: 'مهتم', follow_up: 'متابعة', customer: 'عميل',
   not_interested: 'غير مهتم', no_answer: 'لا يجيب', wrong_number: 'رقم خاطئ', postponed: 'مؤجل', closed: 'مغلق',
 };
+export const CRM_LEAD_PIPELINE: readonly CrmLeadStatus[] = ['new', 'contacted', 'interested', 'follow_up', 'customer'];
 
 interface CrmLeadListProps {
-  isManager: boolean; leads: CrmLead[]; scope: 'mine' | 'pool' | 'all'; loading: boolean; error: string;
-  onScope: (scope: 'mine' | 'pool' | 'all') => void; onFilters: (q: string, status: CrmLeadStatus | '') => void;
+  isManager: boolean; hasPersonalDesk: boolean; leads: CrmLead[]; scope: 'mine' | 'pool' | 'all' | 'follow_ups'; loading: boolean; error: string;
+  onScope: (scope: 'mine' | 'pool' | 'all' | 'follow_ups') => void; onFilters: (q: string, status: CrmLeadStatus | '') => void;
   onSelect: (lead: CrmLead) => void; onClaim: (lead: CrmLead) => void; onLookup: (phone: string) => void;
   lookup: CrmLookup | null; lookupLoading: boolean; onOpenLookup: (id: number) => void; onRequestLookupTransfer: (id: number) => void;
   /** استلامُ رقمٍ وُجد في المخزن من بطاقة البحث مباشرةً — الفعلُ الصحيح هناك. */
@@ -20,10 +22,26 @@ interface CrmLeadListProps {
 
 const tabClass = (active: boolean) => `rounded-lg px-3 py-2 text-sm font-bold ${active ? 'bg-[var(--staff-accent)] text-slate-950' : 'text-[var(--staff-muted)] hover:bg-black/15'}`;
 
-export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup }) => {
+/**
+ * بدايةُ اليومِ المحلّيّ — مرجعُ «متأخّرة» على البطاقة.
+ *
+ * كانت المقارنةُ بـ`Date.now()`، فموعدُ **اليوم** (تكتبه الشاشةُ 09:00) يصير
+ * «متأخّراً» في التاسعة وواحدة وهو عملُ اليوم لا متأخّرُه؛ والأسوأُ أنّ الخادمَ
+ * يعدّ «المتأخّرة» بقاعدةٍ ثانيةٍ فيختلف الرقمُ عن الشارة على الشاشة نفسِها.
+ * القاعدةُ واحدةٌ في الطرفين: **يومٌ مضى** — نظيرُها الخادميُّ
+ * `crm.services.follow_up_day_bounds`.
+ */
+const localStartOfToday = (): number => {
+  const midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  return midnight.getTime();
+};
+
+export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonalDesk, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup }) => {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<CrmLeadStatus | ''>('');
   const [phone, setPhone] = useState('');
+  const startOfToday = localStartOfToday();
   const submitSearch = (event: React.FormEvent) => { event.preventDefault(); onFilters(q, status); };
   const lookupPhone = (event: React.FormEvent) => { event.preventDefault(); if (phone.trim()) onLookup(phone); };
 
@@ -33,6 +51,7 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, leads, scop
       <p className="mt-1 text-sm text-[var(--staff-muted)]">ابحث باسم المحل أو رقم الهاتف ثم افتح ملف العميل أو استلمه من المخزن.</p>
       <div className="mt-4 flex flex-wrap gap-2" role="tablist" aria-label="نطاق العملاء">
         <button type="button" className={tabClass(scope === 'mine')} onClick={() => onScope('mine')} role="tab" aria-selected={scope === 'mine'}>عملائي</button>
+        {hasPersonalDesk && <button type="button" className={tabClass(scope === 'follow_ups')} onClick={() => onScope('follow_ups')} role="tab" aria-selected={scope === 'follow_ups'}>متابعاتي</button>}
         <button type="button" className={tabClass(scope === 'pool')} onClick={() => onScope('pool')} role="tab" aria-selected={scope === 'pool'}>المخزن المتاح</button>
         {isManager && <button type="button" className={tabClass(scope === 'all')} onClick={() => onScope('all')} role="tab" aria-selected={scope === 'all'}>الكل</button>}
       </div>
@@ -64,7 +83,7 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, leads, scop
     </section>
 
     <section className="overflow-hidden rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] shadow-lg shadow-black/30">
-      {loading ? <p className="p-6 text-sm text-[var(--staff-muted)]" role="status">جارٍ تحميل العملاء...</p> : error ? <p className="p-6 text-sm text-rose-300" role="alert">{error}</p> : leads.length === 0 ? <p className="p-8 text-center text-sm text-[var(--staff-muted)]">لا توجد نتائج في هذا النطاق. غيّر البحث أو راجع المخزن المتاح.</p> : <ul className="divide-y divide-[var(--staff-line)]">{leads.map((lead) => <li key={lead.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><button type="button" onClick={() => onSelect(lead)} className="min-w-0 text-right"><span className="block truncate font-extrabold text-[var(--staff-text)]">{lead.store_name}</span><span className="mt-1 block text-sm text-[var(--staff-muted)]">{lead.owner_name || 'لا يوجد اسم مالك'} · {STATUS_LABELS[lead.status]}</span><span dir="ltr" className="mt-1 block text-left text-xs text-cyan-300">{lead.phones[0]?.raw || 'لا يوجد رقم'}</span></button><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-[var(--staff-muted)]">#{formatNumber(lead.id)}</span>{scope === 'pool' && <button type="button" onClick={() => onClaim(lead)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"><UserPlus className="h-4 w-4" />استلام</button>}<button type="button" onClick={() => onSelect(lead)} className="inline-flex items-center gap-1 rounded-lg border border-[var(--staff-line)] px-3 py-2 text-sm font-bold text-[var(--staff-text)]"><PhoneCall className="h-4 w-4" />فتح الملف</button></div></li>)}</ul>}
+      {loading ? <p className="p-6 text-sm text-[var(--staff-muted)]" role="status">جارٍ تحميل العملاء...</p> : error ? <p className="p-6 text-sm text-rose-300" role="alert">{error}</p> : leads.length === 0 ? <p className="p-8 text-center text-sm text-[var(--staff-muted)]">لا توجد نتائج في هذا النطاق. غيّر البحث أو راجع المخزن المتاح.</p> : <ul className="divide-y divide-[var(--staff-line)]">{leads.map((lead) => { const isOverdue = lead.next_follow_up_at !== null && new Date(lead.next_follow_up_at).getTime() < startOfToday; return <li key={lead.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between"><button type="button" onClick={() => onSelect(lead)} className="min-w-0 text-right"><span className="block truncate font-extrabold text-[var(--staff-text)]">{lead.store_name}</span><span className="mt-1 block text-sm text-[var(--staff-muted)]">{lead.owner_name || 'لا يوجد اسم مالك'} · {STATUS_LABELS[lead.status]}</span>{lead.next_follow_up_at && <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-bold ${isOverdue ? 'bg-rose-400/15 text-rose-300' : 'bg-cyan-400/10 text-cyan-300'}`}>{isOverdue ? 'متأخرة' : 'المتابعة القادمة'}: {formatDateValue(lead.next_follow_up_at)}</span>}<span dir="ltr" className="mt-1 block text-left text-xs text-cyan-300">{lead.phones[0]?.raw || 'لا يوجد رقم'}</span></button><div className="flex shrink-0 items-center gap-2"><span className="text-xs text-[var(--staff-muted)]">#{formatNumber(lead.id)}</span>{scope === 'pool' && <button type="button" onClick={() => onClaim(lead)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"><UserPlus className="h-4 w-4" />استلام</button>}<button type="button" onClick={() => onSelect(lead)} className="inline-flex items-center gap-1 rounded-lg border border-[var(--staff-line)] px-3 py-2 text-sm font-bold text-[var(--staff-text)]"><PhoneCall className="h-4 w-4" />فتح الملف</button></div></li>; })}</ul>}
     </section>
   </section>;
 };

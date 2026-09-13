@@ -175,6 +175,104 @@ class CrmPanelsFollowRepoStyleTest(TestCase):
                 )
 
 
+class CrmFollowUpsAreReadFromLeadDataTest(TestCase):
+    """حقولُ المتابعة لا تكفي في النوع: يجب أن تصل إلى عين الموظف."""
+
+    def test_the_lead_card_reads_its_follow_up_date(self):
+        lead_list = (CRM_UI / "CrmLeadList.tsx").read_text(encoding="utf-8")
+        reads = re.findall(r"lead\.next_follow_up_at", lead_list)
+        self.assertTrue(
+            reads,
+            "بطاقة العميل لا تقرأ `lead.next_follow_up_at`؛ الموعد المحفوظ لا يعود للموظف.",
+        )
+
+    def test_status_change_activity_reads_both_ends_in_the_profile(self):
+        profile = (CRM_UI / "CrmLeadProfile.tsx").read_text(encoding="utf-8")
+        missing = [
+            field for field in ("activity.status_before", "activity.status_after")
+            if field not in profile
+        ]
+        self.assertEqual(
+            missing, [],
+            f"سجل تغيير الحالة لا يقرأ: {missing}.",
+        )
+
+    def test_the_overdue_badge_measures_a_day_not_an_instant(self):
+        """«متأخّرة» على البطاقة تُقاس بيومٍ مضى، لا بلحظةِ `Date.now()`.
+
+        بقياس اللحظة يصير موعدُ **اليوم** (تكتبه الشاشةُ 09:00) «متأخّراً» في
+        التاسعة وواحدة وهو عملُ اليوم؛ والأسوأُ أنّ الخادمَ يعدّ «المتأخّرة»
+        بقاعدةٍ أخرى (`crm.services.follow_up_day_bounds`) فيختلف الرقمُ في
+        الشريط عن الشارة في القائمة **على الشاشة نفسِها**. فالقاعدةُ واحدةٌ في
+        الطرفين، وهذا الحارسُ يمنع رجوعَ الواجهة إلى اللحظة.
+        """
+        lead_list = (CRM_UI / "CrmLeadList.tsx").read_text(encoding="utf-8")
+        match = re.search(r"const isOverdue = (?P<expression>[^;]*);", lead_list)
+        self.assertIsNotNone(match, "تعبيرُ `isOverdue` غائبٌ عن بطاقة العميل.")
+        expression = match.group("expression")
+        self.assertNotIn(
+            "Date.now()", expression,
+            f"شارةُ «متأخّرة» تقيس اللحظةَ لا اليومَ: {expression}",
+        )
+        self.assertRegex(
+            lead_list, r"setHours\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\)",
+            "لا حدَّ يومٍ محلّيّاً في الملفّ؛ فبأيِّ شيءٍ تُقارَن المواعيد؟",
+        )
+
+    def test_the_follow_ups_tab_is_hidden_from_a_desk_that_cannot_have_rows(self):
+        """تبويبُ «متابعاتي» خلف وجودِ دفترٍ شخصيّ — وإلّا فهو صفرٌ بحكم البناء.
+
+        النطاقُ يُرشَّح خادميّاً بـ`assigned_to=employee`، وسوبر أدمن بلا صفِّ
+        `PlatformEmployee` يعيد له الخادمُ `base.none()`. فتبويبٌ يُعرَض له هو
+        وعدٌ بقائمةٍ **لا تملأها بياناتٌ أبداً** — وهو بعينه عطبُ 212-H الذي
+        أبلغ عنه المالكُ: شاشةٌ تعمل وتُظهر صفراً والقاعدةُ ملأى.
+        """
+        lead_list = (CRM_UI / "CrmLeadList.tsx").read_text(encoding="utf-8")
+        tab = re.search(r"\{hasPersonalDesk && [^\n]*?onScope\('follow_ups'\)", lead_list)
+        self.assertIsNotNone(
+            tab,
+            "تبويبُ «متابعاتي» غيرُ مقيَّدٍ بـ`hasPersonalDesk`؛ مديرٌ بلا صفِّ موظّفٍ يراه فارغاً دائماً.",
+        )
+        panel = (CRM_UI / "CrmPanel.tsx").read_text(encoding="utf-8")
+        self.assertRegex(
+            panel, r"hasPersonalDesk=\{myEmployeeId !== null\}",
+            "الحاوية لا تمرّر وجودَ الدفتر الشخصيّ، فالقيدُ في القائمة بلا مصدرِ حقيقة.",
+        )
+
+    def test_the_manager_card_reads_the_overdue_field_not_a_doctored_name(self):
+        """عدّادُ المتأخّرات حقلٌ يُعرَض، لا نصٌّ يُلحَم داخل اسم الموظّف.
+
+        أوّلُ صيغةٍ لهذه اللوحة كانت تُعيد كتابةَ `employee_name` نفسِه إلى
+        «أحمد — متأخرة: ٣» عند التحميل: فيصير الاسمُ في البيانات ليس اسماً — لا
+        يُفرز ولا يُبحث فيه ولا تُلوَّن منه شارةٌ ولا يصلح لقائمةِ اختيار، وأيُّ
+        قارئٍ آخرَ لنفس الحقل يقرأ رقماً ملتصقاً باسمٍ.
+        """
+        manager = (CRM_UI / "CrmManagerPanel.tsx").read_text(encoding="utf-8")
+        # التأكيدُ على **قائمةِ مخالفات** لا على نصّ الملفّ: `assertIn` على ملفٍّ
+        # بحجم ثمانية كيلوبايت يطبع الملفَّ كلَّه في خبر الفشل فلا يُقرأ.
+        violations = []
+        if "employee.overdue" not in manager:
+            violations.append("لا يقرأ `employee.overdue` — المدير لا يرى مَن تأخّرت متابعاتُه")
+        if "employee_name:" in manager:
+            violations.append("يُعيد كتابةَ `employee_name` — الرقمُ شارةٌ لا حشوٌ في الاسم")
+        self.assertEqual(violations, [], f"CrmManagerPanel.tsx: {violations}")
+
+    def test_profile_derives_the_pipeline_from_the_single_exported_source(self):
+        lead_list = (CRM_UI / "CrmLeadList.tsx").read_text(encoding="utf-8")
+        profile = (CRM_UI / "CrmLeadProfile.tsx").read_text(encoding="utf-8")
+        violations = []
+        if "export const CRM_LEAD_PIPELINE" not in lead_list:
+            violations.append("CrmLeadList.tsx: المصدر المصدَّر للمراحل غائب")
+        if "CRM_LEAD_PIPELINE" not in profile:
+            violations.append("CrmLeadProfile.tsx: لا يستورد مصدر المراحل")
+        if "CRM_LEAD_PIPELINE.map" not in profile:
+            violations.append("CrmLeadProfile.tsx: الخط لا يرسم من المصدر الواحد")
+        self.assertEqual(
+            violations, [],
+            f"سلسلة الحالة ليست مشتقة من مصدر واحد: {violations}",
+        )
+
+
 class CrmWhatsAppIsHonestTest(TestCase):
     def test_whatsapp_opens_safely_without_recording_an_activity(self):
         source = "\n".join(_component_sources().values())

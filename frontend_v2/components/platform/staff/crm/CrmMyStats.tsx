@@ -16,6 +16,7 @@ const CARDS: Array<{ key: keyof CrmStats; label: string; tone: string }> = [
   { key: 'follow_up', label: 'متابعة', tone: 'text-amber-300' },
   { key: 'customer', label: 'صار عميلاً', tone: 'text-emerald-200' },
   { key: 'not_interested', label: 'غير مهتم', tone: 'text-rose-300' },
+  { key: 'overdue', label: 'متأخرة', tone: 'text-rose-300' },
 ];
 
 interface CrmMyStatsProps {
