@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **840**
+عدد النقاط: **842**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -661,6 +661,8 @@
 | `/api/platform/ops/performance-snapshots/{pk}/` | `PerformanceSnapshotViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/policy-profiles/{pk}/` | `PolicyProfileViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/presence/heartbeat/` | `PlatformPresenceHeartbeatView` | `platform_ops/views.py` |
+| `/api/platform/ops/presence/log/` | `PlatformPresenceLogView` | `platform_ops/views.py` |
 | `/api/platform/ops/profitability/` | `CustomerProfitabilityView` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/recruiters/{pk}/` | `PlatformRecruiterViewSet` | `platform_ops/views.py` |

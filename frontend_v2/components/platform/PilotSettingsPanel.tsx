@@ -38,6 +38,8 @@ type PerfDraft = {
   weights: Record<PilotAxisKey, string>;
   min_sample_size: string;
   review_grace_period_hours: string;
+  presence_min_hours_per_day: string;
+  presence_day_cap_percent: string;
 };
 
 function toPerfDraft(row: PerformanceEvaluationPolicyRow): PerfDraft {
@@ -49,6 +51,8 @@ function toPerfDraft(row: PerformanceEvaluationPolicyRow): PerfDraft {
     }, {} as Record<PilotAxisKey, string>),
     min_sample_size: String(row.min_sample_size),
     review_grace_period_hours: String(row.review_grace_period_hours),
+    presence_min_hours_per_day: String(row.presence_min_hours_per_day),
+    presence_day_cap_percent: String(row.presence_day_cap_percent),
   };
 }
 
@@ -123,6 +127,8 @@ const PerformancePolicySection: React.FC = () => {
         weights: draft.weights,
         min_sample_size: Number(draft.min_sample_size),
         review_grace_period_hours: Number(draft.review_grace_period_hours),
+        presence_min_hours_per_day: draft.presence_min_hours_per_day.trim(),
+        presence_day_cap_percent: Number(draft.presence_day_cap_percent),
       }),
       "تم حفظ المسودة.",
     );
@@ -246,7 +252,29 @@ const PerformancePolicySection: React.FC = () => {
                       onChange={(event) => updateDraft(row, { review_grace_period_hours: event.target.value })}
                     />
                   </label>
+                  {/* عتبةُ الحضورِ اليوميّةُ وسقفُها (#212 212-D): يُضبَطان من هنا
+                      كي لا يكون حقلا السياسةِ حبيسَي افتراضِ قاعدةِ البيانات. */}
+                  <label className="space-y-1">
+                    <span className="text-slate-500">الحد الأدنى لساعات الحضور اليومي</span>
+                    <input
+                      className="ktra-input h-8 w-full" value={draft.presence_min_hours_per_day} disabled={!isDraft}
+                      inputMode="decimal"
+                      onChange={(event) => updateDraft(row, { presence_min_hours_per_day: event.target.value })}
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="text-slate-500">سقف درجة اليوم (%)</span>
+                    <input
+                      className="ktra-input h-8 w-full" value={draft.presence_day_cap_percent} disabled={!isDraft}
+                      inputMode="numeric"
+                      onChange={(event) => updateDraft(row, { presence_day_cap_percent: event.target.value })}
+                    />
+                  </label>
                 </div>
+                <p className="text-[11px] text-slate-500">
+                  حضورٌ دون العتبة يخصم من الدرجة المركَّبة، وما زاد عليها يرفعها حتى السقف؛
+                  وعتبةُ صفرٍ تُطفئ أثرَ الحضور كلَّه.
+                </p>
                 <p className="text-[11px] text-slate-500">
                   سريان: {row.effective_from ? formatDateValue(row.effective_from) : "—"}
                   {row.effective_to && ` حتى ${formatDateValue(row.effective_to)}`}

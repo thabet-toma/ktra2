@@ -27,6 +27,8 @@ from .views import (
     AcquisitionCommissionLineViewSet,
     PerformanceReviewRequestViewSet,
     ChampionsBoardView,
+    PlatformPresenceHeartbeatView,
+    PlatformPresenceLogView,
     CustomerProfitabilityView,
     CompensationMonthCloseView,
     EmployeeCompensationPolicyViewSet,
@@ -75,6 +77,8 @@ urlpatterns = [
     path("dashboard/", PlatformDashboardView.as_view(), name="platform-ops-dashboard"),
     path("compensation/close/", CompensationMonthCloseView.as_view(), name="platform-ops-compensation-close"),
     path("champions/", ChampionsBoardView.as_view(), name="platform-ops-champions"),
+    path("presence/heartbeat/", PlatformPresenceHeartbeatView.as_view(), name="platform-ops-presence-heartbeat"),
+    path("presence/log/", PlatformPresenceLogView.as_view(), name="platform-ops-presence-log"),
     path("profitability/", CustomerProfitabilityView.as_view(), name="platform-ops-profitability"),
     path("", include(router.urls)),
 ]

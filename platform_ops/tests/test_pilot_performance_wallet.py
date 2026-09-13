@@ -14,6 +14,7 @@ from decimal import Decimal
 from django.contrib.auth import get_user_model
 from django.test import SimpleTestCase, TestCase
 from django.utils import timezone
+from rest_framework.test import APIClient
 
 from inventory.models import Product
 from partners.models import Partner
@@ -27,9 +28,11 @@ from platform_ops.models import (
     EmployeeSalaryLine,
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
+    PerformanceEvaluationPolicyEvent,
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformPresenceDay,
     ServiceDocumentType,
     ServiceSubscription,
     SubscriptionBillingRecord,
@@ -48,6 +51,8 @@ from platform_ops.services import (
     approve_work_order_deliverable_with_usage,
     assign_work_order,
     calculate_employee_pilot_performance,
+    clone_performance_evaluation_policy_to_draft,
+    get_default_pilot_policy_dict,
     capture_pilot_performance_snapshot,
     close_compensation_month,
     create_performance_evaluation_policy_draft,
@@ -107,6 +112,50 @@ class PerformanceEvaluationPolicyDraftTest(TestCase):
         active = activate_performance_evaluation_policy(policy=draft, actor=self.admin, activation_reason="v1")
         with self.assertRaises(PerformanceEvaluationPolicyConflict):
             update_performance_evaluation_policy_draft(policy=active, actor=self.admin, min_sample_size=3)
+
+    def test_presence_threshold_and_cap_are_settable_and_survive_a_clone(self):
+        """حقلُ سياسةٍ لا تستطيع شاشةٌ ضبطَه حقلٌ حبيسُ افتراضِ قاعدةِ البيانات.
+
+        والاستنساخُ بعينه هو الموضع الذي يضيع فيه: `clone_...` ينسخ الحقولَ
+        **يدويّاً**، فالحقلُ المنسيُّ يرتدّ بصمتٍ إلى الافتراض — فتقول الشاشةُ
+        «استنسخت النسخةَ النشطة» وقد غيّرت قاعدةَ المحاسبة.
+        """
+        draft = create_performance_evaluation_policy_draft(
+            actor=self.admin, presence_min_hours_per_day="5.50", presence_day_cap_percent=150,
+        )
+        self.assertEqual(draft.presence_min_hours_per_day, Decimal("5.50"))
+        self.assertEqual(draft.presence_day_cap_percent, 150)
+
+        active = activate_performance_evaluation_policy(
+            policy=draft, actor=self.admin, activation_reason="عتبةٌ خمسُ ساعاتٍ ونصف",
+        )
+        clone = clone_performance_evaluation_policy_to_draft(policy=active, actor=self.admin)
+        self.assertEqual(clone.presence_min_hours_per_day, Decimal("5.50"))
+        self.assertEqual(clone.presence_day_cap_percent, 150)
+
+    def test_editing_the_draft_moves_the_presence_threshold(self):
+        draft = create_performance_evaluation_policy_draft(actor=self.admin)
+        updated = update_performance_evaluation_policy_draft(
+            policy=draft, actor=self.admin, presence_min_hours_per_day="7.00",
+        )
+        self.assertEqual(updated.presence_min_hours_per_day, Decimal("7.00"))
+        # ويُسجَّل: تعديلُ قاعدةِ محاسبةٍ لا يُقرأ في السجلّ تعديلٌ بلا مراجعة.
+        event = PerformanceEvaluationPolicyEvent.objects.filter(
+            policy=updated, action=PerformanceEvaluationPolicyEvent.Action.UPDATED,
+        ).latest("created_at")
+        self.assertEqual(event.details["before"]["presence_min_hours_per_day"], "3.00")
+        self.assertEqual(event.details["after"]["presence_min_hours_per_day"], "7.00")
+
+    def test_a_cap_below_one_hundred_percent_is_refused(self):
+        """سقفٌ دون المئة خصمٌ لا مخرجَ منه — نقيضُ «ما زاد علاماتٌ أكثر»."""
+        with self.assertRaises(PerformanceEvaluationPolicyError) as ctx:
+            create_performance_evaluation_policy_draft(actor=self.admin, presence_day_cap_percent=90)
+        self.assertEqual(ctx.exception.code, "invalid_presence_policy")
+
+    def test_a_threshold_longer_than_a_day_is_refused(self):
+        with self.assertRaises(PerformanceEvaluationPolicyError) as ctx:
+            create_performance_evaluation_policy_draft(actor=self.admin, presence_min_hours_per_day="30")
+        self.assertEqual(ctx.exception.code, "invalid_presence_policy")
 
     def test_overlapping_effective_from_is_rejected(self):
         draft1 = create_performance_evaluation_policy_draft(actor=self.admin)
@@ -294,7 +343,114 @@ class PilotPerformanceCalculationTest(PilotScenarioBase):
         total_contrib = sum(
             axis["weighted_contribution"] for axis in result["axes"].values() if axis["applicable"]
         )
+        # **شرطٌ مُعلَنٌ لا مفترَض**: «المركَّبُ = مجموعُ المساهمات» صحيحٌ حين لا
+        # ينطبق معامِلُ الحضور (212-D). ولهذا الموظّفِ لا صفوفَ حضورٍ إطلاقاً،
+        # فلو أُضيف صفٌّ غداً في `setUp` لصار هذا التأكيدُ يسقط لسببٍ لا علاقةَ
+        # له باسمه — فيُصرَّح بالشرط هنا بدل تركه مصادفةً.
+        self.assertFalse(result["presence"]["is_applicable"])
         self.assertEqual(result["composite_score"], min(Decimal("100.00"), total_contrib))
+
+    def test_short_presence_deducts_from_the_evaluated_score_and_shows_both_numbers(self):
+        """قرارُ المالك: «العدّادُ يؤثّر على التقييم ... وما قلّ خصم».
+
+        وهذا هو التأكيدُ الذي يمنع أن يكون كلُّ عملِ 212-D حبراً على ورق: حسابُ
+        معامِلٍ لا يُضرَب بالمركَّب يبقى رقماً في حمولةٍ لا أثرَ له على درجةِ أحد.
+        """
+        now = timezone.now()
+        for _ in range(5):
+            self._approve_one_deliverable(received_at=now - datetime.timedelta(minutes=5))
+        PlatformPresenceDay.objects.create(
+            employee=self.employee, date=timezone.localdate(now),
+            active_seconds=int(1.5 * 3600),  # نصفُ العتبة ⇒ معامِلٌ 0.5
+            first_seen_at=now, last_seen_at=now,
+        )
+        result = calculate_employee_pilot_performance(
+            employee=self.employee, period_year=now.year, period_month=now.month,
+        )
+        self.assertEqual(result["status"], PerformanceSnapshot.Status.CALCULATED)
+        self.assertTrue(result["presence"]["is_applicable"])
+        self.assertEqual(result["presence"]["factor"], 0.5)
+        before = result["score_before_presence"]
+        self.assertIsNotNone(before)
+        self.assertLess(
+            result["composite_score"], before,
+            "حضورٌ دون العتبة لم يخصم من الدرجة — المعامِلُ محسوبٌ ولا يُضرَب بالمركَّب.",
+        )
+        # **ويُعرَض الرقمان**: خصمٌ لا يرى صاحبُه مقدارَه شكوى قادمةٌ لا تقييم.
+        self.assertEqual(result["presence"]["score_before"], float(before))
+        self.assertEqual(result["presence"]["score_after"], float(result["composite_score"]))
+
+    def test_the_presence_threshold_and_cap_come_from_the_frozen_policy(self):
+        """العتبةُ والسقفُ سياسةٌ تُجمَّد لا رقمان في الكود."""
+        now = timezone.now()
+        for _ in range(5):
+            self._approve_one_deliverable(received_at=now - datetime.timedelta(minutes=5))
+        PlatformPresenceDay.objects.create(
+            employee=self.employee, date=timezone.localdate(now), active_seconds=3 * 3600,
+            first_seen_at=now, last_seen_at=now,
+        )
+        policy = get_default_pilot_policy_dict()
+        policy["presence_min_hours_per_day"] = 6.0  # ثلاثُ ساعاتٍ صارت نصفَ المطلوب
+        result = calculate_employee_pilot_performance(
+            employee=self.employee, period_year=now.year, period_month=now.month,
+            policy_dict=policy,
+        )
+        self.assertEqual(result["presence"]["min_hours_per_day"], 6.0)
+        self.assertEqual(
+            result["presence"]["factor"], 0.5,
+            "العتبةُ المُمرَّرةُ من السياسة لم تُستعمَل — الرقمُ مكتوبٌ في الكود.",
+        )
+
+
+class PresenceLogEndpointMirrorsTheEvaluationTest(PilotScenarioBase):
+    """سجلُّ الحضور المعروضُ للموظّف = أرقامُ التقييم نفسُها.
+
+    وهذا ما كان مكسوراً: النقطةُ كانت تنادي `presence_discipline_factor` مباشرةً،
+    فتعود بالعتبةِ الافتراضيّةِ لا بعتبةِ السياسةِ النشطة، وبلا `score_before/after`
+    إطلاقاً — فسطرُ «قبل ← بعد» في اللوحة فرعٌ ميّتٌ لا يُصيَّر، أي أنّ «وبالتقييم
+    يكون واضح» لم يكن مُسلَّماً.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client = APIClient()
+        now = timezone.now()
+        for _ in range(5):
+            self._approve_one_deliverable(received_at=now - datetime.timedelta(minutes=5))
+        PlatformPresenceDay.objects.create(
+            employee=self.employee, date=timezone.localdate(now), active_seconds=int(1.5 * 3600),
+            first_seen_at=now, last_seen_at=now,
+        )
+
+    def test_the_log_shows_the_score_before_and_after_the_presence_factor(self):
+        self.client.force_authenticate(user=self.staff_user)
+        res = self.client.get("/api/platform/ops/presence/log/")
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        self.assertTrue(body["is_applicable"])
+        self.assertIn(
+            "score_before", body,
+            "الحمولةُ بلا `score_before` — سطرُ «قبل ← بعد» في اللوحة لا يُصيَّر أبداً.",
+        )
+        self.assertIsNotNone(body["score_before"])
+        self.assertIsNotNone(body["score_after"])
+        self.assertLess(body["score_after"], body["score_before"])
+
+    def test_the_log_reads_the_threshold_from_the_active_policy(self):
+        """عتبةٌ في الشاشةِ تخالف العتبةَ المُحاسَبَ بها شاشةٌ تكذب على صاحبها."""
+        draft = create_performance_evaluation_policy_draft(
+            actor=self.admin, presence_min_hours_per_day="6.00",
+        )
+        activate_performance_evaluation_policy(
+            policy=draft, actor=self.admin, activation_reason="عتبةُ ستِّ ساعات",
+        )
+        self.client.force_authenticate(user=self.staff_user)
+        body = self.client.get("/api/platform/ops/presence/log/").json()
+        self.assertEqual(
+            body["min_hours_per_day"], 6.0,
+            "النقطةُ تعرض العتبةَ الافتراضيّةَ لا عتبةَ السياسةِ النشطة.",
+        )
+        self.assertEqual(body["factor"], 0.25)  # ساعةٌ ونصفٌ من ستٍّ
 
 
 class PilotSnapshotFreezeTest(PilotScenarioBase):

@@ -44,6 +44,7 @@ from .services import (
     WorkOrderError,
     approve_health_check,
     assign_platform_employee,
+    record_presence_heartbeat,
     calculate_employee_performance,
     calculate_employee_ratings_summary,
     calculate_two_health_scores,
@@ -183,6 +184,7 @@ from .models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformPresenceDay,
     PlatformMeeting,
     PlatformMeetingAttendance,
     PlatformNotification,
@@ -1047,6 +1049,101 @@ class ChampionsBoardView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         return Response(build_champions_board(period_year=year, period_month=month))
+
+
+class PlatformPresenceHeartbeatView(APIView):
+    """نبضةُ حضورِ الموظّف على المنصّة (#212 212-D).
+
+    **الموظّفُ ينبض عن نفسِه فقط**: لا معامِلَ `employee` في هذه النقطة إطلاقاً،
+    فلا يستطيع أحدٌ أن يُثبت حضوراً لغيره — والصفُّ مُشتقٌّ من `request.user`.
+
+    والمديرُ ينبض أيضاً إن كان له صفُّ موظّفٍ: هو يعمل على المنصّة كذلك. ومن لا
+    صفَّ له (سوبر أدمن بلا ملفِّ موظّف) يأخذ 200 بلا تسجيل — النبضةُ ليست فعلاً
+    يفشل، والواجهةُ تنبض كلَّ دقيقةٍ فلا تُحوَّل إلى تيّارٍ من 403 في السجلّ.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def post(self, request):
+        employee = PlatformEmployee.objects.filter(user=request.user).first()
+        if employee is None:
+            return Response({"recorded": False, "reason": "not_a_platform_employee"})
+        row = record_presence_heartbeat(employee=employee)
+        return Response({
+            "recorded": True,
+            "date": row.date.isoformat(),
+            "active_seconds": row.active_seconds,
+            "active_hours": float(row.active_hours),
+        })
+
+
+class PlatformPresenceLogView(APIView):
+    """سجلُّ الحضورِ اليوميّ وأثرُه في التقييم.
+
+    بلا معامِلٍ = صفوفُ الطالبِ نفسِه. وبمعامِل `employee` = صفوفُ موظّفٍ آخر،
+    **للمدير وحدَه** — فسجلُّ ساعاتِ زميلٍ ليس من شأن زميله، وهو بعينه ما تمنعه
+    §١٠ عن لوحة الموظفين.
+
+    والمعامِلُ يُقرأ من الطلب، فلذلك يُفحَص التصعيدُ هنا صراحةً لا في الحارس
+    العامّ: صلاحيّةُ الموظّفِ تكفي لفتح النقطة، ولا تكفي لتسميةِ موظّفٍ غيره.
+    """
+
+    permission_classes = [IsPlatformOperationsStaff | IsPlatformOperationsManager]
+
+    def get(self, request):
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        requested = request.query_params.get("employee")
+        if requested and not is_manager:
+            return Response(
+                {"detail": "لا صلاحيةَ لك لسجلّ حضور موظّفٍ آخر.", "code": "not_a_manager"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        if requested:
+            employee = PlatformEmployee.objects.filter(pk=requested).first()
+            if employee is None:
+                return Response(
+                    {"detail": "موظف العمليات غير موجود.", "code": "employee_not_found"},
+                    status=status.HTTP_404_NOT_FOUND,
+                )
+        else:
+            employee = PlatformEmployee.objects.filter(user=request.user).first()
+            if employee is None:
+                return Response(
+                    {"detail": "لا ملفَّ موظّف منصّةٍ مرتبطٌ بحسابك.", "code": "not_a_platform_employee"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+
+        now = timezone.now()
+        year, month, period_error = _resolve_period(
+            request.query_params.get("year") or now.year,
+            request.query_params.get("month") or now.month,
+        )
+        if period_error:
+            return Response({"detail": period_error}, status=status.HTTP_400_BAD_REQUEST)
+
+        # **الأرقامُ من حاسبةِ التقييم نفسِها لا من حسابٍ ثانٍ هنا.** ونداءُ
+        # `presence_discipline_factor` مباشرةً كان يكسر شيئين: العتبةُ والسقفُ
+        # يعودان إلى افتراضِ الدالّة فتقول الشاشةُ «المطلوب ٣ ساعات» والسياسةُ
+        # النشطةُ تقول أربعاً — قاعدةٌ لم يُحاسَب بها؛ و`score_before/after`
+        # لا يوجدان في تلك الدالّة أصلاً، فكان سطرُ «قبل ← بعد» في اللوحة فرعاً
+        # ميّتاً لا يُصيَّر أبداً، أي أنّ «وبالتقييم يكون واضح» غيرُ مُسلَّم.
+        perf = calculate_employee_pilot_performance(
+            employee=employee, period_year=year, period_month=month,
+        )
+        detail = perf["presence"]
+        today = timezone.localdate(now)
+        today_row = PlatformPresenceDay.objects.filter(employee=employee, date=today).first()
+        return Response({
+            "employee_id": employee.pk,
+            "period_year": year,
+            "period_month": month,
+            "today": {
+                "date": today.isoformat(),
+                "active_seconds": today_row.active_seconds if today_row else 0,
+                "active_hours": float(today_row.active_hours) if today_row else 0.0,
+            },
+            **detail,
+        })
 
 
 class CustomerProfitabilityView(APIView):

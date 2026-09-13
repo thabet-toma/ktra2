@@ -165,6 +165,11 @@ EXCUSED_ROUTES = {
     "/api/platform/ops/champions/":
         "لوحةٌ جماعيّةٌ مُجمَّعةٌ بالتصميم (§١٠ — جمهورُها كلُّ الموظّفين المسجَّلين)؛ "
         "لا صفَّ فرديّاً يُنسَب لموظّفٍ فتُفحَص ملكيّتُه.",
+    "/api/platform/ops/presence/heartbeat/":
+        "كتابةٌ لا قراءة، و**بلا معامِلٍ إطلاقاً**: الصفُّ مشتقٌّ من `request.user` "
+        "فلا يوجد ما يُضيَّق أصلاً — لا صفَّ زميلٍ يُطلَب ولا معرّفَ يُمرَّر. وأنّها "
+        "لا تقبل معرّفَ موظّفٍ مُثبَتٌ سلوكيّاً في "
+        "`test_platform_presence.py::test_the_heartbeat_takes_no_employee_parameter_so_nobody_beats_for_another`.",
     "/api/platform/ops/employees/1/activity/":
         "فعلٌ تفصيليٌّ بـpk يعتمد `get_object()` على نفس `get_queryset()` المضيَّقة "
         "المُثبَتة في `employees/<pk>/`، ويُضيف تحقّقاً صريحاً ثانياً (`emp.user_id != request.user.id`).",
@@ -240,6 +245,9 @@ EXERCISED_ROUTES = frozenset({
     "/api/platform/ops/dashboard/",
     "/api/platform/ops/champions/",  # مُستثنى ملكيّةً لكنّه يُطلَب فعلياً في اختبار توفّره
     "/api/platform/ops/employees/",
+    # يُنفَّذ في `test_platform_presence.py`: زميلٌ يطلب سجلَّ زميلٍ يأخذ 403،
+    # والمديرُ يأخذ 200 — وبلا معامِلٍ يعود سجلُّ الطالب نفسِه.
+    "/api/platform/ops/presence/log/",
     "/api/platform/ops/employees/my-companies/",
     "/api/platform/ops/employees/ranking/",
     "/api/platform/ops/employees/1/",

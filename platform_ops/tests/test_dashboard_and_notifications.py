@@ -28,6 +28,7 @@ from platform_ops.models import (
     PerformanceSnapshot,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformPresenceDay,
     PlatformNotification,
     PolicyProfile,
     ServiceSubscription,
@@ -43,6 +44,8 @@ from platform_ops.services import (
     ANOMALY_CRITICAL_DELAY,
     ANOMALY_LOW_SCORE,
     ANOMALY_OVERLOADED,
+    activate_performance_evaluation_policy,
+    create_performance_evaluation_policy_draft,
     create_platform_notification,
     detect_platform_anomalies,
     get_employee_last_active,
@@ -543,6 +546,86 @@ class DashboardHonestyTest(TestCase):
         cards = summary["employees"]
         for card in cards:
             self.assertIsNotNone(card["last_active_at"], "طابعُ آخرِ ظهورٍ مفقود")
+
+
+class DashboardCardCarriesTodaysPresenceTest(TestCase):
+    """العدّادُ «فوق صورتو في الطاولة» — والطاولةُ تُرسَم من هذه الحمولة.
+
+    وحارسُ الواجهةِ النصّيُّ يثبت أنّ المكوّنَ **يقرأ** الحقل، لا أنّ الخادمَ
+    **يرسله**: حقلٌ يُحذَف من الحمولةِ يترك الرقاقةَ `--:--` أبداً، و`tsc` لا
+    يشكو لأنّ الحقلَ اختياريٌّ في الواجهة البرمجيّة.
+    """
+
+    def setUp(self):
+        self.manager = User.objects.create_superuser(
+            username="presence_dash_mgr", email="pdm@ktra.local", password="x"
+        )
+        self.tenant = Tenant.objects.create(TenantID=4131, CompanyName="Presence Table Co")
+        ServiceSubscription.objects.create(
+            tenant=self.tenant, status=ServiceSubscription.Status.ACTIVE, plan="growth"
+        )
+        user = User.objects.create_user(
+            username="presence_dash_staff", email="pds@ktra.local", password="x"
+        )
+        self.employee = PlatformEmployee.objects.create(
+            user=user, specialty="data_entry", status=PlatformEmployee.Status.ACTIVE
+        )
+        Engagement.objects.create(
+            employee=self.employee, tenant=self.tenant, status=Engagement.Status.ACTIVE
+        )
+        now = timezone.now()
+        PlatformPresenceDay.objects.create(
+            employee=self.employee, date=timezone.localdate(now), active_seconds=7200,
+            first_seen_at=now, last_seen_at=now,
+        )
+
+    def _card(self):
+        summary = get_platform_dashboard_summary(user=self.manager)
+        return next(c for c in summary["employees"] if c["id"] == self.employee.pk)
+
+    def test_the_card_carries_todays_seconds_and_hours(self):
+        card = self._card()
+        self.assertEqual(card["presence_seconds_today"], 7200)
+        self.assertEqual(card["presence_hours_today"], 2.0)
+
+    def test_the_cards_target_follows_the_active_policy_not_a_number_in_the_ui(self):
+        self.assertEqual(self._card()["presence_target_hours"], 3.0)
+        draft = create_performance_evaluation_policy_draft(
+            actor=self.manager, presence_min_hours_per_day="5.00",
+        )
+        activate_performance_evaluation_policy(
+            policy=draft, actor=self.manager, activation_reason="عتبةُ خمسِ ساعات",
+        )
+        self.assertEqual(
+            self._card()["presence_target_hours"], 5.0,
+            "الطاولةُ تُلوِّن رقاقتَها بعتبةٍ قديمة — أخضرُ على حضورٍ دون المطلوب.",
+        )
+
+    def test_the_specialty_threshold_lookup_does_not_scale_with_the_cards(self):
+        """استعلامٌ لكلّ بطاقةٍ هو بعينه العيبُ الذي حرسته `DashboardHonestyTest`."""
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        for index in range(3):
+            extra_user = User.objects.create_user(
+                username=f"presence_dash_extra_{index}", email=f"pde{index}@ktra.local", password="x"
+            )
+            extra = PlatformEmployee.objects.create(
+                user=extra_user, specialty="data_entry", status=PlatformEmployee.Status.ACTIVE
+            )
+            Engagement.objects.create(
+                employee=extra, tenant=self.tenant, status=Engagement.Status.ACTIVE
+            )
+        with CaptureQueriesContext(connection) as ctx:
+            get_platform_dashboard_summary(user=self.manager)
+        policy_queries = [
+            q for q in ctx.captured_queries
+            if "platform_ops_performanceevaluationpolicy" in q["sql"]
+        ]
+        self.assertLessEqual(
+            len(policy_queries), 2,
+            f"استعلامُ السياسةِ تكرّر {len(policy_queries)} مرّةً لأربعةِ موظّفين بتخصّصٍ واحد.",
+        )
 
 
 class PlatformActivityLogIsCappedTest(TestCase):

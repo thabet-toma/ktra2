@@ -1379,6 +1379,7 @@ class PerformanceEvaluationPolicySerializer(serializers.ModelSerializer):
         fields = [
             "id", "version", "status", "status_display", "effective_state", "specialty",
             "weights", "targets", "min_sample_size", "review_grace_period_hours",
+            "presence_min_hours_per_day", "presence_day_cap_percent",
             "activation_reason", "effective_from", "effective_to",
             "created_by", "activated_by", "activated_at", "created_at", "updated_at",
         ]
@@ -1393,6 +1394,12 @@ class DraftPerformanceEvaluationPolicySerializer(serializers.Serializer):
     weights = serializers.DictField(required=False)
     min_sample_size = serializers.IntegerField(required=False, min_value=1)
     review_grace_period_hours = serializers.IntegerField(required=False, min_value=0)
+    # المدى المعنويُّ يُحرَس في `_validate_presence_policy` كي تُرفَض القيمةُ نفسُها
+    # من الخدمةِ مباشرةً أيضاً، لا من هذه البوّابة وحدَها.
+    presence_min_hours_per_day = serializers.DecimalField(
+        required=False, max_digits=4, decimal_places=2, min_value=0,  # كالنموذج بالضبط.
+    )
+    presence_day_cap_percent = serializers.IntegerField(required=False, min_value=100)
 
 
 class ActivatePolicySerializer(serializers.Serializer):

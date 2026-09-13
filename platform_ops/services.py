@@ -51,6 +51,7 @@ from .models import (
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
     PerformanceEvaluationPolicyEvent,
+    PlatformPresenceDay,
     PerformanceReviewRequest,
     PerformanceSnapshot,
     PlatformActivityLog,
@@ -3643,6 +3644,8 @@ def _evaluation_policy_event_details(policy: PerformanceEvaluationPolicy) -> dic
         "weights": policy.weights,
         "min_sample_size": policy.min_sample_size,
         "review_grace_period_hours": policy.review_grace_period_hours,
+        "presence_min_hours_per_day": str(policy.presence_min_hours_per_day),
+        "presence_day_cap_percent": policy.presence_day_cap_percent,
     }
 
 
@@ -3679,7 +3682,40 @@ def get_default_pilot_policy_dict(specialty: str = "") -> dict:
         "weights": {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()},
         "min_sample_size": 5,
         "review_grace_period_hours": 48,
+        # من `_meta` لا رقماً مكتوباً: نسخةٌ ثانيةٌ من الافتراض تتباعد عن النموذج
+        # بصمتٍ عند أوّل تعديل (عيبٌ أُصلح في 210-D بعينه).
+        "presence_min_hours_per_day": float(
+            PerformanceEvaluationPolicy._meta.get_field("presence_min_hours_per_day").default
+        ),
+        "presence_day_cap_percent": int(
+            PerformanceEvaluationPolicy._meta.get_field("presence_day_cap_percent").default
+        ),
     }
+
+
+def _validate_presence_policy(min_hours, cap_percent) -> tuple[Decimal, int]:
+    """عتبةُ الحضورِ اليوميّةُ وسقفُ درجةِ اليوم — بمداهما المعنويّ.
+
+    **والسقفُ لا ينزل تحت المئة**: سقفٌ 90٪ يعني أن الموظّفَ الذي أدّى العتبةَ
+    كاملةً يُخصَم منه عشرةٌ في المئة أبداً، وهو خصمٌ لا يستطيع أحدٌ الخروجَ منه —
+    نقيضُ «ما زاد علاماتٌ أكثر». وصفرُ عتبةٍ مسموحٌ وهو إطفاءُ الأثرِ كلِّه.
+    """
+    try:
+        hours = Decimal(str(min_hours))
+        cap = int(cap_percent)
+    except (TypeError, ValueError, InvalidOperation):
+        raise PerformanceEvaluationPolicyError(
+            "invalid_presence_policy", "عتبةُ الحضور ساعاتٌ عشريّةٌ وسقفُها عددٌ صحيح.",
+        )
+    if hours < Decimal("0") or hours > Decimal("24"):
+        raise PerformanceEvaluationPolicyError(
+            "invalid_presence_policy", "عتبةُ الحضور بين صفرٍ و٢٤ ساعة (والصفرُ يُطفئ أثرَ الحضور).",
+        )
+    if cap < 100 or cap > 300:
+        raise PerformanceEvaluationPolicyError(
+            "invalid_presence_policy", "سقفُ درجةِ اليوم بين ١٠٠٪ و٣٠٠٪ — وما دون المئة خصمٌ لا مخرجَ منه.",
+        )
+    return hours.quantize(Decimal("0.01")), cap
 
 
 def create_performance_evaluation_policy_draft(
@@ -3689,6 +3725,8 @@ def create_performance_evaluation_policy_draft(
     weights=None,
     min_sample_size=_UNSET,
     review_grace_period_hours=_UNSET,
+    presence_min_hours_per_day=_UNSET,
+    presence_day_cap_percent=_UNSET,
     correlation_id: str = "",
     cloned_from=None,
 ) -> PerformanceEvaluationPolicy:
@@ -3702,6 +3740,13 @@ def create_performance_evaluation_policy_draft(
         min_sample_size = PerformanceEvaluationPolicy._meta.get_field("min_sample_size").default
     if review_grace_period_hours is _UNSET:
         review_grace_period_hours = PerformanceEvaluationPolicy._meta.get_field("review_grace_period_hours").default
+    if presence_min_hours_per_day is _UNSET:
+        presence_min_hours_per_day = PerformanceEvaluationPolicy._meta.get_field("presence_min_hours_per_day").default
+    if presence_day_cap_percent is _UNSET:
+        presence_day_cap_percent = PerformanceEvaluationPolicy._meta.get_field("presence_day_cap_percent").default
+    presence_min_hours_per_day, presence_day_cap_percent = _validate_presence_policy(
+        presence_min_hours_per_day, presence_day_cap_percent,
+    )
     try:
         min_sample_size = int(min_sample_size)
         review_grace_period_hours = int(review_grace_period_hours)
@@ -3720,6 +3765,8 @@ def create_performance_evaluation_policy_draft(
                 weights={k: str(v) for k, v in validated_weights.items()},
                 min_sample_size=min_sample_size,
                 review_grace_period_hours=review_grace_period_hours,
+                presence_min_hours_per_day=presence_min_hours_per_day,
+                presence_day_cap_percent=presence_day_cap_percent,
                 created_by=actor if getattr(actor, "pk", None) else None,
             )
     except IntegrityError:
@@ -3749,6 +3796,8 @@ def clone_performance_evaluation_policy_to_draft(*, policy, actor=None, correlat
         weights=source.weights,
         min_sample_size=source.min_sample_size,
         review_grace_period_hours=source.review_grace_period_hours,
+        presence_min_hours_per_day=source.presence_min_hours_per_day,
+        presence_day_cap_percent=source.presence_day_cap_percent,
         correlation_id=correlation_id,
         cloned_from=source,
     )
@@ -3757,7 +3806,10 @@ def clone_performance_evaluation_policy_to_draft(*, policy, actor=None, correlat
 @transaction.atomic
 def update_performance_evaluation_policy_draft(*, policy, actor=None, correlation_id: str = "", **changes):
     """يعدّل المسودة فقط؛ النسخ النشطة والمنتهية غير قابلة للتغيير."""
-    allowed = {"specialty", "weights", "min_sample_size", "review_grace_period_hours"}
+    allowed = {
+        "specialty", "weights", "min_sample_size", "review_grace_period_hours",
+        "presence_min_hours_per_day", "presence_day_cap_percent",
+    }
     if set(changes) - allowed:
         raise PerformanceEvaluationPolicyError("unsupported_field", "يوجد حقل سياسة غير مسموح بتعديله.")
     locked = PerformanceEvaluationPolicy.objects.select_for_update().get(pk=getattr(policy, "pk", policy))
@@ -3774,11 +3826,21 @@ def update_performance_evaluation_policy_draft(*, policy, actor=None, correlatio
     if min_sample_size < 1 or review_grace_period_hours < 0:
         raise PerformanceEvaluationPolicyError("invalid_integer", "حد العينة ومهلة المراجعة يجب أن تكونا صالحتين.")
 
+    presence_hours, presence_cap = _validate_presence_policy(
+        changes.get("presence_min_hours_per_day", locked.presence_min_hours_per_day),
+        changes.get("presence_day_cap_percent", locked.presence_day_cap_percent),
+    )
+
     locked.specialty = str(changes.get("specialty", locked.specialty) or "").strip()[:100]
     locked.weights = {k: str(v) for k, v in validated_weights.items()}
     locked.min_sample_size = min_sample_size
     locked.review_grace_period_hours = review_grace_period_hours
-    locked.save(update_fields=["specialty", "weights", "min_sample_size", "review_grace_period_hours", "updated_at"])
+    locked.presence_min_hours_per_day = presence_hours
+    locked.presence_day_cap_percent = presence_cap
+    locked.save(update_fields=[
+        "specialty", "weights", "min_sample_size", "review_grace_period_hours",
+        "presence_min_hours_per_day", "presence_day_cap_percent", "updated_at",
+    ])
     _log_evaluation_policy_event(
         locked, action=PerformanceEvaluationPolicyEvent.Action.UPDATED, actor=actor, correlation_id=correlation_id,
         details={"before": before, "after": _evaluation_policy_event_details(locked)},
@@ -4212,6 +4274,124 @@ def activate_employee_compensation_policy(
 # ==============================================================================
 
 
+def month_date_bounds(year: int, month: int) -> tuple[datetime.date, datetime.date]:
+    """أوّلُ الشهر وآخرُه. دالّةٌ واحدةٌ لأنّ «آخرَ يومٍ في الشهر» قاعدةٌ لا تُكتب
+    مرّتين: النسخةُ الثانيةُ تُكتب عادةً `+31 يوماً ثمّ رجوعاً`، وهي تصيب اليومَ
+    وتخالف الأولى في شباط الكبيس عند أوّل تعديل.
+    """
+    _, last_day = calendar.monthrange(year, month)
+    return datetime.date(year, month, 1), datetime.date(year, month, last_day)
+
+
+#: أقصى فجوةٍ بين نبضتين تُحتسَب حضوراً. النبضةُ كلَّ دقيقةٍ من الواجهة، فالفجوةُ
+#: الطبيعيّةُ ستّون ثانية؛ ومئةٌ وثمانون تتّسع لتأخّرِ شبكةٍ أو لسانٍ مُجمَّدٍ لحظةً
+#: دون أن تحتسب غيابَ ساعةٍ حضوراً. من غاب أطولَ من ذلك تُحتسَب عودتُه نبضةً أولى.
+PRESENCE_HEARTBEAT_GRACE_SECONDS = 180
+
+#: سقفُ ما تضيفه نبضةٌ واحدة — هو الفجوةُ المسموحة نفسُها، فلا سطرَ ثانياً يُضبَط.
+PRESENCE_MAX_SECONDS_PER_BEAT = PRESENCE_HEARTBEAT_GRACE_SECONDS
+
+
+@transaction.atomic
+def record_presence_heartbeat(*, employee, now=None) -> PlatformPresenceDay:
+    """تُسجّل نبضةَ حضورٍ وتُعيد صفَّ اليوم.
+
+    **الجمعُ بالفجوات لا بالنبضات**، ولهذا سببان:
+
+    * لسانان مفتوحان ينبضان في الثانية نفسِها يضيفان فجوةً واحدةً لا فجوتين —
+      فلا يُضاعِف فتحُ لسانٍ ثانٍ ساعاتَ الموظّف. ولو عُدَّت النبضاتُ (`+60` لكلّ
+      نبضة) لصار عددُ الألسنة مضروبَ الوقت.
+    * الفرقُ بين أوّل نبضةٍ وآخرِها ليس حضوراً: من نبض صباحاً ثمّ عاد عند المغيب
+      لم يحضر يوماً كاملاً. فتُجمَع الفجواتُ المتقاربةُ وحدَها.
+
+    ذرّيّةٌ مع `select_for_update` لأنّها قراءةٌ ثمّ كتابةٌ على صفٍّ واحد، و
+    `ATOMIC_REQUESTS` غيرُ مضبوطٍ في هذا المستودع: نبضتان متزامنتان بلا القفل
+    تقرآن القيمةَ نفسَها فتضيع إحداهما.
+    """
+    moment = now or timezone.now()
+    today = timezone.localdate(moment)
+
+    row = (
+        PlatformPresenceDay.objects.select_for_update()
+        .filter(employee=employee, date=today)
+        .first()
+    )
+    if row is None:
+        # `get_or_create` لا يصلح هنا: القفلُ يجب أن يسبق القراءةَ التي نبني عليها.
+        row, created = PlatformPresenceDay.objects.get_or_create(
+            employee=employee, date=today,
+            defaults={"active_seconds": 0, "first_seen_at": moment, "last_seen_at": moment},
+        )
+        if created:
+            return row
+        row = (
+            PlatformPresenceDay.objects.select_for_update()
+            .get(employee=employee, date=today)
+        )
+
+    elapsed = int((moment - row.last_seen_at).total_seconds())
+    if elapsed < 0:
+        # ساعةٌ رجعت إلى الوراء (تعديلُ مِنطقةٍ أو مزامنة) — لا تُخصَم ثوانٍ.
+        elapsed = 0
+    row.active_seconds += min(elapsed, PRESENCE_MAX_SECONDS_PER_BEAT)
+    row.last_seen_at = moment
+    row.save(update_fields=["active_seconds", "last_seen_at", "updated_at"])
+    return row
+
+
+def presence_discipline_factor(
+    *, employee, start_date=None, end_date=None,
+    min_hours_per_day=None, day_cap_percent=None,
+) -> dict:
+    """معاملُ الحضور على الدرجة المركَّبة، وتفصيلُه المعروض.
+
+    **معامِلٌ لا محورٌ خامس**، وذلك نصُّ قرار المالك: «ما زاد علاماتٌ أكثر، وما
+    قلّ **خصم**» — والخصمُ تعديلٌ على المركَّب. ومحاورُ الـpilot أربعةٌ أوزانُها
+    40/30/20/10 يرفض `_validate_pilot_weights` مجموعاً غيرَ المئة، فمحورٌ خامسٌ
+    كان يستلزم إعادةَ كتابةِ أوزانٍ قرّرها المالكُ بنفسِه.
+
+    درجةُ اليوم = `ساعات ÷ العتبة`، مسقوفةً بسقف السياسة؛ والمعامِلُ متوسّطُ
+    الأيّام **التي فيها نبضةٌ فعلاً**. ويومٌ بلا نبضةٍ لا يُحتسَب صفراً: لا يعرف
+    هذا الدفترُ عطلةً من إجازةٍ من يومٍ لم يُطلَب فيه عمل، واحتسابُ الجُمَع
+    أصفاراً كان يجعل الانضباطَ دالّةَ التقويم لا دالّةَ الموظّف.
+    """
+    threshold = Decimal(str(min_hours_per_day if min_hours_per_day is not None else "3.00"))
+    cap = Decimal(str(day_cap_percent if day_cap_percent is not None else 125)) / Decimal("100")
+
+    rows = PlatformPresenceDay.objects.filter(employee=employee)
+    if start_date:
+        rows = rows.filter(date__gte=start_date)
+    if end_date:
+        rows = rows.filter(date__lte=end_date)
+    rows = list(rows.order_by("date"))
+
+    total_seconds = sum(row.active_seconds for row in rows)
+    detail = {
+        "is_applicable": False,
+        "factor": 1.0,
+        "days_counted": len(rows),
+        "total_hours": float((Decimal(total_seconds) / Decimal("3600")).quantize(Decimal("0.01"))),
+        "min_hours_per_day": float(threshold),
+        "day_cap_percent": int(Decimal(str(day_cap_percent if day_cap_percent is not None else 125))),
+        "days": [
+            {"date": row.date.isoformat(), "hours": float(row.active_hours)} for row in rows
+        ],
+    }
+    # عتبةُ صفرٍ = إطفاءٌ صريحٌ للأثر، ولا أيّامَ = لا معلومةَ نحكم بها.
+    if threshold <= Decimal("0.00") or not rows:
+        return detail
+
+    day_factors = [
+        min(cap, (row.active_hours / threshold)) for row in rows
+    ]
+    factor = (sum(day_factors, Decimal("0.00")) / Decimal(len(day_factors))).quantize(
+        Decimal("0.0001"), rounding=ROUND_HALF_UP,
+    )
+    detail["is_applicable"] = True
+    detail["factor"] = float(factor)
+    return detail
+
+
 def calculate_employee_pilot_performance(
     *,
     employee: PlatformEmployee,
@@ -4233,9 +4413,7 @@ def calculate_employee_pilot_performance(
     **استبعاد وقت الإجازة المعتمدة TODO — سؤال مفتوح غير منفَّذ (§٦ من التذكرة):
     لا رابط بين PlatformEmployee وموظف hr المرتبط بشركة.**
     """
-    start_date = datetime.date(period_year, period_month, 1)
-    _, last_day = calendar.monthrange(period_year, period_month)
-    end_date = datetime.date(period_year, period_month, last_day)
+    start_date, end_date = month_date_bounds(period_year, period_month)
 
     if policy_dict is None:
         p_policy = get_active_performance_evaluation_policy(specialty=employee.specialty)
@@ -4466,10 +4644,38 @@ def calculate_employee_pilot_performance(
         )
         status_message = "محسوبة"
 
+    # ── الحضورُ على المنصّة: معامِلٌ على المركَّب (#212 212-D) ────────────────
+    # قرارُ المالك: «العدّادُ يؤثّر على التقييم — حدٌّ أدنى ثلاثُ ساعات، وما زاد
+    # علاماتٌ أكثر، وما قلّ خصم». و«الخصم» تعديلٌ على المركَّب **لا محورٌ خامس**:
+    # محاورُ الـpilot أربعةٌ ومجموعُ أوزانها مئةٌ يرفض `_validate_pilot_weights`
+    # غيرَها، فمحورٌ خامسٌ كان يستلزم إعادةَ كتابة أوزانٍ قرّرها المالكُ بنفسِه.
+    #
+    # ولا يُغذَّى `attendance_regularity` القديم: ذاك محورُ حاسبةٍ أخرى
+    # (`calculate_employee_performance`) لا تُعرَض للموظّف — واجهتُه تعرض محاورَ
+    # الـpilot، فتغذيةُ محورٍ لا يراه أحدٌ أثرُها صفرٌ على الشاشة.
+    #
+    # والنتيجةُ **تُعرَض قبل وبعد**: خصمٌ لا يرى صاحبُه مقدارَه ولا سببَه شكوى
+    # قادمةٌ لا تقييم.
+    presence = presence_discipline_factor(
+        employee=employee, start_date=start_date, end_date=end_date,
+        min_hours_per_day=policy_dict.get("presence_min_hours_per_day"),
+        day_cap_percent=policy_dict.get("presence_day_cap_percent"),
+    )
+    score_before_presence = composite_score
+    if composite_score is not None and presence["is_applicable"]:
+        composite_score = min(
+            Decimal("100.00"),
+            max(Decimal("0.00"), composite_score * Decimal(str(presence["factor"]))),
+        ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    presence["score_before"] = float(score_before_presence) if score_before_presence is not None else None
+    presence["score_after"] = float(composite_score) if composite_score is not None else None
+
     return {
         "status": status,
         "status_message": status_message,
         "composite_score": composite_score,
+        "score_before_presence": score_before_presence,
+        "presence": presence,
         "sample_size": sample_size,
         "min_sample_size": min_sample_size,
         "axes": axes_breakdown,
@@ -4488,6 +4694,8 @@ def _pilot_policy_dict(policy: PerformanceEvaluationPolicy | None, specialty: st
         "weights": policy.weights or {k: float(v) for k, v in DEFAULT_PILOT_AXIS_WEIGHTS.items()},
         "min_sample_size": policy.min_sample_size,
         "review_grace_period_hours": policy.review_grace_period_hours,
+        "presence_min_hours_per_day": float(policy.presence_min_hours_per_day),
+        "presence_day_cap_percent": int(policy.presence_day_cap_percent),
     }
 
 
@@ -5440,6 +5648,29 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         .values_list("employee_id", flat=True)
     )
 
+    # **وعدّادُ حضورِ اليوم باستعلامٍ واحدٍ أيضاً** (#212 212-D): المالكُ يطلبه
+    # «فوق صورة الموظّف في الطاولة»، والطاولةُ عشراتُ البطاقات — فاستعلامٌ لكلّ
+    # بطاقةٍ هو بعينه العيبُ الذي صيّر ٣٥٠١ استعلامٍ ثلاثةً في هذا المستودع.
+    presence_seconds_today = dict(
+        PlatformPresenceDay.objects.filter(
+            employee_id__in=[e.pk for e in active_employees],
+            date=timezone.localdate(current_time),
+        ).values_list("employee_id", "active_seconds")
+    )
+
+    # وعتبةُ الحضورِ لكلّ تخصّصٍ مرّةً واحدةً لا لكلّ بطاقة: الرقاقةُ تُلوَّن
+    # بالقاعدةِ **النشطة**، وقد صارت قابلةً للضبط من شاشة السياسة — فثلاثةٌ
+    # مكتوبةٌ في الواجهة تُلوِّن أخضرَ حضوراً دون المطلوب، أي شاشةٌ تكذب على المدير.
+    presence_target_by_specialty: dict[str, float] = {}
+    for specialty in {emp.specialty for emp in active_employees}:
+        specialty_policy = get_active_performance_evaluation_policy(
+            specialty=specialty, at=current_time,
+        )
+        presence_target_by_specialty[specialty] = float(
+            specialty_policy.presence_min_hours_per_day if specialty_policy is not None
+            else get_default_pilot_policy_dict()["presence_min_hours_per_day"]
+        )
+
     # 1. بطاقات الموظفين
     employee_cards = []
     for emp in active_employees:
@@ -5513,6 +5744,11 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             "is_recently_active": active_recently,
             "is_active_now": active_recently,
             "is_in_meeting": emp.pk in employee_ids_in_meeting_now,
+            # الثوانيُ للعدّاد الحيّ والساعاتُ للعرض — تُحسَب هنا مرّةً واحدةً كي
+            # لا تُقسَم على 3600 في كلّ مكوّنٍ يعرضها فتتباعد التقريبات.
+            "presence_seconds_today": presence_seconds_today.get(emp.pk, 0),
+            "presence_hours_today": round(presence_seconds_today.get(emp.pk, 0) / 3600, 2),
+            "presence_target_hours": presence_target_by_specialty.get(emp.specialty),
             "performance": {
                 "status": perf.get("status"),
                 "status_message": perf.get("status_message"),

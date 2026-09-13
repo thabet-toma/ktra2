@@ -58,6 +58,9 @@ export interface PerformanceEvaluationPolicyRow {
   targets: Record<string, unknown>;
   min_sample_size: number;
   review_grace_period_hours: number;
+  /** ساعاتٌ عشريّةٌ نصّاً كما يُرسلها DRF — كـ`base_salary`. */
+  presence_min_hours_per_day: string;
+  presence_day_cap_percent: number;
   activation_reason: string;
   effective_from: string | null;
   effective_to: string | null;
@@ -73,6 +76,8 @@ export interface PerformanceEvaluationPolicyDraftInput {
   weights?: Partial<Record<PilotAxisKey, number | string>>;
   min_sample_size?: number;
   review_grace_period_hours?: number;
+  presence_min_hours_per_day?: string | number;
+  presence_day_cap_percent?: number;
 }
 
 export interface PolicyPreview<T> {

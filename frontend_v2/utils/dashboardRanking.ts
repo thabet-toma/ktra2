@@ -32,6 +32,14 @@ export interface PlatformDashboardEmployee {
   is_recently_active: boolean;
   is_active_now?: boolean;
   is_in_meeting?: boolean;
+  /**
+   * مجموعُ وقتِ اليوم على المنصّة (#212 212-D) — من دفتر `PlatformPresenceDay`
+   * لا من ساعة المتصفّح، ولذلك يراه المديرُ في الطاولة كما طلب المالك.
+   */
+  presence_seconds_today?: number;
+  presence_hours_today?: number;
+  /** عتبةُ الحضورِ اليوميّةُ من السياسةِ النشطةِ لتخصّصِ الموظّف. */
+  presence_target_hours?: number;
   performance?: {
     status?: string;
     status_message?: string;

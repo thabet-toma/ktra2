@@ -2892,6 +2892,23 @@ class PerformanceEvaluationPolicy(models.Model):
         verbose_name="مهلة المراجعة قبل الإغلاق (ساعات)",
         help_text="مهلة إعلامية تُعرض في معاينة إغلاق الشهر؛ التسليمات المعلَّقة تبقى تمنع الإغلاق دوماً.",
     )
+    presence_min_hours_per_day = models.DecimalField(
+        max_digits=4, decimal_places=2, default=Decimal("3.00"),
+        verbose_name="ساعات الحضور المطلوبة يومياً",
+        help_text=(
+            "قرارُ المالك (#212): ثلاثُ ساعاتٍ حدّاً أدنى. اليومُ الذي يبلغها يأخذ "
+            "مئةً بالمئة، وما زاد يرفع وما قلّ يخصم. صفرٌ يُلغي أثرَ الحضور على "
+            "الدرجة إلغاءً تامّاً — فهو مفتاحُ الإطفاء لا «حدٌّ أدنى صفر»."
+        ),
+    )
+    presence_day_cap_percent = models.PositiveIntegerField(
+        default=125,
+        verbose_name="سقف نسبة اليوم الواحد (٪)",
+        help_text=(
+            "سقفُ ما يعوّضه يومٌ طويلٌ عن يومٍ قصير. بلا سقفٍ يمحو يومٌ من اثنتي "
+            "عشرةَ ساعةً ثلاثةَ أيّامٍ غائبة، فيصير «الانضباط» مقياسَ نَهَمٍ لا انتظام."
+        ),
+    )
     activation_reason = models.CharField(
         max_length=500,
         blank=True,
@@ -2933,6 +2950,56 @@ class PerformanceEvaluationPolicy(models.Model):
         if self.effective_to and self.effective_to <= moment:
             return "retired"
         return "current"
+
+
+class PlatformPresenceDay(models.Model):
+    """ثوانيُ حضورِ موظّفِ المنصّة في يومٍ واحد — صفٌّ لكلّ موظّفٍ لكلّ يوم.
+
+    **ولماذا دفترٌ جديدٌ لا `hr.AttendanceDay`:** ذاك الدفترُ دوامُ موظّفٍ في
+    **شركةِ زبون** (يحمل `tenant`)، ومحورُ الحضور القديم يقرؤه مُقيَّداً
+    بـ`tenant_id__in=engaged_tenant_ids`. وموظّفُ كترا العاملُ على المنصّة نفسِها
+    لا يملك صفوفاً كهذه أبداً — فكان «الحضور» لا يقيس شيئاً لفريق كترا.
+
+    **والوحدةُ ثوانٍ لا دقائق:** النبضةُ كلَّ دقيقةٍ من الواجهة، ولو خُزِّنت
+    دقائقُ لَقُرِّب كلُّ نبضةٍ إلى دقيقةٍ كاملة — فيصير فتحُ لسانَين حسابَ
+    ساعتين في ساعة. تُجمَع الثواني المنقضيةُ فعلاً بين نبضتين، فلسانان يفتحان
+    معاً لا يُضاعفان شيئاً (راجع `record_presence_heartbeat`).
+
+    ولا `tenant` هنا بحكم الطبيعة: هذا حضورُ كترا لا حضورُ شركة.
+    """
+
+    employee = models.ForeignKey(
+        "platform_ops.PlatformEmployee", on_delete=models.CASCADE,
+        related_name="presence_days", verbose_name="الموظف",
+    )
+    date = models.DateField(verbose_name="اليوم")
+    active_seconds = models.PositiveIntegerField(
+        default=0, verbose_name="ثواني الحضور الفعلي",
+        help_text="مجموعُ الفجوات بين نبضاتٍ متقاربة — لا الفرقُ بين أوّل نبضةٍ وآخرها.",
+    )
+    first_seen_at = models.DateTimeField(verbose_name="أول نبضة")
+    last_seen_at = models.DateTimeField(verbose_name="آخر نبضة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        ordering = ["-date"]
+        verbose_name = "يوم حضور على المنصة"
+        verbose_name_plural = "أيام الحضور على المنصة"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["employee", "date"], name="uniq_platform_presence_employee_day",
+            ),
+        ]
+        indexes = [models.Index(fields=["date"], name="idx_presence_day_date")]
+
+    def __str__(self):
+        return f"{self.employee_id} · {self.date} · {self.active_seconds}ث"
+
+    @property
+    def active_hours(self) -> Decimal:
+        """ساعاتٌ بمنزلتين — الحسابُ كلُّه على هذه الخاصيّة فلا تُشتقّ مرّتين."""
+        return (Decimal(self.active_seconds) / Decimal("3600")).quantize(Decimal("0.01"))
 
 
 class PerformanceEvaluationPolicyEvent(models.Model):

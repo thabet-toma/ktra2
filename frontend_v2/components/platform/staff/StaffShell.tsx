@@ -15,6 +15,7 @@ import { MyMeetingsPanel } from '../MyMeetingsPanel';
 import { MyProfileCard } from '../MyProfileCard';
 import { WorkOrdersPanel } from '../WorkOrdersPanel';
 import { StaffHomeDashboard } from './StaffHomeDashboard';
+import { StaffPresencePanel } from './StaffPresencePanel';
 import { StaffSidebar } from './StaffSidebar';
 import { StaffTopBar } from './StaffTopBar';
 import { CrmPanel } from './crm/CrmPanel';
@@ -73,7 +74,7 @@ const StaffShellContent: React.FC = () => {
     performance: (
       <div className="space-y-6">
         {profileLoading ? <StaffNotice>جارٍ تحميل تقييمك...</StaffNotice>
-          : profile ? <EmployeeSelfWalletCard employeeId={profile.id} />
+          : profile ? <><StaffPresencePanel /><EmployeeSelfWalletCard employeeId={profile.id} /></>
             : <StaffNotice>لا يوجد ملف موظف مرتبط بالحساب لعرض تقييمه.</StaffNotice>}
         <ChampionsPanel />
       </div>
