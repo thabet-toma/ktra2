@@ -57,6 +57,14 @@ class LimitSpec:
     period: str
     count: Callable[[int, object], int]
     bulk: Callable[[object, object], dict]
+    #: حدٌّ **مركَّب** يجمع حدوداً ذرّيّةً بمفاتيحها — فارغٌ للذرّيّ.
+    #:
+    #: تعريفُ المجموع هنا وحدَه، وعدّاداه مشتقّان منه بـ`_sum_of`: لا ثالثةَ
+    #: تكتب «الفواتير = بيعٌ + شراء» مرّةً أخرى فتتباعد عن هذه. ويقرؤه
+    #: `bulk_usage` كي يعدّ كلَّ مصدرٍ **مرّةً واحدة**: كان المجموعُ يعيد عدَّ
+    #: البيعِ والشراء وقد عُدّا لحدَّيهما، فاستعلامان من ثلاثةَ عشرَ زائدان في
+    #: كلّ قراءةٍ للوحة وكلّ فتحٍ لبطاقة «خطّتي».
+    sums: tuple[str, ...] = ()
 
 
 def _month_start():
@@ -110,18 +118,31 @@ def _bulk_purchase_invoices(tenant_ids, since):
     )
 
 
-def _count_all_invoices(tenant_id, since):
-    return (
-        _count_sales_invoices(tenant_id, since)
-        + _count_purchase_invoices(tenant_id, since)
-    )
-
-
-def _bulk_all_invoices(tenant_ids, since):
-    merged = dict(_bulk_sales_invoices(tenant_ids, since))
-    for tenant_id, count in _bulk_purchase_invoices(tenant_ids, since).items():
-        merged[tenant_id] = merged.get(tenant_id, 0) + count
+def _merge_counts(parts) -> dict:
+    """يجمع قواميسَ `{tenant_id: عدد}` — الغائبُ من أحدها صفرٌ فيه لا حذفٌ منها."""
+    merged: dict = {}
+    for part in parts:
+        for tenant_id, count in part.items():
+            merged[tenant_id] = merged.get(tenant_id, 0) + count
     return merged
+
+
+def _sum_of(*keys):
+    """عدّادا حدٍّ مركَّبٍ مشتقّان من حدودٍ ذرّيّةٍ بمفاتيحها.
+
+    `LIMITS` لم يُبنَ بعدُ حين تُنشَأ هذه المغلِّفات، والقراءةُ داخلَها تحدث عند
+    النداء لا عند التعريف — فالتأجيلُ مقصودٌ لا سهو.
+    """
+    # `since` مُهمَلٌ في الاثنين عن قصد: **لكلّ مصدرٍ نافذتُه** من `period` الخاصّ
+    # به، فيحسبها `_usage_of`/`_bulk_of`. والمُعامِلُ باقٍ ليطابق توقيعَ كلّ
+    # عدّادٍ في `LimitSpec` — نداءٌ واحدٌ يخدم الذرّيَّ والمركَّبَ بلا فرعٍ عندَه.
+    def count(tenant_id, since):
+        return sum(_usage_of(key, tenant_id) for key in keys)
+
+    def bulk(tenant_ids, since):
+        return _merge_counts(_bulk_of(key, tenant_ids) for key in keys)
+
+    return count, bulk
 
 
 def _count_warehouses(tenant_id, since):
@@ -268,6 +289,10 @@ def _bulk_managed_books(tenant_ids, since):
     }
 
 
+#: مكوّنا «إجمالي الفواتير» — مصدرُ الحقيقةِ الوحيدُ لمعنى المجموع.
+_ALL_INVOICES_PARTS = ("sales.invoices", "purchase.invoices")
+_ALL_INVOICES_COUNT, _ALL_INVOICES_BULK = _sum_of(*_ALL_INVOICES_PARTS)
+
 LIMITS = {
     spec.key: spec
     for spec in (
@@ -292,8 +317,9 @@ LIMITS = {
             label="إجمالي الفواتير (بيع + شراء)",
             unit="فاتورة",
             period=PERIOD_MONTH,
-            count=_count_all_invoices,
-            bulk=_bulk_all_invoices,
+            count=_ALL_INVOICES_COUNT,
+            bulk=_ALL_INVOICES_BULK,
+            sums=_ALL_INVOICES_PARTS,
         ),
         LimitSpec(
             key="inventory.warehouses",
@@ -674,20 +700,42 @@ def limit_value(tenant, key: str):
     return plan_default(_plan_of(tenant), key)
 
 
+def _window_of(spec):
+    """نافذةُ العدّ لهذا الحدّ — `None` لحدٍّ تراكميٍّ بلا نافذة."""
+    return _month_start() if spec.period == PERIOD_MONTH else None
+
+
+def _usage_of(key: str, tenant_id: int) -> int:
+    """عدُّ حدٍّ واحدٍ لشركةٍ واحدة — بلا مرورٍ بـ`current_usage` كي لا تُعاد الدورة."""
+    spec = LIMITS[key]
+    return spec.count(tenant_id, _window_of(spec))
+
+
+def _bulk_of(key: str, tenant_ids) -> dict:
+    """العدُّ المجمَّعُ لحدٍّ واحدٍ — نظيرُ `_usage_of` لعدّة شركات."""
+    spec = LIMITS[key]
+    return spec.bulk(tenant_ids, _window_of(spec))
+
+
 def current_usage(tenant, key: str) -> int:
     """الاستهلاك الحالي — عدّ حقيقي من الجداول ضمن نافذة الحدّ."""
-    spec = LIMITS.get(key)
     tenant_id = _tenant_id(tenant)
-    if spec is None or tenant_id is None:
+    if key not in LIMITS or tenant_id is None:
         return 0
-    since = _month_start() if spec.period == PERIOD_MONTH else None
-    return spec.count(tenant_id, since)
+    return _usage_of(key, tenant_id)
 
 
 def limit_rows(tenant) -> list[dict]:
-    """صف لكل حدّ: الافتراضي، التجاوز، الفعّال، والاستهلاك — للوحة المنصة."""
+    """صف لكل حدّ: الافتراضي، التجاوز، الفعّال، والاستهلاك — للوحة المنصة.
+
+    الاستهلاكُ من `bulk_usage` لا من `current_usage` في حلقة: الأخيرةُ تعدّ
+    البيعَ والشراءَ **مرّتين** (مرّةً لحدَّيهما ومرّةً لحدّ المجموع)، والأولى
+    تعدّ كلَّ مصدرٍ مرّةً وتشتقّ المجموع.
+    """
     plan = _plan_of(tenant)
     overrides = tenant_overrides(tenant)
+    tenant_id = _tenant_id(tenant)
+    usage = bulk_usage(tenant_ids=[tenant_id]) if tenant_id is not None else {}
     rows = []
     for key, spec in LIMITS.items():
         default = plan_default(plan, key)
@@ -703,7 +751,8 @@ def limit_rows(tenant) -> list[dict]:
             "override": overrides.get(key) if has_override else None,
             "has_override": has_override,
             "effective": effective,
-            "usage": current_usage(tenant, key),
+            # الشركةُ بلا صفوفٍ تغيب عن قاموس `bulk_usage` فاستهلاكُها صفر.
+            "usage": usage.get(key, {}).get(tenant_id, 0),
         })
     return rows
 
@@ -746,12 +795,23 @@ def bulk_usage(keys=None, tenant_ids=None) -> dict:
     (`created_at`)، والشركة بلا صفوف تغيب عن القاموس فاستهلاكها صفر.
     """
     selected = tuple(LIMITS) if keys is None else tuple(k for k in keys if k in LIMITS)
-    month_start = _month_start()
+    counted: dict = {}
+
+    def atomic(key: str) -> dict:
+        """يعدّ المصدرَ مرّةً واحدةً في هذا النداء ولو طلبَه حدّان."""
+        if key not in counted:
+            counted[key] = _bulk_of(key, tenant_ids)
+        return counted[key]
+
     usage = {}
     for key in selected:
         spec = LIMITS[key]
-        since = month_start if spec.period == PERIOD_MONTH else None
-        usage[key] = spec.bulk(tenant_ids, since)
+        # الحدُّ المركَّبُ يُشتقُّ من مصادرِه المعدودةِ سلفاً — لا يُعيد عدَّها.
+        # وقد لا يكون مصدرٌ منها في `selected` أصلاً، فيُعَدُّ هنا ولا يُنشَر.
+        usage[key] = (
+            _merge_counts(atomic(source) for source in spec.sums)
+            if spec.sums else atomic(key)
+        )
     return usage
 
 

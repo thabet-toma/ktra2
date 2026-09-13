@@ -1,10 +1,15 @@
 """T-PLANLIMITS: حدود الخطة — الافتراضي، التجاوز، الحارس عند الإنشاء."""
+from collections import Counter
+
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from rest_framework.test import APITestCase
 
 from core.models import TenantLimit
 from core.plans import (
     LIMITS,
+    bulk_usage,
     check_limit,
     current_usage,
     invalidate_limit_cache,
@@ -80,6 +85,129 @@ class PlanLimitEngineTest(APITestCase):
     def test_limit_rows_cover_every_declared_limit(self):
         rows = {row["key"] for row in limit_rows(self.basic)}
         self.assertEqual(rows, set(LIMITS))
+
+
+class CompositeLimitsAreDerivedNotRecountedTest(APITestCase):
+    """الحدُّ المركَّبُ يُعلِن مصادرَه، فيُشتقُّ منها ولا يُعيد عدَّها.
+
+    قبلَ هذا كان لمعنى «إجمالي الفواتير = بيعٌ + شراء» **نسختان**: دالّةٌ تجمع
+    العدَّ الفرديَّ وأخرى تجمع العدَّ المجمَّع. والثمنُ مقيسٌ لا نظريّ:
+    `limit_rows` تنادي `current_usage` لكلّ حدٍّ، فيُعَدُّ جدولا الفواتير **مرّتين**
+    — مرّةً لحدَّيهما ومرّةً لحدّ المجموع — أي استعلامان زائدان في كلّ فتحٍ
+    لبطاقة «خطّتي» وكلّ قراءةٍ لصفوف لوحة المنصّة.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant = Tenant.objects.create(
+            CompanyName="شركة المركَّب", SubscriptionPlan="Basic", Status="Active",
+        )
+        cls.other = Tenant.objects.create(
+            CompanyName="شركة أخرى", SubscriptionPlan="Basic", Status="Active",
+        )
+
+    def setUp(self):
+        invalidate_limit_cache(self.tenant.pk)
+
+    def test_every_declared_source_is_a_real_atomic_limit(self):
+        """مفتاحٌ في `sums` لا يقابله حدٌّ = `KeyError` في وقت التشغيل لا هنا."""
+        broken = []
+        for key, spec in LIMITS.items():
+            for source in spec.sums:
+                if source not in LIMITS:
+                    broken.append(f"{key} ← {source} (لا حدَّ بهذا المفتاح)")
+                elif LIMITS[source].sums:
+                    broken.append(f"{key} ← {source} (مركَّبٌ يجمع مركَّباً)")
+        self.assertEqual(broken, [], f"مصادرُ حدٍّ مركَّبٍ غيرُ سليمة: {broken}")
+
+    def test_the_composite_equals_the_sum_of_its_sources(self):
+        """الطريقان — العدُّ المباشرُ والاشتقاقُ — على الرقم نفسِه لكلّ حدّ.
+
+        وبصفوفٍ حقيقيّةٍ لا بقاعدةٍ فارغة: صفرٌ يساوي صفراً في كلّ حال، فتأكيدٌ
+        على قاعدةٍ خالية لا يستطيع السقوطَ لأجلِ ما يسمّيه.
+        """
+        self._make_invoices(sales=3, purchases=2)
+        for key, spec in LIMITS.items():
+            if not spec.sums:
+                continue
+            with self.subTest(limit=key):
+                parts = sum(current_usage(self.tenant, source) for source in spec.sums)
+                self.assertEqual(
+                    current_usage(self.tenant, key), parts,
+                    f"«{spec.label}» لا يساوي مجموعَ {spec.sums}.",
+                )
+                rows = {row["key"]: row["usage"] for row in limit_rows(self.tenant)}
+                self.assertEqual(rows[key], parts, "صفُّ اللوحة يخالف العدَّ المباشر.")
+
+    def test_the_composite_counts_this_company_alone(self):
+        """رقمٌ مطلق، لأنّ المساواةَ لا تكشف **تركيبةً خاطئة**.
+
+        `test_the_composite_equals_the_sum_of_its_sources` يقارن طرفَين يقرآن
+        `sums` نفسَها: فلو صارت `("sales.invoices", "sales.invoices")` لتضخّم
+        الطرفان معاً وبقي أخضرَ. هنا العددُ مكتوبٌ — ثلاثُ مبيعاتٍ وشراءان — فمصدرٌ
+        مكرَّرٌ أو مبدَّلٌ يسقط عند `6 != 5`.
+
+        **وبالطريقين**: `current_usage` تعدّ بـ`spec.count` و`limit_rows` بـ
+        `spec.bulk` — دالّتان مستقلّتان لكلّ حدّ، والثانيةُ هي التي تُغذّي صفوفَ
+        اللوحة. وصفُّ شركةٍ أخرى معها يثبت أنّ الرقمَ **لكلّ شركةٍ رقمُها**: عزلُ
+        المسار المجمَّع بنيويٌّ (`values("tenant_id").annotate`) فمخرجُه مفهرسٌ
+        بالشركة، وهذا التأكيدُ يمسك مَن يستبدله بجمعٍ على الكلّ.
+        """
+        self._make_invoices(sales=3, purchases=2)
+        self.assertEqual(current_usage(self.tenant, "documents.invoices"), 5)
+        self.assertEqual(current_usage(self.other, "documents.invoices"), 1)
+        mine = {row["key"]: row["usage"] for row in limit_rows(self.tenant)}
+        theirs = {row["key"]: row["usage"] for row in limit_rows(self.other)}
+        self.assertEqual(
+            (mine["documents.invoices"], theirs["documents.invoices"]), (5, 1),
+            "صفوفُ اللوحة تخلط فواتيرَ الشركتين.",
+        )
+
+    def test_a_shared_source_is_counted_once_per_read(self):
+        """جدولٌ يطلبه حدّان يُستعلَم عنه مرّةً واحدةً في القراءة المجمَّعة."""
+        self._make_invoices(sales=1, purchases=1)
+        with CaptureQueriesContext(connection) as captured:
+            bulk_usage(tenant_ids=[self.tenant.pk])
+        seen = Counter(query["sql"] for query in captured.captured_queries)
+        repeated = {sql[:90]: n for sql, n in seen.items() if n > 1}
+        self.assertEqual(repeated, {}, f"استعلامٌ مكرَّرٌ حرفيّاً: {repeated}")
+
+    def _make_invoices(self, *, sales: int, purchases: int) -> None:
+        """صفوفٌ لهذه الشركة وصفٌّ لشركةٍ أخرى — كي يُقاس العزلُ مع المجموع."""
+        from django.utils import timezone
+
+        from accounting.models import Currency
+        from logistics.models import PurchaseInvoice
+        from partners.models import Partner
+        from sales.models import SalesInvoice
+
+        today = timezone.localdate()
+        currency, _ = Currency.objects.get_or_create(
+            Code="ILS", defaults={"Name": "شيكل", "Symbol": "₪", "IsBaseCurrency": True},
+        )
+        customer = Partner.objects.create(
+            tenant=self.tenant, name="عميل المركَّب", partner_type="Customer",
+        )
+        supplier = Partner.objects.create(
+            tenant=self.tenant, name="مورّد المركَّب", partner_type="Supplier",
+        )
+        for index in range(sales):
+            SalesInvoice.objects.create(
+                tenant=self.tenant, invoice_number=f"S{index}", customer=customer,
+                currency=currency, invoice_date=today, grand_total=100,
+            )
+        for index in range(purchases):
+            PurchaseInvoice.objects.create(
+                tenant=self.tenant, invoice_number=f"P{index}", partner=supplier,
+                currency=currency, invoice_date=today, grand_total=100,
+            )
+        SalesInvoice.objects.create(
+            tenant=self.other, invoice_number="X1",
+            customer=Partner.objects.create(
+                tenant=self.other, name="عميل غريب", partner_type="Customer",
+            ),
+            currency=currency, invoice_date=today, grand_total=100,
+        )
 
 
 class PlanLimitGuardTest(APITestCase):
