@@ -577,7 +577,13 @@ const WorkOrderDetail: React.FC<{
                         سبب الرفض ({d.rejection_category_display}): {d.rejection_reason}
                       </p>
                     )}
-                    {d.review_status === "pending" && (
+                    {/* الحكمُ على المُسلَّم — مدير العمليات وحدَه (القصة ١٤).
+                        الخادمُ يردّ `manager_only` لغيره، وهذه اللوحةُ نفسُها
+                        تُركَّب في قشرة الموظّف: فبدون الشرط كان صاحبُ المُسلَّم
+                        يرى «اعتماد» و«رفض» على عملِه هو — وهو الحكمُ الذي يخصم
+                        من حصّة العميل ويُحتسب إنجازاً له. وحالتُه تبقى مقروءةً
+                        له في الشارة أعلاه، فالمحجوبُ الفعلُ لا الخبر. */}
+                    {isManager && d.review_status === "pending" && (
                       <div className="mt-2 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
