@@ -14,6 +14,18 @@ from django.test import SimpleTestCase
 FRONTEND = Path(__file__).resolve().parents[2] / "frontend_v2"
 INDEX_CSS = FRONTEND / "styles" / "index.css"
 PLATFORM_COMPONENTS = FRONTEND / "components" / "platform"
+STAFF_CRM_COMPONENTS = PLATFORM_COMPONENTS / "staff" / "crm"
+
+# هذه لهجاتُ حالة وأزرارُ فعلٍ مقصودة فوق الجلد الداكن، لا أسطحٌ فاتحة متسرّبة.
+# يبقى الاستثناء ضيّقاً ومكتوبَ السبب كي لا يصير توسيع المسح تجاوزاً أعمى.
+INTENTIONAL_CRM_LIGHT_CLASSES = {
+    "bg-amber-300": "زرّ الفعل الساطع يجاوره دائماً `text-slate-950`، مثل زرّ القشرة ذي الـaccent.",
+    "border-amber-400": "حدود تحذير القفل أو طلب التحويل لهجة حالة مقروءة فوق الخلفية الداكنة.",
+    "border-cyan-400": "حدّ حقل البحث وإجراء الاستعلام؛ لون تفاعلي لا سطح فاتح.",
+    "border-emerald-400": "حدّ نتيجة الرقم المتاحة؛ أخضر الحالة مقروء فوق الداكن.",
+    "border-rose-400": "حدّ الرفض أو الخطر؛ أحمر الحالة مقروء فوق الداكن.",
+    "focus:border-cyan-400": "حلقة تركيز حقل البحث؛ لا يجوز تعتيم مؤشر التركيز التفاعلي.",
+}
 
 #: الشاشاتُ الجذريّةُ لسطح المنصّة السماويّ — ما عداها لوحاتٌ تسكن داخلها فترث
 #: الغلاف. وقشرةُ الموظّف (`staff/StaffShell.tsx`) **ليست** منها عمداً: سطحٌ
@@ -86,6 +98,18 @@ def _scoped_selectors(css: str, scope: str) -> list[str]:
     return [selector for selector in _all_selectors(css) if selector.startswith(scope)]
 
 
+def _ops_shell_bodies(css: str) -> list[str]:
+    r"""أجسامُ كتل `.ops-shell` — **بعد نزع التعليقات**.
+
+    التعليقاتُ هنا تشرح قواعدَ CSS، فتكتبها بأقواسها؛ وقوسٌ إغلاقٍ داخلَ تعليقٍ
+    يقطع جسمَ الكتلة عند التحليل فتختفي كلُّ تصريحةٍ بعده. حدث فعلاً: تعليقٌ
+    يقتبس `… .ktra-input { background: … }` أخفى ثلاثةَ رموزٍ تليه، فسقط حارسٌ
+    على عيبٍ لا وجودَ له.
+    """
+    stripped = re.sub(r"/\*.*?\*/", " ", css, flags=re.DOTALL)
+    return re.findall(r"\.ops-shell\s*\{(?P<body>[^{}]*)\}", stripped)
+
+
 class PlatformOpsDarkSkinContractTest(SimpleTestCase):
     @classmethod
     def setUpClass(cls):
@@ -99,7 +123,13 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
 
     def test_every_light_class_the_ops_components_wear_has_a_dark_override(self):
         light_classes = set()
-        for source_path in PLATFORM_COMPONENTS.glob("*.tsx"):
+        # لوحة CRM تعيش في `staff/crm/` لكنها تُركّب أيضاً في مركز القيادة؛
+        # لذا سطح العمليات مسؤول عن جلدها الداكن مثل مكوّناته المباشرة.
+        source_paths = [
+            *PLATFORM_COMPONENTS.glob("*.tsx"),
+            *STAFF_CRM_COMPONENTS.glob("*.tsx"),
+        ]
+        for source_path in source_paths:
             light_classes.update(
                 match.group(0) for match in LIGHT_PLATFORM_CLASS.finditer(
                     source_path.read_text(encoding="utf-8")
@@ -107,6 +137,11 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
             )
 
         self.assertTrue(light_classes)
+        stale_exceptions = set(INTENTIONAL_CRM_LIGHT_CLASSES) - light_classes
+        self.assertEqual(
+            stale_exceptions, set(),
+            f"استثناءات CRM لم تعد تلبسها اللوحة: {sorted(stale_exceptions)} — احذف الاستثناء المتقادم.",
+        )
         # يُؤكَّد على **قائمةِ المخالفات** لا على نصِّ الـCSS: `assertIn` على ملفٍّ
         # كاملٍ تطبع مئةً وثلاثين كيلوبايتاً في خبر الفشل فيضيع الخبرُ في الكومة.
         scoped = _scoped_selectors(self.css, ".ops-shell")
@@ -117,7 +152,10 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
             # بشكل `.ops-shell .x`: تجاوزُ `group-hover:` يلزمه سلفٌ وسيطٌ
             # (`.ops-shell .group:hover .group-hover\:x`) فالمطابقةُ الحرفيّةُ
             # تطلب المستحيلَ، وتجاوزُ `hover:` يلحقه `:hover` فتقطعه.
-            if not any(f".{escaped_class}" in selector for selector in scoped):
+            if (
+                light_class not in INTENTIONAL_CRM_LIGHT_CLASSES
+                and not any(f".{escaped_class}" in selector for selector in scoped)
+            ):
                 missing.append(light_class)
         self.assertEqual(
             missing, [],
@@ -159,7 +197,7 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
         root = re.search(r'className="([^"]*\bops-shell\b[^"]*)"', source)
         self.assertIsNotNone(root, "لم يُعثر على العنصر الحامل للغلاف.")
 
-        bodies = re.findall(r"\.ops-shell\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
+        bodies = _ops_shell_bodies(self.css)
         needed = {"bg-": "background-color", "text-": "color"}
         unpainted = []
         for light_class in LIGHT_PLATFORM_CLASS.finditer(root.group(1)):
@@ -186,7 +224,7 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
         الذي يحمله اسمُه. والاشتقاقُ من `--staff-*` هو تعريفُ «داكن» هنا:
         قيمةٌ واحدةٌ في مكانٍ واحدٍ لا نسخةٌ ثانيةٌ من اللوحة.
         """
-        bodies = re.findall(r"\.ops-shell\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
+        bodies = _ops_shell_bodies(self.css)
         self.assertTrue(bodies)
         stray = []
         for token in (
@@ -212,6 +250,61 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
         self.assertEqual(
             stray, [],
             f"رموزٌ يقرأها مركزُ القيادة ولم تصر داكنةً: {stray}",
+        )
+
+    def test_every_skin_surface_token_the_ops_components_read_goes_dark(self):
+        """**المصدرُ الرابعُ للفاتح: صنفُ مكوِّنٍ لا أداةُ Tailwind.**
+
+        `ktra-input` ليس صنفَ لونٍ يمسحه تعبيرٌ نمطيّ، وليس لوناً حرفيّاً في
+        قاعدةِ قاعة عمل — بل صنفُ مكوِّنٍ تصبغه أوراقُ جلدٍ ثلاثةٌ متتالية، وآخرُها
+        `:root[data-skin="modern"]` **تثبّت رمزاً فاتحاً ولا تقرأ `--ktra-field`**
+        الذي أعاد الغلافُ تعريفَه. فالرمزُ صحيحٌ داكنٌ والحقلُ أبيضُ، ولونُ النصّ
+        فاتحٌ فوقه: تباينُ 1.06:1. ولا يمسك ذلك أيُّ حارسٍ يقرأ أصنافَ TSX.
+
+        فيُقرأ الاتّجاهُ المعاكس: ما الذي **تقرأه** قواعدُ الجلد على أصنافٍ
+        تلبسها شاشاتُ القيادة فعلاً؟ كلُّ `var(--color-*)` من تلك القواعد يجب أن
+        يكون معرَّفاً على `.ops-shell` ومشتقّاً من جلد الموظّف.
+        """
+        worn = {
+            match.group(0)
+            for path in PLATFORM_COMPONENTS.rglob("*.tsx")
+            for match in re.finditer(r"(?<![\w-])ktra-[a-z0-9-]+(?![\w-])",
+                                     path.read_text(encoding="utf-8"))
+        }
+        self.assertTrue(worn, "لم تعد شاشاتُ القيادة تلبس أصنافَ مكوّنات `ktra-*`.")
+
+        # الرموزُ التي تقرأها قواعدُ الجلد على تلك الأصناف بالذات.
+        read_tokens = set()
+        for selector, body in re.findall(r"([^{}]*)\{([^{}]*)\}",
+                                         re.sub(r"/\*.*?\*/", " ", self.css, flags=re.DOTALL)):
+            if "data-skin" not in selector:
+                continue
+            if not any(f".{name}" in selector for name in worn):
+                continue
+            read_tokens.update(re.findall(r"var\(\s*(--color-[a-z0-9-]+)", body))
+        self.assertTrue(read_tokens, "لم تعد قواعدُ الجلد تقرأ رموزَ `--color-*`.")
+
+        bodies = _ops_shell_bodies(self.css)
+        # رموزُ النصّ والحدّ الدلاليّةُ تُقرأ في مواضعَ كثيرةٍ ولها تجاوزاتُها
+        # أعلاه؛ المقصودُ هنا ما يصبغ **سطحاً** — وهو ما يصير رقعةً بيضاء.
+        surfaces = sorted(token for token in read_tokens if "surface" in token)
+        self.assertTrue(surfaces, "لا رمزَ سطحٍ في القراءة — تغيّر شكلُ ورقة الجلد.")
+
+        stray = []
+        for token in surfaces:
+            values = [
+                match.group("value").strip()
+                for body in bodies
+                for match in re.finditer(rf"{re.escape(token)}\s*:(?P<value>[^;]*);", body)
+            ]
+            if not values:
+                stray.append(f"{token} ← تقرأه قاعدةُ جلدٍ على صنفٍ تلبسه القيادة، وغيرُ معرَّفٍ على `.ops-shell`")
+            elif not all("var(--staff-" in value for value in values):
+                stray.append(f"{token} ← قيمةٌ لا تُشتقّ من جلد الموظّف: {values}")
+        self.assertEqual(
+            stray, [],
+            f"رموزُ أسطحٍ تصبغ مكوّناتِ القيادة ولم تصر داكنةً: {stray} — "
+            "حقلٌ أبيضُ يُكتب عليه بنصٍّ فاتح: الكتابةُ تختفي.",
         )
 
     def test_the_room_grounds_written_in_literal_colours_go_dark(self):

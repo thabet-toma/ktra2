@@ -123,6 +123,30 @@ interface AppLayoutProps {
   listPath?: string;
 }
 
+/**
+ * اسمُ دورِ العضويّة كما يقوله الخادم.
+ *
+ * كان هنا ثلاثيّةٌ تعرف `manager` و`procurement` وتطبع «موظف» لكلِّ ما سواهما —
+ * أي **سبعةً من تسعة**: المحاسبُ والمحاسبُ القانونيُّ وموظّفُ المبيعات وصاحبُ
+ * الخدمة الذاتيّة والموظّفُ الميدانيُّ و«المستعرض» كلُّهم «موظف». ومالكُ النظام
+ * قرأ الملصقَ على حسابِ سوبر أدمن فظنّ العزلَ مكسوراً: هذا **دورُ العضويّة في
+ * الشركة**، ولا يقول شيئاً عن صلاحيّة المنصّة.
+ *
+ * والمصدرُ `UserCompanyMembership.ROLE_CHOICES`، يحرس المطابقةَ
+ * `core/tests/test_header_role_label.py` فلا يمرّ دورٌ جديدٌ بلا اسم.
+ */
+const MEMBERSHIP_ROLE_LABEL: Record<string, string> = {
+  manager: 'مدير',
+  accountant: 'محاسب',
+  legal_accountant: 'محاسب قانوني خارجي',
+  sales: 'موظف مبيعات',
+  procurement: 'موظف مشتريات',
+  staff: 'موظف',
+  ess: 'موظف خدمة ذاتية',
+  field_staff: 'موظف ميداني',
+  viewer: 'مستعرض',
+};
+
 export const AppLayout: React.FC<AppLayoutProps> = ({
   user,
   activeView,
@@ -210,7 +234,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             <UserIcon className="w-3.5 h-3.5" />
             <span className="font-semibold text-[var(--color-text)]">{user.name}</span>
             <span className="text-[var(--color-border)]">|</span>
-            <span>الدور: {user.role === 'manager' ? 'مدير' : user.role === 'procurement' ? 'مشتريات' : 'موظف'}</span>
+            <span>الدور: {MEMBERSHIP_ROLE_LABEL[user.role] ?? user.role}</span>
             <span className="text-[var(--color-border)]">|</span>
             <Calendar className="w-3.5 h-3.5" />
             <span>{formatDateValue(new Date())}</span>

@@ -2617,6 +2617,26 @@ tbody td {
      والثاني إلى `#d7ebf9` من سُلَّم `.platform-surface`. */
   --color-text: var(--staff-text);
   --color-border: var(--staff-line);
+
+  /* ── أسطحُ جلد `modern`: حقلٌ أبيضُ يُكتب عليه بنصٍّ أبيض ──────────────────
+     تسعةُ ملفّاتٍ في مركز القيادة تلبس `ktra-input` (سبعاً وأربعين مرّة)،
+     وقاعدةُ الجلد الأساسيّةُ تقرأ `--ktra-field` — الذي أُعيد تعريفُه داكناً
+     أعلاه. **لكنّ قاعدةً ثالثةً تغلبه**:
+
+         :root[data-skin="modern"] .ktra-input { background: var(--color-surface); }
+
+     نوعيّتُها (0,3,0) تغلب محدِّدَ الغلاف (0,2,0)، و**لا تقرأ `--ktra-field`
+     أصلاً** بل تثبّت `--color-surface` = `#ffffff`. فبقيت الحقولُ بيضاءَ بينما
+     صار لونُ النصّ `--ktra-ink` الفاتحَ: تباينُ 1.06:1 — الكتابةُ تختفي.
+     وقبل قشرةِ القيادة كان الجذرُ `text-slate-800` فيُقرأ الأسودُ على الأبيض،
+     فالعيبُ **انحدارٌ أحدثته القشرةُ** لا نقصٌ قديم.
+
+     والعلاجُ الرمزُ لا محدِّدٌ أشدُّ نوعيّة: قاعدةٌ مضادّةٌ تكسب بالنوعيّة تصلح
+     `ktra-input` وحدَها وتترك كلَّ قاعدةِ `modern` أخرى تقرأ السطحَ الفاتح.
+     يحرسه `test_every_skin_surface_token_the_ops_components_read_goes_dark`. */
+  --color-surface: var(--staff-panel);
+  --color-surface-2: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg));
+  --color-surface-3: color-mix(in oklab, var(--staff-panel) 72%, var(--staff-bg));
 }
 
 .staff-shell .bg-white,

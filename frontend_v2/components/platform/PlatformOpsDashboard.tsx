@@ -32,6 +32,7 @@ import { PlatformTasksAdminPanel } from "./PlatformTasksAdminPanel";
 import { EmployeeTargetsModal } from "./EmployeeTargetsModal";
 import { EmployeeProfileDrawer } from "./EmployeeProfileDrawer";
 import { WorkspaceRoom, RoomOccupant } from "./WorkspaceRoom";
+import { CrmPanel } from "./staff/crm/CrmPanel";
 import { countPresent, derivePresence, sortByPresence } from "../../utils/roomPresence";
 import { formatLastActive } from "../../utils/lastActiveFormat";
 import { DashboardHeroStrip } from "./DashboardHeroStrip";
@@ -41,7 +42,7 @@ import { LayoutDashboard, ClipboardList, DoorOpen, CalendarClock } from "lucide-
 type DashboardTab =
   | "overview" | "work_orders" | "catalog" | "usage_ledger"
   | "pilot_settings" | "compensation_close" | "wallet" | "integration_keys" | "champions"
-  | "profitability" | "review_requests" | "workspace_room" | "meetings" | "staff_tasks";
+  | "profitability" | "review_requests" | "workspace_room" | "meetings" | "staff_tasks" | "crm";
 
 export const PlatformOpsDashboard: React.FC = () => {
   const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
@@ -296,6 +297,15 @@ export const PlatformOpsDashboard: React.FC = () => {
         </button>
         <button
           type="button"
+          onClick={() => setActiveTab("crm")}
+          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
+            activeTab === "crm" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
+          }`}
+        >
+          العملاء
+        </button>
+        <button
+          type="button"
           onClick={() => setActiveTab("workspace_room")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
             activeTab === "workspace_room" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
@@ -477,6 +487,9 @@ export const PlatformOpsDashboard: React.FC = () => {
       {activeTab === "profitability" && <ProfitabilityPanel />}
       {activeTab === "review_requests" && <PerformanceReviewRequestsPanel />}
       {activeTab === "meetings" && <MeetingsPanel />}
+      {/* لا يصل إلى مركز القيادة إلا السوبر أدمن (`IsPlatformAdmin`)، لذلك `true` صحيح هنا.
+          وليس لكل سوبر أدمن صفّ PlatformEmployee؛ `null` يمنع ادعاء ملكية عميل من دليل الزملاء. */}
+      {activeTab === "crm" && <CrmPanel isManager={true} myEmployeeId={null} />}
 
       {activeTab === "workspace_room" && (
         <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-6 shadow-sm">

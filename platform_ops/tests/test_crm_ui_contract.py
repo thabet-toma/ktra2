@@ -232,6 +232,79 @@ class CrmOwnershipComesFromMyProfileTest(TestCase):
         )
 
 
+class CrmPanelIsMountedInBothWorkspacesTest(TestCase):
+    """المالك والمسوّق يدخلان لوحة CRM نفسها من قشرتيهما، لا من بابين."""
+
+    def test_the_crm_panel_is_mounted_in_the_command_centre_and_staff_shell(self):
+        dashboard = (FRONTEND / "components" / "platform" / "PlatformOpsDashboard.tsx").read_text(encoding="utf-8")
+        staff_shell = (STAFF / "StaffShell.tsx").read_text(encoding="utf-8")
+
+        self.assertRegex(
+            dashboard,
+            r'activeTab === "crm"\s*&&\s*<CrmPanel\s+isManager=\{true\}\s+myEmployeeId=\{null\}\s*/>',
+            "مركز القيادة لا يركّب لوحة CRM للمالك؛ زرّ العملاء لا يجوز أن يفتح باب /staff منفصلاً.",
+        )
+        self.assertRegex(
+            staff_shell,
+            r'crm:\s*<CrmPanel\s+isManager=\{capabilities\.is_platform_admin\}\s+myEmployeeId=\{profile\?\.id \?\? null\}\s*/>',
+            "قشرة الموظف لم تعد تركّب لوحة CRM؛ المسوّق هو مستعملها الأول ولا يجوز أن يحذفه تركيب المالك.",
+        )
+
+
+class CrmPanelLandsOnADeskThatHasRowsTest(TestCase):
+    """البابُ الجديدُ لا يُفتح على غرفةٍ فارغةٍ بحكم البناء.
+
+    مركزُ القيادة يركّب اللوحةَ بـ`myEmployeeId={null}` (قرارٌ صحيحٌ: لا يجوز
+    اختراعُ ملكيّةِ عميلٍ لسوبر أدمن بلا صفّ موظّف) — ومن ذلك القرارِ نفسِه يلزم
+    شيئان لا يمسكهما `tsc` ولا `npm test`:
+
+    ١) النطاقُ الابتدائيُّ لا يكون `'mine'` ثابتاً: الخادمُ يرشّح `mine` بـ
+       `assigned_to=employee` فيعيد `none()` بلا صفٍّ — **صفرٌ بحكم البناء**،
+       مُثبَتٌ خادميّاً في
+       `crm/tests/test_manager_without_employee_row.py`.
+    ٢) شريطُ «عدّاداتي» لا يُركَّب لمن لا دفترَ له: نقطتُه ترفع 403، واللوحةُ
+       تعرض نصَّ الخطأ مكانَها بالتصميم — فيصير صدرُ الشاشة اعتذاراً.
+
+    وكلُّ ذلك بلا أيّ خطأٍ في الطرفين: صفحةٌ تعمل وتقول «لا عملاء» والقاعدةُ
+    مملوءة. وهذا الصنفُ بعينه («صفرٌ بحكم البناء») هو ما كُشف في 212-E2 على
+    `claimed_count`.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.panel = (CRM_UI / "CrmPanel.tsx").read_text(encoding="utf-8")
+
+    def _initial_scope_expression(self) -> str:
+        match = re.search(
+            r"useState<Scope>\((?P<expression>[^;]*)\);", self.panel
+        )
+        self.assertIsNotNone(match, "لم يُعثر على النطاق الابتدائيّ في `CrmPanel`.")
+        return match.group("expression")
+
+    def test_the_initial_scope_is_derived_from_whether_there_is_a_personal_desk(self):
+        expression = self._initial_scope_expression()
+        self.assertIn(
+            "myEmployeeId", expression,
+            f"النطاقُ الابتدائيُّ ثابتٌ لا يقرأ وجودَ دفترٍ شخصيّ: `{expression}` — "
+            "مالكُ المنصّة يهبط على «عملائي» وهي صفرٌ بحكم البناء.",
+        )
+        self.assertIn(
+            "'all'", expression,
+            f"لا نطاقَ بديلاً لمن لا دفترَ له: `{expression}` — "
+            "و«المخزن المتاح» ليس بديلاً، فهو لا يحمل عميلاً مُسنَداً.",
+        )
+
+    def test_my_stats_is_mounted_only_where_there_is_a_personal_desk(self):
+        mount = re.search(r".{0,40}<CrmMyStats\b", self.panel)
+        self.assertIsNotNone(mount, "شريطُ «عدّاداتي» لم يعد مركَّباً في اللوحة.")
+        self.assertIn(
+            "myEmployeeId", mount.group(0),
+            f"شريطُ «عدّاداتي» مركَّبٌ بلا شرطِ دفترٍ شخصيّ: `{mount.group(0).strip()}` — "
+            "نقطتُه ترفع 403 لمن لا صفَّ موظّفٍ له، فيصير صدرُ شاشته اعتذاراً.",
+        )
+
+
 class CrmRequiredFieldsAreDeclaredTest(TestCase):
     """زرٌّ لا يفعل شيئاً ليس زرّاً.
 
