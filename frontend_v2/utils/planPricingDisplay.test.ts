@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  buildPlanComparisonSections,
   buildLimitComparisonRows,
   buildModuleComparisonRows,
   buildPlanUsageBar,
@@ -45,6 +46,39 @@ test('buildModuleComparisonRows: اتّحاد مفاتيح الوحدات عبر
   assert.equal(rows.length, 2);
   assert.deepEqual(byKey.hr_suite.enabledByPlan, { Basic: false, Pro: true, Enterprise: true });
   assert.deepEqual(byKey.advanced_reports.enabledByPlan, { Basic: false, Pro: false, Enterprise: true });
+});
+
+test('buildPlanComparisonSections: ترتّب الأقسام، تحفظ البادئة المجهولة، ولا تُظهر قسماً فارغاً', () => {
+  const plans: PublicPlan[] = [
+    {
+      ...plan('Basic', 1, []),
+      limits: [
+        { key: 'inventory.products', label: 'المنتجات', unit: 'منتج', period: 'total', period_label: 'إجمالاً', value: 20 },
+        { key: 'sales.invoices', label: 'فواتير البيع', unit: 'فاتورة', period: 'month', period_label: 'شهرياً', value: 10 },
+        { key: 'future.usage', label: 'حد جديد', unit: 'عنصر', period: 'total', period_label: 'إجمالاً', value: 5 },
+      ],
+      modules: [{ key: 'hr_suite', label: 'الموارد البشرية' }],
+    },
+    {
+      ...plan('Pro', 1, []),
+      limits: [
+        { key: 'inventory.products', label: 'المنتجات', unit: 'منتج', period: 'total', period_label: 'إجمالاً', value: 200 },
+        { key: 'sales.invoices', label: 'فواتير البيع', unit: 'فاتورة', period: 'month', period_label: 'شهرياً', value: 100 },
+        { key: 'future.usage', label: 'حد جديد', unit: 'عنصر', period: 'total', period_label: 'إجمالاً', value: 50 },
+      ],
+      modules: [{ key: 'hr_suite', label: 'الموارد البشرية' }],
+    },
+  ];
+
+  const sections = buildPlanComparisonSections(plans);
+
+  assert.deepEqual(
+    sections.map((section) => section.label),
+    ['الفواتير والمستندات', 'المخزون والمنتجات', 'الوحدات المرخّصة', 'مزايا أخرى'],
+  );
+  assert.deepEqual(sections[3].limitRows.map((row) => row.key), ['future.usage']);
+  assert.equal(sections.some((section) => section.label === 'الشركة ومستخدموها'), false);
+  assert.equal(sections[2].moduleRows[0].key, 'hr_suite');
 });
 
 test('buildPlanUsageBar: `null` بلا حدّ فلا شريطَ ولا قسمةَ على عدم', () => {

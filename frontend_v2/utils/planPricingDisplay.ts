@@ -26,6 +26,29 @@ export interface ModuleComparisonRow {
   enabledByPlan: Record<string, boolean>;
 }
 
+/** بادئة كلّ حدّ هي القسم الذي يقرأه صاحب الخطة في جدول المقارنة. */
+export const LIMIT_SECTION_LABELS_BY_PREFIX: Record<string, string> = {
+  sales: 'الفواتير والمستندات',
+  purchase: 'الفواتير والمستندات',
+  documents: 'الفواتير والمستندات',
+  inventory: 'المخزون والمنتجات',
+  company: 'الشركة ومستخدموها',
+  partners: 'العملاء والموردون',
+  hr: 'الموظفون',
+  employee_ops: 'الموظفون',
+  office: 'المكتب المحاسبي',
+};
+
+const MODULES_SECTION_LABEL = 'الوحدات المرخّصة';
+const OTHER_FEATURES_SECTION_LABEL = 'مزايا أخرى';
+
+export interface PlanComparisonSection {
+  key: string;
+  label: string;
+  limitRows: LimitComparisonRow[];
+  moduleRows: ModuleComparisonRow[];
+}
+
 /**
  * صفٌّ لكلّ حدّ: كلّ الخطط تحمل مفاتيحَ الحدود نفسَها بالترتيب نفسِه
  * (`public_plan_rows` تبنيها من `LIMITS` الواحدة لكلّ خطّة) — فمرجعُ الأعمدة
@@ -67,6 +90,40 @@ export function buildModuleComparisonRows(plans: PublicPlan[]): ModuleComparison
       plans.map((plan) => [plan.key, plan.modules.some((m) => m.key === key)]),
     ),
   }));
+}
+
+/**
+ * يقسّم حدود الخطط من بادئة مفتاحها، ثم يضع الوحدات في قسمها المستقل. حدّ خادم
+ * جديد لا يختفي: يبقى في «مزايا أخرى» في آخر الجدول حتى تُسمّى بادئته هنا.
+ */
+export function buildPlanComparisonSections(plans: PublicPlan[]): PlanComparisonSection[] {
+  const limitsBySection = new Map<string, LimitComparisonRow[]>();
+  for (const row of buildLimitComparisonRows(plans)) {
+    const prefix = row.key.split('.', 1)[0];
+    const section = LIMIT_SECTION_LABELS_BY_PREFIX[prefix] ?? OTHER_FEATURES_SECTION_LABEL;
+    const rows = limitsBySection.get(section) ?? [];
+    rows.push(row);
+    limitsBySection.set(section, rows);
+  }
+
+  const sections: PlanComparisonSection[] = [];
+  for (const label of new Set(Object.values(LIMIT_SECTION_LABELS_BY_PREFIX))) {
+    const limitRows = limitsBySection.get(label);
+    if (limitRows?.length) {
+      sections.push({ key: label, label, limitRows, moduleRows: [] });
+    }
+  }
+
+  const moduleRows = buildModuleComparisonRows(plans);
+  if (moduleRows.length) {
+    sections.push({ key: 'modules', label: MODULES_SECTION_LABEL, limitRows: [], moduleRows });
+  }
+
+  const otherLimitRows = limitsBySection.get(OTHER_FEATURES_SECTION_LABEL);
+  if (otherLimitRows?.length) {
+    sections.push({ key: 'other', label: OTHER_FEATURES_SECTION_LABEL, limitRows: otherLimitRows, moduleRows: [] });
+  }
+  return sections;
 }
 
 /**

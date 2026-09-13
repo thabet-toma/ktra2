@@ -6,8 +6,7 @@ import { PublicNavbar } from './layout/PublicNavbar';
 import { usePublicPricing } from '../hooks/usePublicPricing.ts';
 import { formatNumber } from '../utils/formatNumber.ts';
 import {
-  buildLimitComparisonRows,
-  buildModuleComparisonRows,
+  buildPlanComparisonSections,
   formatPlanLimitValue,
 } from '../utils/planPricingDisplay.ts';
 import type { PublicPlan } from '../services/pricingApi.ts';
@@ -135,40 +134,92 @@ export const PricingPage: React.FC = () => {
 
             <div className="mt-14">
               <h2 className="text-xl font-extrabold text-slate-950 dark:text-white">مقارنة كاملة بين الخطط</h2>
-              <div className="mt-5 overflow-x-auto rounded-2xl border border-slate-200 dark:border-white/10">
+              {/* سقفُ الارتفاع شرطُ عملِ `sticky top-0`: بلا حاويةٍ تتمرّر
+                  رأسيّاً يبقى الرأسُ ثابتاً في مكانه ولا يلاحق القارئ. */}
+              <div className="mt-5 max-h-[75vh] overflow-auto rounded-2xl border border-slate-200 dark:border-white/10">
                 <table className="w-full min-w-[640px] border-collapse text-right text-sm">
-                  <thead className="bg-slate-50 dark:bg-white/5">
+                  <thead className="sticky top-0 z-20 bg-slate-100 shadow-sm dark:bg-slate-900">
                     <tr>
-                      <th className="p-4 font-extrabold text-slate-700 dark:text-slate-200">المزايا</th>
+                      <th className="sticky right-0 z-30 min-w-48 bg-white px-4 py-3 font-extrabold text-slate-800 dark:bg-slate-950 dark:text-slate-100">المزايا</th>
                       {data.plans.map((plan) => (
-                        <th key={plan.key} className="p-4 text-center font-extrabold text-slate-700 dark:text-slate-200">{plan.label}</th>
+                        <th
+                          key={plan.key}
+                          className={`min-w-40 px-4 py-3 text-center ${
+                            plan.key === HIGHLIGHTED_PLAN_KEY
+                              ? 'bg-blue-100 text-blue-950 dark:bg-blue-950 dark:text-blue-100'
+                              : 'bg-slate-100 text-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                          }`}
+                        >
+                          <p className="font-extrabold">{plan.label}</p>
+                          <p className="mt-1 text-xs font-bold text-slate-500 dark:text-slate-400">
+                            {formatNumber(plan.price)} {plan.currency_symbol} / شهرياً
+                          </p>
+                          <Link
+                            to="/"
+                            aria-label={`ابدأ بخطة ${plan.label}`}
+                            className={`mt-2 inline-flex min-h-8 items-center justify-center rounded-lg px-3 text-xs font-extrabold transition ${
+                              plan.key === HIGHLIGHTED_PLAN_KEY
+                                ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                : 'bg-white text-slate-700 hover:bg-slate-50 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 dark:hover:text-blue-300'
+                            }`}
+                          >
+                            ابدأ بها
+                          </Link>
+                        </th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
-                    {buildLimitComparisonRows(data.plans).map((row) => (
-                      <tr key={row.key} className="border-t border-slate-100 dark:border-white/5">
-                        <td className="p-4 font-semibold text-slate-700 dark:text-slate-300">{row.label} ({row.periodLabel})</td>
-                        {data.plans.map((plan) => (
-                          <td key={plan.key} className="p-4 text-center text-slate-600 dark:text-slate-400">
-                            {formatPlanLimitValue(row.valuesByPlan[plan.key])}
-                          </td>
+                    {buildPlanComparisonSections(data.plans).map((section) => (
+                      <React.Fragment key={section.key}>
+                        <tr className="border-y-2 border-slate-200 bg-slate-100 dark:border-white/10 dark:bg-slate-900">
+                          <th colSpan={data.plans.length + 1} scope="colgroup" className="px-4 py-3 text-right text-xs font-black tracking-wide text-slate-700 dark:text-slate-200">
+                            {section.label}
+                          </th>
+                        </tr>
+                        {section.limitRows.map((row) => (
+                          <tr key={row.key} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/70 hover:bg-blue-50 dark:border-white/5 dark:odd:bg-slate-950 dark:even:bg-white/[0.03] dark:hover:bg-blue-950/30">
+                            <td className="sticky right-0 z-10 bg-white px-4 py-3 font-semibold text-slate-700 dark:bg-slate-950 dark:text-slate-300">
+                              {row.label} <span className="text-xs font-medium text-slate-500 dark:text-slate-400">({row.periodLabel})</span>
+                            </td>
+                            {data.plans.map((plan) => (
+                              <td
+                                key={plan.key}
+                                className={`px-4 py-3 text-center font-semibold text-slate-600 dark:text-slate-400 ${
+                                  plan.key === HIGHLIGHTED_PLAN_KEY ? 'bg-blue-50/80 dark:bg-blue-950/30' : ''
+                                }`}
+                              >
+                                {formatPlanLimitValue(row.valuesByPlan[plan.key])}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
-                    ))}
-                    {buildModuleComparisonRows(data.plans).map((row) => (
-                      <tr key={row.key} className="border-t border-slate-100 dark:border-white/5">
-                        <td className="p-4 font-semibold text-slate-700 dark:text-slate-300">{row.label}</td>
-                        {data.plans.map((plan) => (
-                          <td key={plan.key} className="p-4 text-center">
-                            {row.enabledByPlan[plan.key] ? (
-                              <Check className="mx-auto h-4 w-4 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
-                            ) : (
-                              <span className="text-slate-300 dark:text-slate-600">—</span>
-                            )}
-                          </td>
+                        {section.moduleRows.map((row) => (
+                          <tr key={row.key} className="border-t border-slate-100 odd:bg-white even:bg-slate-50/70 hover:bg-blue-50 dark:border-white/5 dark:odd:bg-slate-950 dark:even:bg-white/[0.03] dark:hover:bg-blue-950/30">
+                            <td className="sticky right-0 z-10 bg-white px-4 py-3 font-semibold text-slate-700 dark:bg-slate-950 dark:text-slate-300">{row.label}</td>
+                            {data.plans.map((plan) => (
+                              <td
+                                key={plan.key}
+                                className={`px-4 py-3 text-center ${
+                                  plan.key === HIGHLIGHTED_PLAN_KEY ? 'bg-blue-50/80 dark:bg-blue-950/30' : ''
+                                }`}
+                              >
+                                {row.enabledByPlan[plan.key] ? (
+                                  <>
+                                    <Check className="mx-auto h-4 w-4 text-emerald-600 dark:text-emerald-400" strokeWidth={3} />
+                                    <span className="sr-only">متاحة</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span className="font-black text-slate-400 dark:text-slate-500" aria-hidden="true">✕</span>
+                                    <span className="sr-only">غير متاحة</span>
+                                  </>
+                                )}
+                              </td>
+                            ))}
+                          </tr>
                         ))}
-                      </tr>
+                      </React.Fragment>
                     ))}
                   </tbody>
                 </table>
