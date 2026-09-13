@@ -4,6 +4,7 @@ import {
   getPlatformStaffCapabilities,
   type PlatformStaffCapabilities,
 } from "../services/platformHiringApi";
+import { capabilitiesPending } from "../utils/staffAccess";
 
 /**
  * قدراتُ المستخدم الحاليّ على المنصّة — **نداءٌ واحدٌ لكلّ مستخدمٍ في الجلسة** (#207 م٨-ب).
@@ -34,9 +35,18 @@ export function usePlatformStaffCapabilitiesState(
   isSuperAdmin: boolean,
 ): { capabilities: PlatformStaffCapabilities; loading: boolean; failed: boolean; reload: () => void } {
   const [capabilities, setCapabilities] = useState<PlatformStaffCapabilities>(NONE);
-  const [loading, setLoading] = useState<boolean>(!isSuperAdmin);
+  const [fetching, setFetching] = useState<boolean>(!isSuperAdmin);
   const [failed, setFailed] = useState(false);
   const [attempt, setAttempt] = useState(0);
+  /**
+   * معرّفُ المستخدم الذي **يخصّه** الجوابُ المحفوظ — لا مجرّد «انتهى نداءٌ ما».
+   *
+   * بدونه لا يفرّق المستدعي بين «لم أسأل بعد» و«سألتُ فقيل لا»، وهما في بوّابة
+   * `/staff` نقيضان: الأوّلُ انتظارٌ والثاني طرد. ولحظةَ انتهاءِ المصادقةِ يقع
+   * رسمٌ فيه `fetching` كاذبٌ (ضبطَه فرعُ «لا مستخدمَ بعد») والجوابُ ما زال
+   * `NONE` ولم يُسأل عن أحدٍ قطّ — فكان الموظّفُ يُطرَد قبل انطلاق النداء.
+   */
+  const [answeredFor, setAnsweredFor] = useState<string | null>(null);
 
   const reload = useCallback(() => {
     pending = null;
@@ -46,12 +56,13 @@ export function usePlatformStaffCapabilitiesState(
   useEffect(() => {
     if (!userId || isSuperAdmin) {
       setCapabilities(isSuperAdmin ? { ...NONE, is_platform_admin: true } : NONE);
-      setLoading(false);
+      setFetching(false);
       setFailed(false);
+      setAnsweredFor(userId ?? null);
       return;
     }
     let alive = true;
-    setLoading(true);
+    setFetching(true);
     setFailed(false);
     if (!pending || pending.userId !== userId) {
       // **الفشلُ يُعلَن ولا يُترجَم إلى «لا»**: إعادةُ `NONE` وحدَها تجعل انقطاعةَ
@@ -69,7 +80,8 @@ export function usePlatformStaffCapabilitiesState(
       if (alive) {
         setCapabilities(outcome.value);
         setFailed(!outcome.ok);
-        setLoading(false);
+        setAnsweredFor(userId);
+        setFetching(false);
       }
     });
     return () => {
@@ -77,7 +89,14 @@ export function usePlatformStaffCapabilitiesState(
     };
   }, [userId, isSuperAdmin, attempt]);
 
-  return { capabilities, loading, failed, reload };
+  return {
+    capabilities,
+    // «معلَّقٌ» لا «جارٍ»: القاعدةُ خالصةٌ في `utils/staffAccess.ts` كي يختبرَها
+    // `npm test` — فهو `node --test` على دوالَّ خالصةٍ ولا يصيّر مكوّناً.
+    loading: capabilitiesPending({ isSuperAdmin, fetching, answeredFor, userId: userId ?? null }),
+    failed,
+    reload,
+  };
 }
 
 export function usePlatformStaffCapabilities(

@@ -34,6 +34,12 @@ INVITATION_PAGE = (
 )
 ROUTER = REPO_ROOT / "frontend_v2" / "index.tsx"
 STAFF_LOGIN = REPO_ROOT / "frontend_v2" / "components" / "platform" / "StaffLoginPage.tsx"
+STAFF_SHELL = (
+    REPO_ROOT / "frontend_v2" / "components" / "platform" / "staff" / "StaffShell.tsx"
+)
+CAPABILITIES_HOOK = (
+    REPO_ROOT / "frontend_v2" / "hooks" / "usePlatformStaffCapabilities.ts"
+)
 LANDING_PAGE = REPO_ROOT / "frontend_v2" / "components" / "LandingPage.tsx"
 PUBLIC_NAVBAR = REPO_ROOT / "frontend_v2" / "components" / "layout" / "PublicNavbar.tsx"
 
@@ -255,3 +261,60 @@ class StaffLoginRouteIsPrivateTest(SimpleTestCase):
             "حارسُ الشركة في `ApplicationBoundary` ما زال يبتلع مساراتِ المنصّة.",
         )
         self.assertTrue("'/platform/employee-space'" in router)
+
+
+class TheDoorDoesNotAnswerBeforeItAsksTest(SimpleTestCase):
+    """الجوابُ الفارغُ **قبل** السؤال ليس رفضاً — وقد كان (212-L0).
+
+    الموظّفُ كان يضغط «مساحتي» فيرى `/staff/home` ثانيةً واحدةً ثمّ يُقذَف إلى
+    شاشةِ دوره. السببُ مقيسٌ لا مُستنتَج: حلقةُ الصلاحيّات تضبط `loading = false`
+    في فرعِ «لا مستخدمَ بعد»، فحين تنتهي المصادقةُ يقع رسمٌ واحدٌ فيه
+    `authLoading` و`fetching` كلاهما كاذبٌ والجوابُ ما زال `NONE` ولم يُسأل عن
+    أحدٍ قطّ — فيقرأ شرطُ القشرة «ممنوع» ويطلق `<Navigate to="/" />` **قبل
+    انطلاق النداء**. وفي شريط الشركة لا يؤذي التأخّرُ شيئاً (الزرُّ يظهر
+    متأخّراً)؛ في `/staff` جوابٌ متأخّرٌ = طردٌ نهائيّ.
+
+    والحارسُ ساكنٌ بالضرورة: `npm test` هنا `node --test` على `utils/*.test.ts`
+    ولا يصيّر مكوّناً — فقاعدةُ القرار مُستخرَجةٌ إلى `utils/staffAccess.ts`
+    ويختبرها `staffAccess.test.ts` ديناميكيّاً، وهذا يحرس **وصلَها** بالشاشة.
+    """
+
+    def test_the_shell_asks_one_pure_rule_instead_of_deciding_inline(self):
+        source = STAFF_SHELL.read_text(encoding="utf-8")
+        violations = []
+        if "staffGate({" not in source:
+            violations.append("StaffShell.tsx لا ينادي `staffGate` — عاد القرارُ شرطاً يدوياً")
+        if "from '../../../utils/staffAccess'" not in source:
+            violations.append("StaffShell.tsx لا يستورد `utils/staffAccess`")
+        for banned in ("if (!allowed) return <Navigate", "if (authLoading || capabilitiesLoading) return <div"):
+            if banned in source:
+                violations.append(f"شرطٌ يدويٌّ عاد إلى القشرة: {banned}")
+        self.assertEqual(violations, [], f"بوّابةُ `/staff` تقرّر بنفسها: {violations}")
+
+    def test_the_hook_waits_for_an_answer_about_this_user_not_any_answer(self):
+        source = CAPABILITIES_HOOK.read_text(encoding="utf-8")
+        required = {
+            "loading: capabilitiesPending(": "قيمةُ `loading` لا تُشتقّ من القاعدة الخالصة",
+            "setAnsweredFor(userId);": "الجوابُ العائدُ لا يُنسَب إلى صاحبه",
+            "setAnsweredFor(userId ?? null);": "فرعُ «لا مستخدمَ بعد» لا يُصفّر صاحبَ الجواب",
+        }
+        violations = [why for needle, why in required.items() if needle not in source]
+        self.assertEqual(violations, [], f"الحلقةُ تخلط «لم أسأل» بـ«قيل لا»: {violations}")
+
+
+class TheStaffDoorIsNotADeadEndTest(SimpleTestCase):
+    """`/staff` لمن هو داخلٌ أصلاً كان نموذجَ دخولٍ بلا مخرج (212-L1).
+
+    وهو العنوانُ الوحيدُ الذي يحفظه الموظّفُ ويكتبه بيده؛ والقشرةُ على `/staff/*`
+    بشَرطة. فبلا تحويلٍ يقف أمام حقلَي اسمٍ وكلمةِ مرورٍ وهو مسجَّلٌ بالفعل، ولا
+    رابطَ من هذه الصفحة إلى مساحته.
+    """
+
+    def test_a_signed_in_platform_person_is_sent_to_the_workspace(self):
+        source = STAFF_LOGIN.read_text(encoding="utf-8")
+        violations = []
+        if 'window.location.replace("/staff/home")' not in source:
+            violations.append("لا تحويلَ إلى `/staff/home` لصاحب جلسةٍ هو موظّفُ منصّة")
+        if "checkingSession" not in source:
+            violations.append("النموذجُ يُعرَض قبل حسم الجلسة — ومضةٌ ثمّ قفزة")
+        self.assertEqual(violations, [], f"`/staff` ما زال طريقاً مسدوداً: {violations}")

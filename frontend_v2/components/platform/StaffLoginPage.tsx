@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Loader2, Lock, ShieldCheck, User2 } from "lucide-react";
 
 import { loginUser } from "../../services/authService";
@@ -26,6 +26,33 @@ export const StaffLoginPage: React.FC = () => {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [checkingSession, setCheckingSession] = useState(true);
+
+  /**
+   * مَن وصل هنا وجلستُه قائمةٌ **وهو موظّفُ منصّة** يُنقَل إلى مساحته فوراً.
+   *
+   * بلا هذا يكون `/staff` — العنوانُ الذي يكتبه الموظّفُ بيده لأنّه العنوانُ
+   * الوحيدُ الذي يحفظه — **طريقاً مسدوداً**: نموذجُ دخولٍ لمن هو داخلٌ أصلاً،
+   * بلا رسالةٍ ولا رابطٍ إلى الشَّرطة التي تفتح القشرة (`/staff/*`).
+   *
+   * والتحويلُ مشروطٌ بكونه موظّفَ منصّةٍ لا بمجرّد وجود جلسة: مستخدمُ شركةٍ
+   * يفتح هذا الباب ليدخل بحسابٍ آخر يجب أن يرى النموذج، لا أن يُقذَف عنه.
+   * و`replace` لا `assign` كي لا يصير الرجوعُ بالمتصفّح دورةً مغلقة.
+   */
+  useEffect(() => {
+    let alive = true;
+    void getPlatformStaffCapabilities()
+      .then((capabilities) => {
+        if (!alive) return;
+        if (capabilities.is_platform_employee || capabilities.is_platform_admin) {
+          window.location.replace("/staff/home");
+          return;
+        }
+        setCheckingSession(false);
+      })
+      .catch(() => { if (alive) setCheckingSession(false); });
+    return () => { alive = false; };
+  }, []);
 
   const describe = (message: string): string => {
     if (message === "ACCOUNT_NOT_APPROVED") return "حسابك غير مُفعَّل بعد. راجع مدير العمليات.";
@@ -62,6 +89,20 @@ export const StaffLoginPage: React.FC = () => {
 
   const field =
     "h-11 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20";
+
+  // لا يُعرَض نموذجُ الدخول قبل أن يُعرَف هل صاحبُ الجلسة موظّفُ منصّةٍ يُنقَل:
+  // ومضةُ نموذجٍ ثمّ قفزةٌ تقرأ عطباً لا ترحيباً.
+  if (checkingSession) {
+    return (
+      <div
+        dir="rtl"
+        className="platform-surface flex min-h-screen items-center justify-center gap-2 bg-slate-50 px-4 text-sm text-slate-500 dark:bg-slate-950 dark:text-slate-400"
+      >
+        <Loader2 className="h-5 w-5 animate-spin text-sky-600 dark:text-sky-400" />
+        جارٍ التحقق من جلستك...
+      </div>
+    );
+  }
 
   return (
     <div

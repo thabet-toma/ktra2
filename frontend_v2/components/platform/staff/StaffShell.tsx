@@ -7,6 +7,7 @@ import { ToastProvider } from '../../../contexts/ToastContext';
 import { useAuth } from '../../../contexts/AuthContext';
 import { usePlatformStaffCapabilitiesState } from '../../../hooks/usePlatformStaffCapabilities';
 import { getMyPlatformEmployeeProfile, type MyPlatformEmployeeProfile } from '../../../services/platformEmployeeSpaceApi';
+import { staffGate } from '../../../utils/staffAccess';
 import { staffNav, staffRouteForPath, type StaffNavKey } from '../../../utils/staffNav';
 import { ChampionsPanel } from '../ChampionsPanel';
 import { EmployeeCompaniesPanel } from '../EmployeeCompaniesPanel';
@@ -58,9 +59,13 @@ const StaffShellContent: React.FC = () => {
   const go = (key: StaffNavKey) => { navigate(staffNav.find((item) => item.key === key)?.path || '/staff/home'); setDrawerOpen(false); };
   const search = (term: string) => navigate(term ? `/staff/home?search=${encodeURIComponent(term)}` : '/staff/home');
 
-  if (authLoading || capabilitiesLoading) return <div className="staff-shell flex min-h-screen items-center justify-center gap-2 bg-[var(--staff-bg)] text-sm text-[var(--staff-muted)]" dir="rtl"><Loader2 className="h-5 w-5 animate-spin text-cyan-400" />جارٍ التحقق من الصلاحيات...</div>;
-  if (!currentUser) return <Navigate to="/staff" replace />;
-  if (!allowed) return <Navigate to="/" replace />;
+  // قرارُ البوّابة دالّةٌ خالصةٌ لا سلسلةُ شروطٍ هنا: الشرطُ المكتوبُ يدوياً كان
+  // يقرأ جوابَ الصلاحيّات الفارغَ **قبل أن يُطلَب** على أنّه «ممنوع»، فيطرد
+  // الموظّفَ إلى شاشة دوره بعد أن يرى `/staff/home` ثانيةً واحدة.
+  const gate = staffGate({ authLoading, hasUser: Boolean(currentUser), pending: capabilitiesLoading, capabilities });
+  if (gate === 'loading') return <div className="staff-shell flex min-h-screen items-center justify-center gap-2 bg-[var(--staff-bg)] text-sm text-[var(--staff-muted)]" dir="rtl"><Loader2 className="h-5 w-5 animate-spin text-cyan-400" />جارٍ التحقق من الصلاحيات...</div>;
+  if (gate === 'login') return <Navigate to="/staff" replace />;
+  if (gate === 'leave') return <Navigate to="/" replace />;
 
   // خريطةُ مفتاحٍ ← لوحة، لا سلسلةَ شروطٍ بسِتّ طبقات: الربطُ صار مقروءاً سطراً
   // لكلّ تبويب، ويحرسه `test_every_navigation_entry_has_a_panel_behind_it`.
