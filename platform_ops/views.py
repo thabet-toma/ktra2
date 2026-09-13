@@ -3807,9 +3807,17 @@ class PlatformTaskAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
 
     def get_queryset(self):
         qs = super().get_queryset()
-        if IsPlatformOperationsManager().has_permission(self.request, self):
-            return qs
-        return qs.filter(employee__user=self.request.user)
+        if not IsPlatformOperationsManager().has_permission(self.request, self):
+            # **التضييقُ أوّلاً**: المرشِّحُ أدناه يختار موظّفاً ولا يمنح رؤية،
+            # فلو استبدل مجموعةَ الاستعلام بدل أن يضيّقها لقرأ موظّفٌ إسنادات
+            # زميله بمعرّفٍ في العنوان (درسُ `?employee=` في 212-J).
+            qs = qs.filter(employee__user=self.request.user)
+        raw = self.request.query_params.get("employee")
+        if raw:
+            if not str(raw).isdigit():
+                raise ValidationError({"employee": ["يجب أن يكون معرّف الموظّف رقماً صحيحاً."]})
+            qs = qs.filter(employee_id=int(raw))
+        return qs
 
     def _require_owner(self, request, assignment):
         if assignment.employee.user_id != request.user.id:

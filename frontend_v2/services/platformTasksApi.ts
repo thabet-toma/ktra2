@@ -101,7 +101,7 @@ export const listPlatformTasks = () => apiGetObject<PlatformTask[]>(`${ROOT}task
 export const getPlatformTask = (id: number) => apiGetObject<PlatformTask>(`${ROOT}tasks/${id}/`);
 export const createPlatformTask = (input: CreatePlatformTaskInput) => apiPostObject<PlatformTask>(`${ROOT}tasks/create/`, input);
 export const claimPlatformTask = (id: number) => apiPostObject<PlatformTaskAssignment>(`${ROOT}tasks/${id}/claim/`, {});
-export const listPlatformTaskAssignments = () => apiGetObject<PlatformTaskAssignment[]>(`${ROOT}assignments/`);
+export const listPlatformTaskAssignments = (employee?: number) => apiGetObject<PlatformTaskAssignment[]>(`${ROOT}assignments/`, { query: { employee } });
 export const acceptPlatformTaskAssignment = (id: number) => apiPostObject<PlatformTaskAssignment>(`${ROOT}assignments/${id}/accept/`, {});
 export const submitPlatformTaskAssignment = (id: number, body: string) => apiPostObject<PlatformTaskSubmission>(`${ROOT}assignments/${id}/submit/`, { body });
 export const listPlatformTaskSubmissions = () => apiGetObject<PlatformTaskSubmission[]>(`${ROOT}submissions/`);

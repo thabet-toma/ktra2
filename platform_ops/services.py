@@ -19,7 +19,7 @@ import secrets
 from django.conf import settings
 from django.contrib.auth.models import User
 from django.db import IntegrityError, models, transaction
-from django.db.models import Avg, Max, Q, Sum
+from django.db.models import Avg, Count, Max, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
 
@@ -5669,6 +5669,19 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
         ).values_list("employee_id", "active_seconds")
     )
 
+    # **ومهامُّ الموظّف المفتوحةُ بتجميعةٍ واحدة** (#212 212-O2): المالكُ يطلب
+    # «مهامّ كلّ واحد على طاولته»، والطاولةُ عشراتُ البطاقات. و«مفتوحة» =
+    # كلُّ ما لم يكتمل: `RETURNED` عملٌ عاد إلى صاحبه لا عملٌ انتهى، وعدُّها
+    # منتهيةً كان يُظهر طاولةً فارغةً وأصحابُها يعملون.
+    open_platform_tasks = dict(
+        PlatformTaskAssignment.objects
+        .filter(employee_id__in=[e.pk for e in active_employees])
+        .exclude(status=PlatformTaskAssignment.STATUS_COMPLETED)
+        .values("employee_id")
+        .annotate(open_count=Count("id"))
+        .values_list("employee_id", "open_count")
+    )
+
     # وعتبةُ الحضورِ لكلّ تخصّصٍ مرّةً واحدةً لا لكلّ بطاقة: الرقاقةُ تُلوَّن
     # بالقاعدةِ **النشطة**، وقد صارت قابلةً للضبط من شاشة السياسة — فثلاثةٌ
     # مكتوبةٌ في الواجهة تُلوِّن أخضرَ حضوراً دون المطلوب، أي شاشةٌ تكذب على المدير.
@@ -5760,6 +5773,10 @@ def get_platform_dashboard_summary(*, user, now=None) -> dict:
             "presence_seconds_today": presence_seconds_today.get(emp.pk, 0),
             "presence_hours_today": round(presence_seconds_today.get(emp.pk, 0) / 3600, 2),
             "presence_target_hours": presence_target_by_specialty.get(emp.specialty),
+            # مهامُّ المنصّة غيرُ أوامر العمل: `active_work_orders_count` أعلاه
+            # يعدّ `WorkOrder`، وهذا يعدّ `PlatformTaskAssignment`. خلطُهما كان
+            # يُري المديرَ رقماً واحداً عن نظامين لا يلتقيان.
+            "open_platform_tasks_count": open_platform_tasks.get(emp.pk, 0),
             "performance": {
                 "status": perf.get("status"),
                 "status_message": perf.get("status_message"),

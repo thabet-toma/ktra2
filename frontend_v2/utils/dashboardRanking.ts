@@ -40,6 +40,13 @@ export interface PlatformDashboardEmployee {
   presence_hours_today?: number;
   /** عتبةُ الحضورِ اليوميّةُ من السياسةِ النشطةِ لتخصّصِ الموظّف. */
   presence_target_hours?: number;
+  /**
+   * إسناداتُ مهامِّ المنصّة غيرُ المكتملة (212-O2).
+   *
+   * غيرُ `active_work_orders_count`: ذاك `WorkOrder` وهذا `PlatformTask` —
+   * نظامان لا يلتقيان، ورقمٌ واحدٌ عنهما كان يكذب على المدير.
+   */
+  open_platform_tasks_count?: number;
   performance?: {
     status?: string;
     status_message?: string;

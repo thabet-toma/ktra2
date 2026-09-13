@@ -81,7 +81,7 @@ export const PlatformOpsDashboard: React.FC = () => {
   const [targetsModal, setTargetsModal] = useState<{ employeeId: number; employeeName: string } | null>(null);
 
   // ملفُّ الموظّف الـ360 (211-J) — يُفتح من نقرةٍ على وجهِه في البطاقة أو على مقعده في الغرفة.
-  const [profileDrawer, setProfileDrawer] = useState<{ employeeId: number; employeeName: string } | null>(null);
+  const [profileDrawer, setProfileDrawer] = useState<{ employeeId: number; employeeName: string; tab?: "general" | "tasks" } | null>(null);
 
   const loadDashboard = async () => {
     setLoading(true);
@@ -642,6 +642,7 @@ export const PlatformOpsDashboard: React.FC = () => {
                   }
                   onEditTargets={(id, name) => setTargetsModal({ employeeId: id, employeeName: name })}
                   onOpenProfile={(id) => setProfileDrawer({ employeeId: id, employeeName: emp.name })}
+                  onOpenTasks={(id) => setProfileDrawer({ employeeId: id, employeeName: emp.name, tab: "tasks" })}
                 />
               ))}
             </div>
@@ -697,6 +698,7 @@ export const PlatformOpsDashboard: React.FC = () => {
         <EmployeeProfileDrawer
           employeeId={profileDrawer.employeeId}
           employeeName={profileDrawer.employeeName}
+          initialTab={profileDrawer.tab}
           onClose={() => setProfileDrawer(null)}
           onSaved={() => void loadDashboard()}
         />

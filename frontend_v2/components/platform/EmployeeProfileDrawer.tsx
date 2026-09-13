@@ -25,6 +25,12 @@ import {
 } from "../../services/platformPilotApi";
 import { getEmployeeActivity, type PlatformActivityLog } from "../../services/platformOpsApi";
 import {
+  createPlatformTask,
+  listPlatformTaskAssignments,
+  type PlatformTaskAssignment,
+  type PlatformTaskPriority,
+} from "../../services/platformTasksApi";
+import {
   createPlatformEmployeeNote,
   listPlatformEmployeeNotes,
   type PlatformEmployeeNote,
@@ -38,11 +44,12 @@ import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 
-type ProfileTab = "general" | "performance" | "wallet" | "notes" | "activity";
+type ProfileTab = "general" | "performance" | "tasks" | "wallet" | "notes" | "activity";
 
 const TABS: { key: ProfileTab; label: string }[] = [
   { key: "general", label: "عام" },
   { key: "performance", label: "الأداء" },
+  { key: "tasks", label: "المهامّ" },
   { key: "wallet", label: "المحفظة" },
   { key: "notes", label: "الملاحظات" },
   { key: "activity", label: "النشاط" },
@@ -80,6 +87,14 @@ interface EmployeeProfileDrawerProps {
   onClose: () => void;
   /** يُستدعى بعد تعديل ناجحٍ للبطاقة — يتيح لمن يستضيف الدرج تحديثَ قوائمه هو. */
   onSaved?: () => void;
+  /**
+   * التبويبُ الذي يُفتَح عليه الدرج (212-O1).
+   *
+   * «أسند مهمّة لهذا الشخص» فعلٌ واحد؛ ولو فُتح الدرجُ على «عام» دائماً لصار
+   * الفعلُ نقرتين وبحثاً عن التبويب — وهو بعينه ما شكا منه المالك في النموذج
+   * المركزيّ ذي القائمة المنسدلة.
+   */
+  initialTab?: ProfileTab;
 }
 
 /**
@@ -95,6 +110,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
   employeeName,
   onClose,
   onSaved,
+  initialTab = "general",
 }) => {
   const toast = useToast();
   const { currentUser } = useAuth();
@@ -107,7 +123,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
   const [employee, setEmployee] = useState<PlatformEmployeeRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<ProfileTab>("general");
+  const [tab, setTab] = useState<ProfileTab>(initialTab);
 
   const [editing, setEditing] = useState(false);
   const [jobTitle, setJobTitle] = useState("");
@@ -168,6 +184,21 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
   const [noteVisibility, setNoteVisibility] = useState<PlatformEmployeeNoteVisibility>("EMPLOYEE");
   const [noteSaving, setNoteSaving] = useState(false);
 
+  // تبويب «المهامّ».
+  /**
+   * مهامُّ هذا الشخص (212-O2) — بمرشِّح `?employee=` لا بسحب إسنادات المنصّة
+   * كلِّها ثمّ تصفيتِها في المتصفّح: الطاولةُ عشراتُ الأشخاص، وكلُّ فتحةِ درجٍ
+   * كانت ستجرّ جدولَ الإسنادات بأكمله.
+   */
+  const [assignments, setAssignments] = useState<PlatformTaskAssignment[] | null>(null);
+  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [assignmentsError, setAssignmentsError] = useState<string | null>(null);
+  const [taskTitle, setTaskTitle] = useState("");
+  const [taskDescription, setTaskDescription] = useState("");
+  const [taskPriority, setTaskPriority] = useState<PlatformTaskPriority>("MEDIUM");
+  const [taskDueDate, setTaskDueDate] = useState("");
+  const [taskSaving, setTaskSaving] = useState(false);
+
   const [activity, setActivity] = useState<PlatformActivityLog[] | null>(null);
   const [activityLoading, setActivityLoading] = useState(false);
   const [activityError, setActivityError] = useState<string | null>(null);
@@ -209,6 +240,52 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
     loadWallet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
+
+  const loadAssignments = useCallback(async () => {
+    setAssignmentsLoading(true);
+    setAssignmentsError(null);
+    try {
+      setAssignments(await listPlatformTaskAssignments(employeeId));
+    } catch (cause) {
+      setAssignmentsError(describePlatformOpsError(
+        cause, "لا تصريح لك بعرض مهامّ هذا الموظّف.", "تعذّر تحميل المهامّ.",
+      ));
+    } finally {
+      setAssignmentsLoading(false);
+    }
+  }, [employeeId]);
+
+  useEffect(() => {
+    if (tab !== "tasks" || assignments || assignmentsLoading) return;
+    void loadAssignments();
+  }, [tab, assignments, assignmentsLoading, loadAssignments]);
+
+  const assignTask = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!taskTitle.trim()) return;
+    setTaskSaving(true);
+    try {
+      // **إسنادٌ فرديٌّ لهذا الشخص بعينه**: `INDIVIDUAL` يلزمه موظّفٌ واحدٌ
+      // بالضبط، فلا قائمةَ منسدلةً يُختار منها اسمُه — الدرجُ مفتوحٌ عليه.
+      await createPlatformTask({
+        title: taskTitle,
+        description: taskDescription,
+        priority: taskPriority,
+        due_date: taskDueDate || null,
+        audience: "INDIVIDUAL",
+        employee_ids: [employeeId],
+      });
+      toast(`أُسندت المهمة إلى ${employeeName}.`, "success");
+      setTaskTitle(""); setTaskDescription(""); setTaskPriority("MEDIUM"); setTaskDueDate("");
+      setAssignments(null);
+      await loadAssignments();
+      onSaved?.();
+    } catch (cause) {
+      toast(describePlatformOpsError(cause, "لا تصريح لك بإسناد المهامّ.", "تعذّر إسناد المهمة."), "error");
+    } finally {
+      setTaskSaving(false);
+    }
+  };
 
   const loadNotes = useCallback(async () => {
     setNotesLoading(true);
@@ -563,6 +640,81 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                           </div>
                         )}
                       </>
+                    )}
+                  </section>
+                )}
+
+                {tab === "tasks" && (
+                  <section className="space-y-4">
+                    {canManage && (
+                      <form onSubmit={assignTask} className="rounded-lg border border-slate-200 p-3">
+                        <h3 className="text-xs font-black text-slate-900">أسند مهمة إلى {employeeName}</h3>
+                        <input
+                          required
+                          value={taskTitle}
+                          onChange={(event) => setTaskTitle(event.target.value)}
+                          className="ktra-input mt-2 w-full text-xs"
+                          placeholder="عنوان المهمة"
+                        />
+                        <textarea
+                          value={taskDescription}
+                          onChange={(event) => setTaskDescription(event.target.value)}
+                          className="ktra-input mt-2 min-h-16 w-full text-xs"
+                          placeholder="الوصف (اختياري)"
+                        />
+                        <div className="mt-2 grid grid-cols-2 gap-2">
+                          <label className="text-xs font-semibold text-slate-700">
+                            الأولوية
+                            <select
+                              value={taskPriority}
+                              onChange={(event) => setTaskPriority(event.target.value as PlatformTaskPriority)}
+                              className="ktra-input mt-1 w-full text-xs"
+                            >
+                              <option value="LOW">منخفضة</option>
+                              <option value="MEDIUM">متوسطة</option>
+                              <option value="HIGH">عالية</option>
+                              <option value="URGENT">عاجلة</option>
+                            </select>
+                          </label>
+                          <label className="text-xs font-semibold text-slate-700">
+                            الاستحقاق <span className="font-normal text-slate-500">(اختياري)</span>
+                            <input
+                              type="date"
+                              value={taskDueDate}
+                              onChange={(event) => setTaskDueDate(event.target.value)}
+                              className="ktra-input mt-1 w-full text-xs"
+                            />
+                          </label>
+                        </div>
+                        <button type="submit" disabled={taskSaving} className="ktra-btn mt-3 text-xs disabled:opacity-50">
+                          {taskSaving ? "جاري الإسناد..." : "أسند المهمة"}
+                        </button>
+                      </form>
+                    )}
+                    {assignmentsLoading ? (
+                      <div className="py-8 text-center text-xs text-slate-400">جاري التحميل...</div>
+                    ) : assignmentsError ? (
+                      <p className="text-xs text-rose-700">{assignmentsError}</p>
+                    ) : assignments && assignments.length > 0 ? (
+                      <div className="space-y-2">
+                        {assignments.map((assignment) => (
+                          <article key={assignment.id} className="rounded-lg border border-slate-200 p-3">
+                            <div className="flex flex-wrap items-center justify-between gap-2">
+                              <span className="text-xs font-bold text-slate-800">{assignment.task_title}</span>
+                              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-bold text-slate-700">
+                                {assignment.status_display}
+                              </span>
+                            </div>
+                            <p className="mt-1 text-xs text-slate-500">
+                              أُسندت {formatDateTimeValue(assignment.offered_at)}
+                              {assignment.accepted_at ? ` · قبلها ${formatDateTimeValue(assignment.accepted_at)}` : ""}
+                              {assignment.submitted_at ? ` · سلّمها ${formatDateTimeValue(assignment.submitted_at)}` : ""}
+                            </p>
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="py-8 text-center text-xs text-slate-400">لا مهامَّ مُسندةً لهذا الموظّف بعد.</p>
                     )}
                   </section>
                 )}

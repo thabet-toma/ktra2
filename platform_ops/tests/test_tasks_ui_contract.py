@@ -33,6 +33,9 @@ API = FRONTEND / "services" / "platformTasksApi.ts"
 ADMIN = FRONTEND / "components" / "platform" / "PlatformTasksAdminPanel.tsx"
 SHELL = STAFF / "StaffShell.tsx"
 DASHBOARD = FRONTEND / "components" / "platform" / "PlatformOpsDashboard.tsx"
+#: بطاقةُ الشخص ودرجُ ملفّه — موضعا 212-O1 · O2.
+CARD = FRONTEND / "components" / "platform" / "EmployeeCard.tsx"
+PROFILE_DRAWER = FRONTEND / "components" / "platform" / "EmployeeProfileDrawer.tsx"
 
 #: بادئاتُ 212-E وحدَها من بين مسارات `ops/` الكثيرة.
 TASK_ROUTE_PREFIXES = (
@@ -382,3 +385,95 @@ class TheManagerWritesOnTheTaskItselfTest(TestCase):
         if "note.task ? note.task_title" not in staff:
             violations.append("القائمةُ العامّة لا تقول على أيّ مهمّةٍ كُتبت الملاحظة")
         self.assertEqual(violations, [], f"ملاحظةُ المدير لا تصل الموظّفَ عند مهمّته: {violations}")
+
+
+class TaskAssignmentStartsAtThePersonTest(TestCase):
+    """«زرّ أسند مهمّة على كلّ شخص» — نصُّ طلب المالك (212-O1).
+
+    كان الإسنادُ **نموذجاً مركزيّاً واحداً**: تكتب المهمّةَ ثمّ تبحث عن اسم
+    الشخص في قائمةٍ منسدلة. والمالكُ ينظر إلى وجهِ الشخص أمامه ويريد أن يُسند
+    إليه من مكانه — فصار على بطاقة كلِّ واحدٍ بابٌ يفتح ملفَّه **على تبويب
+    المهامّ** حيث نموذجُ إسنادٍ لا قائمةَ فيه: الشخصُ مُعيَّنٌ سلفاً.
+    """
+
+    def test_every_person_card_carries_the_door(self):
+        violations = []
+        card = CARD.read_text(encoding="utf-8")
+        if "onOpenTasks(employee.id)" not in card:
+            violations.append("بطاقةُ الشخص بلا بابٍ إلى مهامّه")
+        dashboard = DASHBOARD.read_text(encoding="utf-8")
+        if 'onOpenTasks={' not in dashboard:
+            violations.append("اللوحةُ لا تصل البابَ بشيء — زرٌّ لا يفعل")
+        if 'tab: "tasks"' not in dashboard:
+            violations.append("البابُ لا يفتح تبويبَ المهامّ — نقرتان وبحثٌ عن التبويب")
+        self.assertEqual(violations, [], f"الإسنادُ ما زال يبدأ من نموذجٍ مركزيّ: {violations}")
+
+    def test_the_drawer_opens_on_the_tab_it_was_asked_for(self):
+        """درجٌ يهبط على «عام» دائماً يجعل البابَ زينةً."""
+        source = PROFILE_DRAWER.read_text(encoding="utf-8")
+        violations = []
+        if "initialTab" not in source:
+            violations.append("الدرجُ لا يقبل تبويبَ البداية")
+        if "useState<ProfileTab>(initialTab)" not in source:
+            violations.append("الدرجُ يقبل التبويبَ ويتجاهله")
+        if '{ key: "tasks"' not in source:
+            violations.append("لا تبويبَ مهامٍّ في الدرج أصلاً")
+        self.assertEqual(violations, [], f"البابُ يفتح على غير ما طُلب: {violations}")
+
+    def test_the_form_names_no_employee_because_the_drawer_already_did(self):
+        """‏`INDIVIDUAL` يلزمه موظّفٌ واحدٌ بالضبط — وهو صاحبُ الدرج."""
+        source = PROFILE_DRAWER.read_text(encoding="utf-8")
+        violations = []
+        if 'audience: "INDIVIDUAL"' not in source:
+            violations.append("النموذجُ لا يُسند إسناداً فرديّاً")
+        if "employee_ids: [employeeId]" not in source:
+            violations.append("النموذجُ لا يُسند إلى صاحب الدرج بعينه")
+        self.assertEqual(violations, [], f"نموذجُ الإسناد لا يعرف صاحبَه: {violations}")
+
+    def test_the_assign_form_is_not_shown_to_someone_who_cannot_assign(self):
+        """الدرجُ يُركَّب في قشرة الموظّف أيضاً — ونموذجُ إسنادٍ يراه من لا يملكه
+        وعدٌ كاذبٌ ينتهي بـ403."""
+        source = PROFILE_DRAWER.read_text(encoding="utf-8")
+        start = source.find("{tab === \"tasks\" &&")
+        self.assertNotEqual(start, -1, "تبويبُ المهامّ غيرُ مُصيَّر.")
+        end = source.find("{tab === \"wallet\" &&", start)
+        section = source[start:end if end != -1 else len(source)]
+        form = section.find("<form onSubmit={assignTask}")
+        gate = section.find("{canManage && (")
+        self.assertNotEqual(form, -1, "لا نموذجَ إسنادٍ في التبويب.")
+        self.assertNotEqual(gate, -1, "نموذجُ الإسناد بلا شرطِ صلاحيّة.")
+        self.assertLess(gate, form, "الشرطُ بعد النموذج — فالنموذجُ يُعرَض للجميع.")
+
+
+class ThePersonTasksAreVisibleOnTheirDeskTest(TestCase):
+    """«مهامّ كلّ واحد على طاولته» (212-O2).
+
+    والعدّادُ **غيرُ أوامر العمل**: `active_work_orders_count` يعدّ `WorkOrder`
+    و`open_platform_tasks_count` يعدّ `PlatformTaskAssignment` — نظامان لا
+    يلتقيان، ورقمٌ واحدٌ عنهما كان يكذب على المدير.
+    """
+
+    def test_the_card_shows_the_open_task_count_of_that_person(self):
+        card = CARD.read_text(encoding="utf-8")
+        violations = []
+        if "employee.open_platform_tasks_count" not in card:
+            violations.append("البطاقةُ لا تعرض عددَ مهامّه")
+        if "formatNumber(employee.open_platform_tasks_count" not in card:
+            violations.append("العددُ لا يمرّ بـ`formatNumber` — قاعدةُ المستودع")
+        self.assertEqual(violations, [], f"الطاولةُ لا تقول ما على كلّ واحد: {violations}")
+
+    def test_the_drawer_lists_that_persons_assignments_by_filter_not_by_the_whole_table(self):
+        source = PROFILE_DRAWER.read_text(encoding="utf-8")
+        self.assertIn(
+            "listPlatformTaskAssignments(employeeId)", source,
+            "الدرجُ يسحب إسنادات المنصّة كلَّها ليعرض إسنادات واحد.",
+        )
+
+    def test_the_api_client_can_ask_for_one_employee(self):
+        """حارسُ واجهةٍ بلا نظيرٍ على العميل يحرس نصّاً لا سلوكاً."""
+        source = API.read_text(encoding="utf-8")
+        self.assertRegex(
+            source,
+            r"listPlatformTaskAssignments = \(employee\?: number\)[\s\S]{0,200}query: \{ employee \}",
+            "عميلُ الـAPI لا يمرّر معرّفَ الموظّف — فالمرشّحُ الخادميُّ بلا مستدعٍ.",
+        )

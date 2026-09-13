@@ -1,5 +1,6 @@
 import React from "react";
 import { PlatformDashboardEmployee } from "../../utils/dashboardRanking";
+import { formatNumber } from "../../utils/formatNumber";
 import { getLastActiveBadge } from "../../utils/lastActiveFormat";
 import { PresenceClockChip } from "./PresenceClockChip";
 
@@ -10,6 +11,8 @@ interface EmployeeCardProps {
   onEditTargets: (employeeId: number, employeeName: string) => void;
   /** نقرةٌ على الوجه تفتح ملفّ الموظّف الـ360 (211-J). */
   onOpenProfile: (employeeId: number) => void;
+  /** فتحُ الملفّ على تبويب المهامّ مباشرةً — «أسند مهمّة» لهذا الشخص (212-O1). */
+  onOpenTasks: (employeeId: number) => void;
 }
 
 function initialsOf(name: string): string {
@@ -25,6 +28,7 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   onViewActivity,
   onEditTargets,
   onOpenProfile,
+  onOpenTasks,
 }) => {
   const lastActiveBadge = getLastActiveBadge(employee.last_active_at);
   const isOverloaded = employee.active_work_orders_count > employee.capacity_target;
@@ -165,6 +169,21 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
                 {employee.performance?.status_message || "بيانات غير كافية"}
               </span>
             )}
+          </div>
+
+          {/* **مهامُّ المنصّة على بطاقته** (212-O2) — وهي غيرُ أوامر العمل
+              أعلاه: نظامان لا يلتقيان، ورقمٌ واحدٌ عنهما كان يكذب. والزرُّ
+              نفسُه بابُ «أسند مهمّة» لهذا الشخص (212-O1) بدل نموذجٍ مركزيٍّ
+              يُختار منه اسمُه من قائمة. */}
+          <div className="flex items-center justify-between">
+            <span className="text-slate-600">مهامّ المنصة المفتوحة:</span>
+            <button
+              type="button"
+              onClick={() => onOpenTasks(employee.id)}
+              className="font-bold text-blue-700 underline-offset-2 hover:underline"
+            >
+              {formatNumber(employee.open_platform_tasks_count ?? 0, { maxDecimals: 0 })} · أسند مهمة
+            </button>
           </div>
 
           <div className="flex items-center justify-between">

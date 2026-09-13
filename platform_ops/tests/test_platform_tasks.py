@@ -20,6 +20,7 @@ from platform_ops.models import (
 from platform_ops.services import (
     PlatformOpsError,
     accept_platform_task_assignment,
+    get_platform_dashboard_summary,
     add_platform_employee_note,
     add_platform_workspace_note,
     claim_platform_task,
@@ -170,6 +171,109 @@ class SuspendedEmployeeCannotClaimTest(_PlatformTaskFixture):
             claim_platform_task(task=task, employee=self.employee_suspended)
         self.assertEqual(ctx.exception.code, "employee_not_active")
         self.assertEqual(PlatformTaskAssignment.objects.filter(task=task).count(), 0)
+
+
+class TheAssignmentsOfOnePersonTest(_PlatformTaskFixture):
+    """‏`?employee=` — مهامُّ شخصٍ بعينه، بلا سحبِ جدولِ الإسنادات كلِّه (212-O2).
+
+    درجُ الملفّ يُفتَح على كلّ وجهٍ حول الطاولة؛ ولو سحب كلَّ الإسنادات ثمّ صفّاها
+    في المتصفّح لجرّ جدولاً كاملاً في كلّ فتحة.
+    """
+
+    def setUp(self):
+        super().setUp()
+        create_platform_task(
+            actor=self.manager, title="مهمّةُ أ", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        create_platform_task(
+            actor=self.manager, title="مهمّةُ ب", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_b.pk],
+        )
+
+    def test_the_manager_reads_the_assignments_of_the_named_employee_only(self):
+        self.client.force_authenticate(self.manager)
+        rows = self.client.get(f"/api/platform/ops/assignments/?employee={self.employee_a.pk}").json()
+        self.assertEqual([row["task_title"] for row in rows], ["مهمّةُ أ"])
+
+    def test_an_employee_asking_for_a_colleague_gets_nothing_not_the_colleague(self):
+        """المرشِّحُ **يضيّق ولا يمنح رؤية**.
+
+        ولو استبدل مجموعةَ الاستعلام بدل أن يضيّقها — `qs = Assignment.objects
+        .filter(employee_id=…)` مكان `qs = qs.filter(…)` — لقرأ الموظّفُ
+        إسناداتِ زميله بمعرّفٍ يكتبه في العنوان. وذلك ما يسقط به هذا التأكيد.
+        """
+        self.client.force_authenticate(self.user_a)
+        rows = self.client.get(f"/api/platform/ops/assignments/?employee={self.employee_b.pk}").json()
+        self.assertEqual(rows, [])
+
+    def test_an_employee_still_reads_their_own_with_the_filter(self):
+        self.client.force_authenticate(self.user_a)
+        rows = self.client.get(f"/api/platform/ops/assignments/?employee={self.employee_a.pk}").json()
+        self.assertEqual([row["task_title"] for row in rows], ["مهمّةُ أ"])
+
+    def test_a_non_numeric_employee_filter_is_a_bad_request_not_a_server_error(self):
+        self.client.force_authenticate(self.manager)
+        self.assertEqual(
+            self.client.get("/api/platform/ops/assignments/?employee=abc").status_code, 400,
+        )
+
+
+class OpenTaskCountOnTheDeskCardTest(_PlatformTaskFixture):
+    """عدّادُ مهامِّ الشخص على بطاقته (212-O2) — «مفتوحة» = ما لم يكتمل.
+
+    و`RETURNED` عملٌ **عاد إلى صاحبه** لا عملٌ انتهى: عدُّها منتهيةً كان يُظهر
+    طاولةً فارغةً وأصحابُها يعملون.
+    """
+
+    def _card_of(self, employee):
+        summary = get_platform_dashboard_summary(user=self.manager)
+        return next(card for card in summary["employees"] if card["id"] == employee.pk)
+
+    def test_an_open_assignment_is_counted(self):
+        create_platform_task(
+            actor=self.manager, title="مهمّةٌ مفتوحة", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        self.assertEqual(self._card_of(self.employee_a)["open_platform_tasks_count"], 1)
+
+    def test_a_completed_assignment_is_not_counted(self):
+        task = create_platform_task(
+            actor=self.manager, title="مهمّةٌ ستكتمل", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        PlatformTaskAssignment.objects.filter(task=task, employee=self.employee_a).update(
+            status=PlatformTaskAssignment.STATUS_COMPLETED,
+        )
+        self.assertEqual(self._card_of(self.employee_a)["open_platform_tasks_count"], 0)
+
+    def test_a_returned_assignment_is_still_open_work(self):
+        task = create_platform_task(
+            actor=self.manager, title="مهمّةٌ أُعيدت", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        PlatformTaskAssignment.objects.filter(task=task, employee=self.employee_a).update(
+            status=PlatformTaskAssignment.STATUS_RETURNED,
+        )
+        self.assertEqual(self._card_of(self.employee_a)["open_platform_tasks_count"], 1)
+
+    def test_the_count_is_per_person_not_platform_wide(self):
+        create_platform_task(
+            actor=self.manager, title="لِأ", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_a.pk],
+        )
+        create_platform_task(
+            actor=self.manager, title="لِب", audience=PlatformTask.AUDIENCE_INDIVIDUAL,
+            employee_ids=[self.employee_b.pk],
+        )
+        self.assertEqual(self._card_of(self.employee_a)["open_platform_tasks_count"], 1)
+        self.assertEqual(self._card_of(self.employee_b)["open_platform_tasks_count"], 1)
+
+    def test_a_person_with_no_task_reads_zero_not_a_missing_key(self):
+        """مفتاحٌ غائبٌ يجعل الواجهةَ تعرض فراغاً مكان «لا مهامَّ عليه»."""
+        card = self._card_of(self.employee_c)
+        self.assertIn("open_platform_tasks_count", card)
+        self.assertEqual(card["open_platform_tasks_count"], 0)
 
 
 class ManagerNoteOnATaskTest(_PlatformTaskFixture):
