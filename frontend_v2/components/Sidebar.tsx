@@ -36,6 +36,7 @@ import { permForView } from "../utils/viewPermissions";
 import { employeeOpsNavLabels } from "../utils/employeeOps";
 import { useTenantSettings } from "../hooks/useTenantSettings";
 import { usePlatformStaffCapabilities } from "../hooks/usePlatformStaffCapabilities";
+import { userRoleLabel } from "../utils/userRoleLabel";
 import { listPurchaseRfqs, type PurchaseRFQDto } from "../services/procurementDocumentsApi";
 
 // ISSUE #115 قصّة ٣٠ §٦: شارة «ردٌّ جديد» على بند «العروض والطلبيات» — بلا
@@ -946,7 +947,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               <div className="mr-3 overflow-hidden text-right">
                 <p className="text-sm font-bold text-[var(--color-text)] truncate">{user.name}</p>
                 <p className="text-[10px] text-[var(--color-primary)] font-medium tracking-wider">
-                  {user.isSuperAdmin ? "سوبر أدمن المنصة" : user.role}
+                  {user.isSuperAdmin ? "سوبر أدمن المنصة" : userRoleLabel(user.role)}
                 </p>
                 <p className="text-[10px] text-[var(--color-text-muted)]">حسابي ومصاريفي الشخصية</p>
               </div>

@@ -1,8 +1,17 @@
-"""ملصقُ الدور في ترويسة التطبيق يقول الدورَ الذي في الخادم.
+"""ملصقُ الدور يقول الدورَ بالعربيّة، في كلّ موضعٍ يطبعه.
 
 حارسٌ ساكنٌ بالضرورة: `npm test` هنا يشغّل `utils/*.test.ts` عبر `node --test`
 — دوالَّ خالصةً لا تُصيّر مكوّناً — و`tsc` لا يفحص نصَّ واجهةٍ ولا خريطةَ تسميات.
-فالمطابقةُ بين خيارات النموذج والخريطة في الـTSX تُقرأ نصّاً أو لا تُقرأ أصلاً.
+فالمطابقةُ بين مفرداتِ الأدوار والخريطة في الواجهة تُقرأ نصّاً أو لا تُقرأ أصلاً.
+
+**والمفرداتُ اثنتان لا واحدة** (212-P1)، وهذا ما كان يسقط الحارسَ الأوّل: كان
+يشتقّ مطلوبَه من `UserCompanyMembership.ROLE_CHOICES` وحدَها فيبقى أخضرَ،
+و`hr/auth_api.py` يبني حمولةَ المصادقة بـ
+`role = "manager" if user.is_superuser else "employee"` — أي أنّ **كلَّ** من ليس
+سوبر أدمن ولا مديرَ عضويّةٍ يصله `employee`، وهي ليست في `ROLE_CHOICES` أصلاً.
+فالحالةُ الغالبةُ في النظام كلِّه كانت تُعرَض «الدور: employee» وحارسٌ أخضرُ
+فوقها. ولذلك يُقرأ المطلوبُ من **اتّحاد** المفردتين: `ROLE_CHOICES` و`UserRole`
+في `frontend_v2/types/user.ts`.
 """
 import re
 from pathlib import Path
@@ -11,61 +20,86 @@ from django.test import SimpleTestCase
 
 from tenants.models import UserCompanyMembership
 
-APP_LAYOUT = (
-    Path(__file__).resolve().parents[2]
-    / "frontend_v2" / "components" / "layout" / "AppLayout.tsx"
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend_v2"
+#: مصدرُ التسمية الواحد — يقرؤه كلُّ موضعٍ يطبع الدور.
+LABELS = FRONTEND / "utils" / "userRoleLabel.ts"
+#: مفردةُ الواجهة كاملةً (`UserRole`) — تُقرأ نصّاً، والملفُّ لا يُعدَّل من هنا.
+USER_TYPES = FRONTEND / "types" / "user.ts"
+#: المواضعُ التي تطبع الدورَ على الشاشة.
+PRINTERS = (
+    FRONTEND / "components" / "layout" / "AppLayout.tsx",
+    FRONTEND / "components" / "Sidebar.tsx",
 )
 
 
 class HeaderRoleLabelTest(SimpleTestCase):
-    """كلُّ دورٍ يمنحه الخادمُ له اسمٌ في الترويسة.
+    """كلُّ دورٍ يمكن أن يحمله المستخدمُ له اسمٌ عربيّ.
 
-    **ولماذا هذا حارسٌ لا تفصيلٌ تجميليّ:** كان الملصقُ ثلاثيّةً تعرف `manager`
-    و`procurement` وتطبع «موظف» لكلِّ ما سواهما — سبعةً من تسعة، حتى «مستعرض».
-    ومالكُ النظام قرأه على حسابِ سوبر أدمن فاستنتج أنّ عزلَ الموظّفين مكسور،
-    وأمضى وقتاً على عطبٍ لا وجودَ له. الملصقُ الكاذبُ ليس خطأً في التجميل: هو
-    خطأٌ في المعلومة التي يُبنى عليها قرار.
+    **ولماذا هذا حارسٌ لا تفصيلٌ تجميليّ:** الملصقُ كان ثلاثيّةً تعرف `manager`
+    و`procurement` وتطبع «موظف» لكلِّ ما سواهما، ثمّ صار خريطةً تعرف أدوارَ
+    العضويّة وحدَها فتطبع `employee` بالإنجليزيّة لأكثر المستخدمين. ومالكُ
+    النظام قرأ الملصقَ على حسابٍ فاستنتج أنّ عزلَ الموظّفين مكسور، وأمضى وقتاً
+    على عطبٍ لا وجودَ له. الملصقُ الكاذبُ ليس خطأً في التجميل: هو خطأٌ في
+    المعلومة التي يُبنى عليها قرار.
     """
 
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls.source = APP_LAYOUT.read_text(encoding="utf-8")
+        cls.source = LABELS.read_text(encoding="utf-8")
 
     def _label_map(self) -> dict[str, str]:
         match = re.search(
-            r"const MEMBERSHIP_ROLE_LABEL: Record<string, string> = \{(?P<body>[^}]*)\}",
+            r"export const USER_ROLE_LABEL: Record<string, string> = \{(?P<body>[^}]*)\}",
             self.source,
         )
         self.assertIsNotNone(
-            match, "خريطةُ `MEMBERSHIP_ROLE_LABEL` اختفت أو أُعيدت تسميتُها."
+            match, "خريطةُ `USER_ROLE_LABEL` اختفت أو أُعيدت تسميتُها."
         )
-        return {
-            key: label
-            for key, label in re.findall(
-                r"(\w+)\s*:\s*'([^']+)'", match.group("body")
-            )
-        }
+        return dict(re.findall(r"(\w+)\s*:\s*'([^']+)'", match.group("body")))
 
-    def test_every_membership_role_the_server_grants_has_a_name_in_the_header(self):
+    def _ui_roles(self) -> set[str]:
+        """مفردةُ `UserRole` كما هي في الواجهة — لا نسخةٌ يدويّةٌ هنا.
+
+        نسخةٌ مكتوبةٌ في هذا الملفّ كانت ستتقادم بصمتٍ عند إضافة دورٍ جديد،
+        وهو بعينه ما جعل الحارسَ الأوّلَ يحرس مفردةً ناقصة.
+        """
+        source = USER_TYPES.read_text(encoding="utf-8")
+        match = re.search(r"export type UserRole\s*=(?P<body>[^;]+);", source)
+        self.assertIsNotNone(match, "مفردةُ `UserRole` اختفت من `types/user.ts`.")
+        roles = set(re.findall(r"'([a-z_]+)'", match.group("body")))
+        self.assertGreaterEqual(
+            len(roles), 9,
+            f"قراءةُ مفردةِ `UserRole` أعادت {len(roles)} أدوارٍ فقط — التعبيرُ لم يعد يطابق الملفّ.",
+        )
+        return roles
+
+    def test_every_role_the_user_can_carry_has_an_arabic_name(self):
         labels = self._label_map()
-        missing = [
-            f"{role} ({display})"
-            for role, display in UserCompanyMembership.ROLE_CHOICES
-            if role not in labels
-        ]
+        required = self._ui_roles() | {role for role, _ in UserCompanyMembership.ROLE_CHOICES}
+        missing = sorted(role for role in required if role not in labels)
         self.assertEqual(
             missing, [],
-            f"أدوارٌ يمنحها الخادمُ بلا اسمٍ في الترويسة: {missing} — "
-            "تُعرَض بمفتاحها الإنجليزيّ أو بالاسم الخطأ.",
+            f"أدوارٌ بلا اسمٍ عربيّ: {missing} — تُعرَض «مستخدم» للقارئ، "
+            "وهو أفضلُ من مفتاحٍ إنجليزيّ ولا يُغني عن اسمها.",
         )
 
-    def test_no_two_roles_share_one_name(self):
+    def test_the_default_role_of_a_plain_user_is_named(self):
+        """‏`employee` ليست حالةً نادرة: هي جوابُ `hr/auth_api.py` لكلِّ من ليس
+        سوبر أدمن ولا مديرَ عضويّة — أي أكثرِ من يفتح النظام."""
+        self.assertIn(
+            "employee", self._label_map(),
+            "الدورُ الافتراضيُّ في حمولة المصادقة بلا اسمٍ — وهو بلاغُ المالك حرفيّاً.",
+        )
+
+    def test_no_two_membership_roles_share_one_name(self):
         """اسمان متطابقان يعيدان العيبَ نفسَه بصيغةٍ أخفى.
 
         خريطةٌ كاملةُ المفاتيح تمرّ الحارسَ أعلاه وهي تسمّي أربعةَ أدوارٍ «موظف»:
-        القارئُ يرى اسماً صحيحَ المبنى ولا يستطيع تمييزَ من أمامه — وهو بعينه
-        ما فعلته الثلاثيّةُ المستبدَلة.
+        القارئُ يرى اسماً صحيحَ المبنى ولا يستطيع تمييزَ من أمامه.
+
+        والمقارنةُ على **أدوار العضويّة وحدَها**: `employee` و`staff` من مفردتين
+        مختلفتين تصفان الشيءَ نفسَه («ليس مديراً»)، فاسمٌ واحدٌ لهما صدقٌ لا لبس.
         """
         labels = self._label_map()
         granted = {role for role, _ in UserCompanyMembership.ROLE_CHOICES}
@@ -76,23 +110,37 @@ class HeaderRoleLabelTest(SimpleTestCase):
         clashes = {label: roles for label, roles in seen.items() if len(roles) > 1}
         self.assertEqual(
             clashes, {},
-            f"أدوارٌ مختلفةٌ تحمل الاسمَ نفسَه في الترويسة: {clashes} — "
-            "القارئُ لا يميّز من أمامه.",
+            f"أدوارٌ مختلفةٌ تحمل الاسمَ نفسَه: {clashes} — القارئُ لا يميّز من أمامه.",
         )
 
-    def test_the_header_reads_the_map_and_not_a_hand_written_chain(self):
-        """والسلسلةُ الشرطيّةُ لا تعود من الباب الخلفيّ.
+    def test_no_screen_prints_the_raw_role_key(self):
+        """والسلسلةُ الشرطيّةُ — أو المفتاحُ العاري — لا يعودان من الباب الخلفيّ.
 
-        خريطةٌ مضبوطةٌ فوق الملفّ لا تنفع إن بقي الملصقُ يحسب اسمَه بثلاثيّةٍ
-        خاصّةٍ به: الحارسان أعلاه يقرآن الخريطةَ وحدَها فيبقيان أخضرَين.
+        خريطةٌ مضبوطةٌ لا تنفع إن بقي موضعٌ يطبع `user.role` كما هو؛ وقد بقي
+        موضعان: ترويسةُ `AppLayout` بـ`?? user.role`، وبطاقةُ الحساب في
+        `Sidebar` بالمفتاح عارياً بلا خريطةٍ أصلاً.
         """
-        header = re.search(r"<span>الدور:[^<]*</span>", self.source)
-        self.assertIsNotNone(header, "سطرُ «الدور:» في الترويسة اختفى.")
-        self.assertIn(
-            "MEMBERSHIP_ROLE_LABEL", header.group(0),
-            f"ملصقُ الدور لا يقرأ الخريطة: {header.group(0)}",
+        # **موضعُ الطباعة بعينه لا كلُّ ذكرٍ للحقل**: `user.role` يُمرَّر أيضاً
+        # إلى حسابات الصلاحيات (`groupVisible(..., user.role)`) و`GlobalSearch`،
+        # وهي استعمالاتٌ سليمةٌ لا تصل الشاشة. فحارسٌ يمنع الحقلَ أينما ورد
+        # يسقط على كودٍ صحيحٍ ويُدفَع إلى التعطيل.
+        violations = []
+        sites = (
+            (PRINTERS[0], r"<span>الدور:[^<]*</span>", "سطرُ «الدور:» في الترويسة"),
+            (PRINTERS[1], r'\{user\.isSuperAdmin \? "سوبر أدمن المنصة" : [^}]*\}', "سطرُ الدور في بطاقة الحساب"),
         )
-        self.assertNotIn(
-            "?", header.group(0).replace("??", ""),
-            f"ملصقُ الدور عاد يحسب اسمَه بسلسلةٍ شرطيّة: {header.group(0)}",
+        for path, pattern, what in sites:
+            source = path.read_text(encoding="utf-8")
+            printed = re.search(pattern, source)
+            if printed is None:
+                violations.append(f"{path.name}: {what} اختفى — الحارسُ يقيس العدم")
+                continue
+            if "userRoleLabel(" not in printed.group(0):
+                violations.append(f"{path.name}: {what} لا يقرأ مصدرَ التسمية — {printed.group(0).strip()}")
+        self.assertEqual(violations, [], f"مفتاحٌ إنجليزيٌّ يصل الشاشة: {violations}")
+
+    def test_the_unknown_role_falls_back_to_a_name_not_a_key(self):
+        self.assertRegex(
+            self.source, r"\?\?\s*'مستخدم'",
+            "البديلُ عند دورٍ مجهولٍ ليس اسماً عربيّاً — فالمفتاحُ يصل الشاشة.",
         )
