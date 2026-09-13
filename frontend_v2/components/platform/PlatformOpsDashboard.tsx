@@ -232,7 +232,7 @@ export const PlatformOpsDashboard: React.FC = () => {
 
   return (
     <div
-      className="platform-surface min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8 pb-24 md:pb-6 lg:pb-8"
+      className="platform-surface ops-shell min-h-screen bg-slate-50 text-slate-800 p-4 sm:p-6 lg:p-8 pb-24 md:pb-6 lg:pb-8"
       dir="rtl"
     >
       {/* 1. ترويسة الصفحة */}
@@ -289,7 +289,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("overview")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "overview" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "overview" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           اللوحة
@@ -298,7 +298,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("workspace_room")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "workspace_room" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "workspace_room" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           مساحة العمل
@@ -307,7 +307,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("work_orders")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "work_orders" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "work_orders" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           أوامر العمل
@@ -316,7 +316,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("staff_tasks")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "staff_tasks" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "staff_tasks" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           مهام الموظفين
@@ -325,7 +325,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("catalog")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "catalog" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "catalog" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           كتالوج وحدات الخدمة
@@ -334,7 +334,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("usage_ledger")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "usage_ledger" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "usage_ledger" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           دفتر الاستخدام
@@ -343,7 +343,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("pilot_settings")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "pilot_settings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "pilot_settings" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           سياسات الأداء والتعويض
@@ -352,7 +352,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("compensation_close")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "compensation_close" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "compensation_close" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           إغلاق الشهر
@@ -361,7 +361,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("wallet")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "wallet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "wallet" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           محفظة الموظف
@@ -370,7 +370,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("integration_keys")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "integration_keys" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "integration_keys" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           مفاتيح قنوات الإدخال
@@ -379,7 +379,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("champions")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "champions" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "champions" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           Champions
@@ -388,7 +388,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("profitability")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "profitability" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "profitability" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           الربحيّة
@@ -397,7 +397,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("review_requests")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "review_requests" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "review_requests" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           اعتراضات الأداء
@@ -406,7 +406,7 @@ export const PlatformOpsDashboard: React.FC = () => {
           type="button"
           onClick={() => setActiveTab("meetings")}
           className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            activeTab === "meetings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
+            activeTab === "meetings" ? "bg-sky-600 text-white shadow-sm" : "text-slate-600 hover:text-slate-900"
           }`}
         >
           الاجتماعات
@@ -545,7 +545,7 @@ export const PlatformOpsDashboard: React.FC = () => {
               onClick={() => setViewUnit("employee")}
               className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${
                 viewUnit === "employee"
-                  ? "bg-white text-slate-900 shadow-sm"
+                  ? "bg-sky-600 text-white shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
@@ -556,7 +556,7 @@ export const PlatformOpsDashboard: React.FC = () => {
               onClick={() => setViewUnit("company")}
               className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${
                 viewUnit === "company"
-                  ? "bg-white text-slate-900 shadow-sm"
+                  ? "bg-sky-600 text-white shadow-sm"
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >

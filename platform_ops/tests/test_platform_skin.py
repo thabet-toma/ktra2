@@ -7,6 +7,7 @@
 مكوّناً واحداً فلا ترى صنفَ CSS ولا خاصيّةَ JSX. فالحراسةُ ساكنةٌ بالضرورة.
 """
 from pathlib import Path
+import re
 
 from django.test import SimpleTestCase
 
@@ -33,7 +34,210 @@ CONFINED_SCOPES = {
     ".platform-surface": "سطحُ المنصّة السماويُّ (#211 م٣) — لوحةُ القيادة ومساحةُ الموظّف.",
     ".staff-shell": "قشرةُ الموظّف الداكنةُ المستقلّة (#212 212-A) — تُعيد تلوينَ اللوحاتِ "
                     "السِّتَّ المُعادَ استعمالُها دون لمسِ ملفّاتها فتبقى فاتحةً في سطح المنصّة.",
+    ".ops-shell": "قشرةُ مركز القيادة الداكنة (#212 212-G) — تقرأ جلدَ قشرة الموظّف نفسَه بلا نسخةٍ ثانيةٍ من قيمه، وتصبغ اثنين وأربعين ملفّاً كثيرٌ منها محجوزٌ لمهمّةٍ أخرى لا يُلمَس.",
 }
+
+
+#: **أوسعُ من تعبير `test_staff_shell_contract.py` عن قصد**: ذاك يمسح ستَّ لوحاتٍ
+#: مُعادَ استعمالُها، وهذا يمسح اثنين وأربعين ملفّاً تلبس لوحاتٍ أكثر — أحمرَ
+#: التحذير، وبنفسجيَّ الإشعارات، وبرتقاليَّ الربحيّة، ودرجاتٍ بشفّافيّة. وبالتعبير
+#: الضيّق مرّ الحارسُ أخضرَ وفي الشاشة أحدَ عشرَ صنفاً فاتحاً بلا تجاوز.
+#: تُلتَقط **بادئةُ الـvariant كاملةً** لا `hover:` وحدَها: النقطتان ليستا في
+#: `[\w-]`، فبادئةٌ غيرُ ملتقطةٍ تجعل `group-hover:text-blue-700` يُطابَق
+#: `text-blue-700` ويُرضيه تجاوزُ الصنف العاري، والصنفُ الحقيقيُّ بلا تجاوز.
+LIGHT_PLATFORM_CLASS = re.compile(
+    r"(?<![\w:./\[-])(?:(?!dark:)[a-z][a-z0-9-]*:)*(?:"
+    r"bg-(?:white(?:/\d+)?"
+    r"|(?:slate|gray|zinc|neutral|stone)-(?:50|100|200|300)(?:/\d+)?"
+    r"|(?:blue|sky|cyan|teal|indigo|violet|purple|fuchsia|pink|rose|red|orange|amber|yellow|lime|green|emerald)"
+    r"-(?:50|100|200|300)(?:/\d+)?)"
+    r"|text-(?:(?:slate|gray|zinc|neutral|stone)-(?:400|500|600|700|800|900)"
+    r"|(?:blue|sky|cyan|teal|indigo|violet|purple|fuchsia|pink|rose|red|orange|amber|yellow|lime|green|emerald)"
+    r"-(?:500|600|700|800|900))"
+    r"|border-(?:(?:slate|gray|zinc|neutral|stone)-(?:100|200|300)"
+    r"|(?:blue|sky|cyan|teal|indigo|violet|purple|fuchsia|pink|rose|red|orange|amber|yellow|lime|green|emerald)"
+    r"-(?:100|200|300|400))"
+    r"|divide-(?:slate|gray)-(?:100|200|300)"
+    r"|ring-(?:slate-(?:100|200)|white)"
+    r")(?![\w-])"
+)
+
+
+def _all_selectors(css: str) -> list[str]:
+    r"""كلُّ محدِّدٍ في الملفّ، مفضوضةً فواصلُه.
+
+    تُقرأ **مقدِّمةُ كلِّ كتلةٍ** لا الأسطرُ الحاملةُ لـ`{`: محدِّداتُ الجلد
+    مزوَّجةٌ على سطرَين (`.staff-shell .x,` ثم `.ops-shell .x {`)، فقراءةُ سطر
+    القوس وحدَه تُخفي نصفَها — ويمرّ `.bg-slate-50,` بلا غلافٍ في مجموعةٍ صامتاً
+    فيصبغ المبيعاتَ والمخزونَ والمحاسبة. وتُنزع التعليقاتُ أوّلاً كي لا يصير
+    قوسٌ داخلَ تعليقٍ حدَّ كتلة.
+    """
+    stripped = re.sub(r"/\*.*?\*/", " ", css, flags=re.DOTALL)
+    selectors = []
+    for prelude in re.findall(r"([^{}]*)\{", stripped):
+        if prelude.lstrip().startswith("@"):
+            continue
+        selectors.extend(part.strip() for part in prelude.split(",") if part.strip())
+    return selectors
+
+
+def _scoped_selectors(css: str, scope: str) -> list[str]:
+    """المحدِّداتُ التي تبدأ بغلافٍ بعينه."""
+    return [selector for selector in _all_selectors(css) if selector.startswith(scope)]
+
+
+class PlatformOpsDarkSkinContractTest(SimpleTestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.css = INDEX_CSS.read_text(encoding="utf-8")
+
+    def test_the_ops_dashboard_wears_the_dark_shell_alongside_the_platform_surface(self):
+        source = (PLATFORM_COMPONENTS / "PlatformOpsDashboard.tsx").read_text(encoding="utf-8")
+        self.assertIn("platform-surface", source)
+        self.assertRegex(source, r'className="[^"]*\bops-shell\b')
+
+    def test_every_light_class_the_ops_components_wear_has_a_dark_override(self):
+        light_classes = set()
+        for source_path in PLATFORM_COMPONENTS.glob("*.tsx"):
+            light_classes.update(
+                match.group(0) for match in LIGHT_PLATFORM_CLASS.finditer(
+                    source_path.read_text(encoding="utf-8")
+                )
+            )
+
+        self.assertTrue(light_classes)
+        # يُؤكَّد على **قائمةِ المخالفات** لا على نصِّ الـCSS: `assertIn` على ملفٍّ
+        # كاملٍ تطبع مئةً وثلاثين كيلوبايتاً في خبر الفشل فيضيع الخبرُ في الكومة.
+        scoped = _scoped_selectors(self.css, ".ops-shell")
+        missing = []
+        for light_class in sorted(light_classes):
+            escaped_class = light_class.replace(":", r"\:").replace("/", r"\/")
+            # يُطلَب **رمزُ الصنف** داخلَ محدِّدٍ يبدأ بالغلاف، لا سلسلةٌ حرفيّةٌ
+            # بشكل `.ops-shell .x`: تجاوزُ `group-hover:` يلزمه سلفٌ وسيطٌ
+            # (`.ops-shell .group:hover .group-hover\:x`) فالمطابقةُ الحرفيّةُ
+            # تطلب المستحيلَ، وتجاوزُ `hover:` يلحقه `:hover` فتقطعه.
+            if not any(f".{escaped_class}" in selector for selector in scoped):
+                missing.append(light_class)
+        self.assertEqual(
+            missing, [],
+            f"أصنافٌ فاتحةٌ يلبسها مركزُ القيادة بلا تجاوزٍ داكن: {missing} — "
+            "رقعةٌ بيضاءُ وسطَ شاشةٍ داكنة.",
+        )
+
+    def test_the_ops_dark_skin_follows_the_platform_surface_ramp(self):
+        """**الترتيبُ جزءٌ من الصحّة لا زينة.**
+
+        جذرُ القيادة يلبس الغلافين معاً، وقواعدُ `.platform-surface` السماويّة
+        تساوي قواعدَ الجلد نوعيّةً (0,2,0) — فالمتأخّرُ في الملفّ هو الفائز.
+        وكتلةٌ نُقلت فوقَ السُلَّم تُعيد الشاشةَ بيضاءَ بلا أن يسقط اختبارُ صنف.
+
+        ويُقاس **موضعُ القواعد نفسِها** لا موضعُ تعليقٍ فوقها: تعليقٌ باقٍ
+        وقواعدُ مرفوعةٌ يُبقي الحارسَ أخضرَ على شاشةٍ بيضاء — ولذلك لا مرساةَ
+        هنا على نصِّ تعليقٍ: صياغتُه حرّةٌ، وقد انكسرت مرساةٌ كهذه فعلاً حين
+        صُحِّح رأسُ الكتلة.
+        """
+        # **أوّلُ** قاعدةِ جلدٍ بعد **آخرِ** قاعدةِ سُلَّم: مقارنةُ الآخرِ بالآخر
+        # تُبقي الحارسَ أخضرَ إذا رُفعت كتلةٌ واحدةٌ فوق السُلَّم وبقيت أخرى تحتَه.
+        first_skin, last_ramp = self.css.index(".ops-shell ."), self.css.rfind(".platform-surface .")
+        self.assertGreater(
+            first_skin, last_ramp,
+            "قاعدةُ جلدٍ داكنٍ سبقت سُلَّمَ السماويّ في الملفّ "
+            f"(أوّلُ جلدٍ عند {first_skin}، وآخرُ سُلَّمٍ عند {last_ramp}) — "
+            "تخسر صامتةً وتعود الشاشةُ بيضاء.",
+        )
+
+    def test_the_root_paints_its_own_ground_not_only_its_children(self):
+        """صنفٌ فاتحٌ على **حامل الغلاف نفسِه** لا يطابقه محدِّدُ سليل.
+
+        جذرُ اللوحة يلبس `ops-shell` و`bg-slate-50` و`text-slate-800` معاً، وكلُّ
+        قواعد الجلد من شكل `.ops-shell .x` — فالجذرُ وحدَه يبقى فاتحاً: صفحةٌ
+        بيضاءُ تطفو عليها بطاقاتٌ داكنة. ولا يمسك ذلك مسحُ الأصناف، لأنّ الصنفَ
+        **مغطّىً** فعلاً... لمن هو سليل.
+        """
+        source = (PLATFORM_COMPONENTS / "PlatformOpsDashboard.tsx").read_text(encoding="utf-8")
+        root = re.search(r'className="([^"]*\bops-shell\b[^"]*)"', source)
+        self.assertIsNotNone(root, "لم يُعثر على العنصر الحامل للغلاف.")
+
+        bodies = re.findall(r"\.ops-shell\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
+        needed = {"bg-": "background-color", "text-": "color"}
+        unpainted = []
+        for light_class in LIGHT_PLATFORM_CLASS.finditer(root.group(1)):
+            prefix = next((p for p in needed if light_class.group(0).startswith(p)), None)
+            if prefix is None:
+                continue
+            prop = needed[prefix]
+            compound = f".ops-shell.{light_class.group(0)}"
+            painted = compound in self.css or any(
+                re.search(rf"(?<![\w-]){prop}\s*:", body) for body in bodies
+            )
+            if not painted:
+                unpainted.append(f"{light_class.group(0)} ← لا `{prop}` على `.ops-shell` نفسِه")
+        self.assertEqual(
+            unpainted, [],
+            f"أصنافٌ فاتحةٌ على حامل الغلاف بلا صبغٍ: {unpainted}",
+        )
+
+    def test_the_ops_shell_redefines_the_ktra_input_tokens(self):
+        """ويُطلَب أن تُشتقّ القيمةُ من جلد الموظّف لا مجرَّدُ وجودِ الرمز.
+
+        بالوجود وحدَه يمرّ `--ktra-field: white` أخضرَ: الحارسُ اسمُه «تُعاد
+        تعريفُها» ومقصودُه «تصير داكنة»، فأيّ قيمةٍ تُرضيه تجعله لا يسقط للسبب
+        الذي يحمله اسمُه. والاشتقاقُ من `--staff-*` هو تعريفُ «داكن» هنا:
+        قيمةٌ واحدةٌ في مكانٍ واحدٍ لا نسخةٌ ثانيةٌ من اللوحة.
+        """
+        bodies = re.findall(r"\.ops-shell\s*\{(?P<body>.*?)\}", self.css, re.DOTALL)
+        self.assertTrue(bodies)
+        stray = []
+        for token in (
+            "--ktra-field",
+            "--ktra-border",
+            "--ktra-border-soft",
+            "--ktra-ink",
+            "--ktra-accent-bg",
+            "--ktra-panel",
+            "--ktra-ink-soft",
+            "--color-text",
+            "--color-border",
+        ):
+            values = [
+                match.group("value").strip()
+                for body in bodies
+                for match in re.finditer(rf"{re.escape(token)}\s*:(?P<value>[^;]*);", body)
+            ]
+            if not values:
+                stray.append(f"{token} ← غيرُ معرَّفٍ على `.ops-shell`")
+            elif not all("var(--staff-" in value for value in values):
+                stray.append(f"{token} ← قيمةٌ لا تُشتقّ من جلد الموظّف: {values}")
+        self.assertEqual(
+            stray, [],
+            f"رموزٌ يقرأها مركزُ القيادة ولم تصر داكنةً: {stray}",
+        )
+
+    def test_the_room_grounds_written_in_literal_colours_go_dark(self):
+        """**الصنفُ ليس المصدرَ الوحيدَ للفاتح**: هذا الملفّ نفسُه يكتب أبيضَ حرفيّاً.
+
+        أرضيّاتُ قاعة العمل (`pf-room` و`pf-room-table` و`pf-room-screen`
+        و`pf-seat-badge`) مكتوبةٌ هنا بـ`#ffffff` و`rgba(255,255,255,…)`، فلا
+        يراها مسحُ الأصناف مهما وُسِّع تعبيرُه — وبحثٌ في TSX عن تدرّجٍ يعود
+        فارغاً. وشارةُ المقعد أسوأُها: نصُّها `text-slate-900` صار فاتحاً فوق
+        خلفيّةٍ بيضاءَ بقيت بيضاء، أي اسمُ موظّفٍ بتباينِ 1.1:1.
+        """
+        rooms = {"pf-room", "pf-room-table", "pf-room-screen", "pf-seat-badge"}
+        literal = re.compile(r"#f{3,6}\b|#ffffff\b|rgba\(\s*255\s*,\s*255\s*,\s*255", re.IGNORECASE)
+        unpainted = []
+        for name in sorted(rooms):
+            base = re.search(rf"\.{name}\s*\{{(?P<body>[^{{}}]*)\}}", self.css)
+            self.assertIsNotNone(base, f"قاعدةُ `.{name}` اختفت أو أُعيدت تسميتُها.")
+            if not literal.search(base.group("body")):
+                continue  # لا أبيضَ حرفيّاً فيها، فلا شيءَ يُنقَض
+            if not re.search(rf"\.ops-shell\s+\.{name}\s*\{{", self.css):
+                unpainted.append(name)
+        self.assertEqual(
+            unpainted, [],
+            f"أرضيّاتٌ بيضاءُ حرفيّةٌ في قاعة العمل بلا نظيرٍ داكنٍ داخلَ الغلاف: {unpainted} — "
+            "بطاقةٌ بيضاءُ يُكتب عليها نصٌّ صار فاتحاً: اسمٌ يختفي.",
+        )
 
 
 class PlatformSkinIsConfinedTest(SimpleTestCase):
@@ -62,13 +266,7 @@ class PlatformSkinIsConfinedTest(SimpleTestCase):
         والمحاسبةَ — وهو بعينه ما رفضه المالك بقوله «لا تعمّمو».
         """
         offenders = []
-        for raw in self.css.splitlines():
-            line = raw.strip()
-            if "{" not in line:
-                continue
-            selector = line.split("{", 1)[0].strip()
-            if not selector:
-                continue
+        for selector in _all_selectors(self.css):
             # قواعدُ السُلَّم وحدَها هي المقصودة: ما يستهدف صنفَ لونٍ من Tailwind.
             is_ramp_rule = any(
                 token in selector

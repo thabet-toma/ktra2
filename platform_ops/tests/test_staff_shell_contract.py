@@ -2,10 +2,13 @@ from pathlib import Path
 import re
 from unittest import TestCase
 
+from platform_ops.tests.test_platform_skin import LIGHT_PLATFORM_CLASS, _scoped_selectors
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend_v2"
 STAFF = FRONTEND / "components" / "platform" / "staff"
+
 REUSED_STAFF_PANELS = (
     "WorkOrdersPanel.tsx",
     "EmployeeSelfWalletCard.tsx",
@@ -13,16 +16,17 @@ REUSED_STAFF_PANELS = (
     "ChampionsPanel.tsx",
     "MyProfileCard.tsx",
     "MyMeetingsPanel.tsx",
+    # الجرسُ لوحةٌ معادُ استعمالُها كأخواتها: `StaffTopBar.tsx` يركّبه في قشرة
+    # الموظّف، ومركزُ القيادة ومساحةُ العمل يركّبانه كذلك. وبقاؤه خارجَ القائمة
+    # ترك أصنافَه الفاتحةَ بلا حارسٍ **داخلَ قشرةٍ داكنة**: قائمةٌ منسدلةٌ
+    # بنفسجيّةٌ ساطعةٌ وسطَ الليل. صُبغت في 212-G مع جلد القيادة، فتُحرَس هنا.
+    "PlatformNotificationBell.tsx",
 )
-LIGHT_PANEL_CLASS = re.compile(
-    r"(?<![\w-])(?:(?:hover):)?(?:"
-    r"bg-(?:white(?:/\d+)?|(?:slate|gray)-(?:50|100|200)|(?:blue|sky|amber|rose|emerald)-(?:50|100|200))"
-    r"|text-(?:slate-(?:400|500|600|700|800|900)|gray-\d+|(?:blue|sky|amber|rose|emerald)-(?:500|600|700|800))"
-    r"|border-(?:slate-(?:100|200|300)|gray-\d+|(?:blue|sky|amber|rose|emerald)-(?:100|200|300|400))"
-    r"|divide-slate-(?:100|200)"
-    r"|ring-(?:slate-(?:100|200)|white)"
-    r")(?![\w-])"
-)
+#: **تعبيرٌ واحدٌ لقاعدتَي CSS واحدة.** صارت محدِّداتُ الجلد تحمل الغلافَين معاً
+#: (`.staff-shell, .ops-shell`)، فتعبيرٌ ضيّقٌ هنا وواسعٌ هناك يعني أنّ صنفاً
+#: تلبسه لوحةٌ مشتركةٌ يُحرَس في قشرةٍ ويُفلت من الأخرى — وهو ما حدث فعلاً مع
+#: الجرس: بنفسجيُّ قائمته لم يكن يراه أيُّ مسح. فيُستورَد التعبيرُ من مصدره.
+LIGHT_PANEL_CLASS = LIGHT_PLATFORM_CLASS
 
 
 class StaffShellContractTests(TestCase):
@@ -116,7 +120,7 @@ class StaffShellContractTests(TestCase):
 
     def test_the_staff_palette_tokens_are_declared(self):
         source = (FRONTEND / "styles" / "index.css").read_text(encoding="utf-8")
-        match = re.search(r"\.staff-shell\s*\{(?P<body>.*?)\}", source, re.DOTALL)
+        match = re.search(r"\.staff-shell\s*,\s*\.ops-shell\s*\{(?P<body>.*?)\}", source, re.DOTALL)
         self.assertIsNotNone(match)
         body = match.group("body")
         for token in (
@@ -140,9 +144,18 @@ class StaffShellContractTests(TestCase):
             light_classes.update(match.group(0) for match in LIGHT_PANEL_CLASS.finditer(source))
 
         self.assertTrue(light_classes)
+        # يُؤكَّد على **قائمةِ المخالفات** لا على نصِّ الـCSS: `assertIn` على ملفٍّ
+        # كاملٍ تطبع مئةً وثلاثين كيلوبايتاً فيضيع الخبرُ في الكومة. ويُطلَب رمزُ
+        # الصنف داخلَ محدِّدٍ يبدأ بالغلاف لا سلسلةٌ حرفيّةٌ بشكل `.staff-shell .x`:
+        # تجاوزُ `group-hover:` يلزمه سلفٌ وسيطٌ فالمطابقةُ الحرفيّةُ تطلب المستحيل.
+        scoped = _scoped_selectors(stylesheet, ".staff-shell")
+        missing = []
         for light_class in sorted(light_classes):
             escaped_class = light_class.replace(":", r"\:").replace("/", r"\/")
-            selector = f".staff-shell .{escaped_class}"
-            if light_class.startswith("hover:"):
-                selector += ":hover"
-            self.assertIn(selector, stylesheet, f"missing dark override for {light_class}")
+            if not any(f".{escaped_class}" in selector for selector in scoped):
+                missing.append(light_class)
+        self.assertEqual(
+            missing, [],
+            f"أصنافٌ فاتحةٌ تلبسها لوحاتُ قشرة الموظّف بلا تجاوزٍ داكن: {missing} — "
+            "رقعةٌ بيضاءُ وسطَ شاشةٍ داكنة.",
+        )

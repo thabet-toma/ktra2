@@ -2471,7 +2471,8 @@ tbody td {
   color: var(--color-text);
 }
 
-.staff-shell {
+.staff-shell,
+.ops-shell {
   --staff-bg: #0b1220;
   --staff-panel: #111c31;
   --staff-rail: #0a1220;
@@ -2481,68 +2482,6 @@ tbody td {
   --staff-accent: #22d3ee;
   --staff-accent-2: #3b82f6;
 }
-
-/* ── جلد اللوحات المعاد استعمالها داخل قشرة الموظف ──────────────────────────
-   اللوحات أدناه تخدم أيضاً `PlatformEmployeeWorkspace` الفاتح، لذلك لا تُمس
-   أدواتها في TSX. هذه المحددات محصورة في `.staff-shell` وخارج الطبقات مثل
-   تجاوزات `.platform-surface`: تبقى اللوحات فاتحة خارج القشرة، وتقرأ رموز
-   الجلد الداكن داخلها. يحرس القائمةَ المسحُ الحي في
-   `test_every_light_class_the_reused_panels_wear_has_a_dark_override`. */
-.staff-shell .bg-white { background-color: var(--staff-panel); }
-.staff-shell .bg-slate-50,
-.staff-shell .bg-slate-100,
-.staff-shell .bg-slate-200 { background-color: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg)); }
-.staff-shell .bg-blue-50,
-.staff-shell .bg-blue-100,
-.staff-shell .bg-sky-50,
-.staff-shell .bg-sky-100 { background-color: color-mix(in oklab, #38bdf8 14%, var(--staff-panel)); }
-.staff-shell .bg-emerald-50,
-.staff-shell .bg-emerald-100 { background-color: color-mix(in oklab, #34d399 14%, var(--staff-panel)); }
-.staff-shell .bg-amber-50,
-.staff-shell .bg-amber-100,
-.staff-shell .bg-amber-200 { background-color: color-mix(in oklab, #fbbf24 14%, var(--staff-panel)); }
-.staff-shell .bg-rose-50,
-.staff-shell .bg-rose-100,
-.staff-shell .bg-rose-200 { background-color: color-mix(in oklab, #fb7185 14%, var(--staff-panel)); }
-
-.staff-shell .hover\:bg-slate-50:hover,
-.staff-shell .hover\:bg-slate-200:hover { background-color: color-mix(in oklab, var(--staff-panel) 72%, var(--staff-text)); }
-.staff-shell .hover\:bg-blue-100:hover { background-color: color-mix(in oklab, #38bdf8 24%, var(--staff-panel)); }
-.staff-shell .hover\:bg-amber-100:hover,
-.staff-shell .hover\:bg-amber-200:hover { background-color: color-mix(in oklab, #fbbf24 24%, var(--staff-panel)); }
-.staff-shell .hover\:bg-rose-100:hover,
-.staff-shell .hover\:bg-rose-200:hover { background-color: color-mix(in oklab, #fb7185 24%, var(--staff-panel)); }
-
-.staff-shell .text-slate-400,
-.staff-shell .text-slate-500,
-.staff-shell .text-slate-600 { color: var(--staff-muted); }
-.staff-shell .text-slate-700,
-.staff-shell .text-slate-800,
-.staff-shell .text-slate-900 { color: var(--staff-text); }
-.staff-shell .text-blue-700,
-.staff-shell .text-sky-700,
-.staff-shell .text-sky-800 { color: #7dd3fc; }
-.staff-shell .text-emerald-600,
-.staff-shell .text-emerald-700,
-.staff-shell .text-emerald-800 { color: #6ee7b7; }
-.staff-shell .text-amber-500,
-.staff-shell .text-amber-600,
-.staff-shell .text-amber-700,
-.staff-shell .text-amber-800 { color: #fcd34d; }
-.staff-shell .text-rose-600,
-.staff-shell .text-rose-700,
-.staff-shell .text-rose-800 { color: #fda4af; }
-
-.staff-shell .border-slate-100,
-.staff-shell .border-slate-200 { border-color: var(--staff-line); }
-.staff-shell .border-blue-400,
-.staff-shell .border-sky-200 { border-color: color-mix(in oklab, #38bdf8 45%, var(--staff-line)); }
-.staff-shell .border-emerald-200 { border-color: color-mix(in oklab, #34d399 45%, var(--staff-line)); }
-.staff-shell .border-amber-200,
-.staff-shell .border-amber-300 { border-color: color-mix(in oklab, #fbbf24 45%, var(--staff-line)); }
-.staff-shell .border-rose-200 { border-color: color-mix(in oklab, #fb7185 45%, var(--staff-line)); }
-.staff-shell .ring-slate-100,
-.staff-shell .ring-white { --tw-ring-color: var(--staff-line); }
 
 /* الوضعُ الداكن: تُعاد صياغةُ الأرضيّة والحدّ وحدَهما، ويُفتَّح السماويُّ كي
    يبقى مقروءاً فوق سطحٍ داكن — كما فُتِّح `--color-primary-emphasis` في الجذر
@@ -2643,6 +2582,298 @@ tbody td {
 .platform-surface .text-slate-700 { color: oklch(41% 0.058 232); }
 .platform-surface .text-slate-800 { color: oklch(31% 0.05 232); }
 .platform-surface .text-slate-900 { color: oklch(23% 0.042 232); }
+
+/* ── جلدُ قشرة الموظّف ومركزِ القيادة معاً ────────────────────────────────────
+   يبقى `platform-surface` على جذر القيادة لرموزه وعزل سطح المنصّة، لكن هذه
+   القواعد تأتي بعد سلّمِه: النوعية متساوية، والتأخير هو ما يمنع عودة الأبيض.
+   الغلافان في المحدّد نفسه، لذلك لا توجد نسخة ثانية من قيم جلد الموظف.
+
+   واللوحاتُ المصبوغةُ أدناه تخدم أيضاً `PlatformEmployeeWorkspace` الفاتحَ خارجَ
+   القشرتين، فلا تُمَسّ أدواتُها في TSX: تبقى فاتحةً حيث هي، وتقرأ رموزَ الجلد
+   الداكن داخلَ غلافٍ من الاثنين. ويحرس القائمتَين مسحان حيّان —
+   `test_every_light_class_the_reused_panels_wear_has_a_dark_override` للستّ،
+   و`test_every_light_class_the_ops_components_wear_has_a_dark_override` للقيادة. */
+.ops-shell {
+  /* أرضيّةُ الجذر ولونُ نصِّه **على العنصر نفسِه**: قواعدُ الجلد كلُّها محدِّداتُ
+     سليلٍ، والجذرُ يحمل `bg-slate-50 text-slate-800` بنفسه فلا يطابقه شيءٌ منها.
+     والقاعدةُ خارجَ الطبقات فتغلب أداةَ Tailwind مهما تساوت النوعيّة. */
+  background-color: var(--staff-bg);
+  color: var(--staff-text);
+
+  --ktra-field: var(--staff-panel);
+  --ktra-border: var(--staff-line);
+  --ktra-border-soft: var(--staff-line);
+  --ktra-ink: var(--staff-text);
+  --ktra-accent-bg: color-mix(in oklab, var(--staff-accent) 14%, var(--staff-panel));
+  /* يُقرأان بـ`ktra-text-soft` (سبعاً وثلاثين مرّةً) و`ktra-iconbtn` (ثلاثاً)،
+     وقاعدتاهما مشروطتان بـ`:root[data-skin]` — و`styles/skin.ts` يضبطه على
+     الجذر عند الإقلاع، فهما حيّتان لا خامدتان. */
+  --ktra-panel: var(--staff-panel);
+  --ktra-ink-soft: var(--staff-muted);
+
+  /* ورمزان يُقرأان بأصنافِ **قيمةٍ اعتباطيّة** لا تعبيرٌ نمطيٌّ يمسحها:
+     `text-[var(--color-text)]` ستّاً و`border-[var(--color-border)]` ثمانياً.
+     الأوّلُ كان يحلّ إلى `#0f172a` من الجذر — تباينُ 1.3:1 على لوحٍ داكن —
+     والثاني إلى `#d7ebf9` من سُلَّم `.platform-surface`. */
+  --color-text: var(--staff-text);
+  --color-border: var(--staff-line);
+}
+
+.staff-shell .bg-white,
+.ops-shell .bg-white { background-color: var(--staff-panel); }
+.staff-shell .bg-white\/70,
+.ops-shell .bg-white\/70 { background-color: color-mix(in oklab, var(--staff-panel) 70%, transparent); }
+.staff-shell .bg-slate-50,
+.ops-shell .bg-slate-50,
+.staff-shell .bg-slate-100,
+.ops-shell .bg-slate-100,
+.staff-shell .bg-slate-200,
+.ops-shell .bg-slate-200 { background-color: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg)); }
+.staff-shell .bg-blue-50,
+.ops-shell .bg-blue-50,
+.staff-shell .bg-blue-100,
+.ops-shell .bg-blue-100,
+.staff-shell .bg-sky-50,
+.ops-shell .bg-sky-50,
+.staff-shell .bg-sky-100,
+.ops-shell .bg-sky-100 { background-color: color-mix(in oklab, #38bdf8 14%, var(--staff-panel)); }
+.staff-shell .bg-emerald-50,
+.ops-shell .bg-emerald-50,
+.staff-shell .bg-emerald-100,
+.ops-shell .bg-emerald-100 { background-color: color-mix(in oklab, #34d399 14%, var(--staff-panel)); }
+.staff-shell .bg-amber-50,
+.ops-shell .bg-amber-50,
+.staff-shell .bg-amber-100,
+.ops-shell .bg-amber-100,
+.staff-shell .bg-amber-200,
+.ops-shell .bg-amber-200 { background-color: color-mix(in oklab, #fbbf24 14%, var(--staff-panel)); }
+.staff-shell .bg-rose-50,
+.ops-shell .bg-rose-50,
+.staff-shell .bg-rose-100,
+.ops-shell .bg-rose-100,
+.staff-shell .bg-rose-200,
+.ops-shell .bg-rose-200 { background-color: color-mix(in oklab, #fb7185 14%, var(--staff-panel)); }
+
+.staff-shell .hover\:bg-slate-50:hover,
+.ops-shell .hover\:bg-slate-50:hover,
+.staff-shell .hover\:bg-slate-100:hover,
+.ops-shell .hover\:bg-slate-100:hover,
+.staff-shell .hover\:bg-slate-200:hover,
+.ops-shell .hover\:bg-slate-200:hover { background-color: color-mix(in oklab, var(--staff-panel) 72%, var(--staff-text)); }
+.staff-shell .hover\:bg-blue-50:hover,
+.ops-shell .hover\:bg-blue-50:hover,
+.staff-shell .hover\:bg-blue-100:hover,
+.ops-shell .hover\:bg-blue-100:hover { background-color: color-mix(in oklab, #38bdf8 24%, var(--staff-panel)); }
+.staff-shell .hover\:bg-emerald-50:hover,
+.ops-shell .hover\:bg-emerald-50:hover { background-color: color-mix(in oklab, #34d399 24%, var(--staff-panel)); }
+.staff-shell .hover\:bg-amber-100:hover,
+.ops-shell .hover\:bg-amber-100:hover,
+.staff-shell .hover\:bg-amber-200:hover,
+.ops-shell .hover\:bg-amber-200:hover { background-color: color-mix(in oklab, #fbbf24 24%, var(--staff-panel)); }
+.staff-shell .hover\:bg-rose-100:hover,
+.ops-shell .hover\:bg-rose-100:hover,
+.staff-shell .hover\:bg-rose-200:hover,
+.ops-shell .hover\:bg-rose-200:hover { background-color: color-mix(in oklab, #fb7185 24%, var(--staff-panel)); }
+
+.staff-shell .text-slate-400,
+.ops-shell .text-slate-400,
+.staff-shell .text-slate-500,
+.ops-shell .text-slate-500,
+.staff-shell .text-slate-600,
+.ops-shell .text-slate-600 { color: var(--staff-muted); }
+.staff-shell .text-slate-700,
+.ops-shell .text-slate-700,
+.staff-shell .text-slate-800,
+.ops-shell .text-slate-800,
+.staff-shell .text-slate-900,
+.ops-shell .text-slate-900 { color: var(--staff-text); }
+.staff-shell .text-blue-600,
+.ops-shell .text-blue-600,
+.staff-shell .text-blue-700,
+.ops-shell .text-blue-700,
+.staff-shell .text-blue-900,
+.ops-shell .text-blue-900,
+.staff-shell .text-sky-600,
+.ops-shell .text-sky-600,
+.staff-shell .text-sky-900,
+.ops-shell .text-sky-900,
+.staff-shell .text-sky-700,
+.ops-shell .text-sky-700,
+.staff-shell .text-sky-800,
+.ops-shell .text-sky-800 { color: #7dd3fc; }
+.staff-shell .text-emerald-600,
+.ops-shell .text-emerald-600,
+.staff-shell .text-emerald-700,
+.ops-shell .text-emerald-700,
+.staff-shell .text-emerald-800,
+.ops-shell .text-emerald-800,
+.staff-shell .text-emerald-900,
+.ops-shell .text-emerald-900 { color: #6ee7b7; }
+.staff-shell .text-amber-500,
+.ops-shell .text-amber-500,
+.staff-shell .text-amber-600,
+.ops-shell .text-amber-600,
+.staff-shell .text-amber-700,
+.ops-shell .text-amber-700,
+.staff-shell .text-amber-800,
+.ops-shell .text-amber-800,
+.staff-shell .text-amber-900,
+.ops-shell .text-amber-900 { color: #fcd34d; }
+.staff-shell .text-rose-600,
+.ops-shell .text-rose-600,
+.staff-shell .text-rose-700,
+.ops-shell .text-rose-700,
+.staff-shell .text-rose-800,
+.ops-shell .text-rose-800 { color: #fda4af; }
+
+.staff-shell .hover\:text-slate-700:hover,
+.ops-shell .hover\:text-slate-700:hover,
+.staff-shell .hover\:text-slate-800:hover,
+.ops-shell .hover\:text-slate-800:hover,
+.staff-shell .hover\:text-slate-900:hover,
+.ops-shell .hover\:text-slate-900:hover { color: var(--staff-text); }
+.staff-shell .hover\:text-blue-600:hover,
+.ops-shell .hover\:text-blue-600:hover,
+.staff-shell .hover\:text-blue-800:hover,
+.ops-shell .hover\:text-blue-800:hover { color: #7dd3fc; }
+.staff-shell .hover\:text-emerald-700:hover,
+.ops-shell .hover\:text-emerald-700:hover { color: #6ee7b7; }
+.staff-shell .hover\:text-rose-600:hover,
+.ops-shell .hover\:text-rose-600:hover { color: #fda4af; }
+
+/* ── عائلاتٌ يلبسها مركزُ القيادة ولا تلبسها لوحاتُ الموظّف الستّ ───────────────
+   أحمرُ التحذير وبنفسجيُّ الإشعارات وبرتقاليُّ الربحيّة. وكان `bg-red-50` قد
+   صار داكناً بينما `text-red-700` فوقَه باقياً: أحمرُ داكنٌ على أحمرَ داكن.
+   والدرجاتُ 900 أُلحقت بعائلاتها أعلاه للسبب نفسِه. */
+.staff-shell .text-red-600,
+.ops-shell .text-red-600,
+.staff-shell .text-red-700,
+.ops-shell .text-red-700 { color: #fca5a5; }
+.staff-shell .text-purple-700,
+.ops-shell .text-purple-700,
+.staff-shell .text-purple-800,
+.ops-shell .text-purple-800 { color: #d8b4fe; }
+.staff-shell .text-orange-700,
+.ops-shell .text-orange-700 { color: #fdba74; }
+
+/* والحدودُ: مزجُ لونِ العائلة بخطّ الجلد كما في أخواتها. */
+.staff-shell .border-red-200,
+.ops-shell .border-red-200 { border-color: color-mix(in oklab, #f87171 45%, var(--staff-line)); }
+.staff-shell .border-purple-200,
+.ops-shell .border-purple-200 { border-color: color-mix(in oklab, #c084fc 45%, var(--staff-line)); }
+.staff-shell .border-orange-300,
+.ops-shell .border-orange-300 { border-color: color-mix(in oklab, #fb923c 45%, var(--staff-line)); }
+
+/* ── أصنافُ variant لم يكن التعبيرُ الموروثُ يراها ─────────────────────────────
+   `disabled:` و`group-hover:`: كان `(?:(?:hover):)?` يُسقِط البادئةَ فيُطابَق
+   الصنفُ العاري ويُرضيه تجاوزُه — والصنفُ الحقيقيُّ بلا تجاوز. وأسوأُها
+   `group-hover:text-blue-700`: اسمُ الشركة ورقمُها الكبيرُ يصيران `#1d4ed8`
+   على بطاقةٍ داكنةٍ بمجرّد تحويم. ويلزمها سلفٌ وسيطٌ كما تولّدها Tailwind. */
+.staff-shell .disabled\:bg-slate-50:disabled,
+.ops-shell .disabled\:bg-slate-50:disabled { background-color: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg)); }
+.staff-shell .disabled\:text-slate-400:disabled,
+.ops-shell .disabled\:text-slate-400:disabled { color: var(--staff-muted); }
+.staff-shell .group:hover .group-hover\:text-blue-700,
+.ops-shell .group:hover .group-hover\:text-blue-700 { color: #7dd3fc; }
+
+.staff-shell .border-slate-100,
+.ops-shell .border-slate-100,
+.staff-shell .border-slate-200,
+.ops-shell .border-slate-200,
+.staff-shell .border-slate-300,
+.ops-shell .border-slate-300,
+.staff-shell .divide-slate-100 > :not(:last-child),
+.ops-shell .divide-slate-100 > :not(:last-child) { border-color: var(--staff-line); }
+.staff-shell .border-blue-100,
+.ops-shell .border-blue-100,
+.staff-shell .border-blue-200,
+.ops-shell .border-blue-200,
+.staff-shell .border-blue-400,
+.ops-shell .border-blue-400,
+.staff-shell .border-sky-200,
+.ops-shell .border-sky-200 { border-color: color-mix(in oklab, #38bdf8 45%, var(--staff-line)); }
+.staff-shell .border-emerald-200,
+.ops-shell .border-emerald-200 { border-color: color-mix(in oklab, #34d399 45%, var(--staff-line)); }
+.staff-shell .border-amber-200,
+.ops-shell .border-amber-200,
+.staff-shell .border-amber-300,
+.ops-shell .border-amber-300 { border-color: color-mix(in oklab, #fbbf24 45%, var(--staff-line)); }
+.staff-shell .border-rose-100,
+.ops-shell .border-rose-100,
+.staff-shell .border-rose-200,
+.ops-shell .border-rose-200,
+.staff-shell .border-rose-300,
+.ops-shell .border-rose-300 { border-color: color-mix(in oklab, #fb7185 45%, var(--staff-line)); }
+
+.staff-shell .hover\:border-blue-300:hover,
+.ops-shell .hover\:border-blue-300:hover,
+.staff-shell .hover\:border-blue-400:hover,
+.ops-shell .hover\:border-blue-400:hover { border-color: color-mix(in oklab, #38bdf8 65%, var(--staff-line)); }
+.staff-shell .hover\:border-emerald-300:hover,
+.ops-shell .hover\:border-emerald-300:hover { border-color: color-mix(in oklab, #34d399 65%, var(--staff-line)); }
+.staff-shell .hover\:border-rose-300:hover,
+.ops-shell .hover\:border-rose-300:hover { border-color: color-mix(in oklab, #fb7185 65%, var(--staff-line)); }
+
+.staff-shell .ring-slate-100,
+.ops-shell .ring-slate-100,
+.staff-shell .ring-white,
+.ops-shell .ring-white { --tw-ring-color: var(--staff-line); }
+
+/* ── ألوانٌ يلبسها مركزُ القيادة ولا تلبسها لوحاتُ قشرة الموظّف الستّ ──────────
+   تعبيرُ المسح في `test_platform_skin.py` كان موروثاً من عهدِ اللوحات الستّ
+   (‏slate/blue/sky/amber/rose/emerald عند 50–200 بلا شفافيّة)، ومركزُ القيادة
+   يلبس أوسعَ منها: أحمرُ التحذير، وبنفسجيُّ الإشعارات، وبرتقاليُّ الربحيّة،
+   ودرجاتٌ بشفافيّةٍ على بطاقتَي الشركة والموظّف. وُسِّع التعبيرُ هناك، وهذه
+   قواعدُه هنا. */
+.staff-shell .bg-red-50,
+.ops-shell .bg-red-50 { background-color: color-mix(in oklab, #f87171 14%, var(--staff-panel)); }
+.staff-shell .hover\:bg-red-100:hover,
+.ops-shell .hover\:bg-red-100:hover { background-color: color-mix(in oklab, #f87171 24%, var(--staff-panel)); }
+.staff-shell .bg-purple-100,
+.ops-shell .bg-purple-100 { background-color: color-mix(in oklab, #c084fc 16%, var(--staff-panel)); }
+.staff-shell .bg-orange-100,
+.ops-shell .bg-orange-100 { background-color: color-mix(in oklab, #fb923c 16%, var(--staff-panel)); }
+
+/* الشفّافيّةُ تبقى شفّافيّةً: البطاقةُ تحتها داكنةٌ أصلاً، فمزجُ اللون بالشفّاف
+   يحفظ التدرّجَ الذي قصده المصمِّم بدل تسطيحه إلى لونٍ صلب. */
+.staff-shell .bg-blue-50\/40,
+.ops-shell .bg-blue-50\/40 {
+  background-color: color-mix(in oklab, color-mix(in oklab, #38bdf8 14%, var(--staff-panel)) 40%, transparent);
+}
+.staff-shell .bg-blue-50\/70,
+.ops-shell .bg-blue-50\/70,
+.staff-shell .hover\:bg-blue-50\/70:hover,
+.ops-shell .hover\:bg-blue-50\/70:hover {
+  background-color: color-mix(in oklab, color-mix(in oklab, #38bdf8 14%, var(--staff-panel)) 70%, transparent);
+}
+.staff-shell .bg-emerald-50\/60,
+.ops-shell .bg-emerald-50\/60 {
+  background-color: color-mix(in oklab, color-mix(in oklab, #34d399 14%, var(--staff-panel)) 60%, transparent);
+}
+.staff-shell .bg-rose-50\/80,
+.ops-shell .bg-rose-50\/80 {
+  background-color: color-mix(in oklab, color-mix(in oklab, #fb7185 14%, var(--staff-panel)) 80%, transparent);
+}
+.staff-shell .bg-rose-200\/70,
+.ops-shell .bg-rose-200\/70 {
+  background-color: color-mix(in oklab, color-mix(in oklab, #fb7185 22%, var(--staff-panel)) 70%, transparent);
+}
+.staff-shell .hover\:bg-rose-100\/90:hover,
+.ops-shell .hover\:bg-rose-100\/90:hover {
+  background-color: color-mix(in oklab, color-mix(in oklab, #fb7185 24%, var(--staff-panel)) 90%, transparent);
+}
+.staff-shell .bg-slate-50\/70,
+.ops-shell .bg-slate-50\/70 {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg)) 70%, transparent);
+}
+.staff-shell .hover\:bg-slate-50\/60:hover,
+.ops-shell .hover\:bg-slate-50\/60:hover {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--staff-panel) 72%, var(--staff-text)) 60%, transparent);
+}
+.staff-shell .hover\:bg-slate-50\/70:hover,
+.ops-shell .hover\:bg-slate-50\/70:hover {
+  background-color: color-mix(in oklab, color-mix(in oklab, var(--staff-panel) 72%, var(--staff-text)) 70%, transparent);
+}
 
 
 /* ══ غرفةُ مساحة العمل ══════════════════════════════════════════════════════
@@ -2774,6 +3005,35 @@ tbody td {
 /* المقعدُ الفارغ **يبقى فارغاً**: النموذجُ البصريُّ يُجلِس الغائبَ على كرسيّه
    بضوءٍ أحمر، فيقرأ حضوراً لا وجودَ له. الرماديُّ الباهتُ أصدق. */
 .pf-seat-empty { opacity: 0.45; filter: grayscale(0.55); }
+
+/* ── قاعةُ العمل داخلَ مركز القيادة ────────────────────────────────────────────
+   أرضيّاتُ القاعة **ألوانٌ حرفيّةٌ مكتوبةٌ في هذا الملفّ** لا أصنافُ Tailwind،
+   فلا يراها مسحُ الأصناف مهما وُسِّع تعبيرُه: بحثٌ في TSX عن تدرّجٍ أو `#ffffff`
+   يعود فارغاً بينما الأرضيّةُ بيضاءُ هنا. وأسوأُها شارةُ المقعد: خلفيّتُها
+   `rgba(255,255,255,.92)` ونصُّها `text-slate-900` صار `--staff-text` — أبيضُ
+   على أبيضَ بتباينِ 1.1:1، أي أنّ اسمَ الموظّف يختفي تماماً في تبويب «مساحة
+   العمل». والتوهّجُ نفسُه لا يُمَسّ: `--pf-glow` معرَّفٌ داكناً في كتلة الرموز.
+   يحرسها `test_the_room_grounds_written_in_literal_colours_go_dark`. */
+.ops-shell .pf-room {
+  background:
+    radial-gradient(60% 45% at 50% 57%,
+      color-mix(in oklab, var(--staff-panel) 88%, var(--pf-glow)), transparent 70%),
+    radial-gradient(120% 85% at 50% 4%,
+      color-mix(in oklab, var(--pf-glow) 22%, transparent), transparent 62%),
+    linear-gradient(180deg, var(--staff-panel) 0%, var(--staff-bg) 52%, var(--staff-rail) 100%);
+}
+.ops-shell .pf-room-table {
+  background: linear-gradient(180deg,
+    color-mix(in oklab, var(--pf-glow) 24%, var(--staff-panel)) 0%,
+    var(--staff-panel) 55%, var(--staff-rail) 100%);
+}
+.ops-shell .pf-room-screen {
+  background: color-mix(in oklab, var(--staff-panel) 86%, var(--pf-glow));
+}
+.ops-shell .pf-seat-badge {
+  background: color-mix(in oklab, var(--staff-panel) 92%, transparent);
+  box-shadow: 0 2px 10px -2px color-mix(in oklab, var(--staff-rail) 70%, transparent);
+}
 
 /* ── الغرفةُ الضيّقة: شبكةٌ لا حلقة ──────────────────────────────────────────
    حلقةٌ من عشر بطاقاتٍ تحمل أسماءً لا تتّسع في غرفةٍ أضيقَ من ٥٤١ بكسل — قِيس
