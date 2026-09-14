@@ -186,7 +186,11 @@ def gen_api_index():
 
 #: الكتلة → (الملفات الوجهة، المولِّد، هل يحتاج المحتوى القديم؟)
 GENERATORS = {
-    "module_index": (["CLAUDE.md"], gen_module_index, False),
+    # ‏`AGENTS.md` نسخةٌ كاملةٌ للوكيل الخارجيّ الذي لا يقرأ `CLAUDE.md`
+    # (قرارُ المالك 2026-09-14). وبلا إدراجه هنا تتجمّد كتلتُه: كانت بلا
+    # `crm` ولا `platform_ops` — أي أنّ الوكيل يُخبَر أنّ موديولَي العمل
+    # الحاليّ بلا وثائق.
+    "module_index": (["CLAUDE.md", "AGENTS.md"], gen_module_index, False),
     "apps_table": (["ARCHITECTURE.md"], gen_apps_table, True),
     "api_index": (["docs/API_INDEX.md"], gen_api_index, False),
 }
