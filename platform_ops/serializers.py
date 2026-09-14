@@ -12,6 +12,8 @@ from tenants.models import Tenant
 from .models import (
     MAX_SERVICE_TRIAL_DAYS,
     AcquisitionCommissionLine,
+    ApplicantMeeting,
+    ApplicantMeetingAttendee,
     CompanyHealthCheck,
     CompanyHealthCheckItem,
     CustomerAcquisition,
@@ -1714,3 +1716,44 @@ class ReverseWalletLineSerializer(serializers.Serializer):
 class AdjustWalletLineSerializer(serializers.Serializer):
     amount = serializers.DecimalField(max_digits=12, decimal_places=2)
     reason = serializers.CharField(allow_blank=False, max_length=500)
+
+
+class ApplicantMeetingAttendeeSerializer(serializers.ModelSerializer):
+    """حاضرٌ في اجتماع — قراءةٌ فقط؛ الكتابةُ عبر أفعال الـviewset.
+
+    `name` مصدرُه `display_name` على النموذج لا شرطٌ مكرَّرٌ هنا: نسخةٌ ثانيةٌ
+    من قاعدة «المتقدّمُ اسمُه اسمُه وإلاّ فالاسمُ الحرّ» تفترق عن الأولى.
+    """
+
+    name = serializers.CharField(source="display_name", read_only=True)
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    applicant_status = serializers.CharField(source="applicant.status", read_only=True, default="")
+    job_title = serializers.CharField(source="applicant.job.title", read_only=True, default="")
+    #: `cv_url` لا يُطبع هنا كما لا يُطبع في أيّ مُسلسِل — الرابطُ هو الصلاحية.
+
+    class Meta:
+        model = ApplicantMeetingAttendee
+        fields = [
+            "id", "applicant", "guest_name", "name",
+            "status", "status_display", "applicant_status", "job_title",
+            "note", "created_at", "updated_at",
+        ]
+        read_only_fields = fields
+
+
+class ApplicantMeetingSerializer(serializers.ModelSerializer):
+    """اجتماعُ متقدّمين — الحاضرون مضمَّنون فلا يحتاج الدرجُ نداءً ثانياً."""
+
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
+    attendees = ApplicantMeetingAttendeeSerializer(many=True, read_only=True)
+    attendee_count = serializers.IntegerField(source="attendees.count", read_only=True)
+
+    class Meta:
+        model = ApplicantMeeting
+        fields = [
+            "id", "title", "agenda", "start", "end", "location", "notes",
+            "status", "status_display", "created_by_name",
+            "attendees", "attendee_count", "created_at", "updated_at",
+        ]
+        read_only_fields = fields

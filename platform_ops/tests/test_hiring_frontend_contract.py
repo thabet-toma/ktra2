@@ -18,6 +18,8 @@ from rest_framework import status
 from rest_framework.test import APIClient
 
 from platform_ops.models import (
+    ApplicantMeeting,
+    ApplicantMeetingAttendee,
     JobApplicant,
     JobPosting,
     PlatformEmployee,
@@ -174,7 +176,7 @@ class PlatformHiringFrontendContractTest(TestCase):
         )
 
     def test_hiring_and_billing_interfaces_match_real_payloads(self):
-        """فحص جميع واجهات التوظيف والفوترة الـ ١٣ مقابل حمولات الخادم الحقيقية."""
+        """فحص جميع واجهات التوظيف والفوترة الـ ١٥ مقابل حمولات الخادم الحقيقية."""
         hiring_src = HIRING_API.read_text(encoding="utf-8")
         my_agent_src = MY_AGENT_API.read_text(encoding="utf-8")
         ops_src = OPS_API.read_text(encoding="utf-8")
@@ -319,6 +321,33 @@ class PlatformHiringFrontendContractTest(TestCase):
             interface="SubscriptionBillingRecordRow",
             declared=_interface_fields(ops_src, "SubscriptionBillingRecordRow"),
             actual=records[0].keys(),
+        )
+
+        # 14. ApplicantMeeting + 15. ApplicantMeetingAttendee (212-S1)
+        meeting = ApplicantMeeting.objects.create(
+            title="مقابلة الدفعة الأولى",
+            start=timezone.now() + datetime.timedelta(days=1),
+            end=timezone.now() + datetime.timedelta(days=1, hours=1),
+        )
+        ApplicantMeetingAttendee.objects.create(meeting=meeting, guest_name="ضيفٌ بتوصية")
+        resp = self.super_client.get("/api/platform/ops/applicant-meetings/")
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        meetings = (
+            resp.data["results"]
+            if isinstance(resp.data, dict) and "results" in resp.data
+            else resp.data
+        )
+        self.assertTrue(meetings, "لا اجتماعات في الاستجابة")
+        self._assert_declared_fields_exist(
+            interface="ApplicantMeeting",
+            declared=_interface_fields(hiring_src, "ApplicantMeeting"),
+            actual=meetings[0].keys(),
+        )
+        self.assertTrue(meetings[0]["attendees"], "الاجتماعُ عاد بلا حاضرين")
+        self._assert_declared_fields_exist(
+            interface="ApplicantMeetingAttendee",
+            declared=_interface_fields(hiring_src, "ApplicantMeetingAttendee"),
+            actual=meetings[0]["attendees"][0].keys(),
         )
 
     def test_frontend_hiring_options_match_backend_choices(self):

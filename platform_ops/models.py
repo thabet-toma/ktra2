@@ -2253,6 +2253,168 @@ class JobApplicantInvitation(models.Model):
         return not self.is_consumed
 
 
+class ApplicantMeeting(models.Model):
+    """اجتماعٌ مع متقدّمين **قبل التوظيف** — دفترٌ مستقلٌّ عن اجتماعات الموظّفين.
+
+    **ولماذا نموذجٌ جديدٌ لا توسيعٌ لـ`PlatformMeeting`:** ذاك اجتماعُ فريقِ
+    المنصّة، وصفُّ حضوره مفتاحُه `PlatformEmployee` — وللمتقدّم لا حساب أصلاً.
+    وفيه تسجيلُ دخولٍ ودورةُ أعذارٍ (معلّق/مقبول/مرفوض) تُغذّي محورَ «الانتظام»
+    في تقييم الأداء: تعليقُ عقوبةٍ على إنسانٍ خارج المنصّة لا معنى له. والأهمُّ
+    أنّ صفَّ ذاك الدفتر **بلا حقل ملاحظة** أصلاً، والملاحظةُ لكلّ حاضرٍ هي
+    الغرضُ كلُّه هنا. حشرُ الاثنين في جدولٍ واحدٍ يعني مفتاحين فارغين بالتناوب
+    ودورةَ أعذارٍ ميّتةً نصفَ الوقت.
+
+    والنموذجُ المعياريُّ في أنظمة التوظيف (Greenhouse · Lever · Workable) يفصل
+    `Interview` عن `Scorecard` للسبب نفسِه: الاجتماعُ صفٌّ، ورأيُ كلِّ حاضرٍ فيه
+    صفٌّ يحمل نصَّه.
+
+    **بلا `tenant` FK** — استثناءٌ موثَّقٌ كإخوته في التوظيف المنصّيّ
+    (`JobPosting` · `JobApplicant` · `JobApplicantInvitation`): الاجتماعُ ملكُ
+    المنصّة نفسِها لا شركةِ زبون.
+    """
+
+    class Status(models.TextChoices):
+        SCHEDULED = "scheduled", "مجدول"
+        FINISHED = "finished", "منتهٍ"
+        CANCELLED = "cancelled", "ملغى"
+
+    title = models.CharField(max_length=255, verbose_name="عنوان الاجتماع")
+    #: اختياريّةٌ كلُّها: جدولةُ اجتماعٍ لا تنتظر نصّاً يُكتب.
+    agenda = models.TextField(blank=True, default="", verbose_name="جدول الأعمال")
+    start = models.DateTimeField(db_index=True, verbose_name="بداية الاجتماع")
+    end = models.DateTimeField(verbose_name="نهاية الاجتماع")
+    #: مكانٌ أو رابط — نصٌّ حرٌّ لا `URLField`: مقابلةُ التوظيف تكون في مكتبٍ
+    #: كما تكون على رابط، و`URLField` يرفض «مكتب المنصّة — الطابق الثاني».
+    location = models.CharField(
+        max_length=500, blank=True, default="", verbose_name="المكان أو الرابط"
+    )
+    notes = models.TextField(blank=True, default="", verbose_name="ملاحظة عامة على الاجتماع")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.SCHEDULED,
+        db_index=True,
+        verbose_name="الحالة",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="أنشأه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "اجتماع متقدّمين"
+        verbose_name_plural = "اجتماعات المتقدّمين"
+        ordering = ["-start", "-id"]
+        constraints = [
+            # قيدٌ على القاعدة نفسِها لا `clean()` وحده: `clean()` لا يحمي
+            # `bulk_create` ولا كتابةً مباشرة، وبدايةٌ بعد نهاية تُفسد كلَّ
+            # حسابٍ لاحقٍ لمدّة الاجتماع بصمت.
+            models.CheckConstraint(
+                condition=models.Q(end__gt=models.F("start")),
+                name="platform_ops_applicant_meeting_end_after_start",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["status", "-start"]),
+        ]
+
+    def __str__(self):
+        return f"{self.title} ({self.start:%Y-%m-%d %H:%M})"
+
+
+class ApplicantMeetingAttendee(models.Model):
+    """حاضرٌ في اجتماع متقدّمين — **صفٌّ يحمل ملاحظتَه هو**.
+
+    **هويّةٌ من بابين، وواحدٌ منهما لا غير:** متقدّمٌ جاء من رابط الوظيفة
+    (`applicant`) أو اسمٌ حرٌّ لمن لم يأتِ منه (`guest_name`) — شريكٌ أو مرشَّحٌ
+    وصل بتوصية. وقيدُ القاعدة يمنع الصفَّ الذي يحمل الاثنين والصفَّ الذي لا
+    يحمل أيّاً منهما: الأوّلُ يجعل الاسمَ المعروضَ رهنَ ترتيبِ قراءةٍ في الشاشة،
+    والثاني صفُّ حضورٍ بلا حاضر.
+
+    **والحضورُ ثلاثُ حالاتٍ لا بوليان.** بوليانٌ افتراضُه `false` يعني أنّ كلَّ
+    مدعوٍّ إلى اجتماعِ الغد «لم يحضر» منذ لحظة جدولته — فمن يفتح الجدولَ قبل
+    موعده يقرأ غياباً لم يقع. «مدعوّ» حالةٌ ثالثةٌ صادقة، وهي الافتراض.
+
+    و`note` هو الغرضُ من هذا الجدول كلِّه: رأيُ من أدار الاجتماعَ في هذا الشخص
+    في **هذا** الاجتماع — لا في المتقدّم عموماً (لذلك `JobApplicant.notes`).
+    """
+
+    class Status(models.TextChoices):
+        INVITED = "invited", "مدعوّ"
+        ATTENDED = "attended", "حضر"
+        ABSENT = "absent", "لم يحضر"
+
+    meeting = models.ForeignKey(
+        ApplicantMeeting,
+        on_delete=models.CASCADE,
+        related_name="attendees",
+        verbose_name="الاجتماع",
+    )
+    applicant = models.ForeignKey(
+        JobApplicant,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="meeting_attendances",
+        verbose_name="المتقدّم",
+    )
+    guest_name = models.CharField(
+        max_length=200, blank=True, default="", verbose_name="اسم حاضرٍ من خارج الرابط"
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.INVITED,
+        verbose_name="الحضور",
+    )
+    note = models.TextField(blank=True, default="", verbose_name="ملاحظة على هذا الحاضر")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإضافة")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "حاضر في اجتماع متقدّمين"
+        verbose_name_plural = "حاضرو اجتماعات المتقدّمين"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    models.Q(applicant__isnull=False, guest_name="")
+                    | models.Q(applicant__isnull=True) & ~models.Q(guest_name="")
+                ),
+                name="platform_ops_attendee_is_applicant_xor_guest",
+            ),
+            # المتقدّمُ مرّةً واحدةً في الاجتماع: صفّان له يعنيان ملاحظتين
+            # متنافستين على الشخص نفسِه في الجلسة نفسِها.
+            models.UniqueConstraint(
+                fields=["meeting", "applicant"],
+                condition=models.Q(applicant__isnull=False),
+                name="platform_ops_unique_applicant_per_meeting",
+            ),
+            models.UniqueConstraint(
+                fields=["meeting", "guest_name"],
+                condition=models.Q(applicant__isnull=True),
+                name="platform_ops_unique_guest_per_meeting",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["meeting", "status"]),
+        ]
+
+    @property
+    def display_name(self) -> str:
+        """الاسمُ المعروض — مصدرٌ واحدٌ يقرؤه المُسلسِلُ والإدارةُ معاً."""
+        return self.applicant.name if self.applicant_id else self.guest_name
+
+    def __str__(self):
+        return f"{self.display_name} @ {self.meeting_id}"
+
+
 # ==============================================================================
 # التذكرة 210-B: صحة الدفاتر والتشغيل، والإسناد والطاقة، والاكتساب
 # ==============================================================================

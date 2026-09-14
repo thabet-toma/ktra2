@@ -2,6 +2,7 @@
 from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 from .views import (
+    ApplicantMeetingViewSet,
     CompanyHealthCheckViewSet,
     CompanyHealthView,
     CustomerAcquisitionView,
@@ -55,6 +56,9 @@ router.register("activity-logs", PlatformActivityLogViewSet, basename="platform-
 router.register("recruiters", PlatformRecruiterViewSet, basename="platform-ops-recruiters")
 router.register("job-postings", JobPostingViewSet, basename="platform-ops-job-postings")
 router.register("job-applicants", JobApplicantViewSet, basename="platform-ops-job-applicants")
+# 212-S1 — اجتماعاتُ المتقدّمين: بادئةٌ ثالثةٌ لدور التوظيف، مُعلَنةٌ في
+# `PlatformRecruiterRouteScopeTest.HIRING_PREFIXES` لا مفتوحةٌ سهواً.
+router.register("applicant-meetings", ApplicantMeetingViewSet, basename="platform-ops-applicant-meetings")
 router.register("health-checks", CompanyHealthCheckViewSet, basename="platform-ops-health-checks")
 router.register("engagements", EngagementViewSet, basename="platform-ops-engagements")
 router.register("service-unit-catalogs", ServiceUnitCatalogViewSet, basename="platform-ops-service-unit-catalogs")

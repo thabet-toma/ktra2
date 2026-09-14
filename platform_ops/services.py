@@ -22,6 +22,7 @@ from django.db import IntegrityError, models, transaction
 from django.db.models import Avg, Count, Max, Q, Sum
 from django.utils import timezone
 from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.fields import DateTimeField
 
 from core.date_ranges import day_bounds, filter_local_date_range
 from core.activity import describe_activity_changes
@@ -31,6 +32,8 @@ from hr.models import AttendanceDay, UserDevice
 from tenants.models import Currency, Tenant, UserCompanyMembership
 
 from .models import (
+    ApplicantMeeting,
+    ApplicantMeetingAttendee,
     MAX_ONBOARDING_DAYS,
     MAX_SERVICE_TRIAL_DAYS,
     AcquisitionCommissionLine,
@@ -10837,3 +10840,150 @@ def add_platform_workspace_note(
     if task is not None and not PlatformTaskAssignment.objects.filter(task=task, employee=employee).exists():
         raise PlatformTaskError("task_not_assigned_to_you", "هذه المهمّةُ ليست مُسندةً لك — لا يصحّ أن تكتب ملاحظةً عليها.")
     return PlatformWorkspaceNote.objects.create(employee=employee, task=task, body=body)
+
+
+# ==============================================================================
+# 212-S1: اجتماعاتُ المتقدّمين — القواعدُ هنا لا في الشاشة
+# ==============================================================================
+
+
+#: مُحوِّلُ الوقت الوحيدُ في هذه المجموعة — مُسلسِلُ DRF نفسُه الذي يقرأ به
+#: بقيّةُ المستودع حقولَ الوقت، فالصيغُ المقبولةُ واحدةٌ في كلّ باب.
+_MEETING_DATETIME_FIELD = DateTimeField()
+
+
+def _as_meeting_datetime(value, field):
+    """نصُّ الشبكة إلى `datetime` — **قبل** أيّ مقارنة.
+
+    ما يصل من `request.data` نصٌّ، وما يُقرأ من الصفّ `datetime`. ومقارنةُ
+    الاثنين (`end <= start` وأحدُهما نصٌّ جاء من العميل والآخرُ حقلٌ من القاعدة
+    عند تعديلِ طرفٍ واحد) ترفع `TypeError` فيردّ الخادمُ خمسمئةً على طلبٍ
+    مشوّهٍ مكانُه أربعمئة. ومقارنةُ نصَّين تكذب أصلاً: `+03:00` و`Z` يرتّبان
+    حرفيّاً لا زمنيّاً.
+    """
+    if value is None or value == "":
+        raise ValidationError({field: "بدايةُ الاجتماع ونهايتُه مطلوبتان."})
+    if isinstance(value, datetime.datetime):
+        return value
+    try:
+        return _MEETING_DATETIME_FIELD.to_internal_value(value)
+    except ValidationError:
+        raise ValidationError({field: "صيغةُ التاريخ والوقت غير مفهومة."})
+
+
+def _clean_meeting_window(start, end):
+    """نافذةُ الاجتماع — تُفحص هنا وعلى القاعدة معاً.
+
+    القيدُ في `Meta.constraints` يحمي الكتابةَ المباشرة، وهذا الفحصُ يحوّل
+    الانتهاكَ إلى ٤٠٠ بنصٍّ عربيّ بدل `IntegrityError` بخمسمئة.
+    """
+    start = _as_meeting_datetime(start, "start")
+    end = _as_meeting_datetime(end, "end")
+    if end <= start:
+        raise ValidationError({"end": "نهايةُ الاجتماع يجب أن تكون بعد بدايته."})
+    return start, end
+
+
+@transaction.atomic
+def create_applicant_meeting(*, actor, title, start, end, location="", agenda="", notes=""):
+    """جدولةُ اجتماعٍ مع متقدّمين — بلا حاضرين، يُضافون بعدها."""
+    title = (title or "").strip()
+    if not title:
+        raise ValidationError({"title": "عنوانُ الاجتماع مطلوب."})
+    start, end = _clean_meeting_window(start, end)
+    meeting = ApplicantMeeting.objects.create(
+        title=title,
+        agenda=(agenda or "").strip(),
+        start=start,
+        end=end,
+        location=(location or "").strip(),
+        notes=(notes or "").strip(),
+        created_by=actor if getattr(actor, "is_authenticated", False) else None,
+    )
+    logger.info("applicant_meeting_created meeting=%s by=%s", meeting.pk, getattr(actor, "pk", None))
+    return meeting
+
+
+@transaction.atomic
+def update_applicant_meeting(*, meeting, **fields):
+    """تعديلُ اجتماعٍ — الحقولُ المرسَلةُ وحدَها تُكتب.
+
+    ‏`None` تعني «لم يُرسَل» لا «امسحه»: نصٌّ يُمحى بإرسال `""` صراحةً، وهو
+    الفرقُ الذي يمنع مسحَ جدول الأعمال كلَّما عُدّل الوقتُ وحدَه.
+    """
+    dirty = []
+    for name in ("title", "agenda", "location", "notes"):
+        value = fields.get(name)
+        if value is None:
+            continue
+        value = str(value).strip()
+        if name == "title" and not value:
+            raise ValidationError({"title": "عنوانُ الاجتماع مطلوب."})
+        setattr(meeting, name, value)
+        dirty.append(name)
+    start = fields.get("start") or meeting.start
+    end = fields.get("end") or meeting.end
+    if fields.get("start") or fields.get("end"):
+        meeting.start, meeting.end = _clean_meeting_window(start, end)
+        dirty += ["start", "end"]
+    status_value = fields.get("status")
+    if status_value:
+        if status_value not in ApplicantMeeting.Status.values:
+            raise ValidationError({"status": "حالةُ اجتماعٍ غيرُ معروفة."})
+        meeting.status = status_value
+        dirty.append("status")
+    if dirty:
+        meeting.save(update_fields=[*dict.fromkeys(dirty), "updated_at"])
+    return meeting
+
+
+@transaction.atomic
+def add_meeting_attendee(*, meeting, applicant_id=None, guest_name=""):
+    """إضافةُ حاضرٍ — متقدّمٌ من الرابط **أو** اسمٌ حرّ، لا الاثنان ولا لا شيء."""
+    guest_name = (guest_name or "").strip()
+    if bool(applicant_id) == bool(guest_name):
+        raise ValidationError(
+            {"applicant": "اختر متقدّماً من القائمة أو اكتب اسماً حرّاً — واحداً منهما لا كليهما."}
+        )
+
+    applicant = None
+    if applicant_id:
+        applicant = JobApplicant.objects.filter(pk=applicant_id).first()
+        if applicant is None:
+            raise ValidationError({"applicant": "لا متقدّمَ بهذا المعرّف."})
+        # **لحظةَ الإضافة وحدَها**: من وُظِّف بعد الاجتماع يبقى في سجلّه
+        # التاريخيّ، والفحصُ الرجعيُّ يمحو تاريخاً وقع فعلاً.
+        if applicant.status == JobApplicant.Status.HIRED:
+            raise ValidationError(
+                {"applicant": "هذه الاجتماعاتُ لمن لم يُوظَّف بعد — وهذا المتقدّمُ صار موظّفاً."}
+            )
+
+    duplicate = ApplicantMeetingAttendee.objects.filter(meeting=meeting)
+    duplicate = (
+        duplicate.filter(applicant=applicant)
+        if applicant is not None
+        else duplicate.filter(applicant__isnull=True, guest_name=guest_name)
+    )
+    if duplicate.exists():
+        raise ValidationError({"applicant": "هذا الشخصُ مُضافٌ إلى الاجتماع سلفاً."})
+
+    return ApplicantMeetingAttendee.objects.create(
+        meeting=meeting, applicant=applicant, guest_name="" if applicant else guest_name
+    )
+
+
+@transaction.atomic
+def record_meeting_attendee(*, attendee, status=None, note=None):
+    """تسجيلُ الحضور والملاحظة — الفعلُ الذي من أجله بُني الجدول."""
+    dirty = []
+    if status is not None:
+        if status not in ApplicantMeetingAttendee.Status.values:
+            raise ValidationError({"status": "حالةُ حضورٍ غيرُ معروفة."})
+        attendee.status = status
+        dirty.append("status")
+    if note is not None:
+        attendee.note = str(note).strip()
+        dirty.append("note")
+    if dirty:
+        attendee.save(update_fields=[*dirty, "updated_at"])
+    return attendee

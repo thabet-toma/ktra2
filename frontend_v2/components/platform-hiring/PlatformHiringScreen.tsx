@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useState } from "react";
-import { Briefcase, ShieldAlert, UserCheck, Users } from "lucide-react";
+import { Briefcase, CalendarDays, ShieldAlert, UserCheck, Users } from "lucide-react";
 
 import {
   listPlatformJobs,
@@ -7,6 +7,7 @@ import {
 } from "../../services/platformHiringApi";
 import { PlatformApplicantsTab } from "./PlatformApplicantsTab";
 import { PlatformJobsTab } from "./PlatformJobsTab";
+import { PlatformMeetingsTab } from "./PlatformMeetingsTab";
 import { PlatformRecruitersTab } from "./PlatformRecruitersTab";
 
 interface PlatformHiringScreenProps {
@@ -16,7 +17,7 @@ interface PlatformHiringScreenProps {
 export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
   canManageRecruiters,
 }) => {
-  const [activeTab, setActiveTab] = useState<"jobs" | "applicants" | "recruiters">("jobs");
+  const [activeTab, setActiveTab] = useState<"jobs" | "applicants" | "meetings" | "recruiters">("jobs");
   const [jobs, setJobs] = useState<PlatformJobPosting[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
   const [isForbidden, setIsForbidden] = useState(false);
@@ -113,6 +114,18 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
             <Users className="w-3.5 h-3.5" />
             المتقدّمون
           </button>
+          <button
+            type="button"
+            onClick={() => setActiveTab("meetings")}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
+              activeTab === "meetings"
+                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
+                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
+            }`}
+          >
+            <CalendarDays className="w-3.5 h-3.5" />
+            اجتماعات
+          </button>
           {canManageRecruiters && (
             <button
               type="button"
@@ -150,6 +163,8 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
           initialJobFilter={applicantJobFilter}
         />
       )}
+
+      {activeTab === "meetings" && <PlatformMeetingsTab />}
 
       {activeTab === "recruiters" && canManageRecruiters && (
         <PlatformRecruitersTab />

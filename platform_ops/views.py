@@ -42,6 +42,7 @@ from .services import (
     RatingTokenGone,
     RatingTokenNotFound,
     WorkOrderError,
+    add_meeting_attendee,
     approve_health_check,
     assign_platform_employee,
     record_presence_heartbeat,
@@ -55,6 +56,7 @@ from .services import (
     compare_health_baseline,
     convert_health_check_item_to_work_order,
     create_applicant_invitation,
+    create_applicant_meeting,
     create_health_check_draft,
     create_job_posting,
     create_platform_meeting,
@@ -77,6 +79,7 @@ from .services import (
     list_assignment_candidates,
     rank_employees_performance,
     rate_applicant,
+    record_meeting_attendee,
     receive_channel_work_order,
     refresh_health_check_auto_items,
     regenerate_job_posting_token,
@@ -99,6 +102,7 @@ from .services import (
     suspend_service_subscription,
     transfer_engagement,
     transition_applicant_status,
+    update_applicant_meeting,
     update_daily_rating,
     update_health_check,
     update_health_check_item,
@@ -177,6 +181,7 @@ from core.platform_admin_api import IsPlatformAdmin
 
 from .models import (
     AcquisitionCommissionLine,
+    ApplicantMeeting,
     CompanyHealthCheck,
     CompanyHealthCheckItem,
     DailyRating,
@@ -220,6 +225,7 @@ from .permissions import (
 )
 from .public_hiring.cv_validation import guess_cv_content_type
 from .serializers import (
+    ApplicantMeetingSerializer,
     AssignEngagementSerializer,
     CompanyHealthCheckItemSerializer,
     CompanyHealthCheckSerializer,
@@ -4044,3 +4050,102 @@ class PlatformWorkspaceNoteViewSet(viewsets.ReadOnlyModelViewSet):
         except PlatformOpsError as exc:
             return _service_error(exc)
         return Response(self.get_serializer(note).data, status=status.HTTP_201_CREATED)
+
+
+class ApplicantMeetingViewSet(viewsets.ReadOnlyModelViewSet):
+    """اجتماعاتُ المتقدّمين — تبويبٌ رابعٌ على شاشة التوظيف المنصّيّ (212-S1).
+
+    البابُ `IsPlatformRecruiter` نفسُه الذي يفتح بقيّةَ الشاشة (والسوبر أدمن
+    يمرّ منه) — لا بابٌ رابعٌ يُحرس لتبويبٍ في شاشةٍ محروسةٍ أصلاً. وبادئةُ
+    المسار مُعلَنةٌ في `PlatformRecruiterRouteScopeTest.HIRING_PREFIXES`، وبلا
+    ذلك يسقط جردُ المسارات — وهو ما يجب أن يفعل.
+
+    **قراءةٌ وأفعالٌ لا CRUD**، كنظيرِه `JobApplicantViewSet`: الكتابةُ تمرّ
+    بالخدمات حيث القواعدُ (النافذةُ، وهويّةُ الحاضر الواحدة، و«لم يُوظَّف بعد»)،
+    فلا يفتح مُسلسِلٌ قابلٌ للكتابة بابَ تجاوزها.
+    """
+
+    permission_classes = [IsPlatformRecruiter]
+    serializer_class = ApplicantMeetingSerializer
+
+    def get_queryset(self):
+        qs = (
+            ApplicantMeeting.objects.select_related("created_by")
+            .prefetch_related("attendees__applicant__job")
+            .order_by("-start", "-id")
+        )
+        status_filter = self.request.query_params.get("status")
+        if status_filter:
+            qs = qs.filter(status=status_filter)
+        return qs
+
+    @action(detail=False, methods=["post"], url_path="create")
+    def create_meeting(self, request):
+        meeting = create_applicant_meeting(
+            actor=request.user,
+            title=request.data.get("title"),
+            start=request.data.get("start"),
+            end=request.data.get("end"),
+            location=request.data.get("location") or "",
+            agenda=request.data.get("agenda") or "",
+            notes=request.data.get("notes") or "",
+        )
+        return Response(self.get_serializer(meeting).data, status=status.HTTP_201_CREATED)
+
+    #: ما يقبله `update` من العميل — **قائمةٌ صريحةٌ لا `**request.data`**:
+    #: نثرُ حمولةٍ من الشبكة على وسائطَ مسمّاة يجعل مفتاحاً اسمُه `meeting`
+    #: يصطدم بالوسيط نفسِه، فيردّ الخادمُ خمسمئةً على طلبٍ مشوّهٍ مكانُه أربعمئة.
+    EDITABLE_MEETING_FIELDS = ("title", "agenda", "location", "notes", "start", "end", "status")
+
+    @action(detail=True, methods=["post"], url_path="update")
+    def update_meeting(self, request, pk=None):
+        fields = {
+            name: request.data[name]
+            for name in self.EDITABLE_MEETING_FIELDS
+            if name in request.data
+        }
+        meeting = update_applicant_meeting(meeting=self.get_object(), **fields)
+        return Response(self.get_serializer(meeting).data)
+
+    @action(detail=True, methods=["post"], url_path="attendees")
+    def add_attendee(self, request, pk=None):
+        add_meeting_attendee(
+            meeting=self.get_object(),
+            applicant_id=request.data.get("applicant"),
+            guest_name=request.data.get("guest_name") or "",
+        )
+        # الاجتماعُ كاملاً لا الصفُّ وحدَه: الشاشةُ تعرض الجدولَ فتُحدَّثُ مرّةً.
+        return Response(
+            self.get_serializer(self.get_object()).data, status=status.HTTP_201_CREATED
+        )
+
+    @action(detail=True, methods=["post"], url_path="record")
+    def record_attendee(self, request, pk=None):
+        """تسجيلُ حضورِ شخصٍ وملاحظتِه — الفعلُ الأساسيُّ في هذه الشاشة."""
+        meeting = self.get_object()
+        attendee = meeting.attendees.filter(pk=request.data.get("attendee")).first()
+        if attendee is None:
+            # **يُبحَث داخلَ الاجتماع لا في الجدول كلِّه**: معرّفٌ من اجتماعٍ آخر
+            # كان ليُكتَب عليه من هنا.
+            return Response(
+                {"attendee": "لا حاضرَ بهذا المعرّف في هذا الاجتماع."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        record_meeting_attendee(
+            attendee=attendee,
+            status=request.data.get("status"),
+            note=request.data.get("note"),
+        )
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["post"], url_path="remove-attendee")
+    def remove_attendee(self, request, pk=None):
+        meeting = self.get_object()
+        attendee = meeting.attendees.filter(pk=request.data.get("attendee")).first()
+        if attendee is None:
+            return Response(
+                {"attendee": "لا حاضرَ بهذا المعرّف في هذا الاجتماع."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        attendee.delete()
+        return Response(self.get_serializer(self.get_object()).data)

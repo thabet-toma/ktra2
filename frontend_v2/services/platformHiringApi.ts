@@ -269,3 +269,98 @@ export const publicInvitationUrl = (token: string) =>
 
 export const publicInvitationAcceptUrl = (token: string) =>
   `${API_BASE}/careers/invitations/${encodeURIComponent(token)}/accept/`;
+
+
+/* ──────────────────────────────────────────────────────────────────────────
+ * اجتماعاتُ المتقدّمين (212-S1) — مُسلسِلاهما `ApplicantMeetingSerializer`
+ * و`ApplicantMeetingAttendeeSerializer` في `platform_ops/serializers.py`.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** حاضرٌ في اجتماع — متقدّمٌ من الرابط (`applicant`) أو اسمٌ حرّ (`guest_name`). */
+export interface ApplicantMeetingAttendee {
+  id: number;
+  /** `null` لمن لم يأتِ من رابط الوظيفة. */
+  applicant: number | null;
+  guest_name: string;
+  /** الاسمُ المعروض — يحسبه الخادمُ فلا تُكرَّر القاعدةُ هنا. */
+  name: string;
+  status: "invited" | "attended" | "absent";
+  status_display: string;
+  /** حالةُ المتقدّم اليومَ لا يومَ الاجتماع — فراغٌ للضيف. */
+  applicant_status: string;
+  job_title: string;
+  note: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicantMeeting {
+  id: number;
+  title: string;
+  agenda: string;
+  start: string;
+  end: string;
+  /** مكانٌ أو رابط — نصٌّ حرٌّ لا عنوانُ إنترنت بالضرورة. */
+  location: string;
+  notes: string;
+  status: "scheduled" | "finished" | "cancelled";
+  status_display: string;
+  created_by_name: string;
+  attendees: ApplicantMeetingAttendee[];
+  attendee_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ApplicantMeetingInput {
+  title: string;
+  /** ISO-8601 — يُبنى من `datetime-local` لا من `toLocaleString`. */
+  start: string;
+  end: string;
+  location?: string;
+  agenda?: string;
+  notes?: string;
+}
+
+/**
+ * `apiGetList` لا `apiGetObject`: كلُّ قوائم هذا العميل تمرّ بها، وهي تفكّ غلافَ
+ * `{results}` إن وُجد. والترقيمُ هنا `OptionalPageNumberPagination` فلا يُغلِّف
+ * إلاّ مع `?page=` — لكنّ قاعدة المستودع أنّ **جدولاً ينمو بلا حدّ** يأخذ
+ * `EnforcedPageNumberPagination` لاحقاً، وجدولُ الاجتماعات منه. فـ`apiGetObject`
+ * كان قنبلةً موقوتةً يفكّها `tsc` صامتاً: شكلُ ما يصل من الشبكة لا يفحصه.
+ */
+export const listApplicantMeetings = (status?: string) =>
+  apiGetList<ApplicantMeeting>(`${OPS}/applicant-meetings/`, {
+    query: { status: status || undefined },
+  });
+
+export const getApplicantMeeting = (id: number) =>
+  apiGetObject<ApplicantMeeting>(`${OPS}/applicant-meetings/${id}/`);
+
+export const createApplicantMeeting = (input: ApplicantMeetingInput) =>
+  apiPostObject<ApplicantMeeting>(`${OPS}/applicant-meetings/create/`, input);
+
+export const updateApplicantMeeting = (
+  id: number,
+  input: Partial<ApplicantMeetingInput> & { status?: ApplicantMeeting["status"] },
+) => apiPostObject<ApplicantMeeting>(`${OPS}/applicant-meetings/${id}/update/`, input);
+
+/**
+ * إضافةُ حاضر — **أحدُ الحقلين لا كلاهما**؛ الخادمُ يردّ ٤٠٠ على الاثنين معاً
+ * وعلى غيابهما، والقاعدةُ هناك لا هنا فلا تفترق نسختان.
+ */
+export const addApplicantMeetingAttendee = (
+  id: number,
+  who: { applicant: number } | { guest_name: string },
+) => apiPostObject<ApplicantMeeting>(`${OPS}/applicant-meetings/${id}/attendees/`, who);
+
+/** تسجيلُ الحضور والملاحظة — العائدُ الاجتماعُ كاملاً فتُحدَّث الشاشةُ مرّةً. */
+export const recordApplicantMeetingAttendee = (
+  id: number,
+  input: { attendee: number; status?: ApplicantMeetingAttendee["status"]; note?: string },
+) => apiPostObject<ApplicantMeeting>(`${OPS}/applicant-meetings/${id}/record/`, input);
+
+export const removeApplicantMeetingAttendee = (id: number, attendee: number) =>
+  apiPostObject<ApplicantMeeting>(`${OPS}/applicant-meetings/${id}/remove-attendee/`, {
+    attendee,
+  });

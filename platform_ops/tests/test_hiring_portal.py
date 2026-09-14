@@ -623,6 +623,10 @@ class PlatformRecruiterRouteScopeTest(TestCase):
     HIRING_PREFIXES = (
         "/api/platform/ops/job-postings",
         "/api/platform/ops/job-applicants",
+        # 212-S1 — اجتماعاتُ المتقدّمين تبويبٌ في شاشة التوظيف نفسِها، فبابُها
+        # بابُها. وإعلانُها هنا **قرارٌ** لا تسجيلٌ: الجردُ سقط على المسارات
+        # السبعة قبل هذا السطر، وهو ما يجب أن يفعل.
+        "/api/platform/ops/applicant-meetings",
     )
 
     @staticmethod

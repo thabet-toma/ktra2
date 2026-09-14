@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **861**
+عدد النقاط: **868**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -567,6 +567,13 @@
 | `/api/platform/ops/acquisition/` | `CustomerAcquisitionView` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/create/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/{pk}/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/{pk}/attendees/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/{pk}/record/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/{pk}/remove-attendee/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/{pk}/update/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/assignments/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/assignments/{pk}/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/assignments/{pk}/accept/` | `PlatformTaskAssignmentViewSet` | `platform_ops/views.py` |
