@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+from django.db.models.functions import Cast, Concat
 from django.utils import timezone
 
 from tenants.models import Tenant, UserCompanyMembership
@@ -2377,6 +2378,34 @@ class ApplicantMeetingAttendee(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإضافة")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
 
+    #: هويّةُ الحاضر في عمودٍ واحد — **كي تُفرَض الفرادةُ في MySQL فعلاً**.
+    #:
+    #: كان القيدان أدناه مشروطين (`condition=`)، وMySQL **تتجاهل ذلك بصمت**:
+    #: الهجرةُ تنجح، وجانغو يطلق `models.W036` تحذيراً لا خطأً، ولا يُنشأ فهرسٌ
+    #: البتّة. والاختباراتُ على SQLite وهي **تدعم** الفهارس الجزئية — فالقيدُ
+    #: حقيقيٌّ حيث لا يهمّ ووهميٌّ حيث يهمّ، والبوّابةُ خضراءُ فوق فراغ.
+    #:
+    #: والحيلةُ أنّ MySQL تسمح بتكرار `NULL` في الفهرس الفريد، فالشرطيّةُ تُترجَم
+    #: إلى `NULL` بدل أن تُلغى: قيدٌ **غيرُ مشروط** على عمودٍ مُولَّدٍ يحمل الشرط.
+    #: وقيدُ «متقدّمٌ xor ضيف» أعلاه مفروضٌ فعلاً (`CheckConstraint` تُنشئها MySQL)
+    #: فأحدُ الفرعين لا غير.
+    identity_key = models.GeneratedField(
+        expression=models.Case(
+            models.When(
+                applicant__isnull=False,
+                then=Concat(
+                    models.Value("a:"),
+                    Cast("applicant", models.CharField(max_length=20)),
+                ),
+            ),
+            default=Concat(models.Value("g:"), "guest_name"),
+            output_field=models.CharField(max_length=210),
+        ),
+        output_field=models.CharField(max_length=210),
+        db_persist=True,
+        verbose_name="مفتاحُ هويّة الحاضر",
+    )
+
     class Meta:
         verbose_name = "حاضر في اجتماع متقدّمين"
         verbose_name_plural = "حاضرو اجتماعات المتقدّمين"
@@ -2390,16 +2419,12 @@ class ApplicantMeetingAttendee(models.Model):
                 name="platform_ops_attendee_is_applicant_xor_guest",
             ),
             # المتقدّمُ مرّةً واحدةً في الاجتماع: صفّان له يعنيان ملاحظتين
-            # متنافستين على الشخص نفسِه في الجلسة نفسِها.
+            # متنافستين على الشخص نفسِه في الجلسة نفسِها. وكذلك الضيف.
+            # قيدٌ واحدٌ **غيرُ مشروط** يغني عن القيدين المشروطين معاً — انظر
+            # `identity_key` أعلاه.
             models.UniqueConstraint(
-                fields=["meeting", "applicant"],
-                condition=models.Q(applicant__isnull=False),
-                name="platform_ops_unique_applicant_per_meeting",
-            ),
-            models.UniqueConstraint(
-                fields=["meeting", "guest_name"],
-                condition=models.Q(applicant__isnull=True),
-                name="platform_ops_unique_guest_per_meeting",
+                fields=["meeting", "identity_key"],
+                name="platform_ops_unique_attendee_per_meeting",
             ),
         ]
         indexes = [

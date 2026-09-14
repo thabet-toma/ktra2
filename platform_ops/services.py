@@ -10967,9 +10967,24 @@ def add_meeting_attendee(*, meeting, applicant_id=None, guest_name=""):
     if duplicate.exists():
         raise ValidationError({"applicant": "هذا الشخصُ مُضافٌ إلى الاجتماع سلفاً."})
 
-    return ApplicantMeetingAttendee.objects.create(
-        meeting=meeting, applicant=applicant, guest_name="" if applicant else guest_name
-    )
+    try:
+        # ‏**الفحصُ أعلاه يسابق نفسَه**: طلبان متزامنان يعبران `exists()` كلاهما
+        # قبل أن يكتب أيٌّ منهما، فيصير للشخص الواحد صفّان في الاجتماع الواحد —
+        # أي ملاحظتان متنافستان عليه. والقيدُ في القاعدة يمسك الثانيَ الآن،
+        # و`IntegrityError` عارياً يخرج للمستخدم **خمسمئة** على طلبٍ مشروعٍ خسر
+        # السباق. والحراسةُ البايثونيّةُ تبقى: هي مصدرُ الرسالة العربيّة
+        # المفهومة، والقيدُ مصدرُ الضمان — والرسالةُ واحدةٌ في المسارين.
+        #
+        # ولا نقطةَ حفظٍ إضافيّةً هنا: `@transaction.atomic` أعلى الدالّة هي
+        # نقطةُ الحفظ، فالخروجُ بـ`ValidationError` يرتدّ إليها وتبقى معاملةُ
+        # المستدعي صالحةً للكتابة.
+        return ApplicantMeetingAttendee.objects.create(
+            meeting=meeting,
+            applicant=applicant,
+            guest_name="" if applicant else guest_name,
+        )
+    except IntegrityError:
+        raise ValidationError({"applicant": "هذا الشخصُ مُضافٌ إلى الاجتماع سلفاً."})
 
 
 @transaction.atomic

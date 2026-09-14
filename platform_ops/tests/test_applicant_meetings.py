@@ -402,3 +402,142 @@ class ThePickerDoesNotOfferWhatTheServerRefusesTest(TestCase):
             source,
             "التضييقُ في المنتقي يخفي حالةً غيرَ التي ترفضها `add_meeting_attendee`.",
         )
+
+
+class TheRaceTheCheckCannotWinTest(ApplicantMeetingTestBase):
+    """‏**«افحص ثمّ اكتب» تسابق نفسَها — والقيدُ في القاعدة هو الحَكَم.**
+
+    `add_meeting_attendee` تفحص بـ`exists()` ثمّ تكتب. طلبان متزامنان يعبران
+    الفحصَ كلاهما قبل أن يكتب أيٌّ منهما ⇒ صفّان لشخصٍ واحدٍ في اجتماعٍ واحد،
+    أي ملاحظتان متنافستان عليه. وصارت القاعدةُ تمنع ذلك — لكنّ `IntegrityError`
+    عارياً يخرج للمستخدم **خمسمئة** على طلبٍ مشروعٍ خسر السباق.
+
+    **والسباقُ يُحاكى بتعمية الفحص لا بتزييف الخطأ**: `side_effect=IntegrityError`
+    على `create` يرفع خطأً بايثونيّاً لا يمسّ الاتصال، فيمرّ الاختبارُ وإن نُزعت
+    نقطةُ الحفظ — أي تأكيدٌ لا يستطيع السقوطَ لسببه. فيُكتب الصفُّ الأوّلُ فعلاً،
+    ويُعمَّى `exists()` وحدَه، فيقع خطأُ القاعدة **حقيقيّاً** كما يقع في السباق.
+    """
+
+    BLIND = "django.db.models.query.QuerySet.exists"
+
+    def _existing_meeting(self):
+        meeting_id = self._meeting_with(self.applicant)
+        return ApplicantMeeting.objects.get(pk=meeting_id)
+
+    def test_a_write_that_loses_the_race_answers_four_hundred_with_the_same_message(self):
+        from unittest import mock
+
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
+        from platform_ops.services import add_meeting_attendee
+
+        meeting = self._existing_meeting()
+        with mock.patch(self.BLIND, return_value=False):
+            with self.assertRaises(DRFValidationError) as caught:
+                add_meeting_attendee(meeting=meeting, applicant_id=self.applicant.pk)
+
+        self.assertIn("سلفاً", str(caught.exception.detail))
+        self.assertEqual(meeting.attendees.count(), 1)
+
+    def test_the_losing_write_does_not_poison_the_surrounding_transaction(self):
+        """ترجمةُ الخطأ إلى رسالةٍ لا تنفع إن بقيت المعاملةُ فاسدةً بعدها.
+
+        جانغو يمنع أيّ استعلامٍ في معاملةٍ أفسدها خطأُ قاعدة، فيرى المستدعي
+        `TransactionManagementError` بدل الرسالة التي صيغت له. وما يحمي ذلك هنا
+        `@transaction.atomic` أعلى `add_meeting_attendee`: نقطةُ حفظٍ يرتدّ إليها
+        الخطأُ فتبقى معاملةُ المستدعي صالحة. ويسقط هذا الاختبارُ لحظةَ نزعها.
+        """
+        from unittest import mock
+
+        from rest_framework.exceptions import ValidationError as DRFValidationError
+
+        from platform_ops.services import add_meeting_attendee
+
+        meeting = self._existing_meeting()
+        with transaction.atomic():
+            with mock.patch(self.BLIND, return_value=False):
+                with self.assertRaises(DRFValidationError):
+                    add_meeting_attendee(meeting=meeting, applicant_id=self.applicant.pk)
+            # المعاملةُ ما زالت صالحةً للكتابة — وهذا كلُّ الفرق.
+            ApplicantMeetingAttendee.objects.create(
+                meeting=meeting, guest_name="حاضرٌ بعد الخطأ"
+            )
+        self.assertEqual(meeting.attendees.count(), 2)
+
+
+class TheAttendeeConstraintIsRealOnBothEnginesTest(TestCase):
+    """يتجاوز طبقةَ الخدمة عمداً: الحراسةُ البايثونيّةُ تُفحص في مكانها،
+
+    وهذا الملفُّ يسأل سؤالاً آخر — **هل يمنع الجدولُ نفسُه؟** فالخدمةُ تفحص ثمّ
+    تكتب، وطلبان متزامنان يعبران الفحصَ كلاهما قبل أن يكتب أيٌّ منهما.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.job = JobPosting.objects.create(
+            title="وظيفة", description="وصف", token="tok-uniq-1"
+        )
+        cls.applicant = JobApplicant.objects.create(
+            job=cls.job, name="متقدّم", phone="0500", reference_code="REF-UNIQ-1"
+        )
+        now = timezone.now()
+        cls.meeting = ApplicantMeeting.objects.create(
+            title="مقابلة", start=now, end=now + timezone.timedelta(hours=1)
+        )
+        cls.other_meeting = ApplicantMeeting.objects.create(
+            title="مقابلة ثانية", start=now, end=now + timezone.timedelta(hours=1)
+        )
+
+    def test_the_same_applicant_cannot_be_written_twice_into_one_meeting(self):
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, applicant=self.applicant
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ApplicantMeetingAttendee.objects.create(
+                    meeting=self.meeting, applicant=self.applicant
+                )
+
+    def test_the_same_guest_name_cannot_be_written_twice_into_one_meeting(self):
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, guest_name="ضيف من خارج الرابط"
+        )
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                ApplicantMeetingAttendee.objects.create(
+                    meeting=self.meeting, guest_name="ضيف من خارج الرابط"
+                )
+
+    def test_the_same_person_in_two_meetings_is_the_whole_point_and_stays_allowed(self):
+        """القيدُ لو ضاق صار يمنع ما وُجد الجدولُ لأجله: مقابلتان لمتقدّمٍ واحد."""
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, applicant=self.applicant
+        )
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.other_meeting, applicant=self.applicant
+        )
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, guest_name="ضيف"
+        )
+        ApplicantMeetingAttendee.objects.create(
+            meeting=self.other_meeting, guest_name="ضيف"
+        )
+        self.assertEqual(ApplicantMeetingAttendee.objects.count(), 4)
+
+    def test_an_applicant_and_a_guest_never_collide_in_the_one_column(self):
+        """الهويّتان تسكنان عموداً واحداً، فلا بدّ من بادئةٍ تفصلهما.
+
+        بلا بادئةٍ يصير متقدّمٌ رقمُه ٧ وضيفٌ اسمُه «٧» هويّةً واحدةً، فيمنع
+        القيدُ إضافةَ أحدهما بلا سبب.
+        """
+        attendee = ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, applicant=self.applicant
+        )
+        guest = ApplicantMeetingAttendee.objects.create(
+            meeting=self.meeting, guest_name=str(self.applicant.pk)
+        )
+        attendee.refresh_from_db()
+        guest.refresh_from_db()
+        self.assertNotEqual(attendee.identity_key, guest.identity_key)
+        self.assertEqual(attendee.identity_key, f"a:{self.applicant.pk}")
+        self.assertEqual(guest.identity_key, f"g:{self.applicant.pk}")

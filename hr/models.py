@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from django.db import models
+from django.db import models, transaction
 from django.contrib.auth.models import User
 from django.utils import timezone
 from tenants.models import Tenant
@@ -1419,13 +1419,30 @@ class UserDevice(models.Model):
     last_active_at = models.DateTimeField(default=timezone.now)
     is_primary = models.BooleanField(default=False)
 
+    #: صاحبُ الجهاز **حين يكون أساسياً** وإلا `NULL` — كي يُفرَض «واحدٌ لا غير»
+    #: في MySQL فعلاً.
+    #:
+    #: كان القيد أدناه مشروطاً (`condition=is_primary`)، وMySQL تتجاهل الفرادةَ
+    #: المشروطة **بصمت**: تحذيرُ `models.W036` لا خطأ، ولا فهرسَ يُنشأ. والاختبارات
+    #: على SQLite وهي تدعم الفهارس الجزئية، فالحراسةُ كانت حقيقيّةً في الاختبار
+    #: وهميّةً في الإنتاج. وMySQL تسمح بتكرار `NULL` في الفهرس الفريد، فالأجهزةُ
+    #: غيرُ الأساسيّة لا تتزاحم والأساسيُّ محروسٌ فعلاً.
+    primary_user_key = models.GeneratedField(
+        expression=models.Case(
+            models.When(is_primary=True, then=models.F('user')),
+            output_field=models.IntegerField(),
+        ),
+        output_field=models.IntegerField(),
+        db_persist=True,
+        verbose_name='مفتاحُ الجهاز الأساسي',
+    )
+
     class Meta:
         db_table = 'hr_userdevice'
         ordering = ['-is_primary', '-last_active_at', '-created_at']
         constraints = [
             models.UniqueConstraint(
-                fields=['user'],
-                condition=models.Q(is_primary=True),
+                fields=['primary_user_key'],
                 name='unique_primary_device_per_user',
             ),
         ]
@@ -1439,12 +1456,29 @@ class UserDevice(models.Model):
     def save(self, *args, **kwargs):
         if not self.key:
             self.key = self.generate_key()
-        # حماية تطبيقية لجهاز أساسي واحد لكل مستخدم:
-        # محرك MySQL يتجاهل قيود الفهرس الجزئي (condition=) بصمت،
-        # لذا نفرض تفريغ أي جهاز أساسي سابق داخل التطبيق قبل الحفظ.
-        if self.is_primary and self.user_id:
-            UserDevice.objects.filter(user_id=self.user_id, is_primary=True).exclude(pk=self.pk).update(is_primary=False)
-        super().save(*args, **kwargs)
+        if not (self.is_primary and self.user_id):
+            return super().save(*args, **kwargs)
+        # ‏**قفلٌ لا فحصٌ ثمّ كتابة.** كان هنا `update(is_primary=False)` على
+        # الباقين ثمّ حفظٌ — وهي تسابق نفسَها: حفظان متزامنان يُنزّل كلٌّ منهما
+        # الآخرَ ثمّ يرفع نفسَه، فيبقى أساسيّان. والقيدُ في القاعدة صار حقيقيّاً
+        # فيصير الناتجُ `IntegrityError` بدل جهازين — وهو خطأٌ للمستخدم على فعلٍ
+        # مشروع. وترجمةُ الخطأ إلى رسالةٍ لا تصلح هنا: الفعلُ «اجعل هذا الجهاز
+        # أساسياً» ونجاحُه ليس اختيارياً، فالصوابُ أن يُسلسَل الطلبان لا أن
+        # يُعتذَر لأحدهما. والقفلُ على **كلّ** أجهزة المستخدم لا الأساسيّ وحدَه:
+        # الجهازُ الذي يُرقَّى صفٌّ قائمٌ فيها، فالطلبان يتزاحمان على صفٍّ واحدٍ
+        # فعلاً.
+        with transaction.atomic():
+            locked = list(
+                UserDevice.objects.select_for_update()
+                .filter(user_id=self.user_id)
+                .values_list("pk", flat=True)
+            )
+            demote = [pk for pk in locked if pk != self.pk]
+            if demote:
+                UserDevice.objects.filter(pk__in=demote, is_primary=True).update(
+                    is_primary=False
+                )
+            super().save(*args, **kwargs)
 
     @property
     def display_name(self) -> str:

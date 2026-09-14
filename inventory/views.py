@@ -1255,25 +1255,58 @@ class WarehouseViewSet(viewsets.ModelViewSet):
             qs = qs.filter(is_active=True)
         return qs
 
+    #: رسالةٌ واحدةٌ للإنشاء والتعديل — القاعدةُ واحدةٌ فلا تُصاغ مرّتين.
+    DUPLICATE_CODE_MESSAGE = 'رمز المستودع مستعمل في مستودع آخر بهذه الشركة.'
+
+    def _reject_duplicate_code(self, serializer, *, tenant, exclude_pk=None):
+        """‏**حارسٌ لم يكن موجوداً أصلاً.**
+
+        القيدُ في القاعدة كان مشروطاً (`condition=~Q(code='')`) وMySQL تتجاهل
+        الفرادةَ المشروطة بصمت — ولا فحصَ في بايثون هنا ولا في المُسلسِل. أي أنّ
+        رمزين متطابقين في شركةٍ واحدة كانا يُقبلان فعلاً على الإنتاج. وبعد أن صار
+        القيدُ حقيقيّاً، غيابُ هذا الفحص يعني **خمسمئة** في وجه من كرّر رمزاً بدل
+        رسالةٍ يفهمها.
+        """
+        code = (serializer.validated_data.get('code') or '').strip()
+        if not code:
+            return
+        clash = Warehouse.objects.filter(tenant=tenant, code=code)
+        if exclude_pk is not None:
+            clash = clash.exclude(pk=exclude_pk)
+        if clash.exists():
+            raise serializers.ValidationError({'code': self.DUPLICATE_CODE_MESSAGE})
+
+    def _save_or_report_clash(self, serializer, **kwargs):
+        """يترجم سباقَ القيد إلى ٤٠٠ — الفحصُ أعلاه يسبق الكتابة فيسابق نفسَه."""
+        try:
+            with transaction.atomic():
+                return serializer.save(**kwargs)
+        except IntegrityError:
+            raise serializers.ValidationError({'code': self.DUPLICATE_CODE_MESSAGE})
+
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
         # T-PLANLIMITS: عدد المستودعات المسموح به من خطة الشركة.
         enforce_limits(tenant, 'inventory.warehouses')
+        self._reject_duplicate_code(serializer, tenant=tenant)
         # أول مستودع للشركة يصبح الافتراضي تلقائياً
         is_first = not Warehouse.objects.filter(tenant=tenant).exists()
         is_default = bool(serializer.validated_data.get('is_default') or is_first)
         if is_default:
             Warehouse.objects.filter(tenant=tenant, is_default=True).update(is_default=False)
-        serializer.save(tenant=tenant, is_default=is_default)
+        self._save_or_report_clash(serializer, tenant=tenant, is_default=is_default)
 
     def perform_update(self, serializer):
         tenant = get_tenant(self.request)
         old_name = serializer.instance.name
+        self._reject_duplicate_code(
+            serializer, tenant=tenant, exclude_pk=serializer.instance.pk
+        )
         if serializer.validated_data.get('is_default'):
             Warehouse.objects.filter(tenant=tenant, is_default=True).exclude(
                 pk=serializer.instance.pk
             ).update(is_default=False)
-        warehouse = serializer.save()
+        warehouse = self._save_or_report_clash(serializer)
         logger.info(
             "Warehouse updated tenant=%s warehouse=%s name_changed=%s",
             tenant.pk, warehouse.pk, warehouse.name != old_name,

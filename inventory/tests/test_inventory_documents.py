@@ -349,3 +349,82 @@ class StockValuationActionTest(TestCase):
         self.assertEqual(res.status_code, 200)
         self.assertIn("results", res.data)
         self.assertEqual(res.data["count"], 4)
+
+
+class WarehouseCodeGuardTest(APITestCase):
+    """‏**حارسٌ لم يكن موجوداً — لا في المُسلسِل ولا في العرض ولا في القاعدة.**
+
+    كان القيدُ الوحيدُ مشروطاً (`UniqueConstraint(condition=~Q(code=''))`)، وMySQL
+    تتجاهل الفرادةَ المشروطة **بصمت**. فرمزان متطابقان في شركةٍ واحدة كانا
+    يُقبلان فعلاً على الإنتاج، والاختباراتُ على SQLite لا ترى ذلك لأنّها تدعم
+    الفهارس الجزئية.
+
+    وبعد أن صار القيدُ حقيقيّاً، غيابُ فحصٍ في بايثون يعني **خمسمئة** في وجه من
+    كرّر رمزاً — فالقيدُ ضمانٌ والفحصُ رسالة، وكلاهما لازم.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="wh-code-owner", password="x")
+        cls.tenant = create_company("شركة رموز المستودعات", cls.owner)
+        cls.existing = Warehouse.objects.create(
+            tenant=cls.tenant, name="المستودع الأول", code="WH-DUP",
+        )
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def test_a_duplicate_code_is_answered_with_four_hundred_not_five_hundred(self):
+        res = self.client.post(
+            "/api/inventory/warehouses/",
+            {"name": "المستودع الثاني", "code": "WH-DUP"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("code", res.data)
+        self.assertEqual(
+            Warehouse.objects.filter(tenant=self.tenant, code="WH-DUP").count(), 1
+        )
+
+    def test_an_empty_code_may_repeat_as_often_as_the_company_needs(self):
+        """السببُ الذي وُضع الشرطُ لأجله — وفحصٌ أعمى كان سيكسره."""
+        for name in ("بلا رمز ١", "بلا رمز ٢"):
+            res = self.client.post(
+                "/api/inventory/warehouses/", {"name": name, "code": ""}, format="json",
+            )
+            self.assertEqual(res.status_code, 201, res.content)
+
+    def test_editing_a_warehouse_without_touching_its_code_still_works(self):
+        """الفحصُ يستثني الصفَّ نفسَه، وإلّا صار المستودعُ غيرَ قابلٍ للتعديل."""
+        res = self.client.patch(
+            f"/api/inventory/warehouses/{self.existing.id}/",
+            {"name": "اسمٌ جديد", "code": "WH-DUP"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.existing.refresh_from_db()
+        self.assertEqual(self.existing.name, "اسمٌ جديد")
+
+    def test_moving_a_code_onto_a_sibling_is_refused(self):
+        sibling = Warehouse.objects.create(
+            tenant=self.tenant, name="المستودع الثالث", code="WH-OTHER-CODE",
+        )
+        res = self.client.patch(
+            f"/api/inventory/warehouses/{sibling.id}/", {"code": "WH-DUP"}, format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.content)
+        sibling.refresh_from_db()
+        self.assertEqual(sibling.code, "WH-OTHER-CODE")
+
+    def test_another_company_may_reuse_the_same_code(self):
+        other_owner = User.objects.create_user(username="wh-code-owner-b", password="x")
+        other_tenant = create_company("شركة أخرى للرموز", other_owner)
+        self.client.force_authenticate(user=other_owner)
+        self.client.credentials(HTTP_X_TENANT_ID=str(other_tenant.TenantID))
+        res = self.client.post(
+            "/api/inventory/warehouses/",
+            {"name": "مستودعٌ برمزٍ مطابق", "code": "WH-DUP"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)

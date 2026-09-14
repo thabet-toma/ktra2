@@ -15,7 +15,7 @@
 - لا يمكن إنهاء الجهاز الأساسي من هذه الشاشة؛ تسجيل الخروج العادي هو طريقة إنهائه.
 """
 import json
-from django.db import transaction
+from django.db import IntegrityError
 from django.http import JsonResponse
 from django.views.decorators.csrf import csrf_exempt
 
@@ -196,10 +196,22 @@ def set_primary_view(request):
             status=400,
         )
 
-    with transaction.atomic():
-        UserDevice.objects.filter(user=user, is_primary=True).update(is_primary=False)
-        current_device.is_primary = True
+    # ‏تنزيلُ الباقين يقع داخل `UserDevice.save` تحت قفلٍ على أجهزة المستخدم —
+    # وكان هنا `update` يسبق الحفظ **خارج** القفل، فيعيد فتحَ السباق الذي أُغلق.
+    current_device.is_primary = True
+    try:
         current_device.save(update_fields=["is_primary"])
+    except IntegrityError:
+        # القيدُ في القاعدة صار حقيقيّاً، والقفلُ يغطّي الحالةَ الغالبة. ويبقى
+        # تزاحمٌ نادرٌ لا صفَّ قائماً يُقفَل عليه — فيُقال للمستخدم «أعِد المحاولة»
+        # لا أن يُردَّ خمسمئة على فعلٍ مشروع.
+        return JsonResponse(
+            {
+                "detail": "جرى تعيين جهازٍ أساسيٍّ في اللحظة نفسها. أعِد المحاولة.",
+                "code": "PRIMARY_DEVICE_RACE",
+            },
+            status=409,
+        )
 
     from core.activity import log_activity
     log_activity(

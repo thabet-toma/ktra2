@@ -1,4 +1,5 @@
 from django.db import models
+from django.db.models.functions import NullIf
 from tenants.models import Tenant
 from partners.models import Partner
 
@@ -398,14 +399,28 @@ class Warehouse(models.Model):
     is_active = models.BooleanField(default=True, db_column='IsActive')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
+    #: الرمزُ حين لا يكون فارغاً وإلا `NULL` — كي تُفرَض الفرادةُ في MySQL فعلاً.
+    #:
+    #: كان القيد أدناه مشروطاً (`condition=~Q(code='')`)، وMySQL تتجاهل الفرادةَ
+    #: المشروطة **بصمت** (`models.W036` تحذيرٌ لا خطأ). والاختبارات على SQLite وهي
+    #: تدعم الفهارس الجزئية، فلم يُمسَك. وفرادةٌ غيرُ مشروطةٍ على `code` نفسِه
+    #: كانت ستكسر الحالةَ المشروعة: مستودعاتٌ كثيرةٌ بلا رمزٍ في الشركة الواحدة —
+    #: و`NULL` المكرَّرُ مسموحٌ في الفهرس الفريد، فالفراغُ لا يتزاحم.
+    code_key = models.GeneratedField(
+        expression=NullIf('code', models.Value('')),
+        output_field=models.CharField(max_length=30, null=True),
+        db_persist=True,
+        db_column='CodeKey',
+        verbose_name='مفتاحُ الرمز',
+    )
+
     class Meta:
         db_table = 'warehouses'
         managed = True
         ordering = ['-is_default', 'name']
         constraints = [
             models.UniqueConstraint(
-                fields=['tenant', 'code'],
-                condition=~models.Q(code=''),
+                fields=['tenant', 'code_key'],
                 name='idx_tenant_warehouse_code',
             ),
         ]
