@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState } from "react";
 import { pickActiveMembership, storedTenantId } from "../utils/tenantContext";
 import { orderOfficesByPreference } from "../utils/managedBooks";
+import type { FiscalGranularity } from "../utils/fiscalYearChoice";
 import { enterManagedBook, leaveManagedBook, managedBookOffice } from "../utils/officeShell";
 import { createManagedBook as createManagedBookApi, listManagedBooks } from "../services/managedBooksApi";
 import { apiGetObject, apiPostObject } from "../services/restApi";
@@ -49,6 +50,12 @@ export type CompanyMembership = {
   can_access_import?: boolean;
 };
 
+/** #213-أ — السنة المالية التي تختارها شاشة الإنشاء قبل أن تُنشأ الشركة. */
+export type FiscalChoice = {
+  year: number;
+  granularity: FiscalGranularity;
+};
+
 interface CompanyContextType {
   companies: CompanyMembership[];
   currentCompany: Tenant | null;
@@ -57,7 +64,7 @@ interface CompanyContextType {
   /** صلاحية وحدة الاستيراد للشركة النشطة — يشترط تفعيل الشركة للجميع (حتى السوبر أدمن). */
   canAccessImport: boolean;
   switchCompany: (companyId: number) => Promise<void>;
-  createCompany: (name: string, template?: string) => Promise<Tenant>;
+  createCompany: (name: string, template?: string, fiscal?: FiscalChoice) => Promise<Tenant>;
   /**
    * ISSUE #65 — دفاتر عملاء المكتب. **قناةٌ خاصة** لا امتدادٌ لـ`companies`:
    * الدفتر مستثنى من `my-companies` عمداً (#52) كي لا يزحم مبدّل الشركات، وهذه
@@ -242,10 +249,17 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const createCompany = async (name: string, template?: string): Promise<Tenant> => {
+  const createCompany = async (
+    name: string,
+    template?: string,
+    fiscal?: FiscalChoice,
+  ): Promise<Tenant> => {
+    // #213-أ: غياب `fiscal` يعني «اترك القرار للخادم» — وهو يزرع السنة الجارية
+    // شهرياً. لا يُرسَل مفتاح فارغ كي لا يفترق افتراض الشاشة عن افتراض الخادم.
     const newCompany = await apiPostObject<Tenant>("tenants/companies/", {
       CompanyName: name,
       ...(template ? { template } : {}),
+      ...(fiscal ? { fiscal_year: fiscal.year, fiscal_granularity: fiscal.granularity } : {}),
     });
     // Do not activate the tenant from the POST response alone. The membership
     // read is the source of truth for onboarding completion and owner role.

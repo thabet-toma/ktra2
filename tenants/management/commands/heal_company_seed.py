@@ -5,16 +5,20 @@
   - TenantSettings إن غابت
   - الفرع الرئيسي إن غاب
   - دفاتر الترقيم (idempotent)
+  - السنة المالية الجارية إن لم تكن للشركة فترة تغطي اليوم (#213-أ)
 
 آمن للتشغيل المتكرر: كل خطوة get_or_create / تتحقق قبل الإنشاء.
 
     python manage.py heal_company_seed            # كل الشركات
     python manage.py heal_company_seed --tenant 5 # شركة واحدة
 """
+from django.core.exceptions import ValidationError
 from django.core.management.base import BaseCommand
 from django.db import transaction
+from django.utils import timezone
 
-from accounting.models import Account
+from accounting.models import Account, FiscalPeriod
+from accounting.services import create_fiscal_year
 from tenants.models import Branch, Tenant, TenantBook, TenantSettings
 from tenants.services import COA_DATA, ensure_operational_accounts
 
@@ -88,6 +92,25 @@ class Command(BaseCommand):
                             created_books += 1
                 if created_books:
                     fixed.append(f"books(+{created_books})")
+
+                # 5) السنة المالية الجارية (#213-أ) — شركات أُنشئت قبل أن تصير
+                # الفترة تولد مع الشركة تبقى عمياء حتى أول ترحيل. لا يُلمَس
+                # ماضٍ: إن وُجدت فترة تغطي اليوم (ولو مقفلة) لا نكتب شيئاً —
+                # القفل قرار محاسب لا عطب تأسيس.
+                today = timezone.localdate()
+                has_today = FiscalPeriod.objects.filter(
+                    tenant=tenant, start_date__lte=today, end_date__gte=today,
+                ).exists()
+                if not has_today:
+                    try:
+                        periods = create_fiscal_year(tenant, today.year)
+                    except ValidationError as exc:
+                        # سنةٌ فيها فتراتٌ بمدَياتٍ يدويّةٍ لا تطابق الأشهر: لا
+                        # نكسر التشغيلة كلَّها على شركةٍ واحدة — تُسمّى ويُكمَل،
+                        # فالفترات المخصّصة قرار محاسب لا شيء يُصلَح تلقائياً.
+                        fixed.append(f"fiscal-year({today.year}: تعذّر — {'؛ '.join(exc.messages)})")
+                    else:
+                        fixed.append(f"fiscal-year({today.year}: {len(periods)})")
 
                 label = "، ".join(fixed) if fixed else "سليمة — لا تغيير"
                 self.stdout.write(

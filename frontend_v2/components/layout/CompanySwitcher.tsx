@@ -4,6 +4,14 @@ import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { Building, Building2, Calculator, Plus, ChevronDown, Check, Loader2, LogOut, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import {
+  DEFAULT_FISCAL_GRANULARITY,
+  FISCAL_GRANULARITY_OPTIONS,
+  FISCAL_YEAR_RANGE_MESSAGE,
+  currentFiscalYear,
+  isValidFiscalYear,
+  type FiscalGranularity,
+} from "../../utils/fiscalYearChoice";
 
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
@@ -25,6 +33,8 @@ export const CompanySwitcher: React.FC = () => {
   const [showManageModal, setShowManageModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyTemplate, setNewCompanyTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
+  const [newFiscalYear, setNewFiscalYear] = useState(String(currentFiscalYear()));
+  const [newFiscalGranularity, setNewFiscalGranularity] = useState<FiscalGranularity>(DEFAULT_FISCAL_GRANULARITY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pinning, setPinning] = useState<number | null>(null);
@@ -66,13 +76,22 @@ export const CompanySwitcher: React.FC = () => {
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCompanyName.trim()) return;
+    if (!isValidFiscalYear(newFiscalYear)) {
+      setError(FISCAL_YEAR_RANGE_MESSAGE);
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
-      const created = await createCompany(newCompanyName, newCompanyTemplate);
+      const created = await createCompany(newCompanyName, newCompanyTemplate, {
+        year: Number(newFiscalYear),
+        granularity: newFiscalGranularity,
+      });
       setShowModal(false);
       setNewCompanyName("");
       setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
+      setNewFiscalYear(String(currentFiscalYear()));
+      setNewFiscalGranularity(DEFAULT_FISCAL_GRANULARITY);
       // Switch to newly created company automatically
       await switchCompany(created.TenantID);
     } catch (err) {
@@ -297,6 +316,43 @@ export const CompanySwitcher: React.FC = () => {
                 </div>
               </div>
 
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold opacity-80" htmlFor="company-fiscal-year">السنة المالية</label>
+                <p className="text-[11px] leading-4 opacity-70">تُفتح فترات هذه السنة مع الشركة فتستطيع ترحيل أول فاتورة فوراً.</p>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  <input
+                    id="company-fiscal-year"
+                    type="number"
+                    inputMode="numeric"
+                    required
+                    value={newFiscalYear}
+                    onChange={(e) => setNewFiscalYear(e.target.value)}
+                    className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)] focus:border-transparent transition-all duration-200"
+                    disabled={submitting}
+                  />
+                  {FISCAL_GRANULARITY_OPTIONS.map((option) => {
+                    const isSelected = newFiscalGranularity === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setNewFiscalGranularity(option.key)}
+                        disabled={submitting}
+                        aria-pressed={isSelected}
+                        className={`flex flex-col items-start gap-1 rounded-lg border p-3 text-right transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isSelected
+                            ? "border-[var(--ktra-accent)] bg-[var(--ktra-panel-hover)] ring-1 ring-[var(--ktra-accent)]"
+                            : "border-[var(--ktra-border)] bg-[var(--ktra-panel)]"
+                        }`}
+                      >
+                        <span className="text-xs font-bold" style={{ color: "var(--ktra-ink)" }}>{option.name}</span>
+                        <span className="text-[11px] leading-4 opacity-70">{option.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
               <div className="flex gap-3 justify-end pt-2">
                 <button
                   type="button"
@@ -305,6 +361,8 @@ export const CompanySwitcher: React.FC = () => {
                     setError(null);
                     setNewCompanyName("");
                     setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
+                    setNewFiscalYear(String(currentFiscalYear()));
+                    setNewFiscalGranularity(DEFAULT_FISCAL_GRANULARITY);
                   }}
                   className="px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors duration-150"
                   disabled={submitting}

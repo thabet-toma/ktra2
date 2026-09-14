@@ -236,7 +236,7 @@ def validate_fiscal_period(tenant_id, transaction_date):  # يرمي ValidationE
 def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):  # نفس حرّاس post_journal، برسالة تراجع
 def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bool = True) -> dict:  # مصدر ض.ق.م الوحيد لفترة — من JournalLine (issue #79)؛ يستهلكها build_vat_statement وVatReportView وclient_financial_summary معاً
 def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""):  # يرفض فكّ ترحيل مستندٍ داخل فترة كشف ض.ق.م `final` (issue #79) — تُستدعى من unpost_document
-def create_fiscal_year(tenant, year, granularity='monthly') -> list[FiscalPeriod]:  # 12 شهراً (افتراضي) أو فترة `FY <year>` واحدة — idempotent
+def create_fiscal_year(tenant, year, granularity='monthly') -> list[FiscalPeriod]:  # 12 شهراً (افتراضي) أو فترة `FY <year>` واحدة — idempotent؛ يناديها `tenants.services.create_company` لكل شركة جديدة (#213-أ)
 def assert_no_period_overlap(tenant_id, start_date, end_date, exclude_pk=None):  # فترتان متقاطعتان لنفس الشركة تُرفضان
 def post_journal_entry(journal_id, user=None):  # ترحيل قيد موجود بالـid
 def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_account_id: int, user=None) -> dict:  # تصفير الإيراد/المصروف إلى الأرباح المحتجزة

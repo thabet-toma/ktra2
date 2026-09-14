@@ -280,8 +280,17 @@ class TenantViewSet(viewsets.ModelViewSet):
             assert_self_serve_template(template)
         except ValueError as e:
             raise DRFValidationError({"template": str(e)})
+        # #213-أ: السنةُ المالية تُزرع مع الشركة دائماً؛ ما يُرسله العميل هو
+        # السنةُ وتفصيلُها لا وجودُهما. والمفتاحُ الغائب **لا يُملأ هنا**: تكرارُ
+        # افتراض `create_company` في هذا الباب نسخةٌ ثانيةٌ من القاعدة تفترق عنها
+        # صامتةً يومَ يتغيّر أحدُهما.
+        fiscal = {
+            key: request.data[key]
+            for key in ("fiscal_year", "fiscal_granularity")
+            if request.data.get(key) not in (None, "")
+        }
         try:
-            tenant = create_company(name, request.user, template=template)
+            tenant = create_company(name, request.user, template=template, **fiscal)
         except DjangoValidationError as e:
             # Known validation errors → 400; unexpected errors propagate to the
             # shaped 500 handler (with trace_id) instead of being masked as 400.

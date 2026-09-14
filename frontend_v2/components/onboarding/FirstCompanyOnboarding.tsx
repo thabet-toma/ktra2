@@ -5,6 +5,14 @@ import { useCompany } from "../../contexts/CompanyContext";
 import { clientLogger } from "../../services/logger";
 import { LogoIcon } from "../icons/LogoIcon";
 import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
+import {
+  DEFAULT_FISCAL_GRANULARITY,
+  FISCAL_GRANULARITY_OPTIONS,
+  FISCAL_YEAR_RANGE_MESSAGE,
+  currentFiscalYear,
+  isValidFiscalYear,
+  type FiscalGranularity,
+} from "../../utils/fiscalYearChoice";
 
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
@@ -17,6 +25,8 @@ export const FirstCompanyOnboarding: React.FC = () => {
   const { createCompany } = useCompany();
   const [companyName, setCompanyName] = useState("");
   const [template, setTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
+  const [fiscalYear, setFiscalYear] = useState(String(currentFiscalYear()));
+  const [granularity, setGranularity] = useState<FiscalGranularity>(DEFAULT_FISCAL_GRANULARITY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -27,13 +37,17 @@ export const FirstCompanyOnboarding: React.FC = () => {
       setError("أدخل اسم الشركة للمتابعة.");
       return;
     }
+    if (!isValidFiscalYear(fiscalYear)) {
+      setError(FISCAL_YEAR_RANGE_MESSAGE);
+      return;
+    }
 
     const startedAt = performance.now();
     setSubmitting(true);
     setError(null);
     clientLogger.info("onboarding.company_create_started");
     try {
-      await createCompany(name, template);
+      await createCompany(name, template, { year: Number(fiscalYear), granularity });
       clientLogger.info("onboarding.company_create_succeeded", {
         durationMs: Math.round(performance.now() - startedAt),
       });
@@ -103,6 +117,45 @@ export const FirstCompanyOnboarding: React.FC = () => {
                         <Icon className={`h-6 w-6 ${isSelected ? "text-blue-600" : "text-gray-500 dark:text-gray-400"}`} />
                         <span className="font-bold text-gray-900 dark:text-white">{option.name}</span>
                         <span className="text-xs leading-5 text-gray-600 dark:text-gray-400">{option.description}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+              <div>
+                <span className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-200">السنة المالية</span>
+                <p className="mb-3 text-xs leading-5 text-gray-600 dark:text-gray-400">ستُفتح فترات هذه السنة مع الشركة، فتستطيع ترحيل أول فاتورة فوراً. يمكنك إضافة سنوات أخرى لاحقاً من إدارة الفترات المالية.</p>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <label className="block sm:col-span-1">
+                    <span className="mb-2 block text-xs font-semibold text-gray-600 dark:text-gray-300">السنة</span>
+                    <input
+                      name="fiscalYear"
+                      type="number"
+                      inputMode="numeric"
+                      value={fiscalYear}
+                      onChange={(event) => setFiscalYear(event.target.value)}
+                      disabled={submitting}
+                      required
+                      className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-white"
+                    />
+                  </label>
+                  {FISCAL_GRANULARITY_OPTIONS.map((option) => {
+                    const isSelected = granularity === option.key;
+                    return (
+                      <button
+                        key={option.key}
+                        type="button"
+                        onClick={() => setGranularity(option.key)}
+                        disabled={submitting}
+                        aria-pressed={isSelected}
+                        className={`flex flex-col items-start gap-1 self-end rounded-xl border p-3 text-right transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                          isSelected
+                            ? "border-blue-500 bg-blue-50 ring-2 ring-blue-500/20 dark:bg-blue-950/30"
+                            : "border-gray-300 bg-gray-50 hover:border-blue-300 dark:border-gray-600 dark:bg-gray-900"
+                        }`}
+                      >
+                        <span className="text-sm font-bold text-gray-900 dark:text-white">{option.name}</span>
+                        <span className="text-[11px] leading-4 text-gray-600 dark:text-gray-400">{option.description}</span>
                       </button>
                     );
                   })}

@@ -8,6 +8,7 @@ from django.utils import timezone
 from tenants.models import Branch, BookHandoverRequest, Tenant, TenantSettings, TenantBook, UserCompanyMembership
 from tenants.company_templates import COMPANY_TEMPLATES, DEFAULT_TEMPLATE
 from accounting.models import Account, Currency
+from accounting.services import GRANULARITY_MONTHLY, create_fiscal_year
 from core.models import TenantModule
 from core.plans import trial_end_date
 
@@ -16,6 +17,12 @@ logger = logging.getLogger(__name__)
 # ISSUE #54: صلاحية طلب التسليم — أسبوعان، مثل دعوة الارتباط المحاسبي
 # (`accountant_portal.PortalSettings.invitation_expiry_days` الافتراضي).
 HANDOVER_REQUEST_EXPIRY_DAYS = 14
+
+# #213-أ: حدّا السنة المالية المقبولة عند إنشاء شركة. الغرض منع الغلط المطبعيّ
+# (202 أو 20266) لا فرض سياسة — الفترات التاريخية تُنشأ من شاشة إدارة الفترات
+# المالية بلا هذا الحدّ.
+MIN_FISCAL_YEAR = 2000
+MAX_FISCAL_YEAR = 2100
 
 COA_DATA = [
     # Root Nodes
@@ -232,6 +239,8 @@ def ensure_base_currencies():
 def create_company(
     name: str, creator_user, *,
     template: str = DEFAULT_TEMPLATE, managed_by: Tenant | None = None,
+    fiscal_year: int | None = None,
+    fiscal_granularity: str = GRANULARITY_MONTHLY,
 ) -> Tenant:
     """
     Creates a new Tenant, boots it with default settings, seeds its TenantBooks
@@ -246,12 +255,33 @@ def create_company(
     ISSUE #52: `managed_by` كلمة مفتاحية أيضاً — دفترٌ يديره مكتب محاسبة يمرّ
     من هذه الدالة نفسها لا مساراً موازياً، وإلا افترق الزرع (الحسابات والدفاتر
     والفرع والمستودع الافتراضي) بين الشركة العادية والدفتر المُدار.
+
+    #213-أ: `fiscal_year` هو السنة المالية المزروعة مع الشركة، وافتراضه السنة
+    الجارية. **لا خيار تخطٍّ**: شركة بلا فترة مالية تبدو سليمة حتى أول ترحيل،
+    ثم تسقط على «لا توجد فترة مالية مفتوحة تغطي التاريخ …» — وهو بالضبط ما كان
+    يحدث لكل شركة تُنشأ من الواجهة، لأن `create_fiscal_year` لم يكن لها مستدعٍ
+    واحد في كود الإنتاج. القابل للاختيار هو السنة وتفصيلها لا وجودها.
     """
     if not name or not name.strip():
         raise ValidationError("اسم الشركة لا يمكن أن يكون فارغاً.")
     template_config = COMPANY_TEMPLATES.get(template)
     if template_config is None:
         raise ValidationError(f"قالب الشركة «{template}» غير معروف.")
+    # التحقق قبل فتح المعاملة: سنةٌ مرفوضة يجب ألا تكلّف زرعَ شجرةِ حساباتٍ ثم
+    # تراجعاً عنها.
+    if fiscal_year is None:
+        fiscal_year = timezone.localdate().year
+    else:
+        try:
+            fiscal_year = int(fiscal_year)
+        except (TypeError, ValueError):
+            raise ValidationError(f"السنة المالية «{fiscal_year}» ليست رقماً صالحاً.")
+        if not (MIN_FISCAL_YEAR <= fiscal_year <= MAX_FISCAL_YEAR):
+            raise ValidationError(
+                f"السنة المالية يجب أن تقع بين {MIN_FISCAL_YEAR} و{MAX_FISCAL_YEAR}."
+            )
+    # تفصيل الفترة يتحقّق منه `create_fiscal_year` نفسه برسالته — لا تُكتب هنا
+    # نسخة ثانية من القاعدة تفترق عنها لاحقاً.
 
     with transaction.atomic():
         # 1. Create Tenant
@@ -352,6 +382,11 @@ def create_company(
                 plan_note='زُرعت تلقائياً مع قالب دفتر العميل — ISSUE #87',
             )
             invalidate_module_cache(tenant.pk)
+
+        # 4.9 السنة المالية — الشركة تولد وفتراتها مفتوحة (#213-أ).
+        # داخل المعاملة نفسها: شركةٌ اعتُمدت وفتراتُها لم تُكتب هي الحالةُ التي
+        # نُصلحها، فلا يصحّ أن تنجو من فشلٍ هنا.
+        create_fiscal_year(tenant, fiscal_year, granularity=fiscal_granularity)
 
         # 5. Create UserCompanyMembership
         # If this is the user's only company, make it the default

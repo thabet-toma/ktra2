@@ -216,7 +216,11 @@ def test_overlap_is_scoped_to_the_tenant(env):
     """فترة شركة أخرى ليست تداخلاً — عزل الشركات يسبق كل قاعدة."""
     tenant, owner, *_ = env
     other_owner = User.objects.create_user(username="period-lock-2", password="x")
-    other = create_company("شركة أخرى", other_owner)
+    # #213-أ: كل شركة تولد بفترات سنة، فلو وُلدت هذه بـ2026 لصار 2026-06 موجوداً
+    # عندها فعلاً ورُدّ الطلبُ لتكرارٍ داخل الشركة — لا لتداخلٍ عبر الشركات، وهو
+    # ما يقيسه هذا الاختبار. سنةٌ أخرى تُبقي المدى حرّاً عندها ومشغولاً عند
+    # جارتها، فيبقى الرفضُ المحتمل رفضاً عابراً للشركات لا غير.
+    other = create_company("شركة أخرى", other_owner, fiscal_year=2030)
     client, headers = _client(other_owner, other)
 
     res = client.post(
