@@ -2473,10 +2473,10 @@ tbody td {
 
 .staff-shell,
 .ops-shell {
-  --staff-bg: #0b1220;
-  --staff-panel: #111c31;
-  --staff-rail: #0a1220;
-  --staff-line: #1e2c47;
+  --staff-bg: #011632;
+  --staff-panel: #0a2543;
+  --staff-rail: #00102b;
+  --staff-line: #22476f;
   --staff-text: #e2e8f0;
   --staff-muted: #94a3b8;
   --staff-accent: #22d3ee;
@@ -2524,8 +2524,8 @@ tbody td {
 .platform-surface .bg-blue-50\/70 { background-color: color-mix(in oklab, oklch(97.7% 0.013 236.62) 70%, transparent); }
 .platform-surface .bg-blue-600 { background-color: oklch(58.8% 0.158 241.966); }
 .platform-surface .bg-blue-700 { background-color: oklch(50% 0.134 242.749); }
-.platform-surface .bg-blue-900\/60 { background-color: color-mix(in oklab, oklch(39.1% 0.09 240.876) 60%, transparent); }
-.platform-surface .bg-blue-950\/30 { background-color: color-mix(in oklab, oklch(29.3% 0.066 243.157) 30%, transparent); }
+.platform-surface .bg-blue-900\/60 { background-color: color-mix(in oklab, oklch(39.1% 0.10 253) 60%, transparent); }
+.platform-surface .bg-blue-950\/30 { background-color: color-mix(in oklab, oklch(29.3% 0.09 253) 30%, transparent); }
 .platform-surface .bg-sky-100 { background-color: oklch(95.1% 0.026 236.824); }
 .platform-surface .bg-sky-50 { background-color: oklch(97.7% 0.013 236.62); }
 .platform-surface .bg-sky-500\/10 { background-color: color-mix(in oklab, oklch(68.5% 0.169 237.323) 10%, transparent); }
@@ -2536,15 +2536,15 @@ tbody td {
 .platform-surface .bg-slate-50 { background-color: oklch(98.2% 0.008 232); }
 .platform-surface .bg-slate-50\/60 { background-color: color-mix(in oklab, oklch(98.2% 0.008 232) 60%, transparent); }
 .platform-surface .bg-slate-50\/70 { background-color: color-mix(in oklab, oklch(98.2% 0.008 232) 70%, transparent); }
-.platform-surface .bg-slate-700 { background-color: oklch(41% 0.058 232); }
-.platform-surface .bg-slate-800 { background-color: oklch(31% 0.05 232); }
-.platform-surface .bg-slate-800\/40 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 40%, transparent); }
-.platform-surface .bg-slate-800\/60 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 60%, transparent); }
-.platform-surface .bg-slate-800\/80 { background-color: color-mix(in oklab, oklch(31% 0.05 232) 80%, transparent); }
-.platform-surface .bg-slate-900 { background-color: oklch(23% 0.042 232); }
-.platform-surface .bg-slate-900\/40 { background-color: color-mix(in oklab, oklch(23% 0.042 232) 40%, transparent); }
-.platform-surface .bg-slate-900\/50 { background-color: color-mix(in oklab, oklch(23% 0.042 232) 50%, transparent); }
-.platform-surface .bg-slate-950 { background-color: oklch(16% 0.035 232); }
+.platform-surface .bg-slate-700 { background-color: oklch(36% 0.09 253); }
+.platform-surface .bg-slate-800 { background-color: oklch(28% 0.09 253); }
+.platform-surface .bg-slate-800\/40 { background-color: color-mix(in oklab, oklch(28% 0.09 253) 40%, transparent); }
+.platform-surface .bg-slate-800\/60 { background-color: color-mix(in oklab, oklch(28% 0.09 253) 60%, transparent); }
+.platform-surface .bg-slate-800\/80 { background-color: color-mix(in oklab, oklch(28% 0.09 253) 80%, transparent); }
+.platform-surface .bg-slate-900 { background-color: oklch(21% 0.09 253); }
+.platform-surface .bg-slate-900\/40 { background-color: color-mix(in oklab, oklch(21% 0.09 253) 40%, transparent); }
+.platform-surface .bg-slate-900\/50 { background-color: color-mix(in oklab, oklch(21% 0.09 253) 50%, transparent); }
+.platform-surface .bg-slate-950 { background-color: oklch(14% 0.07 263); }
 .platform-surface .border-blue-200 { border-color: oklch(90.1% 0.058 230.902); }
 .platform-surface .border-blue-300 { border-color: oklch(82.8% 0.111 230.318); }
 .platform-surface .border-blue-400 { border-color: oklch(74.6% 0.16 232.661); }

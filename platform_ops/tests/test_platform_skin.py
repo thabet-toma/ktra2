@@ -426,3 +426,117 @@ class PlatformSkinIsConfinedTest(SimpleTestCase):
             self.assertTrue(
                 token in self.css, f"رمزُ حالةٍ مفقود: {token}",
             )
+
+
+class TheSkinIsNavyNotCharcoalTest(SimpleTestCase):
+    """‏**اللونُ نفسُه محروسٌ، لا اشتقاقُه وحدَه** (212-T).
+
+    الحرّاسُ الاثنا عشرَ أعلاه يفحصون الاشتقاقَ والترتيبَ والتغطية — ولا واحدٌ
+    منهم يفحص **اللون**. فانزلقت لوحةُ الجلد إلى رماديٍّ فحميٍّ شبهِ محايد
+    وبقيت المجموعةُ خضراءَ بكاملها، حتى شكا المالكُ بعينه: «طلع رايح داكن لدرجة
+    السواد، أنا بدي أزرق». هذا الحارسُ هو ما كان ناقصاً.
+
+    ويُقاس **المقياسُ الذي فرّق فعلاً** بين المعروض والمرجع: لا الإضاءةُ — كانت
+    لوحةُ المرجع **أفتحَ** من المعروض — بل الزُرقة `B − (R+G)/2`. المعروضُ كان
+    ‎+17…+26 والمرجعُ ‎+31…+43.5، وكِلاهما «داكن» بالإضاءة سواء.
+    """
+
+    #: الحدُّ مأخوذٌ من أضعف سطحٍ في صورة المالك المرجعيّة (‎+31) منقوصاً هامشاً
+    #: صغيراً — لا رقمٌ مخترَع. وما دونه يُقرأ رماديّاً لا كحليّاً.
+    MIN_BLUENESS = 30.0
+
+    #: أدنى فرقِ إضاءةٍ بين سطحين متجاورين؛ دونه تذوب البطاقةُ في أرضيّتها.
+    MIN_STEP = 4.0
+
+    SURFACE_TOKENS = ("--staff-rail", "--staff-bg", "--staff-panel")
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.css = INDEX_CSS.read_text(encoding="utf-8")
+
+    @staticmethod
+    def _rgb(value):
+        value = value.strip().lstrip("#")
+        return tuple(int(value[i:i + 2], 16) for i in (0, 2, 4))
+
+    @staticmethod
+    def _blueness(rgb):
+        red, green, blue = rgb
+        return blue - (red + green) / 2
+
+    @staticmethod
+    def _luminance(rgb):
+        red, green, blue = rgb
+        return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+    def _token(self, name):
+        """قيمةُ الرمز — **ويُشترط تعريفٌ واحدٌ لا غير**.
+
+        بقراءة الأوّل وحدَه يصير تعريفٌ ثانٍ لاحقٌ (تحت `@media` أو `.dark`) هو
+        ما تراه الشاشةُ وما لا يراه الحارس: فيعود العطبُ الذي وُضع هذا الملفُّ
+        كلُّه ليمنعه، ساكتاً كما كان.
+        """
+        values = re.findall(rf"{re.escape(name)}\s*:\s*(#[0-9a-fA-F]{{6}})\s*;", self.css)
+        self.assertEqual(
+            len(values), 1,
+            f"رمزُ الجلد `{name}` معرَّفٌ {len(values)} مرّةً بقيمةٍ ستّ عشريّة — "
+            "الحارسُ يقرأ الأوّلَ والشاشةُ تلبس الأخير.",
+        )
+        return self._rgb(values[0])
+
+    def test_every_skin_surface_is_navy_not_neutral_charcoal(self):
+        """كلُّ سطحٍ في لوحة الجلد يحمل صبغةً زرقاءَ حقيقيّة."""
+        violations = []
+        for name in self.SURFACE_TOKENS:
+            blueness = self._blueness(self._token(name))
+            if blueness < self.MIN_BLUENESS:
+                violations.append(f"{name} ← زُرقة {blueness:+.1f} دون {self.MIN_BLUENESS:+.1f}")
+        self.assertEqual(
+            violations, [],
+            "أسطحُ جلدٍ انزلقت إلى الرماديّ المحايد: "
+            f"{violations} — وهي شكوى المالك نفسُها في 212-T.",
+        )
+
+    def test_the_surfaces_keep_their_order_and_do_not_flatten_into_each_other(self):
+        """الريلُ أعمقُ، واللوحةُ أعلى، وبينهما فرقٌ يُرى.
+
+        الترتيبُ وحدَه لا يكفي: سُلَّمٌ صحيحُ الترتيب وفروقُه أعشارٌ يجعل البطاقةَ
+        والأرضيّةَ سطحاً واحداً، وهو عطبٌ لا يراه أيُّ فحصِ اشتقاق.
+        """
+        ladder = [(name, self._luminance(self._token(name))) for name in self.SURFACE_TOKENS]
+        violations = []
+        for (lower_name, lower), (upper_name, upper) in zip(ladder, ladder[1:]):
+            if upper <= lower:
+                violations.append(f"{upper_name} ({upper:.1f}) ليس أفتحَ من {lower_name} ({lower:.1f})")
+            elif upper - lower < self.MIN_STEP:
+                violations.append(
+                    f"{lower_name}→{upper_name} فرقُ {upper - lower:.1f} دون {self.MIN_STEP:.1f}"
+                )
+        self.assertEqual(
+            violations, [], f"سُلَّمُ الأسطح انبسط أو انقلب: {violations}",
+        )
+
+    def test_the_body_text_stays_readable_on_the_panel_it_sits_on(self):
+        """تغميقُ اللوحة أو تفتيحُ النصّ بلا حسابٍ يُخرج التباينَ عن الحدّ.
+
+        ‏`--staff-text` نصُّ المتن و`--staff-muted` نصُّه الثانويّ، وكلاهما يُكتب
+        فوق `--staff-panel` — فأيُّ تحريكٍ للوحة يمسّهما معاً.
+        """
+        def channel(value):
+            value /= 255
+            return value / 12.92 if value <= 0.04045 else ((value + 0.055) / 1.055) ** 2.4
+
+        def relative(rgb):
+            red, green, blue = (channel(v) for v in rgb)
+            return 0.2126 * red + 0.7152 * green + 0.0722 * blue
+
+        panel = relative(self._token("--staff-panel"))
+        violations = []
+        for name, minimum in (("--staff-text", 7.0), ("--staff-muted", 4.5)):
+            ink = relative(self._token(name))
+            high, low = max(ink, panel), min(ink, panel)
+            ratio = (high + 0.05) / (low + 0.05)
+            if ratio < minimum:
+                violations.append(f"{name} على اللوحة {ratio:.2f}:1 دون {minimum}:1")
+        self.assertEqual(violations, [], f"تباينُ نصٍّ سقط تحت الحدّ: {violations}")
