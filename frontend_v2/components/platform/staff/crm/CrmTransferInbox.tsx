@@ -19,6 +19,11 @@ import { formatNumber } from '../../../../utils/formatNumber';
  *
  * والقائمةُ مضيَّقةٌ خادميّاً على ما يخصّ الطالبَ أو صاحبَ العميل، فما يظهر هنا
  * هو ما يحقّ لقارئه أن يراه — لا ترشيحَ في الواجهة يُلتفُّ عليه.
+ *
+ * **لكنّ الرؤيةَ ليست البتّ** (212-Q2-ب): كانت «قبول/رفض» تُرسَمان على كلّ طلبٍ
+ * معلَّق، ومنها ما طلبتَه أنت من زميلك — فينقر صاحبُه على «قبول» فيوافق على
+ * طلبِ نفسِه، ويردّ الخادمُ ٤٠٣. والزرُّ الآن خلف `can_decide` **الذي يقوله
+ * الخادم** من القاعدة نفسِها التي يرفض بها، لا من نسخةٍ ثانيةٍ لها هنا.
  */
 const STATUS_LABELS: Record<string, string> = {
   pending: 'بانتظار القرار',
@@ -107,30 +112,36 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
                       </p>
                       {row.reason && <p className="mt-1 text-sm text-[var(--staff-text)]">السبب: {row.reason}</p>}
                     </div>
-                    <div className="flex shrink-0 gap-2">
-                      <button
-                        type="button"
-                        onClick={() => void decide(row, true)}
-                        className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"
-                      >
-                        <Check className="h-4 w-4" />
-                        قبول
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setDecidingId(decidingId === row.id ? null : row.id)}
-                        className="inline-flex items-center gap-1 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-bold text-rose-300"
-                      >
-                        <X className="h-4 w-4" />
-                        رفض
-                      </button>
-                    </div>
+                    {!row.can_decide ? (
+                      <p className="shrink-0 rounded-full border border-[var(--staff-line)] bg-black/15 px-3 py-1 text-xs font-bold text-[var(--staff-muted)]">
+                        بانتظار قرار صاحب العميل
+                      </p>
+                    ) : (
+                      <div className="flex shrink-0 gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void decide(row, true)}
+                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"
+                        >
+                          <Check className="h-4 w-4" />
+                          قبول
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setDecidingId(decidingId === row.id ? null : row.id)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-bold text-rose-300"
+                        >
+                          <X className="h-4 w-4" />
+                          رفض
+                        </button>
+                      </div>
+                    )}
                   </div>
 
                   {/* سببُ الرفض حقلٌ في الصفحة لا `window.prompt`: الحوارُ الأصليُّ
                       للمتصفّح لا يُنسَّق ولا يُقرأ RTL، ونمطُ المستودع
                       `ToastProvider`/`ConfirmProvider` لا نوافذُ المتصفّح. */}
-                  {decidingId === row.id && (
+                  {decidingId === row.id && row.can_decide && (
                     <form
                       className="mt-3 flex flex-col gap-2 sm:flex-row"
                       onSubmit={(event) => { event.preventDefault(); void decide(row, false, rejectNote); }}

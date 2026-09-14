@@ -437,3 +437,71 @@ class CrmManagerActionsAreGuardedTest(TestCase):
                     rf"if \(!isManager[^)]*\)[\s\S]{{0,1600}}{action}",
                     f"فعل المدير {action} ليس خلف شرط صفة مدير صريحة.",
                 )
+
+
+def _braced_span(source: str, anchor: str) -> str:
+    """جسمُ تعبيرٍ من `{` عند `anchor` إلى قوسه المُطابِق.
+
+    التأكيدُ المطلوب «الزرّان **داخل** هذا الشرط»، ولا يُقاس بـ`in` على الملفّ
+    كلِّه: شرطٌ يبقى مكتوباً وزرٌّ يُنقَل من تحته يمرّان معاً.
+    """
+    start = source.index(anchor)
+    depth = 0
+    for index in range(start, len(source)):
+        if source[index] == "{":
+            depth += 1
+        elif source[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return source[start:index + 1]
+    raise AssertionError(f"تعبيرٌ مفتوحُ الأقواس عند: {anchor}")
+
+
+class CrmPromisesOnlyWhatTheServerAllowsTest(TestCase):
+    """212-Q2-ب — زرٌّ يَعِد بفعلٍ يردّه الخادمُ ٤٠٣ دعوةٌ إلى إحباط.
+
+    ليست هذه صلاحيّةَ سوبر أدمن (تلك حرسها 212-Q2) بل **صلاحيّةَ صاحبِ الشيء**:
+    الخادمُ يبتّ في التحويل لصاحب العميل أو المدير، ويكتب النشاطَ والحالةَ لهما
+    وحدَهما — والشاشةُ كانت ترسم الأزرارَ للجميع.
+    """
+
+    def test_the_decide_buttons_sit_inside_the_server_flag(self):
+        source = (CRM_UI / "CrmTransferInbox.tsx").read_text(encoding="utf-8")
+        span = _braced_span(source, "{!row.can_decide ?")
+        for trigger in ("void decide(row, true)", "setDecidingId(decidingId === row.id"):
+            with self.subTest(trigger=trigger):
+                self.assertIn(
+                    trigger, span,
+                    "زرُّ البتّ خارج شرط `can_decide` — يُرسَم لطالب التحويل نفسِه.",
+                )
+
+    def test_the_reject_form_is_gated_too_not_only_its_button(self):
+        """الزرُّ بابٌ والنموذجُ بابٌ ثانٍ: حجبُ الأوّل وحدَه يترك الثاني قابلاً للفتح."""
+        source = (CRM_UI / "CrmTransferInbox.tsx").read_text(encoding="utf-8")
+        self.assertIn("decidingId === row.id && row.can_decide", source)
+
+    def test_the_inbox_does_not_rewrite_the_rule_from_the_row(self):
+        """`from_employee` مالكُ **يومِ الطلب**؛ نسخةٌ ثانيةٌ من القاعدة به تكذب بعد انتقال العميل."""
+        source = (CRM_UI / "CrmTransferInbox.tsx").read_text(encoding="utf-8")
+        self.assertNotIn("from_employee?.id ===", source)
+        self.assertNotIn("myEmployeeId", source)
+
+    def test_writing_on_a_lead_is_gated_by_ownership_in_the_profile(self):
+        """`log_activity` و`change_lead_status` ترفعان ٤٠٣ لغير صاحب العميل والمدير."""
+        source = (CRM_UI / "CrmLeadProfile.tsx").read_text(encoding="utf-8")
+        self.assertIn("const canWrite = isOwner || isManager;", source)
+        for anchor in ('{canWrite ? <div className="mt-4 flex', '{canWrite ? <div className="mt-5 flex'):
+            with self.subTest(anchor=anchor):
+                self.assertIn(anchor, source, "نموذجُ كتابةٍ بلا شرط ملكيّة.")
+        self.assertIn("{noteOpen && canWrite &&", source)
+
+    def test_requesting_a_transfer_stays_open_to_everyone(self):
+        """**الحجبُ لا يُوسَّع**: طلبُ التحويل غرضُه أن يفتحه من ليس صاحبَ العميل.
+
+        وبلا هذا التأكيد يكون «أغلقتُ كلَّ شيءٍ خلف `canWrite`» إصلاحاً يمرّ
+        أخضرَ ويسدّ البابَ الذي بُني عمداً (`transfer-requests/` في الخادم).
+        """
+        source = (CRM_UI / "CrmLeadProfile.tsx").read_text(encoding="utf-8")
+        form_start = source.index("<form onSubmit={submitTransfer}")
+        prefix = source[max(0, form_start - 120):form_start]
+        self.assertNotIn("canWrite", prefix, "نموذجُ طلب التحويل صار خلف شرط الملكيّة.")

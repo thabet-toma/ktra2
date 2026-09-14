@@ -2,6 +2,7 @@
 from rest_framework import serializers
 
 from .models import Lead, LeadActivity, LeadImportBatch, LeadPhone, LeadTransfer
+from .services import can_decide_lead_transfer
 
 
 def _employee_summary(employee):
@@ -108,11 +109,28 @@ class LeadStatusChangeSerializer(serializers.Serializer):
 class LeadTransferSerializer(serializers.ModelSerializer):
     from_employee = serializers.SerializerMethodField()
     to_employee = serializers.SerializerMethodField()
+    #: هل يملك قارئُ هذا الصفّ البتَّ فيه؟ — من `can_decide_lead_transfer` نفسِها
+    #: التي يرفض بها الخادم، لا من نسخةٍ ثانيةٍ للقاعدة في الواجهة.
+    can_decide = serializers.SerializerMethodField()
 
     class Meta:
         model = LeadTransfer
-        fields = ["id", "lead", "from_employee", "to_employee", "reason", "status", "created_at", "decided_at"]
+        fields = [
+            "id", "lead", "from_employee", "to_employee", "reason", "status",
+            "created_at", "decided_at", "can_decide",
+        ]
         read_only_fields = fields
+
+    def get_can_decide(self, obj):
+        # بلا سياقٍ يُحقن (تسلسلٌ خارجَ الـviewset) الجوابُ **لا**: التقصيرُ إلى
+        # الحجب يُخفي زرّاً موجوداً، والتقصيرُ إلى الإظهار يَعِد بصلاحيّةٍ ليست.
+        if obj.status != LeadTransfer.Status.PENDING:
+            return False
+        return can_decide_lead_transfer(
+            transfer=obj,
+            employee=self.context.get("current_employee"),
+            is_manager=bool(self.context.get("is_manager")),
+        )
 
     def get_from_employee(self, obj):
         return _employee_summary(obj.from_employee)

@@ -320,6 +320,22 @@ def request_lead_transfer(*, lead: Lead, to_employee, reason: str, actor) -> Lea
     )
 
 
+def can_decide_lead_transfer(*, transfer: LeadTransfer, employee, is_manager: bool) -> bool:
+    """من يبتّ في طلبِ تحويل: صاحبُ العميل **الآن** أو المدير (212-Q2-ب).
+
+    **قاعدةٌ واحدةٌ في موضعٍ واحد** يقرؤها الخادمُ حين يرفض والمُسلسِلُ حين يقول
+    للشاشة أيُّ زرٍّ يُرسَم. كانت الشاشةُ ترسم «قبول/رفض» على كلّ طلبٍ معلَّقٍ —
+    ومنها ما طلبتَه أنت بنفسِك — فيأتي الجوابُ ٤٠٣: زرٌّ يَعِد بما لا يملكه ناقرُه.
+
+    و**صاحبُ العميل الآن** لا `from_employee` المحفوظ في الطلب: الطلبُ يسجّل من
+    كان مالكاً يومَ كُتب، والعميلُ قد ينتقل بعدَه — فنسخُ القاعدة في الواجهة
+    بـ`from_employee` يرسم الزرَّ لمن لم يعد يملك، ويحجبه عمّن صار يملك.
+    """
+    if is_manager:
+        return True
+    return employee is not None and transfer.lead.assigned_to_id == employee.pk
+
+
 @transaction.atomic
 def decide_lead_transfer(*, transfer: LeadTransfer, approve: bool, actor, note: str = "") -> LeadTransfer:
     """البتُّ في طلب تحويل معلَّق — القبولُ يعيد الإسناد، والرفضُ يحفظ الملاحظة."""

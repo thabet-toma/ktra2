@@ -21,7 +21,7 @@
 |---|---|
 | `crm/models.py` | `LeadImportBatch`، `Lead`، `LeadPhone` (مفتاحُ الفرادة)، `LeadActivity` (append-only)، `LeadTransfer` — **كلُّها بلا `tenant`** عمداً (زبائنُ كترا لا زبائن شركة)، محروسٌ بـ`crm/tests/test_crm_isolation_guard.py` |
 | `crm/phone.py` | `normalize_phone` — تطبيعُ الهاتف إلى E.164، مفتاحُ فرادةٍ مخزَّنٌ في القاعدة فلا يُعدَّل بلا هجرةِ بيانات |
-| `crm/services.py` | كلُّ الكتابة: `create_lead`/`suggest_lead`/`claim_lead`/`release_lead`/`log_activity`/`change_lead_status`/`transfer_lead`/`request_lead_transfer`/`decide_lead_transfer`/`approve_lead`/`reject_lead`/`import_leads`/`employee_lead_stats`/`manager_lead_overview`/`lead_contact_stats`؛ والإحصاءات تجمع المتابعات المتأخرة بلا استعلام لكل موظف، وحدُّ «اليوم» من `follow_up_day_bounds` وحدَها (المصدرُ الواحد لمعنى «متأخّر»). و`lead_contact_stats` ستاتستكسُ الرقم الواحد (212-R4) بتجميعتين ثابتتين مهما طال السجلّ، وتَعُدُّ **`CONTACT_ACTIVITY_KINDS` وحدَها** (مكالمة/واتساب/زيارة): الملاحظةُ ليست تواصلاً، و`status_change` و`assignment` و`transfer` صفوفٌ يكتبها النظامُ عن نفسِه |
+| `crm/services.py` | كلُّ الكتابة: `create_lead`/`suggest_lead`/`claim_lead`/`release_lead`/`log_activity`/`change_lead_status`/`transfer_lead`/`request_lead_transfer`/`decide_lead_transfer`/`can_decide_lead_transfer`/`approve_lead`/`reject_lead`/`import_leads`/`employee_lead_stats`/`manager_lead_overview`/`lead_contact_stats`؛ والإحصاءات تجمع المتابعات المتأخرة بلا استعلام لكل موظف، وحدُّ «اليوم» من `follow_up_day_bounds` وحدَها (المصدرُ الواحد لمعنى «متأخّر»). و`lead_contact_stats` ستاتستكسُ الرقم الواحد (212-R4) بتجميعتين ثابتتين مهما طال السجلّ، وتَعُدُّ **`CONTACT_ACTIVITY_KINDS` وحدَها** (مكالمة/واتساب/زيارة): الملاحظةُ ليست تواصلاً، و`status_change` و`assignment` و`transfer` صفوفٌ يكتبها النظامُ عن نفسِه |
 | `crm/views.py` | `LeadViewSet` (وفيه `stats` — قراءةٌ تلبس تضييقَ `retrieve` نفسَه فصفُّ زميلٍ يردّ ٤٠٤ لا أرقاماً عنه؛ ومن قائمته `follow_up=due|overdue|upcoming` بعد تضييق النطاق، بحدِّ **يومٍ** لا لحظةٍ فالثلاثةُ مجموعاتٌ متمايزةٌ و`overdue ⊂ due`)، `LeadTransferViewSet`، `MyLeadStatsView`، `ManagerLeadOverviewView`، `ColleagueDirectoryView` |
 | `crm/urls.py` | مسارات `/api/platform/crm/` |
 | `crm/tests/` | اختباراتُ الوحدة — راجع §الاختبارات (العددُ يتغيّر فلا يُكتب) |
@@ -87,8 +87,8 @@
 |---|---|
 | `CrmPanel.tsx` | الحاوية: النطاقُ والترشيحُ والاستلامُ والبحثُ بالرقم، ومنها نطاق «متابعاتي» الذي يطلب المستحقّ والمتأخر من عملائي — **وتبويبُه خلف وجودِ دفترٍ شخصيّ** (`hasPersonalDesk`) لأنّ `scope=mine` بلا صفِّ موظّفٍ صفرٌ بحكم البناء، ويحرسه `test_the_follow_ups_tab_is_hidden_from_a_desk_that_cannot_have_rows`، ولوحُ المدير للمدير وحدَه |
 | `CrmLeadList.tsx` | القائمةُ وبطاقةُ «بحثِ الرقم قبل الاتصال» بحالاتها الثلاث (مقفولٌ · في المخزن فيظهر «استلام» · غيرُ مسجَّل)، وموعد المتابعة القادم مع تمييز المتأخر |
-| `CrmLeadProfile.tsx` | ملفُّ العميل: خطّ مراحل الحالة، وسجلُّ التواصل الذي يبيّن انتقال الحالة، وتسجيلُ اتّصالٍ ورابطُ `wa.me` وطلبُ التحويل والإعادةُ للمخزن — **وقسمُ ستاتستكس الرقم** (212-R4) بأرقامٍ من `leads/<pk>/stats/` لا من صفحة السجلّ المحمَّلة، وحكمُ الانتباه عليها من `utils/leadContactStats.ts` (عتبتا الركود فيه مرّةً واحدة) |
-| `CrmTransferInbox.tsx` | صندوقُ طلبات التحويل والبتُّ فيها — **بلا هذه اللوحة يصير زرُّ «طلب تحويل العميل» باباً مسدوداً** |
+| `CrmLeadProfile.tsx` | ملفُّ العميل: خطّ مراحل الحالة، وسجلُّ التواصل الذي يبيّن انتقال الحالة، وتسجيلُ اتّصالٍ ورابطُ `wa.me` وطلبُ التحويل والإعادةُ للمخزن — **وقسمُ ستاتستكس الرقم** (212-R4) بأرقامٍ من `leads/<pk>/stats/` لا من صفحة السجلّ المحمَّلة، وحكمُ الانتباه عليها من `utils/leadContactStats.ts` (عتبتا الركود فيه مرّةً واحدة). **ونموذجا الحالة والنشاط خلف `canWrite = isOwner || isManager`** (212-Q2-ب) لأنّ الخدمةَ ترفعهما ٤٠٣ لغيرهما، بينما **طلبُ** التحويل يبقى مفتوحاً للجميع فذاك غرضُه |
+| `CrmTransferInbox.tsx` | صندوقُ طلبات التحويل والبتُّ فيها — **بلا هذه اللوحة يصير زرُّ «طلب تحويل العميل» باباً مسدوداً**؛ وزرّا «قبول/رفض» خلف `can_decide` **الذي يقوله الخادم** (212-Q2-ب) فلا يُرسَمان لطالب التحويل نفسِه |
 | `CrmMyStats.tsx` | عدّاداتُ الموظّف من `stats/me/` — مجموعةٌ في الخادم لا محسوبةٌ في الواجهة |
 | `CrmManagerPanel.tsx` | رفعُ الأرقام بنتيجةِ دفعةٍ كاملة (مُنشأ/مكرَّر/غيرُ صالح + مَن لديه كلُّ مكرَّر)، واعتمادُ الاقتراحات ورفضُها، وعلى بطاقةِ كلِّ موظّفٍ شارةُ «متأخرة» **حقلاً يُعرَض لا نصّاً يُلحَم في اسمه** |
 
@@ -115,7 +115,11 @@
    يستلزم هجرةَ بياناتٍ تعيد تطبيعَ الصفوف القديمة.
 6. **لا `tenant` على أيّ نموذج هنا** — محروسٌ بقائمةٍ بيضاءَ صريحة
    (`crm/tests/test_crm_isolation_guard.py`).
-7. **لا نسخةَ ثانيةً من قاعدة صلاحيّة** — الصلاحيّتان تُستورَدان من
+7. **قاعدةُ «من يبتّ في التحويل» في `can_decide_lead_transfer` وحدَها** —
+   يقرؤها الخادمُ حين يرفض، ويقرؤها المُسلسِلُ ليقول للشاشة أيَّ زرٍّ ترسم
+   (`can_decide`). واشتقاقُها في الواجهة من `from_employee` **يكذب**: ذاك
+   مالكُ يومِ الطلب، والعميلُ قد ينتقل بعدَه.
+8. **لا نسخةَ ثانيةً من قاعدة صلاحيّة** — الصلاحيّتان تُستورَدان من
    `platform_ops.permissions` لا تُستنسَخان؛ ونسخُهما محلّياً يخلق تبايناً
    مستقبليّاً في قاعدةِ أمن (راجع القرار المعماريّ أعلاه).
 8. **لا يستورد `crm` أيُّ تطبيقِ شركات** — الشرطُ الذي يُبقي عنقودَ المنصّة

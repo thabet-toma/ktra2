@@ -84,6 +84,62 @@ class LeadTransferTest(APITestCase):
         )
         self.assertEqual(direct.status_code, 201, direct.content)
 
+    def _pending_request(self) -> int:
+        """طلبٌ معلَّقٌ من زميلٍ على عميل `self.owner` — يعيد معرّفَه."""
+        self.client.force_authenticate(user=self.bystander_user)
+        res = self.client.post(
+            f"/api/platform/crm/leads/{self.lead.pk}/transfer-requests/",
+            {"to_employee": self.bystander.pk, "reason": "أعرف صاحب المحل"}, format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        return res.json()["id"]
+
+    def _can_decide_for(self, user, transfer_id: int) -> bool:
+        self.client.force_authenticate(user=user)
+        res = self.client.get("/api/platform/crm/transfer-requests/")
+        self.assertEqual(res.status_code, 200, res.content)
+        body = res.json()
+        rows = body.get("results", body) if isinstance(body, dict) else body
+        row = next(row for row in rows if row["id"] == transfer_id)
+        return row["can_decide"]
+
+    def test_the_requester_is_told_he_cannot_decide_his_own_request(self):
+        """212-Q2-ب: الصندوقُ كان يرسم «قبول» لطالبِ التحويل نفسِه، والخادمُ يردّ ٤٠٣."""
+        transfer_id = self._pending_request()
+        self.assertFalse(self._can_decide_for(self.bystander_user, transfer_id))
+        self.assertTrue(self._can_decide_for(self.owner_user, transfer_id))
+        self.assertTrue(self._can_decide_for(self.manager, transfer_id))
+
+    def test_the_flag_follows_the_lead_not_the_row_it_was_written_on(self):
+        """`from_employee` يسجّل مالكَ **يومِ الطلب**، والعميلُ قد ينتقل بعدَه.
+
+        فاشتقاقُ الزرّ منه في الواجهة يرسمه لمن لم يعد يملك — ولذلك الحقلُ يأتي
+        من الخادم مقروءاً من `lead.assigned_to` **الآن**.
+
+        وثغرةٌ مجاورةٌ وُجدت أثناء كتابة هذا الاختبار ولم تُصلَح هنا (خارج نطاق
+        التذكرة): `LeadTransferViewSet.get_queryset` يُضيَّق على
+        `from_employee | to_employee`، فمن صار صاحبَ العميل بعد كتابة الطلب
+        **لا يرى الطلبَ أصلاً** وإن كان `decide` يسمح له. أثرُها محصورٌ في حالةِ
+        انتقالِ عميلٍ وطلبٌ معلَّقٌ عليه، والمديرُ يبتّ فيها.
+        """
+        transfer_id = self._pending_request()
+        # الطالبُ نفسُه في الاختبار السابق يملك البتَّ لأنّه صاحبُ العميل؛ وهنا
+        # يفقده **دون أن يتغيّر الصفُّ** — فالحقلُ يقرأ العميلَ لا الصفَّ.
+        self.assertTrue(self._can_decide_for(self.owner_user, transfer_id))
+        self.lead.assigned_to = self.other
+        self.lead.save(update_fields=["assigned_to"])
+        self.assertFalse(self._can_decide_for(self.owner_user, transfer_id))
+
+    def test_a_settled_request_offers_no_decision_to_anyone(self):
+        transfer_id = self._pending_request()
+        self.client.force_authenticate(user=self.owner_user)
+        decided = self.client.post(
+            f"/api/platform/crm/transfer-requests/{transfer_id}/decide/", {"approve": False}, format="json",
+        )
+        self.assertEqual(decided.status_code, 200, decided.content)
+        self.assertFalse(decided.json()["can_decide"])
+        self.assertFalse(self._can_decide_for(self.manager, transfer_id))
+
     def test_old_transfer_record_stays_readable_after_transfer(self):
         self.client.force_authenticate(user=self.owner_user)
         first = self.client.post(

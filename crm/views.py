@@ -29,6 +29,7 @@ from .services import (
     CrmError,
     DuplicateLeadError,
     approve_lead,
+    can_decide_lead_transfer,
     change_lead_status,
     claim_lead,
     decide_lead_transfer,
@@ -54,6 +55,15 @@ def _is_manager(request, view) -> bool:
 
 def _current_employee(request):
     return getattr(request.user, "platform_employee", None)
+
+
+def _transfer_context(request, view) -> dict:
+    """سياقُ `LeadTransferSerializer` — هويّتان يحتاجهما `can_decide` (212-Q2-ب)."""
+    return {
+        "request": request,
+        "is_manager": _is_manager(request, view),
+        "current_employee": _current_employee(request),
+    }
 
 
 def _get_employee_or_400(pk):
@@ -302,7 +312,11 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             )
         except CrmError as exc:
             return _error_response(exc)
-        return Response(LeadTransferSerializer(transfer).data, status=201)
+        # السياقُ يُمرَّر هنا أيضاً كي لا يكون `can_decide` في جوابِ الإنشاء
+        # أصدقَ أو أكذبَ منه في جوابِ القائمة — حقلٌ واحدٌ بمعنًى واحد.
+        return Response(
+            LeadTransferSerializer(transfer, context=_transfer_context(request, self)).data, status=201,
+        )
 
     @action(detail=True, methods=["post"], url_path="transfer-requests")
     def transfer_request(self, request, pk=None):
@@ -316,7 +330,11 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
             )
         except CrmError as exc:
             return _error_response(exc)
-        return Response(LeadTransferSerializer(transfer).data, status=201)
+        # السياقُ يُمرَّر هنا أيضاً كي لا يكون `can_decide` في جوابِ الإنشاء
+        # أصدقَ أو أكذبَ منه في جوابِ القائمة — حقلٌ واحدٌ بمعنًى واحد.
+        return Response(
+            LeadTransferSerializer(transfer, context=_transfer_context(request, self)).data, status=201,
+        )
 
     @action(detail=True, methods=["post"], permission_classes=[IsPlatformOperationsManager])
     def approve(self, request, pk=None):
@@ -367,12 +385,17 @@ class LeadTransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, view
             return qs.none()
         return qs.filter(Q(from_employee=employee) | Q(to_employee=employee))
 
+    def get_serializer_context(self):
+        # المُسلسِلُ يحتاج الهويّتين ليجيب `can_decide`، وهما تُحسَبان هنا حيث
+        # يعيش `IsPlatformOperationsManager` — فلا يستورد المُسلسِلُ الـviews.
+        return {**super().get_serializer_context(), **_transfer_context(self.request, self)}
+
     @action(detail=True, methods=["post"])
     def decide(self, request, pk=None):
         transfer = self.get_object()
         is_manager = _is_manager(request, self)
         employee = _current_employee(request)
-        if not is_manager and (employee is None or transfer.lead.assigned_to_id != employee.pk):
+        if not can_decide_lead_transfer(transfer=transfer, employee=employee, is_manager=is_manager):
             raise PermissionDenied("لا صلاحيةَ لك للبتّ في هذا التحويل.")
         payload = TransferDecisionSerializer(data=request.data)
         payload.is_valid(raise_exception=True)
@@ -383,7 +406,7 @@ class LeadTransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, view
             )
         except CrmError as exc:
             return _error_response(exc)
-        return Response(LeadTransferSerializer(transfer).data)
+        return Response(LeadTransferSerializer(transfer, context=_transfer_context(request, self)).data)
 
 
 class ColleagueDirectoryView(APIView):

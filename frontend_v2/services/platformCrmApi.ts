@@ -25,6 +25,14 @@ export interface CrmActivity {
 export interface CrmTransfer {
   id: number; lead: number; from_employee: CrmEmployeeSummary | null; to_employee: CrmEmployeeSummary | null;
   reason: string; status: string; created_at: string; decided_at: string | null;
+  /**
+   * هل يملك قارئُ هذا الصفّ البتَّ فيه؟ (212-Q2-ب)
+   *
+   * **يقوله الخادمُ ولا يُشتقُّ هنا**: القاعدةُ «صاحبُ العميل الآن أو المدير»
+   * تعيش في `crm/services.py::can_decide_lead_transfer`، ونسخةٌ ثانيةٌ منها
+   * بـ`from_employee` تكذب متى انتقل العميلُ بعد كتابة الطلب.
+   */
+  can_decide: boolean;
 }
 export interface CrmColleague { id: number; name: string; job_title: string; is_me: boolean; }
 /**
