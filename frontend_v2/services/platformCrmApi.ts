@@ -27,6 +27,23 @@ export interface CrmTransfer {
   reason: string; status: string; created_at: string; decided_at: string | null;
 }
 export interface CrmColleague { id: number; name: string; job_title: string; is_me: boolean; }
+/**
+ * ستاتستكس الرقم الواحد (212-R4) — **مجمَّعةٌ في الخادم**.
+ *
+ * ولا تُشتقّ من `CrmActivity[]` المحمَّلة: تلك صفحةٌ من خمسين، فالعدُّ منها يكذب
+ * على رقمٍ طويل السجلّ. الحكمُ على هذه الأرقام في `utils/leadContactStats.ts`.
+ */
+export interface CrmLeadContactStats {
+  age_days: number;
+  contact_attempts: number;
+  by_kind: Partial<Record<Extract<CrmActivityKind, 'call' | 'whatsapp' | 'visit'>, number>>;
+  last_contact_at: string | null;
+  days_since_last_contact: number | null;
+  days_in_status: number;
+  handlers: number;
+  follow_up_state: 'overdue' | 'due_today' | 'upcoming' | 'none';
+  next_follow_up_at: string | null;
+}
 export interface CrmStats { assigned: number; contacted: number; interested: number; follow_up: number; customer: number; not_interested: number; overdue: number; }
 export interface CrmOverviewEmployee { employee_id: number; employee_name: string; total: number; overdue: number; by_status: Partial<Record<CrmLeadStatus, number>>; }
 export interface CrmOverview { employees: CrmOverviewEmployee[]; pool_size: number; }
@@ -55,6 +72,7 @@ export const claimCrmLead = (id: number) => apiPostObject<CrmLead>(`${CRM_ROOT}l
 export const releaseCrmLead = (id: number, reason: string) => apiPostObject<CrmLead>(`${CRM_ROOT}leads/${id}/release/`, { reason });
 export const listCrmActivities = async (id: number): Promise<CrmPage<CrmActivity>> => pageRows(await apiGetObject<CrmPage<CrmActivity> | CrmActivity[]>(`${CRM_ROOT}leads/${id}/activities/`));
 export const createCrmActivity = (id: number, input: CrmActivityInput) => apiPostObject<CrmActivity>(`${CRM_ROOT}leads/${id}/activities/`, record(input));
+export const getCrmLeadStats = (id: number) => apiGetObject<CrmLeadContactStats>(`${CRM_ROOT}leads/${id}/stats/`);
 export const changeCrmLeadStatus = (id: number, status: CrmLeadStatus, body = '') => apiPostObject<CrmLead>(`${CRM_ROOT}leads/${id}/status/`, { status, body });
 export const transferCrmLead = (id: number, to_employee: number, reason: string) => apiPostObject<CrmTransfer>(`${CRM_ROOT}leads/${id}/transfer/`, { to_employee, reason });
 export const requestCrmLeadTransfer = (id: number, to_employee: number, reason: string) => apiPostObject<CrmTransfer>(`${CRM_ROOT}leads/${id}/transfer-requests/`, { to_employee, reason });

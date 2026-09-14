@@ -35,6 +35,7 @@ from .services import (
     employee_lead_stats,
     follow_up_day_bounds,
     import_leads,
+    lead_contact_stats,
     log_activity,
     lookup_lead_by_phone,
     manager_lead_overview,
@@ -165,7 +166,10 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         )
         if self.action == "list":
             qs = _scoped_queryset_for_list(base, self.request, self)
-        elif self.action == "retrieve":
+        elif self.action in {"retrieve", "stats"}:
+            # `stats` قراءةٌ على صفٍّ واحد، فتلبس تضييقَ `retrieve` نفسَه: صفُّ
+            # زميلٍ يردّ ٤٠٤ لا أرقاماً عنه. ولو لبست تضييقَ الباقي (الصفوفَ
+            # كلَّها) لصارت النقطةُ بابَ تجسّسٍ على شغل الزميل بلا حارس.
             qs = _scoped_queryset_for_retrieve(base, self.request, self)
         else:
             qs = base
@@ -264,6 +268,11 @@ class LeadViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, viewsets.Gen
         except CrmError as exc:
             return _error_response(exc)
         return Response(LeadActivitySerializer(activity).data, status=201)
+
+    @action(detail=True, methods=["get"])
+    def stats(self, request, pk=None):
+        """ستاتستكس الرقم (212-R4) — تُحسَب في الخادم لأنّ سجلَّ التواصل مُصفَّح."""
+        return Response(lead_contact_stats(self.get_object()))
 
     @action(detail=True, methods=["post"], url_path="status")
     def change_status(self, request, pk=None):

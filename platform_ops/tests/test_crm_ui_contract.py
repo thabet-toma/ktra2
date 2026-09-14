@@ -35,6 +35,7 @@ ROUTE_TO_FUNCTION = {
     "/api/platform/crm/leads/1/activities/": "listCrmActivities",
     "/api/platform/crm/leads/1/claim/": "claimCrmLead",
     "/api/platform/crm/leads/1/release/": "releaseCrmLead",
+    "/api/platform/crm/leads/1/stats/": "getCrmLeadStats",
     "/api/platform/crm/leads/1/status/": "changeCrmLeadStatus",
     "/api/platform/crm/leads/1/transfer/": "transferCrmLead",
     "/api/platform/crm/leads/1/transfer-requests/": "requestCrmLeadTransfer",

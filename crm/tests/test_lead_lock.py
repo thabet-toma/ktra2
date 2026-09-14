@@ -25,6 +25,7 @@ OWNERSHIP_EXERCISED = frozenset({
     "/api/platform/crm/leads/1/",
     "/api/platform/crm/leads/1/activities/",
     "/api/platform/crm/leads/1/claim/",
+    "/api/platform/crm/leads/1/stats/",
     "/api/platform/crm/leads/1/status/",
     "/api/platform/crm/leads/1/transfer/",
     "/api/platform/crm/leads/lookup/",
@@ -151,6 +152,17 @@ class LeadLockTest(APITestCase):
         )
         self.assertIn(write.status_code, (403, 404), write.content)
         self.assertEqual(self.lead.activities.count(), 0)
+
+    def test_a_colleague_cannot_read_the_numbers_of_a_lead_that_is_not_his(self):
+        """ستاتستكس الرقم (212-R4) تلبس تضييقَ `retrieve` نفسَه — **٤٠٤ لا أرقام**.
+
+        ولو لبست تضييقَ بقيّة الأفعال (الصفوفَ كلَّها) لصارت بابَ تجسّسٍ أنظفَ من
+        فتح الملفّ: «كم مرّةً كلّمه، ومتى آخرَ مرّة، وكم يداً مرّت عليه» بلا أن
+        يظهر الاطّلاعُ في سجلّ شيء.
+        """
+        self.client.force_authenticate(user=self.colleague_user)
+        res = self.client.get(f"/api/platform/crm/leads/{self.lead.pk}/stats/")
+        self.assertEqual(res.status_code, 404, res.content)
 
     def test_a_colleague_cannot_transfer_a_lead_away_from_its_owner(self):
         """التحويلُ المباشرُ لصاحبه أو المدير — وغيرُهما **يطلب** لا يحوّل."""

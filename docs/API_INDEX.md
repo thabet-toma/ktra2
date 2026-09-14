@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **860**
+عدد النقاط: **861**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -550,6 +550,7 @@
 | `/api/platform/crm/leads/{pk}/claim/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/{pk}/reject/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/{pk}/release/` | `LeadViewSet` | `crm/views.py` |
+| `/api/platform/crm/leads/{pk}/stats/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/{pk}/status/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/{pk}/transfer-requests/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/{pk}/transfer/` | `LeadViewSet` | `crm/views.py` |

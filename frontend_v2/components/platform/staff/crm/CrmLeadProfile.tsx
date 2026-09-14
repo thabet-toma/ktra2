@@ -1,22 +1,25 @@
 import React, { useMemo, useState } from 'react';
-import { ArrowRightLeft, MapPin, MessageCircle, Phone, Plus, StickyNote } from 'lucide-react';
+import { Activity, ArrowRightLeft, MapPin, MessageCircle, Phone, Plus, StickyNote } from 'lucide-react';
 
-import type { CrmActivity, CrmActivityInput, CrmColleague, CrmLead, CrmLeadStatus } from '../../../../services/platformCrmApi';
+import type { CrmActivity, CrmActivityInput, CrmColleague, CrmLead, CrmLeadContactStats, CrmLeadStatus } from '../../../../services/platformCrmApi';
 import { formatDateTimeValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
+import { arabicDayCount, contactRecencyLabel, leadAttentionBadge } from '../../../../utils/leadContactStats';
 import { CRM_LEAD_PIPELINE, STATUS_LABELS } from './CrmLeadList';
 
 const ACTIVITY_LABELS: Record<CrmActivity['kind'], string> = { call: 'مكالمة', whatsapp: 'واتساب', visit: 'زيارة', note: 'ملاحظة', status_change: 'تغيير حالة', assignment: 'إسناد', transfer: 'تحويل', materials_sent: 'إرسال مواد' };
 
 interface CrmLeadProfileProps {
   lead: CrmLead; activities: CrmActivity[]; loading: boolean; error: string; isManager: boolean; isOwner: boolean; colleagues: CrmColleague[];
+  /** ستاتستكس الرقم مجمَّعةً من الخادم — `null` حين يتعذّر جلبُها، ولا تُقفل الملفّ. */
+  stats: CrmLeadContactStats | null;
   onBack: () => void; onStatus: (status: CrmLeadStatus, body: string) => void; onActivity: (input: CrmActivityInput) => void;
   onTransfer: (toEmployee: number, reason: string, direct: boolean) => void;
   /** السببُ يأتي من حقلٍ في الصفحة لا من حوار المتصفّح. */
   onRelease: (reason: string) => void;
 }
 
-export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities, loading, error, isManager, isOwner, colleagues, onBack, onStatus, onActivity, onTransfer, onRelease }) => {
+export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities, stats, loading, error, isManager, isOwner, colleagues, onBack, onStatus, onActivity, onTransfer, onRelease }) => {
   const [noteOpen, setNoteOpen] = useState(false); const [activityKind, setActivityKind] = useState<CrmActivityInput['kind']>('note');
   const [body, setBody] = useState(''); const [nextFollowUp, setNextFollowUp] = useState(''); const [status, setStatus] = useState<CrmLeadStatus>(lead.status);
   const [transferTo, setTransferTo] = useState(''); const [reason, setReason] = useState('');
@@ -34,6 +37,9 @@ export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities
   // حالةُ المنتقي تتبع العميلَ: بلا هذا يبقى المنتقي على الحالة القديمة بعد
   // الحفظ فيخالف ما تعرضه الترويسةُ فوقه.
   React.useEffect(() => { setStatus(lead.status); }, [lead.status]);
+  // **الحكمُ من الأرقام المجمَّعة لا من `activities` المحمَّلة**: تلك صفحةٌ من
+  // خمسين صفّاً، فعدُّها يقول «كُلِّم ٥٠ مرّة» عن رقمٍ كُلِّم ثمانين.
+  const attention = stats ? leadAttentionBadge(stats) : null;
   const openActivity = (kind: CrmActivityInput['kind']) => { setActivityKind(kind); setNoteOpen(true); };
   const submitActivity = (event: React.FormEvent) => { event.preventDefault(); onActivity({ kind: activityKind, body, next_follow_up_at: nextFollowUp ? `${nextFollowUp}T09:00:00` : null }); setBody(''); setNextFollowUp(''); setNoteOpen(false); };
   const submitTransfer = (event: React.FormEvent) => { event.preventDefault(); if (!transferTo || !reason.trim()) return; onTransfer(Number(transferTo), reason, isOwner || isManager); setReason(''); setTransferTo(''); };
@@ -41,6 +47,8 @@ export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities
   return <section className="space-y-4" aria-label="ملف العميل">
     <button type="button" onClick={onBack} className="text-sm font-bold text-cyan-300 hover:text-cyan-200">← العودة إلى العملاء</button>
     <header className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><p className="text-sm text-[var(--staff-muted)]">ملف العميل</p><h1 className="mt-2 text-xl font-extrabold text-[var(--staff-text)]">🏪 {lead.store_name}</h1><p className="mt-2 text-sm text-[var(--staff-muted)]">صاحب المحل: {lead.owner_name || 'غير مسجل'}</p>{lead.city || lead.address ? <p className="mt-2 flex items-center gap-2 text-sm text-[var(--staff-muted)]"><MapPin className="h-4 w-4 text-cyan-300" />{[lead.city, lead.address].filter(Boolean).join(' – ')}</p> : null}<div className="mt-3 flex flex-wrap gap-4 text-sm"><span dir="ltr" className="inline-flex items-center gap-1 text-cyan-300"><Phone className="h-4 w-4" />{displayPhone?.raw || 'لا يوجد رقم'}</span>{hasWhatsApp && <span className="text-emerald-300">🟢 WhatsApp</span>}</div><div className="mt-4 border-t border-[var(--staff-line)] pt-4 text-sm"><p>الموظف المسؤول: <strong className="text-[var(--staff-text)]">{lead.assigned_to?.name || 'في المخزن المتاح'}</strong></p><p className="mt-1">الحالة: <strong className="text-amber-200">{STATUS_LABELS[lead.status]}</strong></p></div></header>
+
+    {stats && attention && <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30" aria-label="ستاتستكس الرقم"><div className="flex flex-wrap items-center justify-between gap-3"><h2 className="flex items-center gap-2 font-extrabold text-[var(--staff-text)]"><Activity className="h-5 w-5 text-cyan-300" />ستاتستكس الرقم</h2><span className={`rounded-full border px-3 py-1 text-xs font-bold ${attention.className}`}>{attention.label}</span></div><dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5"><div className="rounded-xl border border-[var(--staff-line)] bg-black/15 p-3"><dt className="text-xs text-[var(--staff-muted)]">آخر تواصل</dt><dd className="mt-1 text-sm font-extrabold text-[var(--staff-text)]">{contactRecencyLabel(stats.days_since_last_contact)}</dd>{stats.last_contact_at && <dd className="mt-1 text-xs text-[var(--staff-muted)]">{formatDateTimeValue(stats.last_contact_at)}</dd>}</div><div className="rounded-xl border border-[var(--staff-line)] bg-black/15 p-3"><dt className="text-xs text-[var(--staff-muted)]">مرّات التواصل</dt><dd className="mt-1 text-sm font-extrabold text-[var(--staff-text)]">{formatNumber(stats.contact_attempts)}</dd><dd className="mt-1 text-xs text-[var(--staff-muted)]">📞 {formatNumber(stats.by_kind.call || 0)} · 🟢 {formatNumber(stats.by_kind.whatsapp || 0)} · 🚶 {formatNumber(stats.by_kind.visit || 0)}</dd></div><div className="rounded-xl border border-[var(--staff-line)] bg-black/15 p-3"><dt className="text-xs text-[var(--staff-muted)]">في حالته الحالية</dt><dd className="mt-1 text-sm font-extrabold text-[var(--staff-text)]">{arabicDayCount(stats.days_in_status)}</dd></div><div className="rounded-xl border border-[var(--staff-line)] bg-black/15 p-3"><dt className="text-xs text-[var(--staff-muted)]">عمر الرقم</dt><dd className="mt-1 text-sm font-extrabold text-[var(--staff-text)]">{arabicDayCount(stats.age_days)}</dd></div><div className="rounded-xl border border-[var(--staff-line)] bg-black/15 p-3"><dt className="text-xs text-[var(--staff-muted)]">عدد من تولّاه</dt><dd className="mt-1 text-sm font-extrabold text-[var(--staff-text)]">{formatNumber(stats.handlers)}</dd></div></dl>{stats.next_follow_up_at && <p className="mt-3 text-sm text-[var(--staff-muted)]">المتابعة القادمة: <strong className={stats.follow_up_state === 'overdue' ? 'text-rose-300' : 'text-cyan-300'}>{formatDateTimeValue(stats.next_follow_up_at)}</strong></p>}</section>}
 
     <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h2 className="font-extrabold text-[var(--staff-text)]">حالة العميل</h2><div className="mt-4 grid grid-cols-5 gap-2" aria-label="مسار حالة العميل">{CRM_LEAD_PIPELINE.map((item, index) => <div key={item} className="min-w-0 text-center"><span className={`mx-auto flex h-7 w-7 items-center justify-center rounded-full text-xs font-extrabold ${happyIndex >= index ? 'bg-[var(--staff-accent)] text-slate-950' : 'bg-black/20 text-[var(--staff-muted)]'}`}>{formatNumber(index + 1)}</span><span className="mt-2 block truncate text-xs text-[var(--staff-muted)]">{STATUS_LABELS[item]}</span></div>)}</div><p className="mt-3 text-sm text-[var(--staff-muted)]">{happyIndex === -1 ? <span className="inline-flex rounded-full bg-amber-400/15 px-2 py-0.5 font-bold text-amber-200">الحالة الحالية: {STATUS_LABELS[lead.status]}</span> : `المرحلة ${formatNumber(happyIndex + 1)} من ${formatNumber(CRM_LEAD_PIPELINE.length)}`}</p><div className="mt-4 flex flex-wrap gap-2"><select value={status} onChange={(event) => setStatus(event.target.value as CrmLeadStatus)} className="rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" aria-label="تغيير حالة العميل">{Object.entries(STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><button type="button" onClick={() => onStatus(status, '')} className="rounded-lg border border-cyan-400/50 px-3 py-2 text-sm font-bold text-cyan-300">حفظ الحالة</button></div></section>
 

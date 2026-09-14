@@ -5,7 +5,7 @@
 from datetime import timedelta
 
 from django.db import IntegrityError, transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 
 # حدودُ اليوم المحلّيّ من الطبقة المشتركة — **لا `__date` أبداً**: جانغو يترجمها
@@ -474,6 +474,78 @@ def employee_lead_stats(employee) -> dict:
         "customer": counts.get(Lead.Status.CUSTOMER, 0),
         "not_interested": counts.get(Lead.Status.NOT_INTERESTED, 0),
         "overdue": overdue,
+    }
+
+
+#: أنواعُ النشاط التي تُعَدُّ **تواصلاً فعليّاً** مع صاحب الرقم (212-R4).
+#:
+#: الملاحظةُ ليست مكالمة، و`status_change` و`assignment` و`transfer` صفوفٌ يكتبها
+#: النظامُ عن نفسِه لا عن الزبون. فعدُّ `activities.count()` كلِّها يجعل رقماً
+#: حُوِّل مرّتين وسُجِّلت عليه ملاحظةٌ يبدو «كُلِّم ثلاثاً» وهو لم تُرفع له سمّاعة.
+#: والتفريقُ ليس اجتهاداً: HubSpot تفصل صراحةً «Last contacted» الضيّقةَ عن
+#: «Last activity» الواسعة التي تضمّ الملاحظاتِ والمهامّ.
+CONTACT_ACTIVITY_KINDS = (
+    LeadActivity.Kind.CALL,
+    LeadActivity.Kind.WHATSAPP,
+    LeadActivity.Kind.VISIT,
+)
+
+
+def _days_since(moment, today) -> int:
+    """فارقُ الأيّام المحلّيّة — **يومٌ لا لحظة**، ولا ينزل تحت الصفر.
+
+    وحدةُ الصدق هنا يومٌ للسبب نفسِه المشروح في `follow_up_day_bounds`: الشاشةُ
+    تكتب تاريخاً ثمّ تُلحق به `T09:00:00` اعتباطاً، فحسابُ «منذ كم» بالساعات
+    يجعل مكالمةَ الثامنة صباحاً «منذ صفر يوم» ومكالمةَ العاشرة مساءً «منذ يوم».
+    """
+    return max(0, (today - timezone.localdate(moment)).days)
+
+
+def lead_contact_stats(lead: Lead) -> dict:
+    """ستاتستكس الرقم الواحد (212-R4) — **استعلامان ثابتان مهما طال السجلّ**.
+
+    ولماذا في الخادم أصلاً والسجلُّ معروضٌ في الشاشة؟ لأنّ `activities` **مُصفَّحة**
+    (`OptionalPageNumberPagination` و`PAGE_SIZE = 50`): الشاشةُ تحمل الصفحةَ الأولى
+    وحدَها، فعدٌّ يُحسَب منها يقول «كُلِّم ٥٠ مرّة» عن رقمٍ كُلِّم ثمانين — ورقمٌ
+    خطأٌ بثقةٍ أسوأُ من لا رقم.
+    """
+    today = timezone.localdate()
+    start_of_today, start_of_tomorrow = follow_up_day_bounds()
+
+    rows = lead.activities.values("kind").annotate(n=Count("id"), last=Max("created_at"))
+    counted = {row["kind"]: row["n"] for row in rows}
+    last_of_kind = {row["kind"]: row["last"] for row in rows}
+
+    moments = [last_of_kind[kind] for kind in CONTACT_ACTIVITY_KINDS if last_of_kind.get(kind)]
+    last_contact_at = max(moments) if moments else None
+
+    totals = lead.activities.aggregate(
+        handlers=Count("employee_id", distinct=True),
+        last_status_change=Max("created_at", filter=Q(kind=LeadActivity.Kind.STATUS_CHANGE)),
+    )
+    # بلا تغييرِ حالةٍ مسجَّلٍ تكون «مدّةُ الحالة» عمرَ الرقم نفسِه: هو في حالته
+    # الأولى منذ أُنشئ — لا صفرٌ يوحي بأنّه تحرّك اليومَ.
+    status_since = totals["last_status_change"] or lead.created_at
+
+    if lead.next_follow_up_at is None:
+        follow_up_state = "none"
+    elif lead.next_follow_up_at < start_of_today:
+        follow_up_state = "overdue"
+    elif lead.next_follow_up_at < start_of_tomorrow:
+        follow_up_state = "due_today"
+    else:
+        follow_up_state = "upcoming"
+
+    return {
+        "age_days": _days_since(lead.created_at, today),
+        "contact_attempts": sum(counted.get(kind, 0) for kind in CONTACT_ACTIVITY_KINDS),
+        "by_kind": {str(kind): counted.get(kind, 0) for kind in CONTACT_ACTIVITY_KINDS},
+        "last_contact_at": last_contact_at,
+        "days_since_last_contact": _days_since(last_contact_at, today) if last_contact_at else None,
+        "days_in_status": _days_since(status_since, today),
+        "handlers": totals["handlers"],
+        "follow_up_state": follow_up_state,
+        "next_follow_up_at": lead.next_follow_up_at,
     }
 
 
