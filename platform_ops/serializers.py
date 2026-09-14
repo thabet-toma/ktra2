@@ -781,6 +781,42 @@ class PublicRatingSubmitSerializer(serializers.Serializer):
     )
 
 
+def resolve_user_by_identifier(value: str):
+    """مستخدمٌ مسجَّلٌ من اسمه أو بريده — **قاعدةٌ واحدةٌ لبابين**.
+
+    ترقيةُ مسؤول التوظيف وضمُّ موظّف المنصّة (212-Q4) كلاهما يسأل السؤالَ نفسَه،
+    ونسختان منه في ملفٍّ واحدٍ تفترقان عند أوّل تحسين (بحثٌ بالاسم الكامل مثلاً)
+    فيصير بابٌ يجد المستخدمَ وبابٌ لا يجده.
+    """
+    identifier = (value or "").strip()
+    if not identifier:
+        raise serializers.ValidationError("اكتب اسم المستخدم أو بريده.")
+    user = (
+        get_user_model()
+        .objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier))
+        .first()
+    )
+    if user is None:
+        raise serializers.ValidationError("لا يوجد مستخدم بهذا الاسم أو البريد.")
+    return user
+
+
+class PromotePlatformEmployeeSerializer(serializers.Serializer):
+    """مدخلاتُ «اجعله موظّفَ منصّة» (212-Q4) — **لا تُنشئ حساباً**.
+
+    بنمط `PlatformRecruiterSerializer`: المدير يعرف زميلَه باسمه ولا يملك شاشةً
+    تُريه معرّفاتِ المستخدمين، ولا شاشةَ يُسرَد فيها مستخدمو المنصّة كلُّهم.
+    """
+
+    identifier = serializers.CharField(max_length=254)
+    #: مفتاحُ `PolicyProfile` لا عنوانُ عرض — العمودُ نفسُه مئةُ محرف.
+    specialty = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+    job_title = serializers.CharField(max_length=100, required=False, allow_blank=True, default="")
+
+    def validate_identifier(self, value):
+        return resolve_user_by_identifier(value)
+
+
 class PlatformRecruiterSerializer(serializers.ModelSerializer):
     """محول بيانات مسؤول توظيف المنصة.
 
@@ -811,17 +847,7 @@ class PlatformRecruiterSerializer(serializers.ModelSerializer):
         read_only_fields = ["id", "user", "is_active", "created_at", "updated_at"]
 
     def validate_identifier(self, value):
-        identifier = (value or "").strip()
-        if not identifier:
-            raise serializers.ValidationError("اكتب اسم المستخدم أو بريده.")
-        user = (
-            get_user_model()
-            .objects.filter(Q(username__iexact=identifier) | Q(email__iexact=identifier))
-            .first()
-        )
-        if user is None:
-            raise serializers.ValidationError("لا يوجد مستخدم بهذا الاسم أو البريد.")
-        return user
+        return resolve_user_by_identifier(value)
 
     def get_full_name(self, obj) -> str:
         return obj.user.get_full_name() or obj.user.username

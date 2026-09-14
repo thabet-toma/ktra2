@@ -2007,6 +2007,81 @@ def offboard_platform_employee(
     return locked_employee
 
 
+def promote_user_to_platform_employee(
+    *,
+    user,
+    specialty: str = "",
+    job_title: str = "",
+) -> tuple[PlatformEmployee, bool]:
+    """جعلُ مستخدمٍ قائمٍ موظّفَ منصّة — **البابُ الثاني** (212-Q4).
+
+    كان الطريقُ الوحيدُ إلى صفِّ `PlatformEmployee` هو `accept_job_invitation`:
+    إعلانُ وظيفةٍ ← متقدّمٌ ← دعوةٌ ← قبولٌ يُنشئ الحسابَ والصفَّ معاً. فمن كان
+    له حسابٌ على المنصّة أصلاً — شريكٌ أو مؤسِّسٌ أو موظّفٌ قديمٌ عاد — لا سبيلَ
+    إلى ضمّه إلّا باختلاق إعلانٍ وهميٍّ ودعوةٍ لنفسه، أو بكتابةِ صفٍّ من الـshell.
+
+    ونظيرُها القائمُ في المستودع `create_platform_recruiter`: ترفع دورَ التوظيف
+    على مستخدمٍ مسجَّلٍ ولا تُنشئ حساباً. هذه أختُها للدور الأثقل.
+
+    **ولا تُنشئ حساباً**: إنشاءُ الحسابات بابُه الدعوة، وله كلمةُ مرورٍ يختارها
+    صاحبُها ويُتحقّق منها. أمّا هنا فالمستخدمُ موجودٌ ويدخل بما يعرفه.
+
+    **والتخصّصُ مفتاحُ سياسةٍ لا زينة**: يُطابَق بـ`PolicyProfile.specialty` في
+    احتساب الأداء، ودرجةُ الأداء مالٌ في المحفظة. فيُقصّ إلى مئة محرفٍ كما في
+    باب الدعوة (العمودُ مئة، والقصُّ على SQLite صامتٌ وعلى MySQL خطأ).
+
+    وعودةُ من غادر **إحياءٌ لا صفٌّ ثانٍ**: العلاقةُ `OneToOne`، فصفٌّ ثانٍ
+    مستحيلٌ أصلاً، وإنشاءٌ أعمى كان يسقط بتصادم الفرادة. والإحياءُ يُبقي تاريخَه
+    كلَّه — مهامَّه وملاحظاته ومحفظته — وهو المقصود: هذا الشخصُ نفسُه لا شخصٌ
+    جديدٌ يحمل اسمَه.
+
+    تُعيد `(employee, created)` — و`created=False` تعني إحياءَ صفٍّ قائم.
+    """
+    if not getattr(user, "is_active", True):
+        raise PlatformOpsError(
+            "inactive_user",
+            "الحسابُ معطَّلٌ؛ فعِّله قبل ضمّه إلى فريق المنصّة.",
+            status_code=400,
+        )
+
+    clean_specialty = (specialty or "").strip()[:100]
+    clean_job_title = (job_title or "").strip()[:100]
+
+    with transaction.atomic():
+        existing = (
+            PlatformEmployee.objects.select_for_update()
+            .filter(user=user)
+            .first()
+        )
+        if existing is not None:
+            if existing.status == PlatformEmployee.Status.ACTIVE:
+                raise PlatformOpsError(
+                    "already_platform_employee",
+                    "هذا المستخدمُ موظّفُ منصّةٍ نشطٌ بالفعل.",
+                    status_code=409,
+                )
+            # الحقولُ لا تُمحى بفراغ: إحياءٌ بلا تخصّصٍ جديدٍ يُبقي تخصّصَه القديم
+            # ومعه سياسةُ تقييمه، بدل أن يعود بسياسةٍ افتراضيّةٍ بلا أن يلاحظ أحد.
+            fields = ["status", "updated_at"]
+            existing.status = PlatformEmployee.Status.ACTIVE
+            if clean_specialty:
+                existing.specialty = clean_specialty
+                fields.append("specialty")
+            if clean_job_title:
+                existing.job_title = clean_job_title
+                fields.append("job_title")
+            existing.save(update_fields=fields)
+            return existing, False
+
+        employee = PlatformEmployee.objects.create(
+            user=user,
+            specialty=clean_specialty,
+            job_title=clean_job_title,
+            status=PlatformEmployee.Status.ACTIVE,
+        )
+        return employee, True
+
+
 # ==============================================================================
 # المرحلة الثالثة (م٣): أوامر العمل ومحطاتها وأجلها وتسليمها وتعليقاتها
 # ==============================================================================

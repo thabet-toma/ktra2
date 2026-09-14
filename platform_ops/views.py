@@ -59,6 +59,7 @@ from .services import (
     create_job_posting,
     create_platform_meeting,
     create_platform_recruiter,
+    promote_user_to_platform_employee,
     decide_meeting_excuse,
     activate_paid_subscription,
     activate_subscription_policy,
@@ -245,6 +246,7 @@ from .serializers import (
     PerformanceSnapshotSerializer,
     PlatformActivityLogSerializer,
     PlatformEmployeeSerializer,
+    PromotePlatformEmployeeSerializer,
     PlatformNotificationSerializer,
     PlatformRecruiterSerializer,
     PolicyProfileSerializer,
@@ -412,6 +414,39 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
         if IsPlatformOperationsManager().has_permission(self.request, self):
             return qs
         return qs.filter(user=self.request.user)
+
+    @action(detail=False, methods=["post"], url_path="promote")
+    def promote(self, request):
+        """ضمُّ مستخدمٍ مسجَّلٍ إلى فريق المنصّة — مدير العمليات وحدَه (212-Q4).
+
+        الطريقُ الوحيدُ إلى صفِّ `PlatformEmployee` كان `accept_job_invitation`
+        وحدَه: إعلانٌ ← متقدّمٌ ← دعوةٌ ← قبول. فمن له حسابٌ أصلاً لم يكن يُضَمّ
+        إلّا باختلاق إعلانٍ وهميٍّ أو بكتابةِ صفٍّ من الـshell.
+
+        **ولا يُنشئ حساباً**: بابُ إنشاء الحسابات هو الدعوةُ وحدَها، حيث يختار
+        صاحبُها كلمةَ مروره ويُتحقَّق منها.
+        """
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "ضمُّ موظّفٍ إلى المنصّة لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        payload = PromotePlatformEmployeeSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        try:
+            employee, created = promote_user_to_platform_employee(
+                user=data["identifier"],
+                specialty=data.get("specialty", ""),
+                job_title=data.get("job_title", ""),
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        body = PlatformEmployeeSerializer(employee).data
+        # `created` يفرّق الضمَّ عن الإحياء: الواجهةُ تقول «أُعيد إلى الفريق»
+        # لا «أُضيف»، فمن يقرأ تاريخَ الشخص لا يظنّه جديداً.
+        body["created"] = created
+        return Response(body, status=status.HTTP_201_CREATED if created else status.HTTP_200_OK)
 
     @action(detail=False, methods=["get"], url_path="my-companies")
     def my_companies(self, request):

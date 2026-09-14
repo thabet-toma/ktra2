@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **859**
+عدد النقاط: **860**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -593,6 +593,7 @@
 | `/api/platform/ops/employee-notes/{pk}/` | `PlatformEmployeeNoteViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/my-companies/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/promote/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |

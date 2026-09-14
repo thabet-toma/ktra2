@@ -199,6 +199,7 @@
 |---|---|---|
 | GET | `/api/platform/ops/dashboard/` | `IsPlatformOperationsStaff` أو `IsPlatformOperationsManager` (اللوحة التفاعلية وشريط التدخل) |
 | GET | `/api/platform/ops/employees/` | `IsPlatformOperationsManager` أو `IsPlatformOperationsStaff` (مفلتر لموظف المنصة على حسابه) — موصولةٌ منذ 210-E عبر `getMyPlatformEmployeeProfile()` كبوّابةِ تعريفِ الموظفِ بنفسه، لا بابَ مديرٍ ميّت |
+| POST | `/api/platform/ops/employees/promote/` | `IsPlatformOperationsManager` بحارسٍ **داخل الفعل** (الـviewset نفسُه مفتوحٌ لموظّف المنصّة على صفّه) — «اجعله موظّفَ منصّة» (212-Q4): ترفع الدورَ على مستخدمٍ مسجَّلٍ بـ`identifier` (اسمٌ أو بريدٌ بلا حساسية حالة) **ولا تُنشئ حساباً**؛ بابُ إنشاء الحسابات هو `accept_job_invitation` وحدَه. والعائدُ من مغادرةٍ يعود إلى **صفّه نفسِه** (`OneToOne`) بتاريخه كلِّه فتردّ `200` و`created=false` بدل `201`، وتخصّصٌ فارغٌ في الطلب لا يمحو تخصّصَه القديم ومعه سياسةُ تقييمه. والنشطُ يُرفض بـ`409 already_platform_employee`، والحسابُ المعطَّل بـ400 |
 | PATCH | `/api/platform/ops/employees/{id}/profile-card/` | `IsPlatformOperationsManager` للثلاثة، والموظّفُ نفسُه لصورته وهاتفه وحدَهما — و`job_title` يُردّ **403** `job_title_is_manager_only` حتى على صفّه هو |
 | POST | `/api/platform/ops/employees/{id}/photo/` | نفسُ صلاحيّة `profile-card/`؛ رفعٌ عبر `core.media_views.upload_media_file` بـ`tenant=None` ثمّ حفظُ الرابط في الصفّ في العمليّة نفسِها |
 | GET | `/api/platform/ops/employees/{id}/performance/` | `IsPlatformOperationsManager` أو الموظف نفسه (عزل عابر مشتق من الارتباطات) |

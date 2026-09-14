@@ -219,6 +219,33 @@ export interface PolicyProfileOption {
 export const listPolicyProfileOptions = () =>
   apiGetList<PolicyProfileOption>(`${OPS}/policy-profiles/`);
 
+/**
+ * ضمُّ مستخدمٍ مسجَّلٍ إلى فريق المنصّة (212-Q4) — **لا يُنشئ حساباً**.
+ *
+ * `created` تفرّق الضمَّ الأوّل عن إحياء صفِّ من غادر: العلاقةُ `OneToOne`
+ * فالعائدُ يعود إلى صفّه نفسِه بتاريخه كلِّه، والواجهةُ تقول «أُعيد» لا «أُضيف».
+ */
+export interface PromotedPlatformEmployee {
+  id: number;
+  user: number;
+  username: string;
+  email: string;
+  specialty: string;
+  job_title: string;
+  status: string;
+  created: boolean;
+}
+
+export const promoteUserToPlatformEmployee = (
+  identifier: string,
+  input: { specialty?: string; job_title?: string } = {},
+) =>
+  apiPostObject<PromotedPlatformEmployee>(`${OPS}/employees/promote/`, {
+    identifier,
+    specialty: input.specialty || "",
+    job_title: input.job_title || "",
+  });
+
 /** إسنادُ الدور لمستخدمٍ مسجَّلٍ باسمه أو بريده — لا يُنشئ حساباً. */
 export const assignPlatformRecruiter = (identifier: string) =>
   apiPostObject<PlatformRecruiter>(`${OPS}/recruiters/`, { identifier });

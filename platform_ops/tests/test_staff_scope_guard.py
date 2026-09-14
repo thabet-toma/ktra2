@@ -262,6 +262,9 @@ EXERCISED_ROUTES = frozenset({
     # يُنفَّذ في `test_platform_presence.py`: زميلٌ يطلب سجلَّ زميلٍ يأخذ 403،
     # والمديرُ يأخذ 200 — وبلا معامِلٍ يعود سجلُّ الطالب نفسِه.
     "/api/platform/ops/presence/log/",
+    # يُنفَّذ في `test_promote_employee.py` (212-Q4): موظّفُ منصّةٍ يطلب ضمَّ زميلٍ
+    # يأخذ 403 `manager_only` — والـviewset مفتوحٌ له على صفّه فالحارسُ **داخل الفعل**.
+    "/api/platform/ops/employees/promote/",
     "/api/platform/ops/employees/my-companies/",
     "/api/platform/ops/employees/ranking/",
     "/api/platform/ops/employees/1/",

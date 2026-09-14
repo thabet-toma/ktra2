@@ -15,6 +15,7 @@ import { CompanyCard } from "./CompanyCard";
 import { CrossTenantActivityTable } from "./CrossTenantActivityTable";
 import { DrilldownModal } from "./DrilldownModal";
 import { EmployeeCard } from "./EmployeeCard";
+import { PromoteEmployeePanel } from "./PromoteEmployeePanel";
 import { InterventionRail } from "./InterventionRail";
 import { PlatformNotificationBell } from "./PlatformNotificationBell";
 import { ServiceUnitCatalogPanel } from "./ServiceUnitCatalogPanel";
@@ -622,7 +623,11 @@ export const PlatformOpsDashboard: React.FC = () => {
             جاري تحميل لوحة العمليات...
           </div>
         ) : viewUnit === "employee" ? (
-          filteredEmployees.length === 0 ? (
+          <>
+          {/* 212-Q4: بابُ ضمِّ مستخدمٍ قائمٍ إلى الفريق — فوق الشبكة لا داخلَها،
+              وقبل شرط «لا يوجد موظفون» عمداً: أوّلُ من يحتاجه فريقٌ فارغ. */}
+          <PromoteEmployeePanel onPromoted={() => void loadDashboard()} />
+          {filteredEmployees.length === 0 ? (
             <div className="py-24 text-center text-sm text-slate-400 bg-white rounded-xl border border-slate-200">
               لا يوجد موظفون مطابقون للشروط الحالية
             </div>
@@ -646,7 +651,8 @@ export const PlatformOpsDashboard: React.FC = () => {
                 />
               ))}
             </div>
-          )
+          )}
+          </>
         ) : filteredCompanies.length === 0 ? (
           <div className="py-24 text-center text-sm text-slate-400 bg-white rounded-xl border border-slate-200">
             لا توجد شركات مطابقة للشروط الحالية
