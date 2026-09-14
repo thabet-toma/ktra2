@@ -87,6 +87,57 @@ class CompanyAdminTest(TestCase):
         usernames = {row['username'] for row in resp.json()}
         self.assertIn('private-user', usernames)
 
+    def test_superuser_and_company_manager_see_the_same_member_list(self):
+        """شاشة «إدارة المستخدمين» مصدرُها واحدٌ للجميع.
+
+        السوبر أدمن الواقف داخل الشركة يرى أعضاءها هم أنفسهم عدداً ودوراً —
+        لا مرآةَ `users` العالمية التي تحمل حسابات المنصة كلَّها بلا شركة.
+        """
+        UserCompanyMembership.objects.create(
+            user=self.superuser, tenant=self.tenant, role='manager'
+        )
+        url = f'/api/tenants/companies/{self.tenant.TenantID}/members/'
+        as_manager = self._client(self.manager).get(url)
+        as_superuser = self._client(self.superuser).get(url)
+        self.assertEqual(as_manager.status_code, 200, as_manager.content)
+        self.assertEqual(as_superuser.status_code, 200, as_superuser.content)
+
+        def identity(resp):
+            return sorted((m['user_id'], m['role']) for m in resp.data)
+
+        self.assertEqual(identity(as_manager), identity(as_superuser))
+        # حسابُ المنصة الذي لا عضويةَ له لا يظهر لأيٍّ منهما.
+        self.assertNotIn(
+            self.platform_user.pk, {m['user_id'] for m in as_superuser.data}
+        )
+
+    def test_member_payload_carries_the_real_role_and_active_flag(self):
+        """الدورُ الحقيقيُّ يصل الواجهة — لا سحقَ إلى «مدير/موظف».
+
+        سحقُ الواجهة القديم كان يُفقد `procurement` و`accountant` و`sales`،
+        فلا يطابقها فلترُ الشاشة أبداً. و`is_active` هو مصدرُ «الحساب مفعَّل»
+        الوحيد بدل قيمةٍ مثبَّتة.
+        """
+        buyer = User.objects.create_user(username='buy', password='x', email='buy@x.co')
+        UserCompanyMembership.objects.create(
+            user=buyer, tenant=self.tenant, role='procurement'
+        )
+        disabled = User.objects.create_user(
+            username='off', password='x', email='off@x.co', is_active=False
+        )
+        UserCompanyMembership.objects.create(
+            user=disabled, tenant=self.tenant, role='accountant'
+        )
+        resp = self._client(self.manager).get(
+            f'/api/tenants/companies/{self.tenant.TenantID}/members/'
+        )
+        self.assertEqual(resp.status_code, 200, resp.content)
+        rows = {m['username']: m for m in resp.data}
+        self.assertEqual(rows['buy']['role'], 'procurement')
+        self.assertEqual(rows['off']['role'], 'accountant')
+        self.assertIs(rows['buy']['is_active'], True)
+        self.assertIs(rows['off']['is_active'], False)
+
     def test_outsider_cannot_list_members(self):
         resp = self._client(self.outsider).get(f'/api/tenants/companies/{self.tenant.TenantID}/members/')
         self.assertEqual(resp.status_code, 404, resp.content)

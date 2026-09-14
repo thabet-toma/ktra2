@@ -826,16 +826,15 @@ const App: React.FC = () => {
   useEffect(() => {
     if (!currentUser) return;
     let active = true;
-    let unsubscribeUsers = () => { };
     let unsubscribeTasks = () => { };
     void legacyData().then((m) => {
       if (!active) return;
-      if (currentUser.isSuperAdmin) {
-        void m.seedUsersIfEmpty();
-        unsubscribeUsers = m.subscribeToUsers(true, (fetchedUsers) => {
-          if (active) setUsers(fetchedUsers);
-        });
-      } else if (currentCompany) {
+      // مصدرٌ واحدٌ للجميع بمن فيهم السوبر أدمن: أعضاءُ الشركة النشطة.
+      // مرآةُ `users` في bridge عالميةٌ عمداً (بلا شركة، `GLOBAL_COLLECTIONS`)،
+      // فكانت تُري السوبر أدمنَ حساباتِ المنصة كلَّها وهو واقفٌ داخل شركةٍ
+      // أعضاؤها أربعة — «قائمةُ مستخدمي الشركة» تكذب. والرؤيةُ العابرةُ
+      // للشركات مكانُها «إدارة المنصة» (`superadmin/PlatformCompanyPanel`).
+      if (currentCompany) {
         void m.loadCompanyMemberUsers(currentCompany.TenantID)
           .then((companyUsers) => { if (active) setUsers(companyUsers); })
           .catch(() => { if (active) setUsers([]); });
@@ -848,10 +847,9 @@ const App: React.FC = () => {
     });
     return () => {
       active = false;
-      unsubscribeUsers();
       unsubscribeTasks();
     };
-  }, [currentUser?.id, currentUser?.isSuperAdmin, currentCompany?.TenantID]);
+  }, [currentUser?.id, currentCompany?.TenantID]);
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {

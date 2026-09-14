@@ -3,6 +3,7 @@ import { User } from '../types';
 import { NoteIcon } from './icons/NoteIcon';
 import { useToast } from '../contexts/ToastContext';
 import { humanizeThrown } from '../utils/drfError';
+import { isEmployeeMember } from '../utils/memberRoles';
 
 interface EmployeeNotesProps {
     users: User[];
@@ -80,7 +81,7 @@ const NoteCard: React.FC<{ user: User; onSave: (userId: string, notes: string) =
 };
 
 export const EmployeeNotes: React.FC<EmployeeNotesProps> = ({ users, onSaveNotes }) => {
-    const employees = users.filter(u => u.role === 'employee');
+    const employees = users.filter(u => isEmployeeMember(u.role));
 
     return (
         <div className="animate-fade-in pb-8">

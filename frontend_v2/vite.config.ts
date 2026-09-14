@@ -7,7 +7,10 @@ import { VitePWA } from 'vite-plugin-pwa';
 export default defineConfig(() => {
     return {
       server: {
-        port: 3000,
+        // 3000 يبقى الافتراضي لـ`npm run dev` العادي؛ ومتغيّر PORT يسمح لمشغّلٍ
+        // خارجي أن يعيّن بورتاً حرّاً حين يكون 3000 مشغولاً. CORS لا ينكسر:
+        // `core/settings.py` يسمح لأيّ بورت على localhost في وضع التطوير.
+        port: Number(process.env.PORT) || 3000,
         host: '0.0.0.0',
       },
       plugins: [

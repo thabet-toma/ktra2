@@ -1,8 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { User, UserRole } from '../../types';
-
-// تحديد نوع حالة التوظيف
-type EmploymentStatus = 'probation' | 'permanent' | 'intern';
+import { ASSIGNABLE_MEMBER_ROLES, MEMBER_ROLE_LABELS } from '../../utils/memberRoles';
 
 interface EditUserModalProps {
     isOpen: boolean;
@@ -14,27 +12,17 @@ interface EditUserModalProps {
 export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, user, onSave }) => {
     const [name, setName] = useState(user.name);
     const [role, setRole] = useState<UserRole>(user.role);
-    // إضافة حالة لحالة التوظيف، مع افتراض أن الحقل موجود في واجهة User
-    const [employmentStatus, setEmploymentStatus] = useState<EmploymentStatus>(
-        (user.employmentStatus as EmploymentStatus) || 'probation' 
-    ); 
 
     useEffect(() => {
         setName(user.name);
         setRole(user.role);
-        setEmploymentStatus((user.employmentStatus as EmploymentStatus) || 'probation');
     }, [user]);
 
     if (!isOpen) return null;
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        onSave({ 
-            ...user, 
-            name, 
-            role,
-            employmentStatus // حفظ الحالة الجديدة
-        });
+        onSave({ ...user, name, role });
     };
 
     return (
@@ -63,20 +51,6 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, u
                             required 
                         />
                     </div>
-                    {/* حقل حالة التوظيف الجديد */}
-                    <div>
-                        <label htmlFor="employmentStatus" className="block text-md font-medium text-[var(--color-text)] mb-1">الحالة الوظيفية</label>
-                        <select 
-                            id="employmentStatus" 
-                            value={employmentStatus} 
-                            onChange={e => setEmploymentStatus(e.target.value as EmploymentStatus)} 
-                            className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
-                        >
-                            <option value="probation">تحت الاختبار</option>
-                            <option value="permanent">موظف ثابت</option>
-                            <option value="intern">متدرب</option>
-                        </select>
-                    </div>
                     <div>
                         <label htmlFor="userRole" className="block text-md font-medium text-[var(--color-text)] mb-1">الدور</label>
                         <select 
@@ -85,9 +59,12 @@ export const EditUserModal: React.FC<EditUserModalProps> = ({ isOpen, onClose, u
                             onChange={e => setRole(e.target.value as UserRole)} 
                             className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                         >
-                            <option value="manager">مدير</option>
-                            <option value="employee">موظف</option>
-                            <option value="procurement">مشتريات</option> {/* إضافة دور المشتريات */}
+                            {/* قائمةُ **الإسناد** لا قائمةُ العرض: `legal_accountant`
+                                يرفضه الخادمُ من هذا الباب، و`ess`/`field_staff`
+                                يُمنحان من وحدتيهما. انظر `utils/memberRoles.ts`. */}
+                            {ASSIGNABLE_MEMBER_ROLES.map((value) => (
+                                <option key={value} value={value}>{MEMBER_ROLE_LABELS[value]}</option>
+                            ))}
                         </select>
                     </div>
                     <div className="pt-4 flex justify-end gap-3">

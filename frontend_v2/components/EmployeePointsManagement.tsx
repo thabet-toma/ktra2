@@ -9,6 +9,7 @@ import { KitDenseTable, type DenseColumn } from './kit/KitDenseTable';
 import { formatDateValue, formatWeekdayName } from '../utils/formatDate';
 import { useToast } from '../contexts/ToastContext';
 import { humanizeThrown } from '../utils/drfError';
+import { isEmployeeMember } from '../utils/memberRoles';
 
 interface EmployeePointsManagementProps {
     users: User[];
@@ -35,7 +36,7 @@ export const EmployeePointsManagement: React.FC<EmployeePointsManagementProps> =
     const [showGlobalSettingsModal, setShowGlobalSettingsModal] = useState(false);
     const [globalDailyDisableSettings, setGlobalDailyDisableSettings] = useState<DailyDisableSettings>({ startTime: '00:00', endTime: '00:00', isEnabled: false });
 
-    const employees = users.filter(u => u.role === 'employee');
+    const employees = users.filter(u => isEmployeeMember(u.role));
 
     useEffect(() => { loadAllUsersStats(); loadGlobalSettings(); }, [users]);
     useEffect(() => { if (selectedUser && viewMode === 'user') loadUserData(); }, [selectedUser, selectedDate, viewMode]);

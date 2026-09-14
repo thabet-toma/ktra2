@@ -12,6 +12,7 @@ import { useKitIndexKeymap } from './kit/useKitIndexKeymap';
 import { formatTimeValue } from '../utils/formatDate';
 import { useToast } from '../contexts/ToastContext';
 import { humanizeThrown } from '../utils/drfError';
+import { isEmployeeMember } from '../utils/memberRoles';
 
 interface AttendanceManagementProps {
     users: User[];
@@ -29,7 +30,7 @@ export const AttendanceManagement: React.FC<AttendanceManagementProps> = ({ user
     const [attendanceFilter, setAttendanceFilter] = useState<'all' | 'present' | 'absent'>('all');
     const searchInputRef = useRef<HTMLInputElement | null>(null);
 
-    const employees = users.filter(u => u.role === 'employee' || u.role === 'procurement');
+    const employees = users.filter(u => isEmployeeMember(u.role));
 
     useEffect(() => { loadActiveSession(); loadAttendanceRecords(); }, [selectedDate]);
 

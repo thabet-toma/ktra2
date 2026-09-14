@@ -1,5 +1,18 @@
 
-export type UserRole = 'manager' | 'employee' | 'procurement' | 'legal_accountant' | 'store_guest';
+/**
+ * مفردتان تلتقيان هنا:
+ *  - أدوارُ التطبيق القديم التي يعيدها `hr/auth_api.py` للمستخدم الحالي
+ *    (`manager` · `employee` · `procurement` · `legal_accountant` · `store_guest`).
+ *  - أدوارُ عضوية الشركة كما هي في `tenants.models` (`ROLE_CHOICES`) — وهي
+ *    ما تحمله صفوفُ «إدارة المستخدمين» منذ أن صارت تقرأ أعضاءَ الشركة.
+ *
+ * لا سحقَ بين المفردتين: `employee` لا وجودَ له في العضوية، وسحقُ
+ * `accountant`/`sales`/`procurement`/`staff` إليه كان يُخفيها عن الفلاتر.
+ * التصنيفُ في `utils/memberRoles.ts`، والتسميةُ في `utils/userRoleLabel.ts` وحدَه.
+ */
+export type UserRole =
+    | 'manager' | 'employee' | 'procurement' | 'legal_accountant' | 'store_guest'
+    | 'accountant' | 'sales' | 'staff' | 'ess' | 'field_staff' | 'viewer';
 
 export interface PointsSystem {
     activityPointsPerClick: number;
@@ -44,11 +57,13 @@ export interface User {
     name: string;
     role: UserRole;
     email: string;
-    employmentStatus: string;
+    /** لا مصدرَ له في الخادم (`member_payload` لا يحمله) — يغيب عن أعضاء الشركة. */
+    employmentStatus?: string;
     phone?: string;
     address?: string;
     isApproved: boolean;
-    isEmailVerified: boolean;
+    /** غيابُه «غير معروف» لا «غير مفعَّل» — لا تُظهر تحذيراً على المجهول. */
+    isEmailVerified?: boolean;
     createdAt?: string;
     experienceDescription?: string;
     educationLevel?: string;

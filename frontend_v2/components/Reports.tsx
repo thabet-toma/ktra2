@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { Task, User } from '../types';
 import { BarChart } from './charts/BarChart';
+import { isEmployeeMember } from '../utils/memberRoles';
 
 interface ReportsProps {
   tasks: Task[];
@@ -21,7 +22,7 @@ const formatTime = (seconds: number) => {
 export const Reports: React.FC<ReportsProps> = ({ tasks, users }) => {
 
   const employeeTimeData = useMemo(() => {
-    const employees = users.filter(u => u.role === 'employee');
+    const employees = users.filter(u => isEmployeeMember(u.role));
     return employees.map(employee => {
       const employeeTasks = tasks.filter(t => t.assignedTo === employee.id);
       const totalTime = employeeTasks.reduce((acc, task) => acc + task.totalWorkTime, 0);

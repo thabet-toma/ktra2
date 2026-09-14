@@ -6,6 +6,7 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, companyTemplateByKey, type CompanyTemplateKey } from "../../utils/companyTemplates";
 import { diffTemplateSwitch } from "../../utils/companyTemplateSwitch";
 import { VIEW_LABELS } from "./Breadcrumb";
+import { ASSIGNABLE_MEMBER_ROLES, MEMBER_ROLE_LABELS } from "../../utils/memberRoles";
 
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
@@ -30,15 +31,12 @@ type MemberRow = {
   can_access_import: boolean;
 };
 
-export const ROLE_LABELS: Record<string, string> = {
-  manager: "مدير",
-  accountant: "محاسب",
-  // T-PERM: دورا الموظف المتخصّص — صلاحياتهما تُضبط من شاشة «الصلاحيات والأدوار».
-  sales: "موظف مبيعات",
-  procurement: "موظف مشتريات",
-  staff: "موظف",
-  viewer: "مستعرض (قراءة فقط)",
-};
+/** الأدوارُ التي يجوز لمدير الشركة إسنادُها — مشتقّةٌ من `utils/memberRoles`
+ * (وتسميتُها من `utils/userRoleLabel.ts` خلفَه) فلا تفترق نسختان، وهي أضيقُ
+ * من قائمة العرض عمداً: `legal_accountant` يرفضه الخادمُ من هذا الباب. */
+export const ROLE_LABELS: Record<string, string> = Object.fromEntries(
+  ASSIGNABLE_MEMBER_ROLES.map((role) => [role, MEMBER_ROLE_LABELS[role]])
+);
 
 interface Props {
   isOpen: boolean;

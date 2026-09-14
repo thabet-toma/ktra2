@@ -68,6 +68,7 @@ import {
 import { invalidatePickerProducts, listPickerProducts } from "../../services/inventoryApi";
 import { formatQuantity } from "../../utils/formatNumber";
 import { mapPickerProductToItem } from "../../utils/pickerProductToItem";
+import { CompanyMemberRow, mapMemberToUser } from "../../utils/memberRoles";
 import { MIN_VISIBILITY_REFRESH_MS } from "../../services/sqlApiClient";
 
 // --- Helper: Sanitize Data ---
@@ -1114,9 +1115,6 @@ export const attendanceService = {
 };
 
 // --- Users Service ---
-export const seedUsersIfEmpty = async () => {
-};
-
 export const updateUserInDb = async (user: Partial<User> & { id: string }) => {
   const userRef = doc(db, "users", user.id);
   await updateDoc(userRef, { ...user });
@@ -1131,41 +1129,20 @@ export const deleteUserFromDb = async (userId: string) => {
   await deleteDoc(userRef);
 };
 
-export const subscribeToUsers = (isSuperuser: boolean, callback: (users: User[]) => void) => {
-  if (!isSuperuser) {
-    callback([]);
-    return () => { };
-  }
-  const q = query(collection(db, "users"));
-  return onSnapshot(q, (snapshot) => {
-    const users = snapshot.docs.map(doc => doc.data() as User);
-    callback(users);
-  });
-};
-
-type CompanyMemberUserRow = {
-  user_id: number;
-  username: string;
-  email: string;
-  full_name: string;
-  role: string;
-};
-
 /** Minimal user records sourced from the membership-scoped API, never the
- * platform-wide users mirror. */
+ * platform-wide users mirror. الدورُ يمرّ كما يعيده الخادم، وما لا تحمله
+ * العضويةُ لا يُختلق — التحويلُ كلُّه في `utils/memberRoles` ومختبَرٌ هناك. */
 export const loadCompanyMemberUsers = async (tenantId: number): Promise<User[]> => {
-  const members = await apiGetObject<CompanyMemberUserRow[]>(
+  const members = await apiGetObject<CompanyMemberRow[]>(
     `tenants/companies/${tenantId}/members/`
   );
-  return members.map((member) => ({
-    id: String(member.user_id),
-    name: member.full_name || member.username,
-    email: member.email || "",
-    role: member.role === "manager" ? "manager" : "employee",
-    employmentStatus: "",
-    isApproved: true,
-    isEmailVerified: true,
-  }));
+  return members.map((member) => {
+    const mapped = mapMemberToUser(member);
+    // الدورُ نصٌّ من الخادم لا يُسحق إلى دورٍ آخر؛ ودورٌ جديدٌ لم تعرفه
+    // الواجهةُ بعد يُعرض «مستخدم» (`memberRoleLabel` ⇐ `userRoleLabel`)،
+    // ويسقط عليه حارسُ `core/tests/test_header_role_label.py` فيُسمّى.
+    return { ...mapped, role: mapped.role as User["role"] };
+  });
 };
 
 // --- Tasks Service ---

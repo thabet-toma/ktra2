@@ -144,3 +144,65 @@ class HeaderRoleLabelTest(SimpleTestCase):
             self.source, r"\?\?\s*'مستخدم'",
             "البديلُ عند دورٍ مجهولٍ ليس اسماً عربيّاً — فالمفتاحُ يصل الشاشة.",
         )
+
+
+#: أدوارُ العضويّة كما تقرؤها الشاشاتُ (`utils/memberRoles.ts`).
+MEMBER_ROLES_UTIL = FRONTEND / "utils" / "memberRoles.ts"
+#: بابُ **إسنادِ** الدور في شاشة «إدارة المستخدمين».
+EDIT_USER_MODAL = FRONTEND / "components" / "modals" / "EditUserModal.tsx"
+
+
+def _element_span(source: str, anchor: str, closing: str) -> str:
+    """جسمُ عنصرٍ من `anchor` إلى `closing` — لا الملفُّ كلُّه.
+
+    التأكيدُ المطلوب «قائمةُ الخيارات **داخل** هذا الـ`select`»: ذكرُ الاسم
+    في مكانٍ آخرَ من الملفّ لا يجعل الخياراتِ ضيّقة.
+    """
+    start = source.index(anchor)
+    end = source.index(closing, start)
+    return source[start:end]
+
+
+class UsersScreenRoleVocabularyTest(SimpleTestCase):
+    """مفردةُ الأدوار في شاشة المستخدمين: نسخةٌ واحدة، وإسنادٌ أضيقُ من العرض."""
+
+    def test_the_members_util_does_not_keep_a_second_label_map(self):
+        """خريطةٌ ثانيةٌ تفترق عن الأولى صامتةً — وقد افترقت فعلاً.
+
+        أُنشئت `MEMBER_ROLE_LABELS` خريطةً حرفيّةً بتسعة أسماءٍ مكتوبةٍ بيدها،
+        فكان `viewer` «مستعرض» في `userRoleLabel.ts` و«مستعرض (قراءة فقط)» فيها
+        منذ أوّل سطر. والحارسُ فوق هذا الملفّ لا يرى نسخةً لا يعرف مكانَها،
+        فيبقى أخضرَ على تعريفين متضاربين للشيء نفسِه.
+        """
+        source = MEMBER_ROLES_UTIL.read_text(encoding="utf-8")
+        literals = re.findall(
+            r'^\s*(\w+)\s*:\s*"[^"]*[\u0600-\u06FF][^"]*"', source, re.MULTILINE
+        )
+        self.assertEqual(
+            literals, [],
+            f"تسمياتٌ عربيّةٌ مكتوبةٌ في `memberRoles.ts`: {literals} — "
+            "المصدرُ الواحدُ `utils/userRoleLabel.ts`، وهذه نسخةٌ ثانيةٌ ستفترق.",
+        )
+        self.assertIn(
+            'from "./userRoleLabel.ts"', source,
+            "`memberRoles.ts` لا يقرأ مصدرَ التسمية — فمن أين تأتي أسماؤه؟",
+        )
+
+    def test_the_user_edit_screen_offers_only_roles_the_server_accepts(self):
+        """زرٌّ يَعِد بما يردّه الخادمُ دعوةٌ إلى إحباط.
+
+        `tenants/views.py` يردّ `legal_accountant` من هذا الباب («يُنشأ دور
+        المحاسب القانوني من دورة الارتباط المحمية فقط»)، و`ess`/`field_staff`
+        يُمنحان من وحدتيهما. فقائمةُ **العرض** تسعةٌ وقائمةُ **الإسناد** ستّة،
+        والفرقُ مقصود: تُقرأ أدوارٌ لا تُكتَب من هذه الشاشة.
+        """
+        source = EDIT_USER_MODAL.read_text(encoding="utf-8")
+        span = _element_span(source, 'id="userRole"', "</select>")
+        violations = []
+        if "ASSIGNABLE_MEMBER_ROLES" not in span:
+            violations.append("قائمةُ الأدوار لا تُشتقّ من `ASSIGNABLE_MEMBER_ROLES`")
+        if "Object.entries(MEMBER_ROLE_LABELS)" in span:
+            violations.append("قائمةُ الإسناد تسرد خريطةَ العرض كلَّها")
+        self.assertEqual(
+            violations, [], f"بابُ إسنادِ الدور أوسعُ ممّا يقبله الخادم: {violations}"
+        )

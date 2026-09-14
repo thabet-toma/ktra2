@@ -9,51 +9,17 @@ import {
   deleteUserFromDb,
   activityService,
 } from "../services/firestoreService";
-import { Filter, UserCheck, Briefcase, Activity } from 'lucide-react'; // استيراد أيقونات الفلاتر
+import { Filter, Briefcase, Activity } from 'lucide-react'; // استيراد أيقونات الفلاتر
 import { useConfirm } from "../contexts/ConfirmContext";
 import { useToast } from "../contexts/ToastContext";
 import { humanizeThrown } from "../utils/drfError";
-
-// إضافة نوع لحالة التوظيف للاستخدام المحلي
-type EmploymentStatus = "probation" | "permanent" | "intern";
+import { MEMBER_ROLE_LABELS, isEmployeeMember, memberRoleLabel } from "../utils/memberRoles";
 
 interface UserManagementProps {
   users: User[];
   onUpdateUser: (user: User) => void;
   onDeleteUser: (userId: string) => void;
 }
-
-// دالة مساعدة لترجمة حالة التوظيف (لم تتغير)
-const getEmploymentStatusText = (
-  status: EmploymentStatus | undefined
-): string => {
-  switch (status) {
-    case "permanent":
-      return "موظف ثابت";
-    case "probation":
-      return "تحت الاختبار";
-    case "intern":
-      return "متدرب";
-    default:
-      return "غير محدد";
-  }
-};
-
-// دالة مساعدة لجلب لون حالة التوظيف (لم تتغير)
-const getEmploymentStatusColor = (
-  status: EmploymentStatus | undefined
-): string => {
-  switch (status) {
-    case "permanent":
-      return "bg-green-100 text-green-800";
-    case "probation":
-      return "bg-yellow-100 text-yellow-800";
-    case "intern":
-      return "bg-blue-100 text-blue-800";
-    default:
-      return "bg-[var(--color-surface-3)] text-[var(--color-text)]";
-  }
-};
 
 // دالة مساعدة لحساب إذا كان المستخدم نشطاً حالياً (لم تتغير)
 const calculateIsActive = (activityStatus?: ActivityStatus): boolean => {
@@ -115,7 +81,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   // حالة الفلاتر الجديدة
   const [roleFilter, setRoleFilter] = useState<string>('all');
-  const [statusFilter, setStatusFilter] = useState<string>('all');
   const [activityFilter, setActivityFilter] = useState<string>('all');
 
   // دالة لتحميل جميع بيانات النشاط للموظفين (لم تتغير)
@@ -123,9 +88,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
     if (Object.keys(activityStatuses).length === 0) {
       setLoading(true);
     }
-    const employees = users.filter(
-      (user) => user.role === "employee" || user.role === "procurement"
-    );
+    const employees = users.filter((user) => isEmployeeMember(user.role));
     const newStatuses: { [userId: string]: ActivityStatus } = {};
 
     const promises = employees.map(async (employee) => {
@@ -146,7 +109,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const employeeIds = useMemo(() => {
     return users
-      .filter((user) => user.role === "employee" || user.role === "procurement")
+      .filter((user) => isEmployeeMember(user.role))
       .map((user) => user.id)
       .sort()
       .join(",");
@@ -194,14 +157,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
         return false;
       }
       
-      // فلتر الحالة الوظيفية
-      if (statusFilter !== 'all') {
-        const userStatus = (user.employmentStatus as EmploymentStatus) || 'غير محدد';
-        if (userStatus !== statusFilter) {
-          return false;
-        }
-      }
-      
       // فلتر حالة النشاط
       if (activityFilter !== 'all') {
         const userActivityStatus = activityStatuses[user.id];
@@ -223,7 +178,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
       return true;
     });
-  }, [users, roleFilter, statusFilter, activityFilter, activityStatuses]);
+  }, [users, roleFilter, activityFilter, activityStatuses]);
   
   // دالة النقر على الصف
   const handleRowClick = (user: User, e: React.MouseEvent<HTMLTableRowElement>) => {
@@ -254,11 +209,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
 
   const handleApproveUser = async (user: User) => {
     if (!(await confirm({ message: `هل أنت متأكد من تفعيل حساب ${user.name}؟` }))) return;
-    const updatedUser = {
-      ...user,
-      isApproved: true,
-      employmentStatus: user.employmentStatus || "probation",
-    };
+    const updatedUser = { ...user, isApproved: true };
     setBusyUserId(user.id);
     try {
       await updateUserInDb(updatedUser);
@@ -350,7 +301,7 @@ export const UserManagement: React.FC<UserManagementProps> = ({
             <Filter className="w-5 h-5 text-blue-500" />
             تصفية المستخدمين
         </h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {/* فلتر الدور */}
             <div>
                 <label htmlFor="roleFilter" className="block text-sm font-medium text-[var(--color-text)] mb-1 flex items-center gap-1">
@@ -364,29 +315,9 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                     className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
                 >
                     <option value="all">الكل</option>
-                    <option value="manager">مدير</option>
-                    <option value="procurement">مشتريات</option>
-                    <option value="employee">موظف</option>
-                </select>
-            </div>
-            
-            {/* فلتر الحالة الوظيفية */}
-            <div>
-                <label htmlFor="statusFilter" className="block text-sm font-medium text-[var(--color-text)] mb-1 flex items-center gap-1">
-                    <UserCheck className="w-4 h-4" />
-                    الحالة الوظيفية
-                </label>
-                <select
-                    id="statusFilter"
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value)}
-                    className="w-full p-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-surface-2)] text-[var(--color-text)]"
-                >
-                    <option value="all">الكل</option>
-                    <option value="permanent">موظف ثابت</option>
-                    <option value="probation">تحت الاختبار</option>
-                    <option value="intern">متدرب</option>
-                    <option value="غير محدد">غير محدد</option>
+                    {Object.entries(MEMBER_ROLE_LABELS).map(([value, label]) => (
+                      <option key={value} value={value}>{label}</option>
+                    ))}
                 </select>
             </div>
             
@@ -430,9 +361,6 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                 </th>
                 <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   الدور
-                </th>
-                <th className="p-4 font-semibold text-[var(--color-text-muted)]">
-                  الحالة الوظيفية
                 </th>
                 <th className="p-4 font-semibold text-[var(--color-text-muted)]">
                   إجراءات
@@ -483,29 +411,16 @@ export const UserManagement: React.FC<UserManagementProps> = ({
                       {user.address || "غير متوفر"}
                     </td>
                     <td className="p-4 text-[var(--color-text-muted)]">
-                      {user.role === "manager" ? (
-                        <span className="bg-[var(--color-surface-2)] text-[var(--color-primary)] px-2 py-1 rounded text-xs">
-                          مدير
-                        </span>
-                      ) : user.role === "procurement" ? (
-                        <span className="bg-orange-100 text-orange-800 px-2 py-1 rounded text-xs">
-                          مشتريات
-                        </span>
-                      ) : (
-                        <span className="bg-[var(--color-surface-3)] text-[var(--color-text)] px-2 py-1 rounded text-xs">
-                          موظف
-                        </span>
-                      )}
-                    </td>
-                    <td className="p-4">
                       <span
-                        className={`${getEmploymentStatusColor(
-                          user.employmentStatus as EmploymentStatus
-                        )} px-2 py-1 rounded text-xs font-bold`}
+                        className={`px-2 py-1 rounded text-xs ${
+                          user.role === "manager"
+                            ? "bg-[var(--color-surface-2)] text-[var(--color-primary)]"
+                            : user.role === "procurement"
+                              ? "bg-orange-100 text-orange-800"
+                              : "bg-[var(--color-surface-3)] text-[var(--color-text)]"
+                        }`}
                       >
-                        {getEmploymentStatusText(
-                          user.employmentStatus as EmploymentStatus
-                        )}
+                        {memberRoleLabel(user.role)}
                       </span>
                     </td>
                     <td className="p-4">

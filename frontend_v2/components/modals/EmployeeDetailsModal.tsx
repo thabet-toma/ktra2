@@ -69,7 +69,7 @@ export const EmployeeDetailsModal: React.FC<EmployeeDetailsModalProps> = ({
                     <div className={`p-3 rounded-lg border ${user.isApproved ? 'bg-green-50 border-green-200 text-green-700' : 'bg-yellow-50 border-yellow-200 text-yellow-700'}`}>
                         <span className="font-bold">الحالة: </span>
                         {user.isApproved ? 'معتمد (Active)' : 'بانتظار الموافقة (Pending)'}
-                        {!user.isEmailVerified && <span className="text-red-500 text-sm block mt-1">⚠ البريد الإلكتروني غير مفعل</span>}
+                        {user.isEmailVerified === false && <span className="text-red-500 text-sm block mt-1">⚠ البريد الإلكتروني غير مفعل</span>}
                     </div>
 
                     {/* Personal Info */}

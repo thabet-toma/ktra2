@@ -132,7 +132,10 @@ test("idle authenticated shell does not poll mapper collections every five secon
 
   await page.goto(process.env.KTRA_E2E_APP_URL || "/dashboard");
   await expect(page.getByRole("button", { name: "تسجيل الخروج" })).toBeVisible({ timeout: 8_000 });
-  await expect.poll(() => [...mapperCounts.keys()].some((path) => path.endsWith("/mapper/users/"))).toBe(true);
+  // مرآةُ `users` العالمية لم تعد تُقرأ من الإقلاع أصلاً: قائمةُ المستخدمين
+  // صارت أعضاءَ الشركة (`companies/{id}/members/`) للجميع بمن فيهم السوبر أدمن.
+  // وكان هذا التأكيدُ ساقطاً قبل ذلك أيضاً — مستخدمُ الاختبار ليس سوبر أدمن،
+  // و`subscribeToUsers(false)` لم تكن تُرسل طلباً أصلاً.
   await expect.poll(() => [...mapperCounts.keys()].some((path) => path.endsWith("/mapper/tasks/"))).toBe(true);
 
   // Let all startup subscriptions settle, then span the former 5-second polling boundary.
