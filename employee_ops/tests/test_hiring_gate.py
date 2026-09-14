@@ -508,11 +508,13 @@ class CvReadIsGuardedTest(HiringBaseTest):
         سجلّ المتصفّح صالحاً للنسخ بعد انتهاء الجلسة. يسقط هذا الاختبارُ لحظةَ
         عودةِ إعادة التوجيه.
         """
-        with mock.patch("employee_ops.views.requests.get") as fetch:
+        # المُرقَّعُ هو الجالبُ المشترك في `core.media_views` — صار التمريرُ
+        # نسخةً واحدةً يقرؤها هذا البابُ وبابُ مركز القيادة معاً.
+        with mock.patch("core.media_views.requests.get") as fetch:
             fetch.return_value = mock.Mock(
+                status_code=200,
                 raw=io.BytesIO(b"%PDF-1.7 fake"),
                 headers={"Content-Type": "application/pdf"},
-                raise_for_status=mock.Mock(),
             )
             res = self.client.get(
                 f"/api/employee-ops/applicants/{self.applicant.pk}/cv/", **self.headers
@@ -550,6 +552,213 @@ class CvReadIsGuardedTest(HiringBaseTest):
             HTTP_X_TENANT_ID=str(other.pk),
         )
         self.assertEqual(res.status_code, 404)
+
+
+class CvFailuresAreDiagnosedNotSwallowedTest(HiringBaseTest):
+    """**عطبُ إعدادٍ خارجيٍّ كان يبدو عطبَ منصّة.**
+
+    وقعت الحادثةُ على الإنتاج: التخزينُ يمنع تسليمَ PDF على مستوى الحساب فيردّ
+    ٤٠١ مع ترويسة `x-cld-error`. وكانت الشيفرةُ تبتلع ذلك كلَّه في
+    `except RequestException` وتردّ للمدير **خمسمئة** برسالةٍ واحدةٍ عامّة، ولا
+    تكتب في السجلّ حرفاً يدلّ على السبب — فاستلزم تشخيصُها فتحَ قاعدة البيانات
+    وطلبَ روابطِ التخزين يدويّاً.
+
+    وكلُّ اختبارٍ هنا يسقط لحظةَ عودةِ الابتلاع.
+    """
+
+    CV_URL = "https://res.cloudinary.com/demo/raw/upload/v1/ktra_uploads/t9/cv-x.pdf"
+    PUBLIC_ID = "ktra_uploads/t9/cv-x.pdf"
+
+    def setUp(self):
+        super().setUp()
+        job = JobPosting.objects.create(
+            tenant=self.tenant, title="وظيفة", description="وصف", token="tok-cv-diag"
+        )
+        self.applicant = JobApplicant.objects.create(
+            tenant=self.tenant, job=job, name="متقدم", phone="0598",
+            cv_url=self.CV_URL, cv_name="cv.pdf", reference_code="REF-DIAG",
+        )
+
+    class _Opaque:
+        """مجرى بايتاتٍ **بلا حجمٍ معلوم** — كما يصل من الشبكة فعلاً.
+
+        ‏`FileResponse` تحسب `Content-Length` بنفسها متى قدرت (`getbuffer` على
+        `BytesIO`)، ومجرى `urllib3` الحقيقيُّ لا يوفّر ذلك. فاختبارُ التمرير
+        بـ`BytesIO` يقيس حسابَ جانغو لا تمريرَنا، ويمرّ وإن لم نمرّر شيئاً.
+        """
+
+        def __init__(self, body=b""):
+            self._body = body
+            self._read = False
+
+        def read(self, size=-1):
+            if self._read:
+                return b""
+            self._read = True
+            return self._body
+
+        def close(self):
+            return None
+
+    def _upstream(self, status_code, headers=None, body=b""):
+        return mock.Mock(
+            status_code=status_code,
+            headers=headers if headers is not None else {},
+            raw=self._Opaque(body),
+            close=mock.Mock(),
+        )
+
+    def _fetch_cv(self):
+        return self.client.get(
+            f"/api/employee-ops/applicants/{self.applicant.pk}/cv/", **self.headers
+        )
+
+    def test_a_storage_refusal_answers_five_hundred_two_not_five_hundred(self):
+        """المديرُ يجب أن يفهم أنّ الملفَّ موجودٌ وأنّ المشكلة ليست عنده.
+
+        خمسمئةٌ تقول «النظامُ عطبان» فيفتّش حيث لا عطب؛ والصوابُ ٥٠٢: رفَضَ
+        طرفٌ ثالثٌ أمامنا، والأمرُ إعدادُ حسابٍ لا عطبُ سجلّ.
+        """
+        upstream = self._upstream(401, {"x-cld-error": "deny or ACL failure"})
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            with self.assertLogs("core.media_views", level="ERROR"):
+                res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 502)
+        self.assertIn("التخزين", str(res.data))
+
+    def test_the_log_carries_the_diagnosis_and_never_the_storage_url(self):
+        """السجلُّ هو ما كان فارغاً — وهو نفسُه لا يجوز أن يصير مخزنَ صلاحيات.
+
+        الرابطُ عند المزوّد **هو** الصلاحية، والسجلُّ يُقرأ ويُصدَّر ويُشارَك.
+        فالمعرّفُ يُسجَّل لا الرابط — والقاعدةُ نفسُها مطبَّقةٌ في
+        `core/media_views.py`.
+        """
+        upstream = self._upstream(401, {"x-cld-error": "deny or ACL failure"})
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            with self.assertLogs("core.media_views", level="ERROR") as captured:
+                res = self._fetch_cv()
+
+        written = " ".join(captured.output)
+        missing = [
+            piece
+            for piece in (self.PUBLIC_ID, "401", "deny or ACL failure",
+                          str(self.applicant.pk))
+            if piece not in written
+        ]
+        self.assertEqual(missing, [], f"السجلّ بلا: {missing} — {written}")
+        self.assertNotIn(self.CV_URL, written)
+        self.assertNotIn(self.CV_URL, str(res.data))
+        self.assertNotIn(self.CV_URL, str(dict(res.items())))
+
+    def test_a_broken_provider_is_not_reported_as_a_refusal(self):
+        """‏٥٠٠ عند المزوّد ليست رفضاً منه.
+
+        وقولُ «رفض التسليم — راجع الإعدادات» عن عطبٍ عابرٍ عنده يرسل القارئَ
+        يفتّش في إعداداتٍ سليمة. الحالةُ ٥٠٢ في الحالتين، والرسالةُ تفترق.
+        """
+        upstream = self._upstream(500)
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            with self.assertLogs("core.media_views", level="ERROR"):
+                res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 502)
+        self.assertIn("500", str(res.data))
+        self.assertNotIn("رفضت", str(res.data))
+
+    def test_a_purged_file_answers_four_hundred_four_not_five_hundred(self):
+        """حالةٌ واردةٌ فعلاً بعد `purge_rejected_applicants`: الصفُّ باقٍ والبايتاتُ لا.
+
+        «لم يعد موجوداً» معلومةٌ يتصرّف بها المدير؛ وخمسمئةٌ تُرسله إلى الدعم.
+        """
+        upstream = self._upstream(404)
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            with self.assertLogs("core.media_views", level="ERROR"):
+                res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 404)
+
+    def test_a_network_timeout_answers_five_hundred_four_and_hides_the_url(self):
+        """المهلةُ حالةٌ تُعاد المحاولةُ فيها — لا عطبٌ دائم.
+
+        ونصُّ استثناء `requests` يحمل الرابطَ كاملاً، فتسجيلُ `%s` للاستثناء
+        نفسِه يسرّب ما مُنع في الردّ. يُسجَّل **نوعُه** وحدَه.
+        """
+        import requests as _requests
+
+        boom = _requests.Timeout(f"timed out for url: {self.CV_URL}")
+        with mock.patch("core.media_views.requests.get", side_effect=boom):
+            with self.assertLogs("core.media_views", level="ERROR") as captured:
+                res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 504)
+        self.assertNotIn(self.CV_URL, " ".join(captured.output))
+
+    def test_every_failure_path_closes_the_connection(self):
+        """‏`raise_for_status()` كانت ترمي **بعد** فتح الاتصال، ولا مسارَ خطأٍ يُغلقه.
+
+        فكلُّ طلبٍ فاشلٍ يسرّب مقبساً، وعطبُ الإعداد يجعل **كلَّ** طلبٍ فاشلاً.
+        """
+        leaked = []
+        for code in (401, 403, 404, 500):
+            upstream = self._upstream(code)
+            with mock.patch("core.media_views.requests.get", return_value=upstream):
+                with self.assertLogs("core.media_views", level="ERROR"):
+                    self._fetch_cv()
+            if not upstream.close.called:
+                leaked.append(code)
+        self.assertEqual(leaked, [], f"اتصالٌ لم يُغلق عند: {leaked}")
+
+    def test_the_browser_is_told_the_real_length(self):
+        """بلا `Content-Length` يرى المستخدمُ تنزيلاً مجهولَ الطول — وأكبرُ سيرةٍ ٤ ميغا."""
+        upstream = self._upstream(
+            200,
+            {"Content-Type": "application/pdf", "Content-Length": "12"},
+            b"%PDF-1.7 aa",
+        )
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res["Content-Length"], "12")
+
+    def test_a_length_that_does_not_describe_the_bytes_is_not_promised(self):
+        """لو جاء الردُّ مرمَّزاً فالطولُ طولُ المرمَّز، وتمريرُه بلا ترويسة الترميز
+        يَعِد المتصفّحَ بما لا يُسلَّم — فيقف التنزيلُ ناقصاً أو يُحفَظ ملفٌّ معطوب.
+        """
+        upstream = self._upstream(
+            200,
+            {
+                "Content-Type": "application/pdf",
+                "Content-Length": "9",
+                "Content-Encoding": "gzip",
+            },
+            b"\x1f\x8b compressed",
+        )
+        with mock.patch("core.media_views.requests.get", return_value=upstream):
+            res = self._fetch_cv()
+
+        self.assertEqual(res.status_code, 200)
+        self.assertNotIn("Content-Length", res)
+
+    def test_neither_door_fetches_the_storage_on_its_own(self):
+        """**النسخةُ الثانيةُ هي ما يُعيد العطب.**
+
+        كانت شيفرةُ التمرير مكرَّرةً حرفيّاً في `employee_ops` و`platform_ops`
+        — ووثّق التكرارَ تعليقٌ في الثاني صراحةً — فالإصلاحُ يقع في بابٍ ويغيب
+        عن الآخر. ولا يسقط هذا الاختبارُ إلا حين يعود بابٌ يجلب بنفسه.
+        """
+        from pathlib import Path
+
+        root = Path(__file__).resolve().parents[2]
+        violations = [
+            name
+            for name in ("employee_ops/views.py", "platform_ops/views.py")
+            if "import requests" in (root / name).read_text(encoding="utf-8")
+        ]
+        self.assertEqual(
+            violations, [], f"بابٌ يجلب التخزينَ بنفسه بدل الجالب المشترك: {violations}"
+        )
 
 
 class AnonymousUploadDosTest(HiringBaseTest):

@@ -21,12 +21,11 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 import logging
 
-import requests
-from django.http import FileResponse, Http404
+from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException, NotFound, ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -34,7 +33,7 @@ from rest_framework.views import APIView
 
 from core.access import require_perm, user_has_perm
 from core.api_defaults import ApiAuthAndUser
-from core.media_views import MediaUploadError, upload_media_file
+from core.media_views import MediaUploadError, stream_stored_asset, upload_media_file
 from core.modules import module_enabled, require_module
 from hr.models import Employee
 from tenants.models import UserCompanyMembership
@@ -1227,22 +1226,18 @@ class JobApplicantViewSet(viewsets.ViewSet):
         if not applicant.cv_url:
             raise NotFound("لا سيرة ذاتية مرفوعة لهذا المتقدّم.")
 
-        try:
-            upstream = requests.get(applicant.cv_url, stream=True, timeout=20)
-            upstream.raise_for_status()
-        except requests.RequestException:
-            raise APIException("تعذّر جلب السيرة الذاتية من التخزين.")
-
-        response = FileResponse(
-            upstream.raw,
-            content_type=upstream.headers.get("Content-Type")
-            or guess_cv_content_type(applicant.cv_url),
-        )
         # `inline` لا `attachment`: المديرُ يقرؤها في تبويب. والاسمُ من سجلّنا لا
         # من ترويسة المزوّد — وهو اسمٌ رفعه مجهولٌ فيُنظَّف من محارف الاقتباس.
         safe_name = (applicant.cv_name or "cv").replace('"', "").replace("\\", "")
-        response["Content-Disposition"] = f'inline; filename="{safe_name}"'
-        return response
+        # ‏**والتمريرُ نسخةٌ واحدةٌ مشتركة**: مركزُ القيادة يحمّل السيرةَ نفسَها
+        # بشيفرةٍ كانت مكرَّرةً حرفيّاً، فابتلاعُ الفشلِ عُولج هنا مرّةً ووحدَها.
+        return stream_stored_asset(
+            applicant.cv_url,
+            filename=safe_name,
+            content_type_fallback=guess_cv_content_type(applicant.cv_url),
+            owner="job_applicant_cv",
+            owner_pk=applicant.pk,
+        )
 
     @action(detail=True, methods=["post"])
     def hire(self, request, pk=None):

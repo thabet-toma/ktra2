@@ -447,11 +447,12 @@ class PlatformHiringPortalTests(TestCase):
         # ويمرّر، ولا يغادر الرابطُ الخادمَ في أيّ ترويسةٍ أو جسم.
         self.client.force_authenticate(user=self.recruiter_user)
         fake_upstream = mock.Mock()
+        fake_upstream.status_code = 200
         fake_upstream.headers = {"Content-Type": "application/pdf"}
         fake_upstream.raw = io.BytesIO(b"%PDF-1.4 stored cv bytes %%EOF")
-        fake_upstream.raise_for_status = mock.Mock()
+        # الجالبُ المشترك في `core.media_views` — لا نسخةٌ في كلّ باب.
         with mock.patch(
-            "platform_ops.views.requests.get", return_value=fake_upstream
+            "core.media_views.requests.get", return_value=fake_upstream
         ) as fetch:
             res_recruiter = self.client.get(cv_endpoint)
 
@@ -477,6 +478,42 @@ class PlatformHiringPortalTests(TestCase):
         )
         res_no_cv = self.client.get(f"/api/platform/ops/job-applicants/{applicant_no_cv.id}/cv/")
         self.assertEqual(res_no_cv.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_this_door_diagnoses_a_storage_refusal_like_the_company_door(self):
+        """**البابُ الثاني كان يبتلع الفشلَ كالأوّل حرفيّاً.**
+
+        شيفرةُ التمرير هنا كانت نسخةً مكرَّرةً من `employee_ops` — بما فيها
+        `except RequestException` التي تردّ خمسمئةً على منعِ التخزين. والمالكُ
+        سوبر أدمن، فالخمسمئةُ التي رآها على الإنتاج جاءت من **هذا** البابِ
+        غالباً. فإصلاحُ واحدٍ وحدَه لا يصلح الحادثة.
+        """
+        applicant = JobApplicant.objects.create(
+            job=self.live_job,
+            name="ريم ناصر",
+            phone="0533322211",
+            reference_code="REF-REEM-77",
+            cv_url="https://res.cloudinary.com/demo/raw/upload/v1/ktra_uploads/p/r.pdf",
+            cv_name="reem_cv.pdf",
+        )
+        self.client.force_authenticate(user=self.recruiter_user)
+        refused = mock.Mock(
+            status_code=401,
+            headers={"x-cld-error": "deny or ACL failure"},
+            raw=io.BytesIO(b""),
+            close=mock.Mock(),
+        )
+        with mock.patch("core.media_views.requests.get", return_value=refused):
+            with self.assertLogs("core.media_views", level="ERROR") as captured:
+                res = self.client.get(
+                    f"/api/platform/ops/job-applicants/{applicant.id}/cv/"
+                )
+
+        self.assertEqual(res.status_code, status.HTTP_502_BAD_GATEWAY)
+        self.assertIn("التخزين", str(res.data))
+        self.assertTrue(refused.close.called, "الاتصالُ لم يُغلق في مسار الفشل")
+        written = " ".join(captured.output)
+        self.assertIn("ktra_uploads/p/r.pdf", written)
+        self.assertNotIn(applicant.cv_url, written)
 
     # 10. عزل صلاحية مسؤول التوظيف ومنعه من لوحة العمليات أو مسارات المستأجرين
     def test_recruiter_permission_isolation_and_operations_block(self):
@@ -1125,11 +1162,11 @@ class PlatformHiringAdminSurfaceTests(TestCase):
         )
         self.client.force_authenticate(user=self.recruiter_user)
         fake_upstream = mock.Mock()
+        fake_upstream.status_code = 200
         fake_upstream.headers = {"Content-Type": "application/pdf"}
         fake_upstream.raw = io.BytesIO(b"%PDF-1.4 stored arabic cv bytes %%EOF")
-        fake_upstream.raise_for_status = mock.Mock()
 
-        with mock.patch("platform_ops.views.requests.get", return_value=fake_upstream):
+        with mock.patch("core.media_views.requests.get", return_value=fake_upstream):
             res = self.client.get(f"/api/platform/ops/job-applicants/{applicant.pk}/cv/")
 
         self.assertEqual(res.status_code, status.HTTP_200_OK)

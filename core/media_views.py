@@ -14,7 +14,9 @@ from __future__ import annotations
 import logging
 import re
 
+import requests
 from django.conf import settings
+from django.http import FileResponse
 from rest_framework import status
 from rest_framework.decorators import (
     api_view,
@@ -22,6 +24,7 @@ from rest_framework.decorators import (
     permission_classes,
     throttle_classes,
 )
+from rest_framework.exceptions import APIException, NotFound
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -254,5 +257,129 @@ def destroy_cloudinary_asset(url: str) -> bool:
         logger.info("destroy_cloudinary_asset ok public_id=%s rtype=%s", public_id, rtype)
         return True
     except Exception as exc:
-        logger.warning("destroy_cloudinary_asset failed url=%s err=%s", url[:80], exc)
+        # ‏**معرّفُ الأصل لا رابطُه**: الرابطُ عند المزوّد صلاحيةٌ بذاتها، وسجلُّ
+        # الخادم يُقرأ ويُصدَّر ويُشارَك. كان هنا `url[:80]` وهو نقضٌ للقاعدة
+        # نفسِها التي يقوم عليها `stream_stored_asset` أدناه.
+        logger.warning(
+            "destroy_cloudinary_asset failed public_id=%s err=%s", public_id, exc
+        )
         return False
+
+
+# ==============================================================================
+# تمريرُ أصلٍ مخزَّنٍ إلى العميل — بايتاتٌ لا إعادةُ توجيه
+# ==============================================================================
+
+
+class StorageRefused(APIException):
+    """‏**التخزينُ رفض التسليم** — إعدادُ حسابٍ لا عطبُ سجلّ.
+
+    ٥٠٢ لا ٥٠٠: الخادمُ سليمٌ والسجلُّ سليمٌ والملفُّ موجود، والرافضُ طرفٌ ثالثٌ
+    أمامه. وخمسمئةٌ تقول للمدير «النظامُ عطبان» فيفتّش حيث لا عطب.
+    """
+
+    status_code = status.HTTP_502_BAD_GATEWAY
+    default_detail = (
+        "خدمةُ التخزين رفضت تسليم الملف. الملفُّ محفوظٌ وسجلُّه سليم، "
+        "والمنعُ في إعدادات حساب التخزين — راجِع مزوّدَ التخزين."
+    )
+
+
+class StorageUnreachable(APIException):
+    """انقطاعٌ أو مهلةٌ بيننا وبين المزوّد — ٥٠٤، وهي حالةٌ تُعاد المحاولةُ فيها."""
+
+    status_code = status.HTTP_504_GATEWAY_TIMEOUT
+    default_detail = "لم تُجِب خدمةُ التخزين في الوقت المتاح. أعِد المحاولة."
+
+
+def _asset_ref(url: str) -> str:
+    """معرّفُ الأصل عند المزوّد — **يُسجَّل بدل الرابط**.
+
+    الرابطُ صلاحيةٌ دائمةٌ بذاته، والسجلُّ ليس مكاناً للصلاحيات. والمعرّفُ يكفي
+    تماماً لفتح الأصل في لوحة المزوّد وتشخيصِ سببِ المنع.
+    """
+    public_id, _rtype = _parse_cloudinary_ref(url)
+    return public_id or "<لا يطابق صيغة Cloudinary>"
+
+
+def stream_stored_asset(
+    url: str,
+    *,
+    filename: str = "",
+    content_type_fallback: str = "",
+    owner: str = "asset",
+    owner_pk=None,
+) -> FileResponse:
+    """يجلب أصلاً من التخزين ويمرّر بايتاته — **وفشلُ المزوّد يُروى لا يُبتلَع**.
+
+    نسخةٌ واحدةٌ لبابين: سيرةُ المتقدّم تُحمَّل من شاشة الشركة ومن مركز القيادة
+    معاً، وكانت الشيفرةُ مكرَّرةً حرفيّاً في الموضعين — فأيُّ إصلاحٍ يقع في واحدٍ
+    ويغيب عن الآخر. (وثّق تكرارَها تعليقٌ في `platform_ops` صراحةً.)
+
+    وما كان هنا `except RequestException: raise APIException(...)` — جملةٌ واحدةٌ
+    تبتلع كلَّ شيء وتردّ **خمسمئة**. فمنعٌ في إعدادات حساب التخزين (يردّ المزوّدُ
+    ٤٠١ مع ترويسة `x-cld-error`) يبدو للمدير عطبَ منصّة، ولا يترك في السجلّ حرفاً
+    يدلّ على سببه. الحالاتُ الآن مفصولة:
+
+    - ‏٤٠١/٤٠٣ من المزوّد ⇒ ٥٠٢ «التخزينُ رفض التسليم»
+    - ‏٤٠٤ من المزوّد ⇒ ٤٠٤ «لم يعد موجوداً» (واردةٌ بعد كنس المرفوضين)
+    - مهلةٌ أو انقطاع ⇒ ٥٠٤
+
+    ولا يُسجَّل الرابطُ ولا يظهر في أيّ ردّ — لا في نصّ الخطأ ولا في السجلّ:
+    حتى نصُّ استثناء `requests` يحمل الرابطَ كاملاً، فيُسجَّل **نوعُه** وحدَه.
+    """
+    try:
+        # ‏`identity`: نمرّر البايتات كما وصلت، فلو ضغطها المزوّدُ صار المحفوظُ
+        # عند المستخدم ملفَّ gzip باسم `.pdf` — ولصار الطولُ الممرَّرُ أدناه طولَ
+        # المضغوط. طلبُ عدمِ الضغط يجعل الطولَ صادقاً والبايتاتِ قابلةً للفتح.
+        upstream = requests.get(
+            url, stream=True, timeout=20, headers={"Accept-Encoding": "identity"}
+        )
+    except requests.RequestException as exc:
+        logger.error(
+            "stored_asset unreachable owner=%s owner_pk=%s public_id=%s err=%s",
+            owner, owner_pk, _asset_ref(url), type(exc).__name__,
+        )
+        raise StorageUnreachable()
+
+    upstream_status = upstream.status_code
+    if upstream_status >= 400:
+        cld_error = upstream.headers.get("x-cld-error") or "-"
+        # ‏**يُغلَق قبل الرمي**: `raise_for_status()` كان يرمي بعد فتح الاتصال،
+        # ولا مسارَ خطأٍ واحدٍ كان يُغلقه — فيُسرَّب مقبسٌ لكلّ طلبٍ فاشل.
+        upstream.close()
+        logger.error(
+            "stored_asset refused owner=%s owner_pk=%s public_id=%s "
+            "upstream_status=%s cld_error=%s",
+            owner, owner_pk, _asset_ref(url), upstream_status, cld_error,
+        )
+        if upstream_status == 404:
+            raise NotFound("لم يعد هذا الملفُّ موجوداً في التخزين.")
+        if upstream_status in (401, 403):
+            raise StorageRefused()
+        # ‏عطبٌ عند المزوّد لا رفضٌ منه — والرسالةُ لا تدّعي ما لا تعرف: قولُ
+        # «رفض» عن خمسمئةٍ عنده يرسل القارئَ إلى الإعدادات يفتّش فيها عبثاً.
+        raise StorageRefused(
+            f"خدمةُ التخزين لم تسلّم الملف (ردّت {upstream_status})."
+        )
+
+    response = FileResponse(
+        upstream.raw,
+        as_attachment=False,
+        filename=filename or "file",
+        # ترتيبٌ محفوظٌ كما كان في الموضعين: ترويسةُ المزوّد أوّلاً، والتخمينُ
+        # من الامتداد احتياطاً. قلبُه يغيّر ما يفتحه المتصفّحُ بلا داعٍ.
+        content_type=(
+            upstream.headers.get("Content-Type")
+            or content_type_fallback
+            or "application/octet-stream"
+        ),
+    )
+    # ‏شريطُ تقدّمٍ حقيقيٌّ بدل تنزيلٍ مجهول الطول. والشرطُ لازم: لو جاء الردُّ
+    # مرمَّزاً رغم `identity` فالطولُ طولُ المرمَّز، وتمريرُه بلا ترويسة الترميز
+    # يَعِد المتصفّحَ بما لا يُسلَّم.
+    if not upstream.headers.get("Content-Encoding"):
+        length = upstream.headers.get("Content-Length")
+        if length:
+            response["Content-Length"] = length
+    return response

@@ -14,22 +14,26 @@ import re
 import uuid
 from decimal import Decimal, InvalidOperation
 
-import requests
 from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Value
 from django.db.models.functions import Coalesce
-from django.http import FileResponse, Http404
+from django.http import Http404
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
 
 from rest_framework.decorators import action
-from rest_framework.exceptions import APIException, PermissionDenied, ValidationError
+from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.parsers import FormParser, MultiPartParser
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from core.media_views import MediaUploadError, MediaUploadThrottle, upload_media_file
+from core.media_views import (
+    MediaUploadError,
+    MediaUploadThrottle,
+    stream_stored_asset,
+    upload_media_file,
+)
 from core.models import TenantAsset
 from core.tenant_utils import get_tenant
 from tenants.models import Tenant, UserCompanyMembership
@@ -3536,21 +3540,16 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
         if not applicant.cv_url:
             raise Http404("لا توجد سيرة ذاتية لهذا المتقدم.")
 
-        try:
-            upstream = requests.get(applicant.cv_url, stream=True, timeout=20)
-            upstream.raise_for_status()
-        except requests.RequestException:
-            raise APIException("تعذّر جلب السيرة الذاتية من التخزين.")
-
         safe_name = (applicant.cv_name or "cv").replace('"', "").replace("\\", "")
-        response = FileResponse(
-            upstream.raw,
-            as_attachment=False,
+        # ‏**النسخةُ المشتركة**: كان هنا نظيرُ شيفرةِ `employee_ops` حرفيّاً — بما
+        # فيها `except RequestException` التي تبتلع منعَ التخزين وتردّ خمسمئة.
+        return stream_stored_asset(
+            applicant.cv_url,
             filename=safe_name,
-            content_type=upstream.headers.get("Content-Type")
-            or guess_cv_content_type(applicant.cv_url),
+            content_type_fallback=guess_cv_content_type(applicant.cv_url),
+            owner="platform_job_applicant_cv",
+            owner_pk=applicant.pk,
         )
-        return response
 
 
 class PlatformStaffCapabilitiesView(APIView):
