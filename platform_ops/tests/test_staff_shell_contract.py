@@ -50,26 +50,13 @@ class StaffShellContractTests(TestCase):
         self.assertIn('"/staff/home"', source)
         self.assertNotIn('"/platform/employee-space"', source)
 
-    def test_the_platform_employee_sidebar_door_enters_the_staff_shell(self):
-        source = (FRONTEND / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-        marker = "{!user.isSuperAdmin && platformStaff.is_platform_employee && ("
-        start = source.find(marker)
-        self.assertNotEqual(start, -1, "مدخل موظف المنصّة فقد شرط العزل الصريح.")
-        door = source[start:source.find("\n          )}", start)]
-        violations = []
-        if '"/staff/home"' not in door:
-            violations.append("مدخل الموظف لا يوجّه إلى /staff/home")
-        if 'setView("platform-employee-space")' in door:
-            violations.append("مدخل الموظف ما زال يفتح المساحة القديمة")
-        self.assertEqual(violations, [], f"مخالفات باب الموظف: {violations}")
-
-    def test_the_platform_employee_sidebar_door_keeps_its_isolation_condition(self):
-        source = (FRONTEND / "components" / "Sidebar.tsx").read_text(encoding="utf-8")
-        required_condition = "!user.isSuperAdmin && platformStaff.is_platform_employee"
-        violations = []
-        if required_condition not in source:
-            violations.append("شرط !user.isSuperAdmin مع is_platform_employee غير موجود حرفياً")
-        self.assertEqual(violations, [], f"مخالفات عزل باب الموظف: {violations}")
+    # حارسا بابِ الشريط الجانبيّ كانا هنا، وقد نُقلا إلى
+    # `test_employee_door.py::TheOwnerHasADoorToWhatTheEmployeeSeesTest` — وهو
+    # موضعُ قاعدةِ الباب. والنقلُ لم يكن ترتيباً: الحارسُ الثاني كان يشترط
+    # **حرفيّاً** `!user.isSuperAdmin && platformStaff.is_platform_employee`،
+    # أي أنّه يمنع 212-Q3 (بابُ معاينةٍ للمالك) بدعوى «العزل» — والعزلُ الحقيقيُّ
+    # في الخادم لا في إخفاء رابطٍ عن مالك النظام. ونسختان من قاعدةٍ واحدةٍ في
+    # ملفّين تفترقان عند أوّل تعديل، وقد افترقتا.
 
     def test_the_staff_shell_contains_every_panel_mounted_by_the_legacy_workspace(self):
         workspace_source = (FRONTEND / "components" / "platform" / "PlatformEmployeeWorkspace.tsx").read_text(encoding="utf-8")

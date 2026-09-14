@@ -8,6 +8,7 @@ import { useAuth } from '../../../contexts/AuthContext';
 import { usePlatformStaffCapabilitiesState } from '../../../hooks/usePlatformStaffCapabilities';
 import { getMyPlatformEmployeeProfile, type MyPlatformEmployeeProfile } from '../../../services/platformEmployeeSpaceApi';
 import { staffGate } from '../../../utils/staffAccess';
+import { isStaffPreview } from '../../../utils/staffDoor';
 import { staffNav, staffRouteForPath, type StaffNavKey } from '../../../utils/staffNav';
 import { ChampionsPanel } from '../ChampionsPanel';
 import { EmployeeCompaniesPanel } from '../EmployeeCompaniesPanel';
@@ -49,6 +50,14 @@ const StaffShellContent: React.FC = () => {
   const allowed = capabilities.is_platform_employee || capabilities.is_platform_admin;
   const activePath = staffRouteForPath(location.pathname);
   const activeKey = staffNav.find((item) => item.path === activePath)?.key || 'home';
+  // 212-Q3: المالكُ يدخل بصلاحيّة `is_platform_admin` بلا صفِّ موظّف، فلوحاتُه
+  // الشخصيّةُ فارغةٌ بحقّ. اللافتةُ تقول ذلك صراحةً كي لا يُقرأ الفراغُ عطباً —
+  // وهو ما وقع فعلاً حين بحث عن أزرارٍ في مساحةٍ ليست مساحتَه.
+  const preview = isStaffPreview({
+    isSuperAdmin: Boolean(currentUser?.isSuperAdmin),
+    profileSettled: !profileLoading,
+    hasProfile: profile !== null,
+  });
 
   const loadProfile = useCallback(async () => {
     setProfileLoading(true);
@@ -92,7 +101,12 @@ const StaffShellContent: React.FC = () => {
   };
   const content = panels[activeKey];
 
-  return <div className="staff-shell flex min-h-screen overflow-x-hidden bg-[var(--staff-bg)] text-[var(--staff-text)]" dir="rtl"><StaffSidebar activeKey={activeKey} collapsed={collapsed} drawerOpen={drawerOpen} profile={profile} onNavigate={go} onToggleCollapsed={() => setCollapsed((value) => !value)} onCloseDrawer={() => setDrawerOpen(false)} /><div className="flex min-w-0 flex-1 flex-col"><StaffTopBar profile={profile} searchTerm={searchTerm} onSearch={search} onOpenDrawer={() => setDrawerOpen(true)} /><main className="min-w-0 flex-1 p-4 sm:p-6">{content}</main></div></div>;
+  return <div className="staff-shell flex min-h-screen overflow-x-hidden bg-[var(--staff-bg)] text-[var(--staff-text)]" dir="rtl"><StaffSidebar activeKey={activeKey} collapsed={collapsed} drawerOpen={drawerOpen} profile={profile} onNavigate={go} onToggleCollapsed={() => setCollapsed((value) => !value)} onCloseDrawer={() => setDrawerOpen(false)} /><div className="flex min-w-0 flex-1 flex-col"><StaffTopBar profile={profile} searchTerm={searchTerm} onSearch={search} onOpenDrawer={() => setDrawerOpen(true)} /><main className="min-w-0 flex-1 p-4 sm:p-6">{preview && (
+      <p className="mb-4 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 text-sm text-amber-100" role="status">
+        <span className="font-extrabold">معاينة.</span> هذه مساحةُ موظّف المنصّة كما يراها هو. حسابُك سوبر أدمن بلا ملفِّ
+        موظّف، فاللوحاتُ الشخصيّة (تقييمك · محفظتك · مهامُّك · شركاتك) تظهر فارغةً — وهذا ليس عطباً.
+      </p>
+    )}{content}</main></div></div>;
 };
 
 export const StaffShell: React.FC = () => <ToastProvider><ConfirmProvider><StaffShellContent /></ConfirmProvider></ToastProvider>;

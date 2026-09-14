@@ -37,6 +37,7 @@ import { employeeOpsNavLabels } from "../utils/employeeOps";
 import { useTenantSettings } from "../hooks/useTenantSettings";
 import { usePlatformStaffCapabilities } from "../hooks/usePlatformStaffCapabilities";
 import { userRoleLabel } from "../utils/userRoleLabel";
+import { staffDoorFor } from "../utils/staffDoor";
 import { listPurchaseRfqs, type PurchaseRFQDto } from "../services/procurementDocumentsApi";
 
 // ISSUE #115 قصّة ٣٠ §٦: شارة «ردٌّ جديد» على بند «العروض والطلبيات» — بلا
@@ -78,6 +79,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const { identity } = useTenantSettings();
   const hasEmployeeOps = moduleAllowsView("employee-ops-daily", modules);
   const platformStaff = usePlatformStaffCapabilities(user?.id ? String(user.id) : undefined, !!user?.isSuperAdmin);
+  const staffDoor = staffDoorFor({
+    isSuperAdmin: !!user?.isSuperAdmin,
+    isPlatformEmployee: platformStaff.is_platform_employee,
+  });
 
   // ISSUE #115 قصّة ٣٠ §٦: عدّاد ردود الطلبية غير المطّلَع عليها — لكلا بندي
   // «العروض والطلبيات» (الشراء المحلي والاستيراد، لكلٍّ نطاقه الخاص في
@@ -621,8 +626,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
 
           {/* التذكرة 210-E، §١: مساحةُ موظّف عمليات المنصة — أكبرُ بابٍ ميّتٍ في
               المواصفة، طبقةُ الصلاحيّات جاهزةٌ منذ #207 ولا مدخل لها. نفسُ نمط
-              مسؤول التوظيف أعلاه بالحرف. */}
-          {!user.isSuperAdmin && platformStaff.is_platform_employee && (
+              مسؤول التوظيف أعلاه بالحرف.
+              و212-Q3: البابُ نفسُه يُفتَح للمالك **معايناً** — القشرةُ تقبله أصلاً
+              (`staffGate` يمرّر `is_platform_admin`) وكان الناقصُ الرابطَ وحدَه.
+              ومَن يُفتَح له وبأيّ اسمٍ قرارُ دالّةٍ خالصةٍ يختبرها `npm test`. */}
+          {staffDoor && (
             <div className="mb-2 rounded-lg border border-blue-200 bg-blue-50/70 p-1 dark:border-blue-900 dark:bg-blue-950/20">
               <button
                 type="button"
@@ -631,10 +639,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                    فلا يبقى هذا الشريطُ مرسوماً بعده، و`isViewActive` هنا كان
                    فرعاً لا يُتَّخذ أبداً بعد 212-I. */
                 className="flex w-full items-center gap-2 rounded-md p-2 text-sm text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"
-                title="مساحتي — عمليات المنصة"
+                title={staffDoor.label}
               >
                 <ClipboardList className="h-5 w-5 flex-shrink-0" />
-                {showText && <span className="font-bold">مساحتي — عمليات المنصة</span>}
+                {showText && <span className="font-bold">{staffDoor.label}</span>}
               </button>
             </div>
           )}

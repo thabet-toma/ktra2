@@ -40,6 +40,8 @@ STAFF_SHELL = (
 CAPABILITIES_HOOK = (
     REPO_ROOT / "frontend_v2" / "hooks" / "usePlatformStaffCapabilities.ts"
 )
+SIDEBAR = REPO_ROOT / "frontend_v2" / "components" / "Sidebar.tsx"
+STAFF_DOOR = REPO_ROOT / "frontend_v2" / "utils" / "staffDoor.ts"
 LANDING_PAGE = REPO_ROOT / "frontend_v2" / "components" / "LandingPage.tsx"
 PUBLIC_NAVBAR = REPO_ROOT / "frontend_v2" / "components" / "layout" / "PublicNavbar.tsx"
 
@@ -318,3 +320,74 @@ class TheStaffDoorIsNotADeadEndTest(SimpleTestCase):
         if "checkingSession" not in source:
             violations.append("النموذجُ يُعرَض قبل حسم الجلسة — ومضةٌ ثمّ قفزة")
         self.assertEqual(violations, [], f"`/staff` ما زال طريقاً مسدوداً: {violations}")
+
+
+class TheOwnerHasADoorToWhatTheEmployeeSeesTest(SimpleTestCase):
+    """بابُ معاينةٍ للمالك إلى مساحة الموظّف (212-Q3).
+
+    القشرةُ كانت **تقبله أصلاً**: `staffGate` يمرّر `is_platform_admin`، وحمولةُ
+    المصادقة ترفع هذه الرايةَ للسوبر أدمن. والممنوعُ كان البابَ لا الغرفة —
+    شرطُ الشريط `!isSuperAdmin && is_platform_employee` يُخفي الرابطَ عن مالك
+    النظام وحدَه، فلا سبيلَ له إلى معاينة ما يراه موظّفوه إلّا بكتابة العنوان
+    بيده. وقد سأل عنها مراراً وقيل له «موجودة» فلم يجدها.
+
+    والاسمُ جزءٌ من الإصلاح لا زينةٌ فوقه: «مساحتي» على حسابٍ بلا صفِّ موظّفٍ
+    تجعل اللوحاتِ الفارغةَ تُقرأ عطباً في الحساب. فالبابُ يقول «معاينة»،
+    واللافتةُ داخلَ القشرة تقول لماذا الفراغُ فراغ.
+    """
+
+    def test_the_door_asks_one_pure_rule_instead_of_a_hand_written_condition(self):
+        source = SIDEBAR.read_text(encoding="utf-8")
+        violations = []
+        if "staffDoorFor(" not in source:
+            violations.append("الشريطُ لا يسأل قاعدةَ الباب الخالصة")
+        if "{staffDoor && (" not in source:
+            violations.append("البابُ غيرُ مشروطٍ بجواب القاعدة")
+        if "!user.isSuperAdmin && platformStaff.is_platform_employee" in source:
+            violations.append("الشرطُ اليدويُّ عاد — والمالكُ بلا بابٍ ثانيةً")
+        self.assertEqual(violations, [], f"بابُ `/staff` لا يُشتقّ من قاعدةٍ واحدة: {violations}")
+
+    def test_the_label_comes_from_the_rule_so_the_two_doors_differ(self):
+        sidebar = SIDEBAR.read_text(encoding="utf-8")
+        rule = STAFF_DOOR.read_text(encoding="utf-8")
+        violations = []
+        if "{staffDoor.label}" not in sidebar:
+            violations.append("الاسمُ مكتوبٌ في الشريط لا مأخوذٌ من القاعدة")
+        if "معاينة مساحة الموظّف" not in rule:
+            violations.append("القاعدةُ لا تسمّي بابَ المالك معاينةً")
+        if rule.count("مساحتي — عمليات المنصة") != 1:
+            violations.append("اسمُ باب الموظّف ليس في القاعدة وحدَها")
+        self.assertEqual(violations, [], f"البابان بلا اسمين متمايزين: {violations}")
+
+    def test_the_door_lands_in_the_staff_shell_not_the_legacy_workspace(self):
+        """منقولٌ من `test_staff_shell_contract.py`: القاعدةُ الواحدة موضعٌ واحد."""
+        source = SIDEBAR.read_text(encoding="utf-8")
+        start = source.find("{staffDoor && (")
+        self.assertNotEqual(start, -1, "بابُ `/staff` اختفى من الشريط.")
+        block = source[start:source.find("\n          )}", start)]
+        violations = []
+        if '"/staff/home"' not in block:
+            violations.append("البابُ لا يوجّه إلى `/staff/home`")
+        if 'setView("platform-employee-space")' in block:
+            violations.append("البابُ ما زال يفتح المساحةَ القديمة")
+        self.assertEqual(violations, [], f"مخالفاتُ وجهةِ الباب: {violations}")
+
+    def test_the_preview_says_why_the_personal_panels_are_empty(self):
+        source = STAFF_SHELL.read_text(encoding="utf-8")
+        violations = []
+        if "isStaffPreview(" not in source:
+            violations.append("القشرةُ لا تعرف أنّها معاينة")
+        if "{preview && (" not in source:
+            violations.append("لا لافتةَ معاينةٍ مشروطةً في القشرة")
+        if "ليس عطباً" not in source:
+            violations.append("اللافتةُ لا تقول إنّ الفراغَ ليس عطباً — وهو سببُ وجودها")
+        self.assertEqual(violations, [], f"معاينةٌ صامتةٌ تُقرأ حساباً مكسوراً: {violations}")
+
+    def test_the_room_itself_still_admits_the_platform_admin(self):
+        """البابُ بلا غرفةٍ تقبل عبثٌ: القاعدةُ الخالصةُ للبوّابة تقرأ الرايتين."""
+        source = (REPO_ROOT / "frontend_v2" / "utils" / "staffAccess.ts").read_text(encoding="utf-8")
+        self.assertIn(
+            "capabilities.is_platform_employee || input.capabilities.is_platform_admin",
+            source,
+            "بوّابةُ `/staff` لم تعد تقبل مديرَ المنصّة — فبابُ المعاينة يقود إلى طرد.",
+        )
