@@ -3173,7 +3173,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         {
           title: "المورد",
           fields: [
-            { label: "الاسم", value: formData.supplierName || "—" },
+            // ‏`formData.supplierName` **حقلٌ لا وجودَ له** على `Invoice`: لا
+            // يكتبه `sqlListToInvoice` ولا `mapPurchaseInvoiceDtoToInvoice`،
+            // فكان السطرُ يعرض «—» في كلّ فاتورة. و`tsc` لا يمسك ذلك هنا —
+            // `formData` تعود `any` لأنّ `@types/react` غيرُ مثبَّتة، فقراءةُ
+            // حقلٍ وهميٍّ تمرّ كما تمرّ الحقيقيّة. و`headerSupplierName` هي
+            // نفسُها التي يعرضها حقلُ المورّد في المحرِّر، فلا يفترق وجهُ
+            // المستند عن الشاشة التي هو فيها.
+            { label: "الاسم", value: headerSupplierName || "—" },
             ...(formData.supplierInvoiceNumber
               ? [{ label: "رقم فاتورة المورد", value: formData.supplierInvoiceNumber }]
               : []),
@@ -3186,7 +3193,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         ...(formData.exchangeRate
           ? [{ label: "سعر الصرف", value: String(formData.exchangeRate) }]
           : []),
-        ...(formData.journalId ? [{ label: "قيد اليومية", value: `#${formData.journalId}` }] : []),
+        // ‏`journalId` حقلُ **دفعةٍ** لا حقلُ فاتورة (`InvoicePayment`)؛ قيدُ
+        // الفاتورة هو `glPurchaseReceiptJournalId` ويكتبه المُحوِّلان معاً من
+        // `journal_id_display`. فكان الصفُّ لا يُرسَم على فاتورةٍ مرحَّلةٍ قطّ.
+        ...(formData.glPurchaseReceiptJournalId
+          ? [{ label: "قيد اليومية", value: `#${formData.glPurchaseReceiptJournalId}` }]
+          : []),
       ]}
       columns={[
         {

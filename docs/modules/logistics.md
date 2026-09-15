@@ -216,6 +216,17 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   `SalesInvoiceEditor` منذ T-CASHBOX)، وحارسٌ في الواجهة يقول الشرط قبل
   الرحلة. الترحيل نفسه كان يحلّ الصندوق الافتراضي بنفسه، فالعطل كان في
   **الحفظ** لا في المحاسبة.
+- **وثلاثةُ حقولٍ وهميّةٍ في وجه مستند الشراء** (نفسُ العطب من الجهة المقابلة):
+  لوحةُ `KitDocumentView` في `InvoiceForm.tsx` كانت تقرأ `formData.supplierName`
+  و`formData.journalId` و`formData.exchangeRate` — **ولا واحدٌ منها حقلٌ على
+  `Invoice`**. فسطرُ «المورد ← الاسم» يعرض «—» في كلّ فاتورة، وصفّا «قيد اليومية»
+  و«سعر الصرف» لا يُرسَمان أبداً. صار الاسمُ `headerSupplierName` (نفسُ ما يعرضه
+  حقلُ المورّد في المحرِّر) والقيدُ `glPurchaseReceiptJournalId` (يكتبه المُحوِّلان
+  من `journal_id_display`). **و`tsc` لا تحرس هذا الباب أصلاً**: `formData` تعود
+  `any` لأنّ `@types/react` غيرُ مثبَّتةٍ في المستودع، فقراءةُ حقلٍ وهميٍّ تمرّ
+  كما تمرّ الحقيقيّة — والحراسةُ صارت في
+  `core/tests/test_purchase_invoice_form_fields.py` يقارن كلَّ قراءةٍ بحقول
+  `types/invoice.ts` نفسِها.
 - **الدفع من داخل الفاتورة نقطة واحدة**: `services.py` (`pay_purchase_invoice`) خلف
   `purchase-invoices/{id}/pay/` — تركيبُ خدمات قائمة بلا أي منطق ترحيل جديد: سند
   صرف واحد بنقده وشيكاته (`post_supplier_payment`) بتوزيعٍ مقصوص على المتبقّي وما
