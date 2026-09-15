@@ -412,3 +412,237 @@ class PlatformHiringFrontendContractTest(TestCase):
             f"خيارات أنواع الدوام في الواجهة لا تطابق خيارات الخادم: {employment_type_options} != {backend_employment_choices}",
         )
 
+
+MATRIX_UI = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "ApplicantAttendanceMatrix.tsx"
+MEETINGS_TAB = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "PlatformMeetingsTab.tsx"
+APPLICANTS_TAB = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "PlatformApplicantsTab.tsx"
+HIRING_SCREEN = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "PlatformHiringScreen.tsx"
+
+
+class TheAttendanceGridSaysTheTruthTest(TestCase):
+    """شبكةُ الحضور (#213-ج): تقول عن كلِّ شخصٍ ما يقوله الخادم، وتُفتَح في كلّ مرّة.
+
+    **كلُّ تأكيدٍ هنا مكتوبٌ على عطبٍ وقع فعلاً** في تسليم الواجهة ومُثبَتٌ سقوطُه
+    عليه قبل الإصلاح، أبرزُها:
+
+    ١. `attendanceIcon` قارنت النصَّ الحرَّ `"ATTENDED"`/`"ABSENT"` وقيمُ الخادم
+       صغيرة، فكانت المقارنتان كاذبتين دائماً و**كلُّ خليّةٍ ترسم ساعةَ «مدعوّ»** —
+       أي أنّ الشبكةَ التي وُجدت لتُقرأ نظرةً واحدةً كانت تقول الشيءَ نفسَه عن
+       الجميع. و`tsc` صامتٌ لأنّ حقلَ الحالة كان `string`.
+    ٢. طلبُ الفتح كان يُلجَم بمتغيّرٍ يتذكّر آخرَ معرّفٍ نُفِّذ، فالضغطةُ الثانية
+       على الاسم نفسِه تنقل التبويبَ ولا تفتح شيئاً.
+    ٣. البحثُ الذي طلبه المالكُ نصّاً لم يكن موجوداً، وفتحُ اجتماعٍ كان يفكّك
+       الشبكةَ فيضيع المدى، واليومُ المعروضُ كان يومَ UTC لا يومَ القارئ.
+    """
+
+    def setUp(self):
+        self.matrix_src = MATRIX_UI.read_text(encoding="utf-8")
+        self.api_src = HIRING_API.read_text(encoding="utf-8")
+        self.screen_src = HIRING_SCREEN.read_text(encoding="utf-8")
+        self.applicants_src = APPLICANTS_TAB.read_text(encoding="utf-8")
+        self.meetings_src = MEETINGS_TAB.read_text(encoding="utf-8")
+
+    def _backend_statuses(self) -> list[str]:
+        return [value for value, _label in ApplicantMeetingAttendee.Status.choices]
+
+    def test_every_backend_status_has_its_own_icon(self):
+        """لكلّ حالةِ حضورٍ في الخادم مفتاحٌ في `ATTENDANCE_ICON` بحروفها نفسِها."""
+        match = re.search(
+            r"const ATTENDANCE_ICON: Record<ApplicantAttendanceStatus, React\.ReactNode> = \{(.*?)\n\};",
+            self.matrix_src,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(
+            match,
+            "شبكةُ الحضور لا تحمل خريطةَ أيقوناتٍ شاملةً على النوع "
+            "(`Record<ApplicantAttendanceStatus, React.ReactNode>`) — وبغيرها "
+            "تعود مقارنةُ النصّ الحرّ التي جعلت كلَّ خليّةٍ ترسم الأيقونةَ نفسَها",
+        )
+        keys = re.findall(r"^\s{2}(\w+):", match.group(1), re.MULTILINE)
+        self.assertEqual(
+            sorted(keys),
+            sorted(self._backend_statuses()),
+            "مفاتيحُ `ATTENDANCE_ICON` لا تطابق قيمَ "
+            "`ApplicantMeetingAttendee.Status` حرفاً بحرف — خليّةٌ بلا أيقونتها",
+        )
+        for icon in ("Check", "X", "Clock"):
+            self.assertEqual(
+                match.group(1).count(f"<{icon} "),
+                1,
+                f"الأيقونة `{icon}` تتكرّر أو تغيب في `ATTENDANCE_ICON` — "
+                "حالتان متمايزتان ترسمان الشكلَ نفسَه",
+            )
+
+    def test_the_cell_status_is_a_union_not_a_free_string(self):
+        """حقلُ الحالة نوعٌ مُغلَقٌ في `platformHiringApi.ts` كي يمسك `tsc` الخطأَ القادم."""
+        declared = re.search(
+            r'export type ApplicantAttendanceStatus = ([^;]+);',
+            self.api_src,
+        )
+        self.assertIsNotNone(declared, "لا يوجد نوعٌ مُغلَقٌ لحالة الحضور")
+        members = sorted(re.findall(r'"([^"]+)"', declared.group(1)))
+        self.assertEqual(
+            members,
+            sorted(self._backend_statuses()),
+            "أعضاءُ `ApplicantAttendanceStatus` لا تطابق حالاتِ الخادم",
+        )
+        for interface in ("ApplicantAttendanceCell", "ApplicantMeetingAttendee"):
+            body = re.search(
+                rf"export interface {interface} \{{(.*?)\n\}}",
+                self.api_src,
+                re.DOTALL,
+            )
+            self.assertIsNotNone(body, f"واجهة {interface} غير موجودة")
+            self.assertIn(
+                "status: ApplicantAttendanceStatus;",
+                body.group(1),
+                f"حالةُ {interface} ما زالت `string` — فمقارنةٌ بحروفٍ خاطئةٍ "
+                "تمرّ صامتةً من `tsc` كما مرّت أوّلَ مرّة",
+            )
+
+    def test_opening_the_same_applicant_twice_still_opens_him(self):
+        """طلبُ الفتح يُفرَغ بعد تنفيذه، فلا يُلجَم بتذكُّرِ آخرِ معرّف."""
+        self.assertNotIn(
+            "handledFocusApplicantId",
+            self.applicants_src,
+            "عاد اللجامُ الذي يجعل الضغطةَ الثانية على الاسم نفسِه بلا أثر",
+        )
+        self.assertIn(
+            "onFocusHandled?.();",
+            self.applicants_src,
+            "تبويبُ المتقدّمين لا يُبلغ الأبَ بأنّ الطلبَ نُفِّذ",
+        )
+        self.assertRegex(
+            self.screen_src,
+            r"onFocusHandled=\{handleApplicantFocusHandled\}",
+            "شاشةُ التوظيف لا تمرّر مُفرِغَ الطلب",
+        )
+        self.assertRegex(
+            self.screen_src,
+            r"const handleApplicantFocusHandled = useCallback\(\(\) => setApplicantFocus\(null\), \[\]\)",
+            "الأبُ لا يُفرِغ `applicantFocus` بعد التنفيذ — فيبقى المعرّفُ عالقاً",
+        )
+
+    def test_every_handle_in_the_grid_is_a_real_button(self):
+        """«كلّ شي كليكبل»: الاجتماعُ والخليّةُ والاسمُ أزرارٌ لا نصوصٌ عليها `onClick`."""
+        for handler in (
+            r"onOpenMeeting\(meeting\.id\)",
+            r"onOpenMeeting\(cell\.meeting\)",
+            r"onOpenApplicant\(row\.applicant\)",
+        ):
+            self.assertRegex(
+                self.matrix_src,
+                rf"<button[^<]*{handler}",
+                f"المقبضُ {handler} ليس داخلَ <button> — لا يصله لوحُ المفاتيح",
+            )
+        self.assertRegex(
+            self.meetings_src,
+            r"onOpenApplicant=\{onOpenApplicant\}",
+            "تبويبُ الاجتماعات لا يمرّر فتحَ ملفّ المتقدّم إلى الشبكة",
+        )
+
+    def test_the_grid_has_the_search_the_owner_asked_for(self):
+        """«وابحث بالاحترافي» — حقلُ بحثٍ في الشبكة، بدالّة التصفية المشتركة نفسِها."""
+        self.assertIn(
+            'type="search"',
+            self.matrix_src,
+            "شبكةُ الحضور بلا حقلِ بحث — والمالكُ طلبه نصّاً: «وابحث بالاحترافي»",
+        )
+        self.assertIn(
+            "filterPlatformApplicants(matrix?.rows ?? [], search)",
+            self.matrix_src,
+            "الشبكةُ تصفّي بقاعدةٍ خاصّةٍ بها لا بـ`filterPlatformApplicants` "
+            "المشتركة المختبَرة — قاعدتا بحثٍ تفترقان",
+        )
+        self.assertIn(
+            "visibleRows.map((row)",
+            self.matrix_src,
+            "الجدولُ يرسم `matrix.rows` كلَّها ويتجاهل نتيجةَ البحث",
+        )
+
+    def test_the_grid_survives_opening_a_meeting(self):
+        """فتحُ اجتماعٍ يُخفي الشبكةَ ولا يفكّكها — وإلا ضاع المدى والعرضُ عند العودة."""
+        self.assertNotIn(
+            "if (selectedMeeting) {",
+            self.meetings_src,
+            "عادت العودةُ المبكّرة التي تفكّك الشبكةَ فتمحو مدى التواريخ "
+            "وتُرجع العرضَ إلى «قائمة»",
+        )
+        self.assertIn(
+            "hidden={selectedMeeting !== null}",
+            self.meetings_src,
+            "جسمُ التبويب لا يُخفى بل يُستبدَل — فتُفقَد حالةُ الشبكة",
+        )
+        self.assertIn(
+            "refreshToken={gridRefresh}",
+            self.meetings_src,
+            "الشبكةُ الباقيةُ مركَّبةً لا تُعاد قراءتُها بعد تسجيل حضورٍ في "
+            "تفصيل الاجتماع — فتعرض خلايا قديمة",
+        )
+        self.assertIn(
+            "setGridRefresh((token) => token + 1);",
+            self.meetings_src,
+            "العودةُ من تفصيل الاجتماع لا تطلب تحديثَ الشبكة",
+        )
+
+    def test_the_focus_waits_for_the_unfiltered_list(self):
+        """لا يُبحَث عن المطلوب في نتيجةِ فلترٍ قديم، فيُعلَن مفقوداً وهو موجود."""
+        self.assertIn(
+            "setLoadedFilters({ job: jobFilter, status: statusFilter });",
+            self.applicants_src,
+            "لا يُسجَّل أيُّ فلترٍ أنتج القائمةَ المحمَّلة",
+        )
+        self.assertIn(
+            "if (loadedFilters.job || loadedFilters.status) return;",
+            self.applicants_src,
+            "أثرُ الفتح يقرأ القائمةَ قبل أن تصلها الفلاترُ المُفرَغة — "
+            "فيرى نتيجةَ الفلتر القديم ويعلن المتقدّمَ مفقوداً ثمّ يُلغي الطلب",
+        )
+
+    def test_the_meeting_day_is_the_readers_day_not_utc(self):
+        """عمودُ الشبكة يعرض يومَ القارئ — لا يومَ UTC المقتطَعَ من النصّ."""
+        self.assertIn(
+            "const meetingDay = (start: string): string => formatDateValue(new Date(start));",
+            self.matrix_src,
+            "يومُ العمود لا يمرّ بـ`Date` — فاجتماعُ آخرِ الليل يظهر في الشبكة "
+            "بيومٍ وفي قائمة الاجتماعات بيومٍ آخر",
+        )
+        self.assertNotIn(
+            "formatDateValue(meeting.start)",
+            self.matrix_src,
+            "ما زال يُقتطع النصُّ ISO مباشرةً ليوم العمود",
+        )
+
+    def test_the_meeting_status_is_a_union_too(self):
+        """حالةُ الاجتماع نوعٌ مُغلَقٌ — العمودُ يقارنها ليُظهر الملغى."""
+        declared = re.search(
+            r"export type ApplicantMeetingStatus = ([^;]+);",
+            self.api_src,
+        )
+        self.assertIsNotNone(declared, "لا يوجد نوعٌ مُغلَقٌ لحالة الاجتماع")
+        self.assertEqual(
+            sorted(re.findall(r'"([^"]+)"', declared.group(1))),
+            sorted(value for value, _ in ApplicantMeeting.Status.choices),
+            "أعضاءُ `ApplicantMeetingStatus` لا تطابق حالاتِ الخادم",
+        )
+        column = re.search(
+            r"export interface ApplicantAttendanceColumn \{(.*?)\n\}",
+            self.api_src,
+            re.DOTALL,
+        )
+        self.assertIsNotNone(column, "واجهة عمود الشبكة غير موجودة")
+        self.assertIn(
+            "status: ApplicantMeetingStatus;",
+            column.group(1),
+            "حالةُ العمود ما زالت `string` — فمقارنةُ `!== \"scheduled\"` "
+            "بحروفٍ خاطئةٍ تمرّ صامتةً من `tsc`",
+        )
+
+    def test_the_row_carries_the_applicant_status_the_server_sends(self):
+        """«نظرةٌ واحدة»: حالةُ المتقدّم تُعرض في صفّه — الخادمُ يرسلها سلفاً."""
+        for needle in ("row.applicant_status_display", "applicantStatusBadgeClass(row.applicant_status)"):
+            self.assertIn(
+                needle,
+                self.matrix_src,
+                f"`{needle}` غيرُ معروضٍ — حقلٌ يرسله الخادمُ ولا تستهلكه الشبكة",
+            )

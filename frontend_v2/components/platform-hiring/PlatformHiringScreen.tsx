@@ -25,6 +25,7 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
 
   // الفلتر الممرر لتبويب المتقدمين عند الضغط على «عرض المتقدمين» من صف وظيفة
   const [applicantJobFilter, setApplicantJobFilter] = useState<number | null>(null);
+  const [applicantFocus, setApplicantFocus] = useState<number | null>(null);
 
   const loadJobs = useCallback(async () => {
     setLoadingJobs(true);
@@ -50,6 +51,17 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
 
   const handleSelectJobForApplicants = (jobId: number) => {
     setApplicantJobFilter(jobId);
+    setActiveTab("applicants");
+  };
+
+  // **والطلبُ يُستهلَك بعد تنفيذه**: لو بقي المعرّفُ مخزَّناً بعد فتح البطاقة،
+  // لَما فُتحت في المرّة الثانية — يعود المستخدمُ إلى الشبكة ويضغط الاسمَ نفسَه
+  // فينتقل التبويبُ ولا يحدث شيء، وهو طريقٌ مسدودٌ بلا رسالة.
+  // ثابتُ الهويّة كي لا يُعاد تشغيلُ أثرِ الفتح في كلّ رسم.
+  const handleApplicantFocusHandled = useCallback(() => setApplicantFocus(null), []);
+
+  const handleOpenApplicantFromMeetings = (id: number) => {
+    setApplicantFocus(id);
     setActiveTab("applicants");
   };
 
@@ -161,10 +173,12 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
         <PlatformApplicantsTab
           jobs={jobs}
           initialJobFilter={applicantJobFilter}
+          focusApplicantId={applicantFocus}
+          onFocusHandled={handleApplicantFocusHandled}
         />
       )}
 
-      {activeTab === "meetings" && <PlatformMeetingsTab />}
+      {activeTab === "meetings" && <PlatformMeetingsTab onOpenApplicant={handleOpenApplicantFromMeetings} />}
 
       {activeTab === "recruiters" && canManageRecruiters && (
         <PlatformRecruitersTab />

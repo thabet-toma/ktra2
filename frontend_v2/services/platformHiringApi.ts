@@ -205,16 +205,33 @@ export interface ApplicantAttendanceColumn {
   title: string;
   start: string;
   end: string;
-  status: string;
+  status: ApplicantMeetingStatus;
   status_display: string;
   location: string;
 }
+
+/**
+ * حالةُ الحضور كما يرسلها الخادم — **صغيرةً** (`ApplicantMeetingAttendee.Status`).
+ *
+ * نوعٌ مُسمّىً لا اتّحادٌ يُكتَب في كلّ موضعٍ من جديد: الشبكةُ ترسم أيقونةً لكلّ
+ * حالة، ومقارنةُ `"ATTENDED"` بـ`"attended"` كاذبةٌ دائماً — وبحقلٍ من نوع
+ * `string` لا يبلّغ `tsc` عنها، فتظهر الشبكةُ كلُّها بحالةٍ واحدة.
+ */
+export type ApplicantAttendanceStatus = "invited" | "attended" | "absent";
+
+/**
+ * حالةُ الاجتماع كما يرسلها الخادم (`ApplicantMeeting.Status`) — **صغيرةً** أيضاً.
+ *
+ * مُسمّاةٌ للسبب نفسِه: عمودُ الشبكة يقارن حالتَه ليُظهر الملغى، ومقارنةُ نصٍّ
+ * حرٍّ تمرّ صامتةً بينما الاتّحادُ يجعل الخطأَ خطأَ ترجمة.
+ */
+export type ApplicantMeetingStatus = "scheduled" | "finished" | "cancelled";
 
 /** خليّةٌ في الشبكة: حضورُ شخصٍ في اجتماعٍ بعينه، وملاحظتُه فيه. */
 export interface ApplicantAttendanceCell {
   attendee: number;
   meeting: number;
-  status: string;
+  status: ApplicantAttendanceStatus;
   status_display: string;
   note: string;
 }
@@ -253,16 +270,18 @@ export interface ApplicantAttendanceWindow {
 }
 
 /** شبكةُ الحضور: صفٌّ لكلّ شخصٍ وعمودٌ لكلّ اجتماع (#213-ج). */
-export const getApplicantAttendanceMatrix = (window: ApplicantAttendanceWindow = {}) =>
+export const getApplicantAttendanceMatrix = (range: ApplicantAttendanceWindow = {}) =>
   apiGetObject<ApplicantAttendanceMatrix>(`${OPS}/applicant-meetings/attendance-matrix/`, {
-    query: { from: window.from, to: window.to },
+    query: { from: range.from, to: range.to },
   });
 
 /** نفسُ الشبكة ملفَّ CSV — بايتاتٌ عبر الخادم كنمط السيرة، لا رابطٌ مباشر. */
-export const exportApplicantAttendanceMatrix = (window: ApplicantAttendanceWindow = {}) => {
+export const exportApplicantAttendanceMatrix = (range: ApplicantAttendanceWindow = {}) => {
+  // ‏`apiGetForBlob` لا يقبل `query` كـ`apiGetObject` — والبناءُ اليدويُّ هنا
+  // أرخصُ من توسيع العميل القاعديّ المشترك لأجل نقطةٍ واحدة.
   const params = new URLSearchParams();
-  if (window.from) params.set('from', window.from);
-  if (window.to) params.set('to', window.to);
+  if (range.from) params.set('from', range.from);
+  if (range.to) params.set('to', range.to);
   const query = params.toString();
   return apiGetForBlob(
     `${OPS}/applicant-meetings/attendance-matrix/export/${query ? `?${query}` : ''}`,
@@ -356,7 +375,7 @@ export interface ApplicantMeetingAttendee {
   guest_name: string;
   /** الاسمُ المعروض — يحسبه الخادمُ فلا تُكرَّر القاعدةُ هنا. */
   name: string;
-  status: "invited" | "attended" | "absent";
+  status: ApplicantAttendanceStatus;
   status_display: string;
   /** حالةُ المتقدّم اليومَ لا يومَ الاجتماع — فراغٌ للضيف. */
   applicant_status: string;
@@ -375,7 +394,7 @@ export interface ApplicantMeeting {
   /** مكانٌ أو رابط — نصٌّ حرٌّ لا عنوانُ إنترنت بالضرورة. */
   location: string;
   notes: string;
-  status: "scheduled" | "finished" | "cancelled";
+  status: ApplicantMeetingStatus;
   status_display: string;
   created_by_name: string;
   attendees: ApplicantMeetingAttendee[];

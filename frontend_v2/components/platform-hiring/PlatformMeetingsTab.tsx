@@ -10,9 +10,14 @@ import {
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { humanizeThrown } from "../../utils/drfError";
+import { ApplicantAttendanceMatrix } from "./ApplicantAttendanceMatrix";
 import { PlatformMeetingDetail } from "./PlatformMeetingDetail";
 
-export const PlatformMeetingsTab: React.FC = () => {
+interface PlatformMeetingsTabProps {
+  onOpenApplicant: (id: number) => void;
+}
+
+export const PlatformMeetingsTab: React.FC<PlatformMeetingsTabProps> = ({ onOpenApplicant }) => {
   const [meetings, setMeetings] = useState<ApplicantMeeting[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -27,6 +32,8 @@ export const PlatformMeetingsTab: React.FC = () => {
   const [agenda, setAgenda] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+  const [view, setView] = useState<"list" | "matrix">("list");
+  const [gridRefresh, setGridRefresh] = useState(0);
 
   const loadMeetings = useCallback(async () => {
     setLoading(true);
@@ -89,21 +96,23 @@ export const PlatformMeetingsTab: React.FC = () => {
     setMeetings((current) => current.map((meeting) => (meeting.id === updated.id ? updated : meeting)));
   };
 
-  if (selectedMeeting) {
-    return (
-      <PlatformMeetingDetail
-        meeting={selectedMeeting}
-        onBack={() => {
-          setSelectedMeeting(null);
-          void loadMeetings();
-        }}
-        onMeetingUpdated={replaceMeeting}
-      />
-    );
-  }
-
   return (
-    <div className="space-y-4 text-right" dir="rtl">
+    <>
+      {selectedMeeting && (
+        <PlatformMeetingDetail
+          meeting={selectedMeeting}
+          onBack={() => {
+            setSelectedMeeting(null);
+            setGridRefresh((token) => token + 1);
+            void loadMeetings();
+          }}
+          onMeetingUpdated={replaceMeeting}
+        />
+      )}
+      {/* لا يُفكَّك عند فتح اجتماع، بل يُخفى: تفكيكُه يمحو مدى التواريخ الذي
+          اختاره المستخدمُ في الشبكة ويعيد العرضَ إلى القائمة — فيعود من
+          الاجتماع إلى غير ما تركه. */}
+      <div className="space-y-4 text-right" dir="rtl" hidden={selectedMeeting !== null}>
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 dark:border-slate-800 bg-white p-3 shadow-sm dark:bg-slate-900 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="flex items-center gap-2 text-sm font-bold text-slate-900 dark:text-slate-100">
@@ -112,16 +121,43 @@ export const PlatformMeetingsTab: React.FC = () => {
           </h2>
           <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">سجّل الحضور وملاحظة مستقلة لكل شخص.</p>
         </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => void loadMeetings()}
-            disabled={loading}
-            className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-            title="تحديث القائمة"
-          >
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-100 p-1 dark:border-slate-700 dark:bg-slate-800/60">
+            <button
+              type="button"
+              onClick={() => setView("list")}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+                view === "list"
+                  ? "bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400"
+                  : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+              }`}
+            >
+              قائمة
+            </button>
+            <button
+              type="button"
+              onClick={() => setView("matrix")}
+              className={`rounded-md px-2.5 py-1.5 text-xs font-semibold transition ${
+                view === "matrix"
+                  ? "bg-white text-blue-600 shadow-sm dark:bg-slate-900 dark:text-blue-400"
+                  : "text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+              }`}
+            >
+              شبكة الحضور
+            </button>
+          </div>
+          {/* للقائمة وحدَها: الشبكةُ تحدّث نفسَها بزرّها ومداها. */}
+          {view === "list" && (
+            <button
+              type="button"
+              onClick={() => void loadMeetings()}
+              disabled={loading}
+              className="rounded-lg p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 disabled:opacity-50 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+              title="تحديث القائمة"
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setShowCreateForm(true)}
@@ -169,7 +205,14 @@ export const PlatformMeetingsTab: React.FC = () => {
 
       {openingError && <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">{openingError}</div>}
 
-      <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+      {view === "matrix" ? (
+        <ApplicantAttendanceMatrix
+          onOpenMeeting={(id) => void openMeeting(id)}
+          onOpenApplicant={onOpenApplicant}
+          refreshToken={gridRefresh}
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
         {loading ? (
           <div className="flex items-center justify-center gap-2 p-10 text-xs text-slate-500 dark:text-slate-400"><Loader2 className="h-4 w-4 animate-spin" />جارٍ تحميل الاجتماعات...</div>
         ) : loadError ? (
@@ -191,7 +234,9 @@ export const PlatformMeetingsTab: React.FC = () => {
             ))}
           </div>
         )}
+        </div>
+      )}
       </div>
-    </div>
+    </>
   );
 };

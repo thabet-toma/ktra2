@@ -18,6 +18,9 @@ import { PlatformApplicantPanel } from "./PlatformApplicantPanel";
 interface PlatformApplicantsTabProps {
   jobs: PlatformJobPosting[];
   initialJobFilter?: number | null;
+  focusApplicantId?: number | null;
+  /** يُنادى بعد تنفيذ طلب الفتح، فيُفرِغه الأبُ ويصير الضغطُ الثاني مسموعاً. */
+  onFocusHandled?: () => void;
 }
 
 const STATUS_CHOICES = [
@@ -28,6 +31,8 @@ const STATUS_CHOICES = [
 export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   jobs,
   initialJobFilter,
+  focusApplicantId,
+  onFocusHandled,
 }) => {
   const [jobFilter, setJobFilter] = useState<string>(
     initialJobFilter ? String(initialJobFilter) : "",
@@ -39,6 +44,15 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedApplicant, setSelectedApplicant] = useState<PlatformJobApplicant | null>(null);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const [focusError, setFocusError] = useState<string | null>(null);
+  /** الفلاتر التي **نتجت عنها** القائمةُ المحمَّلةُ الآن — لا التي في الحقول. */
+  const [loadedFilters, setLoadedFilters] = useState({ job: "", status: "" });
+
+  // **الطلبُ قائمٌ ما دام المعرّفُ قائماً**: الأبُ يُفرِغه فورَ تنفيذه
+  // (`onFocusHandled`)، فلا يلزم تذكُّرُ ما نُفِّذ — وتذكُّرُه كان يمنع فتحَ
+  // الشخص نفسِه مرّةً ثانيةً إلى الأبد.
+  const isFocusPending = focusApplicantId != null;
 
   useEffect(() => {
     if (initialJobFilter) {
@@ -46,8 +60,21 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
     }
   }, [initialJobFilter]);
 
+  useEffect(() => {
+    if (focusApplicantId == null) return;
+    setJobFilter("");
+    setStatusFilter("");
+    setSearchQuery("");
+    setSelectedApplicant(null);
+    setFocusError(null);
+  }, [focusApplicantId]);
+
+  // ‏`isFocusPending` **ليس** من تبعيّات الجلب: الأثرُ الذي قبله يُفرِغ الفلاتر،
+  // وإفراغُها وحدَه يُعيد التحميلَ غيرَ مصفّى. إدخالُه كان يجلب القائمةَ ثلاثَ
+  // مرّاتٍ للفتحة الواحدة — عند رفع الطلب، وعند إفراغ الفلاتر، وعند إنزاله.
   const loadApplicants = useCallback(async () => {
     setLoading(true);
+    setHasLoaded(false);
     setLoadError(null);
     try {
       const data = await listPlatformApplicants({
@@ -55,11 +82,13 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
         status: statusFilter || undefined,
       });
       setApplicants(data);
+      setLoadedFilters({ job: jobFilter, status: statusFilter });
     } catch (err: any) {
       setApplicants([]);
       setLoadError(err?.message || "تعذر تحميل المتقدمين.");
     } finally {
       setLoading(false);
+      setHasLoaded(true);
     }
   }, [jobFilter, statusFilter]);
 
@@ -71,6 +100,23 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   const filteredApplicants = useMemo(() => {
     return filterPlatformApplicants(applicants, searchQuery);
   }, [applicants, searchQuery]);
+
+  useEffect(() => {
+    if (!isFocusPending || loading || !hasLoaded || loadError || focusApplicantId == null) return;
+    // **وقائمةُ البحث هي القائمةُ غيرُ المصفّاة** لا سابقتُها: الأثرُ الذي يُفرِغ
+    // الفلاتر يُجدوِل حالةً لا تصل هذا الأثرَ في نفس اللقطة، فكان المطلوبُ
+    // يُبحَث عنه في نتيجةِ فلترٍ قديمٍ ويُعلَن مفقوداً — ثمّ يُلغى الطلب.
+    if (loadedFilters.job || loadedFilters.status) return;
+
+    const applicant = applicants.find((item) => item.id === focusApplicantId);
+    if (applicant) {
+      setSelectedApplicant(applicant);
+      setFocusError(null);
+    } else {
+      setFocusError("تعذّر العثور على المتقدّم المطلوب ضمن القائمة المحمّلة.");
+    }
+    onFocusHandled?.();
+  }, [applicants, focusApplicantId, hasLoaded, isFocusPending, loadError, loadedFilters, loading, onFocusHandled]);
 
   return (
     <div className="space-y-4 text-right" dir="rtl">
@@ -134,6 +180,12 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
       </div>
 
       {/* جدول المتقدمين */}
+      {focusError && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs font-semibold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+          {focusError}
+        </div>
+      )}
+
       <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
         <table className="w-full text-right text-xs">
           <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-800">
