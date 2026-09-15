@@ -18,6 +18,8 @@ import { PlatformApplicantPanel } from "./PlatformApplicantPanel";
 interface PlatformApplicantsTabProps {
   jobs: PlatformJobPosting[];
   initialJobFilter?: number | null;
+  /** يُنادى بعد تطبيق فلتر الوظيفة، فيُفرِغه الأبُ ويصير الطلبُ الثاني مسموعاً. */
+  onJobFilterHandled?: () => void;
   focusApplicantId?: number | null;
   /** يُنادى بعد تنفيذ طلب الفتح، فيُفرِغه الأبُ ويصير الضغطُ الثاني مسموعاً. */
   onFocusHandled?: () => void;
@@ -31,6 +33,7 @@ const STATUS_CHOICES = [
 export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   jobs,
   initialJobFilter,
+  onJobFilterHandled,
   focusApplicantId,
   onFocusHandled,
 }) => {
@@ -54,11 +57,15 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   // الشخص نفسِه مرّةً ثانيةً إلى الأبد.
   const isFocusPending = focusApplicantId != null;
 
+  // **ويُستهلَك كما يُستهلَك طلبُ الفتح**: المعرَّفُ كان يبقى مخزَّناً عند الأب
+  // إلى الأبد، والتبويبُ يُفصَل عند كلّ تبديل ثمّ يقرؤه من جديد — فمجرّدُ
+  // العودة إلى «المتقدّمون» بزرّ التبويب كانت **تُعيد فرضَ فلتر وظيفةٍ قديم**
+  // على من مسحه بيده. صار طلباً يُنفَّذ مرّةً ثمّ يُفرَغ.
   useEffect(() => {
-    if (initialJobFilter) {
-      setJobFilter(String(initialJobFilter));
-    }
-  }, [initialJobFilter]);
+    if (initialJobFilter == null) return;
+    setJobFilter(String(initialJobFilter));
+    onJobFilterHandled?.();
+  }, [initialJobFilter, onJobFilterHandled]);
 
   useEffect(() => {
     if (focusApplicantId == null) return;
@@ -152,7 +159,7 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
 
           {/* بحث نصي محلي */}
           <div className="relative flex-1 min-w-[200px]">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
+            <Search className="w-3.5 h-3.5 text-slate-500 dark:text-slate-400 absolute right-3 top-2.5" aria-hidden="true" />
             <input
               type="text"
               value={searchQuery}
@@ -200,7 +207,7 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
           <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-800 dark:text-slate-200">
             {filteredApplicants.length === 0 ? (
               <tr>
-                <td colSpan={5} className="p-8 text-center text-slate-400 dark:text-slate-500">
+                <td colSpan={5} className="p-8 text-center text-slate-500 dark:text-slate-400">
                   {loading ? (
                     "جاري تحميل المتقدمين..."
                   ) : loadError ? (
@@ -231,8 +238,12 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
                 >
                   <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
                     <div className="flex items-center gap-2">
-                      <span>{applicant.name}</span>
-                      <span className="font-mono text-[10px] text-slate-400 font-normal">
+                      {/* الاسمُ زرٌّ لا نصّ: نقرُ الصفِّ يخدم الفأرةَ وحدَها،
+                          وبلا هذا الزرِّ لا يصل ملفُّ المتقدّم من لوحة المفاتيح. */}
+                      <button type="button" onClick={() => setSelectedApplicant(applicant)} className="rounded-md text-right transition hover:text-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:hover:text-blue-300 dark:focus:ring-blue-400">
+                        {applicant.name}
+                      </button>
+                      <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                         ({applicant.reference_code})
                       </span>
                     </div>
@@ -256,12 +267,12 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
                   </td>
                   <td className="p-3">
                     {applicant.rating && applicant.rating > 0 ? (
-                      <div className="flex items-center gap-1 text-amber-500">
-                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-400" />
+                      <div className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-500 dark:fill-amber-300 dark:text-amber-300" aria-hidden="true" />
                         <span className="font-bold text-xs">{formatNumber(applicant.rating)}</span>
                       </div>
                     ) : (
-                      <span className="text-slate-400 text-[11px]">بلا تقييم</span>
+                      <span className="text-slate-500 dark:text-slate-400 text-[11px]">بلا تقييم</span>
                     )}
                   </td>
                   <td className="p-3 text-slate-500 dark:text-slate-400">

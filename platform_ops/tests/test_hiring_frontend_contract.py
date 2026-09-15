@@ -646,3 +646,64 @@ class TheAttendanceGridSaysTheTruthTest(TestCase):
                 self.matrix_src,
                 f"`{needle}` غيرُ معروضٍ — حقلٌ يرسله الخادمُ ولا تستهلكه الشبكة",
             )
+
+    def test_the_applicant_row_opens_from_the_keyboard(self):
+        """صفُّ المتقدّم كان `onClick` وحدَه — بابٌ للفأرة وحدَها."""
+        self.assertRegex(
+            self.applicants_src,
+            r"<button[^<]*setSelectedApplicant\(applicant\)",
+            "اسمُ المتقدّم ليس داخلَ <button> — فمن لا يستعمل الفأرةَ لا يصل "
+            "إلى بطاقته أصلاً، ونقرُ الصفِّ وحدَه لا يُنقَل بلوحة المفاتيح",
+        )
+
+    def test_every_muted_class_has_its_dark_counterpart(self):
+        """صنفٌ فاتحٌ بلا مقابلٍ داكن يختفي في القشرة الداكنة — والملفّ يزاوجها."""
+        classes = re.findall(r'className="([^"]*)"', self.applicants_src)
+        unpaired = [
+            value
+            for value in classes
+            if re.search(r"\btext-(slate|amber)-\d00\b", value) and "dark:text-" not in value
+        ]
+        self.assertEqual(
+            unpaired,
+            [],
+            f"أصنافُ نصٍّ بلا مقابلٍ `dark:` في تبويب المتقدّمين: {unpaired}",
+        )
+        # ‏`slate-400` على أبيض ≈ ٢٫٦:١ — يُقرأ بالكاد. القشرةُ الفاتحة تأخذ
+        # `slate-500`، و`slate-400` للقشرة الداكنة وحدَها.
+        too_faint = [
+            value for value in classes if re.search(r"(?<!dark:)\btext-slate-400\b", value)
+        ]
+        self.assertEqual(
+            too_faint,
+            [],
+            f"نصٌّ بـ`text-slate-400` في القشرة الفاتحة: {too_faint}",
+        )
+
+    def test_the_job_filter_request_is_consumed_like_the_focus_request(self):
+        """فلترُ الوظيفة طلبٌ يُنفَّذ مرّةً ثمّ يُفرَغ — لا حالةٌ تبقى عند الأب.
+
+        بقاؤه كان يُعيد فرضَ فلترٍ قديمٍ في كلّ عودةٍ إلى التبويب بزرّه، على من
+        مسحه بيده — والتبويبُ يُفصَل عند التبديل فيقرأ المعرَّفَ من جديد.
+        """
+        self.assertIn(
+            "onJobFilterHandled?.();",
+            self.applicants_src,
+            "فلترُ الوظيفة لا يُبلَّغ الأبُ بتطبيقه، فيبقى معرّفُه عالقاً عنده "
+            "— ثمّ لا يتغيّر فلا يشتغل الأثرُ فلا يُطبَّق الفلتر",
+        )
+        self.assertIn(
+            "if (initialJobFilter == null) return;",
+            self.applicants_src,
+            "شرطُ الأثر ما زال `if (initialJobFilter)` — لا يميّز الفراغَ من الصفر",
+        )
+        self.assertRegex(
+            self.screen_src,
+            r"const handleApplicantJobFilterHandled = useCallback\(\(\) => setApplicantJobFilter\(null\), \[\]\)",
+            "الأبُ لا يُفرِغ `applicantJobFilter` بعد تطبيقه",
+        )
+        self.assertRegex(
+            self.screen_src,
+            r"onJobFilterHandled=\{handleApplicantJobFilterHandled\}",
+            "شاشةُ التوظيف لا تمرّر مُفرِغَ فلتر الوظيفة",
+        )

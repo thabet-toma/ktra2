@@ -59,6 +59,7 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
   // فينتقل التبويبُ ولا يحدث شيء، وهو طريقٌ مسدودٌ بلا رسالة.
   // ثابتُ الهويّة كي لا يُعاد تشغيلُ أثرِ الفتح في كلّ رسم.
   const handleApplicantFocusHandled = useCallback(() => setApplicantFocus(null), []);
+  const handleApplicantJobFilterHandled = useCallback(() => setApplicantJobFilter(null), []);
 
   const handleOpenApplicantFromMeetings = (id: number) => {
     setApplicantFocus(id);
@@ -173,6 +174,7 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
         <PlatformApplicantsTab
           jobs={jobs}
           initialJobFilter={applicantJobFilter}
+          onJobFilterHandled={handleApplicantJobFilterHandled}
           focusApplicantId={applicantFocus}
           onFocusHandled={handleApplicantFocusHandled}
         />
