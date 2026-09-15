@@ -167,6 +167,7 @@ from .services import (
     close_compensation_month,
     create_employee_compensation_policy_draft,
     create_performance_evaluation_policy_draft,
+    get_employee_pay_terms,
     get_employee_wallet_summary,
     preview_compensation_month_close,
     preview_employee_compensation_policy,
@@ -771,6 +772,36 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
             "commission_lines": AcquisitionCommissionLineSerializer(summary["commission_lines"], many=True).data,
         }, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["get"], url_path="pay-terms")
+    def pay_terms(self, request, pk=None):
+        """الراتبُ الذي يُصرف للموظّف والقاعدةُ التي يُحتسب بها (#214-ج).
+
+        **حارسٌ واحدٌ لا نسختان**: نفسُ شرطِ `wallet` و`performance` حرفاً —
+        المديرُ يرى أيَّ موظّف، والموظّفُ يرى نفسَه وحدَه. و`get_queryset` تحصر
+        غيرَ المدير في صفّه أصلاً، وهذا الشرطُ حزامٌ فوق الحمّالة: لو وُسّعت
+        تلك يوماً لغرضٍ آخر، لا يصير راتبُ الناس مكشوفاً بأثرٍ جانبيّ.
+        """
+        emp = self.get_object()
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if not is_manager and emp.user_id != request.user.id:
+            return Response(
+                {"detail": "غير مصرح لك باستعراض راتب موظف آخر."}, status=status.HTTP_403_FORBIDDEN,
+            )
+        terms = get_employee_pay_terms(employee=emp)
+        return Response({
+            "employee_id": terms["employee_id"],
+            "source": terms["source"],
+            "policy_version": terms["policy_version"],
+            # نصّاً لا `Decimal`: تعريبُ جانغو يقلب النقطةَ العشريّةَ فاصلةً في
+            # التصيير، وهي نفسُ العلّة التي عولجت في `docshare` — والواجهةُ
+            # تُنسّق بـ`formatNumber` فتحتاج رقماً نظيفاً لا مُعرَّباً.
+            "base_salary": str(terms["base_salary"]),
+            "daily_hours": str(terms["daily_hours"]),
+            "weekly_days": terms["weekly_days"],
+            "acquisition_commission_amount": str(terms["acquisition_commission_amount"]),
+            "acquisition_commission_months": terms["acquisition_commission_months"],
+            "accrual_day_of_month": terms["accrual_day_of_month"],
+        }, status=status.HTTP_200_OK)
 
 
 #: ترويسةُ الارتباط تُقبل بمجموعة أحرف قصيرة وآمنة، وإلا وُلّد `uuid4` بدلاً منها.
@@ -3518,6 +3549,10 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
                 applicant=applicant,
                 created_by=request.user,
                 expires_in_hours=expires_in_hours,
+                # ‏#214-د: اختياريّان — دعوةٌ بلا شرحٍ تبقى دعوةً صالحة، فلا
+                # تُكسَر نداءاتٌ قائمةٌ ولا تُفرَض كتابةٌ على من لا شيءَ عنده.
+                note=request.data.get("note") or "",
+                contact_phone=request.data.get("contact_phone") or "",
             )
         except ValidationError as exc:
             return Response(
@@ -3533,6 +3568,10 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
                 "invite_url": invitation_public_url(raw_token),
                 "expires_at": invitation.expires_at.isoformat(),
                 "applicant_id": applicant.pk,
+                # يعودان في الردّ ليرى المُصدِرُ ما سيقرؤه المدعوُّ بالضبط —
+                # بعد القصّ والتشذيب، لا كما كتبه في الحقل.
+                "note": invitation.note,
+                "contact_phone": invitation.contact_phone,
             },
             status=status.HTTP_201_CREATED,
         )

@@ -8,6 +8,7 @@ import { Plus, RefreshCw, X, Save, Loader2, Warehouse as WhIcon } from "lucide-r
 import { invoicePathForReference, productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { stockMovementReferenceLabel } from "../../utils/documentTypeLabels";
 
 const TYPES: Record<string, string> = {
   IN: "استلام", OUT: "صرف",
@@ -173,7 +174,7 @@ export const StockMovementsPage: React.FC = () => {
       render: (m) => {
         // task16 A5: مرجع الفاتورة في حركات المخزن رابط يفتح الفاتورة
         const href = invoicePathForReference(m.reference_type, m.reference_id);
-        const label = m.reference_type_display || m.reference_type;
+        const label = stockMovementReferenceLabel(m);
         if (!href) return <>{label}</>;
         return (
           <button

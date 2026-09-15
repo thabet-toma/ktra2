@@ -61,12 +61,18 @@ class JobApplicationSuccessSerializer(serializers.Serializer):
 
 
 class PublicInvitationDetailSerializer(serializers.Serializer):
-    """تفاصيل الدعوة للمرشح — بلا بيانات حساسة."""
+    """تفاصيل الدعوة للمرشح — بلا بيانات حساسة.
+
+    ‏#214-د: `note` و`contact_phone` يكتبهما المدير عند الإصدار. ولا شيءَ هنا
+    من `JobApplicant.notes` — تلك ملاحظاتُ الفرز الداخليّةُ عن الشخص نفسِه.
+    """
 
     job_title = serializers.CharField()
     applicant_name = serializers.CharField()
     email = serializers.EmailField()
     expires_at = serializers.DateTimeField()
+    note = serializers.CharField(allow_blank=True)
+    contact_phone = serializers.CharField(allow_blank=True)
 
 
 class AcceptInvitationInputSerializer(serializers.Serializer):

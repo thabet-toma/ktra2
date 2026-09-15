@@ -4093,6 +4093,49 @@ def get_active_employee_compensation_policy(employee=None, at: datetime.datetime
     return in_effect.filter(employee__isnull=True).order_by("-version").first()
 
 
+def get_employee_pay_terms(*, employee) -> dict:
+    """شروطُ الأجر السارية على هذا الموظّف — بلاغُ المالك #214-ج.
+
+    «بدي بصفحة الموظفين الشخصية خيار اسمو الراتب الذي يُصرف للموظف يبيّنلو».
+
+    كان الموظّف يرى **الحصيلة** في محفظته (`get_employee_wallet_summary`) ولا
+    يرى **القاعدة** أبداً: `base_salary` و`acquisition_commission_amount`
+    محروسان بـ`IsPlatformOperationsManager` وحدَه، فالرقمُ الذي يُصرف له مشتقٌّ
+    من أرقامٍ لا تُعرَض عليه — وهذا ما يجعل كلَّ سؤالٍ عن الراتب يمرّ بالمدير.
+
+    والمصدرُ واحدٌ لا ثانيَ له: `get_active_employee_compensation_policy` هي
+    نفسُها التي يحتسب بها محرّكُ الاستحقاق. ولو نُسخت القراءةُ هنا لافترق
+    ما يُعرَض عمّا يُصرَف يومَ تتغيّر القاعدة — وهو أسوأُ من ألّا يُعرض شيء.
+    """
+    policy = get_active_employee_compensation_policy(employee)
+    if policy is not None:
+        terms = {
+            "base_salary": policy.base_salary,
+            "daily_hours": policy.daily_hours,
+            "weekly_days": policy.weekly_days,
+            "acquisition_commission_amount": policy.acquisition_commission_amount,
+            "acquisition_commission_months": policy.acquisition_commission_months,
+            "accrual_day_of_month": policy.accrual_day_of_month,
+        }
+        # «خاصّةٌ بي» أو «عامّةٌ للمنصّة» فرقٌ يقرؤه الموظّف لا زينةَ عرض:
+        # عليه يعرف هل رقمُه متّفَقٌ عليه معه أم هو الافتراضُ الذي يسري للجميع.
+        source = "employee" if policy.employee_id else "platform"
+        version = policy.version
+    else:
+        # لا نسخةَ منشورةً بعد — وهو حالُ الـpilot قبل أوّل نشر. تُقرأ
+        # الافتراضاتُ من تعريف الحقول لا تُكتب هنا ثانيةً (نفس حجّة
+        # `get_default_compensation_policy_dict`): نسختان تفترقان بصمت.
+        terms = get_default_compensation_policy_dict()
+        source = "default"
+        version = None
+    return {
+        "employee_id": getattr(employee, "pk", employee),
+        "source": source,
+        "policy_version": version,
+        **terms,
+    }
+
+
 def get_default_compensation_policy_dict() -> dict:
     """افتراضيّات الـpilot (جدول القيم الافتراضية) حين لا توجد نسخة منشورة بعد.
 
@@ -7579,7 +7622,21 @@ def resolve_public_job(token: str) -> JobPosting:
 
 
 def job_public_url(token: str) -> str:
-    """بناء الرابط العام لصفحة عرض الوظيفة (صفحة ويب لا نقطة API)."""
+    """الرابطُ المنسوخُ للإعلان — **صفحةُ جانغو** لا مسارُ الـSPA (#214-أ).
+
+    ما يُلصَق على فيسبوك يجب أن يُصيَّر من الخادم: الزاحفُ لا ينفّذ JavaScript،
+    والخادمُ الأمامي يخدم `index.html` لكلّ ما ليس `/api/` — فكان كلُّ إعلانٍ
+    يظهر بعنوان المنصّة العامّ «K.T.R.A — نظام متكامل…» ووصفِها، لا بعنوان
+    الوظيفة. و`job_apply_url` أدناه يبقى على مسار الـSPA: التقديمُ شاشةٌ حيّةٌ
+    برفعِ ملفٍّ وتأكيدٍ، لا صفحةٌ ساكنة.
+    """
+    base = str(getattr(settings, "PLATFORM_JOB_PUBLIC_BASE_URL", "")).rstrip("/")
+    path = str(getattr(settings, "PLATFORM_JOB_SHARE_PATH", "/api/careers/j")).rstrip("/")
+    return f"{base}{path}/{token}"
+
+
+def job_apply_url(token: str) -> str:
+    """رابطُ شاشةِ التقديم (الـSPA) — وجهةُ زرِّ «قدّم» في صفحة الإعلان."""
     base = str(getattr(settings, "PLATFORM_JOB_PUBLIC_BASE_URL", "")).rstrip("/")
     path = str(getattr(settings, "PLATFORM_JOB_PUBLIC_PATH", "/careers/job")).rstrip("/")
     return f"{base}{path}/{token}"
@@ -7713,6 +7770,8 @@ def create_applicant_invitation(
     applicant: JobApplicant,
     created_by=None,
     expires_in_hours: int = 72,
+    note: str = "",
+    contact_phone: str = "",
 ) -> tuple[JobApplicantInvitation, str]:
     """إصدار دعوة قبول التوظيف للمرشح مع توليد رمز مهشر (SHA-256) وإبطال الدعوات السابقة.
 
@@ -7759,6 +7818,12 @@ def create_applicant_invitation(
         applicant=locked_applicant,
         token_hash=token_hash,
         expires_at=expires_at,
+        # ‏#214-د: الشرحُ ورقمُ التواصل يُكتبان مع الدعوة لا مع المتقدّم:
+        # `JobApplicant.notes` ملاحظاتُ مسؤول التوظيف الداخليّة ولا يجوز أن
+        # تُعرَض على صاحبها. وكلُّ دعوةٍ تحمل شرحَها هي، فدعوةٌ ثانيةٌ بعد
+        # إبطال الأولى تستطيع أن تقول شيئاً آخر.
+        note=str(note or "").strip()[:2000],
+        contact_phone=str(contact_phone or "").strip()[:40],
         created_by=created_by if getattr(created_by, "is_authenticated", False) else None,
     )
 

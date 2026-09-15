@@ -1885,6 +1885,14 @@ def product_linked_invoices(
     for inv in sls:
         out.append({
             'document_type': 'SALES_INVOICE',
+            # ‏#214-ب: النوعُ الحقيقيُّ للمستند. `SalesInvoice` نموذجٌ واحدٌ
+            # لأربعة أنواع (`invoice_kind`)، وبلا هذا الحقل كانت كلُّ صفوفِ
+            # «الفواتير المرتبطة» تُسمّى «بيع» — فمرتجعُ البيع يُقرأ بيعةً
+            # ثانيةً في كرت الصنف وفي ملفّ الطرف، وهو بلاغُ المالك في #214-ب:
+            # المرتجعُ يظهر في حركة المخزون باسم مستند البيع نفسِه.
+            # (نصُّ البلاغ حرفيّاً في `docs/CHANGELOG.md` — واسمُ المستند يُقنَّن
+            #  في المعجم فلا يُكتب هنا حرفيّاً، ويحرسه `test_terminology_guard`.)
+            'invoice_kind': inv.invoice_kind,
             'document_id': inv.id,
             'document_number': inv.invoice_number,
             'date': inv.invoice_date.isoformat() if inv.invoice_date else None,

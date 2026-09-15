@@ -771,6 +771,10 @@ class PublicSurfaceGuardTest(TestCase):
     DECLARED_PUBLIC_VIEWS = {
         "PublicJobDetailView",
         "PublicJobApplyView",
+        # ‏#214-أ: صفحةُ الإعلان المُصيَّرةُ من الخادم — الرابطُ الذي يُلصَق على
+        # فيسبوك. عامّةٌ بالضرورة: الزاحفُ مجهولٌ ولا ينفّذ JavaScript، وصفحةُ
+        # الـSPA تُعطيه وسومَ `index.html` العامّة لكلّ إعلانٍ على حدة.
+        "PublicJobPageView",
         "PublicInvitationDetailView",
         "PublicInvitationAcceptView",
         "PublicDailyRatingView",

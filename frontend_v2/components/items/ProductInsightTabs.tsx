@@ -15,6 +15,7 @@ import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTabl
 import SerialEntryModal from "../shared/SerialEntryModal";
 import { formatQuantity, formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { relatedInvoiceTypeLabel, stockLedgerMovementTypeLabel } from "../../utils/documentTypeLabels";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
 
@@ -57,6 +58,7 @@ export interface ProductProfileData {
 export interface LedgerRow {
   id: number;
   date: string | null;
+  movement_type: string | null;
   movement_type_label: string;
   reference_type: string | null;
   reference_id: number | null;
@@ -69,19 +71,13 @@ export interface LedgerRow {
 
 export interface InvoiceRow {
   document_type: string;
+  invoice_kind?: string | null;
   document_id: number;
   document_number: string;
   date: string | null;
   party: string | null;
   is_posted: boolean;
 }
-
-/** نوع الحركة المعروض: مشتريات/مبيعات مشتقّة من نوع المستند المرجعي. */
-export const ledgerTypeLabel = (r: LedgerRow): string => {
-  if (r.reference_type === "PURCHASE_INVOICE") return "مشتريات";
-  if (r.reference_type === "SALE") return "مبيعات";
-  return r.movement_type_label;
-};
 
 const PAGE = 50;
 
@@ -253,7 +249,7 @@ const FamilyBrandsSection: React.FC<{
 /** أعمدة دفتر حركة المخزون — مشتركة بين تبويب الكرت وبطاقة المودال. */
 export const ledgerColumns = (opts: { withParty?: boolean; withWarehouse?: boolean } = {}): LedgerColumn<LedgerRow>[] => [
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
-  { key: "movement_type_label", header: "النوع", render: (r) => ledgerTypeLabel(r) },
+  { key: "movement_type_label", header: "النوع", render: stockLedgerMovementTypeLabel },
   ...(opts.withParty ? [{ key: "party", header: "الطرف", render: (r: LedgerRow) => r.party || "—" }] : []),
   {
     key: "reference",
@@ -280,7 +276,7 @@ const invoiceColumns: LedgerColumn<InvoiceRow>[] = [
       <DocRefCell referenceType={r.document_type} referenceId={r.document_id} label={r.document_number} />
     ),
   },
-  { key: "document_type", header: "النوع", render: (r) => (r.document_type === "SALES_INVOICE" ? "بيع" : "شراء") },
+  { key: "document_type", header: "النوع", render: relatedInvoiceTypeLabel },
   { key: "party", header: "الطرف", render: (r) => r.party || "—" },
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
   { key: "is_posted", header: "الحالة", align: "center", render: (r) => (r.is_posted ? "مرحّلة" : "مسودة") },

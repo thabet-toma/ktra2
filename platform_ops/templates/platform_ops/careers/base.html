@@ -1,0 +1,72 @@
+{% comment %}
+الغلافُ الخادميُّ لصفحات التوظيف العامّة (#214-أ).
+
+**بلا Tailwind وبلا حزمةِ Vite عمداً** — لنفس حجّة `docshare/templates/docshare/base.html`
+حرفاً بحرف: زاحفُ فيسبوك وواتساب ولينكدإن **لا ينفّذ JavaScript** ولا ينتظر حزمة،
+فصفحةُ SPA تُعطيه عنوانَ `index.html` العامَّ لكلّ إعلانٍ على حدة. وهذه ثاني حالةٍ
+في المنصّة تسقط فيها قاعدةُ «Tailwind فقط» — ونطاقُ تلك القاعدة `frontend_v2/`.
+الأنماطُ داخل الصفحة يسمح بها `core/security_headers_middleware.py`
+(`style-src 'self' 'unsafe-inline'`).
+
+**وفرقٌ واحدٌ جوهريٌّ عن غلاف docshare**: ذاك يضع `noindex, nofollow` لأنّ
+مستنداتِه خاصّةٌ بمن أُرسل إليه الرابط. وإعلانُ الوظيفة عكسُه تماماً: يُراد أن
+يُفهرَس وأن يُشارَك، فلا وسمَ منعٍ هنا، وثمّةَ `JobPosting` JSON-LD في القالب
+الابن. ولذلك **لا يرث هذا الغلافُ ذاك** ولا يستورد قوالبَ app أخرى.
+{% endcomment %}<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block page_title %}وظيفة{% endblock %}</title>
+{% block social %}{% endblock %}
+<style>
+  :root{
+    --ink:#0f172a; --muted:#64748b; --faint:#94a3b8; --line:#e2e8f0;
+    --paper:#ffffff; --bg:#f1f5f9; --brand:#1e40af; --brand-soft:#eff4ff;
+    --ok:#15803d; --warn:#b45309;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI","Tahoma","Noto Naskh Arabic",Arial,sans-serif;
+    font-size:15px; line-height:1.75;
+  }
+  .topbar{background:var(--brand); color:#fff}
+  .topbar .inner{
+    max-width:860px; margin:0 auto; padding:13px 18px;
+    display:flex; align-items:center; gap:9px; font-weight:700; font-size:14px;
+  }
+  .topbar .dot{
+    width:9px; height:9px; border-radius:50%; background:#fff; opacity:.75; flex:none;
+  }
+  .wrap{max-width:860px; margin:0 auto; padding:22px 18px 56px}
+  .sheet{
+    background:var(--paper); border-radius:16px; padding:30px;
+    box-shadow:0 1px 3px rgba(15,23,42,.07),0 10px 28px rgba(15,23,42,.06);
+  }
+  .muted{color:var(--muted)}
+  .btn{
+    appearance:none; border:1px solid var(--brand); background:var(--brand); color:#fff;
+    border-radius:10px; padding:13px 26px; font:inherit; font-weight:700; cursor:pointer;
+    text-decoration:none; display:inline-flex; align-items:center; justify-content:center;
+    gap:8px; line-height:1.3;
+  }
+  .btn:hover{background:#1d4ed8; border-color:#1d4ed8}
+  .foot{
+    max-width:860px; margin:0 auto; padding:0 18px 30px;
+    color:var(--faint); font-size:12.5px; text-align:center;
+  }
+  @media (max-width:640px){
+    body{font-size:14.5px}
+    .wrap{padding:14px 12px 40px}
+    .sheet{padding:20px; border-radius:12px}
+  }
+  {% block extra_style %}{% endblock %}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="inner"><span class="dot"></span>وظائف منصّة K.T.R.A</div></div>
+{% block body %}{% endblock %}
+<div class="foot">منصّة K.T.R.A — نظامُ إدارةِ أعمالٍ عربيٌّ متكامل</div>
+</body>
+</html>

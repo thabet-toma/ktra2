@@ -57,6 +57,25 @@ export const getMyPlatformEmployeeProfile = async (
   return rows.find((row) => String(row.user) === String(currentUserId)) ?? null;
 };
 
+export type EmployeePayTermsSource = "employee" | "platform" | "default";
+
+/** شروط الصرف الفعلية التي يراها الموظف، بما فيها مصدر السياسة المطبقة عليه. */
+export interface EmployeePayTerms {
+  employee_id: number;
+  source: EmployeePayTermsSource;
+  /** `null` حين لا نسخةَ منشورةً بعد (`source === "default"`) — وهي حالُ الـpilot. */
+  policy_version: number | null;
+  base_salary: string;
+  daily_hours: string;
+  weekly_days: number;
+  acquisition_commission_amount: string;
+  acquisition_commission_months: number;
+  accrual_day_of_month: number;
+}
+
+export const getEmployeePayTerms = (employeeId: number) =>
+  apiGetObject<EmployeePayTerms>(`platform/ops/employees/${employeeId}/pay-terms/`);
+
 // ==============================================================================
 // شركاتُ الموظّف: الحصّةُ وبنودُ الصحّة المُسنَدةُ إليه (القصّتان ٣٩ و٤٠)
 // ==============================================================================

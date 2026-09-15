@@ -12,6 +12,7 @@ import { isStaffPreview } from '../../../utils/staffDoor';
 import { staffNav, staffRouteForPath, type StaffNavKey } from '../../../utils/staffNav';
 import { ChampionsPanel } from '../ChampionsPanel';
 import { EmployeeCompaniesPanel } from '../EmployeeCompaniesPanel';
+import { EmployeePayTermsCard } from '../EmployeePayTermsCard';
 import { EmployeeSelfWalletCard } from '../EmployeeSelfWalletCard';
 import { MyMeetingsPanel } from '../MyMeetingsPanel';
 import { MyProfileCard } from '../MyProfileCard';
@@ -84,8 +85,9 @@ const StaffShellContent: React.FC = () => {
     tasks: <div className="space-y-6"><StaffTasksPanel /><section><h2 className="mb-3 text-lg font-bold text-[var(--staff-text)]">أوامر العمل</h2><WorkOrdersPanel /></section></div>,
     companies: <EmployeeCompaniesPanel />,
     meetings: <MyMeetingsPanel />,
-    // `space-y-6` لأنّ هذا التبويبَ وحدَه يحمل لوحتين: بلا الفاصلِ كانتا تتلاصقان
-    // حدّاً بحدٍّ بينما كلُّ تبويبٍ آخرَ لوحةٌ واحدةٌ بهامشها.
+    // `space-y-6` لأنّ هذا التبويبَ يحمل لوحتين: بلا الفاصلِ كانتا تتلاصقان
+    // حدّاً بحدٍّ. و«تبويبُ الأداء وحدَه» لم يعد صحيحاً منذ #214-ج — تبويبُ
+    // الملفّ صار لوحتين أيضاً (البطاقةُ الشخصيّةُ وشروطُ الصرف) فورث الفاصلَ نفسَه.
     performance: (
       <div className="space-y-6">
         {profileLoading ? <StaffNotice>جارٍ تحميل تقييمك...</StaffNotice>
@@ -94,9 +96,13 @@ const StaffShellContent: React.FC = () => {
         <ChampionsPanel />
       </div>
     ),
-    profile: profileLoading ? <StaffNotice>جارٍ تحميل ملفك...</StaffNotice>
-      : profile ? <MyProfileCard profile={profile} onSaved={() => void loadProfile()} />
-        : <StaffNotice>لا يوجد ملف موظف مرتبط بهذا الحساب.</StaffNotice>,
+    profile: (
+      <div className="space-y-6">
+        {profileLoading ? <StaffNotice>جارٍ تحميل ملفك...</StaffNotice>
+          : profile ? <><MyProfileCard profile={profile} onSaved={() => void loadProfile()} /><EmployeePayTermsCard employeeId={profile.id} /></>
+            : <StaffNotice>لا يوجد ملف موظف مرتبط بهذا الحساب.</StaffNotice>}
+      </div>
+    ),
     crm: <CrmPanel isManager={capabilities.is_platform_admin} myEmployeeId={profile?.id ?? null} />,
   };
   const content = panels[activeKey];

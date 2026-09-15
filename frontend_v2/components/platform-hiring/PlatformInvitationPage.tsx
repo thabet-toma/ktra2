@@ -216,6 +216,31 @@ export const PlatformInvitationPage: React.FC = () => {
               </p>
             </header>
 
+            {((detail.note || "").trim() || (detail.contact_phone || "").trim()) && (
+              <section className="space-y-3 rounded-xl border border-blue-200 bg-blue-50/70 p-4 dark:border-blue-900 dark:bg-blue-950/30">
+                {(detail.note || "").trim() && (
+                  <div className="space-y-1.5">
+                    <h2 className="text-xs font-bold text-blue-900 dark:text-blue-200">رسالة من فريق التوظيف</h2>
+                    <p className="whitespace-pre-wrap text-sm leading-relaxed text-slate-700 dark:text-slate-300">
+                      {detail.note}
+                    </p>
+                  </div>
+                )}
+                {(detail.contact_phone || "").trim() && (
+                  <div className="border-t border-blue-200 pt-3 dark:border-blue-900">
+                    <p className="text-xs text-slate-600 dark:text-slate-400">للاستفسار قبل قبول الدعوة، تواصل مع فريق التوظيف:</p>
+                    <a
+                      href={`tel:${(detail.contact_phone || "").trim()}`}
+                      dir="ltr"
+                      className="mt-1 inline-block font-semibold text-blue-700 underline decoration-blue-300 underline-offset-2 hover:text-blue-800 dark:text-blue-300 dark:decoration-blue-700 dark:hover:text-blue-200"
+                    >
+                      {(detail.contact_phone || "").trim()}
+                    </a>
+                  </div>
+                )}
+              </section>
+            )}
+
             <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
               <div>
                 <label htmlFor="invite-username" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">

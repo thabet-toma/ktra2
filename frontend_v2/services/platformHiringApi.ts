@@ -100,6 +100,8 @@ export interface ApplicantInvitation {
   invite_url: string;
   expires_at: string;
   applicant_id: number;
+  note: string;
+  contact_phone: string;
 }
 
 export interface PlatformRecruiter {
@@ -141,6 +143,8 @@ export interface PublicInvitationDetail {
   applicant_name: string;
   email: string;
   expires_at: string;
+  note: string;
+  contact_phone: string;
 }
 
 /** ردُّ قبول الدعوة — الحسابُ أُنشئ الآن لا قبلها. */
@@ -192,9 +196,17 @@ export const transitionPlatformApplicant = (id: number, status: string) =>
 export const ratePlatformApplicant = (id: number, payload: { rating?: number; notes?: string }) =>
   apiPostObject<PlatformJobApplicant>(`${OPS}/job-applicants/${id}/rate/`, payload);
 
-export const invitePlatformApplicant = (id: number, expiresInHours: number) =>
+export interface PlatformApplicantInvitationInput {
+  expiresInHours: number;
+  note?: string;
+  contactPhone?: string;
+}
+
+export const invitePlatformApplicant = (id: number, input: PlatformApplicantInvitationInput) =>
   apiPostObject<ApplicantInvitation>(`${OPS}/job-applicants/${id}/invite/`, {
-    expires_in_hours: expiresInHours,
+    expires_in_hours: input.expiresInHours,
+    note: input.note,
+    contact_phone: input.contactPhone,
   });
 
 /**

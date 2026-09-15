@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **874**
+عدد النقاط: **879**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -180,6 +180,8 @@
 | `/api/assistant/whatsapp/webhook/<str:secret>/<str:event_suffix>/` | `whatsapp_webhook` | `core/whatsapp_views.py` |
 | `/api/careers/invitations/<str:token>/` | `PublicInvitationDetailView` | `platform_ops/public_hiring/views.py` |
 | `/api/careers/invitations/<str:token>/accept/` | `PublicInvitationAcceptView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/j/<str:token>` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/j/<str:token>/` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/api/careers/jobs/<str:token>/` | `PublicJobDetailView` | `platform_ops/public_hiring/views.py` |
 | `/api/careers/jobs/<str:token>/apply/` | `PublicJobApplyView` | `platform_ops/public_hiring/views.py` |
 | `/api/client-logs/` | `client_logs` | `core/health.py` |
@@ -607,6 +609,7 @@
 | `/api/platform/ops/employees/ranking/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/activity/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/employees/{pk}/pay-terms/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/photo/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/employees/{pk}/pilot-performance/` | `PlatformEmployeeViewSet` | `platform_ops/views.py` |
@@ -878,6 +881,8 @@
 | `/api/tenants/settings/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/current/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/{pk}/` | `TenantSettingsViewSet` | `tenants/views.py` |
+| `/j/<str:token>` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
+| `/j/<str:token>/` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/s/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
 | `/s/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
 | `/s/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |

@@ -350,6 +350,23 @@ PLATFORM_JOB_PUBLIC_PATH = "/" + os.environ.get(
     "PLATFORM_JOB_PUBLIC_PATH", "careers/job",
 ).strip("/")
 
+# #214-أ: وجهةُ **الرابط المنسوخ** للإعلان — صفحةٌ يُصيّرها جانغو لا مسارُ SPA.
+# الفرقُ ليس تجميليّاً: الخادمُ الأمامي يخدم `index.html` لكلّ ما ليس `/api/`،
+# وزاحفُ فيسبوك لا ينفّذ JavaScript — فكلُّ إعلانٍ كان يُلصَق بعنوان المنصّة
+# العامّ ووصفِها العامّ. والسطحُ مركَّبٌ مرّتين في `core/urls.py` كما في docshare:
+# القصيرُ `/j` يلزمه سطرٌ في الخادم الأمامي، و`/api/careers/j` يعمل اليوم بلا
+# لمسِه — فلا ميزةَ معطَّلةٌ بانتظار إعداد.
+PLATFORM_JOB_SHARE_PATH = "/" + os.environ.get(
+    "PLATFORM_JOB_SHARE_PATH", "api/careers/j",
+).strip("/")
+
+# صورةُ المعاينة في فيسبوك وواتساب. فارغةً **يُحذف الوسم كاملاً** لا يُكتب فارغاً:
+# وسمٌ بقيمةٍ فارغةٍ يُنتج معاينةً مكسورة، وغيابُه يُنتج معاينةً نصّيّةً سليمة.
+PLATFORM_JOB_SHARE_IMAGE = os.environ.get(
+    "PLATFORM_JOB_SHARE_IMAGE",
+    f"{PLATFORM_JOB_PUBLIC_BASE_URL}/android-chrome-512x512.png",
+).strip()
+
 PLATFORM_HIRING_INVITATION_BASE_URL = os.environ.get(
     "PLATFORM_HIRING_INVITATION_BASE_URL", DOCSHARE_PUBLIC_BASE_URL,
 ).rstrip("/")

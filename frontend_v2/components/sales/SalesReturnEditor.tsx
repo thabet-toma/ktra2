@@ -13,7 +13,11 @@ import React, { useEffect, useState, useCallback, useMemo } from "react";
 import {
   createSalesInvoice,
   getSalesInvoice,
+  getSalesReturnRefundOptions,
+  postSalesInvoice,
   type SalesInvoiceRow,
+  type SalesReturnRefundChoice,
+  type SalesReturnRefundOptions,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
@@ -33,6 +37,7 @@ import {
 import { Plus, Save, X, RefreshCw, AlertTriangle, Search, Trash2 } from "lucide-react";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { SalesReturnRefundDialog } from "./SalesReturnRefundDialog";
 
 type Product = {
   id: number;
@@ -80,7 +85,16 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<React.ReactNode>(null);
+  const [refundDialog, setRefundDialog] = useState<{
+    options: SalesReturnRefundOptions;
+    resolve: (choice: SalesReturnRefundChoice | null) => void;
+  } | null>(null);
+  const askRefundChoice = useCallback(
+    (options: SalesReturnRefundOptions): Promise<SalesReturnRefundChoice | null> =>
+      new Promise((resolve) => setRefundDialog({ options, resolve })),
+    [],
+  );
 
   // Form state
   const [originalInvoiceId, setOriginalInvoiceId] = useState<number | "">("");
@@ -249,7 +263,73 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [discardDraft]);
 
-  const submit = async () => {
+  const resetAfterSave = () => {
+    setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
+    setOriginalInvoiceId("");
+    setPartnerId("");
+    setReason("");
+    setTouched(false);
+    void discardDraft();
+  };
+
+  /**
+   * رسالةُ «المرتجعُ قائمٌ وغيرُ مرحَّل» ومعها زرُّ الترحيل — **موضعٌ واحدٌ لا
+   * ثلاثة.** ثلاثةُ طرقٍ تنتهي إلى الحال نفسِها (حفظٌ مقصودٌ كمسودة · تراجعٌ عن
+   * اختيار وجهةِ الردّ · فشلُ الترحيل بعد الحفظ)، وكلُّها تحتاج المخرجَ نفسَه:
+   * زرّاً في مكان الرسالة يرحّل من هنا. وكانت الثلاثةُ منسوخةً حرفاً بحرف —
+   * فتعديلُ صياغةٍ أو صنفٍ في إحداها يترك الأخريَين تتباعدان بصمت.
+   *
+   * وبقاءُ الزرِّ **جوهرُ** #214-ب لا زينةُ عرض: شكوى المالك أنّ المرتجع
+   * «احفظ كمسودة وبعدها ارجع لفواتير المبيعات رحّلو» — فلا يجوز أن ينتهي أيُّ
+   * مسارٍ هنا بمسودّةٍ بلا بابِ ترحيلٍ في الشاشة نفسِها.
+   */
+  const pendingPostMessage = (text: string, action: string, returnId: number, returnNumber: string) => (
+    <>
+      {text}
+      <button
+        type="button"
+        className="mr-2 rounded border border-current px-2 py-0.5 text-xs font-semibold hover:bg-emerald-100 dark:hover:bg-emerald-900/30"
+        onClick={() => void postCreatedReturn(returnId, returnNumber)}
+      >
+        {action}
+      </button>
+    </>
+  );
+
+  const postCreatedReturn = async (returnId: number, returnNumber: string): Promise<boolean> => {
+    setSaving(true);
+    setErr(null);
+    try {
+      let refundChoice: SalesReturnRefundChoice | undefined;
+      const options = await getSalesReturnRefundOptions(returnId);
+      if (options.applicable && !options.auto_refund_on_sales_return) {
+        const choice = await askRefundChoice(options);
+        if (!choice) {
+          setMsg(pendingPostMessage(
+            `تم حفظ مرتجع البيع ${returnNumber} كمسودة. يمكنك ترحيله لاحقاً من هنا.`,
+            "ترحيل المرتجع", returnId, returnNumber,
+          ));
+          return false;
+        }
+        refundChoice = choice;
+      }
+      await postSalesInvoice(returnId, refundChoice);
+      setMsg(`✓ تم ترحيل مرتجع البيع ${returnNumber}. عادت الكمية إلى المخزون وخُفّض رصيد العميل.`);
+      return true;
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e.message : "تعذّر ترحيل مرتجع البيع.";
+      setErr(`حُفظ المرتجع ${returnNumber} كمسودة، لكن تعذّر ترحيله: ${error}`);
+      setMsg(pendingPostMessage(
+        `المرتجع ${returnNumber} محفوظ ولم يُفقد. أعد محاولة الترحيل من هنا.`,
+        "إعادة محاولة الترحيل", returnId, returnNumber,
+      ));
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const submit = async (postAfterSave = false) => {
     if (!originalInvoiceId || !partnerId) {
       setErr("اختر الفاتورة الأصلية — العميل يتبعها.");
       return;
@@ -281,17 +361,21 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
         notes: reason || "",
         lines: payloadLines,
       });
-      const num = created?.invoice_number ? ` رقم ${created.invoice_number}` : "";
-      setMsg(
-        `✓ تم حفظ مرتجع البيع${num} كمسودة. افتحه من «فواتير المبيعات» واضغط «ترحيل» ` +
-        "لإعادة الكمية للمخزون وتخفيض ذمم العميل."
-      );
-      setLines([{ _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" }]);
-      setOriginalInvoiceId("");
-      setReason("");
-      setTouched(false);
-      // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
-      void discardDraft();
+      // **لا `formatNumber` هنا**: `invoice_number` نصٌّ كـ«SR-2026-001»،
+      // ومُنسّقُ الأرقام يعيد `""` لِما لا يُحوَّل عدداً — فيختفي الرقمُ من
+      // الرسالة ويقرأ المستخدم «تم حفظ مرتجع البيع رقم كمسودة».
+      const returnNumber = created?.invoice_number
+        ? `رقم ${created.invoice_number}`
+        : `رقم ${created.id}`;
+      resetAfterSave();
+      if (postAfterSave) {
+        await postCreatedReturn(created.id, returnNumber);
+      } else {
+        setMsg(pendingPostMessage(
+          `تم حفظ مرتجع البيع ${returnNumber} كمسودة. يمكنك ترحيله لاحقاً من هنا.`,
+          "ترحيل المرتجع", created.id, returnNumber,
+        ));
+      }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل حفظ/ترحيل مرتجع البيع.");
     } finally {
@@ -304,6 +388,27 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     F12: () => void submit(),
     F5: () => void load(),
   });
+
+  // ‏`Ctrl+Enter` خارج `useKitKeymap` لأنّ خريطتَه لا تعرف هذا الوتر (مفاتيحُها
+  // الوظيفيّةُ و`Escape` و`+/*/-`). وحارسان لا زينةَ فيهما:
+  //   • `saving` — المستنَدُ **مالِيٌّ**، وضغطتان متتاليتان تُنشئان مرتجعَين
+  //     اثنين على فاتورةٍ واحدة. الزرُّ محميٌّ بـ`disabled`؛ المفتاحُ لا يُعطَّل.
+  //   • `refundDialog` — بينما يُسأل المستخدمُ عن وجهة الردّ، الوترُ يبدأ دورةً
+  //     جديدةً من أوّلها فوق الأولى المعلَّقة.
+  // ومصفوفةُ الاعتماديّات ليست تجميلاً: بلا واحدةٍ يُسجَّل المستمعُ ويُنزَع مع
+  // **كلّ** إعادة رسمٍ للشاشة.
+  useEffect(() => {
+    if (saving || refundDialog) return;
+    const onSaveAndPost = (event: KeyboardEvent) => {
+      if (event.ctrlKey && event.key === "Enter") {
+        event.preventDefault();
+        void submit(true);
+      }
+    };
+    window.addEventListener("keydown", onSaveAndPost);
+    return () => window.removeEventListener("keydown", onSaveAndPost);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [saving, refundDialog]);
 
   const gridColumns: KitGridColumn<ReturnLine>[] = [
     { key: "seq", header: "#", width: "40px", align: "center", readOnly: true },
@@ -364,8 +469,16 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
 
   const actions: KitToolbarAction[] = [
     {
+      key: "save-and-post",
+      label: saving ? "..." : "حفظ وترحيل (Ctrl+Enter)",
+      icon: <Save />,
+      onClick: () => void submit(true),
+      disabled: saving,
+      primary: true,
+    },
+    {
       key: "save",
-      label: saving ? "..." : "حفظ المرتجع كمسودة (F12)",
+      label: saving ? "..." : "حفظ كمسودة (F12)",
       icon: <Save />,
       onClick: () => void submit(),
       disabled: saving,
@@ -483,6 +596,19 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
       >
         <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
       </KitDocumentShell>
+      {refundDialog && (
+        <SalesReturnRefundDialog
+          options={refundDialog.options}
+          onConfirm={(choice) => {
+            refundDialog.resolve(choice);
+            setRefundDialog(null);
+          }}
+          onCancel={() => {
+            refundDialog.resolve(null);
+            setRefundDialog(null);
+          }}
+        />
+      )}
     </div>
   );
 };

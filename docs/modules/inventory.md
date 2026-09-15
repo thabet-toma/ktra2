@@ -71,6 +71,9 @@ def product_stock_ledger(*, tenant_id, product_id=None, product_ids=None, limit=
 def partner_stock_movements(*, tenant_id, partner_id, limit=50, offset=0) -> dict:  # حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب (تبويب «المال» في كرته)
 def document_stock_movements(*, tenant_id, reference_types, reference_id) -> dict:  # المحور الثالث: حركات **مستندٍ واحد** — أثر الفاتورة على المخزون داخل شاشتها، بلقطتَي `quantity_before`/`quantity_after` المخزَّنتين. بلا ترقيم: بنود المستند محدودة بطبعها
 def product_linked_invoices(*, tenant_id, product_id=None, product_ids=None) -> list[dict]:  # (929)
+# ‏#214-ب: صفُّ `SALES_INVOICE` يحمل `invoice_kind` (بيع/مرتجع بيع/شراء/مرتجع
+# شراء). `SalesInvoice` نموذجٌ واحدٌ لأربعة أنواع، وتسطيحُها إلى `document_type`
+# وحدَه كان يجعل الواجهةَ تكتب «بيع» على المرتجع في كرت الصنف وملفّ الطرف.
 def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:  # (986)
 def set_avg_cost_from_purchases(product) -> Decimal:  # النموذج الدوري: متوسط كل المشتريات (1070)
 def apply_purchase_cost_model(product) -> None:  # يختار WAC المتحرك أو الدوري حسب SalesSettings (1087)

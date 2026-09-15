@@ -22,7 +22,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 <!-- AUTO:apps_table:START -->
 | App | المسؤولية | كود | اختبار | مسار الـAPI |
 |---|---|---:|---:|---|
-| `platform_ops` | عمليات المنصة: فحص صحة دفاتر الشركة المعتمد، وإسناد موظفي المنصة ونقلهم حسب الطاقة، وإدارة الخدمة واشتراكاتها، ودورة أوامر العمل (طابور ← نقل حالة ← تسليم ← مراجعة) مع كتالوج وحدات خدمة بنسخٍ مؤرَّخة ودفتر استخدامٍ لا يُعِدّ إلا بعد الاعتماد، وسياسة تقييم pilot بمحاور 40/30/20/10 ومحفظة عملياتية (راتب وعمولة اكتساب) بإغلاقٍ شهري idempotent، واجتماعاتُ المنصّة بدفتر حضورٍ مستقلٍّ عن دوام `hr` (دخولٌ ضمن نافذة، واعتذارٌ يبتّ فيه المدير)، و**اجتماعاتُ المتقدّمين قبل التوظيف** بدفترٍ ثالثٍ منفصلٍ عنهما: حاضرٌ متقدّمٌ أو اسمٌ حرّ، وملاحظةٌ على كلّ حاضرٍ في كلّ اجتماع، **وشبكةُ حضورٍ** صفُّها شخصٌ وعمودُها اجتماعٌ تُقرأ نظرةً واحدةً وتُصدَّر CSV — **وحدة منصة غير مرخصة للشركات، ولا payroll قانوني فيها** | 22,900 | 24,000 | `/api/platform/ops/` · `/api/my-agent/` |
+| `platform_ops` | عمليات المنصة: فحص صحة دفاتر الشركة المعتمد، وإسناد موظفي المنصة ونقلهم حسب الطاقة، وإدارة الخدمة واشتراكاتها، ودورة أوامر العمل (طابور ← نقل حالة ← تسليم ← مراجعة) مع كتالوج وحدات خدمة بنسخٍ مؤرَّخة ودفتر استخدامٍ لا يُعِدّ إلا بعد الاعتماد، وسياسة تقييم pilot بمحاور 40/30/20/10 ومحفظة عملياتية (راتب وعمولة اكتساب) بإغلاقٍ شهري idempotent، واجتماعاتُ المنصّة بدفتر حضورٍ مستقلٍّ عن دوام `hr` (دخولٌ ضمن نافذة، واعتذارٌ يبتّ فيه المدير)، و**اجتماعاتُ المتقدّمين قبل التوظيف** بدفترٍ ثالثٍ منفصلٍ عنهما: حاضرٌ متقدّمٌ أو اسمٌ حرّ، وملاحظةٌ على كلّ حاضرٍ في كلّ اجتماع، **وشبكةُ حضورٍ** صفُّها شخصٌ وعمودُها اجتماعٌ تُقرأ نظرةً واحدةً وتُصدَّر CSV — **وحدة منصة غير مرخصة للشركات، ولا payroll قانوني فيها** | 23,200 | 24,500 | `/api/platform/ops/` · `/api/my-agent/` |
 | `logistics` | الاستيراد والمشتريات: صفقة ← شحنة ← تخليص ← نقل ← فاتورة دولية + التكلفة المستوردة | 21,100 | 13,600 | `/api/logistics/` |
 | `core` | طبقة مشتركة: عزل الشركة، الصلاحيات، التقارير، الوحدات المرخّصة وحدود الخطط **وأسعارها**، الداشبورد، المساعد الذكي | 18,200 | 11,700 | `/api/` (متفرّق) |
 | `accounting` | دفتر الأستاذ: شجرة الحسابات، القيود، الشيكات، البنوك، الفترات المالية، العملات، الضريبة | 15,000 | 8,400 | `/api/accounting/` |
@@ -178,6 +178,7 @@ API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضاف
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |
 | مشاركة مستند برابط عام / معاينة واتساب | `modules/docshare.md` | `docshare/services.py` (`create_share`), `docshare/documents/` (`DOC_TYPES`) |
+| معاينة رابط إعلان وظيفة على فيسبوك/واتساب | `modules/platform_ops.md` | `platform_ops/public_hiring/views.py` (`PublicJobPageView`), `platform_ops/services.py` (`job_public_url`) |
 | أي شاشة أو خدمة في الواجهة | `modules/frontend.md` | `frontend_v2/services/restApi.ts` |
 | «الوضع السهل» — قناع الواجهة المبسّطة | `modules/frontend.md` + `modules/tenants.md` | `frontend_v2/utils/uiMode.ts`, `core/access.py` (`user_ui_mode`) |
 | نافذة عائمة (سحب/تحجيم) أو موضع شريط الإجراءات | `modules/frontend.md` §T-WIN | `frontend_v2/utils/windowGeometry.ts`, `frontend_v2/components/kit/KitFloatWindow.tsx`, `frontend_v2/components/layout/ActionBarRail.tsx` |
@@ -214,7 +215,11 @@ python -m pytest -q -n auto          # البوابة قبل أي commit (‎~80
 - الـmodels/views/serializers/services في **جذر كل app** (`sales/views.py`) — لا مجلد `api/`.
 - ملفات الاختبار في `<app>/tests/`.
 - الوثائق: هذا الملف + `docs/modules/` (حالي) · `docs/decisions/` (قرارات) · `docs/history/` (تاريخي).
-- Frontend: `frontend_v2/` مباشرةً (`components/`, `services/`, `utils/`) — بلا `src/`. الـbase client هو `services/restApi.ts`. Tailwind فقط، لا inline styles.
+- Frontend: `frontend_v2/` مباشرةً (`components/`, `services/`, `utils/`) — بلا `src/`. الـbase client هو `services/restApi.ts`. Tailwind فقط، لا inline styles — **ونطاقُ القاعدة `frontend_v2/`**: الصفحاتُ
+  المُصيَّرةُ من الخادم لزاحفٍ لا ينفّذ JavaScript (`docshare/templates/`،
+  و`platform_ops/templates/platform_ops/careers/` منذ #214-أ) لا حزمةَ Vite لها
+  أصلاً، فأنماطُها داخلها — و‏CSP يسمح بذلك صراحةً (`style-src 'self'
+  'unsafe-inline'` في `core/security_headers_middleware.py`).
 
 ## الديون المعمارية المعروفة
 

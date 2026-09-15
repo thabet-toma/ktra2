@@ -22,6 +22,8 @@ export interface KitToolbarAction {
   icon?: React.ReactNode;
   onClick?: () => void;
   disabled?: boolean;
+  /** أبرز الإجراء الأساسي بصرياً في شريط المستند. */
+  primary?: boolean;
   danger?: boolean;
   /** insert a separator BEFORE this action */
   separatorBefore?: boolean;
@@ -184,7 +186,7 @@ export const KitDocumentShell: React.FC<KitDocumentShellProps> = ({
               {a.separatorBefore && <div className="ktra-toolsep" />}
               <button
                 type="button"
-                className={`ktra-toolbtn${a.danger ? ' ktra-toolbtn--danger' : ''}`}
+                className={`ktra-toolbtn${a.primary ? ' !border-blue-600 !bg-blue-600 !text-white hover:!bg-blue-700' : ''}${a.danger ? ' ktra-toolbtn--danger' : ''}`}
                 onClick={a.onClick}
                 disabled={a.disabled || !a.onClick}
                 title={a.label}

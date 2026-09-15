@@ -5,6 +5,7 @@ import { apiGetObject } from '../../services/restApi';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
+import { relatedInvoiceTypeLabel } from '../../utils/documentTypeLabels';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { KitDocumentShell, KitTab } from '../kit';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
@@ -115,6 +116,7 @@ type OnAccountVoucherRow = {
 
 interface InvoiceRow {
   document_type: string;
+  invoice_kind?: string | null;
   document_id: number;
   document_number: string;
   date: string | null;
@@ -495,7 +497,7 @@ export const PartnerProfilePage: React.FC = () => {
     {
       key: 'document_type',
       header: 'النوع',
-      render: (r) => (r.document_type === 'SALES_INVOICE' ? 'بيع' : 'شراء'),
+      render: relatedInvoiceTypeLabel,
     },
     { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     {

@@ -273,6 +273,11 @@ EXERCISED_ROUTES = frozenset({
     "/api/platform/ops/employees/my-companies/",
     "/api/platform/ops/employees/ranking/",
     "/api/platform/ops/employees/1/",
+    # ‏#214-ج: راتبُ الموظّف **لا يُستثنى بمسوّغٍ مكتوب** بل يُنفَّذ فعلاً في
+    # `test_pay_terms_and_invitation_note.py`: زميلٌ يطلب راتبَ زميلٍ لا يخرج له
+    # رقمٌ البتّة، والمديرُ يقرأ. مسوّغٌ نصّيٌّ يكفي لمسارٍ يعرض حالةَ حضور؛ ولا
+    # يكفي لمسارٍ يعرض ما يقبضه الناس.
+    "/api/platform/ops/employees/1/pay-terms/",
     "/api/platform/ops/work-orders/",
     "/api/platform/ops/work-orders/queue/",
     "/api/platform/ops/work-orders/1/",

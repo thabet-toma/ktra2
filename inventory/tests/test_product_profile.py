@@ -99,6 +99,40 @@ def test_linked_invoices_have_clickable_refs(env):
     assert links[0]["document_number"] == "P-1"
 
 
+def test_a_linked_sales_return_is_not_reported_as_a_sale(env):
+    """بلاغُ المالك #214-ب: «مرتجع المبيعات … بتعامل على اساس انو فاتورة مبيعات».
+
+    `SalesInvoice` نموذجٌ واحدٌ لأربعة أنواع، وهذه الحمولةُ كانت تُسطّحها كلَّها
+    إلى `document_type='SALES_INVOICE'` — فالواجهةُ لا تملك ما تفرّق به، وتكتب
+    «بيع» على المرتجع في كرت الصنف وفي ملفّ الطرف. النوعُ يُرسَل من هنا لأنّه
+    معلومٌ هنا؛ واشتقاقُه في الواجهة من الرقم أو النصّ تخمينٌ يكذب أوّلَ مرّة.
+    """
+    from sales.models import SalesInvoice, SalesInvoiceLine
+
+    tenant, ils, sup, product = env
+    customer = Partner.objects.create(
+        tenant=tenant, name="عميل المرتجع", partner_type="Customer")
+    sale = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="S-1", customer=customer, currency=ils,
+        invoice_date="2026-06-01", invoice_kind=SalesInvoice.INVOICE_KIND_SALE)
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=sale, product=product,
+        quantity=Decimal("2"), unit_price=Decimal("10"))
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-1", customer=customer, currency=ils,
+        invoice_date="2026-06-05", original_invoice=sale,
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN)
+    SalesInvoiceLine.objects.create(
+        tenant=tenant, invoice=ret, product=product,
+        quantity=Decimal("1"), unit_price=Decimal("10"))
+
+    rows = product_linked_invoices(tenant_id=tenant.TenantID, product_id=product.id)
+    kinds = {row["document_id"]: row["invoice_kind"] for row in rows
+             if row["document_type"] == "SALES_INVOICE"}
+    assert kinds[sale.id] == "sale"
+    assert kinds[ret.id] == "sale_return"
+
+
 def test_cost_breakdown_weighted_avg_ignores_sold_qty(env):
     """واجهة تكلفة المنتجات: سعر وحدة لكل فاتورة، ثم متوسط مرجّح بكمية الشراء —
     المقام إجمالي المشترى (لا الكمية الحالية)، فبيع جزء لا يضخّم التكلفة."""

@@ -118,6 +118,14 @@ urlpatterns = [
     path('api/my-agent/', include('platform_ops.urls_tenant')),
     # بوّابة التوظيف المنصية ودعوات المرشحين — خارج /api/platform/ لأنها عامة
     path('api/careers/', include('platform_ops.public_hiring.urls')),
+    # ‏#214-أ: صفحةُ الإعلان الوظيفيّ المُصيَّرةُ من الخادم — الرابطُ الذي يُلصَق
+    # على فيسبوك. مركَّبةٌ **مرّتين** بنفس حجّة docshare أعلاه: `/j/<token>` هو
+    # الشكلُ القصيرُ (يلزمه سطرٌ في الخادم الأمامي)، و`/api/careers/j/<token>/`
+    # يعمل فوراً بلا لمسِه — والاختيارُ بينهما `PLATFORM_JOB_SHARE_PATH` لا كود.
+    path('j/', include(('platform_ops.public_hiring.urls_page', 'careers'),
+                       namespace='careers-j')),
+    path('api/careers/j/', include(('platform_ops.public_hiring.urls_page', 'careers'),
+                                   namespace='careers-api-j')),
     # قدراتُ المستخدم الحاليّ على المنصّة — يسألها كلُّ مصادَقٍ عن نفسه فمكانُها
     # خارج `/api/platform/` المحروس بالسوبر أدمن (`platform_ops/urls_staff.py`).
     path('api/platform-staff/', include('platform_ops.urls_staff')),

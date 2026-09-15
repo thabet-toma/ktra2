@@ -50,6 +50,8 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
 
   // إصدار الدعوة
   const [expiresInHours, setExpiresInHours] = useState<string>("72");
+  const [invitationNote, setInvitationNote] = useState<string>("");
+  const [invitationContactPhone, setInvitationContactPhone] = useState<string>("");
   const [issuingInvite, setIssuingInvite] = useState(false);
   const [issuedInvitation, setIssuedInvitation] = useState<ApplicantInvitation | null>(null);
 
@@ -59,6 +61,8 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
       setNotes(applicant.notes || "");
       setIssuedInvitation(null);
       setExpiresInHours("72");
+      setInvitationNote("");
+      setInvitationContactPhone("");
     }
   }, [applicant?.id]);
 
@@ -142,7 +146,11 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
 
     setIssuingInvite(true);
     try {
-      const invitation = await invitePlatformApplicant(applicant.id, hours);
+      const invitation = await invitePlatformApplicant(applicant.id, {
+        expiresInHours: hours,
+        note: invitationNote.trim() ? invitationNote : undefined,
+        contactPhone: invitationContactPhone.trim() || undefined,
+      });
       setIssuedInvitation(invitation);
       toast("تم إصدار رابط الدعوة بنجاح.", "success");
     } catch (err: any) {
@@ -316,7 +324,7 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
               المرشح في حالة «عرض عمل». يمكنك إصدار رابط دعوة قبول التوظيف لمشاركته معه لإنشاء حسابه بنفسه.
             </p>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
               <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
                 الصلاحية بالساعات:
               </label>
@@ -328,16 +336,46 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
                 onChange={(e) => setExpiresInHours(e.target.value)}
                 className="w-24 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100"
               />
-              <button
-                type="button"
-                onClick={handleIssueInvite}
-                disabled={issuingInvite}
-                className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg shadow-sm transition disabled:opacity-50 mr-auto"
-              >
-                {issuingInvite && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                إصدار رابط الدعوة
-              </button>
             </div>
+
+            <div>
+              <label htmlFor="invitation-note" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                رسالة للمرشح قبل إنشاء الحساب (اختيارية)
+              </label>
+              <textarea
+                id="invitation-note"
+                rows={3}
+                value={invitationNote}
+                onChange={(event) => setInvitationNote(event.target.value)}
+                placeholder="اكتب توضيحاً أو تعليمات سيقرأها المرشح قبل قبول الدعوة..."
+                className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+
+            <div>
+              <label htmlFor="invitation-contact-phone" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                رقم التواصل للاستفسارات قبل القبول (اختياري)
+              </label>
+              <input
+                id="invitation-contact-phone"
+                type="tel"
+                dir="ltr"
+                value={invitationContactPhone}
+                onChange={(event) => setInvitationContactPhone(event.target.value)}
+                placeholder="970000000000+"
+                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleIssueInvite}
+              disabled={issuingInvite}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:opacity-50"
+            >
+              {issuingInvite && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              إصدار رابط الدعوة
+            </button>
 
             {issuedInvitation && (
               <div className="mt-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 p-3 space-y-2">
@@ -360,6 +398,21 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
                 <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
                   احفظه الآن — لا يمكن عرضه مرّةً أخرى، وإصدارُ رابطٍ جديد يُبطل هذا.
                 </p>
+                {((issuedInvitation.note || "").trim() || (issuedInvitation.contact_phone || "").trim()) && (
+                  <div className="space-y-2 border-t border-emerald-200 pt-2 dark:border-emerald-800">
+                    <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200">ما سيقرأه المرشح قبل إنشاء حسابه:</p>
+                    {(issuedInvitation.note || "").trim() && (
+                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700 dark:text-slate-300">
+                        {issuedInvitation.note}
+                      </p>
+                    )}
+                    {(issuedInvitation.contact_phone || "").trim() && (
+                      <p className="text-xs text-slate-600 dark:text-slate-400">
+                        رقم التواصل: <a href={`tel:${(issuedInvitation.contact_phone || "").trim()}`} dir="ltr" className="font-semibold text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">{(issuedInvitation.contact_phone || "").trim()}</a>
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
