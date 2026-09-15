@@ -16,6 +16,7 @@
      `accounting.period.manage` مطلوبة، والفترة المُقفَلة لا تُعدَّل ولا تُحذف،
      وكل تعديل أو حذف يُكتب في سجل التدقيق.
 """
+import datetime
 from decimal import Decimal
 
 import pytest
@@ -97,6 +98,100 @@ def test_create_fiscal_year_builds_twelve_months(env):
     again = create_fiscal_year(tenant, 2026)
     assert len(again) == 12
     assert FiscalPeriod.objects.filter(tenant=tenant).count() == 12
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# #213-أ (تكملة) — السنة المالية تبدأ من أيّ تاريخ، لا من كانون الثاني وحده
+#
+# طلب المالك: «بدي ابلش من أي تاريخ، مش لازم أول السنة؛ الديفولت كانون الثاني
+# وبكون الخيار معبّى، وهو قبل الإنشاء بقدر يغيّره». وهو خيار قياسي في Odoo
+# وXero وZoho Books — سنةٌ ماليةٌ تموزية أو نيسانية ليست حالةً شاذّة.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def test_a_july_start_makes_twelve_contiguous_periods(env):
+    """اثنتا عشرة فترةً من تموز إلى حزيران — بلا فجوةٍ ولا تداخل."""
+    tenant, *_ = env
+    periods = create_fiscal_year(tenant, start="2040-07-01")
+
+    assert len(periods) == 12
+    assert periods[0].start_date == datetime.date(2040, 7, 1)
+    assert periods[-1].end_date == datetime.date(2041, 6, 30)
+    for earlier, later in zip(periods, periods[1:]):
+        assert later.start_date == earlier.end_date + datetime.timedelta(days=1)
+
+
+def test_a_january_start_is_byte_for_byte_the_old_year_call(env):
+    """المسارُ القديم حالةٌ خاصّةٌ من الجديد — لا سلوكٌ ثانٍ بجانبه.
+
+    لو انزاح يومٌ واحدٌ هنا لتغيّرت فتراتُ كلّ شركةٍ قائمةٍ في المستودع.
+    """
+    tenant, *_ = env
+    by_year = [(p.name, p.start_date, p.end_date) for p in create_fiscal_year(tenant, 2041)]
+    # idempotent: النداء الثاني بالمدى نفسه يعيد الصفوف ذاتها لا صفوفاً جديدة.
+    by_start = [
+        (p.name, p.start_date, p.end_date)
+        for p in create_fiscal_year(tenant, start="2041-01-01")
+    ]
+
+    assert by_year == by_start
+    assert by_year[0] == ("2041-01", datetime.date(2041, 1, 1), datetime.date(2041, 1, 31))
+    assert by_year[-1] == ("2041-12", datetime.date(2041, 12, 1), datetime.date(2041, 12, 31))
+
+
+def test_a_yearly_period_off_january_is_named_across_both_years(env):
+    """`FY 2042/2043` — الاسمُ يقول أين تقع السنةُ حين لا تطابق التقويمية."""
+    tenant, *_ = env
+    periods = create_fiscal_year(tenant, start="2042-07-01", granularity="yearly")
+
+    assert len(periods) == 1
+    assert periods[0].name == "FY 2042/2043"
+    assert periods[0].start_date == datetime.date(2042, 7, 1)
+    assert periods[0].end_date == datetime.date(2043, 6, 30)
+
+
+def test_a_start_on_the_thirty_first_does_not_drift(env):
+    """الإزاحةُ من المرساة لا من الفترة السابقة — وإلا انزلق اليومُ شهراً بشهر."""
+    tenant, *_ = env
+    periods = create_fiscal_year(tenant, start="2043-01-31")
+
+    assert periods[0].start_date == datetime.date(2043, 1, 31)
+    assert periods[1].start_date == datetime.date(2043, 2, 28)
+    # لو حُسبت من شباط لصار آذارُ في 28، ولضاعت ثلاثةُ أيامٍ من السنة كلّها.
+    assert periods[2].start_date == datetime.date(2043, 3, 31)
+    assert periods[-1].end_date == datetime.date(2044, 1, 30)
+
+
+def test_a_period_starting_mid_month_is_not_named_after_that_month(env):
+    """مدىً من 31 كانون الثاني إلى 27 شباط أكثرُ أيّامه في شباط.
+
+    تسميتُه «2043-01» تكذب على من يقرأ القائمة، فالاسمُ يصير تاريخَ بدئه.
+    """
+    tenant, *_ = env
+    periods = create_fiscal_year(tenant, start="2043-01-31")
+
+    assert periods[0].name == "2043-01-31"
+    assert periods[1].name == "2043-02-28"
+    # وأوّلُ الشهر يبقى `YYYY-MM` حرفاً بحرف — أسماءُ الفترات القائمة لا تتغيّر.
+    assert create_fiscal_year(tenant, start="2046-01-01")[0].name == "2046-01"
+
+
+def test_a_year_and_a_start_together_are_refused(env):
+    """أحدُهما لا كلاهما — وإلّا صمت أحدُ الوسيطين ولا يدري المستدعي أيُّهما."""
+    tenant, *_ = env
+    with pytest.raises(DjangoValidationError):
+        create_fiscal_year(tenant, 2044, start="2044-07-01")
+    with pytest.raises(DjangoValidationError):
+        create_fiscal_year(tenant)
+
+
+def test_an_impossible_start_is_a_message_not_a_server_error(env):
+    """`parse_date` **ترفع** على 2045-02-31 ولا تعيد `None`."""
+    tenant, *_ = env
+    with pytest.raises(DjangoValidationError):
+        create_fiscal_year(tenant, start="2045-02-31")
+    with pytest.raises(DjangoValidationError):
+        create_fiscal_year(tenant, start="ليس تاريخاً")
 
 
 def test_create_fiscal_year_yearly_granularity_still_available(env):
@@ -220,7 +315,7 @@ def test_overlap_is_scoped_to_the_tenant(env):
     # عندها فعلاً ورُدّ الطلبُ لتكرارٍ داخل الشركة — لا لتداخلٍ عبر الشركات، وهو
     # ما يقيسه هذا الاختبار. سنةٌ أخرى تُبقي المدى حرّاً عندها ومشغولاً عند
     # جارتها، فيبقى الرفضُ المحتمل رفضاً عابراً للشركات لا غير.
-    other = create_company("شركة أخرى", other_owner, fiscal_year=2030)
+    other = create_company("شركة أخرى", other_owner, fiscal_start="2030-01-01")
     client, headers = _client(other_owner, other)
 
     res = client.post(
@@ -255,6 +350,39 @@ def test_create_year_action_defaults_to_monthly(env):
     assert res.status_code == 201, res.content
     assert len(res.json()) == 12
     assert FiscalPeriod.objects.filter(tenant=tenant, name="2028-01").exists()
+
+
+def test_create_year_action_accepts_an_explicit_start(env):
+    """#213-أ: بلا `start` كانت الشركةُ التي سنتُها تموزيّةٌ عاجزةً عن سنتها
+    الثانية — طلبُ السنة يبني كانونَ الثاني فيتقاطع مع نصف سنتها القائمة ويُردّ.
+    """
+    tenant, owner, *_ = env
+    client, headers = _client(owner, tenant)
+
+    res = client.post(
+        "/api/accounting/fiscal-periods/create-year/",
+        {"start": "2027-07-01"}, format="json", **headers)
+
+    assert res.status_code == 201, res.content
+    assert len(res.json()) == 12
+    assert FiscalPeriod.objects.filter(
+        tenant=tenant, name="2027-07", start_date=datetime.date(2027, 7, 1),
+    ).exists()
+    assert FiscalPeriod.objects.filter(
+        tenant=tenant, end_date=datetime.date(2028, 6, 30),
+    ).exists()
+
+
+def test_create_year_action_refuses_a_request_naming_neither(env):
+    """لا سنةَ ولا تاريخ: رسالةٌ لا إنشاءٌ صامتٌ لسنةٍ لم يطلبها أحد."""
+    tenant, owner, *_ = env
+    client, headers = _client(owner, tenant)
+
+    res = client.post(
+        "/api/accounting/fiscal-periods/create-year/", {}, format="json", **headers)
+
+    assert res.status_code == 400, res.content
+    assert FiscalPeriod.objects.filter(tenant=tenant).count() == 12
 
 
 # ── 5) الإغلاق مع قيود غير مرحّلة ─────────────────────────────────────────

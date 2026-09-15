@@ -7,9 +7,9 @@ import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTem
 import {
   DEFAULT_FISCAL_GRANULARITY,
   FISCAL_GRANULARITY_OPTIONS,
-  FISCAL_YEAR_RANGE_MESSAGE,
-  currentFiscalYear,
-  isValidFiscalYear,
+  FISCAL_START_MESSAGE,
+  defaultFiscalStart,
+  isValidFiscalStart,
   type FiscalGranularity,
 } from "../../utils/fiscalYearChoice";
 
@@ -33,7 +33,7 @@ export const CompanySwitcher: React.FC = () => {
   const [showManageModal, setShowManageModal] = useState(false);
   const [newCompanyName, setNewCompanyName] = useState("");
   const [newCompanyTemplate, setNewCompanyTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
-  const [newFiscalYear, setNewFiscalYear] = useState(String(currentFiscalYear()));
+  const [newFiscalStart, setNewFiscalStart] = useState(defaultFiscalStart());
   const [newFiscalGranularity, setNewFiscalGranularity] = useState<FiscalGranularity>(DEFAULT_FISCAL_GRANULARITY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -76,21 +76,21 @@ export const CompanySwitcher: React.FC = () => {
   const handleCreateCompany = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newCompanyName.trim()) return;
-    if (!isValidFiscalYear(newFiscalYear)) {
-      setError(FISCAL_YEAR_RANGE_MESSAGE);
+    if (!isValidFiscalStart(newFiscalStart)) {
+      setError(FISCAL_START_MESSAGE);
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
       const created = await createCompany(newCompanyName, newCompanyTemplate, {
-        year: Number(newFiscalYear),
+        start: newFiscalStart,
         granularity: newFiscalGranularity,
       });
       setShowModal(false);
       setNewCompanyName("");
       setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
-      setNewFiscalYear(String(currentFiscalYear()));
+      setNewFiscalStart(defaultFiscalStart());
       setNewFiscalGranularity(DEFAULT_FISCAL_GRANULARITY);
       // Switch to newly created company automatically
       await switchCompany(created.TenantID);
@@ -317,16 +317,15 @@ export const CompanySwitcher: React.FC = () => {
               </div>
 
               <div className="space-y-1.5">
-                <label className="text-xs font-bold opacity-80" htmlFor="company-fiscal-year">السنة المالية</label>
-                <p className="text-[11px] leading-4 opacity-70">تُفتح فترات هذه السنة مع الشركة فتستطيع ترحيل أول فاتورة فوراً.</p>
+                <label className="text-xs font-bold opacity-80" htmlFor="company-fiscal-start">السنة المالية — تبدأ من</label>
+                <p className="text-[11px] leading-4 opacity-70">تُفتح اثنتا عشرة فترةً من هذا التاريخ مع الشركة فتستطيع ترحيل أول فاتورة فوراً. الافتراض أول كانون الثاني، وتغيّره إن كانت سنتك المالية تبدأ في شهر آخر.</p>
                 <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
                   <input
-                    id="company-fiscal-year"
-                    type="number"
-                    inputMode="numeric"
+                    id="company-fiscal-start"
+                    type="date"
                     required
-                    value={newFiscalYear}
-                    onChange={(e) => setNewFiscalYear(e.target.value)}
+                    value={newFiscalStart}
+                    onChange={(e) => setNewFiscalStart(e.target.value)}
                     className="w-full px-3 py-2 text-sm rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] focus:outline-none focus:ring-2 focus:ring-[var(--ktra-accent)] focus:border-transparent transition-all duration-200"
                     disabled={submitting}
                   />
@@ -361,7 +360,7 @@ export const CompanySwitcher: React.FC = () => {
                     setError(null);
                     setNewCompanyName("");
                     setNewCompanyTemplate(DEFAULT_COMPANY_TEMPLATE);
-                    setNewFiscalYear(String(currentFiscalYear()));
+                    setNewFiscalStart(defaultFiscalStart());
                     setNewFiscalGranularity(DEFAULT_FISCAL_GRANULARITY);
                   }}
                   className="px-4 py-2 text-sm font-semibold rounded-lg hover:bg-[var(--ktra-panel-hover)] transition-colors duration-150"

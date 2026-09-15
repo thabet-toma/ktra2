@@ -236,7 +236,8 @@ def validate_fiscal_period(tenant_id, transaction_date):  # يرمي ValidationE
 def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):  # نفس حرّاس post_journal، برسالة تراجع
 def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bool = True) -> dict:  # مصدر ض.ق.م الوحيد لفترة — من JournalLine (issue #79)؛ يستهلكها build_vat_statement وVatReportView وclient_financial_summary معاً
 def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""):  # يرفض فكّ ترحيل مستندٍ داخل فترة كشف ض.ق.م `final` (issue #79) — تُستدعى من unpost_document
-def create_fiscal_year(tenant, year, granularity='monthly') -> list[FiscalPeriod]:  # 12 شهراً (افتراضي) أو فترة `FY <year>` واحدة — idempotent؛ يناديها `tenants.services.create_company` لكل شركة جديدة (#213-أ)
+def create_fiscal_year(tenant, year=None, granularity='monthly', *, start=None) -> list[FiscalPeriod]:  # 12 شهراً (افتراضي) أو فترة واحدة، من `start` أو من أول كانون الثاني لـ`year` — أحدهما لا كلاهما؛ idempotent؛ يناديها `tenants.services.create_company` لكل شركة جديدة (#213-أ)
+def fiscal_year_start(year=None, start=None) -> datetime.date:  # مصدر واحد لتحويل «السنة» أو نصّ التاريخ إلى تاريخ بدء — يرفض الاثنين معاً وتاريخاً مستحيلاً (#213-أ)
 def assert_no_period_overlap(tenant_id, start_date, end_date, exclude_pk=None):  # فترتان متقاطعتان لنفس الشركة تُرفضان
 def post_journal_entry(journal_id, user=None):  # ترحيل قيد موجود بالـid
 def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_account_id: int, user=None) -> dict:  # تصفير الإيراد/المصروف إلى الأرباح المحتجزة
@@ -295,7 +296,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 | GET | `general-ledger/` · `trial-balance/` · `vat-report/` | `GeneralLedgerView` · `TrialBalanceView` · `VatReportView` |
 | GET | `bank-accounts/{id}/statement/` | `BankAccountViewSet` |
 | POST | `bank-reconciliations/{id}/toggle-line/` · `close/` · `reopen/` | `BankReconciliationViewSet` |
-| POST | `fiscal-periods/create-year/` (`granularity` = `monthly` افتراضاً \| `yearly`؛ **يردّ قائمة فترات** لا فترة واحدة — 12 صفاً في الحالة الشهرية) · `{id}/close/` (409 مع قيود غير مرحّلة ما لم يُمرَّر `force`) · `{id}/reopen/` (`reason` إلزامي، يُحفظ في سجل التدقيق) · `year-end-close/` | `FiscalPeriodViewSet` — كلها بـ`accounting.period.manage` |
+| POST | `fiscal-periods/create-year/` (`start` = `YYYY-MM-DD` تاريخ بدء صريح **أو** `year` = أول كانون الثاني منها — أحدهما لا كلاهما (#213-أ)؛ `granularity` = `monthly` افتراضاً \| `yearly`؛ **يردّ قائمة فترات** لا فترة واحدة — 12 صفاً في الحالة الشهرية) · `{id}/close/` (409 مع قيود غير مرحّلة ما لم يُمرَّر `force`) · `{id}/reopen/` (`reason` إلزامي، يُحفظ في سجل التدقيق) · `year-end-close/` | `FiscalPeriodViewSet` — كلها بـ`accounting.period.manage` |
 | GET/POST/PATCH/DELETE | `fiscal-periods/` · `fiscal-periods/{id}/` | `FiscalPeriodViewSet` — الكتابة كلها بـ`accounting.period.manage`؛ المُقفَلة لا تُعدَّل ولا تُحذف، والحذف مرفوض إن كان في مداها قيد مرحّل؛ `status`/`is_closed` للقراءة فقط (تتغيّر عبر `close/`+`reopen/` وحدهما)، وكل تعديل أو حذف يُكتب في `AccountingAuditLog` |
 | GET | `opening-balance/` | `OpeningBalanceViewSet.list` — الحالة والبنود والمجاميع وأرصدة الأطراف؛ المبالغ نصوصاً والتواريخ ISO |
 | PUT | `opening-balance/lines/` | `OpeningBalanceViewSet.save_lines` — استبدال جماعي للمسودة؛ الرِّجل الغائبة عن الطلب لا تُمَسّ، والمستند المرحَّل يُرفض تعديله |

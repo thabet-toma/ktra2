@@ -6,6 +6,7 @@
   - Creator gets a manager membership; TenantSettings row exists
   - Data of existing companies is not touched
 """
+import datetime
 import io
 
 import pytest
@@ -130,7 +131,7 @@ def test_the_first_journal_of_a_new_company_posts_on_the_day_it_was_created(crea
 
 
 def test_an_explicit_year_is_honoured_and_the_current_one_is_not_seeded(creator):
-    tenant = create_company("شركة بسنة صريحة", creator, fiscal_year=2030)
+    tenant = create_company("شركة بسنة صريحة", creator, fiscal_start="2030-01-01")
 
     years = {p.start_date.year for p in FiscalPeriod.objects.filter(tenant=tenant)}
     assert years == {2030}
@@ -138,18 +139,19 @@ def test_an_explicit_year_is_honoured_and_the_current_one_is_not_seeded(creator)
 
 def test_yearly_granularity_makes_one_period_not_twelve(creator):
     tenant = create_company(
-        "شركة بفترة سنوية", creator, fiscal_year=2031, fiscal_granularity="yearly")
+        "شركة بفترة سنوية", creator, fiscal_start="2031-01-01", fiscal_granularity="yearly")
 
     periods = list(FiscalPeriod.objects.filter(tenant=tenant))
     assert len(periods) == 1
     assert periods[0].name == "FY 2031"
 
 
-def test_a_nonsense_year_is_refused_and_no_company_is_left_behind(creator):
+@pytest.mark.parametrize("bad_start", ["202-01-01", "0202-01-01", "2026-02-31", "ليس تاريخاً", "2026"])
+def test_a_nonsense_start_is_refused_and_no_company_is_left_behind(creator, bad_start):
     """الرفض قبل فتح المعاملة — شركةٌ نصفُ مزروعةٍ أسوأ من شركةٍ لم تُنشأ."""
     before = Tenant.objects.count()
     with pytest.raises(ValidationError):
-        create_company("شركة بسنة سخيفة", creator, fiscal_year=202)
+        create_company("شركة بتاريخ سخيف", creator, fiscal_start=bad_start)
     assert Tenant.objects.count() == before
 
 
@@ -182,10 +184,10 @@ class CompanyCreationApiSeedsTheFiscalYearTest(APITestCase):
             ).exists()
         )
 
-    def test_the_year_the_caller_chose_is_the_year_that_is_seeded(self):
+    def test_the_start_the_caller_chose_is_the_start_that_is_seeded(self):
         res = self.client.post(
             self.URL,
-            {"CompanyName": "شركة بسنتها", "fiscal_year": 2029,
+            {"CompanyName": "شركة بسنتها", "fiscal_start": "2029-01-01",
              "fiscal_granularity": "yearly"},
             format="json",
         )
@@ -196,11 +198,40 @@ class CompanyCreationApiSeedsTheFiscalYearTest(APITestCase):
         self.assertEqual(len(periods), 1)
         self.assertEqual(periods[0].name, "FY 2029")
 
-    def test_a_year_outside_the_sane_range_is_four_hundred_not_five_hundred(self):
+    def test_a_july_start_is_honoured_end_to_end(self):
+        """سنةٌ ماليةٌ تبدأ في تموز — من البابِ الذي يستعمله المستخدم فعلاً."""
         res = self.client.post(
-            self.URL, {"CompanyName": "شركة مرفوضة", "fiscal_year": 202}, format="json")
+            self.URL,
+            {"CompanyName": "شركة سنتها تموزية", "fiscal_start": "2029-07-01"},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
+        tenant = Tenant.objects.get(pk=res.json()["TenantID"])
+        periods = list(
+            FiscalPeriod.objects.filter(tenant=tenant).order_by("start_date")
+        )
+        self.assertEqual(len(periods), 12)
+        self.assertEqual(periods[0].start_date, datetime.date(2029, 7, 1))
+        self.assertEqual(periods[-1].end_date, datetime.date(2030, 6, 30))
+
+    def test_a_start_outside_the_sane_range_is_four_hundred_not_five_hundred(self):
+        res = self.client.post(
+            self.URL, {"CompanyName": "شركة مرفوضة", "fiscal_start": "0202-01-01"},
+            format="json")
         self.assertEqual(res.status_code, 400, res.content)
         self.assertFalse(Tenant.objects.filter(CompanyName="شركة مرفوضة").exists())
+
+    def test_an_impossible_date_is_four_hundred_not_five_hundred(self):
+        """‏`parse_date` **ترفع** `ValueError` على 2026-02-31 ولا تعيد `None`."""
+        res = self.client.post(
+            self.URL,
+            {"CompanyName": "شركة بتاريخ مستحيل", "fiscal_start": "2026-02-31"},
+            format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertFalse(
+            Tenant.objects.filter(CompanyName="شركة بتاريخ مستحيل").exists()
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

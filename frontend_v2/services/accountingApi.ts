@@ -837,12 +837,15 @@ export const accountingApi = {
     return res.json();
   },
 
-  /** `granularity` الافتراضي شهريّ — 12 فترة تُقفَل واحدةً واحدة. */
-  createFiscalYear: async (year: number, granularity: "monthly" | "yearly" = "monthly") => {
+  /**
+   * `start` تاريخُ بدء السنة `YYYY-MM-DD` — لا رقمُ سنةٍ يفترض كانونَ الثاني
+   * (#213-أ). و`granularity` الافتراضي شهريّ — 12 فترة تُقفَل واحدةً واحدة.
+   */
+  createFiscalYear: async (start: string, granularity: "monthly" | "yearly" = "monthly") => {
     const res = await fetch(`${ACC}/fiscal-periods/create-year/`, {
       method: "POST",
       headers: headers(),
-      body: JSON.stringify({ year, granularity }),
+      body: JSON.stringify({ start, granularity }),
     });
     await handle(res, "createFiscalYear");
     return res.json();

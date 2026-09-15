@@ -8,6 +8,11 @@ import {
 } from "../kit";
 import type { KitToolbarAction, KitTab, DenseColumn } from "../kit";
 import { Plus, Lock, Unlock } from "lucide-react";
+import {
+  FISCAL_START_MESSAGE,
+  isValidFiscalStart,
+  nextFiscalStart,
+} from "../../utils/fiscalYearChoice";
 
 type Granularity = "monthly" | "yearly";
 
@@ -15,7 +20,7 @@ export const FiscalPeriodsPage: React.FC = () => {
   const [periods, setPeriods] = useState<FiscalPeriodDto[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [newYear, setNewYear] = useState(new Date().getFullYear().toString());
+  const [newStart, setNewStart] = useState(() => nextFiscalStart([]));
   const [granularity, setGranularity] = useState<Granularity>("monthly");
   const [busy, setBusy] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
@@ -42,12 +47,15 @@ export const FiscalPeriodsPage: React.FC = () => {
   }, [load]);
 
   const createYear = async () => {
-    const y = parseInt(newYear, 10);
-    if (!y || y < 2000 || y > 2100) return;
+    // كان الرفضُ `return` صامتاً: الزرُّ يُضغَط ولا يحدث شيءٌ ولا تُقال العلّة.
+    if (!isValidFiscalStart(newStart)) {
+      setErr(FISCAL_START_MESSAGE);
+      return;
+    }
     setBusy(true);
     setErr(null);
     try {
-      await accountingApi.createFiscalYear(y, granularity);
+      await accountingApi.createFiscalYear(newStart, granularity);
       setShowAddForm(false);
       await load();
     } catch (e: unknown) {
@@ -150,22 +158,30 @@ export const FiscalPeriodsPage: React.FC = () => {
   ];
 
   const actions: KitToolbarAction[] = [
-    { key: "new", label: "إضافة سنة", icon: <Plus className="w-4 h-4" />, onClick: () => setShowAddForm(!showAddForm) },
+    {
+      key: "new",
+      label: "إضافة سنة",
+      icon: <Plus className="w-4 h-4" />,
+      // الافتراضُ يُحسب عند الفتح لا في كل رسم: حسابُه في الرسم يمحو ما كتبه
+      // المستخدم كلما أُعيد تحميل القائمة.
+      onClick: () => {
+        if (!showAddForm) setNewStart(nextFiscalStart(periods.map((p) => p.end_date)));
+        setShowAddForm(!showAddForm);
+      },
+    },
     { key: "refresh", label: "تحديث", onClick: load },
   ];
 
   const addYearBand = showAddForm ? (
     <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-end", gap: "12px" }}>
       <div className="ktra-field">
-        <label className="ktra-field-label">السنة المالية</label>
+        <label className="ktra-field-label">تبدأ من</label>
         <input
-          type="number"
-          min={2000}
-          max={2100}
-          className="ktra-input ktra-num"
-          style={{ width: "100px" }}
-          value={newYear}
-          onChange={(e) => setNewYear(e.target.value)}
+          type="date"
+          className="ktra-input"
+          style={{ width: "150px" }}
+          value={newStart}
+          onChange={(e) => setNewStart(e.target.value)}
         />
       </div>
       <div className="ktra-field">
@@ -190,12 +206,14 @@ export const FiscalPeriodsPage: React.FC = () => {
       <button type="button" className="ktra-toolbtn" disabled={busy} onClick={createYear}
         style={{ marginTop: "18px" }}>
         <Plus className="w-4 h-4" />
-        {granularity === "monthly" ? `إنشاء أشهر ${newYear}` : `إنشاء FY ${newYear}`}
+        {granularity === "monthly" ? "إنشاء 12 شهراً" : "إنشاء سنة واحدة"}
       </button>
       <span style={{ marginTop: "22px", fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
-        {granularity === "monthly"
-          ? `${newYear}-01 … ${newYear}-12 — يُقفَل كل شهر على حدة`
-          : "يناير 1 — ديسمبر 31 — فترة واحدة تُقفَل كاملة"}
+        {isValidFiscalStart(newStart)
+          ? granularity === "monthly"
+            ? `اثنتا عشرة فترة تبدأ من ${fmtDate(newStart)} — يُقفَل كل شهر على حدة`
+            : `فترة واحدة تبدأ من ${fmtDate(newStart)} لاثني عشر شهراً — تُقفَل كاملة`
+          : FISCAL_START_MESSAGE}
       </span>
     </div>
   ) : <></>;

@@ -2589,19 +2589,27 @@ class FiscalPeriodViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=['post'], url_path='create-year')
     @requires_perm('accounting.period.manage')
     def create_year(self, request):
+        """`start` تاريخُ بدءٍ صريح، و`year` تعني أوّلَ كانون الثاني منها.
+
+        #213-أ: بلا `start` هنا كانت الشركةُ التي سنتُها تبدأ في تموز **عاجزةً
+        عن إنشاء سنتها الثانية أصلاً** — طلبُ 2030 يبني كانونَ الثاني فيتقاطع
+        مع نصف سنتها القائمة ويُردّ. فالخيارُ الذي فُتح عند الإنشاء كان يُغلَق
+        بعد اثني عشر شهراً.
+        """
+        # «أحدُهما لا كليهما» قاعدةٌ واحدةٌ في `fiscal_year_start` — ولا نسخةَ
+        # ثانيةً منها هنا: نسختان تفترقان يوماً ولا يدري أحدٌ أيُّهما الصواب.
+        start = request.data.get('start')
         year = request.data.get('year')
-        if not year:
-            return Response({'error': 'year مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
-        try:
-            year = int(year)
-        except (TypeError, ValueError):
-            return Response({'error': 'year يجب أن يكون رقماً'}, status=status.HTTP_400_BAD_REQUEST)
         granularity = request.data.get('granularity') or GRANULARITY_MONTHLY
         tenant = get_tenant(self.request)
         if not tenant:
             return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
         try:
-            periods = create_fiscal_year(tenant, year, granularity=granularity)
+            periods = (
+                create_fiscal_year(tenant, start=start, granularity=granularity)
+                if start
+                else create_fiscal_year(tenant, year, granularity=granularity)
+            )
         except DjangoValidationError as exc:
             return Response({'error': exc.messages}, status=status.HTTP_400_BAD_REQUEST)
         return Response(

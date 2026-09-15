@@ -281,12 +281,12 @@ class TenantViewSet(viewsets.ModelViewSet):
         except ValueError as e:
             raise DRFValidationError({"template": str(e)})
         # #213-أ: السنةُ المالية تُزرع مع الشركة دائماً؛ ما يُرسله العميل هو
-        # السنةُ وتفصيلُها لا وجودُهما. والمفتاحُ الغائب **لا يُملأ هنا**: تكرارُ
-        # افتراض `create_company` في هذا الباب نسخةٌ ثانيةٌ من القاعدة تفترق عنها
-        # صامتةً يومَ يتغيّر أحدُهما.
+        # **تاريخُ بدئها** وتفصيلُها لا وجودُهما. والمفتاحُ الغائب **لا يُملأ
+        # هنا**: تكرارُ افتراض `create_company` في هذا الباب نسخةٌ ثانيةٌ من
+        # القاعدة تفترق عنها صامتةً يومَ يتغيّر أحدُهما.
         fiscal = {
             key: request.data[key]
-            for key in ("fiscal_year", "fiscal_granularity")
+            for key in ("fiscal_start", "fiscal_granularity")
             if request.data.get(key) not in (None, "")
         }
         try:

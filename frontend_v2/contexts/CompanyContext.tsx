@@ -52,7 +52,8 @@ export type CompanyMembership = {
 
 /** #213-أ — السنة المالية التي تختارها شاشة الإنشاء قبل أن تُنشأ الشركة. */
 export type FiscalChoice = {
-  year: number;
+  /** تاريخ بدء السنة المالية `YYYY-MM-DD` — لا رقم سنة: البدء من أيّ يوم. */
+  start: string;
   granularity: FiscalGranularity;
 };
 
@@ -259,7 +260,7 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newCompany = await apiPostObject<Tenant>("tenants/companies/", {
       CompanyName: name,
       ...(template ? { template } : {}),
-      ...(fiscal ? { fiscal_year: fiscal.year, fiscal_granularity: fiscal.granularity } : {}),
+      ...(fiscal ? { fiscal_start: fiscal.start, fiscal_granularity: fiscal.granularity } : {}),
     });
     // Do not activate the tenant from the POST response alone. The membership
     // read is the source of truth for onboarding completion and owner role.

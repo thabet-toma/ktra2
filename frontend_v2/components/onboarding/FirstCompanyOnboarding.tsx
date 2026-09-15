@@ -8,9 +8,9 @@ import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTem
 import {
   DEFAULT_FISCAL_GRANULARITY,
   FISCAL_GRANULARITY_OPTIONS,
-  FISCAL_YEAR_RANGE_MESSAGE,
-  currentFiscalYear,
-  isValidFiscalYear,
+  FISCAL_START_MESSAGE,
+  defaultFiscalStart,
+  isValidFiscalStart,
   type FiscalGranularity,
 } from "../../utils/fiscalYearChoice";
 
@@ -25,7 +25,7 @@ export const FirstCompanyOnboarding: React.FC = () => {
   const { createCompany } = useCompany();
   const [companyName, setCompanyName] = useState("");
   const [template, setTemplate] = useState<CompanyTemplateKey>(DEFAULT_COMPANY_TEMPLATE);
-  const [fiscalYear, setFiscalYear] = useState(String(currentFiscalYear()));
+  const [fiscalStart, setFiscalStart] = useState(defaultFiscalStart());
   const [granularity, setGranularity] = useState<FiscalGranularity>(DEFAULT_FISCAL_GRANULARITY);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,8 +37,8 @@ export const FirstCompanyOnboarding: React.FC = () => {
       setError("أدخل اسم الشركة للمتابعة.");
       return;
     }
-    if (!isValidFiscalYear(fiscalYear)) {
-      setError(FISCAL_YEAR_RANGE_MESSAGE);
+    if (!isValidFiscalStart(fiscalStart)) {
+      setError(FISCAL_START_MESSAGE);
       return;
     }
 
@@ -47,7 +47,7 @@ export const FirstCompanyOnboarding: React.FC = () => {
     setError(null);
     clientLogger.info("onboarding.company_create_started");
     try {
-      await createCompany(name, template, { year: Number(fiscalYear), granularity });
+      await createCompany(name, template, { start: fiscalStart, granularity });
       clientLogger.info("onboarding.company_create_succeeded", {
         durationMs: Math.round(performance.now() - startedAt),
       });
@@ -124,16 +124,15 @@ export const FirstCompanyOnboarding: React.FC = () => {
               </div>
               <div>
                 <span className="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-200">السنة المالية</span>
-                <p className="mb-3 text-xs leading-5 text-gray-600 dark:text-gray-400">ستُفتح فترات هذه السنة مع الشركة، فتستطيع ترحيل أول فاتورة فوراً. يمكنك إضافة سنوات أخرى لاحقاً من إدارة الفترات المالية.</p>
+                <p className="mb-3 text-xs leading-5 text-gray-600 dark:text-gray-400">ستُفتح اثنتا عشرة فترةً من تاريخ البداية هذا مع الشركة، فتستطيع ترحيل أول فاتورة فوراً. الافتراض أول كانون الثاني، وتغيّره إن كانت سنتك المالية تبدأ في شهر آخر. ويمكنك إضافة سنوات أخرى لاحقاً من إدارة الفترات المالية.</p>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <label className="block sm:col-span-1">
-                    <span className="mb-2 block text-xs font-semibold text-gray-600 dark:text-gray-300">السنة</span>
+                    <span className="mb-2 block text-xs font-semibold text-gray-600 dark:text-gray-300">تبدأ من</span>
                     <input
-                      name="fiscalYear"
-                      type="number"
-                      inputMode="numeric"
-                      value={fiscalYear}
-                      onChange={(event) => setFiscalYear(event.target.value)}
+                      name="fiscalStart"
+                      type="date"
+                      value={fiscalStart}
+                      onChange={(event) => setFiscalStart(event.target.value)}
                       disabled={submitting}
                       required
                       className="w-full rounded-xl border border-gray-300 bg-gray-50 px-4 py-3 text-gray-900 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 disabled:opacity-60 dark:border-gray-600 dark:bg-gray-900 dark:text-white"

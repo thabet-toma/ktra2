@@ -13,6 +13,7 @@ from tenants.models import Currency, TenantBook
 from core.hooks import run_tax_period_guards
 from core.terminology import term as tenant_term
 from django.utils import timezone
+from django.utils.dateparse import parse_date
 
 logger = logging.getLogger(__name__)
 
@@ -370,20 +371,92 @@ def assert_no_period_overlap(tenant_id, start_date, end_date, exclude_pk=None):
         )
 
 
-def _month_ranges(year):
-    """(البداية، النهاية، الاسم) لكل شهر في السنة — النهاية آخر يوم فعلي فيه."""
-    for month in range(1, 13):
-        start = datetime.date(year, month, 1)
-        last_day = calendar.monthrange(year, month)[1]
-        yield start, datetime.date(year, month, last_day), f"{year}-{month:02d}"
+def _add_months(anchor, months):
+    """`anchor` مزاحاً `months` شهراً، ويومُه مقصوصٌ على طول الشهر الهدف.
+
+    والإزاحةُ من **المرساة الأصلية** دائماً لا من الفترة السابقة: بدايةٌ في 31
+    كانون الثاني تُقَصّ إلى 28 شباط، ثم الشهرُ الذي يليه 31 آذار لا 28 آذار —
+    فلا ينزلق تاريخُ البداية شهراً بعد شهر حتى يصير غيرَ الذي اختاره صاحبُه.
+    """
+    total = anchor.month - 1 + months
+    year = anchor.year + total // 12
+    month = total % 12 + 1
+    return datetime.date(year, month, min(anchor.day, calendar.monthrange(year, month)[1]))
 
 
-def create_fiscal_year(tenant, year, granularity=GRANULARITY_MONTHLY):
+def _fiscal_ranges(start, granularity):
+    """(البداية، النهاية، الاسم) لفترات سنةٍ ماليّةٍ تبدأ من `start`.
+
+    السنةُ المالية اثنا عشر شهراً من تاريخِ بدايتها — وبدايةُ أوّلِ كانون الثاني
+    حالةٌ خاصّةٌ منها لا العكس (#213-أ).
+
+    والتسميةُ تقول أين تبدأ الفترةُ فعلاً: `YYYY-MM` للشهرية التي تبدأ أوّلَ
+    الشهر (كما كانت حرفاً بحرف)، و`YYYY-MM-DD` لما يبدأ في وسطه — فمدىً من 31
+    كانون الثاني إلى 27 شباط أكثرُ أيّامه في شباط، وتسميتُه «2043-01» تكذب على
+    من يقرأ القائمة. وللسنوية `FY <سنة>` إن بدأت مع السنة التقويمية، وإلا
+    `FY <سنة>/<سنة>` كما تكتبها الدفاترُ التي تبدأ سنتُها في تموز.
+    """
+    if granularity == GRANULARITY_YEARLY:
+        end = _add_months(start, 12) - datetime.timedelta(days=1)
+        name = (
+            f"FY {start.year}"
+            if (start.month, start.day) == (1, 1)
+            else f"FY {start.year}/{end.year}"
+        )
+        yield start, end, name
+        return
+    for index in range(12):
+        period_start = _add_months(start, index)
+        period_end = _add_months(start, index + 1) - datetime.timedelta(days=1)
+        yield period_start, period_end, (
+            f"{period_start.year}-{period_start.month:02d}"
+            if period_start.day == 1
+            else period_start.isoformat()
+        )
+
+
+def fiscal_year_start(year=None, start=None):
+    """تاريخُ بدء السنة المالية — من تاريخٍ صريحٍ أو من سنةٍ تعني أوّلَ كانون الثاني.
+
+    مصدرٌ واحدٌ لتحويل «السنة» إلى تاريخ: بقاؤه في كلّ مستدعٍ كان يعني نسخةً من
+    القاعدة في كلّ باب.
+    """
+    if (year is None) == (start is None):
+        raise ValidationError("حدّد سنةَ البدء أو تاريخَه — أحدَهما لا كليهما.")
+    if start is not None:
+        if isinstance(start, datetime.datetime):
+            return start.date()
+        if isinstance(start, datetime.date):
+            return start
+        # ‏`parse_date` **ترفع** `ValueError` لتاريخٍ يطابق الشكل ويستحيل
+        # تقويمياً (2026-02-31) ولا تعيد `None` — فبلا هذا الالتقاط يصير
+        # الغلطُ المطبعيُّ خطأَ خادمٍ لا رسالةً مفهومة.
+        try:
+            parsed = parse_date(str(start).strip())
+        except ValueError:
+            parsed = None
+        if parsed is None:
+            raise ValidationError(
+                f"تاريخ بداية السنة المالية «{start}» غير صالح — الشكل YYYY-MM-DD."
+            )
+        return parsed
+    try:
+        return datetime.date(int(year), 1, 1)
+    except (TypeError, ValueError):
+        raise ValidationError(f"السنة المالية «{year}» ليست رقماً صالحاً.")
+
+
+def create_fiscal_year(tenant, year=None, granularity=GRANULARITY_MONTHLY, *, start=None):
     """ينشئ فترات السنة المالية — 12 شهراً افتراضياً، أو فترة سنة واحدة.
 
     الافتراض شهريّ لأن المحاسب يُقفِل شهراً بعد شهر (دفترة · Odoo · Zoho Books
     كلها تُنشئ الأشهر مع السنة)؛ فترةٌ سنوية واحدة تعني أن القفل كل شيء أو لا
     شيء. `granularity='yearly'` تُبقي السلوك القديم (فترة `FY <year>` واحدة).
+
+    #213-أ: `year` تعني «ابدأ أوّلَ كانون الثاني منها»، و`start` تاريخُ بدءٍ
+    صريحٌ لمن سنتُه المالية لا تطابق التقويمية (تموز/تموز مثلاً — وهو خيارٌ
+    قياسيٌّ في Odoo وXero وZoho Books). يُمرَّر أحدُهما لا كلاهما، والفتراتُ في
+    الحالتين اثنتا عشرة فترةً متتاليةً بلا فجوةٍ ولا تداخل.
 
     idempotent: الفترة الموجودة بنفس المدى تُعاد كما هي؛ أي مدى آخر متداخل
     يُرفض عبر `assert_no_period_overlap`.
@@ -395,26 +468,23 @@ def create_fiscal_year(tenant, year, granularity=GRANULARITY_MONTHLY):
             f"تفصيل الفترة «{granularity}» غير معروف — المسموح: "
             f"{'، '.join(FISCAL_GRANULARITIES)}."
         )
-    if granularity == GRANULARITY_YEARLY:
-        ranges = [(datetime.date(year, 1, 1), datetime.date(year, 12, 31), f"FY {year}")]
-    else:
-        ranges = list(_month_ranges(year))
+    ranges = list(_fiscal_ranges(fiscal_year_start(year=year, start=start), granularity))
 
     periods = []
     with transaction.atomic():
-        for start, end, name in ranges:
+        for period_start, period_end, name in ranges:
             existing = FiscalPeriod.objects.filter(
-                tenant=tenant, start_date=start, end_date=end,
+                tenant=tenant, start_date=period_start, end_date=period_end,
             ).first()
             if existing:
                 periods.append(existing)
                 continue
-            assert_no_period_overlap(tenant.pk, start, end)
+            assert_no_period_overlap(tenant.pk, period_start, period_end)
             periods.append(FiscalPeriod.objects.create(
                 tenant=tenant,
                 name=name,
-                start_date=start,
-                end_date=end,
+                start_date=period_start,
+                end_date=period_end,
                 status='Open',
                 is_closed=False,
             ))
