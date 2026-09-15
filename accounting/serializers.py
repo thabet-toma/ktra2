@@ -170,11 +170,21 @@ def build_journal_reference_summary(obj, pay_map=None, sales_map=None, cust_map=
                 inv = SalesInvoice.objects.select_related("customer").filter(pk=rid).first()
             if inv:
                 cust = getattr(inv.customer, "name", "") or ""
-                inv_label = tenant_term(obj.tenant, "doc.sales_invoice")
+                # #214-ب: مرتجعُ البيع قيدُه بـ`reference_type="SALES_INVOICE"`
+                # كالبيعة حرفاً، فلو سُمّي من نوع المرجع وحدَه لقرأه صاحبُه
+                # «فاتورة مبيعات». النوعُ الحقيقيُّ على المستند نفسِه وهو محمولٌ
+                # في `sales_map` أصلاً — فالتفرقةُ بلا استعلامٍ إضافيّ.
+                inv_label = (RETURN_KIND_LABELS.get(getattr(inv, "invoice_kind", "") or "")
+                             or tenant_term(obj.tenant, "doc.sales_invoice"))
                 return f"{inv_label} {inv.invoice_number}" + (f" — {cust}" if cust else "")
         except Exception:
             pass
         return f"{tenant_term(obj.tenant, 'doc.sales_invoice')} · #{rid}"
+
+    if rt == "PURCHASE_RETURN" and rid:
+        # كان يسقط إلى السطر العامّ أدناه فيخرج للمحاسب العربيِّ المعرِّفُ
+        # الإنجليزيُّ خاماً: «PURCHASE_RETURN · #12».
+        return f"مرتجع شراء · #{rid}"
 
     if rt == "SALES_DELIVERY_COGS" and rid:
         return f"تكلفة بضاعة مباعة عند التسليم · فاتورة #{rid}"
@@ -211,6 +221,14 @@ def get_deal_ref_number(obj, pay_map=None):
     return None
 
 
+# #214-ب: أسماءُ المرتجعات — تطابق `utils/documentTypeLabels.ts`
+# (`invoiceKindLabel`) حرفاً، فما يقرؤه المحاسبُ في الدفتر هو ما يقرؤه في
+# المحرّر وفي الطباعة وفي كشف الحساب.
+RETURN_KIND_LABELS = {
+    "sale_return": "مرتجع بيع",
+    "purchase_return": "مرتجع شراء",
+}
+
 SOURCE_LABEL_MAP = {
     # ISSUE #82: "SALES_INVOICE" مقصودةٌ غائبة من هنا — اسمها يأتي من المعجم
     # (`core.terminology.term`) لأنه يتبدّل بقالب الشركة (اسمه البديل في مكتب
@@ -218,6 +236,9 @@ SOURCE_LABEL_MAP = {
     "SALES_DELIVERY_COGS": "تكلفة بضاعة مباعة",
     "CUSTOMER_PAYMENT": "تحصيل عميل",
     "PURCHASE_INVOICE": "فاتورة شراء",
+    # مرتجعُ الشراء نوعُ مرجعٍ مستقلٌّ (`post_purchase_return`) لكنّه لم يُسجَّل
+    # هنا، فكان `_get_source_label` يعيد المعرِّفَ الإنجليزيَّ نفسَه.
+    "PURCHASE_RETURN": "مرتجع شراء",
     "PURCHASE_RECEIPT": "استلام مخزون",
     "LOGISTICS_PAYMENT": "دفعة لوجستية",
     "LOGISTICS_EXPENSE": "مصروف لوجستي",
@@ -231,11 +252,45 @@ SOURCE_LABEL_MAP = {
 }
 
 
-def _get_source_label(rt: str, tenant=None) -> str:
+def _get_source_label(rt: str, tenant=None, invoice_kind=None) -> str:
     key = (rt or "").strip()
     if key == "SALES_INVOICE":
-        return tenant_term(tenant, "doc.sales_invoice")
+        # #214-ب: النوعُ وحدَه لا يكفي — المرتجعُ يشاركه. والمعجمُ يُستشار
+        # للبيعة وحدَها لأنّ اسمَها يتبدّل بقالب الشركة، أمّا المرتجع فاسمُه
+        # واحدٌ في المحرّر والطباعة وكشف الحساب (ISSUE #82 لا يشمله).
+        return (RETURN_KIND_LABELS.get((invoice_kind or "").strip())
+                or tenant_term(tenant, "doc.sales_invoice"))
     return SOURCE_LABEL_MAP.get(key, rt or "")
+
+
+_KIND_UNSET = object()
+
+
+def journal_reference_kind(obj, sales_map=None):
+    """نوعُ المستند الذي يقف خلف القيد حين يخالف نوعَ مرجعه — أو `None`.
+
+    يُرسَل **دائماً** ولو فارغاً: حقلٌ يظهر أحياناً يجعل الواجهةَ تخمّن غيابَه.
+    وشرطُ `not sales_map` هو نفسُه المستعمَل في `build_journal_reference_summary`:
+    خريطةٌ ممرَّرةٌ ولو فارغةً تعني «القائمةُ سألت سلفاً فلا تسأل ثانيةً» — وبلا
+    هذا الشرط يعود استعلامٌ لكلّ صفّ.
+    """
+    cached = getattr(obj, "_journal_reference_kind", _KIND_UNSET)
+    if cached is not _KIND_UNSET:
+        return cached
+    rt = (obj.reference_type or "").strip()
+    rid = obj.reference_id
+    kind = None
+    if rt == "SALES_INVOICE" and rid:
+        inv = (sales_map or {}).get(rid)
+        if inv is None and not sales_map:
+            from sales.models import SalesInvoice
+            inv = SalesInvoice.objects.filter(pk=rid).only("invoice_kind").first()
+        if inv is not None:
+            kind = getattr(inv, "invoice_kind", None) or None
+    # حقلان يسألان السؤالَ نفسَه (`reference_kind` و`source_label`) — وبلا الحفظ
+    # يصير استعلامان لقيدٍ واحدٍ في مسار المستند المفرد حيث لا خريطةَ ممرَّرة.
+    obj._journal_reference_kind = kind
+    return kind
 
 
 def _get_tenant_name(obj) -> str:
@@ -253,6 +308,7 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
     currency_code = serializers.SerializerMethodField(read_only=True)
     tenant_name = serializers.SerializerMethodField(read_only=True)
     source_label = serializers.SerializerMethodField(read_only=True)
+    reference_kind = serializers.SerializerMethodField(read_only=True)
     created_by_name = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
@@ -261,6 +317,7 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
             "id",
             "transaction_date",
             "reference_type",
+            "reference_kind",
             "reference_id",
             "reference_summary",
             "deal_ref_number",
@@ -300,8 +357,12 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
     def get_tenant_name(self, obj):
         return _get_tenant_name(obj)
 
+    def get_reference_kind(self, obj):
+        return journal_reference_kind(obj, self.context.get("sales_invoices"))
+
     def get_source_label(self, obj):
-        return _get_source_label(obj.reference_type, obj.tenant)
+        return _get_source_label(
+            obj.reference_type, obj.tenant, self.get_reference_kind(obj))
 
 
 class JournalHeaderSerializer(serializers.ModelSerializer):
@@ -311,6 +372,7 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
     currency_code = serializers.SerializerMethodField(read_only=True)
     tenant_name = serializers.SerializerMethodField(read_only=True)
     source_label = serializers.SerializerMethodField(read_only=True)
+    reference_kind = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = JournalHeader
@@ -318,6 +380,7 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
             'id',
             'transaction_date',
             'reference_type',
+            'reference_kind',
             'reference_id',
             'reference_summary',
             'deal_ref_number',
@@ -348,8 +411,12 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
     def get_tenant_name(self, obj):
         return _get_tenant_name(obj)
 
+    def get_reference_kind(self, obj):
+        return journal_reference_kind(obj, self.context.get("sales_invoices"))
+
     def get_source_label(self, obj):
-        return _get_source_label(obj.reference_type, obj.tenant)
+        return _get_source_label(
+            obj.reference_type, obj.tenant, self.get_reference_kind(obj))
 
     def create(self, validated_data):
         lines_data = validated_data.pop('lines')

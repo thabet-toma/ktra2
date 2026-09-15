@@ -284,7 +284,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 |---|---|---|
 | GET/POST | `accounts/` | `AccountViewSet` |
 | POST | `accounts/resolve-import-expense/` | `AccountViewSet.resolve_import_expense` |
-| GET/POST | `journals/` | `JournalViewSet` (ترقيم اختياري بـ`?page=`؛ فلاتر: `reference_type`، `date_from`/`date_to`، `search`، `account` (سطر على هذا الحساب — `Exists` بلا `distinct`)، `user` (منشئ القيد)) |
+| GET/POST | `journals/` | `JournalViewSet` (ترقيم اختياري بـ`?page=`؛ فلاتر: `reference_type`، `date_from`/`date_to`، `search`، `account` (سطر على هذا الحساب — `Exists` بلا `distinct`)، `user` (منشئ القيد)). ويحمل كلُّ صفٍّ `reference_kind` (#214-ب): نوعُ المستند حين يخالف نوعَ مرجعه — مرتجعُ البيع قيدُه `SALES_INVOICE` كالبيعة حرفاً. يُقرأ من خريطة الفواتير التي تبنيها القائمةُ أصلاً (`accounting/serializers.py` (`journal_reference_kind`)) فلا استعلامَ إضافيّ، ويُرسَل دائماً ولو `None` |
 | GET | `journals/users/` | `JournalViewSet.journal_users` — خيارات فلتر «المستخدم» من قيود الشركة وحدها |
 | POST | `journals/{id}/post/` | `JournalViewSet.post_entry` — يتطلب `accounting.journal.post` |
 | POST | `journals/{id}/reverse/` | `JournalViewSet.reverse_entry` — يتطلب `accounting.journal.unpost` |
@@ -338,6 +338,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py` (`JournalLine`)).
 - **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py` (`post_journal`)).
 - **`JournalLine.account` بـ`PROTECT`** — لا يُحذف حساب له حركة، و`debit`/`credit` بقيدَي `CheckConstraint` غير سالبين (`accounting/models.py` (`JournalLine`)).
+- **اسمُ المستند في الدفتر يُشتقّ من نوعه لا من نوع مرجعه** (#214-ب): مرتجعُ البيع قيدُه `reference_type="SALES_INVOICE"` **كالبيعة حرفاً** لأنّه صفُّ `SalesInvoice` بنوعٍ آخر، وتغييرُ ذلك يمسّ مفتاحَ الـidempotency الذي يبني عليه فكُّ الترحيل وسلّةُ المحذوفات — فالتفرقةُ في طبقة العرض: `accounting/serializers.py` (`RETURN_KIND_LABELS`) مصدرٌ واحدٌ لاسمَي المرتجعين، يقرؤه `_get_source_label` و`build_journal_reference_summary`، ويطابق `frontend_v2/utils/documentTypeLabels.ts` (`invoiceKindLabel`) حرفاً. والمعجمُ (`core.terminology`) يبقى للبيعة وحدَها لأنّ اسمَها يتبدّل بقالب الشركة (ISSUE #82)، أمّا اسمُ المرتجع فثابت.
 - **كل قراءة مُنطاقة بالشركة**: `tenant is None ⇒ .none()` في `accounting/views.py` (`JournalViewSet`) و`accounting/views.py` (`AccountViewSet`).
 - **وكل مرساة تُكتب مُنطاقة بها أيضاً**: `get_queryset` يحمي القراءة وحدها، فحقول الـpk الكاتبة تُعلَن `TenantScopedPrimaryKeyRelatedField` (`core/api_defaults.py`) — أب الحساب (`accounting/serializers.py` (`AccountSerializer`)) وشريك السطر ومركز كلفته (`JournalLineSerializer`). معرّف شركة أخرى يعود «غير موجود»، فلا شجرةَ تُعلَّق تحت شركة غيرها ولا كشفَ لوجود المعرّف.
 - **الشيك لا يتحرك خارج جدول اتجاهه** — `accounting/services.py` (`INCOMING_TRANSITIONS`) و`accounting/services.py` (`OUTGOING_TRANSITIONS`) هما المصدر الواحد، و`accounting/services.py` (`transfer_cheque`) ترفض الانتقال غير المسموح، وترفض أي حركة على شيكٍ سندُه غير مرحّل، وتكتب `ChequeMovement` مربوطةً بقيدها. والورقة المظهَّرة لها مخرج واحد هو `bounce` (قيدٌ بين ذمّتين: العميل الساحب يعود مديناً والمستفيد تعود ذمّته، بلا مساس بحسابَي الشيكات).
@@ -375,6 +376,7 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
+| `accounting/tests/test_journal_return_naming.py` (#214-ب) | الدفترُ يفرّق المرتجعَ عن البيعة وهما بنفس `reference_type`، والبيعةُ العاديّةُ تحتفظ باسمها من معجم الشركة، والحقلُ يُرسَل دائماً ولو `None`، ومرتجعُ الشراء لا يخرج معرِّفاً إنجليزيّاً خاماً، **والتسميةُ بلا استعلامٍ إضافيّ** (عددُ الاستعلامات ثابتٌ مهما زاد عددُ المرتجعات) |
 | `accounting/tests/test_unpost_document.py` | حذف كل قيود مستند بحدوده وحده + إعادة حركات المخزون + الذرّية (324 سطر) |
 | `accounting/tests/test_banks_and_reconciliation.py` | البنوك والفروع والحسابات والمطابقة البنكية (296 سطر) |
 | `accounting/tests/test_cheque_outgoing_and_wallet.py` | إغلاق دورة الشيك الصادر + محفظة الشيكات |

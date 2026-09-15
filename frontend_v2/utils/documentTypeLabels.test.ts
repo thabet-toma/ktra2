@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
+  invoiceKindLabel,
   relatedInvoiceTypeLabel,
   stockLedgerMovementTypeLabel,
   stockMovementReferenceLabel,
@@ -37,4 +38,19 @@ test('يُبقي حركة المرتجع كما وصفها الخادم حتى �
   };
   assert.equal(stockLedgerMovementTypeLabel(movement), 'مرتجع داخل');
   assert.equal(stockMovementReferenceLabel({ ...movement, reference_type_display: 'بيع' }), 'مرتجع بيع');
+});
+
+// ‏#214-ب (بلاغُ المالك الثاني): «لما اضغط عليه بتبين كلمة فاتورة مبيعات
+// بالعنوان». الوجهُ المالي: كشفُ الحساب وعنوانُ نافذة التفاصيل يشتقّان الاسمَ
+// من `reference_type` — وقيدُ المرتجع يحمل `SALES_INVOICE` كالبيعة حرفاً.
+
+test('يسمّي مرتجع البيع باسمه حين يُعرف نوعه', () => {
+  assert.equal(invoiceKindLabel('sale_return'), 'مرتجع بيع');
+  assert.equal(invoiceKindLabel('purchase_return'), 'مرتجع شراء');
+});
+
+test('يعيد null لِما ليس مرتجعاً فيتابع المستدعي تسميته المعتادة', () => {
+  assert.equal(invoiceKindLabel('sale'), null);
+  assert.equal(invoiceKindLabel(undefined), null);
+  assert.equal(invoiceKindLabel(null), null);
 });

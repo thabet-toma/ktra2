@@ -134,6 +134,8 @@ export interface EmployeeCompensationPolicyRow {
   acquisition_commission_amount: string;
   acquisition_commission_months: number;
   accrual_day_of_month: number;
+  /** ‏#214-ج: شرحُ الشروط الذي يقرؤه **الموظّف** — غيرُ `activation_reason` المخصَّص للمدقّق. */
+  pay_terms_note: string;
   activation_reason: string;
   effective_from: string | null;
   effective_to: string | null;
@@ -152,6 +154,7 @@ export interface EmployeeCompensationPolicyDraftInput {
   acquisition_commission_amount?: string | number;
   acquisition_commission_months?: number;
   accrual_day_of_month?: number;
+  pay_terms_note?: string;
 }
 
 export const listEmployeeCompensationPolicies = async (

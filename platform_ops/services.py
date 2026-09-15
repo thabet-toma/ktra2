@@ -4064,6 +4064,7 @@ def _compensation_policy_event_details(policy: EmployeeCompensationPolicy) -> di
         "acquisition_commission_amount": str(policy.acquisition_commission_amount),
         "acquisition_commission_months": policy.acquisition_commission_months,
         "accrual_day_of_month": policy.accrual_day_of_month,
+        "pay_terms_note": policy.pay_terms_note,
     }
 
 
@@ -4116,6 +4117,7 @@ def get_employee_pay_terms(*, employee) -> dict:
             "acquisition_commission_amount": policy.acquisition_commission_amount,
             "acquisition_commission_months": policy.acquisition_commission_months,
             "accrual_day_of_month": policy.accrual_day_of_month,
+            "pay_terms_note": policy.pay_terms_note,
         }
         # «خاصّةٌ بي» أو «عامّةٌ للمنصّة» فرقٌ يقرؤه الموظّف لا زينةَ عرض:
         # عليه يعرف هل رقمُه متّفَقٌ عليه معه أم هو الافتراضُ الذي يسري للجميع.
@@ -4154,6 +4156,7 @@ def get_default_compensation_policy_dict() -> dict:
         "acquisition_commission_amount": Decimal(str(field("acquisition_commission_amount").default)),
         "acquisition_commission_months": field("acquisition_commission_months").default,
         "accrual_day_of_month": field("accrual_day_of_month").default,
+        "pay_terms_note": field("pay_terms_note").default,
     }
 
 
@@ -4167,6 +4170,7 @@ def create_employee_compensation_policy_draft(
     acquisition_commission_amount=_UNSET,
     acquisition_commission_months=_UNSET,
     accrual_day_of_month=_UNSET,
+    pay_terms_note=_UNSET,
     correlation_id: str = "",
     cloned_from=None,
 ) -> EmployeeCompensationPolicy:
@@ -4185,6 +4189,11 @@ def create_employee_compensation_policy_draft(
         acquisition_commission_months = field("acquisition_commission_months").default
     if accrual_day_of_month is _UNSET:
         accrual_day_of_month = field("accrual_day_of_month").default
+    if pay_terms_note is _UNSET:
+        pay_terms_note = field("pay_terms_note").default
+    # يُقَصّ ولا يُرفَض: نسخةُ سياسةٍ تُرفَض لأنّ شرحَها طويل تُضيّع الأرقامَ
+    # كلَّها معه — نفس قرار `create_applicant_invitation`.
+    pay_terms_note = str(pay_terms_note or "").strip()[:4000]
 
     base_salary = _validate_compensation_decimal(base_salary, "base_salary")
     daily_hours = _validate_compensation_decimal(daily_hours, "daily_hours")
@@ -4217,6 +4226,7 @@ def create_employee_compensation_policy_draft(
                 acquisition_commission_amount=acquisition_commission_amount,
                 acquisition_commission_months=acquisition_commission_months,
                 accrual_day_of_month=accrual_day_of_month,
+                pay_terms_note=pay_terms_note,
                 created_by=actor if getattr(actor, "pk", None) else None,
             )
     except IntegrityError:
@@ -4248,6 +4258,7 @@ def clone_employee_compensation_policy_to_draft(*, policy, actor=None, correlati
         acquisition_commission_amount=source.acquisition_commission_amount,
         acquisition_commission_months=source.acquisition_commission_months,
         accrual_day_of_month=source.accrual_day_of_month,
+        pay_terms_note=source.pay_terms_note,
         correlation_id=correlation_id,
         cloned_from=source,
     )
@@ -4258,6 +4269,7 @@ def update_employee_compensation_policy_draft(*, policy, actor=None, correlation
     allowed = {
         "employee", "base_salary", "daily_hours", "weekly_days",
         "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+        "pay_terms_note",
     }
     if set(changes) - allowed:
         raise EmployeeCompensationPolicyError("unsupported_field", "يوجد حقل سياسة غير مسموح بتعديله.")
@@ -4290,6 +4302,11 @@ def update_employee_compensation_policy_draft(*, policy, actor=None, correlation
     if not 1 <= accrual_day_of_month <= 28:
         raise EmployeeCompensationPolicyError("accrual_day_of_month", "يوم الاستحقاق بين 1 و28.")
 
+    # القَصُّ والتشذيبُ هنا كما في الإنشاء — لا في موضعٍ واحدٍ منهما: بابان
+    # يكتبان الحقلَ نفسَه، وقاعدةٌ في أحدهما وحدَه تعني أنّ التعديل يقبل ما
+    # يرفضه الإنشاء.
+    pay_terms_note = str(changes.get("pay_terms_note", locked.pay_terms_note) or "").strip()[:4000]
+
     locked.employee = employee
     locked.base_salary = base_salary
     locked.daily_hours = daily_hours
@@ -4297,9 +4314,13 @@ def update_employee_compensation_policy_draft(*, policy, actor=None, correlation
     locked.acquisition_commission_amount = acquisition_commission_amount
     locked.acquisition_commission_months = acquisition_commission_months
     locked.accrual_day_of_month = accrual_day_of_month
+    locked.pay_terms_note = pay_terms_note
+    # `update_fields` قائمةٌ مكتوبةٌ باليد: حقلٌ يُسنَد أعلاه ويُنسى هنا **يُكتب
+    # في الذاكرة ولا يصل القاعدة**، والنقطةُ تردّ ٢٠٠ وقد كتبت لا شيء. وقعت
+    # فعلاً في أوّل صياغةٍ لهذا التغيير، وأمسكها الاختبار.
     locked.save(update_fields=[
         "employee", "base_salary", "daily_hours", "weekly_days", "acquisition_commission_amount",
-        "acquisition_commission_months", "accrual_day_of_month", "updated_at",
+        "acquisition_commission_months", "accrual_day_of_month", "pay_terms_note", "updated_at",
     ])
     _log_compensation_policy_event(
         locked, action=EmployeeCompensationPolicyEvent.Action.UPDATED, actor=actor, correlation_id=correlation_id,
@@ -4314,6 +4335,7 @@ def preview_employee_compensation_policy(*, policy) -> dict:
     compared_fields = (
         "employee_id", "base_salary", "daily_hours", "weekly_days",
         "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+        "pay_terms_note",
     )
     diff = {}
     for field in compared_fields:

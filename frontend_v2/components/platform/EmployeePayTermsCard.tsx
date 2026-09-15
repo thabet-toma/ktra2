@@ -98,6 +98,16 @@ export const EmployeePayTermsCard: React.FC<{ employeeId: number }> = ({ employe
         </span>
       </div>
 
+      {/* ‏#214-ج (بلاغٌ ثانٍ للمالك): «الراتب لازم عليه شرح لأنو ممكن الأساسي
+          قليل ويكون عمولات عالتسويق، مو رقم وخلص». ويسبق الأرقامَ لا يتبعها:
+          رقمٌ صغيرٌ يُقرأ أوّلاً يُفهَم غلطاً قبل أن تصل عينُ القارئ إلى شرحه.
+          و`whitespace-pre-wrap` لأنّ المدير يكتب فقرات. */}
+      {(terms.pay_terms_note || "").trim() && (
+        <p className="mt-4 whitespace-pre-wrap rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs leading-relaxed text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-300">
+          {terms.pay_terms_note}
+        </p>
+      )}
+
       <div className="mt-4 rounded-xl bg-emerald-50 p-4 dark:bg-emerald-950/30">
         <p className="text-xs font-semibold text-emerald-800 dark:text-emerald-200">الراتب الأساسي الشهري</p>
         <p className="mt-1 text-2xl font-extrabold text-emerald-700 dark:text-emerald-300">

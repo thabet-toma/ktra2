@@ -8,6 +8,7 @@ import { useNavigate } from "react-router-dom";
 import { accountingApi } from "../../services/accountingApi";
 import { Plus, RefreshCw, Printer } from "lucide-react";
 import { invoicePathForReference } from "../../utils/entityLinks";
+import { invoiceKindLabel } from "../../utils/documentTypeLabels";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import {
   KitDenseTable,
@@ -23,6 +24,9 @@ export interface JournalListItem {
   transaction_date: string | null;
   description?: string | null;
   reference_type?: string | null;
+  // #214-ب: نوعُ المستند حين يخالف نوعَ المرجع — مرتجعُ البيع قيدُه
+  // `SALES_INVOICE` كالبيعة حرفاً، فبلا هذا الحقل يُسمّى باسمها.
+  reference_kind?: string | null;
   reference_id?: number | null;
   reference_summary?: string | null;
   deal_ref_number?: string | null;
@@ -51,11 +55,21 @@ const REF_LABELS: Record<string, string> = {
   SALES_DELIVERY_COGS: "تكلفة بضاعة مباعة",
   CUSTOMER_PAYMENT: "تحصيل عميل",
   PURCHASE_INVOICE: "فاتورة شراء",
+  // كان يسقط للمعرِّف الإنجليزيّ الخام: «PURCHASE_RETURN».
+  PURCHASE_RETURN: "مرتجع شراء",
   MANUAL: "قيد يدوي",
   // A3: القيد الذي وسمه المحاسب «تسوية» — نوع مرجع مستقل ليُصفّى وحده.
   ADJUSTMENT: "قيد تسوية",
 };
-function refLabel(rt: string | null | undefined, salesInvoiceTerm: string) {
+function refLabel(
+  rt: string | null | undefined,
+  salesInvoiceTerm: string,
+  invoiceKind?: string | null,
+) {
+  // المعجمُ يخصّ البيعةَ وحدَها (ISSUE #82)؛ أمّا المرتجع فاسمُه ثابتٌ ومصدرُه
+  // `invoiceKindLabel` — نفسُه في المحرّر والطباعة وكشف الحساب.
+  const kindLabel = invoiceKindLabel(invoiceKind);
+  if (kindLabel) return kindLabel;
   if (rt === "SALES_INVOICE") return salesInvoiceTerm;
   return REF_LABELS[rt || ""] || (rt ? rt : "عام / يدوي");
 }
@@ -267,7 +281,7 @@ export const AccountingJournalListPage: React.FC<Props> = ({
       render: (r) => {
         // task16 A6: مرجع فاتورة البيع/الشراء في القيد رابط يفتح الفاتورة
         const href = invoicePathForReference(r.reference_type, r.reference_id);
-        const label = `${refLabel(r.reference_type, term("doc.sales_invoice"))}${r.reference_id ? ` #${r.reference_id}` : ""}`;
+        const label = `${refLabel(r.reference_type, term("doc.sales_invoice"), r.reference_kind)}${r.reference_id ? ` #${r.reference_id}` : ""}`;
         if (!href) {
           return <span className="text-xs text-[var(--ktra-ink-soft)]">{label}</span>;
         }

@@ -36,9 +36,26 @@ type StockMovementReference = {
 const isReturnMovement = (movementType: string | null | undefined): boolean =>
   movementType === 'RETURN_IN' || movementType === 'RETURN_OUT';
 
+/**
+ * اسمُ نوع المستند من `invoice_kind` — **المرجعُ الوحيد** لتسمية المرتجع.
+ *
+ * يُعيد `null` لِما ليس مرتجعاً، فيتابع المستدعي تسميتَه المعتادة: القاعدةُ هنا
+ * تجيب عن سؤالٍ واحدٍ («هل هذا مرتجع، وما اسمه؟») ولا تحلّ محلّ معجم أسماء
+ * المستندات — اسمُ فاتورة المبيعات مُقنَّنٌ يتبدّل بقالب الشركة (`utils/terms.ts`)،
+ * والمرتجعُ لا يتبدّل.
+ *
+ * والاسمُ «مرتجع بيع» لا غيرُه: هو ما يكتبه محرّرُ المستند وصفحةُ الطباعة منذ
+ * ‏T-RETURNUI — واسمٌ ثانٍ لنفس الشيء في شاشةٍ ثالثة يُقرأ مستنداً آخر.
+ */
+export const invoiceKindLabel = (invoiceKind?: string | null): string | null => {
+  if (invoiceKind === 'sale_return') return 'مرتجع بيع';
+  if (invoiceKind === 'purchase_return') return 'مرتجع شراء';
+  return null;
+};
+
 export const relatedInvoiceTypeLabel = (invoice: RelatedInvoice): string => {
   if (invoice.document_type === 'SALES_INVOICE') {
-    return invoice.invoice_kind === 'sale_return' ? 'مرتجع بيع' : 'بيع';
+    return invoiceKindLabel(invoice.invoice_kind) ?? 'بيع';
   }
   return 'شراء';
 };

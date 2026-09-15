@@ -71,6 +71,8 @@ export interface EmployeePayTerms {
   acquisition_commission_amount: string;
   acquisition_commission_months: number;
   accrual_day_of_month: number;
+  /** شرحُ المدير للأرقام أعلاه — فارغٌ حين لا شرحَ مكتوب. */
+  pay_terms_note: string;
 }
 
 export const getEmployeePayTerms = (employeeId: number) =>

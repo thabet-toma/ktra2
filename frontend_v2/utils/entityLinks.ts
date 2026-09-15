@@ -5,6 +5,11 @@
  * نفسها. هذه الدالة تترجم (reference_type, reference_id) إلى مسار الفاتورة.
  * مصدر حقيقة واحد كي لا يتكرر منطق المطابقة في كل شاشة (DRY).
  */
+// ‏`.ts` صريحةً: هذا الملفّ يُستورَد من `entityLinks.test.ts` عبر `node --test`،
+// وهو محرّكُ ESM لا حزمةُ Vite — لا يحلّ امتداداً محذوفاً فيسقط الاختبارُ بـ
+// `ERR_MODULE_NOT_FOUND` لا بتأكيدٍ فاشل، فيبدو العطبُ في الاختبار لا في الاستيراد.
+import { invoiceKindLabel } from "./documentTypeLabels.ts";
+
 export function invoicePathForReference(
   referenceType?: string | null,
   referenceId?: number | null
@@ -81,11 +86,30 @@ export function platformNoteTarget(
  * كشف الحساب: تسمية عربية واضحة لنوع الحركة بدل رمز `reference_type` الإنجليزي الخام
  * (SALES_INVOICE / CUSTOMER_PAYMENT …). مصدر حقيقة واحد يخدم كشف الحساب ونافذة التفاصيل.
  */
-export function referenceTypeLabel(referenceType?: string | null): string {
+export function referenceTypeLabel(
+  referenceType?: string | null,
+  /**
+   * ‏#214-ب: نوعُ المستند حين يكون معلوماً (`reference_kind` في كشف الحساب).
+   *
+   * **بلاغُ المالك: «لما اضغط عليه بتبين كلمة فاتورة مبيعات بالعنوان».** وهو
+   * صحيح: قيدُ مرتجع البيع يُكتب بـ`reference_type="SALES_INVOICE"` **كالبيعة
+   * حرفاً** — لأنّه فعلاً صفُّ `SalesInvoice` بنوعٍ آخر — فكانت هذه الدالّةُ
+   * تسمّيه فاتورةَ مبيعات في كشف الحساب وفي عنوان نافذة التفاصيل.
+   *
+   * ولم يكن فرعُ `SALES_RETURN` أدناه يحرس شيئاً: **لا مستدعيَ يُنتج تلك
+   * القيمة أصلاً** — فرعٌ ميّتٌ بدا حارساً.
+   *
+   * والوسيطُ اختياريٌّ عمداً: للدالّة مستدعون لا يملكون النوع (كشفُ حسابٍ قديم،
+   * دفترُ اليومية)، وإلزامُهم به يكسرهم بلا فائدة — يبقى سلوكُهم كما كان.
+   */
+  invoiceKind?: string | null,
+): string {
   const t = (referenceType || "").toUpperCase();
   if (!t) return "حركة";
-  if (t.includes("SALES_RETURN")) return "مرتجع مبيعات";
-  if (t.includes("PURCHASE_RETURN")) return "مرتجع مشتريات";
+  const kindLabel = invoiceKindLabel(invoiceKind);
+  if (kindLabel) return kindLabel;
+  if (t.includes("SALES_RETURN")) return "مرتجع بيع";
+  if (t.includes("PURCHASE_RETURN")) return "مرتجع شراء";
   if (
     t.includes("SALES_INVOICE") ||
     t.includes("SALES_DELIVERY") ||

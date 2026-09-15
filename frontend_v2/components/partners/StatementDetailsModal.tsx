@@ -23,6 +23,8 @@ import { formatDateLocalized } from "../../utils/formatDate";
  */
 export interface StatementMovement {
   reference_type: string | null;
+  /** ‏#214-ب: نوعُ المستند (`sale` · `sale_return`) — القيدُ وحدَه لا يميّزهما. */
+  reference_kind?: string | null;
   reference_id: number | null;
   description: string;
   date: string | null;
@@ -85,7 +87,9 @@ export const StatementDetailsModal: React.FC<{
   if (!movement) return null;
 
   const path = invoicePathForReference(movement.reference_type, movement.reference_id);
-  const title = `${referenceTypeLabel(movement.reference_type)}${refId != null ? ` #${refId}` : ""}`;
+  // ‏#214-ب: **عنوانُ هذه النافذة هو موضعُ بلاغ المالك بعينه** — يضغط على صفّ
+  // المرتجع في كشف الحساب فيقرأ اسمَ فاتورة المبيعات فوق مستندٍ ليس فاتورة.
+  const title = `${referenceTypeLabel(movement.reference_type, movement.reference_kind)}${refId != null ? ` #${refId}` : ""}`;
 
   return (
     <div

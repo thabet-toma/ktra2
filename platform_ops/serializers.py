@@ -1714,6 +1714,7 @@ class EmployeeCompensationPolicySerializer(serializers.ModelSerializer):
             "id", "version", "status", "status_display", "effective_state", "employee", "employee_name",
             "base_salary", "daily_hours", "weekly_days",
             "acquisition_commission_amount", "acquisition_commission_months", "accrual_day_of_month",
+            "pay_terms_note",
             "activation_reason", "effective_from", "effective_to",
             "created_by", "activated_by", "activated_at", "created_at", "updated_at",
         ]
@@ -1731,6 +1732,9 @@ class DraftEmployeeCompensationPolicySerializer(serializers.Serializer):
     acquisition_commission_amount = serializers.DecimalField(max_digits=12, decimal_places=2, required=False)
     acquisition_commission_months = serializers.IntegerField(required=False, min_value=1)
     accrual_day_of_month = serializers.IntegerField(required=False, min_value=1, max_value=28)
+    #: ‏`allow_blank` لأنّ محوَ الشرح فعلٌ مقصودٌ كإثباته — وبدونها يردّ الحقلُ
+    #: الفارغ ٤٠٠ فلا يستطيع المديرُ سحبَ شرحٍ كتبه.
+    pay_terms_note = serializers.CharField(required=False, allow_blank=True, max_length=4000)
 
 
 class EmployeeSalaryLineSerializer(serializers.ModelSerializer):

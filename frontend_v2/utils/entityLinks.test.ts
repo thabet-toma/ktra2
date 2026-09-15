@@ -117,3 +117,19 @@ test("بلا تصنيف يبقى التعداد — ومجموعةٌ فارغة 
     `/product-group?ids=&name=${encodeURIComponent("بدون تصنيف")}`,
   );
 });
+
+// ── #214-ب: المرتجعُ في الوجه المالي ───────────────────────────────────────
+// قيدُ مرتجع البيع يُكتب بـ`reference_type="SALES_INVOICE"` **كالبيعة حرفاً**،
+// فكانت هذه الدالّةُ تسمّيه فاتورةَ مبيعات في كشف الحساب وفي عنوان نافذة
+// التفاصيل — وهو بلاغُ المالك: «لما اضغط عليه بتبين كلمة فاتورة مبيعات».
+test('مرتجع البيع لا يُسمّى فاتورة مبيعات حين يُعرف نوعه', () => {
+  assert.equal(referenceTypeLabel('SALES_INVOICE'), 'فاتورة مبيعات');
+  assert.equal(referenceTypeLabel('SALES_INVOICE', 'sale_return'), 'مرتجع بيع');
+  assert.equal(referenceTypeLabel('SALES_INVOICE', 'sale'), 'فاتورة مبيعات');
+});
+
+test('غياب النوع يُبقي السلوك القديم حرفياً — المستدعون الذين لا يملكونه لا ينكسرون', () => {
+  assert.equal(referenceTypeLabel('SALES_INVOICE', null), 'فاتورة مبيعات');
+  assert.equal(referenceTypeLabel('CUSTOMER_PAYMENT', undefined), 'سند قبض');
+  assert.equal(referenceTypeLabel(''), 'حركة');
+});

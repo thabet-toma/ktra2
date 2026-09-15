@@ -332,6 +332,7 @@ type CompDraft = {
   acquisition_commission_amount: string;
   acquisition_commission_months: string;
   accrual_day_of_month: string;
+  pay_terms_note: string;
 };
 
 function toCompDraft(row: EmployeeCompensationPolicyRow): CompDraft {
@@ -343,6 +344,7 @@ function toCompDraft(row: EmployeeCompensationPolicyRow): CompDraft {
     acquisition_commission_amount: row.acquisition_commission_amount,
     acquisition_commission_months: String(row.acquisition_commission_months),
     accrual_day_of_month: String(row.accrual_day_of_month),
+    pay_terms_note: row.pay_terms_note ?? "",
   };
 }
 
@@ -422,6 +424,7 @@ const CompensationPolicySection: React.FC = () => {
         acquisition_commission_amount: draft.acquisition_commission_amount,
         acquisition_commission_months: Number(draft.acquisition_commission_months),
         accrual_day_of_month: Number(draft.accrual_day_of_month),
+        pay_terms_note: draft.pay_terms_note,
       }),
       "تم حفظ المسودة.",
     );
@@ -523,6 +526,17 @@ const CompensationPolicySection: React.FC = () => {
                     </label>
                   ))}
                 </div>
+                <label className="block space-y-1 text-xs">
+                  <span className="text-slate-500">
+                    شرح شروط الصرف — يقرؤه الموظّف في صفحته الشخصيّة
+                  </span>
+                  <textarea
+                    className="ktra-input min-h-[68px] w-full py-1.5" rows={3} value={draft.pay_terms_note}
+                    disabled={!isDraft}
+                    placeholder="مثال: الأساسي 400 شيكل، وفوقه عمولة تسويق 5% على كل اشتراك تجلبه، وعمولة اكتساب 100 شيكل شهرياً لثلاثة أشهر عن كل شركة جديدة."
+                    onChange={(event) => updateDraft(row, { pay_terms_note: event.target.value })}
+                  />
+                </label>
                 <p className="text-[11px] text-slate-500">
                   سريان: {row.effective_from ? formatDateValue(row.effective_from) : "—"}
                   {row.effective_to && ` حتى ${formatDateValue(row.effective_to)}`}

@@ -5,7 +5,7 @@ import { apiGetObject } from '../../services/restApi';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
-import { relatedInvoiceTypeLabel } from '../../utils/documentTypeLabels';
+import { relatedInvoiceTypeLabel, stockMovementReferenceLabel } from '../../utils/documentTypeLabels';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { KitDocumentShell, KitTab } from '../kit';
 import { LedgerTable, DocRefCell, type LedgerColumn } from '../shared/LedgerTable';
@@ -83,6 +83,14 @@ interface StatementRow {
   balance_before?: string;
   /** رقم المستند حين تكون الحركة فاتورة. */
   document_number?: string | null;
+  /**
+   * ‏#214-ب: نوعُ المستند الحقيقيّ (`sale` · `sale_return`).
+   *
+   * قيدُ المرتجع يحمل `reference_type="SALES_INVOICE"` **كالبيعة حرفاً** لأنّه
+   * فعلاً صفُّ `SalesInvoice` بنوعٍ آخر — فبلا هذا الحقل لا تملك الشاشةُ ما
+   * تفرّق به، وتكتب اسمَ فاتورة المبيعات على المرتجع.
+   */
+  reference_kind?: string | null;
   /** مفتاح الربط: الفاتورة وسندها يتشاركانه ⇒ يُعرَضان متجاورين بإطار واحد. */
   link_key?: string | null;
   link_label?: string | null;
@@ -96,6 +104,7 @@ interface StockMovementGroup {
   movements: Array<{
     id: number;
     date: string | null;
+    movement_type: string | null;
     movement_type_label: string;
     product_name: string;
     warehouse: string | null;
@@ -420,7 +429,7 @@ export const PartnerProfilePage: React.FC = () => {
           <DocRefCell
             referenceType={r.reference_type}
             referenceId={r.reference_id}
-            label={`${referenceTypeLabel(r.reference_type)}${
+            label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
               r.document_number
                 ? ` ${r.document_number}`
                 : r.reference_id != null ? ` #${r.reference_id}` : ''
@@ -464,7 +473,7 @@ export const PartnerProfilePage: React.FC = () => {
         <DocRefCell
           referenceType={r.reference_type}
           referenceId={r.reference_id}
-          label={`${referenceTypeLabel(r.reference_type)}${
+          label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
             r.reference_id != null ? ` #${r.reference_id}` : ''
           }`}
         />
@@ -766,9 +775,11 @@ export const PartnerProfilePage: React.FC = () => {
                     <DocRefCell
                       referenceType={g.reference_type}
                       referenceId={g.reference_id}
-                      label={`${referenceTypeLabel(g.reference_type)}${
-                        g.reference_id != null ? ` #${g.reference_id}` : ''
-                      }`}
+                      label={`${stockMovementReferenceLabel({
+                        reference_type: g.reference_type,
+                        movement_type: g.movements[0]?.movement_type ?? null,
+                        reference_type_display: referenceTypeLabel(g.reference_type),
+                      })}${g.reference_id != null ? ` #${g.reference_id}` : ''}`}
                     />
                   </div>
                   <table className="w-full text-xs">

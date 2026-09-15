@@ -801,6 +801,9 @@ class PlatformEmployeeViewSet(viewsets.ReadOnlyModelViewSet):
             "acquisition_commission_amount": str(terms["acquisition_commission_amount"]),
             "acquisition_commission_months": terms["acquisition_commission_months"],
             "accrual_day_of_month": terms["accrual_day_of_month"],
+            # شرحُ المدير للأرقام أعلاه — بلاغُ المالك: «الراتب لازم عليه شرح
+            # لأنو ممكن الأساسي قليل ويكون عمولات عالتسويق، مو رقم وخلص».
+            "pay_terms_note": terms["pay_terms_note"],
         }, status=status.HTTP_200_OK)
 
 

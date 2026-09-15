@@ -3937,14 +3937,22 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
         invoice_ids.update(return_to_original.values())
 
     numbers: dict[int, str] = {}
+    #: نوعُ المستند الحقيقيُّ لكلّ معرّف — `sale` أو `sale_return` أو `purchase…`.
+    #: فارغةٌ للمورّد: `PurchaseInvoice` نموذجٌ لنوعٍ واحد، ومرتجعُ الشراء مستندٌ
+    #: آخرُ بنقطةٍ أخرى — فلا شيءَ هنا يلتبس باسم غيره.
+    kinds: dict[int, str] = {}
     if invoice_ids:
         if is_supplier:
             from logistics.models import PurchaseInvoice
             source = PurchaseInvoice.objects.filter(id__in=invoice_ids)
+            numbers = dict(source.values_list("id", "invoice_number"))
         else:
             from sales.models import SalesInvoice
             source = SalesInvoice.objects.filter(id__in=invoice_ids)
-        numbers = dict(source.values_list("id", "invoice_number"))
+            # عمودٌ ثالثٌ في الاستعلام نفسِه لا استعلامٌ ثانٍ.
+            for inv_id, number, kind in source.values_list("id", "invoice_number", "invoice_kind"):
+                numbers[inv_id] = number
+                kinds[inv_id] = kind
 
     for row in rows:
         ref_id = row["reference_id"]
@@ -3952,10 +3960,13 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
         row["link_key"] = None
         row["link_label"] = None
         row["link_count"] = 0
+        # ‏#214-ب: تُرسَل دائماً — حقلٌ يظهر أحياناً يجعل الواجهةَ تخمّن غيابَه.
+        row["reference_kind"] = None
         if not ref_id:
             continue
         if row["reference_type"] == invoice_type:
             row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
+            row["reference_kind"] = kinds.get(ref_id)
             # المرتجعُ يرسو على أصله؛ وغيرُه على نفسه كما كان.
             anchor_id = return_to_original.get(ref_id, ref_id)
             row["link_key"] = f"{invoice_type}:{anchor_id}"
