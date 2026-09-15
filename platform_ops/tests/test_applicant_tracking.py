@@ -42,6 +42,7 @@ from platform_ops.services import (
     issue_tracking_session,
     normalize_tracking_code,
     phones_match,
+    broadcast_applicant_notice,
     publish_applicant_notice,
     record_applicant_reply,
     resolve_applicant_tracking,
@@ -555,3 +556,157 @@ class TrackingRecruiterSurfaceTests(ApplicantTrackingBaseTests):
             ).count(),
             0,
         )
+
+
+class ApplicantBroadcastTests(ApplicantTrackingBaseTests):
+    """‏#216: الإرسالُ الجماعيّ — فعلٌ لا رجعةَ فيه على عشرات الناس."""
+
+    def setUp(self):
+        super().setUp()
+        self.screening = submit_application(
+            job=self.job, name="فرز أوّل", phone="0781111111"
+        )
+        transition_applicant_status(
+            applicant=self.screening, target_status=JobApplicant.Status.SCREENING
+        )
+        self.rejected = submit_application(
+            job=self.job, name="مرفوض", phone="0782222222"
+        )
+        transition_applicant_status(
+            applicant=self.rejected, target_status=JobApplicant.Status.REJECTED
+        )
+        self.other_job = create_job_posting(
+            title="مندوب", description="وصف", created_by=self.admin_user
+        )
+        self.stranger = submit_application(
+            job=self.other_job, name="إعلانٌ آخر", phone="0783333333"
+        )
+
+    def _bodies(self, applicant):
+        return list(
+            JobApplicantUpdate.objects.filter(
+                applicant=applicant, kind=JobApplicantUpdate.Kind.NOTICE
+            ).values_list("body", flat=True)
+        )
+
+    def test_one_row_per_person_not_one_shared_row(self):
+        """دفترُ كلٍّ منهم دفترُه: يردّ عليها وحدَه وتُحذَف نسختُه بلا مسّ غيره."""
+        sent = broadcast_applicant_notice(
+            job=self.job, body="تأجّلت المقابلات", actor=self.recruiter_user
+        )
+        self.assertEqual(sent, 2)  # المتقدّمُ الأصليّ + صاحبُ الفرز
+        self.assertEqual(self._bodies(self.applicant), ["تأجّلت المقابلات"])
+        self.assertEqual(self._bodies(self.screening), ["تأجّلت المقابلات"])
+
+    def test_the_closed_applications_are_spared_by_default(self):
+        """«تأجّلت المقابلات» تصل مرفوضاً جرحاً بلا سبب."""
+        broadcast_applicant_notice(
+            job=self.job, body="تأجّلت المقابلات", actor=self.recruiter_user
+        )
+        self.assertEqual(self._bodies(self.rejected), [])
+
+    def test_including_the_closed_is_possible_when_asked_explicitly(self):
+        sent = broadcast_applicant_notice(
+            job=self.job,
+            body="نتيجةٌ نهائيّة",
+            actor=self.recruiter_user,
+            include_closed=True,
+        )
+        self.assertEqual(sent, 3)
+        self.assertEqual(self._bodies(self.rejected), ["نتيجةٌ نهائيّة"])
+
+    def test_the_broadcast_never_crosses_into_another_job(self):
+        """«أرسل للكلّ» بلا حدٍّ تعني متقدّمي كلّ إعلانٍ في المنصّة."""
+        broadcast_applicant_notice(
+            job=self.job, body="رسالةُ الإعلان الأوّل", actor=self.recruiter_user
+        )
+        self.assertEqual(self._bodies(self.stranger), [])
+
+    def test_a_status_selection_is_honoured(self):
+        sent = broadcast_applicant_notice(
+            job=self.job,
+            body="لأهل الفرز",
+            statuses=[JobApplicant.Status.SCREENING],
+            actor=self.recruiter_user,
+        )
+        self.assertEqual(sent, 1)
+        self.assertEqual(self._bodies(self.screening), ["لأهل الفرز"])
+        self.assertEqual(self._bodies(self.applicant), [])
+
+    def test_an_unknown_status_is_refused_by_name_not_by_matching_nobody(self):
+        """فلترٌ مكتوبٌ غلطاً يطابق صفراً، فيُرفَع «لا يوجد متقدّم» — وهو **جوابٌ
+        صحيحٌ عن سؤالٍ خاطئ**: يخفي الغلطةَ الإملائيّةَ خلف نتيجةٍ تبدو معقولة.
+
+        فالتأكيدُ على **مفتاح** الخطأ لا على وقوعه: بلا ذلك يمرّ هذا الحارسُ
+        وهو لا يفحص التحقّقَ من الحالة إطلاقاً — جرّبتُه بتعطيل الفحص فمرّ.
+        """
+        with self.assertRaises(ValidationError) as caught:
+            broadcast_applicant_notice(
+                job=self.job, body="نصّ", statuses=["screeening"], actor=self.recruiter_user
+            )
+        self.assertIn("statuses", caught.exception.detail)
+
+    def test_an_empty_audience_is_an_error_not_a_silent_success(self):
+        with self.assertRaises(ValidationError):
+            broadcast_applicant_notice(
+                job=self.other_job,
+                body="نصّ",
+                statuses=[JobApplicant.Status.OFFERED],
+                actor=self.recruiter_user,
+            )
+
+    def test_the_broadcast_does_not_swallow_everyones_unread_replies(self):
+        """أختُها الفرديّةُ تُعلّم مقروءاً — وهذه إعلانٌ عامٌّ لم يقرأ أحدٌ به شيئاً."""
+        record_applicant_reply(applicant=self.applicant, body="سؤالٌ لم يُقرأ")
+        broadcast_applicant_notice(
+            job=self.job, body="إعلانٌ عامّ", actor=self.recruiter_user
+        )
+        self.assertEqual(
+            JobApplicantUpdate.objects.filter(
+                applicant=self.applicant,
+                author_kind=JobApplicantUpdate.AuthorKind.APPLICANT,
+                read_at__isnull=True,
+            ).count(),
+            1,
+        )
+
+    def test_the_link_rule_is_the_same_rule_as_the_single_send(self):
+        """نسخةٌ ثانيةٌ من الشروط تعني باباً يقبل غداً ما يرفضه الآخر."""
+        with self.assertRaises(ValidationError):
+            broadcast_applicant_notice(
+                job=self.job,
+                body="اضغط",
+                link="javascript:alert(1)",
+                actor=self.recruiter_user,
+            )
+
+    def test_the_endpoint_needs_a_job_and_belongs_to_the_recruiter(self):
+        outsider = User.objects.create_user(username="outsider216", password="Str0ng!Pass216")
+        url = "/api/platform/ops/job-applicants/broadcast/"
+
+        self.client.force_authenticate(user=outsider)
+        self.assertEqual(
+            self.client.post(url, {"job": self.job.pk, "body": "نصّ"}, format="json").status_code,
+            status.HTTP_403_FORBIDDEN,
+        )
+
+        self.client.force_authenticate(user=self.recruiter_user)
+        no_job = self.client.post(url, {"body": "نصّ"}, format="json")
+        self.assertEqual(no_job.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("job", no_job.data)
+
+        ok = self.client.post(url, {"job": self.job.pk, "body": "وصلت"}, format="json")
+        self.assertEqual(ok.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(ok.data["sent"], 2)
+
+    def test_the_whole_send_costs_a_bounded_number_of_queries(self):
+        """صفٌّ صفٌّ يعني مئةَ كتابةٍ لمئةِ متقدّم — و`bulk_create` واحدةٌ."""
+        for index in range(6):
+            submit_application(job=self.job, name=f"دفعة {index}", phone=f"07866000{index:02d}")
+
+        with CaptureQueriesContext(connection) as captured:
+            broadcast_applicant_notice(
+                job=self.job, body="رسالةٌ للجميع", actor=self.recruiter_user
+            )
+        # اختيارٌ + كتابةٌ واحدةٌ + غلافُ المعاملة — لا كتابةٌ لكلّ متقدّم
+        self.assertLessEqual(len(captured.captured_queries), 6, captured.captured_queries)

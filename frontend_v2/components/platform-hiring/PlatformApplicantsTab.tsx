@@ -13,6 +13,7 @@ import {
   applicantStatusBadgeClass,
   filterPlatformApplicants,
 } from "../../utils/platformHiring";
+import { PlatformApplicantBroadcastDialog } from "./PlatformApplicantBroadcastDialog";
 import { PlatformApplicantPanel } from "./PlatformApplicantPanel";
 
 interface PlatformApplicantsTabProps {
@@ -47,6 +48,7 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedApplicant, setSelectedApplicant] = useState<PlatformJobApplicant | null>(null);
+  const [showBroadcastDialog, setShowBroadcastDialog] = useState(false);
   const [hasLoaded, setHasLoaded] = useState(false);
   const [focusError, setFocusError] = useState<string | null>(null);
   /** الفلاتر التي **نتجت عنها** القائمةُ المحمَّلةُ الآن — لا التي في الحقول. */
@@ -107,6 +109,10 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
   const filteredApplicants = useMemo(() => {
     return filterPlatformApplicants(applicants, searchQuery);
   }, [applicants, searchQuery]);
+  const selectedBroadcastJob = useMemo(
+    () => jobs.find((job) => job.id === parseInt(jobFilter, 10)) ?? null,
+    [jobFilter, jobs],
+  );
 
   useEffect(() => {
     if (!isFocusPending || loading || !hasLoaded || loadError || focusApplicantId == null) return;
@@ -174,6 +180,16 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
           <span className="text-xs text-slate-500 dark:text-slate-400">
             {formatNumber(filteredApplicants.length)} من {formatNumber(applicants.length)} متقدم
           </span>
+          <button
+            type="button"
+            onClick={() => setShowBroadcastDialog(true)}
+            disabled={!jobFilter}
+            title={jobFilter ? "إرسال رسالة إلى متقدّمي الوظيفة المحددة" : "اختر وظيفة أولاً لإرسال رسالة جماعية"}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-blue-400"
+          >
+            <Users className="h-3.5 w-3.5" aria-hidden="true" />
+            رسالة جماعية
+          </button>
           <button
             type="button"
             onClick={() => void loadApplicants()}
@@ -299,6 +315,17 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
           setSelectedApplicant(updated);
         }}
       />
+      {showBroadcastDialog && selectedBroadcastJob && (
+        <PlatformApplicantBroadcastDialog
+          job={selectedBroadcastJob}
+          initialStatus={statusFilter}
+          onClose={() => setShowBroadcastDialog(false)}
+          onSent={() => {
+            setShowBroadcastDialog(false);
+            void loadApplicants();
+          }}
+        />
+      )}
     </div>
   );
 };

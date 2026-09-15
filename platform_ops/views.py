@@ -86,6 +86,7 @@ from .services import (
     invite_employees_to_meeting,
     list_assignment_candidates,
     rank_employees_performance,
+    broadcast_applicant_notice,
     mark_applicant_replies_read,
     publish_applicant_notice,
     rate_applicant,
@@ -3534,6 +3535,43 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
             .order_by("created_at", "id")
         )
         return Response({"results": JobApplicantUpdateSerializer(rows, many=True).data})
+
+    @action(detail=False, methods=["post"], url_path="broadcast")
+    def broadcast(self, request):
+        """رسالةٌ واحدةٌ إلى كلّ متقدّمي إعلانٍ — أو إلى حالةٍ منهم.
+
+        **مقصورةٌ على إعلانٍ واحد** (`job` إلزاميّ): «أرسل للكلّ» بلا حدٍّ تعني
+        متقدّمي كلّ إعلانٍ في المنصّة، وهو ما لا يريده أحدٌ ولا يُتراجَع عنه.
+        """
+        job_id = request.data.get("job")
+        job = JobPosting.objects.filter(pk=job_id).first() if job_id else None
+        if job is None:
+            return Response(
+                {"job": "الوظيفة المستهدَفة إلزامية."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw_statuses = request.data.get("statuses") or []
+        if isinstance(raw_statuses, str):
+            raw_statuses = [raw_statuses]
+        try:
+            sent = broadcast_applicant_notice(
+                job=job,
+                body=request.data.get("body") or "",
+                statuses=raw_statuses,
+                link=request.data.get("link") or "",
+                phone=request.data.get("phone") or "",
+                actor=request.user,
+                include_closed=bool(request.data.get("include_closed")),
+            )
+        except ValidationError as exc:
+            return Response(
+                exc.detail if hasattr(exc, "detail") else str(exc),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            {"detail": "تم إرسال الرسالة.", "sent": sent},
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="notice")
     def notice(self, request, pk=None):

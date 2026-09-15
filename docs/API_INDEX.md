@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **884**
+عدد النقاط: **885**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -643,6 +643,7 @@
 | `/api/platform/ops/integration-keys/{pk}/revoke/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/integration-keys/{pk}/rotate/` | `IntegrationKeyViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/broadcast/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/cv/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/invite/` | `JobApplicantViewSet` | `platform_ops/views.py` |

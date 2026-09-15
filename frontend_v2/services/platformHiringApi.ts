@@ -247,6 +247,23 @@ export const createPlatformApplicantNotice = (
   payload: { body: string; link?: string; phone?: string },
 ) => apiPostObject<PlatformApplicantUpdate>(`${OPS}/job-applicants/${id}/notice/`, payload);
 
+export interface PlatformApplicantBroadcastInput {
+  job: number;
+  body: string;
+  statuses?: string[];
+  include_closed?: boolean;
+  link?: string;
+  phone?: string;
+}
+
+export interface PlatformApplicantBroadcastResult {
+  detail: string;
+  sent: number;
+}
+
+export const broadcastPlatformApplicantNotice = (payload: PlatformApplicantBroadcastInput) =>
+  apiPostObject<PlatformApplicantBroadcastResult>(`${OPS}/job-applicants/broadcast/`, payload);
+
 export interface PlatformApplicantInvitationInput {
   expiresInHours: number;
   note?: string;

@@ -8003,6 +8003,32 @@ def record_applicant_status_update(
     )
 
 
+#: سقفُ المستقبِلين في الإرسالة الواحدة. فعلٌ لا رجعةَ فيه على مئاتِ الناس
+#: يستحقّ حدّاً: خطأٌ في اختيار الوظيفة أو الحالة يصير مئةَ رسالةٍ لا تُسحَب.
+BROADCAST_MAX_RECIPIENTS = 500
+
+
+def _clean_notice_payload(body: str, link: str, phone: str) -> tuple[str, str, str]:
+    """قواعدُ الرسالة في موضعٍ واحد — الفرديّةُ والجماعيّةُ تقرآنها معاً.
+
+    نسخةٌ ثانيةٌ من هذه الشروط تعني أنّ أحدَ البابين سيقبل غداً ما يرفضه الآخر.
+    """
+    clean_body = (body or "").strip()
+    if not clean_body:
+        raise ValidationError({"body": "نصُّ الرسالة إلزامي."})
+    if len(clean_body) > APPLICANT_MESSAGE_MAX_LENGTH:
+        raise ValidationError(
+            {"body": f"نصُّ الرسالة أطول من {APPLICANT_MESSAGE_MAX_LENGTH} حرف."}
+        )
+    clean_link = (link or "").strip()[:500]
+    if clean_link and not clean_link.lower().startswith(("http://", "https://")):
+        # ‏`URLField` يرفض `javascript:` — لكنّ `objects.create()` و`bulk_create`
+        # **لا يشغّلان مدقّقات الحقول أصلاً**، فالقيدُ المعلَن على العمود لا
+        # يحرس شيئاً هنا. والقيمةُ تُصيَّر `href` في صفحةٍ عامّة.
+        raise ValidationError({"link": "الرابط يجب أن يبدأ بـ http:// أو https://"})
+    return clean_body, clean_link, (phone or "").strip()[:40]
+
+
 def publish_applicant_notice(
     *,
     applicant: JobApplicant,
@@ -8017,31 +8043,83 @@ def publish_applicant_notice(
     الردُّ يُقرأ بالردّ: من كتب جواباً فقد قرأ السؤال، وزرُّ «علّم كمقروء»
     منفصلاً زرٌّ يُنسى فيبقى العدّادُ يصرخ على لا شيء.
     """
-    clean_body = (body or "").strip()
-    if not clean_body:
-        raise ValidationError({"body": "نصُّ الرسالة إلزامي."})
-    if len(clean_body) > APPLICANT_MESSAGE_MAX_LENGTH:
-        raise ValidationError(
-            {"body": f"نصُّ الرسالة أطول من {APPLICANT_MESSAGE_MAX_LENGTH} حرف."}
-        )
-    clean_link = (link or "").strip()[:500]
-    if clean_link and not clean_link.lower().startswith(("http://", "https://")):
-        # ‏`URLField` يرفض `javascript:` — لكنّ `objects.create()` **لا يشغّل
-        # مدقّقات الحقول أصلاً**، فالقيدُ المعلَن على العمود لا يحرس شيئاً هنا.
-        # والقيمةُ تُصيَّر `href` في صفحةٍ عامّة، فالفحصُ يقع في الخدمة أو لا يقع.
-        raise ValidationError({"link": "الرابط يجب أن يبدأ بـ http:// أو https://"})
+    clean_body, clean_link, clean_phone = _clean_notice_payload(body, link, phone)
     update = JobApplicantUpdate.objects.create(
         applicant=applicant,
         kind=JobApplicantUpdate.Kind.NOTICE,
         author_kind=JobApplicantUpdate.AuthorKind.TEAM,
         body=clean_body,
         link=clean_link,
-        phone=(phone or "").strip()[:40],
+        phone=clean_phone,
         author=actor if getattr(actor, "pk", None) else None,
         is_public=bool(is_public),
     )
     mark_applicant_replies_read(applicant=applicant)
     return update
+
+
+@transaction.atomic
+def broadcast_applicant_notice(
+    *,
+    job: JobPosting,
+    body: str,
+    statuses=None,
+    link: str = "",
+    phone: str = "",
+    actor=None,
+    include_closed: bool = False,
+) -> int:
+    """رسالةٌ واحدةٌ إلى كلّ متقدّمٍ يطابق الاختيار — ويعيد عددَ من وصلته.
+
+    **صفٌّ لكلّ شخصٍ لا صفٌّ مشترك:** يبقى دفترُ كلٍّ منهم دفترَه، فيردّ عليها
+    وحدَه، وتُحذَف نسخةُ واحدٍ بلا مسّ الباقين. والمشتركُ كان سيحتاج جدولَ ربطٍ
+    وحالةَ قراءةٍ لكلّ طرفٍ — أي هذا الجدولَ نفسَه بخطوةٍ زائدة.
+
+    **والمغلقةُ تُستثنى افتراضاً:** «تأجّلت المقابلات» تصل مرفوضاً جرحاً بلا
+    سبب. و`include_closed` يشملها لمن أرادها صراحةً (إعلانُ نتيجةٍ نهائيّة مثلاً).
+
+    **ولا يُعلَّم شيءٌ مقروءاً هنا** خلافاً لأختها الفرديّة: تلك جوابٌ على سؤالٍ
+    بعينه فقراءتُه مؤكّدة، وهذه إعلانٌ عامّ — وتعليمُها يبتلع ردودَ مئةِ شخصٍ
+    لم يقرأها أحد.
+    """
+    clean_body, clean_link, clean_phone = _clean_notice_payload(body, link, phone)
+
+    rows = JobApplicant.objects.filter(job=job)
+    if statuses:
+        declared = {value for value, _ in JobApplicant.Status.choices}
+        wanted = {str(value).strip() for value in statuses if str(value).strip()}
+        unknown = wanted - declared
+        if unknown:
+            raise ValidationError({"statuses": f"حالةٌ غير معروفة: {', '.join(sorted(unknown))}"})
+        rows = rows.filter(status__in=wanted)
+    if not include_closed:
+        rows = rows.exclude(status__in=APPLICANT_REPLY_CLOSED_STATUSES)
+
+    applicant_ids = list(rows.values_list("pk", flat=True))
+    if not applicant_ids:
+        raise ValidationError({"detail": "لا يوجد متقدّمٌ يطابق هذا الاختيار."})
+    if len(applicant_ids) > BROADCAST_MAX_RECIPIENTS:
+        raise ValidationError(
+            {"detail": f"الحدُّ الأقصى {BROADCAST_MAX_RECIPIENTS} متقدّماً في الإرسالة الواحدة."}
+        )
+
+    author = actor if getattr(actor, "pk", None) else None
+    JobApplicantUpdate.objects.bulk_create(
+        [
+            JobApplicantUpdate(
+                applicant_id=applicant_id,
+                kind=JobApplicantUpdate.Kind.NOTICE,
+                author_kind=JobApplicantUpdate.AuthorKind.TEAM,
+                body=clean_body,
+                link=clean_link,
+                phone=clean_phone,
+                author=author,
+                is_public=True,
+            )
+            for applicant_id in applicant_ids
+        ]
+    )
+    return len(applicant_ids)
 
 
 def record_applicant_reply(*, applicant: JobApplicant, body: str) -> JobApplicantUpdate:
