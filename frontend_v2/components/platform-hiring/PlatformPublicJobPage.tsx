@@ -8,6 +8,7 @@ import {
   Loader2,
   MapPin,
   Paperclip,
+  Search,
   Wallet,
   XCircle,
 } from "lucide-react";
@@ -299,14 +300,33 @@ export const PlatformPublicJobPage: React.FC = () => {
 
         {phase === "open" && job && !tracking && (
           <div className="space-y-5">
-            <div className="grid grid-cols-2 rounded-lg border border-slate-200 p-1 dark:border-slate-800" role="group" aria-label="خيارات الوظيفة">
-              <button type="button" aria-pressed={publicView === "apply"} onClick={() => setPublicView("apply")} className={`min-h-10 rounded-md px-2 text-xs font-bold transition ${publicView === "apply" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"}`}>التقديم على الوظيفة</button>
-              <button type="button" aria-pressed={publicView === "track"} onClick={() => setPublicView("track")} className={`min-h-10 rounded-md px-2 text-xs font-bold transition ${publicView === "track" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"}`}>قدّمت سابقاً؟ تابع طلبك</button>
+            {/* **البابان متساويان وواضحان من اللحظة الأولى.** كانا شريطاً
+                صغيراً: المختارُ أزرقُ ممتلئ، والآخرُ نصٌّ بلا إطارٍ ولا خلفيّة —
+                فيُقرأ عنواناً لا زرّاً، ولا يعرف من قدّم سابقاً أنّ له مدخلاً
+                هنا أصلاً حتى يضغط البابَ الآخر. والرابطُ يُفتَح مرّةً واحدةً من
+                فيسبوك: بابٌ لا يُرى بابٌ غيرُ موجود. */}
+            <div className="grid gap-2 sm:grid-cols-2" role="group" aria-label="ماذا تريد أن تفعل؟">
+              <Door
+                icon={<Briefcase className="h-4 w-4" />}
+                title="التقديم على الوظيفة"
+                hint="أرسل اسمك وسيرتك الذاتية"
+                active={publicView === "apply"}
+                onClick={() => setPublicView("apply")}
+              />
+              <Door
+                icon={<Search className="h-4 w-4" />}
+                title="قدّمتُ سابقاً — تابع طلبي"
+                hint="أدخل رقم التتبّع ورقم هاتفك"
+                active={publicView === "track"}
+                onClick={() => setPublicView("track")}
+              />
             </div>
 
-            {/* شرحُ الوظيفة فوق البابين معاً: المتابِعُ يحتاج أن يعرف على أيّ
-                وظيفةٍ يتابع، والمالكُ وصف الصفحةَ بأنّها «بتشرح عن الوظيفة
-                وشو حالة الطلب» — لا إحداهما. */}
+            {publicView === "apply" && <>
+            {/* **شرحُ الوظيفة في بابِ التقديم وحدَه.** من ضغط «قدّمتُ سابقاً»
+                قرأه فعلاً قبل أن يقدّم، وإعادتُه فوق حقلَي الرمز والهاتف تدفن
+                المدخلَ الذي جاء من أجله في آخر الصفحة. واسمُ الوظيفة يبقى في
+                سطرِ المتابعة، فيعرف على أيّ طلبٍ يدخل بلا أن يُقرئه إيّاه ثانيةً. */}
             <header className="space-y-2 pb-4 border-b border-slate-200 dark:border-slate-800">
               <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">التوظيف · فريق منصة K.T.R.A</p>
               <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
@@ -346,7 +366,6 @@ export const PlatformPublicJobPage: React.FC = () => {
               )}
             </header>
 
-            {publicView === "apply" && <>
             <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
               <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">التقديم على الوظيفة</h2>
 
@@ -451,7 +470,9 @@ export const PlatformPublicJobPage: React.FC = () => {
               <form onSubmit={handleTrackingLogin} className="space-y-3.5" noValidate>
                 <div className="space-y-1">
                   <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">متابعة طلبك</h1>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">أدخل رقم التتبّع ورقم الهاتف اللذين قدّمتهما.</p>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">
+                    وظيفة «{job.title}» — أدخل رقمَ التتبّع ورقمَ الهاتف اللذين قدّمتَ بهما.
+                  </p>
                 </div>
                 <div>
                   <label htmlFor="tracking-reference" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">رقم التتبّع</label>
@@ -473,6 +494,40 @@ export const PlatformPublicJobPage: React.FC = () => {
     </div>
   );
 };
+
+const Door: React.FC<{
+  icon: React.ReactNode;
+  title: string;
+  hint: string;
+  active: boolean;
+  onClick: () => void;
+}> = ({ icon, title, hint, active, onClick }) => (
+  <button
+    type="button"
+    aria-pressed={active}
+    onClick={onClick}
+    className={`flex items-start gap-2 rounded-xl border-2 p-3 text-right transition ${
+      active
+        ? "border-blue-600 bg-blue-50 dark:border-blue-400 dark:bg-blue-950/40"
+        : "border-slate-200 bg-white hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-slate-600"
+    }`}
+  >
+    <span
+      className={`mt-0.5 flex-shrink-0 ${active ? "text-blue-600 dark:text-blue-300" : "text-slate-500 dark:text-slate-400"}`}
+      aria-hidden="true"
+    >
+      {icon}
+    </span>
+    <span>
+      <span
+        className={`block text-xs font-bold ${active ? "text-blue-800 dark:text-blue-200" : "text-slate-700 dark:text-slate-200"}`}
+      >
+        {title}
+      </span>
+      <span className="mt-0.5 block text-[11px] text-slate-500 dark:text-slate-400">{hint}</span>
+    </span>
+  </button>
+);
 
 const Notice: React.FC<{ icon: React.ReactNode; title: string; body: string; action?: React.ReactNode }> = ({
   icon,
