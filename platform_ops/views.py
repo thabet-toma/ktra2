@@ -86,6 +86,8 @@ from .services import (
     invite_employees_to_meeting,
     list_assignment_candidates,
     rank_employees_performance,
+    mark_applicant_replies_read,
+    publish_applicant_notice,
     rate_applicant,
     record_meeting_attendee,
     receive_channel_work_order,
@@ -203,6 +205,7 @@ from .models import (
     EmployeeSalaryLine,
     IntegrationKey,
     JobApplicant,
+    JobApplicantUpdate,
     JobPosting,
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
@@ -262,6 +265,7 @@ from .serializers import (
     SubmitMeetingExcuseSerializer,
     UpdatePlatformMeetingSerializer,
     JobApplicantSerializer,
+    JobApplicantUpdateSerializer,
     JobPostingSerializer,
     PerformanceSnapshotSerializer,
     PlatformActivityLogSerializer,
@@ -3492,7 +3496,19 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = JobApplicantSerializer
 
     def get_queryset(self):
-        qs = JobApplicant.objects.select_related("job", "hired_employee__user").order_by("-created_at")
+        qs = JobApplicant.objects.select_related("job", "hired_employee__user").annotate(
+            # ‏#215: شارةُ الردّ غيرِ المقروء. `annotate` لا `SerializerMethodField`
+            # يستعلم: القائمةُ تعرض عشراتِ الصفوف، واستعلامٌ لكلّ صفٍّ هو عطبُ
+            # N+1 نفسُه الذي أُصلح مرّتين في هذا المستودع.
+            unread_reply_count=Count(
+                "updates",
+                filter=Q(
+                    updates__author_kind=JobApplicantUpdate.AuthorKind.APPLICANT,
+                    updates__read_at__isnull=True,
+                ),
+                distinct=True,
+            )
+        ).order_by("-created_at")
         job_id = self.request.query_params.get("job") or self.request.query_params.get("job_id")
         if job_id:
             qs = qs.filter(job_id=job_id)
@@ -3500,6 +3516,46 @@ class JobApplicantViewSet(viewsets.ReadOnlyModelViewSet):
         if status_filter:
             qs = qs.filter(status=status_filter)
         return qs
+
+    @action(detail=True, methods=["get"], url_path="updates")
+    def updates(self, request, pk=None):
+        """دفترُ المتقدّم كاملاً — المنشورُ والمحجوبُ معاً، لفريق التوظيف.
+
+        **وفتحُه يُعلّم ردودَ المتقدّم مقروءةً.** أثرٌ جانبيٌّ على `GET` مقصودٌ
+        ومحدود: البديلُ زرُّ «علّم كمقروء» يُنسى فتبقى الشارةُ تصرخ على رسالةٍ
+        قُرئت، أو ربطُ القراءة بالردّ وحدَه فتبقى الشارةُ على من لا يحتاج رداً.
+        والبابُ محروسٌ بـ`IsPlatformRecruiter` فلا زاحفَ يبلغه.
+        """
+        applicant = self.get_object()
+        mark_applicant_replies_read(applicant=applicant)
+        rows = (
+            JobApplicantUpdate.objects.filter(applicant=applicant)
+            .select_related("author")
+            .order_by("created_at", "id")
+        )
+        return Response({"results": JobApplicantUpdateSerializer(rows, many=True).data})
+
+    @action(detail=True, methods=["post"], url_path="notice")
+    def notice(self, request, pk=None):
+        """رسالةٌ إلى المتقدّم يقرؤها في صفحة متابعته."""
+        applicant = self.get_object()
+        try:
+            update = publish_applicant_notice(
+                applicant=applicant,
+                body=request.data.get("body") or "",
+                link=request.data.get("link") or "",
+                phone=request.data.get("phone") or "",
+                actor=request.user,
+            )
+        except ValidationError as exc:
+            return Response(
+                exc.detail if hasattr(exc, "detail") else str(exc),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            JobApplicantUpdateSerializer(update).data,
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(detail=True, methods=["post"], url_path="transition-status")
     def transition_status(self, request, pk=None):

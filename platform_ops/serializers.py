@@ -26,6 +26,7 @@ from .models import (
     PerformanceReviewRequest,
     JobApplicant,
     JobApplicantInvitation,
+    JobApplicantUpdate,
     JobPosting,
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
@@ -925,6 +926,8 @@ class JobApplicantSerializer(serializers.ModelSerializer):
     job_title = serializers.CharField(source="job.title", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     has_cv = serializers.SerializerMethodField()
+    #: ‏#215: شارةُ «ردٌّ لم يُقرأ» على صفّ المتقدّم في القائمة.
+    unread_reply_count = serializers.SerializerMethodField()
     #: الانتقالاتُ المسموحةُ من الحالة الحاليّة — **من جدول الخادم الوحيد**
     #: (`APPLICANT_TRANSITIONS`) لا من نسخةٍ في الواجهة تتباعد عنه بصمت. و«مقبول»
     #: مستبعَدةٌ منها: تُبلَغ بقبول المتقدّم للدعوة لا بزرّ.
@@ -949,6 +952,7 @@ class JobApplicantSerializer(serializers.ModelSerializer):
             "cv_name",
             "hired_employee",
             "next_statuses",
+            "unread_reply_count",
             "created_at",
             "updated_at",
         ]
@@ -967,12 +971,19 @@ class JobApplicantSerializer(serializers.ModelSerializer):
             "has_cv",
             "hired_employee",
             "next_statuses",
+            "unread_reply_count",
             "created_at",
             "updated_at",
         ]
 
     def get_has_cv(self, obj) -> bool:
         return bool(obj.cv_url)
+
+    def get_unread_reply_count(self, obj) -> int:
+        # ‏#215: القيمةُ مُحسَّبةٌ في `get_queryset` بـ`annotate`. والاحتياطيُّ
+        # هنا صفرٌ لا استعلام: نداءٌ واحدٌ لكلّ صفٍّ يعيد عطبَ N+1 الذي أُصلح
+        # مرّتين في هذا المستودع، ولا يمسكه إلا عدُّ استعلامات.
+        return int(getattr(obj, "unread_reply_count", 0) or 0)
 
     def get_next_statuses(self, obj) -> list[dict]:
         from .services import APPLICANT_TRANSITIONS
@@ -1837,3 +1848,41 @@ class ApplicantMeetingSerializer(serializers.ModelSerializer):
             "attendees", "attendee_count", "created_at", "updated_at",
         ]
         read_only_fields = fields
+
+
+class JobApplicantUpdateSerializer(serializers.ModelSerializer):
+    """سطرُ دفتر المتقدّم كما يراه فريقُ التوظيف — بـ`is_public` واسمِ الكاتب.
+
+    يخالف نظيرَه العامَّ (`public_hiring/serializers.py`) في حقلين عمداً: العلَمُ
+    يُظهر ما حُجب، والاسمُ يقول مَن كتب — وكلاهما معلومةُ فريقٍ لا معلومةُ متقدّم.
+    """
+
+    author_name = serializers.SerializerMethodField()
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    author_kind_display = serializers.CharField(source="get_author_kind_display", read_only=True)
+
+    class Meta:
+        model = JobApplicantUpdate
+        fields = [
+            "id",
+            "kind",
+            "kind_display",
+            "author_kind",
+            "author_kind_display",
+            "body",
+            "link",
+            "phone",
+            "is_public",
+            "from_status",
+            "to_status",
+            "author_name",
+            "read_at",
+            "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_author_name(self, obj) -> str:
+        user = obj.author
+        if user is None:
+            return ""
+        return (user.get_full_name() or user.username or "").strip()

@@ -18,6 +18,8 @@ import secrets
 
 from django.conf import settings
 from django.contrib.auth.models import User
+from django.core import signing
+from django.core.cache import cache
 from django.db import IntegrityError, models, transaction
 from django.db.models import Avg, Count, Max, Q, Sum
 from django.utils import timezone
@@ -50,6 +52,7 @@ from .models import (
     IntegrationKey,
     JobApplicant,
     JobApplicantInvitation,
+    JobApplicantUpdate,
     JobPosting,
     MonthlyCompensationClose,
     PerformanceEvaluationPolicy,
@@ -1342,6 +1345,14 @@ class JobGone(Exception):
 
 class InvitationGone(Exception):
     """رابط الدعوة مستهلك أو منتهي الصلاحية (410)."""
+
+
+class TrackingSessionExpired(Exception):
+    """جلسةُ متابعة المتقدّم انتهت أو عُبث بتوقيعها (401) — #215."""
+
+
+class ApplicantReplyClosed(Exception):
+    """الطلبُ أُغلق فلم يعد يقبل ردّاً (403) — #215."""
 
 
 
@@ -7696,7 +7707,7 @@ def submit_application(
     for _ in range(5):
         try:
             with transaction.atomic():
-                return JobApplicant.objects.create(
+                applicant = JobApplicant.objects.create(
                     job=job,
                     name=clean_name,
                     phone=clean_phone,
@@ -7707,6 +7718,14 @@ def submit_application(
                     status=JobApplicant.Status.NEW,
                     reference_code=secrets.token_hex(4).upper(),
                 )
+                # ‏#215: سطرٌ أوّلُ في دفتره، وإلّا فتح صفحةَ متابعته على فراغٍ
+                # لا يقول له إن كان طلبُه وصل أصلاً.
+                record_applicant_status_update(
+                    applicant=applicant,
+                    from_status="",
+                    to_status=JobApplicant.Status.NEW,
+                )
+                return applicant
         except IntegrityError:
             continue
     raise ValidationError({"detail": "تعذّر تسجيل الطلب، حاول مرة أخرى."})
@@ -7755,8 +7774,18 @@ def transition_applicant_status(
             inv.revoked_at = now
             inv.save(update_fields=["revoked_at"])
 
+    previous_status = locked_applicant.status
     locked_applicant.status = target_status
     locked_applicant.save(update_fields=["status", "updated_at"])
+    # ‏#215: الحالةُ عمودٌ يُكتب فوقه، فبلا هذا السطر لا تاريخَ للمراحل إطلاقاً.
+    # ويُكتب **داخل** القفل: صفٌّ يُكتب بعد تحرّره قد يسبقه انتقالٌ آخر فيقلب
+    # ترتيبَ الدفتر الذي يقرؤه صاحبُه.
+    record_applicant_status_update(
+        applicant=locked_applicant,
+        from_status=previous_status,
+        to_status=target_status,
+        actor=actor,
+    )
     applicant.status = locked_applicant.status
     applicant.updated_at = locked_applicant.updated_at
     return locked_applicant
@@ -7784,6 +7813,292 @@ def rate_applicant(
         fields.append("notes")
     applicant.save(update_fields=fields)
     return applicant
+
+
+# ==============================================================================
+# التذكرة #215: صفحةُ متابعةِ المتقدّم — دفترُ التحديثات والبابُ العامّ
+# ==============================================================================
+
+
+class TrackingDenied(Exception):
+    """رقمُ التتبّع أو الهاتفُ لا يطابق — **سببٌ واحدٌ معلَنٌ لكلّ الأسباب**.
+
+    التمييزُ بين «رمزٌ غيرُ موجود» و«رمزٌ صحيحٌ بهاتفٍ خاطئ» يحوّل الصفحةَ إلى
+    عرّافٍ يؤكّد وجودَ الرموز لمن يجرّبها — ورابطُ الإعلان منشورٌ على فيسبوك
+    عمداً (#214-أ) فالرمزُ هو الحارسُ الوحيد. لذلك استثناءٌ واحدٌ بنصٍّ واحد.
+    """
+
+
+#: نصُّ الرفض الموحَّد. مصدرٌ واحدٌ كي لا يتباعد نصّان فيصيرا فرقاً يُقرأ.
+TRACKING_DENIED_DETAIL = "رقمُ التتبّع أو رقمُ الهاتف غير صحيح."
+
+#: بعد هذا العدد من المحاولات الفاشلة على **الرمز نفسِه** يُغلق البابُ ساعةً.
+#: الخانقُ على عنوان الشبكة لا يكفي وحدَه: مهاجمٌ يعرف رمزاً صحيحاً ويجرّب
+#: الهواتفَ من ألف عنوانٍ لا يبلغ حدَّ أيٍّ منها. والعدّادُ على الرمز يوقفه.
+#:
+#: **وهو مطبٌّ لا سور، ويُقال صراحةً:** يسكن الذاكرةَ المؤقّتة، و`CACHES` في
+#: الإنتاج تحمل `IGNORE_EXCEPTIONS: True` — فانقطاعُ Redis يُسقط العدّادَ
+#: بصمتٍ ولا يُسقط الطلب. الضمانُ الحقيقيُّ هو اشتراطُ العاملين نفسُه؛ هذا
+#: يضيّق نافذةَ التخمين ولا يغلقها، فلا يُبنى عليه أكثرُ من ذلك.
+TRACKING_FAILURE_LIMIT = 10
+TRACKING_FAILURE_WINDOW_SECONDS = 3600
+
+#: عمرُ جلسة المتابعة. قصيرٌ عمداً: الصفحةُ تُفتَح على هاتفٍ قد يُترَك مفتوحاً.
+TRACKING_SESSION_MAX_AGE = 30 * 60
+TRACKING_SESSION_SALT = "platform_ops.careers.track"
+
+#: سقفُ نصّ الرسالة الواحدة — يطابق ما يعلنه المُسلسِل.
+APPLICANT_MESSAGE_MAX_LENGTH = 4000
+
+#: نصُّ الحالة **كما يقرؤه المتقدّم**، لا كما يقرؤها فريقُ التوظيف.
+#: مصدرٌ واحدٌ هنا لا قاموسٌ ثانٍ في الواجهة (قاعدةُ «النصُّ يخرج مع رمزه»).
+#: و«مرفوض» تُكتب له بصيغةٍ لا تُهين: الحقيقةُ نفسُها بلا كلمةٍ تبقى على شاشته.
+APPLICANT_PUBLIC_STATUS_LABELS = {
+    JobApplicant.Status.NEW: "تمّ استلامُ طلبك",
+    JobApplicant.Status.SCREENING: "طلبُك قيدَ الفرز",
+    JobApplicant.Status.INTERVIEW: "طلبُك في مرحلة المقابلات",
+    JobApplicant.Status.OFFERED: "قُدّم لك عرضُ عمل",
+    JobApplicant.Status.HIRED: "تمّ قبولُك — أهلاً بك",
+    JobApplicant.Status.REJECTED: "لم يقع الاختيارُ على ملفّك هذه المرّة",
+}
+
+#: طلبٌ أُغلق: يُقرأ للأبد ولا يُكتب فيه. وإلّا صار صندوقَ بريدٍ لمئات
+#: المرفوضين لا يقرؤه أحد — وبابٌ مفتوحٌ لا يُجاب أسوأُ من بابٍ مغلقٍ بوضوح.
+APPLICANT_REPLY_CLOSED_STATUSES = {
+    JobApplicant.Status.HIRED,
+    JobApplicant.Status.REJECTED,
+}
+
+#: أرقامٌ عربيّةٌ وفارسيّةٌ إلى لاتينيّة. المتقدّمُ يكتب هاتفَه بلوحة مفاتيحه
+#: العربيّة فيصل «٠٧٩…» ولا يطابق «079…» أبداً وهو الرقمُ نفسُه.
+_EASTERN_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def applicant_public_status_label(status: str) -> str:
+    """نصُّ الحالة للمتقدّم، وإلّا فنصُّ `choices` كما هو."""
+    key = (status or "").strip()
+    if key in APPLICANT_PUBLIC_STATUS_LABELS:
+        return APPLICANT_PUBLIC_STATUS_LABELS[key]
+    return dict(JobApplicant.Status.choices).get(key, key)
+
+
+def normalize_tracking_code(value) -> str:
+    """رقمُ التتبّع كما يُخزَّن: حروفٌ وأرقامٌ بحالةٍ كبيرة.
+
+    يُقرأ من ورقةٍ أو رسالة، فيصل بمسافاتٍ أو شرطاتٍ أو بحروفٍ صغيرة.
+    """
+    raw = str(value or "").translate(_EASTERN_DIGITS)
+    return "".join(ch for ch in raw if ch.isalnum()).upper()
+
+
+def normalize_phone_digits(value) -> str:
+    """أرقامُ الهاتف وحدَها — بلا مسافةٍ ولا شرطةٍ ولا `+`."""
+    raw = str(value or "").translate(_EASTERN_DIGITS)
+    return "".join(ch for ch in raw if ch in "0123456789")
+
+
+def phones_match(entered, stored) -> bool:
+    """هل الرقمان رقمٌ واحد؟ مقارنةٌ على آخر تسع خاناتٍ حين يكفيان.
+
+    «+962791234567» و«0791234567» رقمٌ واحدٌ يكتبه صاحبُه بالشكلين، ومطابقةٌ
+    حرفيّةٌ ترفض صاحبَ الطلب نفسَه. وتسعٌ لا خمسٌ: الأقصرُ يجمع أرقاماً مختلفة.
+    """
+    entered_digits = normalize_phone_digits(entered)
+    stored_digits = normalize_phone_digits(stored)
+    if not entered_digits or not stored_digits:
+        return False
+    span = min(9, len(entered_digits), len(stored_digits))
+    if span < 9:
+        return secrets.compare_digest(entered_digits, stored_digits)
+    return secrets.compare_digest(entered_digits[-span:], stored_digits[-span:])
+
+
+def _tracking_failure_key(code: str) -> str:
+    return f"platform_ops:careers:track_fail:{code}"
+
+
+def _record_tracking_failure(code: str) -> None:
+    """عدّادُ فشلٍ على الرمز. الذاكرةُ المؤقّتةُ تكفي: القفلُ ساعةٌ لا سجلٌّ دائم."""
+    key = _tracking_failure_key(code)
+    try:
+        cache.add(key, 0, TRACKING_FAILURE_WINDOW_SECONDS)
+        cache.incr(key)
+    except ValueError:
+        # المفتاحُ انتهى بين `add` و`incr` — محاولةٌ واحدةٌ ضاعت من العدّاد
+        # ولا أثرَ لها على الصحّة.
+        cache.set(key, 1, TRACKING_FAILURE_WINDOW_SECONDS)
+
+
+def resolve_applicant_tracking(*, job_token: str, reference_code, phone) -> JobApplicant:
+    """المتقدّمُ صاحبُ هذا الرمز على هذه الوظيفة، بعد إثبات الهاتف.
+
+    يرفع `TrackingDenied` **لكلّ** سببٍ: رمزٌ فارغ، رمزٌ معدوم، رمزٌ من وظيفةٍ
+    أخرى، هاتفٌ مخالف، أو عدّادُ فشلٍ بلغ حدَّه. لا يميّز المستدعي بينها.
+    """
+    code = normalize_tracking_code(reference_code)
+    if not code:
+        raise TrackingDenied(TRACKING_DENIED_DETAIL)
+
+    failures = cache.get(_tracking_failure_key(code)) or 0
+    if failures >= TRACKING_FAILURE_LIMIT:
+        raise TrackingDenied(TRACKING_DENIED_DETAIL)
+
+    applicant = (
+        JobApplicant.objects.select_related("job")
+        .filter(reference_code=code, job__token=(job_token or "").strip())
+        .first()
+    )
+    if applicant is None or not phones_match(phone, applicant.phone):
+        _record_tracking_failure(code)
+        raise TrackingDenied(TRACKING_DENIED_DETAIL)
+    return applicant
+
+
+def issue_tracking_session(applicant: JobApplicant) -> str:
+    """جلسةُ متابعةٍ موقَّعةٌ قصيرةُ العمر — **بلا صفٍّ في القاعدة**.
+
+    الرمزُ المهشَّرُ في جدولٍ هو نمطُ `docshare` و`DailyRatingToken`، وهما
+    رابطان يُرسَلان ويُبطَلان. وهذه جلسةُ نصفِ ساعةٍ تُولَد بعد إثباتِ عاملين،
+    فجدولٌ لها صفوفٌ تتراكم بلا قارئٍ وعمليّةُ كنسٍ لا تحرس شيئاً.
+    """
+    return signing.dumps({"applicant": applicant.pk}, salt=TRACKING_SESSION_SALT)
+
+
+def resolve_tracking_session(session: str) -> JobApplicant:
+    """المتقدّمُ صاحبُ الجلسة، أو `TrackingSessionExpired` إن انتهت أو عُبث بها."""
+    try:
+        payload = signing.loads(
+            str(session or ""),
+            salt=TRACKING_SESSION_SALT,
+            max_age=TRACKING_SESSION_MAX_AGE,
+        )
+    except signing.BadSignature:
+        raise TrackingSessionExpired("انتهت الجلسة. أدخل رقمك مرّةً أخرى.")
+    applicant = (
+        JobApplicant.objects.select_related("job")
+        .filter(pk=payload.get("applicant")).first()
+    )
+    if applicant is None:
+        raise TrackingSessionExpired("انتهت الجلسة. أدخل رقمك مرّةً أخرى.")
+    return applicant
+
+
+def record_applicant_status_update(
+    *,
+    applicant: JobApplicant,
+    from_status: str,
+    to_status: str,
+    actor=None,
+) -> JobApplicantUpdate:
+    """صفُّ مرحلةٍ في دفتر المتقدّم — يُكتب مع الانتقال لا بعده."""
+    return JobApplicantUpdate.objects.create(
+        applicant=applicant,
+        kind=JobApplicantUpdate.Kind.STATUS,
+        author_kind=JobApplicantUpdate.AuthorKind.SYSTEM,
+        body=applicant_public_status_label(to_status),
+        from_status=(from_status or "").strip(),
+        to_status=(to_status or "").strip(),
+        author=actor if getattr(actor, "pk", None) else None,
+        is_public=True,
+    )
+
+
+def publish_applicant_notice(
+    *,
+    applicant: JobApplicant,
+    body: str,
+    link: str = "",
+    phone: str = "",
+    actor=None,
+    is_public: bool = True,
+) -> JobApplicantUpdate:
+    """رسالةٌ من فريق التوظيف إلى المتقدّم، ويُعلَّم ردُّه مقروءاً بها.
+
+    الردُّ يُقرأ بالردّ: من كتب جواباً فقد قرأ السؤال، وزرُّ «علّم كمقروء»
+    منفصلاً زرٌّ يُنسى فيبقى العدّادُ يصرخ على لا شيء.
+    """
+    clean_body = (body or "").strip()
+    if not clean_body:
+        raise ValidationError({"body": "نصُّ الرسالة إلزامي."})
+    if len(clean_body) > APPLICANT_MESSAGE_MAX_LENGTH:
+        raise ValidationError(
+            {"body": f"نصُّ الرسالة أطول من {APPLICANT_MESSAGE_MAX_LENGTH} حرف."}
+        )
+    clean_link = (link or "").strip()[:500]
+    if clean_link and not clean_link.lower().startswith(("http://", "https://")):
+        # ‏`URLField` يرفض `javascript:` — لكنّ `objects.create()` **لا يشغّل
+        # مدقّقات الحقول أصلاً**، فالقيدُ المعلَن على العمود لا يحرس شيئاً هنا.
+        # والقيمةُ تُصيَّر `href` في صفحةٍ عامّة، فالفحصُ يقع في الخدمة أو لا يقع.
+        raise ValidationError({"link": "الرابط يجب أن يبدأ بـ http:// أو https://"})
+    update = JobApplicantUpdate.objects.create(
+        applicant=applicant,
+        kind=JobApplicantUpdate.Kind.NOTICE,
+        author_kind=JobApplicantUpdate.AuthorKind.TEAM,
+        body=clean_body,
+        link=clean_link,
+        phone=(phone or "").strip()[:40],
+        author=actor if getattr(actor, "pk", None) else None,
+        is_public=bool(is_public),
+    )
+    mark_applicant_replies_read(applicant=applicant)
+    return update
+
+
+def record_applicant_reply(*, applicant: JobApplicant, body: str) -> JobApplicantUpdate:
+    """ردُّ المتقدّم نفسِه — بلا `author` لأنّه لا حسابَ له في النظام أصلاً."""
+    if applicant.status in APPLICANT_REPLY_CLOSED_STATUSES:
+        raise ApplicantReplyClosed("انتهى النظرُ في هذا الطلب، ولم يعد بابُ الردّ مفتوحاً.")
+    clean_body = (body or "").strip()
+    if not clean_body:
+        raise ValidationError({"body": "نصُّ الرسالة إلزامي."})
+    if len(clean_body) > APPLICANT_MESSAGE_MAX_LENGTH:
+        raise ValidationError(
+            {"body": f"نصُّ الرسالة أطول من {APPLICANT_MESSAGE_MAX_LENGTH} حرف."}
+        )
+    return JobApplicantUpdate.objects.create(
+        applicant=applicant,
+        kind=JobApplicantUpdate.Kind.NOTICE,
+        author_kind=JobApplicantUpdate.AuthorKind.APPLICANT,
+        body=clean_body,
+        is_public=True,
+    )
+
+
+def mark_applicant_replies_read(*, applicant: JobApplicant) -> int:
+    """يعيد عددَ الردود التي عُلّمت مقروءةً الآن."""
+    return JobApplicantUpdate.objects.filter(
+        applicant=applicant,
+        author_kind=JobApplicantUpdate.AuthorKind.APPLICANT,
+        read_at__isnull=True,
+    ).update(read_at=timezone.now())
+
+
+def applicant_public_updates(applicant: JobApplicant):
+    """ما يراه المتقدّم: المنشورُ وحدَه، الأقدمُ أوّلاً — يُقرأ كمحادثة."""
+    return JobApplicantUpdate.objects.filter(
+        applicant=applicant, is_public=True
+    ).order_by("created_at", "id")
+
+
+def applicant_upcoming_meetings(applicant: JobApplicant):
+    """اجتماعاتُه القادمةُ من دفتر الاجتماعات القائم — لا جدولٌ ثانٍ يُملأ باليد.
+
+    وإضافتُه إلى قائمة الحاضرين **هي** الدعوة: من لا يُراد إخبارُه لا يوضَع
+    فيها. ولذلك لا علَمَ نشرٍ هنا.
+    """
+    return (
+        ApplicantMeeting.objects.filter(
+            attendees__applicant=applicant,
+            status=ApplicantMeeting.Status.SCHEDULED,
+            start__gte=timezone.now(),
+        )
+        .order_by("start", "id")
+        .distinct()
+    )
+
+
+def applicant_can_reply(applicant: JobApplicant) -> bool:
+    return applicant.status not in APPLICANT_REPLY_CLOSED_STATUSES
 
 
 @transaction.atomic
@@ -7954,9 +8269,18 @@ def accept_applicant_invitation(
     )
 
     # 6. تحديث المتقدم
+    previous_status = locked_applicant.status
     locked_applicant.status = JobApplicant.Status.HIRED
     locked_applicant.hired_employee = employee
     locked_applicant.save(update_fields=["status", "hired_employee", "updated_at"])
+    # ‏#215: «مقبول» لا تمرّ بـ`transition_applicant_status` (تلك ترفضها صراحةً)،
+    # فبلا هذا السطر يبقى دفترُ من قُبل مفتوحاً على «عرض عمل» إلى الأبد.
+    record_applicant_status_update(
+        applicant=locked_applicant,
+        from_status=previous_status,
+        to_status=JobApplicant.Status.HIRED,
+        actor=user,
+    )
 
     # 7. استهلاك الدعوة
     locked_inv.accepted_at = timezone.now()

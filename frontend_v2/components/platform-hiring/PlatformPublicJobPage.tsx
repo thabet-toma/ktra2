@@ -16,11 +16,15 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import {
   publicCareersApplyUrl,
   publicCareersJobUrl,
+  refreshPublicCareersTracking,
+  trackPublicCareersApplication,
   type PublicApplicationReceipt,
+  type PublicApplicantTrackingPayload,
   type PublicPlatformJob,
 } from "../../services/platformHiringApi";
 import { formatNumber } from "../../utils/formatNumber";
 import { CV_ACCEPT_ATTRIBUTE, cvFileProblem, firstApiErrorMessage } from "../../utils/platformHiring";
+import { PublicApplicantTrackingPanel } from "./PublicApplicantTrackingPanel";
 
 /**
  * صفحةُ وظيفةٍ منصّيّةٍ والتقديمُ عليها — `/careers/job/:token` (#207 م٨-ب، القصّتان ٧٤ و٧٥).
@@ -42,6 +46,12 @@ export const PlatformPublicJobPage: React.FC = () => {
   const [reloadKey, setReloadKey] = useState(0);
   const [job, setJob] = useState<PublicPlatformJob | null>(null);
   const [receipt, setReceipt] = useState<PublicApplicationReceipt | null>(null);
+  const [publicView, setPublicView] = useState<"apply" | "track">("apply");
+  const [referenceCode, setReferenceCode] = useState("");
+  const [trackingPhone, setTrackingPhone] = useState("");
+  const [tracking, setTracking] = useState<PublicApplicantTrackingPayload | null>(null);
+  const [trackingError, setTrackingError] = useState("");
+  const [trackingLoading, setTrackingLoading] = useState(false);
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -154,6 +164,56 @@ export const PlatformPublicJobPage: React.FC = () => {
     }
   };
 
+  const handleTrackingLogin = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setTrackingError("");
+    setTrackingLoading(true);
+    try {
+      const result = await trackPublicCareersApplication(token, referenceCode, trackingPhone);
+      if (result.status === 429) {
+        setTrackingError("حاول بعد قليل");
+        return;
+      }
+      if (result.status !== 200 || !result.data || !("session" in result.data)) {
+        setTrackingError((result.data && "detail" in result.data && result.data.detail) || "تعذّر فتح المتابعة.");
+        return;
+      }
+      setTracking(result.data as PublicApplicantTrackingPayload);
+    } catch {
+      setTrackingError("تعذّر الاتصال بالخادم. حاول مرةً أخرى.");
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
+  const refreshTracking = async () => {
+    if (!tracking) return;
+    setTrackingError("");
+    setTrackingLoading(true);
+    try {
+      const result = await refreshPublicCareersTracking(tracking.session);
+      if (result.status === 401) {
+        setTracking(null);
+        setPublicView("track");
+        setTrackingError("انتهت الجلسة، أدخل رقمك مرةً أخرى");
+        return;
+      }
+      if (result.status === 429) {
+        setTrackingError("حاول بعد قليل");
+        return;
+      }
+      if (result.status === 200 && result.data && "session" in result.data) {
+        setTracking(result.data as PublicApplicantTrackingPayload);
+      } else {
+        setTrackingError((result.data && "detail" in result.data && result.data.detail) || "تعذّر تحديث المتابعة.");
+      }
+    } catch {
+      setTrackingError("تعذّر الاتصال بالخادم. حاول مرةً أخرى.");
+    } finally {
+      setTrackingLoading(false);
+    }
+  };
+
   const inputClass =
     "h-10 w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 text-sm text-slate-900 dark:text-slate-100 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20";
 
@@ -222,8 +282,31 @@ export const PlatformPublicJobPage: React.FC = () => {
           </div>
         )}
 
-        {phase === "open" && job && (
+        {phase === "open" && job && tracking && (
+          <PublicApplicantTrackingPanel
+            tracking={tracking}
+            onRefresh={() => void refreshTracking()}
+            refreshing={trackingLoading}
+            error={trackingError}
+            onTrackingChanged={setTracking}
+            onSessionExpired={() => {
+              setTracking(null);
+              setPublicView("track");
+              setTrackingError("انتهت الجلسة، أدخل رقمك مرةً أخرى");
+            }}
+          />
+        )}
+
+        {phase === "open" && job && !tracking && (
           <div className="space-y-5">
+            <div className="grid grid-cols-2 rounded-lg border border-slate-200 p-1 dark:border-slate-800" role="group" aria-label="خيارات الوظيفة">
+              <button type="button" aria-pressed={publicView === "apply"} onClick={() => setPublicView("apply")} className={`min-h-10 rounded-md px-2 text-xs font-bold transition ${publicView === "apply" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"}`}>التقديم على الوظيفة</button>
+              <button type="button" aria-pressed={publicView === "track"} onClick={() => setPublicView("track")} className={`min-h-10 rounded-md px-2 text-xs font-bold transition ${publicView === "track" ? "bg-blue-600 text-white" : "text-slate-600 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800"}`}>قدّمت سابقاً؟ تابع طلبك</button>
+            </div>
+
+            {/* شرحُ الوظيفة فوق البابين معاً: المتابِعُ يحتاج أن يعرف على أيّ
+                وظيفةٍ يتابع، والمالكُ وصف الصفحةَ بأنّها «بتشرح عن الوظيفة
+                وشو حالة الطلب» — لا إحداهما. */}
             <header className="space-y-2 pb-4 border-b border-slate-200 dark:border-slate-800">
               <p className="text-xs font-semibold text-blue-700 dark:text-blue-300">التوظيف · فريق منصة K.T.R.A</p>
               <h1 className="flex items-center gap-2 text-lg font-bold text-slate-900 dark:text-slate-100">
@@ -263,6 +346,7 @@ export const PlatformPublicJobPage: React.FC = () => {
               )}
             </header>
 
+            {publicView === "apply" && <>
             <form onSubmit={handleSubmit} className="space-y-3.5" noValidate>
               <h2 className="text-sm font-bold text-slate-900 dark:text-slate-100">التقديم على الوظيفة</h2>
 
@@ -361,6 +445,28 @@ export const PlatformPublicJobPage: React.FC = () => {
                 {submitting ? "جاري الإرسال..." : "إرسال الطلب"}
               </button>
             </form>
+            </>}
+
+            {publicView === "track" && (
+              <form onSubmit={handleTrackingLogin} className="space-y-3.5" noValidate>
+                <div className="space-y-1">
+                  <h1 className="text-lg font-bold text-slate-900 dark:text-slate-100">متابعة طلبك</h1>
+                  <p className="text-sm text-slate-600 dark:text-slate-400">أدخل رقم التتبّع ورقم الهاتف اللذين قدّمتهما.</p>
+                </div>
+                <div>
+                  <label htmlFor="tracking-reference" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">رقم التتبّع</label>
+                  <input id="tracking-reference" dir="ltr" autoComplete="off" value={referenceCode} onChange={(event) => setReferenceCode(event.target.value)} className={`${inputClass} font-mono text-left`} />
+                </div>
+                <div>
+                  <label htmlFor="tracking-phone" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">رقم الهاتف</label>
+                  <input id="tracking-phone" type="tel" dir="ltr" autoComplete="tel" value={trackingPhone} onChange={(event) => setTrackingPhone(event.target.value)} className={`${inputClass} text-right`} />
+                </div>
+                {trackingError && <p role="alert" className="text-xs font-semibold text-red-600 dark:text-red-400">{trackingError}</p>}
+                <button type="submit" disabled={trackingLoading} className="flex min-h-11 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60">
+                  {trackingLoading && <Loader2 className="h-4 w-4 animate-spin" />} دخول المتابعة
+                </button>
+              </form>
+            )}
           </div>
         )}
       </main>

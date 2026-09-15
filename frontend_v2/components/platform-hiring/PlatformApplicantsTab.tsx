@@ -246,6 +246,11 @@ export const PlatformApplicantsTab: React.FC<PlatformApplicantsTabProps> = ({
                       <span className="font-mono text-[10px] text-slate-500 dark:text-slate-400 font-normal">
                         ({applicant.reference_code})
                       </span>
+                      {applicant.unread_reply_count > 0 && (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold text-amber-800 dark:bg-amber-950/50 dark:text-amber-200">
+                          ردّ غير مقروء
+                        </span>
+                      )}
                     </div>
                     {applicant.phone && (
                       <div dir="ltr" className="text-[11px] text-slate-500 dark:text-slate-400 font-normal inline-block">

@@ -777,6 +777,14 @@ class PublicSurfaceGuardTest(TestCase):
         "PublicJobPageView",
         "PublicInvitationDetailView",
         "PublicInvitationAcceptView",
+        # ‏#215: متابعةُ المتقدّم. عامّةٌ بالضرورة — لا حسابَ للمتقدّم أصلاً،
+        # وهذا هو الغرضُ كلُّه. والحارسُ هنا **عاملان** لا واحد: رقمُ التتبّع
+        # ورقمُ الهاتف الذي قدّم به، لأنّ رمزَ الوظيفة يُنشَر على فيسبوك عمداً
+        # (#214-أ) فليس سرّاً. والفتحُ بخانقٍ أضيقَ من خانق العرض، وما بعده
+        # بجلسةٍ موقَّعةٍ قصيرةِ العمر.
+        "PublicApplicantTrackView",
+        "PublicApplicantTrackRefreshView",
+        "PublicApplicantReplyView",
         "PublicDailyRatingView",
     }
 

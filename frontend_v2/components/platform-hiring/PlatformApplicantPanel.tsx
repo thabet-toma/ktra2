@@ -15,13 +15,17 @@ import { useToast } from "../../contexts/ToastContext";
 import {
   getPlatformApplicantCv,
   invitePlatformApplicant,
+  createPlatformApplicantNotice,
+  listPlatformApplicantUpdates,
   ratePlatformApplicant,
   transitionPlatformApplicant,
   type ApplicantInvitation,
+  type PlatformApplicantUpdate,
   type PlatformJobApplicant,
 } from "../../services/platformHiringApi";
 import { formatNumber } from "../../utils/formatNumber";
 import { applicantStatusBadgeClass, firstApiErrorMessage } from "../../utils/platformHiring";
+import { ApplicantUpdateThread } from "./ApplicantUpdateThread";
 
 interface PlatformApplicantPanelProps {
   applicant: PlatformJobApplicant | null;
@@ -55,6 +59,14 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
   const [issuingInvite, setIssuingInvite] = useState(false);
   const [issuedInvitation, setIssuedInvitation] = useState<ApplicantInvitation | null>(null);
 
+  const [updates, setUpdates] = useState<PlatformApplicantUpdate[]>([]);
+  const [updatesLoading, setUpdatesLoading] = useState(false);
+  const [updatesError, setUpdatesError] = useState("");
+  const [noticeBody, setNoticeBody] = useState("");
+  const [noticeLink, setNoticeLink] = useState("");
+  const [noticePhone, setNoticePhone] = useState("");
+  const [sendingNotice, setSendingNotice] = useState(false);
+
   useEffect(() => {
     if (applicant) {
       setRating(applicant.rating ?? 0);
@@ -63,7 +75,37 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
       setExpiresInHours("72");
       setInvitationNote("");
       setInvitationContactPhone("");
+      setUpdates([]);
+      setUpdatesError("");
+      setNoticeBody("");
+      setNoticeLink("");
+      setNoticePhone("");
     }
+  }, [applicant?.id]);
+
+  useEffect(() => {
+    if (!applicant) return;
+    let active = true;
+    setUpdatesLoading(true);
+    listPlatformApplicantUpdates(applicant.id)
+      .then((data) => {
+        if (!active) return;
+        setUpdates(data);
+        // الخادمُ علّم ردودَه مقروءةً عند هذا النداء؛ فلتُطفأ الشارةُ في
+        // القائمة أيضاً بدل أن تبقى تصرخ حتى إعادة تحميل الصفحة.
+        if (applicant.unread_reply_count > 0) {
+          onUpdated({ ...applicant, unread_reply_count: 0 });
+        }
+      })
+      .catch((err: any) => {
+        if (active) setUpdatesError(firstApiErrorMessage(err?.data || err, "تعذّر تحميل الرسائل."));
+      })
+      .finally(() => {
+        if (active) setUpdatesLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, [applicant?.id]);
 
   if (!applicant) return null;
@@ -167,6 +209,27 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
       toast("تم نسخ رابط الدعوة.", "success");
     } catch {
       toast("تعذر نسخ الرابط.", "error");
+    }
+  };
+
+  const handleSendNotice = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setSendingNotice(true);
+    try {
+      const update = await createPlatformApplicantNotice(applicant.id, {
+        body: noticeBody,
+        link: noticeLink.trim() || undefined,
+        phone: noticePhone.trim() || undefined,
+      });
+      setUpdates((current) => [...current, update]);
+      setNoticeBody("");
+      setNoticeLink("");
+      setNoticePhone("");
+      toast("تم إرسال الرسالة للمتقدّم.", "success");
+    } catch (err: any) {
+      toast(firstApiErrorMessage(err?.data || err, "تعذّر إرسال الرسالة."), "error");
+    } finally {
+      setSendingNotice(false);
     }
   };
 
@@ -282,6 +345,34 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
             </div>
           )}
         </div>
+
+        <section className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3" aria-labelledby="applicant-updates-title">
+          <h3 id="applicant-updates-title" className="text-xs font-bold text-slate-700 dark:text-slate-300">الرسائل والتحديثات</h3>
+          {updatesLoading ? (
+            <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> جاري تحميل الرسائل...</p>
+          ) : updatesError ? (
+            <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">{updatesError}</p>
+          ) : updates.length > 0 ? (
+            <ApplicantUpdateThread updates={updates} showAuthorName />
+          ) : (
+            <p className="text-xs text-slate-500 dark:text-slate-400">لا توجد رسائل أو تحديثات بعد.</p>
+          )}
+
+          <form onSubmit={handleSendNotice} className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
+            <label htmlFor="applicant-notice" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">رسالة للمتقدّم</label>
+            <textarea id="applicant-notice" rows={3} maxLength={4000} value={noticeBody} onChange={(event) => setNoticeBody(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
+            <details className="text-xs text-slate-600 dark:text-slate-400">
+              <summary className="cursor-pointer font-semibold text-blue-700 dark:text-blue-300">إضافة رابط أو رقم اتصال</summary>
+              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <label className="space-y-1"><span className="block">رابط (اختياري)</span><input type="url" dir="ltr" value={noticeLink} onChange={(event) => setNoticeLink(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" /></label>
+                <label className="space-y-1"><span className="block">رقم هاتف (اختياري)</span><input type="tel" dir="ltr" value={noticePhone} onChange={(event) => setNoticePhone(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" /></label>
+              </div>
+            </details>
+            <button type="submit" disabled={sendingNotice} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
+              {sendingNotice ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} إرسال الرسالة
+            </button>
+          </form>
+        </section>
 
         {/* السيرة الذاتية */}
         <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-2">

@@ -88,6 +88,8 @@ export interface PlatformJobApplicant {
   hired_employee: number | null;
   /** الانتقالاتُ المسموحةُ من الحالة الحاليّة — من جدول الخادم الوحيد. */
   next_statuses: ApplicantNextStatus[];
+  /** ردود المتقدّم التي لم يفتحها مسؤول التوظيف بعد. */
+  unread_reply_count: number;
   created_at: string;
   updated_at: string;
 }
@@ -135,6 +137,47 @@ export interface PublicApplicationReceipt {
   status: string;
   job_title: string;
   cv_name: string;
+}
+
+/** رسالة واحدة في سجلّ التواصل حول طلب التوظيف. */
+export interface ApplicantUpdate {
+  id: number;
+  kind: string;
+  author_kind: "system" | "team" | "applicant";
+  body: string;
+  link: string;
+  phone: string;
+  created_at: string;
+}
+
+/** الرسالة التي يراها مسؤول التوظيف، وفيها مصدرها المرئي. */
+export interface PlatformApplicantUpdate extends ApplicantUpdate {
+  is_public: boolean;
+  author_name: string;
+}
+
+export interface PublicApplicantTrackingPayload {
+  session: string;
+  job: PublicPlatformJob;
+  applicant: {
+    reference_code: string;
+    status: string;
+    status_display: string;
+    can_reply: boolean;
+  };
+  updates: ApplicantUpdate[];
+  meetings: Array<{
+    id: number;
+    title: string;
+    start: string;
+    end: string;
+    location: string;
+  }>;
+}
+
+export interface PublicCareersResponse<T> {
+  status: number;
+  data: T | { detail?: string; body?: string } | null;
 }
 
 /** `GET /api/careers/invitations/<token>/`. */
@@ -195,6 +238,14 @@ export const transitionPlatformApplicant = (id: number, status: string) =>
 
 export const ratePlatformApplicant = (id: number, payload: { rating?: number; notes?: string }) =>
   apiPostObject<PlatformJobApplicant>(`${OPS}/job-applicants/${id}/rate/`, payload);
+
+export const listPlatformApplicantUpdates = (id: number) =>
+  apiGetList<PlatformApplicantUpdate>(`${OPS}/job-applicants/${id}/updates/`);
+
+export const createPlatformApplicantNotice = (
+  id: number,
+  payload: { body: string; link?: string; phone?: string },
+) => apiPostObject<PlatformApplicantUpdate>(`${OPS}/job-applicants/${id}/notice/`, payload);
 
 export interface PlatformApplicantInvitationInput {
   expiresInHours: number;
@@ -366,6 +417,28 @@ export const publicCareersJobUrl = (token: string) =>
 
 export const publicCareersApplyUrl = (token: string) =>
   `${API_BASE}/careers/jobs/${encodeURIComponent(token)}/apply/`;
+
+async function postPublicCareers<T>(path: string, body: Record<string, string>): Promise<PublicCareersResponse<T>> {
+  const response = await fetch(`${API_BASE}/${path.replace(/^\/+/, "")}`, {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const data: unknown = await response.json().catch(() => null);
+  return { status: response.status, data: data as PublicCareersResponse<T>["data"] };
+}
+
+export const trackPublicCareersApplication = (token: string, referenceCode: string, phone: string) =>
+  postPublicCareers<PublicApplicantTrackingPayload>(
+    `careers/jobs/${encodeURIComponent(token)}/track/`,
+    { reference_code: referenceCode, phone },
+  );
+
+export const refreshPublicCareersTracking = (session: string) =>
+  postPublicCareers<PublicApplicantTrackingPayload>("careers/track/refresh/", { session });
+
+export const replyToPublicCareersTracking = (session: string, body: string) =>
+  postPublicCareers<ApplicantUpdate>("careers/track/reply/", { session, body });
 
 export const publicInvitationUrl = (token: string) =>
   `${API_BASE}/careers/invitations/${encodeURIComponent(token)}/`;

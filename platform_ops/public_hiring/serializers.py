@@ -80,3 +80,75 @@ class AcceptInvitationInputSerializer(serializers.Serializer):
 
     password = serializers.CharField(write_only=True, min_length=8, required=True)
     username = serializers.CharField(required=False, allow_blank=True, default="")
+
+
+# ==============================================================================
+# ‏#215: متابعةُ المتقدّم — مُسلسِلاتُ السطح العامّ
+# ==============================================================================
+
+
+class TrackingLookupInputSerializer(serializers.Serializer):
+    """عاملا الدخول: رقمُ التتبّع ورقمُ الهاتف الذي قدّم به.
+
+    **ولماذا عاملان لا واحد:** رابطُ الإعلان يُنشَر على فيسبوك عمداً (#214-أ)
+    فرمزُ الوظيفة ليس سرّاً، ورقمُ التتبّع ثمانيةُ محارفَ تُجرَّب آليّاً — وخلفه
+    اسمُ إنسانٍ ورقمُ هاتفه. الهاتفُ يعرفه صاحبُه غيباً ولا يعرفه غيرُه.
+    """
+
+    reference_code = serializers.CharField(max_length=64, trim_whitespace=True)
+    phone = serializers.CharField(max_length=40, trim_whitespace=True)
+
+
+class TrackingSessionInputSerializer(serializers.Serializer):
+    """جلسةٌ موقَّعةٌ صدرت بعد إثبات العاملين."""
+
+    session = serializers.CharField(max_length=2048, trim_whitespace=True)
+
+
+class TrackingReplyInputSerializer(TrackingSessionInputSerializer):
+    """ردُّ المتقدّم. السقفُ يطابق `services.APPLICANT_MESSAGE_MAX_LENGTH`."""
+
+    body = serializers.CharField(max_length=4000, trim_whitespace=True)
+
+
+class PublicApplicantUpdateSerializer(serializers.Serializer):
+    """سطرٌ في دفتر المتقدّم — **ولا `is_public` ولا `author` ولا اسمُ كاتب**.
+
+    ما يصل هنا منشورٌ أصلاً (المُرشِّحُ في الخدمة)، وإعادةُ العلَم تقول للقارئ
+    إنّ ثمّة سطوراً لا يراها فتدعوه للسؤال عنها.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    kind = serializers.CharField(read_only=True)
+    author_kind = serializers.CharField(read_only=True)
+    body = serializers.CharField(read_only=True)
+    link = serializers.CharField(read_only=True, allow_blank=True)
+    phone = serializers.CharField(read_only=True, allow_blank=True)
+    created_at = serializers.DateTimeField(read_only=True)
+
+
+class PublicApplicantMeetingSerializer(serializers.Serializer):
+    """اجتماعٌ قادمٌ — **بلا حالة حضور**.
+
+    «لم تحضر» تقديرٌ داخليٌّ يُكتب في دفتر الفرز، وعرضُه على صاحبه يفتح جدلاً
+    لا تديره صفحةٌ عامّة. الموعدُ والمكانُ كلُّ ما يحتاجه ليحضر.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    title = serializers.CharField(read_only=True)
+    start = serializers.DateTimeField(read_only=True)
+    end = serializers.DateTimeField(read_only=True)
+    location = serializers.CharField(read_only=True, allow_blank=True)
+
+
+class PublicApplicantStateSerializer(serializers.Serializer):
+    """حالةُ الطلب — **ولا اسم ولا هاتف ولا بريد ولا تقييم ولا `notes`**.
+
+    كلُّها معروفةٌ لصاحب الطلب أصلاً، فإعادتُها لا تفيده وتجعل كلَّ اختراقٍ
+    للرمز تسريبَ بياناتٍ شخصيّةٍ بدل تسريبِ حالةٍ وحدَها (OWASP API3).
+    """
+
+    reference_code = serializers.CharField(read_only=True)
+    status = serializers.CharField(read_only=True)
+    status_display = serializers.CharField(read_only=True)
+    can_reply = serializers.BooleanField(read_only=True)

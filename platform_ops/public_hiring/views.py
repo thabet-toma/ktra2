@@ -27,11 +27,23 @@ from rest_framework.views import APIView
 from core.media_views import MediaUploadError, upload_media_file
 from hr.auth_api import issue_login_session
 from platform_ops.services import (
+    ApplicantReplyClosed,
+    TRACKING_DENIED_DETAIL,
+    TrackingDenied,
+    TrackingSessionExpired,
     accept_applicant_invitation,
+    applicant_can_reply,
+    applicant_public_status_label,
+    applicant_public_updates,
+    applicant_upcoming_meetings,
+    issue_tracking_session,
     job_apply_url,
     job_public_url,
+    record_applicant_reply,
+    resolve_applicant_tracking,
     resolve_public_invitation,
     resolve_public_job,
+    resolve_tracking_session,
     submit_application,
 )
 from platform_ops.throttles import ClientIpScopedThrottle
@@ -48,8 +60,14 @@ from .serializers import (
     AcceptInvitationInputSerializer,
     JobApplicationInputSerializer,
     JobApplicationSuccessSerializer,
+    PublicApplicantMeetingSerializer,
+    PublicApplicantStateSerializer,
+    PublicApplicantUpdateSerializer,
     PublicInvitationDetailSerializer,
     PublicJobPostingSerializer,
+    TrackingLookupInputSerializer,
+    TrackingReplyInputSerializer,
+    TrackingSessionInputSerializer,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,6 +192,132 @@ class PublicJobApplyView(APIView):
             }
         )
         return Response(payload.data, status=status.HTTP_201_CREATED)
+
+
+# ==============================================================================
+# ‏#215: متابعةُ المتقدّم — بابٌ عامٌّ بعاملين، على نفس صفحة التقديم
+# ==============================================================================
+
+
+def _tracking_payload(applicant, *, session: str) -> dict:
+    """حمولةُ لوحة المتابعة. مصدرٌ واحدٌ للأبواب الثلاثة فلا تتباعد ثلاثُ نسخ."""
+    return {
+        "session": session,
+        "job": PublicJobPostingSerializer(applicant.job).data,
+        "applicant": PublicApplicantStateSerializer(
+            {
+                "reference_code": applicant.reference_code,
+                "status": applicant.status,
+                "status_display": applicant_public_status_label(applicant.status),
+                "can_reply": applicant_can_reply(applicant),
+            }
+        ).data,
+        "updates": PublicApplicantUpdateSerializer(
+            applicant_public_updates(applicant), many=True
+        ).data,
+        "meetings": PublicApplicantMeetingSerializer(
+            applicant_upcoming_meetings(applicant), many=True
+        ).data,
+    }
+
+
+class PublicApplicantTrackView(APIView):
+    """فتحُ متابعةِ طلبٍ برقم التتبّع ورقم الهاتف معاً.
+
+    **`POST` لا `GET` عمداً**: الهاتفُ بياناتٌ شخصيّةٌ، وسلسلةُ الاستعلام تُكتب
+    في سجلّات الخادم وتُرسَل في `Referer` إلى كلّ رابطٍ يُنقَر من الصفحة.
+
+    **وخانقٌ أضيقُ من خانق التقديم**: هذا سطحُ التخمين لا سطحُ الاستخدام.
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "platform_ops_track"
+
+    def post(self, request, token):
+        serializer = TrackingLookupInputSerializer(data=request.data)
+        if not serializer.is_valid():
+            # حتى خطأُ الشكل يخرج بالنصّ الموحَّد: «الحقلُ مطلوب» تقول للمجرِّب
+            # أيَّ الحقلين نسي، وهي معلومةٌ لا يحتاجها إلا هو.
+            return Response(
+                {"detail": TRACKING_DENIED_DETAIL},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            applicant = resolve_applicant_tracking(
+                job_token=token,
+                reference_code=serializer.validated_data["reference_code"],
+                phone=serializer.validated_data["phone"],
+            )
+        except TrackingDenied:
+            return Response(
+                {"detail": TRACKING_DENIED_DETAIL},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        session = issue_tracking_session(applicant)
+        return Response(_tracking_payload(applicant, session=session))
+
+
+class PublicApplicantTrackRefreshView(APIView):
+    """تحديثُ اللوحة بجلسةٍ قائمة — بلا إعادة إرسال الهاتف في كلّ نداء."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "platform_ops_track_session"
+
+    def post(self, request):
+        serializer = TrackingSessionInputSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(
+                {"detail": "انتهت الجلسة. أدخل رقمك مرّةً أخرى."},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+        raw_session = serializer.validated_data["session"]
+        try:
+            applicant = resolve_tracking_session(raw_session)
+        except TrackingSessionExpired as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        return Response(_tracking_payload(applicant, session=raw_session))
+
+
+class PublicApplicantReplyView(APIView):
+    """ردُّ المتقدّم على فريق التوظيف — الاتجاهُ الثاني للقناة."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "platform_ops_track_session"
+
+    def post(self, request):
+        serializer = TrackingReplyInputSerializer(data=request.data)
+        if not serializer.is_valid():
+            if "session" in serializer.errors:
+                return Response(
+                    {"detail": "انتهت الجلسة. أدخل رقمك مرّةً أخرى."},
+                    status=status.HTTP_401_UNAUTHORIZED,
+                )
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            applicant = resolve_tracking_session(serializer.validated_data["session"])
+        except TrackingSessionExpired as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_401_UNAUTHORIZED)
+        try:
+            update = record_applicant_reply(
+                applicant=applicant, body=serializer.validated_data["body"]
+            )
+        except ApplicantReplyClosed as exc:
+            return Response({"detail": str(exc)}, status=status.HTTP_403_FORBIDDEN)
+        except ValidationError as exc:
+            return Response(
+                exc.detail if hasattr(exc, "detail") else str(exc),
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(
+            PublicApplicantUpdateSerializer(update).data,
+            status=status.HTTP_201_CREATED,
+        )
 
 
 #: طولُ وصفِ المعاينة. فيسبوك يقتطع ما بعد ~٣٠٠ محرف، وواتساب أقصرُ منه —

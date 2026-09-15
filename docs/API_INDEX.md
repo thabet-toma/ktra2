@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **879**
+عدد النقاط: **884**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -184,6 +184,9 @@
 | `/api/careers/j/<str:token>/` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/api/careers/jobs/<str:token>/` | `PublicJobDetailView` | `platform_ops/public_hiring/views.py` |
 | `/api/careers/jobs/<str:token>/apply/` | `PublicJobApplyView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/jobs/<str:token>/track/` | `PublicApplicantTrackView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/track/refresh/` | `PublicApplicantTrackRefreshView` | `platform_ops/public_hiring/views.py` |
+| `/api/careers/track/reply/` | `PublicApplicantReplyView` | `platform_ops/public_hiring/views.py` |
 | `/api/client-logs/` | `client_logs` | `core/health.py` |
 | `/api/customer-notes/` | `CustomerNoteViewSet` | `partners/views.py` |
 | `/api/customer-notes/alerts/` | `CustomerNoteViewSet` | `partners/views.py` |
@@ -643,8 +646,10 @@
 | `/api/platform/ops/job-applicants/{pk}/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/cv/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/invite/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/notice/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/rate/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-applicants/{pk}/transition-status/` | `JobApplicantViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/job-applicants/{pk}/updates/` | `JobApplicantViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-postings/` | `JobPostingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-postings/{pk}/` | `JobPostingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/job-postings/{pk}/close/` | `JobPostingViewSet` | `platform_ops/views.py` |

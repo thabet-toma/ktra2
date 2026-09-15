@@ -2273,6 +2273,99 @@ class JobApplicantInvitation(models.Model):
         return not self.is_consumed
 
 
+class JobApplicantUpdate(models.Model):
+    """سطرٌ واحدٌ يقرؤه المتقدّمُ في صفحة متابعة طلبه (#215).
+
+    **لماذا جدولٌ واحدٌ لا جدولان (مراحلُ ورسائل):** المالكُ وصف ما يريده
+    بـ«زي إيميلات» — والمتقدّمُ لا يرى «تغيّرَ حالة» و«رسالةً» شيئين، بل يرى
+    دفتراً واحداً مرتَّباً زمنيّاً. جدولان يعنيان دمجاً في كلّ قراءةٍ وترتيباً
+    في بايثون على قائمتين، وفارقاً في الترقيم لا يُصلَح.
+
+    **ولماذا لا يُقرأ `JobApplicant.notes` هنا:** اسمُها الحرفيُّ «ملاحظات
+    مسؤول التوظيف» — ما يُكتب **عن** المتقدّم أثناء الفرز («ضعيفٌ
+    بالإنجليزيّة»)، لا ما يُكتب **له**. الكلمةُ واحدةٌ والمعنيان متعاديان،
+    وخلطُهما يفتح ملفَّ الفرز في وجه صاحبه.
+
+    **ولماذا لا يُبنى على `PlatformOperationEvent`:** ذاك دفترُ تدقيقٍ داخليٌّ
+    فيه `tenant` وحقلُ `details` حرٌّ — وربطُ سطحٍ عامٍّ بدفترٍ داخليٍّ يجعل
+    أوّلَ حقلٍ يُضاف هناك غداً يتسرّب هنا بلا أن يشتكي شيء (OWASP API3).
+
+    **بلا `tenant` FK** — استثناءٌ موثَّقٌ كإخوته في التوظيف المنصّيّ.
+    """
+
+    class Kind(models.TextChoices):
+        STATUS = "status", "تحديثُ مرحلة"
+        NOTICE = "notice", "رسالة"
+
+    class AuthorKind(models.TextChoices):
+        SYSTEM = "system", "النظام"
+        TEAM = "team", "فريق التوظيف"
+        APPLICANT = "applicant", "المتقدّم"
+
+    applicant = models.ForeignKey(
+        JobApplicant,
+        on_delete=models.CASCADE,
+        related_name="updates",
+        verbose_name="المتقدم",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=Kind.choices,
+        default=Kind.NOTICE,
+        db_index=True,
+        verbose_name="النوع",
+    )
+    author_kind = models.CharField(
+        max_length=20,
+        choices=AuthorKind.choices,
+        db_index=True,
+        verbose_name="الكاتب",
+    )
+    body = models.TextField(blank=True, default="", verbose_name="النص")
+    #: ‏`link` و`phone` حقلان مستقلّان عن `body` عمداً: رابطٌ داخل جملةٍ لا يصير
+    #: زرّاً، ورقمٌ داخلها لا يصير اتّصالاً بضغطةٍ على الهاتف. والمتقدّمُ يفتح
+    #: هذه الصفحةَ من فيسبوك على هاتفه في الغالب.
+    link = models.URLField(max_length=500, blank=True, default="", verbose_name="رابط")
+    phone = models.CharField(max_length=40, blank=True, default="", verbose_name="رقم للتواصل")
+    #: ما لم يُنشَر لا يُرى. الافتراضُ منشورٌ لأنّ كلَّ صفٍّ هنا يُكتب بنيّة أن
+    #: يُقرأ — والعلمُ موجودٌ ليُطفأ عند الحاجة لا ليُشعَل في كلّ مرّة.
+    is_public = models.BooleanField(default=True, db_index=True, verbose_name="منشور للمتقدم")
+    #: حالتا الانتقال لصفوف `status` — نصّان لا مفتاحان: `choices` قد تتغيّر
+    #: غداً وصفوفُ التاريخ تبقى تحمل ما كان يومَها.
+    from_status = models.CharField(max_length=30, blank=True, default="", verbose_name="الحالة السابقة")
+    to_status = models.CharField(max_length=30, blank=True, default="", verbose_name="الحالة الجديدة")
+    author = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="كاتب الرسالة",
+    )
+    #: متى قرأ فريقُ التوظيف ردَّ المتقدّم. فارغٌ دائماً لغير صفوف المتقدّم.
+    read_at = models.DateTimeField(null=True, blank=True, verbose_name="تاريخ القراءة")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "تحديث على طلب متقدم"
+        verbose_name_plural = "تحديثات طلبات المتقدمين"
+        ordering = ["created_at", "id"]
+        indexes = [
+            models.Index(fields=["applicant", "is_public", "created_at"]),
+        ]
+        constraints = [
+            # رسالةٌ بلا نصٍّ سطرٌ فارغٌ في وجه قارئه. صفُّ المرحلة معفىً لأنّ
+            # نصَّه مشتقٌّ من الحالة لا مكتوبٌ بيد.
+            models.CheckConstraint(
+                condition=~models.Q(kind="notice") | ~models.Q(body=""),
+                name="platform_ops_applicant_update_notice_needs_body",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()} - {self.applicant_id} ({self.created_at:%Y-%m-%d})"
+
+
 class ApplicantMeeting(models.Model):
     """اجتماعٌ مع متقدّمين **قبل التوظيف** — دفترٌ مستقلٌّ عن اجتماعات الموظّفين.
 

@@ -614,6 +614,12 @@ REST_FRAMEWORK = {
         "platform_ops_public_hiring": os.environ.get("THROTTLE_RATE_PLATFORM_HIRING", "60/min"),
         "platform_ops_apply": os.environ.get("THROTTLE_RATE_PLATFORM_APPLY", "10/hour"),
         "platform_ops_invitation": os.environ.get("THROTTLE_RATE_PLATFORM_INVITATION", "20/hour"),
+        # ‏#215: فتحُ متابعةِ الطلب هو سطحُ تخمينِ رقم التتبّع، فحصّتُه أضيقُ من
+        # حصّة العرض العامّ؛ ومعه عدّادُ فشلٍ على الرمز نفسِه في الخدمة، لأنّ
+        # خانقَ العنوان وحدَه لا يوقف من يجرّب رمزاً واحداً من ألف عنوان.
+        "platform_ops_track": os.environ.get("THROTTLE_RATE_PLATFORM_TRACK", "30/hour"),
+        # وبعد إثبات العاملين تُصبح الحصّةُ حصّةَ استخدامٍ عاديّ (تحديثٌ وردّ).
+        "platform_ops_track_session": os.environ.get("THROTTLE_RATE_PLATFORM_TRACK_SESSION", "120/hour"),
     },
     'EXCEPTION_HANDLER': 'core.exception_handler.custom_exception_handler',
 }
