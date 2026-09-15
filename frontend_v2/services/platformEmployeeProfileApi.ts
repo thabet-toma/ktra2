@@ -29,6 +29,8 @@ export interface PlatformEmployeeRow {
   phone: string;
   job_title: string;
   status: "active" | "on_leave" | "offboarded";
+  /** نصُّ الحالة العربيُّ من `choices` الخادم — لا يُشتقُّ في المتصفّح. */
+  status_display: string;
   created_at: string;
   updated_at: string;
 }

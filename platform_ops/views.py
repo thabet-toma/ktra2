@@ -10,13 +10,16 @@
 `/api/platform/` بلا `X-Tenant-Id` أصلاً، محروسةٌ بـ`IsPlatformOperationsManager`،
 وغرضُها بالضبط أن يرى مديرُ العمليات كلَّ الشركات في جدولٍ واحد.
 """
+import csv
+import io
 import re
 import uuid
 from decimal import Decimal, InvalidOperation
 
-from django.db.models import Count, IntegerField, OuterRef, Q, Subquery, Value
+from django.db.models import Count, IntegerField, OuterRef, Prefetch, Q, Subquery, Value
 from django.db.models.functions import Coalesce
-from django.http import Http404
+from django.http import Http404, HttpResponse
+from django.utils.dateparse import parse_date
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -47,6 +50,7 @@ from .services import (
     RatingTokenNotFound,
     WorkOrderError,
     add_meeting_attendee,
+    build_applicant_attendance_matrix,
     approve_health_check,
     assign_platform_employee,
     record_presence_heartbeat,
@@ -174,8 +178,12 @@ from .services import (
     accept_platform_task_assignment,
     add_platform_employee_note,
     add_platform_workspace_note,
+    assert_platform_task_is_assigned_to,
+    attach_to_platform_task,
     claim_platform_task,
     create_platform_task,
+    platform_task_board,
+    platform_task_thread,
     review_platform_task_submission,
     submit_platform_task,
 )
@@ -209,6 +217,7 @@ from .models import (
     PlatformTask,
     PlatformTaskAssignment,
     PlatformTaskSubmission,
+    PlatformTaskAttachment,
     PlatformEmployeeNote,
     PlatformWorkspaceNote,
     PolicyProfile,
@@ -313,6 +322,8 @@ from .serializers import (
     PlatformTaskAssignmentSerializer,
     PlatformTaskSerializer,
     PlatformTaskSubmissionSerializer,
+    PlatformTaskAttachmentSerializer,
+    UploadPlatformTaskAttachmentSerializer,
     PlatformWorkspaceNoteSerializer,
     ReviewPlatformTaskSubmissionSerializer,
     SubmitPlatformTaskSerializer,
@@ -3759,6 +3770,35 @@ def _current_platform_employee(request):
     return employee, None
 
 
+#: بوادئُ تجعل خليّةَ CSV **صيغةً** في إكسل وLibreOffice لا نصّاً.
+_CSV_FORMULA_LEAD = ("=", "+", "-", "@")
+
+
+def _csv_safe(value):
+    """اسمُ متقدّمٍ يبدأ بـ`=` ليس صيغةً — ولا يُنفَّذ عند فتح الملفّ.
+
+    الاسمُ يكتبه المتقدّمُ نفسُه في نموذج التوظيف، ويخرج هنا إلى ملفٍّ يفتحه
+    مسؤولُ التوظيف بنقرة. والتهريبُ بمسافةٍ سابقةٍ يشوّه النصّ؛ فالفاصلةُ
+    العلويّةُ هي ما يتعارف عليه الجدولان لإبقاء الخليّة نصّاً.
+    """
+    text = "" if value is None else str(value)
+    return f"'{text}" if text.startswith(_CSV_FORMULA_LEAD) else text
+
+
+def _thread_event_is_visible_to(event: dict, *, employee_id: int) -> bool:
+    """ماذا يرى الموظّفُ من ملفِّ المهمّة (#213-ب).
+
+    القاعدةُ واحدةٌ مكتوبةٌ مرّةً: ما لا صاحبَ له فهو للجميع (شرحُ المدير)، وما له
+    صاحبٌ فلصاحبه وللمدير. وملاحظةُ المدير تزيد شرطاً: `MANAGER_ONLY` لا تُرى ولو
+    كانت عن هذا الموظّف نفسِه — وهي أوّلُ شكوى في #212 وما زالت القاعدة.
+    """
+    if event["type"] == "manager_note":
+        if event.get("visibility") == PlatformEmployeeNote.VISIBILITY_MANAGER_ONLY:
+            return False
+    owner = event.get("employee")
+    return owner is None or owner == employee_id
+
+
 class PlatformTaskViewSet(viewsets.ReadOnlyModelViewSet):
     """مهامُّ منصّةٍ — إنشاءٌ لمدير العمليات وحده، ومطالبةُ مهامّ المجمَع للموظّف (212-E).
 
@@ -3779,6 +3819,18 @@ class PlatformTaskViewSet(viewsets.ReadOnlyModelViewSet):
     # وهو استعلامٌ واحدٌ لا غير (محروسٌ في `test_platform_tasks.py`).
     queryset = (
         PlatformTask.objects.select_related("created_by")
+        # شرحُ المدير يخرج مع كلّ بطاقة (#213-ب)، فجلبُه مسبقاً استعلامٌ واحدٌ
+        # للقائمة كلِّها بدل واحدٍ لكلّ صفّ. و`to_attr` يجعل المُسلسِلَ يعرف أنّ
+        # القائمةَ جاهزةٌ فلا يستعلم من جديد.
+        .prefetch_related(
+            Prefetch(
+                "attachments",
+                queryset=PlatformTaskAttachment.objects.filter(
+                    kind=PlatformTaskAttachment.Kind.BRIEF
+                ).select_related("employee__user", "uploaded_by"),
+                to_attr="brief_attachment_rows",
+            )
+        )
         .annotate(
             claimed_count_annotated=Coalesce(
                 Subquery(
@@ -3827,6 +3879,144 @@ class PlatformTaskViewSet(viewsets.ReadOnlyModelViewSet):
         except PlatformOpsError as exc:
             return _service_error(exc)
         return Response(PlatformTaskAssignmentSerializer(assignment).data, status=status.HTTP_201_CREATED)
+
+    #: مجلّدُ مرفقات المهامّ في التخزين — مستقلٌّ عن مجلّدات الشركات: هذه ملفّاتُ
+    #: فريق كترا الداخليّ لا ملفّاتُ زبون.
+    ATTACHMENT_FOLDER = "ktra_platform_task_files"
+
+    @action(
+        detail=True, methods=["post"], url_path="attachments",
+        parser_classes=[MultiPartParser, FormParser], throttle_classes=[MediaUploadThrottle],
+    )
+    def upload_attachment(self, request, pk=None):
+        """رفعُ ملفٍّ على المهمّة وتسجيلُ صفِّه في العمليّة نفسِها (#213-ب).
+
+        `tenant=None` مقصودٌ كما في صورة الموظّف (211-Q): ملفُّ مهمّةٍ داخليّةٍ
+        ليس أصلاً لأيّ شركة، ولو مرّ بالنقطة العامّة `/api/media/upload/` لحُمِّلت
+        شركةٌ بريئةٌ بايتاتِه في نشرٍ أحاديّ الشركة.
+
+        **والدورُ يُشتقّ من الفاعل لا يُرسَل معه**: المديرُ يرفع شرحاً (`brief`)،
+        والموظّفُ يرفع ملفَّ عملٍ (`work`) على مهمّةٍ مُسندةٍ له — ولو لم يقبلها
+        بعد، وهو نصُّ الطلب حرفيّاً. قبولُ `kind` من الشبكة كان سيجعل موظّفاً
+        يكتب «شرحَ المدير» على مهمّةٍ يراها زملاؤه.
+        """
+        task = self.get_object()
+        payload = UploadPlatformTaskAttachmentSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+
+        upload = request.FILES.get("file")
+        if upload is None:
+            return Response(
+                {"detail": "حقل file مطلوب.", "code": "missing_file"},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        is_manager = IsPlatformOperationsManager().has_permission(request, self)
+        if is_manager:
+            kind, employee = PlatformTaskAttachment.Kind.BRIEF, None
+        else:
+            employee, denial = _current_platform_employee(request)
+            if denial is not None:
+                return denial
+            kind = PlatformTaskAttachment.Kind.WORK
+            # **يُرفَض قبل البايتات لا بعدها**: مهمّةُ المجمَع يراها كلُّ موظّفٍ،
+            # فبلا هذا السطر يصير رقمُ أيّ مهمّةٍ في العنوان باباً يُرفَع منه ملفٌّ
+            # إلى حساب التخزين ثمّ يُرفَض صفُّه — الرفضُ يحفظ الجدول ولا يستردّ
+            # البايتات. والقاعدةُ نفسُها تُنادى ثانيةً داخلَ `attach_to_platform_task`.
+            try:
+                assert_platform_task_is_assigned_to(task=task, employee=employee)
+            except PlatformOpsError as exc:
+                return _service_error(exc)
+
+        try:
+            url = upload_media_file(
+                upload, folder=self.ATTACHMENT_FOLDER, tenant=None, uploaded_by=request.user,
+            )
+        except MediaUploadError as exc:
+            return Response({"detail": exc.detail, "code": "upload_failed"}, status=exc.status_code)
+
+        try:
+            attachment = attach_to_platform_task(
+                task=task,
+                actor=request.user,
+                url=url,
+                kind=kind,
+                name=payload.validated_data["name"] or getattr(upload, "name", ""),
+                content_type=getattr(upload, "content_type", "") or "",
+                employee=employee,
+            )
+        except PlatformOpsError as exc:
+            return _service_error(exc)
+        return Response(
+            PlatformTaskAttachmentSerializer(attachment).data, status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["get"], url_path=r"attachments/(?P<attachment_id>\d+)/download")
+    def download_attachment(self, request, pk=None, attachment_id=None):
+        """تمريرُ بايتات المرفق — **لا إعادةُ توجيهٍ إلى التخزين**.
+
+        نفسُ قاعدة السيرة الذاتيّة: ترويسةُ `Location` هي رابطُ التخزين حرفيّاً،
+        وهو صلاحيّةٌ بذاته. والتمريرُ يمرّ بـ`core.media_views.stream_stored_asset`
+        فيُشخَّص فشلُ المزوّد كما هو (رفضُ تخزينٍ ٥٠٢، ملفٌّ ذهب ٤٠٤، مهلةٌ ٥٠٤)
+        بدل خمسمئةٍ عمياء.
+        """
+        task = self.get_object()
+        attachment = task.attachments.filter(pk=attachment_id).first()
+        if attachment is None:
+            # **يُبحَث داخل المهمّة لا في الجدول كلِّه**: معرّفٌ من مهمّةٍ أخرى كان
+            # ليُقرأ من هنا رغم أنّ نطاقَ `get_object` يحرس المهمّةَ وحدَها.
+            return Response(
+                {"detail": "لا مرفقَ بهذا المعرّف في هذه المهمّة.", "code": "attachment_not_found"},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            employee, denial = _current_platform_employee(request)
+            if denial is not None:
+                return denial
+            # الشرحُ للجميع، وملفُّ الموظّف له وللمدير — لا لزميلٍ على المهمّة نفسِها.
+            if attachment.kind != PlatformTaskAttachment.Kind.BRIEF and attachment.employee_id != employee.pk:
+                return Response(
+                    {"detail": "هذا المرفقُ ليس لك.", "code": "not_your_attachment"},
+                    status=status.HTTP_403_FORBIDDEN,
+                )
+        return stream_stored_asset(
+            attachment.url,
+            filename=attachment.name or f"task-{task.pk}-file",
+            content_type_fallback=attachment.content_type or "application/octet-stream",
+            owner="platform_task_attachment",
+            owner_pk=attachment.pk,
+        )
+
+    @action(detail=True, methods=["get"], url_path="thread")
+    def thread(self, request, pk=None):
+        """ملفُّ المهمّة الكامل — حديثٌ واحدٌ مرتَّبٌ بدل أربع شاشات (#213-ب).
+
+        **والترشيحُ بالرائي هنا لا في الخدمة**: الخدمةُ تجمع التاريخَ كلَّه لأنّها
+        تُنادى من بابٍ آخر غداً، وهذا البابُ وحدَه يعرف من يسأل. المديرُ يرى كلَّ
+        شيء؛ والموظّفُ يرى الشرحَ وملفّاتِه وملاحظاتِه وتسليماتِه ومراجعاتِها،
+        وملاحظاتِ المدير الموجَّهةَ إليه والمعلَنةَ له (`visibility=EMPLOYEE`).
+        """
+        task = self.get_object()
+        events = platform_task_thread(task)
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            employee, denial = _current_platform_employee(request)
+            if denial is not None:
+                return denial
+            events = [
+                event for event in events
+                if _thread_event_is_visible_to(event, employee_id=employee.pk)
+            ]
+        return Response({"task": task.pk, "events": events})
+
+    @action(detail=False, methods=["get"], url_path="board")
+    def board(self, request):
+        """من معه ماذا — لوحُ المدير. عدٌّ في القاعدة لا في المتصفّح."""
+        if not IsPlatformOperationsManager().has_permission(request, self):
+            return Response(
+                {"detail": "لوحُ المهامّ متاحٌ لمدير العمليات وحده.", "code": "manager_only"},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        return Response({"rows": platform_task_board()})
 
 
 class PlatformTaskAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
@@ -3889,7 +4079,10 @@ class PlatformTaskAssignmentViewSet(viewsets.ReadOnlyModelViewSet):
         payload.is_valid(raise_exception=True)
         try:
             submission = submit_platform_task(
-                assignment=assignment, actor=request.user, body=payload.validated_data["body"],
+                assignment=assignment,
+                actor=request.user,
+                body=payload.validated_data["body"],
+                attachment_ids=payload.validated_data["attachment_ids"],
             )
         except PlatformOpsError as exc:
             return _service_error(exc)
@@ -4136,6 +4329,82 @@ class ApplicantMeetingViewSet(viewsets.ReadOnlyModelViewSet):
             note=request.data.get("note"),
         )
         return Response(self.get_serializer(self.get_object()).data)
+
+    #: أعمدةُ ملفّ التصدير الثابتةُ قبل أعمدةِ الاجتماعات — مصدرٌ واحدٌ يقرؤه
+    #: الرأسُ والصفُّ معاً، فلا ينزاح أحدُهما عن الآخر بإضافةِ عمودٍ في موضعٍ واحد.
+    ATTENDANCE_EXPORT_LEADING_COLUMNS = (
+        ("name", "الاسم"),
+        ("attended", "حضر"),
+        ("absent", "لم يحضر"),
+        ("invited", "مدعوّ"),
+        ("total", "إجمالي الدعوات"),
+    )
+
+    def _attendance_window(self, request) -> dict:
+        """المصفوفةُ بحدودِ الطلب — والتاريخُ المشوَّهُ يُردّ 400 لا يُتجاهَل بصمت.
+
+        و`parse_date` تفشل بوجهين لا بوجهٍ واحد: تعيد `None` لما لا يشبه تاريخاً
+        («أمس»)، و**ترمي `ValueError`** لما يشبهه ولا يوجد (`2026-13-40`) — فهي
+        تنادي `date.fromisoformat` وتدع خطأَها يمرّ. وبلا الوجهين معاً يصير
+        شهرٌ ثالثَ عشرَ **خمسمئةً** في وجه المستخدم مكان أربعمئةٍ تقول له ما العطب.
+        """
+        bounds = {}
+        for key, name in (("from", "date_from"), ("to", "date_to")):
+            raw = (request.query_params.get(key) or "").strip()
+            if not raw:
+                continue
+            try:
+                parsed = parse_date(raw)
+            except ValueError:
+                parsed = None
+            if parsed is None:
+                raise ValidationError({key: "تاريخٌ غيرُ صالح — الصيغةُ YYYY-MM-DD."})
+            bounds[name] = parsed
+        return build_applicant_attendance_matrix(**bounds)
+
+    @action(detail=False, methods=["get"], url_path="attendance-matrix")
+    def attendance_matrix(self, request):
+        """جدولُ الحضور: صفٌّ لكلّ شخصٍ وعمودٌ لكلّ اجتماع (#213-ج).
+
+        **لا تسلسلَ عبر مُسلسِلِ الاجتماع**: هذه ليست قائمةَ اجتماعاتٍ بل إسقاطٌ
+        مبنيٌّ في الخدمة، ولو مرّ بالمُسلسِل لحمل كلُّ عمودٍ حاضريه كاملين —
+        وهو بالضبط ما تتجنّبه المصفوفة.
+        """
+        return Response(self._attendance_window(request))
+
+    @action(detail=False, methods=["get"], url_path="attendance-matrix/export")
+    def export_attendance_matrix(self, request):
+        """نفسُ الجدول ملفَّ CSV — زرُّ «تصدير» في صورة المالك.
+
+        `utf-8-sig` لا `utf-8`: إكسل على ويندوز يقرأ ملفّاً بلا BOM بترميز النظام
+        فتصير العربيّةُ رموزاً، والملفُّ يبدو للمستخدم عطباً في المنصّة.
+        """
+        matrix = self._attendance_window(request)
+        meetings = matrix["meetings"]
+
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow([
+            *[header for _key, header in self.ATTENDANCE_EXPORT_LEADING_COLUMNS],
+            *[_csv_safe(meeting["title"]) for meeting in meetings],
+        ])
+        for row in matrix["rows"]:
+            writer.writerow([
+                *[_csv_safe(row[key]) for key, _header in self.ATTENDANCE_EXPORT_LEADING_COLUMNS],
+                *[
+                    # الخليّةُ الغائبةُ فراغٌ لا «لم يحضر» — من لم يُدعَ لا يُحسَب غائباً.
+                    (row["cells"].get(str(meeting["id"])) or {}).get("status_display", "")
+                    for meeting in meetings
+                ],
+            ])
+
+        response = HttpResponse(
+            buffer.getvalue().encode("utf-8-sig"), content_type="text/csv; charset=utf-8",
+        )
+        response["Content-Disposition"] = (
+            f'attachment; filename="applicant-attendance-{matrix["from"]}-{matrix["to"]}.csv"'
+        )
+        return response
 
     @action(detail=True, methods=["post"], url_path="remove-attendee")
     def remove_attendee(self, request, pk=None):

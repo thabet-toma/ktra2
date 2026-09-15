@@ -100,8 +100,10 @@ class SubmissionFlowTest(_PlatformTaskFixture):
         )
         self.assignment = PlatformTaskAssignment.objects.get(task=self.task, employee=self.employee_a)
 
-    def test_accept_then_submit_creates_exactly_one_pending_submission(self):
-        accept_platform_task_assignment(assignment=self.assignment, actor=self.user_a)
+    # #213-ب: المُسنَدةُ فرديّاً تولد `ACCEPTED` — «ما في مجال ما يستلمها». فلا
+    # قبولَ في التهيئة هنا بعد اليوم، ونداؤه كان سيُردّ بـ«ليس بانتظار القبول».
+
+    def test_a_personal_assignment_is_born_accepted_and_submits_straight_away(self):
         submit_platform_task(assignment=self.assignment, actor=self.user_a, body="انتهيتُ من الجزء الأوّل.")
         pending = PlatformTaskSubmission.objects.filter(
             task=self.task, employee=self.employee_a, decision=PlatformTaskSubmission.DECISION_PENDING,
@@ -111,7 +113,6 @@ class SubmissionFlowTest(_PlatformTaskFixture):
         self.assertEqual(self.assignment.status, PlatformTaskAssignment.STATUS_SUBMITTED)
 
     def test_second_submit_before_review_is_rejected(self):
-        accept_platform_task_assignment(assignment=self.assignment, actor=self.user_a)
         submit_platform_task(assignment=self.assignment, actor=self.user_a, body="التسليمُ الأوّل.")
         with self.assertRaises(PlatformOpsError) as ctx:
             submit_platform_task(assignment=self.assignment, actor=self.user_a, body="التسليمُ الثاني.")
@@ -138,16 +139,25 @@ class ServiceLayerOwnershipTest(_PlatformTaskFixture):
             employee_ids=[self.employee_a.pk],
         )
         self.assignment = PlatformTaskAssignment.objects.get(task=self.task, employee=self.employee_a)
+        # #213-ب: القبولُ فعلٌ لا يبقى إلّا على إسنادٍ **معروض**، والفرديّةُ تولد
+        # مقبولةً. فلاختبارِ حارسِ ملكيّة القبول يلزم إسنادٌ اختياريٌّ حقيقيّ —
+        # وإلّا لسقط الاختبارُ على «ليس بانتظار القبول» فيخضرّ على غير سببه.
+        self.optional_task = create_platform_task(
+            actor=self.manager, title="مهمّةٌ اختياريّةٌ لـ(أ)",
+            audience=PlatformTask.AUDIENCE_SPECIFIC,
+            employee_ids=[self.employee_a.pk], is_mandatory=False,
+        )
+        self.offered = PlatformTaskAssignment.objects.get(
+            task=self.optional_task, employee=self.employee_a)
 
     def test_a_colleague_cannot_accept_another_employees_assignment(self):
         with self.assertRaises(PlatformOpsError) as ctx:
-            accept_platform_task_assignment(assignment=self.assignment, actor=self.user_b)
+            accept_platform_task_assignment(assignment=self.offered, actor=self.user_b)
         self.assertEqual(ctx.exception.code, "not_your_assignment")
-        self.assignment.refresh_from_db()
-        self.assertEqual(self.assignment.status, PlatformTaskAssignment.STATUS_OFFERED)
+        self.offered.refresh_from_db()
+        self.assertEqual(self.offered.status, PlatformTaskAssignment.STATUS_OFFERED)
 
     def test_a_colleague_cannot_submit_another_employees_assignment(self):
-        accept_platform_task_assignment(assignment=self.assignment, actor=self.user_a)
         with self.assertRaises(PlatformOpsError) as ctx:
             submit_platform_task(assignment=self.assignment, actor=self.user_b, body="تسليمٌ باسم غيري.")
         self.assertEqual(ctx.exception.code, "not_your_assignment")
@@ -155,7 +165,6 @@ class ServiceLayerOwnershipTest(_PlatformTaskFixture):
 
     def test_even_the_manager_does_not_submit_on_an_employees_behalf(self):
         """تسليمٌ بتوقيعِ غيرِ صاحبه يُفسد التقييمَ الذي يُحسَب على صاحبه."""
-        accept_platform_task_assignment(assignment=self.assignment, actor=self.user_a)
         with self.assertRaises(PlatformOpsError) as ctx:
             submit_platform_task(assignment=self.assignment, actor=self.manager, body="تسليمٌ من المدير.")
         self.assertEqual(ctx.exception.code, "not_your_assignment")
@@ -390,7 +399,7 @@ class ReviewDecisionTest(_PlatformTaskFixture):
             employee_ids=[self.employee_a.pk],
         )
         self.assignment = PlatformTaskAssignment.objects.get(task=self.task, employee=self.employee_a)
-        accept_platform_task_assignment(assignment=self.assignment, actor=self.user_a)
+        # مُسنَدةٌ فرديّاً ⇒ مقبولةٌ منذ ولادتها (#213-ب)، فالتسليمُ يلي الإسنادَ مباشرةً.
         self.submission = submit_platform_task(assignment=self.assignment, actor=self.user_a, body="جاهزةٌ للمراجعة.")
 
     def test_approved_partial_returns_assignment_to_in_progress_not_completed(self):
@@ -472,7 +481,7 @@ class ListsDoNotIssueAQueryPerRowTest(_PlatformTaskFixture):
             (self.user_a, self.employee_a), (self.user_b, self.employee_b), (self.user_c, self.employee_c),
         ):
             assignment = PlatformTaskAssignment.objects.get(task=self.task, employee=employee)
-            accept_platform_task_assignment(assignment=assignment, actor=user)
+            # إجباريّةٌ بالافتراض ⇒ مقبولةٌ منذ الإسناد (#213-ب).
             submit_platform_task(assignment=assignment, actor=user, body="تسليم.")
 
     def _count(self, url: str) -> int:
@@ -538,7 +547,6 @@ class CompletedAtOnLastAssignmentTest(_PlatformTaskFixture):
         assignment_a = PlatformTaskAssignment.objects.get(task=task, employee=self.employee_a)
         assignment_b = PlatformTaskAssignment.objects.get(task=task, employee=self.employee_b)
 
-        accept_platform_task_assignment(assignment=assignment_a, actor=self.user_a)
         submission_a = submit_platform_task(assignment=assignment_a, actor=self.user_a, body="جاهز.")
         review_platform_task_submission(
             submission=submission_a, actor=self.manager, decision=PlatformTaskSubmission.DECISION_APPROVED_FULL,
@@ -548,7 +556,6 @@ class CompletedAtOnLastAssignmentTest(_PlatformTaskFixture):
             task.completed_at, "إسنادٌ واحدٌ اكتمل من اثنين — المهمّةُ ليست مكتملةً بعد.",
         )
 
-        accept_platform_task_assignment(assignment=assignment_b, actor=self.user_b)
         submission_b = submit_platform_task(assignment=assignment_b, actor=self.user_b, body="جاهز.")
         review_platform_task_submission(
             submission=submission_b, actor=self.manager, decision=PlatformTaskSubmission.DECISION_APPROVED_FULL,
@@ -615,18 +622,41 @@ class PoolClaimCountIsServerTruthTest(_PlatformTaskFixture):
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(response.data["claimed_count"], 1, response.data)
 
-    def test_the_count_does_not_add_a_query_per_row(self):
-        for index in range(4):
+    def _list_query_count(self) -> int:
+        from django.db import connection
+        from django.test.utils import CaptureQueriesContext
+
+        self.client.force_authenticate(self.manager)
+        with CaptureQueriesContext(connection) as ctx:
+            response = self.client.get("/api/platform/ops/tasks/")
+        self.assertEqual(response.status_code, 200, response.content)
+        return len(ctx.captured_queries)
+
+    def _add_pool_tasks(self, count: int) -> None:
+        for index in range(count):
             pool = create_platform_task(
-                actor=self.manager, title=f"مجمَعٌ {index}", audience=PlatformTask.AUDIENCE_OPEN,
+                actor=self.manager, title=f"مجمَعٌ {index}-{count}",
+                audience=PlatformTask.AUDIENCE_OPEN,
             )
             claim_platform_task(task=pool, employee=self.employee_a)
 
-        self.client.force_authenticate(self.manager)
-        # استعلامٌ واحدٌ لا غير: العدُّ استعلامٌ فرعيٌّ **داخل** جملة الاختيار،
-        # فأربعُ مهامٍّ وأربعُ مطالباتٍ تُقرَأ كما تُقرَأ واحدة.
-        with self.assertNumQueries(1):
-            self.client.get("/api/platform/ops/tasks/")
+    def test_the_count_does_not_add_a_query_per_row(self):
+        """**ثبوتُ العدد مع نموّ الصفوف** لا رقمٌ حرفيٌّ يُعدَّل كلّما أُضيف حقل.
+
+        كان التأكيدُ `assertNumQueries(1)`، فأسقطه أوّلُ جلبٍ مسبقٍ ثابتٍ أُضيف
+        (شرحُ المدير في #213-ب) رغم أنّ الشكوى المحروسة — استعلامٌ **لكلّ صفّ** —
+        لم تقع. والقياسُ الصادق: العددُ نفسُه لصفٍّ واحدٍ ولعشرة.
+        """
+        self._add_pool_tasks(1)
+        few = self._list_query_count()
+
+        self._add_pool_tasks(9)
+        many = self._list_query_count()
+
+        self.assertEqual(
+            few, many,
+            f"قائمةُ المهامّ تُصدِر استعلاماً لكلّ صفّ: {few} ← {many}.",
+        )
 
 
 class WorkspaceNotesReachTheManagerNamedTest(_PlatformTaskFixture):
@@ -714,7 +744,6 @@ class HttpScopeTest(_HttpScopeFixture):
         self.assertIn(response.status_code, (403, 404), response.content)
 
     def test_staff_cannot_review_a_submission(self):
-        accept_platform_task_assignment(assignment=self.assignment_a, actor=self.user_a)
         submission = submit_platform_task(assignment=self.assignment_a, actor=self.user_a, body="جاهز.")
         self.client.force_authenticate(self.user_a)
         response = self.client.post(
@@ -775,8 +804,6 @@ class AssignmentsScopeTest(_HttpScopeFixture):
 class SubmissionsScopeTest(_HttpScopeFixture):
     def setUp(self):
         super().setUp()
-        accept_platform_task_assignment(assignment=self.assignment_a, actor=self.user_a)
-        accept_platform_task_assignment(assignment=self.assignment_b, actor=self.user_b)
         self.submission_a = submit_platform_task(assignment=self.assignment_a, actor=self.user_a, body="أ جاهز.")
         self.submission_b = submit_platform_task(assignment=self.assignment_b, actor=self.user_b, body="ب جاهز.")
 

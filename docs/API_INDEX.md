@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **868**
+عدد النقاط: **874**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -568,6 +568,8 @@
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/applicant-meetings/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/attendance-matrix/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/applicant-meetings/attendance-matrix/export/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/applicant-meetings/create/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/applicant-meetings/{pk}/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/applicant-meetings/{pk}/attendees/` | `ApplicantMeetingViewSet` | `platform_ops/views.py` |
@@ -718,9 +720,13 @@
 | `/api/platform/ops/subscriptions/{pk}/update-settings/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/subscriptions/{pk}/withdraw-cancellation/` | `ServiceSubscriptionViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/tasks/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/board/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/tasks/create/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/tasks/{pk}/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/{pk}/attachments/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/{pk}/attachments/{attachment_id}/download/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/tasks/{pk}/claim/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
+| `/api/platform/ops/tasks/{pk}/thread/` | `PlatformTaskViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/{pk}/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/usage-events/{pk}/reverse/` | `ServiceUsageEventViewSet` | `platform_ops/views.py` |

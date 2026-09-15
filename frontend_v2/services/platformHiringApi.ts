@@ -197,6 +197,78 @@ export const invitePlatformApplicant = (id: number, expiresInHours: number) =>
     expires_in_hours: expiresInHours,
   });
 
+/**
+ * عمودٌ في مصفوفة الحضور — اجتماعٌ واحد. `id` هو ما يُفتَح به عند الضغط (#213-ج).
+ */
+export interface ApplicantAttendanceColumn {
+  id: number;
+  title: string;
+  start: string;
+  end: string;
+  status: string;
+  status_display: string;
+  location: string;
+}
+
+/** خليّةٌ في الشبكة: حضورُ شخصٍ في اجتماعٍ بعينه، وملاحظتُه فيه. */
+export interface ApplicantAttendanceCell {
+  attendee: number;
+  meeting: number;
+  status: string;
+  status_display: string;
+  note: string;
+}
+
+/**
+ * صفٌّ في الشبكة — شخصٌ واحد.
+ *
+ * `applicant` هو ما يُفتَح به ملفُّه، و`null` للضيف الحرّ (لا ملفَّ له فلا رابط).
+ * و`cells` بمفتاحِ **معرّفِ الاجتماع نصّاً** لأنّ مفاتيح JSON نصوصٌ دائماً؛
+ * والمفتاحُ الغائبُ يعني «لم يُدعَ»، وهي غيرُ «لم يحضر».
+ */
+export interface ApplicantAttendanceRow {
+  identity_key: string;
+  applicant: number | null;
+  name: string;
+  applicant_status: string;
+  /** نصُّ حالة المتقدّم العربيُّ — فارغٌ للضيف الحرّ الذي لا ملفَّ له. */
+  applicant_status_display: string;
+  attended: number;
+  absent: number;
+  invited: number;
+  total: number;
+  cells: Record<string, ApplicantAttendanceCell>;
+}
+
+export interface ApplicantAttendanceMatrix {
+  from: string;
+  to: string;
+  meetings: ApplicantAttendanceColumn[];
+  rows: ApplicantAttendanceRow[];
+}
+
+export interface ApplicantAttendanceWindow {
+  from?: string;
+  to?: string;
+}
+
+/** شبكةُ الحضور: صفٌّ لكلّ شخصٍ وعمودٌ لكلّ اجتماع (#213-ج). */
+export const getApplicantAttendanceMatrix = (window: ApplicantAttendanceWindow = {}) =>
+  apiGetObject<ApplicantAttendanceMatrix>(`${OPS}/applicant-meetings/attendance-matrix/`, {
+    query: { from: window.from, to: window.to },
+  });
+
+/** نفسُ الشبكة ملفَّ CSV — بايتاتٌ عبر الخادم كنمط السيرة، لا رابطٌ مباشر. */
+export const exportApplicantAttendanceMatrix = (window: ApplicantAttendanceWindow = {}) => {
+  const params = new URLSearchParams();
+  if (window.from) params.set('from', window.from);
+  if (window.to) params.set('to', window.to);
+  const query = params.toString();
+  return apiGetForBlob(
+    `${OPS}/applicant-meetings/attendance-matrix/export/${query ? `?${query}` : ''}`,
+  );
+};
+
 /** بايتاتُ السيرة عبر الخادم — رابطُ التخزين لا يصل إلى المتصفّح. */
 export const getPlatformApplicantCv = (id: number) =>
   apiGetForBlob(`${OPS}/job-applicants/${id}/cv/`);

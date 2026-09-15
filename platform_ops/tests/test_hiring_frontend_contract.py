@@ -350,6 +350,37 @@ class PlatformHiringFrontendContractTest(TestCase):
             actual=meetings[0]["attendees"][0].keys(),
         )
 
+        # 16. شبكةُ الحضور: المصفوفةُ وعمودُها وصفُّها وخليّتُها (#213-ج).
+        # **إسقاطٌ مبنيٌّ بيدٍ لا مُسلسِلُ نموذج**: حقلٌ يُعاد تسميتُه في الخدمة لا
+        # يسقط له اختبارُ مُسلسِل، والشبكةُ كلُّها تُصيَّر من هذه المفاتيح.
+        resp = self.super_client.get(
+            "/api/platform/ops/applicant-meetings/attendance-matrix/"
+        )
+        self.assertEqual(resp.status_code, status.HTTP_200_OK)
+        self._assert_declared_fields_exist(
+            interface="ApplicantAttendanceMatrix",
+            declared=_interface_fields(hiring_src, "ApplicantAttendanceMatrix"),
+            actual=resp.data.keys(),
+        )
+        self.assertTrue(resp.data["meetings"], "الشبكةُ عادت بلا أعمدة")
+        self._assert_declared_fields_exist(
+            interface="ApplicantAttendanceColumn",
+            declared=_interface_fields(hiring_src, "ApplicantAttendanceColumn"),
+            actual=resp.data["meetings"][0].keys(),
+        )
+        self.assertTrue(resp.data["rows"], "الشبكةُ عادت بلا صفوف")
+        self._assert_declared_fields_exist(
+            interface="ApplicantAttendanceRow",
+            declared=_interface_fields(hiring_src, "ApplicantAttendanceRow"),
+            actual=resp.data["rows"][0].keys(),
+        )
+        first_cell = next(iter(resp.data["rows"][0]["cells"].values()))
+        self._assert_declared_fields_exist(
+            interface="ApplicantAttendanceCell",
+            declared=_interface_fields(hiring_src, "ApplicantAttendanceCell"),
+            actual=first_cell.keys(),
+        )
+
     def test_frontend_hiring_options_match_backend_choices(self):
         """ج١. مطابقة خيارات حالات المتقدمين وأنواع الدوام في الواجهة لتسميات الخادم choices بالتساوي."""
         self.assertTrue(HIRING_UTIL.exists(), f"ملف الواجهة {HIRING_UTIL} غير موجود")

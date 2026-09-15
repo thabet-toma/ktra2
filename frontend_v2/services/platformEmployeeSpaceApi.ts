@@ -25,6 +25,8 @@ export interface MyPlatformEmployeeProfile {
   /** عنوانُ العرض — منفصلٌ عن `specialty` المفتاحيّ عمداً. */
   job_title: string;
   status: PlatformEmployeeStatus;
+  /** نصُّ الحالة العربيُّ من `choices` الخادم — لا يُشتقُّ في المتصفّح. */
+  status_display: string;
   created_at: string;
   updated_at: string;
 }

@@ -40,6 +40,7 @@ from .models import (
     PlatformTask,
     PlatformTaskAssignment,
     PlatformTaskSubmission,
+    PlatformTaskAttachment,
     PlatformEmployeeNote,
     PlatformWorkspaceNote,
     PolicyProfile,
@@ -62,6 +63,9 @@ from .models import (
 class PlatformEmployeeSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", read_only=True)
     email = serializers.EmailField(source="user.email", read_only=True)
+    #: نصُّ الحالة العربيُّ من `choices` — القاعدةُ في هذا المستودع أنّ نصَّ
+    #: الخيار يخرج مع رمزه، فلا تكتب الشاشةُ قاموساً ثانياً يتخلّف عنه.
+    status_display = serializers.CharField(source="get_status_display", read_only=True)
 
     class Meta:
         model = PlatformEmployee
@@ -77,6 +81,7 @@ class PlatformEmployeeSerializer(serializers.ModelSerializer):
             "phone",
             "job_title",
             "status",
+            "status_display",
             "created_at",
             "updated_at",
         ]
@@ -1309,6 +1314,34 @@ class TransitionWorkOrderStatusSerializer(serializers.Serializer):
 # ==============================================================================
 
 
+class PlatformTaskAttachmentSerializer(serializers.ModelSerializer):
+    """مرفقُ مهمّة — قراءةٌ فقط؛ الرفعُ عبر فعلِ `attachments` الذي يحمل الملفَّ نفسَه."""
+
+    kind_display = serializers.CharField(source="get_kind_display", read_only=True)
+    employee_name = serializers.CharField(
+        source="employee.user.username", read_only=True, default="")
+    uploaded_by_name = serializers.CharField(
+        source="uploaded_by.username", read_only=True, default="")
+
+    class Meta:
+        model = PlatformTaskAttachment
+        fields = [
+            "id",
+            "task",
+            "kind",
+            "kind_display",
+            "employee",
+            "employee_name",
+            "submission",
+            "url",
+            "name",
+            "content_type",
+            "uploaded_by",
+            "uploaded_by_name",
+            "created_at",
+        ]
+
+
 class PlatformTaskSerializer(serializers.ModelSerializer):
     """مهمّةُ منصّةٍ — قراءةٌ فقط من الواجهة؛ الكتابةُ عبر `CreatePlatformTaskSerializer` والأفعال."""
 
@@ -1317,6 +1350,24 @@ class PlatformTaskSerializer(serializers.ModelSerializer):
     audience_display = serializers.CharField(source="get_audience_display", read_only=True)
     created_by_name = serializers.CharField(source="created_by.username", read_only=True, default="")
     claimed_count = serializers.SerializerMethodField()
+    brief_attachments = serializers.SerializerMethodField()
+
+    def get_brief_attachments(self, obj) -> list:
+        """شرحُ المدير وحدَه — لا ملفّاتُ الموظّفين (#213-ب).
+
+        بطاقةُ المهمّة يراها كلُّ مُسنَدٍ إليها، فلو حملت `attachments` كاملةً
+        لرأى كلُّ موظّفٍ ملفّاتِ زملائه على المهمّة نفسِها. ملفّاتُ العمل
+        والتسليم تخرج من خيط المهمّة (`thread`) حيث يُرشَّح بالرائي.
+
+        والقائمةُ المجلوبةُ مسبقاً مُفضَّلةٌ حين توجد — كما في `claimed_count`
+        تماماً: بدونها استعلامٌ لكلّ صفٍّ في القائمة، وهو ما أسقطه حارسُ
+        الاستعلامات في `test_platform_tasks.py` لحظةَ كتابة هذا الحقل. وحمولةُ
+        الإنشاء تخرج من كائنٍ طازجٍ بلا جلبٍ مسبق فتستعلم مرّةً واحدة.
+        """
+        rows = getattr(obj, "brief_attachment_rows", None)
+        if rows is None:
+            rows = list(obj.attachments.filter(kind=PlatformTaskAttachment.Kind.BRIEF))
+        return PlatformTaskAttachmentSerializer(rows, many=True).data
 
     def get_claimed_count(self, obj) -> int:
         """عددُ من أُسندت إليه المهمّةُ فعلاً — **من الخادم لا من قائمة المستدعي**.
@@ -1346,6 +1397,8 @@ class PlatformTaskSerializer(serializers.ModelSerializer):
             "audience_display",
             "due_date",
             "claim_limit",
+            "is_mandatory",
+            "brief_attachments",
             "created_by",
             "created_by_name",
             "claimed_count",
@@ -1367,6 +1420,9 @@ class CreatePlatformTaskSerializer(serializers.Serializer):
         child=serializers.IntegerField(min_value=1), required=False, default=list,
     )
     claim_limit = serializers.IntegerField(required=False, allow_null=True, default=None, min_value=1)
+    #: خيارُ المدير للمهمّة الجماعيّة. الفرديّةُ إجباريّةٌ دائماً ومهمّةُ المجمَع
+    #: اختياريّةٌ دائماً — تفرضهما الخدمةُ لا هذا المُسلسِل.
+    is_mandatory = serializers.BooleanField(required=False, default=True)
 
 
 class PlatformTaskAssignmentSerializer(serializers.ModelSerializer):
@@ -1375,6 +1431,12 @@ class PlatformTaskAssignmentSerializer(serializers.ModelSerializer):
     task_title = serializers.CharField(source="task.title", read_only=True)
     employee_name = serializers.CharField(source="employee.user.username", read_only=True)
     status_display = serializers.CharField(source="get_status_display", read_only=True)
+    #: **شارةُ «إجباريّة» تُقرأ من المهمّة لا تُستنتج من الحالة** (#213-ب):
+    #: إسنادٌ `ACCEPTED` قد يكون إجباريّاً وُلد مقبولاً، وقد يكون اختياريّاً قبله
+    #: صاحبُه بيده. والفرقُ هو ما يريد الموظّفُ رؤيتَه.
+    is_mandatory = serializers.BooleanField(source="task.is_mandatory", read_only=True)
+    task_audience = serializers.CharField(source="task.audience", read_only=True)
+    task_due_date = serializers.DateField(source="task.due_date", read_only=True)
 
     class Meta:
         model = PlatformTaskAssignment
@@ -1382,6 +1444,9 @@ class PlatformTaskAssignmentSerializer(serializers.ModelSerializer):
             "id",
             "task",
             "task_title",
+            "task_audience",
+            "task_due_date",
+            "is_mandatory",
             "employee",
             "employee_name",
             "status",
@@ -1397,6 +1462,17 @@ class SubmitPlatformTaskSerializer(serializers.Serializer):
     """تسليمُ إسنادٍ — النصُّ اختياريٌّ (قد يكون التسليمُ بلا ملاحظات)."""
 
     body = serializers.CharField(required=False, allow_blank=True, default="")
+    #: معرّفاتُ ملفّاتِ العمل التي تُرفَق بهذا التسليم — تُنقَل من `work` إلى
+    #: `delivery` فتُنسَب إلى التسليم بعينه.
+    attachment_ids = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False, default=list,
+    )
+
+
+class UploadPlatformTaskAttachmentSerializer(serializers.Serializer):
+    """حمولةُ رفعِ مرفق — الملفُّ في `request.FILES`، وهذه بقيّةُ الوصف."""
+
+    name = serializers.CharField(required=False, allow_blank=True, default="", max_length=255)
 
 
 class PlatformTaskSubmissionSerializer(serializers.ModelSerializer):

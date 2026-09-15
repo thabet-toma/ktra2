@@ -3795,6 +3795,21 @@ class PlatformTask(models.Model):
         verbose_name="حدُّ المطالبين",
         help_text="لمهمّة المجمَع فقط: كم موظّفاً يجوز أن يطالب بها. لا حدّ إن ترك فارغاً.",
     )
+    #: **هل يملك الموظّفُ ألّا يستلمها؟** (#213-ب)
+    #:
+    #: كانت كلُّ مهمّةٍ مُسندةٍ تولد `OFFERED` — أي معروضةً تنتظر قبولاً — فمهمّةٌ
+    #: أُسندت لشخصٍ بعينه تبدو له دعوةً يملك تركَها، وهي ليست كذلك. والمالكُ
+    #: صريح: المُسنَدةُ شخصيّاً **مقبولةٌ افتراضاً بلا خيارِ رفض**، والجماعيّةُ
+    #: يختار لها المديرُ إجباريّةً أو اختياريّة.
+    #:
+    #: والحقلُ يحفظ ما اختاره المديرُ؛ **أثرُه** تحسبه `create_platform_task`:
+    #: الفرديّةُ إجباريّةٌ دائماً (لا معنى لعرضٍ على شخصٍ واحد)، ومهمّةُ المجمَع
+    #: اختياريّةٌ دائماً (المطالبةُ بها تطوّعٌ بتعريفها).
+    is_mandatory = models.BooleanField(
+        default=True,
+        verbose_name="إجباريّة",
+        help_text="الإجباريّةُ تُقبَل فورَ إسنادها؛ الاختياريّةُ تُعرَض وللموظّف قبولُها.",
+    )
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,
@@ -4036,3 +4051,113 @@ class PlatformWorkspaceNote(models.Model):
     def __str__(self):
         return f"ملاحظة {self.employee_id}" + (f" على مهمّة {self.task_id}" if self.task_id else "")
 
+
+
+class PlatformTaskAttachment(models.Model):
+    """مرفقُ مهمّةِ منصّةٍ — **جدولٌ واحدٌ بثلاثة أدوارٍ لا ثلاثةُ جداول** (#213-ب).
+
+    لم يكن في `platform_ops` كلِّه جدولُ مرفقاتٍ واحد: المديرُ يشرح المهمّةَ نصّاً
+    فقط، والموظّفُ يسلّم نصّاً فقط. وطلبُ المالك ثلاثةُ مواضعَ للملفّ — شرحُ
+    المدير مع المهمّة، وملفّاتُ الموظّف **قبل** التسليم (ومنذ لحظة الإسناد، قبل
+    القبول)، وما يُرفَق مع التسليم نفسِه — وهي ثلاثةُ أدوارٍ لصفٍّ واحدٍ لا ثلاثةُ
+    كيانات: نفسُ الرابط ونفسُ الاسم ونفسُ الرافع ونفسُ نقطة الرفع. ثلاثةُ جداولَ
+    تعني ثلاثةَ مُسلسِلاتٍ وثلاثَ نقاطٍ وثلاثَ فرصٍ لتفترق قواعدُها.
+
+    و`kind` ليس زينةً: هو ما يفصل «شرحاً يقرؤه الموظّفُ قبل أن يبدأ» عن «عملاً
+    يراجعه المدير». وقيدُ القاعدة يمنع الصفَّ الذي يخالف دورَه — مرفقُ شرحٍ
+    بموظّفٍ، أو مرفقُ تسليمٍ بلا تسليم.
+
+    **بلا `tenant` FK** كبقيّة عائلة `PlatformTask` — مهامُّ فريق كترا الداخليّ.
+    """
+
+    class Kind(models.TextChoices):
+        BRIEF = "brief", "شرحُ المدير"
+        WORK = "work", "ملفُّ الموظّف أثناء العمل"
+        DELIVERY = "delivery", "مرفقُ تسليم"
+
+    task = models.ForeignKey(
+        PlatformTask,
+        on_delete=models.CASCADE,
+        related_name="attachments",
+        verbose_name="المهمّة",
+    )
+    kind = models.CharField(
+        max_length=10,
+        choices=Kind.choices,
+        db_index=True,
+        verbose_name="الدور",
+    )
+    #: صاحبُ الملفّ حين يكون الرافعُ موظّفاً — فارغٌ لشرح المدير.
+    employee = models.ForeignKey(
+        PlatformEmployee,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="platform_task_attachments",
+        verbose_name="الموظّف",
+    )
+    #: التسليمُ الذي رافقه الملفّ — فارغٌ لما رُفع قبل التسليم.
+    submission = models.ForeignKey(
+        PlatformTaskSubmission,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="attachments",
+        verbose_name="التسليم",
+    )
+    #: نصٌّ لا `URLField`: الرابطُ يأتي من التخزين كما هو، والتحقّقُ منه شكلاً
+    #: يرفض روابطَ صحيحةً لا تعجب المُدقِّق. وهو ما يفعله
+    #: `employee_ops.TaskSubmissionAttachment` نفسُه.
+    url = models.TextField(verbose_name="رابطُ الملفّ")
+    name = models.CharField(max_length=255, blank=True, default="", verbose_name="اسمُ الملفّ")
+    content_type = models.CharField(
+        max_length=120, blank=True, default="", verbose_name="نوعُ المحتوى",
+    )
+    # الرافعُ قد يُحذف حسابُه ويبقى ملفُّه — كقاعدة `PlatformEmployeeNote.author`.
+    uploaded_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="+",
+        verbose_name="الرافع",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الرفع")
+
+    class Meta:
+        verbose_name = "مرفق مهمّة منصّة"
+        verbose_name_plural = "مرفقات مهامّ المنصّة"
+        ordering = ["created_at", "id"]
+        constraints = [
+            # ‏`CheckConstraint` لا `clean()`: MySQL تُنشئها وتفرضها فعلاً (بخلاف
+            # الفرادة المشروطة)، و`clean()` لا يحمي `bulk_create` ولا كتابةً
+            # مباشرة. وصفٌّ يخالف دورَه يجعل الخيطَ يكذب على قارئه.
+            models.CheckConstraint(
+                condition=(
+                    models.Q(
+                        kind="brief",
+                        employee__isnull=True,
+                        submission__isnull=True,
+                    )
+                    | models.Q(
+                        kind="work",
+                        employee__isnull=False,
+                        submission__isnull=True,
+                    )
+                    | models.Q(
+                        kind="delivery",
+                        employee__isnull=False,
+                        submission__isnull=False,
+                    )
+                ),
+                name="platform_ops_task_attachment_role_is_coherent",
+            ),
+        ]
+        indexes = [
+            models.Index(fields=["task", "kind", "created_at"]),
+            # ولا فهرسَ على `submission` وحدَه: جانغو يُنشئ فهرسَ المفتاح
+            # الأجنبيِّ تلقائيّاً، فالثاني نسخةٌ تُكتَب في كلّ إدراجٍ بلا قارئ.
+        ]
+
+    def __str__(self):
+        return f"{self.get_kind_display()}: {self.name or self.url[:40]}"

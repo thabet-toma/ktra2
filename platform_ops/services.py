@@ -67,6 +67,7 @@ from .models import (
     PlatformTask,
     PlatformTaskAssignment,
     PlatformTaskSubmission,
+    PlatformTaskAttachment,
     PlatformEmployeeNote,
     PlatformWorkspaceNote,
     PolicyProfile,
@@ -10522,12 +10523,17 @@ def create_platform_task(
     due_date=None,
     employee_ids: list[int] | None = None,
     claim_limit: int | None = None,
+    is_mandatory: bool = True,
 ) -> PlatformTask:
     """إنشاءُ مهمّةِ منصّةٍ وإسناداتِها **في نفس المعاملة** — بنفس طريقة `employee_ops` القديمة.
 
     `ALL` تُنشئ صفّاً لكلّ موظّفٍ `ACTIVE` (لا موقوفٍ ولا خارجَ الخدمة)، و
     `INDIVIDUAL`/`SPECIFIC` للمذكورين بمعرّفاتهم، و`OPEN` بلا صفوفٍ حتى يطالب
     بها موظّف (`claim_platform_task`).
+
+    #213-ب: حالةُ الإسناد الأولى صارت تتبع الإجباريّةَ لا ثابتةً على `OFFERED`.
+    الإجباريّةُ تولد `ACCEPTED` — بلاغُ المالك: المُسنَدةُ شخصيّاً «ما في مجال ما
+    يستلمها، مقبولة ديفلت». والاختياريّةُ تبقى `OFFERED` فيملك الموظّفُ قبولَها.
     """
     title = str(title or "").strip()
     if not title:
@@ -10546,6 +10552,15 @@ def create_platform_task(
     if audience == PlatformTask.AUDIENCE_OPEN and employee_ids:
         raise PlatformTaskError("open_task_takes_no_employees", "مهمّةُ المجمَع تُترَك بلا موظّفين محدَّدين.")
 
+    # الإجباريّةُ الفعليّة لا ما وصل من الشبكة: العرضُ على شخصٍ واحدٍ بلا معنى،
+    # والمطالبةُ بمهمّةِ مجمَعٍ تطوّعٌ بتعريفها. فالخيارُ للجماعيّة وحدَها.
+    if audience == PlatformTask.AUDIENCE_INDIVIDUAL:
+        is_mandatory = True
+    elif audience == PlatformTask.AUDIENCE_OPEN:
+        is_mandatory = False
+    else:
+        is_mandatory = bool(is_mandatory)
+
     task = PlatformTask.objects.create(
         title=title,
         description=str(description or ""),
@@ -10553,6 +10568,7 @@ def create_platform_task(
         audience=audience,
         due_date=due_date,
         claim_limit=claim_limit if audience == PlatformTask.AUDIENCE_OPEN else None,
+        is_mandatory=is_mandatory,
         created_by=actor,
         status=PlatformTask.STATUS_OPEN if audience == PlatformTask.AUDIENCE_OPEN else PlatformTask.STATUS_NEW,
     )
@@ -10568,16 +10584,31 @@ def create_platform_task(
             raise PlatformTaskError("employee_not_found", f"موظّفو منصّةٍ غير موجودين: {missing}")
 
     if target_employees:
-        PlatformTaskAssignment.objects.bulk_create(
-            [PlatformTaskAssignment(task=task, employee=emp) for emp in target_employees]
+        now = timezone.now()
+        initial_status = (
+            PlatformTaskAssignment.STATUS_ACCEPTED if is_mandatory
+            else PlatformTaskAssignment.STATUS_OFFERED
         )
+        PlatformTaskAssignment.objects.bulk_create([
+            PlatformTaskAssignment(
+                task=task,
+                employee=emp,
+                status=initial_status,
+                accepted_at=now if is_mandatory else None,
+            )
+            for emp in target_employees
+        ])
+        # الحالةُ مشتقّةٌ من الإسنادات، وإسنادٌ `ACCEPTED` يعني أنّ المهمّةَ بدأت
+        # فعلاً — فلو تُركت `NEW` لقرأ المديرُ «لم يبدأ أحد» على عملٍ مُسنَدٍ ملزِم.
+        if is_mandatory:
+            _recompute_platform_task_status(task)
         for emp in target_employees:
             create_platform_notification(
                 recipient=emp.user,
                 notification_type=PlatformNotification.NotificationType.TASK_ASSIGNED,
                 title=f"مهمّةٌ جديدة: {task.title}",
                 message=task.description or "",
-                data={"task_id": task.pk},
+                data={"task_id": task.pk, "is_mandatory": is_mandatory},
             )
 
     actor_employee = PlatformEmployee.objects.filter(user=actor).first() if actor else None
@@ -10651,8 +10682,17 @@ def accept_platform_task_assignment(*, assignment: PlatformTaskAssignment, actor
 
 
 @transaction.atomic
-def submit_platform_task(*, assignment: PlatformTaskAssignment, actor, body: str = "") -> PlatformTaskSubmission:
+def submit_platform_task(
+    *,
+    assignment: PlatformTaskAssignment,
+    actor,
+    body: str = "",
+    attachment_ids: list[int] | None = None,
+) -> PlatformTaskSubmission:
     """تسليمُ إسنادٍ — `ACCEPTED`/`IN_PROGRESS`/`RETURNED` ← `SUBMITTED` + صفُّ تسليمٍ `PENDING`.
+
+    و`attachment_ids` ملفّاتُ عملٍ رُفعت سلفاً على هذه المهمّة تُنسَب إلى هذا
+    التسليم (#213-ب) — الرفعُ فعلٌ مستقلٌّ سبقه، فلا يحمل التسليمُ بايتات.
 
     تسليمٌ ثانٍ قبل مراجعة الأوّل مرفوضٌ: لا يصحّ أن يتراكم تسليمان معلّقان لنفس
     الإسناد فيلتبس أيُّهما يراجع المدير.
@@ -10682,6 +10722,19 @@ def submit_platform_task(*, assignment: PlatformTaskAssignment, actor, body: str
     submission = PlatformTaskSubmission.objects.create(
         task=locked_task, employee=locked_assignment.employee, body=str(body or ""),
     )
+    # #213-ب: ملفّاتُ العمل المختارة تصير مرفقاتِ هذا التسليم. **تُنقَل ولا
+    # تُنسَخ**: الملفُّ واحدٌ في التخزين، ونسخُ صفِّه يعني رقمين لبايتاتٍ واحدة
+    # فيختلف حذفُ أحدهما عن الآخر. والترشيحُ بالمهمّة وبصاحبها معاً — معرّفٌ من
+    # مهمّةٍ أخرى أو من زميلٍ لا يُنقَل، ويُهمَل بصمتٍ لا يُرفَض: التسليمُ نفسُه
+    # وقع، ورفضُه كلِّه لأجل معرّفٍ غريبٍ في قائمةٍ يُضيّع عملاً تمّ.
+    wanted = [int(x) for x in (attachment_ids or [])]
+    if wanted:
+        PlatformTaskAttachment.objects.filter(
+            pk__in=wanted,
+            task=locked_task,
+            employee=locked_assignment.employee,
+            kind=PlatformTaskAttachment.Kind.WORK,
+        ).update(kind=PlatformTaskAttachment.Kind.DELIVERY, submission=submission)
     _recompute_platform_task_status(locked_task)
     log_platform_activity(
         employee=locked_assignment.employee,
@@ -10843,6 +10896,267 @@ def add_platform_workspace_note(
 
 
 # ==============================================================================
+# 213-ب: ملفُّ المهمّة — مرفقاتٌ وخيطُ حديثٍ ولوحُ مدير
+# ==============================================================================
+
+
+def assert_platform_task_is_assigned_to(*, task: PlatformTask, employee: PlatformEmployee) -> None:
+    """الموظّفُ يرفع على مهمّةٍ مُسندةٍ له — **ولو لم يقبلها بعد**.
+
+    الشرطُ الإسنادُ لا القبول: بلاغُ المالك أنّ الموظّف يرفع ملفّاتِه ويكتب
+    ملاحظاتِه «حتى قبل الاستلام»، فربطُ الرفع بالقبول يمنعه ممّا طُلب له. وحدُّه
+    وجودُ صفِّ إسنادٍ باسمه — بلا ذلك يصير رقمُ المهمّة في العنوان باباً يرى منه
+    مهامَّ زملائه ويكتب عليها.
+
+    **عامّةٌ لا خاصّةٌ بقصد**: يناديها البابُ (`views.py`) **قبل** أن يرفع بايتاتِ
+    الملفّ إلى التخزين، وتناديها `attach_to_platform_task` عند تسجيل الصفّ. قاعدةٌ
+    واحدةٌ في موضعٍ واحد، وموضعان للنداء: بدون الأوّل يصير كلُّ مسارِ مهمّةٍ
+    يراها الموظّفُ — ومهامُّ المجمَع يراها الجميعُ — باباً يُثقِل به حسابَ التخزين
+    بملفّاتٍ تُرفَض بعد وصولها.
+    """
+    if not PlatformTaskAssignment.objects.filter(task=task, employee=employee).exists():
+        raise PlatformTaskError(
+            "task_not_assigned_to_you", "هذه المهمّةُ ليست مُسندةً لك.", status_code=403,
+        )
+
+
+@transaction.atomic
+def attach_to_platform_task(
+    *,
+    task: PlatformTask,
+    actor,
+    url: str,
+    kind: str,
+    name: str = "",
+    content_type: str = "",
+    employee: PlatformEmployee | None = None,
+    submission: PlatformTaskSubmission | None = None,
+) -> PlatformTaskAttachment:
+    """يُسجّل مرفقاً على مهمّة — **الدورُ يحدّد من يرفع وماذا يُملأ**.
+
+    `brief` شرحُ المدير: بلا موظّفٍ وبلا تسليم. `work` ملفُّ الموظّف قبل التسليم:
+    بموظّفٍ بلا تسليم. `delivery` مرفقُ التسليم: بموظّفٍ وتسليمِه هو. والقيدُ في
+    القاعدة يمنع الخلط، وهذه الدالّةُ تمنعه برسالةٍ مفهومةٍ قبل أن يصل إليه.
+    """
+    url = str(url or "").strip()
+    if not url:
+        raise PlatformTaskError("url_required", "رابطُ الملفّ مطلوب.")
+    if kind not in PlatformTaskAttachment.Kind.values:
+        raise PlatformTaskError("invalid_kind", f"دورُ مرفقٍ غيرُ معروف: {kind}")
+
+    if kind == PlatformTaskAttachment.Kind.BRIEF:
+        if employee is not None or submission is not None:
+            raise PlatformTaskError(
+                "brief_has_no_owner", "شرحُ المهمّة ملكُها لا ملكُ موظّفٍ ولا تسليم.",
+            )
+    else:
+        if employee is None:
+            raise PlatformTaskError("employee_required", "مرفقُ الموظّف يلزمه صاحبُه.")
+        assert_platform_task_is_assigned_to(task=task, employee=employee)
+        if kind == PlatformTaskAttachment.Kind.DELIVERY:
+            if submission is None:
+                raise PlatformTaskError("submission_required", "مرفقُ التسليم يلزمه تسليمُه.")
+            # صاحبُ التسليم لا غير، ومن نفس المهمّة: بدون هذا يصير رقمُ تسليمٍ
+            # في الحمولة باباً يُعلَّق به ملفٌّ على تسليم زميل.
+            if submission.task_id != task.pk or submission.employee_id != employee.pk:
+                raise PlatformTaskError(
+                    "submission_mismatch", "هذا التسليمُ ليس تسليمَك على هذه المهمّة.",
+                )
+        elif submission is not None:
+            raise PlatformTaskError(
+                "work_takes_no_submission", "ملفُّ العمل يُرفع قبل التسليم فلا يُعلَّق بتسليم.",
+            )
+
+    return PlatformTaskAttachment.objects.create(
+        task=task,
+        kind=kind,
+        employee=employee,
+        submission=submission,
+        url=url,
+        name=str(name or "")[:255],
+        content_type=str(content_type or "")[:120],
+        uploaded_by=actor if getattr(actor, "pk", None) else None,
+    )
+
+
+def platform_task_thread(task: PlatformTask) -> list[dict]:
+    """خيطُ حديثٍ واحدٌ على المهمّة — **إسقاطُ قراءةٍ لا جدولٌ ثالث**.
+
+    طلبُ المالك «ينفتح ملف كامل للمهمة»: تعليقُ الموظّف وردُّ المدير في مكانٍ
+    واحدٍ مرتَّب. والكاتبان موجودان أصلاً في جدولين لسببٍ صحيح — ملاحظةُ المدير
+    لها `visibility` وقد تكون عن الموظّف عموماً، وملاحظةُ الموظّف ملكُه — فجدولٌ
+    ثالثٌ يجمعهما كان سيشطر كلَّ قاعدةٍ منهما نصفين ويترك للبيانات بابين تُكتب
+    منهما. الخيطُ هنا **يُقرأ** من الاثنين ويُرتَّب زمنيّاً.
+
+    والتسليماتُ ومراجعاتُها أحداثٌ في الخيط لا خارجَه: «سلّم» ثمّ «رُدَّ بملاحظة»
+    هما أهمُّ ما في تاريخ المهمّة، وقراءتُهما في شاشةٍ ثانيةٍ تُفقد الترتيبَ الذي
+    يفسّرهما.
+
+    يُرجِع أحداثاً مرتَّبةً تصاعديّاً، و**لا يُرشِّح بالرؤية**: الترشيحُ مسؤوليّةُ
+    المستدعي (`views.py`) الذي وحدَه يعرف من يسأل.
+    """
+    events: list[dict] = []
+
+    attachments_by_submission: dict[int, list] = {}
+    for att in task.attachments.select_related("employee__user", "uploaded_by").all():
+        payload = {
+            "id": att.pk,
+            "kind": att.kind,
+            "url": att.url,
+            "name": att.name,
+            "content_type": att.content_type,
+            "employee": att.employee_id,
+        }
+        if att.submission_id:
+            attachments_by_submission.setdefault(att.submission_id, []).append(payload)
+            continue
+        events.append({
+            "type": "attachment",
+            "at": att.created_at,
+            "author_role": (
+                "manager" if att.kind == PlatformTaskAttachment.Kind.BRIEF else "employee"
+            ),
+            "author_name": getattr(att.uploaded_by, "username", "") or "",
+            "employee": att.employee_id,
+            "attachments": [payload],
+            "body": "",
+        })
+
+    for note in task.manager_notes.select_related("author").all():
+        events.append({
+            "type": "manager_note",
+            "at": note.created_at,
+            "author_role": "manager",
+            "author_name": getattr(note.author, "username", "") or "",
+            "employee": note.employee_id,
+            "visibility": note.visibility,
+            "body": note.body,
+            "attachments": [],
+        })
+
+    for note in task.workspace_notes.select_related("employee__user").all():
+        events.append({
+            "type": "employee_note",
+            "at": note.created_at,
+            "author_role": "employee",
+            "author_name": getattr(note.employee.user, "username", "") or "",
+            "employee": note.employee_id,
+            "body": note.body,
+            "attachments": [],
+        })
+
+    for sub in task.submissions.select_related("employee__user", "reviewer").all():
+        # **ونصُّ القرار الظاهرُ يُرسَل معه**: `decision` رمزٌ إنجليزيٌّ
+        # (`APPROVED_PARTIAL`)، والشاشةُ العربيّةُ لا تملك ترجمتَه إلّا أن تكتب
+        # قاموساً ثانياً يتخلّف عن `choices` أوّلَ ما يُعدَّل. والقاعدةُ في هذا
+        # المستودع أنّ نصَّ الخيار يخرج من الخادم مع رمزه (`*_display`).
+        events.append({
+            "type": "submission",
+            "at": sub.created_at,
+            "author_role": "employee",
+            "author_name": getattr(sub.employee.user, "username", "") or "",
+            "employee": sub.employee_id,
+            "submission": sub.pk,
+            "decision": sub.decision,
+            "decision_display": sub.get_decision_display() if sub.decision else "",
+            "body": sub.body,
+            "attachments": attachments_by_submission.get(sub.pk, []),
+        })
+        if sub.reviewed_at is not None:
+            events.append({
+                "type": "review",
+                "at": sub.reviewed_at,
+                "author_role": "manager",
+                "author_name": getattr(sub.reviewer, "username", "") or "",
+                "employee": sub.employee_id,
+                "submission": sub.pk,
+                "decision": sub.decision,
+                "decision_display": sub.get_decision_display() if sub.decision else "",
+                "body": sub.reviewer_notes,
+                "attachments": [],
+            })
+
+    events.sort(key=lambda event: (event["at"], event["type"]))
+    return events
+
+
+def platform_task_board() -> list[dict]:
+    """ماذا مع كلِّ واحدٍ وماذا استلم — **بأربعة استعلاماتٍ ثابتةٍ لا واحدٍ لكلّ موظّف**.
+
+    بلاغُ المالك أنّ المدير «يبين له منيح كل واحد شو معو مهام وشو استلم مهام».
+    وجمعُ ذلك في الواجهة من قائمة الإسنادات يعني تحميلَ كلِّ إسنادٍ في المنصّة إلى
+    المتصفّح ثمّ عدَّه هناك — يكبر مع الزمن بلا سقف. فالعدُّ في القاعدة.
+
+    «متأخّرة» = إسنادٌ لمهمّةٍ مضى استحقاقُها ولم يُكمِلها صاحبُه بعد.
+    و«إجباريّة» عدُّ ما أُسند إليه بلا خيار — يُقرأ **بجانب** «مقبولة» لا بدلَها،
+    فبدونه يقرأ المديرُ إلزاماً على أنّه قبول.
+    """
+    today = timezone.localdate()
+    counts_by_employee: dict[int, dict] = {}
+    mandatory_by_employee: dict[int, int] = {}
+
+    # **لا يُرشَّح على «نشط»**: موظّفٌ أُوقف وبيده مهمّةٌ متأخّرةٌ كان يختفي من
+    # اللوح كلِّه — وهو بعينه من يسأل عنه المديرُ حين يقول «يبين لي منيح».
+    # والترشيحُ على النشاط مكانُه الإسنادُ الجديدُ (`create_platform_task`) لا
+    # قراءةُ ما أُسند فعلاً.
+    assigned = PlatformTaskAssignment.objects.all()
+    for row in assigned.values("employee_id", "status").annotate(total=Count("id")):
+        counts_by_employee.setdefault(row["employee_id"], {})[row["status"]] = row["total"]
+
+    # **و«مقبولة» وحدَها لا تجيب «شو استلم»**: الإجباريّةُ تولد `ACCEPTED` بلا
+    # فعلٍ من صاحبها (#213-ب)، فعمودٌ يجمعها بما قَبِله بيده يخلط «أخذ» بـ«أُلزم».
+    for row in (
+        assigned
+        .filter(task__is_mandatory=True)
+        .values("employee_id")
+        .annotate(total=Count("id"))
+    ):
+        mandatory_by_employee[row["employee_id"]] = row["total"]
+
+    overdue_by_employee = {
+        row["employee_id"]: row["total"]
+        for row in (
+            assigned
+            .filter(task__due_date__lt=today)
+            .exclude(status=PlatformTaskAssignment.STATUS_COMPLETED)
+            .values("employee_id")
+            .annotate(total=Count("id"))
+        )
+    }
+
+    board = []
+    # النشطون كلُّهم — ولو بلا مهمّةٍ واحدة، فصفٌّ بأصفارٍ جوابٌ أيضاً — ومعهم
+    # كلُّ من بيده إسنادٌ مهما كانت حالتُه.
+    employees = (
+        PlatformEmployee.objects
+        .filter(
+            Q(status=PlatformEmployee.Status.ACTIVE)
+            | Q(pk__in=list(counts_by_employee))
+        )
+        .select_related("user")
+        .order_by("pk")
+    )
+    for employee in employees:
+        counts = counts_by_employee.get(employee.pk, {})
+        board.append({
+            "employee": employee.pk,
+            "employee_name": getattr(employee.user, "username", "") or "",
+            "employee_status": employee.status,
+            "employee_status_display": employee.get_status_display(),
+            "offered": counts.get(PlatformTaskAssignment.STATUS_OFFERED, 0),
+            "accepted": counts.get(PlatformTaskAssignment.STATUS_ACCEPTED, 0),
+            "in_progress": counts.get(PlatformTaskAssignment.STATUS_IN_PROGRESS, 0),
+            "submitted": counts.get(PlatformTaskAssignment.STATUS_SUBMITTED, 0),
+            "completed": counts.get(PlatformTaskAssignment.STATUS_COMPLETED, 0),
+            "returned": counts.get(PlatformTaskAssignment.STATUS_RETURNED, 0),
+            "mandatory": mandatory_by_employee.get(employee.pk, 0),
+            "overdue": overdue_by_employee.get(employee.pk, 0),
+            "total": sum(counts.values()),
+        })
+    return board
+
+
+# ==============================================================================
 # 212-S1: اجتماعاتُ المتقدّمين — القواعدُ هنا لا في الشاشة
 # ==============================================================================
 
@@ -10985,6 +11299,126 @@ def add_meeting_attendee(*, meeting, applicant_id=None, guest_name=""):
         )
     except IntegrityError:
         raise ValidationError({"applicant": "هذا الشخصُ مُضافٌ إلى الاجتماع سلفاً."})
+
+
+#: نافذةُ مصفوفةِ الحضور الافتراضيّة، وسقفُها (#213-ج).
+#:
+#: الافتراضُ «ستّون يوماً مضت وثلاثون آتية»: دفترُ التوظيف ينشط حول اليوم —
+#: المقابلاتُ الماضيةُ هي التي تُقيَّم، والمجدولةُ هي التي تُحضَّر. وشهرٌ تقويميٌّ
+#: واحدٌ كان سيشطر مرشَّحاً قُوبل آخرَ الشهر الماضي وأوّلَ هذا.
+#:
+#: والسقفُ ليس تجميلاً: المصفوفةُ حاصلُ ضربِ صفوفٍ في أعمدة، فنافذةٌ بلا حدٍّ
+#: تعني حمولةً تكبر تربيعيّاً مع عمر المنصّة في طلبٍ واحد.
+ATTENDANCE_MATRIX_DEFAULT_PAST_DAYS = 60
+ATTENDANCE_MATRIX_DEFAULT_FUTURE_DAYS = 30
+ATTENDANCE_MATRIX_MAX_SPAN_DAYS = 366
+
+
+def build_applicant_attendance_matrix(*, date_from=None, date_to=None) -> dict:
+    """صفٌّ لكلّ شخصٍ وعمودٌ لكلّ اجتماع — «نظرةً واحدةً على حضور كلِّ واحد» (#213-ج).
+
+    طلبُ المالك: جدولٌ يُقرأ مرّةً واحدةً فيُعرَف منه انتظامُ كلِّ مرشَّح، ومن كلِّ
+    خليّةٍ يُفتَح اجتماعُها ومن كلِّ صفٍّ يُفتَح ملفُّ صاحبه. فالحمولةُ تحمل
+    **المعرّفات** التي يحتاجها ذلك الضغط (`meeting` في كلّ خليّة و`applicant` في
+    كلّ صفّ) لا الأسماءَ وحدَها.
+
+    **هويّةُ الصفّ `identity_key` لا الاسمُ المعروض**: العمودُ المولَّد في
+    `ApplicantMeetingAttendee` (‏`a:<pk>` للمتقدّم و`g:<اسم>` للضيف) هو نفسُه الذي
+    تفرض عليه القاعدةُ فرادةَ الحاضر في الاجتماع. والتجميعُ على الاسم كان سيدمج
+    متقدّمَين متشابهَي الاسم في صفٍّ واحد — أي نسبةَ حضورِ رجلٍ تُقرأ لآخر.
+
+    **واستعلامان لا استعلامٌ لكلّ صفّ**: الاجتماعاتُ في النافذة، وحاضروها كلُّهم
+    بجلبٍ واحد. الجدولُ كلُّه — عشرةُ اجتماعاتٍ في ثلاثين مرشَّحاً — يُقرأ كما
+    يُقرأ اجتماعٌ واحد.
+
+    ومن لم يُدعَ إلى اجتماعٍ **لا خليّةَ له فيه**: «لم يُدعَ» ليست «لم يحضر»،
+    وخلطُهما يحسب غياباً على من لم يُطلَب حضورُه أصلاً.
+    """
+    today = timezone.localdate()
+    if date_from is None:
+        date_from = today - datetime.timedelta(days=ATTENDANCE_MATRIX_DEFAULT_PAST_DAYS)
+    if date_to is None:
+        date_to = today + datetime.timedelta(days=ATTENDANCE_MATRIX_DEFAULT_FUTURE_DAYS)
+    if date_from > date_to:
+        raise ValidationError({"from": "بدايةُ النافذة بعد نهايتها."})
+    if (date_to - date_from).days > ATTENDANCE_MATRIX_MAX_SPAN_DAYS:
+        raise ValidationError({
+            "from": f"النافذةُ أطولُ من {ATTENDANCE_MATRIX_MAX_SPAN_DAYS} يوماً — حدّدها أضيق.",
+        })
+
+    # النافذةُ عبر `filter_local_date_range` لا `start__date__range`: الثاني
+    # يترجَم إلى `CONVERT_TZ` وجداولُ المناطق فارغةٌ في نشرِنا فيعود **صفرُ
+    # صفوفٍ بصمت** (الحكايةُ كاملةً في رأس `core/date_ranges.py`).
+    meetings = list(
+        filter_local_date_range(
+            ApplicantMeeting.objects.all(), "start", date_from, date_to,
+        ).order_by("start", "id")
+    )
+    meeting_ids = [meeting.pk for meeting in meetings]
+
+    rows_by_identity: dict[str, dict] = {}
+    attendees = (
+        ApplicantMeetingAttendee.objects
+        .filter(meeting_id__in=meeting_ids)
+        .select_related("applicant")
+        .order_by("id")
+    )
+    for attendee in attendees:
+        row = rows_by_identity.get(attendee.identity_key)
+        if row is None:
+            row = rows_by_identity[attendee.identity_key] = {
+                "identity_key": attendee.identity_key,
+                # `applicant` هو ما يُفتَح به ملفُّ الشخص، و`null` للضيف الحرّ:
+                # لا ملفَّ له، فالواجهةُ تعرض اسمَه بلا رابطٍ ميّت.
+                "applicant": attendee.applicant_id,
+                "name": attendee.display_name,
+                # الرمزُ ونصُّه معاً كسائر `*_display` في هذه الحمولة: الشبكةُ
+                # عربيّةٌ، ورمزٌ بلا نصِّه يدفع الشاشةَ إلى قاموسٍ ثانٍ يتخلّف
+                # عن `choices` أوّلَ ما تُضاف حالة.
+                "applicant_status": getattr(attendee.applicant, "status", "") or "",
+                "applicant_status_display": (
+                    attendee.applicant.get_status_display() if attendee.applicant_id else ""
+                ),
+                "attended": 0,
+                "absent": 0,
+                "invited": 0,
+                "total": 0,
+                "cells": {},
+            }
+        row["cells"][str(attendee.meeting_id)] = {
+            "attendee": attendee.pk,
+            "meeting": attendee.meeting_id,
+            "status": attendee.status,
+            "status_display": attendee.get_status_display(),
+            "note": attendee.note,
+        }
+        row["total"] += 1
+        if attendee.status == ApplicantMeetingAttendee.Status.ATTENDED:
+            row["attended"] += 1
+        elif attendee.status == ApplicantMeetingAttendee.Status.ABSENT:
+            row["absent"] += 1
+        else:
+            row["invited"] += 1
+
+    rows = sorted(rows_by_identity.values(), key=lambda row: (row["name"], row["identity_key"]))
+
+    return {
+        "from": date_from.isoformat(),
+        "to": date_to.isoformat(),
+        "meetings": [
+            {
+                "id": meeting.pk,
+                "title": meeting.title,
+                "start": meeting.start,
+                "end": meeting.end,
+                "status": meeting.status,
+                "status_display": meeting.get_status_display(),
+                "location": meeting.location,
+            }
+            for meeting in meetings
+        ],
+        "rows": rows,
+    }
 
 
 @transaction.atomic

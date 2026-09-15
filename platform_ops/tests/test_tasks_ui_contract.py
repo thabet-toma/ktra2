@@ -19,6 +19,7 @@ from unittest import TestCase
 
 from django.urls import get_resolver
 
+from platform_ops.models import PlatformEmployee, PlatformTaskAttachment
 from platform_ops.serializers import (
     PlatformEmployeeNoteSerializer,
     PlatformTaskSerializer,
@@ -52,6 +53,11 @@ ROUTE_TO_FUNCTION = {
     "/api/platform/ops/tasks/1/": "getPlatformTask",
     "/api/platform/ops/tasks/create/": "createPlatformTask",
     "/api/platform/ops/tasks/1/claim/": "claimPlatformTask",
+    # #213-ب: ملفُّ المهمّة — مرفقاتُه وخيطُه، ولوحُ المدير.
+    "/api/platform/ops/tasks/1/attachments/": "uploadPlatformTaskAttachment",
+    "/api/platform/ops/tasks/1/attachments/1/download/": "getPlatformTaskAttachmentFile",
+    "/api/platform/ops/tasks/1/thread/": "getPlatformTaskThread",
+    "/api/platform/ops/tasks/board/": "getPlatformTaskBoard",
     "/api/platform/ops/assignments/": "listPlatformTaskAssignments",
     "/api/platform/ops/assignments/1/": "listPlatformTaskAssignments",
     "/api/platform/ops/assignments/1/accept/": "acceptPlatformTaskAssignment",
@@ -230,17 +236,155 @@ class TheOwnersRulesShowOnTheScreenTest(TestCase):
             "(`submissions.map` سجلُّ التسليمات المستقلُّ عن الإسناد.)",
         )
 
-    def test_the_partial_approval_says_the_work_continues(self):
-        self.assertIn(
-            "العمل مستمرّ", self.admin,
-            "«مقبول بس لسّا ما خلص» لا يقول للمدير إنّ الإسنادَ يعود قيدَ التنفيذ.",
+    # النصُّ **معروضاً على الشاشة ومشروطاً بالقرار المختار**، لا موجوداً في الملفّ:
+    # السقوطُ الذي يحرسه هذان التأكيدان وقع فعلاً — حُذف التحذيرُ الظاهرُ قبل الضغط
+    # وبقيت عبارتُه في نخبِ النجاح وحوارِ التأكيد **بعده**، فمرّ `assertIn` على
+    # الملفّ كلِّه بينما المديرُ صار لا يعرف أثرَ قرارِه إلّا وقد وقع.
+    # ‏`>[^<>{}]*` يقصُر المطابقةَ على نصِّ JSX: نصٌّ داخل `toast(...)` يفصله عن أقرب
+    # `>` قبله قوسٌ معقوفٌ من جسم الدالّة، فلا يطابق.
+    def test_the_partial_approval_says_the_work_continues_before_the_click(self):
+        self.assertRegex(
+            self.admin,
+            r"reviewDecision === 'APPROVED_PARTIAL' &&[^{}]*>[^<>{}]*العمل مستمرّ",
+            "«مقبول بس لسّا ما خلص» لا يقول للمدير — قبل الضغط — إنّ الإسنادَ يعود "
+            "قيدَ التنفيذ.",
         )
 
-    def test_the_rejection_says_the_task_returns_open(self):
+    def test_the_rejection_says_the_task_returns_open_before_the_click(self):
         self.assertRegex(
-            self.admin, r"الرفض يعيد[^<]*المجمّع",
-            "تأكيدُ الرفض لا يقول إنّ المهمّةَ تعود مفتوحة — وهو قرارُ المالك الصريح.",
+            self.admin,
+            r"reviewDecision === 'REJECTED' &&[^{}]*>[^<>{}]*الرفض يعيد[^<>{}]*المجمّع",
+            "تحذيرُ الرفض لا يقول — قبل الضغط — إنّ المهمّةَ تعود مفتوحة، وهو قرارُ "
+            "المالك الصريح.",
         )
+
+
+class TheTaskFileScreensSayTheTruthTest(TestCase):
+    """أربعةُ حرّاسٍ وُلدوا من قراءة الفرق النهائيّ لعمل الوكيل (#213-ب).
+
+    كلُّها مرّت من تحت بوّابةٍ خضراء: `tsc` لا يقرأ نصّاً عربيّاً على شارة،
+    ولا يعرف أنّ حالةً واحدةً تحمل معرّفَي جدولين، ولا أنّ صفّاً بلا عنصرٍ
+    قابلٍ للتبئير يقطع من لا يستعمل الفأرة.
+    """
+
+    def setUp(self):
+        self.admin = ADMIN.read_text(encoding="utf-8")
+        self.staff = (TASKS_UI / "StaffTasksPanel.tsx").read_text(encoding="utf-8")
+        self.drawer = (TASKS_UI / "TaskFileDrawer.tsx").read_text(encoding="utf-8")
+
+    def test_the_brief_files_go_up_with_the_task_not_after_it(self):
+        """«يرفق صور وملفات شرح **مع** المهمة» — لا بعد إنشائها بشاشتين.
+
+        الإسنادُ يقع لحظةَ الإنشاء ويصل الموظّفَ فوراً؛ فنموذجٌ بلا حقل ملفٍّ
+        يعني أنّ البلاغَ يسبق الشرحَ دائماً، ويبقى الموظّفُ ينظر إلى مهمّةٍ بلا
+        ما يشرحها حتى يعود المديرُ ويفتح ملفَّها.
+        """
+        violations = []
+        if 'type="file" multiple' not in self.admin:
+            violations.append("نموذجُ الإنشاء بلا حقلِ ملفّات شرح")
+        if not re.search(r"uploadPlatformTaskAttachment\(created\.id", self.admin):
+            violations.append("الملفّاتُ لا تُرفَع على المهمّة التي أنشأها الطلبُ نفسُه")
+        self.assertEqual(violations, [], f"الشرحُ يأتي بعد المهمّة لا معها: {violations}")
+
+    def test_mandatory_is_not_read_as_personal(self):
+        """«شخصيّةٌ لا عامّة» نطاقُ الإسناد، و«لا تُردّ» إجباريّتُه — شرطان.
+
+        و`is_mandatory` صادقةٌ للجماعيّةِ التي وسمها المديرُ إجباريّةً أيضاً،
+        فقراءتُها «شخصيّة» تجعل البطاقةَ تقول «جماعية» و«شخصية» في سطرٍ واحد.
+        """
+        badge = re.search(r"\{assignment\.is_mandatory \? '([^']*)' : '([^']*)'\}", self.staff)
+        self.assertIsNotNone(badge, "شارةُ الإجباريّة غابت عن بطاقة المهمّة.")
+        for word in ("شخصي", "خاصة"):
+            self.assertNotIn(
+                word, badge.group(1),
+                "شارةُ الإجباريّة تقول إنّ المهمّةَ شخصيّة — والجماعيّةُ تكون إجباريّةً "
+                "أيضاً، فالشخصيّةُ تُقرأ من `task_audience` وحدَه.",
+            )
+        self.assertIn(
+            "assignment.task_audience === 'INDIVIDUAL'", self.staff,
+            "لا شيءَ يقرأ نطاقَ الإسناد — فلا سبيلَ للتمييز بين شخصيّةٍ وعامّة.",
+        )
+
+    def test_employee_status_is_compared_against_the_value_the_server_sends(self):
+        """رمزُ الحالة صغيرٌ (`active`) — ومقارنتُه بكبيرٍ تكذب على كلّ صفّ.
+
+        كان `employeeLabel` يقارن `'ACTIVE'` و`'SUSPENDED'`، وقيمُ
+        `PlatformEmployee.Status` صغيرةٌ ولا `suspended` فيها أصلاً — فوسم
+        **كلُّ** موظّفٍ «(خارج الخدمة)» في منتقي إنشاء المهمّة، بلا خطأٍ ولا
+        حارسٍ أحمر.
+        """
+        values = {value for value, _label in PlatformEmployee.Status.choices}
+        offenders = [
+            literal for literal in re.findall(r"employee\.status === '([^']+)'", self.admin)
+            if literal not in values
+        ]
+        offenders += [
+            literal for literal in re.findall(r"employee_status !== '([^']+)'", self.admin)
+            if literal not in values
+        ]
+        self.assertEqual(
+            offenders, [],
+            f"حالةُ موظّفٍ تُقارَن بقيمةٍ لا يرسلها الخادم: {offenders} — "
+            f"والقيمُ {sorted(values)}.",
+        )
+
+    def test_one_busy_key_does_not_mix_two_tables_ids(self):
+        """حالةُ `busy` واحدةٌ: إسنادٌ رقمُه ٥ ومهمّةٌ رقمُها ٥ ليسا شيئاً واحداً.
+
+        وأوّلُ صياغةٍ لهذا الحارس منعت نصّاً بعينه (`busy === assignment.task`)
+        **وكان قد أُصلح أصلاً**، بينما الخلطُ باقٍ في `claim` بصيغةٍ أخرى — تأكيدٌ
+        أخضرُ فوق عطبٍ حيّ. فالمرساةُ الآن **الشكلُ**: لا معرّفٍ عارٍ في `busy`.
+        """
+        violations = []
+        if "useState<string | null>(null)" not in self.staff:
+            violations.append("‏`busy` ما زال رقماً — ولا رقمَ يميّز جدولَه")
+        for bare in ("busy === assignment.id", "busy === task.id",
+                     "setBusy(assignment.id)", "setBusy(task.id)"):
+            if bare in self.staff:
+                violations.append(f"معرّفٌ عارٍ في `busy`: {bare}")
+        self.assertEqual(
+            violations, [],
+            f"‏`busy` يخلط معرّفَي جدولين فيُعطَّل زرٌّ في بطاقةٍ لا شأنَ لها: {violations}",
+        )
+
+    def test_the_submission_picker_offers_only_files_it_can_send(self):
+        """`submit_platform_task` تنقل `WORK` وحدَها — فغيرُها يُتجاهَل بصمت.
+
+        **والقيمةُ تُقرأ من النموذج لا تُكتب في الحارس**: أوّلُ صياغةٍ لهذا
+        التأكيد ثبّتت النصَّ `'WORK'` حرفيّاً، و`Kind.WORK` قيمتُها `"work"`
+        صغيرةً — فرشّح الدرجُ على قيمةٍ لا وجودَ لها، وصار المنتقي فارغاً أبداً
+        **والحارسُ أخضرُ يحرس العطب**. وقراءةُ القيمة من `TextChoices` تجعل
+        الحارسَ يسقط لو تغيّرت في أيّ من الطرفين.
+        """
+        work = PlatformTaskAttachment.Kind.WORK.value
+        self.assertIn(
+            f"PlatformTaskAttachmentKind = '{work}'", self.drawer,
+            f"قيمةُ دور «ملفّ العمل» في الدرج تخالف `Kind.WORK` (`{work}`) — "
+            "ترشيحٌ كاذبٌ دائماً يُفرغ منتقي ملفّات التسليم بلا خطأ.",
+        )
+        self.assertIn(
+            "attachment.kind === WORK_KIND", self.drawer,
+            "منتقي ملفّات التسليم يعرض ملفّاً سبق أن رافق تسليماً: يُختار ويُرسَل "
+            "ولا يحدث شيء — لا خطأٌ ولا أثر.",
+        )
+
+    def test_every_clickable_row_has_a_focusable_control(self):
+        """صفٌّ كلُّه `onClick` بلا عنصرٍ قابلٍ للتبئير فأرةٌ وحدَها."""
+        # **‏`<button` شرطُ التأكيد لا مجرّدُ نصِّ المُعالِج**: `<span onClick=...>`
+        # يحمل نفسَ النصّ وهو غيرُ قابلٍ للتبئير — فالتأكيدُ على النصّ وحدَه كان
+        # يمرّ على ما يسمّيه عطباً. والمطابقةُ تبدأ من الوسم وتصل إلى المُعالِج
+        # بلا وسمٍ آخرَ بينهما.
+        violations = []
+        for handler, what in (
+            (r"openTask\(task\); \}", "صفُّ المهمّة"),
+            (r"setBoardEmployee\(\(current\) => current === row\.employee \? null : row\.employee\); \}",
+             "صفُّ اللوح"),
+        ):
+            # ‏`[^<]*` لا `[^<>]*`: سهمُ الدالّة `=>` يحمل `>`، واستبعادُه يقطع
+            # المطابقةَ داخل الوسم نفسِه. و`<` وحدَه هو ما يفصل وسماً عن وسم.
+            if not re.search(rf"<button[^<]*{handler}", self.admin):
+                violations.append(f"{what} بلا `<button>` يُبلَغ بلوحة المفاتيح")
+        self.assertEqual(violations, [], f"جدولٌ يُفتَح بالفأرة وحدَها: {violations}")
 
 
 class TheCountsComeFromTheServerTest(TestCase):
@@ -325,16 +469,29 @@ class TheAssignedTaskCanBeOpenedTest(TestCase):
         violations = []
         if "onClick={() => openTask(task)}" not in self.admin:
             violations.append("صفُّ الجدول لا يفتح المهمّة")
-        if "{selectedTask && <section" not in self.admin:
+        # ‏**المرساةُ الشرطُ لا اسمُ الوسم**: صار الدرجُ مكوّناً مشتركاً بين المدير
+        # والموظّف (#213-ب) بدل قسمٍ مكتوبٍ داخل اللوحة، فتثبيتُ الحارس على
+        # `<section` كان يُسقطه على تسميةٍ لا على سلوك.
+        if not re.search(r"\{selectedTask && <\w", self.admin):
             violations.append("لا درجَ تفصيلٍ للمهمّة المفتوحة")
         if "setSelectedTaskId(null)" not in self.admin:
             violations.append("لا مخرجَ من الدرج — حالةٌ لا يُرجَع منها")
+        # وأنّ ما يفتحها عنصرٌ يُبلَغ بلوحة المفاتيح محروسٌ في
+        # `TheTaskFileScreensSayTheTruthTest` — بالوسم لا بنصّ المُعالِج.
         self.assertEqual(violations, [], f"المهمّةُ ما زالت لا تُفتَح: {violations}")
 
     def test_the_detail_view_names_the_people_and_shows_their_state(self):
-        """الدرجُ يقرأ حقولَ الإسناد الحقيقيّة لا عدداً مشتقّاً."""
+        """الدرجُ يقرأ حقولَ الإسناد الحقيقيّة لا عدداً مشتقّاً.
+
+        والدرجُ اليومَ ملفٌّ مشتركٌ (`TaskFileDrawer`) تفتحه لوحةُ المدير وشاشةُ
+        الموظّف معاً، فالحقلُ يُطلَب في **مصادر اللوحة مجتمعةً** لا في ملفٍّ بعينه.
+        """
+        sources = _component_sources()
         required = ("assignment.employee_name", "assignment.status_display", "submission.employee_name")
-        missing = [field for field in required if field not in self.admin]
+        missing = [
+            field for field in required
+            if not any(field in source for source in sources.values())
+        ]
         self.assertEqual(missing, [], f"درجُ المهمّة لا يعرض: {missing}")
 
     def test_the_table_says_who_not_only_how_many(self):
@@ -367,12 +524,31 @@ class TheManagerWritesOnTheTaskItselfTest(TestCase):
             f"حمولةُ الملاحظة بلا مهمّتها: {sorted(fields)}",
         )
 
-    def test_the_admin_panel_sends_the_open_task_with_the_note(self):
-        admin = ADMIN.read_text(encoding="utf-8")
+    def test_the_managers_note_is_written_on_the_task_and_read_in_one_thread(self):
+        """**المرساةُ هي الشرطُ لا اسمُ الدالّة** — وقد تحرّك الاسمُ مرّتين (#213-ب).
+
+        كان هذا الاختبارُ يطلب حرفيّاً `threadFor(selectedTask.id)`: دمجاً محلّيّاً
+        في لوحة المدير لملاحظتين اثنتين. وصار الخادمُ يعطي الخيطَ كاملاً
+        (`tasks/<pk>/thread/`) بمرفقاتِه وتسليماتِه وقراراتِ مراجعته، والدمجُ
+        المحلّيُّ **أضعفُ** منه لا أقوى. فالتمسّكُ بالاسم القديم كان سيفرض إبقاءَ
+        دالّةٍ ميّتةٍ إلى جانب البديل لمجرّد إرضاء نصٍّ في اختبار — وهو أسوأُ ما
+        يفعله حارسٌ ساكن.
+
+        والشرطُ المحروسُ لم يتغيّر حرفاً: أن تُكتَب ملاحظةُ المدير **على المهمّة**،
+        وأن يُقرأ الطرفان في **خيطٍ واحدٍ مرتَّب**. والبحثُ في مكوّنات المهامّ كلِّها
+        لا في لوحة المدير وحدَها، لأنّ الدرجَ المشترَك يخدم الجمهورين معاً.
+        """
+        sources = _component_sources()
         violations = []
-        if "createPlatformEmployeeNote(Number(taskNoteEmployee), taskNoteBody, taskNoteVisibility, selectedTask.id)" not in admin:
-            violations.append("نموذجُ الدرج لا يُرسل معرّفَ المهمّة")
-        if "threadFor(selectedTask.id)" not in admin:
+        if not any(
+            # بلا حسّاسيّةِ حالةٍ: الوسيطُ الرابعُ يُكتَب `selectedTask.id` أو
+            # `currentTask.id`، و`\\btask` كانت تطلب حرفاً صغيراً بعد حدِّ كلمةٍ
+            # فلا تطابق أيّاً منهما — حارسٌ يسقط على التسمية لا على الشرط.
+            re.search(r"createPlatformEmployeeNote\([^;]*task", source, re.IGNORECASE)
+            for source in sources.values()
+        ):
+            violations.append("نموذجُ ملاحظةِ المدير لا يُرسل معرّفَ المهمّة")
+        if not any("getPlatformTaskThread(" in source for source in sources.values()):
             violations.append("لا خيطَ يجمع ملاحظاتِ الطرفين على المهمّة")
         self.assertEqual(violations, [], f"الملاحظةُ لا تُكتَب على المهمّة: {violations}")
 

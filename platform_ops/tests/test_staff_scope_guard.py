@@ -240,6 +240,11 @@ EXCUSED_ROUTES = {
         "فعلُ إنشاءٍ (POST) — مدير العمليات وحده (`create_task`)، محروسٌ صراحةً بفحصٍ داخليّ.",
     "/api/platform/ops/tasks/1/claim/":
         "فعلٌ تفصيليٌّ بـpk، وكتابةٌ (POST)؛ محكومٌ بـ`get_object()` على نطاق «إسنادي أو مهامّ المجمَع» أصلاً.",
+    "/api/platform/ops/tasks/1/attachments/":
+        "فعلٌ تفصيليٌّ بـpk، وكتابةٌ (POST)؛ ومحكومٌ بحارسين لا بواحد: `get_object()` "
+        "على النطاق المضيَّق، ثمّ `assert_platform_task_is_assigned_to` الذي يرفض قبل "
+        "رفع البايتات — ومهمّةُ المجمَع تدخل النطاقَ فتحتاج الثاني. مُنفَّذٌ سلوكيّاً في "
+        "`test_task_file.py::AttachmentRoleTest`.",
     "/api/platform/ops/assignments/1/accept/":
         "فعلٌ تفصيليٌّ بـpk يعتمد `get_object()` على `get_queryset()` المضيَّقة، ويضيف فحصَ ملكيّةٍ صريحاً ثانياً (`_require_owner`).",
     "/api/platform/ops/assignments/1/submit/":
@@ -287,6 +292,12 @@ EXERCISED_ROUTES = frozenset({
     # `employee_ops.Task` (مهامُّ موظّفي شركةِ زبونٍ بـ`tenant` FK).
     "/api/platform/ops/tasks/",
     "/api/platform/ops/tasks/1/",
+    # مُنفَّذٌ في `test_task_file.py` (#213-ب): تنزيلُ مرفقِ زميلٍ يأخذ 403، وخيطُ
+    # المهمّة يُرشَّح بالرائي فلا يرى الموظّفُ ملفَّ زميله على المهمّة نفسِها،
+    # ولوحُ المدير يأخذ 403 `manager_only` لموظّفٍ عاديّ.
+    "/api/platform/ops/tasks/1/attachments/1/download/",
+    "/api/platform/ops/tasks/1/thread/",
+    "/api/platform/ops/tasks/board/",
     "/api/platform/ops/assignments/",
     "/api/platform/ops/assignments/1/",
     "/api/platform/ops/submissions/",
