@@ -6,6 +6,17 @@ import { filterBillingRecords, sumDecimalAmounts } from "../../utils/billingReco
 import { formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import {
+  CcCard,
+  CcEmpty,
+  CcSectionTitle,
+  CcStatTile,
+  CcTable,
+  CcTd,
+  CcTh,
+  CcThead,
+  CcTr,
+} from "./ui";
 import { SubscriptionPolicyPanel } from "./SubscriptionPolicyPanel";
 import { SubscriptionsPanel } from "./SubscriptionsPanel";
 
@@ -62,172 +73,224 @@ export const BillingRecordsScreen: React.FC = () => {
   }, [filteredRecords]);
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-8 text-right" dir="rtl">
-      {/* الترويسة الرئيسية */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <FileSpreadsheet className="w-6 h-6 text-emerald-600 dark:text-emerald-400" />
-            إدارة خدمة المتابعة وفواتيرها
-          </h1>
-          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            نظرة عامة على الاشتراكات وسياسة إعداداتها، وسجل تدقيق الفوترة الشهرية.
-            التفعيل والتعليق والإلغاء يتمّان من بطاقة كل شركة.
-          </p>
-        </div>
-      </div>
-
-      <SubscriptionPolicyPanel />
-      <SubscriptionsPanel />
-
-      {/* سجل الفوترة */}
-      <section className="space-y-4">
-        <div>
-          <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">سجل الفوترة</h2>
-        </div>
-
-        {/* تنبيه تعليمي إلزامي حسب المواصفة §5 */}
-        <div className="rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50/70 dark:bg-blue-950/30 p-4 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-3">
-          <Info className="w-4 h-4 mt-0.5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-          <div className="space-y-1">
-            <p className="font-semibold">
-              الفواتيرُ تُصدَر بأمر الإدارة الشهريّ <code className="font-mono bg-blue-100 dark:bg-blue-900/60 px-1.5 py-0.5 rounded text-[11px]">bill_service_subscriptions</code>.
-            </p>
-            <p className="text-blue-700 dark:text-blue-300 text-[11px]">
-              هذه الشاشة نافذة تدقيق وقراءة على ما فُوتر فعلاً في شركة المنصة ولا تُنشئ فواتير جديدة بصورة كسولة عند فتحها.
+    <div
+      className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 text-right"
+      dir="rtl"
+    >
+      <div className="max-w-7xl mx-auto space-y-6">
+        {/* الترويسة الرئيسية */}
+        <header className="flex flex-wrap items-center justify-between gap-4 pb-6 border-b border-cc-border">
+          <div className="flex flex-col">
+            <div className="flex items-center gap-2.5">
+              <h1 className="text-xl sm:text-2xl font-black text-cc-text tracking-tight flex items-center gap-2">
+                <FileSpreadsheet className="w-6 h-6 text-emerald-400" />
+                إدارة خدمة المتابعة وفواتيرها
+              </h1>
+            </div>
+            <p className="text-xs text-cc-text-muted mt-1">
+              نظرة عامة على الاشتراكات وسياسة إعداداتها، وسجل تدقيق الفوترة الشهرية.
+              التفعيل والتعليق والإلغاء يتمّان من بطاقة كل شركة.
             </p>
           </div>
-        </div>
+        </header>
 
-        {/* شريط البحث والتحديث */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 bg-white dark:bg-slate-900 p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-sm">
-          <div className="relative flex-1 max-w-md">
-            <Search className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-2.5" />
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="ابحث باسم الشركة أو رقم الفاتورة..."
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 pr-8 pl-3 py-1.5 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        <SubscriptionPolicyPanel />
+        <SubscriptionsPanel />
+
+        {/* سجل الفوترة */}
+        <section className="space-y-4">
+          <CcSectionTitle
+            title="سجل الفوترة"
+            badge={filteredRecords.length}
+          />
+
+          {/* تنبيه تعليمي إلزامي حسب المواصفة §5 */}
+          <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-4 text-xs text-sky-200 flex items-start gap-3">
+            <Info className="w-4 h-4 mt-0.5 text-sky-400 shrink-0" />
+            <div className="space-y-1">
+              <p className="font-semibold">
+                الفواتيرُ تُصدَر بأمر الإدارة الشهريّ <code className="font-mono bg-sky-950/60 border border-sky-500/30 px-1.5 py-0.5 rounded text-[11px] text-sky-300">bill_service_subscriptions</code>.
+              </p>
+              <p className="text-sky-300/80 text-[11px]">
+                هذه الشاشة نافذة تدقيق وقراءة على ما فُوتر فعلاً في شركة المنصة ولا تُنشئ فواتير جديدة بصورة كسولة عند فتحها.
+              </p>
+            </div>
           </div>
 
-          <div className="flex items-center gap-2 justify-end">
-            <span className="text-xs text-slate-500 dark:text-slate-400">
-              {formatNumber(filteredRecords.length)} من {formatNumber(records.length)} سجل
-            </span>
-            <button
-              type="button"
-              onClick={() => void loadRecords()}
-              disabled={loading}
-              className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-              title="تحديث السجلات"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-            </button>
+          {/* مجاميع totals الخمسة المحسوبة أصلاً */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+            <CcCard className="p-4">
+              <CcStatTile
+                label="الإجمالي"
+                value={formatNumber(totals.grandTotal)}
+                tone="accent"
+                icon={<FileSpreadsheet className="w-4 h-4 text-sky-400" />}
+              />
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="الرسم الشهري"
+                value={formatNumber(totals.monthlyFee)}
+                tone="neutral"
+                icon={<FileSpreadsheet className="w-4 h-4 text-cc-text-muted" />}
+              />
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="التجاوز"
+                value={formatNumber(totals.overageFee)}
+                tone={Number(totals.overageFee) > 0 ? "warning" : "neutral"}
+                icon={<FileSpreadsheet className="w-4 h-4 text-amber-400" />}
+              />
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="المستهلك"
+                value={totals.consumed}
+                tone="neutral"
+              />
+            </CcCard>
+            <CcCard className="p-4 sm:col-span-2 lg:col-span-1">
+              <CcStatTile
+                label="المشمول"
+                value={totals.included}
+                tone="neutral"
+              />
+            </CcCard>
           </div>
-        </div>
 
-        {error && (
-          <div className="rounded-lg bg-rose-50 dark:bg-rose-950/40 p-3 text-xs font-semibold text-rose-700 dark:text-rose-300 border border-rose-200 dark:border-rose-800">
-              {error}
-              <button type="button" onClick={() => void loadRecords()} className="mr-2 underline">
+          {/* شريط البحث والتحديث */}
+          <CcCard className="p-3">
+            <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-3.5 h-3.5 text-cc-text-muted absolute right-3 top-2.5" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="ابحث باسم الشركة أو رقم الفاتورة..."
+                  className="w-full rounded-lg border border-cc-border bg-cc-surface-2 pr-8 pl-3 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-2 focus:ring-sky-500"
+                />
+              </div>
+
+              <div className="flex items-center gap-2 justify-end">
+                <span className="text-xs text-cc-text-muted">
+                  {formatNumber(filteredRecords.length)} من {formatNumber(records.length)} سجل
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void loadRecords()}
+                  disabled={loading}
+                  className="p-1.5 text-cc-text-muted hover:text-cc-text bg-cc-surface-2 hover:bg-cc-surface border border-cc-border rounded-lg transition"
+                  title="تحديث السجلات"
+                >
+                  <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
+                </button>
+              </div>
+            </div>
+          </CcCard>
+
+          {error && (
+            <div className="rounded-xl bg-rose-500/10 p-3 text-xs font-semibold text-rose-300 border border-rose-500/30 flex items-center justify-between">
+              <span>{error}</span>
+              <button type="button" onClick={() => void loadRecords()} className="mr-2 underline text-rose-200 hover:text-rose-100">
                 إعادة المحاولة
               </button>
-          </div>
-        )}
+            </div>
+          )}
 
-        {/* جدول سجلات الفوترة */}
-        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-          <table className="w-full text-right text-xs">
-            <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-800">
+          {/* جدول سجلات الفوترة */}
+          <CcTable>
+            <CcThead>
               <tr>
-                <th className="p-3">الشركة</th>
-                <th className="p-3">الدورة</th>
-                <th className="p-3">رقم الفاتورة</th>
-                <th className="p-3">الرسم الشهري</th>
-                <th className="p-3 text-center">المشمول / المستهلك</th>
-                <th className="p-3">الزائد × سعره = التجاوز</th>
-                <th className="p-3">الإجمالي</th>
+                <CcTh>الشركة</CcTh>
+                <CcTh>الدورة</CcTh>
+                <CcTh>رقم الفاتورة</CcTh>
+                <CcTh>الرسم الشهري</CcTh>
+                <CcTh className="text-center">المشمول / المستهلك</CcTh>
+                <CcTh>الزائد × سعره = التجاوز</CcTh>
+                <CcTh>الإجمالي</CcTh>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-800 dark:text-slate-200">
+            </CcThead>
+            <tbody>
               {filteredRecords.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="p-8 text-center text-slate-400 dark:text-slate-500">
-                    {loading ? "جاري تحميل سجلات الفوترة..." : "لا توجد سجلات فوترة تطابق البحث."}
-                  </td>
+                  <CcTd colSpan={7} className="p-8 text-center">
+                    <CcEmpty
+                      title={loading ? "جاري تحميل سجلات الفوترة..." : "لا توجد سجلات فوترة تطابق البحث."}
+                    />
+                  </CcTd>
                 </tr>
               ) : (
                 filteredRecords.map((record) => {
                   const hasOverage = record.overage_units > 0;
                   return (
-                    <tr key={record.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition">
-                      <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
+                    <CcTr key={record.id}>
+                      <CcTd className="font-semibold text-cc-text">
                         {record.company_name}
-                      </td>
-                      <td className="p-3 text-slate-600 dark:text-slate-400 whitespace-nowrap">
+                      </CcTd>
+                      <CcTd className="text-cc-text-muted whitespace-nowrap">
                         {formatDateValue(record.period_start)} — {formatDateValue(record.period_end)}
-                      </td>
-                      <td className="p-3 font-mono text-slate-700 dark:text-slate-300">
+                      </CcTd>
+                      <CcTd className="font-mono text-cc-text">
                         {record.invoice_number ? (
-                          <span className="bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded font-bold">
+                          <span className="bg-cc-surface-2 border border-cc-border px-2 py-0.5 rounded font-bold">
                             {record.invoice_number}
                           </span>
                         ) : (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-cc-text-muted">—</span>
                         )}
-                      </td>
-                      <td className="p-3 font-mono">
+                      </CcTd>
+                      <CcTd className="font-mono">
                         {formatNumber(record.monthly_fee)}
-                      </td>
-                      <td className="p-3 text-center font-mono">
-                        <span className="font-semibold text-slate-900 dark:text-slate-100">
+                      </CcTd>
+                      <CcTd className="text-center font-mono">
+                        <span className="font-semibold text-cc-text">
                           {formatNumber(record.consumed_quota)}
                         </span>{" "}
-                        / <span className="text-slate-500">{formatNumber(record.included_quota)}</span>
-                      </td>
-                      <td className="p-3 font-mono text-[11px]">
+                        / <span className="text-cc-text-muted">{formatNumber(record.included_quota)}</span>
+                      </CcTd>
+                      <CcTd className="font-mono text-[11px]">
                         {hasOverage ? (
-                          <span className="text-amber-700 dark:text-amber-300 font-semibold">
+                          <span className="text-amber-400 font-semibold">
                             {formatNumber(record.overage_units)} × {formatNumber(record.overage_unit_price)} = {formatNumber(record.overage_fee)}
                           </span>
                         ) : (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-cc-text-muted">—</span>
                         )}
-                      </td>
-                      <td className="p-3 font-mono font-bold text-slate-900 dark:text-slate-100">
+                      </CcTd>
+                      <CcTd className="font-mono font-bold text-cc-text">
                         {formatNumber(record.total_amount)}
-                      </td>
-                    </tr>
+                      </CcTd>
+                    </CcTr>
                   );
                 })
               )}
             </tbody>
             {filteredRecords.length > 0 && (
-              <tfoot className="bg-slate-50 dark:bg-slate-800/80 font-bold border-t-2 border-slate-200 dark:border-slate-700 text-slate-900 dark:text-slate-100">
+              <tfoot className="border-t-2 border-cc-border bg-cc-surface-2 font-bold text-cc-text">
                 <tr>
                   <td colSpan={3} className="p-3 text-right">
                     المجموع ({formatNumber(filteredRecords.length)} سجل)
                   </td>
-                  <td className="p-3 font-mono text-emerald-700 dark:text-emerald-300">
+                  <td className="p-3 font-mono text-emerald-400">
                     {formatNumber(totals.monthlyFee)}
                   </td>
                   <td className="p-3 text-center font-mono">
                     {formatNumber(totals.consumed)} / {formatNumber(totals.included)}
                   </td>
-                  <td className="p-3 font-mono text-amber-700 dark:text-amber-300">
+                  <td className="p-3 font-mono text-amber-400">
                     {formatNumber(totals.overageFee)}
                   </td>
-                  <td className="p-3 font-mono text-blue-700 dark:text-blue-300 font-extrabold">
+                  <td className="p-3 font-mono text-sky-400 font-extrabold">
                     {formatNumber(totals.grandTotal)}
                   </td>
                 </tr>
               </tfoot>
             )}
-          </table>
-        </div>
-      </section>
+          </CcTable>
+        </section>
+      </div>
     </div>
   );
 };

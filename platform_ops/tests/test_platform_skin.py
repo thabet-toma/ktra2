@@ -37,6 +37,12 @@ ROOT_SCREENS = (
     "StaffLoginPage.tsx",
 )
 
+#: الشاشاتُ الجذريّةُ التي تلبس **الغلافَ الداكنَ** بنفسها (لا ترثه من أمٍّ).
+DARK_ROOT_SCREENS = (
+    "PlatformOpsDashboard.tsx",
+    "BillingRecordsScreen.tsx",
+)
+
 #: أغلفةُ سطح المنصّة المسموحُ لتجاوزات السُلَّم أن تُقصَر بها، ولكلٍّ سببُه.
 #: **الغرضُ المحروسُ ليس اسمَ الغلاف بل الحصر**: قاعدةٌ بلا غلافٍ من هذه تصبغ
 #: شاشاتِ الزبائن. وإضافةُ غلافٍ هنا لا تُسكِت الحارسَ مجّاناً —
@@ -117,9 +123,17 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
         cls.css = INDEX_CSS.read_text(encoding="utf-8")
 
     def test_the_ops_dashboard_wears_the_dark_shell_alongside_the_platform_surface(self):
-        source = (PLATFORM_COMPONENTS / "PlatformOpsDashboard.tsx").read_text(encoding="utf-8")
-        self.assertIn("platform-surface", source)
-        self.assertRegex(source, r'className="[^"]*\bops-shell\b')
+        # شاشةُ الفوترة تُركَّب في `App.tsx` **بلا غلافٍ** — فكانت بيضاءَ كاملةً وسط
+        # موديولٍ داكن، وكلُّ تجاوزات `.ops-shell` في `index.css` لا تصلها. فالغلافُ
+        # على جذرها هي، ويُحرَس هنا مع أخواتها.
+        for name in DARK_ROOT_SCREENS:
+            with self.subTest(screen=name):
+                source = (PLATFORM_COMPONENTS / name).read_text(encoding="utf-8")
+                self.assertRegex(
+                    source,
+                    r'className="[^"]*\bplatform-surface ops-shell\b[^"]*\bbg-cc-bg\b',
+                    f"{name} لا يلبس الغلافَ الداكنَ على جذره — شاشةٌ بيضاءُ في موديولٍ داكن.",
+                )
 
     def test_every_light_class_the_ops_components_wear_has_a_dark_override(self):
         light_classes = set()

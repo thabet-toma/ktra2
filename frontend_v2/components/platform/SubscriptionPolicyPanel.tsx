@@ -10,6 +10,7 @@ import {
   updateSubscriptionPolicyDraft,
   type BillingProductOption,
   type SubscriptionPolicyDiffValue,
+  type SubscriptionPolicyEffectiveState,
   type SubscriptionPolicyInput,
   type SubscriptionPolicyPreview,
   type SubscriptionPolicyRow,
@@ -23,6 +24,18 @@ import {
   describePlatformOpsError,
   validateCommercialNumbers,
 } from "../../utils/platformSubscriptionManagement";
+import { type CcTone } from "../../utils/ccTone";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcTable,
+  CcTd,
+  CcTh,
+  CcThead,
+  CcTr,
+} from "./ui";
 import { BillingProductPicker } from "./BillingProductPicker";
 import { CompanyPicker } from "./CompanyPicker";
 
@@ -99,6 +112,21 @@ const displayError = (cause: unknown): string =>
 
 /** مفتاح الانشغال لكل صف — مقارنة تامة كي لا يُعطَّل صف 11 حين ينشغل صف 1. */
 const rowBusyKey = (action: string, rowId: number) => `${action}:${rowId}`;
+
+const policyEffectiveStateTone = (state: SubscriptionPolicyEffectiveState): CcTone => {
+  switch (state) {
+    case "current":
+      return "success";
+    case "scheduled":
+      return "accent";
+    case "draft":
+      return "warning";
+    case "retired":
+      return "neutral";
+    default:
+      return "neutral";
+  }
+};
 
 /** إعدادات سياسة اشتراك خدمة الإدخال: إصدارات بنطاق خطة، مسودة، معاينة أثر، وتفعيل بسبب وتاريخ سريان. */
 export const SubscriptionPolicyPanel: React.FC = () => {
@@ -203,7 +231,7 @@ export const SubscriptionPolicyPanel: React.FC = () => {
         message: (
           <div>
             <p>{effectiveFrom ? `تسري من ${formatDateValue(chosenDate)}.` : "تسري فوراً."}</p>
-            <PolicyImpact impact={impact} />
+            <PolicyImpact impact={impact} plain />
           </div>
         ),
         confirmText: effectiveFrom ? "جدولة السياسة" : "تفعيل السياسة",
@@ -222,61 +250,79 @@ export const SubscriptionPolicyPanel: React.FC = () => {
 
   return (
     <section className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">سياسة اشتراك خدمة الإدخال</h2>
+      <CcSectionTitle
+        title="سياسة اشتراك خدمة الإدخال"
+        subtitle="إصدارات بنطاق خطة، مسودة، معاينة أثر، وتفعيل بسبب وتاريخ سريان."
+        badge={policies.length}
+      />
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700
-          dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300" role="alert">
-          {error}
-          <button type="button" onClick={() => void load()} className="mr-2 underline">إعادة المحاولة</button>
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-300 flex items-center justify-between" role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={() => void load()} className="mr-2 underline text-rose-200 hover:text-rose-100">إعادة المحاولة</button>
         </div>
       )}
 
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
-        <p className="flex items-center gap-2 text-sm font-semibold"><Plus className="h-4 w-4" /> مسودة جديدة</p>
-        <CompanyPicker
-          value={newBillingTenant?.id ?? null}
-          onChange={(id, name) => setNewBillingTenant({ id, name })}
-          placeholder="شركة فوترة المنصة..."
-        />
-        <button type="button" onClick={createDraft} disabled={busyKey === "create"} className="ktra-btn ktra-btn-primary">
-          إنشاء مسودة
-        </button>
-      </div>
+      <CcCard className="space-y-3 p-4">
+        <p className="flex items-center gap-2 text-sm font-bold text-cc-text">
+          <Plus className="h-4 w-4 text-sky-400" />
+          <span>مسودة جديدة</span>
+        </p>
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          <div className="flex-1">
+            <CompanyPicker
+              value={newBillingTenant?.id ?? null}
+              onChange={(id, name) => setNewBillingTenant({ id, name })}
+              placeholder="شركة فوترة المنصة..."
+            />
+          </div>
+          <button
+            type="button"
+            onClick={createDraft}
+            disabled={busyKey === "create"}
+            className="ktra-btn ktra-btn-primary shrink-0"
+          >
+            {busyKey === "create" ? "جارٍ الإنشاء…" : "إنشاء مسودة"}
+          </button>
+        </div>
+      </CcCard>
 
       {preview && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900
-          dark:border-blue-800 dark:bg-blue-950/30 dark:text-blue-200">
-          <p className="font-semibold">معاينة v{preview.draft.version}</p>
-          <p>{preview.note}</p>
+        <CcCard tone="accent" className="p-4 space-y-2 text-xs">
+          <p className="font-bold text-sky-400">معاينة v{preview.draft.version}</p>
+          <p className="text-cc-text-muted">{preview.note}</p>
           <PolicyImpact impact={preview} />
-        </div>
+        </CcCard>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4 text-sm text-slate-500" role="status">
-          <Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل…
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-cc-text-muted" role="status">
+          <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+          <span>جارٍ التحميل…</span>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-4">
           {policies.map((row) => {
             const draft = drafts[row.id] ?? toDraft(row);
             const isDraft = row.status === "draft";
             const busy = Boolean(busyKey && busyKey.split(":")[1] === String(row.id));
             return (
-              <article key={row.id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm
-                dark:border-slate-800 dark:bg-slate-900">
+              <CcCard
+                key={row.id}
+                tone={row.effective_state === "current" ? "accent" : "default"}
+                className="space-y-3 p-4"
+              >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-bold">
+                  <p className="font-bold text-cc-text">
                     سياسة v{row.version} · {row.plan ? `خطة «${row.plan}»` : "عامة لكل الخطط"} · {row.billing_tenant_name}
                   </p>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs dark:bg-slate-800">
+                  <CcPill tone={policyEffectiveStateTone(row.effective_state)} dot>
                     {POLICY_EFFECTIVE_STATE_LABEL[row.effective_state]}
-                  </span>
+                  </CcPill>
                 </div>
                 <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
                   <label className="space-y-1">
-                    <span className="text-slate-500">{FIELD_LABELS.plan}</span>
+                    <span className="text-cc-text-muted">{FIELD_LABELS.plan}</span>
                     <input
                       className="ktra-input h-8 w-full"
                       value={draft.plan}
@@ -288,7 +334,7 @@ export const SubscriptionPolicyPanel: React.FC = () => {
                   </label>
                   {NUMBER_FIELDS.map((field) => (
                     <label key={field} className="space-y-1">
-                      <span className="text-slate-500">{FIELD_LABELS[field]}</span>
+                      <span className="text-cc-text-muted">{FIELD_LABELS[field]}</span>
                       <input
                         className="ktra-input h-8 w-full"
                         value={draft[field]}
@@ -302,7 +348,7 @@ export const SubscriptionPolicyPanel: React.FC = () => {
                 <div className="grid gap-2 text-xs sm:grid-cols-2">
                   {(["fixed_fee_product", "overage_product"] as const).map((field) => (
                     <div key={field} className="space-y-1">
-                      <span className="text-slate-500">{FIELD_LABELS[`${field}_id`]}</span>
+                      <span className="text-cc-text-muted">{FIELD_LABELS[`${field}_id`]}</span>
                       {isDraft ? (
                         <BillingProductPicker
                           policyId={row.id}
@@ -315,12 +361,12 @@ export const SubscriptionPolicyPanel: React.FC = () => {
                           disabled={busy}
                         />
                       ) : (
-                        <p className="py-1.5">{draft[field]?.name ?? "—"}</p>
+                        <p className="py-1.5 text-cc-text">{draft[field]?.name ?? "—"}</p>
                       )}
                     </div>
                   ))}
                 </div>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-cc-text-muted">
                   سريان: {row.effective_from ? formatDateValue(row.effective_from) : "—"}
                   {row.effective_to && ` حتى ${formatDateValue(row.effective_to)}`}
                   {row.activated_at && ` · فُعّلت ${formatDateValue(row.activated_at)}`}
@@ -348,7 +394,7 @@ export const SubscriptionPolicyPanel: React.FC = () => {
                         value={reasons[row.id] ?? ""}
                         onChange={(event) => setReasons((current) => ({ ...current, [row.id]: event.target.value }))}
                       />
-                      <label className="flex items-center gap-1 text-xs text-slate-500">
+                      <label className="flex items-center gap-1 text-xs text-cc-text-muted">
                         يسري من
                         <input
                           type="date"
@@ -364,17 +410,25 @@ export const SubscriptionPolicyPanel: React.FC = () => {
                     </>
                   )}
                 </div>
-              </article>
+              </CcCard>
             );
           })}
-          {policies.length === 0 && <p className="text-sm text-slate-500">لا توجد سياسة بعد.</p>}
+          {policies.length === 0 && <CcEmpty title="لا توجد سياسة بعد." />}
         </div>
       )}
     </section>
   );
 };
 
-const PolicyImpact: React.FC<{ impact: SubscriptionPolicyPreview }> = ({ impact }) => {
+// `plain`: حوارُ التأكيد يُرسَم من `ConfirmContext` في جذر التطبيق **خارجَ** `.ops-shell`،
+// فجدولُ `Cc*` الكحليُّ هناك نصٌّ فاتحٌ فوق حوارٍ فاتح. الحوارُ يبقى على الأسطر المجرّدة.
+const PolicyImpact: React.FC<{ impact: SubscriptionPolicyPreview; plain?: boolean }> = ({
+  impact,
+  plain = false,
+}: {
+  impact: SubscriptionPolicyPreview;
+  plain?: boolean;
+}) => {
   const describe = (field: string, value: SubscriptionPolicyDiffValue["active"], side: "active" | "draft"): string => {
     const policy = side === "active" ? impact.active : impact.draft;
     if (side === "active" && !policy) return "لا توجد نسخة سارية";
@@ -384,14 +438,46 @@ const PolicyImpact: React.FC<{ impact: SubscriptionPolicyPreview }> = ({ impact 
     if (field === "overage_product_id") return policy?.overage_product_name ?? "—";
     return formatNumber(value, { fallback: "—" });
   };
+
+  const diffEntries = Object.entries(impact.diff) as [string, SubscriptionPolicyDiffValue][];
+
+  if (plain) {
+    return (
+      <div className="mt-2 space-y-1">
+        {diffEntries.length === 0 && <p>لا فروق عن النسخة السارية.</p>}
+        {diffEntries.map(([field, values]) => (
+          <p key={field}>
+            {FIELD_LABELS[field] ?? field}: {describe(field, values.active, "active")} ← {describe(field, values.draft, "draft")}
+          </p>
+        ))}
+      </div>
+    );
+  }
+
+  if (diffEntries.length === 0) {
+    return <p className="mt-2 text-xs text-cc-text-muted">لا فروق عن النسخة السارية.</p>;
+  }
+
   return (
-    <div className="mt-2 space-y-1">
-      {Object.keys(impact.diff).length === 0 && <p>لا فروق عن النسخة السارية.</p>}
-      {(Object.entries(impact.diff) as [string, SubscriptionPolicyDiffValue][]).map(([field, values]) => (
-        <p key={field}>
-          {FIELD_LABELS[field] ?? field}: {describe(field, values.active, "active")} ← {describe(field, values.draft, "draft")}
-        </p>
-      ))}
+    <div className="mt-2">
+      <CcTable>
+        <CcThead>
+          <tr>
+            <CcTh>الحقل</CcTh>
+            <CcTh>النسخة السارية</CcTh>
+            <CcTh>النسخة المسودة</CcTh>
+          </tr>
+        </CcThead>
+        <tbody>
+          {diffEntries.map(([field, values]) => (
+            <CcTr key={field}>
+              <CcTd className="font-semibold text-cc-text">{FIELD_LABELS[field] ?? field}</CcTd>
+              <CcTd className="font-mono text-cc-text-muted">{describe(field, values.active, "active")}</CcTd>
+              <CcTd className="font-mono font-bold text-sky-400">{describe(field, values.draft, "draft")}</CcTd>
+            </CcTr>
+          ))}
+        </tbody>
+      </CcTable>
     </div>
   );
 };

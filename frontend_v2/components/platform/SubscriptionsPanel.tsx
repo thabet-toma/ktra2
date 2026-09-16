@@ -13,11 +13,28 @@ import {
   describePlatformOpsError,
   formatTrialRemainingLabel,
 } from "../../utils/platformSubscriptionManagement";
+import { type CcTone } from "../../utils/ccTone";
+import { CcEmpty, CcPill, CcSectionTitle, CcTable, CcTd, CcTh, CcThead, CcTr } from "./ui";
 
 const STATUS_FILTERS = Object.keys(SUBSCRIPTION_STATUS_LABEL) as ServiceSubscriptionStatus[];
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لعرض اشتراكات الخدمة.", "تعذّر تحميل الاشتراكات.");
+
+const subscriptionStatusTone = (status: ServiceSubscriptionStatus): CcTone => {
+  switch (status) {
+    case "active":
+      return "success";
+    case "trial":
+      return "accent";
+    case "suspended":
+      return "warning";
+    case "cancelled":
+      return "danger";
+    default:
+      return "neutral";
+  }
+};
 
 /**
  * نظرة عامة للقراءة على كل اشتراكات الخدمة — التعديل والانتقالات تتم من
@@ -45,69 +62,92 @@ export const SubscriptionsPanel: React.FC = () => {
 
   return (
     <section className="space-y-4">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">اشتراكات الخدمة</h2>
-        <div className="flex items-center gap-2">
-          <select
-            className="ktra-input h-9"
-            value={statusFilter}
-            onChange={(event) => setStatusFilter(event.target.value as ServiceSubscriptionStatus | "")}
-            aria-label="تصفية حسب الحالة"
-          >
-            <option value="">كل الحالات</option>
-            {STATUS_FILTERS.map((value) => (
-              <option key={value} value={value}>{SUBSCRIPTION_STATUS_LABEL[value]}</option>
-            ))}
-          </select>
-          <button type="button" onClick={() => void load(statusFilter)} className="ktra-iconbtn" title="تحديث" aria-label="تحديث">
-            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
-      </div>
+      <CcSectionTitle
+        title="اشتراكات الخدمة"
+        subtitle="نظرة عامة للقراءة على كل اشتراكات الخدمة — التعديل والانتقالات تتم من بطاقة الشركة نفسها."
+        badge={rows.length}
+        action={
+          <div className="flex items-center gap-2">
+            <select
+              className="ktra-input h-9 text-xs"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as ServiceSubscriptionStatus | "")}
+              aria-label="تصفية حسب الحالة"
+            >
+              <option value="">كل الحالات</option>
+              {STATUS_FILTERS.map((value) => (
+                <option key={value} value={value}>{SUBSCRIPTION_STATUS_LABEL[value]}</option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => void load(statusFilter)}
+              className="ktra-iconbtn"
+              title="تحديث"
+              aria-label="تحديث"
+              disabled={loading}
+            >
+              <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+            </button>
+          </div>
+        }
+      />
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700
-          dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">
-          {error}
-          <button type="button" onClick={() => void load(statusFilter)} className="mr-2 underline">إعادة المحاولة</button>
+        <div className="rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-300 flex items-center justify-between">
+          <span>{error}</span>
+          <button type="button" onClick={() => void load(statusFilter)} className="mr-2 underline text-rose-200 hover:text-rose-100">إعادة المحاولة</button>
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل…</div>
+        <div className="flex items-center justify-center gap-2 py-8 text-sm text-cc-text-muted">
+          <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+          <span>جارٍ التحميل…</span>
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
-          <table className="w-full text-right text-xs">
-            <thead className="border-b border-slate-200 bg-slate-50 font-semibold dark:border-slate-800 dark:bg-slate-800/60">
+        <CcTable>
+          <CcThead>
+            <tr>
+              <CcTh>الشركة</CcTh>
+              <CcTh>الحالة</CcTh>
+              <CcTh>الباقة</CcTh>
+              <CcTh>الحصة</CcTh>
+              <CcTh>عميل الفوترة</CcTh>
+              <CcTh>تنبيه</CcTh>
+            </tr>
+          </CcThead>
+          <tbody>
+            {rows.length === 0 ? (
               <tr>
-                <th className="p-3">الشركة</th>
-                <th className="p-3">الحالة</th>
-                <th className="p-3">الباقة</th>
-                <th className="p-3">الحصة</th>
-                <th className="p-3">عميل الفوترة</th>
-                <th className="p-3">تنبيه</th>
+                <CcTd colSpan={6} className="p-8 text-center">
+                  <CcEmpty title="لا اشتراكات مطابقة." />
+                </CcTd>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80">
-              {rows.length === 0 ? (
-                <tr><td colSpan={6} className="p-8 text-center text-slate-400">لا اشتراكات مطابقة.</td></tr>
-              ) : rows.map((row) => (
-                <tr key={row.id}>
-                  <td className="p-3 font-semibold">{row.company_name}</td>
-                  <td className="p-3">{row.status_display}</td>
-                  <td className="p-3">{row.plan}</td>
-                  <td className="p-3">{formatNumber(row.consumed_quota)} / {formatNumber(row.included_quota)}</td>
-                  <td className="p-3">{row.billing_customer_name ?? "—"}</td>
-                  <td className="p-3 text-amber-700 dark:text-amber-300">
+            ) : (
+              rows.map((row) => (
+                <CcTr key={row.id}>
+                  <CcTd className="font-semibold text-cc-text">{row.company_name}</CcTd>
+                  <CcTd>
+                    <CcPill tone={subscriptionStatusTone(row.status)} dot>
+                      {row.status_display}
+                    </CcPill>
+                  </CcTd>
+                  <CcTd className="text-cc-text">{row.plan}</CcTd>
+                  <CcTd className="font-mono text-cc-text">
+                    {formatNumber(row.consumed_quota)} / {formatNumber(row.included_quota)}
+                  </CcTd>
+                  <CcTd className="text-cc-text-muted">{row.billing_customer_name ?? "—"}</CcTd>
+                  <CcTd className="text-amber-400 text-xs">
                     {row.status === "trial" && formatTrialRemainingLabel(row.trial_ends_at)}
                     {row.status === "trial" && row.scheduled_cancellation_date && " · "}
                     {row.scheduled_cancellation_date && `آخر يوم خدمة ${formatDateValue(row.scheduled_cancellation_date)}`}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+                  </CcTd>
+                </CcTr>
+              ))
+            )}
+          </tbody>
+        </CcTable>
       )}
     </section>
   );
