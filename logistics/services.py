@@ -2467,6 +2467,7 @@ def void_goods_receipt(receipt, *, user=None):
     from inventory.services import (
         _assert_layers_not_consumed_elsewhere,
         _recompute_product_stock,
+        _reverse_provisional_reconciliations,
         _unlayered_inbound_quantities,
         apply_purchase_cost_model,
     )
@@ -2480,9 +2481,8 @@ def void_goods_receipt(receipt, *, user=None):
         # حذفُ الحركة يمحو طبقتها وصفوفَ استهلاك مبيعاتٍ لاحقة معها (CASCADE) —
         # فبضاعةٌ بيعت منها تمنع الإلغاء، كإلغاء ترحيل فاتورة الشراء نفسِها.
         _assert_layers_not_consumed_elsewhere(movement_ids)
-        unlayered_inbound = _unlayered_inbound_quantities(
-            list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
-        )
+        movements = list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
+        unlayered_inbound = _unlayered_inbound_quantities(movements)
 
         # الوحدات المُرقَّمة تخرج مع بضاعتها. الحصّة التي جاءت بهذه الإرسالية هي
         # الأحدث (الاستلام يُنشئ بالترتيب والبيع يستهلك من الأقدم)، وأيُّ وحدة
@@ -2503,6 +2503,8 @@ def void_goods_receipt(receipt, *, user=None):
             )
 
         if movement_ids:
+            # ما سدّته من طبقاتٍ مؤقّتة يُفتح، وقيدُ فرقه يُحذف — قبل حذف الحركة.
+            _reverse_provisional_reconciliations(movements)
             StockMovement.objects.filter(pk__in=movement_ids).delete()
 
         # قيد هذه الإرسالية وحدها (قد تشترك عدة إرساليات في مرجع الفاتورة).

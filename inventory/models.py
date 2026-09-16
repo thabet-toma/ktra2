@@ -937,3 +937,47 @@ class StockLayerConsumption(models.Model):
 
     def __str__(self):
         return f"Consumption {self.id}: layer={self.layer_id} qty={self.quantity}"
+
+
+class StockLayerReconciliation(models.Model):
+    """سجلّ سدٍّ: أيُّ وارِدٍ سدّ أيَّ طبقةٍ مؤقّتة وكم — نظيرُ `StockLayerConsumption`.
+
+    `inventory.fifo.reconcile_provisional` يزيد `StockLayer.reconciled_qty` على الطبقات
+    المؤقّتة الأقدم فالأقدم؛ وبلا هذا السجلّ لا يُعرف بعدها أيُّ وارِدٍ سدّ أيَّها. فإلغاءُ
+    ترحيل وارِدٍ من بين عدّة واردين بكلفٍ مختلفة كان سيفتح طبقةً غيرَ التي سدّها، فيخرج
+    قيدُ الفرق عند إعادة الترحيل بكلفةٍ مخمَّنةٍ أخرى. يقرؤه `fifo.unreconcile` قبل حذف
+    حركة الوارد، ويسقط معها بالتتالي.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='StockLayerReconciliationID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='stock_layer_reconciliations',
+    )
+    movement = models.ForeignKey(
+        StockMovement, on_delete=models.CASCADE, db_column='MovementID',
+        related_name='layer_reconciliations',
+    )
+    layer = models.ForeignKey(
+        StockLayer, on_delete=models.CASCADE, db_column='StockLayerID',
+        related_name='reconciliations',
+    )
+    quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='Quantity',
+        help_text='الكمية التي سدّها هذا الوارد من الطبقة المؤقّتة',
+    )
+    provisional_unit_cost = models.DecimalField(
+        max_digits=18, decimal_places=4, db_column='ProvisionalUnitCost',
+        help_text='الكلفة المخمَّنة للطبقة لحظة السدّ — لقطة لا مرجعاً متحرّكاً',
+    )
+
+    class Meta:
+        db_table = 'stock_layer_reconciliations'
+        managed = True
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['tenant', 'movement'], name='idx_slr_tenant_movement'),
+        ]
+
+    def __str__(self):
+        return f"Reconciliation {self.id}: layer={self.layer_id} qty={self.quantity}"

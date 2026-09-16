@@ -1001,6 +1001,31 @@ def _unlayered_inbound_quantities(movements) -> dict[int, Decimal]:
     return result
 
 
+def _reverse_provisional_reconciliations(movements) -> None:
+    """قبل حذف حركاتٍ واردة: يُعيد فتحَ ما سدّته من طبقاتٍ مؤقّتة (`fifo.unreconcile`)
+    ويحذف قيدَ فرق تسويتها (`STOCK_PROVISIONAL_RECONCILE` بمرجع الحركة).
+
+    القيدُ بمرجع **الحركة** لا المستند، فحذفُ قيود المستند (`unpost_document`) لا يطاله:
+    كان يبقى يتيماً في الدفتر، وإعادةُ الترحيل تُطلع قيداً ثانياً للفرق نفسه. وتاريخُه
+    تاريخُ الحركة نفسها، فحارسُ الفترة هو حارسُ المستدعي على قيود مستنده: `unpost_document`
+    يفحص فترةَ تواريخ الحركات، و`void_goods_receipt` لا يفحص فترةً لقيده هو أيضاً.
+    """
+    inbound = [m for m in movements if m.movement_type in INBOUND_TYPES]
+    if not inbound:
+        return
+    from accounting.models import JournalHeader
+
+    for m in inbound:
+        fifo.unreconcile(m)
+    for header in JournalHeader.objects.filter(
+        tenant_id=inbound[0].tenant_id,
+        reference_type='STOCK_PROVISIONAL_RECONCILE',
+        reference_id__in=[m.id for m in inbound],
+    ):
+        # حذفُ الترويسة يُسقط أسطرها (CASCADE) — نمطُ `unpost_document` نفسُه.
+        header.delete()
+
+
 def _assert_layers_not_consumed_elsewhere(movement_ids) -> None:
     """⚠️ طبقةٌ أنتجتها هذه الحركات واستهلكها صرفٌ من خارجها ⟵ `ValidationError`.
 
@@ -1133,6 +1158,7 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
         # الرَّدّ: كل حركةٍ صادرة ضمن هذا المستند تعيد كميّتها إلى طبقاتها
         # الأصلية وموقعها في رتل FIFO — قبل الحذف لا بعده، وضمن نفس المعاملة
         # الذرّية كي لا يبقى ردٌّ جزئيٌّ بلا حذفٍ يتبعه عند أي عطل.
+        _reverse_provisional_reconciliations(movements)
         unrestored = _restore_outbound_layers(movements)
         StockMovement.objects.filter(id__in=movement_ids).delete()
     for prod in affected_products.values():

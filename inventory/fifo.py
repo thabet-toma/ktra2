@@ -25,7 +25,13 @@ from django.db import transaction
 from django.db.models import DecimalField, F, Sum
 from django.db.models.functions import Coalesce
 
-from .models import Product, StockLayer, StockLayerConsumption, StockMovement
+from .models import (
+    Product,
+    StockLayer,
+    StockLayerConsumption,
+    StockLayerReconciliation,
+    StockMovement,
+)
 
 Q4 = Decimal("0.0001")
 
@@ -277,6 +283,12 @@ def reconcile_provisional(*, movement: StockMovement, quantity, unit_cost) -> Re
             filled = min(pending, remaining)
             layer.reconciled_qty = (layer.reconciled_qty + filled).quantize(Q4)
             layer.save(update_fields=["reconciled_qty"])
+            # السجلُّ هو ما يجعل إلغاءَ ترحيل هذا الوارد يفتح **هذه** الطبقة بعينها
+            # (`unreconcile`) — لا أحدثَ مسدودةٍ ولا أقدمَها.
+            StockLayerReconciliation.objects.create(
+                tenant_id=movement.tenant_id, movement=movement, layer=layer,
+                quantity=filled, provisional_unit_cost=layer.unit_cost,
+            )
             details.append(
                 ReconcileDetail(
                     layer_id=layer.pk,
@@ -299,6 +311,63 @@ def reconcile_provisional(*, movement: StockMovement, quantity, unit_cost) -> Re
             is_provisional=False,
         )
         return ReconcileResult(new_layer=new_layer, filled_qty=filled_total, details=details)
+
+
+def unreconcile(movement: StockMovement) -> Decimal:
+    """ردُّ سدِّ وارِدٍ للطبقات المؤقّتة — مسارُ إلغاء ترحيله، **قبل** حذف الحركة.
+
+    من سجلّ `StockLayerReconciliation`: كلُّ طبقةٍ سدّها يُنقَص `reconciled_qty` عليها
+    بقدر ما سدّ، فتعود معلَّقةً كما كانت قبل وصوله، ويُحذف السجلّ.
+
+    **وسدٌّ بلا سجلّ** (جرى قبل وجود الجدول): كميّتُه مشتقّةٌ من طبقة الوارد نفسها —
+    أصلُها − متبقّيها − ما استُهلك منها = ما ذهب للسدّ — مطروحاً منها المسجَّل. ويُفتح
+    من الطبقات المؤقّتة المسدودة التي **سبقت** طبقتَه (لا يسدّ وارِدٌ ما لم يوجد بعد)،
+    الأحدثُ أوّلاً. وهو تقريبٌ صادقٌ لحالة وارِدٍ واحدٍ بعد البيع، والتعيينُ الدقيق عند
+    تعدّد الواردين بكلفٍ مختلفة هو سببُ وجود السجلّ أصلاً.
+
+    يُرجع الكميّةَ التي أُعيد فتحُها.
+    """
+    reopened = Decimal("0")
+    with transaction.atomic():
+        records = list(
+            StockLayerReconciliation.objects.select_for_update()
+            .filter(movement_id=movement.pk)
+        )
+        for record in records:
+            layer = StockLayer.objects.select_for_update().get(pk=record.layer_id)
+            take = min(record.quantity, layer.reconciled_qty)
+            layer.reconciled_qty = (layer.reconciled_qty - take).quantize(Q4)
+            layer.save(update_fields=["reconciled_qty"])
+            reopened += take
+        recorded = sum((r.quantity for r in records), Decimal("0"))
+        StockLayerReconciliation.objects.filter(pk__in=[r.pk for r in records]).delete()
+
+        own = StockLayer.objects.filter(source_movement_id=movement.pk, is_provisional=False).first()
+        if own is None:
+            return reopened.quantize(Q4)
+        consumed = _d(
+            StockLayerConsumption.objects.filter(layer_id=own.pk).aggregate(s=Sum("quantity"))["s"]
+        )
+        unrecorded = (own.original_qty - own.remaining_qty - consumed - recorded).quantize(Q4)
+        if unrecorded <= 0:
+            return reopened.quantize(Q4)
+        filled_layers = (
+            StockLayer.objects.select_for_update()
+            .filter(
+                tenant_id=movement.tenant_id, product_id=movement.product_id,
+                is_provisional=True, reconciled_qty__gt=0, pk__lt=own.pk,
+            )
+            .order_by("-layer_date", "-id")
+        )
+        for layer in filled_layers:
+            if unrecorded <= 0:
+                break
+            take = min(layer.reconciled_qty, unrecorded)
+            layer.reconciled_qty = (layer.reconciled_qty - take).quantize(Q4)
+            layer.save(update_fields=["reconciled_qty"])
+            unrecorded -= take
+            reopened += take
+    return reopened.quantize(Q4)
 
 
 def pending_provisional_layers(*, tenant_id: int) -> list:
