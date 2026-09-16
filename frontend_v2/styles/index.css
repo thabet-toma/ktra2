@@ -95,6 +95,36 @@
   --z-float-rail: 60;
   --z-window-mask: 80;
   --z-window: 81;
+
+  /* ── قشرةُ مركز القيادة (Command Center) — أسماءٌ تُولّد أدواتِ Tailwind ──
+     لا تُستعمل هذه الرموزُ خارج `frontend_v2/components/platform*`.
+
+     **ليست لوحةً ثانيةً.** لسطح المنصّة لوحةٌ داكنةٌ قائمةٌ منذ #212: رموزُ
+     `--staff-*` المعرّفةُ على `.staff-shell, .ops-shell` ورموزُ `--pf-*` على
+     `.platform-surface`. لو كُتبت القيمُ هنا حرفيّاً لصارتا نسختين تتباعدان
+     بصمت، فتُقرأ كلُّ قيمةٍ من مصدرها بـ`var()` والحرفيُّ **احتياطٌ** لِما
+     يُركَّب خارجَ الغلافين (شاشةُ التوظيف اليوم). تغييرُ اللون يُجرى في
+     `--staff-*` وحدَها فيتبعه هذا تلقائيّاً. */
+  --color-cc-bg: var(--staff-bg, #011632);
+  --color-cc-bg-2: var(--staff-rail, #00102b);
+  --color-cc-surface: var(--staff-panel, #0a2543);
+  /* الرمزُ الوحيدُ بلا نظيرٍ في `--staff-*`: سطحٌ مرفوعٌ بين اللوح والحدّ
+     (صفُّ جدولٍ، بطاقةٌ داخل بطاقة). قيمةٌ حرفيّةٌ لأنّه لا مصدرَ يُقرأ منه. */
+  --color-cc-surface-2: #0f2f57;
+  --color-cc-border: var(--staff-line, #22476f);
+  --color-cc-border-strong: var(--staff-accent-2, #3b82f6);
+  --color-cc-text: var(--staff-text, #e2e8f0);
+  --color-cc-text-muted: var(--staff-muted, #94a3b8);
+  --color-cc-accent: var(--staff-accent-2, #3b82f6);
+  --color-cc-accent-2: var(--staff-accent, #22d3ee);
+  --color-cc-violet: #8b5cf6;
+  --color-cc-success: var(--pf-online, #22c55e);
+  --color-cc-warning: var(--pf-meeting, #f59e0b);
+  --color-cc-danger: var(--pf-offline, #ef4444);
+  --shadow-cc-card: 0 4px 20px -2px rgb(0 0 0 / 0.5), 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-cc-glow: 0 0 25px -5px rgb(56 189 248 / 0.25);
+  --radius-cc: 1rem;
+  --radius-cc-lg: 1.25rem;
 }
 
 /* Dark mode: apply dark token overrides when .dark class is on <html> */
