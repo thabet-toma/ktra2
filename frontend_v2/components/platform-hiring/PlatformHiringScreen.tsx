@@ -5,6 +5,7 @@ import {
   listPlatformJobs,
   type PlatformJobPosting,
 } from "../../services/platformHiringApi";
+import { CcCard, CcEmpty, CcPill, CcTabs, type CcTabItem } from "../platform/ui";
 import { PlatformApplicantsTab } from "./PlatformApplicantsTab";
 import { PlatformJobsTab } from "./PlatformJobsTab";
 import { PlatformMeetingsTab } from "./PlatformMeetingsTab";
@@ -14,9 +15,16 @@ interface PlatformHiringScreenProps {
   canManageRecruiters: boolean;
 }
 
+const HIRING_TABS: CcTabItem[] = [
+  { key: "jobs", label: "الوظائف", icon: <Briefcase className="w-4 h-4" /> },
+  { key: "applicants", label: "المتقدّمون", icon: <Users className="w-4 h-4" /> },
+  { key: "meetings", label: "اجتماعات", icon: <CalendarDays className="w-4 h-4" /> },
+  { key: "recruiters", label: "مسؤولو التوظيف", icon: <UserCheck className="w-4 h-4" /> },
+];
+
 export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
   canManageRecruiters,
-}) => {
+}: PlatformHiringScreenProps) => {
   const [activeTab, setActiveTab] = useState<"jobs" | "applicants" | "meetings" | "recruiters">("jobs");
   const [jobs, setJobs] = useState<PlatformJobPosting[]>([]);
   const [loadingJobs, setLoadingJobs] = useState(true);
@@ -66,94 +74,56 @@ export const PlatformHiringScreen: React.FC<PlatformHiringScreenProps> = ({
     setActiveTab("applicants");
   };
 
+  const visibleTabs = canManageRecruiters
+    ? HIRING_TABS
+    : HIRING_TABS.filter((t) => t.key !== "recruiters");
+
   if (isForbidden) {
     return (
-      <div className="p-8 max-w-4xl mx-auto text-right" dir="rtl">
-        <div className="p-8 rounded-2xl bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 text-center space-y-4 shadow-sm">
-          <ShieldAlert className="w-12 h-12 text-amber-600 dark:text-amber-400 mx-auto" />
-          <div className="space-y-1">
-            <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">
-              صلاحية غير متوفرة
-            </h2>
-            <p className="text-sm font-semibold text-amber-800 dark:text-amber-300">
-              هذه الشاشة لمسؤولي التوظيف في المنصة.
-            </p>
-            <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-              يتطلب الدخول لهذه الصفحة إسناد دور «مسؤول توظيف المنصة» لحسابك من قبل مدير النظام.
-            </p>
-          </div>
-        </div>
+      <div
+        className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 flex items-center justify-center"
+        dir="rtl"
+      >
+        <CcCard tone="warning" className="max-w-md w-full p-6 text-center">
+          <CcEmpty
+            icon={<ShieldAlert className="w-10 h-10 text-amber-400" />}
+            title="صلاحية غير متوفرة"
+            hint="يتطلب الدخول لهذه الصفحة إسناد دور «مسؤول توظيف المنصة» لحسابك من قبل مدير النظام."
+          />
+        </CcCard>
       </div>
     );
   }
 
   return (
-    <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-6 text-right" dir="rtl">
-      {/* الترويسة الرئيسية */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 dark:border-slate-800 pb-4">
-        <div>
-          <h1 className="text-xl md:text-2xl font-bold text-slate-900 dark:text-slate-100 flex items-center gap-2">
-            <Briefcase className="w-6 h-6 text-blue-600 dark:text-blue-400" />
-            التوظيف المنصّي
-          </h1>
-          <p className="text-xs md:text-sm text-slate-500 dark:text-slate-400 mt-1">
+    <div
+      className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 pb-24 md:pb-6 lg:pb-8"
+      dir="rtl"
+    >
+      {/* الترويسة الرئيسية كترويسة PlatformOpsDashboard */}
+      <header className="flex flex-wrap items-center gap-4 pb-6 mb-6 border-b border-cc-border">
+        <div className="flex flex-col">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-xl sm:text-2xl font-black text-cc-text tracking-tight flex items-center gap-2">
+              <Briefcase className="w-6 h-6 text-sky-400" />
+              التوظيف المنصّي
+            </h1>
+            <CcPill tone="accent">المرحلة الثامنة</CcPill>
+          </div>
+          <p className="text-xs text-cc-text-muted mt-1">
             إدارة إعلانات التوظيف المنصية، متابعة طلبات المرشحين، وإصدار روابط الدعوات والقبول.
           </p>
         </div>
 
-        {/* أزرار التبويبات */}
-        <div className="flex items-center gap-1 bg-slate-100 dark:bg-slate-800/60 p-1 rounded-xl border border-slate-200 dark:border-slate-700">
-          <button
-            type="button"
-            onClick={() => setActiveTab("jobs")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeTab === "jobs"
-                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-            }`}
-          >
-            <Briefcase className="w-3.5 h-3.5" />
-            الوظائف
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("applicants")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeTab === "applicants"
-                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-            }`}
-          >
-            <Users className="w-3.5 h-3.5" />
-            المتقدّمون
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("meetings")}
-            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-              activeTab === "meetings"
-                ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-            }`}
-          >
-            <CalendarDays className="w-3.5 h-3.5" />
-            اجتماعات
-          </button>
-          {canManageRecruiters && (
-            <button
-              type="button"
-              onClick={() => setActiveTab("recruiters")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${
-                activeTab === "recruiters"
-                  ? "bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-sm"
-                  : "text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100"
-              }`}
-            >
-              <UserCheck className="w-3.5 h-3.5" />
-              مسؤولو التوظيف
-            </button>
-          )}
-        </div>
+      </header>
+
+      {/* شريط التبويبات بـ CcTabs */}
+      <div className="w-full mb-6">
+        <CcTabs
+          tabs={visibleTabs}
+          active={activeTab}
+          onChange={(key) => setActiveTab(key as "jobs" | "applicants" | "meetings" | "recruiters")}
+        />
       </div>
 
       {/* محتوى التبويب النشط */}

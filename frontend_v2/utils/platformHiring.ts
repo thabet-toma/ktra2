@@ -6,6 +6,8 @@
  * الإرسال لا حكم**: الحكمُ للخادم، ونسخُها هنا يوفّر على المتقدّم رفعَ خمسة ميجا
  * ليُقال له بعدها إنّها أكبرُ من المسموح.
  */
+
+import type { CcTone } from './ccTone.ts';
 import { formatNumber } from './formatNumber.ts';
 
 /** مرآةُ `MAX_CV_BYTES` في `platform_ops/public_hiring/cv_validation.py`. */
@@ -105,23 +107,28 @@ export function firstApiErrorMessage(body: unknown, fallback: string): string {
   return fallback;
 }
 
-const APPLICANT_STATUS_BADGE: Record<string, string> = {
-  new: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800',
-  screening: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-950/40 dark:text-indigo-300 dark:border-indigo-800',
-  interview: 'bg-violet-50 text-violet-700 border-violet-200 dark:bg-violet-950/40 dark:text-violet-300 dark:border-violet-800',
-  offered: 'bg-amber-50 text-amber-800 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
-  hired: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
-  rejected: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
+const APPLICANT_STATUS_TONE: Record<string, CcTone> = {
+  new: 'accent',
+  screening: 'violet',
+  interview: 'violet',
+  offered: 'warning',
+  hired: 'success',
+  rejected: 'danger',
 };
 
-const NEUTRAL_BADGE = 'bg-slate-100 text-slate-700 border-slate-200 dark:bg-slate-800 dark:text-slate-300 dark:border-slate-700';
-
 /**
- * لونُ شارة حالة المتقدّم. **النصُّ من الخادم** (`status_display`) — هذه ألوانٌ لا
- * تسميات، وحالةٌ جديدةٌ لا يعرفها الجدولُ تُعرض محايدةً لا تختفي.
+ * نغمةُ حالة المتقدّم. **النصُّ من الخادم** (`status_display`) — هذه نغمةٌ لا
+ * تسمية، وحالةٌ جديدةٌ لا يعرفها الجدولُ تُعرض محايدةً لا تختفي.
+ *
+ * كانت هنا `applicantStatusBadgeClass` تُرجع أصنافاً **فاتحةً** (`bg-sky-50
+ * text-sky-700`) بلواحق `dark:` — عقدَ شاشةٍ ثنائيّةِ القشرة. ولمّا دخلت شاشاتُ
+ * التوظيف الغلافَ الداكنَ صارت تلك الشاراتُ رقعاً باهتةً على الكحليّ، والحالةُ
+ * الواحدةُ يلبسها لونان: رقاقةٌ داكنةٌ في تبويب المتقدّمين وشارةٌ فاتحةٌ في شبكة
+ * الحضور. **ولا يمسك ذلك حارسُ أصنافٍ ساكن**: اللونُ يأتي من دالّةٍ لا من سلسلةٍ
+ * حرفيّةٍ في `className`. فصار المصدرُ نغمةً واحدةً تقرؤها `CcPill`.
  */
-export function applicantStatusBadgeClass(status: string | null | undefined): string {
-  return APPLICANT_STATUS_BADGE[String(status || '')] ?? NEUTRAL_BADGE;
+export function applicantStatusTone(status: string | null | undefined): CcTone {
+  return APPLICANT_STATUS_TONE[String(status || '')] ?? 'neutral';
 }
 
 

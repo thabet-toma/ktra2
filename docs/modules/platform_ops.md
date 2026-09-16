@@ -399,6 +399,22 @@
 تنزع من «الله». **ولا بوّابةَ هنا تصيّر مكوّناً** — ولذلك كان لا بدّ من إخراجها
 دالّةً خالصةً يمسكها `npm test`، ومن فحصٍ بصريٍّ على بياناتٍ حقيقيّة كشفها أصلاً.
 
+**وشاشاتُ التوظيف الثماني تلبسها أيضاً** (الموجة ٣): `PlatformHiringScreen`
+(الغلافُ `platform-surface ops-shell` — **ولم يكن لها غلافٌ قطّ**، فكانت الشاشةُ
+بيضاءَ) و`PlatformJobsTab` و`PlatformApplicantsTab` (وفيه خطُّ مراحلِ المتقدّم:
+خمسُ دوائرَ موصولةٍ، والنقرُ على مرحلةٍ يصفّي بها) و`PlatformApplicantPanel` و
+`PlatformMeetingsTab` و`PlatformMeetingDetail` و`PlatformRecruitersTab` و
+`ApplicantAttendanceMatrix`. **والثلاثُ التي يراها المتقدّمُ للوظيفة تبقى فاتحةً**
+(`PlatformPublicJobPage` · `PlatformInvitationPage` · `PublicApplicantTrackingPanel`)
+— قرارُ علامةٍ تجاريّةٍ لا سهو.
+
+**ولماذا لم يمسك ذلك حارسٌ**: `test_platform_skin.py` يمسح
+`components/platform/*.tsx` و`staff/crm/*.tsx` وحدَهما، ومجلّدُ `platform-hiring/`
+**ليس في نطاقه**. ولا يصحّ توسيعُ مسحِه إليه: الشاشاتُ العامّةُ فاتحةٌ عمداً
+فتسقطه. فالحارسُ الجديدُ في `test_hiring_frontend_contract.py`
+(`OPERATOR_HIRING_SCREENS` · `LIGHT_SKIN_CLASS`) يسمّي الثمانيَ بأسمائها ويمنع
+فيها الصنفَ الفاتحَ ولاحقةَ `dark:` الميّتة.
+
 **وشاشةُ النظرة العامّة تلبسها**: `EmployeeCard` و`CompanyCard` و`InterventionRail`
 و`TeamTargetBars` و`CrossTenantActivityTable` وترويسةُ `PlatformOpsDashboard`
 وصفُّ تبويباته. **وصفُّ التبويبات صار `CcTabs` يقرأ `DASHBOARD_TABS`** بدل خمسةَ

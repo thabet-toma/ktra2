@@ -24,7 +24,8 @@ import {
   type PlatformJobApplicant,
 } from "../../services/platformHiringApi";
 import { formatNumber } from "../../utils/formatNumber";
-import { applicantStatusBadgeClass, firstApiErrorMessage } from "../../utils/platformHiring";
+import { applicantStatusTone, firstApiErrorMessage } from "../../utils/platformHiring";
+import { CcAvatar, CcCard, CcPill, CcSectionTitle } from "../platform/ui";
 import { ApplicantUpdateThread } from "./ApplicantUpdateThread";
 
 interface PlatformApplicantPanelProps {
@@ -37,7 +38,7 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
   applicant,
   onClose,
   onUpdated,
-}) => {
+}: PlatformApplicantPanelProps) => {
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -233,101 +234,117 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
     }
   };
 
+  const tone = applicantStatusTone(applicant.status);
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-end bg-slate-900/60" dir="rtl">
-      <div className="relative w-full max-w-xl h-full bg-white dark:bg-slate-900 shadow-2xl border-r border-slate-200 dark:border-slate-800 overflow-y-auto p-6 space-y-6 text-right">
-        {/* رأس اللوحة */}
-        <div className="flex items-start justify-between border-b border-slate-200 dark:border-slate-800 pb-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-lg font-bold text-slate-900 dark:text-slate-100">{applicant.name}</h2>
-              <span
-                className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold border ${applicantStatusBadgeClass(
-                  applicant.status,
-                )}`}
-              >
-                {applicant.status_display}
-              </span>
+    <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/60" dir="rtl">
+      <div className="relative w-full max-w-xl h-full bg-cc-surface border-r border-cc-border shadow-2xl overflow-y-auto p-6 space-y-6 text-right">
+        {/* رأس اللوحة: وجه واسم ورقاقات حالة */}
+        <div className="flex items-start justify-between border-b border-cc-border pb-5">
+          <div className="flex items-start gap-3">
+            <CcAvatar name={applicant.name} size="lg" />
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <h2 className="text-lg font-bold text-cc-text">{applicant.name}</h2>
+                <CcPill tone={tone}>
+                  {applicant.status_display}
+                </CcPill>
+              </div>
+              <p className="text-xs text-cc-text-muted mt-1">
+                متقدم على وظيفة: <span className="font-semibold text-cc-text">{applicant.job_title}</span>
+              </p>
+              <div className="flex items-center gap-2 mt-1 font-mono text-[11px] text-cc-text-muted">
+                <span>رمز المرجع:</span>
+                <span className="text-cc-text font-bold">{applicant.reference_code}</span>
+              </div>
             </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
-              متقدم على وظيفة: <span className="font-semibold text-slate-700 dark:text-slate-300">{applicant.job_title}</span>
-            </p>
           </div>
           <button
             type="button"
             onClick={onClose}
             aria-label="إغلاق"
-            className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition"
+            className="p-1.5 text-cc-text-muted hover:text-cc-text hover:bg-cc-surface-2 rounded-lg transition"
           >
             <X className="w-5 h-5" />
           </button>
         </div>
 
-        {/* أزرار الانتقال بين الحالات */}
-        <div className="rounded-xl bg-slate-50 dark:bg-slate-800/50 p-4 border border-slate-200 dark:border-slate-800 space-y-2">
-          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
-            تحريك حالة المتقدم:
-          </span>
-          {applicant.next_statuses && applicant.next_statuses.length > 0 ? (
-            <div className="flex flex-wrap gap-2">
-              {applicant.next_statuses.map((next) => {
-                const isThisTransitioning = transitioningTo === next.value;
-                return (
-                  <button
-                    key={next.value}
-                    type="button"
-                    disabled={transitioningTo !== null}
-                    onClick={() => handleTransition(next.value, next.label)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm disabled:opacity-50 ${
-                      next.value === "rejected"
-                        ? "bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800"
-                        : "bg-blue-600 text-white hover:bg-blue-700"
-                    }`}
-                  >
-                    {isThisTransitioning ? "جاري النقل..." : `الانتقال إلى: ${next.label}`}
-                  </button>
-                );
-              })}
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400 dark:text-slate-500">
-              لا توجد انتقالات مسموحة من هذه الحالة حالياً.
-            </p>
-          )}
+        {/* 1. أزرار الانتقال بين الحالات — صفاً واحداً بـ CcSectionTitle */}
+        <div className="space-y-3">
+          <CcSectionTitle
+            title="تحريك حالة المتقدم"
+            subtitle="نقل المرشح إلى المرحلة التالية في تدفق التوظيف"
+          />
+
+          <div className="rounded-xl bg-cc-surface-2/60 p-4 border border-cc-border">
+            {applicant.next_statuses && applicant.next_statuses.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {applicant.next_statuses.map((next) => {
+                  const isThisTransitioning = transitioningTo === next.value;
+                  const isReject = next.value === "rejected";
+
+                  return (
+                    <button
+                      key={next.value}
+                      type="button"
+                      disabled={transitioningTo !== null}
+                      onClick={() => handleTransition(next.value, next.label)}
+                      className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition shadow-sm disabled:opacity-50 ${
+                        isReject
+                          ? "bg-rose-500/15 text-rose-400 border border-rose-500/30 hover:bg-rose-500/25"
+                          : "bg-sky-600 text-white hover:bg-sky-500"
+                      }`}
+                    >
+                      {isThisTransitioning ? (
+                        <span className="flex items-center gap-1.5">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>جاري النقل...</span>
+                        </span>
+                      ) : (
+                        `الانتقال إلى: ${next.label}`
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : (
+              <p className="text-xs text-cc-text-muted">
+                لا توجد انتقالات مسموحة من هذه الحالة حالياً.
+              </p>
+            )}
+          </div>
         </div>
 
-        {/* بيانات الاتصال والمعلومات */}
+        {/* 2. بيانات المتقدم */}
         <div className="space-y-3">
-          <h3 className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
-            بيانات المتقدم
-          </h3>
+          <CcSectionTitle title="بيانات الاتصال" />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 flex items-center gap-2.5">
-              <Phone className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+            <div className="rounded-xl border border-cc-border bg-cc-surface-2/50 p-3 flex items-center gap-2.5">
+              <Phone className="w-4 h-4 text-sky-400 shrink-0" />
               <div>
-                <span className="text-[11px] text-slate-400 block">الهاتف</span>
-                <span dir="ltr" className="font-semibold text-slate-800 dark:text-slate-200 inline-block">
+                <span className="text-[11px] text-cc-text-muted block">الهاتف</span>
+                <span dir="ltr" className="font-semibold text-cc-text inline-block">
                   {applicant.phone || "—"}
                 </span>
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 flex items-center gap-2.5">
-              <Mail className="w-4 h-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+            <div className="rounded-xl border border-cc-border bg-cc-surface-2/50 p-3 flex items-center gap-2.5">
+              <Mail className="w-4 h-4 text-sky-400 shrink-0" />
               <div className="overflow-hidden">
-                <span className="text-[11px] text-slate-400 block">البريد</span>
-                <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                <span className="text-[11px] text-cc-text-muted block">البريد</span>
+                <span className="font-semibold text-cc-text truncate block">
                   {applicant.email || "—"}
                 </span>
               </div>
             </div>
 
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3 flex items-center gap-2.5 sm:col-span-2">
-              <span className="text-xs font-mono font-bold text-slate-400">#</span>
+            <div className="rounded-xl border border-cc-border bg-cc-surface-2/50 p-3 flex items-center gap-2.5 sm:col-span-2">
+              <span className="text-xs font-mono font-bold text-sky-400">#</span>
               <div>
-                <span className="text-[11px] text-slate-400 block">رمز المرجع</span>
-                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">
+                <span className="text-[11px] text-cc-text-muted block">رمز المرجع</span>
+                <span className="font-mono font-semibold text-cc-text">
                   {applicant.reference_code}
                 </span>
               </div>
@@ -335,232 +352,277 @@ export const PlatformApplicantPanel: React.FC<PlatformApplicantPanelProps> = ({
           </div>
 
           {applicant.about && (
-            <div className="rounded-lg border border-slate-200 dark:border-slate-800 p-3.5 space-y-1">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 block">
+            <div className="rounded-xl border border-cc-border bg-cc-surface-2/50 p-3.5 space-y-1">
+              <span className="text-xs font-semibold text-cc-text block">
                 نبذة عن المتقدم:
               </span>
-              <p className="text-xs text-slate-600 dark:text-slate-400 whitespace-pre-wrap leading-relaxed">
+              <p className="text-xs text-cc-text-muted whitespace-pre-wrap leading-relaxed">
                 {applicant.about}
               </p>
             </div>
           )}
         </div>
 
-        <section className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3" aria-labelledby="applicant-updates-title">
-          <h3 id="applicant-updates-title" className="text-xs font-bold text-slate-700 dark:text-slate-300">الرسائل والتحديثات</h3>
-          {updatesLoading ? (
-            <p className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400"><Loader2 className="h-4 w-4 animate-spin" /> جاري تحميل الرسائل...</p>
-          ) : updatesError ? (
-            <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">{updatesError}</p>
-          ) : updates.length > 0 ? (
-            <ApplicantUpdateThread updates={updates} showAuthorName />
-          ) : (
-            <p className="text-xs text-slate-500 dark:text-slate-400">لا توجد رسائل أو تحديثات بعد.</p>
-          )}
+        {/* 3. الرسائل والتحديثات */}
+        <div className="space-y-3">
+          <CcSectionTitle title="الرسائل والتحديثات" />
 
-          <form onSubmit={handleSendNotice} className="space-y-2 border-t border-slate-200 pt-3 dark:border-slate-800">
-            <label htmlFor="applicant-notice" className="block text-xs font-semibold text-slate-700 dark:text-slate-300">رسالة للمتقدّم</label>
-            <textarea id="applicant-notice" rows={3} maxLength={4000} value={noticeBody} onChange={(event) => setNoticeBody(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" />
-            <details className="text-xs text-slate-600 dark:text-slate-400">
-              <summary className="cursor-pointer font-semibold text-blue-700 dark:text-blue-300">إضافة رابط أو رقم اتصال</summary>
-              <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
-                <label className="space-y-1"><span className="block">رابط (اختياري)</span><input type="url" dir="ltr" value={noticeLink} onChange={(event) => setNoticeLink(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" /></label>
-                <label className="space-y-1"><span className="block">رقم هاتف (اختياري)</span><input type="tel" dir="ltr" value={noticePhone} onChange={(event) => setNoticePhone(event.target.value)} className="w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100" /></label>
-              </div>
-            </details>
-            <button type="submit" disabled={sendingNotice} className="inline-flex min-h-10 items-center gap-1.5 rounded-lg bg-blue-600 px-4 text-xs font-semibold text-white hover:bg-blue-700 disabled:opacity-50">
-              {sendingNotice ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />} إرسال الرسالة
-            </button>
-          </form>
-        </section>
+          <CcCard className="p-4 space-y-3">
+            {updatesLoading ? (
+              <p className="flex items-center gap-2 text-xs text-cc-text-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                جاري تحميل الرسائل...
+              </p>
+            ) : updatesError ? (
+              <p className="text-xs font-semibold text-rose-400">{updatesError}</p>
+            ) : updates.length > 0 ? (
+              <ApplicantUpdateThread updates={updates} showAuthorName />
+            ) : (
+              <p className="text-xs text-cc-text-muted">لا توجد رسائل أو تحديثات بعد.</p>
+            )}
 
-        {/* السيرة الذاتية */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-2">
-          <span className="text-xs font-bold text-slate-700 dark:text-slate-300 block">
-            السيرة الذاتية
-          </span>
-          {applicant.has_cv ? (
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex items-center gap-2 text-xs text-slate-700 dark:text-slate-300">
-                <FileText className="w-4 h-4 text-blue-600 dark:text-blue-400" />
-                <span>{applicant.cv_name || "ملف السيرة الذاتية"}</span>
-              </div>
-              <button
-                type="button"
-                onClick={handleOpenCv}
-                disabled={openingCv}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 rounded-lg border border-blue-200 dark:border-blue-800 transition disabled:opacity-50"
-              >
-                {openingCv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
-                فتح السيرة
-              </button>
-            </div>
-          ) : (
-            <p className="text-xs text-slate-400 dark:text-slate-500">
-              لم يرفق المتقدم ملف سيرة ذاتية.
-            </p>
-          )}
-        </div>
-
-        {/* قسم الدعوة: يظهر فقط حين status === "offered" ولا يوجد hired_employee */}
-        {applicant.status === "offered" && !applicant.hired_employee && (
-          <div className="rounded-xl border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/30 p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <Send className="w-4 h-4 text-amber-700 dark:text-amber-400" />
-              <h3 className="text-xs font-bold text-amber-900 dark:text-amber-200">
-                إصدار رابط دعوة المرشح
-              </h3>
-            </div>
-            <p className="text-[11px] text-amber-800 dark:text-amber-300">
-              المرشح في حالة «عرض عمل». يمكنك إصدار رابط دعوة قبول التوظيف لمشاركته معه لإنشاء حسابه بنفسه.
-            </p>
-
-            <div className="flex flex-wrap items-center gap-3">
-              <label className="text-xs font-semibold text-slate-700 dark:text-slate-300 whitespace-nowrap">
-                الصلاحية بالساعات:
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={168}
-                value={expiresInHours}
-                onChange={(e) => setExpiresInHours(e.target.value)}
-                className="w-24 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 px-3 py-1.5 text-xs text-slate-900 dark:text-slate-100"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="invitation-note" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                رسالة للمرشح قبل إنشاء الحساب (اختيارية)
+            <form onSubmit={handleSendNotice} className="space-y-2 border-t border-cc-border pt-3">
+              <label htmlFor="applicant-notice" className="block text-xs font-semibold text-cc-text">
+                إرسال رسالة للمتقدّم
               </label>
               <textarea
-                id="invitation-note"
+                id="applicant-notice"
                 rows={3}
-                value={invitationNote}
-                onChange={(event) => setInvitationNote(event.target.value)}
-                placeholder="اكتب توضيحاً أو تعليمات سيقرأها المرشح قبل قبول الدعوة..."
-                className="w-full rounded-lg border border-slate-300 bg-white p-2 text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                maxLength={4000}
+                value={noticeBody}
+                onChange={(event) => setNoticeBody(event.target.value)}
+                placeholder="اكتب نص الرسالة أو التعليمات للمتقدم..."
+                className="w-full rounded-lg border border-cc-border bg-cc-surface-2 p-2 text-xs text-cc-text placeholder:text-cc-text-muted outline-none focus:ring-2 focus:ring-sky-500"
               />
+              <details className="text-xs text-cc-text-muted">
+                <summary className="cursor-pointer font-semibold text-sky-400 hover:text-sky-300">
+                  إضافة رابط أو رقم اتصال
+                </summary>
+                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <label className="space-y-1">
+                    <span className="block text-[11px]">رابط (اختياري)</span>
+                    <input
+                      type="url"
+                      dir="ltr"
+                      value={noticeLink}
+                      onChange={(event) => setNoticeLink(event.target.value)}
+                      className="w-full rounded-lg border border-cc-border bg-cc-surface-2 px-2 py-1.5 text-left text-xs text-cc-text outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </label>
+                  <label className="space-y-1">
+                    <span className="block text-[11px]">رقم هاتف (اختياري)</span>
+                    <input
+                      type="tel"
+                      dir="ltr"
+                      value={noticePhone}
+                      onChange={(event) => setNoticePhone(event.target.value)}
+                      className="w-full rounded-lg border border-cc-border bg-cc-surface-2 px-2 py-1.5 text-left text-xs text-cc-text outline-none focus:ring-2 focus:ring-sky-500"
+                    />
+                  </label>
+                </div>
+              </details>
+              <button
+                type="submit"
+                disabled={sendingNotice || !noticeBody.trim()}
+                className="inline-flex min-h-9 items-center gap-1.5 rounded-lg bg-sky-600 px-4 text-xs font-semibold text-white hover:bg-sky-500 disabled:opacity-50 transition"
+              >
+                {sendingNotice ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                <span>إرسال الرسالة</span>
+              </button>
+            </form>
+          </CcCard>
+        </div>
+
+        {/* 4. السيرة الذاتية */}
+        <div className="space-y-3">
+          <CcSectionTitle title="السيرة الذاتية" />
+
+          <CcCard className="p-4">
+            {applicant.has_cv ? (
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex items-center gap-2 text-xs text-cc-text">
+                  <FileText className="w-4 h-4 text-sky-400" />
+                  <span>{applicant.cv_name || "ملف السيرة الذاتية"}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={handleOpenCv}
+                  disabled={openingCv}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-sky-400 bg-sky-500/15 hover:bg-sky-500/25 rounded-lg border border-sky-500/30 transition disabled:opacity-50"
+                >
+                  {openingCv ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <FileText className="w-3.5 h-3.5" />}
+                  <span>فتح السيرة</span>
+                </button>
+              </div>
+            ) : (
+              <p className="text-xs text-cc-text-muted">
+                لم يرفق المتقدم ملف سيرة ذاتية.
+              </p>
+            )}
+          </CcCard>
+        </div>
+
+        {/* 5. قسم الدعوة: يظهر فقط حين status === "offered" ولا يوجد hired_employee */}
+        {applicant.status === "offered" && !applicant.hired_employee && (
+          <div className="space-y-3">
+            <CcSectionTitle title="إصدار رابط دعوة المرشح" />
+
+            <CcCard tone="warning" className="p-4 space-y-3">
+              <p className="text-xs text-amber-300 leading-relaxed">
+                المرشح في حالة «عرض عمل». يمكنك إصدار رابط دعوة قبول التوظيف لمشاركته معه لإنشاء حسابه بنفسه.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="text-xs font-semibold text-cc-text whitespace-nowrap">
+                  الصلاحية بالساعات:
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={168}
+                  value={expiresInHours}
+                  onChange={(e) => setExpiresInHours(e.target.value)}
+                  className="w-24 rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-xs text-cc-text focus:ring-2 focus:ring-amber-500 outline-none"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="invitation-note" className="mb-1 block text-xs font-semibold text-cc-text">
+                  رسالة للمرشح قبل إنشاء الحساب (اختيارية)
+                </label>
+                <textarea
+                  id="invitation-note"
+                  rows={3}
+                  value={invitationNote}
+                  onChange={(event) => setInvitationNote(event.target.value)}
+                  placeholder="اكتب توضيحاً أو تعليمات سيقرأها المرشح قبل قبول الدعوة..."
+                  className="w-full rounded-lg border border-cc-border bg-cc-surface-2 p-2 text-xs text-cc-text placeholder:text-cc-text-muted outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <div>
+                <label htmlFor="invitation-contact-phone" className="mb-1 block text-xs font-semibold text-cc-text">
+                  رقم التواصل للاستفسارات قبل القبول (اختياري)
+                </label>
+                <input
+                  id="invitation-contact-phone"
+                  type="tel"
+                  dir="ltr"
+                  value={invitationContactPhone}
+                  onChange={(event) => setInvitationContactPhone(event.target.value)}
+                  placeholder="+970000000000"
+                  className="w-full rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-left text-xs text-cc-text outline-none focus:ring-2 focus:ring-amber-500"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleIssueInvite}
+                disabled={issuingInvite}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-500 disabled:opacity-50"
+              >
+                {issuingInvite && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>إصدار رابط الدعوة</span>
+              </button>
+
+              {issuedInvitation && (
+                <div className="mt-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3.5 space-y-2">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-emerald-400">
+                      رابط الدعوة المُصدَر:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleCopyInviteUrl}
+                      className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-300 bg-emerald-500/20 rounded-md border border-emerald-500/40 hover:bg-emerald-500/30 transition"
+                    >
+                      <Copy className="w-3.5 h-3.5" />
+                      <span>نسخ الرابط</span>
+                    </button>
+                  </div>
+                  <div className="font-mono text-xs text-cc-text break-all p-2 rounded-lg bg-cc-surface-2 border border-cc-border">
+                    {issuedInvitation.invite_url}
+                  </div>
+                  <p className="text-[11px] font-semibold text-emerald-400">
+                    احفظه الآن — لا يمكن عرضه مرّةً أخرى، وإصدارُ رابطٍ جديد يُبطل هذا.
+                  </p>
+                  {((issuedInvitation.note || "").trim() || (issuedInvitation.contact_phone || "").trim()) && (
+                    <div className="space-y-2 border-t border-emerald-500/20 pt-2">
+                      <p className="text-[11px] font-bold text-emerald-300">ما سيقرأه المرشح قبل إنشاء حسابه:</p>
+                      {(issuedInvitation.note || "").trim() && (
+                        <p className="whitespace-pre-wrap text-xs leading-relaxed text-cc-text-muted">
+                          {issuedInvitation.note}
+                        </p>
+                      )}
+                      {(issuedInvitation.contact_phone || "").trim() && (
+                        <p className="text-xs text-cc-text-muted">
+                          رقم التواصل: <a href={`tel:${(issuedInvitation.contact_phone || "").trim()}`} dir="ltr" className="font-semibold text-emerald-400 underline hover:text-emerald-300">{(issuedInvitation.contact_phone || "").trim()}</a>
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CcCard>
+          </div>
+        )}
+
+        {/* 6. التقييم والملاحظات */}
+        <div className="space-y-3">
+          <CcSectionTitle title="تقييم مسؤول التوظيف" />
+
+          <CcCard className="p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-cc-text">
+                الدرجة والتقييم بالنجوم
+              </span>
+              <span className="text-xs text-cc-text-muted">
+                {rating > 0 ? `${formatNumber(rating)} من 5 نجوم` : "بلا تقييم"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1.5" dir="ltr">
+              {[1, 2, 3, 4, 5].map((starNum) => (
+                <button
+                  key={starNum}
+                  type="button"
+                  onClick={() => handleStarClick(starNum)}
+                  aria-pressed={starNum <= rating}
+                  className="p-1 text-amber-400 hover:scale-110 transition focus:outline-none"
+                  title={`تقييم ${starNum}`}
+                >
+                  <Star
+                    className={`w-6 h-6 ${
+                      starNum <= rating ? "fill-amber-400 text-amber-400" : "text-cc-border"
+                    }`}
+                  />
+                </button>
+              ))}
             </div>
 
             <div>
-              <label htmlFor="invitation-contact-phone" className="mb-1 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                رقم التواصل للاستفسارات قبل القبول (اختياري)
+              <label className="block text-[11px] font-semibold text-cc-text-muted mb-1">
+                ملاحظات مسؤول التوظيف
               </label>
-              <input
-                id="invitation-contact-phone"
-                type="tel"
-                dir="ltr"
-                value={invitationContactPhone}
-                onChange={(event) => setInvitationContactPhone(event.target.value)}
-                placeholder="970000000000+"
-                className="w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-left text-xs text-slate-900 outline-none focus:ring-2 focus:ring-amber-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              <textarea
+                rows={3}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="انطباع المقابلة، نقاط القوة، الملاحظات الإدارية..."
+                className="w-full rounded-lg border border-cc-border bg-cc-surface-2 p-2 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-2 focus:ring-sky-500"
               />
             </div>
 
             <button
               type="button"
-              onClick={handleIssueInvite}
-              disabled={issuingInvite}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 px-4 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-amber-700 disabled:opacity-50"
+              onClick={handleSaveRating}
+              disabled={savingRating}
+              className="inline-flex items-center gap-1.5 px-4 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm transition disabled:opacity-50"
             >
-              {issuingInvite && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-              إصدار رابط الدعوة
+              {savingRating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+              <span>حفظ التقييم والملاحظات</span>
             </button>
-
-            {issuedInvitation && (
-              <div className="mt-3 rounded-lg border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/40 p-3 space-y-2">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="text-xs font-bold text-emerald-800 dark:text-emerald-200">
-                    رابط الدعوة المُصدَر:
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyInviteUrl}
-                    className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold text-emerald-700 bg-white dark:bg-slate-800 rounded border border-emerald-300 dark:border-emerald-700 hover:bg-emerald-100 dark:hover:bg-emerald-900/60 transition"
-                  >
-                    <Copy className="w-3.5 h-3.5" />
-                    نسخ الرابط
-                  </button>
-                </div>
-                <div className="font-mono text-xs text-slate-800 dark:text-slate-200 break-all p-2 rounded bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
-                  {issuedInvitation.invite_url}
-                </div>
-                <p className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
-                  احفظه الآن — لا يمكن عرضه مرّةً أخرى، وإصدارُ رابطٍ جديد يُبطل هذا.
-                </p>
-                {((issuedInvitation.note || "").trim() || (issuedInvitation.contact_phone || "").trim()) && (
-                  <div className="space-y-2 border-t border-emerald-200 pt-2 dark:border-emerald-800">
-                    <p className="text-[11px] font-bold text-emerald-800 dark:text-emerald-200">ما سيقرأه المرشح قبل إنشاء حسابه:</p>
-                    {(issuedInvitation.note || "").trim() && (
-                      <p className="whitespace-pre-wrap text-xs leading-relaxed text-slate-700 dark:text-slate-300">
-                        {issuedInvitation.note}
-                      </p>
-                    )}
-                    {(issuedInvitation.contact_phone || "").trim() && (
-                      <p className="text-xs text-slate-600 dark:text-slate-400">
-                        رقم التواصل: <a href={`tel:${(issuedInvitation.contact_phone || "").trim()}`} dir="ltr" className="font-semibold text-emerald-700 underline hover:text-emerald-800 dark:text-emerald-300 dark:hover:text-emerald-200">{(issuedInvitation.contact_phone || "").trim()}</a>
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* التقييم والملاحظات */}
-        <div className="rounded-xl border border-slate-200 dark:border-slate-800 p-4 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-bold text-slate-700 dark:text-slate-300">
-              تقييم مسؤول التوظيف
-            </span>
-            <span className="text-xs text-slate-400">
-              {rating > 0 ? `${formatNumber(rating)} من 5 نجوم` : "بلا تقييم"}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-1.5" dir="ltr">
-            {[1, 2, 3, 4, 5].map((starNum) => (
-              <button
-                key={starNum}
-                type="button"
-                onClick={() => handleStarClick(starNum)}
-                aria-pressed={starNum <= rating}
-                className="p-1 text-amber-400 hover:scale-110 transition"
-                title={`تقييم ${starNum}`}
-              >
-                <Star
-                  className={`w-6 h-6 ${
-                    starNum <= rating ? "fill-amber-400 text-amber-400" : "text-slate-300 dark:text-slate-600"
-                  }`}
-                />
-              </button>
-            ))}
-          </div>
-
-          <div>
-            <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-400 mb-1">
-              ملاحظات مسؤول التوظيف
-            </label>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="انطباع المقابلة، نقاط القوة، الملاحظات الإدارية..."
-              className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 p-2 text-xs text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
-          </div>
-
-          <button
-            type="button"
-            onClick={handleSaveRating}
-            disabled={savingRating}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition disabled:opacity-50"
-          >
-            {savingRating && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-            حفظ التقييم والملاحظات
-          </button>
+          </CcCard>
         </div>
       </div>
     </div>

@@ -5,7 +5,7 @@ import {
   CV_ACCEPT_ATTRIBUTE,
   EMPLOYMENT_TYPE_OPTIONS,
   MAX_CV_BYTES,
-  applicantStatusBadgeClass,
+  applicantStatusTone,
   cvFileProblem,
   filterPlatformApplicants,
   firstApiErrorMessage,
@@ -56,11 +56,20 @@ test('firstApiErrorMessage يسقط على البديل حين لا رسالة',
   assert.equal(firstApiErrorMessage('', 'تعذّر الإرسال.'), 'تعذّر الإرسال.');
 });
 
-test('applicantStatusBadgeClass: لونٌ لكلّ حالةٍ معروفة، ومحايدٌ لما لا يعرفه', () => {
-  assert.match(applicantStatusBadgeClass('hired'), /emerald/);
-  assert.match(applicantStatusBadgeClass('rejected'), /rose/);
-  assert.match(applicantStatusBadgeClass('future_status'), /slate/);
-  assert.match(applicantStatusBadgeClass(null), /slate/);
+test('applicantStatusTone: نغمةٌ لكلّ حالةٍ معروفة، ومحايدٌ لما لا يعرفه', () => {
+  // كان هذا يفحص `applicantStatusBadgeClass` وأصنافَها الفاتحة؛ وقد زالت حين
+  // دخلت شاشاتُ التوظيف الغلافَ الداكن، فصار المصدرُ نغمةً تقرؤها `CcPill`.
+  assert.equal(applicantStatusTone('hired'), 'success');
+  assert.equal(applicantStatusTone('rejected'), 'danger');
+  assert.equal(applicantStatusTone('offered'), 'warning');
+  assert.equal(applicantStatusTone('new'), 'accent');
+  assert.equal(applicantStatusTone('screening'), 'violet');
+  assert.equal(applicantStatusTone('interview'), 'violet');
+  // **حالةٌ جديدةٌ من الخادم تُعرض محايدةً لا تختفي** — وهو سببُ وجود الدالّة.
+  assert.equal(applicantStatusTone('future_status'), 'neutral');
+  assert.equal(applicantStatusTone(null), 'neutral');
+  assert.equal(applicantStatusTone(undefined), 'neutral');
+  assert.equal(applicantStatusTone(''), 'neutral');
 });
 
 test('APPLICANT_STATUS_OPTIONS وEMPLOYMENT_TYPE_OPTIONS معرّفة وتحتوي على الحالات المتوقعة', () => {

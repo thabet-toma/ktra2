@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import {
   Copy,
   Edit2,
-  ExternalLink,
   Link2,
   Lock,
   Plus,
@@ -21,6 +20,17 @@ import {
 } from "../../services/platformHiringApi";
 import { formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcStatTile,
+  CcTable,
+  CcTd,
+  CcTh,
+  CcThead,
+  CcTr,
+} from "../platform/ui";
 import { PlatformJobFormModal } from "./PlatformJobFormModal";
 
 interface PlatformJobsTabProps {
@@ -43,13 +53,17 @@ export const PlatformJobsTab: React.FC<PlatformJobsTabProps> = ({
   onJobUpdated,
   onJobCreated,
   onSelectJobForApplicants,
-}) => {
+}: PlatformJobsTabProps) => {
   const toast = useToast();
   const confirm = useConfirm();
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingJob, setEditingJob] = useState<PlatformJobPosting | null>(null);
   const [actionLoadingId, setActionLoadingId] = useState<number | null>(null);
+
+  const totalJobs = jobs.length;
+  const liveJobs = jobs.filter((j) => j.is_live).length;
+  const closedJobs = jobs.filter((j) => !j.is_open).length;
 
   const handleCopyLink = async (job: PlatformJobPosting) => {
     try {
@@ -107,21 +121,43 @@ export const PlatformJobsTab: React.FC<PlatformJobsTabProps> = ({
 
   return (
     <div className="space-y-4 text-right" dir="rtl">
+      {/* صف الأرقام العلوي بـ CcStatTile (إجمالي/منشور/مغلق) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <CcCard className="p-4">
+          <CcStatTile
+            label="إجمالي الوظائف"
+            value={totalJobs}
+            tone="neutral"
+          />
+        </CcCard>
+        <CcCard className="p-4">
+          <CcStatTile
+            label="وظائف منشورة"
+            value={liveJobs}
+            tone="success"
+          />
+        </CcCard>
+        <CcCard className="p-4">
+          <CcStatTile
+            label="وظائف مغلقة"
+            value={closedJobs}
+            tone="warning"
+          />
+        </CcCard>
+      </div>
+
+      {/* شريط الإجراءات */}
       <div className="flex items-center justify-between gap-3">
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            إجمالي الوظائف: {formatNumber(jobs.length)}
-          </span>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={loading}
-            className="p-1.5 text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-            title="تحديث القائمة"
-          >
-            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin" : ""}`} />
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={loading}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-cc-text-muted hover:text-cc-text bg-cc-surface hover:bg-cc-surface-2 border border-cc-border rounded-lg transition disabled:opacity-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          title="تحديث القائمة"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+          <span>تحديث</span>
+        </button>
 
         <button
           type="button"
@@ -129,161 +165,150 @@ export const PlatformJobsTab: React.FC<PlatformJobsTabProps> = ({
             setEditingJob(null);
             setModalOpen(true);
           }}
-          className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition"
+          className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
         >
           <Plus className="w-4 h-4" />
           وظيفة جديدة
         </button>
       </div>
 
-      <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm">
-        <table className="w-full text-right text-xs">
-          <thead className="bg-slate-50 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 font-semibold border-b border-slate-200 dark:border-slate-800">
+      {/* جدول الوظائف بـ CcTable */}
+      <CcTable>
+        <CcThead>
+          <tr>
+            <CcTh>العنوان</CcTh>
+            <CcTh>التخصص</CcTh>
+            <CcTh>الحالة</CcTh>
+            <CcTh className="text-center">المتقدمون</CcTh>
+            <CcTh>تاريخ الانتهاء</CcTh>
+            <CcTh className="text-center">الإجراءات</CcTh>
+          </tr>
+        </CcThead>
+        <tbody>
+          {jobs.length === 0 ? (
             <tr>
-              <th className="p-3">العنوان</th>
-              <th className="p-3">التخصص</th>
-              <th className="p-3">الحالة</th>
-              <th className="p-3 text-center">المتقدمون</th>
-              <th className="p-3">تاريخ الانتهاء</th>
-              <th className="p-3 text-center">الإجراءات</th>
+              <CcTd colSpan={6} className="p-8 text-center">
+                {loading ? (
+                  <div className="flex items-center justify-center gap-2 text-xs text-cc-text-muted">
+                    <RefreshCw className="w-4 h-4 animate-spin" />
+                    <span>جاري تحميل الوظائف...</span>
+                  </div>
+                ) : loadError ? (
+                  <div className="flex flex-col items-center justify-center gap-2">
+                    <p className="text-xs font-semibold text-rose-400">{loadError}</p>
+                    <button
+                      type="button"
+                      onClick={onRefresh}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg shadow-sm transition"
+                    >
+                      <RefreshCw className="w-3.5 h-3.5" />
+                      إعادة المحاولة
+                    </button>
+                  </div>
+                ) : (
+                  <CcEmpty
+                    title="لا توجد إعلانات وظائف حالياً"
+                    hint="يمكنك إنشاء أول إعلان وظيفي للبدء في استقبال طلبات التوظيف."
+                  />
+                )}
+              </CcTd>
             </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-100 dark:divide-slate-800/80 text-slate-800 dark:text-slate-200">
-            {jobs.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="p-8 text-center text-slate-400 dark:text-slate-500">
-                  {loading ? (
-                    "جاري تحميل الوظائف..."
-                  ) : loadError ? (
-                    <div className="flex flex-col items-center justify-center gap-2">
-                      <p className="text-xs font-semibold text-rose-600 dark:text-rose-400">
-                        {loadError}
-                      </p>
+          ) : (
+            jobs.map((job) => {
+              const statusPill = job.is_live ? (
+                <CcPill tone="success" dot>منشور</CcPill>
+              ) : job.is_open ? (
+                <CcPill tone="warning" dot>منتهي الصلاحية</CcPill>
+              ) : (
+                <CcPill tone="neutral">مغلق</CcPill>
+              );
+
+              return (
+                <CcTr key={job.id}>
+                  <CcTd className="font-semibold">
+                    <div className="text-cc-text">{job.title}</div>
+                    {job.location && (
+                      <div className="text-[11px] text-cc-text-muted font-normal mt-0.5">
+                        {job.location} · {job.employment_type_display}
+                      </div>
+                    )}
+                  </CcTd>
+                  <CcTd>
+                    {job.specialty ? (
+                      <CcPill tone="accent">{job.specialty}</CcPill>
+                    ) : (
+                      <CcPill tone="warning" title="الموظّفُ المقبولُ يرث التخصّصَ؛ بلا تخصّصٍ لا يُطابَق بملفّ سياسة">
+                        بلا تخصّص
+                      </CcPill>
+                    )}
+                  </CcTd>
+                  <CcTd>{statusPill}</CcTd>
+                  <CcTd className="text-center font-bold text-cc-text">
+                    {formatNumber(job.applicants_count)}
+                  </CcTd>
+                  <CcTd className="text-cc-text-muted">
+                    {job.expires_at ? formatDateValue(job.expires_at) : "دائم"}
+                  </CcTd>
+                  <CcTd>
+                    <div className="flex items-center justify-center gap-1">
                       <button
                         type="button"
-                        onClick={onRefresh}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition"
+                        onClick={() => handleCopyLink(job)}
+                        className="p-1.5 text-cc-text-muted hover:text-sky-400 rounded-lg hover:bg-cc-surface-2 transition"
+                        title="نسخ الرابط العام"
                       >
-                        <RefreshCw className="w-3.5 h-3.5" />
-                        إعادة المحاولة
+                        <Copy className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setEditingJob(job);
+                          setModalOpen(true);
+                        }}
+                        className="p-1.5 text-cc-text-muted hover:text-emerald-400 rounded-lg hover:bg-cc-surface-2 transition"
+                        title="تعديل الإعلان"
+                      >
+                        <Edit2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleToggleOpen(job)}
+                        disabled={actionLoadingId === job.id}
+                        className={`p-1.5 rounded-lg hover:bg-cc-surface-2 transition ${
+                          job.is_open
+                            ? "text-cc-text-muted hover:text-rose-400"
+                            : "text-cc-text-muted hover:text-emerald-400"
+                        }`}
+                        title={job.is_open ? "إغلاق الإعلان" : "إعادة فتح الإعلان"}
+                      >
+                        {job.is_open ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRegenerateLink(job)}
+                        disabled={actionLoadingId === job.id}
+                        className="p-1.5 text-cc-text-muted hover:text-amber-400 rounded-lg hover:bg-cc-surface-2 transition"
+                        title="رابط جديد (إبطال القديم)"
+                      >
+                        <Link2 className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => onSelectJobForApplicants(job.id)}
+                        className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-sky-400 bg-sky-500/15 hover:bg-sky-500/25 rounded-md border border-sky-500/30 transition mr-1"
+                        title="عرض المتقدمين لهذه الوظيفة"
+                      >
+                        <Users className="w-3 h-3" />
+                        عرض المتقدمين
                       </button>
                     </div>
-                  ) : (
-                    "لا توجد إعلانات وظائف حالياً."
-                  )}
-                </td>
-              </tr>
-            ) : (
-              jobs.map((job) => {
-                const statusBadge = job.is_live ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800">
-                    منشور
-                  </span>
-                ) : job.is_open ? (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800">
-                    منتهي الصلاحية
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold bg-slate-100 text-slate-600 border border-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:border-slate-700">
-                    مغلق
-                  </span>
-                );
-
-                const specialtyBadge = job.specialty ? (
-                  <span className="font-mono text-slate-700 dark:text-slate-300">
-                    {job.specialty}
-                  </span>
-                ) : (
-                  <span
-                    className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800"
-                    title="الموظّفُ المقبولُ يرث التخصّصَ؛ بلا تخصّصٍ لا يُطابَق بملفّ سياسة"
-                  >
-                    بلا تخصّص
-                  </span>
-                );
-
-                return (
-                  <tr
-                    key={job.id}
-                    className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition"
-                  >
-                    <td className="p-3 font-semibold text-slate-900 dark:text-slate-100">
-                      <div>{job.title}</div>
-                      {job.location && (
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-normal">
-                          {job.location} · {job.employment_type_display}
-                        </div>
-                      )}
-                    </td>
-                    <td className="p-3">{specialtyBadge}</td>
-                    <td className="p-3">{statusBadge}</td>
-                    <td className="p-3 text-center font-bold">
-                      {formatNumber(job.applicants_count)}
-                    </td>
-                    <td className="p-3 text-slate-600 dark:text-slate-400">
-                      {job.expires_at ? formatDateValue(job.expires_at) : "دائم"}
-                    </td>
-                    <td className="p-3">
-                      <div className="flex items-center justify-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => handleCopyLink(job)}
-                          className="p-1.5 text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                          title="نسخ الرابط العام"
-                        >
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setEditingJob(job);
-                            setModalOpen(true);
-                          }}
-                          className="p-1.5 text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                          title="تعديل الإعلان"
-                        >
-                          <Edit2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleToggleOpen(job)}
-                          disabled={actionLoadingId === job.id}
-                          className={`p-1.5 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition ${
-                            job.is_open
-                              ? "text-slate-500 hover:text-rose-600 dark:text-slate-400 dark:hover:text-rose-400"
-                              : "text-slate-500 hover:text-emerald-600 dark:text-slate-400 dark:hover:text-emerald-400"
-                          }`}
-                          title={job.is_open ? "إغلاق الإعلان" : "إعادة فتح الإعلان"}
-                        >
-                          {job.is_open ? <Lock className="w-3.5 h-3.5" /> : <Unlock className="w-3.5 h-3.5" />}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleRegenerateLink(job)}
-                          disabled={actionLoadingId === job.id}
-                          className="p-1.5 text-slate-500 hover:text-amber-600 dark:text-slate-400 dark:hover:text-amber-400 rounded hover:bg-slate-100 dark:hover:bg-slate-800 transition"
-                          title="رابط جديد (إبطال القديم)"
-                        >
-                          <Link2 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => onSelectJobForApplicants(job.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-semibold text-blue-700 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-900/60 rounded border border-blue-200 dark:border-blue-800 transition mr-1"
-                          title="عرض المتقدمين لهذه الوظيفة"
-                        >
-                          <Users className="w-3 h-3" />
-                          عرض المتقدمين
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
-      </div>
+                  </CcTd>
+                </CcTr>
+              );
+            })
+          )}
+        </tbody>
+      </CcTable>
 
       <PlatformJobFormModal
         isOpen={modalOpen}

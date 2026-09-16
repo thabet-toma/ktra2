@@ -418,6 +418,35 @@ MEETINGS_TAB = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "P
 APPLICANTS_TAB = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "PlatformApplicantsTab.tsx"
 HIRING_SCREEN = REPO_ROOT / "frontend_v2" / "components" / "platform-hiring" / "PlatformHiringScreen.tsx"
 
+#: أصنافُ القشرة الفاتحة: تختفي أو تُقرأ بالكاد فوق الكحليّ. المطابقةُ على
+#: **الرمز كاملاً** (`fullmatch` بعد `split` ونزعِ سوابقِ التنويع) لا بحدودِ
+#: كلماتٍ نمطيّة — كُتب هذا الحارسُ أوّلَ مرّةٍ بحدِّ كلمةٍ فأكلت الكتابةُ الشرطةَ
+#: وصار في المصدر محرفُ تراجعٍ حقيقيّ، فما طابق شيئاً قطّ: تأكيدٌ لا يستطيع
+#: السقوط. أُمسك بحقنِ `bg-white` عمداً والتحقّقِ من سقوطه.
+LIGHT_SKIN_CLASS = re.compile(
+    r"(bg-white|bg-slate-(50|100|200)|text-slate-[5-9]00"
+    r"|text-amber-[6-9]00|border-slate-[12]00)"
+)
+
+#: سوابقُ التنويع تُنزع قبل المطابقة: `hover:bg-white` أبيضُ أيضاً عند التحويم،
+#: و`sm:` و`focus:` مثلُها — ولولا النزعُ لمرّ الفاتحُ متخفّياً خلف سابقة.
+VARIANT_PREFIX = re.compile(r"^([a-z0-9-]+:)+")
+
+#: شاشاتُ التوظيف التي **يراها موظّفُ المنصّة** فتلبس الجلدَ الداكن. وما ليس
+#: فيها يراه المتقدّمُ للوظيفة (`PlatformPublicJobPage` · `PlatformInvitationPage`
+#: · `PublicApplicantTrackingPanel`) فيبقى فاتحاً بقرارِ علامةٍ تجاريّة — ولذلك
+#: تُسمّى هنا بأسمائها ولا يُمسَح المجلّدُ كلُّه بـglob.
+OPERATOR_HIRING_SCREENS = (
+    "PlatformHiringScreen.tsx",
+    "PlatformJobsTab.tsx",
+    "PlatformApplicantsTab.tsx",
+    "PlatformApplicantPanel.tsx",
+    "PlatformMeetingsTab.tsx",
+    "PlatformMeetingDetail.tsx",
+    "PlatformRecruitersTab.tsx",
+    "ApplicantAttendanceMatrix.tsx",
+)
+
 
 class TheAttendanceGridSaysTheTruthTest(TestCase):
     """شبكةُ الحضور (#213-ج): تقول عن كلِّ شخصٍ ما يقوله الخادم، وتُفتَح في كلّ مرّة.
@@ -639,13 +668,32 @@ class TheAttendanceGridSaysTheTruthTest(TestCase):
         )
 
     def test_the_row_carries_the_applicant_status_the_server_sends(self):
-        """«نظرةٌ واحدة»: حالةُ المتقدّم تُعرض في صفّه — الخادمُ يرسلها سلفاً."""
-        for needle in ("row.applicant_status_display", "applicantStatusBadgeClass(row.applicant_status)"):
-            self.assertIn(
-                needle,
-                self.matrix_src,
-                f"`{needle}` غيرُ معروضٍ — حقلٌ يرسله الخادمُ ولا تستهلكه الشبكة",
-            )
+        """«نظرةٌ واحدة»: حالةُ المتقدّم تُعرض في صفّه — الخادمُ يرسلها سلفاً.
+
+        كان التأكيدُ الثاني مربوطاً باسم `applicantStatusBadgeClass` حرفيّاً،
+        وتلك دالّةُ **أصنافٍ فاتحةٍ** زالت حين دخلت الشبكةُ الغلافَ الداكن —
+        فكانت الشارةُ رقعةً باهتةً على الكحليّ، والحالةُ الواحدةُ يلبسها لونان
+        بين هذه الشبكة وتبويب المتقدّمين. والاسمُ عَرَضٌ: المقصودُ أن **النصَّ
+        الذي يرسله الخادمُ يُعرض ملوَّناً بنغمة حالته**، لا أن تُستدعى دالّةٌ
+        بعينها. فيُقاس ذلك: النصُّ معروضٌ، ونغمتُه من المصدر الواحد.
+        """
+        self.assertIn(
+            "row.applicant_status_display",
+            self.matrix_src,
+            "`row.applicant_status_display` غيرُ معروضٍ — حقلٌ يرسله الخادمُ "
+            "ولا تستهلكه الشبكة",
+        )
+        self.assertIn(
+            "applicantStatusTone(row.applicant_status)",
+            self.matrix_src,
+            "حالةُ الصفّ تُعرض بلا نغمةٍ مشتقّةٍ منها، أو بنغمةٍ من خريطةٍ "
+            "محلّيّةٍ ثانيةٍ تتباعد عن `utils/platformHiring.ts`",
+        )
+        self.assertRegex(
+            self.matrix_src,
+            r"<CcPill[\s\S]{0,120}row\.applicant_status_display",
+            "الشارةُ ليست `CcPill` — فألوانُها لا تتبع رموزَ القشرة الداكنة",
+        )
 
     def test_the_applicant_row_opens_from_the_keyboard(self):
         """صفُّ المتقدّم كان `onClick` وحدَه — بابٌ للفأرة وحدَها."""
@@ -656,28 +704,46 @@ class TheAttendanceGridSaysTheTruthTest(TestCase):
             "إلى بطاقته أصلاً، ونقرُ الصفِّ وحدَه لا يُنقَل بلوحة المفاتيح",
         )
 
-    def test_every_muted_class_has_its_dark_counterpart(self):
-        """صنفٌ فاتحٌ بلا مقابلٍ داكن يختفي في القشرة الداكنة — والملفّ يزاوجها."""
-        classes = re.findall(r'className="([^"]*)"', self.applicants_src)
-        unpaired = [
-            value
-            for value in classes
-            if re.search(r"\btext-(slate|amber)-\d00\b", value) and "dark:text-" not in value
-        ]
+    def test_the_operator_hiring_screens_wear_the_dark_skin_and_keep_no_dead_light_pair(self):
+        """كان هذا يفرض لكلِّ صنفٍ فاتحٍ مقابلاً `dark:` — عقدَ شاشةٍ ثنائيّةِ القشرة.
+
+        والعقدُ **انتهى**: صارت شاشةُ التوظيف تُصيَّر داخلَ `platform-surface
+        ops-shell` فهي داكنةٌ دائماً، لا تنقلب مع تفضيل النظام. فالمزاوجةُ التي
+        كانت شرطَ قراءةٍ صارت نصفَ أصنافٍ ميّتاً: `text-slate-700` لا يظهر أبداً،
+        و`dark:` لاحقةٌ لا تُفعَّل أبداً — وكلاهما يكذب على قارئ الملفّ بعدنا.
+
+        فيُقاس ما صار صحيحاً: **لا صنفَ فاتحاً على سطحٍ داكنٍ، ولا لاحقةَ
+        `dark:` ميّتة.** والحدُّ الأدنى للتباين يبقى محروساً بالمنع لا بالمزاوجة.
+        """
+        dead_pairs: list[str] = []
+        light_on_dark: list[str] = []
+        for name in OPERATOR_HIRING_SCREENS:
+            source = (HIRING_SCREEN.parent / name).read_text(encoding="utf-8")
+            for value in re.findall(r'className="([^"]*)"', source):
+                for token in value.split():
+                    if token.startswith("dark:"):
+                        dead_pairs.append(f"{name}: {token}")
+                    bare = VARIANT_PREFIX.sub("", token)
+                    if LIGHT_SKIN_CLASS.fullmatch(bare):
+                        light_on_dark.append(f"{name}: {token}")
+
         self.assertEqual(
-            unpaired,
+            dead_pairs,
             [],
-            f"أصنافُ نصٍّ بلا مقابلٍ `dark:` في تبويب المتقدّمين: {unpaired}",
+            f"لواحقُ `dark:` ميّتةٌ فوق سطحٍ داكنٍ دائماً: {dead_pairs}",
         )
-        # ‏`slate-400` على أبيض ≈ ٢٫٦:١ — يُقرأ بالكاد. القشرةُ الفاتحة تأخذ
-        # `slate-500`، و`slate-400` للقشرة الداكنة وحدَها.
-        too_faint = [
-            value for value in classes if re.search(r"(?<!dark:)\btext-slate-400\b", value)
-        ]
+        # أسطحٌ ونصوصٌ من القشرة الفاتحة: تختفي أو تُقرأ بالكاد فوق الكحليّ.
         self.assertEqual(
-            too_faint,
+            light_on_dark,
             [],
-            f"نصٌّ بـ`text-slate-400` في القشرة الفاتحة: {too_faint}",
+            f"أصنافٌ من القشرة الفاتحة في شاشات التوظيف: {light_on_dark}",
+        )
+
+        # والغلافُ نفسُه شرطُ كلِّ ما سبق: بلا `ops-shell` لا رموزَ جلدٍ أصلاً.
+        self.assertIn(
+            "platform-surface ops-shell",
+            self.screen_src,
+            "شاشةُ التوظيف لا تلبس غلافَ سطح المنصّة، فترجع بيضاءَ كما كانت",
         )
 
     def test_the_job_filter_request_is_consumed_like_the_focus_request(self):
