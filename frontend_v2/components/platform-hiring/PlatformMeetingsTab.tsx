@@ -388,7 +388,7 @@ export const PlatformMeetingsTab: React.FC<PlatformMeetingsTabProps> = ({
                       </CcTd>
                       <CcTd>
                         <div className="text-cc-text font-medium">
-                          {formatDateTimeValue(meeting.start)}
+                          {formatDateTimeValue(meeting.start)} — {formatDateTimeValue(meeting.end)}
                         </div>
                         <div className="text-[11px] text-sky-400 flex items-center gap-1 mt-0.5">
                           <Clock className="w-3 h-3" />
