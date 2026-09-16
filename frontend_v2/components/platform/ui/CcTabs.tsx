@@ -44,7 +44,7 @@ export const CcTabs: React.FC<CcTabsProps> = ({
       role="tablist"
       dir="rtl"
       onKeyDown={onKeyDown}
-      className={`flex items-center gap-2 border-b border-cc-border overflow-x-auto ${className}`}
+      className={`flex w-full min-w-0 items-center gap-2 overflow-x-auto border-b border-cc-border ${className}`}
     >
       {tabs.map((tab) => {
         const isActive = active === tab.key;
@@ -63,7 +63,11 @@ export const CcTabs: React.FC<CcTabsProps> = ({
             aria-selected={isActive}
             tabIndex={isActive ? 0 : -1}
             onClick={() => onChange(tab.key)}
-            className={`group inline-flex items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 -mb-px transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-t-md ${
+            /* `whitespace-nowrap shrink-0`: بلاهما تنكسر التسمياتُ الطويلةُ على
+               ثلاثة أسطرٍ ويُقَصّ آخرُ التبويبات عند الحافّة — رآه المالكُ في
+               اللقطة، ولا بوّابةَ هنا تصيّر مكوّناً فتمسكه. والفائضُ يُمرَّر
+               أفقيّاً لا يُطوى. */
+            className={`group inline-flex shrink-0 whitespace-nowrap items-center gap-2 px-4 py-2.5 text-xs font-bold border-b-2 -mb-px transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-t-md ${
               isActive
                 ? "border-cc-accent-2 text-cc-text"
                 : "border-transparent text-cc-text-muted hover:text-cc-text hover:border-cc-border-strong"

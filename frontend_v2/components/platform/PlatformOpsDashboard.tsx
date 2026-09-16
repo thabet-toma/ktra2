@@ -322,7 +322,7 @@ export const PlatformOpsDashboard: React.FC = () => {
       </header>
 
       {/* تبويبات لوحة عمليات المنصة بـ CcTabs */}
-      <div className="hidden md:inline-flex w-full mb-6">
+      <div className="hidden md:block w-full mb-6">
         <CcTabs
           tabs={DASHBOARD_TABS}
           active={activeTab}

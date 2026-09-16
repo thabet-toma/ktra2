@@ -117,7 +117,18 @@ class DashboardShellContractTest(TestCase):
             self.assertIn(f'aria-label="{label}"', self.dashboard_source)
 
     def test_the_wide_tab_row_is_hidden_on_narrow_screens_instead_of_duplicating(self):
-        self.assertIn("hidden md:inline-flex", self.dashboard_source)
+        """المقصودُ الإخفاءُ في الضيّق، لا قيمةُ `display` في الواسع.
+
+        كان التأكيدُ مربوطاً بالسلسلة `hidden md:inline-flex` حرفيّاً، فسقط
+        حين صار الغلافُ `md:block` ليعمل التمريرُ الأفقيُّ داخلَ `CcTabs` —
+        وذاك تغييرُ عرضٍ لا يمسّ ما يحرسه الاسم: ألّا يظهر الصفُّ العريض
+        فوقَ الشريط السفليّ في الشاشة الضيّقة فيتكرّر التنقّل مرّتين.
+        """
+        self.assertRegex(
+            self.dashboard_source,
+            r'<div className="hidden md:\w+[^"]*">\s*<CcTabs',
+            "صفُّ التبويبات العريض يجب أن يكون `hidden` ويظهر من `md` فصاعداً.",
+        )
 
     def test_the_hero_numbers_are_not_drawn_before_the_payload_arrives(self):
         """صفرٌ بخطٍّ عريضٍ أثناء التحميل خبرٌ كاذب.

@@ -1,4 +1,5 @@
 import React from "react";
+import { ccInitials } from "../../../utils/ccInitials";
 
 export interface CcAvatarProps {
   name: string;
@@ -30,15 +31,6 @@ const PRESENCE_TITLE = {
   offline: "غير متّصل",
 } as const;
 
-function getInitials(name: string): string {
-  if (!name) return "";
-  const parts = name.trim().split(/\s+/);
-  if (parts.length === 1) {
-    return parts[0].slice(0, 2);
-  }
-  return (parts[0][0] || "") + (parts[1][0] || "");
-}
-
 export const CcAvatar: React.FC<CcAvatarProps> = ({
   name,
   photoUrl,
@@ -59,7 +51,7 @@ export const CcAvatar: React.FC<CcAvatarProps> = ({
         />
       ) : (
         <div className="h-full w-full rounded-full bg-cc-surface-2 border border-cc-border flex items-center justify-center font-bold text-cc-text select-none">
-          {getInitials(name)}
+          {ccInitials(name, "")}
         </div>
       )}
       {presenceClass && (

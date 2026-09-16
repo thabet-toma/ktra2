@@ -1,6 +1,7 @@
 import React from "react";
 
 import { PresenceClockChip } from "./PresenceClockChip";
+import { ccInitials } from "../../utils/ccInitials";
 
 /**
  * غرفةُ «مساحة العمل» — من يعمل الآن، بلمحةٍ واحدة (#211 م٣).
@@ -63,13 +64,6 @@ const PRESENCE_TEXT: Record<RoomPresence, string> = {
   offline: "text-rose-700",
 };
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "؟";
-  if (parts.length === 1) return parts[0].slice(0, 2);
-  return `${parts[0][0]}${parts[1][0]}`;
-}
-
 interface OccupantBadgeProps {
   occupant: RoomOccupant;
   onSelect?: (employeeId: number) => void;
@@ -93,7 +87,7 @@ const OccupantBadge: React.FC<OccupantBadgeProps> = ({ occupant, onSelect }) => 
         />
       ) : (
         <span className="flex items-center justify-center w-11 h-11 rounded-full bg-white text-sky-800 font-bold text-sm shadow-md ring-2 ring-white">
-          {initialsOf(occupant.name)}
+          {ccInitials(occupant.name)}
         </span>
       )}
       <span

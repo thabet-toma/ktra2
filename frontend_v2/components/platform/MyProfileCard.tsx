@@ -8,13 +8,7 @@ import {
 import type { MyPlatformEmployeeProfile } from "../../services/platformEmployeeSpaceApi";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 import { useToast } from "../../contexts/ToastContext";
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "؟";
-  if (parts.length === 1) return parts[0].slice(0, 2);
-  return `${parts[0][0]}${parts[1][0]}`;
-}
+import { ccInitials } from "../../utils/ccInitials";
 
 interface MyProfileCardProps {
   profile: MyPlatformEmployeeProfile;
@@ -88,7 +82,7 @@ export const MyProfileCard: React.FC<MyProfileCardProps> = ({ profile, onSaved }
             />
           ) : (
             <span className="flex h-14 w-14 items-center justify-center rounded-full bg-blue-100 text-base font-bold text-blue-700 ring-2 ring-slate-100">
-              {initialsOf(displayName)}
+              {ccInitials(displayName)}
             </span>
           )}
           <button

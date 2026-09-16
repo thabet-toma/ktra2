@@ -3,6 +3,7 @@ import { ChevronRight, LogOut, Menu, ShieldCheck } from 'lucide-react';
 
 import type { MyPlatformEmployeeProfile } from '../../../services/platformEmployeeSpaceApi';
 import { staffNav, type StaffNavKey } from '../../../utils/staffNav';
+import { ccInitials } from '../../../utils/ccInitials';
 
 interface StaffSidebarProps {
   activeKey: StaffNavKey;
@@ -13,8 +14,6 @@ interface StaffSidebarProps {
   onToggleCollapsed: () => void;
   onCloseDrawer: () => void;
 }
-
-const initialsOf = (name: string) => name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('') || 'ك';
 
 export const StaffSidebar: React.FC<StaffSidebarProps> = ({
   activeKey, collapsed, drawerOpen, profile, onNavigate, onToggleCollapsed, onCloseDrawer,
@@ -39,7 +38,7 @@ export const StaffSidebar: React.FC<StaffSidebarProps> = ({
         })}
       </nav>
       <div className={`m-3 rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-3 shadow-lg shadow-black/30 ${collapsed ? 'hidden' : ''}`}>
-        <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-500/15 text-sm font-extrabold text-cyan-300">{profile?.photo_url ? <img src={profile.photo_url} alt="" className="h-full w-full object-cover" /> : initialsOf(name)}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-50">{name}</p><p className="truncate text-xs text-[var(--staff-muted)]">{title}</p></div></div>
+        <div className="flex items-center gap-2"><span className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-500/15 text-sm font-extrabold text-cyan-300">{profile?.photo_url ? <img src={profile.photo_url} alt="" className="h-full w-full object-cover" /> : ccInitials(name, 'ك')}</span><div className="min-w-0"><p className="truncate text-sm font-bold text-slate-50">{name}</p><p className="truncate text-xs text-[var(--staff-muted)]">{title}</p></div></div>
         <p className="mt-2 flex items-center gap-1 text-xs font-semibold text-emerald-400"><span className="h-2 w-2 rounded-full bg-emerald-400" />متصل الآن</p>
         {/* مخرجٌ إلى نظام الشركة — **وليس تزييناً.**
 

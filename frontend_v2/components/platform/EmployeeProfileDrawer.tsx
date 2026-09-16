@@ -43,6 +43,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import { ccInitials } from "../../utils/ccInitials";
 
 type ProfileTab = "general" | "performance" | "tasks" | "wallet" | "notes" | "activity";
 
@@ -73,13 +74,6 @@ const WALLET_STATUS_CLASS: Record<WalletLineStatus, string> = {
 };
 
 const now = new Date();
-
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "؟";
-  if (parts.length === 1) return parts[0].slice(0, 2);
-  return `${parts[0][0]}${parts[1][0]}`;
-}
 
 interface EmployeeProfileDrawerProps {
   employeeId: number;
@@ -417,7 +411,7 @@ export const EmployeeProfileDrawer: React.FC<EmployeeProfileDrawerProps> = ({
                       />
                     ) : (
                       <span className="flex h-16 w-16 items-center justify-center rounded-full bg-blue-100 text-lg font-bold text-blue-700 ring-2 ring-slate-100">
-                        {initialsOf(employeeName)}
+                        {ccInitials(employeeName)}
                       </span>
                     )}
                     {canManage && (
