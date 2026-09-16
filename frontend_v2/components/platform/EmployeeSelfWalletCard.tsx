@@ -21,6 +21,8 @@ import {
   type PerformanceReviewRequestRow,
 } from "../../services/platformEmployeeSpaceApi";
 import { useToast } from "../../contexts/ToastContext";
+import { CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton, CcStatTile, CcTable, CcTd, CcTh, CcThead, CcTr } from "./ui";
+import type { CcTone } from "../../utils/ccTone";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لاستعراض هذه المحفظة.", "تعذّر تحميل البيانات.");
@@ -34,10 +36,10 @@ const isCommissionLine = (line: WalletLine): line is AcquisitionCommissionLineRo
  * ألوانُ حالات سطر المحفظة. **`reversed` ليس مؤكَّداً**: كان يقع في فرع «غير معلَّق»
  * فيُرسَم بأخضر المؤكَّد، فيقرأ الموظّفُ سطراً عُكس مالاً مستحقّاً له.
  */
-const WALLET_STATUS_TONE: Partial<Record<WalletLineStatus, string>> = {
-  pending: "bg-amber-100 text-amber-700",
-  eligible: "bg-sky-100 text-sky-700",
-  reversed: "bg-rose-100 text-rose-700 line-through",
+const WALLET_STATUS_TONES: Partial<Record<WalletLineStatus, CcTone>> = {
+  pending: "warning",
+  eligible: "accent",
+  reversed: "danger",
 };
 
 /**
@@ -104,128 +106,140 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
 
   return (
     <section className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <h2 className="text-sm font-bold text-slate-800 ml-auto">محفظتي وتقييمي</h2>
+      <CcCard className="p-4 flex flex-wrap items-end gap-3">
+        <div className="ml-auto">
+          <CcSectionTitle title="محفظتي وتقييمي" />
+        </div>
         <label className="space-y-1 text-xs">
-          <span className="text-slate-500">السنة</span>
+          <span className="text-cc-text-muted">السنة</span>
           <input
             type="number"
-            className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            className="w-24 px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
             value={year}
             onChange={(event) => setYear(Number(event.target.value))}
           />
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-slate-500">الشهر</span>
+          <span className="text-cc-text-muted">الشهر</span>
           <input
             type="number"
             min={1}
             max={12}
-            className="w-20 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            className="w-20 px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
             value={month}
             onChange={(event) => setMonth(Number(event.target.value))}
           />
         </label>
-      </div>
+      </CcCard>
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700 flex items-center justify-between">
-          <span>{error}</span>
-          <button type="button" onClick={() => void load()} className="px-3 py-1 bg-rose-100 hover:bg-rose-200 rounded-lg font-bold text-[11px]">
+        <CcCard tone="danger" className="p-3 text-xs flex items-center justify-between gap-2">
+          <span className="text-rose-400 font-semibold">{error}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg font-bold text-[11px] transition-colors"
+          >
             إعادة المحاولة
           </button>
-        </div>
+        </CcCard>
       )}
 
       {loading ? (
-        <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+        <CcSkeleton variant="card" count={3} />
       ) : (
         <>
           {wallet && (
-            <div className="space-y-3">
-              <div className="grid grid-cols-3 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-emerald-600" />
-                  <div>
-                    <p className="text-xs text-slate-500">مؤكَّد</p>
-                    <p className="text-lg font-bold text-emerald-700">{formatNumber(wallet.totals.confirmed)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-amber-600" />
-                  <div>
-                    <p className="text-xs text-slate-500">معلَّق (بانتظار تسجيل الدفع أو الاعتماد)</p>
-                    <p className="text-lg font-bold text-amber-700">{formatNumber(wallet.totals.pending)}</p>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Wallet className="h-5 w-5 text-slate-500" />
-                  <div>
-                    <p className="text-xs text-slate-500">متوقَّع (لو تحقّق كلُّ شرطٍ ناقص)</p>
-                    <p className="text-lg font-bold text-slate-700">{formatNumber(wallet.totals.expected)}</p>
-                  </div>
-                </div>
+            <div className="space-y-4">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <CcCard className="p-4">
+                  <CcStatTile
+                    label="مؤكَّد"
+                    value={formatNumber(wallet.totals.confirmed)}
+                    icon={<Wallet className="h-5 w-5" />}
+                    tone="success"
+                  />
+                </CcCard>
+                <CcCard className="p-4">
+                  <CcStatTile
+                    label="معلَّق"
+                    hint="بانتظار تسجيل الدفع أو الاعتماد"
+                    value={formatNumber(wallet.totals.pending)}
+                    icon={<Wallet className="h-5 w-5" />}
+                    tone="warning"
+                  />
+                </CcCard>
+                <CcCard className="p-4">
+                  <CcStatTile
+                    label="متوقَّع"
+                    hint="لو تحقّق كلُّ شرطٍ ناقص"
+                    value={formatNumber(wallet.totals.expected)}
+                    icon={<Wallet className="h-5 w-5" />}
+                    tone="neutral"
+                  />
+                </CcCard>
               </div>
 
-              <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <h3 className="text-xs font-bold text-slate-700 mb-2">سطور المحفظة</h3>
+              <CcCard className="p-4 space-y-3">
+                <h3 className="text-xs font-bold text-cc-text">سطور المحفظة</h3>
                 {lines.length === 0 ? (
-                  <p className="text-xs text-slate-500">لا سطور لهذا الشهر.</p>
+                  <CcEmpty title="لا سطور لهذا الشهر." />
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-xs">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-slate-500">
-                          <th className="py-1.5 pr-2 text-right">النوع</th>
-                          <th className="py-1.5 px-2 text-right">المبلغ</th>
-                          <th className="py-1.5 px-2 text-right">الحالة</th>
-                          <th className="py-1.5 px-2 text-right">السبب/المصدر</th>
-                          <th className="py-1.5 px-2 text-right">آخر تحديث</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {lines.map((line) => (
-                          <tr key={`${isCommissionLine(line) ? "commission" : "salary"}:${line.id}`} className="border-b border-slate-100">
-                            <td className="py-1.5 pr-2">{isCommissionLine(line) ? "عمولة اكتساب" : "راتب"}</td>
-                            <td className="py-1.5 px-2 font-semibold">{formatNumber(line.amount)}</td>
-                            <td className="py-1.5 px-2">
-                              <span className={`rounded-full px-2 py-0.5 ${WALLET_STATUS_TONE[line.status] ?? "bg-emerald-100 text-emerald-700"}`}>
+                  <CcTable>
+                    <CcThead>
+                      <CcTr>
+                        <CcTh>النوع</CcTh>
+                        <CcTh>المبلغ</CcTh>
+                        <CcTh>الحالة</CcTh>
+                        <CcTh>السبب/المصدر</CcTh>
+                        <CcTh>آخر تحديث</CcTh>
+                      </CcTr>
+                    </CcThead>
+                    <tbody>
+                      {lines.map((line) => {
+                        const tone: CcTone = WALLET_STATUS_TONES[line.status] || "success";
+                        return (
+                          <CcTr key={`${isCommissionLine(line) ? "commission" : "salary"}:${line.id}`}>
+                            <CcTd className="font-medium">{isCommissionLine(line) ? "عمولة اكتساب" : "راتب"}</CcTd>
+                            <CcTd className="font-bold text-cc-text">{formatNumber(line.amount)}</CcTd>
+                            <CcTd>
+                              <CcPill tone={tone} className={line.status === "reversed" ? "line-through" : ""}>
                                 {line.status_display || WALLET_LINE_STATUS_LABEL[line.status]}
-                              </span>
-                            </td>
-                            <td className="py-1.5 px-2">
+                              </CcPill>
+                            </CcTd>
+                            <CcTd className="text-cc-text-muted text-xs">
                               {line.status === "pending" && line.pending_reason ? line.pending_reason : (line.reason || "—")}
                               {isCommissionLine(line) && ` · ${line.company_name} · شهر ${formatNumber(line.commission_month_index)}`}
-                            </td>
-                            <td className="py-1.5 px-2">{formatDateTimeValue(line.updated_at) || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                            </CcTd>
+                            <CcTd className="text-cc-text-muted text-xs">{formatDateTimeValue(line.updated_at) || "—"}</CcTd>
+                          </CcTr>
+                        );
+                      })}
+                    </tbody>
+                  </CcTable>
                 )}
-              </div>
+              </CcCard>
             </div>
           )}
 
           {performance && (
-            <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="text-sm font-bold text-slate-800">كيف يُحسب تقييمي؟</h3>
-              <p className="text-xs text-slate-500">
+            <CcCard className="p-4 space-y-3">
+              <h3 className="text-sm font-bold text-cc-text">كيف يُحسب تقييمي؟</h3>
+              <p className="text-xs text-cc-text-muted">
                 {performance.status_message} · حجم العينة: {formatNumber(performance.sample_size)} (الحد الأدنى{" "}
                 {formatNumber(performance.min_sample_size)})
               </p>
               {performance.composite_score !== null && (
-                <p className="text-sm font-bold">النتيجة المركّبة: {formatNumber(performance.composite_score)}%</p>
+                <p className="text-sm font-bold text-sky-400">النتيجة المركّبة: {formatNumber(performance.composite_score)}%</p>
               )}
               <PilotAxesTable performance={performance} />
 
               {/* القصة ٤٤: طلبُ مراجعةِ نتيجةٍ بسبب. **لا يرفع الدرجةَ**: يفتح مساراً
                   بشريّاً يصحّح فيه المديرُ بيانةً أو تصنيفاً عند المصدر ثمّ تُعاد اللقطة. */}
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <h4 className="mb-1.5 text-xs font-bold text-slate-700">أعترض على هذه النتيجة</h4>
+              <div className="mt-3 border-t border-cc-border pt-3">
+                <h4 className="mb-1.5 text-xs font-bold text-cc-text">أعترض على هذه النتيجة</h4>
                 {openReview ? (
-                  <p className="rounded-lg border border-sky-200 bg-sky-50 p-2 text-[11px] text-sky-800">
+                  <p className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-2.5 text-[11px] text-sky-300">
                     لديك اعتراضٌ مفتوحٌ على هذه الفترة بانتظار ردّ مدير العمليات: «{openReview.reason}»
                   </p>
                 ) : (
@@ -235,13 +249,13 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
                       value={reviewReason}
                       onChange={(event) => setReviewReason(event.target.value)}
                       placeholder="سبب الاعتراض — خطأُ بياناتٍ أو تصنيف"
-                      className="min-w-[240px] flex-1 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                      className="min-w-[240px] flex-1 rounded-lg bg-cc-bg border border-cc-border px-2.5 py-1.5 text-xs text-cc-text focus:outline-none focus:border-sky-500"
                     />
                     <button
                       type="button"
                       onClick={() => void submitReview()}
                       disabled={submittingReview || !reviewReason.trim()}
-                      className="rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
+                      className="rounded-lg bg-cc-surface-2 hover:bg-cc-border border border-cc-border px-3 py-1.5 text-xs font-semibold text-cc-text disabled:opacity-50 transition-colors"
                     >
                       {submittingReview ? "..." : "أرسل الطلب"}
                     </button>
@@ -250,17 +264,17 @@ export const EmployeeSelfWalletCard: React.FC<{ employeeId: number }> = ({ emplo
                 {resolvedReviews.length > 0 && (
                   <ul className="mt-2 space-y-1">
                     {resolvedReviews.map((row) => (
-                      <li key={row.id} className="rounded-lg bg-slate-50 p-2 text-[11px] text-slate-600">
-                        <span className={`ml-1 rounded-full px-2 py-0.5 font-bold ${row.status === "accepted" ? "bg-emerald-100 text-emerald-700" : "bg-slate-200 text-slate-700"}`}>
+                      <li key={row.id} className="rounded-lg bg-cc-surface-2 p-2 text-[11px] text-cc-text-muted border border-cc-border">
+                        <CcPill tone={row.status === "accepted" ? "success" : "neutral"} className="ml-1">
                           {row.status_display}
-                        </span>
+                        </CcPill>
                         «{row.reason}» — {row.resolution_note || "بلا ردٍّ مكتوب"}
                       </li>
                     ))}
                   </ul>
                 )}
               </div>
-            </div>
+            </CcCard>
           )}
         </>
       )}

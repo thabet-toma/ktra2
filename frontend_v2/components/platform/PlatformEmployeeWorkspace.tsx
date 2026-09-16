@@ -12,8 +12,17 @@ import { EmployeeCompaniesPanel } from "./EmployeeCompaniesPanel";
 import { ChampionsPanel } from "./ChampionsPanel";
 import { MyMeetingsPanel } from "./MyMeetingsPanel";
 import { MyProfileCard } from "./MyProfileCard";
+import { CcCard, CcEmpty, CcSkeleton, CcTabs } from "./ui";
 
 type EmployeeTab = "queue" | "companies" | "wallet" | "champions" | "meetings";
+
+const TABS = [
+  { key: "queue", label: "طابوري" },
+  { key: "companies", label: "شركاتي" },
+  { key: "wallet", label: "محفظتي وتقييمي" },
+  { key: "champions", label: "Champions" },
+  { key: "meetings", label: "اجتماعاتي" },
+];
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه المساحة لموظفي عمليات المنصة فقط.", "تعذّر تحميل مساحتك.");
@@ -66,94 +75,56 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
 
   if (capabilitiesLoading) {
     return (
-      <div className="platform-surface py-20 flex items-center justify-center gap-2 text-slate-500" dir="rtl">
-        <Loader2 className="h-5 w-5 animate-spin" />
-        <span className="text-sm">جارٍ التحقّق من صلاحيّاتك...</span>
+      <div className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 flex items-center justify-center gap-2" dir="rtl">
+        <Loader2 className="h-5 w-5 animate-spin text-sky-400" />
+        <span className="text-sm text-cc-text-muted">جارٍ التحقّق من صلاحيّاتك...</span>
       </div>
     );
   }
 
   if (!allowed) {
     return (
-      <div className="platform-surface py-20 text-center bg-white rounded-xl border border-slate-200" dir="rtl">
-        <p className="text-sm font-bold text-slate-700">هذه المساحة مخصّصةٌ لموظّفي عمليات المنصة.</p>
-        <p className="text-xs text-slate-500 mt-1">إن كنت تظنّ هذا خطأً فراجع مدير عمليات المنصة.</p>
+      <div className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 flex items-center justify-center" dir="rtl">
+        <CcEmpty
+          title="هذه المساحة مخصّصةٌ لموظّفي عمليات المنصة."
+          hint="إن كنت تظنّ هذا خطأً فراجع مدير عمليات المنصة."
+          className="max-w-md w-full"
+        />
       </div>
     );
   }
 
   return (
-    <div className="platform-surface p-6" dir="rtl">
-      <header className="flex items-center justify-between mb-6">
+    <div className="platform-surface ops-shell min-h-screen bg-cc-bg text-cc-text p-4 sm:p-6 lg:p-8 space-y-6" dir="rtl">
+      <header className="flex items-center justify-between gap-4">
         <div>
-          <h1 className="text-lg font-bold text-slate-900">مساحتي — عمليات المنصة</h1>
-          <p className="text-xs text-slate-500">طابورُ أعمالك، وشركاتُ ارتباطاتك بحصصها وبنودِ صحّتها، وتقييمُك ومحفظتُك.</p>
+          <h1 className="text-lg sm:text-xl font-bold text-cc-text">مساحتي — عمليات المنصة</h1>
+          <p className="text-xs text-cc-text-muted mt-0.5">طابورُ أعمالك، وشركاتُ ارتباطاتك بحصصها وبنودِ صحّتها، وتقييمُك ومحفظتُك.</p>
         </div>
         <PlatformNotificationBell />
       </header>
 
       {profileError && (
-        <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center justify-between">
-          <span>{profileError}</span>
+        <CcCard tone="danger" className="p-4 flex items-center justify-between gap-4">
+          <span className="text-xs text-rose-400 font-medium">{profileError}</span>
           <button
             type="button"
             onClick={() => void loadProfile()}
-            className="px-3 py-1 bg-rose-100 hover:bg-rose-200 rounded-lg font-bold text-[11px]"
+            className="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 rounded-lg font-bold text-[11px] transition-colors shrink-0"
           >
             إعادة المحاولة
           </button>
-        </div>
+        </CcCard>
       )}
 
       {profile && <MyProfileCard profile={profile} onSaved={() => void loadProfile()} />}
 
-      <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-1 mb-6">
-        <button
-          type="button"
-          onClick={() => setTab("queue")}
-          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            tab === "queue" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          طابوري
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("companies")}
-          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            tab === "companies" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          شركاتي
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("wallet")}
-          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            tab === "wallet" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          محفظتي وتقييمي
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("champions")}
-          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            tab === "champions" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          Champions
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("meetings")}
-          className={`px-3.5 py-1.5 text-xs font-bold rounded-md transition ${
-            tab === "meetings" ? "bg-white text-slate-900 shadow-sm" : "text-slate-600 hover:text-slate-900"
-          }`}
-        >
-          اجتماعاتي
-        </button>
-      </div>
+      <CcTabs
+        tabs={TABS}
+        active={tab}
+        onChange={(k) => setTab(k as EmployeeTab)}
+        className="mb-6"
+      />
 
       {tab === "queue" && <WorkOrdersPanel />}
       {tab === "companies" && <EmployeeCompaniesPanel />}
@@ -161,11 +132,12 @@ export const PlatformEmployeeWorkspace: React.FC = () => {
       {tab === "meetings" && <MyMeetingsPanel />}
       {tab === "wallet" && (
         profileLoading ? (
-          <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+          <CcSkeleton variant="card" count={2} className="mt-4" />
         ) : !profile ? (
-          <div className="py-10 text-center text-xs text-slate-400 bg-white rounded-xl border border-slate-200">
-            لا يوجد ملفُّ موظّف منصّةٍ مرتبطٌ بحسابك بعد.
-          </div>
+          <CcEmpty
+            title="لا يوجد ملفُّ موظّف منصّةٍ مرتبطٌ بحسابك بعد."
+            className="mt-4"
+          />
         ) : (
           <EmployeeSelfWalletCard employeeId={profile.id} />
         )

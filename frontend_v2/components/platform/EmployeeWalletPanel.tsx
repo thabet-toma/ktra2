@@ -242,7 +242,7 @@ export const EmployeeWalletPanel: React.FC = () => {
             <CcCard className="p-4">
               <CcStatTile
                 label="مؤكَّد"
-                value={wallet.totals.confirmed}
+                value={formatNumber(wallet.totals.confirmed)}
                 tone="success"
                 icon={<Wallet className="h-5 w-5 text-emerald-400" />}
               />
@@ -250,7 +250,7 @@ export const EmployeeWalletPanel: React.FC = () => {
             <CcCard className="p-4">
               <CcStatTile
                 label="معلَّق (بانتظار تسجيل الدفع أو الاعتماد)"
-                value={wallet.totals.pending}
+                value={formatNumber(wallet.totals.pending)}
                 tone="warning"
                 icon={<Wallet className="h-5 w-5 text-amber-400" />}
               />

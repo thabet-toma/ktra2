@@ -20,8 +20,13 @@ export const CcSkeleton: React.FC<CcSkeletonProps> = ({
   const baseClasses = VARIANT_MAP[variant] || VARIANT_MAP.line;
   const items = Array.from({ length: Math.max(1, count) }, (_, i) => i);
 
+  // الهيكلُ بدلُ نصِّ «جاري التحميل...» في كلّ لوحةٍ حُوِّلت إلى الطبقة، وكتلٌ
+  // صامتةٌ لا يقرؤها القارئُ الآليّ — فالإعلانُ هنا مرّةً لا في كلّ مستهلِك.
   return (
     <>
+      {/* أوّلَ الإخوة لا آخرَهم: `space-y-*` في Tailwind 4 يهامش كلَّ ابنٍ **إلّا
+          الأخير**، فوسمٌ مخفيٌّ في الذيل يُلبس آخرَ هيكلٍ هامشاً زائداً. */}
+      <span role="status" className="sr-only">جاري التحميل...</span>
       {items.map((key) => (
         <div
           key={key}

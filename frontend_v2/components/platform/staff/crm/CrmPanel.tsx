@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Plus } from 'lucide-react';
 
 import { claimCrmLead, createCrmActivity, createCrmLead, changeCrmLeadStatus, getCrmLead, getCrmLeadStats, listCrmActivities, listCrmColleagues, listCrmLeads, lookupCrmPhone, releaseCrmLead, requestCrmLeadTransfer, transferCrmLead, type CrmActivity, type CrmActivityInput, type CrmColleague, type CrmLead, type CrmLeadContactStats, type CrmLeadStatus, type CrmLookup } from '../../../../services/platformCrmApi';
+import { CcCard, CcSectionTitle } from '../../ui';
 import { CrmLeadList } from './CrmLeadList';
 import { CrmLeadProfile } from './CrmLeadProfile';
 import { CrmManagerPanel } from './CrmManagerPanel';
@@ -62,8 +63,130 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   // السبب ونموذجُ النشاط)، وبلا إعادةِ التركيب تنتقل تلك الحالةُ من عميلٍ إلى
   // الذي بعده — فيُحفَظ سببُ تحويلِ الأوّل على الثاني.
   if (selected) return <CrmLeadProfile key={selected.id} lead={selected} activities={activities} stats={leadStats} loading={detailLoading} error={detailError} isManager={isManager} isOwner={Boolean(myEmployeeId && selected.assigned_to?.id === myEmployeeId)} colleagues={colleagues} onBack={() => { setSelected(null); setDetailError(''); }} onStatus={saveStatus} onActivity={saveActivity} onTransfer={transfer} onRelease={release} />;
-  return <div className="space-y-6">{myEmployeeId !== null && <CrmMyStats refreshKey={refreshKey} />}<CrmLeadList isManager={isManager} hasPersonalDesk={myEmployeeId !== null} leads={leads} scope={scope} loading={listLoading} error={listError} onScope={(nextScope) => { setScope(nextScope); void loadLeads(nextScope); }} onFilters={(q, status) => void loadLeads(scope, q, status)} onSelect={(lead) => void openLead(lead.id)} onClaim={(lead) => void claim(lead)} onLookup={(value) => void performLookup(value)} lookup={lookup} lookupLoading={lookupLoading} onOpenLookup={(id) => void openLead(id)} onRequestLookupTransfer={(id) => setRequestLeadId(id)} onClaimLookup={(id) => void claimFromLookup(id)} />
-    <CrmTransferInbox onDecided={() => { bumpStats(); void loadLeads(); }} onNotice={setNotice} />
-    {requestLeadId && <form onSubmit={submitLookupTransfer} className="rounded-2xl border border-amber-400/40 bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h2 className="font-extrabold text-[var(--staff-text)]">طلب تحويل العميل</h2><p className="mt-1 text-sm text-[var(--staff-muted)]">اختر الموظف المستلم واكتب السبب لإرسال الطلب.</p><select required value={requestTo} onChange={(event) => setRequestTo(event.target.value)} className="mt-4 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" aria-label="تحويل إلى"><option value="">اختر الموظف</option>{colleagues.filter((employee) => !employee.is_me).map((employee) => <option key={employee.id} value={employee.id}>{employee.name}</option>)}</select><input required value={requestReason} onChange={(event) => setRequestReason(event.target.value)} className="mt-3 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" placeholder="سبب التحويل" /><div className="mt-3 flex gap-2"><button type="submit" className="rounded-lg bg-amber-300 px-4 py-2 text-sm font-extrabold text-slate-950">إرسال الطلب</button><button type="button" onClick={() => setRequestLeadId(null)} className="rounded-lg border border-[var(--staff-line)] px-4 py-2 text-sm font-bold text-[var(--staff-text)]">إلغاء</button></div></form>}
-    <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-extrabold text-[var(--staff-text)]">{isManager ? 'إضافة رقم' : 'اقتراح رقم'}</h2><p className="mt-1 text-sm text-[var(--staff-muted)]">{isManager ? 'يُضاف الرقم معتمداً.' : 'يرسل الاقتراح إلى المدير للاعتماد.'}</p></div><button type="button" onClick={() => setSuggestOpen((value) => !value)} className="inline-flex items-center gap-2 rounded-lg bg-[var(--staff-accent)] px-3 py-2 text-sm font-extrabold text-slate-950"><Plus className="h-4 w-4" />{isManager ? 'إضافة رقم' : 'اقتراح رقم'}</button></div>{suggestOpen && <form onSubmit={suggest} className="mt-4 grid gap-3 sm:grid-cols-2"><label className="text-sm font-bold text-[var(--staff-text)]">اسم المحل<input required value={storeName} onChange={(event) => setStoreName(event.target.value)} className="mt-2 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" /></label><label className="text-sm font-bold text-[var(--staff-text)]">رقم الهاتف<input required dir="ltr" value={phone} onChange={(event) => setPhone(event.target.value)} className="mt-2 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-left text-sm text-[var(--staff-text)]" /></label><label className="text-sm font-bold text-[var(--staff-text)]">صاحب المحل (اختياري)<input value={ownerName} onChange={(event) => setOwnerName(event.target.value)} className="mt-2 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" /></label><div className="flex items-end"><button type="submit" className="rounded-lg border border-cyan-400/50 px-4 py-2 text-sm font-bold text-cyan-300">حفظ</button></div></form>}</section>{isManager && <CrmManagerPanel isManager={isManager} onLeadChanged={() => void loadLeads()} />}{notice && <p className="rounded-lg border border-cyan-400/40 bg-cyan-400/10 p-3 text-sm text-cyan-100" role="status">{notice}</p>}</div>;
+  return (
+    <div className="space-y-6">
+      {myEmployeeId !== null && <CrmMyStats refreshKey={refreshKey} />}
+      <CrmLeadList
+        isManager={isManager}
+        hasPersonalDesk={myEmployeeId !== null}
+        leads={leads}
+        scope={scope}
+        loading={listLoading}
+        error={listError}
+        onScope={(nextScope) => { setScope(nextScope); void loadLeads(nextScope); }}
+        onFilters={(q, status) => void loadLeads(scope, q, status)}
+        onSelect={(lead) => void openLead(lead.id)}
+        onClaim={(lead) => void claim(lead)}
+        onLookup={(value) => void performLookup(value)}
+        lookup={lookup}
+        lookupLoading={lookupLoading}
+        onOpenLookup={(id) => void openLead(id)}
+        onRequestLookupTransfer={(id) => setRequestLeadId(id)}
+        onClaimLookup={(id) => void claimFromLookup(id)}
+      />
+      <CrmTransferInbox onDecided={() => { bumpStats(); void loadLeads(); }} onNotice={setNotice} />
+      {requestLeadId && (
+        <CcCard tone="warning" className="p-5">
+          <CcSectionTitle title="طلب تحويل العميل" subtitle="اختر الموظف المستلم واكتب السبب لإرسال الطلب." />
+          <form onSubmit={submitLookupTransfer} className="mt-4 space-y-3">
+            <select
+              required
+              value={requestTo}
+              onChange={(event) => setRequestTo(event.target.value)}
+              className="w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text focus:border-cc-accent focus:outline-none"
+              aria-label="تحويل إلى"
+            >
+              <option value="">اختر الموظف</option>
+              {colleagues.filter((employee) => !employee.is_me).map((employee) => (
+                <option key={employee.id} value={employee.id}>{employee.name}</option>
+              ))}
+            </select>
+            <input
+              required
+              value={requestReason}
+              onChange={(event) => setRequestReason(event.target.value)}
+              className="w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+              placeholder="سبب التحويل"
+            />
+            <div className="flex gap-2 pt-1">
+              <button
+                type="submit"
+                className="rounded-xl bg-cc-accent px-4 py-2 text-sm font-extrabold text-cc-bg hover:opacity-90 transition-opacity"
+              >
+                إرسال الطلب
+              </button>
+              <button
+                type="button"
+                onClick={() => setRequestLeadId(null)}
+                className="rounded-xl border border-cc-border bg-cc-surface-2 px-4 py-2 text-sm font-bold text-cc-text hover:border-cc-border-strong transition-colors"
+              >
+                إلغاء
+              </button>
+            </div>
+          </form>
+        </CcCard>
+      )}
+      <CcCard className="p-5">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <CcSectionTitle
+            title={isManager ? 'إضافة رقم' : 'اقتراح رقم'}
+            subtitle={isManager ? 'يُضاف الرقم معتمداً.' : 'يرسل الاقتراح إلى المدير للاعتماد.'}
+          />
+          <button
+            type="button"
+            onClick={() => setSuggestOpen((value) => !value)}
+            className="inline-flex items-center gap-2 rounded-xl bg-cc-accent px-3 py-2 text-xs font-extrabold text-cc-bg hover:opacity-90 transition-opacity shrink-0"
+          >
+            <Plus className="h-4 w-4" />
+            {isManager ? 'إضافة رقم' : 'اقتراح رقم'}
+          </button>
+        </div>
+        {suggestOpen && (
+          <form onSubmit={suggest} className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="text-xs font-bold text-cc-text">
+              اسم المحل
+              <input
+                required
+                value={storeName}
+                onChange={(event) => setStoreName(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+              />
+            </label>
+            <label className="text-xs font-bold text-cc-text">
+              رقم الهاتف
+              <input
+                required
+                dir="ltr"
+                value={phone}
+                onChange={(event) => setPhone(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-left text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+              />
+            </label>
+            <label className="text-xs font-bold text-cc-text">
+              صاحب المحل (اختياري)
+              <input
+                value={ownerName}
+                onChange={(event) => setOwnerName(event.target.value)}
+                className="mt-1.5 w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+              />
+            </label>
+            <div className="flex items-end">
+              <button
+                type="submit"
+                className="rounded-xl bg-cc-accent px-4 py-2 text-sm font-extrabold text-cc-bg hover:opacity-90 transition-opacity"
+              >
+                حفظ
+              </button>
+            </div>
+          </form>
+        )}
+      </CcCard>
+      {isManager && <CrmManagerPanel isManager={isManager} onLeadChanged={() => void loadLeads()} />}
+      {notice && (
+        <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200" role="status">
+          {notice}
+        </div>
+      )}
+    </div>
+  );
 };

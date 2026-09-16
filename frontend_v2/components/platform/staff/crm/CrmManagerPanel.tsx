@@ -1,8 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { Check, FileUp, RotateCcw, X } from 'lucide-react';
+import { Check, RotateCcw, X } from 'lucide-react';
 
 import { approveCrmLead, getCrmOverview, importCrmLeads, rejectCrmLead, releaseCrmLead, listCrmLeads, type CrmImportBatch, type CrmLead, type CrmOverview } from '../../../../services/platformCrmApi';
 import { formatNumber } from '../../../../utils/formatNumber';
+import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton, CcStatTile, CcTable, CcTd, CcTh, CcThead, CcTr } from '../../ui';
 import { STATUS_LABELS } from './CrmLeadList';
 
 interface CrmManagerPanelProps { isManager: boolean; onLeadChanged: () => void; }
@@ -46,5 +47,230 @@ export const CrmManagerPanel: React.FC<CrmManagerPanelProps> = ({ isManager, onL
   };
   const askReason = (id: number, action: 'reject' | 'release') => { setReasonFor((current) => current?.id === id && current.action === action ? null : { id, action }); setReasonText(''); };
   if (!isManager) return null;
-  return <section className="space-y-4" aria-label="لوحة مدير CRM"><header className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h2 className="text-lg font-extrabold text-[var(--staff-text)]">لوحة المدير</h2><p className="mt-1 text-sm text-[var(--staff-muted)]">المخزن والاقتراحات موزعان حسب بيانات الخادم.</p></header>{loading ? <p className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 text-sm text-[var(--staff-muted)]">جارٍ تحميل لوحة المدير...</p> : error ? <p className="rounded-2xl border border-rose-400/40 bg-[var(--staff-panel)] p-5 text-sm text-rose-300" role="alert">{error}</p> : <><section className="grid gap-3 lg:grid-cols-3"><article className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4"><p className="text-sm text-[var(--staff-muted)]">حجم المخزن</p><p className="mt-2 text-2xl font-extrabold text-[var(--staff-text)]">{formatNumber(overview?.pool_size ?? 0)}</p></article>{overview?.employees.map((employee) => <article key={employee.employee_id} className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4"><h3 className="font-bold text-[var(--staff-text)]">{employee.employee_name}</h3><p className="mt-1 flex flex-wrap items-center gap-2 text-sm"><span className="text-cyan-300">{formatNumber(employee.total)} عميل</span><span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-bold ${employee.overdue > 0 ? 'bg-rose-400/15 text-rose-300' : 'text-[var(--staff-muted)]'}`}>متأخرة: {formatNumber(employee.overdue)}</span></p><div className="mt-3 flex flex-wrap gap-2 text-xs text-[var(--staff-muted)]">{Object.entries(employee.by_status).map(([status, count]) => <span key={status}>{STATUS_LABELS[status as keyof typeof STATUS_LABELS]}: {formatNumber(count)}</span>)}</div></article>)}</section><form onSubmit={upload} className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h3 className="flex items-center gap-2 font-extrabold text-[var(--staff-text)]"><FileUp className="h-5 w-5 text-cyan-300" />رفع الأرقام</h3><p className="mt-1 text-sm text-[var(--staff-muted)]">ضع صفاً لكل عميل: اسم المحل، الهاتف، المالك، المدينة، العنوان، النشاط.</p><label className="mt-4 block text-sm font-bold text-[var(--staff-text)]" htmlFor="crm-import-name">اسم الملف</label><input id="crm-import-name" value={fileName} onChange={(event) => setFileName(event.target.value)} className="mt-2 w-full rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" placeholder="leads.csv" /><label className="mt-3 block text-sm font-bold text-[var(--staff-text)]" htmlFor="crm-import-rows">الصفوف</label><textarea id="crm-import-rows" value={rows} onChange={(event) => setRows(event.target.value)} className="mt-2 min-h-28 w-full rounded-xl border border-[var(--staff-line)] bg-black/15 p-3 text-sm text-[var(--staff-text)]" placeholder="محل النور,0500000000,محمد,رهط,الشارع الرئيسي,أدوات كهربائية" /><button type="submit" className="mt-3 rounded-lg bg-[var(--staff-accent)] px-4 py-2 text-sm font-extrabold text-slate-950">رفع الدفعة</button>{batch && <div className="mt-4 rounded-xl border border-[var(--staff-line)] bg-black/15 p-4"><p className="font-bold text-[var(--staff-text)]">نتيجةُ الدفعة{batch.file_name ? `: ${batch.file_name}` : ''}</p><div className="mt-2 flex flex-wrap gap-4 text-sm"><span className="text-[var(--staff-muted)]">الصفوف: <strong className="text-[var(--staff-text)]">{formatNumber(batch.total_rows)}</strong></span><span className="text-emerald-300">أُنشئ: <strong>{formatNumber(batch.created_count)}</strong></span><span className="text-amber-300">مكرَّر: <strong>{formatNumber(batch.duplicate_count)}</strong></span><span className="text-rose-300">غير صالح: <strong>{formatNumber(batch.invalid_count)}</strong></span></div>{batch.duplicates.length > 0 && <details className="mt-3"><summary className="cursor-pointer text-sm font-bold text-amber-300">الأرقامُ المكرَّرة ({formatNumber(batch.duplicates.length)}) — ولدى مَن هي</summary><ul className="mt-2 space-y-1 text-xs text-[var(--staff-muted)]">{(batch.duplicates as Array<{ row?: number; phone?: string; existing_lead_name?: string; assigned_to_name?: string | null }>).map((duplicate, index) => <li key={`${duplicate.phone ?? index}`} dir="auto">صف {formatNumber(duplicate.row ?? index + 1)} · <span dir="ltr">{duplicate.phone}</span> — مسجَّلٌ لدى {duplicate.existing_lead_name || 'عميل آخر'}{duplicate.assigned_to_name ? ` (المسؤول ${duplicate.assigned_to_name})` : ' (في المخزن المتاح)'}</li>)}</ul></details>}</div>}</form><section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h3 className="font-extrabold text-[var(--staff-text)]">اقتراحات بانتظار الاعتماد</h3>{pending.length === 0 ? <p className="mt-3 text-sm text-[var(--staff-muted)]">لا توجد اقتراحات معلقة.</p> : <ul className="mt-3 divide-y divide-[var(--staff-line)]">{pending.map((lead) => <li key={lead.id} className="flex flex-wrap items-center justify-between gap-3 py-3"><div><p className="font-bold text-[var(--staff-text)]">{lead.store_name}</p><p className="text-sm text-[var(--staff-muted)]">{lead.suggested_by?.name || 'موظف'}</p></div><div className="flex gap-2"><button type="button" onClick={() => approve(lead.id)} className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"><Check className="h-4 w-4" />اعتماد</button><button type="button" onClick={() => askReason(lead.id, 'reject')} className="inline-flex items-center gap-1 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-bold text-rose-300"><X className="h-4 w-4" />رفض</button><button type="button" onClick={() => askReason(lead.id, 'release')} className="inline-flex items-center gap-1 rounded-lg border border-[var(--staff-line)] px-3 py-2 text-sm font-bold text-[var(--staff-text)]"><RotateCcw className="h-4 w-4" />للمخزن</button></div>{reasonFor?.id === lead.id && <form onSubmit={submitReason} className="mt-1 flex w-full flex-col gap-2 sm:flex-row"><label className="sr-only" htmlFor={`crm-reason-${lead.id}`}>{reasonFor.action === 'reject' ? 'سبب الرفض' : 'سبب الإعادة إلى المخزن'}</label><input id={`crm-reason-${lead.id}`} required value={reasonText} onChange={(event) => setReasonText(event.target.value)} placeholder={reasonFor.action === 'reject' ? 'سبب الرفض' : 'سبب الإعادة إلى المخزن'} className="min-w-0 flex-1 rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]" /><button type="submit" className="rounded-lg bg-[var(--staff-accent)] px-4 py-2 text-sm font-extrabold text-slate-950">تأكيد</button></form>}</li>)}</ul>}</section>{notice && <p className="rounded-lg border border-emerald-400/40 bg-emerald-400/10 p-3 text-sm text-emerald-200" role="status">{notice}</p>}</>}</section>;
+  return (
+    <section className="space-y-4" aria-label="لوحة مدير CRM">
+      <CcCard className="p-5">
+        <CcSectionTitle
+          title="لوحة المدير"
+          subtitle="المخزن والاقتراحات موزعان حسب بيانات الخادم."
+        />
+      </CcCard>
+      {loading ? (
+        <CcCard className="p-5">
+          <CcSkeleton count={3} />
+        </CcCard>
+      ) : error ? (
+        <CcCard tone="danger" className="p-5 text-sm text-rose-400" role="alert">
+          {error}
+        </CcCard>
+      ) : (
+        <>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <CcCard tone="accent" className="p-4">
+              <CcStatTile
+                label="حجم المخزن"
+                value={overview?.pool_size ?? 0}
+                tone="accent"
+              />
+            </CcCard>
+          </div>
+
+          <CcCard className="p-5">
+            <CcSectionTitle
+              title="توزيع العملاء على الموظفين"
+              badge={overview?.employees.length}
+            />
+            <div className="mt-4">
+              <CcTable>
+                <CcThead>
+                  <tr>
+                    <CcTh>الموظف</CcTh>
+                    <CcTh>إجمالي العملاء</CcTh>
+                    <CcTh>المتأخرات</CcTh>
+                    <CcTh>حسب الحالة</CcTh>
+                  </tr>
+                </CcThead>
+                <tbody>
+                  {overview?.employees.map((employee) => (
+                    <CcTr key={employee.employee_id}>
+                      <CcTd>
+                        <div className="flex items-center gap-2">
+                          <CcAvatar name={employee.employee_name} size="sm" />
+                          <span className="font-bold text-cc-text">{employee.employee_name}</span>
+                        </div>
+                      </CcTd>
+                      <CcTd>
+                        <span className="font-bold text-sky-400">{formatNumber(employee.total)}</span>
+                      </CcTd>
+                      <CcTd>
+                        {employee.overdue > 0 ? (
+                          <CcPill tone="danger">{formatNumber(employee.overdue)} متأخرة</CcPill>
+                        ) : (
+                          <span className="text-xs text-cc-text-muted">{formatNumber(0)}</span>
+                        )}
+                      </CcTd>
+                      <CcTd>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(employee.by_status).map(([status, count]) => (
+                            <span
+                              key={status}
+                              className="inline-flex items-center gap-1 rounded-md bg-cc-surface-2 px-2 py-0.5 text-xs text-cc-text-muted border border-cc-border"
+                            >
+                              <span>{STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}:</span>
+                              <strong className="text-cc-text">{formatNumber(count)}</strong>
+                            </span>
+                          ))}
+                        </div>
+                      </CcTd>
+                    </CcTr>
+                  ))}
+                </tbody>
+              </CcTable>
+            </div>
+          </CcCard>
+
+          <CcCard className="p-5">
+            <CcSectionTitle
+              title="رفع الأرقام"
+              subtitle="ضع صفاً لكل عميل: اسم المحل، الهاتف، المالك، المدينة، العنوان، النشاط."
+            />
+            <form onSubmit={upload} className="mt-4 space-y-3">
+              <div>
+                <label className="block text-xs font-bold text-cc-text" htmlFor="crm-import-name">
+                  اسم الملف
+                </label>
+                <input
+                  id="crm-import-name"
+                  value={fileName}
+                  onChange={(event) => setFileName(event.target.value)}
+                  className="mt-1.5 w-full rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+                  placeholder="leads.csv"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-cc-text" htmlFor="crm-import-rows">
+                  الصفوف
+                </label>
+                <textarea
+                  id="crm-import-rows"
+                  value={rows}
+                  onChange={(event) => setRows(event.target.value)}
+                  className="mt-1.5 min-h-28 w-full rounded-xl border border-cc-border bg-cc-bg/50 p-3 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+                  placeholder="محل النور,0500000000,محمد,رهط,الشارع الرئيسي,أدوات كهربائية"
+                />
+              </div>
+              <button
+                type="submit"
+                className="rounded-xl bg-cc-accent px-4 py-2 text-sm font-extrabold text-cc-bg hover:opacity-90 transition-opacity"
+              >
+                رفع الدفعة
+              </button>
+            </form>
+            {batch && (
+              <div className="mt-4 rounded-xl border border-cc-border bg-cc-surface-2/60 p-4">
+                <p className="font-bold text-cc-text">
+                  نتيجةُ الدفعة{batch.file_name ? `: ${batch.file_name}` : ''}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-4 text-sm">
+                  <span className="text-cc-text-muted">الصفوف: <strong className="text-cc-text">{formatNumber(batch.total_rows)}</strong></span>
+                  <span className="text-emerald-400">أُنشئ: <strong>{formatNumber(batch.created_count)}</strong></span>
+                  <span className="text-amber-400">مكرَّر: <strong>{formatNumber(batch.duplicate_count)}</strong></span>
+                  <span className="text-rose-400">غير صالح: <strong>{formatNumber(batch.invalid_count)}</strong></span>
+                </div>
+                {batch.duplicates.length > 0 && (
+                  <details className="mt-3">
+                    <summary className="cursor-pointer text-xs font-bold text-amber-400 hover:underline">
+                      الأرقامُ المكرَّرة ({formatNumber(batch.duplicates.length)}) — ولدى مَن هي
+                    </summary>
+                    <ul className="mt-2 space-y-1 text-xs text-cc-text-muted">
+                      {(batch.duplicates as Array<{ row?: number; phone?: string; existing_lead_name?: string; assigned_to_name?: string | null }>).map((duplicate, index) => (
+                        <li key={`${duplicate.phone ?? index}`} dir="auto">
+                          صف {formatNumber(duplicate.row ?? index + 1)} · <span dir="ltr" className="font-mono">{duplicate.phone}</span> — مسجَّلٌ لدى {duplicate.existing_lead_name || 'عميل آخر'}{duplicate.assigned_to_name ? ` (المسؤول ${duplicate.assigned_to_name})` : ' (في المخزن المتاح)'}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                )}
+              </div>
+            )}
+          </CcCard>
+
+          <CcCard className="p-5">
+            <CcSectionTitle
+              title="اقتراحات بانتظار الاعتماد"
+              badge={pending.length}
+            />
+            {pending.length === 0 ? (
+              <CcEmpty title="لا توجد اقتراحات معلقة" className="mt-4 p-8" />
+            ) : (
+              <ul className="mt-4 divide-y divide-cc-border">
+                {pending.map((lead) => (
+                  <li key={lead.id} className="py-3 first:pt-0">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-cc-text">{lead.store_name}</p>
+                        <p className="text-xs text-cc-text-muted">{lead.suggested_by?.name || 'موظف'}</p>
+                      </div>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => approve(lead.id)}
+                          className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition-colors"
+                        >
+                          <Check className="h-4 w-4" />
+                          اعتماد
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => askReason(lead.id, 'reject')}
+                          className="inline-flex items-center gap-1 rounded-xl border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-500/20 transition-colors"
+                        >
+                          <X className="h-4 w-4" />
+                          رفض
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => askReason(lead.id, 'release')}
+                          className="inline-flex items-center gap-1 rounded-xl border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-xs font-bold text-cc-text hover:border-cc-border-strong transition-colors"
+                        >
+                          <RotateCcw className="h-4 w-4" />
+                          للمخزن
+                        </button>
+                      </div>
+                    </div>
+                    {reasonFor?.id === lead.id && (
+                      <form onSubmit={submitReason} className="mt-3 flex w-full flex-col gap-2 sm:flex-row">
+                        <label className="sr-only" htmlFor={`crm-reason-${lead.id}`}>
+                          {reasonFor.action === 'reject' ? 'سبب الرفض' : 'سبب الإعادة إلى المخزن'}
+                        </label>
+                        <input
+                          id={`crm-reason-${lead.id}`}
+                          required
+                          value={reasonText}
+                          onChange={(event) => setReasonText(event.target.value)}
+                          placeholder={reasonFor.action === 'reject' ? 'سبب الرفض' : 'سبب الإعادة إلى المخزن'}
+                          className="min-w-0 flex-1 rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
+                        />
+                        <button
+                          type="submit"
+                          className="rounded-xl bg-cc-accent px-4 py-2 text-sm font-extrabold text-cc-bg hover:opacity-90 transition-opacity"
+                        >
+                          تأكيد
+                        </button>
+                      </form>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CcCard>
+          {notice && (
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-sm text-emerald-300" role="status">
+              {notice}
+            </div>
+          )}
+        </>
+      )}
+    </section>
+  );
 };

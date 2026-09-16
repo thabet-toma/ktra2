@@ -1,13 +1,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ArrowRightLeft, Check, Inbox, X } from 'lucide-react';
+import { ArrowRightLeft, Check, X } from 'lucide-react';
 
 import {
   decideCrmTransferRequest,
   listCrmTransferRequests,
   type CrmTransfer,
 } from '../../../../services/platformCrmApi';
+import type { CcTone } from '../../../../utils/ccTone';
 import { formatDateTimeValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
+import { CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton } from '../../ui';
 
 /**
  * صندوقُ طلبات التحويل — **بلا هذه اللوحة يكون زرُّ «طلب تحويل العميل» بابَ
@@ -29,6 +31,12 @@ const STATUS_LABELS: Record<string, string> = {
   pending: 'بانتظار القرار',
   approved: 'مقبول',
   rejected: 'مرفوض',
+};
+
+const STATUS_TONES: Record<string, CcTone> = {
+  pending: 'warning',
+  approved: 'success',
+  rejected: 'danger',
 };
 
 interface CrmTransferInboxProps {
@@ -77,51 +85,48 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
   const settled = rows.filter((row) => row.status !== 'pending');
 
   return (
-    <section
-      className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"
-      aria-label="طلبات تحويل العملاء"
-    >
-      <h2 className="flex items-center gap-2 font-extrabold text-[var(--staff-text)]">
-        <Inbox className="h-5 w-5 text-cyan-300" />
-        طلبات التحويل
-      </h2>
-      <p className="mt-1 text-sm text-[var(--staff-muted)]">
-        ما طلبتَه من زملائك وما طُلب منك — والبتُّ لصاحب العميل أو المدير.
-      </p>
+    <CcCard className="p-5" aria-label="طلبات تحويل العملاء">
+      <CcSectionTitle
+        title="طلبات التحويل"
+        subtitle="ما طلبتَه من زملائك وما طُلب منك — والبتُّ لصاحب العميل أو المدير."
+        badge={pending.length}
+      />
 
       {loading ? (
-        <p className="mt-4 text-sm text-[var(--staff-muted)]" role="status">جارٍ تحميل طلبات التحويل...</p>
+        <div className="mt-4 space-y-3">
+          <CcSkeleton count={2} />
+        </div>
       ) : error ? (
-        <p className="mt-4 text-sm text-rose-300" role="alert">{error}</p>
+        <p className="mt-4 text-sm text-rose-400" role="alert">{error}</p>
       ) : rows.length === 0 ? (
-        <p className="mt-4 text-sm text-[var(--staff-muted)]">لا توجد طلبات تحويل تخصّك.</p>
+        <CcEmpty title="لا توجد طلبات تحويل تخصّك" className="mt-4 p-8" />
       ) : (
         <>
           {pending.length > 0 && (
-            <ul className="mt-4 divide-y divide-[var(--staff-line)]">
+            <ul className="mt-4 divide-y divide-cc-border">
               {pending.map((row) => (
                 <li key={row.id} className="py-4 first:pt-0">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div className="min-w-0">
-                      <p className="flex items-center gap-2 font-bold text-[var(--staff-text)]">
-                        <ArrowRightLeft className="h-4 w-4 text-amber-300" />
+                      <p className="flex items-center gap-2 font-bold text-cc-text">
+                        <ArrowRightLeft className="h-4 w-4 text-amber-400" />
                         {row.from_employee?.name || 'المخزن المتاح'} → {row.to_employee?.name || 'غير محدد'}
                       </p>
-                      <p className="mt-1 text-sm text-[var(--staff-muted)]">
+                      <p className="mt-1 text-xs text-cc-text-muted">
                         العميل #{formatNumber(row.lead)} · {formatDateTimeValue(row.created_at)}
                       </p>
-                      {row.reason && <p className="mt-1 text-sm text-[var(--staff-text)]">السبب: {row.reason}</p>}
+                      {row.reason && <p className="mt-1 text-sm text-cc-text">السبب: {row.reason}</p>}
                     </div>
                     {!row.can_decide ? (
-                      <p className="shrink-0 rounded-full border border-[var(--staff-line)] bg-black/15 px-3 py-1 text-xs font-bold text-[var(--staff-muted)]">
+                      <CcPill tone="neutral">
                         بانتظار قرار صاحب العميل
-                      </p>
+                      </CcPill>
                     ) : (
                       <div className="flex shrink-0 gap-2">
                         <button
                           type="button"
                           onClick={() => void decide(row, true)}
-                          className="inline-flex items-center gap-1 rounded-lg bg-emerald-400 px-3 py-2 text-sm font-bold text-slate-950"
+                          className="inline-flex items-center gap-1 rounded-xl bg-emerald-500 px-3 py-1.5 text-xs font-bold text-slate-950 hover:bg-emerald-400 transition-colors"
                         >
                           <Check className="h-4 w-4" />
                           قبول
@@ -129,7 +134,7 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
                         <button
                           type="button"
                           onClick={() => setDecidingId(decidingId === row.id ? null : row.id)}
-                          className="inline-flex items-center gap-1 rounded-lg border border-rose-400/50 px-3 py-2 text-sm font-bold text-rose-300"
+                          className="inline-flex items-center gap-1 rounded-xl border border-rose-500/50 bg-rose-500/10 px-3 py-1.5 text-xs font-bold text-rose-300 hover:bg-rose-500/20 transition-colors"
                         >
                           <X className="h-4 w-4" />
                           رفض
@@ -152,9 +157,9 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
                         value={rejectNote}
                         onChange={(event) => setRejectNote(event.target.value)}
                         placeholder="سبب الرفض (اختياري)"
-                        className="min-w-0 flex-1 rounded-lg border border-[var(--staff-line)] bg-black/15 px-3 py-2 text-sm text-[var(--staff-text)]"
+                        className="min-w-0 flex-1 rounded-xl border border-cc-border bg-cc-bg/50 px-3 py-2 text-sm text-cc-text placeholder:text-cc-text-muted focus:border-cc-accent focus:outline-none"
                       />
-                      <button type="submit" className="rounded-lg bg-rose-400 px-4 py-2 text-sm font-extrabold text-slate-950">
+                      <button type="submit" className="rounded-xl bg-rose-500 px-4 py-2 text-sm font-extrabold text-slate-950 hover:bg-rose-400 transition-colors">
                         تأكيد الرفض
                       </button>
                     </form>
@@ -166,15 +171,19 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
 
           {settled.length > 0 && (
             <details className="mt-4">
-              <summary className="cursor-pointer text-sm font-bold text-[var(--staff-muted)]">
+              <summary className="cursor-pointer text-xs font-bold text-cc-text-muted hover:text-cc-text">
                 طلبات مُبتٌّ فيها ({formatNumber(settled.length)})
               </summary>
               <ul className="mt-3 space-y-2">
                 {settled.map((row) => (
-                  <li key={row.id} className="rounded-lg bg-black/15 px-3 py-2 text-sm text-[var(--staff-muted)]">
-                    العميل #{formatNumber(row.lead)} → {row.to_employee?.name || 'غير محدد'} ·{' '}
-                    {STATUS_LABELS[row.status] || row.status}
-                    {row.decided_at ? ` · ${formatDateTimeValue(row.decided_at)}` : ''}
+                  <li key={row.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-cc-surface-2/60 border border-cc-border px-3 py-2 text-xs text-cc-text-muted">
+                    <span>
+                      العميل #{formatNumber(row.lead)} → {row.to_employee?.name || 'غير محدد'}
+                      {row.decided_at ? ` · ${formatDateTimeValue(row.decided_at)}` : ''}
+                    </span>
+                    <CcPill tone={STATUS_TONES[row.status] || 'neutral'}>
+                      {STATUS_LABELS[row.status] || row.status}
+                    </CcPill>
                   </li>
                 ))}
               </ul>
@@ -182,6 +191,6 @@ export const CrmTransferInbox: React.FC<CrmTransferInboxProps> = ({ onDecided, o
           )}
         </>
       )}
-    </section>
+    </CcCard>
   );
 };

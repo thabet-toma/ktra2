@@ -36,6 +36,8 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useAuth } from "../../contexts/AuthContext";
 import { usePlatformStaffCapabilitiesState } from "../../hooks/usePlatformStaffCapabilities";
+import { CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton } from "./ui";
+import type { CcTone } from "../../utils/ccTone";
 
 /** خياراتُ نموذج الأولويّة وحدها — عرضُ صفٍّ قائمٍ يبقى من `priority_display` الخادميّ. */
 const PRIORITY_OPTION_LABELS: Record<WorkOrderPriority, string> = {
@@ -51,11 +53,28 @@ const PRIORITY_OPTIONS: WorkOrderPriority[] = ["low", "normal", "high", "urgent"
  * كما ينصّ تعليقُ `WorkOrderSerializer` نفسُه: «ولا يجوز أن تُترجمها الواجهةُ
  * بجدولٍ ثانٍ يتباعد». والصنفُ التنسيقيُّ لا يُرسَل من الخادم فيبقى هنا.
  */
-const PRIORITY_STYLES: Record<string, string> = {
-  low: "bg-slate-100 text-slate-600",
-  normal: "bg-blue-100 text-blue-700",
-  high: "bg-amber-100 text-amber-700",
-  urgent: "bg-rose-100 text-rose-700",
+const PRIORITY_TONES: Record<WorkOrderPriority, CcTone> = {
+  low: "neutral",
+  normal: "accent",
+  high: "warning",
+  urgent: "danger",
+};
+
+const STATUS_TONES: Record<string, CcTone> = {
+  received: "neutral",
+  screening: "neutral",
+  data_entry: "accent",
+  review: "violet",
+  approval: "accent",
+  closed: "success",
+  waiting_customer: "warning",
+  cancelled: "danger",
+};
+
+const REVIEW_STATUS_TONES: Record<string, CcTone> = {
+  approved: "success",
+  rejected: "danger",
+  pending: "warning",
 };
 
 /**
@@ -351,23 +370,25 @@ const WorkOrderDetail: React.FC<{
   return (
     <div className="space-y-4" dir="rtl">
       {error && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800">{error}</div>
+        <CcCard tone="danger" className="p-3 text-xs text-rose-400">
+          {error}
+        </CcCard>
       )}
       {notice && (
-        <div className="p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800">
+        <CcCard tone="success" className="p-3 text-xs text-emerald-400">
           {notice}
-        </div>
+        </CcCard>
       )}
 
       {/* الإسناد والأولوية — مدير العمليات وحده (القصص ١٣، ٣٤) */}
       {isManager && (
-        <div className="bg-white rounded-xl border border-slate-200 p-4">
-          <h3 className="text-xs font-bold text-slate-700 mb-2">الإسناد والأولوية</h3>
+        <CcCard className="p-4 space-y-3">
+          <h3 className="text-xs font-bold text-cc-text">الإسناد والأولوية</h3>
           <div className="flex flex-wrap items-center gap-2">
             <select
               value={assigneeChoice}
               onChange={(e) => setAssigneeChoice(e.target.value)}
-              className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg min-w-[180px]"
+              className="px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg min-w-[180px] focus:outline-none focus:border-sky-500"
             >
               <option value="">بلا مسؤول (طابور)</option>
               {candidates.map((c) => (
@@ -380,14 +401,14 @@ const WorkOrderDetail: React.FC<{
               type="button"
               onClick={handleAssign}
               disabled={busyAssign}
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg disabled:opacity-50 transition-colors"
             >
               {busyAssign ? "..." : "إسناد"}
             </button>
             <select
               value={priorityChoice}
               onChange={(e) => setPriorityChoice(e.target.value as WorkOrderPriority)}
-              className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+              className="px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
             >
               {PRIORITY_OPTIONS.map((p) => (
                 <option key={p} value={p}>
@@ -399,23 +420,23 @@ const WorkOrderDetail: React.FC<{
               type="button"
               onClick={handleChangePriority}
               disabled={busyPriority || priorityChoice === workOrder.priority}
-              className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+              className="px-3 py-1.5 text-xs font-semibold text-cc-text bg-cc-surface-2 hover:bg-cc-border border border-cc-border rounded-lg disabled:opacity-50 transition-colors"
             >
               {busyPriority ? "..." : "حفظ الأولوية"}
             </button>
           </div>
-          <p className="text-[10px] text-slate-400 mt-1">
+          <p className="text-[10px] text-cc-text-muted mt-1">
             المسؤول الحالي: {workOrder.assignee_name || "بلا مسؤول"} — الأولوية الحالية: {workOrder.priority_display}
           </p>
-        </div>
+        </CcCard>
       )}
 
       {/* نقل الحالة */}
-      <div className="bg-white rounded-xl border border-slate-200 p-4">
-        <h3 className="text-xs font-bold text-slate-700 mb-2">نقل الحالة</h3>
+      <CcCard className="p-4 space-y-3">
+        <h3 className="text-xs font-bold text-cc-text">نقل الحالة</h3>
         <div className="flex flex-wrap gap-2">
           {allowedNext.length === 0 ? (
-            <span className="text-xs text-slate-400">لا انتقالات متاحة من هذه الحالة</span>
+            <span className="text-xs text-cc-text-muted">لا انتقالات متاحة من هذه الحالة</span>
           ) : (
             allowedNext.map((target) => (
               <button
@@ -423,27 +444,27 @@ const WorkOrderDetail: React.FC<{
                 type="button"
                 onClick={() => handleTransition(target)}
                 disabled={busyTransition === target}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-semibold text-cc-text bg-cc-surface-2 hover:bg-cc-border border border-cc-border rounded-lg disabled:opacity-50 transition-colors"
               >
                 {busyTransition === target ? "..." : `→ ${WORK_ORDER_STATUS_LABELS[target]}`}
               </button>
             ))
           )}
         </div>
-      </div>
+      </CcCard>
 
       {loading ? (
-        <div className="py-10 text-center text-xs text-slate-400">جاري تحميل التفاصيل...</div>
+        <CcSkeleton variant="card" count={3} />
       ) : (
         <>
           {/* ربط المستندات */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-xs font-bold text-slate-700 mb-2">ربط مستند</h3>
-            <div className="flex flex-wrap items-center gap-2 mb-3">
+          <CcCard className="p-4 space-y-3">
+            <h3 className="text-xs font-bold text-cc-text">ربط مستند</h3>
+            <div className="flex flex-wrap items-center gap-2">
               <select
                 value={linkDocType}
                 onChange={(e) => setLinkDocType(e.target.value as ServiceDocumentType)}
-                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+                className="px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
               >
                 {SERVICE_DOCUMENT_TYPES.map((t) => (
                   <option key={t} value={t}>
@@ -457,7 +478,7 @@ const WorkOrderDetail: React.FC<{
                 placeholder="رقم المستند"
                 value={linkDocId}
                 onChange={(e) => setLinkDocId(e.target.value)}
-                className="w-28 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+                className="w-28 px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
               />
               <input
                 type="number"
@@ -465,13 +486,13 @@ const WorkOrderDetail: React.FC<{
                 placeholder="عدد السطور"
                 value={linkLineCount}
                 onChange={(e) => setLinkLineCount(e.target.value)}
-                className="w-24 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+                className="w-24 px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
               />
               <button
                 type="button"
                 onClick={handleLinkDocument}
                 disabled={busyLink}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg disabled:opacity-50 transition-colors"
               >
                 ربط
               </button>
@@ -483,36 +504,37 @@ const WorkOrderDetail: React.FC<{
                   value={recountReason}
                   onChange={(e) => setRecountReason(e.target.value)}
                   placeholder="سبب إعادة الاحتساب (لمدير العمليات)"
-                  className="flex-1 px-2 py-1.5 text-xs border border-amber-300 bg-amber-50 rounded-lg"
+                  className="flex-1 px-2 py-1.5 text-xs border border-amber-500/30 bg-amber-500/10 text-amber-300 rounded-lg focus:outline-none"
                 />
                 <button
                   type="button"
                   onClick={handleLinkDocument}
                   disabled={busyLink || !recountReason.trim()}
-                  className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-700 rounded-lg disabled:opacity-50"
+                  className="px-3 py-1.5 text-xs font-semibold text-white bg-amber-600 hover:bg-amber-500 rounded-lg disabled:opacity-50 transition-colors"
                 >
                   إعادة الاحتساب
                 </button>
               </div>
             )}
             {links.length === 0 ? (
-              <p className="text-xs text-slate-400">لا مستندات مرتبطة بعد</p>
+              <p className="text-xs text-cc-text-muted">لا مستندات مرتبطة بعد</p>
             ) : (
-              <ul className="space-y-1">
+              <ul className="space-y-1.5">
                 {links.map((l) => (
-                  <li key={l.id} className="text-xs flex items-center gap-2 text-slate-600">
+                  <li key={l.id} className="text-xs flex items-center gap-2 text-cc-text">
                     <input
                       type="checkbox"
                       disabled={!!l.deliverable}
                       checked={selectedLinkIds.includes(l.id)}
                       onChange={() => toggleLinkSelection(l.id)}
+                      className="rounded border-cc-border bg-cc-bg"
                     />
                     <span>
                       {l.document_type_display} #{formatNumber(l.document_id)} — {formatNumber(l.line_count)} سطر
                       {/* مصدرُ العدد ظاهرٌ للمعتمِد: المرصودُ من المستند غيرُ المُصرَّح به. */}
                       <span
                         className={`mr-1 ${
-                          l.line_count_source === "observed" ? "text-emerald-600" : "text-amber-600"
+                          l.line_count_source === "observed" ? "text-emerald-400" : "text-amber-400"
                         }`}
                       >
                         ({l.line_count_source_display})
@@ -523,57 +545,49 @@ const WorkOrderDetail: React.FC<{
                 ))}
               </ul>
             )}
-          </div>
+          </CcCard>
 
           {/* تسليم عمل */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-xs font-bold text-slate-700 mb-2">تسليم عمل (مُسلَّم جديد)</h3>
+          <CcCard className="p-4 space-y-3">
+            <h3 className="text-xs font-bold text-cc-text">تسليم عمل (مُسلَّم جديد)</h3>
             <textarea
               value={deliverableContent}
               onChange={(e) => setDeliverableContent(e.target.value)}
               placeholder="ملاحظة التسليم..."
               rows={2}
-              className="w-full px-3 py-2 text-xs border border-slate-200 rounded-lg mb-2"
+              className="w-full px-3 py-2 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
             />
-            <p className="text-[11px] text-slate-400 mb-2">
+            <p className="text-[11px] text-cc-text-muted">
               اختر أعلاه المستندات المرتبطة غير المُسلَّمة بعد لضمّها ({unlinkedForSubmit.length} متاحة، {selectedLinkIds.length} مختارة).
             </p>
             <button
               type="button"
               onClick={handleSubmitDeliverable}
               disabled={busyDeliverable}
-              className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
+              className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 transition-colors"
             >
               {busyDeliverable ? "جارٍ التسليم..." : "تسليم"}
             </button>
-          </div>
+          </CcCard>
 
           {/* المُسلَّمات والمراجعة */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-xs font-bold text-slate-700 mb-2">المُسلَّمات</h3>
+          <CcCard className="p-4 space-y-3">
+            <h3 className="text-xs font-bold text-cc-text">المُسلَّمات</h3>
             {deliverables.length === 0 ? (
-              <p className="text-xs text-slate-400">لا مُسلَّمات بعد</p>
+              <p className="text-xs text-cc-text-muted">لا مُسلَّمات بعد</p>
             ) : (
               <ul className="space-y-3">
                 {deliverables.map((d) => (
-                  <li key={d.id} className="border border-slate-100 rounded-lg p-3">
+                  <li key={d.id} className="border border-cc-border rounded-lg p-3 bg-cc-surface-2/40">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-semibold text-slate-700">{d.kind_display}</span>
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                          d.review_status === "approved"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : d.review_status === "rejected"
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-amber-100 text-amber-700"
-                        }`}
-                      >
+                      <span className="text-xs font-semibold text-cc-text">{d.kind_display}</span>
+                      <CcPill tone={REVIEW_STATUS_TONES[d.review_status] || "warning"}>
                         {d.review_status_display}
-                      </span>
+                      </CcPill>
                     </div>
-                    {d.content && <p className="text-xs text-slate-600 mb-1">{d.content}</p>}
+                    {d.content && <p className="text-xs text-cc-text-muted mb-1">{d.content}</p>}
                     {d.review_status === "rejected" && (
-                      <p className="text-[11px] text-rose-600">
+                      <p className="text-[11px] text-rose-400">
                         سبب الرفض ({d.rejection_category_display}): {d.rejection_reason}
                       </p>
                     )}
@@ -589,7 +603,7 @@ const WorkOrderDetail: React.FC<{
                           type="button"
                           onClick={() => handleApprove(d.id)}
                           disabled={busyReview === d.id}
-                          className="px-3 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
+                          className="px-3 py-1 text-[11px] font-bold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg disabled:opacity-50 transition-colors"
                         >
                           اعتماد
                         </button>
@@ -598,7 +612,7 @@ const WorkOrderDetail: React.FC<{
                             <select
                               value={rejectionCategory}
                               onChange={(e) => setRejectionCategory(e.target.value as Exclude<RejectionCategory, "">)}
-                              className="px-2 py-1 text-[11px] border border-slate-200 rounded-lg"
+                              className="px-2 py-1 text-[11px] bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none"
                             >
                               {(Object.keys(REJECTION_CATEGORY_LABELS) as Array<Exclude<RejectionCategory, "">>).map(
                                 (cat) => (
@@ -613,20 +627,20 @@ const WorkOrderDetail: React.FC<{
                               value={rejectionReason}
                               onChange={(e) => setRejectionReason(e.target.value)}
                               placeholder="سبب الرفض"
-                              className="px-2 py-1 text-[11px] border border-slate-200 rounded-lg flex-1 min-w-[160px]"
+                              className="px-2 py-1 text-[11px] bg-cc-bg border border-cc-border text-cc-text rounded-lg flex-1 min-w-[160px] focus:outline-none"
                             />
                             <button
                               type="button"
                               onClick={() => handleReject(d.id)}
                               disabled={busyReview === d.id}
-                              className="px-3 py-1 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-lg disabled:opacity-50"
+                              className="px-3 py-1 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-lg disabled:opacity-50 transition-colors"
                             >
                               تأكيد الرفض
                             </button>
                             <button
                               type="button"
                               onClick={() => setRejectingId(null)}
-                              className="px-2 py-1 text-[11px] text-slate-500"
+                              className="px-2 py-1 text-[11px] text-cc-text-muted hover:text-cc-text"
                             >
                               إلغاء
                             </button>
@@ -635,7 +649,7 @@ const WorkOrderDetail: React.FC<{
                           <button
                             type="button"
                             onClick={() => setRejectingId(d.id)}
-                            className="px-3 py-1 text-[11px] font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg"
+                            className="px-3 py-1 text-[11px] font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 rounded-lg transition-colors"
                           >
                             رفض
                           </button>
@@ -646,20 +660,20 @@ const WorkOrderDetail: React.FC<{
                 ))}
               </ul>
             )}
-          </div>
+          </CcCard>
 
           {/* التعليقات */}
-          <div className="bg-white rounded-xl border border-slate-200 p-4">
-            <h3 className="text-xs font-bold text-slate-700 mb-2">التعليقات</h3>
+          <CcCard className="p-4 space-y-3">
+            <h3 className="text-xs font-bold text-cc-text">التعليقات</h3>
             {comments.length === 0 ? (
-              <p className="text-xs text-slate-400 mb-2">لا تعليقات بعد</p>
+              <p className="text-xs text-cc-text-muted">لا تعليقات بعد</p>
             ) : (
               <ul className="space-y-2 mb-3">
                 {comments.map((c) => (
                   <li key={c.id} className="text-xs">
-                    <span className="font-semibold text-slate-700">{c.author_name}</span>{" "}
-                    <span className="text-[10px] text-slate-400">({c.visibility_display})</span>
-                    <p className="text-slate-600">{c.content}</p>
+                    <span className="font-semibold text-cc-text">{c.author_name}</span>{" "}
+                    <span className="text-[10px] text-cc-text-muted">({c.visibility_display})</span>
+                    <p className="text-cc-text-muted mt-0.5">{c.content}</p>
                   </li>
                 ))}
               </ul>
@@ -668,7 +682,7 @@ const WorkOrderDetail: React.FC<{
               <select
                 value={commentVisibility}
                 onChange={(e) => setCommentVisibility(e.target.value as "internal" | "client_visible")}
-                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+                className="px-2 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none"
               >
                 <option value="internal">داخلي</option>
                 <option value="client_visible">مرئي للعميل</option>
@@ -678,18 +692,18 @@ const WorkOrderDetail: React.FC<{
                 value={newComment}
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="أضف تعليقاً..."
-                className="flex-1 min-w-[200px] px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+                className="flex-1 min-w-[200px] px-3 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
               />
               <button
                 type="button"
                 onClick={handleAddComment}
                 disabled={busyComment}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 rounded-lg disabled:opacity-50 transition-colors"
               >
                 إرسال
               </button>
             </div>
-          </div>
+          </CcCard>
         </>
       )}
     </div>
@@ -722,9 +736,9 @@ const NewWorkOrderForm: React.FC<{ onCreated: () => void }> = ({ onCreated }) =>
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4" dir="rtl">
-      <h3 className="text-xs font-bold text-slate-700 mb-2">أمر عمل جديد</h3>
-      {error && <p className="text-xs text-rose-600 mb-2">{error}</p>}
+    <CcCard className="p-4 space-y-3" dir="rtl">
+      <h3 className="text-xs font-bold text-cc-text">أمر عمل جديد</h3>
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-2 items-start">
         <CompanyPicker
           value={tenantId}
@@ -738,18 +752,18 @@ const NewWorkOrderForm: React.FC<{ onCreated: () => void }> = ({ onCreated }) =>
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="عنوان أمر العمل"
-          className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="px-3 py-1.5 text-xs bg-cc-bg border border-cc-border text-cc-text rounded-lg focus:outline-none focus:border-sky-500"
         />
         <button
           type="button"
           onClick={handleCreate}
           disabled={busy}
-          className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+          className="px-3.5 py-2 text-xs font-bold text-white bg-sky-600 hover:bg-sky-500 rounded-lg disabled:opacity-50 transition-colors"
         >
           {busy ? "..." : `إنشاء${tenantName ? ` لـ${tenantName}` : ""}`}
         </button>
       </div>
-    </div>
+    </CcCard>
   );
 };
 
@@ -802,36 +816,41 @@ export const WorkOrdersPanel: React.FC = () => {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" dir="rtl">
       <div className="lg:col-span-1 space-y-4">
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-bold text-slate-800">طابور أوامر العمل</h2>
-            {isManager && (
-              <button
-                type="button"
-                onClick={() => setShowCreate((v) => !v)}
-                className="px-2 py-1 text-[11px] font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg"
-              >
-                {showCreate ? "إخفاء" : "+ جديد"}
-              </button>
-            )}
-          </div>
-          {error && <p className="text-xs text-rose-600 mb-2">{error}</p>}
+        <CcCard className="p-4 space-y-4">
+          <CcSectionTitle
+            title="طابور أوامر العمل"
+            action={
+              isManager ? (
+                <button
+                  type="button"
+                  onClick={() => setShowCreate((v) => !v)}
+                  className="px-2.5 py-1 text-xs font-bold text-sky-400 bg-sky-500/10 hover:bg-sky-500/20 border border-sky-500/30 rounded-lg transition-colors"
+                >
+                  {showCreate ? "إخفاء" : "+ جديد"}
+                </button>
+              ) : undefined
+            }
+          />
+
+          {error && <p className="text-xs text-rose-400">{error}</p>}
+
           {capabilitiesFailed && (
-            <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2 text-[11px] text-amber-300">
               <span>تعذّر التحقّق من صلاحيّاتك، فأفعالُ مدير العمليات مخفيّةٌ مؤقّتاً.</span>
               <button
                 type="button"
                 onClick={reloadCapabilities}
-                className="px-2 py-1 font-bold bg-amber-100 hover:bg-amber-200 rounded-lg"
+                className="px-2 py-1 font-bold bg-amber-500/20 hover:bg-amber-500/30 rounded-lg transition-colors"
               >
                 إعادة المحاولة
               </button>
             </div>
           )}
+
           {loading ? (
-            <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+            <CcSkeleton variant="card" count={4} />
           ) : queue.length === 0 ? (
-            <div className="py-10 text-center text-xs text-slate-400">لا أوامر عمل في طابورك حالياً</div>
+            <CcEmpty title="لا أوامر عمل في طابورك حالياً" />
           ) : (
             <ul className="space-y-2">
               {queue.map((w) => (
@@ -839,38 +858,39 @@ export const WorkOrdersPanel: React.FC = () => {
                   <button
                     type="button"
                     onClick={() => setSelectedId(w.id)}
-                    className={`w-full text-right px-3 py-2 rounded-lg border transition ${
-                      w.id === selectedId ? "border-blue-400 bg-blue-50" : "border-slate-200 bg-white hover:bg-slate-50"
+                    className={`w-full text-right p-3 rounded-lg border transition-all ${
+                      w.id === selectedId
+                        ? "border-sky-500/50 bg-sky-500/10 shadow-sm"
+                        : "border-cc-border bg-cc-surface hover:bg-cc-surface-2"
                     }`}
                   >
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-800">{w.title}</span>
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                          PRIORITY_STYLES[w.priority] || "bg-slate-100 text-slate-600"
-                        }`}
-                      >
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-bold text-cc-text truncate">{w.title}</span>
+                      <CcPill tone={PRIORITY_TONES[w.priority] || "neutral"}>
                         {w.priority_display || w.priority}
-                      </span>
+                      </CcPill>
                     </div>
-                    <div className="text-[10px] text-slate-400 mt-0.5">
-                      {w.company_name} — {WORK_ORDER_STATUS_LABELS[w.status as WorkOrderStatus] || w.status}
+                    <div className="flex items-center justify-between gap-2 mt-1.5 text-[11px] text-cc-text-muted">
+                      <span className="truncate">{w.company_name}</span>
+                      <CcPill tone={STATUS_TONES[w.status] || "neutral"}>
+                        {w.status_display || WORK_ORDER_STATUS_LABELS[w.status as WorkOrderStatus] || w.status}
+                      </CcPill>
                     </div>
-                    <div className="text-[10px] text-slate-400">أجل: {formatDateTime(w.deadline_at)}</div>
+                    <div className="text-[10px] text-cc-text-muted mt-1">أجل: {formatDateTime(w.deadline_at)}</div>
                   </button>
                 </li>
               ))}
             </ul>
           )}
-        </div>
+        </CcCard>
         {isManager && showCreate && <NewWorkOrderForm onCreated={loadQueue} />}
       </div>
 
       <div className="lg:col-span-2">
         {!selected ? (
-          <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 py-16 text-center text-xs text-slate-400">
-            اختر أمر عملٍ من الطابور لعرض تفاصيله
-          </div>
+          <CcCard className="p-12 text-center">
+            <CcEmpty title="اختر أمر عملٍ من الطابور لعرض تفاصيله" />
+          </CcCard>
         ) : (
           <WorkOrderDetail workOrder={selected} isManager={isManager} onChanged={handleChanged} />
         )}

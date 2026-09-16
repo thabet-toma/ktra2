@@ -4,6 +4,7 @@ import { Trophy } from "lucide-react";
 import { getChampionsBoard, type ChampionsBoard } from "../../services/platformEmployeeSpaceApi";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import { CcAvatar, CcCard, CcEmpty, CcSectionTitle, CcSkeleton } from "./ui";
 
 const now = new Date();
 
@@ -43,70 +44,83 @@ export const ChampionsPanel: React.FC = () => {
 
   return (
     <div className="space-y-4" dir="rtl">
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+      <CcCard className="p-4 flex flex-wrap items-end gap-3">
         <div className="ml-auto flex items-center gap-2">
-          <Trophy className="h-4 w-4 text-amber-500" />
-          <h2 className="text-sm font-bold text-slate-800">KTRA Champions</h2>
+          <Trophy className="h-5 w-5 text-amber-400" />
+          <CcSectionTitle title="KTRA Champions" />
         </div>
         <label className="space-y-1 text-xs">
-          <span className="text-slate-500">السنة</span>
+          <span className="text-cc-text-muted">السنة</span>
           <input
             type="number"
             value={year}
             onChange={(event) => setYear(Number(event.target.value))}
-            className="w-24 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+            className="w-24 rounded-lg bg-cc-bg border border-cc-border text-cc-text px-2.5 py-1.5 text-xs focus:outline-none focus:border-sky-500"
           />
         </label>
         <label className="space-y-1 text-xs">
-          <span className="text-slate-500">الشهر</span>
+          <span className="text-cc-text-muted">الشهر</span>
           <input
             type="number"
             min={1}
             max={12}
             value={month}
             onChange={(event) => setMonth(Number(event.target.value))}
-            className="w-20 rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+            className="w-20 rounded-lg bg-cc-bg border border-cc-border text-cc-text px-2.5 py-1.5 text-xs focus:outline-none focus:border-sky-500"
           />
         </label>
-      </div>
+      </CcCard>
 
       {error && (
-        <div className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
-          <span>{error}</span>
-          <button type="button" onClick={() => void load()} className="rounded-lg bg-rose-100 px-3 py-1 text-[11px] font-bold hover:bg-rose-200">
+        <CcCard tone="danger" className="flex items-center justify-between p-3 text-xs">
+          <span className="text-rose-400 font-semibold">{error}</span>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 px-3 py-1 text-[11px] font-bold transition-colors"
+          >
             إعادة المحاولة
           </button>
-        </div>
+        </CcCard>
       )}
 
       {loading ? (
-        <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+        <CcSkeleton variant="card" count={3} />
       ) : (
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {(board?.categories ?? []).map((category) => (
-            <section key={category.category} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-              <h3 className="mb-2 text-xs font-bold text-slate-700">{category.category_label}</h3>
+            <CcCard key={category.category} className="p-4 space-y-3">
+              <h3 className="text-xs sm:text-sm font-bold text-cc-text">{category.category_label}</h3>
               {category.entries.length === 0 ? (
-                <p className="text-[11px] text-slate-400">لا مرشّحين بحدّ العينة هذا الشهر.</p>
+                <CcEmpty title="لا مرشّحين بحدّ العينة هذا الشهر." className="py-6" />
               ) : (
                 <ol className="space-y-2">
                   {category.entries.map((entry, index) => (
-                    <li key={entry.employee_id} className="rounded-lg bg-slate-50 p-2">
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-xs font-semibold text-slate-800">
-                          <span className="ml-1">{medal(index)}</span>
-                          {entry.employee_name}
+                    <li
+                      key={entry.employee_id}
+                      className="flex items-center justify-between gap-3 p-2.5 rounded-lg border border-cc-border bg-cc-surface-2 hover:bg-cc-surface transition-colors"
+                    >
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span className="text-base shrink-0">{medal(index)}</span>
+                        <CcAvatar name={entry.employee_name} size="sm" />
+                        <div className="min-w-0">
+                          <p className="text-xs font-semibold text-cc-text truncate">{entry.employee_name}</p>
+                          <p className="text-[10px] text-cc-text-muted truncate">{entry.evidence}</p>
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-left">
+                        <span className="text-xs font-bold text-sky-400">
+                          {formatNumber(entry.value)}
                         </span>
-                        <span className="text-xs font-bold text-slate-700">
-                          {formatNumber(entry.value)} {category.unit}
+                        <span className="text-[10px] text-cc-text-muted mr-1">
+                          {category.unit}
                         </span>
                       </div>
-                      <p className="mt-0.5 text-[10px] text-slate-500">{entry.evidence}</p>
                     </li>
                   ))}
                 </ol>
               )}
-            </section>
+            </CcCard>
           ))}
         </div>
       )}

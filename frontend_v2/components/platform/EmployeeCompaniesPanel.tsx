@@ -8,6 +8,7 @@ import {
 import { formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import { CcCard, CcEmpty, CcPill, CcProgress, CcSkeleton } from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه القائمة لموظفي عمليات المنصة فقط.", "تعذّر تحميل شركاتك.");
@@ -39,90 +40,103 @@ export const EmployeeCompaniesPanel: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  if (loading) return <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>;
+  if (loading) return <CcSkeleton variant="card" count={2} />;
 
   if (error) {
     return (
-      <div className="flex items-center justify-between rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800" dir="rtl">
-        <span>{error}</span>
-        <button type="button" onClick={() => void load()} className="rounded-lg bg-rose-100 px-3 py-1 text-[11px] font-bold hover:bg-rose-200">
+      <CcCard tone="danger" className="flex items-center justify-between p-3 text-xs" dir="rtl">
+        <span className="text-rose-400 font-semibold">{error}</span>
+        <button
+          type="button"
+          onClick={() => void load()}
+          className="rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/30 px-3 py-1 text-[11px] font-bold transition-colors"
+        >
           إعادة المحاولة
         </button>
-      </div>
+      </CcCard>
     );
   }
 
   if (!rows || rows.length === 0) {
     return (
-      <div className="rounded-xl border border-slate-200 bg-white py-10 text-center text-xs text-slate-400" dir="rtl">
-        لا شركاتِ ارتباطٍ نشطةٍ لك حالياً.
-      </div>
+      <CcEmpty title="لا شركاتِ ارتباطٍ نشطةٍ لك حالياً." />
     );
   }
 
   return (
-    <div className="space-y-4" dir="rtl">
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-4" dir="rtl">
       {rows.map((row) => {
         const exhausted = row.remaining_quota === 0;
         return (
-          <section key={row.tenant_id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <header className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <CcCard key={row.tenant_id} className="p-4 space-y-4">
+            <header className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-slate-500" />
-                <h3 className="text-sm font-bold text-slate-800">{row.company_name}</h3>
+                <Building2 className="h-5 w-5 text-sky-400 shrink-0" />
+                <h3 className="text-sm font-bold text-cc-text">{row.company_name}</h3>
               </div>
-              <div className="flex flex-wrap items-center gap-2 text-[11px]">
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+              <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                <CcPill tone="neutral">
                   المشمول: {formatNumber(row.included_quota)}
-                </span>
-                <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-600">
+                </CcPill>
+                <CcPill tone="neutral">
                   المستهلَك: {formatNumber(row.consumed_quota)}
-                </span>
+                </CcPill>
                 {row.over_quota > 0 ? (
-                  <span className="rounded-full bg-rose-100 px-2 py-0.5 font-bold text-rose-700">
+                  <CcPill tone="danger">
                     تجاوزٌ: {formatNumber(row.over_quota)} وحدة فوق الخطة
-                  </span>
+                  </CcPill>
                 ) : (
-                  <span className={`rounded-full px-2 py-0.5 font-bold ${exhausted ? "bg-amber-100 text-amber-800" : "bg-emerald-100 text-emerald-700"}`}>
+                  <CcPill tone={exhausted ? "warning" : "success"}>
                     المتبقّي: {formatNumber(row.remaining_quota)}
-                  </span>
+                  </CcPill>
                 )}
               </div>
             </header>
 
-            {(row.over_quota > 0 || exhausted) && (
-              <p className="mb-3 flex items-center gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-[11px] text-amber-800">
-                <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0" />
-                لا تَعِد العميلَ بعملٍ إضافيٍّ على هذه الخطة قبل مراجعة مدير العمليات.
-              </p>
+            {row.included_quota > 0 && (
+              <CcProgress
+                value={row.consumed_quota}
+                max={row.included_quota}
+                tone={row.over_quota > 0 ? "danger" : exhausted ? "warning" : "accent"}
+                label="استهلاك الحصة"
+              />
             )}
 
-            <h4 className="mb-1.5 text-xs font-bold text-slate-700">بنودُ الصحّة المطلوبُ منك علاجُها</h4>
-            {row.health_items.length === 0 ? (
-              <p className="text-xs text-slate-500">لا بنودَ مُسنَدةً إليك في أحدث فحصٍ معتمد.</p>
-            ) : (
-              <ul className="space-y-1.5">
-                {row.health_items.map((item) => (
-                  <li key={item.id} className="rounded-lg border border-slate-100 bg-slate-50 p-2 text-xs">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${item.status === "risk" ? "bg-rose-100 text-rose-700" : "bg-amber-100 text-amber-700"}`}>
-                        {item.status_display}
-                      </span>
-                      <span className="font-semibold text-slate-800">{item.code}</span>
-                      {item.mandatory && (
-                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] text-slate-700">إلزاميّ للاعتماد</span>
-                      )}
-                      {item.due_date && (
-                        <span className="text-[10px] text-slate-500">الموعد: {formatDateValue(item.due_date)}</span>
-                      )}
-                    </div>
-                    {item.action && <p className="mt-1 text-slate-600">{item.action}</p>}
-                    {item.evidence_note && <p className="mt-0.5 text-[11px] text-slate-500">{item.evidence_note}</p>}
-                  </li>
-                ))}
-              </ul>
+            {(row.over_quota > 0 || exhausted) && (
+              <div className="flex items-center gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 p-2.5 text-[11px] text-amber-300">
+                <AlertTriangle className="h-4 w-4 shrink-0 text-amber-400" />
+                <span>لا تَعِد العميلَ بعملٍ إضافيٍّ على هذه الخطة قبل مراجعة مدير العمليات.</span>
+              </div>
             )}
-          </section>
+
+            <div className="space-y-2 border-t border-cc-border pt-3">
+              <h4 className="text-xs font-bold text-cc-text">بنودُ الصحّة المطلوبُ منك علاجُها</h4>
+              {row.health_items.length === 0 ? (
+                <p className="text-xs text-cc-text-muted">لا بنودَ مُسنَدةً إليك في أحدث فحصٍ معتمد.</p>
+              ) : (
+                <ul className="space-y-2">
+                  {row.health_items.map((item) => (
+                    <li key={item.id} className="rounded-lg border border-cc-border bg-cc-surface-2 p-2.5 text-xs space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <CcPill tone={item.status === "risk" ? "danger" : "warning"}>
+                          {item.status_display}
+                        </CcPill>
+                        <span className="font-semibold text-cc-text">{item.code}</span>
+                        {item.mandatory && (
+                          <CcPill tone="neutral">إلزاميّ للاعتماد</CcPill>
+                        )}
+                        {item.due_date && (
+                          <span className="text-[10px] text-cc-text-muted">الموعد: {formatDateValue(item.due_date)}</span>
+                        )}
+                      </div>
+                      {item.action && <p className="text-cc-text text-xs">{item.action}</p>}
+                      {item.evidence_note && <p className="text-[11px] text-cc-text-muted">{item.evidence_note}</p>}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </CcCard>
         );
       })}
     </div>
