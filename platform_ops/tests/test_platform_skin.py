@@ -332,6 +332,68 @@ class PlatformOpsDarkSkinContractTest(SimpleTestCase):
             "بطاقةٌ بيضاءُ يُكتب عليها نصٌّ صار فاتحاً: اسمٌ يختفي.",
         )
 
+    def test_the_bare_table_rules_read_no_light_token_inside_either_shell(self):
+        """**المصدرُ الخامسُ للفاتح: عنصرٌ عارٍ بلا صنفٍ أصلاً.**
+
+        صدرُ `index.css` يمسّ كلَّ `<table>` في التطبيق بمحدِّداتِ عناصرَ عاريةٍ
+        **خارجَ الطبقات** — `thead tr` و`thead th` و`tbody tr:hover` — وكلٌّ منها
+        يقرأ رمزاً من سُلَّم الجذر الفاتح. ولا صنفَ في TSX يمسكه أيُّ حارسٍ من
+        الحرّاس الأربعة فوق: لا صنفَ هناك من الأصل.
+
+        قِسْتُ الأثرَ حيّاً على `/staff/performance` بجدول `PilotAxesTable`:
+        رأسُه `rgb(248, 250, 252)` وصفُّه عند التمرير `rgb(241, 245, 249)` —
+        شريطان أبيضان على لوحٍ كحليّ. فالقياسُ هنا معكوسٌ كسابقه: كلُّ
+        `var(--color-*)` تقرأه قاعدةُ جدولٍ عاريةٌ يجب أن يكون معرَّفاً داخلَ
+        **القشرتين معاً** ومشتقّاً من جلد الموظّف.
+        """
+        stripped = re.sub(r"/\*.*?\*/", " ", self.css, flags=re.DOTALL)
+
+        read_tokens = set()
+        for selector, body in re.findall(r"([^{}]*)\{([^{}]*)\}", stripped):
+            selector = selector.strip()
+            if not selector or selector.startswith("@"):
+                continue
+            # محدِّدُ عنصرٍ عارٍ فحسب: لا صنفَ ولا معرّفَ ولا سمةَ ولا زائفاً
+            # (عدا `:hover`) — أي ما يطابق كلَّ جدولٍ في التطبيق بلا استثناء.
+            if not re.fullmatch(r"(?:table|thead|tbody|tfoot|tr|th|td)"
+                                r"(?:(?::hover)?\s+(?:table|thead|tbody|tfoot|tr|th|td))*"
+                                r"(?::hover)?", selector):
+                continue
+            read_tokens.update(re.findall(r"var\(\s*(--color-[a-z0-9-]+)", body))
+        self.assertTrue(
+            read_tokens,
+            "لا قاعدةَ جدولٍ عاريةٍ تقرأ رمزَ `--color-*` — تغيّر صدرُ الملفّ، "
+            "فأعد قراءتَه بدل إسكات الحارس.",
+        )
+
+        shells = (".staff-shell", ".ops-shell")
+        bodies = {shell: [] for shell in shells}
+        for selector, body in re.findall(r"([^{}]*)\{([^{}]*)\}", stripped):
+            parts = {part.strip() for part in selector.split(",")}
+            for shell in shells:
+                if shell in parts:
+                    bodies[shell].append(body)
+        for shell in shells:
+            self.assertTrue(bodies[shell], f"لم تعد `{shell}` كتلةً قائمةً بذاتها في الورقة.")
+
+        stray = []
+        for token in sorted(read_tokens):
+            for shell in shells:
+                values = [
+                    match.group("value").strip()
+                    for body in bodies[shell]
+                    for match in re.finditer(rf"{re.escape(token)}\s*:(?P<value>[^;]*);", body)
+                ]
+                if not values:
+                    stray.append(f"{token} ← تقرأه قاعدةُ جدولٍ عاريةٌ وغيرُ معرَّفٍ على `{shell}`")
+                elif not all("var(--staff-" in value for value in values):
+                    stray.append(f"{token} ← على `{shell}` قيمةٌ لا تُشتقّ من جلد الموظّف: {values}")
+        self.assertEqual(
+            stray, [],
+            f"رموزٌ فاتحةٌ تصل إلى جداولِ القشرتين عبر محدِّداتِ عناصرَ عارية: {stray} — "
+            "شريطٌ أبيضُ في رأس الجدول وومضةٌ بيضاءُ تحت المؤشّر على لوحٍ كحليّ.",
+        )
+
 
 class PlatformSkinIsConfinedTest(SimpleTestCase):
     """القشرةُ تغطّي سطحَ المنصّة كلَّه، ولا تتجاوزه إلى شاشات الزبائن."""

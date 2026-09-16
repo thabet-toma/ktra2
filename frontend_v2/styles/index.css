@@ -2623,10 +2623,13 @@ tbody td {
    الداكن داخلَ غلافٍ من الاثنين. ويحرس القائمتَين مسحان حيّان —
    `test_every_light_class_the_reused_panels_wear_has_a_dark_override` للستّ،
    و`test_every_light_class_the_ops_components_wear_has_a_dark_override` للقيادة. */
+.staff-shell,
 .ops-shell {
   /* أرضيّةُ الجذر ولونُ نصِّه **على العنصر نفسِه**: قواعدُ الجلد كلُّها محدِّداتُ
-     سليلٍ، والجذرُ يحمل `bg-slate-50 text-slate-800` بنفسه فلا يطابقه شيءٌ منها.
-     والقاعدةُ خارجَ الطبقات فتغلب أداةَ Tailwind مهما تساوت النوعيّة. */
+     سليلٍ، وجذرُ القيادة يحمل `bg-slate-50 text-slate-800` بنفسه فلا يطابقه
+     شيءٌ منها. والقاعدةُ خارجَ الطبقات فتغلب أداةَ Tailwind مهما تساوت النوعيّة.
+     (جذرُ الموظّف يحمل الرمزين أصلاً بأصنافِ قيمةٍ اعتباطيّة، فهما له تأكيدٌ
+     لا تغيير — والغرضُ من ضمّه الرموزُ أدناه لا هاتان الخاصّيّتان.) */
   background-color: var(--staff-bg);
   color: var(--staff-text);
 
@@ -2667,6 +2670,23 @@ tbody td {
   --color-surface: var(--staff-panel);
   --color-surface-2: color-mix(in oklab, var(--staff-panel) 86%, var(--staff-bg));
   --color-surface-3: color-mix(in oklab, var(--staff-panel) 72%, var(--staff-bg));
+
+  /* ── شريطُ رأسِ الجدول الأبيضُ وومضةُ التمرير البيضاء ─────────────────────
+     ثلاثُ قواعدَ **خارج الطبقات** في صدر هذا الملفّ تمسّ كلَّ `<table>` عاريةٍ
+     بلا صنفٍ واحد:
+
+         thead tr      { background: var(--color-surface-2); }
+         thead th      { color: var(--color-text-muted); }
+         tbody tr:hover{ background: var(--color-muted); }
+
+     وقبل هذا السطر لم يكن `.staff-shell` يعيد تعريفَ أيٍّ من الرموز الثلاثة،
+     فكانت تحلّ من الجذر الفاتح: قِسْتُ على `/staff/performance` رأسَ جدول
+     `PilotAxesTable` ‏`rgb(248, 250, 252)` وصفَّه عند التمرير `rgb(241, 245, 249)`
+     — شريطان أبيضان على لوحٍ كحليّ. و`--color-muted` كان ناقصاً في القشرتين
+     معاً، فالومضةُ كامنةٌ في مركز القيادة أيضاً لأوّلِ جدولٍ عارٍ يُضاف إليه.
+     يحرسه `test_the_bare_table_rules_read_no_light_token_inside_either_shell`. */
+  --color-muted: color-mix(in oklab, var(--staff-panel) 80%, var(--staff-accent));
+  --color-text-muted: var(--staff-muted);
 }
 
 .staff-shell .bg-white,
