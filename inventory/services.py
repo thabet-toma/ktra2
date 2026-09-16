@@ -977,8 +977,9 @@ def _restore_outbound_layers(movements) -> dict[int, tuple[Decimal, Decimal]]:
     return unrestored
 
 
-def _unlayered_inbound_quantities(movements) -> dict[int, Decimal]:
-    """{المنتج ← كميّةُ الوارد الذي لا طبقةَ له} — يُقرأ **قبل** الحذف.
+def _unlayered_inbound_quantities(movements) -> dict[int, tuple[Decimal, Decimal]]:
+    """{المنتج ← (كميّة، قيمة) الوارد الذي لا طبقةَ له} — يُقرأ **قبل** الحذف. القيمةُ بكلفة
+    الحركة: ما يخرج من حساب المخزون بحذف قيدها، فيُقصّ من الافتتاحيّة بها لا بمتوسّطها.
 
     كلُّ وارِدٍ بعد FIFO يُنشئ طبقةً (`create_layer` أو `reconcile_provisional`)، فوارِدٌ
     بلا طبقة سبق FIFO وذابت بضاعتُه في الافتتاحيّة. `RETURN_IN` مستثنًى: مرتجعُ بيعٍ
@@ -994,10 +995,12 @@ def _unlayered_inbound_quantities(movements) -> dict[int, Decimal]:
         StockLayer.objects.filter(source_movement_id__in=[m.id for m in inbound])
         .values_list('source_movement_id', flat=True)
     )
-    result: dict[int, Decimal] = {}
+    result: dict[int, tuple[Decimal, Decimal]] = {}
     for m in inbound:
         if m.id not in layered:
-            result[m.product_id] = result.get(m.product_id, Decimal('0')) + Decimal(str(m.quantity))
+            qty, value = result.get(m.product_id, (Decimal('0'), Decimal('0')))
+            mqty = Decimal(str(m.quantity))
+            result[m.product_id] = (qty + mqty, value + mqty * Decimal(str(m.unit_cost or 0)))
     return result
 
 
@@ -1076,9 +1079,11 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
     (`_restore_outbound_layers`) — بكلفتها المقيَّدة. والرأبُ يقيس الفجوةَ بعد
     الردّ فلا يُضاعف ما أُعيد.
 
-    والعكس: `unlayered_inbound` (كميّةُ وارِدٍ محذوفٍ سبق FIFO،
+    والعكس: `unlayered_inbound` (كميّةُ وقيمةُ وارِدٍ محذوفٍ سبق FIFO،
     `_unlayered_inbound_quantities`) تُقصّ من الطبقات الافتتاحيّة التي ذابت فيها
-    (`fifo.trim_opening_layers`) — وإلّا بقيت الطبقاتُ أكثرَ من الرصيد.
+    (`fifo.trim_opening_layers`) — وإلّا بقيت الطبقاتُ أكثرَ من الرصيد. وفائضٌ يبقى
+    بعد ذلك (سببُه غيرُ وارِدٍ محذوف) يُسجَّل تحذيراً لا يُقصّ: أيُّ طبقةٍ هي الوهميّة
+    لا يُعرف من هنا — `manage.py check_fifo_layers` يعرضه.
     """
     with transaction.atomic():
         prod = Product.objects.select_for_update().get(pk=product.pk)
@@ -1096,9 +1101,11 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
                 qty -= mqty
         prod.quantity_on_hand = qty.quantize(Decimal('0.0001'))
         if unlayered_inbound:
+            removed_qty, removed_value = unlayered_inbound
             fifo.trim_opening_layers(
                 tenant_id=prod.tenant_id, product_id=prod.pk,
-                quantity_on_hand=prod.quantity_on_hand, max_qty=unlayered_inbound,
+                quantity_on_hand=prod.quantity_on_hand, max_qty=removed_qty,
+                removed_value=removed_value,
             )
         returned_qty, returned_value = unrestored or (Decimal('0'), Decimal('0'))
         fifo.backfill_opening_layer(
@@ -1115,6 +1122,13 @@ def _recompute_product_stock(product: Product, unrestored=None, unlayered_inboun
             tenant_id=prod.tenant_id, product_id=prod.pk,
         ).quantize(Decimal('0.0001'))
         prod.save(update_fields=['quantity_on_hand', 'avg_cost'])
+        for gap in fifo.layer_balance_gaps(tenant_id=prod.tenant_id, product_ids=[prod.pk]):
+            if gap['excess'] > 0:
+                logger.warning(
+                    "FIFO LAYERS EXCEED STOCK: product=%s sku=%s on_hand=%s open_layers=%s — "
+                    "راجع check_fifo_layers.",
+                    prod.pk, prod.sku, gap['quantity_on_hand'], gap['open_qty'],
+                )
 
 
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:

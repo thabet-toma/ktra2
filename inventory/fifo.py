@@ -22,7 +22,7 @@ from decimal import Decimal
 from typing import NamedTuple
 
 from django.db import transaction
-from django.db.models import DecimalField, F, Sum
+from django.db.models import DecimalField, F, Q, Sum
 from django.db.models.functions import Coalesce
 
 from .models import (
@@ -130,17 +130,23 @@ def backfill_opening_layer(*, tenant_id: int, product_id: int, quantity_on_hand,
     )
 
 
-def trim_opening_layers(*, tenant_id: int, product_id: int, quantity_on_hand, max_qty):
+def trim_opening_layers(*, tenant_id: int, product_id: int, quantity_on_hand, max_qty, removed_value=None):
     """مرآةُ `backfill_opening_layer`: تُنقص الطبقاتِ **الافتتاحيّة** وحدَها بما يزيد
     من الطبقات المفتوحة على الرصيد، إلى حدِّ `max_qty`؛ وتُرجع ما أُنقص.
 
     وارِدٌ سبق FIFO لا طبقةَ له — بضاعتُه ذابت في الافتتاحيّة التي أنشأها الرأب. فحذفُه
     (إلغاءُ ترحيل/إرساليّة) ينقص الرصيدَ ولا ينقص الطبقات، فيبقى Σ`remaining_qty` أكبرَ
     من `quantity_on_hand`. المستدعي يمرّر `max_qty` = كميّةَ ذلك الوارد المحذوف، فلا
-    يُقصّ فائضٌ سببُه غيرُ هذا (يبقى ظاهراً لـ`rebuild_fifo_layers`)، ولا تُمسّ طبقةٌ
+    يُقصّ فائضٌ سببُه غيرُ هذا (يبقى ظاهراً لـ`check_fifo_layers`)، ولا تُمسّ طبقةٌ
     لها حركةُ ورود. الأحدثُ أوّلاً (الأبعدُ عن الاستهلاك)، ويُنقَص `original_qty` بقدر
-    `remaining_qty` فيبقى الفرقُ بينهما = ما استُهلك فعلاً. الكلفةُ كلفةُ الطبقة: قيمةُ
-    الوارد المحذوف ذابت في متوسّطها ولا سبيلَ لفصلها.
+    `remaining_qty` فيبقى الفرقُ بينهما = ما استُهلك فعلاً.
+
+    والكلفة: `removed_value` قيمةُ الوارد المحذوف بكلفة حركته — عينُ ما يخرج من حساب المخزون
+    بحذف قيده. فالافتتاحيّةُ متوسّطُ بضاعةٍ ذاب فيها هذا الوارد، وقصُّه بمتوسّطها يترك الطبقاتِ
+    أعلى أو أدنى من الدفتر بـ(الكميّة × (كلفته − المتوسّط)). فتُعاد كلفةُ ما يبقى منها بحيث تنقص
+    قيمتُها بكلفة الوارد لا بمتوسّطها — **إلّا** أن تحمل الطبقةُ صفوفَ استهلاك (ردُّها لاحقاً يعيد
+    الوحداتِ بكلفة الطبقة، فتغييرُها يُحدث فرقاً معاكساً)، أو لا يبقى منها شيء، أو تكون الكلفةُ
+    صفراً (مجهولة) أو يخرج الناتجُ سالباً (بياناتٌ لا تتّسق) — فتبقى كلفةُ الطبقة كما كانت.
 
     يُنادى داخل قفلِ صفّ المنتج — لا يقفل المنتجَ بنفسه.
     """
@@ -159,16 +165,69 @@ def trim_opening_layers(*, tenant_id: int, product_id: int, quantity_on_hand, ma
         (l for l in layers if l.source_movement_id is None and not l.is_provisional),
         key=lambda l: l.pk, reverse=True,
     )
+    removed_unit_cost = (
+        _d(removed_value) / max_qty if removed_value is not None else Decimal("0")
+    )
     for layer in openings:
         if to_trim <= 0:
             break
         take = min(layer.remaining_qty, to_trim)
-        layer.remaining_qty = (layer.remaining_qty - take).quantize(Q4)
+        left = (layer.remaining_qty - take).quantize(Q4)
+        fields = ["remaining_qty", "original_qty"]
+        if (
+            removed_unit_cost > 0 and left > 0
+            and not StockLayerConsumption.objects.filter(layer=layer).exists()
+        ):
+            cost = ((layer.remaining_qty * layer.unit_cost - take * removed_unit_cost) / left).quantize(Q4)
+            if cost >= 0:
+                layer.unit_cost = cost
+                fields.append("unit_cost")
+        layer.remaining_qty = left
         layer.original_qty = (layer.original_qty - take).quantize(Q4)
-        layer.save(update_fields=["remaining_qty", "original_qty"])
+        layer.save(update_fields=fields)
         to_trim -= take
         trimmed += take
     return trimmed.quantize(Q4)
+
+
+def layer_balance_gaps(*, tenant_id: int, product_ids=None) -> list[dict]:
+    """الأصنافُ التي تخرق «Σ`remaining_qty` = max(الرصيد، 0)» لشركةٍ — استعلامان للشركة كلّها.
+
+    لكلٍّ منها `excess` (طبقاتٌ أكثرُ من الرصيد: بضاعةٌ وهميّة تُكلِّف بيعاً لاحقاً) أو
+    `uncovered` (رصيدٌ موجبٌ لا تغطّيه طبقات: ينتظر `backfill_opening_layer`). الرصيدُ السالب
+    يُقاس صفراً — مخزونُه طبقةٌ مؤقّتةٌ معلَّقة لا كميّةٌ في الرتل. يقرأ ولا يكتب.
+    """
+    layers = StockLayer.objects.filter(tenant_id=tenant_id, remaining_qty__gt=0)
+    products = Product.objects.filter(tenant_id=tenant_id)
+    if product_ids is not None:
+        layers = layers.filter(product_id__in=list(product_ids))
+        products = products.filter(pk__in=list(product_ids))
+    open_qty = {
+        row["product_id"]: _d(row["qty"])
+        for row in layers.values("product_id").annotate(qty=Sum("remaining_qty"))
+    }
+    rows = (
+        products.filter(Q(quantity_on_hand__gt=0) | Q(pk__in=layers.values("product_id")))
+        .only("id", "sku", "name_ar", "quantity_on_hand", "avg_cost")
+        .order_by("sku", "id")
+    )
+    gaps = []
+    for product in rows:
+        covered = open_qty.get(product.pk, Decimal("0")).quantize(Q4)
+        diff = (covered - max(_d(product.quantity_on_hand), Decimal("0"))).quantize(Q4)
+        if diff == 0:
+            continue
+        gaps.append({
+            "product_id": product.pk,
+            "sku": product.sku,
+            "name": product.name_ar,
+            "quantity_on_hand": _d(product.quantity_on_hand).quantize(Q4),
+            "avg_cost": _d(product.avg_cost).quantize(Q4),
+            "open_qty": covered,
+            "excess": max(diff, Decimal("0")),
+            "uncovered": max(-diff, Decimal("0")),
+        })
+    return gaps
 
 
 def consume(*, movement: StockMovement, quantity) -> ConsumeResult:

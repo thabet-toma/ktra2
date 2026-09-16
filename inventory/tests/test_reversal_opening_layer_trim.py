@@ -112,3 +112,100 @@ def test_reversing_a_layered_purchase_does_not_trim_anything():
     assert product.quantity_on_hand == Decimal("4.0000")
     assert _open_layers(product) == (Decimal("4.0000"), Decimal("200.00"))
     assert StockMovement.objects.filter(product=product).count() == 1
+
+
+@pytest.mark.parametrize("with_real_layer", [False, True])
+def test_full_unpost_repost_chain_never_leaves_more_layers_than_stock(with_real_layer):
+    """سلسلةُ الإنتاج (شركة 6، 16/09/2026): صنفٌ بلا طبقات ← بيعٌ يُنشئ الافتتاحيّة ←
+    إلغاءُ البيع ← إلغاءُ الشراء الذي منه البضاعة ← إعادتُه ← إعادةُ البيع.
+    الثابت: Σ`remaining_qty` = max(الرصيد، 0) — لا طبقةَ استلامٍ مفتوحةٌ بلا بضاعة."""
+    tenant = _tenant(f"سلسلة{int(with_real_layer)}")
+    product = _product(tenant, f"TR-C{int(with_real_layer)}")
+    _pre_fifo_purchase(tenant, product, "12", "270", ref=16)
+    sold = "12"
+    if with_real_layer:
+        record_stock_movement(
+            product=product, movement_type="IN", quantity=Decimal("3"), unit_cost=Decimal("270"),
+            reference_type="PURCHASE_INVOICE", reference_id=17, movement_date=D, tenant=tenant)
+        sold = "14"
+
+    def sale():
+        record_stock_movement(
+            product=product, movement_type="OUT", quantity=Decimal(sold),
+            reference_type="SALES_INVOICE", reference_id=900, movement_date=D, tenant=tenant)
+
+    sale()
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=900, reference_types=["SALES_INVOICE"])
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=16, reference_types=["PURCHASE_INVOICE"])
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("12"), unit_cost=Decimal("270"),
+        reference_type="PURCHASE_INVOICE", reference_id=16, movement_date=D, tenant=tenant)
+    sale()
+
+    product.refresh_from_db()
+    expected = max(product.quantity_on_hand, Decimal("0"))
+    assert _open_layers(product)[0] == expected, \
+        "بقيت طبقةُ استلامٍ مفتوحةً بلا بضاعة بعد سلسلة الإلغاء وإعادة الترحيل."
+    assert _open_layers(product)[1] == (expected * Decimal("270")).quantize(Decimal("0.01"))
+
+
+def test_trim_takes_the_deleted_purchase_cost_out_of_the_opening_layer():
+    """الافتتاحيّةُ بمتوسّط شراءين (100 و200 ⇒ 150). حذفُ شراء الـ200 يُنقص حسابَ المخزون
+    10 × 200 بحذف قيده — فالطبقاتُ تنقص بالقدر نفسه، لا 10 × 150 (فرقٌ صامتٌ 500)."""
+    tenant = _tenant("كلفة")
+    product = _product(tenant, "TR-4")
+    _pre_fifo_purchase(tenant, product, "10", "100", ref=801)
+    _pre_fifo_purchase(tenant, product, "10", "200", ref=802)
+    StockLayer.objects.filter(product=product).delete()  # الشراءان كلاهما قبل FIFO
+    record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("1"), unit_cost=Decimal("150"),
+        reference_type="PURCHASE_INVOICE", reference_id=803, movement_date=D, tenant=tenant)
+    assert _open_layers(product) == (Decimal("21.0000"), Decimal("3150.00"))
+
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=802, reference_types=["PURCHASE_INVOICE"])
+
+    assert _open_layers(product) == (Decimal("11.0000"), Decimal("1150.00")), \
+        "قُصّت الافتتاحيّةُ بمتوسّطها لا بكلفة الشراء المحذوف."
+    opening = StockLayer.objects.get(product=product, source_movement__isnull=True)
+    assert opening.unit_cost == Decimal("100.0000")
+
+
+def test_trim_keeps_the_layer_cost_when_the_opening_layer_was_consumed():
+    """صفوفُ استهلاكٍ قائمة تحمل كلفةَ الطبقة — تغييرُها يجعل ردَّها لاحقاً بكلفةٍ أخرى."""
+    tenant = _tenant("مستهلكة")
+    product = _product(tenant, "TR-5")
+    _pre_fifo_purchase(tenant, product, "10", "100", ref=811)
+    _pre_fifo_purchase(tenant, product, "10", "200", ref=812)
+    StockLayer.objects.filter(product=product).delete()
+    record_stock_movement(
+        product=product, movement_type="OUT", quantity=Decimal("2"),
+        reference_type="SALES_INVOICE", reference_id=813, movement_date=D, tenant=tenant)
+
+    reverse_stock_movements(
+        tenant_id=tenant.TenantID, reference_id=812, reference_types=["PURCHASE_INVOICE"])
+
+    opening = StockLayer.objects.get(product=product, source_movement__isnull=True)
+    assert opening.remaining_qty == Decimal("8.0000")
+    assert opening.unit_cost == Decimal("150.0000")
+
+
+def test_recompute_warns_when_layers_still_exceed_the_balance(caplog):
+    """فائضٌ لا يقصّه الإلغاء (سببُه غيرُ وارِدٍ محذوف) لا يمرّ صامتاً."""
+    from inventory.services import _recompute_product_stock
+    tenant = _tenant("تحذير")
+    product = _product(tenant, "TR-6")
+    mv = record_stock_movement(
+        product=product, movement_type="IN", quantity=Decimal("5"), unit_cost=Decimal("10"),
+        reference_type="PURCHASE_INVOICE", reference_id=901, movement_date=D, tenant=tenant)
+    StockLayer.objects.create(
+        tenant=tenant, product=product, layer_date=D, original_qty=Decimal("2"),
+        remaining_qty=Decimal("2"), unit_cost=Decimal("10"), source_movement=mv)
+
+    with caplog.at_level("WARNING", logger="inventory.services"):
+        _recompute_product_stock(product)
+
+    assert any("TR-6" in r.getMessage() for r in caplog.records), \
+        "طبقاتٌ أكثرُ من الرصيد بعد إعادة الاحتساب ولا تحذير."
