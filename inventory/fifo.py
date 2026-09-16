@@ -123,6 +123,48 @@ def backfill_opening_layer(*, tenant_id: int, product_id: int, quantity_on_hand,
         is_provisional=False,
     )
 
+
+def trim_opening_layers(*, tenant_id: int, product_id: int, quantity_on_hand, max_qty):
+    """مرآةُ `backfill_opening_layer`: تُنقص الطبقاتِ **الافتتاحيّة** وحدَها بما يزيد
+    من الطبقات المفتوحة على الرصيد، إلى حدِّ `max_qty`؛ وتُرجع ما أُنقص.
+
+    وارِدٌ سبق FIFO لا طبقةَ له — بضاعتُه ذابت في الافتتاحيّة التي أنشأها الرأب. فحذفُه
+    (إلغاءُ ترحيل/إرساليّة) ينقص الرصيدَ ولا ينقص الطبقات، فيبقى Σ`remaining_qty` أكبرَ
+    من `quantity_on_hand`. المستدعي يمرّر `max_qty` = كميّةَ ذلك الوارد المحذوف، فلا
+    يُقصّ فائضٌ سببُه غيرُ هذا (يبقى ظاهراً لـ`rebuild_fifo_layers`)، ولا تُمسّ طبقةٌ
+    لها حركةُ ورود. الأحدثُ أوّلاً (الأبعدُ عن الاستهلاك)، ويُنقَص `original_qty` بقدر
+    `remaining_qty` فيبقى الفرقُ بينهما = ما استُهلك فعلاً. الكلفةُ كلفةُ الطبقة: قيمةُ
+    الوارد المحذوف ذابت في متوسّطها ولا سبيلَ لفصلها.
+
+    يُنادى داخل قفلِ صفّ المنتج — لا يقفل المنتجَ بنفسه.
+    """
+    max_qty = _d(max_qty).quantize(Q4)
+    if max_qty <= 0:
+        return Decimal("0")
+    layers = list(
+        StockLayer.objects.select_for_update()
+        .filter(tenant_id=tenant_id, product_id=product_id, remaining_qty__gt=0)
+    )
+    covered = sum((layer.remaining_qty for layer in layers), Decimal("0"))
+    surplus = (covered - max(_d(quantity_on_hand), Decimal("0"))).quantize(Q4)
+    to_trim = min(surplus, max_qty)
+    trimmed = Decimal("0")
+    openings = sorted(
+        (l for l in layers if l.source_movement_id is None and not l.is_provisional),
+        key=lambda l: l.pk, reverse=True,
+    )
+    for layer in openings:
+        if to_trim <= 0:
+            break
+        take = min(layer.remaining_qty, to_trim)
+        layer.remaining_qty = (layer.remaining_qty - take).quantize(Q4)
+        layer.original_qty = (layer.original_qty - take).quantize(Q4)
+        layer.save(update_fields=["remaining_qty", "original_qty"])
+        to_trim -= take
+        trimmed += take
+    return trimmed.quantize(Q4)
+
+
 def consume(*, movement: StockMovement, quantity) -> ConsumeResult:
     """يستهلك `quantity` بترتيب FIFO (الأقدم أوّلاً) من طبقات (الشركة، المنتج)
     المفتوحة، وينشئ صفّ `StockLayerConsumption` لكل طبقةٍ أُخذ منها.

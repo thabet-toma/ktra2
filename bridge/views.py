@@ -3,6 +3,7 @@ import logging
 import re
 import uuid
 
+from django.db import transaction
 from django.http import JsonResponse
 from django.utils import timezone
 from django.utils.decorators import method_decorator
@@ -480,35 +481,49 @@ class MapperView(View):
         if not isinstance(body, dict):
             return JsonResponse({'detail': 'Document body must be a JSON object'}, status=400)
 
-        doc = FirestoreMirrorDoc.objects.filter(path=path).first()
-        if doc is not None:
+        # قراءةٌ ثمّ إدراجٌ منفصلان كانا سباقاً: طلبان متزامنان (`/staff` يرسل
+        # `PUT activityStatus/<id>` من أكثر من موضع) يقرآن «غير موجودة» معاً
+        # ويُدرجان معاً، فيصطدم الثاني بفرادة `path` ⟵ 500. `get_or_create`
+        # يلتقط الاصطدام ويعيد القراءة — وخارج أيّ معاملة عمداً: تحت REPEATABLE
+        # READ (افتراضيّ MySQL) تعيد القراءةُ داخل معاملةٍ لقطتَها القديمة فلا ترى
+        # صفَّ الطلب الآخر. ثمّ يُقفل الصفّ فلا يمحو دمجٌ (PATCH) دمجاً متزامناً.
+        doc, created = FirestoreMirrorDoc.objects.get_or_create(
+            path=path,
+            defaults={'data': {}, 'tenant': tenant if _is_tenant_scoped(path) else None},
+        )
+        try:
+            return self._write_locked(doc.pk, created, path, segments, tenant, body, merge)
+        except Exception:
+            # الصفُّ الفارغ أُدرج قبل المعاملة؛ فشلُ المزامنة لا يترك وثيقةً `{}` تظهر
+            # في القوائم (موردٌ فارغ مثلاً) — ما لم يكتب فيه طلبٌ آخر في الأثناء.
+            if created:
+                FirestoreMirrorDoc.objects.filter(pk=doc.pk, data={}).delete()
+            raise
+
+    def _write_locked(self, doc_pk, created, path, segments, tenant, body, merge):
+        with transaction.atomic():
+            doc = FirestoreMirrorDoc.objects.select_for_update().get(pk=doc_pk)
             # P0-4: وثيقة مُنطاقة تخصّ شركة أخرى أو يتيمة (NULL) لا تُكتَب — لا
-            # استيلاء. الوثيقة الجديدة (else) تولَد مملوكة لشركة المستدعي مباشرةً.
-            if _is_tenant_scoped(path) and (
+            # استيلاء. الوثيقة الجديدة تولَد مملوكة لشركة المستدعي مباشرةً.
+            if not created and _is_tenant_scoped(path) and (
                 doc.tenant_id is None or tenant is None
                 or doc.tenant_id != tenant.pk
             ):
                 return JsonResponse({'detail': 'Not found'}, status=404)
-        else:
-            doc = FirestoreMirrorDoc(
-                path=path,
-                data={},
-                tenant=tenant if _is_tenant_scoped(path) else None,
-            )
 
-        if merge:
-            doc.data = {**doc.data, **body}
-        else:
-            doc.data = body
+            if merge:
+                doc.data = {**doc.data, **body}
+            else:
+                doc.data = body
 
-        _sync_django_user_active_from_user_mirror(path, doc.data)
-        # Auto-sync mirror suppliers to SQL partners
-        if segments and segments[0] == "suppliers" and len(segments) == 2:
-            _sync_partner_from_mirror_supplier(doc.data, tenant)
-        elif segments and segments[0] == "items" and len(segments) == 2:
-            _sync_product_from_mirror_item(doc.data, tenant, segments[1])
+            _sync_django_user_active_from_user_mirror(path, doc.data)
+            # Auto-sync mirror suppliers to SQL partners
+            if segments and segments[0] == "suppliers" and len(segments) == 2:
+                _sync_partner_from_mirror_supplier(doc.data, tenant)
+            elif segments and segments[0] == "items" and len(segments) == 2:
+                _sync_product_from_mirror_item(doc.data, tenant, segments[1])
 
-        doc.save()
+            doc.save()
         return JsonResponse({'ok': True, 'id': segments[-1]})
 
     def delete(self, request, subpath):

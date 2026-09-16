@@ -2464,13 +2464,25 @@ def void_goods_receipt(receipt, *, user=None):
     from accounting.models import JournalHeader
     from inventory.models import StockMovement
     from inventory.serials import release_purchase_serials
-    from inventory.services import _recompute_product_stock, apply_purchase_cost_model
+    from inventory.services import (
+        _assert_layers_not_consumed_elsewhere,
+        _recompute_product_stock,
+        _unlayered_inbound_quantities,
+        apply_purchase_cost_model,
+    )
     from .models import PurchaseInvoice
 
     with transaction.atomic():
         lines = list(receipt.lines.select_related('item', 'product', 'movement'))
         movement_ids = [l.movement_id for l in lines if l.movement_id]
         products = {l.product_id: l.product for l in lines if l.product_id}
+
+        # حذفُ الحركة يمحو طبقتها وصفوفَ استهلاك مبيعاتٍ لاحقة معها (CASCADE) —
+        # فبضاعةٌ بيعت منها تمنع الإلغاء، كإلغاء ترحيل فاتورة الشراء نفسِها.
+        _assert_layers_not_consumed_elsewhere(movement_ids)
+        unlayered_inbound = _unlayered_inbound_quantities(
+            list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
+        )
 
         # الوحدات المُرقَّمة تخرج مع بضاعتها. الحصّة التي جاءت بهذه الإرسالية هي
         # الأحدث (الاستلام يُنشئ بالترتيب والبيع يستهلك من الأقدم)، وأيُّ وحدة
@@ -2514,7 +2526,7 @@ def void_goods_receipt(receipt, *, user=None):
         receipt.delete()
 
         for product in products.values():
-            _recompute_product_stock(product)
+            _recompute_product_stock(product, unlayered_inbound=unlayered_inbound.get(product.pk))
             apply_purchase_cost_model(product)
 
         if invoice is not None:

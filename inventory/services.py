@@ -977,7 +977,62 @@ def _restore_outbound_layers(movements) -> dict[int, tuple[Decimal, Decimal]]:
     return unrestored
 
 
-def _recompute_product_stock(product: Product, unrestored=None) -> None:
+def _unlayered_inbound_quantities(movements) -> dict[int, Decimal]:
+    """{المنتج ← كميّةُ الوارد الذي لا طبقةَ له} — يُقرأ **قبل** الحذف.
+
+    كلُّ وارِدٍ بعد FIFO يُنشئ طبقةً (`create_layer` أو `reconcile_provisional`)، فوارِدٌ
+    بلا طبقة سبق FIFO وذابت بضاعتُه في الافتتاحيّة. `RETURN_IN` مستثنًى: مرتجعُ بيعٍ
+    يعود إلى طبقته الأصليّة (`restores_movement`) لا يُنشئ طبقةً خاصّة به أيضاً.
+    """
+    inbound = [
+        m for m in movements
+        if m.movement_type in INBOUND_TYPES and m.movement_type != 'RETURN_IN'
+    ]
+    if not inbound:
+        return {}
+    layered = set(
+        StockLayer.objects.filter(source_movement_id__in=[m.id for m in inbound])
+        .values_list('source_movement_id', flat=True)
+    )
+    result: dict[int, Decimal] = {}
+    for m in inbound:
+        if m.id not in layered:
+            result[m.product_id] = result.get(m.product_id, Decimal('0')) + Decimal(str(m.quantity))
+    return result
+
+
+def _assert_layers_not_consumed_elsewhere(movement_ids) -> None:
+    """⚠️ طبقةٌ أنتجتها هذه الحركات واستهلكها صرفٌ من خارجها ⟵ `ValidationError`.
+
+    `StockLayer.source_movement` بـCASCADE: حذفُ حركةٍ واردة يمحو طبقتها **وصفوف
+    استهلاكها** (`StockLayerConsumption.layer` بـCASCADE أيضاً) — فيضيع سجلُّ كلفة
+    مبيعاتٍ لاحقة بلا إنذار. حارسٌ واحدٌ لكلّ حذفٍ لحركات: `reverse_stock_movements`
+    و`logistics.services.void_goods_receipt`.
+    """
+    produced_layer_ids = list(
+        StockLayer.objects.filter(source_movement_id__in=list(movement_ids))
+        .values_list('id', flat=True)
+    )
+    if not produced_layer_ids:
+        return
+    leaking = (
+        StockLayerConsumption.objects
+        .filter(layer_id__in=produced_layer_ids)
+        .exclude(movement_id__in=list(movement_ids))
+        .select_related('layer__product')
+        .first()
+    )
+    if leaking is not None:
+        product = leaking.layer.product
+        label = product.name_ar or product.name_en or product.sku or f"#{product.pk}"
+        raise ValidationError(
+            f"يتعذّر التراجع عن هذا المستند — بضاعةٌ منه للمنتج «{label}» "
+            "بيعت فعلاً (استُهلكت طبقتها بحركةٍ لاحقة خارج هذا المستند). "
+            "ألغِ ترحيل تلك الحركة أولاً."
+        )
+
+
+def _recompute_product_stock(product: Product, unrestored=None, unlayered_inbound=None) -> None:
     """أعد احتساب رصيد منتج بإعادة تشغيل كل حركاته المتبقية، ومتوسط تكلفته من
     طبقات FIFO المفتوحة (مواصفة #137 المرحلة 2).
 
@@ -995,6 +1050,10 @@ def _recompute_product_stock(product: Product, unrestored=None) -> None:
     فوقه، ثمّ `unrestored` (كميّة، قيمة) — وحداتُ صرفٍ أُلغي بلا صفوف استهلاك
     (`_restore_outbound_layers`) — بكلفتها المقيَّدة. والرأبُ يقيس الفجوةَ بعد
     الردّ فلا يُضاعف ما أُعيد.
+
+    والعكس: `unlayered_inbound` (كميّةُ وارِدٍ محذوفٍ سبق FIFO،
+    `_unlayered_inbound_quantities`) تُقصّ من الطبقات الافتتاحيّة التي ذابت فيها
+    (`fifo.trim_opening_layers`) — وإلّا بقيت الطبقاتُ أكثرَ من الرصيد.
     """
     with transaction.atomic():
         prod = Product.objects.select_for_update().get(pk=product.pk)
@@ -1011,6 +1070,11 @@ def _recompute_product_stock(product: Product, unrestored=None) -> None:
             else:
                 qty -= mqty
         prod.quantity_on_hand = qty.quantize(Decimal('0.0001'))
+        if unlayered_inbound:
+            fifo.trim_opening_layers(
+                tenant_id=prod.tenant_id, product_id=prod.pk,
+                quantity_on_hand=prod.quantity_on_hand, max_qty=unlayered_inbound,
+            )
         returned_qty, returned_value = unrestored or (Decimal('0'), Decimal('0'))
         fifo.backfill_opening_layer(
             tenant_id=prod.tenant_id, product_id=prod.pk,
@@ -1060,26 +1124,8 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
     movement_ids = [m.id for m in movements]
 
     # ⚠️ الحارس الصريح: طبقةٌ أنتجها هذا المستند واستهلكها صرفٌ من خارجه.
-    produced_layer_ids = list(
-        StockLayer.objects.filter(source_movement_id__in=movement_ids)
-        .values_list('id', flat=True)
-    )
-    if produced_layer_ids:
-        leaking = (
-            StockLayerConsumption.objects
-            .filter(layer_id__in=produced_layer_ids)
-            .exclude(movement_id__in=movement_ids)
-            .select_related('layer__product')
-            .first()
-        )
-        if leaking is not None:
-            product = leaking.layer.product
-            label = product.name_ar or product.name_en or product.sku or f"#{product.pk}"
-            raise ValidationError(
-                f"يتعذّر التراجع عن هذا المستند — بضاعةٌ منه للمنتج «{label}» "
-                "بيعت فعلاً (استُهلكت طبقتها بحركةٍ لاحقة خارج هذا المستند). "
-                "ألغِ ترحيل تلك الحركة أولاً."
-            )
+    _assert_layers_not_consumed_elsewhere(movement_ids)
+    unlayered_inbound = _unlayered_inbound_quantities(movements)
 
     affected_products = {m.product_id: m.product for m in movements}
     count = len(movements)
@@ -1090,7 +1136,9 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
         unrestored = _restore_outbound_layers(movements)
         StockMovement.objects.filter(id__in=movement_ids).delete()
     for prod in affected_products.values():
-        _recompute_product_stock(prod, unrestored.get(prod.pk))
+        _recompute_product_stock(
+            prod, unrestored.get(prod.pk), unlayered_inbound=unlayered_inbound.get(prod.pk),
+        )
     logger.info(
         "reverse_stock_movements: deleted %d movements ref=%s types=%s products=%d",
         count, reference_id, list(reference_types), len(affected_products),
