@@ -1007,8 +1007,8 @@ def _reverse_provisional_reconciliations(movements) -> None:
 
     القيدُ بمرجع **الحركة** لا المستند، فحذفُ قيود المستند (`unpost_document`) لا يطاله:
     كان يبقى يتيماً في الدفتر، وإعادةُ الترحيل تُطلع قيداً ثانياً للفرق نفسه. وتاريخُه
-    تاريخُ الحركة نفسها، فحارسُ الفترة هو حارسُ المستدعي على قيود مستنده: `unpost_document`
-    يفحص فترةَ تواريخ الحركات، و`void_goods_receipt` لا يفحص فترةً لقيده هو أيضاً.
+    تاريخُ الحركة نفسها، فحارسُ الفترة حارسُ المستدعي على تواريخ حركاته
+    (`accounting.services.assert_dates_open_for_unpost` في `unpost_document` و`void_goods_receipt`).
     """
     inbound = [m for m in movements if m.movement_type in INBOUND_TYPES]
     if not inbound:

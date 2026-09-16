@@ -2497,12 +2497,21 @@ def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
     التتبّع عبر `DeliveryOrderLine.movement`، فلا تُمسّ إرساليات أخرى لنفس الفاتورة.
     """
     from accounting.models import JournalHeader
+    from accounting.services import assert_dates_open_for_unpost
     from inventory.services import _recompute_product_stock, _restore_outbound_layers
 
     with transaction.atomic():
         lines = list(delivery.lines.select_related("invoice_line", "product", "movement"))
         movement_ids = [l.movement_id for l in lines if l.movement_id]
         products = {l.product_id: l.product for l in lines if l.product_id}
+
+        # الإلغاءُ يحذف القيدَ والحركات — تعديلٌ على الفترة كإلغاء الترحيل (THA-184).
+        assert_dates_open_for_unpost(
+            delivery.tenant_id,
+            {l.movement.movement_date for l in lines if l.movement_id}
+            | ({delivery.journal.transaction_date} if delivery.journal_id else set()),
+            f"الإرسالية {delivery.delivery_number or delivery.id}",
+        )
 
         unrestored = {}
         if movement_ids:

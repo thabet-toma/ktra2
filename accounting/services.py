@@ -1008,6 +1008,16 @@ def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""
         )
 
 
+def assert_dates_open_for_unpost(tenant_id, dates, document_label=""):
+    """حارسا الفترة والإقرار الضريبيّ النهائيّ على كلّ تاريخٍ سيُحذف منه شيء — **قبل**
+    أن يُمسّ صفّ. مصدرٌ واحدٌ لـ`unpost_document` ولإلغاء الإرساليّات
+    (`logistics.services.void_goods_receipt` · `sales.services.flow.void_delivery_note`)
+    اللذين يحذفان قيدَهما وحركاتهما مباشرةً فكانا يتجاوزان القفل."""
+    for txn_date in sorted(d for d in dates if d):
+        assert_period_open_for_unpost(tenant_id, txn_date, document_label)
+        assert_no_final_vat_statement(tenant_id, txn_date, document_label)
+
+
 def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):
     """A2/THA-184 — إلغاء الترحيل تعديلٌ على الفترة، فيمرّ بحرّاسها نفسهم.
 
@@ -1112,9 +1122,7 @@ def unpost_document(
                     reference_type__in=list(stock_reference_types),
                 ).values_list("movement_date", flat=True)
             )
-        for txn_date in sorted(d for d in affected_dates if d):
-            assert_period_open_for_unpost(tenant_id, txn_date, document_label)
-            assert_no_final_vat_statement(tenant_id, txn_date, document_label)
+        assert_dates_open_for_unpost(tenant_id, affected_dates, document_label)
 
         # Feature 2: حجز رقم القيد الأساسي في سلّة المحذوفات قبل الحذف.
         if recycle and primary_ref_type:

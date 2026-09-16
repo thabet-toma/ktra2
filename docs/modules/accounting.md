@@ -233,6 +233,7 @@ def post_journal(*, tenant_id: int, transaction_date, reference_type: str, refer
 def unpost_document(*, tenant_id: int, reference_id: int, journal_reference_types, stock_reference_types=(), user=None, document_label: str = "", recycle: bool = False) -> dict:  # حذف كل قيود مستند + عكس حركات مخزونه ذرّياً — بعد حارس الفترة على تواريخ المستند
 def validate_journal_entry(header, lines_data):  # توازن + حساب فعّال + نفس الشركة + فترة مفتوحة
 def validate_fiscal_period(tenant_id, transaction_date):  # يرمي ValidationError إن كانت الفترة مقفلة
+def assert_dates_open_for_unpost(tenant_id, dates, document_label=""):  # الفترة + الإقرار النهائي لكل تاريخ — unpost_document وإلغاء إرساليّتي الشراء والبيع
 def assert_period_open_for_unpost(tenant_id, transaction_date, document_label=""):  # نفس حرّاس post_journal، برسالة تراجع
 def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bool = True) -> dict:  # مصدر ض.ق.م الوحيد لفترة — من JournalLine (issue #79)؛ يستهلكها build_vat_statement وVatReportView وclient_financial_summary معاً
 def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""):  # يرفض فكّ ترحيل مستندٍ داخل فترة كشف ض.ق.م `final` (issue #79) — تُستدعى من unpost_document

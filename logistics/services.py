@@ -2462,6 +2462,7 @@ def void_goods_receipt(receipt, *, user=None):
     الفاتورة (بخلاف الحذف بالمرجع الذي يطالها كلها).
     """
     from accounting.models import JournalHeader
+    from accounting.services import assert_dates_open_for_unpost
     from inventory.models import StockMovement
     from inventory.serials import release_purchase_serials
     from inventory.services import (
@@ -2478,10 +2479,17 @@ def void_goods_receipt(receipt, *, user=None):
         movement_ids = [l.movement_id for l in lines if l.movement_id]
         products = {l.product_id: l.product for l in lines if l.product_id}
 
+        movements = list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
+        # الإلغاءُ يحذف القيدَ والحركات — تعديلٌ على الفترة كإلغاء الترحيل (THA-184).
+        assert_dates_open_for_unpost(
+            receipt.tenant_id,
+            {m.movement_date for m in movements}
+            | ({receipt.journal.transaction_date} if receipt.journal_id else set()),
+            f"الإرسالية {receipt.receipt_number}",
+        )
         # حذفُ الحركة يمحو طبقتها وصفوفَ استهلاك مبيعاتٍ لاحقة معها (CASCADE) —
         # فبضاعةٌ بيعت منها تمنع الإلغاء، كإلغاء ترحيل فاتورة الشراء نفسِها.
         _assert_layers_not_consumed_elsewhere(movement_ids)
-        movements = list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
         unlayered_inbound = _unlayered_inbound_quantities(movements)
 
         # الوحدات المُرقَّمة تخرج مع بضاعتها. الحصّة التي جاءت بهذه الإرسالية هي

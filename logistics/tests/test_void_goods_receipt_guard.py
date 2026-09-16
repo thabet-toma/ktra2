@@ -89,3 +89,21 @@ def test_voiding_an_untouched_receipt_still_works(received):
     product.refresh_from_db()
     assert product.quantity_on_hand == Decimal("0.0000")
     assert not StockLayer.objects.filter(product=product, remaining_qty__gt=0).exists()
+
+
+def test_voiding_a_receipt_inside_a_closed_period_is_refused(received):
+    """إلغاءُ الإرساليّة يحذف قيدَها وحركاتها — تعديلٌ على الفترة كإلغاء الترحيل (THA-184)."""
+    from accounting.models import FiscalPeriod, JournalHeader
+
+    tenant, client, headers, product, receipt = received
+    journal_id = receipt.journal_id
+    assert journal_id is not None
+    FiscalPeriod.objects.filter(tenant=tenant).update(is_closed=True)
+
+    res = client.delete(f"/api/logistics/goods-receipts/{receipt.pk}/", **headers)
+
+    assert res.status_code == 400, res.content
+    assert GoodsReceipt.objects.filter(pk=receipt.pk).exists()
+    assert JournalHeader.objects.filter(pk=journal_id).exists()
+    product.refresh_from_db()
+    assert product.quantity_on_hand == Decimal("10.0000")
