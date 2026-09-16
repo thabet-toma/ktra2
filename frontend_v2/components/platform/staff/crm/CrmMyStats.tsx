@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 
 import { getMyCrmStats, type CrmStats } from '../../../../services/platformCrmApi';
-import { formatNumber } from '../../../../utils/formatNumber';
+import type { CcTone } from '../../../../utils/ccTone';
+import { CcCard, CcStatTile } from '../../ui';
 
 /**
  * عدّاداتُ الموظّف عن عملائه — من `stats/me/` **مجموعةً في الخادم**.
@@ -9,14 +10,14 @@ import { formatNumber } from '../../../../utils/formatNumber';
  * ولا تُحسَب من صفوف القائمة المعروضة: القائمةُ مُصفَّحةٌ وتُرشَّح بالحالة، فعدُّ
  * ما في الشاشة يعطي رقماً يصغُر كلّما رشّح الموظّفُ — رقمٌ يتغيّر بالنظر إليه.
  */
-const CARDS: Array<{ key: keyof CrmStats; label: string; tone: string }> = [
-  { key: 'assigned', label: 'كل عملائي', tone: 'text-cyan-300' },
-  { key: 'contacted', label: 'تم الاتصال', tone: 'text-sky-300' },
-  { key: 'interested', label: 'مهتم', tone: 'text-emerald-300' },
-  { key: 'follow_up', label: 'متابعة', tone: 'text-amber-300' },
-  { key: 'customer', label: 'صار عميلاً', tone: 'text-emerald-200' },
-  { key: 'not_interested', label: 'غير مهتم', tone: 'text-rose-300' },
-  { key: 'overdue', label: 'متأخرة', tone: 'text-rose-300' },
+const CARDS: Array<{ key: keyof CrmStats; label: string; tone: CcTone }> = [
+  { key: 'assigned', label: 'كل عملائي', tone: 'accent' },
+  { key: 'contacted', label: 'تم الاتصال', tone: 'accent' },
+  { key: 'interested', label: 'مهتم', tone: 'success' },
+  { key: 'follow_up', label: 'متابعة', tone: 'warning' },
+  { key: 'customer', label: 'صار عميلاً', tone: 'success' },
+  { key: 'not_interested', label: 'غير مهتم', tone: 'danger' },
+  { key: 'overdue', label: 'متأخرة', tone: 'danger' },
 ];
 
 interface CrmMyStatsProps {
@@ -24,7 +25,7 @@ interface CrmMyStatsProps {
   refreshKey: number;
 }
 
-export const CrmMyStats: React.FC<CrmMyStatsProps> = ({ refreshKey }) => {
+export const CrmMyStats: React.FC<CrmMyStatsProps> = ({ refreshKey }: CrmMyStatsProps) => {
   const [stats, setStats] = useState<CrmStats | null>(null);
   const [error, setError] = useState('');
 
@@ -44,24 +45,28 @@ export const CrmMyStats: React.FC<CrmMyStatsProps> = ({ refreshKey }) => {
 
   if (error) {
     return (
-      <p className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4 text-sm text-[var(--staff-muted)]">
+      <p className="rounded-2xl border border-cc-border bg-cc-surface p-4 text-sm text-cc-text-muted">
         {error}
       </p>
     );
   }
 
   return (
-    <section className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6" aria-label="عدّاداتي في العملاء">
+    <section
+      className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-7 gap-3"
+      aria-label="عدّاداتي في العملاء"
+    >
       {CARDS.map((card) => (
-        <article
+        <CcCard
           key={card.key}
-          className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4 shadow-lg shadow-black/30"
+          className="p-3.5 transition-all hover:border-cc-border-strong"
         >
-          <p className={`text-2xl font-extrabold ${card.tone}`}>
-            {stats ? formatNumber(stats[card.key]) : '—'}
-          </p>
-          <p className="mt-1 text-xs font-semibold text-[var(--staff-muted)]">{card.label}</p>
-        </article>
+          <CcStatTile
+            label={card.label}
+            value={stats ? stats[card.key] : '—'}
+            tone={card.tone}
+          />
+        </CcCard>
       ))}
     </section>
   );

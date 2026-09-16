@@ -7,6 +7,7 @@ import { getEmployeeWorkOrderQueue, type WorkOrderDetailRow } from '../../../ser
 import { listPlatformMeetings } from '../../../services/platformMeetingsApi';
 import { formatDateTimeValue, formatDateValue, formatWeekdayName } from '../../../utils/formatDate';
 import { formatNumber } from '../../../utils/formatNumber';
+import { CcAvatar, CcCard, CcGauge, CcPill, CcStatTile } from '../ui';
 
 interface StaffHomeDashboardProps {
   profile: MyPlatformEmployeeProfile | null;
@@ -40,9 +41,12 @@ const stageIndexOf = (status: WorkOrderDetailRow['status']): number | null => {
 };
 
 const isOpen = (status: WorkOrderDetailRow['status']) => !['closed', 'cancelled'].includes(status);
-const priorityClass = (priority: WorkOrderDetailRow['priority']) => priority === 'urgent' ? 'bg-rose-400' : priority === 'high' ? 'bg-amber-400' : priority === 'normal' ? 'bg-cyan-400' : 'bg-slate-400';
 
-export const StaffHomeDashboard: React.FC<StaffHomeDashboardProps> = ({ profile, searchTerm, onOpenTasks }) => {
+export const StaffHomeDashboard: React.FC<StaffHomeDashboardProps> = ({
+  profile,
+  searchTerm,
+  onOpenTasks,
+}: StaffHomeDashboardProps) => {
   const [companies, setCompanies] = useState<Awaited<ReturnType<typeof listMyEngagedCompanies>>>([]);
   const [tasks, setTasks] = useState<WorkOrderDetailRow[]>([]);
   const [meetings, setMeetings] = useState<Awaited<ReturnType<typeof listPlatformMeetings>>>([]);
@@ -80,56 +84,230 @@ export const StaffHomeDashboard: React.FC<StaffHomeDashboardProps> = ({ profile,
   const todayTasks = useMemo(() => tasks.filter((task) => isOpen(task.status)).slice(0, 5), [tasks]);
   const hasNoData = !loading && companies.length === 0 && tasks.length === 0 && meetings.length === 0;
   const performance = (profile as (MyPlatformEmployeeProfile & { performance?: { composite_score?: number } }) | null)?.performance?.composite_score;
-  const circumference = 2 * Math.PI * 44;
   const score = typeof performance === 'number' ? Math.max(0, Math.min(100, performance)) : null;
 
-  if (hasNoData) return <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-10 text-center shadow-lg shadow-black/30"><ClipboardList className="mx-auto h-10 w-10 text-cyan-300" /><h1 className="mt-3 text-lg font-extrabold text-slate-50">لا توجد متابعة معلّقة الآن</h1><p className="mt-1 text-sm text-[var(--staff-muted)]">ستظهر مهامك وشركاتك واجتماعاتك هنا فور إسنادها إليك.</p><button type="button" onClick={onOpenTasks} className="mt-5 rounded-xl bg-gradient-to-l from-cyan-500 to-blue-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-blue-500">اذهب إلى مهامي</button></section>;
+  if (hasNoData) {
+    return (
+      <CcCard className="p-10 text-center shadow-lg shadow-black/30">
+        <ClipboardList className="mx-auto h-10 w-10 text-sky-400" />
+        <h1 className="mt-3 text-lg font-extrabold text-cc-text">لا توجد متابعة معلّقة الآن</h1>
+        <p className="mt-1 text-sm text-cc-text-muted">ستظهر مهامك وشركاتك واجتماعاتك هنا فور إسنادها إليك.</p>
+        <button
+          type="button"
+          onClick={onOpenTasks}
+          className="mt-5 rounded-xl bg-gradient-to-l from-cyan-500 to-blue-600 px-4 py-2 text-sm font-bold text-white shadow-lg shadow-cyan-500/20 hover:from-cyan-400 hover:to-blue-500 transition"
+        >
+          اذهب إلى مهامي
+        </button>
+      </CcCard>
+    );
+  }
 
-  return <div className="space-y-6">
-    <section className="flex items-center justify-between gap-4 rounded-2xl border border-[var(--staff-line)] bg-gradient-to-l from-blue-900/50 via-[var(--staff-panel)] to-[var(--staff-panel)] p-5 shadow-lg shadow-cyan-500/10"><div><h1 className="text-2xl font-extrabold text-slate-50">مرحباً {profile?.username || 'بك'}</h1><p className="mt-1 text-sm text-[var(--staff-muted)]">{formatWeekdayName(now)}، {formatDateValue(now)}</p></div><span className="flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-full bg-cyan-500/15 text-xl font-extrabold text-cyan-300 ring-2 ring-cyan-400/30">{profile?.photo_url ? <img src={profile.photo_url} alt="" className="h-full w-full object-cover" /> : (profile?.username || 'ك').slice(0, 1)}</span></section>
+  return (
+    <div className="space-y-6">
+      <CcCard className="flex items-center justify-between gap-4 bg-gradient-to-l from-blue-950/40 via-cc-surface to-cc-surface p-5 shadow-lg shadow-cyan-500/10">
+        <div>
+          <h1 className="text-2xl font-extrabold text-cc-text">مرحباً {profile?.username || 'بك'}</h1>
+          <p className="mt-1 text-sm text-cc-text-muted">{formatWeekdayName(now)}، {formatDateValue(now)}</p>
+        </div>
+        <CcAvatar
+          name={profile?.username || 'موظف كترا'}
+          photoUrl={profile?.photo_url}
+          size="lg"
+          presence="online"
+        />
+      </CcCard>
 
-    <section className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-      <article className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4 shadow-lg shadow-black/30"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-cyan-500/15 text-cyan-300"><Building2 className="h-5 w-5" /></span><p className="mt-4 text-2xl font-extrabold text-slate-50">{formatNumber(companies.length)}</p><p className="text-xs font-semibold text-[var(--staff-muted)]">شركاتي</p></article>
-      <article className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4 shadow-lg shadow-black/30"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-500/15 text-violet-300"><ClipboardList className="h-5 w-5" /></span><p className="mt-4 text-2xl font-extrabold text-slate-50">{formatNumber(tasks.filter((task) => isOpen(task.status)).length)}</p><p className="text-xs font-semibold text-[var(--staff-muted)]">مهامي المفتوحة</p></article>
-      <article className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-4 shadow-lg shadow-black/30"><span className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-500/15 text-emerald-300"><CalendarDays className="h-5 w-5" /></span><p className="mt-4 text-2xl font-extrabold text-slate-50">{formatNumber(meetingsThisWeek.length)}</p><p className="text-xs font-semibold text-[var(--staff-muted)]">اجتماعاتي هذا الأسبوع</p></article>
-    </section>
+      <section className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+        <CcCard className="p-4 shadow-lg shadow-black/30">
+          <CcStatTile
+            label="شركاتي"
+            value={companies.length}
+            icon={<Building2 className="h-5 w-5 text-sky-400" />}
+            tone="accent"
+          />
+        </CcCard>
+        <CcCard className="p-4 shadow-lg shadow-black/30">
+          <CcStatTile
+            label="مهامي المفتوحة"
+            value={tasks.filter((task) => isOpen(task.status)).length}
+            icon={<ClipboardList className="h-5 w-5 text-purple-400" />}
+            tone="violet"
+          />
+        </CcCard>
+        <CcCard className="p-4 shadow-lg shadow-black/30">
+          <CcStatTile
+            label="اجتماعاتي هذا الأسبوع"
+            value={meetingsThisWeek.length}
+            icon={<CalendarDays className="h-5 w-5 text-emerald-400" />}
+            tone="success"
+          />
+        </CcCard>
+      </section>
 
-    {score !== null ? <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><div className="flex flex-col items-center gap-5 sm:flex-row"><svg viewBox="0 0 112 112" className="h-36 w-36" aria-label="حلقة الأداء العام"><g transform="rotate(-90 56 56)"><circle cx="56" cy="56" r="44" fill="none" stroke="currentColor" strokeWidth="10" className="stroke-[var(--staff-line)]" /><circle cx="56" cy="56" r="44" fill="none" stroke="currentColor" strokeWidth="10" strokeLinecap="round" strokeDasharray={circumference} strokeDashoffset={circumference * (1 - score / 100)} className="stroke-cyan-400" /></g><text x="56" y="61" textAnchor="middle" className="fill-slate-50 text-xl font-extrabold">{formatNumber(score)}%</text></svg><div><h2 className="text-lg font-extrabold text-slate-50">الأداء العام</h2><p className="mt-1 text-sm text-[var(--staff-muted)]">تقييمك المعتمد في المنصة.</p><p className="mt-3 flex items-center gap-2 text-xs font-semibold text-[var(--staff-muted)]"><span className="h-2 w-2 rounded-full bg-cyan-400" />التقييم الحالي</p></div></div></section> : <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><p className="font-extrabold text-slate-50">الأداء العام</p><p className="mt-1 text-sm text-[var(--staff-muted)]">لم يصدر تقييم معتمد لعرضه بعد.</p></section>}
-
-    {term && <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><h2 className="text-base font-extrabold text-slate-50">نتائج البحث</h2>{matchingCompanies.length === 0 && matchingTasks.length === 0 ? <p className="mt-3 flex items-center gap-2 text-sm text-[var(--staff-muted)]"><SearchX className="h-4 w-4" />لا نتائج في شركاتك أو أوامر عملك.</p> : <div className="mt-3 space-y-2 text-sm">{matchingCompanies.map((company) => <p key={`company-${company.tenant_id}`} className="rounded-xl bg-white/5 px-3 py-2 text-slate-50">شركة: {company.company_name}</p>)}{matchingTasks.map((task) => <p key={`task-${task.id}`} className="rounded-xl bg-white/5 px-3 py-2 text-slate-50">أمر {formatNumber(task.id)}: {task.title}</p>)}</div>}</section>}
-
-    <section className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-5 shadow-lg shadow-black/30"><div className="flex items-center justify-between gap-3"><div><h2 className="text-lg font-extrabold text-slate-50">متابعاتي اليوم</h2><p className="text-sm text-[var(--staff-muted)]">أقرب خمسة أوامر عمل مفتوحة.</p></div><TimerReset className="h-5 w-5 text-cyan-300" /></div><div className="mt-4 divide-y divide-[var(--staff-line)]">{loading ? <p className="py-5 text-sm text-[var(--staff-muted)]">جارٍ التحميل...</p> : todayTasks.map((task) => {
-      const stage = stageIndexOf(task.status);
-      return (
-        <article key={task.id} className="py-4 first:pt-0">
-          <div className="flex items-start gap-3">
-            <span className={`mt-1 h-3 w-3 shrink-0 rounded ${priorityClass(task.priority)}`} />
-            <div className="min-w-0 flex-1">
-              <div className="flex items-center justify-between gap-3">
-                <h3 className="truncate text-sm font-bold text-slate-50">{task.title}</h3>
-                <span className="shrink-0 text-xs font-bold text-cyan-300">
-                  {stage === null
-                    ? STAGE_LABELS[task.status]
-                    : `المرحلة ${formatNumber(stage)} من ${formatNumber(STAGE_ORDER.length)} · ${STAGE_LABELS[task.status]}`}
-                </span>
+      {score !== null ? (
+        <CcCard className="p-5 shadow-lg shadow-black/30">
+          <div className="flex flex-col items-center gap-6 sm:flex-row sm:justify-start">
+            <CcGauge
+              value={score}
+              size="lg"
+              caption="الأداء العام"
+              displayValue={`${formatNumber(score)}%`}
+            />
+            <div className="text-center sm:text-right">
+              <h2 className="text-lg font-extrabold text-cc-text">الأداء العام</h2>
+              <p className="mt-1 text-sm text-cc-text-muted">تقييمك المعتمد في المنصة.</p>
+              <div className="mt-3 flex items-center justify-center sm:justify-start gap-2">
+                <CcPill tone="accent" dot>
+                  التقييم الحالي: {formatNumber(score)}%
+                </CcPill>
               </div>
-              <p className="mt-1 text-xs text-[var(--staff-muted)]">{task.company_name} · آخر تحديث {formatDateTimeValue(task.updated_at)}</p>
-              {/* شريطُ محطّاتٍ لا شريطُ نسبة: ستُّ خاناتٍ تُملأ حتى المحطّة الحاليّة. */}
-              <div className="mt-2 flex gap-1" aria-hidden="true">
-                {STAGE_ORDER.map((name, index) => (
-                  <span
-                    key={name}
-                    className={`h-1.5 flex-1 rounded-full ${stage !== null && index < stage ? 'bg-cyan-400' : 'bg-white/10'}`}
-                  />
-                ))}
-              </div>
-              <p className="mt-2 text-xs text-[var(--staff-muted)]">أمر #{formatNumber(task.id)}</p>
             </div>
           </div>
-        </article>
-      );
-    })}</div></section>
-  </div>;
+        </CcCard>
+      ) : (
+        <CcCard className="p-5 shadow-lg shadow-black/30">
+          <p className="font-extrabold text-cc-text">الأداء العام</p>
+          <p className="mt-1 text-sm text-cc-text-muted">لم يصدر تقييم معتمد لعرضه بعد.</p>
+        </CcCard>
+      )}
+
+      {term && (
+        <CcCard className="p-5 shadow-lg shadow-black/30">
+          <h2 className="text-base font-extrabold text-cc-text">نتائج البحث</h2>
+          {matchingCompanies.length === 0 && matchingTasks.length === 0 ? (
+            <p className="mt-3 flex items-center gap-2 text-sm text-cc-text-muted">
+              <SearchX className="h-4 w-4" />لا نتائج في شركاتك أو أوامر عملك.
+            </p>
+          ) : (
+            <div className="mt-3 space-y-2 text-sm">
+              {matchingCompanies.map((company) => (
+                <p key={`company-${company.tenant_id}`} className="rounded-xl bg-cc-surface-2 px-3 py-2 text-cc-text">
+                  شركة: {company.company_name}
+                </p>
+              ))}
+              {matchingTasks.map((task) => (
+                <p key={`task-${task.id}`} className="rounded-xl bg-cc-surface-2 px-3 py-2 text-cc-text">
+                  أمر {formatNumber(task.id)}: {task.title}
+                </p>
+              ))}
+            </div>
+          )}
+        </CcCard>
+      )}
+
+      <CcCard className="p-5 shadow-lg shadow-black/30">
+        <div className="flex items-center justify-between gap-3 mb-4">
+          <div>
+            <h2 className="text-lg font-extrabold text-cc-text">متابعاتي اليوم</h2>
+            <p className="text-sm text-cc-text-muted">أقرب خمسة أوامر عمل مفتوحة.</p>
+          </div>
+          <TimerReset className="h-5 w-5 text-sky-400" />
+        </div>
+
+        <div className="space-y-4">
+          {loading ? (
+            <p className="py-5 text-sm text-cc-text-muted">جارٍ التحميل...</p>
+          ) : todayTasks.length === 0 ? (
+            <p className="py-5 text-sm text-cc-text-muted">لا توجد أوامر عمل مفتوحة اليوم.</p>
+          ) : (
+            todayTasks.map((task) => {
+              const stage = stageIndexOf(task.status);
+              const priorityTone =
+                task.priority === 'urgent'
+                  ? 'danger'
+                  : task.priority === 'high'
+                  ? 'warning'
+                  : task.priority === 'normal'
+                  ? 'accent'
+                  : 'neutral';
+
+              return (
+                <CcCard key={task.id} className="p-4 bg-cc-surface-2/40 hover:border-cc-border-strong transition">
+                  <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h3 className="text-sm font-bold text-cc-text truncate">{task.title}</h3>
+                        {/* الاسمُ من الخادم لا من خريطةٍ هنا — هي القاعدةُ نفسُها
+                            المكتوبةُ فوق `PRIORITY_OPTION_LABELS` في `WorkOrdersPanel`:
+                            «ألوانٌ فقط — لا تسميات». والخريطةُ المحلّيّةُ تنحرف:
+                            قالت «عاجل» والخادمُ يقول «عاجلة». */}
+                        <CcPill tone={priorityTone} dot>{task.priority_display}</CcPill>
+                      </div>
+                      <p className="mt-1 text-xs text-cc-text-muted">
+                        {task.company_name} · آخر تحديث {formatDateTimeValue(task.updated_at)} · أمر #{formatNumber(task.id)}
+                      </p>
+                    </div>
+
+                    <span className="shrink-0 text-xs font-bold text-sky-400">
+                      {stage === null
+                        ? STAGE_LABELS[task.status]
+                        : `المرحلة ${formatNumber(stage)} من ${formatNumber(STAGE_ORDER.length)} · ${STAGE_LABELS[task.status]}`}
+                    </span>
+                  </div>
+
+                  {/* خطُّ محطّاتٍ لا شريطُ نسبة: ستُّ محطّاتٍ تُملأ حتى الحاليّة.
+                      كان هنا جدولٌ يعطي `data_entry` «٥٠٪» و`review` «٧٠٪» — أرقامٌ
+                      لم يقلها الخادمُ قطّ وتُقرأ على الشاشة إنجازاً محسوباً. وصورةُ
+                      المالك (اللوحة 5) دوائرُ مرقّمةٌ موصولةٌ بخطّ، وهي الصادقةُ
+                      هنا لأنّها تعدّ المحطّاتِ ولا تدّعي كسراً. */}
+                  <div className="mt-4 pt-3 border-t border-cc-border">
+                    <div className="flex items-center justify-between gap-1 w-full" aria-label="خط مراحل أمر العمل">
+                      {STAGE_ORDER.map((stName, idx) => {
+                        const stepNum = idx + 1;
+                        const isReached = stage !== null && stage >= stepNum;
+                        const isCurrent = stage !== null && stage === stepNum;
+                        const hasNext = idx < STAGE_ORDER.length - 1;
+                        const isLineActive = stage !== null && stage > stepNum;
+
+                        return (
+                          <React.Fragment key={stName}>
+                            <div className="flex flex-col items-center">
+                              <div
+                                className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold transition-colors ${
+                                  isCurrent
+                                    ? 'bg-emerald-500 text-slate-950 ring-2 ring-emerald-400/50'
+                                    : isReached
+                                    ? 'bg-sky-500 text-slate-950'
+                                    : 'bg-cc-surface-2 border border-cc-border text-cc-text-muted'
+                                }`}
+                                title={`${STAGE_LABELS[stName]} (${formatNumber(stepNum)})`}
+                              >
+                                {formatNumber(stepNum)}
+                              </div>
+                              <span
+                                className={`text-[10px] mt-1 whitespace-nowrap ${
+                                  isCurrent
+                                    ? 'font-bold text-emerald-400'
+                                    : isReached
+                                    ? 'text-sky-300 font-medium'
+                                    : 'text-cc-text-muted'
+                                }`}
+                              >
+                                {STAGE_LABELS[stName]}
+                              </span>
+                            </div>
+                            {hasNext && (
+                              <div
+                                className={`h-0.5 flex-1 mx-1 rounded-full transition-colors ${
+                                  isLineActive ? 'bg-sky-500' : 'bg-cc-border'
+                                }`}
+                                aria-hidden="true"
+                              />
+                            )}
+                          </React.Fragment>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </CcCard>
+              );
+            })
+          )}
+        </div>
+      </CcCard>
+    </div>
+  );
 };
 
 export default StaffHomeDashboard;

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
-import { Loader2 } from 'lucide-react';
+import { AlertTriangle, Loader2 } from 'lucide-react';
 
 import { ConfirmProvider } from '../../../contexts/ConfirmContext';
 import { ToastProvider } from '../../../contexts/ToastContext';
@@ -23,6 +23,7 @@ import { StaffSidebar } from './StaffSidebar';
 import { StaffTopBar } from './StaffTopBar';
 import { CrmPanel } from './crm/CrmPanel';
 import { StaffTasksPanel } from './tasks/StaffTasksPanel';
+import { CcCard, CcEmpty } from '../ui';
 
 /**
  * لوحةُ «لا شيء لتعرضه» — **مكوّنٌ واحدٌ لا أربعُ نسخ.**
@@ -32,10 +33,10 @@ import { StaffTasksPanel } from './tasks/StaffTasksPanel';
  * واحدةٍ منها كان يتركُ الثلاثَ الأخرى متباينةً بصمت — وهو أوّلُ ما يُفسد اتّساقَ
  * التصميم بين التبويبات.
  */
-const StaffNotice: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <p className="rounded-2xl border border-[var(--staff-line)] bg-[var(--staff-panel)] p-8 text-sm text-[var(--staff-muted)] shadow-lg shadow-black/30">
-    {children}
-  </p>
+const StaffNotice: React.FC<{ children: React.ReactNode }> = ({ children }: { children: React.ReactNode }) => (
+  // `CcEmpty` تصيّر `title` عقدةً كما هي، فلا حاجةَ إلى حارسِ نوعٍ يبتلع ما
+  // ليس نصّاً خامّاً ويضع مكانه كلمةً عامّة: الرسالةُ تمرّ كما كُتبت.
+  <CcEmpty title={children} className="my-4" />
 );
 
 const StaffShellContent: React.FC = () => {
@@ -73,7 +74,7 @@ const StaffShellContent: React.FC = () => {
   // يقرأ جوابَ الصلاحيّات الفارغَ **قبل أن يُطلَب** على أنّه «ممنوع»، فيطرد
   // الموظّفَ إلى شاشة دوره بعد أن يرى `/staff/home` ثانيةً واحدة.
   const gate = staffGate({ authLoading, hasUser: Boolean(currentUser), pending: capabilitiesLoading, capabilities });
-  if (gate === 'loading') return <div className="staff-shell flex min-h-screen items-center justify-center gap-2 bg-[var(--staff-bg)] text-sm text-[var(--staff-muted)]" dir="rtl"><Loader2 className="h-5 w-5 animate-spin text-cyan-400" />جارٍ التحقق من الصلاحيات...</div>;
+  if (gate === 'loading') return <div className="staff-shell flex min-h-screen items-center justify-center gap-2 bg-[var(--staff-bg)] text-sm text-cc-text-muted" dir="rtl"><Loader2 className="h-5 w-5 animate-spin text-sky-400" />جارٍ التحقق من الصلاحيات...</div>;
   if (gate === 'login') return <Navigate to="/staff" replace />;
   if (gate === 'leave') return <Navigate to="/" replace />;
 
@@ -107,12 +108,44 @@ const StaffShellContent: React.FC = () => {
   };
   const content = panels[activeKey];
 
-  return <div className="staff-shell flex min-h-screen overflow-x-hidden bg-[var(--staff-bg)] text-[var(--staff-text)]" dir="rtl"><StaffSidebar activeKey={activeKey} collapsed={collapsed} drawerOpen={drawerOpen} profile={profile} onNavigate={go} onToggleCollapsed={() => setCollapsed((value) => !value)} onCloseDrawer={() => setDrawerOpen(false)} /><div className="flex min-w-0 flex-1 flex-col"><StaffTopBar profile={profile} searchTerm={searchTerm} onSearch={search} onOpenDrawer={() => setDrawerOpen(true)} /><main className="min-w-0 flex-1 p-4 sm:p-6">{preview && (
-      <p className="mb-4 rounded-2xl border border-amber-400/40 bg-amber-400/10 p-4 text-sm text-amber-100" role="status">
-        <span className="font-extrabold">معاينة.</span> هذه مساحةُ موظّف المنصّة كما يراها هو. حسابُك سوبر أدمن بلا ملفِّ
-        موظّف، فاللوحاتُ الشخصيّة (تقييمك · محفظتك · مهامُّك · شركاتك) تظهر فارغةً — وهذا ليس عطباً.
-      </p>
-    )}{content}</main></div></div>;
+  return (
+    <div className="staff-shell flex min-h-screen overflow-x-hidden bg-[var(--staff-bg)] text-[var(--staff-text)]" dir="rtl">
+      <StaffSidebar
+        activeKey={activeKey}
+        collapsed={collapsed}
+        drawerOpen={drawerOpen}
+        profile={profile}
+        onNavigate={go}
+        onToggleCollapsed={() => setCollapsed((value) => !value)}
+        onCloseDrawer={() => setDrawerOpen(false)}
+      />
+      <div className="flex min-w-0 flex-1 flex-col">
+        <StaffTopBar
+          profile={profile}
+          searchTerm={searchTerm}
+          onSearch={search}
+          onOpenDrawer={() => setDrawerOpen(true)}
+        />
+        <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8 space-y-6 max-w-7xl w-full mx-auto">
+          {preview && (
+            <CcCard tone="warning" className="p-4" role="status">
+              <div className="flex items-start gap-3">
+                <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <p className="font-extrabold text-amber-400">معاينة</p>
+                  <p className="mt-1 text-xs text-cc-text-muted leading-relaxed">
+                    هذه مساحةُ موظّف المنصّة كما يراها هو. حسابُك سوبر أدمن بلا ملفِّ
+                    موظّف، فاللوحاتُ الشخصيّة (تقييمك · محفظتك · مهامُّك · شركاتك) تظهر فارغةً — وهذا ليس عطباً.
+                  </p>
+                </div>
+              </div>
+            </CcCard>
+          )}
+          {content}
+        </main>
+      </div>
+    </div>
+  );
 };
 
 export const StaffShell: React.FC = () => <ToastProvider><ConfirmProvider><StaffShellContent /></ConfirmProvider></ToastProvider>;
