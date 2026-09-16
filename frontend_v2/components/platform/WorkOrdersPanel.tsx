@@ -31,6 +31,7 @@ import { listAssignmentCandidates, type AssignmentCandidateRow } from "../../ser
 import { CompanyPicker } from "./CompanyPicker";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { REJECTION_CATEGORY_LABELS as SHARED_REJECTION_CATEGORY_LABELS } from "../../utils/pilotExclusions";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -80,12 +81,9 @@ const REVIEW_STATUS_TONES: Record<string, CcTone> = {
 /**
  * مفاتيحُ خيارات قائمة الردّ — تُبنى منها `<option>` فيلزمها مفاتيحُ محلّيّة.
  * أمّا **عرضُ** التصنيف على مُسلَّمٍ مردودٍ فمن `rejection_category_display` الخادميّ.
+ * والأسماءُ من `utils/pilotExclusions` — نفسُها التي يطبعها جدولُ محاور الـpilot.
  */
-const REJECTION_CATEGORY_LABELS: Record<Exclude<RejectionCategory, "">, string> = {
-  employee_error: "خطأ الموظف",
-  customer_new_info: "معلومات جديدة من العميل",
-  other: "أخرى",
-};
+const REJECTION_CATEGORY_LABELS: Record<Exclude<RejectionCategory, "">, string> = SHARED_REJECTION_CATEGORY_LABELS;
 
 /** رسالةُ الخطأ الموحَّدة لأسطح المنصّة — تميّز 403 عن غيره بدل عرض نصّ الخادم الخام. */
 const describeError = (cause: unknown, fallback: string): string =>

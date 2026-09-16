@@ -954,7 +954,30 @@ def record_stock_movement(
     return movement
 
 
-def _recompute_product_stock(product: Product) -> None:
+def _restore_outbound_layers(movements) -> dict[int, tuple[Decimal, Decimal]]:
+    """يردّ استهلاكَ كلّ حركةٍ صادرة إلى طبقاتها (`fifo.restore_partial`) قبل
+    حذفها، ويُرجع ما **لم** يُردّ: {المنتج ← (الكميّة، قيمتها بكلفة حركتها)}.
+
+    صرفٌ سبق FIFO لا صفوفَ استهلاكٍ له، فلا يعود من وحداته شيءٌ إلى طبقة —
+    يُمرَّر الناتج إلى `_recompute_product_stock` فتُغطّى تلك الوحدات بكلفة حركتها
+    نفسِها: عينُ المبلغ الذي يعود إلى حساب المخزون بحذف قيدها.
+    """
+    unrestored: dict[int, tuple[Decimal, Decimal]] = {}
+    for m in movements:
+        if m.movement_type not in OUTBOUND_TYPES:
+            continue
+        restored = fifo.restore_partial(movements=[m])
+        missing = Decimal(str(m.quantity)) - restored.quantity
+        if missing <= 0:
+            continue
+        qty, value = unrestored.get(m.product_id, (Decimal('0'), Decimal('0')))
+        unrestored[m.product_id] = (
+            qty + missing, value + missing * Decimal(str(m.unit_cost or 0)),
+        )
+    return unrestored
+
+
+def _recompute_product_stock(product: Product, unrestored=None) -> None:
     """أعد احتساب رصيد منتج بإعادة تشغيل كل حركاته المتبقية، ومتوسط تكلفته من
     طبقات FIFO المفتوحة (مواصفة #137 المرحلة 2).
 
@@ -962,11 +985,20 @@ def _recompute_product_stock(product: Product) -> None:
     quantity_on_hand بالمشي في دفتر الحركات المتبقية (كما كانت دائماً)،
     و avg_cost من `inventory.fifo.derived_avg_cost` (قيمة الطبقات المفتوحة ÷
     كميّتها) بدل صيغة WAC القديمة — الطبقات نفسها **لا تُعاد بناؤها هنا**؛
-    حالتها بعد `reverse_stock_movements` (التي تستدعي `fifo.restore` قبل
-    الحذف) هي مصدر الحقيقة.
+    حالتها بعد `reverse_stock_movements` (التي تردّ الاستهلاك بـ
+    `_restore_outbound_layers` قبل الحذف) هي مصدر الحقيقة.
+
+    ورصيدٌ لا تغطّيه الطبقات يُرأب قبل الاشتقاق بـ`fifo.backfill_opening_layer`
+    — كما في `record_stock_movement` — وإلّا اشتُقّت الكلفةُ من رتلٍ فارغٍ
+    **صفراً** وأُعيد ترحيلُ مبيعات الصنف بكلفة صفر (شركة 6، 16/09/2026). على
+    مرحلتين: الكميّةُ اليتيمةُ القائمة بكلفة `avg_cost` الملتقطة قبل الكتابة
+    فوقه، ثمّ `unrestored` (كميّة، قيمة) — وحداتُ صرفٍ أُلغي بلا صفوف استهلاك
+    (`_restore_outbound_layers`) — بكلفتها المقيَّدة. والرأبُ يقيس الفجوةَ بعد
+    الردّ فلا يُضاعف ما أُعيد.
     """
     with transaction.atomic():
         prod = Product.objects.select_for_update().get(pk=product.pk)
+        book_avg = Decimal(str(prod.avg_cost or 0))
         movements = (
             StockMovement.objects.filter(product=prod)
             .order_by('movement_date', 'id')
@@ -979,6 +1011,17 @@ def _recompute_product_stock(product: Product) -> None:
             else:
                 qty -= mqty
         prod.quantity_on_hand = qty.quantize(Decimal('0.0001'))
+        returned_qty, returned_value = unrestored or (Decimal('0'), Decimal('0'))
+        fifo.backfill_opening_layer(
+            tenant_id=prod.tenant_id, product_id=prod.pk,
+            quantity_on_hand=prod.quantity_on_hand - returned_qty, avg_cost=book_avg,
+        )
+        if returned_qty > 0:
+            fifo.backfill_opening_layer(
+                tenant_id=prod.tenant_id, product_id=prod.pk,
+                quantity_on_hand=prod.quantity_on_hand,
+                avg_cost=returned_value / returned_qty,
+            )
         prod.avg_cost = fifo.derived_avg_cost(
             tenant_id=prod.tenant_id, product_id=prod.pk,
         ).quantize(Decimal('0.0001'))
@@ -1044,12 +1087,10 @@ def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:
         # الرَّدّ: كل حركةٍ صادرة ضمن هذا المستند تعيد كميّتها إلى طبقاتها
         # الأصلية وموقعها في رتل FIFO — قبل الحذف لا بعده، وضمن نفس المعاملة
         # الذرّية كي لا يبقى ردٌّ جزئيٌّ بلا حذفٍ يتبعه عند أي عطل.
-        for m in movements:
-            if m.movement_type in OUTBOUND_TYPES:
-                fifo.restore(m)
+        unrestored = _restore_outbound_layers(movements)
         StockMovement.objects.filter(id__in=movement_ids).delete()
     for prod in affected_products.values():
-        _recompute_product_stock(prod)
+        _recompute_product_stock(prod, unrestored.get(prod.pk))
     logger.info(
         "reverse_stock_movements: deleted %d movements ref=%s types=%s products=%d",
         count, reference_id, list(reference_types), len(affected_products),

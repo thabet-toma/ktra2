@@ -2497,14 +2497,20 @@ def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
     التتبّع عبر `DeliveryOrderLine.movement`، فلا تُمسّ إرساليات أخرى لنفس الفاتورة.
     """
     from accounting.models import JournalHeader
-    from inventory.services import _recompute_product_stock
+    from inventory.services import _recompute_product_stock, _restore_outbound_layers
 
     with transaction.atomic():
         lines = list(delivery.lines.select_related("invoice_line", "product", "movement"))
         movement_ids = [l.movement_id for l in lines if l.movement_id]
         products = {l.product_id: l.product for l in lines if l.product_id}
 
+        unrestored = {}
         if movement_ids:
+            # الحذفُ يُسقط صفوفَ الاستهلاك بالتتالي ويترك الطبقاتِ مستهلَكة، فيعود
+            # الرصيدُ بلا كلفة — الردُّ إلى الطبقات قبل الحذف كـ`reverse_stock_movements`.
+            unrestored = _restore_outbound_layers(
+                list({l.movement_id: l.movement for l in lines if l.movement_id}.values())
+            )
             StockMovement.objects.filter(pk__in=movement_ids).delete()
         if delivery.journal_id:
             JournalHeader.objects.filter(pk=delivery.journal_id).delete()
@@ -2526,7 +2532,7 @@ def void_delivery_note(delivery: DeliveryOrder, *, user=None) -> dict:
         delivery.delete()
 
         for product in products.values():
-            _recompute_product_stock(product)
+            _recompute_product_stock(product, unrestored.get(product.pk))
 
         if invoice is not None:
             sync_invoice_delivery_status(invoice)

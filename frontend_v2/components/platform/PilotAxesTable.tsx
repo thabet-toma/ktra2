@@ -6,6 +6,7 @@ import {
   type EmployeePilotPerformance,
 } from "../../services/platformPilotApi";
 import { formatNumber } from "../../utils/formatNumber";
+import { pilotExclusionLabel } from "../../utils/pilotExclusions";
 
 /**
  * جدولُ محاور تقييم الـpilot — **مصدرٌ واحد** لبطاقة الموظف الذاتيّة
@@ -70,7 +71,7 @@ export const PilotAxesTable: React.FC<{ performance: EmployeePilotPerformance }>
                 )}
               </td>
               <td className="py-1.5 px-2">{formatNumber(detail.weighted_contribution)}</td>
-              <td className="py-1.5 px-2">{detail.exclusions.length ? detail.exclusions.join("، ") : "—"}</td>
+              <td className="py-1.5 px-2">{detail.exclusions.length ? detail.exclusions.map(pilotExclusionLabel).join("، ") : "—"}</td>
             </tr>
           );
         })}
