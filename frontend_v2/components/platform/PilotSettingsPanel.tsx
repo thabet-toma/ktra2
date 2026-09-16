@@ -20,6 +20,7 @@ import {
   type EmployeeCompensationPolicyRow,
   type PerformanceEvaluationPolicyRow,
   type PilotAxisKey,
+  type PilotPolicyEffectiveState,
   type PolicyPreview,
 } from "../../services/platformPilotApi";
 import { useToast } from "../../contexts/ToastContext";
@@ -27,11 +28,27 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { formatDateValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import { type CcTone } from "../../utils/ccTone";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcSkeleton,
+  CcTabs,
+} from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لإدارة إعدادات الأداء والتعويض.", "تعذّر إتمام العملية.");
 
 const rowBusyKey = (action: string, rowId: number) => `${action}:${rowId}`;
+
+const EFFECTIVE_STATE_TONE: Record<PilotPolicyEffectiveState, CcTone> = {
+  draft: "neutral",
+  scheduled: "accent",
+  current: "success",
+  retired: "neutral",
+};
 
 type PerfDraft = {
   specialty: string;
@@ -182,46 +199,66 @@ const PerformancePolicySection: React.FC = () => {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700" role="alert">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-400" role="alert">
           {error}
         </div>
       )}
-      <button type="button" onClick={createDraft} disabled={busyKey === "create"} className="ktra-btn ktra-btn-primary">
-        <Plus className="h-3.5 w-3.5" /> مسودة سياسة تقييم جديدة
-      </button>
+
+      <CcSectionTitle
+        title="سياسات تقييم الأداء"
+        badge={rows.length > 0 ? rows.length : undefined}
+        action={
+          <button
+            type="button"
+            onClick={createDraft}
+            disabled={busyKey === "create"}
+            className="ktra-btn ktra-btn-primary"
+          >
+            <Plus className="h-3.5 w-3.5" /> مسودة سياسة تقييم جديدة
+          </button>
+        }
+      />
 
       {preview && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-300">
           <p className="font-semibold">معاينة v{preview.draft.version}</p>
           <p>{preview.note}</p>
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل…</div>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-500">لا توجد سياسة تقييم بعد — أوزانُ المحاور الافتراضيّة المضبوطة في الخادم مطبَّقة ضمنيّاً.</p>
-      ) : (
         <div className="space-y-3">
+          <div className="flex items-center gap-2 py-2 text-sm text-cc-text-muted">
+            <Loader2 className="h-4 w-4 animate-spin text-sky-400" /> جارٍ التحميل…
+          </div>
+          <CcSkeleton variant="card" count={2} />
+        </div>
+      ) : rows.length === 0 ? (
+        <CcEmpty
+          title="لا توجد سياسة تقييم بعد"
+          hint="أوزانُ المحاور الافتراضيّة المضبوطة في الخادم مطبَّقة ضمنيّاً."
+        />
+      ) : (
+        <div className="space-y-4">
           {rows.map((row) => {
             const draft = drafts[row.id] ?? toPerfDraft(row);
             const isDraft = row.status === "draft";
             const busy = Boolean(busyKey && busyKey.split(":")[1] === String(row.id));
             const sum = weightsSum(draft.weights);
             return (
-              <article key={row.id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-bold">
-                    سياسة تقييم v{row.version} · {row.specialty ? `تخصص «${row.specialty}»` : "عامة لكل التخصصات"}
-                  </p>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">
-                    {PILOT_POLICY_EFFECTIVE_STATE_LABEL[row.effective_state]}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <CcCard key={row.id} className="p-5 space-y-4">
+                <CcSectionTitle
+                  title={`سياسة تقييم v${row.version} · ${row.specialty ? `تخصص «${row.specialty}»` : "عامة لكل التخصصات"}`}
+                  action={
+                    <CcPill tone={EFFECTIVE_STATE_TONE[row.effective_state]} dot>
+                      {PILOT_POLICY_EFFECTIVE_STATE_LABEL[row.effective_state]}
+                    </CcPill>
+                  }
+                />
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
                   {PILOT_AXES.map((axis) => (
                     <label key={axis} className="space-y-1">
-                      <span className="text-slate-500">{PILOT_AXIS_LABELS[axis]} (%)</span>
+                      <span className="text-cc-text-muted">{PILOT_AXIS_LABELS[axis]} (%)</span>
                       <input
                         className="ktra-input h-8 w-full"
                         value={draft.weights[axis]}
@@ -232,12 +269,12 @@ const PerformancePolicySection: React.FC = () => {
                     </label>
                   ))}
                 </div>
-                <p className={`text-[11px] font-semibold ${sum === 100 ? "text-emerald-600" : "text-rose-600"}`}>
+                <p className={`text-[11px] font-semibold ${sum === 100 ? "text-emerald-400" : "text-rose-400"}`}>
                   مجموع الأوزان: {formatNumber(sum)}% {sum !== 100 && "— يجب أن يساوي 100% لحفظ المسودة أو تفعيلها"}
                 </p>
-                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-4">
                   <label className="space-y-1">
-                    <span className="text-slate-500">الحد الأدنى لحجم العينة</span>
+                    <span className="text-cc-text-muted">الحد الأدنى لحجم العينة</span>
                     <input
                       className="ktra-input h-8 w-full" value={draft.min_sample_size} disabled={!isDraft}
                       inputMode="numeric"
@@ -245,7 +282,7 @@ const PerformancePolicySection: React.FC = () => {
                     />
                   </label>
                   <label className="space-y-1">
-                    <span className="text-slate-500">مهلة المراجعة قبل الإغلاق (ساعة)</span>
+                    <span className="text-cc-text-muted">مهلة المراجعة قبل الإغلاق (ساعة)</span>
                     <input
                       className="ktra-input h-8 w-full" value={draft.review_grace_period_hours} disabled={!isDraft}
                       inputMode="numeric"
@@ -255,7 +292,7 @@ const PerformancePolicySection: React.FC = () => {
                   {/* عتبةُ الحضورِ اليوميّةُ وسقفُها (#212 212-D): يُضبَطان من هنا
                       كي لا يكون حقلا السياسةِ حبيسَي افتراضِ قاعدةِ البيانات. */}
                   <label className="space-y-1">
-                    <span className="text-slate-500">الحد الأدنى لساعات الحضور اليومي</span>
+                    <span className="text-cc-text-muted">الحد الأدنى لساعات الحضور اليومي</span>
                     <input
                       className="ktra-input h-8 w-full" value={draft.presence_min_hours_per_day} disabled={!isDraft}
                       inputMode="decimal"
@@ -263,7 +300,7 @@ const PerformancePolicySection: React.FC = () => {
                     />
                   </label>
                   <label className="space-y-1">
-                    <span className="text-slate-500">سقف درجة اليوم (%)</span>
+                    <span className="text-cc-text-muted">سقف درجة اليوم (%)</span>
                     <input
                       className="ktra-input h-8 w-full" value={draft.presence_day_cap_percent} disabled={!isDraft}
                       inputMode="numeric"
@@ -271,16 +308,16 @@ const PerformancePolicySection: React.FC = () => {
                     />
                   </label>
                 </div>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-cc-text-muted">
                   حضورٌ دون العتبة يخصم من الدرجة المركَّبة، وما زاد عليها يرفعها حتى السقف؛
                   وعتبةُ صفرٍ تُطفئ أثرَ الحضور كلَّه.
                 </p>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-cc-text-muted">
                   سريان: {row.effective_from ? formatDateValue(row.effective_from) : "—"}
                   {row.effective_to && ` حتى ${formatDateValue(row.effective_to)}`}
                   {row.activation_reason && ` · السبب: ${row.activation_reason}`}
                 </p>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-cc-border">
                   {isDraft && (
                     <button type="button" disabled={busy} onClick={() => saveDraft(row)} className="ktra-btn">
                       <Save className="h-3.5 w-3.5" /> حفظ
@@ -297,11 +334,11 @@ const PerformancePolicySection: React.FC = () => {
                   {isDraft && (
                     <>
                       <input
-                        className="ktra-input h-8 flex-1" placeholder="سبب التفعيل"
+                        className="ktra-input h-8 flex-1 min-w-[140px]" placeholder="سبب التفعيل"
                         value={reasons[row.id] ?? ""}
                         onChange={(event) => setReasons((current) => ({ ...current, [row.id]: event.target.value }))}
                       />
-                      <label className="flex items-center gap-1 text-xs text-slate-500">
+                      <label className="flex items-center gap-1.5 text-xs text-cc-text-muted">
                         يسري من
                         <input
                           type="date" className="ktra-input h-8" min={todayIso()}
@@ -315,7 +352,7 @@ const PerformancePolicySection: React.FC = () => {
                     </>
                   )}
                 </div>
-              </article>
+              </CcCard>
             );
           })}
         </div>
@@ -473,44 +510,64 @@ const CompensationPolicySection: React.FC = () => {
   return (
     <div className="space-y-4">
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700" role="alert">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-400" role="alert">
           {error}
         </div>
       )}
-      <button type="button" onClick={createDraft} disabled={busyKey === "create"} className="ktra-btn ktra-btn-primary">
-        <Plus className="h-3.5 w-3.5" /> مسودة سياسة تعويض جديدة
-      </button>
+
+      <CcSectionTitle
+        title="سياسات تعويض الموظفين"
+        badge={rows.length > 0 ? rows.length : undefined}
+        action={
+          <button
+            type="button"
+            onClick={createDraft}
+            disabled={busyKey === "create"}
+            className="ktra-btn ktra-btn-primary"
+          >
+            <Plus className="h-3.5 w-3.5" /> مسودة سياسة تعويض جديدة
+          </button>
+        }
+      />
 
       {preview && (
-        <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-900">
+        <div className="rounded-lg border border-sky-500/30 bg-sky-500/10 p-3 text-xs text-sky-300">
           <p className="font-semibold">معاينة v{preview.draft.version}</p>
           <p>{preview.note}</p>
         </div>
       )}
 
       {loading ? (
-        <div className="flex items-center gap-2 py-4 text-sm text-slate-500"><Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل…</div>
-      ) : rows.length === 0 ? (
-        <p className="text-sm text-slate-500">لا توجد سياسة تعويض بعد — قيمُ التعويض الافتراضيّة المضبوطة في الخادم مطبَّقة ضمنيّاً.</p>
-      ) : (
         <div className="space-y-3">
+          <div className="flex items-center gap-2 py-2 text-sm text-cc-text-muted">
+            <Loader2 className="h-4 w-4 animate-spin text-sky-400" /> جارٍ التحميل…
+          </div>
+          <CcSkeleton variant="card" count={2} />
+        </div>
+      ) : rows.length === 0 ? (
+        <CcEmpty
+          title="لا توجد سياسة تعويض بعد"
+          hint="قيمُ التعويض الافتراضيّة المضبوطة في الخادم مطبَّقة ضمنيّاً."
+        />
+      ) : (
+        <div className="space-y-4">
           {rows.map((row) => {
             const draft = drafts[row.id] ?? toCompDraft(row);
             const isDraft = row.status === "draft";
             const busy = Boolean(busyKey && busyKey.split(":")[1] === String(row.id));
             return (
-              <article key={row.id} className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="font-bold">
-                    سياسة تعويض v{row.version} · {row.employee ? `موظف #${row.employee} (${row.employee_name ?? "—"})` : "عامة لكل الموظفين"}
-                  </p>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs">
-                    {PILOT_POLICY_EFFECTIVE_STATE_LABEL[row.effective_state]}
-                  </span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 text-xs sm:grid-cols-3">
+              <CcCard key={row.id} className="p-5 space-y-4">
+                <CcSectionTitle
+                  title={`سياسة تعويض v${row.version} · ${row.employee ? `موظف #${row.employee} (${row.employee_name ?? "—"})` : "عامة لكل الموظفين"}`}
+                  action={
+                    <CcPill tone={EFFECTIVE_STATE_TONE[row.effective_state]} dot>
+                      {PILOT_POLICY_EFFECTIVE_STATE_LABEL[row.effective_state]}
+                    </CcPill>
+                  }
+                />
+                <div className="grid grid-cols-2 gap-3 text-xs sm:grid-cols-3">
                   <label className="space-y-1">
-                    <span className="text-slate-500">نطاق: معرّف موظف (فارغ = عامة)</span>
+                    <span className="text-cc-text-muted">نطاق: معرّف موظف (فارغ = عامة)</span>
                     <input
                       className="ktra-input h-8 w-full" value={draft.employee} disabled={!isDraft} inputMode="numeric"
                       onChange={(event) => updateDraft(row, { employee: event.target.value })}
@@ -518,7 +575,7 @@ const CompensationPolicySection: React.FC = () => {
                   </label>
                   {(Object.keys(COMP_FIELD_LABELS) as (keyof CompDraft)[]).map((field) => (
                     <label key={field} className="space-y-1">
-                      <span className="text-slate-500">{COMP_FIELD_LABELS[field]}</span>
+                      <span className="text-cc-text-muted">{COMP_FIELD_LABELS[field]}</span>
                       <input
                         className="ktra-input h-8 w-full" value={draft[field]} disabled={!isDraft} inputMode="decimal"
                         onChange={(event) => updateDraft(row, { [field]: event.target.value })}
@@ -527,7 +584,7 @@ const CompensationPolicySection: React.FC = () => {
                   ))}
                 </div>
                 <label className="block space-y-1 text-xs">
-                  <span className="text-slate-500">
+                  <span className="text-cc-text-muted">
                     شرح شروط الصرف — يقرؤه الموظّف في صفحته الشخصيّة
                   </span>
                   <textarea
@@ -537,12 +594,12 @@ const CompensationPolicySection: React.FC = () => {
                     onChange={(event) => updateDraft(row, { pay_terms_note: event.target.value })}
                   />
                 </label>
-                <p className="text-[11px] text-slate-500">
+                <p className="text-[11px] text-cc-text-muted">
                   سريان: {row.effective_from ? formatDateValue(row.effective_from) : "—"}
                   {row.effective_to && ` حتى ${formatDateValue(row.effective_to)}`}
                   {row.activation_reason && ` · السبب: ${row.activation_reason}`}
                 </p>
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-cc-border">
                   {isDraft && (
                     <button type="button" disabled={busy} onClick={() => saveDraft(row)} className="ktra-btn">
                       <Save className="h-3.5 w-3.5" /> حفظ
@@ -559,11 +616,11 @@ const CompensationPolicySection: React.FC = () => {
                   {isDraft && (
                     <>
                       <input
-                        className="ktra-input h-8 flex-1" placeholder="سبب التفعيل"
+                        className="ktra-input h-8 flex-1 min-w-[140px]" placeholder="سبب التفعيل"
                         value={reasons[row.id] ?? ""}
                         onChange={(event) => setReasons((current) => ({ ...current, [row.id]: event.target.value }))}
                       />
-                      <label className="flex items-center gap-1 text-xs text-slate-500">
+                      <label className="flex items-center gap-1.5 text-xs text-cc-text-muted">
                         يسري من
                         <input
                           type="date" className="ktra-input h-8" min={todayIso()}
@@ -577,7 +634,7 @@ const CompensationPolicySection: React.FC = () => {
                     </>
                   )}
                 </div>
-              </article>
+              </CcCard>
             );
           })}
         </div>
@@ -588,25 +645,15 @@ const CompensationPolicySection: React.FC = () => {
 
 /** شاشة إعدادات الأداء (٤٠/٣٠/٢٠/١٠) وإعدادات تعويض الموظف — كلٌّ بنسخٍ مؤرَّخة (210-D، §٥، §٧، §٨). */
 export const PilotSettingsPanel: React.FC = () => {
-  const [section, setSection] = useState<"performance" | "compensation">("performance");
+  const [section, setSection] = useState<string>("performance");
+  const tabs = [
+    { key: "performance", label: "سياسة تقييم الأداء" },
+    { key: "compensation", label: "سياسة تعويض الموظف" },
+  ];
+
   return (
-    <section className="space-y-4">
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-2">
-        <button
-          type="button"
-          onClick={() => setSection("performance")}
-          className={`px-3 py-1.5 text-sm font-bold rounded-lg ${section === "performance" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}
-        >
-          سياسة تقييم الأداء
-        </button>
-        <button
-          type="button"
-          onClick={() => setSection("compensation")}
-          className={`px-3 py-1.5 text-sm font-bold rounded-lg ${section === "compensation" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-700"}`}
-        >
-          سياسة تعويض الموظف
-        </button>
-      </div>
+    <section className="space-y-6">
+      <CcTabs tabs={tabs} active={section} onChange={setSection} />
       {section === "performance" ? <PerformancePolicySection /> : <CompensationPolicySection />}
     </section>
   );

@@ -22,9 +22,51 @@ import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import {
+  CcAvatar,
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcTable,
+  CcThead,
+  CcTh,
+  CcTr,
+  CcTd,
+} from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذا الإجراء متاح لمدير العمليات وحده.", "تعذّر إتمام العملية.");
+
+const meetingStatusTone = (status: string): "neutral" | "accent" | "success" | "warning" | "danger" => {
+  switch (status) {
+    case "scheduled":
+      return "accent";
+    case "finished":
+      return "success";
+    case "cancelled":
+      return "danger";
+    default:
+      return "neutral";
+  }
+};
+
+const attendanceStatusTone = (status: string): "neutral" | "accent" | "success" | "warning" | "danger" => {
+  switch (status) {
+    case "attended":
+      return "success";
+    case "absent":
+      return "danger";
+    case "excused_pending":
+      return "warning";
+    case "excused_accepted":
+      return "accent";
+    case "excused_rejected":
+      return "danger";
+    default:
+      return "neutral";
+  }
+};
 
 interface MeetingFormState {
   title: string;
@@ -73,38 +115,38 @@ const MeetingForm: React.FC<{
 
   return (
     <div className="space-y-2">
-      {error && <p className="text-xs text-rose-600">{error}</p>}
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
         <input
           type="text"
           value={form.title}
           onChange={(event) => set("title", event.target.value)}
           placeholder="عنوان الاجتماع"
-          className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
         <input
           type="text"
           value={form.meeting_link}
           onChange={(event) => set("meeting_link", event.target.value)}
           placeholder="رابط الاجتماع"
-          className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
-        <label className="flex flex-col gap-0.5 text-[11px] text-slate-500">
+        <label className="flex flex-col gap-0.5 text-[11px] text-cc-text-muted">
           البداية
           <input
             type="datetime-local"
             value={form.start}
             onChange={(event) => set("start", event.target.value)}
-            className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text focus:outline-none focus:ring-1 focus:ring-sky-500"
           />
         </label>
-        <label className="flex flex-col gap-0.5 text-[11px] text-slate-500">
+        <label className="flex flex-col gap-0.5 text-[11px] text-cc-text-muted">
           النهاية
           <input
             type="datetime-local"
             value={form.end}
             onChange={(event) => set("end", event.target.value)}
-            className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+            className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text focus:outline-none focus:ring-1 focus:ring-sky-500"
           />
         </label>
         <textarea
@@ -112,7 +154,7 @@ const MeetingForm: React.FC<{
           onChange={(event) => set("agenda", event.target.value)}
           placeholder="جدول الأعمال (اختياري)"
           rows={2}
-          className="md:col-span-2 px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="md:col-span-2 rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
       </div>
       <div className="flex gap-2">
@@ -120,7 +162,7 @@ const MeetingForm: React.FC<{
           type="button"
           disabled={busy}
           onClick={handleSubmit}
-          className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50 transition"
         >
           {busy ? "..." : submitLabel}
         </button>
@@ -128,7 +170,7 @@ const MeetingForm: React.FC<{
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-lg bg-slate-100 px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-200"
+            className="rounded-lg bg-cc-surface-2 border border-cc-border px-3.5 py-1.5 text-xs font-bold text-cc-text-muted hover:text-cc-text transition"
           >
             إلغاء
           </button>
@@ -163,15 +205,22 @@ const InvitePicker: React.FC<{
         setEmployees(rows);
         setAlreadyInvited(new Set(attendance.map((row) => row.employee)));
       })
-      .catch((cause) => { if (!cancelled) toast(displayError(cause), "error"); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
+      .catch((cause) => {
+        if (!cancelled) toast(displayError(cause), "error");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [meeting.id, toast]);
 
   const toggle = (id: number) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
@@ -195,21 +244,21 @@ const InvitePicker: React.FC<{
   };
 
   return (
-    <div className="rounded-xl border border-blue-200 bg-blue-50 p-4 space-y-3" dir="rtl">
-      <h3 className="text-xs font-bold text-blue-900">دعوةُ موظّفين إلى «{meeting.title}»</h3>
+    <CcCard tone="accent" className="p-4 space-y-3" dir="rtl">
+      <h3 className="text-xs font-bold text-sky-400">دعوةُ موظّفين إلى «{meeting.title}»</h3>
       {loading ? (
-        <p className="text-xs text-slate-500">جاري التحميل...</p>
+        <p className="text-xs text-cc-text-muted">جاري التحميل...</p>
       ) : !employees || employees.length === 0 ? (
-        <p className="text-xs text-slate-500">لا موظّفو منصّةٍ نشطون.</p>
+        <p className="text-xs text-cc-text-muted">لا موظّفو منصّةٍ نشطون.</p>
       ) : (
-        <ul className="max-h-52 overflow-y-auto space-y-1 rounded-lg bg-white p-2 border border-blue-100">
+        <ul className="max-h-52 overflow-y-auto space-y-1 rounded-xl bg-cc-surface p-2 border border-cc-border">
           {employees.map((employee) => {
             const invited = alreadyInvited.has(employee.id);
             return (
               <li key={employee.id}>
                 <label
-                  className={`flex items-center gap-2 rounded px-1 py-1 text-xs ${
-                    invited ? "text-slate-400" : "text-slate-700 hover:bg-slate-50"
+                  className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-xs transition ${
+                    invited ? "text-cc-text-muted/60" : "text-cc-text hover:bg-cc-surface-2"
                   }`}
                 >
                   <input
@@ -217,11 +266,16 @@ const InvitePicker: React.FC<{
                     checked={invited || selected.has(employee.id)}
                     disabled={invited}
                     onChange={() => toggle(employee.id)}
+                    className="rounded border-cc-border"
                   />
                   <span>
                     {employee.username} {employee.specialty ? `— ${employee.specialty}` : ""}
                   </span>
-                  {invited && <span className="text-[10px] font-bold text-blue-600">مدعوٌّ سلفاً</span>}
+                  {invited && (
+                    <CcPill tone="accent" className="mr-auto">
+                      مدعوٌّ سلفاً
+                    </CcPill>
+                  )}
                 </label>
               </li>
             );
@@ -233,19 +287,19 @@ const InvitePicker: React.FC<{
           type="button"
           disabled={busy || loading}
           onClick={() => void submit()}
-          className="rounded-lg bg-blue-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-blue-700 disabled:opacity-50"
+          className="rounded-lg bg-sky-600 px-3.5 py-1.5 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50 transition"
         >
           {busy ? "..." : `دعوة (${formatNumber(selected.size)})`}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="rounded-lg bg-white px-3.5 py-1.5 text-xs font-bold text-slate-600 hover:bg-slate-100 border border-slate-200"
+          className="rounded-lg bg-cc-surface-2 border border-cc-border px-3.5 py-1.5 text-xs font-bold text-cc-text-muted hover:text-cc-text transition"
         >
           إغلاق
         </button>
       </div>
-    </div>
+    </CcCard>
   );
 };
 
@@ -266,7 +320,9 @@ const AttendanceBook: React.FC<{ meeting: PlatformMeetingRow; onClose: () => voi
     }
   }, [meeting.id, toast]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // العدُّ في دالّةٍ خالصةٍ يفحصها `npm test` — منطقٌ يسكن `useMemo` لا يراه شيء.
   const counts = useMemo(() => tallyAttendance(rows), [rows]);
@@ -285,103 +341,108 @@ const AttendanceBook: React.FC<{ meeting: PlatformMeetingRow; onClose: () => voi
   };
 
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3" dir="rtl">
+    <CcCard className="p-4 space-y-4" dir="rtl">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold text-slate-800">دفترُ حضور «{meeting.title}»</h3>
-        <button type="button" onClick={onClose} className="text-[11px] text-slate-500 underline">
+        <h3 className="text-xs font-bold text-cc-text">دفترُ حضور «{meeting.title}»</h3>
+        <button type="button" onClick={onClose} className="text-xs text-sky-400 hover:underline">
           إغلاق
         </button>
       </div>
       {loading ? (
-        <p className="text-xs text-slate-400">جاري التحميل...</p>
+        <p className="text-xs text-cc-text-muted">جاري التحميل...</p>
       ) : !rows || rows.length === 0 ? (
-        <p className="text-xs text-slate-400">لا مدعوّون بعد.</p>
+        <CcEmpty title="لا مدعوّون بعد." />
       ) : (
         <>
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs font-bold text-slate-600">
-            <span>مدعوّون {formatNumber(counts.total)}</span>
-            <span className="text-emerald-700">حضر {formatNumber(counts.attended)}</span>
-            <span className="text-rose-700">غاب بلا عذر {formatNumber(counts.absent)}</span>
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold">
+            <span className="rounded-lg bg-cc-surface-2 border border-cc-border px-2.5 py-1 text-cc-text">
+              مدعوّون {formatNumber(counts.total)}
+            </span>
+            <span className="rounded-lg bg-emerald-500/15 border border-emerald-500/30 px-2.5 py-1 text-emerald-400">
+              حضر {formatNumber(counts.attended)}
+            </span>
+            <span className="rounded-lg bg-rose-500/15 border border-rose-500/30 px-2.5 py-1 text-rose-400">
+              غاب بلا عذر {formatNumber(counts.absent)}
+            </span>
             {counts.excusedPending > 0 && (
-              <span className="text-amber-700">عذرٌ بانتظار البتّ {formatNumber(counts.excusedPending)}</span>
+              <span className="rounded-lg bg-amber-500/15 border border-amber-500/30 px-2.5 py-1 text-amber-400">
+                عذرٌ بانتظار البتّ {formatNumber(counts.excusedPending)}
+              </span>
             )}
             {counts.excusedAccepted > 0 && (
-              <span className="text-blue-700">عذرٌ مقبول {formatNumber(counts.excusedAccepted)}</span>
+              <span className="rounded-lg bg-sky-500/15 border border-sky-500/30 px-2.5 py-1 text-sky-400">
+                عذرٌ مقبول {formatNumber(counts.excusedAccepted)}
+              </span>
             )}
             {counts.excusedRejected > 0 && (
-              <span className="text-rose-700">عذرٌ مرفوض {formatNumber(counts.excusedRejected)}</span>
+              <span className="rounded-lg bg-rose-500/15 border border-rose-500/30 px-2.5 py-1 text-rose-400">
+                عذرٌ مرفوض {formatNumber(counts.excusedRejected)}
+              </span>
             )}
           </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-slate-500 border-b border-slate-200">
-                  <th className="py-2 pr-2 text-right">الموظّف</th>
-                  <th className="py-2 px-2 text-right">الحالة</th>
-                  <th className="py-2 px-2 text-right">وقت الدخول</th>
-                  <th className="py-2 px-2 text-right">سبب العذر</th>
-                  <th className="py-2 px-2 text-right">البتّ</th>
-                  <th className="py-2 px-2 text-right"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 align-top">
-                    <td className="py-1.5 pr-2 font-medium text-slate-700">{row.employee_name}</td>
-                    <td className="py-1.5 px-2">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                          row.status === "attended"
-                            ? "bg-emerald-100 text-emerald-700"
-                            : row.status === "excused_pending"
-                            ? "bg-amber-100 text-amber-700"
-                            : row.status === "excused_accepted"
-                            ? "bg-blue-100 text-blue-700"
-                            : row.status === "excused_rejected"
-                            ? "bg-rose-100 text-rose-700"
-                            : "bg-slate-100 text-slate-600"
-                        }`}
-                      >
-                        {row.status_display}
-                      </span>
-                    </td>
-                    <td className="py-1.5 px-2">{row.checked_in_at ? formatDateTimeValue(row.checked_in_at) : "—"}</td>
-                    <td className="py-1.5 px-2">{row.excuse_note || "—"}</td>
-                    <td className="py-1.5 px-2 text-slate-500">
-                      {row.excuse_decided_by_name
-                        ? `${row.excuse_decided_by_name} — ${formatDateTimeValue(row.excuse_decided_at)}`
-                        : "—"}
-                    </td>
-                    <td className="py-1.5 px-2 whitespace-nowrap">
-                      {row.status === "excused_pending" && (
-                        <div className="flex gap-1">
-                          <button
-                            type="button"
-                            disabled={busyId === row.id}
-                            onClick={() => void decide(row, true)}
-                            className="rounded-lg bg-emerald-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-emerald-700 disabled:opacity-50"
-                          >
-                            قبول
-                          </button>
-                          <button
-                            type="button"
-                            disabled={busyId === row.id}
-                            onClick={() => void decide(row, false)}
-                            className="rounded-lg bg-rose-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-rose-700 disabled:opacity-50"
-                          >
-                            رفض
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <CcTable>
+            <CcThead>
+              <tr>
+                <CcTh>الموظّف</CcTh>
+                <CcTh>الحالة</CcTh>
+                <CcTh>وقت الدخول</CcTh>
+                <CcTh>سبب العذر</CcTh>
+                <CcTh>البتّ</CcTh>
+                <CcTh />
+              </tr>
+            </CcThead>
+            <tbody>
+              {rows.map((row) => (
+                <CcTr key={row.id}>
+                  <CcTd className="font-medium text-cc-text">
+                    <div className="flex items-center gap-2">
+                      <CcAvatar name={row.employee_name} size="sm" />
+                      <span>{row.employee_name}</span>
+                    </div>
+                  </CcTd>
+                  <CcTd>
+                    <CcPill tone={attendanceStatusTone(row.status)}>
+                      {row.status_display}
+                    </CcPill>
+                  </CcTd>
+                  <CcTd className="text-cc-text-muted">
+                    {row.checked_in_at ? formatDateTimeValue(row.checked_in_at) : "—"}
+                  </CcTd>
+                  <CcTd className="text-cc-text">{row.excuse_note || "—"}</CcTd>
+                  <CcTd className="text-cc-text-muted">
+                    {row.excuse_decided_by_name
+                      ? `${row.excuse_decided_by_name} — ${formatDateTimeValue(row.excuse_decided_at)}`
+                      : "—"}
+                  </CcTd>
+                  <CcTd className="whitespace-nowrap">
+                    {row.status === "excused_pending" && (
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          disabled={busyId === row.id}
+                          onClick={() => void decide(row, true)}
+                          className="rounded-lg bg-emerald-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-emerald-500 disabled:opacity-50 transition"
+                        >
+                          قبول
+                        </button>
+                        <button
+                          type="button"
+                          disabled={busyId === row.id}
+                          onClick={() => void decide(row, false)}
+                          className="rounded-lg bg-rose-600 px-2.5 py-1 text-[11px] font-bold text-white hover:bg-rose-500 disabled:opacity-50 transition"
+                        >
+                          رفض
+                        </button>
+                      </div>
+                    )}
+                  </CcTd>
+                </CcTr>
+              ))}
+            </tbody>
+          </CcTable>
         </>
       )}
-    </div>
+    </CcCard>
   );
 };
 
@@ -418,7 +479,9 @@ export const MeetingsPanel: React.FC = () => {
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   const submitCreate = async (form: MeetingFormState) => {
     setCreating(true);
@@ -481,85 +544,112 @@ export const MeetingsPanel: React.FC = () => {
   };
 
   return (
-    <section className="space-y-4" dir="rtl">
-      <div className="flex items-center gap-2">
-        <CalendarClock className="h-4 w-4 text-slate-500" />
-        <h2 className="text-sm font-bold text-slate-800">الاجتماعات</h2>
-      </div>
+    <section className="space-y-6" dir="rtl">
+      <CcSectionTitle
+        title="الاجتماعات"
+        badge={meetings ? meetings.length : undefined}
+      />
 
-      <div className="rounded-xl border border-slate-200 bg-white p-4">
-        <h3 className="mb-2 text-xs font-bold text-slate-700">اجتماعٌ جديد</h3>
+      <CcCard className="p-4 sm:p-5">
+        <h3 className="mb-3 text-xs font-bold text-cc-text">اجتماعٌ جديد</h3>
         <MeetingForm key={formSeq} submitLabel="إنشاء الاجتماع" busy={creating} onSubmit={submitCreate} />
-      </div>
+      </CcCard>
 
       {error && (
-        <div className="flex items-center justify-between gap-2 rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs text-rose-800">
+        <div className="flex items-center justify-between gap-2 rounded-xl border border-rose-500/30 bg-rose-500/10 p-3 text-xs text-rose-300">
           <span>{error}</span>
-          <button type="button" onClick={() => void load()} className="rounded-lg bg-rose-100 px-3 py-1 text-[11px] font-bold hover:bg-rose-200">
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="rounded-lg bg-rose-500/20 px-3 py-1 text-[11px] font-bold text-rose-200 hover:bg-rose-500/30 transition"
+          >
             إعادة المحاولة
           </button>
         </div>
       )}
 
       {loading ? (
-        <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+        <CcCard className="p-6">
+          <div className="py-12 text-center text-xs text-cc-text-muted">جاري التحميل...</div>
+        </CcCard>
       ) : !meetings || meetings.length === 0 ? (
-        <div className="rounded-xl border border-slate-200 bg-white p-6 text-center text-xs text-slate-400">
-          لا اجتماعات مجدولة بعد.
-        </div>
+        <CcEmpty title="لا اجتماعات مجدولة بعد." />
       ) : (
         <ul className="space-y-3">
           {meetings.map((meeting) => (
-            <li key={meeting.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-3">
-              <div className="flex flex-wrap items-start justify-between gap-2">
-                <div>
-                  <p className="text-xs font-bold text-slate-800">{meeting.title}</p>
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    {formatDateTimeValue(meeting.start)} — {formatDateTimeValue(meeting.end)}
-                  </p>
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-slate-500">
-                    <Users className="h-3 w-3" /> مدعوّون: {formatNumber(meeting.invited_count)}
-                  </p>
-                  {meeting.agenda && <p className="mt-1 text-[11px] text-slate-500">{meeting.agenda}</p>}
-                  <p className="mt-1 flex items-center gap-1 text-[11px] text-blue-600">
-                    <Video className="h-3 w-3" /> {meeting.meeting_link}
-                  </p>
+            <li key={meeting.id}>
+            <CcCard className="p-4 space-y-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="flex items-start gap-3 min-w-0 flex-1">
+                  {meeting.created_by_name && (
+                    <CcAvatar name={meeting.created_by_name} size="md" />
+                  )}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h4 className="text-sm font-bold text-cc-text">{meeting.title}</h4>
+                      {meeting.created_by_name && (
+                        <span className="text-[11px] text-cc-text-muted">
+                          بواسطة {meeting.created_by_name}
+                        </span>
+                      )}
+                    </div>
+                    <p className="mt-1 flex items-center gap-1.5 text-xs text-cc-text-muted">
+                      <CalendarClock className="h-3.5 w-3.5 text-sky-400 shrink-0" />
+                      <span>
+                        {formatDateTimeValue(meeting.start)} — {formatDateTimeValue(meeting.end)}
+                      </span>
+                    </p>
+                    <div className="mt-1 flex items-center gap-3 text-xs text-cc-text-muted flex-wrap">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3.5 w-3.5 text-cc-text-muted shrink-0" />
+                        <span>مدعوّون: {formatNumber(meeting.invited_count)}</span>
+                      </span>
+                      {meeting.meeting_link && (
+                        <span className="flex items-center gap-1 text-sky-400">
+                          <Video className="h-3.5 w-3.5 shrink-0" />
+                          <span className="truncate max-w-xs">{meeting.meeting_link}</span>
+                        </span>
+                      )}
+                    </div>
+                    {meeting.agenda && (
+                      <p className="mt-2 text-xs text-cc-text-muted bg-cc-surface-2/60 rounded-lg p-2 border border-cc-border">
+                        {meeting.agenda}
+                      </p>
+                    )}
+                  </div>
                 </div>
-                <span
-                  className={`rounded-full px-2 py-0.5 text-[11px] font-bold ${
-                    meeting.status === "scheduled"
-                      ? "bg-blue-100 text-blue-700"
-                      : meeting.status === "cancelled"
-                      ? "bg-rose-100 text-rose-700"
-                      : "bg-slate-100 text-slate-600"
-                  }`}
-                >
-                  {MEETING_STATUS_LABEL[meeting.status]}
-                </span>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <CcPill tone={meetingStatusTone(meeting.status)}>
+                    {meeting.status_display || MEETING_STATUS_LABEL[meeting.status]}
+                  </CcPill>
+                </div>
               </div>
 
               {meeting.status === "scheduled" && (
                 <>
                   {editingId === meeting.id ? (
-                    <MeetingForm
-                      initial={{
-                        title: meeting.title,
-                        agenda: meeting.agenda,
-                        start: isoToDateTimeLocal(meeting.start),
-                        end: isoToDateTimeLocal(meeting.end),
-                        meeting_link: meeting.meeting_link,
-                      }}
-                      submitLabel="حفظ التعديل"
-                      busy={busyId === meeting.id}
-                      onCancel={() => setEditingId(null)}
-                      onSubmit={(form) => void submitEdit(meeting, form)}
-                    />
+                    <div className="mt-3 pt-3 border-t border-cc-border">
+                      <MeetingForm
+                        initial={{
+                          title: meeting.title,
+                          agenda: meeting.agenda,
+                          start: isoToDateTimeLocal(meeting.start),
+                          end: isoToDateTimeLocal(meeting.end),
+                          meeting_link: meeting.meeting_link,
+                        }}
+                        submitLabel="حفظ التعديل"
+                        busy={busyId === meeting.id}
+                        onCancel={() => setEditingId(null)}
+                        onSubmit={(form) => void submitEdit(meeting, form)}
+                      />
+                    </div>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap gap-2 pt-2 border-t border-cc-border">
                       <button
                         type="button"
                         onClick={() => setEditingId(meeting.id)}
-                        className="rounded-lg bg-slate-100 px-3 py-1.5 text-[11px] font-bold text-slate-700 hover:bg-slate-200"
+                        className="rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-[11px] font-bold text-cc-text hover:bg-cc-surface transition"
                       >
                         تعديل
                       </button>
@@ -567,14 +657,14 @@ export const MeetingsPanel: React.FC = () => {
                         type="button"
                         disabled={busyId === meeting.id}
                         onClick={() => void cancel(meeting)}
-                        className="rounded-lg bg-rose-50 px-3 py-1.5 text-[11px] font-bold text-rose-700 hover:bg-rose-100 disabled:opacity-50"
+                        className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-1.5 text-[11px] font-bold text-rose-300 hover:bg-rose-500/20 disabled:opacity-50 transition"
                       >
                         إلغاء الاجتماع
                       </button>
                       <button
                         type="button"
                         onClick={() => setInviteMeeting(meeting)}
-                        className="rounded-lg bg-blue-50 px-3 py-1.5 text-[11px] font-bold text-blue-700 hover:bg-blue-100"
+                        className="rounded-lg border border-sky-500/30 bg-sky-500/10 px-3 py-1.5 text-[11px] font-bold text-sky-300 hover:bg-sky-500/20 transition"
                       >
                         دعوة موظّفين
                       </button>
@@ -586,7 +676,7 @@ export const MeetingsPanel: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setAttendanceMeeting(meeting)}
-                className="text-[11px] font-bold text-slate-600 underline"
+                className="text-[11px] font-bold text-sky-400 hover:underline"
               >
                 دفتر الحضور
               </button>
@@ -598,6 +688,7 @@ export const MeetingsPanel: React.FC = () => {
               {attendanceMeeting?.id === meeting.id && (
                 <AttendanceBook meeting={meeting} onClose={() => setAttendanceMeeting(null)} />
               )}
+            </CcCard>
             </li>
           ))}
         </ul>

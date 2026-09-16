@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { CheckCircle2, Loader2, Search } from "lucide-react";
+import { CheckCircle2, Clock, Loader2, Search, ShieldAlert, Users } from "lucide-react";
 
 import {
   closeCompensationMonth,
@@ -12,6 +12,12 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import {
+  CcCard,
+  CcPill,
+  CcSectionTitle,
+  CcStatTile,
+} from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لإغلاق مستحقّات الشهر.", "تعذّر إتمام العملية.");
@@ -73,75 +79,127 @@ export const CompensationMonthClosePanel: React.FC = () => {
   };
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900">إغلاق مستحقّات الشهر</h2>
+    <section className="space-y-6">
+      <CcSectionTitle title="إغلاق مستحقّات الشهر" />
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700" role="alert">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-400" role="alert">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <label className="space-y-1 text-xs">
-          <span className="text-slate-500">السنة</span>
-          <input
-            type="number" className="ktra-input h-9 w-24" value={year}
-            onChange={(event) => setYear(Number(event.target.value))}
-          />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-slate-500">الشهر</span>
-          <input
-            type="number" min={1} max={12} className="ktra-input h-9 w-20" value={month}
-            onChange={(event) => setMonth(Number(event.target.value))}
-          />
-        </label>
-        <button type="button" onClick={() => void runPreview()} disabled={loading} className="ktra-btn ktra-btn-primary">
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} معاينة
-        </button>
-      </div>
+      <CcCard className="p-5">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="space-y-1 text-xs">
+            <span className="text-cc-text-muted">السنة</span>
+            <input
+              type="number" className="ktra-input h-9 w-28" value={year}
+              onChange={(event) => setYear(Number(event.target.value))}
+            />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-cc-text-muted">الشهر</span>
+            <input
+              type="number" min={1} max={12} className="ktra-input h-9 w-24" value={month}
+              onChange={(event) => setMonth(Number(event.target.value))}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void runPreview()}
+            disabled={loading}
+            className="ktra-btn ktra-btn-primary"
+          >
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} معاينة
+          </button>
+        </div>
+      </CcCard>
 
       {preview && (
-        <div className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-            <p><span className="text-slate-500">الحالة:</span> {preview.already_closed ? "مُغلَق سلفاً" : "لم يُغلَق بعد"}</p>
-            <p><span className="text-slate-500">موظفون نشطون:</span> {formatNumber(preview.eligible_employees)}</p>
-            <p><span className="text-slate-500">مهلة المراجعة:</span> {formatNumber(preview.review_grace_period_hours)} ساعة</p>
+        <CcCard className="p-5 space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <CcCard className="p-4">
+              <div className="flex flex-col justify-between h-full gap-2">
+                <span className="text-xs font-semibold text-cc-text-muted">حالة الشهر</span>
+                <div>
+                  <CcPill tone={preview.already_closed ? "success" : "warning"} dot>
+                    {preview.already_closed ? "مُغلَق سلفاً" : "لم يُغلَق بعد"}
+                  </CcPill>
+                </div>
+              </div>
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="موظفون نشطون"
+                value={preview.eligible_employees}
+                tone="accent"
+                icon={<Users className="h-4 w-4" />}
+              />
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="مهلة المراجعة"
+                value={preview.review_grace_period_hours}
+                unit="ساعة"
+                tone="neutral"
+                icon={<Clock className="h-4 w-4" />}
+              />
+            </CcCard>
           </div>
 
           {preview.blockers.length > 0 ? (
-            <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800">
-              <p className="font-bold">{formatNumber(preview.blockers.length)} تسليماً بانتظار المراجعة يمنع الإغلاق:</p>
-              <p>أرقام التسليمات: {preview.blockers.map((id) => `#${id}`).join("، ")}</p>
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 text-xs text-amber-300">
+              <p className="font-bold flex items-center gap-1.5">
+                <ShieldAlert className="h-4 w-4 text-amber-400" />
+                {formatNumber(preview.blockers.length)} تسليماً بانتظار المراجعة يمنع الإغلاق:
+              </p>
+              <p className="mt-1.5 text-cc-text-muted">أرقام التسليمات: {preview.blockers.map((id) => `#${id}`).join("، ")}</p>
             </div>
           ) : (
-            <p className="flex items-center gap-1 text-xs font-semibold text-emerald-700">
-              <CheckCircle2 className="h-3.5 w-3.5" /> لا تسليماتٍ معلَّقةً تمنع الإغلاق.
+            <p className="flex items-center gap-1.5 text-xs font-semibold text-emerald-400">
+              <CheckCircle2 className="h-4 w-4" /> لا تسليماتٍ معلَّقةً تمنع الإغلاق.
             </p>
           )}
 
           {preview.close && (
-            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs">
-              <p>سطور رواتب: {formatNumber(preview.close.salary_lines_created)} · سطور عمولات: {formatNumber(preview.close.commission_lines_created)}</p>
-              <p>لقطات أداء: {formatNumber(preview.close.snapshots_captured)} · أُغلق في {formatDateTimeValue(preview.close.created_at)}</p>
+            <div className="space-y-3 pt-4 border-t border-cc-border">
+              <h3 className="text-xs font-bold text-cc-text">تفاصيل الإغلاق المسجَّل</h3>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <CcCard className="p-4">
+                  <CcStatTile label="سطور رواتب" value={preview.close.salary_lines_created} tone="accent" />
+                </CcCard>
+                <CcCard className="p-4">
+                  <CcStatTile label="سطور عمولات" value={preview.close.commission_lines_created} tone="violet" />
+                </CcCard>
+                <CcCard className="p-4">
+                  <CcStatTile
+                    label="لقطات أداء"
+                    value={preview.close.snapshots_captured}
+                    tone="success"
+                    hint={`أُغلق في ${formatDateTimeValue(preview.close.created_at)}`}
+                  />
+                </CcCard>
+              </div>
             </div>
           )}
 
           {!preview.already_closed && (
-            <button
-              type="button" onClick={() => void runClose()}
-              disabled={closing || preview.blockers.length > 0}
-              className="ktra-btn ktra-btn-primary"
-            >
-              {closing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} إغلاق الشهر
-            </button>
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => void runClose()}
+                disabled={closing || preview.blockers.length > 0}
+                className="ktra-btn ktra-btn-primary"
+              >
+                {closing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />} إغلاق الشهر
+              </button>
+            </div>
           )}
-        </div>
+        </CcCard>
       )}
 
       {closeResult && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+        <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-xs font-semibold text-emerald-400">
           تم إغلاق {formatNumber(closeResult.period_month)}/{formatNumber(closeResult.period_year)}: {formatNumber(closeResult.salary_lines_created)} سطر راتب و{formatNumber(closeResult.commission_lines_created)} سطر عمولة.
         </div>
       )}

@@ -17,13 +17,27 @@ import {
   type EmployeePilotPerformance,
   type EmployeeSalaryLineRow,
   type EmployeeWalletSummary,
+  type WalletLineStatus,
 } from "../../services/platformPilotApi";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
+import { ccScoreTone, type CcTone } from "../../utils/ccTone";
 import { PilotAxesTable } from "./PilotAxesTable";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcStatTile,
+  CcTable,
+  CcTd,
+  CcTh,
+  CcThead,
+  CcTr,
+} from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "ليس لديك تصريح لاستعراض محفظة موظف آخر.", "تعذّر تحميل البيانات.");
@@ -33,6 +47,15 @@ const now = new Date();
 type WalletLine = EmployeeSalaryLineRow | AcquisitionCommissionLineRow;
 
 const isCommissionLine = (line: WalletLine): line is AcquisitionCommissionLineRow => "acquisition" in line;
+
+const WALLET_STATUS_TONE: Record<WalletLineStatus, CcTone> = {
+  pending: "warning",
+  eligible: "warning",
+  approved: "accent",
+  payable: "accent",
+  paid: "success",
+  reversed: "danger",
+};
 
 /** محفظة الموظّف الشهرية وتفصيل محاور تقييمه — «افتح مصدر كلّ سطر» (210-D، §٢، §٥، §٧، §٣٤). */
 export const EmployeeWalletPanel: React.FC = () => {
@@ -170,59 +193,68 @@ export const EmployeeWalletPanel: React.FC = () => {
   };
 
   return (
-    <section className="space-y-4">
-      <h2 className="text-lg font-bold text-slate-900">محفظة الموظّف</h2>
+    <section className="space-y-6">
+      <CcSectionTitle title="محفظة الموظّف" />
 
       {error && (
-        <div className="rounded-lg border border-rose-200 bg-rose-50 p-3 text-xs font-semibold text-rose-700" role="alert">
+        <div className="rounded-lg border border-rose-500/30 bg-rose-500/10 p-3 text-xs font-semibold text-rose-400" role="alert">
           {error}
         </div>
       )}
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-        <label className="space-y-1 text-xs">
-          <span className="text-slate-500">الموظّف</span>
-          <select
-            className="ktra-input h-9 min-w-[220px]"
-            value={employeeId ?? ""}
-            onChange={(event) => setEmployeeId(event.target.value ? Number(event.target.value) : null)}
+      <CcCard className="p-5">
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="space-y-1 text-xs">
+            <span className="text-cc-text-muted">الموظّف</span>
+            <select
+              className="ktra-input h-9 min-w-[220px]"
+              value={employeeId ?? ""}
+              onChange={(event) => setEmployeeId(event.target.value ? Number(event.target.value) : null)}
+            >
+              <option value="">اختر موظّفاً…</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>{emp.name} (#{emp.id})</option>
+              ))}
+            </select>
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-cc-text-muted">السنة</span>
+            <input type="number" className="ktra-input h-9 w-28" value={year} onChange={(event) => setYear(Number(event.target.value))} />
+          </label>
+          <label className="space-y-1 text-xs">
+            <span className="text-cc-text-muted">الشهر</span>
+            <input type="number" min={1} max={12} className="ktra-input h-9 w-24" value={month} onChange={(event) => setMonth(Number(event.target.value))} />
+          </label>
+          <button
+            type="button"
+            onClick={() => void load()}
+            disabled={!employeeId || loading}
+            className="ktra-btn ktra-btn-primary"
           >
-            <option value="">اختر موظّفاً…</option>
-            {employees.map((emp) => (
-              <option key={emp.id} value={emp.id}>{emp.name} (#{emp.id})</option>
-            ))}
-          </select>
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-slate-500">السنة</span>
-          <input type="number" className="ktra-input h-9 w-24" value={year} onChange={(event) => setYear(Number(event.target.value))} />
-        </label>
-        <label className="space-y-1 text-xs">
-          <span className="text-slate-500">الشهر</span>
-          <input type="number" min={1} max={12} className="ktra-input h-9 w-20" value={month} onChange={(event) => setMonth(Number(event.target.value))} />
-        </label>
-        <button type="button" onClick={() => void load()} disabled={!employeeId || loading} className="ktra-btn ktra-btn-primary">
-          {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} عرض
-        </button>
-      </div>
+            {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />} عرض
+          </button>
+        </div>
+      </CcCard>
 
       {wallet && (
-        <div className="space-y-4">
-          <div className="grid grid-cols-2 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2">
-            <div className="flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-emerald-600" />
-              <div>
-                <p className="text-xs text-slate-500">مؤكَّد</p>
-                <p className="text-lg font-bold text-emerald-700">{formatNumber(wallet.totals.confirmed)}</p>
-              </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <Wallet className="h-5 w-5 text-amber-600" />
-              <div>
-                <p className="text-xs text-slate-500">معلَّق (بانتظار تسجيل الدفع أو الاعتماد)</p>
-                <p className="text-lg font-bold text-amber-700">{formatNumber(wallet.totals.pending)}</p>
-              </div>
-            </div>
+        <div className="space-y-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <CcCard className="p-4">
+              <CcStatTile
+                label="مؤكَّد"
+                value={wallet.totals.confirmed}
+                tone="success"
+                icon={<Wallet className="h-5 w-5 text-emerald-400" />}
+              />
+            </CcCard>
+            <CcCard className="p-4">
+              <CcStatTile
+                label="معلَّق (بانتظار تسجيل الدفع أو الاعتماد)"
+                value={wallet.totals.pending}
+                tone="warning"
+                icon={<Wallet className="h-5 w-5 text-amber-400" />}
+              />
+            </CcCard>
           </div>
 
           <WalletLinesTable
@@ -237,6 +269,7 @@ export const EmployeeWalletPanel: React.FC = () => {
             onAdjust={doAdjust}
             onTransition={doTransition}
           />
+
           <WalletLinesTable
             title="سطور عمولة الاكتساب"
             lines={wallet.commission_lines}
@@ -253,14 +286,24 @@ export const EmployeeWalletPanel: React.FC = () => {
       )}
 
       {performance && (
-        <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-          <h3 className="text-sm font-bold text-slate-800">كيف يُحسب تقييمي؟ — المحاور الأربعة وأوزانُها في السياسة السارية</h3>
-          <p className="text-xs text-slate-500">{performance.status_message} · حجم العينة: {formatNumber(performance.sample_size)} (الحد الأدنى {formatNumber(performance.min_sample_size)})</p>
+        <CcCard className="p-5 space-y-4">
+          <CcSectionTitle
+            title="كيف يُحسب تقييمي؟ — المحاور الأربعة وأوزانُها في السياسة السارية"
+            subtitle={`${performance.status_message} · حجم العينة: ${formatNumber(performance.sample_size)} (الحد الأدنى ${formatNumber(performance.min_sample_size)})`}
+          />
           {performance.composite_score !== null && (
-            <p className="text-sm font-bold">النتيجة المركّبة: {formatNumber(performance.composite_score)}%</p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <CcCard className="p-4">
+                <CcStatTile
+                  label="النتيجة المركّبة"
+                  value={`${formatNumber(performance.composite_score)}%`}
+                  tone={ccScoreTone(performance.composite_score)}
+                />
+              </CcCard>
+            </div>
           )}
           <PilotAxesTable performance={performance} />
-        </div>
+        </CcCard>
       )}
     </section>
   );
@@ -278,99 +321,100 @@ const WalletLinesTable: React.FC<{
   onAdjust: (line: WalletLine) => void;
   onTransition: (line: WalletLine) => void;
 }> = ({ title, lines, busyLine, reasons, setReasons, adjustAmounts, setAdjustAmounts, onReverse, onAdjust, onTransition }) => (
-  <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-    <h3 className="text-sm font-bold text-slate-800">{title}</h3>
+  <CcCard className="p-5 space-y-4">
+    <CcSectionTitle title={title} badge={lines.length > 0 ? lines.length : undefined} />
     {lines.length === 0 ? (
-      <p className="text-xs text-slate-500">لا سطور لهذا الشهر.</p>
+      <CcEmpty title="لا سطور لهذا الشهر." />
     ) : (
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead>
-            <tr className="border-b border-slate-200 text-slate-500">
-              <th className="py-1.5 pr-2 text-right">المبلغ</th>
-              <th className="py-1.5 px-2 text-right">الحالة</th>
-              <th className="py-1.5 px-2 text-right">السبب/المصدر</th>
-              <th className="py-1.5 px-2 text-right">تسلسل</th>
-              <th className="py-1.5 px-2 text-right">آخر تحديث</th>
-              <th className="py-1.5 px-2 text-right">سبب الإجراء</th>
-              <th className="py-1.5 px-2 text-right">مبلغ التسوية</th>
-              <th className="py-1.5 px-2 text-right"></th>
-            </tr>
-          </thead>
-          <tbody>
-            {lines.map((line) => {
-              const key = `${isCommissionLine(line) ? "commission" : "salary"}:${line.id}`;
-              return (
-                <tr key={key} className="border-b border-slate-100">
-                  <td className="py-1.5 pr-2 font-semibold">{formatNumber(line.amount)}</td>
-                  <td className="py-1.5 px-2">
-                    <span className={`rounded-full px-2 py-0.5 ${line.status === "pending" ? "bg-amber-100 text-amber-700" : "bg-emerald-100 text-emerald-700"}`}>
-                      {line.status_display || WALLET_LINE_STATUS_LABEL[line.status]}
-                    </span>
-                  </td>
-                  <td className="py-1.5 px-2">
-                    {line.status === "pending" && line.pending_reason ? line.pending_reason : (line.reason || "—")}
-                    {isCommissionLine(line) && ` · ${line.company_name} · شهر ${formatNumber(line.commission_month_index)}`}
-                  </td>
-                  <td className="py-1.5 px-2">{formatNumber(line.sequence)}</td>
-                  <td className="py-1.5 px-2">{formatDateTimeValue(line.updated_at)}</td>
-                  <td className="py-1.5 px-2">
-                    <input
-                      className="ktra-input h-7 w-32"
-                      placeholder="سبب العكس/التسوية"
-                      value={reasons[key] ?? ""}
-                      onChange={(event) => setReasons((current) => ({ ...current, [key]: event.target.value }))}
-                    />
-                  </td>
-                  <td className="py-1.5 px-2">
-                    <input
-                      className="ktra-input h-7 w-24"
-                      placeholder="مبلغ"
-                      inputMode="decimal"
-                      value={adjustAmounts[key] ?? ""}
-                      onChange={(event) => setAdjustAmounts((current) => ({ ...current, [key]: event.target.value }))}
-                    />
-                  </td>
-                  <td className="py-1.5 px-2 whitespace-nowrap">
-                    <div className="flex gap-1">
-                      {WALLET_LINE_NEXT_STATUS[line.status] && (
-                        <button
-                          type="button"
-                          disabled={busyLine === `transition:${key}`}
-                          onClick={() => onTransition(line)}
-                          className="ktra-btn h-7 px-2 text-[11px]"
-                        >
-                          → {WALLET_LINE_STATUS_LABEL[WALLET_LINE_NEXT_STATUS[line.status]!]}
-                        </button>
-                      )}
+      <CcTable>
+        <CcThead>
+          <tr>
+            <CcTh>المبلغ</CcTh>
+            <CcTh>الحالة</CcTh>
+            <CcTh>السبب/المصدر</CcTh>
+            <CcTh>تسلسل</CcTh>
+            <CcTh>آخر تحديث</CcTh>
+            <CcTh>سبب الإجراء</CcTh>
+            <CcTh>مبلغ التسوية</CcTh>
+            <CcTh></CcTh>
+          </tr>
+        </CcThead>
+        <tbody>
+          {lines.map((line) => {
+            const key = `${isCommissionLine(line) ? "commission" : "salary"}:${line.id}`;
+            return (
+              <CcTr key={key}>
+                <CcTd className="font-semibold tabular-nums">{formatNumber(line.amount)}</CcTd>
+                <CcTd>
+                  <CcPill
+                    tone={WALLET_STATUS_TONE[line.status] || "neutral"}
+                    className={line.status === "reversed" ? "line-through" : ""}
+                  >
+                    {line.status_display || WALLET_LINE_STATUS_LABEL[line.status]}
+                  </CcPill>
+                </CcTd>
+                <CcTd className="text-xs">
+                  {line.status === "pending" && line.pending_reason ? line.pending_reason : (line.reason || "—")}
+                  {isCommissionLine(line) && ` · ${line.company_name} · شهر ${formatNumber(line.commission_month_index)}`}
+                </CcTd>
+                <CcTd className="tabular-nums text-xs">{formatNumber(line.sequence)}</CcTd>
+                <CcTd className="text-xs text-cc-text-muted">{formatDateTimeValue(line.updated_at)}</CcTd>
+                <CcTd>
+                  <input
+                    className="ktra-input h-7 w-32 text-xs"
+                    placeholder="سبب العكس/التسوية"
+                    value={reasons[key] ?? ""}
+                    onChange={(event) => setReasons((current) => ({ ...current, [key]: event.target.value }))}
+                  />
+                </CcTd>
+                <CcTd>
+                  <input
+                    className="ktra-input h-7 w-24 text-xs"
+                    placeholder="مبلغ"
+                    inputMode="decimal"
+                    value={adjustAmounts[key] ?? ""}
+                    onChange={(event) => setAdjustAmounts((current) => ({ ...current, [key]: event.target.value }))}
+                  />
+                </CcTd>
+                <CcTd className="whitespace-nowrap">
+                  <div className="flex items-center gap-1.5">
+                    {WALLET_LINE_NEXT_STATUS[line.status] && (
                       <button
                         type="button"
-                        disabled={busyLine === `adjust:${key}`}
-                        onClick={() => onAdjust(line)}
+                        disabled={busyLine === `transition:${key}`}
+                        onClick={() => onTransition(line)}
                         className="ktra-btn h-7 px-2 text-[11px]"
                       >
-                        + تسوية
+                        → {WALLET_LINE_STATUS_LABEL[WALLET_LINE_NEXT_STATUS[line.status]!]}
                       </button>
-                      {line.status !== "reversed" && (
-                        <button
-                          type="button"
-                          disabled={busyLine === `reverse:${key}`}
-                          onClick={() => onReverse(line)}
-                          className="inline-flex items-center gap-1 rounded-md bg-red-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-red-700 disabled:opacity-50"
-                        >
-                          <RotateCcw className="h-3 w-3" /> عكس
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+                    )}
+                    <button
+                      type="button"
+                      disabled={busyLine === `adjust:${key}`}
+                      onClick={() => onAdjust(line)}
+                      className="ktra-btn h-7 px-2 text-[11px]"
+                    >
+                      + تسوية
+                    </button>
+                    {line.status !== "reversed" && (
+                      <button
+                        type="button"
+                        disabled={busyLine === `reverse:${key}`}
+                        onClick={() => onReverse(line)}
+                        className="inline-flex items-center gap-1 rounded-md bg-rose-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-rose-700 disabled:opacity-50 transition"
+                      >
+                        <RotateCcw className="h-3 w-3" /> عكس
+                      </button>
+                    )}
+                  </div>
+                </CcTd>
+              </CcTr>
+            );
+          })}
+        </tbody>
+      </CcTable>
     )}
-  </div>
+  </CcCard>
 );
 
 export default EmployeeWalletPanel;

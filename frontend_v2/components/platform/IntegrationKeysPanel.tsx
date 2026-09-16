@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { Copy, KeyRound, RotateCcw } from "lucide-react";
+import { Copy, RotateCcw } from "lucide-react";
 
 import {
   INTEGRATION_CHANNELS,
@@ -16,6 +16,17 @@ import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcTable,
+  CcThead,
+  CcTh,
+  CcTr,
+  CcTd,
+} from "./ui";
 
 const displayError = (cause: unknown): string =>
   describePlatformOpsError(cause, "هذه الشاشة لمدير عمليات المنصة فقط.", "تعذّر إتمام العملية.");
@@ -48,38 +59,38 @@ const CopyOnceBanner: React.FC<{ secret: RevealedSecret; onDismiss: () => void; 
   };
 
   return (
-    <div className="rounded-xl border border-amber-300 bg-amber-50 p-4 space-y-2" dir="rtl">
+    <CcCard tone="warning" className="p-4 space-y-2" dir="rtl">
       <div className="flex items-center justify-between">
-        <h3 className="text-xs font-bold text-amber-800">
+        <h3 className="text-xs font-bold text-amber-300">
           الرمز الخامّ لمفتاح {secret.companyName} — {secret.channelLabel}
         </h3>
-        <button type="button" onClick={onDismiss} className="text-[11px] text-amber-700 underline">
+        <button type="button" onClick={onDismiss} className="text-[11px] text-amber-400 underline hover:text-amber-300">
           إخفاء
         </button>
       </div>
-      <p className="text-[11px] text-amber-700">
+      <p className="text-[11px] text-amber-200/80">
         هذا الرمزُ يظهر الآن مرّةً واحدةً ولن يُعرض ثانيةً بعد إخفاء هذه اللافتة أو تحديث الصفحة.
         احفظه في مكانه الآن.
       </p>
       <div className="flex items-center gap-2">
-        <code className="flex-1 min-w-0 truncate rounded-lg bg-white border border-amber-200 px-3 py-2 text-xs font-mono text-slate-800">
+        <code className="flex-1 min-w-0 truncate rounded-lg bg-cc-surface border border-amber-500/30 px-3 py-2 text-xs font-mono text-amber-200">
           {secret.rawToken}
         </code>
         <button
           type="button"
           onClick={handleCopy}
-          className="flex items-center gap-1 px-3 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg"
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-500 rounded-lg transition shrink-0"
         >
           <Copy className="h-3.5 w-3.5" /> {copied ? "تم النسخ" : "نسخ"}
         </button>
       </div>
       {secret.copyFailed && (
-        <p className="text-[11px] text-rose-700">
+        <p className="text-[11px] text-rose-400">
           تعذّر النسخ التلقائي — انسخ النصّ أعلاه يدوياً الآن. لن يُعاد عرضُ هذا الرمز لاحقاً؛ إن
           فاتك نسخُه فأصدِر مفتاحاً بديلاً (تدوير) يُبطل هذا فوراً.
         </p>
       )}
-    </div>
+    </CcCard>
   );
 };
 
@@ -120,9 +131,9 @@ const IssueKeyForm: React.FC<{ onIssued: (row: RevealedSecret) => void; onListCh
   };
 
   return (
-    <div className="bg-white rounded-xl border border-slate-200 p-4 space-y-3" dir="rtl">
-      <h3 className="text-xs font-bold text-slate-700">إصدار مفتاح جديد</h3>
-      {error && <p className="text-xs text-rose-600">{error}</p>}
+    <CcCard className="p-4 sm:p-5 space-y-3" dir="rtl">
+      <h3 className="text-xs font-bold text-cc-text">إصدار مفتاح جديد</h3>
+      {error && <p className="text-xs text-rose-400">{error}</p>}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-2 items-start">
         <CompanyPicker
           value={tenantId}
@@ -134,10 +145,10 @@ const IssueKeyForm: React.FC<{ onIssued: (row: RevealedSecret) => void; onListCh
         <select
           value={channel}
           onChange={(event) => setChannel(event.target.value as IntegrationChannel)}
-          className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text focus:outline-none focus:ring-1 focus:ring-sky-500"
         >
           {INTEGRATION_CHANNELS.map((value) => (
-            <option key={value} value={value}>
+            <option key={value} value={value} className="bg-cc-surface-2 text-cc-text">
               {INTEGRATION_CHANNEL_FORM_LABELS[value]}
             </option>
           ))}
@@ -147,18 +158,18 @@ const IssueKeyForm: React.FC<{ onIssued: (row: RevealedSecret) => void; onListCh
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="تسمية اختيارية"
-          className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg"
+          className="rounded-lg border border-cc-border bg-cc-surface-2 px-2.5 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
         />
         <button
           type="button"
           onClick={handleIssue}
           disabled={busy || !tenantId}
-          className="px-3.5 py-2 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
+          className="rounded-lg bg-sky-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-sky-500 disabled:opacity-50 transition"
         >
           {busy ? "..." : `إصدار${tenantName ? ` لـ${tenantName}` : ""}`}
         </button>
       </div>
-    </div>
+    </CcCard>
   );
 };
 
@@ -253,18 +264,18 @@ export const IntegrationKeysPanel: React.FC = () => {
 
   if (forbidden) {
     return (
-      <div className="py-16 text-center bg-white rounded-xl border border-slate-200" dir="rtl">
-        <p className="text-sm font-bold text-slate-700">هذه الشاشة مقصورة على مدير عمليات المنصة.</p>
-      </div>
+      <CcCard className="py-16 text-center" dir="rtl">
+        <p className="text-sm font-bold text-cc-text">هذه الشاشة مقصورة على مدير عمليات المنصة.</p>
+      </CcCard>
     );
   }
 
   return (
-    <div className="space-y-4" dir="rtl">
-      <div className="flex items-center gap-2">
-        <KeyRound className="h-4 w-4 text-slate-500" />
-        <h2 className="text-sm font-bold text-slate-800">مفاتيح قنوات الإدخال</h2>
-      </div>
+    <div className="space-y-6" dir="rtl">
+      <CcSectionTitle
+        title="مفاتيح قنوات الإدخال"
+        badge={keys ? keys.length : undefined}
+      />
 
       {revealed && (
         <CopyOnceBanner
@@ -277,105 +288,103 @@ export const IntegrationKeysPanel: React.FC = () => {
       <IssueKeyForm onIssued={setRevealed} onListChanged={load} />
 
       {error && (
-        <div className="p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800 flex items-center justify-between">
+        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300 flex items-center justify-between">
           <span>{error}</span>
-          <button type="button" onClick={load} className="px-3 py-1 bg-rose-100 hover:bg-rose-200 rounded-lg font-bold text-[11px]">
+          <button
+            type="button"
+            onClick={load}
+            className="px-3 py-1 bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 rounded-lg font-bold text-[11px] transition"
+          >
             إعادة المحاولة
           </button>
         </div>
       )}
 
-      <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+      <CcCard className="p-4 sm:p-6">
         {loading ? (
-          <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+          <div className="py-10 text-center text-xs text-cc-text-muted">جاري التحميل...</div>
         ) : !keys || keys.length === 0 ? (
-          <div className="py-10 text-center text-xs text-slate-400">لا مفاتيح مُصدرة بعد</div>
+          <CcEmpty title="لا مفاتيح مُصدرة بعد" />
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs border-collapse">
-              <thead>
-                <tr className="text-slate-500 border-b border-slate-200">
-                  <th className="py-2 pr-2 text-right">الشركة</th>
-                  <th className="py-2 px-2 text-right">القناة</th>
-                  <th className="py-2 px-2 text-right">التسمية</th>
-                  <th className="py-2 px-2 text-right">الحالة</th>
-                  <th className="py-2 px-2 text-right">آخر استخدام</th>
-                  <th className="py-2 px-2 text-right">آخر تدوير</th>
-                  <th className="py-2 px-2 text-right"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {keys.map((row) => (
-                  <tr key={row.id} className="border-b border-slate-100 align-top">
-                    <td className="py-1.5 pr-2 font-medium text-slate-700">{row.company_name}</td>
-                    <td className="py-1.5 px-2">{row.channel_display}</td>
-                    <td className="py-1.5 px-2">{row.name || "—"}</td>
-                    <td className="py-1.5 px-2">
-                      <span
-                        className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                          row.status === "active" ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700"
-                        }`}
-                      >
-                        {row.status_display}
-                      </span>
-                      {row.status === "revoked" && row.revocation_reason && (
-                        <p className="text-[10px] text-slate-400 mt-0.5">{row.revocation_reason}</p>
-                      )}
-                    </td>
-                    <td className="py-1.5 px-2">{formatDate(row.last_used_at)}</td>
-                    <td className="py-1.5 px-2">{formatDate(row.rotated_at)}</td>
-                    <td className="py-1.5 px-2 whitespace-nowrap">
-                      {row.status === "active" && (
-                        <div className="flex flex-col items-end gap-1">
-                          <div className="flex gap-1">
+          <CcTable>
+            <CcThead>
+              <tr>
+                <CcTh>الشركة</CcTh>
+                <CcTh>القناة</CcTh>
+                <CcTh>التسمية</CcTh>
+                <CcTh>الحالة</CcTh>
+                <CcTh>آخر استخدام</CcTh>
+                <CcTh>آخر تدوير</CcTh>
+                <CcTh />
+              </tr>
+            </CcThead>
+            <tbody>
+              {keys.map((row) => (
+                <CcTr key={row.id}>
+                  <CcTd className="font-medium text-cc-text">{row.company_name}</CcTd>
+                  <CcTd className="text-cc-text-muted">{row.channel_display}</CcTd>
+                  <CcTd className="text-cc-text">{row.name || "—"}</CcTd>
+                  <CcTd>
+                    <CcPill tone={row.status === "active" ? "success" : "danger"}>
+                      {row.status_display}
+                    </CcPill>
+                    {row.status === "revoked" && row.revocation_reason && (
+                      <p className="text-[10px] text-cc-text-muted mt-0.5">{row.revocation_reason}</p>
+                    )}
+                  </CcTd>
+                  <CcTd className="text-cc-text-muted">{formatDate(row.last_used_at)}</CcTd>
+                  <CcTd className="text-cc-text-muted">{formatDate(row.rotated_at)}</CcTd>
+                  <CcTd className="whitespace-nowrap">
+                    {row.status === "active" && (
+                      <div className="flex flex-col items-end gap-1">
+                        <div className="flex gap-1">
+                          <button
+                            type="button"
+                            onClick={() => handleRotate(row)}
+                            disabled={busyId === row.id}
+                            className="flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-cc-text bg-cc-surface-2 border border-cc-border hover:bg-cc-surface rounded-lg transition disabled:opacity-50"
+                          >
+                            <RotateCcw className="h-3 w-3" /> تدوير
+                          </button>
+                          {revokingId === row.id ? (
                             <button
                               type="button"
-                              onClick={() => handleRotate(row)}
+                              onClick={() => handleRevoke(row)}
                               disabled={busyId === row.id}
-                              className="flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-white bg-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+                              className="px-2.5 py-1 text-[11px] font-bold text-white bg-rose-600 hover:bg-rose-500 rounded-lg transition disabled:opacity-50"
                             >
-                              <RotateCcw className="h-3 w-3" /> تدوير
+                              تأكيد الإبطال
                             </button>
-                            {revokingId === row.id ? (
-                              <button
-                                type="button"
-                                onClick={() => handleRevoke(row)}
-                                disabled={busyId === row.id}
-                                className="px-2 py-1 text-[11px] font-bold text-white bg-red-600 hover:bg-red-700 rounded-lg disabled:opacity-50"
-                              >
-                                تأكيد الإبطال
-                              </button>
-                            ) : (
-                              <button
-                                type="button"
-                                onClick={() => setRevokingId(row.id)}
-                                className="px-2 py-1 text-[11px] font-bold text-red-700 bg-red-50 hover:bg-red-100 rounded-lg"
-                              >
-                                إبطال
-                              </button>
-                            )}
-                          </div>
-                          {revokingId === row.id && (
-                            <input
-                              type="text"
-                              value={revokeReasons[row.id] ?? ""}
-                              onChange={(event) =>
-                                setRevokeReasons((prev) => ({ ...prev, [row.id]: event.target.value }))
-                              }
-                              placeholder="سبب الإبطال"
-                              className="w-40 px-2 py-1 text-[11px] border border-red-200 bg-red-50 rounded-lg"
-                            />
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setRevokingId(row.id)}
+                              className="px-2.5 py-1 text-[11px] font-bold text-rose-400 border border-rose-500/30 bg-rose-500/10 hover:bg-rose-500/20 rounded-lg transition"
+                            >
+                              إبطال
+                            </button>
                           )}
                         </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                        {revokingId === row.id && (
+                          <input
+                            type="text"
+                            value={revokeReasons[row.id] ?? ""}
+                            onChange={(event) =>
+                              setRevokeReasons((prev) => ({ ...prev, [row.id]: event.target.value }))
+                            }
+                            placeholder="سبب الإبطال"
+                            className="w-40 rounded-lg border border-rose-500/40 bg-rose-500/10 px-2 py-1 text-[11px] text-cc-text placeholder:text-rose-400/60 focus:outline-none focus:ring-1 focus:ring-rose-500"
+                          />
+                        )}
+                      </div>
+                    )}
+                  </CcTd>
+                </CcTr>
+              ))}
+            </tbody>
+          </CcTable>
         )}
-      </div>
+      </CcCard>
     </div>
   );
 };

@@ -12,6 +12,17 @@ import {
   updateServiceUnitCatalogEntries,
 } from "../../services/platformWorkOrdersApi";
 import { describePlatformOpsError } from "../../utils/platformSubscriptionManagement";
+import {
+  CcCard,
+  CcEmpty,
+  CcPill,
+  CcSectionTitle,
+  CcTable,
+  CcThead,
+  CcTh,
+  CcTr,
+  CcTd,
+} from "./ui";
 
 /** رسالةٌ موحَّدةٌ تميّز 403 عن غيره بدل نصّ الخادم الخام. */
 const describeError = (cause: unknown, fallback: string): string =>
@@ -42,11 +53,18 @@ const EFFECTIVE_STATE_LABELS: Record<string, string> = {
   retired: "منتهية",
 };
 
-const EFFECTIVE_STATE_STYLES: Record<string, string> = {
-  draft: "bg-slate-100 text-slate-600",
-  scheduled: "bg-amber-100 text-amber-700",
-  current: "bg-emerald-100 text-emerald-700",
-  retired: "bg-rose-100 text-rose-600",
+const catalogStateTone = (state: string): "neutral" | "accent" | "success" | "warning" | "danger" => {
+  switch (state) {
+    case "current":
+      return "success";
+    case "scheduled":
+      return "warning";
+    case "retired":
+      return "danger";
+    case "draft":
+    default:
+      return "neutral";
+  }
 };
 
 function buildFormFromCatalog(catalog: ServiceUnitCatalogRow | null): Record<ServiceDocumentType, EntryFormRow> {
@@ -189,22 +207,26 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-4" dir="rtl">
-      <div className="lg:col-span-1 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold text-slate-800">نسخ الكتالوج</h2>
-          <button
-            type="button"
-            onClick={handleCreateDraft}
-            disabled={busyAction}
-            className="px-3 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 rounded-lg disabled:opacity-50"
-          >
-            + مسودة جديدة
-          </button>
-        </div>
+      <CcCard className="lg:col-span-1 p-4">
+        <CcSectionTitle
+          title="نسخ الكتالوج"
+          badge={catalogs.length}
+          action={
+            <button
+              type="button"
+              onClick={handleCreateDraft}
+              disabled={busyAction}
+              className="rounded-lg bg-sky-600 hover:bg-sky-500 px-3 py-1.5 text-xs font-bold text-white transition disabled:opacity-50"
+            >
+              + مسودة جديدة
+            </button>
+          }
+          className="mb-4"
+        />
         {loading ? (
-          <div className="py-10 text-center text-xs text-slate-400">جاري التحميل...</div>
+          <div className="py-10 text-center text-xs text-cc-text-muted">جاري التحميل...</div>
         ) : catalogs.length === 0 ? (
-          <div className="py-10 text-center text-xs text-slate-400">لا توجد نسخ كتالوج بعد</div>
+          <CcEmpty title="لا توجد نسخ كتالوج بعد" />
         ) : (
           <ul className="space-y-2">
             {catalogs.map((c) => (
@@ -212,25 +234,21 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedId(c.id)}
-                  className={`w-full text-right px-3 py-2 rounded-lg border transition ${
+                  className={`w-full text-right px-3 py-2.5 rounded-xl border transition ${
                     c.id === selectedId
-                      ? "border-blue-400 bg-blue-50"
-                      : "border-slate-200 bg-white hover:bg-slate-50"
+                      ? "border-sky-500 bg-sky-500/15 text-cc-text shadow-cc-card"
+                      : "border-cc-border bg-cc-surface-2/50 text-cc-text-muted hover:bg-cc-surface-2 hover:text-cc-text"
                   }`}
                 >
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-slate-800">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="text-xs font-bold text-cc-text">
                       نسخة #{c.version} {c.id === activeCatalogId && "★"}
                     </span>
-                    <span
-                      className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                        EFFECTIVE_STATE_STYLES[c.effective_state] || "bg-slate-100 text-slate-600"
-                      }`}
-                    >
+                    <CcPill tone={catalogStateTone(c.effective_state)}>
                       {EFFECTIVE_STATE_LABELS[c.effective_state] || c.effective_state}
-                    </span>
+                    </CcPill>
                   </div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">
+                  <div className="text-[10px] text-cc-text-muted mt-1">
                     {c.entries.length} بند{c.id === activeCatalogId ? " — الساريةُ حالياً على الاحتساب" : ""}
                   </div>
                 </button>
@@ -238,32 +256,30 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
             ))}
           </ul>
         )}
-      </div>
+      </CcCard>
 
-      <div className="lg:col-span-2 bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+      <CcCard className="lg:col-span-2 p-4 sm:p-6">
         {error && (
-          <div className="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-xs text-rose-800">
+          <div className="mb-4 p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-300">
             {error}
           </div>
         )}
         {!selected ? (
-          <div className="py-16 text-center text-xs text-slate-400">اختر نسخةً من القائمة لعرض بنودها</div>
+          <CcEmpty title="اختر نسخةً من القائمة لعرض بنودها" />
         ) : (
           <>
-            <div className="flex items-center justify-between mb-4">
+            <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
               <div>
-                <h2 className="text-sm font-bold text-slate-800">
-                  نسخة #{selected.version} —{" "}
-                  <span
-                    className={`px-2 py-0.5 text-[10px] font-bold rounded-full ${
-                      EFFECTIVE_STATE_STYLES[selected.effective_state] || "bg-slate-100 text-slate-600"
-                    }`}
-                  >
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-cc-text tracking-tight">
+                    نسخة #{selected.version}
+                  </h2>
+                  <CcPill tone={catalogStateTone(selected.effective_state)}>
                     {EFFECTIVE_STATE_LABELS[selected.effective_state] || selected.effective_state}
-                  </span>
-                </h2>
+                  </CcPill>
+                </div>
                 {selected.activation_reason && (
-                  <p className="text-[11px] text-slate-500 mt-1">سبب التفعيل: {selected.activation_reason}</p>
+                  <p className="text-xs text-cc-text-muted mt-1">سبب التفعيل: {selected.activation_reason}</p>
                 )}
               </div>
               {selected.status !== "draft" && (
@@ -271,62 +287,61 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                   type="button"
                   onClick={handleClone}
                   disabled={busyAction}
-                  className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg disabled:opacity-50"
+                  className="rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-xs font-semibold text-cc-text hover:bg-cc-surface transition disabled:opacity-50"
                 >
                   استنساخ إلى مسودة جديدة
                 </button>
               )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs border-collapse">
-                <thead>
-                  <tr className="text-slate-500 border-b border-slate-200">
-                    <th className="py-2 pr-2 text-right w-8"></th>
-                    <th className="py-2 pr-2 text-right">نوع المستند</th>
-                    <th className="py-2 px-2 text-right">وحدات أساس</th>
-                    <th className="py-2 px-2 text-right">وزن لكلّ سطر</th>
-                    <th className="py-2 px-2 text-right">تعقيد منخفض +</th>
-                    <th className="py-2 px-2 text-right">تعقيد متوسط +</th>
-                    <th className="py-2 px-2 text-right">تعقيد مرتفع +</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {SERVICE_DOCUMENT_TYPES.map((docType) => {
-                    const row = form[docType];
-                    return (
-                      <tr key={docType} className="border-b border-slate-100">
-                        <td className="py-1.5 pr-2">
+            <CcTable>
+              <CcThead>
+                <tr>
+                  <CcTh className="w-8"></CcTh>
+                  <CcTh>نوع المستند</CcTh>
+                  <CcTh>وحدات أساس</CcTh>
+                  <CcTh>وزن لكلّ سطر</CcTh>
+                  <CcTh>تعقيد منخفض +</CcTh>
+                  <CcTh>تعقيد متوسط +</CcTh>
+                  <CcTh>تعقيد مرتفع +</CcTh>
+                </tr>
+              </CcThead>
+              <tbody>
+                {SERVICE_DOCUMENT_TYPES.map((docType) => {
+                  const row = form[docType];
+                  return (
+                    <CcTr key={docType}>
+                      <CcTd>
+                        <input
+                          type="checkbox"
+                          checked={row.included}
+                          disabled={!isEditable}
+                          onChange={(e) => handleFieldChange(docType, "included", e.target.checked)}
+                          className="rounded border-cc-border"
+                        />
+                      </CcTd>
+                      <CcTd className="font-medium text-cc-text">
+                        {SERVICE_DOCUMENT_TYPE_LABELS[docType]}
+                      </CcTd>
+                      {(
+                        ["base_units", "per_line_weight", "complexity_low_add", "complexity_medium_add", "complexity_high_add"] as const
+                      ).map((field) => (
+                        <CcTd key={field}>
                           <input
-                            type="checkbox"
-                            checked={row.included}
-                            disabled={!isEditable}
-                            onChange={(e) => handleFieldChange(docType, "included", e.target.checked)}
+                            type="number"
+                            step="0.01"
+                            value={row[field]}
+                            disabled={!isEditable || !row.included}
+                            onChange={(e) => handleFieldChange(docType, field, e.target.value)}
+                            className="w-24 px-2 py-1 rounded-md border border-cc-border bg-cc-surface-2 text-cc-text disabled:opacity-40 disabled:bg-cc-surface/30"
                           />
-                        </td>
-                        <td className="py-1.5 pr-2 font-medium text-slate-700">
-                          {SERVICE_DOCUMENT_TYPE_LABELS[docType]}
-                        </td>
-                        {(
-                          ["base_units", "per_line_weight", "complexity_low_add", "complexity_medium_add", "complexity_high_add"] as const
-                        ).map((field) => (
-                          <td key={field} className="py-1.5 px-2">
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={row[field]}
-                              disabled={!isEditable || !row.included}
-                              onChange={(e) => handleFieldChange(docType, field, e.target.value)}
-                              className="w-24 px-2 py-1 border border-slate-200 rounded-md disabled:bg-slate-50 disabled:text-slate-400"
-                            />
-                          </td>
-                        ))}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+                        </CcTd>
+                      ))}
+                    </CcTr>
+                  );
+                })}
+              </tbody>
+            </CcTable>
 
             {isEditable && (
               <div className="mt-4 flex flex-wrap items-center gap-3">
@@ -334,7 +349,7 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                   type="button"
                   onClick={handleSaveEntries}
                   disabled={savingEntries}
-                  className="px-3.5 py-2 text-xs font-bold text-white bg-slate-700 hover:bg-slate-800 rounded-lg disabled:opacity-50"
+                  className="rounded-lg bg-cc-surface-2 border border-cc-border px-3.5 py-2 text-xs font-bold text-cc-text hover:bg-cc-surface transition disabled:opacity-50"
                 >
                   {savingEntries ? "جارٍ الحفظ..." : "حفظ البنود"}
                 </button>
@@ -345,7 +360,7 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                     value={activationReason}
                     onChange={(e) => setActivationReason(e.target.value)}
                     placeholder="سبب التفعيل (إلزامي عند التفعيل)"
-                    className="w-full px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+                    className="w-full rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-xs text-cc-text placeholder:text-cc-text-muted focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                 </div>
                 <div>
@@ -353,14 +368,14 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
                     type="datetime-local"
                     value={effectiveFrom}
                     onChange={(e) => setEffectiveFrom(e.target.value)}
-                    className="px-3 py-1.5 text-xs border border-slate-200 rounded-lg"
+                    className="rounded-lg border border-cc-border bg-cc-surface-2 px-3 py-1.5 text-xs text-cc-text focus:outline-none focus:ring-1 focus:ring-sky-500"
                   />
                 </div>
                 <button
                   type="button"
                   onClick={handleActivate}
                   disabled={activating || selected.entries.length === 0}
-                  className="px-3.5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg disabled:opacity-50"
+                  className="rounded-lg bg-emerald-600 hover:bg-emerald-500 px-3.5 py-2 text-xs font-bold text-white transition disabled:opacity-50"
                 >
                   {activating ? "جارٍ التفعيل..." : "تفعيل هذه النسخة"}
                 </button>
@@ -368,7 +383,7 @@ export const ServiceUnitCatalogPanel: React.FC = () => {
             )}
           </>
         )}
-      </div>
+      </CcCard>
     </div>
   );
 };

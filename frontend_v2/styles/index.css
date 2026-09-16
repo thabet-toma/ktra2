@@ -2688,6 +2688,28 @@ tbody td {
   --color-muted: color-mix(in oklab, var(--staff-panel) 80%, var(--staff-accent));
   --color-text-muted: var(--staff-muted);
 }
+/* ── مقاسُ الحقل والزرّ داخل القشرتين ──────────────────────────────────────
+   `ktra-input` حقلُ شبكةِ ERP كثيف: ارتفاعُه 20px وحشوُه 4px — مناسبٌ لبنود
+   فاتورة، لكنّه في نماذج مركز القيادة الواسعة (إنشاءُ مهمّة، سياساتُ الأداء)
+   خيطٌ رفيعٌ فوق لوحٍ كحليّ. القاعدةُ الأصلُ خارجَ الطبقات بنوعيّة (0,3,0)
+   فلا تغلبها أداةُ Tailwind على العنصر؛ ولذلك محدِّدٌ بالغلاف (0,4,0) يُكبّر
+   المقاسَ هنا وحدَه ويترك كثافةَ شاشات المحاسبة كما هي. */
+:root[data-skin] .staff-shell .ktra-input,
+:root[data-skin] .ops-shell .ktra-input {
+  height: 36px;
+  padding: 0 10px;
+  border-radius: 10px;
+}
+:root[data-skin] .staff-shell textarea.ktra-input,
+:root[data-skin] .ops-shell textarea.ktra-input {
+  height: auto;
+  padding: 8px 10px;
+}
+:root[data-skin] .staff-shell .ktra-btn,
+:root[data-skin] .ops-shell .ktra-btn {
+  padding: 6px 14px;
+  border-radius: 10px;
+}
 
 .staff-shell .bg-white,
 .ops-shell .bg-white { background-color: var(--staff-panel); }
