@@ -578,7 +578,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   </button>
                   <button type="button" onClick={() => { setView("platform-ops"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-ops") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
-                    <Radar className="h-4 w-4" /> مركز قيادة كترا
+                    <Radar className="h-4 w-4" /> مركز قيادة شؤون الموظفين والمهام
                   </button>
                   <button type="button" onClick={() => { setView("development-notes"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>

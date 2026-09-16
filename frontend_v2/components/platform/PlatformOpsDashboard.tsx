@@ -283,7 +283,7 @@ export const PlatformOpsDashboard: React.FC = () => {
         <div className="flex flex-col">
           <div className="flex items-center gap-2.5">
             <h1 className="text-xl sm:text-2xl font-black text-cc-text tracking-tight">
-              مركز قيادة كترا
+              مركز قيادة شؤون الموظفين والمهام
             </h1>
             <CcPill tone="accent">المرحلة السادسة</CcPill>
           </div>

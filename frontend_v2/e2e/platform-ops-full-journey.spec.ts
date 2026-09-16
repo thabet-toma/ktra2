@@ -447,7 +447,7 @@ test("الرحلة الكاملة: تفعيل الخدمة ← أمر عمل ←
     // انتقالٌ أوّلٌ إلى مسارٍ محمَّلٍ كسولاً — Vite البارد يحتاج مهلةً صريحة
     // بدل `expect` سريعٍ قد يفشل عشوائياً (فخٌّ موثَّق في البريف).
     await page.goto("/super-admin/platform-ops");
-    await expect(page.getByRole("heading", { name: "مركز قيادة عمليات المنصة" }))
+    await expect(page.getByRole("heading", { name: "مركز قيادة شؤون الموظفين والمهام" }))
       .toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "أوامر العمل", exact: true }).click();
     await page.getByRole("button", { name: "+ جديد" }).click();

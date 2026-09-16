@@ -8,7 +8,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   dashboard: 'الرئيسية',
   'super-admin': 'لوحة تحكم السوبر أدمن',
   'development-notes': 'ملاحظات التطوير',
-  'platform-ops': 'مركز قيادة كترا',
+  'platform-ops': 'مركز قيادة شؤون الموظفين والمهام',
   'platform-hiring': 'التوظيف المنصّي',
   'platform-billing': 'فواتير خدمة المتابعة',
   'platform-employee-space': 'مساحتي — عمليات المنصة',
