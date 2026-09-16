@@ -3,6 +3,8 @@ import { PlatformDashboardEmployee } from "../../utils/dashboardRanking";
 import { formatNumber } from "../../utils/formatNumber";
 import { getLastActiveBadge } from "../../utils/lastActiveFormat";
 import { PresenceClockChip } from "./PresenceClockChip";
+import { ccPresenceTone, ccScoreTone } from "../../utils/ccTone";
+import { CcAvatar, CcCard, CcGauge, CcPill, CcStatTile } from "./ui";
 
 interface EmployeeCardProps {
   employee: PlatformDashboardEmployee;
@@ -15,13 +17,6 @@ interface EmployeeCardProps {
   onOpenTasks: (employeeId: number) => void;
 }
 
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return "؟";
-  if (parts.length === 1) return parts[0].slice(0, 2);
-  return `${parts[0][0]}${parts[1][0]}`;
-}
-
 export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   employee,
   onDrilldown,
@@ -29,192 +24,156 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
   onEditTargets,
   onOpenProfile,
   onOpenTasks,
-}) => {
+}: EmployeeCardProps) => {
   const lastActiveBadge = getLastActiveBadge(employee.last_active_at);
   const isOverloaded = employee.active_work_orders_count > employee.capacity_target;
   const hasOverdue = employee.overdue_work_orders_count > 0;
   const score = employee.performance?.composite_score;
 
+  const cardTone = hasOverdue ? "danger" : isOverloaded ? "warning" : "default";
+
   return (
-    <div
-      className={`bg-white rounded-xl border transition shadow-sm hover:shadow-md p-5 flex flex-col justify-between ${
-        hasOverdue
-          ? "border-rose-300 ring-1 ring-rose-200"
-          : isOverloaded
-          ? "border-orange-300 ring-1 ring-orange-200"
-          : "border-slate-200"
-      }`}
-      dir="rtl"
-    >
-      {/* الرأس: اسم الموظف والتخصص وحالة النشاط */}
+    <CcCard tone={cardTone} className="p-4 flex flex-col justify-between" dir="rtl">
       <div>
-        <div className="flex items-start justify-between gap-2 mb-2.5">
+        {/* الرأس: الصورة، تفاصيل الموظف، وحلقة الأداء المركبة */}
+        <div className="flex items-start justify-between gap-3 mb-3">
           <button
             type="button"
             onClick={() => onOpenProfile(employee.id)}
             title="فتح ملف الموظّف"
-            className="flex flex-1 min-w-0 items-center gap-2 text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded-lg group"
+            className="flex flex-1 min-w-0 items-center gap-3 text-right focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded-lg group"
           >
-            {/* **العدّادُ فوق الصورة** — مجموعُ اليوم من دفتر الخادم لا عدّادُ
-                جلسةٍ في متصفّح الموظّف، فهو رقمٌ يراه المديرُ ويعرفه التقييم.
-                والرقاقةُ نفسُها فوق كلّ وجهٍ على طاولة مساحة العمل (212-N2). */}
             <span className="flex shrink-0 flex-col items-center gap-1">
               <PresenceClockChip
                 seconds={employee.presence_seconds_today}
                 targetHours={employee.presence_target_hours}
               />
-              {employee.photo_url ? (
-                <img
-                  src={employee.photo_url}
-                  alt={employee.name}
-                  className="h-9 w-9 rounded-full object-cover bg-slate-100"
-                />
-              ) : (
-                <span className="flex h-9 w-9 items-center justify-center rounded-full bg-blue-100 text-xs font-bold text-blue-700">
-                  {initialsOf(employee.name)}
-                </span>
-              )}
+              <CcAvatar
+                name={employee.name}
+                photoUrl={employee.photo_url}
+                size="md"
+                presence={ccPresenceTone(employee.is_active_now, employee.is_in_meeting)}
+              />
             </span>
             <span className="flex-1 min-w-0">
-              <h4 className="text-base font-bold text-slate-900 truncate group-hover:text-blue-700">{employee.name}</h4>
-              <div className="flex items-center gap-2 mt-1 text-xs text-slate-500">
-                <span className="font-mono text-slate-400">@{employee.username}</span>
-                <span>•</span>
-                <span className="px-2 py-0.5 font-medium bg-slate-100 text-slate-700 rounded-md">
+              <h4 className="text-sm sm:text-base font-bold text-cc-text truncate group-hover:text-sky-400 transition-colors">
+                {employee.name}
+              </h4>
+              <div className="flex items-center gap-2 mt-1 text-xs text-cc-text-muted flex-wrap">
+                {employee.username && (
+                  <span className="font-mono text-cc-text-muted">@{employee.username}</span>
+                )}
+                {employee.username && <span>•</span>}
+                {/* التخصّصُ لا المسمّى: مصفاةُ اللوحة تُصفّي بـ`specialty`،
+                    فعرضُ `job_title` يجعل المعروضَ غيرَ المبحوثِ به. */}
+                <CcPill tone="neutral">
                   {employee.specialty}
-                </span>
+                </CcPill>
               </div>
             </span>
           </button>
 
-          <span
-            className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-semibold rounded-full border ${lastActiveBadge.className}`}
-          >
-            {/* لا مصباحَ نابضاً: المواصفةُ أسقطته لأنّه «يَعِد بدقّةٍ لا يملكها
-                النظام» — المصدرُ نافذةُ خمسِ دقائقَ على `UserDevice`. والنصُّ
-                يحمل الساعةَ الحقيقيّةَ وهي أصدقُ من لون. */}
-            {lastActiveBadge.label}
-          </span>
+          <div className="shrink-0 flex items-center justify-center">
+            <CcGauge
+              value={typeof score === "number" ? score : 0}
+              size="sm"
+              tone={ccScoreTone(score)}
+              displayValue={typeof score === "number" ? `${formatNumber(Math.round(score))}%` : "—"}
+              caption="الدرجة"
+            />
+          </div>
         </div>
 
-        {/* شبكة المقاييس والأرقام المنقور عليها (Drilldown) */}
-        <div className="grid grid-cols-2 gap-2.5 my-4">
+        {/* شرائح الحالة والحضور */}
+        <div className="flex items-center justify-between gap-2 mb-3 flex-wrap">
+          {/* لا مصباحَ ولا نقطةَ حالة: المواصفةُ أسقطتهما لأنّهما «يَعِدان بدقّةٍ لا
+              يملكها النظام» — المصدرُ نافذةُ خمسِ دقائقَ على `UserDevice`. والنصُّ
+              يحمل الساعةَ الحقيقيّةَ وهي أصدقُ من لون. */}
+          <CcPill tone={lastActiveBadge.active ? "success" : "neutral"}>
+            {lastActiveBadge.label}
+          </CcPill>
+          {isOverloaded && (
+            <CcPill tone="warning" dot={true}>
+              حمل مفرط ({formatNumber(employee.active_work_orders_count)} / {formatNumber(employee.capacity_target)})
+            </CcPill>
+          )}
+          {hasOverdue && (
+            <CcPill tone="danger" dot={true}>
+              تأخر حرج ({formatNumber(employee.overdue_work_orders_count)})
+            </CcPill>
+          )}
+        </div>
+
+        {/* صف الأرقام الإحصائية المنقور عليها (CcStatTile) */}
+        <div className="grid grid-cols-3 gap-2 my-2">
           <button
             type="button"
             onClick={() => onDrilldown({ assignee: employee.id, metric: "active" })}
-            className="p-3 bg-slate-50 hover:bg-blue-50 border border-slate-200 hover:border-blue-300 rounded-lg text-right transition group"
+            className="p-2.5 rounded-lg bg-cc-surface-2/60 hover:bg-cc-surface-2 border border-cc-border hover:border-cc-border-strong text-right transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           >
-            <span className="text-xs text-slate-500 group-hover:text-blue-700 block">أوامر العمل النشطة</span>
-            <div className="flex items-baseline justify-between mt-1">
-              <span className="text-xl font-black text-slate-900 group-hover:text-blue-700">
-                {employee.active_work_orders_count}
-              </span>
-              <span className="text-[11px] text-slate-400">
-                الهدف: {employee.capacity_target}
-              </span>
-            </div>
+            <CcStatTile
+              label="أوامر نشطة"
+              value={employee.active_work_orders_count}
+              hint={`الهدف: ${formatNumber(employee.capacity_target)}`}
+              tone={isOverloaded ? "warning" : "neutral"}
+            />
           </button>
 
           <button
             type="button"
             onClick={() => onDrilldown({ assignee: employee.id, metric: "overdue" })}
-            className={`p-3 rounded-lg text-right border transition group ${
+            className={`p-2.5 rounded-lg border text-right transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 ${
               hasOverdue
-                ? "bg-rose-50/80 hover:bg-rose-100/90 border-rose-200 hover:border-rose-300"
-                : "bg-slate-50 hover:bg-slate-100 border-slate-200"
+                ? "bg-rose-500/10 border-rose-500/30 hover:border-rose-500/50"
+                : "bg-cc-surface-2/60 hover:bg-cc-surface-2 border-cc-border hover:border-cc-border-strong"
             }`}
           >
-            <span
-              className={`text-xs block ${
-                hasOverdue ? "text-rose-700 font-bold" : "text-slate-500"
-              }`}
-            >
-              أوامر متأخرة
-            </span>
-            <div className="flex items-baseline justify-between mt-1">
-              <span
-                className={`text-xl font-black ${
-                  hasOverdue ? "text-rose-700" : "text-slate-700"
-                }`}
-              >
-                {employee.overdue_work_orders_count}
-              </span>
-              {hasOverdue && (
-                <span className="text-[10px] font-bold text-rose-600 bg-rose-200/70 px-1.5 py-0.5 rounded">
-                  تأخر حرج
-                </span>
-              )}
-            </div>
+            <CcStatTile
+              label="أوامر متأخرة"
+              value={employee.overdue_work_orders_count}
+              hint={hasOverdue ? "تأخر حرج" : "لا تأخير"}
+              tone={hasOverdue ? "danger" : "neutral"}
+            />
+          </button>
+
+          {/* **مهامُّ المنصّة** (212-O2) — وهي غيرُ أوامر العمل المجاورة: نظامان
+              لا يلتقيان، ورقمٌ واحدٌ عنهما كان يكذب. والزرُّ نفسُه بابُ «أسند
+              مهمّة» لهذا الشخص (212-O1) بدل نموذجٍ مركزيٍّ يُختار منه اسمُه. */}
+          <button
+            type="button"
+            onClick={() => onOpenTasks(employee.id)}
+            className="p-2.5 rounded-lg bg-cc-surface-2/60 hover:bg-cc-surface-2 border border-cc-border hover:border-cc-border-strong text-right transition group focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
+          >
+            <CcStatTile
+              label="مهام مفتوحة"
+              value={formatNumber(employee.open_platform_tasks_count ?? 0, { maxDecimals: 0 })}
+              hint="أسند مهمة"
+              tone={(employee.open_platform_tasks_count ?? 0) > 0 ? "accent" : "neutral"}
+            />
           </button>
         </div>
 
-        {/* مؤشر الأداء والسعة */}
-        <div className="space-y-2 bg-slate-50/70 p-3 rounded-lg border border-slate-100 text-xs">
-          <div className="flex items-center justify-between">
-            <span className="text-slate-600">درجة الأداء المركبة:</span>
-            {score !== null && score !== undefined ? (
-              <span
-                className={`font-bold ${
-                  score >= 80
-                    ? "text-emerald-700"
-                    : score >= 60
-                    ? "text-blue-700"
-                    : "text-rose-700"
-                }`}
-              >
-                {score}%
-              </span>
-            ) : (
-              <span className="text-slate-400 font-medium">
-                {employee.performance?.status_message || "بيانات غير كافية"}
-              </span>
-            )}
+        {(score === null || score === undefined) && employee.performance?.status_message && (
+          <div className="text-xs text-cc-text-muted mt-1 px-1">
+            {employee.performance.status_message}
           </div>
-
-          {/* **مهامُّ المنصّة على بطاقته** (212-O2) — وهي غيرُ أوامر العمل
-              أعلاه: نظامان لا يلتقيان، ورقمٌ واحدٌ عنهما كان يكذب. والزرُّ
-              نفسُه بابُ «أسند مهمّة» لهذا الشخص (212-O1) بدل نموذجٍ مركزيٍّ
-              يُختار منه اسمُه من قائمة. */}
-          <div className="flex items-center justify-between">
-            <span className="text-slate-600">مهامّ المنصة المفتوحة:</span>
-            <button
-              type="button"
-              onClick={() => onOpenTasks(employee.id)}
-              className="font-bold text-blue-700 underline-offset-2 hover:underline"
-            >
-              {formatNumber(employee.open_platform_tasks_count ?? 0, { maxDecimals: 0 })} · أسند مهمة
-            </button>
-          </div>
-
-          <div className="flex items-center justify-between">
-            <span className="text-slate-600">حمل السعة:</span>
-            <span
-              className={`font-bold ${
-                isOverloaded ? "text-orange-700" : "text-slate-700"
-              }`}
-            >
-              {employee.active_work_orders_count} / {employee.capacity_target}
-              {isOverloaded && " (حمل مفرط)"}
-            </span>
-          </div>
-        </div>
+        )}
 
         {/* الشركات المرتبطة */}
         {employee.companies && employee.companies.length > 0 && (
-          <div className="mt-3">
-            <span className="text-[11px] text-slate-500 block mb-1">الشركات المرتبطة ({employee.companies.length}):</span>
+          <div className="mt-2.5 pt-2 border-t border-cc-border">
+            <span className="text-[11px] text-cc-text-muted block mb-1">
+              الشركات المرتبطة ({formatNumber(employee.companies.length)}):
+            </span>
             <div className="flex flex-wrap gap-1">
               {employee.companies.slice(0, 3).map((comp) => (
-                <span
-                  key={comp.id}
-                  className="px-2 py-0.5 text-[11px] bg-white text-slate-700 border border-slate-200 rounded"
-                >
+                <CcPill key={comp.id} tone="neutral">
                   {comp.name}
-                </span>
+                </CcPill>
               ))}
               {employee.companies.length > 3 && (
-                <span className="px-1.5 py-0.5 text-[10px] text-slate-400">
-                  +{employee.companies.length - 3} أخرى
+                <span className="text-[10px] text-cc-text-muted self-center">
+                  +{formatNumber(employee.companies.length - 3)} أخرى
                 </span>
               )}
             </div>
@@ -222,36 +181,35 @@ export const EmployeeCard: React.FC<EmployeeCardProps> = ({
         )}
       </div>
 
-      {/* زر سجل النشاط العابر */}
-      <div className="mt-4 pt-3 border-t border-slate-100 flex items-center justify-between">
+      {/* زر سجل النشاط والروابط السفلية */}
+      <div className="mt-3 pt-2.5 border-t border-cc-border flex items-center justify-between text-xs">
         <button
           type="button"
           onClick={() => onViewActivity(employee.id, employee.name)}
-          className="text-xs font-semibold text-blue-600 hover:text-blue-800 transition flex items-center gap-1"
+          className="font-semibold text-sky-400 hover:text-sky-300 transition flex items-center gap-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded"
         >
-          <span>عرض سجل النشاط العابر للشركات</span>
+          <span>سجل النشاط العابر</span>
           <span>←</span>
         </button>
 
-        <div className="flex items-center gap-3">
-          {/* الهدفُ أعلاه كان رقماً يُعرض ولا يُضبط: لا نقطةَ كتابةٍ له في النظام
-              كلِّه قبل 210-ز، فيبقى صفراً لكلّ موظّفٍ حقيقيّ. */}
+        <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => onEditTargets(employee.id, employee.name)}
-            className="text-xs text-slate-500 hover:text-slate-800 transition"
+            className="text-cc-text-muted hover:text-cc-text transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded px-1.5 py-0.5"
           >
             ضبط المستهدفات
           </button>
           <button
             type="button"
             onClick={() => onDrilldown({ assignee: employee.id })}
-            className="text-xs text-slate-500 hover:text-slate-800 transition"
+            className="text-cc-text-muted hover:text-cc-text transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 rounded px-1.5 py-0.5"
           >
             كل الأوامر
           </button>
         </div>
       </div>
-    </div>
+    </CcCard>
   );
 };
+

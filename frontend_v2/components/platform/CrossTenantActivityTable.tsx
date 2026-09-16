@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { formatDateTimeValue } from "../../utils/formatDate.ts";
+import { formatNumber } from "../../utils/formatNumber";
 import {
   getEmployeeActivity,
   getPlatformActivityLogs,
   PlatformActivityLog,
 } from "../../services/platformOpsApi";
+import { CcEmpty, CcPill, CcSkeleton, CcTable, CcTd, CcTh, CcThead, CcTr } from "./ui";
 
 interface CrossTenantActivityTableProps {
   isOpen: boolean;
@@ -18,7 +20,7 @@ export const CrossTenantActivityTable: React.FC<CrossTenantActivityTableProps> =
   onClose,
   employeeId,
   employeeName,
-}) => {
+}: CrossTenantActivityTableProps) => {
   const [logs, setLogs] = useState<PlatformActivityLog[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
@@ -54,24 +56,24 @@ export const CrossTenantActivityTable: React.FC<CrossTenantActivityTableProps> =
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 overflow-y-auto" dir="rtl">
-      <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 overflow-y-auto" dir="rtl">
+      <div className="bg-cc-surface rounded-2xl shadow-cc-card border border-cc-border w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
         {/* شريط العنوان */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 bg-slate-50">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-cc-border bg-cc-surface-2">
           <div>
-            <h3 className="text-lg font-bold text-slate-900">
+            <h3 className="text-base sm:text-lg font-bold text-cc-text">
               {employeeName
                 ? `سجل النشاط العابر للشركات — ${employeeName}`
                 : "سجل نشاط عمليات المنصة العابر للشركات"}
             </h3>
-            <p className="text-xs text-slate-500 mt-0.5">
+            <p className="text-xs text-cc-text-muted mt-0.5">
               سجل مستقل بالكامل (PlatformActivityLog) يعبر الشركات زمنياً دون المساس بجدول ActivityLog المستأجر
             </p>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-700 p-2 rounded-lg hover:bg-slate-200 transition"
+            className="text-cc-text-muted hover:text-cc-text p-2 rounded-lg hover:bg-cc-surface transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           >
             ✕
           </button>
@@ -80,62 +82,69 @@ export const CrossTenantActivityTable: React.FC<CrossTenantActivityTableProps> =
         {/* الجدول */}
         <div className="flex-1 overflow-y-auto p-4">
           {loading ? (
-            <div className="py-16 text-center text-sm text-slate-400">جاري تحميل سجل النشاط...</div>
+            <div className="p-8 space-y-3">
+              <CcSkeleton variant="line" count={5} />
+            </div>
           ) : logs.length === 0 ? (
-            <div className="py-16 text-center text-sm text-slate-400">لا يوجد نشاط مسجل حتى الآن</div>
+            <CcEmpty
+              title="لا يوجد نشاط مسجل حتى الآن"
+              hint="لم يتم رصد أي عمليات عابرة للشركات في هذه الفترة."
+            />
           ) : (
-            <table className="w-full text-right text-sm">
-              <thead className="text-xs text-slate-500 bg-slate-50 border-b border-slate-200">
+            <CcTable>
+              <CcThead>
                 <tr>
-                  <th className="px-3 py-2.5 font-semibold">التوقيت</th>
-                  <th className="px-3 py-2.5 font-semibold">الموظف</th>
-                  <th className="px-3 py-2.5 font-semibold">الشركة</th>
-                  <th className="px-3 py-2.5 font-semibold">الحدث</th>
-                  <th className="px-3 py-2.5 font-semibold">الوصف</th>
-                  <th className="px-3 py-2.5 font-semibold">الكيان</th>
+                  <CcTh>التوقيت</CcTh>
+                  <CcTh>الموظف</CcTh>
+                  <CcTh>الشركة</CcTh>
+                  <CcTh>الحدث</CcTh>
+                  <CcTh>الوصف</CcTh>
+                  <CcTh>الكيان</CcTh>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
+              </CcThead>
+              <tbody>
                 {logs.map((log) => (
-                  <tr key={log.id} className="hover:bg-slate-50/70 transition">
-                    <td className="px-3 py-3 text-xs text-slate-500 whitespace-nowrap">
+                  <CcTr key={log.id}>
+                    <CcTd className="text-xs text-cc-text-muted whitespace-nowrap">
                       {formatDateTimeValue(log.created_at)}
-                    </td>
-                    <td className="px-3 py-3 font-semibold text-slate-800 whitespace-nowrap">
+                    </CcTd>
+                    <CcTd className="font-semibold text-cc-text whitespace-nowrap">
                       {log.employee_name}
-                    </td>
-                    <td className="px-3 py-3 text-slate-600">
+                    </CcTd>
+                    <CcTd>
                       {log.company_name ? (
-                        <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-xs">
+                        <CcPill tone="neutral">
                           {log.company_name}
-                        </span>
+                        </CcPill>
                       ) : (
-                        <span className="text-xs text-slate-400">نشاط عام للمنصة</span>
+                        <span className="text-xs text-cc-text-muted">نشاط عام للمنصة</span>
                       )}
-                    </td>
-                    <td className="px-3 py-3 text-xs">
-                      <span className="font-mono text-slate-500">{log.action_display || log.action}</span>
-                    </td>
-                    <td className="px-3 py-3 text-slate-700 max-w-[280px]">
+                    </CcTd>
+                    <CcTd className="text-xs">
+                      <span className="font-mono text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded border border-sky-500/20">
+                        {log.action_display || log.action}
+                      </span>
+                    </CcTd>
+                    <CcTd className="text-cc-text max-w-[280px]">
                       {log.description}
-                    </td>
-                    <td className="px-3 py-3 text-xs text-slate-400 whitespace-nowrap">
+                    </CcTd>
+                    <CcTd className="text-xs text-cc-text-muted whitespace-nowrap">
                       {log.entity_type} {log.entity_id ? `#${log.entity_id}` : ""}
-                    </td>
-                  </tr>
+                    </CcTd>
+                  </CcTr>
                 ))}
               </tbody>
-            </table>
+            </CcTable>
           )}
         </div>
 
         {/* الذيل */}
-        <div className="px-6 py-3 border-t border-slate-200 bg-slate-50 flex items-center justify-between text-xs text-slate-500">
-          <span>عدد الأنشطة: {logs.length}</span>
+        <div className="px-6 py-3 border-t border-cc-border bg-cc-surface-2 flex items-center justify-between text-xs text-cc-text-muted">
+          <span>عدد الأنشطة: {formatNumber(logs.length)}</span>
           <button
             type="button"
             onClick={onClose}
-            className="px-4 py-1.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-medium rounded-lg transition"
+            className="px-4 py-1.5 bg-cc-surface hover:bg-cc-surface-2 text-cc-text border border-cc-border font-medium rounded-lg transition focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500"
           >
             إغلاق
           </button>
@@ -144,3 +153,4 @@ export const CrossTenantActivityTable: React.FC<CrossTenantActivityTableProps> =
     </div>
   );
 };
+

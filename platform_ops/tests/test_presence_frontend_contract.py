@@ -74,7 +74,10 @@ class TheCounterSitsAboveThePhotoTest(TestCase):
     """
 
     #: مرساةُ الصورة في كلّ موضع — تُقرأ لتُقاس الرقاقةُ **قبلها** لا بعدها.
-    PHOTO_ANCHORS = ((CARD, "employee.photo_url ?"), (ROOM, "occupant.photoUrl ?"))
+    #: والمرساتان تختلفان لأنّ الموضعين يرسمان الوجهَ بطريقتين: البطاقةُ صارت
+    #: تُمرّر الرابطَ إلى `CcAvatar` المشترك (موجةُ تصميم مركز القيادة)، والمقعدُ
+    #: ما زال يكتب `<img>` بيده. والحارسُ يبلّغ من نفسِه إن شاخت مرساةٌ منهما.
+    PHOTO_ANCHORS = ((CARD, "photoUrl={employee.photo_url}"), (ROOM, "occupant.photoUrl ?"))
 
     def test_the_chip_is_rendered_above_the_photo_in_both_places(self):
         violations = []

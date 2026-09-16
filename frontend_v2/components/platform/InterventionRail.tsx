@@ -4,96 +4,137 @@ import {
   PlatformAnomaly,
   sortAnomaliesWorstFirst,
 } from "../../utils/interventionAnomalies";
+import { formatNumber } from "../../utils/formatNumber";
+import { formatTimeValue } from "../../utils/formatDate";
+import { CcTone } from "../../utils/ccTone";
+import { CcCard, CcPill } from "./ui";
+import { AlertCircle, AlertTriangle, Layers, TrendingDown, Bell } from "lucide-react";
 
 interface InterventionRailProps {
   anomalies: PlatformAnomaly[];
   onSelectAnomaly?: (anomaly: PlatformAnomaly) => void;
 }
 
+function getAnomalyTone(type: string): CcTone {
+  const norm = (type || "").toLowerCase();
+  if (norm === "critical_delay") return "danger";
+  if (norm === "absent_with_work") return "warning";
+  if (norm === "overloaded") return "warning";
+  if (norm === "low_score") return "violet";
+  return "neutral";
+}
+
+function getAnomalyIcon(type: string) {
+  const norm = (type || "").toLowerCase();
+  if (norm === "critical_delay") return <AlertCircle className="w-4 h-4 text-rose-400" />;
+  if (norm === "absent_with_work") return <AlertTriangle className="w-4 h-4 text-amber-400" />;
+  if (norm === "overloaded") return <Layers className="w-4 h-4 text-amber-400" />;
+  if (norm === "low_score") return <TrendingDown className="w-4 h-4 text-purple-400" />;
+  return <Bell className="w-4 h-4 text-sky-400" />;
+}
+
 export const InterventionRail: React.FC<InterventionRailProps> = ({
   anomalies,
   onSelectAnomaly,
-}) => {
+}: InterventionRailProps) => {
   const sortedAnomalies = sortAnomaliesWorstFirst(anomalies);
   const count = sortedAnomalies.length;
 
   if (count === 0) {
     return (
-      <div className="bg-emerald-50/60 border border-emerald-200 rounded-xl p-4 flex items-center justify-between" dir="rtl">
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-            ✓
+      <CcCard tone="success" className="p-4" dir="rtl">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-lg bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold">
+              ✓
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-cc-text">العمليات تسير بصورة طبيعية</h4>
+              <p className="text-xs text-cc-text-muted mt-0.5">
+                لا توجد شذوذات تشغيلية حرجة أو تأخيرات معلقة تتطلب تدخلاً فورياً.
+              </p>
+            </div>
           </div>
-          <div>
-            <h4 className="text-sm font-bold text-emerald-900">العمليات تسير بصورة طبيعية</h4>
-            <p className="text-xs text-emerald-700 mt-0.5">
-              لا توجد شذوذات تشغيلية حرجة أو تأخيرات معلقة تتطلب تدخلاً فورياً.
-            </p>
-          </div>
+          <CcPill tone="success">0 تنبيهات</CcPill>
         </div>
-        <span className="text-xs font-semibold px-2.5 py-1 bg-emerald-100 text-emerald-800 rounded-full">
-          0 تنبيهات
-        </span>
-      </div>
+      </CcCard>
     );
   }
 
   return (
-    <div className="bg-white border border-rose-200 rounded-xl p-4 shadow-sm" dir="rtl">
-      <div className="flex items-center justify-between mb-3 border-b border-rose-100 pb-2.5">
+    <CcCard tone="danger" className="p-4" dir="rtl">
+      <div className="flex items-center justify-between mb-3 border-b border-cc-border pb-2.5">
         <div className="flex items-center gap-2.5">
-          <span className="relative flex h-3 w-3">
-            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75"></span>
-            <span className="relative inline-flex rounded-full h-3 w-3 bg-rose-500"></span>
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75 motion-reduce:animate-none" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-rose-500" />
           </span>
-          <h3 className="text-base font-bold text-slate-900">شريط التدخل السريع (الشذوذات الحرجة)</h3>
-          <span className="text-xs text-slate-500">مرتبة بحسب الأولوية والحدة (الأسوأ أولاً)</span>
+          <h3 className="text-sm sm:text-base font-bold text-cc-text">شريط التدخل السريع (الشذوذات الحرجة)</h3>
+          <span className="text-xs text-cc-text-muted hidden sm:inline">مرتبة بحسب الأولوية والحدة (الأسوأ أولاً)</span>
         </div>
-        <span className="text-xs font-bold px-2.5 py-1 bg-rose-100 text-rose-800 rounded-full border border-rose-200">
-          {count} حالات تستوجب التدخل
-        </span>
+        <CcPill tone="danger">
+          {formatNumber(count)} حالات تستوجب التدخل
+        </CcPill>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
         {sortedAnomalies.map((item, idx) => {
           const typeStr = (item.type || item.anomaly_type || "").toString();
           const meta = getAnomalyMeta(typeStr);
+          const tone = getAnomalyTone(typeStr);
+          const icon = getAnomalyIcon(typeStr);
 
           return (
-            <div
+            <button
               key={`${typeStr}-${item.employee_id}-${item.work_order_id}-${idx}`}
+              type="button"
               onClick={() => onSelectAnomaly && onSelectAnomaly(item)}
-              className={`p-3 rounded-lg border transition cursor-pointer hover:shadow-md ${meta.bgClass} ${meta.borderClass}`}
+              className="p-3 rounded-lg border text-right transition group bg-cc-surface-2/60 hover:bg-cc-surface-2 border-cc-border hover:border-cc-border-strong focus:outline-none focus-visible:ring-2 focus-visible:ring-sky-500 flex flex-col justify-between"
             >
-              <div className="flex items-center justify-between gap-2 mb-1.5">
-                <span className={`px-2 py-0.5 text-xs font-bold rounded-md border ${meta.badgeClass}`}>
-                  {meta.label}
-                </span>
-                {item.severity === "critical" && (
-                  <span className="text-[10px] font-extrabold text-rose-600 uppercase tracking-wider">
-                    حرج جداً
-                  </span>
-                )}
+              <div>
+                <div className="flex items-center justify-between gap-2 mb-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="p-1 rounded-md bg-cc-surface border border-cc-border shrink-0">
+                      {icon}
+                    </span>
+                    <CcPill tone={tone}>
+                      {meta.label}
+                    </CcPill>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    {item.severity === "critical" && (
+                      <span className="text-[10px] font-extrabold text-rose-400 uppercase tracking-wider">
+                        حرج جداً
+                      </span>
+                    )}
+                    {item.created_at && (
+                      <span className="text-[10px] font-mono text-cc-text-muted">
+                        {formatTimeValue(item.created_at)}
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <p className="text-xs font-semibold text-cc-text leading-snug mb-2 line-clamp-2">
+                  {item.message}
+                </p>
               </div>
 
-              <p className="text-xs font-semibold text-slate-800 leading-snug mb-2 line-clamp-2">
-                {item.message}
-              </p>
-
-              <div className="flex items-center justify-between text-[11px] text-slate-600 pt-1.5 border-t border-slate-200/50">
-                <span className="truncate max-w-[120px] font-medium">
+              <div className="flex items-center justify-between text-[11px] text-cc-text-muted pt-1.5 border-t border-cc-border w-full">
+                <span className="truncate max-w-[120px] font-medium text-cc-text">
                   {item.employee_name || "بدون موظف"}
                 </span>
                 {item.tenant_name && (
-                  <span className="truncate max-w-[100px] text-slate-500">
+                  <span className="truncate max-w-[100px] text-cc-text-muted">
                     {item.tenant_name}
                   </span>
                 )}
               </div>
-            </div>
+            </button>
           );
         })}
       </div>
-    </div>
+    </CcCard>
   );
 };
+

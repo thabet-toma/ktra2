@@ -198,7 +198,16 @@ class BothPanelsAreMountedTest(TestCase):
             'activeTab === "staff_tasks"', dashboard,
             "لوحةُ المدير مستوردةٌ بلا تبويبٍ يعرضها.",
         )
-        self.assertIn('setActiveTab("staff_tasks")', dashboard, "لا زرَّ يفتح تبويبَ مهامّ الموظّفين.")
+        # صفُّ التبويبات صار `CcTabs` يقرأ قائمةً معطاة، فلم يعد لكلّ تبويبٍ
+        # نداءُ `setActiveTab("…")` باسمه. والمقيسُ الآن الوصلُ نفسُه: المفتاحُ
+        # موجودٌ في القائمة، والقائمةُ مركَّبةٌ بمبدِّلٍ يكتب الحالة. وكتابةُ فرعٍ
+        # ميّتٍ يحمل النصَّ القديمَ لإرضاء هذا السطر مرّت فعلاً — فلا يُقاس النصّ.
+        self.assertIn('{ key: "staff_tasks"', dashboard, "لا تبويبَ لمهامّ الموظّفين في قائمة التبويبات.")
+        self.assertRegex(
+            dashboard,
+            r"<CcTabs[\s\S]{0,300}onChange=\{\(key\) => setActiveTab",
+            "قائمةُ التبويبات غيرُ موصولةٍ بمبدِّل الحالة — تبويبٌ لا يُفتح.",
+        )
 
 
 class TheOwnersRulesShowOnTheScreenTest(TestCase):

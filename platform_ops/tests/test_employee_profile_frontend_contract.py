@@ -146,10 +146,26 @@ class TheStoredPhotoActuallyReachesTheBoardTest(EmployeeProfileFrontendContractT
         )
 
     def test_the_employee_card_renders_the_real_photo_when_one_exists(self):
+        """الصورةُ صارت داخلَ `CcAvatar`، فيُقاس الطرفان لا نصُّ البطاقة وحدَه.
+
+        كانت البطاقةُ تكتب `<img>` بيدها فكفى تعبيرٌ واحدٌ عليها. ومنذ موجةِ
+        تصميم مركز القيادة تُمرِّر الحقلَ إلى مكوّنٍ مشترك — فتأكيدٌ على نصِّ
+        البطاقة وحدَها يمرّ على **تعليقٍ** يحمل الشكلَ القديم (حدث فعلاً). فيُقاس
+        هنا الوصلُ: البطاقةُ تمرّر `photo_url`، والمكوّنُ يُصيّر `<img>` عند وجوده.
+        """
         self.assertRegex(
             self.employee_card_source,
-            r"employee\.photo_url\s*\?[\s\S]{0,200}<img",
-            "بطاقةُ اللوحة لا تعرض صورةَ الموظّف.",
+            r"<CcAvatar[\s\S]{0,200}photoUrl=\{employee\.photo_url\}",
+            "بطاقةُ اللوحة لا تمرّر صورةَ الموظّف إلى `CcAvatar`.",
+        )
+        avatar_source = (
+            Path(__file__).resolve().parents[2]
+            / "frontend_v2" / "components" / "platform" / "ui" / "CcAvatar.tsx"
+        ).read_text(encoding="utf-8")
+        self.assertRegex(
+            avatar_source,
+            r"photoUrl\s*\?[\s\S]{0,200}<img",
+            "`CcAvatar` لا يُصيّر الصورةَ الحقيقيّةَ عند وجود الرابط.",
         )
 
     def test_the_dashboard_passes_the_photo_into_the_room(self):
