@@ -446,6 +446,7 @@ terms_payload(tenant) -> dict       # القاموس كاملاً بعد قنا�
 | `core/tests/test_single_tenant_cache.py` | كاشُ الشركة الواحدة: استبدالُ الوحيدةِ لا يُبقي القديمةَ مخدومة، والمحذوفةُ لا تُسلَّم، وشركتان تُوقفان الحلَّ التلقائيّ، والتحقّقُ يبقى استعلاماً واحداً في الطلب |
 | `core/tests/test_cache_resilience.py` | ألا يُسقط تعثّر الكاش الطلبَ |
 | `core/tests/test_global_throttle.py` | حدود المعدّل العامة |
+| `core/tests/test_throttle_guards.py` | الفخُّ الصامت: `DummyCache` يبقى افتراضَ الاختبارات، وكلُّ `throttle_scope` له معدّل (الاسمُ المطبعيّ = `ImproperlyConfigured` عند أوّل طلب)، وكلُّ ملفٍ يؤكّد ردَّ 429 يفرض `LocMemCache` — وإلّا فالعدّاد لا يتراكم والتأكيدُ لا يستطيع السقوط |
 | `core/tests/test_reports.py` | صحة التقارير وثبات عدّ الاستعلامات |
 | `core/tests/test_reports_stock_dimension.py` | تقرير البُعد المتبدّل: مجموع التنقيب = رقم الصفّ على كل صفّ في كل محور |
 | `core/tests/test_scan_lookup.py` | حلّال المسح: IMEI مباع يفتح بطاقته (عميل · تاريخ بيع · كفالة)، والشكل يُرتّب ولا يُصفّي، والصلاحيات والعزل |
