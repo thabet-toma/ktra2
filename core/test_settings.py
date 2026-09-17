@@ -8,6 +8,8 @@
 النماذج مباشرةً عبر run_syncdb بدل تشغيل 161 هجرة لكل جولة اختبار. النماذج هي مصدر
 الحقيقة، و`makemigrations --check` يحرس تطابقها مع سلسلة الهجرات.
 """
+import os
+
 from core.settings import *  # noqa: F403
 
 DATABASES = {
@@ -53,3 +55,17 @@ class _DisableMigrations:
 
 
 MIGRATION_MODULES = _DisableMigrations()
+
+# بوّابة الهجرات في CI: المجموعة تبني المخطط بـsyncdb فلا تشهد أن السلسلة تُطبَّق
+# ولا أن النماذج بلا هجرةٍ ناقصة. `KTRA_MIGRATIONS_DB=<مسار ملف SQLite>` يُعيد
+# الهجرات ويوجّه القاعدة إلى ذلك الملف، فيصدق عليها `makemigrations --check`
+# و`migrate` من صفر (`.github/workflows/ci.yml`). بلا المتغيّر لا شيء يتغيّر.
+_MIGRATIONS_DB = os.environ.get("KTRA_MIGRATIONS_DB", "").strip()
+if _MIGRATIONS_DB:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": _MIGRATIONS_DB,
+        }
+    }
+    MIGRATION_MODULES = {}

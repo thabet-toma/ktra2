@@ -32,6 +32,17 @@ jobs:
         # يمنع تشابكاً *جديداً* فقط؛ الانتهاكات القائمة موثّقة في docs/DEPENDENCIES.md
         run: lint-imports
 
+      - name: Migrations — no drift, and the chain applies from scratch
+        # pytest يعمل بـ--nomigrations (syncdb من النماذج) فلا يشهد أن سلسلة الهجرات
+        # تُطبَّق على قاعدة فارغة ولا أن نموذجاً تغيّر بلا هجرة. KTRA_MIGRATIONS_DB
+        # يُعيد الهجرات في core.test_settings ويوجّهها إلى ملف SQLite جديد.
+        run: |
+          python manage.py makemigrations --check --dry-run
+          python manage.py migrate --noinput
+        env:
+          DJANGO_SETTINGS_MODULE: core.test_settings
+          KTRA_MIGRATIONS_DB: ${{ runner.temp }}/ktra-migrations.sqlite3
+
       - name: Run pytest
         run: coverage run -m pytest
         env:

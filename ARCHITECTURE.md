@@ -203,6 +203,9 @@ python -m pytest -q -n auto          # البوابة قبل أي commit (‎~80
   «شغّل موديولك فقط» كان سيمرّر الاثنين. التقسيم للحلقة الداخلية السريعة وحدها.
 - `core/test_settings.py`: SQLite في الذاكرة، `DummyCache`، هجرات معطّلة (`run_syncdb`)،
   وتهشير MD5 — كلّها سرعةٌ بلا تنازل عن الصحة. الإنتاج يبقى على PBKDF2.
+  **والهجرات تُحرَس في خطوةٍ مستقلّة من CI** لأن المجموعة لا تشغّلها: `makemigrations --check
+  --dry-run` ثم `migrate --noinput` على ملف SQLite جديد، بالإعدادات نفسها مع
+  `KTRA_MIGRATIONS_DB=<مسار الملف>` الذي يُعيد الهجرات (`core/test_settings.py`).
 - `pytest.ini` يجمع كل `<app>/tests`؛ يحرس اكتمالَ قائمته `core/tests/test_docs_freshness.py`
   بعد أن سقطت منها ثلاث apps فغابت عن CI بصمت. CI تشغّل pytest تسلسلياً تحت `coverage`
   (‎`-n auto` يحتاج تركيب تغطية موزَّعة، ولا يستحقّه زمنٌ صار مقبولاً بعد المُجزِّئ السريع).
