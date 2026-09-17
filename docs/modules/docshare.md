@@ -37,7 +37,7 @@
 | `customer_payment` | `sales.CustomerPayment` | `partner` | زبون | **المرحَّل وحده**؛ بلا جدول بنود |
 | `credit_debit_note` | `sales.CreditDebitNote` | `customer` | زبون | بلا جدول بنود؛ السبب هو المتن |
 | `purchase_invoice` | `logistics.PurchaseInvoice` | `partner` | مورّد | يخدم مرجعَ الشراء أيضاً (`is_return`) |
-| `purchase_order` | `logistics.PurchaseOrder` | `supplier` | مورّد | **يقبل قراراً**؛ وبلا شاشة — انظر أسفل |
+| `purchase_order` | `logistics.PurchaseOrder` | `supplier` | مورّد | **يقبل قراراً**؛ وزرُّه في محرِّر العرض — انظر أسفل |
 | `logistics_deal` | `logistics.LogisticsDeal` | `partner` | مورّد | أغنى نموذجٍ بالحقول الحسّاسة |
 | `supplier_quotation` | `logistics.SupplierQuotation` | `supplier` أو `supplier_draft_name` | مورّد | الطرف قد يكون **اسماً** بلا صفّ |
 | `supplier_payment` | `sales.SupplierPayment` | `partner` | مورّد | **المرحَّل وحده**؛ مرآةُ سند القبض |
@@ -266,7 +266,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 | `frontend_v2/components/sales/SalesQuotationsPage.tsx` (صفوف القائمة) | `sales_quotation` |
 | `frontend_v2/components/procurement/invoices/InvoiceForm.tsx` | `purchase_invoice` (وهو نفسه مرجعُ الشراء حين `is_return`) |
 | `frontend_v2/components/procurement/deals/DealForm.tsx` | `logistics_deal` |
-| `frontend_v2/components/procurement/price-offers/PriceOfferForm.tsx` | `supplier_quotation` |
+| `frontend_v2/components/procurement/price-offers/PriceOfferForm.tsx` | `supplier_quotation` أو `purchase_order` — بحسب المستند المفتوح (`utils/documentBadges.ts` (`procurementShareTarget`)) |
 | `frontend_v2/components/sales/SalesOrdersPage.tsx` | `sales_order` |
 | `frontend_v2/components/sales/DeliveryNotesPage.tsx` | `delivery_order` |
 | `frontend_v2/components/sales/SalesCustomerPaymentsPage.tsx` | `customer_payment` (المرحَّل وحده) |
@@ -277,7 +277,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 
 - `frontend_v2/components/shared/ShareRowButton.tsx` — زرُّ الصفّ في شاشات القوائم، يحمل حالته ونافذته معه. شاشاتُ القوائم لا محرّرَ لها بشريط أدوات، وتكرارُ ثلاثيّة «حالة + نافذة + زرّ» في ثمان شاشات كان يعني ثماني نسخٍ تنحرف. **والنافذة تُركَّب عند الفتح فقط**، فقائمةٌ بمئة صفّ لا تُطلق مئة نداء `listDocumentShares`.
 
-**نوعان بلا شاشة — مقصودٌ وموثَّق:** `purchase_order` مدعومٌ خادمياً بالكامل ولا زرّ له لأن **لا شاشة لأمر الشراء أصلاً في `frontend_v2`** (النقطة `/api/logistics/purchase-orders/` حيّة و`procurementDocumentsApi.ts` يخاطبها، ولا مكوّن يستدعيه). و`local_purchase_invoice` (`SalesInvoice` بنوع شراء) لا مُنشئ له في الواجهة اليوم — جانب الشراء يمرّ عبر `logistics.PurchaseInvoice`. النوعان يعملان عبر الـAPI، وينتظران شاشتيهما.
+**`purchase_order` بلا شاشةٍ خاصة لكن له زرّ:** قائمةُ «عروض الأسعار» (`PriceOfferManagement.tsx`) تعرض طلبياتِ الشراء المحلية (`order-7`) بجانب العروض (`quote-12`)، وكلاهما يُفتح في `PriceOfferForm.tsx`. كان زرُّ «مشاركة» فيه يرسل `Number("quote-12")` = `NaN` بنوع `supplier_quotation` ثابتاً حتى لطلبية — فصار النوعُ والمعرّفُ الرقميّ يُشتقّان معاً من معرّف الواجهة (`procurementShareTarget`)، ومعرّفٌ لا يُحلَّل (مستندٌ لم يُحفَظ) يُعطّل الزرّ. **نوعٌ بلا شاشة — مقصودٌ وموثَّق:** `local_purchase_invoice` (`SalesInvoice` بنوع شراء) لا مُنشئ له في الواجهة اليوم — جانب الشراء يمرّ عبر `logistics.PurchaseInvoice`. يعمل عبر الـAPI، وينتظر شاشته.
 
 ## خطوة نشر يملكها المالك
 لتشغيل الرابط القصير `https://ktra-pro.tech/s/<token>` يُضاف إلى `/etc/nginx/sites-available/ktra-pro.tech`:

@@ -20,6 +20,24 @@ export const procurementDocKind = (
   return scope === "import" ? "import_quotation" : "quotation";
 };
 
+/**
+ * C2-3: هدفُ «مشاركة» من محرِّر عرض السعر (`PriceOfferForm`) — الذي يفتح عرضَ
+ * المورّد **وطلبيةَ الشراء** معاً. معرّف الواجهة `quote-12`/`order-7` لا رقم،
+ * فالنوعُ والمعرّفُ الرقميّ يُشتقّان منه معاً (نفس نمط `parseSqlDocumentId` في
+ * `firestoreService.ts`، بلا رمي). النوعان مسجَّلان في
+ * `docshare/documents/purchase_docs.py` (`DOC_TYPES`). ما لا يُحلَّل (مستندٌ لم
+ * يُحفَظ، أو نوعٌ له محرِّره الخاص) ⇒ `null` فيُعطَّل الزرّ.
+ */
+export const procurementShareTarget = (
+  id: string | null | undefined,
+): { docType: "supplier_quotation" | "purchase_order"; docId: number } | null => {
+  const match = /^(quote|order)-(\d+)$/.exec(String(id ?? ""));
+  if (!match) return null;
+  const docId = Number(match[2]);
+  if (!Number.isSafeInteger(docId) || docId <= 0) return null;
+  return { docType: match[1] === "order" ? "purchase_order" : "supplier_quotation", docId };
+};
+
 export const PROCUREMENT_KIND_LABELS: Record<ProcurementDocKind, string> = {
   quotation: "عرض سعر",
   import_quotation: "عرض استيراد",

@@ -36,6 +36,7 @@ import {
   type PurchasePriceListEntry,
 } from "../../../utils/purchasePriceHint";
 import { getScreenColumns } from "../../../utils/procurementColumns";
+import { PROCUREMENT_KIND_LABELS, procurementShareTarget } from "../../../utils/documentBadges";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../../shared/DocumentDraftBanners";
@@ -108,6 +109,9 @@ export const PriceOfferForm: React.FC<Props> = ({
   const confirm = useConfirm();
   const [offerNumber, setOfferNumber] = useState(offer.offerNumber || "");
   const [showShareModal, setShowShareModal] = useState(false);
+  // C2-3: المعرّف `quote-12`/`order-7` لا رقم — النوع والمعرّف الرقمي يُشتقّان
+  // منه معاً؛ `null` (لم يُحفَظ بعد) يُعطّل «مشاركة» بدل إرسال NaN.
+  const shareTarget = procurementShareTarget(offer.id);
   const [orderName, setOrderName] = useState(offer.orderName || "");
   const [orderDescription, setOrderDescription] = useState(offer.orderDescription || "");
   const [supplierId, setSupplierId] = useState(offer.supplierId || "");
@@ -583,13 +587,13 @@ export const PriceOfferForm: React.FC<Props> = ({
     { key: "cancel", label: "إلغاء", icon: <X />, onClick: onCancel, danger: true, separatorBefore: true },
     { key: "print", label: "طباعة", icon: <Save />, onClick: () => window.print() },
     // DOC-SHARE: العرض يعود إلى المورّد الذي كتبه — تأكيدُ ما اتُّفق عليه.
-    // ويلزمه عرضٌ محفوظ: الرابط يشير إلى صفٍّ في القاعدة لا إلى مسوّدة ذاكرة.
+    // ويلزمه مستندٌ محفوظ: الرابط يشير إلى صفٍّ في القاعدة لا إلى مسوّدة ذاكرة.
     {
       key: "share",
       label: "مشاركة",
       icon: <Share2 />,
-      disabled: offer.id == null,
-      onClick: () => setShowShareModal(true),
+      disabled: shareTarget == null,
+      onClick: shareTarget ? () => setShowShareModal(true) : undefined,
     },
   ];
 
@@ -1261,13 +1265,13 @@ export const PriceOfferForm: React.FC<Props> = ({
           />
         )}
         <FilePreviewModal file={previewFile} onClose={() => setPreviewFile(null)} />
-        {offer.id != null && (
+        {shareTarget && (
           <ShareDocumentModal
             open={showShareModal}
             onClose={() => setShowShareModal(false)}
-            docType="supplier_quotation"
-            docId={Number(offer.id)}
-            docLabel={`عرض سعر ${offerNumber || `#${offer.id}`}`}
+            docType={shareTarget.docType}
+            docId={shareTarget.docId}
+            docLabel={`${shareTarget.docType === "purchase_order" ? PROCUREMENT_KIND_LABELS.order : "عرض سعر"} ${offerNumber || `#${shareTarget.docId}`}`}
             partyName={selectedSupplier?.tradeName || supplierDraftName}
           />
         )}

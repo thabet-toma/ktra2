@@ -9,6 +9,7 @@ import {
   isReservationActive,
   offerSuitability,
   procurementDocKind,
+  procurementShareTarget,
   procurementStatusLabel,
 } from './documentBadges.ts';
 
@@ -141,4 +142,20 @@ test('توكنات @theme لا تخطف مقاييس عرض Tailwind (max-w-sm�
     `توكن --spacing-${found.join('/--spacing-')} يخطف max-w-${found.join('/max-w-')}؛ `
       + 'استعمل اسماً رقمياً أو توكناً خارج نطاق spacing.',
   );
+});
+
+/* C2-3: زرّ «مشاركة» في محرِّر عرض السعر — معرّف الواجهة `quote-12`/`order-7`
+ * لا رقم، و`Number("quote-12")` = NaN. والمحرِّر نفسه يفتح طلبية الشراء. */
+test('procurementShareTarget: عرض سعر مورّد ⇒ supplier_quotation بمعرّفه الرقمي', () => {
+  assert.deepEqual(procurementShareTarget('quote-12'), { docType: 'supplier_quotation', docId: 12 });
+});
+
+test('procurementShareTarget: طلبية شراء ⇒ purchase_order لا supplier_quotation', () => {
+  assert.deepEqual(procurementShareTarget('order-7'), { docType: 'purchase_order', docId: 7 });
+});
+
+test('procurementShareTarget: معرّفٌ لا يُحلَّل (غير محفوظ، أو نوعٌ آخر) ⇒ null فيُعطَّل الزرّ', () => {
+  for (const id of [undefined, null, '', 'quote-', 'quote-abc', '12', 'rfq-3', 'deal-5', 'quote-0']) {
+    assert.equal(procurementShareTarget(id as string | null | undefined), null, String(id));
+  }
 });
