@@ -630,6 +630,9 @@ def post_journal_entry(journal_id, user=None):
             header_tenant_id = header.tenant_id if header.tenant_id is not None else 0
             if header.transaction_date:
                 validate_fiscal_period(header_tenant_id, header.transaction_date)
+                assert_no_final_vat_statement(
+                    header_tenant_id, header.transaction_date, f"القيد #{header.id}", posting=True,
+                )
 
             # Re-verify balance on actual saved lines before posting
             lines = list(header.lines.all())
@@ -686,6 +689,7 @@ def post_journal(
     # ── 1) Validate fiscal period + journal balance (pre-atomic — fast fail) ──
     validate_fiscal_period(tenant_id, transaction_date)
     run_tax_period_guards(tenant_id, transaction_date)
+    assert_no_final_vat_statement(tenant_id, transaction_date, posting=True)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
 
@@ -984,12 +988,15 @@ def vat_period_totals(tenant_id: int, period_from, period_to, *, posted_only: bo
     }
 
 
-def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""):
-    """يمنع فكّ ترحيل مستندٍ مؤرَّخ داخل فترة كشف ض.ق.م `final` (issue #79).
+def assert_no_final_vat_statement(tenant_id, transaction_date, document_label="", *, posting=False):
+    """يمنع ترحيل مستندٍ أو فكّ ترحيله بتاريخٍ داخل فترة كشف ض.ق.م `final` (issue #79 · A2-1).
 
     الكشف النهائي إقرارٌ مُقدَّم لدائرة الضريبة — **لا أثر رجعي عليه**:
     تصحيحه بإقرارٍ معدَّل لا بتعديل صامت على مستند داخل فترته. الكشوف
-    `draft` لا تُقيَّد بشيء هنا.
+    `draft` لا تُقيَّد بشيء هنا. قاعدةٌ واحدة لمسارين: `unpost_document`
+    (عبر `assert_dates_open_for_unpost`) و`posting=True` من نقاط الترحيل
+    (`post_journal` · `post_journal_entry` · `accounting.api.reverse_journal`) —
+    يختلف فعلُ الرسالة وحده. المخرج: `sales.services.reopen_vat_statement`.
     """
     from sales.models import VatStatement
 
@@ -1000,8 +1007,9 @@ def assert_no_final_vat_statement(tenant_id, transaction_date, document_label=""
         period_to__gte=transaction_date,
     ).first()
     if stmt:
+        verb = "ترحيل" if posting else "التراجع عن ترحيل"
         raise ValidationError(
-            f"تعذّر التراجع عن ترحيل {document_label or 'هذا المستند'}: تاريخه "
+            f"تعذّر {verb} {document_label or 'هذا المستند'}: تاريخه "
             f"({transaction_date}) داخل فترة كشف ضريبة نهائي «{stmt.statement_number}» "
             f"({stmt.period_from} → {stmt.period_to}). الكشوف النهائية لا تُعدَّل بأثر "
             f"رجعي — صحّح بإقرار معدَّل لا بتغيير هذا المستند."
@@ -3877,6 +3885,92 @@ def close_bank_reconciliation(reconciliation, *, user=None):
         reconciliation.pk, reconciliation.bank_account_id, reconciliation.statement_balance,
     )
     return reconciliation
+
+
+RECONCILIATION_ADJUSTMENT_EXPENSE = "expense"
+RECONCILIATION_ADJUSTMENT_REVENUE = "revenue"
+
+
+def record_reconciliation_adjustment(
+    reconciliation, *, kind, amount, account_id, date=None, description="",
+    exchange_rate=Decimal("1"), user=None,
+):
+    """A2-3 — «قيد تسوية» من داخل مطابقة مفتوحة: عمولة بنكية أو فائدة ظهرت في كشف
+    البنك ولا قيد لها في الدفاتر.
+
+    لا قيدٌ خامٌ جديد: يُنشئ **سند مصروف** (`create_expense_voucher`) أو **سند إيراد**
+    (`create_revenue_voucher`) طرفُه النقدي حسابُ البنك المطابَق نفسه — فيمرّ بـ`post_journal`
+    وحرّاسه، ويظهر في شاشة سنداته ويُتراجع عنه من هناك (حذف القيد يُسقط سطر المطابقة
+    بالـCASCADE). ثم يُؤشَّر سطرُ البنك من قيده مطابَقاً في هذه المطابقة — كل ذلك ذرّياً.
+
+    يُرفض: مطابقة مُقفلة · تاريخ بعد تاريخ الكشف (لن يدخل ملخّصها) · حساب مقابل من شركة
+    أخرى أو من غير نوعه (`Expense` للمصروف، `Revenue` للإيراد).
+    """
+    from .models import BankReconciliation, BankReconciliationLine, ExpenseVoucher, RevenueVoucher
+
+    if kind not in (RECONCILIATION_ADJUSTMENT_EXPENSE, RECONCILIATION_ADJUSTMENT_REVENUE):
+        raise ValidationError("نوع قيد التسوية غير صالح — مصروف بنكي أو إيراد بنكي.")
+    expected_type = "Expense" if kind == RECONCILIATION_ADJUSTMENT_EXPENSE else "Revenue"
+
+    with transaction.atomic():
+        rec = (
+            BankReconciliation.objects.select_for_update()
+            .select_related("tenant", "bank_account", "bank_account__currency")
+            .get(pk=reconciliation.pk)
+        )
+        if rec.status == BankReconciliation.STATUS_CLOSED:
+            raise ValidationError("المطابقة مُقفلة — أعِد فتحها قبل تسجيل قيد تسوية.")
+        when = date or rec.statement_date
+        if isinstance(when, str):
+            when = datetime.datetime.strptime(when, "%Y-%m-%d").date()
+        if when > rec.statement_date:
+            raise ValidationError(
+                f"تاريخ قيد التسوية ({when}) بعد تاريخ الكشف ({rec.statement_date}) — "
+                "لن يدخل هذه المطابقة."
+            )
+        counter = Account.objects.filter(
+            pk=account_id, tenant_id=rec.tenant_id, is_active=True,
+        ).first()
+        if counter is None:
+            raise ValidationError("الحساب المقابل غير موجود في هذه الشركة.")
+        if counter.account_type != expected_type:
+            label = "مصروف" if expected_type == "Expense" else "إيراد"
+            raise ValidationError(f"الحساب المقابل يجب أن يكون حساب {label}.")
+
+        bank = rec.bank_account
+        common = dict(
+            tenant=rec.tenant, date=when, amount=amount, currency=bank.currency,
+            exchange_rate=exchange_rate, cash_or_bank_account_id=bank.account_id,
+            user=user,
+        )
+        if kind == RECONCILIATION_ADJUSTMENT_EXPENSE:
+            voucher = create_expense_voucher(
+                **common, payment_method=ExpenseVoucher.PAYMENT_CASH, expense_account=counter,
+                description=description or "مصروف بنكي — تسوية مطابقة",
+            )
+        else:
+            voucher = create_revenue_voucher(
+                **common, payment_method=RevenueVoucher.PAYMENT_CASH, revenue_account=counter,
+                description=description or "إيراد بنكي — تسوية مطابقة",
+            )
+
+        bank_lines = list(
+            JournalLine.objects.filter(journal_id=voucher.journal_id, account_id=bank.account_id)
+        )
+        if not bank_lines:
+            raise ValidationError("تعذّر إيجاد سطر حساب البنك في قيد التسوية.")
+        for line in bank_lines:
+            BankReconciliationLine.objects.create(reconciliation=rec, journal_line=line)
+
+    create_audit_log(
+        tenant=rec.tenant, user=user, action="UPDATE",
+        model_name="BankReconciliation", object_id=rec.pk,
+        change_details=(
+            f"قيد تسوية ({kind}) بمبلغ {voucher.amount} — سند #{voucher.id} "
+            f"قيد #{voucher.journal_id} مؤشَّر مطابَقاً"
+        ),
+    )
+    return voucher
 
 
 # ─────────────────────────────────────────────────────────

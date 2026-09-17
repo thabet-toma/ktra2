@@ -12,6 +12,7 @@ from .views import (
     GeneralLedgerView,
     TrialBalanceView,
     VatReportView,
+    VatStatementViewSet,
     CashBoxLedgerViewSet,
     CashCountViewSet,
     CashTransferViewSet,
@@ -39,6 +40,7 @@ router.register(r'bank-reconciliations', BankReconciliationViewSet, basename='ba
 router.register(r'general-ledger', GeneralLedgerView, basename='general-ledger')
 router.register(r'trial-balance', TrialBalanceView, basename='trial-balance')
 router.register(r'vat-report', VatReportView, basename='vat-report')
+router.register(r'vat-statements', VatStatementViewSet, basename='vat-statements')
 router.register(r'cash-box-accounts', CashBoxLedgerViewSet, basename='cash-box-accounts')
 router.register(r'cash-transfers', CashTransferViewSet, basename='cash-transfers')
 router.register(r'cash-counts', CashCountViewSet, basename='cash-counts')

@@ -23,6 +23,7 @@ from django.db import transaction
 from .account_classification import sub_type_for_partner
 from .models import Account, JournalHeader, JournalLine
 from .services import (
+    assert_no_final_vat_statement,
     post_journal,
     unpost_document,
     validate_fiscal_period,
@@ -148,6 +149,9 @@ def reverse_journal(
         tenant = orig.tenant
         tid = getattr(tenant, "pk", None) if tenant is not None else None
         validate_fiscal_period(tid if tid is not None else 0, transaction_date)
+        assert_no_final_vat_statement(
+            tid if tid is not None else 0, transaction_date, f"عكس القيد #{orig.id}", posting=True,
+        )
 
         sum_dr = sum(Decimal(str(l.debit or 0)) for l in lines)
         sum_cr = sum(Decimal(str(l.credit or 0)) for l in lines)

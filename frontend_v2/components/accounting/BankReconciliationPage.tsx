@@ -12,7 +12,9 @@ import type {
 } from "../../types/accounting";
 import { KitDocumentShell, KitDenseTable } from "../kit";
 import type { KitToolbarAction, DenseColumn } from "../kit";
-import { CheckCircle, Lock, Plus, RefreshCw, Unlock } from "lucide-react";
+import { AccountTreeField } from "./AccountTreePicker";
+import type { AccountNodeLike } from "../../utils/accountTree";
+import { CheckCircle, FilePlus, Lock, Plus, RefreshCw, Unlock } from "lucide-react";
 
 /** مبلغ مع رمز عملة الحساب — الوسيط الثاني في `formatMoney` بديلٌ عند الفشل لا عملة. */
 const money = (value: unknown, code?: string): string =>
@@ -38,6 +40,15 @@ export const BankReconciliationPage: React.FC = () => {
 
   const [stmtDate, setStmtDate] = useState(new Date().toISOString().split("T")[0]);
   const [stmtBalance, setStmtBalance] = useState("");
+
+  // A2-3: قيد تسوية (عمولة/فائدة بنكية) من داخل المطابقة المفتوحة.
+  const [adjOpen, setAdjOpen] = useState(false);
+  const [adjKind, setAdjKind] = useState<"expense" | "revenue">("expense");
+  const [adjAmount, setAdjAmount] = useState("");
+  const [adjDate, setAdjDate] = useState("");
+  const [adjAccountId, setAdjAccountId] = useState<number | "">("");
+  const [adjDescription, setAdjDescription] = useState("");
+  const [ledgerAccounts, setLedgerAccounts] = useState<AccountNodeLike[]>([]);
 
   const selectedAccount = useMemo(
     () => accounts.find((a) => String(a.id) === accountId) || null,
@@ -127,6 +138,35 @@ export const BankReconciliationPage: React.FC = () => {
     }, "أُقفلت المطابقة");
   };
 
+  const openAdjustment = () => {
+    if (!current) return;
+    setAdjKind("expense");
+    setAdjAmount("");
+    setAdjDate(String(current.statement_date).slice(0, 10));
+    setAdjAccountId("");
+    setAdjDescription("");
+    setAdjOpen(true);
+    if (!ledgerAccounts.length) {
+      void accountingApi.getAccounts()
+        .then((rows) => setLedgerAccounts(rows as AccountNodeLike[]))
+        .catch((e: unknown) => setErr(humanizeThrown(e)));
+    }
+  };
+
+  const submitAdjustment = () => {
+    if (!current || !adjAccountId || !(parseFloat(adjAmount) > 0)) return;
+    void run(async () => {
+      setCurrent(await accountingApi.addBankReconciliationAdjustment(current.id, {
+        kind: adjKind,
+        amount: adjAmount,
+        date: adjDate,
+        account: Number(adjAccountId),
+        description: adjDescription.trim(),
+      }));
+      setAdjOpen(false);
+    }, adjKind === "expense" ? "سُجِّل المصروف البنكي وأُشِّر مطابَقاً" : "سُجِّل الإيراد البنكي وأُشِّر مطابَقاً");
+  };
+
   const reopenCurrent = () => {
     if (!current) return;
     void run(async () => {
@@ -200,6 +240,13 @@ export const BankReconciliationPage: React.FC = () => {
       </button>
       <div style={{ flex: 1 }} />
       {current && !isClosed && (
+        <button type="button" className="ktra-toolbtn" disabled={busy}
+          title="عمولة أو فائدة ظهرت في كشف البنك ولا قيد لها في الدفاتر"
+          onClick={openAdjustment}>
+          <FilePlus className="w-4 h-4" /> قيد تسوية
+        </button>
+      )}
+      {current && !isClosed && (
         <button type="button" className="ktra-toolbtn" disabled={busy || !balanced}
           title={balanced ? "إقفال المطابقة" : "لا يمكن الإقفال قبل تصفير الفرق"}
           onClick={() => void closeCurrent()}
@@ -248,6 +295,55 @@ export const BankReconciliationPage: React.FC = () => {
       >
         <div style={{ padding: "8px 12px" }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
+
+          {adjOpen && current && !isClosed && (
+            <div className="flex flex-wrap items-end gap-2 mb-2 p-2 rounded border border-[var(--color-border)]">
+              <div className="ktra-field">
+                <label className="ktra-field-label">نوع التسوية</label>
+                <select className="ktra-input" value={adjKind}
+                  onChange={(e) => { setAdjKind(e.target.value as "expense" | "revenue"); setAdjAccountId(""); }}>
+                  <option value="expense">مصروف بنكي (عمولة/رسوم)</option>
+                  <option value="revenue">إيراد بنكي (فائدة)</option>
+                </select>
+              </div>
+              <div className="ktra-field">
+                <label className="ktra-field-label">المبلغ ({currencyCode})</label>
+                <input type="number" step="0.01" min="0" className="ktra-input ktra-num w-32"
+                  value={adjAmount} placeholder="0.00" onChange={(e) => setAdjAmount(e.target.value)} />
+              </div>
+              <div className="ktra-field">
+                <label className="ktra-field-label">التاريخ</label>
+                <input type="date" className="ktra-input" value={adjDate}
+                  max={String(current.statement_date).slice(0, 10)}
+                  onChange={(e) => setAdjDate(e.target.value)} />
+              </div>
+              <div className="ktra-field min-w-[220px]">
+                <label className="ktra-field-label">{adjKind === "expense" ? "حساب المصروف" : "حساب الإيراد"}</label>
+                <AccountTreeField
+                  accounts={ledgerAccounts}
+                  value={adjAccountId}
+                  onChange={(id) => setAdjAccountId(id ?? "")}
+                  purpose={adjKind}
+                  title={adjKind === "expense" ? "اختيار حساب المصروف" : "اختيار حساب الإيراد"}
+                  placeholder="— اختر من الشجرة —"
+                />
+              </div>
+              <div className="ktra-field flex-1 min-w-[180px]">
+                <label className="ktra-field-label">البيان</label>
+                <input className="ktra-input" value={adjDescription}
+                  placeholder={adjKind === "expense" ? "مثال: عمولة حوالة" : "مثال: فائدة شهرية"}
+                  onChange={(e) => setAdjDescription(e.target.value)} />
+              </div>
+              <button type="button" className="ktra-toolbtn"
+                disabled={busy || !adjAccountId || !(parseFloat(adjAmount) > 0) || !adjDate}
+                onClick={submitAdjustment}>
+                <CheckCircle className="w-4 h-4" /> ترحيل وتأشير
+              </button>
+              <button type="button" className="ktra-toolbtn" disabled={busy} onClick={() => setAdjOpen(false)}>
+                إلغاء
+              </button>
+            </div>
+          )}
 
           {isClosed && (
             <div className="ktra-banner" style={{ marginBottom: "8px", background: "var(--ktra-ok-bg, #e3f6e9)", color: "var(--ktra-ok, #2d7d46)" }}>

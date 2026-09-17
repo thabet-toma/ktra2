@@ -3,27 +3,24 @@ import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney } from "../../utils/formatNumber";
-import type { VatReportResponse, VatReportLine } from "../../types/accounting";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
+import type { VatReportResponse, VatReportLine, VatStatementDto } from "../../types/accounting";
 import {
   KitDocumentShell,
   KitDenseTable,
   KitReportTable,
 } from "../kit";
 import type { KitToolbarAction, KitTab, DenseColumn, ReportColumn } from "../kit";
-import { Plus, Search, FileText } from "lucide-react";
+import { Plus, Search, Lock, Unlock } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
 import { formatDateLocalized } from "../../utils/formatDate";
 
-// Placeholder type for future VAT statements (N8-T13 backend not yet done)
-interface VatStatement {
-  id: number;
-  statement_number: string;
-  period_from: string;
-  period_to: string;
-  status: string;
-  net_payable: number;
-  created_at: string;
-}
+/** نصّ حوار الاعتماد — يشرح القفل قبل أن يقع (A2-1، نمط Tax Lock Date). */
+const finalizeMessage = (from: string, to: string) =>
+  `اعتماد كشف الضريبة للفترة ${formatDateLocalized(from)} ← ${formatDateLocalized(to)} نهائياً؟\n` +
+  "تُحفظ الأرقام من الدفتر لحظة الاعتماد، ثم يُمنع ترحيل أي مستند أو قيد بتاريخٍ داخل الفترة " +
+  "ويُمنع التراجع عن ترحيله. إعادة الفتح للمدير وحده وبسببٍ يُسجَّل في سجل التدقيق.";
 
 export const VatStatementsPage: React.FC = () => {
   const today = new Date();
@@ -37,10 +34,79 @@ export const VatStatementsPage: React.FC = () => {
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewErr, setPreviewErr] = useState<string | null>(null);
   const toast = useToast();
+  const confirm = useConfirm();
+  const { can, isManager } = usePermissions();
+  const canFinalize = can("accounting.period.manage");
   const [showNewForm, setShowNewForm] = useState(false);
 
-  // Statements list (empty until N8-T13)
-  const statements: VatStatement[] = [];
+  // A2-1: الكشوف المحفوظة من الخادم.
+  const [statements, setStatements] = useState<VatStatementDto[]>([]);
+  const [listLoading, setListLoading] = useState(false);
+  const [listErr, setListErr] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [reopenTarget, setReopenTarget] = useState<VatStatementDto | null>(null);
+  const [reopenReason, setReopenReason] = useState("");
+
+  const loadStatements = useCallback(async () => {
+    setListLoading(true);
+    setListErr(null);
+    try {
+      setStatements(await accountingApi.getVatStatements());
+    } catch (e: unknown) {
+      setListErr(humanizeThrown(e, "فشل تحميل الكشوف"));
+    } finally {
+      setListLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void loadStatements(); }, [loadStatements]);
+
+  const runAction = async (fn: () => Promise<unknown>, okMessage: string) => {
+    setBusy(true);
+    try {
+      await fn();
+      toast(okMessage, "success");
+      await loadStatements();
+      return true;
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "تعذّر تنفيذ العملية"), "error");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const finalizeRow = async (row: VatStatementDto) => {
+    if (!(await confirm({
+      title: "اعتماد نهائي",
+      message: finalizeMessage(row.period_from, row.period_to),
+      confirmText: "اعتماد نهائي",
+    }))) return;
+    await runAction(() => accountingApi.finalizeVatStatement(row.id), `اعتُمد الكشف ${row.statement_number} نهائياً`);
+  };
+
+  const finalizePreviewPeriod = async () => {
+    if (!(await confirm({
+      title: "اعتماد نهائي",
+      message: finalizeMessage(previewFrom, previewTo),
+      confirmText: "اعتماد نهائي",
+    }))) return;
+    const ok = await runAction(
+      () => accountingApi.finalizeVatStatementPeriod(previewFrom, previewTo),
+      "اعتُمد كشف الفترة نهائياً",
+    );
+    if (ok) setShowNewForm(false);
+  };
+
+  const submitReopen = async () => {
+    const reason = reopenReason.trim();
+    if (!reopenTarget || !reason) return;
+    const ok = await runAction(
+      () => accountingApi.reopenVatStatement(reopenTarget.id, reason),
+      `أُعيد فتح الكشف ${reopenTarget.statement_number}`,
+    );
+    if (ok) { setReopenTarget(null); setReopenReason(""); }
+  };
 
   const fetchPreview = useCallback(async () => {
     setPreviewLoading(true);
@@ -65,13 +131,39 @@ export const VatStatementsPage: React.FC = () => {
 
   const fmt = (n: number | undefined | null) => formatMoney(n);
 
-  const stmtColumns: DenseColumn<VatStatement>[] = [
+  const stmtColumns: DenseColumn<VatStatementDto>[] = [
     { key: "statement_number", header: "رقم الكشف" },
-    { key: "period_from", header: "من" },
-    { key: "period_to", header: "إلى" },
-    { key: "status", header: "الحالة" },
-    { key: "net_payable", header: "الصافي المستحق", numeric: true, render: (r) => fmt(r.net_payable) },
-    { key: "created_at", header: "تاريخ الإنشاء" },
+    { key: "period_from", header: "من", render: (r) => formatDateLocalized(r.period_from) },
+    { key: "period_to", header: "إلى", render: (r) => formatDateLocalized(r.period_to) },
+    {
+      key: "status", header: "الحالة",
+      render: (r) => r.status === "final" ? (
+        <span className="inline-flex items-center gap-1 text-red-600">
+          <Lock className="w-3 h-3" /> نهائي — الفترة مقفلة
+        </span>
+      ) : "مسودة",
+    },
+    { key: "total_sales_vat", header: "ضريبة مخرجات", numeric: true, render: (r) => fmt(Number(r.total_sales_vat)) },
+    { key: "total_purchase_vat", header: "ضريبة مدخلات", numeric: true, render: (r) => fmt(Number(r.total_purchase_vat)) },
+    { key: "net_vat", header: "الصافي المستحق", numeric: true, render: (r) => fmt(Number(r.net_vat)) },
+    {
+      key: "actions", header: "",
+      render: (r) => r.status === "final" ? (
+        isManager ? (
+          <button type="button" className="ktra-toolbtn" disabled={busy}
+            onClick={() => { setReopenReason(""); setReopenTarget(r); }}>
+            <Unlock className="w-3 h-3" /> إعادة فتح
+          </button>
+        ) : null
+      ) : (
+        canFinalize ? (
+          <button type="button" className="ktra-toolbtn" disabled={busy}
+            onClick={() => void finalizeRow(r)}>
+            <Lock className="w-3 h-3" /> اعتماد نهائي
+          </button>
+        ) : null
+      ),
+    },
   ];
 
   type VatLine = VatReportLine & { vat_type: string };
@@ -93,13 +185,37 @@ export const VatStatementsPage: React.FC = () => {
 
   const statementsContent = (
     <>
-      <div style={{ marginBottom: "8px", fontSize: "0.85rem", color: "var(--ktra-ink-soft)" }}>
-        ملاحظة: قائمة الكشوف ستكون متاحة بعد تنفيذ N8-T13 في الخادم.
-      </div>
-      <KitDenseTable<VatStatement>
+      {listErr && <div className="ktra-banner ktra-banner--err mb-2">{listErr}</div>}
+      {reopenTarget && (
+        <div className="flex flex-wrap items-end gap-2 mb-2">
+          <div className="ktra-field flex-1 min-w-[260px]">
+            <label className="ktra-field-label">
+              سبب إعادة فتح الكشف {reopenTarget.statement_number} (يُحفظ في سجل التدقيق)
+            </label>
+            <input
+              className="ktra-input"
+              autoFocus
+              placeholder="مثال: إقرار معدَّل لفاتورة مورّد وردت متأخرة"
+              value={reopenReason}
+              onChange={(e) => setReopenReason(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void submitReopen(); }}
+            />
+          </div>
+          <button type="button" className="ktra-toolbtn" disabled={busy || !reopenReason.trim()}
+            onClick={() => void submitReopen()}>
+            <Unlock className="w-4 h-4" /> إعادة الفتح
+          </button>
+          <button type="button" className="ktra-toolbtn" disabled={busy}
+            onClick={() => { setReopenTarget(null); setReopenReason(""); }}>
+            إلغاء
+          </button>
+        </div>
+      )}
+      <KitDenseTable<VatStatementDto>
         columns={stmtColumns}
         rows={statements}
         getRowKey={(r) => r.id}
+        loading={listLoading}
         emptyHint="لا توجد كشوف ضريبية محفوظة بعد"
       />
     </>
@@ -149,20 +265,19 @@ export const VatStatementsPage: React.FC = () => {
         getRowKey={(r, idx) => `${r.journal_id}-${idx}`}
       />
 
-      {previewData && (
-        <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
+      {previewData && canFinalize && (
+        <div className="mt-3 flex justify-end">
           <OfflineGuard
-            action="إصدار كشف الضريبة"
-            warningMessage="إصدار الكشف يتطلب اتصالاً — يَقفل الفواتير المؤهَّلة على الـserver"
+            action="اعتماد كشف الضريبة"
+            warningMessage="الاعتماد النهائي يتطلب اتصالاً — يَقفل الترحيل داخل الفترة على الخادم"
           >
             <button
               type="button"
               className="ktra-toolbtn"
-              onClick={() => {
-                toast("إنشاء الكشف غير متاح بعد — ينتظر تنفيذ N8-T13 في الخادم.", "info");
-              }}
+              disabled={busy}
+              onClick={() => void finalizePreviewPeriod()}
             >
-              <FileText className="w-4 h-4" />إصدار الكشف
+              <Lock className="w-4 h-4" />اعتماد نهائي
             </button>
           </OfflineGuard>
         </div>
@@ -177,7 +292,7 @@ export const VatStatementsPage: React.FC = () => {
       icon: <Plus className="w-4 h-4" />,
       onClick: () => setShowNewForm(true),
     },
-    { key: "refresh", label: "تحديث" },
+    { key: "refresh", label: "تحديث", onClick: () => void loadStatements() },
   ];
 
   const tabs: KitTab[] = [

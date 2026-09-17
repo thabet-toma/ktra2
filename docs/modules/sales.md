@@ -66,6 +66,8 @@ def sales_cogs_map(*, tenant_id: int, invoice_ids) -> dict[tuple[int, int], dict
 def invoice_profits(*, tenant_id: int, branch=None, date_from=None, date_to=None, customer_id=None) -> dict:  # (2725)
 def dormant_customers(*, tenant_id: int, days: int | None = None) -> list[dict]:  # (226)
 def build_vat_statement(tenant_id: int, period_from, period_to, *, user=None):  # الأرقام من accounting.services.vat_period_totals وحدها — الدفتر لا الفواتير (issue #79)
+def finalize_vat_statement(tenant_id: int, *, statement_id: int | None = None, period_from=None, period_to=None, user=None):  # A2-1: يحدّث أرقام الكشف من vat_period_totals ويضعه `final` (يولّده للفترة إن غاب) — قفلٌ على الترحيل وفكّه داخل الفترة
+def reopen_vat_statement(statement, *, user=None, reason: str = ""):  # A2-1: المخرج الوحيد — `final` ⇒ `draft` بسببٍ إلزامي في سجل التدقيق (المدير وحده يُفرض في الواجهة البرمجية)
 def vat_statement_diff_report(tenant_id: int) -> list[dict]:  # تقرير فرقٍ للقراءة فقط: محفوظ كل كشف مقابل ما يحسبه vat_period_totals الآن — بلا كتابة (issue #79)
 def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> str:  # (3059)
 def resolve_default_account(tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True):  # (91)
@@ -209,7 +211,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
   حسابات الزبائن، وعليه يقع ما هو «على الحساب» بلا زبونٍ بعينه، واستبعادُه هناك
   يُرجع حسابَ زبونٍ عشوائيّ.
 
-- **كشف ض.ق.م (issue #79)**: `build_vat_statement` (`sales/services/supplier_vat.py`) ما عاد يقرأ `tax_amount` على `SalesInvoice` — يستدعي `accounting.services.vat_period_totals` (الدفتر) وحدها، نفس الدالّة التي تستدعيها `VatReportView` (`accounting`) و`client_financial_summary` (`accountant_portal`)، فيتّفق الثلاثة دائماً. **فرادة (شركة، من، إلى) هي حارس الاحتساب المزدوج الآن** — سقط `vat_statement__isnull=True` كآلية اختيار (الحقل `SalesInvoice.vat_statement` يبقى للتاريخ/التتبّع لا للاحتساب). فكّ ترحيل مستندٍ مؤرَّخ داخل فترة كشف `VatStatement.status='final'` مرفوض من `accounting.services.unpost_document` — لا أثر رجعي على كشفٍ نهائي.
+- **كشف ض.ق.م (issue #79)**: `build_vat_statement` (`sales/services/supplier_vat.py`) ما عاد يقرأ `tax_amount` على `SalesInvoice` — يستدعي `accounting.services.vat_period_totals` (الدفتر) وحدها، نفس الدالّة التي تستدعيها `VatReportView` (`accounting`) و`client_financial_summary` (`accountant_portal`)، فيتّفق الثلاثة دائماً. **فرادة (شركة، من، إلى) هي حارس الاحتساب المزدوج الآن** — سقط `vat_statement__isnull=True` كآلية اختيار (الحقل `SalesInvoice.vat_statement` يبقى للتاريخ/التتبّع لا للاحتساب). فكّ ترحيل مستندٍ مؤرَّخ داخل فترة كشف `VatStatement.status='final'` مرفوض من `accounting.services.unpost_document` — لا أثر رجعي على كشفٍ نهائي. **و(A2-1) ترحيلُه مرفوضٌ كذلك** من `post_journal` نفسها؛ و`final` لا يضعه إلا `finalize_vat_statement`، ولا يرفعه إلا `reopen_vat_statement`.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |

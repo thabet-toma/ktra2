@@ -259,19 +259,19 @@ def test_unpost_is_blocked_inside_a_final_statement_period_and_allowed_outside()
 
 def test_final_statement_numbers_are_never_recomputed_after_the_fact():
     tenant, user, ils = _setup_tenant("vat-no-retro")
-    stmt = VatStatement.objects.create(
-        tenant=tenant, statement_number="VS-FROZEN", period_from=date(2026, 6, 1),
-        period_to=date(2026, 6, 30), status=VatStatement.STATUS_FINAL,
-        total_sales_vat=Decimal("999.00"), total_purchase_vat=Decimal("111.00"),
-        net_vat=Decimal("888.00"),
-    )
-
-    # نشاطٌ جديد داخل نفس الفترة بعد تجميد الكشف — رقم الدفتر الطازج يختلف حتماً.
+    # نشاطٌ داخل الفترة يخالف أرقام الكشف المجمَّد — رقم الدفتر الطازج يختلف حتماً.
+    # (A2-1: الترحيل **بعد** الاعتماد النهائي صار مرفوضاً، فالنشاط يسبق التجميد.)
     cash = Account.objects.get(tenant=tenant, code="1101")
     create_expense_voucher(
         tenant=tenant, date=date(2026, 6, 20), amount=Decimal("50.00"), currency=ils,
         tax_amount=Decimal("5.00"), payment_method="cash",
         expense_account_name="مصروف لاحق", cash_or_bank_account_id=cash.pk, user=user,
+    )
+    stmt = VatStatement.objects.create(
+        tenant=tenant, statement_number="VS-FROZEN", period_from=date(2026, 6, 1),
+        period_to=date(2026, 6, 30), status=VatStatement.STATUS_FINAL,
+        total_sales_vat=Decimal("999.00"), total_purchase_vat=Decimal("111.00"),
+        net_vat=Decimal("888.00"),
     )
 
     fresh = vat_period_totals(tenant.pk, date(2026, 6, 1), date(2026, 6, 30))

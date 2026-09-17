@@ -356,6 +356,19 @@ export interface VatReportLine {
   partner: string | null;
 }
 
+/** A2-1: كشف ض.ق.م محفوظ — `final` قفلٌ ضريبي يمنع الترحيل وفكّه داخل فترته. المبالغ نصوص Decimal. */
+export interface VatStatementDto {
+  id: number;
+  statement_number: string;
+  period_from: string;
+  period_to: string;
+  status: "draft" | "final";
+  total_sales_vat: string;
+  total_purchase_vat: string;
+  net_vat: string;
+  created_at: string | null;
+}
+
 export interface LandedCostShipment {
   shipment_id: number;
   shipment_number: string;

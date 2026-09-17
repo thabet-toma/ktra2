@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **887**
+عدد النقاط: **891**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -77,6 +77,7 @@
 | `/api/accounting/bank-branches/{pk}/` | `BankBranchViewSet` | `accounting/views.py` |
 | `/api/accounting/bank-reconciliations/` | `BankReconciliationViewSet` | `accounting/views.py` |
 | `/api/accounting/bank-reconciliations/{pk}/` | `BankReconciliationViewSet` | `accounting/views.py` |
+| `/api/accounting/bank-reconciliations/{pk}/adjustment/` | `BankReconciliationViewSet` | `accounting/views.py` |
 | `/api/accounting/bank-reconciliations/{pk}/close/` | `BankReconciliationViewSet` | `accounting/views.py` |
 | `/api/accounting/bank-reconciliations/{pk}/reopen/` | `BankReconciliationViewSet` | `accounting/views.py` |
 | `/api/accounting/bank-reconciliations/{pk}/summary/` | `BankReconciliationViewSet` | `accounting/views.py` |
@@ -141,6 +142,10 @@
 | `/api/accounting/tax-rates/{pk}/` | `TaxRateViewSet` | `accounting/views.py` |
 | `/api/accounting/trial-balance/` | `TrialBalanceView` | `accounting/views.py` |
 | `/api/accounting/vat-report/` | `VatReportView` | `accounting/views.py` |
+| `/api/accounting/vat-statements/` | `VatStatementViewSet` | `accounting/views.py` |
+| `/api/accounting/vat-statements/finalize/` | `VatStatementViewSet` | `accounting/views.py` |
+| `/api/accounting/vat-statements/{pk}/finalize/` | `VatStatementViewSet` | `accounting/views.py` |
+| `/api/accounting/vat-statements/{pk}/reopen/` | `VatStatementViewSet` | `accounting/views.py` |
 | `/api/accounting/vouchers/batch-save/` | `VoucherBatchSaveView` | `accounting/views.py` |
 | `/api/activity/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/activity/` | `ActivityLogViewSet` | `core/activity_views.py` |
@@ -440,6 +445,7 @@
 | `/api/logistics/public-supplier-quote-requests/{pk}/matches/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/public-supplier-quote-requests/{pk}/reject/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/purchase-invoices/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/check-supplier-invoice-number/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/clearance-import-options/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/import-from-clearance/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/next-number/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |

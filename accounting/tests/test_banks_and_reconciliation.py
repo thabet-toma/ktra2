@@ -294,3 +294,115 @@ class ChequeBankLinkTest(BankApiTestBase):
         chq.refresh_from_db()
         self.assertEqual(chq.bank_name, "البنك العربي")
         self.assertEqual(chq.bank_branch, "فرع نابلس")
+
+
+class ReconciliationAdjustmentTest(BankApiTestBase):
+    """A2-3 — «قيد تسوية» من شاشة المطابقة: عمولة بنكية/فائدة تظهر في كشف البنك ولا
+    قيد لها في الدفاتر. تُسجَّل سند مصروف/إيراد على حساب البنك نفسه، ويُؤشَّر سطرها
+    مطابَقاً في المطابقة الجارية — ذرّياً."""
+
+    def setUp(self):
+        super().setUp()
+        self.ba = self.make_account(name="جاري التسوية")
+        self.fees = Account.objects.create(
+            tenant=self.tenant, code="5299", name="عمولات بنكية", account_type="Expense",
+            is_active=True,
+        )
+        self.interest = Account.objects.create(
+            tenant=self.tenant, code="4299", name="فوائد دائنة", account_type="Revenue",
+            is_active=True,
+        )
+
+    def _open_rec(self, h, balance="0.00"):
+        res = self.client.post("/api/accounting/bank-reconciliations/", {
+            "bank_account": self.ba.pk, "statement_date": "2026-06-30",
+            "statement_balance": balance,
+        }, format="json", **h)
+        self.assertEqual(res.status_code, 201, res.data)
+        return res.data["id"]
+
+    def _adjust(self, h, rec_id, **overrides):
+        payload = {
+            "kind": "expense", "amount": "15.00", "date": "2026-06-30",
+            "account": self.fees.pk, "description": "عمولة حوالة",
+        }
+        payload.update(overrides)
+        return self.client.post(
+            f"/api/accounting/bank-reconciliations/{rec_id}/adjustment/",
+            payload, format="json", **h,
+        )
+
+    def test_fee_entry_posts_a_voucher_and_clears_its_bank_line(self):
+        from accounting.models import ExpenseVoucher
+
+        h = self.auth()
+        rec_id = self._open_rec(h, balance="-15.00")
+        before = self.client.get(
+            f"/api/accounting/bank-reconciliations/{rec_id}/summary/", **h).data
+        self.assertEqual(Decimal(str(before["difference"])), Decimal("-15.00"))
+
+        res = self._adjust(h, rec_id)
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+
+        voucher = ExpenseVoucher.objects.get(tenant=self.tenant)
+        self.assertTrue(voucher.is_posted)
+        self.assertEqual(voucher.cash_or_bank_account_id, self.ba.account_id)
+        bank_line = voucher.journal.lines.get(account_id=self.ba.account_id)
+        self.assertEqual(bank_line.credit, Decimal("15.00"))
+        self.assertEqual(
+            BankReconciliationLine.objects.get(journal_line=bank_line).reconciliation_id, rec_id)
+        # الفرق تغيّر بمقدار المبلغ: −15 ⇒ صفر.
+        self.assertEqual(Decimal(str(res.data["difference"])), Decimal("0.00"))
+        self.assertEqual(Decimal(str(res.data["cleared_balance"])), Decimal("-15.00"))
+
+    def test_interest_entry_posts_a_revenue_voucher_debiting_the_bank(self):
+        from accounting.models import RevenueVoucher
+
+        h = self.auth()
+        rec_id = self._open_rec(h, balance="7.50")
+        res = self._adjust(h, rec_id, kind="revenue", amount="7.50", account=self.interest.pk,
+                           description="فائدة شهرية")
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+        voucher = RevenueVoucher.objects.get(tenant=self.tenant)
+        bank_line = voucher.journal.lines.get(account_id=self.ba.account_id)
+        self.assertEqual(bank_line.debit, Decimal("7.50"))
+        self.assertTrue(BankReconciliationLine.objects.filter(journal_line=bank_line).exists())
+        self.assertEqual(Decimal(str(res.data["difference"])), Decimal("0.00"))
+
+    def test_closed_reconciliation_is_refused_and_nothing_is_posted(self):
+        from accounting.models import ExpenseVoucher
+
+        h = self.auth()
+        rec_id = self._open_rec(h, balance="0.00")
+        self.assertEqual(self.client.post(
+            f"/api/accounting/bank-reconciliations/{rec_id}/close/", {}, format="json", **h,
+        ).status_code, 200)
+
+        res = self._adjust(h, rec_id)
+        self.assertEqual(res.status_code, 400, getattr(res, "data", None))
+        self.assertFalse(ExpenseVoucher.objects.filter(tenant=self.tenant).exists())
+        self.assertFalse(JournalLine.objects.filter(account=self.ba.account).exists())
+
+    def test_wrong_account_type_or_date_after_statement_is_refused(self):
+        h = self.auth()
+        rec_id = self._open_rec(h)
+        self.assertEqual(self._adjust(h, rec_id, account=self.interest.pk).status_code, 400)
+        self.assertEqual(self._adjust(h, rec_id, date="2026-07-01").status_code, 400)
+        self.assertFalse(JournalLine.objects.filter(account=self.ba.account).exists())
+
+    def test_tenant_isolation(self):
+        h = self.auth()
+        rec_id = self._open_rec(h)
+        other_user = User.objects.create_user(username="other-recon", password="x")
+        other = create_company("شركة تسوية أخرى", other_user)
+        foreign_expense = Account.objects.create(
+            tenant=other, code="5298", name="مصروف الغير", account_type="Expense", is_active=True,
+        )
+        # حساب مقابل من شركة أخرى مرفوض.
+        self.assertEqual(self._adjust(h, rec_id, account=foreign_expense.pk).status_code, 400)
+        # ومستخدم الشركة الأخرى لا يرى المطابقة أصلاً.
+        self.client.force_authenticate(user=other_user)
+        res = self._adjust({"HTTP_X_TENANT_ID": str(other.TenantID)}, rec_id,
+                           account=foreign_expense.pk)
+        self.assertEqual(res.status_code, 404, getattr(res, "data", None))
+        self.assertFalse(JournalLine.objects.filter(account=self.ba.account).exists())

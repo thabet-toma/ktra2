@@ -16,6 +16,7 @@ import type {
   CodingRuleDto,
   ExpenseVoucherDto,
   RevenueVoucherDto,
+  VatStatementDto,
   OpeningBalanceDto,
   OpeningBalanceLinesInput,
   VoucherBatchSaveResult,
@@ -414,6 +415,18 @@ export const accountingApi = {
     return res.json();
   },
 
+  /** A2-3: قيد تسوية (عمولة/فائدة بنكية) — سند مصروف/إيراد على حساب البنك، يُؤشَّر مطابَقاً. */
+  addBankReconciliationAdjustment: async (
+    id: number,
+    body: { kind: "expense" | "revenue"; amount: string; date: string; account: number; description?: string },
+  ): Promise<BankReconciliationSummaryDto> => {
+    const res = await fetch(`${ACC}/bank-reconciliations/${id}/adjustment/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "addBankReconciliationAdjustment");
+    return res.json();
+  },
+
   deleteBankReconciliation: async (id: number) => {
     const res = await fetch(`${ACC}/bank-reconciliations/${id}/`, {
       method: "DELETE", headers: headers(),
@@ -548,6 +561,35 @@ export const accountingApi = {
       headers: headers(),
     });
     await handle(res, "vatReport");
+    return res.json();
+  },
+
+  /* A2-1: كشوف ض.ق.م المحفوظة والاعتماد النهائي (قفلٌ ضريبي). */
+  getVatStatements: (): Promise<VatStatementDto[]> =>
+    fetch(`${ACC}/vat-statements/`, { headers: headers() }).then(asList),
+
+  finalizeVatStatementPeriod: async (periodFrom: string, periodTo: string): Promise<VatStatementDto> => {
+    const res = await fetch(`${ACC}/vat-statements/finalize/`, {
+      method: "POST", headers: headers(),
+      body: JSON.stringify({ period_from: periodFrom, period_to: periodTo }),
+    });
+    await handle(res, "finalizeVatStatementPeriod");
+    return res.json();
+  },
+
+  finalizeVatStatement: async (id: number): Promise<VatStatementDto> => {
+    const res = await fetch(`${ACC}/vat-statements/${id}/finalize/`, {
+      method: "POST", headers: headers(), body: "{}",
+    });
+    await handle(res, "finalizeVatStatement");
+    return res.json();
+  },
+
+  reopenVatStatement: async (id: number, reason: string): Promise<VatStatementDto> => {
+    const res = await fetch(`${ACC}/vat-statements/${id}/reopen/`, {
+      method: "POST", headers: headers(), body: JSON.stringify({ reason }),
+    });
+    await handle(res, "reopenVatStatement");
     return res.json();
   },
 

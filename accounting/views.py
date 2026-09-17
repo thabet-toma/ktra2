@@ -86,6 +86,8 @@ from .services import (
     bank_reconciliation_summary,
     batch_save_vouchers,
     close_bank_reconciliation,
+    RECONCILIATION_ADJUSTMENT_EXPENSE,
+    record_reconciliation_adjustment,
     create_bank_account,
     validate_journal_entry,
     post_journal_entry,
@@ -1179,6 +1181,121 @@ class VatReportView(viewsets.ViewSet):
             'input_lines': _lines(totals['input_lines']),
             'output_lines': _lines(totals['output_lines']),
         })
+
+
+class VatStatementViewSet(viewsets.ViewSet):
+    """A2-1 — كشوف ض.ق.م المحفوظة و«الاعتماد النهائي» (قفلٌ ضريبي، نمط Tax Lock
+    Date في Odoo). الاعتماد يمنع ترحيل أي مستند وفكّ ترحيله بتاريخٍ داخل فترة
+    الكشف (`accounting.services.assert_no_final_vat_statement`)، وإعادة الفتح
+    للمدير وحده بسببٍ يُحفظ في سجل التدقيق.
+
+    - `GET vat-statements/` — كشوف الشركة.
+    - `POST vat-statements/finalize/` `{period_from, period_to}` — يعتمد كشف الفترة
+      (يولّده إن غاب).
+    - `POST vat-statements/{id}/finalize/` — يعتمد كشفاً محفوظاً.
+    - `POST vat-statements/{id}/reopen/` `{reason}` — المدير وحده.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    @staticmethod
+    def _row(stmt):
+        return {
+            'id': stmt.id,
+            'statement_number': stmt.statement_number,
+            'period_from': stmt.period_from.isoformat() if hasattr(stmt.period_from, 'isoformat') else stmt.period_from,
+            'period_to': stmt.period_to.isoformat() if hasattr(stmt.period_to, 'isoformat') else stmt.period_to,
+            'status': stmt.status,
+            'total_sales_vat': str(stmt.total_sales_vat),
+            'total_purchase_vat': str(stmt.total_purchase_vat),
+            'net_vat': str(stmt.net_vat),
+            'created_at': stmt.created_at.isoformat() if stmt.created_at else None,
+        }
+
+    @staticmethod
+    def _tenant_or_error(request):
+        tenant = get_tenant(request)
+        if not tenant:
+            raise ValidationError({'error': 'لا يوجد مستأجر.'})
+        return tenant
+
+    def _get_statement(self, request, pk):
+        from django.http import Http404
+        from sales.models import VatStatement
+
+        tenant = self._tenant_or_error(request)
+        stmt = VatStatement.objects.filter(tenant=tenant, pk=pk).first()
+        if stmt is None:
+            raise Http404
+        return tenant, stmt
+
+    @staticmethod
+    def _error(exc):
+        detail = "؛ ".join(exc.messages) if hasattr(exc, 'messages') else str(exc)
+        return Response({'error': detail}, status=status.HTTP_400_BAD_REQUEST)
+
+    def list(self, request):
+        from sales.models import VatStatement
+
+        tenant = self._tenant_or_error(request)
+        rows = VatStatement.objects.filter(tenant=tenant).order_by('-period_from', '-id')
+        return Response([self._row(s) for s in rows])
+
+    @action(detail=False, methods=['post'], url_path='finalize')
+    @requires_perm('accounting.period.manage')
+    def finalize_period(self, request):
+        from django.utils.dateparse import parse_date
+        from sales.services import finalize_vat_statement
+
+        tenant = self._tenant_or_error(request)
+        period_from = parse_date(str(request.data.get('period_from') or ''))
+        period_to = parse_date(str(request.data.get('period_to') or ''))
+        if not period_from or not period_to:
+            return Response(
+                {'error': 'period_from و period_to مطلوبان بصيغة YYYY-MM-DD.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            stmt = finalize_vat_statement(
+                tenant.pk, period_from=period_from, period_to=period_to, user=request.user,
+            )
+        except DjangoValidationError as exc:
+            return self._error(exc)
+        return Response(self._row(stmt))
+
+    @action(detail=True, methods=['post'], url_path='finalize')
+    @requires_perm('accounting.period.manage')
+    def finalize_statement(self, request, pk=None):
+        from sales.services import finalize_vat_statement
+
+        tenant, stmt = self._get_statement(request, pk)
+        try:
+            stmt = finalize_vat_statement(tenant.pk, statement_id=stmt.pk, user=request.user)
+        except DjangoValidationError as exc:
+            return self._error(exc)
+        return Response(self._row(stmt))
+
+    @action(detail=True, methods=['post'], url_path='reopen')
+    def reopen(self, request, pk=None):
+        from core.access import user_tenant_role
+        from sales.services import reopen_vat_statement
+
+        tenant, stmt = self._get_statement(request, pk)
+        # المخرج الوحيد من القفل الضريبي — للمدير (مالك الشركة) وحده، لا لصلاحيةٍ
+        # قابلةٍ للمنح: الإقرار المُقدَّم لا يُفتح بتجاوزٍ فرديّ.
+        if user_tenant_role(request.user, tenant) != 'manager':
+            return Response(
+                {'error': 'إعادة فتح كشف ضريبة معتمد نهائياً للمدير وحده.'},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        try:
+            stmt = reopen_vat_statement(
+                stmt, user=request.user, reason=request.data.get('reason') or '',
+            )
+        except DjangoValidationError as exc:
+            return self._error(exc)
+        return Response(self._row(stmt))
 
 
 class CashBoxLedgerViewSet(viewsets.ModelViewSet):
@@ -2416,6 +2533,41 @@ class BankReconciliationViewSet(viewsets.ModelViewSet):
             close_bank_reconciliation(rec, user=request.user)
         except DjangoValidationError as e:
             raise ValidationError({"detail": e.messages if hasattr(e, 'messages') else str(e)})
+        return Response(bank_reconciliation_summary(rec))
+
+    @action(detail=True, methods=['post'], url_path='adjustment')
+    def adjustment(self, request, pk=None):
+        """A2-3 — «قيد تسوية»: عمولة/فائدة بنكية تُسجَّل سندَ مصروف/إيراد على حساب
+        هذا البنك ويُؤشَّر سطرها مطابَقاً (`record_reconciliation_adjustment`)."""
+        require_perm(request, 'accounting.journal.create')
+        rec = self.get_object()
+        kind = request.data.get('kind')
+        require_perm(
+            request,
+            'finance.expense.create' if kind == RECONCILIATION_ADJUSTMENT_EXPENSE
+            else 'finance.revenue.create',
+        )
+        try:
+            amount = Decimal(str(request.data.get('amount') or '0'))
+            exchange_rate = Decimal(str(request.data.get('exchange_rate') or '1'))
+        except (InvalidOperation, TypeError, ValueError):
+            raise ValidationError({"amount": "مبلغ غير صالح."})
+        date_raw = request.data.get('date')
+        when = None
+        if date_raw:
+            try:
+                when = datetime.date.fromisoformat(str(date_raw))
+            except ValueError:
+                raise ValidationError({"date": "تاريخ غير صالح — YYYY-MM-DD."})
+        try:
+            record_reconciliation_adjustment(
+                rec, kind=kind, amount=amount, account_id=request.data.get('account'),
+                date=when, description=(request.data.get('description') or '').strip(),
+                exchange_rate=exchange_rate, user=request.user,
+            )
+        except DjangoValidationError as e:
+            raise ValidationError({"detail": e.messages if hasattr(e, 'messages') else str(e)})
+        rec.refresh_from_db()
         return Response(bank_reconciliation_summary(rec))
 
     @action(detail=True, methods=['post'], url_path='reopen')

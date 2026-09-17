@@ -464,3 +464,102 @@ def vat_statement_diff_report(tenant_id: int) -> list[dict]:
     return rows
 
 
+
+
+# ── A2-1: «اعتماد نهائي» — قفلٌ ضريبيٌّ حقيقي ─────────────────────────────
+
+def finalize_vat_statement(
+    tenant_id: int,
+    *,
+    statement_id: int | None = None,
+    period_from=None,
+    period_to=None,
+    user=None,
+):
+    """يعتمد كشف ض.ق.م نهائياً — يحفظ أرقامه من الدفتر ثم يضعه `final`.
+
+    إمّا `statement_id` (كشفٌ محفوظ لهذه الشركة) وإمّا `period_from`/`period_to`:
+    يُعتمد الكشف المطابق للفترة حرفياً إن وُجد، وإلا يُولَّد عبر
+    `build_vat_statement` (برفض التداخل نفسه). **الأرقام تُحدَّث من
+    `accounting.services.vat_period_totals` لحظة الاعتماد** — مسودةٌ حُفظت قبل
+    ترحيلاتٍ لاحقة لا تُقفَل بأرقامٍ بائتة. بعد الاعتماد لا أثر رجعي: لا تُعاد
+    كتابة الأرقام، و`accounting.services.assert_no_final_vat_statement` يرفض
+    **الترحيل** (`post_journal`) و**فكّه** (`unpost_document`) بتاريخٍ داخل الفترة.
+    المخرج الوحيد `reopen_vat_statement`.
+    """
+    from sales.models import VatStatement
+    from accounting.services import vat_period_totals
+
+    with transaction.atomic():
+        if statement_id is not None:
+            stmt = (
+                VatStatement.objects.select_for_update()
+                .filter(tenant_id=tenant_id, pk=statement_id)
+                .first()
+            )
+            if stmt is None:
+                raise VatStatement.DoesNotExist("كشف الضريبة غير موجود في هذه الشركة.")
+        else:
+            if not period_from or not period_to or period_from > period_to:
+                raise ValidationError("حدود فترة الكشف غير صالحة.")
+            stmt = (
+                VatStatement.objects.select_for_update()
+                .filter(tenant_id=tenant_id, period_from=period_from, period_to=period_to)
+                .first()
+            )
+            if stmt is None:
+                stmt = build_vat_statement(tenant_id, period_from, period_to, user=user)
+
+        if stmt.status == VatStatement.STATUS_FINAL:
+            raise ValidationError(
+                f"كشف الضريبة «{stmt.statement_number}» معتمدٌ نهائياً أصلاً."
+            )
+
+        totals = vat_period_totals(tenant_id, stmt.period_from, stmt.period_to)
+        stmt.total_sales_vat = totals['output']['balance_payable']
+        stmt.total_purchase_vat = totals['input']['balance']
+        stmt.net_vat = totals['net_payable']
+        stmt.status = VatStatement.STATUS_FINAL
+        stmt.save(update_fields=['total_sales_vat', 'total_purchase_vat', 'net_vat', 'status'])
+
+        create_audit_log(
+            tenant=stmt.tenant,
+            user=user,
+            action="UPDATE",
+            model_name="VatStatement",
+            object_id=stmt.id,
+            change_details=(
+                f"VAT statement {stmt.statement_number} set final "
+                f"({stmt.period_from} → {stmt.period_to}) net={stmt.net_vat} — "
+                "اعتماد نهائي: الترحيل وفكّه داخل الفترة مقفلان"
+            ),
+        )
+        return stmt
+
+
+def reopen_vat_statement(statement, *, user=None, reason: str = ""):
+    """المخرج الوحيد من القفل الضريبي — يعيد الكشف `draft` بسببٍ مكتوب يُحفظ في
+    سجل التدقيق (مرآة `FiscalPeriodViewSet.reopen_period`). صلاحية المدير وحده
+    تُفرض في الواجهة البرمجية (`accounting/views.py` — `VatStatementViewSet.reopen`)."""
+    from sales.models import VatStatement
+
+    cleaned = (reason or "").strip()
+    if not cleaned:
+        raise ValidationError("سبب إعادة فتح الكشف مطلوب — يُحفظ في سجل التدقيق.")
+    with transaction.atomic():
+        stmt = VatStatement.objects.select_for_update().get(pk=statement.pk)
+        if stmt.status != VatStatement.STATUS_FINAL:
+            raise ValidationError(f"كشف الضريبة «{stmt.statement_number}» ليس معتمداً نهائياً.")
+        stmt.status = VatStatement.STATUS_DRAFT
+        stmt.save(update_fields=['status'])
+        create_audit_log(
+            tenant=stmt.tenant,
+            user=user,
+            action="UPDATE",
+            model_name="VatStatement",
+            object_id=stmt.id,
+            change_details=(
+                f"VAT statement {stmt.statement_number} reopened — السبب: {cleaned[:400]}"
+            ),
+        )
+        return stmt

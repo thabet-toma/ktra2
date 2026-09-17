@@ -120,6 +120,8 @@ from .supplier_vat import (
     deallocate_supplier_payment,
     build_vat_statement,
     vat_statement_diff_report,
+    finalize_vat_statement,
+    reopen_vat_statement,
 )
 
 __all__ = [
@@ -221,4 +223,6 @@ __all__ = [
     "deallocate_supplier_payment",
     "build_vat_statement",
     "vat_statement_diff_report",
+    "finalize_vat_statement",
+    "reopen_vat_statement",
 ]
