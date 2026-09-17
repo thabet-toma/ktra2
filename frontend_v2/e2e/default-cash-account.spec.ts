@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { managerPermissionsBody } from './manager-permissions';
 
 test('New Customer Payment modal selects default cash account from purchase settings', async ({ page }) => {
   const requestedPaths: string[] = [];
@@ -26,6 +27,21 @@ test('New Customer Payment modal selects default cash account from purchase sett
         isApproved: true,
         isEmailVerified: true,
       };
+    } else if (url.pathname.endsWith('/tenants/companies/my-companies/')) {
+      // بلا عضويةٍ يقف التطبيق على «لنُنشئ شركتك الأولى» فلا تُرسم الشاشة أصلاً.
+      body = [{
+        id: 1, role: 'manager', is_default: true, created_at: '2026-01-01T00:00:00Z',
+        can_access_import: false,
+        tenant: {
+          TenantID: 1, CompanyName: 'Default Cash Co', SubscriptionPlan: 'Enterprise',
+          Status: 'Active', CreatedAt: '2026-01-01T00:00:00Z', import_enabled: false,
+          template: 'general', managed_by: null,
+        },
+      }];
+    } else if (url.pathname.endsWith('/permissions/me/')) {
+      // مجموعةُ مديرٍ كاملة لا `[]`: الشاشة محروسة بـ`sales.payment.create`
+      // (`utils/viewPermissions.ts`)، والفراغ يمنعها بصمت.
+      body = managerPermissionsBody();
     } else if (url.pathname.endsWith('/accounting/accounts/')) {
       body = [
         { id: 411, code: '110001', name: 'صندوق احتياطي', account_type: 'cash' },
@@ -50,14 +66,17 @@ test('New Customer Payment modal selects default cash account from purchase sett
   });
 
   await page.goto('/sales/customer-payments');
-  await expect.poll(() => requestedPaths).toContain('/api/sales/settings/current/');
+  await expect.poll(() => requestedPaths, { timeout: 30_000 }).toContain('/api/sales/settings/current/');
   await expect.poll(() => requestedPaths).toContain('/api/logistics/purchase-settings/current/');
 
-  await page.getByRole('button', { name: 'دفعة جديدة', exact: true }).click();
+  // زرُّ شريط الأدوات في `SalesCustomerPaymentsPage.tsx` (`actions` — المفتاح `new`).
+  await page.getByRole('button', { name: 'سند قبض جديد (Ctrl+Ins)', exact: true }).click();
 
-  const cashSelect = page.getByText('الصندوق / البنك *', { exact: true })
+  // حقلُ الصندوق صار `AccountTreeField` (زرٌّ يفتح شجرة الحسابات) لا `<select>`:
+  // نصُّ الزرّ هو الحساب المختار (`accountLabel` — «الرمز — الاسم»). اسمُه
+  // المتاح يأتي من `<label>` المحيط لا من نصّه، فالتأكيدُ على النصّ نفسه.
+  const cashButton = page.getByText('الصندوق / البنك *', { exact: true })
     .locator('..')
-    .locator('select');
-  await expect(cashSelect).toHaveValue('412');
-  await expect(cashSelect.locator('option:checked')).toHaveText('110002 الصندوق الافتراضي للاختبار');
+    .locator('button.ktra-input');
+  await expect(cashButton).toHaveText('110002 — الصندوق الافتراضي للاختبار');
 });

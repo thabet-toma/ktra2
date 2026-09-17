@@ -11,6 +11,7 @@ import {
   type ParityBaseline,
   type ViewCensus,
 } from "../utils/parityCensus";
+import { managerPermissionsBody } from "./manager-permissions";
 
 test.use({
   serviceWorkers: "block",
@@ -218,16 +219,13 @@ async function installAuthenticatedApiMocks(page: Page) {
     localStorage.setItem("tenantId", "1");
   });
 
-  await page.route("**/*", async (route: Route) => {
+  /* المطابقةُ بدالّة على الرابط لا `**\/*` ثم `route.continue()`: خادمُ Vite
+     للتطوير يقدّم التطبيقَ مئاتِ وحداتٍ منفصلة، وكلُّ واحدةٍ منها كانت تعبر
+     المعترِض ذهاباً وإياباً مع كلّ `goto` من 69 — فصار التحميلُ وحده 10–30ث
+     للشاشة على جهازٍ مشغول وتجاوزت الجولةُ مهلتها (15د). ما ليس API لا يُعترَض. */
+  const isApi = (url: URL) => url.port === "8000" || url.pathname.startsWith("/api/");
+  await page.route(isApi, async (route: Route) => {
     const url = new URL(route.request().url());
-    const isApi =
-      url.port === "8000" ||
-      url.pathname.startsWith("/api/");
-
-    if (!isApi) {
-      await route.continue();
-      return;
-    }
 
     if (url.pathname.endsWith("/hr/users/parity-e2e-user/")) {
       await route.fulfill({
@@ -272,10 +270,15 @@ async function installAuthenticatedApiMocks(page: Page) {
       return;
     }
 
+    /* مجموعةُ المدير كاملةً لا `permissions: []`: `can()` تقرأ المجموعة وحدها
+       بعد التحميل ولا تنظر إلى `is_manager`، فالفراغ كان يمنع كلَّ شاشةٍ محروسة
+       (`utils/viewPermissions.ts`) — ويُسجَّل ما يُرسم مكانها. خطُّ الأساس
+       السابق (bf73495) حمل ذلك: 36 شاشةً من 69 بلا حقلٍ واحد، و`sales-customer-payments`
+       مطابقةٌ حرفاً لـ`sales-customers`، و16 شاشةً متطابقةً فيما بينها. */
     if (url.pathname.endsWith("/permissions/me/")) {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ role: "manager", is_manager: true, permissions: [] }),
+        body: JSON.stringify(managerPermissionsBody()),
       });
       return;
     }
@@ -285,6 +288,49 @@ async function installAuthenticatedApiMocks(page: Page) {
         contentType: "application/json",
         body: JSON.stringify({ isCurrentlyActive: true }),
       });
+      return;
+    }
+
+    /* نقاطٌ تُرجع **كائناً** لا قائمة: `[]` العامّ يُسقط عندها التطبيقَ كلَّه
+       (خطأُ تصييرٍ بلا حدّ خطأ ⇒ `#root` فارغ)، فتُسجَّل الشاشةُ صفراً من كلّ شيء
+       وتطابق حرفاً كلَّ شاشةٍ فارغةٍ أخرى. أُمسك هذا بإعادة التسجيل: «الرئيسية»
+       (`TradeDashboard` — `data.period.from`)، و«الإعدادات» (`MyPlanCard` —
+       `pricing.plans.find`)، و«تقرير الضريبة» (`data.input.balance`). */
+    const emptyObjectBodies: Array<[string, unknown]> = [
+      ["/api/dashboard/", {
+        period: { from: "2026-09-01", to: "2026-09-30" },
+        is_new_company: false,
+        financials: { revenue: 0, expenses: 0, net_profit: 0 },
+        sales_invoices: { total: 0, posted: 0, draft: 0, recent: [] },
+        purchase_invoices: { total: 0, posted: 0, draft: 0, recent: [] },
+        inventory: {
+          total_products: 0, in_stock: 0, low_stock: 0, out_of_stock: 0,
+          inventory_value: 0, movements_this_month: 0, low_stock_items: [],
+        },
+        accounting: { journals_this_month: 0 },
+        alerts: [],
+      }],
+      ["/api/pricing/plans/", {
+        currency: "ILS",
+        plans: [],
+        data_entry_addon: {
+          key: "data_entry", label: "", price: 0, included_operations: 0, extra_operation_price: null,
+        },
+      }],
+      ["/api/my-plan/usage/", { plan: "Enterprise", plan_label: "Enterprise", limits: [] }],
+      ["/api/accounting/vat-report/", {
+        start_date: "2026-09-01",
+        end_date: "2026-09-30",
+        input: { accounts: [], total_debit: 0, total_credit: 0, balance: 0 },
+        output: { accounts: [], total_debit: 0, total_credit: 0, balance: 0, balance_payable: 0 },
+        net_payable: 0,
+        input_lines: [],
+        output_lines: [],
+      }],
+    ];
+    const objectBody = emptyObjectBodies.find(([suffix]) => url.pathname.endsWith(suffix));
+    if (objectBody) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(objectBody[1]) });
       return;
     }
 
@@ -312,8 +358,12 @@ async function waitForStableView(page: Page, target: ViewTarget) {
     // حزمتها الكسولة تُترجم باردةً فتُلتقط الصفحةُ فارغةً، و«فارغ» حالةٌ
     // مستقرّة تجتازها حلقةُ الاستقرار — فيُبلَّغ عن سقوط الشاشة كلها زوراً.
     // انتظار أول زرّ يُنهي هذا التذبذب (وقع فعلاً على `sales-classic`).
+    // و«أول زرّ» وحده لا يكفي `sales-classic`: `appView` يُضبط في تأثيرٍ بعد
+    // أوّل رسمة (`App.tsx`)، فيُرسم غلافُ التطبيق بأزراره لحظةً قبل الشاشة
+    // الكسولة — فسُجّلت أزرارُ الشريط الجانبي مكانها وتذبذبت المقارنةُ بين
+    // جولتين. شريطُ أدوات المستند (`.ktra-toolbtn`) لا يوجد في ذلك الغلاف.
     await page
-      .locator("#root button")
+      .locator(target.view === "sales-classic" ? "#root .ktra-toolbtn" : "#root button")
       .first()
       .waitFor({ state: "attached", timeout: 15_000 })
       .catch(() => { /* شاشةٌ بلا أزرار: يتولّاها الالتقاط كما هي */ });
@@ -457,6 +507,13 @@ test("authenticated AppView feature-parity census", async ({ page }) => {
 
   const deterministic = sortedBaseline(current);
   if (RECORD_MODE) {
+    /* شاشةٌ فشل تنقّلها تُكتب في `skipped` فتخرج من المقارنة إلى الأبد (غيابُ
+       شاشةٍ عن خطّ الأساس «زيادةٌ» لا نقصان). وتجاوزُ مهلة الاختبار لا يوقف
+       الحلقة: كلُّ `goto` بعده يرمي «Target closed» فوراً ويُكتب الملفُّ بنصف
+       الشاشات — وقع فعلاً أثناء إعادة التسجيل. التسجيلُ الجزئيّ يُرفض. */
+    const failedNavigation = Object.entries(deterministic.skipped)
+      .filter(([, reason]) => reason.startsWith("navigation failed"));
+    expect(failedNavigation, "لا يُسجَّل خطُّ أساسٍ فشل فيه تنقّل").toEqual([]);
     await writeFile(BASELINE_PATH, `${JSON.stringify(deterministic, null, 2)}\n`, "utf8");
     return;
   }

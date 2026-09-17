@@ -582,12 +582,12 @@ test('عرض السعر: اكتب، أخفِ التبويب، أعِد التح�
   await expect(page.getByPlaceholder('ملاحظات داخلية…')).toHaveValue('OFFER-DRAFT-001');
 });
 
-/* ISSUE #121 — معلَّقةٌ لا محذوفة: شاشةُ «العروض والطلبيات» لا تُركَّب تحت
-   `stubGeneric` (الشريطُ الجانبي يظهر ومنطقةُ المحتوى تبقى فارغةً بلا خطأ في
-   الطرفية أصلاً) — يلزمها تقنيعٌ مفصَّلٌ خاصٌّ بها كـ`stubSalesInvoice`. حفظُ
-   المسودّة في الشاشتين منفَّذٌ ومُتحقَّقٌ منه بالقراءة و`tsc`، والناقصُ إثباتُه
-   في المتصفّح. تُترك ظاهرةً معلّقةً لا محذوفة كي لا يُنسى الدَّين. */
-test.fixme('الطلبية: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النموذج ← المحتوى موجود والشريط ظاهر (issue #121 دَين)', async ({ page }) => {
+/* كانت معلَّقةً بسببٍ مكتوبٍ خطأ («الشاشة لا تُركَّب تحت `stubGeneric`»): الشاشةُ
+   تُركَّب، وحالةُ «عرض السعر» أعلاه تمرّ على المسار نفسه. العطبُ كان محدِّدَ ما بعد
+   إعادة التحميل: `/الطلبيات/` بلا مرساة يطابق أيضاً بندَ الشريط الجانبي «العروض
+   والطلبيات»، وهو وحده الظاهر قبل أن تُحمَّل القائمة، فيُنقر هو ولا يظهر زرُّ
+   «طلبية جديدة» أبداً. المرساةُ `^` كما في النقرة الأولى. */
+test('الطلبية: اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتح النموذج ← المحتوى موجود والشريط ظاهر (issue #121 دَين)', async ({ page }) => {
   test.setTimeout(60_000);
   await stubGeneric(page, ['purchase.invoice.view', 'purchase.invoice.create', 'purchase.invoice.edit']);
 
@@ -606,7 +606,7 @@ test.fixme('الطلبية: اكتب، أخفِ التبويب، أعِد الت
   await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
 
   await page.reload();
-  await page.getByRole('button', { name: /الطلبيات/ }).click();
+  await page.getByRole('button', { name: /^الطلبيات/ }).click();
   await page.getByRole('button', { name: 'طلبية جديدة' }).click();
   await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByPlaceholder('ملاحظات داخلية عن الطلبية…')).toHaveValue('RFQ-DRAFT-001');
@@ -650,23 +650,29 @@ const BATCH4_SCREENS: Array<{
   /** تسمية زرّ الإنشاء **حرفياً** — لا نمطٌ عامّ: «ما الجديد» في الشريط
    *  العلويّ يطابق `/جديد/` ويسبق زرَّ الإنشاء في ترتيب الصفحة. */
   newLabel: string;
-  /** سببُ التعليق (`test.fixme`) إن كانت الشاشة لا تصل نقطةَ لمسها تحت
-   *  التقنيع العامّ. الحفظُ فيها منفَّذٌ ومُتحقَّقٌ منه بالقراءة و`tsc`،
-   *  والناقصُ إثباتُه في المتصفّح — تُترك ظاهرةً معلّقةً لا محذوفة. */
+  /** الاستعادةُ نفسها تفتح المحرِّر (`onRestoreDraft` يُظهر النموذج) — فلا نقرة
+   *  بعد إعادة التحميل. النقرُ هنا كان سبقاً: يُقرأ «الحقل غير ظاهر» قبل أن
+   *  تنتهي الاستعادةُ غيرُ المتزامنة، ثم يُنتظر زرُّ إنشاءٍ اختفى (صار «إخفاء
+   *  النموذج» أو خرجت القائمة) — فعُلِّقت الحالات الثلاث بأسبابٍ مكتوبةٍ خطأ
+   *  («الزرّ يبقى معطَّلاً»، «تنتظر مستودعات»). */
+  reopensItself?: true;
+  /** سببُ التعليق (`test.fixme`) — **عطبٌ في التطبيق** لا في التقنيع، بموضعه. */
   pending?: string;
 }> = [
   { name: 'عرض سعر الزبون', route: '/sales/quotations', permissions: ['sales.quotation.manage'],
     touch: '[data-testid="quotation-customer-address"]', value: 'QUO-DRAFT-001' , newLabel: 'عرض جديد' },
   { name: 'طلبية الزبون', route: '/sales/orders', permissions: ['sales.quotation.manage'],
-    touch: '[data-testid="order-notes"]', value: 'ORD-DRAFT-001' , newLabel: 'طلبية جديدة' , pending: 'النموذجُ لا يُعاد فتحُه على نفس الهويّة بعد إعادة التحميل تحت التقنيع العامّ' },
+    touch: '[data-testid="order-notes"]', value: 'ORD-DRAFT-001' , newLabel: 'طلبية جديدة' ,
+    pending: 'عطبٌ في التطبيق: الاستعادةُ تتمّ عند فتح القائمة (`SalesOrdersPage.tsx` — `onRestoreDraft` يملأ الحالة ولا يُظهر النموذج) فيظهر شريطُ «استُعيدت مسودةٌ» بلا طريقٍ إليها، وزرُّ «طلبية جديدة» (`onNew` ← `resetForm()`) يمحو ما استُعيد: الشريطُ ظاهر والملاحظاتُ فارغة' },
   { name: 'إشعار دائن/مدين', route: '/sales/credit-debit-notes', permissions: ['sales.invoice.view', 'sales.invoice.create'],
-    touch: '[data-testid="note-related-invoice"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' , pending: 'زرُّ الإنشاء يظهر مرّتين وترتيبُهما غيرُ ثابتٍ تحت التقنيع العامّ' },
+    touch: '[data-testid="note-related-invoice"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' ,
+    pending: 'عطبٌ في التطبيق: الاستعادةُ تتمّ عند فتح القائمة (`CreditDebitNotesPage.tsx` — `onRestoreDraft` يملأ الحالة ولا يُظهر النافذة) وشريطُها داخل النافذة المغلقة، وزرّا «إشعار جديد» كلاهما `resetForm()` فيمحوان ما استُعيد: الشريطُ ظاهر والحقلُ فارغ' },
   { name: 'إرسالية الشراء', route: '/purchase-receipts', permissions: ['purchase.invoice.view', 'purchase.invoice.create'],
-    touch: '[data-testid="receipt-supplier-ref"]', value: 'GR-DRAFT-001' , newLabel: 'إرسالية جديدة' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر بياناتٍ لا يوفّرها التقنيعُ العامّ' },
+    touch: '[data-testid="receipt-supplier-ref"]', value: 'GR-DRAFT-001' , newLabel: 'إرسالية جديدة' , reopensItself: true },
   { name: 'الجرد المخزني', route: '/stocktake', permissions: ['inventory.doc.post', 'inventory.item.view'],
-    touch: '[data-testid="stocktake-notes"]', value: 'STK-DRAFT-001' , newLabel: 'جرد جديد' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر مستودعاتٍ وأصنافاً لا يوفّرها التقنيعُ العامّ' },
+    touch: '[data-testid="stocktake-notes"]', value: 'STK-DRAFT-001' , newLabel: 'جرد جديد' , reopensItself: true },
   { name: 'التحويل المستودعي', route: '/warehouse-transfer', permissions: ['inventory.doc.post', 'inventory.item.view'],
-    touch: '[data-testid="transfer-notes"]', value: 'TRF-DRAFT-001' , newLabel: 'تحويل جديد' , pending: 'زرُّ الإنشاء يبقى معطَّلاً — الشاشةُ تنتظر مستودعَين لا يوفّرهما التقنيعُ العامّ' },
+    touch: '[data-testid="transfer-notes"]', value: 'TRF-DRAFT-001' , newLabel: 'تحويل جديد' , reopensItself: true },
 ];
 
 /** يفتح محرِّرَ الشاشة: بعضُها يعرضه فوراً، وبعضُها خلف زرّ «…جديد». */
@@ -699,8 +705,13 @@ for (const screen of BATCH4_SCREENS) {
     await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
 
     await page.reload();
-    await openEditor(page, screen.touch, screen.newLabel);
-    await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+    if (screen.reopensItself) {
+      await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+      await expect(page.locator(screen.touch)).toBeVisible();
+    } else {
+      await openEditor(page, screen.touch, screen.newLabel);
+      await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
+    }
     await expect(page.locator(screen.touch)).toHaveValue(screen.value);
   });
 }
