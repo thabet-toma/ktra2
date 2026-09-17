@@ -407,7 +407,13 @@ export const DealForm: React.FC<DealFormProps> = ({
             discountAmount: formData.discountAmount, shippingCost: formData.shippingCost,
             shippingIncluded: formData.shippingIncluded,
           }, currentUser.id, currentUser.name, currentUser.role || "user", "", "");
-        } catch (err) { console.error("Auto-save failed:", err); }
+        } catch (err: unknown) {
+          // B-2: الدفع يُبنى على البنود والإجماليات المحفوظة — فشلُ حفظها يوقف
+          // العملية بدل أن تمضي على بياناتٍ لم تُحفظ (مرآة `handleUpdateDeal`).
+          const reason = err instanceof Error && err.message ? err.message : "خطأ غير معروف";
+          toast(`لم تُنفَّذ العملية: تعذّر حفظ بنود الصفقة وإجمالياتها قبلها — ${reason}`, "error");
+          return;
+        }
       }
       const cleanData = (d: any): any => Object.fromEntries(Object.entries(d).filter(([_, v]) => v !== undefined));
       let confirmAccountingMeta: { journalId?: number; message: string; openManualJournal?: boolean; postingBlockers?: string[] } | undefined;
@@ -609,12 +615,18 @@ export const DealForm: React.FC<DealFormProps> = ({
         const { payments: _paymentsOmitted, ...dealUpdateWithoutPayments } = finalFormData;
         const savedDeal = await handleUpdateDeal(dealUpdateWithoutPayments, "تحديث بيانات الصفقة", "تم تحديث بيانات الصفقة (البنود والحقول؛ سجل الدفعات دون تغيير من هذا الزر)");
         if (savedDeal?.linkedShipment?.id) {
-          const reconciliation = await purchaseInvoiceApi.recalculateLandedCost({
-            shipment_id: savedDeal.linkedShipment.id,
-            auto_repost: true,
-          });
-          if (reconciliation.reconciliation?.left_draft) {
-            toast(reconciliation.reconciliation.warnings.join(" · "), "info");
+          // B-1: المسودات وحدها تُحدَّث هنا — إعادة ترحيل المرحّل قرارٌ صريح من
+          // زرّ «أعد الاحتساب والترحيل» في شاشة الشحنة، لا أثرٌ جانبيّ للحفظ.
+          await purchaseInvoiceApi.recalculateLandedCost({ shipment_id: savedDeal.linkedShipment.id });
+          // تنبيهٌ إرشاديّ: تعذّرُ قراءته لا يجعل حفظاً نجح يُقرأ «فشل الحفظ».
+          const drift = await purchaseInvoiceApi
+            .getShipmentCostDrift(savedDeal.linkedShipment.id)
+            .catch(() => null);
+          if (drift && drift.stale_posted_invoices.length > 0) {
+            toast(
+              `تغيّرت تكاليف الشحنة — الفواتير المرحّلة لم تُحدَّث بعد (${drift.stale_posted_invoices.map((row) => row.invoice_number).join("، ")}). افتح الشحنة واضغط «أعد الاحتساب والترحيل».`,
+              "info",
+            );
           }
         }
         const updatedDeal = await dealsService.getDeal(dealId);

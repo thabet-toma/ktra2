@@ -9,6 +9,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError as DjangoValidationError
 from django.test import SimpleTestCase
 from rest_framework.test import APITestCase
 
@@ -200,6 +201,184 @@ class ClearanceImportTest(APITestCase):
                 reference_id=invoice.id, is_posted=True,
             ).count(),
             1,
+        )
+
+    # ── B-1: إعادة الاحتساب والترحيل ذرّية، والنقدية لا تبقى مسودة ────────
+    def _post_credit_and_cash_invoices(self):
+        """فاتورتان دوليتان مرحّلتان على شحنةٍ واحدة: آجلةٌ ونقدية."""
+        ap = Account.objects.filter(tenant=self.tenant, code="2101").first()
+        if ap is None:
+            ap = Account.objects.create(
+                tenant=self.tenant, code="2101", name="ذمم الموردين",
+                account_type="Liability", is_active=True,
+            )
+        self.partner.linked_account = ap
+        self.partner.save(update_fields=["linked_account"])
+        cash_account = Account.objects.create(
+            tenant=self.tenant, code="1109-B1", name="صندوق اختبار إعادة الترحيل",
+            account_type="Asset", is_active=True,
+        )
+        deal2 = self._second_deal()
+        for deal, sku, price in ((self.deal, "B1-CREDIT", "1997"), (deal2, "B1-CASH", "1000")):
+            product = Product.objects.create(
+                tenant=self.tenant, sku=sku, name_ar=f"منتج {sku}",
+                quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+            )
+            LogisticsDealItem.objects.create(
+                deal=deal, product=product, quantity=Decimal("1"), unit_price=Decimal(price),
+            )
+        imported = self.client.post(
+            "/api/logistics/purchase-invoices/import-from-clearance/",
+            {"clearance_id": self.clearance.id, "deal_ids": [self.deal.id, deal2.id],
+             "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
+            format="json", **self._auth())
+        self.assertEqual(imported.status_code, 201, imported.content)
+        credit = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+        cash = PurchaseInvoice.objects.get(tenant=self.tenant, deal=deal2)
+        PurchaseInvoice.objects.filter(pk=cash.pk).update(
+            payment_type=PurchaseInvoice.PAYMENT_TYPE_CASH, cash_or_bank_account=cash_account,
+        )
+        for invoice in (credit, cash):
+            posted = self.client.post(
+                f"/api/logistics/purchase-invoices/{invoice.id}/post-to-accounting/",
+                {}, format="json", **self._auth(),
+            )
+            self.assertEqual(posted.status_code, 201, posted.content)
+            invoice.refresh_from_db()
+            self.assertTrue(invoice.is_posted)
+        return credit, cash
+
+    def _add_capitalized_local_transport(self):
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("450"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+            capitalize_to_inventory=True,
+        )
+
+    def _assert_balanced(self, journal):
+        lines = list(journal.lines.all())
+        self.assertTrue(lines)
+        self.assertEqual(
+            sum((l.debit for l in lines), Decimal("0")),
+            sum((l.credit for l in lines), Decimal("0")),
+        )
+
+    def test_repost_keeps_credit_and_cash_invoices_posted_with_new_totals(self):
+        from sales.models import SupplierPayment
+
+        credit, cash = self._post_credit_and_cash_invoices()
+        old_totals = {inv.pk: inv.grand_total for inv in (credit, cash)}
+        self._add_capitalized_local_transport()
+
+        recalc = self.client.post(
+            "/api/logistics/purchase-invoices/recalculate-landed-cost/",
+            {"shipment_id": self.shipment.id, "auto_repost": True},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(recalc.status_code, 200, recalc.content)
+        self.assertEqual(recalc.json()["reconciliation"]["reposted"], 2)
+        self.assertNotIn("left_draft", recalc.json()["reconciliation"])
+        for invoice in (credit, cash):
+            invoice.refresh_from_db()
+            self.assertTrue(invoice.is_posted, invoice.invoice_number)
+            self.assertGreater(invoice.grand_total, old_totals[invoice.pk])
+            journals = JournalHeader.objects.filter(
+                tenant=self.tenant, reference_type="PURCHASE_INVOICE",
+                reference_id=invoice.id, is_posted=True,
+            )
+            self.assertEqual(journals.count(), 1)
+            self.assertEqual(journals.get().pk, invoice.journal_id)
+            self._assert_balanced(journals.get())
+        # التسوية النقدية أُعيد بناؤها مرّةً واحدة بالمبلغ الجديد — لا ازدواج.
+        settlements = SupplierPayment.objects.filter(
+            tenant=self.tenant, auto_settled_invoice=cash, is_posted=True,
+        )
+        self.assertEqual(settlements.count(), 1)
+        self.assertEqual(settlements.get().amount, cash.grand_total)
+        drift = self.client.get(
+            f"/api/logistics/purchase-invoices/shipment-cost-drift/?shipment_id={self.shipment.id}",
+            **self._auth(),
+        )
+        self.assertEqual(drift.status_code, 200, drift.content)
+        self.assertEqual(
+            drift.json()["stale_posted_invoices"], [],
+            "بعد إعادة الترحيل لا يبقى فرقٌ بين التكاليف والمرحَّل",
+        )
+
+    def test_repost_failure_rolls_back_to_original_posted_state(self):
+        from unittest import mock
+
+        from sales.models import SupplierPayment
+        import logistics.views.invoices as invoice_views
+
+        credit, cash = self._post_credit_and_cash_invoices()
+        original = {
+            inv.pk: (inv.journal_id, inv.grand_total, inv.subtotal)
+            for inv in (credit, cash)
+        }
+        original_settlements = list(
+            SupplierPayment.objects.filter(auto_settled_invoice=cash)
+            .values_list("pk", flat=True)
+        )
+        self.assertEqual(len(original_settlements), 1)
+        self._add_capitalized_local_transport()
+
+        real_post_journal = invoice_views.post_journal
+        calls = {"n": 0}
+
+        def fail_on_second_invoice(*args, **kwargs):
+            calls["n"] += 1
+            if calls["n"] >= 2:
+                raise DjangoValidationError("فشلٌ مفتعل أثناء إعادة الترحيل")
+            return real_post_journal(*args, **kwargs)
+
+        with mock.patch.object(invoice_views, "post_journal", side_effect=fail_on_second_invoice):
+            recalc = self.client.post(
+                "/api/logistics/purchase-invoices/recalculate-landed-cost/",
+                {"shipment_id": self.shipment.id, "auto_repost": True},
+                format="json", **self._auth(),
+            )
+        self.assertEqual(calls["n"], 2, "الفشل يجب أن يقع على الفاتورة الثانية بعد نجاح الأولى")
+        self.assertEqual(recalc.status_code, 409, recalc.content)
+        self.assertIn("لم يتغيّر شيء", recalc.json()["error"])
+        for invoice in (credit, cash):
+            invoice.refresh_from_db()
+            self.assertTrue(invoice.is_posted, invoice.invoice_number)
+            self.assertEqual(
+                (invoice.journal_id, invoice.grand_total, invoice.subtotal),
+                original[invoice.pk],
+            )
+            journal = JournalHeader.objects.get(pk=invoice.journal_id)
+            self.assertTrue(journal.is_posted)
+            self._assert_balanced(journal)
+            self.assertEqual(
+                JournalHeader.objects.filter(
+                    tenant=self.tenant, reference_type="PURCHASE_INVOICE",
+                    reference_id=invoice.id,
+                ).count(),
+                1,
+            )
+        self.assertEqual(
+            list(SupplierPayment.objects.filter(auto_settled_invoice=cash)
+                 .values_list("pk", flat=True)),
+            original_settlements,
+        )
+
+    def test_cost_drift_lists_posted_invoices_whose_costs_changed(self):
+        credit, cash = self._post_credit_and_cash_invoices()
+        url = f"/api/logistics/purchase-invoices/shipment-cost-drift/?shipment_id={self.shipment.id}"
+        before = self.client.get(url, **self._auth())
+        self.assertEqual(before.status_code, 200, before.content)
+        self.assertEqual(before.json()["posted_count"], 2)
+        self.assertEqual(before.json()["stale_posted_invoices"], [])
+
+        self._add_capitalized_local_transport()
+        after = self.client.get(url, **self._auth())
+        self.assertEqual(after.status_code, 200, after.content)
+        self.assertEqual(
+            sorted(row["id"] for row in after.json()["stale_posted_invoices"]),
+            sorted([credit.id, cash.id]),
         )
 
     def test_import_does_not_require_clearance_or_local_transport_payment(self):

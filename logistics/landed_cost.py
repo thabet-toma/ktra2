@@ -1279,6 +1279,12 @@ def compute_live_purchase_invoice_read_payload(inv: PurchaseInvoice) -> Optional
     """
     if getattr(inv, 'is_posted', False):
         return None
+    return _rebuild_import_invoice_row(inv)
+
+
+def _rebuild_import_invoice_row(inv: PurchaseInvoice) -> Optional[Dict[str, Any]]:
+    """يبني صفّ الفاتورة الدولية من صفقتها وشحنتها وتخليصها الحاليّين بمعاملاتها
+    المحفوظة — بلا كتابة وبلا نظرٍ إلى حالة الترحيل (يقرّر المستدعي)."""
     if not inv.deal_id or not inv.shipment_id:
         return None
     # معاملات الاستيراد من الأعمدة المنمّطة (بديل conversion_metadata_json المحذوف في P-D-8)
@@ -1312,6 +1318,46 @@ def compute_live_purchase_invoice_read_payload(inv: PurchaseInvoice) -> Optional
         )
     except Exception:
         return None
+
+
+def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
+    """B-1: الفواتير الدولية المرحّلة التي لم تعد تعكس تكاليف شحنتها الحالية.
+
+    حفظُ تكلفةٍ في الشحنة لا يمسّ مستنداً مرحّلاً (لا إلغاءَ ترحيلٍ ضمنيّ) —
+    فهذه القراءة هي ما يُظهر للمستخدم أنّ الدفاتر متأخّرة عن التكاليف، ليقرّر
+    هو «أعد الاحتساب والترحيل». المقارنة على ما تكتبه
+    `recalculate_landed_for_shipment` من الصفّ المعاد بناؤه (الإجمالي الفرعي،
+    والشحن، وكلفةُ كل سطر) بدقّة الأغورة — لا على ما يُشتقّ منها.
+    """
+    qs = PurchaseInvoice.objects.filter(
+        tenant=tenant,
+        shipment_id=shipment_id,
+        invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+        is_return=False,
+        is_posted=True,
+    ).order_by('pk')
+
+    def q(v) -> Decimal:
+        return _d(v).quantize(Q2, rounding=ROUND_HALF_UP)
+
+    posted_count = 0
+    stale: List[Dict[str, Any]] = []
+    for inv in qs:
+        posted_count += 1
+        row = _rebuild_import_invoice_row(inv)
+        if not row:
+            continue
+        stored_lines = sorted(
+            q(v) for v in inv.items.values_list('landed_line_total_ils', flat=True)
+        )
+        live_lines = sorted(q(r.get('landed_line_total_ils')) for r in row.get('items') or [])
+        if (
+            q(inv.subtotal) != q(row.get('subtotal'))
+            or q(inv.shipping_cost) != q(row.get('shipping_cost'))
+            or stored_lines != live_lines
+        ):
+            stale.append({'id': inv.pk, 'invoice_number': inv.invoice_number})
+    return {'posted_count': posted_count, 'stale_posted_invoices': stale}
 
 
 def _json_friendly_value(x: Any) -> Any:

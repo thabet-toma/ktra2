@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **885**
+عدد النقاط: **886**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -448,6 +448,7 @@
 | `/api/logistics/purchase-invoices/recalculate-landed-cost/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/resolve-price/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/returns/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
+| `/api/logistics/purchase-invoices/shipment-cost-drift/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/attach-payment/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |
 | `/api/logistics/purchase-invoices/{pk}/attachments/` | `PurchaseInvoiceViewSet` | `logistics/views/invoices.py` |

@@ -15,7 +15,7 @@ import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
 import { CompactTimeline } from "./CompactTimeline";
 import OfflineGuard from "@/components/offline/OfflineGuard";
 import { DocumentPaymentsTab } from "@/components/shared/DocumentPaymentsTab";
-import { formatMoney } from "@/utils/formatNumber";
+import { formatMoney, formatNumber } from "@/utils/formatNumber";
 import { getImportJourneyGuidance, getMissingDealMeasureRefs, type ImportJourneyAction } from "./importJourneyGuidance";
 import { ImportPartyDuesPanel, type ImportPartyDue } from "./ImportPartyDuesPanel";
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
@@ -311,6 +311,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingDealIds, setSavingDealIds] = useState<ReadonlySet<number>>(() => new Set());
+  // B-1: الفواتير المرحّلة التي تأخّرت عن تكاليف الشحنة — حفظُ حقلٍ لا يلغي
+  // ترحيلاً ضمنياً؛ اللافتةُ تُظهر الفرق والزرُّ الصريح وحده يعيد الترحيل.
+  const [costDrift, setCostDrift] = useState<{
+    posted_count: number;
+    stale_posted_invoices: Array<{ id: number; invoice_number: string }>;
+  } | null>(null);
+  const [reposting, setReposting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // G6: خريطة «حقل الشحنة → رسالة» لإبراز الحقل الناقص عند فشل الحفظ خادمياً.
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
@@ -381,12 +388,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     });
   }, []);
 
+  const refreshCostDrift = useCallback(async (id: number) => {
+    try {
+      setCostDrift(await purchaseInvoiceApi.getShipmentCostDrift(id));
+    } catch {
+      // اللافتة إرشاديةٌ لا حارس: تعذّرُ قراءتها لا يحجب الشاشة، والخادم يبقى
+      // مصدر الحقيقة عند الضغط على الزر.
+      setCostDrift(null);
+    }
+  }, []);
+
   const loadAll = useCallback(async (id: number | string) => {
     setLoading(true); setError(null);
     try {
       const s = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${id}/`, { tenantId: tid() });
       setShipment(s);
       setShipmentForm({ ...s });
+      void refreshCostDrift(s.id);
       // القائمتان مستقلتان ومفلترتان خادمياً بالشحنة؛ زمنهما = الأبطأ منهما
       // بدلاً من مجموعهما، ولا ننزل مستندات شحنات أخرى.
       const [cls, locs] = await Promise.all([
@@ -408,7 +426,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [refreshCostDrift]);
 
   useEffect(() => {
     if (!shipmentId || shipmentId === "new") {
@@ -458,24 +476,48 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     [],
   );
 
-  const reconcileShipmentInvoices = useCallback(async (id: number) => {
-    const result = await purchaseInvoiceApi.recalculateLandedCost({
-      shipment_id: id,
-      auto_repost: true,
+  // B-1: حفظُ تكلفةٍ يحدّث **المسودات** وحدها (ليست في الدفاتر) ثم يقرأ الفرق مع
+  // المرحّل — ولا يلغي ترحيلاً ولا يعيده. كان يمرّر `auto_repost` في كلّ blur
+  // فتُلغى الفواتير المرحّلة وتُعاد خارج معاملة، وتبقى النقدية مسودة.
+  const syncShipmentInvoiceCosts = useCallback(async (id: number) => {
+    const result = await purchaseInvoiceApi.recalculateLandedCost({ shipment_id: id });
+    if (result.updated) {
+      toast(`تم تحديث ${formatNumber(result.updated)} فاتورة مسودة مرتبطة.`, "success");
+    }
+    await refreshCostDrift(id);
+    return result;
+  }, [toast, refreshCostDrift]);
+
+  const handleRecalculateAndRepost = useCallback(async () => {
+    const currentShipmentId = shipment?.id;
+    if (!currentShipmentId || !costDrift) return;
+    const postedCount = costDrift.posted_count;
+    const numbers = costDrift.stale_posted_invoices.map((row) => row.invoice_number).join("، ");
+    const ok = await confirm({
+      title: "أعد الاحتساب والترحيل",
+      message: `سيُلغى ترحيل ${formatNumber(postedCount)} فاتورة مرحّلة على هذه الشحنة، ويُعاد احتسابها بالتكاليف الحالية، ثم تُرحَّل من جديد (ومعها تسوية الفواتير النقدية). الفواتير المتأخّرة: ${numbers}. العملية واحدة: إن تعذّر ترحيل أيٍّ منها لا يتغيّر شيء وتبقى كلها مرحّلة كما هي.`,
+      confirmText: "أعد الاحتساب والترحيل",
     });
-    const reconciliation = result.reconciliation;
-    if (reconciliation?.left_draft) {
-      toast(reconciliation.warnings.join(" · "), "info");
-    } else if (result.updated) {
+    if (!ok) return;
+    setReposting(true); setError(null);
+    try {
+      const result = await purchaseInvoiceApi.recalculateLandedCost({
+        shipment_id: currentShipmentId,
+        auto_repost: true,
+      });
       toast(
-        reconciliation?.reposted
-          ? `تم تحديث ${result.updated} فاتورة وإعادة ترحيل ${reconciliation.reposted}.`
-          : `تم تحديث ${result.updated} فاتورة مرتبطة وبقيت المسودات مسودات.`,
+        `أُعيد احتساب ${formatNumber(result.updated)} فاتورة وترحيل ${formatNumber(result.reconciliation?.reposted ?? 0)}.`,
         "success",
       );
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      setError(message);
+      toast(message, "error");
+    } finally {
+      await refreshCostDrift(currentShipmentId);
+      setReposting(false);
     }
-    return result;
-  }, [toast]);
+  }, [shipment?.id, costDrift, confirm, toast, refreshCostDrift]);
 
   const handleSaveShipment = useCallback(async () => {
     if (!shipmentForm) return;
@@ -489,7 +531,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         );
         setShipment(patched);
         setShipmentForm({ ...patched });
-        await reconcileShipmentInvoices(patched.id);
+        await syncShipmentInvoiceCosts(patched.id);
       } else {
         const created = await apiPostObject<ShipmentApiRow>(
           "logistics/shipments/",
@@ -512,7 +554,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [shipmentForm, toast, loadAll, reconcileShipmentInvoices]);
+  }, [shipmentForm, toast, loadAll, syncShipmentInvoiceCosts]);
 
   const isShipmentDirty = useMemo(() => {
     if (!shipmentForm) return false;
@@ -607,7 +649,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       });
       setClearance(patched);
       setClearanceForm({ ...patched });
-      if (patched.shipment) await reconcileShipmentInvoices(Number(patched.shipment));
+      if (patched.shipment) await syncShipmentInvoiceCosts(Number(patched.shipment));
       return true;
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -615,7 +657,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [clearanceForm, reconcileShipmentInvoices]);
+  }, [clearanceForm, syncShipmentInvoiceCosts]);
 
   /** «تسجيل سريع»: إجمالي تخليص واحد بدون بنود — يُخزَّن كبند وحيد ويُحفظ فوراً */
   const applyQuickClearanceTotal = useCallback(async () => {
@@ -704,14 +746,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       const refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
       setShipment(refreshed);
       setShipmentForm({ ...refreshed });
-      await reconcileShipmentInvoices(refreshed.id);
+      await syncShipmentInvoiceCosts(refreshed.id);
       setLinkPickerOpen(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [shipment, reconcileShipmentInvoices]);
+  }, [shipment, syncShipmentInvoiceCosts]);
 
   // ج8 (M5): قدوم من زر «الخطوة التالية» في الصفقة (?join_deal=ID) — بمجرد
   // وجود شحنة محفوظة، افتح فاتح ضمّ الصفقات على تبويب الصفقات تلقائياً (بلا
@@ -787,14 +829,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
-      await reconcileShipmentInvoices(patched.id);
+      await syncShipmentInvoiceCosts(patched.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
       restoreScrollPosition();
     }
-  }, [shipment, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition]);
+  }, [shipment, syncShipmentInvoiceCosts, saveScrollPosition, restoreScrollPosition]);
 
   // Edit a deal's CBM/KG inline from the shipment — no need to leave for the deal
   // screen. Saves to the deal, then (once every deal has the chosen measure and a
@@ -825,7 +867,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         }
         setShipment(refreshed);
         setShipmentForm({ ...refreshed });
-        await reconcileShipmentInvoices(refreshed.id);
+        await syncShipmentInvoiceCosts(refreshed.id);
       } catch (e) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -833,7 +875,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         restoreScrollPosition();
       }
     },
-    [shipment?.id, freightUnit, freightRate, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition, setDealSaving],
+    [shipment?.id, freightUnit, freightRate, syncShipmentInvoiceCosts, saveScrollPosition, restoreScrollPosition, setDealSaving],
   );
 
   const handleUpdateAllocation = useCallback(async (dealId: number, newAlloc: number) => {
@@ -850,14 +892,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
-      await reconcileShipmentInvoices(patched.id);
+      await syncShipmentInvoiceCosts(patched.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setDealSaving(dealId, false);
       restoreScrollPosition();
     }
-  }, [shipment?.id, reconcileShipmentInvoices, saveScrollPosition, restoreScrollPosition, setDealSaving]);
+  }, [shipment?.id, syncShipmentInvoiceCosts, saveScrollPosition, restoreScrollPosition, setDealSaving]);
 
   // ── D: Local shipment helpers ──
   const reloadLocal = useCallback(async () => {
@@ -979,13 +1021,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         setEditingLocalId(null); setLocalForm(null);
       }
       void reloadLocal();
-      await reconcileShipmentInvoices(shipment.id);
+      await syncShipmentInvoiceCosts(shipment.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [localForm, editingLocalId, shipment, reloadLocal, reconcileShipmentInvoices]);
+  }, [localForm, editingLocalId, shipment, reloadLocal, syncShipmentInvoiceCosts]);
 
   const handleDeleteLocal = useCallback(async (id: number) => {
     if (!(await confirm({ title: "حذف النقل المحلي", message: "هل تريد حذف سجل النقل المحلي؟" }))) return;
@@ -994,13 +1036,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       await deleteLocalShipment(id);
       setLocalShipments((prev) => prev.filter((l) => l.id !== id));
       if (editingLocalId === id) { setEditingLocalId(null); setLocalForm(null); }
-      if (shipment) await reconcileShipmentInvoices(shipment.id);
+      if (shipment) await syncShipmentInvoiceCosts(shipment.id);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [editingLocalId, shipment, reconcileShipmentInvoices]);
+  }, [editingLocalId, shipment, syncShipmentInvoiceCosts]);
 
   const handlePostLocal = useCallback(async (id: number) => {
     setSaving(true); setError(null);
@@ -1248,7 +1290,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       );
       setShipment(patched);
       setShipmentForm({ ...patched });
-      await reconcileShipmentInvoices(patched.id);
+      await syncShipmentInvoiceCosts(patched.id);
       setShowAgentPayForm(false);
       setAgentPayAmount("");
       setAgentPayNotes("");
@@ -1263,7 +1305,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast, reconcileShipmentInvoices]);
+  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast, syncShipmentInvoiceCosts]);
 
   // ── استحقاق شحن الوكيل: قيد مستقل تماماً عن دفعاته ──
   const refetchShipment = useCallback(async (shipmentId: number) => {
@@ -2615,6 +2657,24 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {error && (
         <div style={{ background: "var(--ktra-err-bg, #fde8e8)", color: "var(--ktra-err, #c0392b)", padding: "4px 12px", borderBottom: "1px solid var(--ktra-err, #c0392b)", fontSize: "var(--ktra-fs-sm, 12px)" }}>
           {error}
+        </div>
+      )}
+      {shipment && costDrift && costDrift.stale_posted_invoices.length > 0 && (
+        <div
+          role="status"
+          data-testid="shipment-cost-drift-banner"
+          className="flex flex-wrap items-center gap-2 border-b border-amber-300 bg-amber-50 px-3 py-1.5 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/30 dark:text-amber-200"
+        >
+          <span className="font-semibold">تغيّرت تكاليف الشحنة — الفواتير المرحّلة لم تُحدَّث بعد</span>
+          <span>({costDrift.stale_posted_invoices.map((row) => row.invoice_number).join("، ")})</span>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => void handleRecalculateAndRepost()}
+            disabled={saving || reposting}
+          >
+            {reposting ? "جارٍ إعادة الترحيل…" : "أعد الاحتساب والترحيل"}
+          </button>
         </div>
       )}
       <KitDocumentShell

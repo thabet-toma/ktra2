@@ -587,6 +587,7 @@ export const purchaseInvoiceApi = {
     deal_remaining_rate?: number;
     shipment_remaining_rate?: number;
     use_cost_lines?: boolean;
+    /** B-1: صريحٌ فقط من زرّ «أعد الاحتساب والترحيل» — ذرّيّ: كلُّها مرحّلة أو لا شيء (409). */
     auto_repost?: boolean;
   }): Promise<{
     updated: number;
@@ -595,8 +596,6 @@ export const purchaseInvoiceApi = {
     reconciliation?: {
       previously_posted: number;
       reposted: number;
-      left_draft: number;
-      warnings: string[];
     };
   }> => {
     const res = await safeFetch(`${BASE}/recalculate-landed-cost/`, {
@@ -605,6 +604,19 @@ export const purchaseInvoiceApi = {
       body: JSON.stringify(body),
     });
     await handle(res, "recalculateLandedCost");
+    return res.json();
+  },
+
+  /** B-1: الفواتير الدولية المرحّلة التي تأخّرت عن تكاليف شحنتها — قراءةٌ لا تكتب. */
+  getShipmentCostDrift: async (shipmentId: number): Promise<{
+    posted_count: number;
+    stale_posted_invoices: Array<{ id: number; invoice_number: string }>;
+  }> => {
+    const query = new URLSearchParams({ shipment_id: String(shipmentId) });
+    const res = await safeFetch(`${BASE}/shipment-cost-drift/?${query}`, {
+      headers: headers(),
+    });
+    await handle(res, "getShipmentCostDrift");
     return res.json();
   },
 

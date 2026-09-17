@@ -779,13 +779,29 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             finally:
                 self.kwargs = old_kwargs
 
+        def response_error(response):
+            data = response.data if isinstance(response.data, dict) else {}
+            return data.get('error') or data.get('detail')
+
+        class RepostAborted(Exception):
+            pass
+
+        # B-1: إلغاء الترحيل ← إعادة الاحتساب ← إعادة الترحيل **في معاملةٍ واحدة**.
+        # قبلها كانت إعادة الترحيل خارج المعاملة، والفاتورة النقدية تُترك مسودةً
+        # عمداً فيختفي قيدها من الدفاتر برسالةٍ عابرة. الآن: كلُّها مرحّلةٌ بأرقامها
+        # الجديدة، أو يرتدّ كلُّ شيءٍ إلى حاله المرحّل الأصلي. إلغاء الترحيل يحرّر
+        # سند التسوية النقدية التلقائي، وإعادة الترحيل تبنيه مرّةً واحدة بالمبلغ
+        # الجديد — فلا ازدواج. حرّاس الفترة والضريبة داخل `unpost`/`post_to_accounting`.
+        reposted = 0
         try:
             with transaction.atomic():
                 for invoice_id in posted_ids:
                     unpost_response = call_detail_action('unpost', invoice_id)
                     if unpost_response.status_code >= 400:
-                        detail = unpost_response.data.get('error') or unpost_response.data.get('detail')
-                        raise ValidationError(detail or f'تعذّر إلغاء ترحيل الفاتورة #{invoice_id}')
+                        raise RepostAborted(
+                            f'تعذّر إلغاء ترحيل الفاتورة #{invoice_id}: '
+                            f'{response_error(unpost_response) or "سببٌ غير معروف"}'
+                        )
                 result = recalculate_landed_for_shipment(
                     tenant=tenant,
                     shipment_id=sid,
@@ -793,40 +809,54 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     shipment_remaining_rate=sr,
                     use_cost_lines=use_cl,
                 )
+                for invoice_id in posted_ids:
+                    post_response = call_detail_action('post_to_accounting', invoice_id)
+                    if post_response.status_code >= 400:
+                        number = (
+                            PurchaseInvoice.objects.filter(pk=invoice_id, tenant=tenant)
+                            .values_list('invoice_number', flat=True).first()
+                        ) or f'#{invoice_id}'
+                        raise RepostAborted(
+                            f'تعذّر إعادة ترحيل الفاتورة {number}: '
+                            f'{response_error(post_response) or "سببٌ غير معروف"}'
+                        )
+                    reposted += 1
+        except RepostAborted as e:
+            logger.warning(
+                'shipment invoice reconciliation rolled back shipment=%s reason=%s', sid, e,
+            )
+            return Response(
+                {'error': f'{e} — لم يتغيّر شيء: بقيت كل الفواتير مرحّلةً بقيودها الأصلية.'},
+                status=status.HTTP_409_CONFLICT,
+            )
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
-        reconciliation = {
+        result['reconciliation'] = {
             'previously_posted': len(posted_ids),
-            'reposted': 0,
-            'left_draft': 0,
-            'warnings': [],
+            'reposted': reposted,
         }
-        for invoice_id in posted_ids:
-            invoice = PurchaseInvoice.objects.filter(pk=invoice_id, tenant=tenant).first()
-            if not invoice:
-                continue
-            if invoice.payment_type == PurchaseInvoice.PAYMENT_TYPE_CASH:
-                reconciliation['left_draft'] += 1
-                reconciliation['warnings'].append(
-                    f'الفاتورة {invoice.invoice_number} بقيت مسودة لتجنب تكرار تسوية دفع نقدي تلقائية.'
-                )
-                continue
-            post_response = call_detail_action('post_to_accounting', invoice_id)
-            if post_response.status_code < 400:
-                reconciliation['reposted'] += 1
-            else:
-                reconciliation['left_draft'] += 1
-                detail = post_response.data.get('error') or post_response.data.get('detail')
-                reconciliation['warnings'].append(
-                    f'الفاتورة {invoice.invoice_number} حُدّثت وبقيت مسودة: {detail or "تعذّر إعادة الترحيل"}'
-                )
-        result['reconciliation'] = reconciliation
         logger.info(
-            'shipment invoice reconciliation shipment=%s updated=%s reposted=%s left_draft=%s',
-            sid, result.get('updated'), reconciliation['reposted'], reconciliation['left_draft'],
+            'shipment invoice reconciliation shipment=%s updated=%s reposted=%s',
+            sid, result.get('updated'), reposted,
         )
         return Response(result)
+
+    @action(detail=False, methods=['get'], url_path='shipment-cost-drift')
+    def shipment_cost_drift(self, request):
+        """B-1: الفواتير الدولية المرحّلة التي تأخّرت عن تكاليف شحنتها — قراءةٌ فقط.
+
+        تغذّي لافتة «تغيّرت تكاليف الشحنة» وزرّ «أعد الاحتساب والترحيل» الصريح.
+        """
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            sid = int(request.query_params.get('shipment_id'))
+        except (TypeError, ValueError):
+            return Response({'error': 'shipment_id مطلوب'}, status=status.HTTP_400_BAD_REQUEST)
+        from logistics.landed_cost import posted_invoices_cost_drift
+        return Response(posted_invoices_cost_drift(tenant=tenant, shipment_id=sid))
 
     @action(detail=True, methods=['post'], url_path='payment-voucher')
     @requires_perm('purchase.payment.create')
