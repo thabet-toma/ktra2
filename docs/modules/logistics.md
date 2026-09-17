@@ -393,8 +393,10 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 (`post_payment` يمرّر `idempotent=False` — قيود المرجع السابقة تبقى في الدفاتر، وحارس
 التكرار هو قفل صف الدفعة + فحص `is_posted`). الاختبار المرجعي:
 `tests/test_deal_payment_unpost_cycle.py`. **بيانات تاريخية:** دورات إلغاء قديمة
-(أصل غير مرحّل + عكس مرحّل) أثرها معكوس الإشارة في التقارير المرحّلة — فحصها عبر
-`payment_posting_diagnostics.py`.
+(أصل غير مرحّل + عكس مرحّل) أثرها معكوس الإشارة في التقارير المرحّلة — كشفها وتصحيحها
+بالأمر `fix_logistics_unpost_cycles` (يسكن في accounting — انظر `docs/modules/accounting.md`).
+أما `payment_posting_diagnostics.py` فيشخّص موانع الترحيل التلقائي لدفعةٍ لم تُرحَّل فقط،
+ولا يرى هذه الدورات.
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
