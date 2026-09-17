@@ -672,6 +672,11 @@ def restore_returned_sales_serials(return_invoice, lines) -> int:
 
     أيُّ وحدة بعينها رجعت ليس سؤالاً يجيبه المستند (لا اختيار في مرجع البيع)،
     فالترتيب هو الجواب الحتمي الوحيد المتاح.
+
+    **الأثر لا يُمحى:** `sales_line` يبقى على بند البيع الأصلي، ويُسجَّل بندُ
+    المرجع في `return_line` — فيعرف `revert_returned_sales_serials` عند إلغاء
+    ترحيل المرجع أيَّ وحدةٍ أعاد وإلى أيِّ بيعٍ تعود. الحالةُ `in_stock` هي ما
+    يقول إن الوحدة ليست لزبون، و`_serial_row` لا يُسمّي زبوناً لوحدةٍ في المخزن.
     """
     original = getattr(return_invoice, 'original_invoice', None)
     if original is None:
@@ -694,8 +699,8 @@ def restore_returned_sales_serials(return_invoice, lines) -> int:
         )
         for unit in units:
             unit.status = ProductSerial.STATUS_IN_STOCK
-            unit.sales_line = None
-            unit.save(update_fields=['status', 'sales_line'])
+            unit.return_line = line
+            unit.save(update_fields=['status', 'return_line'])
         restored += len(units)
 
     if restored:
@@ -704,6 +709,64 @@ def restore_returned_sales_serials(return_invoice, lines) -> int:
             return_invoice.pk, original.pk, restored,
         )
     return restored
+
+
+def revert_returned_sales_serials(return_invoice) -> int:
+    """إلغاء ترحيل مرجع البيع يُعيد وحداته «مُباعة» على بيعها الأصلي.
+
+    مرآة `release_purchase_serials` على جانب البيع: الوحدات هي ما سجّل
+    `restore_returned_sales_serials` بندَ هذا المرجع عليها (`return_line`).
+    وحدةٌ تحرّكت بعد المرجع — بِيعت ثانيةً، أو انفصلت عن بند بيعها الأصلي
+    (إلغاءُ ترحيل ذلك البيع أو بيعٍ لاحقٍ فرّغ الرابط) — تُسمّى ويُرفض الإلغاء:
+    إعادتُها «مُباعة» كانت ستسرق وحدةً من زبونٍ آخر أو تُسندها لبيعٍ لا وجود له.
+
+    مرجعٌ رُحِّل قبل وجود `return_line` لا أثر له فلا يُعيد شيئاً — تخمينُ
+    الوحدات هنا أسوأ من تركها في المخزن.
+    """
+    units = list(
+        ProductSerial.objects.filter(
+            tenant_id=return_invoice.tenant_id,
+            return_line__invoice=return_invoice,
+        ).select_related('sales_line__invoice').order_by('id')
+    )
+    if not units:
+        return 0
+
+    original_id = getattr(return_invoice, 'original_invoice_id', None)
+    moved = [
+        u for u in units
+        if u.status != ProductSerial.STATUS_IN_STOCK
+        or not u.sales_line_id
+        or u.sales_line.invoice_id != original_id
+    ]
+    if moved:
+        listing = '؛ '.join(
+            u.serial + (
+                f" (فاتورة {u.sales_line.invoice.invoice_number})"
+                if u.status == ProductSerial.STATUS_SOLD and u.sales_line_id
+                and u.sales_line.invoice_id else ''
+            )
+            for u in moved
+        )
+        logger.warning(
+            'revert_returned_sales_serials blocked: return=%s moved=%d',
+            return_invoice.pk, len(moved),
+        )
+        raise ValidationError(
+            f"تعذّر إلغاء ترحيل مرجع البيع {return_invoice.invoice_number}: وحداتٌ "
+            f"بأرقام تسلسلية أعادها هذا المرجع تحرّكت بعده (بِيعت ثانيةً أو انفصلت "
+            f"عن فاتورة بيعها الأصلية). ألغِ ترحيل ما بُني عليها أولاً — "
+            f"الوحدات: {listing}"
+        )
+
+    reverted = ProductSerial.objects.filter(pk__in=[u.pk for u in units]).update(
+        status=ProductSerial.STATUS_SOLD, return_line=None,
+    )
+    logger.info(
+        'product serials sold again by return unpost: return=%s original=%s units=%d',
+        return_invoice.pk, original_id, reverted,
+    )
+    return reverted
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -715,7 +778,12 @@ def _serial_row(unit) -> dict:
     purchase_invoice = (
         purchase_item.invoice if purchase_item and purchase_item.invoice_id else None
     )
-    sales_line = unit.sales_line if unit.sales_line_id else None
+    # وحدةٌ في المخزن ليست لزبون: مرجعُ البيع يُبقي `sales_line` أثراً لبيعها
+    # الأصلي (`restore_returned_sales_serials`)، فالحالةُ هي ما يقرّر لا الرابط.
+    sales_line = (
+        unit.sales_line
+        if unit.sales_line_id and unit.status == ProductSerial.STATUS_SOLD else None
+    )
     sales_invoice = sales_line.invoice if sales_line and sales_line.invoice_id else None
     return {
         'id': unit.id,

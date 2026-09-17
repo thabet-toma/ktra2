@@ -679,6 +679,15 @@ class ProductSerial(models.Model):
         related_name='serial_units',
         help_text='بند فاتورة البيع الذي استهلك هذه الوحدة',
     )
+    # مرجعُ البيع يُعيد الوحدة للمخزن ولا يمحو `sales_line` (أثرُ بيعها الأصلي)،
+    # ويسجّل هنا بندَه — فإلغاءُ ترحيل المرجع يعرف أيَّ وحدةٍ أعاد وإلى أيِّ بيعٍ
+    # تعود. قبل هذا الحقل كان الرابطُ يُفرَّغ فيُلغى المرجعُ ووحداتُه في المخزن.
+    return_line = models.ForeignKey(
+        'sales.SalesInvoiceLine', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='ReturnSalesInvoiceLineID',
+        related_name='returned_serial_units',
+        help_text='بند مرجع البيع الذي أعاد هذه الوحدة للمخزن',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     class Meta:

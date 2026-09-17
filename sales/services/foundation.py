@@ -26,6 +26,7 @@ from inventory.serials import (
     consume_sales_serials,
     release_sales_serials,
     restore_returned_sales_serials,
+    revert_returned_sales_serials,
 )
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup

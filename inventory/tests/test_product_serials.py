@@ -740,11 +740,112 @@ class ProductSerialFlowTest(APITestCase):
 
         ret = self._sales_return(sale, qty='1')
         assert self._post_sale(ret).status_code == 200
-        # الأقدم استهلاكاً يعود أولاً، والرابط بالبند يُفرَّغ.
+        # الأقدم استهلاكاً يعود أولاً. أثرُ البيع الأصلي يبقى على الوحدة،
+        # ومعه بندُ المرجع الذي أعادها — وهما ما يعكسه إلغاءُ ترحيل المرجع.
         back = self._units(status=ProductSerial.STATUS_IN_STOCK)
         assert [u.serial for u in back] == ['V1']
-        assert back.first().sales_line_id is None
+        assert back.first().sales_line_id == _line.pk
+        assert back.first().return_line_id == ret.lines.get().pk
         assert [u.serial for u in self._units(status=ProductSerial.STATUS_SOLD)] == ['V2']
+
+    def test_returned_unit_in_stock_names_no_customer(self):
+        """وحدةٌ في المخزن ليست لزبون — ولو بقي أثرُ بيعها الأصلي عليها."""
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('RC1')
+        sale, _line = self._sales_invoice(qty='1')
+        assert self._post_sale(sale).status_code == 200
+        assert self._post_sale(self._sales_return(sale, qty='1')).status_code == 200
+
+        rows = self.client.get('/api/inventory/serials/?q=RC1', **self._auth()).json()
+        assert rows[0]['status'] == ProductSerial.STATUS_IN_STOCK
+        assert rows[0]['customer_name'] is None
+        assert rows[0]['customer'] is None
+        assert rows[0]['sales_invoice'] is None
+        assert rows[0]['sold_at'] is None
+
+    def test_unposting_a_sale_return_puts_its_units_back_on_the_original_sale(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('UR1', 'UR2')
+        sale, line = self._sales_invoice(qty='2')
+        assert self._post_sale(sale).status_code == 200
+        ret = self._sales_return(sale, qty='1')
+        assert self._post_sale(ret).status_code == 200
+        assert self._units(serial='UR1', status=ProductSerial.STATUS_IN_STOCK).exists()
+
+        res = self._unpost_sale(ret)
+        assert res.status_code == 200, res.content
+
+        unit = self._units(serial='UR1').get()
+        assert unit.status == ProductSerial.STATUS_SOLD
+        assert unit.sales_line_id == line.pk
+        assert unit.return_line_id is None
+        rows = self.client.get('/api/inventory/serials/?q=UR1', **self._auth()).json()
+        assert rows[0]['sales_invoice_number'] == sale.invoice_number
+        assert rows[0]['customer_name'] == 'زبون'
+        # وإعادةُ ترحيل المرجع تعيدها للمخزن ثانيةً — الدورة قابلةٌ للتكرار.
+        assert self._post_sale(ret).status_code == 200
+        assert self._units(serial='UR1', status=ProductSerial.STATUS_IN_STOCK).exists()
+
+    def test_resold_returned_unit_blocks_unposting_the_return(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('RS1')
+        first, _line = self._sales_invoice(qty='1')
+        assert self._post_sale(first).status_code == 200
+        ret = self._sales_return(first, qty='1')
+        assert self._post_sale(ret).status_code == 200
+        second, second_line = self._sales_invoice(qty='1', serials=['RS1'])
+        assert self._post_sale(second).status_code == 200
+
+        res = self._unpost_sale(ret)
+
+        assert res.status_code == 400, res.content
+        error = res.json()['error']
+        assert 'RS1' in error, error
+        assert second.invoice_number in error, error
+        ret.refresh_from_db()
+        assert ret.status == SalesInvoice.STATUS_POSTED
+        unit = self._units(serial='RS1').get()
+        assert unit.status == ProductSerial.STATUS_SOLD
+        assert unit.sales_line_id == second_line.pk
+
+    def test_return_posted_before_tracking_is_unposted_without_touching_units(self):
+        """مرجعٌ رُحِّل قبل حفظ الأثر لا يعرف وحداته — فلا يُعيد شيئاً تخميناً."""
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('LG1')
+        sale, _line = self._sales_invoice(qty='1')
+        assert self._post_sale(sale).status_code == 200
+        ret = self._sales_return(sale, qty='1')
+        assert self._post_sale(ret).status_code == 200
+        # شكلُ الصفّ قبل هذا التغيير: لا رابط بالمرجع ولا بالبيع.
+        self._units(serial='LG1').update(return_line=None, sales_line=None)
+
+        assert self._unpost_sale(ret).status_code == 200
+        assert self._units(serial='LG1', status=ProductSerial.STATUS_IN_STOCK).exists()
+
+    def test_unposting_a_return_never_touches_another_company_units(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('TI1')
+        sale, line = self._sales_invoice(qty='1')
+        assert self._post_sale(sale).status_code == 200
+        ret = self._sales_return(sale, qty='1')
+        assert self._post_sale(ret).status_code == 200
+
+        other_owner = User.objects.create_user(username='other-ret-sn', password='x')
+        other = create_company('شركة مرجع أخرى', other_owner)
+        other_product = Product.objects.create(
+            tenant=other, sku='OT-1', name_ar='جهاز', is_serialized=True,
+            quantity_on_hand=Decimal('0'), avg_cost=Decimal('0'))
+        # صفٌّ فاسدٌ عمداً يشير إلى بنود هذه الشركة — الفلترةُ بالشركة وحدها تحميه.
+        stray = ProductSerial.objects.create(
+            tenant=other, product=other_product, serial='TI1',
+            status=ProductSerial.STATUS_IN_STOCK,
+            sales_line=line, return_line=ret.lines.get())
+
+        assert self._unpost_sale(ret).status_code == 200
+        stray.refresh_from_db()
+        assert stray.status == ProductSerial.STATUS_IN_STOCK
+        assert stray.return_line_id == ret.lines.get().pk
+        assert self._units(serial='TI1').get().status == ProductSerial.STATUS_SOLD
 
     def test_sale_return_of_untracked_stock_changes_nothing(self):
         self._set_modes(sales=SERIAL_MODE_OPTIONAL)

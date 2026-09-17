@@ -101,7 +101,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 ## الاعتماديات
 **يعتمد على:**
 - `accounting` — **models مباشرةً كـFKs**: `sales/models.py` يستورد `Account, JournalHeader, TaxRate` على مستوى الوحدة (لا lazy). و`services` أيضاً: `sales/services.py:14-23` (`post_journal`, `unpost_document`, `validate_fiscal_period`, `convert_amount`…).
-- `inventory` — models + services: `sales/models.py:6-7` (`Product`, `SERIAL_MODE_CHOICES`)، و`sales/services/` (`record_stock_movement`، `consume_sales_serials`, `release_sales_serials`, `restore_returned_sales_serials`).
+- `inventory` — models + services: `sales/models.py:6-7` (`Product`, `SERIAL_MODE_CHOICES`)، و`sales/services/` (`record_stock_movement`، `consume_sales_serials`, `release_sales_serials`, `restore_returned_sales_serials`, `revert_returned_sales_serials`).
 - `partners` (`sales/services.py:31-32`: `Partner`, `PartnerGroup`, `ensure_partner_linked_account`)، `tenants` (Tenant/Currency/Branch)، و`after_sales` عبر استيراد كسول داخل الترحيل (`views.py`, `services.py` عند `create_auto_warranty_cards`).
 
 **يعتمد عليه:** `logistics` (`views.py` + `post_supplier_payment` / `allocate_supplier_payment`)، `accounting` (`services.py`, `serializers.py`, `views.py`)، `inventory` (`services.py:742,748` و`views.py` و`serials.py`)، `core` (`reports.py:420,1061,1234`, `payments.py`)، `accountant_portal` (`services.py`)، `after_sales`، `tenants`.

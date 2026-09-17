@@ -84,6 +84,7 @@ from .services import (
     release_auto_sales_return_refund,
     release_sales_serials,
     remaining_delivery_lines,
+    revert_returned_sales_serials,
     suggest_fifo_allocations,
     unpost_customer_payment,
 )
@@ -429,6 +430,10 @@ class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
                 # الوحدات المُرقَّمة تعود للمخزن مع مخزونها؛ ما اختاره المستخدم يبقى
                 # على البند فتستهلك إعادة الترحيل الوحدات ذاتها.
                 release_sales_serials(invoice)
+                # ومرجعُ البيع يعكس ما أعاده: وحداتُه تعود «مُباعة» على بيعها
+                # الأصلي، ويُرفض الإلغاء إن تحرّكت إحداها بعده.
+                if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                    revert_returned_sales_serials(invoice)
                 # THA-24: بطاقات الكفالة التلقائية من إنتاج هذا الترحيل — تُحذف
                 # معه وتعود بإعادته (نمط الحذف نفسه). اليدوية لا تُمَسّ.
                 from after_sales.services import delete_auto_warranty_cards

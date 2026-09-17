@@ -205,7 +205,13 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
 
     unit_info = None
     if unit is not None:
-        sales_line = unit.sales_line if unit.sales_line_id else None
+        # وحدةٌ في المخزن ليست لزبون ولو بقي أثرُ بيعها الأصلي بعد مرجعه
+        # (`inventory/serials.py` — `restore_returned_sales_serials`).
+        sales_line = (
+            unit.sales_line
+            if unit.sales_line_id and unit.status == ProductSerial.STATUS_SOLD
+            else None
+        )
         sales_invoice = (
             sales_line.invoice if (sales_line and sales_line.invoice_id) else None
         )

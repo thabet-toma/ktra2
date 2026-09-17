@@ -476,6 +476,30 @@ class WarrantyApiTest(WarrantyTestBase):
         self.assertFalse(unknown["covered"])
         self.assertIsNone(unknown["unit"])
 
+    def test_check_names_no_customer_for_a_returned_unit_back_in_stock(self):
+        """مرجعُ البيع يُبقي أثرَ البيع الأصلي على الوحدة — والفحصُ لا يُسمّيه."""
+        self.stock_units("SN-RT1")
+        invoice = self.sales_invoice(serials=["SN-RT1"])
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
+        sale_return = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SR-RT1", customer=self.customer,
+            currency=self.ils, invoice_date=SALE_DATE,
+            invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=True,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            original_invoice=invoice,
+        )
+        SalesInvoiceLine.objects.create(
+            tenant=self.tenant, invoice=sale_return, product=self.product,
+            quantity=Decimal("1"), unit_price=Decimal("2000"),
+        )
+        self.assertEqual(self.post_sale(sale_return).status_code, 200)
+
+        unit = self.client.get(f"{BASE}check/?serial=SN-RT1", **self.headers()).data["unit"]
+        self.assertEqual(unit["status"], ProductSerial.STATUS_IN_STOCK)
+        self.assertIsNone(unit["sales_invoice"])
+        self.assertIsNone(unit["sale_date"])
+        self.assertIsNone(unit["customer_name"])
+
     def test_list_filters_by_search_term_and_derived_status(self):
         self.client.post(
             BASE, self.manual_payload(serial="LIVE-1", start_date="2026-01-01",
