@@ -176,6 +176,30 @@ export function wouldOpeningOrphanClobberUnsavedWork(input: OrphanOpenGuardInput
   return input.isTouched === true;
 }
 
+/* ──────── يتيمٌ فُتح ثمّ انتهت وظيفة المسودّة — لا يعود بعد الحفظ (C2-2) ──────── */
+
+export interface DraftDiscardInput {
+  /** مفتاح مسودّة الهويّة الحالية (`buildDocumentDraftKey`). */
+  currentKey: string;
+  /** آخرُ يتيمٍ فُتحت حمولتُه على هذه الشاشة، أو `null`. */
+  adoptedOrphanKey: string | null;
+}
+
+/**
+ * ما يُمحى حين تنتهي وظيفة المسودّة (`discardDraft` — حفظٌ صريحٌ ناجح في كل
+ * المحرِّرات، أو تجاهلٌ صريح). فتحُ يتيمٍ ينسخ حمولتَه إلى الشاشة ولا يمحو
+ * صفَّه؛ فبلا محوِه هنا يعود اليتيمُ نفسُه في شريط اليتامى بعد حفظ ما كُتب منه
+ * — ويُحفَظ مرّتين. **آخرُ يتيمٍ مفتوحٍ وحده**: يتيمٌ فُتح ثمّ استُبدل بآخر لم
+ * يُحفَظ محتواه فلا يُمحى.
+ */
+export function draftKeysToDiscard(input: DraftDiscardInput): string[] {
+  const keys = [input.currentKey];
+  if (input.adoptedOrphanKey && input.adoptedOrphanKey !== input.currentKey) {
+    keys.push(input.adoptedOrphanKey);
+  }
+  return keys;
+}
+
 /* ───────────────────────── متى تُمحى — ٣٠ يوماً (§٥) ──────────────────────── */
 
 export const DRAFT_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;

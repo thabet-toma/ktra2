@@ -19,6 +19,7 @@ import { isOfflineRecordForTenant } from "@/utils/offlineTenantScope";
 import { useToast } from "@/contexts/ToastContext";
 import {
   buildDocumentDraftKey,
+  draftKeysToDiscard,
   draftPreviewLine,
   evaluateDraftRestore,
   selectOrphanDrafts,
@@ -102,7 +103,11 @@ export interface UseDocumentDraftResult<TPayload> {
   restoredBanner: DocumentDraftBanner<TPayload> | null;
   /** يخفي الشريط دون مسّ المسودّة نفسها. */
   dismissBanner: () => void;
-  /** يمسح المسودّة المحلية فوراً — بعد حفظ ناجح، تجاهل صريح، أو «تراجع». */
+  /**
+   * يمسح المسودّة المحلية فوراً — بعد حفظ ناجح، تجاهل صريح، أو «تراجع».
+   * ويمسح معها آخرَ يتيمٍ فُتح على الشاشة (`openOrphanDraft`) — محتواه صار
+   * عملَ الشاشة نفسه، فبقاؤه يُعيده في شريط اليتامى بعد حفظه (C2-2).
+   */
   discardDraft: () => Promise<void>;
   /**
    * مسودّات مستندٍ جديد **يتيمة** لنفس الشركة والنوع (docId فارغ في الخطّاف)
@@ -116,6 +121,12 @@ export interface UseDocumentDraftResult<TPayload> {
    * `null` إن تعذّرت القراءة أو لم تعد موجودة (يتيمٌ حُذف من تبويبٍ آخر).
    */
   loadOrphanDraft: (key: string) => Promise<TPayload | null>;
+  /**
+   * C2-2: كـ`loadOrphanDraft` ويُسجِّل اليتيمَ «مفتوحاً على الشاشة» — فيُمحى مع
+   * `discardDraft` التالي (أوّلُ حفظٍ ناجح) بدل أن يعود. آخرُ يتيمٍ مفتوحٍ وحده
+   * (`draftKeysToDiscard`). المستدعي ما زال يطبّق الحمولة بنفسه.
+   */
+  openOrphanDraft: (key: string) => Promise<TPayload | null>;
   /** issue #146: يمحو يتيماً بعينه فوراً — لا استرجاع؛ المستدعي يؤكّد صراحةً قبلها. */
   deleteOrphanDraft: (key: string) => Promise<void>;
 }
@@ -150,6 +161,9 @@ export function useDocumentDraft<TPayload>(
   // هويّات التبويبات التي أُنذر عنها بالفعل لهذه الهويّة (مفتاح) — «مرّةً
   // واحدة» (issue #119 §٨)، لا تُصفَّر إلا بتغيّر الهويّة نفسها.
   const warnedTabsRef = useRef<Set<string>>(new Set());
+
+  // C2-2: آخرُ يتيمٍ فُتحت حمولتُه على هذه الشاشة — يُمحى مع `discardDraft`.
+  const adoptedOrphanKeyRef = useRef<string | null>(null);
 
   // مراجع حيّة كي تقرأ الكتابة المؤجَّلة (مؤقّت/إخفاء/تفكيك) آخر قيمة بلا
   // إعادة تسجيل مستمعين مع كل حرف يُكتب.
@@ -344,13 +358,16 @@ export function useDocumentDraft<TPayload>(
   const dismissBanner = useCallback(() => setRestoredBanner(null), []);
 
   const discardDraft = useCallback(async () => {
+    const keys = draftKeysToDiscard({ currentKey: key, adoptedOrphanKey: adoptedOrphanKeyRef.current });
+    adoptedOrphanKeyRef.current = null;
     try {
-      await db.document_drafts.delete(key);
+      await db.document_drafts.bulkDelete(keys);
     } catch {
       /* أفضل جهد — لا يُسقط تدفّق الحفظ/التراجع */
     }
     setRestoredBanner(null);
     setDraftSavedAt(null);
+    setOrphanDrafts((prev) => prev.filter((o) => !keys.includes(o.key)));
   }, [key]);
 
   // issue #146: قراءةٌ صرفة بمفتاح يتيمٍ بعينه — لا تُطبَّق ولا تُحذّر، ذلك
@@ -365,9 +382,16 @@ export function useDocumentDraft<TPayload>(
     }
   }, [tenantId]);
 
+  const openOrphanDraft = useCallback(async (orphanKey: string): Promise<TPayload | null> => {
+    const payload = await loadOrphanDraft(orphanKey);
+    if (payload) adoptedOrphanKeyRef.current = orphanKey;
+    return payload;
+  }, [loadOrphanDraft]);
+
   // issue #146: حذفٌ صريح ليتيمٍ بعينه — القائمة المحلية تُحدَّث فوراً بلا
   // انتظار دورة الاستعلام التالية (تبقى مقيَّدةً بهويّة مستندٍ جديد واحدة).
   const deleteOrphanDraft = useCallback(async (orphanKey: string): Promise<void> => {
+    if (adoptedOrphanKeyRef.current === orphanKey) adoptedOrphanKeyRef.current = null;
     try {
       await db.document_drafts.delete(orphanKey);
     } catch {
@@ -384,6 +408,7 @@ export function useDocumentDraft<TPayload>(
     discardDraft,
     orphanDrafts,
     loadOrphanDraft,
+    openOrphanDraft,
     deleteOrphanDraft,
   };
 }

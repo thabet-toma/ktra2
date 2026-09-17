@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   DRAFT_MAX_AGE_MS,
   buildDocumentDraftKey,
+  draftKeysToDiscard,
   draftPreviewLine,
   evaluateDraftRestore,
   isDraftExpired,
@@ -253,6 +254,24 @@ test("شاشةٌ بلا تعديلٍ مستخدم ⇒ فتح اليتيم لا �
 
 test("شاشةٌ عليها تعديلٌ غير محفوظ ⇒ فتح اليتيم يحذّر أوّلاً", () => {
   assert.equal(wouldOpeningOrphanClobberUnsavedWork({ isTouched: true }), true);
+});
+
+/* ───── يتيمٌ فُتح ثمّ انتهت وظيفة المسودّة (حفظٌ ناجح) — لا يعود (C2-2) ───── */
+
+test("بلا يتيمٍ مفتوح ⇒ تُمحى مسودّة هذه الهويّة وحدها", () => {
+  assert.deepEqual(draftKeysToDiscard({ currentKey: "k:new:tab1", adoptedOrphanKey: null }), ["k:new:tab1"]);
+});
+
+test("يتيمٌ فُتح على الشاشة ⇒ يُمحى مع مسودّة الهويّة، فلا يعود بعد الحفظ", () => {
+  assert.deepEqual(
+    draftKeysToDiscard({ currentKey: "k:new:tab1", adoptedOrphanKey: "k:new:tab0" }),
+    ["k:new:tab1", "k:new:tab0"],
+  );
+});
+
+test("مفتاحٌ مكرَّر أو فارغ لا يُمحى مرّتين", () => {
+  assert.deepEqual(draftKeysToDiscard({ currentKey: "k:new:tab1", adoptedOrphanKey: "k:new:tab1" }), ["k:new:tab1"]);
+  assert.deepEqual(draftKeysToDiscard({ currentKey: "k:new:tab1", adoptedOrphanKey: "" }), ["k:new:tab1"]);
 });
 
 /* ─────────────────────── نفس المستند في تبويبين — إنذارٌ مرّة ─────────────────── */

@@ -55,7 +55,7 @@ export function DocumentDraftBanners<TPayload>({
     restoredBanner,
     discardDraft,
     orphanDrafts,
-    loadOrphanDraft,
+    openOrphanDraft,
     deleteOrphanDraft,
   } = draft;
 
@@ -73,7 +73,9 @@ export function DocumentDraftBanners<TPayload>({
     ) {
       return;
     }
-    const payload = await loadOrphanDraft(key);
+    // C2-2: `openOrphanDraft` لا `loadOrphanDraft` — اليتيمُ المفتوح يُمحى مع
+    // أوّل حفظٍ ناجح (`discardDraft`) فلا يعود في هذا الشريط ويُحفَظ مرّتين.
+    const payload = await openOrphanDraft(key);
     if (payload) onApplyDraft(payload);
   };
 
