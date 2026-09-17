@@ -174,6 +174,35 @@ class FixLogisticsUnpostCyclesTest(TestCase):
         self.assertNotIn(f"orig=#{orig.id}", rerun)
         self.assertEqual(JournalHeader.objects.count(), count)
 
+    def test_reversal_tagging_cash_line_with_supplier_is_negated_line_by_line(self):
+        """شكلُ الإنتاج (دفعات D-0042 وD-0101 المحذوفة): العكسُ القديم وسم سطرَ
+        النقدية بالمورّد والأصلُ لم يَسِمه — يتعاكسان حساباً ومبلغاً لا طرفاً. كان
+        يُتخطّى «مراجعة يدوية» والعكسُ المرحّل يُضخّم رصيدَ المورّد والصندوق. التسوية
+        تنفي أسطرَ العكس نفسها فيعود كلُّ (حساب، طرف) صفراً — وإعادةُ ترحيل الأصل
+        كانت ستترك وسمَ النقدية في رصيد المورّد."""
+        pay = self._payment(self.t1)
+        orig, rev = self._old_cycle(self.t1, pay)
+        partner = self.t1._f1["partner"]
+        JournalLine.objects.filter(journal=rev, account=self.t1._f1["box"]).update(partner=partner)
+
+        report = self._run()
+        self.assertIn("action=adjust", report)
+        self.assertIn("وسم الطرف", report)
+        self._run("--apply")
+
+        self._assert_net_zero(self.t1, pay)
+        tagged = JournalLine.objects.filter(
+            journal__reference_id=pay.id, journal__reference_type__in=PAYMENT_TYPES,
+            journal__is_posted=True, partner=partner,
+        ).aggregate(d=Sum("debit"), c=Sum("credit"))
+        self.assertEqual((tagged["d"] or 0) - (tagged["c"] or 0), 0)
+        orig.refresh_from_db()
+        self.assertFalse(orig.is_posted)
+
+        count = JournalHeader.objects.count()
+        self._run("--apply")
+        self.assertEqual(JournalHeader.objects.count(), count)
+
     def test_final_vat_statement_counts_as_locked(self):
         pay = self._payment(self.t1)
         orig, _ = self._old_cycle(self.t1, pay)

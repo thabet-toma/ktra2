@@ -119,6 +119,12 @@ ignore_imports =
     # مُسلسِل عرض المورّد — حارس T-132) يقصد ذلك الاعتماد قصداً، وهو ما يُراد.
     *.tests.* -> logistics.serializers
     *.tests.* -> logistics.serializers.*
+    # 2026-09-17: `core/tests/test_document_updated_at.py` يؤكّد أن ختمَ `updated_at`
+    # مكشوفٌ للقراءة فقط في مُسلسِلات سبعة نماذج عبر أربع apps — القاعدةُ نفسُها.
+    *.tests.* -> accounting.serializers
+    *.tests.* -> inventory.serializers
+    *.tests.* -> partners.serializers
+    *.tests.* -> sales.serializers
     # baseline عند الإضافة 2026-09-17 — `platform_ops` و`import_file` دخلا العقود
     # (كانا خارجها فلا يحرسهما شيء). الانتهاك الوحيد الذي ظهر: فوترةُ اشتراك الخدمة
     # تبني فاتورة البيع بـ`SalesInvoiceSerializer` كسولاً لتمرّ بمسار التحقّق المعتمد

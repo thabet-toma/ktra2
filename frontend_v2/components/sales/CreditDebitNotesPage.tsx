@@ -280,6 +280,9 @@ export const CreditDebitNotesPage: React.FC = () => {
     setFormTaxRate(restored.formTaxRate);
     setFormRelatedInvoice(restored.formRelatedInvoice);
     setFormVatStatementNo(restored.formVatStatementNo);
+    // شريطُ الاستعادة داخل النافذة — مغلقةً يبقى ما استُعيد بلا طريقٍ إليه، وزرُّ
+    // «جديد» (`resetForm`) يمحوه (مرآة `StocktakePage`).
+    setShowForm(true);
     setTouched(true);
   }, []);
 

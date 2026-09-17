@@ -617,7 +617,7 @@ test('القيد المحاسبيّ اليدويّ: اكتب، أخفِ التب
   await stubGeneric(page, ['accounting.journal.view', 'accounting.journal.create']);
 
   await page.goto('/accounting/journals/new');
-  const amountField = page.locator('[data-ktra-field="simple-amount"]');
+  const amountField = page.locator('[data-ktra-field="quick-amount-receipts"]');
   await expect(amountField).toBeVisible({ timeout: 30_000 });
   await amountField.fill('123.45');
   await expect(amountField).toHaveValue('123.45');
@@ -630,7 +630,7 @@ test('القيد المحاسبيّ اليدويّ: اكتب، أخفِ التب
 
   await page.reload();
   await expect(page.getByTestId('draft-restored-banner')).toBeVisible({ timeout: 30_000 });
-  await expect(page.locator('[data-ktra-field="simple-amount"]')).toHaveValue('123.45');
+  await expect(page.locator('[data-ktra-field="quick-amount-receipts"]')).toHaveValue('123.45');
 });
 
 /* ─────────────── ISSUE #121 — الدفعة الرابعة: ١٣ شاشةً تنضمّ ───────────────
@@ -662,11 +662,9 @@ const BATCH4_SCREENS: Array<{
   { name: 'عرض سعر الزبون', route: '/sales/quotations', permissions: ['sales.quotation.manage'],
     touch: '[data-testid="quotation-customer-address"]', value: 'QUO-DRAFT-001' , newLabel: 'عرض جديد' },
   { name: 'طلبية الزبون', route: '/sales/orders', permissions: ['sales.quotation.manage'],
-    touch: '[data-testid="order-notes"]', value: 'ORD-DRAFT-001' , newLabel: 'طلبية جديدة' ,
-    pending: 'عطبٌ في التطبيق: الاستعادةُ تتمّ عند فتح القائمة (`SalesOrdersPage.tsx` — `onRestoreDraft` يملأ الحالة ولا يُظهر النموذج) فيظهر شريطُ «استُعيدت مسودةٌ» بلا طريقٍ إليها، وزرُّ «طلبية جديدة» (`onNew` ← `resetForm()`) يمحو ما استُعيد: الشريطُ ظاهر والملاحظاتُ فارغة' },
+    touch: '[data-testid="order-notes"]', value: 'ORD-DRAFT-001' , newLabel: 'طلبية جديدة' , reopensItself: true },
   { name: 'إشعار دائن/مدين', route: '/sales/credit-debit-notes', permissions: ['sales.invoice.view', 'sales.invoice.create'],
-    touch: '[data-testid="note-related-invoice"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' ,
-    pending: 'عطبٌ في التطبيق: الاستعادةُ تتمّ عند فتح القائمة (`CreditDebitNotesPage.tsx` — `onRestoreDraft` يملأ الحالة ولا يُظهر النافذة) وشريطُها داخل النافذة المغلقة، وزرّا «إشعار جديد» كلاهما `resetForm()` فيمحوان ما استُعيد: الشريطُ ظاهر والحقلُ فارغ' },
+    touch: '[data-testid="note-related-invoice"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' , reopensItself: true },
   { name: 'إرسالية الشراء', route: '/purchase-receipts', permissions: ['purchase.invoice.view', 'purchase.invoice.create'],
     touch: '[data-testid="receipt-supplier-ref"]', value: 'GR-DRAFT-001' , newLabel: 'إرسالية جديدة' , reopensItself: true },
   { name: 'الجرد المخزني', route: '/stocktake', permissions: ['inventory.doc.post', 'inventory.item.view'],

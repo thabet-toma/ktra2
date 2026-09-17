@@ -72,6 +72,14 @@ def _effects(journal):
     return nominal, base
 
 
+def _by_account(effects):
+    """الأثر نفسه مجمَّعاً بالحساب وحده — بلا وسم الطرف."""
+    out = defaultdict(Decimal)
+    for (account_id, _partner_id), amount in effects.items():
+        out[account_id] += amount
+    return out
+
+
 def _cancels(a, b):
     return all(abs(a.get(k, 0) + b.get(k, 0)) <= TOLERANCE for k in set(a) | set(b))
 
@@ -164,9 +172,19 @@ def collect_rows(tenant_id=None):
         row["rev"] = rev
         orig_nominal, orig_base = _effects(j)
         rev_nominal, rev_base = _effects(rev)
+        # عكسٌ يعاكس الأصل حساباً ومبلغاً ويختلف في **وسم الطرف** وحده (العكسُ القديم
+        # وسم سطرَ النقدية بالمورّد والأصلُ لم يَسِمه): التسوية تنفي العكسَ نفسَه سطراً
+        # بسطر فيعود كلُّ (حساب، طرف) صفراً — إعادةُ ترحيل الأصل تترك الوسمَ الزائد
+        # في رصيد المورّد (`partner_posted_balance` يجمع كلَّ أسطره).
+        negate_reversal = False
         if not _cancels(orig_nominal, rev_nominal):
-            row["reason"] = f"أسطر العكس #{rev.id} لا تعاكس أسطر الأصل — مراجعة يدوية"
-            continue
+            if not (
+                _cancels(_by_account(orig_nominal), _by_account(rev_nominal))
+                and _cancels(_by_account(orig_base), _by_account(rev_base))
+            ):
+                row["reason"] = f"أسطر العكس #{rev.id} لا تعاكس أسطر الأصل — مراجعة يدوية"
+                continue
+            negate_reversal = True
         if rev.id in claimed:
             row["reason"] = (
                 f"العكس #{rev.id} يُعادَل بالأصل #{claimed[rev.id]} — "
@@ -184,7 +202,14 @@ def collect_rows(tenant_id=None):
         # أثرهما الأساسي، وإلا بعملة العكس وسعره (العكس القديم لم ينسخ العملة).
         row["fx_source"] = j if base_cancels else rev
         lock = _lock_reason(j)
-        if lock:
+        if negate_reversal:
+            row["negate_reversal"] = True
+            row["fx_source"] = rev
+            row["action"] = "adjust"
+            row["reason"] = (
+                f"العكس #{rev.id} يعاكس الأصل حساباً ومبلغاً ويختلف في وسم الطرف: "
+                "التسوية تنفي أسطر العكس نفسها")
+        elif lock:
             row["action"], row["reason"] = "adjust", f"فترة الأصل مقفلة: {lock}"
         elif not base_cancels:
             row["action"] = "adjust"
@@ -268,17 +293,31 @@ def _adjust(row):
             return f"تخطٍّ: الأصل #{orig_id} صُحِّح سابقاً"
         if not JournalHeader.objects.filter(pk=rev_id, is_posted=True).exists():
             return f"تخطٍّ: العكس #{rev_id} لم يعد مرحّلاً"
-        lines_data = [
-            {
-                "account": line.account_id,
-                "debit": line.debit or Decimal("0"),
-                "credit": line.credit or Decimal("0"),
-                "partner": line.partner_id,
-                "cost_center": line.cost_center_id,
-                "description": f"تسوية قيد #{orig_id}: {line.description or ''}",
-            }
-            for line in orig.lines.all().order_by("id")
-        ]
+        if row.get("negate_reversal"):
+            rev = JournalHeader.objects.get(pk=rev_id)
+            lines_data = [
+                {
+                    "account": line.account_id,
+                    "debit": line.credit or Decimal("0"),
+                    "credit": line.debit or Decimal("0"),
+                    "partner": line.partner_id,
+                    "cost_center": line.cost_center_id,
+                    "description": f"تسوية قيد #{orig_id} (نفي العكس #{rev_id}): {line.description or ''}",
+                }
+                for line in rev.lines.all().order_by("id")
+            ]
+        else:
+            lines_data = [
+                {
+                    "account": line.account_id,
+                    "debit": line.debit or Decimal("0"),
+                    "credit": line.credit or Decimal("0"),
+                    "partner": line.partner_id,
+                    "cost_center": line.cost_center_id,
+                    "description": f"تسوية قيد #{orig_id}: {line.description or ''}",
+                }
+                for line in orig.lines.all().order_by("id")
+            ]
         fx = row["fx_source"]
         adj = post_journal(
             tenant_id=orig.tenant_id,

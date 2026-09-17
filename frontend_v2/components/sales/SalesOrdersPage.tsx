@@ -739,6 +739,9 @@ export const SalesOrdersPage: React.FC = () => {
     setFormNotes(restored.formNotes);
     // ISSUE #147 §B.7: سعرٌ من مسودّة مستعادة يُعامَل «ملموساً».
     setFormLines(restored.formLines.map((l) => (l.product_id ? { ...l, priceTouched: true } : l)));
+    // مسودّةٌ لطلبيةٍ جديدة تُستعاد والشاشةُ على القائمة — بلا إظهار النموذج يبقى
+    // الشريطُ بلا طريقٍ إليها، و«طلبية جديدة» (`resetForm`) يمحو ما استُعيد.
+    setShowForm(true);
     setTouched(true);
   }, []);
 
