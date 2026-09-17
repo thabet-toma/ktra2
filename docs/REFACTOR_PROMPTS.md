@@ -107,7 +107,7 @@ app بلا وثيقة · `python manage.py sync_docs` يولّد الحقائق 
 **خطوات أول جلسة تنفيذ (إلزامية):**
 ```bash
 # 1. البيئة — الحاوية لا تأتي بـDjango، وmysqlclient يفشل بناؤه (لا حاجة له، الاختبارات SQLite):
-pip install Django==5.1.15 djangorestframework==3.16.1 django-cors-headers==4.9.0 \
+pip install Django==6.1.1 djangorestframework==3.18.1 django-cors-headers==4.9.0 \
   python-dotenv django-cloudinary-storage cloudinary Pillow requests \
   websocket-client sqlglot pytest pytest-django import-linter
 # 2. الفرع — ⚠️ تحقّق أنك عليه فعلاً، ولا تفترض أن النسخة المحلية تحتويه:

@@ -75,8 +75,8 @@
 ## إعدادات مشروع K.T.R.A
 
 ### Tech Stack
-- **Backend:** Django 5.1.15 (requirements.txt), DRF 3.16, MySQL (prod) / SQLite (test)
-  — لا تستعمل ميزةً حصريةً بـ6.0
+- **Backend:** Django 6.1.1 (requirements.txt), DRF 3.18, MySQL 8.4 (prod) / SQLite (test)
+  — Python ≥3.12 وMySQL ≥8.4 شرطان؛ قاعدةُ MySQL 8.0 محلّيّة لا تعمل معه
 - **Frontend:** React 19.2, TypeScript 5.8, Vite 6.2, Tailwind CSS 4.3
 - **Tests:** يجب أن تبقى خضراء (لا تكتب عددها في الوثائق: يتغيّر كل جلسة)
 
