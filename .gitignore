@@ -5,6 +5,9 @@ __pycache__/
 *.py[cod]
 *.sqlite3
 *.db
+# مجلّدات `--basetemp` المؤقّتة لـpytest في الجذر — بعضها يُنشأ بـACL يمنع حتى
+# قراءتها فيُحذّر git عند كل `status`. مكانُ basetemp خارج المستودع أصلاً.
+/.pytest-*/
 
 # Env & secrets (never commit)
 .env
