@@ -31,6 +31,7 @@ import {
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { inventoryApi, listPickerProducts } from "../../services/inventoryApi";
+import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { formatQuantity } from "../../utils/formatNumber";
@@ -57,7 +58,7 @@ import {
 
 type WarehouseOpt = { id: number; name: string; is_default?: boolean };
 type PartnerOpt = { id: number; name: string; partner_type?: string };
-type ProductOpt = { id: number; sku?: string; name_ar?: string; name_en?: string };
+type ProductOpt = { id: number; sku?: string; name_ar?: string; name_en?: string; display_name?: string | null };
 
 type LineState = {
   /** سطر الفاتورة المرتبطة — فارغ في السند المستقل. */
@@ -94,7 +95,8 @@ interface DeliveryDraftPayload {
   formLines: LineState[];
 }
 
-const productLabel = (p: ProductOpt) => p.name_ar || p.name_en || p.sku || `#${p.id}`;
+// «الاسم (البراند)» كما تسمّيه فاتورةُ البيع — لا `name_ar` الخامّ الذي يُسقط البراند.
+const productLabel = (p: ProductOpt) => formatProductPrimaryName(p);
 
 /**
  * «تسليم الكل»: بنود الفاتورة التي بقي منها شيء ⇒ صفوفُ محرّرٍ جاهزة بالكمية

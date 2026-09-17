@@ -70,18 +70,23 @@ test('سطر المستند: لا لقطة ولا صنفٌ محمَّل ⇒ فر
   assert.equal(documentLineProductName(undefined, undefined), '');
 });
 
-/** مواضعُ تسمّي صنفَ سطرٍ في فاتورة البيع. السقوطُ إلى `name_ar || name_en || sku`
+/** مواضعُ تسمّي صنفَ سطرٍ في مستندات البيع (فاتورة · طلبيّة · عرض سعر · سند تسليم). السقوطُ إلى `name_ar || name_en || sku`
  *  فيها هو العطبُ نفسُه: يُسقط البراند. التعليقاتُ تُجرَّد — حارسٌ يسقط على تعليقٍ
  *  معطوب، وبدون التجريد «تُصلَح» المخالفةُ بنقلها إلى تعليق. */
 const SALES_LINE_NAMING_SOURCES = [
   '../components/sales/SalesInvoiceEditor.tsx',
   '../components/sales/SalesInvoicePrintView.tsx',
+  '../components/sales/SalesOrdersPage.tsx',
+  '../components/sales/SalesQuotationsPage.tsx',
+  '../components/sales/DeliveryNotesPage.tsx',
 ];
 
-test('فاتورة البيع لا تسمّي صنفاً بالاسم الخامّ الذي يُسقط البراند', () => {
+test('مستندات البيع لا تسمّي صنفاً بالاسم الخامّ الذي يُسقط البراند', () => {
   // أيُّ سقوطٍ يبدأ بـ`name_ar ||` — بصيغه كلِّها (`p.name_ar || p.name_en || p.sku`،
   // `pr?.name_ar || productId`…): كلُّها تُسمّي البراند باسم منتجه الأب.
-  const rawFallback = /\bname_ar\s*\|\|[^\n;,)]*/g;
+  // المستثنى وحده ملءُ الحقل نفسِه (`name_ar: p.name_ar || p.name`) — ذاك حقلُ
+  // الاسم العربيّ لا لافتة.
+  const rawFallback = /(?<!\bname_ar:\s*[^\n,]*)\bname_ar\s*\|\|[^\n;,)]*/g;
   const offenders: string[] = [];
   for (const rel of SALES_LINE_NAMING_SOURCES) {
     const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8')
@@ -90,4 +95,13 @@ test('فاتورة البيع لا تسمّي صنفاً بالاسم الخام
     for (const hit of source.match(rawFallback) || []) offenders.push(`${rel}: ${hit}`);
   }
   assert.deepEqual(offenders, [], 'استعمل formatProductPrimaryName / documentLineProductName');
+});
+
+test('مُطابِقا الطلبيّة وعرض السعر لا يُسقطان display_name', () => {
+  // بغيابه يسمّي `formatProductPrimaryName` الصنفَ بلا براند وإن مرّ الاسمُ بها.
+  for (const rel of ['../components/sales/SalesOrdersPage.tsx', '../components/sales/SalesQuotationsPage.tsx']) {
+    const source = readFileSync(fileURLToPath(new URL(rel, import.meta.url)), 'utf8');
+    assert.match(source, /display_name: p\.display_name \?\? null/, `${rel}: مُطابِقُ القائمة`);
+    assert.match(source, /display_name: created\.display_name \?\? null/, `${rel}: مُطابِقُ الإنشاء السريع`);
+  }
 });

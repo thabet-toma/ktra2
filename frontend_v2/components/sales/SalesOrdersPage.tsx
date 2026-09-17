@@ -151,7 +151,7 @@ export const SalesOrdersPage: React.FC = () => {
     setProducts((prev) => prev.map((p) => {
       if (p.id !== row.id) return p;
       const merged = { ...p, ...updated } as Product;
-      merged.name = (updated as any).name_ar || (updated as any).name_en || (updated as any).sku || merged.name;
+      merged.name = formatProductPrimaryName(merged);
       return merged;
     }));
   }, []);
@@ -301,7 +301,10 @@ export const SalesOrdersPage: React.FC = () => {
           quantity_on_hand: String(p.available_quantity ?? p.quantity_on_hand ?? "0"),
           name_ar: p.name_ar || p.name || "",
           name_en: p.name_en || "",
-          name: p.name_ar || p.name_en || p.name || p.sku || `#${p.id}`,
+          // البراند: `display_name` كان يُسقَط هنا فتُسمّى الأصنافُ بلا براندها
+          // في القائمة وفي كلّ سطرٍ يُختار منها.
+          display_name: p.display_name ?? null,
+          name: formatProductPrimaryName(p),
           unit_price: p.sale_price ?? p.selling_price ?? p.unit_price ?? "",
           // ISSUE #147 M4: كانت تُسقَط هنا فتصل شارة المخزون والسعر التقديري
           // معدومةً دائماً إلى المنتقي المدمج.
@@ -892,7 +895,8 @@ export const SalesOrdersPage: React.FC = () => {
                   quantity_on_hand: String(created.quantity_on_hand ?? "0"),
                   name_ar: created.name_ar || created.name || "",
                   name_en: created.name_en || "",
-                  name: created.name_ar || created.name_en || created.sku || `#${created.id}`,
+                  display_name: created.display_name ?? null,
+                  name: formatProductPrimaryName(created),
                   unit_price: created.sale_price ?? created.selling_price ?? "",
                   stock_status: created.stock_status ?? null,
                   is_service: created.is_service ?? false,

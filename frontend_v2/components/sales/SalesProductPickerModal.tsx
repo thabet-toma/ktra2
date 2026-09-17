@@ -18,6 +18,10 @@ export type SalesProductPickerItem = {
   barcode?: string | null;
   name_ar?: string | null;
   name_en?: string | null;
+  /** «الاسم (البراند)» من الخادم (`product_display_name`). **لا تُسقطه** في أيّ
+   *  مُطابِقٍ يبني هذا النوع: بغيابه يسقط `formatProductPrimaryName` إلى
+   *  `name_ar` الخامّ فيضيع البراند من المنتقي ومن اسم كلّ سطرٍ يُختار به. */
+  display_name?: string | null;
   quantity_on_hand: string;
   online_price?: string | null;
   /** T-REORDER: حالة المخزون كما يحسمها الخادم — لا تُعاد هنا. */
