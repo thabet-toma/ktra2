@@ -1187,3 +1187,24 @@ class InvitationLinkPointsAtThePageTest(HiringBaseTest):
         self.assertNotIn(
             "/api/", url, "رابطٌ يُرسل لإنسانٍ لا يشير إلى نقطة API"
         )
+
+    @override_settings(ALLOWED_HOSTS=["*"], DOCSHARE_PUBLIC_BASE_URL="https://configured.example")
+    def test_the_invite_link_ignores_a_spoofed_host_header(self):
+        """D-3: الرابطُ يُرسَل لإنسانٍ ويعيش أيّاماً، فأساسُه من الإعدادات لا من `Host`.
+
+        كان يُبنى بـ`request.build_absolute_uri` — أي من ترويسةٍ يرسلها العميل.
+        """
+        from employee_ops.views import INVITE_PAGE_PATH
+
+        res = self.client.post(
+            "/api/employee-ops/employees/",
+            {"name": "موظف مزوّر المضيف", "phone": "0599778"},
+            format="json",
+            HTTP_HOST="evil.example",
+            **self.headers,
+        )
+        self.assertEqual(res.status_code, 201, res.data)
+        self.assertEqual(
+            res.data["invitation_url"],
+            f"https://configured.example{INVITE_PAGE_PATH}{res.data['raw_token']}",
+        )

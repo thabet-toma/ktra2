@@ -194,7 +194,7 @@ export const PlatformInvitationPage: React.FC = () => {
               {acceptance.username}
             </p>
             <a
-              href={acceptance.token ? "/platform/employee-space" : "/"}
+              href={acceptance.token ? "/staff/home" : "/"}
               className="inline-flex items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-bold text-white hover:bg-blue-700"
             >
               {acceptance.token ? "ادخل إلى مساحتك" : "تسجيل الدخول"}

@@ -85,9 +85,11 @@ class ChannelIntakeTest(TestCase):
         cache.clear()
 
     def test_01_idempotency_same_external_ref_returns_same_order_and_charges_once(self):
-        """1. idempotency: نفس external_ref مرتين -> أمر عمل واحد وعملية مفوترة واحدة.
+        """1. idempotency: نفس external_ref مرتين -> أمر عمل واحد.
 
-        التحقق من العداد consumed_quota لا من عدد الصفوف وحده.
+        والعدّاد `consumed_quota` يبقى صفراً في الطلبين (D-4، قرار المالك): الاستقبالُ
+        لا يُفوتِر، والاحتسابُ بوحدات الدفتر بعد اعتماد المُسلَّم وحدَها — كان هذا
+        الاختبارُ يتوقّع ١ فكان يحرس الفوترةَ المزدوجة نفسَها.
         """
         payload = {
             "external_ref": "REF-MSG-1001",
@@ -107,7 +109,7 @@ class ChannelIntakeTest(TestCase):
         wo_id_1 = res1.data["id"]
 
         self.sub_a.refresh_from_db()
-        self.assertEqual(self.sub_a.consumed_quota, 1)
+        self.assertEqual(self.sub_a.consumed_quota, 0)
         self.assertEqual(
             WorkOrder.objects.filter(tenant=self.tenant_a, external_ref="REF-MSG-1001").count(),
             1,
@@ -126,12 +128,12 @@ class ChannelIntakeTest(TestCase):
         # أمر العمل نفسه لم يتغير
         self.assertEqual(wo_id_1, wo_id_2)
 
-        # التحقق الحاسم من العداد: لم يزد ولم يُحتسب مرتين
+        # العدّادُ لم يتحرّك بإعادة الإرسال — ولا بالإرسال الأوّل (D-4)
         self.sub_a.refresh_from_db()
         self.assertEqual(
             self.sub_a.consumed_quota,
-            1,
-            "إعادة إرسال نفس external_ref زادت عداد العمليات المفوترة وهذا خرق صارم لـ idempotency.",
+            0,
+            "الاستقبالُ لا يُفوتِر: الاحتسابُ بوحدات الدفتر بعد الاعتماد وحدَها.",
         )
         self.assertEqual(
             WorkOrder.objects.filter(tenant=self.tenant_a, external_ref="REF-MSG-1001").count(),
@@ -170,10 +172,11 @@ class ChannelIntakeTest(TestCase):
         self.assertNotIn("policy_snapshot", res_a.data)
         self.assertNotIn("assignee", res_a.data)
 
+        # الاستقبالُ لا يُفوتِر (D-4): العدّادان صفرٌ لا ١.
         self.sub_a.refresh_from_db()
         self.sub_b.refresh_from_db()
-        self.assertEqual(self.sub_a.consumed_quota, 1)
-        self.assertEqual(self.sub_b.consumed_quota, 1)
+        self.assertEqual(self.sub_a.consumed_quota, 0)
+        self.assertEqual(self.sub_b.consumed_quota, 0)
 
     def test_03_rejected_payload_assignee_status_price_rejected_individually(self):
         """3. الحمولة المرفوضة: حمولة تحمل assignee أو status أو price تُرفض — اختبار الثلاثة كلاً على حدة."""

@@ -688,25 +688,26 @@ class NotificationsHaveRealProducersTest(TestCase):
             tenant=self.tenant, channel=IntegrationKey.Channel.WHATSAPP
         )
 
-    def test_crossing_the_quota_notifies_once_not_on_every_request(self):
+    def test_intake_alone_neither_consumes_nor_notifies(self):
+        """D-4 (قرار المالك): الاستقبالُ لا يُفوتِر، فلا يعبر الحدَّ ولا يُشعِر.
+
+        كان هذا الاختبارُ يعبر الباقةَ بأربعة استقبالات — أي يحرس الاحتسابَ عند
+        الاستقبال الذي كان يُفوتِر أمرَ القناة مرّتين. مُنتِجُ «تجاوز الباقة» صار
+        الدفترَ بعد الاعتماد، ويحرسه
+        `test_usage_ledger.py` (`ChannelWorkOrderIsBilledOnlyByTheLedgerTest`).
+        """
         for i in range(4):
             receive_channel_work_order(
                 key=self.key, title=f"طلب {i}", external_ref=f"NOTIF-{i}"
             )
 
         self.subscription.refresh_from_db()
-        self.assertEqual(self.subscription.consumed_quota, 4)
-
-        quota_notes = PlatformNotification.objects.filter(
-            notification_type=PlatformNotification.NotificationType.QUOTA_EXCEEDED,
-            recipient=self.manager,
+        self.assertEqual(self.subscription.consumed_quota, 0)
+        self.assertFalse(
+            PlatformNotification.objects.filter(
+                notification_type=PlatformNotification.NotificationType.QUOTA_EXCEEDED,
+            ).exists()
         )
-        self.assertEqual(
-            quota_notes.count(),
-            1,
-            "إشعارُ التجاوز يُطلَق مرّةً عند العبور لا في كلّ عمليّةٍ بعده.",
-        )
-        self.assertEqual(quota_notes.first().tenant_id, self.tenant.pk)
 
     def test_approving_a_work_order_after_its_deadline_notifies_the_breach(self):
         staff_user = User.objects.create_user(

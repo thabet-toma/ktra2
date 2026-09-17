@@ -116,11 +116,8 @@ class LeadTransferTest(APITestCase):
         فاشتقاقُ الزرّ منه في الواجهة يرسمه لمن لم يعد يملك — ولذلك الحقلُ يأتي
         من الخادم مقروءاً من `lead.assigned_to` **الآن**.
 
-        وثغرةٌ مجاورةٌ وُجدت أثناء كتابة هذا الاختبار ولم تُصلَح هنا (خارج نطاق
-        التذكرة): `LeadTransferViewSet.get_queryset` يُضيَّق على
-        `from_employee | to_employee`، فمن صار صاحبَ العميل بعد كتابة الطلب
-        **لا يرى الطلبَ أصلاً** وإن كان `decide` يسمح له. أثرُها محصورٌ في حالةِ
-        انتقالِ عميلٍ وطلبٌ معلَّقٌ عليه، والمديرُ يبتّ فيها.
+        ومن صار صاحبَ العميل بعد كتابة الطلب يرى الطلبَ ويبتّ فيه — محروسٌ في
+        `test_the_current_owner_sees_and_decides_a_request_written_before_him`.
         """
         transfer_id = self._pending_request()
         # الطالبُ نفسُه في الاختبار السابق يملك البتَّ لأنّه صاحبُ العميل؛ وهنا
@@ -129,6 +126,40 @@ class LeadTransferTest(APITestCase):
         self.lead.assigned_to = self.other
         self.lead.save(update_fields=["assigned_to"])
         self.assertFalse(self._can_decide_for(self.owner_user, transfer_id))
+
+    def test_the_current_owner_sees_and_decides_a_request_written_before_him(self):
+        """D-1: الطلبُ كُتب و`self.owner` مالكٌ، ثمّ انتقل العميلُ إلى `self.other`.
+
+        كان `get_queryset` يُضيَّق على `from_employee | to_employee` وحدَهما،
+        و`decide` يمرّ عبر `get_object()` — فالمالكُ الحاليُّ (وهو وحدَه من
+        تسمح له `can_decide_lead_transfer`) لا يرى الطلبَ ويردّه `decide` ٤٠٤.
+        """
+        stranger_user, _stranger = make_staff_employee("transfer-stranger")
+        transfer_id = self._pending_request()
+        self.lead.assigned_to = self.other
+        self.lead.save(update_fields=["assigned_to"])
+
+        self.client.force_authenticate(user=self.other_user)
+        listed = self.client.get("/api/platform/crm/transfer-requests/")
+        self.assertEqual(listed.status_code, 200, listed.content)
+        body = listed.json()
+        rows = body.get("results", body) if isinstance(body, dict) else body
+        self.assertIn(transfer_id, [row["id"] for row in rows])
+        self.assertTrue(self._can_decide_for(self.other_user, transfer_id))
+
+        self.client.force_authenticate(user=stranger_user)
+        denied = self.client.post(
+            f"/api/platform/crm/transfer-requests/{transfer_id}/decide/", {"approve": True}, format="json",
+        )
+        self.assertEqual(denied.status_code, 404, denied.content)
+
+        self.client.force_authenticate(user=self.other_user)
+        decided = self.client.post(
+            f"/api/platform/crm/transfer-requests/{transfer_id}/decide/", {"approve": True}, format="json",
+        )
+        self.assertEqual(decided.status_code, 200, decided.content)
+        self.lead.refresh_from_db()
+        self.assertEqual(self.lead.assigned_to_id, self.bystander.pk)
 
     def test_a_settled_request_offers_no_decision_to_anyone(self):
         transfer_id = self._pending_request()

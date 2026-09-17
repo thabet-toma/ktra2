@@ -52,3 +52,22 @@ export function staffGate(input: {
   const allowed = input.capabilities.is_platform_employee || input.capabilities.is_platform_admin;
   return allowed ? 'render' : 'leave';
 }
+
+export type FirstCompanyGate = 'loading' | 'staff' | 'onboarding';
+
+/**
+ * مستخدمٌ بلا شركةٍ على الباب العادي: انتظارٌ · مساحةُ `/staff` · نموذجُ «أنشئ شركتك الأولى».
+ *
+ * موظّفُ المنصّة لا شركةَ له بالضرورة — `accept_applicant_invitation` لا يُنشئ
+ * عضويّةً، والعضويّةُ تأتي بالإسناد — فمن دخل من الصفحة الرئيسيّة قبل إسناده كان
+ * يهبط على نموذجِ تأسيسِ شركةٍ لا يخصّه (D-2). و`pending` من `capabilitiesPending`
+ * نفسِها: «لم أسأل بعد» انتظارٌ لا «ليس موظّفاً»، وإلّا ومضَ النموذجُ قبل الجواب.
+ */
+export function firstCompanyGate(input: {
+  pending: boolean;
+  capabilities: StaffCapabilitiesAnswer;
+}): FirstCompanyGate {
+  if (input.pending) return 'loading';
+  const staff = input.capabilities.is_platform_employee || input.capabilities.is_platform_admin;
+  return staff ? 'staff' : 'onboarding';
+}

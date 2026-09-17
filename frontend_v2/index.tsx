@@ -10,6 +10,8 @@ import { useCompany } from './contexts/CompanyContext';
 import { useAuth } from './contexts/AuthContext';
 import { FirstCompanyOnboarding } from './components/onboarding/FirstCompanyOnboarding';
 import { LoadingSpinner } from './components/LoadingSpinner';
+import { usePlatformStaffCapabilitiesState } from './hooks/usePlatformStaffCapabilities';
+import { firstCompanyGate } from './utils/staffAccess';
 import { ConfirmProvider } from './contexts/ConfirmContext';
 import { ToastProvider } from './contexts/ToastContext';
 import { ThemeProvider, applyThemeOnBoot } from './contexts/ThemeContext';
@@ -156,22 +158,6 @@ const ApplicationBoundary: React.FC = () => {
   const { currentUser, loading: authLoading } = useAuth();
   const { companies, currentCompany, loading: companiesLoading, error, refreshCompanies } = useCompany();
 
-  if (authLoading || (currentUser && companiesLoading)) {
-    return <div dir="rtl" className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900"><div className="text-center"><LoadingSpinner /><p className="mt-4 text-sm text-gray-600 dark:text-gray-300">جاري تجهيز مساحة العمل...</p></div></div>;
-  }
-
-  if (currentUser && error) {
-    return (
-      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-900">
-        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-xl dark:border-red-900 dark:bg-gray-800">
-          <h1 className="text-xl font-bold text-gray-900 dark:text-white">تعذّر تحميل مساحة العمل</h1>
-          <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-gray-300">{error}</p>
-          <button type="button" onClick={() => void refreshCompanies()} className="mt-6 rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700">إعادة المحاولة</button>
-        </div>
-      </div>
-    );
-  }
-
   const accountantTenantlessPath =
     location.pathname.startsWith('/accountant/profile') ||
     location.pathname.startsWith('/accountant/engagements');
@@ -188,7 +174,40 @@ const ApplicationBoundary: React.FC = () => {
 
   const tenantlessPath = accountantTenantlessPath || platformTenantlessPath;
 
+  // D-2: ومن دخل من الباب العادي بلا شركةٍ يُسأل الخادمُ أوّلاً «أهو من فريق المنصّة؟»
+  // — المصدرُ نفسُه الذي يقرؤه `StaffLoginPage` و`StaffShell` — فيُوجَّه إلى مساحته
+  // لا إلى نموذج التأسيس. والسؤالُ لا يُطرح إلا لمن سيرى النموذجَ فعلاً: معرّفٌ
+  // `undefined` لغيره فلا نداءَ زائداً على كلّ إقلاعٍ لمستخدمي الشركات.
+  const mayNeedFirstCompany =
+    Boolean(currentUser) && !authLoading && !companiesLoading && !error &&
+    companies.length === 0 && !tenantlessPath;
+  const { capabilities: staffCapabilities, loading: staffCapabilitiesLoading } = usePlatformStaffCapabilitiesState(
+    mayNeedFirstCompany && currentUser?.id ? String(currentUser.id) : undefined,
+    Boolean(currentUser?.isSuperAdmin),
+  );
+
+  const workspaceLoader = <div dir="rtl" className="flex min-h-screen items-center justify-center bg-gray-50 dark:bg-gray-900"><div className="text-center"><LoadingSpinner /><p className="mt-4 text-sm text-gray-600 dark:text-gray-300">جاري تجهيز مساحة العمل...</p></div></div>;
+
+  if (authLoading || (currentUser && companiesLoading)) {
+    return workspaceLoader;
+  }
+
+  if (currentUser && error) {
+    return (
+      <div dir="rtl" className="flex min-h-screen items-center justify-center bg-gray-50 px-4 dark:bg-gray-900">
+        <div className="w-full max-w-md rounded-2xl border border-red-200 bg-white p-6 text-center shadow-xl dark:border-red-900 dark:bg-gray-800">
+          <h1 className="text-xl font-bold text-gray-900 dark:text-white">تعذّر تحميل مساحة العمل</h1>
+          <p className="mt-3 text-sm leading-6 text-gray-600 dark:text-gray-300">{error}</p>
+          <button type="button" onClick={() => void refreshCompanies()} className="mt-6 rounded-xl bg-blue-600 px-6 py-3 font-bold text-white transition hover:bg-blue-700">إعادة المحاولة</button>
+        </div>
+      </div>
+    );
+  }
+
   if (currentUser && companies.length === 0 && !tenantlessPath) {
+    const gate = firstCompanyGate({ pending: staffCapabilitiesLoading, capabilities: staffCapabilities });
+    if (gate === 'loading') return workspaceLoader;
+    if (gate === 'staff') return <Navigate to="/staff/home" replace />;
     return <FirstCompanyOnboarding />;
   }
 

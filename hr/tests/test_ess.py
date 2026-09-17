@@ -8,12 +8,15 @@ from decimal import Decimal
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth.models import User
+from django.core.cache import cache
 from django.test import override_settings
 from django.utils import timezone
 from rest_framework.test import APITestCase
+from rest_framework.throttling import SimpleRateThrottle
 
 from core.models import TenantModule
 from hr.attendance import record_punch
+from hr.ess_api import EssPunchThrottle, EssThrottle
 from hr.models import (
     AttendanceDay, CheckEvent, Employee, Payslip, Shift, ShiftAssignment, WorkLocation,
 )
@@ -325,3 +328,38 @@ class EssAccessGrantTest(APITestCase):
         response = self.client.post(
             self.url(), {"username": "sami"}, format="json", **self.headers())
         self.assertEqual(response.status_code, 404, response.content)
+
+
+_LOCMEM = {"default": {"BACKEND": "django.core.cache.backends.locmem.LocMemCache"}}
+
+
+@override_settings(CACHES=_LOCMEM)
+class EssThrottleTest(EssTestBase):
+    """D-6: `EssThrottle`/`EssPunchThrottle` يردّان 429 بعد المعدّل المضبوط.
+
+    `core.test_settings` يستعمل DummyCache فلا يتراكم عدّاد — لذلك LocMemCache
+    صراحةً، وإلا لمرّ الاختبار والخانقُ غيرُ مركَّبٍ أصلاً. والمعدّلُ يُقرأ من
+    الإعدادات لا يُكتب رقماً هنا: الاختبارُ يحرس ما يعمل في الإنتاج.
+    """
+
+    def setUp(self):
+        super().setUp()
+        cache.clear()
+        self.addCleanup(cache.clear)
+
+    def _allowed(self, throttle_class):
+        rate = SimpleRateThrottle.THROTTLE_RATES[throttle_class.scope]
+        num_requests, _duration = SimpleRateThrottle.parse_rate(None, rate)
+        return num_requests
+
+    def test_ess_reads_are_throttled_past_the_configured_rate(self):
+        allowed = self._allowed(EssThrottle)
+        statuses = [self.client.get(ME, **self.headers()).status_code for _ in range(allowed)]
+        self.assertNotIn(429, statuses)
+        self.assertEqual(self.client.get(ME, **self.headers()).status_code, 429)
+
+    def test_ess_punch_is_throttled_past_the_configured_rate(self):
+        allowed = self._allowed(EssPunchThrottle)
+        statuses = [self.check_in().status_code for _ in range(allowed)]
+        self.assertNotIn(429, statuses)
+        self.assertEqual(self.check_in().status_code, 429)

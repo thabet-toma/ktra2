@@ -21,6 +21,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 import logging
 
+from django.conf import settings
 from django.http import Http404
 from django.shortcuts import get_object_or_404
 from rest_framework import status, viewsets
@@ -213,8 +214,14 @@ def _invitation_url(request, raw_token: str) -> str:
     والمسارُ ثابتٌ هنا لا `reverse`: الصفحةُ يخدمها راوترُ React لا جانغو، فلا
     اسمَ مسارٍ في جدول العناوين يُشتقّ منه. ويحرسه اختبارٌ يقارن الرابطَ بالمسار
     الذي يسجّله الراوتر.
+
+    والأساسُ من الإعدادات (`DOCSHARE_PUBLIC_BASE_URL`، الأساسُ العامُّ الذي
+    تسقط إليه روابطُ المنصّة الأخرى) لا من `request.build_absolute_uri`: ذاك
+    يبني من ترويسة `Host` التي يرسلها العميل، والرابطُ يُرسَل لإنسانٍ ويعيش
+    أيّاماً — كـ`docshare.services.public_url`.
     """
-    return request.build_absolute_uri(f"{INVITE_PAGE_PATH}{raw_token}")
+    base = str(getattr(settings, "DOCSHARE_PUBLIC_BASE_URL", "")).rstrip("/")
+    return f"{base}{INVITE_PAGE_PATH}{raw_token}"
 
 
 class EmployeeOpsSettingsViewSet(viewsets.ViewSet):

@@ -23,7 +23,7 @@ from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from rest_framework.throttling import ScopedRateThrottle
+from rest_framework.throttling import UserRateThrottle
 
 from core.access import require_perm
 from core.modules import require_module
@@ -40,11 +40,15 @@ logger = logging.getLogger(__name__)
 PAYSLIP_LIMIT = 24
 
 
-class EssThrottle(ScopedRateThrottle):
+#: `UserRateThrottle` بنطاقٍ مسمّى لا `ScopedRateThrottle`: الأخير يقرأ النطاقَ من
+#: `view.throttle_scope` ويسمح بكلّ طلبٍ إن غاب — ونقاطُ هذا الملف دوالُّ
+#: `@api_view` بلا تلك السمة، فكان الخانقان لا يخنقان شيئاً (D-6). الهويّةُ
+#: معرّفُ المستخدم، ومحروسٌ بـ`hr/tests/test_ess.py` (`EssThrottleTest`).
+class EssThrottle(UserRateThrottle):
     scope = 'ess'
 
 
-class EssPunchThrottle(ScopedRateThrottle):
+class EssPunchThrottle(UserRateThrottle):
     scope = 'ess_punch'
 
 

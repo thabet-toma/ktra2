@@ -202,6 +202,23 @@ class EmployeeDoorFrontendContractTest(SimpleTestCase):
             "شاشةُ الدعوة لا تحفظ الجلسة في التخزين المحلّي.",
         )
 
+    def test_invitation_page_lands_the_new_employee_in_the_staff_shell(self):
+        """D-2: زرُّ «ادخل إلى مساحتك» كان يقود إلى `/platform/employee-space` القديمة.
+
+        الإسنادُ نفسُه في `href` لا ذكرُ المسار في تعليق، والنفيُ جزءٌ من الحارس.
+        """
+        source = INVITATION_PAGE.read_text(encoding="utf-8")
+        self.assertRegex(source, r'href=\{acceptance\.token \? "/staff/home"')
+        self.assertNotIn("/platform/employee-space", source)
+
+    def test_a_companyless_platform_employee_is_asked_before_onboarding(self):
+        """D-2: الباب العادي يسأل الخادمَ عن قدرات المنصّة قبل «أنشئ شركتك الأولى»."""
+        router = ROUTER.read_text(encoding="utf-8")
+        self.assertRegex(router, r"usePlatformStaffCapabilitiesState\s*\(")
+        gate = router.index("firstCompanyGate({")
+        self.assertLess(gate, router.index("return <FirstCompanyOnboarding />"))
+        self.assertIn('<Navigate to="/staff/home" replace />', router)
+
 class StaffLoginRouteIsPrivateTest(SimpleTestCase):
     """بابُ `/staff` موجودٌ ويوصل إلى مساحة الموظّف — **وغيرُ معلَنٍ في أيّ سطحٍ عامّ** (211-C)."""
 

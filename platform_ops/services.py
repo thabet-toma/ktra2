@@ -2832,8 +2832,8 @@ def receive_channel_work_order(
     2. فرادة (tenant, channel, external_ref) تمنع التكرار (idempotency):
        إعادة إرسال نفس المرجع الخارجي تُعيد أمر العمل نفسه دون إنشاء جديد،
        ودون احتساب عملية ثانية.
-    3. احتساب العملية يزيد consumed_quota تحت قفل وفي نفس المعاملة الذرية
-       فقط عند إنشاء أمر عمل جديد.
+    3. الاستقبالُ لا يمسّ consumed_quota: الاحتسابُ بوحدات الدفتر بعد اعتماد
+       المُسلَّم وحدَها (`_apply_usage_event_to_quota`).
     """
     clean_ref = str(external_ref or "").strip()
     if not clean_ref:
@@ -2870,22 +2870,11 @@ def receive_channel_work_order(
         # إعادة نفس أمر العمل دون احتساب عملية ثانية
         return existing_wo, False
 
-    # 3. احتساب العملية المفوترة بزيادة العداد تحت القفل
-    # `<=` لا `<`: لحظةَ العبور يكون المستهلَكُ **مساوياً** للحدّ قبل الزيادة
-    # (٢ من ٢)، فشرطُ `<` يُفوّت العبورَ نفسَه فلا يُطلَق الإشعارُ أبداً.
-    was_within_quota = (
-        subscription.included_quota > 0
-        and subscription.consumed_quota <= subscription.included_quota
-    )
-    subscription.consumed_quota += 1
-    subscription.save(update_fields=["consumed_quota", "updated_at"])
-
-    # **وهنا يُولَد إشعارُ «تجاوزُ باقة»**: صندوقُ الإشعارات كان بلا مُنتِجٍ واحدٍ في
-    # الكود — دالّةُ الإنشاء لا يستدعيها إلا الاختبار، فالصندوقُ فارغٌ أبداً في
-    # الإنتاج. وهذه هي اللحظةُ الوحيدةُ التي يُعرَف فيها التجاوزُ يقيناً: عبورُ
-    # الحدّ، مرّةً واحدةً، لا في كلّ طلبٍ بعده.
-    if was_within_quota and subscription.consumed_quota > subscription.included_quota:
-        notify_quota_exceeded(subscription=subscription)
+    # 3. لا احتسابَ عند الاستقبال (D-4، قرار المالك): الزبونُ يُفوتَر بوحدات
+    # المستندات بعد اعتماد المُسلَّم وحدَها (`_apply_usage_event_to_quota`). كانت
+    # هنا زيادةُ `consumed_quota` بواحد، فيُفوتَر أمرُ القناة مرّتين: عند وصوله
+    # ثمّ بوحدات دفتره. ولا شيءَ عند الاستقبال يُنفِذ حدّاً بالعدّاد — الأهليّةُ
+    # أعلاه حالةُ الاشتراك لا استهلاكُه — فانتقل إشعارُ التجاوز مع الاستهلاك.
 
     # 4. إنشاء أمر العمل الجديد
     rec_at = timezone.now()
@@ -7832,13 +7821,23 @@ class TrackingDenied(Exception):
 #: نصُّ الرفض الموحَّد. مصدرٌ واحدٌ كي لا يتباعد نصّان فيصيرا فرقاً يُقرأ.
 TRACKING_DENIED_DETAIL = "رقمُ التتبّع أو رقمُ الهاتف غير صحيح."
 
-#: بعد هذا العدد من المحاولات الفاشلة على **الرمز نفسِه** يُغلق البابُ ساعةً.
+#: بعد هذا العدد من المحاولات الفاشلة على **الرمز نفسِه** يُغلق البابُ — ساعةً في
+#: القصد (`TRACKING_FAILURE_WINDOW_SECONDS`)، وأقصرَ في الإنتاج (انظر أدناه).
 #: الخانقُ على عنوان الشبكة لا يكفي وحدَه: مهاجمٌ يعرف رمزاً صحيحاً ويجرّب
 #: الهواتفَ من ألف عنوانٍ لا يبلغ حدَّ أيٍّ منها. والعدّادُ على الرمز يوقفه.
 #:
-#: **وهو مطبٌّ لا سور، ويُقال صراحةً:** يسكن الذاكرةَ المؤقّتة، و`CACHES` في
-#: الإنتاج تحمل `IGNORE_EXCEPTIONS: True` — فانقطاعُ Redis يُسقط العدّادَ
-#: بصمتٍ ولا يُسقط الطلب. الضمانُ الحقيقيُّ هو اشتراطُ العاملين نفسُه؛ هذا
+#: **وهو مطبٌّ لا سور، ويُقال صراحةً:** يسكن الذاكرةَ المؤقّتة، والإنتاجُ بلا
+#: `REDIS_URL` — فـ`CACHES` هناك `ResilientFileBasedCache` (`core/settings.py`):
+#: - `add` ثمّ `incr` في `_record_tracking_failure` **ليسا ذرّيَّين** بين عمّال
+#:   gunicorn: `incr` في هذه الخلفية قراءةٌ ثمّ كتابة، ففشلان متزامنان قد يُعدّان
+#:   واحداً (العدّادُ يَنقص لا يزيد).
+#: - وأخطاءُ نظام الملفات تُبتلَع: قراءةٌ متعثّرةٌ تُعَدّ «لا فشلَ»، وتعثّرُها داخل
+#:   `incr` يرفع `ValueError` فيُعيد فرعُ الالتقاط العدّادَ إلى ١.
+#: - و`incr` هنا يكتب بمهلة الكاش الافتراضيّة (`TIMEOUT` = 300) لا بـ
+#:   `TRACKING_FAILURE_WINDOW_SECONDS`: فالإغلاقُ فعلياً نحوُ خمس دقائق بعد آخر
+#:   فشلٍ محسوب، لا ساعة.
+#: ما يبقى بعده: الهاتفُ عاملاً ثانياً (الضمانُ الحقيقيّ)، وخانقُ النقطة على عنوان
+#: الشبكة (`platform_ops_track` — 30/ساعة لكلّ `REMOTE_ADDR`، وهو في الكاش نفسِه).
 #: يضيّق نافذةَ التخمين ولا يغلقها، فلا يُبنى عليه أكثرُ من ذلك.
 TRACKING_FAILURE_LIMIT = 10
 TRACKING_FAILURE_WINDOW_SECONDS = 3600
@@ -9772,8 +9771,20 @@ def _apply_usage_event_to_quota(subscription: ServiceSubscription, *, event: Ser
     )
     if delta == 0:
         return
+    # `<=` لا `<`: لحظةَ العبور قد يكون المستهلَكُ **مساوياً** للحدّ قبل الزيادة
+    # (٢ من ٢)، فشرطُ `<` يُفوّت العبورَ نفسَه فلا يُطلَق الإشعارُ أبداً.
+    was_within_quota = (
+        locked_sub.included_quota > 0
+        and locked_sub.consumed_quota <= locked_sub.included_quota
+    )
     locked_sub.consumed_quota = max(0, locked_sub.consumed_quota + delta)
     locked_sub.save(update_fields=["consumed_quota", "updated_at"])
+
+    # **هنا يُولَد إشعارُ «تجاوزُ باقة»** — المُنتِجُ الوحيدُ له، وقد انتقل من
+    # `receive_channel_work_order` حين صار الدفترُ وحدَه يستهلك (D-4). يُطلَق مرّةً
+    # عند عبور الحدّ لا في كلّ اعتمادٍ بعده؛ والعكسُ (`delta` سالب) لا يعبر صعوداً.
+    if was_within_quota and locked_sub.consumed_quota > locked_sub.included_quota:
+        notify_quota_exceeded(subscription=locked_sub)
 
 
 @transaction.atomic

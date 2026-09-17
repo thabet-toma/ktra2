@@ -33,9 +33,11 @@ from tenants.models import Currency, Tenant
 
 from platform_ops.models import (
     Engagement,
+    IntegrationKey,
     LineCountSource,
     PlatformActivityLog,
     PlatformEmployee,
+    PlatformNotification,
     ServiceDocumentType,
     ServiceSubscription,
     ServiceUnitCatalogEntry,
@@ -58,8 +60,10 @@ from platform_ops.services import (
     change_work_order_priority,
     create_service_unit_catalog_draft,
     create_work_order,
+    generate_integration_key,
     generate_usage_events_for_deliverable,
     link_work_order_document,
+    receive_channel_work_order,
     review_work_order_deliverable,
     reverse_usage_event,
     submit_work_order_deliverable,
@@ -1056,3 +1060,58 @@ class RecountRequiresManagerApprovalTest(UsageLedgerTestBase):
         self.assertEqual(response.status_code, 201, response.content)
         self.assertEqual(response.data["line_count_source"], LineCountSource.OBSERVED)
         self.assertEqual(response.data["recount_reason"], "العميل عدّل الفاتورة بعد الاعتماد.")
+
+
+class ChannelWorkOrderIsBilledOnlyByTheLedgerTest(UsageLedgerTestBase):
+    """D-4 (قرار المالك): الزبونُ يُفوتَر بوحدات المستندات بعد الاعتماد **وحدَها**.
+
+    كان `receive_channel_work_order` يزيد `consumed_quota` واحداً لحظةَ الاستقبال،
+    ثمّ يزيده `_apply_usage_event_to_quota` ثانيةً بوحدات الدفتر عند الاعتماد —
+    فأمرُ القناة الواحدُ يُفوتَر مرّتين.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.key, _raw = generate_integration_key(tenant=self.tenant, channel=IntegrationKey.Channel.WHATSAPP)
+
+    def _channel_work_order(self, external_ref):
+        wo, created = receive_channel_work_order(key=self.key, title="طلب قناة", external_ref=external_ref)
+        self.assertTrue(created)
+        return assign_work_order(work_order=wo, assignee=self.employee)
+
+    def _approve_two_line_invoice(self, wo):
+        invoice = self._make_multiline_invoice(line_count=2)
+        link = link_work_order_document(
+            work_order=wo, document_type=ServiceDocumentType.SALES_INVOICE,
+            document_id=invoice.pk, line_count=2,
+        )
+        deliverable = submit_work_order_deliverable(work_order=wo, document_link_ids=[link.pk])
+        _, events = approve_work_order_deliverable_with_usage(deliverable=deliverable, reviewed_by=self.admin)
+        return events
+
+    def test_intake_consumes_nothing_and_approval_consumes_exactly_the_ledger_units(self):
+        wo = self._channel_work_order("D4-REF-1")
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.consumed_quota, 0, "الاستقبالُ وحدَه لا يستهلك من الباقة")
+
+        events = self._approve_two_line_invoice(wo)
+        self.assertEqual(events[0].units, Decimal("2.00"))  # 1.00 + 0.50*2 — عددٌ صحيحٌ بلا تقريب
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.consumed_quota, 2)
+
+    def test_crossing_the_quota_through_the_ledger_notifies_once(self):
+        """إشعارُ «تجاوز الباقة» ينتقل مع الاستهلاك: مُنتِجُه الوحيدُ كان الاستقبال."""
+        self.sub.included_quota = 2
+        self.sub.save(update_fields=["included_quota"])
+
+        for i in range(3):
+            self._approve_two_line_invoice(self._channel_work_order(f"D4-NOTIF-{i}"))
+
+        self.sub.refresh_from_db()
+        self.assertEqual(self.sub.consumed_quota, 6)
+        quota_notes = PlatformNotification.objects.filter(
+            notification_type=PlatformNotification.NotificationType.QUOTA_EXCEEDED,
+            recipient=self.admin,
+        )
+        self.assertEqual(quota_notes.count(), 1, "الإشعارُ يُطلَق مرّةً عند العبور لا في كلّ اعتمادٍ بعده")
+        self.assertEqual(quota_notes.first().tenant_id, self.tenant.pk)

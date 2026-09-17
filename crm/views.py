@@ -383,7 +383,12 @@ class LeadTransferViewSet(mixins.ListModelMixin, mixins.RetrieveModelMixin, view
         employee = _current_employee(self.request)
         if employee is None:
             return qs.none()
-        return qs.filter(Q(from_employee=employee) | Q(to_employee=employee))
+        # `lead__assigned_to`: صاحبُ العميل **الآن** — وهو من تسمح له
+        # `can_decide_lead_transfer` بالبتّ. بدونه من انتقل إليه العميلُ بعد كتابة
+        # الطلب لا يراه، و`decide` (عبر `get_object`) يردّه ٤٠٤.
+        return qs.filter(
+            Q(from_employee=employee) | Q(to_employee=employee) | Q(lead__assigned_to=employee)
+        )
 
     def get_serializer_context(self):
         # المُسلسِلُ يحتاج الهويّتين ليجيب `can_decide`، وهما تُحسَبان هنا حيث

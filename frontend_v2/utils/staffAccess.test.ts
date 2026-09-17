@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import { capabilitiesPending, staffGate } from './staffAccess.ts';
+import { capabilitiesPending, firstCompanyGate, staffGate } from './staffAccess.ts';
 
 const NONE = { is_platform_employee: false, is_platform_admin: false };
 const EMPLOYEE = { is_platform_employee: true, is_platform_admin: false };
@@ -63,4 +63,19 @@ test('البابُ يُفتَح لموظّف المنصّة ولمديرها ك�
 test('المصادقةُ الجاريةُ انتظارٌ مهما كان الجواب', () => {
   assert.equal(staffGate({ authLoading: true, hasUser: false, pending: false, capabilities: NONE }), 'loading');
   assert.equal(staffGate({ authLoading: true, hasUser: true, pending: false, capabilities: EMPLOYEE }), 'loading');
+});
+
+// ═══ D-2: موظّفُ المنصّة بلا شركةٍ لا يرى «أنشئ شركتك الأولى» ═══════════════
+test('مستخدمٌ بلا شركةٍ لم يُحسَم جوابُه ينتظر — لا ومضةَ نموذجِ تأسيس', () => {
+  const pending = capabilitiesPending({ isSuperAdmin: false, fetching: false, answeredFor: null, userId: '7' });
+  assert.equal(firstCompanyGate({ pending, capabilities: NONE }), 'loading');
+});
+
+test('موظّفُ المنصّة ومديرُها بلا شركةٍ يُوجَّهان إلى مساحة /staff', () => {
+  assert.equal(firstCompanyGate({ pending: false, capabilities: EMPLOYEE }), 'staff');
+  assert.equal(firstCompanyGate({ pending: false, capabilities: ADMIN }), 'staff');
+});
+
+test('من ليس من فريق المنصّة يبقى على نموذج تأسيس شركته الأولى', () => {
+  assert.equal(firstCompanyGate({ pending: false, capabilities: NONE }), 'onboarding');
 });
