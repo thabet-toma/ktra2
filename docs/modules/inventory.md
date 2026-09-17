@@ -125,10 +125,10 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
 | **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
 | **POST** | `products/apply-replenishment/` | تثبيت الحدّين المقترَحين على منتجاتٍ محدَّدة — `ProductViewSet` (`apply_replenishment`). كتابةٌ حقيقية: تشترط `inventory.item.manage` وليست في `read_only_post_actions`، والمحدِّد في **جسم** الطلب |
-| **POST** | `products/add-brand/` | (task21) يضيف براندًا إلى منتجٍ قائم (`{family_id, brand, sku?}`) — `ProductViewSet` (`add_brand`)، عبر `services.add_brand_to_family`. الكتابة على جانب البراند عمداً — لا على `product-families/` القرائي |
+| **POST** | `products/add-brand/` | (task21) يضيف براندًا إلى منتجٍ قائم (`{family_id | product_id, brand, sku?}`) — `ProductViewSet` (`add_brand`)، عبر `services.add_brand_to_family`. `product_id` لمنتجٍ بلا أب (أغلبُ الكتالوج القديم) يتبنّى له أباً (`adopt_family_for_product`) **داخل معاملة الإضافة نفسِها** — فشلُ الإضافة لا يترك أباً. الكتابة على جانب البراند عمداً — لا على `product-families/` القرائي |
 | **POST** | `products/merge/` | (task24) ضمٌّ جماعي: `{target_product_id, product_ids: [...], brands?: {id: اسم}}` — `ProductViewSet` (`merge`)، عبر `services.merge_products`. المحدِّد في **جسم** الطلب (≥1500 معرّف)؛ يشترط `inventory.item.manage`؛ يطبّع اسم كل براندٍ مُضموم على اسم الهدف ويرفض اختلاف الوحدة أو التتبّع التسلسلي فقط — بلا حركة مخزون ولا قيد. `brands` يقبل مفتاح الهدف نفسه (دلتا ٢) — لا الإخوة المنقولين وحدهم |
 | **POST** | `products/merge-undo/` | (task24) `{merge_id}` — `ProductViewSet` (`merge_undo`)، عبر `services.undo_product_merge`. يعيد كل براندٍ لأبيه واسمه وبراندِه كما كانوا حرفياً؛ سجلٌّ متراجَعٌ عنه لا يُقبل ثانيةً |
-| GET | `product-families/check-name/?name=` | (task21) اقتراح «هذا موجود» — مطابقةٌ مطبَّعة لا حرفية (`services.find_by_normalized_name`)، اقتراحٌ لا منع. مجموعةٌ صريحة `brands__isnull=False` لا `get_queryset()` (تلك `select_related`، وهذه تستدعي `find_by_normalized_name` التي تستعمل `only` — جانغو يرفض الجمع)؛ الحجب نفسه: أبٌ يتيمٌ من ضمٍّ (task24) لا يُقترَح أبداً |
+| GET | `product-families/check-name/?name=` | (task21) اقتراح «هذا موجود» — مطابقةٌ مطبَّعة لا حرفية (`services.find_by_normalized_name`)، اقتراحٌ لا منع. الردّ `{id, family_id, product_id, name_ar, name_en}`: أبٌ يطابق ⇒ `family_id` (و`id` نفسُه)؛ وإلّا منتجٌ **بلا أب** يطابق ⇒ `product_id` و`id` فارغ — كان يبحث في الآباء وحدها فلا يرى 1760 منتجاً قديماً. مجموعةٌ صريحة `brands__isnull=False` لا `get_queryset()` (تلك `select_related`، وهذه تستدعي `find_by_normalized_name` التي تستعمل `only` — جانغو يرفض الجمع)؛ الحجب نفسه: أبٌ يتيمٌ من ضمٍّ (task24) لا يُقترَح أبداً |
 | POST | `products/generate_barcode/` · `products/generate_serials/` | (522) · (541) |
 | GET | `products/groups/` · `products/brands/` | (468) · (460) |
 | GET/**POST** | `products/group-profile/` · `products/group-ledger/` · `products/group-invoices/` | الكرت المجمّع — المحدِّد في **جسم** الطلب |
@@ -637,6 +637,12 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   (`ItemForm.tsx`) يحتاج أب المنتج المفتوح ليعرض «أضف براند إلى هذا المنتج» —
   `ProductSerializer` لا يحمل `family` أصلاً، فأُضيف الحقل لناتج `product_profile`
   بدل توسيع عقد المنتج الكامل (أثرٌ أضيق).
+- **أفعالُ البراند في الواجهة قاعدةٌ واحدة**: `frontend_v2/utils/brandActions.ts` — `brandTargetOf`
+  (الأبُ أوّلاً وإلّا صفُّ المنتج: هدفُ `add-brand`)، `createProductWithBrands` (منتجٌ جديدٌ بعدّة براندات:
+  الأوّلُ مع الإنشاء والباقي بالتتابع، وفشلُ براندٍ يُسمّى لا يُبتلَع)، و`attachBrandToExisting` (الإنشاءُ السريع
+  من مستندٍ باسمٍ موجود: براندٌ تحته ثمّ **الصفُّ الكامل** للمستدعي، لا ردُّ `add-brand` المختصر). واقتراحُ
+  «هذا موجود» في `frontend_v2/hooks/useProductNameOffer.ts` يتقاسمه كرتُ المنتج (`ItemForm.tsx`) ونافذةُ
+  الإنشاء السريع (`ItemQuickCreateModal.tsx`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -662,7 +668,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 | `inventory/tests/test_product_api.py` | توليد SKU خادمي، ترتيب/بحث/ترقيم صفحات، عزل الشركات |
 | `inventory/tests/test_product_lookup_endpoint.py` | ISSUE #88: `/api/inventory/products/` يبقى مقنَّعاً لقالب `accounting_firm`، `/api/lookup/products/` يتخطّى القناع ويحمل خدمات #78، تطابق حرفي مع عقد `?view=lookup` القديم لـ`general`، عزل الشركات، رفض الكتابة، ورحلةٌ كاملة عبر HTTP: اختيار «مسك دفاتر شهري» من المنتقي ← إنشاء الفاتورة ← ترحيلها على `4103` |
 | `inventory/tests/test_product_family.py` | task20: الإنشاء الذرّي (الأب + البراند الضمني) من مساري التسجيل معاً، عزل الشركات على `ProductFamily`، وقاعدة التعايش (مع/بلا أب) |
-| `inventory/tests/test_product_offer_and_brand.py` | task21: اقتراح «هذا موجود» مطبَّعاً لا حرفياً (وعدم منعه)، أوّل براندٍ يُسمّي الضمنيّ والثاني يُنشئ صفّاً تحت نفس الأب، بلا حركة مخزون ولا قيد محاسبي، وعزل الشركات على الاقتراح — والمطابقة نفسها من موضع تجسيد عرض المورّد |
+| `inventory/tests/test_product_offer_and_brand.py` | task21: اقتراح «هذا موجود» مطبَّعاً لا حرفياً (وعدم منعه)، أوّل براندٍ يُسمّي الضمنيّ والثاني يُنشئ صفّاً تحت نفس الأب، بلا حركة مخزون ولا قيد محاسبي، وعزل الشركات على الاقتراح — والمطابقة نفسها من موضع تجسيد عرض المورّد؛ (2026-09-17) المنتجُ بلا أب: يُقترَح بـ`product_id` ولا يُقترَح منتجُ شركةٍ أخرى (`ProductNameOfferForLegacyProductsTest`)، و`add-brand` بـ`product_id` يتبنّى أباً ويُسمّي أو يُضيف، وفشلُ الإضافة لا يترك أباً (`AddBrandToLegacyProductTest`) |
 | `inventory/tests/test_product_merge.py` | task24: ضمٌّ جماعي تحت أبٍ واحد بمحدِّدٍ في الجسم (≥1500 معرّف)، بلا حركة مخزون ولا قيد (عدّاً قبل/بعد)، منعٌ عند اختلاف الوحدة أو التتبّع التسلسلي فقط، تراجعٌ كامل بلا أثر (ولا يُقبل مرّتين)، وعزل الشركات على الهدف والمصدر معاً؛ `OrphanFamilyIsHiddenAfterMergeTest` — الأب اليتيم يبقى في القاعدة (تراجعٌ لاحقٌ سليم) ويغيب عن `product-families/` و`check-name/` معاً؛ (دلتا ٢) براندٌ مُمرَّرٌ للهدف وللأخ معاً يُطبَّق على كليهما (لا الأخ وحده)، والتراجع يعيد براند الهدف أيضاً ضمن `restored_product_ids` |
 | `frontend_v2/utils/productMerge.test.ts` | task24: معاينة الضمّ الخالصة (`buildMergePreview`) — الهدف الغائب، التوافق الكامل مع تطبيع الاسم، منعا الوحدة/التتبّع التسلسلي وسببهما، عدم اختراع موانع أخرى، وخليط قابلٍ/مرفوضٍ في معاينةٍ واحدة؛ (دلتا ٢) `findBrandCollisions` — فراغان يتصادمان، براندٌ مكرَّر حرفياً، لا تصادم عند الاختلاف، القصّ يطابق ما يفعله الخادم، وتصادمٌ واحد وسط أعضاءَ فريدين |
 | `inventory/tests/test_supplier_products.py` | أرقام الموردين: المنتج من مورّدين، ورقمان لمورّد، ومنع الرقم الواحد لمنتجين، والبحث بالرقم بلا تكرار صفّ |

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from "react";
 import { Package, X, Save } from "lucide-react";
 import { inventoryApi } from "../../services/inventoryApi";
 import { blankSimpleFields, simplePayload, validateSimpleFields } from "../../utils/itemSimpleFields";
+import { useProductNameOffer } from "../../hooks/useProductNameOffer";
+import { attachBrandToExisting } from "../../utils/brandActions";
 
 export type ItemQuickCreateModalProps = {
   isOpen: boolean;
@@ -18,12 +20,15 @@ export type ItemQuickCreateModalProps = {
 export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOpen, onClose, onSaved, initialName, categoryId, initialIsService = false }) => {
   const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
+  const [brand, setBrand] = useState("");
   const [uomId, setUomId] = useState<number | null>(null);
   const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
   const [salePrice, setSalePrice] = useState("");
   const [isService, setIsService] = useState(initialIsService);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const nameOfferApi = useProductNameOffer(nameAr.trim() || nameEn.trim(), true);
+  const nameOffer = nameOfferApi.offer;
 
   // T-ITEMS M1: وحدة القياس صارت اختياراً من الجدول. كانت نصّاً حرّاً يُرسَل
   // باسم `uom_primary` — وهو ليس في عقد الخادم، فيرميه DRF بصمت: يكتب
@@ -49,12 +54,35 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
       // نفس تعريف «الوضع البسيط» الذي يستعمله الكرت الكامل — الحمولة تُبنى
       // مرّةً واحدة في `utils/itemSimpleFields` فلا تتباعد الشاشتان.
       const payload = simplePayload(fields);
+      payload.brand = brand.trim();
       // التصنيف يأتي من المستدعي (عقدة الشجرة) ويسبق قيمة النموذج الفارغة.
       if (categoryId != null && categoryId !== "") payload.category = Number(categoryId);
       const created = await inventoryApi.createProduct(payload);
       onSaved(created);
     } catch (e: any) {
       setError(e.message || "حدث خطأ أثناء الحفظ");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleAttachToExisting = async () => {
+    if (!nameOffer || !brand.trim() || saving) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const product = await attachBrandToExisting(
+        {
+          addBrand: (body) => inventoryApi.addBrand(body) as unknown as Promise<Record<string, unknown> & { id: number }>,
+          getProduct: inventoryApi.getProduct,
+        },
+        nameOffer,
+        brand,
+      );
+      nameOfferApi.clear();
+      onSaved(product);
+    } catch (reason: unknown) {
+      setError(reason instanceof Error ? reason.message : "تعذّرت إضافة البراند إلى المنتج القائم");
     } finally {
       setSaving(false);
     }
@@ -86,6 +114,46 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
               onChange={(e) => setNameAr(e.target.value)}
             />
           </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1 text-[var(--color-text)]">البراند</label>
+            <input
+              type="text"
+              className="ktra-input w-full"
+              value={brand}
+              placeholder="مثال: ميشلان"
+              onChange={(e) => setBrand(e.target.value)}
+            />
+          </div>
+
+          {nameOffer && (
+            <div className="space-y-2 rounded border border-[var(--ktra-warn-bd)] bg-[var(--ktra-warn-bg)] p-3 text-sm text-[var(--ktra-ink)]">
+              <div>
+                يوجد منتجٌ بهذا الاسم: «{nameOffer.name_ar || nameOffer.name_en}»
+              </div>
+              {!brand.trim() && (
+                <div className="text-xs text-[var(--ktra-warn-fg)]">اكتب اسم البراند أولاً لتضيفه تحت المنتج القائم.</div>
+              )}
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="ktra-btn ktra-btn-primary"
+                  disabled={saving || !brand.trim()}
+                  onClick={() => void handleAttachToExisting()}
+                >
+                  {brand.trim() ? `أضف «${brand.trim()}» تحته` : "أضف البراند تحته"}
+                </button>
+                <button
+                  type="button"
+                  className="ktra-btn"
+                  disabled={saving}
+                  onClick={nameOfferApi.dismiss}
+                >
+                  تجاهل
+                </button>
+              </div>
+            </div>
+          )}
 
           <div>
             <label className="block text-sm font-medium mb-1 text-[var(--color-text)]">الاسم الإنجليزي (اختياري)</label>

@@ -7,7 +7,8 @@ import { useNavigate } from "react-router-dom";
 import { inventoryApi } from "../../services/inventoryApi";
 import type { SqlProduct } from "../../types/inventory";
 import { type DenseColumn } from "../kit/KitDenseTable";
-import { GroupedItemsTable, type TreeCategory } from "./GroupedItemsTable";
+import { GroupedItemsTable, type AddBrandRequest, type TreeCategory } from "./GroupedItemsTable";
+import { AddBrandModal } from "./AddBrandModal";
 import { MergeProductsModal } from "./MergeProductsModal";
 import {
   Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink,
@@ -238,6 +239,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [undoingMerge, setUndoingMerge] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
+  const [addBrandRequest, setAddBrandRequest] = useState<AddBrandRequest | null>(null);
 
   const orderingParam = sortKey
     ? `${sortDir === "desc" ? "-" : ""}${ORDER_FIELD[sortKey] ?? sortKey}`
@@ -729,14 +731,14 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         return <span style={{ color: "var(--ktra-ok,#267346)" }}>متوفر</span>;
       }
     },
-    { key: "edit", header: "", width: "70px", align: "center",
+    { key: "edit", header: "", width: "170px", align: "center",
       render: (p) => (
         <div style={{ display: "flex", gap: "6px", justifyContent: "center" }}>
           <button className="ktra-iconbtn" title="تعديل"
             onClick={(e) => { e.stopPropagation(); setEditId(p.id); setDuplicateId(null); setView("form"); }}>
             <Edit2 className="h-3.5 w-3.5" />
           </button>
-          <button className="ktra-iconbtn text-indigo-600 hover:bg-indigo-50" title="إضافة براند آخر (تكرار)"
+          <button className="ktra-iconbtn text-indigo-600 hover:bg-indigo-50" title="نسخ إلى منتجٍ جديد"
             onClick={(e) => { e.stopPropagation(); setDuplicateId(p.id); setEditId(null); setView("form"); }}>
             <Copy className="h-3.5 w-3.5" />
           </button>
@@ -764,7 +766,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         duplicateId={duplicateId}
         products={products}
         onSaved={() => { reload(); setView("list"); setEditId(null); setDuplicateId(null); }}
-        onCancel={() => { setView("list"); setEditId(null); setDuplicateId(null); }}
+        // «+ براند» من شريط الكرت يغيّر القائمة دون إغلاقه، فالعودةُ تُعيد التحميل.
+        onCancel={() => { reload(); setView("list"); setEditId(null); setDuplicateId(null); }}
       />
     );
   }
@@ -906,8 +909,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <button className="ktra-toolbtn" onClick={() => reload()} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="ktra-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="إضافة منتج (Ctrl+Ins)">
-          <Plus className="h-4 w-4" /> إضافة
+        <button className="ktra-toolbtn" onClick={() => { setEditId(null); setDuplicateId(null); setView("form"); }} title="منتج جديد (Ctrl+Ins)">
+          <Plus className="h-4 w-4" /> منتج جديد
         </button>
       </div>
 
@@ -1009,8 +1012,30 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           // بعد #28: صار حكماً على المنتج فيُعيد **كل** براندات المنتج
           // المطابق، فصفّ المنتج مكتملٌ ولا يدّعي مجموعاً ناقصاً.
           brandFilterActive={Boolean(search)}
+          onAddBrand={setAddBrandRequest}
         />
       )}
+
+      <AddBrandModal
+        isOpen={addBrandRequest != null}
+        productName={addBrandRequest?.productName || ""}
+        existingBrands={addBrandRequest?.existingBrands || []}
+        onClose={() => setAddBrandRequest(null)}
+        onAdd={async (brand) => {
+          if (!addBrandRequest) throw new Error("لم يُعرَف المنتج.");
+          return inventoryApi.addBrand({ ...addBrandRequest.target, brand });
+        }}
+        onAdded={(result) => {
+          addBrandRequest?.onAdded(result);
+          toast(
+            result.created
+              ? `أُضيف البراند «${result.brand}» إلى المنتج.`
+              : `سُمّي البراند الحالي «${result.brand}».`,
+            "success",
+          );
+          reload();
+        }}
+      />
 
       <MergeProductsModal
         isOpen={mergeModalOpen}

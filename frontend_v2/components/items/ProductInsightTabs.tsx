@@ -8,7 +8,12 @@
  */
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { apiGetObject } from "../../services/restApi";
-import { inventoryApi, type ProductGroupSelector, type ProductSerialRow } from "../../services/inventoryApi";
+import {
+  inventoryApi,
+  type AddBrandResult,
+  type ProductGroupSelector,
+  type ProductSerialRow,
+} from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import type { KitTab } from "../kit";
 import { LedgerTable, DocRefCell, type LedgerColumn } from "../shared/LedgerTable";
@@ -18,6 +23,7 @@ import { formatDateLocalized } from "../../utils/formatDate";
 import { relatedInvoiceTypeLabel, stockLedgerMovementTypeLabel } from "../../utils/documentTypeLabels";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
+import { AddBrandModal } from "./AddBrandModal";
 
 export interface ProductProfileData {
   id: number;
@@ -121,8 +127,7 @@ const SALE_SOURCE_LABEL: Record<"product" | "last_invoice", string> = {
 export const ProductOverview: React.FC<{
   profile: ProductProfileData | null;
   loading?: boolean;
-  addBrandSlot?: React.ReactNode;
-}> = ({ profile, loading, addBrandSlot }) => {
+}> = ({ profile, loading }) => {
   if (!profile) {
     return (
       <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
@@ -201,7 +206,7 @@ export const ProductOverview: React.FC<{
       {/* #23: «كرت المنتج يعرض المجمَّع والتفصيل معاً» — حين يتبع هذا البراند
           منتجاً له إخوة، يظهر مجمّعهم وتفصيلهم هنا بلا مغادرة الكرت. */}
       {profile.family_id != null &&
-        <FamilyBrandsSection familyId={profile.family_id} addBrandSlot={addBrandSlot} />}
+        <FamilyBrandsSection familyId={profile.family_id} />}
     </div>
   );
 };
@@ -214,21 +219,14 @@ export const ProductOverview: React.FC<{
  */
 const FamilyBrandsSection: React.FC<{
   familyId: number;
-  /** حقل «أضف براند» جاهزاً من المستدعي. يُمرَّر عنصراً لا دالّة كي لا تستورد
-   *  هذه الوحدة من `ItemForm` (تلك تستورد منها أصلاً — استيرادٌ دائري). */
-  addBrandSlot?: React.ReactNode;
-}> = ({ familyId, addBrandSlot }) => {
+}> = ({ familyId }) => {
   const { profile: group, loading } = useGroupInsights({ family: familyId });
-  // القسم كان يصمت لمنتجٍ ببراندٍ واحد. ومع مقبس الإضافة يجب أن يظهر: هذا
-  // بالضبط المنتج الذي يريد صاحبه أن يضيف له ثانياً، وإخفاء القسم يُخفي
-  // الطريق الوحيد إليه.
-  if (!loading && (!group || group.member_count <= 1) && !addBrandSlot) return null;
+  if (!loading && (!group || group.member_count <= 1)) return null;
   return (
     <section className="mb-3">
       <div className="text-xs font-bold text-[var(--ktra-ink-soft)] mb-1.5 pr-0.5">
         براندات هذا المنتج
       </div>
-      {addBrandSlot && <div className="mb-2">{addBrandSlot}</div>}
       {group && (
         <div className="grid grid-cols-2 md:grid-cols-4 gap-2 mb-2">
           <Kpi label="إجمالي الرصيد (كل البراندات)" value={formatQuantity(group.quantity_on_hand, "—")} />
@@ -241,6 +239,101 @@ const FamilyBrandsSection: React.FC<{
         rows={group?.members || []}
         loading={loading}
         emptyText="لا توجد براندات أخرى بعد."
+      />
+    </section>
+  );
+};
+
+/**
+ * شريط البراندات في أعلى الكرت: نفس مصدر `FamilyBrandsSection`، لكن بسطح
+ * تنقّلٍ مضغوط يظهر أيضاً للمنتج القديم بلا أب. إضافة أول براند لذلك المنتج
+ * تعيد `family_id` من الخادم، فيتحوّل الشريط فوراً إلى قراءة العائلة كاملةً.
+ */
+export const ProductBrandStrip: React.FC<{
+  productId: number;
+  familyId?: number | null;
+  currentBrand?: string | null;
+  currentName: string;
+  currentQuantity?: string | number | null;
+  onSelect: (productId: number) => void;
+  onAddBrand: (brand: string) => Promise<AddBrandResult>;
+}> = ({
+  productId, familyId, currentBrand, currentName, currentQuantity, onSelect, onAddBrand,
+}) => {
+  const [modalOpen, setModalOpen] = useState(false);
+  const [resolvedFamilyId, setResolvedFamilyId] = useState<number | null>(familyId ?? null);
+  useEffect(() => { setResolvedFamilyId(familyId ?? null); }, [familyId, productId]);
+
+  // ملفُّ المجموعة وحدَه — لا `useGroupInsights`: ذاك يجلب دفترَ الحركة وفواتيرَ
+  // المجموعة أيضاً، أي ثلاثةَ طلباتٍ مع كلّ فتح كرتٍ لرسم شارات. والردُّ المتأخّرُ
+  // لبراندٍ غادره المستخدم لا يُكتب.
+  const [profile, setProfile] = useState<GroupProfileData | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setError(false);
+    inventoryApi.getProductGroupProfile(resolvedFamilyId != null ? { family: resolvedFamilyId } : { ids: [productId] })
+      .then((data) => { if (active) setProfile(data as GroupProfileData); })
+      .catch(() => { if (active) { setProfile(null); setError(true); } })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [resolvedFamilyId, productId, reloadKey]);
+  const members: GroupMember[] = profile?.members?.length ? profile.members : [{
+    id: productId,
+    sku: "",
+    brand: currentBrand || "",
+    name: currentName,
+    quantity_on_hand: String(currentQuantity ?? ""),
+    avg_cost: "",
+    inventory_valuation: "",
+    sold_qty: "",
+  }];
+  const existingBrands = members.map((member) => member.brand || "").filter(Boolean);
+
+  return (
+    <section className="border-y border-[var(--ktra-border-soft)] bg-[var(--ktra-surface-2)] px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-xs font-bold text-[var(--ktra-ink-soft)]">براندات هذا المنتج</span>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5">
+          {members.map((member) => {
+            const current = member.id === productId;
+            return (
+              <button
+                key={member.id}
+                type="button"
+                aria-current={current ? "true" : undefined}
+                className={`rounded-full border px-2.5 py-1 text-xs font-medium ${
+                  current
+                    ? "border-[var(--ktra-accent)] bg-[var(--ktra-accent-bg)] text-[var(--ktra-ink)]"
+                    : "border-[var(--ktra-border)] bg-[var(--ktra-panel)] text-[var(--ktra-ink)] hover:border-[var(--ktra-accent)]"
+                }`}
+                onClick={() => { if (!current) onSelect(member.id); }}
+                title={current ? "البراند المفتوح حالياً" : "فتح كرت هذا البراند"}
+              >
+                {member.brand || "بلا براند"} · {formatQuantity(member.quantity_on_hand, "—")}
+              </button>
+            );
+          })}
+          {loading && <span className="text-xs text-[var(--ktra-ink-soft)]">جارٍ التحديث…</span>}
+          {error && <span role="alert" className="text-xs text-[var(--ktra-danger)]">تعذّر تحميل بقية البراندات.</span>}
+        </div>
+        <button type="button" className="ktra-toolbtn shrink-0" onClick={() => setModalOpen(true)}>
+          + براند
+        </button>
+      </div>
+      <AddBrandModal
+        isOpen={modalOpen}
+        productName={profile?.name || currentName}
+        existingBrands={existingBrands}
+        onClose={() => setModalOpen(false)}
+        onAdd={onAddBrand}
+        onAdded={(result) => {
+          if (result.family_id !== resolvedFamilyId) setResolvedFamilyId(result.family_id);
+          else setReloadKey((key) => key + 1);
+        }}
       />
     </section>
   );
@@ -338,9 +431,9 @@ const serialColumns: LedgerColumn<ProductSerialRow>[] = [
  */
 export const useProductInsights = (
   productId: number | null,
-  options: { isSerialized?: boolean; addBrandSlot?: React.ReactNode } = {},
+  options: { isSerialized?: boolean } = {},
 ) => {
-  const { isSerialized = false, addBrandSlot } = options;
+  const { isSerialized = false } = options;
   const tenantId = useMemo(() => resolveTenantId(), []);
   const [profile, setProfile] = useState<ProductProfileData | null>(null);
   const [loading, setLoading] = useState(false);
@@ -461,7 +554,7 @@ export const useProductInsights = (
         ? <div className="p-4 text-[var(--ktra-ink-soft)]">{emptyHint}</div>
         : error
           ? <div role="alert" className="p-3 text-sm text-[var(--ktra-danger,#c00)]">تعذّر تحميل النظرة العامة: {error}</div>
-          : <ProductOverview profile={profile} loading={loading} addBrandSlot={addBrandSlot} />,
+          : <ProductOverview profile={profile} loading={loading} />,
     },
     {
       key: "invoices",

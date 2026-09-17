@@ -137,11 +137,23 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
             ProductFamily.objects.filter(tenant=tenant, brands__isnull=False).distinct(),
             name,
         )
-        if not match:
+        if match:
+            return Response({'match': {
+                'id': match.id, 'family_id': match.id, 'product_id': None,
+                'name_ar': match.name_ar, 'name_en': match.name_en,
+            }})
+        # المنتجُ القديمُ بلا أب (كلُّ ما سُجّل قبل #20 — أغلبُ الكتالوج) لا صفَّ له
+        # في `ProductFamily`، فكان لا يُقترَح أبداً ويُسجَّل اسمُه ثانيةً منتجاً منفصلاً.
+        # يُعرَّف بصفّه، و`add-brand` يقبل `product_id` فيتبنّى له أباً.
+        legacy = find_by_normalized_name(
+            Product.objects.filter(tenant=tenant, family__isnull=True), name,
+        )
+        if not legacy:
             return Response({'match': None})
-        return Response({
-            'match': {'id': match.id, 'name_ar': match.name_ar, 'name_en': match.name_en},
-        })
+        return Response({'match': {
+            'id': None, 'family_id': None, 'product_id': legacy.id,
+            'name_ar': legacy.name_ar, 'name_en': legacy.name_en,
+        }})
 
 
 class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
@@ -808,19 +820,33 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         صريح يُسمّي البراند الضمنيّ الوحيد بدل أن يُنشئ صفّاً جديداً — انظر
         `services.add_brand_to_family`. الكتابة تبقى على جانب البراند/المنتج
         عمداً — لا على `ProductFamilyViewSet` القرائي حصراً."""
-        from .services import add_brand_to_family
+        from . import services as inventory_services
         tenant = self._get_tenant()
         if not tenant:
             return Response({'detail': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
         family_id = request.data.get('family_id')
+        # المنتجُ القديمُ بلا أب (كلُّ ما سُجّل قبل #20 — أغلبُ الكتالوج) لا
+        # `family_id` له يُرسَل؛ فبابُ «أضف براند» كان مغلقاً عليه كلّياً. يُعرَّف
+        # بصفّه، ويُتبنّى له أبٌ في معاملة الإضافة نفسِها.
+        product_id = request.data.get('product_id')
         brand_name = (request.data.get('brand') or '').strip()
-        if not family_id:
-            raise serializers.ValidationError({'family_id': 'مطلوب.'})
+        if not family_id and not product_id:
+            raise serializers.ValidationError({'family_id': 'مطلوب — أو product_id لمنتجٍ قائم.'})
         if not brand_name:
             raise serializers.ValidationError({'brand': 'اسم البراند مطلوب.'})
-        family = ProductFamily.objects.filter(tenant=tenant, id=family_id).first()
-        if not family:
-            return Response({'detail': 'المنتج غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        anchor = None
+        if family_id:
+            family = ProductFamily.objects.filter(tenant=tenant, id=family_id).first()
+            if not family:
+                return Response({'detail': 'المنتج غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+        else:
+            try:
+                anchor = Product.objects.filter(tenant=tenant, id=int(product_id)).first()
+            except (TypeError, ValueError):
+                anchor = None
+            if not anchor:
+                return Response({'detail': 'المنتج غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+            family = ProductFamily.objects.filter(tenant=tenant, id=anchor.family_id).first()
         sku = (request.data.get('sku') or '').strip() or None
         if sku and Product.objects.filter(tenant=tenant, sku=sku).exists():
             raise serializers.ValidationError({'sku': 'رقم المنتج مستخدم مسبقاً لهذه الشركة.'})
@@ -828,14 +854,23 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         # فبلا هذا الحارس صار هذا الباب طريقاً للالتفاف على حدّ الخطة. وتسميةُ
         # البراند الضمنيّ لا تُنشئ صفّاً فلا تُحاسَب: الشرط هو وجود براندٍ مُسمّىً
         # سلفاً تحت الأب، وهو نفس شرط الإنشاء في `add_brand_to_family`.
-        existing = list(Product.objects.filter(family=family).values_list('brand', flat=True))
+        # المنتجُ بلا أب براندُه الوحيدُ هو صفُّه نفسُه.
+        existing = (
+            list(Product.objects.filter(family=family).values_list('brand', flat=True))
+            if family is not None else [anchor.brand]
+        )
         will_create = not (len(existing) == 1 and not (existing[0] or '').strip())
         if will_create:
             enforce_limits(tenant, 'inventory.products')
         try:
-            product, created = add_brand_to_family(
-                family=family, brand_name=brand_name, tenant=tenant, sku=sku,
-            )
+            # التبنّي والإضافة معاً أو لا شيء: إضافةٌ مرفوضةٌ لا تترك أباً يتيماً.
+            with transaction.atomic():
+                if family is None:
+                    inventory_services.adopt_family_for_product(anchor, tenant=tenant)
+                    family = ProductFamily.objects.get(pk=anchor.family_id)
+                product, created = inventory_services.add_brand_to_family(
+                    family=family, brand_name=brand_name, tenant=tenant, sku=sku,
+                )
         except DjangoValidationError as exc:
             raise serializers.ValidationError(
                 {'brand': exc.messages if hasattr(exc, 'messages') else [str(exc)]}

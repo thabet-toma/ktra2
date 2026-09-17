@@ -8,7 +8,16 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
-import type { AddBrandResult, ProductNameMatch } from "../../services/inventoryApi";
+import type { AddBrandResult } from "../../services/inventoryApi";
+import {
+  addBrandChip,
+  brandedNamesPreview,
+  brandTargetOf,
+  createProductWithBrands,
+  createWithBrandsMessage,
+} from "../../utils/brandActions";
+import type { AddBrandTarget } from "../../utils/brandActions";
+import { useProductNameOffer } from "../../hooks/useProductNameOffer";
 import type { SqlProduct } from "../../types/inventory";
 import { useToast } from "../../contexts/ToastContext";
 import {
@@ -25,9 +34,9 @@ import { AccountTreeField } from "../accounting/AccountTreePicker";
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { usePasteZone } from "../../utils/clipboardImage";
-import { useProductInsights } from "./ProductInsightTabs";
+import { ProductBrandStrip, useProductInsights } from "./ProductInsightTabs";
 import { SupplierCodesTab } from "./SupplierCodesTab";
-import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatNumber, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
@@ -121,6 +130,10 @@ const extractDatasheets = (p: Record<string, unknown>): DatasheetRef[] =>
 type FormState = {
   sku: string; name_ar: string; name_en: string;
   brand: string;
+  /** برانداتُ **منتجٍ جديد** قبل حفظه (شاراتٌ): الأوّلُ يُنشأ مع المنتج والباقي تحت
+   *  أبه — `utils/brandActions.createProductWithBrands`. فارغٌ على المحفوظ دائماً:
+   *  براندُ صفٍّ محفوظ هو `brand`، وإضافةُ شقيقٍ له فعلُ «+ براند». */
+  new_brands: string[];
   /** T-REORDER: «الصنف» — موديلات الصنف الواحد بدائلُ بعضها في البيع والطلب. */
   variant_group: string;
   /** T-SERIAL: باركود المنتج (EAN-13) — فريد داخل الشركة، يحرسه الخادم. */
@@ -158,6 +171,7 @@ type FormState = {
 const blankForm = (): FormState => ({
   sku: "", name_ar: "", name_en: "",
   brand: "",
+  new_brands: [],
   variant_group: "",
   barcode: "", is_serialized: false,
   warranty_months: "", supplier_warranty_months: "",
@@ -263,40 +277,13 @@ export const ItemForm: React.FC<Props> = ({
      يبقى المحوُ عند: حفظٍ ناجح · «تراجع» · وبدءِ سجلٍّ جديدٍ صراحةً (فمفتاح
      المسودّة نفسُه، وتركُها يعني استعادتَها فوق نموذجٍ بدأه المستخدم فارغاً). */
   const draftRestoredRef = useRef(false);
-  // الجزء القرائي من الكرت (نظرة عامة/فواتير/حركة/أرقام تسلسلية) — يتبع المنتج المعروض.
-  // #21: «أضف براند» تسكن قسم «براندات هذا المنتج» — حيث يراها المستخدم وهو
-  // ينظر إلى برانداته. تُمرَّر عنصراً جاهزاً لا دالّة: `ProductInsightTabs`
-  // لا يجوز أن تستورد من هنا (هذا الملف يستورد منها، فيصير الاستيراد دائرياً).
-  const addBrandSlot = currentId == null ? undefined : (
-    <AddBrandField
-      buttonLabel="أضف براند"
-      placeholder="اسم البراند الجديد (مثال: دانتير)"
-      onSubmit={async (brandName) => {
-        const familyId = insightsRef.current?.profile?.family_id;
-        if (familyId == null) return;
-        try {
-          await submitAddBrand(familyId, brandName);
-          insightsRef.current?.reload();
-        } catch (e: unknown) {
-          toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
-        }
-      }}
-    />
-  );
   const insights = useProductInsights(currentId, {
     isSerialized: form.is_serialized,
-    addBrandSlot,
   });
-  const insightsRef = useRef(insights);
-  insightsRef.current = insights;
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // #21: اقتراح «هذا موجود — أضف براند». يُظهَر فقط أثناء تسجيل منتجٍ **جديد**
-  // (currentId فارغ) — فتح منتجٍ محفوظ بالفعل سيطابق نفسه دائماً، وهو تنبيهٌ
-  // بلا فائدة. اقتراحٌ لا منع: لا يمسّ حفظ المنتج الجاري تسجيله بأي شكل.
-  const [nameOffer, setNameOffer] = useState<ProductNameMatch | null>(null);
-  const [offerDismissed, setOfferDismissed] = useState(false);
+  const [newBrandDraft, setNewBrandDraft] = useState("");
   const [lastKey, setLastKey] = useState("—");
   const [dsUploading, setDsUploading] = useState(false);
   const datasheetRef = useRef<HTMLDivElement>(null);
@@ -341,24 +328,10 @@ export const ItemForm: React.FC<Props> = ({
     return names.length ? names.join(" ‹ ") : (form.category_name || null);
   }, [form.category, form.category_name, categories]);
 
-  // #21: «هذا موجود — أضف براند؟» — مُؤجَّلٌ (نمط debounce القائم في
-  // ItemsManagement.tsx: setTimeout+clearTimeout بلا مكتبة/hook مخصّص)، فلا
-  // يطلب الخادم مع كل ضغطة مفتاح. يتوقّف تماماً حين تعديل منتجٍ محفوظ — راجع
-  // تعليق `nameOffer` أعلاه.
-  useEffect(() => {
-    if (currentId != null) { setNameOffer(null); return; }
-    const name = form.name_ar.trim() || form.name_en.trim();
-    if (!name) { setNameOffer(null); return; }
-    const t = setTimeout(() => {
-      inventoryApi.checkProductName(name)
-        .then((match) => setNameOffer(match))
-        .catch(() => setNameOffer(null));
-    }, 400);
-    return () => clearTimeout(t);
-  }, [form.name_ar, form.name_en, currentId]);
-
-  // اسمٌ جديد يُلغي رفض الاقتراح السابق — تجاهلٌ لاسمٍ بعينه لا لكل الاقتراحات.
-  useEffect(() => { setOfferDismissed(false); }, [form.name_ar, form.name_en]);
+  // #21: «هذا موجود — أضف براند؟» — القاعدةُ في `hooks/useProductNameOffer` يتقاسمها
+  // هذا الكرت والإنشاءُ السريع من المستندات. منتجٌ **جديد** وحدَه: المحفوظُ يطابق نفسَه.
+  const nameOfferApi = useProductNameOffer(form.name_ar.trim() || form.name_en.trim(), currentId == null);
+  const nameOffer = nameOfferApi.offer;
 
   /**
    * يُستدعى من موضعين: زرّ «أضف براند» داخل كرت منتجٍ محفوظ (يُلحق ببراند
@@ -366,8 +339,8 @@ export const ItemForm: React.FC<Props> = ({
    * يميّز صراحةً بين تسمية البراند الضمنيّ وإنشاء صفٍّ جديد — لا يُقال «أُضيف
    * براند» حين كان الفعل الحقيقي تسميةً لصفٍّ قائم.
    */
-  const submitAddBrand = async (familyId: number, brandName: string): Promise<AddBrandResult> => {
-    const res = await inventoryApi.addBrand({ family_id: familyId, brand: brandName });
+  const submitAddBrand = async (target: AddBrandTarget, brandName: string): Promise<AddBrandResult> => {
+    const res = await inventoryApi.addBrand({ ...target, brand: brandName });
     toast(
       res.created
         ? `أُضيف براند جديد «${res.brand}» (منتج رقم ${res.sku}) — برصيدٍ وتكلفةٍ مستقلَّين.`
@@ -446,6 +419,17 @@ export const ItemForm: React.FC<Props> = ({
     setForm((f) => ({ ...f, [k]: v }));
   };
 
+  const appendNewBrand = () => {
+    const next = addBrandChip(form.new_brands, newBrandDraft);
+    if (next.length !== form.new_brands.length) patch("new_brands", next);
+    setNewBrandDraft("");
+  };
+
+  const newBrandPreview = useMemo(
+    () => brandedNamesPreview(form.name_ar || form.name_en, form.new_brands),
+    [form.name_ar, form.name_en, form.new_brands],
+  );
+
   /**
    * ISSUE #121: إعادة الكرت لحالة «منتج جديد» — نقطة توحيد لخمسة مواضع كانت
    * تكرّر `setForm(blankForm()); setCurrentId(null);` (تحميل أوّلي بلا معرّف،
@@ -467,6 +451,7 @@ export const ItemForm: React.FC<Props> = ({
       return;
     }
     setForm(blankForm());
+    setNewBrandDraft("");
     setCurrentId(null);
   }, []);
 
@@ -512,6 +497,7 @@ export const ItemForm: React.FC<Props> = ({
   };
 
   const applyProduct = useCallback((p: Record<string, unknown>, isDuplicate = false) => {
+    setNewBrandDraft("");
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
@@ -527,6 +513,7 @@ export const ItemForm: React.FC<Props> = ({
       name_ar: String(p.name_ar ?? ""),
       name_en: isDuplicate ? "" : String(p.name_en ?? ""),
       brand: isDuplicate ? "" : String(p.brand ?? ""),
+      new_brands: [],
       variant_group: String(p.variant_group ?? ""),
       description: String(p.description ?? ""),
       storage_location: String(p.storage_location ?? ""),
@@ -558,7 +545,7 @@ export const ItemForm: React.FC<Props> = ({
       datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
     setCurrentId(isDuplicate ? null : Number(p.id));
-    setErr(null); setMsg(isDuplicate ? "أنت الآن تقوم بإضافة منتج جديد كنسخة من منتج آخر. قم بتغيير البراند أو الاسم." : null);
+    setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» بدل النسخ." : null);
   }, []);
 
   useEffect(() => {
@@ -634,15 +621,34 @@ export const ItemForm: React.FC<Props> = ({
       };
       if (form.sku.trim()) payload.sku = form.sku.trim();
       let savedId: number;
+      let partialBrands = false;
       if (currentId) {
         await inventoryApi.updateProduct(currentId, payload);
         savedId = currentId;
         setMsg("تم الحفظ.");
       } else {
-        const created = await inventoryApi.createProduct(payload) as Record<string, unknown>;
+        // شاراتُ البراندات إن كُتبت، وإلّا حقلُ البراند الواحد. الأوّلُ مع الإنشاء والباقي
+        // تحت أبه؛ فشلُ براندٍ لا يُبتلَع — يُسمّى في الرسالة ويُعاد من شريط البراندات.
+        // براندٌ مكتوبٌ في الحقل لم يُضغط له Enter بعد يُحسب — كان يُسقَط صامتاً عند الحفظ.
+        const chips = addBrandChip(form.new_brands, newBrandDraft);
+        const brands = chips.length > 0
+          ? chips
+          : (form.brand.trim() ? [form.brand.trim()] : []);
+        const { product: created, steps } = await createProductWithBrands(
+          {
+            createProduct: (body) => inventoryApi.createProduct(body) as Promise<Record<string, unknown> & { id: number }>,
+            addBrand: (body) => inventoryApi.addBrand(body) as unknown as Promise<Record<string, unknown> & { id: number }>,
+          },
+          payload,
+          brands,
+        );
         savedId = Number(created.id);
         setCurrentId(savedId);
-        setMsg(`تم إنشاء المنتج ${created.sku}.`);
+        setForm((f) => ({ ...f, brand: brands[0] ?? "", new_brands: [] }));
+        setNewBrandDraft("");
+        const outcome = createWithBrandsMessage(String(created.sku ?? ""), brands.length, steps, (n) => formatNumber(n));
+        if (outcome.ok) setMsg(outcome.text); else setErr(outcome.text);
+        partialBrands = !outcome.ok;
       }
       // زامن معرّفات الداتا شيت بعد الحفظ: الرفوعات الجديدة صارت صفوفاً محفوظة لها id
       // (فيعمل زر الحذف من الخادم دون إعادة تحميل الصفحة). التزامن ليس حرجاً إن فشل.
@@ -655,7 +661,9 @@ export const ItemForm: React.FC<Props> = ({
       // ISSUE #121: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
       dirtyRef.current = false;
       void discardDraft();
-      onSaved();
+      // براندٌ لم يُضَف ⇒ يبقى الكرتُ مفتوحاً على رسالته وشريطِ البراندات لإعادة المحاولة؛
+      // `onSaved` عند `ItemsManagement` يُغلق الكرت فتختفي الرسالةُ قبل أن تُقرأ.
+      if (!partialBrands) onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -792,9 +800,68 @@ export const ItemForm: React.FC<Props> = ({
           onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />, 2)}
       {fld("اسم المنتج (إنجليزي)", <input className="ktra-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
+      {currentId == null && (
+        <div className="col-span-3 rounded border border-[var(--ktra-border-soft)] bg-[var(--ktra-surface-2)] p-3">
+          <label htmlFor="new-product-brand" className="mb-1 block text-xs font-bold text-[var(--ktra-ink)]">
+            البراندات
+          </label>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              id="new-product-brand"
+              className="ktra-input min-w-[180px] flex-1"
+              value={newBrandDraft}
+              placeholder="اكتب اسم البراند"
+              onChange={(event) => setNewBrandDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  appendNewBrand();
+                }
+              }}
+            />
+            <button
+              type="button"
+              className="ktra-btn ktra-btn-primary shrink-0"
+              disabled={!newBrandDraft.trim()}
+              onClick={appendNewBrand}
+            >
+              إضافة
+            </button>
+          </div>
+          <p className="mt-1.5 text-xs text-[var(--ktra-ink-soft)]">
+            منتجٌ بعدّة براندات؟ اكتبها هنا — لكلِّ براندٍ رصيدُه وسعرُه. فارغ = بلا براند.
+          </p>
+          {form.new_brands.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5" aria-label="البراندات المضافة">
+              {form.new_brands.map((brand, index) => (
+                <span
+                  key={`${brand}-${index}`}
+                  className="inline-flex items-center gap-1 rounded-full border border-[var(--ktra-accent-bd)] bg-[var(--ktra-accent-bg)] px-2.5 py-1 text-xs font-medium text-[var(--ktra-ink)]"
+                >
+                  {brand}
+                  <button
+                    type="button"
+                    className="rounded px-1 text-[var(--ktra-ink-soft)] hover:text-[var(--ktra-danger)]"
+                    aria-label={`حذف البراند ${brand}`}
+                    title="حذف"
+                    onClick={() => patch("new_brands", form.new_brands.filter((_, itemIndex) => itemIndex !== index))}
+                  >
+                    ×
+                  </button>
+                </span>
+              ))}
+            </div>
+          )}
+          {newBrandPreview.length > 0 && (
+            <div className="mt-2 text-xs text-[var(--ktra-ink)]">
+              سيُسجَّل: <b>{newBrandPreview.join(" · ")}</b>
+            </div>
+          )}
+        </div>
+      )}
       {/* #21: «هذا موجود — أضف براند؟» — اقتراحٌ لا منع. يظهر أثناء تسجيل منتجٍ
           جديد فقط، ويختفي بمجرّد تجاهله أو تغيير الاسم إلى ما لا يطابق شيئاً. */}
-      {nameOffer && !offerDismissed && (
+      {nameOffer && (
         <div className="col-span-3 flex flex-wrap items-center gap-2 rounded border border-amber-400/60 bg-amber-400/10 px-3 py-2 text-sm ktra-text-ink">
           <span className="flex-1 min-w-[220px]">
             يوجد منتجٌ مسجَّلٌ بهذا الاسم: «{nameOffer.name_ar || nameOffer.name_en}». أضف براندًا
@@ -804,9 +871,11 @@ export const ItemForm: React.FC<Props> = ({
             placeholder="اسم البراند"
             buttonLabel="أضف براند إلى هذا المنتج"
             onSubmit={async (brandName) => {
+              const target = brandTargetOf(nameOffer);
+              if (target == null) return;
               try {
-                await submitAddBrand(nameOffer.id, brandName);
-                setNameOffer(null);
+                await submitAddBrand(target, brandName);
+                nameOfferApi.clear();
                 void discardDraft();
                 resetToBlank(true);
                 onSaved();
@@ -815,7 +884,7 @@ export const ItemForm: React.FC<Props> = ({
               }
             }}
           />
-          <button type="button" onClick={() => setOfferDismissed(true)}
+          <button type="button" onClick={nameOfferApi.dismiss}
             className="shrink-0 text-xs underline ktra-text-soft">
             تجاهل ومتابعة تسجيل منتجٍ جديد
           </button>
@@ -849,7 +918,7 @@ export const ItemForm: React.FC<Props> = ({
         <button type="button" className="ktra-addrow" style={{ margin: 0 }}
           aria-expanded={showAdvanced}
           onClick={() => setShowAdvanced((v) => !v)}>
-          {showAdvanced ? "▾ إخفاء المتقدم" : "▸ متقدم (باركود، براند، صنف، حدود مخزون، كفالات، ملفات)"}
+          {showAdvanced ? "▾ إخفاء المتقدم" : "▸ متقدم (باركود، صنف، حدود مخزون، كفالات، ملفات)"}
         </button>
       </div>
       {!showAdvanced ? null : <>
@@ -921,15 +990,6 @@ export const ItemForm: React.FC<Props> = ({
           placeholder="فارغ = بلا كفالة مورد"
           title="تُحسب من تاريخ فاتورة الشراء — يراها موظف الكاونتر فلا تتحمّل الشركة كلفة يتحمّلها المورد"
           onChange={(e) => patch("supplier_warranty_months", e.target.value)} />)}
-      {fld("البراند (يظهر بين قوسين)",
-        <ValuePicker value={form.brand} onChange={(b) => patch("brand", b)}
-          fetchOptions={inventoryApi.getBrands}
-          emptyLabel="— بدون براند —" addPlaceholder="مثال: روك بيلد" addTitle="إضافة براند جديد" />)}
-      {/* #21: هذا الحقل أعلاه يعيد تسمية براند **هذا** الصفّ وحده. «أضف براند»
-          عمليةٌ أخرى تماماً (تُلحق صفّاً تحت نفس المنتج الأب) وقد انتقلت إلى
-          قسم «براندات هذا المنتج» في النظرة العامة — انظر `addBrandSlot` أدناه:
-          كانت هنا خلف طيّ «متقدم» المغلق افتراضياً، فيبحث عنها المستخدم ثم
-          ييأس فيُنشئ صنفاً جديداً، وهو الخلل الذي جاء النموذج كلّه ليمنعه. */}
       {/* T-REORDER: «الصنف» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
           الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
           كل منتجٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم المنتج: كل
@@ -1220,7 +1280,9 @@ export const ItemForm: React.FC<Props> = ({
     <div dir="rtl">
       <KitDocumentShell
         title="كرت المنتج"
-        state={currentId ? `منتج #${currentId}` : "منتج جديد"}
+        state={currentId
+          ? `${form.name_ar || form.name_en || "المنتج"}${form.brand.trim() ? ` (${form.brand.trim()})` : ""}`
+          : "منتج جديد"}
         activeTab={activeTab}
         onTabChange={setActiveTab}
         nav={nav}
@@ -1237,7 +1299,11 @@ export const ItemForm: React.FC<Props> = ({
               onChange={(e) => patch("sku", e.target.value)} />)}
             {fld("اسم المنتج", <input className="ktra-input ktra-input--hl" value={form.name_ar}
               onChange={(e) => patch("name_ar", e.target.value)}
-              placeholder="اسم المنتج" autoFocus={productId == null} />, 2)}
+              placeholder="اسم المنتج" autoFocus={productId == null} />, currentId == null ? 2 : undefined)}
+            {currentId != null && fld("البراند",
+              <ValuePicker value={form.brand} onChange={(brand) => patch("brand", brand)}
+                fetchOptions={inventoryApi.getBrands}
+                emptyLabel="— بلا براند —" addPlaceholder="مثال: ميشلان" addTitle="براند جديد" />)}
             {fld("التصنيف",
               <CategoryPicker value={form.category} onChange={(id, name) => {
                 patch("category", id);
@@ -1298,6 +1364,35 @@ export const ItemForm: React.FC<Props> = ({
           </>
         }
       >
+        {currentId != null && (
+          <ProductBrandStrip
+            productId={currentId}
+            familyId={insights.profile?.family_id}
+            currentBrand={form.brand}
+            currentName={form.name_ar || form.name_en || "المنتج"}
+            currentQuantity={insights.profile?.quantity_on_hand}
+            onSelect={(id) => {
+              setActiveTab("overview");
+              inventoryApi.getProduct(id).then((product) => applyProduct(product, false)).catch((reason: unknown) => {
+                setErr(reason instanceof Error ? reason.message : "تعذّر فتح كرت البراند");
+              });
+            }}
+            onAddBrand={async (brandName) => {
+              const target = brandTargetOf({ family_id: insights.profile?.family_id, id: currentId });
+              if (target == null) throw new Error("لم يُعرَف المنتج.");
+              const result = await submitAddBrand(target, brandName);
+              if (!result.created && result.id === currentId) {
+                // الخادم سمّى صفَّ البراند الضمنيّ نفسه؛ حدّث الرأس من الردّ
+                // بلا وسم النموذج «ملموساً» لأن الكتابة تمّت بالفعل.
+                setForm((current) => ({ ...current, brand: result.brand }));
+              }
+              // لا `onSaved()` هنا: المستدعي (`ItemsManagement`) يُغلق الكرت به ويعود للقائمة،
+              // والمستخدم أضاف براندًا ليبقى على الكرت ويرى الشريط.
+              insights.reload();
+              return result;
+            }}
+          />
+        )}
         <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={dirtyRef.current} />
         {banner}
       </KitDocumentShell>

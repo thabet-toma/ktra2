@@ -8,11 +8,20 @@ import React, { useState } from "react";
 import { ChevronDown, ChevronLeft, FolderTree } from "lucide-react";
 import type { DenseColumn } from "../kit/KitDenseTable";
 import type { SqlProduct } from "../../types/inventory";
+import type { AddBrandResult } from "../../services/inventoryApi";
 import { formatQuantity } from "../../utils/formatNumber";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../utils/categoryTree";
 import { groupProductsByFamily, buildFamilyRow, type ProductGroup } from "../../utils/familyGrouping";
+import { brandTargetOf, type AddBrandTarget } from "../../utils/brandActions";
 
 export type TreeCategory = { id: number; name: string; parent: number | null };
+
+export type AddBrandRequest = {
+  target: AddBrandTarget;
+  productName: string;
+  existingBrands: string[];
+  onAdded: (result: AddBrandResult) => void;
+};
 
 type Props = {
   columns: DenseColumn<SqlProduct>[];
@@ -25,6 +34,7 @@ type Props = {
   sortDir?: "asc" | "desc";
   onSort?: (key: string, dir: "asc" | "desc") => void;
   onRowDoubleClick?: (p: SqlProduct) => void;
+  onAddBrand?: (request: AddBrandRequest) => void;
   /** مرشِّحٌ يختار **أيّ البراندات** فاعلٌ الآن (بحث/حالة مخزون) — فلا تجميع:
    *  صفوف براندٍ صريحة. صفّ منتجٍ مبنيٌّ على البراندات المطابِقة وحدها يكون
    *  مجموعاً جزئياً يدّعي أنه المنتج، وهو ما تمنعه قاعدة #26. نفس تفريق
@@ -51,7 +61,7 @@ const UNCAT = -1; // تصنيف افتراضي «بدون تصنيف» للمن�
 export const GroupedItemsTable: React.FC<Props> = ({
   columns, rows, categories, getRowKey, loading, emptyHint = "لا توجد منتجات",
   sortKey, sortDir, onSort, onRowDoubleClick, onShowGroup, selection,
-  brandFilterActive,
+  brandFilterActive, onAddBrand,
 }) => {
   // مفتوحة افتراضياً: البدء بالطيّ كان يُخفي كل المنتجات تحت اسم التصنيف فتبدو
   // الشاشة فارغة. `collapsed` تحمل ما طواه المستخدم فقط (الجديد يبقى مفتوحاً).
@@ -106,6 +116,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
     p: SqlProduct,
     depth: number,
     reveal?: { count: number; expanded: boolean; onToggle: () => void; rowKey: string },
+    brandAction?: AddBrandRequest,
   ) => (
     <tr key={reveal ? reveal.rowKey : `p-${getRowKey(p)}`} onDoubleClick={() => onRowDoubleClick?.(p)}>
       {selection && (
@@ -125,6 +136,30 @@ export const GroupedItemsTable: React.FC<Props> = ({
       )}
       {columns.map((col, ci) => {
         const isNameCol = col.key === "name_ar";
+        const content = reveal && isNameCol ? (
+          <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, width: "100%" }}>
+            {/* كلمةٌ صغيرة لا أيقونةٌ صامتة — الطلب كان «منتج وبحدّه كلمة
+                صغيرة: أظهر براندات»، ودفنُها في `title` يعني ألّا يراها
+                أحدٌ إلا بالتحويم. العدد داخل الكلمة نفسها فلا يتكرّر. */}
+            <button
+              type="button"
+              className="ktra-iconbtn ktra-iconbtn--text"
+              onClick={(e) => { e.stopPropagation(); reveal.onToggle(); }}
+            >
+              {reveal.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
+              {reveal.expanded ? "طيّ البراندات" : `إظهار البراندات (${reveal.count})`}
+            </button>
+            <span
+              className="truncate"
+              style={{ minWidth: 0, flex: 1, fontWeight: 600 }}
+              title={p.display_name || p.name_ar || ""}
+            >
+              {p.display_name || p.name_ar || p.name_en || "—"}
+            </span>
+          </span>
+        ) : (
+          col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")
+        );
         return (
           <td
             key={col.key}
@@ -134,30 +169,18 @@ export const GroupedItemsTable: React.FC<Props> = ({
             }}
             className={col.numeric ? "ktra-num" : ""}
           >
-            {reveal && isNameCol ? (
-              <span style={{ display: "inline-flex", alignItems: "center", gap: 4, minWidth: 0, width: "100%" }}>
-                {/* كلمةٌ صغيرة لا أيقونةٌ صامتة — الطلب كان «منتج وبحدّه كلمة
-                    صغيرة: أظهر براندات»، ودفنُها في `title` يعني ألّا يراها
-                    أحدٌ إلا بالتحويم. العدد داخل الكلمة نفسها فلا يتكرّر. */}
+            {col.key === "edit" && brandAction ? (
+              <div className="flex items-center justify-center gap-1.5">
+                {content}
                 <button
                   type="button"
-                  className="ktra-iconbtn ktra-iconbtn--text"
-                  onClick={(e) => { e.stopPropagation(); reveal.onToggle(); }}
+                  className="ktra-toolbtn shrink-0"
+                  onClick={(event) => { event.stopPropagation(); onAddBrand?.(brandAction); }}
                 >
-                  {reveal.expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronLeft className="h-3 w-3" />}
-                  {reveal.expanded ? "طيّ البراندات" : `إظهار البراندات (${reveal.count})`}
+                  + براند
                 </button>
-                <span
-                  className="truncate"
-                  style={{ minWidth: 0, flex: 1, fontWeight: 600 }}
-                  title={p.display_name || p.name_ar || ""}
-                >
-                  {p.display_name || p.name_ar || p.name_en || "—"}
-                </span>
-              </span>
-            ) : (
-              col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")
-            )}
+              </div>
+            ) : content}
           </td>
         );
       })}
@@ -173,7 +196,18 @@ export const GroupedItemsTable: React.FC<Props> = ({
     // صفٌّ مفردٌ كما كان، بلا كشفٍ ولا عدد. ومع مرشِّح براندٍ فاعل كذلك: كل
     // صفٍّ براندُه، فما وصل مقصوصٌ بالفلتر لا يمثّل منتجاً.
     if (group.familyId == null || brandFilterActive) {
-      return group.members.map((m) => renderRow(m, depth));
+      return group.members.map((m) => {
+        const target = brandTargetOf(m);
+        const action = target && onAddBrand ? {
+          target,
+          productName: m.name_ar || m.name_en || m.sku || "المنتج",
+          existingBrands: m.brand ? [m.brand] : [],
+          onAdded: (result: AddBrandResult) => {
+            setExpandedFamilies((previous) => new Set(previous).add(result.family_id));
+          },
+        } : undefined;
+        return renderRow(m, depth, undefined, action);
+      });
     }
     // وما عداه صفّ منتجٍ **دائماً**، ولو كان تحته براندٌ واحد. كان الشرط
     // `members.length <= 1` يُسقط هذه الحالة إلى صفّ براندٍ عارٍ، فيقرأ
@@ -183,13 +217,23 @@ export const GroupedItemsTable: React.FC<Props> = ({
     // فيقفز شكل الصفّ بلا سببٍ يفهمه. «(1)» عددٌ مشروع لا استثناء.
     const familyId = group.familyId as number;
     const expanded = expandedFamilies.has(familyId);
+    const familyRow = buildFamilyRow(group.members);
+    const target = brandTargetOf(familyRow);
+    const action = target && onAddBrand ? {
+      target,
+      productName: familyRow.name_ar || familyRow.name_en || familyRow.sku || "المنتج",
+      existingBrands: group.members.map((member) => member.brand || "").filter(Boolean),
+      onAdded: (result: AddBrandResult) => {
+        setExpandedFamilies((previous) => new Set(previous).add(result.family_id));
+      },
+    } : undefined;
     const nodes: React.ReactNode[] = [
-      renderRow(buildFamilyRow(group.members), depth, {
+      renderRow(familyRow, depth, {
         count: group.members.length,
         expanded,
         onToggle: () => toggleFamily(familyId),
         rowKey: `fam-${familyId}`,
-      }),
+      }, action),
     ];
     if (expanded) {
       for (const m of group.members) nodes.push(renderRow(m, depth + 1));

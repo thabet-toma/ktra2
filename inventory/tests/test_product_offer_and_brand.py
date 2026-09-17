@@ -198,6 +198,166 @@ class AddBrandTest(APITestCase):
         assert res.status_code == 404
 
 
+class ProductNameOfferForLegacyProductsTest(APITestCase):
+    """«هذا موجود» كان يبحث في الآباء وحدَها (`ProductFamily`) — فمنتجٌ قديمٌ بلا أب
+    (أغلبُ الكتالوج) لا يُقترَح أبداً، ويُسجَّل اسمُه مرّةً ثانيةً منتجاً منفصلاً.
+    المطابقةُ تشمل الآن الصفوفَ بلا أب، والردُّ يسمّي ما يُرسَل إلى `add-brand`."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="legacy_offer_owner", password="x")
+        cls.tenant = create_company("شركة الاقتراح القديم", cls.owner)
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _check(self, name):
+        res = self.client.get(f"{FAMILIES_URL}check-name/", {"name": name}, **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        return res.json()["match"]
+
+    def test_a_familyless_product_is_offered_by_its_product_id(self):
+        legacy = Product.objects.create(
+            tenant=self.tenant, sku="OFFER-LEG-1", name_ar="بطّارية 70 أمبير", family=None,
+        )
+        match = self._check("بطارية  70 أمبير")
+        assert match is not None
+        assert match["product_id"] == legacy.id
+        assert match["family_id"] is None
+        assert match["id"] is None  # `id` يبقى معرّفَ الأب كما كان — ولا أبَ هنا
+
+    def test_a_family_match_keeps_its_contract_and_names_the_family(self):
+        res = self.client.post(PRODUCTS_URL, {"name_ar": "مروحة سقف"}, format="json", **self.hdr)
+        family_id = Product.objects.get(pk=res.json()["id"]).family_id
+
+        match = self._check("مروحة سقف")
+        assert match["id"] == family_id
+        assert match["family_id"] == family_id
+        assert match["product_id"] is None
+
+    def test_a_foreign_companys_familyless_product_is_never_offered(self):
+        other = User.objects.create_user(username="legacy_offer_other", password="x")
+        other_tenant = create_company("شركة غريبة للاقتراح", other)
+        Product.objects.create(tenant=other_tenant, sku="OFFER-FOREIGN", name_ar="ثلاجة غريبة", family=None)
+        assert self._check("ثلاجة غريبة") is None
+
+
+class AddBrandToLegacyProductTest(APITestCase):
+    """«أضف براند» على منتجٍ قديمٍ بلا أب — حالُ الكتالوج كلِّه تقريباً.
+
+    كلُّ منتجٍ سُجّل قبل #20 يحمل `family_id` فارغاً (قيس على قاعدة التطوير:
+    1760 من 1763). والنقطةُ كانت تشترط `family_id`، فكرتُ المنتج لا يرسم قسمَ
+    البراندات أصلاً لمنتجٍ بلا أب — **لا بابَ لإضافة براندٍ لمنتجٍ قائم**، والبابُ
+    الوحيدُ الباقي (زرُّ «تكرار» في القائمة) يُنشئ منتجاً منفصلاً. `product_id`
+    يتبنّى له أباً (`adopt_family_for_product`) ثمّ يُضيف البراند، في معاملةٍ واحدة.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="legacy_brand_owner", password="x")
+        cls.tenant = create_company("شركة البراند القديم", cls.owner)
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _legacy(self, name, sku, brand=""):
+        product = Product.objects.create(
+            tenant=self.tenant, sku=sku, name_ar=name, brand=brand, family=None,
+        )
+        assert product.family_id is None
+        return product
+
+    def _add(self, payload):
+        return self.client.post(f"{PRODUCTS_URL}add-brand/", payload, format="json", **self.hdr)
+
+    def test_first_brand_names_the_legacy_row_and_gives_it_a_parent(self):
+        legacy = self._legacy("بطارية 70 أمبير", "LEG-1")
+        record_stock_movement(
+            product=legacy, movement_type="IN", quantity=Decimal("6"),
+            unit_cost=Decimal("40"), movement_date="2026-06-01", tenant=self.tenant,
+        )
+
+        res = self._add({"product_id": legacy.id, "brand": "فارتا"})
+        assert res.status_code == 200, res.content[:300]
+        data = res.json()
+        assert data["created"] is False
+        assert data["id"] == legacy.id
+
+        legacy.refresh_from_db()
+        assert legacy.family_id is not None
+        assert data["family_id"] == legacy.family_id
+        assert legacy.brand == "فارتا"
+        assert legacy.quantity_on_hand == Decimal("6")
+        assert ProductFamily.objects.filter(tenant=self.tenant).count() == 1
+
+    def test_second_brand_on_a_named_legacy_row_creates_a_sibling_not_a_product(self):
+        legacy = self._legacy("بطارية 100 أمبير", "LEG-2", brand="فارتا")
+
+        res = self._add({"product_id": legacy.id, "brand": "بوش"})
+        assert res.status_code == 201, res.content[:300]
+        data = res.json()
+        assert data["created"] is True
+
+        legacy.refresh_from_db()
+        sibling = Product.objects.get(pk=data["id"])
+        assert sibling.family_id == legacy.family_id is not None
+        assert set(
+            Product.objects.filter(family_id=legacy.family_id).values_list("brand", flat=True)
+        ) == {"فارتا", "بوش"}
+        assert ProductFamily.objects.filter(tenant=self.tenant).count() == 1
+
+    def test_product_id_of_a_row_that_already_has_a_parent_reuses_it(self):
+        res = self.client.post(PRODUCTS_URL, {"name_ar": "مروحة", "brand": "توشيبا"}, format="json", **self.hdr)
+        assert res.status_code == 201, res.content[:300]
+        product = Product.objects.get(pk=res.json()["id"])
+
+        added = self._add({"product_id": product.id, "brand": "شارب"})
+        assert added.status_code == 201, added.content[:300]
+        assert added.json()["family_id"] == product.family_id
+        assert ProductFamily.objects.filter(tenant=self.tenant).count() == 1
+
+    def test_a_failed_add_leaves_the_legacy_row_without_a_parent(self):
+        """التبنّي والإضافة معاملةٌ واحدة: رفضُ الإضافة لا يترك أباً يتيماً.
+
+        الرفضُ يُحقَن **داخل** الإضافة نفسِها (بعد التبنّي) — رفضٌ يسبق التبنّي
+        (رقمٌ مكرَّر مثلاً) يمرّ بلا معاملةٍ أصلاً فلا يختبر شيئاً."""
+        from unittest import mock
+
+        from django.core.exceptions import ValidationError as DjangoValidationError
+
+        legacy = self._legacy("بطارية 45 أمبير", "LEG-3", brand="فارتا")
+
+        with mock.patch(
+            "inventory.services.add_brand_to_family",
+            side_effect=DjangoValidationError("تعذّر توليد رقم منتج — أعد المحاولة."),
+        ):
+            res = self._add({"product_id": legacy.id, "brand": "بوش"})
+        assert res.status_code == 400, res.content[:300]
+        legacy.refresh_from_db()
+        assert legacy.family_id is None
+        assert ProductFamily.objects.filter(tenant=self.tenant).count() == 0
+
+    def test_requires_a_family_or_a_product(self):
+        res = self._add({"brand": "فارتا"})
+        assert res.status_code == 400
+        assert "family_id" in res.json()
+
+    def test_rejects_a_foreign_company_product_without_adopting_it(self):
+        other_owner = User.objects.create_user(username="legacy_brand_other", password="x")
+        other_tenant = create_company("شركة أخرى قديمة", other_owner)
+        foreign = Product.objects.create(
+            tenant=other_tenant, sku="FOREIGN-LEG", name_ar="منتج غريب", family=None,
+        )
+
+        res = self._add({"product_id": foreign.id, "brand": "فارتا"})
+        assert res.status_code == 404
+        foreign.refresh_from_db()
+        assert foreign.family_id is None
+        assert foreign.brand == ""
+
+
 class QuotationMaterializationNormalizedMatchTest(APITestCase):
     """قاعدة المطابقة الموضع الثاني: تجسيد عرض السعر (`logistics.services
     .materialize_quotation_draft_parties`) يعيد استعمال منتجاً قائماً بعد

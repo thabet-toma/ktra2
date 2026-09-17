@@ -1,4 +1,5 @@
 import { humanizeDrfError } from "../utils/drfError";
+import type { AddBrandTarget } from "../utils/brandActions";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, apiGetList, toPagedList } from "./restApi";
 
@@ -81,9 +82,13 @@ export interface ProductSerialRow {
  */
 export type ProductGroupSelector = { ids?: number[]; category?: number; family?: number };
 
-/** #21: منتجٌ (عائلة) قائم يطابق الاسم المطبَّع — نتيجة `check-name`. */
+/** #21: منتجٌ قائم يطابق الاسم المطبَّع — نتيجة `check-name`. أبٌ (`family_id`)، أو
+ *  منتجٌ قديمٌ بلا أب (`product_id`) — وحينها `id` (معرّفُ الأب) فارغ. يُمرَّر كما هو إلى
+ *  `utils/brandActions` (`brandTargetOf` / `attachBrandToExisting`). */
 export interface ProductNameMatch {
-  id: number;
+  id: number | null;
+  family_id: number | null;
+  product_id: number | null;
   name_ar: string | null;
   name_en: string | null;
 }
@@ -636,11 +641,12 @@ export const inventoryApi = {
     return data?.match ?? null;
   },
   /**
-   * يلحق براندًا بمنتجٍ قائم (`family_id`). الردّ يميّز صراحةً بين تسمية
+   * يلحق براندًا بمنتجٍ قائم: `family_id`، أو `product_id` لمنتجٍ قديمٍ بلا أب (يتبنّى له
+   * الخادمُ أباً في معاملة الإضافة). الردّ يميّز صراحةً بين تسمية
    * البراند الضمنيّ (`created: false`) وإنشاء صفّ جديد (`created: true`) —
    * الفارق حقيقة يجب أن تصل المستخدم لا تفصيل تنفيذ يُطوى.
    */
-  addBrand: async (body: { family_id: number; brand: string; sku?: string }): Promise<AddBrandResult> => {
+  addBrand: async (body: AddBrandTarget & { brand: string; sku?: string }): Promise<AddBrandResult> => {
     const res = await fetch(`${INV}/products/add-brand/`, {
       method: "POST",
       headers: headers(),
