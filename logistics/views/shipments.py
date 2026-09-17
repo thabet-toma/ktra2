@@ -611,7 +611,8 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 else:
                     lines_data = [
                         {"account": ag.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": ag.id, "description": _adesc},
-                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "partner": ag.id, "description": _adesc},
+                        # الصندوقُ بلا الوكيل (مرآة فرع FIFO): موسوماً يُلغي مدينَ الذمة في رصيده.
+                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "description": _adesc},
                     ]
                     journal_currency, journal_rate = journal_currency, rate
 

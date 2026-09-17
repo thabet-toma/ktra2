@@ -112,6 +112,14 @@ class ImportPaymentSeparationTest(APITestCase):
         self.assertTrue(payment_journal.lines.filter(
             account=self.cash_account, credit=D("250.00"),
         ).exists())
+        # سطرُ الصندوق بلا المخلّص: موسوماً كان يُلغي مدينَ الذمة في رصيده
+        # (`partner_posted_balance` يجمع كلَّ أسطره) فيبقى «مستحقاً» 600 بعد الدفع.
+        self.assertFalse(payment_journal.lines.filter(
+            account=self.cash_account, partner__isnull=False,
+        ).exists())
+        from accounting.services import partner_posted_balance
+        debit, credit = partner_posted_balance(self.tenant.pk, self.broker.pk)
+        self.assertEqual(credit - debit, D("350.00"))
         detail = self.client.get(
             f"/api/logistics/clearances/{self.clearance.pk}/", **self._auth(),
         )

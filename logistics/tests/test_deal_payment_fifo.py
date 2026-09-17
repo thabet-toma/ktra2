@@ -138,6 +138,29 @@ class AgentPaymentFifoTest(APITestCase):
         self.assertTrue(jh.lines.filter(account=self.box.account, credit=D("3000.00")).exists())
         self.assertTrue(jh.lines.filter(account=fx, credit=D("500.00")).exists())
 
+    def test_non_fifo_agent_payment_tags_only_the_payable_line(self):
+        """فرعُ الحساب العاديّ (بلا طبقات FIFO) كان يَسِم الصندوقَ بالوكيل فيُلغي
+        مدينَ الذمة في `partner_posted_balance` — الدفعُ لا يُنقص رصيدَ الوكيل."""
+        from accounting.services import partner_posted_balance
+
+        self.shipment.total_shipping_cost_usd = D("1000")
+        self.shipment.save(update_fields=["total_shipping_cost_usd"])
+        plain = Account.objects.create(
+            tenant=self.tenant, code="BANK-PLAIN", name="بنك عادي",
+            account_type="Asset", is_active=True)
+        pay = LogisticsPayment.objects.create(
+            shipment=self.shipment, title="AP-PLAIN", amount=D("100"), status="Confirmed",
+            usd_to_ils=D("3.5"), transfer_date="2026-06-20")
+        resp = self.client.post(
+            f"/api/logistics/shipments/{self.shipment.pk}/post_agent_payment/{pay.pk}/",
+            {"bank_account_id": plain.pk}, format="json", **self._auth())
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
+        self.assertTrue(jh.lines.filter(account=plain, partner__isnull=True).exists())
+        self.assertFalse(jh.lines.filter(account=plain, partner__isnull=False).exists())
+        debit, _credit = partner_posted_balance(self.tenant.pk, self.agent.pk)
+        self.assertEqual(debit, jh.lines.get(account=self.agent.linked_account).base_debit)
+
     def test_posted_shipment_accepts_new_payment_for_increased_freight(self):
         self.shipment.total_shipping_cost_usd = D("540")
         self.shipment.save(update_fields=["total_shipping_cost_usd"])

@@ -442,9 +442,10 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                             "credit": Decimal("0"),
                             "description": line_desc,
                         },
+                        # سطرُ الذمة وحده يحمل المخلّص — الصندوقُ الموسوم به يُلغي
+                        # مدينَ الذمة في رصيده فيبقى مستحقاً بعد الدفع.
                         {
                             "account": cash_link.account_id,
-                            "partner": payee.pk,
                             "debit": Decimal("0"),
                             "credit": amount,
                             "description": f"صرف من الصندوق {cash_link.name}",

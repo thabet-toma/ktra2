@@ -1,4 +1,4 @@
-"""إصلاح بيانات — قيود الشراء القديمة الموسومة بالمورد على غير حساب الذمم.
+"""إصلاح بيانات — قيود الشراء والاستيراد القديمة الموسومة بالمورد على غير حساب الذمم.
 
 قبل fddfcce (فاتورة الشراء) وقبل A1-1 (الاستلام قبل الترحيل، مرجع الشراء، ونقطة
 `purchase-receipts/` القديمة) كانت أسطر المخزون/الضريبة/الوسيط/المصروف تُوسَم
@@ -11,7 +11,8 @@
 
 القاعدة (لكل قيد × شريك):
   - أنواع قيدٍ فيها سطر ذمم بطبيعتها (`PURCHASE_INVOICE`/`PURCHASE_RECEIPT`/
-    `PURCHASE_RETURN`): يُزال الوسم عن غير الرقابي **فقط إن وُجد سطر رقابي موسوم
+    `PURCHASE_RETURN`، وقيودُ الاستيراد: شراءُ الصفقة، ودفعاتُ الصفقة والوكيل والمخلّص
+    وعكوسُها، والعكسُ العامّ): يُزال الوسم عن غير الرقابي **فقط إن وُجد سطر رقابي موسوم
     بنفس الشريك** — وإلا لا يُعرف أين ساق الذمم فيُترك القيد ويُعرض للمراجعة.
   - أنواع قيدٍ لا ذمم فيها بطبيعتها (`PURCHASE_GRN`/`GOODS_RECEIPT`: مخزون ↔ وسيط):
     يُزال الوسم عن غير الرقابي مباشرةً.
@@ -32,14 +33,22 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from accounting.account_classification import SUB_TYPE_PAYABLE, SUB_TYPE_RECEIVABLE
-from accounting.models import JournalLine
+from accounting.models import JournalHeader, JournalLine
 from partners.models import Partner, PartnerGroup
 
 logger = logging.getLogger(__name__)
 
 # أنواع قيود الشراء التي يكتبها الكود (logistics/services.py، logistics/views/invoices.py،
 # accounting/views.py (`PurchaseReceiptViewSet`)).
-TYPES_WITH_CONTROL_LINE = ("PURCHASE_INVOICE", "PURCHASE_RECEIPT", "PURCHASE_RETURN")
+TYPES_WITH_CONTROL_LINE = (
+    "PURCHASE_INVOICE", "PURCHASE_RECEIPT", "PURCHASE_RETURN",
+    # الاستيراد (قيسَت على الإنتاج 2026-09-17، الشركة 1): قيدُ شراء الصفقة القديم وسم
+    # سطرَ المصروف بالمورّد، ودفعاتُ الصفقة/الوكيل/المخلّص وعكوسُها وسمت الصندوق —
+    # فيُلغي الموسومُ الذمّةَ في `partner_posted_balance`. وعكسُ قيدٍ منها بالعكس العامّ كذلك.
+    "LOGISTICS_DEAL", "LOGISTICS_PAYMENT", "LOGISTICS_PAYMENT_UNPOST",
+    "CLEARANCE_PAYMENT", "CLEARANCE_PAYMENT_UNPOST", "JOURNAL_REVERSAL",
+)
+REVERSAL_TYPE = "JOURNAL_REVERSAL"
 TYPES_WITHOUT_CONTROL_LINE = ("PURCHASE_GRN", "GOODS_RECEIPT")
 PURCHASE_REFERENCE_TYPES = TYPES_WITH_CONTROL_LINE + TYPES_WITHOUT_CONTROL_LINE
 
@@ -74,8 +83,17 @@ class Command(BaseCommand):
             lines = lines.filter(tenant_id=opts['tenant'])
         rows = list(lines.values(
             'id', 'tenant_id', 'journal_id', 'partner_id', 'account_id',
-            'account__sub_type', 'journal__reference_type',
+            'account__sub_type', 'journal__reference_type', 'journal__reference_id',
         ))
+        # العكسُ العامّ يغطّي الدفترَ كلَّه: يُصلَح عكسُ قيدٍ مشمولٍ وحده — عكسُ فاتورة بيعٍ
+        # يُزال وسمُه ويبقى وسمُ أصله فيتغيّر رصيدُ الزبون.
+        reversed_ids = {r['journal__reference_id'] for r in rows
+                        if r['journal__reference_type'] == REVERSAL_TYPE}
+        covered = set(JournalHeader.objects.filter(
+            pk__in=reversed_ids, reference_type__in=PURCHASE_REFERENCE_TYPES,
+        ).exclude(reference_type=REVERSAL_TYPE).values_list('pk', flat=True))
+        rows = [r for r in rows if r['journal__reference_type'] != REVERSAL_TYPE
+                or r['journal__reference_id'] in covered]
         control_ids = _control_account_ids({r['tenant_id'] for r in rows})
 
         groups = defaultdict(list)

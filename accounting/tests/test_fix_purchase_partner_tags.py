@@ -125,3 +125,54 @@ def test_tenant_flag_limits_scope(env):
                  stdout=StringIO())
     assert JournalLine.objects.filter(journal=mine, partner__isnull=False).count() == 1
     assert JournalLine.objects.filter(journal=theirs, partner__isnull=False).count() == 2
+
+
+def test_import_deal_and_payment_journals_are_untagged_too(env):
+    """شكلُ الإنتاج (الشركة 1): شراءُ الصفقة وسم المصروفَ بالمورّد، ودفعتُه وسمت
+    الصندوق — فظهر رصيدُ المورّد بإشارةٍ معكوسة. بعد الإصلاح = الذمّةُ وحدها."""
+    tenant, supplier, acc = env
+    deal = _legacy(tenant, supplier, "LOGISTICS_DEAL", [
+        (acc["1104"], "4005", "0"), (acc["ap"], "0", "4005")])
+    pay = _legacy(tenant, supplier, "LOGISTICS_PAYMENT", [
+        (acc["ap"], "1000", "0"), (acc["1105"], "0", "1000")])
+    clearance = _legacy(tenant, supplier, "CLEARANCE_PAYMENT", [
+        (acc["ap"], "5", "0"), (acc["1105"], "0", "5")])
+
+    call_command("fix_purchase_partner_tags", "--apply", stdout=StringIO())
+
+    for journal in (deal, pay, clearance):
+        tagged = {code for code, partner in _tags(journal) if partner}
+        assert tagged == {acc["ap"].code}, journal.reference_type
+    debit, credit = partner_posted_balance(tenant.TenantID, supplier.id)
+    assert credit - debit == Decimal("3000.00")
+
+
+def test_general_reversal_is_fixed_only_when_its_original_is_covered(env):
+    """العكسُ العامّ يغطّي الدفترَ كلَّه: عكسُ قيدٍ غيرِ مشمول (بيع) يبقى كما هو وإلا
+    زال وسمُه وبقي وسمُ أصله فتغيّر رصيدُ الطرف."""
+    tenant, supplier, acc = env
+
+    def reversal_of(orig, legs):
+        return post_journal(
+            tenant_id=tenant.TenantID, transaction_date="2026-06-12",
+            reference_type="JOURNAL_REVERSAL", reference_id=orig.id, description="عكس",
+            lines_data=[
+                {"account": a.id, "debit": Decimal(d), "credit": Decimal(c), "partner": supplier.id}
+                for a, d, c in legs
+            ],
+            idempotent=False,
+        )
+
+    deal = _legacy(tenant, supplier, "LOGISTICS_DEAL", [
+        (acc["1104"], "40", "0"), (acc["ap"], "0", "40")])
+    deal_rev = reversal_of(deal, [(acc["ap"], "40", "0"), (acc["1104"], "0", "40")])
+    sale = _legacy(tenant, supplier, "SALES_INVOICE", [
+        (acc["ap"], "90", "0"), (acc["other_liab"], "0", "90")])
+    sale_rev = reversal_of(sale, [(acc["other_liab"], "90", "0"), (acc["ap"], "0", "90")])
+    sale_rev_before = _tags(sale_rev)
+
+    call_command("fix_purchase_partner_tags", "--apply", stdout=StringIO())
+
+    assert {code for code, partner in _tags(deal_rev) if partner} == {acc["ap"].code}
+    assert _tags(sale_rev) == sale_rev_before
+
