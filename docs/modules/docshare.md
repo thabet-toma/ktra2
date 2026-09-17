@@ -81,7 +81,7 @@
 | GET | `s/<token>` · `api/share/<token>/` | صفحة المستند (HTML خادمي) — `docshare/views.py` (`DocSharePublicView`) |
 | POST | `s/<token>/decision/` | قبول الزبون أو رفضه لعرض السعر — `docshare/views.py` (`DocShareDecisionView`) |
 | POST | `s/<token>/quote/` | تسعير المورّد على طلب عرض سعر — `docshare/views.py` (`DocShareQuoteView`)، ISSUE #115 |
-| GET/POST | `api/document-shares/` | سطح الإدارة: قائمة الروابط وإنشاؤها — `docshare/views.py` (`DocumentShareViewSet`) |
+| GET/POST | `api/document-shares/` | سطح الإدارة: قائمة الروابط وإنشاؤها — `docshare/views.py` (`DocumentShareViewSet`). **الإنشاء يرفض `purchase_rfq` بـ400**: هذا السطح يُنشئ بجمهورٍ خاصّ ويعيد الحيّ القائم، فكان يُسلِّم رابطَ آخر مورّدٍ مسمّى (وصفحتُه معبّأةٌ بأسعاره) لنداءٍ مباشر؛ للطلبية بابان خاصّان: رابطُ المستقبِل عند الإرسال و`logistics/views/procurement.py` (`PurchaseRFQViewSet.public_link`) |
 | POST | `api/document-shares/<id>/revoke/` | إبطال فوري |
 
 ## تسعير المورّد على طلب عرض سعر (ISSUE #115، مواصفة #108 §٥)

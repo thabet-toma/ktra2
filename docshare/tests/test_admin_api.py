@@ -218,3 +218,31 @@ def test_filtering_by_document_returns_only_its_links(env, invoice, quotation):
 def test_anonymous_cannot_reach_the_admin_surface(env, invoice):
     response = APIClient().get(SHARES_URL)
     assert response.status_code in (401, 403)
+
+
+def test_generic_create_refuses_purchase_rfq_and_creates_nothing(
+    env, purchase_rfq, rfq_recipient,
+):
+    """طلبُ عرض السعر لا يُشارَك من السطح العامّ — له بابان خاصّان به.
+
+    `create_share` هنا بجمهورٍ خاصّ (`is_public=False`) وبإعادة الحيّ القائم،
+    فكان نداءٌ مباشر يعيد **رابطَ المورّد المسمّى** نفسه — وصفحتُه معبّأةٌ
+    بأسعار ذلك المورّد. الرابط العامّ المشروع وحده:
+    `POST /api/logistics/purchase-rfqs/<id>/public-link/`.
+    """
+    from docshare.models import DOC_PURCHASE_RFQ, DocumentShare
+
+    services.create_share(
+        env["tenant"], DOC_PURCHASE_RFQ, purchase_rfq.pk, dedupe=False,
+    )
+    before = DocumentShare.objects.count()
+
+    response = _client(env["owner"], env["tenant"]).post(
+        SHARES_URL, {"doc_type": DOC_PURCHASE_RFQ, "doc_id": purchase_rfq.pk},
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert "public-link" in response.data["detail"]
+    assert "token" not in response.data
+    assert DocumentShare.objects.count() == before

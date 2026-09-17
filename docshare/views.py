@@ -28,7 +28,9 @@ from core.modules import module_enabled, require_module
 from core.tenant_utils import get_tenant
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
-from docshare.models import DECISION_ACCEPTED, DECISION_REJECTED, DocumentShare
+from docshare.models import (
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PURCHASE_RFQ, DocumentShare,
+)
 from docshare.serializers import DocumentShareSerializer
 
 logger = logging.getLogger(__name__)
@@ -396,6 +398,19 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
         if doc_type not in DOC_TYPES or not str(doc_id).isdigit():
             return Response(
                 {"detail": "نوع المستند أو معرّفه غير صالح."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type == DOC_PURCHASE_RFQ:
+            # طلبُ عرض السعر له بابان خاصّان به لا يمرّان من هنا: رابطُ كلّ
+            # مستقبِلٍ مسمّى (`PurchaseRFQRecipient.share`، يُوصَل عند الإرسال)،
+            # والرابطُ العامّ (`public-link/`، `is_public=True`). هذا السطح
+            # يُنشئ بجمهورٍ خاصّ ويعيد الحيّ القائم، فكان يُسلِّم رابطَ آخر
+            # مورّدٍ مسمّى — وصفحتُه معبّأةٌ بأسعاره — لمن يطلبه مباشرةً.
+            return Response(
+                {"detail": (
+                    "طلب عرض السعر لا يُشارَك من هنا — استعمل رابط الطلبية العامّ "
+                    "(POST /api/logistics/purchase-rfqs/<id>/public-link/)."
+                )},
                 status=status.HTTP_400_BAD_REQUEST,
             )
         spec = DOC_TYPES[doc_type]
