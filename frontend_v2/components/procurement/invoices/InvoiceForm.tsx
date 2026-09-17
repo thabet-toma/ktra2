@@ -700,6 +700,32 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       toast("الفاتورة نقدية — اختر صندوق التسوية بجوار علامة «نقدي».", "error");
       return;
     }
+    /* A2-2: رقم فاتورة المورد المكرَّر تحذيرٌ يُتجاوَز لا منع (قرار المالك). تعذّرُ
+       الفحص نفسه لا يوقف الحفظ — الفحص مساعدةٌ لا حارس. المراجيع تحمل رقم الأصل مشروعاً. */
+    const supplierInvoiceNumber = String(formData.supplierInvoiceNumber || "").trim();
+    const supplierPartnerId = Number(String(formData.supplierId || "").trim());
+    if (supplierInvoiceNumber && !formData.isReturn && supplierPartnerId > 0) {
+      let duplicate: { is_unique: boolean; existing_invoice_number?: string } | null = null;
+      try {
+        duplicate = await purchaseInvoiceApi.checkSupplierInvoiceNumber({
+          partner: supplierPartnerId,
+          supplierInvoiceNumber,
+          exclude: Number(formData.id) > 0 ? Number(formData.id) : null,
+        });
+      } catch {
+        duplicate = null;
+      }
+      if (duplicate && !duplicate.is_unique) {
+        const proceed = await confirm({
+          title: "رقم فاتورة مورد مكرَّر",
+          message: `رقم فاتورة المورد ${supplierInvoiceNumber} مسجَّل مسبقاً على الفاتورة #${duplicate.existing_invoice_number} لنفس المورد — متابعة الحفظ؟`,
+          confirmText: "متابعة الحفظ",
+          cancelText: "إلغاء",
+          danger: false,
+        });
+        if (!proceed) return;
+      }
+    }
 
     setSaving(true);
     try {

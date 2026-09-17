@@ -129,6 +129,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | GET | `purchase-invoices/{pk}/stock-movements/` · `supplier-ledger/` | تبويبا السياق — أثر الفاتورة على المخزن، وكشف حساب المورّد مرسوّاً عليها |
 | GET/POST · DELETE | `purchase-invoices/{pk}/attachments/` · `attachments/{id}/` | تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
 | GET · POST | `purchase-invoices/next-number/` · `purchase-invoices/{pk}/duplicate/` | الرقم التالي قبل الحفظ · نسخُ الفاتورة مسودّةً بلا ترحيلٍ ولا استلام |
+| GET | `purchase-invoices/check-supplier-invoice-number/` (`partner`، `supplier_invoice_number`، `exclude`) | `check_supplier_invoice_number` (A2-2) — نفس الشركة والمورد والرقم (بلا حساسية حالة)، بلا المراجيع ولا الفاتورة نفسها. **تحذيرٌ قابل للتجاوز لا قيد**: `InvoiceForm` يسأل قبل الحفظ ويحفظ إن أكّد المستخدم |
 | GET | `supplier-payments/suggest-fifo-allocations/?partner=&amount=` | اقتراح توزيع سند صرف على فواتير المورّد (الأقدم استحقاقاً أولاً) |
 | POST | `supplier-payments/{pk}/allocate/` · `deallocate/` | توزيع سند صرف على فواتير شراء · فكّ توزيعٍ واحد (`{"allocation": id}`) — ربطٌ بلا قيد، والمبلغ يعود «على الحساب» (`sales.services.deallocate_supplier_payment`) |
 | POST | `purchase-invoices/{pk}/pay/` | `pay` — الدفع من داخل الفاتورة (نقد/شيكات/سلف المورّد)، صلاحية `purchase.payment.create` (+`purchase.invoice.post` مع `post_invoice`) |

@@ -306,6 +306,25 @@ export const purchaseInvoiceApi = {
     return (await res.json()).invoice_number as string;
   },
 
+  /** A2-2: رقم فاتورة المورد مسجَّل على فاتورة أخرى لنفس المورد؟ — تحذيرٌ قابل للتجاوز لا قيد. */
+  checkSupplierInvoiceNumber: async (params: {
+    partner: number;
+    supplierInvoiceNumber: string;
+    exclude?: number | null;
+  }): Promise<{ is_unique: boolean; existing_invoice_id?: number; existing_invoice_number?: string }> => {
+    const q = new URLSearchParams({
+      partner: String(params.partner),
+      supplier_invoice_number: params.supplierInvoiceNumber,
+    });
+    if (params.exclude) q.set("exclude", String(params.exclude));
+    const res = await safeFetch(
+      `${API_BASE}/logistics/purchase-invoices/check-supplier-invoice-number/?${q}`,
+      { headers: headers() },
+    );
+    await handle(res, "checkSupplierInvoiceNumber");
+    return res.json();
+  },
+
   /** T-PSIMPL: نسخُ الفاتورة إلى مسودّة جديدة — بلا ترحيلها ولا استلامها. */
   duplicate: async (id: number): Promise<PurchaseInvoiceDto> => {
     const res = await safeFetch(

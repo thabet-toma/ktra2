@@ -924,6 +924,40 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 {'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'invoice_number': self._next_invoice_number(tenant)})
 
+    @action(detail=False, methods=['get'], url_path='check-supplier-invoice-number')
+    def check_supplier_invoice_number(self, request):
+        """A2-2: هل رقم فاتورة المورد مسجَّل على فاتورة شراء أخرى لنفس المورد؟
+
+        تحذيرٌ قابلٌ للتجاوز لا قيد (قرار المالك — نمط Odoo/QuickBooks/Zoho): لا
+        تفرّد في القاعدة، والمحرّر يسأل قبل الحفظ ويترك القرار للمستخدم. مرآة
+        `LogisticsDealViewSet.check_uniqueness`. النطاق: نفس الشركة + نفس المورد +
+        نفس الرقم غير الفارغ (بلا حساسية حالة الأحرف)، باستثناء الفاتورة نفسها
+        (`exclude`) والمراجيع — المرجع يحمل رقم فاتورة الأصل مشروعاً.
+        """
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        number = (request.query_params.get('supplier_invoice_number') or '').strip()
+        partner = request.query_params.get('partner')
+        if not number or not str(partner or '').isdigit():
+            return Response({'is_unique': True})
+        qs = PurchaseInvoice.objects.filter(
+            tenant=tenant, partner_id=int(partner), is_return=False,
+            supplier_invoice_number__iexact=number,
+        )
+        exclude = request.query_params.get('exclude')
+        if str(exclude or '').isdigit():
+            qs = qs.exclude(pk=int(exclude))
+        dup = qs.only('id', 'invoice_number').order_by('id').first()
+        if dup is None:
+            return Response({'is_unique': True})
+        return Response({
+            'is_unique': False,
+            'existing_invoice_id': dup.id,
+            'existing_invoice_number': dup.invoice_number,
+        })
+
     @action(detail=True, methods=['post'], url_path='duplicate')
     @requires_perm('purchase.invoice.create')
     def duplicate(self, request, pk=None):
