@@ -256,6 +256,14 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   > **اليوم** فتظهر المسدَّدةُ بأثرٍ صفريّ وهي دائنةُ ذمم بكامل إجماليها. الحقلان
   > باقيان لعقد الـAPI، ولا يُعرضان على أنهما «قبل/بعد» — الشاشة تعرض الرصيد
   > الحالي وتُحيل إلى التبويب.
+- **دفعُ الاستيراد يَسِم سطرَ الذمة وحده**: `partner_posted_balance` يجمع كلَّ أسطر
+  الطرف بلا فلتر حساب، فسطرُ الصندوق/البنك موسوماً يُلغي مدينَ الذمة — الدفعُ لا
+  يُنقص الرصيد، بل تنقلب إشارتُه فيظهر المورّدُ مديناً للشركة. كان يقع في
+  `logistics/views/clearance.py` (`pay_from_cashbox`) وفي فرع الحساب العاديّ من
+  `logistics/views/shipments.py` (`post_agent_payment`) — وفرعُ FIFO فيه سليمٌ
+  أصلاً فصار الفرعان مرآةً واحدة. القديم يُصلحه
+  `python manage.py fix_purchase_partner_tags` (يشمل أنواعَ الاستيراد منذ
+  2b5693e؛ التفصيل في `docs/modules/accounting.md`).
 - **الاستحقاق حقلٌ ومهلةُ السداد تشتقّه**: `due_date` + `payment_terms_days` على
   `PurchaseInvoice` (كانا على فاتورة البيع وحدها). القاعدة في
   `core/payments.py` (`resolve_due_date`) — الصريح يسمو على المشتقّ فلا يمحو حفظٌ
