@@ -125,6 +125,9 @@ class JournalHeader(models.Model):
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='CreatedBy_UserID',
     )
+    # ختمُ آخر حفظ — مسودّةُ شاشة القيد تقارنه (#109 §٩). بلا `created_at` هنا
+    # أصلاً، فالصفوف السابقة تأخذ لحظةَ الهجرة لا تاريخاً مُختلَقاً.
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 
     class Meta:
         db_table = 'journal_headers'

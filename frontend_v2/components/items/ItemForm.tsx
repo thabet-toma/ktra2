@@ -266,6 +266,8 @@ export const ItemForm: React.FC<Props> = ({
   const toast = useToast();
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
+  // ختمُ «آخر تعديل» للمنتج المفتوح (#109 §٩) — يُلتقط في `applyProduct`.
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم
   // (`patch`، رفع/حذف الداتا شيت، استعادة مسودّة) لا عبر مراقبة `form` بأثر
   // رجعي؛ التعبئة البرمجية (`applyProduct`) لا تلمسها عمداً.
@@ -545,6 +547,7 @@ export const ItemForm: React.FC<Props> = ({
       datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
     setCurrentId(isDuplicate ? null : Number(p.id));
+    setDocUpdatedAt(isDuplicate || p.updated_at == null ? null : String(p.updated_at));
     setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» بدل النسخ." : null);
   }, []);
 
@@ -719,13 +722,9 @@ export const ItemForm: React.FC<Props> = ({
     // المنتجات بلا مفهوم «مرحَّل» محاسبي — لا حالة إغلاقٍ طبيعية تقابله على
     // `SqlProduct` اليوم (لا `is_active`/`archived`)، فالقيمة ثابتة دائماً.
     isPosted: false,
-    // GAP معروف: `SqlProduct` (types/inventory.ts) لا يحمل حقل updated_at
-    // إطلاقاً، و`ProductSerializer` لا يعرض واحداً. فلا مصدر حقيقي
-    // لـ`docUpdatedAt` في هذا الكرت، و`null` دائماً يُعطّل بصمت فحص «تغيّر
-    // المستند بعد مسودّتك» (issue #109 §٩) لكرت المنتج وحده. إصلاحه خادميّ
-    // (إضافة updated_at للنموذج + migration + الserializer) وخارج نطاق هذه
-    // المهمة (نمط `AccountingJournalEntryPage.tsx`).
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ تحميل المنتج (`ProductSerializer.updated_at`)؛ لمنتجٍ
+    // جديد أو نسخةٍ `null`.
+    docUpdatedAt: currentId != null ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 

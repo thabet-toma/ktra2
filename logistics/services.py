@@ -2006,7 +2006,7 @@ def create_goods_receipt_document(
         receipt.partner = partner or (invoice.partner if invoice else receipt.partner)
         receipt.journal = journal
         receipt.save(update_fields=[
-            'receipt_date', 'notes', 'supplier_ref', 'partner', 'journal',
+            'receipt_date', 'notes', 'supplier_ref', 'partner', 'journal', 'updated_at',
         ])
     for row in lines:
         if not row.get('product_id'):

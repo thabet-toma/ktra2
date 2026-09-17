@@ -612,7 +612,7 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
         )
         note.journal = jh
         note.status = CreditDebitNote.STATUS_POSTED
-        note.save(update_fields=["journal", "status"])
+        note.save(update_fields=["journal", "status", "updated_at"])
 
         create_audit_log(
             tenant=note.tenant,

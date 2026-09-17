@@ -49,6 +49,8 @@ export interface GoodsReceiptRow {
   total_quantity: string;
   total_remaining: string;
   created_at: string;
+  /** ختمُ آخر حفظ — مسودّةُ المحرِّر تقارنه (#109 §٩). */
+  updated_at?: string | null;
 }
 
 /** سطر باقٍ غير مستلم عبر كل الفواتير — تقرير الطباعة/PDF. */

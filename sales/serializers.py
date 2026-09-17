@@ -1070,7 +1070,7 @@ class DeliveryOrderListSerializer(serializers.ModelSerializer):
             "customer", "customer_name", "customer_ref", "is_standalone", "doc_label",
             "status", "status_display", "auto_created", "notes",
             "lines_count", "total_quantity", "total_remaining",
-            "delivered_at", "created_at",
+            "delivered_at", "created_at", "updated_at",
         ]
         read_only_fields = fields
 
@@ -1685,8 +1685,9 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
             "status",
             "journal",
             "created_at",
+            "updated_at",
         ]
-        read_only_fields = ["id", "status", "journal", "created_at", "customer_name", "related_invoice_number"]
+        read_only_fields = ["id", "status", "journal", "created_at", "updated_at", "customer_name", "related_invoice_number"]
 
     def validate(self, attrs):
         amt = attrs.get("amount")

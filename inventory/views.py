@@ -1096,11 +1096,14 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             )
 
         products = list(Product.objects.filter(tenant=tenant, pk__in=ids))
+        # `bulk_update` لا يمرّ بـ`auto_now` — الختمُ يُكتب صراحةً مع الحقلين.
+        stamp = timezone.now()
         for product in products:
             for name, value in fields.items():
                 setattr(product, name, value)
+            product.updated_at = stamp
         if products:
-            Product.objects.bulk_update(products, list(fields))
+            Product.objects.bulk_update(products, [*fields, 'updated_at'])
             labels = '، '.join(
                 f'{self.activity_field_labels.get(k, k)} = «{v or "—"}»'
                 for k, v in fields.items()

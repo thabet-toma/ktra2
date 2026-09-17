@@ -330,6 +330,7 @@ class JournalHeaderListSerializer(serializers.ModelSerializer):
             "source_label",
             "created_by",
             "created_by_name",
+            "updated_at",
         ]
 
     def get_currency_code(self, obj):
@@ -391,6 +392,7 @@ class JournalHeaderSerializer(serializers.ModelSerializer):
             'currency_code',
             'tenant_name',
             'source_label',
+            'updated_at',
             'lines',
         ]
 

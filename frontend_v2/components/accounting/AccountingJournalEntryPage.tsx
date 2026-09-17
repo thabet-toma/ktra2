@@ -235,6 +235,9 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const toast = useToast();
   const [posted, setPosted] = useState(false);
+  // ختمُ «آخر تعديل» للقيد `journalId` وحده (#109 §٩) — يُلتقط عند جلبه هو، لا
+  // عند التنقّل إلى سجلٍّ آخر (التنقّل لا يغيّر `journalId` ولا مفتاح المسودّة).
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
 
   const [header, setHeader] = useState({
     transaction_date: new Date().toISOString().split("T")[0],
@@ -461,13 +464,8 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
     isTouched: touched,
     onRestore: onRestoreDraft,
     isPosted: posted,
-    // GAP معروف: `JournalHeader` (accounting/models.py) لا يحمل حقل
-    // updated_at/timestamps إطلاقاً — ولا حتى على مستوى القاعدة — و
-    // `JournalHeaderSerializer` لا يعرض واحداً. فلا مصدر حقيقي لـ`docUpdatedAt`
-    // في هذه الشاشة، و`null` دائماً هنا يُعطّل بصمت فحص «تغيّر المستند بعد
-    // مسودّتك» (issue #109 §٩) لشاشة القيد اليدوي وحدها. إصلاحه خادميّ
-    // (إضافة updated_at للنموذج + migration + الserializer) وخارج نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ جلب القيد (`JournalHeaderSerializer.updated_at`)؛ لقيدٍ جديد `null`.
+    docUpdatedAt: journalId != null ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
@@ -602,6 +600,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
 
       if (journalId != null) {
         const j = await accountingApi.getJournal(journalId);
+        setDocUpdatedAt(j.updated_at ?? null);
         if (j.currency == null && baseCurrency) j.currency = baseCurrency.CurrencyID;
         hydrateFromJournal(j, activeAccounts, part as AccountingPartner[], defCashAccountId);
       } else if (draftRestoredRef.current) {

@@ -49,6 +49,8 @@ type NoteRow = {
   reason?: string;
   status: string;
   journal?: number | null;
+  /** ختمُ آخر حفظ — مسودّةُ المحرِّر تقارنه (#109 §٩). */
+  updated_at?: string | null;
 };
 
 type Partner = { id: number; name: string };
@@ -288,11 +290,9 @@ export const CreditDebitNotesPage: React.FC = () => {
     isTouched: touched,
     onRestore: onRestoreDraft,
     isPosted: selectedNote?.status === "posted",
-    // GAP معروف: `NoteRow` (هذا الملف — لا مسلسِلاً في services/salesApi.ts)
-    // لا يحمل حقل updated_at، والخادم لا يعرضه. فلا مصدر حقيقي لـ`docUpdatedAt`
-    // هنا، و`null` دائماً يُعطّل بصمت فحص «تغيّر المستند بعد مسودّتك» (issue
-    // #109 §٩) لهذه الشاشة وحدها. إصلاحه خادميّ وخارج نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم للإشعار المفتوح (`CreditDebitNoteSerializer.updated_at`) —
+    // من صفوف القائمة نفسها (نمط `SalesOrdersPage`)؛ لإشعارٍ جديد `null`.
+    docUpdatedAt: selectedNote?.updated_at ?? null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 

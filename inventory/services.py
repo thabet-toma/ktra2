@@ -298,6 +298,9 @@ def _push_family_fields_to_siblings(family, *, exclude_id, fields) -> int:
     if not fields:
         return 0
     values = {f: getattr(family, f) for f in fields}
+    # تعديلُ حقلٍ ظاهرٍ في كرت الأخ — ختمُه يتحرّك كما لو عُدِّل من كرته
+    # (`.update()` لا يمرّ بـ`auto_now`).
+    values['updated_at'] = timezone.now()
     return (
         Product.objects.filter(family_id=family.pk)
         .exclude(pk=exclude_id)
@@ -431,7 +434,7 @@ def add_brand_to_family(*, family, brand_name: str, tenant=None, sku: str | None
         if len(brands) == 1 and not (brands[0].brand or '').strip():
             product = brands[0]
             product.brand = brand_name
-            product.save(update_fields=['brand'])
+            product.save(update_fields=['brand', 'updated_at'])
             return product, False
 
         # الثاني فصاعداً: صفٌّ جديدٌ يرث حقول #9 «على المنتج» من الأب — نفس
@@ -573,7 +576,7 @@ def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=
             })
         if brand_changes:
             target.brand = new_target_brand
-            target.save(update_fields=['brand'])
+            target.save(update_fields=['brand', 'updated_at'])
 
         for product in others:
             if product.family_id == target_family.id:
@@ -590,12 +593,15 @@ def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=
             product.name_en = target_family.name_en
             if product.id in brand_overrides:
                 product.brand = brand_overrides[product.id]
+            product.updated_at = timezone.now()
             moved.append(product)
 
         if not moved:
             raise ValidationError('كل المنتجات المحدَّدة تحت المنتج نفسه بالفعل.')
 
-        Product.objects.bulk_update(moved, ['family_id', 'name_ar', 'name_en', 'brand'])
+        Product.objects.bulk_update(
+            moved, ['family_id', 'name_ar', 'name_en', 'brand', 'updated_at'],
+        )
         merge = ProductMerge.objects.create(
             tenant=tenant, target_family=target_family, snapshot=snapshot,
             created_by=user if getattr(user, 'is_authenticated', False) else None,
@@ -633,10 +639,13 @@ def undo_product_merge(*, tenant, merge_id):
             product.brand = row['brand']
             product.name_ar = row['name_ar']
             product.name_en = row['name_en']
+            product.updated_at = timezone.now()
             restored.append(product)
 
         if restored:
-            Product.objects.bulk_update(restored, ['family_id', 'brand', 'name_ar', 'name_en'])
+            Product.objects.bulk_update(
+                restored, ['family_id', 'brand', 'name_ar', 'name_en', 'updated_at'],
+            )
         merge.undone_at = timezone.now()
         merge.save(update_fields=['undone_at'])
     return merge, restored
@@ -2411,6 +2420,6 @@ def post_stocktake(stocktake, user=None):
             )
         stocktake.is_posted = True
         stocktake.journal = journal
-        stocktake.save(update_fields=['is_posted', 'journal', 'stocktake_number'])
+        stocktake.save(update_fields=['is_posted', 'journal', 'stocktake_number', 'updated_at'])
     logger.info("Stocktake #%s posted (journal=%s)", stocktake.id, journal.id if journal else None)
     return stocktake

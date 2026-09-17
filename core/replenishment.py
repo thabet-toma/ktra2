@@ -1076,6 +1076,8 @@ def apply_suggested_levels(tenant_id: int, product_ids, *, user=None) -> dict:
     ويعود في `skipped` بسببه. كتابةُ صفرٍ عليه تعني «لا تطلب هذا أبداً» وهي
     ليست ما تقوله البيانات — البيانات تقول «لا أعرف بعد».
     """
+    from django.utils import timezone
+
     from core.activity import log_activity
 
     from inventory.models import Product
@@ -1101,6 +1103,7 @@ def apply_suggested_levels(tenant_id: int, product_ids, *, user=None) -> dict:
             continue
         product.min_stock_level = row["suggested_min"]
         product.max_stock_level = row["suggested_max"]
+        product.updated_at = timezone.now()
         touched.append(product)
         applied.append({
             "product_id": pid, "sku": row["sku"], "name": row["name"],
@@ -1109,7 +1112,9 @@ def apply_suggested_levels(tenant_id: int, product_ids, *, user=None) -> dict:
         })
 
     if touched:
-        Product.objects.bulk_update(touched, ["min_stock_level", "max_stock_level"])
+        Product.objects.bulk_update(
+            touched, ["min_stock_level", "max_stock_level", "updated_at"],
+        )
         # #20: حدّا التجديد حقلان «أبويّان» والقراءة تفضّل الأب — فكاتبٌ لا
         # يزامن يترك الكرت يعرض الحدَّ القديم بعد تطبيق الجديد، بلا خطأٍ ظاهر.
         from inventory.services import sync_families_from_products

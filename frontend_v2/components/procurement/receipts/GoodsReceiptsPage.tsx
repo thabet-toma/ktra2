@@ -146,6 +146,8 @@ export const GoodsReceiptsPage: React.FC = () => {
 
   // ── حالة المحرّر ──
   const [editingId, setEditingId] = useState<number | null>(null);
+  // ختمُ «آخر تعديل» للإرسالية المفتوحة (#109 §٩) — يُلتقط في `openEdit`.
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
   const [invoiceOptions, setInvoiceOptions] = useState<PickableInvoice[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
@@ -328,6 +330,7 @@ export const GoodsReceiptsPage: React.FC = () => {
       setMode("form");
       setViewDoc(null);
       setEditingId(doc.id);
+      setDocUpdatedAt(doc.updated_at ?? null);
       setTouched(false);
       setFormDate(doc.receipt_date || todayIso());
       setFormNotes(doc.notes || "");
@@ -434,11 +437,9 @@ export const GoodsReceiptsPage: React.FC = () => {
     isTouched: touched,
     onRestore: onRestoreDraft,
     isPosted: false,
-    // GAP معروف: `GoodsReceipt` (logistics/models.py) لا يحمل `updated_at` —
-    // `created_at` فقط. فلا مصدر حقيقي لـ«تغيّر المستند بعد مسودتك» (issue
-    // #109 §٩) لهذه الشاشة، و`null` هنا يُعطّل ذلك الفحص بصمت. إصلاحه خادميّ
-    // (إضافة الحقل + migration + الserializer) وخارج نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ فتح الإرسالية (`GoodsReceiptListSerializer.updated_at`)؛
+    // لمستندٍ جديد `null`.
+    docUpdatedAt: editingId != null ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 

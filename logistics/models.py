@@ -2364,6 +2364,7 @@ class GoodsReceipt(models.Model):
         db_column='JournalID', related_name='goods_receipts',
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
     created_by = models.ForeignKey(
         User, on_delete=models.SET_NULL, null=True, blank=True,
         db_column='CreatedBy_UserID', related_name='goods_receipts',

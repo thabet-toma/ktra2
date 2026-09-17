@@ -144,6 +144,8 @@ export const DeliveryNotesPage: React.FC = () => {
   const [allowEdit, setAllowEdit] = useState(true);
 
   const [editingId, setEditingId] = useState<number | null>(null);
+  // ختمُ «آخر تعديل» للسند المفتوح (#109 §٩) — يُلتقط في `openEdit`.
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
   const [invoiceOptions, setInvoiceOptions] = useState<PickableInvoice[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [warehouses, setWarehouses] = useState<WarehouseOpt[]>([]);
@@ -210,13 +212,9 @@ export const DeliveryNotesPage: React.FC = () => {
     // والتعديل اللاحق مسموحٌ دوماً عبر `updateDeliveryNote` (يعكس الأثر
     // القديم ويعيد تطبيق الجديد)، فلا حالةٌ نهائية تحجب الاستعادة.
     isPosted: false,
-    // GAP معروف: `DeliveryNoteRow` (services/salesApi.ts) يحمل `created_at`
-    // و`delivered_at` لا `updated_at` — ولا يعكسان تعديل رأس/بنود المستند
-    // بعد إنشائه (created_at ثابت، delivered_at دلالته مختلفة). فلا مصدر
-    // حقيقي لـ`docUpdatedAt` هنا، و`null` دائماً يُعطّل بصمت فحص «تغيّر
-    // المستند بعد مسودّتك» (issue #109 §٩) لهذه الشاشة وحدها. إصلاحه خادميّ
-    // (إضافة updated_at حقيقي + migration + الserializer) وخارج نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ فتح السند (`DeliveryOrderListSerializer.updated_at`) —
+    // لا `created_at` (ثابت) ولا `delivered_at` (دلالته التسليم)؛ لسندٍ جديد `null`.
+    docUpdatedAt: editingId != null ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 
@@ -402,6 +400,7 @@ export const DeliveryNotesPage: React.FC = () => {
       setMode("form");
       setViewDoc(null);
       setEditingId(doc.id);
+      setDocUpdatedAt(doc.updated_at ?? null);
       setFormDate(doc.delivery_date || todayIso());
       setFormNotes(doc.notes || "");
       setFormCustomerRef(doc.customer_ref || "");

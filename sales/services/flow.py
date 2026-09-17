@@ -2215,7 +2215,7 @@ def deliver_invoice_lines(
                 invoice.tenant_id, invoice.branch,
             )
             delivery.delivery_date = delivery.delivery_date or invoice.invoice_date
-            delivery.save(update_fields=["delivery_number", "delivery_date"])
+            delivery.save(update_fields=["delivery_number", "delivery_date", "updated_at"])
 
         costs_by_product: dict[int, Decimal] = defaultdict(Decimal)
         for line_id, qty in delivered_now.items():
@@ -2291,7 +2291,7 @@ def deliver_invoice_lines(
 
         delivery.delivered_at = timezone.now()
         delivery.journal = cogs_journal
-        delivery.save(update_fields=["status", "delivered_at", "journal"])
+        delivery.save(update_fields=["status", "delivered_at", "journal", "updated_at"])
 
         sync_invoice_delivery_status(invoice, inv_lines)
 
@@ -2414,7 +2414,7 @@ def create_standalone_delivery_note(
             doc.customer_ref = (customer_ref or "")[:100]
             doc.notes = (notes or "")[:500]
             doc.save(update_fields=[
-                "delivery_date", "partner", "customer_ref", "notes",
+                "delivery_date", "partner", "customer_ref", "notes", "updated_at",
             ])
 
         for p in planned:

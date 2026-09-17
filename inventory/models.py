@@ -245,6 +245,7 @@ class Product(models.Model):
 
     # task14 M2 (DEF-A5): فلتر الفترة + ترتيب «الأحدث أولاً» — القديم يأخذ تاريخ الترحيل
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 
     quantity_on_hand = models.DecimalField(
         max_digits=18, decimal_places=4, default=0, db_column='QuantityOnHand',
@@ -779,6 +780,7 @@ class Stocktake(models.Model):
         'accounting.JournalHeader', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='JournalID', related_name='stocktakes')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 
     class Meta:
         db_table = 'stocktakes'

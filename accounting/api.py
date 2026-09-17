@@ -217,6 +217,7 @@ def reverse_journal(
             JournalHeader.objects.filter(pk=orig.pk).update(
                 is_posted=False,
                 description=new_desc,
+                updated_at=timezone.now(),
             )
 
         logger.info(

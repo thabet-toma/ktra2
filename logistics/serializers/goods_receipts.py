@@ -182,6 +182,7 @@ class GoodsReceiptListSerializer(serializers.ModelSerializer):
             'partner', 'partner_name', 'supplier_ref', 'is_standalone', 'doc_label',
             'auto_created', 'journal', 'notes',
             'lines_count', 'total_quantity', 'total_remaining', 'created_at',
+            'updated_at',
         ]
         read_only_fields = fields
 

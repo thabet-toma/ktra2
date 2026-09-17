@@ -98,6 +98,8 @@ export const StocktakePage: React.FC = () => {
   // editingPosted = هل هو مُرحَّل (عرض فقط، لا تعديل).
   const [editingId, setEditingId] = useState<number | null>(null);
   const [editingPosted, setEditingPosted] = useState(false);
+  // ختمُ «آخر تعديل» للجرد المفتوح (#109 §٩) — يُلتقط عند فتحه، ولجردٍ جديد `null`.
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
 
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم فعليّ
   // (عدّ كمية، اختيار منتج، إضافة/حذف سطر…) لا داخل تبديل تحديد الطباعة (ليس
@@ -251,7 +253,7 @@ export const StocktakePage: React.FC = () => {
   const resetForm = () => {
     setDate(today); setWarehouse(""); setNotes(""); setFilterMode("all");
     setLines([{ product: "", counted_quantity: "", selected: false }]); setShowForm(false);
-    setEditingId(null); setEditingPosted(false); setTouched(false);
+    setEditingId(null); setEditingPosted(false); setDocUpdatedAt(null); setTouched(false);
   };
 
   // فتح مستند جرد محفوظ للعرض/المتابعة: المسودة تُفتح للتعديل، والمُرحَّل للعرض فقط.
@@ -273,6 +275,7 @@ export const StocktakePage: React.FC = () => {
       })));
       setEditingId(id);
       setEditingPosted(!!d.is_posted);
+      setDocUpdatedAt(d.updated_at ?? null);
       setFilterMode("all");
       setShowForm(true);
       setTouched(false);
@@ -315,11 +318,8 @@ export const StocktakePage: React.FC = () => {
     isTouched: touched,
     onRestore: onRestoreDraft,
     isPosted: editingPosted,
-    // GAP معروف: `Stocktake` (inventory/models.py) لا يحمل `updated_at` —
-    // `created_at` فقط. فلا مصدر حقيقي لـ«تغيّر المستند بعد مسودتك» (issue
-    // #109 §٩) لهذه الشاشة، و`null` هنا يُعطّل ذلك الفحص بصمت. إصلاحه خادميّ
-    // (إضافة الحقل + migration + الserializer) وخارج نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ فتح الجرد (`StocktakeSerializer.updated_at`)؛ لجردٍ جديد `null`.
+    docUpdatedAt: editingId != null ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 

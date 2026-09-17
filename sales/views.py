@@ -1278,7 +1278,7 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
                     )
                     if customer_ref:
                         delivery.customer_ref = customer_ref
-                        delivery.save(update_fields=["customer_ref"])
+                        delivery.save(update_fields=["customer_ref", "updated_at"])
                 else:
                     delivery = create_standalone_delivery_note(
                         tenant, partner=partner, lines=lines,

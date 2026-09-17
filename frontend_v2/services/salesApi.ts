@@ -548,6 +548,8 @@ export type DeliveryNoteRow = {
   total_remaining: string;
   delivered_at: string | null;
   created_at: string;
+  /** ختمُ آخر حفظ — مسودّةُ المحرِّر تقارنه (#109 §٩). */
+  updated_at?: string | null;
 };
 
 export type DeliveryNoteDto = DeliveryNoteRow & { lines: DeliveryNoteLineDto[] };

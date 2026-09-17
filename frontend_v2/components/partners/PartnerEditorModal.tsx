@@ -56,6 +56,8 @@ type PartnerDetail = PartnerEditorResult & {
   end_of_dealing_date?: string | null;
   assigned_price_tier?: number | null;
   bank_accounts?: BankForm[];
+  /** ختمُ آخر حفظ — مسودّةُ البطاقة تقارنه (#109 §٩). */
+  updated_at?: string | null;
 };
 
 type CurrencyRow = { CurrencyID: number; Code: string; Name?: string | null };
@@ -148,6 +150,8 @@ export const PartnerEditorModal: React.FC<{
   // مشتقّة داخل useEffect؛ حالةٌ مشتقّة تفوّت بالضبط حالة «عُدِّل مرّةً ثم
   // غادر» التي صُمِّمت الميزة لأجلها).
   const [touched, setTouched] = useState(false);
+  // ختمُ «آخر تعديل» للطرف المفتوح (#109 §٩) — من جلب البطاقة.
+  const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
   const markTouched = () => setTouched(true);
   // نقطة إعادة التهيئة الوحيدة في هذا الملف (جلب تفاصيل الطرف أدناه) غير
   // متزامنة، واستعادة المسودّة من IndexedDB (داخل الخطّاف) غير متزامنة أيضاً
@@ -196,6 +200,8 @@ export const PartnerEditorModal: React.FC<{
         if (cancelled) return;
         setCurrencies(currencyRows);
         setCostCenters(costCenterRows);
+        // الختمُ قبل فحص المسودّة المستعادة: هو ختمُ الخادم لا حالةُ النموذج.
+        setDocUpdatedAt(partner?.updated_at ?? null);
         // ISSUE #121: مسودّةٌ استُعيدت للتوّ (سباقٌ مع هذا الجلب نفسه) — لا
         // تُطمَس بنسخة الخادم. العلامة تُستهلَك فور قراءتها كي لا تمنع تحميلاً
         // لاحقاً حقيقياً (تبديل partnerId مثلاً بينما المكوّن نفسه لا يُعاد تركيبه).
@@ -243,15 +249,8 @@ export const PartnerEditorModal: React.FC<{
     // بطاقة الطرف لا تحمل مفهوم «مرحَّل» كالمستندات المحاسبية — لا قيدٌ يمنع
     // تعديلها بعد الحفظ (بخلاف فاتورةٍ أو سندٍ مرحَّل)، فلا حالة عرضٍ فقط هنا.
     isPosted: false,
-    // GAP معروف: نموذج `Partner` (partners/models.py) يحمل `created_at` وحده
-    // (auto_now_add) — بلا حقل `updated_at`/`auto_now` إطلاقاً، ولا حتى على
-    // مستوى القاعدة، و`PartnerSerializer`/`PartnerListSerializer`
-    // (partners/serializers.py) لا يعرضان واحداً تبعاً لذلك. فلا مصدر حقيقي
-    // لـ`docUpdatedAt` في هذه الشاشة، و`null` دائماً هنا يُعطّل بصمت فحص
-    // «تغيّر المستند بعد مسودّتك» (issue #109 §٩) لبطاقة الطرف وحدها. إصلاحه
-    // خادميّ (إضافة updated_at للنموذج + migration + الـserializer) وخارج
-    // نطاق هذه المهمة.
-    docUpdatedAt: null,
+    // ختمُ الخادم لحظةَ جلب البطاقة (`PartnerSerializer.updated_at`)؛ لطرفٍ جديد `null`.
+    docUpdatedAt: partnerId ? docUpdatedAt : null,
   });
   const { draftSavedAt, draftSaveFailed, discardDraft } = draftApi;
 

@@ -739,6 +739,7 @@ class DeliveryOrder(models.Model):
         db_column="JournalID", related_name="delivery_orders",
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
     delivered_at = models.DateTimeField(null=True, blank=True, db_column="DeliveredAt")
 
     class Meta:
@@ -1480,6 +1481,7 @@ class CreditDebitNote(models.Model):
         db_column="JournalID",
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
     created_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         on_delete=models.SET_NULL,

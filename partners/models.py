@@ -130,6 +130,7 @@ class Partner(models.Model):
     )
 
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 
     class Meta:
         db_table = 'partners'

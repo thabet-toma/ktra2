@@ -135,9 +135,9 @@ class PartnerSerializer(serializers.ModelSerializer):
             'opening_balance', 'opening_balance_date', 'currency',
             'linked_account', 'group', 'default_cost_center',
             'end_of_dealing_date', 'assigned_price_tier', 'row_color',
-            'attachments', 'bank_accounts'
+            'attachments', 'bank_accounts', 'updated_at',
         ]
-        read_only_fields = ['id', 'created_at']
+        read_only_fields = ['id', 'created_at', 'updated_at']
 
     def _tenant_id(self):
         """شركة البطاقة: من السطر عند التعديل، ومن سياق الطلب عند الإنشاء."""
@@ -185,7 +185,7 @@ class PartnerListSerializer(serializers.ModelSerializer):
             'postal_code', 'credit_limit', 'image_path', 'created_at',
             'opening_balance', 'opening_balance_date', 'currency',
             'linked_account', 'group', 'default_cost_center',
-            'end_of_dealing_date', 'assigned_price_tier', 'row_color',
+            'end_of_dealing_date', 'assigned_price_tier', 'row_color', 'updated_at',
         ]
         read_only_fields = fields
 

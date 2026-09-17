@@ -237,10 +237,10 @@ class ProductSerializer(serializers.ModelSerializer):
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
             'effective_min_stock_level', 'effective_max_stock_level',
-            'created_at',
+            'created_at', 'updated_at',
             'attachments',
         ]
-        read_only_fields = ['id', 'tenant', 'quantity_on_hand', 'avg_cost', 'created_at']
+        read_only_fields = ['id', 'tenant', 'quantity_on_hand', 'avg_cost', 'created_at', 'updated_at']
 
     def get_group_key(self, obj):
         from .services import product_group_key
@@ -662,9 +662,9 @@ class StocktakeSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'stocktake_number', 'stocktake_date',
             'warehouse', 'warehouse_name', 'notes',
-            'is_posted', 'journal', 'created_at', 'lines',
+            'is_posted', 'journal', 'created_at', 'updated_at', 'lines',
         ]
-        read_only_fields = ['id', 'stocktake_number', 'is_posted', 'journal', 'created_at']
+        read_only_fields = ['id', 'stocktake_number', 'is_posted', 'journal', 'created_at', 'updated_at']
 
     def create(self, validated_data):
         lines = validated_data.pop('lines', [])
