@@ -66,6 +66,7 @@ import {
   CommercialDocumentsList,
   type CommercialListColumn,
 } from "../shared/CommercialDocumentsList";
+import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 
 type Partner = { id: number; name: string };
 /** نسبة ضريبة من شجرة الحسابات — الحقل على البند مفتاحُها لا نسبتها المئوية. */
@@ -197,13 +198,10 @@ export const SalesQuotationsPage: React.FC = () => {
         if (!alive) return;
         const m = new Map<number, { price: string; source: "last_invoice" | "quote" | "default"; source_label: string }>();
         for (const r of rows) {
-          // #147: **وجودُ السعر لا كونُه موجباً** — سطرٌ بِيع فعلاً بصفر
-          // (هديّة، أو بندٌ مجّانيّ ضمن صفقة) رقمٌ حقيقيٌّ في تاريخ هذا
-          // الزبون، وإسقاطُه يجعل الشاشة تقول «لا سابقة» وهي كاذبة. القاعدة
-          // الذهبية «فارغٌ يبقى فارغاً» تمنع اختلاقَ صفرٍ لا وجود له، لا
-          // إخفاءَ صفرٍ موجود. (فاتورة البيع ما زالت على `> 0` — فارقٌ
-          // سابقٌ لهذه المواصفة، يُحسَم على حدة.)
-          if (r.price != null && String(r.price).trim() !== "") {
+          // #147: **وجودُ السعر لا كونُه موجباً** — القاعدةُ ومبرّرُها في
+          // `utils/customerPriceList.ts`، مشتركةٌ مع فاتورة البيع وعرض السعر
+          // والطلبية فلا تفترق الشاشات الثلاث.
+          if (hasRecordedCustomerPrice(r.price)) {
             m.set(r.product_id, { price: String(r.price), source: r.source, source_label: r.source_label });
           }
         }

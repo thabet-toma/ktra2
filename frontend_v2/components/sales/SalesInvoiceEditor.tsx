@@ -119,6 +119,7 @@ import { humanizeThrown } from "../../utils/drfError";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { FieldError } from "../ui/FieldError";
+import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 import {
   KitDocumentShell,
   KitDocumentView,
@@ -2425,7 +2426,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         if (cancelled) return;
         const m = new Map<number, { price: string; source: "last_invoice" | "quote" | "default"; prices?: any[] }>();
         for (const r of rows) {
-          if (r.price != null && Number(r.price) > 0) {
+          // #147: وجودُ السعر لا كونُه موجباً — صفرٌ مسجَّل سعرٌ حقيقيّ (القاعدة في المصدر).
+          if (hasRecordedCustomerPrice(r.price)) {
             m.set(r.product_id, { price: r.price, source: r.source, prices: r.prices });
           }
         }
