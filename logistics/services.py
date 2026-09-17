@@ -2220,16 +2220,18 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
                 # Feature 2: قيد الاستلام يدين المخزون/الضريبة ويدائن ذمم المورد بالكامل
                 # فقط — لا يُسوّي النقدية. الدفع للمورد يُسجَّل كوصل دفع مستقل
                 # (SupplierPayment، Dr ذمم المورد / Cr صندوق) بعد الاستلام.
+                # توجيه الـsubledger (مرآة post_to_accounting): سطر الذمم وحده يَحمل
+                # المورد — مدين المخزون/الضريبة الموسوم به يُلغي دائنه فيظهر رصيده صفراً.
                 ap_account = _resolve_ap_account(invoice.partner)
                 lines_payload = [
                     {'account': inventory_account.id, 'debit': inv_net, 'credit': Decimal('0'),
-                     'partner': invoice.partner_id},
+                     'partner': None},
                 ]
                 if inv_vat > 0:
                     vat_acc = _resolve_vat_input_account(invoice.tenant)
                     lines_payload.append({
                         'account': vat_acc.id, 'debit': inv_vat, 'credit': Decimal('0'),
-                        'partner': invoice.partner_id,
+                        'partner': None,
                     })
 
                 # دائن ذمم المورد بكامل القيمة المستلمة
@@ -2837,17 +2839,18 @@ def post_purchase_return(invoice, *, user=None):
         if gross > 0:
             ap_account = _resolve_ap_account(partner)
             inventory_account = _resolve_inventory_account(tenant)
+            # توجيه الـsubledger: سطر الذمم (الحساب الرقابي) وحده يَحمل المورد.
             lines_payload = [
                 {'account': ap_account.id, 'debit': gross, 'credit': _D('0'),
                  'partner': partner.id},
                 {'account': inventory_account.id, 'debit': _D('0'), 'credit': inv_net,
-                 'partner': partner.id},
+                 'partner': None},
             ]
             if inv_vat > 0:
                 vat_acc = _resolve_vat_input_account(tenant)
                 lines_payload.append({
                     'account': vat_acc.id, 'debit': _D('0'), 'credit': inv_vat,
-                    'partner': partner.id,
+                    'partner': None,
                 })
             journal = post_journal(
                 tenant_id=tenant.TenantID,

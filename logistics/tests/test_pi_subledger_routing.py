@@ -230,3 +230,91 @@ class PurchaseSubledgerRoutingTest(APITestCase):
         debit, credit = partner_posted_balance(self.tenant.TenantID, self.partner.id)
         assert (credit - debit) == Decimal("1000.00"), \
             "الشراء الآجل غير المدفوع يجب أن يُظهر المورد دائناً بكامل الإجمالي"
+
+
+class PurchasePartnerTagOtherPathsTest(APITestCase):
+    """A1-1: مرآة fddfcce في المسارات الثلاثة الباقية — الاستلام قبل الترحيل،
+    ترحيل مرجع الشراء، ونقطة `purchase-receipts/` القديمة. فقط سطر ذمم المورد
+    يَحمل الشريك؛ فيساوي `partner_posted_balance` مبلغ الذمم وحده."""
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventory.models import Warehouse
+        cls.user = User.objects.create_user(username="pitag", password="x")
+        cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
+        cls.tenant = create_company("شركة وسم الموردين", cls.user)
+        create_fiscal_year(cls.tenant, 2026)
+        cls.ap = Account.objects.create(
+            tenant=cls.tenant, code="2101-T", name="ذمم المورد",
+            account_type="Liability", is_active=True)
+        cls.partner = Partner.objects.create(
+            tenant=cls.tenant, name="مورد الوسم", partner_type="Supplier",
+            linked_account=cls.ap)
+        cls.warehouse = Warehouse.objects.get(tenant=cls.tenant, is_default=True)
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="PTAG-1", name_ar="منتج الوسم",
+            quantity_on_hand=Decimal("10"), avg_cost=Decimal("100"))
+
+    def _auth(self):
+        self.client.force_authenticate(user=self.user)
+        return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _invoice(self, number, *, qty="2", price="100", vat="16"):
+        inv = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number=number,
+            partner=self.partner, currency=self.ils, invoice_date="2026-06-11",
+            exchange_rate=Decimal("1"), grand_total=Decimal("0"),
+            payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT)
+        item = PurchaseInvoiceItem.objects.create(
+            invoice=inv, product=self.product, name="منتج الوسم",
+            quantity=Decimal(qty), unit_price=Decimal(price),
+            total_price=Decimal(qty) * Decimal(price),
+            is_taxable=True, vat_percent=Decimal(vat))
+        return inv, item
+
+    def _assert_only_ap_tagged(self, journal):
+        jl = list(JournalLine.objects.filter(journal=journal).select_related("account"))
+        assert any(l.account_id != self.ap.id for l in jl), "لا سطر مقابل للذمم"
+        offenders = [
+            (l.account.code, l.partner_id) for l in jl
+            if l.partner_id != (self.partner.id if l.account_id == self.ap.id else None)
+        ]
+        assert not offenders, f"سطور غير الذمم تَحمل المورد: {offenders}"
+
+    def test_receive_before_post_tags_only_ap(self):
+        inv, item = self._invoice("PTAG-RCV-1")  # 200 + 32 ض = 232
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/receive/",
+            {"lines": [{"item_id": item.pk, "quantity": 2,
+                        "warehouse_id": self.warehouse.pk}]},
+            format="json", **self._auth())
+        assert res.status_code == 200, res.content
+        inv.refresh_from_db()
+        debit, credit = partner_posted_balance(self.tenant.TenantID, self.partner.id)
+        assert (debit, credit) == (Decimal("0"), Decimal("232.00"))
+        self._assert_only_ap_tagged(inv.journal)
+
+    def test_purchase_return_tags_only_ap(self):
+        from logistics.services import create_purchase_return, post_purchase_return
+        original, _item = self._invoice("PTAG-ORIG-1", qty="5")
+        ret = create_purchase_return(
+            self.tenant, original_invoice=original, partner=self.partner,
+            return_date="2026-06-15",
+            lines=[{"product": self.product.id, "quantity": 2, "unit_price": 100}])
+        post_purchase_return(ret, user=None)
+        ret.refresh_from_db()
+        debit, credit = partner_posted_balance(self.tenant.TenantID, self.partner.id)
+        assert (debit, credit) == (Decimal("232.00"), Decimal("0"))
+        self._assert_only_ap_tagged(ret.journal)
+
+    def test_legacy_purchase_receipt_endpoint_tags_only_ap(self):
+        from accounting.models import JournalHeader
+        res = self.client.post(
+            "/api/accounting/purchase-receipts/",
+            {"partner_id": self.partner.id, "amount": "116", "tax_amount": "16",
+             "transaction_date": "2026-06-11"},
+            format="json", **self._auth())
+        assert res.status_code == 201, res.content
+        debit, credit = partner_posted_balance(self.tenant.TenantID, self.partner.id)
+        assert (debit, credit) == (Decimal("0"), Decimal("116.00"))
+        self._assert_only_ap_tagged(JournalHeader.objects.get(pk=res.json()["journal_id"]))

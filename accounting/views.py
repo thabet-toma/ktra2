@@ -2130,18 +2130,20 @@ class PurchaseReceiptViewSet(viewsets.ViewSet):
             except Exception:
                 pass
 
+        # توجيه الـsubledger: سطر ذمم المورد (الحساب الرقابي) وحده يَحمل الشريك —
+        # مدين المخزون/الضريبة الموسوم به يُلغي دائن الذمم في رصيده.
         lines_payload = [
-            {'account': inventory_account.id, 'debit': net_amount, 'credit': Decimal('0'), 'partner': partner.id},
+            {'account': inventory_account.id, 'debit': net_amount, 'credit': Decimal('0'), 'partner': None},
         ]
         if tax_amount > 0:
             if vat_lines:
                 for vtype, vamt, vpct in vat_lines:
                     lines_payload.append({
-                        'account': vat_input_account.id, 'debit': vamt, 'credit': Decimal('0'), 'partner': partner.id,
+                        'account': vat_input_account.id, 'debit': vamt, 'credit': Decimal('0'), 'partner': None,
                     })
             else:
                 lines_payload.append({
-                    'account': vat_input_account.id, 'debit': tax_amount, 'credit': Decimal('0'), 'partner': partner.id,
+                    'account': vat_input_account.id, 'debit': tax_amount, 'credit': Decimal('0'), 'partner': None,
                 })
         lines_payload.append({
             'account': partner.linked_account.id, 'debit': Decimal('0'), 'credit': amount, 'partner': partner.id,
