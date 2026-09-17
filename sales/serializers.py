@@ -10,6 +10,7 @@ from partners.models import Partner
 from tenants.models import Currency
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 from core.payments import (
+    CHEQUE_DUE_DATE_REQUIRED,
     apply_default_cash_account,
     document_partner_balance_summary,
     document_overdue_state,
@@ -779,13 +780,6 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
             "conversion_rate",
         ]
         read_only_fields = ["id", "amount_in_invoice_currency", "conversion_rate"]
-
-
-# T-CHQ3/ط: رسالة واحدة لشرط تاريخ الاستحقاق — يستهلكها سند القبض وسند الصرف
-# ومسار إرفاق الشيكات بالفاتورة، فلا تتفرّع صياغتها بين الشاشات.
-CHEQUE_DUE_DATE_REQUIRED = (
-    "تاريخ استحقاق الشيك مطلوب — عليه تقوم المحفظة والتحصيل عند الموعد."
-)
 
 
 class _PaymentChequeInputSerializer(serializers.Serializer):

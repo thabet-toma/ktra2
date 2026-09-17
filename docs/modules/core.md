@@ -251,6 +251,7 @@ run_drill(key, tenant_id, params) -> dict        # أسطر التفصيل + م�
 
 # core/payments.py — الدفع المشترك
 validate_payment(ctx) · post_payment(...) · document_payment_summary(total, paid)
+CHEQUE_DUE_DATE_REQUIRED            # رسالة شرط استحقاق الشيك — سندا القبض والصرف معاً
 
 # core/terminology.py — المعجم (ISSUE #82)
 term(tenant, key) -> str            # مصطلحٌ واحد؛ مفتاح/قالب غائب يسقط للافتراضي بلا رمي

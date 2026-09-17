@@ -3,8 +3,9 @@
 (shipments → deals الحافة الوحيدة عبر الوحدات). كل الأسماء العامة تُعاد
 تصديرها فيبقى `from logistics.serializers import X` شغّالاً.
 """
-# الترويسة (imports مثل CHEQUE_DUE_DATE_REQUIRED/PartnerSerializer) كانت
-# مُعاد تصديرها من الملف الأصلي — _helpers يحملها فيستعيدها import *.
+# الترويسة كانت مُعاد تصديرها من الملف الأصلي — _helpers يحملها فيستعيدها
+# import *. (2026-09-17: حُذف منها `PartnerSerializer`/`CHEQUE_DUE_DATE_REQUIRED`
+# — استيرادان من داخليات partners/sales بلا مستهلك واحد عبر هذه الحزمة.)
 from ._helpers import *  # noqa: F401,F403
 from ._helpers import (
     _deal_title_for_list_preview,

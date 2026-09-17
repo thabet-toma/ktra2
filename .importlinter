@@ -25,9 +25,11 @@ root_packages =
     docshare
     employee_ops
     hr
+    import_file
     inventory
     logistics
     partners
+    platform_ops
     realestate
     sales
     store
@@ -52,9 +54,11 @@ source_modules =
     docshare
     employee_ops
     hr
+    import_file
     inventory
     logistics
     partners
+    platform_ops
     realestate
     sales
     store
@@ -105,17 +109,21 @@ forbidden_modules =
     store.views
     store.urls
 # baseline 2026-08-11 — كانت 6 انتهاكات؛ المرحلة 2-د فكّت الأربعة الخاصة
-# بـpartners.signals (المستوردون تحولوا إلى accounting.api) — بقي اثنان
-# مؤجلان عمداً (docs/REFACTOR_PROMPTS.md «ديون مؤجلة»)
+# بـpartners.signals (المستوردون تحولوا إلى accounting.api)، و2026-09-17 فكّ
+# الاثنين الباقيين (`logistics.serializers.*` → partners/sales.serializers:
+# `PartnerSerializer` ميت، و`CHEQUE_DUE_DATE_REQUIRED` انتقل إلى `core.payments`).
 ignore_imports =
-    logistics.serializers.* -> partners.serializers
-    logistics.serializers.* -> sales.serializers
     # 2026-09-10: الاختبارات مستثناة كما في العقدين 2 و3 (`*.tests.*` هناك).
     # العقد يحرس **تشابك الإنتاج**: أن يعتمد تشغيلُ app على داخليّات أخرى.
     # واختبارٌ يؤكّد ضمانةً في app أخرى (هنا: `supplier_note` للقراءة فقط في
     # مُسلسِل عرض المورّد — حارس T-132) يقصد ذلك الاعتماد قصداً، وهو ما يُراد.
     *.tests.* -> logistics.serializers
     *.tests.* -> logistics.serializers.*
+    # baseline عند الإضافة 2026-09-17 — `platform_ops` و`import_file` دخلا العقود
+    # (كانا خارجها فلا يحرسهما شيء). الانتهاك الوحيد الذي ظهر: فوترةُ اشتراك الخدمة
+    # تبني فاتورة البيع بـ`SalesInvoiceSerializer` كسولاً لتمرّ بمسار التحقّق المعتمد
+    # (مُعلَن في `platform_ops/tests/test_isolation_guard.py`).
+    platform_ops.services -> sales.serializers
 
 # ─────────────────────────────────────────────────────────────────────────────
 # العقد 2 — ممنوع استيراد accounting.models من خارج accounting
@@ -136,9 +144,11 @@ source_modules =
     docshare
     employee_ops
     hr
+    import_file
     inventory
     logistics
     partners
+    platform_ops
     realestate
     sales
     store

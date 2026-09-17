@@ -59,7 +59,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
      │            ┌──────┴──┴────┐           │
      └────────────│    sales     │───────────┘
                   └──────▲───────┘
-                         │  (SupplierPayment + ثابت serializer)
+                         │  (SupplierPayment)
                   ┌──────┴───────┐
                   │  logistics   │──► accounting · inventory · partners
                   └──────────────┘
@@ -227,7 +227,7 @@ python -m pytest -q -n auto          # البوابة قبل أي commit (‎~80
 | الدين | الموقع | المرجع |
 |---|---|---|
 | ~~قيود تُكتب يدوياً متجاوزةً `post_journal`~~ ✅ عولج (المرحلة 2) | كل الكتابة عبر `accounting.api`/`post_journal` | `docs/REFACTOR_PROMPTS.md` مرحلة 2 |
-| `logistics` يستورد داخليات `sales.serializers` | `logistics/serializers/_helpers.py` (`CHEQUE_DUE_DATE_REQUIRED`) | `docs/REFACTOR_PROMPTS.md` (دين مؤجل) |
+| ~~`logistics` يستورد داخليات `sales.serializers`/`partners.serializers`~~ ✅ عولج 2026-09-17 — `PartnerSerializer` كان ميتاً، والثابت انتقل | `core/payments.py` (`CHEQUE_DUE_DATE_REQUIRED`) | `docs/DEPENDENCIES.md` §6 |
 | 5 نماذج دفع منفصلة | `logistics/`, `sales/`, `accounting/` | `docs/decisions/payment_model_unification.md` |
 | مرفقات كحقول URL متفرّقة بلا نموذج موحّد | `logistics/models.py` | `docs/decisions/attachments_model.md` |
 | ~~ملفات عملاقة~~ ✅ عولج (المرحلة 3) — الأربعة الكبرى صارت حزماً | `logistics/views/`, `sales/services/`, `logistics/serializers/`, `core/reports/` | `docs/REFACTOR_PROMPTS.md` مرحلة 3 |

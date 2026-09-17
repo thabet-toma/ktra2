@@ -637,7 +637,7 @@ python manage.py test --settings=core.test_settings
 ## ديون مؤجلة عمداً (خارج هذه الخطة — مراحل مستقبلية)
 
 - واجهة facade مماثلة لـ`inventory` (reserve/issue/reverse)
-- فك `logistics/serializers.py:11` عن داخليات `sales`
+- ~~فك `logistics/serializers.py:11` عن داخليات `sales`~~ — ✅ 2026-09-17: الثابت في `core/payments.py` واستيراد `PartnerSerializer` الميت حُذف، وأُزيل سطرا `ignore_imports`
 - توحيد نماذج الدفع الخمسة (`docs/decisions/payment_model_unification.md`)
 - نموذج `Attachment` الموحّد (`docs/decisions/attachments_model.md`)
 - ~~تنفيذ Celery إذا أوصت به المرحلة 6~~ — **لم توصِ به** (2026-08-12): الاختناق سعة لا عمل ثقيل. يبقى مفتوحاً لـP1-12/P1-13 وحدهما، وبعد سيناريو حمل يستهدفهما

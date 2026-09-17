@@ -9,7 +9,6 @@ from rest_framework import serializers
 
 from accounting.models import Account
 from sales.models import SupplierPayment, SupplierPaymentAllocation
-from sales.serializers import CHEQUE_DUE_DATE_REQUIRED
 from core.payments import (
     apply_default_cash_account,
     document_partner_balance_summary,
@@ -65,7 +64,6 @@ from logistics.models import (
     LocalShipmentPayment,
 )
 
-from partners.serializers import PartnerSerializer
 from inventory.models import Product
 
 logger = logging.getLogger("logistics.serializers")

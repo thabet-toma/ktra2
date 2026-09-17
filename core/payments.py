@@ -15,6 +15,15 @@ from typing import Any
 from django.core.exceptions import ValidationError
 
 
+# T-CHQ3/ط: رسالة واحدة لشرط تاريخ الاستحقاق — يستهلكها سند القبض وسند الصرف
+# ومسار إرفاق الشيكات بالفاتورة، فلا تتفرّع صياغتها بين الشاشات. مكانها هنا لا
+# في `sales.serializers`: جانبا البيع والشراء يستوردان هذه الوحدة أصلاً، وداخليّاتُ
+# serializers app أخرى ممنوعةٌ بعقد `.importlinter` (`no-cross-app-internals`).
+CHEQUE_DUE_DATE_REQUIRED = (
+    "تاريخ استحقاق الشيك مطلوب — عليه تقوم المحفظة والتحصيل عند الموعد."
+)
+
+
 @dataclass(frozen=True)
 class PaymentContext:
     """تمثيل موحّد لأي دفعة بغض النظر عن مصدرها."""

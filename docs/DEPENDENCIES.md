@@ -141,8 +141,8 @@
 | 5 | `logistics/management/commands/purge_deals.py:81-82` | حذف `JournalLine`/`JournalHeader` جماعي مباشر | مسار الحذف الوحيد للقيود خارج accounting — أمر إدارة، لكنه يعمل على بيانات إنتاج |
 | 6 | `partners/signals.py` كـservice بحكم الواقع | `ensure_partner_linked_account` مستورد من `logistics/services.py`، `logistics/views/`، `logistics/accruals.py`، `sales/services/` | منطق أعمال يسكن في وحدة signals — 4 apps تعتمد على «أثر جانبي» كواجهة؛ مرشّح أول للانتقال لـ`accounting.api` (مرحلة 2-ج) |
 | 7 | `inventory/services.py` | `record_stock_movement` (الدالة الحرجة) يستورد `sales.SalesSettings` كسولاً لقرار المخزون السالب | **اتجاه معكوس**: inventory (طبقة سفلى) يعتمد على sales؛ القرار يخص المخزون ومكانه الطبيعي inventory |
-| 8 | `logistics/serializers/` | `from sales.serializers import CHEQUE_DUE_DATE_REQUIRED` | استيراد ثابت من داخليات serializers لـapp آخر — مذكور في «الديون المؤجلة» |
-| 9 | `logistics/serializers/` | `from partners.serializers import PartnerSerializer` | إعادة استخدام serializer عبر الحدود تربط عقد API الخاص بـlogistics بشكل partners الداخلي |
+| 8 | ~~`logistics/serializers/`~~ ✅ | ~~`from sales.serializers import CHEQUE_DUE_DATE_REQUIRED`~~ | **فُكّ 2026-09-17:** الثابت انتقل إلى `core/payments.py` (`CHEQUE_DUE_DATE_REQUIRED`) — يستورده جانبا البيع والشراء، ويبقى متاحاً من `sales.serializers` |
+| 9 | ~~`logistics/serializers/`~~ ✅ | ~~`from partners.serializers import PartnerSerializer`~~ | **فُكّ 2026-09-17:** كان استيراداً ميتاً في كل وحدات الحزمة العشر (لا استعمال ولا مستهلك عبر إعادة التصدير) — حُذف |
 | 10 | `sales/models.py` + `logistics/models.py` | FKs على مستوى الوحدة إلى `Account`/`JournalHeader`/`TaxRate` | ربط سكيمة: أي تغيير في accounting.models يموّج migrations في 4 apps (موثّق في ARCHITECTURE.md) |
 | 11 | `accounting/services.py:930-1013, 1498-1525` | accounting يستورد `sales.models`/`logistics.models`/`sales.services`/`logistics.services` | **دورة كاملة**: الطبقة التي يفترض أنها الأساس تستدعي من فوقها — تمنع أي فصل مستقبلي لـaccounting كحزمة مستقلة |
 | 12 | `accounting/serializers.py:75-167` + `accounting/views.py:313-365, 1355` | accounting يقرأ `LogisticsPayment`/`SalesInvoice`/`CustomerPayment` لعرض مراجع القيود | نفس الدورة من جهة العرض — فكّها يحتاج reference-resolver عام بدل استيراد مباشر |
@@ -201,8 +201,9 @@
 2. **`ensure_partner_linked_account` من `partners/signals` إلى واجهة عامة** —
    يفكّ 4 استيرادات فئة (ج) دفعة واحدة (`logistics×3` + `sales×1`) ويحرّر
    إنشاء الحسابات من طبقة الـsignals.
-3. **الاستيرادان في `logistics/serializers.py:12,230`** — نقل الثابت
+3. ✅ **الاستيرادان في `logistics/serializers/`** — نقل الثابت
    `CHEQUE_DUE_DATE_REQUIRED` لموضع محايد وفكّ `PartnerSerializer` — يصفّر فئة (ج).
+   *(نُفِّذ 2026-09-17: الموضع المحايد `core/payments.py`.)*
 4. **قرار المخزون السالب من `sales.SalesSettings` إلى inventory**
    (`inventory/services.py`) — يفكّ أخطر اتجاه معكوس. يحتاج قرار منتج:
    نقل الحقل بـmigration أو واجهة قراءة — خارج نطاق المرحلة 2، وثّق فيها فقط.
@@ -221,13 +222,20 @@
   **المباشر** فقط (`allow_indirect_imports = True`):
   1. `no-cross-app-internals` — داخليات (serializers/views/signals/admin/urls)
      ليست واجهات عامة. baseline: كان **6 انتهاكات** (§3 بنود 6، 8، 9) —
-     **بعد المرحلة 2: بقي 2** (استيرادا `logistics.serializers` المؤجلان).
+     **بعد المرحلة 2: بقي 2** (استيرادا `logistics.serializers` المؤجلان)،
+     **وفُكّا 2026-09-17** فصار الـbaseline الإنتاجي سطراً واحداً دخل مع
+     `platform_ops` (أدناه).
   2. `no-direct-accounting-models` — `accounting.models` ليس واجهة عامة.
      baseline: كان **27 وحدة مستورِدة** (كل مواضع §4) + استثناء wildcard
      للاختبارات — **بعد المرحلة 2: بقي 25** (حُذف `logistics.signals` الميت
      و`partners.signals` المرحَّل؛ الباقي قراءات وFKs موثّقة).
   3. `inventory-independent-of-sales-logistics` — الاتجاه المعكوس لا يتمدد.
      baseline: **8 وحدات** (§3 بنود 7، 13).
+- **التغطية:** `root_packages` ومصادر العقدين 1 و2 تضمّ كل apps المشروع. `platform_ops`
+  و`import_file` كانا خارجها حتى 2026-09-17 — فكان «3 kept» لا يحرسهما أصلاً. أُدخلا
+  بـbaseline سطرٍ واحد: `platform_ops.services -> sales.serializers` (فوترة اشتراك
+  الخدمة تبني الفاتورة بـ`SalesInvoiceSerializer` كسولاً — مُعلَن في
+  `platform_ops/tests/test_isolation_guard.py`).
 - **الوضع:** «تحذير موثّق» — الانتهاكات القائمة مسجّلة كـ`ignore_imports`
   فلا يفشل البناء اليوم؛ أي استيراد **جديد** يخالف عقداً يُفشِل `lint-imports`
   (تم التحقق عملياً بإضافة استيراد مخالف مؤقت). **قاعدة الصيانة:** ممنوع إضافة
@@ -237,6 +245,10 @@
   الـbackend قبل pytest (تثبيت الأداة يتم أصلاً عبر `pip install -r requirements.txt`).
 - **التشغيل محلياً:** `lint-imports` من جذر المشروع (تحليل ثابت — لا يحتاج
   إعدادات Django ولا قاعدة بيانات). النتيجة المتوقعة: `Contracts: 3 kept, 0 broken`.
+  على ويندوز قد لا يكون مجلّد `Scripts` لتثبيت المستخدم على `PATH` فلا يُعرف الأمر؛
+  البديل بلا PATH:
+  `python -c "import sys; from importlinter.cli import lint_imports_command; sys.exit(lint_imports_command())"`.
+  الأداة تُنشئ `.import_linter_cache/` في الجذر وتتجاهله بـ`.gitignore` داخله.
 
 ## التحقق
 
