@@ -112,7 +112,7 @@ def confirm_sales_order(order, *, user=None):
             if product is None:
                 shortages.append(f"المنتج #{product_id} غير متاح في الشركة الحالية")
                 continue
-            if product.is_service or product.allow_negative_stock:
+            if product.is_service:
                 continue
             available = (
                 Decimal(str(product.quantity_on_hand or 0))

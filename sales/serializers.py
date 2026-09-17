@@ -95,18 +95,13 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
             raise serializers.ValidationError(
                 {"lines": f"المنتج {prod.sku} لا يتبع نفس الشركة."}
             )
-        # M2-14 + M3: المخزون السالب مسموح إن سمح الإعداد العام أو المنتج.
-        # **والخدمة معفاةٌ صراحةً**: كان الإعفاء متروكاً لـ`allow_negative_stock`
-        # وحده على أساس أن الخدمة تُنشأ به، وهو `default=False` — فخدمةٌ أُنشئت
-        # بالافتراضي (ومنها الخدماتُ المزروعة مع القوالب) كانت تُردّ بـ«الكمية
-        # تتجاوز المتوفر» على شيءٍ لا مخزون له أصلاً. بقيّة المستودع تعفيها
-        # صراحةً (`sales/services/orders.py`، `sales/services/numbering.py`)
-        # وهذا الموضع وحده كان شاذّاً.
-        if (
-            getattr(prod, "is_service", False)
-            or global_allow
-            or getattr(prod, "allow_negative_stock", False)
-        ):
+        # M2-14 + M3: المخزونُ السالب مسموحٌ إن سمح إعدادُ الشركة — ولا علامةَ
+        # تجاوزٍ على المنتج بعد اليوم (حُذفت: كانت تغلب الإعداد بلا أن تظهر في
+        # أيّ شاشة). **والخدمة معفاةٌ صراحةً بـ`is_service`** لا بعلامةٍ أخرى:
+        # خدمةٌ لا مخزون لها أصلاً، فكانت تُردّ بـ«الكمية تتجاوز المتوفر» متى
+        # أطفأت الشركةُ السالبَ العام. بقيّةُ المستودع تعفيها صراحةً كذلك
+        # (`sales/services/orders.py`، `sales/services/numbering.py`).
+        if getattr(prod, "is_service", False) or global_allow:
             continue
         if qty > prod.quantity_on_hand + Decimal("0.0001"):
             raise serializers.ValidationError(

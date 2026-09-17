@@ -192,7 +192,6 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'hs_code': 'رمز HS',
         'min_stock_level': 'حد المخزون الأدنى',
         'max_stock_level': 'حد المخزون الأقصى',
-        'allow_negative_stock': 'السماح بالمخزون السالب',
         'is_serialized': 'التتبع التسلسلي',
         'is_service': 'نوع الخدمة',
         'is_for_sale_online': 'البيع عبر الإنترنت',

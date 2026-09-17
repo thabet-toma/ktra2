@@ -193,8 +193,6 @@ def test_negative_stock_creates_provisional_layer_and_consumes_it_without_except
     """بلا طبقات، بيع 10 ⟵ طبقة is_provisional=True أُنشئت واستُهلكت، والكمية -10."""
     tenant = _make_tenant("مخزون سالب RSM")
     product = _make_product(tenant, "RSM-6")
-    product.allow_negative_stock = True
-    product.save(update_fields=["allow_negative_stock"])
 
     mv = record_stock_movement(
         product=product, movement_type="OUT", quantity=Decimal("10"),

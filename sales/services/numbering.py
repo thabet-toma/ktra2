@@ -309,7 +309,7 @@ def guard_reserved_stock(
     requested = defaultdict(lambda: Decimal("0"))
     for line in lines:
         product = products_by_id.get(line.product_id) or line.product
-        if getattr(product, "is_service", False) or getattr(product, "allow_negative_stock", False):
+        if getattr(product, "is_service", False):
             continue
         requested[line.product_id] += Decimal(str(line.quantity or 0))
     if not requested:

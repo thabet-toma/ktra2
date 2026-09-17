@@ -15,7 +15,7 @@ class ProductFamilySerializer(serializers.ModelSerializer):
         fields = [
             'id', 'tenant', 'name_ar', 'name_en', 'category', 'uom',
             'min_stock_level', 'max_stock_level',
-            'is_serialized', 'is_service', 'allow_negative_stock',
+            'is_serialized', 'is_service',
             'sale_account_override', 'sale_return_account_override',
             'purchase_account_override', 'purchase_return_account_override',
             'supplier_account_override', 'ending_inventory_account_override',

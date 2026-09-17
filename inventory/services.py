@@ -225,7 +225,7 @@ def generate_next_sku(tenant) -> str:
 FAMILY_FIELD_NAMES = (
     'name_ar', 'name_en', 'category', 'uom',
     'min_stock_level', 'max_stock_level',
-    'is_serialized', 'is_service', 'allow_negative_stock',
+    'is_serialized', 'is_service',
     'sale_account_override', 'sale_return_account_override',
     'purchase_account_override', 'purchase_return_account_override',
     'supplier_account_override', 'ending_inventory_account_override',
@@ -753,8 +753,8 @@ def record_stock_movement(
     نفاد الطبقات المفتوحة قبل تغطية صرفٍ كاملاً (مخزون سالب مسموح): تُنشأ
     طبقة مؤقّتة (`is_provisional=True`) بالكمية غير المغطّاة، بآخر كلفةٍ
     معروفة (`avg_before` إن كان > 0، وإلا `_last_layer_unit_cost`، وإلا صفر)،
-    ثم تُستهلك فوراً — حارس منع المخزون السالب (`allow_negative_stock`) لا
-    يتغيّر بحرف؛ هذا يعالج فقط ما يتجاوزه هو أصلاً.
+    ثم تُستهلك فوراً — حارس منع المخزون السالب (`SalesSettings.
+    allow_negative_stock_default`) لا يتغيّر بحرف؛ هذا يعالج فقط ما يتجاوزه أصلاً.
 
     `restores_movement`: مرّرها مع حركةٍ واردة (مرتجع بيعٍ يشير إلى حركة
     الصرف الأصلية) لإرجاع البضاعة إلى *نفس* طبقتها وموقعها في رتل FIFO
@@ -808,14 +808,16 @@ def record_stock_movement(
         if movement_type in INBOUND_TYPES:
             new_qty = qty_before + quantity
         else:
-            # ── Negative stock prevention (يتجاوزها allow_negative_stock على المنتج أو الإعداد العام) ──
+            # ── منعُ المخزون السالب — قرارٌ واحدٌ على مستوى الشركة ──
+            # كان للمنتج علامةُ تجاوزٍ (`Product.allow_negative_stock`) تغلب
+            # الإعداد العام، بلا زرٍّ في الواجهة يكشفها: شركةٌ تقول «ممنوع»
+            # وأصنافٌ تبيع بالسالب ولا سبيل لمعرفة لماذا (قيس على الإنتاج:
+            # 1,490 صنفاً من 1,556 في شركةٍ واحدة، وضعها سكربتُ استيرادٍ على
+            # الكلّ). حُذفت العلامة — السياسةُ إعدادٌ واحدٌ ظاهرٌ للشركة.
             if qty_before < quantity:
                 from sales.models import SalesSettings
                 ss = SalesSettings.objects.filter(tenant_id=tenant.TenantID if tenant else prod.tenant_id).first()
-                global_allow = ss.allow_negative_stock_default if ss else True
-
-                # Allow if either global default is true, or product explicitly allows it
-                allow_negative = global_allow or bool(getattr(prod, "allow_negative_stock", False))
+                allow_negative = ss.allow_negative_stock_default if ss else True
                 if not allow_negative:
                     raise ValidationError(
                         f"لا يمكن صرف {quantity} من المنتج «{prod.sku}» — "

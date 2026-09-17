@@ -410,9 +410,10 @@ class Command(BaseCommand):
                         category=random.choice(categories),
                         uom=uom,
                         min_stock_level=random.choice([0, 5, 10, 20]),
-                        # المخزون السالب مسموح: الحمل يبيع عشوائياً، ورفض
-                        # «لا يوجد رصيد» يلوّث معدّل الأخطاء بلا علاقة بالأداء.
-                        allow_negative_stock=True,
+                        # المخزون السالب مسموحٌ بإعداد الشركة (`SalesSettings.
+                        # allow_negative_stock_default` افتراضُه السماح): الحملُ
+                        # يبيع عشوائياً، ورفضُ «لا يوجد رصيد» يلوّث معدّل الأخطاء
+                        # بلا علاقة بالأداء.
                         sale_price=Decimal(str(round(random.uniform(20, 600), 2))),
                     )
                 )

@@ -88,7 +88,6 @@ class ProductFamily(models.Model):
     max_stock_level = models.IntegerField(blank=True, null=True, db_column='MaxStockLevel')
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
     is_service = models.BooleanField(default=False, db_column='IsService')
-    allow_negative_stock = models.BooleanField(default=False, db_column='AllowNegativeStock')
     sale_account_override = models.ForeignKey(
         'accounting.Account', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='SaleAccountOverrideID', related_name='product_families_sale_override',
@@ -206,11 +205,6 @@ class Product(models.Model):
     reorder_mode = models.CharField(
         max_length=10, choices=REORDER_MODE_CHOICES, default=REORDER_MODE_MANUAL,
         db_column='ReorderMode',
-    )
-    allow_negative_stock = models.BooleanField(
-        default=False,
-        db_column='AllowNegativeStock',
-        help_text='إن عُطّل، يُرفض الصرف إذا تجاوزت الكمية المتاحة (الافتراضي: مرفوض)',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
     # THA-24: سياسة الكفالة على المنتج — لا حالة. النسخة الفعلية لكل وحدة مباعة

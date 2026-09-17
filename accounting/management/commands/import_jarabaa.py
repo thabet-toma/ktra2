@@ -422,7 +422,6 @@ class Command(BaseCommand):
                 brand=clean(r.get('Brand')) or '',
                 category=cat,
                 is_serialized=(tracking == 'serial'),
-                allow_negative_stock=True,
                 min_stock_level=int(dec(r.get('LowStockThershol'))) or None,
                 quantity_on_hand=Decimal('0'),
                 avg_cost=dec(r.get('AverageCost')) or dec(r.get('BuyPrice')),
@@ -474,7 +473,7 @@ class Command(BaseCommand):
         _fam, p = create_product_with_family(
             tenant=self.tenant, sku=f'AX-{self._auto_seq:05d}',
             name_ar=key[:200], category=cat,
-            allow_negative_stock=True, quantity_on_hand=Decimal('0'), avg_cost=Decimal('0'))
+            quantity_on_hand=Decimal('0'), avg_cost=Decimal('0'))
         self.prod_by_name[key] = p
         return p, True
 
