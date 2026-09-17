@@ -240,3 +240,165 @@ class CustomerPaymentApiOnAccountTest(APITestCase):
         self.assertEqual(allocated.data["unallocated_amount"], "0.00")
         self.invoice.refresh_from_db()
         self.assertEqual(self.invoice.amount_paid, Decimal("100.00"))
+
+
+def _dealloc_url(pay):
+    return f"/api/sales/payments/{pay.id}/deallocate/"
+
+
+class CustomerPaymentDeallocateTest(APITestCase):
+    """A1-3: فكّ توزيعٍ واحد — المبلغ يعود «على الحساب» بلا قيد جديد، والفاتورة
+    تعود بمدفوعها وحالتها، والسند بمتاحه غير الموزَّع."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.user = User.objects.create_user(username="dealloc_c", password="x")
+        cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True)
+        cls.tenant = create_company("شركة فك التوزيع", cls.user)
+        create_fiscal_year(cls.tenant, 2026)
+        cls.ar = Account.objects.create(
+            tenant=cls.tenant, code="1101-D", name="ذمم", account_type="Asset", is_active=True)
+        cls.cash = Account.objects.create(
+            tenant=cls.tenant, code="1000-D", name="صندوق", account_type="Asset", is_active=True)
+        cls.customer = Partner.objects.create(
+            tenant=cls.tenant, name="عميل الفك", partner_type="Customer", linked_account=cls.ar)
+
+    def _auth(self, user=None, tenant=None):
+        self.client.force_authenticate(user=user or self.user)
+        return {"HTTP_X_TENANT_ID": str((tenant or self.tenant).TenantID)}
+
+    def _invoice(self, number, total=100, currency=None):
+        return SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number=number, customer=self.customer,
+            currency=currency or self.ils, invoice_date="2026-06-15",
+            invoice_type=SalesInvoice.INVOICE_CREDIT, grand_total=Decimal(str(total)),
+            status=SalesInvoice.STATUS_POSTED,
+        )
+
+    def _journal_count(self, pay):
+        return JournalHeader.objects.filter(
+            tenant_id=self.tenant.TenantID, reference_type="CUSTOMER_PAYMENT",
+            reference_id=pay.id).count()
+
+    def _assert_restored(self, pay, inv, res):
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["unallocated_amount"], "150.00")
+        self.assertEqual(res.data["allocations"], [])
+        inv.refresh_from_db()
+        self.assertEqual(inv.amount_paid, Decimal("0.00"))
+        detail = self.client.get(f"/api/sales/invoices/{inv.id}/", **self._auth())
+        self.assertEqual(detail.status_code, 200, detail.data)
+        self.assertEqual(detail.data["payment_status"], "unpaid")
+        self.assertFalse(PaymentAllocation.objects.filter(payment=pay).exists())
+
+    def test_deallocate_late_allocation_restores_invoice_and_voucher(self):
+        inv = self._invoice("SI-D-1")
+        pay = _payment(self.tenant, self.customer, self.cash, self.ils, 150)
+        post_customer_payment(pay)
+        allocate_customer_payment(pay, [{"invoice": inv.id, "amount": "100"}])
+        inv.refresh_from_db()
+        self.assertEqual(inv.amount_paid, Decimal("100.00"))
+        journals = self._journal_count(pay)
+        alloc = PaymentAllocation.objects.get(payment=pay)
+
+        res = self.client.post(
+            _dealloc_url(pay), {"allocation": alloc.id}, format="json", **self._auth())
+        self._assert_restored(pay, inv, res)
+        # ربطٌ فقط: لا قيد يُضاف ولا يُحذف.
+        self.assertEqual(self._journal_count(pay), journals)
+        # الفاتورة تقبل توزيعاً جديداً بعد الفكّ.
+        allocate_customer_payment(pay, [{"invoice": inv.id, "amount": "100"}])
+        inv.refresh_from_db()
+        self.assertEqual(inv.amount_paid, Decimal("100.00"))
+
+    def test_deallocate_allocation_posted_with_voucher(self):
+        inv = self._invoice("SI-D-2")
+        pay = _payment(self.tenant, self.customer, self.cash, self.ils, 150, [(inv, 100)])
+        post_customer_payment(pay)
+        alloc = PaymentAllocation.objects.get(payment=pay)
+        res = self.client.post(
+            _dealloc_url(pay), {"allocation": alloc.id}, format="json", **self._auth())
+        self._assert_restored(pay, inv, res)
+
+    def test_deallocate_on_draft_voucher_only_unlinks(self):
+        inv = self._invoice("SI-D-3")
+        pay = _payment(self.tenant, self.customer, self.cash, self.ils, 150, [(inv, 100)])
+        alloc = PaymentAllocation.objects.get(payment=pay)
+        res = self.client.post(
+            _dealloc_url(pay), {"allocation": alloc.id}, format="json", **self._auth())
+        self._assert_restored(pay, inv, res)
+
+    def test_auto_cash_settlement_refused(self):
+        """سند التسوية التلقائية يُحرَّر مع إلغاء ترحيل فاتورته، لا بفكّ توزيعه."""
+        inv = self._invoice("SI-D-AUTO")
+        pay = _payment(self.tenant, self.customer, self.cash, self.ils, 100, [(inv, 100)])
+        pay.auto_settled_invoice = inv
+        pay.save(update_fields=["auto_settled_invoice"])
+        post_customer_payment(pay)
+        alloc = PaymentAllocation.objects.get(payment=pay)
+        res = self.client.post(
+            _dealloc_url(pay), {"allocation": alloc.id}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("ألغِ ترحيل الفاتورة", res.data["error"])
+        self.assertTrue(PaymentAllocation.objects.filter(pk=alloc.pk).exists())
+
+    def test_other_tenant_allocation_is_404(self):
+        other_user = User.objects.create_user(username="dealloc_c2", password="x")
+        other = create_company("شركة أخرى للفك", other_user)
+        create_fiscal_year(other, 2026)
+        oar = Account.objects.create(
+            tenant=other, code="1101-O", name="ذمم", account_type="Asset", is_active=True)
+        ocash = Account.objects.create(
+            tenant=other, code="1000-O", name="صندوق", account_type="Asset", is_active=True)
+        ocust = Partner.objects.create(
+            tenant=other, name="عميلهم", partner_type="Customer", linked_account=oar)
+        oinv = SalesInvoice.objects.create(
+            tenant=other, invoice_number="SI-O-1", customer=ocust, currency=self.ils,
+            invoice_date="2026-06-15", invoice_type=SalesInvoice.INVOICE_CREDIT,
+            grand_total=Decimal("100"), status=SalesInvoice.STATUS_POSTED)
+        opay = _payment(other, ocust, ocash, self.ils, 100, [(oinv, 100)])
+        post_customer_payment(opay)
+        oalloc = PaymentAllocation.objects.get(payment=opay)
+        mine = _payment(self.tenant, self.customer, self.cash, self.ils, 50)
+
+        # سندهم عبر شركتي ⇒ 404؛ وتوزيعهم تحت سندي ⇒ 404.
+        res = self.client.post(
+            _dealloc_url(opay), {"allocation": oalloc.id}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 404, res.data)
+        res = self.client.post(
+            _dealloc_url(mine), {"allocation": oalloc.id}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 404, res.data)
+        self.assertTrue(PaymentAllocation.objects.filter(pk=oalloc.pk).exists())
+        oinv.refresh_from_db()
+        self.assertEqual(oinv.amount_paid, Decimal("100.00"))
+
+    def test_cross_currency_posted_allocation_refused(self):
+        """سند بعملةٍ غير عملة الفاتورة رُحِّل بقيد فرق عملة لتوزيعه — فكّه يترك
+        الفرق معلّقاً، فالمخرج إلغاء ترحيل السند."""
+        from accounting.models import ExchangeRate
+        usd = Currency.objects.create(Code="USD", Name="دولار", Symbol="$")
+        ExchangeRate.objects.create(
+            tenant=self.tenant, from_currency=usd, to_currency=self.ils,
+            rate=Decimal("4"), effective_date="2026-01-01")
+        ExchangeRate.objects.create(
+            tenant=self.tenant, from_currency=self.ils, to_currency=usd,
+            rate=Decimal("0.25"), effective_date="2026-01-01")
+        inv = self._invoice("SI-D-FX", total=400)
+        pay = CustomerPayment.objects.create(
+            tenant=self.tenant, partner=self.customer, currency=usd,
+            exchange_rate=Decimal("4"), amount=Decimal("100"),
+            cash_or_bank_account=self.cash, payment_date="2026-06-20")
+        PaymentAllocation.objects.create(
+            tenant=self.tenant, payment=pay, invoice=inv, amount=Decimal("100"))
+        post_customer_payment(pay)
+        inv.refresh_from_db()
+        paid_before = inv.amount_paid
+        alloc = PaymentAllocation.objects.get(payment=pay)
+
+        res = self.client.post(
+            _dealloc_url(pay), {"allocation": alloc.id}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("ألغِ ترحيل السند", res.data["error"])
+        self.assertTrue(PaymentAllocation.objects.filter(pk=alloc.pk).exists())
+        inv.refresh_from_db()
+        self.assertEqual(inv.amount_paid, paid_before)

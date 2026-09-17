@@ -43,9 +43,11 @@ def recalculate_invoice_amounts(invoice: SalesInvoice, lines: list[SalesInvoiceL
 def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPayment:  # ترحيل سند قبض (2223)
 def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:  # التراجع عن سند قبض (1029)
 def allocate_customer_payment(payment: CustomerPayment, allocations: list[dict], *, user=None) -> CustomerPayment:  # (2557)
+def deallocate_customer_payment(allocation: PaymentAllocation, *, user=None) -> CustomerPayment:  # فكّ توزيعٍ واحد بلا قيد: يعود «على الحساب» ويُنقص amount_paid بحلقة unpost نفسها (`_reverse_allocations_amount_paid`)؛ يرفض المرحّل بعملةٍ غير عملة الفاتورة (فرق العملة رُحِّل) والتسوية النقدية التلقائية
 def post_supplier_payment(payment: 'SupplierPayment', *, user=None) -> 'SupplierPayment':  # يستدعيه logistics (3808)
 def unpost_supplier_payment(payment: 'SupplierPayment', *, user=None) -> dict:  # التراجع عن سند صرف — مرآة unpost_customer_payment؛ «المدفوع» على فواتير الشراء مشتق فلا مبالغ تُعكس
 def allocate_supplier_payment(payment: 'SupplierPayment', allocations: list[dict], *, user=None) -> 'SupplierPayment':  # (3896)
+def deallocate_supplier_payment(allocation, *, user=None) -> 'SupplierPayment':  # مرآة deallocate_customer_payment — حذفُ الصفّ يكفي («المدفوع» مشتق) ولا فرق عملة يُرحَّل مع سند الصرف
 def collect_invoice_payment(invoice: SalesInvoice, *, cash=None, cash_account_id=None, cheques=None, from_on_account=None, post_invoice=False, payment_date=None, user=None) -> CustomerPayment | None:  # منسّق التحصيل: ترحيل + سند قبض واحد + خصم من رصيد العميل، ذرّياً
 def attach_voucher_and_post(invoice: SalesInvoice, *, cash_amount=0, cash_account_id=None, cheques=None, user=None) -> SalesInvoice:  # غلاف فوق المنسّق — شكل قديم محفوظ
 def confirm_sales_order(order, *, user=None):  # تأكيد الطلبية = حجز بلا قيد (3336)
@@ -89,7 +91,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | GET/POST · DELETE | `invoices/{id}/attachments/` · `attachments/{attachment_id}/` | `SalesInvoiceViewSet.attachments` · `delete_attachment` — تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
 | POST | `invoices/{id}/payment-voucher/` · `invoices/{id}/duplicate/` | (498) · (400) — الأولى غلاف قديم فوق `collect` |
 | POST | `invoices/repeat-last-month/` | `SalesInvoiceViewSet.repeat_last_month` (`views.py`) — «كرّر فاتورة الشهر الماضي» (ISSUE #53، قرار 22): يكتشف المصدر من `customer_id` في الجسم بدل pk صريح، ثم نفس آلية `duplicate` |
-| POST | `payments/{id}/post/` · `payments/{id}/unpost/` · `payments/{id}/allocate/` | `CustomerPaymentViewSet` (1099/1074/1117) |
+| POST | `payments/{id}/post/` · `payments/{id}/unpost/` · `payments/{id}/allocate/` · `payments/{id}/deallocate/` | `CustomerPaymentViewSet` — `deallocate` بجسم `{"allocation": id}`، والتوزيع مُنطاق بالسند (404 لغيره) |
 | POST | `quotations/{id}/convert/` · `orders/{id}/confirm/` · `orders/{id}/convert/` · `orders/{id}/deposit/` | (1396) · (1505) · (1526) · (1539) |
 | GET/PUT | `settings/current/` · POST `settings/restore-defaults/` | `SalesSettingsViewSet` (1169/1183) |
 | GET | `reports/aging/` · `reports/dormant-customers/` · `reports/reserved-stock/` | `SalesReportViewSet` (`urls.py:32-42`) |

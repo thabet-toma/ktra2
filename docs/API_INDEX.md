@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **886**
+عدد النقاط: **887**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -500,6 +500,7 @@
 | `/api/logistics/supplier-payments/suggest-fifo-allocations/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/allocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/{pk}/deallocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/post/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/unpost/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-quotations/` | `SupplierQuotationViewSet` | `logistics/views/procurement.py` |
@@ -820,6 +821,7 @@
 | `/api/sales/payments/suggest-fifo-allocations/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/allocate/` | `CustomerPaymentViewSet` | `sales/views.py` |
+| `/api/sales/payments/{pk}/deallocate/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/post/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/unpost/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/quotations/` | `SalesQuotationViewSet` | `sales/views.py` |

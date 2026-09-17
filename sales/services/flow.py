@@ -716,6 +716,33 @@ def release_auto_sales_return_refund(invoice: SalesInvoice, *, user=None) -> dic
     }
 
 
+def _reverse_allocations_amount_paid(allocations) -> None:
+    """يُنقص `amount_paid` على فاتورة كل توزيع بمبلغه بعملة الفاتورة (تحت قفل).
+
+    مصدرٌ واحد لمسارَي «السند المرحّل يترك الفاتورة»: التراجع عن ترحيل السند
+    كلّه (`unpost_customer_payment`) وفكّ توزيعٍ واحد (`deallocate_customer_payment`).
+    يُستدعى داخل معاملة المستدعي، ولتوزيعات سندٍ **مرحّل** وحده — قبل الترحيل لم
+    يُضَف شيء إلى `amount_paid` أصلاً.
+    """
+    inv_ids = sorted({a.invoice_id for a in allocations})
+    locked = {
+        inv.pk: inv
+        for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
+    }
+    for alloc in allocations:
+        inv = locked.get(alloc.invoice_id)
+        if inv is None:
+            continue
+        back = Decimal(str(
+            alloc.amount_in_invoice_currency
+            if alloc.amount_in_invoice_currency is not None else alloc.amount
+        ))
+        inv.amount_paid = max(
+            Decimal(str(inv.amount_paid or 0)) - back, Decimal("0")
+        ).quantize(DEC)
+        inv.save(update_fields=["amount_paid"])
+
+
 def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
     """التراجع عن ترحيل سند قبض: حذف قيوده وإرجاع ما سدّده من الفواتير.
 
@@ -747,23 +774,7 @@ def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
             document_label=f"سند قبض #{payment.id}",
         )
         allocations = list(payment.allocations.all())
-        inv_ids = sorted({a.invoice_id for a in allocations})
-        locked = {
-            inv.pk: inv
-            for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
-        }
-        for alloc in allocations:
-            inv = locked.get(alloc.invoice_id)
-            if inv is None:
-                continue
-            back = Decimal(str(
-                alloc.amount_in_invoice_currency
-                if alloc.amount_in_invoice_currency is not None else alloc.amount
-            ))
-            inv.amount_paid = max(
-                Decimal(str(inv.amount_paid or 0)) - back, Decimal("0")
-            ).quantize(DEC)
-            inv.save(update_fields=["amount_paid"])
+        _reverse_allocations_amount_paid(allocations)
         payment.is_posted = False
         payment.journal = None
         payment.save(update_fields=["is_posted", "journal"])
@@ -3146,6 +3157,64 @@ def allocate_customer_payment(
             ),
         )
 
+    return payment
+
+
+def deallocate_customer_payment(
+    allocation: PaymentAllocation, *, user=None
+) -> CustomerPayment:
+    """A1-3: فكّ توزيعٍ واحد من سند قبض — عكس `allocate_customer_payment`.
+
+    ربطٌ يُحلّ بلا قيد: الذمم خُفِّضت وقت ترحيل السند، فالمبلغ يعود «على الحساب»
+    (رصيداً لصالح العميل) ويُوزَّع لاحقاً. على السند المرحّل يُنقَص `amount_paid`
+    بمبلغ التوزيع بعملة الفاتورة — نفس حلقة `unpost_customer_payment`.
+
+    يُرفض حيث يترك الفكّ الدفاترَ تكذب — والمخرج فيهما قائمٌ أصلاً:
+    - سندٌ مرحّل بعملةٍ غير عملة الفاتورة: `post_customer_payment` يسدّد الذمم
+      بقيمة الفاتورة المحوّلة ويقيّد الفرق في «فروقات العملة» — قيدٌ لا يُعكَس
+      هنا، فالمخرج التراجع عن ترحيل السند.
+    - سند التسوية التلقائية لفاتورة بيع نقدية: يُحرَّر مع إلغاء ترحيل فاتورته
+      (`release_auto_cash_settlement`)، وتمييزُ بياناته القديمة يعتمد التوزيع نفسه.
+    """
+    with transaction.atomic():
+        payment = CustomerPayment.objects.select_for_update().get(pk=allocation.payment_id)
+        alloc = (
+            PaymentAllocation.objects.select_related("invoice")
+            .filter(pk=allocation.pk, payment=payment).first()
+        )
+        if alloc is None:
+            raise ValidationError("التوزيع غير موجود على هذا السند.")
+        inv = alloc.invoice
+        if payment.is_posted:
+            if payment.currency_id != inv.currency_id:
+                raise ValidationError(
+                    f"لا يمكن فكّ توزيع السند #{payment.id} عن الفاتورة "
+                    f"{inv.invoice_number}: عملتاهما مختلفتان ورُحِّل فرق العملة مع "
+                    "السند. ألغِ ترحيل السند ثم أعد توزيعه."
+                )
+            if is_auto_cash_settlement(payment, inv):
+                raise ValidationError(
+                    f"السند #{payment.id} تسويةٌ تلقائية للفاتورة النقدية "
+                    f"{inv.invoice_number} — لا يُفكّ توزيعه. ألغِ ترحيل الفاتورة بدلاً من ذلك."
+                )
+            _reverse_allocations_amount_paid([alloc])
+        amount = alloc.amount
+        alloc.delete()
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="DEALLOCATE",
+            model_name="CustomerPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Deallocated {amount} from invoice {inv.invoice_number} "
+                f"(posted={payment.is_posted})"
+            ),
+        )
+    logger.info(
+        "Payment %s deallocated %s ← invoice %s (posted=%s)",
+        payment.id, amount, inv.invoice_number, payment.is_posted,
+    )
     return payment
 
 

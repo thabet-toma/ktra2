@@ -95,6 +95,7 @@ from .flow import (
     _resolve_ar_account_for_partner,
     post_customer_payment,
     allocate_customer_payment,
+    deallocate_customer_payment,
     credit_preview_for_sale,
 )
 from .orders import (
@@ -116,6 +117,7 @@ from .supplier_vat import (
     post_supplier_payment,
     unpost_supplier_payment,
     allocate_supplier_payment,
+    deallocate_supplier_payment,
     build_vat_statement,
     vat_statement_diff_report,
 )
@@ -198,6 +200,7 @@ __all__ = [
     "_resolve_ar_account_for_partner",
     "post_customer_payment",
     "allocate_customer_payment",
+    "deallocate_customer_payment",
     "credit_preview_for_sale",
     "_recalculate_order_totals",
     "confirm_sales_order",
@@ -215,6 +218,7 @@ __all__ = [
     "post_supplier_payment",
     "unpost_supplier_payment",
     "allocate_supplier_payment",
+    "deallocate_supplier_payment",
     "build_vat_statement",
     "vat_statement_diff_report",
 ]

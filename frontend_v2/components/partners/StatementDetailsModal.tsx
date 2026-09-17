@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { X, Loader2, FileText, ExternalLink } from "lucide-react";
+import { X, Loader2, FileText, ExternalLink, Unlink } from "lucide-react";
 import {
   getSalesInvoice,
   getCustomerPayment,
+  deallocateCustomerPayment,
   type SalesInvoiceDetail,
   type CustomerPaymentRow,
+  type CustomerPaymentAllocation,
 } from "../../services/salesApi";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import type { PurchaseInvoiceDto } from "../../types/purchaseInvoice";
 import { referenceTypeLabel, invoicePathForReference } from "../../utils/entityLinks";
@@ -61,6 +64,32 @@ export const StatementDetailsModal: React.FC<{
   const [sales, setSales] = useState<SalesInvoiceDetail | null>(null);
   const [purchase, setPurchase] = useState<PurchaseInvoiceDto | null>(null);
   const [payment, setPayment] = useState<CustomerPaymentRow | null>(null);
+  const confirm = useConfirm();
+  const [deallocating, setDeallocating] = useState(false);
+
+  // A1-3: فكّ توزيعٍ واحد — لا يغيّر قيداً فلا يمسّ أرقام الكشف؛ يُعاد جلب السند
+  // وحده ليعرض توزيعاته بعد الفكّ.
+  const handleDeallocate = async (a: CustomerPaymentAllocation) => {
+    if (!payment || a.id == null || deallocating) return;
+    const ok = await confirm({
+      title: "فكّ التوزيع",
+      message:
+        `سيُفكّ توزيع ${formatMoney(a.amount)} من السند #${payment.id} عن الفاتورة #${a.invoice}، ` +
+        "فيعود المبلغ «على الحساب» وتعود الفاتورة بمتبقّيها — بلا قيد جديد. متابعة؟",
+      confirmText: "فكّ التوزيع",
+      danger: true,
+    });
+    if (!ok) return;
+    setDeallocating(true);
+    setError(null);
+    try {
+      setPayment(await deallocateCustomerPayment(payment.id, a.id));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setDeallocating(false);
+    }
+  };
 
   const kind = kindOf(movement?.reference_type);
   const refId = movement?.reference_id ?? null;
@@ -192,6 +221,7 @@ export const StatementDetailsModal: React.FC<{
                     <tr>
                       <th className={th}>الفاتورة المُسددة</th>
                       <th className={th}>المبلغ المخصّص</th>
+                      <th className={th}><span className="sr-only">إجراءات</span></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -199,6 +229,18 @@ export const StatementDetailsModal: React.FC<{
                       <tr key={a.id ?? i}>
                         <td className={td}>فاتورة #{a.invoice}</td>
                         <td className={`${td} ktra-num`}>{formatMoney(a.amount)}</td>
+                        <td className={td}>
+                          {a.id != null && (
+                            <button
+                              type="button"
+                              onClick={() => void handleDeallocate(a)}
+                              disabled={deallocating}
+                              className="inline-flex items-center gap-1 text-[var(--ktra-danger)] hover:underline disabled:opacity-50"
+                            >
+                              <Unlink className="w-3.5 h-3.5" /> فكّ التوزيع
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -491,6 +491,20 @@ export const purchaseInvoiceApi = {
     return res.json();
   },
 
+  /**
+   * A1-3: فكّ توزيعٍ واحد من سند صرف — المبلغ يعود «على الحساب» بلا قيد جديد،
+   * وتعود فاتورة الشراء بمتبقّيها. مرآة `deallocateCustomerPayment`.
+   */
+  deallocateSupplierPayment: async (id: number, allocation: number): Promise<SupplierPaymentDto> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/deallocate/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ allocation }),
+    });
+    await handle(res, "deallocateSupplierPayment");
+    return res.json();
+  },
+
   /** ترحيل سند صرف مسودة (زر «ترحيل» في قائمة سندات الصرف). */
   postSupplierPayment: async (id: number): Promise<{ id: number; is_posted: boolean }> => {
     const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/post/`, {

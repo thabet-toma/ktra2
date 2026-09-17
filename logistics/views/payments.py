@@ -5,7 +5,7 @@ from decimal import Decimal
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
 from django.db.models import (
@@ -241,6 +241,36 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         log_activity(
             action='update', entity_type='supplier_payment', entity_id=payment.id,
             entity_label=f'#{payment.id}', description='توزيع سند صرف على الفواتير',
+            partner_ids=[payment.partner_id], request=request,
+        )
+        return Response(SupplierPaymentSerializer(payment).data)
+
+    @action(detail=True, methods=['post'], url_path='deallocate')
+    def deallocate(self, request, pk=None):
+        """A1-3: فكّ توزيعٍ واحد عن فاتورة الشراء — مرآة نظيره في سند القبض.
+
+        السند مُنطاق بالشركة (`get_object`) والتوزيع مُنطاق بالسند ⇒ 404 لغيرهما.
+        """
+        payment = self.get_object()
+        try:
+            allocation_id = int(request.data.get('allocation'))
+        except (TypeError, ValueError):
+            allocation_id = None
+        allocation = (
+            payment.allocations.filter(pk=allocation_id).first() if allocation_id else None
+        )
+        if allocation is None:
+            raise NotFound('التوزيع غير موجود على هذا السند.')
+        try:
+            from sales.services import deallocate_supplier_payment
+            deallocate_supplier_payment(allocation, user=request.user)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action='update', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='فكّ توزيع سند صرف عن فاتورة',
             partner_ids=[payment.partner_id], request=request,
         )
         return Response(SupplierPaymentSerializer(payment).data)

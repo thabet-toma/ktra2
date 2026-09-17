@@ -24,6 +24,7 @@ import {
   Printer,
   RefreshCw,
   Undo2,
+  Unlink,
 } from "lucide-react";
 import {
   listCustomerPayments,
@@ -32,9 +33,11 @@ import {
   unpostCustomerPayment,
   deleteCustomerPayment,
   allocateCustomerPayment,
+  deallocateCustomerPayment,
   suggestFifoAllocations,
   getAgingReport,
   getSalesSettings,
+  type CustomerPaymentAllocation,
   type CustomerPaymentRow,
 } from "../../services/salesApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
@@ -266,6 +269,28 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     }
   };
 
+  // A1-3: فكّ توزيعٍ واحد — المبلغ يعود «على الحساب» بلا قيد جديد والفاتورة
+  // تعود بمتبقّيها. الخادم يرفض السند المرحّل بعملة مختلفة والتسوية التلقائية.
+  const handleDeallocate = async (p: CustomerPaymentRow, a: CustomerPaymentAllocation) => {
+    if (a.id == null) return;
+    const ok = await confirm({
+      title: "فكّ التوزيع",
+      message:
+        `سيُفكّ توزيع ${fmt(a.amount)} من السند #${p.id} عن الفاتورة #${a.invoice}، ` +
+        "فيعود المبلغ «على الحساب» وتعود الفاتورة بمتبقّيها — بلا قيد جديد. متابعة؟",
+      confirmText: "فكّ التوزيع",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deallocateCustomerPayment(p.id, a.id);
+      toast("تم فكّ التوزيع — المبلغ عاد على الحساب", "success");
+      await loadAll();
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "فشل فكّ التوزيع"), "error");
+    }
+  };
+
   const handleDelete = async (p: CustomerPaymentRow) => {
     if (p.is_posted) {
       toast("لا يمكن حذف سند مرحّل. ألغِ الترحيل أولاً.", "error");
@@ -337,7 +362,22 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       render: (r) => (
         <span className="text-[11px]">
           {r.allocations && r.allocations.length > 0
-            ? r.allocations.map((a) => `#${a.invoice} = ${fmt(a.amount)}`).join(" · ")
+            ? r.allocations.map((a, i) => (
+                <span key={a.id ?? i} className="inline-flex items-center gap-0.5 me-2">
+                  #{a.invoice} = {fmt(a.amount)}
+                  {a.id != null && (
+                    <button
+                      type="button"
+                      className="ktra-toolbtn"
+                      title="فكّ التوزيع"
+                      aria-label={`فكّ التوزيع عن الفاتورة #${a.invoice}`}
+                      onClick={(e) => { e.stopPropagation(); void handleDeallocate(r, a); }}
+                    >
+                      <Unlink className="w-3 h-3" />
+                    </button>
+                  )}
+                </span>
+              ))
             : <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
         </span>
       ),

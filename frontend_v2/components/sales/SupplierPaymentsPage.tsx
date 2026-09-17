@@ -24,7 +24,7 @@ import {
   type KitToolbarAction,
   type KitTab,
 } from "../kit";
-import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2 } from "lucide-react";
+import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2, Unlink } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareRowButton } from "../shared/ShareRowButton";
@@ -197,6 +197,36 @@ export const SupplierPaymentsPage: React.FC = () => {
     }
   };
 
+  // A1-3: فكّ توزيعٍ واحد — المبلغ يعود «على الحساب» بلا قيد جديد، وفاتورة الشراء
+  // تعود بمتبقّيها (المدفوع مشتقّ من التوزيعات المرحّلة).
+  const handleDeallocate = async (
+    p: SupplierPaymentRow,
+    a: NonNullable<SupplierPaymentRow["allocations"]>[number],
+  ) => {
+    if (busyId != null) return;
+    const label = a.invoice_number || `#${a.invoice}`;
+    const ok = await confirm({
+      title: "فكّ التوزيع",
+      message:
+        `سيُفكّ توزيع ${fmt(a.amount)} من السند #${p.id} عن فاتورة الشراء ${label}، ` +
+        "فيعود المبلغ «على الحساب» وتعود الفاتورة بمتبقّيها — بلا قيد جديد. متابعة؟",
+      confirmText: "فكّ التوزيع",
+      danger: true,
+    });
+    if (!ok) return;
+    setErr(null);
+    setBusyId(p.id);
+    try {
+      await purchaseInvoiceApi.deallocateSupplierPayment(p.id, a.id);
+      setMsg("✓ تم فكّ التوزيع — المبلغ عاد على الحساب");
+      await load();
+    } catch (e: unknown) {
+      setErr(humanizeThrown(e, "فشل فكّ التوزيع"));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
   const accountName = (id: number) => {
     const a = accounts.find((x) => x.id === id);
@@ -229,7 +259,21 @@ export const SupplierPaymentsPage: React.FC = () => {
       render: (r) => (
         <span className="text-[11px]">
           {r.allocations && r.allocations.length > 0
-            ? r.allocations.map((a) => `${a.invoice_number || "#" + a.invoice} = ${fmt(a.amount)}`).join(" · ")
+            ? r.allocations.map((a) => (
+                <span key={a.id} className="inline-flex items-center gap-0.5 me-2">
+                  {a.invoice_number || "#" + a.invoice} = {fmt(a.amount)}
+                  <button
+                    type="button"
+                    className="ktra-toolbtn"
+                    title="فكّ التوزيع"
+                    aria-label={`فكّ التوزيع عن فاتورة الشراء ${a.invoice_number || "#" + a.invoice}`}
+                    disabled={busyId != null}
+                    onClick={(e) => { e.stopPropagation(); void handleDeallocate(r, a); }}
+                  >
+                    <Unlink className="w-3 h-3" />
+                  </button>
+                </span>
+              ))
             : <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
         </span>
       ),

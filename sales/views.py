@@ -7,7 +7,7 @@ from django.db import models, transaction
 from django.db.models.functions import Coalesce
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError as DRFValidationError
+from rest_framework.exceptions import NotFound, ValidationError as DRFValidationError
 from rest_framework.response import Response
 
 from accounting.services import attach_partner_posted_balance, unpost_document
@@ -52,6 +52,7 @@ from .serializers import (
 )
 from .services import (
     allocate_customer_payment,
+    deallocate_customer_payment,
     attach_payment_voucher,
     collect_invoice_payment,
     cancel_quotation,
@@ -1577,6 +1578,38 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             action="update", entity_type="customer_payment", entity_id=payment.id,
             entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
             description="توزيع سند قبض على الفواتير", request=request,
+            partner_ids=[payment.partner_id],
+        )
+        return Response(CustomerPaymentSerializer(payment).data)
+
+    @action(detail=True, methods=["post"], url_path="deallocate")
+    def deallocate(self, request, pk=None):
+        """A1-3: فكّ توزيعٍ واحد عن فاتورته — المبلغ يعود «على الحساب» بلا قيد.
+
+        السند من `get_object` (مُنطاق بالشركة) والتوزيع مُنطاق بالسند، فمعرّف
+        توزيعٍ من شركة أو سند آخر يعود 404.
+        """
+        payment = self.get_object()
+        try:
+            allocation_id = int(request.data.get("allocation"))
+        except (TypeError, ValueError):
+            allocation_id = None
+        allocation = (
+            payment.allocations.filter(pk=allocation_id).first() if allocation_id else None
+        )
+        if allocation is None:
+            raise NotFound("التوزيع غير موجود على هذا السند.")
+        try:
+            deallocate_customer_payment(allocation, user=request.user)
+        except ValidationError as e:
+            return Response(
+                {"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST
+            )
+        payment.refresh_from_db()
+        log_activity(
+            action="update", entity_type="customer_payment", entity_id=payment.id,
+            entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
+            description="فكّ توزيع سند قبض عن فاتورة", request=request,
             partner_ids=[payment.partner_id],
         )
         return Response(CustomerPaymentSerializer(payment).data)

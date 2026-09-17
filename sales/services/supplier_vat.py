@@ -302,6 +302,52 @@ def allocate_supplier_payment(
     return payment
 
 
+def deallocate_supplier_payment(allocation, *, user=None) -> 'SupplierPayment':
+    """A1-3 (المورد): فكّ توزيعٍ واحد من سند صرف — مرآة `deallocate_customer_payment`.
+
+    بخلاف جانب العميل لا `amount_paid` مخزَّن يُعكَس: «المدفوع» على فاتورة الشراء
+    مشتقٌّ من التوزيعات المرحّلة (`purchase_invoice_payment_summary`)، فحذفُ صفّ
+    التوزيع يكفي والمبلغ يعود «على الحساب». ولا فرق عملة يُرفض لأجله: ترحيل سند
+    الصرف قيدٌ واحد (Dr ذمم / Cr صندوق) لا يعرف التوزيع ولا يقيّد فروقات عملة.
+    سند التسوية التلقائية لفاتورة نقدية يُرفض كنظيره — يُحرَّر مع فاتورته.
+    """
+    from logistics.services import is_auto_cash_purchase_settlement
+    from sales.models import SupplierPayment as SP, SupplierPaymentAllocation
+
+    with transaction.atomic():
+        payment = SP.objects.select_for_update().get(pk=allocation.payment_id)
+        alloc = (
+            SupplierPaymentAllocation.objects.select_related("invoice")
+            .filter(pk=allocation.pk, payment=payment).first()
+        )
+        if alloc is None:
+            raise ValidationError("التوزيع غير موجود على هذا السند.")
+        inv = alloc.invoice
+        if payment.is_posted and is_auto_cash_purchase_settlement(payment, inv):
+            raise ValidationError(
+                f"السند #{payment.id} تسويةٌ تلقائية لفاتورة الشراء النقدية "
+                f"{inv.invoice_number} — لا يُفكّ توزيعه. ألغِ ترحيل الفاتورة بدلاً من ذلك."
+            )
+        amount = alloc.amount
+        alloc.delete()
+        create_audit_log(
+            tenant=payment.tenant,
+            user=user,
+            action="DEALLOCATE",
+            model_name="SupplierPayment",
+            object_id=payment.id,
+            change_details=(
+                f"Deallocated {amount} from purchase invoice {inv.invoice_number} "
+                f"(posted={payment.is_posted})"
+            ),
+        )
+    logger.info(
+        "Supplier payment %s deallocated %s ← purchase invoice %s",
+        payment.id, amount, inv.invoice_number,
+    )
+    return payment
+
+
 # ── N8-T13: VatStatement builder ─────────────────────────────
 
 def build_vat_statement(

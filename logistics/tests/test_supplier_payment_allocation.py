@@ -156,3 +156,62 @@ class SupplierPaymentAllocationTest(APITestCase):
         self.assertTrue(rows)
         self.assertTrue(all(r["partner"] == self.partner.id for r in rows))
         self.assertIn("unallocated_amount", rows[0])
+
+    def test_deallocate_restores_invoice_status_and_voucher(self):
+        """A1-3 (مرآة المورد): فكّ توزيعٍ واحد — المدفوع مشتقّ من التوزيعات فيعود
+        وحده، والمبلغ يرجع «على الحساب» بلا قيد جديد."""
+        inv = self._invoice("PINV-AL-D1", 400)
+        inv2 = self._invoice("PINV-AL-D2", 300)
+        pay = self._payment(1000)
+        allocate_supplier_payment(pay, [
+            {"invoice": inv.id, "amount": "400"}, {"invoice": inv2.id, "amount": "300"}])
+        self.assertEqual(self._summary(inv)["payment_status"], "paid")
+        journals = JournalHeader.objects.filter(
+            tenant_id=self.tenant.TenantID, reference_type="SUPPLIER_PAYMENT",
+            reference_id=pay.id).count()
+        alloc = SupplierPaymentAllocation.objects.get(payment=pay, invoice=inv)
+
+        res = self.client.post(
+            f"/api/logistics/supplier-payments/{pay.id}/deallocate/",
+            {"allocation": alloc.id}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 200, res.data)
+        self.assertEqual(res.data["unallocated_amount"], "700.00")
+        self.assertEqual([a["invoice"] for a in res.data["allocations"]], [inv2.id])
+        self.assertEqual(self._summary(inv)["amount_paid"], Decimal("0.00"))
+        self.assertEqual(self._summary(inv)["payment_status"], "unpaid")
+        self.assertEqual(self._summary(inv2)["amount_paid"], Decimal("300.00"))
+        self.assertEqual(
+            JournalHeader.objects.filter(
+                tenant_id=self.tenant.TenantID, reference_type="SUPPLIER_PAYMENT",
+                reference_id=pay.id).count(),
+            journals)
+
+    def test_deallocate_other_tenant_allocation_is_404(self):
+        other_user = User.objects.create_user(username="spalloc2", password="x")
+        other = create_company("شركة صرف أخرى", other_user)
+        create_fiscal_year(other, 2026)
+        oap = Account.objects.create(
+            tenant=other, code="2101-OA", name="ذمم", account_type="Liability", is_active=True)
+        ocash = Account.objects.create(
+            tenant=other, code="1110-OA", name="صندوق", account_type="Asset", is_active=True)
+        osup = Partner.objects.create(
+            tenant=other, name="موردهم", partner_type="Supplier", linked_account=oap)
+        oinv = PurchaseInvoice.objects.create(
+            tenant=other, invoice_number="PINV-O-1", partner=osup, currency=self.ils,
+            invoice_date="2026-06-11", exchange_rate=Decimal("1"),
+            grand_total=Decimal("100"), is_posted=True,
+            payment_type=PurchaseInvoice.PAYMENT_TYPE_CREDIT)
+        opay = SupplierPayment.objects.create(
+            tenant=other, partner=osup, currency=self.ils, exchange_rate=Decimal("1"),
+            amount=Decimal("100"), cash_or_bank_account=ocash,
+            payment_date="2026-06-20", is_posted=False)
+        oalloc = SupplierPaymentAllocation.objects.create(
+            tenant=other, payment=opay, invoice=oinv, amount=Decimal("100"))
+        mine = self._payment(50)
+
+        for pay in (opay, mine):
+            res = self.client.post(
+                f"/api/logistics/supplier-payments/{pay.id}/deallocate/",
+                {"allocation": oalloc.id}, format="json", **self._auth())
+            self.assertEqual(res.status_code, 404, res.data)
+        self.assertTrue(SupplierPaymentAllocation.objects.filter(pk=oalloc.pk).exists())

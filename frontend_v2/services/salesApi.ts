@@ -912,6 +912,18 @@ export async function allocateCustomerPayment(
   return apiPostObject(`${BASE}/payments/${id}/allocate/`, { allocations }, { tenantId: tid() });
 }
 
+/**
+ * A1-3: فكّ توزيعٍ واحد من سند قبض — المبلغ يعود «على الحساب» بلا قيد جديد،
+ * والفاتورة تعود بمتبقّيها. يرفضه الخادم (400) لسندٍ مرحّل بعملةٍ غير عملة
+ * الفاتورة ولسند التسوية النقدية التلقائية.
+ */
+export async function deallocateCustomerPayment(
+  id: number,
+  allocation: number,
+): Promise<CustomerPaymentRow> {
+  return apiPostObject(`${BASE}/payments/${id}/deallocate/`, { allocation }, { tenantId: tid() });
+}
+
 // -------------------------------------------------------------
 // Sales Settings (إعدادات المبيعات المركزية)
 // -------------------------------------------------------------
