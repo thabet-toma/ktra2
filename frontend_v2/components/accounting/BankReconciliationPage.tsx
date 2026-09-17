@@ -48,6 +48,7 @@ export const BankReconciliationPage: React.FC = () => {
   const [adjDate, setAdjDate] = useState("");
   const [adjAccountId, setAdjAccountId] = useState<number | "">("");
   const [adjDescription, setAdjDescription] = useState("");
+  const [adjRate, setAdjRate] = useState("");
   const [ledgerAccounts, setLedgerAccounts] = useState<AccountNodeLike[]>([]);
 
   const selectedAccount = useMemo(
@@ -145,6 +146,7 @@ export const BankReconciliationPage: React.FC = () => {
     setAdjDate(String(current.statement_date).slice(0, 10));
     setAdjAccountId("");
     setAdjDescription("");
+    setAdjRate("");
     setAdjOpen(true);
     if (!ledgerAccounts.length) {
       void accountingApi.getAccounts()
@@ -162,6 +164,7 @@ export const BankReconciliationPage: React.FC = () => {
         date: adjDate,
         account: Number(adjAccountId),
         description: adjDescription.trim(),
+        ...(adjRate.trim() ? { exchange_rate: adjRate.trim() } : {}),
       }));
       setAdjOpen(false);
     }, adjKind === "expense" ? "سُجِّل المصروف البنكي وأُشِّر مطابَقاً" : "سُجِّل الإيراد البنكي وأُشِّر مطابَقاً");
@@ -310,6 +313,11 @@ export const BankReconciliationPage: React.FC = () => {
                 <label className="ktra-field-label">المبلغ ({currencyCode})</label>
                 <input type="number" step="0.01" min="0" className="ktra-input ktra-num w-32"
                   value={adjAmount} placeholder="0.00" onChange={(e) => setAdjAmount(e.target.value)} />
+              </div>
+              <div className="ktra-field">
+                <label className="ktra-field-label">سعر الصرف</label>
+                <input type="number" step="0.000001" min="0" className="ktra-input ktra-num w-28"
+                  value={adjRate} placeholder="للعملة الأجنبية" onChange={(e) => setAdjRate(e.target.value)} />
               </div>
               <div className="ktra-field">
                 <label className="ktra-field-label">التاريخ</label>

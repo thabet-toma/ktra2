@@ -2549,7 +2549,8 @@ class BankReconciliationViewSet(viewsets.ModelViewSet):
         )
         try:
             amount = Decimal(str(request.data.get('amount') or '0'))
-            exchange_rate = Decimal(str(request.data.get('exchange_rate') or '1'))
+            raw_rate = request.data.get('exchange_rate')
+            exchange_rate = Decimal(str(raw_rate)) if raw_rate not in (None, '') else None
         except (InvalidOperation, TypeError, ValueError):
             raise ValidationError({"amount": "مبلغ غير صالح."})
         date_raw = request.data.get('date')

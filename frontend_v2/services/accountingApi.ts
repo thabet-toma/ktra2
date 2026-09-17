@@ -418,7 +418,7 @@ export const accountingApi = {
   /** A2-3: قيد تسوية (عمولة/فائدة بنكية) — سند مصروف/إيراد على حساب البنك، يُؤشَّر مطابَقاً. */
   addBankReconciliationAdjustment: async (
     id: number,
-    body: { kind: "expense" | "revenue"; amount: string; date: string; account: number; description?: string },
+    body: { kind: "expense" | "revenue"; amount: string; date: string; account: number; description?: string; exchange_rate?: string },
   ): Promise<BankReconciliationSummaryDto> => {
     const res = await fetch(`${ACC}/bank-reconciliations/${id}/adjustment/`, {
       method: "POST", headers: headers(), body: JSON.stringify(body),

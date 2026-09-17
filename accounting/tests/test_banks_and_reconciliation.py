@@ -355,6 +355,23 @@ class ReconciliationAdjustmentTest(BankApiTestBase):
         self.assertEqual(Decimal(str(res.data["difference"])), Decimal("0.00"))
         self.assertEqual(Decimal(str(res.data["cleared_balance"])), Decimal("-15.00"))
 
+    def test_foreign_currency_bank_requires_an_explicit_rate(self):
+        """حسابٌ بالدولار لا يُرحَّل بسعر 1 مفترَض — عمولةُ 15$ ليست 15 بالعملة الأساسية."""
+        from accounting.models import ExpenseVoucher
+
+        self.ba = self.make_account(bank=self.make_bank("بنك الدولار"), name="جاري دولار", currency=self.usd)
+        h = self.auth()
+        rec_id = self._open_rec(h, balance="-15.00")
+        res = self._adjust(h, rec_id)
+        self.assertEqual(res.status_code, 400, getattr(res, "data", None))
+        self.assertIn("سعر الصرف", str(res.data))
+        self.assertFalse(ExpenseVoucher.objects.filter(tenant=self.tenant).exists())
+
+        res = self._adjust(h, rec_id, exchange_rate="3.700000")
+        self.assertEqual(res.status_code, 200, getattr(res, "data", None))
+        voucher = ExpenseVoucher.objects.get(tenant=self.tenant)
+        self.assertEqual(voucher.exchange_rate, Decimal("3.700000"))
+
     def test_interest_entry_posts_a_revenue_voucher_debiting_the_bank(self):
         from accounting.models import RevenueVoucher
 

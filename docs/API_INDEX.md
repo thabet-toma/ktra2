@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **891**
+عدد النقاط: **894**
 
 | المسار | الـView | الملف |
 |---|---|---|

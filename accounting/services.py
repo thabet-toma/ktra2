@@ -3893,7 +3893,7 @@ RECONCILIATION_ADJUSTMENT_REVENUE = "revenue"
 
 def record_reconciliation_adjustment(
     reconciliation, *, kind, amount, account_id, date=None, description="",
-    exchange_rate=Decimal("1"), user=None,
+    exchange_rate=None, user=None,
 ):
     """A2-3 — «قيد تسوية» من داخل مطابقة مفتوحة: عمولة بنكية أو فائدة ظهرت في كشف
     البنك ولا قيد لها في الدفاتر.
@@ -3938,6 +3938,14 @@ def record_reconciliation_adjustment(
             raise ValidationError(f"الحساب المقابل يجب أن يكون حساب {label}.")
 
         bank = rec.bank_account
+        # حسابُ بنكٍ بعملةٍ أجنبية لا يُرحَّل بسعرٍ مفترَض: السعرُ 1 الصامت يقيّد
+        # عمولةَ 15 دولاراً 15 بالعملة الأساسية. الغيابُ مقبولٌ للعملة الأساسية وحدها.
+        if exchange_rate is None:
+            if bank.currency_id and not bank.currency.IsBaseCurrency:
+                raise ValidationError(
+                    f"حساب البنك بعملة {bank.currency.Code} — أدخل سعر الصرف إلى العملة الأساسية."
+                )
+            exchange_rate = Decimal("1")
         common = dict(
             tenant=rec.tenant, date=when, amount=amount, currency=bank.currency,
             exchange_rate=exchange_rate, cash_or_bank_account_id=bank.account_id,
