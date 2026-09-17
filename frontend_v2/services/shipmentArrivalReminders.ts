@@ -1,6 +1,7 @@
 import { shipmentsService } from "./shipmentsService";
 import { notificationsService } from "./notificationsService";
 import type { Shipment } from "../types";
+import { claimOnceAndRun, singleFlight } from "../utils/reminderDedupe";
 
 const LS_PREFIX = "ktra_ship_eta_v1";
 
@@ -29,8 +30,14 @@ function shouldRemindShipment(s: Shipment): boolean {
 /**
  * إشعارات وصول الشحنة: عند بقاء ≤ 3 أيام على تاريخ الوصول (وما زالت في الطريق).
  * يمنع التكرار عبر localStorage مرة واحدة لكل (شحنة، يوم تقويم، قيمة العدّاد).
+ *
+ * C2-4: المفتاح يُحجَز قبل انتظار الكتابة، وتشغيلٌ واحدٌ جارٍ — `utils/reminderDedupe.ts`.
  */
-export async function runShipmentArrivalReminders(userId: string): Promise<void> {
+export function runShipmentArrivalReminders(userId: string): Promise<void> {
+  return runGuarded(userId);
+}
+
+const runGuarded = singleFlight(async (userId: string): Promise<void> => {
   if (!userId) return;
   let list: Shipment[];
   try {
@@ -46,26 +53,18 @@ export async function runShipmentArrivalReminders(userId: string): Promise<void>
     const days = calendarDaysUntil(ad);
     if (days < 0 || days > 3) continue;
     const dedupe = `${LS_PREFIX}:${s.id}:${todayKey}:${days}`;
-    try {
-      if (localStorage.getItem(dedupe)) continue;
-    } catch {
-      /* خاصية خاصة */
-    }
     const num = s.shipmentNumber || `شحنة #${s.id}`;
     const dayWord =
       days === 0 ? "اليوم" : days === 1 ? "يوم واحد" : days === 2 ? "يومان" : `${days} أيام`;
-    await notificationsService.addNotification({
-      userId: "all_managers",
-      title: "اقتراب وصول شحنة",
-      message: `${num}: بقي ${dayWord} على تاريخ الوصول (${s.shippingInfo?.arrivalDate?.slice(0, 10) ?? ""}).`,
-      type: "shipment_arrival_soon",
-      targetId: s.id,
-      targetView: "shipments-management",
-    });
-    try {
-      localStorage.setItem(dedupe, "1");
-    } catch {
-      /* ignore */
-    }
+    await claimOnceAndRun(() => localStorage, dedupe, () =>
+      notificationsService.addNotification({
+        userId: "all_managers",
+        title: "اقتراب وصول شحنة",
+        message: `${num}: بقي ${dayWord} على تاريخ الوصول (${s.shippingInfo?.arrivalDate?.slice(0, 10) ?? ""}).`,
+        type: "shipment_arrival_soon",
+        targetId: s.id,
+        targetView: "shipments-management",
+      }),
+    );
   }
-}
+});
