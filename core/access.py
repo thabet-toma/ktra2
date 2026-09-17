@@ -108,6 +108,9 @@ PERMISSIONS: list[dict] = [
     {"key": "import.deal.manage", "label": "إدارة صفقات الاستيراد", "group": GROUP_IMPORT},
     {"key": "import.shipment.manage", "label": "إدارة الشحنات والتخليص", "group": GROUP_IMPORT},
     {"key": "import.doc.unpost", "label": "التراجع عن ترحيل مستندات الاستيراد", "group": GROUP_IMPORT},
+    # B-3: لا مفتاحَ قراءةٍ للاستيراد قبله — كانت طلبياتُ مورّدي الاستيراد وعروضُهم
+    # تُقرأ لكل عضو. النطاقُ المحلّي يبقى على `purchase.invoice.view`.
+    {"key": "import.procurement.view", "label": "عرض طلبيات الاستيراد وعروض مورّديه", "group": GROUP_IMPORT},
     # شؤون الموظفين (تقود قائمة «إدارة الموظفين» في الشريط الجانبي)
     {"key": "hr.employees.manage", "label": "قائمة المستخدمين وملاحظات الموظفين", "group": GROUP_HR},
     {"key": "hr.attendance.view", "label": "شاشة الحضور والغياب", "group": GROUP_HR},
@@ -242,6 +245,7 @@ _PROCUREMENT_EMPLOYEE = _VIEW_ONLY | _AFTERSALES_READ | _EMPLOYEE_SELF | {
     "inventory.doc.post",
     "import.deal.manage",
     "import.shipment.manage",
+    "import.procurement.view",
     # ملف الاستيراد يتبع من يمشي الرحلة: المشتريات وحدها من غير المدير تملك
     # `import.*`، فهي وحدها التي ترفع أوراقها وتغلق بنودها.
     "importfile.file.view",
@@ -280,6 +284,8 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     "finance.revenue.unpost",
     "finance.coding_rule.manage",
     "import.doc.unpost",
+    # يطابق الفاتورة الدولية بعرض المورّد الذي وُلدت منه الصفقة — قراءةٌ لا إدارة.
+    "import.procurement.view",
     # المحاسب يطابق الفاتورة الدولية بالبوليصة والبيان الجمركي — يقرأ الملف
     # ولا يرفع أوراقه.
     "importfile.file.view",

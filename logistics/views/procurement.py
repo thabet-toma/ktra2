@@ -6,6 +6,7 @@ from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
+from rest_framework.permissions import SAFE_METHODS
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
 from django.db.models import (
@@ -105,8 +106,41 @@ from logistics.services import (
 logger = logging.getLogger("logistics.views")
 
 
+# B-3 — صلاحيةُ القراءة لكل نطاق. المحلّي على مفتاح قراءة المشتريات القائم،
+# والاستيراد على مفتاحه الخاص (`core/access.py`). قبلها كان `TenantRolePermission`
+# يمرّر كلَّ قراءة، فيقرأ أيُّ عضوٍ مستنداتِ النطاقين معاً.
+PROCUREMENT_SCOPE_VIEW_PERMS = {
+    SupplierQuotation.SCOPE_LOCAL: 'purchase.invoice.view',
+    SupplierQuotation.SCOPE_IMPORT: 'import.procurement.view',
+}
 
-class SupplierQuotationViewSet(BaseTenantViewSet):
+
+class ProcurementScopeViewPermissionMixin:
+    """يفرض صلاحيةَ عرض النطاق على القائمة وعلى كلّ قراءةٍ تفصيلية.
+
+    القائمة تُفحَص بـ`?scope=` (وغيابه = المحلّي، مرآةُ افتراض `get_queryset`)،
+    والتفصيل بنطاق **المستند نفسه** — وإلا قرأ من مُنح الاستيراد وحده طلبيةً
+    محلّيةً بمعرّفها. الكتابة تبقى على فحوصها القائمة (خارج هذا الحارس عمداً).
+    """
+
+    def _require_scope_view(self, scope):
+        key = PROCUREMENT_SCOPE_VIEW_PERMS.get(scope)
+        if key:
+            require_perm(self.request, key)
+
+    def list(self, request, *args, **kwargs):
+        scope = str(request.query_params.get('scope') or '').strip()
+        self._require_scope_view(scope or SupplierQuotation.SCOPE_LOCAL)
+        return super().list(request, *args, **kwargs)
+
+    def get_object(self):
+        obj = super().get_object()
+        if self.request.method in SAFE_METHODS:
+            self._require_scope_view(obj.scope)
+        return obj
+
+
+class SupplierQuotationViewSet(ProcurementScopeViewPermissionMixin, BaseTenantViewSet):
     serializer_class = SupplierQuotationSerializer
     queryset = SupplierQuotation.objects.all()
 
@@ -134,9 +168,8 @@ class SupplierQuotationViewSet(BaseTenantViewSet):
             # ولا يمسّه هذا التغيير. كل مستدعٍ في الواجهة يرسل `scope` صراحةً
             # على قوائمه اليوم (`listSupplierQuotations` يفرضه معامِلاً
             # إلزامياً)، فالافتراضية هنا حراسةٌ لطلبٍ عارٍ لا مساراً حيّاً.
-            # صلاحيةُ قراءةٍ لكل موديول تبقى خارج النطاق عمداً — الحارس العام
-            # (`TenantRolePermission`) يمرّر كل قراءة اليوم، وسدُّ ذاك تغييرٌ
-            # في نموذج الصلاحيات لا في هذه الشاشة.
+            # صلاحيةُ القراءة لكل نطاق لا تُفرض هنا بل في
+            # `ProcurementScopeViewPermissionMixin` (B-3) — هذا فلترُ رؤيةٍ فقط.
             qs = qs.filter(scope=SupplierQuotation.SCOPE_LOCAL)
         if quote_status:
             qs = qs.filter(status=quote_status)
@@ -351,7 +384,7 @@ def _wire_rfq_recipient_shares(tenant, rfq, request):
 
 # ── ISSUE #112 — الطلبية (طلب عروض أسعار): الأبّ الذي يسبق `SupplierQuotation`
 
-class PurchaseRFQViewSet(BaseTenantViewSet):
+class PurchaseRFQViewSet(ProcurementScopeViewPermissionMixin, BaseTenantViewSet):
     serializer_class = PurchaseRFQSerializer
     queryset = PurchaseRFQ.objects.all()
 
@@ -376,8 +409,8 @@ class PurchaseRFQViewSet(BaseTenantViewSet):
             # أعلاه — مقصورٌ على `list` (`send`/`award`/`cancel`/`comparison`/
             # `recipients` كلّها تفعل `self.get_object()` بلا `scope` في
             # جسمها، فتُحجَب عن مستندٍ استيراديّ لو شمَلها هذا الافتراض).
-            # نفس التبرير حرفياً: رؤيةٌ داخل الشركة، لا تسريبَ عبرها، وصلاحية
-            # القراءة لكل موديول خارج النطاق.
+            # نفس التبرير حرفياً: رؤيةٌ داخل الشركة، لا تسريبَ عبرها؛ وصلاحية
+            # القراءة لكل نطاق في `ProcurementScopeViewPermissionMixin` (B-3).
             qs = qs.filter(scope=PurchaseRFQ.SCOPE_LOCAL)
         if rfq_status:
             qs = qs.filter(status=rfq_status)
