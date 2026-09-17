@@ -186,6 +186,14 @@ def unpost_payroll_payment(payment: PayrollPayment, *, user=None) -> dict:  # ي
 `work-logs`، `attendance-adjustments`، `payroll-payments`) **ليس مرخَّصاً ولا
 يصير كذلك**: حجبه خلف ترخيصٍ جديد كان سيُطفئ رواتب شركاتٍ تشتغل عليه اليوم.
 
+**بابُ «الحضور والغياب» (`attendance` في `frontend_v2/App.tsx`) للشركة غير المرخّصة
+دعوةُ ترقية (C2-6، قرار المالك)** لا الشاشتان القديمتان `AttendanceManagement`/
+`EmployeeAttendance` — كانتا تكتبان جلساتِ مرآة Firestore
+(`services/attendanceService.ts`) لا تصل الرواتبَ أبداً، ولم يجد فحصُ الإنتاج لشركةٍ
+غير مرخّصة بياناتٍ فيها. الحارسُ `ModuleLicenseGuard` نفسُه (بخاصيّة `upgrade`: زرُّ
+«عرض خطّتي» إلى `/settings#my-plan`) فيعرض المؤشّر أثناء التحميل. الملفّان باقيان
+بلا مستدعٍ — مرشّحان للحذف.
+
 فالقاعدة الحاكمة: **كل ViewSet جديد يرث `hr/suite.py` (`HrSuiteViewSetBase`)**،
 فيمرّ ببوابة `require_module` أولاً (404 لا 403 — 403 يُثبت وجود الوحدة) ثم
 `require_perm`. ومسارات الوحدة تُسجَّل على `suite_router` وهو **`SimpleRouter`
