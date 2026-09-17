@@ -24,3 +24,18 @@ export function formatProductPrimaryName(p: ProductNameFields): string {
   if (n) return n;
   return p.sku || `منتج #${p.id}`;
 }
+
+/** اسمُ الصنف على **سطر مستند**: اللقطةُ المجمَّدة عند الترحيل (THA-18) أوّلاً،
+ * وإلّا الاسمُ الحيّ بصيغة `formatProductPrimaryName` — أي بالبراند.
+ *
+ * كانت هذه القاعدة مكتوبةً ثلاثَ مرّات في فاتورة البيع بمآلين: خليّةُ المحرِّر
+ * تعرض البراند، ووجهُ المستند والطباعة يسقطان إلى `name_ar` الخامّ. فالمسودّة
+ * (بلا لقطة) تُفتح بلا براند والمرحَّلة به — «أحياناً آه وأحياناً لا». */
+export function documentLineProductName(
+  snapshot: string | null | undefined,
+  product: ProductNameFields | null | undefined,
+): string {
+  const frozen = (snapshot || "").trim();
+  if (frozen) return frozen;
+  return product ? formatProductPrimaryName(product) : "";
+}

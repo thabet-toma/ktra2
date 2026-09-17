@@ -111,6 +111,7 @@ import { eventBus } from "../../utils/eventBus";
 import { ItemQuickCreateModal } from "../items/ItemQuickCreateModal";
 import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
 import { SalesProductPickerModal, formatProductPrimaryName } from "./SalesProductPickerModal";
+import { documentLineProductName } from "../../utils/productDisplayName";
 import { CustomerQuickAddModal } from "./CustomerQuickAddModal";
 import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import { formatTimeValue } from "../../utils/formatDate";
@@ -717,7 +718,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             productId: Number(l.product),
             quantity: l.quantity,
             onHand: pr?.quantity_on_hand ?? 0,
-            name: pr ? (pr.name_ar || pr.name_en || pr.sku) : `#${l.product}`,
+            name: pr ? formatProductPrimaryName(pr) : `#${l.product}`,
             exempt: !pr || !!pr.is_service,
           };
         }),
@@ -736,7 +737,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       if (!pr) continue;
       const q = Number(l.quantity) || 0;
       const avail = Number(pr.quantity_on_hand) || 0;
-      if (q > avail + 1e-6) out.push({ name: pr.name_ar || pr.name_en || pr.sku, qty: q, available: avail });
+      if (q > avail + 1e-6) out.push({ name: formatProductPrimaryName(pr), qty: q, available: avail });
     }
     return out;
     // lines/quantities are strings in state; recompute whenever they change
@@ -1563,7 +1564,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       const cost = Number(p.avg_cost || 0) * Number(l.quantity || 0);
       const revenue = totals.perLine[i]?.lineNetAdjusted ?? 0;
       if (revenue - cost < 0) {
-        const name = p.name_ar || p.name_en || p.sku || `#${l.product}`;
+        const name = formatProductPrimaryName(p);
         offenders.push(`«${name}» (التكلفة ${fmt(cost)} أعلى من صافي البيع ${fmt(revenue)})`);
       }
     }
@@ -1960,7 +1961,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     );
     if (isDuplicate && (salesSettings?.warn_on_duplicate_item ?? true)) {
       const merge = await confirm({
-        message: `المنتج «${pr?.name_ar || productId}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
+        message: `المنتج «${pr ? formatProductPrimaryName(pr) : productId}» مضاف مسبقاً في الفاتورة. اختر الإجراء:`,
         confirmText: "دمج الكمية",
         cancelText: "سطر جديد مستقل",
         danger: false,
@@ -2011,7 +2012,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           const ageMs = Date.now() - new Date(cached.updated_at).getTime();
           if (ageMs > 3600_000) {
             const verdict = await confirmStale(
-              pr?.name_ar || cached.sku || String(productId),
+              pr ? formatProductPrimaryName(pr) : (cached.sku || String(productId)),
               "—",
               cached.updated_at,
             );
@@ -2533,9 +2534,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           // THA-18: اللقطة المجمَّدة (فاتورة مرحَّلة) تُقدَّم على البحث الحي كي
           // لا تعيد إعادة التسمية كتابة ما تعرضه فاتورة مؤرشفة. المسودّة بلا
           // لقطة فتبقى على صيغة الشاشة نفسها — لا يتغيّر عرضها بهذه التذكرة.
-          if (row.name_snapshot) return row.name_snapshot;
-          const pr = row.product ? productsById.get(Number(row.product)) : undefined;
-          return pr ? formatProductPrimaryName(pr) : "";
+          return documentLineProductName(
+            row.name_snapshot,
+            row.product ? productsById.get(Number(row.product)) : undefined,
+          );
         })()}
         options={productOptions}
         disabled={readOnly}
@@ -3721,11 +3723,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             // THA-18: هذه هي الشاشة التي تُفتح عليها الفاتورة **المرحَّلة** —
             // فاللقطة المجمَّدة تُقدَّم هنا قبل كل شيء، وإلا لعرض المستند
             // المؤرشف اسماً أُعيدت تسميته بعد ترحيله.
-            const pr = productsById.get(Number(row.product));
-            const live = pr ? pr.name_ar || pr.name_en || pr.sku : "";
+            // والمسودّةُ (بلا لقطة) تُسمّى كما تُسمّيها خليّةُ المحرِّر — بالبراند.
+            const name = documentLineProductName(row.name_snapshot, productsById.get(Number(row.product)));
             return (
               <span className="font-semibold">
-                {row.name_snapshot || live || "—"}
+                {name || "—"}
               </span>
             );
           },
@@ -4544,7 +4546,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       {cardProductId != null && (
         <ProductCardModal
           productId={cardProductId}
-          productName={(() => { const p = products.find((x) => x.id === cardProductId); return p ? (p.name_ar || p.name_en || p.sku) : undefined; })()}
+          productName={(() => { const p = products.find((x) => x.id === cardProductId); return p ? formatProductPrimaryName(p) : undefined; })()}
           addMode={cardCanAdd && !readOnly && !isPosted}
           suggestedPrice={cardSuggestedPrice}
           priceSource={cardPriceSource}
@@ -4562,7 +4564,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           <SerialEntryModal
             mode="pick"
             productId={Number(row.product)}
-            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : `#${row.product}`}
+            productName={pr ? formatProductPrimaryName(pr) : `#${row.product}`}
             quantity={Number(row.quantity) || 0}
             value={row.serials ?? []}
             required={serialMode === "required"}
@@ -4583,7 +4585,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         const pr = row.product !== "" ? productsById.get(Number(row.product)) : undefined;
         return (
           <LineNotesModal
-            productName={pr ? (pr.name_ar || pr.name_en || pr.sku) : "بند بلا منتج"}
+            productName={pr ? formatProductPrimaryName(pr) : "بند بلا منتج"}
             internalNote={row.internal_note ?? ""}
             customerNote={row.customer_note ?? ""}
             readOnly={readOnly}

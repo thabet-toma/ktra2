@@ -5,6 +5,7 @@ import { Printer, X, FileText, Building2 } from 'lucide-react';
 import { formatMoney, formatQuantity } from '../../utils/formatNumber';
 import type { PartnerRow, ProductRow, DraftLine } from './SalesInvoiceEditor';
 import { formatDateValue } from "../../utils/formatDate";
+import { documentLineProductName } from "../../utils/productDisplayName";
 
 export interface SalesPrintData {
   invoiceNumber: string;
@@ -172,8 +173,7 @@ export const SalesInvoicePrintView: React.FC<Props> = ({ data, onClose }) => {
                                 if (item.product === "") return null;
                                 // THA-18: اللقطة المجمَّدة (فاتورة مرحَّلة) تسبق البحث الحي —
                                 // فلا تُعيد إعادة تسمية المنتج كتابة ما تطبعه فاتورة مؤرشفة.
-                                const pr = data.productsById.get(Number(item.product));
-                                const pName = item.name_snapshot || (pr ? (pr.name_ar || pr.name_en || pr.sku) : '');
+                                const pName = documentLineProductName(item.name_snapshot, data.productsById.get(Number(item.product)));
                                 const lineTotal = data.totals.perLine[index]?.lineTotal || 0;
                                 return (
                                     <tr key={index} className="border-b ktra-border-soft last:border-0 hover:ktra-bg-panel">
