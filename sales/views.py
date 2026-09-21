@@ -74,6 +74,7 @@ from .services import (
     get_or_create_sales_settings,
     guard_invoice_payments_before_unpost,
     invoice_profits,
+    linked_return_credit_summary,
     last_sale_price,
     next_invoice_number,
     post_credit_debit_note,
@@ -1756,23 +1757,23 @@ class SalesReportViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=["get"], url_path="aging")
     def aging(self, request):
-        """أعمار الديون لكل مدين (فواتير آجل مرحّلة ومتبقي > 0)."""
+        """أعمار الديون من صافي فواتير البيع الأصلية القابلة للتحصيل."""
         tenant = get_tenant(request)
         if not tenant:
             return Response([])
-        # P2-13 (SCALABILITY_AUDIT): كانت الحلقة تجلب **كل** فواتير الآجل
-        # المرحّلة منذ نشأة الشركة ثم تُسقط المسدَّدة في بايثون — فالمُهمَل
-        # يُنقَل عبر الشبكة كاملاً، وهو الأغلبية في شركة عاملة. الشرط صار في
-        # القاعدة، ومدى التاريخ اختياري (from/to) لمن يريد تضييقه.
+        # المتبقي الخام الموجب شرط لازم للصافي الموجب، فيبقى مرشح SQL القديم
+        # كي لا تُحمّل الفواتير المسددة. ثم يطرح المصدر المشترك أرصدة المراجيع
+        # المفتوحة في بايثون؛ ومدى التاريخ اختياري لمن يريد تضييقه أكثر.
         from django.utils.dateparse import parse_date
 
         qs = SalesInvoice.objects.filter(
             tenant_id=tenant.TenantID,
             status=SalesInvoice.STATUS_POSTED,
             invoice_type=SalesInvoice.INVOICE_CREDIT,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
         ).annotate(
-            _remaining=models.F("grand_total") - models.F("amount_paid"),
-        ).filter(_remaining__gt=0)
+            _gross_remaining=models.F("grand_total") - models.F("amount_paid"),
+        ).filter(_gross_remaining__gt=0)
 
         date_from = parse_date(request.query_params.get("from") or "")
         date_to = parse_date(request.query_params.get("to") or "")
@@ -1781,9 +1782,13 @@ class SalesReportViewSet(viewsets.ViewSet):
         if date_to:
             qs = qs.filter(invoice_date__lte=date_to)
 
+        invoices = list(qs.select_related("customer").order_by("invoice_date", "id"))
+        summaries = linked_return_credit_summary(invoices)
         rows = []
-        for inv in qs.select_related("customer").order_by("invoice_date", "id"):
-            remaining = inv.grand_total - inv.amount_paid
+        for inv in invoices:
+            remaining = summaries[inv.pk]["collectible"]
+            if remaining <= 0:
+                continue
             rows.append(
                 {
                     "invoice_id": inv.id,
@@ -1795,6 +1800,7 @@ class SalesReportViewSet(viewsets.ViewSet):
                     "grand_total": str(inv.grand_total),
                     "amount_paid": str(inv.amount_paid),
                     "remaining": str(remaining),
+                    "invoice_kind": inv.invoice_kind,
                 }
             )
         return Response(rows)

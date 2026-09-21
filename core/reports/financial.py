@@ -67,14 +67,18 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
 
     if side == "customer":
         from sales.models import SalesInvoice
+        from sales.services import linked_return_credit_summary
 
-        docs = SalesInvoice.objects.filter(
-            tenant_id=tenant_id, status=SalesInvoice.STATUS_POSTED,
-        ).select_related("customer")
+        docs = list(SalesInvoice.objects.filter(
+            tenant_id=tenant_id,
+            status=SalesInvoice.STATUS_POSTED,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
+        ).select_related("customer"))
+        summaries = linked_return_credit_summary(docs)
         rows_src = (
             (d.customer_id, d.customer.name if d.customer_id else "",
              d.due_date or d.invoice_date,
-             Decimal(str(d.grand_total or 0)) - Decimal(str(d.amount_paid or 0)))
+             summaries[d.pk]["collectible"])
             for d in docs
         )
     else:

@@ -55,7 +55,7 @@ DEC = Decimal("0.01")
 from .foundation import get_or_create_sales_settings
 from .numbering import guard_reserved_stock
 from .pricing import SALES_STOCK_REFERENCE_TYPES
-from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, recalculate_invoice_amounts, resolve_cheques_under_collection_account
+from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, linked_return_credit_summary, recalculate_invoice_amounts, resolve_cheques_under_collection_account
 
 def _validate_cheque_payloads(
     cheques: list[dict], *, require_due_date: bool = False
@@ -291,15 +291,15 @@ def calculate_sales_return_refund_caps(
         Decimal("0.00"),
     ).quantize(DEC)
 
-    prior_refunds_qs = CustomerPayment.objects.filter(
-        tenant_id=original_invoice.tenant_id,
-        kind=CustomerPayment.KIND_REFUND,
-        is_posted=True,
-        refund_for_invoice__original_invoice_id=original_invoice.pk,
+    return_rows = linked_return_credit_summary([original_invoice])[original_invoice.pk]["returns"]
+    prior_refunded_cash = sum(
+        (
+            values["cash_refunded"]
+            for return_id, values in return_rows.items()
+            if not current_return or return_id != current_return.pk
+        ),
+        Decimal("0.00"),
     )
-    if current_return and current_return.pk:
-        prior_refunds_qs = prior_refunds_qs.exclude(refund_for_invoice_id=current_return.pk)
-    prior_refunded_cash = prior_refunds_qs.aggregate(total=Sum("amount"))["total"] or Decimal("0.00")
 
     cash_cap = max(
         orig_posted - uncollected_total - Decimal(str(prior_refunded_cash)),
@@ -367,6 +367,106 @@ def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) 
         raise ValidationError(
             f"مجموع التوزيعات المرحّلة على الفاتورة #{invoice.invoice_number} "
             f"({total}) يتجاوز إجماليها ({grand}). راجع سندات القبض المرتبطة بها."
+        )
+
+
+def _discover_linked_original_ids(
+    invoice_ids, *, tenant_id: int | None = None,
+) -> dict[int, int | None]:
+    """يقرأ أصول الفواتير المطلوبة قبل أخذ أقفالها فقط لتحديد مجموعة القفل."""
+    targets = SalesInvoice.objects.filter(pk__in=invoice_ids)
+    if tenant_id is not None:
+        targets = targets.filter(tenant_id=tenant_id)
+    return dict(targets.values_list("pk", "original_invoice_id"))
+
+
+def _lock_customer_payments(
+    payment_ids, *, tenant_id: int | None = None,
+) -> list[CustomerPayment]:
+    """يقفل سندات العملاء بترتيب pk الثابت قبل قفل أي فاتورة مرتبطة."""
+    ids = sorted({int(payment_id) for payment_id in payment_ids if payment_id})
+    if not ids:
+        return []
+    payments = CustomerPayment.objects.select_for_update().filter(pk__in=ids)
+    if tenant_id is not None:
+        payments = payments.filter(tenant_id=tenant_id)
+    return list(payments.order_by("pk"))
+
+
+def _lock_invoices_with_linked_originals(
+    invoice_ids, *, tenant_id: int | None = None,
+) -> dict[int, tuple[SalesInvoice, SalesInvoice | None]]:
+    """يقفل الفواتير وأصول مراجيع البيع بترتيب المعرّف نفسه في كل مسارٍ مُعدِّل.
+
+    القراءة الأولى تجمع أصول الصفوف المطلوبة فقط؛ أما الصفوف المستعملة لاحقاً فهي
+    الصفوف المعاد جلبها تحت `select_for_update`. ترتيب `pk` يمنع أن يقفل مسارٌ
+    المرتجع ثم الأصل بينما يفعل آخر العكس.
+    """
+    requested_ids = sorted({int(invoice_id) for invoice_id in invoice_ids if invoice_id})
+    if not requested_ids:
+        return {}
+
+    target_original_ids = _discover_linked_original_ids(
+        requested_ids, tenant_id=tenant_id,
+    )
+    lock_ids = set(target_original_ids) | {
+        original_id for original_id in target_original_ids.values() if original_id
+    }
+    locked = {
+        invoice.pk: invoice
+        for invoice in SalesInvoice.objects.select_for_update()
+        .filter(pk__in=lock_ids)
+        .order_by("pk")
+    }
+
+    # لا نأخذ قفلاً ثانياً خارج ترتيب pk إن تغيّرت العلاقة أثناء انتظار القفل؛
+    # نرفض العملية لتعاد بعد أن تحرّر المعاملة أقفالها الحالية.
+    changed_links = [
+        invoice
+        for invoice_id, invoice in locked.items()
+        if invoice_id in target_original_ids
+        and invoice.original_invoice_id != target_original_ids[invoice_id]
+    ]
+    if changed_links:
+        raise ValidationError(
+            f"تغيّرت الفاتورة الأصلية للمرتجع #{changed_links[0].invoice_number} "
+            "أثناء تأمين المعاملة؛ أعد المحاولة."
+        )
+
+    return {
+        invoice_id: (invoice, locked.get(invoice.original_invoice_id))
+        for invoice_id, invoice in locked.items()
+        if invoice_id in target_original_ids
+    }
+
+
+def _validate_linked_sales_return(
+    returned: SalesInvoice, original: SalesInvoice | None,
+) -> None:
+    """حارس خدمة حاسم لعلاقة مرتجع البيع، بعد قفل الصفين وقراءةٍ طازجة."""
+    if original is None:
+        return
+    label = (
+        f"مرتجع البيع «{returned.invoice_number}» والفاتورة الأصلية "
+        f"«{original.invoice_number}»"
+    )
+    if returned.tenant_id != original.tenant_id:
+        raise ValidationError(f"{label} لا يتبعان الشركة نفسها.")
+    if returned.customer_id != original.customer_id:
+        raise ValidationError(f"{label} لا يخصان العميل نفسه.")
+    if returned.currency_id != original.currency_id:
+        raise ValidationError(f"{label} لا يحملان العملة نفسها.")
+
+
+def _guard_shared_sales_return_refund_cap(
+    original: SalesInvoice, *, incoming: Decimal,
+) -> None:
+    """يمنع ردود الأشقاء النقدية من تجاوز ما دُفع فعلاً على الأصل المقفّل."""
+    cash_cap = calculate_sales_return_refund_caps(original)["cash_cap"]
+    if incoming > cash_cap + DEC:
+        raise ValidationError(
+            f"مبلغ ردّ الدفعة المطلوب ({incoming}) يتجاوز سقف النقد المتبقي "
+            f"للفاتورة الأصلية #{original.invoice_number} ({cash_cap})."
         )
 
 
@@ -636,6 +736,40 @@ def release_auto_cash_settlement(invoice: SalesInvoice, *, user=None) -> list[in
 
 
 def release_auto_sales_return_refund(invoice: SalesInvoice, *, user=None) -> dict:
+    """يحرّر الردّ التلقائي وفق ترتيب القفل: السندات ثم المرتجع وأصله."""
+    with transaction.atomic():
+        payment_ids = list(
+            CustomerPayment.objects.filter(
+                tenant_id=invoice.tenant_id,
+                refund_for_invoice_id=invoice.pk,
+            ).order_by("pk").values_list("pk", flat=True)
+        )
+        payments = _lock_customer_payments(
+            payment_ids, tenant_id=invoice.tenant_id,
+        )
+        locked = _lock_invoices_with_linked_originals(
+            [invoice.pk], tenant_id=invoice.tenant_id,
+        )
+        returned, _original = locked.get(invoice.pk, (invoice, None))
+        fresh_payment_ids = list(
+            CustomerPayment.objects.filter(
+                tenant_id=returned.tenant_id,
+                refund_for_invoice_id=returned.pk,
+            ).order_by("pk").values_list("pk", flat=True)
+        )
+        if fresh_payment_ids != payment_ids:
+            raise ValidationError(
+                f"تغيّرت سندات ردّ الدفعة للمرتجع #{returned.invoice_number} "
+                "أثناء تأمين المعاملة؛ أعد المحاولة."
+            )
+        return _release_auto_sales_return_refund_locked(
+            returned, payments=payments, user=user,
+        )
+
+
+def _release_auto_sales_return_refund_locked(
+    invoice: SalesInvoice, *, payments: list[CustomerPayment], user=None,
+) -> dict:
     """T-ARINT / issue #167: يحرّر سند ردّ الدفعة التلقائي والشيكات المُعادة مع مرتجع البيع.
 
     يُستدعى قبل إلغاء ترحيل مرتجع البيع وقبل `guard_invoice_payments_before_unpost`:
@@ -646,13 +780,7 @@ def release_auto_sales_return_refund(invoice: SalesInvoice, *, user=None) -> dic
     سندات ردّ الدفعة التي أنشأها المستخدم لا تُمَسّ — يحرسها فحص الذمم التالي.
     """
     released_vouchers: list[int] = []
-    auto_refund_payments = list(
-        CustomerPayment.objects.filter(
-            tenant_id=invoice.tenant_id,
-            refund_for_invoice_id=invoice.pk,
-        )
-    )
-    for payment in auto_refund_payments:
+    for payment in payments:
         if payment.is_posted:
             unpost_document(
                 tenant_id=payment.tenant_id,
@@ -726,8 +854,8 @@ def _reverse_allocations_amount_paid(allocations) -> None:
     """
     inv_ids = sorted({a.invoice_id for a in allocations})
     locked = {
-        inv.pk: inv
-        for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
+        invoice_id: context[0]
+        for invoice_id, context in _lock_invoices_with_linked_originals(inv_ids).items()
     }
     for alloc in allocations:
         inv = locked.get(alloc.invoice_id)
@@ -754,7 +882,7 @@ def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
     if not payment.is_posted:
         raise ValidationError("السند غير مرحّل.")
     with transaction.atomic():
-        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        payment = _lock_customer_payments([payment.pk])[0]
         if not payment.is_posted:
             raise ValidationError("السند غير مرحّل.")
         # CHQ-2: قبل حذف أي قيد — شيكٌ تحرّك بعد الترحيل يجعل الحذف عطلاً
@@ -1047,8 +1175,18 @@ def _process_sales_return_refund(
          بـ kind=refund على صندوق الشركة الافتراضي ومملوكاً للمرتجع (refund_for_invoice).
       3. ما لم يُغطّه النقد ولا الورق يبقى رصيداً دائناً للزبون، ويُسجَّل في ملخص الردّ.
     """
+    caller_invoice = invoice
     if (invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE) != SalesInvoice.INVOICE_KIND_SALE_RETURN:
         return
+
+    # يستدعيه ترحيل الفاتورة داخل المعاملة نفسها. نعيد جلب المرتجع وأصله المقفّلين
+    # قبل فحص أي توزيع أو اختيار سقف، حتى لا يقرأ شقيقان قدرة الأصل نفسها.
+    if invoice.original_invoice_id:
+        locked = _lock_invoices_with_linked_originals(
+            [invoice.pk], tenant_id=invoice.tenant_id,
+        )
+        invoice, original = locked.get(invoice.pk, (invoice, None))
+        _validate_linked_sales_return(invoice, original)
 
     # تفادي التكرار عند وجود سند رد مسبق أو توزيعات مرحلة
     if CustomerPayment.objects.filter(
@@ -1058,7 +1196,7 @@ def _process_sales_return_refund(
     if posted_allocations_total(invoice.pk) > 0:
         return
 
-    orig = invoice.original_invoice
+    orig = original if invoice.original_invoice_id else None
     return_total = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
 
     # التحقق من وجود فاتورة أصلية
@@ -1068,7 +1206,7 @@ def _process_sales_return_refund(
             chosen_cash = Decimal(str(refund_choice.get("cash_amount") or 0)).quantize(DEC)
             if chosen_cheque_ids or chosen_cash > 0:
                 raise ValidationError("لا يمكن ردّ دفعة لمرتجع بيع غير مربوط بفاتورة بيع أصلية.")
-        invoice._refund_summary = {
+        caller_invoice._refund_summary = {
             "paper_amount": "0.00",
             "cheque_numbers": [],
             "cheque_ids": [],
@@ -1088,7 +1226,7 @@ def _process_sales_return_refund(
         auto_refund = ss.auto_refund_on_sales_return if ss else False
         if not auto_refund:
             # الإعداد معطّل ولم يُرسل اختيار صريح: لا شيء يُردّ الآن
-            invoice._refund_summary = {
+            caller_invoice._refund_summary = {
                 "paper_amount": "0.00",
                 "cheque_numbers": [],
                 "cheque_ids": [],
@@ -1130,7 +1268,7 @@ def _process_sales_return_refund(
 
         if not chosen_cheque_ids and chosen_cash == Decimal("0.00"):
             # اختيار صريح بعدم رد شيء الآن
-            invoice._refund_summary = {
+            caller_invoice._refund_summary = {
                 "paper_amount": "0.00",
                 "cheque_numbers": [],
                 "cheque_ids": [],
@@ -1237,7 +1375,7 @@ def _process_sales_return_refund(
         )
 
     credit_balance = (return_total - paper_total - cash_to_refund).quantize(DEC)
-    invoice._refund_summary = {
+    caller_invoice._refund_summary = {
         "paper_amount": str(paper_total),
         "cheque_numbers": [c.cheque_number for c in selected_cheques],
         "cheque_ids": [c.pk for c in selected_cheques],
@@ -1271,6 +1409,7 @@ def post_sales_invoice(
     خطفت التسويةُ التلقائية كامل المتبقّي قبل أن يوزّع تقسيمُه، فخرج سندان على
     فاتورة واحدة. الافتراضي `False` ⇒ كل نداء قائم يبقى على سلوكه حرفياً.
     """
+    caller_invoice = invoice
     if invoice.status == SalesInvoice.STATUS_POSTED:
         raise ValidationError("الفاتورة مرحّلة مسبقاً.")
     if invoice.status == SalesInvoice.STATUS_CANCELLED:
@@ -1343,6 +1482,20 @@ def post_sales_invoice(
     grand = invoice.grand_total
 
     with transaction.atomic():
+        if kind == SalesInvoice.INVOICE_KIND_SALE_RETURN and invoice.original_invoice_id:
+            locked = _lock_invoices_with_linked_originals(
+                [invoice.pk], tenant_id=invoice.tenant_id,
+            )
+            invoice, original = locked.get(invoice.pk, (invoice, None))
+            _validate_linked_sales_return(invoice, original)
+            # لا نُبقي أي مرجعٍ قادمٍ من المستدعي بعد القفل.
+            kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
+            is_return = kind in (
+                SalesInvoice.INVOICE_KIND_SALE_RETURN,
+                SalesInvoice.INVOICE_KIND_PURCHASE_RETURN,
+            )
+            sign = -1 if is_return else 1
+            grand = invoice.grand_total
         lines = list(
             invoice.lines.select_related(
                 "tax_rate",
@@ -1672,6 +1825,8 @@ def post_sales_invoice(
                     invoice, user=user, refund_choice=refund_choice
                 )
 
+    if hasattr(invoice, "_refund_summary"):
+        caller_invoice._refund_summary = invoice._refund_summary
     return invoice
 
 
@@ -2665,6 +2820,10 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             raise ValidationError(
                 f"سند ردّ الدفعة لا يُوزَّع إلا على مرتجع بيع (المستند #{alloc.invoice.invoice_number} ليس مرتجع بيع)."
             )
+        if not is_refund and alloc.invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            raise ValidationError(
+                f"لا يجوز توزيع سند قبض على مرتجع البيع #{alloc.invoice.invoice_number}."
+            )
         if alloc.invoice.status != SalesInvoice.STATUS_POSTED:
             prefix = "مرتجع البيع" if is_refund else "الفاتورة"
             raise ValidationError(f"{prefix} #{alloc.invoice.invoice_number} غير مرحّل.")
@@ -2764,18 +2923,25 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         # T-SPLIT: قفل صفّ الدفعة وإعادة فحص الترحيل — إذ نُنشئ قيداً لكل فاتورة
         # بـ idempotent=False (نفس reference_id)، فلا يحمينا فحص post_journal من
         # ترحيل مزدوج متزامن؛ القفل هنا يُسلسِل الطلبات ويمنع تكرار القيود.
-        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        payment = _lock_customer_payments([payment.pk])[0]
         if payment.is_posted:
             raise ValidationError("الدفعة مرحّلة مسبقاً.")
 
-        # قفل الفواتير (select_for_update) ومادّتها فعلياً في dict لمنع
-        # سباق lost-update على amount_paid. لا بد من تقييم الـ queryset
-        # (التكرار) حتى يصدر SELECT ... FOR UPDATE فعلياً.
+        # بروتوكول موحّد: المرتجع وأصله (وكل أصول المراجيع في السند) تُقفل
+        # معاً بترتيب pk ثابت قبل حساب الرصيد أو سقف ردّ النقد.
         inv_ids = sorted({alloc.invoice_id for alloc, _amt, _rate in alloc_conversions})
-        locked_invoices = {
-            inv.pk: inv
-            for inv in SalesInvoice.objects.select_for_update().filter(pk__in=inv_ids)
-        }
+        contexts = _lock_invoices_with_linked_originals(
+            inv_ids, tenant_id=payment.tenant_id,
+        )
+        locked_invoices = {invoice_id: context[0] for invoice_id, context in contexts.items()}
+        linked_originals = [
+            original for _returned, original in contexts.values() if original is not None
+        ]
+        collectible_sources = [
+            inv for inv in locked_invoices.values()
+            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE
+        ] + linked_originals
+        collectible_summaries = linked_return_credit_summary(collectible_sources)
 
         # إجمالي الزيادة لكل فاتورة (قد تتعدّد التوزيعات على نفس الفاتورة)
         increment_by_invoice: dict[int, Decimal] = {}
@@ -2786,9 +2952,32 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             )
 
         # إعادة التحقق من تجاوز المتبقي على الصفوف المقفلة (القراءة الحديثة)
+        refund_increments_by_original: dict[int, Decimal] = {}
         for inv_id, total_increment in increment_by_invoice.items():
-            inv = locked_invoices[inv_id]
-            remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            inv = locked_invoices.get(inv_id)
+            if inv is None:
+                raise ValidationError(f"الفاتورة #{inv_id} غير موجودة في هذه الشركة.")
+            if inv.customer_id != payment.partner_id:
+                raise ValidationError(f"الفاتورة #{inv.invoice_number} لا تخص نفس العميل.")
+            if inv.status != SalesInvoice.STATUS_POSTED:
+                raise ValidationError(f"الفاتورة #{inv.invoice_number} غير مرحّلة.")
+            if is_refund and inv.invoice_kind != SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                raise ValidationError(
+                    f"سند ردّ الدفعة لا يُوزَّع إلا على مرتجع بيع "
+                    f"(المستند #{inv.invoice_number} ليس مرتجع بيع)."
+                )
+            if not is_refund and inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                raise ValidationError(
+                    f"لا يجوز توزيع سند قبض على مرتجع البيع #{inv.invoice_number}."
+                )
+            if is_refund and inv.original_invoice_id:
+                remaining = collectible_summaries[inv.original_invoice_id]["returns"].get(
+                    inv.pk, {"open_credit": Decimal("0.00")}
+                )["open_credit"]
+            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
+                remaining = collectible_summaries[inv.pk]["collectible"]
+            else:
+                remaining = inv.grand_total - Decimal(str(inv.amount_paid))
             if total_increment > remaining + DEC:
                 if is_refund:
                     raise ValidationError(
@@ -2801,6 +2990,23 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             # T-ARINT: حارس ثانٍ مستقلّ عن amount_paid (يُصفَّر من الخارج) —
             # مجموع توزيعات السندات المرحّلة نفسه لا يتجاوز إجمالي الفاتورة.
             guard_invoice_allocation_total(inv, incoming=total_increment)
+            if is_refund and inv.original_invoice_id:
+                refund_increments_by_original[inv.original_invoice_id] = (
+                    refund_increments_by_original.get(inv.original_invoice_id, Decimal("0.00"))
+                    + total_increment
+                )
+
+        # لا يكفي رصيد المرتجع نفسه: كل ردّ جديد يستهلك السقف النقدي المشترك
+        # للأصل. بما أن الأصل مقفّل أعلاه، لا يستطيع شقيقان قراءة السقف نفسه.
+        originals_by_id = {
+            original.pk: original
+            for _returned, original in contexts.values()
+            if original is not None
+        }
+        for original_id, incoming in refund_increments_by_original.items():
+            _guard_shared_sales_return_refund_cap(
+                originals_by_id[original_id], incoming=incoming,
+            )
 
         # ── بناء أسطر القيد المحاسبي ──
         # فرق العملة (I4-03): إذا اختلفت عملة الدفعة عن عملة الفاتورة نحسب
@@ -3079,7 +3285,11 @@ def allocate_customer_payment(
         raise ValidationError("مبلغ التوزيع يجب أن يكون أكبر من صفر.")
 
     with transaction.atomic():
-        payment = CustomerPayment.objects.select_for_update().get(pk=payment.pk)
+        payment = _lock_customer_payments([payment.pk])[0]
+        is_refund = (
+            (getattr(payment, "kind", None) or CustomerPayment.KIND_RECEIPT)
+            == CustomerPayment.KIND_REFUND
+        )
         already = (
             PaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum("amount"))["t"]
             or Decimal("0")
@@ -3091,12 +3301,21 @@ def allocate_customer_payment(
                 f"({payment.amount}). المتاح للتوزيع: {Decimal(str(payment.amount)) - already}."
             )
 
-        invoices = {
-            inv.pk: inv
-            for inv in SalesInvoice.objects.select_for_update().filter(
-                pk__in={inv_id for inv_id, _amt in rows}, tenant_id=payment.tenant_id
-            )
-        }
+        contexts = _lock_invoices_with_linked_originals(
+            {inv_id for inv_id, _amt in rows}, tenant_id=payment.tenant_id,
+        )
+        invoices = {invoice_id: context[0] for invoice_id, context in contexts.items()}
+        linked_originals = [
+            original for _returned, original in contexts.values() if original is not None
+        ]
+        collectible_sources = [
+            inv for inv in invoices.values()
+            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE
+        ] + linked_originals
+        collectible_summaries = linked_return_credit_summary(collectible_sources)
+        incoming_by_invoice: dict[int, Decimal] = {}
+        refund_increments_by_original: dict[int, Decimal] = {}
+        prepared_allocations: list[tuple[SalesInvoice, Decimal, Decimal, Decimal]] = []
         for inv_id, amt in rows:
             inv = invoices.get(inv_id)
             if inv is None:
@@ -3107,6 +3326,15 @@ def allocate_customer_payment(
                 )
             if inv.status != SalesInvoice.STATUS_POSTED:
                 raise ValidationError(f"الفاتورة #{inv.invoice_number} غير مرحّلة.")
+            if is_refund and inv.invoice_kind != SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                raise ValidationError(
+                    f"سند ردّ الدفعة لا يُوزَّع إلا على مرتجع بيع "
+                    f"(المستند #{inv.invoice_number} ليس مرتجع بيع)."
+                )
+            if not is_refund and inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                raise ValidationError(
+                    f"لا يجوز توزيع سند قبض على مرتجع البيع #{inv.invoice_number}."
+                )
 
             if payment.currency_id == inv.currency_id:
                 amount_in_inv_curr, conv_rate = amt, Decimal("1")
@@ -3118,17 +3346,48 @@ def allocate_customer_payment(
                     tenant_id=payment.tenant_id,
                     effective_date=payment.payment_date,
                 )
-            remaining = inv.grand_total - Decimal(str(inv.amount_paid))
-            if amount_in_inv_curr > remaining + DEC:
+            if is_refund and inv.original_invoice_id:
+                remaining = collectible_summaries[inv.original_invoice_id]["returns"].get(
+                    inv.pk, {"open_credit": Decimal("0.00")}
+                )["open_credit"]
+            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
+                remaining = collectible_summaries[inv.pk]["collectible"]
+            else:
+                remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            incoming = incoming_by_invoice.get(inv.pk, Decimal("0.00")) + amount_in_inv_curr
+            if incoming > remaining + DEC:
+                if is_refund:
+                    raise ValidationError(
+                        f"مبلغ ردّ الدفعة الموزّع ({incoming}) يتجاوز المتبقي على "
+                        f"مرتجع البيع #{inv.invoice_number} ({remaining})."
+                    )
                 raise ValidationError(
-                    f"مبلغ التوزيع ({amount_in_inv_curr}) يتجاوز المتبقي على "
+                    f"مبلغ التوزيع ({incoming}) يتجاوز المتبقي على "
                     f"الفاتورة #{inv.invoice_number} ({remaining})."
                 )
+            incoming_by_invoice[inv.pk] = incoming
             # T-ARINT: نفس الحارس المستقلّ عن amount_paid المطبَّق في الترحيل.
             # قبل ترحيل السند لا يُحتسب توزيعه بعد — يحرسه `post_customer_payment`.
             if payment.is_posted:
                 guard_invoice_allocation_total(inv, incoming=amount_in_inv_curr)
+            if is_refund and inv.original_invoice_id:
+                refund_increments_by_original[inv.original_invoice_id] = (
+                    refund_increments_by_original.get(inv.original_invoice_id, Decimal("0.00"))
+                    + amount_in_inv_curr
+                )
+            prepared_allocations.append((inv, amt, amount_in_inv_curr, conv_rate))
 
+        originals_by_id = {
+            original.pk: original
+            for _returned, original in contexts.values()
+            if original is not None
+        }
+        for original_id, incoming in refund_increments_by_original.items():
+            _guard_shared_sales_return_refund_cap(
+                originals_by_id[original_id], incoming=incoming,
+            )
+
+        for inv, amt, amount_in_inv_curr, conv_rate in prepared_allocations:
             PaymentAllocation.objects.create(
                 tenant_id=payment.tenant_id,
                 payment=payment,
@@ -3177,7 +3436,7 @@ def deallocate_customer_payment(
       (`release_auto_cash_settlement`)، وتمييزُ بياناته القديمة يعتمد التوزيع نفسه.
     """
     with transaction.atomic():
-        payment = CustomerPayment.objects.select_for_update().get(pk=allocation.payment_id)
+        payment = _lock_customer_payments([allocation.payment_id])[0]
         alloc = (
             PaymentAllocation.objects.select_related("invoice")
             .filter(pk=allocation.pk, payment=payment).first()

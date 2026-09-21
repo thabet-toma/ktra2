@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Q, Sum
 
-from accounting.models import Account, JournalLine
+from accounting.models import Account, ChequeMovement, JournalLine
 from accounting.services import (
     convert_amount,
     create_audit_log,
@@ -46,6 +46,94 @@ from sales.models import (
 logger = logging.getLogger("sales.services")
 
 DEC = Decimal("0.01")
+
+
+def linked_return_credit_summary(original_invoices) -> dict[int, dict]:
+    """صافي تحصيل فواتير البيع بعد أرصدة مراجيعها المرتبطة المفتوحة.
+
+    النقد المسدِّد للمرتجع مصدره توزيعات سندات الرد المرحّلة، والورق مصدره
+    حركات الإرجاع ذات القيد الفعّال. لا يدخل مرتجع غير مرحّل أو مختلف العملة.
+    """
+    originals = [invoice for invoice in original_invoices if invoice.pk]
+    if not originals:
+        return {}
+
+    originals_by_id = {invoice.pk: invoice for invoice in originals}
+    summaries = {
+        invoice.pk: {
+            "collectible": max(
+                Decimal(str(invoice.grand_total or 0))
+                - Decimal(str(invoice.amount_paid or 0)),
+                Decimal("0.00"),
+            ).quantize(DEC),
+            "open_return_credit": Decimal("0.00"),
+            "returns": {},
+        }
+        for invoice in originals
+    }
+
+    returns = list(
+        SalesInvoice.objects.filter(
+            tenant_id__in={invoice.tenant_id for invoice in originals},
+            original_invoice_id__in=originals_by_id,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            status=SalesInvoice.STATUS_POSTED,
+        ).only(
+            "id", "tenant_id", "original_invoice_id", "currency_id",
+            "grand_total", "amount_paid",
+        )
+    )
+    returns = [
+        ret for ret in returns
+        if ret.currency_id == originals_by_id[ret.original_invoice_id].currency_id
+    ]
+    return_ids = [ret.pk for ret in returns]
+
+    cash_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
+    for return_id, amount, amount_in_invoice_currency in PaymentAllocation.objects.filter(
+        invoice_id__in=return_ids,
+        payment__is_posted=True,
+        payment__kind=CustomerPayment.KIND_REFUND,
+    ).values_list("invoice_id", "amount", "amount_in_invoice_currency"):
+        cash_by_return[return_id] += Decimal(str(
+            amount_in_invoice_currency if amount_in_invoice_currency is not None else amount
+        ))
+
+    paper_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
+    for return_id, amount in ChequeMovement.objects.filter(
+        sales_return_id__in=return_ids,
+        movement_type="return_to_customer",
+        journal_id__isnull=False,
+    ).values_list("sales_return_id", "cheque__amount"):
+        paper_by_return[return_id] += Decimal(str(amount or 0))
+
+    for ret in returns:
+        # `amount_paid` هو المرآة التاريخية لتوزيعات النقد. التوزيعات المرحّلة
+        # هي المصدر الأقوى، والسقوط للأكبر يحافظ على صفوف قديمة لم يبقَ صف
+        # توزيعها من دون أن يجمع المبلغ نفسه مرتين.
+        cash_refunded = max(
+            cash_by_return[ret.pk], Decimal(str(ret.amount_paid or 0))
+        ).quantize(DEC)
+        paper_refunded = paper_by_return[ret.pk].quantize(DEC)
+        open_credit = max(
+            Decimal(str(ret.grand_total or 0)) - cash_refunded - paper_refunded,
+            Decimal("0.00"),
+        ).quantize(DEC)
+        original_summary = summaries[ret.original_invoice_id]
+        original_summary["returns"][ret.pk] = {
+            "cash_refunded": cash_refunded,
+            "paper_refunded": paper_refunded,
+            "open_credit": open_credit,
+        }
+        original_summary["open_return_credit"] += open_credit
+
+    for original_id, summary in summaries.items():
+        summary["open_return_credit"] = summary["open_return_credit"].quantize(DEC)
+        summary["collectible"] = max(
+            summary["collectible"] - summary["open_return_credit"],
+            Decimal("0.00"),
+        ).quantize(DEC)
+    return summaries
 
 
 

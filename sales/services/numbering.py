@@ -44,6 +44,8 @@ from sales.models import (
 )
 from django.utils import timezone
 
+from .calc import linked_return_credit_summary
+
 logger = logging.getLogger("sales.services")
 
 DEC = Decimal("0.01")
@@ -65,14 +67,17 @@ def suggest_fifo_allocations(
             tenant_id=tenant_id,
             customer_id=partner_id,
             status=SalesInvoice.STATUS_POSTED,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
         )
         .order_by("invoice_date", "id")
     )
+    invs = list(invs)
+    summaries = linked_return_credit_summary(invs)
     out: list[dict] = []
     for inv in invs:
         if remaining <= 0:
             break
-        due = (inv.grand_total - Decimal(str(inv.amount_paid))).quantize(DEC)
+        due = summaries[inv.pk]["collectible"]
         if due <= 0:
             continue
         take = min(due, remaining)

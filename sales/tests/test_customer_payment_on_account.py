@@ -13,7 +13,11 @@ from accounting.models import Account, JournalHeader
 from accounting.services import create_fiscal_year
 from partners.models import Partner
 from sales.models import SalesInvoice, CustomerPayment, PaymentAllocation
-from sales.services import allocate_customer_payment, post_customer_payment
+from sales.services import (
+    allocate_customer_payment,
+    post_customer_payment,
+    suggest_fifo_allocations,
+)
 from tenants.models import Currency
 from tenants.services import create_company
 
@@ -148,6 +152,104 @@ def test_allocations_exceeding_payment_amount_rejected_on_post(env):
 
     with pytest.raises(ValidationError):
         post_customer_payment(pay)
+
+
+def test_receipt_cannot_be_posted_against_a_sales_return(env):
+    tenant, customer, cash, ar, ils, inv1, _inv2 = env
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-RECEIPT-POST", customer=customer,
+        currency=ils, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=Decimal("40"),
+        status=SalesInvoice.STATUS_POSTED,
+    )
+    pay = _payment(tenant, customer, cash, ils, 20, [(ret, 20)])
+
+    with pytest.raises(ValidationError) as exc:
+        post_customer_payment(pay)
+    assert ret.invoice_number in str(exc.value)
+    assert "سند قبض" in str(exc.value)
+
+
+def test_posted_receipt_cannot_be_allocated_to_a_sales_return(env):
+    tenant, customer, cash, ar, ils, inv1, _inv2 = env
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-RECEIPT-LATE", customer=customer,
+        currency=ils, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=Decimal("40"),
+        status=SalesInvoice.STATUS_POSTED,
+    )
+    pay = _payment(tenant, customer, cash, ils, 20)
+    post_customer_payment(pay)
+
+    with pytest.raises(ValidationError) as exc:
+        allocate_customer_payment(pay, [{"invoice": ret.id, "amount": "20"}])
+    assert ret.invoice_number in str(exc.value)
+    assert "سند قبض" in str(exc.value)
+
+
+def test_refund_can_still_be_allocated_to_a_sales_return(env):
+    tenant, customer, cash, ar, ils, inv1, _inv2 = env
+    # ردّ النقد لا يتجاوز ما دُفع على الأصل؛ هذا التحصيل يثبت الحالة المسموحة.
+    receipt = _payment(tenant, customer, cash, ils, 20, [(inv1, 20)])
+    post_customer_payment(receipt)
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-REFUND-LATE", customer=customer,
+        currency=ils, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=Decimal("40"),
+        status=SalesInvoice.STATUS_POSTED,
+    )
+    refund = _payment(tenant, customer, cash, ils, 20)
+    refund.kind = CustomerPayment.KIND_REFUND
+    refund.save(update_fields=["kind"])
+    post_customer_payment(refund)
+
+    allocate_customer_payment(refund, [{"invoice": ret.id, "amount": "20"}])
+    ret.refresh_from_db()
+    assert ret.amount_paid == Decimal("20.00")
+
+
+def test_fifo_excludes_returns_and_uses_original_net_collectible(env):
+    tenant, customer, cash, ar, ils, inv1, inv2 = env
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-FIFO", customer=customer,
+        currency=ils, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=Decimal("100"),
+        amount_paid=Decimal("20"), status=SalesInvoice.STATUS_POSTED,
+    )
+
+    rows = suggest_fifo_allocations(
+        tenant_id=tenant.TenantID, partner_id=customer.id, amount=Decimal("100"),
+    )
+    assert rows == [
+        {"invoice": inv1.id, "invoice_number": inv1.invoice_number, "amount": "20.00"},
+        {"invoice": inv2.id, "invoice_number": inv2.invoice_number, "amount": "50.00"},
+    ]
+    assert all(row["invoice"] != ret.id for row in rows)
+
+
+def test_receipt_rejects_original_with_zero_net_collectible(env):
+    tenant, customer, cash, ar, ils, inv1, _inv2 = env
+    SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-NET-ZERO", customer=customer,
+        currency=ils, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=inv1.grand_total,
+        status=SalesInvoice.STATUS_POSTED,
+    )
+    direct = _payment(tenant, customer, cash, ils, 1, [(inv1, 1)])
+    with pytest.raises(ValidationError) as direct_exc:
+        post_customer_payment(direct)
+    assert inv1.invoice_number in str(direct_exc.value)
+
+    late = _payment(tenant, customer, cash, ils, 1)
+    post_customer_payment(late)
+    with pytest.raises(ValidationError) as late_exc:
+        allocate_customer_payment(late, [{"invoice": inv1.id, "amount": "1"}])
+    assert inv1.invoice_number in str(late_exc.value)
 
 
 class CustomerPaymentApiOnAccountTest(APITestCase):

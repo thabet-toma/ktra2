@@ -12,13 +12,17 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
+from django.db import transaction
 from rest_framework.test import APIClient
 
-from accounting.models import Account
+from accounting.models import Account, JournalHeader
 from accounting.services import create_fiscal_year
 from inventory.models import Product
 from partners.models import Partner
 from sales.models import SalesInvoice, SalesInvoiceLine
+from sales.services import post_sales_invoice
+from sales.services import flow as sales_flow
 from tenants.models import Currency
 from tenants.services import create_company
 
@@ -139,3 +143,116 @@ def test_patching_a_return_to_another_customer_is_rejected(env):
     )
     assert res.status_code == 400, res.data
     assert "customer" in res.data
+
+
+def test_linked_return_currency_must_match_original(env):
+    tenant, owner, cur, buyer, stranger, product, original = env
+    usd = Currency.objects.create(Code="USD", Name="دولار", Symbol="$")
+    res = _client(owner, tenant).post(
+        "/api/sales/invoices/",
+        _payload(usd, product, customer_id=buyer.id, original_id=original.id),
+        format="json",
+    )
+    assert res.status_code == 400, res.data
+    assert "currency" in res.data
+    assert original.invoice_number in str(res.data["currency"])
+
+
+def _direct_linked_return(
+    tenant, customer, currency, product, original, *, number
+):
+    """ينشئ مرجعاً متجاوزاً للـserializer لاختبار حارس الخدمة الحاسم."""
+    returned = SalesInvoice.objects.create(
+        tenant=tenant,
+        invoice_number=number,
+        customer=customer,
+        currency=currency,
+        invoice_date="2026-06-20",
+        invoice_type=SalesInvoice.INVOICE_CREDIT,
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=original,
+        stock_on_post=False,
+    )
+    SalesInvoiceLine.objects.create(
+        tenant=tenant,
+        invoice=returned,
+        product=product,
+        quantity=Decimal("1"),
+        unit_price=Decimal("100"),
+    )
+    return returned
+
+
+def _assert_direct_return_post_rejected(returned, original, expected_reason):
+    with pytest.raises(ValidationError) as exc:
+        post_sales_invoice(returned)
+    message = str(exc.value)
+    assert returned.invoice_number in message
+    assert original.invoice_number in message
+    assert expected_reason in message
+    returned.refresh_from_db()
+    assert returned.status == SalesInvoice.STATUS_DRAFT
+    assert not JournalHeader.objects.filter(
+        reference_type="SALES_INVOICE", reference_id=returned.id
+    ).exists()
+
+
+def test_service_rejects_direct_linked_return_with_other_currency(env):
+    tenant, owner, cur, buyer, stranger, product, original = env
+    usd = Currency.objects.create(Code="USD", Name="دولار", Symbol="$")
+    returned = _direct_linked_return(
+        tenant, buyer, usd, product, original, number="SR-SVC-CURRENCY"
+    )
+
+    _assert_direct_return_post_rejected(returned, original, "العملة نفسها")
+
+
+def test_service_rejects_direct_linked_return_with_other_customer(env):
+    tenant, owner, cur, buyer, stranger, product, original = env
+    returned = _direct_linked_return(
+        tenant, stranger, cur, product, original, number="SR-SVC-CUSTOMER"
+    )
+
+    _assert_direct_return_post_rejected(returned, original, "العميل نفسه")
+
+
+def test_service_rejects_direct_linked_return_with_other_tenant(env):
+    tenant, owner, cur, buyer, stranger, product, original = env
+    other_tenant = create_company("شركة أخرى للمرجع", owner)
+    create_fiscal_year(other_tenant, 2026)
+    other_customer = Partner.objects.create(
+        tenant=other_tenant, name="عميل الشركة الأخرى", partner_type="Customer"
+    )
+    returned = _direct_linked_return(
+        other_tenant, other_customer, cur, product, original, number="SR-SVC-TENANT"
+    )
+
+    _assert_direct_return_post_rejected(returned, original, "الشركة نفسها")
+
+
+def test_lock_retries_if_linked_original_changes_after_discovery(env, monkeypatch):
+    """لا يُقفل أصلٌ ثانٍ خارج الترتيب إذا تغيّرت العلاقة أثناء تأمين الصفوف."""
+    tenant, owner, cur, buyer, stranger, product, original = env
+    replacement = SalesInvoice.objects.create(
+        tenant=tenant,
+        invoice_number="INV-RI-REPLACEMENT",
+        customer=buyer,
+        currency=cur,
+        invoice_date="2026-06-15",
+        invoice_type=SalesInvoice.INVOICE_CREDIT,
+    )
+    returned = _direct_linked_return(
+        tenant, buyer, cur, product, original, number="SR-LOCK-RETRY"
+    )
+    returned.original_invoice = replacement
+    returned.save(update_fields=["original_invoice"])
+    monkeypatch.setattr(
+        sales_flow,
+        "_discover_linked_original_ids",
+        lambda *_args, **_kwargs: {returned.id: original.id},
+    )
+
+    with transaction.atomic(), pytest.raises(ValidationError) as exc:
+        sales_flow._lock_invoices_with_linked_originals([returned.id])
+    assert returned.invoice_number in str(exc.value)
+    assert "أعد المحاولة" in str(exc.value)

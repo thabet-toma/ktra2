@@ -573,7 +573,20 @@ class SalesInvoiceSerializer(
         ):
             return attrs
         original = _current("original_invoice")
-        if original is None or original.customer_id is None:
+        if original is None:
+            return attrs
+        if kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+            currency = _current("currency")
+            if currency is None:
+                attrs["currency"] = original.currency
+            elif currency.pk != original.currency_id:
+                raise serializers.ValidationError({
+                    "currency": (
+                        f"مرتجع الفاتورة «{original.invoice_number}» يجب أن يكون "
+                        f"بعملة الفاتورة الأصلية نفسها."
+                    )
+                })
+        if original.customer_id is None:
             return attrs
         customer = _current("customer")
         if customer is None:

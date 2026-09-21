@@ -21,10 +21,11 @@ from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from rest_framework.test import APIClient
 
-from accounting.models import Account, Cheque, ChequeMovement, FiscalPeriod, JournalLine
-from accounting.services import create_fiscal_year, transfer_cheque
+from accounting.models import Account, Cheque, ChequeMovement, FiscalPeriod, JournalHeader, JournalLine
+from accounting.services import create_fiscal_year, partner_posted_balance, transfer_cheque
 from inventory.models import Product
 from partners.models import Partner
 from sales.models import (
@@ -37,9 +38,13 @@ from sales.models import (
 from sales.services import (
     calculate_sales_return_refund_caps,
     get_or_create_sales_settings,
+    allocate_customer_payment,
     post_customer_payment,
     post_sales_invoice,
+    release_auto_sales_return_refund,
+    suggest_fifo_allocations,
 )
+from sales.services import flow as sales_flow
 from tenants.models import Currency
 from tenants.services import create_company
 
@@ -107,6 +112,12 @@ def _client(owner, tenant):
     c.force_authenticate(user=owner)
     c.credentials(HTTP_X_TENANT_ID=str(tenant.TenantID))
     return c
+
+
+def _aging_rows(owner, tenant):
+    response = _client(owner, tenant).get("/api/sales/reports/aging/")
+    assert response.status_code == 200, response.data
+    return response.data
 
 
 def _invoice(
@@ -384,6 +395,26 @@ def test_explicit_choice_respects_caps(env):
     assert resp.data["refund_summary"]["cash_amount"] == "100.00"
     assert resp.data["refund_summary"]["credit_balance"] == "0.00"
 
+    # الورق + النقد سدّدا المرتجع كاملاً؛ لا يجوز ردّ مبلغ آخر عليه لاحقاً.
+    extra_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("1.00"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    PaymentAllocation.objects.create(
+        tenant=tenant, payment=extra_refund, invoice=ret, amount=Decimal("1.00"),
+    )
+    with pytest.raises(ValidationError) as exc:
+        post_customer_payment(extra_refund)
+    assert f"مرتجع البيع #{ret.invoice_number}" in str(exc.value)
+    extra_refund.refresh_from_db()
+    ret.refresh_from_db()
+    assert extra_refund.is_posted is False
+    assert ret.amount_paid == Decimal("100.00")
+    assert not JournalHeader.objects.filter(
+        reference_type="CUSTOMER_PAYMENT", reference_id=extra_refund.id
+    ).exists()
+
 
 # ── 6. الاختيار الصريح المتجاوز للسقوف يُرفض بجمل عربية ────────────────────────
 def test_explicit_choice_exceeding_caps_rejected(env):
@@ -581,6 +612,39 @@ def test_unpost_restores_cheques_and_deletes_system_refund_voucher(env):
     orig.refresh_from_db()
     assert orig.status == SalesInvoice.STATUS_POSTED
     assert orig.amount_paid == Decimal("400.00")
+
+
+def test_release_auto_refund_locks_payment_before_linked_invoices(env, monkeypatch):
+    """فكّ المرتجع يشارك السندات ترتيب القفل: الدفع ثم المرتجع/الأصل."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    orig = _invoice(tenant, customer, product, total="500", number="SI-LOCK-ORDER")
+    post_sales_invoice(orig)
+    _pay_invoice_cash(tenant, customer, orig, cash, "200")
+    ret = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-LOCK-ORDER",
+    )
+    post_sales_invoice(ret)
+    refund = CustomerPayment.objects.get(refund_for_invoice=ret)
+    order = []
+    lock_payments = sales_flow._lock_customer_payments
+    lock_invoices = sales_flow._lock_invoices_with_linked_originals
+
+    def record_payments(*args, **kwargs):
+        order.append("payments")
+        return lock_payments(*args, **kwargs)
+
+    def record_invoices(*args, **kwargs):
+        order.append("invoices")
+        return lock_invoices(*args, **kwargs)
+
+    monkeypatch.setattr(sales_flow, "_lock_customer_payments", record_payments)
+    monkeypatch.setattr(sales_flow, "_lock_invoices_with_linked_originals", record_invoices)
+    release_auto_sales_return_refund(ret)
+
+    assert order == ["payments", "invoices"]
+    assert not CustomerPayment.objects.filter(pk=refund.pk).exists()
 
 
 # ── 11. سند الرد اليدوي يمنع إلغاء ترحيل المرتجع ──────────────────────────────
@@ -950,6 +1014,7 @@ def test_returned_cheque_does_not_become_spendable_cash(env):
     # لا نقدَ إطلاقاً: كلُّ ما وصلنا ورقتان لم تُحصَّل واحدةٌ منهما.
     assert calculate_sales_return_refund_caps(orig)["cash_cap"] == Decimal("0.00")
 
+
     c = _client(owner, tenant)
     ret1 = _invoice(
         tenant, customer, product, total="500", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
@@ -979,7 +1044,280 @@ def test_returned_cheque_does_not_become_spendable_cash(env):
     assert not CustomerPayment.objects.filter(refund_for_invoice=ret2).exists()
 
 
-# ── 19. المستنداتُ الثلاثة مرتبطةٌ في كشف حساب الزبون ─────────────────────────
+# ── 19. صافي الذمم بعد المرتجع والاسترداد ────────────────────────────────────
+def test_full_unpaid_return_removes_original_from_aging_and_matches_ledger(env):
+    """فاتورة 1000 بلا تحصيل + مرتجع كامل بلا رد = لا دين، كما يقول دفتر العميل."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-AGING-NET")
+    post_sales_invoice(orig)
+    ret = _invoice(
+        tenant, customer, product, total="1000",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-AGING-NET",
+    )
+    response = _client(owner, tenant).post(
+        f"/api/sales/invoices/{ret.id}/post/",
+        {"refund": {"cheque_ids": [], "cash_amount": "0"}}, format="json",
+    )
+    assert response.status_code == 200, response.data
+
+    rows = _aging_rows(owner, tenant)
+    debit, credit = partner_posted_balance(tenant.TenantID, customer.id)
+    assert rows == []
+    assert sum((Decimal(row["remaining"]) for row in rows), Decimal("0")) == debit - credit
+    assert debit - credit == Decimal("0.00")
+
+
+def test_auto_cash_refund_leaves_only_original_unpaid_amount_collectible(env):
+    """الرد التلقائي الكامل للمرتجع يُصفّر رصيده المفتوح ولا يخصم قيمته مرتين."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-AUTO-NET")
+    post_sales_invoice(orig)
+    _pay_invoice_cash(tenant, customer, orig, cash, "400")
+    ret = _invoice(
+        tenant, customer, product, total="300",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-AUTO-NET",
+    )
+    response = _client(owner, tenant).post(
+        f"/api/sales/invoices/{ret.id}/post/", {}, format="json",
+    )
+    assert response.status_code == 200, response.data
+
+    ret.refresh_from_db()
+    assert ret.amount_paid == Decimal("300.00")
+    rows = _aging_rows(owner, tenant)
+    assert [row["invoice_number"] for row in rows] == [orig.invoice_number]
+    assert Decimal(rows[0]["remaining"]) == Decimal("600.00")
+
+
+def test_manual_partial_refund_deducts_only_open_return_credit(env):
+    """الرد اليدوي الجزئي يترك الجزء غير المسترد وحده رصيداً دائنًا يخصم من الأصل."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-MANUAL-NET")
+    post_sales_invoice(orig)
+    _pay_invoice_cash(tenant, customer, orig, cash, "400")
+    ret = _invoice(
+        tenant, customer, product, total="300",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-MANUAL-NET",
+    )
+    response = _client(owner, tenant).post(
+        f"/api/sales/invoices/{ret.id}/post/",
+        {"refund": {"cheque_ids": [], "cash_amount": "100.00"}}, format="json",
+    )
+    assert response.status_code == 200, response.data
+
+    ret.refresh_from_db()
+    assert ret.amount_paid == Decimal("100.00")
+    rows = _aging_rows(owner, tenant)
+    assert [row["invoice_number"] for row in rows] == [orig.invoice_number]
+    assert Decimal(rows[0]["remaining"]) == Decimal("400.00")
+    debit, credit = partner_posted_balance(tenant.TenantID, customer.id)
+    assert debit - credit == Decimal("400.00")
+
+
+def test_returned_cheque_settles_return_credit_without_touching_amount_paid(env):
+    """الورقة المعادة تُسدّد المرتجع دفترياً ولو بقي amount_paid صفراً."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-PAPER-NET")
+    post_sales_invoice(orig)
+    _pay_invoice_cheques_and_cash(
+        tenant, customer, orig, cash,
+        cheques_data=[{"cheque_number": "CHQ-PAPER-NET", "amount": "500"}],
+    )
+    ret = _invoice(
+        tenant, customer, product, total="500",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-PAPER-NET",
+    )
+    response = _client(owner, tenant).post(
+        f"/api/sales/invoices/{ret.id}/post/", {}, format="json",
+    )
+    assert response.status_code == 200, response.data
+
+    ret.refresh_from_db()
+    assert ret.amount_paid == Decimal("0.00")
+    assert ChequeMovement.objects.filter(
+        sales_return=ret, movement_type="return_to_customer", journal_id__isnull=False,
+    ).count() == 1
+    rows = _aging_rows(owner, tenant)
+    assert [row["invoice_number"] for row in rows] == [orig.invoice_number]
+    assert Decimal(rows[0]["remaining"]) == Decimal("500.00")
+    debit, credit = partner_posted_balance(tenant.TenantID, customer.id)
+    assert debit - credit == Decimal("500.00")
+    assert suggest_fifo_allocations(
+        tenant_id=tenant.TenantID, partner_id=customer.id, amount=Decimal("1000"),
+    ) == [{
+        "invoice": orig.id, "invoice_number": orig.invoice_number, "amount": "500.00",
+    }]
+
+    extra_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("1"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    PaymentAllocation.objects.create(
+        tenant=tenant, payment=extra_refund, invoice=ret, amount=Decimal("1"),
+    )
+    with pytest.raises(ValidationError) as exc:
+        post_customer_payment(extra_refund)
+    assert f"مرتجع البيع #{ret.invoice_number}" in str(exc.value)
+    extra_refund.refresh_from_db()
+    ret.refresh_from_db()
+    assert extra_refund.is_posted is False
+    assert ret.amount_paid == Decimal("0.00")
+    assert not JournalHeader.objects.filter(
+        reference_type="CUSTOMER_PAYMENT", reference_id=extra_refund.id
+    ).exists()
+
+
+def test_manual_sibling_refunds_cannot_exceed_original_cash_cap(env):
+    """الحارس يعيد قراءة سقف الأصل قبل كتابة ردّ الشقيق الثاني."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    original = _invoice(tenant, customer, product, total="500", number="SI-SHARED-CAP")
+    post_sales_invoice(original)
+    _pay_invoice_cash(tenant, customer, original, cash, "300")
+    first_return = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=original, number="SR-SHARED-CAP-1",
+    )
+    second_return = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=original, number="SR-SHARED-CAP-2",
+    )
+    post_sales_invoice(first_return, refund_choice={"cheque_ids": [], "cash_amount": "0"})
+    post_sales_invoice(second_return, refund_choice={"cheque_ids": [], "cash_amount": "0"})
+
+    first_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("200"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    PaymentAllocation.objects.create(
+        tenant=tenant, payment=first_refund, invoice=first_return, amount=Decimal("200"),
+    )
+    post_customer_payment(first_refund)
+
+    second_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("150"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    PaymentAllocation.objects.create(
+        tenant=tenant, payment=second_refund, invoice=second_return, amount=Decimal("150"),
+    )
+    with pytest.raises(ValidationError) as exc:
+        post_customer_payment(second_refund)
+    assert original.invoice_number in str(exc.value)
+
+    second_refund.refresh_from_db()
+    second_return.refresh_from_db()
+    assert second_refund.is_posted is False
+    assert second_return.amount_paid == Decimal("0.00")
+    assert not JournalHeader.objects.filter(
+        reference_type="CUSTOMER_PAYMENT", reference_id=second_refund.id
+    ).exists()
+
+
+def test_later_refund_allocation_rechecks_sibling_cash_cap(env):
+    """توزيع سند ردّ مرحّل لاحقاً يعيد فحص السقف المشترك قبل ربطه بالمرتجع."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    original = _invoice(tenant, customer, product, total="500", number="SI-ALLOC-CAP")
+    post_sales_invoice(original)
+    _pay_invoice_cash(tenant, customer, original, cash, "300")
+    first_return = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=original, number="SR-ALLOC-CAP-1",
+    )
+    second_return = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=original, number="SR-ALLOC-CAP-2",
+    )
+    post_sales_invoice(first_return, refund_choice={"cheque_ids": [], "cash_amount": "0"})
+    post_sales_invoice(second_return, refund_choice={"cheque_ids": [], "cash_amount": "0"})
+
+    first_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("200"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    post_customer_payment(first_refund)
+    allocate_customer_payment(
+        first_refund, [{"invoice": first_return.id, "amount": "200"}],
+    )
+
+    second_refund = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-21",
+        amount=Decimal("150"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    post_customer_payment(second_refund)
+    with pytest.raises(ValidationError) as exc:
+        allocate_customer_payment(
+            second_refund, [{"invoice": second_return.id, "amount": "150"}],
+        )
+    assert original.invoice_number in str(exc.value)
+
+    second_return.refresh_from_db()
+    assert second_return.amount_paid == Decimal("0.00")
+    assert not PaymentAllocation.objects.filter(payment=second_refund).exists()
+
+
+def test_manual_refund_reduces_next_returns_automatic_cash_cap(env):
+    """الرد اليدوي الموزع على مرتجع يدخل السقف التراكمي ولو لم يملك refund_for_invoice."""
+    tenant, owner, cur, ar, cash, rev, customer, product, ss = env
+    ss.auto_refund_on_sales_return = False
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    orig = _invoice(tenant, customer, product, total="1000", number="SI-MANUAL-CAP")
+    post_sales_invoice(orig)
+    _pay_invoice_cash(tenant, customer, orig, cash, "500")
+
+    ret1 = _invoice(
+        tenant, customer, product, total="200",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-MANUAL-CAP-1",
+    )
+    post_sales_invoice(ret1, refund_choice={"cheque_ids": [], "cash_amount": "0"})
+    manual = CustomerPayment.objects.create(
+        tenant=tenant, partner=customer, payment_date="2026-06-20",
+        amount=Decimal("100"), currency=cur, cash_or_bank_account=cash,
+        kind=CustomerPayment.KIND_REFUND,
+    )
+    PaymentAllocation.objects.create(
+        tenant=tenant, payment=manual, invoice=ret1, amount=Decimal("100"),
+    )
+    post_customer_payment(manual)
+
+    ss.auto_refund_on_sales_return = True
+    ss.save(update_fields=["auto_refund_on_sales_return"])
+    ret2 = _invoice(
+        tenant, customer, product, total="500",
+        kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original=orig, number="SR-MANUAL-CAP-2",
+    )
+    response = _client(owner, tenant).post(
+        f"/api/sales/invoices/{ret2.id}/post/", {}, format="json",
+    )
+    assert response.status_code == 200, response.data
+    ret2.refresh_from_db()
+    assert ret2.amount_paid == Decimal("400.00")
+    assert response.data["refund_summary"]["credit_balance"] == "100.00"
+
+
+# ── 20. المستنداتُ الثلاثة مرتبطةٌ في كشف حساب الزبون ─────────────────────────
 def test_statement_links_invoice_return_and_refund_together(env):
     """الفاتورةُ والمرتجعُ وسندُ الردّ في مجموعةٍ واحدة، مرساتُها الفاتورةُ الأصليّة.
 

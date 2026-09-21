@@ -41,6 +41,7 @@ from .numbering import (
     guard_reserved_stock,
 )
 from .calc import (
+    linked_return_credit_summary,
     line_net,
     recalculate_invoice_amounts,
     _resolve_ar_account,
@@ -152,6 +153,7 @@ __all__ = [
     "reserved_quantity_map",
     "reserved_stock_rows",
     "guard_reserved_stock",
+    "linked_return_credit_summary",
     "line_net",
     "recalculate_invoice_amounts",
     "_resolve_ar_account",

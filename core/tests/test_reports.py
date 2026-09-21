@@ -199,6 +199,27 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(Decimal(row["b3"]), Decimal("150"))
         self.assertEqual(Decimal(row["b0"]), Decimal("0"))
 
+    def test_receivables_aging_nets_only_open_credit_of_linked_returns(self):
+        """المرتجع ليس ديناً، والمسترد منه لا يبقى رصيداً دائناً يخصم من الأصل."""
+        ret = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SR-RPT-NET", customer=self.customer,
+            currency=self.currency, invoice_date="2026-06-20",
+            invoice_type=SalesInvoice.INVOICE_CREDIT,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            original_invoice=self.invoice, status=SalesInvoice.STATUS_POSTED,
+            grand_total=Decimal("40"), amount_paid=Decimal("10"),
+        )
+
+        res = self._run("receivables-aging", **{"as_of": "2026-12-31"})
+        row = next(r for r in res.data["rows"] if r["partner_name"] == "زبون التقارير")
+        self.assertEqual(Decimal(row["total"]), Decimal("120"))
+
+        ret.amount_paid = Decimal("40")
+        ret.save(update_fields=["amount_paid"])
+        res = self._run("receivables-aging", **{"as_of": "2026-12-31"})
+        row = next(r for r in res.data["rows"] if r["partner_name"] == "زبون التقارير")
+        self.assertEqual(Decimal(row["total"]), Decimal("150"))
+
     #: تقارير لها حدٌّ على الفترة ترفض النطاق العريض الافتراضي هنا عن حق —
     #: يُشغَّل كلٌّ منها بنطاقه بدل تعطيل الحارس عنه.
     NARROW_PERIOD_REPORTS = {
