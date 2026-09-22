@@ -36,6 +36,7 @@ import {
   deallocateCustomerPayment,
   suggestFifoAllocations,
   getAgingReport,
+  getPartnerBalance,
   getSalesSettings,
   type CustomerPaymentAllocation,
   type CustomerPaymentRow,
@@ -88,9 +89,75 @@ type AgingInvoice = {
   grand_total: string;
   amount_paid: string;
   remaining: string;
+  /** حارس واجهة احتياطي إن أعاد الخادم نوع المستند مستقبلاً. */
+  invoice_kind?: string;
 };
 
 const fmt = (n: string | number) => formatMoney(n);
+
+const isCollectibleAgingInvoice = (invoice: AgingInvoice) =>
+  invoice.invoice_kind !== "sale_return";
+
+const CustomerLedgerBalance: React.FC<{ partnerId: number | "" | null }> = ({ partnerId }) => {
+  const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
+  const [balance, setBalance] = useState(0);
+  const [reloadKey, setReloadKey] = useState(0);
+
+  useEffect(() => {
+    if (!partnerId) {
+      setStatus("idle");
+      setBalance(0);
+      return;
+    }
+
+    let cancelled = false;
+    setStatus("loading");
+    getPartnerBalance({ partnerId })
+      .then((response) => {
+        if (cancelled) return;
+        setBalance(Number(response.open_balance) || 0);
+        setStatus("ready");
+      })
+      .catch(() => {
+        if (!cancelled) setStatus("error");
+      });
+
+    return () => { cancelled = true; };
+  }, [partnerId, reloadKey]);
+
+  if (status === "idle") return null;
+
+  return (
+    <div
+      className="mb-2 flex min-h-9 items-center justify-between gap-2 rounded border border-[var(--ktra-border)] bg-[var(--ktra-surface-2)] px-3 py-2 text-xs"
+      data-testid="customer-ledger-balance"
+      aria-live="polite"
+    >
+      {status === "loading" && <span>جارٍ تحميل رصيد العميل…</span>}
+      {status === "error" && (
+        <>
+          <span>تعذّر تحميل رصيد العميل</span>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            onClick={() => setReloadKey((key) => key + 1)}
+          >
+            <RefreshCw className="h-3 w-3" /> إعادة المحاولة
+          </button>
+        </>
+      )}
+      {status === "ready" && (
+        <span className="font-semibold">
+          {balance > 0.009
+            ? <>على العميل <span className="ktra-num">{fmt(balance)}</span></>
+            : balance < -0.009
+              ? <>للعميل <span className="ktra-num">{fmt(Math.abs(balance))}</span></>
+              : "الرصيد متوازن"}
+        </span>
+      )}
+    </div>
+  );
+};
 
 /** المتبقّي غير الموزَّع على الفواتير (يأتي محسوباً من الخادم، ويُشتق احتياطاً). */
 const unallocatedOf = (p: CustomerPaymentRow) =>
@@ -166,7 +233,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       setPartners(parts || []);
       setAccounts(accs || []);
       setCurrencies(currs || []);
-      setAging(ag || []);
+      setAging((ag || []).filter(isCollectibleAgingInvoice));
       const paymentId = Number(new URLSearchParams(window.location.search).get("payment_id"));
       if (paymentId) {
         setSearch(String(paymentId));
@@ -611,7 +678,7 @@ export const NewPaymentModal: React.FC<{
   const partners = providedPartners ?? loadedPartners;
   const accounts = providedAccounts ?? loadedAccounts;
   const currencies = providedCurrencies ?? loadedCurrencies;
-  const aging = providedAging ?? loadedAging;
+  const aging = (providedAging ?? loadedAging).filter(isCollectibleAgingInvoice);
   const effectiveDefaultCashAccountId = defaultCashAccountId || loadedDefaultCashAccountId;
   const [partnerId, setPartnerId] = useState<number | "">(initialPartnerId ?? initialPartner?.id ?? "");
   const [date, setDate] = useState(today);
@@ -768,7 +835,7 @@ export const NewPaymentModal: React.FC<{
         setLoadedPartners(parts || []);
         setLoadedAccounts(accs || []);
         setLoadedCurrencies(currs || []);
-        setLoadedAging(agingRows || []);
+        setLoadedAging((agingRows || []).filter(isCollectibleAgingInvoice));
         const defaultAccount =
           salesSettings?.default_cash_account || purchaseSettings?.default_cash_account;
         if (defaultAccount) setLoadedDefaultCashAccountId(defaultAccount);
@@ -997,6 +1064,7 @@ export const NewPaymentModal: React.FC<{
       <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={touched} />
       {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={partnerId === "" ? null : partnerId} className="mb-2" />
+      <CustomerLedgerBalance partnerId={partnerId} />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field" style={{ gridColumn: "span 2" }}>
           <span className="ktra-field-label">العميل *</span>
@@ -1201,7 +1269,8 @@ export const PaymentAllocationModal: React.FC<{
       is_posted: payment.is_posted,
     }}
     partnerLabel={partnerLabel}
-    docs={aging.map((a) => ({
+    summary={<CustomerLedgerBalance partnerId={payment.partner} />}
+    docs={aging.filter(isCollectibleAgingInvoice).map((a) => ({
       id: a.invoice_id,
       label: a.invoice_number || `#${a.invoice_id}`,
       remaining: a.remaining,

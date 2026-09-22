@@ -33,12 +33,14 @@ interface Props {
   voucher: AllocatableVoucher;
   partnerLabel: string;
   docs: AllocatableDoc[];
+  /** ملخّص سياقي اختياري (مثل رصيد الطرف) قبل حقول التوزيع. */
+  summary?: React.ReactNode;
   onClose: () => void;
   onSaved: () => void;
 }
 
 export const VoucherAllocationModal: React.FC<Props> = ({
-  kind, voucher, partnerLabel, docs, onClose, onSaved,
+  kind, voucher, partnerLabel, docs, summary, onClose, onSaved,
 }) => {
   const isCustomer = kind === "customer";
   const available = voucher.unallocated;
@@ -92,6 +94,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
       onClose={onClose}
       onSubmit={() => void submit()}
     >
+      {summary}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field">
           <span className="ktra-field-label">مبلغ السند</span>
