@@ -220,6 +220,33 @@ class ReportEngineTest(APITestCase):
         row = next(r for r in res.data["rows"] if r["partner_name"] == "زبون التقارير")
         self.assertEqual(Decimal(row["total"]), Decimal("150"))
 
+    def test_receivables_aging_shows_unapplied_return_credit_as_negative(self):
+        """مرتجع بلا أصل رصيدٌ دائن غير مطبَّق: يظهر سالباً في خانة عمره ويُصفّي الإجمالي."""
+        SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SR-RPT-FREE", customer=self.customer,
+            currency=self.currency, invoice_date="2026-12-20",
+            invoice_type=SalesInvoice.INVOICE_CREDIT,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            status=SalesInvoice.STATUS_POSTED,
+            grand_total=Decimal("40"), amount_paid=Decimal("10"),
+        )
+        # صفّ تاريخي مرتبط بعملة تخالف أصله: لا يُطرح من الأصل، فيظهر سالباً مثله.
+        other_currency, _ = Currency.objects.get_or_create(
+            Code="RPX", defaults={"Name": "Other", "Symbol": "X"})
+        SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SR-RPT-FX", customer=self.customer,
+            currency=other_currency, invoice_date="2026-12-20",
+            invoice_type=SalesInvoice.INVOICE_CREDIT,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            original_invoice=self.invoice, status=SalesInvoice.STATUS_POSTED,
+            grand_total=Decimal("5"),
+        )
+
+        res = self._run("receivables-aging", **{"as_of": "2026-12-31"})
+        row = next(r for r in res.data["rows"] if r["partner_name"] == "زبون التقارير")
+        self.assertEqual(Decimal(row["b0"]), Decimal("-35"))
+        self.assertEqual(Decimal(row["total"]), Decimal("115"))
+
     #: تقارير لها حدٌّ على الفترة ترفض النطاق العريض الافتراضي هنا عن حق —
     #: يُشغَّل كلٌّ منها بنطاقه بدل تعطيل الحارس عنه.
     NARROW_PERIOD_REPORTS = {

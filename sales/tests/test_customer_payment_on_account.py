@@ -211,6 +211,34 @@ def test_refund_can_still_be_allocated_to_a_sales_return(env):
     assert ret.amount_paid == Decimal("20.00")
 
 
+def test_refund_on_legacy_return_in_other_currency_uses_its_own_open_credit(env):
+    """صفّ تاريخي: مرتجع مرتبط بعملة تخالف أصله لا يُطرح من الأصل، لكن رصيده يُردّ."""
+    tenant, customer, cash, ar, ils, inv1, _inv2 = env
+    usd = Currency.objects.create(Code="USD", Name="دولار", Symbol="$")
+    ret = SalesInvoice.objects.create(
+        tenant=tenant, invoice_number="SR-LEGACY-USD", customer=customer,
+        currency=usd, invoice_date="2026-06-16",
+        invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+        original_invoice=inv1, grand_total=Decimal("40"),
+        status=SalesInvoice.STATUS_POSTED,
+    )
+
+    def _refund(amount):
+        pay = _payment(tenant, customer, cash, usd, amount, [(ret, amount)])
+        pay.kind = CustomerPayment.KIND_REFUND
+        pay.save(update_fields=["kind"])
+        return pay
+
+    too_much = _refund(41)
+    with pytest.raises(ValidationError) as exc:
+        post_customer_payment(too_much)
+    assert ret.invoice_number in str(exc.value)
+
+    post_customer_payment(_refund(40))
+    ret.refresh_from_db()
+    assert ret.amount_paid == Decimal("40.00")
+
+
 def test_fifo_excludes_returns_and_uses_original_net_collectible(env):
     tenant, customer, cash, ar, ils, inv1, inv2 = env
     ret = SalesInvoice.objects.create(

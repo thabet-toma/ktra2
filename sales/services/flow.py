@@ -55,7 +55,7 @@ DEC = Decimal("0.01")
 from .foundation import get_or_create_sales_settings
 from .numbering import guard_reserved_stock
 from .pricing import SALES_STOCK_REFERENCE_TYPES
-from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, linked_return_credit_summary, recalculate_invoice_amounts, resolve_cheques_under_collection_account
+from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, linked_return_credit_summary, recalculate_invoice_amounts, resolve_cheques_under_collection_account, sales_return_open_credit
 
 def _validate_cheque_payloads(
     cheques: list[dict], *, require_due_date: bool = False
@@ -456,6 +456,28 @@ def _validate_linked_sales_return(
         raise ValidationError(f"{label} لا يخصان العميل نفسه.")
     if returned.currency_id != original.currency_id:
         raise ValidationError(f"{label} لا يحملان العملة نفسها.")
+
+
+def _allocation_open_amount(
+    inv: SalesInvoice, *, collectible_summaries: dict, return_credits: dict,
+) -> Decimal:
+    """ما يقبله المستند من توزيع: صافي تحصيل فاتورة البيع، أو الرصيد المفتوح للمرتجع.
+
+    رصيد المرتجع يُقرأ من مصدره الواحد مرتبطاً كان أم لا — صفٌّ تاريخي بعملة
+    تخالف أصله لا يُطرح من الأصل، لكن رصيده يبقى قابلاً للردّ.
+    """
+    if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+        return return_credits[inv.pk]["open_credit"]
+    if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
+        return collectible_summaries[inv.pk]["collectible"]
+    return inv.grand_total - Decimal(str(inv.amount_paid))
+
+
+def _consumes_original_cash_cap(inv: SalesInvoice, collectible_summaries: dict) -> bool:
+    """ردّ المرتجع يستهلك سقف نقد أصله فقط إن كان محسوباً عليه (نفس العملة)."""
+    return bool(inv.original_invoice_id) and inv.pk in (
+        collectible_summaries.get(inv.original_invoice_id, {}).get("returns", {})
+    )
 
 
 def _guard_shared_sales_return_refund_cap(
@@ -2942,6 +2964,10 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE
         ] + linked_originals
         collectible_summaries = linked_return_credit_summary(collectible_sources)
+        return_credits = sales_return_open_credit([
+            inv for inv in locked_invoices.values()
+            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN
+        ])
 
         # إجمالي الزيادة لكل فاتورة (قد تتعدّد التوزيعات على نفس الفاتورة)
         increment_by_invoice: dict[int, Decimal] = {}
@@ -2970,14 +2996,11 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                 raise ValidationError(
                     f"لا يجوز توزيع سند قبض على مرتجع البيع #{inv.invoice_number}."
                 )
-            if is_refund and inv.original_invoice_id:
-                remaining = collectible_summaries[inv.original_invoice_id]["returns"].get(
-                    inv.pk, {"open_credit": Decimal("0.00")}
-                )["open_credit"]
-            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
-                remaining = collectible_summaries[inv.pk]["collectible"]
-            else:
-                remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            remaining = _allocation_open_amount(
+                inv,
+                collectible_summaries=collectible_summaries,
+                return_credits=return_credits,
+            )
             if total_increment > remaining + DEC:
                 if is_refund:
                     raise ValidationError(
@@ -2990,7 +3013,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             # T-ARINT: حارس ثانٍ مستقلّ عن amount_paid (يُصفَّر من الخارج) —
             # مجموع توزيعات السندات المرحّلة نفسه لا يتجاوز إجمالي الفاتورة.
             guard_invoice_allocation_total(inv, incoming=total_increment)
-            if is_refund and inv.original_invoice_id:
+            if is_refund and _consumes_original_cash_cap(inv, collectible_summaries):
                 refund_increments_by_original[inv.original_invoice_id] = (
                     refund_increments_by_original.get(inv.original_invoice_id, Decimal("0.00"))
                     + total_increment
@@ -3313,6 +3336,10 @@ def allocate_customer_payment(
             if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE
         ] + linked_originals
         collectible_summaries = linked_return_credit_summary(collectible_sources)
+        return_credits = sales_return_open_credit([
+            inv for inv in invoices.values()
+            if inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN
+        ])
         incoming_by_invoice: dict[int, Decimal] = {}
         refund_increments_by_original: dict[int, Decimal] = {}
         prepared_allocations: list[tuple[SalesInvoice, Decimal, Decimal, Decimal]] = []
@@ -3346,14 +3373,11 @@ def allocate_customer_payment(
                     tenant_id=payment.tenant_id,
                     effective_date=payment.payment_date,
                 )
-            if is_refund and inv.original_invoice_id:
-                remaining = collectible_summaries[inv.original_invoice_id]["returns"].get(
-                    inv.pk, {"open_credit": Decimal("0.00")}
-                )["open_credit"]
-            elif inv.invoice_kind == SalesInvoice.INVOICE_KIND_SALE:
-                remaining = collectible_summaries[inv.pk]["collectible"]
-            else:
-                remaining = inv.grand_total - Decimal(str(inv.amount_paid))
+            remaining = _allocation_open_amount(
+                inv,
+                collectible_summaries=collectible_summaries,
+                return_credits=return_credits,
+            )
             incoming = incoming_by_invoice.get(inv.pk, Decimal("0.00")) + amount_in_inv_curr
             if incoming > remaining + DEC:
                 if is_refund:
@@ -3370,7 +3394,7 @@ def allocate_customer_payment(
             # قبل ترحيل السند لا يُحتسب توزيعه بعد — يحرسه `post_customer_payment`.
             if payment.is_posted:
                 guard_invoice_allocation_total(inv, incoming=amount_in_inv_curr)
-            if is_refund and inv.original_invoice_id:
+            if is_refund and _consumes_original_cash_cap(inv, collectible_summaries):
                 refund_increments_by_original[inv.original_invoice_id] = (
                     refund_increments_by_original.get(inv.original_invoice_id, Decimal("0.00"))
                     + amount_in_inv_curr

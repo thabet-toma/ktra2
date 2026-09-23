@@ -1014,7 +1014,6 @@ def test_returned_cheque_does_not_become_spendable_cash(env):
     # لا نقدَ إطلاقاً: كلُّ ما وصلنا ورقتان لم تُحصَّل واحدةٌ منهما.
     assert calculate_sales_return_refund_caps(orig)["cash_cap"] == Decimal("0.00")
 
-
     c = _client(owner, tenant)
     ret1 = _invoice(
         tenant, customer, product, total="500", kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,

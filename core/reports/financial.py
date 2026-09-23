@@ -67,20 +67,34 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
 
     if side == "customer":
         from sales.models import SalesInvoice
-        from sales.services import linked_return_credit_summary
+        from sales.services import (
+            linked_return_credit_summary,
+            unapplied_sales_return_credits,
+        )
 
+        # المتبقي الخام الموجب شرطٌ لازم للصافي الموجب، فالمسدَّد لا يُحمَّل.
         docs = list(SalesInvoice.objects.filter(
             tenant_id=tenant_id,
             status=SalesInvoice.STATUS_POSTED,
             invoice_kind=SalesInvoice.INVOICE_KIND_SALE,
-        ).select_related("customer"))
+        ).annotate(
+            _gross_remaining=F("grand_total") - F("amount_paid"),
+        ).filter(_gross_remaining__gt=0).select_related("customer"))
         summaries = linked_return_credit_summary(docs)
-        rows_src = (
+        rows_src = [
             (d.customer_id, d.customer.name if d.customer_id else "",
              d.due_date or d.invoice_date,
              summaries[d.pk]["collectible"])
             for d in docs
-        )
+        ]
+        # الرصيد الدائن غير المطبَّق (مرتجعٌ لا يُطرح من أصل) يُعرض سالباً في
+        # خانة عمره فيُصفّي ما على الزبون — كما في QuickBooks وOdoo — بدل أن
+        # يختفي فيرتفع إجمالي الأعمار عن دفتر الزبون.
+        rows_src += [
+            (ret.customer_id, ret.customer.name if ret.customer_id else "",
+             ret.invoice_date, -open_credit)
+            for ret, open_credit in unapplied_sales_return_credits(tenant_id)
+        ]
     else:
         from logistics.models import PurchaseInvoice
         from logistics.services import annotate_purchase_invoice_payment_summary
@@ -108,7 +122,8 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
         )
 
     for partner_id, partner_name, base_date, remaining in rows_src:
-        if remaining <= DEC:
+        # السالب رصيدٌ دائن للزبون مقصود؛ جانب الموردين يُبقي حدّه القديم.
+        if (abs(remaining) if side == "customer" else remaining) <= DEC:
             continue
         age = (today - base_date).days if base_date else 0
         bucket = buckets.setdefault(partner_id, {

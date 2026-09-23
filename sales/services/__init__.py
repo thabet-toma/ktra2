@@ -42,6 +42,8 @@ from .numbering import (
 )
 from .calc import (
     linked_return_credit_summary,
+    sales_return_open_credit,
+    unapplied_sales_return_credits,
     line_net,
     recalculate_invoice_amounts,
     _resolve_ar_account,
@@ -154,6 +156,8 @@ __all__ = [
     "reserved_stock_rows",
     "guard_reserved_stock",
     "linked_return_credit_summary",
+    "sales_return_open_credit",
+    "unapplied_sales_return_credits",
     "line_net",
     "recalculate_invoice_amounts",
     "_resolve_ar_account",

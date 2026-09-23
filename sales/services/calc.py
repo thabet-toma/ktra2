@@ -9,7 +9,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Q, Sum
+from django.db.models import F, Q, Sum
 
 from accounting.models import Account, ChequeMovement, JournalLine
 from accounting.services import (
@@ -46,6 +46,82 @@ from sales.models import (
 logger = logging.getLogger("sales.services")
 
 DEC = Decimal("0.01")
+
+
+def sales_return_open_credit(returns) -> dict[int, dict]:
+    """الرصيد الدائن المفتوح لكل مرتجع بيع: إجماليه ناقص ما رُدّ نقداً وورقاً.
+
+    النقد المسدِّد للمرتجع مصدره توزيعات سندات الرد المرحّلة، والورق مصدره
+    حركات الإرجاع ذات القيد الفعّال. مصدرٌ واحد لكل مرتجع — مرتبطاً كان أم لا.
+    """
+    returns = [ret for ret in returns if ret.pk]
+    if not returns:
+        return {}
+    return_ids = [ret.pk for ret in returns]
+
+    cash_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
+    for return_id, amount, amount_in_invoice_currency in PaymentAllocation.objects.filter(
+        invoice_id__in=return_ids,
+        payment__is_posted=True,
+        payment__kind=CustomerPayment.KIND_REFUND,
+    ).values_list("invoice_id", "amount", "amount_in_invoice_currency"):
+        cash_by_return[return_id] += Decimal(str(
+            amount_in_invoice_currency if amount_in_invoice_currency is not None else amount
+        ))
+
+    paper_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
+    for return_id, amount in ChequeMovement.objects.filter(
+        sales_return_id__in=return_ids,
+        movement_type="return_to_customer",
+        journal_id__isnull=False,
+    ).values_list("sales_return_id", "cheque__amount"):
+        paper_by_return[return_id] += Decimal(str(amount or 0))
+
+    credits: dict[int, dict] = {}
+    for ret in returns:
+        # `amount_paid` هو المرآة التاريخية لتوزيعات النقد. التوزيعات المرحّلة
+        # هي المصدر الأقوى، والسقوط للأكبر يحافظ على صفوف قديمة لم يبقَ صف
+        # توزيعها من دون أن يجمع المبلغ نفسه مرتين.
+        cash_refunded = max(
+            cash_by_return[ret.pk], Decimal(str(ret.amount_paid or 0))
+        ).quantize(DEC)
+        paper_refunded = paper_by_return[ret.pk].quantize(DEC)
+        credits[ret.pk] = {
+            "cash_refunded": cash_refunded,
+            "paper_refunded": paper_refunded,
+            "open_credit": max(
+                Decimal(str(ret.grand_total or 0)) - cash_refunded - paper_refunded,
+                Decimal("0.00"),
+            ).quantize(DEC),
+        }
+    return credits
+
+
+def unapplied_sales_return_credits(tenant_id: int) -> list[tuple[SalesInvoice, Decimal]]:
+    """مراجيع البيع المرحّلة التي لا تُطرح من أصل — ورصيدها الدائن المفتوح.
+
+    مرتجعٌ بلا فاتورة أصلية، أو صفٌّ تاريخيّ بعملة تخالف أصله (الجديد يُرفض عند
+    الإنشاء والترحيل). كلاهما رصيدٌ دائنٌ غير مطبَّق على فاتورة بعينها، فيظهر
+    سالباً في أعمار الذمم كما في QuickBooks وOdoo بدل أن يختفي من التقرير.
+    """
+    returns = list(
+        SalesInvoice.objects.filter(
+            tenant_id=tenant_id,
+            invoice_kind=SalesInvoice.INVOICE_KIND_SALE_RETURN,
+            status=SalesInvoice.STATUS_POSTED,
+        )
+        .exclude(
+            original_invoice__isnull=False,
+            currency_id=F("original_invoice__currency_id"),
+        )
+        .select_related("customer")
+    )
+    credits = sales_return_open_credit(returns)
+    return [
+        (ret, credits[ret.pk]["open_credit"])
+        for ret in returns
+        if credits[ret.pk]["open_credit"] > 0
+    ]
 
 
 def linked_return_credit_summary(original_invoices) -> dict[int, dict]:
@@ -87,45 +163,12 @@ def linked_return_credit_summary(original_invoices) -> dict[int, dict]:
         ret for ret in returns
         if ret.currency_id == originals_by_id[ret.original_invoice_id].currency_id
     ]
-    return_ids = [ret.pk for ret in returns]
-
-    cash_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
-    for return_id, amount, amount_in_invoice_currency in PaymentAllocation.objects.filter(
-        invoice_id__in=return_ids,
-        payment__is_posted=True,
-        payment__kind=CustomerPayment.KIND_REFUND,
-    ).values_list("invoice_id", "amount", "amount_in_invoice_currency"):
-        cash_by_return[return_id] += Decimal(str(
-            amount_in_invoice_currency if amount_in_invoice_currency is not None else amount
-        ))
-
-    paper_by_return: dict[int, Decimal] = defaultdict(lambda: Decimal("0.00"))
-    for return_id, amount in ChequeMovement.objects.filter(
-        sales_return_id__in=return_ids,
-        movement_type="return_to_customer",
-        journal_id__isnull=False,
-    ).values_list("sales_return_id", "cheque__amount"):
-        paper_by_return[return_id] += Decimal(str(amount or 0))
+    credits = sales_return_open_credit(returns)
 
     for ret in returns:
-        # `amount_paid` هو المرآة التاريخية لتوزيعات النقد. التوزيعات المرحّلة
-        # هي المصدر الأقوى، والسقوط للأكبر يحافظ على صفوف قديمة لم يبقَ صف
-        # توزيعها من دون أن يجمع المبلغ نفسه مرتين.
-        cash_refunded = max(
-            cash_by_return[ret.pk], Decimal(str(ret.amount_paid or 0))
-        ).quantize(DEC)
-        paper_refunded = paper_by_return[ret.pk].quantize(DEC)
-        open_credit = max(
-            Decimal(str(ret.grand_total or 0)) - cash_refunded - paper_refunded,
-            Decimal("0.00"),
-        ).quantize(DEC)
         original_summary = summaries[ret.original_invoice_id]
-        original_summary["returns"][ret.pk] = {
-            "cash_refunded": cash_refunded,
-            "paper_refunded": paper_refunded,
-            "open_credit": open_credit,
-        }
-        original_summary["open_return_credit"] += open_credit
+        original_summary["returns"][ret.pk] = credits[ret.pk]
+        original_summary["open_return_credit"] += credits[ret.pk]["open_credit"]
 
     for original_id, summary in summaries.items():
         summary["open_return_credit"] = summary["open_return_credit"].quantize(DEC)
