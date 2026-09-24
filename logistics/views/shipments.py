@@ -40,7 +40,7 @@ from logistics.serializers import (
 from accounting.models import Account, TaxRate
 from inventory.models import StockMovement
 from partners.models import Partner
-from tenants.models import Tenant, Currency
+from tenants.models import Tenant
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
 from accounting.services import resolve_cash_account
@@ -578,43 +578,14 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
 
                 payment_date = payment_locked.transfer_date or timezone.localdate()
-                foreign_amount = payment_locked.amount
-
-                usd_currency = Currency.objects.filter(Code__iexact='USD').first()
-                base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
-                is_foreign_usd = (
-                    usd_currency
-                    and base_currency
-                    and base_currency.pk != usd_currency.pk
-                )
-
-                if is_foreign_usd:
-                    rate = payment_locked.usd_to_ils or Decimal('1')
-                    local_amount = (foreign_amount * rate).quantize(Decimal('0.01'))
-                    journal_currency = usd_currency
-                else:
-                    rate = Decimal('1')
-                    local_amount = foreign_amount
-                    journal_currency = base_currency or usd_currency
 
                 ag = ship_locked.shipping_agent
                 _adesc = f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number}"
-                # صندوق الدولار FIFO لدفعات وكيل الشحن (مثل دفعات الصفقة).
-                from accounting.fx_fifo import fifo_link_for_box, build_fx_payment_lines
-                fifo_link = fifo_link_for_box(bank_account, ship_locked.tenant) if is_foreign_usd else None
-                if fifo_link:
-                    lines_data = build_fx_payment_lines(
-                        fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
-                        debit_account_id=ag.linked_account_id, box_account_id=bank_account.id,
-                        partner_id=ag.id, description=_adesc, tenant=ship_locked.tenant)
-                    journal_currency, journal_rate = (base_currency or usd_currency), Decimal('1')
-                else:
-                    lines_data = [
-                        {"account": ag.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": ag.id, "description": _adesc},
-                        # الصندوقُ بلا الوكيل (مرآة فرع FIFO): موسوماً يُلغي مدينَ الذمة في رصيده.
-                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "description": _adesc},
-                    ]
-                    journal_currency, journal_rate = journal_currency, rate
+                # نفس بنّاء قيد دفعة الصفقة (صندوق الدولار FIFO أو الدولار الاسمي بسعره).
+                from logistics.payment_posting import build_usd_payment_journal
+                lines_data, journal_currency, journal_rate = build_usd_payment_journal(
+                    payment_locked, debit_account_id=ag.linked_account_id, partner_id=ag.id,
+                    box_account=bank_account, tenant=ship_locked.tenant, description=_adesc)
 
                 journal = post_journal(
                     tenant_id=ship_locked.tenant_id,
@@ -846,7 +817,14 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return super().destroy(request, *args, **kwargs)
+        from logistics.domain.shipment_builder import release_shipment_for_delete
+        try:
+            with transaction.atomic():
+                release_shipment_for_delete(instance)
+                return super().destroy(request, *args, **kwargs)
+        except DjangoValidationError as e:
+            return Response(
+                {'detail': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
 
     @action(detail=True, methods=['post'], url_path='unpost')
     @requires_perm('import.doc.unpost')

@@ -42,7 +42,7 @@ from accounting.models import Account, TaxRate
 from core.pagination import EnforcedPageNumberPagination
 from inventory.models import StockMovement
 from partners.models import Partner
-from tenants.models import Tenant, Currency
+from tenants.models import Tenant
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
 from accounting import api as accounting_api
 from accounting.services import resolve_cash_account
@@ -768,40 +768,15 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     return Response({"error": cap_err}, status=status.HTTP_400_BAD_REQUEST)
 
                 payment_date = payment_locked.transfer_date or timezone.localdate()
-                foreign_amount = payment_locked.amount
-
-                deal_currency = deal_locked.currency
-                base_currency = Currency.objects.filter(IsBaseCurrency=True).first()
-                is_foreign = (
-                    deal_currency and base_currency
-                    and deal_currency.pk != base_currency.pk
-                )
-
-                if is_foreign:
-                    rate = payment_locked.usd_to_ils or deal_locked.currency_rate or Decimal('1')
-                    local_amount = (foreign_amount * rate).quantize(Decimal('0.01'))
-                else:
-                    rate = Decimal('1')
-                    local_amount = foreign_amount
 
                 _desc = f"دفعة {payment_locked.title} | صفقة: {deal_locked.ref_number}"
-                # صندوق الدولار FIFO: إن كان الصندوق المصدر بعملة أجنبية وله طبقات،
-                # تُسحب التكلفة بالشيقل FIFO ويُحتسب فرق الصرف المحقّق مقابل سعر الدفع.
-                from accounting.fx_fifo import fifo_link_for_box, build_fx_payment_lines
-                fifo_link = fifo_link_for_box(bank_account, deal_locked.tenant) if is_foreign else None
-                if fifo_link:
-                    lines_data = build_fx_payment_lines(
-                        fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
-                        debit_account_id=deal_locked.partner.linked_account_id,
-                        box_account_id=bank_account.id, partner_id=deal_locked.partner_id,
-                        description=_desc, tenant=deal_locked.tenant)
-                    journal_currency, journal_rate = base_currency, Decimal('1')
-                else:
-                    lines_data = [
-                        {"account": deal_locked.partner.linked_account_id, "debit": local_amount, "credit": Decimal("0"), "partner": deal_locked.partner_id, "description": _desc},
-                        {"account": bank_account.id, "debit": Decimal("0"), "credit": local_amount, "description": _desc},
-                    ]
-                    journal_currency, journal_rate = deal_currency, rate
+                # الدفعة بالدولار أياً كانت عملة الصفقة (حقلها يقول ILS في صفقات
+                # كثيرة) — نفس قيمة الشيكل التي تُحسب بها تكلفة البضاعة في الفاتورة.
+                from logistics.payment_posting import build_usd_payment_journal
+                lines_data, journal_currency, journal_rate = build_usd_payment_journal(
+                    payment_locked, debit_account_id=deal_locked.partner.linked_account_id,
+                    partner_id=deal_locked.partner_id, box_account=bank_account,
+                    tenant=deal_locked.tenant, description=_desc)
 
                 journal = post_journal(
                     tenant_id=deal_locked.tenant_id,

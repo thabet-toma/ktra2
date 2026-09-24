@@ -29,6 +29,16 @@ class AccrualSkipped(Exception):
     """مقوّمات الاستحقاق غائبة — سبب مقروء للمستخدم عند الطلب اليدوي."""
 
 
+DELETED_SHIPMENT_MESSAGE = 'الشحنة محذوفة — لا يُثبت عليها استحقاق ولا تُسجَّل لها دفعة.'
+
+
+def assert_shipment_alive(shipment) -> None:
+    """شحنة محذوفة لا تقبل استحقاقاً ولا دفعة (إنتاج: استحقاق 1,500 على تخليص S-0016
+    المحذوفة — التخليص لا يُخفى مع شحنته فبقيت أزراره تعمل)."""
+    if shipment is not None and getattr(shipment, 'is_deleted', False):
+        raise AccrualSkipped(DELETED_SHIPMENT_MESSAGE)
+
+
 def _as_decimal(value, default="0") -> Decimal:
     try:
         return Decimal(str(value if value not in (None, "") else default))
@@ -76,6 +86,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
     """Dr بنود التخليص / Cr ذمم المخلّص. None إن كان مرحّلاً أو بلا مقوّمات."""
     if clearance.journal_id:
         return None
+    assert_shipment_alive(clearance.shipment)
     broker = clearance.customs_broker
     if not broker:
         raise AccrualSkipped('حدّد المخلّص الجمركي قبل إثبات الاستحقاق.')
@@ -216,6 +227,7 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     """Dr مصاريف الشحن الدولي / Cr ذمم الوكيل. None إن كان مرحّلاً أو بلا مقوّمات."""
     if shipment.freight_is_posted:
         return None
+    assert_shipment_alive(shipment)
     tenant = shipment.tenant
     agent = shipment.shipping_agent
     if not agent:

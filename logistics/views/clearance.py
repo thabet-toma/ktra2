@@ -54,8 +54,8 @@ from accounting.services import (
     next_document_number,
 )
 from logistics.accruals import (
-    AccrualSkipped, post_clearance_accrual, post_freight_accrual,
-    post_local_shipment_accrual,
+    AccrualSkipped, DELETED_SHIPMENT_MESSAGE, post_clearance_accrual,
+    post_freight_accrual, post_local_shipment_accrual,
 )
 from core.activity import (
     build_activity_changes,
@@ -243,6 +243,8 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         يُنشأ القيد كـ Draft (غير مرحّل).
         """
         clearance = self.get_object()
+        if clearance.shipment.is_deleted:
+            return Response({"error": DELETED_SHIPMENT_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
         SHIPPING_COST_LINE_LABEL = "دفعة الشحن (الناقل)"
 
         kind = str(request.data.get("payment_kind") or "clearance").strip().lower()

@@ -219,6 +219,27 @@ def resync_shipment_totals_on_deal_unlink(sender, instance, **kwargs):
     _resync_shipment_totals_from_deals(instance.shipment_id)
 
 
+@receiver(post_delete, sender=LogisticsShipmentDeal)
+def return_unlinked_deal_to_ready(sender, instance, **kwargs):
+    """فكّ ربط صفقة (remove_deal أو حذف الشحنة) → «جاهزة للشحن» إن لم يبقَ لها ربط.
+
+    كانت تبقى in_shipment بلا شحنة: تختفي من deals/ready-to-ship ولا تُضاف لشحنة
+    جديدة (إنتاج: D-0111 بعد حذف SH-0017). مرحلةُ ما بعد in_shipment لا تُلمس هنا
+    — حذف الشحنة يعيدها خطوةً أو يرفض (`release_shipment_for_delete`).
+    """
+    from logistics.domain.stages import advance_deal_stage, derive_stage
+    deal = LogisticsDeal.objects.filter(pk=instance.deal_id).first()
+    if deal is None or derive_stage(deal) != LogisticsDeal.STAGE_IN_SHIPMENT:
+        return
+    if LogisticsShipmentDeal.objects.filter(
+        deal_id=deal.pk, shipment__is_deleted=False,
+    ).exists():
+        return
+    advance_deal_stage(deal, LogisticsDeal.STAGE_READY_TO_SHIP)
+    logger.info('deal %s returned to ready_to_ship after unlink from shipment %s',
+                deal.pk, instance.shipment_id)
+
+
 @receiver(post_save, sender=PurchaseInvoice)
 def release_deal_on_purchase_invoice(sender, instance, created, **kwargs):
     """حفظ فاتورة شراء مرتبطة بصفقة → الصفقة «مفرج عنها» (sw_released).

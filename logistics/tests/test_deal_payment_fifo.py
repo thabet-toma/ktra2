@@ -90,7 +90,8 @@ class DealPaymentFifoTest(APITestCase):
         resp = self._post(pay)
         self.assertEqual(resp.status_code, 200, resp.content)
         jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
-        self.assertTrue(jh.lines.filter(account=self.box.account, credit=D("3500.00")).exists())
+        # الأساس لا الاسمي: السطر كان 3500 بعملة الدولار وسعر 3.5 ⇒ أساس 12,250.
+        self.assertEqual(jh.lines.get(account=self.box.account).base_credit, D("3500.00"))
         self.assertIsNone(jh.lines.get(account=self.box.account).partner_id)
         self.assertEqual(jh.lines.get(account=self.partner.linked_account).partner_id, self.partner.id)
         self.assertEqual(jh.lines.count(), 2)

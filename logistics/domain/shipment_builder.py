@@ -164,3 +164,60 @@ def create_shipment_from_deals(
             stages.advance_deal_stage(deal, LogisticsDeal.STAGE_IN_SHIPMENT, force=True)
 
     return shipment
+
+
+# Deals past the clearance on this shipment: a transport or an invoice already
+# rests on the shipment, so deleting it would orphan those documents.
+_PAST_CLEARANCE_STAGES = frozenset({
+    LogisticsDeal.STAGE_IN_TRANSPORT,
+    LogisticsDeal.STAGE_INVOICED,
+    LogisticsDeal.STAGE_CLOSED,
+})
+
+
+def release_shipment_for_delete(shipment) -> None:
+    """Undo everything a shipment holds before it is soft-deleted, or refuse.
+
+    Refuses (ValidationError) while anything posted rests on it: the freight
+    accrual, a posted agent payment, a clearance accrual or posted clearance
+    payment, or a deal already past clearance. Otherwise the unposted clearance
+    is deleted (lines and draft payments cascade — same as deleting it from the
+    clearance screen; the model has no soft delete), deals at clearance step back
+    to IN_SHIPMENT, and every link is removed so the unlink signal returns each
+    deal to READY_TO_SHIP. Before this, a deleted shipment kept its deals
+    stranded «in shipment», off the ready-to-ship list, and its clearance kept
+    accepting accruals (production: S-0016, SH-0017).
+    """
+    from logistics.models import LogisticsClearance
+
+    links = list(LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related('deal'))
+    past = [
+        link.deal.ref_number for link in links
+        if stages.derive_stage(link.deal) in _PAST_CLEARANCE_STAGES
+    ]
+    if past:
+        raise ValidationError(
+            f"لا يمكن حذف الشحنة: الصفقات {'، '.join(past)} تجاوزت التخليص "
+            "(نقل محلي أو فاتورة) — ألغِ ما بُني عليها أولاً."
+        )
+    if shipment.freight_is_posted:
+        raise ValidationError(
+            'استحقاق شحن الوكيل مُرحّل على هذه الشحنة — ألغِ ترحيله قبل حذف الشحنة.')
+    if shipment.agent_payments.filter(is_posted=True).exists():
+        raise ValidationError(
+            'على الشحنة دفعة وكيل شحن مرحّلة — ألغِ ترحيلها قبل حذف الشحنة.')
+
+    clearance = LogisticsClearance.objects.filter(shipment=shipment).first()
+    if clearance is not None:
+        if clearance.journal_id:
+            raise ValidationError(
+                'للشحنة تخليص عليه استحقاق مُرحّل — ألغِ ترحيل الاستحقاق قبل حذف الشحنة.')
+        if clearance.payments.filter(is_posted=True).exists():
+            raise ValidationError(
+                'على تخليص الشحنة دفعة مرحّلة — ألغِ ترحيلها قبل حذف الشحنة.')
+        clearance.delete()
+
+    for link in links:
+        if stages.derive_stage(link.deal) == LogisticsDeal.STAGE_AT_CLEARANCE:
+            stages.advance_deal_stage(link.deal, LogisticsDeal.STAGE_IN_SHIPMENT)
+        link.delete()

@@ -124,6 +124,17 @@ def payment_settled(p: LogisticsPayment) -> bool:
     return st in ('confirmed', 'paid')
 
 
+def payment_usd_rate(p) -> Decimal:
+    """سعر الدولار للشيكل لدفعة استيراد (LogisticsPayment)."""
+    return _d(getattr(p, 'usd_to_ils', None), '3.5')
+
+
+def payment_ils(p) -> Decimal:
+    """قيمة دفعة الاستيراد بالشيكل = amount (دولار) × usd_to_ils — تكلفةُ البضاعة
+    وقيدُ الدفعة (`logistics.payment_posting`) يقرآنها من هنا فلا يختلفان."""
+    return (_d(p.amount) * payment_usd_rate(p)).quantize(Q2, rounding=ROUND_HALF_UP)
+
+
 def sum_settled_usd_ils(payments, is_paid=payment_settled) -> Tuple[Decimal, Decimal]:
     """(دولار، شيكل) للدفعات المنفّذة. is_paid يبدّل معيار «منفّذة» — تسويةُ الفاتورة
     الدولية تعدّ المرحّلَ في الدفاتر لا المؤكَّدَ من المورد."""
@@ -132,10 +143,8 @@ def sum_settled_usd_ils(payments, is_paid=payment_settled) -> Tuple[Decimal, Dec
     for p in payments or []:
         if not is_paid(p):
             continue
-        a = _d(p.amount)
-        r = _d(getattr(p, 'usd_to_ils', None), '3.5')
-        paid_usd += a
-        paid_ils += (a * r).quantize(Q2, rounding=ROUND_HALF_UP)
+        paid_usd += _d(p.amount)
+        paid_ils += payment_ils(p)
     return paid_usd, paid_ils
 
 

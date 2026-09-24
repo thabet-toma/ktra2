@@ -133,7 +133,8 @@ class DealPaymentUnpostCycleTest(APITestCase):
                 "LOGISTICS_PAYMENT", "LOGISTICS_PAYMENT_UNPOST"],
             journal__is_posted=True,
             account=self.partner.linked_account,
-        ).aggregate(d=Sum("debit"), c=Sum("credit"))
+        ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+        # بالأساس: السطر دولار اسمي (1000) بسعر 3.5.
         self.assertEqual(agg["d"] - agg["c"], D("3500.00"))
 
     def test_deal_unpost_after_cycle_leaves_no_dangling_reversal(self):
