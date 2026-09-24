@@ -189,8 +189,10 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
         reference_id=shipment.pk,
         description=f"ارسالية {shipment.shipment_number} | {shipment.carrier.name}"[:500],
         lines_data=[
+            # سطرُ الذمة وحده يحمل الناقل: المصروفُ الموسومُ به يُلغي دائنَه في
+            # `partner_posted_balance` وكشفه (إنتاج: قيد #10961 — الهجرة 0090).
             {
-                'account': expense_account.id, 'partner': shipment.carrier_id,
+                'account': expense_account.id, 'partner': None,
                 'debit': amt, 'credit': Decimal('0'),
                 'description': f"استحقاق نقل محلي — {shipment.shipment_number}"[:255],
             },
