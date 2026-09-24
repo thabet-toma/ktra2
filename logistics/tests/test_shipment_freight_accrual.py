@@ -305,3 +305,69 @@ class FreightAgentIsLockedAfterAccrualTest(APITestCase):
         self.assertEqual(resp.status_code, 200, resp.content)
         self.shipment.refresh_from_db()
         self.assertEqual(self.shipment.shipping_agent_id, self.other_agent.pk)
+
+
+class AgentOnStockPostedShipmentTest(APITestCase):
+    """شحنة دخلت بضاعتها قديماً (حركة SHIPMENT) ولا وكيل لها — يُحدَّد وكيلها ما دام
+    استحقاق الشحن غير مرحّل. إنتاج: شركة 1، SH-0013 — بلا وكيل لا يُرحَّل استحقاقها،
+    و«إلغاء الترحيل» ليتاح التعديل يُخرج البضاعة من المخزون.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        from inventory.models import Product
+        from inventory.services import record_stock_movement
+
+        cls.user = User.objects.create_user(username="agent-stock", password="x")
+        Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
+        cls.tenant = create_company("شركة شحنة قديمة", cls.user)
+        create_fiscal_year(cls.tenant, 2026)
+        agent_ap = Account.objects.create(
+            tenant=cls.tenant, code="AP-AG13", name="ذمم الوكيل",
+            account_type="Liability", is_active=True)
+        cls.agent = Partner.objects.create(
+            tenant=cls.tenant, name="وكيل SH-0013", partner_type="ShippingAgent",
+            linked_account=agent_ap)
+        cls.shipment = LogisticsShipment.objects.create(
+            tenant=cls.tenant, shipment_number="SH-0013",
+            total_shipping_cost_usd=D("1000"))
+        product = Product.objects.create(
+            tenant=cls.tenant, sku="SH13-1", name_ar="إطار",
+            quantity_on_hand=D("0"), avg_cost=D("0"))
+        record_stock_movement(
+            product=product, movement_type="IN", quantity=D("5"), unit_cost=D("100"),
+            reference_type="SHIPMENT", reference_id=cls.shipment.pk,
+            movement_date="2026-07-03", tenant=cls.tenant)
+
+    def _patch(self, body):
+        self.client.force_authenticate(user=self.user)
+        return self.client.patch(
+            f"/api/logistics/shipments/{self.shipment.pk}/", body, format="json",
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def test_agent_can_be_set_then_freight_accrual_posts(self):
+        resp = self._patch({"shipping_agent": self.agent.pk})
+        self.assertEqual(resp.status_code, 200, resp.content)
+        self.shipment.refresh_from_db()
+        self.assertEqual(self.shipment.shipping_agent_id, self.agent.pk)
+        accrual = self.client.post(
+            f"/api/logistics/shipments/{self.shipment.pk}/post-freight-accrual/",
+            {"freight_exchange_rate": "3.6"}, format="json",
+            HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+        self.assertEqual(accrual.status_code, 201, accrual.content)
+
+    def test_other_fields_stay_locked(self):
+        resp = self._patch({"shipping_agent": self.agent.pk, "total_shipping_cost_usd": "2000"})
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.shipment.refresh_from_db()
+        self.assertIsNone(self.shipment.shipping_agent_id)
+
+    def test_agent_locked_once_freight_accrual_is_posted(self):
+        LogisticsShipment.objects.filter(pk=self.shipment.pk).update(
+            shipping_agent=self.agent, freight_is_posted=True)
+        other = Partner.objects.create(
+            tenant=self.tenant, name="وكيل آخر", partner_type="ShippingAgent")
+        resp = self._patch({"shipping_agent": other.pk})
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.shipment.refresh_from_db()
+        self.assertEqual(self.shipment.shipping_agent_id, self.agent.pk)

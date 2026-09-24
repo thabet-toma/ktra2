@@ -776,7 +776,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         instance = serializer.instance
         if instance is not None and self._shipment_is_posted(instance):
             changed_fields = set(serializer.validated_data.keys())
-            if changed_fields - {'agent_payments'}:
+            allowed = {'agent_payments'}
+            # شحنة دخلت بضاعتها (حركة SHIPMENT قديمة) بلا وكيل: تحديده شرطُ استحقاق
+            # الشحن، و«إلغاء الترحيل» ليتاح يُخرج البضاعة. الحارس أدناه يقفله بعد الاستحقاق.
+            if not instance.freight_is_posted:
+                allowed.add('shipping_agent')
+            if changed_fields - allowed:
                 raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
         # تغيير تكلفة الشحن بعد الاستحقاق يجعل القيد لا يطابق التكلفة. (سعر الصرف
         # وحالة الترحيل read_only أصلاً — يملكهما مسارا الاستحقاق وحدهما.)
