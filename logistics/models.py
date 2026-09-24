@@ -1227,7 +1227,9 @@ class LogisticsPayment(SoftDeleteMixin, models.Model):
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 
     # Exact Mapping Fields from deal.ts
-    usd_to_ils = models.DecimalField(max_digits=18, decimal_places=6, default=3.5, db_column='usd_to_ils')
+    # بلا قيمة افتراضية: الـ3.5 الصامتة كانت تُحفظ لكل دفعة لم يُدخَل سعرها (101 من 137
+    # على الإنتاج) ثم تُرحَّل بها. NULL = لم يُدخِله أحد ⇒ `build_usd_payment_journal` ترفض.
+    usd_to_ils = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True, db_column='usd_to_ils')
     transfer_cost = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='transfer_cost')
     bank_swift_image = models.CharField(max_length=500, null=True, blank=True, db_column='bank_swift_image')
     supplier_confirmation_image = models.CharField(max_length=500, null=True, blank=True, db_column='supplier_confirmation_image')

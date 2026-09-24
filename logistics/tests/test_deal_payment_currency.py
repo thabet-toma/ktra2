@@ -248,3 +248,81 @@ class DealPaymentCurrencyTest(APITestCase):
         self.assertEqual(pay.journal_id, old)
         self.assertFalse(JournalHeader.objects.filter(
             reference_type="LOGISTICS_PAYMENT_UNPOST", reference_id=pay.pk).exists())
+
+    # ── سعر الدولار إلزامي عند الترحيل ─────────────────────────────────────
+    # إنتاج: 101 من 137 دفعة سعرها 3.500000 بالزبط — القيمة الافتراضية للحقل، لا سعرٌ
+    # أدخله أحد. الحقل صار بلا قيمة افتراضية، والترحيل يرفض الدفعة بلا سعر.
+
+    def _create_via_api(self, deal, body):
+        resp = self.client.post(f"/api/logistics/deals/{deal.pk}/payments/",
+                                {"title": "P", "status": "Confirmed", **body},
+                                format="json", **self.h)
+        self.assertEqual(resp.status_code, 201, resp.content)
+        return LogisticsPayment.objects.get(pk=resp.data["id"])
+
+    def _post(self, deal, pay):
+        return self.client.post(f"/api/logistics/deals/{deal.pk}/post_payment/{pay.pk}/",
+                                {"bank_account_id": self.bank.pk}, format="json", **self.h)
+
+    def test_payment_without_rate_is_refused_at_posting(self):
+        deal = self._deal("D-NORATE", self.ils)
+        pay = self._create_via_api(deal, {"amount": "1000"})
+        self.assertIsNone(pay.usd_to_ils)
+        resp = self._post(deal, pay)
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("سعر الدولار", str(resp.content.decode()))
+        self.assertFalse(JournalHeader.objects.filter(
+            reference_type="LOGISTICS_PAYMENT", reference_id=pay.pk).exists())
+
+    def test_rate_entered_through_api_posts_at_that_rate(self):
+        deal = self._deal("D-324", self.ils)
+        pay = self._create_via_api(deal, {"amount": "1000", "usd_to_ils": "3.24"})
+        resp = self._post(deal, pay)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.pk)
+        self.assertEqual(self._base(jh, self.supplier.linked_account), (D("3240.00"), D(0)))
+
+    def test_agent_payment_without_rate_is_refused(self):
+        agent = Partner.objects.create(
+            tenant=self.tenant, name="وكيل بلا سعر", partner_type="Supplier",
+            linked_account=self.supplier.linked_account)
+        shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number="SH-NR", shipping_agent=agent,
+            total_shipping_cost_usd=D("1000"))
+        resp = self.client.patch(
+            f"/api/logistics/shipments/{shipment.pk}/",
+            {"payments": [{"payment_number": 1, "title": "دفعة", "amount": "100",
+                           "status": "Confirmed"}]}, format="json", **self.h)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        pay = shipment.agent_payments.get()
+        self.assertIsNone(pay.usd_to_ils)
+        resp = self.client.post(
+            f"/api/logistics/shipments/{shipment.pk}/post_agent_payment/{pay.pk}/",
+            {"bank_account_id": self.bank.pk}, format="json", **self.h)
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("سعر الدولار", str(resp.content.decode()))
+
+    def test_blockers_name_the_missing_rate(self):
+        from logistics.payment_posting_diagnostics import collect_auto_posting_blockers
+        deal = self._deal("D-BLK", self.ils)
+        pay = self._create_via_api(deal, {"amount": "500"})
+        self.assertTrue(any("سعر الدولار" in b for b in collect_auto_posting_blockers(deal, pay)))
+
+    def test_rates_report_lists_suspect_rates_and_writes_nothing(self):
+        deal = self._deal("D-RATES", self.ils)
+        self._payment(deal, "100", rate="3.5")
+        self._payment(deal, "200", rate="2.0")
+        self._payment(deal, "300", rate="4.8")
+        self._payment(deal, "400", rate="3.62")
+        LogisticsPayment.objects.create(deal=deal, title="بلا سعر", amount=D("50"),
+                                        status="Pending", transfer_date="2026-06-20")
+        before = list(LogisticsPayment.objects.values_list("id", "usd_to_ils"))
+        out = StringIO()
+        call_command("audit_deal_payment_currency", "--tenant", str(self.tenant.pk),
+                     "--rates", stdout=out)
+        report = out.getvalue()
+        for amount in ("100", "200", "300", "50"):
+            self.assertIn(f"| {amount}.", report)
+        self.assertNotIn("| 400.", report)
+        self.assertIn("D-RATES", report)
+        self.assertEqual(list(LogisticsPayment.objects.values_list("id", "usd_to_ils")), before)

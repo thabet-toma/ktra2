@@ -9,6 +9,7 @@ from django.conf import settings
 
 from accounting.models import Account, CashBoxLedgerAccount
 
+from .payment_posting import USD_RATE_REQUIRED_MESSAGE, usd_rate_entered
 from .payment_posting_cap import posting_cap_check
 
 
@@ -66,6 +67,9 @@ def collect_auto_posting_blockers(deal, payment) -> List[str]:
 
     if payment.amount is None or payment.amount <= 0:
         blockers.append("مبلغ الدفعة صفر أو غير محدد.")
+
+    if not usd_rate_entered(payment):
+        blockers.append(USD_RATE_REQUIRED_MESSAGE)
 
     partner = getattr(deal, "partner", None)
     if not partner:

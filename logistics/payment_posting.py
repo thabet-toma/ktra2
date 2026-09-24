@@ -20,6 +20,14 @@ from django.core.exceptions import ValidationError
 from logistics.landed_cost import payment_ils, payment_usd_rate
 from tenants.models import Currency
 
+USD_RATE_REQUIRED_MESSAGE = 'أدخل سعر الدولار للشيكل على الدفعة (أكبر من صفر) قبل ترحيلها.'
+
+
+def usd_rate_entered(payment) -> bool:
+    """سعرٌ أدخله أحد — لا `payment_usd_rate` التي تسقط إلى 3.5 للعرض والتقديرات."""
+    rate = getattr(payment, 'usd_to_ils', None)
+    return rate is not None and Decimal(str(rate)) > 0
+
 
 def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_account,
                               tenant, description, use_fifo=True):
@@ -28,8 +36,8 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
     use_fifo=False يتخطّى طبقات صندوق الدولار (أمر التصحيح يعيد ترحيل دفعة قديمة
     على نفس حساباتها — طبقاتها لم تُستهلك في الأصل ولا تُستهلك بأثر رجعي).
     """
-    if payment_usd_rate(payment) <= 0:
-        raise ValidationError('أدخل سعر الدولار للشيكل على الدفعة (أكبر من صفر) قبل ترحيلها.')
+    if not usd_rate_entered(payment):
+        raise ValidationError(USD_RATE_REQUIRED_MESSAGE)
     foreign_amount = Decimal(str(payment.amount or 0))
     local_amount = payment_ils(payment)
     usd = Currency.objects.filter(Code__iexact='USD').first()

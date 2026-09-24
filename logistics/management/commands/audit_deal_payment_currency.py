@@ -22,19 +22,28 @@
 للأصل (reverse_journal، لا حذف) بتاريخه، ثم قيد جديد بـamount × usd_to_ils على نفس حسابَي الأصل وبتاريخه، وربط الدفعة
 بالجديد، وسجلّ تدقيق — كلّ دفعة في transaction.atomic وحدها، فرفضُ واحدة (فترة مغلقة) لا يمسّ غيرها.
 طبقات صندوق الدولار FIFO لا تُستهلك بأثر رجعي (الأصل لم يستهلكها).
+
+--rates: قراءة فقط — دفعات الاستيراد (مرحّلة وغير مرحّلة) بلا سعر، أو بسعر 3.5 بالزبط
+(القيمة الافتراضية القديمة، لا سعرٌ أدخله أحد)، أو خارج المعقول (<3 أو >4.5)، للمراجعة.
+لا تصحيح تلقائي: السعر الصحيح لا يعرفه إلا من حوّل.
+
+    python manage.py audit_deal_payment_currency --tenant 1 --rates
 """
 from collections import defaultdict
 from decimal import Decimal
 
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 from accounting.services import CashBoxLedgerAccount, JournalHeader, JournalLine
 from logistics.landed_cost import payment_ils
 from logistics.models import LogisticsPayment, PurchaseInvoice
 
 Q2 = Decimal('0.01')
+OLD_DEFAULT_RATE = Decimal('3.5')
+SANE_RATE_MIN = Decimal('3')
+SANE_RATE_MAX = Decimal('4.5')
 APPLICABLE_GROUPS = ('a', 'c', 'agent')
 GROUP_LABELS = {
     'a': '(أ) صفقة لها فاتورة دولية مرحّلة',
@@ -59,9 +68,16 @@ class Command(BaseCommand):
         parser.add_argument("--groups", default="a",
                             help="المجموعات التي يصحّحها --apply، مفصولة بفواصل من a,c,agent "
                                  "(الافتراضي a). b (الأرشيف) لا تُصحَّح.")
+        parser.add_argument("--rates", action="store_true",
+                            help="قراءة فقط: دفعات بلا سعر أو بسعر 3.5 بالزبط أو خارج 3–4.5.")
 
     def handle(self, *args, **options):
         tenant_id = options["tenant"]
+        if options["rates"]:
+            if options["apply"]:
+                raise CommandError("--rates تقرير قراءة فقط — لا يُجمع مع --apply.")
+            self._rates_report(tenant_id)
+            return
         groups = [g.strip() for g in options["groups"].split(",") if g.strip()]
         if 'b' in groups:
             raise CommandError(
@@ -117,6 +133,29 @@ class Command(BaseCommand):
             self._apply([r for r in rows if r['group'] in groups and r['diff'] != 0], groups)
         else:
             self.stdout.write("\nقراءة فقط. --apply يصحّح --groups (الافتراضي a؛ المسموح a,c,agent).")
+
+    def _rates_report(self, tenant_id):
+        suspect = (Q(usd_to_ils__isnull=True) | Q(usd_to_ils=OLD_DEFAULT_RATE)
+                   | Q(usd_to_ils__lt=SANE_RATE_MIN) | Q(usd_to_ils__gt=SANE_RATE_MAX))
+        payments = (
+            LogisticsPayment.objects.filter(suspect, deal__tenant_id=tenant_id)
+            | LogisticsPayment.objects.filter(suspect, deal__isnull=True,
+                                              shipment__tenant_id=tenant_id)
+        ).select_related('deal', 'shipment').order_by('id')
+        w = self.stdout.write
+        w(self.style.MIGRATE_HEADING(
+            f"\nأسعار دولار للمراجعة — {payments.count()} دفعة (قراءة فقط، لا تصحيح)"))
+        w("  دفعة | النوع | صفقة/شحنة | التاريخ | amount$ | السعر | مرحّلة | السبب")
+        for p in payments:
+            rate = p.usd_to_ils
+            reason = ('بلا سعر' if rate is None
+                      else 'القيمة الافتراضية القديمة 3.5' if rate == OLD_DEFAULT_RATE
+                      else 'خارج المعقول (3–4.5)')
+            kind, label = (('صفقة', p.deal.ref_number) if p.deal_id
+                           else ('شحنة', p.shipment.shipment_number))
+            when = p.transfer_date or p.created_at.date()
+            w(f"  #{p.pk} | {kind} | {label} | {when} | {p.amount} | {rate if rate is not None else '—'} "
+              f"| {'نعم' if p.is_posted else 'لا'} | {reason}")
 
     def _report(self, rows):
         w = self.stdout.write

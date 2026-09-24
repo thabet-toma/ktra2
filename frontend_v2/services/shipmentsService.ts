@@ -1,5 +1,6 @@
 import { Shipment, DealPayment, Deal } from "../types";
 import { effectiveDealTitleForDisplay } from "../utils/dealTitleDisplay";
+import { usdRateForPayload } from "../utils/paymentRate";
 import {
   apiDelete,
   apiGetList,
@@ -303,7 +304,7 @@ function mapShipmentPaymentsToSql(payments: any[] | undefined): Record<string, a
       ...(swift ? { bank_swift_image: swift } : {}),
       ...(claimDoc ? { claim_doc: claimDoc } : {}),
       confirmed_by_supplier: Boolean(p.confirmedBySupplier),
-      usd_to_ils: Number(p.usdToIls ?? p.usd_to_ils ?? 3.5),
+      usd_to_ils: usdRateForPayload(p.usdToIls ?? p.usd_to_ils),
       transfer_cost: Number(p.transferCost ?? p.transfer_cost ?? 0),
       ...(p.supplierConfirmationImage && String(p.supplierConfirmationImage).trim()
         ? {

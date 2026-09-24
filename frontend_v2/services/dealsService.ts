@@ -10,6 +10,7 @@ import {
   legacyDescriptionFromMisfiledOfferNumber,
 } from "../utils/dealTitleDisplay";
 import { pickBestDealPayment } from "../utils/dealPaymentMatch";
+import { usdRateForPayload } from "../utils/paymentRate";
 import {
   apiDelete,
   apiGetList,
@@ -420,7 +421,7 @@ function mapSinglePaymentToSqlPayload(
     ...(swift ? { bank_swift_image: swift } : {}),
     ...(claimDoc ? { claim_doc: claimDoc } : {}),
     confirmed_by_supplier: Boolean(p.confirmedBySupplier),
-    usd_to_ils: Number(p.usdToIls ?? (p as any).usd_to_ils ?? 3.5),
+    usd_to_ils: usdRateForPayload(p.usdToIls ?? (p as any).usd_to_ils),
     transfer_cost: Number(p.transferCost ?? (p as any).transfer_cost ?? 0),
     ...(p.supplierConfirmationImage && String(p.supplierConfirmationImage).trim()
       ? {

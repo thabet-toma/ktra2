@@ -21,6 +21,7 @@ import { ImportPartyDuesPanel, type ImportPartyDue } from "./ImportPartyDuesPane
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
+import { usdRateForPayload } from "@/utils/paymentRate";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
 import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
@@ -351,7 +352,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // دفعات وكيل الشحن الدولي (USD) — شرط الاستيراد لفاتورة دولية
   const [showAgentPayForm, setShowAgentPayForm] = useState(false);
   const [agentPayAmount, setAgentPayAmount] = useState("");
-  const [agentPayRate, setAgentPayRate] = useState("3.6");
+  const [agentPayRate, setAgentPayRate] = useState("");
   const [freightAccrualRate, setFreightAccrualRate] = useState("3.6");
   const [agentPayDate, setAgentPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [agentPayConfirmed, setAgentPayConfirmed] = useState(true);
@@ -1251,6 +1252,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError("أدخل مبلغ الدفعة بالدولار (أكبر من صفر).");
       return;
     }
+    // لا سعر افتراضي: 3.6 المعبّأة سلفاً كانت تُحفظ حين لا يعدّلها أحد.
+    const rate = usdRateForPayload(agentPayRate);
+    if (rate === undefined) {
+      setError("أدخل سعر الصرف (₪ لكل $) للدفعة — أكبر من صفر.");
+      return;
+    }
     setSaving(true); setError(null);
     try {
       // المطابقة في الخادم تتم بـ payment_number — نمرّر الدفعات القائمة كما هي + الجديدة
@@ -1264,7 +1271,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         status: p.status || "Pending",
         notes: p.notes || "",
         confirmed_by_supplier: Boolean(p.confirmed_by_supplier),
-        usd_to_ils: Number(p.usd_to_ils || 3.6),
+        // القائمة تُعاد كاملةً: دفعةٌ بلا سعر تبقى بلا سعر (كان يكتب 3.6 فوقها).
+        usd_to_ils: usdRateForPayload(p.usd_to_ils),
         transfer_cost: Number(p.transfer_cost || 0),
       }));
       const nextNo = existing.reduce((m, p) => Math.max(m, p.payment_number), 0) + 1;
@@ -1279,7 +1287,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           status: agentPayConfirmed ? "Confirmed" : "Pending",
           notes: agentPayNotes || "",
           confirmed_by_supplier: agentPayConfirmed,
-          usd_to_ils: Number(agentPayRate) || 3.6,
+          usd_to_ils: rate,
           transfer_cost: 0,
         },
       ];
@@ -2273,7 +2281,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <div style={{ marginBottom: 8, border: "1px solid var(--ktra-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
             {fld("المبلغ (USD)", <input className="ktra-input" type="number" step="0.01" value={agentPayAmount} onChange={(e) => setAgentPayAmount(e.target.value)} />)}
-            {fld("سعر الصرف (₪/$)", <input className="ktra-input" type="number" step="0.001" value={agentPayRate} onChange={(e) => setAgentPayRate(e.target.value)} />)}
+            {fld("سعر الصرف (₪/$)", <input className="ktra-input" type="number" step="0.001" value={agentPayRate} onChange={(e) => setAgentPayRate(e.target.value)} placeholder="أدخل السعر" required />)}
             {fld("تاريخ التحويل", <input className="ktra-input" type="date" value={agentPayDate} onChange={(e) => setAgentPayDate(e.target.value)} />)}
             {fld("ملاحظات", <input className="ktra-input" value={agentPayNotes} onChange={(e) => setAgentPayNotes(e.target.value)} />)}
             <label className="ktra-field" style={{ justifyContent: "end" }}>
