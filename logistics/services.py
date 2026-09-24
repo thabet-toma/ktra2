@@ -1983,6 +1983,23 @@ def refresh_purchase_receipt_status(invoice):
     return invoice.receipt_status
 
 
+def legacy_shipment_deal_notes_q(ref_number):
+    """مطابقة صفقة في ملاحظة حركة `SHIPMENT` القديمة — بصيغتيها.
+
+    `receive_shipment_stock` كتب «شحنة X | صفقة REF | تكلفة: ...»، و`backfill_stock`
+    كتب «[backfill] شحنة X | صفقة REF» بلا فاصل ختامي. حدّ الصفقة إمّا « |» بعدها
+    أو نهاية النصّ — فلا يطابق D-1 صفقةَ D-10 في أيٍّ من الصيغتين.
+    """
+    from django.db.models import Q
+
+    token = f"| صفقة {ref_number}"
+    return (
+        Q(notes__contains=f"{token} |")
+        | Q(notes__endswith=token)
+        | Q(notes__endswith=f"{token} ")
+    )
+
+
 def sync_import_receipt_from_shipment_stock(invoice):
     """الفاتورة الدولية التي دخلت بضاعتها من الشحنة (المسار القديم) تُعرَف مستلَمة.
 
@@ -2003,9 +2020,7 @@ def sync_import_receipt_from_shipment_stock(invoice):
         reference_id=invoice.shipment_id, movement_type='IN',
     )
     if invoice.deal_id:
-        # ملاحظة receive_shipment_stock: «شحنة X | صفقة REF | تكلفة: ...» —
-        # الفاصلان يمنعان D-1 من مطابقة D-10.
-        moves = moves.filter(notes__contains=f"| صفقة {invoice.deal.ref_number} |")
+        moves = moves.filter(legacy_shipment_deal_notes_q(invoice.deal.ref_number))
     by_product: dict[int, Decimal] = {}
     for pid, qty in moves.values_list('product_id', 'quantity'):
         by_product[pid] = by_product.get(pid, Decimal('0')) + Decimal(str(qty or 0))

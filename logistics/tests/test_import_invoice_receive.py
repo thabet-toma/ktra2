@@ -262,3 +262,61 @@ class ImportInvoiceReceiveTest(APITestCase):
         inv.refresh_from_db()
         assert inv.receipt_status == PurchaseInvoice.RECEIPT_NOT
         assert inv.items.get().received_quantity == D("0")
+
+    def test_legacy_notes_without_trailing_separator_match_exact_deal(self):
+        """`backfill_stock` كتب «شحنة S | صفقة REF» بلا « | تكلفة: ...» — تُحسب
+        لصفقتها، ولا يطابق REF صفقةَ REF0 ولا العكس (الإنتاج: INV-0010..0013)."""
+        from inventory.services import record_stock_movement
+
+        deal, shipment, inv = self._make_import()
+        long_ref = f"{deal.ref_number}0"
+        other = LogisticsDeal.objects.create(
+            tenant=self.tenant, ref_number=long_ref, partner=self.partner,
+            order_date="2026-07-01", total_amount=D("1"), currency=self.ils)
+        LogisticsShipmentDeal.objects.create(shipment=shipment, deal=other)
+        other_inv = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number=f"{inv.invoice_number}-B",
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+            partner=self.partner, currency=self.ils, invoice_date="2026-07-02",
+            exchange_rate=D("1"), grand_total=D("300"), deal=other, shipment=shipment)
+        PurchaseInvoiceItem.objects.create(
+            invoice=other_inv, product=self.p1, name="إطار", quantity=D("3"),
+            unit_price=D("100"), total_price=D("300"),
+            landed_unit_price_ils=D("100"), landed_line_total_ils=D("300"))
+
+        # 6 لا 10: لو طابق REF حركةَ REF0 لصار 9 — السقف (10) لا يُخفيه.
+        for ref, qty in ((deal.ref_number, "6"), (long_ref, "3")):
+            record_stock_movement(
+                product=self.p1, movement_type="IN", quantity=D(qty),
+                unit_cost=D("100"), reference_type="SHIPMENT",
+                reference_id=shipment.pk, partner=self.partner,
+                movement_date="2026-07-03",
+                notes=f"[backfill] شحنة {shipment.shipment_number} | صفقة {ref}",
+                tenant=self.tenant)
+
+        sync_import_receipt_from_shipment_stock(inv)
+        sync_import_receipt_from_shipment_stock(other_inv)
+        inv.refresh_from_db()
+        other_inv.refresh_from_db()
+        assert inv.items.get().received_quantity == D("6")
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_PARTIAL
+        assert other_inv.items.get().received_quantity == D("3")
+        assert other_inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
+
+        # الهجرة 0089 نسخةٌ على النماذج التاريخية — تُحرَس بالبيانات نفسها.
+        import importlib
+        from django.apps import apps as django_apps
+        PurchaseInvoiceItem.objects.filter(invoice__in=[inv, other_inv]).update(
+            received_quantity=0)
+        PurchaseInvoice.objects.filter(pk__in=[inv.pk, other_inv.pk]).update(
+            receipt_status=PurchaseInvoice.RECEIPT_NOT)
+        mig = importlib.import_module(
+            "logistics.migrations.0089_sync_import_receipts_legacy_notes")
+        mig.sync_receipts(django_apps, None)
+        mig.sync_receipts(django_apps, None)  # idempotent
+        assert inv.items.get().received_quantity == D("6")
+        assert other_inv.items.get().received_quantity == D("3")
+        inv.refresh_from_db()
+        other_inv.refresh_from_db()
+        assert inv.receipt_status == PurchaseInvoice.RECEIPT_PARTIAL
+        assert other_inv.receipt_status == PurchaseInvoice.RECEIPT_FULL
