@@ -171,3 +171,80 @@ class DealPaymentCurrencyTest(APITestCase):
         call_command("audit_deal_payment_currency", "--tenant", str(self.tenant.pk),
                      "--apply", stdout=StringIO())
         self.assertEqual(JournalHeader.objects.count(), count)
+
+    # ── --groups ────────────────────────────────────────────────────────────
+
+    def _run(self, *args):
+        call_command("audit_deal_payment_currency", "--tenant", str(self.tenant.pk),
+                     *args, stdout=StringIO())
+
+    def test_group_c_corrected_only_when_selected(self):
+        uninvoiced = self._deal("D-0107", self.ils)
+        pay = self._legacy_posted(uninvoiced, "1000")
+        self._run("--apply")  # الافتراضي a: (ج) لا تُمسّ
+        old = pay.journal_id
+        pay.refresh_from_db()
+        self.assertEqual(pay.journal_id, old)
+
+        self._run("--apply", "--groups", "c")
+        pay.refresh_from_db()
+        self.assertNotEqual(pay.journal_id, old)
+        self.assertEqual(self._base(pay.journal, self.supplier.linked_account), (D("3240.00"), D(0)))
+        self.assertEqual(self._base(pay.journal, self.bank), (D(0), D("3240.00")))
+
+    def test_group_agent_fixes_double_conversion_on_agent_account(self):
+        agent_ap = Account.objects.create(tenant=self.tenant, code="AP-YOYO", name="ذمم yoyo",
+            account_type="Liability", is_active=True)
+        agent = Partner.objects.create(
+            tenant=self.tenant, name="yoyo", partner_type="Supplier", linked_account=agent_ap)
+        shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number="S-0012", shipping_agent=agent)
+        pay = LogisticsPayment.objects.create(
+            shipment=shipment, title="AP", amount=D("100"), status="Confirmed",
+            usd_to_ils=D("3.5"), transfer_date="2026-06-20")
+        # الكود القديم: أسطر بالشيكل (350) بعملة الدولار وسعره ⇒ أساس 1,225.
+        jh = post_journal(
+            tenant_id=self.tenant.pk, transaction_date="2026-06-20",
+            reference_type="LOGISTICS_PAYMENT", reference_id=pay.pk, description="قديم",
+            currency=self.usd, exchange_rate=D("3.5"), idempotent=False,
+            lines_data=[
+                {"account": agent_ap.pk, "debit": D(350), "credit": D(0), "partner": agent.pk,
+                 "description": "قديم"},
+                {"account": self.bank.pk, "debit": D(0), "credit": D(350), "description": "قديم"},
+            ])
+        LogisticsPayment.objects.filter(pk=pay.pk).update(is_posted=True, journal=jh, bank_account=self.bank)
+        self.assertEqual(self._base(jh, agent_ap), (D("1225.00"), D(0)))
+
+        self._run("--apply", "--groups", "agent")
+        pay.refresh_from_db()
+        self.assertNotEqual(pay.journal_id, jh.pk)
+        self.assertEqual(self._base(pay.journal, agent_ap), (D("350.00"), D(0)))
+        self.assertIn("شحنة: S-0012", pay.journal.description)
+        net = JournalLine.objects.filter(
+            tenant=self.tenant, account=agent_ap, journal__is_posted=True,
+        ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+        self.assertEqual(net["d"] - net["c"], D("350.00"))
+
+    def test_group_b_is_refused_and_never_touched(self):
+        from django.core.management.base import CommandError
+
+        archived = self._deal("D-0001", self.ils)
+        post_journal(
+            tenant_id=self.tenant.pk, transaction_date="2026-06-20",
+            reference_type="LOGISTICS_DEAL", reference_id=archived.pk, description="أرشيف",
+            lines_data=[
+                {"account": self.bank.pk, "debit": D(700), "credit": D(0), "description": "أرشيف"},
+                {"account": self.supplier.linked_account_id, "debit": D(0), "credit": D(700),
+                 "partner": self.supplier.pk, "description": "أرشيف"},
+            ])
+        pay = self._legacy_posted(archived, "700")
+        with self.assertRaisesMessage(CommandError, "b"):
+            self._run("--apply", "--groups", "a,b")
+        with self.assertRaisesMessage(CommandError, "x"):
+            self._run("--apply", "--groups", "x")
+        self._run("--apply", "--groups", "a,c,agent")
+        old = pay.journal_id
+        pay.refresh_from_db()
+        self.assertEqual(pay.journal_id, old)
+        self.assertFalse(JournalHeader.objects.filter(
+            reference_type="LOGISTICS_PAYMENT_UNPOST", reference_id=pay.pk).exists())
