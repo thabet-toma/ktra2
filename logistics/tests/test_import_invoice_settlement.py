@@ -206,6 +206,65 @@ class ImportInvoiceSettlementTest(APITestCase):
             c=Sum("credit"))["c"]
         self.assertEqual(supplier_credit, D("3500.00") + local_share)
 
+    # ── حارس الترحيل يقارن التكاليف لا الإجمالي: ضريبة الفاتورة ليست تكلفة شحنة ──
+    def _recalculate(self, **extra):
+        res = self.client.post(
+            "/api/logistics/purchase-invoices/recalculate-landed-cost/",
+            {"shipment_id": self.shipment.id, **extra}, format="json", **self._auth())
+        return res
+
+    def test_invoice_own_tax_does_not_block_posting_or_repost(self):
+        # الإنتاج (شحنة 13): الفاتورة تحمل ضريبة 16% والصفقة بلا ضريبة. إعادة
+        # الاحتساب تُبقي ضريبة الفاتورة، والصفّ المعاد بناؤه يأخذ ضريبة الصفقة —
+        # فكان الحارس يرى «الإجمالي تغيّر» بقيمة الضريبة وحدها ويرفض دائماً.
+        invoices = self._release_and_import()
+        PurchaseInvoice.objects.filter(pk__in=[i.pk for i in invoices]).update(
+            tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv = PurchaseInvoice.objects.get(pk=invoices[0].pk)
+        tax = (inv.subtotal * D("0.16")).quantize(Q2)
+        self.assertEqual(inv.tax_amount, tax)
+
+        # ترحيلٌ قديم (قبل 51b12571): المورد دائنٌ بالإجمالي المحمَّل كلّه.
+        with mock.patch(
+            "logistics.accruals.import_invoice_accrual_credits", return_value=[],
+        ):
+            inv = self._post(inv)
+        old_supplier = inv.journal.lines.filter(account=self.ap).aggregate(
+            c=Sum("credit"))["c"]
+        self.assertEqual(old_supplier, inv.grand_total)
+
+        shares = import_invoice_cost_shares(inv)
+        res = self._recalculate(auto_repost=True)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["reconciliation"]["reposted"], 1)
+
+        inv.refresh_from_db()
+        lines = list(inv.journal.lines.all())
+        self.assertEqual(
+            sum((l.debit for l in lines), D("0")), sum((l.credit for l in lines), D("0")))
+        new_supplier = sum((l.credit for l in lines if l.account_id == self.ap.id), D("0"))
+        # نقصت ذمّة المورد بحصص الشحن والتخليص والنقل، وبقيت له البضاعة + ضريبة فاتورته.
+        self.assertEqual(
+            old_supplier - new_supplier,
+            shares["freight"] + shares["clearance"] + shares["local"])
+        self.assertEqual(new_supplier, D("3500.00") + tax)
+        # ضريبة الفاتورة مدخلاتٌ في 1105، لا تكلفة: البضاعة لم تتغيّر بها.
+        vat = sum((l.debit for l in lines if l.account.code == "1105"), D("0"))
+        self.assertEqual(vat, tax)
+
+    def test_posting_still_refuses_when_shipment_costs_changed(self):
+        # الحارس باقٍ لما وُضع له: تكلفةٌ أُضيفت للشحنة بعد بناء الفاتورة.
+        inv = self._release_and_import()[0]
+        LogisticsClearanceLine.objects.create(
+            clearance=self.clearance, seq=9, line_type="broker_commission",
+            description="عمولة إضافية", debit=D("600"), credit=D("0"))
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/post-to-accounting/",
+            {"receive_on_post": False}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("إعادة حساب التكلفة", res.json()["error"])
+
     # ── 3ب: حالة الدفع = التكاليف الأربع مقابل الدفعات الأربع ─────────────
     def _pay_deal(self, deal):
         """دفعة صفقة مرحّلة كما يرحّلها `deals.post_payment`: مدين ذمم المورد."""

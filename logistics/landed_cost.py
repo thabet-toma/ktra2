@@ -1358,7 +1358,9 @@ def import_invoice_cost_shares(inv: PurchaseInvoice) -> Optional[Dict[str, Any]]
         'clearance': q(meta.get('deal_clearance_allocated_ils')),
         'local': q(meta.get('local_shipping_from_clearance_ils')),
         'local_source': conv.get('local_transport_source') or 'none',
-        'grand_total': q(row.get('grand_total')),
+        # الحصص صالحةٌ للفاتورة ما دامت تكاليفها المحفوظة هي تكاليف الصفّ الحيّ.
+        'matches_invoice': not _import_row_drifted(inv, row),
+        'subtotal': q(row.get('subtotal')),
         # أحواض الشحنة التي اقتُطعت منها الحصص — «مدفوعٌ كلّه» يُقاس عليها.
         'freight_pool': q(conv.get('shipment_total_ils')),
         'clearance_pool': q(conv.get('clearance_pool_ils')),
@@ -1366,14 +1368,32 @@ def import_invoice_cost_shares(inv: PurchaseInvoice) -> Optional[Dict[str, Any]]
     }
 
 
+def _import_row_drifted(inv: PurchaseInvoice, row: Dict[str, Any]) -> bool:
+    """هل تأخّرت تكاليف الفاتورة المحفوظة عن الصفّ المعاد بناؤه؟ على ما تكتبه
+    `recalculate_landed_for_shipment` من الصفّ (الإجمالي الفرعي، والشحن، وكلفة
+    كل سطر) بدقّة الأغورة — لا على الإجمالي: ضريبةُ الفاتورة وخصمُها ملكُها
+    وتُبقيهما إعادةُ الاحتساب، والصفّ يأخذهما من الصفقة."""
+    def q(v) -> Decimal:
+        return _d(v).quantize(Q2, rounding=ROUND_HALF_UP)
+
+    stored_lines = sorted(
+        q(v) for v in inv.items.values_list('landed_line_total_ils', flat=True)
+    )
+    live_lines = sorted(q(r.get('landed_line_total_ils')) for r in row.get('items') or [])
+    return (
+        q(inv.subtotal) != q(row.get('subtotal'))
+        or q(inv.shipping_cost) != q(row.get('shipping_cost'))
+        or stored_lines != live_lines
+    )
+
+
 def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
     """B-1: الفواتير الدولية المرحّلة التي لم تعد تعكس تكاليف شحنتها الحالية.
 
     حفظُ تكلفةٍ في الشحنة لا يمسّ مستنداً مرحّلاً (لا إلغاءَ ترحيلٍ ضمنيّ) —
     فهذه القراءة هي ما يُظهر للمستخدم أنّ الدفاتر متأخّرة عن التكاليف، ليقرّر
-    هو «أعد الاحتساب والترحيل». المقارنة على ما تكتبه
-    `recalculate_landed_for_shipment` من الصفّ المعاد بناؤه (الإجمالي الفرعي،
-    والشحن، وكلفةُ كل سطر) بدقّة الأغورة — لا على ما يُشتقّ منها.
+    هو «أعد الاحتساب والترحيل». المقارنة `_import_row_drifted` — نفسُها حارسُ
+    ترحيل الدولية، فما تقول اللافتة إنه متأخّر هو ما يرفض الترحيلُ بناءه.
     """
     qs = PurchaseInvoice.objects.filter(
         tenant=tenant,
@@ -1383,9 +1403,6 @@ def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
         is_posted=True,
     ).order_by('pk')
 
-    def q(v) -> Decimal:
-        return _d(v).quantize(Q2, rounding=ROUND_HALF_UP)
-
     posted_count = 0
     stale: List[Dict[str, Any]] = []
     for inv in qs:
@@ -1393,15 +1410,7 @@ def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
         row = _rebuild_import_invoice_row(inv)
         if not row:
             continue
-        stored_lines = sorted(
-            q(v) for v in inv.items.values_list('landed_line_total_ils', flat=True)
-        )
-        live_lines = sorted(q(r.get('landed_line_total_ils')) for r in row.get('items') or [])
-        if (
-            q(inv.subtotal) != q(row.get('subtotal'))
-            or q(inv.shipping_cost) != q(row.get('shipping_cost'))
-            or stored_lines != live_lines
-        ):
+        if _import_row_drifted(inv, row):
             stale.append({'id': inv.pk, 'invoice_number': inv.invoice_number})
     return {'posted_count': posted_count, 'stale_posted_invoices': stale}
 

@@ -1689,11 +1689,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             shares = import_invoice_cost_shares(invoice)
             accrual_credits = import_invoice_accrual_credits(invoice, shares) if shares else []
             if accrual_credits:
-                if abs(shares['grand_total'] - grand) > Decimal('0.05'):
+                # التكاليف لا الإجمالي: ضريبة الفاتورة وخصمها ملكُها وتُبقيهما
+                # إعادةُ الاحتساب، والصفّ الحيّ يأخذهما من الصفقة.
+                if not shares['matches_invoice']:
+                    subtotal = Decimal(str(invoice.subtotal or 0)).quantize(Decimal('0.01'))
                     return Response(
                         {'error': (
                             'تكاليف الشحنة تغيّرت بعد بناء الفاتورة '
-                            f'(الإجمالي الآن {shares["grand_total"]} ₪ لا {grand.quantize(Decimal("0.01"))} ₪). '
+                            f'(تكلفة البضاعة الآن {shares["subtotal"]} ₪ لا {subtotal} ₪). '
                             'اضغط «إعادة حساب التكلفة» ثم رحّل.'
                         )},
                         status=status.HTTP_400_BAD_REQUEST,
