@@ -458,10 +458,10 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
     @action(detail=True, methods=['post'], url_path='receive')
     def receive(self, request, pk=None):
-        """استلام بضاعة فاتورة محلية إلى المخزن (انعكاس على المستودع + قيد).
+        """استلام بضاعة فاتورة شراء إلى المخزن (انعكاس على المستودع + قيد).
 
         Body: { "lines": [ { "item_id": int, "quantity": number, "warehouse_id": int }, ... ] }
-        حصري للفواتير غير المستوردة (بلا صفقة/شحنة/تخليص).
+        المحلية والدولية سواء؛ الدولية بعد ترحيلها (انظر receive_purchase_invoice).
         """
         from core.tenant_utils import get_branch
         from logistics.services import receive_purchase_invoice
@@ -792,9 +792,34 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         # الجديدة، أو يرتدّ كلُّ شيءٍ إلى حاله المرحّل الأصلي. إلغاء الترحيل يحرّر
         # سند التسوية النقدية التلقائي، وإعادة الترحيل تبنيه مرّةً واحدة بالمبلغ
         # الجديد — فلا ازدواج. حرّاس الفترة والضريبة داخل `unpost`/`post_to_accounting`.
+        def snapshot_receipts(invoice_id):
+            """إرساليات الفاتورة قبل إلغاء الترحيل (الذي يحذفها) — لإعادتها كما كانت.
+
+            بالمنتج لا بمعرّف البند: إعادة الاحتساب تحذف البنود وتُعيد إنشاءها.
+            """
+            from logistics.models import GoodsReceipt
+            out = []
+            for rc in GoodsReceipt.objects.filter(
+                tenant=tenant, invoice_id=invoice_id,
+            ).prefetch_related('lines').order_by('receipt_date', 'id'):
+                lines = [
+                    {'product_id': ln.product_id, 'quantity': ln.quantity,
+                     'warehouse_id': ln.warehouse_id}
+                    for ln in rc.lines.all() if ln.item_id and ln.quantity
+                ]
+                if lines:
+                    out.append({
+                        'lines': lines, 'date': rc.receipt_date, 'branch': rc.branch,
+                        'notes': rc.notes or '', 'supplier_ref': rc.supplier_ref or '',
+                    })
+            return out
+
         reposted = 0
         try:
             with transaction.atomic():
+                receipts_by_invoice = {
+                    invoice_id: snapshot_receipts(invoice_id) for invoice_id in posted_ids
+                }
                 for invoice_id in posted_ids:
                     unpost_response = call_detail_action('unpost', invoice_id)
                     if unpost_response.status_code >= 400:
@@ -810,7 +835,56 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     use_cost_lines=use_cl,
                 )
                 for invoice_id in posted_ids:
-                    post_response = call_detail_action('post_to_accounting', invoice_id)
+                    # الاستلام يُعاد من الإرساليات المحفوظة لا من الإعداد: إعدادٌ مطفأ
+                    # كان سيُسقط البضاعة من المخزن، ومفعّلٌ كان سيستلم الباقي كلّه
+                    # في المستودع الافتراضي.
+                    self._forced_receive_on_post = False
+                    try:
+                        post_response = call_detail_action('post_to_accounting', invoice_id)
+                    finally:
+                        self._forced_receive_on_post = None
+                    if post_response.status_code < 400:
+                        from logistics.services import receive_purchase_invoice
+                        invoice_obj = PurchaseInvoice.objects.get(pk=invoice_id, tenant=tenant)
+                        for rc in receipts_by_invoice.get(invoice_id, []):
+                            # كل سطر إلى بنود منتجه الجديدة بالترتيب، حتى باقي كلٍّ منها.
+                            remaining = {
+                                it.id: Decimal(str(it.quantity or 0))
+                                - Decimal(str(it.received_quantity or 0))
+                                for it in invoice_obj.items.all() if it.product_id
+                            }
+                            items_by_product = {}
+                            for it in invoice_obj.items.order_by('id'):
+                                if it.product_id:
+                                    items_by_product.setdefault(it.product_id, []).append(it.id)
+                            lines = []
+                            for ln in rc['lines']:
+                                qty = Decimal(str(ln['quantity']))
+                                for item_id in items_by_product.get(ln['product_id'], []):
+                                    take = min(qty, remaining[item_id])
+                                    if take <= 0:
+                                        continue
+                                    lines.append({'item_id': item_id, 'quantity': take,
+                                                  'warehouse_id': ln['warehouse_id']})
+                                    remaining[item_id] -= take
+                                    qty -= take
+                                    if qty <= 0:
+                                        break
+                            if not lines:
+                                continue
+                            try:
+                                receive_purchase_invoice(
+                                    invoice_obj, lines=lines, user=request.user,
+                                    branch=rc['branch'], movement_date=rc['date'], receipt_date=rc['date'],
+                                    notes=rc['notes'], supplier_ref=rc['supplier_ref'],
+                                )
+                            except (DjangoValidationError, ValidationError) as ve:
+                                msg = getattr(ve, 'messages', None) or [str(ve)]
+                                raise RepostAborted(
+                                    f'تعذّر إعادة استلام الفاتورة {invoice_obj.invoice_number}: '
+                                    f'{"؛ ".join(msg)}'
+                                )
+                            invoice_obj.refresh_from_db()
                     if post_response.status_code >= 400:
                         number = (
                             PurchaseInvoice.objects.filter(pk=invoice_id, tenant=tenant)
@@ -1458,19 +1532,21 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
         td = invoice.invoice_date or timezone.localdate()
 
-        # ─── GR/IR: الفاتورة المحلية → قيدان منفصلان عبر الحساب الوسيط ──────────
+        # ─── GR/IR: قيدان منفصلان عبر الحساب الوسيط — محلية ودولية ────────────
         # بند البضاعة في قيد الفاتورة يدين «الوسيط» بدل المخزون مباشرةً؛ ويُنشأ
         # قيد استلام مستقل (مدين المخزون / دائن الوسيط) + إدخال المخزون فعلياً.
-        # المستورد (صفقة/شحنة/تخليص) يبقى كما هو — مخزونه يأتي عبر الشحنة.
+        # الدولية تُستلَم كالمحلية، إلا واحدة دخلت بضاعتها من الشحنة قبل هذا
+        # المسار (receipt_status ليست «غير مستلمة»): وسيطٌ لها لا يُصفّيه استلامٌ
+        # أبداً، فتدين المخزون مباشرةً كما كانت.
         is_local = not (invoice.deal_id or invoice.shipment_id or invoice.clearance_id)
         gr_ir_account = None
-        if is_local:
+        if is_local or invoice.receipt_status == PurchaseInvoice.RECEIPT_NOT:
             from logistics.services import _resolve_gr_ir_account
             try:
                 gr_ir_account = _resolve_gr_ir_account(tenant)
             except Exception:
                 gr_ir_account = None
-        use_gr_ir = bool(is_local and gr_ir_account)
+        use_gr_ir = bool(gr_ir_account)
         # إعداد «الاستلام مع الترحيل»: معطّلاً يبقى القيد كما هو (البضاعة في
         # الوسيط) وتُستلَم البنود لاحقاً بكمياتها من نافذة الاستلام.
         from logistics.services import get_or_create_purchase_settings
@@ -1482,6 +1558,9 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         # فاتورتها). الخيار لحظةُ ترحيلٍ لا حقلٌ محفوظ: ما بعد الترحيل تقوله
         # `receipt_status` والإرساليات نفسها، فلا داعي لعمودٍ يكرّره.
         override = request.data.get('receive_on_post')
+        # إعادة الترحيل بعد إعادة الحساب تعيد الاستلام بنفسها كما كان — لا بالإعداد.
+        if getattr(self, '_forced_receive_on_post', None) is not None:
+            override = self._forced_receive_on_post
         if override is not None:
             receive_on_post = (
                 override if isinstance(override, bool)
@@ -2061,6 +2140,10 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 # إرساليات الفاتورة توثّق استلاماً عُكِس ⇒ تُحذف معه (تُنشأ من
                 # جديد عند إعادة الترحيل/الاستلام).
                 invoice.receipts.all().delete()
+                # الدولية التي دخلت بضاعتها من الشحنة (المسار القديم): تلك الحركات
+                # ليست من الفاتورة فلم تُعكَس — تبقى مستلَمة.
+                from logistics.services import sync_import_receipt_from_shipment_stock
+                sync_import_receipt_from_shipment_stock(invoice)
                 # أعد ضبط avg_cost حسب نموذج التكلفة: الدوري يعيده من المشتريات
                 # المتبقية؛ والمتوسط المتحرك يترك ما أعاده _recompute_product_stock.
                 from inventory.services import apply_purchase_cost_model

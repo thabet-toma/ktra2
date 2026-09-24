@@ -239,21 +239,8 @@ def release_deal_on_purchase_invoice(sender, instance, created, **kwargs):
     advance_deal_stage(deal, LogisticsDeal.STAGE_INVOICED, force=True)
 
 
-@receiver(post_save, sender=LogisticsShipment)
-def auto_receive_stock_on_shipment_cleared(sender, instance, **kwargs):
-    """
-    عند تغيير حالة الشحنة إلى Cleared → إنشاء حركات استلام مخزون تلقائية
-    لكل بنود الصفقات المرتبطة بالشحنة.
-    """
-    if instance.status != 'Cleared':
-        return
-    try:
-        from inventory.services import receive_shipment_stock
-        created = receive_shipment_stock(instance)
-        if created:
-            logger.info(
-                "Auto-received %d stock movements for shipment %s",
-                len(created), instance.shipment_number,
-            )
-    except Exception as e:
-        logger.error("Error auto-receiving stock for shipment %s: %s", instance.pk, e)
+# بضاعة الاستيراد لا تدخل المخزن عند «Cleared» بعد الآن: تُستلَم من فاتورتها
+# الدولية كالمحلية (الاستلام مع الترحيل أو نافذة الاستلام/الإرسالية). الإشارة
+# القديمة كانت تُدخلها بلا مستودع، وبسعر الصفقة إن سبقت الفاتورة، ودون أن تعلم
+# الفاتورة بذلك فتبقى «غير مستلمة». حركاتها السابقة تُحسب للفواتير عبر
+# `logistics.services.sync_import_receipt_from_shipment_stock`.

@@ -458,7 +458,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         """«استُلم X من Y — باقي Z» بالأرقام، بلا فتح تقرير آخر.
 
         الأعداد نصوصٌ كبقية الكميات في هذا العقد (Decimal لا يُسلسَل إلى JSON
-        بأمانة float)، والفاتورة المستوردة تُرجع أصفاراً — مخزونها من الشحنة.
+        بأمانة float). المحلية والدولية سواء — الدولية تُستلَم من فاتورتها أيضاً.
         """
         s = purchase_invoice_receipt_summary(obj)
         return {

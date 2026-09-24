@@ -228,10 +228,10 @@ export const GoodsReceiptsPage: React.FC = () => {
       ]);
       setInvoiceOptions(
         (invs || [])
-          // المستوردة تُستلَم من تخليص الشحنة، والمرجع لا يُستلَم أصلاً.
+          // المرجع لا يُستلَم أصلاً؛ والدولية بعد ترحيلها وحده (تكلفتها تثبت به).
           .filter(
             (i) =>
-              i.invoice_type !== "international" &&
+              (i.invoice_type !== "international" || i.is_posted) &&
               !i.is_return &&
               i.receipt_status !== "received"
           )
@@ -284,14 +284,13 @@ export const GoodsReceiptsPage: React.FC = () => {
             data.receipt_status_display ? ` · ${data.receipt_status_display}` : ""
           }`
         );
+        const receivable = data.is_local || data.is_posted;
         setErr(
-          data.is_local
+          receivable
             ? null
-            : "فاتورة مستوردة — بضاعتها تُستلَم من تخليص الشحنة لا من إرسالية."
+            : "فاتورة مستوردة غير مرحّلة — رحّلها أولاً ثم استلم بضاعتها."
         );
-        // المستوردة لا تُعبَّأ: بضاعتها تدخل من التخليص، وتعبئتها تدعو إلى
-        // استلامٍ مزدوج. رسالة الخطأ أعلاه تشرح السبب للمستخدم.
-        if (data.is_local && opts?.autofillWarehouse !== undefined && !keepLines) {
+        if (receivable && opts?.autofillWarehouse !== undefined && !keepLines) {
           setFormLines(receivableToLines(data.lines || [], opts.autofillWarehouse));
         }
       } catch (e) {

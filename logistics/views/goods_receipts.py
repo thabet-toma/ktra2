@@ -259,7 +259,6 @@ class GoodsReceiptViewSet(BaseTenantViewSet):
         invoices = (
             PurchaseInvoice.objects.filter(
                 tenant=tenant, is_posted=True, is_return=False,
-                deal__isnull=True, shipment__isnull=True, clearance__isnull=True,
             )
             .exclude(receipt_status=PurchaseInvoice.RECEIPT_FULL)
             .select_related('partner')

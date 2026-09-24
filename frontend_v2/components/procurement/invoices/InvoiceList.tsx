@@ -423,8 +423,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
             </button>
           )}
           {/* استلام: يفتح محرّر إرسالية بهذه الفاتورة مربوطةً مسبقاً. */}
-          {r.isPosted && !r.isReturn && r.invoiceType !== "international"
-            && r.receiptStatus !== "received" && (
+          {r.isPosted && !r.isReturn && r.receiptStatus !== "received" && (
             <button
               type="button"
               className="ktra-toolbtn"

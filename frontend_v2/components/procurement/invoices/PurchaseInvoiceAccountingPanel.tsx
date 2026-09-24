@@ -200,7 +200,6 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     // T-RECVOPT: نفس سؤال شريط أدوات المحرّر ونفس شرطه — مصدرٌ واحد.
     let receiveChoice: boolean | undefined;
     if (receiveOnPostApplies({
-      isLocal: Boolean(invoice.is_local),
       isReturn: Boolean(invoice.is_return),
       receiptStatus: invoice.receipt_status,
       autoReceiveSetting: receiveOnPostDefault,
@@ -433,7 +432,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
               </b>
             </span>
           )}
-          {invoice.is_local && invoice.receipt_status !== "received" && !readOnly && (
+          {/* الدولية تُستلَم بعد ترحيلها وحده — تكلفتها المستوردة تثبت بالترحيل. */}
+          {(invoice.is_local || invoice.is_posted) && !invoice.is_return
+            && invoice.receipt_status !== "received" && !readOnly && (
             <button
               onClick={() => setShowReceive(true)}
               className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] text-white rounded-full text-sm font-medium"

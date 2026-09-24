@@ -62,7 +62,7 @@ def record_stock_movement(
 ) -> StockMovement:  # القلب: يقفل المنتج، يطبّق WAC، يُنشئ الحركة ويحدّث الرصيد ذرّياً (سطر 154)
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:  # حذف حركات مستند + إعادة احتساب (302)
 def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[dict]:  # من بنى على هذه البضاعة (371)
-def receive_shipment_stock(shipment, movement_date=None):  # استلام شحنة استيراد (431)
+def receive_shipment_stock(shipment, movement_date=None):  # استلام شحنة استيراد — مسارٌ قديم: لم تعد إشارة «Cleared» تستدعيه، البضاعة تُستلَم من الفاتورة الدولية (431)
 def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة المنتج (710)
 def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:  # التصنيف وكل أحفاده — نسخة واحدة يقرؤها الكرت المجمّع وفلتر `?category=` معاً
 def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:  # منتجات تصنيفٍ وأحفاده — الخادم يشتقّها بدل تعدادها في الطلب

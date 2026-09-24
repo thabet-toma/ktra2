@@ -932,8 +932,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    */
   const askReceiveChoice = async (): Promise<boolean | undefined | null> => {
     if (!receiveOnPostApplies({
-      isLocal: !isInternationalInvoice && !formData.shipment && !formData.dealId
-        && !formData.clearanceId,
       isReturn: Boolean(formData.isReturn),
       receiptStatus: formData.receiptStatus,
       autoReceiveSetting: receiveOnPostDefault,
@@ -1448,8 +1446,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
      الأرقام كلّها من الخادم (`receipt_progress` للرأس و`remainingQuantity`
      للبند) — الشاشة تعرض ولا تطرح، فلا يفترق «الباقي» هنا عن تقرير البواقي.
-     تظهر على الفاتورة المحلية المرحّلة وحدها: قبل الترحيل لا استلامَ أصلاً،
-     والمستوردة تدخل مخزنها من تخليص الشحنة لا من هذه الشاشة. */
+     تظهر على الفاتورة المرحّلة، محلية أو دولية: قبل الترحيل لا استلامَ أصلاً. */
   const receiptProgress = formData.receiptProgress;
   const showReceiptColumns =
     // «المرحّلة فقط» هي القاعدة (لا أعمدةَ أصفارٍ على مسودّة)، لكنّ فاتورةً
@@ -1457,10 +1454,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     // وصلت المخزنَ فعلاً كذبٌ لا اختصار.
     (Boolean(formData.isPosted) || (receiptProgress?.received ?? 0) > 0)
     && !formData.isReturn
-    && !isShipmentLinkedImport
-    && formData.invoiceType !== "international"
-    && !formData.dealId
-    && !formData.clearanceId
     && Boolean(receiptProgress && receiptProgress.linesTotal > 0);
   const receiptSummaryText = receiptProgress
     ? `استُلم ${formatQuantity(receiptProgress.received)} من `
@@ -3005,15 +2998,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     });
   };
 
-  // فاتورة محلية مرحّلة لم تُستلَم بضاعتها كلها ⇒ يظهر مسارا الاستلام.
+  // فاتورة مرحّلة (محلية أو دولية) لم تُستلَم بضاعتها كلها ⇒ يظهر مسارا الاستلام.
   const canReceiveGoods =
     Boolean(formData.id)
     && isPosted
     && !formData.isReturn
-    && formData.invoiceType !== "international"
-    && !formData.shipment
-    && !formData.dealId
-    && !formData.clearanceId
     && formData.receiptStatus !== "received";
 
   const toolbarActions: KitToolbarAction[] = [

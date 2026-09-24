@@ -203,6 +203,66 @@ class ClearanceImportTest(APITestCase):
             1,
         )
 
+    def test_auto_recalculate_repost_keeps_partial_receipt(self):
+        """إعادة الترحيل تُعيد الاستلام كما كان: الكمية نفسها والمستودع نفسه —
+        لا تُسقط البضاعة من المخزن ولا تستلمها كاملةً بإعداد الشركة."""
+        from inventory.models import StockMovement, Warehouse
+        from logistics.services import get_or_create_purchase_settings
+
+        ap = Account.objects.filter(tenant=self.tenant, code="2101").first()
+        self.partner.linked_account = ap
+        self.partner.save(update_fields=["linked_account"])
+        product = Product.objects.create(
+            tenant=self.tenant, sku="IMP-RECALC-RCV", name_ar="منتج مستلم جزئياً",
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+        LogisticsDealItem.objects.create(
+            deal=self.deal, product=product, quantity=Decimal("10"),
+            unit_price=Decimal("199.7"),
+        )
+        second_wh = Warehouse.objects.create(tenant=self.tenant, name="مستودع الميناء")
+        ps = get_or_create_purchase_settings(self.tenant)
+        ps.receive_on_post = False
+        ps.save(update_fields=["receive_on_post"])
+
+        self.assertEqual(self._import().status_code, 201)
+        invoice = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+        posted = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.id}/post-to-accounting/",
+            {}, format="json", **self._auth(),
+        )
+        self.assertEqual(posted.status_code, 201, posted.content)
+        item = invoice.items.get(product=product)
+        received = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.id}/receive/",
+            {"lines": [{"item_id": item.id, "quantity": "4", "warehouse_id": second_wh.id}]},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(received.status_code, 200, received.content)
+
+        LocalShipment.objects.create(
+            tenant=self.tenant, shipment=self.shipment, clearance=self.clearance,
+            carrier=self.partner, amount=Decimal("450"), currency=self.ils,
+            exchange_rate=Decimal("1"), status="delivered",
+            capitalize_to_inventory=True,
+        )
+        recalc = self.client.post(
+            "/api/logistics/purchase-invoices/recalculate-landed-cost/",
+            {"shipment_id": self.shipment.id, "auto_repost": True},
+            format="json", **self._auth(),
+        )
+        self.assertEqual(recalc.status_code, 200, recalc.content)
+        invoice.refresh_from_db()
+        # إعادة الاحتساب تُعيد إنشاء البنود — البند الجديد لنفس المنتج.
+        item = invoice.items.get(product=product)
+        self.assertTrue(invoice.is_posted)
+        self.assertEqual(invoice.receipt_status, PurchaseInvoice.RECEIPT_PARTIAL)
+        self.assertEqual(item.received_quantity, Decimal("4"))
+        moves = StockMovement.objects.filter(
+            reference_type="PURCHASE_INVOICE", reference_id=invoice.id, product=product)
+        self.assertEqual(sum(m.quantity for m in moves), Decimal("4"))
+        self.assertEqual({m.warehouse_id for m in moves}, {second_wh.id})
+
     # ── B-1: إعادة الاحتساب والترحيل ذرّية، والنقدية لا تبقى مسودة ────────
     def _post_credit_and_cash_invoices(self):
         """فاتورتان دوليتان مرحّلتان على شحنةٍ واحدة: آجلةٌ ونقدية."""

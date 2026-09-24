@@ -1852,22 +1852,33 @@ def goods_clearing_unit_costs(invoice, total_clearing):
     مصدر توزيع واحد لقيد الاستلام عند الترحيل ولاستلام البنود لاحقاً — فتتطابق
     قيمة المخزون الفعلية (WAC) مع رصيد حساب المخزون في الدفتر مهما كان المسار.
     آخر سطر يأخذ الباقي لتفادي فروق التقريب.
+
+    الفاتورة الدولية تُوزَّن بتكلفتها المستوردة (`landed_line_total_ils`) لا بسعر
+    الصفقة: حصص الشحن والتخليص لا تتبع سعر المورّد، فسعران متساويان قد يحملان
+    تكلفتين نازلتين مختلفتين.
     """
     goods_lines = [
         it for it in invoice.items.all()
         if it.product_id and not it.expense_account_id
         and Decimal(str(it.quantity or 0)) > 0
     ]
-    base = sum(
-        (Decimal(str(it.total_price or it.quantity * it.unit_price or 0)) for it in goods_lines),
-        Decimal('0'),
+    use_landed = bool(goods_lines) and all(
+        it.landed_line_total_ils is not None and Decimal(str(it.landed_line_total_ils)) > 0
+        for it in goods_lines
     )
+
+    def _line_value(it):
+        if use_landed:
+            return Decimal(str(it.landed_line_total_ils))
+        return Decimal(str(it.total_price or it.quantity * it.unit_price or 0))
+
+    base = sum((_line_value(it) for it in goods_lines), Decimal('0'))
     total_clearing = Decimal(str(total_clearing or 0))
     out: dict[int, tuple[Decimal, Decimal]] = {}
     allocated = Decimal('0')
     for idx, it in enumerate(goods_lines):
         qty = Decimal(str(it.quantity or 0))
-        line_val = Decimal(str(it.total_price or it.quantity * it.unit_price or 0))
+        line_val = _line_value(it)
         if idx == len(goods_lines) - 1:
             cost_share = total_clearing - allocated
         elif base > 0:
@@ -1953,6 +1964,71 @@ def purchase_invoice_receipt_summary(invoice, items=None):
     }
 
 
+def refresh_purchase_receipt_status(invoice):
+    """يشتقّ `receipt_status` من الكميات المستلمة لبنود المنتجات ويحفظه."""
+    from .models import PurchaseInvoice
+
+    product_items = [it for it in invoice.items.all() if it.product_id]
+    fully = bool(product_items) and all(
+        Decimal(str(it.received_quantity or 0)) >= Decimal(str(it.quantity or 0))
+        for it in product_items
+    )
+    any_received = any(Decimal(str(it.received_quantity or 0)) > 0 for it in product_items)
+    invoice.receipt_status = (
+        PurchaseInvoice.RECEIPT_FULL if fully
+        else PurchaseInvoice.RECEIPT_PARTIAL if any_received
+        else PurchaseInvoice.RECEIPT_NOT
+    )
+    invoice.save(update_fields=['receipt_status'])
+    return invoice.receipt_status
+
+
+def sync_import_receipt_from_shipment_stock(invoice):
+    """الفاتورة الدولية التي دخلت بضاعتها من الشحنة (المسار القديم) تُعرَف مستلَمة.
+
+    قبل أن تُستلَم الدولية من فاتورتها كانت إشارة «Cleared» تُدخل البضاعة بحركات
+    `SHIPMENT` لا تلمس الفاتورة، فتبقى «غير مستلمة» وبضاعتها في المخزن — ويَعرض
+    عليها الاستلامُ الجديد إدخالها ثانيةً. هنا تُحسب تلك الحركات للبنود: الكمية
+    المستلمة = ما دخل لمنتج البند من صفقة الفاتورة على شحنتها (موزّعاً على بنود
+    المنتج الواحد بالترتيب، ومسقوفاً بكمية كلٍّ منها)، ولا تنقص عمّا استُلم
+    بمسارٍ آخر. idempotent. يُستدعى عند الإنشاء من التخليص، وبعد إلغاء الترحيل،
+    وفي هجرة البيانات.
+    """
+    from inventory.models import StockMovement
+
+    if not invoice.shipment_id or getattr(invoice, 'is_return', False):
+        return None
+    moves = StockMovement.objects.filter(
+        tenant_id=invoice.tenant_id, reference_type='SHIPMENT',
+        reference_id=invoice.shipment_id, movement_type='IN',
+    )
+    if invoice.deal_id:
+        # ملاحظة receive_shipment_stock: «شحنة X | صفقة REF | تكلفة: ...» —
+        # الفاصلان يمنعان D-1 من مطابقة D-10.
+        moves = moves.filter(notes__contains=f"| صفقة {invoice.deal.ref_number} |")
+    by_product: dict[int, Decimal] = {}
+    for pid, qty in moves.values_list('product_id', 'quantity'):
+        by_product[pid] = by_product.get(pid, Decimal('0')) + Decimal(str(qty or 0))
+    if not by_product:
+        return None
+
+    for it in invoice.items.filter(product_id__isnull=False).order_by('id'):
+        available = by_product.get(it.product_id, Decimal('0'))
+        if available <= 0:
+            continue
+        take = min(available, Decimal(str(it.quantity or 0)))
+        by_product[it.product_id] = available - take
+        if take > Decimal(str(it.received_quantity or 0)):
+            it.received_quantity = take
+            it.save(update_fields=['received_quantity'])
+    status_ = refresh_purchase_receipt_status(invoice)
+    logger.info(
+        "import invoice %s receipt synced from shipment %s stock: %s",
+        invoice.pk, invoice.shipment_id, status_,
+    )
+    return status_
+
+
 def next_goods_receipt_number(tenant_id, branch=None) -> str:
     """رقم إرسالية الشراء التالي — عبر دفاتر الترقيم المركزية (GRN-0001)."""
     from accounting.services import next_document_number
@@ -2027,10 +2103,12 @@ def create_goods_receipt_document(
 def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement_date=None,
                              receipt_date=None, notes='', supplier_ref='',
                              existing_receipt=None):
-    """استلام بضاعة فاتورة شراء محلية إلى المخزن (انعكاس على المستودع + قيد).
+    """استلام بضاعة فاتورة شراء إلى المخزن (انعكاس على المستودع + قيد).
 
-    حصري للفواتير المحلية (غير مستوردة: بلا صفقة/شحنة/تخليص) — مسار الاستيراد
-    يستلم البضاعة عبر تخليص الشحنة، لا من هنا.
+    المحلية والدولية سواء. الدولية تُستلَم **بعد ترحيلها** وحده: تكلفتها
+    المستوردة (شحن + تخليص + نقل) لا تثبت إلا بالترحيل، فتكلفتها من توزيع مدين
+    الوسيط كالمحلية تماماً. دولية مرحّلة قبل هذا المسار (مدين المخزون مباشرةً،
+    بلا وسيط) تُستلَم بتكلفة الوحدة المستوردة **بلا قيد** — قيمتها في المخزون سلفاً.
 
     lines: قائمة [{'item_id': int, 'quantity': Decimal, 'warehouse_id': int}].
     لكل بند ذي منتج مخزون: تُنشأ حركة IN (متوسط مرجح) موسومة بالفرع والمستودع،
@@ -2055,9 +2133,11 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
 
     logger = logging.getLogger(__name__)
 
-    if invoice.deal_id or invoice.shipment_id or invoice.clearance_id:
+    is_import = bool(invoice.deal_id or invoice.shipment_id or invoice.clearance_id)
+    if is_import and not invoice.is_posted:
         raise ValidationError(
-            "هذه فاتورة مستوردة — يتم استلام بضاعتها من تخليص الشحنة، لا من الفاتورة."
+            "رحّل الفاتورة المستوردة أولاً — تكلفتها المستوردة (الشحن والتخليص) "
+            "تثبت بالترحيل، ثم تُستلَم بضاعتها."
         )
 
     if not lines:
@@ -2119,6 +2199,11 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
 
             if use_clearing:
                 unit_cost = clearing_costs.get(item.id, (Decimal('0'), Decimal('0')))[0]
+                line_vat = Decimal('0')
+            elif is_import:
+                # دولية مرحّلة على المخزون مباشرةً (قبل الوسيط): القيمة في الدفتر
+                # سلفاً، فالحركة بالتكلفة المستوردة ولا قيد (انظر أدناه).
+                unit_cost = Decimal(str(item.landed_unit_price_ils or 0))
                 line_vat = Decimal('0')
             else:
                 unit_price = Decimal(str(item.unit_price or 0))
@@ -2202,7 +2287,9 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
         # دون قيد محاسبي (لا قيد فارغ يُرفض من post_journal).
         gross = (inv_net + inv_vat).quantize(DEC)
         journal = None
-        if gross > 0:
+        # الدولية بلا وسيط مفتوح دَيَّنت المخزون عند ترحيلها — قيدٌ هنا يضاعف
+        # المخزون وذمم المورّد معاً.
+        if gross > 0 and not (is_import and not use_clearing):
             inventory_account = _resolve_inventory_account(invoice.tenant)
             if use_clearing:
                 # قيد استلام مستقل: مدين المخزون / دائن الوسيط. لا شريك على أيّ

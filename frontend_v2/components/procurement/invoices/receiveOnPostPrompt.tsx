@@ -12,8 +12,6 @@
 import React from "react";
 
 export interface ReceiveOnPostTarget {
-  /** فاتورة محلية = غير مستوردة؛ المستوردة تدخل مخزنها من تخليص الشحنة. */
-  isLocal: boolean;
   isReturn: boolean;
   receiptStatus?: string;
   /** `PurchaseSettings.receive_on_post` — مفعّلاً يُسكِت السؤال. انظر أدناه. */
@@ -23,8 +21,8 @@ export interface ReceiveOnPostTarget {
 /**
  * هل للسؤال معنى أصلاً؟
  *
- * لا معنى له على مرجع شراء (يُخرج البضاعة لا يُدخلها)، ولا على فاتورة مستوردة
- * (لا تمرّ من هنا)، ولا على فاتورة استُلمت بضاعتها كلّها سلفاً.
+ * لا معنى له على مرجع شراء (يُخرج البضاعة لا يُدخلها)، ولا على فاتورة استُلمت
+ * بضاعتها كلّها سلفاً. المحلية والدولية سواء: الدولية تُستلَم من فاتورتها أيضاً.
  *
  * ولا معنى له حين يكون الإعداد العام مفعّلاً: من ضبط شركته على «الاستلام مع
  * الترحيل» أجاب السؤال مرّةً في الإعدادات، وإعادةُ سؤاله عند كل ترحيل تطلب
@@ -37,8 +35,7 @@ export interface ReceiveOnPostTarget {
  */
 export function receiveOnPostApplies(target: ReceiveOnPostTarget): boolean {
   return (
-    target.isLocal
-    && !target.isReturn
+    !target.isReturn
     && !target.autoReceiveSetting
     && (target.receiptStatus || "not_received") !== "received"
   );

@@ -1088,6 +1088,9 @@ def import_invoices_from_clearance(
                     landed_unit_price_ils=row.get('landed_unit_price_ils'),
                     landed_line_total_ils=row.get('landed_line_total_ils'),
                 )
+            # شحنة دخلت بضاعتها بالمسار القديم قبل الفاتورة ⇒ الفاتورة تولد مستلَمة.
+            from .services import sync_import_receipt_from_shipment_stock
+            sync_import_receipt_from_shipment_stock(inv)
             created.append(inv)
 
         # «الإفراج لحظة الاستحقاق»: بمجرد أن تصير الشحنة فاتورة يصبح المخلّص
