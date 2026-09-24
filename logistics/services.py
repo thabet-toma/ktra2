@@ -943,6 +943,9 @@ def import_deal_payments_ap_debit(invoice) -> Decimal:
     دائن البنك) فلا يربطها سندٌ بالفاتورة، وكانت الفاتورة «غير مدفوعة» والمورد
     مسدَّد. تُقرأ من سطر الذمم في قيدها — ما سدّدته الدفاتر فعلاً بسعر الترحيل.
     مرآة `annotate_purchase_invoice_payment_summary` (`list_deal_paid`).
+
+    تُقرأ **بالأساس** (`base_debit`): قيد الدفعة دولارٌ اسمي بسعرها، والاسميّ 690
+    لدفعةٍ قيمتها 2,235.60 ₪ (INV-0021 على الإنتاج) — والتكلفة المقابلة بالشيكل.
     """
     from django.db.models import Sum
 
@@ -954,10 +957,10 @@ def import_deal_payments_ap_debit(invoice) -> Decimal:
     if not ap_account_id:
         return Decimal("0")
     total = JournalLine.objects.filter(
-        account_id=ap_account_id, debit__gt=0,
+        tenant_id=invoice.tenant_id, account_id=ap_account_id, debit__gt=0,
         journal__logisticspayment__deal_id=invoice.deal_id,
         journal__logisticspayment__is_posted=True,
-    ).aggregate(total=Sum("debit"))["total"]
+    ).aggregate(total=Sum("base_debit"))["total"]
     return Decimal(str(total or 0)).quantize(DEC)
 
 
@@ -976,7 +979,7 @@ def import_invoice_ap_credit(invoice) -> Decimal | None:
         return None
     total = JournalLine.objects.filter(
         journal_id=invoice.journal_id, account_id=ap_account_id, credit__gt=0,
-    ).aggregate(total=Sum("credit"))["total"]
+    ).aggregate(total=Sum("base_credit"))["total"]
     return Decimal(str(total)).quantize(DEC) if total else None
 
 
@@ -1259,7 +1262,8 @@ def annotate_purchase_invoice_payment_summary(queryset):
     )
     # 3ب: الفاتورة الدولية — جانب المورد وحده. نفس `import_invoice_ap_credit`
     # و`import_deal_payments_ap_debit` حرفاً بحرف: المستحقّ ما دائن به قيدُها
-    # ذممَ المورد، والمدفوع يشمل مدينَ الذمم في قيود دفعات صفقتها المرحّلة.
+    # ذممَ المورد، والمدفوع يشمل مدينَ الذمم في قيود دفعات صفقتها المرحّلة —
+    # بالأساس كلاهما (قيد الدفعة دولارٌ اسمي بسعرها).
     import_ap_credit = (
         JournalLine.objects
         .filter(
@@ -1268,19 +1272,20 @@ def annotate_purchase_invoice_payment_summary(queryset):
             credit__gt=0,
         )
         .values("journal_id")
-        .annotate(total=Sum("credit"))
+        .annotate(total=Sum("base_credit"))
         .values("total")[:1]
     )
     deal_paid = (
         JournalLine.objects
         .filter(
+            tenant_id=OuterRef("tenant_id"),
             account_id=OuterRef("partner__linked_account_id"),
             debit__gt=0,
             journal__logisticspayment__deal_id=OuterRef("deal_id"),
             journal__logisticspayment__is_posted=True,
         )
         .values("account_id")
-        .annotate(total=Sum("debit"))
+        .annotate(total=Sum("base_debit"))
         .values("total")[:1]
     )
     import_doc = Q(invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, is_return=False)

@@ -364,3 +364,35 @@ class ImportInvoiceSettlementTest(APITestCase):
         # سند المورد لا يتجاوز حصّته: ما بقي للمورد صفر.
         other = next(r for r in rows if r["id"] == invoices[1].pk)
         self.assertEqual(D(other["remaining_balance"]), D("7000.00"))
+
+    def test_deal_paid_through_endpoint_matches_supplier_cost(self):
+        """INV-0021 على الإنتاج: صفقةٌ عملتها ILS (كل صفقات كترا) مدفوعةٌ كاملةً بدولار
+        بسعر 3.24 عبر زرّ الدفع نفسه — كانت تُعرض «مدفوع 690» مقابل تكلفة 2,235.60:
+        القيد رحّل الرقم الدولاري، والملخّص يقرأ الاسميّ لا الأساس."""
+        deal = self.deals[0]
+        LogisticsDeal.objects.filter(pk=deal.pk).update(currency=self.ils)
+        payment = LogisticsPayment.objects.get(deal=deal)
+        LogisticsPayment.objects.filter(pk=payment.pk).update(usd_to_ils=D("3.24"))
+        cash = Account.objects.get(tenant=self.tenant, code="1101")
+        res = self.client.post(
+            f"/api/logistics/deals/{deal.pk}/post_payment/{payment.pk}/",
+            {"bank_account_id": cash.pk}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        payment.refresh_from_db()
+        ap_base = JournalLine.objects.filter(
+            journal=payment.journal, account=self.ap).aggregate(s=Sum("base_debit"))["s"]
+        self.assertEqual(ap_base, D("3240.00"))  # 1000$ × 3.24
+
+        inv = self._post(self._release_and_import()[0])
+        supplier = self._breakdown(inv)["components"]["supplier"]
+        self.assertEqual(D(supplier["cost"]), D("3240.00"))
+        self.assertEqual(D(supplier["paid"]), D(supplier["cost"]))
+        self.assertEqual(D(supplier["remaining"]), D("0.00"))
+        # ملخّص المورد في التفصيل والقائمة (نسخة SQL) يقرآن الأساس كذلك.
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        self.assertEqual(D(detail["remaining_balance"]), D("0.00"))
+        listed = self.client.get(
+            "/api/logistics/purchase-invoices/", {"page_size": 50}, **self._auth()).json()
+        row = next(r for r in listed.get("results", listed) if r["id"] == inv.pk)
+        self.assertEqual(D(row["remaining_balance"]), D("0.00"))
