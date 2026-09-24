@@ -656,6 +656,53 @@ def post_journal_entry(journal_id, user=None):
         raise ValidationError(f"Journal with ID {journal_id} does not exist.")
 
 
+def foreign_partner_tag_rows(tenant_id: int, lines_data: list[dict]) -> list[tuple]:
+    """أسطر تحمل طرفاً على حسابٍ ليس ذمّته — `[(row, account, partner), ...]`.
+
+    `partner_posted_balance` يجمع كل أسطر الطرف بلا فلتر حساب، فسطر صندوق أو
+    مصروف موسوم بالطرف يُلغي سطر ذمّته (تكرّر: مشتريات، استيراد، استحقاق النقل
+    المحلي). مرآة QuickBooks وOdoo: الطرف يخصّ سطر الذمم.
+
+    - حساب الطرف نفسه (`linked_account`) أو أي حساب ذمم مدينة/دائنة ⇒ سليم
+      (ذمم الفاتورة المختارة وذمم المجموعة والافتراضية تمرّ).
+    - صندوق/بنك/مخزون أو مصروف/إيراد ⇒ خطأ دائماً.
+    - غير ذلك (ضريبة، GR/IR، فروق صرف) ⇒ خطأ إن كان للطرف حسابه؛ الطرف بلا
+      حساب يسقط في `_resolve_ap_account` إلى أول خصم نشط فلا يُحكَم عليه.
+    """
+    from .account_classification import (
+        SUB_TYPE_BANK, SUB_TYPE_CASH_BOX, SUB_TYPE_INVENTORY, SUB_TYPE_PAYABLE,
+        SUB_TYPE_RECEIVABLE,
+    )
+
+    tagged = [row for row in lines_data if row.get("partner")]
+    if not tagged:
+        return []
+    accounts = Account.objects.filter(
+        tenant_id=tenant_id, id__in={row["account"] for row in tagged},
+    ).only("id", "code", "name", "account_type", "sub_type").in_bulk()
+    partners = Partner.objects.filter(
+        tenant_id=tenant_id, id__in={row["partner"] for row in tagged},
+    ).only("id", "name", "linked_account_id").in_bulk()
+
+    foreign = []
+    for row in tagged:
+        account = accounts.get(row["account"])
+        partner = partners.get(row["partner"])
+        if account is None or partner is None:
+            continue  # الانتماء للشركة يفحصه validate_journal_entry
+        if account.id == partner.linked_account_id:
+            continue
+        if account.sub_type in (SUB_TYPE_RECEIVABLE, SUB_TYPE_PAYABLE):
+            continue
+        never_partner = (
+            account.sub_type in (SUB_TYPE_CASH_BOX, SUB_TYPE_BANK, SUB_TYPE_INVENTORY)
+            or (account.account_type or "").strip().lower() in ("expense", "revenue")
+        )
+        if never_partner or partner.linked_account_id:
+            foreign.append((row, account, partner))
+    return foreign
+
+
 def post_journal(
     *,
     tenant_id: int,
@@ -669,8 +716,13 @@ def post_journal(
     user=None,
     idempotent: bool = True,
     branch_id: int | None = None,
+    mirrors_posted_lines: bool = False,
 ) -> JournalHeader:
     """دالة ترحيل مركزية ذرّية — المسار الوحيد لإنشاء + ترحيل أي قيد محاسبي.
+
+    ترفض وسمَ طرفٍ على حسابٍ ليس ذمّته (`foreign_partner_tag_rows`).
+    `mirrors_posted_lines=True` لقيد يعادل قيداً مرحّلاً سطراً بسطر (أدوات
+    التصحيح) — يَنسخ وسمَه القديم كما يفعل `reverse_journal`، وإلا بقي نصف الوسم.
 
     تفرض:
     - فترة مالية مفتوحة
@@ -692,6 +744,17 @@ def post_journal(
     assert_no_final_vat_statement(tenant_id, transaction_date, posting=True)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
+    foreign = [] if mirrors_posted_lines else foreign_partner_tag_rows(tenant_id, lines_data)
+    if foreign:
+        _row, account, partner = foreign[0]
+        _logger.warning(
+            "post_journal refused foreign partner tag: type=%s ref_id=%s account=%s partner=%s",
+            reference_type, reference_id, account.id, partner.id,
+        )
+        raise ValidationError(
+            f"لا يُوسَم الطرف «{partner.name}» على الحساب «{account.code} {account.name}» — "
+            "الطرف على سطر ذمّته وحده، وإلا ألغى هذا السطرُ رصيدَه في كشف حسابه."
+        )
 
     # ── 2) Atomic: idempotency (select_for_update) + create + post ──
     with transaction.atomic():

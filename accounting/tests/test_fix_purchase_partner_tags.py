@@ -40,16 +40,21 @@ def env():
 
 
 def _legacy(tenant, supplier, ref_type, legs):
-    """قيد بالشكل القديم: كل الأسطر موسومة بالمورد."""
-    return post_journal(
+    """قيد بالشكل القديم: كل الأسطر موسومة بالمورد.
+
+    حارس post_journal يرفض هذا الوسم اليوم، فيُكتب كما تركه الكود القديم في القاعدة.
+    """
+    journal = post_journal(
         tenant_id=tenant.TenantID, transaction_date="2026-06-11",
         reference_type=ref_type, reference_id=None, description=f"قديم {ref_type}",
         lines_data=[
-            {"account": a.id, "debit": Decimal(d), "credit": Decimal(c), "partner": supplier.id}
+            {"account": a.id, "debit": Decimal(d), "credit": Decimal(c)}
             for a, d, c in legs
         ],
         idempotent=False,
     )
+    JournalLine.objects.filter(journal=journal).update(partner_id=supplier.id)
+    return journal
 
 
 def _tags(journal):
@@ -161,6 +166,7 @@ def test_general_reversal_is_fixed_only_when_its_original_is_covered(env):
                 for a, d, c in legs
             ],
             idempotent=False,
+            mirrors_posted_lines=True,
         )
 
     deal = _legacy(tenant, supplier, "LOGISTICS_DEAL", [

@@ -331,6 +331,9 @@ def _adjust(row):
             currency=fx.currency,
             exchange_rate=Decimal(str(fx.exchange_rate or 1)),
             idempotent=False,
+            # التسوية تعادل قيداً مرحّلاً سطراً بسطر: وسمٌ قديم على الصندوق يُنسخ
+            # كما هو وإلا بقي وسمُ العكس وحده في رصيد الطرف.
+            mirrors_posted_lines=True,
         )
         tag = f" [{ADJUSTED_MARKER}{adj.id} — fix_logistics_unpost_cycles]"
         JournalHeader.objects.filter(pk=orig_id).update(

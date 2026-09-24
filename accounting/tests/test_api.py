@@ -183,7 +183,7 @@ def test_reverse_journal_unpost_original_tags_description(env):
 def test_reverse_journal_copies_line_metadata(env):
     tenant, owner, ils, usd, ar, rev = env
     partner = Partner.objects.create(
-        tenant=tenant, name="شريك عكس", partner_type="Customer")
+        tenant=tenant, name="شريك عكس", partner_type="Customer", linked_account=ar)
     orig = api.post_document(
         tenant_id=tenant.TenantID, transaction_date="2026-06-10",
         reference_type="FACADE_SRC", reference_id=103,

@@ -55,16 +55,19 @@ class LocalShipmentAccrualPartnerTagTest(TestCase):
 
     def test_migration_untags_legacy_expense_line_idempotently(self):
         local = self._local("LS-OLD")
-        # كما رحّله الكود القديم: الطرف على السطرين.
+        # كما رحّله الكود القديم: الطرف على السطرين (حارس post_journal يرفضه اليوم،
+        # فيُكتب الوسم كما تركه الكود القديم في القاعدة).
         journal = post_journal(
             tenant_id=self.tenant.pk, transaction_date="2026-07-02",
             reference_type="LOCAL_SHIPMENT", reference_id=local.pk, description="قديم",
             lines_data=[
-                {"account": self.expense.pk, "partner": self.carrier.pk,
+                {"account": self.expense.pk,
                  "debit": D(2000), "credit": D(0), "description": "استحقاق"},
                 {"account": self.carrier_ap.pk, "partner": self.carrier.pk,
                  "debit": D(0), "credit": D(2000), "description": "ارسالية"},
             ])
+        JournalLine.objects.filter(journal=journal, account=self.expense).update(
+            partner_id=self.carrier.pk)
         self.assertEqual(partner_posted_balance(self.tenant.pk, self.carrier.pk),
                          (D("2000.00"), D("2000.00")))
 
