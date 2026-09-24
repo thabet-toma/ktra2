@@ -124,11 +124,13 @@ def payment_settled(p: LogisticsPayment) -> bool:
     return st in ('confirmed', 'paid')
 
 
-def sum_settled_usd_ils(payments) -> Tuple[Decimal, Decimal]:
+def sum_settled_usd_ils(payments, is_paid=payment_settled) -> Tuple[Decimal, Decimal]:
+    """(دولار، شيكل) للدفعات المنفّذة. is_paid يبدّل معيار «منفّذة» — تسويةُ الفاتورة
+    الدولية تعدّ المرحّلَ في الدفاتر لا المؤكَّدَ من المورد."""
     paid_usd = Decimal('0')
     paid_ils = Decimal('0')
     for p in payments or []:
-        if not payment_settled(p):
+        if not is_paid(p):
             continue
         a = _d(p.amount)
         r = _d(getattr(p, 'usd_to_ils', None), '3.5')
@@ -191,11 +193,13 @@ def clearance_cost_line_dicts(clearance) -> List[dict]:
     replacing the removed `LogisticsClearance.cost_lines` model shim (D2). amount =
     debit − credit (same convention the old JSON used, where a credit was negative).
     Single source for every landed-cost pool sum and the clearance read payload."""
+    from logistics.accruals import is_vat_clearance_line
     out: List[dict] = []
     for line in clearance.lines.all():
         amount = _d(getattr(line, 'debit', 0)) - _d(getattr(line, 'credit', 0))
         out.append({'label': str(getattr(line, 'description', None) or '').strip(),
-                    'amount': amount})
+                    'amount': amount,
+                    'is_vat': is_vat_clearance_line(line)})
     return out
 
 
@@ -295,10 +299,14 @@ def sum_clearance_logistics_for_landed_share_ils(clearance: LogisticsClearance) 
 
 
 def sum_cost_lines_ils(clearance: LogisticsClearance) -> Decimal:
-    """حوض «تكلفة التخليص» للتوزيع: كل البنود ما عدا شحن الناقل والشحن المحلي المسجّل كبنود."""
+    """حوض «تكلفة التخليص» للتوزيع: كل البنود ما عدا شحن الناقل والشحن المحلي المسجّل كبنود
+    وضريبة الاستيراد — تلك ضريبةُ مدخلات يُثبتها استحقاق التخليص في 1105 وتُسترد،
+    فعدُّها في التكلفة أيضاً كان يُثبتها مرّتين (قرار المالك 2026-09-24)."""
     s = Decimal('0')
     for row in clearance_cost_line_dicts(clearance):
         if not isinstance(row, dict):
+            continue
+        if row.get('is_vat'):
             continue
         lb = _clearance_cost_line_label(row)
         if _excluded_from_clearance_pool_label(lb):
@@ -345,11 +353,19 @@ def clearance_payment_amount_ils(
     return amt.quantize(Q2, rounding=ROUND_HALF_UP)
 
 
-def sum_clearance_payments_ils(clearance: LogisticsClearance, usd_to_ils: Decimal) -> Decimal:
-    """دفعات التخليص فقط — دون دفعات الشحن الناقل الموسومة في الملاحظات."""
+def sum_clearance_payments_ils(
+    clearance: LogisticsClearance,
+    usd_to_ils: Decimal,
+    posted_only: bool = False,
+    carrier: bool = False,
+) -> Decimal:
+    """دفعات التخليص فقط — دون دفعات الشحن الناقل الموسومة في الملاحظات.
+    carrier=True يعكس الاختيار (دفعات الناقل وحدها)؛ posted_only المرحّلة وحدها."""
     s = Decimal('0')
     for p in clearance.payments.all():
-        if _clearance_payment_is_carrier_shipping(p):
+        if _clearance_payment_is_carrier_shipping(p) != carrier:
+            continue
+        if posted_only and not p.is_posted:
             continue
         s += clearance_payment_amount_ils(p, usd_to_ils)
     return s.quantize(Q2, rounding=ROUND_HALF_UP)
@@ -1321,6 +1337,33 @@ def _rebuild_import_invoice_row(inv: PurchaseInvoice) -> Optional[Dict[str, Any]
         )
     except Exception:
         return None
+
+
+def import_invoice_cost_shares(inv: PurchaseInvoice) -> Optional[Dict[str, Any]]:
+    """حصّة الفاتورة الدولية (شيكل) من كل تكلفة مشتركة لشحنتها — كما يبنيها المحرّك
+    الآن: الشحن الدولي والتخليص والنقل المحلي، ومصدر النقل المحلي. الباقي من
+    إجمالي الفاتورة للمورد (بضاعة + شحن داخل بلد المنشأ + ضريبة). None إن لم
+    تكتمل مستنداتها (بلا تخليص مثلاً)."""
+    row = _rebuild_import_invoice_row(inv)
+    if not row:
+        return None
+    conv = row.get('conversion_metadata_json') or {}
+    meta = conv.get('line_meta') or {}
+
+    def q(v) -> Decimal:
+        return _d(v).quantize(Q2, rounding=ROUND_HALF_UP)
+
+    return {
+        'freight': q(meta.get('deal_ship_allocated_ils')),
+        'clearance': q(meta.get('deal_clearance_allocated_ils')),
+        'local': q(meta.get('local_shipping_from_clearance_ils')),
+        'local_source': conv.get('local_transport_source') or 'none',
+        'grand_total': q(row.get('grand_total')),
+        # أحواض الشحنة التي اقتُطعت منها الحصص — «مدفوعٌ كلّه» يُقاس عليها.
+        'freight_pool': q(conv.get('shipment_total_ils')),
+        'clearance_pool': q(conv.get('clearance_pool_ils')),
+        'local_pool': q(conv.get('local_transport_total_ils')),
+    }
 
 
 def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:

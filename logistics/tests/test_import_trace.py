@@ -54,8 +54,9 @@ class ImportTraceTest(TestCase):
         shipment = LogisticsShipment.objects.get(pk=resp.data['id'])
         clr = LogisticsClearance.objects.create(
             tenant=self.tenant, shipment=shipment, declaration_number='DECL-5')
+        # عمولةٌ لا ضريبة: ضريبة الاستيراد مدخلاتٌ خارج حوض التكلفة (2026-09-24).
         LogisticsClearanceLine.objects.create(
-            clearance=clr, seq=1, line_type='vat', description='ضريبة',
+            clearance=clr, seq=1, line_type='broker_commission', description='عمولة المخلص',
             debit=Decimal('900'), credit=Decimal('0'))
         LocalShipment.objects.create(
             tenant=self.tenant, clearance=clr, shipment=shipment, carrier=self.carrier,

@@ -60,6 +60,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
+import { importPaymentTooltip } from "@/utils/importPayment";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
@@ -3156,9 +3157,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           ? { label: "مرحّلة", tone: "ok" }
           : { label: "مسودة", tone: "warn" }
       }
-      metrics={[
-        { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" },
-        { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" },
+      metrics={[...(formData.importPayment ? [
+        // 3ب: الدولية تُقاس بتكاليفها الأربع ودفعاتها الأربع — والتفصيل عند التمرير.
+        { label: "إجمالي التكاليف", value: invMoney(Number(formData.importPayment.payable_total) || 0), tone: "info" as const },
+        { label: "المدفوع", value: invMoney(Number(formData.importPayment.amount_paid) || 0), tone: "ok" as const },
+        { label: "المتبقي للدفع", value: invMoney(Number(formData.importPayment.remaining_balance) || 0), tone: "warn" as const },
+        {
+          label: "حالة الدفع",
+          value: (
+            <span title={importPaymentTooltip(formData.importPayment)} className="cursor-help underline decoration-dotted">
+              {formData.importPayment.payment_status_display}
+            </span>
+          ),
+        },
+      ] : [
+        { label: "إجمالي المستحق", value: invMoney(payableTotal), tone: "info" as const },
+        { label: "المدفوع المرحّل", value: invMoney(Number(formData.amountPaid) || 0), tone: "ok" as const },
         ...(settlement.pendingIntent > 0.009
           ? [{
             label: "دفعة غير مرحّلة",
@@ -3168,13 +3182,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           : []),
         // T-RECVIS: «المتبقي» صار يعني شيئين على شاشةٍ واحدة منذ ظهور باقي
         // الاستلام — فالمالي يقول «للدفع» والكمّي يقول «الاستلام».
-        { label: "المتبقي للدفع", value: invMoney(settlement.remainingAfterIntent), tone: "warn" },
+        { label: "المتبقي للدفع", value: invMoney(settlement.remainingAfterIntent), tone: "warn" as const },
         {
           label: "حالة الدفع",
           value: settlement.intentCoversAll
             ? "مدفوعة — غير مرحّلة"
             : (formData.paymentStatusDisplay || "غير مدفوعة"),
         },
+      ]),
         ...(showReceiptColumns ? [
           {
             label: `الاستلام — ${formData.receiptStatusDisplay || "غير مستلمة"}`,

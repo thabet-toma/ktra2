@@ -77,6 +77,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     cheques: dto.cheques || [],
     paymentStatus: dto.payment_status || "unpaid",
     paymentStatusDisplay: dto.payment_status_display || "غير مدفوعة",
+    importPayment: dto.import_payment || undefined,
     isOverdue: Boolean(dto.is_overdue),
     daysOverdue: Number(dto.days_overdue || 0),
     dueDate: dto.due_date || null,

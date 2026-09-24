@@ -50,6 +50,28 @@ CLEARANCE_DEFAULT_ACCOUNT_CODES = {
 SHIPPING_COST_LINE_LABEL = 'دفعة الشحن (الناقل)'
 
 
+def clearance_line_account(line, tenant):
+    """حساب مدين بند التخليص في قيد استحقاقه: الصريح وإلا افتراضيُّ نوعه.
+
+    مصدرٌ واحد يقرؤه الاستحقاق نفسه وترحيلُ الفاتورة الدولية حين يُعيد حصّتها
+    إلى الحسابات التي دينها الاستحقاق — فلا يفترقان على حساب."""
+    if line.account_id:
+        return line.account
+    return Account.objects.filter(
+        tenant=tenant,
+        code=CLEARANCE_DEFAULT_ACCOUNT_CODES.get(line.line_type, '5307'),
+        is_active=True,
+    ).first()
+
+
+def is_vat_clearance_line(line) -> bool:
+    """ضريبة الاستيراد: ضريبةُ مدخلاتٍ تُسترد (1105) لا تكلفةُ بضاعة."""
+    if getattr(line, 'line_type', None) == 'vat':
+        return True
+    account = line.account if getattr(line, 'account_id', None) else None
+    return bool(account and account.code == CLEARANCE_DEFAULT_ACCOUNT_CODES['vat'])
+
+
 def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
     """Dr بنود التخليص / Cr ذمم المخلّص. None إن كان مرحّلاً أو بلا مقوّمات."""
     if clearance.journal_id:
@@ -69,13 +91,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
         amount = (_as_decimal(line.debit) - _as_decimal(line.credit)).quantize(Decimal('0.01'))
         if amount <= 0 or line.description == SHIPPING_COST_LINE_LABEL:
             continue
-        account = line.account
-        if not account:
-            account = Account.objects.filter(
-                tenant=clearance.tenant,
-                code=CLEARANCE_DEFAULT_ACCOUNT_CODES.get(line.line_type, '5307'),
-                is_active=True,
-            ).first()
+        account = clearance_line_account(line, clearance.tenant)
         if not account:
             raise AccrualSkipped(f'لا يوجد حساب محاسبي مناسب لبند «{line.description}».')
         lines_data.append({
@@ -305,3 +321,114 @@ def accrue_all_on_release(clearance, freight_rate=None, user=None) -> List[str]:
             logger.exception('release accrual failed kind=local id=%s', local.pk)
 
     return posted
+
+
+# ── الفاتورة الدولية: حصّتها من الاستحقاقات تعود إلى البضاعة ─────────────────
+
+IMPORT_COMPONENT_LABELS = {
+    'freight': 'الشحن الدولي',
+    'clearance': 'التخليص',
+    'local': 'النقل المحلي',
+}
+
+
+def _journal_debit_sources(journal_id, weight=None) -> List[tuple]:
+    """(حساب، وزن) لكل سطر مدين في قيد استحقاق — الحساب الذي دينه فعلاً."""
+    from accounting.models import JournalLine
+    rows = list(
+        JournalLine.objects.filter(journal_id=journal_id, debit__gt=0)
+        .values_list('account_id', 'debit')
+    )
+    total = sum((_as_decimal(d) for _a, d in rows), Decimal('0'))
+    if not rows or total <= 0:
+        return []
+    if weight is None:
+        return [(acc, _as_decimal(d)) for acc, d in rows]
+    return [(acc, weight * _as_decimal(d) / total) for acc, d in rows]
+
+
+def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
+    """أسطر الدائن التي تُعيد حصّة الفاتورة الدولية من كل تكلفة مشتركة إلى
+    الحسابات التي دينها استحقاقُها عند الإفراج.
+
+    الاستحقاق دين 5301/بنود التخليص/مصروف النقل ودائن الوكيل والمخلّص والناقل؛
+    والفاتورة ترسمل التكلفة نفسها في البضاعة. لو دائنت المورد بها أيضاً لثبتت
+    التكلفة مرّتين (مصروفاً ومخزوناً) وتضخّمت ذمّته بما لا يدين به. فالحصّة
+    تُقسَم على حسابات الاستحقاق بأوزان أسطره (مجموعها = الحصّة بالضبط)، وما لم
+    يُستحقّ بعد يبقى على المورد كما كان — مع تحذيرٍ في السجل.
+
+    shares: ناتج `landed_cost.import_invoice_cost_shares`. يُرجع
+    [{'account', 'amount', 'component'}] لكلّ حساب؛ فارغاً إن لا استحقاق مرحّل.
+    """
+    from .landed_cost import LOCAL_SHIPPING_CLEARANCE_LINE_LABELS, distribute_by_weights
+    from .models import LocalShipment, LogisticsClearance
+
+    tenant = invoice.tenant
+    shipment = invoice.shipment
+    clearance = invoice.clearance or LogisticsClearance.objects.filter(
+        tenant_id=invoice.tenant_id, shipment_id=invoice.shipment_id,
+    ).first()
+    local_source = shares.get('local_source') or 'none'
+    sources = {'freight': [], 'clearance': [], 'local': []}
+
+    if shipment is not None and shipment.freight_is_posted and shipment.freight_journal_id:
+        sources['freight'] = _journal_debit_sources(shipment.freight_journal_id)
+
+    if clearance is not None:
+        accrued = bool(clearance.journal_id)
+        for line in clearance.lines.select_related('account').all():
+            amount = _as_decimal(line.debit) - _as_decimal(line.credit)
+            if amount <= 0 or is_vat_clearance_line(line):
+                continue
+            label = (line.description or '').strip()
+            if label == SHIPPING_COST_LINE_LABEL:
+                # بند الناقل لا يدخل قيد استحقاق التخليص أصلاً.
+                bucket, account = 'local', None
+            elif label in LOCAL_SHIPPING_CLEARANCE_LINE_LABELS:
+                bucket = 'local'
+                account = clearance_line_account(line, tenant) if accrued else None
+            else:
+                bucket = 'clearance'
+                account = clearance_line_account(line, tenant) if accrued else None
+            if bucket == 'local' and local_source != 'clearance_lines':
+                continue
+            sources[bucket].append((account.id if account else None, amount))
+
+    if local_source == 'local_shipment' and shipment is not None:
+        from django.db.models import Q
+        # فلتر `domain.inland.transport_pool_ils` نفسه — الحوض الذي بُنيت منه الحصّة.
+        cond = Q(shipment=shipment) | (Q(clearance=clearance) if clearance else Q())
+        for ls in (
+            LocalShipment.objects.filter(cond, tenant=tenant, capitalize_to_inventory=True)
+            .exclude(status='cancelled').distinct()
+        ):
+            weight = _as_decimal(ls.amount) * (_as_decimal(ls.exchange_rate, '1') or Decimal('1'))
+            if weight <= 0:
+                continue
+            accrued = _journal_debit_sources(ls.journal_id, weight) if (
+                ls.is_posted and ls.journal_id) else []
+            sources['local'].extend(accrued or [(None, weight)])
+
+    credits: dict = {}
+    for component in ('freight', 'clearance', 'local'):
+        share = _as_decimal(shares.get(component)).quantize(Decimal('0.01'))
+        if share <= 0:
+            continue
+        srcs = sources[component] or [(None, Decimal('1'))]
+        parts = distribute_by_weights(share, [w for _a, w in srcs])
+        unaccrued = Decimal('0')
+        for (account_id, _w), part in zip(srcs, parts):
+            if account_id is None:
+                unaccrued += part
+                continue
+            key = (component, account_id)
+            credits[key] = credits.get(key, Decimal('0')) + part
+        if unaccrued > 0:
+            logger.warning(
+                'import invoice %s: %s share %s has no posted accrual — stays on supplier',
+                invoice.pk, component, unaccrued,
+            )
+    return [
+        {'component': component, 'account': account_id, 'amount': amount}
+        for (component, account_id), amount in credits.items() if amount > 0
+    ]

@@ -927,16 +927,68 @@ def purchase_journal_settlement_debit(invoice) -> Decimal:
     return Decimal(str(total or 0)).quantize(DEC)
 
 
-def purchase_invoice_payment_summary(invoice):
-    """ملخص دفع فاتورة الشراء من السندات المرتبطة والمرحّلة فقط."""
-    cached = getattr(invoice, "_payment_summary_cache", None)
-    if cached is not None:
-        return cached
-    fees_total = sum(
+def _is_import_supplier_doc(invoice) -> bool:
+    from logistics.models import PurchaseInvoice
+
+    return (
+        invoice.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+        and not getattr(invoice, "is_return", False)
+    )
+
+
+def import_deal_payments_ap_debit(invoice) -> Decimal:
+    """3ب: دفعات صفقة الفاتورة الدولية المرحّلة — مدينُها على ذمم المورد.
+
+    الدفعة تُرحَّل قبل الفاتورة غالباً (`deals.post_payment`: مدين ذمم المورد /
+    دائن البنك) فلا يربطها سندٌ بالفاتورة، وكانت الفاتورة «غير مدفوعة» والمورد
+    مسدَّد. تُقرأ من سطر الذمم في قيدها — ما سدّدته الدفاتر فعلاً بسعر الترحيل.
+    مرآة `annotate_purchase_invoice_payment_summary` (`list_deal_paid`).
+    """
+    from django.db.models import Sum
+
+    from accounting.models import JournalLine
+
+    if not _is_import_supplier_doc(invoice) or not invoice.deal_id:
+        return Decimal("0")
+    ap_account_id = getattr(invoice.partner, "linked_account_id", None)
+    if not ap_account_id:
+        return Decimal("0")
+    total = JournalLine.objects.filter(
+        account_id=ap_account_id, debit__gt=0,
+        journal__logisticspayment__deal_id=invoice.deal_id,
+        journal__logisticspayment__is_posted=True,
+    ).aggregate(total=Sum("debit"))["total"]
+    return Decimal(str(total or 0)).quantize(DEC)
+
+
+def import_invoice_ap_credit(invoice) -> Decimal | None:
+    """ما دائن به ترحيلُ الفاتورة الدولية ذممَ المورد — حصّته وحده منذ أن صار
+    الترحيل يُعيد حصص الشحن والتخليص والنقل إلى استحقاقاتها. None لغير المرحّلة.
+    مرآة `annotate_purchase_invoice_payment_summary` (`list_import_ap_credit`)."""
+    from django.db.models import Sum
+
+    from accounting.models import JournalLine
+
+    if not _is_import_supplier_doc(invoice) or not invoice.is_posted or not invoice.journal_id:
+        return None
+    ap_account_id = getattr(invoice.partner, "linked_account_id", None)
+    if not ap_account_id:
+        return None
+    total = JournalLine.objects.filter(
+        journal_id=invoice.journal_id, account_id=ap_account_id, credit__gt=0,
+    ).aggregate(total=Sum("credit"))["total"]
+    return Decimal(str(total)).quantize(DEC) if total else None
+
+
+def purchase_invoice_fees_total(invoice) -> Decimal:
+    return sum(
         (Decimal(str(f.amount or 0)) for f in invoice.fees.all()),
         Decimal("0"),
     ).quantize(DEC)
-    payable = (Decimal(str(invoice.grand_total or 0)) + fees_total).quantize(DEC)
+
+
+def purchase_invoice_recorded_paid(invoice) -> Decimal:
+    """المدفوع عبر سندات الفاتورة نفسها (غير مسقوف) — بلا دفعات الصفقة."""
     # T-ONACC: السند الموزَّع يُحسب بمبالغ توزيعه على هذه الفاتورة فقط؛ والسند
     # المرتبط بالحقل المفرد (السلوك القديم) يُحسب بكامل مبلغه — ولا يُجمع الاثنان
     # لنفس السند فلا يتكرّر الاحتساب.
@@ -971,7 +1023,25 @@ def purchase_invoice_payment_summary(invoice):
     # بالكامل» وذمم المورد دائنة. ما يُحتسب اليوم شيئان فقط، وكلاهما قيدٌ في
     # الدفاتر: سنداتٌ مرحّلة، وتسويةٌ داخل قيد الفاتورة نفسه (فواتير ما قبل
     # Feature 2). النسخة الـSQL أدناه تطبّق القاعدة نفسها حرفاً بحرف.
-    paid = linked_paid + legacy_paid + purchase_journal_settlement_debit(invoice)
+    return linked_paid + legacy_paid + purchase_journal_settlement_debit(invoice)
+
+
+def purchase_invoice_payment_summary(invoice):
+    """ملخص دفع فاتورة الشراء من السندات المرتبطة والمرحّلة فقط.
+
+    الفاتورة الدولية (3ب): الملخّص جانبُ المورد وحده — المستحقّ له ما دائنه به
+    الترحيل، والمدفوع يشمل دفعات صفقتها المرحّلة. تفصيلُ تكاليفها الأربع
+    ودفعاتها في `domain.import_settlement.import_invoice_payment_breakdown`.
+    """
+    cached = getattr(invoice, "_payment_summary_cache", None)
+    if cached is not None:
+        return cached
+    fees_total = purchase_invoice_fees_total(invoice)
+    payable = (Decimal(str(invoice.grand_total or 0)) + fees_total).quantize(DEC)
+    import_ap_credit = import_invoice_ap_credit(invoice)
+    if import_ap_credit is not None:
+        payable = import_ap_credit
+    paid = purchase_invoice_recorded_paid(invoice) + import_deal_payments_ap_debit(invoice)
     summary = {
         "fees_total": fees_total,
         "payable_total": payable,
@@ -1129,7 +1199,8 @@ def annotate_purchase_invoice_payment_summary(queryset):
     )
     from django.db.models.functions import Coalesce, Greatest
     from accounting.models import JournalLine
-    from logistics.models import PurchaseInvoiceFee, PurchaseInvoicePayment
+    from django.db.models import Q
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceFee, PurchaseInvoicePayment
     from sales.models import SupplierPayment, SupplierPaymentAllocation
 
     money = DecimalField(max_digits=18, decimal_places=2)
@@ -1186,9 +1257,46 @@ def annotate_purchase_invoice_payment_summary(queryset):
         .annotate(total=Sum("debit"))
         .values("total")[:1]
     )
+    # 3ب: الفاتورة الدولية — جانب المورد وحده. نفس `import_invoice_ap_credit`
+    # و`import_deal_payments_ap_debit` حرفاً بحرف: المستحقّ ما دائن به قيدُها
+    # ذممَ المورد، والمدفوع يشمل مدينَ الذمم في قيود دفعات صفقتها المرحّلة.
+    import_ap_credit = (
+        JournalLine.objects
+        .filter(
+            journal_id=OuterRef("journal_id"),
+            account_id=OuterRef("partner__linked_account_id"),
+            credit__gt=0,
+        )
+        .values("journal_id")
+        .annotate(total=Sum("credit"))
+        .values("total")[:1]
+    )
+    deal_paid = (
+        JournalLine.objects
+        .filter(
+            account_id=OuterRef("partner__linked_account_id"),
+            debit__gt=0,
+            journal__logisticspayment__deal_id=OuterRef("deal_id"),
+            journal__logisticspayment__is_posted=True,
+        )
+        .values("account_id")
+        .annotate(total=Sum("debit"))
+        .values("total")[:1]
+    )
+    import_doc = Q(invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, is_return=False)
     zero = Value(Decimal("0.00"), output_field=money)
 
     queryset = queryset.annotate(
+        list_import_ap_credit=Case(
+            When(import_doc & Q(is_posted=True), then=Subquery(import_ap_credit, output_field=money)),
+            default=None,
+            output_field=money,
+        ),
+        list_deal_paid=Case(
+            When(import_doc, then=Coalesce(Subquery(deal_paid, output_field=money), zero)),
+            default=zero,
+            output_field=money,
+        ),
         list_fees_total=Coalesce(Subquery(fee_total, output_field=money), zero),
         list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
         list_allocated_paid=Coalesce(Subquery(allocated_paid, output_field=money), zero),
@@ -1199,12 +1307,14 @@ def annotate_purchase_invoice_payment_summary(queryset):
             output_field=money,
         ),
     ).annotate(
-        list_payable_total=ExpressionWrapper(
-            F("grand_total") + F("list_fees_total"), output_field=money,
+        list_payable_total=Coalesce(
+            F("list_import_ap_credit"),
+            ExpressionWrapper(F("grand_total") + F("list_fees_total"), output_field=money),
+            output_field=money,
         ),
         list_recorded_paid=ExpressionWrapper(
             F("list_linked_paid") + F("list_allocated_paid") + F("list_legacy_paid")
-            + F("list_journal_settled"),
+            + F("list_journal_settled") + F("list_deal_paid"),
             output_field=money,
         ),
     ).annotate(

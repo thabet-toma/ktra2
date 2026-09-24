@@ -12,6 +12,7 @@ import { clientLogger } from "../../../services/logger";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { PaymentStatusBadge } from "../../shared/PaymentStatusBadge";
 import { deriveInvoiceSettlement } from "../../shared/DocumentPaymentPanel";
+import { importPaymentTooltip } from "../../../utils/importPayment";
 import {
   Plus,
   RefreshCw,
@@ -31,13 +32,39 @@ import {
   type KitToolbarAction,
 } from "../../kit";
 
+/** 3ب: الفاتورة الدولية تُقاس بتكاليفها الأربع ودفعاتها الأربع، لا بسنداتها وحدها. */
+const rowPayment = (r: Invoice) => {
+  const ip = r.importPayment;
+  return ip
+    ? {
+      status: ip.payment_status,
+      label: ip.payment_status_display,
+      payable: Number(ip.payable_total || 0),
+      paid: Number(ip.amount_paid || 0),
+    }
+    : {
+      status: r.paymentStatus,
+      label: r.paymentStatusDisplay,
+      payable: Number(r.payableTotal ?? r.grandTotal ?? 0),
+      paid: Number(r.amountPaid || 0),
+    };
+};
+
 /** T-INTENT: تسوية صفّ القائمة من المشتقّة المشتركة — نفس رقم المحرّر. */
 const rowSettlement = (r: Invoice) => deriveInvoiceSettlement({
+  grandTotal: rowPayment(r).payable,
+  paid: rowPayment(r).paid,
+  pendingIntent: Number(r.pendingPaymentTotal || 0),
+  isPosted: Boolean(r.isPosted),
+});
+
+/** سند المورد يُسدّد حصّته وحدها — للدولية غيرُ متبقّيها الكلّي. */
+const supplierRemaining = (r: Invoice) => deriveInvoiceSettlement({
   grandTotal: Number(r.payableTotal ?? r.grandTotal ?? 0),
   paid: Number(r.amountPaid || 0),
   pendingIntent: Number(r.pendingPaymentTotal || 0),
   isPosted: Boolean(r.isPosted),
-});
+}).remaining;
 
 interface InvoiceListProps {
   invoices: Invoice[];
@@ -138,6 +165,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   };
 
   const grandOf = (invoice: Invoice): number => {
+    if (invoice.importPayment) return Number(invoice.importPayment.payable_total) || 0;
     if (invoice.payableTotal != null && !Number.isNaN(Number(invoice.payableTotal))) {
       return Number(invoice.payableTotal);
     }
@@ -173,7 +201,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         // T-DUE: «متأخرة» بُعدٌ فوق الحالة — تُرشَّح بعلمها لا بمساواة الحالة.
         if (filterPaymentStatus === "overdue") {
           if (!inv.isOverdue) return false;
-        } else if (filterPaymentStatus !== "all" && inv.paymentStatus !== filterPaymentStatus) {
+        } else if (filterPaymentStatus !== "all" && rowPayment(inv).status !== filterPaymentStatus) {
           return false;
         }
         const d = inv.invoiceDate || (inv.createdAt ? inv.createdAt.slice(0, 10) : "");
@@ -324,15 +352,18 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       align: "center",
       render: (r) => {
         const settlement = rowSettlement(r);
+        const payment = rowPayment(r);
         return (
-          <PaymentStatusBadge
-            status={r.paymentStatus}
-            label={r.paymentStatusDisplay}
-            isOverdue={r.isOverdue}
-            daysOverdue={r.daysOverdue}
-            pendingIntent={settlement.pendingIntent}
-            intentCoversAll={settlement.intentCoversAll}
-          />
+          <span title={importPaymentTooltip(r.importPayment) || undefined}>
+            <PaymentStatusBadge
+              status={payment.status}
+              label={payment.label}
+              isOverdue={r.isOverdue}
+              daysOverdue={r.daysOverdue}
+              pendingIntent={settlement.pendingIntent}
+              intentCoversAll={settlement.intentCoversAll}
+            />
+          </span>
         );
       },
     },
@@ -342,7 +373,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
       width: "100px",
       align: "left",
       numeric: true,
-      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(r.amountPaid)}</span>,
+      render: (r) => <span className="ktra-num font-mono text-xs">{fmtNum(rowPayment(r).paid)}</span>,
     },
     {
       key: "remainingBalance",
@@ -408,7 +439,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           {/* T-PAYFULL: «مدفوعة» من القائمة — يفتح الفاتورة ولوحة الدفع معبّأة
               بالمتبقّي كاملاً (Zoho/دفترة تسدّدان من الصف بلا فتح المستند؛
               نُبقي الفتح لأن الصندوق والقيد يُراجَعان قبل ترحيل السند). */}
-          {r.isPosted && !r.isReturn && rowSettlement(r).remaining > 0.009 && (
+          {r.isPosted && !r.isReturn && supplierRemaining(r) > 0.009 && (
             <button
               type="button"
               className="ktra-toolbtn"
@@ -558,7 +589,7 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
   const draftCount = filteredRows.length - postedCount;
   /* T-INTENT: مجاميع المدفوع والمتبقّي في الشريط — كان جانب البيع وحده يجمعها،
      فيغلق المشتري الشاشة وهو لا يعرف كم عليه للموردين في هذه الصفحة. */
-  const paidSum = filteredRows.reduce((s, r) => s + (Number(r.amountPaid) || 0), 0);
+  const paidSum = filteredRows.reduce((s, r) => s + rowPayment(r).paid, 0);
   const balanceSum = filteredRows.reduce(
     (s, r) => s + rowSettlement(r).remainingAfterIntent, 0,
   );

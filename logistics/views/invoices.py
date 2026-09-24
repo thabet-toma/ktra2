@@ -1345,6 +1345,8 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
           مدين: حساب مصروف لكل رسم     = fee.amount                    (لكل PurchaseInvoiceFee)
              └─ إن كان capitalize_to_inventory=True يُضاف للمخزون بدل المصروف
           دائن: ذمم المورد (partner.linked_account)                    = إجمالي + مجموع الرسوم
+             └─ الدولية: ناقصاً حصصها من الشحن والتخليص والنقل، وتُدائَن بها حسابات
+                استحقاقها (5301/بنود التخليص/مصروف النقل) — `import_invoice_accrual_credits`
           (Section B) ثم تسوية الدفعة النقدية عبر ذمم المورد:
           مدين: ذمم المورد / دائن: صندوق/بنك                            = المبلغ المدفوع نقداً
 
@@ -1676,11 +1678,55 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
         credit_total = grand + fees_total
 
+        # الفاتورة الدولية: حصّتها من الشحن الدولي والتخليص والنقل المحلي دُيِّنت
+        # في مصاريفها عند الإفراج ودُوئن بها الوكيلُ والمخلّص والناقل — فتُدائَن تلك
+        # المصاريف هنا بالحصّة (تنتقل إلى البضاعة مرّةً واحدة)، والمورد بما يخصّه
+        # وحده. قبلها كان المورد يُدائَن بالإجمالي المحمَّل كلّه.
+        supplier_credit = credit_total
+        if not is_local and invoice.deal_id and invoice.shipment_id:
+            from logistics.accruals import IMPORT_COMPONENT_LABELS, import_invoice_accrual_credits
+            from logistics.landed_cost import import_invoice_cost_shares
+            shares = import_invoice_cost_shares(invoice)
+            accrual_credits = import_invoice_accrual_credits(invoice, shares) if shares else []
+            if accrual_credits:
+                if abs(shares['grand_total'] - grand) > Decimal('0.05'):
+                    return Response(
+                        {'error': (
+                            'تكاليف الشحنة تغيّرت بعد بناء الفاتورة '
+                            f'(الإجمالي الآن {shares["grand_total"]} ₪ لا {grand.quantize(Decimal("0.01"))} ₪). '
+                            'اضغط «إعادة حساب التكلفة» ثم رحّل.'
+                        )},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+                for row in accrual_credits:
+                    lines_payload.append({
+                        'account': row['account'],
+                        'debit': Decimal('0'),
+                        'credit': row['amount'].quantize(Decimal('0.01')),
+                        'partner': None,
+                        'description': (
+                            f"حصّة الفاتورة من {IMPORT_COMPONENT_LABELS[row['component']]} "
+                            f"— {invoice.invoice_number}"
+                        )[:500],
+                    })
+                supplier_credit = credit_total - sum(
+                    (row['amount'] for row in accrual_credits), Decimal('0'))
+                logger.info(
+                    'import invoice %s posting: supplier=%s accrual_credits=%s',
+                    invoice.pk, supplier_credit,
+                    {f"{r['component']}:{r['account']}": str(r['amount']) for r in accrual_credits},
+                )
+                if supplier_credit <= 0:
+                    return Response(
+                        {'error': 'حصص الشحن والتخليص تتجاوز إجمالي الفاتورة — أعد حساب التكلفة.'},
+                        status=status.HTTP_400_BAD_REQUEST,
+                    )
+
         # سطر الذمم (الحساب الرقابي) هو الوحيد الذي يَحمل المورد — جوهر الـsubledger.
         lines_payload.append({
             'account': credit_account.id,
             'debit': Decimal('0'),
-            'credit': credit_total.quantize(Decimal('0.01')),
+            'credit': supplier_credit.quantize(Decimal('0.01')),
             'partner': partner.id,
             'description': f"ذمم مورد — {invoice.invoice_number}"[:500],
         })
@@ -1737,7 +1783,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 # T-CASH2 (شراء): الشراء النقدي = مدفوع فوراً ⇒ سوِّه بسند صرف
                 # مستقل داخل نفس المعاملة (ذرّياً مع الترحيل) فلا يبقى المورد دائناً.
                 self._auto_settle_cash_purchase(
-                    invoice, settle_amount=credit_total, request=request,
+                    invoice, settle_amount=supplier_credit, request=request,
                 )
 
                 # توحيد التكلفة (تذكير task23): بعد الترحيل تدخل الفاتورة نموذج

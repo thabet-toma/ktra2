@@ -1,3 +1,5 @@
+import type { ImportPaymentBreakdown } from "../utils/importPayment";
+
 export interface PurchaseInvoiceItemDto {
   id?: number;
   product?: number | null;
@@ -87,6 +89,8 @@ export interface PurchaseInvoiceListDto {
   pending_payment_total?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  /** 3ب: الفاتورة الدولية — تكاليفها الأربع مقابل دفعاتها الأربع (None لغيرها). */
+  import_payment?: ImportPaymentBreakdown | null;
   /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
   due_date?: string | null;
   payment_terms_days?: number | null;
@@ -174,6 +178,8 @@ export interface PurchaseInvoiceDto {
   readonly attached_cash_account?: number | null;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   payment_status_display?: string;
+  /** 3ب: الفاتورة الدولية — تكاليفها الأربع مقابل دفعاتها الأربع (None لغيرها). */
+  import_payment?: ImportPaymentBreakdown | null;
   /** T-DUE: الاستحقاق والتأخّر — التأخّر بُعدٌ فوق حالة الدفع لا قيمةٌ فيها. */
   due_date?: string | null;
   payment_terms_days?: number | null;

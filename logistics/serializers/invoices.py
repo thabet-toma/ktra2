@@ -136,6 +136,32 @@ RECEIVED_DOC_WARNING = (
 # المرحلة 3: مراجع عبر وحدات الحزمة (نفس الملف سابقاً) — لا-دوري.
 from ._helpers import _deal_title_for_list_preview
 
+
+def _import_payment_payload(obj):
+    """3ب: تكاليف الفاتورة الدولية الأربع ودفعاتها — None لغيرها (يعرض الملخّص
+    المعتاد). عطبٌ في الحساب لا يُسقط القائمة: يُسجَّل ويعود None."""
+    if obj.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL or obj.is_return:
+        return None
+    from logistics.domain.import_settlement import import_invoice_payment_breakdown
+    try:
+        data = import_invoice_payment_breakdown(obj)
+    except Exception:
+        logger.exception('import payment breakdown failed invoice=%s', obj.pk)
+        return None
+    if not data:
+        return None
+    return {
+        'payment_status': data['payment_status'],
+        'payment_status_display': data['payment_status_display'],
+        'payable_total': str(data['payable_total']),
+        'amount_paid': str(data['amount_paid']),
+        'remaining_balance': str(data['remaining_balance']),
+        'components': {
+            key: {k: str(v) for k, v in comp.items()}
+            for key, comp in data['components'].items()
+        },
+    }
+
 class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     # معرّف البند يُقرأ ويُكتب: التعديل يطابق البنود به بدل حذفها وإعادة
     # إنشائها (`PurchaseInvoiceSerializer._sync_items`)، فتبقى الكمية المستلَمة
@@ -249,6 +275,10 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     supplier_balance = serializers.DecimalField(
         max_digits=18, decimal_places=2, read_only=True,
     )
+    import_payment = serializers.SerializerMethodField()
+
+    def get_import_payment(self, obj):
+        return _import_payment_payload(obj)
 
     def get_deal_title(self, obj):
         return _deal_title_for_list_preview(obj.deal) if obj.deal_id else ''
@@ -290,6 +320,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'fees_total', 'payable_total',
             'amount_paid', 'remaining_balance', 'pending_payment_total',
             'payment_status', 'payment_status_display', 'supplier_balance',
+            'import_payment',
             'receipt_status', 'receipt_status_display',
             'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
             'items_count',
@@ -375,6 +406,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     days_overdue = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payment_status_display = serializers.SerializerMethodField()
+    import_payment = serializers.SerializerMethodField()
     fees_total = serializers.SerializerMethodField()
     payable_total = serializers.SerializerMethodField()
     supplier_balance_current = serializers.DecimalField(
@@ -432,7 +464,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'receipt_progress',
             'source_document',
             'amount_paid', 'remaining_balance', 'pending_payment_total',
-            'payment_status', 'payment_status_display',
+            'payment_status', 'payment_status_display', 'import_payment',
             'supplier_balance_current', 'supplier_balance_before_invoice',
             'supplier_balance_after_invoice', 'payment_details',
             'fees_total', 'payable_total',
@@ -534,6 +566,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     def get_payment_status_display(self, obj):
         return purchase_invoice_payment_summary(obj)['payment_status_display']
+
+    def get_import_payment(self, obj):
+        return _import_payment_payload(obj)
 
     def get_is_overdue(self, obj) -> bool:
         """T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها."""

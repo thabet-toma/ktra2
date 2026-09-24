@@ -1,5 +1,5 @@
-
 import { DealStatus, DealStatusHistoryEntry, DealActivity } from './deal';
+import type { ImportPaymentBreakdown } from "../utils/importPayment";
 
 /** سطر ضمن «بند الضرائب والرسوم» على فاتورة الشيكل */
 export interface TaxesAndFeesLine {
@@ -307,6 +307,8 @@ export interface Invoice {
     }>;
     paymentStatus?: 'paid' | 'partially_paid' | 'unpaid';
     paymentStatusDisplay?: string;
+    /** 3ب: تسوية الفاتورة الدولية — المورد والشحن والتخليص والمحلي. */
+    importPayment?: ImportPaymentBreakdown;
     /** T-DUE: التأخّر بُعدٌ فوق حالة الدفع — لا قيمةٌ رابعة فيها. */
     isOverdue?: boolean;
     daysOverdue?: number;
