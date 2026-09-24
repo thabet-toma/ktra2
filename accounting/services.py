@@ -7,6 +7,7 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import Q, Sum
 from .models import Account, ExchangeRate, JournalHeader, JournalLine, AccountingAuditLog, FiscalPeriod, CostCenter, TaxRate, VoidedJournal
+from .models import CashBoxLedgerAccount  # noqa: F401 — تصديرٌ لـlogistics (عقد no-direct-accounting-models)
 from decimal import Decimal, InvalidOperation
 from partners.models import Partner
 from tenants.models import Currency, TenantBook

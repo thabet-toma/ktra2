@@ -30,7 +30,7 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Sum
 
-from accounting.models import CashBoxLedgerAccount, JournalHeader, JournalLine
+from accounting.services import CashBoxLedgerAccount, JournalHeader, JournalLine
 from logistics.landed_cost import payment_ils
 from logistics.models import LogisticsPayment, PurchaseInvoice
 
