@@ -705,6 +705,29 @@ def foreign_partner_tag_rows(tenant_id: int, lines_data: list[dict]) -> list[tup
     return foreign
 
 
+def _line_amount_currency(row: dict) -> tuple[Decimal | None, str | None]:
+    """`amount_currency`/`currency_code` صريحان في سطر `lines_data` — أو (None, None).
+
+    للقيد بالشيكل الذي دولارُه معروف. إشارته إشارة (مدين − دائن) إلزاماً: مبلغٌ
+    أجنبيّ بإشارةٍ معاكسة يقلب رصيد الطرف بالدولار بصمت. القيد بعملةٍ أجنبية لا
+    يحتاجه: `JournalLine.save` يأخذه من الاسميّ.
+    """
+    raw = row.get("amount_currency")
+    if raw is None:
+        return None, None
+    amount = Decimal(str(raw)).quantize(Decimal("0.01"))
+    code = (row.get("currency_code") or "").strip().upper()
+    if not code:
+        raise ValidationError("مبلغٌ بعملةٍ أجنبية بلا رمز عملته (currency_code).")
+    net = Decimal(str(row.get("debit", 0) or 0)) - Decimal(str(row.get("credit", 0) or 0))
+    if (amount > 0) - (amount < 0) != (net > 0) - (net < 0):
+        raise ValidationError(
+            f"إشارة المبلغ الأجنبي ({amount} {code}) تخالف السطر "
+            f"(مدين {row.get('debit', 0)} / دائن {row.get('credit', 0)})."
+        )
+    return amount, code[:3]
+
+
 def post_journal(
     *,
     tenant_id: int,
@@ -726,6 +749,10 @@ def post_journal(
     `mirrors_posted_lines=True` لقيد يعادل قيداً مرحّلاً سطراً بسطر (أدوات
     التصحيح) — يَنسخ وسمَه القديم كما يفعل `reverse_journal`، وإلا بقي نصف الوسم.
 
+    سطرٌ يحمل `amount_currency` (موقَّعاً كالمدين − الدائن) و`currency_code` يُحفظ
+    بهما — القيد بالشيكل الذي دولارُه معروف (`_line_amount_currency`). وقيدٌ بعملةٍ
+    أجنبية يملؤهما `JournalLine.save` من الاسميّ؛ الصريح هناك يُستبدل بالاسميّ.
+
     تفرض:
     - فترة مالية مفتوحة
     - توازن دقيق (debit == credit بعد quantize)
@@ -746,6 +773,7 @@ def post_journal(
     assert_no_final_vat_statement(tenant_id, transaction_date, posting=True)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
+    line_currencies = [_line_amount_currency(row) for row in lines_data]
     foreign = [] if mirrors_posted_lines else foreign_partner_tag_rows(tenant_id, lines_data)
     if foreign:
         _row, account, partner = foreign[0]
@@ -855,7 +883,7 @@ def post_journal(
                     f"الحساب #{row['account']} طبيعته «دائن فقط» — لا يمكن إضافة مبلغ مدين."
                 )
 
-        for row in lines_data:
+        for row, (amount_currency, currency_code) in zip(lines_data, line_currencies):
             JournalLine.objects.create(
                 tenant_id=tenant_id,
                 journal=jh,
@@ -865,6 +893,8 @@ def post_journal(
                 partner_id=row.get("partner"),
                 cost_center_id=row.get("cost_center"),
                 description=(row.get("description") or "")[:500],
+                amount_currency=amount_currency,
+                currency_code=currency_code,
             )
 
         _logger.info(
@@ -4292,12 +4322,49 @@ def statement_reversal_pairs(tenant_id: int, lines) -> dict[int, tuple[int, int]
     return pairs
 
 
+def _statement_fx(
+    tenant_id: int, code: str, currency_balance: Decimal, book_balance: Decimal,
+    last_entry_rate: Decimal | None,
+) -> dict:
+    """سطر فرق الصرف الختامي لكشفٍ بعملةٍ أجنبية: رصيد الدفاتر بالشيكل مقابل
+    الرصيد الأجنبي × آخر سعر، والفرق (فرق صرفٍ لم يُقيَّد).
+
+    آخر سعر = جدول أسعار الصرف لليوم (`get_exchange_rate`)، وإلا سعرُ آخر قيدٍ للطرف
+    بهذه العملة — ويُعلَن مصدره. بلا سعرٍ إطلاقاً: الرصيدان بلا فرقٍ مخترَع.
+    """
+    rate, source = None, None
+    base = Currency.objects.filter(IsBaseCurrency=True).first()
+    foreign = Currency.objects.filter(Code__iexact=code).first()
+    if base and foreign and base.pk != foreign.pk:
+        try:
+            rate, source = get_exchange_rate(tenant_id, foreign.pk, base.pk), "exchange_rate"
+        except ValidationError:
+            rate = None
+    if rate is None and last_entry_rate:
+        rate, source = last_entry_rate, "last_entry"
+    out = {
+        "currency": code,
+        "book_balance": str(book_balance),
+        "currency_balance": str(currency_balance),
+        "rate": None, "rate_source": None, "revalued_balance": None, "difference": None,
+    }
+    if rate is not None:
+        rate = Decimal(str(rate))
+        revalued = (currency_balance * rate).quantize(Decimal("0.01"))
+        out.update(
+            rate=str(rate), rate_source=source, revalued_balance=str(revalued),
+            difference=str((book_balance - revalued).quantize(Decimal("0.01"))),
+        )
+    return out
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
     only_payments: bool = False,
     anchor_reference_type: str | None = None,
     anchor_reference_id: int | None = None,
+    currency: str | None = None,
 ) -> dict:
     """FEAT-4: كشف حساب الشريك من أسطر القيود المرحَّلة — مع رصيد جارٍ لكل سطر.
 
@@ -4326,6 +4393,13 @@ def partner_account_statement(
     `balance_before_folded`/`running_balance_folded` — الرصيد نفسه محسوباً بلا
     الأزواج، ليطويها العرض دون رصيدٍ جارٍ يمرّ بقيمة مضلّلة بين القيد وعكسه.
     الأسطر كلّها تُرسَل كما هي، والختامي واحدٌ في الحالتين لأن صافي الزوج صفر.
+
+    `currency='USD'`: الكشف بالدولار — المدين/الدائن والأرصدة من `amount_currency`
+    للأسطر بهذه العملة. سطرٌ بلا مبلغٍ بها يُعرض بـ`currency_missing` ومبلغِه
+    بالشيكل (`base_debit`/`base_credit`) **ولا يدخل الرصيد**، وعددُه وأثرُه بالشيكل
+    في `missing_count`/`missing_base_balance`؛ و`fx` سطر فرق الصرف الختامي
+    (`_statement_fx`). الزوج المعكوس يُطوى بالدولار إن كان صافيه به صفراً أيضاً.
+    `currencies` (في الحالتين): العملات الأجنبية على أسطر الطرف — الواجهة تختار بها.
     """
     base = (
         JournalLine.objects.filter(
@@ -4337,18 +4411,53 @@ def partner_account_statement(
     # (بحدود أسطر الشريك). النوع لازمٌ للترشيح، ويأتي في الاستعلام نفسه.
     ordered = list(base.values_list(
         "id", "base_debit", "base_credit",
-        "journal__reference_type", "journal__reference_id", "journal_id"))
+        "journal__reference_type", "journal__reference_id", "journal_id",
+        "amount_currency", "currency_code"))
     pairs = statement_reversal_pairs(
-        tenant_id, [(jid, rt, rid, d, c) for _lid, d, c, rt, rid, jid in ordered])
+        tenant_id, [(jid, rt, rid, d, c) for _lid, d, c, rt, rid, jid, _ac, _cc in ordered])
+    currency = (currency or "").strip().upper()[:3] or None
+    if currency and Currency.objects.filter(IsBaseCurrency=True, Code__iexact=currency).exists():
+        currency = None  # عملة الأساس = الكشف بالشيكل نفسه
+    if currency:
+        # بالدولار يُطوى الزوج إن كان صافيه بالدولار صفراً كذلك وطرفاه كلاهما به.
+        usd_net: dict[int, Decimal] = {}
+        without_currency: set[int] = set()
+        for _lid, _d, _c, _rt, _rid, jid, ac, code in ordered:
+            if code == currency and ac is not None:
+                usd_net[jid] = usd_net.get(jid, Decimal("0")) + Decimal(str(ac))
+            else:
+                without_currency.add(jid)
+        pairs = {
+            jid: pair for jid, pair in pairs.items()
+            if not ({pair[0], pair[1]} & without_currency)
+            and usd_net.get(pair[0], Decimal("0")) + usd_net.get(pair[1], Decimal("0")) == 0
+        }
     running = Decimal("0")
     folded = Decimal("0")
+    book = Decimal("0")
+    missing_base = Decimal("0")
+    missing_ids: set[int] = set()
+    last_entry_rate = None
     running_by_id: dict[int, Decimal] = {}
     before_by_id: dict[int, Decimal] = {}
     folded_by_id: dict[int, tuple[Decimal, Decimal]] = {}
-    for lid, d, c, _ref_type, _ref_id, jid in ordered:
+    for lid, d, c, _ref_type, _ref_id, jid, ac, code in ordered:
         d = Decimal(str(d or 0))
         c = Decimal(str(c or 0))
-        effect = (c - d) if is_supplier else (d - c)
+        effect = base_effect = (c - d) if is_supplier else (d - c)
+        book += base_effect
+        if currency:
+            if code == currency and ac is not None:
+                ac = Decimal(str(ac))
+                # `amount_currency` = مدين − دائن، فأثره على المورد سالبُه.
+                effect = -ac if is_supplier else ac
+                if ac:
+                    last_entry_rate = (abs(d - c) / abs(ac)).quantize(Decimal("0.000001"))
+            else:
+                # لا مبلغ بالعملة: يُعرض ولا يدخل الرصيد — ولا يُخمَّن له سعر.
+                effect = Decimal("0")
+                missing_ids.add(lid)
+                missing_base += base_effect
         # اللقطة قبل الأثر ثم بعده — من الحلقة ذاتها، بلا مرور ثانٍ.
         before_by_id[lid] = running
         running += effect
@@ -4408,6 +4517,11 @@ def partner_account_statement(
         if jl is None:
             continue
         j = jl.journal
+        debit, credit = str(jl.base_debit), str(jl.base_credit)
+        if currency:
+            ac = jl.amount_currency if lid not in missing_ids else None
+            debit = "" if ac is None else str(ac if ac > 0 else Decimal("0.00"))
+            credit = "" if ac is None else str(-ac if ac < 0 else Decimal("0.00"))
         row = {
             "id": jl.id,
             "journal_id": j.id,
@@ -4415,8 +4529,8 @@ def partner_account_statement(
             "reference_type": j.reference_type,
             "reference_id": j.reference_id,
             "description": jl.description or j.description or "",
-            "debit": str(jl.base_debit),
-            "credit": str(jl.base_credit),
+            "debit": debit,
+            "credit": credit,
             "balance_before": str(before_by_id[lid]),
             "running_balance": str(running_by_id[lid]),
             "balance_before_folded": str(folded_by_id[lid][0]),
@@ -4432,6 +4546,10 @@ def partner_account_statement(
                 "reversal_journal_id": pair[1],
                 "role": "original" if j.id == pair[0] else "reversal",
             }
+        if currency:
+            row["base_debit"] = str(jl.base_debit)
+            row["base_credit"] = str(jl.base_credit)
+            row["currency_missing"] = lid in missing_ids
         if anchor_reference_type:
             row["is_anchor"] = lid in anchor_set
         rows.append(row)
@@ -4444,7 +4562,17 @@ def partner_account_statement(
         "offset": offset,
         "ordering": normalized_ordering,
         "closing_balance": str(closing),
+        "currency": currency,
+        "currencies": sorted({code for *_rest, code in ordered if code}),
     }
+    if currency:
+        out["missing_count"] = len(missing_ids)
+        out["missing_base_balance"] = str(missing_base)
+        out["fx"] = _statement_fx(tenant_id, currency, closing, book, last_entry_rate)
+        logger.info(
+            "partner statement currency=%s tenant=%s partner=%s lines=%s missing=%s",
+            currency, tenant_id, partner_id, len(ordered), len(missing_ids),
+        )
     if anchor_reference_type:
         # «ماذا فعل هذا المستند بالحساب؟» — من لقطتَي الحلقة نفسها لا بحسابٍ
         # ثانٍ: الرصيد قبل أوّل أسطره، وبعد آخرها، والفرق هو أثره الفعلي على
@@ -4462,6 +4590,24 @@ def partner_account_statement(
             else None
         )
     return out
+
+
+def set_lines_amount_currency(tenant_id: int, updates: dict) -> int:
+    """تعبئة `amount_currency`/`currency_code` لأسطرٍ مرحّلة قائمة: `{line_id: (amount, code)}`.
+
+    لأمر التعبئة (`backfill_foreign_party_currency`) وحده — عمودٌ وصفيّ لا يمسّ
+    المدين/الدائن ولا أساسهما ولا رصيداً بالشيكل، ولا سطراً معبّأً قبلاً، ولا سطراً
+    من شركةٍ أخرى. ذرّي: كلّه أو لا شيء. يُعيد عدد الأسطر المكتوبة.
+    """
+    written = 0
+    with transaction.atomic():
+        for line_id, (amount, code) in updates.items():
+            written += JournalLine.objects.filter(
+                tenant_id=tenant_id, pk=line_id, amount_currency__isnull=True,
+            ).update(amount_currency=amount, currency_code=code)
+    logger.info("set_lines_amount_currency tenant=%s requested=%s written=%s",
+                tenant_id, len(updates), written)
+    return written
 
 
 def partner_posted_balance(tenant_id: int, partner_id: int) -> tuple[Decimal, Decimal]:

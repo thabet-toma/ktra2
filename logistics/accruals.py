@@ -274,6 +274,8 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
             {
                 'account': agent.linked_account_id, 'debit': Decimal('0'), 'credit': amount_ils,
                 'partner': agent.id, 'description': desc[:500],
+                # القيد بالشيكل والذمة دولار: كشف الوكيل بالدولار يقرأ هذا لا الشيكل.
+                'amount_currency': -total_usd.quantize(Decimal('0.01')), 'currency_code': 'USD',
             },
         ],
     )

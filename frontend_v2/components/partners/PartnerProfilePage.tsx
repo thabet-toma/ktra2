@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { apiGetObject } from '../../services/restApi';
-import { formatMoney, formatQuantity } from '../../utils/formatNumber';
+import { formatMoney, formatNumber, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
 import { relatedInvoiceTypeLabel, stockMovementReferenceLabel } from '../../utils/documentTypeLabels';
@@ -23,7 +23,7 @@ import {
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import {
-  partnerKindFromType, partnerTypeLabel, partnerVoucherDirections,
+  defaultStatementCurrency, partnerKindFromType, partnerTypeLabel, partnerVoucherDirections,
 } from '../../utils/partnerActions';
 import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
 import { NewSupplierPaymentModal } from '../sales/NewSupplierPaymentModal';
@@ -116,9 +116,34 @@ interface StatementRow {
   /** رقم قيد الأصل حين يكون السطر طرفاً في «قيد + عكسه» صافيهما صفر. */
   reversal_pair_id?: number | null;
   reversal_pair?: StatementReversalPair | null;
+  /** كشف الدولار: سطرٌ بلا مبلغ بالدولار — يُعرض بشيكله ولا يدخل الرصيد. */
+  currency_missing?: boolean;
+  base_debit?: string;
+  base_credit?: string;
 }
 
 type StatementDisplayRow = FoldedStatementRow<StatementRow>;
+
+/** سطر فرق الصرف الختامي في كشف الدولار (`_statement_fx` في الخادم). */
+interface StatementFx {
+  currency: string;
+  book_balance: string;
+  currency_balance: string;
+  rate: string | null;
+  rate_source: 'exchange_rate' | 'last_entry' | null;
+  revalued_balance: string | null;
+  difference: string | null;
+}
+
+interface StatementResponse {
+  results: StatementRow[];
+  count: number;
+  currency?: string | null;
+  currencies?: string[];
+  missing_count?: number;
+  missing_base_balance?: string;
+  fx?: StatementFx;
+}
 
 /** وسم الشحنة تحت البيان — حين لا يحمله نصّ القيد أصلاً (القيود القديمة). */
 function StatementShipmentLabel({ row }: { row: StatementRow }) {
@@ -203,6 +228,10 @@ export const PartnerProfilePage: React.FC = () => {
 
   // statement (party ledger) — paginated
   const [stmt, setStmt] = useState<{ rows: StatementRow[]; count: number }>({ rows: [], count: 0 });
+  // «₪ / $»: الكشف بالشيكل (null) أو بالدولار من `amount_currency`.
+  const [stmtCurrency, setStmtCurrency] = useState<'USD' | null>(null);
+  const [stmtMeta, setStmtMeta] = useState<Omit<StatementResponse, 'results' | 'count'>>({});
+  const stmtCurrencyPicked = useRef(false);
   const [stmtOffset, setStmtOffset] = useState(0);
   /* THA-128 — تبويب «المال»: حركات التسوية وحدها من الكشف نفسه (المصدر ذاته،
      فلا معادلة ثانية للرصيد)، ومعها حركات المخزون تحت مستندها المسبِّب. */
@@ -415,16 +444,38 @@ export const PartnerProfilePage: React.FC = () => {
     (offset: number) => {
       if (!id) return;
       setStmtLoading(true);
-      apiGetObject<{ results: StatementRow[]; count: number }>(
-        `partners/${id}/statement/?limit=${PAGE}&offset=${offset}&ordering=${stmtOrdering}`,
+      apiGetObject<StatementResponse>(
+        `partners/${id}/statement/?limit=${PAGE}&offset=${offset}&ordering=${stmtOrdering}${
+          stmtCurrency ? `&currency=${stmtCurrency}` : ''}`,
         { tenantId },
       )
-        .then((d) => setStmt({ rows: d.results, count: d.count }))
+        .then(({ results, count, ...meta }) => {
+          setStmt({ rows: results, count });
+          setStmtMeta(meta);
+        })
         .catch((err) => setError(err instanceof Error ? err.message : String(err)))
         .finally(() => setStmtLoading(false));
     },
-    [id, tenantId, stmtOrdering],
+    [id, tenantId, stmtOrdering, stmtCurrency],
   );
+
+  // طرفٌ آخر: العملة تُختار له من جديد — وعملاتُ السابق لا تقرّر افتراضيَّه.
+  useEffect(() => {
+    stmtCurrencyPicked.current = false;
+    setStmtCurrency(null);
+    setStmtMeta({});
+  }, [id]);
+
+  // الافتراضي مرّةً لكل طرف بعد أول كشف: الدولار للوكيل/المورد ذي القيود الدولارية.
+  useEffect(() => {
+    if (stmtCurrencyPicked.current || !partner || !stmtMeta.currencies) return;
+    stmtCurrencyPicked.current = true;
+    const picked = defaultStatementCurrency(partner.partner_type, stmtMeta.currencies);
+    if (picked) {
+      setStmtCurrency(picked);
+      setStmtOffset(0);
+    }
+  }, [partner, stmtMeta.currencies]);
 
   useEffect(() => {
     loadStatement(stmtOffset);
@@ -520,14 +571,33 @@ export const PartnerProfilePage: React.FC = () => {
         <div className="flex flex-col gap-0.5">
           <span>{clarifyStatementDescription(r.reference_type, r.description) || '—'}</span>
           <StatementShipmentLabel row={r} />
+          {r.currency_missing && (
+            <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
+              ⚠ بلا مبلغ بالدولار — {formatMoney(Number(r.base_debit || 0) - Number(r.base_credit || 0))} ₪ (مدين − دائن)، لا يدخل الرصيد
+            </span>
+          )}
         </div>
       ),
     },
-    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
-    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
+    {
+      key: 'debit',
+      header: stmtCurrency ? `مدين (${stmtCurrency})` : 'مدين (Dr)',
+      align: 'right',
+      render: (r) => r.currency_missing
+        ? <span className="text-[var(--ktra-ink-soft)]">—</span>
+        : <span className="ktra-num">{r?.debit ?? ''}</span>,
+    },
+    {
+      key: 'credit',
+      header: stmtCurrency ? `دائن (${stmtCurrency})` : 'دائن (Cr)',
+      align: 'right',
+      render: (r) => r.currency_missing
+        ? <span className="text-[var(--ktra-ink-soft)]">—</span>
+        : <span className="ktra-num">{r?.credit ?? ''}</span>,
+    },
     {
       key: 'running_balance',
-      header: 'الرصيد',
+      header: stmtCurrency ? `الرصيد (${stmtCurrency})` : 'الرصيد',
       align: 'right',
       render: (r) => r.reversal_member
         ? <span className="text-[var(--ktra-ink-soft)]">—</span>
@@ -779,6 +849,28 @@ export const PartnerProfilePage: React.FC = () => {
               />
               إظهار القيود المعكوسة
             </label>
+            {(stmtCurrency || stmtMeta.currencies?.includes('USD')) && (
+              <div className="flex overflow-hidden rounded-lg border border-[var(--ktra-border)] text-sm" role="group" aria-label="عملة الكشف">
+                {([[null, '₪'], ['USD', '$']] as const).map(([code, label]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    aria-pressed={stmtCurrency === code}
+                    onClick={() => {
+                      stmtCurrencyPicked.current = true;
+                      setStmtCurrency(code);
+                      setStmtOffset(0);
+                      clientLogger.info("partner.statement_currency_changed", { currency: code ?? 'base' });
+                    }}
+                    className={`px-3 py-1.5 ${stmtCurrency === code
+                      ? 'bg-[var(--ktra-accent,#2563eb)] font-bold text-white'
+                      : 'bg-[var(--ktra-panel)] text-[var(--ktra-ink)]'}`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            )}
             <label htmlFor="partner-statement-ordering" className="text-sm text-[var(--ktra-ink-soft)]">
               ترتيب الحركات:
             </label>
@@ -797,6 +889,12 @@ export const PartnerProfilePage: React.FC = () => {
               <option value="oldest">الأقدم أولاً</option>
             </select>
           </div>
+          {stmtCurrency && (stmtMeta.missing_count ?? 0) > 0 && (
+            <div className="mb-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300" role="status">
+              ⚠ {formatNumber(stmtMeta.missing_count ?? 0, { maxDecimals: 0 })} حركة بلا مبلغ بالدولار (صافيها {formatMoney(stmtMeta.missing_base_balance ?? '0')} ₪)
+              — معروضةٌ في الكشف ولا تدخل رصيده بالدولار.
+            </div>
+          )}
           {stmtGrouped && (
             <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]">
               الحركات المترابطة مجمَّعة داخل إطار واحد؛ عمود «الرصيد» يبقى الرصيد الجاري
@@ -814,6 +912,7 @@ export const PartnerProfilePage: React.FC = () => {
             rowClassName={(r) => (
               r.reversal_summary || r.reversal_member
                 ? 'bg-gray-100 text-[var(--ktra-ink-soft)] dark:bg-white/5'
+                : r.currency_missing ? 'bg-amber-50 dark:bg-amber-900/20'
                 : r.info_amount ? 'bg-[var(--ktra-panel)]' : statementToneRowClass(r.reference_type)
             )}
             rowGroupKey={stmtGrouped ? (r) => r.link_key : undefined}
@@ -840,6 +939,31 @@ export const PartnerProfilePage: React.FC = () => {
               ) : undefined
             }
           />
+          {stmtCurrency && stmtMeta.fx && (
+            <div
+              data-testid="statement-fx-row"
+              className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] p-2 text-sm"
+            >
+              <span>الرصيد بالدفاتر: <b className="ktra-num">{formatMoney(stmtMeta.fx.book_balance)}</b> ₪</span>
+              {stmtMeta.fx.rate ? (
+                <>
+                  <span>
+                    الرصيد بالدولار <b className="ktra-num">{formatMoney(stmtMeta.fx.currency_balance)}</b> $
+                    × {stmtMeta.fx.rate_source === 'exchange_rate' ? 'سعر اليوم' : 'سعر آخر قيد'}{' '}
+                    <span className="ktra-num">{formatNumber(stmtMeta.fx.rate, { maxDecimals: 4 })}</span>
+                    {' '}= <b className="ktra-num">{formatMoney(stmtMeta.fx.revalued_balance)}</b> ₪
+                  </span>
+                  <span className="font-bold">
+                    الفرق (فرق صرف غير مقيَّد): <span className="ktra-num">{formatMoney(stmtMeta.fx.difference)}</span> ₪
+                  </span>
+                </>
+              ) : (
+                <span className="text-[var(--ktra-ink-soft)]">
+                  الرصيد بالدولار <b className="ktra-num">{formatMoney(stmtMeta.fx.currency_balance)}</b> $ — لا سعر صرف مسجَّل لحساب الفرق.
+                </span>
+              )}
+            </div>
+          )}
         </div>
       ),
     },

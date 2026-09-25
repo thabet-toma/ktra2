@@ -167,6 +167,10 @@ class ImportInvoiceSettlementTest(APITestCase):
             supplier_credit = sum(
                 (l.credit for l in lines if l.account_id == self.ap.id), D("0"))
             self.assertEqual(supplier_credit, (inv.deal.total_amount * D("3.5")).quantize(Q2))
+            # وبالدولار: مبلغ الصفقة نفسه — كشف المورد بالدولار يقرؤه.
+            supplier_line = next(l for l in lines if l.account_id == self.ap.id)
+            self.assertEqual((supplier_line.amount_currency, supplier_line.currency_code),
+                             (-inv.deal.total_amount, "USD"))
             # سطر الذمم وحده يحمل الشريك.
             self.assertFalse(any(
                 l.partner_id for l in lines if l.account_id != self.ap.id))

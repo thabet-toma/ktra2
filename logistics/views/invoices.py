@@ -1752,13 +1752,20 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     )
 
         # سطر الذمم (الحساب الرقابي) هو الوحيد الذي يَحمل المورد — جوهر الـsubledger.
-        lines_payload.append({
+        supplier_line = {
             'account': credit_account.id,
             'debit': Decimal('0'),
             'credit': supplier_credit.quantize(Decimal('0.01')),
             'partner': partner.id,
             'description': f"ذمم مورد — {invoice.invoice_number}"[:500],
-        })
+        }
+        if not is_local and invoice.deal_id:
+            # الدولية: دَين المورد بالدولار مبلغُ صفقته (`total_amount` دولارٌ دائماً)،
+            # والشيكل حصّته بأسعار دفعاتها — كشفه بالدولار يقرأ هذا.
+            deal_usd = Decimal(str(invoice.deal.total_amount or 0)).quantize(Decimal('0.01'))
+            if deal_usd > 0 and supplier_line['credit'] > 0:
+                supplier_line.update(amount_currency=-deal_usd, currency_code='USD')
+        lines_payload.append(supplier_line)
 
         # ─── Feature 2 (شراء): ترحيل الفاتورة لا يُسوّي النقدية ─────────────────
         # قيد الفاتورة يدين المخزون/الضريبة ويدائن ذمم المورد بالكامل فقط. الدفع

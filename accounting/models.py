@@ -188,6 +188,21 @@ class JournalLine(models.Model):
     description = models.CharField(max_length=500, null=True, blank=True, db_column='LineDescription')
     project_id = models.IntegerField(null=True, blank=True, db_column='ProjectID')
 
+    # ── المبلغ بعملته الأجنبية (كشف الحساب بالدولار) ──
+    # عمودٌ واحد موقَّع لا مدين/دائن منفصلان (مرآة Odoo `amount_currency`): إشارته
+    # إشارة (debit − credit) فالمجموع رصيدٌ مباشرة، ولا حالة «مدين ودائن معاً» تُحرس.
+    # قيدٌ بعملةٍ أجنبية: أسطره الاسمية بها ⇒ يُملأ تلقائياً في `save`. قيدٌ بالشيكل
+    # دولارُه معروف (استحقاق الشحن، دفعة صندوق FIFO، الفاتورة الدولية، الأرشيف) ⇒
+    # يمرّره المسار صراحةً عبر `post_journal`. NULL = سطرٌ بعملة الأساس بلا مبلغٍ أجنبيّ.
+    amount_currency = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True, db_column='AmountCurrency',
+        help_text='المبلغ بعملة السطر الأجنبية، موقَّعاً: موجبٌ مدين وسالبٌ دائن. NULL = سطرٌ بعملة الأساس.',
+    )
+    currency_code = models.CharField(
+        max_length=3, null=True, blank=True, db_column='CurrencyCode',
+        help_text="رمز عملة amount_currency ('USD'). NULL مع amount_currency.",
+    )
+
     class Meta:
         db_table = 'journal_lines'
         managed = True
@@ -234,13 +249,17 @@ class JournalLine(models.Model):
 
         from django.core.exceptions import ValidationError
 
+        foreign_code = None
         if self.journal_id:
             if self._state.adding or not self._meta.get_field("journal").is_cached(self):
-                jr = JournalHeader.objects.filter(pk=self.journal_id).values_list(
-                    "exchange_rate", flat=True
-                ).first()
+                jr, code, is_base = JournalHeader.objects.filter(pk=self.journal_id).values_list(
+                    "exchange_rate", "currency__Code", "currency__IsBaseCurrency",
+                ).first() or (None, None, None)
             else:
+                currency = self.journal.currency
                 jr = self.journal.exchange_rate
+                code = currency.Code if currency is not None else None
+                is_base = currency.IsBaseCurrency if currency is not None else None
             if jr is None:
                 raise ValidationError(
                     f"تعذّر تحديد سعر صرف القيد للسطر (journal_id={self.journal_id}); "
@@ -251,11 +270,21 @@ class JournalLine(models.Model):
                 raise ValidationError(
                     f"سعر صرف القيد غير صالح ({rate}) للقيد journal_id={self.journal_id}."
                 )
+            # سعرٌ غير 1 شرطٌ ثانٍ: مسارٌ بلا عملة أساسٍ معرَّفة يمرّر الدولار عملةً
+            # للقيد وأسطرُه بالشيكل بسعر 1 — فعملة الرأس وحدها لا تكفي دليلاً.
+            if code and not is_base and rate != 1:
+                foreign_code = code.upper()[:3]
         else:
             rate = Decimal("1")
 
         self.base_debit = (Decimal(str(self.debit or 0)) * rate).quantize(Decimal("0.01"))
         self.base_credit = (Decimal(str(self.credit or 0)) * rate).quantize(Decimal("0.01"))
+        if foreign_code:
+            # الاسميّ هو المبلغ الأجنبيّ نفسه — مصدرٌ لا يختلف عنه.
+            self.amount_currency = (
+                Decimal(str(self.debit or 0)) - Decimal(str(self.credit or 0))
+            ).quantize(Decimal("0.01"))
+            self.currency_code = foreign_code
         super().save(*args, **kwargs)
 
 

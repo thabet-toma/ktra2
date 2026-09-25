@@ -2899,10 +2899,13 @@ def _international_return_split(original_invoice, returned_value: Decimal) -> di
     vat_account_id = _resolve_vat_input_account(tenant).id
     supplier_id = original_invoice.partner_id
     lines, supplier_line = [], None
+    supplier_credit = supplier_usd = supplier_code = None
     inventory = vat = Decimal('0')
-    for account_id, partner_id, debit, credit in JournalLine.objects.filter(
+    for account_id, partner_id, debit, credit, amount_currency, currency_code in JournalLine.objects.filter(
         journal_id=original_invoice.journal_id,
-    ).order_by('id').values_list('account_id', 'partner_id', 'debit', 'credit'):
+    ).order_by('id').values_list(
+        'account_id', 'partner_id', 'debit', 'credit', 'amount_currency', 'currency_code',
+    ):
         debit, credit = Decimal(str(debit or 0)), Decimal(str(credit or 0))
         if credit > 0:
             line = {'account': account_id, 'debit': (credit * ratio).quantize(DEC),
@@ -2910,6 +2913,7 @@ def _international_return_split(original_invoice, returned_value: Decimal) -> di
             lines.append(line)
             if partner_id == supplier_id and supplier_line is None:
                 supplier_line = line
+                supplier_credit, supplier_usd, supplier_code = credit, amount_currency, currency_code
         elif account_id == vat_account_id:
             vat += debit * ratio
         else:
@@ -2925,6 +2929,12 @@ def _international_return_split(original_invoice, returned_value: Decimal) -> di
                       'partner': None})
     # التقريب على سطر المورد: مجموع المدين = مجموع الدائن بالضبط.
     supplier_line['debit'] += (inventory + vat) - sum((l['debit'] for l in lines), Decimal('0'))
+    if supplier_usd is not None and supplier_line['debit'] > 0:
+        # دولار المرتجع بنسبة شيكله من دائن الفاتورة — النسبة نفسها التي عُكس بها.
+        supplier_line['amount_currency'] = (
+            -Decimal(str(supplier_usd)) * supplier_line['debit'] / supplier_credit
+        ).quantize(DEC)
+        supplier_line['currency_code'] = supplier_code
     lines = [l for l in lines if l['debit'] > 0 or l['credit'] > 0]
     return {'lines': lines, 'supplier': supplier_line['debit'], 'inventory': inventory, 'vat': vat}
 

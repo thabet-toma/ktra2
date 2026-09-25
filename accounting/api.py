@@ -190,6 +190,11 @@ def reverse_journal(
                 partner=line.partner,
                 cost_center=line.cost_center,
                 description=(f"{prefix}{line.description or ''}")[:500],
+                # المبلغ الأجنبيّ معكوساً ولو لم تُنسخ العملة: هو حقيقةُ السطر لا
+                # عملةُ الرأس (دفعة صندوق FIFO بالشيكل دولارُها معروف).
+                amount_currency=(
+                    -line.amount_currency if line.amount_currency is not None else None),
+                currency_code=line.currency_code,
             )
             if copy_project:
                 line_kwargs["project_id"] = line.project_id

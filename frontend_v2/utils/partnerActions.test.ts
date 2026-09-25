@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  defaultStatementCurrency,
   partnerActionGroups,
   partnerKindFromType,
   partnerTypeLabel,
@@ -129,4 +130,13 @@ test("المخلّص/الوكيل/الناقل: سند صرف واسترداد �
       .flatMap((g) => g.actions.map((a) => a.key));
     assert.ok(keys.includes("purchase-invoice"));
   }
+});
+
+test('defaultStatementCurrency: dollars for a forwarder or supplier with dollar entries only', () => {
+  assert.equal(defaultStatementCurrency('FreightForwarder', ['USD']), 'USD');
+  assert.equal(defaultStatementCurrency('Supplier', ['USD']), 'USD');
+  // بلا قيود دولار: الشيكل ولو كان وكيلاً — كشفٌ بالدولار كلّه تنبيهات.
+  assert.equal(defaultStatementCurrency('FreightForwarder', []), null);
+  assert.equal(defaultStatementCurrency('CustomsBroker', ['USD']), null);
+  assert.equal(defaultStatementCurrency('Customer', ['USD']), null);
 });

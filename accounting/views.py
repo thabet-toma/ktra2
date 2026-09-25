@@ -663,6 +663,10 @@ class JournalViewSet(viewsets.ModelViewSet):
                     reference_type='JOURNAL_REVERSAL',
                     reference_id=orig.id,
                     is_posted=True,
+                    # عملة الأصل وسعره: قيدٌ بالدولار كان يُعكس بسعر 1 فيعكس
+                    # 1,000 ₪ بدل 3,240 ₪ (الاسميّ دولار × سعرٍ غائب).
+                    currency=orig.currency,
+                    exchange_rate=orig.exchange_rate,
                 )
                 for line in lines:
                     JournalLine.objects.create(
@@ -675,6 +679,9 @@ class JournalViewSet(viewsets.ModelViewSet):
                         cost_center=line.cost_center,
                         description=line.description,
                         project_id=line.project_id,
+                        amount_currency=(
+                            -line.amount_currency if line.amount_currency is not None else None),
+                        currency_code=line.currency_code,
                     )
             create_audit_log(
                 tenant=orig.tenant,

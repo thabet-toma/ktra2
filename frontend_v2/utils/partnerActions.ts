@@ -86,6 +86,19 @@ const PARTNER_TYPE_LABELS: Record<string, string> = {
   Carrier: "ناقل",
 };
 
+/**
+ * عملة كشف الحساب الافتراضية: الدولار لوكيل الشحن أو المورد متى كانت على حسابه قيودٌ
+ * بالدولار (`currencies` من ردّ الكشف) — ذمّته الحقيقية بالدولار وشيكلُها يتحرّك
+ * بالسعر. غيرهما، أو بلا قيود دولار: الشيكل. `null` = عملة الأساس.
+ */
+export function defaultStatementCurrency(
+  partnerType: string | null | undefined,
+  currencies: readonly string[],
+): 'USD' | null {
+  if (!currencies.includes('USD')) return null;
+  return partnerType === 'FreightForwarder' || partnerType === 'Supplier' ? 'USD' : null;
+}
+
 export function partnerTypeLabel(partnerType: string | null | undefined): string {
   const t = String(partnerType || "");
   return PARTNER_TYPE_LABELS[t] || t;

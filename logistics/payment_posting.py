@@ -81,8 +81,10 @@ def _archive_payment_journal(payment, *, debit_account_id, partner_id, box_accou
     amount = Decimal(str(payment.amount or 0))
     base = Currency.objects.filter(IsBaseCurrency=True).first()
     lines = [
+        # الرقم دولارٌ مسجَّلٌ بوحدة الشيكل: مبلغُه الأجنبيّ هو نفسه.
         {"account": debit_account_id, "debit": amount, "credit": Decimal("0"),
-         "partner": partner_id, "description": description},
+         "partner": partner_id, "description": description,
+         "amount_currency": amount, "currency_code": "USD"},
         {"account": box_account.id, "debit": Decimal("0"), "credit": amount,
          "description": description},
     ]
@@ -213,6 +215,10 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
                 fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
                 debit_account_id=debit_account_id, box_account_id=box_account.id,
                 partner_id=partner_id, description=description, tenant=tenant)
+            # القيد بالشيكل وسطر الذمة وحده يحمل دولار الدفعة (كشف الطرف بالدولار).
+            for line in lines:
+                if line.get("partner") == partner_id:
+                    line.update(amount_currency=foreign_amount, currency_code="USD")
             return lines, (base or usd), Decimal('1')
 
     if usd and base and usd.pk != base.pk:

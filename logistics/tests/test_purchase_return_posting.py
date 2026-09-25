@@ -219,6 +219,24 @@ def test_international_return_reverses_the_invoice_journal_in_proportion(env):
     assert ret.grand_total == Decimal("210.00")
 
 
+def test_international_return_carries_its_dollars_in_the_same_proportion(env):
+    """دائن المورد في الأصل 700 ₪ = 200$؛ مرتجعٌ يدينه 210 ₪ ⇒ 60$ بالنسبة نفسها."""
+    tenant, supplier, product, ap, inv = env
+    orig, _f, _c = _posted_international(tenant, supplier, product, ap, inv)
+    JournalLine.objects.filter(journal=orig.journal, partner=supplier).update(
+        amount_currency=Decimal("-200.00"), currency_code="USD")
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        lines=[{"product": product.id, "quantity": 3, "unit_price": 100}],
+    )
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+    line = JournalLine.objects.get(journal=ret.journal, partner=supplier)
+    assert (line.debit, line.amount_currency, line.currency_code) == (
+        Decimal("210.00"), Decimal("60.00"), "USD")
+
+
 def test_international_return_needs_the_posted_invoice(env):
     from django.core.exceptions import ValidationError
     tenant, supplier, product, ap, inv = env

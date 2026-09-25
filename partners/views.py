@@ -194,10 +194,14 @@ class PartnerViewSet(viewsets.ModelViewSet):
         # THA-128: تبويب «المال» يطلب حركات التسوية وحدها من الكشف نفسه.
         only_payments = str(
             request.query_params.get("only_payments", "")).lower() in ("1", "true", "yes")
+        # كشف بعملةٍ أجنبية (`?currency=USD`) من `amount_currency`؛ بلاه بالشيكل كما كان.
+        currency = str(request.query_params.get("currency", "")).strip().upper()
+        if currency and not (len(currency) == 3 and currency.isalpha()):
+            return Response({"error": "رمز العملة غير صالح."}, status=400)
         return Response(partner_account_statement(
             tenant_id=partner.tenant_id, partner_id=partner.id,
             is_supplier=is_supplier, limit=limit, offset=offset, ordering=ordering,
-            only_payments=only_payments))
+            only_payments=only_payments, currency=currency or None))
 
     @action(detail=True, methods=["get"], url_path="stock-movements")
     def stock_movements(self, request, pk=None):

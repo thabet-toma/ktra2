@@ -257,6 +257,76 @@ test("statement folds a payment and its reversal into one grey row; the option s
   await expect(page.getByText("7049.26")).toBeVisible();
 });
 
+test("forwarder statement opens in dollars with the FX closing row; ₪ switches back", async ({ page }) => {
+  const agent = { id: 35, name: "yoyo", partner_type: "FreightForwarder", supplier_scope: "" };
+  const row = (id: number, extra: Record<string, unknown>) => ({
+    id, journal_id: id, date: "2026-06-01", description: "", reference_id: id, balance_before: "0",
+    document_number: null, reference_kind: null, link_key: null, link_label: null, link_count: 0,
+    link_targets: [], shipment_label: null, reversal_pair_id: null, reversal_pair: null, ...extra,
+  });
+  const requested: string[] = [];
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/partners/35/")) {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(agent) });
+      return true;
+    }
+    if (url.pathname.endsWith("/partners/35/profile/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ balance: "1060.00", balance_side: "Cr", outstanding_balance: "1060.00",
+          total_sales: "0", total_purchases: "0", last_transaction_date: null }),
+      });
+      return true;
+    }
+    if (url.pathname.endsWith("/partners/35/statement/")) {
+      const currency = url.searchParams.get("currency");
+      requested.push(currency ?? "base");
+      const body = currency === "USD" ? {
+        count: 3, closing_balance: "0.00", currency: "USD", currencies: ["USD"],
+        missing_count: 1, missing_base_balance: "700.00",
+        fx: { currency: "USD", book_balance: "1060.00", currency_balance: "0.00", rate: "3.240000",
+          rate_source: "last_entry", revalued_balance: "0.00", difference: "1060.00" },
+        results: [
+          row(3, { reference_type: "SUPPLIER_PAYMENT", debit: "", credit: "", base_debit: "0.00",
+            base_credit: "700.00", currency_missing: true, running_balance: "0.00" }),
+          row(2, { reference_type: "LOGISTICS_PAYMENT", debit: "1000.00", credit: "0.00",
+            base_debit: "3240.00", base_credit: "0.00", currency_missing: false, running_balance: "0.00" }),
+          row(1, { reference_type: "SHIPMENT_FREIGHT_ACCRUAL", debit: "0.00", credit: "1000.00",
+            base_debit: "0.00", base_credit: "3600.00", currency_missing: false, running_balance: "1000.00" }),
+        ],
+      } : {
+        count: 3, closing_balance: "1060.00", currency: null, currencies: ["USD"],
+        results: [
+          row(3, { reference_type: "SUPPLIER_PAYMENT", debit: "0.00", credit: "700.00", running_balance: "1060.00" }),
+          row(2, { reference_type: "LOGISTICS_PAYMENT", debit: "3240.00", credit: "0.00", running_balance: "360.00" }),
+          row(1, { reference_type: "SHIPMENT_FREIGHT_ACCRUAL", debit: "0.00", credit: "3600.00", running_balance: "3600.00" }),
+        ],
+      };
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(body) });
+      return true;
+    }
+    return false;
+  });
+  await page.goto("/partners/35?tab=statement");
+
+  const dollars = page.getByRole("button", { name: "$", exact: true });
+  await expect(dollars).toHaveAttribute("aria-pressed", "true", { timeout: 15000 });
+  await expect(page.getByRole("columnheader", { name: "مدين (USD)" })).toBeVisible();
+  await expect(page.getByText("1000.00", { exact: true }).first()).toBeVisible();
+  const fx = page.getByTestId("statement-fx-row");
+  await expect(fx).toContainText("1,060");
+  await expect(fx).toContainText("سعر آخر قيد");
+  await expect(fx).toContainText("فرق صرف غير مقيَّد");
+  await expect(page.getByText(/1 حركة بلا مبلغ بالدولار \(صافيها 700 ₪\)/)).toBeVisible();
+  await expect(page.getByText(/بلا مبلغ بالدولار — -700/)).toBeVisible();
+  expect(requested).toContain("USD");
+
+  await page.getByRole("button", { name: "₪", exact: true }).click();
+  await expect(page.getByRole("columnheader", { name: "مدين (Dr)" })).toBeVisible();
+  await expect(page.getByText("3240.00", { exact: true })).toBeVisible();
+  await expect(fx).toHaveCount(0);
+});
+
 test("broker card: its clearances are its invoices, totalled as «إجمالي المستحقّات» and linked to the shipment", async ({ page }) => {
   await installAuthenticatedApiMocks(page, async (route, url) => {
     if (url.pathname.endsWith("/partners/83/profile/")) {
