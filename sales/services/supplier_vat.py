@@ -225,8 +225,16 @@ def allocate_supplier_payment(
 
     with transaction.atomic():
         payment = SP.objects.select_for_update().get(pk=payment.pk)
+        # والموزَّع على مستحقّات لوجستية (المخلّص/الوكيل/الناقل) من السند نفسه —
+        # وإلا وُزِّع السند مرّتين: على المستحقّات ثم على الفواتير.
+        from logistics.models import LogisticsAccrualAllocation
         already = (
             SupplierPaymentAllocation.objects.filter(payment=payment).aggregate(
+                t=Sum("amount")
+            )["t"]
+            or Decimal("0")
+        ) + (
+            LogisticsAccrualAllocation.objects.filter(payment=payment).aggregate(
                 t=Sum("amount")
             )["t"]
             or Decimal("0")

@@ -132,6 +132,22 @@ class SupplierPaymentAllocationSerializer(serializers.ModelSerializer):
                   'amount_in_invoice_currency', 'conversion_rate']
         read_only_fields = fields
 
+class LogisticsAccrualAllocationSerializer(serializers.Serializer):
+    """توزيع السند على مستحقٍّ لوجستي — للعرض وفكّ التوزيع."""
+    id = serializers.IntegerField(read_only=True)
+    amount = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    amount_base = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
+    kind = serializers.SerializerMethodField()
+    target_id = serializers.SerializerMethodField()
+
+    def get_kind(self, obj) -> str:
+        if obj.clearance_id:
+            return 'clearance'
+        return 'freight' if obj.shipment_id else 'local'
+
+    def get_target_id(self, obj) -> int:
+        return obj.clearance_id or obj.shipment_id or obj.local_shipment_id
+
 class _SupplierChequeInputSerializer(serializers.Serializer):
     """شيك صادر داخل سند الصرف — مبلغه جزء من مبلغ السند لا إضافة عليه."""
     cheque_number = serializers.CharField(max_length=50)
@@ -178,12 +194,16 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
     )
     # T-ONACC: التوزيع على فواتير الشراء + المتبقّي «على الحساب» (مرآة سند القبض).
     allocations = SupplierPaymentAllocationSerializer(many=True, read_only=True)
+    # توزيعه على مستحقّات المخلّص/وكيل الشحن/الناقل (`party_accruals`).
+    logistics_allocations = LogisticsAccrualAllocationSerializer(many=True, read_only=True)
     allocated_amount = serializers.SerializerMethodField()
     unallocated_amount = serializers.SerializerMethodField()
 
     def _allocated(self, obj) -> Decimal:
         return sum(
             (Decimal(str(a.amount)) for a in obj.allocations.all()), Decimal('0')
+        ) + sum(
+            (Decimal(str(a.amount)) for a in obj.logistics_allocations.all()), Decimal('0')
         )
 
     def get_allocated_amount(self, obj) -> str:
@@ -205,12 +225,12 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             'is_posted', 'journal',
             'notes',
             'cheques', 'attached_cheques',
-            'allocations', 'allocated_amount', 'unallocated_amount',
+            'allocations', 'logistics_allocations', 'allocated_amount', 'unallocated_amount',
             'created_at',
         ]
         read_only_fields = ['id', 'is_posted', 'journal', 'created_at',
-                            'attached_cheques',
-                            'allocations', 'allocated_amount', 'unallocated_amount']
+                            'attached_cheques', 'allocations', 'logistics_allocations',
+                            'allocated_amount', 'unallocated_amount']
 
     def validate(self, attrs):
         try:

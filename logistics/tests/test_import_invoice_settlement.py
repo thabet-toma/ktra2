@@ -316,6 +316,26 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertTrue(all(part > 0 for part in attributed), attributed)
         self.assertEqual(sum(attributed, D("0")), D("500.00"))
 
+    def test_broker_voucher_allocated_to_clearance_counts_as_clearance_paid(self):
+        """سند صرفٍ للمخلّص وُزِّع على التخليص مدفوعٌ للتخليص في 3ب — كدفعة التخليص نفسها."""
+        invoices = self._release_and_import()
+        box = Account.objects.create(
+            tenant=self.tenant, code="BOX-3B", name="صندوق", account_type="Asset", is_active=True)
+        voucher = self.client.post("/api/logistics/supplier-payments/", {
+            "partner": self.broker.id, "payment_date": "2026-07-08", "amount": "500",
+            "currency": self.ils.CurrencyID, "exchange_rate": "1", "cash_or_bank_account": box.id,
+        }, format="json", **self._auth())
+        self.assertEqual(voucher.status_code, 201, voucher.content)
+        before = sum((D(self._breakdown(inv)["components"]["clearance"]["paid"]) for inv in invoices), D("0"))
+        self.assertEqual(before, D("0.00"))
+        res = self.client.post(
+            f"/api/logistics/supplier-payments/{voucher.json()['id']}/allocate-accruals/",
+            {"allocations": [{"kind": "clearance", "id": self.clearance.id, "amount": "500"}]},
+            format="json", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        attributed = [D(self._breakdown(inv)["components"]["clearance"]["paid"]) for inv in invoices]
+        self.assertEqual(sum(attributed, D("0")), D("500.00"))
+
     def test_status_follows_all_four_costs(self):
         invoices = [self._post(inv) for inv in self._release_and_import()]
         inv = invoices[0]

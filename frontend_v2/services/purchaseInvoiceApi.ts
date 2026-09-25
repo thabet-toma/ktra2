@@ -6,6 +6,7 @@ import type { SerialEntryMode } from "../types/inventory";
 import { resolveTenantId } from "../utils/tenantContext";
 import { apiFetch } from "./restApi";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
+import type { AccrualKind, AllocatableDoc } from "../utils/voucherAllocation";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000/api";
 const BASE = `${API_BASE}/logistics/purchase-invoices`;
@@ -521,6 +522,68 @@ export const purchaseInvoiceApi = {
       body: JSON.stringify({ allocation }),
     });
     await handle(res, "deallocateSupplierPayment");
+    return res.json();
+  },
+
+  /**
+   * كل ما يُوزَّع عليه سند صرفٍ لطرف: فواتير الشراء المفتوحة + مستحقّاته اللوجستية
+   * المرحّلة (تخليص/شحن/إرسالية) — مصدرٌ واحد لصفحة السندات وكرت الطرف.
+   */
+  supplierAllocatableDocs: async (partnerId: number | string): Promise<AllocatableDoc[]> => {
+    const [invoices, accrualRes] = await Promise.all([
+      purchaseInvoiceApi.list({
+        partner: String(partnerId), is_posted: "true", page: "1", page_size: "200",
+      }) as Promise<Array<{
+        id: number; invoice_number?: string; remaining_balance?: string;
+        due_date?: string | null; invoice_date?: string | null;
+      }>>,
+      safeFetch(
+        `${API_BASE}/logistics/supplier-payments/logistics-accruals/?partner=${encodeURIComponent(String(partnerId))}`,
+        { headers: headers() },
+      ),
+    ]);
+    await handle(accrualRes, "supplierAllocatableDocs");
+    const { accruals } = (await accrualRes.json()) as {
+      accruals: Array<{ kind: AccrualKind; id: number; label: string; date: string | null; remaining: string }>;
+    };
+    return [
+      ...(invoices || [])
+        .filter((inv) => Number(inv.remaining_balance ?? 0) > 0.009)
+        .map((inv) => ({
+          id: inv.id,
+          label: inv.invoice_number || `#${inv.id}`,
+          remaining: String(inv.remaining_balance ?? "0"),
+          date: inv.due_date || inv.invoice_date || null,
+        })),
+      ...(accruals || []).map((a) => ({
+        id: a.id, label: a.label, remaining: a.remaining, date: a.date,
+        target: { kind: a.kind, id: a.id },
+      })),
+    ];
+  },
+
+  /** توزيع سند صرف مرحَّل على مستحقّات لوجستية — ربطٌ بلا قيد. */
+  allocateSupplierPaymentAccruals: async (
+    id: number,
+    allocations: Array<{ kind: AccrualKind; id: number; amount: string | number }>,
+  ): Promise<SupplierPaymentDto> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/allocate-accruals/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ allocations }),
+    });
+    await handle(res, "allocateSupplierPaymentAccruals");
+    return res.json();
+  },
+
+  /** فكّ توزيعٍ عن مستحقٍّ لوجستي — يعود المبلغ «تحت الحساب». */
+  deallocateSupplierPaymentAccrual: async (id: number, allocation: number): Promise<SupplierPaymentDto> => {
+    const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/deallocate-accrual/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ allocation }),
+    });
+    await handle(res, "deallocateSupplierPaymentAccrual");
     return res.json();
   },
 

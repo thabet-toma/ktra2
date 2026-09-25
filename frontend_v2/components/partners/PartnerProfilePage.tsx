@@ -25,7 +25,7 @@ import {
 } from '../../utils/partnerActions';
 import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
 import { NewSupplierPaymentModal } from '../sales/NewSupplierPaymentModal';
-import { VoucherAllocationModal } from '../shared/VoucherAllocationModal';
+import { VoucherAllocationModal, type AllocatableDoc } from '../shared/VoucherAllocationModal';
 import {
   listCustomerPayments,
   getAgingReport,
@@ -207,7 +207,7 @@ export const PartnerProfilePage: React.FC = () => {
   const [onAccountPayments, setOnAccountPayments] = useState<OnAccountVoucherRow[]>([]);
   const [showAllocPicker, setShowAllocPicker] = useState(false);
   const [allocTarget, setAllocTarget] = useState<OnAccountVoucherRow | null>(null);
-  const [allocDocs, setAllocDocs] = useState<Array<{ id: number; label: string; remaining: string }>>([]);
+  const [allocDocs, setAllocDocs] = useState<AllocatableDoc[]>([]);
   const [allocError, setAllocError] = useState<string | null>(null);
   const [paymentsRefreshKey, setPaymentsRefreshKey] = useState(0);
 
@@ -302,19 +302,8 @@ export const PartnerProfilePage: React.FC = () => {
     setAllocError(null);
     try {
       if (isSupplier) {
-        // فواتير الشراء المفتوحة لهذا المورد.
-        const rows = await purchaseInvoiceApi.list({
-          partner: String(id), is_posted: 'true', page: '1', page_size: '200',
-        }) as Array<{ id: number; invoice_number?: string; remaining_balance?: string }>;
-        setAllocDocs(
-          (rows || [])
-            .filter((inv) => Number(inv.remaining_balance ?? 0) > 0.009)
-            .map((inv) => ({
-              id: inv.id,
-              label: inv.invoice_number || `#${inv.id}`,
-              remaining: String(inv.remaining_balance ?? '0'),
-            })),
-        );
+        // فواتير الشراء المفتوحة + مستحقّاته اللوجستية (تخليص/شحن/إرسالية).
+        setAllocDocs(await purchaseInvoiceApi.supplierAllocatableDocs(id));
       } else {
         const rows = await getAgingReport();
         setAllocDocs(

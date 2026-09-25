@@ -23,6 +23,7 @@ from typing import Any, Dict, List, Optional
 from django.db.models import Q
 
 from logistics import landed_cost as lc
+from logistics.domain.party_accruals import allocated_base
 from logistics.models import (
     LocalShipment,
     LocalShipmentPayment,
@@ -107,6 +108,12 @@ def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[
             local_paid_total += (
                 lc._d(pay.amount) * (lc._d(pay.exchange_rate, '1') or Decimal('1'))
             ).quantize(Q2)
+        local_paid_total += allocated_base('local', list(pool))
+    # سندات صرفٍ وُزِّعت على هذه المستحقّات (`party_accruals`) مدفوعٌ لها أيضاً —
+    # بلا هذا يبقى تخليصٌ سدّده سندُ المخلّص «غير مدفوع» في 3ب.
+    freight_paid_total += allocated_base('freight', [shipment])
+    if clearance is not None:
+        clearance_paid_total += allocated_base('clearance', [clearance])
 
     fees = purchase_invoice_fees_total(invoice)
     grand = lc._d(invoice.grand_total).quantize(Q2)

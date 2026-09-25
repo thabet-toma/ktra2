@@ -547,6 +547,20 @@ def ensure_partner_account(partner):
     return partner
 
 
+def journal_lines_party_net(journal_ids, partner_id) -> Decimal:
+    """Σ(base_credit − base_debit) لأسطر طرفٍ في قيود بعينها — بالعملة الأساسية.
+
+    مصدر «المستحق/المدفوع» لمستحقّات الأطراف اللوجستية
+    (`logistics/domain/party_accruals.py`): الدفتر كما رُحِّل لا حقول المستند.
+    """
+    from django.db.models import Sum
+
+    totals = JournalLine.objects.filter(
+        journal_id__in=list(journal_ids), partner_id=partner_id,
+    ).aggregate(c=Sum('base_credit'), d=Sum('base_debit'))
+    return Decimal(str(totals['c'] or 0)) - Decimal(str(totals['d'] or 0))
+
+
 def account_has_journal_lines(account_id) -> bool:
     """هل على الحساب أيّ سطر قيد — حارس حذف الطرف (القيد قد لا يحمل وسم الطرف)."""
     return JournalLine.objects.filter(account_id=account_id).exists()

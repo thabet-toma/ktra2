@@ -103,7 +103,7 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
     def get_queryset(self):
         qs = SupplierPayment.objects.all().select_related(
             'partner', 'purchase_invoice', 'currency', 'cash_or_bank_account', 'journal',
-        ).prefetch_related('allocations__invoice').order_by('-created_at', '-id')
+        ).prefetch_related('allocations__invoice', 'logistics_allocations').order_by('-created_at', '-id')
         tenant = get_tenant(self.request)
         if not tenant:
             return qs.none()
@@ -271,6 +271,79 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         log_activity(
             action='update', entity_type='supplier_payment', entity_id=payment.id,
             entity_label=f'#{payment.id}', description='فكّ توزيع سند صرف عن فاتورة',
+            partner_ids=[payment.partner_id], request=request,
+        )
+        return Response(SupplierPaymentSerializer(payment).data)
+
+    @action(detail=False, methods=['get'], url_path='logistics-accruals')
+    def logistics_accruals(self, request):
+        """مستحقّات الطرف اللوجستية المرحّلة غير المسدّدة (FIFO بتاريخ الاستحقاق) —
+        التخليصات للمخلّص، استحقاق الشحن لوكيل الشحن، الإرساليات للناقل."""
+        from logistics.domain.party_accruals import party_open_accruals
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            partner_id = int(request.query_params.get('partner'))
+        except (TypeError, ValueError):
+            return Response({'error': 'الطرف مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'accruals': party_open_accruals(tenant.TenantID, partner_id)})
+
+    @action(detail=False, methods=['get'], url_path='suggest-fifo-accruals')
+    def suggest_fifo_accruals(self, request):
+        """اقتراح توزيع مبلغ على مستحقّات الطرف من الأقدم — مرآة `suggest-fifo-allocations`."""
+        from logistics.domain.party_accruals import suggest_accrual_fifo
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            partner_id = int(request.query_params.get('partner'))
+            amount = Decimal(str(request.query_params.get('amount') or '0'))
+        except Exception:
+            return Response({'error': 'الطرف والمبلغ مطلوبان.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'allocations': suggest_accrual_fifo(tenant.TenantID, partner_id, amount)})
+
+    @action(detail=True, methods=['post'], url_path='allocate-accruals')
+    def allocate_accruals(self, request, pk=None):
+        """توزيع سند مرحَّل على مستحقّات لوجستية — ربطٌ بلا قيد.
+
+        ``{"allocations": [{"kind": "clearance"|"freight"|"local", "id": pk, "amount": x}]}``
+        """
+        from logistics.domain.party_accruals import allocate_voucher_to_accruals
+
+        payment = self.get_object()
+        try:
+            allocate_voucher_to_accruals(payment, request.data.get('allocations') or [], user=request.user)
+        except DjangoValidationError as e:
+            return Response({'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action='update', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='توزيع سند صرف على المستحقّات',
+            partner_ids=[payment.partner_id], request=request,
+        )
+        return Response(SupplierPaymentSerializer(payment).data)
+
+    @action(detail=True, methods=['post'], url_path='deallocate-accrual')
+    def deallocate_accrual(self, request, pk=None):
+        """فكّ توزيعٍ واحد عن مستحقٍّ لوجستي — المبلغ يعود «تحت الحساب»."""
+        from logistics.domain.party_accruals import deallocate_voucher_accrual
+
+        payment = self.get_object()
+        try:
+            allocation_id = int(request.data.get('allocation'))
+        except (TypeError, ValueError):
+            raise NotFound('التوزيع غير موجود على هذا السند.')
+        try:
+            deallocate_voucher_accrual(payment, allocation_id, user=request.user)
+        except DjangoValidationError as e:
+            return Response({'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        payment.refresh_from_db()
+        log_activity(
+            action='update', entity_type='supplier_payment', entity_id=payment.id,
+            entity_label=f'#{payment.id}', description='فكّ توزيع سند صرف عن مستحق',
             partner_ids=[payment.partner_id], request=request,
         )
         return Response(SupplierPaymentSerializer(payment).data)

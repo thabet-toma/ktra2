@@ -2578,5 +2578,58 @@ class PurchaseSettings(models.Model):
         return f"PurchaseSettings(tenant={self.tenant_id})"
 
 
+class LogisticsAccrualAllocation(models.Model):
+    """توزيع سند صرف على مستحقٍّ لوجستي مرحَّل — مرآة `sales.SupplierPaymentAllocation`.
+
+    السند (Dr ذمّة الطرف / Cr صندوق) يُوزَّع على استحقاق تخليصٍ للمخلّص، أو
+    استحقاق شحنٍ لوكيل الشحن، أو إرساليةٍ محلية للناقل. ربطٌ بلا قيد: الدفتر لا
+    يتغيّر، والمتبقّي يُحسب من `logistics/domain/party_accruals.py`. سندٌ بلا
+    توزيع = «دفعة تحت الحساب». يُحتسب التوزيع ما دام سنده مرحَّلاً (كتوزيع الفواتير).
+    """
+
+    id = models.AutoField(primary_key=True, db_column='AccrualAllocationID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    payment = models.ForeignKey(
+        'sales.SupplierPayment', on_delete=models.CASCADE,
+        related_name='logistics_allocations', db_column='SupplierPaymentID',
+    )
+    clearance = models.ForeignKey(
+        'LogisticsClearance', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='voucher_allocations', db_column='ClearanceID',
+    )
+    shipment = models.ForeignKey(
+        'LogisticsShipment', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='freight_voucher_allocations', db_column='ShipmentID',
+        help_text='استحقاق الشحن الدولي (freight_journal) لوكيل الشحن',
+    )
+    local_shipment = models.ForeignKey(
+        'LocalShipment', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='voucher_allocations', db_column='LocalShipmentID',
+    )
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column='Amount', help_text='بعملة السند')
+    amount_base = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column='AmountBase',
+        help_text='بالعملة الأساسية = المبلغ × سعر صرف السند — يُطرح من متبقّي المستحق')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'logistics_accrual_allocations'
+        constraints = [
+            models.CheckConstraint(
+                name='accrual_allocation_one_target',
+                condition=(
+                    models.Q(clearance__isnull=False, shipment__isnull=True, local_shipment__isnull=True)
+                    | models.Q(clearance__isnull=True, shipment__isnull=False, local_shipment__isnull=True)
+                    | models.Q(clearance__isnull=True, shipment__isnull=True, local_shipment__isnull=False)
+                ),
+            ),
+        ]
+        indexes = [models.Index(fields=['tenant', 'payment'], name='accr_alloc_tenant_pay_idx')]
+
+    def __str__(self):
+        return f"AccrualAllocation(payment={self.payment_id}, amount={self.amount})"
+
+
 # Automatically connect signals for the logistics app
 import logistics.signals

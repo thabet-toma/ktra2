@@ -29,7 +29,7 @@ import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import { usePermissions } from "../../contexts/PermissionsContext";
-import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
+import { VoucherAllocationModal, type AllocatableDoc } from "../shared/VoucherAllocationModal";
 import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
 
 type Partner = { id: number; name: string };
@@ -79,7 +79,7 @@ export const SupplierPaymentsPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   // T-ONACC: السند المُراد توزيعه على فواتير الشراء + الفواتير المفتوحة لمورده.
   const [allocating, setAllocating] = useState<SupplierPaymentRow | null>(null);
-  const [allocDocs, setAllocDocs] = useState<Array<{ id: number; label: string; remaining: string }>>([]);
+  const [allocDocs, setAllocDocs] = useState<AllocatableDoc[]>([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -132,23 +132,11 @@ export const SupplierPaymentsPage: React.FC = () => {
   const openAllocation = async (row: SupplierPaymentRow) => {
     setErr(null);
     try {
-      const rows = await purchaseInvoiceApi.list({
-        partner: String(row.partner),
-        is_posted: "true",
-        page: "1", page_size: "200",
-      }) as Array<{ id: number; invoice_number?: string; remaining_balance?: string }>;
-      setAllocDocs(
-        (rows || [])
-          .filter((inv) => Number(inv.remaining_balance ?? 0) > 0.009)
-          .map((inv) => ({
-            id: inv.id,
-            label: inv.invoice_number || `#${inv.id}`,
-            remaining: String(inv.remaining_balance ?? "0"),
-          })),
-      );
+      // فواتير الشراء المفتوحة + مستحقّات الطرف اللوجستية (تخليص/شحن/إرسالية).
+      setAllocDocs(await purchaseInvoiceApi.supplierAllocatableDocs(row.partner));
       setAllocating(row);
     } catch (e: unknown) {
-      setErr(humanizeThrown(e, "تعذّر جلب فواتير الشراء المفتوحة"));
+      setErr(humanizeThrown(e, "تعذّر جلب المستندات المفتوحة"));
     }
   };
 
@@ -322,7 +310,7 @@ export const SupplierPaymentsPage: React.FC = () => {
           <button
             type="button"
             className="ktra-toolbtn"
-            title="توزيع على فواتير الشراء"
+            title="توزيع على المستندات (فواتير ومستحقّات)"
             disabled={unallocatedOf(r) <= 0.009}
             onClick={() => void openAllocation(r)}
           >

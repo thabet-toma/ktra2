@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **896**
+عدد النقاط: **900**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -503,9 +503,13 @@
 | `/api/logistics/shipments/{pk}/unpost-freight-accrual/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/unpost/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/supplier-payments/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/logistics-accruals/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/suggest-fifo-accruals/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/suggest-fifo-allocations/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/{pk}/allocate-accruals/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/allocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/{pk}/deallocate-accrual/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/deallocate/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/post/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/{pk}/unpost/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
