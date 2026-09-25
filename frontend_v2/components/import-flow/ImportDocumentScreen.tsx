@@ -5,8 +5,8 @@ import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus } from "@/services/clearanceApi";
-import { overpaymentExcess, type AccrualKind } from "@/utils/voucherAllocation";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus, getClearance } from "@/services/clearanceApi";
+import { docSettlement, overpaymentExcess, type AccrualKind } from "@/utils/voucherAllocation";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
@@ -27,6 +27,25 @@ import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, ty
 import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
+/**
+ * مدفوع/متبقّي التخليص: بعد ترحيل استحقاقه من الخادم (يشمل سندات المخلّص الموزَّعة
+ * عليه)، وقبله بنود النموذج ناقص دفعاته المرحّلة. مصدرٌ واحد للحقل والملخّصات والزر.
+ */
+function clearanceSettlementOf(
+  clearance: ClearanceRow | null,
+  form: ClearanceRow | null,
+  payments: ClearancePaymentRow[],
+) {
+  const due = (form?.lines || []).reduce(
+    (sum, line) => sum + Math.max(0, (Number(line.debit) || 0) - (Number(line.credit) || 0)),
+    0,
+  );
+  const paid = payments
+    .filter((p) => p.payment_purpose !== "shipping" && p.is_posted)
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+  return { due, ...docSettlement(Boolean(clearance?.journal), clearance, { due, paid }) };
+}
+
 /** ذيلُ رسالة النجاح حين فصل الخادم زائد الدفعة سنداً «تحت الحساب». */
 const withOnAccountNote = (msg: string, voucher?: { id: number; amount: string } | null) =>
   voucher ? `${msg} وفُصل ${fmt(voucher.amount)} ₪ سند صرف #${voucher.id} تحت الحساب.` : msg;
@@ -360,8 +379,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // لا سعر افتراضي: المستخدم يكتبه (3.6 المعبّأة سلفاً تُرحَّل حين لا يعدّلها أحد).
   const [freightAccrualRate, setFreightAccrualRate] = useState("");
   const [agentPayDate, setAgentPayDate] = useState(() => new Date().toISOString().slice(0, 10));
-  const [agentPayConfirmed, setAgentPayConfirmed] = useState(true);
   const [agentPayNotes, setAgentPayNotes] = useState("");
+  // صندوق دفعة الوكيل مستقلٌّ عن صندوق المخلّص: الدفعة بالدولار فالافتراضي صندوقٌ بالدولار.
+  const [agentPayBoxId, setAgentPayBoxId] = useState("");
   // الناقلون المحليون (بدل إدخال «رقم الناقل» يدوياً)
   const [carriers, setCarriers] = useState<Array<{ id: number; name: string; partner_type?: string }>>([]);
   // إنشاء سريع لوكيل شحن / مخلص جمركي — الحقلان كانا readOnly بلا أي مسار إنشاء (ج7)
@@ -1180,8 +1200,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const reloadPayments = useCallback(async () => {
     if (!clearance) return;
     try {
-      const pays = await listClearancePayments(clearance.id);
+      // والتخليص نفسه: متبقّيه من الخادم يتغيّر بالدفعة (وبفصل زائدها).
+      const [pays, row] = await Promise.all([listClearancePayments(clearance.id), getClearance(clearance.id)]);
       setClearancePayments(pays);
+      setClearance(row);
     } catch { /* ignore */ }
   }, [clearance]);
 
@@ -1230,17 +1252,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }, [clearance, payAmount, payDate, payNotes, payCashBoxId, reloadPayments, toast, confirmOverpaymentSplit]);
 
   const openClearancePayment = useCallback(() => {
-    const total = (clearanceForm?.lines || []).reduce(
-      (sum, line) => sum + Math.max(0, (Number(line.debit) || 0) - (Number(line.credit) || 0)),
-      0,
-    );
-    const paid = clearancePayments
-      .filter((payment) => payment.payment_purpose !== "shipping" && payment.is_posted)
-      .reduce((sum, payment) => sum + (Number(payment.amount) || 0), 0);
-    setPayAmount(String(Math.max(0, total - paid)));
+    setPayAmount(String(clearanceSettlementOf(clearance, clearanceForm, clearancePayments).remaining));
     setShowPaymentForm(true);
     setActiveTab("payments");
-  }, [clearanceForm, clearancePayments]);
+  }, [clearance, clearanceForm, clearancePayments]);
 
   const handlePostClearance = useCallback(async () => {
     if (!clearanceForm?.id) return;
@@ -1277,7 +1292,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   }, [clearance, shipment, loadAll, confirm, toast]);
 
   // ── دفعات وكيل الشحن (LogisticsPayment على الشحنة، بدون صفقة) ──
-  // كانت بلا أي واجهة رغم أن استيراد الفاتورة الدولية مشروط باكتمالها بالدولار.
+  // كبسة واحدة كالمخلّص والناقل: الخادم ينشئ الدفعة ويرحّلها معاً. كانت تُحفظ بـPATCH
+  // قائمة الدفعات «مؤكّدة» بلا قيد، وزرّ الترحيل بلا مستدعٍ (9 دفعات على الإنتاج).
+  const openAgentPayment = useCallback((remainingUsd: number) => {
+    setShowAgentPayForm(true);
+    setAgentPayAmount(remainingUsd > 0 ? String(Math.round(remainingUsd * 100) / 100) : "");
+    const live = cashBoxes.filter((b) => b.is_active !== false);
+    const usdBox = live.find((b) => String(b.currency_code || "").toUpperCase() === "USD");
+    setAgentPayBoxId((current) => current || usdBox?.external_id || payCashBoxId);
+  }, [cashBoxes, payCashBoxId]);
+
   const handleAddAgentPayment = useCallback(async () => {
     if (!shipment) return;
     const amt = Number(agentPayAmount);
@@ -1291,62 +1315,33 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError("أدخل سعر الصرف (₪ لكل $) للدفعة — أكبر من صفر.");
       return;
     }
+    if (!agentPayBoxId) {
+      setError("اختر الصندوق الذي خرجت منه الدفعة.");
+      return;
+    }
     setSaving(true); setError(null);
     try {
-      // المطابقة في الخادم تتم بـ payment_number — نمرّر الدفعات القائمة كما هي + الجديدة
-      const existing = (shipment.payments || []).map((p, idx) => ({
-        id: p.id,
-        payment_number: Number(p.payment_number) > 0 ? Number(p.payment_number) : idx + 1,
-        title: p.title || `Payment ${idx + 1}`,
-        amount: Number(p.amount || 0),
-        transfer_date: p.transfer_date ? String(p.transfer_date).slice(0, 10) : null,
-        due_date: (p.due_date || p.transfer_date) ? String(p.due_date || p.transfer_date).slice(0, 10) : null,
-        status: p.status || "Pending",
-        notes: p.notes || "",
-        confirmed_by_supplier: Boolean(p.confirmed_by_supplier),
-        // القائمة تُعاد كاملةً: دفعةٌ بلا سعر تبقى بلا سعر (كان يكتب 3.6 فوقها).
-        usd_to_ils: usdRateForPayload(p.usd_to_ils),
-        transfer_cost: Number(p.transfer_cost || 0),
-      }));
-      const nextNo = existing.reduce((m, p) => Math.max(m, p.payment_number), 0) + 1;
-      const rows = [
-        ...existing,
-        {
-          payment_number: nextNo,
-          title: `دفعة شحن ${nextNo}`,
-          amount: amt,
-          transfer_date: agentPayDate || null,
-          due_date: agentPayDate || null,
-          status: agentPayConfirmed ? "Confirmed" : "Pending",
-          notes: agentPayNotes || "",
-          confirmed_by_supplier: agentPayConfirmed,
-          usd_to_ils: rate,
-          transfer_cost: 0,
-        },
-      ];
-      const patched = await apiPatchObject<ShipmentApiRow>(
-        `logistics/shipments/${shipment.id}/`,
-        { payments: rows },
-        { tenantId: tid() },
-      );
-      setShipment(patched);
-      setShipmentForm({ ...patched });
-      await syncShipmentInvoiceCosts(patched.id);
+      const res = await shipmentsService.payAgentFromCashBox(shipment.id, {
+        amount: amt,
+        usd_to_ils: rate,
+        cash_box_external_id: agentPayBoxId,
+        payment_date: agentPayDate || undefined,
+        notes: agentPayNotes || undefined,
+      });
+      const fresh = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${shipment.id}/`, { tenantId: tid() });
+      setShipment(fresh);
+      setShipmentForm({ ...fresh });
+      await syncShipmentInvoiceCosts(fresh.id);
       setShowAgentPayForm(false);
       setAgentPayAmount("");
       setAgentPayNotes("");
-      toast(
-        agentPayConfirmed
-          ? "سُجّلت دفعة وكيل الشحن (مؤكّدة) — تُحتسب ضمن شرط الاستيراد."
-          : "سُجّلت الدفعة كمعلّقة — لن تُحتسب لشرط الاستيراد حتى تأكيدها.",
-        "success",
-      );
+      toast(`سُجّلت دفعة وكيل الشحن ورُحّلت — قيد #${res.journal_id}.`, "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayConfirmed, agentPayNotes, toast, syncShipmentInvoiceCosts]);
+  }, [shipment, agentPayAmount, agentPayRate, agentPayDate, agentPayNotes, agentPayBoxId, toast, syncShipmentInvoiceCosts]);
 
   // ── استحقاق شحن الوكيل: قيد مستقل تماماً عن دفعاته ──
   const refetchShipment = useCallback(async (shipmentId: number) => {
@@ -1492,16 +1487,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const paidShipping = clearancePayments
     .filter((p) => p.payment_purpose === "shipping" && p.is_posted)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const paidClearance = clearancePayments
-    .filter((p) => p.payment_purpose !== "shipping" && p.is_posted)
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
-  const clearanceCostTotal = (clearanceForm?.lines || []).reduce(
-    (sum, line) => sum + Math.max(0, (Number(line.debit) || 0) - (Number(line.credit) || 0)),
-    0,
-  );
-  const clearanceRemaining = Math.max(0, clearanceCostTotal - paidClearance);
-  /** الفائض عن استحقاق التخليص = دفعة مقدمة لدى المخلّص (يصبح مديناً لنا) */
-  const clearanceAdvance = Math.max(0, paidClearance - clearanceCostTotal);
+  const {
+    due: clearanceCostTotal,
+    paid: paidClearance,
+    remaining: clearanceRemaining,
+    /** الفائض عن استحقاق التخليص = دفعة مقدمة لدى المخلّص (يصبح مديناً لنا) */
+    advance: clearanceAdvance,
+  } = clearanceSettlementOf(clearance, clearanceForm, clearancePayments);
   const guidance = getImportJourneyGuidance({
     shipmentSaved: Boolean(s.id),
     invoiceEligible: s.shipment_type !== "transport",
@@ -2172,11 +2164,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       accrueLabel: "أثبت استحقاق الشحن",
       onAccrue: freightTotalUsd > 0 ? () => void handlePostFreightAccrual() : undefined,
       onPay: freightTotalUsd > 0
-        ? () => {
-            setShowAgentPayForm(true);
-            const remaining = Math.max(0, freightTotalUsd - freightPaidUsd);
-            setAgentPayAmount(remaining > 0 ? String(Math.round(remaining * 100) / 100) : "");
-          }
+        ? () => openAgentPayment(Math.max(0, freightTotalUsd - freightPaidUsd))
         : undefined,
     },
     ...(clearance ? [{
@@ -2277,12 +2265,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           type="button"
           className="ktra-toolbtn"
           onClick={() => {
-            const opening = !showAgentPayForm;
-            setShowAgentPayForm(opening);
-            if (opening) {
-              const remaining = Math.max(0, freightTotalUsd - freightPaidUsd);
-              setAgentPayAmount(remaining > 0 ? String(Math.round(remaining * 100) / 100) : "");
-            }
+            if (showAgentPayForm) setShowAgentPayForm(false);
+            else openAgentPayment(Math.max(0, freightTotalUsd - freightPaidUsd));
           }}
           disabled={!shipment || saving}
         >
@@ -2318,19 +2302,21 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: "2px 8px", marginBottom: 4 }}>
             {fld("المبلغ (USD)", <input className="ktra-input" type="number" step="0.01" value={agentPayAmount} onChange={(e) => setAgentPayAmount(e.target.value)} />)}
             {fld("سعر الصرف (₪/$)", <input className="ktra-input" type="number" step="0.001" value={agentPayRate} onChange={(e) => setAgentPayRate(e.target.value)} placeholder="أدخل السعر" required />)}
+            {fld("الصندوق", <select className="ktra-input" value={agentPayBoxId} onChange={(e) => setAgentPayBoxId(e.target.value)}>
+              <option value="">— اختر —</option>
+              {cashBoxes.map((cb) => (
+                <option key={cb.external_id} value={cb.external_id}>{cb.name} ({cb.currency_code})</option>
+              ))}
+            </select>)}
             {fld("تاريخ التحويل", <input className="ktra-input" type="date" value={agentPayDate} onChange={(e) => setAgentPayDate(e.target.value)} />)}
             {fld("ملاحظات", <input className="ktra-input" value={agentPayNotes} onChange={(e) => setAgentPayNotes(e.target.value)} />)}
-            <label className="ktra-field" style={{ justifyContent: "end" }}>
-              <span className="ktra-field-label">مؤكّدة (دُفعت فعلاً)</span>
-              <input type="checkbox" checked={agentPayConfirmed} onChange={(e) => setAgentPayConfirmed(e.target.checked)} style={{ width: 16, height: 16 }} />
-            </label>
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button type="button" className="ktra-toolbtn" onClick={() => void handleAddAgentPayment()} disabled={saving || !agentPayAmount || Number(agentPayAmount) <= 0}>تسجيل دفعة الشحن</button>
+            <button type="button" className="ktra-toolbtn" onClick={() => void handleAddAgentPayment()} disabled={saving || !agentPayAmount || Number(agentPayAmount) <= 0 || !agentPayRate || !agentPayBoxId}>دفع للوكيل</button>
             <button type="button" className="ktra-toolbtn" onClick={() => setShowAgentPayForm(false)}>إلغاء</button>
           </div>
           <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", marginTop: 4 }}>
-            الدفع للوكيل مستقل عن الاستحقاق ولا يشترطه الاستيراد. يجوز الدفع بأكثر من تكلفة الشحن — الفائض دفعة مقدمة تُسوّى على شحنة لاحقة.
+            «دفع للوكيل» يسجّل الدفعة ويرحّلها فوراً: مدين ذمّة الوكيل / دائن الصندوق بالمبلغ × السعر. الدفع مستقل عن الاستحقاق ولا يشترطه الاستيراد، ويجوز بأكثر من تكلفة الشحن — الفائض دفعة مقدمة تُسوّى على شحنة لاحقة.
           </p>
         </div>
       )}

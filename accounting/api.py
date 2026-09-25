@@ -561,6 +561,16 @@ def journal_lines_party_net(journal_ids, partner_id) -> Decimal:
     return Decimal(str(totals['c'] or 0)) - Decimal(str(totals['d'] or 0))
 
 
+def cash_box_ledger_account(tenant_id, external_id):
+    """حساب الصندوق المربوط بـ`external_id` في الشركة، أو None — لأوامر خارج accounting."""
+    from .models import CashBoxLedgerAccount
+
+    link = CashBoxLedgerAccount.objects.filter(
+        tenant_id=tenant_id, external_id=str(external_id or '')[:128],
+    ).select_related('account').first()
+    return link.account if link and link.account_id else None
+
+
 def account_has_journal_lines(account_id) -> bool:
     """هل على الحساب أيّ سطر قيد — حارس حذف الطرف (القيد قد لا يحمل وسم الطرف)."""
     return JournalLine.objects.filter(account_id=account_id).exists()

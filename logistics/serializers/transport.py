@@ -145,6 +145,7 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
     )
     amount_paid = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
+    advance_balance = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
     payments = serializers.SerializerMethodField()
 
@@ -169,7 +170,7 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
             'notes',
             'is_posted', 'journal',
             'purchase_invoice', 'purchase_invoice_number',
-            'amount_paid', 'remaining_balance', 'payment_status', 'payments',
+            'amount_paid', 'remaining_balance', 'advance_balance', 'payment_status', 'payments',
             'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -196,20 +197,29 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
             Decimal('0'),
         ).quantize(Decimal('0.01'))
 
+    def _settlement(self, obj) -> dict:
+        """مرآة التخليص (`party_accruals.document_settlement`) بعملة الإرسالية."""
+        from logistics.domain.party_accruals import document_settlement
+
+        cache = self.__dict__.setdefault('_settlement_cache', {})
+        if obj.pk not in cache:
+            cache[obj.pk] = document_settlement(
+                'local', obj, draft_due=obj.amount, draft_paid=self._paid_total(obj),
+                rate=obj.exchange_rate,
+            )
+        return cache[obj.pk]
+
     def get_amount_paid(self, obj):
-        return str(self._paid_total(obj))
+        return self._settlement(obj)['amount_paid']
 
     def get_remaining_balance(self, obj):
-        return str(max(Decimal('0'), Decimal(str(obj.amount or 0)) - self._paid_total(obj)))
+        return self._settlement(obj)['remaining_balance']
+
+    def get_advance_balance(self, obj):
+        return self._settlement(obj)['advance_balance']
 
     def get_payment_status(self, obj):
-        amount = Decimal(str(obj.amount or 0))
-        paid = self._paid_total(obj)
-        if amount > 0 and paid >= amount - Decimal('0.01'):
-            return 'paid'
-        if paid > 0:
-            return 'partially_paid'
-        return 'unpaid'
+        return self._settlement(obj)['payment_status']
 
     def get_payments(self, obj):
         return LocalShipmentPaymentSerializer(obj.payments.all(), many=True).data

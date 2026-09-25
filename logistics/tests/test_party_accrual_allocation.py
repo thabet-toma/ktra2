@@ -207,3 +207,21 @@ class PartyAccrualAllocationTest(APITestCase):
         carrier_voucher = self._voucher(self.carrier, 450)
         self.assertEqual(self._allocate(carrier_voucher, [{"kind": "local", "id": self.local.pk, "amount": "450"}]).status_code, 200)
         self.assertEqual(self._remaining("local", self.local), D("0.00"))
+
+    def test_document_screens_read_remaining_from_the_same_source(self):
+        """شاشة الاستيراد تقرأ `remaining_balance` من مسلسل التخليص/الإرسالية — كان
+        بنوده ناقص دفعاته فيغفل سند المخلّص الموزَّع عليه ويعرض متبقّياً أكبر من الحقيقي."""
+        voucher = self._voucher(self.broker, 500)
+        self.assertEqual(self._allocate(voucher, [{"kind": "clearance", "id": self.old.pk, "amount": "500"}]).status_code, 200)
+        row = self.client.get(f"/api/logistics/clearances/{self.old.pk}/", **self.h).data
+        self.assertEqual((D(row["amount_paid"]), D(row["remaining_balance"])), (D("500.00"), D("100.00")))
+        self.assertEqual(row["payment_status"], "partially_paid")
+
+        # قبل ترحيل الاستحقاق: تقدير الإرسالية (مبلغها ناقص دفعاتها) — لا قيد يُقرأ.
+        draft = self.client.get(f"/api/logistics/local-shipments/{self.local.pk}/", **self.h).data
+        self.assertEqual(D(draft["remaining_balance"]), D("450.00"))
+        post_local_shipment_accrual(LocalShipment.objects.get(pk=self.local.pk))
+        carrier_voucher = self._voucher(self.carrier, 450)
+        self.assertEqual(self._allocate(carrier_voucher, [{"kind": "local", "id": self.local.pk, "amount": "450"}]).status_code, 200)
+        posted = self.client.get(f"/api/logistics/local-shipments/{self.local.pk}/", **self.h).data
+        self.assertEqual((D(posted["remaining_balance"]), posted["payment_status"]), (D("0.00"), "paid"))

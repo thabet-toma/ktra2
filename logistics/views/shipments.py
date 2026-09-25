@@ -39,10 +39,8 @@ from logistics.serializers import (
 )
 from accounting.models import Account, TaxRate
 from inventory.models import StockMovement
-from partners.models import Partner
 from tenants.models import Tenant
 from accounting.models import JournalHeader, JournalLine, CashBoxLedgerAccount
-from accounting import api as accounting_api
 from accounting.services import resolve_cash_account
 from accounting.services import (
     annotate_partner_posted_balance,
@@ -482,22 +480,6 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 {'error': 'الشحنة لا تملك وكيل شحن محدد'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        # نفس إشارة الشريك: إنشاء حساب دائن تلقائياً تحت 2101/2102 إن أمكن
-        accounting_api.ensure_partner_account(shipment.shipping_agent)
-        agent = Partner.objects.select_related("linked_account").get(
-            pk=shipment.shipping_agent_id
-        )
-        if not agent.linked_account:
-            return Response(
-                {
-                    'error': (
-                        "تعذّر ربط وكيل الشحن بحساب محاسبي تلقائياً. "
-                        "تحقق من شجرة الحسابات (حسابات أب 2101 أو 2102) أو من مجموعة الشريك في المحاسبة، "
-                        "أو عيّن نوع الشريك «FreightForwarder» لوكيل الشحن."
-                    ),
-                },
-                status=status.HTTP_400_BAD_REQUEST,
-            )
 
         ext_in = (request.data.get('cash_box_external_id') or '').strip()
         if ext_in:
@@ -549,68 +531,15 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        from logistics.payment_posting_cap import shipment_agent_posting_cap_check
+        from logistics.payment_posting import post_shipment_agent_payment
 
         try:
-            with transaction.atomic():
-                ship_locked = (
-                    LogisticsShipment.objects.select_related(
-                        'shipping_agent', 'shipping_agent__linked_account', 'tenant'
-                    )
-                    .select_for_update()
-                    .get(pk=shipment.pk)
-                )
-                payment_locked = LogisticsPayment.objects.select_for_update().get(
-                    pk=payment.id,
-                    shipment=ship_locked,
-                    deal__isnull=True,
-                )
-                if payment_locked.is_posted:
-                    return Response(
-                        {'error': 'هذه الدفعة مرحلة بالفعل'},
-                        status=status.HTTP_400_BAD_REQUEST,
-                    )
-
-                ok_cap, cap_err = shipment_agent_posting_cap_check(
-                    ship_locked, payment_locked.amount
-                )
-                if not ok_cap:
-                    return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
-
-                payment_date = payment_locked.transfer_date or timezone.localdate()
-
-                ag = ship_locked.shipping_agent
-                _adesc = f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number}"
-                # نفس بنّاء قيد دفعة الصفقة (صندوق الدولار FIFO أو الدولار الاسمي بسعره).
-                from logistics.payment_posting import build_usd_payment_journal
-                lines_data, journal_currency, journal_rate = build_usd_payment_journal(
-                    payment_locked, debit_account_id=ag.linked_account_id, partner_id=ag.id,
-                    box_account=bank_account, tenant=ship_locked.tenant, description=_adesc)
-
-                journal = post_journal(
-                    tenant_id=ship_locked.tenant_id,
-                    transaction_date=payment_date,
-                    reference_type='LOGISTICS_PAYMENT',
-                    reference_id=payment_locked.id,
-                    description=(
-                        f"دفعة {payment_locked.title} | شحنة: {ship_locked.shipment_number} "
-                        f"| وكيل شحن: {ag.name}"
-                    ),
-                    lines_data=lines_data,
-                    currency=journal_currency,
-                    exchange_rate=journal_rate,
-                )
-
-                payment_locked.is_posted = True
-                payment_locked.journal = journal
-                payment_locked.bank_account = bank_account
-                payment_locked.save()
-
+            journal = post_shipment_agent_payment(payment, box_account=bank_account, user=request.user)
             return Response(
                 {
                     'status': 'تم ترحيل دفعة وكيل الشحن بنجاح',
                     'journal_id': journal.id,
-                    'payment_id': payment_locked.id,
+                    'payment_id': payment.id,
                 },
                 status=status.HTTP_200_OK,
             )
@@ -621,6 +550,79 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         except Exception:
             logger.exception("shipment post_agent_payment failed pk=%s", pk)
             return Response({'error': 'حدث خطأ غير متوقع أثناء ترحيل دفعة الوكيل.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'])
+    def pay_agent_from_cashbox(self, request, pk=None):
+        """دفعة وكيل الشحن من الصندوق بكبسة واحدة — مرآة `pay_from_cashbox` للتخليص والنقل.
+
+        تُنشأ مؤكّدةً وتُرحَّل (Dr ذمّة الوكيل / Cr الصندوق، `post_shipment_agent_payment`)
+        في معاملة واحدة: فشلُ الترحيل لا يترك دفعة. كانت الشاشة تحفظها بـPATCH قائمة
+        الدفعات «مؤكّدة» بلا قيد، وزرّ الترحيل بلا مستدعٍ منذ f1afc66b (9 على الإنتاج).
+        المدخلات: amount ($)، usd_to_ils (إلزامي)، cash_box_external_id (إلزامي)،
+        payment_date، notes.
+        """
+        from django.db.models import Max
+        from logistics.accruals import DELETED_SHIPMENT_MESSAGE
+        from logistics.payment_posting import USD_RATE_REQUIRED_MESSAGE, post_shipment_agent_payment
+
+        shipment = self.get_object()
+        if shipment.is_deleted:
+            return Response({'error': DELETED_SHIPMENT_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+        if not shipment.shipping_agent_id:
+            return Response({'error': 'حدّد وكيل الشحن على الشحنة قبل الدفع له.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            amount = Decimal(str(request.data.get('amount') or '0')).quantize(Decimal('0.01'))
+        except Exception:
+            amount = Decimal('0')
+        if amount <= 0:
+            return Response({'error': 'المبلغ يجب أن يكون أكبر من صفر.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            rate = Decimal(str(request.data.get('usd_to_ils') or '0'))
+        except Exception:
+            rate = Decimal('0')
+        if rate <= 0:
+            return Response({'error': USD_RATE_REQUIRED_MESSAGE}, status=status.HTTP_400_BAD_REQUEST)
+        ext = str(request.data.get('cash_box_external_id') or '').strip()[:128]
+        link = CashBoxLedgerAccount.objects.filter(
+            tenant=shipment.tenant, external_id=ext,
+        ).select_related('account').first() if ext else None
+        if not link or not link.account_id:
+            return Response({'error': 'اختر صندوقاً مربوطاً بحساب محاسبي.'}, status=status.HTTP_400_BAD_REQUEST)
+        raw_date = request.data.get('payment_date')
+        try:
+            payment_date = datetime.date.fromisoformat(str(raw_date)[:10]) if raw_date else timezone.localdate()
+        except (TypeError, ValueError):
+            payment_date = timezone.localdate()
+
+        try:
+            with transaction.atomic():
+                last = LogisticsPayment.all_objects.filter(
+                    shipment=shipment, deal__isnull=True,
+                ).aggregate(m=Max('payment_number'))['m'] or 0
+                payment = LogisticsPayment.objects.create(
+                    tenant=shipment.tenant, shipment=shipment, deal=None,
+                    payment_number=last + 1, title=f"دفعة شحن {last + 1}",
+                    amount=amount, usd_to_ils=rate,
+                    transfer_date=payment_date, due_date=payment_date,
+                    status='Confirmed', confirmed_by_supplier=True,
+                    notes=str(request.data.get('notes') or '').strip(),
+                    cash_box_external_id=ext,
+                )
+                journal = post_shipment_agent_payment(payment, box_account=link.account, user=request.user)
+        except (ValidationError, DjangoValidationError) as ve:
+            msg = ve.message if hasattr(ve, 'message') else '؛ '.join(getattr(ve, 'messages', [str(ve)]))
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception:
+            logger.exception("shipment pay_agent_from_cashbox failed pk=%s", pk)
+            return Response({'error': 'حدث خطأ غير متوقع أثناء دفع وكيل الشحن.'},
+                            status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        payment.refresh_from_db()
+        return Response({
+            'status': 'تم تسجيل دفعة وكيل الشحن وترحيلها.',
+            'journal_id': journal.id,
+            'payment': LogisticsPaymentSerializer(payment).data,
+        }, status=status.HTTP_201_CREATED)
 
     @action(
         detail=True,

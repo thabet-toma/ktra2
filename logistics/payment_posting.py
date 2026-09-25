@@ -15,12 +15,15 @@
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 
 from logistics.landed_cost import payment_ils, payment_usd_rate
 from tenants.models import Currency
+
+logger = logging.getLogger(__name__)
 
 USD_RATE_REQUIRED_MESSAGE = 'أدخل سعر الدولار للشيكل على الدفعة (أكبر من صفر) قبل ترحيلها.'
 
@@ -90,6 +93,98 @@ def usd_rate_entered(payment) -> bool:
     """سعرٌ أدخله أحد — لا `payment_usd_rate` التي تسقط إلى 3.5 للعرض والتقديرات."""
     rate = getattr(payment, 'usd_to_ils', None)
     return rate is not None and Decimal(str(rate)) > 0
+
+
+AGENT_ACCOUNT_MESSAGE = (
+    "تعذّر ربط وكيل الشحن بحساب محاسبي تلقائياً. "
+    "تحقق من شجرة الحسابات (حسابات أب 2101 أو 2102) أو من مجموعة الشريك في المحاسبة، "
+    "أو عيّن نوع الشريك «FreightForwarder» لوكيل الشحن."
+)
+
+
+def agent_payment_blockers(payment) -> list[str]:
+    """موانع ترحيل دفعة وكيل شحن (بلا صفقة) — قراءة فقط، لأمر `post_pending_agent_payments`
+    ولتقرير ما قبل الترحيل. الفارغة = قابلة للترحيل؛ `post_shipment_agent_payment` يفحص
+    المانع نفسه ويرفض."""
+    from logistics.accruals import DELETED_SHIPMENT_MESSAGE
+
+    shipment = payment.shipment
+    reasons = []
+    if payment.is_posted:
+        reasons.append('مرحّلة بالفعل')
+    if shipment is None or getattr(shipment, 'is_deleted', False):
+        reasons.append(DELETED_SHIPMENT_MESSAGE)
+    elif not shipment.shipping_agent_id:
+        reasons.append('الشحنة لا تملك وكيل شحن محدد')
+    if not usd_rate_entered(payment):
+        reasons.append(USD_RATE_REQUIRED_MESSAGE)
+    if Decimal(str(payment.amount or 0)) <= 0:
+        reasons.append('المبلغ صفر')
+    return reasons
+
+
+def post_shipment_agent_payment(payment, *, box_account, user=None):
+    """ترحيل دفعة وكيل شحن (بلا صفقة): Dr ذمّة الوكيل / Cr الصندوق — مصدرٌ واحد لزرّ
+    الترحيل (`post_agent_payment`) والدفع من الصندوق (`pay_agent_from_cashbox`) وأمر
+    `post_pending_agent_payments`. ذرّية بنفسها وتُستدعى داخل معاملة المستدعي فيرتدّ معها
+    إنشاء الدفعة؛ ترمي `ValidationError` ولا تكتب شيئاً إن رُفضت. تعيد القيد.
+    """
+    from django.db import transaction
+    from django.utils import timezone
+
+    from accounting.api import ensure_partner_account
+    from accounting.services import post_journal
+    from logistics.accruals import DELETED_SHIPMENT_MESSAGE
+    from logistics.models import LogisticsPayment, LogisticsShipment
+    from logistics.payment_posting_cap import shipment_agent_posting_cap_check
+    from partners.models import Partner
+
+    with transaction.atomic():
+        shipment = (
+            LogisticsShipment.all_objects.select_related('tenant', 'shipping_agent')
+            .select_for_update().get(pk=payment.shipment_id)
+        )
+        if shipment.is_deleted:
+            raise ValidationError(DELETED_SHIPMENT_MESSAGE)
+        locked = LogisticsPayment.objects.select_for_update().get(
+            pk=payment.pk, shipment=shipment, deal__isnull=True,
+        )
+        if locked.is_posted:
+            raise ValidationError('هذه الدفعة مرحلة بالفعل')
+        if not shipment.shipping_agent_id:
+            raise ValidationError('الشحنة لا تملك وكيل شحن محدد')
+        # نفس إشارة الشريك: إنشاء حساب دائن تلقائياً تحت 2101/2102 إن أمكن
+        ensure_partner_account(shipment.shipping_agent)
+        agent = Partner.objects.select_related('linked_account').get(pk=shipment.shipping_agent_id)
+        if not agent.linked_account_id:
+            raise ValidationError(AGENT_ACCOUNT_MESSAGE)
+        ok_cap, cap_err = shipment_agent_posting_cap_check(shipment, locked.amount)
+        if not ok_cap:
+            raise ValidationError(cap_err)
+
+        description = f"دفعة {locked.title} | شحنة: {shipment.shipment_number}"
+        # نفس بنّاء قيد دفعة الصفقة (صندوق الدولار FIFO أو الدولار الاسمي بسعره).
+        lines_data, journal_currency, journal_rate = build_usd_payment_journal(
+            locked, debit_account_id=agent.linked_account_id, partner_id=agent.id,
+            box_account=box_account, tenant=shipment.tenant, description=description)
+        journal = post_journal(
+            tenant_id=shipment.tenant_id,
+            transaction_date=locked.transfer_date or timezone.localdate(),
+            reference_type='LOGISTICS_PAYMENT',
+            reference_id=locked.id,
+            description=f"{description} | وكيل شحن: {agent.name}",
+            lines_data=lines_data,
+            currency=journal_currency,
+            exchange_rate=journal_rate,
+            user=user,
+        )
+        locked.is_posted = True
+        locked.journal = journal
+        locked.bank_account = box_account
+        locked.save()
+    logger.info('shipment agent payment posted shipment=%s payment=%s journal=%s amount=%s',
+                shipment.pk, locked.pk, journal.pk, locked.amount)
+    return journal
 
 
 def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_account,

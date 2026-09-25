@@ -86,14 +86,19 @@ const clearance = {
   lines: [{ seq: 1, line_type: "broker_commission", description: "رسوم تخليص", debit: "7073.00", credit: "0" }],
 };
 
-async function openClearancePaymentForm(page: Page, posts: Array<Record<string, unknown>>) {
+async function openClearancePaymentForm(
+  page: Page,
+  posts: Array<Record<string, unknown>>,
+  clearanceRow: Record<string, unknown> = clearance,
+  fillAmount: string | null = "9600",
+) {
   await installAuthenticatedApiMocks(page, async (route, url) => {
     if (url.pathname.endsWith("/logistics/shipments/91/")) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify(shipment) });
       return true;
     }
     if (url.pathname.endsWith("/logistics/clearances/")) {
-      await route.fulfill({ contentType: "application/json", body: JSON.stringify([clearance]) });
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify([clearanceRow]) });
       return true;
     }
     if (url.pathname.endsWith("/accounting/cash-box-accounts/")) {
@@ -137,8 +142,20 @@ async function openClearancePaymentForm(page: Page, posts: Array<Record<string, 
   await page.getByText("الدفعات", { exact: true }).first().click();
   await page.getByRole("button", { name: "تسجيل دفعة للمخلّص" }).first().click();
   const amount = page.locator("label").filter({ hasText: "المبلغ (المتبقي" }).locator("input");
-  await amount.fill("9600");
+  if (fillAmount !== null) await amount.fill(fillAmount);
+  return amount;
 }
+
+test("after the accrual is posted the form's remaining is the server's, net of allocated vouchers", async ({ page }) => {
+  // سند مخلّص 500 وُزِّع على تخليصٍ بنوده 600: الخادم يقول المتبقّي 100، وكانت
+  // الشاشة تحسب البنود ناقص دفعاتها فتعرض 600 وتعبّئها مبلغاً للدفع.
+  const allocated = { ...clearance, lines: [{ ...clearance.lines[0], debit: "600.00" }],
+    amount_paid: "500.00", remaining_balance: "100.00", advance_balance: "0.00" };
+  const amount = await openClearancePaymentForm(page, [], allocated, null);
+  await expect(page.locator("label").filter({ hasText: "المبلغ (المتبقي 100" })).toBeVisible();
+  await expect(amount).toHaveValue("100");
+  await expect(page.getByText("المدفوع:").locator("b")).toHaveText("500 ₪");
+});
 
 test("overpaying the broker warns how much becomes on-account, and cancel sends nothing", async ({ page }) => {
   const posts: Array<Record<string, unknown>> = [];

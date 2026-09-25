@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { docKey, fifoFill, overpaymentExcess, type AllocatableDoc } from "./voucherAllocation.ts";
+import { docKey, docSettlement, fifoFill, overpaymentExcess, type AllocatableDoc } from "./voucherAllocation.ts";
 
 const clearance = (id: number, remaining: string, date: string): AllocatableDoc => ({
   id, label: `تخليص #${id}`, remaining, date, target: { kind: "clearance", id },
@@ -32,6 +32,17 @@ test("overpayment excess is what exceeds the remaining, in exact cents", () => {
 
 test("no split before the accrual is posted — the advance stays on its document", () => {
   assert.equal(overpaymentExcess(9600, { accrual_posted: false, remaining: "0" }), 0);
+});
+
+test("after the accrual is posted the screen shows the server's remaining, not lines minus payments", () => {
+  // سند مخلّص 500 موزَّع على تخليص 600: الخادم يقول 100، والتقدير المحلي كان 600.
+  const server = { amount_paid: "500.00", remaining_balance: "100.00", advance_balance: "0.00" };
+  assert.deepEqual(docSettlement(true, server, { due: 600, paid: 0 }), { paid: 500, remaining: 100, advance: 0 });
+});
+
+test("before the accrual the draft lines are the estimate", () => {
+  assert.deepEqual(docSettlement(false, { remaining_balance: "0" }, { due: 600.1, paid: 700 }), { paid: 700, remaining: 0, advance: 99.9 });
+  assert.deepEqual(docSettlement(true, null, { due: 600, paid: 250 }), { paid: 250, remaining: 350, advance: 0 });
 });
 
 test("docs without a date come last", () => {

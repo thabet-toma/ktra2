@@ -36,6 +36,8 @@ export type ClearanceRow = {
   editable?: boolean;
   amount_paid?: string;
   remaining_balance?: string;
+  /** الزائد المدفوع عن المستحق — بعد ترحيل الاستحقاق من الخادم (`document_settlement`). */
+  advance_balance?: string;
   payment_status?: "paid" | "partially_paid" | "unpaid";
   cost_lines?: ClearanceCostLine[];
   /** البنود المهيكلة (P-D-1: LogisticsClearanceLine) */

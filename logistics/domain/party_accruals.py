@@ -109,6 +109,39 @@ def accrual_remaining(kind: str, obj, **kwargs) -> Decimal:
     return accrual_status(kind, obj, **kwargs)['remaining']
 
 
+def document_settlement(kind: str, obj, *, draft_due, draft_paid, rate=None) -> dict:
+    """{amount_paid, remaining_balance, advance_balance, payment_status} لشاشة المستند.
+
+    بعد ترحيل الاستحقاق: من `accrual_status` — أسطر القيود ومعها سندات الصرف الموزَّعة،
+    الرقم نفسه الذي يفصل به `overpayment_split` الزائد ويتحقّق به التوزيع. قبله لا قيد
+    يُقرأ، فالمستحق تقديرُ المستند (`draft_due`: بنوده) ناقص دفعاته المرحّلة.
+    `rate`: سعر المستند — الأرقام بعملته (الإرسالية بعملة الشحنة، ودفعتها كذلك).
+    """
+    _party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
+    if accrual_journal_id:
+        status = accrual_status(kind, obj)
+        divisor = Decimal(str(rate or 1)) or Decimal('1')
+        due, paid, remaining, advance = (
+            (value / divisor).quantize(Q2) for value in (
+                status['due'], status['paid'] + status['allocated'],
+                status['remaining'], status['overpaid'],
+            )
+        )
+    else:
+        due, paid = _money(draft_due), _money(draft_paid)
+        remaining, advance = max(due - paid, ZERO), max(paid - due, ZERO)
+    if due > 0 and remaining <= Q2:
+        payment_status = 'paid'
+    elif paid > 0:
+        payment_status = 'partially_paid'
+    else:
+        payment_status = 'unpaid'
+    return {
+        'amount_paid': str(paid), 'remaining_balance': str(remaining),
+        'advance_balance': str(advance), 'payment_status': payment_status,
+    }
+
+
 def _label(kind: str, obj) -> str:
     if kind == 'clearance':
         ship = getattr(obj, 'shipment', None)
@@ -297,7 +330,8 @@ def deallocate_voucher_accrual(payment, allocation_id: int, *, user=None):
 
 
 __all__ = [
-    'KINDS', 'accrual_status', 'accrual_remaining', 'accrual_snapshot', 'allocated_base', 'party_open_accruals',
+    'KINDS', 'accrual_status', 'accrual_remaining', 'accrual_snapshot', 'allocated_base', 'document_settlement',
+    'party_open_accruals',
     'suggest_accrual_fifo', 'voucher_unallocated', 'allocate_voucher_to_accruals',
     'deallocate_voucher_accrual',
 ]

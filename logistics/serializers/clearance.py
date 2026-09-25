@@ -148,6 +148,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     cost_lines = serializers.JSONField(required=False, write_only=True)
     amount_paid = serializers.SerializerMethodField()
     remaining_balance = serializers.SerializerMethodField()
+    advance_balance = serializers.SerializerMethodField()
     payment_status = serializers.SerializerMethodField()
 
     class Meta:
@@ -192,20 +193,31 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             Decimal('0'),
         ).quantize(Decimal('0.01'))
 
+    def _settlement(self, instance) -> dict:
+        """المدفوع/المتبقّي مرّةً لكل تخليص — `party_accruals.document_settlement`: بعد
+        ترحيل الاستحقاق من القيود والسندات الموزَّعة (ما تفصل به الدفعة الزائدة)،
+        وقبله بنوده ناقص دفعاته. كان يحسب البنود ناقص الدفعات دائماً فيغفل السندات."""
+        from logistics.domain.party_accruals import document_settlement
+
+        cache = self.__dict__.setdefault('_settlement_cache', {})
+        if instance.pk not in cache:
+            cache[instance.pk] = document_settlement(
+                'clearance', instance,
+                draft_due=self._cost_total(instance), draft_paid=self._paid_total(instance),
+            )
+        return cache[instance.pk]
+
     def get_amount_paid(self, instance):
-        return str(self._paid_total(instance))
+        return self._settlement(instance)['amount_paid']
 
     def get_remaining_balance(self, instance):
-        return str(max(Decimal('0'), self._cost_total(instance) - self._paid_total(instance)))
+        return self._settlement(instance)['remaining_balance']
+
+    def get_advance_balance(self, instance):
+        return self._settlement(instance)['advance_balance']
 
     def get_payment_status(self, instance):
-        total = self._cost_total(instance)
-        paid = self._paid_total(instance)
-        if total > 0 and paid >= total - Decimal('0.01'):
-            return 'paid'
-        if paid > 0:
-            return 'partially_paid'
-        return 'unpaid'
+        return self._settlement(instance)['payment_status']
 
     def get_local_shipments(self, obj):
         try:

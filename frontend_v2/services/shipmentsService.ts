@@ -593,81 +593,25 @@ export const shipmentsService = {
     );
   },
 
-  /** ترحيل دفعة وكيل الشحن إلى المحاسبة (ينشئ قيداً ويربطه بالدفعة). */
-  async postShipmentAgentPaymentToAccounting(
-    shipmentId: string,
-    paymentId: string,
-    body?: { cash_box_external_id?: string; bank_account_id?: number }
-  ): Promise<{ status?: string; journal_id?: number; error?: string }> {
-    return apiPostObject(
-      `logistics/shipments/${shipmentId}/post_agent_payment/${encodeURIComponent(String(paymentId))}/`,
-      body || {},
-      { tenantId: getTenantId() }
-    );
-  },
-
   /**
-   * بعد السليب/الخصم من الصندوق: محاولة إنشاء القيد تلقائياً (مثل دفعات الصفقة).
+   * دفعة وكيل الشحن من الصندوق بكبسة واحدة: الخادم ينشئها مؤكّدةً ويرحّلها في معاملة
+   * واحدة (`pay_agent_from_cashbox`) — مرآة دفع المخلّص والناقل. فشلُ الترحيل لا يترك دفعة.
    */
-  async tryAutoPostShipmentAgentPaymentAccounting(
-    shipmentId: string,
-    paymentId: string,
-    opts?: { cashBoxExternalId?: string }
-  ): Promise<{ journalId?: number; posted: boolean; blockers?: string[] }> {
-    const pid = String(paymentId ?? "").trim();
-    if (!/^\d+$/.test(pid)) {
-      return { posted: false, blockers: ["معرّف الدفعة غير رقمي بعد — أعد فتح الشحنة."] };
-    }
-
-    const body: Record<string, any> = {};
-    const ext = opts?.cashBoxExternalId?.trim();
-    if (ext) body.cash_box_external_id = ext.slice(0, 128);
-
-    const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-    let lastMsg = "";
-    for (let attempt = 0; attempt < 4; attempt++) {
-      if (attempt > 0) {
-        await sleep(350);
-      }
-      let refreshed = await this.getShipment(shipmentId);
-      let row = refreshed.payments?.find((p) => String(p.id) === pid);
-      const jidRow = row?.journalId != null ? Number(row.journalId) : NaN;
-      if (row?.isPosted && Number.isFinite(jidRow) && jidRow > 0) {
-        return { posted: true, journalId: jidRow };
-      }
-
-      try {
-        const res = await this.postShipmentAgentPaymentToAccounting(shipmentId, pid, body);
-        if (res?.journal_id != null) {
-          return { posted: true, journalId: Number(res.journal_id) };
-        }
-        return {
-          posted: false,
-          blockers: ["لم يُرجع الخادم رقم القيد."],
-        };
-      } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        lastMsg = msg;
-        if (/مرحلة بالفعل|already posted/i.test(msg)) {
-          const again = await this.getShipment(shipmentId);
-          const pr = again.payments?.find((p) => String(p.id) === pid);
-          const j = pr?.journalId != null ? Number(pr.journalId) : NaN;
-          if (Number.isFinite(j) && j > 0) {
-            return { posted: true, journalId: j };
-          }
-        }
-        const retryable =
-          attempt < 3 &&
-          /حالة الدفعة|قبل الترحيل|يجب تسجيل السليب|Pending|Paid|Confirmed/i.test(
-            msg
-          );
-        if (!retryable) {
-          return { posted: false, blockers: [msg] };
-        }
-      }
-    }
-    return { posted: false, blockers: [lastMsg || "تعذّر ترحيل الدفعة بعد عدة محاولات."] };
+  async payAgentFromCashBox(
+    shipmentId: number | string,
+    body: {
+      amount: number;
+      usd_to_ils: number;
+      cash_box_external_id: string;
+      payment_date?: string;
+      notes?: string;
+    },
+  ): Promise<{ status: string; journal_id: number; payment: { id: number; journal?: number | null } }> {
+    return apiPostObject(
+      `logistics/shipments/${shipmentId}/pay_agent_from_cashbox/`,
+      body,
+      { tenantId: getTenantId() },
+    );
   },
 
   async linkShipmentAgentPaymentJournal(

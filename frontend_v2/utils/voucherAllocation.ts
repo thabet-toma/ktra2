@@ -50,6 +50,35 @@ export function overpaymentExcess(
   return excess > 0 ? excess / 100 : 0;
 }
 
+/** أرقام المستند كما يرسلها مسلسله (`party_accruals.document_settlement`). */
+export type ServerSettlement = {
+  amount_paid?: string | number | null;
+  remaining_balance?: string | number | null;
+  advance_balance?: string | number | null;
+};
+
+/**
+ * المدفوع/المتبقّي/المقدَّم لمستحقٍّ في الشاشة. بعد ترحيل الاستحقاق أرقامُ الخادم —
+ * القيود ومعها سندات الصرف الموزَّعة، وهي ما يفصل به الزائد. قبله لا قيد يُقرأ،
+ * فالتقدير من النموذج نفسه (بنودٌ قد لا تكون حُفظت بعد) ناقص دفعاته.
+ */
+export function docSettlement(
+  accrualPosted: boolean,
+  server: ServerSettlement | null | undefined,
+  draft: { due: number; paid: number },
+): { paid: number; remaining: number; advance: number } {
+  if (accrualPosted && server) {
+    return {
+      paid: cents(server.amount_paid) / 100,
+      remaining: cents(server.remaining_balance) / 100,
+      advance: cents(server.advance_balance) / 100,
+    };
+  }
+  const due = cents(draft.due);
+  const paid = cents(draft.paid);
+  return { paid: paid / 100, remaining: Math.max(0, due - paid) / 100, advance: Math.max(0, paid - due) / 100 };
+}
+
 export function docKey(doc: Pick<AllocatableDoc, "id" | "target">): string {
   return doc.target ? `${doc.target.kind}:${doc.target.id}` : `invoice:${doc.id}`;
 }

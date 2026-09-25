@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **901**
+عدد النقاط: **902**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -495,6 +495,7 @@
 | `/api/logistics/shipments/{pk}/add_deal/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/freight/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/link_agent_payment_journal/{payment_id}/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
+| `/api/logistics/shipments/{pk}/pay_agent_from_cashbox/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/post-freight-accrual/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/post_agent_payment/{payment_id}/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/post_to_accounting/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
