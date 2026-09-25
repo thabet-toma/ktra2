@@ -334,6 +334,53 @@ def _expected_parent_code_for_partner_type(partner_type: str) -> str | None:
     }.get(partner_type)
 
 
+def _ensure_partner_parent(tenant, code: str | None) -> None:
+    """الأب المعياري لنوع الطرف يُكمَل من بذرة الشركة إن غاب.
+
+    شركاتٌ بُذرت قبل إضافة 2109 «ذمم الناقلين» (إنتاج: شركة 1) لا تملكه، فكان
+    الناقل يُنشأ بلا حساب بصمت ثم يقع سنده على 2101 العام (`_resolve_ap_account`).
+    `ensure_operational_accounts` idempotent وتحترم قالب الشركة (مكتب المحاسبة
+    يُسقط 2106-2109 عمداً) — فلا نزرع ما أسقطته البذرة.
+    """
+    if not code or Account.objects.filter(tenant=tenant, code=code).exists():
+        return
+    from tenants.services import OPERATIONAL_ACCOUNT_CODES, ensure_operational_accounts
+
+    if code in OPERATIONAL_ACCOUNT_CODES:
+        created = ensure_operational_accounts(tenant)
+        if created:
+            logger.info(
+                "partner parent healed tenant=%s code=%s created=%s",
+                tenant.TenantID, code, created,
+            )
+
+
+def partner_account_problem(partner) -> str | None:
+    """وصفٌ مقروء لخلل حساب الطرف في الشجرة، أو None إن كان سليماً.
+
+    مصدرٌ واحد يقرؤه ردّ حفظ الطرف (فيرى المستخدم المشكلة لا تبتلعها السجلات)
+    وأمر `audit_partner_accounts`.
+    """
+    expected = _expected_parent_code_for_partner_type(partner.partner_type)
+    account = partner.linked_account
+    if account is None:
+        if expected and not Account.objects.filter(
+            tenant_id=partner.tenant_id, code=expected,
+        ).exists():
+            return (
+                f"لم يُنشأ حساب ذمم للطرف «{partner.name}»: الحساب الأب {expected} "
+                "غير موجود في شجرة الحسابات. أضِفه ثم احفظ الطرف ثانيةً."
+            )
+        return f"لم يُنشأ حساب ذمم للطرف «{partner.name}» في شجرة الحسابات."
+    parent_code = account.parent.code if account.parent_id else None
+    if expected and parent_code != expected:
+        return (
+            f"حساب الطرف «{partner.name}» ({account.code}) تحت الأب {parent_code or '—'} "
+            f"لا تحت {expected} المطابق لنوعه."
+        )
+    return None
+
+
 def sync_partner_accounting(partner) -> None:
     """مزامنة الجانب المحاسبي للشريك بعد حفظه (يستدعيه signal الـpost_save).
 
@@ -361,6 +408,7 @@ def sync_partner_accounting(partner) -> None:
         expected_parent_code = _expected_parent_code_for_partner_type(
             partner.partner_type
         )
+        _ensure_partner_parent(tenant, expected_parent_code)
 
         # 1. Try to get Parent from Partner Group
         if partner.group:
@@ -446,6 +494,7 @@ def sync_partner_accounting(partner) -> None:
         )
 
         if expected_parent_code and (not partner.linked_account.parent or partner.linked_account.parent.code != expected_parent_code):
+            _ensure_partner_parent(partner.tenant, expected_parent_code)
             try:
                 new_parent = Account.objects.get(code=expected_parent_code, tenant=partner.tenant)
                 partner.linked_account.parent = new_parent

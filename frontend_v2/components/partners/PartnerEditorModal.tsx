@@ -8,6 +8,7 @@ import {
   apiGetList, apiGetObject, apiPatchObject, apiPostObject,
 } from "../../services/restApi";
 import { clientLogger } from "../../services/logger";
+import { useToast } from "../../contexts/ToastContext";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { KitDateInput } from "../kit/KitDateInput";
@@ -28,6 +29,8 @@ export type PartnerEditorResult = {
   id: number;
   name: string;
   partner_type: PartnerType;
+  /** الخادم: الطرف حُفظ لكن حساب ذممه في الشجرة غائب أو تحت أبٍ خاطئ. */
+  account_warning?: string;
 };
 
 /** T-IMPOFFER: نطاق المورد. '' = غير مصنَّف (يظهر في الجانبين). */
@@ -139,6 +142,7 @@ export const PartnerEditorModal: React.FC<{
   onSaved,
 }) => {
   const tenantId = resolveTenantId();
+  const toast = useToast();
   const [form, setForm] = useState(() => emptyForm(fixedType || initialType));
   const [banks, setBanks] = useState<BankForm[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyRow[]>([]);
@@ -385,6 +389,8 @@ export const PartnerEditorModal: React.FC<{
         bank_accounts: effectiveBanks.length,
       });
       eventBus.publish("partners", tenantId);
+      // الحفظ نجح لكن الحساب لم يُنشأ — لا يُبتلع: سنداتُ طرفٍ بلا حساب لا تُرحَّل.
+      if (saved.account_warning) toast(saved.account_warning, "error");
       setTouched(false);
       // ISSUE #118 §٥: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
       void discardDraft();

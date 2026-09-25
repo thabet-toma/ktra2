@@ -466,7 +466,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
             partner.id, tenant.TenantID, partner.partner_type,
             partner.bank_accounts.count(), getattr(request.user, "pk", None),
         )
-        return Response(self.get_serializer(partner).data, status=status.HTTP_201_CREATED)
+        return Response(self._with_account_warning(partner), status=status.HTTP_201_CREATED)
 
     @transaction.atomic
     def update(self, request, *args, **kwargs):
@@ -495,7 +495,23 @@ class PartnerViewSet(viewsets.ModelViewSet):
             partner.id, tenant.TenantID, partner.partner_type,
             partner.bank_accounts.count(), getattr(request.user, "pk", None),
         )
-        return Response(self.get_serializer(partner).data)
+        return Response(self._with_account_warning(partner))
+
+    def _with_account_warning(self, partner) -> dict:
+        """ردّ الحفظ + `account_warning` حين بقي الطرف بلا حساب ذمم سليم.
+
+        `sync_partner_accounting` تبتلع أخطاءها كي لا يسقط حفظ الطرف — فكان
+        الناقل يُحفظ بلا حساب (2109 غائب) ولا يعلم أحد حتى يُرحَّل سنده على 2101.
+        """
+        from accounting.api import partner_account_problem
+
+        partner.refresh_from_db()
+        data = self.get_serializer(partner).data
+        problem = partner_account_problem(partner)
+        if problem:
+            logger.warning("partner.account_problem id=%s: %s", partner.id, problem)
+            data["account_warning"] = problem
+        return data
 
 
 class CustomerNoteViewSet(viewsets.ModelViewSet):
