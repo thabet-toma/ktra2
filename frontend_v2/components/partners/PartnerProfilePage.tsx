@@ -1061,11 +1061,14 @@ export const PartnerProfilePage: React.FC = () => {
                       onClick: () => { void openAllocation(); },
                     }]
                   : []),
-                {
-                  key: 'new-purchase',
-                  label: 'فاتورة مشتريات جديدة',
-                  onClick: () => navigate('/purchase-invoices/new'),
-                },
+                // المخلّص/الوكيل/الناقل تُستحقّ لهم تخاليص وشحن وإرساليات لا فواتير شراء.
+                ...(partner?.partner_type === 'Supplier'
+                  ? [{
+                      key: 'new-purchase',
+                      label: 'فاتورة مشتريات جديدة',
+                      onClick: () => navigate('/purchase-invoices/new'),
+                    }]
+                  : []),
                 // الخيار الثاني الصريح للدائن: استرداد زيادةٍ دُفعت له (Dr صندوق / Cr ذمّته).
                 ...(voucherDirs?.secondary === 'receipt'
                   ? [{

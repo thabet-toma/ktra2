@@ -52,6 +52,7 @@ export interface AccountingPartner {
   id: number;
   name: string;
   legal_name?: string | null;
+  partner_type?: string | null;
 }
 
 /**

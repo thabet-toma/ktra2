@@ -264,7 +264,8 @@ export const accountingApi = {
       try {
         const cached = await db.partners.where("tenant_id").equals(tenantId).toArray();
         return cached
-          .filter((c) => !partnerType || c.partner_type === partnerType)
+          // النوع قد يكون قائمة مفصولة بفاصلة (الأطراف الدائنة) كما يقبلها الخادم.
+          .filter((c) => !partnerType || partnerType.split(",").includes(c.partner_type))
           .map((c) => JSON.parse(c.data));
       } catch {
         return [];

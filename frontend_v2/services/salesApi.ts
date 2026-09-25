@@ -736,6 +736,8 @@ export async function saveCustomerQuotes(
 export type PartnerBalanceResponse = {
   partner: number;
   partner_type: string;
+  /** طرفٌ دائن (مورد/مخلّص/وكيل/ناقل): `open_balance` = دائن − مدين، موجبُه «له». */
+  is_creditor?: boolean;
   debit: string;
   credit: string;
   open_balance: string;

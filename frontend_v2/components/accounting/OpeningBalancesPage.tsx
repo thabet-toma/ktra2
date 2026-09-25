@@ -21,6 +21,7 @@ import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
+import { partnerTypeLabel } from "../../utils/partnerActions";
 import { KitDocumentShell, KitAutocomplete, KitDateInput } from "../kit";
 import type { KitTab, KitToolbarAction } from "../kit";
 import { AccountTreeField } from "./AccountTreePicker";
@@ -406,7 +407,7 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const partnerRows = data?.partners ?? [];
   const partnerOptions = useMemo(
-    () => partners.map((p) => ({ id: p.id, label: `${p.name}${p.partner_type ? ` — ${p.partner_type === "Customer" ? "عميل" : "مورّد"}` : ""}` })),
+    () => partners.map((p) => ({ id: p.id, label: `${p.name}${p.partner_type ? ` — ${partnerTypeLabel(p.partner_type)}` : ""}` })),
     [partners],
   );
 
@@ -444,7 +445,8 @@ export const OpeningBalancesPage: React.FC = () => {
             return (
               <tr key={p.id}>
                 <td>{p.name}</td>
-                <td className="text-center">{p.partner_type === "Customer" ? "عميل" : "مورّد"}</td>
+                {/* النوع باسمه الحقيقي: المخلّص والوكيل والناقل ليسوا «مورّداً». */}
+                <td className="text-center">{partnerTypeLabel(p.partner_type)}</td>
                 <td>
                   <input
                     type="number" step="any" className="ktra-input ktra-num"

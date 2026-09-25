@@ -383,6 +383,7 @@ export const AccountingCoaPage: React.FC<AccountingCoaPageProps> = ({
       id: String(lp.id),
       name: lp.trade_name || lp.legal_name || "",
       kind,
+      partnerType: lp.partner_type,
     });
   };
 

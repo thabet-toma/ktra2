@@ -13,7 +13,7 @@ from core.api_defaults import ApiAuthAndUser
 from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
 from tenants.models import Currency, Tenant
-from .models import CustomerNote, Partner, PartnerBankAccount
+from .models import CustomerNote, Partner, PartnerBankAccount, is_creditor_party
 from .serializers import (
     CustomerNoteSerializer, PartnerBankAccountSerializer, PartnerListSerializer,
     PartnerSerializer, find_partner_with_similar_bank_account, normalize_identifier,
@@ -66,7 +66,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
         from accounting.services import partner_posted_balance
         partner = self.get_object()
         debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
-        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        is_supplier = is_creditor_party(partner)
         open_balance = (credit - debit) if is_supplier else (debit - credit)
         try:
             proposed = Decimal(str(request.query_params.get("proposed_total", "0")))
@@ -75,6 +75,8 @@ class PartnerViewSet(viewsets.ModelViewSet):
         return Response({
             "partner": partner.id,
             "partner_type": partner.partner_type,
+            # الواجهة تقرأ به «له/عليه» — موجبُ الدائن له، وموجبُ العميل عليه.
+            "is_creditor": is_supplier,
             "debit": str(debit),
             "credit": str(credit),
             "open_balance": str(open_balance),
@@ -94,7 +96,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
         from logistics.models import PurchaseInvoice
 
         partner = self.get_object()
-        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        is_supplier = is_creditor_party(partner)
         debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
         balance = (credit - debit) if is_supplier else (debit - credit)
 
@@ -136,7 +138,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
         """كشف حساب الشريك (الأستاذ) — Debit/Credit + رصيد جارٍ، مُرقَّم."""
         from accounting.services import partner_account_statement
         partner = self.get_object()
-        is_supplier = (partner.partner_type or "").lower() == "supplier"
+        is_supplier = is_creditor_party(partner)
         try:
             limit = min(int(request.query_params.get("limit", 50)), 200)
         except (TypeError, ValueError):

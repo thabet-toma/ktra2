@@ -1,6 +1,22 @@
 from django.db import models
 from tenants.models import Tenant, Currency
 
+#: الأطراف الدائنة — ذممهم دائنة (دائن − مدين): المورد والمخلّص ووكيل الشحن والناقل.
+#: مرآة `utils/partnerActions.ts` (`partnerKindFromType`) في الواجهة.
+CREDITOR_PARTNER_TYPES = frozenset({
+    'Supplier', 'FreightForwarder', 'CustomsBroker', 'LocalTransporter', 'Carrier',
+})
+
+
+def is_creditor_party(partner_or_type) -> bool:
+    """الطرف دائنٌ (رصيده دائن − مدين) أم مدين كالعميل؟ — مصدرٌ واحد للإشارة.
+
+    كان كل موضع يقارن بـ«supplier» وحده، فالمخلّص حاييم (CustomsBroker) ظهر رصيده
+    −7,551.50 بدل «له 7,551.50» في البطاقة والكشف. يقبل الطرف أو نوعه نصّاً.
+    """
+    kind = getattr(partner_or_type, 'partner_type', partner_or_type)
+    return str(kind or '') in CREDITOR_PARTNER_TYPES
+
 class PartnerGroup(models.Model):
     id = models.AutoField(primary_key=True, db_column='GroupID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', default=1)

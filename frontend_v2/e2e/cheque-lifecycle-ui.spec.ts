@@ -145,6 +145,7 @@ const PARTNERS = [
   { id: 8, name: "عميل الشيكات", partner_type: "Customer" },
   { id: 9, name: "مورد الأدوات", partner_type: "Supplier" },
   { id: 10, name: "مورد التغليف", partner_type: "Supplier" },
+  { id: 83, name: "حاييم", partner_type: "CustomsBroker" },
 ];
 
 /** رفض الخادم على التحويل — الشكل الحقيقي: `ValidationError` تُغلَّف `{"detail": [...]}`. */
@@ -181,10 +182,12 @@ async function installMocks(page: Page, opts: Mocks = {}) {
         role: "manager", is_default: true, created_at: "2026-07-01T00:00:00Z",
       }];
     } else if (path.endsWith("/permissions/me/")) {
-      body = { role: "manager", is_manager: true, ui_mode: "advanced", permissions: [] };
+      // الشاشة محروسة بـ`accounting.journal.view` (`utils/viewPermissions.ts`) — بلا الصلاحية
+      // كان المشهد «لا تملك صلاحية» فيسقط كل اختبار هنا قبل أن يرى شيكاً.
+      body = { role: "manager", is_manager: true, ui_mode: "advanced", permissions: ["accounting.journal.view"] };
     } else if (path.endsWith("/partners/lookup/")) {
       const type = url.searchParams.get("partner_type");
-      body = type ? PARTNERS.filter((p) => p.partner_type === type) : PARTNERS;
+      body = type ? PARTNERS.filter((p) => type.split(",").includes(p.partner_type)) : PARTNERS;
     } else if (path.endsWith("/accounting/cheques/wallet/")) {
       body = WALLET;
     } else if (path.endsWith("/movements/")) {
@@ -270,8 +273,9 @@ test("التظهير يطلب المورد المستفيد ويرسله، وا�
   await expect(endorsee).toBeVisible();
   // بلا مستفيد لا يمرّ الإرسال — القيد بلا طرفٍ مدين لا معنى له.
   await expect(page.getByTestId("cheque-transfer-submit")).toBeDisabled();
-  // والقائمة موردون فقط: العميل ليس فيها.
-  await expect(endorsee.locator("option")).toContainText(["— اختر المورد —", "مورد الأدوات", "مورد التغليف"]);
+  // والقائمة الأطراف الدائنة كلّها — المخلّص بنوعه — والعميل ليس فيها.
+  await expect(endorsee.locator("option")).toContainText([
+    "— اختر الطرف —", "مورد الأدوات", "مورد التغليف", "حاييم — مخلّص جمركي"]);
   await expect(endorsee.locator("option", { hasText: "عميل الشيكات" })).toHaveCount(0);
 
   await endorsee.selectOption("10");

@@ -4237,7 +4237,8 @@ def partner_account_statement(
     الحلقة الزمنية كاملةً كما هو، وهي تحكم النافذة المعروضة وحدها. وبلا
     تمريرهما السلوك حرفياً كما كان (المستهلكون القائمون لا يتأثرون).
 
-    `only_payments` يحصر **المعروض** بحركات التسوية دون الفاتورة نفسها. استثناءُ
+    `only_payments` يحصر **المعروض** بحركات التسوية دون الفاتورة نفسها (وللطرف الدائن
+    دون مستحقّات التخليص/الشحن/النقل — فواتيرُ المخلّص والوكيل والناقل). استثناءُ
     الفاتورة لا قائمةُ أنواعٍ مسموحة: القائمة المسموحة تُسقط بصمت كل نوعٍ جديد
     يمسّ المال (ارتداد شيك · تظهير · إشعار دائن)، وإخفاء حركةٍ ماليّة من شاشة
     المال أسوأ من إظهار حركةٍ زائدة. والحساب لا يتأثر بالترشيح إطلاقاً: الرصيد
@@ -4268,8 +4269,13 @@ def partner_account_statement(
 
     # الترشيح بعد الحساب: يحكم ما يُعرض لا كيف يُحسب.
     if only_payments:
-        invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
-        visible = [row for row in ordered if row[3] != invoice_type]
+        hidden = {"PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"}
+        if is_supplier:
+            # مستحقّ المخلّص/الوكيل/الناقل «فاتورته» — ليس حركة مال. وقيد تكلفة الشحن
+            # القديم (`LOGISTICS_SHIPMENT`) استحقاقُ الوكيل قبل `SHIPMENT_FREIGHT_ACCRUAL`.
+            from logistics.domain.party_accruals import ACCRUAL_ANCHOR_TYPE
+            hidden |= set(ACCRUAL_ANCHOR_TYPE.values()) | {"LOGISTICS_SHIPMENT"}
+        visible = [row for row in ordered if row[3] not in hidden]
     else:
         visible = ordered
     total = len(visible)

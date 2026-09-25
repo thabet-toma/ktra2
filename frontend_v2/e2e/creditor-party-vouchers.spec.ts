@@ -192,3 +192,26 @@ test("broker statement: a voucher over three clearances stays one row with a sub
   await page.getByLabel("ربط الفاتورة بسندها").uncheck();
   await expect(page.getByText(/↳ من سند صرف/)).toHaveCount(0);
 });
+
+test("broker refund receipt reads the balance as «له» — not «للعميل» with a flipped sign", async ({ page }) => {
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/partners/83/balance/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          partner: 83, partner_type: "CustomsBroker", is_creditor: true,
+          debit: "2000.00", credit: "9551.50", open_balance: "7551.50",
+          proposed_total: "0", projected_balance: "7551.50",
+        }),
+      });
+      return true;
+    }
+    return profileResponder(route, url);
+  });
+  await page.goto("/partners/83");
+  await page.getByRole("button", { name: "سند قبض (استرداد)" }).click();
+  const balance = page.getByTestId("customer-ledger-balance");
+  await expect(balance).toContainText("له", { timeout: 15000 });
+  await expect(balance).toContainText("7,551.5");
+  await expect(balance).not.toContainText("للعميل");
+});

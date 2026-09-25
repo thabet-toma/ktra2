@@ -12,10 +12,20 @@
 
 export type PartnerKind = "customer" | "supplier";
 
+/**
+ * الأطراف الدائنة — مرآة `partners.models.CREDITOR_PARTNER_TYPES` في الخادم. قائمةٌ
+ * مفصولة بفاصلة يقبلها `partners/lookup/?partner_type=` كما هي.
+ */
+export const CREDITOR_PARTNER_TYPES = [
+  "Supplier", "FreightForwarder", "CustomsBroker", "LocalTransporter", "Carrier",
+] as const;
+
 export interface PartnerActionTarget {
   id: string;
   name: string;
   kind: PartnerKind;
+  /** نوع الطرف في الخادم إن عُرف — المخلّص/الوكيل/الناقل لا يُشترى منهم بفاتورة شراء. */
+  partnerType?: string | null;
 }
 
 export type PartnerActionIcon =
@@ -135,6 +145,35 @@ export function partnerActionGroups(
         actions: [
           { key: "sales-invoices", label: "فواتيره", icon: "list", href: `/sales/invoices?customer=${id}` },
           { key: "sales-payments", label: "سندات قبضه", icon: "list", href: `/sales/customer-payments?partner=${id}` },
+        ],
+      },
+    ];
+  }
+
+  // المخلّص ووكيل الشحن والناقل: مستحقّاتهم من التخليص والشحن والإرسالية لا من فاتورة
+  // شراء — فلا «فاتورة شراء» ولا «عرض سعر شراء» ولا «فواتيره» لهم.
+  const logisticsParty = Boolean(target.partnerType) && target.partnerType !== "Supplier";
+  if (logisticsParty) {
+    return [
+      {
+        title: "الطرف",
+        actions: [
+          { key: "card", label: named(`بطاقة ${partnerTypeLabel(target.partnerType)}`), icon: "card", href: `/partners/${id}` },
+          { key: "statement", label: "كشف حساب", icon: "statement", href: `/partners/${id}?tab=statement` },
+          { key: "ledger", label: "حركات الحساب", icon: "ledger", href: `/partners/${id}?tab=ledger` },
+        ],
+      },
+      {
+        title: "إنشاء مستند",
+        actions: [
+          { key: "payment", label: "سند صرف", icon: "payment", bridge: "payment" },
+          { key: "refund-receipt", label: "سند قبض (استرداد)", icon: "receipt", bridge: "receipt" },
+        ],
+      },
+      {
+        title: "مستنداته",
+        actions: [
+          { key: "supplier-payments", label: "سندات صرفه", icon: "list", href: `/supplier-payments?partner=${id}` },
         ],
       },
     ];

@@ -28,6 +28,7 @@ import {
 import type { KitToolbarAction, KitTab, DenseColumn } from "../kit";
 import { Plus, X, ArrowRightLeft, Loader2, Upload, Banknote, Printer } from "lucide-react";
 import OfflineGuard from "../offline/OfflineGuard";
+import { CREDITOR_PARTNER_TYPES, partnerTypeLabel } from "../../utils/partnerActions";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
 
 const DIRECTIONS = [
@@ -201,7 +202,8 @@ export const AccountingChequesPage: React.FC = () => {
         }),
         soft("الأطراف", accountingApi.getPartners()),
         soft("الحسابات البنكية", accountingApi.getBankAccounts({ activeOnly: true })),
-        soft("الموردين", accountingApi.getPartners("Supplier")),
+        // التظهير يسدّد أيّ طرفٍ دائن (مورد، مخلّص، وكيل شحن، ناقل) — الخادم يقبلهم كلّهم.
+        soft("الأطراف الدائنة", accountingApi.getPartners(CREDITOR_PARTNER_TYPES.join(","))),
       ]);
       setRows(ch.results);
       setTotalCount(ch.count);
@@ -988,18 +990,21 @@ export const AccountingChequesPage: React.FC = () => {
                   يكون للحركة قيد ذمم، فالحقل شرطٌ لا اختيار. */}
               {selectedMove?.requires_endorsee && (
                 <div className="ktra-field">
-                  <label className="ktra-field-label">المورد المستفيد من التظهير</label>
+                  <label className="ktra-field-label">الطرف المستفيد من التظهير</label>
                   <select className="ktra-input" data-testid="cheque-endorsee-select"
                     value={transferEndorsee}
                     onChange={(e) => setTransferEndorsee(e.target.value)}>
-                    <option value="">— اختر المورد —</option>
+                    <option value="">— اختر الطرف —</option>
                     {suppliers.map((sup) => (
-                      <option key={sup.id} value={sup.id}>{sup.name}</option>
+                      <option key={sup.id} value={sup.id}>
+                        {sup.partner_type && sup.partner_type !== "Supplier"
+                          ? `${sup.name} — ${partnerTypeLabel(sup.partner_type)}` : sup.name}
+                      </option>
                     ))}
                   </select>
                   {!transferEndorsee && (
                     <span style={{ fontSize: "0.75rem", color: "var(--ktra-ink-soft)" }}>
-                      تنخفض ذمة هذا المورد بقيمة الشيك عند التظهير.
+                      تنخفض ذمة هذا الطرف بقيمة الشيك عند التظهير.
                     </span>
                   )}
                 </div>

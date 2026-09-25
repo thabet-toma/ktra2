@@ -148,13 +148,14 @@ register(ReportSpec(
 # ══════════════════════════════════════════════════════════════════════
 
 def _partner_is_customer(tenant_id: int, partner_id: int) -> bool:
-    from partners.models import Partner
+    from partners.models import Partner, is_creditor_party
 
     kind = (
         Partner.objects.filter(tenant_id=tenant_id, id=partner_id)
         .values_list("partner_type", flat=True).first()
     )
-    return str(kind or "").lower() == "customer"
+    # مصدر الإشارة الواحد — بطاقة الطرف وكشفه يقرآنه أيضاً.
+    return not is_creditor_party(kind)
 
 
 def _partner_statement(tenant_id: int, params: dict) -> list[dict]:

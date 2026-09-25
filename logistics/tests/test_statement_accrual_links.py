@@ -65,6 +65,20 @@ class StatementAccrualLinksTest(_LabelBase):
         for row in (accrual, payment):
             self.assertEqual((row["link_key"], row["shipment_label"]), (f"LOCAL_SHIPMENT:{local.pk}", label))
 
+    def test_money_tab_hides_the_accrual_itself(self):
+        """تبويب «المال» (`only_payments`): المستحق «فاتورة» المخلّص — لا يُعرض بين حركات المال،
+        والرصيد الختامي يبقى على الحساب كلّه."""
+        clearance = self._clearance(self._shipment("SH-0017", "شحنة رقع"), "900")
+        self.client.post(
+            f"/api/logistics/clearances/{clearance.pk}/pay_from_cashbox/",
+            {"amount": "400", "cash_box_external_id": self.box.external_id, "payment_date": "2026-07-01"},
+            format="json", **self.h)
+        full = self._statement(self.broker)
+        money = partner_account_statement(
+            tenant_id=self.tenant.TenantID, partner_id=self.broker.id, is_supplier=True, only_payments=True)
+        self.assertEqual([r["reference_type"] for r in money["results"]], ["CLEARANCE_PAYMENT"])
+        self.assertEqual(money["closing_balance"], full["closing_balance"])
+
     def test_voucher_allocated_to_one_accrual_joins_it(self):
         clearance = self._clearance(self._shipment("SH-0017", "شحنة رقع"), "2500")
         voucher = self._voucher(2045)

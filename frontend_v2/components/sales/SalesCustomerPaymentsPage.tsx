@@ -101,6 +101,8 @@ const isCollectibleAgingInvoice = (invoice: AgingInvoice) =>
 const CustomerLedgerBalance: React.FC<{ partnerId: number | "" | null }> = ({ partnerId }) => {
   const [status, setStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [balance, setBalance] = useState(0);
+  // سند القبض يُفتح للدائن أيضاً (استرداد من مخلّص/مورد): موجبُ رصيده «له» لا «عليه».
+  const [isCreditor, setIsCreditor] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -116,6 +118,7 @@ const CustomerLedgerBalance: React.FC<{ partnerId: number | "" | null }> = ({ pa
       .then((response) => {
         if (cancelled) return;
         setBalance(Number(response.open_balance) || 0);
+        setIsCreditor(Boolean(response.is_creditor));
         setStatus("ready");
       })
       .catch(() => {
@@ -133,10 +136,10 @@ const CustomerLedgerBalance: React.FC<{ partnerId: number | "" | null }> = ({ pa
       data-testid="customer-ledger-balance"
       aria-live="polite"
     >
-      {status === "loading" && <span>جارٍ تحميل رصيد العميل…</span>}
+      {status === "loading" && <span>جارٍ تحميل رصيد {isCreditor ? "الطرف" : "العميل"}…</span>}
       {status === "error" && (
         <>
-          <span>تعذّر تحميل رصيد العميل</span>
+          <span>تعذّر تحميل رصيد {isCreditor ? "الطرف" : "العميل"}</span>
           <button
             type="button"
             className="ktra-toolbtn"
@@ -149,9 +152,9 @@ const CustomerLedgerBalance: React.FC<{ partnerId: number | "" | null }> = ({ pa
       {status === "ready" && (
         <span className="font-semibold">
           {balance > 0.009
-            ? <>على العميل <span className="ktra-num">{fmt(balance)}</span></>
+            ? <>{isCreditor ? "له" : "على العميل"} <span className="ktra-num">{fmt(balance)}</span></>
             : balance < -0.009
-              ? <>للعميل <span className="ktra-num">{fmt(Math.abs(balance))}</span></>
+              ? <>{isCreditor ? "عليه" : "للعميل"} <span className="ktra-num">{fmt(Math.abs(balance))}</span></>
               : "الرصيد متوازن"}
         </span>
       )}

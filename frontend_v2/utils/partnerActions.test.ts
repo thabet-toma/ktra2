@@ -110,3 +110,23 @@ test('الإجراءات مجمَّعة بعناوين — قائمة مسطّح
   const card = groups[0].actions.find((a) => a.key === 'card');
   assert.equal(card?.label, 'بطاقة العميل');
 });
+
+test("المخلّص/الوكيل/الناقل: سند صرف واسترداد — لا فاتورة شراء ولا عرض سعر شراء ولا «فواتيره»", () => {
+  for (const partnerType of ["CustomsBroker", "FreightForwarder", "LocalTransporter", "Carrier"]) {
+    const groups = partnerActionGroups({ id: "83", name: "حاييم", kind: "supplier", partnerType });
+    const keys = groups.flatMap((g) => g.actions.map((a) => a.key));
+    assert.ok(keys.includes("payment"), partnerType);
+    assert.ok(keys.includes("refund-receipt"), partnerType);
+    for (const hidden of ["purchase-invoice", "purchase-offer", "purchase-invoices"]) {
+      assert.ok(!keys.includes(hidden), `${partnerType}: ${hidden}`);
+    }
+  }
+  const broker = partnerActionGroups({ id: "83", name: "حاييم", kind: "supplier", partnerType: "CustomsBroker" });
+  assert.equal(broker[0].actions[0].label, "بطاقة مخلّص جمركي: حاييم");
+  // المورد نفسه — ومن لا يُعرف نوعه (القائمة العامّة) — كما كان.
+  for (const partnerType of ["Supplier", undefined]) {
+    const keys = partnerActionGroups({ id: "7", name: "مورد", kind: "supplier", partnerType })
+      .flatMap((g) => g.actions.map((a) => a.key));
+    assert.ok(keys.includes("purchase-invoice"));
+  }
+});
