@@ -150,7 +150,12 @@ export async function payLocalShipmentFromCashBox(
     payment_date?: string;
     notes?: string;
   },
-): Promise<{ status: string; journal_id: number; payment: LocalShipmentPaymentRow }> {
+): Promise<{
+  status: string;
+  journal_id: number;
+  payment: LocalShipmentPaymentRow | null;
+  on_account_voucher?: { id: number; amount: string } | null;
+}> {
   return apiPostObject(
     `logistics/local-shipments/${id}/pay_from_cashbox/`,
     payload,

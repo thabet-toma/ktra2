@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **900**
+عدد النقاط: **901**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -503,6 +503,7 @@
 | `/api/logistics/shipments/{pk}/unpost-freight-accrual/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/unpost/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/supplier-payments/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
+| `/api/logistics/supplier-payments/accrual-status/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/logistics-accruals/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/suggest-fifo-accruals/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |
 | `/api/logistics/supplier-payments/suggest-fifo-allocations/` | `SupplierPaymentViewSet` | `logistics/views/payments.py` |

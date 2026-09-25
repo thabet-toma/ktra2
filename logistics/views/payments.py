@@ -290,6 +290,24 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             return Response({'error': 'الطرف مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'accruals': party_open_accruals(tenant.TenantID, partner_id)})
 
+    @action(detail=False, methods=['get'], url_path='accrual-status')
+    def accrual_status(self, request):
+        """متبقّي مستحقٍّ لوجستي واحد (`?kind=clearance|freight|local&id=`) — مصدر تنبيه
+        «سيُفصل X كدفعة تحت الحساب» قبل دفعة التخليص/النقل."""
+        from logistics.domain.party_accruals import accrual_snapshot
+
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            pk = int(request.query_params.get('id'))
+        except (TypeError, ValueError):
+            return Response({'error': 'المستند مطلوب.'}, status=status.HTTP_400_BAD_REQUEST)
+        try:
+            return Response(accrual_snapshot(tenant.TenantID, str(request.query_params.get('kind') or ''), pk))
+        except DjangoValidationError as e:
+            return Response({'error': '؛ '.join(e.messages)}, status=status.HTTP_404_NOT_FOUND)
+
     @action(detail=False, methods=['get'], url_path='suggest-fifo-accruals')
     def suggest_fifo_accruals(self, request):
         """اقتراح توزيع مبلغ على مستحقّات الطرف من الأقدم — مرآة `suggest-fifo-allocations`."""

@@ -5,7 +5,8 @@ import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual } from "@/services/clearanceApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus } from "@/services/clearanceApi";
+import { overpaymentExcess, type AccrualKind } from "@/utils/voucherAllocation";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
@@ -26,6 +27,9 @@ import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, ty
 import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
+/** ذيلُ رسالة النجاح حين فصل الخادم زائد الدفعة سنداً «تحت الحساب». */
+const withOnAccountNote = (msg: string, voucher?: { id: number; amount: string } | null) =>
+  voucher ? `${msg} وفُصل ${fmt(voucher.amount)} ₪ سند صرف #${voucher.id} تحت الحساب.` : msg;
 
 /** أسماء افتراضية لأنواع بنود التخليص — تُقترَح كـ«بيان» عند اختيار النوع لبند بلا بيان. */
 const CLEARANCE_LINE_TYPE_LABELS: Record<string, string> = {
@@ -1059,6 +1063,32 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [toast]);
 
+  /**
+   * دفعةٌ أكبر من متبقّي مستحقّها المرحَّل يفصل الخادمُ زائدَها سندَ صرف «تحت الحساب»
+   * (`domain/overpayment_split.py`) — نسأل قبل الحفظ بالمتبقّي من المصدر نفسه.
+   * تعذّر جلب الحالة لا يمنع الدفع: الخادم يفصل على كلّ حال.
+   */
+  const confirmOverpaymentSplit = useCallback(async (
+    kind: AccrualKind, id: number, amount: string | number, partyLabel: string,
+  ): Promise<boolean> => {
+    let excess = 0;
+    let remaining = "0";
+    try {
+      const status = await getAccrualStatus(kind, id);
+      excess = overpaymentExcess(amount, status);
+      remaining = status.remaining;
+    } catch {
+      return true;
+    }
+    if (excess <= 0) return true;
+    return confirm({
+      title: "الدفعة أكبر من المتبقّي",
+      message: `المتبقّي على المستند ${fmt(remaining)} ₪.\nسيُفصل ${fmt(excess)} ₪ كدفعة تحت الحساب — سند صرف مستقل لـ${partyLabel} بنفس التاريخ والصندوق، يوزّعه لاحقاً على مستحقّاته من «سندات الصرف».`,
+      confirmText: "سجّل وافصل الزائد",
+      danger: false,
+    });
+  }, [confirm]);
+
   const openLocalPayment = useCallback((row: LocalShipmentRow) => {
     setPayingLocalId(row.id);
     setLocalPayAmount(String(row.remaining_balance ?? Math.max(0, Number(row.amount) - Number(row.amount_paid || 0))));
@@ -1068,9 +1098,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handlePayLocal = useCallback(async () => {
     if (!payingLocalId || !payCashBoxId || Number(localPayAmount) <= 0) return;
+    if (!(await confirmOverpaymentSplit("local", payingLocalId, localPayAmount, "الناقل"))) return;
     setSaving(true); setError(null);
     try {
-      await payLocalShipmentFromCashBox(payingLocalId, {
+      const res = await payLocalShipmentFromCashBox(payingLocalId, {
         amount: Number(localPayAmount),
         cash_box_external_id: payCashBoxId,
         payment_date: localPayDate || undefined,
@@ -1080,13 +1111,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setLocalPayAmount("");
       setLocalPayNotes("");
       await reloadLocal();
-      toast("تم تسجيل دفعة الناقل وبقيت داخل رحلة الاستيراد.", "success");
+      toast(withOnAccountNote("تم تسجيل دفعة الناقل وبقيت داخل رحلة الاستيراد.", res.on_account_voucher), "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, reloadLocal, toast]);
+  }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, reloadLocal, toast, confirmOverpaymentSplit]);
 
   // ── تراجع عن الترحيل (task17 — كانت الـ endpoints جاهزة backend بلا واجهة) ──
   const handleUnpostShipment = useCallback(async () => {
@@ -1175,9 +1206,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError("اختر الصندوق قبل تسجيل الدفعة.");
       return;
     }
+    if (!(await confirmOverpaymentSplit("clearance", clearance.id, payAmount, "المخلّص"))) return;
     setSaving(true); setError(null);
     try {
-      await payClearanceFromCashBox(clearance.id, {
+      const res = await payClearanceFromCashBox(clearance.id, {
         amount: Number(payAmount),
         cash_box_external_id: payCashBoxId,
         payment_kind: "clearance",
@@ -1189,13 +1221,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setPayDate(new Date().toISOString().slice(0, 10));
       setPayNotes("");
       await reloadPayments();
-      toast("تم تسجيل دفعة المخلّص. بقيت في رحلة الاستيراد ولم تُفتح شاشة القيود.", "success");
+      toast(withOnAccountNote("تم تسجيل دفعة المخلّص. بقيت في رحلة الاستيراد ولم تُفتح شاشة القيود.", res.on_account_voucher), "success");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setSaving(false);
     }
-  }, [clearance, payAmount, payDate, payNotes, payCashBoxId, reloadPayments, toast]);
+  }, [clearance, payAmount, payDate, payNotes, payCashBoxId, reloadPayments, toast, confirmOverpaymentSplit]);
 
   const openClearancePayment = useCallback(() => {
     const total = (clearanceForm?.lines || []).reduce(
@@ -1798,7 +1830,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         <button
           type="button" className="ktra-toolbtn" onClick={openClearancePayment}
           disabled={saving || !clearanceForm.customs_broker}
-          title="دفع للمخلّص من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)"
+          title="دفع للمخلّص من الصندوق بقيد مستقل — ما زاد عن المتبقي يُفصل سند صرف تحت الحساب"
         >
           تسجيل دفعة للمخلّص
         </button>
@@ -2367,8 +2399,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {showPaymentForm && (
         <div style={{ marginBottom: 8, border: "1px solid var(--ktra-border, #ddd)", padding: 8, borderRadius: 4 }}>
           <div className="mb-1 grid grid-cols-1 gap-x-2 gap-y-1 sm:grid-cols-2 lg:grid-cols-4">
-            {/* بلا max: الدفع الزائد مسموح ويصبح دفعة مقدمة — المخلّص يصير مديناً
-                لنا بالفائض (قرار المالك). كان الحقل والزر يمنعانه رغم قبول الخادم. */}
+            {/* بلا max: الدفع الزائد مسموح — يُسجَّل على التخليص بالمتبقّي والزائد سند صرف
+                «تحت الحساب» للمخلّص (`confirmOverpaymentSplit` يسأل قبل الحفظ). */}
             {fld(`المبلغ (المتبقي ${fmt(clearanceRemaining)} ₪)`, <input className="ktra-input" type="number" step="0.01" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} />)}
             {fld("الصندوق", <select className="ktra-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}>
               <option value="">— اختر —</option>

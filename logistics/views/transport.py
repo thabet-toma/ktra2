@@ -241,8 +241,30 @@ class LocalShipmentViewSet(BaseTenantViewSet):
             payment_date = timezone.localdate()
         currency = shipment.currency or Currency.objects.filter(Code__iexact='ILS').first()
         exchange_rate = Decimal(str(shipment.exchange_rate or 1))
+        from logistics.domain.overpayment_split import (
+            accrual_label, create_on_account_voucher, split_incoming,
+        )
+        on_account = None
         try:
             with transaction.atomic():
+                # دفعةٌ أكبر من متبقّي الإرسالية المرحَّلة: تُسجَّل بالمتبقّي، والزائد سند
+                # صرف «تحت الحساب» للناقل بنفس التاريخ والصندوق (بالعملة الأساسية وحدها).
+                if exchange_rate == Decimal('1'):
+                    amount, excess = split_incoming('local', shipment, amount)
+                    if excess > 0:
+                        on_account = create_on_account_voucher(
+                            tenant=shipment.tenant, partner=shipment.carrier, amount=excess,
+                            currency=currency, payment_date=payment_date,
+                            cash_account_id=cash_link.account_id,
+                            doc_label=accrual_label('local', shipment), user=request.user,
+                        )
+                    if amount <= 0:
+                        return Response({
+                            'status': 'الإرسالية مسدَّدة — سُجّلت الدفعة كلّها سند صرف تحت الحساب للناقل.',
+                            'journal_id': on_account.journal_id,
+                            'payment': None,
+                            'on_account_voucher': {'id': on_account.id, 'amount': str(on_account.amount)},
+                        }, status=status.HTTP_201_CREATED)
                 payment = LocalShipmentPayment.objects.create(
                     tenant=shipment.tenant,
                     local_shipment=shipment,
@@ -294,6 +316,9 @@ class LocalShipmentViewSet(BaseTenantViewSet):
             'status': 'تم تسجيل دفعة الناقل وبقيت في شاشة رحلة الاستيراد.',
             'journal_id': journal.id,
             'payment': LocalShipmentPaymentSerializer(payment).data,
+            'on_account_voucher': (
+                {'id': on_account.id, 'amount': str(on_account.amount)} if on_account else None
+            ),
         }, status=status.HTTP_201_CREATED)
 
     def perform_update(self, serializer):

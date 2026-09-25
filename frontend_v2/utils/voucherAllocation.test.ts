@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { docKey, fifoFill, type AllocatableDoc } from "./voucherAllocation.ts";
+import { docKey, fifoFill, overpaymentExcess, type AllocatableDoc } from "./voucherAllocation.ts";
 
 const clearance = (id: number, remaining: string, date: string): AllocatableDoc => ({
   id, label: `تخليص #${id}`, remaining, date, target: { kind: "clearance", id },
@@ -22,6 +22,16 @@ test("fifo fills the oldest due first regardless of list order", () => {
 test("fifo stops when the voucher is spent and skips settled docs", () => {
   const docs = [clearance(1, "0", "2026-06-01"), clearance(2, "100.10", "2026-06-02"), clearance(3, "50", "2026-06-03")];
   assert.deepEqual(fifoFill(docs, 100.1).map((r) => [r.doc.id, r.amount]), [[2, "100.10"]]);
+});
+
+test("overpayment excess is what exceeds the remaining, in exact cents", () => {
+  assert.equal(overpaymentExcess(9600, { accrual_posted: true, remaining: "7073.00" }), 2527);
+  assert.equal(overpaymentExcess("100.30", { accrual_posted: true, remaining: "100.10" }), 0.2);
+  assert.equal(overpaymentExcess(500, { accrual_posted: true, remaining: "700" }), 0);
+});
+
+test("no split before the accrual is posted — the advance stays on its document", () => {
+  assert.equal(overpaymentExcess(9600, { accrual_posted: false, remaining: "0" }), 0);
 });
 
 test("docs without a date come last", () => {

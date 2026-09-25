@@ -8,6 +8,9 @@
 
 export type AccrualKind = "clearance" | "freight" | "local";
 
+const cents = (value: string | number | null | undefined): number =>
+  Math.round((Number(value) || 0) * 100);
+
 /** مستند مفتوح قابل لاستقبال التوزيع. */
 export type AllocatableDoc = {
   id: number;
@@ -20,12 +23,36 @@ export type AllocatableDoc = {
   target?: { kind: AccrualKind; id: number };
 };
 
+/** حالة مستحقٍّ لوجستي — من `supplier-payments/accrual-status/`. */
+export type AccrualStatus = {
+  kind: AccrualKind;
+  id: number;
+  label: string;
+  accrual_posted: boolean;
+  due: string;
+  paid: string;
+  allocated: string;
+  remaining: string;
+  overpaid: string;
+};
+
+/**
+ * ما سيُفصل «دفعة تحت الحساب» من دفعةٍ على مستحقّ — مرآة `split_incoming` في
+ * الخادم (`logistics/domain/overpayment_split.py`). صفرٌ إن لم يُرحَّل الاستحقاق:
+ * الدفعة المقدّمة قبل الإفراج تبقى على مستندها.
+ */
+export function overpaymentExcess(
+  amount: string | number,
+  status: Pick<AccrualStatus, "accrual_posted" | "remaining">,
+): number {
+  if (!status.accrual_posted) return 0;
+  const excess = cents(amount) - cents(status.remaining);
+  return excess > 0 ? excess / 100 : 0;
+}
+
 export function docKey(doc: Pick<AllocatableDoc, "id" | "target">): string {
   return doc.target ? `${doc.target.kind}:${doc.target.id}` : `invoice:${doc.id}`;
 }
-
-const cents = (value: string | number | null | undefined): number =>
-  Math.round((Number(value) || 0) * 100);
 
 /**
  * يملأ المبلغ المتاح على المستندات من الأقدم استحقاقاً — «توزيع تلقائي». المستند

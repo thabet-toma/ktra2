@@ -206,9 +206,12 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                         reference_id=pay.id,
                         # يشمل القيد العكسي CLEARANCE_PAYMENT_UNPOST كي لا يبقى
                         # معلّقاً وحده بأثر وهمي (نمط العكس يُبقي الأصل مرحّلاً).
+                        # وقيدا فصل الدفعة الزائدة (`split_logistics_overpayments`):
+                        # حذفُ الأصل وحده يُبقي عكسه وإعادة ترحيله بأثرٍ وهمي.
                         journal_reference_types=[
                             'CLEARANCE_PAYMENT', 'LOGISTICS_CLEARANCE_PAYMENT',
                             'CLEARANCE_PAYMENT_UNPOST',
+                            'CLEARANCE_PAYMENT_SPLIT', 'CLEARANCE_PAYMENT_SPLIT_REVERSAL',
                         ],
                         user=request.user,
                         document_label=f"دفعة تخليص #{clearance.id}",
@@ -388,6 +391,34 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
                 purpose = 'shipping' if kind == 'shipping' else 'clearance_fee'
 
+                # دفعةٌ أكبر من متبقّي استحقاق التخليص المرحَّل: تُسجَّل بالمتبقّي،
+                # والزائد سند صرف «تحت الحساب» للمخلّص بنفس التاريخ والصندوق بلا توزيع.
+                # بالعملة الأساسية وحدها (`domain/overpayment_split.py`).
+                from logistics.domain.overpayment_split import (
+                    accrual_label, create_on_account_voucher, split_incoming,
+                )
+                on_account = None
+                is_base_pay = not (pay_currency and base_cur and pay_currency.pk != base_cur.pk)
+                if kind == "clearance" and is_base_pay:
+                    amount, excess = split_incoming("clearance", clearance, amount)
+                    if excess > 0:
+                        on_account = create_on_account_voucher(
+                            tenant=clearance.tenant, partner=payee, amount=excess,
+                            currency=pay_currency or base_cur, payment_date=payment_date,
+                            cash_account_id=cash_link.account_id,
+                            doc_label=accrual_label("clearance", clearance), user=request.user,
+                        )
+                    if amount <= 0:
+                        return Response(
+                            {
+                                "status": "التخليص مسدَّد — سُجّلت الدفعة كلّها سند صرف تحت الحساب للمخلّص.",
+                                "journal_id": on_account.journal_id,
+                                "payment": None,
+                                "on_account_voucher": {"id": on_account.id, "amount": str(on_account.amount)},
+                            },
+                            status=status.HTTP_201_CREATED,
+                        )
+
                 if kind == "shipping":
                     jdesc = (
                         f"[دفع شحن] شحنة {clearance.shipment.shipment_number} — "
@@ -481,6 +512,9 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                     "status": "تم ترحيل الدفع بنجاح.",
                     "journal_id": jh.id,
                     "payment": ser.data,
+                    "on_account_voucher": (
+                        {"id": on_account.id, "amount": str(on_account.amount)} if on_account else None
+                    ),
                 },
                 status=status.HTTP_201_CREATED,
             )

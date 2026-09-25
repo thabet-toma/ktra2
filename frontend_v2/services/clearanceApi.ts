@@ -6,6 +6,7 @@ import {
 } from "./restApi";
 import type { ClearanceCostLine, ClearanceLine } from "@/constants/clearanceDefaults";
 import { resolveTenantId } from "@/utils/tenantContext";
+import type { AccrualKind, AccrualStatus } from "@/utils/voucherAllocation";
 
 const tid = () => resolveTenantId();
 
@@ -146,6 +147,14 @@ export async function listClearancePayments(
   );
 }
 
+/** دفعة التخليص؛ `payment` فارغٌ إن كان التخليص مسدَّداً فصارت كلّها سنداً «تحت الحساب». */
+export type ClearancePaymentResult = {
+  status: string;
+  journal_id?: number;
+  payment: ClearancePaymentRow | null;
+  on_account_voucher?: { id: number; amount: string } | null;
+};
+
 export async function payClearanceFromCashBox(
   clearanceId: number,
   payload: {
@@ -157,12 +166,20 @@ export async function payClearanceFromCashBox(
     payment_kind?: "clearance" | "shipping";
     payee_partner_id?: number;
   }
-): Promise<{ status: string; journal_id?: number; payment: ClearancePaymentRow }> {
-  return apiPostObject<{ status: string; journal_id?: number; payment: ClearancePaymentRow }>(
+): Promise<ClearancePaymentResult> {
+  return apiPostObject<ClearancePaymentResult>(
     `logistics/clearances/${clearanceId}/pay_from_cashbox/`,
     payload as any,
     { tenantId: tid() }
   );
+}
+
+/** متبقّي مستحقٍّ لوجستي واحد — مصدر تنبيه «سيُفصل X كدفعة تحت الحساب». */
+export async function getAccrualStatus(kind: AccrualKind, id: number): Promise<AccrualStatus> {
+  return apiGetObject<AccrualStatus>("logistics/supplier-payments/accrual-status/", {
+    tenantId: tid(),
+    query: { kind, id },
+  });
 }
 
 export async function postClearanceAccrual(

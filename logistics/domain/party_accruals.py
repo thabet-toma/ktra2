@@ -194,16 +194,28 @@ def voucher_unallocated(payment) -> Decimal:
     return max(_money(payment.amount) - used, ZERO)
 
 
-def _load_accrual(kind: str, pk: int, tenant_id: int):
+def _load_accrual(kind: str, pk: int, tenant_id: int, *, lock: bool = True):
     from logistics.models import LocalShipment, LogisticsClearance, LogisticsShipment
 
     model = {'clearance': LogisticsClearance, 'freight': LogisticsShipment, 'local': LocalShipment}.get(kind)
     if model is None:
         raise ValidationError(f"صنف مستحق غير معروف: {kind}")
-    obj = model.objects.select_for_update().filter(pk=pk, tenant_id=tenant_id).first()
+    qs = model.objects.select_for_update() if lock else model.objects
+    obj = qs.filter(pk=pk, tenant_id=tenant_id).first()
     if obj is None:
         raise ValidationError(f"المستند {kind} #{pk} غير موجود في هذه الشركة.")
     return obj
+
+
+def accrual_snapshot(tenant_id: int, kind: str, pk: int) -> dict:
+    """حالة مستحقٍّ واحد للواجهة — تنبيه «سيُفصل X كدفعة تحت الحساب» قبل الدفع."""
+    obj = _load_accrual(kind, pk, tenant_id, lock=False)
+    _party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
+    return {
+        'kind': kind, 'id': obj.pk, 'label': _label(kind, obj),
+        'accrual_posted': bool(accrual_journal_id),
+        **{k: str(v) for k, v in accrual_status(kind, obj).items()},
+    }
 
 
 def allocate_voucher_to_accruals(payment, allocations: list[dict], *, user=None):
@@ -285,7 +297,7 @@ def deallocate_voucher_accrual(payment, allocation_id: int, *, user=None):
 
 
 __all__ = [
-    'KINDS', 'accrual_status', 'accrual_remaining', 'allocated_base', 'party_open_accruals',
+    'KINDS', 'accrual_status', 'accrual_remaining', 'accrual_snapshot', 'allocated_base', 'party_open_accruals',
     'suggest_accrual_fifo', 'voucher_unallocated', 'allocate_voucher_to_accruals',
     'deallocate_voucher_accrual',
 ]
