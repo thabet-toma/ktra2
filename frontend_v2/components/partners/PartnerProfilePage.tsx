@@ -98,6 +98,17 @@ interface StatementRow {
   link_key?: string | null;
   link_label?: string | null;
   link_count?: number;
+  /**
+   * «SH-0017 — شحنة رقع» — وسم الشحنة الحيّ من مستند الحركة المرجعي (تخليص، إرسالية،
+   * استحقاق شحن، دفعاتها، سند صرفٍ موزَّع عليها). القيد القديم يحمل الرقم وحده.
+   */
+  shipment_label?: string | null;
+}
+
+/** وسم الشحنة تحت البيان — حين لا يحمله نصّ القيد أصلاً (القيود القديمة). */
+function StatementShipmentLabel({ row }: { row: StatementRow }) {
+  if (!row.shipment_label || (row.description || '').includes(row.shipment_label)) return null;
+  return <span className="text-[10px] text-[var(--ktra-ink-soft)]">الشحنة: {row.shipment_label}</span>;
 }
 
 /** حركات مخزون مستندٍ واحد، كما يجمعها الخادم تحت المستند المسبِّب. */
@@ -444,7 +455,16 @@ export const PartnerProfilePage: React.FC = () => {
         </div>
       ),
     },
-    { key: 'description', header: 'البيان', render: (r) => clarifyStatementDescription(r.reference_type, r.description) || '—' },
+    {
+      key: 'description',
+      header: 'البيان',
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span>{clarifyStatementDescription(r.reference_type, r.description) || '—'}</span>
+          <StatementShipmentLabel row={r} />
+        </div>
+      ),
+    },
     { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
     { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
     { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="ktra-num">{r?.running_balance ?? ''}</b> },
@@ -470,13 +490,16 @@ export const PartnerProfilePage: React.FC = () => {
       key: 'reference',
       header: 'الحركة',
       render: (r) => (
-        <DocRefCell
-          referenceType={r.reference_type}
-          referenceId={r.reference_id}
-          label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
-            r.reference_id != null ? ` #${r.reference_id}` : ''
-          }`}
-        />
+        <div className="flex flex-col gap-0.5">
+          <DocRefCell
+            referenceType={r.reference_type}
+            referenceId={r.reference_id}
+            label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
+              r.reference_id != null ? ` #${r.reference_id}` : ''
+            }`}
+          />
+          <StatementShipmentLabel row={r} />
+        </div>
       ),
     },
     { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },

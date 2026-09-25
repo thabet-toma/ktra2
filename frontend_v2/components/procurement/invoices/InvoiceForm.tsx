@@ -1439,7 +1439,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     ? suppliers.find((s) => s.id === formData.supplierId)
     : undefined;
   const shipmentLinkId = formData.importLogistics?.shipmentId || formData.shipment;
-  const shipmentDisplayNumber = formData.importLogistics?.shipmentNumber || `#${shipmentLinkId || ""}`;
+  const shipmentDisplayNumber = formData.importLogistics?.shipmentLabel
+    || formData.importLogistics?.shipmentNumber || `#${shipmentLinkId || ""}`;
   const isShipmentLinkedImport = Boolean(shipmentLinkId);
   const costLabels = getPurchaseInvoiceCostLabels(isShipmentLinkedImport);
 
@@ -3606,7 +3607,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               >
                 <ExternalLink className="h-3.5 w-3.5" />
                 <span>فتح رحلة الشحنة</span>
-                <b dir="ltr">{shipmentDisplayNumber}</b>
+                <b dir="auto">{shipmentDisplayNumber}</b>
               </button>
             </div>
           )}

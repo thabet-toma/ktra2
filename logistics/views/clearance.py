@@ -100,8 +100,9 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
     serializer_class = LogisticsClearanceSerializer
 
     def get_queryset(self):
-        deal_mini = LogisticsDeal.objects.only(
-            "id", "description", "ref_number", "notes"
+        # short_name والمورد لـ`display_label` (اسم الشحنة من صفقاتها) بلا استعلامٍ لكل صفّ.
+        deal_mini = LogisticsDeal.objects.select_related("partner").only(
+            "id", "description", "ref_number", "notes", "short_name", "partner__name"
         ).order_by("id")
         qs = (
             super()
@@ -227,14 +228,21 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=["get"])
     def payments(self, request, pk=None):
+        from logistics.domain.party_accruals import document_voucher_rows
+
         clearance = self.get_object()
         rows = (
             LogisticsClearancePayment.objects.filter(clearance=clearance)
             .select_related("customs_broker", "journal")
             .order_by("-payment_date", "-id")
         )
-        ser = LogisticsClearancePaymentSerializer(rows, many=True)
-        return Response(ser.data, status=status.HTTP_200_OK)
+        # والسندات الموزَّعة عليه: رأسُ التخليص يعدّها مدفوعاً (`document_settlement`)
+        # فالتبويب يعرضها — كان يقرأ دفعاته المباشرة وحدها فيبدو فارغاً تحت «مدفوع».
+        data = list(LogisticsClearancePaymentSerializer(rows, many=True).data)
+        data += document_voucher_rows("clearance", clearance)
+        # بالتاريخ وحده (الأحدث أولاً): الفرز مستقرّ فيبقى ترتيب كل مصدرٍ داخل اليوم.
+        data.sort(key=lambda r: str(r.get("payment_date") or ""), reverse=True)
+        return Response(data, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=["post"])
     def pay_from_cashbox(self, request, pk=None):
@@ -421,16 +429,16 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
 
                 if kind == "shipping":
                     jdesc = (
-                        f"[دفع شحن] شحنة {clearance.shipment.shipment_number} — "
+                        f"[دفع شحن] شحنة {clearance.shipment.display_label} — "
                         f"{payee.name} — صندوق {cash_link.name}"
                     )[:500]
-                    line_desc = f"دفع شحن — {clearance.shipment.shipment_number}"
+                    line_desc = f"دفع شحن — {clearance.shipment.display_label}"
                 else:
                     jdesc = (
-                        f"[تخليص شحنة {clearance.shipment.shipment_number}] "
+                        f"[تخليص شحنة {clearance.shipment.display_label}] "
                         f"دفع للمخلّص {payee.name} من الصندوق {cash_link.name}"
                     )[:500]
-                    line_desc = f"دفع تخليص جمركي — {clearance.shipment.shipment_number}"
+                    line_desc = f"دفع تخليص جمركي — {clearance.shipment.display_label}"
 
                 pay = LogisticsClearancePayment.objects.create(
                     tenant=clearance.tenant,

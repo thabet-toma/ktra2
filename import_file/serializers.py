@@ -160,7 +160,8 @@ def serialize_import_file(deal, shipment) -> dict:
     return {
         "deal": {"id": deal.pk, "ref_number": deal.ref_number},
         "shipment": (
-            {"id": shipment.pk, "shipment_number": shipment.shipment_number}
+            {"id": shipment.pk, "shipment_number": shipment.shipment_number,
+             "shipment_label": shipment.display_label}
             if shipment is not None else None
         ),
         "stages": stages,

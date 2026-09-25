@@ -131,6 +131,8 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
     shipment_number_source = serializers.CharField(
         source='shipment.shipment_number', read_only=True,
     )
+    # وسم الشحنة الدولية التي تنقلها (مباشرةً أو عبر التخليص) — فارغ لإرساليةٍ حرّة.
+    shipment_label = serializers.CharField(read_only=True)
     expense_account_code = serializers.CharField(
         source='expense_account.code', read_only=True, allow_null=True,
     )
@@ -155,7 +157,7 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
             'id',
             'shipment_number',
             'clearance', 'clearance_number',
-            'shipment', 'shipment_number_source',
+            'shipment', 'shipment_number_source', 'shipment_label',
             'carrier', 'carrier_name',
             'driver_name', 'vehicle_number',
             'origin', 'destination',
@@ -226,6 +228,7 @@ class LocalShipmentSerializer(serializers.ModelSerializer):
 
 class LocalShipmentPaymentSerializer(serializers.ModelSerializer):
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True)
+    shipment_label = serializers.CharField(source='local_shipment.shipment_label', read_only=True)
     currency_code = serializers.CharField(source='currency.Code', read_only=True)
 
     class Meta:

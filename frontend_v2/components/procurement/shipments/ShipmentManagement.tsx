@@ -187,8 +187,8 @@ export const ShipmentManagement: React.FC<ShipmentManagementProps> = ({
             header: 'اسم الشحنة',
             sortable: true,
             render: (s) => (
-                <span title={s.shipmentName || undefined}>
-                    {(s.shipmentName || '').trim() || '—'}
+                <span title={s.displayName || undefined}>
+                    {(s.displayName || s.shipmentName || '').trim() || '—'}
                 </span>
             ),
         },

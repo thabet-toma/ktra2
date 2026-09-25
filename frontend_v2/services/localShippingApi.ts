@@ -39,6 +39,8 @@ export type LocalShipmentRow = {
   clearance_number?: string | null;
   shipment: number | null;
   shipment_number_source?: string | null;
+  /** وسم الشحنة الدولية التي تنقلها — مباشرةً أو عبر التخليص (فارغ لإرساليةٍ حرّة). */
+  shipment_label?: string | null;
   carrier: number;
   carrier_name?: string;
   driver_name?: string | null;

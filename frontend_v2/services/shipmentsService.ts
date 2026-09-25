@@ -255,6 +255,8 @@ function mapShipmentFromSql(s: any): Shipment {
     status,
     notes: s.notes || "",
     shipmentName: s.shipment_name || "",
+    shipmentLabel: s.shipment_label || "",
+    displayName: s.shipment_display_name || s.shipment_name || "",
     pricingMethod: s.pricing_method || "total",
     unitType: s.unit_type || "cbm",
     pricePerUnit: Number(s.price_per_unit || 0),

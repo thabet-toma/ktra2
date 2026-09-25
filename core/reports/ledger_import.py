@@ -99,11 +99,12 @@ def _import_shipments(tenant_id: int, params: dict) -> list[dict]:
 
     qs = LogisticsShipment.objects.filter(tenant_id=tenant_id).select_related(
         "shipping_agent",
-    )
+    ).prefetch_related("deals__partner")
     qs = _apply_dates(qs, "departure_date", params)
     return [{
         "id": sh.id,
-        "number": sh.shipment_number or f"#{sh.id}",
+        # «SH-0017 — شحنة رقع» (`display_label`) — الرقم وحده لا يعرّف الشحنة.
+        "number": sh.display_label,
         "departure_date": sh.departure_date,
         "arrival_date": sh.arrival_date,
         "agent": sh.shipping_agent.name if sh.shipping_agent_id else "",

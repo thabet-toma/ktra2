@@ -111,7 +111,8 @@ export const LocalShippingPage: React.FC = () => {
     if (search) {
       const s = search.toLowerCase();
       result = result.filter(r =>
-        r.shipment_number?.includes(s) ||
+        r.shipment_number?.toLowerCase().includes(s) ||
+        r.shipment_label?.toLowerCase().includes(s) ||
         r.carrier_name?.toLowerCase().includes(s) ||
         r.origin?.toLowerCase().includes(s) ||
         r.destination?.toLowerCase().includes(s)
@@ -190,11 +191,12 @@ export const LocalShippingPage: React.FC = () => {
     },
     {
       key: "clearance",
-      header: "التخليص",
-      width: "120px",
+      header: "الشحنة / التخليص",
+      width: "220px",
       render: (r) => (
         <span style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)" }}>
-          {r.clearance_number ? `بيان ${r.clearance_number}` : r.shipment_number_source || "—"}
+          {[r.shipment_label || r.shipment_number_source, r.clearance_number ? `بيان ${r.clearance_number}` : ""]
+            .filter(Boolean).join(" · ") || "—"}
         </span>
       ),
     },

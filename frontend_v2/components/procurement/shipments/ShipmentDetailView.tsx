@@ -200,7 +200,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         </div>
                         <div>
                             <h2 className="text-xl font-bold ktra-text-ink dark:text-white">
-                                {shipment.shipmentName || `شحنة ${shipmentNumber}`}
+                                {shipment.displayName || shipment.shipmentName || `شحنة ${shipmentNumber}`}
                             </h2>
                             <p className="text-sm ktra-text-soft">تفاصيل الشحنة #{shipmentNumber}</p>
                         </div>
@@ -238,7 +238,7 @@ export const ShipmentDetailView: React.FC<ShipmentDetailViewProps> = ({ shipment
                         <div className="flex justify-between items-start">
                             <div>
                                 <h1 className="text-2xl font-bold ktra-text-ink">
-                                    {shipment.shipmentName || `شحنة ${shipmentNumber}`}
+                                    {shipment.displayName || shipment.shipmentName || `شحنة ${shipmentNumber}`}
                                 </h1>
                                 <p className="ktra-text-soft">تقرير تفصيلي للشحنة #{shipmentNumber}</p>
                             </div>

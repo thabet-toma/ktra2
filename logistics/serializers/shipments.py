@@ -127,6 +127,10 @@ from .deals import LogisticsDealShipmentSummarySerializer, LogisticsPaymentSeria
 
 class LogisticsShipmentSerializer(serializers.ModelSerializer):
     shipment_number = serializers.CharField(required=False, allow_blank=True)
+    # «SH-0017 — شحنة رقع» من `LogisticsShipment.display_label` — الواجهة لا تحسبه.
+    shipment_label = serializers.CharField(source='display_label', read_only=True)
+    # الاسم وحده لعمود «اسم الشحنة» — `shipment_name` أو المشتقّ من الصفقات/المورد.
+    shipment_display_name = serializers.CharField(source='display_name', read_only=True)
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
     deals = LogisticsDealShipmentSummarySerializer(many=True, read_only=True)
     shipment_deal_allocations = LogisticsShipmentDealAllocationSerializer(
@@ -139,10 +143,23 @@ class LogisticsShipmentSerializer(serializers.ModelSerializer):
     payments = LogisticsPaymentSerializer(
         many=True, required=False, source="agent_payments"
     )
+    # سندات صرف الوكيل الموزَّعة على استحقاق الشحن — بالدولار (÷ سعر الاستحقاق)
+    # بجانب دفعاته في تبويب «الدفعات» (`party_accruals.document_voucher_rows`).
+    freight_voucher_rows = serializers.SerializerMethodField()
+
+    def get_freight_voucher_rows(self, obj) -> list:
+        from logistics.domain.party_accruals import document_voucher_rows
+
+        if not obj.pk or not obj.freight_is_posted:
+            return []
+        return document_voucher_rows('freight', obj, rate=obj.freight_exchange_rate)
 
     class Meta:
         model = LogisticsShipment
         fields = [f.name for f in LogisticsShipment._meta.concrete_fields] + [
+            "shipment_label",
+            "shipment_display_name",
+            "freight_voucher_rows",
             "agent_name",
             "deals",
             "shipment_deal_allocations",
@@ -213,6 +230,8 @@ class LogisticsShipmentListSerializer(serializers.ModelSerializer):
     """Collection contract: shipment header plus scalar summaries only."""
 
     agent_name = serializers.CharField(source='shipping_agent.name', read_only=True)
+    shipment_label = serializers.CharField(source='display_label', read_only=True)
+    shipment_display_name = serializers.CharField(source='display_name', read_only=True)
     deals_count = serializers.IntegerField(read_only=True)
     payments_count = serializers.IntegerField(read_only=True)
     payments_total = serializers.DecimalField(
@@ -222,6 +241,7 @@ class LogisticsShipmentListSerializer(serializers.ModelSerializer):
     class Meta:
         model = LogisticsShipment
         fields = [field.name for field in LogisticsShipment._meta.concrete_fields] + [
-            'agent_name', 'deals_count', 'payments_count', 'payments_total',
+            'shipment_label', 'shipment_display_name', 'agent_name', 'deals_count', 'payments_count',
+            'payments_total',
         ]
         read_only_fields = fields

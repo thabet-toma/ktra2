@@ -127,6 +127,7 @@ def _shipment_rows(tenant, limit: int) -> list:
         .filter(tenant=tenant)
         .order_by("-id")
         .annotate(linked_deals=Count("logisticsshipmentdeal", distinct=True))
+        .prefetch_related("deals__partner")
     )
     shipments = list(qs[: limit * 3])
     if not shipments:
@@ -180,7 +181,8 @@ def _shipment_rows(tenant, limit: int) -> list:
         rows.append({
             "id": shipment.pk,
             "number": shipment.shipment_number or f"#{shipment.pk}",
-            "name": shipment.shipment_name or None,
+            # `display_name`: شحنةٌ بلا اسم تُعرف بصفقاتها أو مورّدها لا برقمها وحده.
+            "name": shipment.display_name or None,
             "shipment_type": shipment.shipment_type or "invoice",
             "deals_count": shipment.linked_deals,
             "freight_total_usd": str(_money(shipment.total_shipping_cost_usd)),

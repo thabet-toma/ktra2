@@ -114,6 +114,10 @@ export interface Shipment {
     status: ShipmentStatus;
     notes?: string;
     shipmentName?: string;
+    /** «SH-0017 — شحنة رقع» من الخادم (`shipment_label`) — لا يُحسب في الواجهة. */
+    shipmentLabel?: string;
+    /** الاسم وحده: `shipment_name` أو المشتقّ من الصفقات/المورد (`shipment_display_name`). */
+    displayName?: string;
     pricingMethod?: 'total' | 'unit';
     unitType?: 'cbm' | 'weight' | 'container';
     pricePerUnit?: number;

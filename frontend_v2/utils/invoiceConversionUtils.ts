@@ -53,7 +53,8 @@ export function formatInvoiceImportLogisticsLine(il: InvoiceImportLogistics): st
     const name = (il.shipmentName || "").trim();
     const num = (il.shipmentNumber || "").trim();
     let ship: string;
-    if (name && num && name !== num) ship = `${name} — ${num}`;
+    if ((il.shipmentLabel || "").trim()) ship = String(il.shipmentLabel).trim();
+    else if (name && num && name !== num) ship = `${name} — ${num}`;
     else if (num) ship = num;
     else if (name) ship = name;
     else ship = `شحنة #${il.shipmentId}`;

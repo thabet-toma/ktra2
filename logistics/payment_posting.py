@@ -162,7 +162,7 @@ def post_shipment_agent_payment(payment, *, box_account, user=None):
         if not ok_cap:
             raise ValidationError(cap_err)
 
-        description = f"دفعة {locked.title} | شحنة: {shipment.shipment_number}"
+        description = f"دفعة {locked.title} | شحنة: {shipment.display_label}"
         # نفس بنّاء قيد دفعة الصفقة (صندوق الدولار FIFO أو الدولار الاسمي بسعره).
         lines_data, journal_currency, journal_rate = build_usd_payment_journal(
             locked, debit_account_id=agent.linked_account_id, partner_id=agent.id,

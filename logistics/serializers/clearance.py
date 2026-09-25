@@ -138,6 +138,8 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
     shipment_name = serializers.CharField(
         source="shipment.shipment_name", read_only=True, allow_null=True
     )
+    # «SH-0017 — شحنة رقع» من `LogisticsShipment.display_label` — الواجهة لا تحسبه.
+    shipment_label = serializers.CharField(source="shipment.display_label", read_only=True)
     deals_count = serializers.SerializerMethodField()
     deals_preview = serializers.SerializerMethodField()
     local_shipments = serializers.SerializerMethodField()
@@ -362,6 +364,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
 
 class LogisticsClearancePaymentSerializer(serializers.ModelSerializer):
     broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
+    shipment_label = serializers.CharField(source="clearance.shipment.display_label", read_only=True)
     journal_id_display = serializers.IntegerField(source="journal.id", read_only=True)
     currency_code = serializers.CharField(
         source="currency.Code", read_only=True, allow_null=True, default=None

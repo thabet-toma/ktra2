@@ -115,10 +115,13 @@ class LocalShipmentViewSet(BaseTenantViewSet):
     """
 
     queryset = LocalShipment.objects.all().select_related(
-        'carrier', 'clearance', 'shipment', 'currency',
+        'carrier', 'clearance', 'clearance__shipment', 'shipment', 'currency',
         'expense_account', 'cash_or_bank_account',
         'journal', 'purchase_invoice',
-    ).prefetch_related('payments__journal', 'payments__currency')
+    ).prefetch_related(
+        'payments__journal', 'payments__currency',
+        'shipment__deals__partner', 'clearance__shipment__deals__partner',
+    )
     serializer_class = LocalShipmentSerializer
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
 
@@ -204,9 +207,14 @@ class LocalShipmentViewSet(BaseTenantViewSet):
 
     @action(detail=True, methods=['get'])
     def payments(self, request, pk=None):
+        from logistics.domain.party_accruals import document_voucher_rows
+
         shipment = self.get_object()
         rows = shipment.payments.select_related('journal', 'currency').all()
-        return Response(LocalShipmentPaymentSerializer(rows, many=True).data)
+        # والسندات الموزَّعة عليها بعملتها — مرآة تبويب دفعات التخليص.
+        data = list(LocalShipmentPaymentSerializer(rows, many=True).data)
+        data += document_voucher_rows('local', shipment, rate=shipment.exchange_rate)
+        return Response(data)
 
     @action(detail=True, methods=['post'])
     def pay_from_cashbox(self, request, pk=None):
@@ -281,14 +289,14 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                     transaction_date=payment_date,
                     reference_type='LOCAL_SHIPMENT_PAYMENT',
                     reference_id=payment.id,
-                    description=f"دفع نقل محلي {shipment.shipment_number} | {shipment.carrier.name}"[:500],
+                    description=f"دفع نقل محلي {shipment.display_label} | {shipment.carrier.name}"[:500],
                     lines_data=[
                         {
                             'account': shipment.carrier.linked_account_id,
                             'partner': shipment.carrier_id,
                             'debit': amount,
                             'credit': Decimal('0'),
-                            'description': f"دفع للناقل — {shipment.shipment_number}",
+                            'description': f"دفع للناقل — {shipment.display_label}"[:255],
                         },
                         {
                             'account': cash_link.account_id,

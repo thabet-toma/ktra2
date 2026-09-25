@@ -126,6 +126,7 @@ from ._helpers import _apply_lines_subtotal_and_grand_total, _to_decimal
 
 class LogisticsPaymentSerializer(serializers.ModelSerializer):
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True)
+    shipment_label = serializers.CharField(source='shipment.display_label', read_only=True, default=None)
     
     class Meta:
         model = LogisticsPayment
@@ -314,6 +315,8 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
                 'id': sh.id,
                 'shipment_number': sh.shipment_number or '',
                 'shipment_name': sh.shipment_name or '',
+                # شاشة الصفقة وحدها (صفٌّ واحد) — القائمة بلا وسمٍ كي لا تستعلم لكل صفّ.
+                'shipment_label': sh.display_label,
             }
         except Exception:
             return None

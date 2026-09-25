@@ -110,7 +110,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
             'partner': None,
             'debit': amount,
             'credit': Decimal('0'),
-            'description': f"{line.description} — {clearance.shipment.shipment_number}"[:500],
+            'description': f"{line.description} — {clearance.shipment.display_label}"[:500],
         })
 
     total = sum((row['debit'] for row in lines_data), Decimal('0'))
@@ -122,7 +122,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
         'partner': broker.id,
         'debit': Decimal('0'),
         'credit': total,
-        'description': f"استحقاق تخليص — {clearance.shipment.shipment_number}"[:500],
+        'description': f"استحقاق تخليص — {clearance.shipment.display_label}"[:500],
     })
 
     transaction_date = clearance.clearance_date or timezone.localdate()
@@ -132,7 +132,7 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
         transaction_date=transaction_date,
         reference_type='LOGISTICS_CLEARANCE',
         reference_id=clearance.id,
-        description=f"استحقاق تخليص {clearance.shipment.shipment_number} | {broker.name}"[:500],
+        description=f"استحقاق تخليص {clearance.shipment.display_label} | {broker.name}"[:500],
         lines_data=lines_data,
         currency=clearance.currency or Currency.objects.filter(Code__iexact='ILS').first(),
         exchange_rate=_as_decimal(clearance.exchange_rate, '1'),
@@ -187,20 +187,20 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
         transaction_date=td,
         reference_type='LOCAL_SHIPMENT',
         reference_id=shipment.pk,
-        description=f"ارسالية {shipment.shipment_number} | {shipment.carrier.name}"[:500],
+        description=f"ارسالية {shipment.display_label} | {shipment.carrier.name}"[:500],
         lines_data=[
             # سطرُ الذمة وحده يحمل الناقل: المصروفُ الموسومُ به يُلغي دائنَه في
             # `partner_posted_balance` وكشفه (إنتاج: قيد #10961 — الهجرة 0090).
             {
                 'account': expense_account.id, 'partner': None,
                 'debit': amt, 'credit': Decimal('0'),
-                'description': f"استحقاق نقل محلي — {shipment.shipment_number}"[:255],
+                'description': f"استحقاق نقل محلي — {shipment.display_label}"[:255],
             },
             {
                 'account': credit_account.id, 'partner': shipment.carrier_id,
                 'debit': Decimal('0'), 'credit': amt,
                 'description': (
-                    f"ارسالية {shipment.shipment_number} — {shipment.carrier.name}"
+                    f"ارسالية {shipment.display_label} — {shipment.carrier.name}"
                 )[:255],
             },
         ],
@@ -259,7 +259,7 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     td = shipment.departure_date or shipment.arrival_date or timezone.localdate()
     validate_fiscal_period(tenant, td)
 
-    desc = f"استحقاق شحن دولي | شحنة: {shipment.shipment_number} | وكيل: {agent.name}"
+    desc = f"استحقاق شحن دولي | شحنة: {shipment.display_label} | وكيل: {agent.name}"
     journal = post_journal(
         tenant_id=tenant.TenantID,
         transaction_date=td,

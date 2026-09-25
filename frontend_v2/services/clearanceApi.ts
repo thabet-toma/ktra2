@@ -16,6 +16,8 @@ export type ClearanceRow = {
   shipment_number?: string;
   /** اسم تعريفي للشحنة (عربي) — من logistics_shipments.shipment_name */
   shipment_name?: string | null;
+  /** «SH-0017 — شحنة رقع» من الخادم (`shipment.display_label`). */
+  shipment_label?: string | null;
   customs_broker: number | null;
   broker_name?: string;
   declaration_number?: string | null;
@@ -60,6 +62,7 @@ export type ClearanceRow = {
 
 /** سطر عرض موحّد: «اسم الشحنة — S-00xx» كما في شاشة التخليص */
 export function formatClearanceShipmentLine(c: ClearanceRow): string {
+  if ((c.shipment_label || "").trim()) return String(c.shipment_label).trim();
   const num = (c.shipment_number || "").trim();
   const name = (c.shipment_name || "").trim();
   const fallback = c.shipment ? `شحنة #${c.shipment}` : "شحنة";
@@ -70,8 +73,9 @@ export function formatClearanceShipmentLine(c: ClearanceRow): string {
 }
 
 export type ClearancePaymentRow = {
-  id: number;
-  clearance: number;
+  /** رقمٌ للدفعة المباشرة، و`alloc-<n>` لصفّ سندٍ موزَّع. */
+  id: number | string;
+  clearance?: number;
   amount: number;
   currency?: number | null;
   currency_code?: string | null;
@@ -84,6 +88,11 @@ export type ClearancePaymentRow = {
   journal_id_display?: number | null;
   broker_name?: string;
   created_at?: string;
+  shipment_label?: string | null;
+  /** صفّ سند صرفٍ موزَّع على التخليص (`party_accruals.document_voucher_rows`) لا دفعة مباشرة. */
+  row_type?: "voucher_allocation";
+  voucher_id?: number;
+  kind_label?: string;
 };
 
 export async function listClearances(

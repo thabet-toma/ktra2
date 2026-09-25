@@ -53,7 +53,7 @@ const runGuarded = singleFlight(async (userId: string): Promise<void> => {
     const days = calendarDaysUntil(ad);
     if (days < 0 || days > 3) continue;
     const dedupe = `${LS_PREFIX}:${s.id}:${todayKey}:${days}`;
-    const num = s.shipmentNumber || `شحنة #${s.id}`;
+    const num = s.shipmentLabel || s.shipmentNumber || `شحنة #${s.id}`;
     const dayWord =
       days === 0 ? "اليوم" : days === 1 ? "يوم واحد" : days === 2 ? "يومان" : `${days} أيام`;
     await claimOnceAndRun(() => localStorage, dedupe, () =>

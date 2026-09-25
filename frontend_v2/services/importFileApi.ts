@@ -74,7 +74,7 @@ export interface ImportFileStageRow {
 
 export interface ImportFilePayload {
   deal: { id: number; ref_number: string };
-  shipment: { id: number; shipment_number: string } | null;
+  shipment: { id: number; shipment_number: string; shipment_label?: string } | null;
   stages: ImportFileStageRow[];
   progress: ImportFileProgress;
 }

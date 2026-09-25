@@ -121,11 +121,13 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     dealNumber: dto.deal_ref || undefined,
     dealTitle: dto.deal_title || undefined,
     shipment: dto.shipment ? String(dto.shipment) : undefined,
+    shipmentLabel: dto.shipment_label || undefined,
     clearanceId: dto.clearance != null ? String(dto.clearance) : undefined,
     importLogistics: dto.shipment && dto.clearance != null ? {
       shipmentId: String(dto.shipment),
       shipmentNumber: dto.shipment_number || undefined,
       shipmentName: dto.shipment_name || undefined,
+      shipmentLabel: dto.shipment_label || undefined,
       clearanceId: dto.clearance,
     } : undefined,
     supplierSnapshot: { tradeName: dto.partner_name || "" },

@@ -1523,6 +1523,41 @@ class LogisticsShipment(SoftDeleteMixin, models.Model):
     def __str__(self):
         return self.shipment_number
 
+    #: حدّ الاسم المشتقّ من الصفقات — يعرّف الشحنة ولا يُغرق عمود الجدول.
+    DISPLAY_NAME_LIMIT = 60
+
+    @property
+    def display_name(self) -> str:
+        """ما هي الشحنة: `shipment_name`، وإلّا وصف صفقاتها المختصر (`short_name` ثم أول
+        سطر من `description`، مجموعةً بـ«،»)، وإلّا اسم مورّدها. يقرأ `deals.all()` فتكفيه
+        `prefetch_related('deals__partner')` في القوائم."""
+        name = (self.shipment_name or '').strip()
+        if name or not self.pk:
+            return name
+        deals = list(self.deals.all())
+        parts: list[str] = []
+        for deal in deals:
+            text = (deal.short_name or '').strip() or next(
+                (line.strip() for line in (deal.description or '').splitlines() if line.strip()), '')
+            if text and text not in parts:
+                parts.append(text)
+        if not parts:
+            for deal in deals:
+                supplier = (getattr(deal.partner, 'name', '') or '').strip()
+                if supplier and supplier not in parts:
+                    parts.append(supplier)
+        joined = '، '.join(parts)
+        if len(joined) > self.DISPLAY_NAME_LIMIT:
+            joined = joined[:self.DISPLAY_NAME_LIMIT - 1].rstrip() + '…'
+        return joined
+
+    @property
+    def display_label(self) -> str:
+        """«SH-0017 — شحنة رقع»: الوسم الواحد للشاشات والقيود وكشوف الحساب."""
+        number = self.shipment_number or f'#{self.pk}'
+        name = self.display_name
+        return f'{number} — {name}' if name else number
+
 class LogisticsShipmentDeal(models.Model):
     id = models.AutoField(primary_key=True, db_column='LinkID')
     shipment = models.ForeignKey(LogisticsShipment, on_delete=models.CASCADE, db_column='ShipmentID')
@@ -1868,6 +1903,26 @@ class LocalShipment(models.Model):
 
     def __str__(self):
         return f"{self.shipment_number} — {self.carrier.name if self.carrier_id else '—'}"
+
+    @property
+    def import_shipment(self):
+        """الشحنة الدولية التي تنقلها الإرسالية — مباشرةً أو عبر تخليصها (قد لا تكون)."""
+        if self.shipment_id:
+            return self.shipment
+        return self.clearance.shipment if self.clearance_id else None
+
+    @property
+    def shipment_label(self) -> str:
+        """وسم الشحنة الدولية (`LogisticsShipment.display_label`) أو فارغ."""
+        shipment = self.import_shipment
+        return shipment.display_label if shipment is not None else ''
+
+    @property
+    def display_label(self) -> str:
+        """«LS-0003 · SH-0019 — داتا لوجر» — رقم الإرسالية ثم ما تنقله."""
+        number = self.shipment_number or f'#{self.pk}'
+        label = self.shipment_label
+        return f'{number} · {label}' if label else number
 
 
 class LocalShipmentPayment(models.Model):

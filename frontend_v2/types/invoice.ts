@@ -94,6 +94,8 @@ export interface InvoiceImportLogistics {
     shipmentId: string;
     shipmentNumber?: string;
     shipmentName?: string | null;
+    /** «SH-0017 — شحنة رقع» من الخادم — لا يُركَّب في الواجهة. */
+    shipmentLabel?: string | null;
     clearanceId: number;
     clearanceDeclaration?: string | null;
     brokerName?: string | null;
@@ -264,6 +266,8 @@ export interface Invoice {
     glPurchaseReceiptJournalId?: number;
     /** FK شحنة SQL */
     shipment?: string;
+    /** «SH-0017 — شحنة رقع» من الخادم (`shipment_label`). */
+    shipmentLabel?: string;
     /** FK تخليص SQL */
     clearanceId?: string;
     /** فاتورة شراء SQL مرحّلة إلى المحاسبة — لا يُعاد حساب التكلفة الأرضية تلقائياً */

@@ -149,7 +149,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
     def get_queryset(self):
         qs = PurchaseInvoice.objects.all().select_related(
             'partner', 'deal', 'shipment', 'clearance', 'currency', 'journal',
-        ).order_by('-created_at', '-id')
+        ).prefetch_related('shipment__deals__partner').order_by('-created_at', '-id')
         # كما في الصفقات: الرصيد للقائمة يأتي من الـmixin بعد الترقيم.
         if self.action != 'list':
             qs = annotate_partner_posted_balance(

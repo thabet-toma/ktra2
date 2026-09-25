@@ -358,7 +358,7 @@ def _clearances(tenant_id: int, params: dict) -> list[dict]:
 
     qs = LogisticsClearance.objects.filter(tenant_id=tenant_id).select_related(
         "shipment", "customs_broker",
-    )
+    ).prefetch_related("shipment__deals__partner")
     qs = _apply_dates(qs, "clearance_date", params)
     broker = _int_param(params, "partner")
     if broker:
@@ -367,7 +367,7 @@ def _clearances(tenant_id: int, params: dict) -> list[dict]:
         "id": c.shipment_id,
         "book_number": c.book_number or f"#{c.id}",
         "date": c.clearance_date,
-        "shipment": c.shipment.shipment_number if c.shipment_id else "",
+        "shipment": c.shipment.display_label if c.shipment_id else "",
         "broker": c.customs_broker.name if c.customs_broker_id else "",
         "declaration_number": c.declaration_number or "",
         "status": _CLEARANCE_STATUS.get(c.status, c.status or ""),
@@ -409,14 +409,17 @@ _LOCAL_SHIPMENT_STATUS = {
 def _local_shipments(tenant_id: int, params: dict) -> list[dict]:
     from logistics.models import LocalShipment
 
-    qs = LocalShipment.objects.filter(tenant_id=tenant_id).select_related("carrier")
+    qs = LocalShipment.objects.filter(tenant_id=tenant_id).select_related(
+        "carrier", "shipment", "clearance__shipment",
+    ).prefetch_related("shipment__deals__partner", "clearance__shipment__deals__partner")
     qs = _apply_dates(qs, "pickup_date", params)
     carrier = _int_param(params, "partner")
     if carrier:
         qs = qs.filter(carrier_id=carrier)
     return [{
         "id": s.id,
-        "number": s.shipment_number or f"#{s.id}",
+        # «LS-0003 · SH-0019 — داتا لوجر»: الإرسالية وما تنقله.
+        "number": s.display_label,
         "pickup_date": s.pickup_date,
         "delivery_date": s.delivery_date,
         "carrier": s.carrier.name if s.carrier_id else "",

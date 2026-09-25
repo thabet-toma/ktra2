@@ -303,6 +303,24 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
         ) : <span className="text-xs ktra-text-soft">—</span>
       ),
     },
+    // الفاتورة الدولية تُعرف بشحنتها أيضاً: «SH-0017 — شحنة رقع» لا الرقم وحده.
+    ...(isInternational ? [{
+      key: "shipmentLabel",
+      header: "الشحنة",
+      width: "200px",
+      render: (r: Invoice) => (
+        r.shipment ? (
+          <button
+            type="button"
+            className="text-xs text-[var(--ktra-accent)] underline hover:no-underline cursor-pointer bg-transparent border-0 p-0 font-inherit text-right"
+            title="فتح رحلة الشحنة في تبويب جديد"
+            onClick={(e) => { e.stopPropagation(); openInNewTab(`/import-flow/${r.shipment}`); }}
+          >
+            {r.shipmentLabel || `#${r.shipment}`}
+          </button>
+        ) : <span className="text-xs ktra-text-soft">—</span>
+      ),
+    } as DenseColumn<Invoice>] : []),
     {
       key: "status",
       header: "الحالة",

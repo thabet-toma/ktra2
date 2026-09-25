@@ -6,7 +6,8 @@ import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus, getClearance } from "@/services/clearanceApi";
-import { docSettlement, overpaymentExcess, type AccrualKind } from "@/utils/voucherAllocation";
+import { docSettlement, overpaymentExcess, type AccrualKind, type VoucherAllocationRow } from "@/utils/voucherAllocation";
+import { entityPathForReference } from "@/utils/entityLinks";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
@@ -44,6 +45,24 @@ function clearanceSettlementOf(
     .filter((p) => p.payment_purpose !== "shipping" && p.is_posted)
     .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
   return { due, ...docSettlement(Boolean(clearance?.journal), clearance, { due, paid }) };
+}
+
+/** دفعة تخليص مباشرة مرحَّلة — صفوف السندات الموزَّعة لا يتراجع عنها زرّ «دفعات التخليص». */
+const isPostedDirectPayment = (p: ClearancePaymentRow) => p.is_posted && p.row_type !== "voucher_allocation";
+
+/** رقم سند الصرف الموزَّع رابطاً يفتح السند في تبويب جديد. */
+function VoucherLink({ row }: { row: VoucherAllocationRow }) {
+  const path = entityPathForReference("SUPPLIER_PAYMENT", row.voucher_id);
+  return (
+    <button
+      type="button"
+      className="font-mono font-bold text-blue-600 hover:underline dark:text-blue-400"
+      title={row.shipment_label ? `سند صرف #${row.voucher_id} — ${row.shipment_label}` : undefined}
+      onClick={() => path && openInNewTab(path, `سند صرف #${row.voucher_id}`)}
+    >
+      #{row.voucher_id}
+    </button>
+  );
 }
 
 /** ذيلُ رسالة النجاح حين فصل الخادم زائد الدفعة سنداً «تحت الحساب». */
@@ -105,6 +124,10 @@ interface ShipmentApiRow {
   id: number;
   shipment_number?: string;
   shipment_name?: string;
+  /** «SH-0017 — شحنة رقع» من الخادم (`display_label`). */
+  shipment_label?: string;
+  /** سندات صرف الوكيل الموزَّعة على استحقاق الشحن — بالدولار. */
+  freight_voucher_rows?: VoucherAllocationRow[];
   shipment_date?: string;
   transaction_time?: string;
   second_date?: string;
@@ -1470,10 +1493,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     Boolean(String(p.bank_swift_image || "").trim()) ||
     Boolean(String(p.cash_box_external_id || "").trim()) ||
     ["confirmed", "paid"].includes(String(p.status || "").toLowerCase());
+  // وسندات صرف الوكيل الموزَّعة على استحقاق الشحن — تُسدّده كدفعاته.
+  const freightVoucherRows: VoucherAllocationRow[] = shipment?.freight_voucher_rows || [];
   const freightTotalUsd = Number(s.total_shipping_cost_usd) || 0;
   const freightPaidUsd = agentPayments
     .filter(isAgentPaymentSettled)
-    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    .reduce((sum, p) => sum + (Number(p.amount) || 0), 0)
+    + freightVoucherRows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
   const freightFullyPaid = freightTotalUsd > 0 && freightPaidUsd >= freightTotalUsd - 0.02;
   // بوابة الاستيراد صارت «التكلفة مُثبتة» لا «مدفوعة»: قيد الاستحقاق يثبّت تكلفة
   // الشحن وسعر صرفها، فلا داعي لدفع الوكيل — ولا لدفعة وهمية عندما تكون التكلفة صفراً.
@@ -1559,7 +1585,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     <>
       <span className="ktra-status-item">الحالة <b>{s.shipping_workflow_status || "—"}</b></span>
       {s.transit_journal && <span className="ktra-status-item">رقم القيد <b>#{s.transit_journal}</b></span>}
-      <span className="ktra-status-item">رقم الشحنة <b>{s.shipment_number || "—"}</b></span>
+      <span className="ktra-status-item">الشحنة <b>{s.shipment_label || s.shipment_number || "—"}</b></span>
       {isShipmentDirty && <span className="ktra-status-item" style={{ color: "var(--ktra-warn, #b45309)" }}>● غير محفوظ</span>}
       <span className="ktra-status-item">السجل <b>{nav.position}/{nav.total}</b></span>
     </>
@@ -2259,7 +2285,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       {/* ── ١) دفعات وكيل الشحن الدولي (USD) — سداد الذمّة، لا شرط للاستيراد ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
         <h4 style={{ fontSize: "var(--ktra-fs-sm, 12px)", fontWeight: 600 }}>
-          دفعات وكيل الشحن — الشحن الدولي بالدولار ({agentPayments.length})
+          دفعات وكيل الشحن — الشحن الدولي بالدولار ({agentPayments.length + freightVoucherRows.length})
         </h4>
         <button
           type="button"
@@ -2320,7 +2346,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           </p>
         </div>
       )}
-      {agentPayments.length > 0 && (
+      {(agentPayments.length > 0 || freightVoucherRows.length > 0) && (
         <table className="ktra-input" style={{ width: "100%", fontSize: "var(--ktra-fs-sm, 12px)", marginBottom: 10 }}>
           <thead><tr style={{ background: "var(--ktra-bg-strip, #f5f5f5)", fontWeight: 600 }}>
             <th style={{ padding: "2px 4px", textAlign: "start", width: 40 }}>#</th>
@@ -2343,6 +2369,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                     : <span style={{ color: "var(--ktra-warn, #b45309)" }}>معلّقة</span>}
                 </td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : p.is_posted ? "✓" : "—"}</td>
+              </tr>
+            ))}
+            {freightVoucherRows.map((r) => (
+              <tr key={r.id}>
+                <td className="px-1 py-0.5"><VoucherLink row={r} /></td>
+                <td className="px-1 py-0.5">{formatDateLocalized(r.payment_date) || "—"}</td>
+                <td className="px-1 py-0.5 text-center font-mono">{fmt(r.amount)}</td>
+                <td className="px-1 py-0.5 text-center">—</td>
+                <td className="px-1 py-0.5 text-center">{r.kind_label}</td>
+                <td className="px-1 py-0.5 text-center">{r.journal ? `#${r.journal}` : "—"}</td>
               </tr>
             ))}
           </tbody>
@@ -2426,7 +2462,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             {clearancePayments.map((p) => (
               <tr key={p.id}>
                 <td style={{ padding: "2px 4px" }}>{formatDateLocalized(p.payment_date) || "—"}</td>
-                <td style={{ padding: "2px 4px" }}>{p.payment_purpose || "—"}</td>
+                <td style={{ padding: "2px 4px" }}>
+                  {p.row_type === "voucher_allocation"
+                    ? <span className="inline-flex items-center gap-1">{p.kind_label} <VoucherLink row={p as VoucherAllocationRow} /></span>
+                    : p.payment_purpose || "—"}
+                </td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : "—"}</td>
@@ -2462,8 +2502,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <button
             type="button" className="ktra-toolbtn"
             onClick={() => void handleUnpostClearance()}
-            disabled={!clearance || saving || !clearancePayments.some((p) => p.is_posted)}
-            title={clearancePayments.some((p) => p.is_posted)
+            disabled={!clearance || saving || !clearancePayments.some(isPostedDirectPayment)}
+            title={clearancePayments.some(isPostedDirectPayment)
               ? "يحذف قيود كل دفعات التخليص المرحّلة ويعيدها مسودات"
               : "لا توجد دفعات تخليص مرحّلة"}
           >
@@ -2708,8 +2748,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </div>
       )}
       <KitDocumentShell
-        title={`رحلة الاستيراد — ${s.shipment_name || (s.shipment_number ? `شحنة ${s.shipment_number}` : "شحنة جديدة")}`}
-        state={s.shipment_number ? `شحنة #${s.shipment_number}` : "شحنة جديدة"}
+        title={`رحلة الاستيراد — ${s.shipment_label || s.shipment_name || (s.shipment_number ? `شحنة ${s.shipment_number}` : "شحنة جديدة")}`}
+        state={s.shipment_label ? `شحنة ${s.shipment_label}` : s.shipment_number ? `شحنة #${s.shipment_number}` : "شحنة جديدة"}
         nav={nav}
         actions={toolbarActions}
         header={headerBand}

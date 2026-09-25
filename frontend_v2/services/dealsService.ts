@@ -368,6 +368,7 @@ function mapDealFromSql(d: SqlDeal): Deal {
           id: Number(d.linked_shipment.id),
           shipmentNumber: String(d.linked_shipment.shipment_number || ""),
           shipmentName: String(d.linked_shipment.shipment_name || ""),
+          shipmentLabel: String(d.linked_shipment.shipment_label || ""),
         }
       : null,
     linkedInvoice: d?.linked_invoice

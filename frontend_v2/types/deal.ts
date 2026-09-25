@@ -162,7 +162,7 @@ export interface Deal {
     /** مرحلة الشحن (يدوي/تلقائي) — مصدر الحقيقة في قاعدة البيانات */
     shippingWorkflowStatus?: ShippingWorkflowStatus | null;
     /** الشحنة المرتبطة (إن وُجدت) — لعرض خريطة المسار ورابط رحلة الاستيراد */
-    linkedShipment?: { id: number; shipmentNumber: string; shipmentName: string } | null;
+    linkedShipment?: { id: number; shipmentNumber: string; shipmentName: string; shipmentLabel?: string } | null;
     /** فاتورة الشراء الناتجة عن تحويل الصفقة (إن وُجدت) — لرابط «فتح الفاتورة» بجانب حالة «محوّلة» */
     linkedInvoice?: { id: number; invoiceNumber: string } | null;
     installments: DealInstallment[];

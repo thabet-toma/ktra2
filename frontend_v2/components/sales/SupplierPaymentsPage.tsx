@@ -47,6 +47,10 @@ interface SupplierPaymentRow {
   notes?: string | null;
   /** T-ONACC: التوزيع على فواتير الشراء والمتبقّي «على الحساب». */
   allocations?: Array<{ id: number; invoice: number; invoice_number?: string; amount: string }>;
+  /** توزيعه على مستحقّات المخلّص/وكيل الشحن/الناقل — `label` يسمّي المستند وشحنته. */
+  logistics_allocations?: Array<{
+    id: number; kind: string; target_id: number; amount: string; label?: string; shipment_label?: string;
+  }>;
   unallocated_amount?: string;
 }
 
@@ -54,7 +58,9 @@ interface SupplierPaymentRow {
 const unallocatedOf = (p: SupplierPaymentRow) =>
   p.unallocated_amount != null
     ? Number(p.unallocated_amount)
-    : Number(p.amount) - (p.allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
+    : Number(p.amount)
+      - (p.allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0)
+      - (p.logistics_allocations || []).reduce((s, a) => s + Number(a.amount || 0), 0);
 
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -215,6 +221,35 @@ export const SupplierPaymentsPage: React.FC = () => {
     }
   };
 
+  // فكّ توزيعٍ على مستحقٍّ لوجستي — مرآة فكّ الفاتورة (`deallocate-accrual/`).
+  const handleDeallocateAccrual = async (
+    p: SupplierPaymentRow,
+    a: NonNullable<SupplierPaymentRow["logistics_allocations"]>[number],
+  ) => {
+    if (busyId != null) return;
+    const label = a.label || `#${a.target_id}`;
+    const ok = await confirm({
+      title: "فكّ التوزيع",
+      message:
+        `سيُفكّ توزيع ${fmt(a.amount)} من السند #${p.id} عن ${label}، ` +
+        "فيعود المبلغ «على الحساب» ويعود المستحق بمتبقّيه — بلا قيد جديد. متابعة؟",
+      confirmText: "فكّ التوزيع",
+      danger: true,
+    });
+    if (!ok) return;
+    setErr(null);
+    setBusyId(p.id);
+    try {
+      await purchaseInvoiceApi.deallocateSupplierPaymentAccrual(p.id, a.id);
+      setMsg("✓ تم فكّ التوزيع — المبلغ عاد على الحساب");
+      await load();
+    } catch (e: unknown) {
+      setErr(humanizeThrown(e, "فشل فكّ التوزيع"));
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
   const accountName = (id: number) => {
     const a = accounts.find((x) => x.id === id);
@@ -246,6 +281,21 @@ export const SupplierPaymentsPage: React.FC = () => {
       key: "allocations", header: "التوزيعات",
       render: (r) => (
         <span className="text-[11px]">
+          {(r.logistics_allocations || []).map((a) => (
+            <span key={`acc-${a.id}`} className="inline-flex items-center gap-0.5 me-2" title={a.shipment_label || undefined}>
+              {a.label || `#${a.target_id}`} = {fmt(a.amount)}
+              <button
+                type="button"
+                className="ktra-toolbtn"
+                title="فكّ التوزيع"
+                aria-label={`فكّ التوزيع عن ${a.label || `#${a.target_id}`}`}
+                disabled={busyId != null}
+                onClick={(e) => { e.stopPropagation(); void handleDeallocateAccrual(r, a); }}
+              >
+                <Unlink className="w-3 h-3" />
+              </button>
+            </span>
+          ))}
           {r.allocations && r.allocations.length > 0
             ? r.allocations.map((a) => (
                 <span key={a.id} className="inline-flex items-center gap-0.5 me-2">
@@ -262,7 +312,7 @@ export const SupplierPaymentsPage: React.FC = () => {
                   </button>
                 </span>
               ))
-            : <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
+            : !(r.logistics_allocations || []).length && <span style={{ color: "var(--ktra-ink-soft)" }}>بدون توزيع</span>}
         </span>
       ),
     },

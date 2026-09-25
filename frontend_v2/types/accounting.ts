@@ -372,6 +372,8 @@ export interface VatStatementDto {
 export interface LandedCostShipment {
   shipment_id: number;
   shipment_number: string;
+  /** «SH-0017 — شحنة رقع» من الخادم. */
+  shipment_label?: string;
   status: string;
   arrival_date: string | null;
   shipping_agent: string | null;

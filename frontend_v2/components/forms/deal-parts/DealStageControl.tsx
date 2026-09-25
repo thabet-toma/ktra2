@@ -102,7 +102,7 @@ export const DealStageControl: React.FC<StageProps> = ({
       ? null
       : shipment
         ? {
-            label: `متابعة رحلة الاستيراد — ${shipment.shipmentName || shipment.shipmentNumber || `#${shipment.id}`}`,
+            label: `متابعة رحلة الاستيراد — ${shipment.shipmentLabel || shipment.shipmentName || shipment.shipmentNumber || `#${shipment.id}`}`,
             hint:
               currentIdx >= WF_ORDER.sw_wait_clearance
                 ? "أكمل التخليص ثم حوّل إلى فاتورة شراء دولية."
@@ -280,7 +280,7 @@ export const DealStageControl: React.FC<StageProps> = ({
         <div className="flex items-center justify-between gap-3 rounded-lg border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20 px-4 py-3">
           <div className="text-sm text-blue-900 dark:text-blue-200">
             <span className="font-semibold">الشحنة المرتبطة: </span>
-            {shipment.shipmentName || shipment.shipmentNumber || `#${shipment.id}`}
+            {shipment.shipmentLabel || shipment.shipmentName || shipment.shipmentNumber || `#${shipment.id}`}
           </div>
           <button
             type="button"

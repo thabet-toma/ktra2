@@ -246,7 +246,7 @@ export const ImportFilePanel: React.FC<ImportFilePanelProps> = ({ dealId }) => {
         </span>
         {file.shipment && (
           <span className="text-[11px] text-[var(--color-text-muted)]">
-            ضمن الشحنة {file.shipment.shipment_number} — وثائق الشحن تُرفع مرّة واحدة لكل صفقاتها.
+            ضمن الشحنة {file.shipment.shipment_label || file.shipment.shipment_number} — وثائق الشحن تُرفع مرّة واحدة لكل صفقاتها.
           </span>
         )}
         <button
@@ -472,7 +472,7 @@ export const ImportFilePanel: React.FC<ImportFilePanelProps> = ({ dealId }) => {
           </button>
           {SHIPMENT_ANCHORED_STAGES.has(draftStage) && file.shipment && (
             <p className="basis-full text-[10px] text-[var(--color-text-muted)]">
-              بنود هذه المرحلة تُضاف على الشحنة {file.shipment.shipment_number} فتظهر في ملف كل صفقاتها.
+              بنود هذه المرحلة تُضاف على الشحنة {file.shipment.shipment_label || file.shipment.shipment_number} فتظهر في ملف كل صفقاتها.
             </p>
           )}
         </div>

@@ -4157,6 +4157,17 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
                 row["link_label"] = f"{len(links)} فواتير"
 
 
+def _attach_statement_shipment_labels(tenant_id: int, rows: list) -> None:
+    """`shipment_label` لكل حركة من مستندها المرجعي الحيّ («SH-0017 — شحنة رقع») —
+    وصف القيد نصُّ لحظة الترحيل، والقديم يحمل رقم الشحنة وحده. None لغير اللوجستي."""
+    from logistics.domain.party_accruals import journal_reference_shipment_labels
+
+    labels = journal_reference_shipment_labels(
+        tenant_id, [(row["reference_type"], row["reference_id"]) for row in rows])
+    for row in rows:
+        row["shipment_label"] = labels.get((row["reference_type"], row["reference_id"]))
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
@@ -4268,6 +4279,7 @@ def partner_account_statement(
             row["is_anchor"] = lid in anchor_set
         rows.append(row)
     _attach_statement_document_links(rows, is_supplier=is_supplier)
+    _attach_statement_shipment_labels(tenant_id, rows)
     out = {
         "results": rows,
         "count": total,

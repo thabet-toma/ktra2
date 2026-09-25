@@ -9,7 +9,7 @@ from rest_framework.exceptions import ValidationError
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction, IntegrityError
 from django.db.models import (
-    Count, DecimalField, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum,
+    Count, DecimalField, Exists, F, IntegerField, OuterRef, Prefetch, Q, Subquery, Sum,
     Value,
 )
 from django.db.models.functions import Coalesce
@@ -106,6 +106,10 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
         qs = super().get_queryset().select_related("shipping_agent")
         search = str(self.request.query_params.get('search') or '').strip()
         if search:
+            # والاسم المشتقّ (`display_label`): شحنةٌ بلا `shipment_name` تُعرف بصفقاتها.
+            deal_match = LogisticsShipmentDeal.objects.filter(shipment_id=OuterRef('pk')).filter(
+                Q(deal__short_name__icontains=search) | Q(deal__description__icontains=search)
+            )
             qs = qs.filter(
                 Q(shipment_number__icontains=search)
                 | Q(shipment_name__icontains=search)
@@ -113,6 +117,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 | Q(container_number__icontains=search)
                 | Q(bill_of_lading__icontains=search)
                 | Q(shipping_agent__name__icontains=search)
+                | Exists(deal_match)
             )
         shipping_type = str(self.request.query_params.get('shipping_type') or '').strip().lower()
         if shipping_type in {'air', 'sea'}:
@@ -182,7 +187,12 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                     total_shipping_cost_usd__gt=0,
                     payments_total__gte=F('total_shipping_cost_usd'),
                 )
-            return qs
+            # `shipment_label` يقرأ الصفقات ومورّدها — استعلامٌ واحد للصفحة لا لكل صفّ.
+            return qs.prefetch_related(Prefetch(
+                'deals',
+                queryset=LogisticsDeal.objects.select_related('partner').only(
+                    'id', 'short_name', 'description', 'partner__name'),
+            ))
 
         qs = qs.prefetch_related(
             Prefetch('deals', queryset=LogisticsDeal.objects.select_related('partner')),
@@ -747,7 +757,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 transaction_date=shipment.departure_date or timezone.localdate(),
                 reference_type='LOGISTICS_SHIPMENT',
                 reference_id=shipment.id,
-                description=f"تكلفة شحن | شحنة: {shipment.shipment_number} | وكيل: {shipment.shipping_agent.name}",
+                description=f"تكلفة شحن | شحنة: {shipment.display_label} | وكيل: {shipment.shipping_agent.name}",
                 lines_data=lines_data,
             )
         except (ValidationError, DjangoValidationError) as ve:

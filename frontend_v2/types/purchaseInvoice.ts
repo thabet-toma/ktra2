@@ -72,6 +72,8 @@ export interface PurchaseInvoiceListDto {
   shipment?: number | null;
   shipment_number?: string | null;
   shipment_name?: string | null;
+  /** «SH-0017 — شحنة رقع» من الخادم (`shipment.display_label`). */
+  shipment_label?: string | null;
   clearance?: number | null;
   currency?: number | null;
   currency_code?: string | null;
@@ -133,6 +135,7 @@ export interface PurchaseInvoiceDto {
   shipment?: number | null;
   shipment_number?: string | null;
   shipment_name?: string | null;
+  shipment_label?: string | null;
   clearance?: number | null;
   /** T-PLINEAGE: المستند الذي وُلدت منه الفاتورة (عرض سعر أو طلبية شراء). */
   source_document?: {

@@ -139,6 +139,9 @@ class LogisticsAccrualAllocationSerializer(serializers.Serializer):
     amount_base = serializers.DecimalField(max_digits=18, decimal_places=2, read_only=True)
     kind = serializers.SerializerMethodField()
     target_id = serializers.SerializerMethodField()
+    # «تخليص #13 — SH-0017 — شحنة رقع» وما تحته — شاشة السند تسمّي ما وُزِّع عليه.
+    label = serializers.SerializerMethodField()
+    shipment_label = serializers.SerializerMethodField()
 
     def get_kind(self, obj) -> str:
         if obj.clearance_id:
@@ -147,6 +150,19 @@ class LogisticsAccrualAllocationSerializer(serializers.Serializer):
 
     def get_target_id(self, obj) -> int:
         return obj.clearance_id or obj.shipment_id or obj.local_shipment_id
+
+    def _target(self, obj):
+        return obj.clearance or obj.shipment or obj.local_shipment
+
+    def get_label(self, obj) -> str:
+        from logistics.domain.party_accruals import _label
+
+        return _label(self.get_kind(obj), self._target(obj))
+
+    def get_shipment_label(self, obj) -> str:
+        from logistics.domain.party_accruals import shipment_label_of
+
+        return shipment_label_of(self.get_kind(obj), self._target(obj))
 
 class _SupplierChequeInputSerializer(serializers.Serializer):
     """شيك صادر داخل سند الصرف — مبلغه جزء من مبلغ السند لا إضافة عليه."""

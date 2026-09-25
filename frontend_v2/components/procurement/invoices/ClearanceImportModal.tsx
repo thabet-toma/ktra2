@@ -105,7 +105,8 @@ function importButtonFooterHint(args: {
 
 function shipmentTitleAndNumber(s: Shipment): { title: string; numberLine: string } {
     const num = (s.shipmentNumber || "").trim() || "—";
-    const name = (s.shipmentName || "").trim();
+    // الاسم المشتقّ من الخادم (`shipment_display_name`) — شحنةٌ بلا اسم تُعرف بصفقاتها.
+    const name = (s.displayName || s.shipmentName || "").trim();
     if (name && name !== num) return { title: name, numberLine: `رقم الشحنة: ${num}` };
     return { title: num, numberLine: `رقم الشحنة: ${num}` };
 }

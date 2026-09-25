@@ -175,7 +175,8 @@ class LandedCostReportViewSet(viewsets.ViewSet):
         qs = qs.select_related('shipping_agent', 'tenant').prefetch_related(
             'clearance',
             'clearance__payments',
-            'deals',
+            # ومورّد الصفقة: `shipment_label` بلا استعلامٍ لكل شحنة.
+            'deals__partner',
         ).order_by('-arrival_date', '-id')
 
         # P1-2 (SCALABILITY_AUDIT §2-3): كان البناء يستعلم لكل شحنة على حدة —
@@ -399,6 +400,7 @@ def _build_landed_cost_summary(shipment, *, detailed=False, links_map=None, pi_m
     return {
         'shipment_id': shipment.id,
         'shipment_number': shipment.shipment_number,
+        'shipment_label': shipment.display_label,
         'status': shipment.status,
         'arrival_date': shipment.arrival_date.isoformat() if shipment.arrival_date else None,
         'shipping_agent': shipment.shipping_agent.name if shipment.shipping_agent else None,

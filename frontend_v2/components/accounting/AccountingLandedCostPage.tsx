@@ -83,7 +83,7 @@ export const AccountingLandedCostPage: React.FC = () => {
         </button>
       ),
     },
-    { key: "shipment_number", header: "الشحنة", render: (r) => <span style={{ fontFamily: "monospace" }}>{r.shipment_number}</span> },
+    { key: "shipment_number", header: "الشحنة", render: (r) => <span>{r.shipment_label || r.shipment_number}</span> },
     { key: "arrival_date", header: "الوصول", render: (r) => formatDateLocalized(r.arrival_date) || "—" },
     { key: "status", header: "الحالة", render: (r) => r.status },
     { key: "total_merchandise", header: "البضاعة", numeric: true, render: (r) => fmt(r.total_merchandise) },

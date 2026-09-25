@@ -251,6 +251,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     receipt_status_display = serializers.CharField(source='get_receipt_status_display', read_only=True)
     shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
+    shipment_label = serializers.CharField(source='shipment.display_label', read_only=True, default=None)
     # اسم الصفقة المحوَّلة — نفس مصدر قائمة الصفقات (بلا تكرار منطق الاشتقاق).
     deal_title = serializers.SerializerMethodField()
     fees_total = serializers.DecimalField(
@@ -313,7 +314,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref', 'deal_title',
-            'shipment', 'shipment_number', 'shipment_name', 'clearance',
+            'shipment', 'shipment_number', 'shipment_name', 'shipment_label', 'clearance',
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount', 'tax_rate', 'tax_amount',
             'grand_total', 'status', 'status_display',
@@ -430,6 +431,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
+    shipment_label = serializers.CharField(source='shipment.display_label', read_only=True, default=None)
     from tenants.models import Currency
     currency = serializers.SlugRelatedField(
         slug_field='Code',
@@ -445,7 +447,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'invoice_type',
             'partner', 'partner_name',
             'deal', 'deal_ref',
-            'shipment', 'shipment_number', 'shipment_name',
+            'shipment', 'shipment_number', 'shipment_name', 'shipment_label',
             'clearance',
             'currency', 'currency_code', 'exchange_rate',
             'subtotal', 'discount_amount',

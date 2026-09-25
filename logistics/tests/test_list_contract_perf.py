@@ -155,7 +155,9 @@ class LogisticsListContractPerformanceTest(TestCase):
             "/api/logistics/shipments/?page=1&page_size=2"
         )
         self.assertEqual(response.data["count"], 8)
-        self.assertLessEqual(query_count, 4)
+        # 4 + استعلام الصفقات ومورّدها لـ`shipment_label` (اسم الشحنة بلا `shipment_name`)
+        # — ثابتٌ للصفحة كما يتحقّق السطر التالي، لا لكل صفّ.
+        self.assertLessEqual(query_count, 5)
         _, large_query_count = self._get_with_query_count(
             "/api/logistics/shipments/?page=1&page_size=8"
         )

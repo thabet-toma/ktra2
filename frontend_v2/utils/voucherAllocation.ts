@@ -50,6 +50,22 @@ export function overpaymentExcess(
   return excess > 0 ? excess / 100 : 0;
 }
 
+/**
+ * سند صرفٍ موزَّع على مستحقّ — صفٌّ في تبويب «الدفعات» بجانب دفعاته المباشرة
+ * (`party_accruals.document_voucher_rows`). المبلغ بعملة المستند، فمجموع التبويب
+ * = المدفوع في رأسه.
+ */
+export type VoucherAllocationRow = {
+  id: string;
+  row_type: "voucher_allocation";
+  voucher_id: number;
+  kind_label: string;
+  payment_date: string | null;
+  amount: string;
+  journal: number | null;
+  shipment_label?: string | null;
+};
+
 /** أرقام المستند كما يرسلها مسلسله (`party_accruals.document_settlement`). */
 export type ServerSettlement = {
   amount_paid?: string | number | null;
