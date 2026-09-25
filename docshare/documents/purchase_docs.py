@@ -20,6 +20,7 @@
 الحسّاسة ويبحث عنها حرفياً في الصفحة المُصيَّرة.
 """
 from decimal import Decimal
+from types import SimpleNamespace
 
 from django.core.exceptions import ValidationError
 
@@ -44,6 +45,8 @@ from docshare.documents._contract import (
     total,
 )
 from logistics.models import (
+    DEAL_CURRENCY_CODE,
+    DEAL_CURRENCY_SYMBOL,
     LogisticsDeal,
     PurchaseInvoice,
     PurchaseOrder,
@@ -354,8 +357,10 @@ _DEAL_COLUMNS = (
     "subtotal", "discount_amount", "tax_amount", "total_amount",
     "partner__name", "partner__street_address", "partner__city",
     "partner__phone", "partner__tax_number",
-    "currency__Code", "currency__Symbol",
 )
+
+#: ورقة المورّد بالدولار دائماً — `deal.currency` يحمل ILS على صفقات الإنتاج.
+_DEAL_CURRENCY = SimpleNamespace(Code=DEAL_CURRENCY_CODE, Symbol=DEAL_CURRENCY_SYMBOL)
 
 
 def load_logistics_deal(tenant_id: int, doc_id: int):
@@ -363,7 +368,7 @@ def load_logistics_deal(tenant_id: int, doc_id: int):
     #: لا تُحمَّل، فرابطُها يردّ 404 لا صفحةً لمستندٍ ألغاه صاحبه.
     return (
         LogisticsDeal.objects
-        .select_related("partner", "currency")
+        .select_related("partner")
         .filter(pk=doc_id, tenant_id=tenant_id)
         .only(*_DEAL_COLUMNS)
         .first()
@@ -405,7 +410,7 @@ def build_logistics_deal(deal) -> dict:
         status_tone=tone_for(_DEAL_TONES, deal.status),
         party_title="المورّد",
         party=deal.partner,
-        currency=deal.currency,
+        currency=_DEAL_CURRENCY,
         meta_rows=[
             meta("التاريخ", deal.order_date, VALUE_DATE),
             meta("رقم الفاتورة المبدئية", deal.pi_number),
@@ -420,7 +425,7 @@ def build_logistics_deal(deal) -> dict:
                 "مدة الكفالة (شهر)",
                 deal.warranty_duration or "", VALUE_QTY,
             ),
-            meta("العملة", deal.currency.Code if deal.currency_id else ""),
+            meta("العملة", DEAL_CURRENCY_CODE),
         ],
         lines=lines,
         # لا `remaining_amount` ولا `fees_percentage` ولا `shipping_cost_estimate`:

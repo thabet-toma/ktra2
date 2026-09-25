@@ -24,6 +24,7 @@ from .models import (
     LogisticsShipmentDeal,
     PurchaseInvoice,
     SupplierQuotation,
+    DEAL_CURRENCY_CODE,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,7 +73,7 @@ def _deal_rows(tenant, limit: int) -> tuple[list, int]:
         .filter(tenant=tenant)
         .exclude(status__in=DEAL_CLOSED_STATUSES)
         .exclude(shipping_workflow_status=DEAL_RELEASED_STAGE)
-        .select_related("partner", "currency")
+        .select_related("partner")
         .order_by("-id")
     )
     deals = list(qs[: limit * 4])
@@ -106,7 +107,7 @@ def _deal_rows(tenant, limit: int) -> tuple[list, int]:
             "ref": deal.ref_number or f"#{deal.pk}",
             "title": (deal.short_name or deal.description or "").strip() or None,
             "partner_name": deal.partner.name if deal.partner_id else None,
-            "currency_code": deal.currency.Code if deal.currency_id else None,
+            "currency_code": DEAL_CURRENCY_CODE,
             "stage": deal.shipping_workflow_status or None,
             "total": str(total),
             "paid": str(paid),

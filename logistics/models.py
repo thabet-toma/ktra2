@@ -830,6 +830,13 @@ class PublicSupplierQuoteRequestLine(models.Model):
         return f'{self.request_id} · {self.name_snapshot}'
 
 
+#: صفقة الاستيراد بالدولار دائماً (قرار المالك 2026-09-24). `LogisticsDeal.currency`
+#: يحمل ILS على صفقات الإنتاج كلها فلا يُقرأ للعرض ولا للحساب — العرضُ من هنا،
+#: والترحيلُ من سعر كل دفعة (`payment_posting.py`).
+DEAL_CURRENCY_CODE = 'USD'
+DEAL_CURRENCY_SYMBOL = '$'
+
+
 class LogisticsDeal(SoftDeleteMixin, models.Model):
     STATUS_CHOICES = [
         ('Open', 'Open'),
@@ -853,6 +860,7 @@ class LogisticsDeal(SoftDeleteMixin, models.Model):
     partner = models.ForeignKey(Partner, on_delete=models.PROTECT, db_column='PartnerID')
     order_date = models.DateField(db_column='OrderDate')
     total_amount = models.DecimalField(max_digits=18, decimal_places=2, default=0.00, db_column='TotalAmount')
+    # لا يُقرأ: الصفقة دولارٌ دائماً (`DEAL_CURRENCY_CODE`) — صفقاتُ الإنتاج تحمل ILS هنا.
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, db_column='CurrencyID')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='Open', db_column='Status')
     notes = models.TextField(null=True, blank=True, db_column='Notes')

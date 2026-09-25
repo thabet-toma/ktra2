@@ -241,3 +241,15 @@ def test_arabic_page_never_shows_an_english_status_label(client, env, deal, supp
         html = client.get(f"/s/{share.token}").content.decode("utf-8")
         badge = html.split('class="badge')[1].split("</span>")[0]
         assert english not in badge, f"[{doc_type}] شارة الحالة بالإنجليزية: {badge}"
+
+
+def test_deal_document_is_always_in_dollars(env, deal):
+    """صفقة الاستيراد دولارٌ دائماً (قرار المالك) — وصفقاتُ الإنتاج تحمل ILS في
+    `currency`، فكانت ورقة المورّد تطبع ₪ و«العملة: ILS» بجانب مبالغ دولارية."""
+    from docshare.documents.purchase_docs import build_logistics_deal
+
+    assert env["currency"].Code != "USD"
+    data = build_logistics_deal(deal)
+    assert (data["currency_code"], data["currency_symbol"]) == ("USD", "$")
+    currency_rows = [r for r in data["meta_rows"] if r and r["label"] == "العملة"]
+    assert [r["value"] for r in currency_rows] == ["USD"]

@@ -22,6 +22,7 @@ from logistics.models import (
     LogisticsPayment, LogisticsClearancePayment,
     PurchaseInvoice, PurchaseInvoiceItem, PurchaseInvoiceFee, PurchaseInvoicePayment,
     LocalShipment, LocalShipmentPayment,
+    DEAL_CURRENCY_CODE,
 )
 from sales.models import SupplierPayment
 from logistics.serializers import (
@@ -215,7 +216,7 @@ def _prefetch_landed_cost_context(tenant, shipments):
     links = (
         LogisticsShipmentDeal.objects
         .filter(shipment_id__in=shipment_ids)
-        .select_related('deal', 'deal__partner', 'deal__currency')
+        .select_related('deal', 'deal__partner')
         .prefetch_related(Prefetch(
             'deal__items',
             queryset=LogisticsDealItem.objects.filter(is_deleted=False)
@@ -253,7 +254,7 @@ def _build_landed_cost_summary(shipment, *, detailed=False, links_map=None, pi_m
         links = links_map.get(shipment.id, [])
     else:
         links = LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related(
-            'deal', 'deal__partner', 'deal__currency',
+            'deal', 'deal__partner',
         )
 
     deals_data = []
@@ -321,7 +322,7 @@ def _build_landed_cost_summary(shipment, *, detailed=False, links_map=None, pi_m
             'deal_id': deal.id,
             'ref_number': deal.ref_number,
             'partner_name': deal.partner.name if deal.partner else None,
-            'currency': deal.currency.Code if deal.currency else None,
+            'currency': DEAL_CURRENCY_CODE,
             'merchandise_total': float(deal_merch),
             'allocated_shipping_cost_usd': float(link.allocated_shipping_cost or 0),
             'extra_costs_usd': float(link.extra_costs or 0),

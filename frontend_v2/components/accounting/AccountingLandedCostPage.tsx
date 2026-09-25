@@ -191,7 +191,7 @@ const ShipmentDetail: React.FC<{
           <span style={{ fontWeight: "600" }}>صفقة {d.ref_number || `#${d.deal_id}`}</span>
           <span style={{ fontSize: "0.8rem", color: "var(--ktra-ink-soft)" }}>{d.partner_name} — {d.currency}</span>
           <span style={{ fontSize: "0.8rem", marginInlineStart: "auto" }}>
-            بضاعة: {fmt(d.merchandise_total)} | شحن مُخصَّص: {fmt(d.allocated_shipping_cost_usd)} USD
+            بضاعة: {fmt(d.merchandise_total)} USD | شحن مُخصَّص: {fmt(d.allocated_shipping_cost_usd)} USD
           </span>
         </div>
 
