@@ -193,6 +193,70 @@ test("broker statement: a voucher over three clearances stays one row with a sub
   await expect(page.getByText(/↳ من سند صرف/)).toHaveCount(0);
 });
 
+test("statement folds a payment and its reversal into one grey row; the option shows them in full", async ({ page }) => {
+  const pair = { original_journal_id: 283, reversal_journal_id: 10979 };
+  const row = (id: number, extra: Record<string, unknown>) => ({
+    id, journal_id: id, date: "2026-05-10", description: "", reference_id: 175,
+    document_number: null, reference_kind: null, link_key: null, link_label: null,
+    link_count: 0, link_targets: [], shipment_label: null, reversal_pair_id: null, reversal_pair: null, ...extra,
+  });
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/partners/83/statement/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          count: 4,
+          closing_balance: "7049.26",
+          results: [
+            row(10980, {
+              reference_type: "LOGISTICS_PAYMENT", debit: "4298.96", credit: "0.00",
+              balance_before: "8630.30", running_balance: "7049.26",
+              balance_before_folded: "11348.22", running_balance_folded: "7049.26",
+            }),
+            row(10979, {
+              reference_type: "LOGISTICS_PAYMENT_UNPOST", debit: "0.00", credit: "13928.63",
+              balance_before: "-2580.41", running_balance: "11348.22",
+              balance_before_folded: "11348.22", running_balance_folded: "11348.22",
+              reversal_pair_id: 283, reversal_pair: { ...pair, role: "reversal" },
+            }),
+            row(283, {
+              reference_type: "LOGISTICS_PAYMENT", debit: "13928.63", credit: "0.00",
+              balance_before: "11348.22", running_balance: "-2580.41",
+              balance_before_folded: "11348.22", running_balance_folded: "11348.22",
+              reversal_pair_id: 283, reversal_pair: { ...pair, role: "original" },
+            }),
+            row(12, {
+              reference_type: "SHIPMENT_FREIGHT_ACCRUAL", reference_id: 12, debit: "0.00", credit: "11348.22",
+              balance_before: "0", running_balance: "11348.22",
+              balance_before_folded: "0", running_balance_folded: "11348.22",
+            }),
+          ],
+        }),
+      });
+      return true;
+    }
+    return profileResponder(route, url);
+  });
+  await page.goto("/partners/83?tab=statement");
+
+  const summary = page.getByRole("button", { name: /قيد صُحّح: #283 ⇄ #10979 \(صافي 0\)/ });
+  await expect(summary).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText("-2580.41")).toHaveCount(0);
+  await expect(page.getByText("13928.63")).toHaveCount(0);
+
+  // بكبسة يُفتح الزوج تحت سطره — بلا رصيدٍ جارٍ مضلّل.
+  await summary.click();
+  await expect(summary).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByText("13928.63")).toHaveCount(2);
+  await expect(page.getByText("-2580.41")).toHaveCount(0);
+
+  // الخيار يعيدهما كاملين بالرصيد الخام، والختامي نفسه.
+  await page.getByLabel("إظهار القيود المعكوسة").check();
+  await expect(summary).toHaveCount(0);
+  await expect(page.getByText("-2580.41")).toBeVisible();
+  await expect(page.getByText("7049.26")).toBeVisible();
+});
+
 test("broker card: its clearances are its invoices, totalled as «إجمالي المستحقّات» and linked to the shipment", async ({ page }) => {
   await installAuthenticatedApiMocks(page, async (route, url) => {
     if (url.pathname.endsWith("/partners/83/profile/")) {

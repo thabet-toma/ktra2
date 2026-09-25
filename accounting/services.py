@@ -1,6 +1,7 @@
 import calendar
 import datetime
 import logging
+import re
 import uuid
 
 from django.core.exceptions import ValidationError
@@ -4215,6 +4216,82 @@ def _attach_statement_shipment_labels(tenant_id: int, rows: list) -> None:
         row["shipment_label"] = labels.get((row["reference_type"], row["reference_id"]))
 
 
+# «عكس قيد #283» · «عكس القيد #283» · «عكس #283» — كل صيغ `reverse_journal`
+# ومستدعيه (الوصف الافتراضي وبادئة السطر، ودفعات الصفقة والتخليص وفصل الدفعة
+# الزائدة). ووسمُ الأصل الملغى «عكس مرحّل #N» لا يطابق عمداً: الأصل الملغى لا
+# يظهر في الكشف أصلاً.
+_REVERSAL_OF_RE = re.compile(r"عكس\s+(?:(?:ال)?قيد\s+)?#\s*(\d+)")
+_REVERSAL_TYPE_SUFFIXES = ("_UNPOST", "_REVERSAL")
+
+
+def statement_reversal_pairs(tenant_id: int, lines) -> dict[int, tuple[int, int]]:
+    """أزواج «قيد + قيد عكسه» بين أسطر كشف طرفٍ: `{journal_id: (الأصل، العكس)}` للطرفين.
+
+    `lines`: `(journal_id, reference_type, reference_id, base_debit, base_credit)`
+    لأسطر الطرف المرحّلة. العكس يُعرف بثلاث علامات، أيّها وُجد:
+    `JOURNAL_REVERSAL` ومرجعه رقم الأصل (العكس اليدوي)؛ أو «عكس قيد #N» في وصف
+    رأس القيد أو أحد أسطره؛ أو نوعٌ ينتهي بـ`_UNPOST`/`_REVERSAL` بلا رقمٍ في نصّه
+    فيُطابَق بأحدث قيدٍ قبله من النوع الأصلي على المرجع نفسه.
+
+    **الزوج صافيه على الطرف صفرٌ بالضبط وإلا فليس زوجاً** — عكسٌ جزئيٌّ حركةٌ
+    حقيقية تغيّر الرصيد، وطيّها يُخفي مالاً. ولا حذف ولا دمج: الدالّة تُسمّي
+    الأزواج وحدها، والمستدعي يقرّر العرض.
+    """
+    net: dict[int, Decimal] = {}
+    refs: dict[int, tuple[str | None, int | None]] = {}
+    for jid, ref_type, ref_id, d, c in lines:
+        net[jid] = net.get(jid, Decimal("0")) + Decimal(str(d or 0)) - Decimal(str(c or 0))
+        refs[jid] = (ref_type, ref_id)
+    if len(net) < 2:
+        return {}
+
+    marker = Q(description__contains="عكس")
+    for suffix in _REVERSAL_TYPE_SUFFIXES:
+        marker |= Q(reference_type__endswith=suffix)
+    headers = {
+        jid: (ref_type, ref_id, desc or "")
+        for jid, ref_type, ref_id, desc in JournalHeader.objects.filter(
+            tenant_id=tenant_id, id__in=list(net),
+        ).filter(marker | Q(reference_type="JOURNAL_REVERSAL")).values_list(
+            "id", "reference_type", "reference_id", "description")
+    }
+    line_texts: dict[int, list[str]] = {}
+    for jid, desc in JournalLine.objects.filter(
+        tenant_id=tenant_id, journal_id__in=list(net), description__contains="عكس",
+    ).values_list("journal_id", "description"):
+        line_texts.setdefault(jid, []).append(desc or "")
+
+    def original_of(jid: int) -> int | None:
+        ref_type, ref_id, desc = headers.get(jid, (refs[jid][0], refs[jid][1], ""))
+        if ref_type == "JOURNAL_REVERSAL" and ref_id:
+            return ref_id
+        for text in [desc, *line_texts.get(jid, [])]:
+            match = _REVERSAL_OF_RE.search(text)
+            if match:
+                return int(match.group(1))
+        for suffix in _REVERSAL_TYPE_SUFFIXES:
+            if ref_type and ref_type.endswith(suffix) and ref_id:
+                base_type = ref_type[: -len(suffix)]
+                earlier = [
+                    other for other, (t, r) in refs.items()
+                    if other < jid and t == base_type and r == ref_id
+                ]
+                return max(earlier) if earlier else None
+        return None
+
+    pairs: dict[int, tuple[int, int]] = {}
+    for rev_id in sorted(set(headers) | set(line_texts)):
+        orig_id = original_of(rev_id)
+        if (
+            orig_id is None or orig_id == rev_id or orig_id not in net
+            or rev_id in pairs or orig_id in pairs
+            or (net[orig_id] + net[rev_id]).quantize(Decimal("0.01")) != 0
+        ):
+            continue
+        pairs[orig_id] = pairs[rev_id] = (orig_id, rev_id)
+    return pairs
+
+
 def partner_account_statement(
     *, tenant_id: int, partner_id: int, is_supplier: bool,
     limit: int = 50, offset: int = 0, ordering: str = "newest",
@@ -4243,6 +4320,12 @@ def partner_account_statement(
     يمسّ المال (ارتداد شيك · تظهير · إشعار دائن)، وإخفاء حركةٍ ماليّة من شاشة
     المال أسوأ من إظهار حركةٍ زائدة. والحساب لا يتأثر بالترشيح إطلاقاً: الرصيد
     الجاري و`closing_balance` يُحسبان على الحساب كلّه.
+
+    «القيد المعكوس وعكسه» (`statement_reversal_pairs`): كل سطرٍ يحمل
+    `reversal_pair_id` (رقم قيد الأصل، أو None) و`reversal_pair`، ومعهما
+    `balance_before_folded`/`running_balance_folded` — الرصيد نفسه محسوباً بلا
+    الأزواج، ليطويها العرض دون رصيدٍ جارٍ يمرّ بقيمة مضلّلة بين القيد وعكسه.
+    الأسطر كلّها تُرسَل كما هي، والختامي واحدٌ في الحالتين لأن صافي الزوج صفر.
     """
     base = (
         JournalLine.objects.filter(
@@ -4254,17 +4337,26 @@ def partner_account_statement(
     # (بحدود أسطر الشريك). النوع لازمٌ للترشيح، ويأتي في الاستعلام نفسه.
     ordered = list(base.values_list(
         "id", "base_debit", "base_credit",
-        "journal__reference_type", "journal__reference_id"))
+        "journal__reference_type", "journal__reference_id", "journal_id"))
+    pairs = statement_reversal_pairs(
+        tenant_id, [(jid, rt, rid, d, c) for _lid, d, c, rt, rid, jid in ordered])
     running = Decimal("0")
+    folded = Decimal("0")
     running_by_id: dict[int, Decimal] = {}
     before_by_id: dict[int, Decimal] = {}
-    for lid, d, c, _ref_type, _ref_id in ordered:
+    folded_by_id: dict[int, tuple[Decimal, Decimal]] = {}
+    for lid, d, c, _ref_type, _ref_id, jid in ordered:
         d = Decimal(str(d or 0))
         c = Decimal(str(c or 0))
+        effect = (c - d) if is_supplier else (d - c)
         # اللقطة قبل الأثر ثم بعده — من الحلقة ذاتها، بلا مرور ثانٍ.
         before_by_id[lid] = running
-        running += (c - d) if is_supplier else (d - c)
+        running += effect
         running_by_id[lid] = running
+        folded_before = folded
+        if jid not in pairs:
+            folded += effect
+        folded_by_id[lid] = (folded_before, folded)
     closing = running
 
     # الترشيح بعد الحساب: يحكم ما يُعرض لا كيف يُحسب.
@@ -4327,7 +4419,19 @@ def partner_account_statement(
             "credit": str(jl.base_credit),
             "balance_before": str(before_by_id[lid]),
             "running_balance": str(running_by_id[lid]),
+            "balance_before_folded": str(folded_by_id[lid][0]),
+            "running_balance_folded": str(folded_by_id[lid][1]),
+            "reversal_pair_id": None,
+            "reversal_pair": None,
         }
+        pair = pairs.get(j.id)
+        if pair:
+            row["reversal_pair_id"] = pair[0]
+            row["reversal_pair"] = {
+                "original_journal_id": pair[0],
+                "reversal_journal_id": pair[1],
+                "role": "original" if j.id == pair[0] else "reversal",
+            }
         if anchor_reference_type:
             row["is_anchor"] = lid in anchor_set
         rows.append(row)

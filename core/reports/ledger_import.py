@@ -163,8 +163,14 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
 
     نفس قاعدة `accounting.services.partner_account_statement`: للعميل
     مدين−دائن، ولغيره دائن−مدين — كي لا يقرأ الطرفان الرقم نفسه بإشارتين.
+
+    «القيد المعكوس وعكسه» (`statement_reversal_pairs` — مصدر الشاشة نفسه) يُطوى
+    افتراضياً في سطرٍ واحد «قيد صُحّح» بلا مدين ولا دائن، و`reversals=show` يطبعهما
+    كاملين. يُطوى الزوج حين يقع طرفاه كلاهما في الفترة: أصلٌ قبلها في الافتتاحي
+    وعكسه داخلها يبقى ظاهراً، وإلا انكسر الرصيد. الختامي واحدٌ في الحالتين.
     """
     from accounting.models import JournalLine
+    from accounting.services import statement_reversal_pairs
 
     partner_id = _int_param(params, "partner")
     if not partner_id:
@@ -195,9 +201,38 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
     }]
     running = opening
     qs = _apply_dates(base, "journal__transaction_date", params).select_related("journal")
-    for line in qs.order_by("journal__transaction_date", "journal_id", "id"):
+    lines = list(qs.order_by("journal__transaction_date", "journal_id", "id"))
+    pairs = {}
+    if params.get("reversals") != "show":
+        in_period = {line.journal_id for line in lines}
+        pairs = {
+            jid: pair for jid, pair in statement_reversal_pairs(tenant_id, base.values_list(
+                "journal_id", "journal__reference_type", "journal__reference_id",
+                "base_debit", "base_credit",
+            )).items()
+            if pair[0] in in_period and pair[1] in in_period
+        }
+    folded_shown = set()
+    for line in lines:
         debit = Decimal(str(line.base_debit or 0))
         credit = Decimal(str(line.base_credit or 0))
+        pair = pairs.get(line.journal_id)
+        if pair:
+            # سطرٌ واحد في موضع أوّل طرفَي الزوج، والزوج لا يحرّك الرصيد الجاري:
+            # صافيه صفر، فما بين طرفيه لا يمرّ بالقيمة المضلّلة.
+            if pair not in folded_shown:
+                folded_shown.add(pair)
+                rows.append({
+                    "id": pair[0],
+                    "date": line.journal.transaction_date,
+                    "journal": f"#{pair[0]} ⇄ #{pair[1]}",
+                    "reference": "",
+                    "description": f"قيد صُحّح: #{pair[0]} ⇄ #{pair[1]} (صافي 0)",
+                    "debit": _money(ZERO),
+                    "credit": _money(ZERO),
+                    "balance": _money(running),
+                })
+            continue
         running += (debit - credit) if is_customer else (credit - debit)
         rows.append({
             "id": line.journal_id,
@@ -217,7 +252,14 @@ register(ReportSpec(
     title="كشف حساب طرف",
     category="partners",
     description="حركة العميل أو المورد: رصيد افتتاحي، ثم كل حركة برصيد جارٍ حتى الختامي.",
-    filters=(ReportFilter("partner", "الطرف", "partner"),) + DATE_FILTERS,
+    filters=(
+        ReportFilter("partner", "الطرف", "partner"),
+        *DATE_FILTERS,
+        ReportFilter("reversals", "القيود المعكوسة", "select", options=(
+            ("fold", "مطويّة (قيد صُحّح)"),
+            ("show", "إظهار القيود المعكوسة"),
+        ), default="fold"),
+    ),
     columns=(
         ReportColumn("date", "التاريخ", KIND_DATE, width="110px"),
         ReportColumn("journal", "القيد", width="80px"),

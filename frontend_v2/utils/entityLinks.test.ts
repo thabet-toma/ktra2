@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   entityPathForReference,
+  foldStatementReversals,
   isSafeInternalPath,
   platformNoteTarget,
   productGroupPath,
@@ -159,4 +160,47 @@ test("سند على ثلاثة مستحقّات: صفّه مرّة واحدة و
   ]);
   // لا أثر على الرصيد: لا مدين ولا دائن ولا رصيد جارٍ.
   for (const r of infos) assert.deepEqual([r.debit, r.credit, r.running_balance], ["", "", ""]);
+});
+
+/* ── القيد المعكوس وعكسه: سطرٌ رماديٌّ واحد ورصيدٌ مطويّ ── */
+const pairRows = [
+  { id: 1, journal_id: 10, debit: "0", credit: "11348.22", running_balance: "11348.22",
+    running_balance_folded: "11348.22", balance_before_folded: "0", reversal_pair_id: null, reversal_pair: null },
+  { id: 2, journal_id: 283, debit: "13928.63", credit: "0", running_balance: "-2580.41",
+    running_balance_folded: "11348.22", balance_before_folded: "11348.22", reversal_pair_id: 283,
+    reversal_pair: { original_journal_id: 283, reversal_journal_id: 10979, role: "original" as const } },
+  { id: 3, journal_id: 10979, debit: "0", credit: "13928.63", running_balance: "11348.22",
+    running_balance_folded: "11348.22", balance_before_folded: "11348.22", reversal_pair_id: 283,
+    reversal_pair: { original_journal_id: 283, reversal_journal_id: 10979, role: "reversal" as const } },
+  { id: 4, journal_id: 10980, debit: "4298.96", credit: "0", running_balance: "7049.26",
+    running_balance_folded: "7049.26", balance_before_folded: "11348.22", reversal_pair_id: null, reversal_pair: null },
+];
+
+test("foldStatementReversals: a zero-net pair folds into one summary row with no misleading balance", () => {
+  const out = foldStatementReversals(pairRows, new Set());
+  assert.equal(out.length, 3);
+  const summary = out[1];
+  assert.deepEqual(summary.reversal_summary, { original_journal_id: 283, reversal_journal_id: 10979 });
+  assert.deepEqual([summary.debit, summary.credit, summary.running_balance], ["", "", "11348.22"]);
+  assert.ok(!out.some((r) => r.running_balance === "-2580.41"));
+  // الختامي نفسه مطويّاً وخاماً.
+  assert.equal(out[2].running_balance, pairRows[3].running_balance);
+});
+
+test("foldStatementReversals: an expanded pair shows both sides under it without a running balance", () => {
+  const out = foldStatementReversals(pairRows, new Set([283]));
+  assert.deepEqual(out.map((r) => r.id), [1, "reversal-283", 2, 3, 4]);
+  const members = out.filter((r) => r.reversal_member);
+  assert.deepEqual(members.map((r) => [r.debit, r.credit, r.running_balance]), [
+    ["13928.63", "0", ""],
+    ["0", "13928.63", ""],
+  ]);
+  // السطر وطرفاه في مجموعةٍ واحدة لا في مجموعة فاتورتهم.
+  assert.deepEqual(new Set(out.slice(1, 4).map((r) => r.link_key)), new Set(["reversal:283"]));
+});
+
+test("foldStatementReversals: rows without a pair pass through untouched", () => {
+  const plain = [pairRows[0], pairRows[3]];
+  const out = foldStatementReversals(plain, new Set());
+  assert.deepEqual(out.map((r) => r.running_balance), ["11348.22", "7049.26"]);
 });

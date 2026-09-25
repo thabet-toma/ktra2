@@ -267,3 +267,90 @@ export function withStatementLinkSublines<T extends StatementLinkRow>(
   }
   return [...rows, ...sublines];
 }
+
+/** قيدٌ وعكسه على كشف الطرف — `reversal_pair` في ردّ الخادم (`statement_reversal_pairs`). */
+export interface StatementReversalPair {
+  original_journal_id: number;
+  reversal_journal_id: number;
+  role?: "original" | "reversal";
+}
+
+interface ReversalFoldRow extends StatementLinkRow {
+  debit: string;
+  credit: string;
+  running_balance: string;
+  balance_before?: string;
+  /** الرصيد نفسه محسوباً بلا الأزواج — من حلقة الخادم لا من الصفحة. */
+  running_balance_folded?: string;
+  balance_before_folded?: string;
+  reversal_pair_id?: number | null;
+  reversal_pair?: StatementReversalPair | null;
+}
+
+export type FoldedStatementRow<T> = T & {
+  /** السطر الرمادي وطرفاه المفتوحان مجموعةٌ واحدة (`reversal:<الأصل>`). */
+  link_key?: string | null;
+  /** سطر «قيد صُحّح» الرمادي مكان الزوج. */
+  reversal_summary?: StatementReversalPair;
+  /** طرفٌ من زوجٍ مفتوح تحت سطره — بلا رصيدٍ جارٍ، فالرصيد المطويّ لا يمرّ به. */
+  reversal_member?: boolean;
+};
+
+/**
+ * يطوي «القيد + عكسه» (صافيهما على الطرف صفر) في سطرٍ رماديٍّ واحد مكان أوّل
+ * طرفَيه في الصفحة، ويعرض بقية الأسطر بالرصيد المطويّ — فلا يمرّ الرصيد الجاري
+ * بالقيمة المضلّلة بين القيد وعكسه. الزوج المفتوح (`expanded`) يُظهر طرفيه تحت
+ * سطره بلا رصيد. لا يُسقط سطراً ماليّاً: الزوج صافيه صفر، والختامي واحد.
+ * طرفٌ خارج الصفحة لا يمنع الطيّ — السطر الرمادي يدلّ عليه برقمه.
+ */
+export function foldStatementReversals<T extends ReversalFoldRow>(
+  rows: T[],
+  expanded: ReadonlySet<number>,
+): Array<FoldedStatementRow<T>> {
+  const members = new Map<number, T[]>();
+  for (const row of rows) {
+    if (row.reversal_pair_id == null || !row.reversal_pair) continue;
+    members.set(row.reversal_pair_id, [...(members.get(row.reversal_pair_id) ?? []), row]);
+  }
+  const out: Array<FoldedStatementRow<T>> = [];
+  for (const row of rows) {
+    const pairId = row.reversal_pair_id;
+    if (pairId == null || !row.reversal_pair) {
+      out.push({
+        ...row,
+        balance_before: row.balance_before_folded ?? row.balance_before,
+        running_balance: row.running_balance_folded ?? row.running_balance,
+      });
+      continue;
+    }
+    const group = members.get(pairId);
+    if (!group || group[0] !== row) continue;
+    const key = `reversal:${pairId}`;
+    out.push({
+      ...row,
+      id: `reversal-${pairId}`,
+      debit: "",
+      credit: "",
+      balance_before: row.balance_before_folded ?? "",
+      running_balance: row.running_balance_folded ?? "",
+      link_key: key,
+      link_targets: [],
+      reversal_summary: {
+        original_journal_id: row.reversal_pair.original_journal_id,
+        reversal_journal_id: row.reversal_pair.reversal_journal_id,
+      },
+    });
+    if (!expanded.has(pairId)) continue;
+    for (const member of group) {
+      out.push({
+        ...member,
+        balance_before: "",
+        running_balance: "",
+        link_key: key,
+        link_targets: [],
+        reversal_member: true,
+      });
+    }
+  }
+  return out;
+}

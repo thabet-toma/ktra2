@@ -18,7 +18,8 @@ import { PartnerEditorModal } from './PartnerEditorModal';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
-  withStatementLinkSublines, type StatementLinkTarget,
+  withStatementLinkSublines, foldStatementReversals,
+  type FoldedStatementRow, type StatementLinkTarget, type StatementReversalPair,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import {
@@ -109,7 +110,15 @@ interface StatementRow {
    * استحقاق شحن، دفعاتها، سند صرفٍ موزَّع عليها). القيد القديم يحمل الرقم وحده.
    */
   shipment_label?: string | null;
+  /** الرصيد بلا أزواج «القيد + عكسه» — لقطتا حلقة الخادم نفسها. */
+  running_balance_folded?: string;
+  balance_before_folded?: string;
+  /** رقم قيد الأصل حين يكون السطر طرفاً في «قيد + عكسه» صافيهما صفر. */
+  reversal_pair_id?: number | null;
+  reversal_pair?: StatementReversalPair | null;
 }
+
+type StatementDisplayRow = FoldedStatementRow<StatementRow>;
 
 /** وسم الشحنة تحت البيان — حين لا يحمله نصّ القيد أصلاً (القيود القديمة). */
 function StatementShipmentLabel({ row }: { row: StatementRow }) {
@@ -206,10 +215,28 @@ export const PartnerProfilePage: React.FC = () => {
   const [stmtOrdering, setStmtOrdering] = useState<StatementOrdering>('newest');
   // ربط الفاتورة بسندها: يجمع الحركتين متجاورتين داخل إطار واحد (ضمن الصفحة).
   const [stmtGrouped, setStmtGrouped] = useState(true);
+  // «القيد + عكسه» مطويّان افتراضياً في سطرٍ رماديّ؛ الخيار يعيدهما كاملين بالرصيد الخام.
+  const [stmtShowReversals, setStmtShowReversals] = useState(false);
+  const [expandedPairs, setExpandedPairs] = useState<ReadonlySet<number>>(() => new Set());
+  const toggleReversalPair = useCallback((pairId: number) => {
+    setExpandedPairs((prev) => {
+      const next = new Set(prev);
+      if (next.has(pairId)) next.delete(pairId);
+      else next.add(pairId);
+      return next;
+    });
+  }, []);
   // الربط وحده يُظهر أسطر السند الموزَّع الفرعية — بلا ربط لا مجموعة تحويها.
-  const stmtDisplayRows = useMemo(
-    () => (stmtGrouped ? withStatementLinkSublines(stmt.rows) : stmt.rows),
-    [stmt.rows, stmtGrouped],
+  const stmtDisplayRows = useMemo(() => {
+    const rows: StatementDisplayRow[] = stmtShowReversals
+      ? stmt.rows
+      : foldStatementReversals(stmt.rows, expandedPairs);
+    return stmtGrouped ? withStatementLinkSublines(rows) : rows;
+  }, [stmt.rows, stmtGrouped, stmtShowReversals, expandedPairs]);
+  // مجموع الصفحة: الزوج المطويّ صافيه صفر، فلا يُجمع مدينه ودائنه مرّتين في الذيل.
+  const stmtTotalRows = useMemo(
+    () => (stmtShowReversals ? stmt.rows : stmt.rows.filter((r) => r.reversal_pair_id == null)),
+    [stmt.rows, stmtShowReversals],
   );
 
   // تفاصيل حركة كشف الحساب (نافذة)
@@ -443,12 +470,14 @@ export const PartnerProfilePage: React.FC = () => {
     // paymentsRefreshKey: يُعيد الجلب بعد توزيع سند على الفواتير (تغيّر المدفوع/المتبقي).
   }, [id, tenantId, paymentsRefreshKey]);
 
-  const stmtColumns: LedgerColumn<StatementRow>[] = [
+  const stmtColumns: LedgerColumn<StatementDisplayRow>[] = [
     { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     {
       key: 'reference',
       header: 'الحركة',
-      render: (r) => (
+      render: (r) => r.reversal_summary ? (
+        <span className="text-[var(--ktra-ink-soft)]">قيد مصحَّح</span>
+      ) : (
         <div className="flex flex-col gap-0.5">
           <DocRefCell
             referenceType={r.reference_type}
@@ -473,7 +502,17 @@ export const PartnerProfilePage: React.FC = () => {
     {
       key: 'description',
       header: 'البيان',
-      render: (r) => r.info_amount ? (
+      render: (r) => r.reversal_summary ? (
+        <button
+          type="button"
+          aria-expanded={expandedPairs.has(r.reversal_summary.original_journal_id)}
+          onClick={() => toggleReversalPair(r.reversal_summary!.original_journal_id)}
+          className="text-right text-[var(--ktra-ink-soft)] hover:underline"
+        >
+          {expandedPairs.has(r.reversal_summary.original_journal_id) ? '▾' : '▸'} قيد صُحّح:
+          #{r.reversal_summary.original_journal_id} ⇄ #{r.reversal_summary.reversal_journal_id} (صافي 0)
+        </button>
+      ) : r.info_amount ? (
         <span className="text-[11px] italic text-[var(--ktra-ink-soft)]">
           ↳ من {referenceTypeLabel(r.reference_type)} #{r.reference_id}: {formatMoney(r.info_amount)} — جزءٌ من سندٍ موزَّع، لا أثر له على الرصيد
         </span>
@@ -486,12 +525,19 @@ export const PartnerProfilePage: React.FC = () => {
     },
     { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
     { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
-    { key: 'running_balance', header: 'الرصيد', align: 'right', render: (r) => <b className="ktra-num">{r?.running_balance ?? ''}</b> },
+    {
+      key: 'running_balance',
+      header: 'الرصيد',
+      align: 'right',
+      render: (r) => r.reversal_member
+        ? <span className="text-[var(--ktra-ink-soft)]">—</span>
+        : <b className="ktra-num">{r?.running_balance ?? ''}</b>,
+    },
     {
       key: 'details',
       header: 'تفاصيل',
       align: 'center',
-      render: (r) => r.info_amount ? null : (
+      render: (r) => (r.info_amount || r.reversal_summary) ? null : (
         <button
           type="button"
           onClick={() => setDetailRow(r)}
@@ -720,6 +766,19 @@ export const PartnerProfilePage: React.FC = () => {
               />
               ربط الفاتورة بسندها
             </label>
+            <label className="flex items-center gap-1.5 text-sm text-[var(--ktra-ink-soft)]">
+              <input
+                type="checkbox"
+                checked={stmtShowReversals}
+                onChange={(event) => {
+                  setStmtShowReversals(event.target.checked);
+                  clientLogger.info("partner.statement_reversals_changed", {
+                    shown: event.target.checked,
+                  });
+                }}
+              />
+              إظهار القيود المعكوسة
+            </label>
             <label htmlFor="partner-statement-ordering" className="text-sm text-[var(--ktra-ink-soft)]">
               ترتيب الحركات:
             </label>
@@ -744,7 +803,7 @@ export const PartnerProfilePage: React.FC = () => {
               زمنياً لكل حركة. الربط ضمن الصفحة المعروضة.
             </div>
           )}
-          <LedgerTable<StatementRow>
+          <LedgerTable<StatementDisplayRow>
             columns={stmtColumns}
             rows={stmtDisplayRows}
             loading={stmtLoading}
@@ -752,7 +811,11 @@ export const PartnerProfilePage: React.FC = () => {
             limit={PAGE}
             offset={stmtOffset}
             onPage={setStmtOffset}
-            rowClassName={(r) => (r.info_amount ? 'bg-[var(--ktra-panel)]' : statementToneRowClass(r.reference_type))}
+            rowClassName={(r) => (
+              r.reversal_summary || r.reversal_member
+                ? 'bg-gray-100 text-[var(--ktra-ink-soft)] dark:bg-white/5'
+                : r.info_amount ? 'bg-[var(--ktra-panel)]' : statementToneRowClass(r.reference_type)
+            )}
             rowGroupKey={stmtGrouped ? (r) => r.link_key : undefined}
             emptyText="لا توجد حركات على حساب هذا الشريك."
             summaryRow={
@@ -760,13 +823,13 @@ export const PartnerProfilePage: React.FC = () => {
                 <tr className="bg-[#e6e4d5] font-bold border-t-2 border-[var(--ktra-border)]">
                   <td colSpan={3} className="px-2 py-2 text-right">الإجمالي (هذه الصفحة):</td>
                   <td className="px-2 py-2 text-right ktra-num">
-                    {formatMoney(stmt.rows.reduce((sum, r) => {
+                    {formatMoney(stmtTotalRows.reduce((sum, r) => {
                       const val = parseFloat(String(r?.debit || "0").replace(/,/g, ''));
                       return sum + (isNaN(val) ? 0 : val);
                     }, 0))}
                   </td>
                   <td className="px-2 py-2 text-right ktra-num">
-                    {formatMoney(stmt.rows.reduce((sum, r) => {
+                    {formatMoney(stmtTotalRows.reduce((sum, r) => {
                       const val = parseFloat(String(r?.credit || "0").replace(/,/g, ''));
                       return sum + (isNaN(val) ? 0 : val);
                     }, 0))}
