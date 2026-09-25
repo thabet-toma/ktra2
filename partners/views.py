@@ -37,6 +37,41 @@ PARTNER_KINDS = {
 }
 
 
+def _party_accruals_total(partner):
+    """(مجموع مستحقّات الطرف الدائن المرحّلة، تاريخ آخرها) — التخليص والشحن والنقل."""
+    from logistics.domain.party_accruals import party_accrued_total
+    return party_accrued_total(partner.tenant_id, partner.id)
+
+
+def _party_accrual_invoice_rows(partner) -> list[dict]:
+    """مستحقّات التخليص والشحن والنقل المرحّلة على الطرف — «فواتير» المخلّص والوكيل
+    والناقل في كرته. المدفوع والمتبقّي من `accrual_status` (القيود والسندات الموزَّعة)،
+    والرقم وسمُ الشحنة، والرابط إلى شحنتها (`shipment_id`)."""
+    from decimal import Decimal
+    from core.payments import document_payment_summary
+    from logistics.domain.party_accruals import ACCRUAL_ANCHOR_TYPE, party_open_accruals
+
+    rows = []
+    for row in party_open_accruals(partner.tenant_id, partner.id, include_settled=True):
+        due = Decimal(row["due"])
+        summary = document_payment_summary(due, Decimal(row["paid"]) + Decimal(row["allocated"]))
+        rows.append({
+            "document_type": ACCRUAL_ANCHOR_TYPE[row["kind"]],
+            "document_id": row["id"],
+            "document_number": row["label"],
+            "shipment_id": row["shipment_id"],
+            "date": row["date"],
+            "grand_total": str(due),
+            "is_posted": True,
+            "amount_paid": str(summary["amount_paid"]),
+            "remaining_balance": str(summary["remaining_balance"]),
+            "payment_status": summary["payment_status"],
+            "payment_status_display": summary["payment_status_display"],
+        })
+    rows.sort(key=lambda r: (r["date"] or "", r["document_id"]), reverse=True)
+    return rows
+
+
 def _csv_param(value) -> list[str]:
     return [v.strip() for v in str(value or "").split(",") if v.strip()]
 
@@ -104,11 +139,19 @@ class PartnerViewSet(viewsets.ModelViewSet):
             tenant_id=partner.tenant_id, customer_id=partner.id,
             status=SalesInvoice.STATUS_POSTED,
         ).aggregate(total=Sum("grand_total"), last=Max("invoice_date"))
-        purch_agg = PurchaseInvoice.objects.filter(
+        from logistics.services import annotate_purchase_supplier_share
+        # الدولية بحصّة المورد لا بالمحمَّل — حصص الوكيل والمخلّص والناقل ليست مشترياتٍ منه.
+        purch_agg = annotate_purchase_supplier_share(PurchaseInvoice.objects.filter(
             tenant_id=partner.tenant_id, partner_id=partner.id, is_posted=True,
-        ).aggregate(total=Sum("grand_total"), last=Max("invoice_date"))
-
+        )).aggregate(total=Sum("supplier_share"), last=Max("invoice_date"))
+        total_purchases = purch_agg["total"] or Decimal("0")
         last_dates = [d for d in (sales_agg["last"], purch_agg["last"]) if d]
+        if is_supplier:
+            # المخلّص والوكيل والناقل: «مشترياتهم» مستحقّاتُ التخليص والشحن والنقل.
+            accrued, last_accrual = _party_accruals_total(partner)
+            total_purchases += accrued
+            if last_accrual:
+                last_dates.append(last_accrual)
         last_txn = max(last_dates).isoformat() if last_dates else None
 
         # عميل: رصيد موجب = مدين له علينا (Dr/ذمم مدينة). مورد: رصيد موجب =
@@ -129,7 +172,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
             "balance_side": balance_side,
             "outstanding_balance": str(abs(balance)),
             "total_sales": str(sales_agg["total"] or Decimal("0")),
-            "total_purchases": str(purch_agg["total"] or Decimal("0")),
+            "total_purchases": str(total_purchases),
             "last_transaction_date": last_txn,
         })
 
@@ -226,6 +269,8 @@ class PartnerViewSet(viewsets.ModelViewSet):
                 "payment_status": summary["payment_status"],
                 "payment_status_display": summary["payment_status_display"],
             })
+        if is_creditor_party(partner):
+            out.extend(_party_accrual_invoice_rows(partner))
         return Response(out)
 
     def get_queryset(self):

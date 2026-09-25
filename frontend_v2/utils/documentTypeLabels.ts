@@ -53,11 +53,18 @@ export const invoiceKindLabel = (invoiceKind?: string | null): string | null => 
   return null;
 };
 
+/** «فواتير» المخلّص والوكيل والناقل في كرته مستحقّاتهم — `partners/views.py` (`_party_accrual_invoice_rows`). */
+const ACCRUAL_DOCUMENT_LABELS: Record<string, string> = {
+  LOGISTICS_CLEARANCE: 'مستحق تخليص',
+  SHIPMENT_FREIGHT_ACCRUAL: 'مستحق شحن',
+  LOCAL_SHIPMENT: 'إرسالية',
+};
+
 export const relatedInvoiceTypeLabel = (invoice: RelatedInvoice): string => {
   if (invoice.document_type === 'SALES_INVOICE') {
     return invoiceKindLabel(invoice.invoice_kind) ?? 'بيع';
   }
-  return 'شراء';
+  return ACCRUAL_DOCUMENT_LABELS[invoice.document_type] ?? 'شراء';
 };
 
 export const stockLedgerMovementTypeLabel = (movement: StockLedgerMovement): string => {

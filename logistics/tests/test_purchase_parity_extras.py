@@ -91,8 +91,10 @@ class PurchaseParityExtrasTest(APITestCase):
         assert clone.items.first().received_quantity == Decimal("0")
         assert clone.due_date is None, "الاستحقاق يُعاد حسابه للنسخة الجديدة"
 
-    def test_duplicate_of_an_import_invoice_becomes_a_local_draft(self):
-        """النسخة لا ترث ارتباط مسار الاستيراد — لا صفقة ولا شحنة تدّعيها.
+    def test_duplicate_of_an_import_invoice_is_refused(self):
+        """سعر بند الدولية محمَّل (بضاعة + شحن + تخليص + نقل) — كانت تُنسخ فاتورةً
+        محليةً بتلك الأسعار، أي شراءً من المورد بسعرٍ لم يبعه به. ولا سعر مورّدٍ على
+        البند يُنسخ بدلاً منه، فالنسخ مرفوض والواجهة تُخفي الزرّ.
 
         الفاتورة الدولية محجوبةٌ عمّن لا يملك وحدة الاستيراد (404 لا 403)،
         فتُفعَّل للشركة هنا كي يصل الاختبار إلى المستند أصلاً."""
@@ -101,13 +103,13 @@ class PurchaseParityExtrasTest(APITestCase):
         source = self._invoice("PINV-DUP-2")
         PurchaseInvoice.objects.filter(pk=source.pk).update(
             invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL)
+        before = PurchaseInvoice.objects.filter(tenant=self.tenant).count()
         res = self.client.post(
             f"/api/logistics/purchase-invoices/{source.pk}/duplicate/",
             {}, format="json", **self._auth())
-        assert res.status_code == 201, res.content
-        clone = PurchaseInvoice.objects.get(pk=res.json()["id"])
-        assert clone.invoice_type == PurchaseInvoice.INVOICE_TYPE_LOCAL
-        assert clone.deal_id is None and clone.shipment_id is None
+        assert res.status_code == 400, res.content
+        assert "لا تُنسخ" in res.json()["error"]
+        assert PurchaseInvoice.objects.filter(tenant=self.tenant).count() == before
 
     # ── اقتراح توزيع FIFO ──────────────────────────────────────────────────
     def test_fifo_suggestion_fills_the_earliest_due_first(self):

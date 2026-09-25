@@ -324,7 +324,11 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
         invoice = serializer.save(tenant=tenant, invoice_number=inv_num, invoice_type=invoice_type)
         self._sync_attachments(invoice)
-        # الإنشاء يُسجَّل بمحتواه كاملاً — مرآة فاتورة البيع (sales/views.py).
+        self._log_invoice_created(invoice)
+
+    def _log_invoice_created(self, invoice, *, note=''):
+        """الإنشاء يُسجَّل بمحتواه كاملاً — مرآة فاتورة البيع (sales/views.py).
+        مصدرٌ واحد لـ`perform_create` و`import_from_clearance`."""
         changes = build_document_snapshot_changes(
             header=snapshot_fields(invoice, PURCHASE_ACTIVITY_FIELD_LABELS),
             lines=_purchase_item_snapshot(invoice),
@@ -332,7 +336,7 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             line_labels=PURCHASE_ACTIVITY_ITEM_LABELS,
         )
         details = describe_activity_changes(changes)
-        base = 'إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء')
+        base = 'إنشاء ' + ('مرجع شراء' if invoice.is_return else 'فاتورة شراء') + note
         log_activity(
             action='create', entity_type='purchase_invoice', entity_id=invoice.id,
             entity_label=invoice.invoice_number,
@@ -646,10 +650,22 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
     @action(detail=False, methods=['post'], url_path='import-from-clearance')
     def import_from_clearance(self, request):
-        """إنشاء فواتير شراء من تخليص جمركي (منطق موحّد في الخادم)."""
+        """إنشاء فواتير شراء من تخليص جمركي (منطق موحّد في الخادم).
+
+        حرّاس الإنشاء نفسها التي في `perform_create` — صلاحية الإنشاء، حدّ الخطة،
+        والوصول للاستيراد (الفاتورة هنا دولية دائماً)، وسجلّ نشاطٍ لكل فاتورة. كانت
+        تُتخطّى كلّها فيُنشئ فواتيرَ من لا يملك إنشاءها ولا يرى الاستيراد، بلا أثرٍ في السجلّ.
+        (`_sync_attachments` لا تنطبق: الطلب لا يحمل مرفقات.)
+        """
         tenant = self._get_tenant()
         if not tenant:
             return Response({'error': 'لا يوجد مستأجر'}, status=status.HTTP_400_BAD_REQUEST)
+        require_perm(request, 'purchase.invoice.create', tenant=tenant)
+        from core.import_access import user_can_access_import
+        if not user_can_access_import(request.user, tenant):
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied("صلاحية الفاتورة الدولية (الاستيراد) غير متاحة لحسابك.")
+        enforce_limits(tenant, 'purchase.invoices', 'documents.invoices')
         try:
             cid = int(request.data.get('clearance_id'))
         except (TypeError, ValueError):
@@ -676,18 +692,18 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                     status=status.HTTP_403_FORBIDDEN,
                 )
 
-        preview = preview_landed_import(
-            clearance=LogisticsClearance.objects.select_related('shipment').get(pk=cid, tenant=tenant),
-            deal_ids=deal_ids,
-            deal_remaining_rate=dr,
-            shipment_remaining_rate=sr,
-            use_cost_lines=use_cl,
-        )
-
         def _next():
             return self._next_invoice_number(tenant)
 
         try:
+            # داخل المصيدة: تخليصٌ من شركةٍ أخرى أو محذوف = 404 لا 500.
+            preview = preview_landed_import(
+                clearance=LogisticsClearance.objects.select_related('shipment').get(pk=cid, tenant=tenant),
+                deal_ids=deal_ids,
+                deal_remaining_rate=dr,
+                shipment_remaining_rate=sr,
+                use_cost_lines=use_cl,
+            )
             created = import_invoices_from_clearance(
                 tenant=tenant,
                 clearance_id=cid,
@@ -703,6 +719,8 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
+        for invoice in created:
+            self._log_invoice_created(invoice, note=' دولية من التخليص')
         ser = PurchaseInvoiceSerializer(created, many=True)
         logger.info(
             'clearance invoices imported clearance=%s deal_ids=%s invoice_ids=%s',
@@ -1043,6 +1061,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         تقع.
         """
         source = self.get_object()
+        if source.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL:
+            # سعر بند الدولية محمَّل (بضاعة + شحن + تخليص + نقل) ولا يُحفظ سعر المورد على
+            # البند؛ نسخُه فاتورةً محليةً يشتري من المورد بسعرٍ لم يبعه به.
+            return Response(
+                {'error': 'الفاتورة الدولية لا تُنسخ — سعر بندها محمَّل لا سعر المورد. '
+                          'أنشئ الفاتورة الدولية من صفقتها وتخليصها.'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         tenant = source.tenant
         with transaction.atomic():
             clone = PurchaseInvoice.objects.create(

@@ -152,6 +152,16 @@ def shipment_label_of(kind: str, obj) -> str:
     return obj.shipment_label
 
 
+def shipment_id_of(kind: str, obj):
+    """الشحنة الدولية للمستحق — None لإرساليةٍ بلا شحنة ولا تخليص."""
+    if kind == 'freight':
+        return obj.pk
+    if kind == 'clearance':
+        return obj.shipment_id
+    clearance = getattr(obj, 'clearance', None)
+    return obj.shipment_id or (clearance.shipment_id if clearance is not None else None)
+
+
 def _label(kind: str, obj) -> str:
     if kind == 'clearance':
         ship = shipment_label_of(kind, obj)
@@ -396,31 +406,58 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
     return {'anchors': anchors, 'vouchers': vouchers, 'deal_invoices': deal_invoices}
 
 
-def _party_accrual_docs(tenant_id: int, partner_id: int):
+#: الصنف ← حقل الطرف الدائن على المستند.
+_PARTY_FIELD = {'clearance': 'customs_broker', 'freight': 'shipping_agent', 'local': 'carrier'}
+
+
+def _party_accrual_docs(tenant_id: int, partner_id: int | None):
+    """مستحقّات الطرف المرحّلة — أو مستحقّات كل أطراف الشركة حين `partner_id=None`."""
     from logistics.models import LocalShipment, LogisticsClearance, LogisticsShipment
+
+    def party(kind: str) -> dict:
+        field = _PARTY_FIELD[kind]
+        if partner_id is None:
+            return {f'{field}__isnull': False}
+        return {f'{field}_id': partner_id}
 
     yield from (
         ('clearance', c) for c in LogisticsClearance.objects.filter(
-            tenant_id=tenant_id, customs_broker_id=partner_id, journal__isnull=False,
-        ).select_related('journal', 'shipment').prefetch_related('shipment__deals__partner')
+            tenant_id=tenant_id, journal__isnull=False, **party('clearance'),
+        ).select_related('journal', 'shipment', 'customs_broker').prefetch_related('shipment__deals__partner')
     )
     yield from (
         ('freight', s) for s in LogisticsShipment.objects.filter(
-            tenant_id=tenant_id, shipping_agent_id=partner_id,
-            freight_is_posted=True, freight_journal__isnull=False,
-        ).select_related('freight_journal').prefetch_related('deals__partner')
+            tenant_id=tenant_id, freight_is_posted=True, freight_journal__isnull=False,
+            **party('freight'),
+        ).select_related('freight_journal', 'shipping_agent').prefetch_related('deals__partner')
     )
     yield from (
         ('local', ls) for ls in LocalShipment.objects.filter(
-            tenant_id=tenant_id, carrier_id=partner_id, is_posted=True, journal__isnull=False,
-        ).select_related('journal', 'shipment', 'clearance__shipment').prefetch_related(
+            tenant_id=tenant_id, is_posted=True, journal__isnull=False, **party('local'),
+        ).select_related('journal', 'carrier', 'shipment', 'clearance__shipment').prefetch_related(
             'shipment__deals__partner', 'clearance__shipment__deals__partner')
     )
 
 
+#: الصنف ← حقل قيد الاستحقاق على المستند.
+_ACCRUAL_JOURNAL = {'clearance': 'journal', 'freight': 'freight_journal', 'local': 'journal'}
+
+
 def _accrual_date(kind: str, obj):
-    journal = {'clearance': 'journal', 'freight': 'freight_journal', 'local': 'journal'}[kind]
-    return getattr(getattr(obj, journal), 'transaction_date', None)
+    return getattr(getattr(obj, _ACCRUAL_JOURNAL[kind]), 'transaction_date', None)
+
+
+def party_accrued_total(tenant_id: int, partner_id: int):
+    """(مجموع مستحقّات الطرف المرحّلة، تاريخ آخرها) — «إجمالي مشتريات» المخلّص والوكيل
+    والناقل في كرته. دائنُ الطرف في قيود الاستحقاق نفسها التي تقرأ منها `accrual_status`،
+    باستعلامٍ واحدٍ على القيود لا استعلاماتٍ لكل مستند."""
+    journal_ids, last = [], None
+    for kind, obj in _party_accrual_docs(tenant_id, partner_id):
+        journal_ids.append(getattr(obj, f'{_ACCRUAL_JOURNAL[kind]}_id'))
+        date = _accrual_date(kind, obj)
+        if date and (last is None or date > last):
+            last = date
+    return _party_net(journal_ids, partner_id, credit_side=True), last
 
 
 def party_open_accruals(tenant_id: int, partner_id: int, *, include_settled: bool = False) -> list[dict]:
@@ -436,11 +473,26 @@ def party_open_accruals(tenant_id: int, partner_id: int, *, include_settled: boo
             'id': obj.pk,
             'label': _label(kind, obj),
             'shipment_label': shipment_label_of(kind, obj),
+            'shipment_id': shipment_id_of(kind, obj),
             'date': date.isoformat() if date else None,
             **{k: str(v) for k, v in status.items()},
         })
     rows.sort(key=lambda r: (r['date'] or '9999-12-31', KINDS.index(r['kind']), r['id']))
     return rows
+
+
+def tenant_open_accruals(tenant_id: int) -> list[tuple]:
+    """[(الطرف، اسمه، تاريخ الاستحقاق، المتبقّي)] لكل مستحقٍّ لوجستي غير مسدَّد في الشركة —
+    جانب المخلّص والوكيل والناقل من أعمار الذمم الدائنة (`core/reports/financial.py` — `_aging`).
+    المتبقّي من `accrual_status` نفسها التي تقرأ منها البطاقة والتوزيع."""
+    out = []
+    for kind, obj in _party_accrual_docs(tenant_id, None):
+        remaining = accrual_status(kind, obj)['remaining']
+        if remaining <= 0:
+            continue
+        party = getattr(obj, _PARTY_FIELD[kind])
+        out.append((party.pk, party.name, _accrual_date(kind, obj), remaining))
+    return out
 
 
 def suggest_accrual_fifo(tenant_id: int, partner_id: int, amount) -> list[dict]:
@@ -581,4 +633,5 @@ __all__ = [
     'document_voucher_rows', 'journal_reference_shipment_labels', 'party_open_accruals', 'shipment_label_of',
     'suggest_accrual_fifo', 'voucher_unallocated', 'allocate_voucher_to_accruals',
     'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
+    'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
 ]

@@ -55,10 +55,10 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | DELETE | `partners/{id}/` | `PartnerViewSet.destroy` — 400 «عليه حركات (…) — أوقفه بدل حذفه» إن حمل أيّ مرجع غير مملوك؛ وإلا يُحذف مع حسابه الفارغ |
 | GET | `partners/lookup/` | `PartnerViewSet.lookup` — مصفوفة خام محدودة (افتراضي 200، حد أقصى 500) |
 | GET | `partners/{id}/balance/` | `PartnerViewSet.balance` — رصيد حالي + `projected_balance` بعد `?proposed_total=`، و`is_creditor` (موجبُ الدائن «له») |
-| GET | `partners/{id}/profile/` | `PartnerViewSet.profile` — Dr/Cr + إجمالي المبيعات/المشتريات + آخر معاملة |
+| GET | `partners/{id}/profile/` | `PartnerViewSet.profile` — Dr/Cr + إجمالي المبيعات/المشتريات (الدولية بحصّة المورد، وللمخلّص/الوكيل/الناقل مجموع مستحقّاتهم) + آخر معاملة |
 | GET | `partners/{id}/statement/` | `PartnerViewSet.statement` (`limit` ≤ 200، `offset`، `ordering`، `only_payments`) — كل صفّ يحمل `balance_before` و`running_balance`: الرصيد قبل الحركة وبعدها. `only_payments=true` يستثني الفاتورة نفسها — وللطرف الدائن مستحقّات التخليص/الشحن/النقل أيضاً — ويُبقي كل ما عداها (سند · ارتداد شيك · إشعار دائن) — الترشيح يحكم المعروض لا الحساب |
 | GET | `partners/{id}/stock-movements/` | `PartnerViewSet.stock_movements` → `inventory/services.py` (`partner_stock_movements`) — حركات مخزون الشريك مجمَّعةً تحت المستند المسبِّب |
-| GET | `partners/{id}/invoices/` | `PartnerViewSet.invoices` — فواتير البيع والشراء بحالة الدفع |
+| GET | `partners/{id}/invoices/` | `PartnerViewSet.invoices` — فواتير البيع والشراء بحالة الدفع، وللطرف الدائن مستحقّات التخليص/الشحن/النقل (`_party_accrual_invoice_rows`: بوسم الشحنة و`shipment_id` رابطاً إليها) |
 | GET | `partners/{id}/payment-defaults/` | `PartnerViewSet.payment_defaults` (`?direction=Incoming\|Outgoing`) |
 | GET/POST | `customer-notes/` | `CustomerNoteViewSet` (فلاتر `partner`، `target_type`، `target_id`) |
 | GET | `customer-notes/alerts/` | `CustomerNoteViewSet.alerts` — «عاجل» مستحقة لطرف بعينه |
@@ -100,6 +100,7 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 |---|---|
 | `partners/tests/test_customer_notes.py` | إنشاء الملاحظة مع `created_by`، الفلترة بـ`?partner`، العزل بين الشركات، `reminders-due` و`alerts` |
 | `partners/tests/test_partner_card_payment_clarity.py` | `invoices/` يطابق حالة الدفع في شاشة الفواتير، و`link_key` يربط الحركة بمستندها في كشف الحساب، والسند على فاتورتين يحمل `link_targets` بمبلغ كلٍّ منهما |
+| `core/tests/test_creditor_aging_and_balances.py` | أعمار الذمم الدائنة = رصيد كل طرفٍ في الدفتر (المخلّص والناقل)؛ «أرصدة الموردين» بكل الأنواع الدائنة وعمود النوع وفلتره؛ كرت المخلّص بمستحقّاته ومجموعها |
 | `partners/tests/test_creditor_party_sign.py` | إشارة الرصيد لكل نوع طرف دائن في `balance`/`profile`/`statement` (دائن − مدين) والعميل كما كان |
 | `logistics/tests/test_statement_accrual_links.py` | مستحق التخليص مع دفعته المباشرة وسنده الموزَّع عليه وحده في مجموعةٍ واحدة، وسند على ثلاثة مستحقّات صفٌّ واحد بـ«3 مستحقات: …» والرصيد الختامي لا يتغيّر، وسند شراء على فاتورتين |
 | `partners/tests/test_partner_stock_movements.py` | حركات مخزون الشريك مجمَّعةً تحت مستندها، وعزلها عن الشركات الأخرى (العدد تسريبٌ أيضاً) |

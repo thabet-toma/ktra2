@@ -60,7 +60,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
-import { importPaymentTooltip } from "@/utils/importPayment";
+import { importPaymentTooltip, purchasePayableTotal } from "@/utils/importPayment";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
@@ -2050,7 +2050,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const transferCommissionsIls = transferCommissionsIlsForVat(
     formData.conversionMetadata as Record<string, unknown> | null,
   );
-  const payableTotal = (Number(formData.grandTotal) || 0) + feesTotal;
+  const payableTotal = purchasePayableTotal({
+    grandTotal: Number(formData.grandTotal) || 0,
+    feesTotal,
+    international: formData.invoiceType === "international" && !formData.isReturn,
+    isPosted: Boolean(formData.isPosted),
+    serverPayableTotal: formData.payableTotal,
+  });
   const defaultInlineFeeAccount =
     feeAccounts.find((account) => account.code === "5307") ||
     feeAccounts.find((account) => account.account_type === "Expense") ||
@@ -3038,8 +3044,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       ? [{ key: "new", label: "جديدة", icon: <Plus />, onClick: guardedNew, separatorBefore: true } as KitToolbarAction]
       : []),
     // T-PSIMPL: «نسخ» — مرآة نظيرتها في البيع. فواتير المورّد الواحد تتكرّر
-    // شهرياً، وكانت تُعاد كتابتها بندًا بندًا.
-    ...(canPerm("purchase.invoice.create") && formData.id ? [{
+    // شهرياً، وكانت تُعاد كتابتها بندًا بندًا. الدولية لا تُنسخ: سعر بندها محمَّل
+    // لا سعر المورد (الخادم يرفضها — `views/invoices.py` `duplicate`).
+    ...(canPerm("purchase.invoice.create") && formData.id && !isInternationalInvoice ? [{
       key: "duplicate",
       label: duplicating ? "...نسخ" : "نسخ",
       icon: duplicating ? <Loader2 className="animate-spin" /> : <Copy />,

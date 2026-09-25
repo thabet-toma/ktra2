@@ -1194,6 +1194,48 @@ def release_auto_cash_purchase_settlement(invoice, *, user=None) -> list[int]:
     return released
 
 
+def _import_ap_credit_subquery():
+    """ما دائن به قيدُ الفاتورة ذممَ مورّدها (بالأساس) — نسخة SQL من `import_invoice_ap_credit`."""
+    from django.db.models import OuterRef, Sum
+    from accounting.models import JournalLine
+
+    return (
+        JournalLine.objects
+        .filter(
+            journal_id=OuterRef("journal_id"),
+            account_id=OuterRef("partner__linked_account_id"),
+            credit__gt=0,
+        )
+        .values("journal_id")
+        .annotate(total=Sum("base_credit"))
+        .values("total")[:1]
+    )
+
+
+def annotate_purchase_supplier_share(queryset):
+    """`supplier_share`: ما يخصّ المورد من فاتورة الشراء — للدولية المرحّلة حصّته التي
+    دائنه بها قيدُها (`import_invoice_ap_credit`)، ولغيرها `grand_total`.
+
+    الفاتورة الدولية إجماليها محمَّل (بضاعة + شحن + تخليص + نقل)، وحصص الوكيل والمخلّص
+    والناقل ليست مشترياتٍ من المورد — فـ«إجمالي المشتريات» في التقارير وكرت الطرف من هنا.
+    """
+    from django.db.models import Case, DecimalField, F, Q, Subquery, When
+    from django.db.models.functions import Coalesce
+    from logistics.models import PurchaseInvoice
+
+    money = DecimalField(max_digits=18, decimal_places=2)
+    return queryset.annotate(
+        supplier_share=Case(
+            When(
+                Q(invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, is_return=False, is_posted=True),
+                then=Coalesce(Subquery(_import_ap_credit_subquery(), output_field=money), F("grand_total")),
+            ),
+            default=F("grand_total"),
+            output_field=money,
+        ),
+    )
+
+
 def annotate_purchase_invoice_payment_summary(queryset):
     """نسخة SQL لملخص الدفع تُستخدم في القوائم والفلترة قبل pagination."""
     from django.db.models import (
@@ -1264,17 +1306,7 @@ def annotate_purchase_invoice_payment_summary(queryset):
     # و`import_deal_payments_ap_debit` حرفاً بحرف: المستحقّ ما دائن به قيدُها
     # ذممَ المورد، والمدفوع يشمل مدينَ الذمم في قيود دفعات صفقتها المرحّلة —
     # بالأساس كلاهما (قيد الدفعة دولارٌ اسمي بسعرها).
-    import_ap_credit = (
-        JournalLine.objects
-        .filter(
-            journal_id=OuterRef("journal_id"),
-            account_id=OuterRef("partner__linked_account_id"),
-            credit__gt=0,
-        )
-        .values("journal_id")
-        .annotate(total=Sum("base_credit"))
-        .values("total")[:1]
-    )
+    import_ap_credit = _import_ap_credit_subquery()
     deal_paid = (
         JournalLine.objects
         .filter(

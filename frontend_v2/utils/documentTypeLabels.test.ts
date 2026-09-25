@@ -20,6 +20,12 @@ test('يبقي فاتورة الشراء شراءً', () => {
   assert.equal(relatedInvoiceTypeLabel({ document_type: 'PURCHASE_INVOICE' }), 'شراء');
 });
 
+test('يسمّي مستحقّات المخلّص والوكيل والناقل بأسمائها لا «شراء»', () => {
+  assert.equal(relatedInvoiceTypeLabel({ document_type: 'LOGISTICS_CLEARANCE' }), 'مستحق تخليص');
+  assert.equal(relatedInvoiceTypeLabel({ document_type: 'SHIPMENT_FREIGHT_ACCRUAL' }), 'مستحق شحن');
+  assert.equal(relatedInvoiceTypeLabel({ document_type: 'LOCAL_SHIPMENT' }), 'إرسالية');
+});
+
 test('يبقي حركة البيع مبيعاتٍ — الإصلاح لا يقلب السليم', () => {
   const movement = {
     reference_type: 'SALE',

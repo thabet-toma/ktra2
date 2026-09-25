@@ -148,6 +148,8 @@ interface InvoiceRow {
   invoice_kind?: string | null;
   document_id: number;
   document_number: string;
+  /** مستحقّات المخلّص/الوكيل/الناقل: الرابط إلى شحنتها (لا شاشة للمستحق وحده). */
+  shipment_id?: number | null;
   date: string | null;
   grand_total: string;
   is_posted: boolean;
@@ -540,7 +542,9 @@ export const PartnerProfilePage: React.FC = () => {
       key: 'document_number',
       header: 'رقم الفاتورة',
       render: (r) => (
-        <DocRefCell referenceType={r.document_type} referenceId={r.document_id} label={r.document_number} />
+        r.shipment_id
+          ? <DocRefCell referenceType="LOGISTICS_SHIPMENT" referenceId={r.shipment_id} label={r.document_number} />
+          : <DocRefCell referenceType={r.document_type} referenceId={r.document_id} label={r.document_number} />
       ),
     },
     {
@@ -653,7 +657,10 @@ export const PartnerProfilePage: React.FC = () => {
             <>
               <Kpi label="الرصيد الحالي" value={`${profile.balance} ${profile.balance_side}`} />
               <Kpi label="المتبقي المستحق" value={profile.outstanding_balance} />
-              <Kpi label={isSupplier ? 'إجمالي المشتريات' : 'إجمالي المبيعات'} value={isSupplier ? profile.total_purchases : profile.total_sales} />
+              <Kpi
+                label={!isSupplier ? 'إجمالي المبيعات' : partner?.partner_type === 'Supplier' ? 'إجمالي المشتريات' : 'إجمالي المستحقّات'}
+                value={isSupplier ? profile.total_purchases : profile.total_sales}
+              />
               <Kpi label="آخر معاملة" value={profile.last_transaction_date || '—'} />
             </>
           ) : (

@@ -64,8 +64,13 @@ def _posted_purchases(tenant_id: int, params: dict, *, returns: bool = False):
 
 
 def _purchase_invoice_rows(tenant_id: int, params: dict, *, returns: bool = False):
+    from logistics.services import annotate_purchase_supplier_share
+
     rows = []
-    qs = _posted_purchases(tenant_id, params, returns=returns).select_related("partner")
+    # «الإجمالي» ما يخصّ المورد (حصّته للدولية)، و«التكلفة المحمَّلة» إجمالي المستند
+    # نفسه — للدولية بضاعة + شحن + تخليص + نقل، ولغيرها يساوي الإجمالي.
+    qs = annotate_purchase_supplier_share(
+        _posted_purchases(tenant_id, params, returns=returns).select_related("partner"))
     for inv in qs.order_by("invoice_date", "id"):
         rows.append({
             "id": inv.id,
@@ -78,7 +83,8 @@ def _purchase_invoice_rows(tenant_id: int, params: dict, *, returns: bool = Fals
             "discount": _money(inv.discount_amount),
             "tax_amount": _money(inv.tax_amount),
             "shipping_cost": _money(inv.shipping_cost),
-            "grand_total": _money(inv.grand_total),
+            "grand_total": _money(inv.supplier_share),
+            "landed_total": _money(inv.grand_total),
         })
     return rows
 
@@ -94,6 +100,7 @@ _PURCHASE_COLUMNS = (
     ReportColumn("tax_amount", "الضريبة", KIND_MONEY, total=True),
     ReportColumn("shipping_cost", "الشحن", KIND_MONEY, total=True),
     ReportColumn("grand_total", "الإجمالي", KIND_MONEY, total=True),
+    ReportColumn("landed_total", "التكلفة المحمَّلة", KIND_MONEY, total=True),
 )
 
 register(ReportSpec(
@@ -120,13 +127,16 @@ register(ReportSpec(
 
 
 def _purchases_by_supplier(tenant_id: int, params: dict) -> list[dict]:
-    qs = _posted_purchases(tenant_id, params).values(
+    from logistics.services import annotate_purchase_supplier_share
+
+    # الدولية بحصّة المورد — حصص الوكيل والمخلّص والناقل ليست تعاملاً معه.
+    qs = annotate_purchase_supplier_share(_posted_purchases(tenant_id, params)).values(
         "partner_id", "partner__name",
     ).annotate(
         invoices=Sum(Value(1), output_field=DecimalField(max_digits=12, decimal_places=0)),
         subtotal=_money_sum("subtotal"),
         tax_amount=_money_sum("tax_amount"),
-        grand_total=_money_sum("grand_total"),
+        grand_total=_money_sum("supplier_share"),
     ).order_by("-grand_total")
     return [{
         "partner_id": r["partner_id"],

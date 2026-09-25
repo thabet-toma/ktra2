@@ -176,8 +176,9 @@ def resolve_purchase_price(
 
     if chosen is not None:
         src_rate = _src_purchase_rate(chosen)
+        ratios = _international_supplier_ratios(tenant_id, invoice_ids=[chosen.invoice_id])
         price = _convert_currency(
-            _dec(chosen.unit_price), source_rate=src_rate, target_rate=target_rate
+            _supplier_unit_price(chosen, ratios), source_rate=src_rate, target_rate=target_rate
         )
         result = _resolved(
             price,
@@ -259,8 +260,9 @@ def purchase_price_list(
         .order_by("product_id", "-invoice__invoice_date", "-invoice_id", "-id")
     )
     result: dict[int, dict] = {}
+    ratios = _international_supplier_ratios(tenant_id)
     for item in qs:
-        unit = _dec(item.unit_price)
+        unit = _supplier_unit_price(item, ratios)
         cur = result.setdefault(item.product_id, {"last": None})
 
         if cur["last"] is None and (
@@ -455,6 +457,37 @@ def _lowest_purchase_item(qs):
             best_base = base
             chosen = item
     return chosen
+
+
+def _international_supplier_ratios(tenant_id: int, invoice_ids=None) -> dict[int, Decimal]:
+    """{فاتورة دولية مرحّلة: حصّة المورد ÷ إجماليها المحمَّل} — باستعلامٍ واحد.
+
+    بند الدولية محمَّل (بضاعة + شحن + تخليص + نقل)، و`logistics/landed_cost.py` يوزّع
+    البضاعة واللوجستيات على البنود **بالأوزان نفسها**؛ فسعر المورد لكل بند = سعره المحمَّل ×
+    هذه النسبة. الحصّة ما دائن به قيدُ الفاتورة المورد (`annotate_purchase_supplier_share`).
+    """
+    from logistics.models import PurchaseInvoice
+    from logistics.services import annotate_purchase_supplier_share
+
+    qs = PurchaseInvoice.objects.filter(
+        tenant_id=tenant_id, is_posted=True, is_return=False, grand_total__gt=0,
+        invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+    )
+    if invoice_ids is not None:
+        qs = qs.filter(id__in=invoice_ids)
+    return {
+        pk: _dec(share) / _dec(total)
+        for pk, share, total in annotate_purchase_supplier_share(qs).values_list(
+            "id", "supplier_share", "grand_total")
+        if _dec(share) > 0
+    }
+
+
+def _supplier_unit_price(item, ratios: dict[int, Decimal]) -> Decimal:
+    """سعر المورد لبند شراء — للدولية المحمَّلُ × نسبة حصّة المورد، ولغيرها سعرُ البند."""
+    unit = _dec(item.unit_price)
+    ratio = ratios.get(item.invoice_id)
+    return unit * ratio if ratio is not None else unit
 
 
 def _src_purchase_rate(item) -> Decimal:

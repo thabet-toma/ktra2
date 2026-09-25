@@ -5,6 +5,7 @@ import { formatMoney, formatQuantity } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 import { formatDateValue } from "../../../utils/formatDate";
+import { importPaymentRows } from "../../../utils/importPayment";
 
 interface InvoicePrintViewProps {
     invoice: Invoice;
@@ -67,6 +68,10 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
     };
 
     const totals = calculateTotals();
+    // الدولية: الإجمالي محمَّل (بضاعة + شحن + تخليص + نقل) والمدفوع والباقي جانبُ المورد
+    // وحده — فيُطبع صفّ المورد متّسقاً من الخادم، والتكاليف الأربع في جدولٍ مستقل.
+    const importRows = importPaymentRows(invoice.importPayment);
+    const supplierPart = importRows.find((row) => row.key === 'supplier');
 
     return (
         <div className="fixed inset-0 z-50 ktra-bg-panel flex justify-center overflow-auto py-8 print:p-0 print:ktra-bg-field print:static print:block" dir="rtl">
@@ -277,16 +282,22 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.shippingCost)}</span>
                             </div>
                             <div className="flex justify-between pt-2 font-black text-lg ktra-bg-panel -mx-3 px-3 border-t ktra-border-soft">
-                                <span>الإجمالي:</span>
+                                <span>{supplierPart ? 'الإجمالي المحمَّل:' : 'الإجمالي:'}</span>
                                 <span className="font-mono" dir="ltr">{formatCurrency(totals.grandTotal)}</span>
                             </div>
+                            {supplierPart && (
+                                <div className="flex justify-between pt-1.5">
+                                    <span className="ktra-text-soft">حصّة المورد:</span>
+                                    <span className="font-mono font-bold" dir="ltr">{formatCurrency(supplierPart.cost)}</span>
+                                </div>
+                            )}
                             <div className="flex justify-between pt-1.5">
-                                <span className="ktra-text-soft">المدفوع المرحّل:</span>
-                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.amountPaid || 0)}</span>
+                                <span className="ktra-text-soft">{supplierPart ? 'المدفوع للمورد:' : 'المدفوع المرحّل:'}</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(supplierPart ? supplierPart.paid : invoice.amountPaid || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
-                                <span className="ktra-text-soft">المتبقي للدفع:</span>
-                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(invoice.remainingBalance || 0)}</span>
+                                <span className="ktra-text-soft">{supplierPart ? 'المتبقي للمورد:' : 'المتبقي للدفع:'}</span>
+                                <span className="font-mono font-bold" dir="ltr">{formatCurrency(supplierPart ? supplierPart.remaining : invoice.remainingBalance || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
                                 <span className="ktra-text-soft">حالة الدفع:</span>
@@ -307,6 +318,32 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                         </div>
                     </div>
                 </div>
+
+                {importRows.length > 0 && (
+                    <div className="mb-4 border ktra-border-soft rounded-lg overflow-hidden" data-testid="print-import-costs">
+                        <div className="ktra-bg-panel px-3 py-2 border-b ktra-border-soft font-bold">تفصيل التكاليف ودفعاتها</div>
+                        <table className="w-full text-[10px]">
+                            <thead>
+                                <tr className="border-b ktra-border-soft">
+                                    <th className="p-2 text-right">البند</th>
+                                    <th className="p-2 text-right">التكلفة</th>
+                                    <th className="p-2 text-right">المدفوع</th>
+                                    <th className="p-2 text-right">المتبقي</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {importRows.map((row) => (
+                                    <tr key={row.key} className="border-b ktra-border-soft">
+                                        <td className="p-2">{row.label}</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(row.cost)}</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(row.paid)}</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(row.remaining)}</td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
 
                 {!!invoice.paymentDetails?.length && (
                     <div className="mb-4 border ktra-border-soft rounded-lg overflow-hidden">

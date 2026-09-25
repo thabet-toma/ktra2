@@ -193,6 +193,46 @@ test("broker statement: a voucher over three clearances stays one row with a sub
   await expect(page.getByText(/↳ من سند صرف/)).toHaveCount(0);
 });
 
+test("broker card: its clearances are its invoices, totalled as «إجمالي المستحقّات» and linked to the shipment", async ({ page }) => {
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/partners/83/profile/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          balance: "955.00", balance_side: "Cr", outstanding_balance: "955.00",
+          total_sales: "0", total_purchases: "3400.00", last_transaction_date: "2026-06-10",
+        }),
+      });
+      return true;
+    }
+    if (url.pathname.endsWith("/partners/83/invoices/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify([
+          {
+            document_type: "LOGISTICS_CLEARANCE", document_id: 14, shipment_id: 19,
+            document_number: "تخليص #14 — SH-0019 — داتا لوجر", date: "2026-06-10",
+            grand_total: "2500.00", is_posted: true, amount_paid: "2045.00", remaining_balance: "455.00",
+            payment_status: "partially_paid", payment_status_display: "مدفوعة جزئياً",
+          },
+        ]),
+      });
+      return true;
+    }
+    return profileResponder(route, url);
+  });
+  await page.goto("/partners/83");
+
+  await page.getByRole("tab", { name: "ملخص الرصيد" }).click({ timeout: 15000 });
+  await expect(page.getByText("إجمالي المستحقّات")).toBeVisible();
+  await expect(page.getByText("3400.00")).toBeVisible();
+  await expect(page.getByText("إجمالي المشتريات")).toHaveCount(0);
+  await page.getByRole("tab", { name: "الفواتير" }).click();
+  await expect(page.getByText("مستحق تخليص", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "تخليص #14 — SH-0019 — داتا لوجر" }).click();
+  await expect(page).toHaveURL(/\/import-flow\/19$/);
+});
+
 test("broker refund receipt reads the balance as «له» — not «للعميل» with a flipped sign", async ({ page }) => {
   await installAuthenticatedApiMocks(page, async (route, url) => {
     if (url.pathname.endsWith("/partners/83/balance/")) {

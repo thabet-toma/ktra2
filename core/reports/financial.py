@@ -111,7 +111,7 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
                 tenant_id=tenant_id, is_posted=True, is_return=False,
             ).select_related("partner")
         )
-        rows_src = (
+        rows_src = [
             # T-DUE: تُعمَّر بالاستحقاق كنظيرتها المدينة — كان الجانب الدائن
             # وحده يُعمَّر بتاريخ الفاتورة لأن `PurchaseInvoice` كانت بلا
             # `due_date` أصلاً، فتظهر فاتورةٌ مهلتها 60 يوماً «متأخرة» بعد 31.
@@ -119,7 +119,11 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
              d.due_date or d.invoice_date,
              Decimal(str(d.list_remaining_balance or 0)))
             for d in docs
-        )
+        ]
+        # مستحقّات التخليص والشحن والنقل ذممٌ دائنةٌ للمخلّص والوكيل والناقل — كان
+        # التقرير من فواتير الشراء وحدها فيغيب دَينهم كلّه ويقصر مجموعُه عن الدفتر.
+        from logistics.domain.party_accruals import tenant_open_accruals
+        rows_src += tenant_open_accruals(tenant_id)
 
     for partner_id, partner_name, base_date, remaining in rows_src:
         # السالب رصيدٌ دائن للزبون مقصود؛ جانب الموردين يُبقي حدّه القديم.
@@ -183,14 +187,17 @@ register(ReportSpec(
 ))
 
 
-def _partner_balances(tenant_id: int, params: dict, *, partner_type: str) -> list[dict]:
+def _partner_balances(tenant_id: int, params: dict, *, partner_types: tuple) -> list[dict]:
     """أرصدة الأطراف من دفتر الأستاذ — مدين ودائن ورصيد لكل حساب طرف مربوط."""
     from accounting.models import JournalLine
-    from partners.models import Partner
+    from partners.models import PARTNER_TYPE_LABELS, Partner
 
+    chosen = params.get("partner_type")
+    if chosen:
+        partner_types = tuple(t for t in partner_types if t == chosen)
     partners = Partner.objects.filter(
-        tenant_id=tenant_id, partner_type=partner_type,
-    ).values("id", "name")
+        tenant_id=tenant_id, partner_type__in=partner_types,
+    ).values("id", "name", "partner_type")
     lines = JournalLine.objects.filter(
         tenant_id=tenant_id, journal__is_posted=True, partner_id__isnull=False,
     )
@@ -212,6 +219,7 @@ def _partner_balances(tenant_id: int, params: dict, *, partner_type: str) -> lis
         rows.append({
             "partner_id": p["id"],
             "partner_name": p["name"],
+            "partner_type": PARTNER_TYPE_LABELS.get(p["partner_type"], p["partner_type"]),
             "debit": _money(debit),
             "credit": _money(credit),
             "balance": _money(abs(balance)),
@@ -237,18 +245,31 @@ register(ReportSpec(
     filters=DATE_FILTERS,
     columns=_BALANCE_COLUMNS,
     permission="sales.customer.view",
-    build=lambda t, p: _partner_balances(t, p, partner_type="Customer"),
+    build=lambda t, p: _partner_balances(t, p, partner_types=("Customer",)),
 ))
+
+#: الأطراف الدائنة بترتيب فلتر النوع — المورد ثم المخلّص والوكيل والناقل.
+_CREDITOR_TYPES = ("Supplier", "CustomsBroker", "FreightForwarder", "LocalTransporter", "Carrier")
 
 register(ReportSpec(
     key="supplier-balances",
-    title="أرصدة الموردين",
+    title="أرصدة الموردين والأطراف الدائنة",
     category="partners",
-    description="مدين ودائن ورصيد كل مورد من واقع القيود المرحّلة.",
-    filters=DATE_FILTERS,
-    columns=_BALANCE_COLUMNS,
+    description="مدين ودائن ورصيد كل مورد ومخلّص ووكيل شحن وناقل من واقع القيود المرحّلة.",
+    filters=(
+        *DATE_FILTERS,
+        ReportFilter("partner_type", "النوع", "select", options=(
+            ("Supplier", "مورد"), ("CustomsBroker", "مخلّص جمركي"), ("FreightForwarder", "وكيل شحن"),
+            ("LocalTransporter", "ناقل محلي"), ("Carrier", "ناقل"),
+        )),
+    ),
+    columns=(
+        _BALANCE_COLUMNS[0],
+        ReportColumn("partner_type", "النوع", width="110px"),
+        *_BALANCE_COLUMNS[1:],
+    ),
     permission="purchase.invoice.view",
-    build=lambda t, p: _partner_balances(t, p, partner_type="Supplier"),
+    build=lambda t, p: _partner_balances(t, p, partner_types=_CREDITOR_TYPES),
 ))
 
 

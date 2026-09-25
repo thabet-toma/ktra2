@@ -7,6 +7,16 @@ CREDITOR_PARTNER_TYPES = frozenset({
     'Supplier', 'FreightForwarder', 'CustomsBroker', 'LocalTransporter', 'Carrier',
 })
 
+#: اسم نوع الطرف للتقارير — مرآة `utils/partnerActions.ts` (`partnerTypeLabel`).
+PARTNER_TYPE_LABELS = {
+    'Customer': 'عميل',
+    'Supplier': 'مورد',
+    'CustomsBroker': 'مخلّص جمركي',
+    'FreightForwarder': 'وكيل شحن',
+    'LocalTransporter': 'ناقل محلي',
+    'Carrier': 'ناقل',
+}
+
 
 def is_creditor_party(partner_or_type) -> bool:
     """الطرف دائنٌ (رصيده دائن − مدين) أم مدين كالعميل؟ — مصدرٌ واحد للإشارة.

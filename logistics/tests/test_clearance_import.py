@@ -101,6 +101,63 @@ class ClearanceImportTest(APITestCase):
         self.assertEqual(inv.import_shipment_remaining_rate, Decimal("3.65"))
         self.assertGreater(inv.grand_total, 0)
 
+    def _member(self, username, *, can_create, can_access_import):
+        from tenants.models import MemberPermission, UserCompanyMembership
+        user = User.objects.create_user(username=username, password="x")
+        membership = UserCompanyMembership.objects.create(
+            user=user, tenant=self.tenant, role="staff", can_access_import=can_access_import)
+        MemberPermission.objects.create(
+            membership=membership, permission_key="purchase.invoice.create", allowed=can_create)
+        return user
+
+    def _import_as(self, user):
+        self.client.force_authenticate(user=user)
+        return self.client.post(
+            "/api/logistics/purchase-invoices/import-from-clearance/",
+            {"clearance_id": self.clearance.id, "deal_ids": [self.deal.id],
+             "deal_remaining_rate": "3.7", "shipment_remaining_rate": "3.65"},
+            format="json", HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def test_import_has_the_same_guards_as_create(self):
+        """كان يتخطّى صلاحية الإنشاء والوصول للاستيراد فيُنشئ فاتورةً دوليةً لمن لا يملكهما."""
+        no_create = self._member("imp-no-create", can_create=False, can_access_import=True)
+        no_import = self._member("imp-no-import", can_create=True, can_access_import=False)
+        for user in (no_create, no_import):
+            resp = self._import_as(user)
+            self.assertEqual(resp.status_code, 403, (user.username, resp.content))
+        self.assertFalse(PurchaseInvoice.objects.filter(tenant=self.tenant, deal=self.deal).exists())
+
+    def test_import_logs_each_created_invoice(self):
+        from core.models import ActivityLog
+        resp = self._import()
+        self.assertEqual(resp.status_code, 201, resp.content)
+        inv = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deal)
+        log = ActivityLog.objects.get(entity_type="purchase_invoice", entity_id=inv.id, action="create")
+        self.assertIn("دولية من التخليص", log.description)
+
+    def test_import_from_a_foreign_clearance_is_404_not_500(self):
+        resp = self.client.post(
+            "/api/logistics/purchase-invoices/import-from-clearance/",
+            {"clearance_id": 987654, "deal_ids": [self.deal.id]},
+            format="json", **self._auth())
+        self.assertEqual(resp.status_code, 404, resp.content)
+
+    def test_a_deal_lives_on_one_shipment_so_its_payments_meet_one_invoice(self):
+        """تحقّق (بند 16): `import_deal_payments_ap_debit` و`list_deal_paid` ينسبان دفعات الصفقة
+        كلّها لفاتورتها — يتكرّر ذلك لو وُزِّعت الصفقة على شحنتين. لا تُوزَّع: الربط الثاني
+        مرفوض، والاستيراد الثاني للصفقة نفسها مرفوض؛ فلا فاتورتان تتقاسمان دفعاتها."""
+        other = LogisticsShipment.objects.create(tenant=self.tenant, shipment_number="SH-0002")
+        resp = self.client.post(
+            f"/api/logistics/shipments/{other.pk}/add_deal/", {"deal_id": self.deal.id},
+            format="json", **self._auth())
+        self.assertEqual(resp.status_code, 400, resp.content)
+        self.assertIn("لا يمكن ربطها بأكثر من شحنة", resp.json()["error"])
+
+        self.assertEqual(self._import().status_code, 201)
+        self.assertEqual(self._import().status_code, 400, "استيرادٌ ثانٍ للصفقة نفسها")
+        self.assertEqual(
+            PurchaseInvoice.objects.filter(tenant=self.tenant, deal=self.deal, is_return=False).count(), 1)
+
     def test_preview_exposes_supplier_payment_gate_before_import(self):
         LogisticsPayment.objects.filter(deal=self.deal).update(amount=Decimal("997"))
         preview = self.client.post(
