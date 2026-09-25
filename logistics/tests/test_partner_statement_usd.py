@@ -15,7 +15,7 @@ from rest_framework.test import APITestCase
 from accounting.models import Account, CashBoxLedgerAccount, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year, partner_account_statement, post_journal
 from logistics.accruals import post_freight_accrual
-from logistics.models import LogisticsPayment, LogisticsShipment
+from logistics.models import LogisticsDeal, LogisticsPayment, LogisticsShipment
 from partners.models import Partner
 from tenants.models import Currency
 from tenants.services import create_company
@@ -282,3 +282,63 @@ class BackfillYoyoTest(_UsdBase):
         call_command("backfill_foreign_party_currency", tenant=self.tenant.TenantID, apply=True,
                      stdout=again)
         self.assertIn("كُتب 0 سطراً", again.getvalue())
+
+
+class BackfillDeletedPaymentsTest(_UsdBase):
+    """الدفعة المحذوفة قيداها باقيان: المحذوفة ليّناً دولارها في صفّها، والمحذوفة نهائياً
+    على صفقة أرشيف اسميُّها دولار (كقيد LOGISTICS_DEAL) — وغيرها بلا مصدر."""
+
+    def _pair(self, partner, ref_id, amount, description):
+        for ref_type, side in (("LOGISTICS_PAYMENT", "debit"), ("LOGISTICS_PAYMENT_UNPOST", "credit")):
+            jh = JournalHeader.objects.create(
+                tenant=self.tenant, transaction_date="2026-05-10", is_posted=True,
+                reference_type=ref_type, reference_id=ref_id, description=description)
+            JournalLine.objects.create(
+                tenant=self.tenant, journal=jh, account=partner.linked_account, partner=partner,
+                debit=D(amount) if side == "debit" else 0, credit=D(amount) if side == "credit" else 0)
+            JournalLine.objects.create(
+                tenant=self.tenant, journal=jh, account=self.usd_box_account,
+                debit=D(amount) if side == "credit" else 0, credit=D(amount) if side == "debit" else 0)
+
+    def _usd(self, ref_id):
+        """[قيد الترحيل، قيد العكس]."""
+        return list(JournalLine.objects.filter(
+            tenant=self.tenant, partner__isnull=False, journal__reference_id=ref_id,
+            journal__reference_type__startswith="LOGISTICS_PAYMENT",
+        ).order_by("journal__reference_type").values_list("amount_currency", flat=True))
+
+    def test_deleted_payments_are_filled_and_an_unknown_one_stays_empty(self):
+        from accounting.api import ensure_partner_account
+
+        supplier = Partner.objects.create(tenant=self.tenant, name="مورد أرشيف", partner_type="Supplier")
+        for partner in (supplier, self.agent):
+            ensure_partner_account(partner)
+            partner.refresh_from_db()
+        deal = LogisticsDeal.objects.create(
+            tenant=self.tenant, ref_number="D-0042", partner=supplier, order_date="2026-04-01",
+            total_amount=D("5000"))
+        # صفقة أرشيف: قيد LOGISTICS_DEAL مرحّل ولا فاتورة دولية.
+        JournalHeader.objects.create(
+            tenant=self.tenant, transaction_date="2026-04-01", is_posted=True,
+            reference_type="LOGISTICS_DEAL", reference_id=deal.pk, description="صفقة D-0042")
+
+        soft = LogisticsPayment.objects.create(
+            deal=deal, amount=D("1000"), usd_to_ils=D("3.5"), status="Confirmed", is_posted=True)
+        self._pair(supplier, soft.pk, "3500", "دفعة | صفقة: D-0042")
+        soft.delete()
+        self.assertTrue(LogisticsPayment.all_objects.get(pk=soft.pk).is_deleted)
+
+        hard_id = soft.pk + 1000
+        self._pair(supplier, hard_id, "1497.75", "دفعة قديمة | صفقة: D-0042 | المورد: مورد أرشيف")
+        # محذوفة نهائياً لطرفٍ بلا صفقة أرشيف: لا مصدر ⇒ تبقى فارغة.
+        unknown_id = soft.pk + 2000
+        self._pair(self.agent, unknown_id, "800", "دفعة")
+        JournalLine.objects.filter(tenant=self.tenant).update(amount_currency=None, currency_code=None)
+
+        out = StringIO()
+        call_command("backfill_foreign_party_currency", tenant=self.tenant.TenantID, apply=True,
+                     stdout=out)
+        self.assertEqual(self._usd(soft.pk), [D("1000.00"), D("-1000.00")])
+        self.assertEqual(self._usd(hard_id), [D("1497.75"), D("-1497.75")])
+        self.assertEqual(self._usd(unknown_id), [None, None])
+        self.assertIn("كُتب 4 سطراً", out.getvalue())

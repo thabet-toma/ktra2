@@ -8,6 +8,10 @@
   قيدٌ بعملةٍ أجنبية بسعرٍ غير 1   ⇒ الاسميّ نفسه (مدين − دائن) بعملة القيد.
   LOGISTICS_PAYMENT(_UNPOST)       ⇒ دولار الدفعة (`amount`) بإشارة السطر — الأصل
                                      الخاطئ وعكسه والمصحَّح يتعادلون كما في الشيكل.
+                                     والمحذوفة ليّناً منها (قيداها باقيان في الدفاتر).
+    …ودفعةٌ حُذف صفّها نهائياً    ⇒ الاسميّ دولاراً — بشرط قيدٍ بعملة الأساس بسعر 1
+                                     وصفقةِ أرشيف: المسمّاة في وصفه («صفقة: D-…»)، وإلّا
+                                     فكلّ صفقات الطرف أرشيف. غير ذلك بلا مصدر.
   SHIPMENT_FREIGHT_ACCRUAL          ⇒ شيكل السطر ÷ `freight_exchange_rate` (ما رُحِّل
                                      فعلاً، لا تكلفة الشحن الحيّة إن عُدِّلت بعده).
   PURCHASE_INVOICE (دولية بصفقة)    ⇒ مبلغ الصفقة الدولاري، موزَّعاً على أسطر المورد.
@@ -21,6 +25,7 @@
     python manage.py backfill_foreign_party_currency --tenant 1 --apply   # بعد نسخة احتياطية
 """
 import logging
+import re
 from collections import defaultdict
 from decimal import Decimal
 
@@ -28,12 +33,16 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db.models import Sum
 
 from accounting.services import JournalLine, set_lines_amount_currency
-from logistics.models import LogisticsPayment, LogisticsShipment, PurchaseInvoice
+from logistics.models import LogisticsDeal, LogisticsPayment, LogisticsShipment, PurchaseInvoice
+from logistics.payment_posting import archive_deal_ids
 from tenants.models import Currency
 
 logger = logging.getLogger(__name__)
 Q2 = Decimal('0.01')
 USD = 'USD'
+PAYMENT_TYPES = ('LOGISTICS_PAYMENT', 'LOGISTICS_PAYMENT_UNPOST')
+# «دفعة … | صفقة: D-0042 | المورد: …» — وصف قيد دفعة الصفقة (`logistics/views/deals.py`).
+_DEAL_REF_RE = re.compile(r'صفقة:\s*([^|]+?)\s*(?:\||$)')
 
 
 def _sign(line) -> int:
@@ -62,16 +71,35 @@ def plan_backfill(tenant_id: int, partner_id: int | None = None) -> dict:
         'id', 'journal_id', 'account_id', 'partner_id', 'debit', 'credit', 'base_debit',
         'base_credit', 'journal__reference_type', 'journal__reference_id',
         'journal__exchange_rate', 'journal__currency__Code', 'journal__transaction_date',
+        'journal__description',
     ))
 
     def ids_of(ref_type):
         return {l['journal__reference_id'] for l in lines
                 if l['journal__reference_type'] in ref_type and l['journal__reference_id']}
 
-    payments = dict(LogisticsPayment.objects.filter(
-        tenant_id=tenant_id,
-        id__in=ids_of(('LOGISTICS_PAYMENT', 'LOGISTICS_PAYMENT_UNPOST')),
+    # all_objects: الدفعة المحذوفة ليّناً قيداها باقيان في الدفاتر، ودولارها في صفّها.
+    payments = dict(LogisticsPayment.all_objects.filter(
+        tenant_id=tenant_id, id__in=ids_of(PAYMENT_TYPES),
     ).values_list('id', 'amount'))
+    # دفعةٌ لا صفّ لها أصلاً (حُذفت نهائياً): صفقات طرفها {المرجع: أرشيف؟}.
+    orphan_partners = {l['partner_id'] for l in lines if l['journal__reference_type'] in PAYMENT_TYPES
+                       and l['journal__reference_id'] not in payments}
+    orphan_deals: dict[int, dict[str, bool]] = defaultdict(dict)
+    if orphan_partners:
+        deals = list(LogisticsDeal.all_objects.filter(
+            tenant_id=tenant_id, partner_id__in=orphan_partners,
+        ).values_list('id', 'partner_id', 'ref_number'))
+        archive = archive_deal_ids(tenant_id, [d[0] for d in deals])
+        for deal_id, pid, ref in deals:
+            orphan_deals[pid][(ref or '').strip()] = deal_id in archive
+
+    def on_archive_deal(line) -> bool:
+        deals = orphan_deals.get(line['partner_id']) or {}
+        named = _DEAL_REF_RE.search(line['journal__description'] or '')
+        if named:
+            return deals.get(named.group(1).strip()) is True
+        return bool(deals) and all(deals.values())
     freight_rates = dict(LogisticsShipment.all_objects.filter(
         tenant_id=tenant_id, id__in=ids_of(('SHIPMENT_FREIGHT_ACCRUAL',)),
     ).values_list('id', 'freight_exchange_rate'))
@@ -111,8 +139,11 @@ def plan_backfill(tenant_id: int, partner_id: int | None = None) -> dict:
         rate = Decimal(str(line['journal__exchange_rate'] or 1))
         if code and code not in base_codes and rate != 1:
             put(line, _nominal(line), code[:3], f'قيد بعملة {code}')
-        elif ref_type in ('LOGISTICS_PAYMENT', 'LOGISTICS_PAYMENT_UNPOST') and payments.get(ref_id):
+        elif ref_type in PAYMENT_TYPES and payments.get(ref_id):
             put(line, _sign(line) * Decimal(str(payments[ref_id])), USD, ref_type)
+        elif (ref_type in PAYMENT_TYPES and ref_id not in payments
+                and (not code or code in base_codes) and rate == 1 and on_archive_deal(line)):
+            put(line, _nominal(line), USD, f'{ref_type} (محذوفة نهائياً، صفقة أرشيف)')
         elif ref_type == 'SHIPMENT_FREIGHT_ACCRUAL' and (freight_rates.get(ref_id) or 0) > 0:
             put(line, _sign(line) * _base_abs(line) / Decimal(str(freight_rates[ref_id])), USD, ref_type)
         elif ref_type in ('PURCHASE_INVOICE', 'PURCHASE_RETURN') and ref_id in invoices:
