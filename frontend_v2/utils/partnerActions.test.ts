@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   partnerActionGroups,
   partnerKindFromType,
+  partnerTypeLabel,
+  partnerVoucherDirections,
   type PartnerActionGroup,
 } from './partnerActions.ts';
 
@@ -58,6 +60,34 @@ test('إجراءات المورد مستندات شراء — ولا تسرّب 
   assert.ok(keys.includes('purchase-offer'));
   assert.ok(!keys.includes('sales-invoice'));
   assert.ok(!keys.includes('receipt'));
+});
+
+test('اتجاه السند الافتراضي من نوع الطرف: الدائنون «سند صرف» والعميل «سند قبض»', () => {
+  // المخلّص ووكيل الشحن والناقل كانوا يُعامَلون عميلاً في كرتهم («سند قبض»).
+  for (const type of ['Supplier', 'FreightForwarder', 'CustomsBroker', 'LocalTransporter', 'Carrier']) {
+    assert.deepEqual(partnerVoucherDirections(type), { primary: 'payment', secondary: 'receipt' }, type);
+  }
+  assert.deepEqual(partnerVoucherDirections('Customer'), { primary: 'receipt', secondary: null });
+  assert.equal(partnerVoucherDirections(''), null);
+  assert.equal(partnerVoucherDirections('Unknown'), null);
+});
+
+test('الطرف الدائن: «سند قبض» خيارٌ ثانٍ صريح (استرداد) لا الزرّ الافتراضي', () => {
+  const groups = partnerActionGroups({ id: '83', name: 'حاييم', kind: 'supplier' });
+  const actions = groups.flatMap((g) => g.actions);
+  const payment = actions.findIndex((a) => a.key === 'payment');
+  const refund = actions.findIndex((a) => a.key === 'refund-receipt');
+  assert.ok(payment >= 0 && refund > payment);
+  assert.equal(actions[refund].bridge, 'receipt');
+  assert.match(actions[refund].label, /استرداد/);
+});
+
+test('تسمية نوع الطرف بالعربية — والنوع المجهول يُعرض كما هو', () => {
+  assert.equal(partnerTypeLabel('CustomsBroker'), 'مخلّص جمركي');
+  assert.equal(partnerTypeLabel('FreightForwarder'), 'وكيل شحن');
+  assert.equal(partnerTypeLabel('Customer'), 'عميل');
+  assert.equal(partnerTypeLabel('Other'), 'Other');
+  assert.equal(partnerTypeLabel(null), '');
 });
 
 test('الروابط تُعبَّأ بمعرّف الطرف كي يفتح المستند جاهزاً', () => {

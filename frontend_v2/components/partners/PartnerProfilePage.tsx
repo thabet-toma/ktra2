@@ -20,6 +20,9 @@ import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
+import {
+  partnerKindFromType, partnerTypeLabel, partnerVoucherDirections,
+} from '../../utils/partnerActions';
 import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
 import { NewSupplierPaymentModal } from '../sales/NewSupplierPaymentModal';
 import { VoucherAllocationModal } from '../shared/VoucherAllocationModal';
@@ -209,7 +212,13 @@ export const PartnerProfilePage: React.FC = () => {
   const [paymentsRefreshKey, setPaymentsRefreshKey] = useState(0);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
-  const isSupplier = (partner?.partner_type || '').toLowerCase() === 'supplier';
+  // جانب الشراء كلّه لا «مورد» وحده: المخلّص ووكيل الشحن والناقل كانوا يُعامَلون
+  // عملاءً هنا («سند قبض» وفواتير بيع). القاعدة نفسها التي تقرؤها قائمة زر اليمين.
+  const isSupplier = partnerKindFromType(partner?.partner_type) === 'supplier';
+  const voucherDirs = useMemo(
+    () => partnerVoucherDirections(partner?.partner_type),
+    [partner?.partner_type],
+  );
   const receiptPartner = useMemo(
     () => partner ? { id: partner.id, name: partner.name } : null,
     [partner],
@@ -352,13 +361,15 @@ export const PartnerProfilePage: React.FC = () => {
     } catch { /* خاصية خاصة */ }
   }, [location.key]);
 
-  // تطبيق نيّة قائمة زر اليمين بعد تحميل الشريك — receipt للعميل، payment للمورد.
+  // تطبيق نيّة قائمة زر اليمين بعد تحميل الشريك — ما يسمح به نوعه فقط: صرفٌ للدائن،
+  // وقبضٌ للعميل أو للدائن استرداداً.
   useEffect(() => {
     if (!partner || !pendingCtxAction) return;
-    if (pendingCtxAction === 'receipt' && !isSupplier) setShowReceiptModal(true);
-    if (pendingCtxAction === 'payment' && isSupplier) setShowPaymentModal(true);
+    const allowed = voucherDirs ? [voucherDirs.primary, voucherDirs.secondary] : [];
+    if (pendingCtxAction === 'receipt' && allowed.includes('receipt')) setShowReceiptModal(true);
+    if (pendingCtxAction === 'payment' && allowed.includes('payment')) setShowPaymentModal(true);
     setPendingCtxAction(null);
-  }, [partner, pendingCtxAction, isSupplier]);
+  }, [partner, pendingCtxAction, voucherDirs]);
 
   const loadStatement = useCallback(
     (offset: number) => {
@@ -574,7 +585,7 @@ export const PartnerProfilePage: React.FC = () => {
               </div>
               <div><span className="text-[var(--ktra-ink-soft)]">الاسم:</span> <b>{partner.name}</b></div>
               <div><span className="text-[var(--ktra-ink-soft)]">الاسم القانوني:</span> <b>{partner.legal_name || '—'}</b></div>
-              <div><span className="text-[var(--ktra-ink-soft)]">النوع:</span> <b>{isSupplier ? 'مورد' : partner.partner_type === 'Customer' ? 'عميل' : partner.partner_type}</b></div>
+              <div><span className="text-[var(--ktra-ink-soft)]">النوع:</span> <b>{partnerTypeLabel(partner.partner_type)}</b></div>
               <div><span className="text-[var(--ktra-ink-soft)]">الهاتف:</span> <b>{partner.phone || '—'}</b></div>
               <div><span className="text-[var(--ktra-ink-soft)]">البريد الإلكتروني:</span> <b>{partner.email || '—'}</b></div>
               <div><span className="text-[var(--ktra-ink-soft)]">الرقم الضريبي:</span> <b>{partner.tax_number || '—'}</b></div>
@@ -1026,6 +1037,17 @@ export const PartnerProfilePage: React.FC = () => {
                   label: 'فاتورة مشتريات جديدة',
                   onClick: () => navigate('/purchase-invoices/new'),
                 },
+                // الخيار الثاني الصريح للدائن: استرداد زيادةٍ دُفعت له (Dr صندوق / Cr ذمّته).
+                ...(voucherDirs?.secondary === 'receipt'
+                  ? [{
+                      key: 'refund-receipt',
+                      label: 'سند قبض (استرداد)',
+                      onClick: () => {
+                        setShowReceiptModal(true);
+                        clientLogger.info("partner.refund_receipt_open");
+                      },
+                    }]
+                  : []),
               ]
             : []),
         ]}
@@ -1035,7 +1057,7 @@ export const PartnerProfilePage: React.FC = () => {
         status={
           error || allocError ? <span className="text-[var(--ktra-danger)]">{error || allocError}</span> :
           loading ? <span>جاري التحميل...</span> :
-          <span className="ktra-status-item">{isSupplier ? 'مورد' : 'عميل'}{profile ? ` · الرصيد ${profile.balance} ${profile.balance_side}` : ''}</span>
+          <span className="ktra-status-item">{partnerTypeLabel(partner?.partner_type) || (isSupplier ? 'مورد' : 'عميل')}{profile ? ` · الرصيد ${profile.balance} ${profile.balance_side}` : ''}</span>
         }
       >
         <></>

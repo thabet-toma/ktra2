@@ -87,6 +87,7 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 - **`get_queryset` يُرجع `.none()` عند غياب الشركة** في `PartnerViewSet` و`CustomerNoteViewSet` (`views.py:188-191`، `486-488`).
 - **لا رقم ضريبي ولا رقم حساب بنكي «شبيه» لطرفين** — المقارنة بعد التطبيع في بايثون لا في SQL (`serializers.py:155-170`، `views.py:306-325`)، وحساب بنكي افتراضي واحد فقط ويجب أن يكون فعّالاً (`views.py:346-371`).
 - **`enforce_limits(tenant, 'partners.records')` قبل أي إنشاء** (`views.py`).
+- **جانب الطرف واتجاه سنده قاعدةٌ واحدة في الواجهة** — `frontend_v2/utils/partnerActions.ts` (`partnerKindFromType`، `partnerVoucherDirections`): المورد والمخلّص ووكيل الشحن والناقل المحلي والناقل **أطرافٌ دائنة** ⇒ «سند صرف» افتراضياً و«سند قبض (استرداد)» خيارٌ ثانٍ صريح؛ العميل «سند قبض» وحده. يقرؤها كرت الطرف (`PartnerProfilePage.tsx`) وقائمة زر اليمين ونافذة سند الصرف (`NewSupplierPaymentModal.tsx`). مقارنةُ `partner_type === 'supplier'` كانت تجعل المخلّص «عميلاً» في كرته وتُخرجه من منتقي سند الصرف. الخادم لا يفلتر النوع في السندين: القيد Dr ذمّة الطرف / Cr الصندوق للصرف ومرآته للقبض (`logistics/tests/test_creditor_party_vouchers.py`).
 
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
@@ -98,3 +99,4 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | `partners/tests/test_supplier_scope.py` | غير المصنَّف يظهر في الجانبين — الفصل لا يُخفي مورداً قائماً |
 | `partners/tests/test_partner_list_pagination.py` | حدود `list`/`lookup` والفلترة والعزل وعدد الاستعلامات |
 | `partners/tests/test_partner_payment_defaults.py` | حسابات البنك المعادة وافتراضات الشيك الوارد |
+| `logistics/tests/test_creditor_party_vouchers.py` | سند صرف للمخلّص ووكيل الشحن والناقل المحلي بقيد Dr ذمّته / Cr الصندوق، وسند قبض منه (استرداد) يدائن ذمّته |

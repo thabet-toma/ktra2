@@ -32,18 +32,20 @@ import {
   PaymentVoucherModal,
   type ChequeLine,
 } from "./PaymentVoucherParts";
+import { partnerKindFromType, partnerTypeLabel } from "../../utils/partnerActions";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
-export type SupplierPaymentPartner = { id: number; name: string };
-/** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الموردين فقط. */
-type PartnerRow = SupplierPaymentPartner & { partner_type?: string };
+export type SupplierPaymentPartner = { id: number; name: string; partner_type?: string };
+/** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الأطراف الدائنة. */
+type PartnerRow = SupplierPaymentPartner;
 type Account = {
   id: number; code: string; name: string; parent: number | null; account_type?: string;
 };
 
-const isSupplierRow = (p: PartnerRow) =>
-  String(p.partner_type || "").toLowerCase() === "supplier";
+// الأطراف الدائنة كلّها لا «مورد» وحده — المخلّص ووكيل الشحن والناقل يُصرف لهم
+// بنفس السند والقيد (Dr ذمّة الطرف / Cr الصندوق). نفس قاعدة كرت الطرف.
+const isCreditorRow = (p: PartnerRow) => partnerKindFromType(p.partner_type) === "supplier";
 type Currency = { CurrencyID: number; Code: string };
 
 interface Props {
@@ -206,9 +208,9 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
         if (defaultCash) setCashAccountId((prev) => prev || defaultCash);
       }
       if (parts.status === "fulfilled") {
-        // المورد المثبّت مسبقاً يمرّ كما هو؛ وإلا نعرض الموردين فقط (لا العملاء).
+        // الطرف المثبّت مسبقاً يمرّ كما هو؛ وإلا نعرض الأطراف الدائنة (لا العملاء).
         const list = parts.value || [];
-        setPartners((lockPartner && initialPartner) ? list : list.filter(isSupplierRow));
+        setPartners((lockPartner && initialPartner) ? list : list.filter(isCreditorRow));
       }
     })();
     return () => { alive = false; };
@@ -327,13 +329,19 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
       <PartnerNoteAlert partnerId={supplierId === "" ? null : supplierId} className="mb-2" />
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field" style={{ gridColumn: "span 2" }}>
-          <span className="ktra-field-label">المورد *</span>
+          <span className="ktra-field-label">المورد / المستفيد *</span>
           {lockPartner && initialPartner ? (
             <input className="ktra-input" value={initialPartner.name} readOnly style={{ background: "var(--ktra-surface-2)" }} />
           ) : (
             <select className="ktra-input" value={supplierId} onChange={(e) => { setSupplierId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
               <option value="">— اختر —</option>
-              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {partners.map((p) => (
+                <option key={p.id} value={p.id}>
+                  {p.partner_type && p.partner_type !== "Supplier"
+                    ? `${p.name} — ${partnerTypeLabel(p.partner_type)}`
+                    : p.name}
+                </option>
+              ))}
             </select>
           )}
         </label>

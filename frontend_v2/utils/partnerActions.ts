@@ -66,6 +66,38 @@ export function partnerKindFromType(
   }
 }
 
+/** تسمية نوع الطرف كما تظهر في الكرت والجداول والفلاتر. */
+const PARTNER_TYPE_LABELS: Record<string, string> = {
+  Customer: "عميل",
+  Supplier: "مورد",
+  FreightForwarder: "وكيل شحن",
+  CustomsBroker: "مخلّص جمركي",
+  LocalTransporter: "ناقل محلي",
+  Carrier: "ناقل",
+};
+
+export function partnerTypeLabel(partnerType: string | null | undefined): string {
+  const t = String(partnerType || "");
+  return PARTNER_TYPE_LABELS[t] || t;
+}
+
+export type VoucherDirection = "receipt" | "payment";
+
+/**
+ * اتجاه السند لكل نوع طرف — **قاعدة واحدة** يقرؤها كرت الطرف وقائمة زر اليمين.
+ * كان الكرت يقرّر بـ`partner_type === 'supplier'` فيُعامَل المخلّص ووكيل الشحن
+ * والناقل عملاءً («سند قبض» زرّاً افتراضياً). الدائن يُصرف له أولاً، ويبقى
+ * «سند قبض» خياراً ثانياً صريحاً لاسترداد زيادةٍ دُفعت له.
+ */
+export function partnerVoucherDirections(
+  partnerType: string | null | undefined,
+): { primary: VoucherDirection; secondary: VoucherDirection | null } | null {
+  const kind = partnerKindFromType(partnerType);
+  if (kind === "customer") return { primary: "receipt", secondary: null };
+  if (kind === "supplier") return { primary: "payment", secondary: "receipt" };
+  return null;
+}
+
 /** إجراءات الطرف مجمَّعة بعناوين — قائمة مسطّحة طويلة لا تُقرأ. */
 export function partnerActionGroups(
   target: PartnerActionTarget,
@@ -123,6 +155,7 @@ export function partnerActionGroups(
         { key: "purchase-invoice", label: "فاتورة شراء", icon: "invoice", href: "/purchase-invoices/new" },
         { key: "purchase-offer", label: "عرض سعر شراء", icon: "quotation", href: "/price-offers" },
         { key: "payment", label: "سند صرف", icon: "payment", bridge: "payment" },
+        { key: "refund-receipt", label: "سند قبض (استرداد)", icon: "receipt", bridge: "receipt" },
       ],
     },
     {
