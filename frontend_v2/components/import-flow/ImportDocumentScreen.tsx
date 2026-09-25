@@ -353,7 +353,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [showAgentPayForm, setShowAgentPayForm] = useState(false);
   const [agentPayAmount, setAgentPayAmount] = useState("");
   const [agentPayRate, setAgentPayRate] = useState("");
-  const [freightAccrualRate, setFreightAccrualRate] = useState("3.6");
+  // لا سعر افتراضي: المستخدم يكتبه (3.6 المعبّأة سلفاً تُرحَّل حين لا يعدّلها أحد).
+  const [freightAccrualRate, setFreightAccrualRate] = useState("");
   const [agentPayDate, setAgentPayDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [agentPayConfirmed, setAgentPayConfirmed] = useState(true);
   const [agentPayNotes, setAgentPayNotes] = useState("");
@@ -1450,6 +1451,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // بوابة الاستيراد صارت «التكلفة مُثبتة» لا «مدفوعة»: قيد الاستحقاق يثبّت تكلفة
   // الشحن وسعر صرفها، فلا داعي لدفع الوكيل — ولا لدفعة وهمية عندما تكون التكلفة صفراً.
   const freightAccrued = Boolean((s as { freight_is_posted?: boolean }).freight_is_posted);
+  // بعد الترحيل يُعرض السعر المرحَّل فعلاً من الشحنة، لا ما في الحقل (فارغ بعد إعادة التحميل).
+  const freightRateShown = freightAccrued ? String(s.freight_exchange_rate ?? "") : freightAccrualRate;
   /** الفائض عن تكلفة الشحن = دفعة مقدمة لدى الوكيل (يصبح مديناً لنا) */
   const freightAgentAdvanceUsd = Math.max(0, freightPaidUsd - freightTotalUsd);
   const freightCostEstablished = freightAccrued || freightFullyPaid || freightTotalUsd <= 0;
@@ -2197,8 +2200,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <div style={{ display: "flex", gap: 8, alignItems: "flex-end", flexWrap: "wrap" }}>
               {fld("سعر الصرف (₪/$)", (
                 <input
-                  className="ktra-input" type="number" step="0.001"
-                  value={freightAccrualRate}
+                  className="ktra-input" type="number" step="0.001" min="0" required
+                  placeholder="أدخل السعر"
+                  value={freightRateShown}
                   disabled={freightAccrued}
                   onChange={(e) => setFreightAccrualRate(e.target.value)}
                 />
@@ -2206,7 +2210,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               <span style={{ fontSize: "var(--ktra-fs-sm, 12px)" }}>
                 الاستحقاق:{" "}
                 <b style={{ fontFamily: "monospace" }}>
-                  {fmt(freightTotalUsd * (Number(freightAccrualRate) || 0))} ₪
+                  {fmt(freightTotalUsd * (Number(freightRateShown) || 0))} ₪
                 </b>{" "}
                 (${fmt(freightTotalUsd)})
               </span>

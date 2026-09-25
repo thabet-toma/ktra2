@@ -78,6 +78,15 @@ async function installAuthenticatedApiMocks(page: Page, responder: ApiResponder)
       return;
     }
     if (await responder(route, url)) return;
+    // القناع العام `[]` هنا يُسقط الشاشة: `costDrift.stale_posted_invoices.length`
+    // على مصفوفة ⇒ TypeError وصفحةٌ بيضاء، فتفشل كل اختبارات `/import-flow/<id>`.
+    if (url.pathname.endsWith("/shipment-cost-drift/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({ posted_count: 0, stale_posted_invoices: [] }),
+      });
+      return;
+    }
     if (url.pathname.includes("/mapper/activityStatus/")) {
       await route.fulfill({ contentType: "application/json", body: JSON.stringify({ isCurrentlyActive: true }) });
       return;
@@ -235,6 +244,43 @@ test("editing one CBM keeps the other row mounted and restores app-content scrol
   await expect(cbmInput).toHaveValue("2");
   await expect(untouchedCbmInput).toHaveAttribute("data-g17-identity", "stable");
   await expect.poll(() => page.evaluate(() => document.querySelector<HTMLElement>("main.app-content")!.scrollTop)).toBe(expectedTop);
+});
+
+test("freight accrual rate starts empty and is shown as posted after reload", async ({ page }) => {
+  // لا سعر افتراضي: كانت 3.6 معبّأةً سلفاً فتُرحَّل حين لا يعدّلها أحد.
+  let posted = false;
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/logistics/shipments/91/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify(shipment({
+          total_shipping_cost_usd: 500,
+          shipping_agent: 7,
+          freight_is_posted: posted,
+          freight_exchange_rate: posted ? "3.240000" : null,
+        })),
+      });
+      return true;
+    }
+    return false;
+  });
+
+  await page.goto("/import-flow/91");
+  await page.getByText("الدفعات", { exact: true }).first().click();
+  const rate = page.locator("label").filter({ hasText: "سعر الصرف (₪/$)" }).locator("input");
+  const postButton = page.getByRole("button", { name: "ترحيل الاستحقاق" });
+  await expect(rate).toHaveValue("");
+  await expect(postButton).toBeDisabled();
+  await rate.fill("3.4");
+  await expect(postButton).toBeEnabled();
+
+  // بعد الترحيل وإعادة التحميل: السعر المرحَّل من الشحنة، لا حقلٌ فارغ ولا 3.6.
+  posted = true;
+  await page.reload();
+  await page.getByText("الدفعات", { exact: true }).first().click();
+  await expect(rate).toHaveValue("3.240000");
+  await expect(rate).toBeDisabled();
+  await expect(page.getByText("1,620 ₪", { exact: true }).first()).toBeVisible();
 });
 
 test("a supplier created inside the deal form remains searchable without reloading", async ({ page }) => {
