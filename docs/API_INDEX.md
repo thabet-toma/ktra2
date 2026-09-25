@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **894**
+عدد النقاط: **896**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -527,6 +527,8 @@
 | `/api/my-agent/suspend/` | `TenantAgentBooksViewSet` | `platform_ops/views.py` |
 | `/api/my-plan/usage/` | `my_plan_usage` | `core/plan_usage_api.py` |
 | `/api/partners/` | `PartnerViewSet` | `partners/views.py` |
+| `/api/partners/bulk-scope/` | `PartnerViewSet` | `partners/views.py` |
+| `/api/partners/kind-counts/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/lookup/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/balance/` | `PartnerViewSet` | `partners/views.py` |

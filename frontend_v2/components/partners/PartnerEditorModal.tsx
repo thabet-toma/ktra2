@@ -82,11 +82,11 @@ const TYPES: Array<{ value: PartnerType; label: string }> = [
   { value: "Carrier", label: "ناقل" },
 ];
 
-const emptyForm = (partnerType: PartnerType) => ({
+const emptyForm = (partnerType: PartnerType, supplierScope: SupplierScope = "") => ({
   name: "",
   legal_name: "",
   partner_type: partnerType,
-  supplier_scope: "" as SupplierScope,
+  supplier_scope: supplierScope,
   tax_number: "",
   phone: "",
   email: "",
@@ -130,6 +130,8 @@ export const PartnerEditorModal: React.FC<{
   open: boolean;
   partnerId?: number | null;
   fixedType?: PartnerType;
+  /** «جديد» من صفحة الأطراف الدائنة: نطاق المورد مختارٌ سلفاً فلا يُسأل مرّتين. */
+  fixedScope?: SupplierScope;
   initialType?: PartnerType;
   embedded?: boolean;
   onClose: () => void;
@@ -138,6 +140,7 @@ export const PartnerEditorModal: React.FC<{
   open,
   partnerId,
   fixedType,
+  fixedScope,
   initialType = "Customer",
   embedded = false,
   onClose,
@@ -145,7 +148,7 @@ export const PartnerEditorModal: React.FC<{
 }) => {
   const tenantId = resolveTenantId();
   const toast = useToast();
-  const [form, setForm] = useState(() => emptyForm(fixedType || initialType));
+  const [form, setForm] = useState(() => emptyForm(fixedType || initialType, fixedScope));
   const [banks, setBanks] = useState<BankForm[]>([]);
   const [currencies, setCurrencies] = useState<CurrencyRow[]>([]);
   const [costCenters, setCostCenters] = useState<CostCenterRow[]>([]);
@@ -220,7 +223,7 @@ export const PartnerEditorModal: React.FC<{
           applyPartnerToForm(partner);
           return;
         }
-        setForm(emptyForm(fixedType || initialType));
+        setForm(emptyForm(fixedType || initialType, fixedScope));
         setBanks([]);
       })
       .catch((e: unknown) => {
@@ -284,7 +287,7 @@ export const PartnerEditorModal: React.FC<{
         /* أفضل جهد — تعذّر إعادة الجلب لا يجوز أن يمنع مسح المسودّة */
       }
     } else {
-      setForm(emptyForm(fixedType || initialType));
+      setForm(emptyForm(fixedType || initialType, fixedScope));
       setBanks([]);
     }
     setTouched(false);
@@ -364,7 +367,7 @@ export const PartnerEditorModal: React.FC<{
       partner_type: fixedType || form.partner_type,
       // T-IMPOFFER: النطاق يخص المورد وحده — لا يُكتب لزبون أو ناقل.
       supplier_scope:
-        (fixedType || form.partner_type) === "Supplier" ? form.supplier_scope : "",
+        (fixedType || form.partner_type) === "Supplier" ? (fixedScope ?? form.supplier_scope) : "",
       bank_accounts: effectiveBanks.map((bank) => ({
         ...(bank.id ? { id: bank.id } : {}),
         bank_name: bank.bank_name.trim(),
@@ -473,7 +476,7 @@ export const PartnerEditorModal: React.FC<{
                       </select>
                     </label>
                   )}
-                  {(fixedType || form.partner_type) === "Supplier" && (
+                  {(fixedType || form.partner_type) === "Supplier" && fixedScope === undefined && (
                     <label className="ktra-field">
                       <span className="ktra-field-label">نطاق المورد</span>
                       <select

@@ -23,6 +23,24 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
+#: أصناف صفحة الأطراف الدائنة — المورد يُقسَم بنطاقه، وبقية الأطراف بنوعها.
+#: «مورد محلي + وكيل شحن» لا يُعبَّر عنه بـ`partner_type` و`supplier_scope` معاً:
+#: نطاق الوكيل فارغ فيلتقطه فلتر «غير المصنّف».
+PARTNER_KINDS = {
+    "supplier_local": Q(partner_type="Supplier", supplier_scope="local"),
+    "supplier_international": Q(partner_type="Supplier", supplier_scope="international"),
+    "supplier_unscoped": Q(partner_type="Supplier", supplier_scope=""),
+    "FreightForwarder": Q(partner_type="FreightForwarder"),
+    "CustomsBroker": Q(partner_type="CustomsBroker"),
+    "LocalTransporter": Q(partner_type="LocalTransporter"),
+    "Carrier": Q(partner_type="Carrier"),
+}
+
+
+def _csv_param(value) -> list[str]:
+    return [v.strip() for v in str(value or "").split(",") if v.strip()]
+
+
 class PartnerViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
@@ -216,16 +234,26 @@ class PartnerViewSet(viewsets.ModelViewSet):
             return Partner.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
         # الموقوف يختفي من القوائم والمنتقيات فقط — كرته وتعديله وكشفه تبقى.
-        if self.action in {"list", "lookup"} and self.request.query_params.get("include_inactive") not in {"1", "true"}:
+        if (
+            self.action in {"list", "lookup", "kind_counts"}
+            and self.request.query_params.get("include_inactive") not in {"1", "true"}
+        ):
             qs = qs.filter(is_active=True)
-        partner_type = self.request.query_params.get("partner_type")
-        if partner_type:
-            qs = qs.filter(partner_type=partner_type)
+        # النوع والنطاق يقبلان قيمة أو قائمة مفصولة بفاصلة.
+        partner_types = _csv_param(self.request.query_params.get("partner_type"))
+        if partner_types:
+            qs = qs.filter(partner_type__in=partner_types)
         # T-IMPOFFER: فصل المورد الدولي عن المحلي. غير المصنَّف ('') يظهر في
         # الجانبين — الفصل الجديد لا يُخفي مورداً قائماً عن شاشته المعتادة.
-        supplier_scope = self.request.query_params.get("supplier_scope", "").strip()
-        if supplier_scope:
-            qs = qs.filter(Q(supplier_scope=supplier_scope) | Q(supplier_scope=""))
+        scopes = _csv_param(self.request.query_params.get("supplier_scope"))
+        if scopes:
+            qs = qs.filter(Q(supplier_scope__in=scopes) | Q(supplier_scope=""))
+        kinds = [k for k in _csv_param(self.request.query_params.get("kinds")) if k in PARTNER_KINDS]
+        if kinds:
+            kinds_q = Q()
+            for kind in kinds:
+                kinds_q |= PARTNER_KINDS[kind]
+            qs = qs.filter(kinds_q)
         assigned_price_tier = self.request.query_params.get("assigned_price_tier")
         if assigned_price_tier:
             qs = qs.filter(assigned_price_tier=assigned_price_tier)
@@ -250,6 +278,42 @@ class PartnerViewSet(viewsets.ModelViewSet):
         limit = min(max(limit, 1), 500)
         rows = self.get_queryset().order_by("name", "id")[:limit]
         return Response(self.get_serializer(rows, many=True).data)
+
+    @action(detail=False, methods=["get"], url_path="kind-counts")
+    def kind_counts(self, request):
+        """عدّاد كل صنف في صفحة الأطراف الدائنة — يحترم البحث والموقوفين لا الأصناف المختارة."""
+        from django.db.models import Count
+
+        counts = self.get_queryset().order_by().aggregate(
+            **{kind: Count("id", filter=q) for kind, q in PARTNER_KINDS.items()}
+        )
+        return Response(counts)
+
+    @action(detail=False, methods=["post"], url_path="bulk-scope")
+    def bulk_scope(self, request):
+        """تصنيف جماعي للموردين محليين/دوليين — موردو هذه الشركة وحدهم.
+
+        النطاق لا يمسّ الحساب المحاسبي (الأب 2101 للمورد أيّاً كان نطاقه)، فـ`update`
+        واحد بلا إشارات الحفظ.
+        """
+        scope = request.data.get("supplier_scope")
+        if scope not in {"local", "international"}:
+            raise ValidationError({"supplier_scope": "النطاق يجب أن يكون محلياً أو دولياً."})
+        try:
+            ids = [int(i) for i in request.data.get("ids") or []]
+        except (TypeError, ValueError):
+            raise ValidationError({"ids": "معرّفات غير صالحة."})
+        tenant = self._get_tenant()
+        if not tenant or not ids:
+            raise ValidationError({"ids": "لم يُختر أي مورد."})
+        updated = Partner.objects.filter(
+            tenant=tenant, pk__in=ids, partner_type="Supplier",
+        ).update(supplier_scope=scope, updated_at=timezone.now())
+        logger.info(
+            "partner.bulk_scope tenant=%s scope=%s requested=%s updated=%s user=%s",
+            tenant.TenantID, scope, len(ids), updated, getattr(request.user, "pk", None),
+        )
+        return Response({"updated": updated})
 
     @action(detail=True, methods=["get"], url_path="payment-defaults")
     def payment_defaults(self, request, pk=None):

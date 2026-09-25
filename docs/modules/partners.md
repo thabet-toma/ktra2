@@ -49,7 +49,9 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 ## أهم الـAPI endpoints
 | Method | المسار | الـview |
 |---|---|---|
-| GET/POST | `partners/` | `PartnerViewSet` (فلاتر: `partner_type`، `supplier_scope`، `assigned_price_tier`، `search`، `include_inactive=1` — الموقوف مخفيّ من القائمة و`lookup` افتراضاً) |
+| GET/POST | `partners/` | `PartnerViewSet` (فلاتر: `partner_type` و`supplier_scope` قيمةً أو قائمةً بفاصلة، `kinds` (أصناف `PARTNER_KINDS`: `supplier_local`/`supplier_international`/`supplier_unscoped` أو نوع الطرف)، `assigned_price_tier`، `search`، `include_inactive=1` — الموقوف مخفيّ من القائمة و`lookup` افتراضاً) |
+| GET | `partners/kind-counts/` | `PartnerViewSet.kind_counts` — عدّاد كل صنف (يحترم `search` و`include_inactive`) لرقاقات صفحة الأطراف الدائنة |
+| POST | `partners/bulk-scope/` | `PartnerViewSet.bulk_scope` — `{ids, supplier_scope: local\|international}`: تصنيف جماعي لموردي الشركة وحدهم (غير المورد يُتجاهل) |
 | DELETE | `partners/{id}/` | `PartnerViewSet.destroy` — 400 «عليه حركات (…) — أوقفه بدل حذفه» إن حمل أيّ مرجع غير مملوك؛ وإلا يُحذف مع حسابه الفارغ |
 | GET | `partners/lookup/` | `PartnerViewSet.lookup` — مصفوفة خام محدودة (افتراضي 200، حد أقصى 500) |
 | GET | `partners/{id}/balance/` | `PartnerViewSet.balance` — رصيد حالي + `projected_balance` بعد `?proposed_total=` |
@@ -104,4 +106,6 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | `partners/tests/test_partner_payment_defaults.py` | حسابات البنك المعادة وافتراضات الشيك الوارد |
 | `accounting/tests/test_partner_accounts_audit.py` | الأب 2109 الغائب يُكمَل فيُنشأ للناقل حسابه، وردّ الحفظ يحمل `account_warning` حين يتعذّر، و`audit_partner_accounts` يقرأ ثم يصلح (بلا حساب / أبٌ خاطئ) ولا يجد شيئاً في تشغيله الثاني |
 | `partners/tests/test_partner_deactivate_delete.py` | الموقوف يختفي من القائمة و`lookup` ويظهر بـ`include_inactive=1` وكرته تُفتح؛ حذف طرفٍ بقيد موسوم (SET_NULL) أو بعرض سعر (PROTECT) ⇒ 400 برسالة لا 500 ولا حذف صامت؛ حذف طرفٍ بلا حركات يحذف حسابه الفارغ |
+| `partners/tests/test_supplier_kinds_filter.py` | `kinds` يجمع «مورد محلي + مخلّص» بلا تسريب الوكيل ذي النطاق الفارغ، `partner_type`/`supplier_scope` قوائم، `kind-counts` يستثني الموقوف والشركات الأخرى، و`bulk-scope` يمسّ موردي الشركة وحدهم |
+| `frontend_v2/e2e/supplier-management-kinds.spec.ts` | رقاقات الأصناف تُطلب من الخادم بعدّادها وتبقى بعد إعادة التحميل؛ «فتح البطاقة» لكل صف؛ التصنيف الجماعي؛ «جديد» يسأل الصنف ثم يفتح البطاقة بنوعٍ ونطاقٍ مثبّتين |
 | `logistics/tests/test_creditor_party_vouchers.py` | سند صرف للمخلّص ووكيل الشحن والناقل المحلي بقيد Dr ذمّته / Cr الصندوق، وسند قبض منه (استرداد) يدائن ذمّته |
