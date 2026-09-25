@@ -42,7 +42,7 @@ class DealPaymentCurrencyTest(APITestCase):
         self.client.force_authenticate(user=self.user)
         self.h = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
 
-    def _deal(self, ref, currency):
+    def _deal(self, ref):
         return LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=ref, partner=self.supplier,
             order_date="2026-06-20", total_amount=D("10000"))
@@ -58,7 +58,7 @@ class DealPaymentCurrencyTest(APITestCase):
         return (agg["d"] or D(0)), (agg["c"] or D(0))
 
     def test_ils_labelled_deal_payment_posts_amount_times_rate(self):
-        deal = self._deal("D-0105", self.ils)
+        deal = self._deal("D-0105")
         pay = self._payment(deal, "1650")
         resp = self.client.post(
             f"/api/logistics/deals/{deal.pk}/post_payment/{pay.pk}/",
@@ -69,7 +69,7 @@ class DealPaymentCurrencyTest(APITestCase):
         self.assertEqual(self._base(jh, self.bank), (D(0), D("5346.00")))
 
     def test_usd_deal_non_fifo_payment_converts_once(self):
-        deal = self._deal("D-USD", self.usd)
+        deal = self._deal("D-USD")
         pay = self._payment(deal, "1000", rate="3.5")
         resp = self.client.post(
             f"/api/logistics/deals/{deal.pk}/post_payment/{pay.pk}/",
@@ -121,14 +121,14 @@ class DealPaymentCurrencyTest(APITestCase):
         return (agg["d"] or D(0)) - (agg["c"] or D(0))
 
     def test_audit_reports_then_apply_fixes_group_a_only(self):
-        invoiced = self._deal("D-0105", self.ils)
+        invoiced = self._deal("D-0105")
         PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number="INV-0002", partner=self.supplier,
             currency=self.ils, invoice_date="2026-06-25", deal=invoiced,
             invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, is_posted=True)
         p1 = self._legacy_posted(invoiced, "1650")
         p2 = self._legacy_posted(invoiced, "3850")
-        archived = self._deal("D-0001", self.ils)
+        archived = self._deal("D-0001")
         post_journal(
             tenant_id=self.tenant.pk, transaction_date="2026-06-20",
             reference_type="LOGISTICS_DEAL", reference_id=archived.pk, description="أرشيف",
@@ -179,7 +179,7 @@ class DealPaymentCurrencyTest(APITestCase):
                      *args, stdout=StringIO())
 
     def test_group_c_corrected_only_when_selected(self):
-        uninvoiced = self._deal("D-0107", self.ils)
+        uninvoiced = self._deal("D-0107")
         pay = self._legacy_posted(uninvoiced, "1000")
         self._run("--apply")  # الافتراضي a: (ج) لا تُمسّ
         old = pay.journal_id
@@ -228,7 +228,7 @@ class DealPaymentCurrencyTest(APITestCase):
     def test_group_b_is_refused_and_never_touched(self):
         from django.core.management.base import CommandError
 
-        archived = self._deal("D-0001", self.ils)
+        archived = self._deal("D-0001")
         post_journal(
             tenant_id=self.tenant.pk, transaction_date="2026-06-20",
             reference_type="LOGISTICS_DEAL", reference_id=archived.pk, description="أرشيف",
@@ -265,7 +265,7 @@ class DealPaymentCurrencyTest(APITestCase):
                                 {"bank_account_id": self.bank.pk}, format="json", **self.h)
 
     def test_payment_without_rate_is_refused_at_posting(self):
-        deal = self._deal("D-NORATE", self.ils)
+        deal = self._deal("D-NORATE")
         pay = self._create_via_api(deal, {"amount": "1000"})
         self.assertIsNone(pay.usd_to_ils)
         resp = self._post(deal, pay)
@@ -275,7 +275,7 @@ class DealPaymentCurrencyTest(APITestCase):
             reference_type="LOGISTICS_PAYMENT", reference_id=pay.pk).exists())
 
     def test_rate_entered_through_api_posts_at_that_rate(self):
-        deal = self._deal("D-324", self.ils)
+        deal = self._deal("D-324")
         pay = self._create_via_api(deal, {"amount": "1000", "usd_to_ils": "3.24"})
         resp = self._post(deal, pay)
         self.assertEqual(resp.status_code, 200, resp.content)
@@ -304,12 +304,12 @@ class DealPaymentCurrencyTest(APITestCase):
 
     def test_blockers_name_the_missing_rate(self):
         from logistics.payment_posting_diagnostics import collect_auto_posting_blockers
-        deal = self._deal("D-BLK", self.ils)
+        deal = self._deal("D-BLK")
         pay = self._create_via_api(deal, {"amount": "500"})
         self.assertTrue(any("سعر الدولار" in b for b in collect_auto_posting_blockers(deal, pay)))
 
     def test_rates_report_lists_suspect_rates_and_writes_nothing(self):
-        deal = self._deal("D-RATES", self.ils)
+        deal = self._deal("D-RATES")
         self._payment(deal, "100", rate="3.5")
         self._payment(deal, "200", rate="2.0")
         self._payment(deal, "300", rate="4.8")
