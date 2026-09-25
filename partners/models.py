@@ -104,6 +104,11 @@ class Partner(models.Model):
         max_length=7, null=True, blank=True, db_column='RowColor',
         help_text='لون HEX (مثل #ff0000) لتلوين صف الشريك في الجداول',
     )
+    # إيقاف لا حذف: الموقوف يختفي من القوائم والمنتقيات وتبقى حركاته وكرته.
+    is_active = models.BooleanField(
+        default=True, db_column='IsActive',
+        help_text='موقوف ⇒ مخفيٌّ من القوائم والمنتقيات (?include_inactive=1 يظهره)',
+    )
 
     # ── ISSUE #86: زبون مكتب المحاسبة — الطرف نفسه، لا سجلّ منفصل ───────────
     # `PracticeClient` (accountant_portal) كان يحمل هذين الحقلين ولا يحملهما

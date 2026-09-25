@@ -54,7 +54,7 @@ def agent_suppliers(request):
         if tenant is None:
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
         qs = Partner.objects.filter(
-            tenant_id=tenant.TenantID, partner_type="Supplier",
+            tenant_id=tenant.TenantID, partner_type="Supplier", is_active=True,
         ).order_by("name")
         search = request.query_params.get("search", "").strip()
         if search:
@@ -119,7 +119,7 @@ def agent_customers(request):
         if tenant is None:
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
         qs = Partner.objects.filter(
-            tenant_id=tenant.TenantID, partner_type="Customer",
+            tenant_id=tenant.TenantID, partner_type="Customer", is_active=True,
         ).order_by("name")
         search = request.query_params.get("search", "").strip()
         if search:

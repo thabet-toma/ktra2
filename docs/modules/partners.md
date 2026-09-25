@@ -25,7 +25,7 @@
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `Partner` | `name`، `partner_type`، `supplier_scope`، `tax_number`، `credit_limit`، `opening_balance`، `opening_balance_date`، `assigned_price_tier`، `end_of_dealing_date`، `row_color`، `sector`، `mobile` (ISSUE #86) | `tenant` (CASCADE)، `group` → `PartnerGroup`، `linked_account` → `accounting.Account` (SET_NULL)، `default_cost_center` → `accounting.CostCenter`، `currency`، `engagement` → `accountant_portal.AccountantEngagement` (SET_NULL، مرجع نصّي، ISSUE #86)، `managed_tenant` → `tenants.Tenant` (SET_NULL، مرجع نصّي، ISSUE #86)؛ `client_type` property مشتقّة (managed/engaged/hybrid/unlinked) — زبون مكتب محاسبة إن وُجدا |
+| `Partner` | `name`، `partner_type`، `supplier_scope`، `tax_number`، `credit_limit`، `opening_balance`، `opening_balance_date`، `assigned_price_tier`، `end_of_dealing_date`، `row_color`، `is_active` (إيقاف لا حذف)، `sector`، `mobile` (ISSUE #86) | `tenant` (CASCADE)، `group` → `PartnerGroup`، `linked_account` → `accounting.Account` (SET_NULL)، `default_cost_center` → `accounting.CostCenter`، `currency`، `engagement` → `accountant_portal.AccountantEngagement` (SET_NULL، مرجع نصّي، ISSUE #86)، `managed_tenant` → `tenants.Tenant` (SET_NULL، مرجع نصّي، ISSUE #86)؛ `client_type` property مشتقّة (managed/engaged/hybrid/unlinked) — زبون مكتب محاسبة إن وُجدا |
 | `PartnerGroup` | `name`، `group_type` | `account_receivable` / `account_payable` → `accounting.Account` (SET_NULL) |
 | `PartnerBankAccount` | `bank_name`، `account_number`، `iban`، `swift_code`، `beneficiary_name`، `is_default`، `is_active` | `partner` (CASCADE)، `currency` (PROTECT)؛ `unique_together (tenant, partner, account_number)` |
 | `CustomerNote` | `title`، `body`، `remind_on`، `is_done`، `priority`، `target_type/id/label/path` | `partner` (CASCADE، nullable)، `created_by`؛ 4 فهارس مركّبة تبدأ بـ`tenant` |
@@ -49,7 +49,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 ## أهم الـAPI endpoints
 | Method | المسار | الـview |
 |---|---|---|
-| GET/POST | `partners/` | `PartnerViewSet` (فلاتر: `partner_type`، `supplier_scope`، `assigned_price_tier`، `search`) |
+| GET/POST | `partners/` | `PartnerViewSet` (فلاتر: `partner_type`، `supplier_scope`، `assigned_price_tier`، `search`، `include_inactive=1` — الموقوف مخفيّ من القائمة و`lookup` افتراضاً) |
+| DELETE | `partners/{id}/` | `PartnerViewSet.destroy` — 400 «عليه حركات (…) — أوقفه بدل حذفه» إن حمل أيّ مرجع غير مملوك؛ وإلا يُحذف مع حسابه الفارغ |
 | GET | `partners/lookup/` | `PartnerViewSet.lookup` — مصفوفة خام محدودة (افتراضي 200، حد أقصى 500) |
 | GET | `partners/{id}/balance/` | `PartnerViewSet.balance` — رصيد حالي + `projected_balance` بعد `?proposed_total=` |
 | GET | `partners/{id}/profile/` | `PartnerViewSet.profile` — Dr/Cr + إجمالي المبيعات/المشتريات + آخر معاملة |
@@ -89,6 +90,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 - **`enforce_limits(tenant, 'partners.records')` قبل أي إنشاء** (`views.py`).
 - **جانب الطرف واتجاه سنده قاعدةٌ واحدة في الواجهة** — `frontend_v2/utils/partnerActions.ts` (`partnerKindFromType`، `partnerVoucherDirections`): المورد والمخلّص ووكيل الشحن والناقل المحلي والناقل **أطرافٌ دائنة** ⇒ «سند صرف» افتراضياً و«سند قبض (استرداد)» خيارٌ ثانٍ صريح؛ العميل «سند قبض» وحده. يقرؤها كرت الطرف (`PartnerProfilePage.tsx`) وقائمة زر اليمين ونافذة سند الصرف (`NewSupplierPaymentModal.tsx`). مقارنةُ `partner_type === 'supplier'` كانت تجعل المخلّص «عميلاً» في كرته وتُخرجه من منتقي سند الصرف. الخادم لا يفلتر النوع في السندين: القيد Dr ذمّة الطرف / Cr الصندوق للصرف ومرآته للقبض (`logistics/tests/test_creditor_party_vouchers.py`).
 
+- **الطرف الذي عليه حركات لا يُحذف — يُوقَف** (`partners/views.py` (`PartnerViewSet.destroy`، `_delete_blockers`)): العلاقات تُقرأ من `Partner._meta.related_objects` فلا تفوت علاقةٌ تُضاف لاحقاً، وكلّ ما ليس في `DELETE_OWNED` (بنوكه وملاحظاته وسجلّ نشاطه وقواعد ترميزه وأصناف مورّده وعروض أسعاره) ويحمل صفّاً يمنع، وكذلك قيدٌ على حسابه بلا وسم. `ProtectedError` وحده لم يكن حارساً: القيود والتخليصات والشحنات تشير للطرف بـ`SET_NULL` فكان الحذف يمرّ ويمسح وسمه عنها بصمت. الحذف الناجح يحذف حسابه الفارغ (`accounting/api.py` (`delete_account_if_unused`)). والإيقاف `is_active=False` يُخفيه من القائمة و`lookup` ومنتقيات الوكيل (`partners/agent_api.py`) ويُبقي كرته وكشفه.
+
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
@@ -100,4 +103,5 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | `partners/tests/test_partner_list_pagination.py` | حدود `list`/`lookup` والفلترة والعزل وعدد الاستعلامات |
 | `partners/tests/test_partner_payment_defaults.py` | حسابات البنك المعادة وافتراضات الشيك الوارد |
 | `accounting/tests/test_partner_accounts_audit.py` | الأب 2109 الغائب يُكمَل فيُنشأ للناقل حسابه، وردّ الحفظ يحمل `account_warning` حين يتعذّر، و`audit_partner_accounts` يقرأ ثم يصلح (بلا حساب / أبٌ خاطئ) ولا يجد شيئاً في تشغيله الثاني |
+| `partners/tests/test_partner_deactivate_delete.py` | الموقوف يختفي من القائمة و`lookup` ويظهر بـ`include_inactive=1` وكرته تُفتح؛ حذف طرفٍ بقيد موسوم (SET_NULL) أو بعرض سعر (PROTECT) ⇒ 400 برسالة لا 500 ولا حذف صامت؛ حذف طرفٍ بلا حركات يحذف حسابه الفارغ |
 | `logistics/tests/test_creditor_party_vouchers.py` | سند صرف للمخلّص ووكيل الشحن والناقل المحلي بقيد Dr ذمّته / Cr الصندوق، وسند قبض منه (استرداد) يدائن ذمّته |

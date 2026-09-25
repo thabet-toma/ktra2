@@ -58,6 +58,7 @@ type PartnerDetail = PartnerEditorResult & {
   default_cost_center?: number | null;
   end_of_dealing_date?: string | null;
   assigned_price_tier?: number | null;
+  is_active?: boolean;
   bank_accounts?: BankForm[];
   /** ختمُ آخر حفظ — مسودّةُ البطاقة تقارنه (#109 §٩). */
   updated_at?: string | null;
@@ -99,6 +100,7 @@ const emptyForm = (partnerType: PartnerType) => ({
   default_cost_center: "" as number | "",
   end_of_dealing_date: "",
   assigned_price_tier: "" as number | "",
+  is_active: true,
 });
 
 const blankBank = (currency: number | "", isDefault: boolean): BankForm => ({
@@ -185,6 +187,7 @@ export const PartnerEditorModal: React.FC<{
       default_cost_center: partner.default_cost_center || "",
       end_of_dealing_date: partner.end_of_dealing_date || "",
       assigned_price_tier: partner.assigned_price_tier || "",
+      is_active: partner.is_active !== false,
     });
     setBanks(partner.bank_accounts || []);
   }, [fixedType]);
@@ -564,6 +567,23 @@ export const PartnerEditorModal: React.FC<{
                       <option value="4">VIP</option>
                     </select>
                   </label>
+                  {partnerId && (
+                    <label className="ktra-field">
+                      <span className="ktra-field-label">الحالة</span>
+                      <span className="flex items-center gap-2 py-2 text-sm">
+                        <input
+                          type="checkbox"
+                          data-testid="partner-inactive-toggle"
+                          checked={!form.is_active}
+                          onChange={(e) => {
+                            markTouched();
+                            setForm((current) => ({ ...current, is_active: !e.target.checked }));
+                          }}
+                        />
+                        موقوف — يختفي من القوائم والمنتقيات وتبقى حركاته
+                      </span>
+                    </label>
+                  )}
                 </div>
               </section>
 

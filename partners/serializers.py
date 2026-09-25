@@ -135,7 +135,7 @@ class PartnerSerializer(serializers.ModelSerializer):
             'opening_balance', 'opening_balance_date', 'currency',
             'linked_account', 'group', 'default_cost_center',
             'end_of_dealing_date', 'assigned_price_tier', 'row_color',
-            'attachments', 'bank_accounts', 'updated_at',
+            'attachments', 'bank_accounts', 'updated_at', 'is_active',
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 
@@ -186,6 +186,7 @@ class PartnerListSerializer(serializers.ModelSerializer):
             'opening_balance', 'opening_balance_date', 'currency',
             'linked_account', 'group', 'default_cost_center',
             'end_of_dealing_date', 'assigned_price_tier', 'row_color', 'updated_at',
+            'is_active',
         ]
         read_only_fields = fields
 

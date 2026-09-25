@@ -42,6 +42,7 @@ type PartnerApi = {
   default_cost_center?: number | null;
   end_of_dealing_date?: string | null;
   assigned_price_tier?: number | null;
+  is_active?: boolean;
 };
 
 const PRICE_TIERS = [
@@ -67,6 +68,7 @@ export const SalesCustomersPage: React.FC = () => {
   const [msg, setMsg] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [filterTier, setFilterTier] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [selectedKey, setSelectedKey] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -86,6 +88,7 @@ export const SalesCustomersPage: React.FC = () => {
           page, page_size: pageSize, partner_type: "Customer",
           search: search.trim() || undefined,
           assigned_price_tier: filterTier || undefined,
+          include_inactive: showInactive ? 1 : undefined,
         },
       });
       setRows(result.results);
@@ -95,7 +98,7 @@ export const SalesCustomersPage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [filterTier, page, search, tenantId]);
+  }, [filterTier, page, search, showInactive, tenantId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void loadRows(); }, 250);
@@ -161,6 +164,9 @@ export const SalesCustomersPage: React.FC = () => {
             }}
           >
             {r.name}
+            {r.is_active === false && (
+              <span className="mr-1 rounded bg-gray-200 px-1 text-[10px] font-normal text-gray-700">موقوف</span>
+            )}
           </button>
           {r.legal_name && <span className="text-[10px]" style={{ color: "var(--ktra-ink-soft)" }}>{r.legal_name}</span>}
         </div>
@@ -262,6 +268,15 @@ export const SalesCustomersPage: React.FC = () => {
           </select>
         </label>
       )}
+      <label className="flex items-center gap-1 pb-2 text-xs">
+        <input
+          type="checkbox"
+          data-testid="show-inactive-partners"
+          checked={showInactive}
+          onChange={(e) => { setShowInactive(e.target.checked); setPage(1); }}
+        />
+        إظهار الموقوفين
+      </label>
     </div>
   );
 

@@ -215,6 +215,9 @@ class PartnerViewSet(viewsets.ModelViewSet):
         if not tenant:
             return Partner.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
+        # الموقوف يختفي من القوائم والمنتقيات فقط — كرته وتعديله وكشفه تبقى.
+        if self.action in {"list", "lookup"} and self.request.query_params.get("include_inactive") not in {"1", "true"}:
+            qs = qs.filter(is_active=True)
         partner_type = self.request.query_params.get("partner_type")
         if partner_type:
             qs = qs.filter(partner_type=partner_type)
@@ -496,6 +499,82 @@ class PartnerViewSet(viewsets.ModelViewSet):
             partner.bank_accounts.count(), getattr(request.user, "pk", None),
         )
         return Response(self._with_account_warning(partner))
+
+    #: ما يُحذف مع الطرف — بياناته هو لا حركاته: حساباته البنكية وملاحظاته وسجلّ
+    #: نشاطه وقواعد ترميزه وربط أصنافه وعروض أسعاره؛ وإعداد «الزبون الافتراضي»
+    #: يُفرَّغ (SET_NULL). أيّ علاقة أخرى تحمل صفّاً تمنع.
+    DELETE_OWNED = frozenset({
+        "partners.PartnerBankAccount", "partners.CustomerNote",
+        "core.ActivityLogPartner", "accounting.PartnerAccountCodingRule",
+        "inventory.SupplierProduct", "sales.CustomerProductQuote",
+        "sales.SalesSettings",
+    })
+
+    #: أسماء الحركات في رسالة رفض الحذف — ما لا تسمية له يُعرض باسم النموذج.
+    DELETE_BLOCKER_LABELS = {
+        "accounting.JournalLine": "قيود", "accounting.Cheque": "شيكات",
+        "accounting.ExpenseVoucher": "سندات مصروف", "accounting.RevenueVoucher": "سندات إيراد",
+        "inventory.StockMovement": "حركات مخزون",
+        "sales.SalesInvoice": "فواتير مبيعات", "sales.SalesQuotation": "عروض أسعار",
+        "sales.SalesOrder": "طلبيات", "sales.DeliveryOrder": "سندات تسليم",
+        "sales.CustomerPayment": "سندات قبض", "sales.SupplierPayment": "سندات صرف",
+        "sales.CreditDebitNote": "إشعارات دائن/مدين",
+        "logistics.PurchaseInvoice": "فواتير شراء", "logistics.PurchaseOrder": "أوامر شراء",
+        "logistics.GoodsReceipt": "سندات استلام", "logistics.SupplierQuotation": "عروض موردين",
+        "logistics.LogisticsDeal": "صفقات استيراد", "logistics.LogisticsShipment": "شحنات",
+        "logistics.LogisticsClearance": "تخليصات", "logistics.LogisticsClearancePayment": "دفعات تخليص",
+        "logistics.LocalShipment": "إرساليات محلية",
+    }
+
+    def _delete_blockers(self, partner) -> list[str]:
+        """العلاقات التي تحمل حركات للطرف — تُقرأ من `_meta` فلا تفوت علاقةٌ تُضاف لاحقاً.
+
+        `ProtectedError` وحده لا يكفي حارساً: القيود والتخليصات والشحنات تشير
+        للطرف بـ`SET_NULL` فيمرّ الحذف ويفقد القيدُ طرفه بصمت.
+        """
+        from accounting.api import account_has_journal_lines
+
+        blockers = []
+        for rel in partner._meta.related_objects:
+            if rel.related_model._meta.label in self.DELETE_OWNED:
+                continue
+            if rel.related_model._default_manager.filter(**{rel.field.name: partner}).exists():
+                label = rel.related_model._meta.label
+                name = self.DELETE_BLOCKER_LABELS.get(label, str(rel.related_model._meta.verbose_name))
+                if name not in blockers:
+                    blockers.append(name)
+        if "قيود" not in blockers and partner.linked_account_id and account_has_journal_lines(partner.linked_account_id):
+            blockers.append("قيود على حسابه")
+        return blockers
+
+    @transaction.atomic
+    def destroy(self, request, *args, **kwargs):
+        from django.db.models import ProtectedError, RestrictedError
+        from accounting.api import delete_account_if_unused
+
+        partner = self.get_object()
+        blockers = self._delete_blockers(partner)
+        if blockers:
+            logger.info("partner.delete_refused id=%s blockers=%s", partner.id, blockers)
+            return Response(
+                {"detail": f"عليه حركات ({'، '.join(blockers)}) — أوقفه بدل حذفه.", "blockers": blockers},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        account_id = partner.linked_account_id
+        try:
+            partner.delete()
+        except (ProtectedError, RestrictedError):
+            return Response(
+                {"detail": "عليه حركات — أوقفه بدل حذفه."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        account_deleted = delete_account_if_unused(account_id) if account_id else False
+        logger.info(
+            "partner.delete id=%s tenant=%s account=%s account_deleted=%s user=%s",
+            kwargs.get("pk"), partner.tenant_id, account_id, account_deleted,
+            getattr(request.user, "pk", None),
+        )
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
     def _with_account_warning(self, partner) -> dict:
         """ردّ الحفظ + `account_warning` حين بقي الطرف بلا حساب ذمم سليم.

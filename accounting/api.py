@@ -547,6 +547,37 @@ def ensure_partner_account(partner):
     return partner
 
 
+def account_has_journal_lines(account_id) -> bool:
+    """هل على الحساب أيّ سطر قيد — حارس حذف الطرف (القيد قد لا يحمل وسم الطرف)."""
+    return JournalLine.objects.filter(account_id=account_id).exists()
+
+
+def delete_account_if_unused(account_id) -> bool:
+    """يحذف حساب طرفٍ حُذف إن بقي فارغاً: بلا قيود ولا أبناء ولا طرفٍ آخر مربوطٍ به.
+
+    أيّ مرجعٍ محميّ آخر يُبقيه (نقطة حفظ فلا يُفسد المعاملة المحيطة) — الحساب
+    الباقي فارغاً أهون من حذفٍ يسقط.
+    """
+    from django.db.models import ProtectedError, RestrictedError
+
+    account = Account.objects.filter(pk=account_id).first()
+    if account is None:
+        return False
+    if (
+        account_has_journal_lines(account_id)
+        or Account.objects.filter(parent_id=account_id).exists()
+        or account.linked_partners.exists()
+    ):
+        return False
+    try:
+        with transaction.atomic():
+            account.delete()
+    except (ProtectedError, RestrictedError):
+        logger.info("delete_account_if_unused: account id=%s still referenced — kept", account_id)
+        return False
+    return True
+
+
 def create_partner_opening_balance(partner) -> None:
     """قيد الرصيد الافتتاحي للشريك: طرفه حساب الشريك وقابله «3300 أرصدة افتتاحية».
 
