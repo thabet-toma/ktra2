@@ -284,6 +284,7 @@ function mapDealFromSql(d: SqlDeal): Deal {
     priceOfferId: d?.price_offer_id || "",
     /* T113-2: أثر المستند — العرض المصدر يُعرض كرابط في ترويسة الصفقة. */
     sourceQuotationId: d?.source_quotation != null ? String(d.source_quotation) : undefined,
+    isArchive: Boolean(d?.is_archive),
     incoterms: d?.incoterms || undefined,
     originalOfferNumber: pickFirst(
       d?.original_offer_number,
@@ -720,6 +721,15 @@ export const dealsService = {
     await apiPatchObject(
       `logistics/deals/${dealId}/payments/${encodeURIComponent(String(paymentId))}/`,
       body,
+      { tenantId: getTenantId() }
+    );
+  },
+
+  /** تصحيح سعر دفعة مرحّلة بصفقة أرشيف — الخادم يقبل `usd_to_ils` وحده ولا يمسّ القيد. */
+  async setArchivePaymentRate(dealId: string, paymentId: string, rate: number): Promise<void> {
+    await apiPatchObject(
+      `logistics/deals/${dealId}/payments/${encodeURIComponent(String(paymentId))}/`,
+      { usd_to_ils: rate },
       { tenantId: getTenantId() }
     );
   },

@@ -393,13 +393,13 @@ export const DealForm: React.FC<DealFormProps> = ({
   const handleRemoveItem = (index: number) => { recalculateTotals(items.filter((_, i) => i !== index)); };
 
   const handlePaymentOperation = async (
-    operation: "claim" | "swift" | "add" | "confirm" | "cancel" | "unpost" | "linkJournal",
+    operation: "claim" | "swift" | "add" | "confirm" | "cancel" | "unpost" | "linkJournal" | "rate",
     paymentType: string, data: any, paymentId?: string
   ) => {
     if (!formData.id) { toast("يرجى حفظ الصفقة أولاً", "info"); return; }
     try {
       setLoading(true);
-      if (operation !== "unpost" && operation !== "linkJournal") {
+      if (operation !== "unpost" && operation !== "linkJournal" && operation !== "rate") {
         try {
           await dealsService.updateDeal(formData.id, {
             items, installments: installmentPlanEnabled ? installments : [], installmentPlanEnabled,
@@ -478,6 +478,10 @@ export const DealForm: React.FC<DealFormProps> = ({
           if (!paymentId || !formData.id) { setLoading(false); return; }
           unpostAccountingMeta = await dealsService.unpostDealPayment(formData.id, paymentId);
           break;
+        case "rate":
+          if (!paymentId) { setLoading(false); return; }
+          await dealsService.setArchivePaymentRate(String(formData.id), String(paymentId), Number(data?.rate));
+          break;
         case "cancel":
           if (paymentId) await dealsService.cancelPayment(formData.id, paymentId, currentUser.id, currentUser.name, currentUser.role || "user");
           break;
@@ -519,6 +523,7 @@ export const DealForm: React.FC<DealFormProps> = ({
           notify("إلغاء ترحيل الدفعة", `تم إلغاء ترحيل الدفعة محاسبياً.\n\n• قيد عكسي مرحّل: ${rj != null ? `#${rj}` : "—"}\n• القيد الأصلي أصبح غير مرحّل: ${vj != null ? `#${vj}` : "—"}\n\nالدفعة أصبحت قابلة للحذف من «حذف من السجل».\n${note ? `\n${note}` : ""}`);
           break;
         }
+        case "rate": toast("تم تصحيح سعر الدفعة — القيد ورصيد المورد لم يتغيّرا.", "success"); break;
         case "linkJournal": toast("تم ربط الدفعة بالقيد. سيظهر «فتح في المحاسبة» في سجل المدفوعات بعد التحديث.", "success"); break;
         default: toast("تم حفظ العملية بنجاح", "success");
       }

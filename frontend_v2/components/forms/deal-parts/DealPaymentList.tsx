@@ -29,7 +29,8 @@ interface DealPaymentListProps {
       | "confirm"
       | "cancel"
       | "unpost"
-      | "linkJournal",
+      | "linkJournal"
+      | "rate",
     paymentType: string,
     data: any,
     paymentId?: string
@@ -94,6 +95,7 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
   const toast = useToast();
   const confirmDialog = useConfirm();
   const [journalLinkTarget, setJournalLinkTarget] = useState<DealPayment | null>(null);
+  const [rateTarget, setRateTarget] = useState<DealPayment | null>(null);
   const showManagerUnpost = isManagerUser(currentUser);
   const payments = deal.payments || [];
 
@@ -166,6 +168,20 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
     });
     if (!ok) return;
     onPaymentOperation("unpost", payment.type, {}, payment.id);
+  };
+
+  // صفقة أرشيف: قيد الدفعة بالرقم الدولاري بسعر 1 فلا يقرأ السعر — تصحيحه
+  // (3.5 الافتراضية القديمة) لا يمسّ القيد، ويغيّر تكلفة البضاعة بالشيكل وحدها.
+  const submitRate = (raw: string) => {
+    const target = rateTarget;
+    setRateTarget(null);
+    if (!target || raw.trim() === "") return;
+    const rate = Number(raw.trim());
+    if (!Number.isFinite(rate) || rate <= 0) {
+      toast("أدخل سعراً أكبر من صفر.", "error");
+      return;
+    }
+    onPaymentOperation("rate", target.type, { rate }, target.id);
   };
 
   const deletePayment = async (payment: DealPayment) => {
@@ -377,6 +393,16 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
                           )}
                         </>
                       )}
+                      {payment.isPosted && showManagerUnpost && deal.isArchive && (
+                        <button
+                          type="button"
+                          className={iconBtnCls}
+                          title="صفقة أرشيف: تصحيح السعر لا يغيّر قيد الدفعة (مدير)"
+                          onClick={() => setRateTarget(payment)}
+                        >
+                          تعديل السعر
+                        </button>
+                      )}
                       {payment.isPosted && showManagerUnpost && (
                         <button
                           type="button"
@@ -433,6 +459,21 @@ export const DealPaymentList: React.FC<DealPaymentListProps> = ({
         confirmText="ربط"
         onCancel={() => setJournalLinkTarget(null)}
         onSubmit={submitManualJournal}
+      />
+
+      <PromptDialog
+        isOpen={rateTarget !== null}
+        title="تعديل سعر الدولار"
+        message={
+          "صفقة أرشيف: قيد هذه الدفعة مرحّل بالرقم الدولاري بسعر 1، فتعديل السعر لا يغيّر القيد ولا رصيد المورد.\n" +
+          "يتغيّر فقط ما يُحسب من السعر: قيمة الدفعة بالشيكل في تكلفة البضاعة وتقارير التكلفة المستوردة.\n\n" +
+          "سعر الدولار بالشيكل:"
+        }
+        initialValue={rateTarget?.usdToIls ? String(rateTarget.usdToIls) : ""}
+        type="number"
+        confirmText="حفظ السعر"
+        onCancel={() => setRateTarget(null)}
+        onSubmit={submitRate}
       />
     </div>
   );

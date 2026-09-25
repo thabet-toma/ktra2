@@ -210,6 +210,9 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
     supplier_advance = serializers.SerializerMethodField()
     unposted_registered_amount = serializers.SerializerMethodField()
     payment_status_summary = serializers.SerializerMethodField()
+    # صفقة أرشيف (`payment_posting.archive_deal_ids`): سعر دفعتها المرحّلة يُصحَّح
+    # مباشرة لأن قيدها لا يقرؤه — الواجهة تُظهر «تعديل السعر» بها وحدها.
+    is_archive = serializers.SerializerMethodField()
     supplier_balance_current = serializers.DecimalField(
         source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
     )
@@ -343,6 +346,10 @@ class LogisticsDealSerializer(serializers.ModelSerializer):
             (Decimal(str(payment.amount or 0)) for payment in self._payments(obj) if not payment.is_posted),
             Decimal('0'),
         ).quantize(Decimal('0.01')))
+
+    def get_is_archive(self, obj):
+        from logistics.payment_posting import is_archive_deal
+        return is_archive_deal(obj)
 
     def get_payment_status_summary(self, obj):
         return document_payment_summary(

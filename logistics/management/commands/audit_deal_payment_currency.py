@@ -38,6 +38,7 @@ from django.db.models import Q, Sum
 
 from accounting.services import CashBoxLedgerAccount, JournalHeader, JournalLine
 from logistics.landed_cost import payment_ils
+from logistics.payment_posting import archive_deal_ids
 from logistics.models import LogisticsPayment, PurchaseInvoice
 
 Q2 = Decimal('0.01')
@@ -99,9 +100,7 @@ class Command(BaseCommand):
             tenant_id=tenant_id, invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
             is_posted=True, deal__isnull=False,
         ).values_list('deal_id', flat=True))
-        archived_deals = set(JournalHeader.objects.filter(
-            tenant_id=tenant_id, reference_type='LOGISTICS_DEAL', is_posted=True,
-        ).values_list('reference_id', flat=True))
+        archived_deals = archive_deal_ids(tenant_id)
         box_currency = dict(CashBoxLedgerAccount.objects.filter(tenant_id=tenant_id)
                             .values_list('account_id', 'currency_code'))
 

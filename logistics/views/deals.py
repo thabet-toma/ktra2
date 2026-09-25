@@ -462,6 +462,7 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         serializer = LogisticsPaymentSerializer(payment, data=data, partial=True)
         serializer.is_valid(raise_exception=True)
 
+        archive_rate_edit = False
         if payment.is_posted:
             def _changed(field):
                 new_v = serializer.validated_data[field]
@@ -477,6 +478,19 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 f for f in self.PAYMENT_FIELDS_LOCKED_WHEN_POSTED
                 if f in serializer.validated_data and _changed(f)
             ]
+            # صفقة أرشيف: قيد الدفعة بالرقم الدولاري بسعر 1 فلا يقرأ السعر — تصحيحه
+            # (3.5 الافتراضية القديمة) لا يمسّ القيد. وإلغاء الترحيل لتصحيحه يمرّ
+            # بمسارٍ لا يعيد إلا القيد نفسه، فهذا الطريق المباشر بصلاحية إلغاء الترحيل.
+            from logistics.payment_posting import is_archive_deal
+            archive_rate_edit = blocked == ['usd_to_ils'] and is_archive_deal(deal)
+            if archive_rate_edit:
+                if not user_can_unpost_logistics_deal_payment(request.user):
+                    return Response(
+                        {'error': 'تعديل سعر دفعة مرحّلة متاح لمن يملك إلغاء ترحيلها (المدير).'},
+                        status=status.HTTP_403_FORBIDDEN,
+                    )
+                old_rate = payment.usd_to_ils
+                blocked = []
             if blocked:
                 return Response(
                     {
@@ -498,6 +512,16 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 return Response({'error': cap_err}, status=status.HTTP_400_BAD_REQUEST)
 
         payment = serializer.save(deal=deal, shipment=None)
+        if payment.is_posted and archive_rate_edit:
+            create_audit_log(
+                tenant=deal.tenant, user=request.user, action='UPDATE',
+                model_name='LogisticsPayment', object_id=payment.pk,
+                change_details=(
+                    f"تصحيح سعر دفعة مرحّلة بصفقة أرشيف {deal.ref_number}: usd_to_ils "
+                    f"{old_rate} ← {payment.usd_to_ils}؛ القيد #{payment.journal_id} لم يتغيّر "
+                    "(مرحّل بالرقم الدولاري بسعر 1)"
+                )[:2000],
+            )
         log_activity(
             action='update', entity_type='deal', entity_id=deal.id,
             entity_label=deal.ref_number,

@@ -143,6 +143,8 @@ export interface Deal {
     originalOfferNumber?: string;
     /** عرض السعر المصدر (source_quotation) — يُربط عند إنشاء الصفقة فقط */
     sourceQuotationId?: string;
+    /** صفقة أرشيف (قيد LOGISTICS_DEAL قديم): سعر دفعتها المرحّلة يُصحَّح بلا مسّ القيد */
+    isArchive?: boolean;
     incoterms?: string;
     supplierId: string;
     factoryName: string;

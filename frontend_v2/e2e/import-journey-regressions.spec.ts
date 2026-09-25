@@ -283,6 +283,59 @@ test("freight accrual rate starts empty and is shown as posted after reload", as
   await expect(page.getByText("1,620 ₪", { exact: true }).first()).toBeVisible();
 });
 
+test("archive deal: posted payment rate is edited without unposting", async ({ page }) => {
+  // صفقة أرشيف: قيد الدفعة بالرقم الدولاري بسعر 1، فالسعر يُصحَّح مباشرةً (PATCH
+  // بـusd_to_ils وحده) — وصفقةٌ غير أرشيف لا يظهر لها الزر أصلاً.
+  let patched: Record<string, unknown> | null = null;
+  const deal = (isArchive: boolean) => ({
+    id: 501,
+    ref_number: "D-0091",
+    partner: 7,
+    partner_name: "مورد الأرشيف",
+    order_date: "2025-08-01",
+    status: "Open",
+    total_amount: "1535.42",
+    is_archive: isArchive,
+    items: [],
+    payments: [{
+      id: 24, payment_number: 1, title: "دفعة أولى", amount: "1115.39", usd_to_ils: "2.000000",
+      status: "Confirmed", is_posted: true, journal: 166, transfer_date: "2025-10-15",
+    }],
+  });
+  let archive = true;
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/logistics/deals/501/") && route.request().method() === "GET") {
+      await route.fulfill({ contentType: "application/json", body: JSON.stringify(deal(archive)) });
+      return true;
+    }
+    if (url.pathname.endsWith("/logistics/deals/501/payments/24/") && route.request().method() === "PATCH") {
+      patched = route.request().postDataJSON();
+      await route.fulfill({ contentType: "application/json", body: "{}" });
+      return true;
+    }
+    return false;
+  });
+
+  await page.goto("/deals/501");
+  await page.getByRole("button", { name: "تحرير" }).click();
+  await page.getByText("الدفعات", { exact: true }).first().click();
+  await page.getByText("السجل المحاسبي المفصّل", { exact: false }).first().click();
+  await page.getByRole("button", { name: "تعديل السعر" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(dialog).toContainText("لا يغيّر القيد");
+  await dialog.locator("input").fill("3.62");
+  await dialog.getByRole("button", { name: "حفظ السعر" }).click();
+  await expect.poll(() => patched).toEqual({ usd_to_ils: 3.62 });
+
+  archive = false;
+  await page.reload();
+  await page.getByRole("button", { name: "تحرير" }).click();
+  await page.getByText("الدفعات", { exact: true }).first().click();
+  await page.getByText("السجل المحاسبي المفصّل", { exact: false }).first().click();
+  await expect(page.getByRole("button", { name: "إلغاء الترحيل" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "تعديل السعر" })).toHaveCount(0);
+});
+
 test("a supplier created inside the deal form remains searchable without reloading", async ({ page }) => {
   let supplierCreates = 0;
   await installAuthenticatedApiMocks(page, async (route, url) => {
