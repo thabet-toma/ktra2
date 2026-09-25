@@ -115,7 +115,11 @@ class PartnerCardPaymentClarityTest(APITestCase):
         row = st["results"][0]
         self.assertIsNone(row["link_key"])
         self.assertEqual(row["link_count"], 2)
-        self.assertEqual(row["link_label"], "2 فواتير")
+        # الأرقام في الوسم، وكل فاتورة تستقبل سطراً فرعياً بما وُزِّع عليها.
+        self.assertEqual(row["link_label"], "2 فواتير: SI-1، SI-2")
+        self.assertEqual(
+            [(t["label"], t["amount"]) for t in row["link_targets"]],
+            [("SI-1", "60.00"), ("SI-2", "40.00")])
 
     def test_unlinked_movement_keeps_empty_link_fields(self):
         self._journal("PARTNER_OPENING", None, debit=50, credit=0)

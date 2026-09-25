@@ -219,72 +219,66 @@ _REFERENCE_DOCS = {
 }
 
 
-def journal_reference_shipment_labels(tenant_id: int, refs) -> dict:
-    """{(reference_type, reference_id): وسم الشحنة الحيّ} لأسطر كشف الحساب — بالدفعة.
-
-    الوصف المحفوظ في القيد نصُّ لحظة الترحيل (رقم الشحنة وحده في القديم)؛ هذا يقرأ
-    المستند المرجعي الآن: التخليص ودفعاته، الإرسالية ودفعاتها، استحقاق الشحن ودفعات
-    الوكيل، فاتورة الشراء، وسند الصرف بما وُزِّع عليه. ما لا مستند له لا يظهر.
-    """
+def _reference_accruals(tenant_id: int, wanted: dict) -> dict:
+    """{(reference_type, reference_id): (الصنف، المستحق)} — المستحق نفسه أو مستحقّ الدفعة
+    المباشرة، بالدفعة (استعلامٌ لكل صنف لا لكل صف). ما لا مستند له لا يظهر."""
     from logistics.models import (
         LocalShipment,
         LocalShipmentPayment,
-        LogisticsAccrualAllocation,
         LogisticsClearance,
         LogisticsClearancePayment,
         LogisticsPayment,
         LogisticsShipment,
-        PurchaseInvoice,
     )
-
-    wanted: dict[str, set] = {}
-    for ref_type, ref_id in refs:
-        if ref_type and ref_id:
-            wanted.setdefault(ref_type, set()).add(ref_id)
 
     def ids(kind: str, role: str) -> set:
         return {i for t, (k, r) in _REFERENCE_DOCS.items() if (k, r) == (kind, role) for i in wanted.get(t, ())}
 
     ship_deals = 'deals__partner'
     docs = {
-        'clearance': {c.pk: shipment_label_of('clearance', c) for c in LogisticsClearance.objects.filter(
+        'clearance': {c.pk: c for c in LogisticsClearance.objects.filter(
             tenant_id=tenant_id, pk__in=ids('clearance', 'doc'),
         ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}')},
-        'local': {ls.pk: ls.display_label for ls in LocalShipment.objects.filter(
+        'local': {ls.pk: ls for ls in LocalShipment.objects.filter(
             tenant_id=tenant_id, pk__in=ids('local', 'doc'),
         ).select_related('shipment', 'clearance__shipment').prefetch_related(
             f'shipment__{ship_deals}', f'clearance__shipment__{ship_deals}')},
-        'freight': {s.pk: s.display_label for s in LogisticsShipment.all_objects.filter(
+        'freight': {s.pk: s for s in LogisticsShipment.all_objects.filter(
             tenant_id=tenant_id, pk__in=ids('freight', 'doc'),
         ).prefetch_related(ship_deals)},
     }
     payments = {
-        'clearance': {p.pk: shipment_label_of('clearance', p.clearance) for p in LogisticsClearancePayment.objects.filter(
+        'clearance': {p.pk: p.clearance for p in LogisticsClearancePayment.objects.filter(
             tenant_id=tenant_id, pk__in=ids('clearance', 'payment'),
         ).select_related('clearance__shipment').prefetch_related(f'clearance__shipment__{ship_deals}')},
-        'local': {p.pk: p.local_shipment.display_label for p in LocalShipmentPayment.objects.filter(
+        'local': {p.pk: p.local_shipment for p in LocalShipmentPayment.objects.filter(
             tenant_id=tenant_id, pk__in=ids('local', 'payment'),
         ).select_related('local_shipment__shipment', 'local_shipment__clearance__shipment').prefetch_related(
             f'local_shipment__shipment__{ship_deals}', f'local_shipment__clearance__shipment__{ship_deals}')},
-        'freight': {p.pk: p.shipment.display_label for p in LogisticsPayment.all_objects.filter(
-            tenant_id=tenant_id, pk__in=ids('freight', 'payment'), shipment__isnull=False,
+        # دفعة الوكيل (شحنةٌ بلا صفقة) وحدها — دفعة الصفقة للمورد وتتبع فاتورتها.
+        'freight': {p.pk: p.shipment for p in LogisticsPayment.all_objects.filter(
+            tenant_id=tenant_id, pk__in=ids('freight', 'payment'), shipment__isnull=False, deal__isnull=True,
         ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}')},
     }
     out = {}
     for ref_type, (kind, role) in _REFERENCE_DOCS.items():
         source = docs[kind] if role == 'doc' else payments[kind]
         for ref_id in wanted.get(ref_type, ()):
-            if source.get(ref_id):
-                out[(ref_type, ref_id)] = source[ref_id]
+            if source.get(ref_id) is not None:
+                out[(ref_type, ref_id)] = (kind, source[ref_id])
+    return out
 
-    for inv in PurchaseInvoice.objects.filter(
-        tenant_id=tenant_id, pk__in=wanted.get('PURCHASE_INVOICE', ()), shipment__isnull=False,
-    ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}'):
-        out[('PURCHASE_INVOICE', inv.pk)] = inv.shipment.display_label
 
-    by_voucher: dict[int, list[str]] = {}
+def _voucher_accruals(tenant_id: int, payment_ids) -> dict:
+    """{سند الصرف: [(الصنف، المستحق، المبلغ بالأساس)]} من `LogisticsAccrualAllocation` — بالدفعة."""
+    from logistics.models import LogisticsAccrualAllocation
+
+    ship_deals = 'deals__partner'
+    out: dict[int, list] = {}
+    if not payment_ids:
+        return out
     for alloc in LogisticsAccrualAllocation.objects.filter(
-        tenant_id=tenant_id, payment_id__in=wanted.get('SUPPLIER_PAYMENT', ()),
+        tenant_id=tenant_id, payment_id__in=payment_ids,
     ).select_related(
         'clearance__shipment', 'shipment', 'local_shipment__shipment', 'local_shipment__clearance__shipment',
     ).prefetch_related(
@@ -292,14 +286,114 @@ def journal_reference_shipment_labels(tenant_id: int, refs) -> dict:
         f'local_shipment__shipment__{ship_deals}', f'local_shipment__clearance__shipment__{ship_deals}',
     ).order_by('id'):
         kind = 'clearance' if alloc.clearance_id else ('freight' if alloc.shipment_id else 'local')
-        label = shipment_label_of(kind, alloc.clearance or alloc.shipment or alloc.local_shipment)
-        labels = by_voucher.setdefault(alloc.payment_id, [])
-        if label and label not in labels:
-            labels.append(label)
-    for voucher_id, labels in by_voucher.items():
+        obj = alloc.clearance or alloc.shipment or alloc.local_shipment
+        out.setdefault(alloc.payment_id, []).append((kind, obj, _money(alloc.amount_base)))
+    return out
+
+
+#: الصنف ← نوع مرجع قيد استحقاقه — مفتاح مرساة المستحق في كشف الحساب.
+ACCRUAL_ANCHOR_TYPE = {
+    'clearance': 'LOGISTICS_CLEARANCE',
+    'local': 'LOCAL_SHIPMENT',
+    'freight': 'SHIPMENT_FREIGHT_ACCRUAL',
+}
+
+
+def _anchor_of(kind: str, obj) -> dict:
+    """مرساة المستحق: مفتاحها ووسمها («SH-0017 — شحنة رقع») ورقمها المختصر لعدّ المستندات."""
+    if kind == 'local':
+        label, short = obj.display_label, obj.shipment_number or f"#{obj.pk}"
+    else:
+        ship = obj if kind == 'freight' else getattr(obj, 'shipment', None)
+        label = shipment_label_of(kind, obj) or f"#{obj.pk}"
+        short = (ship.shipment_number if ship is not None else '') or f"#{obj.pk}"
+    return {'key': f"{ACCRUAL_ANCHOR_TYPE[kind]}:{obj.pk}", 'label': label, 'short': short}
+
+
+def journal_reference_shipment_labels(tenant_id: int, refs) -> dict:
+    """{(reference_type, reference_id): وسم الشحنة الحيّ} لأسطر كشف الحساب — بالدفعة.
+
+    الوصف المحفوظ في القيد نصُّ لحظة الترحيل (رقم الشحنة وحده في القديم)؛ هذا يقرأ
+    المستند المرجعي الآن: التخليص ودفعاته، الإرسالية ودفعاتها، استحقاق الشحن ودفعات
+    الوكيل، فاتورة الشراء، وسند الصرف بما وُزِّع عليه. ما لا مستند له لا يظهر.
+    """
+    from logistics.models import LogisticsPayment, PurchaseInvoice
+
+    wanted: dict[str, set] = {}
+    for ref_type, ref_id in refs:
+        if ref_type and ref_id:
+            wanted.setdefault(ref_type, set()).add(ref_id)
+
+    out = {}
+    for ref, (kind, obj) in _reference_accruals(tenant_id, wanted).items():
+        # الإرسالية برقمها ووسم شحنتها («LS-0003 · SH-0019 — …») — قد تكون بلا شحنة.
+        label = obj.display_label if kind == 'local' else shipment_label_of(kind, obj)
+        if label:
+            out[ref] = label
+
+    ship_deals = 'deals__partner'
+    # دفعة الصفقة (للمورد) تحمل شحنتها إن رُبطت بها — وسمٌ فقط، فمرساتها فاتورتها.
+    for p in LogisticsPayment.all_objects.filter(
+        tenant_id=tenant_id, pk__in=wanted.get('LOGISTICS_PAYMENT', ()),
+        shipment__isnull=False, deal__isnull=False,
+    ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}'):
+        out[('LOGISTICS_PAYMENT', p.pk)] = p.shipment.display_label
+
+    for inv in PurchaseInvoice.objects.filter(
+        tenant_id=tenant_id, pk__in=wanted.get('PURCHASE_INVOICE', ()), shipment__isnull=False,
+    ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}'):
+        out[('PURCHASE_INVOICE', inv.pk)] = inv.shipment.display_label
+
+    for voucher_id, targets in _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())).items():
+        labels = []
+        for kind, obj, _amount in targets:
+            label = shipment_label_of(kind, obj)
+            if label and label not in labels:
+                labels.append(label)
         if labels:
             out[('SUPPLIER_PAYMENT', voucher_id)] = '، '.join(labels)
     return out
+
+
+def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
+    """روابط كشف الحساب للمستحقّات اللوجستية — بالدفعة لا لكل صف.
+
+    يُرجع:
+      - ``anchors``: {(reference_type, reference_id): مرساة} لقيد المستحق نفسه ولقيود دفعاته
+        المباشرة (دفعة التخليص/الإرسالية/الوكيل، وقيود الفصل وعكسها).
+      - ``vouchers``: {سند الصرف: [مرساة + ``amount`` بالأساس]} من `LogisticsAccrualAllocation`.
+      - ``deal_invoices``: {دفعة الصفقة: [فاتورتها الدولية المرحّلة]} — مرساتها الفاتورة.
+    المرساة: ``{'key': 'LOGISTICS_CLEARANCE:13', 'label': 'SH-0017 — شحنة رقع', 'short': 'SH-0017'}``.
+    """
+    from logistics.models import LogisticsPayment, PurchaseInvoice
+
+    wanted: dict[str, set] = {}
+    for ref_type, ref_id in refs:
+        if ref_type and ref_id:
+            wanted.setdefault(ref_type, set()).add(ref_id)
+
+    anchors = {
+        ref: _anchor_of(kind, obj)
+        for ref, (kind, obj) in _reference_accruals(tenant_id, wanted).items()
+    }
+    vouchers = {
+        voucher_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
+        for voucher_id, targets in _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())).items()
+    }
+
+    deal_invoices: dict[int, list[int]] = {}
+    deal_payment_ids = wanted.get('LOGISTICS_PAYMENT', set()) | wanted.get('LOGISTICS_PAYMENT_UNPOST', set())
+    if deal_payment_ids:
+        payment_deal = dict(LogisticsPayment.all_objects.filter(
+            tenant_id=tenant_id, pk__in=deal_payment_ids, deal__isnull=False,
+        ).values_list('pk', 'deal_id'))
+        by_deal: dict[int, list[int]] = {}
+        for inv_id, deal_id in PurchaseInvoice.objects.filter(
+            tenant_id=tenant_id, deal_id__in=set(payment_deal.values()), is_posted=True,
+        ).order_by('id').values_list('pk', 'deal_id'):
+            by_deal.setdefault(deal_id, []).append(inv_id)
+        deal_invoices = {pay_id: by_deal.get(deal_id, []) for pay_id, deal_id in payment_deal.items()}
+    return {'anchors': anchors, 'vouchers': vouchers, 'deal_invoices': deal_invoices}
 
 
 def _party_accrual_docs(tenant_id: int, partner_id: int):
@@ -486,5 +580,5 @@ __all__ = [
     'KINDS', 'accrual_status', 'accrual_remaining', 'accrual_snapshot', 'allocated_base', 'document_settlement',
     'document_voucher_rows', 'journal_reference_shipment_labels', 'party_open_accruals', 'shipment_label_of',
     'suggest_accrual_fifo', 'voucher_unallocated', 'allocate_voucher_to_accruals',
-    'deallocate_voucher_accrual',
+    'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
 ]

@@ -4049,13 +4049,31 @@ def record_reconciliation_adjustment(
 #  task18 DEF-C1: رصيد الشريك من دفتر الأستاذ الفرعي (subledger)
 # ─────────────────────────────────────────────────────────
 
-def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
-    """يربط حركات كشف الحساب بمستند المرساة (الفاتورة) — استعلامات بالدفعة لا لكل صف.
+def _link_label_for_targets(targets: list) -> str:
+    """«3 مستحقات: SH-0019، SH-0014، SH-0015» — وسم صفّ سندٍ موزَّع على أكثر من مستند."""
+    kinds = {t["key"].split(":", 1)[0] for t in targets}
+    if kinds <= {"PURCHASE_INVOICE", "SALES_INVOICE"}:
+        noun = "فواتير"
+    elif kinds.isdisjoint({"PURCHASE_INVOICE", "SALES_INVOICE"}):
+        noun = "مستحقات"
+    else:
+        noun = "مستندات"
+    shorts = [t["short"] for t in targets if t.get("short")]
+    return f"{len(targets)} {noun}" + (f": {'، '.join(shorts)}" if shorts else "")
 
-    الفاتورة مرساة مجموعتها، وسند القبض/الصرف ينضمّ لمجموعة الفاتورة التي وُزّع
-    عليها؛ فتُعرَض الحركتان متجاورتين في الواجهة. سند موزَّع على أكثر من فاتورة
-    يبقى بلا مرساة واحدة (link_key=None) ويحمل عددها في link_count. يعدّل `rows`
-    في مكانها.
+
+def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id: int | None = None) -> None:
+    """يربط حركات كشف الحساب بمستند المرساة — استعلامات بالدفعة لا لكل صف.
+
+    المرساة: الفاتورة، أو مستحقٌّ لوجستي للمخلّص/الوكيل/الناقل (التخليص، الإرسالية،
+    استحقاق الشحن — `logistics.domain.party_accruals.journal_reference_accrual_links`).
+    ينضمّ لمجموعتها: سند القبض/الصرف الموزَّع عليها وحدها، ودفعات المستحق المباشرة
+    (وقيود فصلها وعكسها)، ودفعة الصفقة إلى فاتورتها الدولية.
+
+    سندٌ موزَّع على أكثر من مستند يبقى صفّاً واحداً بلا مرساة (`link_key=None`) — الرصيد
+    الجاري لا يتكرّر — ويحمل `link_label` «3 مستحقات: SH-0019، …» و`link_targets`
+    (مفتاح كل مستند ووسمه والمبلغ الموزَّع عليه بالأساس) لتعرض الواجهة داخل كل مجموعة
+    سطراً معلوماتياً «من سند صرف #N: X» بلا مدين/دائن. يعدّل `rows` في مكانها.
     """
     invoice_type = "PURCHASE_INVOICE" if is_supplier else "SALES_INVOICE"
     payment_type = "SUPPLIER_PAYMENT" if is_supplier else "CUSTOMER_PAYMENT"
@@ -4068,20 +4086,23 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
         if r["reference_type"] == payment_type and r["reference_id"]
     }
 
-    by_payment: dict[int, list[int]] = {}
+    #: السند ← [(الفاتورة، المبلغ الموزَّع بالأساس أو None)]
+    by_payment: dict[int, list[tuple[int, Decimal | None]]] = {}
     if payment_ids:
         if is_supplier:
             from sales.models import SupplierPayment, SupplierPaymentAllocation
             allocations = SupplierPaymentAllocation.objects.filter(
                 payment_id__in=payment_ids,
-            ).values_list("payment_id", "invoice_id")
+            ).order_by("id").values_list("payment_id", "invoice_id", "amount", "payment__exchange_rate")
         else:
             from sales.models import PaymentAllocation
             allocations = PaymentAllocation.objects.filter(
                 payment_id__in=payment_ids,
-            ).values_list("payment_id", "invoice_id")
-        for pay_id, inv_id in allocations:
-            by_payment.setdefault(pay_id, []).append(inv_id)
+            ).order_by("id").values_list("payment_id", "invoice_id", "amount", "payment__exchange_rate")
+        for pay_id, inv_id, amount, rate in allocations:
+            # الكشف بالعملة الأساسية، والتوزيع بعملة السند.
+            base = (Decimal(str(amount or 0)) * Decimal(str(rate or 1))).quantize(Decimal("0.01"))
+            by_payment.setdefault(pay_id, []).append((inv_id, base))
         if is_supplier:
             # سندات الصرف القديمة مربوطة بالحقل المفرد لا بجدول التوزيعات.
             legacy = SupplierPayment.objects.filter(
@@ -4089,8 +4110,16 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
                 purchase_invoice__isnull=False,
             ).values_list("id", "purchase_invoice_id")
             for pay_id, inv_id in legacy:
-                by_payment.setdefault(pay_id, []).append(inv_id)
-        invoice_ids.update(inv_id for links in by_payment.values() for inv_id in links)
+                by_payment.setdefault(pay_id, []).append((inv_id, None))
+        invoice_ids.update(inv_id for links in by_payment.values() for inv_id, _ in links)
+
+    # المخلّص/الوكيل/الناقل: مستحقّاتهم ودفعاتها وسنداتها الموزَّعة، ودفعات الصفقة.
+    logistics = {"anchors": {}, "vouchers": {}, "deal_invoices": {}}
+    if is_supplier and tenant_id is not None:
+        from logistics.domain.party_accruals import journal_reference_accrual_links
+        logistics = journal_reference_accrual_links(
+            tenant_id, [(r["reference_type"], r["reference_id"]) for r in rows])
+        invoice_ids.update(i for links in logistics["deal_invoices"].values() for i in links)
 
     # ISSUE #167 (قصة ١٢): مرتجعُ البيع ينضمّ إلى مجموعة **فاتورته الأصليّة**، لا
     # يصنع مجموعةً ثانية. وإلّا قرأ صاحبُ الحساب ثلاثةَ مستنداتٍ متفرّقة —
@@ -4128,33 +4157,51 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool) -> None:
                 numbers[inv_id] = number
                 kinds[inv_id] = kind
 
+    def invoice_anchor(inv_id: int) -> dict:
+        anchor_id = return_to_original.get(inv_id, inv_id)
+        number = numbers.get(anchor_id) or f"#{anchor_id}"
+        return {"key": f"{invoice_type}:{anchor_id}", "label": number, "short": number}
+
+    def link_to(row: dict, targets: list) -> None:
+        row["link_count"] = len(targets)
+        if len(targets) == 1:
+            row["link_key"] = targets[0]["key"]
+            row["link_label"] = targets[0]["label"]
+        elif targets:
+            row["link_label"] = _link_label_for_targets(targets)
+            # السطر الفرعي يحتاج مبلغاً؛ التوزيع القديم بلا مبلغ لا يُعرض فيه.
+            row["link_targets"] = [
+                {"key": t["key"], "label": t["label"], "amount": str(t["amount"])}
+                for t in targets if t.get("amount") is not None
+            ]
+
     for row in rows:
         ref_id = row["reference_id"]
         row["document_number"] = None
         row["link_key"] = None
         row["link_label"] = None
         row["link_count"] = 0
+        row["link_targets"] = []
         # ‏#214-ب: تُرسَل دائماً — حقلٌ يظهر أحياناً يجعل الواجهةَ تخمّن غيابَه.
         row["reference_kind"] = None
         if not ref_id:
             continue
+        ref = (row["reference_type"], ref_id)
         if row["reference_type"] == invoice_type:
             row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
             row["reference_kind"] = kinds.get(ref_id)
             # المرتجعُ يرسو على أصله؛ وغيرُه على نفسه كما كان.
-            anchor_id = return_to_original.get(ref_id, ref_id)
-            row["link_key"] = f"{invoice_type}:{anchor_id}"
-            row["link_label"] = numbers.get(anchor_id) or f"#{anchor_id}"
-            row["link_count"] = 1
+            link_to(row, [invoice_anchor(ref_id)])
         elif row["reference_type"] == payment_type:
-            links = by_payment.get(ref_id, [])
-            row["link_count"] = len(links)
-            if len(links) == 1:
-                anchor_id = return_to_original.get(links[0], links[0])
-                row["link_key"] = f"{invoice_type}:{anchor_id}"
-                row["link_label"] = numbers.get(anchor_id) or f"#{anchor_id}"
-            elif links:
-                row["link_label"] = f"{len(links)} فواتير"
+            targets = [
+                {**invoice_anchor(inv_id), "amount": amount}
+                for inv_id, amount in by_payment.get(ref_id, [])
+            ] + logistics["vouchers"].get(ref_id, [])
+            link_to(row, targets)
+        elif ref in logistics["anchors"]:
+            link_to(row, [logistics["anchors"][ref]])
+        elif row["reference_type"] in ("LOGISTICS_PAYMENT", "LOGISTICS_PAYMENT_UNPOST"):
+            link_to(row, [invoice_anchor(i) for i in logistics["deal_invoices"].get(ref_id, [])])
 
 
 def _attach_statement_shipment_labels(tenant_id: int, rows: list) -> None:
@@ -4278,7 +4325,7 @@ def partner_account_statement(
         if anchor_reference_type:
             row["is_anchor"] = lid in anchor_set
         rows.append(row)
-    _attach_statement_document_links(rows, is_supplier=is_supplier)
+    _attach_statement_document_links(rows, is_supplier=is_supplier, tenant_id=tenant_id)
     _attach_statement_shipment_labels(tenant_id, rows)
     out = {
         "results": rows,

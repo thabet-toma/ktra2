@@ -223,3 +223,47 @@ export function supplierPath(): string {
 export function customerPath(): string {
   return "/sales/customers";
 }
+
+/** مستندٌ وُزِّع عليه سندٌ واحدٌ مع غيره — من `link_targets` في كشف الحساب. */
+export interface StatementLinkTarget {
+  key: string;
+  label: string;
+  /** المبلغ الموزَّع على هذا المستند بالعملة الأساسية. */
+  amount: string;
+}
+
+interface StatementLinkRow {
+  id: number | string;
+  link_key?: string | null;
+  link_targets?: StatementLinkTarget[];
+}
+
+/**
+ * سندٌ موزَّع على أكثر من مستند يبقى صفّاً واحداً في مكانه (الرصيد الجاري لا يتكرّر)،
+ * ويُلحق داخل مجموعة كل مستندٍ ظاهرٍ في الصفحة سطراً معلوماتياً بلا مدين/دائن ولا
+ * رصيد (`info_amount` = ما وُزِّع عليه). مستندٌ خارج الصفحة لا سطر له — مجموعةٌ من
+ * سطرٍ فرعيٍّ وحده بلا مستندها تضلّل.
+ */
+export function withStatementLinkSublines<T extends StatementLinkRow>(
+  rows: T[],
+): Array<T & { info_amount?: string }> {
+  const anchors = new Set(rows.map((r) => r.link_key).filter(Boolean));
+  const sublines: Array<T & { info_amount?: string }> = [];
+  for (const row of rows) {
+    for (const target of row.link_targets ?? []) {
+      if (!anchors.has(target.key)) continue;
+      sublines.push({
+        ...row,
+        id: `info-${row.id}-${target.key}`,
+        debit: "",
+        credit: "",
+        balance_before: "",
+        running_balance: "",
+        link_key: target.key,
+        link_targets: [],
+        info_amount: target.amount,
+      });
+    }
+  }
+  return [...rows, ...sublines];
+}

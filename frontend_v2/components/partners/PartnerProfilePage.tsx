@@ -18,6 +18,7 @@ import { PartnerEditorModal } from './PartnerEditorModal';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
+  withStatementLinkSublines, type StatementLinkTarget,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import {
@@ -74,7 +75,8 @@ interface PartnerProfile {
 }
 
 interface StatementRow {
-  id: number;
+  /** نصّيٌّ للسطر المعلوماتي (`withStatementLinkSublines`) وحده. */
+  id: number | string;
   date: string | null;
   reference_type: string | null;
   reference_id: number | null;
@@ -98,6 +100,10 @@ interface StatementRow {
   link_key?: string | null;
   link_label?: string | null;
   link_count?: number;
+  /** سندٌ موزَّع على أكثر من مستند: كل مستندٍ وما وُزِّع عليه — سطرٌ فرعيٌّ في مجموعته. */
+  link_targets?: StatementLinkTarget[];
+  /** السطر المعلوماتي داخل مجموعة المستند: ما وُزِّع عليه من السند، بلا أثر على الرصيد. */
+  info_amount?: string;
   /**
    * «SH-0017 — شحنة رقع» — وسم الشحنة الحيّ من مستند الحركة المرجعي (تخليص، إرسالية،
    * استحقاق شحن، دفعاتها، سند صرفٍ موزَّع عليها). القيد القديم يحمل الرقم وحده.
@@ -198,6 +204,11 @@ export const PartnerProfilePage: React.FC = () => {
   const [stmtOrdering, setStmtOrdering] = useState<StatementOrdering>('newest');
   // ربط الفاتورة بسندها: يجمع الحركتين متجاورتين داخل إطار واحد (ضمن الصفحة).
   const [stmtGrouped, setStmtGrouped] = useState(true);
+  // الربط وحده يُظهر أسطر السند الموزَّع الفرعية — بلا ربط لا مجموعة تحويها.
+  const stmtDisplayRows = useMemo(
+    () => (stmtGrouped ? withStatementLinkSublines(stmt.rows) : stmt.rows),
+    [stmt.rows, stmtGrouped],
+  );
 
   // تفاصيل حركة كشف الحساب (نافذة)
   const [detailRow, setDetailRow] = useState<StatementRow | null>(null);
@@ -446,8 +457,10 @@ export const PartnerProfilePage: React.FC = () => {
                 : r.reference_id != null ? ` #${r.reference_id}` : ''
             }`}
           />
-          {/* السند يعلن الفاتورة التي وُزّع عليها — الربط ظاهر ولو تفرّقت الصفحة. */}
-          {!r.document_number && r.link_label && (
+          {/* السند يعلن الفاتورة التي وُزّع عليها — الربط ظاهر ولو تفرّقت الصفحة.
+              والمستحق مرساةُ نفسه فلا «مقابل» له. */}
+          {!r.info_amount && !r.document_number && r.link_label
+            && r.link_key !== `${r.reference_type}:${r.reference_id}` && (
             <span className="text-[10px] text-[var(--ktra-ink-soft)]">
               ↔ مقابل {r.link_label}
             </span>
@@ -458,7 +471,11 @@ export const PartnerProfilePage: React.FC = () => {
     {
       key: 'description',
       header: 'البيان',
-      render: (r) => (
+      render: (r) => r.info_amount ? (
+        <span className="text-[11px] italic text-[var(--ktra-ink-soft)]">
+          ↳ من {referenceTypeLabel(r.reference_type)} #{r.reference_id}: {formatMoney(r.info_amount)} — جزءٌ من سندٍ موزَّع، لا أثر له على الرصيد
+        </span>
+      ) : (
         <div className="flex flex-col gap-0.5">
           <span>{clarifyStatementDescription(r.reference_type, r.description) || '—'}</span>
           <StatementShipmentLabel row={r} />
@@ -472,7 +489,7 @@ export const PartnerProfilePage: React.FC = () => {
       key: 'details',
       header: 'تفاصيل',
       align: 'center',
-      render: (r) => (
+      render: (r) => r.info_amount ? null : (
         <button
           type="button"
           onClick={() => setDetailRow(r)}
@@ -722,13 +739,13 @@ export const PartnerProfilePage: React.FC = () => {
           )}
           <LedgerTable<StatementRow>
             columns={stmtColumns}
-            rows={stmt.rows}
+            rows={stmtDisplayRows}
             loading={stmtLoading}
             count={stmt.count}
             limit={PAGE}
             offset={stmtOffset}
             onPage={setStmtOffset}
-            rowClassName={(r) => statementToneRowClass(r.reference_type)}
+            rowClassName={(r) => (r.info_amount ? 'bg-[var(--ktra-panel)]' : statementToneRowClass(r.reference_type))}
             rowGroupKey={stmtGrouped ? (r) => r.link_key : undefined}
             emptyText="لا توجد حركات على حساب هذا الشريك."
             summaryRow={

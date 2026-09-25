@@ -134,3 +134,61 @@ test("payment voucher picker lists the broker, forwarder and carrier — not cus
   expect(options).toContain("اسامه — ناقل محلي");
   expect(options.some((o) => o.includes("زبون"))).toBe(false);
 });
+
+test("broker statement: a voucher over three clearances stays one row with a subline in each group", async ({ page }) => {
+  const row = (id: number, extra: Record<string, unknown>) => ({
+    id, journal_id: id, date: "2026-08-0" + (id % 9), description: "", balance_before: "0",
+    document_number: null, reference_kind: null, link_count: 1, link_targets: [], shipment_label: null, ...extra,
+  });
+  await installAuthenticatedApiMocks(page, async (route, url) => {
+    if (url.pathname.endsWith("/partners/83/statement/")) {
+      await route.fulfill({
+        contentType: "application/json",
+        body: JSON.stringify({
+          count: 3,
+          closing_balance: "-4000.00",
+          results: [
+            row(3, {
+              reference_type: "SUPPLIER_PAYMENT", reference_id: 2460, debit: "19000.00", credit: "0.00",
+              running_balance: "-4000.00", link_key: null, link_count: 3,
+              link_label: "3 مستحقات: SH-0019، SH-0014، SH-0015",
+              link_targets: [
+                { key: "LOGISTICS_CLEARANCE:14", label: "SH-0019 — داتا لوجر", amount: "9000.00" },
+                { key: "LOGISTICS_CLEARANCE:12", label: "SH-0014 — ثلاجات", amount: "6000.00" },
+                { key: "LOGISTICS_CLEARANCE:11", label: "SH-0015 — تلفزيونات", amount: "4000.00" },
+              ],
+            }),
+            row(2, {
+              reference_type: "LOGISTICS_CLEARANCE", reference_id: 14, debit: "0.00", credit: "9000.00",
+              running_balance: "15000.00", link_key: "LOGISTICS_CLEARANCE:14", link_label: "SH-0019 — داتا لوجر",
+            }),
+            row(1, {
+              reference_type: "LOGISTICS_CLEARANCE", reference_id: 12, debit: "0.00", credit: "6000.00",
+              running_balance: "6000.00", link_key: "LOGISTICS_CLEARANCE:12", link_label: "SH-0014 — ثلاجات",
+            }),
+          ],
+        }),
+      });
+      return true;
+    }
+    return profileResponder(route, url);
+  });
+  await page.goto("/partners/83?tab=statement");
+
+  await expect(page.getByText("↔ مقابل 3 مستحقات: SH-0019، SH-0014، SH-0015")).toBeVisible({ timeout: 15000 });
+  // التخليص مرساةُ نفسه — لا «مقابل» تحته.
+  await expect(page.getByText(/↔ مقابل SH-00/)).toHaveCount(0);
+  const sublines = page.getByText(/↳ من سند صرف #2460/);
+  await expect(sublines).toHaveCount(2);
+  await expect(sublines.nth(0)).toContainText("9,000");
+  await expect(sublines.nth(1)).toContainText("6,000");
+  // السطر الفرعي داخل إطار مجموعة تخليصه، لا صفٌّ مستقلّ.
+  const group14 = page.locator("tbody", { hasText: "مستحق تخليص #14" });
+  await expect(group14.getByText(/↳ من سند صرف #2460/)).toBeVisible();
+  // صفّ السند نفسه مرّة واحدة: رصيده الجاري لا يتكرّر.
+  await expect(page.getByText("-4000.00")).toHaveCount(1);
+
+  // بلا ربط: لا أسطر فرعية.
+  await page.getByLabel("ربط الفاتورة بسندها").uncheck();
+  await expect(page.getByText(/↳ من سند صرف/)).toHaveCount(0);
+});

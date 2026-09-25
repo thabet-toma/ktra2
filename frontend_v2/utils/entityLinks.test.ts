@@ -9,6 +9,7 @@ import {
   referenceTypeLabel,
   statementMovementTone,
   statementToneRowClass,
+  withStatementLinkSublines,
 } from "./entityLinks.ts";
 
 /* ── A1 (THA-195): القفزة الثالثة — من القيد إلى مستنده المصدر ── */
@@ -132,4 +133,30 @@ test('غياب النوع يُبقي السلوك القديم حرفياً — 
   assert.equal(referenceTypeLabel('SALES_INVOICE', null), 'فاتورة مبيعات');
   assert.equal(referenceTypeLabel('CUSTOMER_PAYMENT', undefined), 'سند قبض');
   assert.equal(referenceTypeLabel(''), 'حركة');
+});
+
+test("سند على ثلاثة مستحقّات: صفّه مرّة واحدة وسطرٌ معلوماتي في كل مجموعة ظاهرة", () => {
+  const rows = [
+    { id: 1, link_key: "LOGISTICS_CLEARANCE:13", debit: "0", credit: "9000", running_balance: "9000" },
+    { id: 2, link_key: "LOGISTICS_CLEARANCE:14", debit: "0", credit: "6000", running_balance: "15000" },
+    {
+      id: 3, link_key: null, debit: "19000", credit: "0", running_balance: "-4000",
+      link_targets: [
+        { key: "LOGISTICS_CLEARANCE:13", label: "SH-0019", amount: "9000.00" },
+        { key: "LOGISTICS_CLEARANCE:14", label: "SH-0014", amount: "6000.00" },
+        // مستندٌ خارج الصفحة — لا سطر له.
+        { key: "LOGISTICS_CLEARANCE:15", label: "SH-0015", amount: "4000.00" },
+      ],
+    },
+  ];
+  const out = withStatementLinkSublines(rows);
+  assert.equal(out.length, 5);
+  assert.deepEqual(out.slice(0, 3), rows);
+  const infos = out.slice(3);
+  assert.deepEqual(infos.map((r) => [r.link_key, r.info_amount]), [
+    ["LOGISTICS_CLEARANCE:13", "9000.00"],
+    ["LOGISTICS_CLEARANCE:14", "6000.00"],
+  ]);
+  // لا أثر على الرصيد: لا مدين ولا دائن ولا رصيد جارٍ.
+  for (const r of infos) assert.deepEqual([r.debit, r.credit, r.running_balance], ["", "", ""]);
 });

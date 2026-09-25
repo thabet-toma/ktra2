@@ -126,6 +126,7 @@ def document_settlement(kind, obj, *, draft_due, draft_paid, rate=None)  # مد�
 def document_voucher_rows(kind, obj, *, rate=None) -> list[dict]         # السندات الموزَّعة صفوفاً لتبويب «الدفعات» بعملة المستند
 def shipment_label_of(kind, obj) -> str                                  # وسم الشحنة الدولية للمستحق
 def journal_reference_shipment_labels(tenant_id, refs) -> dict           # (reference_type, reference_id) ← وسم الشحنة الحيّ — كشف الحساب
+def journal_reference_accrual_links(tenant_id, refs) -> dict             # مرساة كل مستحق (LOGISTICS_CLEARANCE:<id> · LOCAL_SHIPMENT:<id> · SHIPMENT_FREIGHT_ACCRUAL:<shipment>) لقيده ودفعاته، والسندات الموزَّعة بمبالغها، ودفعة الصفقة ← فاتورتها — «ربط الفاتورة بسندها»
 def allocated_base(kind, objs) -> Decimal                                # يضيفه 3ب إلى كل حوض
 
 # logistics/payment_posting.py — دفعة وكيل الشحن (بلا صفقة)

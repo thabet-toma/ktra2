@@ -98,7 +98,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 | الملف | ما يغطيه |
 |---|---|
 | `partners/tests/test_customer_notes.py` | إنشاء الملاحظة مع `created_by`، الفلترة بـ`?partner`، العزل بين الشركات، `reminders-due` و`alerts` |
-| `partners/tests/test_partner_card_payment_clarity.py` | `invoices/` يطابق حالة الدفع في شاشة الفواتير، و`link_key` يربط الحركة بمستندها في كشف الحساب |
+| `partners/tests/test_partner_card_payment_clarity.py` | `invoices/` يطابق حالة الدفع في شاشة الفواتير، و`link_key` يربط الحركة بمستندها في كشف الحساب، والسند على فاتورتين يحمل `link_targets` بمبلغ كلٍّ منهما |
+| `logistics/tests/test_statement_accrual_links.py` | مستحق التخليص مع دفعته المباشرة وسنده الموزَّع عليه وحده في مجموعةٍ واحدة، وسند على ثلاثة مستحقّات صفٌّ واحد بـ«3 مستحقات: …» والرصيد الختامي لا يتغيّر، وسند شراء على فاتورتين |
 | `partners/tests/test_partner_stock_movements.py` | حركات مخزون الشريك مجمَّعةً تحت مستندها، وعزلها عن الشركات الأخرى (العدد تسريبٌ أيضاً) |
 | `partners/tests/test_partner_duplicate_identifiers.py` | رفض الرقم الضريبي/البنكي الشبيه، مُنطاقاً بالشركة وعبر كل الأنواع |
 | `partners/tests/test_supplier_scope.py` | غير المصنَّف يظهر في الجانبين — الفصل لا يُخفي مورداً قائماً |
