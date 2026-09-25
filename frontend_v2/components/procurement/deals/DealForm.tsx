@@ -643,9 +643,8 @@ export const DealForm: React.FC<DealFormProps> = ({
           createdBy: currentUser.id, updatedBy: currentUser.id, status: "initial",
           installments: finalFormData.installments || [], installmentPlanEnabled: finalFormData.installmentPlanEnabled || false,
         };
-        // T113-2: العرض المصدر وعملته يُرسَلان مع الإنشاء — بدونهما تُحفظ الصفقة
-        // بلا نسبٍ إلى عرضها وبالعملة الأولى مهما كانت عملة العرض.
-        const optionalFields = ["sourceQuotationId", "currencyId", "currencyRate", "incoterms", "totalWeightKg", "priceOfferId", "dealDescription", "originalOfferNumber", "alibabaOrderLink", "internalNotes", "notes", "invoiceLink", "supplierInvoiceNumber", "supplierName", "shippingMethod", "productionDays", "deliveryDays", "quoteImages", "quotePdfs", "quote_images", "quote_pdfs", "productionTime", "paymentMethod", "deliveryTime", "warrantyDuration", "certificates", "shipping_method_id", "shippingMethodCode", "shippingMethodName", "shipmentNotes", "totalWeight", "totalVolume", "isReadyStock", "shippingDetails", "productionPath"];
+        // T113-2: العرض المصدر يُرسَل مع الإنشاء — بدونه تُحفظ الصفقة بلا نسبٍ إلى عرضها.
+        const optionalFields = ["sourceQuotationId", "incoterms", "totalWeightKg", "priceOfferId", "dealDescription", "originalOfferNumber", "alibabaOrderLink", "internalNotes", "notes", "invoiceLink", "supplierInvoiceNumber", "supplierName", "shippingMethod", "productionDays", "deliveryDays", "quoteImages", "quotePdfs", "quote_images", "quote_pdfs", "productionTime", "paymentMethod", "deliveryTime", "warrantyDuration", "certificates", "shipping_method_id", "shippingMethodCode", "shippingMethodName", "shipmentNotes", "totalWeight", "totalVolume", "isReadyStock", "shippingDetails", "productionPath"];
         optionalFields.forEach((field) => { if (formData[field as keyof Deal] !== undefined && formData[field as keyof Deal] !== null) createData[field] = formData[field as keyof Deal]; });
         const dealId = await dealsService.createDeal(createData);
         const createdDeal = await dealsService.getDeal(dealId);

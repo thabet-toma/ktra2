@@ -143,9 +143,6 @@ export interface Deal {
     originalOfferNumber?: string;
     /** عرض السعر المصدر (source_quotation) — يُربط عند إنشاء الصفقة فقط */
     sourceQuotationId?: string;
-    /** عملة الصفقة ومعامل تحويلها — تُنقلان من العرض المصدر */
-    currencyId?: number;
-    currencyRate?: number;
     incoterms?: string;
     supplierId: string;
     factoryName: string;

@@ -47,7 +47,7 @@ class LogisticsPaymentTenantTest(TestCase):
     def setUpTestData(cls):
         cls.tenant_a = Tenant.objects.create(CompanyName="دفعات أ")
         cls.tenant_b = Tenant.objects.create(CompanyName="دفعات ب")
-        cls.currency = Currency.objects.create(
+        Currency.objects.create(
             Code="LPT", Symbol="$", IsBaseCurrency=False,
         )
         cls.supplier = Partner.objects.create(
@@ -55,7 +55,7 @@ class LogisticsPaymentTenantTest(TestCase):
         )
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant_a, ref_number="D-LPT-1", partner=cls.supplier,
-            order_date="2026-07-01", currency=cls.currency,
+            order_date="2026-07-01",
             total_amount=Decimal("1000"),
         )
         cls.shipment = LogisticsShipment.objects.create(

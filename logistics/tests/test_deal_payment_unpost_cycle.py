@@ -30,7 +30,7 @@ class DealPaymentUnpostCycleTest(APITestCase):
         cls.user = User.objects.create_user(
             username="unpost_cycle", password="x", is_staff=True)
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
+        Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
         cls.tenant = create_company("شركة دورة العكس", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         parent = get_cash_box_parent_account(cls.tenant)
@@ -48,8 +48,7 @@ class DealPaymentUnpostCycleTest(APITestCase):
             currency_code="USD", account=usd_acc)
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number="D-9100", partner=cls.partner,
-            order_date="2026-06-20", total_amount=D("10000"), currency=cls.usd,
-            currency_rate=D("3.5"))
+            order_date="2026-06-20", total_amount=D("10000"))
 
     def _auth(self):
         self.client.force_authenticate(user=self.user)

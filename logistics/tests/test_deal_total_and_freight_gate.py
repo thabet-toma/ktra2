@@ -42,7 +42,7 @@ class DealTotalIsAlwaysDerivedTest(APITestCase):
     def _deal_with_goods(self, goods="20140"):
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-TOT-1", partner=self.supplier,
-            currency=Currency.objects.get(Code="ILS"), order_date="2026-07-01",
+            order_date="2026-07-01",
             total_amount=D(goods), subtotal=D(goods),
         )
         LogisticsDealItem.objects.create(
@@ -142,7 +142,7 @@ class SupplierOverpaymentBecomesAdvanceTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="sup-over", password="x")
-        cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
+        Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
         cls.tenant = create_company("شركة دفع زائد", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         cls.supplier = Partner.objects.create(
@@ -155,7 +155,7 @@ class SupplierOverpaymentBecomesAdvanceTest(APITestCase):
     def setUp(self):
         self.deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-OVER-1", partner=self.supplier,
-            currency=self.ils, order_date="2026-07-01",
+            order_date="2026-07-01",
             total_amount=D("1000"), subtotal=D("1000"),
         )
         LogisticsDealItem.objects.create(

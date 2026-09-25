@@ -507,7 +507,7 @@ class LogisticsDealListSerializer(serializers.ModelSerializer):
         model = LogisticsDeal
         fields = [
             'id', 'ref_number', 'partner', 'partner_name', 'partner_legal_name',
-            'order_date', 'total_amount', 'currency', 'status', 'description',
+            'order_date', 'total_amount', 'status', 'description',
             'short_name', 'pi_number', 'factory_name', 'original_offer_number',
             'supplier_invoice_number', 'installment_plan_enabled',
             'current_installment_number', 'remaining_amount', 'subtotal',

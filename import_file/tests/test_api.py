@@ -37,7 +37,7 @@ class ImportFileApiTestBase(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="import-file-api", password="x")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        Currency.objects.create(Code="USD", Name="دولار")
         cls.tenant = create_company("شركة ملف الاستيراد", cls.user)
         cls.supplier = Partner.objects.create(
             tenant=cls.tenant, name="المصنع الصيني", partner_type="Supplier",
@@ -52,7 +52,7 @@ class ImportFileApiTestBase(APITestCase):
     def make_deal(cls, ref, tenant, supplier):
         return LogisticsDeal.objects.create(
             tenant=tenant, ref_number=ref, partner=supplier,
-            order_date="2026-07-01", total_amount=1000, currency=cls.usd,
+            order_date="2026-07-01", total_amount=1000,
         )
 
     def setUp(self):

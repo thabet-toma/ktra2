@@ -13,8 +13,7 @@
 القاعدة (لكلّ صفقة، وكلُّها شرطٌ لا يُتخطّى):
   - مجموعةٌ من **قيدين مرحَّلين بالضبط** لنفس `reference_id` — ثلاثةٌ فأكثر تُترك.
   - كلُّ قيدٍ **سطران**: مدينُ مصروفٍ ودائنُ حسابِ المورّد نفسِه في القيدين.
-  - الصفقةُ موجودةٌ في نفس الشركة وعملتُها هي الأساس (وإلّا فالمقارنةُ بالإجمالي
-    لا تصحّ، فتُترك للمراجعة).
+  - الصفقةُ موجودةٌ في نفس الشركة.
   - **المبلغان متساويان** ⇒ يُحذف الأحدثُ ويبقى الأوّل.
   - **مختلفان وأحدُهما يساوي إجماليَ الصفقة** (الصفقةُ عُدِّلت وأُعيد ترحيلُها)
     ⇒ يبقى المطابقُ ويُحذف الآخر.
@@ -64,8 +63,6 @@ def _plan_for(deal_id, journals, deals):
     deal = deals.get(deal_id)
     if deal is None:
         return None, None, "الصفقةُ غير موجودة"
-    if deal.currency_id and not deal.currency.IsBaseCurrency:
-        return None, None, f"عملةُ الصفقة {deal.currency.Code} ليست الأساس"
     total = Decimal(str(deal.total_amount or "0"))
     matches = [j for j in (first, second) if amounts[j.id] == total]
     if len(matches) != 1:
@@ -95,8 +92,7 @@ class Command(BaseCommand):
             groups[(journal.tenant_id, journal.reference_id)].append(journal)
 
         deal_ids = {ref for _tenant, ref in groups if ref}
-        deals = {d.pk: d for d in LogisticsDeal.all_objects.filter(pk__in=deal_ids)
-                 .select_related("currency")}
+        deals = {d.pk: d for d in LogisticsDeal.all_objects.filter(pk__in=deal_ids)}
 
         planned, skipped = [], []
         for (tenant_id, deal_id), journals in sorted(groups.items()):

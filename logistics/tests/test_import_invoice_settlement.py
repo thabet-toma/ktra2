@@ -47,7 +47,7 @@ class ImportInvoiceSettlementTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="impsettle", password="x")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        Currency.objects.create(Code="USD", Name="دولار")
         cls.tenant = create_company("شركة تسوية الاستيراد", cls.user)
         cls.tenant.import_enabled = True
         cls.tenant.save(update_fields=["import_enabled"])
@@ -80,7 +80,7 @@ class ImportInvoiceSettlementTest(APITestCase):
         for n, (usd, cbm) in enumerate((("1000", "1"), ("2000", "2"), ("3000", "3")), start=1):
             deal = LogisticsDeal.objects.create(
                 tenant=cls.tenant, ref_number=f"D-SET-{n}", partner=cls.supplier,
-                order_date="2026-06-01", total_amount=D(usd), currency=cls.usd,
+                order_date="2026-06-01", total_amount=D(usd),
                 total_cbm=D(cbm))
             product = Product.objects.create(
                 tenant=cls.tenant, sku=f"SET-{n}", name_ar=f"صنف {n}",
@@ -366,11 +366,10 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(D(other["remaining_balance"]), D("7000.00"))
 
     def test_deal_paid_through_endpoint_matches_supplier_cost(self):
-        """INV-0021 على الإنتاج: صفقةٌ عملتها ILS (كل صفقات كترا) مدفوعةٌ كاملةً بدولار
+        """INV-0021 على الإنتاج: صفقةٌ مدفوعةٌ كاملةً بدولار
         بسعر 3.24 عبر زرّ الدفع نفسه — كانت تُعرض «مدفوع 690» مقابل تكلفة 2,235.60:
         القيد رحّل الرقم الدولاري، والملخّص يقرأ الاسميّ لا الأساس."""
         deal = self.deals[0]
-        LogisticsDeal.objects.filter(pk=deal.pk).update(currency=self.ils)
         payment = LogisticsPayment.objects.get(deal=deal)
         LogisticsPayment.objects.filter(pk=payment.pk).update(usd_to_ils=D("3.24"))
         cash = Account.objects.get(tenant=self.tenant, code="1101")

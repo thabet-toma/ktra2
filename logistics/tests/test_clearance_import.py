@@ -36,7 +36,7 @@ class ClearanceImportTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="impmgr", password="x")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        Currency.objects.create(Code="USD", Name="دولار")
         cls.tenant = create_company("شركة الاستيراد", cls.user)
         cls.tenant.import_enabled = True
         cls.tenant.save(update_fields=["import_enabled"])
@@ -46,7 +46,7 @@ class ClearanceImportTest(APITestCase):
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number="D-0042", partner=cls.partner,
             order_date="2026-06-01", total_amount=Decimal("1997"),
-            currency=cls.usd, description="شحنة الكوابل الانفيرتر الاصفر",
+            description="شحنة الكوابل الانفيرتر الاصفر",
             total_cbm=Decimal("5"))
         cls.shipment = LogisticsShipment.objects.create(
             tenant=cls.tenant, shipment_number="SH-0001",
@@ -79,7 +79,7 @@ class ClearanceImportTest(APITestCase):
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-0043", partner=self.partner,
             order_date="2026-06-02", total_amount=Decimal("1000"),
-            currency=self.usd, description="الصفقة الثانية في نفس الشحنة",
+            description="الصفقة الثانية في نفس الشحنة",
             total_cbm=Decimal("5"),
         )
         LogisticsShipmentDeal.objects.create(shipment=self.shipment, deal=deal)

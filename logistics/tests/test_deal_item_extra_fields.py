@@ -13,7 +13,7 @@ class DealItemExtraFieldsTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.tenant = Tenant.objects.create(TenantID=60, CompanyName="DealItem Test")
-        cls.currency = Currency.objects.create(
+        Currency.objects.create(
             CurrencyID=1, Code="ILS", Symbol="₪", IsBaseCurrency=True,
         )
         cls.partner = Partner.objects.create(
@@ -27,7 +27,7 @@ class DealItemExtraFieldsTest(TestCase):
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number="D-DI-001",
             partner=cls.partner, order_date="2026-02-01",
-            currency=cls.currency, total_amount=10000,
+            total_amount=10000,
         )
 
     def test_create_item_with_all_extra_fields(self):

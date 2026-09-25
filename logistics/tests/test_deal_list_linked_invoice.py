@@ -24,12 +24,12 @@ class DealListLinkedInvoiceTest(APITestCase):
             tenant=cls.tenant, name="مورد", partner_type="Supplier")
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, partner=cls.partner, ref_number="D-0200",
-            order_date="2026-06-01", currency=cls.ils,
+            order_date="2026-06-01",
             short_name="صفقة محوَّلة",
         )
         cls.deal_plain = LogisticsDeal.objects.create(
             tenant=cls.tenant, partner=cls.partner, ref_number="D-0201",
-            order_date="2026-06-02", currency=cls.ils,
+            order_date="2026-06-02",
             short_name="صفقة بلا فاتورة",
         )
 

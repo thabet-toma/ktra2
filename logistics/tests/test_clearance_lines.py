@@ -28,7 +28,7 @@ class ClearanceLinesTest(TestCase):
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number="D-CL-001",
             partner=cls.partner, order_date="2026-01-01",
-            currency=cls.currency, total_amount=1000,
+            total_amount=1000,
         )
         cls.shipment = LogisticsShipment.objects.create(
             tenant=cls.tenant, shipment_number="SH-CL-001",

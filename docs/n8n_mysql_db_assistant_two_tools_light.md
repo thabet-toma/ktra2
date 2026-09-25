@@ -196,7 +196,6 @@ smartktra_smart-ktra	logistics_deals	RefNumber	varchar(50)	رقم صفقة مث�
 smartktra_smart-ktra	logistics_deals	PartnerID	int	FK → partners مورد الصفقة
 smartktra_smart-ktra	logistics_deals	OrderDate	date	تاريخ الطلب
 smartktra_smart-ktra	logistics_deals	TotalAmount	decimal(18,2)	إجمالي الصفقة
-smartktra_smart-ktra	logistics_deals	CurrencyID	int	FK
 smartktra_smart-ktra	logistics_deals	Status	varchar(20)	Open/Shipped/…
 smartktra_smart-ktra	logistics_deals	Notes	longtext	ملاحظات
 smartktra_smart-ktra	logistics_deals	CreatedAt	datetime	إنشاء
@@ -235,7 +234,6 @@ smartktra_smart-ktra	logistics_deals	payment_date	date	دفعة
 smartktra_smart-ktra	logistics_deals	started_production_at	date	بداية إنتاج
 smartktra_smart-ktra	logistics_deals	PaymentStatus	varchar(20)	Unpaid/Partially Paid/Fully Paid
 smartktra_smart-ktra	logistics_deals	OrderStatus	varchar(20)	مراحل تنفيذ الطلب
-smartktra_smart-ktra	logistics_deals	CurrencyRate	decimal(18,6)	سعر صرف
 smartktra_smart-ktra	logistics_deals	IsPosted	tinyint(1)	ترحيل محاسبي للصفقة (نادر)
 smartktra_smart-ktra	logistics_deals	JournalID	int	FK قيد مرتبط بالصفقة إن وُجد
 smartktra_smart-ktra	logistics_deals	shipping_workflow_status	varchar(32)	مسار شحن sw_*

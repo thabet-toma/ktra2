@@ -342,7 +342,7 @@ class ActivityApiTest(APITestCase):
 
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-ACT-1", partner=supplier,
-            order_date=date(2026, 7, 1), currency=currency,
+            order_date=date(2026, 7, 1),
         )
         purchase = PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number="PI-ACT-1", partner=supplier,

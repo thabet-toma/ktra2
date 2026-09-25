@@ -30,10 +30,10 @@ class InlandReconcileTest(TestCase):
         # A: value 8000 / cbm 1 ;  B: value 2000 / cbm 4
         dA = LogisticsDeal.objects.create(
             tenant=self.t, ref_number='D-A', partner=self.sup, order_date='2026-06-01',
-            currency=self.cur, total_amount=Decimal('8000'), total_cbm=Decimal('1'))
+            total_amount=Decimal('8000'), total_cbm=Decimal('1'))
         dB = LogisticsDeal.objects.create(
             tenant=self.t, ref_number='D-B', partner=self.sup, order_date='2026-06-01',
-            currency=self.cur, total_amount=Decimal('2000'), total_cbm=Decimal('4'))
+            total_amount=Decimal('2000'), total_cbm=Decimal('4'))
         sh = LogisticsShipment.objects.create(
             tenant=self.t, shipment_number='SH-R', chargeable_unit='cbm',
             freight_rate=Decimal('100'), total_shipping_cost_usd=Decimal('500'))

@@ -41,7 +41,7 @@ class ImportTraceTest(TestCase):
     def _build_flow(self):
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number='D-5001', partner=self.partner,
-            order_date='2026-06-01', currency=self.cur, total_amount=Decimal('5000'),
+            order_date='2026-06-01', total_amount=Decimal('5000'),
             total_cbm=Decimal('4'))
         LogisticsDealItem.objects.create(
             deal=deal, product=self.product, quantity=Decimal('10'), unit_price=Decimal('500'))

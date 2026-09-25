@@ -45,7 +45,7 @@ class DealPaymentCurrencyTest(APITestCase):
     def _deal(self, ref, currency):
         return LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=ref, partner=self.supplier,
-            order_date="2026-06-20", total_amount=D("10000"), currency=currency)
+            order_date="2026-06-20", total_amount=D("10000"))
 
     def _payment(self, deal, amount, rate="3.24"):
         return LogisticsPayment.objects.create(

@@ -145,7 +145,7 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         if date_to:
             qs = qs.filter(order_date__lte=date_to)
 
-        qs = qs.select_related('partner', 'currency', 'tenant', 'created_by')
+        qs = qs.select_related('partner', 'tenant', 'created_by')
         # القائمة تأخذ الرصيد من `PagePartnerBalanceMixin` باستعلام واحد بعد
         # الترقيم؛ الاستعلام الفرعي هنا للصف الواحد (المستند المفتوح) فقط.
         if self.action != 'list':
@@ -350,7 +350,6 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 'stage': derive_stage(d),
                 'shipping_workflow_status': d.shipping_workflow_status,
                 'total_amount': d.total_amount,
-                'currency_id': d.currency_id,
                 'total_cbm': d.total_cbm,
                 'total_weight_kg': d.total_weight_kg if d.total_weight_kg is not None else d.total_weight,
             })

@@ -14,7 +14,6 @@ from accounting.models import Account, JournalHeader
 from accounting.services import create_fiscal_year, partner_posted_balance, post_journal
 from logistics.models import LogisticsDeal
 from partners.models import Partner
-from tenants.models import Currency
 from tenants.services import create_company
 
 pytestmark = pytest.mark.django_db
@@ -23,8 +22,6 @@ pytestmark = pytest.mark.django_db
 @pytest.fixture
 def env():
     owner = User.objects.create_user(username="dupdeal", password="x")
-    ils = Currency.objects.create(Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True)
-    usd = Currency.objects.create(Code="USD", Name="دولار", Symbol="$", IsBaseCurrency=False)
     tenant = create_company("شركة صفقات مكرَّرة", owner)
     create_fiscal_year(tenant, 2026)
     ap = Account.objects.create(
@@ -35,13 +32,13 @@ def env():
         tenant=tenant, code="5-D", name="مصروفات", account_type="Expense", is_active=True)
     supplier = Partner.objects.create(
         tenant=tenant, name="مورد الصين", partner_type="Supplier", linked_account=ap)
-    return tenant, supplier, ap, expense, ils, usd
+    return tenant, supplier, ap, expense
 
 
-def _deal(tenant, supplier, currency, total, ref="D-0001"):
+def _deal(tenant, supplier, total, ref="D-0001"):
     return LogisticsDeal.objects.create(
         tenant=tenant, ref_number=ref, partner=supplier, order_date="2026-06-01",
-        total_amount=Decimal(total), currency=currency, description="شراء")
+        total_amount=Decimal(total), description="شراء")
 
 
 def _deal_journal(tenant, supplier, ap, expense, deal, amount):
@@ -64,8 +61,8 @@ def _journal_ids(deal):
 
 
 def test_identical_pair_keeps_the_first_and_halves_the_supplier_balance(env):
-    tenant, supplier, ap, expense, ils, _usd = env
-    deal = _deal(tenant, supplier, ils, "4005")
+    tenant, supplier, ap, expense = env
+    deal = _deal(tenant, supplier, "4005")
     first = _deal_journal(tenant, supplier, ap, expense, deal, "4005")
     _second = _deal_journal(tenant, supplier, ap, expense, deal, "4005")
     _debit, credit = partner_posted_balance(tenant.TenantID, supplier.id)
@@ -81,8 +78,8 @@ def test_identical_pair_keeps_the_first_and_halves_the_supplier_balance(env):
 
 
 def test_report_changes_nothing_and_rerun_is_a_noop(env):
-    tenant, supplier, ap, expense, ils, _usd = env
-    deal = _deal(tenant, supplier, ils, "1000")
+    tenant, supplier, ap, expense = env
+    deal = _deal(tenant, supplier, "1000")
     _deal_journal(tenant, supplier, ap, expense, deal, "1000")
     _deal_journal(tenant, supplier, ap, expense, deal, "1000")
     before = _journal_ids(deal)
@@ -102,8 +99,8 @@ def test_report_changes_nothing_and_rerun_is_a_noop(env):
 
 def test_edited_deal_keeps_the_journal_matching_its_total(env):
     """الصفقةُ عُدِّلت وأُعيد ترحيلُها: الباقي هو المطابقُ للإجمالي لا الأحدثَ آلياً."""
-    tenant, supplier, ap, expense, ils, _usd = env
-    deal = _deal(tenant, supplier, ils, "76625")
+    tenant, supplier, ap, expense = env
+    deal = _deal(tenant, supplier, "76625")
     stale = _deal_journal(tenant, supplier, ap, expense, deal, "79140")
     current = _deal_journal(tenant, supplier, ap, expense, deal, "76625")
 
@@ -116,8 +113,8 @@ def test_edited_deal_keeps_the_journal_matching_its_total(env):
 
 
 def test_older_journal_survives_when_it_is_the_matching_one(env):
-    tenant, supplier, ap, expense, ils, _usd = env
-    deal = _deal(tenant, supplier, ils, "500")
+    tenant, supplier, ap, expense = env
+    deal = _deal(tenant, supplier, "500")
     matching = _deal_journal(tenant, supplier, ap, expense, deal, "500")
     _newer = _deal_journal(tenant, supplier, ap, expense, deal, "650")
 
@@ -127,8 +124,8 @@ def test_older_journal_survives_when_it_is_the_matching_one(env):
 
 
 def test_pair_matching_nothing_is_left_for_review(env):
-    tenant, supplier, ap, expense, ils, _usd = env
-    deal = _deal(tenant, supplier, ils, "900")
+    tenant, supplier, ap, expense = env
+    deal = _deal(tenant, supplier, "900")
     _a = _deal_journal(tenant, supplier, ap, expense, deal, "700")
     _b = _deal_journal(tenant, supplier, ap, expense, deal, "800")
     before = _journal_ids(deal)
@@ -140,23 +137,9 @@ def test_pair_matching_nothing_is_left_for_review(env):
     assert "متروكةٌ للمراجعة" in out.getvalue()
 
 
-def test_foreign_currency_deal_is_left_for_review(env):
-    tenant, supplier, ap, expense, _ils, usd = env
-    deal = _deal(tenant, supplier, usd, "1000")
-    _a = _deal_journal(tenant, supplier, ap, expense, deal, "3500")
-    _b = _deal_journal(tenant, supplier, ap, expense, deal, "3600")
-    before = _journal_ids(deal)
-
-    out = StringIO()
-    call_command("fix_duplicate_deal_journals", "--apply", stdout=out)
-
-    assert _journal_ids(deal) == before
-    assert "ليست الأساس" in out.getvalue()
-
-
 def test_single_journal_and_other_tenants_are_untouched(env):
-    tenant, supplier, ap, expense, ils, _usd = env
-    lonely = _deal(tenant, supplier, ils, "300", ref="D-0002")
+    tenant, supplier, ap, expense = env
+    lonely = _deal(tenant, supplier, "300", ref="D-0002")
     only = _deal_journal(tenant, supplier, ap, expense, lonely, "300")
 
     other_owner = User.objects.create_user(username="dupdeal2", password="x")
@@ -168,7 +151,7 @@ def test_single_journal_and_other_tenants_are_untouched(env):
         tenant=other, code="5-O", name="مصروفات", account_type="Expense", is_active=True)
     osup = Partner.objects.create(
         tenant=other, name="مورد آخر", partner_type="Supplier", linked_account=oap)
-    odeal = _deal(other, osup, ils, "700", ref="D-0003")
+    odeal = _deal(other, osup, "700", ref="D-0003")
     _deal_journal(other, osup, oap, oexp, odeal, "700")
     _deal_journal(other, osup, oap, oexp, odeal, "700")
     other_before = _journal_ids(odeal)

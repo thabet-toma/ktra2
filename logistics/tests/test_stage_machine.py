@@ -41,7 +41,7 @@ class _Base(TestCase):
     def _mk_deal(self, ref, **kw):
         return LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=ref, partner=self.partner,
-            order_date='2026-06-01', currency=self.cur, total_amount=1000, **kw)
+            order_date='2026-06-01', total_amount=1000, **kw)
 
     def _shipment_with(self, *deals, unit='cbm', rate=10):
         resp = self.client.post(

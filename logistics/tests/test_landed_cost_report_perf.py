@@ -69,7 +69,6 @@ class LandedCostReportQueryCountTest(TestCase):
                 ref_number=f"D-LCP-{idx:02d}-{sub}",
                 partner=cls.supplier,
                 order_date=f"2026-06-{idx + 1:02d}",
-                currency=cls.currency,
                 total_amount=Decimal("1000"),
             )
             LogisticsDealItem.objects.create(

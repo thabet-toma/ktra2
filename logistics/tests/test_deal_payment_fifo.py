@@ -40,8 +40,7 @@ class DealPaymentFifoTest(APITestCase):
             currency_code="USD", account=usd_acc)
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number="D-9001", partner=cls.partner,
-            order_date="2026-06-20", total_amount=D("10000"), currency=cls.usd,
-            currency_rate=D("3.5"))
+            order_date="2026-06-20", total_amount=D("10000"))
 
     def _auth(self):
         self.client.force_authenticate(user=self.user)

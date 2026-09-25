@@ -95,7 +95,7 @@ def test_local_purchase_page_hides_the_internal_note(
             (
                 "fees_percentage", "remaining_amount", "shipping_cost_estimate",
                 "alibaba_link", "price_offer_id", "installment_plan_enabled",
-                "journal", "currency_rate", "is_posted",
+                "journal", "is_posted",
             ),
         ),
         (
@@ -244,11 +244,10 @@ def test_arabic_page_never_shows_an_english_status_label(client, env, deal, supp
 
 
 def test_deal_document_is_always_in_dollars(env, deal):
-    """صفقة الاستيراد دولارٌ دائماً (قرار المالك) — وصفقاتُ الإنتاج تحمل ILS في
-    `currency`، فكانت ورقة المورّد تطبع ₪ و«العملة: ILS» بجانب مبالغ دولارية."""
+    """صفقة الاستيراد دولارٌ دائماً (قرار المالك) — كانت ورقة المورّد تقرأ عملة الصفقة
+    (ILS على صفقات الإنتاج) فتطبع ₪ و«العملة: ILS» بجانب مبالغ دولارية."""
     from docshare.documents.purchase_docs import build_logistics_deal
 
-    assert env["currency"].Code != "USD"
     data = build_logistics_deal(deal)
     assert (data["currency_code"], data["currency_symbol"]) == ("USD", "$")
     currency_rows = [r for r in data["meta_rows"] if r and r["label"] == "العملة"]

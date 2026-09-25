@@ -117,8 +117,6 @@ class SupplierQuotationAPITest(APITestCase):
             'source_quotation': quotation_id,
             'partner': self.supplier.id,
             'order_date': '2026-07-26',
-            'currency': self.currency.pk,
-            'currency_rate': '3.650000',
             'discount_amount': '2.00',
             'shipping_cost_estimate': '3.00',
             'is_shipping_included': False,

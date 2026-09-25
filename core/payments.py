@@ -57,7 +57,7 @@ class PaymentContext:
                 tenant_id=payment.deal.tenant_id,
                 partner_id=payment.deal.partner_id,
                 amount=Decimal(str(payment.amount or 0)),
-                currency_id=payment.deal.currency_id,
+                currency_id=None,
                 payment_date=payment.transfer_date,
                 cash_account_id=payment.bank_account_id,
                 is_posted=payment.is_posted,

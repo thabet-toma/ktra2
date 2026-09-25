@@ -71,7 +71,7 @@ class ImportFileSeedingTest(TestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="import-file", password="x")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        Currency.objects.create(Code="USD", Name="دولار")
         cls.tenant = create_company("شركة ملف الاستيراد", cls.user)
         cls.supplier = Partner.objects.create(
             tenant=cls.tenant, name="المصنع الصيني", partner_type="Supplier",
@@ -81,7 +81,7 @@ class ImportFileSeedingTest(TestCase):
         return LogisticsDeal.objects.create(
             tenant=tenant or self.tenant, ref_number=ref,
             partner=supplier or self.supplier, order_date="2026-07-01",
-            total_amount=1000, currency=self.usd,
+            total_amount=1000,
         )
 
     def _shipment(self, number, tenant=None):

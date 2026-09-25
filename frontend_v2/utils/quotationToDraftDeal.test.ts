@@ -125,10 +125,10 @@ test('البند المكتوب يدوياً يصل بلا منتج مربوط �
   assert.equal(/^\d+$/.test(items[0].id), false);
 });
 
-test('العملة والشحن والإجماليات تُحمل كما هي من العرض', () => {
+test('الشحن والإجماليات تُحمل كما هي من العرض — والعملة لا: الصفقة دولارٌ دائماً', () => {
   const draft = quotationToDraftDeal(baseQuotation(), suppliers);
-  assert.equal(draft.currencyId, 3);
-  assert.equal(draft.currencyRate, 3.65);
+  assert.equal('currencyId' in draft, false);
+  assert.equal('currencyRate' in draft, false);
   assert.equal(draft.incoterms, 'CIF');
   assert.equal(draft.shippingMethod, 'Sea');
   assert.equal(draft.paymentMethod, 'T/T');

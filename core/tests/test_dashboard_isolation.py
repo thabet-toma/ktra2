@@ -47,7 +47,7 @@ class DashboardIsolationTest(APITestCase):
         )
         partner = Partner.objects.create(tenant=cls.t_a, name="مورد قديم", partner_type="Supplier")
         deal = LogisticsDeal.objects.create(
-            tenant=cls.t_a, ref_number="D-0001", partner=partner, currency=currency,
+            tenant=cls.t_a, ref_number="D-0001", partner=partner,
             status="Open", total_amount=1000, order_date=timezone.localdate(),
         )
         LogisticsPayment.objects.create(deal=deal, amount=250, is_posted=True,
@@ -100,7 +100,6 @@ class DashboardIsolationTest(APITestCase):
             tenant=cls.t_b,
             ref_number="HIDDEN-DEAL",
             partner=hidden_partner,
-            currency=currency,
             status="Open",
             total_amount=777,
             order_date=timezone.localdate(),

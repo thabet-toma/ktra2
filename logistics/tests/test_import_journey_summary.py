@@ -65,7 +65,7 @@ class ImportJourneySummaryTest(APITestCase):
     def _deal(self, ref, *, total="1000", stage="sw_mfg_start"):
         return LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=ref, partner=self.supplier,
-            order_date="2026-07-01", total_amount=D(total), currency=self.usd,
+            order_date="2026-07-01", total_amount=D(total),
             shipping_workflow_status=stage,
         )
 
@@ -170,10 +170,10 @@ class ImportJourneySummaryTest(APITestCase):
         self.assertEqual(resp.json()["deals"]["rows"], [])
 
     def test_deal_currency_is_always_dollars(self):
-        # صفقات الإنتاج تحمل ILS — والمرشد كان يكتب «قيمتها 5,000 ILS» لمبلغٍ دولاري.
+        # المرشد كان يقرأ عملة الصفقة (ILS على الإنتاج) فيكتب «قيمتها 5,000 ILS» لمبلغٍ دولاري.
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-ILS", partner=self.supplier,
-            order_date="2026-07-01", total_amount=D("5000"), currency=self.ils,
+            order_date="2026-07-01", total_amount=D("5000"),
             shipping_workflow_status="sw_mfg_start")
         row = next(r for r in self._get().json()["deals"]["rows"] if r["id"] == deal.pk)
         self.assertEqual(row["currency_code"], "USD")
@@ -181,7 +181,7 @@ class ImportJourneySummaryTest(APITestCase):
     def test_landed_cost_report_labels_deal_in_dollars(self):
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-ILS-LC", partner=self.supplier,
-            order_date="2026-07-01", total_amount=D("5000"), currency=self.ils)
+            order_date="2026-07-01", total_amount=D("5000"))
         shipment = LogisticsShipment.objects.create(tenant=self.tenant, shipment_number="SH-LC")
         LogisticsShipmentDeal.objects.create(shipment=shipment, deal=deal)
         resp = self.client.get(

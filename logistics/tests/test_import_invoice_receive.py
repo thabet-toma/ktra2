@@ -75,8 +75,7 @@ class ImportInvoiceReceiveTest(APITestCase):
         n = LogisticsDeal.objects.count() + 1
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=f"IRD-{n:04d}",
-            partner=self.partner, order_date="2026-07-01", total_amount=D("1000"),
-            currency=self.ils)
+            partner=self.partner, order_date="2026-07-01", total_amount=D("1000"))
         shipment = LogisticsShipment.objects.create(
             tenant=self.tenant, shipment_number=f"IRS-{n:04d}", status=shipment_status)
         LogisticsShipmentDeal.objects.create(shipment=shipment, deal=deal)
@@ -250,8 +249,7 @@ class ImportInvoiceReceiveTest(APITestCase):
         deal, shipment, inv = self._make_import()
         other = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=f"{deal.ref_number}9",
-            partner=self.partner, order_date="2026-07-01", total_amount=D("1"),
-            currency=self.ils)
+            partner=self.partner, order_date="2026-07-01", total_amount=D("1"))
         LogisticsDealItem.objects.create(
             deal=other, product=self.p1, quantity=D("3"), unit_price=D("1"))
         LogisticsShipmentDeal.objects.create(shipment=shipment, deal=other)
@@ -272,7 +270,7 @@ class ImportInvoiceReceiveTest(APITestCase):
         long_ref = f"{deal.ref_number}0"
         other = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=long_ref, partner=self.partner,
-            order_date="2026-07-01", total_amount=D("1"), currency=self.ils)
+            order_date="2026-07-01", total_amount=D("1"))
         LogisticsShipmentDeal.objects.create(shipment=shipment, deal=other)
         other_inv = PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number=f"{inv.invoice_number}-B",

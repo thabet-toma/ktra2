@@ -284,8 +284,6 @@ function mapDealFromSql(d: SqlDeal): Deal {
     priceOfferId: d?.price_offer_id || "",
     /* T113-2: أثر المستند — العرض المصدر يُعرض كرابط في ترويسة الصفقة. */
     sourceQuotationId: d?.source_quotation != null ? String(d.source_quotation) : undefined,
-    currencyId: Number(d?.currency) || undefined,
-    currencyRate: Number(d?.currency_rate) || undefined,
     incoterms: d?.incoterms || undefined,
     originalOfferNumber: pickFirst(
       d?.original_offer_number,
@@ -445,10 +443,7 @@ function mapDealToSqlPayload(
   deal: Partial<Deal>,
   opts?: { create?: boolean }
 ): Record<string, any> {
-  // T113-2: العملة ومعاملها ينتقلان من العرض المصدر ويبقيان مع البنود —
-  // كانت `currency: 1` ثابتة، فأي تعديل لصفقة بعملة أخرى يعيدها إلى الأولى.
-  const currency = Number(deal.currencyId) > 0 ? Number(deal.currencyId) : 1;
-  const currencyRate = Number(deal.currencyRate) > 0 ? Number(deal.currencyRate) : 1;
+  // الصفقة دولارٌ دائماً (قرار المالك): لا عملة ولا معامل على الصفقة ولا على بنودها.
   const items = (deal.items || []).map((i: any, idx: number) => ({
     id: i.id && /^\d+$/.test(String(i.id)) ? Number(i.id) : undefined,
     product: i.itemId && /^\d+$/.test(String(i.itemId)) ? Number(i.itemId) : undefined,
@@ -458,8 +453,6 @@ function mapDealToSqlPayload(
     description_line: String(i.specifications || i.notes || "").slice(0, 500),
     quantity: Number(i.quantity || 0),
     unit_price: Number(i.unitPrice || 0),
-    line_currency: currency,
-    line_exchange_rate: currencyRate,
     notes: i.notes || i.specifications || "",
   }));
 
@@ -472,7 +465,6 @@ function mapDealToSqlPayload(
   return {
     ...(sourceQuotation ? { source_quotation: sourceQuotation } : {}),
     ...(deal.incoterms ? { incoterms: deal.incoterms } : {}),
-    currency_rate: currencyRate,
     is_shipping_included: Boolean(deal.shippingIncluded),
     ref_number: deal.dealNumber,
     partner,
@@ -480,7 +472,6 @@ function mapDealToSqlPayload(
     status: mapStatusToSql(deal.status),
     description: String(deal.dealDescription ?? "").trim().slice(0, 255),
     notes: deal.internalNotes || "",
-    currency,
     items,
     // ج8: الدفعات مورد مستقل (deals/{id}/payments/) — لا تُرسَل داخل payload الصفقة
     // (الخادم يتجاهلها read_only، والواجهة تكتبها عبر endpoints الدفعة المخصّصة).

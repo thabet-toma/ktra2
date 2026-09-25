@@ -93,8 +93,6 @@ export function quotationToDraftDeal(
     priceOfferId: String(quotation.id),
     originalOfferNumber: quotation.quotation_number,
     dealDescription: `طلبية من عرض سعر ${quotation.quotation_number}`,
-    currencyId: quotation.currency,
-    currencyRate: num(quotation.exchange_rate) || 1,
     incoterms: quotation.incoterms || undefined,
     shippingMethod: quotation.shipping_method || undefined,
     paymentMethod: quotation.payment_method || undefined,

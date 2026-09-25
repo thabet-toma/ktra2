@@ -359,7 +359,7 @@ _DEAL_COLUMNS = (
     "partner__phone", "partner__tax_number",
 )
 
-#: ورقة المورّد بالدولار دائماً — `deal.currency` يحمل ILS على صفقات الإنتاج.
+#: ورقة المورّد بالدولار دائماً — لا حقل عملة على الصفقة (`DEAL_CURRENCY_CODE`).
 _DEAL_CURRENCY = SimpleNamespace(Code=DEAL_CURRENCY_CODE, Symbol=DEAL_CURRENCY_SYMBOL)
 
 

@@ -41,7 +41,7 @@ class JourneyFileProgressTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="journey-file", password="x")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار")
+        Currency.objects.create(Code="USD", Name="دولار")
         cls.tenant = create_company("شركة مرشد الملف", cls.user)
         cls.tenant.import_enabled = True
         cls.tenant.save(update_fields=["import_enabled"])
@@ -55,7 +55,7 @@ class JourneyFileProgressTest(APITestCase):
     def make_deal(cls, ref):
         return LogisticsDeal.objects.create(
             tenant=cls.tenant, ref_number=ref, partner=cls.supplier,
-            order_date="2026-07-01", total_amount=1000, currency=cls.usd,
+            order_date="2026-07-01", total_amount=1000,
             shipping_workflow_status="sw_mfg_start",
         )
 

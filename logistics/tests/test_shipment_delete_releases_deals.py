@@ -30,7 +30,7 @@ class ShipmentDeleteReleasesDealsTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="shd", password="x", email="shd@x.co")
         cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
-        cls.usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
+        Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
         cls.tenant = create_company("شركة الشحن", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         cls.supplier = Partner.objects.create(
@@ -46,7 +46,7 @@ class ShipmentDeleteReleasesDealsTest(APITestCase):
         self.h = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
         self.deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number="D-0111", partner=self.supplier,
-            order_date="2026-09-01", total_amount=D("1000"), currency=self.usd,
+            order_date="2026-09-01", total_amount=D("1000"),
             stage=LogisticsDeal.STAGE_READY_TO_SHIP, shipping_workflow_status="sw_wait_intl_ship")
         self.shipment = LogisticsShipment.objects.create(
             tenant=self.tenant, shipment_number="SH-0017")

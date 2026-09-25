@@ -111,10 +111,10 @@ class Command(BaseCommand):
             #  A: value 8000, cbm 1   B: value 2000, cbm 4  → value share 80/20, unit share 20/80
             dA = LogisticsDeal.objects.create(
                 tenant=t, ref_number='D-A', partner=sup, order_date='2026-06-01',
-                currency=cur, total_amount=Decimal('8000'), total_cbm=Decimal('1'))
+                total_amount=Decimal('8000'), total_cbm=Decimal('1'))
             dB = LogisticsDeal.objects.create(
                 tenant=t, ref_number='D-B', partner=sup, order_date='2026-06-01',
-                currency=cur, total_amount=Decimal('2000'), total_cbm=Decimal('4'))
+                total_amount=Decimal('2000'), total_cbm=Decimal('4'))
             sh = LogisticsShipment.objects.create(
                 tenant=t, shipment_number='SH-RECON', chargeable_unit='cbm',
                 freight_rate=Decimal('100'), total_shipping_cost_usd=Decimal('500'))

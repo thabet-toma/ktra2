@@ -46,8 +46,7 @@ class ImportCostModelTest(APITestCase):
         """صفقة + شحنة + فاتورة دولية بلاندد كوست (تشمل حصة التخليص)."""
         deal = LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=f"D-{LogisticsDeal.objects.count()+1:04d}",
-            partner=self.partner, order_date="2026-07-01", total_amount=D("5000"),
-            currency=self.ils)
+            partner=self.partner, order_date="2026-07-01", total_amount=D("5000"))
         LogisticsDealItem.objects.create(
             deal=deal, product=self.product, quantity=D(qty), unit_price=D(deal_price))
         shipment = LogisticsShipment.objects.create(

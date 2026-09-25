@@ -59,7 +59,6 @@ class LogisticsListContractPerformanceTest(TestCase):
                 ref_number=f"D-PERF-{idx:02d}",
                 partner=cls.partner,
                 order_date=f"2026-06-{idx + 1:02d}",
-                currency=cls.currency,
                 total_amount=100 + idx,
                 remaining_amount=100 + idx,
                 description=f"Performance deal {idx}",
@@ -104,7 +103,6 @@ class LogisticsListContractPerformanceTest(TestCase):
             ref_number="D-HIDDEN",
             partner=cls.other_partner,
             order_date="2026-06-01",
-            currency=cls.currency,
             total_amount=999,
         )
         cls.hidden_shipment = LogisticsShipment.objects.create(

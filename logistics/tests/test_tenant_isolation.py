@@ -19,7 +19,7 @@ class TenantIsolationDealTest(TestCase):
     def setUpTestData(cls):
         cls.tenant_a = Tenant.objects.create(TenantID=10, CompanyName='Tenant A')
         cls.tenant_b = Tenant.objects.create(TenantID=20, CompanyName='Tenant B')
-        cur, _ = Currency.objects.get_or_create(Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True})
+        Currency.objects.get_or_create(Code='ILS', defaults={'Symbol': '₪', 'IsBaseCurrency': True})
         cls.user = User.objects.create_user(username='testuser', password='pass123')
         UserDevice.objects.create(user=cls.user)
         from tenants.models import UserCompanyMembership
@@ -38,12 +38,12 @@ class TenantIsolationDealTest(TestCase):
         cls.deal_a = LogisticsDeal.objects.create(
             tenant=cls.tenant_a, ref_number='D-A-001',
             partner=partner_a, order_date='2026-01-01',
-            currency=cur, total_amount=1000,
+            total_amount=1000,
         )
         cls.deal_b = LogisticsDeal.objects.create(
             tenant=cls.tenant_b, ref_number='D-B-001',
             partner=partner_b, order_date='2026-01-01',
-            currency=cur, total_amount=2000,
+            total_amount=2000,
         )
 
     def setUp(self):

@@ -89,8 +89,6 @@ class DealFromQuotationPreviewTest(APITestCase):
             'source_quotation': quotation_id,
             'partner': self.supplier.id,
             'order_date': '2026-08-01',
-            'currency': self.currency.pk,
-            'currency_rate': '3.650000',
             'discount_amount': '2.00',
             'shipping_cost_estimate': '3.00',
             'is_shipping_included': False,
@@ -167,6 +165,16 @@ class DealFromQuotationPreviewTest(APITestCase):
         self.assertEqual(deal.original_offer_number, quotation['quotation_number'])
         self.assertEqual(deal.price_offer_id, str(quotation['id']))
         self.assertEqual(self.convert_log_count(), 1)
+
+    def test_deal_saves_without_any_currency(self):
+        # الصفقة دولارٌ دائماً: لا حقل عملة يُطلب ولا يُعاد — كان الإنشاء يُرسل
+        # عملة شيكل لأنّ الحقل إجباري، فتُحفظ صفقةٌ دولارية بعملة ILS.
+        response = self.client.post(
+            '/api/logistics/deals/', self.deal_payload(None), format='json',
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertNotIn('currency', response.data)
+        self.assertNotIn('currency_rate', response.data)
 
     def test_client_cannot_forge_the_offer_lineage(self):
         """رقم العرض ومعرّفه شهادة نسب: قيمة العميل تُتجاهل ويُكتب ما في العرض."""

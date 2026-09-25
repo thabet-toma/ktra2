@@ -23,7 +23,7 @@ class InvoiceListDealTitleTest(APITestCase):
             tenant=cls.tenant, name="مورد", partner_type="Supplier")
         cls.deal = LogisticsDeal.objects.create(
             tenant=cls.tenant, partner=cls.partner, ref_number="D-0113",
-            order_date="2026-06-01", currency=cls.ils,
+            order_date="2026-06-01",
             short_name="بطاريات ليثيوم — الدفعة الثانية",
         )
 

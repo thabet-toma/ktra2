@@ -47,7 +47,7 @@ class _Base(TestCase):
     def _mk_deal(self, ref, total='1000'):
         return LogisticsDeal.objects.create(
             tenant=self.tenant, ref_number=ref, partner=self.partner,
-            order_date='2026-07-01', currency=self.cur,
+            order_date='2026-07-01',
             total_amount=Decimal(total),
         )
 

@@ -126,7 +126,7 @@ export function SqlDealsPage() {
         if (!createForm.partner) { setErr('اختر المورد أولاً.'); return; }
         setSavingCreate(true); setErr(null);
         try {
-            await apiPostObject('logistics/deals/', { ref_number: createForm.ref_number.trim(), partner: Number(createForm.partner), order_date: createForm.order_date, status: createForm.status, description: createForm.description || null, currency: 1, items: [], payments: [] }, { tenantId: resolveTenantId() });
+            await apiPostObject('logistics/deals/', { ref_number: createForm.ref_number.trim(), partner: Number(createForm.partner), order_date: createForm.order_date, status: createForm.status, description: createForm.description || null, items: [], payments: [] }, { tenantId: resolveTenantId() });
             setCreateOpen(false);
             setCreateForm({ ref_number: '', partner: '', order_date: new Date().toISOString().slice(0, 10), status: 'Open', description: '' });
             await refreshDeals();

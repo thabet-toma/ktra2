@@ -33,7 +33,7 @@ class FixLogisticsUnpostCyclesTest(TestCase):
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="f1_cycles", password="x")
-        cls.ils = Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
+        Currency.objects.create(Code="ILS", Name="شيكل", IsBaseCurrency=True)
         cls.usd = Currency.objects.create(Code="USD", Name="دولار", IsBaseCurrency=False)
         cls.today = timezone.localdate()
         # السنة الماضية كاملةً — الدورة القديمة فيها، و«اليوم» في فترة مفتوحة دائماً.
@@ -59,8 +59,7 @@ class FixLogisticsUnpostCyclesTest(TestCase):
             linked_account=ap)
         deal = LogisticsDeal.objects.create(
             tenant=tenant, ref_number=f"D-{code}", partner=partner,
-            order_date=cls.old_date, total_amount=D("10000"), currency=cls.ils,
-            currency_rate=D("1"))
+            order_date=cls.old_date, total_amount=D("10000"))
         tenant._f1 = {"ap": ap, "box": box, "partner": partner, "deal": deal}
         return tenant
 

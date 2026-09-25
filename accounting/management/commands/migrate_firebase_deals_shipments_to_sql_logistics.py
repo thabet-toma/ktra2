@@ -327,14 +327,6 @@ class Command(BaseCommand):
                 partner_cache[supplier_doc_id] = partner
             return partner
 
-        def get_currency_from_deal_or_default(d: dict):
-            code = d.get("currency") or d.get("Currency") or None
-            if code:
-                cur = Currency.objects.filter(Code=str(code)).first()
-                if cur:
-                    return cur
-            return currency_ils
-
         # --- migrate deals ---
         deal_q = db.collection("deals")
         if deals_limit and deals_limit > 0:
@@ -359,7 +351,6 @@ class Command(BaseCommand):
             order_date = _parse_date(d.get("dealDate")) or timezone.localdate()
             total_amount = _to_decimal(d.get("totalAmount", 0))
             deal_status = _map_deal_status(d.get("status"))
-            currency = get_currency_from_deal_or_default(d)
             original_offer_number = _truncate(
                 _pick(
                     d.get("originalOfferNumber"),
@@ -427,7 +418,6 @@ class Command(BaseCommand):
                     partner=partner,
                     order_date=order_date,
                     total_amount=total_amount,
-                    currency=currency,
                     status=deal_status,
                     description=description_val,
                     payment_method=_truncate(d.get("paymentMethod") or "T/T", 50) or "T/T",
@@ -463,7 +453,6 @@ class Command(BaseCommand):
                 # Always backfill/refresh key columns for already-existing SQL deals.
                 deal_obj.partner = partner
                 deal_obj.order_date = order_date
-                deal_obj.currency = currency
                 deal_obj.status = deal_status
                 deal_obj.payment_method = _truncate(d.get("paymentMethod") or deal_obj.payment_method or "T/T", 50) or "T/T"
                 deal_obj.incoterms = _truncate(d.get("incoterms") or deal_obj.incoterms or "FOB", 10) or "FOB"

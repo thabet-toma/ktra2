@@ -1820,9 +1820,6 @@ type ImportDealDto = {
   partner: number;
   partner_name?: string;
   order_date: string;
-  currency: number;
-  currency_code?: string;
-  currency_rate?: string;
   subtotal?: string;
   discount_amount?: string;
   tax_rate?: string;
@@ -2052,8 +2049,9 @@ const dealToUi = async (row: ImportDealDto): Promise<PriceOffer> => ({
   supplierId: String(row.partner),
   factoryName: row.partner_name || "",
   offerDate: row.order_date,
-  currency: await currencyCode(row.currency, row.currency_code),
-  exchangeRate: Number(row.currency_rate || 1),
+  // الصفقة دولارٌ دائماً — لا حقل عملة عليها.
+  currency: "USD",
+  exchangeRate: 1,
   shippingMethod: row.shipping_method || "",
   shippingCost: Number(row.shipping_cost_estimate || 0),
   shippingIncluded: row.is_shipping_included,
@@ -2282,8 +2280,6 @@ export const priceOffersService = {
     const row = await apiPatchObject<ImportDealDto>(`logistics/deals/${parsed.id}/`, {
       partner: Number(offer.supplierId),
       order_date: offer.offerDate,
-      currency,
-      currency_rate: offer.exchangeRate || 1,
       notes: offer.internalNotes || "",
       shipping_method: offer.shippingMethod || "Sea",
       payment_method: offer.paymentMethod || "T/T",

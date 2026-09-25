@@ -41,7 +41,7 @@ class _Base(TestCase):
         return LogisticsDeal.objects.create(
             tenant=tenant or self.tenant, ref_number=ref,
             partner=partner or self.partner, order_date='2026-06-01',
-            currency=self.cur, total_amount=kw.pop('total_amount', 1000), **kw,
+            total_amount=kw.pop('total_amount', 1000), **kw,
         )
 
     def _create(self, deal_ids, unit='cbm', rate=100, header=None):

@@ -163,7 +163,7 @@ def deal(env, supplier):
 
     row = LogisticsDeal.objects.create(
         tenant=env["tenant"], ref_number="SH-DEAL-1", partner=supplier,
-        order_date="2026-08-01", currency=env["currency"],
+        order_date="2026-08-01",
         subtotal=Decimal("1000"), tax_amount=Decimal("160"),
         total_amount=Decimal("1160"), notes="ملاحظات الصفقة",
         pi_number="PI-9", incoterms="FOB", shipping_method="Sea",
