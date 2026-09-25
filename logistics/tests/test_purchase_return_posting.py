@@ -156,3 +156,77 @@ def test_returnable_lines_reports_invoiced_returned_remaining(env):
     assert Decimal(row["invoiced_qty"]) == Decimal("10")
     assert Decimal(row["returned_qty"]) == Decimal("4")
     assert Decimal(row["remaining_qty"]) == Decimal("6")
+
+
+# ── مرتجع الفاتورة الدولية: عكسٌ بنسبة قيدها — لا الإجمالي المحمَّل على المورد ──
+
+def _posted_international(tenant, supplier, product, ap, inv):
+    """فاتورة دولية مرحّلة: 10 وحدات × 100 ₪ محمَّلة = 1,000 — المورد دائنٌ بحصّته 700،
+    والشحن 200 والتخليص 100 عادا إلى حساباتهما (`import_invoice_accrual_credits`)."""
+    from accounting.models import JournalHeader
+    from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
+
+    freight = Account.objects.create(tenant=tenant, code="5301-R", name="شحن", account_type="Expense")
+    clearance = Account.objects.create(tenant=tenant, code="5307-R", name="تخليص", account_type="Expense")
+    jh = JournalHeader.objects.create(
+        tenant=tenant, transaction_date="2026-06-01", is_posted=True, exchange_rate=Decimal("1"),
+        reference_type="PURCHASE_INVOICE", reference_id=None)
+    for account, debit, credit, partner in (
+        (inv, 1000, 0, None), (supplier.linked_account, 0, 700, supplier),
+        (freight, 0, 200, None), (clearance, 0, 100, None),
+    ):
+        JournalLine.objects.create(
+            tenant=tenant, journal=jh, account=account, debit=Decimal(debit), credit=Decimal(credit),
+            partner=partner)
+    orig = PurchaseInvoice.objects.create(
+        tenant=tenant, invoice_number="PI-INT", invoice_date="2026-06-01", partner=supplier,
+        currency=tenant._cur, invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+        subtotal=Decimal("1000"), grand_total=Decimal("1000"), is_posted=True, journal=jh)
+    PurchaseInvoiceItem.objects.create(
+        invoice=orig, product=product, name="منتج", quantity=Decimal("10"),
+        unit_price=Decimal("100"), total_price=Decimal("1000"), landed_unit_price_ils=Decimal("100"))
+    return orig, freight, clearance
+
+
+def test_international_return_reverses_the_invoice_journal_in_proportion(env):
+    """مرتجع 3 من 10: المورد يُدان بحصّته (210) لا بالمحمَّل (300)، والشحن والتخليص بحصّتهما،
+    والمخزون يُدائَن بالمحمَّل. كان يدين ذمّة المورد 300 كاملةً — 90 ليست له."""
+    from logistics.models import PurchaseInvoice
+    tenant, supplier, product, ap, inv = env
+    orig, freight, clearance = _posted_international(tenant, supplier, product, ap, inv)
+
+    ret = create_purchase_return(
+        tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+        # السعر المُرسَل لا يُصدَّق للدولية: سعر الأصل المحمَّل وحده.
+        lines=[{"product": product.id, "quantity": 3, "unit_price": 999}],
+    )
+    assert ret.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+    assert (ret.grand_total, ret.tax_amount) == (Decimal("210.00"), Decimal("0.00"))
+    assert ret.items.get().unit_price == Decimal("100")
+
+    post_purchase_return(ret, user=None)
+    ret.refresh_from_db()
+    lines = {
+        (l.account_id, l.partner_id): (Decimal(str(l.debit)), Decimal(str(l.credit)))
+        for l in JournalLine.objects.filter(journal=ret.journal)
+    }
+    assert lines == {
+        (supplier.linked_account_id, supplier.id): (Decimal("210.00"), Decimal("0")),
+        (freight.id, None): (Decimal("60.00"), Decimal("0")),
+        (clearance.id, None): (Decimal("30.00"), Decimal("0")),
+        (inv.id, None): (Decimal("0"), Decimal("300.00")),
+    }
+    assert ret.grand_total == Decimal("210.00")
+
+
+def test_international_return_needs_the_posted_invoice(env):
+    from django.core.exceptions import ValidationError
+    tenant, supplier, product, ap, inv = env
+    orig, _f, _c = _posted_international(tenant, supplier, product, ap, inv)
+    orig.is_posted = False
+    orig.journal = None
+    orig.save(update_fields=["is_posted", "journal"])
+    with pytest.raises(ValidationError, match="رحّل"):
+        create_purchase_return(
+            tenant, original_invoice=orig, partner=supplier, return_date="2026-06-15",
+            lines=[{"product": product.id, "quantity": 1, "unit_price": 100}])

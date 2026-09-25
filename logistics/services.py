@@ -2827,6 +2827,76 @@ def returnable_lines_for_invoice(original_invoice):
     return out
 
 
+def _is_international_return(original_invoice) -> bool:
+    from .models import PurchaseInvoice
+    return (
+        original_invoice is not None
+        and original_invoice.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+    )
+
+
+def _international_return_split(original_invoice, returned_value: Decimal) -> dict:
+    """مرتجع الفاتورة الدولية = عكسُ قيدها **بنسبته**، لا الإجمالي المحمَّل على المورد.
+
+    قيد الدولية: Dr بضاعة بالمحمَّل (+ض.مدخلات) / Cr المورد بحصّته وحدها، وCr حسابات
+    الشحن والتخليص والنقل بحصصها (`accruals.import_invoice_accrual_credits`). المرتجع
+    يعكس كل سطرٍ دائن بالنسبة f = قيمة المرتجع المحمَّلة ÷ بضاعة الفاتورة المحمَّلة:
+    Dr المورد f×حصّته وDr كل حساب استحقاق f×حصّته (تكلفةٌ لا تُستردّ من الوكيل والمخلّص
+    فتعود مصروفاً)، وCr المخزون f×البضاعة وCr ض.المدخلات f×ضريبتها. كان يدين ذمّة
+    المورد بالمحمَّل كاملاً — حصص الغير ليست دَيناً عليه.
+
+    يُرجع {'lines', 'supplier', 'inventory', 'vat'} بعملة الفاتورة؛ الفرق التقريبي على سطر
+    المورد فيبقى القيد متوازناً.
+    """
+    from accounting.models import JournalLine
+
+    if not original_invoice.is_posted or not original_invoice.journal_id:
+        raise ValidationError(
+            "رحّل الفاتورة الدولية قبل مرتجعها — المرتجع يعكس قيدها بنسبة ما يُرجَع.")
+    goods = sum(
+        (Decimal(str(it.quantity or 0)) * Decimal(str(it.unit_price or 0))
+         for it in original_invoice.items.all()),
+        Decimal('0'),
+    )
+    if goods <= 0:
+        raise ValidationError("الفاتورة الدولية بلا قيمة بضاعة — لا نسبة يُعكس بها المرتجع.")
+    ratio = Decimal(str(returned_value)) / goods
+
+    tenant = original_invoice.tenant
+    inventory_account = _resolve_inventory_account(tenant)
+    vat_account_id = _resolve_vat_input_account(tenant).id
+    supplier_id = original_invoice.partner_id
+    lines, supplier_line = [], None
+    inventory = vat = Decimal('0')
+    for account_id, partner_id, debit, credit in JournalLine.objects.filter(
+        journal_id=original_invoice.journal_id,
+    ).order_by('id').values_list('account_id', 'partner_id', 'debit', 'credit'):
+        debit, credit = Decimal(str(debit or 0)), Decimal(str(credit or 0))
+        if credit > 0:
+            line = {'account': account_id, 'debit': (credit * ratio).quantize(DEC),
+                    'credit': Decimal('0'), 'partner': partner_id}
+            lines.append(line)
+            if partner_id == supplier_id and supplier_line is None:
+                supplier_line = line
+        elif account_id == vat_account_id:
+            vat += debit * ratio
+        else:
+            # البضاعة (أو وسيط الاستلام في قيد الفاتورة) تخرج من المخزون فعلاً.
+            inventory += debit * ratio
+    if supplier_line is None:
+        raise ValidationError("قيد الفاتورة الدولية بلا سطر ذمّة لمورّدها — تعذّر عكسه بنسبته.")
+    inventory, vat = inventory.quantize(DEC), vat.quantize(DEC)
+    lines.append({'account': inventory_account.id, 'debit': Decimal('0'), 'credit': inventory,
+                  'partner': None})
+    if vat > 0:
+        lines.append({'account': vat_account_id, 'debit': Decimal('0'), 'credit': vat,
+                      'partner': None})
+    # التقريب على سطر المورد: مجموع المدين = مجموع الدائن بالضبط.
+    supplier_line['debit'] += (inventory + vat) - sum((l['debit'] for l in lines), Decimal('0'))
+    lines = [l for l in lines if l['debit'] > 0 or l['credit'] > 0]
+    return {'lines': lines, 'supplier': supplier_line['debit'], 'inventory': inventory, 'vat': vat}
+
+
 def create_purchase_return(
     tenant, *, original_invoice, partner, return_date, lines, notes='',
     invoice_number=None, currency=None, exchange_rate=None, user=None,
@@ -2875,6 +2945,20 @@ def create_purchase_return(
         clean_lines.append({'product': int(pid), 'quantity': qty, 'unit_price': price})
     if not clean_lines:
         raise ValidationError("أضِف بنداً واحداً على الأقل بكمية موجبة.")
+
+    international = _is_international_return(original_invoice)
+    if international:
+        # سعر بند الدولية محمَّلٌ (بضاعة + شحن + تخليص + نقل) — يُقرأ من الأصل لا من
+        # المُدخَل، فالنسبة التي يُعكس بها القيد لا تُحرَّف بسعرٍ مكتوب باليد.
+        _international_return_split(original_invoice, Decimal('0'))  # حارس: الأصل مرحّل
+        landed_price = {}
+        for it in original_invoice.items.all():
+            if it.product_id and it.product_id not in landed_price:
+                landed_price[it.product_id] = _D(str(it.unit_price or 0))
+        for l in clean_lines:
+            l['unit_price'] = landed_price.get(l['product'], l['unit_price'])
+        currency = original_invoice.currency
+        exchange_rate = original_invoice.exchange_rate
 
     products = {
         p.id: p for p in Product.objects.filter(
@@ -2939,7 +3023,11 @@ def create_purchase_return(
             tenant=tenant,
             invoice_number=invoice_number,
             invoice_date=return_date,
-            invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL,
+            # نوع المرتجع نوع أصله: مرتجع الدولية دوليٌّ يُعكس بنسبة قيدها.
+            invoice_type=(
+                original_invoice.invoice_type if original_invoice is not None
+                else PurchaseInvoice.INVOICE_TYPE_LOCAL
+            ),
             partner=partner,
             currency=currency,
             exchange_rate=base_factor,
@@ -2980,6 +3068,13 @@ def create_purchase_return(
         ret.subtotal = inv_net
         ret.tax_amount = inv_vat
         ret.grand_total = (inv_net + inv_vat).quantize(DEC)
+        if international:
+            # المرتجع مستند المورد: إجماليه ما يُردّ عليه (حصّته)، لا المحمَّل.
+            split = _international_return_split(
+                original_invoice, sum((l['quantity'] * l['unit_price'] for l in clean_lines), _D('0')))
+            ret.grand_total = split['supplier']
+            ret.tax_amount = split['vat']
+            ret.subtotal = split['supplier'] - split['vat']
         ret.save(update_fields=['subtotal', 'tax_amount', 'grand_total'])
 
     return ret
@@ -3053,7 +3148,30 @@ def post_purchase_return(invoice, *, user=None):
 
         gross = (inv_net + inv_vat).quantize(DEC)
         journal = None
-        if gross > 0:
+        international = _is_international_return(invoice.original_invoice)
+        if international and gross > 0:
+            split = _international_return_split(
+                invoice.original_invoice,
+                sum((_D(str(it.quantity or 0)) * _D(str(it.unit_price or 0)) for it in items), _D('0')),
+            )
+            logger.info(
+                "Purchase return #%s international split: supplier=%s inventory=%s vat=%s",
+                invoice.id, split['supplier'], split['inventory'], split['vat'],
+            )
+            journal = post_journal(
+                tenant_id=tenant.TenantID,
+                transaction_date=return_date,
+                reference_type='PURCHASE_RETURN',
+                reference_id=invoice.id,
+                description=f"مرتجع شراء {invoice.invoice_number} | {partner.name}"[:500],
+                lines_data=split['lines'],
+                currency=invoice.currency,
+                exchange_rate=base_factor,
+                user=user if user and not getattr(user, 'is_anonymous', False) else None,
+                idempotent=False,
+            )
+            inv_net, inv_vat, gross = split['supplier'] - split['vat'], split['vat'], split['supplier']
+        elif gross > 0:
             ap_account = _resolve_ap_account(partner)
             inventory_account = _resolve_inventory_account(tenant)
             # توجيه الـsubledger: سطر الذمم (الحساب الرقابي) وحده يَحمل المورد.

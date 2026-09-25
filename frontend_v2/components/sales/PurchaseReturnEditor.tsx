@@ -51,6 +51,7 @@ type PurchaseInvoice = {
   invoice_date?: string;
   is_posted?: boolean;
   is_return?: boolean;
+  invoice_type?: string;
 };
 
 interface ReturnLine {
@@ -99,6 +100,11 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const [msg, setMsg] = useState<string | null>(null);
 
   const [originalInvoiceId, setOriginalInvoiceId] = useState<number | "">("");
+  // الدولية تُعكس بنسبة قيدها في الخادم (`_international_return_split`) — تنبيهٌ قبل الحفظ.
+  const isInternationalOriginal = useMemo(
+    () => originalInvoices.find((i) => i.id === originalInvoiceId)?.invoice_type === "international",
+    [originalInvoices, originalInvoiceId],
+  );
   const [returnDate, setReturnDate] = useState(today);
   const [supplierId, setSupplierId] = useState<number | "">("");
   const [supplierName, setSupplierName] = useState<string>("");
@@ -443,6 +449,13 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
         <div style={{ padding: "8px" }}>
           {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}><AlertTriangle className="w-3 h-3 inline" /> {err}</div>}
           {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
+          {isInternationalOriginal && (
+            <div className="ktra-banner mb-2" data-testid="international-return-note">
+              مرتجع فاتورة دولية: سعر البند محمَّل (بضاعة + شحن + تخليص + نقل) ويُقرأ من الفاتورة.
+              يُعكس قيدها بنسبة ما يُرجَع — ذمّة المورد بحصّته وحدها، وحصص الشحن والتخليص والنقل
+              تعود مصروفاً، والمخزون بالمحمَّل. إجمالي المرتجع بعد الحفظ = ما يُردّ على المورد.
+            </div>
+          )}
 
           <KitGrid<ReturnLine>
             columns={gridColumns}
