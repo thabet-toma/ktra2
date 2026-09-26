@@ -25,15 +25,15 @@ DEFAULT_CLEARANCE_ITEMS = (
 
 def ensure_clearance_item_types(tenant) -> None:
     """يبذر البنود القياسية لشركةٍ بلا بنود. آمنٌ للتكرار والتزامن."""
-    from accounting.models import Account
+    from accounting.api import get_accounts_by_codes
     from logistics.accruals import CLEARANCE_DEFAULT_ACCOUNT_CODES
     from logistics.models import ClearanceItemType
 
     if ClearanceItemType.objects.filter(tenant=tenant).exists():
         return
     accounts = {
-        acc.code: acc for acc in Account.objects.filter(
-            tenant=tenant, code__in=set(CLEARANCE_DEFAULT_ACCOUNT_CODES.values()), is_active=True)
+        acc.code: acc for acc in get_accounts_by_codes(
+            tenant, set(CLEARANCE_DEFAULT_ACCOUNT_CODES.values())).filter(is_active=True)
     }
     try:
         with transaction.atomic():

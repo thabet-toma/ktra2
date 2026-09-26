@@ -23,7 +23,6 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
 from django.utils import timezone
 
 from logistics.domain.party_accruals import (
@@ -67,25 +66,12 @@ def _target_lines(kind: str, obj, freight_rate=None):
 
 def _current_totals(journal_ids) -> dict:
     """{(حساب، طرف): [صافي الأساس (مدين − دائن)، صافي الأجنبي، رمزه]} لقيود المستند."""
-    from accounting.models import JournalLine
+    from accounting.api import journal_lines_net_by_account_partner
 
-    out: dict = {}
-    for row in (
-        JournalLine.objects.filter(journal_id__in=journal_ids)
-        .values('account_id', 'partner_id')
-        .annotate(d=Sum('base_debit'), c=Sum('base_credit'))
-    ):
-        key = (row['account_id'], row['partner_id'])
-        out[key] = [_money(row['d']) - _money(row['c']), ZERO, None]
-    for row in (
-        JournalLine.objects.filter(journal_id__in=journal_ids, currency_code__isnull=False)
-        .values('account_id', 'partner_id', 'currency_code')
-        .annotate(a=Sum('amount_currency'))
-    ):
-        entry = out.setdefault((row['account_id'], row['partner_id']), [ZERO, ZERO, None])
-        entry[1] += _money(row['a'])
-        entry[2] = row['currency_code']
-    return out
+    return {
+        key: [_money(base), _money(foreign), code]
+        for key, (base, foreign, code) in journal_lines_net_by_account_partner(journal_ids).items()
+    }
 
 
 def _target_totals(lines, rate: Decimal, foreign) -> dict:

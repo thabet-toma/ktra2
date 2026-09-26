@@ -84,28 +84,14 @@ def _accrual_meta(kind: str, obj):
 
 def adjustment_journal_ids(kind: str, obj) -> list[int]:
     """قيود «تعديل الاستحقاق» المرحّلة على المستند، الأقدم أولاً."""
-    from accounting.models import JournalHeader
-
-    return list(JournalHeader.objects.filter(
-        tenant_id=obj.tenant_id, reference_type=ACCRUAL_ADJUST_TYPE[kind],
-        reference_id=obj.pk, is_posted=True,
-    ).order_by('id').values_list('id', flat=True))
+    return _adjustments_by_doc(kind, obj.tenant_id, [obj.pk]).get(obj.pk, [])
 
 
 def _adjustments_by_doc(kind: str, tenant_id: int, doc_ids) -> dict:
     """{المستند: [قيود تعديله]} لمستندات صنفٍ واحد — استعلامٌ واحد."""
-    from accounting.models import JournalHeader
+    from accounting.api import posted_journal_ids_by_reference
 
-    out: dict[int, list[int]] = {}
-    ids = [i for i in doc_ids if i]
-    if not ids:
-        return out
-    for jid, ref_id in JournalHeader.objects.filter(
-        tenant_id=tenant_id, reference_type=ACCRUAL_ADJUST_TYPE[kind],
-        reference_id__in=ids, is_posted=True,
-    ).order_by('id').values_list('id', 'reference_id'):
-        out.setdefault(ref_id, []).append(jid)
-    return out
+    return posted_journal_ids_by_reference(tenant_id, ACCRUAL_ADJUST_TYPE[kind], doc_ids)
 
 
 #: الصنف ← حقل الربط في `sales.CreditDebitNote`.

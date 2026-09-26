@@ -566,6 +566,51 @@ def journal_lines_party_net(journal_ids, partner_id) -> Decimal:
     return Decimal(str(totals['c'] or 0)) - Decimal(str(totals['d'] or 0))
 
 
+def posted_journal_ids_by_reference(tenant_id, reference_type: str, reference_ids) -> dict[int, list[int]]:
+    """{المرجع: [قيوده المرحّلة]} لنوع مرجعٍ واحد — الأقدم أولاً، باستعلامٍ واحد.
+
+    تقرؤها قيود «تعديل الاستحقاق» في `logistics/domain/party_accruals.py`.
+    """
+    out: dict[int, list[int]] = {}
+    ids = [i for i in reference_ids if i]
+    if not ids:
+        return out
+    for jid, ref_id in JournalHeader.objects.filter(
+        tenant_id=tenant_id, reference_type=reference_type,
+        reference_id__in=ids, is_posted=True,
+    ).order_by('id').values_list('id', 'reference_id'):
+        out.setdefault(ref_id, []).append(jid)
+    return out
+
+
+def journal_lines_net_by_account_partner(journal_ids) -> dict:
+    """{(حساب، طرف): (صافي الأساس مدين − دائن، صافي `amount_currency`، رمز العملة أو None)}.
+
+    ما رُحِّل فعلاً لقيود مستندٍ — يقارنه تعديل الاستحقاق
+    (`logistics/domain/accrual_adjust.py`) بما يجب أن يكون.
+    """
+    from django.db.models import Sum
+
+    journal_ids = list(journal_ids)
+    out: dict = {}
+    for row in (
+        JournalLine.objects.filter(journal_id__in=journal_ids)
+        .values('account_id', 'partner_id')
+        .annotate(d=Sum('base_debit'), c=Sum('base_credit'))
+    ):
+        base = Decimal(str(row['d'] or 0)) - Decimal(str(row['c'] or 0))
+        out[(row['account_id'], row['partner_id'])] = (base, Decimal('0'), None)
+    for row in (
+        JournalLine.objects.filter(journal_id__in=journal_ids, currency_code__isnull=False)
+        .values('account_id', 'partner_id', 'currency_code')
+        .annotate(a=Sum('amount_currency'))
+    ):
+        key = (row['account_id'], row['partner_id'])
+        base, foreign, _code = out.get(key, (Decimal('0'), Decimal('0'), None))
+        out[key] = (base, foreign + Decimal(str(row['a'] or 0)), row['currency_code'])
+    return out
+
+
 def cash_box_ledger_account(tenant_id, external_id):
     """حساب الصندوق المربوط بـ`external_id` في الشركة، أو None — لأوامر خارج accounting."""
     from .models import CashBoxLedgerAccount
