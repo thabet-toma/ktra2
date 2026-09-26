@@ -10,6 +10,7 @@ import {
 } from "./restApi";
 import type { PagedList } from "./restApi";
 import type { SerialEntryMode } from "../types/inventory";
+import type { NoteTarget } from "../utils/voucherAllocation";
 
 const tid = () => resolveTenantId();
 const BASE = "sales";
@@ -1319,6 +1320,26 @@ export type CreditDebitNoteRow = {
   created_at?: string;
   /** ختمُ آخر حفظ — مسودّةُ المحرِّر تقارنه (#109 §٩). */
   updated_at?: string | null;
+  /** مدينٌ على دائن أو دائنٌ على عميل — رصيدٌ للطرف يُوزَّع كالسند. */
+  settles?: boolean;
+  allocated_amount?: string;
+  /** غير الموزَّع ولا المسترَدّ من المسوّي المرحَّل — «تحت الحساب». */
+  unallocated_amount?: string;
+};
+
+/** `credit-debit-notes/{id}/allocation-targets/` — وما تُرجعه `allocate/` و`deallocate/`. */
+export type NoteAllocationPayload = {
+  note: CreditDebitNoteRow;
+  unallocated: string;
+  allocations: Array<{
+    allocation_kind: "invoice" | "accrual";
+    allocation_id: number;
+    kind: string;
+    id: number;
+    label: string;
+    amount: string;
+  }>;
+  targets: NoteTarget[];
 };
 
 export type CreditDebitNoteBody = {
@@ -1338,8 +1359,30 @@ export type CreditDebitNoteBody = {
   related_shipment?: number | null;
 };
 
-export async function listCreditDebitNotes(): Promise<CreditDebitNoteRow[]> {
-  return apiGetList(`${BASE}/credit-debit-notes/`, { tenantId: tid() });
+export async function listCreditDebitNotes(partnerId?: number | string): Promise<CreditDebitNoteRow[]> {
+  const query = partnerId ? `?partner=${encodeURIComponent(String(partnerId))}` : "";
+  return apiGetList(`${BASE}/credit-debit-notes/${query}`, { tenantId: tid() });
+}
+
+export async function getNoteAllocationTargets(id: number): Promise<NoteAllocationPayload> {
+  return apiGetObject(`${BASE}/credit-debit-notes/${id}/allocation-targets/`, { tenantId: tid() });
+}
+
+/** توزيع الإشعار المسوّي على مستندات طرفه — ربطٌ بلا قيد. */
+export async function allocateCreditDebitNote(
+  id: number, allocations: Array<{ kind: string; id: number; amount: string }>,
+): Promise<NoteAllocationPayload> {
+  return apiPostObject(`${BASE}/credit-debit-notes/${id}/allocate/`, { allocations }, { tenantId: tid() });
+}
+
+export async function deallocateCreditDebitNote(
+  id: number, allocationKind: "invoice" | "accrual", allocationId: number,
+): Promise<NoteAllocationPayload> {
+  return apiPostObject(
+    `${BASE}/credit-debit-notes/${id}/deallocate/`,
+    { allocation_kind: allocationKind, allocation_id: allocationId },
+    { tenantId: tid() },
+  );
 }
 
 export async function createCreditDebitNote(body: CreditDebitNoteBody): Promise<CreditDebitNoteRow> {
@@ -1356,10 +1399,10 @@ export async function deleteCreditDebitNote(id: number): Promise<void> {
   return apiDelete(`${BASE}/credit-debit-notes/${id}/`, { tenantId: tid() });
 }
 
-/** ترحيل · إلغاء الترحيل (يعود مسودة) · إلغاء المسودة. */
+/** ترحيل · إلغاء الترحيل (يعود مسودة) · إلغاء المسودة. `notice`: ما فكّه إلغاء الترحيل من توزيعات. */
 export async function creditDebitNoteAction(
   id: number, action: "post" | "unpost" | "cancel",
-): Promise<CreditDebitNoteRow> {
+): Promise<CreditDebitNoteRow & { notice?: string }> {
   return apiPostObject(`${BASE}/credit-debit-notes/${id}/${action}/`, {}, { tenantId: tid() });
 }
 

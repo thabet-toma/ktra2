@@ -128,3 +128,40 @@ export function fifoFill(
   }
   return out;
 }
+
+/** مستندٌ مفتوح لطرف الإشعار — من `credit-debit-notes/{id}/allocation-targets/` (`note_open_targets`). */
+export type NoteTarget = {
+  kind: "sales_invoice" | "purchase_invoice" | AccrualKind;
+  id: number;
+  label: string;
+  date: string | null;
+  remaining: string;
+};
+
+const ACCRUAL_KINDS: readonly string[] = ["clearance", "freight", "local"];
+
+/** أهداف الإشعار ← صفوف نافذة التوزيع: المستحقّ اللوجستي يحمل `target`، والفاتورة لا. */
+export function noteTargetDocs(targets: NoteTarget[]): AllocatableDoc[] {
+  return targets.map((t) => ({
+    id: t.id,
+    label: t.label,
+    remaining: t.remaining,
+    date: t.date,
+    ...(ACCRUAL_KINDS.includes(t.kind) ? { target: { kind: t.kind as AccrualKind, id: t.id } } : {}),
+  }));
+}
+
+/**
+ * صفوف النافذة ← حمولة `allocate/` للإشعار. فواتير الإشعار صنفٌ واحد: فواتير شراء للدائن
+ * وفواتير بيع للعميل (`invoiceKind`)، والمستحقّ بصنفه.
+ */
+export function noteAllocationRows(
+  rows: Array<{ doc: AllocatableDoc; amount: string }>,
+  invoiceKind: "sales_invoice" | "purchase_invoice",
+): Array<{ kind: NoteTarget["kind"]; id: number; amount: string }> {
+  return rows
+    .filter((r) => cents(r.amount) > 0)
+    .map((r) => (r.doc.target
+      ? { kind: r.doc.target.kind, id: r.doc.target.id, amount: r.amount }
+      : { kind: invoiceKind, id: r.doc.id, amount: r.amount }));
+}

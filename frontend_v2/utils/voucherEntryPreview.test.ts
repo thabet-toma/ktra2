@@ -57,3 +57,11 @@ test("nothing to preview before any amount is entered", () => {
     buildVoucherEntryPreview({ ...base, cashAmount: 0, chequesAmount: 0 }), [],
   );
 });
+
+test("refund vouchers name the party by its role, not by the direction", () => {
+  const refund = buildVoucherEntryPreview({ ...base, cashAmount: 80, chequesAmount: 0, direction: "Outgoing", partnerRole: "العميل" });
+  assert.equal(refund[0].side, "Dr");
+  assert.match(refund[0].label, /^ذمم العميل /);
+  const receipt = buildVoucherEntryPreview({ ...base, cashAmount: 80, chequesAmount: 0, partnerRole: "المورد" });
+  assert.match(receipt.find((l) => l.side === "Cr")?.label ?? "", /^ذمم المورد /);
+});

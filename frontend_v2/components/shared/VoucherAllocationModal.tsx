@@ -30,12 +30,17 @@ interface Props {
   docs: AllocatableDoc[];
   /** ملخّص سياقي اختياري (مثل رصيد الطرف) قبل حقول التوزيع. */
   summary?: React.ReactNode;
+  /** مصدرٌ غير السند (الإشعار المسوّي): عنوانه وحفظه — `NoteAllocationModal`. */
+  title?: string;
+  /** اسم المصدر في النصوص («السند» افتراضاً، «الإشعار»). */
+  sourceNoun?: string;
+  onSubmitRows?: (rows: Array<{ doc: AllocatableDoc; amount: string }>) => Promise<void>;
   onClose: () => void;
   onSaved: () => void;
 }
 
 export const VoucherAllocationModal: React.FC<Props> = ({
-  kind, voucher, partnerLabel, docs, summary, onClose, onSaved,
+  kind, voucher, partnerLabel, docs, summary, title, sourceNoun = "السند", onSubmitRows, onClose, onSaved,
 }) => {
   const isCustomer = kind === "customer";
   const available = voucher.unallocated;
@@ -76,7 +81,9 @@ export const VoucherAllocationModal: React.FC<Props> = ({
         .map((r) => ({ invoice: r.doc.id, amount: r.amount }));
       const accrualRows = rows.flatMap((r) =>
         r.doc.target ? [{ kind: r.doc.target.kind, id: r.doc.target.id, amount: r.amount }] : []);
-      if (isCustomer) {
+      if (onSubmitRows) {
+        await onSubmitRows(rows.map(({ doc, amount }) => ({ doc, amount })));
+      } else if (isCustomer) {
         await allocateCustomerPayment(voucher.id, invoiceRows);
       } else {
         if (invoiceRows.length) await purchaseInvoiceApi.allocateSupplierPayment(voucher.id, invoiceRows);
@@ -92,7 +99,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
 
   return (
     <PaymentVoucherModal
-      title={`توزيع سند #${voucher.id} — ${partnerLabel}`}
+      title={title ?? `توزيع سند #${voucher.id} — ${partnerLabel}`}
       error={error}
       submitting={submitting}
       disabled={!canSubmit}
@@ -103,7 +110,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
       {summary}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field">
-          <span className="ktra-field-label">مبلغ السند</span>
+          <span className="ktra-field-label">مبلغ {sourceNoun}</span>
           <input readOnly className="ktra-input ktra-num" value={formatMoney(voucher.amount)}
             style={{ background: "var(--ktra-surface-2)" }} />
         </label>
@@ -156,7 +163,7 @@ export const VoucherAllocationModal: React.FC<Props> = ({
       {rows.length === 0 ? (
         <div style={{ textAlign: "center", fontSize: "11px", padding: "12px", marginTop: "8px", color: "var(--ktra-ink-soft)", border: "1px dashed var(--ktra-border)", borderRadius: "4px" }}>
           {docs.length === 0
-            ? `لا مستندات مفتوحة لهذا ${isCustomer ? "العميل" : "الطرف"} — يبقى السند دفعة تحت الحساب`
+            ? `لا مستندات مفتوحة لهذا ${isCustomer ? "العميل" : "الطرف"} — يبقى ${sourceNoun} ${sourceNoun === "السند" ? "دفعة" : "رصيداً"} تحت الحساب`
             : "أضف مستنداً أو «توزيع تلقائي» لتوزيع المبلغ"}
         </div>
       ) : (
@@ -192,8 +199,8 @@ export const VoucherAllocationModal: React.FC<Props> = ({
 
       <div style={{ fontSize: "11px", marginTop: "8px", color: "var(--ktra-ink-soft)" }}>
         {voucher.is_posted
-          ? `السند مرحَّل — التوزيع ربط بالمستندات فقط ولا يُنشئ قيداً جديداً (${isCustomer ? "ذمم العميل خُفِّضت" : "ذمم المورد دُينت"} وقت الترحيل).`
-          : "السند غير مرحَّل — التوزيع يُحفظ الآن ويُطبَّق محاسبياً عند الترحيل."}
+          ? `${sourceNoun} مرحَّل — التوزيع ربط بالمستندات فقط ولا يُنشئ قيداً جديداً (${isCustomer ? "ذمم العميل خُفِّضت" : "ذمم المورد دُينت"} وقت الترحيل).`
+          : `${sourceNoun} غير مرحَّل — التوزيع يُحفظ الآن ويُطبَّق محاسبياً عند الترحيل.`}
       </div>
     </PaymentVoucherModal>
   );

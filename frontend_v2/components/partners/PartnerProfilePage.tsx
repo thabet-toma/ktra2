@@ -28,8 +28,10 @@ import {
 import { NewPaymentModal } from '../sales/SalesCustomerPaymentsPage';
 import { NewSupplierPaymentModal } from '../sales/NewSupplierPaymentModal';
 import { VoucherAllocationModal, type AllocatableDoc } from '../shared/VoucherAllocationModal';
+import { NoteAllocationModal } from '../shared/NoteAllocationModal';
 import {
   listCustomerPayments,
+  listCreditDebitNotes,
   getAgingReport,
   listQuotations,
   listSalesOrders,
@@ -172,13 +174,17 @@ interface StockMovementGroup {
   }>;
 }
 
-/** سند «على الحساب» موحَّد الشكل بين العميل (قبض) والمورد (صرف). */
+/** رصيد «على الحساب» موحَّد الشكل: سند (قبض للعميل، صرف للمورد) أو إشعارٌ مسوٍّ لم يُوزَّع. */
 type OnAccountVoucherRow = {
   id: number;
   payment_date: string;
   amount: string;
   is_posted: boolean;
   unallocated_amount?: string;
+  source: 'voucher' | 'note';
+  /** رقم الإشعار — صفّ المصدر «إشعار». */
+  number?: string;
+  currency_code?: string | null;
 };
 
 interface InvoiceRow {
@@ -295,6 +301,7 @@ export const PartnerProfilePage: React.FC = () => {
   const [onAccountPayments, setOnAccountPayments] = useState<OnAccountVoucherRow[]>([]);
   const [showAllocPicker, setShowAllocPicker] = useState(false);
   const [allocTarget, setAllocTarget] = useState<OnAccountVoucherRow | null>(null);
+  const [noteAllocTarget, setNoteAllocTarget] = useState<OnAccountVoucherRow | null>(null);
   const [allocDocs, setAllocDocs] = useState<AllocatableDoc[]>([]);
   const [allocError, setAllocError] = useState<string | null>(null);
   const [paymentsRefreshKey, setPaymentsRefreshKey] = useState(0);
@@ -345,12 +352,13 @@ export const PartnerProfilePage: React.FC = () => {
     return () => { alive = false; };
   }, [id, isSupplier]);
 
-  // T-ONACC: جلب السندات غير الموزَّعة لهذا الطرف — قبض للعميل وصرف للمورد
+  // T-ONACC: جلب السندات غير الموزَّعة لهذا الطرف — قبض للعميل وصرف للمورد — ومعها
+  // الإشعارات المسوّية غير الموزَّعة (مدينٌ على دائن، دائنٌ لعميل): رصيدٌ كالسند
   // (لعرض زر «توزيع على الفواتير» بقيمة الرصيد على الحساب).
   useEffect(() => {
     if (!id) { setOnAccountPayments([]); return; }
     let alive = true;
-    const load = isSupplier
+    const vouchers: Promise<OnAccountVoucherRow[]> = isSupplier
       ? purchaseInvoiceApi.listSupplierPayments(id).then((rows) =>
           (rows || []).map((p) => ({
             id: p.id,
@@ -358,6 +366,7 @@ export const PartnerProfilePage: React.FC = () => {
             amount: p.amount,
             is_posted: p.is_posted,
             unallocated_amount: p.unallocated_amount,
+            source: 'voucher' as const,
           })),
         )
       : listCustomerPayments({ partner: id, page: 1, page_size: 200 }).then((rows) =>
@@ -367,13 +376,28 @@ export const PartnerProfilePage: React.FC = () => {
             amount: p.amount,
             is_posted: p.is_posted,
             unallocated_amount: p.unallocated_amount,
+            source: 'voucher' as const,
           })),
         );
-    load
-      .then((rows) => {
+    const notes: Promise<OnAccountVoucherRow[]> = listCreditDebitNotes(id).then((rows) =>
+      (rows || [])
+        .filter((n) => n.settles)
+        .map((n) => ({
+          id: n.id,
+          payment_date: n.note_date,
+          amount: n.amount,
+          is_posted: n.status === 'posted',
+          unallocated_amount: n.unallocated_amount,
+          source: 'note' as const,
+          number: n.note_number,
+          currency_code: n.currency_code,
+        })),
+    );
+    Promise.all([vouchers, notes.catch(() => [] as OnAccountVoucherRow[])])
+      .then(([voucherRows, noteRows]) => {
         if (!alive) return;
         setOnAccountPayments(
-          rows.filter((p) => p.is_posted && Number(p.unallocated_amount ?? 0) > 0.009),
+          [...voucherRows, ...noteRows].filter((p) => p.is_posted && Number(p.unallocated_amount ?? 0) > 0.009),
         );
       })
       .catch(() => { if (alive) setOnAccountPayments([]); });
@@ -394,7 +418,13 @@ export const PartnerProfilePage: React.FC = () => {
     [onAccountPayments],
   );
 
-  /** يفتح نافذة التوزيع (مباشرةً إن كان سنداً واحداً، وإلا قائمة اختيار). */
+  /** الإشعار يُوزَّع بنافذته (مستندات طرفه من الخادم)، والسند بنافذة السند. */
+  const openOnAccountRow = useCallback((row: OnAccountVoucherRow) => {
+    if (row.source === 'note') setNoteAllocTarget(row);
+    else setAllocTarget(row);
+  }, []);
+
+  /** يفتح نافذة التوزيع (مباشرةً إن كان رصيداً واحداً، وإلا قائمة اختيار). */
   const openAllocation = useCallback(async () => {
     setAllocError(null);
     try {
@@ -414,7 +444,7 @@ export const PartnerProfilePage: React.FC = () => {
         );
       }
       if (onAccountPayments.length === 1) {
-        setAllocTarget(onAccountPayments[0]);
+        openOnAccountRow(onAccountPayments[0]);
       } else {
         setShowAllocPicker(true);
       }
@@ -422,7 +452,7 @@ export const PartnerProfilePage: React.FC = () => {
     } catch (e) {
       setAllocError(e instanceof Error ? e.message : 'تعذّر جلب الفواتير المفتوحة');
     }
-  }, [id, isSupplier, onAccountPayments]);
+  }, [id, isSupplier, onAccountPayments, openOnAccountRow]);
 
   // مزامنة التبويب مع ?tab= في المسار (روابط خارجية مثل شارة «عرض السعر»).
   useEffect(() => { if (initialTab) setActiveTabKey(initialTab); }, [initialTab]);
@@ -1382,7 +1412,7 @@ export const PartnerProfilePage: React.FC = () => {
             <table className="ktra-compact-grid w-full text-[12px]">
               <thead className="bg-[var(--ktra-surface-2)]">
                 <tr>
-                  <th>السند</th>
+                  <th>المصدر</th>
                   <th>التاريخ</th>
                   <th>المبلغ</th>
                   <th>على الحساب</th>
@@ -1391,8 +1421,8 @@ export const PartnerProfilePage: React.FC = () => {
               </thead>
               <tbody>
                 {onAccountPayments.map((p) => (
-                  <tr key={p.id} className="border-t border-[var(--ktra-border)]">
-                    <td>#{p.id}</td>
+                  <tr key={`${p.source}:${p.id}`} className="border-t border-[var(--ktra-border)]">
+                    <td>{p.source === 'note' ? `إشعار ${p.number}` : `سند #${p.id}`}</td>
                     <td>{formatDateLocalized(p.payment_date)}</td>
                     <td className="ktra-num">{formatMoney(p.amount)}</td>
                     <td className="ktra-num text-[var(--ktra-warn)]">
@@ -1402,7 +1432,7 @@ export const PartnerProfilePage: React.FC = () => {
                       <button
                         type="button"
                         className="ktra-toolbtn text-[11px]"
-                        onClick={() => { setAllocTarget(p); setShowAllocPicker(false); }}
+                        onClick={() => { openOnAccountRow(p); setShowAllocPicker(false); }}
                       >
                         توزيع
                       </button>
@@ -1413,6 +1443,21 @@ export const PartnerProfilePage: React.FC = () => {
             </table>
           </div>
         </div>
+      )}
+      {noteAllocTarget && partner && (
+        <NoteAllocationModal
+          noteId={noteAllocTarget.id}
+          partnerLabel={partner.name}
+          onClose={() => setNoteAllocTarget(null)}
+          onSaved={() => {
+            setNoteAllocTarget(null);
+            setStmtOffset(0);
+            loadStatement(0);
+            setPaymentsRefreshKey((key) => key + 1);
+            setActivityRefreshKey((key) => key + 1);
+            clientLogger.info("partner.note_allocation_saved");
+          }}
+        />
       )}
       {allocTarget && partner && (
         <VoucherAllocationModal

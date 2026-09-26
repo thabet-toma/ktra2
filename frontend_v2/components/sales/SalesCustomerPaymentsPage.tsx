@@ -1413,6 +1413,7 @@ export const NewPaymentModal: React.FC<{
             (partners.find((p) => p.id === partnerId)?.name)
             || initialPartner?.name || "—",
           direction: refundMode === "refund" ? "Outgoing" : "Incoming",
+          ...(refundMode ? { partnerRole: refundMode === "refund" ? "العميل" as const : "المورد" as const } : {}),
         }).map((line) => `${line.side} ${line.label} ${fmt(line.amount)}`).join(" / ") || "—"}
       </div>
     </PaymentVoucherModal>

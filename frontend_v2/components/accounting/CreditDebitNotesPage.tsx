@@ -18,6 +18,7 @@ import {
   Printer,
   RefreshCw,
   Save,
+  Split,
   Trash2,
   Undo2,
   X,
@@ -31,6 +32,7 @@ import { KitAutocomplete, type KitAutocompleteOption } from "../kit/KitAutocompl
 import { KitDocumentShell, useKitKeymap, useRecordNavigation } from "../kit";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { NoteAllocationModal } from "../shared/NoteAllocationModal";
 import { AccountTreeField } from "./AccountTreePicker";
 import { accountingApi } from "../../services/accountingApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
@@ -140,6 +142,10 @@ export const CreditDebitNotesPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
+  // تنبيه ما بعد الإجراء (إلغاء ترحيل إشعارٍ موزَّع يفكّ توزيعاته ويسمّيها).
+  const [notice, setNotice] = useState<string | null>(null);
+  // الإشعار المسوّي المفتوح في نافذة التوزيع.
+  const [allocNote, setAllocNote] = useState<CreditDebitNoteRow | null>(null);
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formType, setFormType] = useState<NoteType>("debit");
@@ -237,6 +243,17 @@ export const CreditDebitNotesPage: React.FC = () => {
     setTouched(false);
     setShowForm(true);
   }, []);
+
+  // رابط المستند إلى إشعاره (`entityLinks` — تبويب «الدفعات» في شاشة الاستيراد): `?note_id=`.
+  const linkedNoteId = new URLSearchParams(location.search).get("note_id");
+  useEffect(() => {
+    if (!linkedNoteId || loading) return;
+    const target = notes.find((n) => String(n.id) === linkedNoteId);
+    if (target) loadIntoForm(target);
+    else if (notes.length) setErr(`الإشعار #${linkedNoteId} غير موجود في هذه الشركة.`);
+    else return;
+    navigate(location.pathname, { replace: true });
+  }, [linkedNoteId, loading, notes, loadIntoForm, navigate, location.pathname]);
 
   const nav = useRecordNavigation<CreditDebitNoteRow>({
     items: notes,
@@ -416,11 +433,13 @@ export const CreditDebitNotesPage: React.FC = () => {
     if (!(await confirm({ title: "تأكيد", cancelText: "تراجع", ...prompts[action] }))) return;
     setBusyId(n.id);
     setErr(null);
+    setNotice(null);
     try {
       if (action === "delete") {
         await deleteCreditDebitNote(n.id);
       } else {
-        await creditDebitNoteAction(n.id, action);
+        const res = await creditDebitNoteAction(n.id, action);
+        if (res?.notice) setNotice(res.notice);
       }
       clientLogger.info("credit_debit_note.action", { action });
       if (selectedId === n.id) {
@@ -609,6 +628,7 @@ export const CreditDebitNotesPage: React.FC = () => {
           </div>
 
           {err && <div className="rounded-lg p-3 ktra-bg-panel ktra-text-state">{err}</div>}
+          {notice && <div className="rounded-lg p-3 text-sm ktra-bg-panel">{notice}</div>}
 
           {loading ? (
             <KitSpinner />
@@ -659,7 +679,14 @@ export const CreditDebitNotesPage: React.FC = () => {
                             : "—"}
                         </td>
                         <td className="p-3">{formatDateLocalized(n.note_date)}</td>
-                        <td className="p-3 font-mono">{money(n)}</td>
+                        <td className="p-3 font-mono">
+                          {money(n)}
+                          {n.status === "posted" && n.settles && Number(n.unallocated_amount) > 0 && (
+                            <span className="block text-xs text-[var(--ktra-warn)]">
+                              تحت الحساب {formatMoney(n.unallocated_amount)}
+                            </span>
+                          )}
+                        </td>
                         <td className="p-3">
                           <span className={`rounded px-2 py-0.5 text-xs ${STATUS_CLASS[n.status] || STATUS_CLASS.draft}`}>
                             {STATUS_LABEL[n.status] || n.status}
@@ -671,6 +698,11 @@ export const CreditDebitNotesPage: React.FC = () => {
                             {n.status === "draft" && canPost && (
                               <button onClick={() => runAction(n, "post")} className="flex items-center gap-1 text-green-700 hover:underline">
                                 <CheckCircle className="h-3 w-3" /> ترحيل
+                              </button>
+                            )}
+                            {n.status === "posted" && n.settles && canPost && (
+                              <button onClick={() => setAllocNote(n)} className="flex items-center gap-1 ktra-text-accent hover:underline">
+                                <Split className="h-3 w-3" /> توزيع
                               </button>
                             )}
                             {n.status === "posted" && canUnpost && (
@@ -911,6 +943,17 @@ export const CreditDebitNotesPage: React.FC = () => {
           )}
         </div>
       </KitDocumentShell>
+      {allocNote && (
+        <NoteAllocationModal
+          noteId={allocNote.id}
+          partnerLabel={allocNote.partner_name || "الطرف"}
+          onClose={() => setAllocNote(null)}
+          onSaved={() => {
+            setAllocNote(null);
+            void loadAll();
+          }}
+        />
+      )}
     </div>
   );
 };

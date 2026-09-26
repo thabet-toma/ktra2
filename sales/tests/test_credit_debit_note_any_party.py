@@ -459,6 +459,7 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         # إلغاء ترحيل الإشعار يفكّ الاسترداد أيضاً ويسمّيه في التنبيه.
         res = self.client.post(f"{URL}{note['id']}/unpost/", {}, format="json", **self.h)
         self.assertIn("سند استرداد", res.data["notice"])
+        self.assertIn("يبقى السند مرحَّلاً «تحت الحساب»", res.data["notice"])
 
     def test_customer_credit_note_surplus_is_returned_by_a_refund_voucher(self):
         customer = self.parties["Customer"]

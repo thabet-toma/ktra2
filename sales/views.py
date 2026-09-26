@@ -2152,7 +2152,18 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
         note = self.get_queryset().get(pk=note.pk)
         data = dict(self.get_serializer(note).data)
         if released:
-            data["notice"] = f"فُكّ توزيع الإشعار عن: {'، '.join(released)} — عاد المبلغ متبقّياً عليها."
+            # المستندات يعود مبلغها متبقّياً عليها؛ وسند الاسترداد يبقى مرحَّلاً (نقدٌ دخل فعلاً)
+            # فيصير «تحت الحساب» للطرف بعد أن لم يعد يُطفئ الإشعار.
+            docs = [r for r in released if not r.startswith("سند استرداد")]
+            refunds = [r for r in released if r.startswith("سند استرداد")]
+            parts = []
+            if docs:
+                parts.append(f"فُكّ توزيع الإشعار عن: {'، '.join(docs)} — عاد المبلغ متبقّياً عليها.")
+            if refunds:
+                parts.append(f"وفُكّ عن: {'، '.join(refunds)} — يبقى السند مرحَّلاً «تحت الحساب» للطرف."
+                             if docs else
+                             f"فُكّ ربط الإشعار بـ: {'، '.join(refunds)} — يبقى السند مرحَّلاً «تحت الحساب» للطرف.")
+            data["notice"] = " ".join(parts)
         return Response(data)
 
     def _allocation_payload(self, note):

@@ -1,7 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { docKey, docSettlement, fifoFill, overpaymentExcess, type AllocatableDoc } from "./voucherAllocation.ts";
+import {
+  docKey, docSettlement, fifoFill, noteAllocationRows, noteTargetDocs, overpaymentExcess, type AllocatableDoc,
+} from "./voucherAllocation.ts";
 
 const clearance = (id: number, remaining: string, date: string): AllocatableDoc => ({
   id, label: `تخليص #${id}`, remaining, date, target: { kind: "clearance", id },
@@ -48,4 +50,19 @@ test("before the accrual the draft lines are the estimate", () => {
 test("docs without a date come last", () => {
   const docs: AllocatableDoc[] = [{ id: 9, label: "فاتورة", remaining: "50" }, clearance(1, "50", "2026-06-01")];
   assert.deepEqual(fifoFill(docs, 60).map((r) => [docKey(r.doc), r.amount]), [["clearance:1", "50.00"], ["invoice:9", "10.00"]]);
+});
+
+test("note targets keep accrual kinds and send invoices with the note's side", () => {
+  const docs = noteTargetDocs([
+    { kind: "purchase_invoice", id: 3, label: "PI-3", date: "2026-07-01", remaining: "80" },
+    { kind: "clearance", id: 3, label: "تخليص #3", date: "2026-06-01", remaining: "50" },
+  ]);
+  assert.equal(docKey(docs[0]), "invoice:3");
+  assert.equal(docKey(docs[1]), "clearance:3");
+  const rows = noteAllocationRows(fifoFill(docs, 60), "purchase_invoice");
+  assert.deepEqual(rows, [
+    { kind: "clearance", id: 3, amount: "50.00" },
+    { kind: "purchase_invoice", id: 3, amount: "10.00" },
+  ]);
+  assert.deepEqual(noteAllocationRows([{ doc: docs[0], amount: "0" }], "sales_invoice"), []);
 });

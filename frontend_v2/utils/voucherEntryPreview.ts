@@ -26,8 +26,11 @@ export function buildVoucherEntryPreview(input: {
   cashAccountLabel: string;
   partnerLabel: string;
   direction: "Incoming" | "Outgoing";
+  /** صفة الطرف في سطر الذمّة — الافتراضي من الاتجاه (قبضٌ من عميل، صرفٌ لمورد). سندا
+   *  الاسترداد يعاكسانه: قبضٌ من دائن وصرفٌ (ردّ) لعميل. */
+  partnerRole?: "العميل" | "المورد";
 }): VoucherEntryLine[] {
-  const { cashAmount, chequesAmount, cashAccountLabel, partnerLabel, direction } = input;
+  const { cashAmount, chequesAmount, cashAccountLabel, partnerLabel, direction, partnerRole } = input;
   const cash = cashAmount > 0 ? cashAmount : 0;
   const cheques = chequesAmount > 0 ? chequesAmount : 0;
   const total = cash + cheques;
@@ -36,7 +39,7 @@ export function buildVoucherEntryPreview(input: {
   const incoming = direction === "Incoming";
   const partnerLine: VoucherEntryLine = {
     side: incoming ? "Cr" : "Dr",
-    label: `ذمم ${incoming ? "العميل" : "المورد"} ${partnerLabel}`,
+    label: `ذمم ${partnerRole ?? (incoming ? "العميل" : "المورد")} ${partnerLabel}`,
     amount: total,
   };
   const moneyLines: VoucherEntryLine[] = [];
