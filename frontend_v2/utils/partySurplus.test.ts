@@ -8,8 +8,13 @@ import {
   pickedTotal,
   refundPicksError,
   refundSourcesPayload,
+  splitOriginPath,
+  splitOriginSource,
+  splitOriginText,
+  type SplitOrigin,
   type SurplusRow,
 } from "./partySurplus.ts";
+import { formatMoney } from "./formatNumber.ts";
 
 const row = (over: Partial<SurplusRow>): SurplusRow => ({
   source: "note", id: 1, label: "إشعار DN-0001", date: "2026-07-01", amount: "100",
@@ -38,6 +43,22 @@ test("errors name the over-picked source, then the over-voucher total", () => {
   assert.match(refundPicksError(rows, { "note:1": "100.01" }, 500, 1) ?? "", /DN-0001/);
   assert.match(refundPicksError(rows, { "note:1": "100" }, 99.99, 1) ?? "", /يتجاوز مبلغه/);
   assert.equal(refundPicksError(rows, { "note:1": "100" }, 100, 1), null);
+});
+
+test("أصل سند «الزيادة»: نصّه بمبالغ منسَّقة، ومصدره، ومساره في ملف الشحنة", () => {
+  const origin: SplitOrigin = {
+    kind: "clearance", doc_id: 3, payment_id: 4, shipment_id: 13, key: "LOGISTICS_CLEARANCE:3",
+    label: "تخليص SH-0013 — شحنة جوتو", amount: "2527.00", paid: "9600.00", due: "7073.00",
+  };
+  assert.equal(
+    splitOriginText(origin),
+    `زيادة دفعة تخليص SH-0013 — شحنة جوتو (دُفع ${formatMoney("9600.00")} والمستحق ${formatMoney("7073.00")})`,
+  );
+  assert.equal(splitOriginSource(origin), "دفعة #4 على تخليص SH-0013 — شحنة جوتو");
+  // الدفعة كلّها زائدة: لا دفعة — المستحق وحده.
+  assert.equal(splitOriginSource({ ...origin, payment_id: null }), "تخليص SH-0013 — شحنة جوتو");
+  assert.equal(splitOriginPath(origin), "/import-flow/13?tab=clearance");
+  assert.equal(splitOriginPath({ ...origin, kind: "local", shipment_id: null }), null);
 });
 
 test("bucketItemPath: السند والإشعار بشاشتيهما، والمستحقّ بتبويبه في ملف شحنته", () => {

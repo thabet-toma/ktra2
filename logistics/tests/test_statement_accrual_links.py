@@ -5,11 +5,14 @@
 SH-0019 وSH-0014 وSH-0015 لا يظهر في أيٍّ من مجموعاتها.
 """
 from decimal import Decimal
+from importlib import import_module
 
-from accounting.models import Account, JournalHeader, JournalLine
+from django.apps import apps
+
+from accounting.models import Account, AccountingAuditLog, JournalHeader, JournalLine
 from accounting.services import partner_account_statement
 from logistics.accruals import post_local_shipment_accrual
-from logistics.models import LocalShipment, PurchaseInvoice
+from logistics.models import LocalShipment, LogisticsClearancePayment, PurchaseInvoice
 from logistics.tests.test_shipment_labels import _LabelBase
 from sales.models import SupplierPayment, SupplierPaymentAllocation
 
@@ -84,12 +87,86 @@ class StatementAccrualLinksTest(_LabelBase):
         doc = f"تخليص #{clearance.pk} · مطالبة CLM-778 · بيان D-4411"
         (accrual,) = self._rows(self.broker, "LOGISTICS_CLEARANCE")
         self.assertEqual((accrual["document_number"], accrual["details"], accrual["open_target"]),
-                         ("CLM-778", [doc], opens))
+                         ("CLM-778", [{"text": doc, "amount": None}], opens))
         (payment,) = self._rows(self.broker, "CLEARANCE_PAYMENT")
-        self.assertEqual(payment["details"][0], f"على {doc}")
+        self.assertEqual(payment["details"][0], {"text": f"على {doc}", "amount": None})
         self.assertEqual((payment["paid_on"], payment["open_target"]), ("2026-07-01", opens))
         (row,) = self._rows(self.broker, "SUPPLIER_PAYMENT")
-        self.assertEqual((row["details"], row["open_target"]), ([f"وُزِّع على {doc}: 2045.00"], opens))
+        # المبلغ منفصلٌ عن النصّ — الواجهة تنسّقه (formatMoney) لا الخادم.
+        self.assertEqual((row["details"], row["open_target"]),
+                         ([{"text": f"وُزِّع على {doc}", "amount": "2045.00"}], opens))
+
+    def _split_payment(self, number="SH-0013", name="شحنة جوتو", due="7073", paid="9600"):
+        """إنتاج (حاييم): دفعة تخليص 9,600 على مستحق 7,073 ← الدفعة بالمستحق وسند «زيادة» بالباقي."""
+        shipment = self._shipment(number, name)
+        clearance = self._clearance(shipment, due)
+        res = self.client.post(
+            f"/api/logistics/clearances/{clearance.pk}/pay_from_cashbox/",
+            {"amount": paid, "cash_box_external_id": self.box.external_id, "payment_date": "2026-07-14"},
+            format="json", **self.h)
+        self.assertEqual(res.status_code, 201, res.content)
+        payment = LogisticsClearancePayment.objects.get(clearance=clearance)
+        voucher = SupplierPayment.objects.get(pk=res.data["on_account_voucher"]["id"])
+        return shipment, clearance, payment, voucher
+
+    def test_split_voucher_shows_its_origin_even_after_its_note_changes(self):
+        """ب-7: سند «الزيادة» يعلن أصله في الكشف من حقوله لا من نصّ ملاحظته، والرصيد لا يتغيّر."""
+        shipment, clearance, payment, voucher = self._split_payment()
+        self.assertEqual((voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id),
+                         ("clearance", clearance.pk, payment.pk))
+        self.assertEqual((payment.amount, voucher.amount), (D("7073"), D("2527")))
+        closing = self._statement(self.broker)["closing_balance"]
+
+        SupplierPayment.objects.filter(pk=voucher.pk).update(notes="ملاحظة جديدة لا تذكر التخليص")
+        statement = self._statement(self.broker)
+        (row,) = [r for r in statement["results"] if r["reference_type"] == "SUPPLIER_PAYMENT"]
+        self.assertEqual(row["split_origin"], {
+            "kind": "clearance", "doc_id": clearance.pk, "payment_id": payment.pk,
+            "shipment_id": shipment.pk, "key": f"LOGISTICS_CLEARANCE:{clearance.pk}",
+            "label": "تخليص SH-0013 — شحنة جوتو", "amount": "2527.00", "paid": "9600.00", "due": "7073.00",
+        })
+        self.assertEqual(statement["closing_balance"], closing)
+        # وفي البطاقة: السند في «دفعات تحت الحساب» يحمل أصله.
+        profile = self.client.get(f"/api/partners/{self.broker.pk}/profile/", **self.h).data
+        (item,) = [i for i in profile["on_account_items"] if i["source"] == "voucher"]
+        self.assertEqual(item["split_origin"]["payment_id"], payment.pk)
+        # وشاشة السند.
+        data = self.client.get(f"/api/logistics/supplier-payments/{voucher.pk}/", **self.h).data
+        self.assertEqual(data["split_origin"]["label"], "تخليص SH-0013 — شحنة جوتو")
+
+    def test_backfill_links_existing_split_vouchers_to_their_payment(self):
+        """ب-6: السندات القائمة — من سجلّ التدقيق `SPLIT_OVERPAYMENT` (إنتاج: #2459 ← دفعة #4)،
+        وما لا سجلّ له من ملاحظته حين تكون الدفعة وحيدةً بتاريخه."""
+        backfill = import_module("sales.migrations.0049_supplierpayment_split_from").backfill
+        _shipment, clearance, payment, logged = self._split_payment()
+        _s2, clearance2, payment2, noted = self._split_payment("SH-0014", "شحنة ثانية", "500", "800")
+        SupplierPayment.objects.filter(pk__in=[logged.pk, noted.pk]).update(
+            split_from_kind="", split_from_doc_id=None, split_from_payment_id=None)
+        AccountingAuditLog.objects.create(
+            tenant=self.tenant, user=self.user, action="SPLIT_OVERPAYMENT",
+            model_name="LogisticsClearancePayment", object_id=payment.pk,
+            change_details=f"تخليص #{clearance.pk}: 9600 → 7073 (journal 1 reversed, re-posted 2); "
+                           f"excess 2527 → on-account voucher #{logged.pk}")
+        manual = self._voucher(100)
+
+        backfill(apps, None)
+
+        for voucher, expected in ((logged, ("clearance", clearance.pk, payment.pk)),
+                                  (noted, ("clearance", clearance2.pk, payment2.pk)),
+                                  (manual, ("", None, None))):
+            voucher.refresh_from_db()
+            self.assertEqual(
+                (voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id), expected)
+
+    def test_original_clearance_group_knows_its_excess_went_to_the_voucher(self):
+        """ب-7: سند الزيادة موزَّعٌ على تخليصٍ آخر — كشف الحساب يعطي التخليص الأصلي مفتاحه
+        (سطرٌ معلوماتي «فُصلت إلى سند» في مجموعته) بلا أثرٍ على الرصيد."""
+        _shipment, clearance, _payment, voucher = self._split_payment()
+        other = self._clearance(self._shipment("SH-0015", "شحنة أخرى"), "3000")
+        self._allocate(voucher, [{"kind": "clearance", "id": other.pk, "amount": "2527"}])
+        (row,) = self._rows(self.broker, "SUPPLIER_PAYMENT")
+        self.assertEqual(row["link_key"], f"LOGISTICS_CLEARANCE:{other.pk}")
+        self.assertEqual(row["split_origin"]["key"], f"LOGISTICS_CLEARANCE:{clearance.pk}")
 
     def test_money_tab_hides_the_accrual_itself(self):
         """تبويب «المال» (`only_payments`): المستحق «فاتورة» المخلّص — لا يُعرض بين حركات المال،

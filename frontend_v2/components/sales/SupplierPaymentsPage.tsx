@@ -24,13 +24,15 @@ import {
   type KitToolbarAction,
   type KitTab,
 } from "../kit";
-import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2, Unlink } from "lucide-react";
+import { Plus, X, RefreshCw, AlertTriangle, Banknote, Check, Split, Undo2, Loader2, Unlink, Pencil } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { VoucherAllocationModal, type AllocatableDoc } from "../shared/VoucherAllocationModal";
 import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
+import { PostedTextDialog } from "../shared/PostedTextDialog";
+import { splitOriginPath, splitOriginSource, splitOriginText, type SplitOrigin } from "../../utils/partySurplus";
 
 type Partner = { id: number; name: string };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -52,6 +54,8 @@ interface SupplierPaymentRow {
     id: number; kind: string; target_id: number; amount: string; label?: string; shipment_label?: string;
   }>;
   unallocated_amount?: string;
+  /** سند «الزيادة»: الدفعة التي فُصل منها — من حقوله لا من ملاحظته. */
+  split_origin?: SplitOrigin | null;
 }
 
 /** المتبقّي غير الموزَّع (محسوب في الخادم، ويُشتق احتياطاً). */
@@ -65,6 +69,23 @@ const unallocatedOf = (p: SupplierPaymentRow) =>
 import { formatMoney } from "@/utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 const fmt = (n: string | number) => formatMoney(n);
+
+/** شارة سند «الزيادة» ومصدره — تفتح الدفعة الأصلية في تبويب مستحقّها. */
+function SplitOriginLine({ origin, onOpen }: { origin: SplitOrigin; onOpen: (path: string) => void }) {
+  const path = splitOriginPath(origin);
+  return (
+    <span className="flex flex-wrap items-center gap-1 text-[10px]" title={splitOriginText(origin)}>
+      <span className="rounded bg-[var(--ktra-surface-2)] px-1 font-semibold text-[var(--ktra-warn,#b06800)]">زيادة دفعة</span>
+      {path ? (
+        <button type="button" className="text-[var(--ktra-accent)] hover:underline" onClick={() => onOpen(path)}>
+          {splitOriginSource(origin)}
+        </button>
+      ) : (
+        <span className="text-[var(--ktra-ink-soft)]">{splitOriginSource(origin)}</span>
+      )}
+    </span>
+  );
+}
 
 export const SupplierPaymentsPage: React.FC = () => {
   const navigate = useNavigate();
@@ -86,6 +107,8 @@ export const SupplierPaymentsPage: React.FC = () => {
   // T-ONACC: السند المُراد توزيعه على فواتير الشراء + الفواتير المفتوحة لمورده.
   const [allocating, setAllocating] = useState<SupplierPaymentRow | null>(null);
   const [allocDocs, setAllocDocs] = useState<AllocatableDoc[]>([]);
+  // ملاحظة السند — تُعدَّل مرحَّلاً (`core/posted_text.py`).
+  const [editingNote, setEditingNote] = useState<SupplierPaymentRow | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -166,6 +189,8 @@ export const SupplierPaymentsPage: React.FC = () => {
   // تلقائياً (المدفوع مشتق من التوزيعات المرحّلة). السند يبقى مسودةً.
   const handleUnpost = async (p: SupplierPaymentRow) => {
     const allocCount = (p.allocations || []).length;
+    // سند «الزيادة» لا يُلغى منفرداً بصمت: المبلغ خرج من الصندوق مع الدفعة الأصلية ولا يعود إليها.
+    const origin = p.split_origin;
     const ok = await confirm({
       title: "التراجع عن ترحيل السند",
       message:
@@ -173,7 +198,12 @@ export const SupplierPaymentsPage: React.FC = () => {
         (allocCount > 0
           ? `، وستعود ${allocCount} فاتورة شراء «غير مسدَّدة» بقيمة توزيعها`
           : "") +
-        "، ويعود السند مسودةً يمكن تعديلها أو حذفها. متابعة؟",
+        "، ويعود السند مسودةً يمكن تعديلها أو حذفها." +
+        (origin
+          ? ` تنبيه: هذا سند زيادةٍ فُصل من ${splitOriginSource(origin)} — إلغاء ترحيله لا يعيد ` +
+            `${fmt(origin.amount)} إلى تلك الدفعة، فيخرج المبلغ من الدفاتر وهو خارجٌ من الصندوق فعلاً.`
+          : "") +
+        " متابعة؟",
       confirmText: "تراجع عن الترحيل",
       danger: true,
     });
@@ -259,7 +289,18 @@ export const SupplierPaymentsPage: React.FC = () => {
   const columns: DenseColumn<SupplierPaymentRow>[] = [
     { key: "id", header: "#", width: "60px", align: "center", render: (r) => <span className="font-mono text-xs">#{r.id}</span> },
     { key: "payment_date", header: "التاريخ", width: "110px", align: "center", render: (r) => <span className="text-xs">{formatDateLocalized(r.payment_date)}</span> },
-    { key: "supplier", header: "المورد", render: (r) => <span className="text-xs" data-ctx-partner-id={r.partner ?? undefined} data-ctx-partner-name={r.partner_name || partnerName(r.partner)} data-ctx-partner-kind="supplier">{r.partner_name || partnerName(r.partner)}</span> },
+    {
+      key: "supplier", header: "المورد",
+      render: (r) => (
+        <div className="flex flex-col gap-0.5">
+          <span className="text-xs" data-ctx-partner-id={r.partner ?? undefined} data-ctx-partner-name={r.partner_name || partnerName(r.partner)} data-ctx-partner-kind="supplier">{r.partner_name || partnerName(r.partner)}</span>
+          {r.split_origin && (
+            <SplitOriginLine origin={r.split_origin} onOpen={(path) => navigate(path)} />
+          )}
+          {r.notes && <span className="text-[10px] text-[var(--ktra-ink-soft)]">{r.notes}</span>}
+        </div>
+      ),
+    },
     { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
     {
       // T-ONACC: المتبقّي غير الموزَّع = رصيد لنا عند المورد.
@@ -333,7 +374,7 @@ export const SupplierPaymentsPage: React.FC = () => {
     {
       // T-AUTOPOST: السندات تُرحَّل فور الحفظ افتراضياً؛ زر الترحيل لمن حُفظ كمسودة.
       // T-ONACC: زر التوزيع على فواتير الشراء لمن بقي فيه رصيد على الحساب.
-      key: "actions", header: "إجراءات", width: "90px", align: "center",
+      key: "actions", header: "إجراءات", width: "110px", align: "center",
       render: (r) => (
         <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
           {!r.is_posted && (
@@ -357,6 +398,15 @@ export const SupplierPaymentsPage: React.FC = () => {
               label=""
             />
           )}
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            title={r.is_posted ? "تعديل الملاحظة (المبالغ مقفلة)" : "تعديل الملاحظة"}
+            aria-label={`تعديل ملاحظة السند #${r.id}`}
+            onClick={() => setEditingNote(r)}
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
           <button
             type="button"
             className="ktra-toolbtn"
@@ -464,6 +514,17 @@ export const SupplierPaymentsPage: React.FC = () => {
             setMsg(posted ? "✓ تم إنشاء سند الصرف وترحيله" : "✓ حُفظ سند الصرف كمسودة");
             void load();
           }}
+        />
+      )}
+
+      {editingNote && (
+        <PostedTextDialog
+          doc={{ kind: "supplier_payment", id: editingNote.id }}
+          title={`ملاحظة سند الصرف #${editingNote.id}`}
+          posted={editingNote.is_posted}
+          fields={[{ key: "notes", label: "الملاحظة", value: editingNote.notes, multiline: true }]}
+          onClose={() => setEditingNote(null)}
+          onSaved={() => { setMsg("✓ حُفظت ملاحظة السند"); void load(); }}
         />
       )}
 

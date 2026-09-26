@@ -57,6 +57,53 @@ from .numbering import guard_reserved_stock
 from .pricing import SALES_STOCK_REFERENCE_TYPES
 from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, linked_return_credit_summary, recalculate_invoice_amounts, resolve_cheques_under_collection_account, sales_return_open_credit
 
+#: ملاحظة فاتورة البيع في آخر وصف قيدها: «… — العميل · الملاحظة».
+INVOICE_NOTES_MARK = "· "
+
+
+def customer_payment_note_text(payment, notes: str | None = None) -> str:
+    """أوّل وصف قيد سند القبض: ملاحظته (أو `notes`)، وإلا «تحصيل عميل …»/«ردّ دفعة للعميل …»."""
+    text = payment.notes if notes is None else notes
+    if text:
+        return text
+    is_refund = (getattr(payment, "kind", None) or CustomerPayment.KIND_RECEIPT) == CustomerPayment.KIND_REFUND
+    return f"{'ردّ دفعة للعميل' if is_refund else 'تحصيل عميل'} {payment.partner.name}"
+
+
+def sync_customer_payment_journal_text(payment, before: dict, *, user=None) -> int:
+    """ملاحظة سند القبض المرحَّل عُدِّلت: أوّلُ وصفِ كلّ قيدٍ له يتبعها — والباقي كما هو."""
+    from accounting.services import rewrite_journal_texts
+
+    old = customer_payment_note_text(payment, before.get("notes") or "")
+    new = customer_payment_note_text(payment)
+
+    def header(desc: str):
+        return new + desc[len(old):] if desc.startswith(old) else None
+
+    return rewrite_journal_texts(payment.tenant, reference=("CUSTOMER_PAYMENT", payment.pk), header=header,
+                                 user=user, source=f"ملاحظة سند القبض #{payment.pk}")
+
+
+def sync_sales_invoice_journal_text(invoice, before: dict, *, user=None) -> int:
+    """ملاحظة فاتورة البيع المرحّلة عُدِّلت: ذيلُ وصف قيدها («· الملاحظة») يتبعها."""
+    from accounting.services import rewrite_journal_texts
+
+    old, new = before.get("notes") or "", invoice.notes or ""
+
+    def header(desc: str):
+        if old:
+            pos = desc.rfind(f" {INVOICE_NOTES_MARK}{old}")
+            if pos < 0:
+                return None  # الوصف لم يُشتقّ منها (قديمٌ أو مقطوع) — لا يُمسّ.
+            desc = desc[:pos]
+        elif f" {INVOICE_NOTES_MARK}" in desc:
+            return None
+        return desc + (f" {INVOICE_NOTES_MARK}{new}" if new else "")
+
+    # قيدُ الفاتورة نفسه لا كلُّ ما على مرجعها — قيودُ «تحصيل نقدي» القديمة تحمل المرجعَ نفسه.
+    return rewrite_journal_texts(invoice.tenant, journal_ids=[invoice.journal_id], header=header,
+                                 user=user, source=f"ملاحظة فاتورة البيع {invoice.invoice_number}")
+
 def _validate_cheque_payloads(
     cheques: list[dict], *, require_due_date: bool = False
 ) -> Decimal:
@@ -1785,7 +1832,7 @@ def post_sales_invoice(
         if cust_name:
             desc_parts.append(f"— {cust_name}")
         if invoice.notes:
-            desc_parts.append(f"· {invoice.notes}")
+            desc_parts.append(f"{INVOICE_NOTES_MARK}{invoice.notes}")
         final_desc = " ".join(desc_parts)[:500]
 
         jh = post_journal(
@@ -3140,8 +3187,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                             "description": f"ربح فروق عملة — مرتجع {inv.invoice_number}",
                         })
                 jh_desc = (
-                    (payment.notes or f"ردّ دفعة للعميل {payment.partner.name}")
-                    + f" — مرتجع {inv.invoice_number}"
+                    customer_payment_note_text(payment) + f" — مرتجع {inv.invoice_number}"
                 )[:500]
             else:
                 inv_lines: list[dict] = _debit_lines(
@@ -3178,8 +3224,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                         "description": f"تسديد ذمم — فاتورة {inv.invoice_number}",
                     })
                 jh_desc = (
-                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
-                    + f" — فاتورة {inv.invoice_number}"
+                    customer_payment_note_text(payment) + f" — فاتورة {inv.invoice_number}"
                 )[:500]
             jh = post_journal(
                 tenant_id=payment.tenant_id,
@@ -3217,10 +3262,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                         "description": f"ردّ دفعة نقداً على الحساب — {payment.partner.name}",
                     },
                 ]
-                unalloc_desc = (
-                    (payment.notes or f"ردّ دفعة للعميل {payment.partner.name}")
-                    + " — على الحساب"
-                )[:500]
+                unalloc_desc = (customer_payment_note_text(payment) + " — على الحساب")[:500]
             else:
                 unalloc_lines = [
                     *_debit_lines(
@@ -3234,10 +3276,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
                         "description": f"دفعة على الحساب — {payment.partner.name}",
                     },
                 ]
-                unalloc_desc = (
-                    (payment.notes or f"تحصيل عميل {payment.partner.name}")
-                    + " — على الحساب"
-                )[:500]
+                unalloc_desc = (customer_payment_note_text(payment) + " — على الحساب")[:500]
             jh = post_journal(
                 tenant_id=payment.tenant_id,
                 transaction_date=payment.payment_date,

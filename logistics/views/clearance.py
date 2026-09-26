@@ -73,6 +73,7 @@ from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet, DocumentAttachmentsMixin
 from core.plans import enforce_limits
+from core.posted_text import save_posted_text
 from logistics.landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
@@ -319,6 +320,20 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
         data.sort(key=lambda r: str(r.get("payment_date") or ""), reverse=True)
         return Response(data, status=status.HTTP_200_OK)
 
+    @action(detail=True, methods=["patch"], url_path=r"payments/(?P<payment_id>[0-9]+)")
+    def update_payment_text(self, request, pk=None, payment_id=None):
+        """ملاحظة دفعة التخليص — وحدها (`core.posted_text`): الدفعة مرحَّلةٌ منذ إنشائها،
+        ووصف قيدها لا يحمل الملاحظة."""
+        from django.shortcuts import get_object_or_404
+
+        clearance = self.get_object()
+        payment = get_object_or_404(LogisticsClearancePayment, pk=payment_id, clearance=clearance,
+                                    tenant_id=clearance.tenant_id)
+        save_posted_text(payment, request.data, entity_type="clearance_payment",
+                         entity_label=f"دفعة #{payment.pk} — {clearance.shipment.display_label}",
+                         request=request, partner_ids=[payment.customs_broker_id])
+        return Response(LogisticsClearancePaymentSerializer(payment).data)
+
     @action(detail=True, methods=["post"])
     def pay_from_cashbox(self, request, pk=None):
         """
@@ -490,6 +505,7 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                             currency=pay_currency or base_cur, payment_date=payment_date,
                             cash_account_id=cash_link.account_id,
                             doc_label=accrual_label("clearance", clearance), user=request.user,
+                            split_kind="clearance", split_doc_id=clearance.pk,
                         )
                     if amount <= 0:
                         return Response(
@@ -527,6 +543,9 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     notes=notes,
                     is_posted=False,
                 )
+                if on_account is not None:
+                    # سند الزيادة سبق الدفعة — أصله يكتمل بمعرّفها.
+                    SupplierPayment.objects.filter(pk=on_account.pk).update(split_from_payment_id=pay.pk)
                 # P-H-9: shared validation gate. Same as customer / deal /
                 # shipment-agent payment surfaces. We're inside the
                 # transaction.atomic block already, so raising rolls the

@@ -136,6 +136,7 @@ import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorStat
 import { formatDateLocalized, formatTimeValue } from "../../../utils/formatDate";
 import { useDocumentDraft } from "@/hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "@/components/shared/DocumentDraftBanners";
+import { PostedTextFields } from "@/components/shared/PostedTextDialog";
 
 interface InvoiceFormProps {
   invoice: Partial<Invoice> | null;
@@ -1961,7 +1962,22 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   if (deleteColumn) deleteColumn.render = renderDeleteCell;
 
   /* ───────────── تبويبات ───────────── */
-  const notesTab = (
+  // المرحّلة: ملاحظتها ورقم فاتورة المورد وحدهما يُعدَّلان (`core/posted_text.py`) — باقي الحقول مقفلة.
+  const notesTab = formData.isPosted && Number(formData.id) > 0 ? (
+    <PostedTextFields
+      doc={{ kind: "purchase_invoice", id: Number(formData.id) }}
+      fields={[
+        { key: "supplier_invoice_number", label: "رقم فاتورة المورد", value: formData.supplierInvoiceNumber },
+        { key: "notes", label: "الملاحظات", value: formData.notes || formData.dealInfo?.internalNotes, multiline: true },
+      ]}
+      onSaved={(values) => setFormData((prev) => ({
+        ...prev,
+        notes: values.notes,
+        supplierInvoiceNumber: values.supplier_invoice_number,
+        dealInfo: prev.dealInfo ? { ...prev.dealInfo, internalNotes: values.notes } : prev.dealInfo,
+      }))}
+    />
+  ) : (
     <textarea
       className="ktra-input"
       rows={3}

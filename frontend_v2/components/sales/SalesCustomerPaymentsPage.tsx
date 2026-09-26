@@ -25,6 +25,7 @@ import {
   RefreshCw,
   Undo2,
   Unlink,
+  Pencil,
 } from "lucide-react";
 import {
   listCustomerPayments,
@@ -65,6 +66,7 @@ import {
 } from "./PaymentVoucherParts";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { VoucherAllocationModal } from "../shared/VoucherAllocationModal";
+import { PostedTextDialog } from "../shared/PostedTextDialog";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
@@ -200,6 +202,8 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   const [autoPostPayments, setAutoPostPayments] = useState(true);
   // T-ONACC: السند المُراد توزيعه على الفواتير (بعد الترحيل أو قبله).
   const [allocatingPayment, setAllocatingPayment] = useState<CustomerPaymentRow | null>(null);
+  // ملاحظة السند — تُعدَّل مرحَّلاً (`core/posted_text.py`)، وأوّل وصف قيده يتبعها.
+  const [editingNote, setEditingNote] = useState<CustomerPaymentRow | null>(null);
 
   useEffect(() => {
     const pid = new URLSearchParams(window.location.search).get("pay_partner");
@@ -412,14 +416,17 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
     {
       key: "customer", header: "العميل",
       render: (r) => (
-        <span
-          className="text-xs"
-          data-ctx-partner-id={r.partner ?? undefined}
-          data-ctx-partner-name={r.partner_name || partnerName(r.partner)}
-          data-ctx-partner-kind="customer"
-        >
-          {r.partner_name || partnerName(r.partner)}
-        </span>
+        <div className="flex flex-col gap-0.5">
+          <span
+            className="text-xs"
+            data-ctx-partner-id={r.partner ?? undefined}
+            data-ctx-partner-name={r.partner_name || partnerName(r.partner)}
+            data-ctx-partner-kind="customer"
+          >
+            {r.partner_name || partnerName(r.partner)}
+          </span>
+          {r.notes && <span className="text-[10px] text-[var(--ktra-ink-soft)]">{r.notes}</span>}
+        </div>
       ),
     },
     { key: "amount", header: "المبلغ", width: "120px", align: "left", numeric: true, render: (r) => <span className="ktra-num font-mono text-xs font-semibold">{fmt(r.amount)}</span> },
@@ -478,9 +485,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
       ),
     },
     {
-      key: "actions", header: "إجراءات", width: "110px", align: "center",
+      key: "actions", header: "إجراءات", width: "130px", align: "center",
       render: (r) => (
         <div style={{ display: "flex", gap: "2px", justifyContent: "center" }} onClick={(e) => e.stopPropagation()}>
+          <button
+            type="button"
+            className="ktra-toolbtn"
+            title={r.is_posted ? "تعديل الملاحظة (المبالغ مقفلة)" : "تعديل الملاحظة"}
+            aria-label={`تعديل ملاحظة السند #${r.id}`}
+            onClick={() => setEditingNote(r)}
+          >
+            <Pencil className="w-3 h-3" />
+          </button>
           {!r.is_posted && (
             <button type="button" className="ktra-toolbtn" title="ترحيل" onClick={() => void handlePost(r)}>
               <Check className="w-3 h-3" />
@@ -624,6 +640,20 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
             setShowForm(false);
             setPrefillPartnerId(null);
             toast(autoPostPayments ? "تم حفظ السند وترحيله" : "تم حفظ السند", "success");
+            await loadAll();
+          }}
+        />
+      )}
+
+      {editingNote && (
+        <PostedTextDialog
+          doc={{ kind: "customer_payment", id: editingNote.id }}
+          title={`ملاحظة سند القبض #${editingNote.id}`}
+          posted={editingNote.is_posted}
+          fields={[{ key: "notes", label: "الملاحظة", value: editingNote.notes, multiline: true }]}
+          onClose={() => setEditingNote(null)}
+          onSaved={async () => {
+            toast("حُفظت ملاحظة السند", "success");
             await loadAll();
           }}
         />

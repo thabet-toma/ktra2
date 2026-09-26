@@ -56,6 +56,25 @@ from .calc import _default_revenue_account, _resolve_ar_account
 from .flow import post_customer_payment
 from django.utils import timezone
 
+
+def note_counter_text(note, reason: str | None = None) -> str:
+    """وصف سطر الحساب المقابل في قيد الإشعار: سببه (أو `reason`)، وإلا «إشعار رقمه»."""
+    text = note.reason if reason is None else reason
+    return text or f"إشعار {note.note_number}"
+
+
+def sync_note_journal_text(note, before: dict, *, user=None) -> int:
+    """سبب الإشعار المرحَّل عُدِّل: وصفُ سطر الحساب المقابل في قيده يتبعه — والرأس لا يحمله."""
+    from accounting.services import rewrite_journal_texts
+
+    old, new = note_counter_text(note, before.get("reason") or ""), note_counter_text(note)
+
+    def line(jl):
+        return new if jl.account_id == note.counter_account_id and (jl.description or "") == old else None
+
+    return rewrite_journal_texts(note.tenant, journal_ids=[note.journal_id], line=line, user=user,
+                                 source=f"سبب الإشعار {note.note_number}")
+
 def _recalculate_order_totals(order) -> None:
     """يعيد حساب إجماليات الطلبية من بنودها (بلا ضريبة سطرية بعد — مسجّل)."""
     subtotal = Decimal("0.00")
@@ -742,8 +761,7 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
     journal_lines = [
         line(party_account.id, amount, party_side=True, partner_id=note.partner_id,
              description=f"إشعار {'مدين' if is_debit else 'دائن'} — {party_label}"),
-        line(counter.id, amount - tax, party_side=False,
-             description=note.reason or f"إشعار {note.note_number}"),
+        line(counter.id, amount - tax, party_side=False, description=note_counter_text(note)),
     ]
     if tax > 0:
         if creditor:

@@ -72,6 +72,7 @@ from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet, DocumentAttachmentsMixin
 from core.plans import enforce_limits
+from core.posted_text import save_posted_text
 from logistics.landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
@@ -223,6 +224,19 @@ class LocalShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
         data += document_voucher_rows('local', shipment, rate=shipment.exchange_rate)
         return Response(data)
 
+    @action(detail=True, methods=['patch'], url_path=r'payments/(?P<payment_id>[0-9]+)')
+    def update_payment_text(self, request, pk=None, payment_id=None):
+        """ملاحظة دفعة الناقل — وحدها (`core.posted_text`): وصف قيدها لا يحملها."""
+        from django.shortcuts import get_object_or_404
+
+        shipment = self.get_object()
+        payment = get_object_or_404(LocalShipmentPayment, pk=payment_id, local_shipment=shipment,
+                                    tenant_id=shipment.tenant_id)
+        save_posted_text(payment, request.data, entity_type='local_shipment_payment',
+                         entity_label=f"دفعة #{payment.pk} — {shipment.display_label}",
+                         request=request, partner_ids=[shipment.carrier_id])
+        return Response(LocalShipmentPaymentSerializer(payment).data)
+
     @action(detail=True, methods=['post'])
     def pay_from_cashbox(self, request, pk=None):
         """دفع الناقل: Dr ذمم الناقل / Cr الصندوق، بقيد مستقل عن الاستحقاق."""
@@ -272,6 +286,7 @@ class LocalShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                             currency=currency, payment_date=payment_date,
                             cash_account_id=cash_link.account_id,
                             doc_label=accrual_label('local', shipment), user=request.user,
+                            split_kind='local', split_doc_id=shipment.pk,
                         )
                     if amount <= 0:
                         return Response({
@@ -291,6 +306,9 @@ class LocalShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     notes=str(request.data.get('notes') or '').strip(),
                     created_by=request.user if request.user.is_authenticated else None,
                 )
+                if on_account is not None:
+                    # سند الزيادة سبق الدفعة — أصله يكتمل بمعرّفها.
+                    SupplierPayment.objects.filter(pk=on_account.pk).update(split_from_payment_id=payment.pk)
                 journal = post_journal(
                     tenant_id=shipment.tenant_id,
                     transaction_date=payment_date,

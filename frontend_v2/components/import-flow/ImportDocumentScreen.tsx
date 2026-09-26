@@ -29,6 +29,8 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { usdRateForPayload } from "@/utils/paymentRate";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
 import { formatDateLocalized } from "../../utils/formatDate";
+import { PostedTextDialog } from "@/components/shared/PostedTextDialog";
+import type { PostedTextDoc } from "@/services/postedTextApi";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
 
@@ -417,6 +419,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   // مرفق الناقل: لوحةٌ واحدة تحت الجدول للإرسالية المختارة.
   const [localAttachFor, setLocalAttachFor] = useState<{ id: number; label: string } | null>(null);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
+  // ملاحظة دفعةٍ مرحَّلة (تخليص أو وكيل) — وحدها تُعدَّل (`core/posted_text.py`).
+  const [paymentNote, setPaymentNote] = useState<{ doc: PostedTextDoc; title: string; value?: string | null } | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingDealIds, setSavingDealIds] = useState<ReadonlySet<number>>(() => new Set());
@@ -2467,6 +2471,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>الصرف</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>الحالة</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 70 }}>القيد</th>
+            <th className="px-1 py-0.5 text-start">ملاحظة</th>
           </tr></thead>
           <tbody>
             {agentPayments.map((p, idx) => (
@@ -2481,6 +2486,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                     : <span style={{ color: "var(--ktra-warn, #b45309)" }}>معلّقة</span>}
                 </td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : p.is_posted ? "✓" : "—"}</td>
+                <td className="px-1 py-0.5">
+                  {p.id != null && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="text-[var(--ktra-ink-soft)]">{p.notes || ""}</span>
+                      <button
+                        type="button" className="ktra-toolbtn" title="تعديل الملاحظة (المبلغ مقفل)"
+                        aria-label={`تعديل ملاحظة دفعة الوكيل ${p.payment_number ?? idx + 1}`}
+                        onClick={() => setPaymentNote({
+                          doc: { kind: "logistics_payment", id: Number(p.id) },
+                          title: `ملاحظة دفعة الوكيل ${p.payment_number ?? idx + 1}`, value: p.notes,
+                        })}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                </td>
               </tr>
             ))}
             {freightVoucherRows.map((r) => (
@@ -2491,6 +2513,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 <td className="px-1 py-0.5 text-center">—</td>
                 <td className="px-1 py-0.5 text-center">{r.kind_label}</td>
                 <td className="px-1 py-0.5 text-center">{r.journal ? `#${r.journal}` : "—"}</td>
+                <td />
               </tr>
             ))}
           </tbody>
@@ -2569,6 +2592,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>المبلغ</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 60 }}>مرحَّلة</th>
             <th style={{ padding: "2px 4px", textAlign: "center", width: 80 }}>القيد</th>
+            <th className="px-1 py-0.5 text-start">ملاحظة</th>
           </tr></thead>
           <tbody>
             {clearancePayments.map((p) => (
@@ -2582,6 +2606,23 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(p.amount)}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.is_posted ? "✓" : "—"}</td>
                 <td style={{ padding: "2px 4px", textAlign: "center" }}>{p.journal ? `#${p.journal}` : "—"}</td>
+                <td className="px-1 py-0.5">
+                  {p.row_type !== "voucher_allocation" && clearance && (
+                    <span className="inline-flex items-center gap-1">
+                      <span className="text-[var(--ktra-ink-soft)]">{p.notes || ""}</span>
+                      <button
+                        type="button" className="ktra-toolbtn" title="تعديل الملاحظة (المبلغ مقفل)"
+                        aria-label={`تعديل ملاحظة دفعة التخليص #${p.id}`}
+                        onClick={() => setPaymentNote({
+                          doc: { kind: "clearance_payment", id: p.id, clearanceId: clearance.id },
+                          title: `ملاحظة دفعة التخليص #${p.id}`, value: p.notes,
+                        })}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </span>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -2944,6 +2985,18 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             />
           </label>
         </AccrualAdjustDialog>
+      )}
+      {paymentNote && (
+        <PostedTextDialog
+          doc={paymentNote.doc}
+          title={paymentNote.title}
+          fields={[{ key: "notes", label: "الملاحظة", value: paymentNote.value, multiline: true }]}
+          onClose={() => setPaymentNote(null)}
+          onSaved={() => {
+            if (paymentNote.doc.kind === "clearance_payment") void reloadPayments();
+            else if (shipment) void loadAll(shipment.id);
+          }}
+        />
       )}
       {adjusting?.kind === "local" && (
         <AccrualAdjustDialog

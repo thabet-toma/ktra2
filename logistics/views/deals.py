@@ -73,6 +73,7 @@ from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
+from core.posted_text import PostedTextEditMixin
 from core.plans import enforce_limits
 from logistics.landed_cost import (
     import_invoices_from_clearance,
@@ -1069,8 +1070,21 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             return Response({"error": "حدث خطأ غير متوقع أثناء إلغاء ترحيل الدفعة."}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class LogisticsPaymentViewSet(BaseTenantViewSet):
-    """ViewSet مستقل للدفعات للاستعلام وإدارة الفواتير"""
+class LogisticsPaymentViewSet(PostedTextEditMixin, BaseTenantViewSet):
+    """ViewSet مستقل للدفعات للاستعلام وإدارة الفواتير.
+
+    المرحَّلة: ملاحظتها وحدها تُعدَّل (`core.posted_text`) — كان التعديل بلا حارسٍ يغيّر مبلغها
+    وقيدُها كما هو. دفعة الصفقة لها مسارها (`LogisticsDealViewSet.update_payment`) وقائمته.
+    """
+    posted_text_entity_type = 'logistics_payment'
+
+    def posted_text_label(self, instance) -> str:
+        return f"دفعة {instance.payment_number} — {instance.title}"
+
+    def posted_text_partner_ids(self, instance) -> list:
+        partner_id = instance.deal.partner_id if instance.deal_id else (
+            instance.shipment.shipping_agent_id if instance.shipment_id else None)
+        return [partner_id] if partner_id else []
     # P0-5: ترقيم إلزامي — الجدول ينمو بلا حد ولا مستهلك واجهة يعتمد على
     # المصفوفة الخام (تحقق grep على frontend_v2 — صفر استدعاءات لقائمته).
     queryset = LogisticsPayment.objects.all().order_by('-created_at', '-id')

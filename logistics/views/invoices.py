@@ -74,6 +74,7 @@ from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
 from core.plans import enforce_limits
+from core.posted_text import PostedTextEditMixin
 from logistics.landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
@@ -134,7 +135,15 @@ def _purchase_item_snapshot(invoice):
     )
 
 
-class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
+class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseTenantViewSet):
+    # المرحّلة: ملاحظتها ورقم فاتورة المورد وحدهما يُعدَّلان (`core.posted_text`) — وصف
+    # قيدها لا يحملهما.
+    posted_text_entity_type = 'purchase_invoice'
+    posted_text_perm = 'purchase.invoice.edit'
+
+    def posted_text_label(self, instance) -> str:
+        return instance.invoice_number
+
     # P0-5: ترقيم إلزامي — الشاشة الرئيسية مُرقَّمة أصلاً (listPage)، وبقية
     # المستهلكين صاروا بسقف 200 صريح (منتقيات ومحرّرات).
     pagination_class = EnforcedPageNumberPagination

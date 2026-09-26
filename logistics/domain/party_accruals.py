@@ -446,21 +446,26 @@ def _reference_payments(tenant_id: int, wanted: dict) -> dict:
     }
 
 
-def _payment_facts(kind: str, payment) -> tuple[list[str], object]:
+def _fact(text: str, amount=None) -> dict:
+    """سطر تفاصيل: نصّه ومبلغه منفصلان — الواجهة تنسّق المبلغ (`formatMoney`)."""
+    return {'text': text, 'amount': str(_money(amount)) if amount is not None else None}
+
+
+def _payment_facts(kind: str, payment) -> tuple[list[dict], object]:
     """(سطور تفاصيل دفعة المستحق المباشرة: رقمها وغرضها وملاحظتها، تاريخ دفعها) — التاريخ
     يُنسَّق في الواجهة (`formatDate`)."""
     lines = []
     if kind == 'freight':
         date = payment.transfer_date or payment.confirmation_date
-        lines.append(f"دفعة الوكيل رقم {payment.payment_number}" + (f" — {payment.title}" if payment.title else ''))
+        lines.append(_fact(f"دفعة الوكيل رقم {payment.payment_number}" + (f" — {payment.title}" if payment.title else '')))
     else:
         date = payment.payment_date
         # «أخرى» الافتراضية لا تقول شيئاً — الغرض يُذكر حين اختاره المستخدم.
         purpose = payment.get_payment_purpose_display() if kind == 'clearance' and payment.payment_purpose != 'other' else ''
-        lines.append(f"دفعة #{payment.pk}" + (f" — {purpose}" if purpose else ''))
+        lines.append(_fact(f"دفعة #{payment.pk}" + (f" — {purpose}" if purpose else '')))
     notes = (getattr(payment, 'notes', '') or '').strip()
     if notes:
-        lines.append(notes[:120])
+        lines.append(_fact(notes[:120]))
     return lines, date
 
 
@@ -519,7 +524,9 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
       - ``notes``: {الإشعار المدين: [مرساة + ``amount``]} — توزيعاته بالمثل.
       - ``deal_invoices``: {دفعة الصفقة: [فاتورتها الدولية المرحّلة]} — مرساتها الفاتورة.
       - ``details``: {(reference_type, reference_id): {number, lines, paid_on}} — رقم المستند
-        (مطالبة المخلّص، رقم الإرسالية أو الشحنة) وسطورٌ تشرح الحركة، وتاريخ الدفعة المباشرة.
+        (مطالبة المخلّص، رقم الإرسالية أو الشحنة) وسطورٌ تشرح الحركة ``{text, amount}``، وتاريخ
+        الدفعة المباشرة.
+      - ``origins``: {سند الصرف: أصله} لسندات «الزيادة» (`voucher_split_origins`).
     المرساة: ``{'key': 'LOGISTICS_CLEARANCE:13', 'label': 'SH-0017 — شحنة رقع', 'short': 'SH-0017',
     'open': {'kind': 'clearance', 'id': 13, 'shipment_id': 17}}``.
     """
@@ -551,16 +558,16 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
     for ref, (kind, obj) in referenced.items():
         number, doc_text = _doc_facts(kind, obj)
         if _REFERENCE_DOCS[ref[0]][1] == 'doc':
-            details[ref] = {'number': number, 'lines': [doc_text], 'paid_on': None}
+            details[ref] = {'number': number, 'lines': [_fact(doc_text)], 'paid_on': None}
         else:
             payment = payments.get(ref)
             lines, paid_on = _payment_facts(kind, payment) if payment is not None else ([], None)
-            details[ref] = {'number': None, 'lines': [f"على {doc_text}", *lines],
+            details[ref] = {'number': None, 'lines': [_fact(f"على {doc_text}"), *lines],
                             'paid_on': paid_on.isoformat() if paid_on else None}
     for ref_type, by_source in allocated.items():
         for source_id, targets in by_source.items():
             details[(ref_type, source_id)] = {'number': None, 'paid_on': None, 'lines': [
-                f"وُزِّع على {_doc_facts(kind, obj)[1]}: {amount}" for kind, obj, amount in targets]}
+                _fact(f"وُزِّع على {_doc_facts(kind, obj)[1]}", amount) for kind, obj, amount in targets]}
     # الإشعار المربوط بمستحقٍّ يرسو عليه كدفعته — الدائن دائماً، والمدين حين لا توزيع له.
     note_ids = wanted.get('CREDIT_DEBIT_NOTE')
     if note_ids:
@@ -598,7 +605,78 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
             by_deal.setdefault(deal_id, []).append(inv_id)
         deal_invoices = {pay_id: by_deal.get(deal_id, []) for pay_id, deal_id in payment_deal.items()}
     return {'anchors': anchors, 'vouchers': vouchers, 'notes': notes, 'deal_invoices': deal_invoices,
-            'details': details}
+            'details': details, 'origins': voucher_split_origins(tenant_id, wanted.get('SUPPLIER_PAYMENT', ()))}
+
+
+#: صنف المستحق ← كلمته في وسم أصل سند «الزيادة».
+_SPLIT_KIND_WORD = {'clearance': 'تخليص', 'local': 'إرسالية'}
+
+
+def voucher_split_origins(tenant_id: int, voucher_ids) -> dict:
+    """{سند الصرف: أصله} لسندات «الزيادة» (`SupplierPayment.split_from_*`) — بالدفعة، ومستقلاً
+    عن نصّ الملاحظة.
+
+    ``{kind, doc_id, payment_id, shipment_id, key, label, amount, paid, due}``: ``label`` وسم
+    المستحق («تخليص SH-0013 — شحنة جوتو»)، و``key`` مفتاح مرساته (سطر «فُصلت إلى سند» في
+    مجموعته)، و``paid`` ما دُفع أصلاً (الدفعة بعد الفصل + كلّ ما فُصل منها؛ والسند وحده حين
+    لا دفعة)، و``due`` مستحقّه الآن. مبالغ بالعملة الأساسية — الفصل لا يكون بغيرها.
+    """
+    from logistics.models import LocalShipment, LocalShipmentPayment, LogisticsClearance, LogisticsClearancePayment
+    from sales.models import SupplierPayment
+
+    vouchers = list(SupplierPayment.objects.filter(
+        tenant_id=tenant_id, pk__in=voucher_ids, split_from_kind__in=tuple(_SPLIT_KIND_WORD),
+        split_from_doc_id__isnull=False,
+    ).values_list('pk', 'amount', 'split_from_kind', 'split_from_doc_id', 'split_from_payment_id'))
+    if not vouchers:
+        return {}
+
+    def wanted(kind: str, col: int) -> set:
+        return {v[col] for v in vouchers if v[2] == kind and v[col]}
+
+    ship_deals = 'deals__partner'
+    docs = {
+        'clearance': {c.pk: c for c in LogisticsClearance.objects.filter(
+            tenant_id=tenant_id, pk__in=wanted('clearance', 3),
+        ).select_related('shipment').prefetch_related(f'shipment__{ship_deals}')},
+        'local': {ls.pk: ls for ls in LocalShipment.objects.filter(
+            tenant_id=tenant_id, pk__in=wanted('local', 3),
+        ).select_related('shipment', 'clearance__shipment').prefetch_related(
+            f'shipment__{ship_deals}', f'clearance__shipment__{ship_deals}')},
+    }
+    paid_now = {
+        'clearance': dict(LogisticsClearancePayment.objects.filter(
+            tenant_id=tenant_id, pk__in=wanted('clearance', 4)).values_list('pk', 'amount')),
+        'local': dict(LocalShipmentPayment.objects.filter(
+            tenant_id=tenant_id, pk__in=wanted('local', 4)).values_list('pk', 'amount')),
+    }
+    # كلّ ما فُصل من الدفعة — قد تُفصل مرّتين (لحظة الترحيل ثم بتعديل الاستحقاق).
+    split_out = {
+        (kind, pid): _money(total)
+        for kind, pid, total in SupplierPayment.objects.filter(
+            tenant_id=tenant_id, split_from_payment_id__in={v[4] for v in vouchers if v[4]},
+        ).values('split_from_kind', 'split_from_payment_id').annotate(t=Sum('amount'))
+        .values_list('split_from_kind', 'split_from_payment_id', 't')
+    }
+    dues: dict[tuple, Decimal] = {}
+    out = {}
+    for voucher_id, amount, kind, doc_id, payment_id in vouchers:
+        obj = docs[kind].get(doc_id)
+        if obj is None:
+            continue
+        if (kind, doc_id) not in dues:
+            dues[(kind, doc_id)] = accrual_status(kind, obj)['due']
+        anchor = _anchor_of(kind, obj)
+        payment_amount = paid_now[kind].get(payment_id) if payment_id else None
+        paid = _money(amount) if payment_amount is None else (
+            _money(payment_amount) + split_out.get((kind, payment_id), _money(amount)))
+        out[voucher_id] = {
+            'kind': kind, 'doc_id': doc_id, 'payment_id': payment_id if payment_amount is not None else None,
+            'shipment_id': anchor['open']['shipment_id'], 'key': anchor['key'],
+            'label': f"{_SPLIT_KIND_WORD[kind]} {anchor['label']}", 'amount': str(_money(amount)),
+            'paid': str(paid), 'due': str(dues[(kind, doc_id)]),
+        }
+    return out
 
 
 #: الصنف ← حقل الطرف الدائن على المستند.
@@ -685,12 +763,15 @@ def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
                 'date': date.isoformat() if date else None, 'amount': str(_money(amount)),
                 'currency_code': currency_code, 'base': str(_money(base)), **extra}
 
-    for voucher, free, _base in party_unallocated_vouchers(tenant_id, partner_id):
+    unallocated = party_unallocated_vouchers(tenant_id, partner_id)
+    origins = voucher_split_origins(tenant_id, [voucher.pk for voucher, _free, _base in unallocated])
+    for voucher, free, _base in unallocated:
         from_adjust = min(free, _money(voucher.adjust_surplus))
         for bucket, part, why in ((surplus_items, from_adjust, " — خفض مستحق"), (on_items, free - from_adjust, "")):
             if part > 0:
                 bucket.append(item('voucher', voucher.pk, f"سند صرف #{voucher.pk}{why}", voucher.payment_date,
-                                   part, code_of(voucher), _payment_base(voucher, part)))
+                                   part, code_of(voucher), _payment_base(voucher, part),
+                                   split_origin=origins.get(voucher.pk)))
     for note, free, base in party_unallocated_notes(tenant_id, partner_id):
         surplus_items.append(item('note', note.pk, f"إشعار {note.note_number}", note.note_date,
                                   free, code_of(note), base))
@@ -978,4 +1059,5 @@ __all__ = [
     'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
     'ACCRUAL_ADJUST_TYPE', 'accrual_journal_ids', 'adjustment_journal_ids', 'party_on_account_summary',
     'note_journal_ids', 'party_unallocated_notes', 'party_unallocated_vouchers', 'allocate_note_to_accrual', 'note_accrual_allocation_rows',
+    'voucher_split_origins',
 ]

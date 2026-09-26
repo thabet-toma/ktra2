@@ -545,7 +545,7 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         # وفي كشفه يقول ممّ استُردّ.
         rows = self.client.get(f"/api/partners/{self.broker.pk}/statement/", **self.h).data["results"]
         (receipt,) = [r for r in rows if r["reference_type"] == "CUSTOMER_PAYMENT"]
-        self.assertEqual(receipt["details"], [f"استرداد من إشعار {note['note_number']}: 942.96"])
+        self.assertEqual(receipt["details"], [{"text": f"استرداد من إشعار {note['note_number']}", "amount": "942.96"}])
 
     # ── الصلاحيات والعزل ───────────────────────────────────────────────────
     def test_finance_permissions_gate_the_notes(self):

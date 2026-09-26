@@ -118,6 +118,7 @@ import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { PostedTextFields } from "../shared/PostedTextDialog";
 import { FieldError } from "../ui/FieldError";
 import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 import {
@@ -4131,7 +4132,14 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             // task18: إعادة تبويب «ملاحظات» (نُقل سابقاً للأسفل) — المفتاح يطابق activeTabKey الافتراضي.
             key: "notes",
             label: "ملاحظات",
-            content: (
+            // المرحّلة: الملاحظة وحدها تُعدَّل (`core/posted_text.py`) — وذيل وصف قيدها يتبعها.
+            content: isPosted && draftId != null ? (
+              <PostedTextFields
+                doc={{ kind: "sales_invoice", id: draftId }}
+                fields={[{ key: "notes", label: "ملاحظات الفاتورة", value: notes, multiline: true }]}
+                onSaved={(values) => setNotes(values.notes)}
+              />
+            ) : (
               <textarea
                 className="ktra-input"
                 style={{ width: "100%", minHeight: "90px" }}

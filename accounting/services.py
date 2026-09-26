@@ -589,6 +589,41 @@ def _truncate_for_field(value, field_name: str):
     return text[:max_length] if max_length else text
 
 
+def rewrite_journal_texts(tenant, *, journal_ids=None, reference=None, header=None, line=None,
+                          user=None, source: str = "") -> int:
+    """نصُّ قيودٍ مرحّلة وحده — حين تُعدَّل ملاحظة مستندٍ مرحَّل اشتُقّ منها وصفُ قيده
+    (`core.posted_text`). يُرجع عدد الأوصاف التي تغيّرت.
+
+    القيود: `journal_ids` أو `reference=(reference_type, reference_id)` — محصورةً بالشركة.
+    `header(وصف) -> وصفٌ جديد | None` و`line(سطر) -> وصفٌ جديد | None`: None = لا يُمسّ.
+    `update()` لا `save()`: حارس `JournalHeader.save` يمنع تعديل القيد المرحّل كلّه، وهذا
+    عمود الوصف وحده — لا مبلغ ولا حساب ولا تاريخ ولا طرف. كلّ تغييرٍ في سجلّ التدقيق.
+    """
+    journals = JournalHeader.objects.filter(tenant=tenant)
+    if journal_ids is not None:
+        journals = journals.filter(pk__in=[j for j in journal_ids if j])
+    elif reference is not None:
+        journals = journals.filter(reference_type=reference[0], reference_id=reference[1])
+    else:
+        return 0
+    changed = 0
+    for journal in journals.prefetch_related("lines"):
+        new = header(journal.description or "") if header else None
+        if new is not None and new != (journal.description or ""):
+            JournalHeader.objects.filter(pk=journal.pk).update(description=new[:500])
+            create_audit_log(tenant, user, "UPDATE", "JournalHeader", journal.pk,
+                             f"{source}: الوصف «{journal.description}» ← «{new[:500]}» — النصّ وحده")
+            changed += 1
+        for jl in (journal.lines.all() if line else ()):
+            new = line(jl)
+            if new is not None and new != (jl.description or ""):
+                JournalLine.objects.filter(pk=jl.pk).update(description=new[:500])
+                create_audit_log(tenant, user, "UPDATE", "JournalLine", jl.pk,
+                                 f"{source}: وصف السطر «{jl.description}» ← «{new[:500]}» — النصّ وحده")
+                changed += 1
+    return changed
+
+
 def create_audit_log(tenant, user, action, model_name, object_id, change_details):
     try:
         auth_user = user if user and user.is_authenticated else None
@@ -4175,7 +4210,7 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
             invoice_ids.add(inv_id)
 
     # المخلّص/الوكيل/الناقل: مستحقّاتهم ودفعاتها وسنداتها الموزَّعة، ودفعات الصفقة.
-    logistics = {"anchors": {}, "vouchers": {}, "notes": {}, "deal_invoices": {}, "details": {}}
+    logistics = {"anchors": {}, "vouchers": {}, "notes": {}, "deal_invoices": {}, "details": {}, "origins": {}}
     #: سند قبض الاسترداد من الدائن ← [(وسم المصدر، المبلغ)] — ما أطفأه من فائضه.
     refunds: dict[int, list[tuple[str, Decimal]]] = {}
     if is_supplier and tenant_id is not None:
@@ -4267,6 +4302,8 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
         row["details"] = []
         row["paid_on"] = None
         row["open_target"] = None
+        # سند «الزيادة»: الدفعة التي فُصل منها ومستحقّها — مستقلاً عن نصّ الملاحظة.
+        row["split_origin"] = None
         if not ref_id:
             continue
         ref = (row["reference_type"], ref_id)
@@ -4276,13 +4313,15 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
             row["details"] = facts["lines"]
             row["paid_on"] = facts["paid_on"]
         if ref_id in refunds and row["reference_type"] == "CUSTOMER_PAYMENT":
-            row["details"] = [f"استرداد من {source}: {amount}" for source, amount in refunds[ref_id]]
+            row["details"] = [
+                {"text": f"استرداد من {source}", "amount": str(amount)} for source, amount in refunds[ref_id]]
         if row["reference_type"] == invoice_type:
             row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
             row["reference_kind"] = kinds.get(ref_id)
             # المرتجعُ يرسو على أصله؛ وغيرُه على نفسه كما كان.
             link_to(row, [invoice_anchor(ref_id)])
         elif row["reference_type"] == payment_type:
+            row["split_origin"] = logistics["origins"].get(ref_id)
             targets = [
                 {**invoice_anchor(inv_id), "amount": amount}
                 for inv_id, amount in by_payment.get(ref_id, [])

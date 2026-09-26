@@ -11,7 +11,9 @@ import {
   statementMovementTone,
   statementToneRowClass,
   withStatementLinkSublines,
+  statementDetailText,
 } from "./entityLinks.ts";
+import { formatMoney } from "./formatNumber.ts";
 
 /* ── A1 (THA-195): القفزة الثالثة — من القيد إلى مستنده المصدر ── */
 
@@ -160,6 +162,34 @@ test("سند على ثلاثة مستحقّات: صفّه مرّة واحدة و
   ]);
   // لا أثر على الرصيد: لا مدين ولا دائن ولا رصيد جارٍ.
   for (const r of infos) assert.deepEqual([r.debit, r.credit, r.running_balance], ["", "", ""]);
+});
+
+test("statementDetailText: المبلغ يُنسَّق في الواجهة، والسطر بلا مبلغ نصّه وحده", () => {
+  assert.equal(statementDetailText({ text: "وُزِّع على تخليص #3", amount: "2045.00" }),
+    `وُزِّع على تخليص #3: ${formatMoney("2045.00")}`);
+  assert.equal(statementDetailText({ text: "على تخليص #3", amount: null }), "على تخليص #3");
+});
+
+test("withStatementLinkSublines: سند «الزيادة» يُعلَن في مجموعة المستحق الذي فُصل منه", () => {
+  const origin = { key: "LOGISTICS_CLEARANCE:3", amount: "2527.00" };
+  const rows = [
+    { id: 1, link_key: "LOGISTICS_CLEARANCE:3", debit: "0", credit: "7073", running_balance: "7073" },
+    { id: 2, link_key: "LOGISTICS_CLEARANCE:10", debit: "0", credit: "3000", running_balance: "10073" },
+    // موزَّعٌ على تخليصٍ آخر، وأصله تخليص #3.
+    { id: 3, link_key: "LOGISTICS_CLEARANCE:10", debit: "2527", credit: "0", running_balance: "7546",
+      split_origin: origin },
+    // موزَّعٌ على مستحقّه نفسه — لا سطر: هو في مجموعته أصلاً.
+    { id: 4, link_key: "LOGISTICS_CLEARANCE:3", debit: "10", credit: "0", running_balance: "7536",
+      split_origin: origin },
+    // أصله خارج الصفحة — لا سطر.
+    { id: 5, link_key: null, debit: "5", credit: "0", running_balance: "7531",
+      split_origin: { key: "LOGISTICS_CLEARANCE:99", amount: "5.00" } },
+  ];
+  const infos = withStatementLinkSublines(rows).slice(rows.length);
+  assert.deepEqual(infos.map((r) => [r.id, r.link_key, r.info_amount, r.info_kind]), [
+    ["split-3", "LOGISTICS_CLEARANCE:3", "2527.00", "split"],
+  ]);
+  assert.deepEqual([infos[0].debit, infos[0].credit, infos[0].running_balance], ["", "", ""]);
 });
 
 /* ── القيد المعكوس وعكسه: سطرٌ رماديٌّ واحد ورصيدٌ مطويّ ── */

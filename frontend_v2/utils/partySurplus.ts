@@ -6,6 +6,8 @@
  * تختار ما يُطفئه السند منها؛ والمبالغ بعملة المصدر = عملة السند.
  */
 
+import { formatMoney } from "./formatNumber.ts";
+
 export type SurplusSource = "note" | "supplier_payment" | "customer_payment";
 
 export type SurplusRow = {
@@ -111,10 +113,46 @@ export type BucketItem = {
   currency_code: string | null;
   base: string;
   shipment_id?: number | null;
+  /** سند «الزيادة»: الدفعة التي فُصل منها. */
+  split_origin?: SplitOrigin | null;
+};
+
+/**
+ * أصل سند «الزيادة» (`party_accruals.voucher_split_origins`): دفعةٌ زادت على مستحقّها فُصل
+ * زائدها سنداً — من حقول السند لا من نصّ ملاحظته. المبالغ بالعملة الأساسية.
+ */
+export type SplitOrigin = {
+  kind: "clearance" | "local";
+  doc_id: number;
+  /** الدفعة الأصلية — null حين كانت الدفعة كلّها زائدة فلم تُنشأ. */
+  payment_id: number | null;
+  shipment_id: number | null;
+  /** مرساة المستحق في كشف الحساب — سطر «فُصلت إلى سند» في مجموعته. */
+  key: string;
+  label: string;
+  amount: string;
+  /** ما دُفع أصلاً، ومستحقّ المستند الآن. */
+  paid: string;
+  due: string;
 };
 
 /** تبويب ملف الاستيراد الذي يعرض المستحقّ اللوجستي. */
 const ACCRUAL_TAB: Record<string, string> = { clearance: "clearance", local: "local", freight: "deals" };
+
+/** «زيادة دفعة تخليص SH-0013 — شحنة جوتو (دُفع 9,600 والمستحق 7,073)». */
+export function splitOriginText(origin: SplitOrigin): string {
+  return `زيادة دفعة ${origin.label} (دُفع ${formatMoney(origin.paid)} والمستحق ${formatMoney(origin.due)})`;
+}
+
+/** مصدر السند باختصار: «دفعة #4 على تخليص SH-0013 — …»، أو المستحق وحده بلا دفعة. */
+export function splitOriginSource(origin: SplitOrigin): string {
+  return origin.payment_id ? `دفعة #${origin.payment_id} على ${origin.label}` : origin.label;
+}
+
+/** الدفعة الأصلية تُفتح في تبويب مستحقّها بملف الشحنة. */
+export function splitOriginPath(origin: SplitOrigin): string | null {
+  return bucketItemPath({ source: origin.kind, id: origin.doc_id, shipment_id: origin.shipment_id });
+}
 
 /** مسار فتح مستند الخانة — السند والإشعار بشاشتيهما، والمستحقّ بتبويبه في ملف شحنته. */
 export function bucketItemPath(item: Pick<BucketItem, "source" | "id" | "shipment_id">): string | null {

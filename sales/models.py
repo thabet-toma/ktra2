@@ -963,6 +963,13 @@ class SupplierPayment(models.Model):
     adjust_surplus = models.DecimalField(
         max_digits=18, decimal_places=2, default=0, db_column="AdjustSurplus",
     )
+    # سند «الزيادة»: فُصل من دفعةٍ زادت على مستحقّها (`overpayment_split`) — أصله هنا لا في
+    # نصّ الملاحظة. الصنف (`clearance`/`local`) ومعرّف المستحق، ومعرّف الدفعة الأصلية حين
+    # وُجدت (دفعةٌ كلّها زائدة لحظة الترحيل لا تُنشئ دفعة). معرّفاتٌ لا FK: الدفعة من
+    # نموذجين، ودفعات الوكيل بالدولار لا تُفصل أصلاً.
+    split_from_kind = models.CharField(max_length=10, blank=True, default="", db_column="SplitFromKind")
+    split_from_doc_id = models.IntegerField(null=True, blank=True, db_column="SplitFromDocID")
+    split_from_payment_id = models.IntegerField(null=True, blank=True, db_column="SplitFromPaymentID")
     notes = models.TextField(null=True, blank=True, db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
 

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **920**
+عدد النقاط: **922**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -412,6 +412,7 @@
 | `/api/logistics/clearances/{pk}/attachments/{attachment_id}/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/pay_from_cashbox/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/payments/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
+| `/api/logistics/clearances/{pk}/payments/{payment_id}/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/post-to-accounting/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/unpost-accrual/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/unpost-payment/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
@@ -443,6 +444,7 @@
 | `/api/logistics/local-shipments/{pk}/import-to-invoice/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/pay_from_cashbox/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/payments/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
+| `/api/logistics/local-shipments/{pk}/payments/{payment_id}/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/post-to-accounting/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/unpost/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/payments/` | `LogisticsPaymentViewSet` | `logistics/views/deals.py` |

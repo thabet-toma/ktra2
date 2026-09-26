@@ -214,6 +214,15 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
     logistics_allocations = LogisticsAccrualAllocationSerializer(many=True, read_only=True)
     allocated_amount = serializers.SerializerMethodField()
     unallocated_amount = serializers.SerializerMethodField()
+    # سند «الزيادة»: الدفعة التي فُصل منها ومستحقّها (`voucher_split_origins`) — None لغيره.
+    split_origin = serializers.SerializerMethodField()
+
+    def get_split_origin(self, obj) -> dict | None:
+        if not obj.split_from_kind:
+            return None
+        from logistics.domain.party_accruals import voucher_split_origins
+
+        return voucher_split_origins(obj.tenant_id, [obj.pk]).get(obj.pk)
 
     def _allocated(self, obj) -> Decimal:
         return sum(
@@ -245,19 +254,22 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             'notes',
             'cheques', 'attached_cheques',
             'allocations', 'logistics_allocations', 'allocated_amount', 'unallocated_amount',
-            'created_at',
+            'split_origin', 'created_at',
         ]
         read_only_fields = ['id', 'is_posted', 'journal', 'created_at',
                             'attached_cheques', 'allocations', 'logistics_allocations',
-                            'allocated_amount', 'unallocated_amount']
+                            'allocated_amount', 'unallocated_amount', 'split_origin']
 
     def validate(self, attrs):
+        # PATCH جزئي (ملاحظة المسودة وحدها): المبلغ والتاريخ من السند نفسه.
+        current = self.instance
         try:
-            if Decimal(str(attrs.get('amount', 0))) <= 0:
+            amount = attrs.get('amount', current.amount if current else 0)
+            if Decimal(str(amount)) <= 0:
                 raise serializers.ValidationError({'amount': 'المبلغ يجب أن يكون أكبر من صفر.'})
         except (InvalidOperation, TypeError):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
-        if not attrs.get('payment_date'):
+        if not (attrs.get('payment_date') or (current.payment_date if current else None)):
             raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
         # T-DEFACC: الصندوق يُملأ من افتراضي الشركة بدل رفض السند لفراغه.
         attrs = apply_default_cash_account(self, attrs)

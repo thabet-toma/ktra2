@@ -25,6 +25,7 @@ from core.activity import (
 from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
+from core.posted_text import PostedTextEditMixin
 from core.tenant_utils import get_branch, get_tenant
 from core.terminology import term as tenant_term
 from .models import (
@@ -127,7 +128,25 @@ def _invoice_line_snapshot(invoice):
     )
 
 
-class SalesInvoiceViewSet(PagePartnerBalanceMixin, viewsets.ModelViewSet):
+class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets.ModelViewSet):
+    # المرحّلة: ملاحظتها وحدها تُعدَّل (`core.posted_text`) — وذيل وصف قيدها يتبعها.
+    posted_text_entity_type = "sales_invoice"
+    posted_text_perm = "sales.invoice.edit"
+
+    def is_posted_document(self, instance) -> bool:
+        return instance.status == SalesInvoice.STATUS_POSTED
+
+    def posted_text_label(self, instance) -> str:
+        return instance.invoice_number
+
+    def posted_text_partner_ids(self, instance) -> list:
+        return [instance.customer_id]
+
+    def sync_posted_text(self, instance, before) -> None:
+        from sales.services.flow import sync_sales_invoice_journal_text
+
+        sync_sales_invoice_journal_text(instance, before, user=self.request.user)
+
     # P0-5: ترقيم إلزامي — SalesInvoicesPage مُرقَّمة أصلاً، والمحرّرات على
     # نقطة lookup المحدودة (مصفوفة خام بسقف 500، لا يمسّها ترقيم القائمة).
     pagination_class = EnforcedPageNumberPagination
@@ -1406,7 +1425,18 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
         return Response(DeliveryOrderSerializer(d).data)
 
 
-class CustomerPaymentViewSet(viewsets.ModelViewSet):
+class CustomerPaymentViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
+    # المرحَّل: ملاحظته وحدها تُعدَّل — وأوّل وصف قيده يتبعها (`customer_payment_note_text`).
+    posted_text_entity_type = "customer_payment"
+
+    def posted_text_label(self, instance) -> str:
+        return getattr(instance, "payment_number", "") or f"#{instance.pk}"
+
+    def sync_posted_text(self, instance, before) -> None:
+        from sales.services.flow import sync_customer_payment_journal_text
+
+        sync_customer_payment_journal_text(instance, before, user=self.request.user)
+
     # P0-5: ترقيم إلزامي — الشاشة الرئيسية على أحدث 200، والاستدعاءات
     # المفلترة بشريك بسقف صريح.
     pagination_class = EnforcedPageNumberPagination
@@ -2082,13 +2112,27 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
         return Response(SalesOrderSerializer(order).data)
 
 
-class CreditDebitNoteViewSet(viewsets.ModelViewSet):
+class CreditDebitNoteViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
     """إشعارات مدينة/دائنة على أيّ طرف — قسم المالية.
 
     الصلاحيات من دفتر اليومية: العرض `accounting.journal.view`، الإنشاء والتعديل
     والحذف والإلغاء `accounting.journal.create`، الترحيل `.post`، وإلغاؤه `.unpost`.
-    المسودة وحدها تُعدَّل أو تُحذف؛ المرحَّل يُلغى ترحيله أولاً.
+    المسودة وحدها تُعدَّل أو تُحذف؛ المرحَّل يُلغى ترحيله أولاً — إلا سببه
+    (`core.posted_text`)، ووصف سطر الحساب المقابل في قيده يتبعه.
     """
+    posted_text_entity_type = "credit_debit_note"
+    posted_text_perm = "accounting.journal.create"
+
+    def is_posted_document(self, instance) -> bool:
+        return instance.status == CreditDebitNote.STATUS_POSTED
+
+    def posted_text_label(self, instance) -> str:
+        return instance.note_number
+
+    def sync_posted_text(self, instance, before) -> None:
+        from sales.services.orders import sync_note_journal_text
+
+        sync_note_journal_text(instance, before, user=self.request.user)
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]

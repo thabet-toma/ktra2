@@ -101,6 +101,8 @@ class OverpaymentSplitAtPostingTest(_Base):
         self.assertEqual(str(voucher.payment_date), "2026-07-01")
         self.assertEqual(voucher.cash_or_bank_account_id, self.cash.id)
         self.assertIn("زيادة دفعة", voucher.notes)
+        # أصله في حقوله لا في الملاحظة — والدفعة التي أُنشئت بعده مربوطةٌ به.
+        self.assertEqual((voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id), ("clearance", self.clearance.pk, pay.pk))
         self.assertFalse(voucher.allocations.exists())
         self.assertFalse(voucher.logistics_allocations.exists())
         self.assertEqual(D(res.json()["on_account_voucher"]["amount"]), D("2527.00"))
@@ -132,7 +134,10 @@ class OverpaymentSplitAtPostingTest(_Base):
         res = self._pay_clearance(100)
         self.assertEqual(res.status_code, 201, res.content)
         self.assertEqual(LogisticsClearancePayment.objects.filter(clearance=self.clearance).count(), 1)
-        self.assertEqual(self._vouchers(self.broker).get().amount, D("100.00"))
+        voucher = self._vouchers(self.broker).get()
+        self.assertEqual(voucher.amount, D("100.00"))
+        # الدفعة كلّها زائدة: لا دفعة تُنشأ — الأصل المستحق وحده.
+        self.assertEqual((voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id), ("clearance", self.clearance.pk, None))
         self.assertEqual(self._net(self.cash.id), D("-7173.00"))
 
     def test_local_shipment_overpayment_splits_to_the_carrier(self):
@@ -142,8 +147,11 @@ class OverpaymentSplitAtPostingTest(_Base):
             {"amount": "450", "cash_box_external_id": self.box.external_id, "payment_date": "2026-07-02"},
             format="json", **self.h)
         self.assertEqual(res.status_code, 201, res.content)
-        self.assertEqual(LocalShipmentPayment.objects.get(local_shipment=self.local).amount, D("400.00"))
-        self.assertEqual(self._vouchers(self.carrier).get().amount, D("50.00"))
+        payment = LocalShipmentPayment.objects.get(local_shipment=self.local)
+        self.assertEqual(payment.amount, D("400.00"))
+        voucher = self._vouchers(self.carrier).get()
+        self.assertEqual(voucher.amount, D("50.00"))
+        self.assertEqual((voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id), ("local", self.local.pk, payment.pk))
 
     def test_accrual_status_endpoint_feeds_the_warning(self):
         self._accrue_clearance()
@@ -207,6 +215,7 @@ class SplitLogisticsOverpaymentsCommandTest(_Base):
         self.assertTrue(voucher.is_posted)
         self.assertEqual(str(voucher.payment_date), "2026-07-01")
         self.assertEqual(voucher.cash_or_bank_account_id, self.cash.id)
+        self.assertEqual((voucher.split_from_kind, voucher.split_from_doc_id, voucher.split_from_payment_id), ("clearance", self.clearance.pk, pay.pk))
         self.assertEqual(self._net(self.broker.linked_account_id, self.broker.id), broker_before)
         self.assertEqual(self._net(self.cash.id), box_before)
         self.assertTrue(AccountingAuditLog.objects.filter(

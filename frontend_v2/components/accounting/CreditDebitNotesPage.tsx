@@ -32,6 +32,7 @@ import { KitAutocomplete, type KitAutocompleteOption } from "../kit/KitAutocompl
 import { KitDocumentShell, useKitKeymap, useRecordNavigation } from "../kit";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { PostedTextFields } from "../shared/PostedTextDialog";
 import { NoteAllocationModal } from "../shared/NoteAllocationModal";
 import { AccountTreeField } from "./AccountTreePicker";
 import { accountingApi } from "../../services/accountingApi";
@@ -173,6 +174,8 @@ export const CreditDebitNotesPage: React.FC = () => {
   const amount = Number(formAmount) || 0;
   const selectedNote = notes.find((n) => n.id === selectedId);
   const readOnly = Boolean(selectedNote && selectedNote.status !== "draft");
+  // المرحَّل: سببه وحده يُعدَّل (`core/posted_text.py`) — ووصف سطر الحساب المقابل في قيده يتبعه.
+  const postedNote = selectedNote?.status === "posted" ? selectedNote : null;
 
   const loadAll = useCallback(async () => {
     setLoading(true);
@@ -915,17 +918,29 @@ export const CreditDebitNotesPage: React.FC = () => {
                     {defaultHint && <span className="text-[11px] ktra-text-state">{defaultHint}</span>}
                   </label>
 
-                  <label className="col-span-2 block">
-                    <span className="mb-1 block text-xs font-medium">السبب / البيان</span>
-                    <textarea
-                      data-testid="note-reason"
-                      value={formReason}
-                      onChange={(e) => { markTouched(); setFormReason(e.target.value); }}
-                      className="w-full rounded border p-2 text-sm"
-                      rows={3}
-                    />
-                  </label>
+                  {!postedNote && (
+                    <label className="col-span-2 block">
+                      <span className="mb-1 block text-xs font-medium">السبب / البيان</span>
+                      <textarea
+                        data-testid="note-reason"
+                        value={formReason}
+                        onChange={(e) => { markTouched(); setFormReason(e.target.value); }}
+                        className="w-full rounded border p-2 text-sm"
+                        rows={3}
+                      />
+                    </label>
+                  )}
                 </fieldset>
+                {postedNote && (
+                  <div className="mt-3">
+                    <PostedTextFields
+                      doc={{ kind: "credit_debit_note", id: postedNote.id }}
+                      fields={[{ key: "reason", label: "السبب / البيان", value: postedNote.reason, multiline: true }]}
+                      disabled={!canCreate}
+                      onSaved={(values) => { setFormReason(values.reason); void loadAll(); }}
+                    />
+                  </div>
+                )}
 
                 <div className="mt-4 flex justify-end gap-3">
                   <button onClick={() => setShowForm(false)} className="rounded-lg px-4 py-2 ktra-bg-panel hover:ktra-bg-grid-head">

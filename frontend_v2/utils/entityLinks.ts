@@ -9,6 +9,7 @@
 // وهو محرّكُ ESM لا حزمةُ Vite — لا يحلّ امتداداً محذوفاً فيسقط الاختبارُ بـ
 // `ERR_MODULE_NOT_FOUND` لا بتأكيدٍ فاشل، فيبدو العطبُ في الاختبار لا في الاستيراد.
 import { invoiceKindLabel } from "./documentTypeLabels.ts";
+import { formatMoney } from "./formatNumber.ts";
 
 export function invoicePathForReference(
   referenceType?: string | null,
@@ -233,7 +234,17 @@ export function customerPath(): string {
   return "/sales/customers";
 }
 
-/** مستندٌ وُزِّع عليه سندٌ واحدٌ مع غيره — من `link_targets` في كشف الحساب. */
+/** سطر تفاصيل حركة الدائن في الكشف (`party_accruals._fact`): نصّه، ومبلغه إن كان له مبلغ. */
+export interface StatementDetailLine {
+  text: string;
+  amount?: string | null;
+}
+
+/** «وُزِّع على تخليص #3 · مطالبة CLM-778: 2,045» — المبلغ منسَّقاً هنا لا في الخادم. */
+export function statementDetailText(line: StatementDetailLine): string {
+  return line.amount != null && line.amount !== "" ? `${line.text}: ${formatMoney(line.amount)}` : line.text;
+}
+
 /** ما تفتحه حركة الدائن: المستحق اللوجستي بتبويبه في ملف شحنته (`party_accruals._anchor_of`). */
 export interface AccrualOpenTarget {
   kind: "clearance" | "freight" | "local";
@@ -241,6 +252,7 @@ export interface AccrualOpenTarget {
   shipment_id: number | null;
 }
 
+/** مستندٌ وُزِّع عليه سندٌ واحدٌ مع غيره — من `link_targets` في كشف الحساب. */
 export interface StatementLinkTarget {
   key: string;
   label: string;
@@ -253,20 +265,41 @@ interface StatementLinkRow {
   id: number | string;
   link_key?: string | null;
   link_targets?: StatementLinkTarget[];
+  /** سند «الزيادة»: مرساة المستحق الذي فُصل منه ومبلغه (`split_origin` في الكشف). */
+  split_origin?: { key: string; amount: string } | null;
 }
+
+/** السطر المعلوماتي: `allocation` ما وُزِّع من السند على المستند، `split` زيادةٌ فُصلت منه إلى السند. */
+export type StatementInfoKind = "allocation" | "split";
 
 /**
  * سندٌ موزَّع على أكثر من مستند يبقى صفّاً واحداً في مكانه (الرصيد الجاري لا يتكرّر)،
  * ويُلحق داخل مجموعة كل مستندٍ ظاهرٍ في الصفحة سطراً معلوماتياً بلا مدين/دائن ولا
  * رصيد (`info_amount` = ما وُزِّع عليه). مستندٌ خارج الصفحة لا سطر له — مجموعةٌ من
- * سطرٍ فرعيٍّ وحده بلا مستندها تضلّل.
+ * سطرٍ فرعيٍّ وحده بلا مستندها تضلّل. وسند «الزيادة» يُلحق مجموعةَ المستحق الذي فُصل
+ * منه سطراً «فُصلت إلى سند» (`info_kind: "split"`) — إلا إن كان موزَّعاً عليه نفسه.
  */
 export function withStatementLinkSublines<T extends StatementLinkRow>(
   rows: T[],
-): Array<T & { info_amount?: string }> {
+): Array<T & { info_amount?: string; info_kind?: StatementInfoKind }> {
   const anchors = new Set(rows.map((r) => r.link_key).filter(Boolean));
-  const sublines: Array<T & { info_amount?: string }> = [];
+  const sublines: Array<T & { info_amount?: string; info_kind?: StatementInfoKind }> = [];
   for (const row of rows) {
+    const origin = row.split_origin;
+    if (origin && anchors.has(origin.key) && row.link_key !== origin.key) {
+      sublines.push({
+        ...row,
+        id: `split-${row.id}`,
+        debit: "",
+        credit: "",
+        balance_before: "",
+        running_balance: "",
+        link_key: origin.key,
+        link_targets: [],
+        info_amount: origin.amount,
+        info_kind: "split",
+      });
+    }
     for (const target of row.link_targets ?? []) {
       if (!anchors.has(target.key)) continue;
       sublines.push({
@@ -279,6 +312,7 @@ export function withStatementLinkSublines<T extends StatementLinkRow>(
         link_key: target.key,
         link_targets: [],
         info_amount: target.amount,
+        info_kind: "allocation",
       });
     }
   }

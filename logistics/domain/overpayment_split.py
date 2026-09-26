@@ -58,9 +58,13 @@ def split_incoming(kind: str, obj, amount) -> tuple[Decimal, Decimal]:
 
 
 def create_on_account_voucher(*, tenant, partner, amount, currency, payment_date,
-                              cash_account_id, doc_label: str, user=None, adjust_surplus=ZERO):
+                              cash_account_id, doc_label: str, split_kind: str, split_doc_id: int,
+                              split_payment_id: int | None = None, user=None, adjust_surplus=ZERO):
     """سند صرفٍ مرحَّل «تحت الحساب» بالزائد — بلا توزيع ولا استهلاك تلقائي.
 
+    `split_kind`/`split_doc_id`/`split_payment_id`: أصل السند (`SupplierPayment.split_from_*`) —
+    يُعرض في كشف الحساب والبطاقة مستقلاً عن الملاحظة. الدفعة None حين تُنشأ بعده (يملؤها
+    المستدعي) أو لا تُنشأ أصلاً (الدفعة كلّها زائدة).
     `adjust_surplus`: ما منه زائدٌ لأن المستحق خُفِّض (فائضٌ لا دفعة — `SupplierPayment.adjust_surplus`).
     """
     from sales.models import SupplierPayment
@@ -70,6 +74,7 @@ def create_on_account_voucher(*, tenant, partner, amount, currency, payment_date
         tenant=tenant, partner=partner, payment_date=payment_date, amount=_money(amount),
         currency=currency, exchange_rate=Decimal('1'), cash_or_bank_account_id=cash_account_id,
         notes=ON_ACCOUNT_NOTE.format(label=doc_label), adjust_surplus=_money(adjust_surplus),
+        split_from_kind=split_kind, split_from_doc_id=split_doc_id, split_from_payment_id=split_payment_id,
     )
     post_supplier_payment(voucher, user=user)
     logger.info("logistics.overpayment_voucher partner=%s voucher=%s amount=%s doc=%s",
@@ -175,6 +180,7 @@ def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None,
             tenant=payment.tenant, partner=party_line.partner, amount=excess,
             currency=payment.currency, payment_date=payment.payment_date,
             cash_account_id=box_line.account_id, doc_label=row['label'], user=user,
+            split_kind=kind, split_doc_id=obj.pk, split_payment_id=payment.pk,
             adjust_surplus=min(_money(adjust_surplus), excess),
         )
         create_audit_log(

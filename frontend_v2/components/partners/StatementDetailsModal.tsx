@@ -12,7 +12,9 @@ import {
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import type { PurchaseInvoiceDto } from "../../types/purchaseInvoice";
-import { referenceTypeLabel, entityPathForReference } from "../../utils/entityLinks";
+import {
+  referenceTypeLabel, entityPathForReference, statementDetailText, type StatementDetailLine,
+} from "../../utils/entityLinks";
 import { formatMoney } from "../../utils/formatNumber";
 import { clientLogger } from "../../services/logger";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -34,7 +36,7 @@ export interface StatementMovement {
   debit: string;
   credit: string;
   /** حركة الدائن: سطورُ تفاصيلها من الخادم (المستحق ورقم مطالبته، التوزيع، الاسترداد). */
-  details?: string[];
+  details?: StatementDetailLine[];
   paid_on?: string | null;
   /** مسار مستحقّها حين لا مسار لنوع المرجع نفسه. */
   open_path?: string | null;
@@ -262,7 +264,7 @@ export const StatementDetailsModal: React.FC<{
           {/* حركة الدائن — تفاصيلها من الخادم */}
           {hasDetails && (
             <ul className="space-y-1 rounded border border-[var(--ktra-border)] p-2">
-              {(movement.details ?? []).map((line, i) => <li key={i}>{line}</li>)}
+              {(movement.details ?? []).map((line, i) => <li key={i}>{statementDetailText(line)}</li>)}
               {movement.paid_on && <li>تاريخ الدفع: {formatDateLocalized(movement.paid_on)}</li>}
             </ul>
           )}

@@ -73,6 +73,7 @@ from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
 from core.mixins import BaseTenantViewSet
 from core.plans import enforce_limits
+from core.posted_text import PostedTextEditMixin
 from logistics.landed_cost import (
     import_invoices_from_clearance,
     preview_landed_import,
@@ -95,10 +96,27 @@ logger = logging.getLogger("logistics.views")
 
 
 
-class SupplierPaymentViewSet(BaseTenantViewSet):
+def _split_origin_note(payment) -> str:
+    """ذيل سجلّ النشاط لسند «الزيادة»: الدفعة التي فُصل منها — إلغاؤه أو حذفه لا يعيد
+    المبلغ إليها (الواجهة تنبّه بالمثل من `split_origin`)."""
+    if not payment.split_from_kind:
+        return ''
+    from logistics.domain.party_accruals import voucher_split_origins
+
+    origin = voucher_split_origins(payment.tenant_id, [payment.pk]).get(payment.pk)
+    if origin is None:
+        return ''
+    source = f"دفعة #{origin['payment_id']} على " if origin['payment_id'] else ''
+    return f" — سند زيادة فُصل من {source}{origin['label']}؛ لم يعُد إليها"
+
+
+class SupplierPaymentViewSet(PostedTextEditMixin, BaseTenantViewSet):
     # P0-5: ترقيم إلزامي — الشاشة الرئيسية أحدث 200، والمفلتر بمورد بسقف صريح.
     pagination_class = EnforcedPageNumberPagination
     serializer_class = SupplierPaymentSerializer
+    # المرحَّل: ملاحظته وحدها تُعدَّل (`core.posted_text`) — كان التعديل بلا حارسٍ يغيّر مبلغه
+    # وقيدُه كما هو. وصف قيده لا يحمل الملاحظة.
+    posted_text_entity_type = 'supplier_payment'
 
     def get_queryset(self):
         qs = SupplierPayment.objects.all().select_related(
@@ -193,10 +211,11 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
                     {'error': '؛ '.join(e.messages)},
                     status=status.HTTP_400_BAD_REQUEST,
                 )
+        origin_note = _split_origin_note(payment)
         response = super().destroy(request, *args, **kwargs)
         log_activity(
             action='delete', entity_type='supplier_payment', entity_id=payment_id,
-            entity_label=f'#{payment_id}', description='حذف سند صرف مورد',
+            entity_label=f'#{payment_id}', description='حذف سند صرف مورد' + origin_note,
             partner_ids=[partner_id], request=request,
         )
         return response
@@ -413,7 +432,8 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
         payment.refresh_from_db()
         log_activity(
             action='unpost', entity_type='supplier_payment', entity_id=payment.id,
-            entity_label=f'#{payment.id}', description='التراجع عن ترحيل سند صرف مورد',
+            entity_label=f'#{payment.id}',
+            description='التراجع عن ترحيل سند صرف مورد' + _split_origin_note(payment),
             partner_ids=[payment.partner_id], request=request,
         )
         ser = SupplierPaymentSerializer(payment, context={'request': request})

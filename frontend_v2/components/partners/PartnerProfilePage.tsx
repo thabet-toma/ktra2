@@ -5,7 +5,9 @@ import { apiGetObject } from '../../services/restApi';
 import { formatMoney, formatNumber, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
-import { bucketItemPath, type BucketItem } from '../../utils/partySurplus';
+import {
+  bucketItemPath, splitOriginPath, splitOriginSource, splitOriginText, type BucketItem, type SplitOrigin,
+} from '../../utils/partySurplus';
 import { relatedInvoiceTypeLabel, stockMovementReferenceLabel } from '../../utils/documentTypeLabels';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { KitDocumentShell, KitTab } from '../kit';
@@ -19,8 +21,9 @@ import { PartnerEditorModal } from './PartnerEditorModal';
 import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
-  withStatementLinkSublines, foldStatementReversals,
+  withStatementLinkSublines, foldStatementReversals, entityPathForReference, statementDetailText,
   type AccrualOpenTarget, type FoldedStatementRow, type StatementLinkTarget, type StatementReversalPair,
+  type StatementDetailLine, type StatementInfoKind,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import {
@@ -114,6 +117,10 @@ interface StatementRow {
   link_targets?: StatementLinkTarget[];
   /** السطر المعلوماتي داخل مجموعة المستند: ما وُزِّع عليه من السند، بلا أثر على الرصيد. */
   info_amount?: string;
+  /** `split`: زيادةٌ فُصلت من المستحق إلى سند — لا توزيع. */
+  info_kind?: StatementInfoKind;
+  /** سند «الزيادة»: الدفعة التي فُصل منها ومستحقّها — من حقوله لا من ملاحظته. */
+  split_origin?: SplitOrigin | null;
   /**
    * «SH-0017 — شحنة رقع» — وسم الشحنة الحيّ من مستند الحركة المرجعي (تخليص، إرسالية،
    * استحقاق شحن، دفعاتها، سند صرفٍ موزَّع عليها). القيد القديم يحمل الرقم وحده.
@@ -128,7 +135,7 @@ interface StatementRow {
   /** كشف الدولار: سطرٌ بلا مبلغ بالدولار — يُعرض بشيكله ولا يدخل الرصيد. */
   currency_missing?: boolean;
   /** حركة الدائن: على أيّ مستحقٍّ هي ورقم مطالبته، وما وُزِّع عليه السند أو استُردّ منه. */
-  details?: string[];
+  details?: StatementDetailLine[];
   /** تاريخ الدفعة المباشرة على المستحق. */
   paid_on?: string | null;
   /** المستحق الذي تُفتح عليه الحركة (التخليص/الإرسالية/الشحن في ملف شحنته). */
@@ -166,14 +173,38 @@ function rowOpenPath(row: Pick<StatementRow, 'open_target'>): string | null {
   return t ? bucketItemPath({ source: t.kind, id: t.id, shipment_id: t.shipment_id }) : null;
 }
 
-/** تفاصيل حركة الدائن تحت بيانها: المستحق ورقم مطالبته، والتوزيع أو الاسترداد، وتاريخ الدفع. */
+/** تفاصيل حركة الدائن تحت بيانها: أصل سند «الزيادة»، والمستحق ورقم مطالبته، والتوزيع أو
+ *  الاسترداد، وتاريخ الدفع. */
 function StatementRowDetails({ row }: { row: StatementRow }) {
-  if (!row.details?.length && !row.paid_on) return null;
+  const navigate = useNavigate();
+  if (!row.details?.length && !row.paid_on && !row.split_origin) return null;
+  const origin = row.split_origin;
+  const originPath = origin ? splitOriginPath(origin) : null;
   return (
     <div className="flex flex-col text-[10px] text-[var(--ktra-ink-soft)]">
-      {(row.details ?? []).map((line, i) => <span key={i}>{line}</span>)}
+      {origin && (originPath ? (
+        <button type="button" className="text-right text-[var(--ktra-accent)] hover:underline" onClick={() => navigate(originPath)}>
+          {splitOriginText(origin)}
+        </button>
+      ) : <span>{splitOriginText(origin)}</span>)}
+      {(row.details ?? []).map((line, i) => <span key={i}>{statementDetailText(line)}</span>)}
       {row.paid_on && <span>تاريخ الدفع: {formatDateLocalized(row.paid_on)}</span>}
     </div>
+  );
+}
+
+/** شارة سند «الزيادة» في «دفعات تحت الحساب» ومصدره — يفتح الدفعة الأصلية. */
+function SplitOriginBadge({ origin, onOpen }: { origin: SplitOrigin; onOpen: (path: string) => void }) {
+  const path = splitOriginPath(origin);
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1 text-[11px]" title={splitOriginText(origin)}>
+      <span className="rounded bg-[var(--ktra-surface-2)] px-1 font-semibold text-[var(--ktra-warn,#b06800)]">زيادة دفعة</span>
+      {path ? (
+        <button type="button" className="text-[var(--ktra-accent)] hover:underline" onClick={() => onOpen(path)}>
+          {splitOriginSource(origin)}
+        </button>
+      ) : <span className="text-[var(--ktra-ink-soft)]">{splitOriginSource(origin)}</span>}
+    </span>
   );
 }
 
@@ -654,6 +685,14 @@ export const PartnerProfilePage: React.FC = () => {
           {expandedPairs.has(r.reversal_summary.original_journal_id) ? '▾' : '▸'} قيد صُحّح:
           #{r.reversal_summary.original_journal_id} ⇄ #{r.reversal_summary.reversal_journal_id} (صافي 0)
         </button>
+      ) : r.info_kind === 'split' ? (
+        <button
+          type="button"
+          className="text-right text-[11px] italic text-[var(--ktra-accent)] hover:underline"
+          onClick={() => navigate(entityPathForReference(r.reference_type, r.reference_id) ?? '')}
+        >
+          ↳ زيادة {formatMoney(r.info_amount)} فُصلت إلى {referenceTypeLabel(r.reference_type)} #{r.reference_id} — لا أثر لها على الرصيد
+        </button>
       ) : r.info_amount ? (
         <span className="text-[11px] italic text-[var(--ktra-ink-soft)]">
           ↳ من {referenceTypeLabel(r.reference_type)} #{r.reference_id}: {formatMoney(r.info_amount)} — جزءٌ من سندٍ موزَّع، لا أثر له على الرصيد
@@ -946,6 +985,9 @@ export const PartnerProfilePage: React.FC = () => {
                               </button>
                             ) : (
                               <span>{item.label}</span>
+                            )}
+                            {item.split_origin && (
+                              <SplitOriginBadge origin={item.split_origin} onOpen={(p) => navigate(p)} />
                             )}
                             {item.date && <span className="text-[var(--ktra-ink-soft)]">{formatDateLocalized(item.date)}</span>}
                             <span className="ms-auto font-semibold tabular-nums">
