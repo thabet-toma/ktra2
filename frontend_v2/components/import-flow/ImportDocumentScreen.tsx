@@ -558,6 +558,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         `أُعيد احتساب ${formatNumber(result.updated)} فاتورة وترحيل ${formatNumber(result.reconciliation?.reposted ?? 0)}.`,
         "success",
       );
+      // فواتير صفقات الأرشيف تُتخطّى وتبقى بقيدها — سببها لكلٍّ منها.
+      for (const row of result.reconciliation?.skipped_archive ?? []) {
+        toast(`تُخطّيت ${row.invoice_number}: ${row.reason}`, "info");
+      }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       setError(message);

@@ -272,6 +272,9 @@ export interface Invoice {
     clearanceId?: string;
     /** فاتورة شراء SQL مرحّلة إلى المحاسبة — لا يُعاد حساب التكلفة الأرضية تلقائياً */
     isPosted?: boolean;
+    /** صفقة أرشيف: الترحيل ممنوع والفاتورة للاطلاع فقط؛ السبب للتلميح. */
+    isArchiveLocked?: boolean;
+    archiveLockReason?: string;
     /** مرجع شراء (إرجاع بضاعة للمورد) بدل فاتورة شراء عادية. */
     isReturn?: boolean;
     /** رقم الفاتورة الأصلية المرتبطة بالمرجع (W7a). */

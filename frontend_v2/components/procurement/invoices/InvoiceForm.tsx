@@ -2366,7 +2366,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   );
 
   const isPosted = Boolean(formData.isPosted);
-  const canPostDocument = Boolean(formData.id) && !isPosted && !formData.isHistorical;
+  // صفقة أرشيف: الخادم يرفض الترحيل (قيد الصفقة حيّ) — الزرّ معطّل وسببه تلميحه.
+  const archiveLocked = Boolean(formData.isArchiveLocked) && !isPosted;
+  const canPostDocument = Boolean(formData.id) && !isPosted && !formData.isHistorical && !archiveLocked;
 
   // T-ONEPAY (مرآة فاتورة البيع): مدخل واحد لدفع المورد — نقد و/أو شيكات في سند
   // صرف واحد. التوزيع يلزمه فاتورة مرحّلة، فنحفظ ونرحّل ضمن نفس النقرة بتأكيد.
@@ -3019,10 +3021,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       key: "save-and-post",
       label: saving || posting ? "...حفظ وترحيل" : "حفظ وترحيل",
       icon: saving || posting ? <Loader2 className="animate-spin" /> : <CheckCircle2 />,
-      onClick: !saving && !posting && !isPosted && !formData.isHistorical
+      onClick: !saving && !posting && !isPosted && !formData.isHistorical && !archiveLocked
         ? () => void handleSaveAndPost()
         : undefined,
-      disabled: saving || posting || isPosted || Boolean(formData.isHistorical),
+      disabled: saving || posting || isPosted || Boolean(formData.isHistorical) || archiveLocked,
+      title: archiveLocked ? formData.archiveLockReason : undefined,
       separatorBefore: true,
     } as KitToolbarAction] : []),
     ...(viewMode && !formData.isHistorical && invoicePermissions.canSave ? [{
@@ -3059,6 +3062,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       icon: posting ? <Loader2 className="animate-spin" /> : <Send />,
       onClick: canPostDocument && !posting ? () => void handlePost() : undefined,
       disabled: !canPostDocument || posting,
+      title: archiveLocked ? formData.archiveLockReason : undefined,
       separatorBefore: true,
     } as KitToolbarAction] : []),
     ...(!readOnly && formData.shipment && formData.id && formData.currency === "ILS" ? [{
@@ -3408,7 +3412,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         : isInternationalInvoice ? "فاتورة شراء دولية" : "فاتورة الشراء"}
       state={
         formData.id
-          ? `${formData.isReturn ? "مرتجع" : isInternationalInvoice ? "فاتورة دولية" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}`
+          ? `${formData.isReturn ? "مرتجع" : isInternationalInvoice ? "فاتورة دولية" : "فاتورة"} ${formData.invoiceNumber || `#${formData.id}`}${archiveLocked ? " · أرشيف — للاطلاع" : ""}`
           : (formData.isReturn ? "مرتجع جديد" : isInternationalInvoice ? "فاتورة دولية جديدة" : "فاتورة جديدة")
       }
       company={

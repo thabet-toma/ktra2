@@ -241,6 +241,30 @@ class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
             )
         return value
 
+
+class ArchiveLockListSerializer(serializers.ListSerializer):
+    """قفل الأرشيف لقائمةٍ كاملة باستعلامين (`invoice_archive_locks`)، لا لكل صفّ."""
+
+    def to_representation(self, data):
+        from django.db.models.manager import BaseManager
+        from logistics.payment_posting import invoice_archive_locks
+
+        rows = list(data.all() if isinstance(data, BaseManager) else data)
+        self._context['archive_locks'] = invoice_archive_locks(rows)
+        return super().to_representation(rows)
+
+
+def _archive_lock_reason(serializer, obj):
+    """سبب قفل ترحيل فاتورة صفقة الأرشيف أو None — من خريطة القائمة إن وُجدت."""
+    locks = serializer.context.get('archive_locks')
+    if locks is not None:
+        return locks.get(obj.pk)
+    if not hasattr(obj, '_archive_lock_reason'):
+        from logistics.payment_posting import invoice_archive_locks
+        obj._archive_lock_reason = invoice_archive_locks([obj]).get(obj.pk)
+    return obj._archive_lock_reason
+
+
 class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
@@ -277,6 +301,14 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
         max_digits=18, decimal_places=2, read_only=True,
     )
     import_payment = serializers.SerializerMethodField()
+    is_archive_locked = serializers.SerializerMethodField()
+    archive_lock_reason = serializers.SerializerMethodField()
+
+    def get_is_archive_locked(self, obj) -> bool:
+        return _archive_lock_reason(self, obj) is not None
+
+    def get_archive_lock_reason(self, obj):
+        return _archive_lock_reason(self, obj)
 
     def get_import_payment(self, obj):
         return _import_payment_payload(obj)
@@ -324,9 +356,11 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'import_payment',
             'receipt_status', 'receipt_status_display',
             'is_posted', 'is_return', 'original_invoice', 'journal_id_display',
+            'is_archive_locked', 'archive_lock_reason',
             'items_count',
             'created_at', 'updated_at',
         ]
+        list_serializer_class = ArchiveLockListSerializer
 
 def read_document_images(tenant_id, related_table, related_id):
     """W7c: روابط الصور المرفقة (غير PDF) من SystemAttachment لأي مستند. مصدر قراءة
@@ -428,6 +462,9 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     # الحفظ في PurchaseInvoiceViewSet._sync_attachments (نمط الموردين/المنتجات).
     quote_images = serializers.SerializerMethodField()
     quote_pdfs = serializers.SerializerMethodField()
+    # صفقة أرشيف: ترحيل الفاتورة ممنوع (`payment_posting.invoice_archive_locks`).
+    is_archive_locked = serializers.SerializerMethodField()
+    archive_lock_reason = serializers.SerializerMethodField()
     invoice_number = serializers.CharField(required=False, allow_blank=True, allow_null=True)
     shipment_number = serializers.CharField(source='shipment.shipment_number', read_only=True, default=None)
     shipment_name = serializers.CharField(source='shipment.shipment_name', read_only=True, default=None)
@@ -473,16 +510,24 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'is_return', 'original_invoice', 'original_invoice_number',
             'journal', 'journal_id_display',
+            'is_archive_locked', 'archive_lock_reason',
             'items', 'fees', 'cheques',
             'quote_images', 'quote_pdfs',
             'created_at', 'updated_at', 'created_by',
         ]
+        list_serializer_class = ArchiveLockListSerializer
         # T-INTENT: حقلا النيّة النقدية للقراءة فقط هنا — تُكتب من نقطة
         # `attach-payment/` وحدها كي تبقى دلالة الاستبدال في مكان واحد
         # (مرآة `SalesInvoice`).
         read_only_fields = ['id', 'is_posted', 'is_return', 'original_invoice',
                             'journal', 'created_at', 'updated_at', 'receipt_status',
                             'attached_cash_amount', 'attached_cash_account']
+
+    def get_is_archive_locked(self, obj) -> bool:
+        return _archive_lock_reason(self, obj) is not None
+
+    def get_archive_lock_reason(self, obj):
+        return _archive_lock_reason(self, obj)
 
     def get_is_local(self, obj):
         """فاتورة محلية = غير مستوردة (بلا صفقة/شحنة/تخليص) — قابلة للاستلام للمخزن."""

@@ -106,6 +106,9 @@ export interface PurchaseInvoiceListDto {
   is_posted: boolean;
   is_return?: boolean;
   journal_id_display?: number | null;
+  /** صفقة أرشيف: ترحيل الفاتورة ممنوع (قيد LOGISTICS_DEAL حيّ) — للاطلاع فقط. */
+  is_archive_locked?: boolean;
+  archive_lock_reason?: string | null;
   items_count: number;
   created_at: string;
   updated_at: string;
@@ -207,6 +210,9 @@ export interface PurchaseInvoiceDto {
   supplier_invoice_number?: string | null;
   factory_name?: string | null;
   is_posted?: boolean;
+  /** صفقة أرشيف: ترحيل الفاتورة ممنوع (قيد LOGISTICS_DEAL حيّ) — للاطلاع فقط. */
+  is_archive_locked?: boolean;
+  archive_lock_reason?: string | null;
   // W7a: هوية مستند المرجع.
   is_return?: boolean;
   original_invoice?: number | null;

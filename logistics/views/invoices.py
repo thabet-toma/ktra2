@@ -779,15 +779,24 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             if 'use_cost_lines' in request.data else None
         )
         auto_repost = request.data.get('auto_repost') in (True, 1, '1', 'true', 'True')
-        posted_ids = list(
+        posted = list(
             PurchaseInvoice.objects.filter(
                 tenant=tenant,
                 shipment_id=sid,
                 invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
                 is_return=False,
                 is_posted=True,
-            ).values_list('pk', flat=True)
+            ).select_related('deal')
         ) if auto_repost else []
+        # فاتورة صفقة الأرشيف لا يُعاد ترحيلها (حارسُ الترحيل يرفضها): تُتخطّى قبل
+        # إلغاء ترحيلها فتبقى بقيدها كما هي، ويكمل الباقي.
+        from logistics.payment_posting import invoice_archive_locks
+        archive_locks = invoice_archive_locks(posted)
+        skipped_archive = [
+            {'invoice_number': inv.invoice_number, 'reason': archive_locks[inv.pk]}
+            for inv in posted if inv.pk in archive_locks
+        ]
+        posted_ids = [inv.pk for inv in posted if inv.pk not in archive_locks]
 
         def call_detail_action(action_name, invoice_id):
             old_kwargs = getattr(self, 'kwargs', {}).copy()
@@ -925,12 +934,13 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
         result['reconciliation'] = {
-            'previously_posted': len(posted_ids),
+            'previously_posted': len(posted),
             'reposted': reposted,
+            'skipped_archive': skipped_archive,
         }
         logger.info(
-            'shipment invoice reconciliation shipment=%s updated=%s reposted=%s',
-            sid, result.get('updated'), reposted,
+            'shipment invoice reconciliation shipment=%s updated=%s reposted=%s skipped_archive=%s',
+            sid, result.get('updated'), reposted, len(skipped_archive),
         )
         return Response(result)
 
@@ -1414,6 +1424,14 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
 
         tenant = invoice.tenant or self._get_tenant()
         partner = invoice.partner
+
+        # صفقة أرشيف: قيد LOGISTICS_DEAL الحيّ دائنُ المورد ومدينُ التكلفة، والبضاعة
+        # دخلت من الشحنة — ترحيل فاتورتها يكرّرهما. كل مسار ترحيل يمرّ من هنا.
+        from logistics.payment_posting import assert_invoice_not_archive_locked
+        try:
+            assert_invoice_not_archive_locked(invoice)
+        except DjangoValidationError as e:
+            return Response({'error': e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
 
         # نمط «إجباري»: الأرقام شرط الترحيل نفسه لا الاستلام وحده — الاستلام مع
         # الترحيل مشروط (محلية + GR/IR + قيمة موجبة)، وترحيلٌ بلا أرقام يُقفل

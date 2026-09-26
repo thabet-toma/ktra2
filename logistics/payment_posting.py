@@ -55,6 +55,78 @@ def is_archive_deal(deal) -> bool:
     return deal.pk in archive_deal_ids(deal.tenant_id, [deal.pk])
 
 
+def live_archive_deal_journals(tenant_id, deal_ids) -> dict:
+    """`{deal_id: رقم قيد LOGISTICS_DEAL الحيّ}` — مرحّلٌ ولم يعكسه قيد JOURNAL_REVERSAL.
+
+    بخلاف `archive_deal_ids` لا تنظر في الفاتورة الدولية: قيد الصفقة الحيّ دائنُ
+    المورد ومدينُ التكلفة أيّاً كانت فاتورتها — وهذا ما يحرسه ترحيلها. استعلامان
+    مهما كثرت الصفقات (قائمة الفواتير تحسب صفحتها بنداءٍ واحد).
+    """
+    from accounting.services import JournalHeader
+
+    deal_ids = {d for d in deal_ids if d}
+    if not deal_ids:
+        return {}
+    journals = list(JournalHeader.objects.filter(
+        tenant_id=tenant_id, reference_type='LOGISTICS_DEAL', is_posted=True,
+        reference_id__in=deal_ids,
+    ).values_list('id', 'reference_id'))
+    if not journals:
+        return {}
+    reversed_ids = set(JournalHeader.objects.filter(
+        tenant_id=tenant_id, reference_type='JOURNAL_REVERSAL', is_posted=True,
+        reference_id__in=[jid for jid, _ in journals],
+    ).values_list('reference_id', flat=True))
+    live = {}
+    for jid, deal_id in sorted(journals):
+        if jid not in reversed_ids:
+            live.setdefault(deal_id, jid)
+    return live
+
+
+def deal_has_live_archive_journal(deal):
+    """رقم قيد الصفقة الحيّ أو None."""
+    return live_archive_deal_journals(deal.tenant_id, [deal.pk]).get(deal.pk)
+
+
+ARCHIVE_INVOICE_LOCK_MESSAGE = (
+    'صفقة أرشيف {deal}: المورد والتكلفة مرحّلان بقيد الصفقة #{journal} والبضاعة '
+    'دخلت المخزون من الشحنة — هذه الفاتورة للاطلاع فقط.'
+)
+
+
+def invoice_archive_locks(invoices) -> dict:
+    """`{invoice_id: سبب القفل}` لفواتير الشراء الدولية على صفقة قيدُها حيّ.
+
+    المرتجع لا يُقفل (يعكس فاتورةً مرحّلة بمساره). الفواتير من شركةٍ واحدة أو أكثر:
+    تُجمَّع بالشركة فيبقى كل استعلام مفلتراً بها.
+    """
+    from logistics.models import PurchaseInvoice
+
+    by_tenant: dict = {}
+    for inv in invoices:
+        if (inv.deal_id and not inv.is_return
+                and inv.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL):
+            by_tenant.setdefault(inv.tenant_id, []).append(inv)
+    locks = {}
+    for tenant_id, rows in by_tenant.items():
+        live = live_archive_deal_journals(tenant_id, [inv.deal_id for inv in rows])
+        for inv in rows:
+            if inv.deal_id in live:
+                locks[inv.pk] = ARCHIVE_INVOICE_LOCK_MESSAGE.format(
+                    deal=inv.deal.ref_number or f'#{inv.deal_id}', journal=live[inv.deal_id])
+    return locks
+
+
+def assert_invoice_not_archive_locked(invoice) -> None:
+    """حارس الترحيل الوحيد لفاتورة صفقة الأرشيف — `PurchaseInvoiceViewSet.post_to_accounting`
+    يمرّ به كل مسار: الترحيل، و`pay/` مع الترحيل، وإعادة ترحيل فواتير الشحنة."""
+    reason = invoice_archive_locks([invoice]).get(invoice.pk)
+    if reason:
+        logger.warning('archive invoice post refused invoice=%s deal=%s', invoice.pk, invoice.deal_id)
+        raise ValidationError(reason)
+
+
 ARCHIVE_FIRST_POST_MESSAGE = (
     'صفقة أرشيف: قيدها القديم يدائن المورد بالرقم الدولاري كأنه شيكل، فدفعةٌ جديدة '
     'عليها لا تُرحَّل — بالشيكل تجعل المورد مديناً لنا، وبوحدة الأرشيف تكتب في الصندوق '

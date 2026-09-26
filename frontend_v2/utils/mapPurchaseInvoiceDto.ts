@@ -132,6 +132,8 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     } : undefined,
     supplierSnapshot: { tradeName: dto.partner_name || "" },
     isPosted: Boolean(dto.is_posted),
+    isArchiveLocked: Boolean(dto.is_archive_locked),
+    archiveLockReason: dto.archive_lock_reason || undefined,
     // W7a: هوية مستند المرجع (شارة + رابط الفاتورة الأصلية + لغة معكوسة).
     isReturn: Boolean(dto.is_return),
     originalInvoiceId: dto.original_invoice != null ? String(dto.original_invoice) : undefined,

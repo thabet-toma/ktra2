@@ -692,6 +692,8 @@ export const purchaseInvoiceApi = {
     reconciliation?: {
       previously_posted: number;
       reposted: number;
+      /** فواتير صفقات الأرشيف: لا يُعاد ترحيلها وتبقى بقيدها كما هي. */
+      skipped_archive?: Array<{ invoice_number: string; reason: string }>;
     };
   }> => {
     const res = await safeFetch(`${BASE}/recalculate-landed-cost/`, {

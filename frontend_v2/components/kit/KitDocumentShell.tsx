@@ -27,6 +27,8 @@ export interface KitToolbarAction {
   danger?: boolean;
   /** insert a separator BEFORE this action */
   separatorBefore?: boolean;
+  /** تلميحٌ بدل الاسم — سبب تعطيل الزر مثلاً. */
+  title?: string;
 }
 
 export interface KitTab {
@@ -189,7 +191,7 @@ export const KitDocumentShell: React.FC<KitDocumentShellProps> = ({
                 className={`ktra-toolbtn${a.primary ? ' !border-blue-600 !bg-blue-600 !text-white hover:!bg-blue-700' : ''}${a.danger ? ' ktra-toolbtn--danger' : ''}`}
                 onClick={a.onClick}
                 disabled={a.disabled || !a.onClick}
-                title={a.label}
+                title={a.title ?? a.label}
               >
                 {a.icon}
                 <span>{a.label}</span>

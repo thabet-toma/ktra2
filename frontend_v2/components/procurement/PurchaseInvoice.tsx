@@ -49,6 +49,8 @@ function sqlListToInvoice(row: PurchaseInvoiceListDto): Invoice {
     items: [],
     status: row.status as Invoice['status'],
     isPosted: Boolean(row.is_posted),
+    isArchiveLocked: Boolean(row.is_archive_locked),
+    archiveLockReason: row.archive_lock_reason || undefined,
     isReturn: Boolean(row.is_return),
     subtotal: row.subtotal,
     discountAmount: row.discount_amount,

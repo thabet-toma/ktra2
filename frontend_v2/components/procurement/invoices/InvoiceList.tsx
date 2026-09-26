@@ -335,6 +335,15 @@ export const InvoiceList: React.FC<InvoiceListProps> = ({
           }}
         >
           {r.isPosted ? "مرحَّلة" : "مسودة"}
+          {/* صفقة أرشيف: الترحيل ممنوع — السبب في التلميح. */}
+          {r.isArchiveLocked && !r.isPosted && (
+            <span
+              className="mt-0.5 block rounded border border-slate-300 bg-slate-100 px-1 text-[10px] font-medium text-slate-700"
+              title={r.archiveLockReason}
+            >
+              أرشيف — للاطلاع
+            </span>
+          )}
         </span>
       ),
     },
