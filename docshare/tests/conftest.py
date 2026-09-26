@@ -376,7 +376,7 @@ def credit_debit_note(env, invoice):
 
     return CreditDebitNote.objects.create(
         tenant=env["tenant"], note_number="SH-CN-1", note_date="2026-08-10",
-        note_type=CreditDebitNote.TYPE_CREDIT, customer=env["customer"],
+        note_type=CreditDebitNote.TYPE_CREDIT, partner=env["customer"],
         related_invoice=invoice, amount=Decimal("25"),
         reason="خصم تسوية على الفاتورة",
     )

@@ -38,6 +38,7 @@ test('إجراءات العميل مستندات بيع — ولا تسرّب ل
   assert.ok(keys.includes('receipt'));
   assert.ok(!keys.includes('purchase-invoice'));
   assert.ok(!keys.includes('payment'));
+  assert.ok(keys.includes('credit-debit-note'));
 });
 
 test('ISSUE #53 — فاتورة الأتعاب تبدأ من بطاقة العميل بعميلٍ مملوء وبندٍ خدمي افتراضاً', () => {

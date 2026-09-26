@@ -40,7 +40,7 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "id": "fees",
                 "label_term": "nav.fees",
                 "views": [
-                    "sales-invoices", "sales-quotations", "credit-debit-notes",
+                    "sales-invoices", "sales-quotations",
                     "sales-return", "sales-customers", "sales-customer-payments",
                     "sales-settings",
                 ],
@@ -51,7 +51,7 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "views": [
                     "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",
                     "accounting-cheques", "accounting-expense-vouchers",
-                    "accounting-revenue-vouchers",
+                    "accounting-revenue-vouchers", "credit-debit-notes",
                     "supplier-payments", "supplier-management",
                 ],
             },

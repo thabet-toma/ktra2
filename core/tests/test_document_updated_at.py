@@ -60,7 +60,7 @@ class DocumentUpdatedAtTest(TestCase):
             ),
             "credit_debit_note": CreditDebitNote.objects.create(
                 tenant=self.tenant, note_number="CN-STAMP", note_date=TODAY,
-                note_type=CreditDebitNote.TYPE_CREDIT, customer=partner,
+                note_type=CreditDebitNote.TYPE_CREDIT, partner=partner,
                 amount=Decimal("10"),
             ),
             "journal_header": JournalHeader.objects.create(

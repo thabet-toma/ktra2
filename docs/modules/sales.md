@@ -30,7 +30,8 @@
 | `CustomerPayment` / `PaymentAllocation` | `amount`, `is_posted`, `kind` (`receipt`/`refund`), `auto_settled_invoice`, `refund_for_invoice` | توزيع على `SalesInvoice` بمبلغ + `conversion_rate` |
 | `SupplierPayment` / `SupplierPaymentAllocation` | `amount`, `is_posted` | `purchase_invoice→logistics.PurchaseInvoice` |
 | `SalesQuotation` / `SalesOrder` (+ بنودهما) | `status`, `valid_until`, `reserved_until`, `deposit_amount` | سلسلة النَسَب: `quotation→order→invoice` |
-| `CreditDebitNote`, `VatStatement`, `CustomerProductQuote` | `note_type`, `net_vat`, `unit_price` | `related_invoice`, `journal`, تسعير خاص بالعميل |
+| `CreditDebitNote` | `note_type` (debit/credit), `status` (draft/posted/cancelled), `amount` (شاملاً الضريبة), `tax_amount`, `exchange_rate` | `partner→Partner` (**أيّ نوع** — كان `customer`؛ الهجرة 0045 أعادت تسمية الحقل والعمود `PartnerID` بلا فقد)، ربطٌ واحدٌ اختياريّ من خمسة (`LINK_FIELDS`: `related_invoice` · `related_purchase_invoice` · `related_clearance` · `related_local_shipment` · `related_shipment`)، `counter_account`، `currency`، `journal` |
+| `VatStatement`, `CustomerProductQuote` | `net_vat`, `unit_price` | تسعير خاص بالعميل |
 
 ## دوال الـservices العامة
 ```python
@@ -73,6 +74,13 @@ def next_invoice_number(tenant_id: int, book_number: int = 0, branch=None) -> st
 def resolve_default_account(tenant_id, code_prefixes=None, acc_type=None, name_kw=None, *, allow_any_of_type=True):  # (91)
 def resolve_product_revenue_account(tenant_id: int) -> Account:  # «4101» من الشجرة أو يُنشئه ويُثبِّته — نظير resolve_service_revenue_account (ISSUE #59) (`sales/services/calc.py`)
 def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلكها accounting.services (731)
+# الإشعار المدين/الدائن على أيّ طرف — `sales/services/orders.py`
+def post_credit_debit_note(note, *, user=None) -> CreditDebitNote:  # مدين: Dr ذمّة الطرف / Cr المقابل + الضريبة؛ دائن عكسه — عبر post_journal بمرجع CREDIT_DEBIT_NOTE
+def unpost_credit_debit_note(note, *, user=None) -> CreditDebitNote:  # unpost_document ⇒ مسودة
+def cancel_credit_debit_note(note, *, user=None) -> CreditDebitNote:  # المسودة وحدها
+def validate_credit_debit_note(note) -> None:  # المبلغ والضريبة وسعر الصرف، ربطٌ واحد لنفس الطرف ومرحَّل، والمقابل
+def default_note_counter_account(note) -> Account:  # مصروف/إيراد المستند المربوط، وإلا حسب نوع الطرف
+def credit_debit_counter_account_error(account, tenant_id) -> str | None:  # لا ذمم ولا مخزون ولا مجمِّع
 ```
 
 ## أهم الـAPI endpoints
@@ -97,6 +105,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 | POST | `quotations/{id}/convert/` · `orders/{id}/confirm/` · `orders/{id}/convert/` · `orders/{id}/deposit/` | (1396) · (1505) · (1526) · (1539) |
 | GET/PUT | `settings/current/` · POST `settings/restore-defaults/` | `SalesSettingsViewSet` (1169/1183) |
 | GET | `reports/aging/` · `reports/dormant-customers/` · `reports/reserved-stock/` | `SalesReportViewSet` (`urls.py:32-42`) |
+| GET/POST · PATCH/DELETE (مسودة) | `credit-debit-notes/` · POST `{id}/post/` · `{id}/unpost/` · `{id}/cancel/` · GET `default-account/?partner=&related_…=` | `CreditDebitNoteViewSet` (`views.py`) — صلاحيات دفتر اليومية: `accounting.journal.view` / `.create` / `.post` / `.unpost` |
 
 ## الاعتماديات
 **يعتمد على:**
@@ -107,6 +116,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 **يعتمد عليه:** `logistics` (`views.py` + `post_supplier_payment` / `allocate_supplier_payment`)، `accounting` (`services.py`, `serializers.py`, `views.py`)، `inventory` (`services.py:742,748` و`views.py` و`serials.py`)، `core` (`reports.py:420,1061,1234`, `payments.py`)، `accountant_portal` (`services.py`)، `after_sales`، `tenants`.
 
 ## قواعد لا يجوز كسرها
+- **الإشعار المدين/الدائن لأيّ طرف، والدلالة من منظور ذمّته** (`sales/services/orders.py` — `post_credit_debit_note`): المدين Dr ذمّة الطرف (يزيد ما على العميل أو ينقص ما للدائن)، والدائن Cr ذمّته — للعميل هذا سلوك M4-T4 حرفياً. الذمّة `_resolve_ap_account` للدائن (`is_creditor_party`) و`_resolve_ar_account_for_partner` (أو ذمّة فاتورة البيع المربوطة) للعميل. **المقابل** يختاره المستخدم؛ الفارغ يُحلّ بـ`default_note_counter_account`: مصروف المستند المربوط (أكبر مصروفٍ في قيد استحقاق التخليص، `expense_account` للإرسالية، مصروف بنود فاتورة الشراء، إيراد فاتورة البيع) ثم حسب النوع — عميل ← الإيرادات · مخلّص 5307 · وكيل شحن 5301 · ناقل 5305 · مورد ← تكلفة المبيعات (لا المخزون: قيدٌ عليه بلا طبقة يكسر تطابق الدفتر والطبقات). **حسابات الذمم والمخزون والمجمِّعة مرفوضةٌ مقابلاً**. الضريبة جزءٌ من `amount`: مخرجاتٌ للعميل (`accounting.services.resolve_output_vat_account`) ومدخلاتٌ 1105 للدائن. العملة الأجنبية تملأ `amount_currency` من `post_journal`. **الربط** بمستندٍ واحدٍ لنفس الطرف، مرحَّلٍ استحقاقه: فاتورة الشراء (بعملتها، لا مرتجع) والتخليص والإرسالية واستحقاق الشحن **يُطفئ الإشعار المدين متبقّيها** (ولا يتجاوزه عند الترحيل — الزائد يبقى بلا ربط رصيداً عاماً) والدائن يزيد مستحقّها؛ **وفاتورة البيع مرجعٌ فقط** — `amount_paid` عمودٌ مخزَّن يراجعه `audit_ar_integrity` فلا يُكتب من هنا. المرحَّل لا يُعدَّل ولا يُحذف؛ إلغاء الترحيل عبر `unpost_document`، والإلغاء للمسودة.
 - **الخدمة لا يُقاس عليها نفادُ مخزون** (بلاغ المالك): إعفاؤها في `_validate_stock_availability` (`sales/serializers.py`) **صريحٌ بـ`is_service`** — وكان متروكاً لـ`Product.allow_negative_stock` (حقلٌ حُذف لاحقاً، انظر `docs/modules/inventory.md`). الحقل `default=False` (`inventory/models.py`)، فخدمةٌ أُنشئت بالافتراضي — ومنها كلُّ خدمةٍ يزرعها قالبُ مكتب المحاسبة (`ACCOUNTING_FIRM_SERVICES`) وكلُّ خدمةٍ يُنشئها المستخدم من شاشة الأصناف — كانت تُردّ بـ«الكمية تتجاوز المتوفر في المخزون (0)» على شيءٍ لا مخزون له، متى أطفأت الشركة `allow_negative_stock_default`. القاعدة نفسها منصوصةٌ صراحةً في `sales/services/orders.py` و`sales/services/numbering.py` (`product.is_service or product.allow_negative_stock`) — الثلاثة يجب أن تتّفق، وهذا الموضع وحده كان شاذّاً. **والحارس لم يُفتح للبضاعة**: بضاعةٌ برصيدٍ صفر تبقى مردودةً كما كانت.
 - **لا تعديل ولا حذف لفاتورة غير مسودة**: `views.py` و`:306` يرفضان بـ`POSTED_DOC_WARNING` مع `can_unpost: True`؛ ونفس المنع في `serializers.py`. **والمرفقات استثناءٌ مقصود**: نقاطها الثلاث (`attachments`) تكتب في `core.SystemAttachment` لا في الفاتورة، فيبقى إرفاق الإيصال ممكناً بعد الترحيل — وهو أكثر وقت يُحتاج فيه. ربطُها بمسار PATCH كان يعني ألّا يُرفق شيء بفاتورة نهائية أبداً.
 - **«رصيد العميل قبل/بعد» لا يُشتقّ من «المتبقّي»**: `customer_balance_before_invoice`/`after` في `serializers.py` (`SalesInvoiceSerializer`) **تقريبٌ لا يطابق كشف الحساب** — يطرح المتبقّي من رصيد **اليوم**، فالفاتورة المدفوعة بالكامل تُظهر أثراً صفرياً وهي دائنةُ ذمم بكامل إجماليها (قيدها يدين الذمم كلَّها، والتحصيل قيدٌ منفصل). المصدر الصحيح هو `invoices/{id}/customer-ledger/` من `partner_account_statement` نفسه الذي يبني كشف الحساب — المطابقة **بالبناء** لا بالمصادفة. لا تعرض الحقلين القديمين على أنهما «قبل/بعد». **والمرآة في جانب المورّد أُصلحت** (T-PCTX): `GET /api/logistics/purchase-invoices/{id}/supplier-ledger/` هي نظيرتها، و`document_partner_balance_summary` (`core/payments.py`) يبقى تقريباً موثَّقاً على الجانبين لعقد الـAPI وحده — لا يُعرض على أنه «قبل/بعد» في أيٍّ منهما.
@@ -217,6 +227,7 @@ def resolve_cheques_payable_account(tenant_id: int) -> Account:  # يستهلك�
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
+| `sales/tests/test_credit_debit_note_any_party.py` | اتجاه الرصيد لكل نوع طرف × نوع إشعار، الافتراضي حسب النوع، حالة المخلّص (مدينٌ لنا)، المقابل المختار، رفض الذمم/المجمِّع/المخزون، ضريبة مخرجات/مدخلات، الدولار، إلغاء الترحيل يعيد الرصيد، دفتر ترقيم لكل نوع، التخليص يُطفأ ولا يُتجاوز، الدائن يزيد المستحق، الربط لنفس الطرف ومرحَّل وواحد، فاتورة الشراء في التوأمين، أعمار الذمم، الصلاحيات، وهجرة `customer`←`partner` إعادةُ تسمية |
 | `sales/tests/test_service_line_stock_guard.py` (بلاغ المالك) | خدمةٌ برصيدٍ صفر تُحفظ رغم منع الشركة للسالب ولا تُخصم كميتها، وبضاعةٌ برصيدٍ صفر تبقى مردودةً 400 (تراجعٌ صريح) |
 | `sales/tests/test_ar_integrity.py` | سلامة الذمم: منع ازدواج التحصيل وبقاء السندات معلّقة بعد إلغاء الترحيل، وتصنيف فرق «المدفوع» (قديمٌ لا يُمسّ ÷ يتيمٌ يُصلَح) |
 | `sales/tests/test_sales_post_unpost_stock.py` | تماثل post → unpost → repost للمخزون والقيد معاً |

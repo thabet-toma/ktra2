@@ -1265,55 +1265,85 @@ export async function recordOrderDeposit(
 }
 
 // -------------------------------------------------------------
-// M4-T4 — Credit / Debit notes (إشعارات مدينة/دائنة)
+// إشعارات مدينة/دائنة على أيّ طرف — عميلٍ أو دائنٍ (قسم المالية).
+// الدلالة من منظور ذمّة الطرف: المدين Dr ذمّته، والدائن Cr ذمّته.
 // -------------------------------------------------------------
+export type CreditDebitNoteType = "credit" | "debit";
+
+/** نوع المستند المربوط — واحدٌ فقط؛ غير فاتورة البيع يُطفئ متبقّي المستند. */
+export type CreditDebitNoteLinkKind =
+  | "sales_invoice" | "purchase_invoice" | "clearance" | "local_shipment" | "freight";
+
+/** حقل الربط في الخادم لكل نوع. */
+export const CREDIT_DEBIT_NOTE_LINK_FIELD: Record<CreditDebitNoteLinkKind, string> = {
+  sales_invoice: "related_invoice",
+  purchase_invoice: "related_purchase_invoice",
+  clearance: "related_clearance",
+  local_shipment: "related_local_shipment",
+  freight: "related_shipment",
+};
+
 export type CreditDebitNoteRow = {
   id: number;
   note_number: string;
   note_date: string;
-  note_type: "credit" | "debit";
-  customer: number;
-  customer_name?: string;
+  note_type: CreditDebitNoteType;
+  partner: number;
+  partner_name?: string;
+  partner_type?: string;
+  /** طرفٌ دائن (مورد/مخلّص/وكيل/ناقل) — رصيده «له» لا «عليه». */
+  is_creditor?: boolean;
   related_invoice: number | null;
   related_invoice_number?: string | null;
+  related_purchase_invoice?: number | null;
+  related_clearance?: number | null;
+  related_local_shipment?: number | null;
+  related_shipment?: number | null;
+  linked_document?: { kind: CreditDebitNoteLinkKind; id: number; label: string } | null;
+  counter_account?: number | null;
+  counter_account_code?: string | null;
+  counter_account_name?: string | null;
+  currency?: number | null;
+  currency_code?: string | null;
+  exchange_rate?: string;
+  /** شاملاً الضريبة. */
   amount: string;
+  tax_amount?: string;
   reason?: string;
-  status: string;
+  status: "draft" | "posted" | "cancelled";
   journal?: number | null;
   created_at?: string;
+  /** ختمُ آخر حفظ — مسودّةُ المحرِّر تقارنه (#109 §٩). */
+  updated_at?: string | null;
+};
+
+export type CreditDebitNoteBody = {
+  note_date: string;
+  note_type: CreditDebitNoteType;
+  partner: number;
+  amount: string;
+  tax_amount?: string;
+  currency?: number | null;
+  exchange_rate?: string;
+  counter_account?: number | null;
+  reason?: string;
+  related_invoice?: number | null;
+  related_purchase_invoice?: number | null;
+  related_clearance?: number | null;
+  related_local_shipment?: number | null;
+  related_shipment?: number | null;
 };
 
 export async function listCreditDebitNotes(): Promise<CreditDebitNoteRow[]> {
   return apiGetList(`${BASE}/credit-debit-notes/`, { tenantId: tid() });
 }
 
-export async function getCreditDebitNote(id: number): Promise<CreditDebitNoteRow> {
-  return apiGetObject(`${BASE}/credit-debit-notes/${id}/`, { tenantId: tid() });
-}
-
-export async function createCreditDebitNote(
-  body: {
-    note_date: string;
-    note_type: "credit" | "debit";
-    customer: number;
-    related_invoice?: number | null;
-    amount: string | number;
-    reason?: string;
-  },
-): Promise<CreditDebitNoteRow> {
+export async function createCreditDebitNote(body: CreditDebitNoteBody): Promise<CreditDebitNoteRow> {
   return apiPostObject(`${BASE}/credit-debit-notes/`, body, { tenantId: tid() });
 }
 
 export async function updateCreditDebitNote(
-  id: number,
-  body: Partial<{
-    note_date: string;
-    note_type: "credit" | "debit";
-    customer: number;
-    related_invoice: number | null;
-    amount: string | number;
-    reason: string;
-  }>,
+  id: number, body: Partial<CreditDebitNoteBody>,
 ): Promise<CreditDebitNoteRow> {
   return apiPatchObject(`${BASE}/credit-debit-notes/${id}/`, body, { tenantId: tid() });
 }
@@ -1322,10 +1352,18 @@ export async function deleteCreditDebitNote(id: number): Promise<void> {
   return apiDelete(`${BASE}/credit-debit-notes/${id}/`, { tenantId: tid() });
 }
 
-export async function postCreditDebitNote(id: number): Promise<CreditDebitNoteRow> {
-  return apiPostObject(
-    `${BASE}/credit-debit-notes/${id}/post/`,
-    {},
-    { tenantId: tid() },
-  );
+/** ترحيل · إلغاء الترحيل (يعود مسودة) · إلغاء المسودة. */
+export async function creditDebitNoteAction(
+  id: number, action: "post" | "unpost" | "cancel",
+): Promise<CreditDebitNoteRow> {
+  return apiPostObject(`${BASE}/credit-debit-notes/${id}/${action}/`, {}, { tenantId: tid() });
+}
+
+/** الحساب المقابل الافتراضي لطرفٍ (ومستندٍ مربوط إن وُجد) — يملأ المنتقي. */
+export async function getCreditDebitNoteDefaultAccount(
+  partnerId: number, link?: { field: string; id: number } | null,
+): Promise<{ account: { id: number; code: string; name: string } | null; error?: string }> {
+  const q = new URLSearchParams({ partner: String(partnerId) });
+  if (link) q.set(link.field, String(link.id));
+  return apiGetObject(`${BASE}/credit-debit-notes/default-account/?${q.toString()}`, { tenantId: tid() });
 }

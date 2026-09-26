@@ -9,6 +9,7 @@ from inventory.models import Product
 from partners.models import Partner
 from tenants.models import Currency
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
+from logistics.models import LocalShipment, LogisticsClearance, LogisticsShipment, PurchaseInvoice
 from core.payments import (
     CHEQUE_DUE_DATE_REQUIRED,
     apply_default_cash_account,
@@ -39,6 +40,7 @@ from .services import (
     next_credit_debit_note_number,
     next_invoice_number,
     recalculate_invoice_amounts,
+    validate_credit_debit_note,
 )
 
 
@@ -1671,10 +1673,40 @@ class SalesQuotationListSerializer(serializers.ModelSerializer):
 # ─────────────────────────────────────────────────────────────────────────
 
 class CreditDebitNoteSerializer(serializers.ModelSerializer):
-    customer_name = serializers.CharField(source="customer.name", read_only=True)
+    """إشعار مدين/دائن على أيّ طرف — كل الروابط مقيّدةٌ بشركة الطلب (P1-8)."""
+
+    partner = TenantScopedPrimaryKeyRelatedField(queryset=Partner.objects.all())
+    partner_name = serializers.CharField(source="partner.name", read_only=True)
+    partner_type = serializers.CharField(source="partner.partner_type", read_only=True)
+    is_creditor = serializers.SerializerMethodField()
+    related_invoice = TenantScopedPrimaryKeyRelatedField(
+        queryset=SalesInvoice.objects.all(), required=False, allow_null=True,
+    )
     related_invoice_number = serializers.CharField(
         source="related_invoice.invoice_number", read_only=True, allow_null=True,
     )
+    related_purchase_invoice = TenantScopedPrimaryKeyRelatedField(
+        queryset=PurchaseInvoice.objects.all(), required=False, allow_null=True,
+    )
+    related_clearance = TenantScopedPrimaryKeyRelatedField(
+        queryset=LogisticsClearance.objects.all(), required=False, allow_null=True,
+    )
+    related_local_shipment = TenantScopedPrimaryKeyRelatedField(
+        queryset=LocalShipment.objects.all(), required=False, allow_null=True,
+    )
+    related_shipment = TenantScopedPrimaryKeyRelatedField(
+        queryset=LogisticsShipment.objects.all(), required=False, allow_null=True,
+    )
+    linked_document = serializers.SerializerMethodField()
+    counter_account = TenantScopedPrimaryKeyRelatedField(
+        queryset=Account.objects.all(), required=False, allow_null=True,
+    )
+    counter_account_code = serializers.CharField(source="counter_account.code", read_only=True, allow_null=True)
+    counter_account_name = serializers.CharField(source="counter_account.name", read_only=True, allow_null=True)
+    currency = serializers.PrimaryKeyRelatedField(
+        queryset=Currency.objects.all(), required=False, allow_null=True,
+    )
+    currency_code = serializers.CharField(source="currency.Code", read_only=True, allow_null=True)
     note_number = serializers.CharField(required=False, allow_blank=True)
 
     class Meta:
@@ -1684,26 +1716,95 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
             "note_number",
             "note_date",
             "note_type",
-            "customer",
-            "customer_name",
+            "partner",
+            "partner_name",
+            "partner_type",
+            "is_creditor",
             "related_invoice",
             "related_invoice_number",
+            "related_purchase_invoice",
+            "related_clearance",
+            "related_local_shipment",
+            "related_shipment",
+            "linked_document",
+            "counter_account",
+            "counter_account_code",
+            "counter_account_name",
+            "currency",
+            "currency_code",
+            "exchange_rate",
             "amount",
+            "tax_amount",
             "reason",
             "status",
             "journal",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = ["id", "status", "journal", "created_at", "updated_at", "customer_name", "related_invoice_number"]
+        read_only_fields = ["id", "status", "journal", "created_at", "updated_at"]
+
+    #: حقل الربط ← صنف المرساة في `logistics.domain.party_accruals._anchor_of`.
+    _LOGISTICS_KIND = {
+        "related_clearance": "clearance",
+        "related_local_shipment": "local",
+        "related_shipment": "freight",
+    }
+
+    def get_is_creditor(self, obj) -> bool:
+        from partners.models import is_creditor_party
+
+        return is_creditor_party(obj.partner)
+
+    def get_linked_document(self, obj):
+        """المستند المربوط {kind, id, label} — `None` بلا ربط."""
+        fields = obj.linked_fields()
+        if not fields:
+            return None
+        field = fields[0]
+        kind = dict(CreditDebitNote.LINK_FIELDS)[field]
+        doc = getattr(obj, field)
+        if field == "related_invoice":
+            label = doc.invoice_number
+        elif field == "related_purchase_invoice":
+            label = doc.invoice_number
+        else:
+            from logistics.domain.party_accruals import _anchor_of
+
+            label = _anchor_of(self._LOGISTICS_KIND[field], doc)["label"]
+        return {"kind": kind, "id": doc.pk, "label": label}
 
     def validate(self, attrs):
-        amt = attrs.get("amount")
+        from core.tenant_utils import get_tenant
+
+        amt = attrs.get("amount", getattr(self.instance, "amount", None))
         if amt is None or Decimal(str(amt)) <= 0:
             raise serializers.ValidationError({"amount": "المبلغ يجب أن يكون أكبر من صفر."})
-        nt = attrs.get("note_type")
+        nt = attrs.get("note_type", getattr(self.instance, "note_type", None))
         if nt not in (CreditDebitNote.TYPE_CREDIT, CreditDebitNote.TYPE_DEBIT):
             raise serializers.ValidationError({"note_type": "نوع غير صالح."})
+
+        # العملة تُورث من المستند المربوط حين لا تُرسل — تسوية فاتورة الشراء بعملتها.
+        if "currency" not in attrs or attrs.get("currency") is None:
+            source = attrs.get("related_purchase_invoice") or attrs.get("related_invoice")
+            if source is not None and source.currency_id:
+                attrs["currency"] = source.currency
+                if "exchange_rate" not in attrs:
+                    attrs["exchange_rate"] = source.exchange_rate or 1
+
+        request = self.context.get("request")
+        tenant = get_tenant(request) if request is not None else self.context.get("tenant")
+        probe = CreditDebitNote(
+            **{f.attname: getattr(self.instance, f.attname) for f in CreditDebitNote._meta.concrete_fields
+               if self.instance is not None and not f.primary_key},
+        )
+        for key, value in attrs.items():
+            setattr(probe, key, value)
+        if tenant is not None:
+            probe.tenant = tenant
+        try:
+            validate_credit_debit_note(probe)
+        except DjangoValidationError as exc:
+            raise serializers.ValidationError({"detail": exc.messages[0]})
         return attrs
 
     def create(self, validated_data):

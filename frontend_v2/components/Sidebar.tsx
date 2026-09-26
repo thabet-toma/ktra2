@@ -208,7 +208,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const salesLinksAll: NavLink[] = [
     { view: "sales-invoices", label: "فواتير المبيعات", icon: <FileText className="h-4 w-4" /> },
     { view: "sales-quotations", label: "العروض والطلبيات", icon: <ClipboardList className="h-4 w-4" /> },
-    { view: "credit-debit-notes", label: "الإشعارات المدينة/الدائنة", icon: <FileText className="h-4 w-4" /> },
     { view: "sales-delivery-notes", label: "إرساليات البيع", icon: <Truck className="h-4 w-4" /> },
     { view: "sales-return", label: "مرتجع البيع", icon: <FileText className="h-4 w-4" /> },
     { view: "invoice-profits", label: "أرباح الفواتير", icon: <TrendingUp className="h-4 w-4" /> },
@@ -272,6 +271,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // issue #56 — سند مصروف: مستندٌ عامٌّ لكل شركة بلا مورّدٍ إلزامي.
     { view: "accounting-expense-vouchers", label: "سندات المصروف", icon: <FileSignature className="h-4 w-4" /> },
     { view: "accounting-revenue-vouchers", label: "سندات الإيراد", icon: <FileSignature className="h-4 w-4" /> },
+    // إشعارٌ مدين/دائن على أيّ طرف (عميل، مورد، مخلّص، وكيل، ناقل) — كان تحت المبيعات للعميل وحده.
+    { view: "credit-debit-notes", label: "إشعارات مدينة/دائنة", icon: <Scale className="h-4 w-4" /> },
   ];
 
   // 8) التقارير — كل تقرير يفتح في تبويبه الخاص (G2).

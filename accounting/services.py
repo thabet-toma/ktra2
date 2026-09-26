@@ -3591,6 +3591,28 @@ REVENUE_VOUCHER_VAT_OUTPUT_CODE = "2104"
 REVENUE_VOUCHER_TRADE_RECEIVABLES_CODE = "1103"
 
 
+def resolve_output_vat_account(tenant_id: int):
+    """حساب ضريبة المخرجات: `TaxRate.tax_account` باتجاه sales/both، وإلا الكود `2104`.
+
+    issue #80 (مراجعة الالتزام): النسبة أولاً — كي يكتب السند حيث تكتب فاتورة البيع
+    فعلاً في شركةٍ نسبتُها على حسابٍ غير «2104» — ثم الكود المعياري. يقرؤه سند الإيراد
+    والإشعار المدين/الدائن على العميل. `None` حين لا يوجد أيٌّ منهما.
+    """
+    vat_account = (
+        TaxRate.objects.filter(
+            tenant_id=tenant_id, direction__in=["sales", "both"],
+        )
+        .exclude(tax_account__isnull=True)
+        .values_list("tax_account_id", flat=True)
+        .first()
+    )
+    return (
+        Account.objects.filter(pk=vat_account).first() if vat_account else None
+    ) or Account.objects.filter(
+        tenant_id=tenant_id, code=REVENUE_VOUCHER_VAT_OUTPUT_CODE, account_type="Liability",
+    ).first()
+
+
 def _voucher_account_entry_is_linked(tenant_id: int) -> bool:
     """أيُلزِم إعدادُ الشركة كاتبَ السند بحسابٍ من الشجرة بدل النصّ الحرّ؟
 
@@ -3701,23 +3723,7 @@ def create_revenue_voucher(
         "description": label,
     }]
     if tax_amount > 0:
-        # issue #80 (مراجعة الالتزام): `TaxRate.tax_account` باتجاه sales/both
-        # أولاً — كي يكتب السند حيث تكتب فاتورة البيع فعلاً في شركةٍ نسبتُها
-        # على حسابٍ غير «2104» — ثم السقوط إلى الكود المعياري كما كان.
-        vat_account = (
-            TaxRate.objects.filter(
-                tenant_id=tenant_id, direction__in=["sales", "both"],
-            )
-            .exclude(tax_account__isnull=True)
-            .select_related("tax_account")
-            .values_list("tax_account_id", flat=True)
-            .first()
-        )
-        vat_account = (
-            Account.objects.filter(pk=vat_account).first() if vat_account else None
-        ) or Account.objects.filter(
-            tenant_id=tenant_id, code=REVENUE_VOUCHER_VAT_OUTPUT_CODE, account_type="Liability",
-        ).first()
+        vat_account = resolve_output_vat_account(tenant_id)
         if not vat_account:
             raise ValidationError(
                 "ضريبة المخرجات > 0 تتطلب نسبة ضريبة مخرجات (TaxRate) أو حساب "
@@ -4144,6 +4150,22 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
                 by_payment.setdefault(pay_id, []).append((inv_id, None))
         invoice_ids.update(inv_id for links in by_payment.values() for inv_id, _ in links)
 
+    # الإشعار المدين/الدائن: رقمه، ومرساته فاتورتُه المربوطة (بيعٍ للعميل، شراءٍ للدائن).
+    note_rows: dict[int, tuple[str, int | None]] = {}
+    note_ids = {
+        r["reference_id"] for r in rows
+        if r["reference_type"] == "CREDIT_DEBIT_NOTE" and r["reference_id"]
+    }
+    if note_ids and tenant_id is not None:
+        from sales.models import CreditDebitNote
+        invoice_field = "related_purchase_invoice_id" if is_supplier else "related_invoice_id"
+        for note_id, number, inv_id in CreditDebitNote.objects.filter(
+            tenant_id=tenant_id, id__in=note_ids,
+        ).values_list("id", "note_number", invoice_field):
+            note_rows[note_id] = (number, inv_id)
+            if inv_id:
+                invoice_ids.add(inv_id)
+
     # المخلّص/الوكيل/الناقل: مستحقّاتهم ودفعاتها وسنداتها الموزَّعة، ودفعات الصفقة.
     logistics = {"anchors": {}, "vouchers": {}, "deal_invoices": {}}
     if is_supplier and tenant_id is not None:
@@ -4229,6 +4251,13 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
                 for inv_id, amount in by_payment.get(ref_id, [])
             ] + logistics["vouchers"].get(ref_id, [])
             link_to(row, targets)
+        elif row["reference_type"] == "CREDIT_DEBIT_NOTE" and ref_id in note_rows:
+            number, inv_id = note_rows[ref_id]
+            row["document_number"] = number
+            if inv_id:
+                link_to(row, [invoice_anchor(inv_id)])
+            elif ref in logistics["anchors"]:
+                link_to(row, [logistics["anchors"][ref]])
         elif ref in logistics["anchors"]:
             link_to(row, [logistics["anchors"][ref]])
         elif row["reference_type"] in ("LOGISTICS_PAYMENT", "LOGISTICS_PAYMENT_UNPOST"):

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **913**
+عدد النقاط: **916**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -805,8 +805,11 @@
 | `/api/sales/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/sales/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/sales/credit-debit-notes/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/default-account/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/{pk}/cancel/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/post/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/{pk}/unpost/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/customer-price-list/` | `CustomerPriceListViewSet` | `sales/views.py` |
 | `/api/sales/customer-price-list/save/` | `CustomerPriceListViewSet` | `sales/views.py` |
 | `/api/sales/delivery-orders/` | `DeliveryOrderViewSet` | `sales/views.py` |

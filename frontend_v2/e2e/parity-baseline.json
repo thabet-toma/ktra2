@@ -2657,7 +2657,7 @@
       }
     },
     "credit-debit-notes": {
-      "path": "/sales/credit-debit-notes",
+      "path": "/accounting/credit-debit-notes",
       "buttons": {
         "count": 93,
         "values": [

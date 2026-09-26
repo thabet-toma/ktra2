@@ -76,7 +76,8 @@ def convert_local_quotation_to_order(quotation, *, user=None):          # عرض
 def convert_local_quotation_to_invoice(quotation, *, user=None):        # عرض محلي → فاتورة مسودة مباشرةً (بلا طلبية)
 def convert_purchase_order_to_invoice(order, *, user=None):             # طلبية → فاتورة شراء مسودة
 def get_or_create_purchase_settings(tenant):                            # إعدادات الشراء للشركة بقيم افتراضية
-def purchase_invoice_payment_summary(invoice):                          # ملخص الدفع من السندات المرحّلة فقط
+def purchase_invoice_payment_summary(invoice):                          # ملخص الدفع من السندات المرحّلة فقط (+ الإشعارات المربوطة)
+def purchase_invoice_note_totals(invoice) -> tuple[Decimal, Decimal]:    # (مدينة، دائنة) مرحّلة مربوطة — المدين مع المدفوع، والدائن على المستحق
 def purchase_item_receipt_quantities(item):                             # (المطلوب، المستلَم، الباقي) لبند — القاعدة الوحيدة
 def purchase_invoice_receipt_summary(invoice, items=None):              # «استُلم X من Y — باقي Z» للفاتورة كلها
 def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement_date=None,
@@ -119,7 +120,7 @@ def import_invoice_cost_shares(inv) -> Optional[Dict[str, Any]]:          # حص
 def import_invoice_accrual_credits(invoice, shares) -> List[dict]:     # أسطر دائن 5301/بنود التخليص/مصروف النقل
 
 # logistics/domain/party_accruals.py — مستحقّات المخلّص/وكيل الشحن/الناقل (مصدرٌ واحد للمتبقّي)
-def accrual_status(kind, obj, *, exclude_payment_journal_id=None) -> dict:  # {due, paid, allocated, remaining, overpaid} بالأساس
+def accrual_status(kind, obj, *, exclude_payment_journal_id=None) -> dict:  # {due, paid, allocated, noted, remaining, overpaid} بالأساس — noted: الإشعارات المدينة المربوطة، والدائنة تزيد due
 def party_open_accruals(tenant_id, partner_id) -> list[dict]:            # FIFO بتاريخ قيد الاستحقاق
 def suggest_accrual_fifo(tenant_id, partner_id, amount) -> list[dict]
 def allocate_voucher_to_accruals(payment, allocations, *, user=None)     # ربطٌ بلا قيد، سندٌ مرحَّل فقط
@@ -130,6 +131,7 @@ def journal_reference_shipment_labels(tenant_id, refs) -> dict           # (refe
 def journal_reference_accrual_links(tenant_id, refs) -> dict             # مرساة كل مستحق (LOGISTICS_CLEARANCE:<id> · LOCAL_SHIPMENT:<id> · SHIPMENT_FREIGHT_ACCRUAL:<shipment>) لقيده ودفعاته، والسندات الموزَّعة بمبالغها، ودفعة الصفقة ← فاتورتها — «ربط الفاتورة بسندها»
 def allocated_base(kind, objs) -> Decimal                                # يضيفه 3ب إلى كل حوض
 def accrual_journal_ids(kind, obj) -> list[int]                          # قيد الاستحقاق الأصلي + قيود تعديله (ACCRUAL_ADJUST_TYPE)
+def note_journal_ids(kind, obj) -> list[int]                             # قيود الإشعارات المدينة/الدائنة المرحّلة المربوطة بالمستند
 def party_on_account_summary(tenant_id, partner_id) -> dict              # {on_account, surplus} — مربّعا رأس كشف الدائن
 
 # logistics/domain/accrual_adjust.py — «تعديل الاستحقاق» (بدل «تراجع عن الاستحقاق»)
@@ -268,6 +270,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
   الوحيد سندُ التسوية النقدية التلقائي (الموسوم بـ`auto_settled_invoice`) —
   يُحرَّر بالحذف أولاً عبر `release_auto_cash_purchase_settlement` لأن الترحيل
   نفسه أنشأه، فلا يبقى معلّقاً ولا يتضاعف عند إعادة الترحيل.
+- **الإشعار المدين/الدائن المربوط تسويةٌ على المستحق** (`sales.CreditDebitNote`، القاعدة في `docs/modules/sales.md`): مرحَّلاً على تخليصٍ أو إرساليةٍ أو استحقاق شحن يدخل `accrual_status` بقيوده (`note_journal_ids`) — صافي سطر الطرف موجبٌ (مدين: خصمٌ أو مطالبة) يُطفئ المتبقّي كالدفع (`noted`)، وسالبٌ (دائن: مبلغٌ إضافيّ له) يزيد `due` — فالكرت والتوزيع وFIFO والأعمار وفصل الزائد تقرؤه كلّها من الموضع الواحد، وكشف الحساب يُرسيه على المستحق (`journal_reference_accrual_links`). وعلى فاتورة الشراء: `purchase_invoice_note_totals` في الملخّص وتوأمه SQL (`note_total` في `annotate_purchase_invoice_payment_summary`) — المدين مع المدفوع والدائن على المستحق، والقاعدتان لا تفترقان.
 - **«المدفوع» يُحسب ولا يُفترض**: `purchase_invoice_payment_summary` (وتوأمها
   الـSQL `annotate_purchase_invoice_payment_summary`) كانتا تعطيان كل فاتورة
   **نقدية مرحّلة** `paid = payable` بغضّ النظر عن وجود سند، وتسقطان عند غيابه على

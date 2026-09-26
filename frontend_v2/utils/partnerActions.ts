@@ -38,7 +38,8 @@ export type PartnerActionIcon =
   | "receipt"
   | "payment"
   | "list"
-  | "repeat";
+  | "repeat"
+  | "note";
 
 export interface PartnerAction {
   key: string;
@@ -127,6 +128,11 @@ export function partnerActionGroups(
 ): PartnerActionGroup[] {
   const id = encodeURIComponent(target.id);
   const named = (base: string) => (target.name ? `${base}: ${target.name}` : base);
+  // لكل الأطراف: شاشة المالية بالطرف مُعبّأً (`CreditDebitNotesPage` تقرأ `?action=new`).
+  const creditDebitNote: PartnerAction = {
+    key: "credit-debit-note", label: "إشعار مدين/دائن", icon: "note",
+    href: `/accounting/credit-debit-notes?action=new&partner_id=${id}`,
+  };
 
   if (target.kind === "customer") {
     return [
@@ -151,6 +157,7 @@ export function partnerActionGroups(
           // ISSUE #53 (قرار 22): نسخ آخر فاتورة للشهر الماضي بنقرة واحدة —
           // `SalesInvoicesPage` تلتقط العلمين وتطلب النسخ فور الوصول.
           { key: "repeat-last-invoice", label: "كرّر فاتورة الشهر الماضي", icon: "repeat", href: `/sales/invoices?repeat_last_month=1&customer=${id}` },
+          creditDebitNote,
         ],
       },
       {
@@ -181,6 +188,7 @@ export function partnerActionGroups(
         actions: [
           { key: "payment", label: "سند صرف", icon: "payment", bridge: "payment" },
           { key: "refund-receipt", label: "سند قبض (استرداد)", icon: "receipt", bridge: "receipt" },
+          creditDebitNote,
         ],
       },
       {
@@ -208,6 +216,7 @@ export function partnerActionGroups(
         { key: "purchase-offer", label: "عرض سعر شراء", icon: "quotation", href: "/price-offers" },
         { key: "payment", label: "سند صرف", icon: "payment", bridge: "payment" },
         { key: "refund-receipt", label: "سند قبض (استرداد)", icon: "receipt", bridge: "receipt" },
+        creditDebitNote,
       ],
     },
     {

@@ -111,7 +111,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'ui-kit': 'مكوّنات الواجهة',
   'sales-classic': 'فاتورة المبيعات (كلاسيكي)',
   'sales-quotations': 'عروض وطلبيات البيع',
-  'credit-debit-notes': 'الإشعارات المدينة/الدائنة',
+  'credit-debit-notes': 'إشعارات مدينة/دائنة',
   'sql-clearances': 'التخليص (SQL)',
   'sql-purchase-invoices': 'فواتير الشراء (SQL)',
   shipments: 'الشحنات',

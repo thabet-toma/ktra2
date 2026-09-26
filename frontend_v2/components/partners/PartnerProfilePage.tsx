@@ -1293,6 +1293,14 @@ export const PartnerProfilePage: React.FC = () => {
                   : []),
               ]
             : []),
+          // إشعار مدين/دائن لأيّ طرف — شاشة المالية بالطرف مُعبّأً مسبقاً.
+          ...(id
+            ? [{
+                key: 'new-credit-debit-note',
+                label: 'إشعار مدين/دائن',
+                onClick: () => navigate(`/accounting/credit-debit-notes?action=new&partner_id=${id}`),
+              }]
+            : []),
         ]}
         tabs={tabs}
         activeTab={activeTabKey}

@@ -101,7 +101,7 @@ const ShipmentManagement = lazyPage(() => import("./components/procurement/shipm
 const KitStory = lazyPage(() => import("./components/kit/KitStory").then((m) => ({ default: m.KitStory })));
 const SalesInvoiceKitStory = lazyPage(() => import("./components/sales/SalesInvoiceKitStory").then((m) => ({ default: m.SalesInvoiceKitStory })));
 const SalesDocumentsPage = lazyPage(() => import("./components/sales/SalesQuotationsPage").then((m) => ({ default: m.SalesDocumentsPage })));
-const CreditDebitNotesPage = lazyPage(() => import("./components/sales/CreditDebitNotesPage").then((m) => ({ default: m.CreditDebitNotesPage })));
+const CreditDebitNotesPage = lazyPage(() => import("./components/accounting/CreditDebitNotesPage").then((m) => ({ default: m.CreditDebitNotesPage })));
 const SalesReturnEditor = lazyPage(() => import("./components/sales/SalesReturnEditor").then((m) => ({ default: m.SalesReturnEditor })));
 const PurchaseReturnEditor = lazyPage(() => import("./components/sales/PurchaseReturnEditor").then((m) => ({ default: m.PurchaseReturnEditor })));
 const SupplierPaymentsPage = lazyPage(() => import("./components/sales/SupplierPaymentsPage").then((m) => ({ default: m.SupplierPaymentsPage })));
@@ -291,7 +291,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "sales-invoices": "/sales/invoices",
   "sales-quotations": "/sales/quotations",
   "sales-orders": "/sales/orders",
-  "credit-debit-notes": "/sales/credit-debit-notes",
+  "credit-debit-notes": "/accounting/credit-debit-notes",
   "sales-return": "/sales/returns",
   "purchase-return": "/purchase-returns",
   "sales-customer-payments": "/sales/customer-payments",
@@ -692,6 +692,12 @@ const App: React.FC = () => {
     // كي لا تسقط إشارةٌ محفوظة في متصفّح المستخدم على صفحةٍ لا وجود لها.
     if (path === "/personal-expenses") {
       navigate("/my-account", { replace: true });
+      return;
+    }
+    // الإشعارات المدينة/الدائنة انتقلت من المبيعات إلى المالية (لكل الأطراف) —
+    // الرابط القديم يحوِّل بمعاملاته (`?action=new&partner_id=`) كما هي.
+    if (path === "/sales/credit-debit-notes") {
+      navigate(`/accounting/credit-debit-notes${location.search}`, { replace: true });
       return;
     }
     const params = new URLSearchParams(location.search);
@@ -2394,6 +2400,9 @@ const App: React.FC = () => {
         return <SalesDocumentsPage initialTab="quotations" />;
 
       case "credit-debit-notes":
+        if (!canView(appView)) {
+          return noPermission();
+        }
         return <CreditDebitNotesPage />;
 
       case "sales-return":

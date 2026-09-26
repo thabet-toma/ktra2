@@ -56,6 +56,35 @@ from ._framework import (
 AGING_BUCKETS = ((0, 30), (31, 60), (61, 90), (91, None))
 
 
+def _open_note_rows(tenant_id: int, *, creditor: bool) -> list[tuple]:
+    """الإشعارات المدينة/الدائنة المرحّلة التي لا تُطفئ مستنداً — صفٌّ موقَّعٌ بتاريخها.
+
+    المربوط بفاتورة شراء أو مستحقٍّ لوجستي داخلٌ في متبقّيه أصلاً فلا يُكرَّر؛ وربطُ
+    فاتورة البيع مرجعٌ فقط فإشعار العميل يظهر دائماً. الموجب يزيد ما على العميل أو
+    ما للدائن (مدينٌ للعميل، دائنٌ للدائن)، والسالب يُصفّيه — بالعملة الأساسية.
+    """
+    from partners.models import CREDITOR_PARTNER_TYPES
+    from sales.models import CreditDebitNote
+
+    qs = CreditDebitNote.objects.filter(
+        tenant_id=tenant_id, status=CreditDebitNote.STATUS_POSTED,
+    ).select_related("partner")
+    if creditor:
+        qs = qs.filter(
+            partner__partner_type__in=CREDITOR_PARTNER_TYPES,
+            related_purchase_invoice__isnull=True, related_clearance__isnull=True,
+            related_local_shipment__isnull=True, related_shipment__isnull=True,
+        )
+    else:
+        qs = qs.exclude(partner__partner_type__in=CREDITOR_PARTNER_TYPES)
+    rows = []
+    for note in qs:
+        base = Decimal(str(note.amount)) * Decimal(str(note.exchange_rate or 1))
+        increases = (note.note_type == CreditDebitNote.TYPE_DEBIT) != creditor
+        rows.append((note.partner_id, note.partner.name, note.note_date, base if increases else -base))
+    return rows
+
+
 def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
     """أعمار الذمم بأربع خانات — المدين للعملاء والدائن للموردين.
 
@@ -95,6 +124,7 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
              ret.invoice_date, -open_credit)
             for ret, open_credit in unapplied_sales_return_credits(tenant_id)
         ]
+        rows_src += _open_note_rows(tenant_id, creditor=False)
     else:
         from logistics.models import PurchaseInvoice
         from logistics.services import annotate_purchase_invoice_payment_summary
@@ -124,10 +154,12 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
         # التقرير من فواتير الشراء وحدها فيغيب دَينهم كلّه ويقصر مجموعُه عن الدفتر.
         from logistics.domain.party_accruals import tenant_open_accruals
         rows_src += tenant_open_accruals(tenant_id)
+        rows_src += _open_note_rows(tenant_id, creditor=True)
 
     for partner_id, partner_name, base_date, remaining in rows_src:
-        # السالب رصيدٌ دائن للزبون مقصود؛ جانب الموردين يُبقي حدّه القديم.
-        if (abs(remaining) if side == "customer" else remaining) <= DEC:
+        # السالب رصيدٌ مقصود: دائنٌ للزبون (مرتجعٌ أو إشعارٌ دائن)، ومدينٌ على الدائن
+        # (إشعارٌ مدينٌ غير مربوط). متبقّي المستندات نفسها لا يكون سالباً.
+        if abs(remaining) <= DEC:
             continue
         age = (today - base_date).days if base_date else 0
         bucket = buckets.setdefault(partner_id, {

@@ -29,6 +29,7 @@ import {
   ExternalLink,
   Factory,
   RefreshCw,
+  Scale,
   Search,
   UserRound,
   FilePlus2,
@@ -102,6 +103,7 @@ const PartnerActionIconView: React.FC<{ icon: PartnerActionIcon }> = ({ icon }) 
     case "receipt": return <ReceiptText className={cls} />;
     case "payment": return <HandCoins className={cls} />;
     case "repeat": return <RefreshCw className={cls} />;
+    case "note": return <Scale className={cls} />;
     default: return <ExternalLink className={cls} />;
   }
 };

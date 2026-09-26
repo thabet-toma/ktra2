@@ -383,17 +383,17 @@ def build_supplier_payment(payment) -> dict:
 _NOTE_COLUMNS = (
     "id", "tenant_id", "note_number", "note_date", "note_type", "amount",
     "reason", "status",
-    "customer__name", "customer__street_address", "customer__city",
-    "customer__phone", "customer__tax_number",
+    "partner__name", "partner__street_address", "partner__city",
+    "partner__phone", "partner__tax_number",
 )
 
 
 def load_credit_debit_note(tenant_id: int, doc_id: int):
     return (
         CreditDebitNote.objects
-        .select_related("customer", "related_invoice")
+        .select_related("partner", "related_invoice", "currency")
         .filter(pk=doc_id, tenant_id=tenant_id)
-        .only(*_NOTE_COLUMNS, "related_invoice__invoice_number")
+        .only(*_NOTE_COLUMNS, "related_invoice__invoice_number", "currency")
         .first()
     )
 
@@ -408,8 +408,8 @@ def build_credit_debit_note(note) -> dict:
         status_label=note.get_status_display(),
         status_tone=tone_for(_NOTE_TONES, note.status),
         party_title="إلى",
-        party=note.customer,
-        currency=None,
+        party=note.partner,
+        currency=note.currency,
         meta_rows=[
             meta("التاريخ", note.note_date, VALUE_DATE),
             meta(

@@ -1419,18 +1419,16 @@ class SalesOrderLine(models.Model):
 
 
 class CreditDebitNote(models.Model):
-    """M4-T4 — إشعار مدين/دائن (Credit/Debit Note).
+    """إشعار مدين/دائن على **أيّ طرف** — عميلٍ أو دائنٍ (مورد، مخلّص، وكيل شحن، ناقل).
 
-    يربط بحساب عميل وفاتورة اختيارياً، ويُنشئ قيداً محاسبياً متوازناً
-    عبر `accounting.services.post_journal()` عند الترحيل.
+    الدلالة واحدة لكل الأنواع، من منظور ذمّة الطرف:
+    - إشعار مدين  = Dr ذمّة الطرف / Cr الحساب المقابل ← يزيد ما عليه أو ينقص ما له.
+    - إشعار دائن  = Cr ذمّة الطرف / Dr الحساب المقابل ← ينقص ما عليه أو يزيد ما له.
+    للعميل هذا سلوك M4-T4 الأصليّ حرفياً (المقابل إيراداته)؛ وللدائن: المدين خصمٌ أو
+    مطالبةٌ منه، والدائن مبلغٌ إضافيٌّ له. الترحيل وإلغاؤه في `sales/services/orders.py`.
 
-    دلالات الإشارات (per `notices.txt` + standard accounting):
-    - إشعار دائن (credit): العميل يحصل على رصيد لنا (تخفيض إيراد، خصم ذمم) →
-      Dr إيرادات (نقص الإيراد)، Cr ذمم العميل (نقص الدائن).
-    - إشعار مدين (debit): العميل مدين لنا بمبلغ إضافي → Dr ذمم العميل (زيادة)،
-      Cr إيرادات (زيادة).
-
-    Reference: docs/aseel_reference/notices.txt
+    الربط بمستندٍ واحدٍ اختياريّ. فاتورة الشراء والتخليص والإرسالية واستحقاق الشحن
+    يُطفئ الإشعارُ المرحّلُ متبقّيها (يُحسب مع مدفوعها)؛ وفاتورة البيع مرجعٌ فقط.
     """
 
     TYPE_CREDIT = "credit"
@@ -1455,10 +1453,10 @@ class CreditDebitNote(models.Model):
     note_type = models.CharField(
         max_length=10, choices=TYPE_CHOICES, db_column="NoteType",
     )
-    customer = models.ForeignKey(
+    partner = models.ForeignKey(
         Partner,
         on_delete=models.PROTECT,
-        db_column="CustomerID",
+        db_column="PartnerID",
         related_name="credit_debit_notes",
     )
     related_invoice = models.ForeignKey(
@@ -1468,7 +1466,41 @@ class CreditDebitNote(models.Model):
         db_column="RelatedInvoiceID",
         related_name="credit_debit_notes",
     )
+    # الربط بمستند الدائن — واحدٌ فقط من الخمسة (`linked_document`).
+    related_purchase_invoice = models.ForeignKey(
+        "logistics.PurchaseInvoice", on_delete=models.PROTECT, null=True, blank=True,
+        db_column="RelatedPurchaseInvoiceID", related_name="credit_debit_notes",
+    )
+    related_clearance = models.ForeignKey(
+        "logistics.LogisticsClearance", on_delete=models.PROTECT, null=True, blank=True,
+        db_column="RelatedClearanceID", related_name="credit_debit_notes",
+    )
+    related_local_shipment = models.ForeignKey(
+        "logistics.LocalShipment", on_delete=models.PROTECT, null=True, blank=True,
+        db_column="RelatedLocalShipmentID", related_name="credit_debit_notes",
+    )
+    #: استحقاق شحن الوكيل على هذه الشحنة.
+    related_shipment = models.ForeignKey(
+        "logistics.LogisticsShipment", on_delete=models.PROTECT, null=True, blank=True,
+        db_column="RelatedShipmentID", related_name="credit_debit_notes",
+    )
+    #: الحساب المقابل لذمّة الطرف — يختاره المستخدم (افتراضيٌّ ذكيٌّ عند الترحيل إن تُرك).
+    counter_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, null=True, blank=True,
+        db_column="CounterAccountID", related_name="+",
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, null=True, blank=True,
+        db_column="CurrencyID", related_name="+",
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, default=1, db_column="ExchangeRate",
+    )
+    #: المبلغ الإجماليّ شاملاً الضريبة؛ `tax_amount` جزؤه على حساب الضريبة.
     amount = models.DecimalField(max_digits=18, decimal_places=2, db_column="Amount")
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, default=0, db_column="TaxAmount",
+    )
     reason = models.TextField(blank=True, default="", db_column="Reason")
     status = models.CharField(
         max_length=20, choices=STATUS_CHOICES,
@@ -1496,6 +1528,18 @@ class CreditDebitNote(models.Model):
 
     def __str__(self):
         return f"{self.note_number} ({self.note_type})"
+
+    #: (الحقل، نوع المستند للواجهة) — ترتيبٌ ثابت.
+    LINK_FIELDS = (
+        ("related_invoice", "sales_invoice"),
+        ("related_purchase_invoice", "purchase_invoice"),
+        ("related_clearance", "clearance"),
+        ("related_local_shipment", "local_shipment"),
+        ("related_shipment", "freight"),
+    )
+
+    def linked_fields(self) -> list[str]:
+        return [f for f, _kind in self.LINK_FIELDS if getattr(self, f"{f}_id")]
 
 
 class VatStatement(models.Model):

@@ -990,6 +990,27 @@ def purchase_invoice_fees_total(invoice) -> Decimal:
     ).quantize(DEC)
 
 
+def purchase_invoice_note_totals(invoice) -> tuple[Decimal, Decimal]:
+    """(إشعارات مدينة، إشعارات دائنة) **مرحّلة** مربوطة بالفاتورة — بعملتها.
+
+    المدين (خصمٌ أو مرتجعٌ من المورد) تسويةٌ تُحسب مع المدفوع؛ والدائن (مبلغٌ إضافيٌّ
+    له) يزيد المستحق. العملة تطابق عملة الفاتورة (`validate_credit_debit_note`).
+    نسخة SQL في `annotate_purchase_invoice_payment_summary` (`note_total`).
+    """
+    from django.db.models import Sum
+    from sales.models import CreditDebitNote
+
+    totals = dict(
+        CreditDebitNote.objects.filter(
+            related_purchase_invoice_id=invoice.pk, status=CreditDebitNote.STATUS_POSTED,
+        ).values("note_type").annotate(total=Sum("amount")).values_list("note_type", "total")
+    )
+    return (
+        Decimal(str(totals.get(CreditDebitNote.TYPE_DEBIT) or 0)),
+        Decimal(str(totals.get(CreditDebitNote.TYPE_CREDIT) or 0)),
+    )
+
+
 def purchase_invoice_recorded_paid(invoice) -> Decimal:
     """المدفوع عبر سندات الفاتورة نفسها (غير مسقوف) — بلا دفعات الصفقة."""
     # T-ONACC: السند الموزَّع يُحسب بمبالغ توزيعه على هذه الفاتورة فقط؛ والسند
@@ -1026,7 +1047,11 @@ def purchase_invoice_recorded_paid(invoice) -> Decimal:
     # بالكامل» وذمم المورد دائنة. ما يُحتسب اليوم شيئان فقط، وكلاهما قيدٌ في
     # الدفاتر: سنداتٌ مرحّلة، وتسويةٌ داخل قيد الفاتورة نفسه (فواتير ما قبل
     # Feature 2). النسخة الـSQL أدناه تطبّق القاعدة نفسها حرفاً بحرف.
-    return linked_paid + legacy_paid + purchase_journal_settlement_debit(invoice)
+    # والإشعار المدين المربوط تسويةٌ كالسند.
+    return (
+        linked_paid + legacy_paid + purchase_journal_settlement_debit(invoice)
+        + purchase_invoice_note_totals(invoice)[0]
+    )
 
 
 def purchase_invoice_payment_summary(invoice):
@@ -1044,6 +1069,7 @@ def purchase_invoice_payment_summary(invoice):
     import_ap_credit = import_invoice_ap_credit(invoice)
     if import_ap_credit is not None:
         payable = import_ap_credit
+    payable += purchase_invoice_note_totals(invoice)[1]
     paid = purchase_invoice_recorded_paid(invoice) + import_deal_payments_ap_debit(invoice)
     summary = {
         "fees_total": fees_total,
@@ -1246,7 +1272,7 @@ def annotate_purchase_invoice_payment_summary(queryset):
     from accounting.models import JournalLine
     from django.db.models import Q
     from logistics.models import PurchaseInvoice, PurchaseInvoiceFee, PurchaseInvoicePayment
-    from sales.models import SupplierPayment, SupplierPaymentAllocation
+    from sales.models import CreditDebitNote, SupplierPayment, SupplierPaymentAllocation
 
     money = DecimalField(max_digits=18, decimal_places=2)
 
@@ -1277,6 +1303,17 @@ def annotate_purchase_invoice_payment_summary(queryset):
         .values("total")[:1]
     )
     legacy_paid = total_subquery(PurchaseInvoicePayment, is_posted=True)
+
+    # نفس `purchase_invoice_note_totals`: المدين مع المدفوع، والدائن على المستحق.
+    def note_total(note_type):
+        return (
+            CreditDebitNote.objects
+            .filter(related_purchase_invoice_id=OuterRef("pk"), status=CreditDebitNote.STATUS_POSTED,
+                    note_type=note_type)
+            .values("related_purchase_invoice_id")
+            .annotate(total=Sum("amount"))
+            .values("total")[:1]
+        )
     pending_cheques = (
         Cheque.objects
         .filter(
@@ -1338,20 +1375,25 @@ def annotate_purchase_invoice_payment_summary(queryset):
         list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
         list_allocated_paid=Coalesce(Subquery(allocated_paid, output_field=money), zero),
         list_legacy_paid=Coalesce(Subquery(legacy_paid, output_field=money), zero),
+        list_note_debit=Coalesce(Subquery(note_total(CreditDebitNote.TYPE_DEBIT), output_field=money), zero),
+        list_note_credit=Coalesce(Subquery(note_total(CreditDebitNote.TYPE_CREDIT), output_field=money), zero),
         list_journal_settled=Case(
             When(is_return=True, then=zero),
             default=Coalesce(Subquery(journal_settled, output_field=money), zero),
             output_field=money,
         ),
     ).annotate(
-        list_payable_total=Coalesce(
-            F("list_import_ap_credit"),
-            ExpressionWrapper(F("grand_total") + F("list_fees_total"), output_field=money),
+        list_payable_total=ExpressionWrapper(
+            Coalesce(
+                F("list_import_ap_credit"),
+                ExpressionWrapper(F("grand_total") + F("list_fees_total"), output_field=money),
+                output_field=money,
+            ) + F("list_note_credit"),
             output_field=money,
         ),
         list_recorded_paid=ExpressionWrapper(
             F("list_linked_paid") + F("list_allocated_paid") + F("list_legacy_paid")
-            + F("list_journal_settled") + F("list_deal_paid"),
+            + F("list_journal_settled") + F("list_deal_paid") + F("list_note_debit"),
             output_field=money,
         ),
     ).annotate(

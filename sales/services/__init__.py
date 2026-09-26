@@ -115,6 +115,11 @@ from .orders import (
     duplicate_invoice_for_today,
     next_credit_debit_note_number,
     post_credit_debit_note,
+    unpost_credit_debit_note,
+    cancel_credit_debit_note,
+    validate_credit_debit_note,
+    default_note_counter_account,
+    credit_debit_counter_account_error,
 )
 from .supplier_vat import (
     post_supplier_payment,
@@ -223,6 +228,11 @@ __all__ = [
     "duplicate_invoice_for_today",
     "next_credit_debit_note_number",
     "post_credit_debit_note",
+    "unpost_credit_debit_note",
+    "cancel_credit_debit_note",
+    "validate_credit_debit_note",
+    "default_note_counter_account",
+    "credit_debit_counter_account_error",
     "post_supplier_payment",
     "unpost_supplier_payment",
     "allocate_supplier_payment",

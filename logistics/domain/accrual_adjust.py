@@ -209,7 +209,7 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
             party_id = next((r['partner'] for r in lines if r.get('partner')), None)
             due_after = before['due'] + sum(
                 (r['credit'] - r['debit'] for r in adj_lines if r['partner'] == party_id), ZERO)
-            paid = before['paid'] + before['allocated']
+            paid = before['paid'] + before['allocated'] + before['noted']
             result = {
                 'kind': kind, 'id': obj.pk, 'label': label, 'preview': preview,
                 'journal_id': journal.pk if journal else None,

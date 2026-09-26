@@ -13,7 +13,7 @@ export const VIEW_PERMISSIONS: Record<string, string> = {
   "sales-invoices": "sales.invoice.view",
   "sales-quotations": "sales.quotation.manage",
   "sales-orders": "sales.quotation.manage",
-  "credit-debit-notes": "sales.invoice.view",
+  "credit-debit-notes": "accounting.journal.view",
   "sales-return": "sales.invoice.view",
   "sales-delivery-notes": "sales.invoice.view",
   "invoice-profits": "inventory.cost.view",

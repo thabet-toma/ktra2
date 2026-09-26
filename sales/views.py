@@ -77,7 +77,10 @@ from .services import (
     linked_return_credit_summary,
     last_sale_price,
     next_invoice_number,
+    cancel_credit_debit_note,
+    default_note_counter_account,
     post_credit_debit_note,
+    unpost_credit_debit_note,
     post_customer_payment,
     post_sales_invoice,
     recalculate_invoice_amounts,
@@ -2073,7 +2076,12 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
 
 
 class CreditDebitNoteViewSet(viewsets.ModelViewSet):
-    """M4-T4 — Credit / Debit notes (إشعارات مدينة/دائنة)."""
+    """إشعارات مدينة/دائنة على أيّ طرف — قسم المالية.
+
+    الصلاحيات من دفتر اليومية: العرض `accounting.journal.view`، الإنشاء والتعديل
+    والحذف والإلغاء `accounting.journal.create`، الترحيل `.post`، وإلغاؤه `.unpost`.
+    المسودة وحدها تُعدَّل أو تُحذف؛ المرحَّل يُلغى ترحيله أولاً.
+    """
 
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
@@ -2084,25 +2092,101 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
         tenant = get_tenant(self.request)
         if not tenant:
             return CreditDebitNote.objects.none()
-        return CreditDebitNote.objects.select_related(
-            "customer", "related_invoice", "journal"
+        qs = CreditDebitNote.objects.select_related(
+            "partner", "related_invoice", "related_purchase_invoice",
+            "related_clearance__shipment", "related_local_shipment", "related_shipment",
+            "counter_account", "currency", "journal",
         ).filter(tenant=tenant).order_by("-note_date", "-id")
+        params = self.request.query_params
+        if params.get("partner"):
+            qs = qs.filter(partner_id=params["partner"])
+        if params.get("note_type") in (CreditDebitNote.TYPE_CREDIT, CreditDebitNote.TYPE_DEBIT):
+            qs = qs.filter(note_type=params["note_type"])
+        return qs
+
+    def list(self, request, *args, **kwargs):
+        require_perm(request, "accounting.journal.view")
+        return super().list(request, *args, **kwargs)
+
+    def retrieve(self, request, *args, **kwargs):
+        require_perm(request, "accounting.journal.view")
+        return super().retrieve(request, *args, **kwargs)
 
     def perform_create(self, serializer):
+        require_perm(self.request, "accounting.journal.create")
         tenant = get_tenant(self.request)
         if not tenant:
             raise DRFValidationError({"tenant": "لا يوجد شركة محددة."})
-        serializer.save(tenant=tenant, created_by=self.request.user if self.request.user.is_authenticated else None)
+        serializer.save(tenant=tenant)
 
-    @action(detail=True, methods=["post"], url_path="post")
-    def post_action(self, request, pk=None):
-        """ترحيل الإشعار — قيد متوازن idempotent عبر post_journal()."""
+    def _require_draft(self, note):
+        if note.status != CreditDebitNote.STATUS_DRAFT:
+            raise DRFValidationError({"detail": POSTED_DOC_WARNING if note.status == CreditDebitNote.STATUS_POSTED
+                                      else "الإشعار ملغي — لا يُعدَّل."})
+
+    def perform_update(self, serializer):
+        require_perm(self.request, "accounting.journal.create")
+        self._require_draft(serializer.instance)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        require_perm(self.request, "accounting.journal.create")
+        self._require_draft(instance)
+        instance.delete()
+
+    def _note_action(self, request, service):
         note = self.get_object()
         try:
-            post_credit_debit_note(note, user=request.user)
+            service(note, user=request.user)
         except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
-        except Exception as e:
-            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            return Response({"error": e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
         note.refresh_from_db()
-        return Response(CreditDebitNoteSerializer(note).data)
+        return Response(self.get_serializer(note).data)
+
+    @action(detail=True, methods=["post"], url_path="post")
+    @requires_perm("accounting.journal.post")
+    def post_action(self, request, pk=None):
+        """ترحيل الإشعار — قيد متوازن idempotent عبر post_journal()."""
+        return self._note_action(request, post_credit_debit_note)
+
+    @action(detail=True, methods=["post"], url_path="unpost")
+    @requires_perm("accounting.journal.unpost")
+    def unpost_action(self, request, pk=None):
+        """إلغاء الترحيل بـ`unpost_document` — يعود الإشعار مسودة."""
+        return self._note_action(request, unpost_credit_debit_note)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    @requires_perm("accounting.journal.create")
+    def cancel_action(self, request, pk=None):
+        return self._note_action(request, cancel_credit_debit_note)
+
+    @action(detail=False, methods=["get"], url_path="default-account")
+    @requires_perm("accounting.journal.view")
+    def default_account(self, request):
+        """الحساب المقابل الافتراضي لطرفٍ ونوع ربطٍ — يملأ المنتقي في النموذج."""
+        from logistics.models import LocalShipment, LogisticsClearance, LogisticsShipment, PurchaseInvoice
+        from partners.models import Partner
+
+        tenant = get_tenant(request)
+        partner = Partner.objects.filter(tenant=tenant, pk=request.query_params.get("partner") or 0).first()
+        if partner is None:
+            return Response({"error": "الطرف غير موجود."}, status=status.HTTP_404_NOT_FOUND)
+        probe = CreditDebitNote(tenant=tenant, partner=partner)
+        link_models = {
+            "related_invoice": SalesInvoice,
+            "related_purchase_invoice": PurchaseInvoice,
+            "related_clearance": LogisticsClearance,
+            "related_local_shipment": LocalShipment,
+            "related_shipment": LogisticsShipment,
+        }
+        for field, model in link_models.items():
+            value = request.query_params.get(field)
+            if value:
+                doc = model.objects.filter(tenant=tenant, pk=value).first()
+                if doc is not None:
+                    setattr(probe, field, doc)
+        try:
+            account = default_note_counter_account(probe)
+        except ValidationError as e:
+            return Response({"account": None, "error": e.messages[0]})
+        return Response({"account": {"id": account.id, "code": account.code, "name": account.name}})

@@ -369,17 +369,24 @@ async function installMocks(page: Page) {
   });
 }
 
-test("credit and debit note choices explain their customer impact", async ({ page }) => {
+test("credit and debit note choices explain their party impact", async ({ page }) => {
   await installMocks(page);
+  // الرابط القديم تحت المبيعات يحوِّل إلى المالية.
   await page.goto("/sales/credit-debit-notes");
+  await expect(page).toHaveURL(/\/accounting\/credit-debit-notes/);
   await page.getByRole("button", { name: "إشعار جديد", exact: true }).last().click();
 
-  await expect(page.getByText("ينقص المبلغ المطلوب من العميل", { exact: false })).toBeVisible();
-  await expect(page.getByText("العميل", { exact: true }).last()).toBeVisible();
-  await expect(page.getByText("الحساب (العميل/المورد)", { exact: true })).toHaveCount(0);
+  // كل أنواع الأطراف في الفلتر، لا العميل وحده.
+  await expect(page.getByLabel("نوع الطرف").locator("option", { hasText: "مخلّص جمركي" })).toHaveCount(1);
+  await page.getByPlaceholder("اكتب اسم الطرف…").fill("عميل");
+  await page.getByText("عميل واضح", { exact: true }).first().click();
 
-  await page.getByLabel("النوع").selectOption("debit");
-  await expect(page.getByText("يزيد المبلغ المطلوب من العميل", { exact: false })).toBeVisible();
+  const explanation = page.getByTestId("note-explanation");
+  await expect(explanation).toContainText("هذا الإشعار سيجعل عميل واضح مديناً لنا");
+  await expect(explanation).toContainText("يزيد ما عليه");
+  await page.getByLabel("نوع الإشعار").selectOption("credit");
+  await expect(explanation).toContainText("دائناً لنا");
+  await expect(explanation).toContainText("ينقص ما عليه");
 });
 
 test("sales and purchase lists show payment state remaining and partner balance", async ({ page }) => {

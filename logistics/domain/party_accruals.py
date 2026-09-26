@@ -108,6 +108,20 @@ def _adjustments_by_doc(kind: str, tenant_id: int, doc_ids) -> dict:
     return out
 
 
+#: الصنف ← حقل الربط في `sales.CreditDebitNote`.
+_NOTE_LINK_FIELD = {'clearance': 'related_clearance', 'freight': 'related_shipment', 'local': 'related_local_shipment'}
+
+
+def note_journal_ids(kind: str, obj) -> list[int]:
+    """قيود الإشعارات المدينة/الدائنة **المرحّلة** المربوطة بالمستند — تسويةٌ على مستحقّه."""
+    from sales.models import CreditDebitNote
+
+    return list(CreditDebitNote.objects.filter(
+        tenant_id=obj.tenant_id, status=CreditDebitNote.STATUS_POSTED, journal__isnull=False,
+        **{_NOTE_LINK_FIELD[kind]: obj},
+    ).values_list('journal_id', flat=True))
+
+
 def accrual_journal_ids(kind: str, obj) -> list[int]:
     """قيد الاستحقاق وقيود تعديله — فارغة إن لم يُرحَّل الاستحقاق."""
     _party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
@@ -130,8 +144,11 @@ def allocated_base(kind: str, objs) -> Decimal:
 
 
 def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
-    """{due, due_original, paid, allocated, remaining, overpaid, surplus} لمستندٍ واحد
+    """{due, due_original, paid, allocated, noted, remaining, overpaid, surplus} لمستندٍ واحد
     بالعملة الأساسية.
+
+    `noted`: الإشعارات المدينة المرحّلة المربوطة بالمستند (خصمٌ أو مطالبةٌ من الطرف) —
+    تسويةٌ كالدفع تُطفئ المتبقّي. والإشعار الدائن المربوط (مبلغٌ إضافيٌّ له) يزيد `due`.
 
     `due` بعد تعديلات الاستحقاق و`due_original` قبلها. `surplus` (الفائض) هو ما صار
     من الزائد زائداً **لأن المستحق خُفِّض**: min(الزائد، مقدار التخفيض). وباقي الزائد
@@ -151,13 +168,18 @@ def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
         due = due_original = ZERO
     paid = _party_net(pay_journals, party_id, credit_side=False)
     allocated = allocated_base(kind, [obj])
-    settled = paid + allocated
+    # Dr ذمّة الطرف (إشعار مدين) موجب ← تسوية؛ Cr (إشعار دائن) سالب ← يزيد المستحق.
+    noted = _party_net(note_journal_ids(kind, obj), party_id, credit_side=False)
+    if noted < 0:
+        due, noted = due - noted, ZERO
+    settled = paid + allocated + noted
     overpaid = max(settled - due, ZERO)
     return {
         'due': due,
         'due_original': due_original,
         'paid': paid,
         'allocated': allocated,
+        'noted': noted,
         'remaining': max(due - settled, ZERO),
         'overpaid': overpaid,
         'surplus': min(overpaid, max(due_original - due, ZERO)),
@@ -182,7 +204,7 @@ def document_settlement(kind: str, obj, *, draft_due, draft_paid, rate=None) -> 
         divisor = Decimal(str(rate or 1)) or Decimal('1')
         due, paid, remaining, advance = (
             (value / divisor).quantize(Q2) for value in (
-                status['due'], status['paid'] + status['allocated'],
+                status['due'], status['paid'] + status['allocated'] + status['noted'],
                 status['remaining'], status['overpaid'],
             )
         )
@@ -452,6 +474,29 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
         voucher_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
         for voucher_id, targets in _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())).items()
     }
+    # الإشعار المدين/الدائن المربوط بمستحقٍّ يرسو عليه كدفعته.
+    note_ids = wanted.get('CREDIT_DEBIT_NOTE')
+    if note_ids:
+        from sales.models import CreditDebitNote
+
+        ship_deals = 'deals__partner'
+        for note in CreditDebitNote.objects.filter(
+            tenant_id=tenant_id, pk__in=note_ids,
+        ).exclude(
+            related_clearance__isnull=True, related_shipment__isnull=True, related_local_shipment__isnull=True,
+        ).select_related(
+            'related_clearance__shipment', 'related_shipment',
+            'related_local_shipment__shipment', 'related_local_shipment__clearance__shipment',
+        ).prefetch_related(
+            f'related_clearance__shipment__{ship_deals}', f'related_shipment__{ship_deals}',
+            f'related_local_shipment__shipment__{ship_deals}',
+            f'related_local_shipment__clearance__shipment__{ship_deals}',
+        ):
+            for kind, field in _NOTE_LINK_FIELD.items():
+                obj = getattr(note, field)
+                if obj is not None:
+                    anchors[('CREDIT_DEBIT_NOTE', note.pk)] = _anchor_of(kind, obj)
+                    break
 
     deal_invoices: dict[int, list[int]] = {}
     deal_payment_ids = wanted.get('LOGISTICS_PAYMENT', set()) | wanted.get('LOGISTICS_PAYMENT_UNPOST', set())
@@ -735,4 +780,5 @@ __all__ = [
     'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
     'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
     'ACCRUAL_ADJUST_TYPE', 'accrual_journal_ids', 'adjustment_journal_ids', 'party_on_account_summary',
+    'note_journal_ids',
 ]

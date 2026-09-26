@@ -29,7 +29,7 @@ from inventory.serials import (
     restore_returned_sales_serials,
 )
 from inventory.services import product_display_name, record_stock_movement
-from partners.models import Partner, PartnerGroup
+from partners.models import Partner
 from accounting.api import ensure_partner_account
 from tenants.models import Tenant
 
@@ -516,87 +516,275 @@ def next_credit_debit_note_number(tenant_id: int, note_type: str) -> str:
     return f"{prefix}-{seq:04d}"
 
 
+#: نوع الدائن ← كود الحساب المقابل الافتراضي (مصروفه). المورد يسقط إلى تكلفة المبيعات.
+_CREDITOR_COUNTER_CODES = {
+    "CustomsBroker": "5307",
+    "FreightForwarder": "5301",
+    "LocalTransporter": "5305",
+    "Carrier": "5305",
+}
+#: حسابات لا تكون مقابلاً: الذمم (قيدُ ذمّةٍ على ذمّة يُيتّم الرصيد) والمخزون (قيمته
+#: تتبع طبقات الكلفة — قيدٌ عليه بلا طبقة يكسر تطابق الدفتر والطبقات).
+_BLOCKED_COUNTER_SUB_TYPES = {"receivable", "payable", "inventory"}
+
+
+def _note_is_creditor(note) -> bool:
+    from partners.models import is_creditor_party
+
+    return is_creditor_party(note.partner)
+
+
+def _note_party_account(note) -> Account:
+    """ذمّة الطرف: الدائن من `_resolve_ap_account`، والعميل من ذمّة فاتورته ثم ذمّته."""
+    if _note_is_creditor(note):
+        from logistics.services import _resolve_ap_account
+
+        return _resolve_ap_account(note.partner)
+    if note.related_invoice_id and note.related_invoice.accounts_receivable_account_id:
+        return note.related_invoice.accounts_receivable_account
+    from .flow import _resolve_ar_account_for_partner
+
+    return _resolve_ar_account_for_partner(note.partner)
+
+
+def credit_debit_counter_account_error(account, tenant_id: int) -> str | None:
+    """سبب رفض الحساب مقابلاً للإشعار، أو `None` إن صلح."""
+    from accounting.account_classification import sub_type_for_account
+
+    if account is None:
+        return "اختر الحساب المقابل."
+    if account.tenant_id != tenant_id:
+        return "الحساب المقابل من شركة أخرى."
+    if not account.is_active:
+        return f"الحساب «{account.code} {account.name}» غير نشط."
+    if account.children.exists():
+        return f"«{account.code} {account.name}» حساب مجمِّع — اختر حساباً فرعياً."
+    sub_type = sub_type_for_account(account)
+    if sub_type == "inventory":
+        return "حساب المخزون لا يُعدَّل بإشعار — قيمته تتبع طبقات الكلفة."
+    if sub_type in _BLOCKED_COUNTER_SUB_TYPES or Partner.objects.filter(
+        tenant_id=tenant_id, linked_account_id=account.id,
+    ).exists():
+        return f"«{account.code} {account.name}» حساب ذمم — الإشعار يقيد على ذمّة الطرف تلقائياً."
+    return None
+
+
+def _usable_counter(account, tenant_id):
+    return account if account and credit_debit_counter_account_error(account, tenant_id) is None else None
+
+
+def _code_account(tenant_id: int, code: str):
+    return _usable_counter(Account.objects.filter(tenant_id=tenant_id, code=code).first(), tenant_id)
+
+
+def _linked_document_counter(note):
+    """حساب مصروف/إيراد المستند المربوط — `None` إن لم يُعرف منه."""
+    tenant_id = note.tenant_id
+    if note.related_invoice_id:
+        return _usable_counter(note.related_invoice.revenue_account, tenant_id)
+    if note.related_clearance_id:
+        from logistics.accruals import _journal_debit_sources
+        from logistics.domain.party_accruals import accrual_journal_ids
+
+        sources = _journal_debit_sources(accrual_journal_ids("clearance", note.related_clearance))
+        by_id = Account.objects.in_bulk([acc for acc, _w in sources])
+        for acc_id, _weight in sorted(sources, key=lambda s: s[1], reverse=True):
+            acc = by_id.get(acc_id)
+            if acc and acc.account_type == "Expense" and _usable_counter(acc, tenant_id):
+                return acc
+        return None
+    if note.related_local_shipment_id:
+        return _usable_counter(note.related_local_shipment.expense_account, tenant_id)
+    if note.related_purchase_invoice_id:
+        from logistics.models import PurchaseInvoiceItem
+
+        rows = (
+            PurchaseInvoiceItem.objects.filter(
+                invoice_id=note.related_purchase_invoice_id, expense_account__isnull=False,
+            )
+            .values("expense_account").annotate(total=Sum("total_price")).order_by("-total")
+        )
+        for row in rows:
+            acc = _usable_counter(Account.objects.filter(pk=row["expense_account"]).first(), tenant_id)
+            if acc:
+                return acc
+    return None
+
+
+def default_note_counter_account(note) -> Account:
+    """الحساب المقابل الافتراضي: مصروف/إيراد المستند المربوط، وإلا حسب نوع الطرف.
+
+    عميل ← الإيرادات (سلوك M4-T4) · مخلّص 5307 · وكيل شحن 5301 · ناقل 5305 ·
+    مورد ← تكلفة المبيعات (إعدادات المبيعات ثم 5101) — لا المخزون: الخصم على بضاعةٍ
+    بيع أغلبها لا يُقيَّد على مخزونٍ بلا طبقات. آخر سقوط: أول مصروفٍ فرعيٍّ نشط.
+    """
+    tenant_id = note.tenant_id
+    acc = _linked_document_counter(note)
+    if acc:
+        return acc
+    if not _note_is_creditor(note):
+        return _default_revenue_account(tenant_id)
+    code = _CREDITOR_COUNTER_CODES.get(note.partner.partner_type)
+    if code:
+        acc = _code_account(tenant_id, code)
+    else:
+        ss = SalesSettings.objects.filter(tenant_id=tenant_id).select_related("default_cogs_account").first()
+        acc = _usable_counter(ss.default_cogs_account if ss else None, tenant_id) or _code_account(tenant_id, "5101")
+    if acc:
+        return acc
+    for candidate in Account.objects.filter(
+        tenant_id=tenant_id, account_type="Expense", is_active=True, children__isnull=True,
+    ).order_by("code"):
+        if _usable_counter(candidate, tenant_id):
+            return candidate
+    raise ValidationError("لا يوجد حساب مصروف صالح مقابلاً للإشعار — اختر الحساب المقابل يدوياً.")
+
+
+#: حقل الربط ← مالك المستند (يجب أن يكون طرف الإشعار نفسه).
+_LINK_OWNER = {
+    "related_invoice": lambda d: d.customer_id,
+    "related_purchase_invoice": lambda d: d.partner_id,
+    "related_clearance": lambda d: d.customs_broker_id,
+    "related_local_shipment": lambda d: d.carrier_id,
+    "related_shipment": lambda d: d.shipping_agent_id,
+}
+#: حقل الربط ← هل استحقاق المستند مرحَّل؟ (التسوية تطفئ مستحقّاً قائماً في الدفتر.)
+_LINK_POSTED = {
+    "related_purchase_invoice": lambda d: bool(d.is_posted),
+    "related_clearance": lambda d: bool(d.journal_id),
+    "related_local_shipment": lambda d: bool(d.is_posted),
+    "related_shipment": lambda d: bool(d.freight_is_posted),
+}
+
+
+def validate_credit_debit_note(note) -> None:
+    """قواعد الإشعار قبل الحفظ والترحيل: المبلغ والضريبة، ربطٌ واحد لنفس الطرف، والمقابل."""
+    tenant_id = note.tenant_id
+    if note.partner.tenant_id != tenant_id:
+        raise ValidationError("الطرف لا يتبع نفس الشركة.")
+    amount = Decimal(str(note.amount or 0)).quantize(DEC)
+    tax = Decimal(str(note.tax_amount or 0)).quantize(DEC)
+    if amount <= 0:
+        raise ValidationError("مبلغ الإشعار يجب أن يكون أكبر من صفر.")
+    if tax < 0 or tax >= amount:
+        raise ValidationError("الضريبة جزءٌ من المبلغ: بين صفر والمبلغ الإجمالي.")
+    if Decimal(str(note.exchange_rate or 0)) <= 0:
+        raise ValidationError("سعر الصرف يجب أن يكون أكبر من صفر.")
+
+    linked = note.linked_fields()
+    if len(linked) > 1:
+        raise ValidationError("اربط الإشعار بمستندٍ واحد فقط.")
+    if linked:
+        field = linked[0]
+        doc = getattr(note, field)
+        if doc.tenant_id != tenant_id or _LINK_OWNER[field](doc) != note.partner_id:
+            raise ValidationError("المستند المربوط لا يخصّ هذا الطرف.")
+        posted = _LINK_POSTED.get(field)
+        if posted and not posted(doc):
+            raise ValidationError("المستند المربوط غير مرحَّل بعد — رحّله أولاً.")
+        if field == "related_purchase_invoice":
+            if doc.is_return:
+                raise ValidationError("اربط الإشعار بفاتورة الشراء الأصلية لا بمرتجعها.")
+            if note.currency_id != doc.currency_id:
+                raise ValidationError("عملة الإشعار يجب أن تطابق عملة فاتورة الشراء المربوطة.")
+
+    if note.counter_account_id:
+        error = credit_debit_counter_account_error(note.counter_account, tenant_id)
+        if error:
+            raise ValidationError(error)
+
+
+#: حقل الربط ← صنف المستحق اللوجستي في `logistics.domain.party_accruals`.
+_NOTE_ACCRUAL_KIND = (
+    ("related_clearance", "clearance"),
+    ("related_local_shipment", "local"),
+    ("related_shipment", "freight"),
+)
+
+
+def _linked_settlement_remaining(note):
+    """متبقّي المستند الذي يُطفئه الإشعار المدين المربوط — بعملة الإشعار؛ `None` بلا تسوية."""
+    if note.related_purchase_invoice_id:
+        from logistics.services import purchase_invoice_payment_summary
+
+        return purchase_invoice_payment_summary(note.related_purchase_invoice)["remaining_balance"]
+    for field, kind in _NOTE_ACCRUAL_KIND:
+        if getattr(note, f"{field}_id"):
+            from logistics.domain.party_accruals import accrual_remaining
+
+            rate = Decimal(str(note.exchange_rate or 1))
+            return (accrual_remaining(kind, getattr(note, field)) / rate).quantize(DEC)
+    return None
+
+
 def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
-    """Post a credit/debit note via the canonical `post_journal()`.
+    """ترحيل الإشعار على أيّ طرف عبر `post_journal()` — مرجع `CREDIT_DEBIT_NOTE`.
 
-    Account resolution (in priority order):
-      • Revenue: related_invoice.revenue_account → SalesSettings default → first Revenue account.
-      • AR:      related_invoice.accounts_receivable_account → customer.linked_account
-                 → customer.group.account_receivable → SalesSettings default.
-
-    Journal lines (both note types balance Dr=Cr=note.amount):
-      • Credit note: Dr Revenue (reverse sale) / Cr AR (release receivable).
-      • Debit  note: Dr AR (extra receivable) / Cr Revenue (extra sale).
-
-    Idempotent via `post_journal()`'s `(reference_type, reference_id)` lock.
+      • مدين: Dr ذمّة الطرف (المبلغ) / Cr المقابل (المبلغ − الضريبة) / Cr الضريبة.
+      • دائن: Cr ذمّة الطرف / Dr المقابل / Dr الضريبة.
+    الضريبة مخرجاتٌ للعميل (`resolve_output_vat_account`) ومدخلاتٌ للدائن (1105).
+    العملة الأجنبية تملأ `amount_currency` تلقائياً من `post_journal`. المقابل الفارغ
+    يُحلّ بـ`default_note_counter_account` ويُحفظ على الإشعار.
     """
     if note.status == CreditDebitNote.STATUS_POSTED:
         raise ValidationError("الإشعار مرحَّل مسبقاً.")
     if note.status == CreditDebitNote.STATUS_CANCELLED:
         raise ValidationError("لا يمكن ترحيل إشعار ملغي.")
-    amt = Decimal(str(note.amount or 0)).quantize(DEC)
-    if amt <= 0:
-        raise ValidationError("مبلغ الإشعار يجب أن يكون أكبر من صفر.")
+    validate_credit_debit_note(note)
 
-    # ── Resolve revenue account ─────────────────────────────────────────
-    revenue_account_id = None
-    if note.related_invoice_id and note.related_invoice.revenue_account_id:
-        revenue_account_id = note.related_invoice.revenue_account_id
-    if not revenue_account_id:
-        revenue_account_id = _default_revenue_account(note.tenant_id).id
+    amount = Decimal(str(note.amount)).quantize(DEC)
+    tax = Decimal(str(note.tax_amount or 0)).quantize(DEC)
+    creditor = _note_is_creditor(note)
+    party_account = _note_party_account(note)
+    counter = note.counter_account or default_note_counter_account(note)
+    error = credit_debit_counter_account_error(counter, note.tenant_id)
+    if error:
+        raise ValidationError(error)
 
-    # ── Resolve AR account (mirror `_resolve_ar_account` semantics) ────
-    ar_account_id = None
-    if note.related_invoice_id and note.related_invoice.accounts_receivable_account_id:
-        ar_account_id = note.related_invoice.accounts_receivable_account_id
-    if not ar_account_id:
-        cust: Partner = note.customer
-        if cust.linked_account_id:
-            ar_account_id = cust.linked_account_id
-        elif cust.group_id:
-            g = PartnerGroup.objects.filter(pk=cust.group_id).first()
-            if g and g.account_receivable_id:
-                ar_account_id = g.account_receivable_id
-        if not ar_account_id:
-            ss = SalesSettings.objects.filter(tenant_id=note.tenant_id).first()
-            if ss and ss.default_ar_account_id:
-                ar_account_id = ss.default_ar_account_id
-    if not ar_account_id:
-        raise ValidationError(
-            "لا يوجد حساب ذمم: عيّن حساباً مرتبطاً بالعميل أو في إعدادات المبيعات."
-        )
+    is_debit = note.note_type == CreditDebitNote.TYPE_DEBIT
+    party_label = note.partner.name
+    if is_debit and creditor:
+        # مرآة `allocate_voucher_to_accruals`: التسوية لا تتجاوز المتبقّي — الزائد
+        # بلا ربطٍ يبقى رصيداً عاماً على الطرف بدل «مدفوعٍ» فوق المستحق.
+        remaining = _linked_settlement_remaining(note)
+        if remaining is not None and amount > remaining + DEC:
+            raise ValidationError(
+                f"الإشعار ({amount}) أكبر من متبقّي المستند المربوط ({remaining}) — "
+                "خفّضه أو اتركه بلا ربط ليبقى رصيداً عاماً على الطرف."
+            )
 
-    # ── Build journal lines per note type ──────────────────────────────
-    if note.note_type == CreditDebitNote.TYPE_CREDIT:
-        dr_acc, cr_acc = revenue_account_id, ar_account_id
-        dr_desc, cr_desc = "تخفيض إيراد", "إشعار دائن للعميل"
-    else:  # debit
-        dr_acc, cr_acc = ar_account_id, revenue_account_id
-        dr_desc, cr_desc = "إشعار مدين للعميل", "زيادة إيراد"
+    def line(account_id, value, *, party_side, description, partner_id=None):
+        on_debit = is_debit == party_side
+        return {
+            "account": account_id, "partner": partner_id,
+            "debit": value if on_debit else Decimal("0"),
+            "credit": Decimal("0") if on_debit else value,
+            "description": description,
+        }
 
     journal_lines = [
-        {
-            "account": dr_acc,
-            "partner": note.customer_id if dr_acc == ar_account_id else None,
-            "debit": amt,
-            "credit": Decimal("0"),
-            "description": dr_desc,
-        },
-        {
-            "account": cr_acc,
-            "partner": note.customer_id if cr_acc == ar_account_id else None,
-            "debit": Decimal("0"),
-            "credit": amt,
-            "description": cr_desc,
-        },
+        line(party_account.id, amount, party_side=True, partner_id=note.partner_id,
+             description=f"إشعار {'مدين' if is_debit else 'دائن'} — {party_label}"),
+        line(counter.id, amount - tax, party_side=False,
+             description=note.reason or f"إشعار {note.note_number}"),
     ]
+    if tax > 0:
+        if creditor:
+            from logistics.services import _resolve_vat_input_account
 
-    # ── Currency: inherit from related invoice if any, else first tenant currency
-    currency = None
-    exchange_rate = Decimal("1")
-    if note.related_invoice_id:
-        currency = note.related_invoice.currency
-        exchange_rate = Decimal(str(note.related_invoice.exchange_rate or 1))
+            vat_account = _resolve_vat_input_account(note.tenant_id)
+        else:
+            from accounting.services import resolve_output_vat_account
+
+            vat_account = resolve_output_vat_account(note.tenant_id)
+            if not vat_account:
+                raise ValidationError(
+                    "ضريبة المخرجات تتطلب نسبة ضريبة مخرجات أو حساب «2104» من نوع Liability."
+                )
+        journal_lines.append(line(
+            vat_account.id, tax, party_side=False,
+            description=f"ضريبة {'مدخلات' if creditor else 'مخرجات'} — إشعار {note.note_number}",
+        ))
 
     with transaction.atomic():
         jh = post_journal(
@@ -604,15 +792,16 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
             transaction_date=note.note_date,
             reference_type="CREDIT_DEBIT_NOTE",
             reference_id=note.id,
-            description=f"إشعار {note.get_note_type_display()} — {note.note_number}",
+            description=f"إشعار {note.get_note_type_display()} — {note.note_number} — {party_label}",
             lines_data=journal_lines,
-            currency=currency,
-            exchange_rate=exchange_rate,
+            currency=note.currency,
+            exchange_rate=Decimal(str(note.exchange_rate or 1)),
             user=user,
         )
         note.journal = jh
+        note.counter_account = counter
         note.status = CreditDebitNote.STATUS_POSTED
-        note.save(update_fields=["journal", "status", "updated_at"])
+        note.save(update_fields=["journal", "counter_account", "status", "updated_at"])
 
         create_audit_log(
             tenant=note.tenant,
@@ -622,7 +811,42 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
             object_id=note.id,
             change_details=f"Posted {note.get_note_type_display()} — journal={jh.id}",
         )
+    logger.info(
+        "credit_debit_note.posted tenant=%s note=%s journal=%s creditor=%s",
+        note.tenant_id, note.id, jh.id, creditor,
+    )
+    return note
 
+
+def unpost_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
+    """إلغاء ترحيل الإشعار بالمسار الموحّد `unpost_document` — يعود مسودةً قابلةً للتعديل."""
+    if note.status != CreditDebitNote.STATUS_POSTED:
+        raise ValidationError("الإشعار غير مرحَّل.")
+    with transaction.atomic():
+        unpost_document(
+            tenant_id=note.tenant_id,
+            reference_id=note.id,
+            journal_reference_types=["CREDIT_DEBIT_NOTE"],
+            user=user,
+            document_label=f"إشعار {note.note_number}",
+        )
+        note.journal = None
+        note.status = CreditDebitNote.STATUS_DRAFT
+        note.save(update_fields=["journal", "status", "updated_at"])
+    logger.info("credit_debit_note.unposted tenant=%s note=%s", note.tenant_id, note.id)
+    return note
+
+
+def cancel_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
+    """إلغاء إشعارٍ مسودة — المرحَّل يُلغى ترحيله أولاً."""
+    if note.status != CreditDebitNote.STATUS_DRAFT:
+        raise ValidationError("يُلغى الإشعار وهو مسودة فقط — ألغِ ترحيله أولاً.")
+    note.status = CreditDebitNote.STATUS_CANCELLED
+    note.save(update_fields=["status", "updated_at"])
+    create_audit_log(
+        tenant=note.tenant, user=user, action="UPDATE", model_name="CreditDebitNote",
+        object_id=note.id, change_details=f"Cancelled {note.note_number}",
+    )
     return note
 
 

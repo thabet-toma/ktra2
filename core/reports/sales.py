@@ -554,7 +554,7 @@ def _credit_notes(tenant_id: int, params: dict) -> list[dict]:
     from sales.models import CreditDebitNote
 
     qs = CreditDebitNote.objects.filter(tenant_id=tenant_id).select_related(
-        "customer", "related_invoice",
+        "partner", "related_invoice",
     )
     qs = _apply_dates(qs, "note_date", params)
     return [{
@@ -562,7 +562,7 @@ def _credit_notes(tenant_id: int, params: dict) -> list[dict]:
         "number": n.note_number,
         "date": n.note_date,
         "note_type": "إشعار دائن" if n.note_type == CreditDebitNote.TYPE_CREDIT else "إشعار مدين",
-        "partner_name": n.customer.name if n.customer_id else "",
+        "partner_name": n.partner.name,
         "invoice_number": n.related_invoice.invoice_number if n.related_invoice_id else "",
         "status": n.status,
         "amount": _money(n.amount),
@@ -573,13 +573,13 @@ register(ReportSpec(
     key="sales-credit-notes",
     title="الإشعارات الدائنة والمدينة",
     category="sales",
-    description="تسويات ما بعد الفاتورة — إشعارات الخصم والإضافة على حساب العميل.",
+    description="تسويات ما بعد الفاتورة — إشعارات الخصم والإضافة على حساب أيّ طرف.",
     filters=DATE_FILTERS,
     columns=(
         ReportColumn("number", "رقم الإشعار", width="130px"),
         ReportColumn("date", "التاريخ", KIND_DATE, width="110px"),
         ReportColumn("note_type", "النوع", width="110px"),
-        ReportColumn("partner_name", "العميل"),
+        ReportColumn("partner_name", "الطرف"),
         ReportColumn("invoice_number", "الفاتورة المرتبطة", width="140px"),
         ReportColumn("status", "الحالة", width="100px"),
         ReportColumn("amount", "المبلغ", KIND_MONEY, total=True),

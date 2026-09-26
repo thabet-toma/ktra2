@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import {
   Home,
   RefreshCw,
+  Scale,
   Printer,
   ArrowRight,
   Calculator,
@@ -271,6 +272,7 @@ export const GlobalContextMenu: React.FC<Props> = ({ user, onNavigate }) => {
       case "receipt": return <ReceiptText className={ICON} />;
       case "payment": return <HandCoins className={ICON} />;
       case "repeat": return <RefreshCw className={ICON} />;
+      case "note": return <Scale className={ICON} />;
       default: return <ShoppingCart className={ICON} />;
     }
   };

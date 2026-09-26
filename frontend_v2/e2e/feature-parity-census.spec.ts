@@ -171,7 +171,7 @@ const VIEW_TARGETS: readonly ViewTarget[] = [
   { view: "ui-kit", path: "/ui-kit" },
   { view: "sales-classic", path: "/sales-classic" },
   { view: "sales-quotations", path: "/sales/quotations" },
-  { view: "credit-debit-notes", path: "/sales/credit-debit-notes" },
+  { view: "credit-debit-notes", path: "/accounting/credit-debit-notes" },
   {
     view: "sql-clearances",
     skipReason: "declared in AppView but has no route or render case",

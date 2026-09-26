@@ -271,7 +271,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 | `frontend_v2/components/sales/DeliveryNotesPage.tsx` | `delivery_order` |
 | `frontend_v2/components/sales/SalesCustomerPaymentsPage.tsx` | `customer_payment` (المرحَّل وحده) |
 | `frontend_v2/components/sales/SupplierPaymentsPage.tsx` | `supplier_payment` (المرحَّل وحده) |
-| `frontend_v2/components/sales/CreditDebitNotesPage.tsx` | `credit_debit_note` |
+| `frontend_v2/components/accounting/CreditDebitNotesPage.tsx` | `credit_debit_note` |
 | `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | `warranty_card` |
 | `frontend_v2/components/aftersales/ServiceOrdersScreen.tsx` | `service_order` |
 
