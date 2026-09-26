@@ -239,6 +239,9 @@ def allocate_supplier_payment(
             )["t"]
             or Decimal("0")
         )
+        # وما استُردّ منه نقداً لم يعد قابلاً للتوزيع.
+        from .party_surplus import refunded_total
+        already += refunded_total("supplier_payment", payment.pk)
         total_new = sum((amt for _inv_id, amt in rows), Decimal("0"))
         if already + total_new > Decimal(str(payment.amount)) + DEC:
             raise ValidationError(

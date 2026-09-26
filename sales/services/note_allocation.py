@@ -65,10 +65,13 @@ def note_allocated(note) -> Decimal:
 
 
 def note_unallocated(note) -> Decimal:
-    """ما بقي من الإشعار المسوّي المرحَّل «تحت الحساب» بعملته — صفرٌ لغيره."""
+    """ما بقي من الإشعار المسوّي المرحَّل «تحت الحساب» بعملته — لا موزَّعاً ولا مسترَدّاً نقداً.
+    صفرٌ لغير المسوّي أو غير المرحَّل."""
+    from .party_surplus import refunded_total
+
     if note.status != CreditDebitNote.STATUS_POSTED or not note_settles(note):
         return ZERO
-    return max(_money(note.amount) - note_allocated(note), ZERO)
+    return max(_money(note.amount) - note_allocated(note) - refunded_total("note", note.pk), ZERO)
 
 
 def posted_note_allocations_total(invoice_id: int) -> Decimal:
@@ -290,10 +293,17 @@ def note_allocation_rows(note) -> list[dict]:
 
 
 def release_note_allocations(note) -> list[str]:
-    """يفكّ كل توزيعات الإشعار — داخل معاملة المستدعي (إلغاء الترحيل). يُرجع وسوم ما فُكّ."""
+    """يفكّ كل توزيعات الإشعار واستردادَه — داخل معاملة المستدعي (إلغاء الترحيل). يُرجع وسوم ما فُكّ.
+
+    سند الاسترداد المرحَّل يبقى قيده (نقدٌ دخل فعلاً) لكنه لا يعود يُطفئ إشعاراً غير مرحَّل.
+    """
     from logistics.models import LogisticsAccrualAllocation
+    from sales.models import PartyRefundAllocation
 
     released = [f"{r['label']} ({r['amount']})" for r in note_allocation_rows(note)]
+    refunds = PartyRefundAllocation.objects.filter(source_note=note)
+    released += [f"سند استرداد #{r.refund_id} ({r.amount})" for r in refunds]
+    refunds.delete()
     sales_allocs = list(CreditDebitNoteAllocation.objects.filter(note=note, sales_invoice__isnull=False))
     if sales_allocs:
         _release_sales_allocations(sales_allocs)

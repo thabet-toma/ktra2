@@ -75,6 +75,17 @@ import {
 } from "../../utils/partnerChequeDefaults";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import {
+  eligibleTotal,
+  fillRefundPicks,
+  isEligible,
+  pickedTotal,
+  refundPicksError,
+  refundSourcesPayload,
+  surplusKey,
+  type RefundPicks,
+  type SurplusRow,
+} from "../../utils/partySurplus";
 
 type Partner = { id: number; name: string; legal_name?: string | null };
 type Account = { id: number; code: string; name: string; account_type?: string };
@@ -635,6 +646,86 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
   );
 };
 
+/**
+ * فائض الطرف أعلى نافذة الاسترداد: ما يُطفئه السند منه مصدراً مصدراً (إشعار/سند زائد).
+ * المصدر بغير عملة السند معروضٌ معطَّلاً — يُستردّ بسندٍ بعملته.
+ */
+const RefundSurplusPanel: React.FC<{
+  rows: SurplusRow[] | null;
+  picks: RefundPicks;
+  currencyId: number | "";
+  voucherAmount: number;
+  onPick: (key: string, amount: string) => void;
+  onFill: () => void;
+}> = ({ rows, picks, currencyId, voucherAmount, onPick, onFill }) => {
+  if (rows === null) {
+    return <div className="mb-2 text-[11px] text-[var(--ktra-ink-soft)]">جاري تحميل الفائض…</div>;
+  }
+  if (rows.length === 0) {
+    return (
+      <div className="mb-2 rounded border border-dashed border-[var(--ktra-border)] p-2 text-center text-[11px] text-[var(--ktra-ink-soft)]">
+        لا فائض «تحت الحساب» لهذا الطرف — السند يُسجَّل على حسابه بلا إطفاء.
+      </div>
+    );
+  }
+  const available = eligibleTotal(rows, currencyId);
+  const picked = pickedTotal(rows, picks, currencyId);
+  return (
+    <div className="mb-2 rounded border border-[var(--ktra-border)] p-2" data-testid="refund-surplus-panel">
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <span className="text-[12px] font-semibold">
+          الفائض المتاح بعملة السند: <span className="ktra-num">{fmt(available)}</span>
+        </span>
+        <button type="button" className="ktra-toolbtn text-[11px]" onClick={onFill} disabled={available <= 0}>
+          <Sparkles className="h-3 w-3" /> ملء تلقائي (الأقدم أولاً)
+        </button>
+      </div>
+      <table className="w-full text-[11px]">
+        <thead className="bg-[var(--ktra-surface-2)]">
+          <tr>
+            <th className="p-1 text-right">المصدر</th>
+            <th className="p-1 text-right">التاريخ</th>
+            <th className="p-1 text-right">الفائض</th>
+            <th className="p-1 text-right">يُطفئ السند منه</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => {
+            const eligible = isEligible(row, currencyId);
+            return (
+              <tr key={surplusKey(row)} className={`border-t border-[var(--ktra-border)] ${eligible ? "" : "opacity-50"}`}>
+                <td className="p-1">{row.label}</td>
+                <td className="p-1">{row.date ? formatDateLocalized(row.date) : "—"}</td>
+                <td className="ktra-num p-1">{fmt(row.unallocated)} {row.currency_code || ""}</td>
+                <td className="p-1">
+                  {eligible ? (
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      className="ktra-input ktra-num text-[11px]"
+                      value={picks[surplusKey(row)] ?? ""}
+                      onChange={(e) => onPick(surplusKey(row), e.target.value)}
+                    />
+                  ) : (
+                    <span className="text-[var(--ktra-ink-soft)]">بعملةٍ أخرى</span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      {voucherAmount > 0 && (
+        <div className="mt-1 text-[11px] text-[var(--ktra-warn)]">
+          يُطفئ من الفائض {fmt(picked)}
+          {voucherAmount - picked > 0.009 ? ` — والباقي ${fmt(voucherAmount - picked)} يُسجَّل على حساب الطرف` : ""}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // ═══════════════════════════════════════════════════════════════════════════
 // Modal إنشاء سند قبض — نفس هيكل «سند صرف» عبر PaymentVoucherParts
 // N4-T4: حقول خصم المصدر (withholding) + شبكة شيكات + توزيع على الفواتير
@@ -655,6 +746,9 @@ export const NewPaymentModal: React.FC<{
   autoPostPayments?: boolean;
   /** T-ONEPAY: فاتورة مُسبقة التوزيع عند الفتح من داخلها (المبلغ = متبقّيها). */
   initialInvoice?: { id: number; number?: string; remaining: number } | null;
+  /** استرداد الفائض من بطاقة الطرف: «receipt» سند قبض من الدائن، «refund» سند صرف (ردّ) للعميل.
+   *  يعرض الفائض أعلى النافذة ويختار ما يُطفئه السند منه؛ ولا توزيعَ على فواتير. */
+  refundMode?: "receipt" | "refund";
 }> = ({
   partners: providedPartners,
   accounts: providedAccounts,
@@ -668,6 +762,7 @@ export const NewPaymentModal: React.FC<{
   defaultCashAccountId,
   autoPostPayments,
   initialInvoice,
+  refundMode,
 }) => {
   const today = new Date().toISOString().split("T")[0];
   const [loadedPartners, setLoadedPartners] = useState<Partner[]>(initialPartner ? [initialPartner] : []);
@@ -711,6 +806,9 @@ export const NewPaymentModal: React.FC<{
   );
   // T-P1: الفاتورة المحددة لتسوية الدفعة عليها (بديل لتوزيع FIFO).
   const [pickInvoiceId, setPickInvoiceId] = useState<number | "">("");
+  // الاسترداد: فائض الطرف (null = لم يُحمَّل بعد) وما يُطفئه السند من كل مصدر.
+  const [surplusRows, setSurplusRows] = useState<SurplusRow[] | null>(null);
+  const [refundPicks, setRefundPicks] = useState<RefundPicks>({});
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -725,9 +823,9 @@ export const NewPaymentModal: React.FC<{
   const draftPayload = useMemo(
     () => ({
       partnerId, date, cashAmount, currencyId, exchangeRate, cashAccountId,
-      notes, withholdingPct, withholdingAmt, cheques, allocations,
+      notes, withholdingPct, withholdingAmt, cheques, allocations, refundPicks,
     }),
-    [partnerId, date, cashAmount, currencyId, exchangeRate, cashAccountId, notes, withholdingPct, withholdingAmt, cheques, allocations],
+    [partnerId, date, cashAmount, currencyId, exchangeRate, cashAccountId, notes, withholdingPct, withholdingAmt, cheques, allocations, refundPicks],
   );
 
   const onRestoreDraft = useCallback((p: {
@@ -742,6 +840,7 @@ export const NewPaymentModal: React.FC<{
     withholdingAmt: string;
     cheques: ChequeLine[];
     allocations: Array<{ invoice: number; invoice_number?: string; amount: string }>;
+    refundPicks?: RefundPicks;
   }) => {
     setPartnerId(p.partnerId);
     setDate(p.date);
@@ -754,11 +853,13 @@ export const NewPaymentModal: React.FC<{
     setWithholdingAmt(p.withholdingAmt);
     setCheques(p.cheques || []);
     setAllocations(p.allocations || []);
+    setRefundPicks(p.refundPicks || {});
     setTouched(true);
   }, []);
 
   const draftApi = useDocumentDraft({
-    docType: "customer_payment_voucher",
+    // مسودة الاسترداد منفصلةٌ عن سند القبض العادي — لا تُستعاد إحداهما في نافذة الأخرى.
+    docType: refundMode ? `party_refund_${refundMode}` : "customer_payment_voucher",
     docId: null,
     payload: draftPayload,
     isTouched: touched,
@@ -797,6 +898,7 @@ export const NewPaymentModal: React.FC<{
         ? [{ invoice: initialInvoice.id, invoice_number: initialInvoice.number, amount: String(initialInvoice.remaining) }]
         : [],
     );
+    setRefundPicks({});
     setTouched(false);
     void discardDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -920,15 +1022,49 @@ export const NewPaymentModal: React.FC<{
     [aging, partnerId],
   );
 
+  // الاسترداد: فائض الطرف من `partners/{id}/surplus/` — المصدر الذي يتحقّق منه الحفظ نفسه.
+  useEffect(() => {
+    if (!refundMode || !partnerId) { setSurplusRows(refundMode ? [] : null); return; }
+    let cancelled = false;
+    setSurplusRows(null);
+    apiGetObject<{ rows: SurplusRow[] }>(`partners/${partnerId}/surplus/`)
+      .then((res) => { if (!cancelled) setSurplusRows(res.rows || []); })
+      .catch((e: unknown) => {
+        if (!cancelled) {
+          setSurplusRows([]);
+          setError(humanizeThrown(e, "تعذّر تحميل فائض الطرف"));
+        }
+      });
+    return () => { cancelled = true; };
+  }, [refundMode, partnerId]);
+
+  // أوّل فتحٍ بلا لمس: عملة السند عملةُ أقدم فائض، ومبلغه كاملُ الفائض بها موزَّعاً من الأقدم.
+  useEffect(() => {
+    if (!refundMode || touched || !surplusRows?.length || !currencies.length || cashAmount) return;
+    const first = surplusRows[0];
+    const cur = first.currency ?? currencyId;
+    if (cur !== currencyId) {
+      setCurrencyId(cur);
+      setExchangeRate(first.exchange_rate || "1");
+    }
+    const total = eligibleTotal(surplusRows, cur);
+    setCashAmount(total.toFixed(2));
+    setRefundPicks(fillRefundPicks(surplusRows, total, cur));
+  }, [refundMode, touched, surplusRows, currencies.length, cashAmount, currencyId]);
+
   const totalAlloc = allocations.reduce((s, a) => s + Number(a.amount || 0), 0);
   // T-ONACC: الفرق ليس خطأً — هو ما سيُسجَّل على حساب العميل.
   const onAccount = amtNum - totalAlloc;
+  const refundError = refundMode && surplusRows
+    ? refundPicksError(surplusRows, refundPicks, amtNum, currencyId)
+    : null;
   const canSubmit =
     !!partnerId &&
     amtNum > 0 &&
     !!cashAccountId &&
     !!currencyId &&
-    totalAlloc <= amtNum + 0.01;
+    totalAlloc <= amtNum + 0.01 &&
+    !refundError;
 
   const suggestFifo = async () => {
     if (!partnerId || amtNum <= 0) {
@@ -990,9 +1126,10 @@ export const NewPaymentModal: React.FC<{
     setError(null);
     if (!canSubmit) {
       setError(
-        totalAlloc > amtNum + 0.01
-          ? "مجموع التوزيعات يتجاوز مبلغ السند"
-          : "أكمل الحقول المطلوبة (العميل + الصندوق + مبلغ > 0)",
+        refundError
+          ?? (totalAlloc > amtNum + 0.01
+            ? "مجموع التوزيعات يتجاوز مبلغ السند"
+            : "أكمل الحقول المطلوبة (العميل + الصندوق + مبلغ > 0)"),
       );
       return;
     }
@@ -1013,6 +1150,13 @@ export const NewPaymentModal: React.FC<{
         cash_or_bank_account: cashAccountId as number,
         notes,
         auto_post: autoPost,
+        // الاسترداد: اتجاه السند وما يُطفئه من الفائض (`attach_refund_sources` يتحقّق ثانيةً).
+        ...(refundMode
+          ? {
+              kind: refundMode,
+              refund_sources: refundSourcesPayload(surplusRows || [], refundPicks, currencyId),
+            }
+          : {}),
         // T-ONEPAY: الشيكات جزء من مبلغ السند — تُرسَل ليُقيَّد جزؤها على
         // «شيكات برسم التحصيل» لا على الصندوق، وتُنشأ شيكات حقيقية.
         ...(cheques.length > 0
@@ -1054,7 +1198,7 @@ export const NewPaymentModal: React.FC<{
 
   return (
     <PaymentVoucherModal
-      title="سند قبض جديد"
+      title={refundMode === "refund" ? "سند صرف (ردّ فائض)" : refundMode ? "سند قبض (استرداد)" : "سند قبض جديد"}
       error={error}
       submitting={submitting}
       disabled={!canSubmit}
@@ -1068,9 +1212,26 @@ export const NewPaymentModal: React.FC<{
       {/* ملاحظة عاجلة مستحقة على هذا العميل — تظهر قبل إتمام السند. */}
       <PartnerNoteAlert partnerId={partnerId === "" ? null : partnerId} className="mb-2" />
       <CustomerLedgerBalance partnerId={partnerId} />
+      {refundMode && (
+        <RefundSurplusPanel
+          rows={surplusRows}
+          picks={refundPicks}
+          currencyId={currencyId}
+          voucherAmount={amtNum}
+          onPick={(key, amount) => { setRefundPicks((prev) => ({ ...prev, [key]: amount })); markTouched(); }}
+          onFill={() => {
+            if (!surplusRows) return;
+            // بلا مبلغٍ بعد: السند = كامل الفائض بعملته.
+            const target = amtNum > 0 ? amtNum : eligibleTotal(surplusRows, currencyId);
+            if (amtNum <= 0) setCashAmount(target.toFixed(2));
+            setRefundPicks(fillRefundPicks(surplusRows, target, currencyId));
+            markTouched();
+          }}
+        />
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px" }}>
         <label className="ktra-field" style={{ gridColumn: "span 2" }}>
-          <span className="ktra-field-label">العميل *</span>
+          <span className="ktra-field-label">{refundMode ? "الطرف *" : "العميل *"}</span>
           {lockPartner && initialPartner ? (
             <input className="ktra-input" value={initialPartner.name} readOnly style={{ background: "var(--ktra-surface-2)" }} />
           ) : (
@@ -1080,6 +1241,7 @@ export const NewPaymentModal: React.FC<{
               onChange={(e) => {
                 setPartnerId(e.target.value ? Number(e.target.value) : "");
                 setAllocations([]);
+                setRefundPicks({});
                 markTouched();
               }}
             >
@@ -1129,7 +1291,8 @@ export const NewPaymentModal: React.FC<{
         netLabel="مبلغ الحساب"
       />
 
-      {/* التوزيع على الفواتير — اختياري (T-ONACC) */}
+      {/* التوزيع على الفواتير — اختياري (T-ONACC)؛ سند الاسترداد يُطفئ الفائض وحده. */}
+      {!refundMode && (
       <div style={{ marginTop: "12px" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px" }}>
           <span style={{ fontWeight: 600, fontSize: "12px" }}>توزيع على الفواتير (اختياري)</span>
@@ -1211,13 +1374,17 @@ export const NewPaymentModal: React.FC<{
           </div>
         )}
       </div>
+      )}
 
-      <ChequeGrid
-        cheques={cheques}
-        onChange={(next) => { setCheques(next); markTouched(); }}
-        onError={setError}
-        newLineDefaults={chequeDefaults}
-      />
+      {/* ردّ الفائض للعميل نقديٌّ وحده — الخادم يرفض الشيكات على سند الردّ. */}
+      {refundMode !== "refund" && (
+        <ChequeGrid
+          cheques={cheques}
+          onChange={(next) => { setCheques(next); markTouched(); }}
+          onError={setError}
+          newLineDefaults={chequeDefaults}
+        />
+      )}
 
       <label className="ktra-field" style={{ marginTop: "12px", display: "block" }}>
         <span className="ktra-field-label">ملاحظات</span>
@@ -1245,7 +1412,7 @@ export const NewPaymentModal: React.FC<{
           partnerLabel:
             (partners.find((p) => p.id === partnerId)?.name)
             || initialPartner?.name || "—",
-          direction: "Incoming",
+          direction: refundMode === "refund" ? "Outgoing" : "Incoming",
         }).map((line) => `${line.side} ${line.label} ${fmt(line.amount)}`).join(" / ") || "—"}
       </div>
     </PaymentVoucherModal>

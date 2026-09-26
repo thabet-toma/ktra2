@@ -415,6 +415,64 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         module.backfill_linked_debit_notes(apps, None)
         self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("480"))
 
+    # ── الاسترداد النقدي للفائض ────────────────────────────────────────────
+    def _cash_box(self):
+        return Account.objects.get_or_create(
+            tenant=self.tenant, code="1B0009",
+            defaults={"name": "صندوق الاسترداد", "account_type": "Asset", "is_active": True},
+        )[0]
+
+    def _refund(self, partner, kind, amount, sources):
+        return self.client.post("/api/sales/payments/", {
+            "partner": partner.pk, "payment_date": "2026-07-20", "amount": amount,
+            "currency": self.ils.pk, "exchange_rate": "1", "cash_or_bank_account": self._cash_box().pk,
+            "kind": kind, "auto_post": True, "refund_sources": sources,
+        }, format="json", **self.h)
+
+    def _surplus(self, partner):
+        res = self.client.get(f"/api/partners/{partner.pk}/surplus/", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data["rows"]
+
+    def test_cash_refund_from_broker_clears_the_note_surplus_and_the_balance(self):
+        before = self._balance(self.broker)
+        note = self._posted(self.broker, "debit", "250", currency=self.ils.pk)
+        self.assertEqual(self._balance(self.broker), before - D("250"))
+        rows = self._surplus(self.broker)
+        self.assertEqual([(r["source"], r["id"], r["unallocated"]) for r in rows],
+                         [("note", note["id"], "250.00")])
+        # أكثر من الفائض يُرفض، وسند صرفٍ (ردّ) لدائنٍ اتجاهٌ خاطئ.
+        res = self._refund(self.broker, "receipt", "300", [{"source": "note", "id": note["id"], "amount": "300"}])
+        self.assertEqual(res.status_code, 400, res.content)
+        res = self._refund(self.broker, "refund", "250", [{"source": "note", "id": note["id"], "amount": "250"}])
+        self.assertEqual(res.status_code, 400, res.content)
+
+        res = self._refund(self.broker, "receipt", "250", [{"source": "note", "id": note["id"], "amount": "250"}])
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertTrue(res.data["is_posted"], res.data)
+        # Dr صندوق / Cr ذمّة المخلّص — الفائض والرصيد صفرٌ معاً.
+        self.assertEqual(self._surplus(self.broker), [])
+        self.assertEqual(self._balance(self.broker), before)
+        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("0"))
+        self.assertEqual(self._aging_total(self.broker), D("0"))
+        self.assertEqual(self.client.get(f"{URL}{note['id']}/", **self.h).data["unallocated_amount"], "0.00")
+        # إلغاء ترحيل الإشعار يفكّ الاسترداد أيضاً ويسمّيه في التنبيه.
+        res = self.client.post(f"{URL}{note['id']}/unpost/", {}, format="json", **self.h)
+        self.assertIn("سند استرداد", res.data["notice"])
+
+    def test_customer_credit_note_surplus_is_returned_by_a_refund_voucher(self):
+        customer = self.parties["Customer"]
+        note = self._posted(customer, "credit", "80", currency=self.ils.pk)
+        self.assertEqual([(r["source"], r["unallocated"]) for r in self._surplus(customer)], [("note", "80.00")])
+        res = self._refund(customer, "receipt", "80", [{"source": "note", "id": note["id"], "amount": "80"}])
+        self.assertEqual(res.status_code, 400, res.content)  # العميل يُردّ له بسند صرف
+        res = self._refund(customer, "refund", "80", [{"source": "note", "id": note["id"], "amount": "80"}])
+        self.assertEqual(res.status_code, 201, res.content)
+        # سند الردّ نفسه أطفأ الفائض فلا يبقى «على الحساب».
+        self.assertEqual(res.data["unallocated_amount"], "0.00")
+        self.assertEqual(self._surplus(customer), [])
+        self.assertEqual(self._aging_total(customer, "customer"), D("0"))
+
     # ── الصلاحيات والعزل ───────────────────────────────────────────────────
     def test_finance_permissions_gate_the_notes(self):
         # صلاحيات دفتر اليومية: موظف المبيعات بلا `accounting.journal.*` خارجها كلّها،

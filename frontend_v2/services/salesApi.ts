@@ -883,6 +883,10 @@ export async function createCustomerPayment(
     }>;
     /** T-AUTOPOST: يسمو على إعداد الشركة — true = حفظ وترحيل، false = مسودة. */
     auto_post?: boolean;
+    /** «refund» سند صرف (ردّ دفعة) للعميل؛ الافتراضي «receipt» سند قبض. */
+    kind?: "receipt" | "refund";
+    /** ما يُطفئه سند الاسترداد من فائض الطرف (`partners/{id}/surplus/`) — بعملة السند. */
+    refund_sources?: Array<{ source: "note" | "supplier_payment" | "customer_payment"; id: number; amount: string }>;
   },
 ): Promise<CustomerPaymentRow & { auto_post_error?: string }> {
   return apiPostObject(`${BASE}/payments/`, body, { tenantId: tid() });

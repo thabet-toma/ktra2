@@ -121,6 +121,15 @@ class PartnerViewSet(viewsets.ModelViewSet):
         })
 
     # ── FEAT-4: Party (customer/supplier) profile ────────────────
+    @action(detail=True, methods=["get"], url_path="surplus")
+    def surplus(self, request, pk=None):
+        """فائض الطرف «تحت الحساب» مصدراً مصدراً — سنداتٌ وإشعاراتٌ مسوّية غير موزَّعة ولا
+        مسترَدّة. تقرؤه نافذة الاسترداد في بطاقته (`sales/services/party_surplus.py`)."""
+        from sales.services.party_surplus import party_surplus_rows
+
+        partner = self.get_object()
+        return Response({"rows": party_surplus_rows(partner.tenant_id, partner)})
+
     @action(detail=True, methods=["get"], url_path="profile")
     def profile(self, request, pk=None):
         """رأس بطاقة الشريك: الرصيد Dr/Cr + إجمالي المبيعات/المشتريات + المتبقي

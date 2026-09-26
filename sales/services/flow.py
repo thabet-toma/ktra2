@@ -2963,6 +2963,9 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         payment = _lock_customer_payments([payment.pk])[0]
         if payment.is_posted:
             raise ValidationError("الدفعة مرحّلة مسبقاً.")
+        # سند الاسترداد: ما يُطفئه لا يزال فائضاً لحظة الترحيل.
+        from .party_surplus import guard_refund_sources
+        guard_refund_sources(payment)
 
         # بروتوكول موحّد: المرتجع وأصله (وكل أصول المراجيع في السند) تُقفل
         # معاً بترتيب pk ثابت قبل حساب الرصيد أو سقف ردّ النقد.
@@ -3328,10 +3331,12 @@ def allocate_customer_payment(
             (getattr(payment, "kind", None) or CustomerPayment.KIND_RECEIPT)
             == CustomerPayment.KIND_REFUND
         )
+        from .party_surplus import refund_sources_total, refunded_total
+
         already = (
             PaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum("amount"))["t"]
             or Decimal("0")
-        )
+        ) + refunded_total("customer_payment", payment.pk) + refund_sources_total(payment)
         total_new = sum((amt for _inv_id, amt in rows), Decimal("0"))
         if already + total_new > Decimal(str(payment.amount)) + DEC:
             raise ValidationError(

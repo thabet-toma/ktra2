@@ -1595,6 +1595,62 @@ class CreditDebitNoteAllocation(models.Model):
         return f"NoteAllocation(note={self.note_id}, amount={self.amount})"
 
 
+class PartyRefundAllocation(models.Model):
+    """ما يُطفئه سند الاسترداد النقدي من فائض الطرف — مصدرٌ واحدٌ لكل صف.
+
+    فائض الدائن (سند صرفٍ أو إشعارٌ مدينٌ غير موزَّعين) يُستردّ بـ«سند قبض (استرداد)»
+    (Dr صندوق / Cr ذمّته)، وفائض العميل (سند قبضٍ أو إشعارٌ دائنٌ غير موزَّعين) يُردّ بـ«سند
+    صرف (ردّ)» (Dr ذمّته / Cr صندوق) — كلاهما `CustomerPayment`. الصفّ يقول أيّ فائضٍ
+    استهلكه السند فيسقط من «تحت الحساب»؛ يُحتسب ما دام السند مرحَّلاً. العملة عملة المصدر.
+    الخدمات في `sales/services/party_surplus.py`.
+    """
+
+    id = models.AutoField(primary_key=True, db_column="RefundAllocationID")
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column="TenantID", to_field="TenantID",
+    )
+    refund = models.ForeignKey(
+        CustomerPayment, on_delete=models.CASCADE, db_column="RefundPaymentID",
+        related_name="refund_sources",
+    )
+    source_note = models.ForeignKey(
+        CreditDebitNote, on_delete=models.CASCADE, null=True, blank=True,
+        db_column="SourceNoteID", related_name="refunds",
+    )
+    source_supplier_payment = models.ForeignKey(
+        SupplierPayment, on_delete=models.CASCADE, null=True, blank=True,
+        db_column="SourceSupplierPaymentID", related_name="refunds",
+    )
+    source_customer_payment = models.ForeignKey(
+        CustomerPayment, on_delete=models.CASCADE, null=True, blank=True,
+        db_column="SourceCustomerPaymentID", related_name="refunds",
+    )
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column="Amount", help_text="بعملة السند والمصدر")
+    amount_base = models.DecimalField(max_digits=18, decimal_places=2, db_column="AmountBase")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+
+    class Meta:
+        db_table = "sales_module_party_refund_allocations"
+        constraints = [
+            models.CheckConstraint(
+                name="refund_allocation_one_source",
+                condition=(
+                    models.Q(source_note__isnull=False, source_supplier_payment__isnull=True,
+                             source_customer_payment__isnull=True)
+                    | models.Q(source_note__isnull=True, source_supplier_payment__isnull=False,
+                               source_customer_payment__isnull=True)
+                    | models.Q(source_note__isnull=True, source_supplier_payment__isnull=True,
+                               source_customer_payment__isnull=False)
+                ),
+            ),
+        ]
+        indexes = [models.Index(fields=["tenant", "refund"], name="refund_alloc_tenant_idx")]
+
+    def __str__(self):
+        return f"RefundAllocation(refund={self.refund_id}, amount={self.amount})"
+
+
 class VatStatement(models.Model):
     """N8-T13: كشف ضريبة القيمة المضافة الدوري."""
     STATUS_DRAFT = 'draft'

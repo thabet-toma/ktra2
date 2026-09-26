@@ -861,7 +861,12 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
         return str(self._allocated(obj))
 
     def get_unallocated_amount(self, obj) -> str:
-        return str(Decimal(str(obj.amount)) - self._allocated(obj))
+        # سند القبض: ما رُدّ منه نقداً (سند صرف ردّ مرحَّل). وسند الاسترداد/الردّ نفسه:
+        # ما خصّصه للفائض يُطفئه فلا يبقى على حسابه.
+        refunded = sum(
+            (Decimal(str(r.amount)) for r in obj.refunds.all() if r.refund.is_posted), Decimal("0"))
+        spent = sum((Decimal(str(r.amount)) for r in obj.refund_sources.all()), Decimal("0"))
+        return str(Decimal(str(obj.amount)) - self._allocated(obj) - refunded - spent)
 
     class Meta:
         model = CustomerPayment
@@ -1776,7 +1781,9 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
     def get_unallocated_amount(self, obj) -> str:
         if obj.status != CreditDebitNote.STATUS_POSTED or not self.get_settles(obj):
             return "0.00"
-        free = Decimal(str(obj.amount)) - Decimal(self.get_allocated_amount(obj))
+        refunded = sum(
+            (Decimal(str(r.amount)) for r in obj.refunds.all() if r.refund.is_posted), Decimal("0"))
+        free = Decimal(str(obj.amount)) - Decimal(self.get_allocated_amount(obj)) - refunded
         return str(max(free, Decimal("0")).quantize(Decimal("0.01")))
 
     def get_linked_document(self, obj):

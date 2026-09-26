@@ -108,6 +108,7 @@ class SupplierPaymentViewSet(BaseTenantViewSet):
             'logistics_allocations__shipment__deals__partner',
             'logistics_allocations__local_shipment__shipment__deals__partner',
             'logistics_allocations__local_shipment__clearance__shipment__deals__partner',
+            'refunds__refund',
         ).order_by('-created_at', '-id')
         tenant = get_tenant(self.request)
         if not tenant:

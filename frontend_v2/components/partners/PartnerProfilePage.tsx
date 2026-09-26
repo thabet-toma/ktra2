@@ -280,6 +280,10 @@ export const PartnerProfilePage: React.FC = () => {
   const [invLoading, setInvLoading] = useState(false);
   const [invError, setInvError] = useState<string | null>(null);
   const [showReceiptModal, setShowReceiptModal] = useState(false);
+  // ردّ فائض العميل نقداً — سند صرف (ردّ) بالنافذة نفسها (`refundMode="refund"`).
+  const [showRefundModal, setShowRefundModal] = useState(false);
+  // عدد مصادر فائض العميل (سند قبض زائد/إشعار دائن) — يُظهر «سند صرف (ردّ فائض)».
+  const [customerSurplusCount, setCustomerSurplusCount] = useState(0);
   // سند صرف سريع للمورد (مرآة سند القبض للعميل).
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   // نيّة مؤجّلة من قائمة زر اليمين العامّة (سند قبض/صرف) — تُطبَّق بعد تحميل الشريك.
@@ -375,6 +379,15 @@ export const PartnerProfilePage: React.FC = () => {
       .catch(() => { if (alive) setOnAccountPayments([]); });
     return () => { alive = false; };
   }, [id, isSupplier, paymentsRefreshKey]);
+
+  useEffect(() => {
+    if (!id || isSupplier) { setCustomerSurplusCount(0); return; }
+    let alive = true;
+    apiGetObject<{ rows: unknown[] }>(`partners/${id}/surplus/`, { tenantId })
+      .then((res) => { if (alive) setCustomerSurplusCount((res.rows || []).length); })
+      .catch(() => { if (alive) setCustomerSurplusCount(0); });
+    return () => { alive = false; };
+  }, [id, isSupplier, paymentsRefreshKey, tenantId]);
 
   const totalOnAccount = useMemo(
     () => onAccountPayments.reduce((s, p) => s + Number(p.unallocated_amount ?? 0), 0),
@@ -1240,6 +1253,17 @@ export const PartnerProfilePage: React.FC = () => {
                       onClick: () => { void openAllocation(); },
                     }]
                   : []),
+                // ردّ فائض العميل (سند قبض زائد/إشعار دائن) نقداً: Dr ذمّته / Cr صندوق.
+                ...(customerSurplusCount > 0
+                  ? [{
+                      key: 'refund-payment',
+                      label: 'سند صرف (ردّ فائض)',
+                      onClick: () => {
+                        setShowRefundModal(true);
+                        clientLogger.info("partner.refund_payment_open");
+                      },
+                    }]
+                  : []),
                 {
                   key: 'new-invoice',
                   label: `${term('doc.sales_invoice')} جديدة`,
@@ -1314,13 +1338,16 @@ export const PartnerProfilePage: React.FC = () => {
         <></>
       </KitDocumentShell>
       <StatementDetailsModal movement={detailRow} onClose={() => setDetailRow(null)} />
-      {showReceiptModal && receiptPartner && (
+      {(showReceiptModal || showRefundModal) && receiptPartner && (
         <NewPaymentModal
           initialPartner={receiptPartner}
           lockPartner
-          onClose={() => setShowReceiptModal(false)}
+          // قبضُ الدائن استردادٌ دائماً: يعرض فائضه ويختار ما يُطفئه (إشعار/سند صرف زائد).
+          refundMode={showRefundModal ? 'refund' : isSupplier ? 'receipt' : undefined}
+          onClose={() => { setShowReceiptModal(false); setShowRefundModal(false); }}
           onSaved={() => {
             setShowReceiptModal(false);
+            setShowRefundModal(false);
             setStmtOffset(0);
             loadStatement(0);
             apiGetObject<PartnerProfile>(`partners/${id}/profile/`, { tenantId })

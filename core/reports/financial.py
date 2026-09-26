@@ -82,6 +82,10 @@ def _open_note_rows(tenant_id: int, *, creditor: bool) -> list[tuple]:
         for note_id, total in model.objects.filter(note_id__in=settling_ids).values(
             "note_id").annotate(t=Sum("amount")).values_list("note_id", "t"):
             used[note_id] = used.get(note_id, ZERO) + Decimal(str(total or 0))
+    # وما استُردّ نقداً — سند الاسترداد قيّد الذمّة بقيده، فالإشعار لم يعد رصيداً مفتوحاً.
+    from sales.services.party_surplus import refunded_totals
+    for note_id, total in refunded_totals("note", settling_ids).items():
+        used[note_id] = used.get(note_id, ZERO) + total
     rows = []
     for note in notes:
         rate = Decimal(str(note.exchange_rate or 1))

@@ -226,7 +226,10 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
         return str(self._allocated(obj))
 
     def get_unallocated_amount(self, obj) -> str:
-        return str(Decimal(str(obj.amount)) - self._allocated(obj))
+        # وما استُردّ منه نقداً (سند قبض استرداد مرحَّل) لم يعد تحت الحساب.
+        refunded = sum(
+            (Decimal(str(r.amount)) for r in obj.refunds.all() if r.refund.is_posted), Decimal('0'))
+        return str(Decimal(str(obj.amount)) - self._allocated(obj) - refunded)
 
     class Meta:
         model = SupplierPayment

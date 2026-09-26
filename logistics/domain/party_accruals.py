@@ -584,23 +584,7 @@ def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
     مستحقٍّ لوجستي لحظة الدفع. الفائض = ما صار زائداً على مستحقٍّ لأن المستحق خُفِّض بعد الدفع
     (`accrual_status`). مجموعهما رصيدٌ لصالحنا لم يُستهلك؛ رصيد الكشف لا يتغيّر بهما.
     """
-    from logistics.models import LogisticsAccrualAllocation
-    from sales.models import SupplierPayment, SupplierPaymentAllocation
-
-    # `voucher_unallocated` لكل سند بثلاثة استعلامات ثابتة لا اثنين لكل سند.
-    vouchers = list(SupplierPayment.objects.filter(
-        tenant_id=tenant_id, partner_id=partner_id, is_posted=True,
-    ).only('id', 'amount', 'exchange_rate'))
-    used: dict[int, Decimal] = {}
-    for model in (SupplierPaymentAllocation, LogisticsAccrualAllocation):
-        for pid, total in model.objects.filter(payment__in=[v.pk for v in vouchers]).values(
-            'payment_id').annotate(t=Sum('amount')).values_list('payment_id', 't'):
-            used[pid] = used.get(pid, ZERO) + _money(total)
-    on_account = ZERO
-    for voucher in vouchers:
-        free = max(_money(voucher.amount) - used.get(voucher.pk, ZERO), ZERO)
-        if free > 0:
-            on_account += _payment_base(voucher, free)
+    on_account = sum((base for _v, _free, base in party_unallocated_vouchers(tenant_id, partner_id)), ZERO)
     on_account += sum((base for _note, _free, base in party_unallocated_notes(tenant_id, partner_id)), ZERO)
     surplus = ZERO
     for kind, obj in _party_accrual_docs(tenant_id, partner_id):
@@ -610,17 +594,41 @@ def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
     return {'on_account': _money(on_account), 'surplus': _money(surplus)}
 
 
-def party_unallocated_notes(tenant_id: int, partner_id: int) -> list[tuple]:
-    """[(الإشعار، غير الموزَّع بعملته، بالأساس)] لإشعارات الدائن المدينة المرحّلة — خصمٌ منه لم
-    يُطفئ مستنداً بعد، فهو رصيدٌ لنا عنده كالسند غير الموزَّع. بثلاثة استعلامات ثابتة."""
+def party_unallocated_vouchers(tenant_id: int, partner_id: int) -> list[tuple]:
+    """[(سند الصرف، غير الموزَّع بعملته، بالأساس)] لسندات الطرف المرحّلة — ما لم يُوزَّع على
+    فاتورةٍ أو مستحقٍّ ولم يُستردّ نقداً. بأربعة استعلامات ثابتة لا اثنين لكل سند."""
+    from logistics.models import LogisticsAccrualAllocation
+    from sales.models import SupplierPayment, SupplierPaymentAllocation
+    from sales.services.party_surplus import refunded_totals
+
+    vouchers = list(SupplierPayment.objects.filter(
+        tenant_id=tenant_id, partner_id=partner_id, is_posted=True,
+    ).select_related('currency').order_by('payment_date', 'id'))
+    used: dict[int, Decimal] = dict(refunded_totals('supplier_payment', [v.pk for v in vouchers]))
+    for model in (SupplierPaymentAllocation, LogisticsAccrualAllocation):
+        for pid, total in model.objects.filter(payment__in=[v.pk for v in vouchers]).values(
+            'payment_id').annotate(t=Sum('amount')).values_list('payment_id', 't'):
+            used[pid] = used.get(pid, ZERO) + _money(total)
+    out = []
+    for voucher in vouchers:
+        free = max(_money(voucher.amount) - used.get(voucher.pk, ZERO), ZERO)
+        if free > 0:
+            out.append((voucher, free, _payment_base(voucher, free)))
+    return out
+
+
+def party_unallocated_notes(tenant_id: int, partner_id: int, *, note_type: str = 'debit') -> list[tuple]:
+    """[(الإشعار، غير الموزَّع بعملته، بالأساس)] للإشعارات المسوّية المرحّلة — المدينة على دائن
+    (الافتراضي) أو الدائنة لعميل: رصيدٌ لم يُطفئ مستنداً ولم يُستردّ بعد، كالسند غير الموزَّع."""
     from logistics.models import LogisticsAccrualAllocation
     from sales.models import CreditDebitNote, CreditDebitNoteAllocation
+    from sales.services.party_surplus import refunded_totals
 
     notes = list(CreditDebitNote.objects.filter(
         tenant_id=tenant_id, partner_id=partner_id, status=CreditDebitNote.STATUS_POSTED,
-        note_type=CreditDebitNote.TYPE_DEBIT,
+        note_type=note_type,
     ).select_related('currency').order_by('note_date', 'id'))
-    used: dict[int, Decimal] = {}
+    used: dict[int, Decimal] = dict(refunded_totals('note', [n.pk for n in notes]))
     for model in (CreditDebitNoteAllocation, LogisticsAccrualAllocation):
         for nid, total in model.objects.filter(note__in=[n.pk for n in notes]).values(
             'note_id').annotate(t=Sum('amount')).values_list('note_id', 't'):
@@ -688,13 +696,15 @@ def _payment_base(payment, amount: Decimal) -> Decimal:
 
 
 def voucher_unallocated(payment) -> Decimal:
-    """ما لم يُوزَّع من السند بعملته — على فواتير الشراء والمستحقّات اللوجستية معاً."""
+    """ما لم يُوزَّع من السند بعملته — على فواتير الشراء والمستحقّات اللوجستية معاً، ولم يُستردّ."""
     from logistics.models import LogisticsAccrualAllocation
     from sales.models import SupplierPaymentAllocation
+    from sales.services.party_surplus import refunded_total
 
     used = (
         _money(SupplierPaymentAllocation.objects.filter(payment=payment).aggregate(t=Sum('amount'))['t'])
         + _money(LogisticsAccrualAllocation.objects.filter(payment=payment).aggregate(t=Sum('amount'))['t'])
+        + refunded_total('supplier_payment', payment.pk)
     )
     return max(_money(payment.amount) - used, ZERO)
 
@@ -849,5 +859,5 @@ __all__ = [
     'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
     'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
     'ACCRUAL_ADJUST_TYPE', 'accrual_journal_ids', 'adjustment_journal_ids', 'party_on_account_summary',
-    'note_journal_ids', 'party_unallocated_notes', 'allocate_note_to_accrual', 'note_accrual_allocation_rows',
+    'note_journal_ids', 'party_unallocated_notes', 'party_unallocated_vouchers', 'allocate_note_to_accrual', 'note_accrual_allocation_rows',
 ]
