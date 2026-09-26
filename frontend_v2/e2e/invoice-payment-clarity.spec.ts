@@ -61,6 +61,9 @@ async function installMocks(page: Page) {
             "sales.payment.create",
             "purchase.invoice.view",
             "import.deal.manage",
+            // الإشعارات انتقلت إلى المالية (ecc85514) — صلاحيتها صلاحية القيود.
+            "accounting.journal.view",
+            "accounting.journal.create",
           ],
         }),
       });
