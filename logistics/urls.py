@@ -4,7 +4,7 @@ from .views import (
     SupplierQuotationViewSet, PurchaseRFQViewSet,
     PublicSupplierQuoteRequestViewSet, PurchaseOrderViewSet,
     LogisticsDealViewSet, LogisticsShipmentViewSet,
-    LogisticsClearanceViewSet,
+    LogisticsClearanceViewSet, ClearanceItemTypeViewSet,
     LogisticsPaymentViewSet, PurchaseInvoiceViewSet,
     SupplierPaymentViewSet,
     LandedCostReportViewSet, LocalShipmentViewSet,
@@ -23,6 +23,7 @@ router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-ord
 router.register(r'deals', LogisticsDealViewSet)
 router.register(r'shipments', LogisticsShipmentViewSet)
 router.register(r'clearances', LogisticsClearanceViewSet)
+router.register(r'clearance-item-types', ClearanceItemTypeViewSet, basename='clearance-item-types')
 router.register(r'payments', LogisticsPaymentViewSet)
 router.register(r'purchase-invoices', PurchaseInvoiceViewSet, basename='purchase-invoices')
 router.register(r'supplier-payments', SupplierPaymentViewSet, basename='supplier-payments')

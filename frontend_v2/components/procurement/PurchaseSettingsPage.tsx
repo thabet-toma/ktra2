@@ -11,6 +11,7 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
+import { ClearanceItemTypesSection } from "./ClearanceItemTypesSection";
 import {
   SERIAL_ENTRY_MODE_HINT,
   SERIAL_ENTRY_MODE_OPTIONS,
@@ -464,6 +465,7 @@ const PurchaseSettingsPage: React.FC = () => {
               </label>
             </div>
           </div>
+          <ClearanceItemTypesSection accounts={accounts} disabled={loading} />
         </div>
       </KitDocumentShell>
     </div>

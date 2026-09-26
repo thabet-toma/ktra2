@@ -5,7 +5,7 @@ import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus, getClearance } from "@/services/clearanceApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus, getClearance, listClearanceItemTypes, type ClearanceItemType } from "@/services/clearanceApi";
 import { docSettlement, overpaymentExcess, type AccrualKind, type VoucherAllocationRow } from "@/utils/voucherAllocation";
 import { entityPathForReference } from "@/utils/entityLinks";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
@@ -352,6 +352,11 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [shipment, setShipment] = useState<ShipmentApiRow | null>(null);
   const [shipmentForm, setShipmentForm] = useState<ShipmentApiRow | null>(null);
   const [clearance, setClearance] = useState<ClearanceRow | null>(null);
+  // بنود المخلّص من إعدادات الشركة — منتقي نوع البند في التخليص.
+  const [clearanceItems, setClearanceItems] = useState<ClearanceItemType[]>([]);
+  useEffect(() => {
+    listClearanceItemTypes().then(setClearanceItems).catch(() => setClearanceItems([]));
+  }, []);
   const [clearanceForm, setClearanceForm] = useState<ClearanceRow | null>(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
@@ -687,6 +692,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         transaction_time: f.transaction_time,
         second_date: f.second_date,
         settlement_invoice_number: f.settlement_invoice_number,
+        broker_claim_number: f.broker_claim_number,
         licensed_dealer_no: f.licensed_dealer_no,
         customs_broker: f.customs_broker,
         currency: f.currency,
@@ -698,6 +704,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           label: l.description,
           amount: (l.debit || 0) - (l.credit || 0),
           type: l.line_type,
+          item_type: l.item_type ?? null,
         })),
       });
       setClearance(patched);
@@ -1683,6 +1690,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         {fld("رقم البيان", <input className="ktra-input" readOnly value={clearance?.declaration_number || "—"} />)}
         {fld("تاريخ التخليص", <input className="ktra-input" type="date" readOnly value={clearance?.clearance_date ? String(clearance.clearance_date).slice(0, 10) : ""} />)}
         {fld("فاتورة المقاصة", <input className="ktra-input" readOnly value={clearance?.settlement_invoice_number || "—"} />)}
+        {fld("مطالبة المخلِّص", <input className="ktra-input" readOnly value={clearance?.broker_claim_number || "—"} />)}
         {fld("كشف الضريبة", <input className="ktra-input" readOnly value={clearance?.vat_statement != null ? String(clearance.vat_statement) : "—"} />)}
         {fld("محرَّر", <input className="ktra-input" readOnly value={shipmentForm.editable ? "نعم" : "لا"} />)}
       </>}
@@ -1891,6 +1899,19 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           </select>
           <button type="button" className="ktra-ellipsis" title="إضافة مخلِّص جمركي جديد" onClick={() => { setQuickAddType("CustomsBroker"); setQuickAddName(""); }}>+</button>
         </span>)}
+        {/* رقم المطالبة يصل غالباً بعد الإفراج: بعد ترحيل الاستحقاق يُحفظ وحده. */}
+        {fld("رقم مطالبة المخلِّص", <input
+          className="ktra-input"
+          value={clearanceForm.broker_claim_number || ""}
+          onChange={cfText("broker_claim_number")}
+          onBlur={() => {
+            if (!clearanceForm.journal || !clearanceForm.id) return;
+            if ((clearanceForm.broker_claim_number || "") === (clearance?.broker_claim_number || "")) return;
+            void updateClearance(clearanceForm.id, { broker_claim_number: clearanceForm.broker_claim_number || "" })
+              .then((row) => { setClearance(row); toast("حُفظ رقم مطالبة المخلِّص.", "success"); })
+              .catch((e) => toast(e instanceof Error ? e.message : String(e), "error"));
+          }}
+        />)}
         {showAdvancedClearance && <>
           {fld("الوقت", <input className="ktra-input" type="time" value={clearanceForm.transaction_time ? String(clearanceForm.transaction_time).slice(0, 5) : ""} onChange={cfText("transaction_time")} />)}
           {fld("تاريخ ثاني", <input className="ktra-input" type="date" value={clearanceForm.second_date ? String(clearanceForm.second_date).slice(0, 10) : ""} onChange={cfText("second_date")} />)}
@@ -1958,27 +1979,48 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           {(clearanceForm.lines || []).map((l, i) => (
             <tr key={l.id ?? i}>
               <td style={{ padding: "2px 4px" }}>
-                <select
-                  className="ktra-input"
-                  value={l.line_type}
-                  onChange={(e) => {
-                    const nextType = e.target.value;
-                    // بند بلا بيان بعد: اقترح اسماً افتراضياً من النوع (يبقى قابلاً للتعديل).
-                    const nextDescription = l.description.trim()
-                      ? l.description
-                      : (CLEARANCE_LINE_TYPE_LABELS[nextType] || l.description);
-                    updateClearanceLine(i, { line_type: nextType, description: nextDescription });
-                  }}
-                >
-                  <option value="vat">ضريبة القيمة المضافة</option>
-                  <option value="declaration_fee">رسوم البيان</option>
-                  <option value="terminal">محطة الشحن</option>
-                  <option value="permits">تصاريح</option>
-                  <option value="broker_commission">عمولة المخلص</option>
-                  <option value="customs_system">نظام الجمارك</option>
-                  <option value="شحن محلي">شحن محلي</option>
-                  <option value="other">أخرى</option>
-                </select>
+                {(() => {
+                  // البنود من الإعدادات (`item:<id>`)، ثم «شحن محلي» و«أخرى». بندٌ قديم
+                  // بلا بند إعدادات يُطابَق ببند إعداداتٍ من نوعه، وإلّا يُعرض بنوعه.
+                  const active = clearanceItems.filter((it) => it.is_active || it.id === l.item_type);
+                  const matched = l.item_type
+                    ? active.find((it) => it.id === l.item_type)
+                    : active.find((it) => it.legacy_type === l.line_type && l.line_type !== "other");
+                  const value = matched ? `item:${matched.id}` : l.line_type;
+                  const known = Boolean(matched) || l.line_type === "other" || l.line_type === "شحن محلي";
+                  return (
+                    <select
+                      className="ktra-input"
+                      value={value}
+                      onChange={(e) => {
+                        const next = e.target.value;
+                        if (next.startsWith("item:")) {
+                          const item = clearanceItems.find((it) => `item:${it.id}` === next);
+                          if (!item) return;
+                          // بند بلا بيان بعد: اسم البند اقتراحاً (يبقى قابلاً للتعديل).
+                          updateClearanceLine(i, {
+                            item_type: item.id,
+                            line_type: item.legacy_type,
+                            description: l.description.trim() ? l.description : item.name,
+                          });
+                          return;
+                        }
+                        updateClearanceLine(i, {
+                          item_type: null,
+                          line_type: next,
+                          description: l.description.trim() ? l.description : (CLEARANCE_LINE_TYPE_LABELS[next] || l.description),
+                        });
+                      }}
+                    >
+                      {active.map((it) => (
+                        <option key={it.id} value={`item:${it.id}`}>{it.name}</option>
+                      ))}
+                      {!known && <option value={l.line_type}>{CLEARANCE_LINE_TYPE_LABELS[l.line_type] || l.line_type}</option>}
+                      <option value="شحن محلي">شحن محلي</option>
+                      <option value="other">أخرى</option>
+                    </select>
+                  );
+                })()}
               </td>
               <td style={{ padding: "2px 4px" }}>
                 <input className="ktra-input" value={l.description} onChange={(e) => updateClearanceLine(i, { description: e.target.value })} style={{ width: "100%" }} />

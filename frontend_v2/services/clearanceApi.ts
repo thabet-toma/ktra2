@@ -3,6 +3,7 @@ import {
   apiGetObject,
   apiPostObject,
   apiPatchObject,
+  apiDelete,
 } from "./restApi";
 import type { ClearanceCostLine, ClearanceLine } from "@/constants/clearanceDefaults";
 import { resolveTenantId } from "@/utils/tenantContext";
@@ -28,6 +29,8 @@ export type ClearanceRow = {
   second_date?: string | null;
   licensed_dealer_no?: string;
   settlement_invoice_number?: string;
+  /** رقم مطالبة المخلّص — يُعدَّل بعد ترحيل الاستحقاق أيضاً. */
+  broker_claim_number?: string;
   currency?: number | null;
   exchange_rate?: number | null;
   vat_statement?: number | null;
@@ -95,6 +98,37 @@ export type ClearancePaymentRow = {
   kind_label?: string;
 };
 
+/** بند مخلّص من إعدادات الشركة (`ClearanceItemType`). */
+export type ClearanceItemType = {
+  id: number;
+  name: string;
+  /** معنى البند للمحرّك: `vat` ضريبة مدخلات، وغيره تكلفة استيراد. */
+  legacy_type: string;
+  account: number | null;
+  account_code?: string | null;
+  account_name?: string | null;
+  is_active: boolean;
+  sort_order: number;
+};
+
+export async function listClearanceItemTypes(): Promise<ClearanceItemType[]> {
+  return apiGetList<ClearanceItemType>("logistics/clearance-item-types/", { tenantId: tid() });
+}
+
+export async function saveClearanceItemType(
+  body: Partial<ClearanceItemType> & { name: string },
+): Promise<ClearanceItemType> {
+  if (body.id) {
+    return apiPatchObject<ClearanceItemType>(
+      `logistics/clearance-item-types/${body.id}/`, body, { tenantId: tid() });
+  }
+  return apiPostObject<ClearanceItemType>("logistics/clearance-item-types/", body, { tenantId: tid() });
+}
+
+export async function deleteClearanceItemType(id: number): Promise<void> {
+  return apiDelete(`logistics/clearance-item-types/${id}/`, { tenantId: tid() });
+}
+
 export async function listClearances(
   query?: Record<string, string | number | boolean | undefined>,
 ): Promise<ClearanceRow[]> {
@@ -136,6 +170,7 @@ export async function updateClearance(
     second_date: string | null;
     licensed_dealer_no: string | null;
     settlement_invoice_number: string | null;
+    broker_claim_number: string | null;
     currency: number | null;
     exchange_rate: number | null;
     subtotal_no_vat: number | null;

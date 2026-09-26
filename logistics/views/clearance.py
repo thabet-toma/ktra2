@@ -31,6 +31,7 @@ from logistics.serializers import (
     LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
     LogisticsPaymentSerializer,
     LogisticsClearancePaymentSerializer,
+    ClearanceItemTypeSerializer,
     PurchaseInvoiceSerializer, PurchaseInvoiceListSerializer,
     LocalShipmentSerializer, LocalShipmentPaymentSerializer, SupplierPaymentSerializer,
     PurchaseSettingsSerializer,
@@ -95,6 +96,38 @@ logger = logging.getLogger("logistics.views")
 
 
 
+class ClearanceItemTypeViewSet(BaseTenantViewSet):
+    """بنود المخلّص في إعدادات الشركة: القراءة لكل من يفتح التخليص، والتعديل
+    بصلاحية إعدادات الشراء. أوّل قراءة لشركةٍ بلا بنود تبذر البنود القياسية."""
+
+    serializer_class = ClearanceItemTypeSerializer
+    pagination_class = None
+
+    def get_queryset(self):
+        from logistics.models import ClearanceItemType
+        return ClearanceItemType.objects.select_related('account')
+
+    def list(self, request, *args, **kwargs):
+        from logistics.domain.clearance_items import ensure_clearance_item_types
+        tenant = get_tenant(request)
+        if tenant:
+            ensure_clearance_item_types(tenant)
+        return super().list(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        require_perm(self.request, 'purchase.settings.manage')
+        super().perform_create(serializer)
+
+    def perform_update(self, serializer):
+        require_perm(self.request, 'purchase.settings.manage')
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # البنود القائمة تحتفظ بنوعها وحسابها (SET_NULL على `item_type`).
+        require_perm(self.request, 'purchase.settings.manage')
+        instance.delete()
+
+
 class LogisticsClearanceViewSet(BaseTenantViewSet):
     queryset = LogisticsClearance.objects.all().order_by("-id")
     serializer_class = LogisticsClearanceSerializer
@@ -125,9 +158,13 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         # الاستحقاق. الذي يقفل بنود التخليص فقط هو قيد الاستحقاق نفسه.
         return bool(clearance.journal_id)
 
+    #: حقولٌ وصفية لا تمسّ قيد الاستحقاق — تُعدَّل بعد ترحيله.
+    POSTED_EDITABLE_FIELDS = frozenset({'broker_claim_number'})
+
     def perform_update(self, serializer):
         instance = serializer.instance
-        if instance is not None and self._clearance_is_posted(instance):
+        if (instance is not None and self._clearance_is_posted(instance)
+                and not set(self.request.data.keys()) <= self.POSTED_EDITABLE_FIELDS):
             raise ValidationError({'detail': POSTED_DOC_WARNING, 'can_unpost': True})
         serializer.save()
 

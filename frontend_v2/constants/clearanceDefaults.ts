@@ -10,10 +10,12 @@ export type ClearanceLine = {
   credit: number;
   vat_percent: number;
   cost_center?: number | null;
+  /** بند المخلّص من إعدادات الشركة — منه النوع والحساب. */
+  item_type?: number | null;
 };
 
 /** بنود تكلفة التخليص القديمة (JSONField — backwards compat). */
-export type ClearanceCostLine = { label: string; amount: number; type?: string };
+export type ClearanceCostLine = { label: string; amount: number; type?: string; item_type?: number | null };
 
 export const DEFAULT_CLEARANCE_COST_LINES: ClearanceCostLine[] = [
   { label: "ضريبة القيمة المضافة", amount: 0 },

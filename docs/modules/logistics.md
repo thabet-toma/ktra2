@@ -56,8 +56,9 @@
 | `LogisticsDeal` (:409) | `ref_number`, `stage`, `shipping_workflow_status`, `total_amount`, `total_cbm`, `total_weight_kg`, `payment_status` | `tenant`, `partner`, `currency`, `source_quotation` OneToOne, `shipments` M2M |
 | `LogisticsShipment` (:846) | `shipment_number`, `chargeable_unit` (cbm/kg), `freight_rate`, `total_shipping_cost_usd`, `freight_is_posted` | `deals` M2M عبر `LogisticsShipmentDeal`, `freight_journal`, `transit_journal` |
 | `LogisticsShipmentDeal` (:1046) | `allocated_shipping_cost`, `extra_costs` | `unique_together (shipment, deal)` |
-| `LogisticsClearance` (:1077) | `declaration_number`, `grand_total`, `exchange_rate` | `shipment` **OneToOne**, `customs_broker`, `lines`, `payments` |
-| `LogisticsClearanceLine` (:1177) | `line_type`, `debit`/`credit`, `vat_percent` | `clearance`, `account` |
+| `LogisticsClearance` (:1077) | `declaration_number`, `grand_total`, `exchange_rate`, `broker_claim_number` (رقم مطالبة المخلّص — غير فاتورة المقاصة، ويُعدَّل وحده بعد ترحيل الاستحقاق: `views/clearance.py` — `POSTED_EDITABLE_FIELDS`) | `shipment` **OneToOne**, `customs_broker`, `lines`, `payments` |
+| `LogisticsClearanceLine` (:1177) | `line_type`, `debit`/`credit`, `vat_percent` | `clearance`, `account`, `item_type` |
+| `ClearanceItemType` (`logistics/models.py`) | `name`، `legacy_type` (`vat` ضريبة مدخلات، وغيره حسابُه الافتراضي إن لم يُحدَّد)، `is_active`، `sort_order` | `tenant`، `account` — **بنود المخلّص في إعدادات الشراء** (`clearance-item-types/`، التعديل بـ`purchase.settings.manage`؛ البذرة الستّة القياسية عند أوّل قراءة: `domain/clearance_items.py` — `ensure_clearance_item_types`). سطر التخليص الحامل له يأخذ نوعه وحسابه (`serializers/clearance.py` — `_sync_lines_from_cost_lines`، مفلتراً بشركة التخليص) |
 | `LocalShipment` (:1210) | `shipment_number` (LS-XXXX), `capitalize_to_inventory`, `exchange_rate`, `status` | `clearance`, `shipment` (كلاهما اختياري) |
 | `PurchaseInvoice` (:1435) | `invoice_number`, `invoice_type` (local/international), `grand_total`, `import_*_rate` | `deal`, `shipment`, `clearance`, `partner`, `source_quotation` **FK** (كان OneToOne — #112) |
 | `PurchaseInvoiceItem/Fee/Payment` (:1629/:1730/:1699) · `GoodsReceipt`/`Line` (:1811/:1883) | البنود والرسوم والدفعات · سند الاستلام | `invoice` · `movement`→StockMovement |

@@ -1613,6 +1613,9 @@ class LogisticsClearance(models.Model):
     second_date = models.DateField(null=True, blank=True, db_column='SecondDate', help_text='تاريخ ثاني')
     licensed_dealer_no = models.CharField(max_length=100, blank=True, default='', db_column='LicensedDealerNo', help_text='رقم المشتغل المرخص للمخلّص')
     settlement_invoice_number = models.CharField(max_length=100, blank=True, default='', db_column='SettlementInvoiceNumber', help_text='رقم فاتورة المقاصة')
+    # رقم مطالبة المخلّص (فاتورته لنا) — غير رقم فاتورة المقاصة، ويصل غالباً بعد الإفراج
+    # فيبقى قابلاً للتعديل بعد ترحيل الاستحقاق (`views/clearance.py` — `perform_update`).
+    broker_claim_number = models.CharField(max_length=100, blank=True, default='', db_column='BrokerClaimNumber', help_text='رقم مطالبة المخلّص')
     currency = models.ForeignKey(Currency, on_delete=models.PROTECT, null=True, blank=True, db_column='CurrencyID', help_text='عملة البيان')
     exchange_rate = models.DecimalField(max_digits=18, decimal_places=6, null=True, blank=True, db_column='ExchangeRate', help_text='سعر الصرف')
     vat_statement = models.ForeignKey('sales.VatStatement', on_delete=models.SET_NULL, null=True, blank=True, db_column='VatStatementID', help_text='كشف الضريبة')
@@ -1715,11 +1718,40 @@ class LogisticsClearanceLine(models.Model):
     credit = models.DecimalField(max_digits=18, decimal_places=2, default=0, db_column='Credit')
     vat_percent = models.DecimalField(max_digits=5, decimal_places=2, default=0, db_column='VATPercent')
     cost_center = models.ForeignKey('accounting.CostCenter', on_delete=models.SET_NULL, null=True, blank=True, db_column='CostCenterID')
+    # البند من إعدادات الشركة (`ClearanceItemType`) — منه `line_type` و`account`؛ فارغ
+    # لبندٍ قديم أو «أخرى».
+    item_type = models.ForeignKey('ClearanceItemType', on_delete=models.SET_NULL, null=True, blank=True, db_column='ClearanceItemTypeID', related_name='lines')
 
     class Meta:
         db_table = 'logistics_clearance_lines'
         managed = True
         ordering = ['seq']
+
+
+class ClearanceItemType(models.Model):
+    """بند تخليص معرَّف في إعدادات الشركة: اسمٌ وحسابُ مدينه في قيد الاستحقاق.
+
+    البند المتكرّر يُضاف هنا بدل «أخرى». `legacy_type` يحمل معنى البند للمحرّك:
+    `vat` ضريبةُ مدخلاتٍ تُسترد لا تكلفةُ بضاعة، وغيره حسابُه الافتراضي إن لم يُحدَّد
+    حساب (`accruals.clearance_line_account`). تُبذَر البنود الستّة القياسية عند أوّل
+    قراءة (`domain/clearance_items.py` — `ensure_clearance_item_types`).
+    """
+    id = models.AutoField(primary_key=True, db_column='ClearanceItemTypeID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID', related_name='clearance_item_types')
+    name = models.CharField(max_length=120, db_column='Name')
+    legacy_type = models.CharField(max_length=32, choices=LogisticsClearanceLine.LINE_TYPE_CHOICES, default='other', db_column='LegacyType')
+    account = models.ForeignKey(Account, on_delete=models.PROTECT, null=True, blank=True, db_column='AccountID', related_name='+')
+    is_active = models.BooleanField(default=True, db_column='IsActive')
+    sort_order = models.PositiveSmallIntegerField(default=0, db_column='SortOrder')
+
+    class Meta:
+        db_table = 'logistics_clearance_item_types'
+        managed = True
+        ordering = ['sort_order', 'id']
+        unique_together = [('tenant', 'name')]
+
+    def __str__(self):
+        return self.name
 
 
 # D3 (import redesign M6): LogisticsExpense removed — a generic Deal/Shipment/

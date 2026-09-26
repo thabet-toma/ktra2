@@ -40,6 +40,7 @@ from .clearance import (
     LogisticsClearanceLineSerializer,
     LogisticsClearanceSerializer,
     LogisticsClearancePaymentSerializer,
+    ClearanceItemTypeSerializer,
 )
 from .invoices import (
     PurchaseInvoiceItemSerializer,
@@ -97,6 +98,7 @@ __all__ = [
     "LogisticsClearanceLineSerializer",
     "LogisticsClearanceSerializer",
     "LogisticsClearancePaymentSerializer",
+    "ClearanceItemTypeSerializer",
     "PurchaseInvoiceItemSerializer",
     "PurchaseInvoiceFeeSerializer",
     "PurchaseInvoiceListSerializer",

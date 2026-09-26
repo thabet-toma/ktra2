@@ -47,6 +47,7 @@ from logistics.models import (
     LogisticsShipment,
     LogisticsClearance,
     LogisticsClearanceLine,
+    ClearanceItemType,
     LogisticsShipmentDeal,
     LogisticsPayment,
     LogisticsClearancePayment,
@@ -130,6 +131,45 @@ class LogisticsClearanceLineSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ['id']
 
+
+class ClearanceItemTypeSerializer(serializers.ModelSerializer):
+    """بند تخليص من إعدادات الشركة — اسمه وحساب مدينه في قيد الاستحقاق."""
+    account_code = serializers.CharField(source='account.code', read_only=True, default=None)
+    account_name = serializers.CharField(source='account.name', read_only=True, default=None)
+
+    class Meta:
+        model = ClearanceItemType
+        fields = ['id', 'name', 'legacy_type', 'account', 'account_code', 'account_name',
+                  'is_active', 'sort_order']
+        read_only_fields = ['id']
+
+    def _tenant(self):
+        request = self.context.get('request')
+        return get_tenant(request) if request else None
+
+    def validate_name(self, value):
+        name = (value or '').strip()
+        if not name:
+            raise serializers.ValidationError('اسم البند مطلوب.')
+        tenant = self._tenant()
+        dup = ClearanceItemType.objects.filter(tenant=tenant, name=name)
+        if self.instance is not None:
+            dup = dup.exclude(pk=self.instance.pk)
+        if tenant is not None and dup.exists():
+            raise serializers.ValidationError('يوجد بند بهذا الاسم.')
+        return name
+
+    def validate_account(self, value):
+        if value is None:
+            return value
+        tenant = self._tenant()
+        if tenant is not None and value.tenant_id != tenant.pk:
+            raise serializers.ValidationError('الحساب من شركة أخرى.')
+        # مصروف (تكلفة استيراد) أو أصل (ضريبة مدخلات 1105) — مرآة `PurchaseInvoiceFee`.
+        if value.account_type not in ('Expense', 'Asset'):
+            raise serializers.ValidationError('حساب البند يجب أن يكون مصروفاً أو أصلاً.')
+        return value
+
 class LogisticsClearanceSerializer(serializers.ModelSerializer):
     broker_name = serializers.CharField(source="customs_broker.name", read_only=True)
     shipment_number = serializers.CharField(
@@ -168,6 +208,7 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
                 "label": (r.get("description") or ""),
                 "amount": float((r.get("debit") or 0)) - float((r.get("credit") or 0)),
                 "type": r.get("line_type") or "other",
+                "item_type": r.get("item_type"),
             }
             for r in rows
         ]
@@ -300,9 +341,14 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
                 amt = 0.0
             # بند بلا بيان ولا نوع صريح ولا مبلغ = صف فارغ فعلاً — لا معنى لحفظه.
             # لكن بند اختير له نوع أو له مبلغ لا يُسقَط لمجرد أن «البيان» بقي فارغاً.
-            if not label and not line_type and amt == 0:
+            try:
+                item_type = int(row.get("item_type")) if row.get("item_type") else None
+            except (TypeError, ValueError):
+                item_type = None
+            if not label and not line_type and not item_type and amt == 0:
                 continue
-            out.append({"label": label[:220], "amount": round(amt, 2), "type": line_type})
+            out.append({"label": label[:220], "amount": round(amt, 2), "type": line_type,
+                        "item_type": item_type})
         return out if out else self._default_cost_lines()
 
     def validate(self, attrs):
@@ -326,6 +372,13 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
 
     def _sync_lines_from_cost_lines(self, instance, cost_lines):
         valid_types = {c[0] for c in LogisticsClearanceLine.LINE_TYPE_CHOICES}
+        # بند الإعدادات يحمل نوعه وحسابه — مفلترٌ بشركة التخليص.
+        items = {
+            it.pk: it for it in ClearanceItemType.objects.filter(
+                tenant_id=instance.tenant_id,
+                pk__in=[r.get('item_type') for r in cost_lines if r.get('item_type')],
+            )
+        }
         instance.lines.all().delete()
         for idx, item in enumerate(cost_lines):
             label = str(item.get('label', '') or '')
@@ -341,12 +394,18 @@ class LogisticsClearanceSerializer(serializers.ModelSerializer):
             line_type = str(item.get('type') or '').strip()
             if line_type not in valid_types:
                 line_type = self.LABEL_TO_LINE_TYPE.get(label, 'other')
+            catalog = items.get(item.get('item_type'))
+            if catalog is not None:
+                line_type = catalog.legacy_type
+                label = label or catalog.name
             instance.lines.create(
                 seq=idx + 1,
                 line_type=line_type,
                 description=label,
                 debit=debit,
                 credit=credit,
+                item_type=catalog,
+                account_id=catalog.account_id if catalog is not None else None,
             )
 
     def create(self, validated_data):

@@ -10,7 +10,7 @@ from .procurement import (
 )
 from .deals import LogisticsDealViewSet, LogisticsPaymentViewSet
 from .shipments import LogisticsShipmentViewSet
-from .clearance import LogisticsClearanceViewSet
+from .clearance import ClearanceItemTypeViewSet, LogisticsClearanceViewSet
 from .invoices import (
     PurchaseInvoiceViewSet,
     _purchase_item_snapshot,
@@ -31,7 +31,7 @@ __all__ = [
     "SupplierQuotationViewSet", "PurchaseRFQViewSet",
     "PublicSupplierQuoteRequestViewSet", "PurchaseOrderViewSet",
     "LogisticsDealViewSet", "LogisticsPaymentViewSet",
-    "LogisticsShipmentViewSet", "LogisticsClearanceViewSet",
+    "LogisticsShipmentViewSet", "LogisticsClearanceViewSet", "ClearanceItemTypeViewSet",
     "PurchaseInvoiceViewSet", "SupplierPaymentViewSet",
     "LocalShipmentViewSet", "ImportJourneyViewSet",
     "LandedCostReportViewSet", "GoodsReceiptViewSet",
