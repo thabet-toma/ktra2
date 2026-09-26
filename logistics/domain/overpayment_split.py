@@ -10,6 +10,9 @@
   (`views/clearance.py`، `views/transport.py`).
 - للموجود: `split_posted_overpayment` من أمر `split_logistics_overpayments` — يعكس
   قيد الدفعة (لا حذف) ويعيد ترحيلها بالمستحق وينشئ السند بالزائد.
+- بعد «تعديل الاستحقاق» إلى أقلّ من المدفوع: `release_adjusted_overpayment` — الزائد كلّه
+  (الفائض معه) يعود «تحت الحساب»: توزيعات السندات والإشعارات على المستند تُقلَّص أولاً
+  (بلا قيد)، ثم ما بقي من دفعات المستند المباشرة بالفصل نفسه أعلاه.
 
 بالعملة الأساسية وحدها: دفعةٌ بعملةٍ أجنبية تبقى كما هي (فرق الصرف يجعل «الزائد»
 بالعملة الأجنبية رقماً غير مستقرّ). استحقاق الشحن الدولي (دفعات الوكيل بالدولار)
@@ -22,7 +25,9 @@ from decimal import Decimal
 
 from django.db import transaction
 
-from logistics.domain.party_accruals import ZERO, _accrual_meta, _label, _money, accrual_status
+from logistics.domain.party_accruals import (
+    _ALLOCATION_FIELD, _POSTED_SOURCE, ZERO, _accrual_meta, _label, _money, accrual_status,
+)
 
 #: تسمية المستند في ملاحظة السند وسجلّ التدقيق («تخليص #3 — SH-0013»).
 accrual_label = _label
@@ -97,11 +102,13 @@ def _simple_lines(payment, party_id):
     return (party[0], box[0]), None
 
 
-def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None) -> dict | None:
+def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None,
+                             include_surplus: bool = False) -> dict | None:
     """يفصل زائد المستند المرحَّل عن أحدث دفعاته. None = لا زائد.
 
     ``{kind, doc, label, payment, amount, excess, new_amount, action, reason, voucher}``
-    — ``action`` ∈ ``report`` / ``split`` / ``skip``.
+    — ``action`` ∈ ``report`` / ``split`` / ``skip``. ``include_surplus``: الفائض (زائدٌ لأن
+    المستحق خُفِّض) يُفصل أيضاً — «تعديل الاستحقاق».
     """
     from accounting.api import reverse_journal
     from accounting.services import create_audit_log, post_journal
@@ -109,9 +116,9 @@ def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None) 
     party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
     if kind not in SPLIT_REFERENCES or not accrual_journal_id:
         return None
-    # الفائض (زائدٌ لأن المستحق خُفِّض بعد الدفع) يبقى فائضاً على مستنده — لا سنداً.
+    # الفائض (زائدٌ لأن المستحق خُفِّض بعد الدفع) يبقى على مستنده للأمر — ويُفصل بعد التعديل.
     status = accrual_status(kind, obj)
-    excess = status['overpaid'] - status['surplus']
+    excess = status['overpaid'] - (ZERO if include_surplus else status['surplus'])
     if excess <= 0:
         return None
     row = {'kind': kind, 'doc': obj.pk, 'label': _label(kind, obj), 'excess': excess,
@@ -180,4 +187,63 @@ def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None) 
     return row
 
 
-__all__ = ['ON_ACCOUNT_NOTE', 'accrual_label', 'split_incoming', 'create_on_account_voucher', 'split_posted_overpayment']
+def release_adjusted_overpayment(kind: str, obj, *, user=None) -> dict | None:
+    """بعد «تعديل الاستحقاق»: ما زاد من المدفوع على المستحق الجديد يعود «تحت الحساب». None = لا زائد.
+
+    1. توزيعات السندات والإشعارات المرحّلة على المستند، الأحدث أولاً — تُقلَّص أو تُحذف فيعود
+       المبلغ غيرَ موزَّعٍ على مصدره. بلا قيد: الدفتر قيّدها على ذمّة الطرف أصلاً.
+    2. ما بقي من دفعات المستند المباشرة — `split_posted_overpayment` بالفائض معه.
+    ما تعذّر فصله (عملة أجنبية، قيدٌ مركّب، شحنٌ دولي) يبقى «فائضاً» على المستند ويُذكر سببه.
+    يعمل داخل معاملة المستدعي. ``{excess, released: [وسوم], voucher, left, reason}``.
+    """
+    from logistics.models import LogisticsAccrualAllocation
+
+    excess = accrual_status(kind, obj)['overpaid']
+    if excess <= 0:
+        return None
+    out = {'excess': str(excess), 'released': [], 'voucher': None, 'left': '0.00', 'reason': ''}
+    allocations = (
+        LogisticsAccrualAllocation.objects.select_for_update()
+        .filter(_POSTED_SOURCE, tenant_id=obj.tenant_id, **{_ALLOCATION_FIELD[kind]: obj})
+        .select_related('note').order_by('-id')
+    )
+    left = excess
+    for alloc in allocations:
+        if left <= 0:
+            break
+        base = _money(alloc.amount_base)
+        take = min(base, left)
+        if take <= 0:
+            continue
+        source = f"إشعار {alloc.note.note_number}" if alloc.note_id else f"سند صرف #{alloc.payment_id}"
+        if take >= base:
+            released_amount = _money(alloc.amount)
+            alloc.delete()
+        else:
+            new_base = base - take
+            new_amount = (Decimal(str(alloc.amount)) * new_base / base).quantize(Decimal('0.01'))
+            released_amount = _money(alloc.amount) - new_amount
+            alloc.amount, alloc.amount_base = new_amount, new_base
+            alloc.save(update_fields=['amount', 'amount_base'])
+        out['released'].append(f"{source} ({released_amount})")
+        left -= take
+    if left > 0:
+        row = split_posted_overpayment(kind, obj, apply=True, user=user, include_surplus=True)
+        if row and row['action'] == 'split':
+            out['voucher'] = row['voucher']
+            out['released'].append(f"دفعة المستند #{row['payment']} ({row['excess']}) ← سند صرف #{row['voucher']}")
+        elif row:
+            out['left'] = str(row['excess'])
+            out['reason'] = row['reason']
+        elif kind not in SPLIT_REFERENCES:
+            out['left'] = str(left)
+            out['reason'] = "دفعات الشحن الدولي لا تُفصل — تبقى «فائضاً» على المستند"
+    logger.info("logistics.adjust_overpayment %s doc=%s excess=%s released=%s left=%s",
+                kind, obj.pk, excess, len(out['released']), out['left'])
+    return out
+
+
+__all__ = [
+    'ON_ACCOUNT_NOTE', 'accrual_label', 'split_incoming', 'create_on_account_voucher', 'split_posted_overpayment',
+    'release_adjusted_overpayment',
+]

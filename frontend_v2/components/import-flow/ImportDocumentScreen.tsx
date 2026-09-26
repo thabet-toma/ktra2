@@ -1348,11 +1348,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const handleAccrualAdjusted = useCallback(async (result: AccrualAdjustResult) => {
     setAdjusting(null);
     const revalued = result.revaluations.map((r) => r.invoice_number).join("، ");
+    const onAccount = result.on_account;
     toast(
       `رُحِّل قيد تعديل الاستحقاق #${result.journal_id ?? "—"} بفرق ${fmt(result.difference)} ₪`
         + (revalued ? ` — وعُدِّلت تكلفة: ${revalued}` : "")
-        + (result.drafts_updated ? ` — وأُعيد بناء ${result.drafts_updated} مسودة` : ""),
-      "success",
+        + (result.drafts_updated ? ` — وأُعيد بناء ${result.drafts_updated} مسودة` : "")
+        + (onAccount?.released.length ? ` — وعاد «تحت الحساب»: ${onAccount.released.join("، ")}` : "")
+        + (onAccount && Number(onAccount.left) > 0
+          ? ` — وبقي ${fmt(onAccount.left)} ₪ فائضاً على المستند (${onAccount.reason})`
+          : ""),
+      onAccount && Number(onAccount.left) > 0 ? "info" : "success",
     );
     if (shipment) await loadAll(shipment.id);
   }, [shipment, loadAll, toast]);

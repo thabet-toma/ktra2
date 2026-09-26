@@ -4,7 +4,7 @@
 تبقى على التكلفة القديمة. الآن: القيد الأصلي باقٍ وقيدُ فرقٍ على المستند نفسه، وكل
 فاتورة دولية مرحّلة على الشحنة تُسوّى تكلفتُها: الباقي في المخزن على المخزون وطبقته،
 والمبيع على ت.ب.م، وغير المستلَم على وسيط الاستلام. وما زاد من المدفوع لأن المستحق نزل
-«فائضٌ» لا «دفعة تحت الحساب».
+يعود «تحت الحساب» للطرف (توزيعٌ يُقلَّص أو دفعةٌ تُفصل) فيُوزَّع أو يُستردّ.
 """
 from decimal import Decimal
 
@@ -323,23 +323,37 @@ class AccrualAdjustTest(APITestCase):
         inv.refresh_from_db()
         self.assertEqual(inv.subtotal - before, D("300.00"))
 
-    # ── M5: الفائض غير «تحت الحساب» ────────────────────────────────────────
-    def test_reduction_after_full_payment_is_surplus_not_on_account(self):
+    # ── M5: التخفيض تحت المدفوع يعود «تحت الحساب» ──────────────────────────
+    def test_reduction_after_full_payment_splits_the_excess_on_account(self):
+        from sales.models import SupplierPayment
+
         paid = self.client.post(
             f"/api/logistics/local-shipments/{self.local.pk}/pay_from_cashbox/",
             {"amount": "450", "cash_box_external_id": self.box.external_id,
              "payment_date": "2026-07-10"}, format="json", **self.h)
         self.assertEqual(paid.status_code, 201, paid.content)
+        box_before = self._net(self.cash.code)
+        preview = self.client.post(
+            f"/api/logistics/local-shipments/{self.local.pk}/adjust-accrual/",
+            {"amount": "400", "preview": True}, format="json", **self.h)
+        self.assertEqual((preview.data["surplus_after"], preview.data["on_account"]), ("50.00", None))
         res = self.client.post(
             f"/api/logistics/local-shipments/{self.local.pk}/adjust-accrual/",
             {"amount": "400"}, format="json", **self.h)
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data["surplus_after"], "50.00")
 
+        # الدفعة صارت 400 على الإرسالية، والـ50 سند صرفٍ مرحَّلٌ «تحت الحساب» — والصندوق كما هو.
+        voucher = SupplierPayment.objects.get(pk=res.data["on_account"]["voucher"])
+        self.assertEqual((voucher.amount, voucher.is_posted, voucher.partner_id), (D("50.00"), True, self.carrier.id))
+        self.assertEqual(self._net(self.cash.code), box_before)
         status = accrual_status("local", LocalShipment.objects.get(pk=self.local.pk))
-        self.assertEqual((status["overpaid"], status["surplus"]), (D("50.00"), D("50.00")))
+        self.assertEqual((status["overpaid"], status["surplus"], status["remaining"]), (D("0"), D("0"), D("0")))
         profile = self.client.get(f"/api/partners/{self.carrier.id}/profile/", **self.h).data
-        self.assertEqual((profile["accrual_surplus"], profile["on_account_payments"]), ("50.00", "0.00"))
+        self.assertEqual((profile["accrual_surplus"], profile["on_account_payments"]), ("0.00", "50.00"))
+        surplus = self.client.get(f"/api/partners/{self.carrier.id}/surplus/", **self.h).data["rows"]
+        self.assertEqual([(r["source"], r["id"], r["unallocated"]) for r in surplus],
+                         [("supplier_payment", voucher.pk, "50.00")])
 
         # دفعةٌ أكبر من المستحق لحظتها ← «تحت الحساب» لا فائض.
         more = self.client.post(
@@ -349,6 +363,28 @@ class AccrualAdjustTest(APITestCase):
         self.assertEqual(more.status_code, 201, more.content)
         broker = self.client.get(f"/api/partners/{self.broker.id}/profile/", **self.h).data
         self.assertEqual((broker["on_account_payments"], broker["accrual_surplus"]), ("100.00", "0.00"))
+
+    def test_reduction_trims_an_allocated_voucher_back_on_account(self):
+        from logistics.domain.party_accruals import allocate_voucher_to_accruals, voucher_unallocated
+        from logistics.models import LogisticsAccrualAllocation
+        from sales.models import SupplierPayment
+        from sales.services import post_supplier_payment
+
+        voucher = SupplierPayment.objects.create(
+            tenant=self.tenant, partner=self.broker, payment_date="2026-07-08", amount=D("900"),
+            currency=self.ils, exchange_rate=D("1"), cash_or_bank_account=self.cash)
+        post_supplier_payment(voucher, user=self.user)
+        allocate_voucher_to_accruals(voucher, [{"kind": "clearance", "id": self.clearance.pk, "amount": "900"}])
+        res = self._adjust_clearance(400)  # المستحق 900 ← 700
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertIn(f"سند صرف #{voucher.pk} (200.00)", res.data["on_account"]["released"])
+        alloc = LogisticsAccrualAllocation.objects.get(payment=voucher)
+        self.assertEqual((alloc.amount, alloc.amount_base), (D("700.00"), D("700.00")))
+        self.assertEqual(voucher_unallocated(voucher), D("200.00"))
+        status = accrual_status("clearance", LogisticsClearance.objects.get(pk=self.clearance.pk))
+        self.assertEqual((status["overpaid"], status["remaining"]), (D("0"), D("0")))
+        broker = self.client.get(f"/api/partners/{self.broker.id}/profile/", **self.h).data
+        self.assertEqual((broker["on_account_payments"], broker["accrual_surplus"]), ("200.00", "0.00"))
 
     def _default_warehouse_id(self):
         from inventory.models import Warehouse

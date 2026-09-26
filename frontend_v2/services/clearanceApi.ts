@@ -273,8 +273,11 @@ export type AccrualAdjustResult = {
   due_after: string;
   difference: string;
   paid: string;
-  /** ما سيصير «فائضاً» على المستند: مدفوعٌ زاد لأن المستحق نزل. */
+  /** مدفوعٌ زاد لأن المستحق نزل — يعود «تحت الحساب» للطرف عند الترحيل. */
   surplus_after: string;
+  /** بعد الترحيل (null في المعاينة أو بلا زائد): ما عاد «تحت الحساب» — توزيعاتٌ قُلِّصت ودفعةٌ
+   *  فُصلت سنداً (`voucher`)، و`left` ما تعذّر فصله فبقي فائضاً على المستند مع سببه. */
+  on_account: { excess: string; released: string[]; voucher: number | null; left: string; reason: string } | null;
   lines: { account: number; partner: number | null; debit: string; credit: string; description: string }[];
   /** الفواتير الدولية المرحّلة التي تتعدّل تكلفتها. */
   revaluations: {

@@ -82,7 +82,7 @@ export const AccrualAdjustDialog: React.FC<Props> = ({ title, children, request,
             </div>
             {Number(preview.surplus_after) > 0 && (
               <p className="text-emerald-700">
-                المدفوع يزيد على المستحق الجديد بـ{fmt(preview.surplus_after)} ₪ — يظهر «فائضاً» في كشف الطرف.
+                المدفوع يزيد على المستحق الجديد بـ{fmt(preview.surplus_after)} ₪ — يعود «تحت الحساب» للطرف، فيُوزَّع على مستحقٍّ آخر أو يُستردّ من بطاقته.
               </p>
             )}
             {preview.revaluations.length > 0 && (

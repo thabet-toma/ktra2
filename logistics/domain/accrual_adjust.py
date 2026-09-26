@@ -9,7 +9,9 @@
     القيد  = الهدف − الحالي، بمرجع `ACCRUAL_ADJUST_TYPE[kind]` على المستند نفسه
 
 ويتبعه تلقائياً تعديل تكلفة البضاعة (`landed_revaluation`): الفواتير المرحّلة بقيد
-تسوية، والمسودات بإعادة البناء. كلّه ذرّيٌّ في معاملةٍ واحدة. و`preview=True` يحسب
+تسوية، والمسودات بإعادة البناء. وإن صار المستحق أقلّ من المدفوع عليه عاد الزائد «تحت
+الحساب» (`overpayment_split.release_adjusted_overpayment`) فيُوزَّع أو يُستردّ كأيّ فائض.
+كلّه ذرّيٌّ في معاملةٍ واحدة. و`preview=True` يحسب
 الأثر كاملاً ثم يتراجع عنه — بلا قيدٍ مرحّلٍ ولا رقمٍ مستهلَك.
 
 المرجع: Odoo يعدّل الاستحقاق بقيدٍ لا بحذفه، ويوزّع فرق تكلفة الاستيراد على المخزون
@@ -147,6 +149,7 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
     from accounting.services import post_journal
     from logistics.accruals import assert_shipment_alive
     from logistics.domain import landed_revaluation
+    from logistics.domain.overpayment_split import release_adjusted_overpayment
     from logistics.landed_cost import recalculate_landed_for_shipment
     from tenants.models import Currency
 
@@ -192,6 +195,8 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
             if shipment_id and not preview:
                 drafts = recalculate_landed_for_shipment(
                     tenant=obj.tenant, shipment_id=shipment_id)['updated']
+            # المدفوع فوق المستحق الجديد يعود «تحت الحساب» — المعاينة تعرض مقداره وحده.
+            on_account = None if preview else release_adjusted_overpayment(kind, obj, user=user)
             party_id = next((r['partner'] for r in lines if r.get('partner')), None)
             due_after = before['due'] + sum(
                 (r['credit'] - r['debit'] for r in adj_lines if r['partner'] == party_id), ZERO)
@@ -211,6 +216,7 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
                 ],
                 'revaluations': revaluations,
                 'drafts_updated': drafts,
+                'on_account': on_account,
             }
             if preview:
                 raise _PreviewRollback()
