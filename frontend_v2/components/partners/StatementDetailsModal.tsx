@@ -12,7 +12,7 @@ import {
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import type { PurchaseInvoiceDto } from "../../types/purchaseInvoice";
-import { referenceTypeLabel, invoicePathForReference } from "../../utils/entityLinks";
+import { referenceTypeLabel, entityPathForReference } from "../../utils/entityLinks";
 import { formatMoney } from "../../utils/formatNumber";
 import { clientLogger } from "../../services/logger";
 import { formatDateLocalized } from "../../utils/formatDate";
@@ -33,6 +33,11 @@ export interface StatementMovement {
   date: string | null;
   debit: string;
   credit: string;
+  /** حركة الدائن: سطورُ تفاصيلها من الخادم (المستحق ورقم مطالبته، التوزيع، الاسترداد). */
+  details?: string[];
+  paid_on?: string | null;
+  /** مسار مستحقّها حين لا مسار لنوع المرجع نفسه. */
+  open_path?: string | null;
 }
 
 type Kind = "sales" | "purchase" | "customer_payment" | "other";
@@ -115,7 +120,10 @@ export const StatementDetailsModal: React.FC<{
 
   if (!movement) return null;
 
-  const path = invoicePathForReference(movement.reference_type, movement.reference_id);
+  // المستند نفسه (فاتورة، سند، إشعار) — ومستحقُّ حركة الدائن في ملف شحنته زرٌّ ثانٍ.
+  const path = entityPathForReference(movement.reference_type, movement.reference_id);
+  const accrualPath = movement.open_path && movement.open_path !== path ? movement.open_path : null;
+  const hasDetails = Boolean(movement.details?.length || movement.paid_on);
   // ‏#214-ب: **عنوانُ هذه النافذة هو موضعُ بلاغ المالك بعينه** — يضغط على صفّ
   // المرتجع في كشف الحساب فيقرأ اسمَ فاتورة المبيعات فوق مستندٍ ليس فاتورة.
   const title = `${referenceTypeLabel(movement.reference_type, movement.reference_kind)}${refId != null ? ` #${refId}` : ""}`;
@@ -251,22 +259,41 @@ export const StatementDetailsModal: React.FC<{
             </div>
           )}
 
+          {/* حركة الدائن — تفاصيلها من الخادم */}
+          {hasDetails && (
+            <ul className="space-y-1 rounded border border-[var(--ktra-border)] p-2">
+              {(movement.details ?? []).map((line, i) => <li key={i}>{line}</li>)}
+              {movement.paid_on && <li>تاريخ الدفع: {formatDateLocalized(movement.paid_on)}</li>}
+            </ul>
+          )}
+
           {/* أنواع أخرى — ملخّص + رابط المستند إن وُجد */}
-          {!loading && kind === "other" && !error && (
+          {!loading && kind === "other" && !error && !hasDetails && (
             <div className="text-[var(--ktra-ink-soft)] py-2">
               لا تتوفر بنود تفصيلية لهذا النوع من الحركات. يظهر الملخّص أعلاه.
             </div>
           )}
 
-          {path && (
-            <div className="pt-2">
-              <button
-                type="button"
-                onClick={() => navigate(path)}
-                className="inline-flex items-center gap-1.5 text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
-              >
-                <ExternalLink className="w-4 h-4" /> فتح المستند الكامل
-              </button>
+          {(path || accrualPath) && (
+            <div className="flex flex-wrap gap-4 pt-2">
+              {path && (
+                <button
+                  type="button"
+                  onClick={() => navigate(path)}
+                  className="inline-flex items-center gap-1.5 text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
+                >
+                  <ExternalLink className="w-4 h-4" /> فتح المستند الكامل
+                </button>
+              )}
+              {accrualPath && (
+                <button
+                  type="button"
+                  onClick={() => navigate(accrualPath)}
+                  className="inline-flex items-center gap-1.5 text-[var(--ktra-accent,#2563eb)] underline hover:opacity-80"
+                >
+                  <ExternalLink className="w-4 h-4" /> فتح المستحق في ملف الشحنة
+                </button>
+              )}
             </div>
           )}
         </div>

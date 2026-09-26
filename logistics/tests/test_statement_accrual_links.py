@@ -65,6 +65,32 @@ class StatementAccrualLinksTest(_LabelBase):
         for row in (accrual, payment):
             self.assertEqual((row["link_key"], row["shipment_label"]), (f"LOCAL_SHIPMENT:{local.pk}", label))
 
+    def test_broker_movements_carry_claim_payment_date_and_what_to_open(self):
+        """بلاغ المالك: حركة المخلّص «ما ببين شي» — الآن رقم المطالبة والبيان، وعلى أيّ تخليصٍ
+        الدفعة وتاريخ دفعها، وما وُزِّع عليه السند، وما يُفتح بالنقر (التخليص في ملف شحنته)."""
+        shipment = self._shipment("SH-0017", "شحنة رقع")
+        clearance = self._clearance(shipment, "2900")
+        clearance.broker_claim_number, clearance.declaration_number = "CLM-778", "D-4411"
+        clearance.save(update_fields=["broker_claim_number", "declaration_number"])
+        res = self.client.post(
+            f"/api/logistics/clearances/{clearance.pk}/pay_from_cashbox/",
+            {"amount": "400", "cash_box_external_id": self.box.external_id, "payment_date": "2026-07-01"},
+            format="json", **self.h)
+        self.assertEqual(res.status_code, 201, res.content)
+        voucher = self._voucher(2045)
+        self._allocate(voucher, [{"kind": "clearance", "id": clearance.pk, "amount": "2045"}])
+
+        opens = {"kind": "clearance", "id": clearance.pk, "shipment_id": shipment.pk}
+        doc = f"تخليص #{clearance.pk} · مطالبة CLM-778 · بيان D-4411"
+        (accrual,) = self._rows(self.broker, "LOGISTICS_CLEARANCE")
+        self.assertEqual((accrual["document_number"], accrual["details"], accrual["open_target"]),
+                         ("CLM-778", [doc], opens))
+        (payment,) = self._rows(self.broker, "CLEARANCE_PAYMENT")
+        self.assertEqual(payment["details"][0], f"على {doc}")
+        self.assertEqual((payment["paid_on"], payment["open_target"]), ("2026-07-01", opens))
+        (row,) = self._rows(self.broker, "SUPPLIER_PAYMENT")
+        self.assertEqual((row["details"], row["open_target"]), ([f"وُزِّع على {doc}: 2045.00"], opens))
+
     def test_money_tab_hides_the_accrual_itself(self):
         """تبويب «المال» (`only_payments`): المستحق «فاتورة» المخلّص — لا يُعرض بين حركات المال،
         والرصيد الختامي يبقى على الحساب كلّه."""

@@ -122,10 +122,18 @@ export function referenceTypeLabel(
   if (t === "CUSTOMER_PAYMENT") return "سند قبض";
   if (t === "SUPPLIER_PAYMENT") return "سند صرف";
   if (t === "LOGISTICS_CLEARANCE") return "مستحق تخليص";
-  if (t === "CLEARANCE_PAYMENT") return "دفع تخليص جمركي";
+  if (t === "LOGISTICS_CLEARANCE_ADJUST") return "تعديل مستحق تخليص";
+  if (t === "CLEARANCE_PAYMENT" || t === "CLEARANCE_PAYMENT_SPLIT") return "دفع تخليص جمركي";
+  if (t === "CLEARANCE_PAYMENT_UNPOST" || t === "CLEARANCE_PAYMENT_SPLIT_REVERSAL") return "عكس دفع تخليص";
   if (t === "LOCAL_SHIPMENT") return "ارسالية";
-  if (t === "LOCAL_SHIPMENT_PAYMENT") return "دفع للناقل";
+  if (t === "LOCAL_SHIPMENT_ADJUST") return "تعديل مستحق إرسالية";
+  if (t === "LOCAL_SHIPMENT_PAYMENT" || t === "LOCAL_SHIPMENT_PAYMENT_SPLIT") return "دفع للناقل";
+  if (t === "LOCAL_SHIPMENT_PAYMENT_SPLIT_REVERSAL") return "عكس دفع للناقل";
+  // قيد تكلفة الشحن القديم (`LOGISTICS_SHIPMENT`) استحقاقُ الوكيل قبل `SHIPMENT_FREIGHT_ACCRUAL`.
+  if (t === "SHIPMENT_FREIGHT_ACCRUAL" || t === "LOGISTICS_SHIPMENT") return "مستحق شحن";
+  if (t === "SHIPMENT_FREIGHT_ACCRUAL_ADJUST") return "تعديل مستحق شحن";
   if (t === "LOGISTICS_PAYMENT" || t === "PAYMENT") return "سند دفع";
+  if (t === "LOGISTICS_PAYMENT_UNPOST") return "عكس سند دفع";
   if (t === "CREDIT_DEBIT_NOTE") return "إشعار مدين/دائن";
   if (t === "PARTNER_OPENING") return "رصيد افتتاحي";
   if (t === "JOURNAL_REVERSAL") return "عكس قيد";
@@ -226,11 +234,19 @@ export function customerPath(): string {
 }
 
 /** مستندٌ وُزِّع عليه سندٌ واحدٌ مع غيره — من `link_targets` في كشف الحساب. */
+/** ما تفتحه حركة الدائن: المستحق اللوجستي بتبويبه في ملف شحنته (`party_accruals._anchor_of`). */
+export interface AccrualOpenTarget {
+  kind: "clearance" | "freight" | "local";
+  id: number;
+  shipment_id: number | null;
+}
+
 export interface StatementLinkTarget {
   key: string;
   label: string;
   /** المبلغ الموزَّع على هذا المستند بالعملة الأساسية. */
   amount: string;
+  open?: AccrualOpenTarget | null;
 }
 
 interface StatementLinkRow {

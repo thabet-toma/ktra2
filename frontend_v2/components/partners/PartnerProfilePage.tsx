@@ -20,7 +20,7 @@ import { EntityActivityLog } from '../activity/EntityActivityLog';
 import {
   referenceTypeLabel, clarifyStatementDescription, statementToneRowClass,
   withStatementLinkSublines, foldStatementReversals,
-  type FoldedStatementRow, type StatementLinkTarget, type StatementReversalPair,
+  type AccrualOpenTarget, type FoldedStatementRow, type StatementLinkTarget, type StatementReversalPair,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
 import {
@@ -127,6 +127,12 @@ interface StatementRow {
   reversal_pair?: StatementReversalPair | null;
   /** كشف الدولار: سطرٌ بلا مبلغ بالدولار — يُعرض بشيكله ولا يدخل الرصيد. */
   currency_missing?: boolean;
+  /** حركة الدائن: على أيّ مستحقٍّ هي ورقم مطالبته، وما وُزِّع عليه السند أو استُردّ منه. */
+  details?: string[];
+  /** تاريخ الدفعة المباشرة على المستحق. */
+  paid_on?: string | null;
+  /** المستحق الذي تُفتح عليه الحركة (التخليص/الإرسالية/الشحن في ملف شحنته). */
+  open_target?: AccrualOpenTarget | null;
   base_debit?: string;
   base_credit?: string;
 }
@@ -152,6 +158,23 @@ interface StatementResponse {
   missing_count?: number;
   missing_base_balance?: string;
   fx?: StatementFx;
+}
+
+/** مسار المستحق الذي ترسو عليه حركة الدائن — لنوع مرجعٍ بلا شاشةٍ خاصّة به. */
+function rowOpenPath(row: Pick<StatementRow, 'open_target'>): string | null {
+  const t = row.open_target;
+  return t ? bucketItemPath({ source: t.kind, id: t.id, shipment_id: t.shipment_id }) : null;
+}
+
+/** تفاصيل حركة الدائن تحت بيانها: المستحق ورقم مطالبته، والتوزيع أو الاسترداد، وتاريخ الدفع. */
+function StatementRowDetails({ row }: { row: StatementRow }) {
+  if (!row.details?.length && !row.paid_on) return null;
+  return (
+    <div className="flex flex-col text-[10px] text-[var(--ktra-ink-soft)]">
+      {(row.details ?? []).map((line, i) => <span key={i}>{line}</span>)}
+      {row.paid_on && <span>تاريخ الدفع: {formatDateLocalized(row.paid_on)}</span>}
+    </div>
+  );
 }
 
 /** وسم الشحنة تحت البيان — حين لا يحمله نصّ القيد أصلاً (القيود القديمة). */
@@ -283,6 +306,11 @@ export const PartnerProfilePage: React.FC = () => {
 
   // تفاصيل حركة كشف الحساب (نافذة)
   const [detailRow, setDetailRow] = useState<StatementRow | null>(null);
+  // كائنٌ ثابتٌ بين الرسمات: النافذة تجلب تفاصيلها عند تغيّره.
+  const detailMovement = useMemo(
+    () => (detailRow ? { ...detailRow, open_path: rowOpenPath(detailRow) } : null),
+    [detailRow],
+  );
 
   // invoices
   const [invoices, setInvoices] = useState<InvoiceRow[]>([]);
@@ -585,6 +613,7 @@ export const PartnerProfilePage: React.FC = () => {
           <DocRefCell
             referenceType={r.reference_type}
             referenceId={r.reference_id}
+            fallbackPath={rowOpenPath(r)}
             label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
               r.document_number
                 ? ` ${r.document_number}`
@@ -592,12 +621,22 @@ export const PartnerProfilePage: React.FC = () => {
             }`}
           />
           {/* السند يعلن الفاتورة التي وُزّع عليها — الربط ظاهر ولو تفرّقت الصفحة.
-              والمستحق مرساةُ نفسه فلا «مقابل» له. */}
+              والمستحق مرساةُ نفسه فلا «مقابل» له. ومقابلُ الدائن يُفتح بالنقر. */}
           {!r.info_amount && !r.document_number && r.link_label
             && r.link_key !== `${r.reference_type}:${r.reference_id}` && (
-            <span className="text-[10px] text-[var(--ktra-ink-soft)]">
-              ↔ مقابل {r.link_label}
-            </span>
+            rowOpenPath(r) ? (
+              <button
+                type="button"
+                onClick={() => navigate(rowOpenPath(r) as string)}
+                className="text-right text-[10px] text-[var(--ktra-accent)] hover:underline"
+              >
+                ↔ مقابل {r.link_label}
+              </button>
+            ) : (
+              <span className="text-[10px] text-[var(--ktra-ink-soft)]">
+                ↔ مقابل {r.link_label}
+              </span>
+            )
           )}
         </div>
       ),
@@ -623,6 +662,7 @@ export const PartnerProfilePage: React.FC = () => {
         <div className="flex flex-col gap-0.5">
           <span>{clarifyStatementDescription(r.reference_type, r.description) || '—'}</span>
           <StatementShipmentLabel row={r} />
+          <StatementRowDetails row={r} />
           {r.currency_missing && (
             <span className="text-[10px] font-bold text-amber-700 dark:text-amber-400">
               ⚠ بلا مبلغ بالدولار — {formatMoney(Number(r.base_debit || 0) - Number(r.base_credit || 0))} ₪ (مدين − دائن)، لا يدخل الرصيد
@@ -681,11 +721,13 @@ export const PartnerProfilePage: React.FC = () => {
           <DocRefCell
             referenceType={r.reference_type}
             referenceId={r.reference_id}
+            fallbackPath={rowOpenPath(r)}
             label={`${referenceTypeLabel(r.reference_type, r.reference_kind)}${
               r.reference_id != null ? ` #${r.reference_id}` : ''
             }`}
           />
           <StatementShipmentLabel row={r} />
+          <StatementRowDetails row={r} />
         </div>
       ),
     },
@@ -1423,7 +1465,7 @@ export const PartnerProfilePage: React.FC = () => {
       >
         <></>
       </KitDocumentShell>
-      <StatementDetailsModal movement={detailRow} onClose={() => setDetailRow(null)} />
+      <StatementDetailsModal movement={detailMovement} onClose={() => setDetailRow(null)} />
       {(showReceiptModal || showRefundModal) && receiptPartner && (
         <NewPaymentModal
           initialPartner={receiptPartner}

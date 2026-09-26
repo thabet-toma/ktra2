@@ -204,3 +204,13 @@ test("foldStatementReversals: rows without a pair pass through untouched", () =>
   const out = foldStatementReversals(plain, new Set());
   assert.deepEqual(out.map((r) => r.running_balance), ["11348.22", "7049.26"]);
 });
+
+test("referenceTypeLabel: حركات الدائن اللوجستية بأسمائها لا «قيد يومية»", () => {
+  assert.equal(referenceTypeLabel("LOGISTICS_CLEARANCE_ADJUST"), "تعديل مستحق تخليص");
+  assert.equal(referenceTypeLabel("CLEARANCE_PAYMENT_SPLIT"), "دفع تخليص جمركي");
+  assert.equal(referenceTypeLabel("CLEARANCE_PAYMENT_UNPOST"), "عكس دفع تخليص");
+  assert.equal(referenceTypeLabel("SHIPMENT_FREIGHT_ACCRUAL"), "مستحق شحن");
+  assert.equal(referenceTypeLabel("SHIPMENT_FREIGHT_ACCRUAL_ADJUST"), "تعديل مستحق شحن");
+  assert.equal(referenceTypeLabel("LOCAL_SHIPMENT_ADJUST"), "تعديل مستحق إرسالية");
+  assert.equal(referenceTypeLabel("LOGISTICS_PAYMENT_UNPOST"), "عكس سند دفع");
+});

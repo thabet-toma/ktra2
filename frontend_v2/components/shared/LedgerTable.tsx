@@ -43,9 +43,11 @@ export const DocRefCell: React.FC<{
   referenceType?: string | null;
   referenceId?: number | null;
   label?: React.ReactNode;
-}> = ({ referenceType, referenceId, label }) => {
+  /** مسارٌ حين لا مسار لنوع المرجع نفسه — حركة الدائن تفتح مستحقّها في ملف شحنته. */
+  fallbackPath?: string | null;
+}> = ({ referenceType, referenceId, label, fallbackPath }) => {
   const navigate = useNavigate();
-  const path = entityPathForReference(referenceType, referenceId);
+  const path = entityPathForReference(referenceType, referenceId) ?? fallbackPath ?? null;
   const text = label ?? (referenceId != null ? `#${referenceId}` : "—");
   if (!path) return <span>{text}</span>;
   return (

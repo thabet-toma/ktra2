@@ -4175,12 +4175,29 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
             invoice_ids.add(inv_id)
 
     # المخلّص/الوكيل/الناقل: مستحقّاتهم ودفعاتها وسنداتها الموزَّعة، ودفعات الصفقة.
-    logistics = {"anchors": {}, "vouchers": {}, "notes": {}, "deal_invoices": {}}
+    logistics = {"anchors": {}, "vouchers": {}, "notes": {}, "deal_invoices": {}, "details": {}}
+    #: سند قبض الاسترداد من الدائن ← [(وسم المصدر، المبلغ)] — ما أطفأه من فائضه.
+    refunds: dict[int, list[tuple[str, Decimal]]] = {}
     if is_supplier and tenant_id is not None:
         from logistics.domain.party_accruals import journal_reference_accrual_links
         logistics = journal_reference_accrual_links(
             tenant_id, [(r["reference_type"], r["reference_id"]) for r in rows])
         invoice_ids.update(i for links in logistics["deal_invoices"].values() for i in links)
+        receipt_ids = {
+            r["reference_id"] for r in rows
+            if r["reference_type"] == "CUSTOMER_PAYMENT" and r["reference_id"]
+        }
+        if receipt_ids:
+            from sales.models import PartyRefundAllocation
+            for alloc in PartyRefundAllocation.objects.filter(
+                refund_id__in=receipt_ids, refund__tenant_id=tenant_id,
+            ).select_related("source_note").order_by("id"):
+                source = (
+                    f"إشعار {alloc.source_note.note_number}" if alloc.source_note_id
+                    else f"سند صرف #{alloc.source_supplier_payment_id}" if alloc.source_supplier_payment_id
+                    else f"سند قبض #{alloc.source_customer_payment_id}"
+                )
+                refunds.setdefault(alloc.refund_id, []).append((source, Decimal(str(alloc.amount))))
 
     # ISSUE #167 (قصة ١٢): مرتجعُ البيع ينضمّ إلى مجموعة **فاتورته الأصليّة**، لا
     # يصنع مجموعةً ثانية. وإلّا قرأ صاحبُ الحساب ثلاثةَ مستنداتٍ متفرّقة —
@@ -4228,11 +4245,12 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
         if len(targets) == 1:
             row["link_key"] = targets[0]["key"]
             row["link_label"] = targets[0]["label"]
+            row["open_target"] = targets[0].get("open")
         elif targets:
             row["link_label"] = _link_label_for_targets(targets)
             # السطر الفرعي يحتاج مبلغاً؛ التوزيع القديم بلا مبلغ لا يُعرض فيه.
             row["link_targets"] = [
-                {"key": t["key"], "label": t["label"], "amount": str(t["amount"])}
+                {"key": t["key"], "label": t["label"], "amount": str(t["amount"]), "open": t.get("open")}
                 for t in targets if t.get("amount") is not None
             ]
 
@@ -4245,9 +4263,20 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
         row["link_targets"] = []
         # ‏#214-ب: تُرسَل دائماً — حقلٌ يظهر أحياناً يجعل الواجهةَ تخمّن غيابَه.
         row["reference_kind"] = None
+        # تفاصيل الحركة للدائن: على أيّ مستحقٍّ هي ورقم مطالبته، وتاريخ الدفعة، وما يُفتح.
+        row["details"] = []
+        row["paid_on"] = None
+        row["open_target"] = None
         if not ref_id:
             continue
         ref = (row["reference_type"], ref_id)
+        facts = logistics["details"].get(ref)
+        if facts:
+            row["document_number"] = facts["number"]
+            row["details"] = facts["lines"]
+            row["paid_on"] = facts["paid_on"]
+        if ref_id in refunds and row["reference_type"] == "CUSTOMER_PAYMENT":
+            row["details"] = [f"استرداد من {source}: {amount}" for source, amount in refunds[ref_id]]
         if row["reference_type"] == invoice_type:
             row["document_number"] = numbers.get(ref_id) or f"#{ref_id}"
             row["reference_kind"] = kinds.get(ref_id)

@@ -392,14 +392,76 @@ ACCRUAL_ANCHOR_TYPE = {
 
 
 def _anchor_of(kind: str, obj) -> dict:
-    """مرساة المستحق: مفتاحها ووسمها («SH-0017 — شحنة رقع») ورقمها المختصر لعدّ المستندات."""
+    """مرساة المستحق: مفتاحها ووسمها («SH-0017 — شحنة رقع») ورقمها المختصر لعدّ المستندات،
+    و`open` ما تفتحه الواجهة (المستحق بتبويبه في ملف شحنته)."""
     if kind == 'local':
         label, short = obj.display_label, obj.shipment_number or f"#{obj.pk}"
     else:
         ship = obj if kind == 'freight' else getattr(obj, 'shipment', None)
         label = shipment_label_of(kind, obj) or f"#{obj.pk}"
         short = (ship.shipment_number if ship is not None else '') or f"#{obj.pk}"
-    return {'key': f"{ACCRUAL_ANCHOR_TYPE[kind]}:{obj.pk}", 'label': label, 'short': short}
+    return {'key': f"{ACCRUAL_ANCHOR_TYPE[kind]}:{obj.pk}", 'label': label, 'short': short,
+            'open': {'kind': kind, 'id': obj.pk, 'shipment_id': shipment_id_of(kind, obj)}}
+
+
+def _doc_facts(kind: str, obj) -> tuple[str | None, str]:
+    """(رقم المستند كما يعرفه المستخدم، وصفه المختصر) — «مطالبة CLM-778 · بيان 4411» للتخليص،
+    ورقم الإرسالية أو الشحنة لغيره. الرقم None حين لا رقم له غير المعرّف."""
+    if kind == 'clearance':
+        claim, declaration = (obj.broker_claim_number or '').strip(), (obj.declaration_number or '').strip()
+        parts = [f"تخليص #{obj.pk}"]
+        if claim:
+            parts.append(f"مطالبة {claim}")
+        if declaration:
+            parts.append(f"بيان {declaration}")
+        if (obj.settlement_invoice_number or '').strip():
+            parts.append(f"فاتورة مقاصّة {obj.settlement_invoice_number.strip()}")
+        return claim or declaration or None, ' · '.join(parts)
+    if kind == 'local':
+        number = obj.shipment_number or None
+        return number, f"إرسالية {number or f'#{obj.pk}'}"
+    number = obj.shipment_number or None
+    parts = [f"شحن {obj.display_label}"]
+    if (obj.bill_of_lading or '').strip():
+        parts.append(f"بوليصة {obj.bill_of_lading.strip()}")
+    return number, ' · '.join(parts)
+
+
+def _reference_payments(tenant_id: int, wanted: dict) -> dict:
+    """{(reference_type, reference_id): الدفعة المباشرة} لقيود دفعات المستحقّات — بالدفعة."""
+    from logistics.models import LocalShipmentPayment, LogisticsClearancePayment, LogisticsPayment
+
+    def ids(kind: str) -> set:
+        return {i for t, (k, r) in _REFERENCE_DOCS.items() if (k, r) == (kind, 'payment') for i in wanted.get(t, ())}
+
+    found = {
+        'clearance': {p.pk: p for p in LogisticsClearancePayment.objects.filter(tenant_id=tenant_id, pk__in=ids('clearance'))},
+        'local': {p.pk: p for p in LocalShipmentPayment.objects.filter(tenant_id=tenant_id, pk__in=ids('local'))},
+        'freight': {p.pk: p for p in LogisticsPayment.all_objects.filter(tenant_id=tenant_id, pk__in=ids('freight'))},
+    }
+    return {
+        (ref_type, ref_id): found[kind][ref_id]
+        for ref_type, (kind, role) in _REFERENCE_DOCS.items() if role == 'payment'
+        for ref_id in wanted.get(ref_type, ()) if ref_id in found[kind]
+    }
+
+
+def _payment_facts(kind: str, payment) -> tuple[list[str], object]:
+    """(سطور تفاصيل دفعة المستحق المباشرة: رقمها وغرضها وملاحظتها، تاريخ دفعها) — التاريخ
+    يُنسَّق في الواجهة (`formatDate`)."""
+    lines = []
+    if kind == 'freight':
+        date = payment.transfer_date or payment.confirmation_date
+        lines.append(f"دفعة الوكيل رقم {payment.payment_number}" + (f" — {payment.title}" if payment.title else ''))
+    else:
+        date = payment.payment_date
+        # «أخرى» الافتراضية لا تقول شيئاً — الغرض يُذكر حين اختاره المستخدم.
+        purpose = payment.get_payment_purpose_display() if kind == 'clearance' and payment.payment_purpose != 'other' else ''
+        lines.append(f"دفعة #{payment.pk}" + (f" — {purpose}" if purpose else ''))
+    notes = (getattr(payment, 'notes', '') or '').strip()
+    if notes:
+        lines.append(notes[:120])
+    return lines, date
 
 
 def journal_reference_shipment_labels(tenant_id: int, refs) -> dict:
@@ -456,7 +518,10 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
       - ``vouchers``: {سند الصرف: [مرساة + ``amount`` بالأساس]} من `LogisticsAccrualAllocation`.
       - ``notes``: {الإشعار المدين: [مرساة + ``amount``]} — توزيعاته بالمثل.
       - ``deal_invoices``: {دفعة الصفقة: [فاتورتها الدولية المرحّلة]} — مرساتها الفاتورة.
-    المرساة: ``{'key': 'LOGISTICS_CLEARANCE:13', 'label': 'SH-0017 — شحنة رقع', 'short': 'SH-0017'}``.
+      - ``details``: {(reference_type, reference_id): {number, lines, paid_on}} — رقم المستند
+        (مطالبة المخلّص، رقم الإرسالية أو الشحنة) وسطورٌ تشرح الحركة، وتاريخ الدفعة المباشرة.
+    المرساة: ``{'key': 'LOGISTICS_CLEARANCE:13', 'label': 'SH-0017 — شحنة رقع', 'short': 'SH-0017',
+    'open': {'kind': 'clearance', 'id': 13, 'shipment_id': 17}}``.
     """
     from logistics.models import LogisticsPayment, PurchaseInvoice
 
@@ -465,19 +530,37 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
         if ref_type and ref_id:
             wanted.setdefault(ref_type, set()).add(ref_id)
 
-    anchors = {
-        ref: _anchor_of(kind, obj)
-        for ref, (kind, obj) in _reference_accruals(tenant_id, wanted).items()
+    referenced = _reference_accruals(tenant_id, wanted)
+    allocated = {
+        'SUPPLIER_PAYMENT': _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())),
+        'CREDIT_DEBIT_NOTE': _voucher_accruals(tenant_id, wanted.get('CREDIT_DEBIT_NOTE', ()), source='note'),
     }
+    anchors = {ref: _anchor_of(kind, obj) for ref, (kind, obj) in referenced.items()}
     vouchers = {
         voucher_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
-        for voucher_id, targets in _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())).items()
+        for voucher_id, targets in allocated['SUPPLIER_PAYMENT'].items()
     }
     notes = {
         note_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
-        for note_id, targets in _voucher_accruals(
-            tenant_id, wanted.get('CREDIT_DEBIT_NOTE', ()), source='note').items()
+        for note_id, targets in allocated['CREDIT_DEBIT_NOTE'].items()
     }
+    # تفاصيل الحركة: رقم المستند (مطالبة المخلّص، رقم الإرسالية أو الشحنة) وسطورٌ تشرحها —
+    # على أيّ مستحقٍّ هي، وللدفعة رقمها وتاريخها. والسند/الإشعار الموزَّع: ما أطفأه مستنداً مستنداً.
+    details: dict[tuple, dict] = {}
+    payments = _reference_payments(tenant_id, wanted)
+    for ref, (kind, obj) in referenced.items():
+        number, doc_text = _doc_facts(kind, obj)
+        if _REFERENCE_DOCS[ref[0]][1] == 'doc':
+            details[ref] = {'number': number, 'lines': [doc_text], 'paid_on': None}
+        else:
+            payment = payments.get(ref)
+            lines, paid_on = _payment_facts(kind, payment) if payment is not None else ([], None)
+            details[ref] = {'number': None, 'lines': [f"على {doc_text}", *lines],
+                            'paid_on': paid_on.isoformat() if paid_on else None}
+    for ref_type, by_source in allocated.items():
+        for source_id, targets in by_source.items():
+            details[(ref_type, source_id)] = {'number': None, 'paid_on': None, 'lines': [
+                f"وُزِّع على {_doc_facts(kind, obj)[1]}: {amount}" for kind, obj, amount in targets]}
     # الإشعار المربوط بمستحقٍّ يرسو عليه كدفعته — الدائن دائماً، والمدين حين لا توزيع له.
     note_ids = wanted.get('CREDIT_DEBIT_NOTE')
     if note_ids:
@@ -514,7 +597,8 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
         ).order_by('id').values_list('pk', 'deal_id'):
             by_deal.setdefault(deal_id, []).append(inv_id)
         deal_invoices = {pay_id: by_deal.get(deal_id, []) for pay_id, deal_id in payment_deal.items()}
-    return {'anchors': anchors, 'vouchers': vouchers, 'notes': notes, 'deal_invoices': deal_invoices}
+    return {'anchors': anchors, 'vouchers': vouchers, 'notes': notes, 'deal_invoices': deal_invoices,
+            'details': details}
 
 
 #: الصنف ← حقل الطرف الدائن على المستند.
