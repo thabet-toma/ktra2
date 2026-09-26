@@ -1,6 +1,6 @@
 """حزمة sales.services — المرحلة 3: تفكيك services.py (4,087 سطراً) حسب الدومين.
 صفر تغيير سلوك (تحقّق byte-for-byte). الرسم لا-دوري:
-foundation ← {pricing, numbering, calc} ← flow ← {orders, supplier_vat}.
+foundation ← {pricing, numbering, calc} ← flow ← {orders, supplier_vat, note_allocation}.
 كل الأسماء العامة تُعاد تصديرها فيبقى `from sales.services import X` شغّالاً.
 """
 # الترويسة (imports) كانت مُعاد تصديرها من services.py الأصلي (مثل
@@ -121,6 +121,19 @@ from .orders import (
     default_note_counter_account,
     credit_debit_counter_account_error,
 )
+from .note_allocation import (
+    note_settles,
+    note_unallocated,
+    posted_note_allocations_total,
+    posted_invoice_settled_total,
+    allocate_note,
+    deallocate_note,
+    note_allocation_rows,
+    release_note_allocations,
+    note_open_targets,
+    suggest_note_fifo,
+    auto_allocate_linked,
+)
 from .supplier_vat import (
     post_supplier_payment,
     unpost_supplier_payment,
@@ -233,6 +246,17 @@ __all__ = [
     "validate_credit_debit_note",
     "default_note_counter_account",
     "credit_debit_counter_account_error",
+    "note_settles",
+    "note_unallocated",
+    "posted_note_allocations_total",
+    "posted_invoice_settled_total",
+    "allocate_note",
+    "deallocate_note",
+    "note_allocation_rows",
+    "release_note_allocations",
+    "note_open_targets",
+    "suggest_note_fifo",
+    "auto_allocate_linked",
     "post_supplier_payment",
     "unpost_supplier_payment",
     "allocate_supplier_payment",

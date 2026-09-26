@@ -991,24 +991,23 @@ def purchase_invoice_fees_total(invoice) -> Decimal:
 
 
 def purchase_invoice_note_totals(invoice) -> tuple[Decimal, Decimal]:
-    """(إشعارات مدينة، إشعارات دائنة) **مرحّلة** مربوطة بالفاتورة — بعملتها.
+    """(إشعارات مدينة موزَّعة، إشعارات دائنة مربوطة) **مرحّلة** على الفاتورة — بعملتها.
 
-    المدين (خصمٌ أو مرتجعٌ من المورد) تسويةٌ تُحسب مع المدفوع؛ والدائن (مبلغٌ إضافيٌّ
-    له) يزيد المستحق. العملة تطابق عملة الفاتورة (`validate_credit_debit_note`).
-    نسخة SQL في `annotate_purchase_invoice_payment_summary` (`note_total`).
+    المدين (خصمٌ أو مرتجعٌ من المورد) تسويةٌ تُحسب مع المدفوع بما **وُزِّع** منه على الفاتورة
+    (`CreditDebitNoteAllocation` — الترحيل يوزّعه على مستنده المربوط تلقائياً)؛ والدائن
+    المربوط (مبلغٌ إضافيٌّ له) يزيد المستحق. نسخة SQL في `annotate_purchase_invoice_payment_summary`.
     """
     from django.db.models import Sum
-    from sales.models import CreditDebitNote
+    from sales.models import CreditDebitNote, CreditDebitNoteAllocation
 
-    totals = dict(
-        CreditDebitNote.objects.filter(
-            related_purchase_invoice_id=invoice.pk, status=CreditDebitNote.STATUS_POSTED,
-        ).values("note_type").annotate(total=Sum("amount")).values_list("note_type", "total")
-    )
-    return (
-        Decimal(str(totals.get(CreditDebitNote.TYPE_DEBIT) or 0)),
-        Decimal(str(totals.get(CreditDebitNote.TYPE_CREDIT) or 0)),
-    )
+    debit = CreditDebitNoteAllocation.objects.filter(
+        purchase_invoice_id=invoice.pk, note__status=CreditDebitNote.STATUS_POSTED,
+    ).aggregate(total=Sum("amount_in_invoice_currency"))["total"]
+    credit = CreditDebitNote.objects.filter(
+        related_purchase_invoice_id=invoice.pk, status=CreditDebitNote.STATUS_POSTED,
+        note_type=CreditDebitNote.TYPE_CREDIT,
+    ).aggregate(total=Sum("amount"))["total"]
+    return Decimal(str(debit or 0)), Decimal(str(credit or 0))
 
 
 def purchase_invoice_recorded_paid(invoice) -> Decimal:
@@ -1272,7 +1271,7 @@ def annotate_purchase_invoice_payment_summary(queryset):
     from accounting.models import JournalLine
     from django.db.models import Q
     from logistics.models import PurchaseInvoice, PurchaseInvoiceFee, PurchaseInvoicePayment
-    from sales.models import CreditDebitNote, SupplierPayment, SupplierPaymentAllocation
+    from sales.models import CreditDebitNote, CreditDebitNoteAllocation, SupplierPayment, SupplierPaymentAllocation
 
     money = DecimalField(max_digits=18, decimal_places=2)
 
@@ -1304,16 +1303,22 @@ def annotate_purchase_invoice_payment_summary(queryset):
     )
     legacy_paid = total_subquery(PurchaseInvoicePayment, is_posted=True)
 
-    # نفس `purchase_invoice_note_totals`: المدين مع المدفوع، والدائن على المستحق.
-    def note_total(note_type):
-        return (
-            CreditDebitNote.objects
-            .filter(related_purchase_invoice_id=OuterRef("pk"), status=CreditDebitNote.STATUS_POSTED,
-                    note_type=note_type)
-            .values("related_purchase_invoice_id")
-            .annotate(total=Sum("amount"))
-            .values("total")[:1]
-        )
+    # نفس `purchase_invoice_note_totals`: المدين الموزَّع مع المدفوع، والدائن المربوط على المستحق.
+    note_debit = (
+        CreditDebitNoteAllocation.objects
+        .filter(purchase_invoice_id=OuterRef("pk"), note__status=CreditDebitNote.STATUS_POSTED)
+        .values("purchase_invoice_id")
+        .annotate(total=Sum("amount_in_invoice_currency"))
+        .values("total")[:1]
+    )
+    note_credit = (
+        CreditDebitNote.objects
+        .filter(related_purchase_invoice_id=OuterRef("pk"), status=CreditDebitNote.STATUS_POSTED,
+                note_type=CreditDebitNote.TYPE_CREDIT)
+        .values("related_purchase_invoice_id")
+        .annotate(total=Sum("amount"))
+        .values("total")[:1]
+    )
     pending_cheques = (
         Cheque.objects
         .filter(
@@ -1375,8 +1380,8 @@ def annotate_purchase_invoice_payment_summary(queryset):
         list_linked_paid=Coalesce(Subquery(linked_paid, output_field=money), zero),
         list_allocated_paid=Coalesce(Subquery(allocated_paid, output_field=money), zero),
         list_legacy_paid=Coalesce(Subquery(legacy_paid, output_field=money), zero),
-        list_note_debit=Coalesce(Subquery(note_total(CreditDebitNote.TYPE_DEBIT), output_field=money), zero),
-        list_note_credit=Coalesce(Subquery(note_total(CreditDebitNote.TYPE_CREDIT), output_field=money), zero),
+        list_note_debit=Coalesce(Subquery(note_debit, output_field=money), zero),
+        list_note_credit=Coalesce(Subquery(note_credit, output_field=money), zero),
         list_journal_settled=Case(
             When(is_return=True, then=zero),
             default=Coalesce(Subquery(journal_settled, output_field=money), zero),

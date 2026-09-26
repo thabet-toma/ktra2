@@ -51,14 +51,16 @@ export function overpaymentExcess(
 }
 
 /**
- * سند صرفٍ موزَّع على مستحقّ — صفٌّ في تبويب «الدفعات» بجانب دفعاته المباشرة
- * (`party_accruals.document_voucher_rows`). المبلغ بعملة المستند، فمجموع التبويب
- * = المدفوع في رأسه.
+ * سند صرفٍ أو إشعارٌ مدينٌ موزَّع على مستحقّ — صفٌّ في تبويب «الدفعات» بجانب دفعاته
+ * المباشرة (`party_accruals.document_voucher_rows`). المبلغ بعملة المستند، فمجموع
+ * التبويب = المدفوع في رأسه. صفّ الإشعار: `voucher_id` فارغ و`note_id`/`note_number`.
  */
 export type VoucherAllocationRow = {
   id: string;
   row_type: "voucher_allocation";
-  voucher_id: number;
+  voucher_id: number | null;
+  note_id?: number | null;
+  note_number?: string | null;
   kind_label: string;
   payment_date: string | null;
   amount: string;

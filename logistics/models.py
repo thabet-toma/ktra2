@@ -2672,13 +2672,20 @@ class LogisticsAccrualAllocation(models.Model):
     استحقاق شحنٍ لوكيل الشحن، أو إرساليةٍ محلية للناقل. ربطٌ بلا قيد: الدفتر لا
     يتغيّر، والمتبقّي يُحسب من `logistics/domain/party_accruals.py`. سندٌ بلا
     توزيع = «دفعة تحت الحساب». يُحتسب التوزيع ما دام سنده مرحَّلاً (كتوزيع الفواتير).
+
+    المصدر سند صرفٍ **أو** إشعارٌ مدينٌ على الطرف (`note`) — خصمٌ منه يُطفئ مستحقّه كالسند،
+    ويُحتسب ما دام الإشعار مرحَّلاً. مصدرٌ واحدٌ وهدفٌ واحد (قيدا قاعدة البيانات).
     """
 
     id = models.AutoField(primary_key=True, db_column='AccrualAllocationID')
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
     payment = models.ForeignKey(
-        'sales.SupplierPayment', on_delete=models.CASCADE,
+        'sales.SupplierPayment', on_delete=models.CASCADE, null=True, blank=True,
         related_name='logistics_allocations', db_column='SupplierPaymentID',
+    )
+    note = models.ForeignKey(
+        'sales.CreditDebitNote', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='accrual_allocations', db_column='CreditDebitNoteID',
     )
     clearance = models.ForeignKey(
         'LogisticsClearance', on_delete=models.CASCADE, null=True, blank=True,
@@ -2703,6 +2710,13 @@ class LogisticsAccrualAllocation(models.Model):
     class Meta:
         db_table = 'logistics_accrual_allocations'
         constraints = [
+            models.CheckConstraint(
+                name='accrual_allocation_one_source',
+                condition=(
+                    models.Q(payment__isnull=False, note__isnull=True)
+                    | models.Q(payment__isnull=True, note__isnull=False)
+                ),
+            ),
             models.CheckConstraint(
                 name='accrual_allocation_one_target',
                 condition=(

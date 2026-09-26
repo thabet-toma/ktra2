@@ -1698,6 +1698,10 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
         queryset=LogisticsShipment.objects.all(), required=False, allow_null=True,
     )
     linked_document = serializers.SerializerMethodField()
+    #: الإشعار المسوّي (مدينٌ على دائن، دائنٌ على عميل) رصيدٌ يُوزَّع كالسند.
+    settles = serializers.SerializerMethodField()
+    allocated_amount = serializers.SerializerMethodField()
+    unallocated_amount = serializers.SerializerMethodField()
     counter_account = TenantScopedPrimaryKeyRelatedField(
         queryset=Account.objects.all(), required=False, allow_null=True,
     )
@@ -1727,6 +1731,9 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
             "related_local_shipment",
             "related_shipment",
             "linked_document",
+            "settles",
+            "allocated_amount",
+            "unallocated_amount",
             "counter_account",
             "counter_account_code",
             "counter_account_name",
@@ -1754,6 +1761,23 @@ class CreditDebitNoteSerializer(serializers.ModelSerializer):
         from partners.models import is_creditor_party
 
         return is_creditor_party(obj.partner)
+
+    def get_settles(self, obj) -> bool:
+        from sales.services.note_allocation import note_settles
+
+        return note_settles(obj)
+
+    def get_allocated_amount(self, obj) -> str:
+        # من الجلب المسبق في `CreditDebitNoteViewSet.get_queryset` — لا استعلامَ لكل صف.
+        total = sum((Decimal(str(a.amount)) for a in obj.allocations.all()), Decimal("0")) + sum(
+            (Decimal(str(a.amount)) for a in obj.accrual_allocations.all()), Decimal("0"))
+        return str(total.quantize(Decimal("0.01")))
+
+    def get_unallocated_amount(self, obj) -> str:
+        if obj.status != CreditDebitNote.STATUS_POSTED or not self.get_settles(obj):
+            return "0.00"
+        free = Decimal(str(obj.amount)) - Decimal(self.get_allocated_amount(obj))
+        return str(max(free, Decimal("0")).quantize(Decimal("0.01")))
 
     def get_linked_document(self, obj):
         """المستند المربوط {kind, id, label} — `None` بلا ربط."""

@@ -55,7 +55,7 @@ def _party_accrual_invoice_rows(partner) -> list[dict]:
     for row in party_open_accruals(partner.tenant_id, partner.id, include_settled=True):
         due = Decimal(row["due"])
         summary = document_payment_summary(
-            due, Decimal(row["paid"]) + Decimal(row["allocated"]) + Decimal(row["noted"]))
+            due, Decimal(row["paid"]) + Decimal(row["allocated"]))
         rows.append({
             "document_type": ACCRUAL_ANCHOR_TYPE[row["kind"]],
             "document_id": row["id"],

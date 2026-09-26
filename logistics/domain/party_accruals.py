@@ -13,7 +13,8 @@
 
     المستحق  = Σ(دائن − مدين) لأسطر الطرف في قيد الاستحقاق وقيود تعديله
     المدفوع  = Σ(مدين − دائن) لأسطر الطرف في قيود دفعات المستند نفسه المرحّلة
-    الموزَّع = Σ `LogisticsAccrualAllocation.amount_base` لسندات صرفٍ مرحّلة
+    الموزَّع = Σ `LogisticsAccrualAllocation.amount_base` لسندات صرفٍ مرحّلة وإشعاراتٍ
+               مدينةٍ مرحّلة (خصمٌ من الطرف يُوزَّع كالسند — `sales/services/note_allocation.py`)
     المتبقّي = max(المستحق − المدفوع − الموزَّع، 0)
 
 يستعملها منتقي التوزيع وFIFO والتحقّق عند التوزيع، وفصلُ الدفعة الزائدة عند
@@ -32,7 +33,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import Q, Sum
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +43,8 @@ KINDS = ('clearance', 'freight', 'local')
 
 #: الصنف ← (حقل FK في `LogisticsAccrualAllocation`، تسمية المستند)
 _ALLOCATION_FIELD = {'clearance': 'clearance', 'freight': 'shipment', 'local': 'local_shipment'}
+#: التوزيع يُحتسب ما دام مصدره مرحَّلاً — سند صرفٍ أو إشعارٌ مدين.
+_POSTED_SOURCE = Q(payment__is_posted=True) | Q(note__status='posted')
 
 #: الصنف ← مرجع قيد «تعديل الاستحقاق» (قيد فرقٍ على المستند نفسه، `reference_id` = المستند).
 ACCRUAL_ADJUST_TYPE = {
@@ -99,12 +102,16 @@ _NOTE_LINK_FIELD = {'clearance': 'related_clearance', 'freight': 'related_shipme
 
 
 def note_journal_ids(kind: str, obj) -> list[int]:
-    """قيود الإشعارات المدينة/الدائنة **المرحّلة** المربوطة بالمستند — تسويةٌ على مستحقّه."""
+    """قيود الإشعارات **الدائنة** المرحّلة المربوطة بالمستند — مبلغٌ إضافيٌّ للطرف يرفع مستحقّه.
+
+    المدين (خصمٌ منه) لا يُقرأ من ربطه: يُطفئ المستحق بتوزيعه (`LogisticsAccrualAllocation.note`)
+    كالسند، والترحيل يوزّعه على مستنده المربوط تلقائياً.
+    """
     from sales.models import CreditDebitNote
 
     return list(CreditDebitNote.objects.filter(
         tenant_id=obj.tenant_id, status=CreditDebitNote.STATUS_POSTED, journal__isnull=False,
-        **{_NOTE_LINK_FIELD[kind]: obj},
+        note_type=CreditDebitNote.TYPE_CREDIT, **{_NOTE_LINK_FIELD[kind]: obj},
     ).values_list('journal_id', flat=True))
 
 
@@ -117,24 +124,24 @@ def accrual_journal_ids(kind: str, obj) -> list[int]:
 
 
 def allocated_base(kind: str, objs) -> Decimal:
-    """ما وُزِّع من سندات صرفٍ **مرحّلة** على مستندات صنفٍ واحد (بالعملة الأساسية)."""
+    """ما وُزِّع من سندات صرفٍ وإشعاراتٍ **مرحّلة** على مستندات صنفٍ واحد (بالعملة الأساسية)."""
     from logistics.models import LogisticsAccrualAllocation
 
     ids = [o.pk for o in objs if o is not None]
     if not ids:
         return ZERO
     total = LogisticsAccrualAllocation.objects.filter(
-        **{f"{_ALLOCATION_FIELD[kind]}_id__in": ids}, payment__is_posted=True,
+        _POSTED_SOURCE, **{f"{_ALLOCATION_FIELD[kind]}_id__in": ids},
     ).aggregate(t=Sum('amount_base'))['t']
     return _money(total)
 
 
 def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
-    """{due, due_original, paid, allocated, noted, remaining, overpaid, surplus} لمستندٍ واحد
+    """{due, due_original, paid, allocated, remaining, overpaid, surplus} لمستندٍ واحد
     بالعملة الأساسية.
 
-    `noted`: الإشعارات المدينة المرحّلة المربوطة بالمستند (خصمٌ أو مطالبةٌ من الطرف) —
-    تسويةٌ كالدفع تُطفئ المتبقّي. والإشعار الدائن المربوط (مبلغٌ إضافيٌّ له) يزيد `due`.
+    `allocated`: سندات الصرف والإشعارات المدينة الموزَّعة عليه. والإشعار الدائن المربوط
+    (مبلغٌ إضافيٌّ للطرف) يزيد `due`.
 
     `due` بعد تعديلات الاستحقاق و`due_original` قبلها. `surplus` (الفائض) هو ما صار
     من الزائد زائداً **لأن المستحق خُفِّض**: min(الزائد، مقدار التخفيض). وباقي الزائد
@@ -154,18 +161,15 @@ def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
         due = due_original = ZERO
     paid = _party_net(pay_journals, party_id, credit_side=False)
     allocated = allocated_base(kind, [obj])
-    # Dr ذمّة الطرف (إشعار مدين) موجب ← تسوية؛ Cr (إشعار دائن) سالب ← يزيد المستحق.
-    noted = _party_net(note_journal_ids(kind, obj), party_id, credit_side=False)
-    if noted < 0:
-        due, noted = due - noted, ZERO
-    settled = paid + allocated + noted
+    # الإشعار الدائن المربوط: Cr ذمّة الطرف ← يزيد المستحق.
+    due += _party_net(note_journal_ids(kind, obj), party_id, credit_side=True)
+    settled = paid + allocated
     overpaid = max(settled - due, ZERO)
     return {
         'due': due,
         'due_original': due_original,
         'paid': paid,
         'allocated': allocated,
-        'noted': noted,
         'remaining': max(due - settled, ZERO),
         'overpaid': overpaid,
         'surplus': min(overpaid, max(due_original - due, ZERO)),
@@ -190,7 +194,7 @@ def document_settlement(kind: str, obj, *, draft_due, draft_paid, rate=None) -> 
         divisor = Decimal(str(rate or 1)) or Decimal('1')
         due, paid, remaining, advance = (
             (value / divisor).quantize(Q2) for value in (
-                status['due'], status['paid'] + status['allocated'] + status['noted'],
+                status['due'], status['paid'] + status['allocated'],
                 status['remaining'], status['overpaid'],
             )
         )
@@ -239,12 +243,14 @@ def _label(kind: str, obj) -> str:
 
 
 VOUCHER_ALLOCATION_KIND_LABEL = 'سند صرف — توزيع'
+NOTE_ALLOCATION_KIND_LABEL = 'إشعار مدين — توزيع'
 
 
 def document_voucher_rows(kind: str, obj, *, rate=None) -> list[dict]:
-    """سندات الصرف **المرحّلة** الموزَّعة على المستند — صفوفٌ لتبويب «الدفعات» بجانب
-    دفعاته المباشرة. المبلغ بعملة المستند (الأساس ÷ `rate`) كما يقسم `document_settlement`،
-    فمجموع التبويب = `amount_paid` في رأسه. كان التبويب يقرأ دفعات المستند وحدها.
+    """سندات الصرف والإشعارات المدينة **المرحّلة** الموزَّعة على المستند — صفوفٌ لتبويب
+    «الدفعات» بجانب دفعاته المباشرة. المبلغ بعملة المستند (الأساس ÷ `rate`) كما يقسم
+    `document_settlement`، فمجموع التبويب = `amount_paid` في رأسه. صفّ الإشعار يحمل
+    `note_id`/`note_number` و`voucher_id=None`.
     """
     from logistics.models import LogisticsAccrualAllocation
 
@@ -252,31 +258,36 @@ def document_voucher_rows(kind: str, obj, *, rate=None) -> list[dict]:
     label = shipment_label_of(kind, obj)
     allocations = (
         LogisticsAccrualAllocation.objects
-        .filter(tenant_id=obj.tenant_id, payment__is_posted=True, **{_ALLOCATION_FIELD[kind]: obj})
-        .select_related('payment', 'payment__currency')
-        .order_by('-payment__payment_date', '-id')
+        .filter(_POSTED_SOURCE, tenant_id=obj.tenant_id, **{_ALLOCATION_FIELD[kind]: obj})
+        .select_related('payment', 'payment__currency', 'note', 'note__currency')
+        .order_by('-id')
     )
-    return [
-        {
+    rows = []
+    for a in allocations:
+        source = a.payment or a.note
+        date = a.payment.payment_date if a.payment_id else a.note.note_date
+        rows.append({
             'id': f"alloc-{a.id}",
             'row_type': 'voucher_allocation',
             'allocation_id': a.id,
             'voucher_id': a.payment_id,
-            'kind_label': VOUCHER_ALLOCATION_KIND_LABEL,
+            'note_id': a.note_id,
+            'note_number': a.note.note_number if a.note_id else None,
+            'kind_label': VOUCHER_ALLOCATION_KIND_LABEL if a.payment_id else NOTE_ALLOCATION_KIND_LABEL,
             'payment_purpose': kind,
-            'payment_date': a.payment.payment_date.isoformat() if a.payment.payment_date else None,
+            'payment_date': date.isoformat() if date else None,
             'amount': str((Decimal(str(a.amount_base)) / divisor).quantize(Q2)),
             'amount_base': str(a.amount_base),
             'voucher_amount': str(a.amount),
-            'currency_code': getattr(a.payment.currency, 'Code', None),
+            'currency_code': getattr(source.currency, 'Code', None),
             'is_posted': True,
-            'journal': a.payment.journal_id,
-            'journal_id_display': a.payment.journal_id,
-            'notes': a.payment.notes or '',
+            'journal': source.journal_id,
+            'journal_id_display': source.journal_id,
+            'notes': (a.payment.notes if a.payment_id else a.note.reason) or '',
             'shipment_label': label,
-        }
-        for a in allocations
-    ]
+        })
+    rows.sort(key=lambda r: r['payment_date'] or '', reverse=True)
+    return rows
 
 
 #: نوع مرجع القيد ← (الصنف، ما يعرّفه المرجع). `payment` = دفعة المستند المباشرة.
@@ -349,8 +360,9 @@ def _reference_accruals(tenant_id: int, wanted: dict) -> dict:
     return out
 
 
-def _voucher_accruals(tenant_id: int, payment_ids) -> dict:
-    """{سند الصرف: [(الصنف، المستحق، المبلغ بالأساس)]} من `LogisticsAccrualAllocation` — بالدفعة."""
+def _voucher_accruals(tenant_id: int, payment_ids, *, source: str = 'payment') -> dict:
+    """{سند الصرف: [(الصنف، المستحق، المبلغ بالأساس)]} من `LogisticsAccrualAllocation` — بالدفعة.
+    `source='note'`: المفتاح الإشعار المدين الموزَّع بدل السند."""
     from logistics.models import LogisticsAccrualAllocation
 
     ship_deals = 'deals__partner'
@@ -358,7 +370,7 @@ def _voucher_accruals(tenant_id: int, payment_ids) -> dict:
     if not payment_ids:
         return out
     for alloc in LogisticsAccrualAllocation.objects.filter(
-        tenant_id=tenant_id, payment_id__in=payment_ids,
+        tenant_id=tenant_id, **{f'{source}_id__in': payment_ids},
     ).select_related(
         'clearance__shipment', 'shipment', 'local_shipment__shipment', 'local_shipment__clearance__shipment',
     ).prefetch_related(
@@ -367,7 +379,7 @@ def _voucher_accruals(tenant_id: int, payment_ids) -> dict:
     ).order_by('id'):
         kind = 'clearance' if alloc.clearance_id else ('freight' if alloc.shipment_id else 'local')
         obj = alloc.clearance or alloc.shipment or alloc.local_shipment
-        out.setdefault(alloc.payment_id, []).append((kind, obj, _money(alloc.amount_base)))
+        out.setdefault(getattr(alloc, f'{source}_id'), []).append((kind, obj, _money(alloc.amount_base)))
     return out
 
 
@@ -442,6 +454,7 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
       - ``anchors``: {(reference_type, reference_id): مرساة} لقيد المستحق نفسه ولقيود دفعاته
         المباشرة (دفعة التخليص/الإرسالية/الوكيل، وقيود الفصل وعكسها).
       - ``vouchers``: {سند الصرف: [مرساة + ``amount`` بالأساس]} من `LogisticsAccrualAllocation`.
+      - ``notes``: {الإشعار المدين: [مرساة + ``amount``]} — توزيعاته بالمثل.
       - ``deal_invoices``: {دفعة الصفقة: [فاتورتها الدولية المرحّلة]} — مرساتها الفاتورة.
     المرساة: ``{'key': 'LOGISTICS_CLEARANCE:13', 'label': 'SH-0017 — شحنة رقع', 'short': 'SH-0017'}``.
     """
@@ -460,7 +473,12 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
         voucher_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
         for voucher_id, targets in _voucher_accruals(tenant_id, wanted.get('SUPPLIER_PAYMENT', ())).items()
     }
-    # الإشعار المدين/الدائن المربوط بمستحقٍّ يرسو عليه كدفعته.
+    notes = {
+        note_id: [{**_anchor_of(kind, obj), 'amount': amount} for kind, obj, amount in targets]
+        for note_id, targets in _voucher_accruals(
+            tenant_id, wanted.get('CREDIT_DEBIT_NOTE', ()), source='note').items()
+    }
+    # الإشعار المربوط بمستحقٍّ يرسو عليه كدفعته — الدائن دائماً، والمدين حين لا توزيع له.
     note_ids = wanted.get('CREDIT_DEBIT_NOTE')
     if note_ids:
         from sales.models import CreditDebitNote
@@ -496,7 +514,7 @@ def journal_reference_accrual_links(tenant_id: int, refs) -> dict:
         ).order_by('id').values_list('pk', 'deal_id'):
             by_deal.setdefault(deal_id, []).append(inv_id)
         deal_invoices = {pay_id: by_deal.get(deal_id, []) for pay_id, deal_id in payment_deal.items()}
-    return {'anchors': anchors, 'vouchers': vouchers, 'deal_invoices': deal_invoices}
+    return {'anchors': anchors, 'vouchers': vouchers, 'notes': notes, 'deal_invoices': deal_invoices}
 
 
 #: الصنف ← حقل الطرف الدائن على المستند.
@@ -562,8 +580,8 @@ def party_accrued_total(tenant_id: int, partner_id: int):
 def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
     """رقما رأس كشف الطرف الدائن: «دفعات تحت الحساب» و«فائض» — بالعملة الأساسية.
 
-    تحت الحساب = غير الموزَّع من سندات صرفه المرحّلة + ما زاد على مستحقٍّ لوجستي
-    لحظة الدفع. الفائض = ما صار زائداً على مستحقٍّ لأن المستحق خُفِّض بعد الدفع
+    تحت الحساب = غير الموزَّع من سندات صرفه وإشعاراته المدينة المرحّلة + ما زاد على
+    مستحقٍّ لوجستي لحظة الدفع. الفائض = ما صار زائداً على مستحقٍّ لأن المستحق خُفِّض بعد الدفع
     (`accrual_status`). مجموعهما رصيدٌ لصالحنا لم يُستهلك؛ رصيد الكشف لا يتغيّر بهما.
     """
     from logistics.models import LogisticsAccrualAllocation
@@ -583,12 +601,36 @@ def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
         free = max(_money(voucher.amount) - used.get(voucher.pk, ZERO), ZERO)
         if free > 0:
             on_account += _payment_base(voucher, free)
+    on_account += sum((base for _note, _free, base in party_unallocated_notes(tenant_id, partner_id)), ZERO)
     surplus = ZERO
     for kind, obj in _party_accrual_docs(tenant_id, partner_id):
         status = accrual_status(kind, obj)
         surplus += status['surplus']
         on_account += status['overpaid'] - status['surplus']
     return {'on_account': _money(on_account), 'surplus': _money(surplus)}
+
+
+def party_unallocated_notes(tenant_id: int, partner_id: int) -> list[tuple]:
+    """[(الإشعار، غير الموزَّع بعملته، بالأساس)] لإشعارات الدائن المدينة المرحّلة — خصمٌ منه لم
+    يُطفئ مستنداً بعد، فهو رصيدٌ لنا عنده كالسند غير الموزَّع. بثلاثة استعلامات ثابتة."""
+    from logistics.models import LogisticsAccrualAllocation
+    from sales.models import CreditDebitNote, CreditDebitNoteAllocation
+
+    notes = list(CreditDebitNote.objects.filter(
+        tenant_id=tenant_id, partner_id=partner_id, status=CreditDebitNote.STATUS_POSTED,
+        note_type=CreditDebitNote.TYPE_DEBIT,
+    ).select_related('currency').order_by('note_date', 'id'))
+    used: dict[int, Decimal] = {}
+    for model in (CreditDebitNoteAllocation, LogisticsAccrualAllocation):
+        for nid, total in model.objects.filter(note__in=[n.pk for n in notes]).values(
+            'note_id').annotate(t=Sum('amount')).values_list('note_id', 't'):
+            used[nid] = used.get(nid, ZERO) + _money(total)
+    out = []
+    for note in notes:
+        free = max(_money(note.amount) - used.get(note.pk, ZERO), ZERO)
+        if free > 0:
+            out.append((note, free, _payment_base(note, free)))
+    return out
 
 
 def party_open_accruals(tenant_id: int, partner_id: int, *, include_settled: bool = False) -> list[dict]:
@@ -738,6 +780,47 @@ def allocate_voucher_to_accruals(payment, allocations: list[dict], *, user=None)
     return payment
 
 
+def allocate_note_to_accrual(note, kind: str, pk: int, amount: Decimal, *, base: Decimal) -> str:
+    """توزيع إشعارٍ مدينٍ مرحَّل على مستحقٍّ لوجستي لطرفه — داخل معاملة `allocate_note`
+    (`sales/services/note_allocation.py`) التي تحرس غير الموزَّع. يُرجع وسم المستحق."""
+    from logistics.models import LogisticsAccrualAllocation
+
+    obj = _load_accrual(kind, pk, note.tenant_id)
+    party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
+    if not accrual_journal_id:
+        raise ValidationError(f"{_label(kind, obj)} غير مرحَّل الاستحقاق.")
+    if party_id != note.partner_id:
+        raise ValidationError(f"{_label(kind, obj)} لا يخصّ طرف الإشعار.")
+    remaining = accrual_remaining(kind, obj)
+    # تقريب المبلغ إلى القرش ثم ضربه بالسعر قد يتجاوز المتبقّي بكسرٍ دون قرشٍ بعملة الإشعار.
+    slack = (Q2 * (Decimal(str(note.exchange_rate or 1)) or Decimal('1'))).quantize(Q2) + Q2
+    if base > remaining + slack:
+        raise ValidationError(
+            f"مبلغ التوزيع ({base}) يتجاوز المتبقّي على {_label(kind, obj)} ({remaining}).")
+    LogisticsAccrualAllocation.objects.create(
+        tenant_id=note.tenant_id, note=note, **{_ALLOCATION_FIELD[kind]: obj},
+        amount=amount, amount_base=min(base, remaining),
+    )
+    return _label(kind, obj)
+
+
+def note_accrual_allocation_rows(note) -> list[dict]:
+    """توزيعات الإشعار على المستحقّات اللوجستية للعرض — مرآة صفوف `note_allocation_rows`."""
+    from logistics.models import LogisticsAccrualAllocation
+
+    return [
+        {'allocation_kind': 'accrual', 'allocation_id': a.pk, 'kind': kind, 'id': obj.pk,
+         'label': _label(kind, obj), 'amount': str(a.amount)}
+        for a in LogisticsAccrualAllocation.objects.filter(note=note).select_related(
+            'clearance__shipment', 'shipment', 'local_shipment',
+        ).prefetch_related('clearance__shipment__deals__partner', 'shipment__deals__partner').order_by('id')
+        for kind, obj in [(
+            'clearance' if a.clearance_id else ('freight' if a.shipment_id else 'local'),
+            a.clearance or a.shipment or a.local_shipment,
+        )]
+    ]
+
+
 def deallocate_voucher_accrual(payment, allocation_id: int, *, user=None):
     """فكّ توزيعٍ واحد — المبلغ يعود «تحت الحساب» على السند."""
     from accounting.services import create_audit_log
@@ -766,5 +849,5 @@ __all__ = [
     'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
     'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
     'ACCRUAL_ADJUST_TYPE', 'accrual_journal_ids', 'adjustment_journal_ids', 'party_on_account_summary',
-    'note_journal_ids',
+    'note_journal_ids', 'party_unallocated_notes', 'allocate_note_to_accrual', 'note_accrual_allocation_rows',
 ]

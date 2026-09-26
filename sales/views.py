@@ -2096,7 +2096,7 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
             "partner", "related_invoice", "related_purchase_invoice",
             "related_clearance__shipment", "related_local_shipment", "related_shipment",
             "counter_account", "currency", "journal",
-        ).filter(tenant=tenant).order_by("-note_date", "-id")
+        ).prefetch_related("allocations", "accrual_allocations").filter(tenant=tenant).order_by("-note_date", "-id")
         params = self.request.query_params
         if params.get("partner"):
             qs = qs.filter(partner_id=params["partner"])
@@ -2140,8 +2140,62 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
             service(note, user=request.user)
         except ValidationError as e:
             return Response({"error": e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
-        note.refresh_from_db()
-        return Response(self.get_serializer(note).data)
+        released = getattr(note, "released_allocations", None)
+        note = self.get_queryset().get(pk=note.pk)
+        data = dict(self.get_serializer(note).data)
+        if released:
+            data["notice"] = f"فُكّ توزيع الإشعار عن: {'، '.join(released)} — عاد المبلغ متبقّياً عليها."
+        return Response(data)
+
+    def _allocation_payload(self, note):
+        from sales.services.note_allocation import (
+            note_allocation_rows, note_open_targets, note_unallocated, suggest_note_fifo,
+        )
+
+        return {
+            "note": self.get_serializer(self.get_queryset().get(pk=note.pk)).data,
+            "unallocated": str(note_unallocated(note)),
+            "allocations": note_allocation_rows(note),
+            "targets": note_open_targets(note),
+            "fifo": suggest_note_fifo(note),
+        }
+
+    @action(detail=True, methods=["get"], url_path="allocation-targets")
+    @requires_perm("accounting.journal.view")
+    def allocation_targets(self, request, pk=None):
+        """غير الموزَّع، وتوزيعات الإشعار، ومستندات طرفه المفتوحة، واقتراح FIFO."""
+        return Response(self._allocation_payload(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="allocate")
+    @requires_perm("accounting.journal.post")
+    def allocate(self, request, pk=None):
+        """توزيع الإشعار المسوّي: ``{"allocations": [{kind, id, amount}]}`` أو ``{"fifo": true}``."""
+        from sales.services.note_allocation import allocate_note, suggest_note_fifo
+
+        note = self.get_object()
+        rows = suggest_note_fifo(note) if request.data.get("fifo") else request.data.get("allocations")
+        try:
+            allocate_note(note, rows or [], user=request.user)
+        except ValidationError as e:
+            return Response({"error": e.messages[0]}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._allocation_payload(note))
+
+    @action(detail=True, methods=["post"], url_path="deallocate")
+    @requires_perm("accounting.journal.post")
+    def deallocate(self, request, pk=None):
+        """فكّ توزيع: ``{"allocation_kind": "invoice"|"accrual", "allocation_id": N}``."""
+        from sales.services.note_allocation import deallocate_note
+
+        note = self.get_object()
+        try:
+            deallocate_note(
+                note, allocation_kind=str(request.data.get("allocation_kind") or ""),
+                allocation_id=int(request.data.get("allocation_id") or 0), user=request.user,
+            )
+        except (ValidationError, ValueError) as e:
+            message = e.messages[0] if isinstance(e, ValidationError) else "معرّف توزيع غير صالح."
+            return Response({"error": message}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(self._allocation_payload(note))
 
     @action(detail=True, methods=["post"], url_path="post")
     @requires_perm("accounting.journal.post")

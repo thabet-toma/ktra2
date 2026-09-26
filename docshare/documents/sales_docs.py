@@ -21,7 +21,7 @@ from docshare.documents._contract import (
     total,
 )
 from sales.models import SalesInvoice, SalesQuotation
-from sales.services import posted_allocations_total
+from sales.services import posted_invoice_settled_total
 
 #: نبرة شارة الحالة لمستندات المبيعات — مفرداتها مشتركة بين الفاتورة والعرض.
 SALES_TONES = {
@@ -114,8 +114,8 @@ def build_sales_invoice(invoice) -> dict:
         ))
 
     # `amount_paid` ليس مصدر حقيقة في هذا المستودع: المصدر هو مجموع التوزيعات
-    # المرحّلة. قراءته من العمود تُظهر للزبون رقماً يخالف ما في شاشة الموظف.
-    paid = posted_allocations_total(invoice.pk)
+    # المرحّلة (سنداتٍ وإشعاراتٍ دائنة). قراءته من العمود تُظهر للزبون رقماً يخالف ما في شاشة الموظف.
+    paid = posted_invoice_settled_total(invoice.pk)
     grand_total = money(invoice.grand_total)
     is_return = invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN
 

@@ -356,8 +356,11 @@ def guard_invoice_allocation_total(invoice: SalesInvoice, *, incoming: Decimal) 
     يُستدعى دائماً **داخل معاملة وبعد قفل صفّ الفاتورة** (select_for_update) —
     نفس نمط `post_customer_payment` — فلا يتسلّل سندان متزامنان على نفس الفاتورة.
     """
+    from .note_allocation import posted_invoice_settled_total
+
     grand = Decimal(str(invoice.grand_total or 0)).quantize(DEC)
-    total = (posted_allocations_total(invoice.pk) + Decimal(str(incoming))).quantize(DEC)
+    # والإشعارات الموزَّعة معها — تُطفئ الفاتورة كالسندات.
+    total = (posted_invoice_settled_total(invoice.pk) + Decimal(str(incoming))).quantize(DEC)
     if total > grand + DEC:
         if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
             raise ValidationError(
@@ -689,6 +692,18 @@ def guard_invoice_payments_before_unpost(
         document_label=f"الفاتورة {invoice.invoice_number}",
         action_label=action_label,
     )
+    from sales.models import CreditDebitNoteAllocation
+
+    notes = list(
+        CreditDebitNoteAllocation.objects.filter(sales_invoice=invoice, note__status="posted")
+        .select_related("note")
+    )
+    if notes:
+        listing = "، ".join(f"{a.note.note_number} ({Decimal(str(a.amount)).quantize(DEC)})" for a in notes)
+        raise ValidationError(
+            f"تعذّر {action_label} الفاتورة {invoice.invoice_number}: إشعاراتٌ موزَّعة عليها ({listing}). "
+            f"فكّ توزيعها أولاً من شاشة الإشعارات."
+        )
     rows = list(
         PaymentAllocation.objects.filter(
             invoice=invoice, payment__is_posted=True,

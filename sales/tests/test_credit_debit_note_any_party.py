@@ -18,6 +18,7 @@ from core.reports.financial import _aging
 from logistics.accruals import post_clearance_accrual
 from logistics.domain.party_accruals import accrual_status, journal_reference_accrual_links
 from logistics.models import (
+    LogisticsAccrualAllocation,
     LogisticsClearance,
     LogisticsClearanceLine,
     LogisticsShipment,
@@ -25,7 +26,7 @@ from logistics.models import (
 )
 from logistics.services import annotate_purchase_invoice_payment_summary, purchase_invoice_payment_summary
 from partners.models import Partner
-from sales.models import CreditDebitNote
+from sales.models import CreditDebitNote, CreditDebitNoteAllocation, SalesInvoice
 from sales.services.calc import _default_revenue_account
 from tenants.models import Currency, UserCompanyMembership
 from tenants.services import create_company
@@ -251,26 +252,36 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         clearance = self._posted_clearance("600")
         self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("600"))
         note = self._posted(self.broker, "debit", "200", related_clearance=clearance.pk)
+        # الترحيل وزّعه على مستنده المربوط تلقائياً — كالسند.
         status = accrual_status("clearance", clearance)
-        self.assertEqual((status["noted"], status["remaining"]), (D("200"), D("400")))
+        self.assertEqual((status["allocated"], status["remaining"]), (D("200"), D("400")))
+        self.assertEqual((note["allocated_amount"], note["unallocated_amount"], note["settles"]),
+                         ("200.00", "0.00", True))
         self.assertEqual(note["linked_document"]["kind"], "clearance")
-        # كشف الحساب: الإشعار يرسو على التخليص كدفعته.
+        # كشف الحساب: الإشعار يرسو على ما وُزِّع عليه.
         links = journal_reference_accrual_links(self.tenant.TenantID, [("CREDIT_DEBIT_NOTE", note["id"])])
-        self.assertEqual(links["anchors"][("CREDIT_DEBIT_NOTE", note["id"])]["key"],
-                         f"LOGISTICS_CLEARANCE:{clearance.pk}")
+        self.assertEqual([t["key"] for t in links["notes"][note["id"]]], [f"LOGISTICS_CLEARANCE:{clearance.pk}"])
         # الافتراضي من حساب مصروف التخليص نفسه.
         self.assertEqual(self._acc(note["counter_account_code"]).account_type, "Expense")
-        # إشعارٌ أكبر من المتبقّي يُرفض عند الترحيل؛ وإلغاء الترحيل يعيد المتبقّي.
-        big = self._note(self.broker, "debit", "401", related_clearance=clearance.pk)
-        self.assertEqual(self._post(big["id"]).status_code, 400)
-        self.client.post(f"{URL}{note['id']}/unpost/", {}, format="json", **self.h)
-        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("600"))
+        # إشعارٌ أكبر من المتبقّي يُرحَّل: يُطفئ المتبقّي والزائد يبقى تحت الحساب.
+        big = self._posted(self.broker, "debit", "401", related_clearance=clearance.pk)
+        self.assertEqual((big["allocated_amount"], big["unallocated_amount"]), ("400.00", "1.00"))
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("0"))
+        # إلغاء الترحيل يفكّ توزيعاته في المعاملة نفسها وينبّه.
+        res = self.client.post(f"{URL}{note['id']}/unpost/", {}, format="json", **self.h)
+        self.assertIn("فُكّ توزيع الإشعار", res.data["notice"])
+        self.assertFalse(LogisticsAccrualAllocation.objects.filter(note_id=note["id"]).exists())
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("200"))
 
     def test_credit_note_linked_to_a_clearance_raises_what_is_due(self):
         clearance = self._posted_clearance("600")
-        self._posted(self.broker, "credit", "50", related_clearance=clearance.pk)
+        note = self._posted(self.broker, "credit", "50", related_clearance=clearance.pk)
         status = accrual_status("clearance", clearance)
-        self.assertEqual((status["due"], status["remaining"], status["noted"]), (D("650"), D("650"), D("0")))
+        self.assertEqual((status["due"], status["remaining"], status["allocated"]), (D("650"), D("650"), D("0")))
+        # يزيد ما للطرف فلا يُوزَّع ولا يُحسب تحت الحساب.
+        self.assertEqual((note["settles"], note["unallocated_amount"]), (False, "0.00"))
+        res = self.client.post(f"{URL}{note['id']}/allocate/", {"fifo": True}, format="json", **self.h)
+        self.assertEqual(res.status_code, 400, res.content)
 
     def test_link_must_be_the_partners_own_single_posted_document(self):
         clearance = self._posted_clearance()
@@ -297,8 +308,10 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
             tenant=self.tenant, partner=supplier, invoice_number="PI-CDN", invoice_date="2026-07-01",
             currency=self.ils, exchange_rate=D("1"), grand_total=D("1000"),
             is_posted=True, status="posted")
-        self._posted(supplier, "debit", "300", related_purchase_invoice=invoice.pk)
+        debit = self._posted(supplier, "debit", "300", related_purchase_invoice=invoice.pk)
         self._posted(supplier, "credit", "50", related_purchase_invoice=invoice.pk)
+        self.assertEqual(list(CreditDebitNoteAllocation.objects.filter(note_id=debit["id"]).values_list(
+            "purchase_invoice_id", "amount")), [(invoice.pk, D("300"))])
         summary = purchase_invoice_payment_summary(PurchaseInvoice.objects.get(pk=invoice.pk))
         listed = annotate_purchase_invoice_payment_summary(PurchaseInvoice.objects.filter(pk=invoice.pk)).get()
         self.assertEqual((summary["payable_total"], summary["remaining_balance"]), (D("1050"), D("750")))
@@ -315,6 +328,92 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         customer_side = {r["partner_id"]: r for r in _aging(self.tenant.TenantID, {}, side="customer")}
         self.assertEqual(D(supplier_side[self.broker.pk]["total"]), D("-70"))
         self.assertEqual(D(customer_side[self.parties["Customer"].pk]["total"]), D("-40"))
+
+    # ── الإشعار المسوّي رصيدٌ يُوزَّع كالسند ─────────────────────────────────
+    def _profile(self, partner):
+        res = self.client.get(f"/api/partners/{partner.pk}/profile/", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
+
+    def _aging_total(self, partner, side="supplier"):
+        rows = {r["partner_id"]: r for r in _aging(self.tenant.TenantID, {}, side=side)}
+        return D(rows[partner.pk]["total"]) if partner.pk in rows else D("0")
+
+    def test_broker_debit_note_is_surplus_until_allocated_to_a_clearance(self):
+        # حالة حاييم: إشعارٌ مدينٌ بلا ربط = رصيدٌ لنا عنده، ظاهرٌ تحت الحساب.
+        clearance = self._posted_clearance("600")
+        note = self._posted(self.broker, "debit", "250")
+        self.assertEqual(note["unallocated_amount"], "250.00")
+        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("250"))
+        self.assertEqual(self._aging_total(self.broker), D("350"))  # 600 − 250
+
+        url = f"{URL}{note['id']}/"
+        targets = self.client.get(f"{url}allocation-targets/", **self.h).data
+        self.assertEqual([(t["kind"], t["id"], t["remaining"]) for t in targets["targets"]],
+                         [("clearance", clearance.pk, "600.00")])
+        self.assertEqual(targets["fifo"], [{"kind": "clearance", "id": clearance.pk,
+                                            "label": targets["targets"][0]["label"], "amount": "250.00"}])
+        # أكثر من غير الموزَّع يُرفض.
+        res = self.client.post(f"{url}allocate/", {"allocations": [
+            {"kind": "clearance", "id": clearance.pk, "amount": "251"}]}, format="json", **self.h)
+        self.assertEqual(res.status_code, 400, res.content)
+
+        res = self.client.post(f"{url}allocate/", {"fifo": True}, format="json", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data["unallocated"], "0.00")
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("350"))
+        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("0"))
+        self.assertEqual(self._aging_total(self.broker), D("350"))
+        # تبويب «الدفعات» في التخليص يعرضه بجانب السندات.
+        rows = self.client.get(f"/api/logistics/clearances/{clearance.pk}/payments/", **self.h)
+        self.assertEqual(rows.status_code, 200, rows.content)
+        self.assertIn(note["note_number"], [r.get("note_number") for r in rows.data])
+
+        # فكّ التوزيع يعيده تحت الحساب ويعيد المتبقّي.
+        alloc = res.data["allocations"][0]
+        self.assertEqual((alloc["allocation_kind"], alloc["kind"]), ("accrual", "clearance"))
+        res = self.client.post(f"{url}deallocate/", {"allocation_kind": "accrual",
+                                                     "allocation_id": alloc["allocation_id"]},
+                               format="json", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data["unallocated"], "250.00")
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("600"))
+
+    def test_customer_credit_note_settles_its_sales_invoice_without_touching_the_cash_cap(self):
+        from sales.services import (
+            guard_invoice_payments_before_unpost, posted_allocations_total, posted_invoice_settled_total,
+        )
+        from django.core.exceptions import ValidationError
+
+        customer = self.parties["Customer"]
+        invoice = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SI-CDN", customer=customer, currency=self.ils,
+            invoice_date="2026-07-01", status=SalesInvoice.STATUS_POSTED, grand_total=D("500"))
+        SalesInvoice.objects.filter(pk=invoice.pk).update(grand_total=D("500"), amount_paid=D("0"))
+        note = self._posted(customer, "credit", "200", related_invoice=invoice.pk, currency=self.ils.pk)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.amount_paid, D("200"))
+        self.assertEqual((posted_invoice_settled_total(invoice.pk), posted_allocations_total(invoice.pk)),
+                         (D("200"), D("0")))  # سقف الردّ النقدي للمرتجع نقدٌ وحده
+        self.assertEqual(self._aging_total(customer, "customer"), D("300"))
+        # فاتورةٌ أطفأها إشعارٌ لا يُلغى ترحيلها قبل فكّ توزيعه.
+        with self.assertRaisesMessage(ValidationError, note["note_number"]):
+            guard_invoice_payments_before_unpost(invoice)
+        self.client.post(f"{URL}{note['id']}/unpost/", {}, format="json", **self.h)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.amount_paid, D("0"))
+        guard_invoice_payments_before_unpost(invoice)
+
+    def test_backfill_turns_linked_debit_notes_into_allocations(self):
+        from django.apps import apps
+
+        clearance = self._posted_clearance("600")
+        note = self._posted(self.broker, "debit", "120", related_clearance=clearance.pk)
+        LogisticsAccrualAllocation.objects.filter(note_id=note["id"]).delete()
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("600"))
+        module = importlib.import_module("sales.migrations.0046_note_allocations")
+        module.backfill_linked_debit_notes(apps, None)
+        self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("480"))
 
     # ── الصلاحيات والعزل ───────────────────────────────────────────────────
     def test_finance_permissions_gate_the_notes(self):

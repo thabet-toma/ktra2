@@ -93,15 +93,20 @@ const isPostedDirectPayment = (p: ClearancePaymentRow) => p.is_posted && p.row_t
 
 /** رقم سند الصرف الموزَّع رابطاً يفتح السند في تبويب جديد. */
 function VoucherLink({ row }: { row: VoucherAllocationRow }) {
-  const path = entityPathForReference("SUPPLIER_PAYMENT", row.voucher_id);
+  // صفّ الإشعار المدين الموزَّع يحمل رقمه لا رقم سند.
+  const isNote = row.voucher_id == null && row.note_id != null;
+  const path = isNote
+    ? entityPathForReference("CREDIT_DEBIT_NOTE", row.note_id)
+    : entityPathForReference("SUPPLIER_PAYMENT", row.voucher_id);
+  const name = isNote ? `إشعار ${row.note_number ?? `#${row.note_id}`}` : `سند صرف #${row.voucher_id}`;
   return (
     <button
       type="button"
       className="font-mono font-bold text-blue-600 hover:underline dark:text-blue-400"
-      title={row.shipment_label ? `سند صرف #${row.voucher_id} — ${row.shipment_label}` : undefined}
-      onClick={() => path && openInNewTab(path, `سند صرف #${row.voucher_id}`)}
+      title={row.shipment_label ? `${name} — ${row.shipment_label}` : undefined}
+      onClick={() => path && openInNewTab(path, name)}
     >
-      #{row.voucher_id}
+      {isNote ? row.note_number ?? `#${row.note_id}` : `#${row.voucher_id}`}
     </button>
   );
 }

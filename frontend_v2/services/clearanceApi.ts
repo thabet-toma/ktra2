@@ -92,9 +92,11 @@ export type ClearancePaymentRow = {
   broker_name?: string;
   created_at?: string;
   shipment_label?: string | null;
-  /** صفّ سند صرفٍ موزَّع على التخليص (`party_accruals.document_voucher_rows`) لا دفعة مباشرة. */
+  /** صفّ سند صرفٍ أو إشعارٍ مدينٍ موزَّع على التخليص (`party_accruals.document_voucher_rows`) لا دفعة مباشرة. */
   row_type?: "voucher_allocation";
-  voucher_id?: number;
+  voucher_id?: number | null;
+  note_id?: number | null;
+  note_number?: string | null;
   kind_label?: string;
 };
 

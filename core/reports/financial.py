@@ -57,31 +57,43 @@ AGING_BUCKETS = ((0, 30), (31, 60), (61, 90), (91, None))
 
 
 def _open_note_rows(tenant_id: int, *, creditor: bool) -> list[tuple]:
-    """الإشعارات المدينة/الدائنة المرحّلة التي لا تُطفئ مستنداً — صفٌّ موقَّعٌ بتاريخها.
+    """الإشعارات المرحّلة التي لم تدخل متبقّي مستند — صفٌّ موقَّعٌ بتاريخها، بالعملة الأساسية.
 
-    المربوط بفاتورة شراء أو مستحقٍّ لوجستي داخلٌ في متبقّيه أصلاً فلا يُكرَّر؛ وربطُ
-    فاتورة البيع مرجعٌ فقط فإشعار العميل يظهر دائماً. الموجب يزيد ما على العميل أو
-    ما للدائن (مدينٌ للعميل، دائنٌ للدائن)، والسالب يُصفّيه — بالعملة الأساسية.
+    المسوّي (مدينٌ على دائن، دائنٌ على عميل) رصيدٌ للطرف كالسند: ما وُزِّع منه أطفأ مستنداته
+    فدخل متبقّيها، وغير الموزَّع وحده صفٌّ سالب. والمعاكس (يزيد ما له أو عليه) صفٌّ موجب —
+    إلا دائناً على دائنٍ مربوطاً بفاتورة شراءٍ أو مستحقٍّ لوجستي: رفع مستحقّه فهو في متبقّيه.
     """
+    from logistics.models import LogisticsAccrualAllocation
     from partners.models import CREDITOR_PARTNER_TYPES
-    from sales.models import CreditDebitNote
+    from sales.models import CreditDebitNote, CreditDebitNoteAllocation
 
     qs = CreditDebitNote.objects.filter(
         tenant_id=tenant_id, status=CreditDebitNote.STATUS_POSTED,
     ).select_related("partner")
     if creditor:
-        qs = qs.filter(
-            partner__partner_type__in=CREDITOR_PARTNER_TYPES,
-            related_purchase_invoice__isnull=True, related_clearance__isnull=True,
-            related_local_shipment__isnull=True, related_shipment__isnull=True,
-        )
+        qs = qs.filter(partner__partner_type__in=CREDITOR_PARTNER_TYPES)
     else:
         qs = qs.exclude(partner__partner_type__in=CREDITOR_PARTNER_TYPES)
+    notes = list(qs)
+    settling = (CreditDebitNote.TYPE_DEBIT if creditor else CreditDebitNote.TYPE_CREDIT)
+    used: dict[int, Decimal] = {}
+    settling_ids = [n.pk for n in notes if n.note_type == settling]
+    for model in (CreditDebitNoteAllocation, LogisticsAccrualAllocation):
+        for note_id, total in model.objects.filter(note_id__in=settling_ids).values(
+            "note_id").annotate(t=Sum("amount")).values_list("note_id", "t"):
+            used[note_id] = used.get(note_id, ZERO) + Decimal(str(total or 0))
     rows = []
-    for note in qs:
-        base = Decimal(str(note.amount)) * Decimal(str(note.exchange_rate or 1))
-        increases = (note.note_type == CreditDebitNote.TYPE_DEBIT) != creditor
-        rows.append((note.partner_id, note.partner.name, note.note_date, base if increases else -base))
+    for note in notes:
+        rate = Decimal(str(note.exchange_rate or 1))
+        if note.note_type == settling:
+            free = max(Decimal(str(note.amount)) - used.get(note.pk, ZERO), ZERO)
+            if free > 0:
+                rows.append((note.partner_id, note.partner.name, note.note_date, -(free * rate)))
+            continue
+        if creditor and (note.related_purchase_invoice_id or note.related_clearance_id
+                         or note.related_local_shipment_id or note.related_shipment_id):
+            continue
+        rows.append((note.partner_id, note.partner.name, note.note_date, Decimal(str(note.amount)) * rate))
     return rows
 
 
@@ -158,7 +170,7 @@ def _aging(tenant_id: int, params: dict, *, side: str) -> list[dict]:
 
     for partner_id, partner_name, base_date, remaining in rows_src:
         # السالب رصيدٌ مقصود: دائنٌ للزبون (مرتجعٌ أو إشعارٌ دائن)، ومدينٌ على الدائن
-        # (إشعارٌ مدينٌ غير مربوط). متبقّي المستندات نفسها لا يكون سالباً.
+        # (إشعارٌ مدينٌ غير موزَّع). متبقّي المستندات نفسها لا يكون سالباً.
         if abs(remaining) <= DEC:
             continue
         age = (today - base_date).days if base_date else 0

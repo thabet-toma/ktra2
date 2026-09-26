@@ -15,7 +15,8 @@
   ويُلحق بها: فواتير نقدية سُوّيت داخل قيدها (بلا مدين ذمم) ومع ذلك أُنشئ لها
   سند قبض ⇒ ازدواج نقدية.
 
-T3 — العقد الذي يحرسه القسم 2: **`amount_paid` = `posted_allocations_total`**.
+T3 — العقد الذي يحرسه القسم 2: **`amount_paid` = `posted_invoice_settled_total`**
+(توزيعات السندات المرحّلة + توزيعات الإشعارات الدائنة المرحّلة).
 الحقل مخزنٌ مُشتقّ (يقرؤه كشف الحساب والتقارير والأعمار)، وكلّ كاتب اليوم يزيده
 مقروناً بصفّ `PaymentAllocation`. فحصُ الفرق هنا هو ما يُثبت بقاءَ العقد صحيحاً،
 وهو يصنّف كل فاتورة مختلّة إلى منتجين لا ثالث لهما:
@@ -52,6 +53,7 @@ from sales.services import (
     invoice_journal_settlement_credit,
     is_auto_cash_settlement,
     posted_allocations_total,
+    posted_invoice_settled_total,
     unpost_customer_payment,
 )
 from tenants.models import Tenant
@@ -177,7 +179,8 @@ class Command(BaseCommand):
             .order_by("id")
         )
         for inv in invoices:
-            allocated = posted_allocations_total(inv.pk)
+            # والإشعارات الدائنة الموزَّعة شريكةٌ في العقد — تُطفئ الفاتورة بلا سند.
+            allocated = posted_invoice_settled_total(inv.pk)
             paid = Decimal(str(inv.amount_paid or 0)).quantize(DEC)
             if paid == allocated:
                 continue

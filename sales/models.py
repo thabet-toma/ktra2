@@ -1542,6 +1542,59 @@ class CreditDebitNote(models.Model):
         return [f for f, _kind in self.LINK_FIELDS if getattr(self, f"{f}_id")]
 
 
+class CreditDebitNoteAllocation(models.Model):
+    """توزيع إشعارٍ **مُسوٍّ** على فاتورة — مرآة `SupplierPaymentAllocation`/`PaymentAllocation`.
+
+    الإشعار المسوّي رصيدٌ للطرف كالسند: المدين على دائنٍ (خصمٌ منه) يُطفئ فواتير شرائه،
+    والدائن على عميلٍ يُطفئ فواتير مبيعه. ربطٌ بلا قيد — الترحيل قيّد الذمّة أصلاً. ما لم
+    يُوزَّع «تحت الحساب». المستحقّات اللوجستية في `logistics.LogisticsAccrualAllocation.note`.
+    يُحتسب ما دام الإشعار مرحَّلاً؛ وإلغاء ترحيله يفكّ توزيعاته في المعاملة نفسها.
+    الخدمات في `sales/services/note_allocation.py`.
+    """
+
+    id = models.AutoField(primary_key=True, db_column="NoteAllocationID")
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column="TenantID", to_field="TenantID",
+    )
+    note = models.ForeignKey(
+        CreditDebitNote, on_delete=models.CASCADE, db_column="CreditDebitNoteID",
+        related_name="allocations",
+    )
+    sales_invoice = models.ForeignKey(
+        "SalesInvoice", on_delete=models.CASCADE, null=True, blank=True,
+        db_column="SalesInvoiceID", related_name="note_allocations",
+    )
+    purchase_invoice = models.ForeignKey(
+        "logistics.PurchaseInvoice", on_delete=models.CASCADE, null=True, blank=True,
+        db_column="PurchaseInvoiceID", related_name="note_allocations",
+    )
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column="Amount", help_text="بعملة الإشعار")
+    amount_in_invoice_currency = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column="AmountInInvoiceCurrency",
+        help_text="ما يُطرح من متبقّي الفاتورة — يساوي `amount` حين تتطابق العملتان")
+    amount_base = models.DecimalField(
+        max_digits=18, decimal_places=2, db_column="AmountBase",
+        help_text="بالعملة الأساسية = المبلغ × سعر صرف الإشعار — لكشف الحساب")
+    created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+
+    class Meta:
+        db_table = "sales_module_credit_debit_note_allocations"
+        constraints = [
+            models.CheckConstraint(
+                name="note_allocation_one_target",
+                condition=(
+                    models.Q(sales_invoice__isnull=False, purchase_invoice__isnull=True)
+                    | models.Q(sales_invoice__isnull=True, purchase_invoice__isnull=False)
+                ),
+            ),
+        ]
+        indexes = [models.Index(fields=["tenant", "note"], name="note_alloc_tenant_note_idx")]
+
+    def __str__(self):
+        return f"NoteAllocation(note={self.note_id}, amount={self.amount})"
+
+
 class VatStatement(models.Model):
     """N8-T13: كشف ضريبة القيمة المضافة الدوري."""
     STATUS_DRAFT = 'draft'

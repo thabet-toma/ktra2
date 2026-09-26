@@ -4150,14 +4150,16 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
                 by_payment.setdefault(pay_id, []).append((inv_id, None))
         invoice_ids.update(inv_id for links in by_payment.values() for inv_id, _ in links)
 
-    # الإشعار المدين/الدائن: رقمه، ومرساته فاتورتُه المربوطة (بيعٍ للعميل، شراءٍ للدائن).
+    # الإشعار المدين/الدائن: رقمه، ومرساته ما وُزِّع عليه (كالسند) — وإلا فاتورتُه المربوطة
+    # (بيعٍ للعميل، شراءٍ للدائن): الإشعار المعاكس لا يُوزَّع ويرسو على ربطه.
     note_rows: dict[int, tuple[str, int | None]] = {}
+    by_note: dict[int, list[tuple[int, Decimal]]] = {}
     note_ids = {
         r["reference_id"] for r in rows
         if r["reference_type"] == "CREDIT_DEBIT_NOTE" and r["reference_id"]
     }
     if note_ids and tenant_id is not None:
-        from sales.models import CreditDebitNote
+        from sales.models import CreditDebitNote, CreditDebitNoteAllocation
         invoice_field = "related_purchase_invoice_id" if is_supplier else "related_invoice_id"
         for note_id, number, inv_id in CreditDebitNote.objects.filter(
             tenant_id=tenant_id, id__in=note_ids,
@@ -4165,9 +4167,15 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
             note_rows[note_id] = (number, inv_id)
             if inv_id:
                 invoice_ids.add(inv_id)
+        target_field = "purchase_invoice_id" if is_supplier else "sales_invoice_id"
+        for note_id, inv_id, base in CreditDebitNoteAllocation.objects.filter(
+            tenant_id=tenant_id, note_id__in=note_ids, **{f"{target_field}__isnull": False},
+        ).order_by("id").values_list("note_id", target_field, "amount_base"):
+            by_note.setdefault(note_id, []).append((inv_id, Decimal(str(base))))
+            invoice_ids.add(inv_id)
 
     # المخلّص/الوكيل/الناقل: مستحقّاتهم ودفعاتها وسنداتها الموزَّعة، ودفعات الصفقة.
-    logistics = {"anchors": {}, "vouchers": {}, "deal_invoices": {}}
+    logistics = {"anchors": {}, "vouchers": {}, "notes": {}, "deal_invoices": {}}
     if is_supplier and tenant_id is not None:
         from logistics.domain.party_accruals import journal_reference_accrual_links
         logistics = journal_reference_accrual_links(
@@ -4254,7 +4262,13 @@ def _attach_statement_document_links(rows: list, *, is_supplier: bool, tenant_id
         elif row["reference_type"] == "CREDIT_DEBIT_NOTE" and ref_id in note_rows:
             number, inv_id = note_rows[ref_id]
             row["document_number"] = number
-            if inv_id:
+            targets = [
+                {**invoice_anchor(target_id), "amount": amount}
+                for target_id, amount in by_note.get(ref_id, [])
+            ] + logistics["notes"].get(ref_id, [])
+            if targets:
+                link_to(row, targets)
+            elif inv_id:
                 link_to(row, [invoice_anchor(inv_id)])
             elif ref in logistics["anchors"]:
                 link_to(row, [logistics["anchors"][ref]])

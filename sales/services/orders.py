@@ -699,29 +699,6 @@ def validate_credit_debit_note(note) -> None:
             raise ValidationError(error)
 
 
-#: حقل الربط ← صنف المستحق اللوجستي في `logistics.domain.party_accruals`.
-_NOTE_ACCRUAL_KIND = (
-    ("related_clearance", "clearance"),
-    ("related_local_shipment", "local"),
-    ("related_shipment", "freight"),
-)
-
-
-def _linked_settlement_remaining(note):
-    """متبقّي المستند الذي يُطفئه الإشعار المدين المربوط — بعملة الإشعار؛ `None` بلا تسوية."""
-    if note.related_purchase_invoice_id:
-        from logistics.services import purchase_invoice_payment_summary
-
-        return purchase_invoice_payment_summary(note.related_purchase_invoice)["remaining_balance"]
-    for field, kind in _NOTE_ACCRUAL_KIND:
-        if getattr(note, f"{field}_id"):
-            from logistics.domain.party_accruals import accrual_remaining
-
-            rate = Decimal(str(note.exchange_rate or 1))
-            return (accrual_remaining(kind, getattr(note, field)) / rate).quantize(DEC)
-    return None
-
-
 def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
     """ترحيل الإشعار على أيّ طرف عبر `post_journal()` — مرجع `CREDIT_DEBIT_NOTE`.
 
@@ -730,6 +707,10 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
     الضريبة مخرجاتٌ للعميل (`resolve_output_vat_account`) ومدخلاتٌ للدائن (1105).
     العملة الأجنبية تملأ `amount_currency` تلقائياً من `post_journal`. المقابل الفارغ
     يُحلّ بـ`default_note_counter_account` ويُحفظ على الإشعار.
+
+    الإشعار المسوّي (مدينٌ على دائن، دائنٌ على عميل) المربوط بمستند يُوزَّع عليه في المعاملة
+    نفسها بحدّ متبقّيه (`auto_allocate_linked`) — والزائد يبقى «تحت الحساب» رصيداً للتوزيع
+    أو الاسترداد، لا رفضاً.
     """
     if note.status == CreditDebitNote.STATUS_POSTED:
         raise ValidationError("الإشعار مرحَّل مسبقاً.")
@@ -748,15 +729,6 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
 
     is_debit = note.note_type == CreditDebitNote.TYPE_DEBIT
     party_label = note.partner.name
-    if is_debit and creditor:
-        # مرآة `allocate_voucher_to_accruals`: التسوية لا تتجاوز المتبقّي — الزائد
-        # بلا ربطٍ يبقى رصيداً عاماً على الطرف بدل «مدفوعٍ» فوق المستحق.
-        remaining = _linked_settlement_remaining(note)
-        if remaining is not None and amount > remaining + DEC:
-            raise ValidationError(
-                f"الإشعار ({amount}) أكبر من متبقّي المستند المربوط ({remaining}) — "
-                "خفّضه أو اتركه بلا ربط ليبقى رصيداً عاماً على الطرف."
-            )
 
     def line(account_id, value, *, party_side, description, partner_id=None):
         on_debit = is_debit == party_side
@@ -807,6 +779,9 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
         note.counter_account = counter
         note.status = CreditDebitNote.STATUS_POSTED
         note.save(update_fields=["journal", "counter_account", "status", "updated_at"])
+        from .note_allocation import auto_allocate_linked
+
+        auto_allocate_linked(note, user=user)
 
         create_audit_log(
             tenant=note.tenant,
@@ -824,10 +799,17 @@ def post_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNo
 
 
 def unpost_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebitNote:
-    """إلغاء ترحيل الإشعار بالمسار الموحّد `unpost_document` — يعود مسودةً قابلةً للتعديل."""
+    """إلغاء ترحيل الإشعار بالمسار الموحّد `unpost_document` — يعود مسودةً قابلةً للتعديل.
+
+    توزيعاته تُفكّ في المعاملة نفسها (لا توزيعَ يشير لإشعارٍ غير مرحَّل)، ووسومُ ما فُكّ في
+    `note.released_allocations` لتنبيه المستخدم.
+    """
+    from .note_allocation import release_note_allocations
+
     if note.status != CreditDebitNote.STATUS_POSTED:
         raise ValidationError("الإشعار غير مرحَّل.")
     with transaction.atomic():
+        note.released_allocations = release_note_allocations(note)
         unpost_document(
             tenant_id=note.tenant_id,
             reference_id=note.id,
@@ -838,7 +820,8 @@ def unpost_credit_debit_note(note: CreditDebitNote, *, user=None) -> CreditDebit
         note.journal = None
         note.status = CreditDebitNote.STATUS_DRAFT
         note.save(update_fields=["journal", "status", "updated_at"])
-    logger.info("credit_debit_note.unposted tenant=%s note=%s", note.tenant_id, note.id)
+    logger.info("credit_debit_note.unposted tenant=%s note=%s released=%s",
+                note.tenant_id, note.id, len(note.released_allocations))
     return note
 
 

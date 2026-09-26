@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **916**
+عدد النقاط: **919**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -807,7 +807,10 @@
 | `/api/sales/credit-debit-notes/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/default-account/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/{pk}/allocate/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/{pk}/allocation-targets/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/cancel/` | `CreditDebitNoteViewSet` | `sales/views.py` |
+| `/api/sales/credit-debit-notes/{pk}/deallocate/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/post/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/credit-debit-notes/{pk}/unpost/` | `CreditDebitNoteViewSet` | `sales/views.py` |
 | `/api/sales/customer-price-list/` | `CustomerPriceListViewSet` | `sales/views.py` |

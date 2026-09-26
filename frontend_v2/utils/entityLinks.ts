@@ -43,6 +43,7 @@ export function entityPathForReference(
   if (t === "SHIPMENT" || t === "LOGISTICS_SHIPMENT") return `/import-flow/${referenceId}`;
   if (t === "CUSTOMER_PAYMENT") return `/sales/customer-payments?payment_id=${referenceId}`;
   if (t === "SUPPLIER_PAYMENT") return `/supplier-payments?payment_id=${referenceId}`;
+  if (t === "CREDIT_DEBIT_NOTE") return `/accounting/credit-debit-notes?note_id=${referenceId}`;
   // مستند قيد العكس هو القيد الأصلي نفسه — `reference_id` رقمه (accounting/views.py `reverse`).
   if (t === "JOURNAL_REVERSAL") return `/accounting/journals/${referenceId}`;
   // LOGISTICS_PAYMENT عمداً بلا مسار هنا: `reference_id` رقم الدفعة لا رقم الصفقة
