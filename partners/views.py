@@ -163,9 +163,10 @@ class PartnerViewSet(viewsets.ModelViewSet):
             if last_accrual:
                 last_dates.append(last_accrual)
         last_txn = max(last_dates).isoformat() if last_dates else None
-        # الدائن: رصيدٌ لنا لم يُستهلك — «دفعات تحت الحساب» و«فائض» (مستحقٌّ خُفِّض بعد
-        # دفعه) — رقمان في رأس كشفه؛ الرصيد نفسه لا يتغيّر بهما.
-        on_account = {"on_account": Decimal("0"), "surplus": Decimal("0")}
+        # الدائن: رصيدٌ لنا لم يُستهلك — «دفعات تحت الحساب» (سنداتٌ وزائدٌ لحظة الدفع) و«فائض»
+        # (إشعاراتٌ ومستحقٌّ خُفِّض بعد دفعه) — رقمان ومستنداتهما في رأس كشفه؛ الرصيد لا يتغيّر بهما.
+        on_account = {"on_account": Decimal("0"), "surplus": Decimal("0"),
+                      "on_account_items": [], "surplus_items": []}
         if is_supplier:
             from logistics.domain.party_accruals import party_on_account_summary
             on_account = party_on_account_summary(partner.tenant_id, partner.id)
@@ -192,6 +193,8 @@ class PartnerViewSet(viewsets.ModelViewSet):
             "last_transaction_date": last_txn,
             "on_account_payments": str(on_account["on_account"]),
             "accrual_surplus": str(on_account["surplus"]),
+            "on_account_items": on_account["on_account_items"],
+            "surplus_items": on_account["surplus_items"],
         })
 
     @action(detail=True, methods=["get"], url_path="statement")

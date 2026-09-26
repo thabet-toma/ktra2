@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 
 import {
+  bucketItemPath,
   eligibleTotal,
   fillRefundPicks,
   pickedTotal,
@@ -37,4 +38,14 @@ test("errors name the over-picked source, then the over-voucher total", () => {
   assert.match(refundPicksError(rows, { "note:1": "100.01" }, 500, 1) ?? "", /DN-0001/);
   assert.match(refundPicksError(rows, { "note:1": "100" }, 99.99, 1) ?? "", /يتجاوز مبلغه/);
   assert.equal(refundPicksError(rows, { "note:1": "100" }, 100, 1), null);
+});
+
+test("bucketItemPath: السند والإشعار بشاشتيهما، والمستحقّ بتبويبه في ملف شحنته", () => {
+  assert.equal(bucketItemPath({ source: "voucher", id: 7 }), "/supplier-payments?payment_id=7");
+  assert.equal(bucketItemPath({ source: "note", id: 3 }), "/accounting/credit-debit-notes?note_id=3");
+  assert.equal(bucketItemPath({ source: "clearance", id: 5, shipment_id: 12 }), "/import-flow/12?tab=clearance");
+  assert.equal(bucketItemPath({ source: "local", id: 5, shipment_id: 12 }), "/import-flow/12?tab=local");
+  assert.equal(bucketItemPath({ source: "freight", id: 12, shipment_id: 12 }), "/import-flow/12?tab=deals");
+  // إرساليةٌ بلا شحنة: لا ملفّ تُفتح فيه — نصٌّ بلا رابط.
+  assert.equal(bucketItemPath({ source: "local", id: 5, shipment_id: null }), null);
 });

@@ -344,7 +344,9 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         clearance = self._posted_clearance("600")
         note = self._posted(self.broker, "debit", "250")
         self.assertEqual(note["unallocated_amount"], "250.00")
-        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("250"))
+        # إشعارٌ لا دفعة: «فائض تحت الحساب» لا «دفعات تحت الحساب».
+        self.assertEqual(D(self._profile(self.broker)["accrual_surplus"]), D("250"))
+        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("0"))
         self.assertEqual(self._aging_total(self.broker), D("350"))  # 600 − 250
 
         url = f"{URL}{note['id']}/"
@@ -362,7 +364,7 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data["unallocated"], "0.00")
         self.assertEqual(accrual_status("clearance", clearance)["remaining"], D("350"))
-        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("0"))
+        self.assertEqual(D(self._profile(self.broker)["accrual_surplus"]), D("0"))
         self.assertEqual(self._aging_total(self.broker), D("350"))
         # تبويب «الدفعات» في التخليص يعرضه بجانب السندات.
         rows = self.client.get(f"/api/logistics/clearances/{clearance.pk}/payments/", **self.h)
@@ -453,7 +455,7 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         # Dr صندوق / Cr ذمّة المخلّص — الفائض والرصيد صفرٌ معاً.
         self.assertEqual(self._surplus(self.broker), [])
         self.assertEqual(self._balance(self.broker), before)
-        self.assertEqual(D(self._profile(self.broker)["on_account_payments"]), D("0"))
+        self.assertEqual(D(self._profile(self.broker)["accrual_surplus"]), D("0"))
         self.assertEqual(self._aging_total(self.broker), D("0"))
         self.assertEqual(self.client.get(f"{URL}{note['id']}/", **self.h).data["unallocated_amount"], "0.00")
         # إلغاء ترحيل الإشعار يفكّ الاسترداد أيضاً ويسمّيه في التنبيه.
@@ -473,6 +475,73 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
         self.assertEqual(res.data["unallocated_amount"], "0.00")
         self.assertEqual(self._surplus(customer), [])
         self.assertEqual(self._aging_total(customer, "customer"), D("0"))
+
+    # ── خانتا رأس الكشف بتعريف المالك: الدفعة سند، والفائض إشعار أو خفض مستحق ─────
+    def _buckets(self, partner):
+        profile = self._profile(partner)
+        return D(profile["on_account_payments"]), D(profile["accrual_surplus"]), profile
+
+    def _closing(self, partner):
+        res = self.client.get(f"/api/partners/{partner.pk}/statement/", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        return D(res.data["closing_balance"])
+
+    def _voucher(self, partner, amount):
+        from sales.models import SupplierPayment
+        from sales.services import post_supplier_payment
+
+        voucher = SupplierPayment.objects.create(
+            tenant=self.tenant, partner=partner, payment_date="2026-07-12", amount=D(amount),
+            currency=self.ils, exchange_rate=D("1"), cash_or_bank_account=self._cash_box())
+        post_supplier_payment(voucher, user=self.user)
+        return voucher
+
+    def test_voucher_is_on_account_and_note_is_surplus_each_allocation_shrinks_its_own(self):
+        from logistics.domain.party_accruals import allocate_voucher_to_accruals
+
+        clearance = self._posted_clearance("600")
+        voucher = self._voucher(self.broker, "100")
+        note = self._posted(self.broker, "debit", "80", currency=self.ils.pk)
+        on_account, surplus, profile = self._buckets(self.broker)
+        self.assertEqual((on_account, surplus), (D("100"), D("80")))
+        self.assertEqual([(r["source"], r["id"], r["amount"]) for r in profile["on_account_items"]],
+                         [("voucher", voucher.pk, "100.00")])
+        self.assertEqual([(r["source"], r["id"], r["amount"]) for r in profile["surplus_items"]],
+                         [("note", note["id"], "80.00")])
+        closing = self._closing(self.broker)
+        self.assertEqual(closing, D("600") - D("100") - D("80"))
+
+        # السند على التخليص يُنقص «الدفعات» وحدها؛ والإشعار يُنقص «الفائض» وحده.
+        allocate_voucher_to_accruals(voucher, [{"kind": "clearance", "id": clearance.pk, "amount": "60"}])
+        self.assertEqual(self._buckets(self.broker)[:2], (D("40"), D("80")))
+        res = self.client.post(f"{URL}{note['id']}/allocate/", {"allocations": [
+            {"kind": "clearance", "id": clearance.pk, "amount": "30"}]}, format="json", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(self._buckets(self.broker)[:2], (D("40"), D("50")))
+        # التوزيع لا يمسّ الدفتر: الرصيد الختامي كما هو.
+        self.assertEqual(self._closing(self.broker), closing)
+
+    def test_one_note_can_be_partly_allocated_and_partly_refunded(self):
+        # إشعار حاييم: 2,000 على تخليص و942.96 استرداد — المتاح = المبلغ − الموزَّع − المسترَدّ.
+        clearance = self._posted_clearance("5000")
+        note = self._posted(self.broker, "debit", "2942.96", currency=self.ils.pk)
+        closing = self._closing(self.broker)
+        self.assertEqual(self._buckets(self.broker)[:2], (D("0"), D("2942.96")))
+        res = self.client.post(f"{URL}{note['id']}/allocate/", {"allocations": [
+            {"kind": "clearance", "id": clearance.pk, "amount": "2000"}]}, format="json", **self.h)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(self._buckets(self.broker)[:2], (D("0"), D("942.96")))
+        self.assertEqual(self._closing(self.broker), closing)
+        # أكثر من الباقي يُرفض.
+        res = self._refund(self.broker, "receipt", "943", [{"source": "note", "id": note["id"], "amount": "943"}])
+        self.assertEqual(res.status_code, 400, res.content)
+        res = self._refund(self.broker, "receipt", "942.96",
+                           [{"source": "note", "id": note["id"], "amount": "942.96"}])
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._buckets(self.broker)[:2], (D("0"), D("0")))
+        self.assertEqual(self.client.get(f"{URL}{note['id']}/", **self.h).data["unallocated_amount"], "0.00")
+        # سند القبض حركةٌ نقدية حقيقية: Cr ذمّة المخلّص بالمسترَدّ.
+        self.assertEqual(self._closing(self.broker), closing + D("942.96"))
 
     # ── الصلاحيات والعزل ───────────────────────────────────────────────────
     def test_finance_permissions_gate_the_notes(self):

@@ -5,6 +5,7 @@ import { apiGetObject } from '../../services/restApi';
 import { formatMoney, formatNumber, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
+import { bucketItemPath, type BucketItem } from '../../utils/partySurplus';
 import { relatedInvoiceTypeLabel, stockMovementReferenceLabel } from '../../utils/documentTypeLabels';
 import { resolveTenantId } from '../../utils/tenantContext';
 import { KitDocumentShell, KitTab } from '../kit';
@@ -75,10 +76,12 @@ interface PartnerProfile {
   total_sales: string;
   total_purchases: string;
   last_transaction_date: string | null;
-  /** الدائن: غير الموزَّع من سنداته + ما زاد على مستحقٍّ لحظة دفعه (بالعملة الأساسية). */
+  /** الدائن: ما دُفع له ليس لمستحقٍّ بعينه أو زاد عليه لحظة الدفع — سنداتٌ غير موزَّعة (بالأساس). */
   on_account_payments?: string;
-  /** الدائن: ما صار زائداً لأن مستحقّه خُفِّض بعد دفعه («تعديل الاستحقاق»). */
+  /** الدائن: ما صار لنا لاحقاً لا بدفع — إشعاراتٌ غير موزَّعة ومستحقٌّ خُفِّض تحت ما دُفع عليه. */
   accrual_surplus?: string;
+  on_account_items?: BucketItem[];
+  surplus_items?: BucketItem[];
 }
 
 interface StatementRow {
@@ -424,8 +427,8 @@ export const PartnerProfilePage: React.FC = () => {
     else setAllocTarget(row);
   }, []);
 
-  /** يفتح نافذة التوزيع (مباشرةً إن كان رصيداً واحداً، وإلا قائمة اختيار). */
-  const openAllocation = useCallback(async () => {
+  /** يفتح نافذة التوزيع: لرصيدٍ بعينه (`row`)، أو مباشرةً إن كان رصيداً واحداً، وإلا قائمة اختيار. */
+  const openAllocation = useCallback(async (row?: OnAccountVoucherRow) => {
     setAllocError(null);
     try {
       if (isSupplier) {
@@ -443,7 +446,9 @@ export const PartnerProfilePage: React.FC = () => {
             })),
         );
       }
-      if (onAccountPayments.length === 1) {
+      if (row) {
+        openOnAccountRow(row);
+      } else if (onAccountPayments.length === 1) {
         openOnAccountRow(onAccountPayments[0]);
       } else {
         setShowAllocPicker(true);
@@ -858,17 +863,68 @@ export const PartnerProfilePage: React.FC = () => {
       label: 'كشف الحساب',
       content: (
         <div className="p-2">
-          {/* الدائن: رصيدٌ لنا لم يُستهلك، مفصولاً رقمين — الرصيد نفسه لا يتغيّر بهما. */}
+          {/* الدائن: رصيدٌ لنا لم يُستهلك، مفصولاً رقمين بمستنداتهما — الرصيد نفسه لا يتغيّر بهما. */}
           {isSupplier && profile && (
-            <div className="mb-3 grid grid-cols-2 gap-3 sm:max-w-md">
-              <div className="rounded border border-[var(--ktra-border)] p-2" title="سندات صرف لم تُوزَّع، ودفعاتٌ زادت على المستحق لحظة دفعها">
-                <div className="text-xs text-[var(--ktra-ink-soft)]">دفعات تحت الحساب</div>
-                <div className="font-bold text-[var(--ktra-ink)]">{formatMoney(profile.on_account_payments ?? 0)} ₪</div>
-              </div>
-              <div className="rounded border border-[var(--ktra-border)] p-2" title="مدفوعٌ صار زائداً لأن المستحق خُفِّض بعد دفعه">
-                <div className="text-xs text-[var(--ktra-ink-soft)]">فائض تحت الحساب</div>
-                <div className="font-bold text-[var(--ktra-ink)]">{formatMoney(profile.accrual_surplus ?? 0)} ₪</div>
-              </div>
+            <div className="mb-3 grid gap-3 md:grid-cols-2">
+              {([
+                {
+                  key: 'on_account',
+                  title: 'دفعات تحت الحساب',
+                  hint: 'ما دفعناه له ونحن نعلم لحظتها أنه ليس لمستحقٍّ بعينه أو يزيد عليه: سندات صرفٍ غير موزَّعة (أو باقيها)، وسندات «الزيادة» المفصولة من دفعةٍ زادت على مستحقّها، وزيادةٌ بقيت على مستندها.',
+                  total: profile.on_account_payments,
+                  items: profile.on_account_items ?? [],
+                },
+                {
+                  key: 'surplus',
+                  title: 'فائض تحت الحساب',
+                  hint: 'ما صار لنا لاحقاً لا بدفع: إشعاراتٌ مدينة غير موزَّعة (أو باقيها)، ومستحقٌّ خُفِّض تحت ما دُفع عليه.',
+                  total: profile.accrual_surplus,
+                  items: profile.surplus_items ?? [],
+                },
+              ]).map((bucket) => (
+                <div key={bucket.key} className="rounded border border-[var(--ktra-border)] p-2" title={bucket.hint}>
+                  <div className="text-xs text-[var(--ktra-ink-soft)]">{bucket.title}</div>
+                  <div className="font-bold text-[var(--ktra-ink)]">{formatMoney(bucket.total ?? 0)} ₪</div>
+                  {bucket.items.length > 0 && (
+                    <ul className="mt-2 space-y-1 border-t border-[var(--ktra-border)] pt-2 text-xs">
+                      {bucket.items.map((item) => {
+                        const path = bucketItemPath(item);
+                        const source = onAccountPayments.find(
+                          (p) => p.id === item.id && p.source === (item.source === 'note' ? 'note' : 'voucher'),
+                        );
+                        return (
+                          <li key={`${item.source}:${item.id}`} className="flex flex-wrap items-center gap-2">
+                            {path ? (
+                              <button
+                                type="button"
+                                className="text-[var(--ktra-accent)] hover:underline"
+                                onClick={() => navigate(path)}
+                              >
+                                {item.label}
+                              </button>
+                            ) : (
+                              <span>{item.label}</span>
+                            )}
+                            {item.date && <span className="text-[var(--ktra-ink-soft)]">{formatDateLocalized(item.date)}</span>}
+                            <span className="ms-auto font-semibold tabular-nums">
+                              {formatMoney(item.amount)} {item.currency_code || '₪'}
+                            </span>
+                            {source && (item.source === 'voucher' || item.source === 'note') && (
+                              <button
+                                type="button"
+                                className="rounded border border-[var(--ktra-border)] px-1.5 text-[var(--ktra-accent)] hover:bg-[var(--ktra-surface-2)]"
+                                onClick={() => { void openAllocation(source); }}
+                              >
+                                توزيع
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+              ))}
             </div>
           )}
           <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
@@ -1455,6 +1511,10 @@ export const PartnerProfilePage: React.FC = () => {
             loadStatement(0);
             setPaymentsRefreshKey((key) => key + 1);
             setActivityRefreshKey((key) => key + 1);
+            // خانتا «تحت الحساب» ومستنداتهما من رأس البطاقة.
+            apiGetObject<PartnerProfile>(`partners/${id}/profile/`, { tenantId })
+              .then(setProfile)
+              .catch((err) => setError(err instanceof Error ? err.message : String(err)));
             clientLogger.info("partner.note_allocation_saved");
           }}
         />
@@ -1477,6 +1537,10 @@ export const PartnerProfilePage: React.FC = () => {
             loadStatement(0);
             setPaymentsRefreshKey((key) => key + 1);
             setActivityRefreshKey((key) => key + 1);
+            // خانتا «تحت الحساب» ومستنداتهما من رأس البطاقة.
+            apiGetObject<PartnerProfile>(`partners/${id}/profile/`, { tenantId })
+              .then(setProfile)
+              .catch((err) => setError(err instanceof Error ? err.message : String(err)));
             clientLogger.info("partner.payment_allocation_saved");
           }}
         />

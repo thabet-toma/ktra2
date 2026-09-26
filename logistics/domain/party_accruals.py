@@ -578,20 +578,54 @@ def party_accrued_total(tenant_id: int, partner_id: int):
 
 
 def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
-    """رقما رأس كشف الطرف الدائن: «دفعات تحت الحساب» و«فائض» — بالعملة الأساسية.
+    """رقما رأس كشف الطرف الدائن ومستنداتهما — بالعملة الأساسية (تعريف المالك 2026-09-26).
 
-    تحت الحساب = غير الموزَّع من سندات صرفه وإشعاراته المدينة المرحّلة + ما زاد على
-    مستحقٍّ لوجستي لحظة الدفع. الفائض = ما صار زائداً على مستحقٍّ لأن المستحق خُفِّض بعد الدفع
-    (`accrual_status`). مجموعهما رصيدٌ لصالحنا لم يُستهلك؛ رصيد الكشف لا يتغيّر بهما.
+    «دفعات تحت الحساب» — ما دُفع والمستخدم يعلم لحظتها أنه ليس لمستحقٍّ بعينه أو يزيد عليه:
+    غير الموزَّع من سندات الصرف المرحّلة (يدويّةً وسندات فصل الزائد) + زائدٌ على مستحقٍّ
+    لحظة دفعه بقي على مستنده.
+    «فائض تحت الحساب» — ما صار لنا لاحقاً لا بدفع: غير الموزَّع من الإشعارات المدينة +
+    ما زاد لأن المستحق خُفِّض تحت ما دُفع عليه: عائداً إلى سند (`SupplierPayment.adjust_surplus`)
+    أو باقياً على مستنده (`accrual_status` — `surplus`).
+    المتاح من كلّ مصدر = مبلغه − الموزَّع − المسترَدّ. مجموع الرقمين رصيدٌ لصالحنا لم يُستهلك،
+    ورصيد الكشف لا يتغيّر بهما. ``{on_account, surplus, on_account_items, surplus_items}``.
     """
-    on_account = sum((base for _v, _free, base in party_unallocated_vouchers(tenant_id, partner_id)), ZERO)
-    on_account += sum((base for _note, _free, base in party_unallocated_notes(tenant_id, partner_id)), ZERO)
-    surplus = ZERO
+    on_items: list[dict] = []
+    surplus_items: list[dict] = []
+
+    def code_of(doc):  # العملة الأساسية بلا رمز — تُعرض ₪ كالرقم فوقها.
+        currency = getattr(doc, 'currency', None)
+        return None if currency is None or currency.IsBaseCurrency else currency.Code
+
+    def item(source: str, obj_id: int, label: str, date, amount, currency_code, base, **extra) -> dict:
+        return {'source': source, 'id': obj_id, 'label': label,
+                'date': date.isoformat() if date else None, 'amount': str(_money(amount)),
+                'currency_code': currency_code, 'base': str(_money(base)), **extra}
+
+    for voucher, free, _base in party_unallocated_vouchers(tenant_id, partner_id):
+        from_adjust = min(free, _money(voucher.adjust_surplus))
+        for bucket, part, why in ((surplus_items, from_adjust, " — خفض مستحق"), (on_items, free - from_adjust, "")):
+            if part > 0:
+                bucket.append(item('voucher', voucher.pk, f"سند صرف #{voucher.pk}{why}", voucher.payment_date,
+                                   part, code_of(voucher), _payment_base(voucher, part)))
+    for note, free, base in party_unallocated_notes(tenant_id, partner_id):
+        surplus_items.append(item('note', note.pk, f"إشعار {note.note_number}", note.note_date,
+                                  free, code_of(note), base))
     for kind, obj in _party_accrual_docs(tenant_id, partner_id):
         status = accrual_status(kind, obj)
-        surplus += status['surplus']
-        on_account += status['overpaid'] - status['surplus']
-    return {'on_account': _money(on_account), 'surplus': _money(surplus)}
+        extra = {'shipment_id': shipment_id_of(kind, obj)}
+        date = _accrual_date(kind, obj)
+        for bucket, part in ((surplus_items, status['surplus']),
+                             (on_items, status['overpaid'] - status['surplus'])):
+            if part > 0:
+                bucket.append(item(kind, obj.pk, _label(kind, obj), date, part, None, part, **extra))
+    for rows in (on_items, surplus_items):
+        rows.sort(key=lambda r: (r['date'] or '9999-12-31', r['source'], r['id']))
+    return {
+        'on_account': _money(sum((Decimal(r['base']) for r in on_items), ZERO)),
+        'surplus': _money(sum((Decimal(r['base']) for r in surplus_items), ZERO)),
+        'on_account_items': on_items,
+        'surplus_items': surplus_items,
+    }
 
 
 def party_unallocated_vouchers(tenant_id: int, partner_id: int) -> list[tuple]:

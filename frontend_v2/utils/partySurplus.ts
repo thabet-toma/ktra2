@@ -99,3 +99,27 @@ export function refundPicksError(
   }
   return null;
 }
+
+/** مستندٌ تحت إحدى خانتَي رأس كشف الدائن (`party_accruals.party_on_account_summary`). */
+export type BucketItem = {
+  source: "voucher" | "note" | "clearance" | "freight" | "local";
+  id: number;
+  label: string;
+  date: string | null;
+  /** ما يخصّ هذه الخانة منه — بعملته (`currency_code`)، أو بالأساس للمستحقّ. */
+  amount: string;
+  currency_code: string | null;
+  base: string;
+  shipment_id?: number | null;
+};
+
+/** تبويب ملف الاستيراد الذي يعرض المستحقّ اللوجستي. */
+const ACCRUAL_TAB: Record<string, string> = { clearance: "clearance", local: "local", freight: "deals" };
+
+/** مسار فتح مستند الخانة — السند والإشعار بشاشتيهما، والمستحقّ بتبويبه في ملف شحنته. */
+export function bucketItemPath(item: Pick<BucketItem, "source" | "id" | "shipment_id">): string | null {
+  if (item.source === "voucher") return `/supplier-payments?payment_id=${item.id}`;
+  if (item.source === "note") return `/accounting/credit-debit-notes?note_id=${item.id}`;
+  if (!item.shipment_id) return null;
+  return `/import-flow/${item.shipment_id}?tab=${ACCRUAL_TAB[item.source]}`;
+}
