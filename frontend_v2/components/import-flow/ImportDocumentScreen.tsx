@@ -2,9 +2,11 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useSearchParams } from "react-router-dom";
-import { Save, Plus, FileText, Pencil } from "lucide-react";
+import { Save, Plus, FileText, Pencil, Paperclip } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
+import { InvoiceAttachmentsTab } from "@/components/shared/DocumentContextTabs";
+import { importDocAttachmentsApi } from "@/services/clearanceApi";
 import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, adjustClearanceAccrual, getAccrualStatus, getClearance, listClearanceItemTypes, type AccrualAdjustResult, type ClearanceItemType } from "@/services/clearanceApi";
 import { docSettlement, overpaymentExcess, type AccrualKind, type VoucherAllocationRow } from "@/utils/voucherAllocation";
 import { entityPathForReference } from "@/utils/entityLinks";
@@ -37,6 +39,36 @@ const clearanceCostLines = (f: ClearanceRow) => (f.lines || []).map((l) => ({
   type: l.line_type,
   item_type: l.item_type ?? null,
 }));
+const clearanceAttachmentsApi = importDocAttachmentsApi("clearances");
+const shipmentAttachmentsApi = importDocAttachmentsApi("shipments");
+const localAttachmentsApi = importDocAttachmentsApi("local-shipments");
+
+/** مرفقٌ اختياري (صورة أو PDF) على مستند الشحنة — يُجلب عند فتحه لا مع الشاشة. */
+const DocAttachments: React.FC<{
+  label: string;
+  docId: number;
+  api: ReturnType<typeof importDocAttachmentsApi>;
+  emptyText: string;
+  defaultOpen?: boolean;
+}> = ({ label, docId, api, emptyText, defaultOpen = false }) => {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="my-2">
+      <button type="button" className="ktra-toolbtn inline-flex items-center gap-1" onClick={() => setOpen((v) => !v)}>
+        <Paperclip className="h-3.5 w-3.5" /> {open ? `إخفاء ${label}` : label}
+      </button>
+      {open && (
+        <div className="mt-1 rounded-lg border border-[var(--ktra-border)]">
+          <InvoiceAttachmentsTab
+            invoiceId={docId} api={api} emptyText={emptyText}
+            subHint="صورة أو PDF — اختياري، ويُحفظ فوراً ولو كان المستند مرحّلاً"
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
 /**
  * مدفوع/متبقّي التخليص: بعد ترحيل استحقاقه من الخادم (يشمل سندات المخلّص الموزَّعة
  * عليه)، وقبله بنود النموذج ناقص دفعاته المرحّلة. مصدرٌ واحد للحقل والملخّصات والزر.
@@ -377,6 +409,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     | null
   >(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
+  // مرفق الناقل: لوحةٌ واحدة تحت الجدول للإرسالية المختارة.
+  const [localAttachFor, setLocalAttachFor] = useState<{ id: number; label: string } | null>(null);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1853,6 +1887,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
         </span>
       </div>
+      {clearanceForm.id ? (
+        <DocAttachments
+          key={clearanceForm.id} label="مرفق مطالبة المخلّص" docId={clearanceForm.id}
+          api={clearanceAttachmentsApi} emptyText="لا مرفق لمطالبة المخلّص بعد."
+        />
+      ) : null}
       <div className="ktra-headband" style={{ marginBottom: 4 }}>
         {fld("رقم البيان", <input className="ktra-input" value={clearanceForm.declaration_number || ""} onChange={cfText("declaration_number")} />)}
         {fld("تاريخ التخليص", <input className="ktra-input" type="date" value={clearanceForm.clearance_date ? String(clearanceForm.clearance_date).slice(0, 10) : ""} onChange={cfText("clearance_date")} />)}
@@ -2104,6 +2144,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   {!ls.is_posted && (
                     <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void handlePostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px", backgroundColor: "var(--ktra-primary)", color: "white", padding: "2px 6px" }} title="مدين تكلفة نقل محلي / دائن ذمم الناقل.">إثبات الاستحقاق</button>
                   )}
+                  <button
+                    type="button" className={`ktra-toolbtn inline-flex items-center text-[11px] ${localAttachFor?.id === ls.id ? "font-bold" : ""}`}
+                    onClick={(e) => { e.stopPropagation(); setLocalAttachFor((cur) => (cur?.id === ls.id ? null : { id: ls.id, label: ls.shipment_number || `#${ls.id}` })); }}
+                    title="مرفق الناقل (صورة أو PDF) — اختياري"
+                  >
+                    <Paperclip className="h-3 w-3" />
+                  </button>
                   <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
                   {ls.is_posted && (
                     <button
@@ -2123,6 +2170,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           )}
         </tbody>
       </table>
+      {localAttachFor && (
+        <DocAttachments
+          key={localAttachFor.id} label={`مرفق الناقل — ${localAttachFor.label}`} docId={localAttachFor.id}
+          api={localAttachmentsApi} emptyText="لا مرفق للناقل على هذه الإرسالية بعد." defaultOpen
+        />
+      )}
       {localShipments.some((l) => !l.is_posted) && (
         <p className="ktra-text-soft" style={{ fontSize: "var(--ktra-fs-sm, 12px)", padding: "4px 0" }}>
           الاستحقاق («ارسالية») يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة فيصير الناقل دائناً — أو أثبِته الآن يدوياً. «تسجيل دفعة» يخصم من ذممه بقيد منفصل.
@@ -2323,6 +2376,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             </p>
           </>
         )}
+        {shipment?.id ? (
+          <DocAttachments
+            key={shipment.id} label="مرفق الشحن الدولي" docId={Number(shipment.id)}
+            api={shipmentAttachmentsApi} emptyText="لا مرفق للشحن الدولي بعد (بوليصة، فاتورة الوكيل…)."
+          />
+        ) : null}
       </div>
 
       {/* ── ١) دفعات وكيل الشحن الدولي (USD) — سداد الذمّة، لا شرط للاستيراد ── */}

@@ -71,7 +71,7 @@ from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
-from core.mixins import BaseTenantViewSet
+from core.mixins import BaseTenantViewSet, DocumentAttachmentsMixin
 from core.plans import enforce_limits
 from logistics.landed_cost import (
     import_invoices_from_clearance,
@@ -128,7 +128,14 @@ class ClearanceItemTypeViewSet(BaseTenantViewSet):
         instance.delete()
 
 
-class LogisticsClearanceViewSet(BaseTenantViewSet):
+class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
+    # مرفق «مطالبة المخلّص» (صورة أو PDF) — اختياري، ويُرفق بعد الترحيل أيضاً.
+    attachment_table = 'logistics_clearance'
+    attachment_entity_type = 'clearance'
+
+    def attachment_label(self, obj) -> str:
+        return f"تخليص {obj.shipment.display_label}"
+
     queryset = LogisticsClearance.objects.all().order_by("-id")
     serializer_class = LogisticsClearanceSerializer
 

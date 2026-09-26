@@ -14,7 +14,7 @@
 | الملف | الغرض |
 |---|---|
 | `core/tenant_utils.py` | حلّ الشركة والفرع من الطلب — **نقطة العزل الوحيدة** |
-| `core/mixins.py` | `BaseTenantViewSet` — الفلترة التلقائية بالشركة |
+| `core/mixins.py` | `BaseTenantViewSet` — الفلترة التلقائية بالشركة · `DocumentAttachmentsMixin` — `attachments/` و`attachments/<id>/` لمستندٍ في `SystemAttachment` (جدولُه في `attachment_table`)، مُنطاقةً بالشركة والمستند معاً وتُحفظ فوراً ولو كان مرحّلاً |
 | `core/access.py` | كتالوج الصلاحيات ومصفوفة الأدوار والإنفاذ |
 | `core/permissions.py` · `core/permissions_api.py` | منتج الصلاحية لـDRF + نقطة `/api/permissions/me/` |
 | `core/terminology.py` | **ISSUE #82 — المعجم**: قاموس تسميةٍ مسطّح (`doc.*`، `line.item`، `nav.*`، `action.*`، `empty.shell`) يتبدّل بقالب الشركة — `term(tenant, key)`، يُسلَّم على حمولة `/api/permissions/me/` (`terms`) |

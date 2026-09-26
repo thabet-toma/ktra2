@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **907**
+عدد النقاط: **913**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -408,6 +408,8 @@
 | `/api/logistics/clearances/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/adjust-accrual/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
+| `/api/logistics/clearances/{pk}/attachments/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
+| `/api/logistics/clearances/{pk}/attachments/{attachment_id}/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/pay_from_cashbox/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/payments/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/{pk}/post-to-accounting/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |
@@ -436,6 +438,8 @@
 | `/api/logistics/local-shipments/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/adjust-accrual/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
+| `/api/logistics/local-shipments/{pk}/attachments/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
+| `/api/logistics/local-shipments/{pk}/attachments/{attachment_id}/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/import-to-invoice/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/pay_from_cashbox/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/local-shipments/{pk}/payments/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
@@ -498,6 +502,8 @@
 | `/api/logistics/shipments/{pk}/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/add_deal/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/adjust-freight-accrual/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
+| `/api/logistics/shipments/{pk}/attachments/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
+| `/api/logistics/shipments/{pk}/attachments/{attachment_id}/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/freight/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/link_agent_payment_journal/{payment_id}/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |
 | `/api/logistics/shipments/{pk}/pay_agent_from_cashbox/` | `LogisticsShipmentViewSet` | `logistics/views/shipments.py` |

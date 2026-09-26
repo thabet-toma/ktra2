@@ -326,9 +326,12 @@ export const InvoicePartnerLedgerTab: React.FC<{
 
 export const InvoiceAttachmentsTab: React.FC<{
   invoiceId: number;
-  api: DocumentContextApi;
+  /** نقاط المرفقات وحدها — فيخدم مستنداتٍ بلا تبويبي المخزن وكشف الحساب (مستندات الشحنة). */
+  api: Pick<DocumentContextApi, "listAttachments" | "addAttachment" | "deleteAttachment">;
   readOnly?: boolean;
-}> = ({ invoiceId, api, readOnly }) => {
+  emptyText?: string;
+  subHint?: string;
+}> = ({ invoiceId, api, readOnly, emptyText, subHint }) => {
   const [rows, setRows] = useState<ContextAttachmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -390,14 +393,14 @@ export const InvoiceAttachmentsTab: React.FC<{
           busy={busy}
           variant="compact"
           hint="اضغط للاختيار، اسحب الملف إلى هنا، أو الصق صورة (Ctrl+V)"
-          subHint="صور وملفات PDF — تُحفظ فوراً ولو كانت الفاتورة مرحّلة"
+          subHint={subHint ?? "صور وملفات PDF — تُحفظ فوراً ولو كانت الفاتورة مرحّلة"}
         />
       )}
       {loading ? (
         <div className="p-4 text-center text-[var(--ktra-ink-soft)]">جارٍ التحميل…</div>
       ) : rows.length === 0 ? (
         <div className="p-4 text-center text-[var(--ktra-ink-soft)]">
-          لا مرفقات على هذه الفاتورة بعد.
+          {emptyText ?? "لا مرفقات على هذه الفاتورة بعد."}
         </div>
       ) : (
         <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-6">

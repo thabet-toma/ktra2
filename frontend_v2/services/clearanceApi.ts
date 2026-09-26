@@ -98,6 +98,28 @@ export type ClearancePaymentRow = {
   kind_label?: string;
 };
 
+/** مرفقٌ على مستند شحنة (`core.mixins.DocumentAttachmentsMixin`). */
+export type ImportDocAttachment = {
+  id: number;
+  url: string;
+  file_type: string;
+  filename: string;
+  uploaded_at?: string | null;
+};
+
+/** مرفقات مستندات الشحنة الاختيارية (صورة أو PDF): مطالبة المخلّص على التخليص، والشحن
+ *  الدولي على الشحنة، والناقل على الإرسالية — تُحفظ فوراً ولو كان المستند مرحّلاً. */
+export function importDocAttachmentsApi(resource: "clearances" | "shipments" | "local-shipments") {
+  const base = (id: number) => `logistics/${resource}/${id}/attachments/`;
+  return {
+    listAttachments: (id: number) => apiGetList<ImportDocAttachment>(base(id), { tenantId: tid() }),
+    addAttachment: (id: number, url: string) =>
+      apiPostObject<ImportDocAttachment>(base(id), { url }, { tenantId: tid() }),
+    deleteAttachment: (id: number, attachmentId: number) =>
+      apiDelete(`${base(id)}${attachmentId}/`, { tenantId: tid() }),
+  };
+}
+
 /** بند مخلّص من إعدادات الشركة (`ClearanceItemType`). */
 export type ClearanceItemType = {
   id: number;

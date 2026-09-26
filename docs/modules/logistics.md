@@ -164,6 +164,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | POST | `deals/{pk}/payments/` · `post_payment/{id}` · `unpost_payment/{id}` | views.py:618 / 883 / 1124 |
 | POST/PATCH | `shipments/create-from-deals/` · `shipments/{pk}/freight/` | `create_from_deals` (:1505) · `set_freight` (:1549) |
 | POST | `shipments/{pk}/post-freight-accrual/` · `unpost-freight-accrual/` | views.py:2139 / 2177 |
+| GET/POST · DELETE | `clearances/{pk}/attachments/` · `shipments/{pk}/attachments/` · `local-shipments/{pk}/attachments/` (و`…/attachments/{id}/`) | مرفقٌ اختياري (صورة أو PDF): مطالبة المخلّص · الشحن الدولي · الناقل — `core.mixins.DocumentAttachmentsMixin`، ويُرفق بعد الترحيل أيضاً |
 | POST | `clearances/{pk}/adjust-accrual/` · `local-shipments/{pk}/adjust-accrual/` · `shipments/{pk}/adjust-freight-accrual/` | «تعديل الاستحقاق» — `{preview, date}` مع `cost_lines` / `amount` / `freight_rate`+`freight_exchange_rate`؛ المعاينة لا تكتب شيئاً (`domain/accrual_adjust.py`) |
 | POST | `clearances/{pk}/post-to-accounting/` · `pay_from_cashbox/` | views.py:2249 / 2338 |
 | POST | `purchase-invoices/preview-clearance-import/` · `import-from-clearance/` | views.py:3103 / 3179 |
@@ -503,6 +504,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 | `tests/test_agent_payment_from_cashbox.py` | دفعة الوكيل بكبسة: إنشاء وترحيل بالأساس = المبلغ × السعر، الترقيم بعد القائمة، لا دفعة عند أي مانع أو فشل ترحيل، الزرّ القديم عبر الخدمة نفسها، والأمر: تقرير بلا كتابة وتنبيهاته و`--apply` للمختار وحده |
 | `tests/test_overpayment_split.py` | الفصل عند الترحيل (تخليص وإرسالية، دفعة ثانية، مستند مسدَّد، لا فصل قبل الاستحقاق)، ثبات رصيد الطرف والصندوق، الأمر: تقرير ثم تنفيذ ثم idempotent، و`unpost` التخليص بعد الفصل |
 | `tests/test_accrual_adjust.py` | قيد الفرق للتخليص وتعديلٌ ثانٍ فوقه، رفض «لا فرق» والمعاينة لا تكتب، الإرسالية وإلغاء ترحيلها يحذف تعديلاتها، الشحن بسعر صرفٍ معاكس وقفل `freight/`، الفاتورة المرحّلة: مخزون/تكلفة مبيعات والطبقة وحركة البيع بلا انجراف، التحويل بين المستودعات، غير المستلَم على الوسيط ثم يُستلم بالجديدة، الفاتورة المتأخّرة تمنع، إعادة المسودة، والفائض مقابل تحت الحساب في الكرت |
+| `tests/test_shipment_attachments.py` | مرفقٌ صورة أو PDF على التخليص والشحنة والإرسالية، الرابط نفسه مرّةً واحدة، الإرفاق بعد الترحيل، رفض رابطٍ غير http، الحذف مُنطاقٌ بالمستند، والشركة الأخرى لا تقرأ ولا تُضيف ولا تحذف |
 | `tests/test_import_payment_separation.py` (556) | فصل الاستحقاق عن الدفع (تخليص + نقل محلي) |
 | `tests/test_shipment_freight_accrual.py` (307) · `test_receive_on_post_setting.py` (466) | استحقاق شحن الوكيل مستقلاً عن دفعاته · الاستلام عند الترحيل و GR/IR |
 | `tests/test_purchase_receipt_visibility.py` | الباقي على البند وملخّص رأس الفاتورة — وتكافؤ رقمهما مع تقرير `outstanding` (وكان بلا اختبار) |

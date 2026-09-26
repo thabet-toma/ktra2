@@ -70,7 +70,7 @@ from core.api_defaults import PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.access import require_perm, requires_perm
 from core.user_roles import user_can_unpost_logistics_deal_payment
 from core.tenant_utils import get_tenant
-from core.mixins import BaseTenantViewSet
+from core.mixins import BaseTenantViewSet, DocumentAttachmentsMixin
 from core.plans import enforce_limits
 from logistics.landed_cost import (
     import_invoices_from_clearance,
@@ -95,7 +95,14 @@ logger = logging.getLogger("logistics.views")
 
 
 
-class LocalShipmentViewSet(BaseTenantViewSet):
+class LocalShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
+    # مرفق «الناقل» (فاتورة الإرسالية) — اختياري، ويُرفق بعد الترحيل أيضاً.
+    attachment_table = 'logistics_local_shipments'
+    attachment_entity_type = 'local_shipment'
+
+    def attachment_label(self, obj) -> str:
+        return obj.display_label
+
     """الشحن المحلي — مرحلة بين التخليص الجمركي وفاتورة المشتريات.
 
     الدورة:
