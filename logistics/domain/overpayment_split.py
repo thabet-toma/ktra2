@@ -109,7 +109,9 @@ def split_posted_overpayment(kind: str, obj, *, apply: bool = False, user=None) 
     party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
     if kind not in SPLIT_REFERENCES or not accrual_journal_id:
         return None
-    excess = accrual_status(kind, obj)['overpaid']
+    # الفائض (زائدٌ لأن المستحق خُفِّض بعد الدفع) يبقى فائضاً على مستنده — لا سنداً.
+    status = accrual_status(kind, obj)
+    excess = status['overpaid'] - status['surplus']
     if excess <= 0:
         return None
     row = {'kind': kind, 'doc': obj.pk, 'label': _label(kind, obj), 'excess': excess,

@@ -238,12 +238,46 @@ export async function postClearanceAccrual(
   );
 }
 
-export async function unpostClearanceAccrual(
+/** ناتج «تعديل الاستحقاق» (`domain/accrual_adjust.py`) — المعاينة والترحيل بالشكل نفسه. */
+export type AccrualAdjustResult = {
+  kind: "clearance" | "freight" | "local";
+  id: number;
+  label: string;
+  preview: boolean;
+  journal_id: number | null;
+  due_before: string;
+  due_after: string;
+  difference: string;
+  paid: string;
+  /** ما سيصير «فائضاً» على المستند: مدفوعٌ زاد لأن المستحق نزل. */
+  surplus_after: string;
+  lines: { account: number; partner: number | null; debit: string; credit: string; description: string }[];
+  /** الفواتير الدولية المرحّلة التي تتعدّل تكلفتها. */
+  revaluations: {
+    invoice_id: number;
+    invoice_number: string;
+    amount: string;
+    inventory: string;
+    cogs: string;
+    clearing: string;
+    expense: string;
+    journal_id: number | null;
+    warnings: string[];
+  }[];
+  drafts_updated: number;
+};
+
+export type AccrualAdjustOptions = { preview: boolean; date: string };
+
+/** «تعديل الاستحقاق»: بنود التخليص بعد التعديل ← قيد فرقٍ على المخلّص (القيد الأصلي باقٍ). */
+export async function adjustClearanceAccrual(
   clearanceId: number,
-): Promise<{ message: string }> {
+  costLines: ClearanceCostLine[],
+  opts: AccrualAdjustOptions,
+): Promise<AccrualAdjustResult> {
   return apiPostObject(
-    `logistics/clearances/${clearanceId}/unpost-accrual/`,
-    {},
+    `logistics/clearances/${clearanceId}/adjust-accrual/`,
+    { cost_lines: costLines, ...opts },
     { tenantId: tid() },
   );
 }

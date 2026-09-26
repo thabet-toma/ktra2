@@ -73,6 +73,10 @@ interface PartnerProfile {
   total_sales: string;
   total_purchases: string;
   last_transaction_date: string | null;
+  /** الدائن: غير الموزَّع من سنداته + ما زاد على مستحقٍّ لحظة دفعه (بالعملة الأساسية). */
+  on_account_payments?: string;
+  /** الدائن: ما صار زائداً لأن مستحقّه خُفِّض بعد دفعه («تعديل الاستحقاق»). */
+  accrual_surplus?: string;
 }
 
 interface StatementRow {
@@ -811,6 +815,19 @@ export const PartnerProfilePage: React.FC = () => {
       label: 'كشف الحساب',
       content: (
         <div className="p-2">
+          {/* الدائن: رصيدٌ لنا لم يُستهلك، مفصولاً رقمين — الرصيد نفسه لا يتغيّر بهما. */}
+          {isSupplier && profile && (
+            <div className="mb-3 grid grid-cols-2 gap-3 sm:max-w-md">
+              <div className="rounded border border-[var(--ktra-border)] p-2" title="سندات صرف لم تُوزَّع، ودفعاتٌ زادت على المستحق لحظة دفعها">
+                <div className="text-xs text-[var(--ktra-ink-soft)]">دفعات تحت الحساب</div>
+                <div className="font-bold text-[var(--ktra-ink)]">{formatMoney(profile.on_account_payments ?? 0)} ₪</div>
+              </div>
+              <div className="rounded border border-[var(--ktra-border)] p-2" title="مدفوعٌ صار زائداً لأن المستحق خُفِّض بعد دفعه">
+                <div className="text-xs text-[var(--ktra-ink-soft)]">فائض تحت الحساب</div>
+                <div className="font-bold text-[var(--ktra-ink)]">{formatMoney(profile.accrual_surplus ?? 0)} ₪</div>
+              </div>
+            </div>
+          )}
           <div className="mb-3 flex flex-wrap items-center justify-end gap-3">
             {/* مفتاح الألوان: ما يزيد الذمة أحمر وما يسدّدها أخضر. */}
             <div className="me-auto flex items-center gap-3 text-xs text-[var(--ktra-ink-soft)]">

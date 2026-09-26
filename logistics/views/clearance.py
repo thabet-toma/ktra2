@@ -214,7 +214,8 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
                 result = unpost_document(
                     tenant_id=clearance.tenant_id,
                     reference_id=clearance.id,
-                    journal_reference_types=['LOGISTICS_CLEARANCE'],
+                    # وقيود «تعديل الاستحقاق» معه — وإلا بقي فرقٌ بلا أصل.
+                    journal_reference_types=['LOGISTICS_CLEARANCE', 'LOGISTICS_CLEARANCE_ADJUST'],
                     user=request.user,
                     document_label=f"استحقاق تخليص {clearance.shipment.shipment_number}",
                 )
@@ -223,6 +224,36 @@ class LogisticsClearanceViewSet(BaseTenantViewSet):
         except Exception as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'تم التراجع عن إثبات استحقاق التخليص.', 'unpost_result': result})
+
+    @action(detail=True, methods=['post'], url_path='adjust-accrual')
+    @requires_perm('import.doc.unpost')
+    def adjust_accrual(self, request, pk=None):
+        """«تعديل الاستحقاق»: بنود التخليص الجديدة (`cost_lines`) ← قيد فرقٍ على المخلّص
+        وتعديل تكلفة بضاعة الشحنة، والقيد الأصلي باقٍ. `preview` يعاين بلا ترحيل."""
+        from logistics.domain.accrual_adjust import adjust_accrual, error_text, request_options
+
+        clearance = self.get_object()
+        cost_lines = request.data.get('cost_lines')
+        if not isinstance(cost_lines, list):
+            return Response({'error': 'أرسل بنود التخليص بعد التعديل (cost_lines).'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            preview, adjust_date = request_options(request.data)
+            with transaction.atomic():
+                locked = LogisticsClearance.objects.select_for_update().get(
+                    pk=clearance.pk, tenant_id=clearance.tenant_id)
+
+                def apply_changes():
+                    serializer = self.get_serializer(locked, data={'cost_lines': cost_lines}, partial=True)
+                    serializer.is_valid(raise_exception=True)
+                    serializer.save()
+
+                result = adjust_accrual(
+                    'clearance', locked, apply_changes=apply_changes, adjust_date=adjust_date,
+                    user=request.user, preview=preview)
+        except (ValidationError, DjangoValidationError, AccrualSkipped) as exc:
+            return Response({'error': error_text(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
     @action(detail=True, methods=['post'], url_path='unpost')
     @requires_perm('import.doc.unpost')

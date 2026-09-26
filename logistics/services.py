@@ -2052,14 +2052,27 @@ def open_goods_clearing(invoice):
     ).first()
     if acc is None:
         return None, Decimal('0'), Decimal('0')
-    rows = JournalLine.objects.filter(
-        tenant_id=invoice.tenant_id,
-        account=acc,
-        journal__reference_id=invoice.pk,
-        journal__reference_type__in=('PURCHASE_INVOICE', 'PURCHASE_GRN'),
-    ).aggregate(d=Sum('debit'), c=Sum('credit'))
-    total = Decimal(str(rows['d'] or 0)).quantize(DEC)
-    open_amt = (total - Decimal(str(rows['c'] or 0))).quantize(DEC)
+    # وقيدُ تعديل التكلفة بعد «تعديل الاستحقاق» (`PURCHASE_INVOICE_LANDED_ADJ`) يزيد مدين
+    # البضاعة غير المستلمة أو ينقصه — فيدخل الإجمالي بصافيه كي يُستلَم الباقي بالكلفة الجديدة.
+    rows = {
+        r['journal__reference_type']: r for r in JournalLine.objects.filter(
+            tenant_id=invoice.tenant_id,
+            account=acc,
+            journal__reference_id=invoice.pk,
+            journal__reference_type__in=(
+                'PURCHASE_INVOICE', 'PURCHASE_GRN', 'PURCHASE_INVOICE_LANDED_ADJ'),
+        ).values('journal__reference_type').annotate(d=Sum('debit'), c=Sum('credit'))
+    }
+
+    def _side(ref, key):
+        return Decimal(str((rows.get(ref) or {}).get(key) or 0))
+
+    total = (
+        _side('PURCHASE_INVOICE', 'd')
+        + _side('PURCHASE_INVOICE_LANDED_ADJ', 'd') - _side('PURCHASE_INVOICE_LANDED_ADJ', 'c')
+    ).quantize(DEC)
+    open_amt = (total - _side('PURCHASE_INVOICE', 'c')
+                - _side('PURCHASE_GRN', 'c') + _side('PURCHASE_GRN', 'd')).quantize(DEC)
     return acc, total, (open_amt if open_amt > 0 else Decimal('0'))
 
 

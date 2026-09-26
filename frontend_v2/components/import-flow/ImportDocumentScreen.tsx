@@ -5,12 +5,13 @@ import { useSearchParams } from "react-router-dom";
 import { Save, Plus, FileText, Pencil } from "lucide-react";
 import { apiGetList, apiGetObject, apiGetPagedList, apiPatchObject, apiPostObject } from "@/services/restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
-import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, unpostClearanceAccrual, getAccrualStatus, getClearance, listClearanceItemTypes, type ClearanceItemType } from "@/services/clearanceApi";
+import { listClearances, ClearanceRow, listClearancePayments, ClearancePaymentRow, updateClearance, createClearance, payClearanceFromCashBox, postClearanceAccrual, adjustClearanceAccrual, getAccrualStatus, getClearance, listClearanceItemTypes, type AccrualAdjustResult, type ClearanceItemType } from "@/services/clearanceApi";
 import { docSettlement, overpaymentExcess, type AccrualKind, type VoucherAllocationRow } from "@/utils/voucherAllocation";
 import { entityPathForReference } from "@/utils/entityLinks";
 import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi";
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
-import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox } from "@/services/localShippingApi";
+import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox, adjustLocalShipmentAccrual } from "@/services/localShippingApi";
+import { AccrualAdjustDialog } from "./AccrualAdjustDialog";
 import { KitDocumentShell, useRecordNavigation, KitToolbarAction, KitTab, KitDateInput } from "@/components/kit";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
@@ -28,6 +29,14 @@ import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, ty
 import { formatDateLocalized } from "../../utils/formatDate";
 const tid = () => resolveTenantId();
 const fmt = (v: number | string | null | undefined) => formatMoney(v, "—");
+
+/** بنود التخليص كما يرسلها المحرّر (`cost_lines`) — للحفظ ولـ«تعديل الاستحقاق». */
+const clearanceCostLines = (f: ClearanceRow) => (f.lines || []).map((l) => ({
+  label: l.description,
+  amount: (l.debit || 0) - (l.credit || 0),
+  type: l.line_type,
+  item_type: l.item_type ?? null,
+}));
 /**
  * مدفوع/متبقّي التخليص: بعد ترحيل استحقاقه من الخادم (يشمل سندات المخلّص الموزَّعة
  * عليه)، وقبله بنود النموذج ناقص دفعاته المرحّلة. مصدرٌ واحد للحقل والملخّصات والزر.
@@ -147,6 +156,8 @@ interface ShipmentApiRow {
   agent_shipment_number?: string;
   invoice_number?: string;
   total_shipping_cost_usd?: number;
+  /** استحقاق شحن الوكيل مرحّل — إجمالي الشحن يتغيّر بعدها من «تعديل الاستحقاق» وحده. */
+  freight_is_posted?: boolean;
   total_volume?: number;
   total_weight_kg?: number;
   chargeable_unit?: "cbm" | "kg" | null;
@@ -358,6 +369,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     listClearanceItemTypes().then(setClearanceItems).catch(() => setClearanceItems([]));
   }, []);
   const [clearanceForm, setClearanceForm] = useState<ClearanceRow | null>(null);
+  // «تعديل الاستحقاق» (بدل التراجع): أيّ مستحقٍّ مفتوح في النافذة، وقيمه الجديدة.
+  const [adjusting, setAdjusting] = useState<
+    | { kind: "clearance" }
+    | { kind: "freight"; freightRate: string; fx: string }
+    | { kind: "local"; id: number; label: string; amount: string }
+    | null
+  >(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -700,12 +718,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         subtotal_no_vat: f.subtotal_no_vat,
         vat_total: f.vat_total,
         grand_total: f.grand_total,
-        cost_lines: (f.lines || []).map((l) => ({
-          label: l.description,
-          amount: (l.debit || 0) - (l.credit || 0),
-          type: l.line_type,
-          item_type: l.item_type ?? null,
-        })),
+        cost_lines: clearanceCostLines(f),
       });
       setClearance(patched);
       setClearanceForm({ ...patched });
@@ -919,7 +932,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         const stillMissing = allocs.some(
           (d) => num(freightUnit === "kg" ? d.deal_total_weight_kg : d.deal_total_cbm) <= 0);
         // كل الصفقات صار إلها قياس + في سعر شحن → أعِد حساب الإجمالي والحصص تلقائياً.
-        if (!stillMissing && Number(freightRate) > 0) {
+        // بعد استحقاق الشحن يبقى إجماليه كما رُحِّل (يتغيّر من «تعديل الاستحقاق»)،
+        // وتُعاد قسمته على الصفقات بالقياس الجديد وحده.
+        if (!stillMissing && refreshed.freight_is_posted) {
+          await apiPostObject(`logistics/shipments/${currentShipmentId}/recalculate-distribution/`, {}, { tenantId: tid() });
+          refreshed = await apiGetObject<ShipmentApiRow>(`logistics/shipments/${currentShipmentId}/`, { tenantId: tid() });
+        } else if (!stillMissing && Number(freightRate) > 0) {
           refreshed = await apiPatchObject<ShipmentApiRow>(
             `logistics/shipments/${currentShipmentId}/freight/`,
             { chargeable_unit: freightUnit, freight_rate: Number(freightRate) },
@@ -1212,24 +1230,6 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [clearance, shipment, confirm, toast]);
 
-  const handleUnpostLocal = useCallback(async (id: number) => {
-    if (!(await confirm({
-      title: "تراجع عن ترحيل النقل المحلي",
-      message: "سيُحذف قيد المصروف ويعود سجل النقل المحلي مسودة (فيمكن نقله إلى الفاتورة أو تعديله).",
-      confirmText: "تراجع عن الترحيل",
-    }))) return;
-    setSaving(true); setError(null);
-    try {
-      await apiPostObject(`logistics/local-shipments/${id}/unpost/`, {}, { tenantId: tid() });
-      toast("تم التراجع عن ترحيل النقل المحلي وحذف قيده.", "success");
-      await reloadLocal();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [confirm, toast]);
-
   // ── E: Payment helpers ──
   const reloadPayments = useCallback(async () => {
     if (!clearance) return;
@@ -1306,24 +1306,17 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     }
   }, [clearanceForm, handleSaveClearance, shipment, loadAll, toast]);
 
-  const handleUnpostClearanceAccrual = useCallback(async () => {
-    if (!clearance?.id) return;
-    if (!(await confirm({
-      title: "تراجع عن استحقاق التخليص",
-      message: "سيُحذف قيد استحقاق التخليص فقط. دفعات المخلّص تبقى بقيودها المستقلة.",
-      confirmText: "تراجع",
-    }))) return;
-    setSaving(true); setError(null);
-    try {
-      const result = await unpostClearanceAccrual(clearance.id);
-      toast(result.message, "success");
-      if (shipment) await loadAll(shipment.id);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [clearance, shipment, loadAll, confirm, toast]);
+  const handleAccrualAdjusted = useCallback(async (result: AccrualAdjustResult) => {
+    setAdjusting(null);
+    const revalued = result.revaluations.map((r) => r.invoice_number).join("، ");
+    toast(
+      `رُحِّل قيد تعديل الاستحقاق #${result.journal_id ?? "—"} بفرق ${fmt(result.difference)} ₪`
+        + (revalued ? ` — وعُدِّلت تكلفة: ${revalued}` : "")
+        + (result.drafts_updated ? ` — وأُعيد بناء ${result.drafts_updated} مسودة` : ""),
+      "success",
+    );
+    if (shipment) await loadAll(shipment.id);
+  }, [shipment, loadAll, toast]);
 
   // ── دفعات وكيل الشحن (LogisticsPayment على الشحنة، بدون صفقة) ──
   // كبسة واحدة كالمخلّص والناقل: الخادم ينشئ الدفعة ويرحّلها معاً. كانت تُحفظ بـPATCH
@@ -1408,23 +1401,6 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setSaving(false);
     }
   }, [shipment, freightAccrualRate, refetchShipment, toast]);
-
-  const handleUnpostFreightAccrual = useCallback(async () => {
-    if (!shipment) return;
-    setSaving(true); setError(null);
-    try {
-      await shipmentsService.unpostShipmentFreightAccrual(String(shipment.id));
-      const cleared = { freight_is_posted: false, freight_exchange_rate: null };
-      setShipment((prev) => (prev ? { ...prev, ...cleared } : prev));
-      setShipmentForm((prev) => (prev ? { ...prev, ...cleared } : prev));
-      await refetchShipment(shipment.id);
-      toast("تم التراجع عن استحقاق الشحن — دفعات الوكيل المرحّلة لم تتأثر.", "success");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setSaving(false);
-    }
-  }, [shipment, refetchShipment, toast]);
 
   // ── F: Convert to purchase invoice ──
   const [convertedInvoices, setConvertedInvoices] = useState<Array<{
@@ -1723,7 +1699,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             {(["cbm", "kg"] as const).map((u) => (
               <button key={u} type="button" className="ktra-toolbtn"
                 onClick={() => { setFreightUnit(u); void handleSetFreight(u, freightRate); }}
-                disabled={saving}
+                disabled={saving || freightAccrued}
+                title={freightAccrued ? "استحقاق الشحن مرحّل — غيّر السعر من «تعديل الاستحقاق»" : undefined}
                 style={{ borderRadius: 0, padding: "2px 12px", background: freightUnit === u ? "var(--ktra-accent, #1857a4)" : "transparent", color: freightUnit === u ? "#fff" : "var(--ktra-ink)" }}>
                 {u.toUpperCase()}
               </button>
@@ -1733,7 +1710,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             سعر/{freightUnit.toUpperCase()}:
             <input className="ktra-input" type="number" step="0.0001" min="0" style={{ width: 90 }}
               value={freightRate} onChange={(e) => setFreightRate(e.target.value)}
-              onBlur={() => void handleSetFreight(freightUnit, freightRate)} disabled={saving} />
+              onBlur={() => void handleSetFreight(freightUnit, freightRate)} disabled={saving || freightAccrued}
+              title={freightAccrued ? "استحقاق الشحن مرحّل — غيّر السعر من «تعديل الاستحقاق»" : undefined} />
           </label>
           <span className="ktra-text-soft">
             الإجمالي = السعر × مجموع {freightUnit.toUpperCase()} ={" "}
@@ -1854,7 +1832,12 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         ) : (
           <>
             <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-semibold text-emerald-800">الاستحقاق مرحّل · قيد #{clearanceForm.journal}</span>
-            <button type="button" className="ktra-toolbtn" onClick={() => void handleUnpostClearanceAccrual()} disabled={saving}>تراجع عن الاستحقاق</button>
+            <button
+              type="button" className="ktra-toolbtn" onClick={() => setAdjusting({ kind: "clearance" })} disabled={saving}
+              title="عدّل بنود التخليص في الجدول أدناه ثم اضغط هنا — يُرحَّل قيدٌ بالفرق والقيد الأصلي يبقى"
+            >
+              تعديل الاستحقاق
+            </button>
           </>
         )}
         <button
@@ -2123,7 +2106,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   )}
                   <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
                   {ls.is_posted && (
-                    <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); void handleUnpostLocal(ls.id); }} disabled={saving} style={{ fontSize: "11px" }} title="يحذف قيد المصروف ويعيد السجل مسودة">تراجع عن الترحيل</button>
+                    <button
+                      type="button" className="ktra-toolbtn text-[11px]" disabled={saving}
+                      onClick={(e) => { e.stopPropagation(); setAdjusting({ kind: "local", id: ls.id, label: ls.shipment_number || `#${ls.id}`, amount: String(ls.amount ?? "") }); }}
+                      title="مبلغ الإرسالية الجديد ← قيدٌ بالفرق على الناقل، والقيد الأصلي يبقى"
+                    >
+                      تعديل الاستحقاق
+                    </button>
                   )}
                 </span>
               </td>
@@ -2307,8 +2296,16 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 (${fmt(freightTotalUsd)})
               </span>
               {freightAccrued ? (
-                <button type="button" className="ktra-toolbtn" disabled={saving} onClick={() => void handleUnpostFreightAccrual()}>
-                  تراجع عن الاستحقاق
+                <button
+                  type="button" className="ktra-toolbtn" disabled={saving}
+                  onClick={() => setAdjusting({
+                    kind: "freight",
+                    freightRate: shipment?.freight_rate != null ? String(shipment.freight_rate) : "",
+                    fx: String(s.freight_exchange_rate ?? ""),
+                  })}
+                  title="سعر الشحن أو سعر الصرف الجديد ← قيدٌ بالفرق على الوكيل، والقيد الأصلي يبقى"
+                >
+                  تعديل الاستحقاق
                 </button>
               ) : (
                 <button
@@ -2835,6 +2832,65 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             </div>
           </div>
         </div>
+      )}
+      {adjusting?.kind === "clearance" && clearanceForm?.id && (
+        <AccrualAdjustDialog
+          title="تعديل استحقاق التخليص"
+          request={(opts) => adjustClearanceAccrual(clearanceForm.id as number, clearanceCostLines(clearanceForm), opts)}
+          onDone={(r) => void handleAccrualAdjusted(r)}
+          onClose={() => setAdjusting(null)}
+        >
+          <p className="text-sm">
+            البنود كما في جدول التخليص الآن — مجموعها <b>{fmt(clearanceCostTotal)} ₪</b>. عدّل الجدول قبل المعاينة.
+          </p>
+        </AccrualAdjustDialog>
+      )}
+      {adjusting?.kind === "freight" && shipment && (
+        <AccrualAdjustDialog
+          title="تعديل استحقاق شحن الوكيل"
+          request={(opts) => shipmentsService.adjustShipmentFreightAccrual(
+            Number(shipment.id),
+            {
+              freight_rate: adjusting.freightRate === "" ? undefined : Number(adjusting.freightRate),
+              chargeable_unit: freightUnit,
+              freight_exchange_rate: Number(adjusting.fx),
+            },
+            opts,
+          )}
+          onDone={(r) => void handleAccrualAdjusted(r)}
+          onClose={() => setAdjusting(null)}
+        >
+          <label className="flex flex-col text-xs text-[var(--color-text-muted)]">
+            سعر الشحن لكل {freightUnit.toUpperCase()} ($)
+            <input
+              className="ktra-input w-28" type="number" step="0.0001" min="0" value={adjusting.freightRate}
+              onChange={(e) => setAdjusting({ ...adjusting, freightRate: e.target.value })}
+            />
+          </label>
+          <label className="flex flex-col text-xs text-[var(--color-text-muted)]">
+            سعر الصرف (₪/$)
+            <input
+              className="ktra-input w-24" type="number" step="0.001" min="0" value={adjusting.fx}
+              onChange={(e) => setAdjusting({ ...adjusting, fx: e.target.value })}
+            />
+          </label>
+        </AccrualAdjustDialog>
+      )}
+      {adjusting?.kind === "local" && (
+        <AccrualAdjustDialog
+          title={`تعديل استحقاق الإرسالية ${adjusting.label}`}
+          request={(opts) => adjustLocalShipmentAccrual(adjusting.id, Number(adjusting.amount), opts)}
+          onDone={(r) => void handleAccrualAdjusted(r)}
+          onClose={() => setAdjusting(null)}
+        >
+          <label className="flex flex-col text-xs text-[var(--color-text-muted)]">
+            المبلغ الجديد
+            <input
+              className="ktra-input w-32" type="number" step="0.01" min="0" value={adjusting.amount}
+              onChange={(e) => setAdjusting({ ...adjusting, amount: e.target.value })}
+            />
+          </label>
+        </AccrualAdjustDialog>
       )}
     </>
   );

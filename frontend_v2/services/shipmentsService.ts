@@ -10,6 +10,7 @@ import {
   apiPostObject,
 } from "./restApi";
 import { resolveTenantId } from "../utils/tenantContext";
+import type { AccrualAdjustOptions, AccrualAdjustResult } from "./clearanceApi";
 
 const getTenantId = () => resolveTenantId();
 
@@ -584,13 +585,15 @@ export const shipmentsService = {
     );
   },
 
-  /** تراجع عن استحقاق شحن الوكيل — لا يمسّ دفعاته المرحّلة. */
-  async unpostShipmentFreightAccrual(
-    shipmentId: string,
-  ): Promise<{ message?: string; error?: string }> {
+  /** «تعديل الاستحقاق» لشحن الوكيل: سعر الشحن للوحدة ($) وسعر الصرف ← قيد فرقٍ بالشيكل والدولار. */
+  async adjustShipmentFreightAccrual(
+    shipmentId: number,
+    body: { freight_rate?: number; chargeable_unit?: string; freight_exchange_rate: number },
+    opts: AccrualAdjustOptions,
+  ): Promise<AccrualAdjustResult> {
     return apiPostObject(
-      `logistics/shipments/${shipmentId}/unpost-freight-accrual/`,
-      {},
+      `logistics/shipments/${shipmentId}/adjust-freight-accrual/`,
+      { ...body, ...opts },
       { tenantId: getTenantId() },
     );
   },

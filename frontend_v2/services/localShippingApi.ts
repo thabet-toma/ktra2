@@ -6,8 +6,22 @@ import {
   apiDelete,
 } from "./restApi";
 import { resolveTenantId } from "@/utils/tenantContext";
+import type { AccrualAdjustOptions, AccrualAdjustResult } from "./clearanceApi";
 
 const tid = () => resolveTenantId();
+
+/** «تعديل الاستحقاق» للإرسالية: المبلغ الجديد ← قيد فرقٍ على الناقل (القيد الأصلي باقٍ). */
+export async function adjustLocalShipmentAccrual(
+  localShipmentId: number,
+  amount: number,
+  opts: AccrualAdjustOptions,
+): Promise<AccrualAdjustResult> {
+  return apiPostObject(
+    `logistics/local-shipments/${localShipmentId}/adjust-accrual/`,
+    { amount, ...opts },
+    { tenantId: tid() },
+  );
+}
 
 export type LocalShipmentStatus =
   | "pending"

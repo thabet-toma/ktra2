@@ -359,7 +359,7 @@ class LocalShipmentViewSet(BaseTenantViewSet):
                 result = unpost_document(
                     tenant_id=shipment.tenant_id,
                     reference_id=shipment.pk,
-                    journal_reference_types=['LOCAL_SHIPMENT'],
+                    journal_reference_types=['LOCAL_SHIPMENT', 'LOCAL_SHIPMENT_ADJUST'],
                     user=request.user,
                     document_label=f"شحن محلي {shipment.shipment_number}",
                 )
@@ -369,6 +369,40 @@ class LocalShipmentViewSet(BaseTenantViewSet):
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'تم التراجع عن الترحيل وحذف القيد.', 'unpost_result': result})
+
+    @action(detail=True, methods=['post'], url_path='adjust-accrual')
+    @requires_perm('inventory.doc.unpost')
+    def adjust_accrual(self, request, pk=None):
+        """«تعديل الاستحقاق» للإرسالية: المبلغ الجديد (`amount`) ← قيد فرقٍ على الناقل
+        وتعديل تكلفة بضاعة الشحنة، والقيد الأصلي باقٍ. `preview` يعاين بلا ترحيل."""
+        from logistics.accruals import AccrualSkipped
+        from logistics.domain.accrual_adjust import adjust_accrual, error_text, request_options
+
+        shipment = self.get_object()
+        try:
+            amount = Decimal(str(request.data.get('amount')))
+        except Exception:
+            return Response({'error': 'أدخل مبلغ الإرسالية بعد التعديل.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        if amount <= 0:
+            return Response({'error': 'مبلغ الإرسالية يجب أن يكون أكبر من صفر.'},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            preview, adjust_date = request_options(request.data)
+            with transaction.atomic():
+                locked = LocalShipment.objects.select_for_update().get(
+                    pk=shipment.pk, tenant_id=shipment.tenant_id)
+
+                def apply_changes():
+                    locked.amount = amount.quantize(Decimal('0.01'))
+                    locked.save(update_fields=['amount'])
+
+                result = adjust_accrual(
+                    'local', locked, apply_changes=apply_changes, adjust_date=adjust_date,
+                    user=request.user, preview=preview)
+        except (ValidationError, DjangoValidationError, AccrualSkipped) as exc:
+            return Response({'error': error_text(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
     @action(detail=True, methods=['post'], url_path='import-to-invoice')
     def import_to_invoice(self, request, pk=None):

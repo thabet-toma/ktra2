@@ -2225,7 +2225,10 @@ class PurchaseInvoiceViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.pk,
-                    journal_reference_types=['PURCHASE_INVOICE', 'PURCHASE_GRN', 'PURCHASE_RECEIPT'],
+                    journal_reference_types=[
+                        'PURCHASE_INVOICE', 'PURCHASE_GRN', 'PURCHASE_RECEIPT',
+                        'PURCHASE_INVOICE_LANDED_ADJ',
+                    ],
                     stock_reference_types=['PURCHASE_INVOICE'],
                     user=request.user,
                     document_label=f"فاتورة شراء {invoice.invoice_number}",

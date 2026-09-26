@@ -4474,8 +4474,9 @@ def partner_account_statement(
         if is_supplier:
             # مستحقّ المخلّص/الوكيل/الناقل «فاتورته» — ليس حركة مال. وقيد تكلفة الشحن
             # القديم (`LOGISTICS_SHIPMENT`) استحقاقُ الوكيل قبل `SHIPMENT_FREIGHT_ACCRUAL`.
-            from logistics.domain.party_accruals import ACCRUAL_ANCHOR_TYPE
-            hidden |= set(ACCRUAL_ANCHOR_TYPE.values()) | {"LOGISTICS_SHIPMENT"}
+            from logistics.domain.party_accruals import ACCRUAL_ADJUST_TYPE, ACCRUAL_ANCHOR_TYPE
+            hidden |= (set(ACCRUAL_ANCHOR_TYPE.values()) | set(ACCRUAL_ADJUST_TYPE.values())
+                       | {"LOGISTICS_SHIPMENT"})
         visible = [row for row in ordered if row[3] not in hidden]
     else:
         visible = ordered

@@ -92,6 +92,43 @@ from django.utils import timezone
 logger = logging.getLogger("logistics.views")
 
 
+def _price_freight(shipment, unit, raw_rate) -> None:
+    """وحدة تسعير الشحن وسعرها ← إجمالي الشحن بالدولار وتوزيعه على الصفقات.
+
+    مصدرٌ واحد لـ«تعيين سعر الشحن» ولـ«تعديل الاستحقاق». يرمي `ValidationError`."""
+    from logistics.domain import allocation as _alloc
+
+    unit = str(unit or '').strip().lower()
+    if unit not in (LogisticsShipment.CHARGEABLE_CBM, LogisticsShipment.CHARGEABLE_KG):
+        raise DjangoValidationError("وحدة تسعير الشحن يجب أن تكون 'cbm' أو 'kg'.")
+    try:
+        rate = Decimal(str(raw_rate or 0))
+    except Exception:
+        raise DjangoValidationError('سعر شحن غير صالح.')
+    if rate < 0:
+        raise DjangoValidationError('سعر الشحن لا يمكن أن يكون سالباً.')
+    links = list(LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related('deal'))
+    # Same guard as create: a freight rate on a deal missing its CBM/KG allocates wrong.
+    if rate > 0:
+        from logistics.domain.shipment_builder import assert_deals_have_measure
+        assert_deals_have_measure([l.deal for l in links], unit)
+    total_units = sum((_alloc.deal_unit_measure(l.deal, unit) for l in links), Decimal('0'))
+    shipment.chargeable_unit = unit
+    shipment.freight_rate = rate
+    shipment.price_per_unit = rate
+    shipment.pricing_method = 'unit'
+    shipment.unit_type = 'weight' if unit == LogisticsShipment.CHARGEABLE_KG else 'cbm'
+    shipment.total_shipping_cost_usd = _alloc.freight_total(rate, total_units)
+    shipment.save(update_fields=[
+        'chargeable_unit', 'freight_rate', 'price_per_unit',
+        'pricing_method', 'unit_type', 'total_shipping_cost_usd',
+    ])
+    try:
+        redistribute_shipment_deal_allocations(shipment)
+    except Exception:
+        logger.exception('redistribute after set_freight failed (shipment=%s)', shipment.pk)
+
+
 
 class LogisticsShipmentViewSet(BaseTenantViewSet):
     queryset = LogisticsShipment.objects.all().order_by('-id')
@@ -312,48 +349,19 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 {'detail': POSTED_DOC_WARNING, 'can_unpost': True},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        from logistics.domain import allocation as _alloc
-        unit = str(request.data.get('chargeable_unit') or shipment.chargeable_unit or '').strip().lower()
-        if unit not in (LogisticsShipment.CHARGEABLE_CBM, LogisticsShipment.CHARGEABLE_KG):
-            return Response({'error': "وحدة تسعير الشحن يجب أن تكون 'cbm' أو 'kg'."},
-                            status=status.HTTP_400_BAD_REQUEST)
-        raw_rate = request.data.get('freight_rate', request.data.get('rate', shipment.freight_rate or 0))
+        if shipment.freight_is_posted:
+            # كان يغيّر الدولار بعد الاستحقاق بصمت فيفترق القيد عن التكلفة.
+            return Response(
+                {'error': 'استحقاق شحن الوكيل مُرحّل — غيّر سعر الشحن من «تعديل الاستحقاق».'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         try:
-            rate = Decimal(str(raw_rate))
-        except Exception:
-            return Response({'error': 'سعر شحن غير صالح.'}, status=status.HTTP_400_BAD_REQUEST)
-        if rate < 0:
-            return Response({'error': 'سعر الشحن لا يمكن أن يكون سالباً.'},
-                            status=status.HTTP_400_BAD_REQUEST)
-
-        links = list(
-            LogisticsShipmentDeal.objects.filter(shipment=shipment).select_related('deal')
-        )
-        # Same guard as create: a freight rate on a deal missing its CBM/KG allocates wrong.
-        if rate > 0:
-            from logistics.domain.shipment_builder import assert_deals_have_measure
-            try:
-                assert_deals_have_measure([l.deal for l in links], unit)
-            except DjangoValidationError as e:
-                msg = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
-                return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
-        total_units = sum((_alloc.deal_unit_measure(l.deal, unit) for l in links), Decimal('0'))
-        total_freight = _alloc.freight_total(rate, total_units)
-
-        shipment.chargeable_unit = unit
-        shipment.freight_rate = rate
-        shipment.price_per_unit = rate
-        shipment.pricing_method = 'unit'
-        shipment.unit_type = 'weight' if unit == LogisticsShipment.CHARGEABLE_KG else 'cbm'
-        shipment.total_shipping_cost_usd = total_freight
-        shipment.save(update_fields=[
-            'chargeable_unit', 'freight_rate', 'price_per_unit',
-            'pricing_method', 'unit_type', 'total_shipping_cost_usd',
-        ])
-        try:
-            redistribute_shipment_deal_allocations(shipment)
-        except Exception:
-            logger.exception('redistribute after set_freight failed (shipment=%s)', shipment.pk)
+            _price_freight(
+                shipment, request.data.get('chargeable_unit') or shipment.chargeable_unit,
+                request.data.get('freight_rate', request.data.get('rate', shipment.freight_rate or 0)))
+        except DjangoValidationError as e:
+            msg = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': msg}, status=status.HTTP_400_BAD_REQUEST)
         return Response(self.get_serializer(shipment).data)
 
     @action(detail=True, methods=['post'], url_path='recalculate-distribution')
@@ -930,7 +938,7 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
                 result = unpost_document(
                     tenant_id=shipment.tenant_id,
                     reference_id=shipment.pk,
-                    journal_reference_types=['SHIPMENT_FREIGHT_ACCRUAL'],
+                    journal_reference_types=['SHIPMENT_FREIGHT_ACCRUAL', 'SHIPMENT_FREIGHT_ACCRUAL_ADJUST'],
                     user=request.user,
                     document_label=f"استحقاق شحن {shipment.shipment_number}",
                 )
@@ -942,5 +950,41 @@ class LogisticsShipmentViewSet(BaseTenantViewSet):
             err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
             return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
         return Response({'message': 'تم التراجع عن استحقاق شحن الوكيل.', 'unpost_result': result})
+
+    @action(detail=True, methods=['post'], url_path='adjust-freight-accrual')
+    @requires_perm('import.doc.unpost')
+    def adjust_freight_accrual(self, request, pk=None):
+        """«تعديل الاستحقاق» لشحن الوكيل: سعر الشحن للوحدة (`freight_rate`، ومعه وحدته
+        اختيارياً) وسعر الصرف (`freight_exchange_rate`) ← قيد فرقٍ على الوكيل بالشيكل
+        والدولار وتعديل تكلفة البضاعة، والقيد الأصلي باقٍ. `preview` يعاين بلا ترحيل."""
+        from logistics.domain.accrual_adjust import adjust_accrual, error_text, request_options
+
+        shipment = self.get_object()
+        try:
+            preview, adjust_date = request_options(request.data)
+            raw_fx = request.data.get('freight_exchange_rate', shipment.freight_exchange_rate)
+            fx = Decimal(str(raw_fx)) if raw_fx not in (None, '') else Decimal('0')
+            if fx <= 0:
+                raise DjangoValidationError('أدخل سعر صرف الدولار للشيكل (أكبر من صفر).')
+            unit = request.data.get('chargeable_unit')
+            raw_rate = request.data.get('freight_rate')
+            with transaction.atomic():
+                locked = LogisticsShipment.objects.select_for_update().get(
+                    pk=shipment.pk, tenant_id=shipment.tenant_id)
+
+                def apply_changes():
+                    if raw_rate not in (None, '') or unit:
+                        _price_freight(
+                            locked, unit or locked.chargeable_unit,
+                            raw_rate if raw_rate not in (None, '') else locked.freight_rate)
+                    locked.freight_exchange_rate = fx
+                    locked.save(update_fields=['freight_exchange_rate'])
+
+                result = adjust_accrual(
+                    'freight', locked, apply_changes=apply_changes, adjust_date=adjust_date,
+                    freight_rate=fx, user=request.user, preview=preview)
+        except (ValidationError, DjangoValidationError, AccrualSkipped, ArithmeticError) as exc:
+            return Response({'error': error_text(exc)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(result)
 
 

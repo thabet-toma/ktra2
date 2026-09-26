@@ -82,11 +82,11 @@ def is_vat_clearance_line(line) -> bool:
     return bool(account and account.code == CLEARANCE_DEFAULT_ACCOUNT_CODES['vat'])
 
 
-def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
-    """Dr بنود التخليص / Cr ذمم المخلّص. None إن كان مرحّلاً أو بلا مقوّمات."""
-    if clearance.journal_id:
-        return None
-    assert_shipment_alive(clearance.shipment)
+def clearance_accrual_lines(clearance) -> tuple:
+    """(أسطر قيد استحقاق التخليص، المجموع) من بنوده الحالية — بعملة التخليص.
+
+    مصدرٌ واحد للترحيل الأوّل ولتعديل الاستحقاق (`domain/accrual_adjust.py`)،
+    فلا يفترق الهدف الذي يُقاس عليه الفرق عمّا يرحّله الاستحقاق."""
     broker = clearance.customs_broker
     if not broker:
         raise AccrualSkipped('حدّد المخلّص الجمركي قبل إثبات الاستحقاق.')
@@ -124,6 +124,16 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
         'credit': total,
         'description': f"استحقاق تخليص — {clearance.shipment.display_label}"[:500],
     })
+    return lines_data, total
+
+
+def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
+    """Dr بنود التخليص / Cr ذمم المخلّص. None إن كان مرحّلاً أو بلا مقوّمات."""
+    if clearance.journal_id:
+        return None
+    assert_shipment_alive(clearance.shipment)
+    lines_data, total = clearance_accrual_lines(clearance)
+    broker = clearance.customs_broker
 
     transaction_date = clearance.clearance_date or timezone.localdate()
     validate_fiscal_period(clearance.tenant, transaction_date)
@@ -149,10 +159,8 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
 
 # ── النقل المحلي («ارسالية») ──────────────────────────────────────────────────
 
-def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
-    """Dr مصروف النقل / Cr ذمم الناقل. None إن كان مرحّلاً أو بلا مقوّمات."""
-    if shipment.is_posted:
-        return None
+def local_shipment_accrual_lines(shipment) -> tuple:
+    """(أسطر قيد الإرسالية، المبلغ) بعملة الشحنة — للترحيل الأوّل ولتعديل الاستحقاق."""
     if shipment.status == 'cancelled':
         raise AccrualSkipped('لا يمكن ترحيل شحنة ملغاة.')
     tenant = shipment.tenant
@@ -175,11 +183,36 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
     if not credit_account:
         raise AccrualSkipped('الناقل لا يملك حساب محاسبي مرتبط.')
 
+    # تسمية القيود: المدين «استحقاق نقل» والدائن «ارسالية» (مصطلح المالك) —
+    # الأستاذ العام يعرض وصف السطر الخام، فالتفريق يجب أن يكون في النص نفسه.
+    return [
+        # سطرُ الذمة وحده يحمل الناقل: المصروفُ الموسومُ به يُلغي دائنَه في
+        # `partner_posted_balance` وكشفه (إنتاج: قيد #10961 — الهجرة 0090).
+        {
+            'account': expense_account.id, 'partner': None,
+            'debit': amt, 'credit': Decimal('0'),
+            'description': f"استحقاق نقل محلي — {shipment.display_label}"[:255],
+        },
+        {
+            'account': credit_account.id, 'partner': shipment.carrier_id,
+            'debit': Decimal('0'), 'credit': amt,
+            'description': (
+                f"ارسالية {shipment.display_label} — {shipment.carrier.name}"
+            )[:255],
+        },
+    ], amt
+
+
+def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
+    """Dr مصروف النقل / Cr ذمم الناقل. None إن كان مرحّلاً أو بلا مقوّمات."""
+    if shipment.is_posted:
+        return None
+    tenant = shipment.tenant
+    lines_data, amt = local_shipment_accrual_lines(shipment)
+
     td = shipment.delivery_date or shipment.pickup_date or timezone.localdate()
     validate_fiscal_period(tenant, td)
 
-    # تسمية القيود: المدين «استحقاق نقل» والدائن «ارسالية» (مصطلح المالك) —
-    # الأستاذ العام يعرض وصف السطر الخام، فالتفريق يجب أن يكون في النص نفسه.
     # المرحلة 2: عبر post_journal مثل بقية استحقاقات الملف — يستعيد idempotency
     # المرجع (LOCAL_SHIPMENT, pk) وقفل السباق بدل الإنشاء اليدوي.
     journal = post_journal(
@@ -188,22 +221,7 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
         reference_type='LOCAL_SHIPMENT',
         reference_id=shipment.pk,
         description=f"ارسالية {shipment.display_label} | {shipment.carrier.name}"[:500],
-        lines_data=[
-            # سطرُ الذمة وحده يحمل الناقل: المصروفُ الموسومُ به يُلغي دائنَه في
-            # `partner_posted_balance` وكشفه (إنتاج: قيد #10961 — الهجرة 0090).
-            {
-                'account': expense_account.id, 'partner': None,
-                'debit': amt, 'credit': Decimal('0'),
-                'description': f"استحقاق نقل محلي — {shipment.display_label}"[:255],
-            },
-            {
-                'account': credit_account.id, 'partner': shipment.carrier_id,
-                'debit': Decimal('0'), 'credit': amt,
-                'description': (
-                    f"ارسالية {shipment.display_label} — {shipment.carrier.name}"
-                )[:255],
-            },
-        ],
+        lines_data=lines_data,
         currency=shipment.currency,
         exchange_rate=shipment.exchange_rate,
         user=user,
@@ -225,11 +243,9 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
 
 # ── شحن الوكيل الدولي ─────────────────────────────────────────────────────────
 
-def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
-    """Dr مصاريف الشحن الدولي / Cr ذمم الوكيل. None إن كان مرحّلاً أو بلا مقوّمات."""
-    if shipment.freight_is_posted:
-        return None
-    assert_shipment_alive(shipment)
+def freight_accrual_lines(shipment, rate) -> tuple:
+    """(أسطر قيد استحقاق الشحن بالشيكل، المبلغ بالشيكل، الدولار، السعر) — للترحيل
+    الأوّل ولتعديل الاستحقاق. سطر الوكيل يحمل دولاره (`amount_currency`)."""
     tenant = shipment.tenant
     agent = shipment.shipping_agent
     if not agent:
@@ -256,6 +272,30 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     if not expense_account:
         raise AccrualSkipped('لا يوجد حساب «مصاريف الشحن الدولي» (5301) في شجرة الحسابات.')
 
+    desc = f"استحقاق شحن دولي | شحنة: {shipment.display_label} | وكيل: {agent.name}"
+    return [
+        {
+            'account': expense_account.id, 'debit': amount_ils, 'credit': Decimal('0'),
+            'partner': None, 'description': desc[:500],
+        },
+        {
+            'account': agent.linked_account_id, 'debit': Decimal('0'), 'credit': amount_ils,
+            'partner': agent.id, 'description': desc[:500],
+            # القيد بالشيكل والذمة دولار: كشف الوكيل بالدولار يقرأ هذا لا الشيكل.
+            'amount_currency': -total_usd.quantize(Decimal('0.01')), 'currency_code': 'USD',
+        },
+    ], amount_ils, total_usd, rate
+
+
+def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
+    """Dr مصاريف الشحن الدولي / Cr ذمم الوكيل. None إن كان مرحّلاً أو بلا مقوّمات."""
+    if shipment.freight_is_posted:
+        return None
+    assert_shipment_alive(shipment)
+    tenant = shipment.tenant
+    agent = shipment.shipping_agent
+    lines_data, amount_ils, total_usd, rate = freight_accrual_lines(shipment, rate)
+
     td = shipment.departure_date or shipment.arrival_date or timezone.localdate()
     validate_fiscal_period(tenant, td)
 
@@ -266,18 +306,7 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
         reference_type='SHIPMENT_FREIGHT_ACCRUAL',
         reference_id=shipment.pk,
         description=desc[:500],
-        lines_data=[
-            {
-                'account': expense_account.id, 'debit': amount_ils, 'credit': Decimal('0'),
-                'partner': None, 'description': desc[:500],
-            },
-            {
-                'account': agent.linked_account_id, 'debit': Decimal('0'), 'credit': amount_ils,
-                'partner': agent.id, 'description': desc[:500],
-                # القيد بالشيكل والذمة دولار: كشف الوكيل بالدولار يقرأ هذا لا الشيكل.
-                'amount_currency': -total_usd.quantize(Decimal('0.01')), 'currency_code': 'USD',
-            },
-        ],
+        lines_data=lines_data,
     )
     shipment.freight_exchange_rate = rate
     shipment.freight_is_posted = True
@@ -348,14 +377,27 @@ IMPORT_COMPONENT_LABELS = {
 }
 
 
-def _journal_debit_sources(journal_id, weight=None) -> List[tuple]:
-    """(حساب، وزن) لكل سطر مدين في قيد استحقاق — الحساب الذي دينه فعلاً."""
+def _journal_debit_sources(journal_ids, weight=None) -> List[tuple]:
+    """(حساب، وزن) لكل حسابٍ دينه قيدُ الاستحقاق وقيودُ تعديله — صافي المدين
+    بالعملة الأساسية (تعديلٌ بالنقص يُنقص وزن حسابه، وما صار صفراً يسقط)."""
+    from django.db.models import Sum
     from accounting.models import JournalLine
-    rows = list(
-        JournalLine.objects.filter(journal_id=journal_id, debit__gt=0)
-        .values_list('account_id', 'debit')
+    ids = [j for j in (journal_ids if isinstance(journal_ids, (list, tuple, set)) else [journal_ids]) if j]
+    if not ids:
+        return []
+    party_accounts = set(
+        JournalLine.objects.filter(journal_id__in=ids, partner__isnull=False)
+        .values_list('account_id', flat=True)
     )
-    total = sum((_as_decimal(d) for _a, d in rows), Decimal('0'))
+    rows = [
+        (acc, _as_decimal(d) - _as_decimal(c))
+        for acc, d, c in JournalLine.objects.filter(journal_id__in=ids)
+        .exclude(account_id__in=party_accounts)
+        .values('account_id').annotate(d=Sum('base_debit'), c=Sum('base_credit'))
+        .values_list('account_id', 'd', 'c')
+    ]
+    rows = [(acc, net) for acc, net in rows if net > 0]
+    total = sum((d for _a, d in rows), Decimal('0'))
     if not rows or total <= 0:
         return []
     if weight is None:
@@ -387,8 +429,9 @@ def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
     local_source = shares.get('local_source') or 'none'
     sources = {'freight': [], 'clearance': [], 'local': []}
 
+    from .domain.party_accruals import accrual_journal_ids
     if shipment is not None and shipment.freight_is_posted and shipment.freight_journal_id:
-        sources['freight'] = _journal_debit_sources(shipment.freight_journal_id)
+        sources['freight'] = _journal_debit_sources(accrual_journal_ids('freight', shipment))
 
     if clearance is not None:
         accrued = bool(clearance.journal_id)
@@ -421,7 +464,7 @@ def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
             weight = _as_decimal(ls.amount) * (_as_decimal(ls.exchange_rate, '1') or Decimal('1'))
             if weight <= 0:
                 continue
-            accrued = _journal_debit_sources(ls.journal_id, weight) if (
+            accrued = _journal_debit_sources(accrual_journal_ids('local', ls), weight) if (
                 ls.is_posted and ls.journal_id) else []
             sources['local'].extend(accrued or [(None, weight)])
 

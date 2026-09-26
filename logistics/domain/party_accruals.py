@@ -11,7 +11,7 @@
 الدفتر فعلاً، ودفعةٌ بعملة أجنبية أو قسمٌ منها لطرفٍ آخر (شحنُ الناقل داخل دفعة
 التخليص) يُحسب كما رُحِّل لا كما كُتب في النموذج. فلا فرق عملة ولا تصنيف ملاحظات.
 
-    المستحق  = Σ(دائن − مدين) لأسطر الطرف في قيد الاستحقاق
+    المستحق  = Σ(دائن − مدين) لأسطر الطرف في قيد الاستحقاق وقيود تعديله
     المدفوع  = Σ(مدين − دائن) لأسطر الطرف في قيود دفعات المستند نفسه المرحّلة
     الموزَّع = Σ `LogisticsAccrualAllocation.amount_base` لسندات صرفٍ مرحّلة
     المتبقّي = max(المستحق − المدفوع − الموزَّع، 0)
@@ -19,6 +19,11 @@
 يستعملها منتقي التوزيع وFIFO والتحقّق عند التوزيع، وفصلُ الدفعة الزائدة عند
 الترحيل وأمرُ `split_logistics_overpayments`، و3ب (`import_settlement`) يضيف منها
 حصّة سندات الصرف الموزَّعة إلى كل حوض.
+
+«تعديل الاستحقاق» (`domain/accrual_adjust.py`) لا يحذف القيد: يرحّل قيد فرقٍ بمرجع
+`ACCRUAL_ADJUST_TYPE[kind]` على المستند نفسه، فالمستحق = الأصل + كل تعديلاته. وما
+زاد من المدفوع بعد تخفيض المستحق «فائضٌ» (`surplus`) لا «دفعة تحت الحساب»: الأولى
+دفعةٌ أكبر من المستحق لحظة الدفع، والثاني ما صار زائداً لأن المستحق نزل بعدها.
 """
 from __future__ import annotations
 
@@ -37,6 +42,13 @@ KINDS = ('clearance', 'freight', 'local')
 
 #: الصنف ← (حقل FK في `LogisticsAccrualAllocation`، تسمية المستند)
 _ALLOCATION_FIELD = {'clearance': 'clearance', 'freight': 'shipment', 'local': 'local_shipment'}
+
+#: الصنف ← مرجع قيد «تعديل الاستحقاق» (قيد فرقٍ على المستند نفسه، `reference_id` = المستند).
+ACCRUAL_ADJUST_TYPE = {
+    'clearance': 'LOGISTICS_CLEARANCE_ADJUST',
+    'freight': 'SHIPMENT_FREIGHT_ACCRUAL_ADJUST',
+    'local': 'LOCAL_SHIPMENT_ADJUST',
+}
 
 
 def _money(value) -> Decimal:
@@ -70,6 +82,40 @@ def _accrual_meta(kind: str, obj):
     raise ValueError(f"صنف مستحق غير معروف: {kind}")
 
 
+def adjustment_journal_ids(kind: str, obj) -> list[int]:
+    """قيود «تعديل الاستحقاق» المرحّلة على المستند، الأقدم أولاً."""
+    from accounting.models import JournalHeader
+
+    return list(JournalHeader.objects.filter(
+        tenant_id=obj.tenant_id, reference_type=ACCRUAL_ADJUST_TYPE[kind],
+        reference_id=obj.pk, is_posted=True,
+    ).order_by('id').values_list('id', flat=True))
+
+
+def _adjustments_by_doc(kind: str, tenant_id: int, doc_ids) -> dict:
+    """{المستند: [قيود تعديله]} لمستندات صنفٍ واحد — استعلامٌ واحد."""
+    from accounting.models import JournalHeader
+
+    out: dict[int, list[int]] = {}
+    ids = [i for i in doc_ids if i]
+    if not ids:
+        return out
+    for jid, ref_id in JournalHeader.objects.filter(
+        tenant_id=tenant_id, reference_type=ACCRUAL_ADJUST_TYPE[kind],
+        reference_id__in=ids, is_posted=True,
+    ).order_by('id').values_list('id', 'reference_id'):
+        out.setdefault(ref_id, []).append(jid)
+    return out
+
+
+def accrual_journal_ids(kind: str, obj) -> list[int]:
+    """قيد الاستحقاق وقيود تعديله — فارغة إن لم يُرحَّل الاستحقاق."""
+    _party_id, accrual_journal_id, _ = _accrual_meta(kind, obj)
+    if not accrual_journal_id:
+        return []
+    return [accrual_journal_id, *adjustment_journal_ids(kind, obj)]
+
+
 def allocated_base(kind: str, objs) -> Decimal:
     """ما وُزِّع من سندات صرفٍ **مرحّلة** على مستندات صنفٍ واحد (بالعملة الأساسية)."""
     from logistics.models import LogisticsAccrualAllocation
@@ -84,7 +130,12 @@ def allocated_base(kind: str, objs) -> Decimal:
 
 
 def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
-    """{due, paid, allocated, remaining, overpaid} لمستندٍ واحد بالعملة الأساسية.
+    """{due, due_original, paid, allocated, remaining, overpaid, surplus} لمستندٍ واحد
+    بالعملة الأساسية.
+
+    `due` بعد تعديلات الاستحقاق و`due_original` قبلها. `surplus` (الفائض) هو ما صار
+    من الزائد زائداً **لأن المستحق خُفِّض**: min(الزائد، مقدار التخفيض). وباقي الزائد
+    دفعةٌ تجاوزت المستحق لحظة دفعها — «تحت الحساب».
 
     `exclude_payment_journal_id`: يستثني قيد دفعةٍ بعينها — يستعمله فصلُ الزائد
     ليحسب ما بقي **قبل** تلك الدفعة.
@@ -92,16 +143,24 @@ def accrual_status(kind: str, obj, *, exclude_payment_journal_id=None) -> dict:
     party_id, accrual_journal_id, pay_journals = _accrual_meta(kind, obj)
     if exclude_payment_journal_id:
         pay_journals = [j for j in pay_journals if j != exclude_payment_journal_id]
-    due = _party_net([accrual_journal_id], party_id, credit_side=True) if accrual_journal_id else ZERO
+    if accrual_journal_id:
+        due_original = _party_net([accrual_journal_id], party_id, credit_side=True)
+        adjustments = adjustment_journal_ids(kind, obj)
+        due = (due_original + _party_net(adjustments, party_id, credit_side=True)) if adjustments else due_original
+    else:
+        due = due_original = ZERO
     paid = _party_net(pay_journals, party_id, credit_side=False)
     allocated = allocated_base(kind, [obj])
     settled = paid + allocated
+    overpaid = max(settled - due, ZERO)
     return {
         'due': due,
+        'due_original': due_original,
         'paid': paid,
         'allocated': allocated,
         'remaining': max(due - settled, ZERO),
-        'overpaid': max(settled - due, ZERO),
+        'overpaid': overpaid,
+        'surplus': min(overpaid, max(due_original - due, ZERO)),
     }
 
 
@@ -215,15 +274,18 @@ def document_voucher_rows(kind: str, obj, *, rate=None) -> list[dict]:
 #: نوع مرجع القيد ← (الصنف، ما يعرّفه المرجع). `payment` = دفعة المستند المباشرة.
 _REFERENCE_DOCS = {
     'LOGISTICS_CLEARANCE': ('clearance', 'doc'),
+    'LOGISTICS_CLEARANCE_ADJUST': ('clearance', 'doc'),
     'CLEARANCE_PAYMENT': ('clearance', 'payment'),
     'CLEARANCE_PAYMENT_UNPOST': ('clearance', 'payment'),
     'CLEARANCE_PAYMENT_SPLIT': ('clearance', 'payment'),
     'CLEARANCE_PAYMENT_SPLIT_REVERSAL': ('clearance', 'payment'),
     'LOCAL_SHIPMENT': ('local', 'doc'),
+    'LOCAL_SHIPMENT_ADJUST': ('local', 'doc'),
     'LOCAL_SHIPMENT_PAYMENT': ('local', 'payment'),
     'LOCAL_SHIPMENT_PAYMENT_SPLIT': ('local', 'payment'),
     'LOCAL_SHIPMENT_PAYMENT_SPLIT_REVERSAL': ('local', 'payment'),
     'SHIPMENT_FREIGHT_ACCRUAL': ('freight', 'doc'),
+    'SHIPMENT_FREIGHT_ACCRUAL_ADJUST': ('freight', 'doc'),
     'LOGISTICS_SHIPMENT': ('freight', 'doc'),
     'LOGISTICS_PAYMENT': ('freight', 'payment'),
 }
@@ -452,12 +514,50 @@ def party_accrued_total(tenant_id: int, partner_id: int):
     والناقل في كرته. دائنُ الطرف في قيود الاستحقاق نفسها التي تقرأ منها `accrual_status`،
     باستعلامٍ واحدٍ على القيود لا استعلاماتٍ لكل مستند."""
     journal_ids, last = [], None
+    docs: dict[str, list[int]] = {}
     for kind, obj in _party_accrual_docs(tenant_id, partner_id):
         journal_ids.append(getattr(obj, f'{_ACCRUAL_JOURNAL[kind]}_id'))
+        docs.setdefault(kind, []).append(obj.pk)
         date = _accrual_date(kind, obj)
         if date and (last is None or date > last):
             last = date
+    # تعديلات الاستحقاق جزءٌ منه — استعلامٌ لكل صنف.
+    for kind, ids in docs.items():
+        for adjust_ids in _adjustments_by_doc(kind, tenant_id, ids).values():
+            journal_ids.extend(adjust_ids)
     return _party_net(journal_ids, partner_id, credit_side=True), last
+
+
+def party_on_account_summary(tenant_id: int, partner_id: int) -> dict:
+    """رقما رأس كشف الطرف الدائن: «دفعات تحت الحساب» و«فائض» — بالعملة الأساسية.
+
+    تحت الحساب = غير الموزَّع من سندات صرفه المرحّلة + ما زاد على مستحقٍّ لوجستي
+    لحظة الدفع. الفائض = ما صار زائداً على مستحقٍّ لأن المستحق خُفِّض بعد الدفع
+    (`accrual_status`). مجموعهما رصيدٌ لصالحنا لم يُستهلك؛ رصيد الكشف لا يتغيّر بهما.
+    """
+    from logistics.models import LogisticsAccrualAllocation
+    from sales.models import SupplierPayment, SupplierPaymentAllocation
+
+    # `voucher_unallocated` لكل سند بثلاثة استعلامات ثابتة لا اثنين لكل سند.
+    vouchers = list(SupplierPayment.objects.filter(
+        tenant_id=tenant_id, partner_id=partner_id, is_posted=True,
+    ).only('id', 'amount', 'exchange_rate'))
+    used: dict[int, Decimal] = {}
+    for model in (SupplierPaymentAllocation, LogisticsAccrualAllocation):
+        for pid, total in model.objects.filter(payment__in=[v.pk for v in vouchers]).values(
+            'payment_id').annotate(t=Sum('amount')).values_list('payment_id', 't'):
+            used[pid] = used.get(pid, ZERO) + _money(total)
+    on_account = ZERO
+    for voucher in vouchers:
+        free = max(_money(voucher.amount) - used.get(voucher.pk, ZERO), ZERO)
+        if free > 0:
+            on_account += _payment_base(voucher, free)
+    surplus = ZERO
+    for kind, obj in _party_accrual_docs(tenant_id, partner_id):
+        status = accrual_status(kind, obj)
+        surplus += status['surplus']
+        on_account += status['overpaid'] - status['surplus']
+    return {'on_account': _money(on_account), 'surplus': _money(surplus)}
 
 
 def party_open_accruals(tenant_id: int, partner_id: int, *, include_settled: bool = False) -> list[dict]:
@@ -634,4 +734,5 @@ __all__ = [
     'suggest_accrual_fifo', 'voucher_unallocated', 'allocate_voucher_to_accruals',
     'deallocate_voucher_accrual', 'journal_reference_accrual_links', 'ACCRUAL_ANCHOR_TYPE',
     'tenant_open_accruals', 'party_accrued_total', 'shipment_id_of',
+    'ACCRUAL_ADJUST_TYPE', 'accrual_journal_ids', 'adjustment_journal_ids', 'party_on_account_summary',
 ]

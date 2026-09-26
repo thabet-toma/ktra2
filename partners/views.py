@@ -153,6 +153,12 @@ class PartnerViewSet(viewsets.ModelViewSet):
             if last_accrual:
                 last_dates.append(last_accrual)
         last_txn = max(last_dates).isoformat() if last_dates else None
+        # الدائن: رصيدٌ لنا لم يُستهلك — «دفعات تحت الحساب» و«فائض» (مستحقٌّ خُفِّض بعد
+        # دفعه) — رقمان في رأس كشفه؛ الرصيد نفسه لا يتغيّر بهما.
+        on_account = {"on_account": Decimal("0"), "surplus": Decimal("0")}
+        if is_supplier:
+            from logistics.domain.party_accruals import party_on_account_summary
+            on_account = party_on_account_summary(partner.tenant_id, partner.id)
 
         # عميل: رصيد موجب = مدين له علينا (Dr/ذمم مدينة). مورد: رصيد موجب =
         # دائن نحن مدينون له (Cr/ذمم دائنة). الإشارة السالبة تعكس الجهة.
@@ -174,6 +180,8 @@ class PartnerViewSet(viewsets.ModelViewSet):
             "total_sales": str(sales_agg["total"] or Decimal("0")),
             "total_purchases": str(total_purchases),
             "last_transaction_date": last_txn,
+            "on_account_payments": str(on_account["on_account"]),
+            "accrual_surplus": str(on_account["surplus"]),
         })
 
     @action(detail=True, methods=["get"], url_path="statement")
