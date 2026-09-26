@@ -1415,7 +1415,7 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
 
     queryset = CustomerPayment.objects.all().select_related(
         "partner", "currency", "cash_or_bank_account", "journal"
-    ).prefetch_related("allocations")
+    ).prefetch_related("allocations", "refunds__refund", "refund_sources")
     serializer_class = CustomerPaymentSerializer
 
     def get_queryset(self):
@@ -1461,12 +1461,19 @@ class CustomerPaymentViewSet(viewsets.ModelViewSet):
             validate_payment,
         )
         from rest_framework.exceptions import ValidationError as DRFValidationError
+        from sales.services.party_surplus import attach_refund_sources
+
         with transaction.atomic():
             payment = serializer.save(tenant=tenant)
             ctx = PaymentContext.from_customer_payment(payment)
             errors = validate_payment(ctx)
             if errors:
                 raise DRFValidationError({"payment": errors})
+            # سند الاسترداد/الردّ من بطاقة الطرف: ما يُطفئه من الفائض (`party_surplus`).
+            try:
+                attach_refund_sources(payment, self.request.data.get("refund_sources"), user=self.request.user)
+            except ValidationError as exc:
+                raise DRFValidationError({"refund_sources": exc.messages[0]})
         log_activity(
             action="payment", entity_type="customer_payment", entity_id=payment.id,
             entity_label=getattr(payment, "payment_number", "") or f"#{payment.id}",
@@ -2096,7 +2103,8 @@ class CreditDebitNoteViewSet(viewsets.ModelViewSet):
             "partner", "related_invoice", "related_purchase_invoice",
             "related_clearance__shipment", "related_local_shipment", "related_shipment",
             "counter_account", "currency", "journal",
-        ).prefetch_related("allocations", "accrual_allocations").filter(tenant=tenant).order_by("-note_date", "-id")
+        ).prefetch_related("allocations", "accrual_allocations", "refunds__refund").filter(
+            tenant=tenant).order_by("-note_date", "-id")
         params = self.request.query_params
         if params.get("partner"):
             qs = qs.filter(partner_id=params["partner"])
