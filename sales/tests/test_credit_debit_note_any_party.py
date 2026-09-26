@@ -166,6 +166,44 @@ class CreditDebitNoteAnyPartyTest(APITestCase):
                 res = self._create(self.broker, counter_account=account.pk)
                 self.assertEqual(res.status_code, 400, res.content)
 
+    def test_cash_bank_and_cheque_accounts_are_refused_as_counter(self):
+        # DN-0001 على الإنتاج: Dr ذمّة المخلّص / Cr «صندوق شيكل» 1B0001 — سندُ صرفٍ بلا نقد.
+        prod_box = Account.objects.create(tenant=self.tenant, code="1B0001", name="صندوق شيكل",
+                                          account_type="Asset", is_active=True)
+        bank = Account.objects.create(tenant=self.tenant, code="1102999", name="بنك المعاينة",
+                                      account_type="Asset", is_active=True, sub_type="bank")
+        cheques = Account.objects.filter(tenant=self.tenant, code__in=("1107", "1109", "2111")).first() \
+            or Account.objects.create(tenant=self.tenant, code="1107", name="شيكات برسم التحصيل",
+                                      account_type="Asset", is_active=True)
+        for label, account in (("cash", prod_box), ("bank", bank), ("cheques", cheques)):
+            with self.subTest(label=label):
+                res = self._create(self.broker, counter_account=account.pk)
+                self.assertEqual(res.status_code, 400, res.content)
+                self.assertIn("الإشعار ليس دفعاً", str(res.content.decode()))
+
+    def test_report_command_lists_posted_notes_with_a_cash_counter(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+
+        box = Account.objects.create(tenant=self.tenant, code="1B0001", name="صندوق شيكل",
+                                     account_type="Asset", is_active=True)
+        clean = self._posted(self.broker, "debit", "30")
+        dirty = self._posted(self.broker, "debit", "2942.96")
+        # ما رُحِّل قبل الحارس: يُحاكى بالكتابة المباشرة على الحقل.
+        CreditDebitNote.objects.filter(pk=dirty["id"]).update(counter_account=box)
+        before = list(JournalLine.objects.order_by("id").values_list("id", "debit", "credit"))
+        out = StringIO()
+        call_command("list_notes_with_cash_counter", tenant=self.tenant.TenantID, stdout=out)
+        text = out.getvalue()
+        self.assertIn(dirty["note_number"], text)
+        self.assertNotIn(clean["note_number"], text)
+        self.assertIn("1B0001", text)
+        self.assertIn("المجموع: 1", text)
+        # تقريرٌ فقط: لا قيد ولا إشعار تغيّر.
+        self.assertEqual(list(JournalLine.objects.order_by("id").values_list("id", "debit", "credit")), before)
+        self.assertEqual(CreditDebitNote.objects.get(pk=dirty["id"]).status, "posted")
+
     def test_vat_goes_to_output_for_customers_and_input_for_creditors(self):
         cust = self._posted(self.parties["Customer"], "debit", "117", tax_amount="17")
         codes = {l.account.code: (l.debit, l.credit) for l in self._lines(cust["id"])}

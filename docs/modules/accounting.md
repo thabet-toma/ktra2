@@ -13,7 +13,7 @@
 ## أهم الملفات
 | الملف | الغرض | أسطر |
 |---|---|---|
-| `accounting/api.py` | **الواجهة العامة للكتابة من خارج accounting** (المرحلة 2): `post_document`، `reverse_journal`، `purge_journals`، `get_account_by_code`، والجانب المحاسبي للشريك (`sync_partner_accounting`/`ensure_partner_account`/`create_partner_opening_balance`)؛ **وقراءاتٌ لمن خارجها** بدل `accounting.models`: `get_accounts_by_codes`، `journal_lines_party_net`، `journal_lines_net_by_account_partner` (صافي (حساب، طرف) لقيود مستند)، `posted_journal_ids_by_reference` | 467 |
+| `accounting/api.py` | **الواجهة العامة للكتابة من خارج accounting** (المرحلة 2): `post_document`، `reverse_journal`، `purge_journals`، `get_account_by_code`، والجانب المحاسبي للشريك (`sync_partner_accounting`/`ensure_partner_account`/`create_partner_opening_balance`)؛ **وقراءاتٌ لمن خارجها** بدل `accounting.models`: `get_accounts_by_codes`، `money_account_kind` (صندوق/بنك/شيكات)، `journal_lines_party_net`، `journal_lines_net_by_account_partner` (صافي (حساب، طرف) لقيود مستند)، `posted_journal_ids_by_reference` | 467 |
 | `accounting/services.py` | كل منطق الترحيل والتحقق: `post_journal`، `unpost_document`، الشيكات، البنوك، أرصدة الأطراف | 1738 |
 | `accounting/views.py` | 19 ViewSet: الحسابات، القيود، الشيكات، الميزان، الأستاذ، الضريبة، البنوك، الأرصدة الافتتاحية | 1963 |
 | `accounting/models.py` | 20 موديلاً محاسبياً (Account، Journal*، Cheque، Bank*، FiscalPeriod، TaxRate، OpeningBalance*…) | 824 |

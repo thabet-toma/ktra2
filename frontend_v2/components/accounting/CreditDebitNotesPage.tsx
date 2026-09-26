@@ -86,8 +86,14 @@ const linkDocTitle = (kind: CreditDebitNoteLinkKind, label: string, term: (key: 
   return label.startsWith(kindLabel) ? label : `${kindLabel} ${label}`;
 };
 
-/** حسابات لا تكون مقابلاً — الخادم يرفضها أيضاً (`credit_debit_counter_account_error`). */
-const BLOCKED_COUNTER_SUB_TYPES = new Set(["receivable", "payable", "inventory"]);
+/** حسابات لا تكون مقابلاً — الخادم يرفضها أيضاً (`credit_debit_counter_account_error`):
+ *  الذمم والمخزون، والنقد والبنوك والشيكات (الإشعار ليس دفعاً؛ `accounting.api.money_account_kind`). */
+const BLOCKED_COUNTER_SUB_TYPES = new Set(["receivable", "payable", "inventory", "cash_box", "bank"]);
+const CHEQUE_ACCOUNT_CODES = new Set(["1107", "1109", "2111"]);
+const isCounterSelectable = (a: AccountNodeLike) =>
+  !BLOCKED_COUNTER_SUB_TYPES.has(String(a.sub_type || "")) &&
+  !CHEQUE_ACCOUNT_CODES.has(String(a.code || "")) &&
+  !String(a.name || "").includes("شيكات");
 
 const STATUS_LABEL: Record<string, string> = { draft: "مسودة", posted: "مرحّل", cancelled: "ملغي" };
 const STATUS_CLASS: Record<string, string> = {
@@ -869,7 +875,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                       accounts={accounts}
                       value={formCounter ? Number(formCounter) : null}
                       onChange={(id) => { markTouched(); setFormCounter(id ? String(id) : ""); setCounterChosen(Boolean(id)); }}
-                      isSelectable={(a) => !BLOCKED_COUNTER_SUB_TYPES.has(String(a.sub_type || ""))}
+                      isSelectable={isCounterSelectable}
                       title="اختيار الحساب المقابل"
                       placeholder="— الافتراضي حسب الطرف —"
                       disabled={readOnly}

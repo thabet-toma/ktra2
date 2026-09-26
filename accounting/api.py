@@ -583,6 +583,36 @@ def posted_journal_ids_by_reference(tenant_id, reference_type: str, reference_id
     return out
 
 
+#: أكواد حسابات الشيكات المبذورة: برسم التحصيل · في المحفظة · برسم الدفع.
+_CHEQUE_ACCOUNT_CODES = ("1107", "1109", "2111")
+
+
+def money_account_kind(account) -> str | None:
+    """«cash» · «bank» · «cheques» إن كان الحساب تتحرّك به النقود فعلاً، وإلا None.
+
+    الصندوق: نوعه الفرعي أو ربطُه بصندوقٍ (`CashBoxLedgerAccount`). البنك: نوعه الفرعي
+    أو ربطُه بحسابٍ بنكي (`BankAccount`). الشيكات: أكوادها المبذورة أو اسمٌ يذكر
+    «شيكات» في الأصول والخصوم — مطابقةُ الاسم نفسها التي تحلّ بها المسارات حسابَ الشيكات
+    في الشجرات القديمة (`sales/services/calc.py` — `resolve_cheques_payable_account`).
+    يقرؤها حارس الإشعار المدين/الدائن: الإشعار تسويةٌ لا دفع.
+    """
+    from .account_classification import SUB_TYPE_BANK, SUB_TYPE_CASH_BOX, sub_type_for_account
+    from .models import BankAccount, CashBoxLedgerAccount
+
+    if account is None:
+        return None
+    sub_type = sub_type_for_account(account)
+    if sub_type == SUB_TYPE_CASH_BOX or CashBoxLedgerAccount.objects.filter(account_id=account.pk).exists():
+        return "cash"
+    if sub_type == SUB_TYPE_BANK or BankAccount.objects.filter(account_id=account.pk).exists():
+        return "bank"
+    if account.code in _CHEQUE_ACCOUNT_CODES or (
+        account.account_type in ("Asset", "Liability") and "شيكات" in (account.name or "")
+    ):
+        return "cheques"
+    return None
+
+
 def journal_lines_net_by_account_partner(journal_ids) -> dict:
     """{(حساب، طرف): (صافي الأساس مدين − دائن، صافي `amount_currency`، رمز العملة أو None)}.
 

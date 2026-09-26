@@ -524,8 +524,10 @@ _CREDITOR_COUNTER_CODES = {
     "Carrier": "5305",
 }
 #: حسابات لا تكون مقابلاً: الذمم (قيدُ ذمّةٍ على ذمّة يُيتّم الرصيد) والمخزون (قيمته
-#: تتبع طبقات الكلفة — قيدٌ عليه بلا طبقة يكسر تطابق الدفتر والطبقات).
-_BLOCKED_COUNTER_SUB_TYPES = {"receivable", "payable", "inventory"}
+#: تتبع طبقات الكلفة — قيدٌ عليه بلا طبقة يكسر تطابق الدفتر والطبقات)، والنقد والبنوك
+#: (الإشعار ليس دفعاً: DN-0001 على الإنتاج أنقص الصندوق بلا حركة نقد).
+_BLOCKED_COUNTER_SUB_TYPES = {"receivable", "payable", "inventory", "cash_box", "bank"}
+NOTE_IS_NOT_PAYMENT = "الإشعار ليس دفعاً؛ للنقد استعمل سند صرف/قبض."
 
 
 def _note_is_creditor(note) -> bool:
@@ -550,6 +552,7 @@ def _note_party_account(note) -> Account:
 def credit_debit_counter_account_error(account, tenant_id: int) -> str | None:
     """سبب رفض الحساب مقابلاً للإشعار، أو `None` إن صلح."""
     from accounting.account_classification import sub_type_for_account
+    from accounting.api import money_account_kind
 
     if account is None:
         return "اختر الحساب المقابل."
@@ -559,6 +562,8 @@ def credit_debit_counter_account_error(account, tenant_id: int) -> str | None:
         return f"الحساب «{account.code} {account.name}» غير نشط."
     if account.children.exists():
         return f"«{account.code} {account.name}» حساب مجمِّع — اختر حساباً فرعياً."
+    if money_account_kind(account):
+        return f"«{account.code} {account.name}» — {NOTE_IS_NOT_PAYMENT}"
     sub_type = sub_type_for_account(account)
     if sub_type == "inventory":
         return "حساب المخزون لا يُعدَّل بإشعار — قيمته تتبع طبقات الكلفة."
