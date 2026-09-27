@@ -20,6 +20,9 @@ import { useSimpleUi } from '../hooks/useSimpleUi';
 import { humanizeThrown } from '../utils/drfError';
 import { formatDateTimeValue } from '../utils/formatDate';
 import { MyPlanCard } from './MyPlanCard';
+import { useNavigate } from 'react-router-dom';
+import { usePermissions } from '../contexts/PermissionsContext';
+import { SUPPORT_ACCESS_PATH } from './settings/SupportAccessPage';
 import {
     listLoginDevices,
     evictLoginDevice,
@@ -37,6 +40,9 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const toast = useToast();
     const confirm = useConfirm();
     const { show: showAdv } = useSimpleUi();
+    const navigate = useNavigate();
+    const { can, loading: permsLoading } = usePermissions();
+    const canManageSupport = !permsLoading && can('admin.members.manage');
     const [profileForm, setProfileForm] = useState({
         name: user.name,
         phone: user.phone || '',
@@ -249,6 +255,17 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
             <div id="my-plan" className="mb-4">
                 <MyPlanCard />
             </div>
+
+            {/* SA-8: بابٌ دائم لقرار دخول فريق كترا — لا يبقى وصوله رهنَ تنبيهٍ أو بريد. */}
+            {canManageSupport && (
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
+                    <div>
+                        <p className="font-bold text-[var(--color-text)]">دخول فريق كترا للدعم</p>
+                        <p className="text-xs ktra-text-soft">وافق على طلبات الدعم أو ارفضها، واسحب أي إذن ساري، وراجع سجلّها.</p>
+                    </div>
+                    <button type="button" className="ktra-btn" onClick={() => navigate(SUPPORT_ACCESS_PATH)}>إدارة أذونات الدخول</button>
+                </div>
+            )}
 
             {/* المعلومات الشخصية والمهنية */}
             <form onSubmit={handleProfileUpdate}>

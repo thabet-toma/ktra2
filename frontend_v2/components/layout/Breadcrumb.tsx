@@ -40,6 +40,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'employee-ops-hiring': 'التوظيف',
   'points-management': 'إدارة النقاط',
   settings: 'الإعدادات',
+  'support-access': 'دخول فريق كترا',
   attendance: 'الحضور والغياب',
   'sales-invoices': 'فواتير المبيعات',
   'sales-customer-payments': 'دفعات العملاء',

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **922**
+عدد النقاط: **934**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -569,12 +569,16 @@
 | `/api/platform/accountant-workspace/` | `platform_accountant_workspace` | `core/platform_admin_api.py` |
 | `/api/platform/accountants/<int:profile_id>/verify/` | `platform_accountant_verify` | `core/platform_admin_api.py` |
 | `/api/platform/accountants/pending/` | `platform_accountants_pending` | `core/platform_admin_api.py` |
+| `/api/platform/audit-log/` | `platform_audit_log` | `core/platform_admin_api.py` |
+| `/api/platform/companies/` | `platform_company_create` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/` | `platform_company_detail` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/activity/` | `platform_company_activity` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/limits/` | `platform_company_limits` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/` | `platform_company_members` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/members/<int:membership_id>/` | `platform_company_member_detail` | `core/platform_admin_api.py` |
 | `/api/platform/companies/<int:pk>/modules/` | `platform_company_modules` | `core/platform_admin_api.py` |
+| `/api/platform/companies/<int:pk>/support-access/` | `platform_company_support_access` | `core/platform_admin_api.py` |
+| `/api/platform/companies/<int:pk>/usage/` | `platform_company_usage` | `core/platform_admin_api.py` |
 | `/api/platform/crm/colleagues/` | `ColleagueDirectoryView` | `crm/views.py` |
 | `/api/platform/crm/leads/` | `LeadViewSet` | `crm/views.py` |
 | `/api/platform/crm/leads/import/` | `LeadViewSet` | `crm/views.py` |
@@ -599,6 +603,7 @@
 | `/api/platform/development-notes/{pk}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
 | `/api/platform/development-notes/{pk}/comments/{comment_id}/` | `DevelopmentNoteViewSet` | `core/platform_admin_api.py` |
+| `/api/platform/health/` | `platform_health` | `core/platform_admin_api.py` |
 | `/api/platform/ops/acquisition/` | `CustomerAcquisitionView` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
 | `/api/platform/ops/activity-logs/{pk}/` | `PlatformActivityLogViewSet` | `platform_ops/views.py` |
@@ -787,6 +792,9 @@
 | `/api/platform/plan-pricing/` | `platform_plan_pricing` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/` | `platform_super_admins` | `core/platform_admin_api.py` |
 | `/api/platform/super-admins/<int:pk>/` | `platform_super_admin_detail` | `core/platform_admin_api.py` |
+| `/api/platform/support-access/` | `platform_support_access` | `core/platform_admin_api.py` |
+| `/api/platform/support-access/<int:grant_id>/end/` | `platform_support_access_end` | `core/platform_admin_api.py` |
+| `/api/platform/usage/` | `platform_usage` | `core/platform_admin_api.py` |
 | `/api/platform/users/<int:pk>/set-active/` | `platform_user_set_active` | `core/platform_admin_api.py` |
 | `/api/pricing/plans/` | `public_pricing_plans` | `core/public_pricing.py` |
 | `/api/realestate/` | `APIRootView` | `rest_framework/routers.py` |
@@ -896,6 +904,10 @@
 | `/api/store/admin/products/import-from-inventory/` | `StoreProductAdminViewSet` | `store/views.py` |
 | `/api/store/admin/products/{pk}/` | `StoreProductAdminViewSet` | `store/views.py` |
 | `/api/store/admin/settings/` | `StoreSettingsAdminView` | `store/views.py` |
+| `/api/support-access/` | `support_access_list` | `core/support_access_api.py` |
+| `/api/support-access/<int:grant_id>/approve/` | `support_access_approve` | `core/support_access_api.py` |
+| `/api/support-access/<int:grant_id>/reject/` | `support_access_reject` | `core/support_access_api.py` |
+| `/api/support-access/<int:grant_id>/revoke/` | `support_access_revoke` | `core/support_access_api.py` |
 | `/api/tenants/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/tenants/books/` | `TenantBookViewSet` | `tenants/views.py` |

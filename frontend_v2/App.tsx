@@ -75,7 +75,8 @@ const TaskDetailsModal = lazyPage(() => import("./components/TaskDetailsModal").
 const GroupConstantsPage = lazyPage(() => import("./components/settings/GroupConstantsPage").then((m) => ({ default: m.GroupConstantsPage })));
 const Dashboard = lazyPage(() => import("./components/Dashboard").then((m) => ({ default: m.Dashboard })));
 const TradeDashboard = lazyPage(() => import("./components/dashboard/TradeDashboard").then((m) => ({ default: m.TradeDashboard })));
-const SuperAdminDashboard = lazyPage(() => import("./components/superadmin/SuperAdminDashboard").then((m) => ({ default: m.SuperAdminDashboard })));
+const SuperAdminConsole = lazyPage(() => import("./components/superadmin/console/SuperAdminConsole").then((m) => ({ default: m.SuperAdminConsole })));
+const SupportAccessPage = lazyPage(() => import("./components/settings/SupportAccessPage").then((m) => ({ default: m.SupportAccessPage })));
 const DevelopmentNotesPage = lazyPage(() => import("./components/superadmin/DevelopmentNotesPage").then((m) => ({ default: m.DevelopmentNotesPage })));
 const PlatformOpsDashboard = lazyPage(() => import("./components/platform/PlatformOpsDashboard").then((m) => ({ default: m.PlatformOpsDashboard })));
 const MyAgentBooksPage = lazyPage(() => import("./components/my-agent/MyAgentBooksPage").then((m) => ({ default: m.MyAgentBooksPage })));
@@ -355,6 +356,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "about-us": "/about-us",
   contact: "/contact",
   settings: "/settings",
+  // SA-8: قرار الشركة في دخول فريق كترا — رابط بريد الطلب يشير إليه حرفياً.
+  "support-access": "/settings/support-access",
   sourcing: "/sourcing",
   // `store` ليست شاشة في هذا التطبيق: `/store` وما تحته يُخدَم من `index.tsx`
   // خارج المصادقة كلياً — إبقاؤه هنا كان سيعيد ربط مسارٍ عام بشاشة لا وجود لها.
@@ -670,7 +673,9 @@ const App: React.FC = () => {
     const path = (location.pathname || "/").replace(/\/$/, "") || "/";
     // `/store*` لا يصل إلى هنا إطلاقاً: المتجر العام يُوجَّه في `index.tsx`
     // خارج `AuthProvider` كلياً، فلا شاشة متجر داخل هذا التطبيق ولا حالة له.
-    if (path.startsWith("/settings")) {
+    if (path === "/settings/support-access") {
+      setAppView("support-access");
+    } else if (path.startsWith("/settings")) {
       setAppView("settings");
     } else if (path.startsWith("/about-us")) {
       setAppView("about-us");
@@ -787,8 +792,12 @@ const App: React.FC = () => {
       setAppView("accounting-journal-entry");
       return;
     }
+    // SA-5: كل `/super-admin/*` غير المسجّل بعينه (الشركات، صفحة شركة، الأسعار،
+    // السجل…) عرضٌ واحد يختار قسمه من المسار — `SuperAdminConsole`.
+    const consoleView: AppView | undefined =
+      path.startsWith("/super-admin/") && !PATH_TO_VIEW[path] ? "super-admin" : undefined;
     // task14 M1: بقية الصفحات — مطابقة مباشرة من جدول المسارات
-    const mappedView = PATH_TO_VIEW[path];
+    const mappedView = PATH_TO_VIEW[path] ?? consoleView;
     if (mappedView) {
       if (
         (mappedView === "super-admin" || mappedView === "development-notes"
@@ -1715,7 +1724,7 @@ const App: React.FC = () => {
         if (!currentUser!.isSuperAdmin) {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
-        return <SuperAdminDashboard onNavigate={setViewAndSyncPath} />;
+        return <SuperAdminConsole />;
 
       case "development-notes":
         if (!currentUser!.isSuperAdmin) {
@@ -1742,6 +1751,9 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <BillingRecordsScreen />;
+
+      case "support-access":
+        return <SupportAccessPage />;
 
       case "platform-hiring":
         return <PlatformHiringScreen canManageRecruiters={!!currentUser!.isSuperAdmin} />;

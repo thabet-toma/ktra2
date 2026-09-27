@@ -128,8 +128,9 @@ class MyPlanUsageTest(APITestCase):
     def test_the_whole_card_costs_a_fixed_number_of_queries(self):
         """عددٌ **مطلق**، لا موازنةُ تشغيلٍ بتشغيلٍ لنفس المعطيات.
 
-        التركيبُ اليوم أربعةَ عشرَ: ثلاثةٌ لحلّ الشركة والتحقّق من العضويّة وقراءة
-        التجاوزات، وأحدَ عشرَ عدّاً لأحدَ عشرَ حدّاً — والتساويُ **مصادفةٌ لا
+        التركيبُ اليوم خمسةَ عشرَ (SA-4 أضاف حدّ `company.storage_mb` قراراً
+        واعياً: مجموع بايتات `TenantAsset` — استعلامٌ واحد): ثلاثةٌ لحلّ الشركة
+        والتحقّق من العضويّة وقراءة التجاوزات، واثنا عشرَ عدّاً لاثني عشرَ حدّاً — والتساويُ **مصادفةٌ لا
         قاعدة**: `employee_ops.seats` يعدّ الأعضاءَ والدعواتِ المعلَّقة (عدّان)،
         و`documents.invoices` **لا يعدّ شيئاً** بل يُشتقُّ جمعاً من
         `sales.invoices` و`purchase.invoices` المعدودَين سلفاً. ورقمٌ مطلقٌ لا
@@ -149,7 +150,7 @@ class MyPlanUsageTest(APITestCase):
         """
         self.client.force_authenticate(user=self.user)
         self.client.get(URL, HTTP_X_TENANT_ID=str(self.tenant.TenantID))
-        with self.assertNumQueries(14):
+        with self.assertNumQueries(15):
             response = self.client.get(
                 URL, HTTP_X_TENANT_ID=str(self.tenant.TenantID)
             )

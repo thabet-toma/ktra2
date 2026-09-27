@@ -135,6 +135,35 @@ class MediaUploadLedgerTest(TestCase):
         assert asset.uploaded_by_id == self.member.pk
 
     @patch("cloudinary.uploader.upload")
+    def test_storage_limit_refuses_before_uploading(self, mock_upload):
+        """SA-4: شركةٌ بلغت حدّ مساحتها لا يُرفع ملفها أصلاً — لا نداء لـCloudinary."""
+        from core.models import TenantLimit
+
+        TenantLimit.objects.create(tenant=self.tenant, limit_key="company.storage_mb", max_value=1)
+        TenantAsset.objects.create(
+            tenant=self.tenant, public_id="old/big", bytes=1024 * 1024)
+
+        res = self._api(self.member_token, self.tenant).post(
+            UPLOAD_URL, {"file": self._png()}, format="multipart")
+
+        assert res.status_code == 400, res.content[:300]
+        assert "مساحة التخزين" in res.json()["detail"]
+        mock_upload.assert_not_called()
+
+    @patch("cloudinary.uploader.upload")
+    def test_storage_under_the_limit_uploads_normally(self, mock_upload):
+        from core.models import TenantLimit
+
+        TenantLimit.objects.create(tenant=self.tenant, limit_key="company.storage_mb", max_value=2)
+        TenantAsset.objects.create(tenant=self.tenant, public_id="old/small", bytes=1024)
+        mock_upload.return_value = self._cloudinary_result(f"ktra_uploads/t{self.tenant.pk}/ok", 512)
+
+        res = self._api(self.member_token, self.tenant).post(
+            UPLOAD_URL, {"file": self._png()}, format="multipart")
+
+        assert res.status_code == 200, res.content[:300]
+
+    @patch("cloudinary.uploader.upload")
     def test_platform_scope_from_a_super_admin_is_attributed_to_no_company(self, mock_upload):
         mock_upload.return_value = self._cloudinary_result("ktra_uploads/note", 512)
 

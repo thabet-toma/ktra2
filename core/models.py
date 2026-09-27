@@ -365,3 +365,142 @@ class ActivityLogPartner(models.Model):
                 fields=["activity", "partner"], name="uniq_activity_log_partner",
             ),
         ]
+
+
+class PlatformAuditLogQuerySet(models.QuerySet):
+    """سجلّ التدقيق append-only: لا `update()` ولا `delete()` جماعيّاً عبر الـORM."""
+
+    def update(self, **kwargs):
+        raise PermissionError('سجلّ تدقيق المنصة لا يُعدَّل.')
+
+    def delete(self):
+        raise PermissionError('سجلّ تدقيق المنصة لا يُحذَف.')
+
+
+class PlatformAuditLog(models.Model):
+    """سجلّ تدقيق المنصة — كل فعلٍ إداريّ للسوبر أدمن وكل حدثٍ أمنيّ عابر للشركات.
+
+    يسدّ فجوة `ActivityLog`/`AccountingAuditLog` اللذين يلزمهما `tenant`: منح
+    السوبر أدمن وسحبه، وأسعار الخطط، ومحاولات الدخول الفاشلة لا شركة لها،
+    فكانت تُكتب في `logger.info` وحده وتضيع مع ملفّ اللوغ. **append-only**:
+    الحفظ الثاني والحذف يرفعان خطأ. يُكتب عبر `core.platform_audit` فقط.
+    الشركة والمستخدم المستهدف مع نسخةٍ نصّية من اسميهما، فالسطر يبقى مقروءاً
+    ولو تغيّر الاسم لاحقاً.
+    """
+
+    SEVERITIES = [
+        ('info', 'معلومة'),
+        ('warning', 'تنبيه'),
+        ('high', 'خطورة عالية'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    action = models.CharField(max_length=40, db_index=True)
+    severity = models.CharField(max_length=10, choices=SEVERITIES, default='info', db_index=True)
+    actor = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='platform_audit_actions', db_column='ActorID')
+    actor_label = models.CharField(max_length=150, blank=True, default='')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='platform_audit_events', db_column='TenantID')
+    tenant_label = models.CharField(max_length=200, blank=True, default='')
+    target_user = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='platform_audit_targets', db_column='TargetUserID')
+    target_label = models.CharField(max_length=200, blank=True, default='')
+    reason = models.TextField(blank=True, default='')
+    metadata = models.JSONField(default=dict, blank=True)
+    ip_address = models.CharField(max_length=64, null=True, blank=True)
+    trace_id = models.CharField(max_length=64, blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    objects = PlatformAuditLogQuerySet.as_manager()
+
+    class Meta:
+        db_table = 'platform_audit_logs'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(fields=['tenant', '-created_at'], name='paudit_tenant_ts_idx'),
+            models.Index(fields=['action', '-created_at'], name='paudit_action_ts_idx'),
+        ]
+
+    def save(self, *args, **kwargs):
+        if self.pk is not None and not self._state.adding:
+            raise PermissionError('سجلّ تدقيق المنصة لا يُعدَّل.')
+        super().save(*args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        raise PermissionError('سجلّ تدقيق المنصة لا يُحذَف.')
+
+    def __str__(self):
+        return f'{self.action} [{self.severity}] {self.created_at:%Y-%m-%d %H:%M}'
+
+
+class SupportAccessGrant(models.Model):
+    """إذن دخول فريق كترا (سوبر أدمن) إلى شركةٍ ليس عضواً فيها — SA-2.
+
+    الدورة: `pending` (طلبٌ بسببٍ مكتوب) ← `active` بموافقة مالك الشركة أو مديرها
+    (قد تُقصِّر المدة أو تُخفِّض النطاق) | `rejected`. والإذن الساري ينتهي بمرور
+    `expires_at` أو بسحبه (`revoked`، من الشركة أو بخروج صاحبه). الطلب المعلّق
+    يسقط بعد مهلة (`core/support_access.py` — `PENDING_TTL`). **الدخول الطارئ**
+    (`is_emergency`) يولد `active` بلا موافقة، بسببٍ إلزاميٍّ ومدةٍ قصيرة، وتُبلَّغ
+    الشركة فوراً. الإذن شخصيّ: لـ`requested_by` وحده، لا لكل سوبر أدمن.
+    الإنفاذ في `core/tenant_utils.py` (`_validate_user_tenant_access`).
+    """
+
+    STATUS_PENDING = 'pending'
+    STATUS_ACTIVE = 'active'
+    STATUS_REJECTED = 'rejected'
+    STATUS_REVOKED = 'revoked'
+    STATUS_CANCELLED = 'cancelled'
+    STATUSES = [
+        (STATUS_PENDING, 'بانتظار موافقة الشركة'),
+        (STATUS_ACTIVE, 'ساري'),
+        (STATUS_REJECTED, 'مرفوض'),
+        (STATUS_REVOKED, 'مسحوب'),
+        (STATUS_CANCELLED, 'ملغى'),
+    ]
+    SCOPE_READ_ONLY = 'read_only'
+    SCOPE_FULL = 'full'
+    SCOPES = [
+        (SCOPE_READ_ONLY, 'قراءة فقط'),
+        (SCOPE_FULL, 'كامل (قراءة وتعديل)'),
+    ]
+
+    id = models.BigAutoField(primary_key=True)
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name='support_access_grants',
+        db_column='TenantID')
+    requested_by = models.ForeignKey(
+        'auth.User', on_delete=models.PROTECT, related_name='support_access_requests')
+    reason = models.TextField()
+    requested_scope = models.CharField(max_length=10, choices=SCOPES, default=SCOPE_READ_ONLY)
+    requested_hours = models.PositiveSmallIntegerField()
+    is_emergency = models.BooleanField(default=False)
+    status = models.CharField(max_length=10, choices=STATUSES, default=STATUS_PENDING, db_index=True)
+    scope = models.CharField(max_length=10, choices=SCOPES, blank=True, default='')
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True)
+    decided_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='support_access_decisions')
+    decided_at = models.DateTimeField(null=True, blank=True)
+    decision_note = models.TextField(blank=True, default='')
+    revoked_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='support_access_revocations')
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    first_used_at = models.DateTimeField(null=True, blank=True)
+    last_used_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'support_access_grants'
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(
+                fields=['tenant', 'requested_by', 'status'], name='sagrant_lookup_idx'),
+        ]
+
+    def __str__(self):
+        return f'SupportAccessGrant#{self.pk} tenant={self.tenant_id} {self.status}'

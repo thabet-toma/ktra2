@@ -25,6 +25,7 @@ from core.models import (
     TenantAsset, TenantLimit, TenantModule,
 )
 from core.modules import MODULES, invalidate_module_cache
+from core.platform_audit import record_platform_event
 from core.plans import (
     LIMITS, PLAN_LABELS, PLAN_PRICING_DEFAULTS, bulk_overrides, bulk_usage,
     invalidate_limit_cache, invalidate_plan_pricing_cache, limit_rows,
@@ -287,9 +288,11 @@ def platform_super_admins(request):
         return Response(
             {'detail': 'هذا المستخدم سوبر أدمن أصلاً.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    target.is_superuser = True
-    target.is_staff = True
-    target.save(update_fields=['is_superuser', 'is_staff'])
+    with transaction.atomic():
+        target.is_superuser = True
+        target.is_staff = True
+        target.save(update_fields=['is_superuser', 'is_staff'])
+        record_platform_event('SUPER_ADMIN_GRANTED', request=request, target_user=target)
     logger.info('platform super admin granted user=%s by_user=%s', target.pk, request.user.pk)
     return Response(_super_admin_row(target), status=status.HTTP_201_CREATED)
 
@@ -313,11 +316,21 @@ def platform_super_admin_detail(request, pk):
             status=status.HTTP_400_BAD_REQUEST,
         )
 
-    target.is_superuser = False
-    target.is_staff = False
-    target.save(update_fields=['is_superuser', 'is_staff'])
+    with transaction.atomic():
+        target.is_superuser = False
+        target.is_staff = False
+        target.save(update_fields=['is_superuser', 'is_staff'])
+        record_platform_event('SUPER_ADMIN_REVOKED', request=request, target_user=target)
     logger.info('platform super admin revoked user=%s by_user=%s', target.pk, request.user.pk)
     return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+def _plan_choices():
+    """خطط الاشتراك بأسمائها من `PLAN_LABELS` — الواجهة لا تحمل نسخةً منها."""
+    return [
+        {'key': key, 'label': PLAN_LABELS.get(key, key)}
+        for key, _ in Tenant.SUBSCRIPTION_PLANS
+    ]
 
 
 def _company_payload(tenant, member_count=None):
@@ -328,6 +341,7 @@ def _company_payload(tenant, member_count=None):
         'id': tenant.TenantID,
         'name': tenant.CompanyName,
         'plan': tenant.SubscriptionPlan,
+        'plan_label': PLAN_LABELS.get(tenant.SubscriptionPlan, tenant.SubscriptionPlan),
         'status': tenant.Status,
         'subscription_ends_at': expiry['ends_at'],
         'subscription_days_left': expiry['days_left'],
@@ -497,6 +511,7 @@ def platform_dashboard(request):
         'status_distribution': status_counts,
         'plan_distribution': plan_counts,
         'company_rows': company_rows,
+        'plan_choices': _plan_choices(),
         'kpis': _dashboard_kpis(company_rows, status_counts),
         'storage': {
             'ledger_total_bytes': ledger_total_bytes,
@@ -633,6 +648,10 @@ def platform_company_modules(request, pk):
             tenant=tenant,
             user=request.user,
         )
+        record_platform_event(
+            'MODULE_TOGGLED', request=request, tenant=tenant, reason=plan_note,
+            metadata={'module': module_key, 'previous_enabled': previous, 'enabled': enabled},
+        )
         transaction.on_commit(
             lambda tenant_id=tenant.pk: invalidate_module_cache(
                 tenant_id,
@@ -733,6 +752,13 @@ def platform_company_limits(request, pk):
             tenant=tenant,
             user=request.user,
         )
+        record_platform_event(
+            'LIMIT_CHANGED', request=request, tenant=tenant, reason=note,
+            metadata={
+                'limit': limit_key, 'previous_limit': previous_limit,
+                'new_limit': new_value, 'reset': reset,
+            },
+        )
         transaction.on_commit(
             lambda tenant_id=tenant.pk: invalidate_limit_cache(tenant_id)
         )
@@ -774,16 +800,19 @@ def _plan_pricing_rows():
     return rows
 
 
+def _plan_pricing_effective(plan_key):
+    overrides = plan_pricing_overrides()
+    return overrides.get(plan_key, PLAN_PRICING_DEFAULTS[plan_key])
+
+
 @api_view(['GET', 'PUT'])
 @authentication_classes([TokenAuthentication, SessionAuthentication])
 @permission_classes([IsPlatformAdmin])
 def platform_plan_pricing(request):
     """أسعار الخطط: قراءتها مع الافتراض والتجاوز (GET)، وضبط/استعادة سعر (PUT).
 
-    لا شركة هنا — السعر يخصّ الخطة كلها، فلا سجل نشاطٍ يربطه بشركة بعينها؛
-    نفس نمط `platform_super_admins` (منح/سحب) الذي يكتفي بسطر `logger.info`
-    لأفعالٍ عابرة للشركات بلا `ActivityLog`/`AccountingAuditLog` (كلاهما يلزمه
-    `tenant` غير قابل لأن يكون فارغاً).
+    لا شركة هنا — السعر يخصّ الخطة كلها، فلا `ActivityLog`/`AccountingAuditLog`
+    (كلاهما يلزمه `tenant`)؛ الأثر في `PlatformAuditLog` بلا شركة، كمنح السوبر أدمن.
     """
     if request.method == 'GET':
         return Response({'results': _plan_pricing_rows()})
@@ -794,6 +823,7 @@ def platform_plan_pricing(request):
     monthly_price = serializer.validated_data['monthly_price']
     note = serializer.validated_data['note']
     default_price = PLAN_PRICING_DEFAULTS[plan_key]
+    previous_price = _plan_pricing_effective(plan_key)
 
     with transaction.atomic():
         if monthly_price == default_price:
@@ -811,6 +841,13 @@ def platform_plan_pricing(request):
                 },
             )
             new_price = monthly_price
+        record_platform_event(
+            'PLAN_PRICE_CHANGED', request=request, reason=note,
+            metadata={
+                'plan': plan_key, 'previous_price': str(previous_price),
+                'new_price': str(new_price),
+            },
+        )
         transaction.on_commit(invalidate_plan_pricing_cache)
 
     logger.info(
@@ -912,10 +949,16 @@ def platform_accountant_verify(request, profile_id):
     profile.verified_by = request.user
     profile.verified_at = timezone.now()
     profile.rejection_reason = '' if decision == 'verified' else reason[:2000]
-    profile.save(update_fields=[
-        'verification_status', 'verified_by', 'verified_at',
-        'rejection_reason', 'updated_at',
-    ])
+    with transaction.atomic():
+        profile.save(update_fields=[
+            'verification_status', 'verified_by', 'verified_at',
+            'rejection_reason', 'updated_at',
+        ])
+        record_platform_event(
+            'ACCOUNTANT_VERIFIED', request=request, target_user=profile.user,
+            reason=reason, metadata={'profile_id': profile.pk, 'decision': decision},
+            severity='warning' if decision == 'barred' else None,
+        )
     logger.info(
         'platform accountant verification profile=%s decision=%s by_user=%s',
         profile.pk,
@@ -1000,6 +1043,10 @@ def platform_accountant_workspace(request):
                 object_id=module_row.pk,
                 change_details='module=accountant_portal; enabled=true',
             )
+        record_platform_event(
+            'ACCOUNTANT_WORKSPACE_OPENED', request=request, tenant=office,
+            metadata={'profile_created': profile_created, 'office_created': office_created},
+        )
         transaction.on_commit(
             lambda tenant_id=office.pk: invalidate_module_cache(tenant_id, request=request)
         )
@@ -1076,6 +1123,14 @@ _COMPANY_EVENT_FIELDS = {
 }
 
 
+# رمز حدث الشركة ← رمزه في سجلّ تدقيق المنصة (الحالة والخطة لهما فلترٌ خاص).
+_PLATFORM_COMPANY_EVENTS = {
+    'PLAN_CHANGED': 'COMPANY_PLAN_CHANGED',
+    'STATUS_CHANGED': 'COMPANY_STATUS_CHANGED',
+    'SUBSCRIPTION_END_CHANGED': 'COMPANY_UPDATED',
+}
+
+
 def _json_safe(value):
     """التاريخ نصّاً قبل أن يدخل `metadata` — JSONField لا يسلسل `date`."""
     return value.isoformat() if isinstance(value, date) else value
@@ -1104,6 +1159,14 @@ def _log_company_changes(request, tenant, changed, previous):
             request=request,
             tenant=tenant,
             user=request.user,
+        )
+        record_platform_event(
+            _PLATFORM_COMPANY_EVENTS[event_code], request=request, tenant=tenant,
+            metadata={
+                'field': field,
+                'previous': _json_safe(previous[field]),
+                'new': _json_safe(new_value),
+            },
         )
 
 
@@ -1159,6 +1222,10 @@ def platform_company_detail(request, pk):
                     set_example_company(None)
                     tenant.is_example = False
                 changed.append('is_example')
+                record_platform_event(
+                    'COMPANY_UPDATED', request=request, tenant=tenant,
+                    metadata={'field': 'is_example', 'new': bool(requested)},
+                )
             if changed:
                 logger.info('platform company updated tenant=%s fields=%s by_user=%s',
                             tenant.pk, ','.join(changed), request.user.pk)
@@ -1168,6 +1235,7 @@ def platform_company_detail(request, pk):
         **_company_payload(tenant),
         **_company_activity_extras(tenant),
         'members': _member_rows(tenant),
+        'plan_choices': _plan_choices(),
     })
 
 
@@ -1235,8 +1303,14 @@ def platform_company_members(request, pk):
             {'detail': 'لا يوجد مستخدم بهذا الاسم أو البريد. يجب أن يسجّل حسابه أولاً.'},
             status=status.HTTP_404_NOT_FOUND,
         )
-    membership, created = UserCompanyMembership.objects.get_or_create(
-        user=target, tenant=tenant, defaults={'role': role})
+    with transaction.atomic():
+        membership, created = UserCompanyMembership.objects.get_or_create(
+            user=target, tenant=tenant, defaults={'role': role})
+        if created:
+            record_platform_event(
+                'MEMBER_ADDED', request=request, tenant=tenant, target_user=target,
+                metadata={'membership_id': membership.pk, 'role': role},
+            )
     if not created:
         return Response(
             {'detail': 'المستخدم عضو في هذه الشركة بالفعل.'}, status=status.HTTP_400_BAD_REQUEST)
@@ -1269,7 +1343,12 @@ def platform_company_member_detail(request, pk, membership_id):
                 status=status.HTTP_400_BAD_REQUEST,
             )
         user_id = membership.user_id
-        membership.delete()
+        with transaction.atomic():
+            record_platform_event(
+                'MEMBER_REMOVED', request=request, tenant=tenant, target_user=membership.user,
+                metadata={'membership_id': membership.pk, 'role': membership.role},
+            )
+            membership.delete()
         logger.info('platform member removed tenant=%s user=%s by_user=%s',
                     tenant.pk, user_id, request.user.pk)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -1296,7 +1375,15 @@ def platform_company_member_detail(request, pk, membership_id):
             request.data.get('can_access_import'))
         changed.append('can_access_import')
     if changed:
-        membership.save(update_fields=changed)
+        with transaction.atomic():
+            membership.save(update_fields=changed)
+            record_platform_event(
+                'MEMBER_UPDATED', request=request, tenant=tenant, target_user=membership.user,
+                metadata={
+                    'membership_id': membership.pk,
+                    **{field: getattr(membership, field) for field in changed},
+                },
+            )
         logger.info('platform membership updated id=%s fields=%s by_user=%s',
                     membership.pk, ','.join(changed), request.user.pk)
     return Response(member_payload(membership))
@@ -1325,8 +1412,546 @@ def platform_user_set_active(request, pk):
                 {'detail': 'حساب سوبر أدمن مُهيّأ في إعدادات المنصة — لا يُوقف من هنا.'},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-    target.is_active = is_active
-    target.save(update_fields=['is_active'])
+    previous_active = target.is_active
+    with transaction.atomic():
+        target.is_active = is_active
+        target.save(update_fields=['is_active'])
+        record_platform_event(
+            'USER_ACTIVE_CHANGED', request=request, target_user=target,
+            metadata={'previous': previous_active, 'is_active': is_active},
+        )
     logger.info('platform user active=%s user=%s by_user=%s',
                 is_active, target.pk, request.user.pk)
     return Response({'id': target.pk, 'username': target.username, 'is_active': target.is_active})
+
+
+PLATFORM_AUDIT_PAGE_SIZE = 50
+
+
+def _platform_audit_row(entry):
+    from core.platform_audit import event_label
+
+    return {
+        'id': entry.id,
+        'action': entry.action,
+        'action_label': event_label(entry.action),
+        'severity': entry.severity,
+        'actor_id': entry.actor_id,
+        'actor': entry.actor_label,
+        'tenant_id': entry.tenant_id,
+        'tenant': entry.tenant_label,
+        'target_user_id': entry.target_user_id,
+        'target_user': entry.target_label,
+        'reason': entry.reason,
+        'metadata': entry.metadata,
+        'ip_address': entry.ip_address,
+        'trace_id': entry.trace_id,
+        'created_at': entry.created_at,
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_audit_log(request):
+    """سجلّ تدقيق المنصة — قراءة فقط، مرقَّم، بفلاتر: شركة، حدث، خطورة، فاعل، تاريخ، بحث.
+
+    `events` في الردّ هو كتالوج الأحداث وتسمياتها من `core.platform_audit`
+    (مصدرٌ واحد للفلتر وللتسمية في الواجهة).
+    """
+    from core.models import PlatformAuditLog
+    from core.platform_audit import PLATFORM_EVENTS
+
+    params = request.query_params
+    queryset = PlatformAuditLog.objects.all()
+    for param, field in (('tenant', 'tenant_id'), ('actor', 'actor_id')):
+        value = params.get(param)
+        if value:
+            if not str(value).isdigit():
+                return Response({param: 'قيمة غير صالحة.'}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(**{field: int(value)})
+    if params.get('action'):
+        queryset = queryset.filter(action=params['action'])
+    if params.get('severity'):
+        queryset = queryset.filter(severity=params['severity'])
+    for param, lookup in (('date_from', 'created_at__date__gte'), ('date_to', 'created_at__date__lte')):
+        if params.get(param):
+            try:
+                parsed = parse_date(params[param])
+            except ValueError:  # شكلٌ صحيح بقيمٍ مستحيلة (شهر 13)
+                parsed = None
+            if parsed is None:
+                return Response({param: 'تاريخ غير صالح.'}, status=status.HTTP_400_BAD_REQUEST)
+            queryset = queryset.filter(**{lookup: parsed})
+    search = (params.get('q') or '').strip()
+    if search:
+        queryset = queryset.filter(
+            Q(actor_label__icontains=search) | Q(tenant_label__icontains=search)
+            | Q(target_label__icontains=search) | Q(reason__icontains=search)
+        )
+
+    try:
+        page = max(1, int(params.get('page') or 1))
+    except ValueError:
+        page = 1
+    total = queryset.count()
+    start = (page - 1) * PLATFORM_AUDIT_PAGE_SIZE
+    rows = queryset[start:start + PLATFORM_AUDIT_PAGE_SIZE]
+    return Response({
+        'count': total,
+        'page': page,
+        'page_size': PLATFORM_AUDIT_PAGE_SIZE,
+        'results': [_platform_audit_row(entry) for entry in rows],
+        'events': [
+            {'action': key, 'label': label, 'severity': severity}
+            for key, (severity, label) in PLATFORM_EVENTS.items()
+        ],
+    })
+
+
+def _support_access_response(fn, **kwargs):
+    from core.models import SupportAccessGrant
+    from core.support_access import SupportAccessError, grant_payload
+
+    try:
+        grant = fn(**kwargs)
+    except SupportAccessGrant.DoesNotExist:
+        return Response({'detail': 'الإذن غير موجود.'}, status=status.HTTP_404_NOT_FOUND)
+    except SupportAccessError as exc:
+        return Response({'detail': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(grant_payload(grant), status=status.HTTP_201_CREATED)
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_support_access(request, pk):
+    """أذونات الدخول لشركة (GET)، وطلب إذن أو دخولٌ طارئ (POST) — SA-2.
+
+    POST: {reason, scope: read_only|full, hours: 4|24|168} طلبٌ ينتظر موافقة الشركة،
+    أو {reason, emergency: true} دخولٌ فوريّ لأربع ساعات تُبلَّغ به الشركة.
+    """
+    from core.models import SupportAccessGrant
+    from core.support_access import emergency_access, grant_payload, request_access
+
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+    if request.method == 'GET':
+        grants = (
+            SupportAccessGrant.objects.filter(tenant=tenant)
+            .select_related('tenant', 'requested_by', 'decided_by', 'revoked_by')[:50]
+        )
+        return Response({'results': [grant_payload(grant) for grant in grants]})
+
+    if _BOOL_FIELD.to_internal_value(request.data.get('emergency', False)):
+        return _support_access_response(
+            emergency_access, tenant=tenant, actor=request.user,
+            reason=request.data.get('reason'), request=request,
+        )
+    return _support_access_response(
+        request_access, tenant=tenant, actor=request.user,
+        reason=request.data.get('reason'), scope=request.data.get('scope'),
+        hours=request.data.get('hours'), request=request,
+    )
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_support_access(request):
+    """كل أذونات الدخول على المنصة — `?status=pending|active` لصفحة «طلبات الدخول»."""
+    from core.models import SupportAccessGrant
+    from core.support_access import PENDING_TTL, grant_payload
+
+    now = timezone.now()
+    queryset = SupportAccessGrant.objects.select_related(
+        'tenant', 'requested_by', 'decided_by', 'revoked_by')
+    wanted = request.query_params.get('status')
+    if wanted == 'pending':
+        queryset = queryset.filter(status='pending', created_at__gt=now - PENDING_TTL)
+    elif wanted == 'active':
+        queryset = queryset.filter(status='active', expires_at__gt=now)
+    elif wanted:
+        return Response({'status': 'القيمة: pending أو active.'}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'results': [grant_payload(grant, now) for grant in queryset[:100]]})
+
+
+@api_view(['POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_support_access_end(request, grant_id):
+    """إنهاء إذن ساري (خروج) أو إلغاء طلبٍ معلّق — قبل موعده."""
+    from core.support_access import revoke
+
+    response = _support_access_response(
+        revoke, grant_id=grant_id, actor=request.user,
+        note=request.data.get('note', ''), request=request,
+    )
+    if response.status_code == status.HTTP_201_CREATED:
+        response.status_code = status.HTTP_200_OK
+    return response
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_usage(request):
+    """حجم استعمال كل الشركات (SA-3): حركات ومستندات (الكل وهذا الشهر) ومستخدمون نشطون.
+
+    من الكاش عشر دقائق مع `computed_at`؛ `?refresh=1` يعيد الحساب الآن.
+    """
+    from core.usage import counter_catalog, platform_usage as compute_platform_usage
+
+    refresh = str(request.query_params.get('refresh') or '').lower() in {'1', 'true'}
+    payload = compute_platform_usage(refresh=refresh)
+    names = dict(Tenant.objects.values_list('TenantID', 'CompanyName'))
+    return Response({
+        'computed_at': payload['computed_at'],
+        'counter_catalog': counter_catalog(),
+        'results': [
+            {'tenant_id': tenant_id, 'name': names.get(tenant_id, ''), **row}
+            for tenant_id, row in payload['rows'].items()
+        ],
+    })
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_usage(request, pk):
+    """استعمال شركة واحدة محسوباً الآن — لصفحة الشركة (رخيصٌ لشركة واحدة)."""
+    from core.usage import compute_usage, counter_catalog
+
+    tenant = Tenant.objects.filter(pk=pk).first()
+    if tenant is None:
+        return Response({'detail': 'الشركة غير موجودة.'}, status=status.HTTP_404_NOT_FOUND)
+    row = compute_usage([tenant.pk])[tenant.pk]
+    return Response({
+        'computed_at': timezone.now(),
+        'counter_catalog': counter_catalog(),
+        'tenant_id': tenant.pk,
+        'name': tenant.CompanyName,
+        **row,
+    })
+
+
+# ── SA-9: إنشاء شركة لعميل من اللوحة ─────────────────────────────────────────
+
+# `client_book` خارج القائمة: دفتر العميل يولد من مكتب محاسبة (`managed_by`)
+# عبر مساره، لا من لوحة المنصة بلا مكتب.
+_CREATABLE_TEMPLATES = ('general', 'accounting_firm', 'tyres')
+MAX_TRIAL_DAYS = 90
+
+
+def _creation_options():
+    from core.plans import TRIAL_PERIOD_DAYS
+    from tenants.company_templates import COMPANY_TEMPLATES
+
+    return {
+        'templates': [
+            {'key': key, 'label': COMPANY_TEMPLATES[key]['name']}
+            for key in _CREATABLE_TEMPLATES if key in COMPANY_TEMPLATES
+        ],
+        'plans': _plan_choices(),
+        'default_trial_days': TRIAL_PERIOD_DAYS,
+        'max_trial_days': MAX_TRIAL_DAYS,
+    }
+
+
+def _creation_errors(data):
+    """يتحقّق من طلب الإنشاء كاملاً قبل أي كتابة — يعيد (القيم، الأخطاء)."""
+    errors = {}
+    name = str(data.get('name') or '').strip()
+    owner_email = str(data.get('owner_email') or '').strip().lower()
+    template = str(data.get('template') or 'general').strip()
+    plan = str(data.get('plan') or 'Trial').strip()
+    if not name:
+        errors['name'] = 'اسم الشركة مطلوب.'
+    elif len(name) > Tenant._meta.get_field('CompanyName').max_length:
+        errors['name'] = 'اسم الشركة أطول من المسموح.'
+    if not owner_email:
+        errors['owner_email'] = 'بريد مالك الشركة مطلوب.'
+    if template not in _CREATABLE_TEMPLATES:
+        errors['template'] = 'قالب غير متاح للإنشاء من اللوحة.'
+    if plan not in {key for key, _ in Tenant.SUBSCRIPTION_PLANS}:
+        errors['plan'] = 'خطة اشتراك غير معروفة.'
+
+    ends_at = None
+    if plan == 'Trial':
+        raw_days = data.get('trial_days')
+        if raw_days not in (None, ''):
+            try:
+                days = int(raw_days)
+            except (TypeError, ValueError):
+                days = 0
+            if not 1 <= days <= MAX_TRIAL_DAYS:
+                errors['trial_days'] = f'مدة التجربة بين يوم و{MAX_TRIAL_DAYS} يوماً.'
+            else:
+                ends_at = timezone.localdate() + timedelta(days=days)
+    else:
+        raw_end = data.get('subscription_ends_at')
+        if raw_end not in (None, ''):
+            ends_at = parse_date(str(raw_end).strip())
+            if ends_at is None:
+                errors['subscription_ends_at'] = 'تاريخ غير صالح — الصيغة YYYY-MM-DD.'
+            elif ends_at <= timezone.localdate():
+                errors['subscription_ends_at'] = 'تاريخ انتهاء الاشتراك يجب أن يكون بعد اليوم.'
+    values = {
+        'name': name, 'owner_email': owner_email, 'template': template,
+        'plan': plan, 'ends_at': ends_at,
+    }
+    return values, errors
+
+
+def _notify_new_company_owner(tenant, owner) -> None:
+    """بريدٌ للمالك أن شركته جاهزة — best-effort: الشركة تظهر له عند دخوله أياً كان."""
+    try:
+        from django.conf import settings
+        from django.core.mail import send_mail
+
+        if not owner.email:
+            return
+        base = getattr(settings, 'FRONTEND_URL', '').rstrip('/')
+        link = base or 'موقع كترا'
+        send_mail(
+            f'شركتكم «{tenant.CompanyName}» جاهزة على كترا',
+            (
+                f'أنشأ فريق كترا شركة «{tenant.CompanyName}» على حسابكم ({owner.email}) '
+                f'وأنتم مديرها.\nادخلوا بحسابكم المعتاد من:\n{link}'
+            ),
+            getattr(settings, 'DEFAULT_FROM_EMAIL', 'no-reply@localhost'),
+            [owner.email],
+        )
+    except Exception:  # noqa: BLE001 — الإشعار لا يُسقط الإنشاء
+        logger.exception('new company owner notification failed tenant=%s', tenant.pk)
+
+
+@api_view(['GET', 'POST'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_company_create(request):
+    """SA-9 — شركة لعميل: GET خيارات النموذج، POST ينشئها.
+
+    الإنشاء عبر `tenants.services.create_company` نفسها (زرع الدليل والدفاتر
+    والفرع والمستودع والسنة المالية) والمالك مديرها — لا مسار زرعٍ ثانٍ.
+    المالك **حسابٌ مسجَّل**: لا نظام دعوات عامّاً للحسابات في المنتج (دعوات
+    `employee_ops` مقيّدة بموظف ميداني)، فبريدٌ بلا حساب يُرفض برمز
+    `owner_not_registered` ليسجّل العميل أولاً — كقاعدة إضافة العضو نفسها.
+    """
+    from django.core.exceptions import ValidationError as DjangoValidationError
+    from tenants.services import create_company
+
+    if request.method == 'GET':
+        return Response(_creation_options())
+
+    values, errors = _creation_errors(request.data)
+    if errors:
+        return Response(errors, status=status.HTTP_400_BAD_REQUEST)
+    owner = User.objects.filter(
+        Q(email__iexact=values['owner_email']) | Q(username__iexact=values['owner_email'])
+    ).first()
+    if owner is None:
+        return Response(
+            {
+                'code': 'owner_not_registered',
+                'owner_email': 'لا حساب بهذا البريد بعد — اطلب من العميل إنشاء حساب من '
+                               'صفحة كترا الرئيسية بهذا البريد، ثم أنشئ الشركة باسمه.',
+            },
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+    if not owner.is_active:
+        return Response(
+            {'owner_email': 'حساب هذا البريد موقوف — فعّله أولاً.'},
+            status=status.HTTP_400_BAD_REQUEST,
+        )
+
+    try:
+        with transaction.atomic():
+            tenant = create_company(values['name'], owner, template=values['template'])
+            changed = []
+            if values['plan'] != 'Trial':
+                tenant.SubscriptionPlan = values['plan']
+                tenant.Status = 'Active'
+                tenant.subscription_ends_at = values['ends_at']
+                changed = ['SubscriptionPlan', 'Status', 'subscription_ends_at']
+            elif values['ends_at'] is not None:
+                tenant.subscription_ends_at = values['ends_at']
+                changed = ['subscription_ends_at']
+            if changed:
+                tenant.save(update_fields=changed)
+            metadata = {
+                'template': values['template'],
+                'plan': tenant.SubscriptionPlan,
+                'subscription_ends_at': _json_safe(tenant.subscription_ends_at),
+            }
+            record_platform_event(
+                'COMPANY_CREATED', request=request, tenant=tenant, target_user=owner,
+                metadata=metadata,
+            )
+            log_activity(
+                action='create', entity_type='tenant', entity_id=tenant.pk,
+                entity_label=tenant.CompanyName,
+                description='أنشأ فريق كترا الشركة وعيّن مالكها مديراً.',
+                metadata={'event_code': 'COMPANY_CREATED', **metadata},
+                request=request, tenant=tenant, user=request.user,
+            )
+            transaction.on_commit(lambda: _notify_new_company_owner(tenant, owner))
+    except DjangoValidationError as exc:
+        return Response({'detail': ' '.join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+
+    logger.info('platform company created tenant=%s template=%s plan=%s owner=%s by_user=%s',
+                tenant.pk, values['template'], tenant.SubscriptionPlan, owner.pk, request.user.pk)
+    return Response(_company_payload(tenant, member_count=1), status=status.HTTP_201_CREATED)
+
+
+# ── SA-9: صحة النظام ─────────────────────────────────────────────────────────
+
+# نسخةٌ أقدم من هذا (بالساعات) تُعلَّم «متأخرة» — نسخٌ يومية + ساعتا هامش.
+BACKUP_STALE_HOURS = 26
+
+
+def _database_health():
+    import time
+
+    from django.db import connection
+
+    started = time.monotonic()
+    result = {'vendor': connection.vendor, 'ok': True, 'ping_ms': None,
+              'size_bytes': None, 'largest_tables': []}
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT 1')
+            cursor.fetchone()
+            result['ping_ms'] = round((time.monotonic() - started) * 1000, 1)
+            if connection.vendor == 'mysql':
+                cursor.execute(
+                    'SELECT table_name, table_rows, data_length + index_length '
+                    'FROM information_schema.tables WHERE table_schema = DATABASE() '
+                    'ORDER BY data_length + index_length DESC'
+                )
+                rows = cursor.fetchall()
+                result['size_bytes'] = sum(int(row[2] or 0) for row in rows)
+                result['largest_tables'] = [
+                    {'name': row[0], 'rows': int(row[1] or 0), 'bytes': int(row[2] or 0)}
+                    for row in rows[:10]
+                ]
+            elif connection.vendor == 'sqlite':
+                cursor.execute('PRAGMA page_count')
+                pages = cursor.fetchone()[0]
+                cursor.execute('PRAGMA page_size')
+                result['size_bytes'] = int(pages) * int(cursor.fetchone()[0])
+    except Exception:  # noqa: BLE001 — الصفحة تقول «تعذّر» ولا تسقط
+        logger.exception('platform health database probe failed')
+        result['ok'] = False
+    return result
+
+
+def _pending_migrations():
+    from django.db import connection
+    from django.db.migrations.executor import MigrationExecutor
+
+    try:
+        executor = MigrationExecutor(connection)
+        plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+        return [f'{migration.app_label}.{migration.name}' for migration, _ in plan]
+    except Exception:  # noqa: BLE001
+        logger.exception('platform health migration probe failed')
+        return None
+
+
+def _cache_health():
+    from django.conf import settings
+    from django.core.cache import cache
+
+    backend = settings.CACHES.get('default', {}).get('BACKEND', '').rsplit('.', 1)[-1]
+    try:
+        cache.set('platform_health_probe', 1, 10)
+        return {'ok': cache.get('platform_health_probe') == 1, 'backend': backend}
+    except Exception:  # noqa: BLE001
+        logger.exception('platform health cache probe failed')
+        return {'ok': False, 'backend': backend}
+
+
+def _backup_health():
+    """آخر نسخة احتياطية من مجلّد `KTRA_BACKUP_DIR` إن ضُبط — اسم الملف لا مساره."""
+    import os
+    from datetime import datetime
+
+    from django.conf import settings
+
+    directory = getattr(settings, 'KTRA_BACKUP_DIR', '') or os.environ.get('KTRA_BACKUP_DIR', '')
+    if not directory:
+        return {'configured': False}
+    if not os.path.isdir(directory):
+        return {'configured': True, 'readable': False}
+    try:
+        entries = [entry for entry in os.scandir(directory) if entry.is_file()]
+    except OSError:
+        logger.exception('platform health backup dir unreadable')
+        return {'configured': True, 'readable': False}
+    if not entries:
+        return {'configured': True, 'readable': True, 'latest_file': None}
+    latest = max(entries, key=lambda entry: entry.stat().st_mtime)
+    stat = latest.stat()
+    latest_at = datetime.fromtimestamp(stat.st_mtime, tz=timezone.get_current_timezone())
+    age_hours = round((timezone.now() - latest_at).total_seconds() / 3600, 1)
+    return {
+        'configured': True, 'readable': True,
+        'latest_file': latest.name, 'latest_at': latest_at, 'latest_bytes': stat.st_size,
+        'age_hours': age_hours, 'stale': age_hours > BACKUP_STALE_HOURS,
+        'file_count': len(entries),
+    }
+
+
+@api_view(['GET'])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsPlatformAdmin])
+def platform_health(request):
+    """SA-9 — صحة النظام الأساسية: القاعدة، الهجرات، الكاش، النسخ الاحتياطي، التخزين،
+    أثقل الشركات استعمالاً، ومحاولات الدخول الفاشلة. لا CPU/RAM لحظي (خارج النطاق).
+    """
+    import platform as py_platform
+
+    import django
+    from django.conf import settings
+
+    from core.models import PlatformAuditLog
+    from core.usage import platform_usage as compute_platform_usage
+
+    per_tenant_storage, _, ledger_total, unattributed = _storage_by_tenant()
+    usage = compute_platform_usage()
+    names = dict(Tenant.objects.values_list('TenantID', 'CompanyName'))
+    heaviest = sorted(
+        usage['rows'].items(),
+        key=lambda item: item[1]['movements_total'] + item[1]['documents_total'],
+        reverse=True,
+    )[:5]
+    pending = _pending_migrations()
+    return Response({
+        'checked_at': timezone.now(),
+        'database': _database_health(),
+        'migrations': {'ok': pending == [], 'pending': pending or []},
+        'cache': _cache_health(),
+        'backup': _backup_health(),
+        'storage': {'ledger_bytes': ledger_total, 'unattributed_bytes': unattributed},
+        'heaviest_companies': [
+            {
+                'tenant_id': tenant_id, 'name': names.get(tenant_id, ''),
+                'movements_total': row['movements_total'],
+                'documents_total': row['documents_total'],
+                'storage_bytes': per_tenant_storage.get(tenant_id, 0),
+            }
+            for tenant_id, row in heaviest
+        ],
+        'usage_computed_at': usage['computed_at'],
+        'failed_logins_24h': PlatformAuditLog.objects.filter(
+            action='LOGIN_FAILED', created_at__gte=timezone.now() - timedelta(hours=24),
+        ).count(),
+        'app': {
+            'django': django.get_version(),
+            'python': py_platform.python_version(),
+            'debug': bool(settings.DEBUG),
+            'timezone': settings.TIME_ZONE,
+        },
+    })

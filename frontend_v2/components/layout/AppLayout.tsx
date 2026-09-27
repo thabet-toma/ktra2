@@ -51,6 +51,8 @@ import { usePlatformStaffCapabilitiesState } from '../../hooks/usePlatformStaffC
 import { usePlatformPresenceHeartbeat } from '../../hooks/usePlatformPresenceHeartbeat';
 import { presenceHeartbeatEnabled } from '../../utils/presenceHeartbeat';
 import { formatDateValue } from "../../utils/formatDate";
+import { SupportSessionBanner } from "./SupportSessionBanner";
+import { SupportAccessNotice } from "../settings/SupportAccessPage";
 
 /**
  * T-TRIAL: شريط انتهاء الاشتراك — يظهر في آخر سبعة أيام وبعد الانتهاء، ويختفي
@@ -305,6 +307,10 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
             listPath={listPath}
             userId={user.id}
           />
+          {/* SA-7/SA-8: شريط جلسة دعم كترا (للسوبر أدمن الداخل بإذن) وتنبيه صاحب
+              الشركة بطلبٍ معلّق أو إذنٍ ساري — كلٌّ يخفي نفسه خارج حالته. */}
+          <SupportSessionBanner />
+          <SupportAccessNotice />
           <ManagedBookBanner />
           <SubscriptionExpiryBanner />
           <main className="app-content overflow-auto flex-1">

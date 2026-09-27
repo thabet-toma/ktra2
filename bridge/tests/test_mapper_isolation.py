@@ -14,6 +14,21 @@ from bridge.models import FirestoreMirrorDoc
 from tenants.models import Tenant, UserCompanyMembership
 
 
+
+def _grant_support(user, tenant, scope="read_only"):
+    """SA-2: سوبر أدمن بلا عضوية لا يدخل الشركة إلا بإذن دعم ساري."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.models import SupportAccessGrant
+
+    return SupportAccessGrant.objects.create(
+        tenant=tenant, requested_by=user, reason="اختبار دعم", requested_hours=24,
+        requested_scope=scope, status="active", scope=scope,
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+
 class MapperIsolationTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -132,7 +147,10 @@ class MapperIsolationTest(APITestCase):
             200,
         )
 
+        # سوبر أدمن ليس عضواً في tenant_a: بلا إذن دعم يُرفض، وبه يقرأ.
         self._as(self.super_token, self.tenant_a.TenantID)
+        self.assertEqual(self.client.get("/api/mapper/users/").status_code, 403)
+        _grant_support(self.superuser, self.tenant_a)
         self.assertEqual(self.client.get("/api/mapper/users/").status_code, 200)
 
     def test_scoped_collection_without_tenant_header_multi_tenant(self):

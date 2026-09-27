@@ -231,20 +231,40 @@ class TenantViewSet(viewsets.ModelViewSet):
         user = self.request.user
         if not user or not user.is_authenticated:
             return Tenant.objects.none()
-        if user.is_superuser:
-            return Tenant.objects.all().order_by("CompanyName")
         # ISSUE #52: العزل هو المنتج — عضوية صريحة، أو مدير مكتبٍ يملك الدفتر
         # المُدار (قرار 7: يرى كل دفاتر مكتبه بلا عضوية لكل واحد). موظفٌ غير
         # مُسند، أو مستخدمٌ من مكتبٍ آخر، لا يقع تحت أيٍّ من الشرطين ⇒ 404 لا
         # 403 (الصفّ غائبٌ عن get_queryset فيسقط `get_object` على DoesNotExist).
+        # SA-2: والسوبر أدمن لا يرى كل الشركات هنا — كان هذا باباً خلفياً يتجاوز
+        # إذن الدعم لأن المسار يحلّ الشركة من `pk` لا من `get_tenant`. يرى شركاته،
+        # ومعها ما له فيه إذن دعم ساري؛ ولوحة المنصة تقرأ الكل من `/api/platform/`.
         from django.db.models import Q
+        from django.utils import timezone
+
+        from core.import_access import is_super_admin
+        from core.models import SupportAccessGrant
 
         office_ids = UserCompanyMembership.objects.filter(
             user=user, role="manager",
         ).values_list("tenant_id", flat=True)
-        return Tenant.objects.filter(
-            Q(memberships__user=user) | Q(managed_by_id__in=office_ids)
-        ).distinct().order_by("CompanyName")
+        visible = Q(memberships__user=user) | Q(managed_by_id__in=office_ids)
+        if is_super_admin(user):
+            visible |= Q(
+                support_access_grants__requested_by=user,
+                support_access_grants__status=SupportAccessGrant.STATUS_ACTIVE,
+                support_access_grants__expires_at__gt=timezone.now(),
+            )
+        return Tenant.objects.filter(visible).distinct().order_by("CompanyName")
+
+    def get_object(self):
+        """جلسة دعم تمرّ بالبوابة نفسها التي يفرضها `get_tenant`: النطاق (قراءة فقط)،
+        والمسارات المغلقة، وأثر الاستعمال في سجلّ الشركة."""
+        tenant = super().get_object()
+        from core.support_access import enforce_support_access, is_support_session
+
+        if is_support_session(self.request.user, tenant):
+            enforce_support_access(self.request, tenant)
+        return tenant
 
     def _can_create_company(self, user) -> bool:
         """Manager-only (M4-T3), with a bootstrap exception: a user with no

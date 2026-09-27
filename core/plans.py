@@ -269,6 +269,39 @@ def _bulk_partners(tenant_ids, since):
     return _grouped_count(Partner.objects.all(), tenant_ids)
 
 
+BYTES_PER_MB = 1024 * 1024
+
+
+def bytes_to_mb(total_bytes) -> int:
+    """ميغابايتٌ مقرَّبةٌ لأعلى — بايتٌ واحد فوق الحدّ يُحسب، لا يُبتلع في التقريب."""
+    total_bytes = int(total_bytes or 0)
+    return (total_bytes + BYTES_PER_MB - 1) // BYTES_PER_MB
+
+
+def _count_storage_mb(tenant_id, since):
+    """SA-4: مجموع بايتات `core.TenantAsset` للشركة — نفس مصدر «التخزين» في اللوحة."""
+    from django.db.models import Sum
+
+    from core.models import TenantAsset
+
+    total = TenantAsset.objects.filter(tenant_id=tenant_id).aggregate(n=Sum("bytes"))["n"]
+    return bytes_to_mb(total)
+
+
+def _bulk_storage_mb(tenant_ids, since):
+    from django.db.models import Sum
+
+    from core.models import TenantAsset
+
+    qs = TenantAsset.objects.filter(tenant_id__isnull=False)
+    if tenant_ids is not None:
+        qs = qs.filter(tenant_id__in=tenant_ids)
+    return {
+        row["tenant_id"]: bytes_to_mb(row["n"])
+        for row in qs.values("tenant_id").order_by().annotate(n=Sum("bytes"))
+    }
+
+
 def _count_managed_books(tenant_id, since):
     """ISSUE #52: عدد الدفاتر المُدارة التي يملكها هذا المكتب (`Tenant.managed_by`)."""
     from tenants.models import Tenant
@@ -370,6 +403,14 @@ LIMITS = {
             bulk=_bulk_partners,
         ),
         LimitSpec(
+            key="company.storage_mb",
+            label="مساحة التخزين",
+            unit="ميغابايت",
+            period=PERIOD_TOTAL,
+            count=_count_storage_mb,
+            bulk=_bulk_storage_mb,
+        ),
+        LimitSpec(
             key="office.managed_books",
             label="الدفاتر المُدارة",
             unit="دفتر",
@@ -400,6 +441,7 @@ PLAN_DEFAULTS = {
         "hr.employees": 10,
         "company.members": 3,
         "company.branches": 1,
+        "company.storage_mb": 2048,
         "inventory.products": 500,
         "partners.records": 200,
         "office.managed_books": 3,
@@ -413,6 +455,7 @@ PLAN_DEFAULTS = {
         "hr.employees": 50,
         "company.members": 10,
         "company.branches": 3,
+        "company.storage_mb": 10240,
         "inventory.products": 5000,
         "partners.records": 2000,
         "office.managed_books": 25,
@@ -426,6 +469,8 @@ PLAN_DEFAULTS = {
         "hr.employees": None,
         "company.members": None,
         "company.branches": None,
+        # التخزين كلفةٌ حقيقية على المنصة — حتى المؤسسية لها سقفٌ يُرفع بطلب.
+        "company.storage_mb": 51200,
         "inventory.products": None,
         "partners.records": None,
         "office.managed_books": None,

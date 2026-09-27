@@ -15,6 +15,21 @@ SET_UI_MODE = "/api/tenants/companies/set-ui-mode/"
 MY_PERMISSIONS = "/api/permissions/me/"
 
 
+
+def _grant_support(user, tenant, scope="read_only"):
+    """SA-2: سوبر أدمن بلا عضوية لا يدخل الشركة إلا بإذن دعم ساري."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.models import SupportAccessGrant
+
+    return SupportAccessGrant.objects.create(
+        tenant=tenant, requested_by=user, reason="اختبار دعم", requested_hours=24,
+        requested_scope=scope, status="active", scope=scope,
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+
 class UiModeTest(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -98,6 +113,7 @@ class UiModeTest(APITestCase):
 
     def test_caller_without_membership_gets_400(self):
         """سوبر أدمن بلا عضوية في الشركة النشطة: لا صفّ يُكتب عليه ⇒ 400."""
+        _grant_support(self.superadmin, self.tenant_a, scope="full")
         res = self.client.post(
             SET_UI_MODE, {"ui_mode": "simple"}, format="json",
             **self._as(self.superadmin, self.tenant_a))
@@ -123,6 +139,7 @@ class UiModeTest(APITestCase):
 
     def test_superadmin_without_membership_reads_advanced(self):
         """بلا عضوية لا وضع محفوظاً — يُقرأ «متقدم» ولا ينكسر شيء."""
+        _grant_support(self.superadmin, self.tenant_a)
         res = self.client.get(
             MY_PERMISSIONS, **self._as(self.superadmin, self.tenant_a))
         self.assertEqual(res.status_code, status.HTTP_200_OK)

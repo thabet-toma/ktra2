@@ -146,14 +146,18 @@ def get_tenant(request=None, *, raise_on_missing: bool = False):
 def _validate_user_tenant_access(request, tenant: Tenant) -> None:
     """
     Validates that the authenticated user has access to the requested tenant
-    using the UserCompanyMembership model. Superusers bypass this check.
+    using the UserCompanyMembership model.
+
+    SA-2: سوبر أدمن المنصة لم يعد يتجاوز الفحص بصمت. عضوٌ في الشركة (أو مدير
+    مكتبها) يدخل كأي عضو؛ ومن ليس كذلك يلزمه إذن دعمٍ ساري له
+    (`core/support_access.py` — `enforce_support_access`)، بقراءةٍ فقط أو كامل،
+    وبمحظوراتٍ ثابتة. تعريف «سوبر أدمن» هنا `is_super_admin` (العلم أو البريد
+    المُهيّأ) — كان `is_superuser` وحده فيفترق عن `IsPlatformAdmin`.
     """
     if not hasattr(request, 'user') or not request.user.is_authenticated:
         return
 
     user = request.user
-    if user.is_superuser:
-        return
 
     from tenants.models import UserCompanyMembership
     membership = (
@@ -163,6 +167,15 @@ def _validate_user_tenant_access(request, tenant: Tenant) -> None:
         .first()
     )
     if membership is None:
+        from core.import_access import is_super_admin
+        if is_super_admin(user):
+            office_id = getattr(tenant, 'managed_by_id', None)
+            if office_id is None or not UserCompanyMembership.objects.filter(
+                user=user, tenant_id=office_id, role='manager',
+            ).exists():
+                from core.support_access import enforce_support_access
+                enforce_support_access(request, tenant)
+            return
         # ISSUE #52 (قرار 7): مدير المكتب يصل كل دفاتر مكتبه المُدارة بلا صفّ
         # عضويةٍ لكل دفتر — وإلا صار الدفتر ظاهراً في `TenantViewSet` (الذي
         # يمنحه الرؤية) وممنوعاً هنا، فيرى المدير دفتراً لا يستطيع فتحه.

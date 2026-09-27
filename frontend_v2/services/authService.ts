@@ -97,6 +97,8 @@ export const logoutUser = async () => {
     localStorage.removeItem("userId");
     localStorage.removeItem("tenantId");
     localStorage.removeItem("branchId");
+    // SA-7: جلسة دعم كترا لا تعبر تسجيل الخروج إلى حسابٍ آخر على الجهاز نفسه.
+    localStorage.removeItem("supportSession");
     // ISSUE #118: مسودّات المستندات المحلية فيها أسماء عملاء وأسعار — جهازٌ
     // مشترك يوجب مسحها عند الخروج (و`IdleTimeoutGuard` ينادي logoutUser نفسها
     // عند مهلة الخمول، فالمسح يغطّي الحالتين بنقطة واحدة). أفضل جهد: فشل

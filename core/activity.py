@@ -223,6 +223,11 @@ def log_activity(
             u = getattr(request, "user", None)
             if u is not None and getattr(u, "is_authenticated", False):
                 user = u
+        # SA-2: ما يُفعل بإذن دعم يحمل رقم الإذن — الشركة تميّز فعل فريق كترا
+        # عن فعل أعضائها في سجلّها نفسه.
+        support_grant = getattr(request, "_support_grant", None) if request is not None else None
+        if support_grant is not None and support_grant.tenant_id == getattr(tenant, "pk", None):
+            metadata = {**(metadata or {}), "support_grant_id": support_grant.pk}
 
         from django.db import transaction
 

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown, ChevronLeft, Loader2, RotateCcw, Save, ShieldOff, ShieldCheck, Trash2,
   UserPlus, X,
@@ -35,21 +35,26 @@ export const COMPANY_STATUS_LABELS: Record<string, string> = {
   Suspended: "موقوفة",
 };
 
-export const COMPANY_PLAN_LABELS: Record<string, string> = {
-  Trial: "تجريبية",
-  Basic: "أساسية",
-  Pro: "احترافية",
-  Enterprise: "مؤسسية",
-};
+/** تبويبات صفحة الشركة في لوحة المنصة (SA-6) التي يرسمها هذا المكوّن. */
+export type CompanyPanelTab = "plan" | "modules" | "limits" | "members" | "activity";
 
 interface Props {
   companyId: number;
   onClose: () => void;
   /** بعد أي تغيير — لتحديث أرقام اللوحة وجدول الشركات */
   onChanged: () => void;
+  /**
+   * SA-6: داخل صفحة الشركة الكاملة بلا إطار النافذة، ويُرسم قسم التبويب `tab`
+   * وحده. غيابه = النافذة القديمة بكل أقسامها.
+   */
+  embedded?: boolean;
+  tab?: CompanyPanelTab;
 }
 
-export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onChanged }) => {
+export const PlatformCompanyPanel: React.FC<Props> = ({
+  companyId, onClose, onChanged, embedded = false, tab,
+}) => {
+  const show = (section: CompanyPanelTab) => !embedded || tab === section;
   const toast = useToast();
   const confirm = useConfirm();
   const [detail, setDetail] = useState<PlatformCompanyDetail | null>(null);
@@ -109,11 +114,13 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
   useEffect(() => { void load(); }, [load]);
 
   /** شركة أخرى = سجلٌّ آخر: يُطوى ويُفرَّغ فلا تُقرأ حركات الشركة السابقة تحت اسم الجديدة. */
+  // وتبويب «السجل» في صفحة الشركة يبدأ مبسوطاً — الجلب نفسه في التأثير التالي.
+  const autoFeed = embedded && tab === "activity";
   useEffect(() => {
-    setFeedOpen(false);
+    setFeedOpen(autoFeed);
     setFeed(null);
     setFeedError(null);
-  }, [companyId]);
+  }, [companyId, autoFeed]);
 
   const loadFeed = useCallback(async () => {
     setFeedLoading(true);
@@ -134,6 +141,16 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
     setFeedOpen(next);
     if (next && feed === null && !feedLoading) void loadFeed();
   };
+
+  // تبويب «السجل» في صفحة الشركة يفتح على الحركات مباشرةً — لا زرّ طيٍّ يُضغط أولاً.
+  // المرجع لا الحالة يحرس «مرّةً واحدة»: تشغيل التأثير مرّتين (StrictMode) يسبق تحديث الحالة.
+  const autoFeedRef = useRef(false);
+  useEffect(() => {
+    if (autoFeed && !autoFeedRef.current) {
+      autoFeedRef.current = true;
+      void loadFeed();
+    }
+  }, [autoFeed, loadFeed]);
 
   const run = async (fn: () => Promise<void>, okMsg?: string) => {
     setError(null);
@@ -300,32 +317,8 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
       }
     });
 
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" dir="rtl">
-      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
-        <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
-          <div>
-            <h2 className="font-bold text-[var(--color-text)]">
-              تحكم المنصة بالشركة{detail ? `: ${detail.name}` : ""}
-            </h2>
-            <p className="text-xs ktra-text-soft">
-              صلاحيات سوبر أدمن — تسري على هذه الشركة دون الحاجة لعضوية فيها
-            </p>
-            {detail && (
-              <p className="mt-1 text-[11px] ktra-text-soft">
-                التخزين المستهلَك:{" "}
-                <span className="font-bold text-[var(--color-text)]">{formatBytes(detail.storage_bytes)}</span>
-                {" · "}آخر نشاط:{" "}
-                {detail.last_activity_at ? formatDateValue(detail.last_activity_at) : "لا نشاط مسجَّل"}
-              </p>
-            )}
-          </div>
-          <button type="button" onClick={onClose} className="ktra-iconbtn" aria-label="إغلاق">
-            <X className="h-4 w-4" />
-          </button>
-        </header>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+  const content = (
+    <>
           {error && (
             <div className="mb-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700" role="alert">{error}</div>
           )}
@@ -336,6 +329,7 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
             </div>
           ) : !detail ? null : (
             <>
+              {show("plan") && (<>
               <section aria-label="إعدادات الشركة" className="rounded-lg border border-[var(--color-border)] p-3">
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">إعدادات الشركة</h3>
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
@@ -356,8 +350,8 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                       value={form.plan}
                       onChange={(event) => setForm((current) => ({ ...current, plan: event.target.value }))}
                     >
-                      {Object.entries(COMPANY_PLAN_LABELS).map(([value, label]) => (
-                        <option key={value} value={value}>{label}</option>
+                      {(detail.plan_choices ?? []).map((choice) => (
+                        <option key={choice.key} value={choice.key}>{choice.label}</option>
                       ))}
                     </select>
                   </div>
@@ -418,7 +412,9 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
               <CompanyHealthCheckSection companyId={companyId} />
 
               <EngagementAssignmentSection companyId={companyId} />
+              </>)}
 
+              {show("modules") && (
               <section aria-label="وحدات الشركة المرخَّصة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">الوحدات المرخَّصة</h3>
                 <div className="space-y-2">
@@ -461,10 +457,12 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   واجهة المكتب نفسها تُفتح من لوحة المنصة بزرّ «افتح واجهة المحاسب القانوني».
                 </p>
               </section>
+              )}
 
+              {show("limits") && (
               <section aria-label="حدود خطة الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <h3 className="mb-3 text-sm font-bold text-[var(--color-text)]">
-                  حدود الاستخدام ({COMPANY_PLAN_LABELS[detail.plan] || detail.plan})
+                  حدود الاستخدام ({detail.plan_label || detail.plan})
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full min-w-[640px] text-sm">
@@ -547,7 +545,9 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   عند بلوغ الحدّ يُرفض الإنشاء برسالة واضحة للمستخدم؛ إضافة عضو من هذه اللوحة لا يحدّها الحدّ.
                 </p>
               </section>
+              )}
 
+              {show("members") && (<>
               <section aria-label="أعضاء الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
                   <h3 className="text-sm font-bold text-[var(--color-text)]">الأعضاء ({detail.members.length})</h3>
@@ -697,7 +697,9 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   الفروع تُنشأ وتُعدَّل من داخل الشركة نفسها — تُقرأ هنا فقط، وعددها يحدّه بند «الفروع» في «حدود الاستخدام» أعلاه.
                 </p>
               </section>
+              </>)}
 
+              {show("activity") && (
               <section aria-label="آخر حركات الشركة" className="mt-4 rounded-lg border border-[var(--color-border)] p-3">
                 <button
                   type="button"
@@ -782,8 +784,41 @@ export const PlatformCompanyPanel: React.FC<Props> = ({ companyId, onClose, onCh
                   آخر مئة حركة على الشركة — تشمل ما فعله سوبر أدمن بها (الخطة، الحالة، الحدود، الوحدات). السجل الكامل مكانه صفحة «سجل النشاط» داخل الشركة.
                 </p>
               </section>
+              )}
             </>
           )}
+    </>
+  );
+
+  if (embedded) return <div dir="rtl">{content}</div>;
+
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" dir="rtl">
+      <div className="flex max-h-[88vh] w-full max-w-4xl flex-col overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] shadow-2xl">
+        <header className="flex flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--color-border)] px-4 py-3">
+          <div>
+            <h2 className="font-bold text-[var(--color-text)]">
+              تحكم المنصة بالشركة{detail ? `: ${detail.name}` : ""}
+            </h2>
+            <p className="text-xs ktra-text-soft">
+              صلاحيات سوبر أدمن — تسري على هذه الشركة دون الحاجة لعضوية فيها
+            </p>
+            {detail && (
+              <p className="mt-1 text-[11px] ktra-text-soft">
+                التخزين المستهلَك:{" "}
+                <span className="font-bold text-[var(--color-text)]">{formatBytes(detail.storage_bytes)}</span>
+                {" · "}آخر نشاط:{" "}
+                {detail.last_activity_at ? formatDateValue(detail.last_activity_at) : "لا نشاط مسجَّل"}
+              </p>
+            )}
+          </div>
+          <button type="button" onClick={onClose} className="ktra-iconbtn" aria-label="إغلاق">
+            <X className="h-4 w-4" />
+          </button>
+        </header>
+
+        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+          {content}
         </div>
       </div>
     </div>

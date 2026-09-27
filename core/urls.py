@@ -20,7 +20,7 @@ from rest_framework.routers import DefaultRouter
 
 from core import (
     assistant_views, agent_db_view, dashboard_api, health, media_views,
-    permissions_api, plan_usage_api, platform_admin_api, public_pricing,
+    permissions_api, plan_usage_api, platform_admin_api, public_pricing, support_access_api,
     reports_api, scan,
     whatsapp_views,
 )
@@ -88,6 +88,10 @@ urlpatterns = [
     # «خطّتي»: حدودُ شركةِ الطالب واستهلاكُها لعضوٍ فيها — ثالثةُ ثلاثٍ
     # بين الأسعار العامّة (بلا مصادقة) ولوحة المنصّة (كلُّ الشركات).
     path('api/my-plan/usage/', plan_usage_api.my_plan_usage),
+    path('api/support-access/', support_access_api.support_access_list),
+    path('api/support-access/<int:grant_id>/approve/', support_access_api.support_access_approve),
+    path('api/support-access/<int:grant_id>/reject/', support_access_api.support_access_reject),
+    path('api/support-access/<int:grant_id>/revoke/', support_access_api.support_access_revoke),
     # T-REPORTS: قسم التقارير — فهرس واحد ومشغّل واحد لكل تقارير المنصة.
     path('api/reports/', reports_api.reports_catalog),
     # التنقيب قبل التشغيل: `<str:key>` يبتلع «drill» لو جاء بعده،
@@ -97,6 +101,7 @@ urlpatterns = [
     path('api/platform/dashboard/', platform_admin_api.platform_dashboard),
     path('api/platform/super-admins/', platform_admin_api.platform_super_admins),
     path('api/platform/super-admins/<int:pk>/', platform_admin_api.platform_super_admin_detail),
+    path('api/platform/companies/', platform_admin_api.platform_company_create),
     path('api/platform/companies/<int:pk>/', platform_admin_api.platform_company_detail),
     path('api/platform/companies/<int:pk>/modules/', platform_admin_api.platform_company_modules),
     path('api/platform/companies/<int:pk>/limits/', platform_admin_api.platform_company_limits),
@@ -109,6 +114,13 @@ urlpatterns = [
     path('api/platform/companies/<int:pk>/members/<int:membership_id>/',
          platform_admin_api.platform_company_member_detail),
     path('api/platform/users/<int:pk>/set-active/', platform_admin_api.platform_user_set_active),
+    path('api/platform/audit-log/', platform_admin_api.platform_audit_log),
+    path('api/platform/companies/<int:pk>/support-access/', platform_admin_api.platform_company_support_access),
+    path('api/platform/support-access/', platform_admin_api.platform_support_access),
+    path('api/platform/usage/', platform_admin_api.platform_usage),
+    path('api/platform/health/', platform_admin_api.platform_health),
+    path('api/platform/companies/<int:pk>/usage/', platform_admin_api.platform_company_usage),
+    path('api/platform/support-access/<int:grant_id>/end/', platform_admin_api.platform_support_access_end),
     path('api/platform/ops/', include('platform_ops.urls')),
     # التذكرة 212-B: نواة CRM كترا الخلفيّة — زبائنُ كترا المحتملون، لا زبائن
     # الشركات على المنصّة. app منفصل (`crm`) لا امتدادٌ لـ`platform_ops`.

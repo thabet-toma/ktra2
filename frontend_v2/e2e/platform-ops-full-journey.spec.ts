@@ -434,10 +434,10 @@ test("الرحلة الكاملة: تفعيل الخدمة ← أمر عمل ←
   await installMocks(page);
 
   await test.step("تفعيل خدمة الإدخال للشركة من لوحة السوبر أدمن", async () => {
-    await page.goto("/super-admin");
+    // SA-6: اشتراك الخدمة في تبويب «الخطة والاشتراك» من صفحة الشركة الكاملة.
+    await page.goto(`/super-admin/companies/${COMPANY_ID}?tab=plan`);
     await expect(page.getByRole("heading", { name: "لوحة تحكم السوبر أدمن" })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole("button", { name: `تحكم بـ${COMPANY_NAME}` }).click();
-    await expect(page.getByRole("heading", { name: /تحكم المنصة بالشركة/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: COMPANY_NAME })).toBeVisible();
     await expect(page.getByText("الحالة: غير مفعّلة")).toBeVisible();
     await page.getByRole("button", { name: "ابدأ تجربة" }).click();
     await expect(page.getByText(/الحالة: تجربة/)).toBeVisible();

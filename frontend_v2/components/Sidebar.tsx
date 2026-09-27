@@ -18,8 +18,9 @@ import {
   ShoppingBag, Landmark, Warehouse, Download, ExternalLink, Home, ShieldCheck,
   Gauge, Radar, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
   PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
-  Briefcase as BriefcaseIcon,
+  Briefcase as BriefcaseIcon, LifeBuoy, BadgeCheck, ScrollText, UserCog, HeartPulse,
 } from 'lucide-react';
+import { useLocation, useNavigate } from "react-router-dom";
 import { openInNewTab } from "../utils/openInNewTab";
 import { enterOfficeShell } from "../utils/officeShell";
 import { readAccountantMode, writeAccountantMode } from "../utils/accountantMode";
@@ -66,6 +67,20 @@ interface SidebarProps {
   activeView: AppView;
   setView: (view: AppView, targetId?: string) => void;
 }
+
+/** SA-5: أقسام «إدارة المنصة» بأيقوناتها — مرآةُ `CONSOLE_SECTIONS` في
+ * `superadmin/console/SuperAdminConsole.tsx` (المسارات نفسها). نسخةٌ هنا لا استيراد:
+ * ذلك الملف يسحب أقسام اللوحة كلها فيُسقط تحميلها الكسول في الحزمة الرئيسية. */
+const PLATFORM_CONSOLE_LINKS: { path: string; label: string; icon: React.ReactNode }[] = [
+  { path: "/super-admin", label: "نظرة عامة", icon: <Gauge className="h-4 w-4" /> },
+  { path: "/super-admin/companies", label: "الشركات", icon: <Building2 className="h-4 w-4" /> },
+  { path: "/super-admin/plans", label: "الخطط والأسعار", icon: <Layers className="h-4 w-4" /> },
+  { path: "/super-admin/support-access", label: "طلبات الدخول للدعم", icon: <LifeBuoy className="h-4 w-4" /> },
+  { path: "/super-admin/accountants", label: "توثيق المحاسبين", icon: <BadgeCheck className="h-4 w-4" /> },
+  { path: "/super-admin/audit-log", label: "سجل التدقيق", icon: <ScrollText className="h-4 w-4" /> },
+  { path: "/super-admin/admins", label: "مديرو المنصة", icon: <UserCog className="h-4 w-4" /> },
+  { path: "/super-admin/health", label: "صحة النظام", icon: <HeartPulse className="h-4 w-4" /> },
+];
 
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
@@ -149,6 +164,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   const [employeeOpsExpanded, setEmployeeOpsExpanded] = useState(true);
   const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
   const [platformExpanded, setPlatformExpanded] = useState(true);
+  const navigate = useNavigate();
+  const location = useLocation();
   // ISSUE #83: مجموعات بيان الشريط تُوسَّع بمفتاحها (id) لا بفهرسها — إدراج
   // مجموعةٍ في البيان لا يزيح توسيع مجموعةٍ أخرى.
   const [manifestExpanded, setManifestExpanded] = useState<Record<string, boolean>>({});
@@ -400,6 +417,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   };
 
   const isViewActive = (view: string) => activeView === view;
+  /** قسم لوحة المنصة نشطٌ بمساره — «نظرة عامة» بالمطابقة التامة، والباقي بالبادئة (صفحة شركة تُبقي «الشركات» مضاءة). */
+  const consoleLinkActive = (path: string) =>
+    activeView === "super-admin"
+    && (path === "/super-admin" ? location.pathname.replace(/\/+$/, "") === path : location.pathname.startsWith(path));
 
   // T-PERM: صلاحية كل رابط من الخريطة الموحّدة (نفسها التي يحرس بها App.tsx
   // الدخول المباشر بالرابط) — لا نسخة ثانية داخل القائمة.
@@ -573,17 +594,20 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
               </button>
               {platformExpanded && showText && (
                 <div className="mt-1 space-y-1 border-r border-blue-200 pr-3 dark:border-blue-900">
-                  <button type="button" onClick={() => { setView("super-admin"); if (isMobile) setIsMobileMenuOpen(false); }}
-                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("super-admin") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
-                    <Gauge className="h-4 w-4" /> لوحة السوبر أدمن
-                  </button>
+                  {/* SA-5: أقسام لوحة المنصة بمساراتها تحت `/super-admin/*` — القسم من المسار
+                      لا من العرض (كلها عرض `super-admin` واحد). */}
+                  {PLATFORM_CONSOLE_LINKS.map((link) => (
+                    <button key={link.path} type="button"
+                      onClick={() => { navigate(link.path); if (isMobile) setIsMobileMenuOpen(false); }}
+                      className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${consoleLinkActive(link.path) ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                      {link.icon} {link.label}
+                    </button>
+                  ))}
+
+                  <p className="px-2 pt-2 text-[11px] font-bold text-blue-900/60 dark:text-blue-300/60">عمليات كترا الداخلية</p>
                   <button type="button" onClick={() => { setView("platform-ops"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-ops") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
-                    <Radar className="h-4 w-4" /> مركز قيادة شؤون الموظفين والمهام
-                  </button>
-                  <button type="button" onClick={() => { setView("development-notes"); if (isMobile) setIsMobileMenuOpen(false); }}
-                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
-                    <TableProperties className="h-4 w-4" /> ملاحظات التطوير
+                    <Radar className="h-4 w-4" /> مركز العمليات
                   </button>
                   <button type="button" onClick={() => { setView("platform-hiring"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-hiring") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
@@ -592,6 +616,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
                   <button type="button" onClick={() => { setView("platform-billing"); if (isMobile) setIsMobileMenuOpen(false); }}
                     className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("platform-billing") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
                     <Receipt className="h-4 w-4" /> فواتير خدمة المتابعة
+                  </button>
+
+                  <p className="px-2 pt-2 text-[11px] font-bold text-blue-900/60 dark:text-blue-300/60">أدوات</p>
+                  <button type="button" onClick={() => { setView("development-notes"); if (isMobile) setIsMobileMenuOpen(false); }}
+                    className={`flex w-full items-center gap-2 rounded-md p-2 text-sm ${isViewActive("development-notes") ? "bg-blue-600 text-white" : "text-blue-800 hover:bg-blue-100 dark:text-blue-300 dark:hover:bg-blue-900/30"}`}>
+                    <TableProperties className="h-4 w-4" /> ملاحظات التطوير
                   </button>
                   {/* T-EXTACCT: طريق العودة لقشرة المكتب — «العودة للوحة المنصة»
                       رحلة ذهاب وإياب، فمن خرج منها يجدها هنا حيث خرج. */}

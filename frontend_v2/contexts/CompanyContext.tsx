@@ -5,6 +5,8 @@ import type { FiscalGranularity } from "../utils/fiscalYearChoice";
 import { enterManagedBook, leaveManagedBook, managedBookOffice } from "../utils/officeShell";
 import { createManagedBook as createManagedBookApi, listManagedBooks } from "../services/managedBooksApi";
 import { apiGetObject, apiPostObject } from "../services/restApi";
+import { getPlatformCompany, type PlatformCompanyDetail } from "../services/platformAdminApi";
+import { clearSupportSession, readSupportSession } from "../utils/supportSession";
 import { useAuth } from "./AuthContext";
 import { clientLogger } from "../services/logger";
 
@@ -86,6 +88,20 @@ interface CompanyContextType {
 
 const CompanyContext = createContext<CompanyContextType | undefined>(undefined);
 
+/** SA-7: كرت المنصة بشكل `Tenant` — الشركة المفتوحة بإذن دعم ليست في `my-companies`. */
+const supportTenant = (company: PlatformCompanyDetail): Tenant => ({
+  TenantID: company.id,
+  CompanyName: company.name,
+  SubscriptionPlan: company.plan,
+  Status: company.status,
+  CreatedAt: company.created_at,
+  import_enabled: company.import_enabled,
+  is_example: company.is_example,
+  subscription_ends_at: company.subscription_ends_at,
+  subscription_days_left: company.subscription_days_left,
+  subscription_expired: company.subscription_expired,
+});
+
 export const useCompany = () => {
   const context = useContext(CompanyContext);
   if (!context) {
@@ -141,6 +157,29 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ) return null;
       if (!shouldCommit) return data;
       setCompanies(data);
+
+      // SA-7: جلسة دعم كترا — سوبر أدمن داخل شركةٍ ليست من عضويّاته بإذنٍ منها.
+      // تُحلّ قبل «لا شركات» لأن السوبر أدمن قد لا يكون عضواً في شيء. الخادم
+      // يحكم كل طلب؛ وانتهاء الإذن لا يُخرجه صامتاً — الشريط يقول «انتهى» ويعرض الخروج.
+      const support = currentUser.isSuperAdmin ? readSupportSession() : null;
+      if (support && !data.some((m) => m.tenant.TenantID === support.tenantId)) {
+        try {
+          const company = await getPlatformCompany(support.tenantId);
+          if (
+            requestVersion !== requestVersionRef.current ||
+            activeUserIdRef.current !== requesterUserId
+          ) return null;
+          localStorage.setItem("tenantId", String(support.tenantId));
+          setCurrentCompany(supportTenant(company));
+          clientLogger.info("support_access.session_resolved", {
+            tenantId: support.tenantId, grantId: support.grantId,
+          });
+          return data;
+        } catch {
+          clientLogger.warn("support_access.session_unresolved", { tenantId: support.tenantId });
+          clearSupportSession();
+        }
+      }
 
       if (data.length === 0) {
         localStorage.removeItem("tenantId");
@@ -240,6 +279,8 @@ export const CompanyProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setLoading(true);
     try {
       localStorage.setItem("tenantId", String(companyId));
+      // الانتقال لشركةٍ من شركاته ينهي جلسة الدعم محلياً — لا تعود الشركة الأخرى بعد التحميل.
+      clearSupportSession();
       // task11 M4: الفرع النشط تابع للشركة — تبديل الشركة يمسحه
       localStorage.removeItem("branchId");
       clientLogger.info("company.switch_requested", { tenantId: companyId });

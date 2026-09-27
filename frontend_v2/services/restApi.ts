@@ -6,7 +6,9 @@
 import { clientLogger } from "./logger";
 import { humanizeDrfError, extractDrfFieldErrors } from "../utils/drfError";
 import { resolveBranchId } from "../utils/tenantContext";
-import { emitEngagementRevoked, emitPlanLimitReached, emitSessionExpired, emitUserActivity } from "../utils/sessionEvents";
+import {
+  emitEngagementRevoked, emitPlanLimitReached, emitSessionExpired, emitSupportAccessDenied, emitUserActivity,
+} from "../utils/sessionEvents";
 import { isUserActivityRequest, writeLastActivity } from "../utils/idleSession";
 import {
   remainingRequestBudgetMs,
@@ -270,6 +272,15 @@ async function handleResponseError(res: Response, path: string): Promise<never> 
   if (responseCode === "engagement_revoked" || responseCode === "engagement_inactive") {
     emitEngagementRevoked();
   }
+  // SA-2: فريق كترا داخل شركةٍ بإذن — انتهى الإذن أو سُحب، أو طلبٌ خارج نطاقه.
+  // شريط جلسة الدعم يلتقط الحدث فيقول ما حدث ويعرض الخروج بدل رسالة خام.
+  if (
+    responseCode === "support_access_required"
+    || responseCode === "support_access_read_only"
+    || responseCode === "support_access_forbidden"
+  ) {
+    emitSupportAccessDenied({ code: responseCode, message: msg });
+  }
   // T-PLANLIMITS (211-P): `enforce_limits` يرفع {"plan_limit": "...", "limit_key": "..."}
   // — يحمل الحدث نفس الرسالة كي يعرض الحارس رابطاً حقيقياً إلى «خطّتي».
   const planLimitMessage = (data as { plan_limit?: string } | null)?.plan_limit;
@@ -514,6 +525,27 @@ export async function apiPatchObject<T = any>(
   const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
   const res = await apiFetch(url, {
     method: "PATCH",
+    headers: getHeaders(
+      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+      true
+    ),
+    body: JSON.stringify(body ?? {}),
+  });
+  if (!res.ok) {
+    await handleResponseError(res, path);
+  }
+  return (await res.json()) as T;
+}
+
+/** PUT بالشكل نفسه لـ`apiPatchObject` — للنقاط التي تستبدل موردها كاملاً (أسعار الخطط). */
+export async function apiPutObject<T = any>(
+  path: string,
+  body: Record<string, any>,
+  opts?: { tenantId?: number }
+): Promise<T> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const res = await apiFetch(url, {
+    method: "PUT",
     headers: getHeaders(
       opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
       true

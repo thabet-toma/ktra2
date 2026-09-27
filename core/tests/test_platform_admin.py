@@ -691,6 +691,21 @@ class PlatformCompanyControlTest(APITestCase):
         self.assertEqual(response.status_code, 403)
 
 
+def _grant_support(user, tenant, scope="read_only"):
+    """SA-2: سوبر أدمن بلا عضوية لا يدخل الشركة إلا بإذن دعم ساري."""
+    from datetime import timedelta
+
+    from django.utils import timezone
+
+    from core.models import SupportAccessGrant
+
+    return SupportAccessGrant.objects.create(
+        tenant=tenant, requested_by=user, reason="اختبار دعم", requested_hours=24,
+        requested_scope=scope, status="active", scope=scope,
+        expires_at=timezone.now() + timedelta(hours=24),
+    )
+
+
 class SuspendedCompanyAccessTest(APITestCase):
     """إيقاف الشركة من لوحة المنصة يمنع أعضاءها فعلاً — لا حالة تزيينية."""
 
@@ -722,6 +737,8 @@ class SuspendedCompanyAccessTest(APITestCase):
 
         self.assertEqual(
             get_tenant(self._request(self.member, self.running)).pk, self.running.pk)
+        # السوبر أدمن ليس عضواً في الموقوفة: يدخلها بإذن دعم، والإيقاف لا يحجبه.
+        _grant_support(self.superuser, self.suspended)
         self.assertEqual(
             get_tenant(self._request(self.superuser, self.suspended)).pk, self.suspended.pk)
 

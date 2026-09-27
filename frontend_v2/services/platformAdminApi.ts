@@ -3,12 +3,20 @@ import {
   apiGetObject,
   apiPatchObject,
   apiPostObject,
+  apiPutObject,
 } from "./restApi";
+
+/** خطة اشتراك باسمها العربي — من `PLAN_LABELS` في الخادم، لا نسخة هنا. */
+export interface PlanChoice {
+  key: string;
+  label: string;
+}
 
 export interface PlatformCompanyRow {
   id: number;
   name: string;
   plan: string;
+  plan_label: string;
   status: "Active" | "Trial" | "Suspended" | string;
   import_enabled: boolean;
   is_example: boolean;
@@ -77,6 +85,7 @@ export interface PlatformDashboardData {
   status_distribution: Record<string, number>;
   plan_distribution: Record<string, number>;
   company_rows: PlatformDashboardCompanyRow[];
+  plan_choices: PlanChoice[];
   kpis: PlatformDashboardKpis;
   /**
    * `unattributed_bytes` = مجموع صفوف `tenant = NULL` (رفوعات المنصة وما لم
@@ -110,6 +119,7 @@ export interface PlatformCompanyBranch {
 
 export interface PlatformCompanyDetail extends PlatformCompanyRow {
   members: PlatformCompanyMember[];
+  plan_choices: PlanChoice[];
   /** الرئيسي أولاً ثم بالاسم — الترتيب من الخادم، لا تُعاد ترتيبها هنا. */
   branches: PlatformCompanyBranch[];
   storage_bytes: number;
@@ -358,3 +368,226 @@ export const addDevelopmentNoteComment = (noteId: number, body: string) =>
 
 export const deleteDevelopmentNoteComment = (noteId: number, commentId: number) =>
   apiDelete(`platform/development-notes/${noteId}/comments/${commentId}/`);
+
+// ── SA-3: حجم استعمال الشركات ──
+
+export interface UsageCounterDef {
+  key: string;
+  label: string;
+  kind: "movement" | "document";
+}
+
+export interface UsageCounterValue {
+  total: number;
+  month: number;
+}
+
+export interface CompanyUsageRow {
+  counters: Record<string, UsageCounterValue>;
+  movements_total: number;
+  movements_month: number;
+  documents_total: number;
+  documents_month: number;
+  active_users_30d: number;
+  last_document_date: string | null;
+}
+
+export interface PlatformUsageResponse {
+  /** وقت الحساب — نتيجة المنصة من كاش عشر دقائق، و`refresh` يعيدها الآن. */
+  computed_at: string;
+  counter_catalog: UsageCounterDef[];
+  results: (CompanyUsageRow & { tenant_id: number; name: string })[];
+}
+
+export interface CompanyUsageResponse extends CompanyUsageRow {
+  computed_at: string;
+  counter_catalog: UsageCounterDef[];
+  tenant_id: number;
+  name: string;
+}
+
+export const getPlatformUsage = (refresh = false) =>
+  apiGetObject<PlatformUsageResponse>(`platform/usage/${refresh ? "?refresh=1" : ""}`);
+
+export const getPlatformCompanyUsage = (companyId: number) =>
+  apiGetObject<CompanyUsageResponse>(`platform/companies/${companyId}/usage/`);
+
+// ── SA-1: سجلّ تدقيق المنصة ──
+
+export type AuditSeverity = "info" | "warning" | "high";
+
+export interface PlatformAuditRow {
+  id: number;
+  action: string;
+  action_label: string;
+  severity: AuditSeverity;
+  actor_id: number | null;
+  actor: string;
+  tenant_id: number | null;
+  tenant: string;
+  target_user_id: number | null;
+  target_user: string;
+  reason: string;
+  metadata: Record<string, unknown>;
+  ip_address: string | null;
+  trace_id: string;
+  created_at: string;
+}
+
+export interface PlatformAuditResponse {
+  count: number;
+  page: number;
+  page_size: number;
+  results: PlatformAuditRow[];
+  events: { action: string; label: string; severity: AuditSeverity }[];
+}
+
+export interface PlatformAuditFilters {
+  page?: number;
+  tenant?: number | null;
+  action?: string;
+  severity?: string;
+  date_from?: string;
+  date_to?: string;
+  q?: string;
+}
+
+export const listPlatformAudit = (filters: PlatformAuditFilters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") params.set(key, String(value));
+  });
+  const query = params.toString();
+  return apiGetObject<PlatformAuditResponse>(`platform/audit-log/${query ? `?${query}` : ""}`);
+};
+
+// ── SA-2: إذن الدخول للدعم ──
+
+export type SupportScope = "read_only" | "full";
+export type SupportGrantStatus =
+  "pending" | "active" | "rejected" | "revoked" | "cancelled" | "expired";
+
+export interface SupportAccessGrant {
+  id: number;
+  tenant_id: number;
+  tenant_name: string;
+  requested_by_id: number;
+  requested_by: string;
+  reason: string;
+  requested_scope: SupportScope;
+  requested_hours: number;
+  is_emergency: boolean;
+  status: SupportGrantStatus;
+  scope: SupportScope | "";
+  expires_at: string | null;
+  decided_by: string;
+  decided_at: string | null;
+  decision_note: string;
+  revoked_by: string;
+  revoked_at: string | null;
+  first_used_at: string | null;
+  last_used_at: string | null;
+  created_at: string;
+}
+
+export const listCompanySupportAccess = (companyId: number) =>
+  apiGetObject<{ results: SupportAccessGrant[] }>(`platform/companies/${companyId}/support-access/`);
+
+export const requestSupportAccess = (
+  companyId: number, reason: string, scope: SupportScope, hours: number,
+) =>
+  apiPostObject<SupportAccessGrant>(
+    `platform/companies/${companyId}/support-access/`, { reason, scope, hours });
+
+/** دخولٌ فوريّ بلا انتظار — أربع ساعات، خطورة عالية، والشركة تُبلَّغ فوراً. */
+export const emergencySupportAccess = (companyId: number, reason: string) =>
+  apiPostObject<SupportAccessGrant>(
+    `platform/companies/${companyId}/support-access/`, { reason, emergency: true });
+
+export const listPlatformSupportAccess = (status?: "pending" | "active") =>
+  apiGetObject<{ results: SupportAccessGrant[] }>(
+    `platform/support-access/${status ? `?status=${status}` : ""}`);
+
+/** إنهاء إذنٍ ساري (خروج) أو سحب طلبٍ معلّق قبل أن تقرّر فيه الشركة. */
+export const endSupportAccess = (grantId: number) =>
+  apiPostObject<SupportAccessGrant>(`platform/support-access/${grantId}/end/`, {});
+
+// ── أسعار الخطط ──
+
+export interface PlanPricingRow {
+  plan_key: string;
+  label: string;
+  /** أرقام عشرية تصل نصّاً من DRF — تُحوَّل عند العرض. */
+  default_price: string;
+  override: string | null;
+  has_override: boolean;
+  effective_price: string;
+}
+
+export const listPlanPricing = () =>
+  apiGetObject<{ results: PlanPricingRow[] }>("platform/plan-pricing/");
+
+/** مساواة السعر بالافتراض = استعادة (يحذف الخادم التجاوز). */
+export const setPlanPricing = (planKey: string, monthlyPrice: string, note = "") =>
+  apiPutObject<{ results: PlanPricingRow[] }>(
+    "platform/plan-pricing/", { plan_key: planKey, monthly_price: monthlyPrice, note });
+
+// ── SA-9: company creation for a customer + system health ──
+
+export interface CompanyCreationOptions {
+  templates: { key: string; label: string }[];
+  plans: PlanChoice[];
+  default_trial_days: number;
+  max_trial_days: number;
+}
+
+export interface CompanyCreationInput {
+  name: string;
+  owner_email: string;
+  template: string;
+  plan: string;
+  trial_days?: number;
+  subscription_ends_at?: string;
+}
+
+export const getCompanyCreationOptions = () =>
+  apiGetObject<CompanyCreationOptions>("platform/companies/");
+
+export const createPlatformCompany = (input: CompanyCreationInput) =>
+  apiPostObject<PlatformCompanyRow>("platform/companies/", input as unknown as Record<string, unknown>);
+
+export interface PlatformHealth {
+  checked_at: string;
+  database: {
+    vendor: string;
+    ok: boolean;
+    ping_ms: number | null;
+    size_bytes: number | null;
+    largest_tables: { name: string; rows: number; bytes: number }[];
+  };
+  migrations: { ok: boolean; pending: string[] };
+  cache: { ok: boolean; backend: string };
+  backup: {
+    configured: boolean;
+    readable?: boolean;
+    latest_file?: string | null;
+    latest_at?: string;
+    latest_bytes?: number;
+    age_hours?: number;
+    stale?: boolean;
+    file_count?: number;
+  };
+  storage: { ledger_bytes: number; unattributed_bytes: number };
+  heaviest_companies: {
+    tenant_id: number;
+    name: string;
+    movements_total: number;
+    documents_total: number;
+    storage_bytes: number;
+  }[];
+  usage_computed_at: string;
+  failed_logins_24h: number;
+  app: { django: string; python: string; debug: boolean; timezone: string };
+}
+
+export const getPlatformHealth = () => apiGetObject<PlatformHealth>("platform/health/");

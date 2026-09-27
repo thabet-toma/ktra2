@@ -262,6 +262,14 @@ def login_view(request):
     user = User.objects.filter(Q(username__iexact=email) | Q(email__iexact=email)).first()
     if not user or not user.check_password(password):
         _login_register_failure(*rate_keys)
+        from core.platform_audit import record_platform_event_safely
+
+        # المعرّف المُدخَل وحده، لا كلمة السر. بعد القفل لا يصل الطلب إلى هنا،
+        # فالسجلّ محدودٌ بعتبة `_login_locked` لكل بريد/IP في النافذة.
+        record_platform_event_safely(
+            "LOGIN_FAILED", request=request, actor=None, target_user=user,
+            metadata={"identifier": email.lower()[:150], "known_user": user is not None},
+        )
         return JsonResponse({"detail": "Invalid credentials"}, status=401)
     _login_clear_failures(*rate_keys)
     if not user.is_active:

@@ -359,6 +359,10 @@ FIELD_STAFF_ROLE = "field_staff"
 
 _FIELD_STAFF = frozenset({"employee_ops.self"})
 
+# SA-2: دور جلسة دعم كترا — ليس في `ROLE_DEFAULTS` عمداً: لا صلاحيات افتراضية له،
+# و`user_permissions` تمنح الجلسة صلاحياتها صراحةً (مدير ناقص `SUPPORT_FORBIDDEN_PERMS`).
+SUPPORT_ROLE = "support"
+
 ROLE_DEFAULTS: dict[str, object] = {
     "manager": "*",
     "accountant": _ACCOUNTANT,
@@ -463,6 +467,14 @@ def user_tenant_role(user, tenant) -> str:
     """
     if user is None or not getattr(user, "is_authenticated", False):
         return "viewer"
+    if tenant is not None:
+        from core.support_access import is_support_session
+
+        # SA-2: فريق كترا داخلٌ بإذن دعم ليس «مدير» الشركة — فحوص «للمدير وحده»
+        # (إعادة فتح إقرار الضريبة، ملخّص اللوحة المالي، `is_manager`) ترفضه.
+        # صلاحياته الفعلية من `user_permissions` (مدير ناقص المحظورات)، لا من الدور.
+        if is_support_session(user, tenant):
+            return SUPPORT_ROLE
     if getattr(user, "is_superuser", False):
         return "manager"
 
@@ -503,6 +515,15 @@ def user_permissions(user, tenant) -> frozenset:
     """الصلاحيات الفعلية = افتراضي الدور ← تجاوز الدور ← تجاوز العضو (الأعلى)."""
     role = user_tenant_role(user, tenant)
     granted = set(role_default_permissions(role, tenant))
+    if tenant is not None:
+        from core.support_access import is_support_forbidden, is_support_session
+
+        if is_support_session(user, tenant):
+            # SA-2: فريق كترا داخلٌ بإذن دعم — صلاحيات مدير ناقص المحظورات الثابتة
+            # (الأعضاء، الصلاحيات، الربط الضريبي، حزمة التصدير). النطاق (قراءة/كامل)
+            # يُفرض في `enforce_support_access` لا هنا.
+            granted = set(role_default_permissions("manager", tenant))
+            return frozenset(key for key in granted if not is_support_forbidden(key))
     if role == "manager":
         # المدير مالك الشركة — لا يُقفل خارج نظامه بتجاوز، دوريّاً كان أو فردياً.
         return frozenset(granted)

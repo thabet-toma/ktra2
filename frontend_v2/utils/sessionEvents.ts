@@ -58,3 +58,23 @@ export function emitPlanLimitReached(detail: PlanLimitReachedDetail): void {
     /* بيئة بلا window (اختبارات) — تجاهل */
   }
 }
+
+/**
+ * SA-2: ردّ 403 برمزٍ من رموز إذن الدعم — `support_access_required` (لا إذن
+ * ساري: انتهى أو سُحب)، `support_access_read_only` (كتابة بإذن قراءة)،
+ * `support_access_forbidden` (محظورٌ على فريق الدعم مهما كان الإذن).
+ */
+export const SUPPORT_ACCESS_DENIED_EVENT = "ktra:support-access-denied";
+
+export interface SupportAccessDeniedDetail {
+  code: string;
+  message: string;
+}
+
+export function emitSupportAccessDenied(detail: SupportAccessDeniedDetail): void {
+  try {
+    window.dispatchEvent(new CustomEvent<SupportAccessDeniedDetail>(SUPPORT_ACCESS_DENIED_EVENT, { detail }));
+  } catch {
+    /* بيئة بلا window (اختبارات) — تجاهل */
+  }
+}

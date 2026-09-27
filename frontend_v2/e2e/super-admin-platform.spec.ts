@@ -297,8 +297,11 @@ test("super admin gets a separate platform dashboard and development notes sheet
 
   await expect(page.getByRole("heading", { name: "لوحة تحكم السوبر أدمن" })).toBeVisible();
   await expect(page.getByText("إجمالي الشركات")).toBeVisible();
-  await expect(page.getByText("شركة الاختبار").last()).toBeVisible();
   await expect(page.getByRole("button", { name: "إدارة المنصة" })).toBeVisible();
+  // SA-5: الأقسام صفحاتٌ بمساراتها — الشركات في `/super-admin/companies` لا في «نظرة عامة».
+  await page.getByRole("button", { name: "الشركات", exact: true }).click();
+  await expect(page).toHaveURL(/\/super-admin\/companies$/);
+  await expect(page.getByText("شركة الاختبار").last()).toBeVisible();
 
   // سكرولر الصفحة لا يتجاوز الشاشة — كان min-height بـ 100vh يقصّ أسفل اللوحة
   // فلا تُرى آخر الشركات مهما سكرلت.
@@ -324,7 +327,7 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await expect(page.getByText("إضافة تقرير هامش الربح", { exact: true })).toBeVisible();
 });
 
-test("لوحة المنصة: مؤشرات التشغيل، وأعمدة القياس في جدول الشركات", async ({ page }) => {
+test("لوحة المنصة: مؤشرات التشغيل في «نظرة عامة»، وأعمدة القياس في جدول الشركات", async ({ page }) => {
   await installMocks(page, true);
   await page.goto("/super-admin");
   await expect(page.getByRole("heading", { name: "لوحة تحكم السوبر أدمن" })).toBeVisible();
@@ -339,28 +342,28 @@ test("لوحة المنصة: مؤشرات التشغيل، وأعمدة القي
   await expect(insights.getByText("5 م.ب", { exact: true })).toBeVisible();
   await expect(insights.getByText("الفروع 3/3")).toBeVisible();
 
-  const table = page.locator("table").first();
-  await expect(table.locator("thead th")).toHaveText([
-    "الشركة", "الخطة", "الحالة", "الأعضاء", "الفروع", "المستندات هذا الشهر",
-    "التخزين", "آخر نشاط", "الاستيراد", "تاريخ الإنشاء", "تحكم",
-  ]);
-
-  const row = (index: number) => table.locator("tbody tr").nth(index);
-  await expect(row(0).locator("td").nth(4)).toHaveText("3");
-  await expect(row(0).locator("td").nth(5)).toHaveText("180");
-  await expect(row(0).locator("td").nth(6)).toHaveText("5 م.ب");
-  await expect(row(0).locator("td").nth(7)).toHaveText("14/08/2026");
-  await expect(row(0)).toContainText("قرب الحدّ: الفروع");
-  // الشركة بلا بايتات مقيسة: «—» لا صفر مُختلَق، وسكونها يُقال صراحةً
-  await expect(row(1).locator("td").nth(6)).toHaveText("—");
-  await expect(row(1).locator("td").nth(7)).toHaveText("لا نشاط مسجَّل");
-  await expect(row(1)).not.toContainText("قرب الحدّ");
-
-  // سطر تخزين المنصة أسفل الجدول — باسمه هو، و«غير منسوب» تبقى محجوزة لتقرير
-  // الاسترجاع الأثري (كمّية أخرى: إجمالي Cloudinary ناقص السجلّ كلّه)
+  // سطر تخزين المنصة — باسمه هو، و«غير منسوب» تبقى محجوزة لتقرير الاسترجاع
+  // الأثري (كمّية أخرى: إجمالي Cloudinary ناقص السجلّ كلّه)
   await expect(page.getByText("تخزين مرفوع لا يخصّ شركة بعينها:")).toBeVisible();
   await expect(page.getByText("1 م.ب", { exact: true })).toBeVisible();
   await expect(page.getByText("غير منسوب")).toHaveCount(0);
+
+  // SA-6: الجدول في صفحة «الشركات» — المستندات والحركات بعمودَي «الكل / هذا الشهر»
+  // من `platform/usage/`، و«—» حين لا يصل الاستخدام (المحاكاة لا تعيده).
+  await page.goto("/super-admin/companies");
+  const table = page.locator("table").first();
+  await expect(table.locator("thead th")).toHaveText([
+    "الشركة", "الخطة والحالة", "الأعضاء", "المستنداتالكل / هذا الشهر",
+    "الحركاتالكل / هذا الشهر", "التخزين", "آخر نشاط", "الإنشاء", "",
+  ]);
+
+  const row = (index: number) => table.locator("tbody tr").nth(index);
+  await expect(row(0).locator("td").nth(5)).toHaveText("5 م.ب");
+  await expect(row(0).locator("td").nth(6)).toHaveText("14/08/2026");
+  await expect(row(0)).toContainText("الفروع");
+  // الشركة بلا بايتات مقيسة: «—» لا صفر مُختلَق، وسكونها يُقال صراحةً
+  await expect(row(1).locator("td").nth(5)).toHaveText("—");
+  await expect(row(1).locator("td").nth(6)).toHaveText("لا نشاط مسجَّل");
 });
 
 /** القسم من عنوانه — للصفحة قسمان لكلٍّ جدوله، فلا تُخلط صفوفهما. */
@@ -511,20 +514,24 @@ test("ردود الملاحظة: إرسالٌ فوري، تمييز ردّ غي�
   await expect(page.getByText("بدأت بالفلتر، والباقي غداً.")).toBeVisible();
 });
 
-test("super admin controls a company and its members from the platform panel", async ({ page }) => {
+test("super admin controls a company and its members from the company page", async ({ page }) => {
   const calls = await installMocks(page, true);
-  await page.goto("/super-admin");
+  // SA-6: صفحة الشركة الكاملة بتبويبات — لا نافذة فوق الجدول.
+  await page.goto("/super-admin/companies");
+  await page.getByRole("button", { name: "فتح شركة الاختبار" }).click();
+  await expect(page).toHaveURL(/\/super-admin\/companies\/42$/);
+  await expect(page.getByRole("heading", { name: "شركة الاختبار" })).toBeVisible();
 
-  await page.getByRole("button", { name: "تحكم بـشركة الاختبار" }).click();
-  await expect(page.getByRole("heading", { name: /تحكم المنصة بالشركة/ })).toBeVisible();
-
-  // إعدادات الشركة: الحالة/الخطة/الاستيراد تُحفظ من هنا لا من نافذة المدير
+  // إعدادات الشركة: الحالة/الخطة/الاستيراد تُحفظ من تبويب «الخطة والاشتراك»
+  await page.getByRole("button", { name: "الخطة والاشتراك" }).click();
+  await expect(page).toHaveURL(/tab=plan$/);
   await page.getByLabel("حالة الشركة").selectOption("Suspended");
-  await page.getByRole("button", { name: "حفظ" }).click();
+  await page.getByRole("button", { name: "حفظ", exact: true }).click();
   await expect.poll(() => calls.companyPatch?.status).toBe("Suspended");
   await expect(page.getByLabel("حالة الشركة")).toHaveValue("Suspended");
 
-  // دور عضو
+  // دور عضو — تبويب «الأعضاء والفروع»
+  await page.getByRole("button", { name: "الأعضاء والفروع" }).click();
   await page.getByLabel("دور sami").selectOption("accountant");
   await expect.poll(() => calls.memberPatch?.role).toBe("accountant");
 
@@ -535,28 +542,23 @@ test("super admin controls a company and its members from the platform panel", a
   await expect(page.getByRole("button", { name: "تفعيل حساب sami" })).toBeVisible();
 });
 
-test("company panel reads branches, and fetches the activity feed only when it is opened", async ({ page }) => {
+test("company page reads branches, and fetches the activity feed only on its tab", async ({ page }) => {
   const calls = await installMocks(page, true);
-  await page.goto("/super-admin");
+  await page.goto("/super-admin/companies/42");
 
-  await page.getByRole("button", { name: "تحكم بـشركة الاختبار" }).click();
-  await expect(page.getByRole("heading", { name: /تحكم المنصة بالشركة/ })).toBeVisible();
+  // «ملخص»: بطاقة التخزين تقرأ بايتات الشركة من كرتها
+  await expect(page.getByRole("button", { name: /^التخزين/ })).toContainText("5 م.ب");
 
-  // التخزين المستهلَك في ترويسة اللوحة — الرقم نفسه يظهر خلفها في جدول الشركات،
-  // فالتأكيد على فقرة الترويسة لا على النص وحده.
-  await expect(page.getByText(/التخزين المستهلَك/)).toContainText("5 م.ب");
-
+  await page.getByRole("button", { name: "الأعضاء والفروع" }).click();
   const branches = page.locator('section[aria-label="فروع الشركة"]');
   await expect(branches.getByRole("heading", { name: "الفروع (2)" })).toBeVisible();
   await expect(branches.getByText("الفرع الرئيسي")).toBeVisible();
   await expect(branches.getByText("MAIN")).toBeVisible();
-
-  // القسم موجود ولم تُطلب مئة الحركة مع فتح اللوحة
-  const feed = page.locator('section[aria-label="آخر حركات الشركة"]');
-  await expect(feed.getByRole("heading", { name: "آخر الحركات" })).toBeVisible();
+  // مئة الحركة لا تُطلب إلا في تبويب «السجل»
   expect(calls.activityHits ?? 0).toBe(0);
 
-  await feed.getByRole("button", { name: /عرض آخر 100 حركة/ }).click();
+  await page.getByRole("button", { name: "السجل", exact: true }).click();
+  const feed = page.locator('section[aria-label="آخر حركات الشركة"]');
   await expect(feed.getByText("INV-1001")).toBeVisible();
   await expect(feed.getByText("الحدّ: 3 ← 5")).toBeVisible();
   await expect(feed.getByText("فاتورة مبيعات INV-1001")).toBeVisible();
@@ -574,13 +576,13 @@ test("company panel reads branches, and fetches the activity feed only when it i
 
 test("super admin assigns the example company and sees its label", async ({ page }) => {
   const calls = await installMocks(page, true);
-  await page.goto("/super-admin");
+  await page.goto("/super-admin/companies");
 
-  await page.getByLabel("تعيين الشركة المثال").selectOption("42");
+  await page.getByLabel("الشركة المثال").selectOption("42");
 
   await expect.poll(() => calls.companyPatch?.is_example).toBe(true);
-  await expect(page.getByLabel("تعيين الشركة المثال")).toHaveValue("42");
-  await expect(page.getByText("شركة الاختبار (مثال)", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("الشركة المثال")).toHaveValue("42");
+  await expect(page.locator("tbody tr").filter({ hasText: "شركة الاختبار" }).getByText("مثال", { exact: true })).toBeVisible();
 });
 
 test("company manager cannot see or open platform administration", async ({ page }) => {

@@ -133,6 +133,15 @@ def upload_media_file(
             status.HTTP_400_BAD_REQUEST,
         )
 
+    if tenant is not None:
+        # SA-4: حدّ مساحة الشركة يُفحص **قبل** الرفع — رفضٌ بعده يترك ملفاً مدفوع
+        # التخزين خارج كل حساب. أصول المنصة (`tenant=None`) بلا حدّ.
+        from core.plans import bytes_to_mb, check_limit
+
+        message = check_limit(tenant, "company.storage_mb", additional=bytes_to_mb(size))
+        if message:
+            raise MediaUploadError(message, status.HTTP_400_BAD_REQUEST)
+
     cfg = getattr(settings, "CLOUDINARY_STORAGE", {}) or {}
     cloud_name = (cfg.get("CLOUD_NAME") or "").strip()
     api_key = (cfg.get("API_KEY") or "").strip()
