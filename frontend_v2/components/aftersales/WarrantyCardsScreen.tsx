@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, ShieldCheck,
+  ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Settings, ShieldCheck,
 } from "lucide-react";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
@@ -17,6 +17,7 @@ import { formatNumber } from "../../utils/formatNumber";
 import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { WarrantyCardModal } from "./WarrantyCardModal";
+import { WarrantySettingsScreen } from "./WarrantySettingsScreen";
 import { warrantyPillClass } from "./warrantyStatus";
 
 /**
@@ -71,6 +72,11 @@ interface PartnerOption {
 export const WarrantyCardsScreen: React.FC = () => {
   const { can } = usePermissions();
   const canManage = can("aftersales.warranty.manage");
+  const canManageSettings = can("aftersales.settings.manage");
+  // الشاشة تحتاج صلاحيةً واحدة على الأقل لتعرض شيئاً — إدارة الإعدادات، أو
+  // القراءة عبر `lookup/` (`aftersales.warranty.view`).
+  const canViewSettings = canManageSettings || can("aftersales.warranty.view");
+  const [showSettings, setShowSettings] = useState(false);
 
   const [searchText, setSearchText] = useState("");
   const [query, setQuery] = useState("");
@@ -163,6 +169,15 @@ export const WarrantyCardsScreen: React.FC = () => {
           محسوبة من تاريخ الانتهاء، لا مُدخَلة
         </span>
         <span className="flex-1" />
+        {canViewSettings && (
+          <button
+            type="button"
+            onClick={() => setShowSettings(true)}
+            className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-2 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+          >
+            <Settings className="h-4 w-4" /> الإعدادات
+          </button>
+        )}
         {canManage && (
           <button
             type="button"
@@ -388,6 +403,13 @@ export const WarrantyCardsScreen: React.FC = () => {
           suppliers={suppliers}
           onClose={() => setOpenCard(null)}
           onChanged={() => { void load(); }}
+        />
+      )}
+
+      {showSettings && (
+        <WarrantySettingsScreen
+          canManage={canManageSettings}
+          onClose={() => setShowSettings(false)}
         />
       )}
     </div>

@@ -8,21 +8,30 @@ import logging
 from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError as DjangoValidationError
-from django.db.models import Q
+from django.db.models import ProtectedError, Q
 from django.utils import timezone
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
-from core.access import require_perm
+from core.access import require_perm, user_has_perm
 from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
 
-from .models import ServiceOrder, ServiceOrderPart, WarrantyCard, WarrantyCardEvent
+from .models import (
+    ManufacturerWarrantor,
+    ServiceOrder,
+    ServiceOrderPart,
+    WarrantyCard,
+    WarrantyCardEvent,
+)
 from .serializers import (
+    AfterSalesSettingsSerializer,
     GenerateServiceInvoiceSerializer,
+    ManufacturerWarrantorSerializer,
     ServiceOrderEventSerializer,
     ServiceOrderListSerializer,
     ServiceOrderNoteSerializer,
@@ -33,7 +42,12 @@ from .serializers import (
     WarrantyCardSerializer,
     WarrantyExtendSerializer,
 )
-from .services import MODULE_KEY, log_warranty_event, warranty_coverage
+from .services import (
+    MODULE_KEY,
+    get_or_create_after_sales_settings,
+    log_warranty_event,
+    warranty_coverage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -239,6 +253,99 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         return Response(
             warranty_coverage(self.tenant.pk, request.query_params.get("serial") or "")
         )
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# جهات كفالة المصنع وإعدادات الوحدة (#230)
+# ══════════════════════════════════════════════════════════════════════════
+
+PERM_SETTINGS_MANAGE = "aftersales.settings.manage"
+PURCHASE_INVOICE_EDIT_PERM = "purchase.invoice.edit"
+
+
+class ManufacturerWarrantorViewSet(viewsets.ModelViewSet):
+    """جهات كفالة المصنع — إدارتها الكاملة خلف `aftersales.settings.manage`.
+
+    `lookup/` وحدها أوسع: يقرأها من يحرّر فواتير الشراء (`purchase.invoice.edit`)
+    أيضاً — تغذّي منتقي كفالة المصنع على بند الشراء لاحقاً (#235).
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = ManufacturerWarrantorSerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        if self.action == "lookup":
+            if not user_has_perm(request.user, self.tenant, PURCHASE_INVOICE_EDIT_PERM):
+                require_perm(request, PERM_VIEW, tenant=self.tenant)
+        else:
+            require_perm(request, PERM_SETTINGS_MANAGE, tenant=self.tenant)
+
+    def get_queryset(self):
+        return ManufacturerWarrantor.objects.filter(tenant=self.tenant)
+
+    def _reject_duplicate_name(self, name: str, *, exclude_pk=None):
+        name = name.strip()
+        queryset = ManufacturerWarrantor.objects.filter(tenant=self.tenant, name=name)
+        if exclude_pk is not None:
+            queryset = queryset.exclude(pk=exclude_pk)
+        if queryset.exists():
+            raise ValidationError({"name": f"توجد جهة بهذا الاسم «{name}» مسبقاً."})
+
+    def perform_create(self, serializer):
+        self._reject_duplicate_name(serializer.validated_data["name"])
+        serializer.save(tenant=self.tenant)
+
+    def perform_update(self, serializer):
+        name = serializer.validated_data.get("name")
+        if name is not None:
+            self._reject_duplicate_name(name, exclude_pk=serializer.instance.pk)
+        serializer.save()
+
+    def perform_destroy(self, instance):
+        # لا حذف لجهة مرتبطة (#230): كل من يشير إليها لاحقاً يفعل ذلك بـPROTECT
+        # (السياسة #231، بند الشراء #235، البطاقة #232) — لا شيء يشير إليها
+        # اليوم، لكن الفحص عامٌّ فلا تحتاج تذكرةٌ لاحقة لمسّه.
+        try:
+            instance.delete()
+        except ProtectedError:
+            raise ValidationError({
+                "detail": "هذه الجهة مرتبطة بسجلات أخرى — أرشفها (أوقف تفعيلها) بدل حذفها.",
+            })
+
+    @action(detail=False, methods=["get"], url_path="lookup")
+    def lookup(self, request):
+        """قائمة القراءة للمنتقي — الجهات المفعَّلة وحدها."""
+        queryset = (
+            ManufacturerWarrantor.objects
+            .filter(tenant=self.tenant, is_active=True)
+            .order_by("name")
+        )
+        return Response(ManufacturerWarrantorSerializer(queryset, many=True).data)
+
+
+class AfterSalesSettingsView(APIView):
+    """صفٌّ واحد لكل شركة — `GET` يقرأه كل من يملك الوحدة، و`PATCH` خلف
+    `aftersales.settings.manage` وحدها (على نمط `SalesSettingsViewSet.current`)."""
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def get(self, request):
+        tenant = require_module(request, MODULE_KEY)
+        settings_row = get_or_create_after_sales_settings(tenant.pk)
+        return Response(AfterSalesSettingsSerializer(settings_row).data)
+
+    def patch(self, request):
+        tenant = require_module(request, MODULE_KEY)
+        require_perm(request, PERM_SETTINGS_MANAGE, tenant=tenant)
+        settings_row = get_or_create_after_sales_settings(tenant.pk)
+        serializer = AfterSalesSettingsSerializer(settings_row, data=request.data, partial=True)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(serializer.data)
 
 
 # ══════════════════════════════════════════════════════════════════════════

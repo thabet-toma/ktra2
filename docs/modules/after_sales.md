@@ -1,6 +1,6 @@
 # after_sales — خدمة ما بعد البيع: بطاقات الكفالة وأوامر الصيانة (وحدة مرخّصة)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28 (#229). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28 (#230). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 وحدة مرخّصة (`after_sales` في `core/modules.py`) تحمل ما يحدث **بعد** خروج البضاعة:
@@ -43,7 +43,8 @@
 | `ServiceOrder` | `order_number`، `order_date`، `serial`، `complaint`/`diagnosis`/`resolution`، `status`، `outcome` (حقل منفصل)، `warranty_covered`، `estimated_amount`، `covered_posted_at`، `billing_waived_reason`، `photos` | `tenant`، `partner`، `product`، `technician`، `warranty_card`، `sales_invoice` (كلها SET_NULL) |
 | `ServiceOrderPart` | `quantity`، `billing ∈ {billable, covered}`، `unit_price`، **`serials`** (JSON، على نمط `SalesInvoiceLine.serials`، #223)، **`issued_cost`** (كلفة FIFO الفعلية لحركة `SERVICE_ISSUE`، تُفرَّغ عند التراجع)، **`materialized_at`** | `order` (CASCADE)، `product` (PROTECT)، `sales_invoice_line` (SET_NULL) |
 | `ServiceOrderEvent` | `event_type`، `from_status`/`to_status`، `text`، `created_at` | `order` (CASCADE)، `actor` |
-| `AfterSalesSettings` | مثبِّت الافتراضيات لكل شركة | `tenant` (OneToOne)، `warranty_expense_account` → `accounting.Account`، `default_labour_product` → `inventory.Product` |
+| `ManufacturerWarrantor` (#230) | الاسم (**فريد للشركة**، `UniqueConstraint(tenant, name)`)، `service_center_address`، `phone`، `notes`، `is_active` | `tenant`. كل من يشير إليها لاحقاً (السياسة #231، بند الشراء #235، البطاقة #232) يفعل ذلك بـPROTECT — لا حذف لجهة مرتبطة، أرشفة (`is_active=False`) بدلاً منه؛ العنوان والهاتف يُقرآن حيّاً في الطباعة لا يُجمَّدان |
+| `AfterSalesSettings` | مثبِّت الافتراضيات لكل شركة، ومنذ #230: `default_terms`/`repair_terms` (سقف 2000 حرف)، `extend_for_shop_days` (افتراضه مفعَّل)، `repair_warranty_days` (افتراضه 90، صفرٌ يطفئه، وإلا 1–730) | `tenant` (OneToOne)، `warranty_expense_account` → `accounting.Account`، `default_labour_product` → `inventory.Product` |
 
 ## دوال الـservices العامة
 ```python
@@ -54,6 +55,7 @@ def on_sale_cancelled(invoice) -> int:  # حذف مسودّة الفاتورة: 
 def on_sales_return_posted(return_invoice) -> int:  # مرجع البيع: يُنهي بطاقات الوحدات المرتجعة وحدها بـreturned
 def on_sales_return_unposted(return_invoice) -> int:  # إلغاء ترحيل المرجع: يُحيي ما أنهاه هو وحده
 def warranty_coverage(tenant_id: int, serial: str, today=None) -> dict:  # التغطية من البطاقة غير المنتهية ومن نسب الوحدة
+def get_or_create_after_sales_settings(tenant_id: int) -> AfterSalesSettings:  # صفّ الإعدادات — نقطة `settings/` (#230) تستعمله للقراءة والتعديل معاً
 def log_warranty_event(card, *, event_type, reason_code="", text="", service_order=None, user=None, old_end_date=None, new_end_date=None, quantity=None) -> WarrantyCardEvent:  # كتابة حدثٍ واحد على سجل البطاقة (#229) — نقطة كتابةٍ واحدة تعيد استعمالها تذاكر لاحقة (الإلغاء، الإصدار، الإحالة…)
 
 # after_sales/service_orders.py — أمر الصيانة
@@ -76,6 +78,9 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 | POST | `warranties/{id}/extend/` | `WarrantyCardViewSet.extend` — يكتب حدث `extend` على سجل البطاقة (`reason_code=courtesy` + التاريخين + السبب الحرّ) **بدل** إلحاق سطرٍ بالملاحظات (#229؛ كان كذلك حتى #222). **يرفض التقصير** (`new_end` يجب أن يتجاوز `end_date` الحالي) **ويرفض بطاقةً منتهية بواقعة** (#222 §٨) |
 | GET | `warranties/{id}/events/` | `WarrantyCardViewSet.events` — سجل أحداث البطاقة، للقراءة فقط (#229) |
 | GET | `warranties/check/?serial=` | `WarrantyCardViewSet.check` |
+| GET/POST/PATCH/DELETE | `manufacturer-warrantors/` | `ManufacturerWarrantorViewSet` (#230) — CRUD كامل خلف `aftersales.settings.manage`. الحذف يمرّ بـ`try/except ProtectedError` عامّ فيردّ 400 مقروءاً لجهةٍ مرتبطة، لا 500؛ الأرشفة (`PATCH {is_active:false}`) هي أداة الإيقاف الطبيعية |
+| GET | `manufacturer-warrantors/lookup/` | `ManufacturerWarrantorViewSet.lookup` — الجهات المفعَّلة وحدها، بصلاحية `purchase.invoice.edit` **أو** `aftersales.warranty.view` (أوسع من الإدارة الكاملة؛ تغذّي منتقي كفالة المصنع على بند الشراء لاحقاً #235) |
+| GET/PATCH | `settings/` | `AfterSalesSettingsView` (#230) — صفٌّ واحد لكل شركة؛ `GET` يقرأه كل من يملك ترخيص الوحدة بلا صلاحيةٍ إضافية (نمط `SalesSettingsViewSet.current`)، و`PATCH` خلف `aftersales.settings.manage` وحدها |
 | GET/POST | `service-orders/` | `ServiceOrderViewSet` (فلاتر `q`، `status`، `open`، `partner`، `date_from/to`) |
 | POST | `service-orders/{id}/transition/` | `ServiceOrderViewSet.transition` — البوابة الوحيدة لتغيير الحالة |
 | POST | `service-orders/{id}/parts/` · PATCH/DELETE `service-orders/{id}/parts/{part_id}/` | `add_part` · `part_detail` |
@@ -101,7 +106,9 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 ## الواجهة (`frontend_v2/`)
 | الملف | الغرض |
 |---|---|
-| `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | قائمة بطاقات الكفالة والبحث والبطاقة اليدوية |
+| `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | قائمة بطاقات الكفالة والبحث والبطاقة اليدوية، وزر «الإعدادات» (#230) الذي يفتح `WarrantySettingsScreen` |
+| `frontend_v2/components/aftersales/WarrantySettingsScreen.tsx` (#230) | إعدادات الوحدة: قسم «جهات كفالة المصنع» (قائمة/إضافة/تعديل/أرشفة) وقسم «الشروط والإعدادات» (شروط الشركة وشروط الإصلاح بعدّاد حروف وتنبيه فوق 1200، وتمديد أيام الصيانة، ومدة كفالة الإصلاح). `GET` يُعرض للجميع، والتعديل خلف `aftersales.settings.manage` |
+| `frontend_v2/components/aftersales/ManufacturerWarrantorModal.tsx` (#230) | إنشاء/تعديل جهة كفالة مصنع واحدة — لا حذف من الواجهة، الأرشفة عبر خانة `is_active` |
 | `frontend_v2/components/aftersales/WarrantyCardModal.tsx` | بطاقة واحدة: إنشاء/تعديل/حذف/تمديد، ومنذ #229 سجل أحداثها (`GET .../events/`) بدل قراءة تاريخ التمديد من الملاحظات |
 | `frontend_v2/components/aftersales/ServiceOrdersScreen.tsx` | قائمة أوامر الصيانة، وفتح المستند، وزر الاستقبال |
 | `frontend_v2/components/aftersales/ServiceOrderDocument.tsx` | المستند: الملف · قطع الغيار (ترحيل/فوترة) · السجل الزمني — يملأ `sale_price` عند إضافة قطعة مفوترة وعند تحويل قطعة مغطاة إليها؛ عمود «الأرقام» في جدول القطع يفتح `SerialEntryModal` نفسه (`mode="pick"`، مصدره «في المخزن») لقطعةٍ مغطاة من منتجٍ مرقّم لم تتجسّد بعد — على البند الجديد وعلى القائم سواء، لا حقل نصّ عند الإضافة فقط؛ النمط `required` من إعدادات المبيعات (`serial_entry_mode`) نفس مصدر `SalesInvoiceEditor` (#223 مراجعة) |
@@ -144,6 +151,7 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 - **الأمر المُسلَّم مجمَّد**: لا تعديل ولا نقل حالة ولا تراجع عن صرف قطعه.
 - **صرف بكلفة صفرية يُسجَّل حركةً بلا قيد** — البضاعة خرجت فعلاً، والقيد الصفري مرفوض من `post_journal` أصلاً.
 - **`device_registry` بلا FK**: الرابط معرّفٌ نصي وحده — أي مفتاح أجنبي يكسر إطفاء الوحدتين المستقل ويهدم برهان حياد سجل الأجهزة مالياً (THA-45).
+- **حذف جهة كفالة المصنع فحصٌ عامٌّ لا قائمة مسمّاة (#230)**: `ManufacturerWarrantorViewSet.perform_destroy` يكتفي بـ`try/except ProtectedError` — لا شيء يشير إلى `ManufacturerWarrantor` بـPROTECT في هذا المعلم، لكن كل مرجعٍ لاحق (السياسة #231، بند الشراء #235، البطاقة #232) يُحمى تلقائياً بمجرد أن يُعرَّف بـ`on_delete=models.PROTECT` — لا تذكرة لاحقة تحتاج لمس هذا الملف.
 - **`WarrantyCard.device_name` التلقائي والبحث بالرقم التسلسلي يمرّان عبر
   `inventory/services.py` (`product_display_name`) لا `str(product)`** (#42):
   بطاقةٌ من إخوةٍ تحت أبٍ واحد كانت تحمل المقاس عارياً بلا براند مميِّز.
@@ -162,3 +170,4 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 | `after_sales/tests/test_service_orders.py` | صرف القطع المغطاة بتكلفة FIFO وقيد متوازن بتاريخ اليوم، **حارس التجسّد المزدوج بالاتجاهين**، ثبات `sales_cogs_map`، إيراد الأجرة في حساب الخدمات، بوابتا التسليم والإلغاء، البحث الموحّد، البوابة والعزل، ومنذ #223: قطعة مفوترة أُضيفت بعد الفاتورة تمنع التسليم، القطعة المغطاة المرقّمة تستهلك رقمها (وتحت `optional` لا يخصّصها بيعٌ لاحق FIFO) والتراجع يعيده `in_stock`، سعرٌ صفري على قطعة مفوترة يُرفض، `billing` خارج `BILLING_CHOICES` يُرفض، وشهرٌ مقفل عند الاستقبال لا يمنع الترحيل اليوم بينما فترة اليوم المقفلة ترفض حتى الصرف الصفري |
 | `logistics/tests/test_issued_serial_purchase_guards.py` | وحدةٌ تسلسلية `issued` (صُرفت خارج البيع) تمنع حذفها في إلغاء ترحيل فاتورة الشراء، وإلغاء سند الاستلام، ومرتجع الشراء — الثلاثة عبر `release_purchase_serials`/`release_returned_purchase_serials` (#223) |
 | `docshare/tests/test_voucher_and_aftersales.py` | الصفحة العامة لا تنشر ملاحظات البطاقة، وحالتها من `status_on` لا من تاريخ الانتهاء وحده |
+| `after_sales/tests/test_manufacturer_warrantors_and_settings.py` | #230: CRUD جهات كفالة المصنع، الأرشفة عبر `is_active=False`، الاسم الفريد للشركة، حذف جهةٍ مرتبطة يُرفض بـ400 لا 500، `lookup/` بصلاحية `purchase.invoice.edit` أو `aftersales.warranty.view`، إعدادات شركة جديدة (تمديد مفعَّل وكفالة إصلاح 90 يوماً)، رفض الشروط فوق 2000 حرف وكفالة الإصلاح خارج 0/1–730، `aftersales.settings.manage` تحصر الكتابة، والبوابة والعزل |

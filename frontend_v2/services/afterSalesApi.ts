@@ -11,6 +11,7 @@
  */
 import {
   apiDelete,
+  apiGetList,
   apiGetObject,
   apiGetPagedList,
   apiPatchObject,
@@ -223,6 +224,84 @@ export interface WarrantyCardEventRow {
 
 export function getWarrantyCardEvents(id: number): Promise<WarrantyCardEventRow[]> {
   return apiGetObject<WarrantyCardEventRow[]>(`${BASE}${id}/events/`, tenantOpts());
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * جهات كفالة المصنع وإعدادات الوحدة (#230)
+ *
+ * إدارة الجهات الكاملة (`manufacturer-warrantors/`) خلف `aftersales.settings.manage`؛
+ * `lookup/` أوسع (تقرأها `purchase.invoice.edit` أيضاً) وتقتصر على المفعَّلة —
+ * تغذّي منتقي كفالة المصنع على بند الشراء لاحقاً (#235). و`settings/` صفٌّ
+ * واحد لكل شركة: `GET` لكل من يملك الوحدة، و`PATCH` خلف صلاحية الإدارة وحدها.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+const WARRANTORS = "after-sales/manufacturer-warrantors/";
+const AFTER_SALES_SETTINGS = "after-sales/settings/";
+
+export interface ManufacturerWarrantorRow {
+  id: number;
+  name: string;
+  service_center_address: string;
+  phone: string;
+  notes: string;
+  is_active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ManufacturerWarrantorDraft {
+  name: string;
+  service_center_address: string;
+  phone: string;
+  notes: string;
+  is_active: boolean;
+}
+
+export function listManufacturerWarrantors(): Promise<ManufacturerWarrantorRow[]> {
+  return apiGetList<ManufacturerWarrantorRow>(WARRANTORS, tenantOpts());
+}
+
+/** الجهات المفعَّلة وحدها — لمنتقي كفالة المصنع لا لشاشة الإدارة. */
+export function lookupManufacturerWarrantors(): Promise<ManufacturerWarrantorRow[]> {
+  return apiGetList<ManufacturerWarrantorRow>(`${WARRANTORS}lookup/`, tenantOpts());
+}
+
+export function createManufacturerWarrantor(
+  draft: ManufacturerWarrantorDraft,
+): Promise<ManufacturerWarrantorRow> {
+  return apiPostObject<ManufacturerWarrantorRow>(WARRANTORS, draft, tenantOpts());
+}
+
+export function updateManufacturerWarrantor(
+  id: number,
+  patch: Partial<ManufacturerWarrantorDraft>,
+): Promise<ManufacturerWarrantorRow> {
+  return apiPatchObject<ManufacturerWarrantorRow>(`${WARRANTORS}${id}/`, patch, tenantOpts());
+}
+
+/** حذفٌ نهائي — يُرفض بـ400 مقروءاً إن كانت الجهة مرتبطة بسجلات أخرى. */
+export function deleteManufacturerWarrantor(id: number): Promise<void> {
+  return apiDelete(`${WARRANTORS}${id}/`, tenantOpts());
+}
+
+export interface AfterSalesSettingsRow {
+  default_terms: string;
+  extend_for_shop_days: boolean;
+  repair_warranty_days: number;
+  repair_terms: string;
+  updated_at: string;
+}
+
+export type AfterSalesSettingsDraft = Omit<AfterSalesSettingsRow, "updated_at">;
+
+export function getAfterSalesSettings(): Promise<AfterSalesSettingsRow> {
+  return apiGetObject<AfterSalesSettingsRow>(AFTER_SALES_SETTINGS, tenantOpts());
+}
+
+export function updateAfterSalesSettings(
+  patch: Partial<AfterSalesSettingsDraft>,
+): Promise<AfterSalesSettingsRow> {
+  return apiPatchObject<AfterSalesSettingsRow>(AFTER_SALES_SETTINGS, patch, tenantOpts());
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

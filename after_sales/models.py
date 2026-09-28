@@ -522,6 +522,40 @@ class ServiceOrderEvent(models.Model):
         return f"{self.event_type}#{self.order_id}"
 
 
+class ManufacturerWarrantor(models.Model):
+    """جهة كفالة المصنع — الاسم فريد للشركة (#230).
+
+    كل من يشير إليها لاحقاً (سياسة الكفالة #231، بند الشراء #235، طبقة المصنع
+    على البطاقة #232) يفعل ذلك بـ`PROTECT` — لا حذف لجهة مرتبطة، أرشفة
+    (`is_active=False`) بدلاً منه. العنوان والهاتف **يُقرآن حيّاً** في الطباعة
+    وورقة الإحالة لاحقاً: ما يُجمَّد على البطاقة هو **مَن** يكفل لا **مكانه** —
+    فجهةٌ تنقل مركزها بعد البيع تطبع عنوانها الحالي على ورقة الإحالة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="manufacturer_warrantors",
+    )
+    name = models.CharField(max_length=150)
+    service_center_address = models.CharField(max_length=300, blank=True, default="")
+    phone = models.CharField(max_length=32, blank=True, default="")
+    notes = models.TextField(blank=True, default="")
+    is_active = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "manufacturer_warrantors"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "name"], name="manufacturer_warrantor_tenant_name_uniq",
+            ),
+        ]
+        ordering = ["name"]
+
+    def __str__(self):
+        return self.name
+
+
 class AfterSalesSettings(models.Model):
     """إعدادات الوحدة لكل شركة — مثبِّت الحسابات والمنتجات الافتراضية.
 
@@ -543,6 +577,20 @@ class AfterSalesSettings(models.Model):
         related_name="after_sales_labour_settings",
         help_text="منتج خدمة «أجرة صيانة» الافتراضي في الفاتورة المولَّدة",
     )
+    # ── شروط الشركة وإعدادات الصيانة (#230) ─────────────────────────────
+    default_terms = models.TextField(
+        blank=True, default="",
+        help_text="شروط كفالة الشركة — تُنسخ إلى `terms_text` على كل بطاقة عند إنشائها",
+    )
+    extend_for_shop_days = models.BooleanField(
+        default=True,
+        help_text="تمديد كفالة التاجر تلقائياً بعدد أيام بقاء الجهاز المغطّى عندنا",
+    )
+    repair_warranty_days = models.PositiveSmallIntegerField(
+        default=90,
+        help_text="مدة كفالة الإصلاح بالأيام — صفرٌ يطفئها، وإلا فمن 1 إلى 730",
+    )
+    repair_terms = models.TextField(blank=True, default="")
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

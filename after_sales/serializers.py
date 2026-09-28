@@ -4,6 +4,8 @@ from datetime import date
 from rest_framework import serializers
 
 from .models import (
+    AfterSalesSettings,
+    ManufacturerWarrantor,
     ServiceOrder,
     ServiceOrderEvent,
     ServiceOrderPart,
@@ -11,6 +13,9 @@ from .models import (
     WarrantyCardEvent,
     add_months,
 )
+
+#: سقف الشروط النصية (شروط الشركة وشروط الإصلاح) — الشهادة المطبوعة تبقى مقروءة (#230).
+TERMS_MAX_LENGTH = 2000
 
 
 class WarrantyCardSerializer(serializers.ModelSerializer):
@@ -190,6 +195,57 @@ class WarrantyExtendSerializer(serializers.Serializer):
                 )
             })
         return new_end
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# جهات كفالة المصنع وإعدادات الوحدة (#230)
+# ══════════════════════════════════════════════════════════════════════════
+
+class ManufacturerWarrantorSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ManufacturerWarrantor
+        fields = [
+            "id", "name", "service_center_address", "phone", "notes",
+            "is_active", "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def validate_name(self, value):
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("اسم جهة الكفالة مطلوب.")
+        return value
+
+
+class AfterSalesSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = AfterSalesSettings
+        fields = [
+            "default_terms", "extend_for_shop_days", "repair_warranty_days",
+            "repair_terms", "updated_at",
+        ]
+        read_only_fields = ["updated_at"]
+
+    def validate_default_terms(self, value):
+        if len(value) > TERMS_MAX_LENGTH:
+            raise serializers.ValidationError(
+                f"شروط الشركة لا تتجاوز {TERMS_MAX_LENGTH} حرفاً."
+            )
+        return value
+
+    def validate_repair_terms(self, value):
+        if len(value) > TERMS_MAX_LENGTH:
+            raise serializers.ValidationError(
+                f"شروط كفالة الإصلاح لا تتجاوز {TERMS_MAX_LENGTH} حرفاً."
+            )
+        return value
+
+    def validate_repair_warranty_days(self, value):
+        if value != 0 and not (1 <= value <= 730):
+            raise serializers.ValidationError(
+                "كفالة الإصلاح: صفرٌ يطفئها، أو مدةٌ من 1 إلى 730 يوماً."
+            )
+        return value
 
 
 # ══════════════════════════════════════════════════════════════════════════
