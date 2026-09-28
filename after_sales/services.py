@@ -140,6 +140,12 @@ def _revive(card, invoice, unit, customer) -> str:
         card.start_date = invoice.invoice_date
         card.end_date = card.end_date + timedelta(days=shift)
         fields += ["start_date", "end_date"]
+        # طبقة المصنع تُزاح بالفرق نفسه — البطاقة نفسها تُحيا لا تُستبدَل،
+        # وتمديدٌ يدويٌّ سابق على طبقة المصنع (#232) يبقى فوق الإزاحة كما مُنح.
+        if card.manufacturer_warrantor_id and card.manufacturer_start_date:
+            card.manufacturer_start_date = card.manufacturer_start_date + timedelta(days=shift)
+            card.manufacturer_end_date = card.manufacturer_end_date + timedelta(days=shift)
+            fields += ["manufacturer_start_date", "manufacturer_end_date"]
 
     card.sales_invoice_line_id = unit.sales_line_id
     card.partner_id = invoice.customer_id
@@ -177,6 +183,74 @@ def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
             invoice.pk, invoice.tenant_id, ended,
         )
     return ended
+
+
+def _resolve_manufacturer_layer(
+    tenant_id: int, units: list, policies: dict, invoice_date,
+) -> dict:
+    """طبقة المصنع لكل وحدة **جديدة**، دفعة واحدة — استعلامٌ واحد لا لكل وحدة (#232).
+
+    الترتيب:
+      1. **آخر بطاقة تلقائية سابقة لهذه الوحدة نفسها** (إعادة بيع) — تُنسخ
+         كما هي حرفياً (الجهة والبداية والمدة والنهاية)، حتى لو انتهت تلك
+         البطاقة `returned` أو `superseded`: طبقة المصنع ملكُ الجهاز لا صاحبه.
+         **لا تصلح مصدراً** بطاقةٌ انتهت `sale_cancelled` (مسودّة بيعها
+         حُذفت — بيعها لم يقع أصلاً) أو `invoice_unposted` (بيعها معلَّقٌ،
+         غير نافذ الآن): تُتجاوَزان إلى بطاقةٍ أقدم مؤهَّلة لنفس الوحدة، لا
+         إلى فراغ — الجهاز نفسه قد يحمل تاريخاً أصدق خلفهما.
+      2. **سطر شراء الوحدة** (`PurchaseLineWarranty`) — لم يُبنَ بعد (#235)؛
+         هذا هو السَّم الذي يُدخِل خطوته بين (١) و(٣) حين يُبنى، بلا لمس
+         الدالتين الأخريين.
+      3. **السياسة نفسها** (`manufacturer_warrantor`/`manufacturer_months`)،
+         ببداية تاريخ الفاتورة — وحدها إن غابت الجهة («لا يوجد») أو لم تبقَ
+         بطاقةٌ سابقة مؤهَّلة.
+    """
+    unit_ids = [u.pk for u in units]
+    previous_by_unit = {}
+    if unit_ids:
+        for card in (
+            WarrantyCard.objects
+            .filter(
+                tenant_id=tenant_id,
+                source=WarrantyCard.SOURCE_AUTO_SALE,
+                product_serial_id__in=unit_ids,
+            )
+            # بيعٌ لم يقف لا يصلح مصدراً — استبعادٌ في الاستعلام نفسه فيبقى
+            # واحداً، ويسقط تلقائياً إلى الصفّ الأقدم المؤهَّل التالي.
+            .exclude(end_reason__in=[
+                WarrantyCard.END_SALE_CANCELLED, WarrantyCard.END_INVOICE_UNPOSTED,
+            ])
+            .order_by("product_serial_id", "-id")
+        ):
+            previous_by_unit.setdefault(card.product_serial_id, card)
+
+    layers = {}
+    for unit in units:
+        previous = previous_by_unit.get(unit.pk)
+        if previous is not None:
+            layers[unit.pk] = {
+                "manufacturer_warrantor_id": previous.manufacturer_warrantor_id,
+                "manufacturer_start_date": previous.manufacturer_start_date,
+                "manufacturer_duration_months": previous.manufacturer_duration_months,
+                "manufacturer_end_date": previous.manufacturer_end_date,
+            }
+            continue
+        policy = policies.get(unit.product_id)
+        if policy is not None and policy.manufacturer_warrantor_id:
+            layers[unit.pk] = {
+                "manufacturer_warrantor_id": policy.manufacturer_warrantor_id,
+                "manufacturer_start_date": invoice_date,
+                "manufacturer_duration_months": policy.manufacturer_months,
+                "manufacturer_end_date": add_months(invoice_date, policy.manufacturer_months),
+            }
+        else:
+            layers[unit.pk] = {
+                "manufacturer_warrantor_id": None,
+                "manufacturer_start_date": None,
+                "manufacturer_duration_months": 0,
+                "manufacturer_end_date": None,
+            }
+    return layers
 
 
 def create_auto_warranty_cards(invoice) -> int:
@@ -258,6 +332,12 @@ def create_auto_warranty_cards(invoice) -> int:
     settings_row = (
         get_or_create_after_sales_settings(invoice.tenant_id) if policies else None
     )
+    # #232: طبقة المصنع لكل الوحدات الجديدة معاً — استعلامٌ واحد للدفعة، لا
+    # واحد لكل وحدة (`_resolve_manufacturer_layer`).
+    manufacturer_layers = (
+        _resolve_manufacturer_layer(invoice.tenant_id, fresh, policies, invoice.invoice_date)
+        if fresh else {}
+    )
 
     created = []
     for unit in fresh:
@@ -266,6 +346,7 @@ def create_auto_warranty_cards(invoice) -> int:
             continue
         supplier_id, supplier_end = _supplier_side(unit, policy.supplier_months)
         terms_text = policy.terms_override or settings_row.default_terms
+        manufacturer_layer = manufacturer_layers.get(unit.pk, {})
         created.append(WarrantyCard(
             tenant_id=invoice.tenant_id,
             product=unit.product,
@@ -289,6 +370,10 @@ def create_auto_warranty_cards(invoice) -> int:
             supplier_id=supplier_id,
             supplier_warranty_end_date=supplier_end,
             terms_text=terms_text,
+            manufacturer_warrantor_id=manufacturer_layer.get("manufacturer_warrantor_id"),
+            manufacturer_start_date=manufacturer_layer.get("manufacturer_start_date"),
+            manufacturer_duration_months=manufacturer_layer.get("manufacturer_duration_months") or 0,
+            manufacturer_end_date=manufacturer_layer.get("manufacturer_end_date"),
         ))
 
     if created:
@@ -438,6 +523,17 @@ def _card_summary(card, today: date) -> dict:
         "supplier": card.supplier_id,
         "supplier_warranty_end_date": card.supplier_warranty_end_date,
         "supplier_warranty_active": card.supplier_active_on(today),
+        # #232: طبقة المصنع — مستقلةٌ عن طبقة التاجر أعلاه، و`None` صراحةً حين
+        # لا جهة («لا يوجد») لا فراغ بيانات.
+        "manufacturer_warrantor": card.manufacturer_warrantor_id,
+        "manufacturer_warrantor_name": (
+            card.manufacturer_warrantor.name if card.manufacturer_warrantor_id else ""
+        ),
+        "manufacturer_start_date": card.manufacturer_start_date,
+        "manufacturer_duration_months": card.manufacturer_duration_months,
+        "manufacturer_end_date": card.manufacturer_end_date,
+        "manufacturer_status": card.manufacturer_status_on(today),
+        "manufacturer_days_remaining": card.manufacturer_days_remaining(today),
     }
 
 
@@ -463,7 +559,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     cards = list(
         WarrantyCard.objects
         .filter(tenant_id=tenant_id, serial=serial, ended_on__isnull=True)
-        .select_related("product")
+        .select_related("product", "manufacturer_warrantor")
         .order_by("-end_date", "-id")
     )
     unit = (

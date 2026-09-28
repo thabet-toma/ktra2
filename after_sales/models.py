@@ -76,6 +76,14 @@ class WarrantyCard(models.Model):
     `end_reason` يقولان إن الشهادة لم تعد لهذا الزبون — أُرجع الجهاز، أو أُلغي
     ترحيل فاتورته، أو حُذفت مسودّتها، أو حلّت محلّها بطاقةُ مشترٍ ثانٍ. البطاقة
     **لا تُحذف أبداً** لأن هويّتها مرساةُ أوامر الصيانة ورمزِ التحقّق المطبوع.
+
+    **البطاقة تحمل طبقتين مستقلتين (#232):** كفالة التاجر (`duration_months`/
+    `end_date` أعلاه) وكفالة المصنع (`manufacturer_*` أسفله)، ولكلٍّ حالتها
+    (`status_on`/`manufacturer_status_on`). طبقة المصنع مجمَّدةٌ عند الإنشاء —
+    الجهة والمدة لا تُعدَّلان، والبداية وحدها قابلة للتعديل اليدوي فتُعيد
+    احتساب النهاية من المدة المجمَّدة نفسها. مصدرها عند البيع (`method=serial`
+    وحده): آخر بطاقة سابقة لهذه الوحدة نفسها (إعادة بيع)، وإلا سياسة البراند —
+    `after_sales/services.py` (`_resolve_manufacturer_layer`).
     """
 
     SOURCE_AUTO_SALE = "auto_sale"
@@ -157,6 +165,20 @@ class WarrantyCard(models.Model):
     )
     supplier_warranty_end_date = models.DateField(null=True, blank=True)
 
+    # ── طبقة كفالة المصنع (#232) ─────────────────────────────────────────
+    # مجمَّدةٌ عند الإنشاء (الجهة والمدة)، والبداية وحدها قابلة للتعديل
+    # اليدوي لاحقاً — بعض المصنّعين يحسبون من تاريخ التفعيل لا البيع، وتعديلها
+    # يعيد احتساب `manufacturer_end_date` من `manufacturer_duration_months`
+    # المجمَّدة نفسها. الفارغ (`manufacturer_warrantor=None`) يعني «لا يوجد»
+    # صراحةً، لا نقصاً في البيانات — سياسةٌ بلا جهة مصنع تنتج بطاقةً هكذا عمداً.
+    manufacturer_warrantor = models.ForeignKey(
+        "ManufacturerWarrantor", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="warranty_cards",
+    )
+    manufacturer_start_date = models.DateField(null=True, blank=True)
+    manufacturer_duration_months = models.PositiveSmallIntegerField(default=0)
+    manufacturer_end_date = models.DateField(null=True, blank=True)
+
     # ── واقعة الانتهاء (#222) ─────────────────────────────────────────────
     ended_on = models.DateField(
         null=True, blank=True,
@@ -224,6 +246,29 @@ class WarrantyCard(models.Model):
         if self.supplier_warranty_end_date is None:
             return False
         return self.supplier_warranty_end_date >= (today or timezone.localdate())
+
+    # ── طبقة المصنع: حالةٌ مستقلة عن طبقة التاجر (#232) ───────────────────
+    def manufacturer_status_on(self, today: date | None = None) -> str | None:
+        """`None` صراحةً حين لا جهة («لا يوجد») — ليست حالة رابعة، بل غيابُ طبقة.
+
+        وإلا فالواقعة نفسها تغلب: بطاقةٌ أُنهيت (مرجع/إلغاء ترحيل/استبدال) لم
+        تعد طبقتاها سارية معاً، ثم `active`/`expired` من `manufacturer_end_date`
+        — بمعزلٍ تام عن حالة طبقة التاجر (`status_on`).
+        """
+        if self.manufacturer_warrantor_id is None:
+            return None
+        if self.ended_on is not None:
+            return self.STATUS_ENDED
+        today = today or timezone.localdate()
+        return (
+            self.STATUS_ACTIVE if self.manufacturer_end_date >= today
+            else self.STATUS_EXPIRED
+        )
+
+    def manufacturer_days_remaining(self, today: date | None = None) -> int | None:
+        if self.manufacturer_end_date is None:
+            return None
+        return (self.manufacturer_end_date - (today or timezone.localdate())).days
 
 
 class WarrantyCardEvent(models.Model):

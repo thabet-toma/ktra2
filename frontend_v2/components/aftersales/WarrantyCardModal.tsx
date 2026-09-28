@@ -6,11 +6,18 @@ import {
   extendWarrantyCard,
   getWarrantyCardEvents,
   updateWarrantyCard,
+  type ManufacturerWarrantorRow,
   type WarrantyCardDraft,
   type WarrantyCardEventRow,
   type WarrantyCardRow,
 } from "../../services/afterSalesApi";
-import { deriveWarrantyEnd, warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
+import {
+  deriveWarrantyEnd,
+  manufacturerWarrantyRemainingText,
+  manufacturerWarrantyStatusLabel,
+  warrantyRemainingText,
+  warrantyStatusLabel,
+} from "../../utils/warranty";
 import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
@@ -53,6 +60,7 @@ interface Props {
   products: ProductOption[];
   customers: PartnerOption[];
   suppliers: PartnerOption[];
+  warrantors: ManufacturerWarrantorRow[];
   onClose: () => void;
   /** يُنادى بعد كل تغيير فعلي كي تُعيد الشاشة تحميل الجدول. */
   onChanged: () => void;
@@ -80,6 +88,9 @@ const emptyDraft = (): WarrantyCardDraft => ({
   end_date: null,
   supplier: null,
   supplier_warranty_end_date: null,
+  manufacturer_warrantor: null,
+  manufacturer_start_date: null,
+  manufacturer_duration_months: null,
   notes: "",
 });
 
@@ -95,11 +106,14 @@ const draftOf = (card: WarrantyCardRow): WarrantyCardDraft => ({
   end_date: card.end_date,
   supplier: card.supplier,
   supplier_warranty_end_date: card.supplier_warranty_end_date,
+  manufacturer_warrantor: card.manufacturer_warrantor,
+  manufacturer_start_date: card.manufacturer_start_date,
+  manufacturer_duration_months: card.manufacturer_duration_months || null,
   notes: card.notes,
 });
 
 export const WarrantyCardModal: React.FC<Props> = ({
-  card, canManage, products, customers, suppliers, onClose, onChanged,
+  card, canManage, products, customers, suppliers, warrantors, onClose, onChanged,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -154,6 +168,11 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const isAuto = card?.source === "auto_sale";
   // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
   const lineageLocked = isAuto || !canManage;
+  // #232: طبقة المصنع مجمَّدة (الجهة والمدة) على البطاقة التلقائية أيضاً —
+  // البداية وحدها تبقى قابلة للتعديل بصلاحية `aftersales.warranty.manage`
+  // (`canManage` نفسها) على الطبقتين معاً، تلقائية كانت البطاقة أم يدوية.
+  const manufacturerLineageLocked = isAuto || !canManage;
+  const manufacturerStartLocked = !canManage;
 
   const patch = <K extends keyof WarrantyCardDraft>(key: K, value: WarrantyCardDraft[K]) => {
     setTouched(true);
@@ -184,6 +203,14 @@ export const WarrantyCardModal: React.FC<Props> = ({
     [draft.start_date, draft.duration_months, draft.end_date],
   );
 
+  /** معاينة نهاية طبقة المصنع — دائماً مشتقّة من البداية والمدة، لا تاريخ صريح لها. */
+  const manufacturerPreviewEnd = useMemo(
+    () => (draft.manufacturer_start_date && draft.manufacturer_duration_months
+      ? deriveWarrantyEnd(draft.manufacturer_start_date, draft.manufacturer_duration_months)
+      : ""),
+    [draft.manufacturer_start_date, draft.manufacturer_duration_months],
+  );
+
   const problems = useMemo(() => {
     const list: string[] = [];
     if (!draft.serial.trim() && !draft.device_name.trim() && !draft.product) {
@@ -195,6 +222,15 @@ export const WarrantyCardModal: React.FC<Props> = ({
     }
     if (previewEnd && draft.start_date && previewEnd < draft.start_date) {
       list.push("تاريخ الانتهاء قبل تاريخ البدء");
+    }
+    if (draft.manufacturer_warrantor && !draft.manufacturer_duration_months) {
+      list.push("اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر");
+    }
+    if (draft.manufacturer_warrantor && !draft.manufacturer_start_date) {
+      list.push("حدّد بداية كفالة المصنع");
+    }
+    if (!draft.manufacturer_warrantor && draft.manufacturer_duration_months) {
+      list.push("بلا جهة كفالة مصنع، مدتها يجب أن تكون صفراً");
     }
     return list;
   }, [draft, previewEnd]);
@@ -284,6 +320,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
             ? {
                 end_date: payload.end_date,
                 supplier_warranty_end_date: payload.supplier_warranty_end_date,
+                // #232: الجهة والمدة مجمَّدتان على البطاقة التلقائية — لا تُرسَلان
+                // هنا، فلا تصطدمان بحارس الخادم. البداية وحدها تُرسَل فيعيد
+                // الخادم احتساب النهاية من المدة المجمَّدة.
+                manufacturer_start_date: payload.manufacturer_start_date,
                 notes: payload.notes,
               }
             : payload,
@@ -585,6 +625,93 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 onChange={(e) => patch("notes", e.target.value)}
               />
             </div>
+          </div>
+
+          {/* #232: طبقة كفالة المصنع — مستقلة عن طبقة التاجر أعلاه بحالتها
+              وتواريخها. الجهة والمدة مجمَّدتان على البطاقة التلقائية، والبداية
+              وحدها قابلة للتعديل فتُعيد الخادم احتساب النهاية من المدة نفسها. */}
+          <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text)]">
+              <ShieldCheck className="h-4 w-4 text-[var(--color-primary)]" />
+              <span className="font-bold">كفالة المصنع</span>
+              {card && (
+                card.manufacturer_status ? (
+                  <span className={warrantyPillClass(card.manufacturer_status, card.manufacturer_days_remaining ?? 0)}>
+                    {manufacturerWarrantyStatusLabel(card.manufacturer_status)}
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-[var(--color-text-muted)]">لا يوجد</span>
+                )
+              )}
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div>
+                <label className={labelClass} htmlFor="warranty-manufacturer-warrantor">الجهة</label>
+                <select
+                  id="warranty-manufacturer-warrantor"
+                  className={fieldClass}
+                  disabled={manufacturerLineageLocked}
+                  value={draft.manufacturer_warrantor ?? ""}
+                  onChange={(e) => {
+                    const id = e.target.value ? Number(e.target.value) : null;
+                    setTouched(true);
+                    setDraft((d) => ({
+                      ...d,
+                      manufacturer_warrantor: id,
+                      // إزالة الجهة تُصفّر مدتها — سياسة الخادم نفسها (0 ⇔ لا جهة).
+                      manufacturer_duration_months: id ? d.manufacturer_duration_months : null,
+                    }));
+                  }}
+                >
+                  <option value="">— لا يوجد —</option>
+                  {warrantors.map((w) => (
+                    <option key={w.id} value={w.id}>{w.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className={labelClass} htmlFor="warranty-manufacturer-start">البداية</label>
+                <input
+                  id="warranty-manufacturer-start"
+                  type="date"
+                  className={fieldClass}
+                  disabled={manufacturerStartLocked || !draft.manufacturer_warrantor}
+                  value={draft.manufacturer_start_date || ""}
+                  onChange={(e) => patch("manufacturer_start_date", e.target.value || null)}
+                />
+              </div>
+
+              <div>
+                <label className={labelClass} htmlFor="warranty-manufacturer-months">المدة (أشهر)</label>
+                <input
+                  id="warranty-manufacturer-months"
+                  type="number"
+                  min="0"
+                  max="600"
+                  className={fieldClass}
+                  disabled={manufacturerLineageLocked || !draft.manufacturer_warrantor}
+                  value={draft.manufacturer_duration_months ?? ""}
+                  onChange={(e) => patch(
+                    "manufacturer_duration_months",
+                    e.target.value ? Number(e.target.value) : null,
+                  )}
+                />
+                {manufacturerPreviewEnd && (
+                  <span className="mt-1 block text-[11px] text-[var(--color-text-muted)]">
+                    تنتهي: {formatDateValue(manufacturerPreviewEnd)}
+                  </span>
+                )}
+              </div>
+            </div>
+            {!card && !draft.manufacturer_warrantor && (
+              <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">لا يوجد — بلا جهة كفالة مصنع لهذا الجهاز</div>
+            )}
+            {card?.manufacturer_warrantor && (
+              <div className="mt-2 text-[11px] text-[var(--color-text-muted)]">
+                {manufacturerWarrantyRemainingText(card.manufacturer_status, card.manufacturer_days_remaining)}
+              </div>
+            )}
           </div>
 
           {card && (

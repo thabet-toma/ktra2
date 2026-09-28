@@ -91,3 +91,22 @@ export function warrantyRemainingText(
   if (days === 0) return "تنتهي اليوم";
   return `باقٍ ${formatNumber(days)} يوماً`;
 }
+
+/**
+ * حالة طبقة كفالة المصنع (#232) — `null` من الخادم يعني «لا يوجد» صراحةً
+ * (بطاقةٌ بسياسة بلا جهة كفالة مصنع)، لا نقصاً في البيانات ولا خطأ تحميل.
+ * وإلا فنفس مفردات طبقة التاجر (`WarrantyStatus`) — طبقتان مستقلتان بمفرداتٍ
+ * واحدة، لا لهجتين.
+ */
+export function manufacturerWarrantyStatusLabel(status: WarrantyStatus | null): string {
+  return status === null ? "لا يوجد" : warrantyStatusLabel(status);
+}
+
+/** مرآة `warrantyRemainingText` لطبقة المصنع — «لا يوجد» بدل حساب أيامٍ لا معنى لها. */
+export function manufacturerWarrantyRemainingText(
+  status: WarrantyStatus | null,
+  daysRemaining: number | null,
+): string {
+  if (status === null) return "لا يوجد";
+  return warrantyRemainingText(status, daysRemaining ?? 0);
+}

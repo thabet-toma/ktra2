@@ -37,6 +37,11 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     end_reason_label = serializers.CharField(
         source="get_end_reason_display", read_only=True,
     )
+    # #232: طبقة المصنع — `manufacturer_end_date` تُشتقّ دوماً من البداية
+    # والمدة في `validate()`؛ ما يرسله العميل فيها يُتجاهَل ولا يُعتمَد.
+    manufacturer_warrantor_name = serializers.SerializerMethodField()
+    manufacturer_status = serializers.SerializerMethodField()
+    manufacturer_days_remaining = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -47,6 +52,9 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "customer_phone", "start_date", "duration_months", "end_date",
             "source", "source_label", "supplier", "supplier_name",
             "supplier_warranty_end_date", "supplier_warranty_active", "notes",
+            "manufacturer_warrantor", "manufacturer_warrantor_name",
+            "manufacturer_start_date", "manufacturer_duration_months",
+            "manufacturer_end_date", "manufacturer_status", "manufacturer_days_remaining",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
             "end_reason_label", "created_at", "updated_at",
         ]
@@ -65,6 +73,15 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
 
     def get_supplier_warranty_active(self, obj):
         return obj.supplier_active_on()
+
+    def get_manufacturer_warrantor_name(self, obj):
+        return obj.manufacturer_warrantor.name if obj.manufacturer_warrantor_id else ""
+
+    def get_manufacturer_status(self, obj):
+        return obj.manufacturer_status_on()
+
+    def get_manufacturer_days_remaining(self, obj):
+        return obj.manufacturer_days_remaining()
 
     def get_product_name(self, obj):
         if not obj.product_id:
@@ -132,6 +149,43 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"supplier_warranty_end_date": "نهاية كفالة المورد قبل بدء الكفالة."}
             )
+
+        # #232: طبقة المصنع — على نمط `WarrantyPolicy` نفسه: مدةٌ بلا جهة
+        # مرفوضة، وجهةٌ بلا مدة أو بداية مرفوضة، والنهاية دائماً مشتقّة هنا لا
+        # مُدخَلة (تعديل البداية على بطاقةٍ تلقائية يعيد احتسابها من المدة
+        # المجمَّدة — `views.py` (`_AUTO_CARD_EDITABLE`) يفرض تجميد الباقي).
+        warrantor = attrs.get(
+            "manufacturer_warrantor", getattr(instance, "manufacturer_warrantor", None),
+        )
+        m_months = attrs.get(
+            "manufacturer_duration_months",
+            getattr(instance, "manufacturer_duration_months", 0) or 0,
+        )
+        m_start = attrs.get(
+            "manufacturer_start_date", getattr(instance, "manufacturer_start_date", None),
+        )
+        if warrantor is None and m_months:
+            raise serializers.ValidationError({
+                "manufacturer_duration_months": "بلا جهة كفالة مصنع، مدتها يجب أن تكون صفراً.",
+            })
+        if warrantor is not None:
+            if not m_months:
+                raise serializers.ValidationError({
+                    "manufacturer_duration_months": (
+                        "اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر، أو أزل الجهة."
+                    ),
+                })
+            if m_start is None:
+                raise serializers.ValidationError({
+                    "manufacturer_start_date": "حدّد بداية كفالة المصنع.",
+                })
+            attrs["manufacturer_end_date"] = add_months(m_start, m_months)
+        else:
+            m_start = None
+            attrs["manufacturer_end_date"] = None
+        attrs["manufacturer_warrantor"] = warrantor
+        attrs["manufacturer_duration_months"] = m_months
+        attrs["manufacturer_start_date"] = m_start
         return attrs
 
 

@@ -72,8 +72,13 @@ _ACTION_PERMS = {
 
 # ما يُسمح بتعديله يدوياً على بطاقة **تلقائية**: البطاقة من إنتاج الترحيل،
 # فتعديل نسبها باليد يجعلها تكذب على فاتورتها. التمديد والملاحظات وحدهما قرار
-# بشري مشروع فوقها.
-_AUTO_CARD_EDITABLE = {"end_date", "notes", "supplier_warranty_end_date"}
+# بشري مشروع فوقها. و#232: بداية كفالة المصنع كذلك — بعض المصنّعين يحسبون من
+# التفعيل لا البيع؛ ونهايتها معها لأنها مشتقّةٌ منها دائماً في `validate()`
+# ولا يملك العميل قيمةً مستقلة لها أصلاً.
+_AUTO_CARD_EDITABLE = {
+    "end_date", "notes", "supplier_warranty_end_date",
+    "manufacturer_start_date", "manufacturer_end_date",
+}
 
 
 class WarrantyCardViewSet(viewsets.ModelViewSet):
@@ -151,7 +156,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
     # ── الكتابة ───────────────────────────────────────────────────────────
     def _validate_tenant_links(self, serializer):
         """كل مرجع في الجسم يجب أن يتبع الشركة النشطة — لا عبور بين الشركات."""
-        for field in ("product", "partner", "supplier"):
+        for field in ("product", "partner", "supplier", "manufacturer_warrantor"):
             obj = serializer.validated_data.get(field)
             if obj is not None and obj.tenant_id != self.tenant.pk:
                 raise ValidationError({field: "هذا السجل لا يتبع الشركة النشطة."})
@@ -175,6 +180,20 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 serializer.validated_data["duration_months"] == card.duration_months
             ):
                 touched.discard("duration_months")
+            # #232: `manufacturer_warrantor`/`manufacturer_duration_months` يمرّان
+            # معاً من `validate()` أيضاً — مجمَّدان على البطاقة التلقائية، فبلا
+            # تغيّرٍ فعلي ليسا تعديلاً (تعديل `manufacturer_start_date` وحده
+            # يُعيد اشتقاق `manufacturer_end_date` المعفى أصلاً في `_AUTO_CARD_EDITABLE`).
+            if "manufacturer_duration_months" in touched and (
+                serializer.validated_data["manufacturer_duration_months"]
+                == card.manufacturer_duration_months
+            ):
+                touched.discard("manufacturer_duration_months")
+            if "manufacturer_warrantor" in touched:
+                new_warrantor = serializer.validated_data["manufacturer_warrantor"]
+                new_warrantor_id = new_warrantor.pk if new_warrantor is not None else None
+                if new_warrantor_id == card.manufacturer_warrantor_id:
+                    touched.discard("manufacturer_warrantor")
             if touched:
                 raise ValidationError({
                     "detail": (

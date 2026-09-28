@@ -53,6 +53,17 @@ export interface WarrantyCardRow {
   supplier_warranty_end_date: string | null;
   supplier_warranty_active: boolean;
   notes: string;
+  // #232: طبقة كفالة المصنع — `manufacturer_warrantor` الفارغ = «لا يوجد»،
+  // ومعه `manufacturer_status`/`manufacturer_days_remaining` بـ`null` حينها
+  // (لا حالة رابعة، بل غياب طبقة). مجمَّدةٌ عند الإنشاء؛ `manufacturer_start_date`
+  // وحدها قابلة للتعديل، وتُعيد `manufacturer_end_date` احتسابها من الخادم.
+  manufacturer_warrantor: number | null;
+  manufacturer_warrantor_name: string;
+  manufacturer_start_date: string | null;
+  manufacturer_duration_months: number;
+  manufacturer_end_date: string | null;
+  manufacturer_status: WarrantyStatus | null;
+  manufacturer_days_remaining: number | null;
   status: WarrantyStatus;
   days_remaining: number;
   // #222: واقعة الانتهاء — `ended` يغلب `status`، والسبب يُعرض للموظف داخلياً
@@ -78,6 +89,11 @@ export interface WarrantyCardDraft {
   end_date?: string | null;
   supplier: number | null;
   supplier_warranty_end_date: string | null;
+  // #232: بلا جهة، اتركها `null` وصفّر `manufacturer_duration_months` — يفرض
+  // الخادم أن الجهة والمدة والبداية تجتمع أو تغيب معاً (`WarrantyCardSerializer.validate`).
+  manufacturer_warrantor: number | null;
+  manufacturer_start_date: string | null;
+  manufacturer_duration_months: number | null;
   notes: string;
 }
 
@@ -107,6 +123,14 @@ export interface WarrantyCoverageCard {
   supplier: number | null;
   supplier_warranty_end_date: string | null;
   supplier_warranty_active: boolean;
+  // #232: طبقة المصنع — راجع الشرح في `WarrantyCardRow` أعلاه.
+  manufacturer_warrantor: number | null;
+  manufacturer_warrantor_name: string;
+  manufacturer_start_date: string | null;
+  manufacturer_duration_months: number;
+  manufacturer_end_date: string | null;
+  manufacturer_status: WarrantyStatus | null;
+  manufacturer_days_remaining: number | null;
 }
 
 /** الوحدة المُرقَّمة كما يعرفها المخزون — تظهر ولو لم تكن لها بطاقة. */

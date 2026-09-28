@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   addWarrantyMonths,
   deriveWarrantyEnd,
+  manufacturerWarrantyRemainingText,
+  manufacturerWarrantyStatusLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
 } from './warranty.ts';
@@ -53,4 +55,19 @@ test('#222 — بطاقة منتهية بواقعة لا تُعرض سارية �
   // نهايتها قد تبقى في المستقبل (جهازٌ أُرجع قبل انقضاء مدّته) — أيامٌ موجبة
   // ومع ذلك النص لا يُشتقّ منها بحساب «باقٍ» أو «منذ».
   assert.equal(warrantyRemainingText('ended', 200), 'لم تعد سارية');
+});
+
+test('#232 — طبقة المصنع: `null` من الخادم يعني «لا يوجد» صراحةً', () => {
+  assert.equal(manufacturerWarrantyStatusLabel(null), 'لا يوجد');
+  assert.equal(manufacturerWarrantyRemainingText(null, null), 'لا يوجد');
+  // بلا جهة كفالة مصنع لا تُقرأ «منتهية» ولا أي حالةٍ أخرى من طبقة التاجر.
+  assert.notEqual(manufacturerWarrantyStatusLabel(null), warrantyStatusLabel('expired'));
+});
+
+test('#232 — طبقة المصنع بجهة: نفس مفردات طبقة التاجر حرفياً', () => {
+  assert.equal(manufacturerWarrantyStatusLabel('active'), 'سارية');
+  assert.equal(manufacturerWarrantyStatusLabel('expired'), 'منتهية');
+  assert.equal(manufacturerWarrantyStatusLabel('ended'), 'غير سارية');
+  assert.match(manufacturerWarrantyRemainingText('active', 45), /^باقٍ /);
+  assert.equal(manufacturerWarrantyRemainingText('ended', 30), 'لم تعد سارية');
 });

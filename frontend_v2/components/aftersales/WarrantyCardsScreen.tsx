@@ -6,6 +6,8 @@ import {
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   listWarrantyCards,
+  lookupManufacturerWarrantors,
+  type ManufacturerWarrantorRow,
   type WarrantyCardRow,
   type WarrantyListFilters,
   type WarrantySource,
@@ -15,7 +17,12 @@ import { listPickerProducts } from "../../services/inventoryApi";
 import { accountingApi } from "../../services/accountingApi";
 import { formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
-import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
+import {
+  manufacturerWarrantyRemainingText,
+  manufacturerWarrantyStatusLabel,
+  warrantyRemainingText,
+  warrantyStatusLabel,
+} from "../../utils/warranty";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { WarrantyCardModal } from "./WarrantyCardModal";
 import { WarrantySettingsScreen } from "./WarrantySettingsScreen";
@@ -104,6 +111,7 @@ export const WarrantyCardsScreen: React.FC = () => {
   const [products, setProducts] = useState<ProductOption[]>([]);
   const [customers, setCustomers] = useState<PartnerOption[]>([]);
   const [suppliers, setSuppliers] = useState<PartnerOption[]>([]);
+  const [warrantors, setWarrantors] = useState<ManufacturerWarrantorRow[]>([]);
 
   /** `null` = مغلقة · `"new"` = بطاقة يدوية جديدة · صف = بطاقة قائمة. */
   const [openCard, setOpenCard] = useState<WarrantyCardRow | "new" | null>(null);
@@ -156,6 +164,9 @@ export const WarrantyCardsScreen: React.FC = () => {
       try {
         setSuppliers(await accountingApi.getPartners("supplier") as PartnerOption[]);
       } catch { /* كما أعلاه */ }
+      try {
+        setWarrantors(await lookupManufacturerWarrantors());
+      } catch { /* كما أعلاه — اسم الجهة المحفوظ على البطاقة يبقى معروضاً حتى لو فشل التحميل */ }
     })();
   }, [canManage]);
 
@@ -295,6 +306,7 @@ export const WarrantyCardsScreen: React.FC = () => {
                 <th className="hidden md:table-cell">البداية</th>
                 <th>الانتهاء</th>
                 <th>الحالة</th>
+                <th className="hidden md:table-cell">كفالة المصنع</th>
                 <th className="hidden lg:table-cell">المصدر</th>
                 <th className="hidden lg:table-cell">كفالة المورد</th>
                 <th>مشاركة</th>
@@ -336,6 +348,22 @@ export const WarrantyCardsScreen: React.FC = () => {
                     <div className="text-[11px] text-[var(--color-text-muted)]">
                       {warrantyRemainingText(row.status, row.days_remaining)}
                     </div>
+                  </td>
+                  <td className="hidden md:table-cell">
+                    {row.manufacturer_warrantor ? (
+                      <>
+                        <div className="text-[var(--color-text)]">{row.manufacturer_warrantor_name}</div>
+                        <div className="text-[11px] text-[var(--color-text-muted)]">
+                          {manufacturerWarrantyStatusLabel(row.manufacturer_status)}
+                          {" — "}
+                          {manufacturerWarrantyRemainingText(
+                            row.manufacturer_status, row.manufacturer_days_remaining,
+                          )}
+                        </div>
+                      </>
+                    ) : (
+                      <span className="text-[var(--color-text-muted)]">لا يوجد</span>
+                    )}
                   </td>
                   <td className="hidden lg:table-cell">{row.source_label}</td>
                   <td className="hidden lg:table-cell">
@@ -412,6 +440,7 @@ export const WarrantyCardsScreen: React.FC = () => {
           products={products}
           customers={customers}
           suppliers={suppliers}
+          warrantors={warrantors}
           onClose={() => setOpenCard(null)}
           onChanged={() => { void load(); }}
         />
