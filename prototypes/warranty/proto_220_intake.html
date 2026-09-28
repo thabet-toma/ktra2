@@ -1,0 +1,434 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نموذج رحلة الاستقبال (#220)</title>
+<style>
+:root{--bg:#f4f5f7;--card:#fff;--line:#dde1e6;--text:#1c2430;--muted:#667085;--acc:#1f5fbf;--ok:#0f7a4a;--okbg:#e6f6ee;--warn:#8a5a00;--warnbg:#fff4dc;--bad:#b42318;--badbg:#fdecea;--gray:#475467;--graybg:#eef0f3}
+*{box-sizing:border-box}
+html,body{overflow-x:hidden}
+body{margin:0;overflow-wrap:anywhere;font-family:Tahoma,"Segoe UI",Arial,sans-serif;background:var(--bg);color:var(--text);font-size:15px;line-height:1.55}
+.wrap{max-width:760px;margin:0 auto;padding:12px 16px 80px}
+h1{font-size:18px;margin:6px 0 2px}
+h2{font-size:16px;margin:0 0 8px}
+h3{font-size:14px;margin:12px 0 6px}
+.muted{color:var(--muted);font-size:13px}
+.proto{background:#222;color:#ffd24d;font-size:12px;padding:4px 10px;border-radius:6px;display:inline-block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;margin:10px 0}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0}
+.tabs button,.btn{border:1px solid var(--line);background:#fff;border-radius:10px;padding:8px 12px;font:inherit;font-size:14px;cursor:pointer;color:var(--text)}
+.tabs button.on{background:var(--acc);color:#fff;border-color:var(--acc)}
+.btn.primary{background:var(--acc);color:#fff;border-color:var(--acc);font-weight:bold}
+.btn.danger{border-color:var(--bad);color:var(--bad)}
+.btn.link{border:none;background:none;color:var(--acc);text-decoration:underline;padding:4px}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.grow{flex:1}
+input[type=text],textarea{width:100%;font:inherit;padding:10px;border:1px solid var(--line);border-radius:10px;background:#fff}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{font-size:12px;border:1px dashed var(--acc);color:var(--acc);background:#fff;border-radius:999px;padding:4px 10px;cursor:pointer}
+.pill{display:inline-block;font-size:12px;border-radius:999px;padding:2px 9px;font-weight:bold}
+.p-ok{background:var(--okbg);color:var(--ok)}.p-warn{background:var(--warnbg);color:var(--warn)}.p-bad{background:var(--badbg);color:var(--bad)}.p-gray{background:var(--graybg);color:var(--gray)}
+.banner{border-radius:10px;padding:10px 12px;margin:8px 0;font-size:14px}
+.b-ok{background:var(--okbg);color:var(--ok);border:1px solid #b7e4cc}
+.b-warn{background:var(--warnbg);color:var(--warn);border:1px solid #f1d49a}
+.b-bad{background:var(--badbg);color:var(--bad);border:1px solid #f4b8b2}
+.b-gray{background:var(--graybg);color:var(--gray);border:1px solid var(--line)}
+.dev{border:1px solid var(--line);border-radius:10px;padding:10px;margin:6px 0;background:#fff;cursor:pointer}
+.dev:hover{border-color:var(--acc)}
+.grp{font-size:13px;color:var(--muted);margin:12px 0 2px}
+.form{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+@media (max-width:520px){.form{grid-template-columns:1fr}}
+.f{border:1px solid var(--line);border-radius:8px;padding:6px 8px;background:#fff}
+.f b{display:block;font-size:11px;color:var(--muted);font-weight:normal}
+.f.filled{border-color:#9cc3f5;background:#f2f7ff}
+.f.filled b::after{content:" · معبّأ";color:var(--acc)}
+.f.empty{border-style:dashed}
+.slip{background:#fff;border:1px solid #999;width:100%;max-width:420px;aspect-ratio:148/210;margin:8px auto;padding:14px;font-size:12px;box-shadow:0 2px 8px #0002;display:flex;flex-direction:column;gap:6px}
+.slip .hd{display:flex;justify-content:space-between;border-bottom:2px solid #333;padding-bottom:6px}
+.slip .qr{width:64px;height:64px;background:repeating-linear-gradient(45deg,#333 0 4px,#fff 4px 8px);border:2px solid #333}
+.slip table{width:100%;border-collapse:collapse}.slip td{border:1px solid #ccc;padding:3px 5px}
+.state{position:fixed;bottom:0;left:0;right:0;background:#111a;backdrop-filter:blur(4px)}
+.state details{max-width:760px;margin:0 auto;background:#10151d;color:#d7e0ea;border-radius:12px 12px 0 0;padding:8px 14px;font-size:12px;max-height:60vh;overflow:auto}
+.state summary{cursor:pointer;color:#ffd24d;font-size:13px}
+.state pre{white-space:pre-wrap;word-break:break-word;margin:6px 0;font-family:Consolas,monospace;direction:ltr;text-align:left}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px}
+.kv span:nth-child(odd){color:var(--muted)}
+.hist li{margin:4px 0;font-size:13px}
+.note{font-size:12px;color:var(--muted);border-right:3px solid var(--acc);padding-right:8px;margin:6px 0}
+.spec table{width:100%;border-collapse:collapse;font-size:13px}.spec td,.spec th{overflow-wrap:anywhere;border:1px solid var(--line);padding:5px;vertical-align:top;text-align:right}
+code{overflow-wrap:anywhere;background:#eef1f5;border-radius:4px;padding:0 4px;font-size:12px;direction:ltr;unicode-bidi:embed}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <span class="proto">نموذج أوّلي للرمي — ليس كوداً للإنتاج · تذكرة #220</span>
+  <h1>رحلة الاستقبال: من الكفالة أو المسح إلى أمر صيانة</h1>
+  <p class="muted">السؤال: كيف ينتقل الموظف من «جاء جهاز» إلى «أمر صيانة مفتوح على الكفالة الصحيحة» بأقل خطوات، ودون أن يعلق في أي حالة؟ اختر مدخلاً، ثم اضغط على جهاز. اللوحة السوداء في الأسفل تُظهر ما يرسله الخادم وما يُعبَّأ. اليوم في النموذج: 27-09-2026.</p>
+
+  <div class="tabs" id="entryTabs"></div>
+  <div id="screen"></div>
+</div>
+<div class="state"><details id="stateBox"><summary>الحالة الكاملة: ردّ البحث، والحكم، والتعبئة (اضغط للفتح)</summary><pre id="statePre"></pre></details></div>
+
+<script>
+/* ═════════════ المنطق الصرف (قابل للنقل) — بلا DOM ═════════════ */
+const TODAY = "2026-09-27";
+const W = { samsung:{name:"الوكيل المعتمد لسامسونج", addr:"رام الله، شارع الإرسال، عمارة النخيل ط2", phone:"02-2951111"},
+            isys:{name:"آي-سيستم (وكيل Apple)", addr:"نابلس، دوّار الشهداء", phone:"09-2381111"},
+            hp:{name:"مركز صيانة HP المعتمد", addr:"البيرة، شارع القدس", phone:"02-2403030"} };
+
+// بطاقات الكفالة (بعد #214/#215/#218/#221/#224). الحالة مشتقة من التواريخ والوقائع لا مخزّنة.
+const CARDS = [
+ {id:101, device:"Samsung Galaxy A55 256GB", serial:"R58W123456", mode:"serial", partner:{id:7,name:"أبو خالد يوسف"}, phone:"0599-123-456", inv:"INV-2040", sale:"2026-03-10",
+  dealer:{end:"2027-03-10"}, mfr:{w:"samsung", end:"2028-03-10"}, token:"Qm9Yp3sT1vX8aZ2cL5nR0e"},
+ {id:102, device:"iPhone 13 128GB", serial:"F2LX88990", mode:"serial", partner:{id:7,name:"أبو خالد يوسف"}, phone:"0599-123-456", inv:"INV-1702", sale:"2025-06-01",
+  dealer:{end:"2026-06-01"}, mfr:{w:"isys", end:"2027-06-01"}},
+ {id:103, device:"إطار ميشلان 205/55R16", serial:"", mode:"invoice", qty:4, returned:1, partner:{id:7,name:"أبو خالد يوسف"}, phone:"0599-123-456", inv:"INV-2031", sale:"2026-02-14",
+  dealer:{end:"2028-02-14"}, mfr:null},
+ {id:104, device:"HP ProBook 450 G9", serial:"5CD2231HP", mode:"serial", partner:{id:9,name:"سمر عودة"}, phone:"+970 568 777 001", inv:"INV-1990", sale:"2026-01-05",
+  dealer:{end:"2027-01-05"}, mfr:{w:"hp", end:"2027-01-05"}, void:{reason:"سوائل أو رطوبة", on:"2026-09-02", order:"SO-0405"}},
+ {id:105, device:"راوتر TP-Link Archer C6", serial:"2231TPC6", mode:"serial", partner:{id:9,name:"سمر عودة"}, phone:"+970 568 777 001", inv:"INV-1200", sale:"2024-01-10",
+  dealer:{end:"2025-01-10"}, mfr:null},
+ {id:106, device:"Xiaomi Redmi Note 13", serial:"XM55410077", mode:"serial", partner:{id:12,name:"ناصر حمدان"}, phone:"0597000333", inv:"INV-2010", sale:"2026-02-01",
+  dealer:{end:"2027-02-01"}, mfr:{w:"samsung", end:"2027-02-01"}, ended:{on:"2026-08-20", reason:"returned", doc:"RET-0118"}},
+ {id:107, device:"شاشة Samsung 55\" Crystal", serial:"TV8812550", mode:"serial", partner:{id:12,name:"ناصر حمدان"}, phone:"0597000333", inv:"INV-1955", sale:"2025-12-20",
+  dealer:{end:"2026-12-20"}, mfr:{w:"samsung", end:"2027-12-20"}},
+];
+// وحدة بعناها قبل تفعيل الوحدة: لا بطاقة لها
+const UNITS_NO_CARD = [{serial:"LNV7788X", product:"Lenovo IdeaPad 3", inv:"INV-0870", sale:"2023-11-02", partner:{id:15,name:"مازن قاسم"}, phone:"0599555010"}];
+let ORDERS = [
+ {id:1, no:"SO-0301", card:101, serial:"R58W123456", date:"2026-05-02", status:"delivered", label:"تم التسليم", covered:true, complaint:"الشاحن لا يعمل"},
+ {id:2, no:"SO-0388", card:103, serial:"", date:"2026-07-11", status:"delivered", label:"تم التسليم", covered:true, complaint:"إطار: تسريب هواء"},
+ {id:3, no:"SO-0405", card:104, serial:"5CD2231HP", date:"2026-09-01", status:"delivered", label:"تم التسليم", covered:false, complaint:"لا يشتغل بعد انسكاب قهوة"},
+ {id:4, no:"SO-0412", card:107, serial:"TV8812550", date:"2026-09-20", status:"in_repair", label:"قيد الإصلاح", covered:true, complaint:"خطوط على الشاشة"},
+];
+let EVENTS = [ // WarrantyCardEvent — يظهر في سجل البطاقة
+ {card:104, date:"2026-09-02", text:"أُلغيت كفالة التاجر: سوائل أو رطوبة (أمر SO-0405)"},
+ {card:106, date:"2026-08-20", text:"انتهت البطاقة: مرتجع RET-0118"},
+ {card:103, date:"2026-04-03", text:"مرتجع جزئي: 1 من 4 (RET-0097)"},
+];
+const OPEN = s => !["delivered","cancelled"].includes(s);
+const toLatin = s => (s||"").replace(/[٠-٩]/g,d=>"٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/[۰-۹]/g,d=>"۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+const phoneKey = s => { const d = toLatin(s).replace(/\D/g,""); return d.length>=9 ? d.slice(-9) : null; };
+const daysLeft = end => Math.round((new Date(end)-new Date(TODAY))/864e5);
+const coveredQty = c => c.mode==="invoice" ? c.qty - c.returned : 1;
+
+/** الحكم الواحد عند الاستقبال — مصدره الخادم (دالة واحدة)، والواجهة ترسمه فقط. */
+function intakeVerdict(card){
+  const openOrders = ORDERS.filter(o=>o.card===card.id && OPEN(o.status));
+  const dealerDateOk = daysLeft(card.dealer.end) >= 0;
+  const mfrActive = !!card.mfr && daysLeft(card.mfr.end) >= 0;
+  let kind;
+  if (card.ended) kind = "ended";
+  else if (!card.void && dealerDateOk && coveredQty(card) > 0) kind = "dealer";
+  else if (mfrActive) kind = "referral";
+  else if (card.void) kind = "voided_paid";
+  else kind = "expired_paid";
+  // طبقة «أمر مفتوح» فوق أي حكم
+  const blocking = card.mode==="invoice" ? openOrders.length >= coveredQty(card) && openOrders.length>0 : openOrders.length>0;
+  return {kind, mfrActive, dealerDateOk, openOrders, blocking,
+          warranty_covered: kind==="dealer",
+          link_card: true /* #218: يُربط بأحدث بطاقة مهما كانت حالتها */};
+}
+/** ماذا يُعبَّأ في أمر الصيانة */
+function prefillFor(card, v){
+  const owner = v.kind !== "ended"; // المرتجعة: الجهاز لم يعد لهذا الزبون
+  return {
+    partner: owner ? card.partner.id : null,
+    customer_name: owner ? card.partner.name : "",
+    customer_phone: owner ? card.phone : "",
+    product: card.device, device_description: card.device,
+    serial: card.serial || "",
+    warranty_card: card.id,
+    warranty_covered: v.warranty_covered,
+    requires_item_confirm: card.mode==="invoice" && v.warranty_covered,
+  };
+}
+/** البحث الموحّد: الشكل يرتّب ولا يصفّي (نفس مبدأ core/scan.py) */
+function lookup(raw){
+  const term = toLatin(raw).trim();
+  const out = {term, matched_on:[], results:[], units_without_card:[], truncated:false};
+  if (!term) return out;
+  // #217: رابط الشهادة الممسوح /api/w/<token> يحلّ إلى بطاقته — داخل الشركة نفسها وحدها
+  const m = term.match(/\/api\/w\/([A-Za-z0-9_-]{22})\/?$/);
+  if (m) { out.matched_on.push("qr");
+    const c = CARDS.find(x=>x.token===m[1]); // الاستعلام مفلتر بـ tenant: رمز شركة أخرى = لا شيء
+    if (c) out.results=[{card:c, verdict:intakeVerdict(c)}];
+    return out; }
+  const up = term.toUpperCase();
+  const byInv = CARDS.filter(c=>c.inv===up);
+  if (byInv.length) out.matched_on.push("invoice");
+  const key = /^[+\d\s\-()]+$/.test(term) ? phoneKey(term) : null;
+  const digits = term.replace(/\D/g,"").length;
+  const byPhone = key && digits<=14 ? CARDS.filter(c=>phoneKey(c.phone)===key) : [];
+  if (byPhone.length) out.matched_on.push("phone");
+  const bySerial = CARDS.filter(c=>c.serial && c.serial.toUpperCase()===up);
+  if (bySerial.length) out.matched_on.push("serial");
+  const seen = new Set(); const rows=[];
+  [...bySerial,...byInv,...byPhone].forEach(c=>{ if(!seen.has(c.id)){seen.add(c.id); rows.push(c);} });
+  rows.sort((a,b)=> b.sale.localeCompare(a.sale));
+  out.results = rows.slice(0,20).map(c=>({card:c, verdict:intakeVerdict(c)}));
+  out.truncated = rows.length>20;
+  out.units_without_card = UNITS_NO_CARD.filter(u=>u.serial===up || u.inv===up || (key && phoneKey(u.phone)===key));
+  if (out.units_without_card.length && !out.matched_on.length) out.matched_on.push(key?"phone":"serial");
+  return out;
+}
+
+/* ═════════════ الصفحة (غلاف رمي) ═════════════ */
+let S = {entry:"intake", screen:"home", term:"", res:null, cardId:null, unit:null, override:"", itemOk:false, manualCover:false, lastOrder:null, slipPrinted:false, from:null};
+const $ = id => document.getElementById(id);
+const esc = s => String(s??"").replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const card = id => CARDS.find(c=>c.id===id);
+const fmt = d => d ? d.split("-").reverse().join("-") : "—";
+
+const KIND = {
+  dealer:{pill:"p-ok", label:"ضمن كفالة التاجر — مغطّى"},
+  referral:{pill:"p-warn", label:"إحالة للوكيل — لا أمر صيانة"},
+  expired_paid:{pill:"p-gray", label:"خارج الكفالة — مدفوع"},
+  voided_paid:{pill:"p-bad", label:"كفالة التاجر ملغاة — مدفوع"},
+  ended:{pill:"p-bad", label:"بطاقة منتهية (مرتجع) — مدفوع"},
+};
+function pillFor(v){ let h=`<span class="pill ${KIND[v.kind].pill}">${KIND[v.kind].label}</span>`;
+  if (v.openOrders.length) h+=` <span class="pill p-warn">أمر مفتوح: ${v.openOrders.map(o=>o.no).join("، ")}</span>`; return h; }
+
+function go(patch){ Object.assign(S,patch); render(); }
+
+function renderTabs(){
+  const t=[["card","١) من بطاقة الكفالة"],["scan","٢) من المسح"],["intake","٣) من شاشة الاستقبال"],["spec","عقد البحث والقرارات"]];
+  $("entryTabs").innerHTML = t.map(([k,l])=>`<button class="${S.entry===k?"on":""}" onclick="go({entry:'${k}',screen:'home',cardId:null,res:null,term:'',unit:null,override:'',itemOk:false,manualCover:false,slipPrinted:false})">${l}</button>`).join("");
+}
+
+function homeCard(){
+  return `<div class="card"><h2>شاشة الكفالات</h2><p class="muted">افتح أي بطاقة: فيها زر «افتح أمر صيانة» وسجل الصيانات.</p>
+  ${CARDS.map(c=>{const v=intakeVerdict(c);return `<div class="dev" onclick="go({screen:'cardView',cardId:${c.id},from:'card'})">
+   <div class="row"><b class="grow">${esc(c.device)}</b>${pillFor(v)}</div>
+   <div class="muted">${c.mode==="invoice"?`على الفاتورة · الكمية المغطاة ${coveredQty(c)} من ${c.qty}`:`<code>${c.serial}</code>`} · ${esc(c.partner.name)} · ${c.inv}</div></div>`}).join("")}</div>`;
+}
+function homeScan(){
+  return `<div class="card"><h2>المسح «ما الذي في يدي؟»</h2>
+  <input type="text" dir="ltr" style="text-align:right" id="scanIn" placeholder="امسح أو اكتب رقماً تسلسلياً / IMEI" value="${esc(S.term)}">
+  <div class="chips">${[["R58W123456","R58W123456"],["F2LX88990","F2LX88990"],["5CD2231HP","5CD2231HP"],["TV8812550","TV8812550"],["XM55410077","XM55410077"],["LNV7788X","LNV7788X"],["ZZZ-000","ZZZ-000 (مجهول)"],["https://erp.example.com/api/w/Qm9Yp3sT1vX8aZ2cL5nR0e","QR من شهادة زبوننا"],["https://erp.example.com/api/w/Zz0OtherTenantTokenX1a","QR من شهادة محل آخر"]].map(([s,l])=>`<span class="chip" onclick="scanGo('${s}')">${l}</span>`).join("")}</div>
+  <div class="row" style="margin-top:8px"><button class="btn primary" onclick="scanGo($('scanIn').value)">تعرّف</button></div>
+  <p class="note">المسح يقرأ الرقم التسلسلي/IMEI، ورابط QR المطبوع على الشهادة (#217) فيفتح بطاقته مباشرةً. الهاتف ورقم الفاتورة في شاشة الاستقبال.</p>
+  ${S.res?scanResult():""}</div>`;
+}
+function scanGo(t){ S.term=t; S.res=lookup(t); render(); }
+function scanResult(){
+  const r=S.res;
+  if (r.matched_on.includes("qr") && !r.results.length) return `<div class="banner b-gray">لا كفالة في شركتك خلف هذا الرمز. قد تكون الشهادة من محل آخر.
+    <div class="row" style="margin-top:6px"><button class="btn" onclick="go({res:null,term:''})">امسح الرقم التسلسلي بدلاً منه</button><button class="btn" onclick="openIntakeBlank('')">افتح أمراً يدوياً (مدفوع)</button></div></div>`;
+  if(!r.results.length && !r.units_without_card.length) return `<div class="banner b-gray">غير مسجَّل — لا وحدة ولا بطاقة بهذا الرقم.
+    <div class="row" style="margin-top:6px"><button class="btn" onclick="openIntakeBlank('${esc(r.term)}')">افتح أمر صيانة بهذا الرقم (جهاز لم نبعه)</button></div></div>`;
+  let h="";
+  r.results.forEach(x=>{const c=x.card; h+=`<div class="card"><div class="row"><b class="grow">${esc(c.device)}</b>${pillFor(x.verdict)}</div>
+   <div class="kv"><span>الرقم</span><span><code>${c.serial}</code></span><span>بيعت</span><span>${c.inv} بتاريخ ${fmt(c.sale)} — ${esc(c.partner.name)}</span>
+   <span>كفالة التاجر</span><span>${dealerLine(c)}</span><span>كفالة المصنع</span><span>${mfrLine(c)}</span></div>
+   <div class="row" style="margin-top:8px"><button class="btn primary" onclick="go({screen:'verdict',cardId:${c.id},from:'scan'})">افتح أمر صيانة</button>
+   <button class="btn link" onclick="go({screen:'cardView',cardId:${c.id},from:'scan'})">افتح البطاقة</button></div></div>`;});
+  r.units_without_card.forEach(u=>{h+=unitRow(u);});
+  return h;
+}
+function unitRow(u){ return `<div class="card"><div class="row"><b class="grow">${esc(u.product)}</b><span class="pill p-gray">بعناها بلا بطاقة كفالة</span></div>
+  <div class="muted"><code>${u.serial}</code> · ${u.inv} بتاريخ ${fmt(u.sale)} · ${esc(u.partner.name)}</div>
+  <p class="note">بيعت قبل تفعيل الوحدة أو دون سياسة كفالة: لا تغطية آلية، لكن الزبون والمنتج معروفان.</p>
+  <button class="btn primary" onclick='go({screen:"verdict",cardId:null,unit:${JSON.stringify(u)},from:S.entry})'>افتح أمر صيانة (مدفوع، معبّأ من الوحدة)</button></div>`;}
+
+function homeIntake(){
+  return `<div class="card"><h2>استقبال جهاز للصيانة</h2>
+  <label class="muted">حقل واحد: رقم تسلسلي / IMEI / هاتف الزبون / رقم فاتورة البيع</label>
+  <input type="text" dir="ltr" style="text-align:right" id="inIn" value="${esc(S.term)}" placeholder="R58W… أو 0599… أو INV-…">
+  <div class="chips">${[["0599 123 456","هاتف: زبون بـ3 أجهزة"],["٠٥٦٨٧٧٧٠٠١","هاتف بأرقام عربية"],["INV-2031","فاتورة: إطارات بلا رقم"],["inv-1990","فاتورة: كفالة ملغاة"],["TV8812550","رقم: أمر مفتوح"],["XM55410077","رقم: جهاز مُرتجع"],["0599000000","هاتف بلا نتائج"],["0599 12","هاتف ناقص"]].map(([s,l])=>`<span class="chip" onclick="inGo('${s}')">${l}</span>`).join("")}</div>
+  <div class="row" style="margin-top:8px"><button class="btn primary" onclick="inGo($('inIn').value)">ابحث</button>
+  <button class="btn" onclick="openIntakeBlank('')">أمر يدوي بلا بحث</button></div>
+  ${S.res?intakeResults():""}</div>`;
+}
+function inGo(t){ S.term=t; S.res=lookup(t); render(); }
+function intakeResults(){
+  const r=S.res; const d=r.term.replace(/\D/g,"");
+  if(!r.results.length && !r.units_without_card.length){
+    const shortPhone = /^[+\d\s\-()]+$/.test(r.term) && d.length>0 && d.length<9;
+    return `<div class="banner b-gray">${shortPhone?"اكتب رقم الهاتف كاملاً (9 أرقام على الأقل). البحث بجزء من الهاتف غير متاح حمايةً لبيانات الزبائن.":"لا بطاقة ولا وحدة مطابقة لـ «"+esc(r.term)+"»."}
+    <div class="row" style="margin-top:6px"><button class="btn" onclick="go({res:null})">ابحث بطريقة أخرى</button>
+    <button class="btn" onclick="openIntakeBlank('${esc(r.term)}')">افتح أمراً يدوياً (مدفوع)</button></div></div>`;}
+  const on = {phone:"مطابقة هاتف",invoice:"مطابقة رقم فاتورة",serial:"مطابقة رقم تسلسلي"};
+  let h=`<div class="muted" style="margin-top:8px">${r.matched_on.map(k=>on[k]).join(" + ")} · ${r.results.length} جهاز${r.truncated?" · النتائج أكثر من 20: اعرض الكل في شاشة الكفالات":""}</div>`;
+  const groups={}; r.results.forEach(x=>{(groups[x.card.partner.name] ||= []).push(x);});
+  Object.entries(groups).forEach(([name,xs])=>{
+    h+=`<div class="grp">${esc(name)} · <bdi>${esc(xs[0].card.phone)}</bdi></div>`;
+    xs.forEach(x=>{const c=x.card; h+=`<div class="dev" onclick="go({screen:'verdict',cardId:${c.id},from:'intake'})">
+      <div class="row"><b class="grow">${esc(c.device)}</b>${pillFor(x.verdict)}</div>
+      <div class="muted">${c.mode==="invoice"?`على الفاتورة · <b>الكمية المغطاة ${coveredQty(c)} من ${c.qty}</b>`:`<code>${c.serial}</code>`} · ${c.inv} · بيعت ${fmt(c.sale)}</div></div>`;});
+  });
+  r.units_without_card.forEach(u=>{h+=unitRow(u);});
+  return h;
+}
+
+function dealerLine(c){
+  if (c.ended) return `<span class="pill p-bad">منتهية</span> أُرجع الجهاز في ${fmt(c.ended.on)} (${c.ended.doc})`;
+  if (c.void) return `<span class="pill p-bad">ملغاة</span> ${esc(c.void.reason)} بتاريخ ${fmt(c.void.on)} (أمر ${c.void.order})`;
+  const d=daysLeft(c.dealer.end); return d>=0?`<span class="pill p-ok">سارية</span> حتى ${fmt(c.dealer.end)} · باقٍ ${d} يوماً`:`<span class="pill p-gray">منتهية</span> في ${fmt(c.dealer.end)}`;
+}
+function mfrLine(c){
+  if(!c.mfr) return `لا يوجد`;
+  const d=daysLeft(c.mfr.end); return `${d>=0?'<span class="pill p-ok">سارية</span>':'<span class="pill p-gray">منتهية</span>'} حتى ${fmt(c.mfr.end)} — ${esc(W[c.mfr.w].name)}`;
+}
+
+function cardView(){
+  const c=card(S.cardId); const v=intakeVerdict(c);
+  const hist=[...ORDERS.filter(o=>o.card===c.id).map(o=>({date:o.date,html:`أمر صيانة <a href="#" onclick="go({screen:'order',lastOrder:${o.id}});return false">${o.no}</a> · ${o.label}${o.covered?" · مغطّى":" · مدفوع"} — ${esc(o.complaint)}`})),
+             ...EVENTS.filter(e=>e.card===c.id).map(e=>({date:e.date,html:esc(e.text)}))].sort((a,b)=>b.date.localeCompare(a.date));
+  return `<div class="card"><div class="row"><h2 class="grow">بطاقة كفالة #${c.id}</h2><button class="btn" onclick="go({screen:'home'})">رجوع</button></div>
+  <div class="kv"><span>الجهاز</span><span>${esc(c.device)}</span><span>${c.mode==="invoice"?"الكمية":"الرقم"}</span><span>${c.mode==="invoice"?`${c.qty} · المرتجع ${c.returned} · <b>المغطاة ${coveredQty(c)}</b>`:`<code>${c.serial}</code>`}</span>
+  <span>الزبون</span><span>${esc(c.partner.name)} · <bdi>${esc(c.phone)}</bdi></span><span>الفاتورة</span><span>${c.inv} بتاريخ ${fmt(c.sale)}</span>
+  <span>كفالة التاجر</span><span>${dealerLine(c)}</span><span>كفالة المصنع</span><span>${mfrLine(c)}</span></div>
+  <div class="row" style="margin-top:10px"><button class="btn primary" onclick="go({screen:'verdict',from:'card'})">افتح أمر صيانة</button><span class="muted">الحكم المتوقّع: ${pillFor(v)}</span></div>
+  <h3>سجل الصيانات والأحداث (الرابط ٢)</h3>
+  ${hist.length?`<ul class="hist">${hist.map(x=>`<li>${fmt(x.date)} — ${x.html}</li>`).join("")}</ul>`:`<p class="muted">لا صيانات بعد.</p>`}
+  <p class="note">المصدر: أوامر <code>warranty_card = هذه البطاقة</code>، مع أحداث <code>WarrantyCardEvent</code> (إلغاء، انتهاء، مرتجع جزئي، إحالة). الأوامر القديمة غير المربوطة تُعرض بمطابقة الرقم التسلسلي في قسم «ربما مرتبطة».</p></div>`;
+}
+
+function openIntakeBlank(serial){ go({screen:"verdict",cardId:null,unit:{blank:true,serial},from:S.entry}); }
+
+function verdictScreen(){
+  // أمر يدوي أو وحدة بلا بطاقة
+  if(!S.cardId){ const u=S.unit||{blank:true,serial:""};
+    const pf = u.blank ? {partner:null,customer_name:"",customer_phone:"",product:null,serial:u.serial,warranty_card:null,warranty_covered:false}
+      : {partner:u.partner.id,customer_name:u.partner.name,customer_phone:u.phone,product:u.product,serial:u.serial,warranty_card:null,warranty_covered:false};
+    S._pf=pf; S._v=null;
+    return `<div class="card">${backBtn()}<div class="banner b-gray">${u.blank?"أمر يدوي: جهاز لم نبعه أو لم يُعثر عليه. لا كفالة تُقترح.":"وحدة بعناها بلا بطاقة: مدفوع افتراضياً. يجوز للموظف وسم «مغطّى» يدوياً مع ملاحظة (كالسلوك الحالي)."}</div>${formHtml(pf,null)}</div>`; }
+  const c=card(S.cardId); const v=intakeVerdict(c); const pf=prefillFor(c,v); S._pf=pf; S._v=v;
+  let h=`<div class="card">${backBtn()}<div class="row"><b class="grow">${esc(c.device)}</b>${pillFor(v)}</div>
+   <div class="kv" style="margin:6px 0"><span>كفالة التاجر</span><span>${dealerLine(c)}</span><span>كفالة المصنع</span><span>${mfrLine(c)}</span></div>`;
+  // طبقة الأمر المفتوح أولاً
+  if (v.openOrders.length && !S.override){
+    const o=v.openOrders[0];
+    if (v.blocking) return h+`<div class="banner b-warn"><b>لهذا الجهاز أمر صيانة مفتوح:</b> ${o.no} (${o.label}) منذ ${fmt(o.date)} — «${esc(o.complaint)}».<br>الأغلب أن الزبون يسأل عن جهازه، لا أنه جاء بعطل جديد.</div>
+      <div class="row"><button class="btn primary" onclick="go({screen:'order',lastOrder:${o.id}})">افتح الأمر القائم ${o.no}</button></div>
+      <h3>زيارة مختلفة فعلاً؟</h3><textarea id="ovr" rows="2" placeholder="السبب (إجباري، 5 أحرف على الأقل): مثلاً «عطل ثانٍ في الريموت»"></textarea>
+      <div class="row" style="margin-top:6px"><button class="btn" onclick="const t=$('ovr').value.trim(); if(t.length<5){alert('اكتب السبب');return;} go({override:t})">افتح أمراً جديداً رغم ذلك</button></div>
+      <p class="note">الخادم يرفض الإنشاء بـ409 ويعيد الأمر القائم، إلا إذا أُرسل <code>duplicate_open_reason</code>، ويُكتب السبب حدثاً في الأمر الجديد.</p></div>`;
+    h+=`<div class="banner b-warn">على هذه البطاقة ${v.openOrders.length} أمر مفتوح (${v.openOrders.map(o=>o.no).join("، ")}) والكمية المغطاة ${coveredQty(c)}: قطعة أخرى، فلا منع.</div>`;
+  }
+  if (S.override) h+=`<div class="banner b-warn">سيُفتح أمر ثانٍ. السبب يُسجَّل: «${esc(S.override)}»</div>`;
+  switch(v.kind){
+    case "dealer": h+=`<div class="banner b-ok">ضمن كفالة التاجر: نحن نصلّح مجاناً. ${v.mfrActive?"كفالة المصنع سارية أيضاً، لكن كفالة التاجر تغلب (#214). يمكنك لاحقاً مطالبة المورّد من داخل الأمر.":""}</div>`;
+      if (c.mode==="invoice") h+=`<div class="banner b-gray">بطاقة على الفاتورة، بلا رقم تسلسلي. الكمية المغطاة <b>${coveredQty(c)} من ${c.qty}</b> (أُرجع ${c.returned}). <label style="display:block;margin-top:6px"><input type="checkbox" ${S.itemOk?"checked":""} onchange="go({itemOk:this.checked})"> تأكّدت أن القطعة المستلمة من هذه الفاتورة (ملصق المحل، نوعها ومقاسها)</label>
+        ${S.itemOk?"":`<span class="muted">بدون التأكيد تبقى خانة «مغطّى» فارغة، ويُفتح الأمر مدفوعاً مع ربط البطاقة (مخرج: القطعة ليست من فاتورتنا).</span>`}</div>`;
+      break;
+    case "referral": return h+referralHtml(c,v)+`</div>`;
+    case "expired_paid": h+=`<div class="banner b-gray">انتهت كفالة التاجر في ${fmt(c.dealer.end)}${c.mfr?" وكفالة المصنع أيضاً":" ولا كفالة مصنع"}. أمر مدفوع، والبطاقة تُربط لسجل الصيانات.</div>`; break;
+    case "voided_paid": h+=`<div class="banner b-bad">كفالة التاجر ملغاة: ${esc(c.void.reason)} بتاريخ ${fmt(c.void.on)} (أمر ${c.void.order}). لا تُقترح تغطية، وخانة «مغطّى» مقفلة. <button class="btn link">مراجعة الإلغاء (للمدير)</button></div>`; break;
+    case "ended": h+=`<div class="banner b-bad">هذه البطاقة منتهية: أُرجع الجهاز في ${fmt(c.ended.on)} (${c.ended.doc})، والوحدة عادت إلى مخزننا. الزبون الواقف أمامك ليس صاحب البطاقة. لذلك لا يُعبَّأ الزبون.<br>تحقّق: هل بيع الجهاز ثانيةً دون تسجيل الرقم؟</div>`; break;
+  }
+  if (c.mode==="invoice" && v.kind==="dealer" && !S.itemOk) pf.warranty_covered=false;
+  return h+formHtml(pf,v)+`</div>`;
+}
+function backBtn(){ return `<div class="row" style="margin-bottom:6px"><button class="btn" onclick="go({screen:S.from==='card'&&S.cardId?'cardView':'home',override:'',itemOk:false,slipPrinted:false})">رجوع</button><span class="muted grow">المدخل: ${{card:"بطاقة الكفالة",scan:"المسح",intake:"شاشة الاستقبال"}[S.from]||"—"}</span></div>`; }
+
+function formHtml(pf,v){
+  const F=(label,val,filled)=>`<div class="f ${filled?"filled":val?"":"empty"}"><b>${label}</b><bdi>${esc(val)||"—"}</bdi></div>`;
+  const lockCover = v && (v.kind==="voided_paid" || v.kind==="ended");
+  return `<h3>نموذج الاستقبال (معبّأ مسبقاً)</h3><div class="form">
+   ${F("الزبون من القائمة",pf.partner?pf.customer_name:"",!!pf.partner)}${F("الهاتف",pf.customer_phone,!!pf.customer_phone)}
+   ${F("المنتج",pf.product,!!pf.product)}${F("الرقم التسلسلي",pf.serial||(S.cardId&&card(S.cardId).mode==="invoice"?"(بطاقة على الفاتورة: بلا رقم)":""),!!pf.serial)}
+   ${F("بطاقة الكفالة المربوطة",pf.warranty_card?"#"+pf.warranty_card:"",!!pf.warranty_card)}${F("تاريخ الاستلام",fmt(TODAY),false)}
+   <div class="f empty"><b>شكوى الزبون (إجباري)</b><input type="text" id="cmp" placeholder="بكلمات الزبون" style="padding:4px"></div>
+   ${F("الحالة عند الاستلام · الملحقات","",false)}</div>
+   <label style="display:block;margin:8px 0"><input type="checkbox" id="cov" ${pf.warranty_covered?"checked":""} ${lockCover?"disabled":""}> الإصلاح مغطى بالكفالة ${lockCover?"<span class='muted'>(مقفل: "+(v.kind==="ended"?"البطاقة منتهية":"كفالة التاجر ملغاة")+")</span>":v&&v.kind==="expired_paid"?"<span class='muted'>(وسمها يدوياً = مجاملة، تُكتب في سجل الأمر)</span>":""}</label>
+   <div class="row"><button class="btn primary" onclick="createOrder()">فتح أمر الصيانة</button><button class="btn" onclick="go({screen:'home'})">إلغاء</button></div>`;
+}
+function createOrder(){
+  const cmp=($("cmp").value||"").trim(); if(!cmp){alert("اكتب شكوى الزبون");return;}
+  const pf=S._pf; const id=ORDERS.length+1; const no="SO-0"+(420+id);
+  const o={id,no,card:pf.warranty_card,serial:pf.serial,date:TODAY,status:"received",label:"مُستلَم",covered:$("cov").checked,complaint:cmp,partner:pf.customer_name,override:S.override};
+  ORDERS.push(o); go({screen:"order",lastOrder:id,override:"",itemOk:false});
+}
+function orderView(){
+  const o=ORDERS.find(x=>x.id===S.lastOrder); const c=o.card?card(o.card):null;
+  let banner;
+  if(!c) banner=`<div class="banner b-gray">لا بطاقة كفالة مربوطة بهذا الأمر — الإصلاح على حساب الزبون.</div>`;
+  else { const v=intakeVerdict(c); const cls={dealer:"b-ok",referral:"b-warn",expired_paid:"b-gray",voided_paid:"b-bad",ended:"b-bad"}[v.kind];
+    banner=`<div class="banner ${cls}"><div class="row"><span class="grow">كفالة التاجر: ${dealerLine(c)}<br>كفالة المصنع: ${mfrLine(c)}${c.mode==="invoice"?`<br>الكمية المغطاة ${coveredQty(c)} من ${c.qty}`:""}</span>
+    <button class="btn" onclick="go({screen:'cardView',cardId:${c.id},from:'card'})">افتح البطاقة #${c.id} ←</button></div></div>`; }
+  return `<div class="card"><div class="row"><h2 class="grow">أمر الصيانة ${o.no}</h2><span class="pill p-gray">${o.label}</span></div>
+  ${banner}<p class="note">الرابط ٣: شريط الكفالة صار رابطاً إلى البطاقة (<code>/after-sales/warranties/${c?c.id:"…"}</code>).</p>
+  <div class="kv"><span>الزبون</span><span>${esc(o.partner||"—")}</span><span>الجهاز</span><span>${o.serial?`<code>${o.serial}</code>`:"—"}</span><span>الشكوى</span><span>${esc(o.complaint)}</span><span>مغطّى</span><span>${o.covered?"نعم":"لا"}</span>${o.override?`<span>أمر ثانٍ لأن</span><span>${esc(o.override)}</span>`:""}</div>
+  <div class="row" style="margin-top:8px"><button class="btn" onclick="go({screen:'home',res:null,term:''})">استقبال جهاز آخر</button></div></div>`;
+}
+
+function referralHtml(c,v){
+  const w=W[c.mfr.w];
+  return `<div class="banner b-warn"><b>راجِع مركز الوكيل.</b> خارج كفالة التاجر${c.void?" (ملغاة)":" (انتهت "+fmt(c.dealer.end)+")"}، وكفالة المصنع سارية حتى ${fmt(c.mfr.end)}. قرار المالك (#214): إحالة بورقة، <b>بلا أمر صيانة</b>.</div>
+  ${c.void?`<p class="note">الورقة لا تذكر سبب إلغاء كفالة التاجر (#218): الوكيل يفحص بنفسه.</p>`:""}
+  <div class="slip">
+   <div class="hd"><div><b>متجر المثال للإلكترونيات</b><br><span style="font-size:10px">الخليل · 02-2220000</span></div><div style="text-align:left"><b>ورقة إحالة إلى الوكيل</b><br><span style="font-size:10px">${fmt(TODAY)}</span></div></div>
+   <div>السيد/ة: <b>${esc(c.partner.name)}</b></div>
+   <table><tr><td>الجهاز</td><td>${esc(c.device)}</td></tr><tr><td>الرقم التسلسلي</td><td>${c.serial}</td></tr>
+   <tr><td>فاتورة الشراء</td><td>${c.inv} بتاريخ ${fmt(c.sale)}</td></tr><tr><td>كفالة المصنع</td><td>سارية حتى ${fmt(c.mfr.end)}</td></tr></table>
+   <div style="border:1px solid #333;padding:6px"><b>يُخدم لدى:</b> ${esc(w.name)}<br>${esc(w.addr)}<br>هاتف: ${esc(w.phone)}</div>
+   <div style="font-size:10px">هذا الجهاز ما زال ضمن كفالة المصنع. يُرجى مراجعة المركز أعلاه مع هذه الورقة وفاتورة الشراء.</div>
+   <div class="row" style="margin-top:auto;justify-content:space-between"><div class="qr" title="رمز التحقق #217"></div><div style="font-size:10px">مرجع البطاقة #${c.id}<br>الختم والتوقيع: ..........</div></div>
+  </div>
+  <div class="row"><button class="btn primary" onclick="EVENTS.push({card:${c.id},date:TODAY,text:'أُحيل إلى الوكيل: ${esc(w.name)}'});go({slipPrinted:true})">اطبع ورقة الإحالة (A5)</button><button class="btn">أرسلها PDF على واتساب</button></div>
+  ${S.slipPrinted?`<div class="banner b-ok">سُجّل حدث «أُحيل إلى الوكيل» في سجل البطاقة. <button class="btn link" onclick="go({screen:'cardView',from:'card'})">افتح البطاقة</button></div>`:""}
+  <h3>مخارج</h3>
+  <div class="row"><button class="btn" onclick="go({screen:'home',res:null,term:''})">تمّ، استقبال التالي</button>
+  <button class="btn danger" onclick="if(confirm('فتح الجهاز عندنا قد يُسقط كفالة المصنع. متابعة بأمر مدفوع؟')) go({_forcePaid:true, screen:'forcedPaid'})">الزبون يرفض الإحالة ويطلب إصلاحاً مدفوعاً عندنا ⏳</button></div>
+  <p class="note">⏳ تفضيل معلّق عند المالك: هل يظهر هذا المخرج؟ المؤقّت: يظهر زرّاً ثانوياً مع تحذير، ويُسجَّل في الأمر أن كفالة المصنع كانت سارية.</p>`;
+}
+function forcedPaid(){ const c=card(S.cardId); const v=intakeVerdict(c); const pf=prefillFor(c,v); pf.warranty_covered=false; S._pf=pf;
+  return `<div class="card">${backBtn()}<div class="banner b-warn">أمر مدفوع رغم سريان كفالة المصنع (بطلب الزبون). يُكتب حدث في الأمر: «كفالة المصنع سارية حتى ${fmt(c.mfr.end)}، وأصرّ الزبون على الإصلاح عندنا».</div>${formHtml(pf,{kind:"voided_paid"})}</div>`;}
+
+function spec(){
+ return `<div class="card spec"><h2>عقد البحث عند الاستقبال</h2>
+ <p><code>GET /api/after-sales/service-orders/lookup/?q=…</code> (يبقى <code>?serial=</code> اسماً قديماً). <code>require_module</code> ثم <code>aftersales.order.create</code>.</p>
+ <table><tr><th>الطريق</th><th>المطابقة</th><th>السقف</th><th>الفهرس</th></tr>
+ <tr><td>رقم تسلسلي / IMEI</td><td>تامّة بعد القصّ، كما اليوم</td><td>5</td><td><code>warranty_tenant_serial_idx</code> القائم</td></tr>
+ <tr><td>رقم فاتورة البيع</td><td>تامّة بعد القصّ، بلا حساسية حالة الأحرف. لا جزئي.</td><td>كل بطاقات الفاتورة (حتى 50)</td><td>فريد القائم <code>(tenant, invoice_number)</code> على الفاتورة، ثم FK <code>WarrantyCard.sales_invoice</code> (#221)</td></tr>
+ <tr><td>هاتف</td><td>أرقام فقط (العربية تتحوّل)، آخر 9 أرقام، تامّة. أقل من 9 = رسالة لا بحث.</td><td>20 بطاقة، الأحدث بيعاً أولاً، و<code>truncated</code></td><td>عمود جديد <code>WarrantyCard.phone_key</code> + فهرس <code>(tenant, phone_key)</code>، يُملأ عند الإنشاء وبهجرة للقديم</td></tr></table>
+ <p class="note">نص واحد قد يطابق أكثر من طريق (رقم تسلسلي من أرقام فقط). الشكل يرتّب ولا يصفّي، وكل صف يحمل <code>matched_on</code>.</p>
+ <h3>شكل الردّ</h3>
+ <pre style="direction:ltr;text-align:left;font-size:11px;background:#f6f8fa;padding:8px;border-radius:8px;white-space:pre-wrap">{ term, matched_on: ["phone"], truncated: false,
+  results: [ { card: {id, device_name, serial, mode, quantity, covered_quantity,
+               partner:{id,name}, customer_phone, sales_invoice_number, sale_date,
+               dealer:{end_date, status}, manufacturer:{warrantor, end_date, status}|null,
+               void:{reason_label, voided_at, service_order_number}|null,
+               ended:{ended_on, end_reason, document_number}|null},
+             verdict: "dealer"|"referral"|"expired_paid"|"voided_paid"|"ended",
+             open_orders: [{id, order_number, status_display, order_date}],
+             prefill: {partner, customer_name, customer_phone, product, serial,
+                       device_description, warranty_card, warranty_covered} } ],
+  units_without_card: [...], sensitive_devices: [...] }</pre>
+ <h3>المداخل</h3>
+ <ul class="hist"><li>من البطاقة: <code>/after-sales/service-orders/new?card=&lt;id&gt;</code></li>
+ <li>من المسح: الزرّ على بطاقة الوحدة، الرابط نفسه (أو <code>?serial=</code> لوحدة بلا بطاقة)</li>
+ <li>الشريط في الأمر يفتح <code>/after-sales/warranties/&lt;id&gt;</code></li>
+ <li>المدخل المعبّأ لا يعرض استعادة مسودة الاستقبال العامة؛ مفتاح المسودة يصير <code>service_order_intake:card:&lt;id&gt;</code>.</li></ul></div>`;
+}
+
+function render(){
+  renderTabs();
+  let h="";
+  if (S.entry==="spec") h=spec();
+  else if (S.screen==="home") h = S.entry==="card"?homeCard():S.entry==="scan"?homeScan():homeIntake();
+  else if (S.screen==="cardView") h=cardView();
+  else if (S.screen==="verdict") h=verdictScreen();
+  else if (S.screen==="forcedPaid") h=forcedPaid();
+  else if (S.screen==="order") h=orderView();
+  $("screen").innerHTML=h;
+  const dump={entry:S.entry, screen:S.screen, lookup_response: S.res?{term:S.res.term,matched_on:S.res.matched_on,truncated:S.res.truncated,
+      results:S.res.results.map(x=>({card_id:x.card.id,device:x.card.device,verdict:x.verdict.kind,open_orders:x.verdict.openOrders.map(o=>o.no),covered_quantity:coveredQty(x.card)})),
+      units_without_card:S.res.units_without_card.map(u=>u.serial)}:null,
+    verdict: S._v&&S.screen==="verdict"?{kind:S._v.kind,blocking_open_order:S._v.blocking,manufacturer_active:S._v.mfrActive}:null,
+    prefill: (S.screen==="verdict"||S.screen==="forcedPaid")?S._pf:null,
+    orders: ORDERS.map(o=>`${o.no} card#${o.card??"-"} ${o.status}${o.covered?" covered":""}`)};
+  $("statePre").textContent=JSON.stringify(dump,null,2);
+  if (S.screen!==render._last) window.scrollTo(0,0);
+  render._last=S.screen;
+}
+render();
+</script>
+</body>
+</html>

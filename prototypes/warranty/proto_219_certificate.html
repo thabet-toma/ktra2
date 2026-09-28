@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<!--
+  PROTOTYPE — #219 «شكل شهادة الكفالة A5». ملف رمي، لا يدخل المستودع.
+  يجيب سؤالاً واحداً: كيف تبدو الشهادة على ورقة A5، وماذا يحدث حين تطول.
+  خطوط النظام عمداً (لا Google Fonts): CSP الخادم `font-src 'self' data:`
+  يمنع الخطوط الخارجية في القالب الحقيقي، فالنموذج يطبع كما سيطبع الحقيقي.
+  كل البيانات وهمية. رمز QR مربع وهمي.
+-->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>شهادة كفالة — INV-2026-01043</title>
+<style>
+  :root{
+    --ink:#0f172a; --muted:#475569; --soft:#94a3b8; --line:#cbd5e1; --hair:#e2e8f0;
+    --brand:#1e3a8a; --danger:#b91c1c; --paper:#fff; --bg:#e5e7eb;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  body{
+    background:var(--bg); color:var(--ink);
+    font-family:"Segoe UI","Tahoma","Noto Naskh Arabic",Arial,sans-serif;
+    font-size:9.5pt; line-height:1.45;
+    -webkit-print-color-adjust:exact; print-color-adjust:exact;
+  }
+  .ltr{direction:ltr; unicode-bidi:isolate; white-space:nowrap; font-family:ui-monospace,Consolas,monospace; letter-spacing:.02em}
+
+  /* ── شريط النموذج (لا يُطبع) ───────────────────────────── */
+  .proto-bar{position:sticky; top:0; z-index:10; background:#0f172a; color:#fff;
+    padding:10px 14px; display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  .proto-bar .tag{background:#f59e0b; color:#111; font-weight:800; border-radius:6px; padding:2px 8px; font-size:9pt}
+  .proto-bar button{font:inherit; font-weight:700; border:1px solid #334155; background:#1e293b; color:#e2e8f0;
+    border-radius:8px; padding:6px 12px; cursor:pointer}
+  .proto-bar button[aria-pressed="true"]{background:#2563eb; border-color:#2563eb; color:#fff}
+  .proto-bar label{display:inline-flex; gap:5px; align-items:center; font-size:9pt; color:#cbd5e1; cursor:pointer}
+  .proto-bar .sep{width:1px; height:22px; background:#334155; margin:0 4px}
+  .proto-note{max-width:148mm; margin:12px auto 0; background:#fffbeb; border:1px solid #fde68a;
+    border-radius:8px; padding:8px 12px; font-size:9pt; color:#78350f}
+  .proto-note b{color:#451a03}
+
+  /* ── الورقة ─────────────────────────────────────────────── */
+  .sheet{width:148mm; min-height:210mm; margin:14px auto 28px; background:var(--paper);
+    padding:8mm; box-shadow:0 2px 10px rgba(0,0,0,.15); position:relative; display:none}
+  .sheet.active{display:block}
+
+  @page{ size:A5 portrait; margin:8mm 8mm 10mm;
+    @bottom-center{ content:"صفحة " counter(page) " من " counter(pages); font-size:7.5pt; color:#64748b } }
+  @page :first{ @bottom-center{ content:none } }
+  /* صفحة التتمّة تحمل هوية الشهادة (ورقة ثانية منفصلة تُعرف لمن تعود).
+     القالب الحقيقي يكتب الرقم في هذا السطر من الخادم؛ هنا يكتبه JS في #pagehead. */
+  @media print{
+    body{background:#fff}
+    .no-print{display:none !important}
+    .sheet{display:none; width:auto; min-height:0; margin:0; padding:0; box-shadow:none}
+    .sheet.active{display:block}
+    thead{display:table-header-group}
+    tr, .keep{break-inside:avoid}
+    .sign{break-inside:avoid; break-before:avoid-page}
+  }
+
+  /* ترويسة */
+  .head{display:flex; justify-content:space-between; gap:8px; align-items:flex-start;
+    border-bottom:1.6pt solid var(--ink); padding-bottom:2.5mm; margin-bottom:2.5mm}
+  .org{display:flex; gap:3mm; align-items:flex-start}
+  .logo{width:15mm; height:15mm; border:1px solid var(--line); border-radius:3mm; display:grid; place-items:center;
+    font-weight:900; color:var(--brand); font-size:13pt}
+  .org-name{font-size:12pt; font-weight:800; margin:0}
+  .org-sub{font-size:8pt; color:var(--muted); margin:0}
+  .org-line{font-size:7.5pt; color:var(--muted); margin:0}
+  .docid{text-align:left; min-width:38mm}
+  .doc-kind{font-size:13pt; font-weight:900; margin:0; color:var(--brand)}
+  .doc-no{font-size:8.5pt; margin:1mm 0 0}
+  .doc-no span{color:var(--muted)}
+  .reprint{display:inline-block; margin-top:1mm; font-size:7pt; border:1px dashed var(--soft); color:var(--muted);
+    border-radius:2mm; padding:0 2mm}
+
+  /* بطاقة الزبون */
+  .facts{display:grid; grid-template-columns:1fr 1fr; gap:0 6mm; border:1px solid var(--line); border-radius:2.5mm;
+    padding:2mm 3mm; margin-bottom:3mm; font-size:8.5pt}
+  .facts div{display:flex; justify-content:space-between; gap:3mm; padding:.4mm 0}
+  .facts div span:first-child{color:var(--muted)}
+  .facts strong{font-weight:700}
+
+  h3.sec{font-size:8.5pt; margin:0 0 1.2mm; color:var(--muted); font-weight:800; letter-spacing:.02em}
+
+  /* جدول الأجهزة */
+  table{width:100%; border-collapse:collapse; font-size:8.3pt; margin-bottom:3mm}
+  th,td{border:1px solid var(--line); padding:1mm 1.5mm; text-align:right; vertical-align:middle}
+  thead th{background:#f1f5f9; font-size:7.5pt; color:var(--muted); font-weight:800}
+  td.n{text-align:center; width:5mm; color:var(--muted)}
+  td.qr{text-align:center; padding:.8mm}
+  .dev{font-weight:700; display:block; text-align:right}
+  .sn{display:block; font-size:7.8pt; margin-top:.5mm}
+  .sn b{font-family:inherit; font-weight:400; color:var(--muted); letter-spacing:0}
+  .layer{font-size:7.6pt}
+  .layer .to{font-weight:800}
+  .layer .from{display:block; color:var(--muted); font-size:7pt}
+  .layer .none{font-weight:800}
+  .ref{display:inline-block; min-width:3.6mm; height:3.6mm; line-height:3.6mm; border:1px solid var(--ink);
+    border-radius:50%; text-align:center; font-size:6.5pt; font-weight:800; margin-inline-start:1mm}
+
+  /* مراكز خدمة المصنع */
+  .centers{border:1px solid var(--line); border-radius:2.5mm; padding:1.5mm 3mm; margin-bottom:2.5mm; font-size:7.6pt}
+  .centers p{margin:.4mm 0}
+  .centers .ref{margin:0 0 0 1.5mm}
+
+  /* سطرا الطبقتين (البطاقة المفردة) */
+  .layers{border:1.2pt solid var(--ink); border-radius:2.5mm; margin-bottom:3mm; position:relative}
+  .lrow{display:grid; grid-template-columns:24mm 1fr; gap:2mm; padding:2mm 3mm; position:relative}
+  .lrow + .lrow{border-top:1px solid var(--line)}
+  .lrow .k{font-weight:900; font-size:9pt}
+  .lrow .v{font-size:9pt}
+  .lrow .v .dates{font-weight:800}
+  .lrow .v .svc{display:block; font-size:8pt; color:var(--muted); margin-top:.6mm}
+  .device-box{display:grid; grid-template-columns:1fr 27mm; gap:3mm; align-items:center;
+    border:1px solid var(--line); border-radius:2.5mm; padding:2.5mm 3mm; margin-bottom:3mm}
+  .device-box .dname{font-size:11pt; font-weight:900; margin:0}
+  .device-box .sn{font-size:9.5pt}
+  .qrcap{display:block; font-size:6.3pt; color:var(--muted); text-align:center; margin-top:.6mm; line-height:1.2}
+
+  /* الأختام */
+  .stamp{display:inline-block; border:1.6pt solid var(--danger); color:var(--danger); border-radius:2mm;
+    padding:.4mm 2mm; font-weight:900; font-size:7.5pt; line-height:1.3; white-space:normal}
+  .stamp small{display:block; font-weight:700; font-size:6.5pt}
+  .stamp-big{position:absolute; inset-inline-end:3mm; top:2.5mm; transform:rotate(-7deg); max-width:40mm;
+    border:2.2pt double var(--danger); color:var(--danger); background:rgba(255,255,255,.85);
+    padding:.6mm 3mm; border-radius:2mm; text-align:center; font-weight:900; font-size:11pt; line-height:1.2}
+  .stamp-big small{display:block; font-size:6.8pt; font-weight:700; line-height:1.25}
+  body.show-void .stamp-big + .lrow{min-height:19mm}
+  .stamp-grey{border-color:var(--muted); color:var(--muted)}
+  .void-only{display:none}
+  body.show-void .void-only{display:inline-block}
+  body.show-void .stamp-big.void-only{display:block}
+  body.show-void .hide-when-void{display:none}
+
+  /* الشروط */
+  .terms{border-top:1px solid var(--line); padding-top:2mm; margin-bottom:3mm}
+  .terms ol{margin:0; padding-inline-start:4.5mm; font-size:7.3pt; line-height:1.35; columns:2; column-gap:5mm; column-rule:1px solid var(--hair)}
+  .terms li{break-inside:avoid; margin-bottom:.6mm}
+  .terms .applies{font-size:7.3pt; color:var(--muted); margin:0 0 1mm}
+  .long-only{display:none}
+  body.long-terms .long-only{display:list-item}
+
+  /* التوقيع والختم */
+  .sign{display:grid; grid-template-columns:1fr 1fr; gap:5mm; margin-top:3mm}
+  .sign .box{border:1px dashed var(--soft); border-radius:2.5mm; height:15mm; padding:1.5mm 2.5mm; font-size:7.5pt; color:var(--muted);
+    display:flex; flex-direction:column; justify-content:space-between}
+  .sign .box b{color:var(--ink)}
+  .foot{margin-top:2.5mm; padding-top:1.5mm; border-top:1px solid var(--hair); font-size:6.8pt; color:var(--muted);
+    display:flex; justify-content:space-between; gap:3mm}
+
+  /* ورقة الإحالة */
+  .to-box{border:1.2pt solid var(--ink); border-radius:2.5mm; padding:2.5mm 3mm; margin-bottom:3mm}
+  .to-box .t{font-size:8pt; color:var(--muted); margin:0}
+  .to-box .n{font-size:11.5pt; font-weight:900; margin:.5mm 0}
+  .to-box p{margin:.3mm 0; font-size:8.8pt}
+  .notice{border:1px solid var(--line); background:#f8fafc; border-radius:2.5mm; padding:2mm 3mm; font-size:8pt; margin-bottom:3mm}
+  .blank-lines div{border-bottom:1px dotted var(--soft); height:6mm}
+</style>
+<style id="pagehead"></style>
+</head>
+<body>
+
+<div class="proto-bar no-print">
+  <span class="tag">PROTOTYPE #219</span>
+  <button type="button" data-v="v1" aria-pressed="true">١ · شهادة الفاتورة (3 أجهزة)</button>
+  <button type="button" data-v="v2" aria-pressed="false">٢ · بطاقة جهاز مفرد</button>
+  <button type="button" data-v="v3" aria-pressed="false">٣ · كفالة على الفاتورة (4 إطارات)</button>
+  <button type="button" data-v="v4" aria-pressed="false">٤ · ورقة إحالة للوكيل</button>
+  <span class="sep"></span>
+  <label><input type="checkbox" id="t-void"> ختم «ملغاة» على كفالة التاجر</label>
+  <label><input type="checkbox" id="t-long"> شروط طويلة (تتجاوز الصفحة)</label>
+  <label><input type="checkbox" id="t-reprint"> إعادة طباعة</label>
+  <span class="sep"></span>
+  <button type="button" onclick="window.print()">طباعة / حفظ PDF (Ctrl+P)</button>
+</div>
+
+<div class="proto-note no-print" id="note"></div>
+
+<!-- ═════════════ ١ · شهادة الفاتورة ═════════════ -->
+<section class="sheet active" id="v1">
+  <div class="head">
+    <div class="org">
+      <div class="logo">ن</div>
+      <div>
+        <p class="org-name">مؤسسة النور للإلكترونيات</p>
+        <p class="org-sub">أجهزة خلوية وإكسسوارات</p>
+        <p class="org-line">رام الله — شارع الإرسال، عمارة 12 · هاتف <span class="ltr">02-2951234</span></p>
+        <p class="org-line">مشتغل مرخّص رقم <span class="ltr">562233441</span></p>
+      </div>
+    </div>
+    <div class="docid">
+      <p class="doc-kind">شهادة كفالة</p>
+      <p class="doc-no"><span>الفاتورة</span> <b class="ltr">INV-2026-01043</b></p>
+      <p class="doc-no"><span>بتاريخ</span> <b>27/09/2026</b></p>
+      <span class="reprint rp">إعادة طباعة · 03/10/2026</span>
+    </div>
+  </div>
+
+  <div class="facts keep">
+    <div><span>الكفالة باسم</span><strong>أحمد خليل</strong></div>
+    <div><span>الهاتف</span><strong class="ltr">0599-123456</strong></div>
+  </div>
+
+  <h3 class="sec">الأجهزة المكفولة (<span id="v1-count">3</span>) — تبدأ كفالاتها من تاريخ الفاتورة ما لم يُذكر غيره</h3>
+  <table>
+    <thead>
+      <tr><th style="width:5mm">#</th><th>الجهاز والرقم التسلسلي</th><th style="width:24mm">كفالة التاجر حتى</th><th style="width:25mm">كفالة المصنع حتى</th><th style="width:16mm">تحقّق</th></tr>
+    </thead>
+    <tbody id="v1-rows"></tbody>
+  </table>
+
+  <div class="centers keep">
+    <h3 class="sec">أين تُخدم كفالة المصنع</h3>
+    <p><span class="ref">1</span><b>الشركة المتحدة للإلكترونيات</b> — مركز خدمة Samsung · البيرة، شارع القدس، مجمّع الريحان · <span class="ltr">02-2987700</span></p>
+    <p><span class="ref">2</span><b>مؤسسة الريادة التقنية</b> — وكيل Xiaomi · نابلس، دوار الشهداء · <span class="ltr">09-2381155</span></p>
+  </div>
+
+  <div class="terms">
+    <h3 class="sec">شروط الكفالة</h3>
+    <p class="applies">تسري على الأجهزة 1 و2 و3 (شروط الشركة).</p>
+    <ol class="terms-list"></ol>
+  </div>
+
+  <div class="sign">
+    <div class="box"><b>البائع — التوقيع وختم المحل</b><span>أصدرها: سامي عودة</span></div>
+    <div class="box"><b>الزبون — استلمت الأجهزة وقرأت الشروط</b><span>التوقيع: ……………………</span></div>
+  </div>
+  <div class="foot"><span>امسح رمز الجهاز لمعرفة حالة كفالته اليوم.</span><span>هذه الشهادة لا تُغني عن الفاتورة.</span></div>
+</section>
+
+<!-- ═════════════ ٢ · بطاقة جهاز مفرد ═════════════ -->
+<section class="sheet" id="v2">
+  <div class="head">
+    <div class="org">
+      <div class="logo">ن</div>
+      <div>
+        <p class="org-name">مؤسسة النور للإلكترونيات</p>
+        <p class="org-sub">أجهزة خلوية وإكسسوارات</p>
+        <p class="org-line">رام الله — شارع الإرسال، عمارة 12 · هاتف <span class="ltr">02-2951234</span></p>
+        <p class="org-line">مشتغل مرخّص رقم <span class="ltr">562233441</span></p>
+      </div>
+    </div>
+    <div class="docid">
+      <p class="doc-kind">بطاقة كفالة</p>
+      <p class="doc-no"><span>رقم البطاقة</span> <b class="ltr">#4812</b></p>
+      <p class="doc-no"><span>الفاتورة</span> <b class="ltr">INV-2026-01043</b></p>
+      <span class="reprint rp">إعادة طباعة · 03/10/2026</span>
+    </div>
+  </div>
+
+  <div class="device-box keep">
+    <div>
+      <p class="dname"><bdi dir="ltr">Samsung Galaxy A55 — 128GB</bdi> — أزرق</p>
+      <span class="sn"><span class="ltr"><b>IMEI</b> 356789104422187</span></span>
+      <p class="org-line" style="margin-top:1.5mm">الكفالة باسم <b style="color:var(--ink)">أحمد خليل</b> · <span class="ltr">0599-123456</span> · بتاريخ 27/09/2026</p>
+    </div>
+    <div><span class="qrslot" data-size="25"></span><span class="qrcap">امسح للتحقق من حالة الكفالة</span></div>
+  </div>
+
+  <div class="layers keep">
+    <div class="stamp-big void-only" style="top:1.5mm">ملغاة<small>بتاريخ 14/01/2027</small><small>السبب: سوائل أو رطوبة</small></div>
+    <div class="lrow">
+      <div class="k">كفالة التاجر</div>
+      <div class="v">
+        <span class="dates">من 27/09/2026 إلى 27/09/2027</span> · 12 شهراً
+        <span class="svc">نحن نصلّح: مؤسسة النور للإلكترونيات، العنوان أعلاه.</span>
+      </div>
+    </div>
+    <div class="lrow">
+      <div class="k">كفالة المصنع</div>
+      <div class="v">
+        <span class="dates">من 27/09/2026 إلى 27/09/2028</span> · 24 شهراً
+        <span class="svc">تُخدم لدى: <b style="color:var(--ink)">الشركة المتحدة للإلكترونيات</b> — مركز خدمة Samsung، البيرة، شارع القدس، مجمّع الريحان · <span class="ltr">02-2987700</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="terms">
+    <h3 class="sec">شروط الكفالة</h3>
+    <ol class="terms-list"></ol>
+  </div>
+
+  <div class="sign">
+    <div class="box"><b>البائع — التوقيع وختم المحل</b><span>أصدرها: سامي عودة</span></div>
+    <div class="box"><b>الزبون — استلمت الجهاز وقرأت الشروط</b><span>التوقيع: ……………………</span></div>
+  </div>
+  <div class="foot"><span>بطاقة لكل جهاز — تُرفق مع العلبة.</span><span>هذه البطاقة لا تُغني عن الفاتورة.</span></div>
+</section>
+
+<!-- ═════════════ ٣ · كفالة على الفاتورة (كمية بلا رقم) ═════════════ -->
+<section class="sheet" id="v3">
+  <div class="head">
+    <div class="org">
+      <div class="logo">ن</div>
+      <div>
+        <p class="org-name">مؤسسة النور للإطارات</p>
+        <p class="org-sub">إطارات وبطاريات وخدمة سريعة</p>
+        <p class="org-line">الخليل — شارع عين سارة · هاتف <span class="ltr">02-2224466</span></p>
+        <p class="org-line">مشتغل مرخّص رقم <span class="ltr">562233441</span></p>
+      </div>
+    </div>
+    <div class="docid">
+      <p class="doc-kind">بطاقة كفالة</p>
+      <p class="doc-no"><span>رقم البطاقة</span> <b class="ltr">#4830</b></p>
+      <p class="doc-no"><span>الفاتورة</span> <b class="ltr">INV-2026-01077</b></p>
+      <span class="reprint rp">إعادة طباعة · 03/10/2026</span>
+    </div>
+  </div>
+
+  <div class="device-box keep">
+    <div>
+      <p class="dname">إطار <bdi dir="ltr">Michelin Primacy 4 — 205/55 R16</bdi></p>
+      <span class="sn" style="font-size:10.5pt"><b style="font-size:9pt">الكمية المكفولة</b> <strong>4</strong> <b style="font-size:8pt">— كفالة على الفاتورة، بلا رقم تسلسلي</b></span>
+      <p class="org-line" style="margin-top:1.5mm">الكفالة باسم <b style="color:var(--ink)">محمود الجعبري</b> · <span class="ltr">0598-765432</span> · بتاريخ 27/09/2026</p>
+    </div>
+    <div><span class="qrslot" data-size="25"></span><span class="qrcap">امسح لمعرفة الكمية المكفولة اليوم</span></div>
+  </div>
+
+  <div class="layers keep">
+    <div class="stamp-big void-only" style="top:1.5mm">ملغاة<small>بتاريخ 14/01/2027</small><small>السبب: سوء استخدام</small></div>
+    <div class="lrow">
+      <div class="k">كفالة التاجر</div>
+      <div class="v">
+        <span class="dates">من 27/09/2026 إلى 27/03/2027</span> · 6 أشهر
+        <span class="svc">التركيب والموازنة وعيوب الصناعة الظاهرة — عندنا.</span>
+      </div>
+    </div>
+    <div class="lrow">
+      <div class="k">كفالة المصنع</div>
+      <div class="v">
+        <span class="dates">من 27/09/2026 إلى 27/09/2031</span> · 60 شهراً
+        <span class="svc">تُخدم لدى: <b style="color:var(--ink)">شركة الإطار الذهبي</b> — وكيل Michelin، رام الله، المنطقة الصناعية · <span class="ltr">02-2961010</span></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="notice keep">عند المطالبة: أحضر هذه البطاقة <b>أو</b> الفاتورة، ونبحث عنها برقم الفاتورة أو هاتفك. إن أرجعت جزءاً من الكمية تنقص الكمية المكفولة، وتعرضها صفحة التحقق.</div>
+
+  <div class="terms">
+    <h3 class="sec">شروط الكفالة — خاصة بالإطارات</h3>
+    <ol class="terms-list-tyre"></ol>
+  </div>
+
+  <div class="sign">
+    <div class="box"><b>البائع — التوقيع وختم المحل</b><span>أصدرها: رامي التميمي</span></div>
+    <div class="box"><b>الزبون — استلمت الإطارات وقرأت الشروط</b><span>التوقيع: ……………………</span></div>
+  </div>
+  <div class="foot"><span>بطاقة واحدة لهذا المنتج على هذه الفاتورة.</span><span>هذه البطاقة لا تُغني عن الفاتورة.</span></div>
+</section>
+
+<!-- ═════════════ ٤ · ورقة إحالة إلى وكيل المصنع ═════════════ -->
+<section class="sheet" id="v4">
+  <div class="head">
+    <div class="org">
+      <div class="logo">ن</div>
+      <div>
+        <p class="org-name">مؤسسة النور للإلكترونيات</p>
+        <p class="org-sub">أجهزة خلوية وإكسسوارات</p>
+        <p class="org-line">رام الله — شارع الإرسال، عمارة 12 · هاتف <span class="ltr">02-2951234</span></p>
+      </div>
+    </div>
+    <div class="docid">
+      <p class="doc-kind">ورقة إحالة</p>
+      <p class="doc-no"><span>إلى مركز خدمة المصنع</span></p>
+      <p class="doc-no"><span>بتاريخ</span> <b>02/11/2027</b></p>
+    </div>
+  </div>
+
+  <div class="to-box keep">
+    <p class="t">إلى</p>
+    <p class="n">الشركة المتحدة للإلكترونيات — مركز خدمة Samsung</p>
+    <p>البيرة، شارع القدس، مجمّع الريحان · <span class="ltr">02-2987700</span></p>
+  </div>
+
+  <div class="device-box keep">
+    <div>
+      <p class="dname"><bdi dir="ltr">Samsung Galaxy A55 — 128GB</bdi> — أزرق</p>
+      <span class="sn"><span class="ltr"><b>IMEI</b> 356789104422187</span></span>
+      <p class="org-line" style="margin-top:1.5mm">بيع من محلّنا بالفاتورة <span class="ltr">INV-2026-01043</span> بتاريخ 27/09/2026 · بطاقة <span class="ltr">#4812</span></p>
+    </div>
+    <div><span class="qrslot" data-size="25"></span><span class="qrcap">امسح للتحقق من كفالة المصنع</span></div>
+  </div>
+
+  <div class="layers keep">
+    <div class="lrow">
+      <div class="k">كفالة المصنع</div>
+      <div class="v"><span class="dates">سارية حتى 27/09/2028</span> · بدأت 27/09/2026</div>
+    </div>
+  </div>
+
+  <div class="facts keep" style="grid-template-columns:1fr">
+    <div><span>صاحب الجهاز</span><strong>أحمد خليل</strong></div>
+  </div>
+
+  <div class="notice keep">هذه <b>إحالة لا استلام</b>: المحل لم يستلم الجهاز ولم يفتحه. الجهاز بيد صاحبه، ويخدمه مركز المصنع وفق شروطه.</div>
+
+  <div class="sign">
+    <div class="box"><b>المحل — التوقيع والختم</b><span>أحالته: سامي عودة</span></div>
+    <div class="box"><b>مركز الخدمة — استلام</b><span>التاريخ والتوقيع: ……………………</span></div>
+  </div>
+  <div class="foot"><span>ورقة إحالة — ليست أمر صيانة ولا شهادة كفالة.</span><span>تُعرض على مركز الخدمة مع الجهاز.</span></div>
+</section>
+
+<script>
+/* ── رمز QR وهمي: ثلاثة مربعات تموضع + نقاط ثابتة. الحقيقي من segno في الخادم. ── */
+function fakeQR(mm, seed){
+  const n = 33, s = [], rnd = (i)=>{ const x = Math.sin(i*9301+seed*49297)*233280; return x-Math.floor(x); };
+  const finder = (x,y)=>`<rect x="${x}" y="${y}" width="7" height="7" fill="#000"/><rect x="${x+1}" y="${y+1}" width="5" height="5" fill="#fff"/><rect x="${x+2}" y="${y+2}" width="3" height="3" fill="#000"/>`;
+  for(let y=0;y<n;y++) for(let x=0;x<n;x++){
+    const inF = (x<8&&y<8)||(x>n-9&&y<8)||(x<8&&y>n-9);
+    if(!inF && rnd(y*n+x)>.52) s.push(`<rect x="${x}" y="${y}" width="1" height="1"/>`);
+  }
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="-2 -2 ${n+4} ${n+4}" width="${mm}mm" height="${mm}mm" shape-rendering="crispEdges" role="img" aria-label="رمز QR وهمي"><rect x="-2" y="-2" width="${n+4}" height="${n+4}" fill="#fff"/>${finder(0,0)}${finder(n-7,0)}${finder(0,n-7)}<g fill="#000">${s.join("")}</g></svg>`;
+}
+
+const DEVICES = [
+  {name:"Samsung Galaxy A55 — 128GB", snK:"IMEI", sn:"356789104422187",
+   dealer:{to:"27/09/2027", m:12}, mfr:{to:"27/09/2028", m:24, ref:1}},
+  {name:"Apple iPhone 15 — 128GB", snK:"S/N", sn:"F2LXK9P3QW", void:true,
+   dealer:{to:"27/03/2027", m:6}, mfr:null},
+  {name:"Xiaomi Redmi Note 13", snK:"IMEI", sn:"861234056789012",
+   dealer:{to:"27/09/2027", m:12}, mfr:{to:"27/09/2027", m:12, ref:2, from:"05/10/2026"}},
+];
+const EXTRA = [
+  {name:"Samsung Galaxy Tab A9", snK:"S/N", sn:"R9XT20B7KQM", dealer:{to:"27/09/2027", m:12}, mfr:{to:"27/09/2028", m:24, ref:1}},
+  {name:"Samsung Galaxy Buds FE", snK:"S/N", sn:"RFAW81C2D0P", dealer:{to:"27/03/2027", m:6}, mfr:{to:"27/09/2027", m:12, ref:1}},
+  {name:"Xiaomi Smart Band 8", snK:"S/N", sn:"53112/F4K0921", dealer:{to:"27/03/2027", m:6}, mfr:null},
+  {name:"Apple AirPods Pro 2", snK:"S/N", sn:"GX7PQ2M0LK4N", dealer:{to:"27/09/2027", m:12}, mfr:null},
+];
+const mo = m => m <= 10 ? `${m} أشهر` : `${m} شهراً`;
+function rowHTML(d,i){
+  const mfr = d.mfr
+    ? `<span class="to">${d.mfr.to}</span><span class="ref">${d.mfr.ref}</span><span class="from">${mo(d.mfr.m)}${d.mfr.from?` · من ${d.mfr.from}`:""}</span>`
+    : `<span class="none">لا يوجد</span>`;
+  const voidStamp = d.void ? `<span class="stamp void-only">ملغاة 14/01/2027<small>سوائل أو رطوبة</small></span>` : "";
+  const dealer = `<span class="${d.void?"hide-when-void":""}"><span class="to">${d.dealer.to}</span><span class="from">${mo(d.dealer.m)}</span></span>${voidStamp}`;
+  return `<tr><td class="n">${i+1}</td>
+    <td><bdi class="dev" dir="ltr">${d.name}</bdi><span class="sn"><span class="ltr"><b>${d.snK}</b> ${d.sn}</span></span></td>
+    <td class="layer">${dealer}</td><td class="layer">${mfr}</td>
+    <td class="qr">${fakeQR(14, i+3)}</td></tr>`;
+}
+function renderRows(){
+  const long = document.body.classList.contains("long-terms");
+  const list = long ? DEVICES.concat(EXTRA) : DEVICES;
+  document.getElementById("v1-rows").innerHTML = list.map(rowHTML).join("");
+  document.getElementById("v1-count").textContent = list.length;
+}
+
+const TERMS = [
+  "تسري الكفالة على عيوب الصناعة وحدها، بإصلاح الجهاز أو استبدال القطعة المعيبة، ولا تشمل استرداد الثمن.",
+  "تُلغى كفالة التاجر عند: الكسر أو الصدمة، السوائل أو الرطوبة، فتح الجهاز أو إصلاحه خارج مركزنا، العبث بالرقم التسلسلي أو الملصق.",
+  "لا تشمل الكفالة: الشاشة المكسورة، الإكسسوارات، البطارية بعد 6 أشهر، البرامج والبيانات.",
+  "المحل غير مسؤول عن البيانات المخزّنة؛ احفظ نسخة قبل التسليم للصيانة.",
+  "مدة الإصلاح لا تتجاوز 14 يوم عمل، ونبلغك بالهاتف عند الجاهزية.",
+  "كفالة المصنع يخدمها الوكيل المذكور وفق شروطه، والمحل يحيلك إليه.",
+  "تُعرض هذه الشهادة أو الفاتورة عند كل مطالبة.",
+];
+const LONG = [
+  "الجهاز المستبدل تحت الكفالة يكمل المدة المتبقية من كفالة الجهاز الأصلي ولا يبدأ مدة جديدة.",
+  "القطع المستبدلة تصير ملكاً للمحل.",
+  "الأعطال الناتجة عن شاحن غير أصلي أو تيار كهربائي غير مستقر لا تشملها الكفالة.",
+  "لا تشمل الكفالة الأضرار التجميلية كالخدوش وتغيّر اللون الناتج عن الاستعمال.",
+  "الجهاز الذي لا يُستلم خلال 90 يوماً من إبلاغ الزبون بجاهزيته يسقط حق المطالبة به وفق القانون.",
+  "في حال تعذّر الإصلاح يُستبدل الجهاز بجهاز مماثل أو أعلى بعد موافقة الزبون.",
+  "يلتزم الزبون بتسليم الجهاز مع ملحقاته الأصلية عند طلب الاستبدال.",
+  "الكفالة شخصية لصاحب هذه الشهادة، ولا تنتقل بالبيع إلا بشهادة جديدة من المحل.",
+  "أي تعديل يدوي على هذه الشهادة يُبطلها.",
+];
+const TYRE = [
+  "تشمل كفالة التاجر التركيب والموازنة وعيوب الصناعة الظاهرة خلال المدة.",
+  "لا تشمل: الثقوب، القطع الجانبي، التآكل غير المنتظم الناتج عن ضبط الزوايا، القيادة بضغط هواء غير صحيح.",
+  "تُحسب كفالة المصنع حسب عمق النقشة المتبقي، ويقدّرها الوكيل.",
+  "أحضر الإطار مع هذه البطاقة أو الفاتورة إلى المحل أو الوكيل المذكور.",
+];
+function renderTerms(){
+  const long = document.body.classList.contains("long-terms");
+  const items = TERMS.concat(long ? LONG : []);
+  document.querySelectorAll(".terms-list").forEach(ol => ol.innerHTML = items.map(t=>`<li>${t}</li>`).join(""));
+  document.querySelectorAll(".terms-list-tyre").forEach(ol => ol.innerHTML = TYRE.concat(long ? LONG.slice(0,6) : []).map(t=>`<li>${t}</li>`).join(""));
+}
+
+const NOTES = {
+  v1:"<b>شهادة الفاتورة:</b> سطر لكل بطاقة حيّة على الفاتورة، وفي كل سطر طبقتان ورمز QR خاص بالجهاز (16mm). الجهات تُطبع مرة واحدة في «أين تُخدم» برقم مرجعي، و«لا يوجد» مطبوعة صراحةً. فعّل «شروط طويلة» ثم اطبع: السطور تنكسر بين الصفحات مع تكرار رأس الجدول، ويخرج التوقيع كتلة واحدة في آخر صفحة.",
+  v2:"<b>بطاقة جهاز مفرد:</b> سطرا الطبقتين إطار واحد، ورمز QR كبير (25mm). فعّل «ختم ملغاة»: الختم على كفالة التاجر وحدها بتاريخه وسببه، وكفالة المصنع لا تُمس (#214، #218). البطاقة المنتهية (مرتجع، أو فاتورة أُلغي ترحيلها) لا تُطبع أصلاً (#221).",
+  v3:"<b>كفالة على الفاتورة:</b> بطاقة لكل (فاتورة، منتج) بالكمية (#224). مكان الرقم التسلسلي «الكمية المكفولة 4». الورقة تطبع الكمية الأصلية، والكمية الحالية بعد أي مرتجع تظهر على صفحة التحقق.",
+  v4:"<b>ورقة الإحالة (#214 §5، ومحتواها من #220 §7):</b> ابنة القالب الأساس نفسه. تحمل طبقة المصنع وحدها والجهة حيّاً، واسم الزبون دون هاتفه، ولا تذكر كفالة التاجر ولا سبب إلغائها (#218) ولا السعر ولا المورّد. لا يُفتح بها أمر صيانة.",
+};
+function show(v){
+  document.querySelectorAll(".sheet").forEach(s => s.classList.toggle("active", s.id===v));
+  document.querySelectorAll("[data-v]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.v===v)));
+  document.getElementById("note").innerHTML = NOTES[v];
+  document.title = {v1:"شهادة كفالة — INV-2026-01043", v2:"بطاقة كفالة #4812", v3:"بطاقة كفالة #4830", v4:"ورقة إحالة — #4812"}[v];
+  document.getElementById("pagehead").textContent =
+    `@page{ @top-center{ content:"تابع — ${document.title}"; font-size:7.5pt; color:#64748b } } @page :first{ @top-center{ content:none } }`;
+}
+document.querySelectorAll("[data-v]").forEach(b => b.addEventListener("click", ()=>show(b.dataset.v)));
+document.getElementById("t-void").addEventListener("change", e => document.body.classList.toggle("show-void", e.target.checked));
+document.getElementById("t-long").addEventListener("change", e => { document.body.classList.toggle("long-terms", e.target.checked); renderTerms(); renderRows(); });
+const rp = ()=> document.querySelectorAll(".rp").forEach(el => el.style.display = document.getElementById("t-reprint").checked ? "inline-block" : "none");
+document.getElementById("t-reprint").addEventListener("change", rp);
+document.querySelectorAll(".qrslot").forEach((el,i) => el.innerHTML = fakeQR(Number(el.dataset.size), 20+i));
+/* رابط مباشر لحالة: #v2,void,long,reprint */
+const H = location.hash.slice(1).split(",");
+if (H.includes("void")) { document.getElementById("t-void").checked = true; document.body.classList.add("show-void"); }
+if (H.includes("long")) { document.getElementById("t-long").checked = true; document.body.classList.add("long-terms"); }
+if (H.includes("reprint")) document.getElementById("t-reprint").checked = true;
+renderTerms(); renderRows(); rp(); show(["v1","v2","v3","v4"].includes(H[0]) ? H[0] : "v1");
+</script>
+</body>
+</html>
