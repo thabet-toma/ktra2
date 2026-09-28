@@ -14,7 +14,7 @@ from django.utils import timezone
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import ValidationError
+from rest_framework.exceptions import NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -43,6 +43,7 @@ from .serializers import (
     WarrantyCardEventSerializer,
     WarrantyCardSerializer,
     WarrantyExtendSerializer,
+    PurchaseLinePolicySerializer,
     WarrantyPolicyBulkSerializer,
     WarrantyPolicySerializer,
 )
@@ -367,6 +368,9 @@ class WarrantyPolicyViewSet(viewsets.ModelViewSet):
         self.tenant = require_module(request, MODULE_KEY)
         if self.action in ("list", "retrieve"):
             require_perm(request, PERM_VIEW, tenant=self.tenant)
+        elif self.action == "for_products":
+            if not user_has_perm(request.user, self.tenant, PURCHASE_INVOICE_EDIT_PERM):
+                require_perm(request, PERM_VIEW, tenant=self.tenant)
         else:
             require_perm(request, PERM_SETTINGS_MANAGE, tenant=self.tenant)
 
@@ -393,6 +397,38 @@ class WarrantyPolicyViewSet(viewsets.ModelViewSet):
                 tenant_id=self.tenant.pk, category_id=int(category_id),
             ))
         return queryset
+
+    def _last_purchase_context(self, policies):
+        from .services import latest_purchase_line_warranties
+
+        return {
+            **self.get_serializer_context(),
+            "last_purchase_map": latest_purchase_line_warranties(
+                self.tenant.pk, [policy.product_id for policy in policies],
+            ),
+        }
+
+    def list(self, request, *args, **kwargs):
+        queryset = self.filter_queryset(self.get_queryset())
+        page = self.paginate_queryset(queryset)
+        rows = list(page) if page is not None else list(queryset)
+        serializer = WarrantyPolicySerializer(
+            rows, many=True, context=self._last_purchase_context(rows),
+        )
+        if page is not None:
+            return self.get_paginated_response(serializer.data)
+        return Response(serializer.data)
+
+    @action(detail=False, methods=["get"], url_path="for-products")
+    def for_products(self, request):
+        """سياسات منتجات فاتورة الشراء دفعةً واحدة (`?products=1,2,3`) — يقرؤها
+        محرّر الفاتورة (`purchase.invoice.edit`) ولو لم يملك `aftersales.warranty.view`."""
+        raw = (request.query_params.get("products") or "").split(",")
+        product_ids = {int(value) for value in (part.strip() for part in raw) if value.isdigit()}
+        queryset = WarrantyPolicy.objects.filter(
+            tenant=self.tenant, product_id__in=product_ids,
+        ).order_by("product_id")
+        return Response(PurchaseLinePolicySerializer(queryset, many=True).data)
 
     def _validate_tenant_links(self, serializer):
         for field in ("product", "manufacturer_warrantor"):
@@ -487,7 +523,9 @@ class WarrantyPolicyViewSet(viewsets.ModelViewSet):
 
         return Response({
             "applied": len(saved),
-            "policies": WarrantyPolicySerializer(saved, many=True).data,
+            "policies": WarrantyPolicySerializer(
+                saved, many=True, context=self._last_purchase_context(saved),
+            ).data,
         })
 
     @action(detail=False, methods=["get"], url_path="serial-impact")
@@ -564,6 +602,63 @@ class AfterSalesSettingsView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
         return Response(serializer.data)
+
+
+class PurchaseLineWarrantyView(APIView):
+    """تصحيح كفالة المصنع على أسطر فاتورة شراء **مرحَّلة** دفعةً واحدة (#235).
+
+    الفاتورة المسودّة تُحفظ كفالتها مع الفاتورة نفسها عبر `core.hooks`؛ هذا
+    المسار لما بعد الترحيل. لا يمسّ بطاقةً صدرت: التصحيح يسري على الوحدات التي
+    ستُباع بعده — البطاقة الصادرة سجلٌّ لما وُعد به العميل يومها.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+
+    def patch(self, request):
+        from logistics.models import PurchaseInvoice
+
+        from .services import purchase_line_label, save_purchase_line_warranty
+
+        tenant = require_module(request, MODULE_KEY)
+        require_perm(request, PERM_MANAGE, tenant=tenant)
+
+        body = request.data if isinstance(request.data, dict) else {}
+        try:
+            invoice_id = int(body.get("invoice"))
+        except (TypeError, ValueError):
+            raise ValidationError({"invoice": "الفاتورة مطلوبة."})
+        lines = body.get("lines")
+        if not isinstance(lines, list) or not lines:
+            raise ValidationError({"lines": "أرسل سطراً واحداً على الأقل."})
+
+        invoice = (
+            PurchaseInvoice.objects.filter(tenant=tenant, pk=invoice_id).first()
+        )
+        if invoice is None:
+            raise NotFound()
+        if not invoice.is_posted:
+            raise ValidationError(
+                {"invoice": "الفاتورة غير مرحّلة — تُعدَّل كفالة أسطرها مع الفاتورة نفسها."}
+            )
+
+        items = {item.pk: item for item in invoice.items.all()}
+        with transaction.atomic():
+            for line in lines:
+                line = line if isinstance(line, dict) else {}
+                try:
+                    item = items.get(int(line.get("item")))
+                except (TypeError, ValueError):
+                    item = None
+                if item is None:
+                    raise ValidationError({"lines": "سطرٌ لا ينتمي لهذه الفاتورة."})
+                try:
+                    save_purchase_line_warranty(
+                        tenant.pk, item, line, request.user, purchase_line_label(item),
+                    )
+                except DjangoValidationError as error:
+                    _reraise_as_drf(error)
+        return Response({"invoice": invoice.pk, "updated": len(lines)})
 
 
 # ══════════════════════════════════════════════════════════════════════════

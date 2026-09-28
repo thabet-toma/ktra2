@@ -1,5 +1,6 @@
 import { DealStatus, DealStatusHistoryEntry, DealActivity } from './deal';
 import type { ImportPaymentBreakdown } from "../utils/importPayment";
+import type { PurchaseLineWarrantyValue } from "../utils/warranty";
 
 /** سطر ضمن «بند الضرائب والرسوم» على فاتورة الشيكل */
 export interface TaxesAndFeesLine {
@@ -87,6 +88,8 @@ export interface InvoiceItem {
     landedLineTotalIls?: number;
     /** T-SERIAL: أرقام وحدات هذا البند — تُجسَّد في المخزن عند الاستلام. */
     serials?: string[];
+    /** #235: كفالة المصنع على السطر — غيابها = السياسة (لا صفّ على الخادم). */
+    manufacturerWarranty?: PurchaseLineWarrantyValue;
 }
 
 /** مصدر استيراد الفاتورة من تخليص + شحنة (نفس منطق ربط الصفقات بالشحنة) */

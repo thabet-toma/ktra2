@@ -162,3 +162,92 @@ export function serialImpactConfirmationLines(input: {
     });
   return lines;
 }
+
+/* ── كفالة المصنع على سطر الشراء (#235) ─────────────────────────────────────
+ * قيمةٌ تُملأ مسبقاً من سياسة المنتج ويعدّلها المستخدم على السطر. لا صفّ على
+ * الخادم = السياسة؛ صفٌّ بجهةٍ فارغة = «لا يوجد» صريحة. */
+
+/** أقصى مدة كفالة بالأشهر يقبلها الخادم (`LINE_WARRANTY_MAX_MONTHS`). */
+export const LINE_WARRANTY_MAX_MONTHS = 600;
+
+export interface PurchaseLineWarrantyValue {
+  manufacturer_warrantor: number | null;
+  manufacturer_months: number;
+  supplier_months: number | null;
+}
+
+export interface PurchaseLineWarrantyPolicy {
+  manufacturer_warrantor: number | null;
+  manufacturer_months: number;
+  supplier_months: number;
+}
+
+/** كفالة المورّد في الصفقة بالسنوات ← أشهر (واجهةٌ فقط؛ الخادم لا يقرأ الصفقة). */
+export function dealWarrantyYearsToMonths(years: unknown): number {
+  const value = Number(years);
+  if (!Number.isFinite(value) || value <= 0) return 0;
+  return Math.round(value * 12);
+}
+
+/**
+ * القيمة الابتدائية للسطر: طبقة المصنع من السياسة، وكفالة المورّد من الصفقة
+ * إن حملت مدّةً (فاتورة الاستيراد) وإلا من السياسة.
+ */
+export function purchaseLineWarrantyFromPolicy(
+  policy: PurchaseLineWarrantyPolicy,
+  dealWarrantyYears?: unknown,
+): PurchaseLineWarrantyValue {
+  const dealMonths = dealWarrantyYearsToMonths(dealWarrantyYears);
+  return {
+    manufacturer_warrantor: policy.manufacturer_warrantor,
+    manufacturer_months: policy.manufacturer_months,
+    supplier_months: dealMonths > 0 ? dealMonths : policy.supplier_months,
+  };
+}
+
+/** وسم «يختلف عن السياسة» — طبقة المصنع وحدها؛ كفالة المورّد ثانوية ولا تُوسَم. */
+export function purchaseLineWarrantyDiffers(
+  value: PurchaseLineWarrantyValue,
+  policy: PurchaseLineWarrantyPolicy,
+): boolean {
+  return (
+    value.manufacturer_warrantor !== policy.manufacturer_warrantor ||
+    value.manufacturer_months !== policy.manufacturer_months
+  );
+}
+
+/** الحمولة المرسلة: أعداد صحيحة، وكفالة المورّد الفارغة `null`. */
+export function purchaseLineWarrantyPayload(
+  value: PurchaseLineWarrantyValue,
+): PurchaseLineWarrantyValue {
+  const supplier = value.supplier_months;
+  return {
+    manufacturer_warrantor: value.manufacturer_warrantor,
+    manufacturer_months: Math.trunc(Number(value.manufacturer_months) || 0),
+    supplier_months:
+      supplier === null || supplier === undefined || Number.isNaN(Number(supplier))
+        ? null
+        : Math.trunc(Number(supplier)),
+  };
+}
+
+/** فحصٌ مبكّر يطابق الخادم — يردّ رسالةً عربيةً أو `null` إن صحّ السطر. */
+export function purchaseLineWarrantyProblem(value: PurchaseLineWarrantyValue): string | null {
+  const payload = purchaseLineWarrantyPayload(value);
+  if (payload.manufacturer_months < 0 || payload.manufacturer_months > LINE_WARRANTY_MAX_MONTHS) {
+    return `مدة كفالة المصنع بين 0 و${formatNumber(LINE_WARRANTY_MAX_MONTHS)} شهراً.`;
+  }
+  if (
+    payload.supplier_months !== null &&
+    (payload.supplier_months < 0 || payload.supplier_months > LINE_WARRANTY_MAX_MONTHS)
+  ) {
+    return `مدة كفالة المورّد بين 0 و${formatNumber(LINE_WARRANTY_MAX_MONTHS)} شهراً.`;
+  }
+  if (payload.manufacturer_warrantor === null && payload.manufacturer_months > 0) {
+    return "بلا جهة كفالة مصنع، مدتها يجب أن تكون صفراً.";
+  }
+  if (payload.manufacturer_warrantor !== null && payload.manufacturer_months === 0) {
+    return "اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر، أو أزل الجهة.";
+  }
+  return null;
+}

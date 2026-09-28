@@ -113,12 +113,12 @@ export const TermsAndShippingSection: React.FC<TermsProps> = ({
             </div>
             <div className="space-y-1">
               <label className="text-[10px] text-[var(--color-text-muted)] flex items-center gap-1">
-                <Shield className="w-3 h-3" /> الضمان (سنة)
+                <Shield className="w-3 h-3" /> كفالة المورّد (سنة)
               </label>
               <input
                 type="number"
                 min="0"
-                step="0.5"
+                step="1"
                 value={data.warrantyDuration || ''}
                 onChange={e => updateField('warrantyDuration', parseFloat(e.target.value))}
                 disabled={readOnly}

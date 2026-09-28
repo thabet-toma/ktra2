@@ -29,6 +29,8 @@ from core.modules import module_enabled
 
 from .models import (
     AfterSalesSettings,
+    ManufacturerWarrantor,
+    PurchaseLineWarranty,
     WarrantyCard,
     WarrantyCardEvent,
     WarrantyPolicy,
@@ -222,6 +224,9 @@ def _policy_manufacturer_layer(policy, invoice_date) -> dict:
     """طبقة المصنع من السياسة وحدها — خطوة (٣) في `_resolve_manufacturer_layer`،
     وهي أيضاً المصدر **الوحيد** لبطاقة الفاتورة (#234): لا وحدة واحدة تحمل
     بطاقةً سابقة تُنسَخ منها (خطوة ١)، فلا معنى لخطوتَي الوحدة هناك أصلاً.
+
+    تقبل أيَّ كائنٍ بحقلَي `manufacturer_warrantor_id`/`manufacturer_months`؛
+    فصفّ سطر الشراء (خطوة ٢) يمرّ من الدالة نفسها بلا نسخةٍ ثانية من المنطق.
     """
     if policy is not None and policy.manufacturer_warrantor_id:
         return {
@@ -251,14 +256,30 @@ def _resolve_manufacturer_layer(
          حُذفت — بيعها لم يقع أصلاً) أو `invoice_unposted` (بيعها معلَّقٌ،
          غير نافذ الآن): تُتجاوَزان إلى بطاقةٍ أقدم مؤهَّلة لنفس الوحدة، لا
          إلى فراغ — الجهاز نفسه قد يحمل تاريخاً أصدق خلفهما.
-      2. **سطر شراء الوحدة** (`PurchaseLineWarranty`) — لم يُبنَ بعد (#235)؛
-         هذا هو السَّم الذي يُدخِل خطوته بين (١) و(٣) حين يُبنى، بلا لمس
-         الدالتين الأخريين.
+      2. **سطر شراء الوحدة** (`PurchaseLineWarranty` على `unit.purchase_item`،
+         #235) — استعلامٌ واحد للدفعة. الصفّ حاضرٌ ⇒ هو الجواب حتى لو جهته
+         فارغة (صراحةً «لا يوجد» ولو كانت السياسة تذكر جهة)، وبدايته تاريخ
+         فاتورة البيع كالسياسة. وصفٌّ غائب (سطرٌ من تخليص أو أمرٍ أو نسخٍ أو
+         مرتجع، أو الشراء قبل #235) ⇒ الخطوة التالية.
       3. **السياسة نفسها** (`manufacturer_warrantor`/`manufacturer_months`)،
          ببداية تاريخ الفاتورة — وحدها إن غابت الجهة («لا يوجد») أو لم تبقَ
          بطاقةٌ سابقة مؤهَّلة.
+
+    ويحمل كلُّ ناتجٍ مفتاحاً إضافياً `supplier_months`: مدة كفالة المورّد
+    لهذه الوحدة (`supplier_months` السطر إن ذُكرت، وإلا السياسة). تُحلّ من
+    الاستعلام نفسه بصرف النظر عن مصدر طبقة المصنع — فالنسخ من بطاقةٍ سابقة
+    يخصّ المصنع وحده، وطرف المورّد يُحتسب دائماً من شراء هذه الوحدة.
     """
     unit_ids = [u.pk for u in units]
+    item_ids = [u.purchase_item_id for u in units if u.purchase_item_id]
+    line_rows = {}
+    if item_ids:
+        line_rows = {
+            row.purchase_item_id: row
+            for row in PurchaseLineWarranty.objects.filter(
+                tenant_id=tenant_id, purchase_item_id__in=item_ids,
+            )
+        }
     previous_by_unit = {}
     if unit_ids:
         for card in (
@@ -279,17 +300,25 @@ def _resolve_manufacturer_layer(
 
     layers = {}
     for unit in units:
+        policy = policies.get(unit.product_id)
+        line = line_rows.get(unit.purchase_item_id)
         previous = previous_by_unit.get(unit.pk)
         if previous is not None:
-            layers[unit.pk] = {
+            layer = {
                 "manufacturer_warrantor_id": previous.manufacturer_warrantor_id,
                 "manufacturer_start_date": previous.manufacturer_start_date,
                 "manufacturer_duration_months": previous.manufacturer_duration_months,
                 "manufacturer_end_date": previous.manufacturer_end_date,
             }
-            continue
-        policy = policies.get(unit.product_id)
-        layers[unit.pk] = _policy_manufacturer_layer(policy, invoice_date)
+        elif line is not None:
+            layer = _policy_manufacturer_layer(line, invoice_date)
+        else:
+            layer = _policy_manufacturer_layer(policy, invoice_date)
+        if line is not None and line.supplier_months is not None:
+            layer["supplier_months"] = line.supplier_months
+        else:
+            layer["supplier_months"] = policy.supplier_months if policy is not None else 0
+        layers[unit.pk] = layer
     return layers
 
 
@@ -446,9 +475,11 @@ def create_auto_warranty_cards(invoice) -> int:
         policy = policies.get(unit.product_id)
         if policy is None:
             continue
-        supplier_id, supplier_end = _supplier_side(unit, policy.supplier_months)
-        terms_text = policy.terms_override or settings_row.default_terms
         manufacturer_layer = manufacturer_layers.get(unit.pk, {})
+        supplier_id, supplier_end = _supplier_side(
+            unit, manufacturer_layer.get("supplier_months", policy.supplier_months),
+        )
+        terms_text = policy.terms_override or settings_row.default_terms
         created.append(WarrantyCard(
             tenant_id=invoice.tenant_id,
             product=unit.product,
@@ -864,3 +895,126 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
         "cards": summaries,
         "unit": unit_info,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# كفالة المصنع من سطر الشراء (#235)
+# ══════════════════════════════════════════════════════════════════════════
+
+LINE_WARRANTY_MAX_MONTHS = 600
+
+
+def _line_months(value, label: str, field_label: str, *, nullable: bool = False):
+    if value is None or value == "":
+        if nullable:
+            return None
+        return 0
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        raise ValidationError(f"{label}: {field_label} عددٌ صحيح من الأشهر.")
+    try:
+        months = int(value)
+    except ValueError:
+        raise ValidationError(f"{label}: {field_label} عددٌ صحيح من الأشهر.") from None
+    if not 0 <= months <= LINE_WARRANTY_MAX_MONTHS:
+        raise ValidationError(
+            f"{label}: {field_label} بين 0 و{LINE_WARRANTY_MAX_MONTHS} شهراً."
+        )
+    return months
+
+
+def clean_purchase_line_warranty(tenant_id: int, payload, label: str) -> dict:
+    """يتحقّق من كفالة سطر شراء ويعيدها منظَّفة — القاعدة نفسها لـ`WarrantyPolicySerializer`.
+
+    `label` اسم السطر («السطر 2») يتصدّر كل رسالة. الجهة تُقرأ بشركة الفاتورة وحدها
+    فجهةُ شركةٍ أخرى «غير موجودة»، والمؤرشفة تُرفض.
+    """
+    if not isinstance(payload, dict):
+        raise ValidationError(f"{label}: كفالة السطر غير صالحة.")
+    warrantor_id = payload.get("manufacturer_warrantor")
+    manufacturer = _line_months(payload.get("manufacturer_months"), label, "مدة كفالة المصنع")
+    supplier = _line_months(
+        payload.get("supplier_months"), label, "مدة كفالة المورّد", nullable=True,
+    )
+
+    warrantor = None
+    if warrantor_id not in (None, ""):
+        try:
+            warrantor = ManufacturerWarrantor.objects.filter(
+                tenant_id=tenant_id, pk=int(warrantor_id),
+            ).first()
+        except (TypeError, ValueError):
+            warrantor = None
+        if warrantor is None:
+            raise ValidationError(f"{label}: جهة كفالة المصنع غير موجودة.")
+        if not warrantor.is_active:
+            raise ValidationError(
+                f"{label}: جهة كفالة المصنع «{warrantor.name}» مؤرشفة — اختر جهةً فعّالة."
+            )
+
+    if warrantor is None and manufacturer:
+        raise ValidationError(f"{label}: بلا جهة كفالة مصنع، مدتها يجب أن تكون صفراً.")
+    if warrantor is not None and not manufacturer:
+        raise ValidationError(
+            f"{label}: اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر، أو أزل الجهة."
+        )
+    return {
+        "manufacturer_warrantor": warrantor,
+        "manufacturer_months": manufacturer,
+        "supplier_months": supplier,
+    }
+
+
+def save_purchase_line_warranty(tenant_id: int, item, payload, user, label: str):
+    """يتحقّق ثم يحفظ (upsert) كفالة سطر شراء — لا يمسّ بطاقةً صدرت."""
+    cleaned = clean_purchase_line_warranty(tenant_id, payload, label)
+    row, _ = PurchaseLineWarranty.objects.update_or_create(
+        purchase_item=item,
+        defaults={
+            "tenant_id": tenant_id,
+            "updated_by": user if getattr(user, "pk", None) else None,
+            **cleaned,
+        },
+    )
+    return row
+
+
+def purchase_line_label(item) -> str:
+    """«السطر N» — ترتيب البند بين بنود فاتورته."""
+    position = item.invoice.items.filter(pk__lte=item.pk).count()
+    return f"السطر {position}"
+
+
+def latest_purchase_line_warranties(tenant_id: int, product_ids) -> dict:
+    """`{product_id: آخر كفالة سطر}` من فواتير الشراء المرحَّلة — استعلامٌ واحد للصفحة.
+
+    «الأحدث» بتاريخ الفاتورة ثم رقم البند؛ المسودّة لا تُحسب شراءً بعد.
+    """
+    from django.db.models import F, Window
+    from django.db.models.functions import RowNumber
+
+    product_ids = list(product_ids)
+    if not product_ids:
+        return {}
+    rows = (
+        PurchaseLineWarranty.objects
+        .filter(
+            tenant_id=tenant_id,
+            purchase_item__product_id__in=product_ids,
+            purchase_item__invoice__is_posted=True,
+        )
+        .annotate(
+            product_id=F("purchase_item__product_id"),
+            invoice_date=F("purchase_item__invoice__invoice_date"),
+            invoice_number=F("purchase_item__invoice__invoice_number"),
+            recency=Window(
+                RowNumber(),
+                partition_by=[F("purchase_item__product_id")],
+                order_by=[
+                    F("purchase_item__invoice__invoice_date").desc(nulls_last=True),
+                    F("purchase_item_id").desc(),
+                ],
+            ),
+        )
+        .select_related("manufacturer_warrantor")
+    )
+    return {row.product_id: row for row in rows.filter(recency=1)}

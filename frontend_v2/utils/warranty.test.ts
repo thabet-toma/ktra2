@@ -2,9 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addWarrantyMonths,
+  dealWarrantyYearsToMonths,
   deriveWarrantyEnd,
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  purchaseLineWarrantyDiffers,
+  purchaseLineWarrantyFromPolicy,
+  purchaseLineWarrantyPayload,
+  purchaseLineWarrantyProblem,
   serialImpactConfirmationLines,
   serialImpactNeedsConfirmation,
   warrantyCoveredQuantityLabel,
@@ -127,4 +132,68 @@ test('#234 — warrantyCoveredQuantityLabel يكتب «الكمية المغطا
   assert.equal(warrantyCoveredQuantityLabel(4, 4), 'الكمية المغطاة 4 من 4');
   assert.equal(warrantyCoveredQuantityLabel(1, 4), 'الكمية المغطاة 1 من 4');
   assert.equal(warrantyCoveredQuantityLabel(0, 4), 'الكمية المغطاة 0 من 4');
+});
+
+// #235: كفالة المصنع على سطر الشراء.
+const LINE_POLICY = { manufacturer_warrantor: 7, manufacturer_months: 24, supplier_months: 6 };
+
+test('#235 — الصفقة بالسنوات تُحوَّل إلى أشهر، وغير الصالح صفر', () => {
+  assert.equal(dealWarrantyYearsToMonths(2), 24);
+  assert.equal(dealWarrantyYearsToMonths('1'), 12);
+  assert.equal(dealWarrantyYearsToMonths(0), 0);
+  assert.equal(dealWarrantyYearsToMonths(-1), 0);
+  assert.equal(dealWarrantyYearsToMonths(undefined), 0);
+  assert.equal(dealWarrantyYearsToMonths('abc'), 0);
+});
+
+test('#235 — القيمة الابتدائية من السياسة، وكفالة المورّد من الصفقة إن وُجدت', () => {
+  assert.deepEqual(purchaseLineWarrantyFromPolicy(LINE_POLICY), {
+    manufacturer_warrantor: 7,
+    manufacturer_months: 24,
+    supplier_months: 6,
+  });
+  assert.equal(purchaseLineWarrantyFromPolicy(LINE_POLICY, 2).supplier_months, 24);
+  // صفقة بلا مدة لا تصفّر كفالة المورّد التي في السياسة.
+  assert.equal(purchaseLineWarrantyFromPolicy(LINE_POLICY, 0).supplier_months, 6);
+});
+
+test('#235 — «يختلف عن السياسة» يقارن طبقة المصنع لا كفالة المورّد', () => {
+  const same = purchaseLineWarrantyFromPolicy(LINE_POLICY);
+  assert.equal(purchaseLineWarrantyDiffers(same, LINE_POLICY), false);
+  assert.equal(purchaseLineWarrantyDiffers({ ...same, supplier_months: 99 }, LINE_POLICY), false);
+  assert.equal(purchaseLineWarrantyDiffers({ ...same, manufacturer_months: 12 }, LINE_POLICY), true);
+  assert.equal(purchaseLineWarrantyDiffers({ ...same, manufacturer_warrantor: 8 }, LINE_POLICY), true);
+  assert.equal(
+    purchaseLineWarrantyDiffers({ ...same, manufacturer_warrantor: null, manufacturer_months: 0 }, LINE_POLICY),
+    true,
+  );
+});
+
+test('#235 — الحمولة أعدادٌ صحيحة وكفالة المورّد الفارغة null', () => {
+  assert.deepEqual(
+    purchaseLineWarrantyPayload({ manufacturer_warrantor: 7, manufacturer_months: 24.9, supplier_months: null }),
+    { manufacturer_warrantor: 7, manufacturer_months: 24, supplier_months: null },
+  );
+  assert.equal(
+    purchaseLineWarrantyPayload({ manufacturer_warrantor: null, manufacturer_months: 0, supplier_months: 6 })
+      .supplier_months,
+    6,
+  );
+});
+
+test('#235 — الفحص المبكّر يطابق قواعد الخادم', () => {
+  const ok = { manufacturer_warrantor: 7, manufacturer_months: 24, supplier_months: 6 };
+  assert.equal(purchaseLineWarrantyProblem(ok), null);
+  assert.equal(
+    purchaseLineWarrantyProblem({ manufacturer_warrantor: null, manufacturer_months: 0, supplier_months: null }),
+    null,
+  );
+  assert.match(
+    purchaseLineWarrantyProblem({ ...ok, manufacturer_warrantor: null }) ?? '',
+    /بلا جهة كفالة مصنع/,
+  );
+  assert.match(purchaseLineWarrantyProblem({ ...ok, manufacturer_months: 0 }) ?? '', /حدّد مدتها/);
+  assert.match(purchaseLineWarrantyProblem({ ...ok, manufacturer_months: 601 }) ?? '', /600/);
+  assert.match(purchaseLineWarrantyProblem({ ...ok, supplier_months: 601 }) ?? '', /المورّد/);
+  assert.equal(purchaseLineWarrantyProblem({ ...ok, manufacturer_months: 600 }), null);
 });

@@ -14,6 +14,8 @@ import {
   SalesProductPickerModal, type SalesProductPickerItem,
 } from "../sales/SalesProductPickerModal";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { formatDateValue } from "../../utils/formatDate";
+import { formatNumber } from "../../utils/formatNumber";
 import { serialImpactConfirmationLines, serialImpactNeedsConfirmation } from "../../utils/warranty";
 
 /**
@@ -87,6 +89,7 @@ export const WarrantyPolicyModal: React.FC<Props> = ({ policy, products, onClose
     setDraft((d) => ({ ...d, [key]: value }));
 
   const isService = pickedProduct?.is_service ?? false;
+  const lastPurchase = policy?.last_purchase ?? null;
 
   const save = async () => {
     if (!draft.product) {
@@ -188,6 +191,35 @@ export const WarrantyPolicyModal: React.FC<Props> = ({ policy, products, onClose
                 {pickedProduct
                   ? (pickedProduct.display_name || pickedProduct.name_ar || pickedProduct.sku)
                   : "اختر برانداً…"}
+              </button>
+            </div>
+          )}
+
+          {lastPurchase && (
+            <div className="flex flex-wrap items-center gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2.5 text-sm">
+              <div className="min-w-0 flex-1">
+                <div className="text-[11px] text-[var(--color-text-muted)]">
+                  آخر شراء — فاتورة {lastPurchase.invoice_number}
+                  {lastPurchase.invoice_date ? ` (${formatDateValue(lastPurchase.invoice_date)})` : ""}
+                </div>
+                <div className="text-[var(--color-text)]">
+                  {lastPurchase.manufacturer_warrantor_name || "لا يوجد جهة"}
+                  {" · "}المصنع {formatNumber(lastPurchase.manufacturer_months)} شهراً
+                  {lastPurchase.supplier_months !== null && (
+                    <>{" · "}المورّد {formatNumber(lastPurchase.supplier_months)} شهراً</>
+                  )}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  patch("manufacturer_warrantor", lastPurchase.manufacturer_warrantor);
+                  patch("manufacturer_months", lastPurchase.manufacturer_months);
+                  patch("supplier_months", lastPurchase.supplier_months ?? 0);
+                }}
+                className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-semibold text-[var(--color-primary)] hover:bg-[var(--color-surface)]"
+              >
+                اعتمدها
               </button>
             </div>
           )}

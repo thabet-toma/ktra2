@@ -21,6 +21,14 @@ export interface PurchaseInvoiceItemDto {
   expense_account_name?: string | null;
   /** T-SERIAL: أرقام وحدات البند (نيّة على البند؛ الوحدات تُنشأ عند الاستلام). */
   serials?: string[] | null;
+  /** #235: امتدادات الوحدات المرخَّصة على البند — تُقرأ بمفتاح الامتداد. */
+  extensions?: {
+    manufacturer_warranty?: {
+      manufacturer_warrantor: number | null;
+      manufacturer_months: number;
+      supplier_months: number | null;
+    };
+  } | null;
 }
 
 export type ReceiptStatus =

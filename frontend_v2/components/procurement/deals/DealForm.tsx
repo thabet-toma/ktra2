@@ -1240,8 +1240,8 @@ export const DealForm: React.FC<DealFormProps> = ({
                       <b>{formatQuantity(formData.totalWeightKg ?? formData.totalWeight ?? 0) || "—"}</b>
                     </div>
                     <div>
-                      <span className="block text-[11px] text-[var(--color-text-muted)]">الضمان</span>
-                      <b>{formData.warrantyDuration ? `${formData.warrantyDuration} شهر` : "—"}</b>
+                      <span className="block text-[11px] text-[var(--color-text-muted)]">كفالة المورّد</span>
+                      <b>{formData.warrantyDuration ? `${formatQuantity(formData.warrantyDuration)} سنة` : "—"}</b>
                     </div>
                     <div>
                       <span className="block text-[11px] text-[var(--color-text-muted)]">الشهادات</span>

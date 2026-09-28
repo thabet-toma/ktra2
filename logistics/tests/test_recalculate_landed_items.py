@@ -283,6 +283,48 @@ class RecalculateLandedItemsTest(APITestCase):
         assert (first.quantity, second.quantity) == (D("10"), D("4"))
         assert (first.serials, second.serials) == (["FIRST"], ["SECOND"])
 
+    # ── #235: كفالة سطر الشراء تنجو من إعادة الاحتساب ───────────────────────
+    def test_a_purchase_line_warranty_row_survives_a_landed_cost_recalculation(self):
+        from after_sales.models import ManufacturerWarrantor, PurchaseLineWarranty
+        from core.models import TenantModule
+
+        TenantModule.objects.create(tenant=self.tenant, module_key="after_sales", enabled=True)
+        warrantor = ManufacturerWarrantor.objects.create(tenant=self.tenant, name="جهة الكوابل")
+        cable = self._product("R-WARRANTY", serialized=True)
+        self._deal_item(cable, "2", "100")
+        assert self._import().status_code == 201
+        inv = self._invoice()
+        item = inv.items.get()
+        landed_before = item.landed_line_total_ils
+
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        row = detail["items"][0]
+        saved = self.client.patch(
+            f"/api/logistics/purchase-invoices/{inv.pk}/",
+            {"items": [{
+                "id": row["id"], "product": row["product"], "name": row["name"],
+                "quantity": row["quantity"], "unit_price": row["unit_price"],
+                "total_price": row["total_price"], "serials": ["W-1", "W-2"],
+                "extensions": {"manufacturer_warranty": {
+                    "manufacturer_warrantor": warrantor.pk,
+                    "manufacturer_months": 18, "supplier_months": 6,
+                }},
+            }]},
+            format="json", **self._auth())
+        assert saved.status_code == 200, saved.content
+        assert PurchaseLineWarranty.objects.get(purchase_item_id=item.id).manufacturer_months == 18
+
+        self._add_capitalized_local_transport()
+        assert self._recalculate().status_code == 200
+
+        item = inv.items.get()
+        assert item.landed_line_total_ils > landed_before, "إعادة الاحتساب جرت فعلاً"
+        kept = PurchaseLineWarranty.objects.get(purchase_item_id=item.id)
+        assert (kept.manufacturer_warrantor_id, kept.manufacturer_months, kept.supplier_months) == (
+            warrantor.pk, 18, 6)
+        assert PurchaseLineWarranty.objects.filter(tenant=self.tenant).count() == 1
+
     # ── أداة الكشف ─────────────────────────────────────────────────────────
     def _second_deal(self, product, qty, price):
         """صفقةٌ ثانية على الشحنة نفسها، مدفوعةٌ بالكامل فتقبل الاستيراد."""

@@ -733,3 +733,46 @@ class AfterSalesSettings(models.Model):
 
     def __str__(self):
         return f"إعدادات ما بعد البيع — {self.tenant_id}"
+
+
+class PurchaseLineWarranty(models.Model):
+    """كفالة المصنع كما وُعدت عند الشراء — صفٌّ اختياريٌّ لكل سطر فاتورة شراء (#235).
+
+    غياب الصفّ = «خذ من السياسة»؛ وجودُه بجهةٍ فارغة = «لا يوجد» صريحةً (يغلب
+    السياسةَ التي لها جهة). تقرؤه `_resolve_manufacturer_layer` عند البيع في
+    الخطوة الثانية (بعد بطاقةٍ سابقةٍ للوحدة، قبل السياسة). لا يُصنع إلا من شاشة
+    فاتورة الشراء (عبر امتداد السطر في `core.hooks`)؛ فبنودُ التخليص والأمر
+    والنسخة والمرتجع لا صفَّ لها. تصحيحه بعد الترحيل لا يمسّ بطاقةً صدرت.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="purchase_line_warranties",
+    )
+    purchase_item = models.OneToOneField(
+        "logistics.PurchaseInvoiceItem", on_delete=models.CASCADE,
+        related_name="line_warranty",
+    )
+    manufacturer_warrantor = models.ForeignKey(
+        ManufacturerWarrantor, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="purchase_line_warranties",
+    )
+    manufacturer_months = models.PositiveSmallIntegerField(
+        default=0, validators=[MaxValueValidator(600)],
+        help_text="مدة كفالة المصنع بالأشهر — أكبر من صفر إن وُجدت الجهة، وإلا صفر",
+    )
+    # الفارغ = خذ مدة كفالة المورّد من السياسة.
+    supplier_months = models.PositiveSmallIntegerField(
+        null=True, blank=True, validators=[MaxValueValidator(600)],
+        help_text="مدة كفالة المورّد بالأشهر لهذا السطر — الفارغ يأخذ من السياسة",
+    )
+    updated_by = models.ForeignKey(
+        "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="updated_purchase_line_warranties",
+    )
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "purchase_line_warranties"
+
+    def __str__(self):
+        return f"كفالة سطر شراء #{self.purchase_item_id}"

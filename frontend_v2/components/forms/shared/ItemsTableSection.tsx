@@ -80,9 +80,9 @@ const TermsAndShippingCard: React.FC<TermsProps> = ({ data, onUpdate, readOnly }
             </select>
           </div>
           <div className="space-y-1">
-            <label className="text-xs text-[var(--color-text-muted)]">ضمان (سنة)</label>
+            <label className="text-xs text-[var(--color-text-muted)]">كفالة المورّد (سنة)</label>
             <input
-              type="number" min="0" step="0.5"
+              type="number" min="0" step="1"
               value={data.warrantyDuration || ''}
               onChange={e => onUpdate('warrantyDuration', parseFloat(e.target.value))}
               disabled={readOnly}

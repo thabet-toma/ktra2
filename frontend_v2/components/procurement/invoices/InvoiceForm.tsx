@@ -83,6 +83,12 @@ import {
   NISInvoiceTaxStrip,
 } from "./sections";
 import { ItemsTableSection } from "@/components/forms/shared/ItemsTableSection";
+import { PurchaseLineWarrantyPanel } from "@/components/aftersales/PurchaseLineWarrantyPanel";
+import {
+  purchaseLineWarrantyPayload,
+  purchaseLineWarrantyProblem,
+  type PurchaseLineWarrantyValue,
+} from "@/utils/warranty";
 import { AttachmentsSection } from "@/components/forms/shared/AttachmentsSection";
 import { PurchaseInvoiceAccountingPanel } from "./PurchaseInvoiceAccountingPanel";
 import { askReceiveOnPost, receiveOnPostApplies } from "./receiveOnPostPrompt";
@@ -323,6 +329,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const markDirty = () => {
     dirtyRef.current = true;
   };
+  /** #235: يضبط كفالة المصنع على البنود بمعرّفها المحلي؛ التعبئة الابتدائية لا تُعلّم الفاتورة معدَّلة. */
+  const setLineWarranties = useCallback(
+    (values: Record<string, PurchaseLineWarrantyValue>, dirty: boolean) => {
+      setFormData((prev) => ({
+        ...prev,
+        items: (prev.items || []).map((line) =>
+          values[line.id] ? { ...line, manufacturerWarranty: values[line.id] } : line,
+        ),
+      }));
+      if (dirty) dirtyRef.current = true;
+    },
+    [],
+  );
+  const prefillLineWarranties = useCallback(
+    (values: Record<string, PurchaseLineWarrantyValue>) => setLineWarranties(values, false),
+    [setLineWarranties],
+  );
+  const changeLineWarranty = useCallback(
+    (itemId: string, value: PurchaseLineWarrantyValue) => setLineWarranties({ [itemId]: value }, true),
+    [setLineWarranties],
+  );
   /** بيانات الفاتورة والمورد — تُعرض من رأس الصفحة عند الضغط على «تفاصيل» */
   const [invoiceHeaderDetailsOpen, setInvoiceHeaderDetailsOpen] = useState(false);
   /** وصف الصفقة من SQL عند غيابه في الفاتورة المحمّلة */
@@ -702,6 +729,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       toast("الفاتورة نقدية — اختر صندوق التسوية بجوار علامة «نقدي».", "error");
       return;
     }
+    // #235: نقول خطأ كفالة المصنع قبل الرحلة — الخادم يرفض الفاتورة كلها بسببه.
+    for (const line of formData.items) {
+      const problem = line.manufacturerWarranty
+        ? purchaseLineWarrantyProblem(line.manufacturerWarranty)
+        : null;
+      if (problem) {
+        toast(`كفالة المصنع — ${line.name}: ${problem}`, "error");
+        return;
+      }
+    }
     /* A2-2: رقم فاتورة المورد المكرَّر تحذيرٌ يُتجاوَز لا منع (قرار المالك). تعذّرُ
        الفحص نفسه لا يوقف الحفظ — الفحص مساعدةٌ لا حارس. المراجيع تحمل رقم الأصل مشروعاً. */
     const supplierInvoiceNumber = String(formData.supplierInvoiceNumber || "").trim();
@@ -832,6 +869,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             // T-SERIAL: تُرسَل دائماً — الفارغة تمسح إدخالاً سابقاً بدل أن يبقى
             // معلّقاً على البند بلا ظهور في الشاشة.
             serials: Array.isArray(item.serials) ? item.serials : [],
+            // #235: كفالة المصنع تُرسَل فقط للبند الذي حملها (اللوحة تعبّئها من السياسة)؛
+            // البند بلا قيمة لا يحمل امتداداً فيبقى على السياسة.
+            ...(item.manufacturerWarranty
+              ? {
+                  extensions: {
+                    manufacturer_warranty: purchaseLineWarrantyPayload(item.manufacturerWarranty),
+                  },
+                }
+              : {}),
           })),
       };
 
@@ -2203,6 +2249,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           currency={formData.currency}
         />
       )}
+      <PurchaseLineWarrantyPanel
+        items={formData.items || []}
+        readOnly={effectiveReadOnly}
+        posted={Boolean(formData.isPosted)}
+        invoiceId={Number(formData.id) > 0 ? Number(formData.id) : undefined}
+        dealWarrantyYears={
+          formData.invoiceType === "international" ? formData.dealInfo?.warrantyDuration : undefined
+        }
+        onChange={changeLineWarranty}
+        onPrefill={prefillLineWarranties}
+      />
     </div>
   );
 

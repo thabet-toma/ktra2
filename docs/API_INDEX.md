@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **943**
+عدد النقاط: **945**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -155,6 +155,7 @@
 | `/api/after-sales/manufacturer-warrantors/` | `ManufacturerWarrantorViewSet` | `after_sales/views.py` |
 | `/api/after-sales/manufacturer-warrantors/lookup/` | `ManufacturerWarrantorViewSet` | `after_sales/views.py` |
 | `/api/after-sales/manufacturer-warrantors/{pk}/` | `ManufacturerWarrantorViewSet` | `after_sales/views.py` |
+| `/api/after-sales/purchase-line-warranties/` | `PurchaseLineWarrantyView` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/lookup/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/` | `ServiceOrderViewSet` | `after_sales/views.py` |
@@ -175,6 +176,7 @@
 | `/api/after-sales/warranties/{pk}/extend/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/bulk/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranty-policies/for-products/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/serial-impact/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/{pk}/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/agent/customers/` | `agent_customers` | `partners/agent_api.py` |

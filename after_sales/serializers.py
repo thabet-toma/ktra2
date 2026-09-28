@@ -292,6 +292,7 @@ class WarrantyPolicySerializer(serializers.ModelSerializer):
     method_label = serializers.CharField(source="get_method_display", read_only=True)
     product_name = serializers.SerializerMethodField()
     manufacturer_warrantor_name = serializers.SerializerMethodField()
+    last_purchase = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyPolicy
@@ -300,9 +301,30 @@ class WarrantyPolicySerializer(serializers.ModelSerializer):
             "dealer_months",
             "manufacturer_warrantor", "manufacturer_warrantor_name",
             "manufacturer_months", "supplier_months", "terms_override",
+            "last_purchase",
             "created_at", "updated_at",
         ]
         read_only_fields = ["created_at", "updated_at"]
+
+    def get_last_purchase(self, obj):
+        """آخر كفالة سطرٍ مرحَّل للمنتج (#235). الخريطة تُبنى مرةً للصفحة في
+        `WarrantyPolicyViewSet.list`؛ وبدونها (تفصيل/حفظ) استعلامٌ واحد للصفّ."""
+        lookup = self.context.get("last_purchase_map")
+        if lookup is None:
+            from .services import latest_purchase_line_warranties
+            lookup = latest_purchase_line_warranties(obj.tenant_id, [obj.product_id])
+        row = lookup.get(obj.product_id)
+        if row is None:
+            return None
+        warrantor = row.manufacturer_warrantor
+        return {
+            "manufacturer_warrantor": row.manufacturer_warrantor_id,
+            "manufacturer_warrantor_name": warrantor.name if warrantor else "",
+            "manufacturer_months": row.manufacturer_months,
+            "supplier_months": row.supplier_months,
+            "invoice_date": row.invoice_date,
+            "invoice_number": row.invoice_number,
+        }
 
     def get_product_name(self, obj):
         if not obj.product_id:
@@ -365,6 +387,19 @@ class WarrantyPolicySerializer(serializers.ModelSerializer):
                 "terms_override": f"شروط البراند البديلة لا تتجاوز {TERMS_MAX_LENGTH} حرفاً.",
             })
         return attrs
+
+
+class PurchaseLinePolicySerializer(serializers.ModelSerializer):
+    """ما يحتاجه محرّر فاتورة الشراء من سياسة المنتج (#235) — بلا «آخر شراء»
+    ولا الشروط: قراءةٌ خفيفة تُطلب دفعةً واحدة لكل منتجات الفاتورة."""
+
+    class Meta:
+        model = WarrantyPolicy
+        fields = [
+            "id", "product", "method",
+            "manufacturer_warrantor", "manufacturer_months", "supplier_months",
+        ]
+        read_only_fields = fields
 
 
 class WarrantyPolicyBulkSerializer(serializers.Serializer):

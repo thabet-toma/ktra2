@@ -4,6 +4,7 @@ from rest_framework.routers import SimpleRouter
 from after_sales.views import (
     AfterSalesSettingsView,
     ManufacturerWarrantorViewSet,
+    PurchaseLineWarrantyView,
     ServiceOrderViewSet,
     WarrantyCardViewSet,
     WarrantyPolicyViewSet,
@@ -23,4 +24,8 @@ router.register(r"warranty-policies", WarrantyPolicyViewSet, basename="warranty-
 # `SalesSettingsViewSet.current` بمسارٍ صريح بدل فعل قائمة/تفصيل يُخمَّن.
 urlpatterns = router.urls + [
     path("settings/", AfterSalesSettingsView.as_view(), name="after-sales-settings"),
+    path(
+        "purchase-line-warranties/", PurchaseLineWarrantyView.as_view(),
+        name="purchase-line-warranties",
+    ),
 ]

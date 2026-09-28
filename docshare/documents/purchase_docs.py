@@ -422,7 +422,7 @@ def build_logistics_deal(deal) -> dict:
             meta("الوزن", deal.total_weight or "", VALUE_QTY),
             meta("الشهادات", deal.certificates),
             meta(
-                "مدة الكفالة (شهر)",
+                "كفالة المورّد (سنة)",
                 deal.warranty_duration or "", VALUE_QTY,
             ),
             meta("العملة", DEAL_CURRENCY_CODE),

@@ -359,8 +359,19 @@ export interface WarrantyPolicyRow {
   manufacturer_months: number;
   supplier_months: number;
   terms_override: string;
+  /** آخر شراء مرحَّل لهذا المنتج بكفالةٍ على سطره (#235) — للتلميح فقط. */
+  last_purchase?: WarrantyPolicyLastPurchase | null;
   created_at: string;
   updated_at: string;
+}
+
+export interface WarrantyPolicyLastPurchase {
+  manufacturer_warrantor: number | null;
+  manufacturer_warrantor_name: string;
+  manufacturer_months: number;
+  supplier_months: number | null;
+  invoice_date: string | null;
+  invoice_number: string;
 }
 
 export interface WarrantyPolicyDraft {
@@ -402,6 +413,24 @@ export function listWarrantyPolicies(
   });
 }
 
+/** #235: ما يحتاجه محرّر فاتورة الشراء من سياسة المنتج — يقرؤه `purchase.invoice.edit`. */
+export interface PurchaseLinePolicyRow {
+  id: number;
+  product: number;
+  method: WarrantyPolicyRow["method"];
+  manufacturer_warrantor: number | null;
+  manufacturer_months: number;
+  supplier_months: number;
+}
+
+/** سياسات منتجات فاتورة الشراء بنداءٍ واحد (`warranty-policies/for-products/`). */
+export function listPurchaseLinePolicies(productIds: number[]): Promise<PurchaseLinePolicyRow[]> {
+  return apiGetList<PurchaseLinePolicyRow>(`${WARRANTY_POLICIES}for-products/`, {
+    ...tenantOpts(),
+    query: { products: productIds.join(",") },
+  });
+}
+
 export function createWarrantyPolicy(draft: WarrantyPolicyDraft): Promise<WarrantyPolicyRow> {
   return apiPostObject<WarrantyPolicyRow>(WARRANTY_POLICIES, draft, tenantOpts());
 }
@@ -421,6 +450,37 @@ export function bulkApplyWarrantyPolicy(
   input: WarrantyPolicyBulkInput,
 ): Promise<WarrantyPolicyBulkResult> {
   return apiPostObject<WarrantyPolicyBulkResult>(`${WARRANTY_POLICIES}bulk/`, input, tenantOpts());
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * كفالة المصنع على سطر الشراء (#235)
+ *
+ * فاتورةٌ في المسودة تحمل الكفالة مع بنودها (`extensions.manufacturer_warranty`
+ * في حمولة الفاتورة). المرحَّلة تُصحَّح بدفعةٍ واحدة هنا خلف
+ * `aftersales.warranty.manage` — ولا تمسّ بطاقةً صدرت.
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+const PURCHASE_LINE_WARRANTIES = "after-sales/purchase-line-warranties/";
+
+export interface PurchaseLineWarrantyPayload {
+  manufacturer_warrantor: number | null;
+  manufacturer_months: number;
+  supplier_months: number | null;
+}
+
+export interface PurchaseLineWarrantyPatchLine extends PurchaseLineWarrantyPayload {
+  item: number;
+}
+
+export function savePurchaseLineWarranties(
+  invoice: number,
+  lines: PurchaseLineWarrantyPatchLine[],
+): Promise<{ invoice: number; updated: number }> {
+  return apiPatchObject<{ invoice: number; updated: number }>(
+    PURCHASE_LINE_WARRANTIES,
+    { invoice, lines },
+    tenantOpts(),
+  );
 }
 
 /** معاينة قبل حفظ سياسة `serial` (#233) — البراندات الشقيقة غير المتتبَّعة

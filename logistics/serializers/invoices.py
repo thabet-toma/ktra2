@@ -173,11 +173,15 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     # T-RECVIS: الباقي على البند. `received_quantity` كان مكشوفاً وحده فتُركت
     # الطرحُ للواجهة — وطرحٌ في الواجهة نسخةٌ سادسة من القاعدة. الخادم يعطيه.
     remaining_quantity = serializers.SerializerMethodField()
+    # امتدادات السطر (#235): حمولةٌ للكتابة فقط تحت مفتاح كل امتداد مسجَّل في
+    # `core.hooks`؛ القراءة تُحقن في `PurchaseInvoiceSerializer.to_representation`
+    # بنداءٍ واحدٍ للفاتورة لا لكل بند.
+    extensions = serializers.DictField(required=False, write_only=True)
 
     class Meta:
         model = PurchaseInvoiceItem
         fields = [
-            'id', 'product', 'product_name', 'name',
+            'id', 'extensions', 'product', 'product_name', 'name',
             'quantity', 'received_quantity', 'remaining_quantity',
             'unit_price', 'total_price',
             'notes', 'hs_code',
@@ -732,8 +736,24 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             for c in obj.cheques.all()
         ]
 
+    @staticmethod
+    def _attach_item_extensions(instance, data):
+        from core.hooks import purchase_line_extension_reads
+
+        rows = data.get('items')
+        if not rows:
+            return
+        reads = purchase_line_extension_reads(instance.tenant_id, instance.items.all())
+        if not reads:
+            return
+        for row in rows:
+            payload = reads.get(row.get('id'))
+            if payload:
+                row['extensions'] = payload
+
     def to_representation(self, instance):
         data = super().to_representation(instance)
+        self._attach_item_extensions(instance, data)
         if getattr(instance, 'is_posted', False):
             return data
         try:
@@ -892,22 +912,35 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         fee_data['amount'] = amount
         return fee_data
 
+    def _write_item_extensions(self, invoice, item, extensions):
+        """يمرّر امتدادات السطر إلى كتّابها المسجَّلين — داخل معاملة الحفظ."""
+        from core.hooks import write_purchase_line_extensions
+
+        request = self.context.get('request')
+        write_purchase_line_extensions(
+            invoice.tenant_id, item, extensions, getattr(request, 'user', None),
+        )
+
     def create(self, validated_data):
         items_data = validated_data.pop('items', [])
         fees_data = validated_data.pop('fees', [])
-        invoice = PurchaseInvoice.objects.create(**validated_data)
-        for item_data in items_data:
-            # معرّفٌ في حمولة إنشاء لا معنى له (بندٌ من فاتورة أخرى أو مفتاح
-            # مفروض) — يُسقَط بدل أن يُكتب pk بعينه.
-            PurchaseInvoiceItem.objects.create(
-                invoice=invoice, **{k: v for k, v in item_data.items() if k != 'id'},
-            )
-        for fee_data in fees_data:
-            fee_data = self._normalize_fee_amount(invoice, fee_data)
-            fee_data = self._bind_import_expense_account(invoice, fee_data)
-            PurchaseInvoiceFee.objects.create(
-                invoice=invoice, tenant=invoice.tenant, **fee_data,
-            )
+        # كلٌّ لا يتجزّأ: خطأ تحقّقٍ في امتداد سطرٍ يُسقط الفاتورة لا يتركها ناقصة.
+        with transaction.atomic():
+            invoice = PurchaseInvoice.objects.create(**validated_data)
+            for item_data in items_data:
+                item_data = dict(item_data)
+                extensions = item_data.pop('extensions', None)
+                # معرّفٌ في حمولة إنشاء لا معنى له (بندٌ من فاتورة أخرى أو مفتاح
+                # مفروض) — يُسقَط بدل أن يُكتب pk بعينه.
+                item_data.pop('id', None)
+                item = PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
+                self._write_item_extensions(invoice, item, extensions)
+            for fee_data in fees_data:
+                fee_data = self._normalize_fee_amount(invoice, fee_data)
+                fee_data = self._bind_import_expense_account(invoice, fee_data)
+                PurchaseInvoiceFee.objects.create(
+                    invoice=invoice, tenant=invoice.tenant, **fee_data,
+                )
         if fees_data:
             logger.info('purchase invoice fees created invoice=%s count=%s', invoice.pk, len(fees_data))
         return invoice
@@ -983,6 +1016,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         for raw in items_data:
             data = dict(raw)
             item_id = data.pop('id', None)
+            extensions = data.pop('extensions', None)
             if item_id is not None:
                 item_id = int(item_id)
                 if item_id not in existing:
@@ -995,42 +1029,48 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                         {'detail': f'البند {item_id} مكرَّر في الحمولة.'},
                     )
                 kept_ids.add(item_id)
-            normalized.append((item_id, data))
+            normalized.append((item_id, data, extensions))
 
-        self._guard_received_items(instance, existing, normalized, kept_ids)
+        self._guard_received_items(
+            instance, existing, [(i, d) for i, d, _ in normalized], kept_ids,
+        )
 
         # المزامنة كلٌّ لا يتجزّأ: فشلٌ في المنتصف كان يترك فاتورةً نصف مُعدَّلة.
         with transaction.atomic():
-            for item_id, data in normalized:
-                if item_id is None:
-                    PurchaseInvoiceItem.objects.create(invoice=instance, **data)
-                    continue
-                item = existing[item_id]
-                for attr, value in data.items():
-                    setattr(item, attr, value)
-                item.save()
+            # الحذف قبل الكتابة: «السطر N» في رسائل امتدادات السطر يُعدّ البنود الباقية.
             for item_id, item in existing.items():
                 if item_id not in kept_ids:
                     item.delete()
+            for item_id, data, extensions in normalized:
+                if item_id is None:
+                    item = PurchaseInvoiceItem.objects.create(invoice=instance, **data)
+                else:
+                    item = existing[item_id]
+                    for attr, value in data.items():
+                        setattr(item, attr, value)
+                    item.save()
+                self._write_item_extensions(instance, item, extensions)
 
     def update(self, instance, validated_data):
         items_data = validated_data.pop('items', None)
         fees_data = validated_data.pop('fees', None)
-        for attr, value in validated_data.items():
-            setattr(instance, attr, value)
-        instance.save()
+        # خطأ امتدادٍ في سطرٍ يُسقط التعديل كلَّه — رأس الفاتورة والرسوم معه.
+        with transaction.atomic():
+            for attr, value in validated_data.items():
+                setattr(instance, attr, value)
+            instance.save()
 
-        if items_data is not None:
-            self._sync_items(instance, items_data)
+            if items_data is not None:
+                self._sync_items(instance, items_data)
 
-        if fees_data is not None:
-            instance.fees.all().delete()
-            for fee_data in fees_data:
-                fee_data = self._normalize_fee_amount(instance, fee_data)
-                fee_data = self._bind_import_expense_account(instance, fee_data)
-                PurchaseInvoiceFee.objects.create(
-                    invoice=instance, tenant=instance.tenant, **fee_data,
-                )
-            logger.info('purchase invoice fees replaced invoice=%s count=%s', instance.pk, len(fees_data))
+            if fees_data is not None:
+                instance.fees.all().delete()
+                for fee_data in fees_data:
+                    fee_data = self._normalize_fee_amount(instance, fee_data)
+                    fee_data = self._bind_import_expense_account(instance, fee_data)
+                    PurchaseInvoiceFee.objects.create(
+                        invoice=instance, tenant=instance.tenant, **fee_data,
+                    )
+                logger.info('purchase invoice fees replaced invoice=%s count=%s', instance.pk, len(fees_data))
 
         return instance

@@ -39,6 +39,7 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
         : undefined,
       // T-SERIAL: الأرقام تعود مع البند فتبقى ظاهرة بعد الحفظ وإعادة الفتح.
       serials: Array.isArray(item.serials) ? item.serials.map(String) : [],
+      manufacturerWarranty: item.extensions?.manufacturer_warranty ?? undefined,
     })),
     status: dto.status as Invoice["status"],
     subtotal: dto.subtotal,
