@@ -20,6 +20,7 @@ import { formatNumber } from "../../utils/formatNumber";
 import {
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  warrantyCoveredQuantityLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
 } from "../../utils/warranty";
@@ -328,6 +329,13 @@ export const WarrantyCardsScreen: React.FC = () => {
                     {row.sales_invoice_number && (
                       <div className="text-[11px] text-[var(--color-text-muted)]">
                         فاتورة {row.sales_invoice_number}
+                      </div>
+                    )}
+                    {/* #234: بطاقة «كفالة على الفاتورة» بلا رقم تسلسلي — الكمية
+                        المغطاة بدل رقمٍ لا وجود له. */}
+                    {!row.serial && row.quantity > 0 && (
+                      <div className="text-[11px] text-[var(--color-text-muted)]">
+                        {warrantyCoveredQuantityLabel(row.covered_quantity, row.quantity)}
                       </div>
                     )}
                   </td>

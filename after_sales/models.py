@@ -179,6 +179,18 @@ class WarrantyCard(models.Model):
     manufacturer_duration_months = models.PositiveSmallIntegerField(default=0)
     manufacturer_end_date = models.DateField(null=True, blank=True)
 
+    # ── بطاقة «كفالة على الفاتورة» (#234) ──────────────────────────────────
+    # بلا رقم تسلسلي (`product_serial` فارغ): بطاقةٌ واحدة لكل (فاتورة، منتج)
+    # بالكمية، لا لكل وحدة. صفرٌ على بطاقة وحدة مُرقَّمة — لا معنى له هناك.
+    # التغطية `quantity − returned_quantity` **محسوبة لا مخزَّنة**
+    # (`covered_quantity` أسفله)، والمرتجع الجزئي ينقص منها بحدثٍ جزئي
+    # (`WarrantyCardEvent.quantity`) دون أن يُنهي البطاقة إلا حين تبلغ صفراً.
+    # `PositiveIntegerField` لا `Small` (#234-review): كميةُ فاتورةٍ واحدة قد
+    # تتجاوز 32767 (بضاعة بالجملة)، والحقل عددٌ صحيح دائماً — الترحيل يرفض
+    # كسراً لمنتج `method=invoice` بدل أن يقصّه (`create_auto_warranty_cards`).
+    quantity = models.PositiveIntegerField(default=0)
+    returned_quantity = models.PositiveIntegerField(default=0)
+
     # ── واقعة الانتهاء (#222) ─────────────────────────────────────────────
     ended_on = models.DateField(
         null=True, blank=True,
@@ -270,6 +282,11 @@ class WarrantyCard(models.Model):
             return None
         return (self.manufacturer_end_date - (today or timezone.localdate())).days
 
+    @property
+    def covered_quantity(self) -> int:
+        """بطاقة الفاتورة: ما تبقّى مكفولاً — بحدٍّ أدنى صفر، لا يُخزَّن أبداً (#234)."""
+        return max(0, self.quantity - self.returned_quantity)
+
 
 class WarrantyCardEvent(models.Model):
     """سجل إلحاقي واحد لكل ما يحدث للبطاقة — لا تحديث ولا حذف (#229).
@@ -333,9 +350,9 @@ class WarrantyCardEvent(models.Model):
     # للتمديد بنوعيه (مجاملة/أيام صيانة) — واقعتا قبل/بعد في حدثٍ واحد.
     old_end_date = models.DateField(null=True, blank=True)
     new_end_date = models.DateField(null=True, blank=True)
-    # كمية الحدث الجزئي — لمرتجع بطاقة الفاتورة (`quantity`/`returned_quantity`
-    # على البطاقة نفسها لم يُضافا بعد؛ هذا العمود ينتظرهما بلا استعمال اليوم).
-    quantity = models.PositiveSmallIntegerField(null=True, blank=True)
+    # كمية الحدث الجزئي — لمرتجع بطاقة الفاتورة. `PositiveIntegerField` لا
+    # `Small` (#234-review): يطابق نوع `WarrantyCard.quantity` الذي يصفه.
+    quantity = models.PositiveIntegerField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

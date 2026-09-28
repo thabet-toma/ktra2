@@ -112,6 +112,15 @@ export function manufacturerWarrantyRemainingText(
 }
 
 /**
+ * #234 — «الكمية المغطاة N من Q» لبطاقة «كفالة على الفاتورة» (بلا رقم
+ * تسلسلي، كالإطارات): التغطية محسوبةٌ في الخادم (`quantity − returned_quantity`)
+ * ولا تُعاد هنا — هذه واجهة عرضٍ فقط، مرآة `WarrantyCard.covered_quantity`.
+ */
+export function warrantyCoveredQuantityLabel(coveredQuantity: number, quantity: number): string {
+  return `الكمية المغطاة ${formatNumber(coveredQuantity)} من ${formatNumber(quantity)}`;
+}
+
+/**
  * #233 — معاينة أثر سياسة كفالة `serial` قبل الحفظ (قصّتا المالك 6 و7):
  * البراندات الشقيقة التي سيرتفع تتبّعها معها (مزامنة العائلة)، وعدد الوحدات
  * غير المرقَّمة الآن لكل منتج معنيّ — تصل جاهزةً من `GET

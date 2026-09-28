@@ -7,6 +7,7 @@ import {
   manufacturerWarrantyStatusLabel,
   serialImpactConfirmationLines,
   serialImpactNeedsConfirmation,
+  warrantyCoveredQuantityLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
 } from './warranty.ts';
@@ -119,4 +120,11 @@ test('#233 — بلا إخوة وبلا رصيدٍ لأي منتج، لا سطو
     }),
     [],
   );
+});
+
+// #234: بطاقة «كفالة على الفاتورة» — الكمية المغطاة N من Q، بلا رقم تسلسلي.
+test('#234 — warrantyCoveredQuantityLabel يكتب «الكمية المغطاة N من Q»', () => {
+  assert.equal(warrantyCoveredQuantityLabel(4, 4), 'الكمية المغطاة 4 من 4');
+  assert.equal(warrantyCoveredQuantityLabel(1, 4), 'الكمية المغطاة 1 من 4');
+  assert.equal(warrantyCoveredQuantityLabel(0, 4), 'الكمية المغطاة 0 من 4');
 });

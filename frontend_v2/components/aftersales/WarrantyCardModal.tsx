@@ -15,6 +15,7 @@ import {
   deriveWarrantyEnd,
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  warrantyCoveredQuantityLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
 } from "../../utils/warranty";
@@ -418,6 +419,13 @@ export const WarrantyCardModal: React.FC<Props> = ({
             {card && (
               <span className={warrantyPillClass(card.status, card.days_remaining)}>
                 {warrantyStatusLabel(card.status)}
+              </span>
+            )}
+            {/* #234: بطاقة «كفالة على الفاتورة» بلا رقم تسلسلي — الكمية المغطاة
+                بدل رقمٍ لا وجود له. */}
+            {card && !card.serial && card.quantity > 0 && (
+              <span className="shrink-0 text-[11px] text-[var(--color-text-muted)]">
+                {warrantyCoveredQuantityLabel(card.covered_quantity, card.quantity)}
               </span>
             )}
           </div>

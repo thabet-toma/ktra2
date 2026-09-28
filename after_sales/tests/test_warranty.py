@@ -267,14 +267,33 @@ class AutoWarrantyLifecycleTest(WarrantyTestBase):
 
         self.assertEqual(self.cards(serial="SN-C1").count(), 1)
 
-    def test_non_serialized_line_gets_no_automatic_card(self):
+    def test_non_serialized_line_with_an_invoice_policy_gets_a_quantity_card(self):
+        """#234: قبل هذه التذكرة لم تكن توجد بطاقة إطلاقاً لمنتج `method=invoice`
+        (كإطارٍ بلا رقم تسلسلي) — الآن بطاقة كميةٍ واحدة بلا وحدة مُرقَّمة، عوض
+        الاعتقاد القديم بأن غير المتسلسل لا بطاقة له مطلقاً (`self.plain` هنا
+        سياسته `METHOD_INVOICE` منذ `WarrantyTestBase.setUp`)."""
         invoice = self.sales_invoice(product=self.plain, qty="5")
         # بضاعة للمنتج غير المتسلسل كي يمرّ خصم المخزون.
         Product.objects.filter(pk=self.plain.pk).update(
             quantity_on_hand=Decimal("10"), avg_cost=Decimal("5"),
         )
 
-        self.assertEqual(self.post_sale(invoice).status_code, 200, )
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
+
+        card = self.cards(product=self.plain).get()
+        self.assertIsNone(card.product_serial_id)
+        self.assertEqual(card.serial, "")
+        self.assertEqual(card.quantity, 5)
+        self.assertEqual(card.covered_quantity, 5)
+
+    def test_non_serialized_line_without_any_policy_gets_no_card(self):
+        WarrantyPolicy.objects.filter(product=self.plain).delete()
+        invoice = self.sales_invoice(product=self.plain, qty="5")
+        Product.objects.filter(pk=self.plain.pk).update(
+            quantity_on_hand=Decimal("10"), avg_cost=Decimal("5"),
+        )
+
+        self.assertEqual(self.post_sale(invoice).status_code, 200)
 
         self.assertEqual(self.cards().count(), 0)
 

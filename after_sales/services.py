@@ -11,7 +11,8 @@
 - `create_auto_warranty_cards` — ترحيل البيع: يُحيي المعلَّق ثم يُنشئ الناقص.
 - `on_sale_unposted` — إلغاء الترحيل: تعليقٌ بـ`invoice_unposted`.
 - `on_sale_cancelled` — حذف المسودّة: المعلَّق يصير `sale_cancelled` بلا رجعة.
-- `on_sales_return_posted` — مرجع البيع: الوحدات المرتجعة وحدها تُنهى بـ`returned`.
+- `on_sales_return_posted` — مرجع البيع: الوحدات المرتجعة وحدها تُنهى بـ`returned`
+  (وبطاقة الفاتورة #234 تُنقَص كميتها المكفولة بدل واقعة انتهاءٍ مباشرة).
 - `on_sales_return_unposted` — إلغاء ترحيل المرجع: إحياءُ ما أنهاه.
 
 **صفر أثر على شركة غير مرخّصة:** كلّها تخرج فوراً إن لم تكن الوحدة مرخّصة، فلا
@@ -20,7 +21,8 @@
 import logging
 from datetime import date, timedelta
 
-from django.db.models import Q
+from django.core.exceptions import ValidationError
+from django.db.models import Q, Sum
 from django.utils import timezone
 
 from core.modules import module_enabled
@@ -157,6 +159,37 @@ def _revive(card, invoice, unit, customer) -> str:
     return REVIVED if reviving else KEPT
 
 
+def _revive_invoice_card(card, invoice, customer, quantity: int) -> str:
+    """يُحيي بطاقة «كفالة على الفاتورة» معلَّقة — بنفس الـ`id`، مطابقةً على
+    `(sales_invoice, product)` لا على وحدة (بطاقة الفاتورة بلا `product_serial`).
+
+    **الكمية تُعاد حسابها دائماً** من بنود الفاتورة الحالية — بند عُدِّل بين
+    الإلغاء وإعادة الترحيل يجب أن ينعكس على البطاقة. `returned_quantity` لا
+    تُمَسّ هنا: مرجعُ بيعٍ أنقص منها واقعةٌ مستقلة عن تعليق هذه الفاتورة وإحيائها.
+
+    المنتهية بمرجعٍ (`END_RETURNED`) لا تُحيا هنا أبداً — نفس قاعدة `_revive`.
+    """
+    fields = ["quantity", "partner", "customer_name", "customer_phone"]
+    reviving = card.ended_on is not None
+    if reviving:
+        if card.end_reason not in (
+            WarrantyCard.END_INVOICE_UNPOSTED, WarrantyCard.END_SALE_CANCELLED,
+        ):
+            return REFUSED
+        card.ended_on = None
+        card.end_reason = ""
+        fields += ["ended_on", "end_reason"]
+
+    card.quantity = quantity
+    card.partner_id = invoice.customer_id
+    card.customer_name = (customer.name if customer else "")[:150]
+    card.customer_phone = (
+        (getattr(customer, "phone", "") or "")[:32] if customer else ""
+    )
+    card.save(update_fields=fields + ["updated_at"])
+    return REVIVED if reviving else KEPT
+
+
 def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
     """شفاءٌ ذاتي: بطاقةٌ تلقائية حيّة لهذه الوحدة على فاتورةٍ **أخرى** تُنهى.
 
@@ -183,6 +216,26 @@ def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
             invoice.pk, invoice.tenant_id, ended,
         )
     return ended
+
+
+def _policy_manufacturer_layer(policy, invoice_date) -> dict:
+    """طبقة المصنع من السياسة وحدها — خطوة (٣) في `_resolve_manufacturer_layer`،
+    وهي أيضاً المصدر **الوحيد** لبطاقة الفاتورة (#234): لا وحدة واحدة تحمل
+    بطاقةً سابقة تُنسَخ منها (خطوة ١)، فلا معنى لخطوتَي الوحدة هناك أصلاً.
+    """
+    if policy is not None and policy.manufacturer_warrantor_id:
+        return {
+            "manufacturer_warrantor_id": policy.manufacturer_warrantor_id,
+            "manufacturer_start_date": invoice_date,
+            "manufacturer_duration_months": policy.manufacturer_months,
+            "manufacturer_end_date": add_months(invoice_date, policy.manufacturer_months),
+        }
+    return {
+        "manufacturer_warrantor_id": None,
+        "manufacturer_start_date": None,
+        "manufacturer_duration_months": 0,
+        "manufacturer_end_date": None,
+    }
 
 
 def _resolve_manufacturer_layer(
@@ -236,20 +289,7 @@ def _resolve_manufacturer_layer(
             }
             continue
         policy = policies.get(unit.product_id)
-        if policy is not None and policy.manufacturer_warrantor_id:
-            layers[unit.pk] = {
-                "manufacturer_warrantor_id": policy.manufacturer_warrantor_id,
-                "manufacturer_start_date": invoice_date,
-                "manufacturer_duration_months": policy.manufacturer_months,
-                "manufacturer_end_date": add_months(invoice_date, policy.manufacturer_months),
-            }
-        else:
-            layers[unit.pk] = {
-                "manufacturer_warrantor_id": None,
-                "manufacturer_start_date": None,
-                "manufacturer_duration_months": 0,
-                "manufacturer_end_date": None,
-            }
+        layers[unit.pk] = _policy_manufacturer_layer(policy, invoice_date)
     return layers
 
 
@@ -259,8 +299,10 @@ def create_auto_warranty_cards(invoice) -> int:
     البداية = **تاريخ الفاتورة** لا تاريخ الترحيل ولا التسليم: تاريخ المستند هو
     ما تُقيَّد به الدفاتر كلها، وحالة التسليم مشتقّة وقد تغيب أصلاً.
 
-    غير المتسلسل لا بطاقة تلقائية له: كمية بلا هوية وحدة تجعل البطاقة بلا معنى،
-    والتغطية تُفحص عندها من فاتورة الزبون لحظة الاستقبال.
+    غير المتسلسل بسياسة `serial` لا بطاقة تلقائية له: كمية بلا هوية وحدة تجعل
+    البطاقة بلا معنى، والتغطية تُفحص عندها من فاتورة الزبون لحظة الاستقبال.
+    أما `method=invoice` (#234) فبطاقة كمية واحدة **لكل (فاتورة، منتج)** —
+    بلا `product_serial`، ومطابقتها عند الإحياء على المنتج لا على وحدة.
 
     **المطابقة على `(sales_invoice, product_serial)` لا على البند**: تعديل
     المسودّة بين الإلغاء وإعادة الترحيل يحذف البنود التي تُرسَل بلا `id`، فتبقى
@@ -296,6 +338,7 @@ def create_auto_warranty_cards(invoice) -> int:
     }
     revived = 0
     carried = set()
+    carried_card_ids = set()
     for unit in units:
         card = existing.get(unit.pk)
         if card is None:
@@ -306,12 +349,67 @@ def create_auto_warranty_cards(invoice) -> int:
         if outcome == REVIVED:
             revived += 1
         carried.add(unit.pk)
+        carried_card_ids.add(card.pk)
+
+    # #234: بطاقات «كفالة على الفاتورة» — تُحيا هي أيضاً هنا، بمطابقة المنتج
+    # لا وحدة (بلا `product_serial` أصلاً). كمية كل منتج = مجموع بنوده الحالية.
+    line_qty_by_product = {}
+    for line in invoice.lines.all():
+        line_qty_by_product[line.product_id] = (
+            line_qty_by_product.get(line.product_id, 0) + line.quantity
+        )
+    invoice_policies = {}
+    if line_qty_by_product:
+        invoice_policies = {
+            policy.product_id: policy
+            for policy in WarrantyPolicy.objects.filter(
+                tenant_id=invoice.tenant_id,
+                product_id__in=list(line_qty_by_product),
+                method=WarrantyPolicy.METHOD_INVOICE,
+            ).select_related("product")
+        }
+    # #234-review (٣): الحقل عددٌ صحيح دائماً — `int()` كان يقصّ كسر منتجٍ
+    # بيع بكميةٍ كسرية (كيلوغرامات مثلاً) صامتاً فتكذب البطاقة على كميتها.
+    # يُرفَض الترحيل بوضوح بدل ذلك، لا لكل بند بل لمجموع بنود المنتج نفسه.
+    for product_id, policy in invoice_policies.items():
+        total = line_qty_by_product[product_id]
+        if total % 1 != 0:
+            raise ValidationError(
+                f"المنتج «{product_display_name(policy.product)}»: كفالة الفاتورة "
+                f"تتطلب كميةً صحيحة، وهذا المنتج بكمية {total} على الفاتورة."
+            )
+    line_qty_by_product = {
+        product_id: int(total) for product_id, total in line_qty_by_product.items()
+    }
+    # #234-review (١ب): الإحياء يطابق **بطاقةً موجودة لهذا المنتج على هذه
+    # الفاتورة** بصرف النظر عن سياسته الحالية — سياسةٌ عُدِّلت أو حُذفت بعد
+    # البيع لا تُسقط بطاقةً صُرفت أيام كانت `invoice`. السياسة الحالية
+    # (`invoice_policies` أعلاه) تقرّر وحدها إنشاء بطاقةٍ **جديدة** أسفله
+    # (`new_invoice_products`)، لا إحياء القائم.
+    existing_invoice_cards = {
+        card.product_id: card
+        for card in _invoice_cards(invoice).filter(
+            product_serial__isnull=True, product_id__in=list(line_qty_by_product),
+        )
+    }
+    invoice_revived = 0
+    carried_products = set()
+    for product_id, card in existing_invoice_cards.items():
+        outcome = _revive_invoice_card(
+            card, invoice, customer, line_qty_by_product[product_id],
+        )
+        if outcome == REFUSED:
+            continue  # منتهيةٌ بمرجعٍ — واقعتها أصدق، ومنتجها يأخذ بطاقةً جديدة
+        if outcome == REVIVED:
+            invoice_revived += 1
+        carried_products.add(product_id)
+        carried_card_ids.add(card.pk)
 
     # ٢) ما بقي معلَّقاً على هذه الفاتورة لم يعد له بيعٌ يحمله.
     cancelled = (
         _invoice_cards(invoice)
         .filter(end_reason=WarrantyCard.END_INVOICE_UNPOSTED)
-        .exclude(product_serial_id__in=list(carried))
+        .exclude(pk__in=carried_card_ids)
         .update(end_reason=WarrantyCard.END_SALE_CANCELLED)
     )
 
@@ -329,8 +427,12 @@ def create_auto_warranty_cards(invoice) -> int:
             product_id__in={u.product_id for u in fresh},
         )
     }
+    # #234: منتجات «الفاتورة» الجديدة — من طُلبت بطاقتها ولم تُحيَ (منتجٌ لم
+    # يكن له صفّ، أو صفّه انتهى بمرجعٍ فلا يُحيا).
+    new_invoice_products = set(invoice_policies) - carried_products
     settings_row = (
-        get_or_create_after_sales_settings(invoice.tenant_id) if policies else None
+        get_or_create_after_sales_settings(invoice.tenant_id)
+        if (policies or new_invoice_products) else None
     )
     # #232: طبقة المصنع لكل الوحدات الجديدة معاً — استعلامٌ واحد للدفعة، لا
     # واحد لكل وحدة (`_resolve_manufacturer_layer`).
@@ -376,13 +478,41 @@ def create_auto_warranty_cards(invoice) -> int:
             manufacturer_end_date=manufacturer_layer.get("manufacturer_end_date"),
         ))
 
+    # #234: بطاقات فاتورة جديدة — منتجٌ عليه سياسة `invoice` لم تُحيَ بطاقته.
+    for product_id in new_invoice_products:
+        policy = invoice_policies[product_id]
+        manufacturer_layer = _policy_manufacturer_layer(policy, invoice.invoice_date)
+        terms_text = policy.terms_override or settings_row.default_terms
+        created.append(WarrantyCard(
+            tenant_id=invoice.tenant_id,
+            product_id=product_id,
+            device_name=product_display_name(policy.product)[
+                :WarrantyCard._meta.get_field('device_name').max_length
+            ],
+            sales_invoice=invoice,
+            partner_id=invoice.customer_id,
+            customer_name=(customer.name if customer else "")[:150],
+            customer_phone=(getattr(customer, "phone", "") or "")[:32] if customer else "",
+            start_date=invoice.invoice_date,
+            duration_months=policy.dealer_months,
+            end_date=add_months(invoice.invoice_date, policy.dealer_months),
+            source=WarrantyCard.SOURCE_AUTO_SALE,
+            quantity=line_qty_by_product[product_id],
+            terms_text=terms_text,
+            manufacturer_warrantor_id=manufacturer_layer["manufacturer_warrantor_id"],
+            manufacturer_start_date=manufacturer_layer["manufacturer_start_date"],
+            manufacturer_duration_months=manufacturer_layer["manufacturer_duration_months"],
+            manufacturer_end_date=manufacturer_layer["manufacturer_end_date"],
+        ))
+
     if created:
         WarrantyCard.objects.bulk_create(created)
-    if created or revived or cancelled:
+    total_revived = revived + invoice_revived
+    if created or total_revived or cancelled:
         logger.info(
             "after_sales.warranty_cards_synced invoice=%s tenant=%s "
             "created=%d revived=%d cancelled=%d",
-            invoice.pk, invoice.tenant_id, len(created), revived, cancelled,
+            invoice.pk, invoice.tenant_id, len(created), total_revived, cancelled,
         )
     return len(created)
 
@@ -434,6 +564,11 @@ def on_sales_return_posted(return_invoice) -> int:
 
     مرجعٌ بلا فاتورة أصلية لا وحدة تُستعاد فيه، فلا بطاقة تُمسّ — سلوك المخزون
     نفسه.
+
+    **بطاقات «كفالة على الفاتورة» (#234)** تُمسّ هنا أيضاً — لا بواقعة انتهاءٍ
+    مباشرة كالوحدة المُرقَّمة، بل بزيادة `returned_quantity` بقدر الكمية
+    المُرجَعة من كل منتج؛ البطاقة لا تُنهى `returned` إلا حين تبلغ الكمية
+    المُرجَعة كامل كمية البطاقة (`_apply_invoice_card_return`).
     """
     from inventory.models import ProductSerial
 
@@ -451,34 +586,35 @@ def on_sales_return_posted(return_invoice) -> int:
         )
         .values_list("pk", "return_line_id")
     )
-    if not return_line_by_unit:
-        return 0
+    cards = []
+    if return_line_by_unit:
+        cards = list(
+            WarrantyCard.objects
+            .filter(
+                tenant_id=return_invoice.tenant_id,
+                product_serial_id__in=list(return_line_by_unit),
+                ended_on__isnull=True,
+            )
+            .filter(
+                Q(sales_invoice_id=original_id)
+                | Q(sales_invoice_line__invoice_id=original_id)
+            )
+        )
+        for card in cards:
+            card.ended_on = return_invoice.invoice_date
+            card.end_reason = WarrantyCard.END_RETURNED
+            card.end_return_line_id = return_line_by_unit[card.product_serial_id]
+            card.save(update_fields=[
+                "ended_on", "end_reason", "end_return_line", "updated_at",
+            ])
+        if cards:
+            logger.info(
+                "after_sales.warranty_cards_returned return=%s original=%s tenant=%s cards=%d",
+                return_invoice.pk, original_id, return_invoice.tenant_id, len(cards),
+            )
 
-    cards = list(
-        WarrantyCard.objects
-        .filter(
-            tenant_id=return_invoice.tenant_id,
-            product_serial_id__in=list(return_line_by_unit),
-            ended_on__isnull=True,
-        )
-        .filter(
-            Q(sales_invoice_id=original_id)
-            | Q(sales_invoice_line__invoice_id=original_id)
-        )
-    )
-    for card in cards:
-        card.ended_on = return_invoice.invoice_date
-        card.end_reason = WarrantyCard.END_RETURNED
-        card.end_return_line_id = return_line_by_unit[card.product_serial_id]
-        card.save(update_fields=[
-            "ended_on", "end_reason", "end_return_line", "updated_at",
-        ])
-    if cards:
-        logger.info(
-            "after_sales.warranty_cards_returned return=%s original=%s tenant=%s cards=%d",
-            return_invoice.pk, original_id, return_invoice.tenant_id, len(cards),
-        )
-    return len(cards)
+    invoice_touched = _apply_invoice_card_return(return_invoice, original_id, reverse=False)
+    return len(cards) + invoice_touched
 
 
 def on_sales_return_unposted(return_invoice) -> int:
@@ -487,6 +623,9 @@ def on_sales_return_unposted(return_invoice) -> int:
     ولا سباق على وحدةٍ بِيعت ثانيةً: الحارس القائم
     (`inventory/serials.py` — `revert_returned_sales_serials`) يرفض الإلغاء
     أصلاً قبل أن نصل إلى هنا.
+
+    وبطاقات «كفالة على الفاتورة» (#234) تُنقَص كميتها المُرجَعة بالمقدار نفسه
+    الذي أضافه ترحيل هذا المرجع — تناظرٌ تامّ، لا حساب ثانٍ.
     """
     if not module_enabled(return_invoice.tenant_id, MODULE_KEY):
         return 0
@@ -499,7 +638,112 @@ def on_sales_return_unposted(return_invoice) -> int:
             "after_sales.warranty_cards_unreturned return=%s tenant=%s cards=%d",
             return_invoice.pk, return_invoice.tenant_id, revived,
         )
-    return revived
+
+    original_id = getattr(return_invoice, "original_invoice_id", None)
+    invoice_revived = _apply_invoice_card_return(return_invoice, original_id, reverse=True)
+    return revived + invoice_revived
+
+
+def _apply_invoice_card_return(return_invoice, original_id, *, reverse: bool) -> int:
+    """يُطبّق أثر مرجع بيعٍ على بطاقات «كفالة على الفاتورة» — ترحيلاً وتراجعاً.
+
+    #234-review (١أ): البطاقات تُطلَب أولاً **بمرساة الفاتورة الأصلية وحدها**
+    (`sales_invoice_id=original_id`) — لا بسياسة المنتج الحالية: سياسةٌ عُدِّلت
+    أو حُذفت بعد البيع لا يجوز أن توقف مرجعاً عن إنقاص بطاقةٍ صُرفت أيام كانت
+    `invoice`. كمية كل منتج تُحسَب بعدها من بنود **مرجع البيع نفسه** لهذه
+    المنتجات وحدها، في كلا الاتجاهين — تناظرٌ تامّ بين الترحيل والتراجع، على
+    نمط استهلاك الوحدات المُرقَّمة وإعادتها. بلوغ `returned_quantity` كاملَ
+    `quantity` يُنهي البطاقة `returned`، والتراجع الذي يُعيد فتح تغطيةٍ يُعيدها
+    سارية.
+
+    #234-review (٢): لا قصّ (`min`) على الزيادة — الحارس الخادميّ
+    `guard_sales_return_quantities` (`sales/services/flow.py`، T-RETQTY) يمنع
+    أي مرجعٍ من تجاوز القابل للإرجاع من الفاتورة الأصلية **عند كل حفظ لبنوده**،
+    عبر كل مراجيعها الشقيقة معاً (مسودةً أو مرحّلة)، فتجاوز `returned_quantity`
+    لـ`quantity` هنا مستحيلٌ بالبناء لا حالةٌ تُقاس. القصّ كان يخفي عدم تناظرٍ
+    كامن: لو فعلاً قُصّت الزيادة يوماً لأعاد التراجع فتح تغطيةٍ أكبر مما أُنقص.
+    بلا قصٍّ، حدث الاتجاهين يحمل الكمية المُطبَّقة فعلاً دائماً.
+
+    كل استدعاء يكتب حدثاً جزئياً واحداً لكل بطاقةٍ مسّها — `ended` عند الزيادة
+    (ولو بقيت التغطية جزئياً)، و`revived` عند الإنقاص.
+    """
+    if not original_id:
+        return 0
+
+    cards = {
+        card.product_id: card
+        for card in WarrantyCard.objects.filter(
+            tenant_id=return_invoice.tenant_id,
+            source=WarrantyCard.SOURCE_AUTO_SALE,
+            product_serial__isnull=True,
+            sales_invoice_id=original_id,
+        )
+    }
+    if not cards:
+        return 0
+
+    from inventory.services import product_display_name
+
+    rows = (
+        return_invoice.lines
+        .filter(product_id__in=list(cards))
+        .values("product_id")
+        .annotate(total=Sum("quantity"))
+    )
+    # #234-review (٣): نفس رفض الكسر عند الترحيل — مرتجعٌ بكميةٍ كسرية لمنتج
+    # بطاقة فاتورة يُرفَض بوضوح بدل أن يُقصّ `int()` كسره صامتاً.
+    quantity_by_product = {}
+    for row in rows:
+        total = row["total"]
+        if not total:
+            continue
+        if total % 1 != 0:
+            card = cards[row["product_id"]]
+            raise ValidationError(
+                f"المنتج «{product_display_name(card.product)}»: كفالة الفاتورة "
+                f"تتطلب كميةً صحيحة على مرجع البيع، وهذا السطر بكمية {total}."
+            )
+        quantity_by_product[row["product_id"]] = int(total)
+    if not quantity_by_product:
+        return 0
+
+    touched = 0
+    for product_id, quantity in quantity_by_product.items():
+        card = cards[product_id]
+        if reverse:
+            was_ended = (
+                card.ended_on is not None and card.end_reason == WarrantyCard.END_RETURNED
+            )
+            card.returned_quantity = max(0, card.returned_quantity - quantity)
+            fields = ["returned_quantity", "updated_at"]
+            if was_ended and card.returned_quantity < card.quantity:
+                card.ended_on = None
+                card.end_reason = ""
+                fields += ["ended_on", "end_reason"]
+            card.save(update_fields=fields)
+            log_warranty_event(
+                card, event_type=WarrantyCardEvent.TYPE_REVIVED, quantity=quantity,
+            )
+        else:
+            card.returned_quantity = card.returned_quantity + quantity
+            fields = ["returned_quantity", "updated_at"]
+            if card.returned_quantity >= card.quantity and card.ended_on is None:
+                card.ended_on = return_invoice.invoice_date
+                card.end_reason = WarrantyCard.END_RETURNED
+                fields += ["ended_on", "end_reason"]
+            card.save(update_fields=fields)
+            log_warranty_event(
+                card, event_type=WarrantyCardEvent.TYPE_ENDED, quantity=quantity,
+            )
+        touched += 1
+
+    if touched:
+        logger.info(
+            "after_sales.warranty_card_quantity_%s return=%s original=%s tenant=%s cards=%d",
+            "reversed" if reverse else "returned",
+            return_invoice.pk, original_id, return_invoice.tenant_id, touched,
+        )
+    return touched
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -534,6 +778,10 @@ def _card_summary(card, today: date) -> dict:
         "manufacturer_end_date": card.manufacturer_end_date,
         "manufacturer_status": card.manufacturer_status_on(today),
         "manufacturer_days_remaining": card.manufacturer_days_remaining(today),
+        # #234: بطاقة الفاتورة — صفرٌ على بطاقة وحدة مُرقَّمة (لا معنى له هناك).
+        "quantity": card.quantity,
+        "returned_quantity": card.returned_quantity,
+        "covered_quantity": card.covered_quantity,
     }
 
 

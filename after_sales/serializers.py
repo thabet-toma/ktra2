@@ -42,6 +42,10 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     manufacturer_warrantor_name = serializers.SerializerMethodField()
     manufacturer_status = serializers.SerializerMethodField()
     manufacturer_days_remaining = serializers.SerializerMethodField()
+    # #234: بطاقة «كفالة على الفاتورة» — `quantity`/`returned_quantity` من
+    # الخادم وحده (ترحيل البيع والمرجع)، و`covered_quantity` محسوبةٌ لا
+    # مخزَّنة أبداً. صفرٌ على بطاقة وحدة مُرقَّمة — لا معنى له هناك.
+    covered_quantity = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -55,14 +59,17 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "manufacturer_warrantor", "manufacturer_warrantor_name",
             "manufacturer_start_date", "manufacturer_duration_months",
             "manufacturer_end_date", "manufacturer_status", "manufacturer_days_remaining",
+            "quantity", "returned_quantity", "covered_quantity",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
             "end_reason_label", "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
-        # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH.
+        # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
+        # (#234) من محرّك الكفالة وحده — لا يكتبها عميلٌ لا عبر إنشاء ولا تعديل.
         read_only_fields = [
             "source", "product_serial", "sales_invoice_line", "sales_invoice",
-            "ended_on", "end_reason", "created_at", "updated_at",
+            "ended_on", "end_reason", "quantity", "returned_quantity",
+            "created_at", "updated_at",
         ]
 
     def get_status(self, obj):
@@ -82,6 +89,9 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
 
     def get_manufacturer_days_remaining(self, obj):
         return obj.manufacturer_days_remaining()
+
+    def get_covered_quantity(self, obj):
+        return obj.covered_quantity
 
     def get_product_name(self, obj):
         if not obj.product_id:

@@ -66,6 +66,12 @@ export interface WarrantyCardRow {
   manufacturer_days_remaining: number | null;
   status: WarrantyStatus;
   days_remaining: number;
+  // #234: بطاقة «كفالة على الفاتورة» — صفرٌ على بطاقة وحدة مُرقَّمة (لا معنى
+  // له هناك). `covered_quantity` محسوبةٌ في الخادم (`quantity − returned_quantity`)
+  // لا تُعاد حسابها هنا.
+  quantity: number;
+  returned_quantity: number;
+  covered_quantity: number;
   // #222: واقعة الانتهاء — `ended` يغلب `status`، والسبب يُعرض للموظف داخلياً
   // لا للزبون (الصفحة العامة لا تنشره، انظر `docshare/documents/aftersales_docs.py`).
   ended: boolean;
