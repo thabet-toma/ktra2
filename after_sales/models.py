@@ -6,7 +6,10 @@
 قاعدتان تحكمان هذا الملف:
 
 - **حالة الكفالة مشتقّة دائماً** من `end_date` مقابل اليوم — لا عمود حالة. قيمة
-  مشتقّة تُخزَّن تتناقض مع مصدرها أول يوم يمرّ دون أن يمسّها أحد.
+  مشتقّة تُخزَّن تتناقض مع مصدرها أول يوم يمرّ دون أن يمسّها أحد. والاستثناء
+  المُعلَن الوحيد **واقعةُ الانتهاء** (`ended_on`/`end_reason`، #222): المرجع
+  حدثٌ وقع في يومٍ بعينه، والتواريخ لا تستطيع أن تشتقّه — فنخزّن الواقعة
+  وتاريخها، وتبقى الحالة محسوبةً منها في `status_on` وحدها.
 - **لا فرادة شرطية** («بطاقة حيّة واحدة لكل وحدة»): MySQL لا تدعمها، واختبار
   SQLite يكذب عليها — الحصر في الكود (`after_sales.services`).
 """
@@ -47,6 +50,11 @@ class WarrantyCard(models.Model):
 
     `end_date` **مخزَّن وقابل للتعديل** — التمديد مجاملةً قرارُ تاجر لا حساب،
     وتخزينه يجعله واقعة مؤرَّخة لا نتيجة ضربٍ تتبدّل بتبدّل سياسة المنتج.
+
+    و«الانتهاء» (#222) واقعةٌ مؤرَّخة أخرى لا عمود حالة: `ended_on` مع
+    `end_reason` يقولان إن الشهادة لم تعد لهذا الزبون — أُرجع الجهاز، أو أُلغي
+    ترحيل فاتورته، أو حُذفت مسودّتها، أو حلّت محلّها بطاقةُ مشترٍ ثانٍ. البطاقة
+    **لا تُحذف أبداً** لأن هويّتها مرساةُ أوامر الصيانة ورمزِ التحقّق المطبوع.
     """
 
     SOURCE_AUTO_SALE = "auto_sale"
@@ -55,6 +63,24 @@ class WarrantyCard(models.Model):
         (SOURCE_AUTO_SALE, "تلقائية من فاتورة بيع"),
         (SOURCE_MANUAL, "يدوية"),
     ]
+
+    #: أسباب انتهاء البطاقة. قائمةٌ مغلقة تُعَدّ في التقرير وتُقرأ في الشاشة —
+    #: و«إلغاء كفالة التاجر» ليس منها (#218): ذاك يخصّ طبقةً واحدة من الكفالة،
+    #: وهذا يُنهي الشهادة كلّها. إن اجتمعا غلب الانتهاء.
+    END_RETURNED = "returned"
+    END_INVOICE_UNPOSTED = "invoice_unposted"
+    END_SALE_CANCELLED = "sale_cancelled"
+    END_SUPERSEDED = "superseded"
+    END_REASON_CHOICES = [
+        (END_RETURNED, "أُرجع الجهاز"),
+        (END_INVOICE_UNPOSTED, "أُلغي ترحيل الفاتورة"),
+        (END_SALE_CANCELLED, "أُلغي البيع"),
+        (END_SUPERSEDED, "حلّت محلّها بطاقة أحدث"),
+    ]
+
+    STATUS_ACTIVE = "active"
+    STATUS_EXPIRED = "expired"
+    STATUS_ENDED = "ended"
 
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="warranty_cards",
@@ -74,7 +100,15 @@ class WarrantyCard(models.Model):
     sales_invoice_line = models.ForeignKey(
         "sales.SalesInvoiceLine", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="warranty_cards",
-        help_text="بند فاتورة البيع الذي وَلَّد البطاقة — مرساة حذفها عند إلغاء الترحيل",
+        help_text="بند فاتورة البيع الذي وَلَّد البطاقة — يُفرَّغ إن حُذف البند من المسودّة",
+    )
+    # #222: المرساة الحقيقية. تعديلُ المسودّة يحذف البنود التي تُرسَل بلا `id`
+    # (`sales/serializers.py` — `SalesInvoiceSerializer.update`) فيُفرَّغ البند
+    # أعلاه بصمت؛ أما الفاتورة فتبقى، فعليها تُطابَق البطاقة عند إعادة الترحيل.
+    sales_invoice = models.ForeignKey(
+        "sales.SalesInvoice", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warranty_cards",
+        help_text="فاتورة البيع التي وَلَّدت البطاقة — مرساة إحيائها عند إعادة الترحيل",
     )
     partner = models.ForeignKey(
         "partners.Partner", on_delete=models.SET_NULL, null=True, blank=True,
@@ -100,6 +134,20 @@ class WarrantyCard(models.Model):
     )
     supplier_warranty_end_date = models.DateField(null=True, blank=True)
 
+    # ── واقعة الانتهاء (#222) ─────────────────────────────────────────────
+    ended_on = models.DateField(
+        null=True, blank=True,
+        help_text="يوم انتهاء البطاقة كواقعة — لا بانقضاء مدّتها",
+    )
+    end_reason = models.CharField(
+        max_length=20, choices=END_REASON_CHOICES, blank=True, default="",
+    )
+    end_return_line = models.ForeignKey(
+        "sales.SalesInvoiceLine", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="ended_warranty_cards",
+        help_text="بند مرجع البيع الذي أنهى البطاقة — ومنه يُحييها إلغاءُ ترحيله",
+    )
+
     notes = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(
         "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
@@ -121,15 +169,30 @@ class WarrantyCard(models.Model):
 
     # ── الحالة مشتقّة، لا مخزّنة ──────────────────────────────────────────
     def is_active_on(self, today: date | None = None) -> bool:
+        """داخل المدّة **وغير منتهية بواقعة** — سؤالٌ واحد لا سؤالان."""
+        if self.ended_on is not None:
+            return False
         return self.end_date >= (today or timezone.localdate())
 
     def days_remaining(self, today: date | None = None) -> int:
         return (self.end_date - (today or timezone.localdate())).days
 
     def status_on(self, today: date | None = None) -> str:
-        return "active" if self.is_active_on(today) else "expired"
+        """`ended` أولاً ثم `active`/`expired` — الواقعة تغلب التاريخ.
+
+        بطاقةٌ أُنهيت بمرجعٍ قد تبقى مدّتها سارية شهوراً؛ الجواب «غير سارية»
+        لا «سارية»، وإلا قال الاستقبال «مغطّى» عن جهازٍ في المخزن.
+        """
+        if self.ended_on is not None:
+            return self.STATUS_ENDED
+        return (
+            self.STATUS_ACTIVE if self.end_date >= (today or timezone.localdate())
+            else self.STATUS_EXPIRED
+        )
 
     def supplier_active_on(self, today: date | None = None) -> bool:
+        if self.ended_on is not None:
+            return False
         if self.supplier_warranty_end_date is None:
             return False
         return self.supplier_warranty_end_date >= (today or timezone.localdate())

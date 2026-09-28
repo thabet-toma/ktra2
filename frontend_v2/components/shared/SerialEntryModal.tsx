@@ -37,6 +37,10 @@ interface Props {
   onClose: () => void;
   /** `capture` يعيد الأرقام والكمية الجديدة معاً؛ `pick` يعيد المختار فقط. */
   onSave: (serials: string[]) => void;
+  /** T-SERIAL/#222: مجمع الاختيار في وضع `pick` — افتراضياً «في المخزن» كما
+   *  كان. مرجع البيع يحتاج «المُباع على فاتورته الأصلية بالذات» بدله: تلك
+   *  الوحدات `sold` لا `in_stock`، فبلا هذا المصدر لا يراها المنتقي أبداً. */
+  poolSalesInvoiceId?: number;
 }
 
 const clean = (raw: string) => raw.trim();
@@ -51,6 +55,7 @@ export const SerialEntryModal: React.FC<Props> = ({
   readOnly = false,
   onClose,
   onSave,
+  poolSalesInvoiceId,
 }) => {
   const [serials, setSerials] = useState<string[]>(() => value.filter(Boolean));
   const [start, setStart] = useState("");
@@ -80,13 +85,17 @@ export const SerialEntryModal: React.FC<Props> = ({
     if (mode !== "pick") return;
     let cancelled = false;
     setLoading(true);
-    inventoryApi
-      .getProductSerials(productId, "in_stock")
+    (poolSalesInvoiceId
+      ? inventoryApi.getProductSerials(productId, undefined, poolSalesInvoiceId)
+      : inventoryApi.getProductSerials(productId, "in_stock"))
       .then((rows) => { if (!cancelled) { setPool(rows); setError(null); } })
       .catch((e) => { if (!cancelled) setError(humanizeThrown(e, "تعذّر تحميل وحدات هذا المنتج")); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [mode, productId]);
+  }, [mode, productId, poolSalesInvoiceId]);
+
+  /** نصوص المصدر — «في المخزن» افتراضياً، أو «على هذه الفاتورة» للمرجع. */
+  const poolLabel = poolSalesInvoiceId ? "على هذه الفاتورة" : "في مخزن هذا المنتج";
 
   /** أرقام مختارة على البند لم تعد «في المخزن» (فاتورة مرحّلة تُعاد قراءتها). */
   const chosenOutsidePool = useMemo(() => {
@@ -164,7 +173,7 @@ export const SerialEntryModal: React.FC<Props> = ({
     if (!serial) return;
     const hit = pool.find((r) => r.serial === serial);
     if (!hit) {
-      setError(`الرقم «${serial}» غير متوفر في مخزن هذا المنتج.`);
+      setError(`الرقم «${serial}» غير متوفر ${poolLabel}.`);
       return;
     }
     setError(null);
@@ -194,7 +203,9 @@ export const SerialEntryModal: React.FC<Props> = ({
     onSave(auto && mode === "pick" ? [] : serials);
   };
 
-  const title = mode === "capture" ? "الأرقام التسلسلية للبند" : "اختيار الوحدات المباعة";
+  const title = mode === "capture"
+    ? "الأرقام التسلسلية للبند"
+    : poolSalesInvoiceId ? "اختيار الوحدات المرتجعة" : "اختيار الوحدات المباعة";
 
   return (
     <div
@@ -426,7 +437,7 @@ export const SerialEntryModal: React.FC<Props> = ({
                 </div>
               ) : filteredPool.length === 0 && chosenOutsidePool.length === 0 ? (
                 <div className="py-8 text-center ktra-text-soft text-sm">
-                  لا وحدات مُرقَّمة في مخزن هذا المنتج — «تلقائي» يترك البند بلا تتبّع.
+                  لا وحدات مُرقَّمة {poolLabel} — «تلقائي» يترك البند بلا تتبّع.
                 </div>
               ) : (
                 <table className="w-full text-sm">
@@ -515,11 +526,11 @@ export const SerialEntryModal: React.FC<Props> = ({
       {camera && (
         <BarcodeScannerModal
           continuous
-          title={mode === "capture" ? "مسح أرقام الوحدات" : "مسح رقم الوحدة المباعة"}
+          title={mode === "capture" ? "مسح أرقام الوحدات" : "مسح رقم الوحدة"}
           hint={
             mode === "capture"
               ? "امسح ملصق كل وحدة — يبقى الماسح مفتوحاً حتى تُغلقه"
-              : "امسح ملصق الوحدة الخارجة — تُختار من المتاح في المخزن"
+              : `امسح ملصق الوحدة — تُختار من المتاح ${poolLabel}`
           }
           onDetect={(detected) =>
             mode === "capture" ? addSerial(detected, serials) : scanPick(detected)

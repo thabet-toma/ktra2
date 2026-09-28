@@ -444,6 +444,54 @@ class ProductSerialFlowTest(APITestCase):
         assert rows[0]['sales_invoice_number'] == sale.invoice_number
         assert rows[0]['supplier_name'] == 'مورد'
 
+    def test_product_serials_endpoint_filters_by_sales_invoice(self):
+        """مرجع البيع يحتاج وحدات **هذه الفاتورة** المُباعة لا كل «مُباع» بالشركة."""
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('SI1', 'SI2', 'SI3')
+        first, _line = self._sales_invoice(qty='2', serials=['SI1', 'SI2'])
+        assert self._post_sale(first).status_code == 200
+        second, _line2 = self._sales_invoice(qty='1', serials=['SI3'])
+        assert self._post_sale(second).status_code == 200
+
+        res = self.client.get(
+            f'/api/inventory/products/{self.product.pk}/serials/'
+            f'?sales_invoice={first.pk}',
+            **self._auth())
+        assert res.status_code == 200, res.content
+        assert {r['serial'] for r in res.json()} == {'SI1', 'SI2'}
+
+    def test_product_serials_sales_invoice_filter_ignores_another_tenants_invoice(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('SK1')
+        sale, _line = self._sales_invoice(qty='1', serials=['SK1'])
+        assert self._post_sale(sale).status_code == 200
+
+        other_owner = User.objects.create_user(username='other-serial-inv', password='x')
+        other = create_company('شركة فاتورة أخرى', other_owner)
+        other_ar = Account.objects.create(
+            tenant=other, code='1101-OT', name='ذمم أخرى', account_type='Asset',
+            is_active=True)
+        other_customer = Partner.objects.create(
+            tenant=other, name='زبون آخر', partner_type='Customer',
+            linked_account=other_ar)
+        other_invoice = SalesInvoice.objects.create(
+            tenant=other, invoice_number='OT-0001', customer=other_customer,
+            currency=self.ils, invoice_date='2026-06-15',
+            invoice_type=SalesInvoice.INVOICE_CREDIT)
+
+        res = self.client.get(
+            f'/api/inventory/products/{self.product.pk}/serials/'
+            f'?sales_invoice={other_invoice.pk}',
+            **self._auth())
+        assert res.status_code == 200, res.content
+        assert res.json() == []
+
+    def test_product_serials_rejects_a_non_numeric_sales_invoice(self):
+        res = self.client.get(
+            f'/api/inventory/products/{self.product.pk}/serials/?sales_invoice=abc',
+            **self._auth())
+        assert res.status_code == 400, res.content
+
     def test_tenant_wide_serial_lookup_answers_where_the_unit_went(self):
         self._set_modes(sales=SERIAL_MODE_OPTIONAL)
         purchase, _item = self._stock_serials('Q1', 'Q2')

@@ -1,6 +1,6 @@
 # after_sales — خدمة ما بعد البيع: بطاقات الكفالة وأوامر الصيانة (وحدة مرخّصة)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-12. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28 (#222). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 وحدة مرخّصة (`after_sales` في `core/modules.py`) تحمل ما يحدث **بعد** خروج البضاعة:
@@ -9,8 +9,13 @@
 نقطة تمرّ من `require_module` **قبل** `require_perm`، فترد الشركة غير المرخّصة
 **404 لا 403**، ولا يكتب النظام صفاً واحداً في جداولها لشركةٍ لا تراها.
 
-قاعدتان تحكمان الوحدة كلها:
-- **حالة الكفالة مشتقّة** من `end_date` مقابل اليوم — لا عمود حالة في أي جدول.
+ثلاث قواعد تحكم الوحدة كلها:
+- **حالة الكفالة مشتقّة**: `WarrantyCard.status_on` تعيد `ended` أولاً إن
+  وُجدت واقعةُ انتهاء (`ended_on`)، وإلا فمشتقّةٌ من `end_date` مقابل اليوم —
+  لا عمود حالة يُخزَّن (#222).
+- **تعطيلٌ لا حذف**: البطاقة التلقائية لا تُحذف أبداً — هويّتها (`id`) مرساةُ
+  أوامر الصيانة ورمزِ التحقّق المطبوع. إلغاءُ الترحيل والمرجع وحذفُ المسودّة
+  كلها تُسجِّل واقعة انتهاء مؤرَّخة، وإعادةُ الترحيل تُحيي البطاقة بنفسها.
 - **بند قطع الغيار يتجسّد في مستند واحد بالضبط**؛ `materialized_at` هو القفل،
   والخصم المزدوج ممنوع بالبناء لا بالانضباط.
 
@@ -21,13 +26,14 @@
 | `after_sales/views.py` | `WarrantyCardViewSet` + `ServiceOrderViewSet` — البوابتان وكل الإجراءات | 560 |
 | `after_sales/serializers.py` | عقود الـAPI والتحقق (رسائل الـ400 التي يقرأها المستخدم) | 400 |
 | `after_sales/models.py` | الجداول الخمسة + `add_months` (أشهر تقويمية لا كتل 30 يوماً) | 380 |
-| `after_sales/services.py` | محرّك الكفالة: الإنشاء التلقائي عند ترحيل البيع، والحذف عند التراجع، وفحص التغطية | 235 |
+| `after_sales/services.py` | محرّك الكفالة: الإنشاء/الإحياء التلقائي عند ترحيل البيع، والتعليق عند إلغائه أو حذف المسودّة، وإنهاء بطاقة الوحدة المرتجعة، وفحص التغطية | 470 |
+| `after_sales/management/commands/repair_warranty_lifecycle.py` | إصلاح بيانات ما قبل #222 — `--tenant <id> [--apply]`، dry-run افتراضياً. يقيس (أ)/(ب) بفاتورة البطاقة (`sales_invoice` أو بندها) لا برقم بندها — بطاقةٌ بلا أيّ مرساة تُبلَّغ لا تُخمَّن | 243 |
 | `after_sales/urls.py` | `SimpleRouter` لا `DefaultRouter` — جذر الـAPI القابل للتصفح يكشف الوحدة | 11 |
 
 ## الـModels
 | Model | الحقول المفتاحية | العلاقات المهمة |
 |---|---|---|
-| `WarrantyCard` | `serial`، `start_date`، `duration_months`، `end_date` (مخزَّن وقابل للتمديد)، `source ∈ {auto_sale, manual}`، `supplier_warranty_end_date` | `tenant`، `product`، `product_serial` → `inventory.ProductSerial`، `sales_invoice_line` → `sales.SalesInvoiceLine` (مرساة الحذف)، `partner`، `supplier` |
+| `WarrantyCard` | `serial`، `start_date`، `duration_months`، `end_date` (مخزَّن وقابل للتمديد)، `source ∈ {auto_sale, manual}`، `supplier_warranty_end_date`، `ended_on`/`end_reason ∈ {returned, invoice_unposted, sale_cancelled, superseded}` (#222) | `tenant`، `product`، `product_serial` → `inventory.ProductSerial`، `sales_invoice` → `sales.SalesInvoice` (مرساة الإحياء)، `sales_invoice_line` → `sales.SalesInvoiceLine` (تُفرَّغ إن حُذف البند من المسودّة)، `end_return_line` → `sales.SalesInvoiceLine` (بند مرجع البيع الذي أنهاها)، `partner`، `supplier` |
 | `ServiceOrder` | `order_number`، `order_date`، `serial`، `complaint`/`diagnosis`/`resolution`، `status`، `outcome` (حقل منفصل)، `warranty_covered`، `estimated_amount`، `covered_posted_at`، `billing_waived_reason`، `photos` | `tenant`، `partner`، `product`، `technician`، `warranty_card`، `sales_invoice` (كلها SET_NULL) |
 | `ServiceOrderPart` | `quantity`، `billing ∈ {billable, covered}`، `unit_price`، **`materialized_at`** | `order` (CASCADE)، `product` (PROTECT)، `sales_invoice_line` (SET_NULL) |
 | `ServiceOrderEvent` | `event_type`، `from_status`/`to_status`، `text`، `created_at` | `order` (CASCADE)، `actor` |
@@ -35,10 +41,13 @@
 
 ## دوال الـservices العامة
 ```python
-# after_sales/services.py — محرّك الكفالة
-def create_auto_warranty_cards(invoice) -> int:  # يستدعيه sales/services/flow.py عند ترحيل فاتورة بيع
-def delete_auto_warranty_cards(invoice) -> int:  # عند إلغاء الترحيل — اليدوية لا تُمَسّ
-def warranty_coverage(tenant_id: int, serial: str, today=None) -> dict:  # التغطية من البطاقة ومن نسب الوحدة
+# after_sales/services.py — محرّك الكفالة (#222: خمس نقاط التحام من sales)
+def create_auto_warranty_cards(invoice) -> int:  # ترحيل البيع: يُحيي المعلَّق على هذه الفاتورة ثم يُنشئ الناقص
+def on_sale_unposted(invoice) -> int:  # إلغاء ترحيل البيع: تعليقٌ بـinvoice_unposted — لا حذف
+def on_sale_cancelled(invoice) -> int:  # حذف مسودّة الفاتورة: المعلَّق يصير sale_cancelled بلا رجعة
+def on_sales_return_posted(return_invoice) -> int:  # مرجع البيع: يُنهي بطاقات الوحدات المرتجعة وحدها بـreturned
+def on_sales_return_unposted(return_invoice) -> int:  # إلغاء ترحيل المرجع: يُحيي ما أنهاه هو وحده
+def warranty_coverage(tenant_id: int, serial: str, today=None) -> dict:  # التغطية من البطاقة غير المنتهية ومن نسب الوحدة
 
 # after_sales/service_orders.py — أمر الصيانة
 def transition_status(order, to_status, *, user=None, outcome="", note="") -> ServiceOrder:  # الحالة لا تنتقل إلا من هنا
@@ -56,8 +65,8 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 
 | Method | المسار | الـview |
 |---|---|---|
-| GET/POST | `warranties/` | `WarrantyCardViewSet` (فلاتر `q`، `status`، `source`، `expiring_within_days`) |
-| POST | `warranties/{id}/extend/` | `WarrantyCardViewSet.extend` — يُوثَّق التمديد في الملاحظات بتاريخ الخادم |
+| GET/POST | `warranties/` | `WarrantyCardViewSet` (فلاتر `q`، `status ∈ {active,expired,ended}`، `source`، `expiring_within_days` — الأخيران يستثنيان المنتهية) |
+| POST | `warranties/{id}/extend/` | `WarrantyCardViewSet.extend` — يُوثَّق التمديد في الملاحظات بتاريخ الخادم. **يرفض التقصير** (`new_end` يجب أن يتجاوز `end_date` الحالي) **ويرفض بطاقةً منتهية بواقعة** (#222 §٨) |
 | GET | `warranties/check/?serial=` | `WarrantyCardViewSet.check` |
 | GET/POST | `service-orders/` | `ServiceOrderViewSet` (فلاتر `q`، `status`، `open`، `partner`، `date_from/to`) |
 | POST | `service-orders/{id}/transition/` | `ServiceOrderViewSet.transition` — البوابة الوحيدة لتغيير الحالة |
@@ -73,7 +82,7 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 
 | المفتاح | ما يجيبه | الصلاحية |
 |---|---|---|
-| `after-sales-warranties-expiring` | كفالات سارية تنتهي خلال نافذة (`days`، افتراضها 30) | `aftersales.warranty.view` |
+| `after-sales-warranties-expiring` | كفالات سارية تنتهي خلال نافذة (`days`، افتراضها 30) — المنتهية بواقعة خارجها (#222) | `aftersales.warranty.view` |
 | `after-sales-open-orders` | كل جهاز ما زال عندنا بعمره بالأيام وما ينقص لإغلاقه | `aftersales.order.view` |
 | `after-sales-warranty-cost` | ما صُرف على الكفالة من حركات `SERVICE_ISSUE` بتكلفته التاريخية | `aftersales.order.view` |
 
@@ -102,13 +111,18 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 - `core` — `modules` (`require_module`, `module_enabled`)، `access` (`require_perm`)، `api_defaults`.
 - `device_registry` — **models للقراءة فقط** داخل `intake_lookup`، وخلف فحص ترخيص الوحدة. **لا FK في أي اتجاه**.
 
-**يعتمد عليه:** `sales` (`sales/services/flow.py` ينادي `create_auto_warranty_cards` بعد استهلاك الوحدات، ومسار إلغاء الترحيل ينادي `delete_auto_warranty_cards`).
+**يعتمد عليه:** `sales` (#222 — نقطة ربطٍ واحدة، كلها كسولة ومحروسة بـ`module_enabled`):
+`sales/services/flow.py` (`post_sales_invoice`) ينادي `create_auto_warranty_cards` بعد استهلاك الوحدات على البيع، و`on_sales_return_posted` بعد `restore_returned_sales_serials` على المرجع؛ `sales/views.py` (`unpost_invoice`) ينادي `on_sale_unposted` أو `on_sales_return_unposted` حسب نوع الفاتورة، و(`destroy`) ينادي `on_sale_cancelled` عند حذف مسودّة.
 
 ## قواعد لا يجوز كسرها
 - **`require_module` قبل `require_perm` في `initial()`** (`after_sales/views.py`) — عكس الترتيب يردّ 403 فيُثبت وجود الوحدة لشركة غير مرخّصة.
 - **بطاقة الكفالة تُنشأ بتاريخ الفاتورة** لا تاريخ الترحيل ولا التسليم (`after_sales/services.py` (`create_auto_warranty_cards`)) — تاريخ المستند هو ما تُقيَّد به الدفاتر، وحالة التسليم مشتقّة وقد تغيب.
-- **مرساة حذف البطاقة التلقائية هي بند الفاتورة** لا رابط الوحدة: إلغاء الترحيل يُفرِّغ `ProductSerial.sales_line` فيضيع الأثر لو اعتمدنا عليه (`after_sales/services.py` (`delete_auto_warranty_cards`)).
-- **لا فرادة شرطية على MySQL**: «بطاقة حيّة واحدة لكل وحدة» محصورة في الكود، ورقم أمر الصيانة عليه فهرس لا قيد — تفرّده من `next_document_number` بقفل الدفتر.
+- **تعطيلٌ لا حذف (#222)**: `on_sale_unposted` يُعلِّق البطاقات الحيّة (`ended_on`/`end_reason=invoice_unposted`) ولا يحذف صفاً واحداً — الـ`id` هو ما تتعلّق به أوامر الصيانة ورمزُ التحقّق المطبوع. إعادةُ الترحيل (`create_auto_warranty_cards`) تُحييها بمطابقة `(sales_invoice, product_serial)` **لا** بالبند: تعديل المسودّة يحذف بنوداً بلا `id` (`sales/serializers.py` (`SalesInvoiceSerializer.update`))، والفاتورة هي المرساة الصامدة. بطاقةٌ منتهية بمرجعٍ (`end_reason=returned`) **لا تُحيا أبداً** بترحيل بيع.
+- **مرجع البيع يحدّد الوحدة المرتجعة من `ProductSerial.return_line`** لا من ترتيب `id`: `inventory/serials.py` (`restore_returned_sales_serials`) يقرأ `line.serials` (إجباري تحت `required`، بمرآة `assert_sales_return_serials_declared`)، و`after_sales/services.py` (`on_sales_return_posted`) يقرأ ما كتبته لينهي بطاقة الوحدة بعينها.
+- **المشتري الثاني يأخذ بطاقة جديدة**: `already_carded` (داخل `create_auto_warranty_cards`) يسأل «بطاقة غير منتهية لهذه الوحدة على **هذه الفاتورة**» لا مطلقاً — ومعه شفاءٌ ذاتي: أي بطاقة `auto_sale` حيّة للوحدة على فاتورة أخرى تُنهى `superseded` بتاريخ الفاتورة الجديدة. اليدوية لا تُمَسّ أبداً.
+- **لا فرادة شرطية على MySQL**: «بطاقة حيّة واحدة لكل وحدة **على فاتورة واحدة**» محصورة في الكود، ورقم أمر الصيانة عليه فهرس لا قيد — تفرّده من `next_document_number` بقفل الدفتر.
+- **التمديد لا يقصّر (#222 §٨)**: `WarrantyExtendSerializer.resolved_end_date` يرفض `new_end <= card.end_date`، و`WarrantyCardViewSet.extend` يرفض بطاقةً منتهية بواقعة. تقصيرٌ موثَّق بصلاحية `aftersales.warranty.void` مستقبلٌ في #236.
+- **الصفحة العامة لا تنشر ملاحظات البطاقة ولا سبب انتهائها**: `docshare/documents/aftersales_docs.py` (`build_warranty_card`) يُفرِغ `notes` دائماً، وحالتها من `WarrantyCard.status_on` (عبر `warranty_card_expired`) لا من مقارنة `end_date` باليوم.
 - **قفل التجسّد**: `post_covered_parts` يلتقط `covered` غير المقفول، و`generate_service_invoice` يلتقط `billable` غير المقفول، والبند المقفول لا يُعدَّل ولا يُحذف ولا يُعاد تصنيفه (`after_sales/views.py` (`part_detail`)). كسر أيٍّ من هذه يفتح باب الخصم المزدوج (THA-65).
 - **`SERVICE_ISSUE` نوع مرجع مستقل** لا يدخل `sales_cogs_map` (تفلتر `SALE`/`STOCK_ISSUE`) — مصروف الكفالة تشغيلي لا COGS. لا تُعِد استعمال `STOCK_ISSUE` هنا.
 - **الحالة لا تُغيَّر بـPATCH**: `status`/`outcome`/`covered_posted_at`/`sales_invoice` كلها `read_only` في السيريالايزر، والانتقال من `transition` وحدها فتمرّ من بواباتها.
@@ -127,5 +141,8 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 ## الاختبارات المهمة
 | الملف | ما يغطيه |
 |---|---|
-| `after_sales/tests/test_warranty.py` | الدورة التلقائية للبطاقة (إنشاء/حذف/إعادة)، اشتقاق الحالة، جانب المورد من نسب الشراء، 404 بلا ترخيص، العزل |
+| `after_sales/tests/test_warranty.py` | الدورة التلقائية للبطاقة (إنشاء/تعليق/إحياء بنفس الـ`id`)، اشتقاق الحالة، جانب المورد من نسب الشراء، 404 بلا ترخيص، العزل |
+| `after_sales/tests/test_warranty_lifecycle.py` | #222 كاملةً: المرجع (كلي/جزئي بالوحدة المسمّاة) ينهي البطاقة، المشتري الثاني يأخذ بطاقة جديدة والشفاء الذاتي، ثبات الهوية عبر إلغاء/إعادة الترحيل مع تعديل المسودّة، فاتورة الصيانة تكفل قطعتها المفوترة، والتمديد لا يقصّر |
+| `after_sales/tests/test_warranty_repair.py` | أمر `repair_warranty_lifecycle` — dry-run لا يكتب، `--apply` يُصلح (أ)/(ب) وتقرير (ج)، إعادة التشغيل بلا أثر، عزل الشركات، رفض غير المرخّصة |
 | `after_sales/tests/test_service_orders.py` | صرف القطع المغطاة بتكلفة تاريخية وقيد متوازن، **حارس التجسّد المزدوج بالاتجاهين**، ثبات `sales_cogs_map`، إيراد الأجرة في حساب الخدمات، بوابتا التسليم والإلغاء، البحث الموحّد، البوابة والعزل |
+| `docshare/tests/test_voucher_and_aftersales.py` | الصفحة العامة لا تنشر ملاحظات البطاقة، وحالتها من `status_on` لا من تاريخ الانتهاء وحده |

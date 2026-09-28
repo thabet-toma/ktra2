@@ -3,7 +3,9 @@
 يثبت:
   1. ترحيل فاتورة بيع لوحدة متسلسلة بمنتجٍ ذي كفالة ⇒ بطاقة بدايتها **تاريخ
      الفاتورة**، ونهايتها بداية + المدة، وجانب المورد من نسب الوحدة الشرائي.
-  2. إلغاء الترحيل يحذف البطاقة التلقائية ويُبقي اليدوية، وإعادة الترحيل تعيدها.
+  2. إلغاء الترحيل **يُعلّق** البطاقة التلقائية (لا يحذفها) ويُبقي اليدوية،
+     وإعادة الترحيل تُحييها بنفس الـ`id` (#222). ودورةُ حياتها الكاملة —
+     المرجع وإعادة البيع وثبات الهوية — في `test_warranty_lifecycle.py`.
   3. كل نقطة API ترد 404 لشركة بلا ترخيص الوحدة — ولا أثر للترحيل أصلاً عندها.
   4. عزل الشركات على كل نقطة.
   5. بند غير متسلسل ⇒ لا بطاقة تلقائية.
@@ -206,7 +208,12 @@ class AutoWarrantyLifecycleTest(WarrantyTestBase):
         self.assertEqual(card.customer_phone, "0599111222")
         self.assertEqual(card.product_serial.serial, "SN-A1")
 
-    def test_unpost_removes_the_auto_card_keeps_the_manual_one_repost_restores(self):
+    def test_unpost_suspends_the_auto_card_keeps_the_manual_one_repost_revives_it(self):
+        """#222 غيّر العقد: التعليق بدل الحذف، والإحياء **بنفس الـ`id`**.
+
+        الحذف كان يكسر كلّ ما عُلِّق على البطاقة — أوامر الصيانة المرتبطة بها،
+        ولاحقاً رمزُ التحقّق المطبوع على الشهادة التي بيد الزبون.
+        """
         self.stock_units("SN-B1")
         invoice = self.sales_invoice(serials=["SN-B1"])
         self.assertEqual(self.post_sale(invoice).status_code, 200)
@@ -215,18 +222,25 @@ class AutoWarrantyLifecycleTest(WarrantyTestBase):
             start_date=date(2026, 1, 1), duration_months=6,
             end_date=date(2026, 7, 1), source=WarrantyCard.SOURCE_MANUAL,
         )
-        self.assertEqual(self.cards(source=WarrantyCard.SOURCE_AUTO_SALE).count(), 1)
+        auto = self.cards(source=WarrantyCard.SOURCE_AUTO_SALE).get()
 
         response = self.unpost_sale(invoice)
         self.assertEqual(response.status_code, 200, response.content)
 
-        self.assertEqual(self.cards(source=WarrantyCard.SOURCE_AUTO_SALE).count(), 0)
-        self.assertTrue(self.cards(pk=manual.pk).exists())
+        # الصفّ باقٍ — معلَّقاً لا محذوفاً — واليدوية لم تُمَسّ.
+        auto.refresh_from_db()
+        self.assertEqual(auto.end_reason, WarrantyCard.END_INVOICE_UNPOSTED)
+        self.assertIsNotNone(auto.ended_on)
+        self.assertEqual(auto.status_on(), "ended")
+        manual.refresh_from_db()
+        self.assertIsNone(manual.ended_on)
 
         self.assertEqual(self.post_sale(invoice).status_code, 200)
         restored = self.cards(source=WarrantyCard.SOURCE_AUTO_SALE).get()
+        self.assertEqual(restored.pk, auto.pk)
         self.assertEqual(restored.serial, "SN-B1")
         self.assertEqual(restored.end_date, date(2027, 6, 15))
+        self.assertIsNone(restored.ended_on)
 
     def test_a_second_posting_never_doubles_the_card_for_one_unit(self):
         self.stock_units("SN-C1")

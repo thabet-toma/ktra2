@@ -23,8 +23,13 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     partner_name = serializers.SerializerMethodField()
     supplier_name = serializers.SerializerMethodField()
     source_label = serializers.CharField(source="get_source_display", read_only=True)
-    sales_invoice = serializers.SerializerMethodField()
     sales_invoice_number = serializers.SerializerMethodField()
+    # #222: «منتهية بواقعة» حالةٌ أولى الدرجة على الشاشة — بطاقةٌ لجهازٍ أُرجع
+    # لا يجوز أن تُعرض «سارية»، والسبب يُسمّى للموظف لا للزبون.
+    ended = serializers.SerializerMethodField()
+    end_reason_label = serializers.CharField(
+        source="get_end_reason_display", read_only=True,
+    )
 
     class Meta:
         model = WarrantyCard
@@ -35,12 +40,14 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "customer_phone", "start_date", "duration_months", "end_date",
             "source", "source_label", "supplier", "supplier_name",
             "supplier_warranty_end_date", "supplier_warranty_active", "notes",
-            "status", "days_remaining", "created_at", "updated_at",
+            "status", "days_remaining", "ended", "ended_on", "end_reason",
+            "end_reason_label", "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
+        # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH.
         read_only_fields = [
-            "source", "product_serial", "sales_invoice_line",
-            "created_at", "updated_at",
+            "source", "product_serial", "sales_invoice_line", "sales_invoice",
+            "ended_on", "end_reason", "created_at", "updated_at",
         ]
 
     def get_status(self, obj):
@@ -64,16 +71,16 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     def get_supplier_name(self, obj):
         return obj.supplier.name if obj.supplier_id else ""
 
-    def _invoice(self, obj):
-        line = obj.sales_invoice_line if obj.sales_invoice_line_id else None
-        return line.invoice if (line and line.invoice_id) else None
-
-    def get_sales_invoice(self, obj):
-        invoice = self._invoice(obj)
-        return invoice.pk if invoice else None
+    def get_ended(self, obj):
+        return obj.ended_on is not None
 
     def get_sales_invoice_number(self, obj):
-        invoice = self._invoice(obj)
+        # #222: من المرساة نفسها (`sales_invoice`) لا من البند — البند يُفرَّغ
+        # حين تُعدَّل المسودّة فكان رقم الفاتورة يختفي عن بطاقةٍ لم تتغيّر.
+        if obj.sales_invoice_id:
+            return obj.sales_invoice.invoice_number
+        line = obj.sales_invoice_line if obj.sales_invoice_line_id else None
+        invoice = line.invoice if (line and line.invoice_id) else None
         return invoice.invoice_number if invoice else None
 
     # ── التحقق ────────────────────────────────────────────────────────────
@@ -136,9 +143,25 @@ class WarrantyExtendSerializer(serializers.Serializer):
         return attrs
 
     def resolved_end_date(self, card) -> date:
-        if self.validated_data.get("end_date"):
-            return self.validated_data["end_date"]
-        return add_months(card.end_date, self.validated_data["months"])
+        """النهاية الجديدة — و**التمديد لا يقصّر** (#222 البند ٨).
+
+        كان الرفض عند `end_date < start_date` وحده، فموظف المبيعات الذي يملك
+        `aftersales.warranty.manage` (صلاحية عطاء) يقدر أن يسلب زبوناً شهوراً
+        من كفالته باسم «تمديد». التقصير قرارٌ آخر بصلاحيةٍ أخرى ومسارٍ يوثّق
+        سببه — لا خانة تاريخٍ في نافذة التمديد.
+        """
+        new_end = (
+            self.validated_data["end_date"] if self.validated_data.get("end_date")
+            else add_months(card.end_date, self.validated_data["months"])
+        )
+        if new_end <= card.end_date:
+            raise serializers.ValidationError({
+                "end_date": (
+                    f"التمديد يُطيل الكفالة ولا يقصّرها — التاريخ الجديد "
+                    f"({new_end}) ليس بعد نهايتها الحالية ({card.end_date})."
+                )
+            })
+        return new_end
 
 
 # ══════════════════════════════════════════════════════════════════════════

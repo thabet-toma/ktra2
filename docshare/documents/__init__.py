@@ -48,6 +48,7 @@ from docshare.documents.aftersales_docs import (  # noqa: F401
     build_warranty_card,
     load_service_order,
     load_warranty_card,
+    warranty_card_expired,
 )
 from docshare.documents.purchase_docs import (  # noqa: F401
     PURCHASE_DOC_TYPES,

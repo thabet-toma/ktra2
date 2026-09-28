@@ -135,7 +135,13 @@ def _page_context(request, share, document, payload):
     _attach_quote_currency_options(share, document, payload)
     company = company_card(share.tenant)
     today = timezone.localdate()
-    expired_offer = bool(payload["valid_until"] and payload["valid_until"] < today)
+    # «انتهت صلاحيته» تاريخٌ افتراضاً، ونوعٌ يعرف أكثر يقولها بنفسه: بطاقةُ
+    # الكفالة تنتهي بواقعةٍ (مرجعٌ، إلغاءُ بيع) قبل أن تنقضي مدّتها (#222 بند ٧).
+    expired_fn = (DOC_TYPES.get(share.doc_type) or {}).get("expired")
+    expired_offer = bool(
+        expired_fn(document) if expired_fn
+        else (payload["valid_until"] and payload["valid_until"] < today)
+    )
     decision = payload["decision"]
     return {
         "doc": payload,

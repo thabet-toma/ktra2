@@ -46,3 +46,11 @@ test('نص التبقّي يقرأ المنتهية بإشارتها الصحي�
   assert.match(warrantyRemainingText('expired', -30), /^انتهت منذ /);
   assert.ok(!warrantyRemainingText('expired', -30).includes('-'));
 });
+
+test('#222 — بطاقة منتهية بواقعة لا تُعرض سارية أبداً حتى بأيامٍ موجبة', () => {
+  assert.equal(warrantyStatusLabel('ended'), 'غير سارية');
+  assert.notEqual(warrantyStatusLabel('ended'), 'سارية');
+  // نهايتها قد تبقى في المستقبل (جهازٌ أُرجع قبل انقضاء مدّته) — أيامٌ موجبة
+  // ومع ذلك النص لا يُشتقّ منها بحساب «باقٍ» أو «منذ».
+  assert.equal(warrantyRemainingText('ended', 200), 'لم تعد سارية');
+});

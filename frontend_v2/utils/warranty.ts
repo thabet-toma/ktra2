@@ -17,8 +17,12 @@ import { formatNumber } from "./formatNumber.ts";
 /** مصدر البطاقة — تلقائية من ترحيل فاتورة بيع، أو يدوية أنشأها مستخدم. */
 export type WarrantySource = "auto_sale" | "manual";
 
-/** الحالة المشتقّة من تاريخ الانتهاء مقابل اليوم. */
-export type WarrantyStatus = "active" | "expired";
+/**
+ * الحالة كما يردّها الخادم (`WarrantyCard.status_on`، #222): `ended` تغلب
+ * دائماً — بطاقةٌ أُنهيت بمرجعٍ أو إلغاء ترحيلٍ لا تصير «سارية» أبداً حتى لو
+ * بقي تاريخ انتهائها في المستقبل. وإلا فمشتقّةٌ من `end_date` كما كانت.
+ */
+export type WarrantyStatus = "active" | "expired" | "ended";
 
 /** كفالة سارية تنتهي خلال هذه المدة تُعرض بلون تنبيه لا بلون اطمئنان. */
 export const WARRANTY_NEAR_EXPIRY_DAYS = 30;
@@ -62,17 +66,26 @@ export function deriveWarrantyEnd(
   return addWarrantyMonths(startIso, months);
 }
 
-export const warrantyStatusLabel = (status: WarrantyStatus): string =>
-  status === "active" ? "سارية" : "منتهية";
+export const warrantyStatusLabel = (status: WarrantyStatus): string => {
+  if (status === "active") return "سارية";
+  // #222: «غير سارية» لا «منتهية» — الانتهاء بواقعة (مرجع/إلغاء ترحيل) ليس
+  // انقضاء مدّة، ولا يجوز أن تظهر بطاقة جهازٍ أُرجع «سارية» أبداً.
+  if (status === "ended") return "غير سارية";
+  return "منتهية";
+};
 
 /**
  * «باقٍ ١٢ يوماً» / «انتهت منذ ٣٠ يوماً» — الرقم وحده يُقرأ خطأً على المنتهية،
  * إذ يعود من الخادم بإشارة سالبة.
+ *
+ * المنتهية بواقعة (#222) لا تُقرأ من الأيام أصلاً: نهايتها قد تبقى في
+ * المستقبل (جهازٌ أُرجع قبل أن تنقضي مدّته)، فحسابُ «منذ كم يوماً» منها كذبٌ.
  */
 export function warrantyRemainingText(
   status: WarrantyStatus,
   daysRemaining: number,
 ): string {
+  if (status === "ended") return "لم تعد سارية";
   const days = Number(daysRemaining) || 0;
   if (status !== "active") return `انتهت منذ ${formatNumber(Math.abs(days))} يوماً`;
   if (days === 0) return "تنتهي اليوم";

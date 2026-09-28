@@ -84,6 +84,56 @@ def test_warranty_card_hides_the_supplier_behind_it(
     assert "SN-SH-1" in html
 
 
+def test_warranty_card_never_publishes_its_internal_notes(
+    client, env, aftersales_tenant, warranty_card
+):
+    """#222 بند ٦: سطرُ «تمديد الكفالة … — السبب» ملاحظةٌ داخلية لا إعلان.
+
+    `WarrantyCardViewSet.extend` يُلحق بالملاحظات التاريخَ القديم والجديد
+    والسببَ الحرّ الذي يكتبه الموظف لنفسه («مجاملة لزبون مهم»)، والصفحةُ
+    العامة كانت تنشره كما هو لمن يفتح الرابط.
+    """
+    warranty_card.notes = "تمديد الكفالة — مجاملة لأن الزبون تاجر جملة"
+    warranty_card.save(update_fields=["notes"])
+
+    _, html = _html(client, aftersales_tenant, "warranty_card", warranty_card)
+
+    assert "مجاملة لأن الزبون تاجر جملة" not in html
+    assert "بطاقة كفالة" in html  # الصفحة نفسها ما زالت تُعرض
+
+
+def test_an_ended_warranty_card_is_never_shown_as_valid(
+    client, env, aftersales_tenant, warranty_card
+):
+    """#222 بند ٧: الحالة من `status_on` لا من `end_date >= today`.
+
+    بطاقةُ جهازٍ أُرجع تبقى نهايتُها 2099، فالمقارنة وحدها كانت تختم الصفحة
+    «سارية» بالأخضر على شهادةٍ لم تعد لصاحبها.
+    """
+    from after_sales.models import WarrantyCard
+
+    warranty_card.ended_on = "2026-09-01"
+    warranty_card.end_reason = WarrantyCard.END_RETURNED
+    warranty_card.save(update_fields=["ended_on", "end_reason"])
+
+    _, html = _html(client, aftersales_tenant, "warranty_card", warranty_card)
+
+    assert "سارية" not in html
+    # ولا يُنشر سببُ الانتهاء — الحالة وحدها، كما في قرار «الحالة فقط».
+    assert "أُرجع الجهاز" not in html
+    assert "منتهي الصلاحية" in html
+
+
+def test_a_live_warranty_card_still_reads_valid(
+    client, env, aftersales_tenant, warranty_card
+):
+    """الاختبار السالب بلا موجب بلا قيمة — بطاقةٌ حيّة تبقى «سارية»."""
+    _, html = _html(client, aftersales_tenant, "warranty_card", warranty_card)
+
+    assert "سارية" in html
+    assert "منتهي الصلاحية" not in html
+
+
 def test_service_order_hides_the_estimate_until_it_is_approved(
     client, env, aftersales_tenant, service_order
 ):

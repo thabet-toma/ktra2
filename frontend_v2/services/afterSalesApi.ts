@@ -54,6 +54,12 @@ export interface WarrantyCardRow {
   notes: string;
   status: WarrantyStatus;
   days_remaining: number;
+  // #222: واقعة الانتهاء — `ended` يغلب `status`، والسبب يُعرض للموظف داخلياً
+  // لا للزبون (الصفحة العامة لا تنشره، انظر `docshare/documents/aftersales_docs.py`).
+  ended: boolean;
+  ended_on: string | null;
+  end_reason: string;
+  end_reason_label: string;
   created_at: string;
   updated_at: string;
 }

@@ -1159,13 +1159,20 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
     @action(detail=True, methods=['get'], url_path='serials')
     def serials(self, request, pk=None):
-        """وحدات هذا المنتج المُرقَّمة — `?status=in_stock|sold` للفلترة."""
+        """وحدات هذا المنتج المُرقَّمة — `?status=in_stock|sold`، أو
+        `?sales_invoice=<id>` لوحدات فاتورة بيعٍ بعينها (مرجع البيع)."""
         from inventory.serials import product_serials
         product = self.get_object()
+        sales_invoice = (request.query_params.get('sales_invoice') or '').strip()
+        if sales_invoice and not sales_invoice.isdigit():
+            return Response(
+                {'detail': 'sales_invoice يجب أن يكون رقم فاتورة.'}, status=400,
+            )
         return Response(product_serials(
             tenant_id=product.tenant_id,
             product_id=product.id,
             status=request.query_params.get('status') or None,
+            sales_invoice=int(sales_invoice) if sales_invoice else None,
         ))
 
     @action(detail=True, methods=['post'], url_path='serials/register')

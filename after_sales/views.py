@@ -73,7 +73,10 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         queryset = (
             WarrantyCard.objects
             .filter(tenant=self.tenant)
-            .select_related("product", "partner", "supplier", "sales_invoice_line__invoice")
+            .select_related(
+                "product", "partner", "supplier", "sales_invoice",
+                "sales_invoice_line__invoice",
+            )
         )
         if self.action != "list":
             return queryset
@@ -92,14 +95,18 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 | Q(product__sku__icontains=term)
             )
 
+        # #222: «المنتهية بواقعة» ليست سارية ولا «انتهت مدّتها» — فئةٌ ثالثة.
+        # الفلتران القديمان كانا يقارنان `end_date` وحده، فتظهر بطاقةُ جهازٍ
+        # أُرجع في قائمة «السارية».
         status_filter = (params.get("status") or "").strip()
-        if status_filter in ("active", "expired"):
+        if status_filter in ("active", "expired", "ended"):
             today = timezone.localdate()
-            queryset = (
-                queryset.filter(end_date__gte=today)
-                if status_filter == "active"
-                else queryset.filter(end_date__lt=today)
-            )
+            if status_filter == "ended":
+                queryset = queryset.filter(ended_on__isnull=False)
+            elif status_filter == "active":
+                queryset = queryset.filter(ended_on__isnull=True, end_date__gte=today)
+            else:
+                queryset = queryset.filter(ended_on__isnull=True, end_date__lt=today)
 
         source = (params.get("source") or "").strip()
         if source:
@@ -117,6 +124,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         if expiring.isdigit():
             today = timezone.localdate()
             queryset = queryset.filter(
+                ended_on__isnull=True,
                 end_date__gte=today,
                 end_date__lte=today + timedelta(days=int(expiring)),
             )
@@ -172,13 +180,22 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
     # ── الإجراءات ─────────────────────────────────────────────────────────
     @action(detail=True, methods=["post"], url_path="extend")
     def extend(self, request, pk=None):
-        """تمديد الكفالة مجاملةً — يُوثَّق في الملاحظات بتاريخ الخادم."""
+        """تمديد الكفالة مجاملةً — يُوثَّق في الملاحظات بتاريخ الخادم.
+
+        شرطان (#222 البند ٨): البطاقة ليست منتهيةً بواقعة، والتاريخ الجديد
+        **بعد** الحالي — يفرض الثاني `WarrantyExtendSerializer.resolved_end_date`.
+        """
         card = self.get_object()
+        if card.ended_on is not None:
+            raise ValidationError({
+                "detail": (
+                    f"البطاقة منتهية ({card.get_end_reason_display()}) بتاريخ "
+                    f"{card.ended_on} — لا تُمدَّد. تراجع عمّا أنهاها أولاً."
+                )
+            })
         form = WarrantyExtendSerializer(data=request.data)
         form.is_valid(raise_exception=True)
         new_end = form.resolved_end_date(card)
-        if new_end < card.start_date:
-            raise ValidationError({"end_date": "التاريخ الجديد قبل بدء الكفالة."})
 
         previous = card.end_date
         reason = (form.validated_data.get("reason") or "").strip()

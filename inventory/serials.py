@@ -546,6 +546,49 @@ def assert_sales_serials_declared(invoice, lines) -> None:
         )
 
 
+def assert_sales_return_serials_declared(return_invoice, lines) -> None:
+    """«إجباري» يحرس ترحيل **مرجع** البيع كما يحرس البيع — قبل أي كتابة.
+
+    مرآة `assert_sales_serials_declared`: «أي وحدةٍ رجعت؟» سؤالٌ لا يجيبه
+    ترتيبُ المعرّفات. تحت `required` تُسمّى الوحدة المرتجعة على البند، وإلا
+    استعاد المخزنُ وحدةً وأنهى `after_sales` بطاقةَ وحدةٍ أخرى — كلتاهما خطأ في
+    ورقة زبون. وتحت `optional` يبقى الترتيب احتياطاً كما كان.
+
+    مرجعٌ بلا فاتورة أصلية لا يستعيد شيئاً فلا يُطالَب بشيء، وبندٌ استُعيدت
+    وحداته فعلاً (إعادة ترحيل) لا يُطالَب ثانيةً.
+    """
+    mode = sales_serial_mode(return_invoice.tenant_id)
+    if mode != SERIAL_MODE_REQUIRED:
+        return
+    if getattr(return_invoice, 'original_invoice', None) is None:
+        return
+
+    incomplete: list[str] = []
+    for line in lines:
+        product = line.product
+        if not product_tracks_serials(product):
+            continue
+        label = _product_label(product)
+        needed = _whole_units(line.quantity, label=label)
+        if needed <= 0:
+            continue
+        if ProductSerial.objects.filter(return_line=line).exists():
+            continue
+        declared = normalize_serials(line.serials, label=label)
+        if len(declared) != needed:
+            incomplete.append(
+                f"«{label}» (المطلوب {needed} والمختار {len(declared)})"
+            )
+
+    if incomplete:
+        raise ValidationError(
+            'اختيار الأرقام التسلسلية إجباري قبل ترحيل مرجع البيع — سمِّ الوحدات '
+            'المرتجعة في البنود التالية: ' + '؛ '.join(incomplete)
+            + '. الوحدة المرتجعة تُسمّى ولا تُخمَّن: عليها تُبنى استعادة المخزن '
+            'وإنهاء بطاقة الكفالة.'
+        )
+
+
 def consume_sales_serials(invoice, lines) -> int:
     """يوسم وحدات فاتورة بيع «مُباع» ويربطها ببنودها عند الترحيل.
 
@@ -665,18 +708,23 @@ def release_sales_serials(invoice) -> int:
 def restore_returned_sales_serials(return_invoice, lines) -> int:
     """مرجع البيع يُعيد البضاعة للمخزن (RETURN_IN) — ووحداتها المُباعة تعود معها.
 
-    تُستعاد وحدات **الفاتورة الأصلية** لنفس المنتج بترتيب استهلاكها (الأقدم أولاً)
-    بقدر الكمية المرتجعة، فلا تبقى وحدةٌ «مُباعة» لزبون أعادها. بندٌ بلا وحدات
-    متتبَّعة — أو مرجعٌ بلا فاتورة أصلية — لا يفعل شيئاً: المخزون غير المتتبَّع
-    يبقى كما كان.
+    تُستعاد وحدات **الفاتورة الأصلية** لنفس المنتج بقدر الكمية المرتجعة، فلا
+    تبقى وحدةٌ «مُباعة» لزبون أعادها. بندٌ بلا وحدات متتبَّعة — أو مرجعٌ بلا
+    فاتورة أصلية — لا يفعل شيئاً: المخزون غير المتتبَّع يبقى كما كان.
 
-    أيُّ وحدة بعينها رجعت ليس سؤالاً يجيبه المستند (لا اختيار في مرجع البيع)،
-    فالترتيب هو الجواب الحتمي الوحيد المتاح.
+    **ما سمّاه البند يُستعاد كما هو** (#222): `line.serials` هو الجواب على «أيُّ
+    وحدةٍ رجعت»، ويُتحقَّق أنها مُباعةٌ على الفاتورة الأصلية ولنفس المنتج. كان
+    الاختيار بترتيب `id` وحده فيُعيد المخزنُ الوحدة الأولى مهما كان المكتوب على
+    ورقة المرجع — ويُنهي `after_sales` بطاقةَ جهازٍ لم يُرجَع. الترتيب يبقى
+    احتياطاً لـ`optional` وحده (تحت `required` يرفض
+    `assert_sales_return_serials_declared` البندَ الناقص قبل أي كتابة).
 
     **الأثر لا يُمحى:** `sales_line` يبقى على بند البيع الأصلي، ويُسجَّل بندُ
     المرجع في `return_line` — فيعرف `revert_returned_sales_serials` عند إلغاء
-    ترحيل المرجع أيَّ وحدةٍ أعاد وإلى أيِّ بيعٍ تعود. الحالةُ `in_stock` هي ما
-    يقول إن الوحدة ليست لزبون، و`_serial_row` لا يُسمّي زبوناً لوحدةٍ في المخزن.
+    ترحيل المرجع أيَّ وحدةٍ أعاد وإلى أيِّ بيعٍ تعود، ويعرف
+    `after_sales/services.py` (`on_sales_return_posted`) أيَّ بطاقةٍ يُنهي.
+    الحالةُ `in_stock` هي ما يقول إن الوحدة ليست لزبون، و`_serial_row` لا
+    يُسمّي زبوناً لوحدةٍ في المخزن.
     """
     original = getattr(return_invoice, 'original_invoice', None)
     if original is None:
@@ -691,12 +739,32 @@ def restore_returned_sales_serials(return_invoice, lines) -> int:
         qty = _whole_units(line.quantity, label=label)
         if qty <= 0:
             continue
-        units = list(
-            ProductSerial.objects.filter(
-                tenant_id=return_invoice.tenant_id, product=product,
-                status=ProductSerial.STATUS_SOLD, sales_line__invoice=original,
-            ).order_by('id')[:qty]
+        sold_on_original = ProductSerial.objects.filter(
+            tenant_id=return_invoice.tenant_id, product=product,
+            status=ProductSerial.STATUS_SOLD, sales_line__invoice=original,
         )
+        declared = normalize_serials(line.serials, label=label)
+        if len(declared) > qty:
+            raise ValidationError(
+                f"بند المرجع «{label}»: عدد الأرقام التسلسلية المختارة "
+                f"({len(declared)}) يتجاوز الكمية المرتجعة ({qty})."
+            )
+        units = list(sold_on_original.filter(serial__in=declared)) if declared else []
+        if len(units) != len(declared):
+            found = {u.serial for u in units}
+            missing = [s for s in declared if s not in found]
+            raise ValidationError(
+                f"بند المرجع «{label}»: الأرقام التسلسلية التالية ليست مُباعة على "
+                f"الفاتورة الأصلية «{original.invoice_number}» — "
+                f"{'، '.join(missing)}."
+            )
+        shortfall = qty - len(units)
+        if shortfall > 0:
+            units.extend(
+                sold_on_original
+                .exclude(pk__in=[u.pk for u in units])
+                .order_by('id')[:shortfall]
+            )
         for unit in units:
             unit.status = ProductSerial.STATUS_IN_STOCK
             unit.return_line = line
@@ -833,10 +901,21 @@ def _serial_queryset(tenant_id):
     )
 
 
-def product_serials(*, tenant_id, product_id, status=None, limit=500) -> list[dict]:
-    """وحدات منتج واحد — بفلترة الحالة اختيارياً."""
+def product_serials(
+    *, tenant_id, product_id, status=None, sales_invoice=None, limit=500,
+) -> list[dict]:
+    """وحدات منتج واحد — بفلترة الحالة، أو بوحدات **فاتورة بيعٍ بعينها** اختيارياً.
+
+    `sales_invoice` لمرجع البيع (#222 مراجعة): الوحدات المرتجَعة **مُباعة على
+    الفاتورة الأصلية** لا «في المخزن» — فمُنتقي الأرقام هناك يحتاج مُباع هذه
+    الفاتورة تحديداً، لا فلتر الحالة العام الذي لا يعرف أيّ فاتورة.
+    """
     qs = _serial_queryset(tenant_id).filter(product_id=product_id)
-    if status:
+    if sales_invoice:
+        qs = qs.filter(
+            sales_line__invoice_id=sales_invoice, status=ProductSerial.STATUS_SOLD,
+        )
+    elif status:
         qs = qs.filter(status=status)
     return [_serial_row(u) for u in qs.order_by('id')[:limit]]
 

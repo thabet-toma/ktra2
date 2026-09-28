@@ -417,6 +417,12 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
         Cheque.objects.filter(
             sales_invoice=instance, status="Draft", customer_payment__isnull=True,
         ).delete()
+        # #222: بطاقات هذه الفاتورة معلَّقة (المسودّة لا تُنشئ بطاقة) — وبحذفها
+        # لم يعد لها بيعٌ يعود. تبقى صفوفاً مؤرَّخة لا تُحذف: سجلُّ الجهاز عند
+        # الزبون لا يختفي لأن ورقةً حُذفت عندنا.
+        from after_sales.services import on_sale_cancelled
+
+        on_sale_cancelled(instance)
         response = super().destroy(request, *args, **kwargs)
         deleted_details = describe_activity_changes(deleted_changes)
         log_activity(
@@ -457,11 +463,18 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
                 # الأصلي، ويُرفض الإلغاء إن تحرّكت إحداها بعده.
                 if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
                     revert_returned_sales_serials(invoice)
-                # THA-24: بطاقات الكفالة التلقائية من إنتاج هذا الترحيل — تُحذف
-                # معه وتعود بإعادته (نمط الحذف نفسه). اليدوية لا تُمَسّ.
-                from after_sales.services import delete_auto_warranty_cards
+                # THA-24 × #222: بطاقة الكفالة **تُعلَّق ولا تُحذف** — هويّتها
+                # مرساةُ أوامر الصيانة ورمزِ الشهادة، وإعادة الترحيل تُحييها
+                # بنفس الـ`id`. ومرجعُ البيع يعكس ما أنهاه هو. اليدوية لا تُمَسّ.
+                from after_sales.services import (
+                    on_sale_unposted,
+                    on_sales_return_unposted,
+                )
 
-                delete_auto_warranty_cards(invoice)
+                if invoice.invoice_kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+                    on_sales_return_unposted(invoice)
+                else:
+                    on_sale_unposted(invoice)
                 result = unpost_document(
                     tenant_id=invoice.tenant_id,
                     reference_id=invoice.id,

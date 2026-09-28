@@ -9,7 +9,15 @@
 **وما لا يخرج إلى الزبون:** `supplier` و`supplier_warranty_end_date` و
 `supplier_claim*` — أن القطعة ما زالت تحت كفالة مورّدنا شأنٌ بيننا وبينه،
 وعرضُه للزبون يفتح تفاوضاً على من يتحمّل الكلفة لا شأن له به. و`technician`
-و`billing_waived_reason` و`estimated_amount` قبل الاعتماد كذلك.
+و`billing_waived_reason` و`estimated_amount` قبل الاعتماد كذلك. و**ملاحظاتُ
+بطاقة الكفالة** (#222 بند ٦): `WarrantyCardViewSet.extend` يُلحق بها سجلَّ
+التمديد بسببه الحرّ الذي يكتبه الموظف لنفسه، فنشرُه على الرابط العام إرسالٌ
+لمذكّرةٍ داخلية إلى صاحب الشأن.
+
+**وحالةُ البطاقة من `WarrantyCard.status_on` لا من مقارنة تاريخ** (#222 بند ٧):
+بطاقةُ جهازٍ أُرجع تبقى نهايتُها في المستقبل، فـ`end_date >= today` وحدها كانت
+تختمها «سارية» بالأخضر على شهادةٍ لم تعد لصاحبها. وسببُ الانتهاء **لا يخرج**:
+الحالة وحدها، كما في قرار رابط التحقّق.
 """
 from after_sales.models import ServiceOrder, WarrantyCard
 from docshare.documents._contract import (
@@ -57,8 +65,8 @@ def load_warranty_card(tenant_id: int, doc_id: int):
         .filter(pk=doc_id, tenant_id=tenant_id)
         .only(
             "id", "tenant_id", "device_name", "serial", "start_date",
-            "end_date", "duration_months", "notes", "customer_name",
-            "customer_phone",
+            "end_date", "duration_months", "customer_name",
+            "customer_phone", "ended_on", "end_reason",
             "partner__name", "partner__street_address", "partner__city",
             "partner__phone", "partner__tax_number",
             "product__name_ar", "product__name_en",
@@ -67,20 +75,28 @@ def load_warranty_card(tenant_id: int, doc_id: int):
     )
 
 
-def build_warranty_card(card) -> dict:
-    from django.utils import timezone
+def warranty_card_expired(card) -> bool:
+    """«غير سارية» للصفحة العامة — الواقعة والتاريخ معاً في جوابٍ واحد.
 
+    يقرؤها `docshare/views.py` (`_page_context`) بدل مقارنة `valid_until`
+    باليوم: مدّةُ البطاقة ليست وحدها ما يجعلها سارية منذ #222.
+    """
+    return card.status_on() != WarrantyCard.STATUS_ACTIVE
+
+
+def build_warranty_card(card) -> dict:
     device = (
         card.device_name
         or (card.product.name_ar or card.product.name_en if card.product_id else "")
         or ""
     )
-    active = card.end_date >= timezone.localdate()
+    active = not warranty_card_expired(card)
     return payload(
         kind="warranty_card",
         title="بطاقة كفالة",
         number=f"#{card.pk}",
         date=card.start_date,
+        # سببُ الانتهاء لا يُنشر — «سارية» أو «منتهية» وحدهما.
         status_label="سارية" if active else "منتهية",
         status_tone=TONE_OK if active else TONE_DANGER,
         party_title="الكفالة باسم",
@@ -97,7 +113,8 @@ def build_warranty_card(card) -> dict:
         ],
         show_lines=False,
         totals_rows=[],
-        notes=card.notes,
+        # `card.notes` **لا يخرج** — انظر رأس الملف (#222 بند ٦).
+        notes="",
         valid_until=card.end_date,
     )
 
@@ -175,6 +192,9 @@ AFTERSALES_DOC_TYPES = {
         "decision": None,
         #: بوابة الترخيص قبل الصلاحية — انظر رأس الملف.
         "module": "after_sales",
+        #: مفتاحٌ اختياريّ: النوع يقرّر متى تنتهي صلاحيته بدل مقارنة تاريخٍ
+        #: عامّة لا تعرف واقعة الانتهاء (#222 بند ٧).
+        "expired": warranty_card_expired,
     },
     "service_order": {
         "label": "أمر صيانة",

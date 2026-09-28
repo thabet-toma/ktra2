@@ -56,7 +56,13 @@ def _warranties_expiring(tenant_id: int, params: dict) -> list[dict]:
     rows = []
     queryset = (
         WarrantyCard.objects
-        .filter(tenant_id=tenant_id, end_date__gte=today, end_date__lte=horizon)
+        # #222: والمنتهية بواقعة خارجها أيضاً — بطاقةُ جهازٍ أُرجع ليست فرصة
+        # تجديد ولا مطالبةً متوقَّعة، وظهورُها هنا يُرسل الموظف إلى زبونٍ لا
+        # جهاز عنده.
+        .filter(
+            tenant_id=tenant_id, ended_on__isnull=True,
+            end_date__gte=today, end_date__lte=horizon,
+        )
         .select_related("product", "partner")
         .order_by("end_date", "id")
     )

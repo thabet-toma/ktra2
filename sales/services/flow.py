@@ -23,6 +23,7 @@ from accounting.services import (
 )
 from inventory.models import Product, StockMovement
 from inventory.serials import (
+    assert_sales_return_serials_declared,
     assert_sales_serials_declared,
     consume_sales_serials,
     release_sales_serials,
@@ -1518,6 +1519,10 @@ def post_sales_invoice(
     # الأصلية بالترتيب ولا اختيار فيه.
     if kind == SalesInvoice.INVOICE_KIND_SALE:
         assert_sales_serials_declared(invoice, lines)
+    elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
+        # #222: والمرجع يحرسه نظيرُه — «أيّ وحدةٍ رجعت؟» سؤالٌ لا يجيبه ترتيبُ
+        # المعرّفات تحت «إجباري»، والبطاقة التي تُنهى تتبع الجواب.
+        assert_sales_return_serials_declared(invoice, lines)
 
     recalculate_invoice_amounts(invoice, lines)
     # THA-18: تجميد لقطة الاسم لحظة الترحيل — لا عند إنشاء السطر. مرآة لفارق
@@ -1884,6 +1889,12 @@ def post_sales_invoice(
             create_auto_warranty_cards(invoice)
         elif kind == SalesInvoice.INVOICE_KIND_SALE_RETURN:
             restore_returned_sales_serials(invoice, lines)
+            # #222: البضاعة رجعت ⇒ بطاقة كفالتها تنتهي بواقعةٍ مؤرَّخة بتاريخ
+            # المرجع. **بعد** الاستعادة لا قبلها: هي التي تكتب `return_line`
+            # الذي يُسمّي الوحدة المرتجعة بعينها.
+            from after_sales.services import on_sales_return_posted
+
+            on_sales_return_posted(invoice)
 
         create_audit_log(
             tenant=invoice.tenant,

@@ -1,21 +1,31 @@
 """محرّك الكفالة — دورة حياة بطاقة الكفالة التلقائية وفحص التغطية.
 
-نقطتا التحام اثنتان لا ثالثة لهما:
+**تعطيلٌ لا حذف (#222).** البطاقة التلقائية لا تُحذف أبداً: هويّتها (`id`) هي
+ما تتعلّق به أوامر الصيانة ورمزُ التحقّق المطبوع على الشهادة، وحذفُها عند إلغاء
+ترحيل الفاتورة كان يكسر الاثنين ثم يُنشئ بديلاً بـ`id` جديد. بدلاً من ذلك
+تُسجَّل على البطاقة **واقعةُ انتهاء** مؤرَّخة (`ended_on` + `end_reason`)،
+ويُحييها إعادةُ الترحيل بنفسها.
 
-- `create_auto_warranty_cards` بعد استهلاك الوحدات في ترحيل فاتورة البيع.
-- `delete_auto_warranty_cards` عند إلغاء الترحيل (حذفٌ لا تعطيل — نمط
-  `unpost_document` نفسه)، وإعادة الترحيل تُنشئها من جديد.
+خمس نقاط التحام، كلّها كسولةٌ من `sales` ومحروسةٌ بترخيص الوحدة:
 
-**صفر أثر على شركة غير مرخّصة:** الدالتان تخرجان فوراً إن لم تكن الوحدة
-مرخّصة، فلا يكتب النظامُ صفاً في جدولٍ لا تراه الشركة أصلاً.
+- `create_auto_warranty_cards` — ترحيل البيع: يُحيي المعلَّق ثم يُنشئ الناقص.
+- `on_sale_unposted` — إلغاء الترحيل: تعليقٌ بـ`invoice_unposted`.
+- `on_sale_cancelled` — حذف المسودّة: المعلَّق يصير `sale_cancelled` بلا رجعة.
+- `on_sales_return_posted` — مرجع البيع: الوحدات المرتجعة وحدها تُنهى بـ`returned`.
+- `on_sales_return_unposted` — إلغاء ترحيل المرجع: إحياءُ ما أنهاه.
+
+**صفر أثر على شركة غير مرخّصة:** كلّها تخرج فوراً إن لم تكن الوحدة مرخّصة، فلا
+يكتب النظامُ ولا يُعدِّل صفاً في جدولٍ لا تراه الشركة أصلاً.
 """
 import logging
-from datetime import date
+from datetime import date, timedelta
+
+from django.db.models import Q
+from django.utils import timezone
 
 from core.modules import module_enabled
 
 from .models import AfterSalesSettings, WarrantyCard, add_months
-from django.utils import timezone
 
 logger = logging.getLogger(__name__)
 
@@ -46,14 +56,107 @@ def _supplier_side(unit, supplier_months: int):
     return supplier_id, add_months(purchase_date, supplier_months)
 
 
+def _invoice_cards(invoice):
+    """بطاقات هذه الفاتورة التلقائية — بالمرساتين معاً.
+
+    `sales_invoice` هي المرساة منذ #222، لكن بطاقاتٍ أقدم منها قد تحمل البند
+    وحده (لو فشل الـbackfill لانقطاع بندها)، فتبقى المرساة الثانية احتياطاً.
+    """
+    return WarrantyCard.objects.filter(
+        tenant_id=invoice.tenant_id, source=WarrantyCard.SOURCE_AUTO_SALE,
+    ).filter(
+        Q(sales_invoice=invoice) | Q(sales_invoice_line__invoice=invoice)
+    )
+
+
+#: مخرجات `_revive`: أُحييت · كانت حيّةً فحُدِّثت · رُفضت (واقعتها خارج الفاتورة).
+REVIVED, KEPT, REFUSED = "revived", "kept", ""
+
+
+def _revive(card, invoice, unit, customer) -> str:
+    """يُعيد بطاقةً معلَّقة إلى الحياة على فاتورتها — بنفس الـ`id`.
+
+    يبقى: الـ`id` والشروط المجمَّدة والمدّة والتمديدات والملاحظات وروابط أوامر
+    الصيانة. ويُحدَّث: لقطة الزبون و`partner` و`sales_invoice_line`. وإن تغيّر
+    تاريخ الفاتورة بين الإلغاء وإعادة الترحيل أُزيح طرفا البطاقة بالفرق نفسه،
+    فيبقى التمديد اليدوي فوقهما كما مُنح.
+
+    **المنتهية بمرجعٍ لا تُحيا هنا أبداً** — ولا المُستبدَلة ببطاقةِ مشترٍ ثانٍ:
+    كلتاهما واقعةٌ خارج هذه الفاتورة، وإحياؤها يسحب شهادةً من صاحبها الحالي.
+    تُترك على حالها وتأخذ الوحدةُ بطاقةً جديدة لبيعها الجديد.
+    """
+    fields = ["sales_invoice_line", "partner", "customer_name", "customer_phone"]
+    reviving = card.ended_on is not None
+    if reviving:
+        if card.end_reason not in (
+            WarrantyCard.END_INVOICE_UNPOSTED, WarrantyCard.END_SALE_CANCELLED,
+        ):
+            return REFUSED
+        card.ended_on = None
+        card.end_reason = ""
+        card.end_return_line = None
+        fields += ["ended_on", "end_reason", "end_return_line"]
+
+    shift = (invoice.invoice_date - card.start_date).days
+    if shift:
+        card.start_date = invoice.invoice_date
+        card.end_date = card.end_date + timedelta(days=shift)
+        fields += ["start_date", "end_date"]
+
+    card.sales_invoice_line_id = unit.sales_line_id
+    card.partner_id = invoice.customer_id
+    card.customer_name = (customer.name if customer else "")[:150]
+    card.customer_phone = (
+        (getattr(customer, "phone", "") or "")[:32] if customer else ""
+    )
+    card.save(update_fields=fields + ["updated_at"])
+    return REVIVED if reviving else KEPT
+
+
+def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
+    """شفاءٌ ذاتي: بطاقةٌ تلقائية حيّة لهذه الوحدة على فاتورةٍ **أخرى** تُنهى.
+
+    تُغطّي مرجعاً وقع والوحدة مطفأة، وبياناتٍ قديمة انقطعت مرساتها. البطاقة
+    **اليدوية لا تُمَسّ**: صاحبها كتبها بيده ولا علاقة لترحيلنا بها.
+    """
+    ended = (
+        WarrantyCard.objects
+        .filter(
+            tenant_id=invoice.tenant_id,
+            source=WarrantyCard.SOURCE_AUTO_SALE,
+            product_serial_id__in=unit_ids,
+            ended_on__isnull=True,
+        )
+        .exclude(sales_invoice=invoice)
+        .update(
+            ended_on=invoice.invoice_date,
+            end_reason=WarrantyCard.END_SUPERSEDED,
+        )
+    )
+    if ended:
+        logger.info(
+            "after_sales.warranty_cards_superseded invoice=%s tenant=%s cards=%d",
+            invoice.pk, invoice.tenant_id, ended,
+        )
+    return ended
+
+
 def create_auto_warranty_cards(invoice) -> int:
-    """يُنشئ بطاقة كفالة لكل وحدة متسلسلة استهلكها ترحيل هذه الفاتورة.
+    """يُحيي بطاقات هذه الفاتورة المعلَّقة، ثم يُنشئ ما ينقص من وحداتها.
 
     البداية = **تاريخ الفاتورة** لا تاريخ الترحيل ولا التسليم: تاريخ المستند هو
     ما تُقيَّد به الدفاتر كلها، وحالة التسليم مشتقّة وقد تغيب أصلاً.
 
     غير المتسلسل لا بطاقة تلقائية له: كمية بلا هوية وحدة تجعل البطاقة بلا معنى،
     والتغطية تُفحص عندها من فاتورة الزبون لحظة الاستقبال.
+
+    **المطابقة على `(sales_invoice, product_serial)` لا على البند**: تعديل
+    المسودّة بين الإلغاء وإعادة الترحيل يحذف البنود التي تُرسَل بلا `id`، فتبقى
+    الفاتورة وحدها مرساةً صامدة. وما بقي معلَّقاً بعد الإحياء (وحدةٌ استُبدلت أو
+    بندٌ حُذف) يصير `sale_cancelled`: البيع الذي وَلَّده لم يعد قائماً.
+
+    وحارس «بطاقة حيّة واحدة لكل وحدة» صار مقيَّداً بهذه الفاتورة: كان مطلقاً
+    فمنع المشتري الثاني لوحدةٍ أُرجعت من أن يأخذ شهادته أصلاً.
     """
     from inventory.models import ProductSerial
     from inventory.services import product_display_name
@@ -61,7 +164,7 @@ def create_auto_warranty_cards(invoice) -> int:
     if not module_enabled(invoice.tenant_id, MODULE_KEY):
         return 0
 
-    units = (
+    units = list(
         ProductSerial.objects
         .filter(
             tenant_id=invoice.tenant_id,
@@ -71,23 +174,42 @@ def create_auto_warranty_cards(invoice) -> int:
         .select_related("product", "purchase_item__invoice")
         .order_by("id")
     )
-    units = list(units)
-    if not units:
-        return 0
+    customer = invoice.customer if invoice.customer_id else None
+    unit_ids = [u.pk for u in units]
 
-    # حصر «بطاقة حيّة واحدة لكل وحدة» في الكود: MySQL لا تدعم فرادةً شرطية،
-    # والاستعلام مرة واحدة للدفعة كلها لا مرة لكل وحدة.
-    already_carded = set(
-        WarrantyCard.objects
-        .filter(tenant_id=invoice.tenant_id, product_serial__in=[u.pk for u in units])
-        .values_list("product_serial_id", flat=True)
+    # ١) الإحياء أولاً — بطاقةٌ لهذه الوحدة على هذه الفاتورة تعود بنفسها.
+    existing = {
+        card.product_serial_id: card
+        for card in _invoice_cards(invoice).filter(product_serial_id__in=unit_ids)
+    }
+    revived = 0
+    carried = set()
+    for unit in units:
+        card = existing.get(unit.pk)
+        if card is None:
+            continue
+        outcome = _revive(card, invoice, unit, customer)
+        if outcome == REFUSED:
+            continue  # واقعتها أصدق من هذا الترحيل — والوحدة تأخذ بطاقةً جديدة
+        if outcome == REVIVED:
+            revived += 1
+        carried.add(unit.pk)
+
+    # ٢) ما بقي معلَّقاً على هذه الفاتورة لم يعد له بيعٌ يحمله.
+    cancelled = (
+        _invoice_cards(invoice)
+        .filter(end_reason=WarrantyCard.END_INVOICE_UNPOSTED)
+        .exclude(product_serial_id__in=list(carried))
+        .update(end_reason=WarrantyCard.END_SALE_CANCELLED)
     )
 
-    customer = invoice.customer if invoice.customer_id else None
+    # ٣) الوحدات الجديدة: شفاءٌ ذاتي لبطاقةٍ قديمة حيّة، ثم بطاقةٌ لهذا الزبون.
+    fresh = [u for u in units if u.pk not in carried]
+    if fresh:
+        _supersede_stale_cards(invoice, [u.pk for u in fresh])
+
     created = []
-    for unit in units:
-        if unit.pk in already_carded:
-            continue
+    for unit in fresh:
         months = int(getattr(unit.product, "warranty_months", 0) or 0)
         if months <= 0:
             continue
@@ -105,6 +227,7 @@ def create_auto_warranty_cards(invoice) -> int:
             ],
             serial=unit.serial,
             product_serial=unit,
+            sales_invoice=invoice,
             sales_invoice_line_id=unit.sales_line_id,
             partner_id=invoice.customer_id,
             customer_name=(customer.name if customer else "")[:150],
@@ -117,37 +240,130 @@ def create_auto_warranty_cards(invoice) -> int:
             supplier_warranty_end_date=supplier_end,
         ))
 
-    if not created:
-        return 0
-    WarrantyCard.objects.bulk_create(created)
-    logger.info(
-        "after_sales.warranty_cards_created invoice=%s tenant=%s cards=%d",
-        invoice.pk, invoice.tenant_id, len(created),
-    )
+    if created:
+        WarrantyCard.objects.bulk_create(created)
+    if created or revived or cancelled:
+        logger.info(
+            "after_sales.warranty_cards_synced invoice=%s tenant=%s "
+            "created=%d revived=%d cancelled=%d",
+            invoice.pk, invoice.tenant_id, len(created), revived, cancelled,
+        )
     return len(created)
 
 
-def delete_auto_warranty_cards(invoice) -> int:
-    """يحذف بطاقات هذه الفاتورة التلقائية وحدها — اليدوية لا تُمَسّ.
+def on_sale_unposted(invoice) -> int:
+    """إلغاء ترحيل البيع **يُعلّق** بطاقاته الحيّة ولا يحذف واحدة.
 
-    المرساة هي بند الفاتورة (`sales_invoice_line`) لا رابط الوحدة: إلغاء
-    الترحيل يُفرِّغ `ProductSerial.sales_line` فيضيع الأثر لو اعتمدنا عليه.
+    البطاقة المنتهية بمرجعٍ لا تُمَسّ: واقعتها أصدق من هذه، ولا يجوز أن يمحوها
+    إلغاءُ ترحيلٍ ثم يعيدها الترحيل «سارية» لزبونٍ أعاد جهازه.
     """
-    deleted, _ = (
+    if not module_enabled(invoice.tenant_id, MODULE_KEY):
+        return 0
+    suspended = _invoice_cards(invoice).filter(ended_on__isnull=True).update(
+        ended_on=timezone.localdate(),
+        end_reason=WarrantyCard.END_INVOICE_UNPOSTED,
+    )
+    if suspended:
+        logger.info(
+            "after_sales.warranty_cards_suspended invoice=%s tenant=%s cards=%d",
+            invoice.pk, invoice.tenant_id, suspended,
+        )
+    return suspended
+
+
+def on_sale_cancelled(invoice) -> int:
+    """حذف مسودّة الفاتورة: بطاقاتها المعلَّقة لن يعود لها بيعٌ أبداً."""
+    if not module_enabled(invoice.tenant_id, MODULE_KEY):
+        return 0
+    cancelled = (
+        _invoice_cards(invoice)
+        .filter(end_reason=WarrantyCard.END_INVOICE_UNPOSTED)
+        .update(end_reason=WarrantyCard.END_SALE_CANCELLED)
+    )
+    if cancelled:
+        logger.info(
+            "after_sales.warranty_cards_cancelled invoice=%s tenant=%s cards=%d",
+            invoice.pk, invoice.tenant_id, cancelled,
+        )
+    return cancelled
+
+
+def on_sales_return_posted(return_invoice) -> int:
+    """مرجع البيع يُنهي بطاقات **الوحدات المرتجعة وحدها** على فاتورتها الأصلية.
+
+    الوحدة المرتجعة تُعرف من `ProductSerial.return_line` الذي كتبه
+    `inventory/serials.py` (`restore_returned_sales_serials`) للتوّ — لا من
+    كميات المرجع ولا من ترتيبٍ مُخمَّن. فالمرجع الجزئي يمسّ ما أُرجع فعلاً،
+    وبقية البطاقات تبقى سارية.
+
+    مرجعٌ بلا فاتورة أصلية لا وحدة تُستعاد فيه، فلا بطاقة تُمسّ — سلوك المخزون
+    نفسه.
+    """
+    from inventory.models import ProductSerial
+
+    if not module_enabled(return_invoice.tenant_id, MODULE_KEY):
+        return 0
+    original_id = getattr(return_invoice, "original_invoice_id", None)
+    if not original_id:
+        return 0
+
+    return_line_by_unit = dict(
+        ProductSerial.objects
+        .filter(
+            tenant_id=return_invoice.tenant_id,
+            return_line__invoice=return_invoice,
+        )
+        .values_list("pk", "return_line_id")
+    )
+    if not return_line_by_unit:
+        return 0
+
+    cards = list(
         WarrantyCard.objects
         .filter(
-            tenant_id=invoice.tenant_id,
-            source=WarrantyCard.SOURCE_AUTO_SALE,
-            sales_invoice_line__invoice=invoice,
+            tenant_id=return_invoice.tenant_id,
+            product_serial_id__in=list(return_line_by_unit),
+            ended_on__isnull=True,
         )
-        .delete()
+        .filter(
+            Q(sales_invoice_id=original_id)
+            | Q(sales_invoice_line__invoice_id=original_id)
+        )
     )
-    if deleted:
+    for card in cards:
+        card.ended_on = return_invoice.invoice_date
+        card.end_reason = WarrantyCard.END_RETURNED
+        card.end_return_line_id = return_line_by_unit[card.product_serial_id]
+        card.save(update_fields=[
+            "ended_on", "end_reason", "end_return_line", "updated_at",
+        ])
+    if cards:
         logger.info(
-            "after_sales.warranty_cards_deleted invoice=%s tenant=%s cards=%d",
-            invoice.pk, invoice.tenant_id, deleted,
+            "after_sales.warranty_cards_returned return=%s original=%s tenant=%s cards=%d",
+            return_invoice.pk, original_id, return_invoice.tenant_id, len(cards),
         )
-    return deleted
+    return len(cards)
+
+
+def on_sales_return_unposted(return_invoice) -> int:
+    """إلغاء ترحيل المرجع يُحيي ما أنهاه هو وحده — بدلالة `end_return_line`.
+
+    ولا سباق على وحدةٍ بِيعت ثانيةً: الحارس القائم
+    (`inventory/serials.py` — `revert_returned_sales_serials`) يرفض الإلغاء
+    أصلاً قبل أن نصل إلى هنا.
+    """
+    if not module_enabled(return_invoice.tenant_id, MODULE_KEY):
+        return 0
+    revived = WarrantyCard.objects.filter(
+        tenant_id=return_invoice.tenant_id,
+        end_return_line__invoice=return_invoice,
+    ).update(ended_on=None, end_reason="", end_return_line=None)
+    if revived:
+        logger.info(
+            "after_sales.warranty_cards_unreturned return=%s tenant=%s cards=%d",
+            return_invoice.pk, return_invoice.tenant_id, revived,
+        )
+    return revived
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -180,6 +396,10 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     وحدةٌ بعناها قبل ترخيص الوحدة (أو منتجٌ بلا سياسة كفالة) لا بطاقة لها؛ نردّ
     عندها ما نعرفه عن الوحدة نفسها (منتجها وفاتورتها وزبونها) كي يقرّر موظف
     الاستقبال بدل أن يرى «غير موجود» على وحدةٍ بعناها بأنفسنا.
+
+    **والمنتهية بواقعة لا تُعدّ تغطية** (#222): جهازٌ أُرجع، أو بيعٌ أُلغي
+    ترحيله، ليس مكفولاً عندنا مهما بقي من مدّته — وهذه هي النقطة التي كان
+    الاستقبال يقول منها «مغطّى» عن وحدةٍ راجعة في المخزن.
     """
     from inventory.models import ProductSerial
     from inventory.services import product_display_name
@@ -191,7 +411,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
 
     cards = list(
         WarrantyCard.objects
-        .filter(tenant_id=tenant_id, serial=serial)
+        .filter(tenant_id=tenant_id, serial=serial, ended_on__isnull=True)
         .select_related("product")
         .order_by("-end_date", "-id")
     )

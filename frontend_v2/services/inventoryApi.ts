@@ -478,12 +478,17 @@ export const inventoryApi = {
     return Array.isArray(data.serials) ? data.serials : [];
   },
 
-  /** وحدات منتج واحد المُرقَّمة — `status` يفلتر «في المخزن»/«مُباع». */
+  /** وحدات منتج واحد المُرقَّمة — `status` يفلتر «في المخزن»/«مُباع»، أو
+   *  `salesInvoiceId` لوحدات فاتورة بيعٍ بعينها (مرجع البيع — #222 مراجعة). */
   getProductSerials: async (
     productId: number,
     status?: "in_stock" | "sold",
+    salesInvoiceId?: number,
   ): Promise<ProductSerialRow[]> => {
-    const q = status ? `?status=${encodeURIComponent(status)}` : "";
+    const params = new URLSearchParams();
+    if (salesInvoiceId) params.set("sales_invoice", String(salesInvoiceId));
+    else if (status) params.set("status", status);
+    const q = params.toString() ? `?${params.toString()}` : "";
     const res = await fetch(`${INV}/products/${productId}/serials/${q}`, {
       headers: headers(),
     });

@@ -4579,6 +4579,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             value={row.serials ?? []}
             required={serialMode === "required"}
             readOnly={readOnly}
+            poolSalesInvoiceId={isReturn && originalInvoiceId != null ? originalInvoiceId : undefined}
             onClose={() => setSerialLineKey(null)}
             onSave={(picked) => {
               updateLine(row.key, { serials: picked });

@@ -205,6 +205,8 @@ export const WarrantyCardsScreen: React.FC = () => {
               <option value="">الكل</option>
               <option value="active">سارية</option>
               <option value="expired">منتهية</option>
+              {/* #222: غير سارية بواقعة — أُرجع الجهاز أو أُلغي ترحيل بيعه */}
+              <option value="ended">غير سارية</option>
             </select>
           </div>
           <div>
