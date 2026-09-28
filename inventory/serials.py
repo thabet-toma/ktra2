@@ -14,8 +14,9 @@ import re
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db.models import Sum
 
-from .models import Product, ProductSerial
+from .models import Product, ProductSerial, StockMovement
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,31 @@ def normalize_serials(raw, *, label: str = '') -> list[str]:
     return out
 
 
-def strip_serials_when_off(rows, mode: str) -> None:
+def strip_serials_when_off(rows, tenant_id, side: str) -> None:
     """نمط «بدون» لا يخزّن أرقاماً أصلاً — تُفرَّغ من حمولة البنود عند الحفظ.
 
     الإلزام في الخدمات يمنع إنشاء الوحدات على أي حال؛ التفريغ هنا يمنع بقاء أرقامٍ
     نائمة على المستندات تصبح فاعلة فجأةً لو شُغّل الإعداد لاحقاً.
+
+    #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بندٌ لمنتجٍ
+    مفروضٍ بسياسة كفالة يبقى بأرقامه حتى إن كان نمط الشركة `off`؛ لهذا تغيّر
+    التوقيع من نمطٍ واحد ثابت إلى `(tenant_id, side)` بنداءٍ واحد للدفعة.
     """
-    if mode != SERIAL_MODE_OFF:
+    candidates = [
+        row for row in (rows or [])
+        if isinstance(row, dict) and row.get('serials') and row.get('product') is not None
+    ]
+    if not candidates:
         return
-    for row in rows or []:
-        if isinstance(row, dict) and row.get('serials'):
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(
+        tenant_id, [row['product'].pk for row in candidates],
+    )
+    for row in candidates:
+        mode = effective_serial_mode(
+            tenant_id, row['product'], side, requirement_map=requirement_map,
+        )
+        if mode == SERIAL_MODE_OFF:
             row['serials'] = []
 
 
@@ -169,6 +185,37 @@ def sales_serial_mode(tenant_id) -> str:
     return mode or SERIAL_MODE_OFF
 
 
+def effective_serial_mode(tenant_id, product, side: str, *, requirement_map=None) -> str:
+    """مصدر واحد لكل قرار نمطٍ في هذا الملف (#233) — البيع والشراء يمرّان من هنا.
+
+    منتجٌ يسمّيه `core.hooks.serial_requirements` (سياسة كفالة «برقم تسلسلي» في
+    `after_sales` — بلا استيراده هنا، الربط عبر الـhook وحده) مفروضٌ:
+    - `side='sale'`: `required` مهما كان إعداد الشركة — لا FIFO ولا بطاقة على
+      رقم مخمَّن.
+    - `side='purchase'`: `optional` على الأقل، و`required` إن كان إعداد
+      الشركة كذلك — الحاوية قد لا تُفتح قبل الترحيل.
+
+    منتجٌ غير مسمّى: نمط الشركة كما هو.
+
+    `requirement_map`: يُمرَّر جاهزاً من مستدعٍ يعالج عدّة بنودٍ لمستندٍ واحد —
+    نداءٌ واحد للمستند لا لكل بند. غيابه يحسبها لهذا المنتج وحده.
+    """
+    if requirement_map is None:
+        from core.hooks import serial_requirements
+
+        requirement_map = serial_requirements(tenant_id, [product.pk])
+    forced = product.pk in requirement_map
+
+    if side == 'sale':
+        return SERIAL_MODE_REQUIRED if forced else sales_serial_mode(tenant_id)
+    if side == 'purchase':
+        company_mode = purchase_serial_mode(tenant_id)
+        if not forced:
+            return company_mode
+        return company_mode if company_mode == SERIAL_MODE_REQUIRED else SERIAL_MODE_OPTIONAL
+    raise ValueError(f"جانبٌ غير معروف لنمط الأرقام التسلسلية: {side}")
+
+
 # ══════════════════════════════════════════════════════════════════════════
 # الشراء: الاستلام يُنشئ الوحدات · التراجع يحرّرها
 # ══════════════════════════════════════════════════════════════════════════
@@ -180,15 +227,29 @@ def assert_purchase_serials_declared(invoice) -> None:
     فاتورة الكمية بلا قيمة كانت تُرحَّل بلا رقم واحد ثم يُقفل تعديلها فلا سبيل
     لإضافة الأرقام إلا بإلغاء الترحيل. الحارس هنا يقع **قبل** أي كتابة، والاستلام
     يبقى خط الدفاع الثاني كما هو (`apply_purchase_serials`).
+
+    #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — منتجٌ
+    مفروضٌ بسياسة كفالة يصير `optional` هنا لا `required` تلقائياً (يُحرسه
+    مصدره أدناه)، فلا يدخل هذا الحارس إلا حين يكون إعداد الشركة نفسه `required`.
     """
-    mode = purchase_serial_mode(invoice.tenant_id)
-    if mode != SERIAL_MODE_REQUIRED:
+    items = [
+        item for item in invoice.items.select_related('product').all()
+        if product_tracks_serials(item.product)
+    ]
+    if not items:
         return
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(
+        invoice.tenant_id, [item.product_id for item in items],
+    )
 
     incomplete: list[str] = []
-    for item in invoice.items.select_related('product').all():
+    for item in items:
         product = item.product
-        if not product_tracks_serials(product):
+        mode = effective_serial_mode(
+            invoice.tenant_id, product, 'purchase', requirement_map=requirement_map,
+        )
+        if mode != SERIAL_MODE_REQUIRED:
             continue
         label = _product_label(product)
         ordered = _whole_units(item.quantity, label=label)
@@ -212,10 +273,21 @@ def assert_receipt_without_serials_allowed(tenant_id, products) -> None:
 
     بابٌ يُدخل المخزون بلا ترقيم يُنتج بالضبط المخزون الذي يرفض البيعُ بيعه؛
     والمخرج مُسمّى في الرسالة لا متروك للمستخدم يبحث عنه.
+
+    #233: لكل منتجٍ نمطه الفعّال الخاص — منتجٌ مفروضٌ بسياسة كفالة يصير على
+    الأقلّ `optional` (لا يُمنع الاستلام بلا رقم)، ويُمنع فقط حين يبلغ
+    `required` فعلاً (إعداد الشركة نفسه `required`، أو الشركة أيضاً فرضته).
     """
-    if purchase_serial_mode(tenant_id) != SERIAL_MODE_REQUIRED:
+    candidates = [p for p in products if product_tracks_serials(p)]
+    if not candidates:
         return
-    tracked = [_product_label(p) for p in products if product_tracks_serials(p)]
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(tenant_id, [p.pk for p in candidates])
+    tracked = [
+        _product_label(p) for p in candidates
+        if effective_serial_mode(tenant_id, p, 'purchase', requirement_map=requirement_map)
+        == SERIAL_MODE_REQUIRED
+    ]
     if not tracked:
         return
     raise ValidationError(
@@ -245,9 +317,7 @@ def register_existing_serials(*, tenant_id, product, serials) -> int:
     _assert_serials_free(tenant_id, product, clean)
 
     on_hand = Decimal(str(product.quantity_on_hand or 0))
-    tracked = ProductSerial.objects.filter(
-        tenant_id=tenant_id, product=product, status=ProductSerial.STATUS_IN_STOCK,
-    ).count()
+    tracked = _tracked_in_stock_count(tenant_id, product)
     if tracked + len(clean) > on_hand:
         on_hand_label = (
             str(int(on_hand)) if on_hand == on_hand.to_integral_value() else str(on_hand)
@@ -284,16 +354,30 @@ def apply_purchase_serials(*, tenant, rows) -> int:
 
     الاستلام الجزئي يأخذ الأرقام بالترتيب المُدخَل: ما استُلم سابقاً موجود أصلاً
     كصفوف، فتبدأ الحصّة الجديدة من حيث انتهت. كل التحقق يسبق أي كتابة.
+
+    #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بند لمنتجٍ
+    مفروضٍ بسياسة كفالة لا يتخطّاه `off` الشركة، ونداءٌ واحد لكل الدفعة لا لكل بند.
     """
     tenant_id = getattr(tenant, 'TenantID', tenant)
-    mode = purchase_serial_mode(tenant_id)
-    if mode == SERIAL_MODE_OFF:
+    rows = list(rows)
+    tracked_products = {
+        item.product_id: item.product for item, _ in rows
+        if product_tracks_serials(item.product)
+    }
+    if not tracked_products:
         return 0
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(tenant_id, list(tracked_products))
 
     planned: list[tuple] = []
     for item, quantity in rows:
         product = item.product
         if not product_tracks_serials(product):
+            continue
+        mode = effective_serial_mode(
+            tenant_id, product, 'purchase', requirement_map=requirement_map,
+        )
+        if mode == SERIAL_MODE_OFF:
             continue
         label = _product_label(product)
         received_now = _whole_units(quantity, label=label)
@@ -334,10 +418,48 @@ def apply_purchase_serials(*, tenant, rows) -> int:
 
     if created:
         logger.info(
-            'product serials received: tenant=%s mode=%s units=%d lines=%d',
-            tenant_id, mode, created, len(planned),
+            'product serials received: tenant=%s units=%d lines=%d',
+            tenant_id, created, len(planned),
         )
     return created
+
+
+def _tracked_in_stock_count(tenant_id, product) -> int:
+    """عدد وحدات المنتج المُرقَّمة `in_stock` — نواة رصيد «غير المرقّم» المشتركة
+    بين تسجيل مخزونٍ قائم (`register_existing_serials`) والترقيم عند البيع
+    (`consume_sales_serials`، #233)."""
+    return ProductSerial.objects.filter(
+        tenant_id=tenant_id, product=product, status=ProductSerial.STATUS_IN_STOCK,
+    ).count()
+
+
+def _pre_sale_on_hand(invoice, product) -> Decimal:
+    """رصيد المنتج قبل حركة صرف **هذه الفاتورة تحديداً** — مُحسَبٌ صراحةً لا
+    مفترَضاً من بقاء كائنٍ في الذاكرة بلا تحديث (#233-r1، مراجعة).
+
+    الرصيد الحالي **مُنعَشٌ من القاعدة** زائد ما صرفته حركات هذه الفاتورة
+    (`reference_type='SALE'`, `movement_type='OUT'`) لهذا المنتج بالضبط —
+    يعمل سواءً سبقت حركةُ المخزون هذا النداء (`stock_on_post=True`، فتُضاف
+    كميتها لتُلغي أثرها) أو لم تحدث أصلاً (`stock_on_post=False`، فلا شيء
+    يُضاف والرصيد الحالي هو رصيد ما قبل البيع فعلاً). لا يفترض شيئاً عن
+    الكائن الذي مرّره المستدعي ولا عن ترتيب الاستدعاءات."""
+    current = Product.objects.filter(pk=product.pk).values_list(
+        'quantity_on_hand', flat=True,
+    ).first()
+    current = Decimal(str(current or 0))
+    already_out = StockMovement.objects.filter(
+        tenant_id=invoice.tenant_id, product_id=product.pk,
+        reference_type='SALE', reference_id=invoice.pk, movement_type='OUT',
+    ).aggregate(total=Sum('quantity'))['total'] or Decimal('0')
+    return current + Decimal(str(already_out))
+
+
+def unnumbered_serial_balance(tenant_id, product) -> int:
+    """رصيد المنتج غير المرقَّم الآن — للعرض (معاينة سياسة الكفالة قبل الحفظ،
+    #233) لا حارساً وقت الحفظ الفعلي؛ الرقم قد يتغيّر حتى لحظة التنفيذ."""
+    on_hand = Decimal(str(product.quantity_on_hand or 0))
+    balance = on_hand - _tracked_in_stock_count(tenant_id, product)
+    return int(balance) if balance > 0 else 0
 
 
 def _assert_serials_free(tenant_id, product, serials) -> None:
@@ -518,15 +640,25 @@ def assert_sales_serials_declared(invoice, lines) -> None:
 
     بندٌ استُهلكت وحداته فعلاً (إعادة ترحيل بعد إلغاء) لا يُطالَب ثانيةً — نفس
     قاعدة الذرّية في `consume_sales_serials`.
+
+    #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بند لمنتجٍ
+    مفروضٍ بسياسة كفالة يُطالَب دائماً بغضّ النظر عن إعداد الشركة.
     """
-    mode = sales_serial_mode(invoice.tenant_id)
-    if mode != SERIAL_MODE_REQUIRED:
+    lines = [ln for ln in lines if product_tracks_serials(ln.product)]
+    if not lines:
         return
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(
+        invoice.tenant_id, [ln.product_id for ln in lines],
+    )
 
     incomplete: list[str] = []
     for line in lines:
         product = line.product
-        if not product_tracks_serials(product):
+        mode = effective_serial_mode(
+            invoice.tenant_id, product, 'sale', requirement_map=requirement_map,
+        )
+        if mode != SERIAL_MODE_REQUIRED:
             continue
         label = _product_label(product)
         needed = _whole_units(line.quantity, label=label)
@@ -607,16 +739,28 @@ def consume_sales_serials(invoice, lines) -> int:
 
     نقص المتاح (مخزون قديم سابق للتتبّع): `optional` يخصّص ما وُجد ويترك الباقي
     بلا تتبّع، و`required` يكون قد رُفض قبل ذلك. `off` لا يفعل شيئاً.
+
+    #233: رقمٌ مُدخَل لا وجود له بعد في السجل **يُسجَّل ويُستهلك في نفس
+    الخطوة** — ما دام للمنتج رصيدٌ غير مرقَّم (رصيد المخزن قبل حركة هذه
+    البيعة، ناقص وحداته المرقَّمة `in_stock` حالياً)؛ تجاوزه 400 تسمّي البند
+    والعدد. الرصيد «قبل حركة هذه البيعة» يُحسب صراحةً بـ`_pre_sale_on_hand`
+    (رصيدٌ مُنعَشٌ من القاعدة زائد ما صرفته حركات هذه الفاتورة نفسها) — لا
+    اعتماداً على بقاء `product.quantity_on_hand` في الذاكرة بلا تحديث،
+    فالحساب صحيحٌ بصرف النظر عن ترتيب استدعاءات المستدعي. قواعد التسجيل
+    نفسها التي يفرضها `register_existing_serials` (تنظيف، تكرار، تصادم) —
+    لا فرعٌ ثانٍ منها.
     """
-    mode = sales_serial_mode(invoice.tenant_id)
-    if mode == SERIAL_MODE_OFF:
+    lines = [ln for ln in lines if product_tracks_serials(ln.product)]
+    if not lines:
         return 0
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(
+        invoice.tenant_id, [ln.product_id for ln in lines],
+    )
 
     planned: list[tuple] = []
     for line in lines:
         product = line.product
-        if not product_tracks_serials(product):
-            continue
         label = _product_label(product)
         needed = _whole_units(line.quantity, label=label)
         if needed <= 0:
@@ -626,6 +770,12 @@ def consume_sales_serials(invoice, lines) -> int:
         if ProductSerial.objects.filter(
             sales_line=line, status=ProductSerial.STATUS_SOLD,
         ).exists():
+            continue
+
+        mode = effective_serial_mode(
+            invoice.tenant_id, product, 'sale', requirement_map=requirement_map,
+        )
+        if mode == SERIAL_MODE_OFF:
             continue
 
         declared = normalize_serials(line.serials, label=label)
@@ -642,18 +792,53 @@ def consume_sales_serials(invoice, lines) -> int:
                 f"البند «{label}»: اختيار الأرقام التسلسلية إجباري — "
                 f"المطلوب {needed} والمختار {len(declared)}."
             )
-        chosen = list(
-            ProductSerial.objects.filter(
+
+        existing_by_serial = {
+            u.serial: u for u in ProductSerial.objects.filter(
                 tenant_id=invoice.tenant_id, product=product, serial__in=declared,
-                status=ProductSerial.STATUS_IN_STOCK,
-            ).order_by('id')
-        )
-        if len(chosen) != len(declared):
-            found = {s.serial for s in chosen}
-            missing = [s for s in declared if s not in found]
+            )
+        }
+        unusable = [
+            s for s in declared
+            if s in existing_by_serial
+            and existing_by_serial[s].status != ProductSerial.STATUS_IN_STOCK
+        ]
+        if unusable:
             raise ValidationError(
                 f"البند «{label}»: الأرقام التسلسلية التالية غير متوفرة في المخزن "
-                f"لهذا المنتج — {'، '.join(missing)}."
+                f"لهذا المنتج — {'، '.join(unusable)}."
+            )
+        chosen = [
+            existing_by_serial[s] for s in declared if s in existing_by_serial
+        ]
+        new_serials = [s for s in declared if s not in existing_by_serial]
+
+        if new_serials:
+            on_hand = _pre_sale_on_hand(invoice, product)
+            tracked = _tracked_in_stock_count(invoice.tenant_id, product)
+            balance = on_hand - tracked
+            if len(new_serials) > balance:
+                balance = balance if balance > 0 else Decimal('0')
+                balance_label = (
+                    str(int(balance)) if balance == balance.to_integral_value()
+                    else str(balance)
+                )
+                raise ValidationError(
+                    f"البند «{label}»: {len(new_serials)} رقماً جديداً يتجاوز رصيد "
+                    f"المنتج غير المرقَّم ({balance_label} وحدة) — قلّل عدد الأرقام "
+                    "الجديدة، أو سجّل أرقام المخزون القديم من كرت المنتج أولاً."
+                )
+            new_units = [
+                ProductSerial.objects.create(
+                    tenant_id=invoice.tenant_id, product=product, serial=serial,
+                    status=ProductSerial.STATUS_IN_STOCK,
+                )
+                for serial in new_serials
+            ]
+            chosen.extend(new_units)
+            logger.info(
+                'product serials numbered at sale: invoice=%s product=%s units=%d',
+                invoice.pk, product.pk, len(new_units),
             )
 
         # التخصيص التلقائي لـ«اختياري» وحده — تحت «إجباري» يكون الاختيار مكتملاً
@@ -687,7 +872,7 @@ def consume_sales_serials(invoice, lines) -> int:
 
     if consumed:
         logger.info(
-            'product serials sold: invoice=%s mode=%s units=%d', invoice.pk, mode, consumed,
+            'product serials sold: invoice=%s units=%d', invoice.pk, consumed,
         )
     return consumed
 
@@ -849,17 +1034,23 @@ def assert_issue_serials_declared(tenant_id, parts) -> None:
     """«إجباري» يحرس صرفاً خارج البيع قبل أي كتابة — مرآة `assert_sales_serials_declared`.
 
     `parts`: كائناتٌ تحمل `product`/`quantity`/`serials` (بند مستندٍ في app آخر
-    مثل `ServiceOrderPart`) — لا استيراد لنوعها هنا، والفرض يتبع `sales_serial_mode`
-    نفسه الذي يحكم البيع لا سياسةً مستقلة.
+    مثل `ServiceOrderPart`) — لا استيراد لنوعها هنا، والفرض يتبع `effective_serial_mode`
+    بـ`side='sale'` (#233: الصرف خارج البيع صرفٌ للزبون كالبيع تماماً)، لكل بندٍ
+    على حدة، بنداءٍ واحد للدفعة.
     """
-    mode = sales_serial_mode(tenant_id)
-    if mode != SERIAL_MODE_REQUIRED:
+    parts = [p for p in parts if product_tracks_serials(p.product)]
+    if not parts:
         return
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(tenant_id, [p.product_id for p in parts])
 
     incomplete: list[str] = []
     for part in parts:
         product = part.product
-        if not product_tracks_serials(product):
+        mode = effective_serial_mode(
+            tenant_id, product, 'sale', requirement_map=requirement_map,
+        )
+        if mode != SERIAL_MODE_REQUIRED:
             continue
         label = _product_label(product)
         needed = _whole_units(part.quantity, label=label)
@@ -885,15 +1076,23 @@ def issue_serials(tenant_id, parts) -> int:
     المنتج)، والباقي يُخصَّص FIFO تحت `optional` وحده — نفس قاعدة البيع بالضبط.
     الوحدة تصير `STATUS_ISSUED` لا `STATUS_SOLD`: بيعٌ لاحقٌ بـFIFO
     (`consume_sales_serials`) يستعلم `in_stock` وحدها فلن يخصّصها أبداً.
+
+    #233: النمط الفعّال **لكل بند** بـ`side='sale'` (صرفٌ للزبون خارج فاتورة
+    البيع، مرآة `assert_issue_serials_declared`) — بنداءٍ واحد للدفعة.
     """
-    mode = sales_serial_mode(tenant_id)
-    if mode == SERIAL_MODE_OFF:
+    parts = [p for p in parts if product_tracks_serials(p.product)]
+    if not parts:
         return 0
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(tenant_id, [p.product_id for p in parts])
 
     planned: list[tuple] = []
     for part in parts:
         product = part.product
-        if not product_tracks_serials(product):
+        mode = effective_serial_mode(
+            tenant_id, product, 'sale', requirement_map=requirement_map,
+        )
+        if mode == SERIAL_MODE_OFF:
             continue
         label = _product_label(product)
         needed = _whole_units(part.quantity, label=label)
@@ -948,8 +1147,8 @@ def issue_serials(tenant_id, parts) -> int:
 
     if consumed:
         logger.info(
-            'product serials issued outside sale: tenant=%s mode=%s units=%d',
-            tenant_id, mode, consumed,
+            'product serials issued outside sale: tenant=%s units=%d',
+            tenant_id, consumed,
         )
     return consumed
 

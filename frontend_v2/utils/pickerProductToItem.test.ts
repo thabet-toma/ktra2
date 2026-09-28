@@ -28,6 +28,7 @@ const fullProduct = {
   online_price: '199.900',
   barcode: '1234567890128',
   is_serialized: true,
+  serial_required_by: 'المنتج مكفول بسياسة كفالة «برقم تسلسلي»',
   supplier_codes_text: 'A1 B2',
   attachments: [{ file_path: '/img/1.png' }, { file_path: '' }],
   family_id: 11,
@@ -61,7 +62,13 @@ test('الشاشة الكاملة: الحقول الموسّعة كلّها كم
   assert.equal(item.storeDescription, 'وصف المتجر');
   assert.equal(item.barcode, '1234567890128');
   assert.equal(item.isSerialized, true);
+  assert.equal(item.serialRequiredBy, 'المنتج مكفول بسياسة كفالة «برقم تسلسلي»');
   assert.equal(item.supplierCodes, 'A1 B2');
+});
+
+test('#233: serial_required_by غائب يصير null', () => {
+  const item = mapPickerProductToItem({ id: 9 }, fullScreenOpts);
+  assert.equal(item.serialRequiredBy, null);
 });
 
 test('الشاشة الكاملة: الاسم الاحتياطي بالإنجليزية والصور الفارغة تصير ["","",""]', () => {

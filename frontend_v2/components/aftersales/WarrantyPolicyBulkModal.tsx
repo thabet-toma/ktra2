@@ -1,12 +1,14 @@
 import React, { useMemo, useState } from "react";
 import { Loader2, Package, X } from "lucide-react";
 import {
-  bulkApplyWarrantyPolicy, lookupManufacturerWarrantors,
+  bulkApplyWarrantyPolicy, getWarrantySerialImpact, lookupManufacturerWarrantors,
   type ManufacturerWarrantorRow, type WarrantyPolicyBulkInput, type WarrantyPolicyMethod,
 } from "../../services/afterSalesApi";
 import {
   SalesProductPickerModal, type SalesProductPickerItem,
 } from "../sales/SalesProductPickerModal";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { serialImpactConfirmationLines, serialImpactNeedsConfirmation } from "../../utils/warranty";
 
 /**
  * #231 — تطبيق سياسة واحدة على كل براندات منتجٍ أبٍ أو تصنيف دفعةً واحدة:
@@ -39,6 +41,7 @@ const labelClass = "mb-1 block text-[11px] text-[var(--color-text-muted)]";
 type Selector = "family" | "category";
 
 export const WarrantyPolicyBulkModal: React.FC<Props> = ({ products, onClose, onApplied }) => {
+  const confirm = useConfirm();
   const [selector, setSelector] = useState<Selector>("family");
   const [anchorProduct, setAnchorProduct] = useState<ProductOption | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -80,14 +83,43 @@ export const WarrantyPolicyBulkModal: React.FC<Props> = ({ products, onClose, on
       setErr("حدّد مدة كفالة التاجر أو المصنع أكبر من صفر — كفالة المورّد وحدها داخلية لا تُصدر للزبون بطاقة");
       return;
     }
+    const groupSelector = selector === "family"
+      ? { family: anchorProduct!.family_id! }
+      : { category: categoryId as number };
+    // #233: قبل تطبيق سياسة `serial` جماعياً — معاينة الإخوة الذين سيُتتبَّعون
+    // معها (خارج التحديد نفسه) والوحدات غير المرقَّمة لكل منتجٍ داخله.
+    if (method === "serial") {
+      try {
+        const impact = await getWarrantySerialImpact(groupSelector);
+        const unitsRows = Object.entries(impact.unnumbered_units).map(([productId, count]) => {
+          const product = products.find((p) => p.id === Number(productId));
+          return {
+            productName:
+              product?.display_name || product?.name_ar || product?.sku || `#${productId}`,
+            count,
+          };
+        });
+        const siblingNames = impact.sibling_brands.map((s) => s.name);
+        if (serialImpactNeedsConfirmation({ siblingCount: siblingNames.length, unitsRows })) {
+          const proceed = await confirm({
+            title: "تفعيل تتبّع الرقم التسلسلي",
+            message: serialImpactConfirmationLines({ siblingNames, unitsRows }).join("\n"),
+            confirmText: "متابعة التطبيق",
+            cancelText: "رجوع",
+            danger: false,
+          });
+          if (!proceed) return;
+        }
+      } catch {
+        // معاينةٌ لا حارس — تعذّرها لا يمنع التطبيق، والخادم يفرض قيوده الحقيقية عنده.
+      }
+    }
     setBusy(true);
     try {
       const input: WarrantyPolicyBulkInput = {
         method, dealer_months: dealerMonths, manufacturer_months: manufacturerMonths,
         supplier_months: supplierMonths, manufacturer_warrantor: warrantorId || null,
-        ...(selector === "family"
-          ? { family: anchorProduct!.family_id! }
-          : { category: categoryId as number }),
+        ...groupSelector,
       };
       const result = await bulkApplyWarrantyPolicy(input);
       onApplied(result.applied);

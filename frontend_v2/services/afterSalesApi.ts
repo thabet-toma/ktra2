@@ -417,6 +417,27 @@ export function bulkApplyWarrantyPolicy(
   return apiPostObject<WarrantyPolicyBulkResult>(`${WARRANTY_POLICIES}bulk/`, input, tenantOpts());
 }
 
+/** معاينة قبل حفظ سياسة `serial` (#233) — البراندات الشقيقة غير المتتبَّعة
+ *  التي سترتفع معها، وعدد الوحدات غير المرقَّمة الآن لكل منتج. */
+export interface WarrantySerialImpactSibling {
+  id: number;
+  name: string;
+}
+
+export interface WarrantySerialImpact {
+  sibling_brands: WarrantySerialImpactSibling[];
+  unnumbered_units: Record<number, number>;
+}
+
+export function getWarrantySerialImpact(
+  selector: { product?: number } | { family?: number } | { category?: number },
+): Promise<WarrantySerialImpact> {
+  return apiGetObject<WarrantySerialImpact>(`${WARRANTY_POLICIES}serial-impact/`, {
+    ...tenantOpts(),
+    query: { ...selector },
+  });
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
  * أوامر الصيانة (م3/م4)
  *

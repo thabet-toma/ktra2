@@ -82,14 +82,6 @@ def test_normalize_serials_trims_and_rejects_duplicates():
         normalize_serials({'a': 1})
 
 
-def test_strip_serials_when_off_only_clears_in_off_mode():
-    rows = [{'serials': ['A1']}, {'serials': []}]
-    strip_serials_when_off(rows, SERIAL_MODE_OPTIONAL)
-    assert rows[0]['serials'] == ['A1']
-    strip_serials_when_off(rows, SERIAL_MODE_OFF)
-    assert rows[0]['serials'] == []
-
-
 def test_ean13_check_digit_matches_known_barcode():
     # 4006381333931 باركود EAN-13 صحيح معروف.
     assert ean13_check_digit('400638133393') == '1'
@@ -218,6 +210,19 @@ class ProductSerialFlowTest(APITestCase):
 
     def _units(self, **filters):
         return ProductSerial.objects.filter(tenant=self.tenant, **filters)
+
+    # ── #233: تفريغ الأرقام تحت «بدون» — لكل بند نمطه الفعّال ──────────
+    def test_strip_serials_when_off_only_clears_unforced_lines(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        rows = [
+            {'product': self.product, 'serials': ['A1']},
+            {'product': self.plain, 'serials': []},
+        ]
+        strip_serials_when_off(rows, self.tenant.TenantID, 'sale')
+        assert rows[0]['serials'] == ['A1']
+        self._set_modes(sales=SERIAL_MODE_OFF)
+        strip_serials_when_off(rows, self.tenant.TenantID, 'sale')
+        assert rows[0]['serials'] == []
 
     # ── الشراء: مصفوفة الأنماط ────────────────────────────────────────
     def test_off_mode_stores_no_units_even_when_lines_carry_serials(self):
@@ -408,13 +413,26 @@ class ProductSerialFlowTest(APITestCase):
         assert self._post_sale(sale).status_code == 200
         assert [u.serial for u in self._units(status=ProductSerial.STATUS_SOLD)] == ['M1']
 
-    def test_sale_rejects_a_serial_that_is_not_in_stock(self):
+    def test_sale_rejects_a_new_serial_when_there_is_no_unnumbered_balance(self):
+        """#233: رقمٌ غير مسجَّل صار يُقبل ويُسجَّل ما دام هناك رصيدٌ غير مرقَّم
+        (`consume_sales_serials`) — فرقمٌ مطبوعٌ خطأً بلا رصيدٍ يُرفض برسالة
+        الرصيد لا لأن الاسم «غير موجود»؛ كان هذا الاختبار يفترض الرفض بالاسم."""
         self._set_modes(sales=SERIAL_MODE_OPTIONAL)
         self._stock_serials('N1')
         sale, _line = self._sales_invoice(qty='1', serials=['NOPE'])
         res = self._post_sale(sale)
         assert res.status_code == 400, res.content
-        assert 'NOPE' in res.json()['error']
+        assert 'رصيد' in res.json()['error']
+
+    def test_sale_rejects_a_declared_serial_that_belongs_to_another_unit(self):
+        self._set_modes(sales=SERIAL_MODE_OPTIONAL)
+        self._stock_serials('N1', 'N2')
+        first, _line = self._sales_invoice(qty='1', serials=['N1'])
+        assert self._post_sale(first).status_code == 200
+        second, _line2 = self._sales_invoice(qty='1', serials=['N1'])
+        res = self._post_sale(second)
+        assert res.status_code == 400, res.content
+        assert 'N1' in res.json()['error']
 
     def test_off_sales_mode_consumes_nothing(self):
         self._stock_serials('O1')

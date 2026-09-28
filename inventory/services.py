@@ -340,6 +340,32 @@ def sync_families_from_products(products) -> int:
     return len(families)
 
 
+def ensure_products_are_serialized(products) -> int:
+    """يرفع `is_serialized` على منتجاتٍ عبر مزامنة العائلة — لا يخفضه أبداً (#233).
+
+    نقطة الاستدعاء الوحيدة لحفظ سياسة كفالة `serial` (إنشاءً أو تعديلاً أو
+    تطبيقاً جماعياً) — `WarrantyPolicy` في `after_sales` تنادي هذه الدالة
+    بدل الكتابة المباشرة على `Product.is_serialized`، فيمرّ الرفع بمزامنة
+    العائلة (`sync_families_from_products`) وتنزل الراية على بقية إخوة
+    البراند تلقائياً (#23) — إشارة «البراندات الشقيقة ستُتتبَّع أيضاً».
+    """
+    to_update = [p for p in products if not p.is_serialized]
+    if not to_update:
+        return 0
+    now = timezone.now()
+    for product in to_update:
+        product.is_serialized = True
+        product.updated_at = now
+    Product.objects.bulk_update(to_update, ['is_serialized', 'updated_at'])
+    sync_families_from_products(to_update)
+    return len(to_update)
+
+
+def ensure_product_is_serialized(product) -> bool:
+    """نسخة المفرد من `ensure_products_are_serialized` (#233)."""
+    return ensure_products_are_serialized([product]) > 0
+
+
 def resolve_family_field(product, field_name: str):
     """قاعدة التعايش (#20): الحقل يُقرأ من الأب إن كان للبراند أب، وإلا من
     صفّ البراند نفسه — لا تُحذف الأعمدة المزدوجة من `Product` في هذا النطاق.

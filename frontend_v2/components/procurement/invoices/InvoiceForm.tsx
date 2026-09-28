@@ -1553,10 +1553,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     allDbItems.forEach((it) => m.set(String(it.id), it));
     return m;
   }, [allDbItems]);
+  /* #233: منتجٌ مفروضٌ بسياسة كفالة `serial` (`serialRequiredBy`) يُظهر عمود
+     الأرقام دائماً، حتى لو كان نمط الشركة `off`. */
   const itemTracksSerials = useCallback(
     (row: InvoiceItem) => {
-      if (serialMode === "off" || !row.itemId) return false;
-      return Boolean(dbItemsById.get(String(row.itemId))?.isSerialized);
+      if (!row.itemId) return false;
+      const item = dbItemsById.get(String(row.itemId));
+      if (item?.serialRequiredBy) return Boolean(item?.isSerialized);
+      if (serialMode === "off") return false;
+      return Boolean(item?.isSerialized);
     },
     [serialMode, dbItemsById],
   );

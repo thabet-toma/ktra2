@@ -189,6 +189,11 @@ class ProductSerializer(serializers.ModelSerializer):
     # لا استعلامَ لكل صفّ.
     indicative_purchase_price = serializers.SerializerMethodField()
     indicative_purchase_price_source = serializers.SerializerMethodField()
+    # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (سياسة كفالة «برقم
+    # تسلسلي» في `after_sales` — عبر `core.hooks.serial_requirements` لا
+    # استيرادٍ مباشر) — `None` حين لا فرض. نداءٌ واحد للصفحة كلّها
+    # (`ProductViewSet.list` يملأ `serial_requirement_map` في الـcontext مسبقاً).
+    serial_required_by = serializers.SerializerMethodField()
 
     # task14 M2 (DEF-A2): رقم المنتج اختياري — يولَّد خادمياً عند الغياب
     sku = serializers.CharField(max_length=50, required=False, allow_blank=True)
@@ -233,6 +238,7 @@ class ProductSerializer(serializers.ModelSerializer):
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
             'effective_min_stock_level', 'effective_max_stock_level',
+            'serial_required_by',
             'created_at', 'updated_at',
             'attachments',
         ]
@@ -314,6 +320,22 @@ class ProductSerializer(serializers.ModelSerializer):
         row = _indicative_purchase_price_map(self.context).get(obj.id)
         return row['source_label'] if row else None
 
+    def get_serial_required_by(self, obj):
+        row = self.context.get('serial_requirement_map')
+        if row is not None:
+            return row.get(obj.id)
+        # صفٌّ مفرد (retrieve) — لا قائمةَ تملأ الخريطة مسبقاً؛ نداءٌ واحد لهذا الصفّ وحده.
+        request = self.context.get('request')
+        tenant_id = None
+        if request is not None:
+            from core.tenant_utils import get_tenant
+            tenant = get_tenant(request)
+            tenant_id = tenant.TenantID if tenant else None
+        if not tenant_id:
+            return None
+        from core.hooks import serial_requirements
+        return serial_requirements(tenant_id, [obj.pk]).get(obj.id)
+
     ACCOUNT_OVERRIDE_FIELDS = (
         'sale_account_override', 'sale_return_account_override',
         'purchase_account_override', 'purchase_return_account_override',
@@ -330,7 +352,54 @@ class ProductSerializer(serializers.ModelSerializer):
             )
         self._validate_barcode_unique(attrs)
         self._validate_account_overrides(attrs)
+        self._validate_serial_tracking_toggle(attrs)
         return attrs
+
+    def _validate_serial_tracking_toggle(self, attrs):
+        """#233: إلغاء تتبّع الرقم التسلسلي مرفوضٌ ما دامت سياسة كفالة `serial`
+        قائمة على هذا المنتج والوحدة مفعّلة — عبر `core.hooks.serial_requirements`
+        لا استيراد `after_sales` هنا (حدود الوحدة، #228).
+
+        الحارس يفحص المنتج **وكل إخوته تحت نفس الأب**، لا هذا الصفّ وحده:
+        `is_serialized` حقلٌ أبويّ (`FAMILY_FIELD_NAMES`) — إطفاؤه على هذا
+        البراند يُنزَل تلقائياً على كل إخوته بعد الحفظ
+        (`services.sync_family_from_product` ← `_push_family_fields_to_siblings`)،
+        فبراندٌ بلا سياسة (هذا الصفّ) كان يُطفئ تتبّع أخيه المفروض دون أن
+        يمرّ الطلب من هنا أصلاً. مراجعة #233-r1.
+        """
+        if 'is_serialized' not in attrs or attrs['is_serialized']:
+            return
+        if self.instance is None or not self.instance.is_serialized:
+            return
+        candidate_ids = [self.instance.pk]
+        if self.instance.family_id:
+            candidate_ids += list(
+                Product.objects.filter(family_id=self.instance.family_id)
+                .exclude(pk=self.instance.pk)
+                .values_list('pk', flat=True)
+            )
+        from core.hooks import serial_requirements
+        requirements = serial_requirements(self.instance.tenant_id, candidate_ids)
+        if not requirements:
+            return
+        if self.instance.pk in requirements:
+            raise serializers.ValidationError(
+                {'is_serialized': requirements[self.instance.pk]}
+            )
+        # المنتج نفسه غير مفروض — لكن مزامنة العائلة ستُطفئ أخاً مفروضاً معه.
+        from .services import product_display_name
+
+        forced_sibling = Product.objects.filter(
+            pk=next(iter(requirements)),
+        ).first()
+        sibling_label = product_display_name(forced_sibling) if forced_sibling else 'براندٌ آخر'
+        raise serializers.ValidationError({
+            'is_serialized': (
+                f'لا يمكن إطفاء التتبّع — البراند الشقيق «{sibling_label}» مكفولٌ '
+                'بسياسة كفالة «برقم تسلسلي»، وإطفاء التتبّع هنا يُطفئه معه '
+                'لأنهما تحت المنتج نفسه.'
+            )
+        })
 
     def _validate_account_overrides(self, attrs):
         """كل حساب تجاوزٍ من شركة المنتج نفسها — الحسابات معزولةٌ بالشركة.
@@ -527,6 +596,9 @@ class ProductLookupSerializer(ProductSerializer):
             'stock_status', 'group_key',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity',
             'avg_cost', 'sale_price', 'is_service', 'is_serialized',
+            # #233: سببُ فرض الرقم التسلسلي — عمود «الأرقام» في محرِّري البيع
+            # والشراء يظهر لهذا البند حتى إن كان نمط الشركة `off`.
+            'serial_required_by',
             # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة،
             # ومعه لافتة مصدره (لا يُخلط برقم تكلفة). حقلان قصيران فقط — لا
             # توسيع للعقد الضيّق عمداً (قياس 1490 منتجاً: 1,145 كيلوبايت مقابل 685).

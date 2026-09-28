@@ -148,6 +148,9 @@ export type ProductRow = {
   is_service?: boolean;
   /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي — يُظهر عمود الأرقام على سطره. */
   is_serialized?: boolean;
+  /** #233: سببُ فرض الرقم التسلسلي على هذا السطر (سياسة كفالة `serial`)
+   *  بصرف النظر عن نمط الشركة — من `Product.serial_required_by`. */
+  serial_required_by?: string | null;
   /** T-REORDER: حالة المخزون كما يحسمها الخادم (`inventory/stock_status.py`). */
   stock_status?: string | null;
   /** T-REORDER: مفتاح «النوع» — موديلات النوع الواحد بدائلُ بعضها. */
@@ -693,11 +696,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [serialLineKey, setSerialLineKey] = useState<string | null>(null);
   /** T-NOTES: البند المفتوحة ملاحظتاه. */
   const [notesLineKey, setNotesLineKey] = useState<string | null>(null);
-  /** المنتج يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  /** المنتج يتتبّع وحداته؟ الخدمة مستثناة — بلا مخزون فبلا وحدات.
+   *  #233: منتجٌ مفروضٌ بسياسة كفالة `serial` (`serial_required_by`) يُظهر
+   *  العمود دائماً، حتى لو كان نمط الشركة `off`. */
   const lineTracksSerials = useCallback(
     (row: DraftLine) => {
-      if (serialMode === "off" || row.product === "") return false;
+      if (row.product === "") return false;
       const pr = productsById.get(Number(row.product));
+      if (pr?.serial_required_by) return Boolean(pr?.is_serialized && !pr?.is_service);
+      if (serialMode === "off") return false;
       return Boolean(pr?.is_serialized && !pr?.is_service);
     },
     [serialMode, productsById],

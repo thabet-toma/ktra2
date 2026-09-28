@@ -110,3 +110,46 @@ export function manufacturerWarrantyRemainingText(
   if (status === null) return "لا يوجد";
   return warrantyRemainingText(status, daysRemaining ?? 0);
 }
+
+/**
+ * #233 — معاينة أثر سياسة كفالة `serial` قبل الحفظ (قصّتا المالك 6 و7):
+ * البراندات الشقيقة التي سيرتفع تتبّعها معها (مزامنة العائلة)، وعدد الوحدات
+ * غير المرقَّمة الآن لكل منتج معنيّ — تصل جاهزةً من `GET
+ * warranty-policies/serial-impact/` (`services/afterSalesApi.ts`).
+ */
+export interface WarrantySerialImpactUnitsRow {
+  productName: string;
+  count: number;
+}
+
+/** لا تأكيد لازم إن لم يكن هناك أخٌ سيُتتبَّع معه ولا وحدةٌ غير مرقَّمة —
+ *  سياسةٌ على منتجٍ وحيدٍ بلا مخزونٍ قديم لا تستحق مقاطعة المستخدم. */
+export function serialImpactNeedsConfirmation(input: {
+  siblingCount: number;
+  unitsRows: WarrantySerialImpactUnitsRow[];
+}): boolean {
+  return input.siblingCount > 0 || input.unitsRows.some((row) => row.count > 0);
+}
+
+/** سطور رسالة التأكيد — سطرٌ للإخوة (إن وُجدوا)، وسطرٌ لكل منتجٍ له وحداتٌ
+ *  غير مرقَّمة (الصفر يُستبعد: لا داعي لإخبار المستخدم بما لا يعنيه). */
+export function serialImpactConfirmationLines(input: {
+  siblingNames: string[];
+  unitsRows: WarrantySerialImpactUnitsRow[];
+}): string[] {
+  const lines: string[] = [];
+  if (input.siblingNames.length > 0) {
+    lines.push(
+      `سيُفعَّل تتبّع الرقم التسلسلي أيضاً على البراندات الشقيقة: ${input.siblingNames.join("، ")}.`,
+    );
+  }
+  input.unitsRows
+    .filter((row) => row.count > 0)
+    .forEach((row) => {
+      lines.push(
+        `«${row.productName}»: ${formatNumber(row.count)} وحدة غير مرقَّمة في المخزون حالياً ` +
+        "— سيُطلب رقمها التسلسلي عند بيعها.",
+      );
+    });
+  return lines;
+}

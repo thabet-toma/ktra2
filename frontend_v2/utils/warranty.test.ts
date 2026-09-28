@@ -5,6 +5,8 @@ import {
   deriveWarrantyEnd,
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  serialImpactConfirmationLines,
+  serialImpactNeedsConfirmation,
   warrantyRemainingText,
   warrantyStatusLabel,
 } from './warranty.ts';
@@ -70,4 +72,51 @@ test('#232 — طبقة المصنع بجهة: نفس مفردات طبقة ال
   assert.equal(manufacturerWarrantyStatusLabel('ended'), 'غير سارية');
   assert.match(manufacturerWarrantyRemainingText('active', 45), /^باقٍ /);
   assert.equal(manufacturerWarrantyRemainingText('ended', 30), 'لم تعد سارية');
+});
+
+test('#233 — لا تأكيد لازم بلا إخوة وبلا وحدات غير مرقَّمة', () => {
+  assert.equal(serialImpactNeedsConfirmation({ siblingCount: 0, unitsRows: [] }), false);
+  assert.equal(
+    serialImpactNeedsConfirmation({
+      siblingCount: 0, unitsRows: [{ productName: 'أ', count: 0 }],
+    }),
+    false,
+  );
+});
+
+test('#233 — إخوةٌ فقط، أو وحداتٌ فقط، كلٌّ منهما يكفي للتأكيد', () => {
+  assert.equal(
+    serialImpactNeedsConfirmation({ siblingCount: 1, unitsRows: [] }), true,
+  );
+  assert.equal(
+    serialImpactNeedsConfirmation({
+      siblingCount: 0, unitsRows: [{ productName: 'أ', count: 3 }],
+    }),
+    true,
+  );
+});
+
+test('#233 — رسالة التأكيد تسمّي الإخوة وتُدرج وحدات كل منتجٍ له رصيد فقط', () => {
+  const lines = serialImpactConfirmationLines({
+    siblingNames: ['تي بي لينك', 'نتغير'],
+    unitsRows: [
+      { productName: 'الأصلي', count: 4 },
+      { productName: 'بلا رصيد', count: 0 },
+    ],
+  });
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /تي بي لينك، نتغير/);
+  assert.match(lines[1], /الأصلي/);
+  assert.match(lines[1], /4/);
+  assert.ok(!lines.some((l) => l.includes('بلا رصيد')));
+});
+
+test('#233 — بلا إخوة وبلا رصيدٍ لأي منتج، لا سطور إطلاقاً', () => {
+  assert.deepEqual(
+    serialImpactConfirmationLines({
+      siblingNames: [],
+      unitsRows: [{ productName: 'أ', count: 0 }],
+    }),
+    [],
+  );
 });

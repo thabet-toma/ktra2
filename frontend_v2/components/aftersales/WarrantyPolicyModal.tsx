@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Loader2, Package, X } from "lucide-react";
 import {
   createWarrantyPolicy,
+  getWarrantySerialImpact,
   lookupManufacturerWarrantors,
   updateWarrantyPolicy,
   type ManufacturerWarrantorRow,
@@ -12,6 +13,8 @@ import {
 import {
   SalesProductPickerModal, type SalesProductPickerItem,
 } from "../sales/SalesProductPickerModal";
+import { useConfirm } from "../../contexts/ConfirmContext";
+import { serialImpactConfirmationLines, serialImpactNeedsConfirmation } from "../../utils/warranty";
 
 /**
  * #231 — سياسة كفالة براندٍ واحد: إنشاء أو تعديل. صفٌّ واحد لكل منتج
@@ -62,6 +65,7 @@ const draftOf = (row: WarrantyPolicyRow): WarrantyPolicyDraft => ({
 });
 
 export const WarrantyPolicyModal: React.FC<Props> = ({ policy, products, onClose, onSaved }) => {
+  const confirm = useConfirm();
   const [draft, setDraft] = useState<WarrantyPolicyDraft>(() =>
     policy ? draftOf(policy) : emptyDraft());
   const [pickedProduct, setPickedProduct] = useState<ProductOption | null>(null);
@@ -92,6 +96,32 @@ export const WarrantyPolicyModal: React.FC<Props> = ({ policy, products, onClose
     if (draft.dealer_months <= 0 && draft.manufacturer_months <= 0) {
       setErr("حدّد مدة كفالة التاجر أو المصنع أكبر من صفر — كفالة المورّد وحدها داخلية لا تُصدر للزبون بطاقة");
       return;
+    }
+    // #233: قبل حفظ سياسة `serial` — معاينة الإخوة الذين سيُتتبَّعون معها
+    // والوحدات غير المرقَّمة القائمة، وتأكيدٌ من المستخدم إن وُجد أيٌّ منهما.
+    if (draft.method === "serial") {
+      try {
+        const impact = await getWarrantySerialImpact({ product: draft.product });
+        const productName =
+          pickedProduct?.display_name || pickedProduct?.name_ar || pickedProduct?.sku || "";
+        const unitsRows = [{
+          productName,
+          count: impact.unnumbered_units[draft.product] || 0,
+        }];
+        const siblingNames = impact.sibling_brands.map((s) => s.name);
+        if (serialImpactNeedsConfirmation({ siblingCount: siblingNames.length, unitsRows })) {
+          const proceed = await confirm({
+            title: "تفعيل تتبّع الرقم التسلسلي",
+            message: serialImpactConfirmationLines({ siblingNames, unitsRows }).join("\n"),
+            confirmText: "متابعة الحفظ",
+            cancelText: "رجوع",
+            danger: false,
+          });
+          if (!proceed) return;
+        }
+      } catch {
+        // معاينةٌ لا حارس — تعذّرها لا يمنع الحفظ، والخادم يفرض قيوده الحقيقية عنده.
+      }
     }
     setBusy(true);
     setErr(null);

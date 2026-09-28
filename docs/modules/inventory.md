@@ -17,7 +17,7 @@
 |---|---|---|
 | `inventory/services.py` | `record_stock_movement` + التحام FIFO، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
-| `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 765 |
+| `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 1285 |
 | `inventory/models.py` | 13 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد، وسلسلة الطلب الأسبوعية المحسوبة (`ProductDemandForecast`، #32) | 465 |
 | `inventory/fifo.py` | **محرّك طبقات FIFO** (#137، نظير `accounting/fx_fifo.py`): إنشاء طبقة · استهلاكٌ بالأقدم أوّلاً · ردٌّ دقيقٌ إلى الطبقة وموقعِها · طبقةٌ افتتاحيّةٌ كسولة للبضاعة القائمة · تسويةُ الطبقات المؤقّتة · متوسّطٌ مشتقّ |
 | `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
@@ -101,12 +101,15 @@ def normalize_serials(raw, *, label: str = '') -> list[str]:  # تنظيف + م�
 def generate_serial_range(start: str, count) -> list[str]:  # يحفظ البادئة وخانات الصفر (93)
 def purchase_serial_mode(tenant_id) -> str:  # من logistics.PurchaseSettings (148)
 def sales_serial_mode(tenant_id) -> str:  # من sales.SalesSettings.serial_entry_mode (160)
+def effective_serial_mode(tenant_id, product, side: str, *, requirement_map=None) -> str:  # #233: النمط الفعّال لبندٍ واحد — بيعٌ يُفرَض `required` إن سمّاه `core.hooks.serial_requirements`، وشراءٌ يُفرَض `optional` على الأقل (لا `required` إلا بنمط الشركة). كل قرار نمطٍ في هذا الملف يمرّ من هنا لا من `purchase_serial_mode`/`sales_serial_mode` مباشرة
+def strip_serials_when_off(rows, tenant_id, side: str) -> None:  # #233: يفرّغ `serials` على بندٍ نمطه الفعّال `off` — لكل بند حسابه لا نمط الشركة وحده؛ يستدعيه `sales.serializers`/`logistics.serializers.invoices` قبل الحفظ
 def assert_purchase_serials_declared(invoice) -> None:  # حارس «إجباري» قبل ترحيل الشراء (176)
 def assert_sales_return_serials_declared(return_invoice, lines) -> None:  # مرآتها على المرجع — «إجباري» يُسمّي الوحدة المرتجعة قبل الترحيل (#222)
 def apply_purchase_serials(*, tenant, rows) -> int:  # الاستلام يُنشئ الوحدات in_stock (275)
 def register_existing_serials(*, tenant_id, product, serials) -> int:  # ترقيم مخزون قائم، سقفه الرصيد (228)
+def unnumbered_serial_balance(tenant_id, product) -> int:  # #233: رصيد المنتج غير المرقَّم الآن — للعرض (معاينة سياسة كفالة) لا حارساً وقت الحفظ
 def release_purchase_serials(*, tenant_id, quantities_by_item, document_label='', action_label='التراجع عن') -> int:  # يمنع لكل حالة غير in_stock لا `sold` وحدها (#223) (357)
-def consume_sales_serials(invoice, lines) -> int:  # ترحيل البيع: المختار صريحاً ثم FIFO للباقي — يستعلم in_stock وحدها فلن يخصّص وحدة `issued` أبداً (507)
+def consume_sales_serials(invoice, lines) -> int:  # ترحيل البيع: المختار صريحاً ثم FIFO للباقي — يستعلم in_stock وحدها فلن يخصّص وحدة `issued` أبداً؛ رصيد ما قبل حركة هذا البيع محسوبٌ صراحةً (`_pre_sale_on_hand`، #233-r1) (507)
 def release_sales_serials(invoice) -> int:  # إلغاء ترحيل البيع: عودة in_stock مع تفريغ الرابط (596)
 def assert_issue_serials_declared(tenant_id, parts) -> None:  # #223: مرآة assert_sales_serials_declared لصرفٍ خارج البيع (بند مستندٍ في app آخر) — «إجباري» يُرفض قبل أي كتابة
 def issue_serials(tenant_id, parts) -> int:  # #223: يستهلك وحدات صرفٍ خارج البيع — الوحدة تصير `STATUS_ISSUED` لا `STATUS_SOLD`
@@ -410,6 +413,39 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 حرفياً كما قبل #44.
 
 ## قواعد لا يجوز كسرها
+- **الفرض عبر الوحدة يمرّ من `core.hooks.serial_requirements` لا استيراد `after_sales` (#233)**:
+  `effective_serial_mode` هو المكان الوحيد الذي يقرأ الفرض — منتجٌ عليه سياسة كفالة
+  `serial` (والوحدة مفعَّلة) يُفرَض `required` على البيع بصرف النظر عن نمط الشركة،
+  و`optional` على الأقل على الشراء (لا `required` إلا بنمط الشركة نفسه). النداء
+  دفعةٌ واحدة لكل مستند (`core.hooks.serial_requirements(tenant_id, product_ids)`) لا
+  نداءً لكل بند. `inventory` لا يستورد `after_sales` مطلقاً — `after_sales/hooks.py`
+  يسجّل مزوّده عند `AppConfig.ready()`.
+- **رقمٌ تسلسليٌّ غير مسجَّل يُقبل عند البيع ضمن الرصيد غير المرقَّم (#233)**:
+  `consume_sales_serials` يسجّل ويستهلك أي رقمٍ جديد بشرط ألا يتجاوز مجموع الجدد
+  رصيدَ `quantity_on_hand` (قبل حركة هذا البيع) ناقص الوحدات المُرقَّمة `in_stock`
+  حالياً — تجاوزٌ يُرفض بـ400 يسمّي البند والعدد. الرصيد «قبل حركة هذا البيع» **يُحسب
+  صراحةً** (`_pre_sale_on_hand`: `quantity_on_hand` منعَشٌ من القاعدة زائد ما صرفته
+  حركات `StockMovement` لهذه الفاتورة نفسها) لا اعتماداً على بقاء `product.quantity_on_hand`
+  في الذاكرة بلا تحديث — مراجعة #233-r1 طلبت إزالة هذا الافتراض الهشّ رغم عدم رصد
+  عطبٍ فعلي منه وقت المراجعة. القاعدة نفسها التي يحكمها `register_existing_serials`
+  عبر مساعدٍ مشترك (`_tracked_in_stock_count`)، لا نسخةٌ ثانية منها.
+- **إلغاء تتبّع منتجٍ عليه سياسة كفالة `serial` مرفوضٌ في السيريالايزر — والفحص
+  يشمل العائلة كلّها لا الصفّ المعدَّل وحده (#233، مراجعة #233-r1)**:
+  `ProductSerializer._validate_serial_tracking_toggle` يستشير نفس
+  `core.hooks.serial_requirements` قبل قبول `is_serialized: false` — لا استيراد
+  `after_sales`، وحذف السياسة وحده لا يُخفِض `is_serialized` (`inventory.services.
+  ensure_product_is_serialized`/`ensure_products_are_serialized`، عبر مزامنة العائلة
+  فترتفع على الإخوة أيضاً، ولا تُخفَض أبداً من هذا المسار). **الحارس يسأل الخطّاف عن
+  المنتج المعدَّل وكل إخوته تحت الأب معاً في نداءٍ واحد**: `is_serialized` حقلٌ أبويّ
+  (`FAMILY_FIELD_NAMES`) تُنزِله مزامنة العائلة (`sync_family_from_product` ←
+  `_push_family_fields_to_siblings`) على كل الإخوة بعد كل حفظ — فحصٌ يقتصر على
+  `self.instance` كان يسمح لبراندٍ شقيقٍ بلا سياسة بإطفاء `is_serialized: false` على
+  نفسه، والقيمة تنزل تلقائياً على أخيه المفروض دون أن يمرّ الطلب من حارسه مطلقاً؛
+  الرفض الآن يسمّي البراند الشقيق المفروض. مسارات أخرى تُنزل قيماً على صفوفٍ قائمة
+  فُحصت ولا تحتاج حارساً مماثلاً: `add_brand_to_family`/`adopt_family_for_product`
+  ينسخان قيمةً إلى صفٍّ **جديد** فقط ولا يكتبان أبداً على شقيقٍ قائم، و`merge_products`
+  (`MERGE_GUARD_FIELDS`) يرفض أصلاً دمج منتجٍ يختلف `is_serialized` عن الهدف قبل أي
+  كتابة — لا يمكنه هيكلياً تغيير القيمة على أي صفّ.
 - **وحدةٌ تسلسلية بحالةٍ غير `in_stock` لا تُحذف أبداً (#223)**: `release_purchase_serials`
   (ومستهلِكاه — إلغاء ترحيل فاتورة الشراء، وإلغاء سند الاستلام عبر `void_goods_receipt`،
   ومرتجع الشراء عبر `release_returned_purchase_serials`) يفحص كل حالةٍ غير `in_stock` —

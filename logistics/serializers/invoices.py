@@ -695,16 +695,15 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({
                 'cash_or_bank_account': 'الدفع النقدي يتطلب اختيار حساب صندوق/بنك.'
             })
-        # نمط «بدون» في إعدادات الشراء: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
+        # نمط «بدون» في إعدادات الشراء: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً
+        # — إلا بندَ منتجٍ مفروضٍ بسياسة كفالة (#233، `effective_serial_mode`).
         from core.tenant_utils import get_tenant
-        from inventory.serials import purchase_serial_mode, strip_serials_when_off
+        from inventory.serials import strip_serials_when_off
 
         request = self.context.get('request')
         tenant = get_tenant(request) if request is not None else None
         if tenant is not None and attrs.get('items'):
-            strip_serials_when_off(
-                attrs['items'], purchase_serial_mode(tenant.TenantID),
-            )
+            strip_serials_when_off(attrs['items'], tenant.TenantID, 'purchase')
         # T-DUE: الاستحقاق يُشتقّ من مهلة السداد حين لا يُكتب صراحةً — والصريح
         # مقدَّمٌ دائماً فلا يمحو حفظٌ لاحق تاريخاً كتبه المستخدم بيده.
         invoice_date = attrs.get('invoice_date') or getattr(self.instance, 'invoice_date', None)

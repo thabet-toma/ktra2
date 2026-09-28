@@ -518,10 +518,21 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
 
         context = self.get_serializer_context()
         context['product_attachments'] = attachment_map
+        context['serial_requirement_map'] = self._serial_requirement_map(products)
         serializer = self.get_serializer(products, many=True, context=context)
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    def _serial_requirement_map(self, products):
+        """#233: سببُ فرض الرقم التسلسلي — نداءٌ واحد لهذه الصفحة
+        (`core.hooks.serial_requirements`)، لا استعلامَ لكل صفّ. تُستهلَك من
+        `ProductSerializer`/`ProductLookupSerializer` معاً (`serial_required_by`)."""
+        tenant = self._get_tenant()
+        if not tenant or not products:
+            return {}
+        from core.hooks import serial_requirements
+        return serial_requirements(tenant.TenantID, [p.id for p in products])
 
     def _handle_attachments(self, product, data, tenant):
         from core.models import SystemAttachment

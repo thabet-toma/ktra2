@@ -71,6 +71,10 @@ export interface Item {
     barcode?: string;
     /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (`Product.is_serialized`). */
     isSerialized?: boolean;
+    /** #233: سببُ فرض الرقم التسلسلي على هذا السطر بصرف النظر عن نمط الشركة
+     *  (سياسة كفالة `serial`) — من `Product.serial_required_by`؛ فارغ يعني
+     *  لا فرض، والنمط العادي (`sales_serial_mode`/`purchase_serial_mode`) هو الحاكم. */
+    serialRequiredBy?: string | null;
     /** #22: «المنتج» (الأب) الذي يتبعه هذا البراند — من `family_id`/`family_name`
      *  في عقد `view=lookup`. الأب نفسه لا يظهر أبداً كبندٍ قابلٍ للإدراج. */
     familyId?: string;

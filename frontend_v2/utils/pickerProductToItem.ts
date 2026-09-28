@@ -62,6 +62,9 @@ export const mapPickerProductToItem = (
     // ليعرف سطر الفاتورة أنه منتج يُتتبَّع بالوحدة.
     barcode: (p as any).barcode || "",
     isSerialized: Boolean((p as any).is_serialized),
+    // #233: فرضٌ فوق نمط الشركة (سياسة كفالة `serial`) — يصل جاهزاً من
+    // `Product.serial_required_by` ضمن نفس عقد المنتقي، فارغ إن لا فرض.
+    serialRequiredBy: (p as any).serial_required_by ?? null,
     // #22: «المنتج» (الأب) — للسياق فقط، لا تُعرض كخيارٍ مستقل في المنتقي.
     familyId: (p as any).family_id != null ? String((p as any).family_id) : undefined,
     familyName: (p as any).family_name || undefined,

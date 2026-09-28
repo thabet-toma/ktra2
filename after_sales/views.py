@@ -402,11 +402,22 @@ class WarrantyPolicyViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self._validate_tenant_links(serializer)
-        serializer.save(tenant=self.tenant)
+        policy = serializer.save(tenant=self.tenant)
+        self._sync_serial_tracking(policy)
 
     def perform_update(self, serializer):
         self._validate_tenant_links(serializer)
-        serializer.save()
+        policy = serializer.save()
+        self._sync_serial_tracking(policy)
+
+    def _sync_serial_tracking(self, policy):
+        """#233: حفظ سياسة `serial` يرفع `is_serialized` على البراند (والإخوة
+        عبر مزامنة العائلة) — لا يُخفَض أبداً، وحذف السياسة لا يمسّه."""
+        if policy.method != WarrantyPolicy.METHOD_SERIAL:
+            return
+        from inventory.services import ensure_product_is_serialized
+
+        ensure_product_is_serialized(policy.product)
 
     @action(detail=False, methods=["post"], url_path="bulk")
     def bulk(self, request):
@@ -469,9 +480,67 @@ class WarrantyPolicyViewSet(viewsets.ModelViewSet):
                 serializer.is_valid(raise_exception=True)
                 saved.append(serializer.save(tenant=self.tenant))
 
+            if data["method"] == WarrantyPolicy.METHOD_SERIAL:
+                from inventory.services import ensure_products_are_serialized
+
+                ensure_products_are_serialized([policy.product for policy in saved])
+
         return Response({
             "applied": len(saved),
             "policies": WarrantyPolicySerializer(saved, many=True).data,
+        })
+
+    @action(detail=False, methods=["get"], url_path="serial-impact")
+    def serial_impact(self, request):
+        """معاينة قبل حفظ سياسة `serial` — البراندات الشقيقة غير المتتبَّعة
+        التي ستُصبح متتبَّعة عبر مزامنة العائلة، وعدد الوحدات غير المرقَّمة في
+        مخزون كل منتج معنيّ الآن (قصّتا المالك 6 و7، #233). قراءةٌ فقط.
+        """
+        from inventory.models import Product
+        from inventory.serials import unnumbered_serial_balance
+        from inventory.services import product_display_name
+
+        params = request.query_params
+        product_id = (params.get("product") or "").strip()
+        family_id = (params.get("family") or "").strip()
+        category_id = (params.get("category") or "").strip()
+
+        if product_id.isdigit():
+            product_ids = [int(product_id)]
+        elif family_id.isdigit():
+            product_ids = list(
+                Product.objects.filter(tenant=self.tenant, family_id=int(family_id))
+                .values_list("id", flat=True)
+            )
+        elif category_id.isdigit():
+            from inventory.services import category_descendant_product_ids
+            product_ids = category_descendant_product_ids(
+                tenant_id=self.tenant.pk, category_id=int(category_id),
+            )
+        else:
+            raise ValidationError({"detail": "حدّد منتجاً أو منتجاً أباً أو تصنيفاً."})
+
+        products = list(Product.objects.filter(tenant=self.tenant, id__in=product_ids))
+        if not products:
+            raise ValidationError({"detail": "لا براندات لهذا المحدِّد."})
+
+        family_ids = {p.family_id for p in products if p.family_id}
+        sibling_brands = []
+        if family_ids:
+            queried_ids = {p.id for p in products}
+            sibling_brands = [
+                {"id": sibling.id, "name": product_display_name(sibling)}
+                for sibling in Product.objects.filter(
+                    tenant=self.tenant, family_id__in=family_ids, is_serialized=False,
+                ).exclude(id__in=queried_ids)
+            ]
+
+        return Response({
+            "sibling_brands": sibling_brands,
+            "unnumbered_units": {
+                product.id: unnumbered_serial_balance(self.tenant.pk, product)
+                for product in products
+            },
         })
 
 

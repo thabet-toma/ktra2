@@ -223,10 +223,15 @@ class ProductApiTest(APITestCase):
         # صفحةُ طلب عرض السعر العامّة تعرض صورة كلّ صنفٍ للمورّد الذي يسعّر،
         # ومحرِّرُ بند الطلبية يرفعها من مكانه — وكلاهما يقرأ المنتجات من عقد
         # المنتقي لا من العقد الكامل. حقلٌ نصّيٌّ واحد (رابط) لا كائن.
+        #
+        # #233: رابعٌ صريح — `serial_required_by`. سببُ فرض الرقم التسلسلي
+        # (سياسة كفالة `serial`) — يقرأه محرّرا البيع والشراء ليُظهرا عمود
+        # الأرقام على البند حتى لو كان نمط الشركة «بدون».
         assert set(row.keys()) == known_before | {
             "family_id", "family_name",
             "indicative_purchase_price", "indicative_purchase_price_source",
             "image_url",
+            "serial_required_by",
         }
 
     def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):
@@ -278,7 +283,13 @@ class ProductApiTest(APITestCase):
 
         الحدّ صار ٧ لا ٦ بعد #133: `indicative_purchase_price`/`_source` يقرآن
         من خريطةٍ واحدة (`_indicative_purchase_price_map`) — استعلامٌ إضافيٌّ
-        **واحد** ثابت مهما بلغ عدد الصفوف، لا استعلاماً لكل صفّ."""
+        **واحد** ثابت مهما بلغ عدد الصفوف، لا استعلاماً لكل صفّ.
+
+        والحدّ صار ٨ لا ٧ بعد #233: `serial_required_by` يقرأ من
+        `serial_requirement_map` — نداءُ `core.hooks.serial_requirements`
+        الواحد لهذه الصفحة (`ProductViewSet._serial_requirement_map`) يفتح
+        استعلاماً إضافياً ثابتاً واحداً (سياسات الكفالة)، لا استعلاماً لكل صفّ.
+        """
         for i in range(10):
             create_product_with_family(tenant=self.t_a, name_ar=f"منتج {i}", sku=f"FAMQ-{i}")
         self._auth()
@@ -288,7 +299,7 @@ class ProductApiTest(APITestCase):
 
         assert res.status_code == 200, res.content[:300]
         assert len(res.json()) == 10
-        assert len(captured) <= 7, [q["sql"] for q in captured]
+        assert len(captured) <= 8, [q["sql"] for q in captured]
 
     def test_category_tree_query_count_is_constant(self):
         root = ProductCategory.objects.create(tenant=self.t_a, name="جذر")

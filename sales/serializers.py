@@ -504,16 +504,15 @@ class SalesInvoiceSerializer(
         resolved = resolve_due_date(invoice_date, due, terms)
         if resolved != due:
             attrs["due_date"] = resolved
-        # نمط «بدون» في إعدادات البيع: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً.
+        # نمط «بدون» في إعدادات البيع: لا تُخزَّن أرقام تسلسلية على البنود إطلاقاً
+        # — إلا بندَ منتجٍ مفروضٍ بسياسة كفالة (#233، `effective_serial_mode`).
         from core.tenant_utils import get_tenant
-        from inventory.serials import sales_serial_mode, strip_serials_when_off
+        from inventory.serials import strip_serials_when_off
 
         request = self.context.get("request")
         tenant = get_tenant(request) if request is not None else None
         if tenant is not None and attrs.get("lines"):
-            strip_serials_when_off(
-                attrs["lines"], sales_serial_mode(tenant.TenantID),
-            )
+            strip_serials_when_off(attrs["lines"], tenant.TenantID, "sale")
         attrs = self._enforce_return_party(attrs)
         self._enforce_return_quantities(attrs)
         return attrs
