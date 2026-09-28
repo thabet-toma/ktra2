@@ -117,8 +117,8 @@ export interface WarrantyCoverageUnit {
   status_display: string;
   product: number | null;
   product_name: string;
-  warranty_months: number | null;
-  supplier_warranty_months: number | null;
+  dealer_months: number | null;
+  supplier_months: number | null;
   sales_invoice: number | null;
   sales_invoice_number: string | null;
   sale_date: string | null;
@@ -302,6 +302,95 @@ export function updateAfterSalesSettings(
   patch: Partial<AfterSalesSettingsDraft>,
 ): Promise<AfterSalesSettingsRow> {
   return apiPatchObject<AfterSalesSettingsRow>(AFTER_SALES_SETTINGS, patch, tenantOpts());
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * سياسات الكفالة (#231) — صفٌّ واحد لكل براند (`inventory.Product`)
+ *
+ * لا سياسة = لا بطاقة تلقائية عند البيع. القراءة خلف `aftersales.warranty.view`،
+ * والكتابة والتطبيق الجماعي خلف `aftersales.settings.manage` كبقية إعدادات
+ * الوحدة. `bulk/` يطبّق سياسةً واحدة على كل براندات منتجٍ أبٍ أو تصنيف —
+ * كلٌّ أو لا شيء عند فشل أيّ براند (#231 قرارٌ متعمَّد: لا كتابة جزئية).
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+const WARRANTY_POLICIES = "after-sales/warranty-policies/";
+
+export type WarrantyPolicyMethod = "serial" | "invoice";
+
+export interface WarrantyPolicyRow {
+  id: number;
+  product: number;
+  product_name: string;
+  method: WarrantyPolicyMethod;
+  method_label: string;
+  dealer_months: number;
+  manufacturer_warrantor: number | null;
+  manufacturer_warrantor_name: string;
+  manufacturer_months: number;
+  supplier_months: number;
+  terms_override: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WarrantyPolicyDraft {
+  product: number;
+  method: WarrantyPolicyMethod;
+  dealer_months: number;
+  manufacturer_warrantor: number | null;
+  manufacturer_months: number;
+  supplier_months: number;
+  terms_override: string;
+}
+
+export interface WarrantyPolicyBulkInput {
+  family?: number;
+  category?: number;
+  method: WarrantyPolicyMethod;
+  dealer_months: number;
+  manufacturer_warrantor?: number | null;
+  manufacturer_months?: number;
+  supplier_months?: number;
+  terms_override?: string;
+}
+
+export interface WarrantyPolicyBulkResult {
+  applied: number;
+  policies: WarrantyPolicyRow[];
+}
+
+export function listWarrantyPolicies(
+  filters: { product?: number; family?: number; category?: number } = {},
+): Promise<WarrantyPolicyRow[]> {
+  return apiGetList<WarrantyPolicyRow>(WARRANTY_POLICIES, {
+    ...tenantOpts(),
+    query: {
+      product: filters.product || undefined,
+      family: filters.family || undefined,
+      category: filters.category || undefined,
+    },
+  });
+}
+
+export function createWarrantyPolicy(draft: WarrantyPolicyDraft): Promise<WarrantyPolicyRow> {
+  return apiPostObject<WarrantyPolicyRow>(WARRANTY_POLICIES, draft, tenantOpts());
+}
+
+export function updateWarrantyPolicy(
+  id: number,
+  patch: Partial<WarrantyPolicyDraft>,
+): Promise<WarrantyPolicyRow> {
+  return apiPatchObject<WarrantyPolicyRow>(`${WARRANTY_POLICIES}${id}/`, patch, tenantOpts());
+}
+
+export function deleteWarrantyPolicy(id: number): Promise<void> {
+  return apiDelete(`${WARRANTY_POLICIES}${id}/`, tenantOpts());
+}
+
+export function bulkApplyWarrantyPolicy(
+  input: WarrantyPolicyBulkInput,
+): Promise<WarrantyPolicyBulkResult> {
+  return apiPostObject<WarrantyPolicyBulkResult>(`${WARRANTY_POLICIES}bulk/`, input, tenantOpts());
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

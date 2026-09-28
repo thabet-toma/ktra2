@@ -11,6 +11,7 @@ from .models import (
     ServiceOrderPart,
     WarrantyCard,
     WarrantyCardEvent,
+    WarrantyPolicy,
     add_months,
 )
 
@@ -215,6 +216,111 @@ class ManufacturerWarrantorSerializer(serializers.ModelSerializer):
         if not value:
             raise serializers.ValidationError("اسم جهة الكفالة مطلوب.")
         return value
+
+
+class WarrantyPolicySerializer(serializers.ModelSerializer):
+    """سياسة كفالة براند — التحقق هنا هو الجملة النهائية (#231).
+
+    يُعاد استعمال هذا التحقّق حرفياً من `WarrantyPolicyViewSet.bulk`: كل صفٍّ
+    يُطبَّق جماعياً يمرّ من نفس `is_valid()` — لا نسخة ثانية من القاعدة.
+    """
+
+    method_label = serializers.CharField(source="get_method_display", read_only=True)
+    product_name = serializers.SerializerMethodField()
+    manufacturer_warrantor_name = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarrantyPolicy
+        fields = [
+            "id", "product", "product_name", "method", "method_label",
+            "dealer_months",
+            "manufacturer_warrantor", "manufacturer_warrantor_name",
+            "manufacturer_months", "supplier_months", "terms_override",
+            "created_at", "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
+
+    def get_product_name(self, obj):
+        if not obj.product_id:
+            return ""
+        from inventory.services import product_display_name
+        return product_display_name(obj.product)
+
+    def get_manufacturer_warrantor_name(self, obj):
+        return obj.manufacturer_warrantor.name if obj.manufacturer_warrantor_id else ""
+
+    def validate(self, attrs):
+        instance = self.instance
+        product = attrs.get("product", getattr(instance, "product", None))
+        if product is None:
+            raise serializers.ValidationError({"product": "حدّد المنتج (البراند)."})
+
+        method = attrs.get(
+            "method", getattr(instance, "method", WarrantyPolicy.METHOD_SERIAL),
+        )
+        if method == WarrantyPolicy.METHOD_SERIAL and product.is_service:
+            raise serializers.ValidationError({
+                "method": (
+                    f"«{product.name_ar or product.name_en}» منتج خدمة — لا يُكفل "
+                    "برقم تسلسلي، اختر «على الفاتورة»."
+                ),
+            })
+
+        dealer = attrs.get("dealer_months", getattr(instance, "dealer_months", 0) or 0)
+        warrantor = attrs.get(
+            "manufacturer_warrantor", getattr(instance, "manufacturer_warrantor", None),
+        )
+        manufacturer = attrs.get(
+            "manufacturer_months", getattr(instance, "manufacturer_months", 0) or 0,
+        )
+
+        if warrantor is None and manufacturer:
+            raise serializers.ValidationError({
+                "manufacturer_months": "بلا جهة كفالة مصنع، مدتها يجب أن تكون صفراً.",
+            })
+        if warrantor is not None and not manufacturer:
+            raise serializers.ValidationError({
+                "manufacturer_months": (
+                    "اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر، أو أزل الجهة."
+                ),
+            })
+
+        # الطبقتان اللتان يراهما الزبون: التاجر والمصنع. كفالة المورّد داخلية
+        # بيننا وبينه — وحدها كانت ستُصدر للزبون بطاقةً بصفر شهر، منتهيةً يوم بيعها.
+        if not (dealer or manufacturer):
+            raise serializers.ValidationError({
+                "dealer_months": (
+                    "حدّد مدة كفالة التاجر أو المصنع أكبر من صفر — كفالة المورّد "
+                    "وحدها داخلية لا تُصدر للزبون بطاقة."
+                ),
+            })
+
+        terms = attrs.get("terms_override", getattr(instance, "terms_override", "") or "")
+        if len(terms) > TERMS_MAX_LENGTH:
+            raise serializers.ValidationError({
+                "terms_override": f"شروط البراند البديلة لا تتجاوز {TERMS_MAX_LENGTH} حرفاً.",
+            })
+        return attrs
+
+
+class WarrantyPolicyBulkSerializer(serializers.Serializer):
+    """محدِّد التطبيق الجماعي — منتجٌ أبٌ **أو** تصنيف، لا كلاهما ولا بلا أحدهما."""
+
+    family = serializers.IntegerField(required=False)
+    category = serializers.IntegerField(required=False)
+    method = serializers.ChoiceField(choices=WarrantyPolicy.METHOD_CHOICES)
+    dealer_months = serializers.IntegerField(min_value=0, max_value=600, required=False, default=0)
+    manufacturer_warrantor = serializers.IntegerField(required=False, allow_null=True)
+    manufacturer_months = serializers.IntegerField(min_value=0, max_value=600, required=False, default=0)
+    supplier_months = serializers.IntegerField(min_value=0, max_value=600, required=False, default=0)
+    terms_override = serializers.CharField(required=False, allow_blank=True, max_length=TERMS_MAX_LENGTH)
+
+    def validate(self, attrs):
+        if bool(attrs.get("family")) == bool(attrs.get("category")):
+            raise serializers.ValidationError({
+                "detail": "حدّد منتجاً أباً واحداً أو تصنيفاً واحداً — لا كليهما ولا بلا أحدهما.",
+            })
+        return attrs
 
 
 class AfterSalesSettingsSerializer(serializers.ModelSerializer):

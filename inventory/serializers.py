@@ -223,10 +223,6 @@ class ProductSerializer(serializers.ModelSerializer):
             # #33: مفتاحٌ لكل صنف — أيّ مسارٍ يحكم اقتراح التجديد (يدوي/تلقائي).
             'reorder_mode',
             'is_serialized', 'is_service',
-            # THA-24: سياسة الكفالة على المنتج — تقرأها الكفالة عند ترحيل البيع،
-            # ويحرّرها المستخدم من كرت المنتج. بلا إدراجها هنا يبتلع DRF قيمتها
-            # في الكتابة بصمت فيبدو الحقل محفوظاً وهو ليس كذلك.
-            'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
             # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
@@ -535,9 +531,6 @@ class ProductLookupSerializer(ProductSerializer):
             # ومعه لافتة مصدره (لا يُخلط برقم تكلفة). حقلان قصيران فقط — لا
             # توسيع للعقد الضيّق عمداً (قياس 1490 منتجاً: 1,145 كيلوبايت مقابل 685).
             'indicative_purchase_price', 'indicative_purchase_price_source',
-            # THA-24: نافذة البطاقة اليدوية تملأ المدة من سياسة المنتج المختار،
-            # فلا يعيد المستخدم كتابة ما تعرفه المنظومة.
-            'warranty_months', 'supplier_warranty_months',
             'is_for_sale_online',
             'online_price', 'online_description', 'attachments',
             # T-SUPSKU: أرقام المورّدين نصّاً واحداً — منتقي بند الفاتورة يبحث

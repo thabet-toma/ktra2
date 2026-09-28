@@ -6,6 +6,7 @@ from after_sales.views import (
     ManufacturerWarrantorViewSet,
     ServiceOrderViewSet,
     WarrantyCardViewSet,
+    WarrantyPolicyViewSet,
 )
 
 # SimpleRouter لا DefaultRouter: جذر الـAPI القابل للتصفح صفحةٌ غير محروسة
@@ -16,6 +17,7 @@ router.register(r"service-orders", ServiceOrderViewSet, basename="service-order"
 router.register(
     r"manufacturer-warrantors", ManufacturerWarrantorViewSet, basename="manufacturer-warrantor",
 )
+router.register(r"warranty-policies", WarrantyPolicyViewSet, basename="warranty-policy")
 
 # `settings/` صفٌّ مفرد بلا `pk` — خارج الراوتر عمداً (#230)، على نمط
 # `SalesSettingsViewSet.current` بمسارٍ صريح بدل فعل قائمة/تفصيل يُخمَّن.

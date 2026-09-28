@@ -15,6 +15,7 @@
 """
 from datetime import date
 
+from django.core.validators import MaxValueValidator
 from django.db import models
 
 from tenants.models import Tenant
@@ -64,8 +65,8 @@ class WarrantyCardQuerySet(models.QuerySet):
 class WarrantyCard(models.Model):
     """بطاقة كفالة — نسخة الكفالة الفعلية لوحدة واحدة عند الزبون.
 
-    السياسة تعيش على المنتج (`Product.warranty_months`)؛ هذه هي النسخة المصروفة
-    منها: تُنشأ آلياً عند ترحيل فاتورة البيع لكل وحدة متسلسلة استُهلكت
+    السياسة تعيش على `WarrantyPolicy` (صفٌّ مستقل بلا حقلَين على المنتج، #231)؛
+    هذه هي النسخة المصروفة منها: تُنشأ آلياً عند ترحيل فاتورة البيع لكل وحدة متسلسلة استُهلكت
     (`source=auto_sale`)، أو يدوياً لما لا وحدة متسلسلة له (`source=manual`).
 
     `end_date` **مخزَّن وقابل للتعديل** — التمديد مجاملةً قرارُ تاجر لا حساب،
@@ -171,6 +172,11 @@ class WarrantyCard(models.Model):
     )
 
     notes = models.TextField(blank=True, default="")
+    # #231: الشروط المجمَّدة لحظة الإنشاء — من `WarrantyPolicy.terms_override`
+    # وإلا `AfterSalesSettings.default_terms`. لا تتغيّر بتعديل السياسة لاحقاً؛
+    # بطاقةٌ قديمة (قبل هذا المعلم) تبقى فارغة، والطباعة تطبع شروط الشركة
+    # الحالية لها (#238 — غير مبنيّة هنا، الحقل يُخزَّن فقط).
+    terms_text = models.TextField(blank=True, default="")
     created_by = models.ForeignKey(
         "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="created_warranty_cards",
@@ -554,6 +560,72 @@ class ManufacturerWarrantor(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class WarrantyPolicy(models.Model):
+    """سياسة كفالة براند واحد — ما يقرأه ترحيل البيع ليقرّر مدد بطاقته (#231).
+
+    صفٌّ واحدٌ لكل براند (`product` علاقةٌ فريدة — لا حالة، بل وعدٌ). المنتج
+    بلا صفّ هنا لا كفالة له أصلاً: `create_auto_warranty_cards` لا تخترع
+    مدّةً من مكانٍ آخر. تعديل السياسة لا يمسّ بطاقةً صُرفت — شروطها ومددها
+    مجمَّدةٌ على البطاقة نفسها لحظة إنشائها.
+
+    التحقّق (السيريالايزر هو من يفرضه، على نمط بقية الوحدة):
+    - طبقة واحدة على الأقل (تاجر/مصنع/مورّد) أكبر من صفر.
+    - `manufacturer_months` أكبر من صفر إذا وُجدت الجهة، وصفرٌ وجوباً إن غابت.
+    - `method=serial` مرفوضةٌ لمنتج خدمة (`product.is_service`) — `invoice`
+      مسموحةٌ له.
+    """
+
+    METHOD_SERIAL = "serial"
+    METHOD_INVOICE = "invoice"
+    METHOD_CHOICES = [
+        (METHOD_SERIAL, "برقم تسلسلي"),
+        (METHOD_INVOICE, "على الفاتورة"),
+    ]
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="warranty_policies",
+    )
+    # علاقةٌ فريدة (لا FK متكرّر): صفٌّ واحدٌ لكل براند، على نمط
+    # `inventory.ProductDemandForecast.product` — الحذف يتبع المنتج (CASCADE).
+    product = models.OneToOneField(
+        "inventory.Product", on_delete=models.CASCADE, related_name="warranty_policy",
+    )
+    method = models.CharField(
+        max_length=10, choices=METHOD_CHOICES, default=METHOD_SERIAL,
+    )
+    dealer_months = models.PositiveSmallIntegerField(
+        default=0, validators=[MaxValueValidator(600)],
+        help_text="مدة كفالة التاجر بالأشهر",
+    )
+    # الفارغ = «لا يوجد» — جهة كفالة المصنع (#230)، PROTECT: لا حذف لجهةٍ
+    # عليها سياسة، أرشفة بدلاً منه.
+    manufacturer_warrantor = models.ForeignKey(
+        ManufacturerWarrantor, on_delete=models.PROTECT, null=True, blank=True,
+        related_name="warranty_policies",
+    )
+    manufacturer_months = models.PositiveSmallIntegerField(
+        default=0, validators=[MaxValueValidator(600)],
+        help_text="مدة كفالة المصنع بالأشهر — أكبر من صفر إن وُجدت الجهة، وإلا صفر",
+    )
+    supplier_months = models.PositiveSmallIntegerField(
+        default=0, validators=[MaxValueValidator(600)],
+        help_text="مدة كفالة المورّد (داخلية) بالأشهر",
+    )
+    terms_override = models.TextField(
+        blank=True, default="",
+        help_text="شروطٌ خاصة بهذا البراند — تحلّ محلّ شروط الشركة على بطاقاته",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "warranty_policies"
+        ordering = ["product_id"]
+
+    def __str__(self):
+        return f"سياسة كفالة #{self.product_id}"
 
 
 class AfterSalesSettings(models.Model):

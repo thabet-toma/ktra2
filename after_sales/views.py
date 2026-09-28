@@ -8,6 +8,7 @@ import logging
 from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import ProtectedError, Q
 from django.utils import timezone
 from rest_framework import status as http_status
@@ -27,6 +28,7 @@ from .models import (
     ServiceOrderPart,
     WarrantyCard,
     WarrantyCardEvent,
+    WarrantyPolicy,
 )
 from .serializers import (
     AfterSalesSettingsSerializer,
@@ -41,6 +43,8 @@ from .serializers import (
     WarrantyCardEventSerializer,
     WarrantyCardSerializer,
     WarrantyExtendSerializer,
+    WarrantyPolicyBulkSerializer,
+    WarrantyPolicySerializer,
 )
 from .services import (
     MODULE_KEY,
@@ -324,6 +328,132 @@ class ManufacturerWarrantorViewSet(viewsets.ModelViewSet):
             .order_by("name")
         )
         return Response(ManufacturerWarrantorSerializer(queryset, many=True).data)
+
+
+class WarrantyPolicyViewSet(viewsets.ModelViewSet):
+    """سياسات الكفالة — صفٌّ لكل براند (#231).
+
+    القراءة خلف `aftersales.warranty.view` (نفس بوابة بطاقات الكفالة — كرت
+    المنتج يعرض منها سطراً للقراءة)، والكتابة (بما فيها `bulk/`) خلف
+    `aftersales.settings.manage` وحدها: السياسة تغيّر وعد الزبون وتفرض إدخالاً
+    على الكاشير، فلا تُترك لموظف مبيعات عابر.
+    """
+
+    authentication_classes = ApiAuthAndUser["authentication_classes"]
+    permission_classes = ApiAuthAndUser["permission_classes"]
+    serializer_class = WarrantyPolicySerializer
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.tenant = require_module(request, MODULE_KEY)
+        if self.action in ("list", "retrieve"):
+            require_perm(request, PERM_VIEW, tenant=self.tenant)
+        else:
+            require_perm(request, PERM_SETTINGS_MANAGE, tenant=self.tenant)
+
+    def get_queryset(self):
+        queryset = (
+            WarrantyPolicy.objects
+            .filter(tenant=self.tenant)
+            .select_related("product", "manufacturer_warrantor")
+        )
+        if self.action != "list":
+            return queryset
+
+        params = self.request.query_params
+        product_id = (params.get("product") or "").strip()
+        if product_id.isdigit():
+            queryset = queryset.filter(product_id=int(product_id))
+        family_id = (params.get("family") or "").strip()
+        if family_id.isdigit():
+            queryset = queryset.filter(product__family_id=int(family_id))
+        category_id = (params.get("category") or "").strip()
+        if category_id.isdigit():
+            from inventory.services import category_descendant_product_ids
+            queryset = queryset.filter(product_id__in=category_descendant_product_ids(
+                tenant_id=self.tenant.pk, category_id=int(category_id),
+            ))
+        return queryset
+
+    def _validate_tenant_links(self, serializer):
+        for field in ("product", "manufacturer_warrantor"):
+            obj = serializer.validated_data.get(field)
+            if obj is not None and obj.tenant_id != self.tenant.pk:
+                raise ValidationError({field: "هذا السجل لا يتبع الشركة النشطة."})
+
+    def perform_create(self, serializer):
+        self._validate_tenant_links(serializer)
+        serializer.save(tenant=self.tenant)
+
+    def perform_update(self, serializer):
+        self._validate_tenant_links(serializer)
+        serializer.save()
+
+    @action(detail=False, methods=["post"], url_path="bulk")
+    def bulk(self, request):
+        """تطبيق سياسةٍ واحدة على كل براندات منتجٍ أب أو تصنيف — صفٌّ لكل براند.
+
+        كلّ أم لا شيء: أيّ براندٍ يرفضه التحقّق (منتج خدمة تحت `method=serial`،
+        أو طبقاتٌ كلّها صفر) يُسقط الجماعة كلّها بـ400 يسمّيه — لا كتابة جزئية
+        صامتة يكتشفها المدير لاحقاً براندًا براندًا.
+        """
+        from inventory.models import Product
+
+        form = WarrantyPolicyBulkSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        data = form.validated_data
+
+        family_id = data.get("family")
+        if family_id:
+            product_ids = list(
+                Product.objects.filter(tenant=self.tenant, family_id=family_id)
+                .values_list("id", flat=True)
+            )
+        else:
+            from inventory.services import category_descendant_product_ids
+            product_ids = category_descendant_product_ids(
+                tenant_id=self.tenant.pk, category_id=data["category"],
+            )
+        if not product_ids:
+            raise ValidationError({"detail": "لا براندات لهذا المحدِّد."})
+
+        warrantor_id = data.get("manufacturer_warrantor")
+        if warrantor_id and not ManufacturerWarrantor.objects.filter(
+            tenant=self.tenant, pk=warrantor_id,
+        ).exists():
+            raise ValidationError({
+                "manufacturer_warrantor": "هذا السجل لا يتبع الشركة النشطة.",
+            })
+
+        base_fields = {
+            "method": data["method"],
+            "dealer_months": data.get("dealer_months", 0),
+            "manufacturer_warrantor": warrantor_id,
+            "manufacturer_months": data.get("manufacturer_months", 0),
+            "supplier_months": data.get("supplier_months", 0),
+            "terms_override": data.get("terms_override", ""),
+        }
+        existing = {
+            policy.product_id: policy
+            for policy in WarrantyPolicy.objects.filter(
+                tenant=self.tenant, product_id__in=product_ids,
+            )
+        }
+
+        saved = []
+        with transaction.atomic():
+            for product_id in product_ids:
+                row_data = dict(base_fields, product=product_id)
+                serializer = WarrantyPolicySerializer(
+                    instance=existing.get(product_id), data=row_data,
+                )
+                serializer.is_valid(raise_exception=True)
+                saved.append(serializer.save(tenant=self.tenant))
+
+        return Response({
+            "applied": len(saved),
+            "policies": WarrantyPolicySerializer(saved, many=True).data,
+        })
 
 
 class AfterSalesSettingsView(APIView):

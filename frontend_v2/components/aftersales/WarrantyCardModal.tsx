@@ -38,8 +38,6 @@ interface ProductOption {
   name_ar?: string;
   name_en?: string;
   sku?: string;
-  warranty_months?: number | null;
-  supplier_warranty_months?: number | null;
 }
 
 interface PartnerOption {
@@ -162,16 +160,11 @@ export const WarrantyCardModal: React.FC<Props> = ({
     setDraft((d) => ({ ...d, [key]: value }));
   };
 
-  /** اختيار المنتج يجلب سياسته: المدة الفارغة تُملأ منها، والمملوءة لا تُداس. */
+  /** #231: مدّة السياسة تُشتقّ آلياً على بطاقات البيع التلقائية — هنا بطاقةٌ
+   * يدوية، فالمدّة تبقى حقلاً يملؤه المستخدم بلا تعبئة تلقائية من سياسة. */
   const pickProduct = (productId: number | null) => {
     setTouched(true);
-    const product = products.find((p) => p.id === productId);
-    setDraft((d) => ({
-      ...d,
-      product: productId,
-      duration_months:
-        d.duration_months || (product?.warranty_months ?? null) || null,
-    }));
+    setDraft((d) => ({ ...d, product: productId }));
   };
 
   /** اختيار الزبون يلتقط اسمه وهاتفه لقطةً — البطاقة وثيقة لحظتها. */

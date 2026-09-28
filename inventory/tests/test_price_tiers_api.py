@@ -161,7 +161,6 @@ class ProductRealFieldsTest(APITestCase):
             "min_stock_level": 5, "max_stock_level": 50,
             "sale_price": 199.5,
             "barcode": None, "is_serialized": False, "is_service": False,
-            "warranty_months": 12, "supplier_warranty_months": 24,
             "uom_id": piece.pk,
             "uom2": box.pk, "uom2_factor": "12",
             "description": "بيان داخلي", "storage_location": "A-3",
@@ -184,7 +183,6 @@ class ProductRealFieldsTest(APITestCase):
         assert body["description"] == "بيان داخلي"
         assert body["storage_location"] == "A-3"
         assert body["sale_account_override"] == account.pk
-        assert body["warranty_months"] == 12
         assert len(body["price_tiers"]) == 1
         # «النوع» يُنشئ تصنيفَ مجموعةٍ خادمياً (task31) — والمنتج يبقى داخله.
         assert body["variant_group"] == "195/65/15"

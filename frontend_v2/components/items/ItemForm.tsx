@@ -35,6 +35,9 @@ import type { AccountNodeLike } from "../../utils/accountTree";
 import { cloudinaryService } from "../../services/cloudinaryService";
 import { usePasteZone } from "../../utils/clipboardImage";
 import { ProductBrandStrip, useProductInsights } from "./ProductInsightTabs";
+import {
+  ProductWarrantyPolicyLine, useProductWarrantyPolicyVisible,
+} from "../aftersales/ProductWarrantyPolicyLine";
 import { SupplierCodesTab } from "./SupplierCodesTab";
 import { formatMoney, formatNumber, formatQuantity } from "../../utils/formatNumber";
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
@@ -140,10 +143,6 @@ type FormState = {
   barcode: string;
   /** T-SERIAL: تتبّع وحدات المنتج بأرقام تسلسلية. */
   is_serialized: boolean;
-  /** THA-24: سياسة كفالة الزبون بالأشهر — فارغ = بلا كفالة، فلا بطاقة تلقائية. */
-  warranty_months: string;
-  /** THA-24: كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء. */
-  supplier_warranty_months: string;
   /** بيانٌ داخلي — منفصل عن وصف المتجر الذي يراه العالم. */
   description: string;
   /** #147 M2: صورة البراند المرجعية الواحدة — يراها المورّد على رابط طلب عرض السعر. */
@@ -174,7 +173,6 @@ const blankForm = (): FormState => ({
   new_brands: [],
   variant_group: "",
   barcode: "", is_serialized: false,
-  warranty_months: "", supplier_warranty_months: "",
   description: "", storage_location: "",
   image_url: "",
   uom_id: null, uom2: null, uom2_factor: "",
@@ -264,6 +262,9 @@ export const ItemForm: React.FC<Props> = ({
   initialTab,
 }) => {
   const toast = useToast();
+  // #231: يحكم عرض تسمية «كفالة الزبون/المصنع/المورّد» **والمكوّن معاً** —
+  // مصدرٌ واحد كي لا يفترق الشرطان (راجع `ProductWarrantyPolicyLine.tsx`).
+  const warrantyPolicyVisible = useProductWarrantyPolicyVisible();
   const [form, setForm] = useState<FormState>(blankForm());
   const [currentId, setCurrentId] = useState<number | null>(productId);
   // ختمُ «آخر تعديل» للمنتج المفتوح (#109 §٩) — يُلتقط في `applyProduct`.
@@ -506,10 +507,6 @@ export const ItemForm: React.FC<Props> = ({
       // الباركود يميّز منتجاً واحداً في الشركة — النسخة تبدأ بلا باركود لا بباركود أخيها.
       barcode: isDuplicate ? "" : String(p.barcode ?? ""),
       is_serialized: Boolean(p.is_serialized),
-      // الكفالة سياسة المنتج لا حالة نسخةٍ منه — تُنسَخ مع النسخة لبراند آخر.
-      warranty_months: p.warranty_months != null ? String(p.warranty_months) : "",
-      supplier_warranty_months:
-        p.supplier_warranty_months != null ? String(p.supplier_warranty_months) : "",
       // التكرار (براند آخر): الاسم والتصنيف يبقيان كما هما، فيُحفظ المنتج تحت نفس
       // التصنيف بجانب إخوته؛ يُفرّغ البراند فقط ليكتبه المستخدم.
       name_ar: String(p.name_ar ?? ""),
@@ -614,11 +611,6 @@ export const ItemForm: React.FC<Props> = ({
         // T-SERIAL: الباركود فارغ = null لا "" — كي لا يتصادم منتجان بلا باركود.
         barcode: form.barcode.trim() || null,
         is_serialized: form.is_serialized,
-        // THA-24: فارغ = null لا 0 — «بلا كفالة» و«كفالة صفر شهر» شيء واحد،
-        // وnull هو ما يقرأه محرّك الكفالة فلا يُنشئ بطاقة.
-        warranty_months: form.warranty_months.trim() ? Number(form.warranty_months) : null,
-        supplier_warranty_months: form.supplier_warranty_months.trim()
-          ? Number(form.supplier_warranty_months) : null,
         // روابط الداتا شيت — يلتقطها الخادم في _handle_attachments (خارج حقول الـserializer).
         datasheet_urls: form.datasheets.map((d) => d.url),
       };
@@ -974,21 +966,13 @@ export const ItemForm: React.FC<Props> = ({
               : "كل وحدة برقمها — يظهر تبويب «الأرقام التسلسلية»"}
           </span>
         </span>)}
-      {/* THA-24: سياسة الكفالة — بجانب التتبّع بالرقم التسلسلي لأن البطاقة
-          التلقائية لا تُنشأ إلا لوحدةٍ مُرقَّمة: المدة بلا تتبّعٍ بالأرقام تبقى
-          سياسةً تُقرأ عند الاستقبال يدوياً. فارغ = بلا كفالة. */}
-      {fld("كفالة الزبون (أشهر)",
-        <input className="ktra-input" type="number" min="0" max="600" step="1"
-          value={form.warranty_months}
-          placeholder="فارغ = بلا كفالة"
-          title="تُنشأ بطاقة كفالة تلقائياً لكل وحدة مُرقَّمة تُباع من هذا المنتج، بدايتها تاريخ فاتورة البيع"
-          onChange={(e) => patch("warranty_months", e.target.value)} />)}
-      {fld("كفالة المورد لنا (أشهر)",
-        <input className="ktra-input" type="number" min="0" max="600" step="1"
-          value={form.supplier_warranty_months}
-          placeholder="فارغ = بلا كفالة مورد"
-          title="تُحسب من تاريخ فاتورة الشراء — يراها موظف الكاونتر فلا تتحمّل الشركة كلفة يتحمّلها المورد"
-          onChange={(e) => patch("supplier_warranty_months", e.target.value)} />)}
+      {/* #231: سياسة الكفالة انتقلت من حقلَي منتجٍ إلى صفٍّ مستقل
+          (`after_sales.WarrantyPolicy`) — تُدار من شاشة سياسات الكفالة لا من
+          هنا؛ الكرت يعرضها للاطّلاع فقط، وفقط لمنتجٍ محفوظٍ فعلاً. تسمية
+          الحقل نفسها مشروطة بنفس شرط ظهور المكوّن (قصة المستخدم ٢٠) — وإلا
+          رأت شركةٌ غير مرخّصة تسمية «كفالة» بلا محتوًى. */}
+      {currentId != null && warrantyPolicyVisible &&
+        fld("كفالة الزبون/المصنع/المورّد", <ProductWarrantyPolicyLine productId={currentId} />)}
       {/* T-REORDER: «الصنف» كان حقلاً خادمياً كاملاً (`variant_group`) بنقطته
           الجاهزة (`products/groups/`) ولا مدخلَ له في أي شاشة — فبقي فارغاً على
           كل منتجٍ في كل شركة، وبفراغه يسقط تجميعُ الموديلات على اسم المنتج: كل

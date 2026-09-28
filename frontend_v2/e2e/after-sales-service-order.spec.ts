@@ -69,7 +69,7 @@ const COVERAGE = {
   }],
   unit: {
     id: 11, serial: "SN-9", status: "sold", status_display: "مُباع", product: 7,
-    product_name: "جهاز لوحي", warranty_months: 12, supplier_warranty_months: 24,
+    product_name: "جهاز لوحي", dealer_months: 12, supplier_months: 24,
     sales_invoice: 9, sales_invoice_number: "SI-9", sale_date: "2026-08-01",
     customer_name: "زبون تجريبي",
   },

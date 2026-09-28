@@ -207,17 +207,10 @@ class Product(models.Model):
         db_column='ReorderMode',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
-    # THA-24: سياسة الكفالة على المنتج — لا حالة. النسخة الفعلية لكل وحدة مباعة
-    # تعيش في `after_sales.WarrantyCard`، وتغيير السياسة لا يمسّ بطاقة صُرفت.
-    # فارغ أو صفر = لا كفالة، فلا تُنشأ بطاقة تلقائية عند ترحيل البيع.
-    warranty_months = models.PositiveSmallIntegerField(
-        null=True, blank=True, db_column='WarrantyMonths',
-        help_text='مدة كفالة الزبون بالأشهر (فارغ = بلا كفالة)',
-    )
-    supplier_warranty_months = models.PositiveSmallIntegerField(
-        null=True, blank=True, db_column='SupplierWarrantyMonths',
-        help_text='مدة كفالة المورد لنا بالأشهر — تُحسب من تاريخ فاتورة الشراء',
-    )
+    # THA-24 → #231: سياسة الكفالة لم تعد عمودين هنا — انتقلت إلى صفٍّ مستقل
+    # `after_sales.WarrantyPolicy` (OneToOne على هذا المنتج/البراند)، فلا يمنع
+    # تغييرُها ما صُرف من بطاقات. الهجرة `after_sales/migrations/
+    # 0008_backfill_warranty_policies.py` نقلت كل قيمةٍ قائمة قبل حذف العمودين.
     is_service = models.BooleanField(
         default=False,
         db_column='IsService',

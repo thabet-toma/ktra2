@@ -171,7 +171,7 @@ PERMISSIONS: list[dict] = [
     # خدمة ما بعد البيع — لا تظهر إلا للشركات المرخّصة للوحدة.
     {"key": "aftersales.warranty.view", "label": "عرض بطاقات الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.warranty.manage", "label": "إنشاء بطاقة كفالة وتمديدها", "group": GROUP_AFTERSALES, "module": "after_sales"},
-    {"key": "aftersales.settings.manage", "label": "إدارة جهات كفالة المصنع وإعدادات الوحدة", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.settings.manage", "label": "إدارة سياسات الكفالة وجهات المصنع وإعدادات الوحدة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.view", "label": "عرض أوامر الصيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.create", "label": "استقبال جهاز وفتح أمر صيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.edit", "label": "تعديل أمر صيانة ونقل حالته", "group": GROUP_AFTERSALES, "module": "after_sales"},

@@ -60,8 +60,6 @@ const PRODUCTS = [
     sku: "P-0007",
     display_name: "جهاز لوحي (سامسونج)",
     name_ar: "جهاز لوحي",
-    warranty_months: 12,
-    supplier_warranty_months: 24,
     is_serialized: true,
     is_service: false,
   },

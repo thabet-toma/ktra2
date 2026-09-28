@@ -29,8 +29,8 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.db.models import Q
 
-from after_sales.models import ServiceOrder, WarrantyCard, add_months
-from after_sales.services import MODULE_KEY
+from after_sales.models import ServiceOrder, WarrantyCard, WarrantyPolicy, add_months
+from after_sales.services import MODULE_KEY, get_or_create_after_sales_settings
 from core.modules import module_enabled
 from inventory.models import ProductSerial
 from tenants.models import Tenant
@@ -196,6 +196,19 @@ class Command(BaseCommand):
         if apply and rows:
             from inventory.services import product_display_name
 
+            # #231: المدة من سياسة البراند لا من عمودٍ على المنتج — استعلامٌ
+            # واحد لكل منتجات هذه الدفعة، لا واحدٌ لكل صفّ.
+            policies = {
+                policy.product_id: policy
+                for policy in WarrantyPolicy.objects.filter(
+                    tenant_id=tenant_id,
+                    product_id__in={unit.product_id for _, unit, _, _ in rows},
+                )
+            }
+            settings_row = (
+                get_or_create_after_sales_settings(tenant_id) if policies else None
+            )
+
             with transaction.atomic():
                 for card, unit, new_invoice, already_carded in rows:
                     card.ended_on = new_invoice.invoice_date
@@ -203,8 +216,8 @@ class Command(BaseCommand):
                     card.save(update_fields=["ended_on", "end_reason", "updated_at"])
                     if already_carded:
                         continue
-                    months = int(getattr(unit.product, "warranty_months", 0) or 0)
-                    if months <= 0:
+                    policy = policies.get(unit.product_id)
+                    if policy is None:
                         continue
                     customer = new_invoice.customer if new_invoice.customer_id else None
                     WarrantyCard.objects.create(
@@ -223,9 +236,10 @@ class Command(BaseCommand):
                             (getattr(customer, "phone", "") or "")[:32] if customer else ""
                         ),
                         start_date=new_invoice.invoice_date,
-                        duration_months=months,
-                        end_date=add_months(new_invoice.invoice_date, months),
+                        duration_months=policy.dealer_months,
+                        end_date=add_months(new_invoice.invoice_date, policy.dealer_months),
                         source=WarrantyCard.SOURCE_AUTO_SALE,
+                        terms_text=policy.terms_override or settings_row.default_terms,
                         notes="أُنشئت بأثر رجعي — أداة إصلاح البيانات (#222).",
                     )
             logger.info(

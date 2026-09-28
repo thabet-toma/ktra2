@@ -212,7 +212,7 @@ class ProductApiTest(APITestCase):
             "category", "category_name", "hs_code", "min_stock_level",
             "stock_status", "group_key", "quantity_on_hand", "reserved_quantity",
             "available_quantity", "avg_cost", "sale_price", "is_service",
-            "is_serialized", "warranty_months", "supplier_warranty_months",
+            "is_serialized",
             "is_for_sale_online", "online_price", "online_description",
             "attachments", "supplier_codes_text",
         }

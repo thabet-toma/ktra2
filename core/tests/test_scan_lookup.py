@@ -23,6 +23,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
+from after_sales.models import WarrantyPolicy
 from core.models import TenantModule
 from core.scan import guess_kind
 from inventory.models import Product, ProductSerial, Warehouse
@@ -123,9 +124,13 @@ class ScanTestBase(APITestCase):
         self.phone = Product.objects.create(
             tenant=self.tenant, sku="PH-001", barcode=BARCODE,
             name_ar="هاتف ذكي 128 جيجا", brand="سامسونج", is_serialized=True,
-            warranty_months=12, supplier_warranty_months=24,
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
             sale_price=Decimal("2000"),
+        )
+        # #231: المدة على سياسة البراند لا على المنتج.
+        WarrantyPolicy.objects.create(
+            tenant=self.tenant, product=self.phone, method=WarrantyPolicy.METHOD_SERIAL,
+            dealer_months=12, supplier_months=24,
         )
         self.client.force_authenticate(user=self.user)
 

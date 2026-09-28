@@ -1,27 +1,49 @@
-import React, { useCallback, useEffect, useState } from "react";
-import { Archive, Loader2, Plus, RotateCcw, Settings, ShieldCheck, X } from "lucide-react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Archive, Layers, Loader2, Plus, RotateCcw, Settings, ShieldCheck, X,
+} from "lucide-react";
+import {
+  deleteWarrantyPolicy,
   getAfterSalesSettings,
   listManufacturerWarrantors,
+  listWarrantyPolicies,
   lookupManufacturerWarrantors,
   updateAfterSalesSettings,
   updateManufacturerWarrantor,
   type AfterSalesSettingsDraft,
   type AfterSalesSettingsRow,
   type ManufacturerWarrantorRow,
+  type WarrantyPolicyRow,
 } from "../../services/afterSalesApi";
+import { listPickerProducts } from "../../services/inventoryApi";
+import type { SalesProductPickerItem } from "../sales/SalesProductPickerModal";
+import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
 import { ManufacturerWarrantorModal } from "./ManufacturerWarrantorModal";
+import { WarrantyPolicyModal } from "./WarrantyPolicyModal";
+import { WarrantyPolicyBulkModal } from "./WarrantyPolicyBulkModal";
 
 /**
- * #230 — إعدادات وحدة خدمة ما بعد البيع: قسما «جهات كفالة المصنع» و«الشروط
- * والإعدادات». تُفتح من زر «الإعدادات» في شاشة بطاقات الكفالة، خلف
+ * #230/#231 — إعدادات وحدة خدمة ما بعد البيع: «جهات كفالة المصنع»،
+ * «سياسات الكفالة» (صفٌّ لكل براند — لا سياسة = لا بطاقة تلقائية عند البيع)،
+ * و«الشروط والإعدادات». تُفتح من زر «الإعدادات» في شاشة بطاقات الكفالة، خلف
  * `aftersales.settings.manage` للكتابة — `GET` وحده يُقرأ بلا صلاحيةٍ خاصة.
  */
+
+interface PolicyProductOption extends SalesProductPickerItem {
+  is_service?: boolean;
+  family_id?: number | null;
+  family_name?: string | null;
+  category?: number | null;
+  category_name?: string | null;
+}
 
 interface Props {
   canManage: boolean;
   onClose: () => void;
+  /** #231: رابط «سياسات الكفالة» على كرت المنتج يصل هنا مباشرةً — يُنزل
+   *  القسم إلى مرأى المستخدم بدل أن يفتح على أعلى النافذة (جهات المصنع). */
+  focusPolicies?: boolean;
 }
 
 const TERMS_MAX_LENGTH = 2000;
@@ -62,13 +84,22 @@ const TermsCounter: React.FC<{ length: number }> = ({ length }) => (
   </div>
 );
 
-export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose }) => {
+export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose, focusPolicies }) => {
   const toast = useToast();
+  const confirm = useConfirm();
+  const policiesSectionRef = useRef<HTMLElement | null>(null);
 
   const [warrantors, setWarrantors] = useState<ManufacturerWarrantorRow[]>([]);
   const [warrantorsErr, setWarrantorsErr] = useState<string | null>(null);
   const [loadingWarrantors, setLoadingWarrantors] = useState(false);
   const [openWarrantor, setOpenWarrantor] = useState<ManufacturerWarrantorRow | "new" | null>(null);
+
+  const [policies, setPolicies] = useState<WarrantyPolicyRow[]>([]);
+  const [policiesErr, setPoliciesErr] = useState<string | null>(null);
+  const [loadingPolicies, setLoadingPolicies] = useState(false);
+  const [policyProducts, setPolicyProducts] = useState<PolicyProductOption[]>([]);
+  const [openPolicy, setOpenPolicy] = useState<WarrantyPolicyRow | "new" | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const [settings, setSettings] = useState<AfterSalesSettingsRow | null>(null);
   const [draft, setDraft] = useState<AfterSalesSettingsDraft>(emptySettingsDraft());
@@ -93,6 +124,23 @@ export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose }) 
     }
   }, [canManage]);
 
+  const loadPolicies = useCallback(async () => {
+    setLoadingPolicies(true);
+    setPoliciesErr(null);
+    try {
+      const [rows, products] = await Promise.all([
+        listWarrantyPolicies(),
+        listPickerProducts<PolicyProductOption>(),
+      ]);
+      setPolicies(rows);
+      setPolicyProducts(products);
+    } catch (e) {
+      setPoliciesErr(messageOf(e, "تعذّر تحميل سياسات الكفالة"));
+    } finally {
+      setLoadingPolicies(false);
+    }
+  }, []);
+
   const loadSettings = useCallback(async () => {
     setLoadingSettings(true);
     setSettingsErr(null);
@@ -114,8 +162,38 @@ export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose }) 
 
   useEffect(() => {
     void loadWarrantors();
+    void loadPolicies();
     void loadSettings();
-  }, [loadWarrantors, loadSettings]);
+  }, [loadWarrantors, loadPolicies, loadSettings]);
+
+  useEffect(() => {
+    if (focusPolicies) policiesSectionRef.current?.scrollIntoView({ block: "start" });
+  }, [focusPolicies]);
+
+  // المنتقي عند إنشاء سياسة جديدة يعرض براندات بلا سياسة قائمة فقط — صفٌّ واحد
+  // لكل براند (`OneToOneField`)، فاختيار براند له سياسة يرتدّ 400 من الخادم.
+  const productsWithoutPolicy = useMemo(() => {
+    const taken = new Set(policies.map((p) => p.product));
+    return policyProducts.filter((p) => !taken.has(p.id));
+  }, [policyProducts, policies]);
+
+  const deletePolicy = async (row: WarrantyPolicyRow) => {
+    const ok = await confirm({
+      title: "حذف سياسة الكفالة",
+      message: `ستُحذف سياسة «${row.product_name}» — البطاقات الصادرة لا تتأثر، لكن مبيعات هذا البراند لن تصدر بطاقةً بعد الآن حتى تُضاف سياسةٌ جديدة.`,
+      confirmText: "حذف السياسة",
+      cancelText: "تراجع",
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteWarrantyPolicy(row.id);
+      toast("حُذفت السياسة", "success");
+      void loadPolicies();
+    } catch (e) {
+      toast(messageOf(e, "تعذّر حذف السياسة"), "error");
+    }
+  };
 
   const toggleActive = async (row: ManufacturerWarrantorRow) => {
     try {
@@ -264,6 +342,102 @@ export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose }) 
           )}
         </section>
 
+        {/* ── سياسات الكفالة (#231) ──────────────────────────────────────── */}
+        <section ref={policiesSectionRef} className={cardClass}>
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <Layers className="h-4 w-4 text-[var(--color-primary)]" />
+              <h2 className="font-bold text-[var(--color-text)]">سياسات الكفالة</h2>
+            </div>
+            {canManage && (
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setBulkOpen(true)}
+                  className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                >
+                  تطبيق جماعي
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setOpenPolicy("new")}
+                  className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-bold text-white"
+                >
+                  <Plus className="h-4 w-4" /> سياسة جديدة
+                </button>
+              </div>
+            )}
+          </div>
+
+          <p className="mb-3 text-[11px] text-[var(--color-text-muted)]">
+            لا سياسة لبراندٍ = لا بطاقة كفالة تُصدَر تلقائياً عند بيعه.
+          </p>
+
+          {policiesErr && (
+            <div role="alert" className="mb-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2.5 text-sm text-red-600 dark:text-red-400">
+              {policiesErr}
+            </div>
+          )}
+
+          <div className="overflow-x-auto">
+            <table>
+              <thead>
+                <tr>
+                  <th>البراند</th>
+                  <th>الطريقة</th>
+                  <th>تاجر</th>
+                  <th>مصنع</th>
+                  <th>مورّد</th>
+                  {canManage && <th>إجراءات</th>}
+                </tr>
+              </thead>
+              <tbody>
+                {policies.map((row) => (
+                  <tr key={row.id}>
+                    <td
+                      className={canManage ? "cursor-pointer font-semibold text-[var(--color-text)]" : "font-semibold text-[var(--color-text)]"}
+                      onClick={() => canManage && setOpenPolicy(row)}
+                    >
+                      {row.product_name}
+                    </td>
+                    <td>{row.method_label}</td>
+                    <td>{row.dealer_months ? `${row.dealer_months} شهراً` : "—"}</td>
+                    <td>
+                      {row.manufacturer_months
+                        ? `${row.manufacturer_months} شهراً${row.manufacturer_warrantor_name ? ` — ${row.manufacturer_warrantor_name}` : ""}`
+                        : "—"}
+                    </td>
+                    <td>{row.supplier_months ? `${row.supplier_months} شهراً` : "—"}</td>
+                    {canManage && (
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => void deletePolicy(row)}
+                          className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-border)] px-2 py-1 text-xs text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+                          title="حذف السياسة"
+                        >
+                          حذف
+                        </button>
+                      </td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          {!loadingPolicies && policies.length === 0 && (
+            <div className="p-6 text-center text-sm text-[var(--color-text-muted)]">
+              لا سياسات كفالة بعد — أضف سياسةً لبراند كي تُصدر بطاقاتٍ تلقائية عند بيعه.
+            </div>
+          )}
+          {loadingPolicies && policies.length === 0 && (
+            <div className="flex items-center justify-center gap-2 p-6 text-sm text-[var(--color-text-muted)]">
+              <Loader2 className="h-4 w-4 animate-spin" /> جارٍ التحميل…
+            </div>
+          )}
+        </section>
+
         {/* ── الشروط والإعدادات ──────────────────────────────────────────── */}
         <section className={cardClass}>
           <h2 className="mb-3 font-bold text-[var(--color-text)]">الشروط والإعدادات</h2>
@@ -361,6 +535,26 @@ export const WarrantySettingsScreen: React.FC<Props> = ({ canManage, onClose }) 
           warrantor={openWarrantor === "new" ? null : openWarrantor}
           onClose={() => setOpenWarrantor(null)}
           onSaved={() => { void loadWarrantors(); }}
+        />
+      )}
+
+      {openPolicy !== null && (
+        <WarrantyPolicyModal
+          policy={openPolicy === "new" ? null : openPolicy}
+          products={openPolicy === "new" ? productsWithoutPolicy : policyProducts}
+          onClose={() => setOpenPolicy(null)}
+          onSaved={() => { void loadPolicies(); }}
+        />
+      )}
+
+      {bulkOpen && (
+        <WarrantyPolicyBulkModal
+          products={policyProducts}
+          onClose={() => setBulkOpen(false)}
+          onApplied={(count) => {
+            toast(`طُبّقت السياسة على ${count} براند`, "success");
+            void loadPolicies();
+          }}
         />
       )}
     </div>

@@ -18,7 +18,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
-from after_sales.models import WarrantyCard, add_months
+from after_sales.models import WarrantyCard, WarrantyPolicy, add_months
 from core.models import TenantModule
 from inventory.models import Product, ProductSerial, Warehouse
 from inventory.serials import SERIAL_MODE_OPTIONAL
@@ -115,19 +115,33 @@ class WarrantyTestBase(APITestCase):
         self.product = Product.objects.create(
             tenant=self.tenant, sku=f"WR-{Product.objects.count() + 1}",
             name_ar="لابتوب مكفول", is_serialized=True,
-            warranty_months=12, supplier_warranty_months=24,
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
+        self.make_policy(self.product, dealer_months=12, supplier_months=24)
         self.plain = Product.objects.create(
             tenant=self.tenant, sku=f"PL-{Product.objects.count() + 1}",
-            name_ar="كرتون ورق", is_serialized=False, warranty_months=12,
+            name_ar="كرتون ورق", is_serialized=False,
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
+        self.make_policy(self.plain, method=WarrantyPolicy.METHOD_INVOICE, dealer_months=12)
         self.client.force_authenticate(user=self.user)
 
     # ── أدوات ──────────────────────────────────────────────────────────
     def headers(self, tenant=None):
         return {"HTTP_X_TENANT_ID": str((tenant or self.tenant).TenantID)}
+
+    def make_policy(self, product, **overrides):
+        """#231: كل منتجٍ يُكفَل في هذه المجموعة يحتاج سياسة — لا حقلاً على المنتج."""
+        method = overrides.pop(
+            "method",
+            WarrantyPolicy.METHOD_SERIAL if product.is_serialized
+            else WarrantyPolicy.METHOD_INVOICE,
+        )
+        fields = {"dealer_months": 12, "supplier_months": 0}
+        fields.update(overrides)
+        return WarrantyPolicy.objects.create(
+            tenant=self.tenant, product=product, method=method, **fields,
+        )
 
     def stock_units(self, *serials, product=None):
         """يُدخل وحدات للمخزن عبر فاتورة شراء مرحّلة — الطريق الطبيعي الوحيد."""
@@ -265,7 +279,7 @@ class AutoWarrantyLifecycleTest(WarrantyTestBase):
         self.assertEqual(self.cards().count(), 0)
 
     def test_product_without_a_warranty_policy_gets_no_card(self):
-        Product.objects.filter(pk=self.product.pk).update(warranty_months=None)
+        WarrantyPolicy.objects.filter(product=self.product).delete()
         self.stock_units("SN-D1")
         invoice = self.sales_invoice(serials=["SN-D1"])
 
@@ -309,12 +323,13 @@ class AutoWarrantyBrandDisplayTest(WarrantyTestBase):
     عارياً من الآن فصاعداً — وبطاقةٌ قديمة لا تُمَسّ (بلا backfill)."""
 
     def _sibling(self, brand, *, name_ar="جهاز شقيق"):
-        return Product.objects.create(
+        product = Product.objects.create(
             tenant=self.tenant, sku=f"SIB-{Product.objects.count() + 1}",
             name_ar=name_ar, brand=brand, is_serialized=True,
-            warranty_months=12, supplier_warranty_months=24,
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
+        self.make_policy(product, dealer_months=12, supplier_months=24)
+        return product
 
     def test_auto_card_device_name_carries_brand_and_pre_existing_card_is_untouched(self):
         p1 = self._sibling("سوني")
@@ -354,8 +369,9 @@ class AutoWarrantyBrandDisplayTest(WarrantyTestBase):
         product = Product.objects.create(
             tenant=self.tenant, sku=f"OVF-{Product.objects.count() + 1}",
             name_ar=long_name, brand=long_brand, is_serialized=True,
-            warranty_months=12, quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
+        self.make_policy(product, dealer_months=12)
         self.stock_units("SN-OVF1", product=product)
         invoice = self.sales_invoice(serials=["SN-OVF1"], product=product)
 
@@ -492,7 +508,7 @@ class WarrantyApiTest(WarrantyTestBase):
         self.assertFalse(unsold["covered"])
         self.assertEqual(unsold["cards"], [])
         self.assertEqual(unsold["unit"]["status"], ProductSerial.STATUS_IN_STOCK)
-        self.assertEqual(unsold["unit"]["warranty_months"], 12)
+        self.assertEqual(unsold["unit"]["dealer_months"], 12)
 
         unknown = self.client.get(f"{BASE}check/?serial=NOPE", **self.headers()).data
         self.assertFalse(unknown["covered"])

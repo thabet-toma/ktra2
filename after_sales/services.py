@@ -25,7 +25,13 @@ from django.utils import timezone
 
 from core.modules import module_enabled
 
-from .models import AfterSalesSettings, WarrantyCard, WarrantyCardEvent, add_months
+from .models import (
+    AfterSalesSettings,
+    WarrantyCard,
+    WarrantyCardEvent,
+    WarrantyPolicy,
+    add_months,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -240,14 +246,26 @@ def create_auto_warranty_cards(invoice) -> int:
     if fresh:
         _supersede_stale_cards(invoice, [u.pk for u in fresh])
 
+    # #231: السياسة وحدها تقرّر وجود البطاقة — استعلامٌ واحد لكل منتجات
+    # الوحدات الجديدة، لا استعلامٌ لكل وحدة. لا صفّ = لا بطاقة.
+    policies = {
+        policy.product_id: policy
+        for policy in WarrantyPolicy.objects.filter(
+            tenant_id=invoice.tenant_id,
+            product_id__in={u.product_id for u in fresh},
+        )
+    }
+    settings_row = (
+        get_or_create_after_sales_settings(invoice.tenant_id) if policies else None
+    )
+
     created = []
     for unit in fresh:
-        months = int(getattr(unit.product, "warranty_months", 0) or 0)
-        if months <= 0:
+        policy = policies.get(unit.product_id)
+        if policy is None:
             continue
-        supplier_id, supplier_end = _supplier_side(
-            unit, int(getattr(unit.product, "supplier_warranty_months", 0) or 0),
-        )
+        supplier_id, supplier_end = _supplier_side(unit, policy.supplier_months)
+        terms_text = policy.terms_override or settings_row.default_terms
         created.append(WarrantyCard(
             tenant_id=invoice.tenant_id,
             product=unit.product,
@@ -265,11 +283,12 @@ def create_auto_warranty_cards(invoice) -> int:
             customer_name=(customer.name if customer else "")[:150],
             customer_phone=(getattr(customer, "phone", "") or "")[:32] if customer else "",
             start_date=invoice.invoice_date,
-            duration_months=months,
-            end_date=add_months(invoice.invoice_date, months),
+            duration_months=policy.dealer_months,
+            end_date=add_months(invoice.invoice_date, policy.dealer_months),
             source=WarrantyCard.SOURCE_AUTO_SALE,
             supplier_id=supplier_id,
             supplier_warranty_end_date=supplier_end,
+            terms_text=terms_text,
         ))
 
     if created:
@@ -467,6 +486,12 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
         sales_invoice = (
             sales_line.invoice if (sales_line and sales_line.invoice_id) else None
         )
+        # #231: المدد لم تعد على المنتج — السياسة، إن وُجدت، هي المصدر.
+        policy = (
+            WarrantyPolicy.objects
+            .filter(tenant_id=tenant_id, product_id=unit.product_id)
+            .first()
+        )
         unit_info = {
             "id": unit.pk,
             "serial": unit.serial,
@@ -474,10 +499,8 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
             "status_display": unit.get_status_display(),
             "product": unit.product_id,
             "product_name": product_display_name(unit.product),
-            "warranty_months": getattr(unit.product, "warranty_months", None),
-            "supplier_warranty_months": getattr(
-                unit.product, "supplier_warranty_months", None,
-            ),
+            "dealer_months": policy.dealer_months if policy else None,
+            "supplier_months": policy.supplier_months if policy else None,
             "sales_invoice": sales_invoice.pk if sales_invoice else None,
             "sales_invoice_number": (
                 sales_invoice.invoice_number if sales_invoice else None

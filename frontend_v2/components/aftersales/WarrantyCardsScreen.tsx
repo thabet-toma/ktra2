@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Settings, ShieldCheck,
 } from "lucide-react";
@@ -59,8 +60,6 @@ interface ProductOption {
   name_ar?: string;
   name_en?: string;
   sku?: string;
-  warranty_months?: number | null;
-  supplier_warranty_months?: number | null;
 }
 
 interface PartnerOption {
@@ -77,6 +76,18 @@ export const WarrantyCardsScreen: React.FC = () => {
   // القراءة عبر `lookup/` (`aftersales.warranty.view`).
   const canViewSettings = canManageSettings || can("aftersales.warranty.view");
   const [showSettings, setShowSettings] = useState(false);
+  const [focusPolicies, setFocusPolicies] = useState(false);
+
+  // #231: رابط «سياسات الكفالة» على كرت المنتج (`ProductWarrantyPolicyLine.tsx`)
+  // يصل بـ`?settings=policies` — يفتح نافذة الإعدادات مباشرةً على قسم السياسات
+  // بدل أن يهبط المستخدم على قائمة البطاقات ثم يبحث عن زر «الإعدادات» بنفسه.
+  const [searchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get("settings") === "policies" && canViewSettings) {
+      setShowSettings(true);
+      setFocusPolicies(true);
+    }
+  }, [searchParams, canViewSettings]);
 
   const [searchText, setSearchText] = useState("");
   const [query, setQuery] = useState("");
@@ -409,7 +420,8 @@ export const WarrantyCardsScreen: React.FC = () => {
       {showSettings && (
         <WarrantySettingsScreen
           canManage={canManageSettings}
-          onClose={() => setShowSettings(false)}
+          focusPolicies={focusPolicies}
+          onClose={() => { setShowSettings(false); setFocusPolicies(false); }}
         />
       )}
     </div>
