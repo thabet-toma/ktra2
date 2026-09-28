@@ -177,12 +177,12 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
         model = ServiceOrderPart
         fields = [
             "id", "product", "product_name", "quantity", "billing", "billing_label",
-            "unit_price", "notes", "sales_invoice_line", "materialized_at",
-            "is_materialized", "created_at",
+            "unit_price", "serials", "issued_cost", "notes", "sales_invoice_line",
+            "materialized_at", "is_materialized", "created_at",
         ]
         # القفل من الخادم وحده: البند المُجسَّد واقعةٌ في الدفاتر لا حقلٌ يُرسَل.
         read_only_fields = [
-            "sales_invoice_line", "materialized_at", "created_at",
+            "sales_invoice_line", "materialized_at", "issued_cost", "created_at",
         ]
 
     def get_product_name(self, obj):
@@ -203,6 +203,18 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
         if value is not None and value < 0:
             raise serializers.ValidationError("سعر القطعة لا يكون سالباً.")
         return value
+
+    def validate_billing(self, value):
+        # `ModelSerializer` يفرض `choices` النموذج تلقائياً — هذا تصريحٌ صريح
+        # يحمي المسار حتى لو تغيّر بناء الحقل، والفحص مذكورٌ صراحةً في العقد (#223).
+        allowed = {choice for choice, _ in ServiceOrderPart.BILLING_CHOICES}
+        if value not in allowed:
+            raise serializers.ValidationError(f"مسار فوترة غير معروف: {value}")
+        return value
+
+    def validate_serials(self, value):
+        from inventory.serials import normalize_serials
+        return normalize_serials(value)
 
 
 class ServiceOrderEventSerializer(serializers.ModelSerializer):

@@ -434,7 +434,10 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         product = form.validated_data["product"]
         if product.tenant_id != self.tenant.pk:
             raise ValidationError({"product": "هذا المنتج لا يتبع الشركة النشطة."})
-        # الافتراض يتبع قرار التغطية على الأمر — أكثر ما يُضاف على أمرٍ مكفول مغطّى.
+        # الخام آمنٌ الآن: `form.is_valid()` أعلاه مرّ بـ`validate_billing`
+        # (THA-223) فرفض قيمةً خارج `BILLING_CHOICES` قبل هذا السطر — قيمة
+        # عشوائية كانت تُسقط القطعة من كل المسارات ولا تمنع التسليم. الافتراض
+        # يتبع قرار التغطية على الأمر حين لا تُرسَل أصلاً.
         billing = request.data.get("billing") or (
             ServiceOrderPart.BILLING_COVERED if order.warranty_covered
             else ServiceOrderPart.BILLING_BILLABLE

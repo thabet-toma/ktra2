@@ -15,6 +15,7 @@ import {
   transitionServiceOrder,
   unpostCoveredParts,
   updateServiceOrder,
+  updateServiceOrderPart,
   type PartBilling,
   type ServiceOrderDetail,
   type ServiceOrderOutcome,
@@ -38,6 +39,9 @@ import { warrantyPillClass } from "./warrantyStatus";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { SerialEntryModal } from "../shared/SerialEntryModal";
+import { getSalesSettings } from "../../services/salesApi";
+import type { SerialEntryMode } from "../../types/inventory";
 
 /**
  * THA-24 م4 — مستند أمر الصيانة: من الشكوى حتى الحل في شاشة واحدة.
@@ -62,6 +66,7 @@ interface ProductOption {
   name_en?: string;
   sku?: string;
   sale_price?: string | number | null;
+  is_serialized?: boolean;
 }
 
 interface Props {
@@ -109,11 +114,25 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const [waiver, setWaiver] = useState("");
   const [note, setNote] = useState("");
 
-  const [newPart, setNewPart] = useState<{ product: string; quantity: string; billing: PartBilling; unit_price: string }>({
+  const [newPart, setNewPart] = useState<{
+    product: string; quantity: string; billing: PartBilling; unit_price: string;
+  }>({
     product: "", quantity: "1", billing: "billable", unit_price: "0",
   });
   const [outcome, setOutcome] = useState<ServiceOrderOutcome>("repaired");
   const [labour, setLabour] = useState("");
+  // T-SERIAL (#223 مراجعة): نمط الأرقام التسلسلية مصدره إعدادات المبيعات —
+  // نفس المصدر الذي تقرأ منه SalesInvoiceEditor، لا اجتهادٌ محلي هنا.
+  const [serialEntryMode, setSerialEntryMode] = useState<SerialEntryMode>("off");
+  const [serialsPartId, setSerialsPartId] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getSalesSettings()
+      .then((s) => { if (!cancelled) setSerialEntryMode(s.serial_entry_mode); })
+      .catch(() => { /* الافتراض «معطّل» يكفي عطباً — لا زر بلا نمطٍ معروف */ });
+    return () => { cancelled = true; };
+  }, []);
 
   const absorb = useCallback((fresh: ServiceOrderDetail) => {
     setOrder(fresh);
@@ -170,7 +189,6 @@ export const ServiceOrderDocument: React.FC<Props> = ({
     () => (order?.parts || []).filter((p) => p.billing === "billable" && !p.is_materialized).length,
     [order],
   );
-
   if (loading && !order) {
     return (
       <div className="flex items-center justify-center gap-2 p-8 text-sm text-[var(--color-text-muted)]">
@@ -237,6 +255,27 @@ export const ServiceOrderDocument: React.FC<Props> = ({
         setNewPart((p) => ({ ...p, product: "", quantity: "1", unit_price: "0" }));
       },
       "أُضيفت القطعة",
+    );
+  };
+
+  /** بندٌ مغطًى لمنتجٍ مرقَّم — وحده يحتاج اختيار وحدة عبر `SerialEntryModal`. */
+  const partTracksSerials = (part: ServiceOrderDetail["parts"][number]) => {
+    if (part.billing !== "covered") return false;
+    const product = products.find((p) => p.id === part.product);
+    return !!product?.is_serialized;
+  };
+
+  /** قلب القطعة مغطاة → مفوترة: يملأ سعر البيع من المنتج إن كانت صفراً. */
+  const convertToBillable = (part: ServiceOrderDetail["parts"][number]) => {
+    const product = products.find((p) => p.id === part.product);
+    const price = Number(part.unit_price) > 0
+      ? part.unit_price
+      : (product?.sale_price != null ? String(product.sale_price) : "0");
+    void run(
+      async () => {
+        await updateServiceOrderPart(order.id, part.id, { billing: "billable", unit_price: price });
+      },
+      "حُوّلت القطعة إلى مفوترة",
     );
   };
 
@@ -605,12 +644,19 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                   <th>الكمية</th>
                   <th>المسار</th>
                   <th>السعر</th>
+                  <th>الأرقام</th>
                   <th>الحالة</th>
                   <th />
                 </tr>
               </thead>
               <tbody>
-                {order.parts.map((part) => (
+                {order.parts.map((part) => {
+                  const tracksSerials = partTracksSerials(part);
+                  const chosen = part.serials?.length ?? 0;
+                  const qty = Math.max(0, Math.trunc(Number(part.quantity) || 0));
+                  const incomplete = tracksSerials && serialEntryMode === "required" && chosen !== qty;
+                  const canPickSerials = editable && !part.is_materialized && tracksSerials;
+                  return (
                   <tr key={part.id}>
                     <td>{part.product_name}</td>
                     <td className="whitespace-nowrap">{formatNumber(Number(part.quantity))}</td>
@@ -620,12 +666,47 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                     <td className="whitespace-nowrap">
                       {part.billing === "billable" ? formatNumber(Number(part.unit_price)) : "—"}
                     </td>
+                    <td className="whitespace-nowrap">
+                      {!tracksSerials ? (
+                        <span className="text-[var(--color-text-muted)]">—</span>
+                      ) : canPickSerials ? (
+                        <button
+                          type="button"
+                          onClick={() => setSerialsPartId(part.id)}
+                          className={`rounded-lg border border-[var(--color-border)] px-2 py-1 text-[11px] hover:bg-[var(--color-surface-2)] ${
+                            incomplete ? "font-bold text-red-600 dark:text-red-400" : "text-[var(--color-text)]"
+                          }`}
+                          title={chosen > 0 ? part.serials.join("، ") : "اختيار وحدة الصرف"}
+                          data-testid={`part-serials-${part.id}`}
+                        >
+                          {chosen > 0 ? `${chosen}/${qty}` : (incomplete ? `0/${qty}` : "اختيار")}
+                        </button>
+                      ) : chosen > 0 ? (
+                        <span className="font-mono text-[11px] text-[var(--color-text)]" dir="ltr">
+                          {part.serials.join("، ")}
+                        </span>
+                      ) : (
+                        <span className="text-[var(--color-text-muted)]">—</span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap text-[11px] text-[var(--color-text-muted)]">
                       {part.is_materialized
                         ? (part.sales_invoice_line ? "مفوترة" : "مرحَّل صرفها")
                         : "بانتظار"}
                     </td>
                     <td className="whitespace-nowrap">
+                      <div className="flex items-center gap-1">
+                      {editable && !part.is_materialized && part.billing === "covered" && (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void convertToBillable(part)}
+                          className="rounded-lg border border-[var(--color-border)] px-2 py-1 text-[11px] text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+                          title="تحويل إلى مفوترة على الزبون"
+                        >
+                          تحويل لمفوترة
+                        </button>
+                      )}
                       {editable && !part.is_materialized && (
                         <button
                           type="button"
@@ -636,9 +717,11 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                           <Trash2 className="h-4 w-4" />
                         </button>
                       )}
+                      </div>
                     </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -648,6 +731,33 @@ export const ServiceOrderDocument: React.FC<Props> = ({
               لا قطع غيار على هذا الأمر بعد.
             </p>
           )}
+
+          {/* T-SERIAL (#223 مراجعة): اختيار وحدة بندٍ مغطًى مرقَّم — نفس النافذة
+              المشتركة التي تستعملها فاتورة البيع (مصدرها «في المخزن» الافتراضي). */}
+          {serialsPartId != null && (() => {
+            const part = order.parts.find((p) => p.id === serialsPartId);
+            if (!part) return null;
+            const product = products.find((p) => p.id === part.product);
+            return (
+              <SerialEntryModal
+                mode="pick"
+                productId={part.product ?? 0}
+                productName={product ? formatProductPrimaryName(product) : part.product_name}
+                quantity={Number(part.quantity) || 0}
+                value={part.serials}
+                required={serialEntryMode === "required"}
+                readOnly={!editable || part.is_materialized}
+                onClose={() => setSerialsPartId(null)}
+                onSave={(picked) => {
+                  setSerialsPartId(null);
+                  void run(
+                    async () => { await updateServiceOrderPart(order.id, part.id, { serials: picked }); },
+                    "حُفظت الأرقام التسلسلية",
+                  );
+                }}
+              />
+            );
+          })()}
 
           {/* ── المسار الأول: مغطاة بالكفالة ─────────────────────────────── */}
           <div className="rounded-xl border border-[var(--color-border)] p-3">

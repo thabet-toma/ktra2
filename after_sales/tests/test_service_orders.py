@@ -15,7 +15,9 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting.models import Account, JournalHeader, JournalLine
+from django.utils import timezone
+
+from accounting.models import Account, FiscalPeriod, JournalHeader, JournalLine
 from accounting.services import create_fiscal_year
 from after_sales.models import (
     ServiceOrder,
@@ -29,7 +31,8 @@ from after_sales.service_orders import (
     WARRANTY_EXPENSE_CODE,
 )
 from core.models import TenantModule
-from inventory.models import Product, StockMovement, Warehouse
+from inventory.models import Product, ProductSerial, StockMovement, Warehouse
+from inventory.serials import SERIAL_MODE_OPTIONAL, SERIAL_MODE_REQUIRED
 from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
 from logistics.services import get_or_create_purchase_settings
 from partners.models import Partner
@@ -840,3 +843,296 @@ class ServiceOrderIsolationTest(ServiceOrderTestBase):
         response = self.client.get(f"{ORDERS}lookup/?serial=OTHER-1", **self.headers())
 
         self.assertEqual(response.data["open_orders"], [])
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #223 — قطعة مفوترة أُضيفت بعد الفاتورة تمنع التسليم
+# ══════════════════════════════════════════════════════════════════════════
+
+class LateBillablePartBlocksDeliveryTest(ServiceOrderTestBase):
+    def test_a_billable_part_added_after_invoice_generation_blocks_delivery_and_names_it(self):
+        order = self.intake()
+        self.add_part(order, billing="billable", quantity="1", price="80")
+        self.assertEqual(self.generate_invoice(order).status_code, 201)
+
+        # يبقى إضافة قطع مسموحاً ما دام الأمر غير مُسلَّم ولا ملغى — هذا هو الثغب.
+        self.add_part(order, billing="billable", quantity="1", price="50")
+        self.assertEqual(self.transition(order, ServiceOrder.STATUS_READY).status_code, 200)
+
+        blocked = self.transition(order, ServiceOrder.STATUS_DELIVERED, outcome="repaired")
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+        self.assertIn("شاشة بديلة", str(blocked.content, "utf-8"))
+        order.refresh_from_db()
+        self.assertEqual(order.status, ServiceOrder.STATUS_READY)
+
+        waived = self.client.patch(
+            f"{ORDERS}{order.pk}/", {"billing_waived_reason": "تنازل عن الفرق"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(waived.status_code, 200, waived.content)
+
+        delivered = self.transition(order, ServiceOrder.STATUS_DELIVERED, outcome="repaired")
+        self.assertEqual(delivered.status_code, 200, delivered.content)
+
+    def test_an_order_whose_invoice_covers_every_billable_part_delivers_without_a_waiver(self):
+        order = self.intake()
+        self.add_part(order, billing="billable", quantity="1", price="80")
+        self.assertEqual(self.generate_invoice(order).status_code, 201)
+        self.assertEqual(self.transition(order, ServiceOrder.STATUS_READY).status_code, 200)
+
+        delivered = self.transition(order, ServiceOrder.STATUS_DELIVERED, outcome="repaired")
+
+        self.assertEqual(delivered.status_code, 200, delivered.content)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #223 — القطعة المغطاة المرقّمة تستهلك رقمها
+# ══════════════════════════════════════════════════════════════════════════
+
+class CoveredPartSerialsTest(ServiceOrderTestBase):
+    def setUp(self):
+        super().setUp()
+        self.serial_product = Product.objects.create(
+            tenant=self.tenant, sku="SER-1", name_ar="جهاز مرقّم",
+            is_serialized=True, quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+        # الاستلام يُنشئ الوحدات المُرقَّمة فقط حين لا يكون نمط الشراء «بدون».
+        purchase_settings = get_or_create_purchase_settings(self.tenant)
+        purchase_settings.serial_entry_mode = SERIAL_MODE_OPTIONAL
+        purchase_settings.save(update_fields=["serial_entry_mode"])
+        self._purchase_serialized(["SNA-01", "SNA-02", "SNA-03"], price="200")
+
+    def _purchase_serialized(self, serials, price="200"):
+        qty = Decimal(len(serials))
+        total = qty * Decimal(price)
+        invoice = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number=f"PB-S-{PurchaseInvoice.objects.count() + 1:04d}",
+            partner=self.supplier, currency=self.ils, invoice_date=PURCHASE_DATE,
+            exchange_rate=Decimal("1"), grand_total=total,
+        )
+        PurchaseInvoiceItem.objects.create(
+            invoice=invoice, product=self.serial_product, name=self.serial_product.name_ar,
+            quantity=qty, unit_price=Decimal(price), total_price=total, serials=list(serials),
+        )
+        response = self.client.post(
+            f"/api/logistics/purchase-invoices/{invoice.pk}/post-to-accounting/",
+            {}, format="json", **self.headers(),
+        )
+        assert response.status_code == 201, response.content
+        return invoice
+
+    def _set_sales_serial_mode(self, mode):
+        settings_row = get_or_create_sales_settings(self.tenant)
+        settings_row.serial_entry_mode = mode
+        settings_row.save(update_fields=["serial_entry_mode"])
+
+    def add_serial_part(self, order, serials, *, quantity=None):
+        response = self.client.post(
+            f"{ORDERS}{order.pk}/parts/",
+            {
+                "product": self.serial_product.pk,
+                "quantity": quantity or str(len(serials)),
+                "billing": "covered",
+                "serials": serials,
+            },
+            format="json", **self.headers(),
+        )
+        assert response.status_code == 201, response.content
+        return ServiceOrderPart.objects.get(pk=response.data["id"])
+
+    def test_posting_a_named_serialized_covered_part_issues_its_unit_and_unpost_restores_it(self):
+        self._set_sales_serial_mode(SERIAL_MODE_REQUIRED)
+        order = self.intake()
+        part = self.add_serial_part(order, ["SNA-02"])
+
+        response = self.post_covered(order)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        unit = ProductSerial.objects.get(
+            tenant=self.tenant, product=self.serial_product, serial="SNA-02",
+        )
+        self.assertEqual(unit.status, ProductSerial.STATUS_ISSUED)
+        self.assertEqual(unit.issued_to_id, part.pk)
+        self.serial_product.refresh_from_db()
+        self.assertEqual(self.serial_product.quantity_on_hand, Decimal("2.0000"))
+        self.assertEqual(
+            ProductSerial.objects.filter(
+                tenant=self.tenant, product=self.serial_product,
+                status=ProductSerial.STATUS_IN_STOCK,
+            ).count(),
+            2,
+        )
+        movement = self.service_movements(order).get()
+        part.refresh_from_db()
+        self.assertEqual(part.issued_cost, movement.total_cost)
+        self.assertEqual(part.issued_cost, Decimal("200.00"))
+
+        response = self.unpost_covered(order)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        unit.refresh_from_db()
+        self.assertEqual(unit.status, ProductSerial.STATUS_IN_STOCK)
+        self.assertIsNone(unit.issued_to_id)
+        part.refresh_from_db()
+        self.assertIsNone(part.issued_cost)
+        self.serial_product.refresh_from_db()
+        self.assertEqual(self.serial_product.quantity_on_hand, Decimal("3.0000"))
+
+    def test_patching_serials_on_an_existing_part_persists_them_and_then_posts(self):
+        """الواجهة تختار الأرقام على بندٍ قائم لا عند الإضافة فقط (#223 مراجعة) —
+        PATCH `serials` على بندٍ غير مُجسَّد يُخزَّن، والترحيل يستهلك ما خُزِّن."""
+        self._set_sales_serial_mode(SERIAL_MODE_REQUIRED)
+        order = self.intake()
+        response = self.client.post(
+            f"{ORDERS}{order.pk}/parts/",
+            {"product": self.serial_product.pk, "quantity": "1", "billing": "covered"},
+            format="json", **self.headers(),
+        )
+        assert response.status_code == 201, response.content
+        part_id = response.data["id"]
+
+        patched = self.client.patch(
+            f"{ORDERS}{order.pk}/parts/{part_id}/",
+            {"serials": ["SNA-03"]}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(patched.status_code, 200, patched.content)
+        self.assertEqual(patched.data["serials"], ["SNA-03"])
+        part = ServiceOrderPart.objects.get(pk=part_id)
+        self.assertEqual(part.serials, ["SNA-03"])
+
+        response = self.post_covered(order)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        unit = ProductSerial.objects.get(tenant=self.tenant, serial="SNA-03")
+        self.assertEqual(unit.status, ProductSerial.STATUS_ISSUED)
+        self.assertEqual(unit.issued_to_id, part_id)
+
+    def test_required_mode_refuses_posting_a_serialized_covered_part_with_no_serials_before_any_write(self):
+        self._set_sales_serial_mode(SERIAL_MODE_REQUIRED)
+        order = self.intake()
+        response = self.client.post(
+            f"{ORDERS}{order.pk}/parts/",
+            {"product": self.serial_product.pk, "quantity": "1", "billing": "covered"},
+            format="json", **self.headers(),
+        )
+        assert response.status_code == 201, response.content
+        part_id = response.data["id"]
+
+        blocked = self.post_covered(order)
+
+        self.assertEqual(blocked.status_code, 400, blocked.content)
+        self.assertEqual(self.service_movements(order).count(), 0)
+        self.serial_product.refresh_from_db()
+        self.assertEqual(self.serial_product.quantity_on_hand, Decimal("3.0000"))
+        part = ServiceOrderPart.objects.get(pk=part_id)
+        self.assertIsNone(part.materialized_at)
+
+    def test_optional_mode_never_fifo_allocates_an_issued_unit_to_a_later_sale(self):
+        self._set_sales_serial_mode(SERIAL_MODE_OPTIONAL)
+        order = self.intake()
+        self.add_serial_part(order, ["SNA-01"])
+        self.assertEqual(self.post_covered(order).status_code, 200)
+
+        sale = SalesInvoice.objects.create(
+            tenant=self.tenant, invoice_number="SV-SALE-SER", customer=self.customer,
+            currency=self.ils, invoice_date=ORDER_DATE,
+            invoice_type=SalesInvoice.INVOICE_CREDIT, stock_on_post=True,
+        )
+        SalesInvoiceLine.objects.create(
+            tenant=self.tenant, invoice=sale, product=self.serial_product,
+            quantity=Decimal("2"), unit_price=Decimal("300"),
+        )
+        post_sales_invoice(sale, user=self.user)
+
+        issued_unit = ProductSerial.objects.get(tenant=self.tenant, serial="SNA-01")
+        self.assertEqual(issued_unit.status, ProductSerial.STATUS_ISSUED)
+        self.assertIsNone(issued_unit.sales_line_id)
+        sold = ProductSerial.objects.filter(
+            tenant=self.tenant, product=self.serial_product, status=ProductSerial.STATUS_SOLD,
+        )
+        self.assertEqual(set(sold.values_list("serial", flat=True)), {"SNA-02", "SNA-03"})
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #223 — سعرٌ صفري ممنوع، و`billing` محصورٌ بقيمتيه
+# ══════════════════════════════════════════════════════════════════════════
+
+class ZeroPriceAndBillingChoiceTest(ServiceOrderTestBase):
+    def test_generating_an_invoice_with_a_zero_priced_billable_part_is_refused_and_names_it(self):
+        order = self.intake()
+        self.add_part(order, billing="billable", quantity="1", price="0")
+
+        response = self.generate_invoice(order)
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("شاشة بديلة", str(response.content, "utf-8"))
+        order.refresh_from_db()
+        self.assertIsNone(order.sales_invoice_id)
+
+    def test_add_part_rejects_a_billing_value_outside_the_choices(self):
+        order = self.intake()
+
+        response = self.client.post(
+            f"{ORDERS}{order.pk}/parts/",
+            {"product": self.part_product.pk, "quantity": "1", "billing": "free_gift"},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertFalse(ServiceOrderPart.objects.filter(order=order).exists())
+
+    def test_part_detail_patch_rejects_a_billing_value_outside_the_choices(self):
+        order = self.intake()
+        part = self.add_part(order, billing="covered", quantity="1")
+
+        response = self.client.patch(
+            f"{ORDERS}{order.pk}/parts/{part.pk}/", {"billing": "free_gift"},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 400, response.content)
+        part.refresh_from_db()
+        self.assertEqual(part.billing, ServiceOrderPart.BILLING_COVERED)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# #223 — الصرف يُؤرَّخ بيوم الترحيل، والفحص يسبق الكتابة ولو كانت الكلفة صفرية
+# ══════════════════════════════════════════════════════════════════════════
+
+class PostingDateTest(ServiceOrderTestBase):
+    def test_an_order_dated_in_a_closed_month_still_posts_today_and_dates_the_movement_and_journal_today(self):
+        order = self.intake()  # order_date = ORDER_DATE = "2026-06-15"
+        self.add_part(order, billing="covered", quantity="2")
+        FiscalPeriod.objects.filter(
+            tenant=self.tenant, start_date__lte=ORDER_DATE, end_date__gte=ORDER_DATE,
+        ).update(is_closed=True)
+
+        response = self.post_covered(order)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        today = timezone.localdate()
+        movement = self.service_movements(order).get()
+        self.assertEqual(movement.movement_date, today)
+        journal = self.warranty_journal(order).get()
+        self.assertEqual(journal.transaction_date, today)
+
+    def test_a_zero_cost_issue_still_checks_the_fiscal_period_and_is_refused_when_closed(self):
+        zero_cost_product = Product.objects.create(
+            tenant=self.tenant, sku="ZERO-1", name_ar="قطعة بلا كلفة",
+            quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
+        )
+        order = self.intake()
+        ServiceOrderPart.objects.create(
+            order=order, product=zero_cost_product, quantity=Decimal("1"),
+            billing=ServiceOrderPart.BILLING_COVERED, unit_price=Decimal("0"),
+        )
+        today = timezone.localdate()
+        FiscalPeriod.objects.filter(
+            tenant=self.tenant, start_date__lte=today, end_date__gte=today,
+        ).update(is_closed=True)
+
+        response = self.post_covered(order)
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertEqual(self.service_movements(order).count(), 0)

@@ -352,6 +352,14 @@ class ServiceOrderPart(models.Model):
         max_length=20, choices=BILLING_CHOICES, default=BILLING_BILLABLE,
     )
     unit_price = models.DecimalField(max_digits=18, decimal_places=4, default=0)
+    # الأرقام المختارة لقطعةٍ مغطاة مرقّمة — على نمط `sales.SalesInvoiceLine.serials`
+    # (نيّةٌ تُترجَم إلى صفوف `inventory.ProductSerial` عند الترحيل، #223).
+    serials = models.JSONField(default=list, blank=True)
+    # كلفة FIFO الفعلية لحركة `SERVICE_ISSUE` — تُملأ عند `post_covered_parts`
+    # وتُفرَّغ عند التراجع؛ تحتاجها تذكرة استبدال الجهاز (#245).
+    issued_cost = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True,
+    )
     sales_invoice_line = models.ForeignKey(
         "sales.SalesInvoiceLine", on_delete=models.SET_NULL, null=True, blank=True,
         related_name="service_order_parts",

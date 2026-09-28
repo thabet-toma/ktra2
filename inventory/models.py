@@ -644,9 +644,13 @@ class ProductSerial(models.Model):
 
     STATUS_IN_STOCK = 'in_stock'
     STATUS_SOLD = 'sold'
+    # صُرفت خارج مسار البيع (بندُ مستندٍ في app آخر يشير إليها بـ`issued_to`) —
+    # لا فاتورة بيع، فلا `sales_line`، ولا يجوز أن يخصّصها بيعٌ لاحق بـFIFO.
+    STATUS_ISSUED = 'issued'
     STATUS_CHOICES = [
         (STATUS_IN_STOCK, 'في المخزن'),
         (STATUS_SOLD, 'مُباع'),
+        (STATUS_ISSUED, 'مصروفة خارج البيع'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='ProductSerialID')
@@ -682,6 +686,14 @@ class ProductSerial(models.Model):
         null=True, blank=True, db_column='ReturnSalesInvoiceLineID',
         related_name='returned_serial_units',
         help_text='بند مرجع البيع الذي أعاد هذه الوحدة للمخزن',
+    )
+    # بندُ المستند الذي صرف هذه الوحدة **خارج** مسار البيع (`STATUS_ISSUED`) —
+    # مرجعٌ نصّي لموديل app آخر مثل `purchase_item`/`sales_line` أعلاه، لا استيراد.
+    issued_to = models.ForeignKey(
+        'after_sales.ServiceOrderPart', on_delete=models.SET_NULL,
+        null=True, blank=True, db_column='IssuedToServiceOrderPartID',
+        related_name='issued_serial_units',
+        help_text='بند المستند الذي صرف هذه الوحدة خارج مسار البيع (لا فاتورة)',
     )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
 

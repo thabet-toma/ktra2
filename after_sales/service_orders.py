@@ -22,9 +22,10 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.utils import timezone
 
-from accounting.api import ensure_account, post_document, unpost_document
+from accounting.api import ensure_account, post_document, unpost_document, validate_fiscal_period
 from core.modules import module_enabled
-from inventory.services import record_stock_movement
+from inventory.serials import assert_issue_serials_declared, issue_serials, unissue_serials
+from inventory.services import product_display_name, record_stock_movement
 
 from .models import ServiceOrder, ServiceOrderEvent, ServiceOrderPart
 from .services import MODULE_KEY, get_or_create_after_sales_settings, warranty_coverage
@@ -181,12 +182,33 @@ def _covered_parts_pending(order: ServiceOrder) -> int:
     ).count()
 
 
-def billing_is_resolved(order: ServiceOrder) -> bool:
-    """حُسم أمر المال: فاتورة قائمة، أو سببُ إعفاءٍ مكتوب. لا ثالث.
+def _unbilled_billable_parts(order: ServiceOrder) -> list[ServiceOrderPart]:
+    """قطع `billable` لم تدخل مستنداً بعد — وجود فاتورةٍ على الأمر لا يعنيها كلَّها.
 
-    التسليم بلا حسمٍ يترك مبلغاً معلّقاً بلا مستند ولا قرار — والجهاز يكون قد خرج.
+    قطعةٌ أُضيفت **بعد** توليد الفاتورة لا تدخلها: الفاتورة وُلِّدت من التقاط
+    `materialized_at__isnull=True` لحظتها، والإضافة اللاحقة بند جديد خارج
+    ذلك الالتقاط (THA-223).
     """
-    return bool(order.sales_invoice_id) or bool((order.billing_waived_reason or "").strip())
+    return list(
+        order.parts
+        .filter(billing=ServiceOrderPart.BILLING_BILLABLE, materialized_at__isnull=True)
+        .select_related("product")
+        .order_by("id")
+    )
+
+
+def billing_is_resolved(order: ServiceOrder) -> bool:
+    """حُسم أمر المال: فاتورة قائمة أو سببُ إعفاءٍ مكتوب، **ولا قطعة مفوترة معلّقة**.
+
+    التسليم بلا حسمٍ يترك مبلغاً معلّقاً بلا مستند ولا قرار — والجهاز يكون قد
+    خرج. وجود الفاتورة وحده لا يكفي: قطعةٌ أُضيفت بعدها تبقى بلا مستند.
+    """
+    waived = bool((order.billing_waived_reason or "").strip())
+    if waived:
+        return True
+    if not order.sales_invoice_id:
+        return False
+    return not _unbilled_billable_parts(order)
 
 
 def delivery_blockers(order: ServiceOrder) -> list[str]:
@@ -197,10 +219,18 @@ def delivery_blockers(order: ServiceOrder) -> list[str]:
         blockers.append(
             f"{pending} قطعة مغطاة بالكفالة لم تُرحَّل بعد — رحّل صرفها أولاً."
         )
-    if not billing_is_resolved(order):
-        blockers.append(
-            "لم يُحسم أمر الفوترة — ولّد فاتورة الصيانة أو اكتب سبب الإعفاء من الفوترة."
-        )
+    if not bool((order.billing_waived_reason or "").strip()):
+        unbilled = _unbilled_billable_parts(order)
+        if unbilled:
+            names = "، ".join(product_display_name(p.product) for p in unbilled)
+            blockers.append(
+                f"قطع مفوترة لم تدخل فاتورة صيانة بعد — وَلِّد فاتورة تشملها أو "
+                f"اكتب سبب الإعفاء من الفوترة: {names}."
+            )
+        elif not order.sales_invoice_id:
+            blockers.append(
+                "لم يُحسم أمر الفوترة — ولّد فاتورة الصيانة أو اكتب سبب الإعفاء من الفوترة."
+            )
     return blockers
 
 
@@ -308,12 +338,16 @@ def record_approval(order: ServiceOrder, *, user=None, note: str = "") -> Servic
 def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
     """يصرف القطع المغطاة من المخزن ويقيّد كلفتها مصروفَ كفالة.
 
-    التكلفة تاريخية بحقّ: `record_stock_movement` يخزّن الصادر بكمية موجبة
-    و`total_cost = qty × avg_cost_before` لحظة الصرف — لا يحرّكها شراء لاحق.
+    التكلفة تاريخية بحقّ FIFO: `record_stock_movement` يستهلك أقدم طبقات
+    المنتج المفتوحة لحظة الصرف — لا متوسطاً يحرّكه شراء لاحق.
 
-    كلفةٌ صفرية (منتج بمتوسط صفر) تُسجَّل حركةً بلا قيد: البضاعة خرجت فعلاً
-    فحركتها واجبة، والقيد الصفري مرفوض من `post_journal` أصلاً — وتعطيل التسليم
-    على تقنيةٍ محاسبية ليس جواباً.
+    كلفةٌ صفرية (طبقاتٌ بسعر صفر) تُسجَّل حركةً بلا قيد: البضاعة خرجت فعلاً
+    فحركتها واجبة، والقيد الصفري مرفوض من `post_journal` أصلاً — لكنها تمرّ
+    بفحص الفترة المالية نفسه فلا يفلت صرفٌ صفري من فترة مقفلة بحجة أنه بلا قيد.
+
+    **التاريخ يوم الترحيل لا يوم الاستلام** (`timezone.localdate()`، #223):
+    الصرف قد يقع بعد إقفال شهر الاستلام، أو قبل شراء القطعة نفسها — نفس قاعدة
+    فاتورة الصيانة المولَّدة (`generate_service_invoice`، تاريخها اليوم دائماً).
     """
     order = ServiceOrder.objects.select_for_update().get(pk=order.pk)
     if order.status in TERMINAL_STATUSES:
@@ -332,10 +366,18 @@ def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
     if not parts:
         raise ValidationError("لا توجد قطع مغطاة بالكفالة بانتظار الترحيل.")
 
+    posting_date = timezone.localdate()
+    # الفحص يسبق أي كتابة ولو كانت الكلفة صفرية — `post_document` يفحصه من
+    # تلقاء نفسه حين يوجد قيد، لكن الفرع الصفري لا يبني قيداً فيفلت بلا هذا.
+    validate_fiscal_period(order.tenant_id, posting_date)
+    # الأرقام التسلسلية: تأكيدٌ قبل أي كتابة تحت «إجباري» — مرآة ما يفعله البيع.
+    assert_issue_serials_declared(order.tenant_id, parts)
+
     expense_account = resolve_warranty_expense_account(order.tenant_id)
     inventory_account = _resolve_inventory_account(order.tenant_id)
 
     total_cost = Decimal("0.00")
+    part_costs: dict[int, Decimal] = {}
     for part in parts:
         movement = record_stock_movement(
             product=part.product,
@@ -343,12 +385,14 @@ def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
             quantity=Decimal(str(part.quantity)),
             reference_type=STOCK_REF_SERVICE_ISSUE,
             reference_id=order.pk,
-            movement_date=order.order_date,
+            movement_date=posting_date,
             tenant=order.tenant,
             partner=order.partner,
             notes=f"قطع كفالة — أمر صيانة {order.order_number or order.pk}"[:500],
         )
-        total_cost += Decimal(str(movement.total_cost))
+        part_cost = Decimal(str(movement.total_cost)).quantize(DEC)
+        part_costs[part.pk] = part_cost
+        total_cost += part_cost
 
     total_cost = total_cost.quantize(DEC)
     stamp = timezone.now()
@@ -359,7 +403,7 @@ def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
         )
         journal = post_document(
             tenant_id=order.tenant_id,
-            transaction_date=order.order_date,
+            transaction_date=posting_date,
             reference_type=JOURNAL_REF_WARRANTY_PARTS,
             reference_id=order.pk,
             description=description,
@@ -385,9 +429,14 @@ def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
             order.tenant_id, order.pk, len(parts),
         )
 
-    ServiceOrderPart.objects.filter(pk__in=[p.pk for p in parts]).update(
-        materialized_at=stamp,
-    )
+    # الأرقام التسلسلية تُستهلك بعد أن تُعرف كلفة كل بند — وحدةٌ `issued` لن
+    # يخصّصها بيعٌ لاحق بـFIFO (`consume_sales_serials` يستعلم `in_stock` وحدها).
+    issue_serials(order.tenant_id, parts)
+
+    for part in parts:
+        part.materialized_at = stamp
+        part.issued_cost = part_costs[part.pk]
+        part.save(update_fields=["materialized_at", "issued_cost"])
     order.covered_posted_at = stamp
     order.save(update_fields=["covered_posted_at", "updated_at"])
 
@@ -426,6 +475,12 @@ def unpost_covered_parts(order: ServiceOrder, *, user=None) -> dict:
             "سُلّم الجهاز للزبون — لا تراجع عن صرف قطعه بعد خروجه."
         )
 
+    parts = list(
+        order.parts.filter(
+            billing=ServiceOrderPart.BILLING_COVERED, materialized_at__isnull=False,
+        )
+    )
+
     result = unpost_document(
         tenant_id=order.tenant_id,
         reference_id=order.pk,
@@ -435,9 +490,13 @@ def unpost_covered_parts(order: ServiceOrder, *, user=None) -> dict:
         document_label=f"أمر صيانة {order.order_number or order.pk}",
     )
 
-    unlocked = order.parts.filter(
-        billing=ServiceOrderPart.BILLING_COVERED, materialized_at__isnull=False,
-    ).update(materialized_at=None)
+    # الأرقام التسلسلية تعود `in_stock` قبل فتح القفل — نفس ترتيب البيع
+    # (`release_sales_serials` قبل تصفير `amount_paid`).
+    unissue_serials(order.tenant_id, parts)
+
+    unlocked = ServiceOrderPart.objects.filter(pk__in=[p.pk for p in parts]).update(
+        materialized_at=None, issued_cost=None,
+    )
     order.covered_posted_at = None
     order.save(update_fields=["covered_posted_at", "updated_at"])
 
@@ -504,6 +563,16 @@ def generate_service_invoice(
     if not parts and labour <= 0:
         raise ValidationError(
             "لا قطع مفوترة ولا أجرة صيانة — لا شيء يُفوتر على الزبون."
+        )
+    # منعٌ لا خصمٌ صامت: قطعةٌ بسعر صفر تخرج مجاناً في فاتورةٍ تدّعي أنها
+    # مفوترة — القرار يُترك للمستخدم (سعرٌ حقيقي، أو تحويلها مغطاة، أو حذفها).
+    zero_priced = [
+        p for p in parts if Decimal(str(p.unit_price or 0)) <= 0
+    ]
+    if zero_priced:
+        names = "، ".join(product_display_name(p.product) for p in zero_priced)
+        raise ValidationError(
+            f"قطع مفوترة بسعر صفر — اكتب سعرها، أو اجعلها مغطاة، أو احذفها: {names}."
         )
 
     sales_settings = get_or_create_sales_settings(order.tenant_id)

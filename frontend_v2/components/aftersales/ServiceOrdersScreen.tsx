@@ -48,6 +48,7 @@ interface ProductOption {
   name_en?: string;
   sku?: string;
   sale_price?: string | number | null;
+  is_serialized?: boolean;
 }
 
 interface PartnerOption { id: number; name: string; phone?: string }

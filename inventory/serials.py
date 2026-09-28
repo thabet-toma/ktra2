@@ -357,15 +357,16 @@ def _assert_serials_free(tenant_id, product, serials) -> None:
 def release_purchase_serials(
     *, tenant_id, quantities_by_item, document_label='', action_label='التراجع عن',
 ) -> int:
-    """يحذف وحدات مستند شراء عند التراجع عنه — ويمنع التراجع إن بِيعت أيٌّ منها.
+    """يحذف وحدات مستند شراء عند التراجع عنه — ويمنع التراجع إن غادرت أيٌّ منها المخزن.
 
     quantities_by_item: {item_id: عدد الوحدات المراد تحريرها} — و`None` تعني
     «كل وحدات هذا البند». التحرير الجزئي (إلغاء إرسالية واحدة من عدّة إرساليات)
     يأخذ الأحدث أولاً: الاستلام يُنشئ بالترتيب والبيع يستهلك بـFIFO من الأقدم،
     فأحدث الوحدات هي بالضبط ما جاءت به الإرسالية الملغاة.
 
-    وحدة مُباعة تعني فاتورة بيع بُنيت على هذا المستند: تُسمّى الوحدات وفواتيرها
-    ويُرفض التراجع — نفس منطق حارس اعتمادية المخزون، فلا يبقى بيعٌ لوحدة لا أصل لها.
+    وحدةٌ بحالةٍ غير `in_stock` (مُباعة بفاتورة بيع، أو مصروفةٌ خارج البيع
+    `issued`، #223) تعني أثراً بُني على هذا المستند: تُسمّى الوحدات وحالتها
+    ويُرفض التراجع — نفس منطق حارس اعتمادية المخزون، فلا يبقى أثرٌ لوحدة لا أصل لها.
     """
     if not quantities_by_item:
         return 0
@@ -386,28 +387,31 @@ def release_purchase_serials(
     if not doomed:
         return 0
 
-    sold = list(
-        ProductSerial.objects.filter(
-            pk__in=doomed, status=ProductSerial.STATUS_SOLD,
-        ).select_related('sales_line__invoice')
+    # المنع لكل حالةٍ غير `in_stock` لا لـ`sold` وحدها: وحدةٌ `issued` (صُرفت
+    # خارج البيع، #223) تُحذَف بصمت إن اقتصر الفحص على البيع — نفس الثغرة التي
+    # كانت تفتح لو تُرك الفحص على مُباع دون غيره.
+    not_in_stock = list(
+        ProductSerial.objects.filter(pk__in=doomed)
+        .exclude(status=ProductSerial.STATUS_IN_STOCK)
+        .select_related('sales_line__invoice')
     )
-    if sold:
+    if not_in_stock:
         listing = '؛ '.join(
-            f"{s.serial}"
+            f"{s.serial} ({s.get_status_display()})"
             + (
-                f" (فاتورة {s.sales_line.invoice.invoice_number})"
-                if s.sales_line_id and s.sales_line.invoice_id else ''
+                f" — فاتورة {s.sales_line.invoice.invoice_number}"
+                if s.status == ProductSerial.STATUS_SOLD and s.sales_line_id
+                and s.sales_line.invoice_id else ''
             )
-            for s in sold
+            for s in not_in_stock
         )
         logger.warning(
-            'release_purchase_serials blocked: %s has %d sold unit(s)',
-            document_label or 'purchase document', len(sold),
+            'release_purchase_serials blocked: %s has %d non-in-stock unit(s)',
+            document_label or 'purchase document', len(not_in_stock),
         )
         raise ValidationError(
             f"تعذّر {action_label} {document_label or 'هذا المستند'}: وحدات بأرقام "
-            f"تسلسلية من هذه البضاعة مُباعة بالفعل. ألغِ ترحيل فواتير بيعها أولاً — "
-            f"المُباعة: {listing}"
+            f"تسلسلية من هذه البضاعة ليست في المخزن — {listing}"
         )
 
     deleted = ProductSerial.objects.filter(pk__in=doomed).delete()[0]
@@ -421,9 +425,9 @@ def release_returned_purchase_serials(return_invoice) -> int:
     """مرجع الشراء يُخرج بضاعته من المخزن — ووحداتها المُرقَّمة تخرج معها.
 
     الوحدات المقصودة هي وحدات **الفاتورة الأصلية** لنفس المنتج، تُؤخذ الأحدث أولاً
-    (نفس قاعدة إلغاء الإرسالية)، ووحدةٌ مُباعة منها تمنع ترحيل المرجع بدل أن تبقى
-    «في المخزن» وبضاعتها عند المورد. مرجعٌ بلا فاتورة أصلية لا يُمسّ: لا شيء يقول
-    أي وحدة بعينها رجعت.
+    (نفس قاعدة إلغاء الإرسالية)، ووحدةٌ ليست `in_stock` منها (مُباعة، أو مصروفة
+    خارج البيع) تمنع ترحيل المرجع بدل أن تبقى «في المخزن» وبضاعتها عند المورد.
+    مرجعٌ بلا فاتورة أصلية لا يُمسّ: لا شيء يقول أي وحدة بعينها رجعت.
     """
     original = getattr(return_invoice, 'original_invoice', None)
     if original is None:
@@ -439,7 +443,7 @@ def release_returned_purchase_serials(return_invoice) -> int:
         qty = _whole_units(line.quantity, label=label)
         if qty <= 0:
             continue
-        # بلا فلترة حالة: الوحدة المُباعة يجب أن تدخل الاختيار كي يوقفها الحارس.
+        # بلا فلترة حالة: أي وحدةٍ غادرت `in_stock` يجب أن تدخل الاختيار كي يوقفها الحارس.
         item_ids = list(
             ProductSerial.objects.filter(
                 tenant_id=tenant_id, product=product, purchase_item__invoice=original,
@@ -835,6 +839,135 @@ def revert_returned_sales_serials(return_invoice) -> int:
         return_invoice.pk, original_id, reverted,
     )
     return reverted
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# الصرف خارج البيع: بندُ مستندٍ في app آخر يستهلك وحدةً بلا فاتورة (#223)
+# ══════════════════════════════════════════════════════════════════════════
+
+def assert_issue_serials_declared(tenant_id, parts) -> None:
+    """«إجباري» يحرس صرفاً خارج البيع قبل أي كتابة — مرآة `assert_sales_serials_declared`.
+
+    `parts`: كائناتٌ تحمل `product`/`quantity`/`serials` (بند مستندٍ في app آخر
+    مثل `ServiceOrderPart`) — لا استيراد لنوعها هنا، والفرض يتبع `sales_serial_mode`
+    نفسه الذي يحكم البيع لا سياسةً مستقلة.
+    """
+    mode = sales_serial_mode(tenant_id)
+    if mode != SERIAL_MODE_REQUIRED:
+        return
+
+    incomplete: list[str] = []
+    for part in parts:
+        product = part.product
+        if not product_tracks_serials(product):
+            continue
+        label = _product_label(product)
+        needed = _whole_units(part.quantity, label=label)
+        if needed <= 0:
+            continue
+        declared = normalize_serials(part.serials, label=label)
+        if len(declared) != needed:
+            incomplete.append(
+                f"«{label}» (المطلوب {needed} والمختار {len(declared)})"
+            )
+
+    if incomplete:
+        raise ValidationError(
+            'اختيار الأرقام التسلسلية إجباري قبل هذا الصرف — أكمل وحدات '
+            'البنود التالية: ' + '؛ '.join(incomplete) + '.'
+        )
+
+
+def issue_serials(tenant_id, parts) -> int:
+    """يستهلك وحداتٍ مُرقَّمة لبنودٍ صُرفت خارج البيع — مرآة `consume_sales_serials`.
+
+    الاختيار الصريح على البند يُستهلَك أولاً (بعد التحقّق أنه في المخزن ولنفس
+    المنتج)، والباقي يُخصَّص FIFO تحت `optional` وحده — نفس قاعدة البيع بالضبط.
+    الوحدة تصير `STATUS_ISSUED` لا `STATUS_SOLD`: بيعٌ لاحقٌ بـFIFO
+    (`consume_sales_serials`) يستعلم `in_stock` وحدها فلن يخصّصها أبداً.
+    """
+    mode = sales_serial_mode(tenant_id)
+    if mode == SERIAL_MODE_OFF:
+        return 0
+
+    planned: list[tuple] = []
+    for part in parts:
+        product = part.product
+        if not product_tracks_serials(product):
+            continue
+        label = _product_label(product)
+        needed = _whole_units(part.quantity, label=label)
+        if needed <= 0:
+            continue
+
+        declared = normalize_serials(part.serials, label=label)
+        if len(declared) > needed:
+            raise ValidationError(
+                f"البند «{label}»: عدد الأرقام التسلسلية المختارة ({len(declared)}) "
+                f"يتجاوز الكمية ({needed})."
+            )
+        if mode == SERIAL_MODE_REQUIRED and len(declared) != needed:
+            raise ValidationError(
+                f"البند «{label}»: اختيار الأرقام التسلسلية إجباري — "
+                f"المطلوب {needed} والمختار {len(declared)}."
+            )
+        chosen = list(
+            ProductSerial.objects.filter(
+                tenant_id=tenant_id, product=product, serial__in=declared,
+                status=ProductSerial.STATUS_IN_STOCK,
+            ).order_by('id')
+        )
+        if len(chosen) != len(declared):
+            found = {s.serial for s in chosen}
+            missing = [s for s in declared if s not in found]
+            raise ValidationError(
+                f"البند «{label}»: الأرقام التسلسلية التالية غير متوفرة في المخزن "
+                f"لهذا المنتج — {'، '.join(missing)}."
+            )
+
+        shortfall = needed - len(chosen)
+        if shortfall > 0:
+            auto = list(
+                ProductSerial.objects.filter(
+                    tenant_id=tenant_id, product=product,
+                    status=ProductSerial.STATUS_IN_STOCK,
+                )
+                .exclude(pk__in=[s.pk for s in chosen])
+                .order_by('id')[:shortfall]
+            )
+            chosen.extend(auto)
+        planned.append((part, chosen))
+
+    consumed = 0
+    for part, chosen in planned:
+        for unit in chosen:
+            unit.status = ProductSerial.STATUS_ISSUED
+            unit.issued_to = part
+            unit.save(update_fields=['status', 'issued_to'])
+            consumed += 1
+
+    if consumed:
+        logger.info(
+            'product serials issued outside sale: tenant=%s mode=%s units=%d',
+            tenant_id, mode, consumed,
+        )
+    return consumed
+
+
+def unissue_serials(tenant_id, parts) -> int:
+    """يعيد وحدات بنودٍ صُرفت خارج البيع إلى المخزن — مرآة `release_sales_serials`."""
+    part_ids = [p.pk for p in parts]
+    if not part_ids:
+        return 0
+    released = ProductSerial.objects.filter(
+        tenant_id=tenant_id, issued_to_id__in=part_ids,
+    ).update(status=ProductSerial.STATUS_IN_STOCK, issued_to=None)
+    if released:
+        logger.info(
+            'product serials unissued back to stock: tenant=%s units=%d',
+            tenant_id, released,
+        )
+    return released
 
 
 # ══════════════════════════════════════════════════════════════════════════

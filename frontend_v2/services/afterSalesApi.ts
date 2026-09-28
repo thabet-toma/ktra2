@@ -233,6 +233,10 @@ export interface ServiceOrderPartRow {
   billing: PartBilling;
   billing_label: string;
   unit_price: string;
+  /** أرقام تسلسلية مختارة لقطعةٍ مغطاة مرقّمة — تُستهلَك عند ترحيل صرفها. */
+  serials: string[];
+  /** كلفة FIFO الفعلية لحركة الصرف — تُملأ بعد الترحيل، للقراءة فقط. */
+  issued_cost: string | null;
   notes: string;
   sales_invoice_line: number | null;
   materialized_at: string | null;
@@ -427,7 +431,10 @@ export function approveServiceOrder(id: number, note = ""): Promise<ServiceOrder
 
 export function addServiceOrderPart(
   id: number,
-  part: { product: number; quantity: string; billing: PartBilling; unit_price?: string; notes?: string },
+  part: {
+    product: number; quantity: string; billing: PartBilling; unit_price?: string;
+    serials?: string[]; notes?: string;
+  },
 ): Promise<ServiceOrderPartRow> {
   return apiPostObject<ServiceOrderPartRow>(`${ORDERS}${id}/parts/`, part, tenantOpts());
 }
@@ -435,7 +442,9 @@ export function addServiceOrderPart(
 export function updateServiceOrderPart(
   id: number,
   partId: number,
-  patch: Partial<{ quantity: string; billing: PartBilling; unit_price: string; notes: string }>,
+  patch: Partial<{
+    quantity: string; billing: PartBilling; unit_price: string; serials: string[]; notes: string;
+  }>,
 ): Promise<ServiceOrderPartRow> {
   return apiPatchObject<ServiceOrderPartRow>(
     `${ORDERS}${id}/parts/${partId}/`, patch, tenantOpts(),

@@ -1,6 +1,6 @@
 # inventory — المنتجات والمخزون: الحركة الوحيدة التي تغيّر الرصيد والتكلفة، والوحدات المُرقَّمة
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-08-11. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 يملك هذا الـapp بطاقة المنتج (`Product`)، تصنيفاته ووحداته وشرائح أسعاره، المستودعات،
@@ -34,7 +34,7 @@
 | `StockMovement` | `movement_type` (IN/OUT/ADJUST_IN/ADJUST_OUT/RETURN_IN/RETURN_OUT), `quantity`, `unit_cost`, `total_cost`, `reference_type`, `reference_id`, `quantity_before/after`, `avg_cost_before/after` | `product` (PROTECT)، `warehouse` (PROTECT)، `branch→tenants.Branch`، `partner→partners.Partner`؛ خاصية `origin` (`:270`) |
 | `ProductCategory` | `name`, `parent` | `revenue_account`, `cogs_account`, `inventory_account` → `accounting.Account` |
 | `Warehouse` | `code`, `code_key` (مُولَّد), `is_default`, `is_active` | `branch→tenants.Branch` (اختياري)؛ فريد `(tenant, code_key)` **بلا شرط** — و`code_key` = `NULLIF(code,'')` فالرمزُ الفارغ يتكرّر كما ينبغي. كان القيدُ شرطيّاً وMySQL تتجاهله بصمت، أي أنّ رمزين متطابقين في شركةٍ واحدة كانا يُقبلان فعلاً. والرسالةُ العربيّةُ من `WarehouseViewSet` (`_reject_duplicate_code`) — **حارسٌ لم يكن موجوداً** |
-| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`، `return_line→sales.SalesInvoiceLine` (بند مرجع البيع الذي أعادها — انظر «مرجع البيع لا يمحو أثر البيع»)؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
+| `ProductSerial` | `serial`, `status` (`in_stock`/`sold`/`issued` — الأخيرة #223: صُرفت خارج مسار البيع) | `purchase_item→logistics.PurchaseInvoiceItem`، `sales_line→sales.SalesInvoiceLine`، `return_line→sales.SalesInvoiceLine` (بند مرجع البيع الذي أعادها — انظر «مرجع البيع لا يمحو أثر البيع»)، `issued_to→after_sales.ServiceOrderPart` (بند المستند الذي صرفها خارج البيع، #223 — مرجعٌ نصّي كنظيريه أعلاه، لا استيراد)؛ فريد `(tenant, product, serial)`، وفهرس `(tenant, serial)` لبحث المسح الذي لا يعرف المنتج (`prodserial_tenant_serial`) |
 | `ProductPriceTier` | `tier_type` (sale/purchase), `tier_number`, `price`, `tax_inclusive` | فريد `(product, tier_type, tier_number)` |
 | `ProductMerge` (task24) | `snapshot` (JSON: لكل براند مُضموم `family_id`/`brand`/`name_ar`/`name_en` قبل الضمّ), `undone_at` | سلّة محذوفات على نمط `accounting.VoidedJournal` — `target_family→ProductFamily` (لا يُحذف أبداً)؛ `undo_product_merge` يعكسها حرفياً من `snapshot` |
 | `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ يقرأه المسار `auto` (#33) في `core/replenishment.py` (`_product_row`) دفعةً واحدة للشركة (`_forecast_map`) |
@@ -105,9 +105,12 @@ def assert_purchase_serials_declared(invoice) -> None:  # حارس «إجبار�
 def assert_sales_return_serials_declared(return_invoice, lines) -> None:  # مرآتها على المرجع — «إجباري» يُسمّي الوحدة المرتجعة قبل الترحيل (#222)
 def apply_purchase_serials(*, tenant, rows) -> int:  # الاستلام يُنشئ الوحدات in_stock (275)
 def register_existing_serials(*, tenant_id, product, serials) -> int:  # ترقيم مخزون قائم، سقفه الرصيد (228)
-def release_purchase_serials(*, tenant_id, quantities_by_item, document_label='', action_label='التراجع عن') -> int:  # (357)
-def consume_sales_serials(invoice, lines) -> int:  # ترحيل البيع: المختار صريحاً ثم FIFO للباقي (507)
+def release_purchase_serials(*, tenant_id, quantities_by_item, document_label='', action_label='التراجع عن') -> int:  # يمنع لكل حالة غير in_stock لا `sold` وحدها (#223) (357)
+def consume_sales_serials(invoice, lines) -> int:  # ترحيل البيع: المختار صريحاً ثم FIFO للباقي — يستعلم in_stock وحدها فلن يخصّص وحدة `issued` أبداً (507)
 def release_sales_serials(invoice) -> int:  # إلغاء ترحيل البيع: عودة in_stock مع تفريغ الرابط (596)
+def assert_issue_serials_declared(tenant_id, parts) -> None:  # #223: مرآة assert_sales_serials_declared لصرفٍ خارج البيع (بند مستندٍ في app آخر) — «إجباري» يُرفض قبل أي كتابة
+def issue_serials(tenant_id, parts) -> int:  # #223: يستهلك وحدات صرفٍ خارج البيع — الوحدة تصير `STATUS_ISSUED` لا `STATUS_SOLD`
+def unissue_serials(tenant_id, parts) -> int:  # #223: يعيد وحدات صرفٍ خارج البيع إلى in_stock — مرآة release_sales_serials
 def restore_returned_sales_serials(return_invoice, lines) -> int:  # مرجع البيع يُعيد ما سمّاه `line.serials` (أو FIFO احتياطاً تحت optional) ويسجّل return_line (#222)
 def revert_returned_sales_serials(return_invoice) -> int:  # إلغاء ترحيل المرجع: وحداته «مُباعة» على بيعها الأصلي، أو رفضٌ إن تحرّكت
 def product_serials(*, tenant_id, product_id, status=None, sales_invoice=None, limit=500) -> list[dict]:  # `status` أو وحدات فاتورة بيعٍ بعينها `sold` (#222 مراجعة) (904)
@@ -407,6 +410,14 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 حرفياً كما قبل #44.
 
 ## قواعد لا يجوز كسرها
+- **وحدةٌ تسلسلية بحالةٍ غير `in_stock` لا تُحذف أبداً (#223)**: `release_purchase_serials`
+  (ومستهلِكاه — إلغاء ترحيل فاتورة الشراء، وإلغاء سند الاستلام عبر `void_goods_receipt`،
+  ومرتجع الشراء عبر `release_returned_purchase_serials`) يفحص كل حالةٍ غير `in_stock` —
+  `sold` أو `issued` (صُرفت خارج البيع، #223) سواء — لا `sold` وحدها، ويسمّي الوحدة
+  وحالتها في رسالة الرفض قبل أي حذف.
+- **`STATUS_ISSUED` ليس `STATUS_SOLD`**: `consume_sales_serials`/التخصيص التلقائي FIFO
+  للبيع يستعلمان `in_stock` وحدها، فوحدةٌ صُرفت خارج البيع (`issue_serials`، #223) لا
+  يخصّصها بيعٌ لاحق أبداً — الفرق حالةٌ لا مجرّد علم.
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
 - **«السعر التقديري» ليس `avg_cost` ولا يُقرأ منه ولا يمسّه بأي حال** (ISSUE #111/#133، `core/pricing.py` — `indicative_purchase_prices`/`_purchase_lowest_prices_base_currency`) — أقلّ سعر شراء ضمن آخر `INDICATIVE_PRICE_INVOICE_WINDOW` (٥) فواتير شراء **مرحَّلة** تحتوي المنتج فقط، لا كلّ الفترات، ومصدره فواتير الشراء وحدها بلا سقوطٍ إلى `avg_cost` عند غيابها: منتجٌ بلا شراء مرحَّل يغيب من القاموس المُعاد لا يظهر صفراً ولا بأي رقمٍ آخر. رقمٌ للقراءة والتفاوض مع المورّد لا تكلفة — خلطه بـ`avg_cost` كلّف الجلسات مرّتين. يظهر في شاشة الأصناف وتقرير الطباعة مكان «متوسط التكلفة» (`indicative_purchase_price`/`indicative_purchase_price_source` على المُسلسِل و`ProductLookupSerializer`)، بينما `avg_cost` يبقى كما هو على شاشتَي مستويات المخزون والتقييم.
 - **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.

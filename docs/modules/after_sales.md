@@ -1,6 +1,6 @@
 # after_sales — خدمة ما بعد البيع: بطاقات الكفالة وأوامر الصيانة (وحدة مرخّصة)
 
-> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28 (#222). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
+> مبني على قراءة الكود مباشرةً بتاريخ 2026-09-28 (#223). عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
 ## الغرض
 وحدة مرخّصة (`after_sales` في `core/modules.py`) تحمل ما يحدث **بعد** خروج البضاعة:
@@ -35,7 +35,7 @@
 |---|---|---|
 | `WarrantyCard` | `serial`، `start_date`، `duration_months`، `end_date` (مخزَّن وقابل للتمديد)، `source ∈ {auto_sale, manual}`، `supplier_warranty_end_date`، `ended_on`/`end_reason ∈ {returned, invoice_unposted, sale_cancelled, superseded}` (#222) | `tenant`، `product`، `product_serial` → `inventory.ProductSerial`، `sales_invoice` → `sales.SalesInvoice` (مرساة الإحياء)، `sales_invoice_line` → `sales.SalesInvoiceLine` (تُفرَّغ إن حُذف البند من المسودّة)، `end_return_line` → `sales.SalesInvoiceLine` (بند مرجع البيع الذي أنهاها)، `partner`، `supplier` |
 | `ServiceOrder` | `order_number`، `order_date`، `serial`، `complaint`/`diagnosis`/`resolution`، `status`، `outcome` (حقل منفصل)، `warranty_covered`، `estimated_amount`، `covered_posted_at`، `billing_waived_reason`، `photos` | `tenant`، `partner`، `product`، `technician`، `warranty_card`، `sales_invoice` (كلها SET_NULL) |
-| `ServiceOrderPart` | `quantity`، `billing ∈ {billable, covered}`، `unit_price`، **`materialized_at`** | `order` (CASCADE)، `product` (PROTECT)، `sales_invoice_line` (SET_NULL) |
+| `ServiceOrderPart` | `quantity`، `billing ∈ {billable, covered}`، `unit_price`، **`serials`** (JSON، على نمط `SalesInvoiceLine.serials`، #223)، **`issued_cost`** (كلفة FIFO الفعلية لحركة `SERVICE_ISSUE`، تُفرَّغ عند التراجع)، **`materialized_at`** | `order` (CASCADE)، `product` (PROTECT)، `sales_invoice_line` (SET_NULL) |
 | `ServiceOrderEvent` | `event_type`، `from_status`/`to_status`، `text`، `created_at` | `order` (CASCADE)، `actor` |
 | `AfterSalesSettings` | مثبِّت الافتراضيات لكل شركة | `tenant` (OneToOne)، `warranty_expense_account` → `accounting.Account`، `default_labour_product` → `inventory.Product` |
 
@@ -51,8 +51,8 @@ def warranty_coverage(tenant_id: int, serial: str, today=None) -> dict:  # ال�
 
 # after_sales/service_orders.py — أمر الصيانة
 def transition_status(order, to_status, *, user=None, outcome="", note="") -> ServiceOrder:  # الحالة لا تنتقل إلا من هنا
-def post_covered_parts(order, *, user=None) -> dict:  # حركات SERVICE_ISSUE + قيد مصروف الكفالة
-def unpost_covered_parts(order, *, user=None) -> dict:  # المستند السابع في unpost_document
+def post_covered_parts(order, *, user=None) -> dict:  # حركات SERVICE_ISSUE (بتاريخ اليوم، #223) + قيد مصروف الكفالة + استهلاك أرقام القطع المرقّمة
+def unpost_covered_parts(order, *, user=None) -> dict:  # المستند السابع في unpost_document + إعادة الأرقام المستهلكة `in_stock`
 def generate_service_invoice(order, *, user=None, labour_amount=None):  # فاتورة بيع **مسودة**
 def detach_service_invoice(order, *, user=None) -> dict:  # يفتح قفل البنود — للمسودة وحدها
 def intake_lookup(tenant, term: str) -> dict:  # البحث الموحّد عند الاستقبال
@@ -95,7 +95,7 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 |---|---|
 | `frontend_v2/components/aftersales/WarrantyCardsScreen.tsx` | قائمة بطاقات الكفالة والبحث والبطاقة اليدوية |
 | `frontend_v2/components/aftersales/ServiceOrdersScreen.tsx` | قائمة أوامر الصيانة، وفتح المستند، وزر الاستقبال |
-| `frontend_v2/components/aftersales/ServiceOrderDocument.tsx` | المستند: الملف · قطع الغيار (ترحيل/فوترة) · السجل الزمني |
+| `frontend_v2/components/aftersales/ServiceOrderDocument.tsx` | المستند: الملف · قطع الغيار (ترحيل/فوترة) · السجل الزمني — يملأ `sale_price` عند إضافة قطعة مفوترة وعند تحويل قطعة مغطاة إليها؛ عمود «الأرقام» في جدول القطع يفتح `SerialEntryModal` نفسه (`mode="pick"`، مصدره «في المخزن») لقطعةٍ مغطاة من منتجٍ مرقّم لم تتجسّد بعد — على البند الجديد وعلى القائم سواء، لا حقل نصّ عند الإضافة فقط؛ النمط `required` من إعدادات المبيعات (`serial_entry_mode`) نفس مصدر `SalesInvoiceEditor` (#223 مراجعة) |
 | `frontend_v2/components/aftersales/ServiceOrderIntakeModal.tsx` | الاستقبال بالبحث الموحّد والتعبئة من نتائجه |
 | `frontend_v2/utils/serviceOrder.ts` · `frontend_v2/utils/warranty.ts` | القواعد الصرفة (بلا React) — مرآة قواعد الخادم |
 | `frontend_v2/services/afterSalesApi.ts` | عميل REST الوحيد للوحدة |
@@ -106,7 +106,7 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 ## الاعتماديات
 **يعتمد على:**
 - `accounting` — **api فقط**: `after_sales/service_orders.py` (`post_document`، `unpost_document`، `ensure_account`). لا استيراد لـ`accounting.models` إطلاقاً — يحرسه `.importlinter`.
-- `inventory` — **services**: `record_stock_movement` (حركة `SERVICE_ISSUE`)، و**models** كسولة للمنتجات والوحدات المتسلسلة.
+- `inventory` — **services**: `record_stock_movement` (حركة `SERVICE_ISSUE`)، و`inventory.serials` (`assert_issue_serials_declared`/`issue_serials`/`unissue_serials`، #223)، و**models** كسولة للمنتجات والوحدات المتسلسلة.
 - `sales` — **services**: `get_or_create_sales_settings`، `next_invoice_number`، `recalculate_invoice_amounts`، `get_or_create_default_customer`، و**models** (`SalesInvoice`, `SalesInvoiceLine`) لتوليد الفاتورة.
 - `core` — `modules` (`require_module`, `module_enabled`)، `access` (`require_perm`)، `api_defaults`.
 - `device_registry` — **models للقراءة فقط** داخل `intake_lookup`، وخلف فحص ترخيص الوحدة. **لا FK في أي اتجاه**.
@@ -124,6 +124,10 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 - **التمديد لا يقصّر (#222 §٨)**: `WarrantyExtendSerializer.resolved_end_date` يرفض `new_end <= card.end_date`، و`WarrantyCardViewSet.extend` يرفض بطاقةً منتهية بواقعة. تقصيرٌ موثَّق بصلاحية `aftersales.warranty.void` مستقبلٌ في #236.
 - **الصفحة العامة لا تنشر ملاحظات البطاقة ولا سبب انتهائها**: `docshare/documents/aftersales_docs.py` (`build_warranty_card`) يُفرِغ `notes` دائماً، وحالتها من `WarrantyCard.status_on` (عبر `warranty_card_expired`) لا من مقارنة `end_date` باليوم.
 - **قفل التجسّد**: `post_covered_parts` يلتقط `covered` غير المقفول، و`generate_service_invoice` يلتقط `billable` غير المقفول، والبند المقفول لا يُعدَّل ولا يُحذف ولا يُعاد تصنيفه (`after_sales/views.py` (`part_detail`)). كسر أيٍّ من هذه يفتح باب الخصم المزدوج (THA-65).
+- **وجود فاتورة لا يعني حسم الفوترة (#223)**: `billing_is_resolved`/`delivery_blockers` (`after_sales/service_orders.py`) يفحصان كل قطعة `billable` بلا `materialized_at` — لا وجود `sales_invoice` وحده. قطعةٌ أُضيفت **بعد** توليد الفاتورة (الإضافة تبقى مسموحة ما دام الأمر غير مُسلَّم ولا ملغى) تمنع التسليم برسالة تسمّيها، ما لم يُكتب `billing_waived_reason`.
+- **القطعة المغطاة المرقّمة تستهلك رقمها (#223)**: `post_covered_parts` يستدعي `inventory.serials` (`assert_issue_serials_declared` قبل أي كتابة تحت «إجباري»، ثم `issue_serials` بعد بناء الحركات) — الوحدة تصير `ProductSerial.STATUS_ISSUED` ومرجعها `issued_to` هو بند القطعة، لا `STATUS_SOLD`: بيعٌ لاحق بـFIFO (`consume_sales_serials` يستعلم `in_stock` وحدها) لا يخصّصها أبداً. `unpost_covered_parts` يستدعي `unissue_serials` فتعود `in_stock`. الفرض يتبع `sales_serial_mode` للشركة نفسه الذي يحكم البيع — لا سياسة كفالة مستقلة (تلك #233).
+- **سعرٌ صفري على قطعة مفوترة يُرفض لا يُخصَم مجاناً (#223)**: `generate_service_invoice` يرفض (400) وجود قطعة `billable` سعرها ≤ 0، ويسمّيها؛ و`billing` يُفحص مقابل `BILLING_CHOICES` صراحةً في `ServiceOrderPartSerializer` (`validate_billing`) عند الإضافة والتعديل معاً — قيمة عشوائية كانت تُسقط القطعة من كل المسارات بصمت.
+- **الصرف يُؤرَّخ بيوم الترحيل لا يوم الاستقبال (#223)**: `post_covered_parts` يستعمل `timezone.localdate()` لحركة `SERVICE_ISSUE` وقيدها — لا `order.order_date`، فلا يقع الصرف في فترةٍ أُقفلت بعد الاستقبال ولا قبل شراء القطعة نفسها. **والفحص يسبق الكتابة ولو كانت الكلفة صفرية**: `validate_fiscal_period` يُستدعى صراحةً قبل أي حركة، فلا يفلت صرفٌ بلا قيدٍ من فترةٍ مقفلة بحجة أنه بلا قيد.
 - **`SERVICE_ISSUE` نوع مرجع مستقل** لا يدخل `sales_cogs_map` (تفلتر `SALE`/`STOCK_ISSUE`) — مصروف الكفالة تشغيلي لا COGS. لا تُعِد استعمال `STOCK_ISSUE` هنا.
 - **الحالة لا تُغيَّر بـPATCH**: `status`/`outcome`/`covered_posted_at`/`sales_invoice` كلها `read_only` في السيريالايزر، والانتقال من `transition` وحدها فتمرّ من بواباتها.
 - **لا حذف لأمر صيانة** — الإلغاء بديل الحذف، والإلغاء ممنوع ما دام في الأمر ترحيلٌ قائم أو فاتورة مرتبطة.
@@ -144,5 +148,6 @@ def resolve_labour_product(tenant_id):  # منتج خدمة «أجرة صيان�
 | `after_sales/tests/test_warranty.py` | الدورة التلقائية للبطاقة (إنشاء/تعليق/إحياء بنفس الـ`id`)، اشتقاق الحالة، جانب المورد من نسب الشراء، 404 بلا ترخيص، العزل |
 | `after_sales/tests/test_warranty_lifecycle.py` | #222 كاملةً: المرجع (كلي/جزئي بالوحدة المسمّاة) ينهي البطاقة، المشتري الثاني يأخذ بطاقة جديدة والشفاء الذاتي، ثبات الهوية عبر إلغاء/إعادة الترحيل مع تعديل المسودّة، فاتورة الصيانة تكفل قطعتها المفوترة، والتمديد لا يقصّر |
 | `after_sales/tests/test_warranty_repair.py` | أمر `repair_warranty_lifecycle` — dry-run لا يكتب، `--apply` يُصلح (أ)/(ب) وتقرير (ج)، إعادة التشغيل بلا أثر، عزل الشركات، رفض غير المرخّصة |
-| `after_sales/tests/test_service_orders.py` | صرف القطع المغطاة بتكلفة تاريخية وقيد متوازن، **حارس التجسّد المزدوج بالاتجاهين**، ثبات `sales_cogs_map`، إيراد الأجرة في حساب الخدمات، بوابتا التسليم والإلغاء، البحث الموحّد، البوابة والعزل |
+| `after_sales/tests/test_service_orders.py` | صرف القطع المغطاة بتكلفة FIFO وقيد متوازن بتاريخ اليوم، **حارس التجسّد المزدوج بالاتجاهين**، ثبات `sales_cogs_map`، إيراد الأجرة في حساب الخدمات، بوابتا التسليم والإلغاء، البحث الموحّد، البوابة والعزل، ومنذ #223: قطعة مفوترة أُضيفت بعد الفاتورة تمنع التسليم، القطعة المغطاة المرقّمة تستهلك رقمها (وتحت `optional` لا يخصّصها بيعٌ لاحق FIFO) والتراجع يعيده `in_stock`، سعرٌ صفري على قطعة مفوترة يُرفض، `billing` خارج `BILLING_CHOICES` يُرفض، وشهرٌ مقفل عند الاستقبال لا يمنع الترحيل اليوم بينما فترة اليوم المقفلة ترفض حتى الصرف الصفري |
+| `logistics/tests/test_issued_serial_purchase_guards.py` | وحدةٌ تسلسلية `issued` (صُرفت خارج البيع) تمنع حذفها في إلغاء ترحيل فاتورة الشراء، وإلغاء سند الاستلام، ومرتجع الشراء — الثلاثة عبر `release_purchase_serials`/`release_returned_purchase_serials` (#223) |
 | `docshare/tests/test_voucher_and_aftersales.py` | الصفحة العامة لا تنشر ملاحظات البطاقة، وحالتها من `status_on` لا من تاريخ الانتهاء وحده |
