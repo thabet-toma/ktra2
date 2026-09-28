@@ -831,7 +831,9 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         def snapshot_receipts(invoice_id):
             """إرساليات الفاتورة قبل إلغاء الترحيل (الذي يحذفها) — لإعادتها كما كانت.
 
-            بالمنتج لا بمعرّف البند: إعادة الاحتساب تحذف البنود وتُعيد إنشاءها.
+            بمعرّف البند (ISSUE #225): إعادة الاحتساب تحدّث البنود في مكانها
+            فيعود كل سطرٍ إلى بنده نفسه وتبقى وحداته المرقّمة مربوطةً به.
+            المنتج يبقى للسقوط عليه إن حُذف البند (منتجٌ أُزيل من الصفقة).
             """
             from logistics.models import GoodsReceipt
             out = []
@@ -839,8 +841,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 tenant=tenant, invoice_id=invoice_id,
             ).prefetch_related('lines').order_by('receipt_date', 'id'):
                 lines = [
-                    {'product_id': ln.product_id, 'quantity': ln.quantity,
-                     'warehouse_id': ln.warehouse_id}
+                    {'item_id': ln.item_id, 'product_id': ln.product_id,
+                     'quantity': ln.quantity, 'warehouse_id': ln.warehouse_id}
                     for ln in rc.lines.all() if ln.item_id and ln.quantity
                 ]
                 if lines:
@@ -883,7 +885,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                         from logistics.services import receive_purchase_invoice
                         invoice_obj = PurchaseInvoice.objects.get(pk=invoice_id, tenant=tenant)
                         for rc in receipts_by_invoice.get(invoice_id, []):
-                            # كل سطر إلى بنود منتجه الجديدة بالترتيب، حتى باقي كلٍّ منها.
+                            # كل سطر إلى بنده نفسه (المعرّفات ثابتة)، وإن حُذف
+                            # فإلى بنود منتجه بالترتيب حتى باقي كلٍّ منها.
                             remaining = {
                                 it.id: Decimal(str(it.quantity or 0))
                                 - Decimal(str(it.received_quantity or 0))
@@ -896,7 +899,11 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                             lines = []
                             for ln in rc['lines']:
                                 qty = Decimal(str(ln['quantity']))
-                                for item_id in items_by_product.get(ln['product_id'], []):
+                                targets = (
+                                    [ln['item_id']] if ln['item_id'] in remaining
+                                    else items_by_product.get(ln['product_id'], [])
+                                )
+                                for item_id in targets:
                                     take = min(qty, remaining[item_id])
                                     if take <= 0:
                                         continue
@@ -940,7 +947,10 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 status=status.HTTP_409_CONFLICT,
             )
         except Exception as e:
-            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # ValidationError (حارس البند المستلَم مثلاً) يحمل رسالة نظيفة في
+            # `.messages` — و`str(e)` عليها يطبع قائمة بايثون للمستخدم.
+            err = '؛ '.join(e.messages) if hasattr(e, 'messages') else str(e)
+            return Response({'error': err}, status=status.HTTP_400_BAD_REQUEST)
 
         result['reconciliation'] = {
             'previously_posted': len(posted),

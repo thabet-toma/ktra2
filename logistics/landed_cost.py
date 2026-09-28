@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
+from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from tenants.models import Currency
@@ -1129,6 +1130,120 @@ def import_invoices_from_clearance(
     return created
 
 
+def quantity_text(value: Decimal) -> str:
+    """كمية للقراءة: بلا أصفارٍ زائدة وبلا صيغة أُسّية (`Decimal.normalize` وحدها
+    تطبع «1E+1» للعشرة)."""
+    return f'{_d(value).normalize():f}'
+
+
+def _unmatched_item_blocker(item: PurchaseInvoiceItem) -> Optional[str]:
+    """ما يمنع حذف بندٍ لم يعد له صفٌّ محسوب — أو None إن كان حذفه آمناً.
+
+    على نمط `_guard_received_items` (`serializers/invoices.py`): البند الذي
+    استُلمت بضاعته أو تجسّدت وحداته مرتبطٌ بحركة مخزونٍ وسطر إرسالية ووحدات
+    مرقَّمة، فحذفه يفصل الفاتورة عن أثرها الفعلي. الرسالة تسمّي البند والمخرج.
+    """
+    from inventory.models import ProductSerial
+    from logistics.models import GoodsReceiptLine
+    from logistics.services import purchase_item_receipt_quantities
+
+    received = purchase_item_receipt_quantities(item)[1]
+    if received > 0:
+        return (
+            f'البند «{item.name}» لم يعد ضمن بنود الصفقة لكن استُلم منه '
+            f'{quantity_text(received)} — لا يُحذف.'
+        )
+    if GoodsReceiptLine.objects.filter(item=item).exists():
+        return f'البند «{item.name}» لم يعد ضمن بنود الصفقة لكن له سطر إرسالية — لا يُحذف.'
+    if ProductSerial.objects.filter(purchase_item=item).exists():
+        return f'البند «{item.name}» لم يعد ضمن بنود الصفقة لكن له وحدات مرقّمة — لا يُحذف.'
+    return None
+
+
+# الحقول التي يعيد المحرّك حسابها — وحدها تُكتب فوق البند القائم.
+_RECALCULATED_ITEM_FIELDS = (
+    'name', 'quantity', 'unit_price', 'total_price', 'hs_code',
+    'landed_unit_price_ils', 'landed_line_total_ils',
+)
+
+
+def sync_recalculated_items(inv: PurchaseInvoice, rows: List[Dict[str, Any]]) -> None:
+    """يطابق الصفوف المحسوبة ببنود الفاتورة ويحدّثها **في مكانها** (ISSUE #225).
+
+    الحذف الشامل (`items.all().delete()`) كان يمحو `serials` وكل حقلٍ أدخله
+    المستخدم، ويُصفّر `received_quantity`، ويُسقط أسطر الإرسالية بالـCASCADE
+    (`GoodsReceiptLine.item`) بينما تبقى حركات المخزون — فبضاعةٌ دخلت أصلاً
+    تُعرض للاستلام مرّةً ثانية ويتضاعف المخزون. نفس الإصلاح المطبَّق في مسار
+    التعديل العادي (`serializers/invoices.py` — `_sync_items`).
+
+    **المطابقة** بـ(المنتج، ترتيب الظهور بين بنود المنتج نفسه مرتّبةً
+    بالمعرّف) — المنتج قد يتكرّر في الفاتورة ولا مفتاح صفقةٍ مخزَّنٌ على
+    البند؛ وللصفّ الاصطناعي بلا منتج البندُ الأول بلا منتج. صفٌّ بلا مطابق
+    يصير بنداً جديداً، وبندٌ بلا صفّ يُحذف ما لم يكن مستلَماً أو مرقَّماً —
+    وعندها تُرفض العملية كلها. **كل التحقق يسبق أي كتابة**، والمستدعي داخل
+    `transaction.atomic` فلا تبقى فاتورةٌ نصفها جديد.
+    """
+    existing = list(inv.items.order_by('id'))
+    by_product: Dict[Optional[int], List[PurchaseInvoiceItem]] = {}
+    for item in existing:
+        by_product.setdefault(item.product_id, []).append(item)
+
+    pairs: List[Tuple[Optional[PurchaseInvoiceItem], Dict[str, Any]]] = []
+    matched_ids = set()
+    for row in rows:
+        queue = by_product.get(row.get('product')) or []
+        item = queue.pop(0) if queue else None
+        if item is not None:
+            matched_ids.add(item.pk)
+        pairs.append((item, row))
+    doomed = [it for it in existing if it.pk not in matched_ids]
+
+    from logistics.services import purchase_item_receipt_quantities
+    errors: List[str] = []
+    for item, row in pairs:
+        if item is None:
+            continue
+        received = purchase_item_receipt_quantities(item)[1]
+        if received > 0 and _d(row.get('quantity')) < received:
+            errors.append(
+                f'الكمية المحسوبة للبند «{item.name}» '
+                f'({quantity_text(row.get("quantity"))}) أقل من المستلَم '
+                f'({quantity_text(received)}).'
+            )
+    errors.extend(filter(None, (_unmatched_item_blocker(it) for it in doomed)))
+    if errors:
+        raise ValidationError(
+            '؛ '.join(errors)
+            + ' أعد بنود الصفقة كما كانت، أو ألغِ إرسالية الاستلام أولاً.'
+        )
+
+    for item, row in pairs:
+        if item is None:
+            PurchaseInvoiceItem.objects.create(
+                invoice=inv,
+                product_id=row.get('product'),
+                name=row['name'],
+                quantity=row['quantity'],
+                unit_price=row['unit_price'],
+                total_price=row['total_price'],
+                notes=row.get('notes'),
+                hs_code=row.get('hs_code'),
+                landed_unit_price_ils=row.get('landed_unit_price_ils'),
+                landed_line_total_ils=row.get('landed_line_total_ils'),
+            )
+            continue
+        item.name = row['name']
+        item.quantity = row['quantity']
+        item.unit_price = row['unit_price']
+        item.total_price = row['total_price']
+        item.hs_code = row.get('hs_code')
+        item.landed_unit_price_ils = row.get('landed_unit_price_ils')
+        item.landed_line_total_ils = row.get('landed_line_total_ils')
+        item.save(update_fields=list(_RECALCULATED_ITEM_FIELDS))
+    for item in doomed:
+        item.delete()
+
+
 def recalculate_landed_for_shipment(
     *,
     tenant,
@@ -1137,7 +1252,12 @@ def recalculate_landed_for_shipment(
     shipment_remaining_rate: Optional[Decimal] = None,
     use_cost_lines: Optional[bool] = None,
 ) -> Dict[str, Any]:
-    """تحديث فواتير الشراء المرتبطة بالشحنة (غير المرحّلة فقط)."""
+    """تحديث فواتير الشراء المرتبطة بالشحنة (غير المرحّلة فقط).
+
+    البنود تُطابَق وتُحدَّث في مكانها (`sync_recalculated_items`) لا تُحذف
+    وتُعاد، ثم تُعاد مزامنة الاستلام وتُشتقّ حالته. بندٌ مستلَمٌ يمنع خفض
+    كميته أو حذفه ⇒ `ValidationError` ولا يُكتب شيء (ISSUE #225).
+    """
     qs = PurchaseInvoice.objects.filter(
         tenant=tenant,
         shipment_id=shipment_id,
@@ -1233,20 +1353,15 @@ def recalculate_landed_for_shipment(
                     basis * Decimal(str(fee.calculation_value or 0)) / Decimal('100')
                 ).quantize(Q2, rounding=ROUND_HALF_UP)
                 fee.save(update_fields=['amount'])
-            inv.items.all().delete()
-            for row in payload['items']:
-                PurchaseInvoiceItem.objects.create(
-                    invoice=inv,
-                    product_id=row.get('product'),
-                    name=row['name'],
-                    quantity=row['quantity'],
-                    unit_price=row['unit_price'],
-                    total_price=row['total_price'],
-                    notes=row.get('notes'),
-                    hs_code=row.get('hs_code'),
-                    landed_unit_price_ils=row.get('landed_unit_price_ils'),
-                    landed_line_total_ils=row.get('landed_line_total_ils'),
-                )
+            sync_recalculated_items(inv, payload['items'])
+            # الكميات المستلَمة تبقى على بنودها، فتُعاد المزامنة مع حركات الشحنة
+            # القديمة وتُشتقّ الحالة منها — لا تبقى فاتورةٌ «مستلمة» بكميات صفرية.
+            from .services import (
+                refresh_purchase_receipt_status,
+                sync_import_receipt_from_shipment_stock,
+            )
+            sync_import_receipt_from_shipment_stock(inv)
+            refresh_purchase_receipt_status(inv)
             updated += 1
     if updated:
         base = f'تم تحديث {updated} فاتورة.'

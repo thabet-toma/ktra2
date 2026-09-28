@@ -2207,16 +2207,11 @@ def legacy_shipment_deal_notes_q(ref_number):
     )
 
 
-def sync_import_receipt_from_shipment_stock(invoice):
-    """الفاتورة الدولية التي دخلت بضاعتها من الشحنة (المسار القديم) تُعرَف مستلَمة.
+def import_shipment_legacy_stock_by_product(invoice):
+    """ما دخل المخزن لكل منتج من حركات `SHIPMENT` القديمة لصفقة هذه الفاتورة.
 
-    قبل أن تُستلَم الدولية من فاتورتها كانت إشارة «Cleared» تُدخل البضاعة بحركات
-    `SHIPMENT` لا تلمس الفاتورة، فتبقى «غير مستلمة» وبضاعتها في المخزن — ويَعرض
-    عليها الاستلامُ الجديد إدخالها ثانيةً. هنا تُحسب تلك الحركات للبنود: الكمية
-    المستلمة = ما دخل لمنتج البند من صفقة الفاتورة على شحنتها (موزّعاً على بنود
-    المنتج الواحد بالترتيب، ومسقوفاً بكمية كلٍّ منها)، ولا تنقص عمّا استُلم
-    بمسارٍ آخر. idempotent. يُستدعى عند الإنشاء من التخليص، وبعد إلغاء الترحيل،
-    وفي هجرة البيانات.
+    `None` = لا حركات أصلاً (الحالة الغالبة). مفصولةٌ عن الكتابة كي تقرأها
+    أداةُ الكشف (`audit_import_double_receipt`) تشغيلاً تجريبياً بلا أثر.
     """
     from inventory.models import StockMovement
 
@@ -2231,15 +2226,46 @@ def sync_import_receipt_from_shipment_stock(invoice):
     by_product: dict[int, Decimal] = {}
     for pid, qty in moves.values_list('product_id', 'quantity'):
         by_product[pid] = by_product.get(pid, Decimal('0')) + Decimal(str(qty or 0))
-    if not by_product:
-        return None
+    return by_product or None
 
+
+def import_receipt_quantities_from_shipment_stock(invoice):
+    """كم يُعَدّ مستلَماً لكل بند من حركات الشحنة القديمة — حساباً بلا كتابة.
+
+    القسمة نفسها التي يكتبها `sync_import_receipt_from_shipment_stock`: توزيعٌ
+    على بنود المنتج الواحد بالترتيب، مسقوفاً بكمية كلٍّ منها. `None` = لا
+    حركات `SHIPMENT` لهذه الفاتورة.
+    """
+    by_product = import_shipment_legacy_stock_by_product(invoice)
+    if by_product is None:
+        return None
+    planned: dict[int, Decimal] = {}
     for it in invoice.items.filter(product_id__isnull=False).order_by('id'):
         available = by_product.get(it.product_id, Decimal('0'))
         if available <= 0:
             continue
         take = min(available, Decimal(str(it.quantity or 0)))
         by_product[it.product_id] = available - take
+        planned[it.pk] = take
+    return planned
+
+
+def sync_import_receipt_from_shipment_stock(invoice):
+    """الفاتورة الدولية التي دخلت بضاعتها من الشحنة (المسار القديم) تُعرَف مستلَمة.
+
+    قبل أن تُستلَم الدولية من فاتورتها كانت إشارة «Cleared» تُدخل البضاعة بحركات
+    `SHIPMENT` لا تلمس الفاتورة، فتبقى «غير مستلمة» وبضاعتها في المخزن — ويَعرض
+    عليها الاستلامُ الجديد إدخالها ثانيةً. هنا تُحسب تلك الحركات للبنود
+    (`import_receipt_quantities_from_shipment_stock`)، ولا تنقص الكميةُ عمّا
+    استُلم بمسارٍ آخر. idempotent. يُستدعى عند الإنشاء من التخليص، وبعد إلغاء
+    الترحيل، وبعد إعادة احتساب التكلفة الواصلة، وفي هجرة البيانات.
+    """
+    planned = import_receipt_quantities_from_shipment_stock(invoice)
+    if planned is None:
+        return None
+
+    for it in invoice.items.filter(pk__in=planned.keys()):
+        take = planned[it.pk]
         if take > Decimal(str(it.received_quantity or 0)):
             it.received_quantity = take
             it.save(update_fields=['received_quantity'])

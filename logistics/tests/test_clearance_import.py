@@ -310,8 +310,10 @@ class ClearanceImportTest(APITestCase):
         )
         self.assertEqual(recalc.status_code, 200, recalc.content)
         invoice.refresh_from_db()
-        # إعادة الاحتساب تُعيد إنشاء البنود — البند الجديد لنفس المنتج.
+        # إعادة الاحتساب تحدّث البنود في مكانها — نفس البند بمعرّفه (#225).
+        item_id = item.id
         item = invoice.items.get(product=product)
+        self.assertEqual(item.id, item_id)
         self.assertTrue(invoice.is_posted)
         self.assertEqual(invoice.receipt_status, PurchaseInvoice.RECEIPT_PARTIAL)
         self.assertEqual(item.received_quantity, Decimal("4"))
