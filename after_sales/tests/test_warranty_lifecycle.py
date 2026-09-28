@@ -258,8 +258,14 @@ class SecondBuyerTest(WarrantyReturnTestBase):
 
 
 class CardIdentityTest(WarrantyReturnTestBase):
-    def test_repost_revives_the_same_card_keeping_its_extension_and_notes(self):
-        """عطل 3: الحذف وإعادة الإنشاء كانا يكسران كل ما عُلِّق على البطاقة."""
+    def test_repost_revives_the_same_card_keeping_its_extension_and_event(self):
+        """عطل 3: الحذف وإعادة الإنشاء كانا يكسران كل ما عُلِّق على البطاقة.
+
+        #229: التوثيق انتقل من `notes` إلى `WarrantyCardEvent` — والحدث نفسه
+        يبقى على البطاقة (لا يُحذف ولا يُعاد إنشاؤه) عبر دورة التعليق والإحياء.
+        """
+        from after_sales.models import WarrantyCardEvent
+
         self.stock_units("SN-T1")
         sale = self.sales_invoice(serials=["SN-T1"])
         self.assertEqual(self.post_sale(sale).status_code, 200)
@@ -282,7 +288,11 @@ class CardIdentityTest(WarrantyReturnTestBase):
         self.assertEqual(revived.pk, card.pk)
         self.assertIsNone(revived.ended_on)
         self.assertEqual(revived.end_date, extended_end)
-        self.assertIn("تمديد الكفالة", revived.notes)
+        self.assertTrue(
+            WarrantyCardEvent.objects.filter(
+                card=revived, event_type=WarrantyCardEvent.TYPE_EXTEND,
+            ).exists()
+        )
 
     def test_a_changed_invoice_date_shifts_both_ends_keeping_the_extension(self):
         self.stock_units("SN-T2")

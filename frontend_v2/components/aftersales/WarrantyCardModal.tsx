@@ -4,8 +4,10 @@ import {
   createWarrantyCard,
   deleteWarrantyCard,
   extendWarrantyCard,
+  getWarrantyCardEvents,
   updateWarrantyCard,
   type WarrantyCardDraft,
+  type WarrantyCardEventRow,
   type WarrantyCardRow,
 } from "../../services/afterSalesApi";
 import { deriveWarrantyEnd, warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
@@ -110,6 +112,9 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const [extendMonths, setExtendMonths] = useState("");
   const [extendReason, setExtendReason] = useState("");
+  // #229: التمديد لم يعد يُلحق سطراً في `notes` — سجلّ الأحداث الإلحاقي هو
+  // مصدر التاريخ الآن، ويُقرأ من نقطته الخاصة لا من حقل البطاقة.
+  const [events, setEvents] = useState<WarrantyCardEventRow[]>([]);
 
   /* ISSUE #121: مسودّة محلية (IndexedDB) — «لُمِس» يُرفَع مزامنةً داخل كل
    * معالج تعديلٍ حقيقي (patch/pickProduct/pickCustomer وحقول التمديد)، لا
@@ -138,6 +143,15 @@ export const WarrantyCardModal: React.FC<Props> = ({
     // تعبئةٌ من الخادم — لا تُعامَل كتعديل مستخدم (issue #121).
     setTouched(false);
   }, [card]);
+
+  const loadEvents = useCallback(async () => {
+    if (!card) { setEvents([]); return; }
+    try {
+      setEvents(await getWarrantyCardEvents(card.id));
+    } catch { setEvents([]); /* السجل تفصيلٌ إضافي — فشل قراءته لا يمنع فتح البطاقة */ }
+  }, [card]);
+
+  useEffect(() => { void loadEvents(); }, [loadEvents]);
 
   const isAuto = card?.source === "auto_sale";
   // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
@@ -321,6 +335,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
       void discardDraft();
       toast(`تم التمديد حتى ${formatDateValue(saved.end_date)}`, "success");
       onChanged();
+      void loadEvents();
     } catch (e) {
       setErr(messageOf(e, "تعذّر تمديد الكفالة"));
     } finally {
@@ -603,7 +618,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 <input
                   className={`${fieldClass} flex-1`}
                   disabled={!canManage || busy}
-                  placeholder="سبب التمديد (يُوثَّق في الملاحظات)"
+                  placeholder="سبب التمديد (يُسجَّل في سجل البطاقة)"
                   aria-label="سبب التمديد"
                   value={extendReason}
                   onChange={(e) => { setTouched(true); setExtendReason(e.target.value); }}
@@ -624,6 +639,31 @@ export const WarrantyCardModal: React.FC<Props> = ({
                   {" "}({formatNumber(Number(extendMonths))} شهراً)
                 </div>
               )}
+            </div>
+          )}
+
+          {/* #229: سجل الأحداث الإلحاقي — التمديد يظهر هنا بتاريخيه وسببه بدل
+              سطرٍ كان يُلحق بالملاحظات. */}
+          {card && events.length > 0 && (
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+              <div className="mb-2 text-sm font-bold text-[var(--color-text)]">سجل البطاقة</div>
+              <ul className="space-y-1.5">
+                {events.map((event) => (
+                  <li key={event.id} className="text-[12px] text-[var(--color-text)]">
+                    <span className="text-[var(--color-text-muted)]">
+                      {formatDateValue(event.created_at)}
+                    </span>
+                    {" — "}
+                    <span className="font-semibold">{event.event_type_label}</span>
+                    {event.old_end_date && event.new_end_date && (
+                      <span>
+                        {" "}: {formatDateValue(event.old_end_date)} ← {formatDateValue(event.new_end_date)}
+                      </span>
+                    )}
+                    {event.text && <span> — {event.text}</span>}
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
         </div>

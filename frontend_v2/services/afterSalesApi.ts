@@ -188,7 +188,7 @@ export function deleteWarrantyCard(id: number): Promise<void> {
   return apiDelete(`${BASE}${id}/`, tenantOpts());
 }
 
-/** تمديد الكفالة مجاملةً — يُوثَّق في ملاحظات البطاقة بتاريخ الخادم. */
+/** تمديد الكفالة مجاملةً — يُسجَّل حدث `extend` في سجل البطاقة (#229) لا في ملاحظاتها. */
 export function extendWarrantyCard(
   id: number,
   input: WarrantyExtendInput,
@@ -202,6 +202,27 @@ export function checkWarrantyBySerial(serial: string): Promise<WarrantyCoverage>
     `${BASE}check/?serial=${encodeURIComponent(serial)}`,
     tenantOpts(),
   );
+}
+
+/** سجل أحداث البطاقة (#229) — إلحاقيّ، للقراءة فقط. */
+export interface WarrantyCardEventRow {
+  id: number;
+  event_type: string;
+  event_type_label: string;
+  reason_code: string;
+  text: string;
+  service_order: number | null;
+  service_order_number: string | null;
+  actor: number | null;
+  actor_name: string;
+  old_end_date: string | null;
+  new_end_date: string | null;
+  quantity: number | null;
+  created_at: string;
+}
+
+export function getWarrantyCardEvents(id: number): Promise<WarrantyCardEventRow[]> {
+  return apiGetObject<WarrantyCardEventRow[]>(`${BASE}${id}/events/`, tenantOpts());
 }
 
 /* ══════════════════════════════════════════════════════════════════════════

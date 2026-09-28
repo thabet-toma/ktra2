@@ -8,6 +8,7 @@ from .models import (
     ServiceOrderEvent,
     ServiceOrderPart,
     WarrantyCard,
+    WarrantyCardEvent,
     add_months,
 )
 
@@ -126,6 +127,33 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
                 {"supplier_warranty_end_date": "نهاية كفالة المورد قبل بدء الكفالة."}
             )
         return attrs
+
+
+class WarrantyCardEventSerializer(serializers.ModelSerializer):
+    """سجل البطاقة — للقراءة فقط، إلحاقيّ لا يُكتب عبر هذا العقد (#229)."""
+
+    event_type_label = serializers.CharField(
+        source="get_event_type_display", read_only=True,
+    )
+    actor_name = serializers.SerializerMethodField()
+    service_order_number = serializers.SerializerMethodField()
+
+    class Meta:
+        model = WarrantyCardEvent
+        fields = [
+            "id", "event_type", "event_type_label", "reason_code", "text",
+            "service_order", "service_order_number", "actor", "actor_name",
+            "old_end_date", "new_end_date", "quantity", "created_at",
+        ]
+        read_only_fields = fields
+
+    def get_actor_name(self, obj):
+        # الأقواس صريحة عمداً: بلا فاعل (`SET_NULL`، أو حدثٌ آليّ بلا مستخدم)
+        # يجب أن يُقرأ «شرطٌ ثم بديل» لا أن يُقرأ بأولوية `or` فيلتبس على القارئ.
+        return (obj.actor.get_full_name() or obj.actor.username) if obj.actor_id else ""
+
+    def get_service_order_number(self, obj):
+        return obj.service_order.order_number if obj.service_order_id else None
 
 
 class WarrantyExtendSerializer(serializers.Serializer):

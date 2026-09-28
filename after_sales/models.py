@@ -41,6 +41,26 @@ def _days_in_month(year: int, month: int) -> int:
     return calendar.monthrange(year, month)[1]
 
 
+class WarrantyCardQuerySet(models.QuerySet):
+    """كل فلترة على `end_date` تمرّ من هنا — لا مقارنة حرّة في مكان آخر (#229).
+
+    الثلاثة لا تستثني إلا المنتهية بواقعة (`ended_on`): بطاقةٌ ملغاة تبقى
+    خارج نطاق هذا الملف — حقولها (`voided_at`…) لم تُضَف بعد (#236)، وتذكرة
+    الإلغاء هي من تُضيف `voided()` حين تُبنى الحقول فعلاً.
+    """
+
+    def active_on(self, today: date | None = None):
+        today = today or timezone.localdate()
+        return self.filter(ended_on__isnull=True, end_date__gte=today)
+
+    def expired_on(self, today: date | None = None):
+        today = today or timezone.localdate()
+        return self.filter(ended_on__isnull=True, end_date__lt=today)
+
+    def ended(self):
+        return self.filter(ended_on__isnull=False)
+
+
 class WarrantyCard(models.Model):
     """بطاقة كفالة — نسخة الكفالة الفعلية لوحدة واحدة عند الزبون.
 
@@ -81,6 +101,8 @@ class WarrantyCard(models.Model):
     STATUS_ACTIVE = "active"
     STATUS_EXPIRED = "expired"
     STATUS_ENDED = "ended"
+
+    objects = WarrantyCardQuerySet.as_manager()
 
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="warranty_cards",
@@ -196,6 +218,84 @@ class WarrantyCard(models.Model):
         if self.supplier_warranty_end_date is None:
             return False
         return self.supplier_warranty_end_date >= (today or timezone.localdate())
+
+
+class WarrantyCardEvent(models.Model):
+    """سجل إلحاقي واحد لكل ما يحدث للبطاقة — لا تحديث ولا حذف (#229).
+
+    `card` بـ`PROTECT`: بطاقةٌ لها حدثٌ واحد لا تُحذف، فهويّتها التي يتّكئ
+    عليها هذا السجل نفسه تبقى مرساة. أنواع الحدث أوسع مما تكتبه هذه التذكرة —
+    الإلغاء والإصدار والإحالة والاستبدال تذاكر لاحقة (#218، #217، #226…) تكتب
+    فيها؛ هنا الشكل النهائي وحده، والتمديد اليدوي أول من يملأه.
+
+    `reason_code` نصٌّ حرّ بلا `choices` على مستوى النموذج عمداً: التمديد
+    يستعمل مفرداتٍ (`courtesy`/`shop_days`/`shop_days_reversed`) والإلغاء
+    مفرداتٍ أخرى تماماً (`physical_damage`/`liquid`/…) — قائمةٌ واحدة تخلطهما،
+    والتحقّق من المفردة الصحيحة شأن الخدمة التي تكتب هذا النوع من الحدث.
+    """
+
+    TYPE_VOID = "void"
+    TYPE_UNVOID = "unvoid"
+    TYPE_EXTEND = "extend"
+    TYPE_ENDED = "ended"
+    TYPE_REVIVED = "revived"
+    TYPE_ISSUED = "issued"
+    TYPE_REFERRED = "referred"
+    TYPE_COVERAGE_REFUSED = "coverage_refused"
+    TYPE_COVERAGE_RESTORED = "coverage_restored"
+    TYPE_REPLACEMENT = "replacement"
+    TYPE_CHOICES = [
+        (TYPE_VOID, "إلغاء كفالة التاجر"),
+        (TYPE_UNVOID, "تراجع عن الإلغاء"),
+        (TYPE_EXTEND, "تمديد"),
+        (TYPE_ENDED, "انتهاء"),
+        (TYPE_REVIVED, "إحياء"),
+        (TYPE_ISSUED, "إصدار (طباعة/مشاركة)"),
+        (TYPE_REFERRED, "إحالة لمركز الوكيل"),
+        (TYPE_COVERAGE_REFUSED, "رفض الكفالة لهذا العطل"),
+        (TYPE_COVERAGE_RESTORED, "استعادة الكفالة لهذا العطل"),
+        (TYPE_REPLACEMENT, "استبدال الجهاز"),
+    ]
+
+    #: مفردات `reason_code` للتمديد وحده — لا تُفرض بـ`choices` (انظر الشرح أعلاه).
+    EXTEND_REASON_COURTESY = "courtesy"
+    EXTEND_REASON_SHOP_DAYS = "shop_days"
+    EXTEND_REASON_SHOP_DAYS_REVERSED = "shop_days_reversed"
+
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, related_name="warranty_card_events",
+    )
+    card = models.ForeignKey(
+        WarrantyCard, on_delete=models.PROTECT, related_name="events",
+    )
+    event_type = models.CharField(max_length=20, choices=TYPE_CHOICES)
+    reason_code = models.CharField(max_length=30, blank=True, default="")
+    text = models.TextField(blank=True, default="")
+    service_order = models.ForeignKey(
+        "ServiceOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warranty_card_events",
+    )
+    actor = models.ForeignKey(
+        "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="warranty_card_events",
+    )
+    # للتمديد بنوعيه (مجاملة/أيام صيانة) — واقعتا قبل/بعد في حدثٍ واحد.
+    old_end_date = models.DateField(null=True, blank=True)
+    new_end_date = models.DateField(null=True, blank=True)
+    # كمية الحدث الجزئي — لمرتجع بطاقة الفاتورة (`quantity`/`returned_quantity`
+    # على البطاقة نفسها لم يُضافا بعد؛ هذا العمود ينتظرهما بلا استعمال اليوم).
+    quantity = models.PositiveSmallIntegerField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = "warranty_card_events"
+        indexes = [
+            models.Index(fields=["card", "created_at"], name="warrantyevent_card_new_idx"),
+        ]
+        ordering = ["created_at", "id"]
+
+    def __str__(self):
+        return f"{self.event_type}#{self.card_id}"
 
 
 class ServiceOrder(models.Model):

@@ -25,7 +25,7 @@ from django.utils import timezone
 
 from core.modules import module_enabled
 
-from .models import AfterSalesSettings, WarrantyCard, add_months
+from .models import AfterSalesSettings, WarrantyCard, WarrantyCardEvent, add_months
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,38 @@ MODULE_KEY = "after_sales"
 def get_or_create_after_sales_settings(tenant_id: int) -> AfterSalesSettings:
     settings_row, _ = AfterSalesSettings.objects.get_or_create(tenant_id=tenant_id)
     return settings_row
+
+
+def log_warranty_event(
+    card: WarrantyCard,
+    *,
+    event_type: str,
+    reason_code: str = "",
+    text: str = "",
+    service_order=None,
+    user=None,
+    old_end_date=None,
+    new_end_date=None,
+    quantity=None,
+) -> WarrantyCardEvent:
+    """حدثٌ إلحاقي مؤرَّخ **من الخادم** — على نمط `service_orders.log_event`.
+
+    نقطة كتابةٍ واحدة يُعاد استعمالها من كل تذكرة لاحقة تكتب على السجل
+    (الإلغاء، الإصدار، الإحالة، تمديد أيام الصيانة…) بدل أن يكرّر كلٌّ منها
+    `WarrantyCardEvent.objects.create` بنفسه.
+    """
+    return WarrantyCardEvent.objects.create(
+        tenant_id=card.tenant_id,
+        card=card,
+        event_type=event_type,
+        reason_code=reason_code,
+        text=(text or "")[:2000],
+        service_order=service_order,
+        actor=user if (user is not None and getattr(user, "is_authenticated", False)) else None,
+        old_end_date=old_end_date,
+        new_end_date=new_end_date,
+        quantity=quantity,
+    )
 
 
 def _supplier_side(unit, supplier_months: int):

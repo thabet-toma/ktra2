@@ -20,7 +20,7 @@ from core.access import require_perm
 from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
 
-from .models import ServiceOrder, ServiceOrderPart, WarrantyCard
+from .models import ServiceOrder, ServiceOrderPart, WarrantyCard, WarrantyCardEvent
 from .serializers import (
     GenerateServiceInvoiceSerializer,
     ServiceOrderEventSerializer,
@@ -29,10 +29,11 @@ from .serializers import (
     ServiceOrderPartSerializer,
     ServiceOrderSerializer,
     ServiceOrderTransitionSerializer,
+    WarrantyCardEventSerializer,
     WarrantyCardSerializer,
     WarrantyExtendSerializer,
 )
-from .services import MODULE_KEY, warranty_coverage
+from .services import MODULE_KEY, log_warranty_event, warranty_coverage
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +49,7 @@ _ACTION_PERMS = {
     "partial_update": PERM_MANAGE,
     "destroy": PERM_MANAGE,
     "extend": PERM_MANAGE,
+    "events": PERM_VIEW,
 }
 
 # ما يُسمح بتعديله يدوياً على بطاقة **تلقائية**: البطاقة من إنتاج الترحيل،
@@ -95,18 +97,18 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 | Q(product__sku__icontains=term)
             )
 
-        # #222: «المنتهية بواقعة» ليست سارية ولا «انتهت مدّتها» — فئةٌ ثالثة.
-        # الفلتران القديمان كانا يقارنان `end_date` وحده، فتظهر بطاقةُ جهازٍ
-        # أُرجع في قائمة «السارية».
+        # #222/#229: «المنتهية بواقعة» ليست سارية ولا «انتهت مدّتها» — فئةٌ
+        # ثالثة، و`WarrantyCardQuerySet` هو من يحسم الثلاثة — لا مقارنة
+        # `end_date` حرّة هنا.
         status_filter = (params.get("status") or "").strip()
         if status_filter in ("active", "expired", "ended"):
             today = timezone.localdate()
             if status_filter == "ended":
-                queryset = queryset.filter(ended_on__isnull=False)
+                queryset = queryset.ended()
             elif status_filter == "active":
-                queryset = queryset.filter(ended_on__isnull=True, end_date__gte=today)
+                queryset = queryset.active_on(today)
             else:
-                queryset = queryset.filter(ended_on__isnull=True, end_date__lt=today)
+                queryset = queryset.expired_on(today)
 
         source = (params.get("source") or "").strip()
         if source:
@@ -123,9 +125,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         expiring = (params.get("expiring_within_days") or "").strip()
         if expiring.isdigit():
             today = timezone.localdate()
-            queryset = queryset.filter(
-                ended_on__isnull=True,
-                end_date__gte=today,
+            queryset = queryset.active_on(today).filter(
                 end_date__lte=today + timedelta(days=int(expiring)),
             )
         return queryset
@@ -175,12 +175,18 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                     "فاتورتها وتعود بإعادة الترحيل."
                 )
             })
+        # `card` على `WarrantyCardEvent` بـPROTECT — الحذف كان سيرتدّ 500 دون
+        # هذا الفحص؛ هنا الرسالة تُقرأ (#229).
+        if instance.events.exists():
+            raise ValidationError({
+                "detail": "على هذه البطاقة أحداث مسجّلة (مثل تمديد) — لا تُحذف.",
+            })
         instance.delete()
 
     # ── الإجراءات ─────────────────────────────────────────────────────────
     @action(detail=True, methods=["post"], url_path="extend")
     def extend(self, request, pk=None):
-        """تمديد الكفالة مجاملةً — يُوثَّق في الملاحظات بتاريخ الخادم.
+        """تمديد الكفالة مجاملةً — يُسجَّل حدث `extend` لا سطراً في الملاحظات (#229).
 
         شرطان (#222 البند ٨): البطاقة ليست منتهيةً بواقعة، والتاريخ الجديد
         **بعد** الحالي — يفرض الثاني `WarrantyExtendSerializer.resolved_end_date`.
@@ -199,18 +205,33 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
 
         previous = card.end_date
         reason = (form.validated_data.get("reason") or "").strip()
-        stamp = timezone.localtime().strftime("%Y-%m-%d %H:%M")
-        line = f"[{stamp}] تمديد الكفالة من {previous} إلى {new_end}"
-        if reason:
-            line = f"{line} — {reason}"
         card.end_date = new_end
-        card.notes = f"{card.notes}\n{line}".strip() if card.notes else line
-        card.save(update_fields=["end_date", "notes", "updated_at"])
+        card.save(update_fields=["end_date", "updated_at"])
+        log_warranty_event(
+            card,
+            event_type=WarrantyCardEvent.TYPE_EXTEND,
+            reason_code=WarrantyCardEvent.EXTEND_REASON_COURTESY,
+            text=reason,
+            user=request.user,
+            old_end_date=previous,
+            new_end_date=new_end,
+        )
         logger.info(
             "after_sales.warranty_extended tenant=%s card=%s %s→%s",
             self.tenant.pk, card.pk, previous, new_end,
         )
         return Response(self.get_serializer(card).data)
+
+    @action(detail=True, methods=["get"], url_path="events")
+    def events(self, request, pk=None):
+        """سجل أحداث البطاقة — إلحاقي، للقراءة فقط. لا PATCH ولا DELETE عليه."""
+        card = self.get_object()
+        queryset = (
+            WarrantyCardEvent.objects
+            .filter(tenant=self.tenant, card=card)
+            .select_related("actor", "service_order")
+        )
+        return Response(WarrantyCardEventSerializer(queryset, many=True).data)
 
     @action(detail=False, methods=["get"], url_path="check")
     def check(self, request):

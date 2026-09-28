@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **934**
+عدد النقاط: **935**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -167,6 +167,7 @@
 | `/api/after-sales/warranties/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/check/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/events/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/extend/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/agent/customers/` | `agent_customers` | `partners/agent_api.py` |
 | `/api/agent/invoices/` | `agent_list_invoices` | `sales/agent_api.py` |

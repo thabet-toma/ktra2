@@ -407,7 +407,10 @@ class WarrantyApiTest(WarrantyTestBase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("end_date", response.data)
 
-    def test_extend_pushes_the_end_date_and_records_it_in_the_notes(self):
+    def test_extend_pushes_the_end_date_and_records_an_event_not_a_notes_line(self):
+        """#229: التوثيق انتقل من `notes` إلى `WarrantyCardEvent` — سجل مستقل."""
+        from after_sales.models import WarrantyCardEvent
+
         created = self.client.post(
             BASE, self.manual_payload(), format="json", **self.headers(),
         ).data
@@ -419,8 +422,13 @@ class WarrantyApiTest(WarrantyTestBase):
 
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(response.data["end_date"], "2027-03-01")
-        self.assertIn("تمديد الكفالة", response.data["notes"])
-        self.assertIn("مجاملة", response.data["notes"])
+        self.assertEqual(response.data["notes"], "")
+
+        event = WarrantyCardEvent.objects.get(card_id=created["id"])
+        self.assertEqual(event.event_type, WarrantyCardEvent.TYPE_EXTEND)
+        self.assertEqual(event.old_end_date.isoformat(), "2026-12-01")
+        self.assertEqual(event.new_end_date.isoformat(), "2027-03-01")
+        self.assertEqual(event.text, "مجاملة")
 
     def test_extend_needs_a_target(self):
         created = self.client.post(
