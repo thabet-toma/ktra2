@@ -20,7 +20,12 @@ import {
   type PagedList,
 } from "./restApi";
 import { resolveTenantId } from "../utils/tenantContext";
-import type { IntakeVerdict, WarrantySource, WarrantyStatus } from "../utils/warranty";
+import type {
+  IntakeVerdict,
+  RepairWarrantyPlan,
+  WarrantySource,
+  WarrantyStatus,
+} from "../utils/warranty";
 
 const BASE = "after-sales/warranties/";
 
@@ -53,6 +58,10 @@ export interface WarrantyCardRow {
   supplier_name: string;
   supplier_warranty_end_date: string | null;
   supplier_warranty_active: boolean;
+  /** #244: كفالة الإصلاح — أمر المنشأ (`null` لغيرها) ونطاقها المجمَّد. */
+  origin_service_order: number | null;
+  origin_order_number: string;
+  coverage_scope: string;
   notes: string;
   // #232: طبقة كفالة المصنع — `manufacturer_warrantor` الفارغ = «لا يوجد»،
   // ومعه `manufacturer_status`/`manufacturer_days_remaining` بـ`null` حينها
@@ -228,6 +237,8 @@ export interface WarrantyCoverageUnit {
 export interface WarrantyCoverage {
   serial: string;
   covered: boolean;
+  /** #244: كفالة إصلاح سارية وحدها — لا تجعل الجهاز «مكفولاً». */
+  repair_covered?: boolean;
   supplier_covered?: boolean;
   cards: WarrantyCoverageCard[];
   unit: WarrantyCoverageUnit | null;
@@ -750,6 +761,8 @@ export interface ServiceOrderDetail extends ServiceOrderListRow {
   technician: number | null;
   technician_name: string;
   warranty_card: number | null;
+  /** #244: بطاقة كفالة الإصلاح التي أنشأها تسليم هذا الأمر — مرجعُ زرّ طباعتها. */
+  repair_warranty_card: number | null;
   warranty_status: {
     id: number;
     end_date: string;
@@ -811,6 +824,8 @@ export interface ServiceOrderDraft {
   duplicate_open_reason: string;
   /** #241: «إصلاح مدفوع بطلب الزبون» رغم الإحالة — الخادم يتحقّق من الحكم ويكتب التنبيه والقبول. */
   paid_despite_referral: boolean;
+  /** #244: «العطل نفسه أو قطعة من هذا الإصلاح» — شرط التغطية على بطاقة كفالة إصلاح (يفرضه الخادم). */
+  repair_fault_confirmed: boolean;
 }
 
 export interface ServiceOrderListFilters {
@@ -863,6 +878,8 @@ export interface IntakePrefill {
   warranty_card: number;
   warranty_covered: boolean;
   requires_item_confirm: boolean;
+  /** #244: بطاقة كفالة إصلاح — لا تغطية إلا بتأكيد الموظف أن العطل من الإصلاح نفسه. */
+  requires_repair_confirm: boolean;
 }
 
 export interface IntakeCardRow {
@@ -878,6 +895,11 @@ export interface IntakeCardRow {
   customer_phone: string;
   sales_invoice_number: string;
   sale_date: string;
+  /** #244: كل بطاقة صفٌّ مستقل — صفّ البيع وصفّ الإصلاح لا يُدمجان. */
+  source: WarrantySource;
+  source_label: string;
+  coverage_scope: string;
+  origin_order_number: string;
   dealer: IntakeLayer;
   manufacturer: (Omit<IntakeLayer, "status" | "days_remaining"> & {
     warrantor: string;
@@ -987,7 +1009,7 @@ export interface DeliveryEffects {
   new_end: string | null;
   reason: string;
   reason_code: string;
-  repair_warranty: unknown | null;
+  repair_warranty: RepairWarrantyPlan | null;
 }
 
 export function getServiceOrderDeliveryEffects(

@@ -57,12 +57,18 @@
     {% elif page.serial_masked %}
     <div class="row"><dt>الرقم التسلسلي</dt><dd class="ltr" dir="ltr">{{ page.serial_masked }}</dd></div>
     {% endif %}
+    {% if page.is_repair %}
+    <div class="row"><dt>كفالة إصلاح</dt><dd>{{ page.dealer_text }}</dd></div>
+    {% if page.repair_order_number %}<div class="row"><dt>أمر الصيانة</dt><dd class="ltr" dir="ltr">{{ page.repair_order_number }}</dd></div>{% endif %}
+    {% if page.repair_scope %}<div class="row"><dt>ما تشمله</dt><dd>{{ page.repair_scope }}</dd></div>{% endif %}
+    {% else %}
     <div class="row"><dt>كفالة التاجر</dt><dd>{{ page.dealer_text }}</dd></div>
     <div class="row">
       <dt>كفالة المصنع</dt>
       <dd>{{ page.manufacturer_text }}</dd>
       {% if page.warrantor_name %}<dd>{{ page.warrantor_name }}{% if page.warrantor_phone %} · <span dir="ltr">{{ page.warrantor_phone }}</span>{% endif %}</dd>{% endif %}
     </div>
+    {% endif %}
   </dl>
 {% endblock %}
 </div>

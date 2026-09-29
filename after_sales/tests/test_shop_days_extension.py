@@ -252,6 +252,9 @@ class ShopDaysNoExtensionTest(ShopDaysBase):
         self.assert_not_extended(order, "إعدادات الكفالة")
 
     def test_an_order_without_a_card_writes_no_warranty_event(self):
+        AfterSalesSettings.objects.update_or_create(
+            tenant=self.tenant, defaults={"repair_warranty_days": 0},
+        )
         order = self.intake(billing_waived_reason="بلا كلفة")
         self.assertEqual(self.transition(order, READY).status_code, 200)
 
@@ -306,7 +309,7 @@ class DeliveryEffectsPreviewTest(ShopDaysBase):
         self.assertTrue(preview.data["extends"])
         self.assertEqual(preview.data["days"], 20)
         self.assertEqual(str(preview.data["old_end"]), str(self.end))
-        self.assertIsNone(preview.data["repair_warranty"])
+        self.assertFalse(preview.data["repair_warranty"]["creates"])
         self.assertFalse(self.shop_events().exists())
         self.card.refresh_from_db()
         self.assertEqual(self.card.end_date, self.end)

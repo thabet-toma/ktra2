@@ -320,14 +320,12 @@ def _shop_days_enabled(tenant_id) -> bool:
     return row.extend_for_shop_days
 
 
-def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
-    """ما سيكتبه التسليم على كفالة التاجر — معاينةٌ خالصة لا تكتب شيئاً.
+def _delivery_date(order: ServiceOrder):
+    return _local_date(order.delivered_at) if order.delivered_at else timezone.localdate()
 
-    `apply_shop_days_extension` يقرأ هذه الدالة نفسها، فالمعاينة لا تخالف التنفيذ.
-    النتيجة تُختار في حوار التسليم قبل أن تُخزَّن على الأمر، فتُمرَّر هنا؛ وإلا
-    فنتيجة الأمر المخزّنة. `reason_code` فارغٌ حين يُمدَّد أو حين لا بطاقة.
-    `repair_warranty` محجوز لكفالة الإصلاح (#244).
-    """
+
+def _shop_days_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
+    """قرار التمديد بأيام الصيانة وحده — `delivery_effects` تضيف إليه قرار كفالة الإصلاح."""
     result = {
         "extends": False, "days": 0, "old_end": None, "new_end": None,
         "reason": "", "reason_code": "", "repair_warranty": None,
@@ -367,9 +365,7 @@ def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
     if card.status_on(order.order_date) != WarrantyCard.STATUS_ACTIVE:
         return refuse("not_active_on_receipt")
 
-    delivery_date = (
-        _local_date(order.delivered_at) if order.delivered_at else timezone.localdate()
-    )
+    delivery_date = _delivery_date(order)
     days = (_shop_days_stop(order, delivery_date) - _shop_days_start(order)).days
     if days <= 0:
         return refuse("zero_days")
@@ -381,6 +377,24 @@ def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
     return result
 
 
+def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
+    """ما سيكتبه التسليم على الكفالتين — معاينةٌ خالصة لا تكتب شيئاً.
+
+    التمديد وكفالة الإصلاح يقرآن قرارَي `_shop_days_effects` و`repair_warranty_decision`
+    نفسيهما اللذين ينفّذ منهما التسليم، فالمعاينة لا تخالف التنفيذ. النتيجة تُختار في
+    حوار التسليم قبل أن تُخزَّن على الأمر، فتُمرَّر هنا؛ وإلا فنتيجة الأمر المخزّنة.
+    `reason_code` فارغٌ حين يُمدَّد أو حين لا بطاقة. `repair_warranty` = `creates`/`start`/
+    `end`/`reason`، وطبقة التاجر فيه **بعد** التمديد المعاين لا قبله.
+    """
+    result = _shop_days_effects(order, outcome)
+    card = order.warranty_card if order.warranty_card_id else None
+    dealer_end = None
+    if card is not None:
+        dealer_end = result["new_end"] if result["extends"] else card.end_date
+    result["repair_warranty"] = repair_warranty_decision(order, outcome, dealer_end=dealer_end)
+    return result
+
+
 def apply_shop_days_extension(order: ServiceOrder, *, user=None) -> dict:
     """يمدّد كفالة التاجر بأيام الصيانة ويكتب أثره — يُنادى من معاملة التسليم.
 
@@ -388,9 +402,9 @@ def apply_shop_days_extension(order: ServiceOrder, *, user=None) -> dict:
     المربوط بالأمر هو الحارس، فاستدعاءٌ ثانٍ لا يكتب شيئاً. لا بطاقة ⇒ لا حدث.
     """
     if not order.warranty_card_id:
-        return delivery_effects(order)
+        return _shop_days_effects(order)
     order.warranty_card = _lock_card(order.warranty_card)
-    effects = delivery_effects(order)
+    effects = _shop_days_effects(order)
     if effects["reason_code"] in ("no_card", "already_extended"):
         return effects
 
@@ -421,6 +435,137 @@ def apply_shop_days_extension(order: ServiceOrder, *, user=None) -> dict:
         effects["reason_code"],
     )
     return effects
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# كفالة الإصلاح (#244) — بطاقةٌ تُنشأ في معاملة التسليم بعد التمديد
+# ══════════════════════════════════════════════════════════════════════════
+
+REPAIR_SCOPE_MAX = 500
+
+
+def _repair_settings(tenant_id) -> tuple[int, str]:
+    row = AfterSalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if row is None:
+        return AfterSalesSettings._meta.get_field("repair_warranty_days").default, ""
+    return row.repair_warranty_days, row.repair_terms
+
+
+def _repair_scope(order: ServiceOrder) -> str:
+    """نطاق الإصلاح المجمَّد: ما كُتب في `resolution` ثم أسماء القطع، مقصوصاً على 500 حرف."""
+    pieces = [" ".join((order.resolution or "").split())]
+    names = [product_display_name(part.product) for part in order.parts.select_related("product")]
+    if names:
+        pieces.append("القطع: " + "، ".join(dict.fromkeys(names)))
+    scope = " — ".join(piece for piece in pieces if piece)
+    if len(scope) > REPAIR_SCOPE_MAX:
+        scope = scope[: REPAIR_SCOPE_MAX - 1].rstrip() + "…"
+    return scope
+
+
+def repair_warranty_decision(order: ServiceOrder, outcome: str | None, *, dealer_end) -> dict:
+    """هل يُنشئ التسليم بطاقة إصلاح؟ — القرار الواحد الذي تقرؤه المعاينة ويقرؤه التنفيذ.
+
+    `dealer_end`: نهاية كفالة التاجر على البطاقة المرتبطة **بعد** تمديد أيام الصيانة
+    (المعاينة تمرّر ما سيصير، والتنفيذ ما صار). لا تحجبها إلا بطاقةٌ غير إصلاح، سارية
+    غير منتهية بواقعة ولا ملغاة، تبلغ نهايتُها نهايةَ كفالة الإصلاح أو تتجاوزها.
+    """
+    result = {"creates": False, "start": None, "end": None, "reason": "", "reason_code": ""}
+
+    def skip(code, reason):
+        result["reason_code"] = code
+        result["reason"] = reason
+        return result
+
+    outcome = order.outcome if outcome is None else outcome
+    if not outcome:
+        return skip("no_outcome", "حدّد نتيجة الصيانة أولاً — لا تُعرف كفالة الإصلاح قبلها.")
+    if outcome != ServiceOrder.OUTCOME_REPAIRED:
+        label = dict(ServiceOrder.OUTCOME_CHOICES).get(outcome, outcome)
+        return skip("outcome_not_repaired", f"نتيجة الصيانة «{label}» — لا كفالة إصلاح.")
+    days, _terms = _repair_settings(order.tenant_id)
+    if days <= 0:
+        return skip("setting_off", "كفالة الإصلاح مُعطَّلة في الإعدادات.")
+    if WarrantyCard.objects.filter(
+        tenant_id=order.tenant_id, origin_service_order=order,
+        source=WarrantyCard.SOURCE_REPAIR,
+    ).exists():
+        return skip("already_created", "لهذا الأمر كفالة إصلاح صادرة أصلاً.")
+
+    start = _delivery_date(order)
+    end = start + timedelta(days=days)
+    linked = order.warranty_card if order.warranty_card_id else None
+    if (
+        linked is not None and not linked.is_repair
+        and linked.ended_on is None and linked.voided_at is None
+        and dealer_end is not None and dealer_end >= end
+    ):
+        return skip(
+            "dealer_longer",
+            f"كفالة التاجر سارية حتى {dealer_end.strftime('%d/%m/%Y')} — "
+            "أطول من كفالة الإصلاح فلا حاجة لبطاقة إصلاح.",
+        )
+    result.update(creates=True, start=start, end=end)
+    return result
+
+
+def apply_repair_warranty(order: ServiceOrder, *, user=None) -> dict:
+    """يُنشئ بطاقة كفالة الإصلاح للأمر المسلَّم ويكتب أثرها — يُنادى من معاملة التسليم.
+
+    بعد `apply_shop_days_extension` لأن الحجب يقرأ نهاية التاجر بعد التمديد. مرةً واحدة
+    للأمر: القفل على صفّ الأمر (تأخذه `transition_status`) يسلسل المنافسين، والفحص
+    `exists()` هو الحارس — لا قيد فرادة في القاعدة (MySQL يتجاهل الشرطي منها).
+    """
+    linked = order.warranty_card if order.warranty_card_id else None
+    plan = repair_warranty_decision(
+        order, None, dealer_end=linked.end_date if linked is not None else None,
+    )
+    if plan["reason_code"] == "already_created":
+        return plan
+    if not plan["creates"]:
+        # يُكتب السبب حين كانت الكفالة ستنطبق لولاه؛ الإعداد المطفأ والنتيجة غير «أُصلح»
+        # لا شيء يُقال فيهما (المعاينة تقولهما للموظف قبل التسليم).
+        if plan["reason_code"] == "dealer_longer":
+            log_event(
+                order, event_type=ServiceOrderEvent.TYPE_WARRANTY,
+                text=f"لم تُنشأ كفالة إصلاح: {plan['reason']}", user=user,
+            )
+        return plan
+
+    _days, terms = _repair_settings(order.tenant_id)
+    partner = order.partner if order.partner_id else None
+    card = WarrantyCard.objects.create(
+        tenant_id=order.tenant_id,
+        source=WarrantyCard.SOURCE_REPAIR,
+        origin_service_order=order,
+        product_id=order.product_id or (linked.product_id if linked else None),
+        device_name=order.device_description or (linked.device_name if linked else ""),
+        serial=order.serial,
+        partner=partner,
+        customer_name=order.customer_name or (partner.name if partner else ""),
+        customer_phone=order.customer_phone or (partner.phone if partner and partner.phone else ""),
+        start_date=plan["start"],
+        duration_months=0,
+        end_date=plan["end"],
+        coverage_scope=_repair_scope(order),
+        terms_text=terms,
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+    )
+    end_text = plan["end"].strftime("%d/%m/%Y")
+    log_warranty_event(
+        card,
+        event_type=WarrantyCardEvent.TYPE_REPAIR_ISSUED,
+        text=f"كفالة إصلاح — {order.order_number} — حتى {end_text}",
+        service_order=order,
+        user=user,
+        new_end_date=plan["end"],
+    )
+    log_event(
+        order, event_type=ServiceOrderEvent.TYPE_WARRANTY,
+        text=f"صدرت كفالة إصلاح (بطاقة #{card.pk}) حتى {end_text}", user=user,
+    )
+    plan["card"] = card.pk
+    return plan
 
 
 @transaction.atomic
@@ -483,6 +628,7 @@ def transition_status(
     )
     if to_status == ServiceOrder.STATUS_DELIVERED:
         apply_shop_days_extension(order, user=user)
+        apply_repair_warranty(order, user=user)
     logger.info(
         "after_sales.order_transition tenant=%s order=%s %s→%s",
         order.tenant_id, order.pk, current, to_status,
@@ -874,7 +1020,7 @@ def detach_service_invoice(order: ServiceOrder, *, user=None) -> dict:
 
 VERDICT_ENDED = "ended"
 VERDICT_DEALER = "dealer"
-# #244 (إصلاح مدفوع بكفالة إصلاح) يضيف حكمه هنا — بين `dealer` و`referral`.
+VERDICT_REPAIR = "repair"
 VERDICT_REFERRAL = "referral"
 VERDICT_VOIDED_PAID = "voided_paid"
 VERDICT_EXPIRED_PAID = "expired_paid"
@@ -901,12 +1047,17 @@ def intake_verdict(card, today) -> str:
     """الحكم الوحيد للاستقبال — الواجهة ترسم ما يردّه هنا ولا تحسب شيئاً.
 
     الترتيب هو المواصفة: المنتهية بواقعة تغلب كل شيء، ثم كفالة التاجر السارية
-    (وعلى بطاقة الفاتورة: بقيت قطعٌ مكفولة)، ثم إحالة المصنع، ثم الملغاة، ثم المنتهية.
+    (وعلى بطاقة الفاتورة: بقيت قطعٌ مكفولة)، ثم كفالة الإصلاح السارية (#244)، ثم
+    إحالة المصنع، ثم الملغاة، ثم المنتهية. الحكم **لكل بطاقة**: بطاقة بيعٍ وبطاقة إصلاح
+    لجهازٍ واحد سطران لكلٍّ حكمه، فبطاقة الإصلاح لا تمرّ من فرع «التاجر» أبداً.
     """
     status = card.status_on(today)
     if status == WarrantyCard.STATUS_ENDED:
         return VERDICT_ENDED
-    if status == WarrantyCard.STATUS_ACTIVE and (
+    if card.is_repair:
+        if status == WarrantyCard.STATUS_ACTIVE:
+            return VERDICT_REPAIR
+    elif status == WarrantyCard.STATUS_ACTIVE and (
         not is_invoice_card(card) or card.covered_quantity > 0
     ):
         return VERDICT_DEALER
@@ -993,6 +1144,7 @@ def _intake_prefill(card, verdict: str) -> dict:
         "warranty_card": card.pk,
         "warranty_covered": verdict == VERDICT_DEALER,
         "requires_item_confirm": is_invoice_card(card),
+        "requires_repair_confirm": verdict == VERDICT_REPAIR,
     }
 
 
@@ -1043,6 +1195,12 @@ def _intake_card_row(card, today, verdict: str) -> dict:
         "customer_phone": card.customer_phone,
         "sales_invoice_number": invoice.invoice_number if invoice else "",
         "sale_date": invoice.invoice_date if invoice else card.start_date,
+        "source": card.source,
+        "source_label": card.get_source_display(),
+        "coverage_scope": card.coverage_scope,
+        "origin_order_number": (
+            card.origin_service_order.order_number if card.origin_service_order_id else ""
+        ),
         "dealer": {
             "start_date": card.start_date,
             "end_date": card.end_date,
@@ -1056,10 +1214,16 @@ def _intake_card_row(card, today, verdict: str) -> dict:
 
 
 def _latest_per_unit(cards, cap: int) -> list:
-    """أحدث بطاقة لكل وحدة (منتج + رقم)، وبطاقةُ الفاتورة وحدةٌ بذاتها."""
+    """أحدث بطاقة لكل وحدة (منتج + رقم)، وبطاقةُ الفاتورة وحدةٌ بذاتها.
+
+    وكفالة الإصلاح (#244) طبقةٌ مستقلة لا تُدمَج بكفالة البيع: مفتاحها يحمل `is_repair`
+    فيبقى للجهاز سطرُ بيعٍ وسطرُ إصلاحٍ، لكلٍّ منهما أحدثُ بطاقته."""
     seen, picked = set(), []
     for card in cards:
-        key = (card.product_id, card.serial) if card.serial else ("card", card.pk)
+        key = (
+            (card.product_id, card.serial, card.is_repair) if card.serial
+            else ("card", card.pk)
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -1113,7 +1277,7 @@ MATCH_CARD = "card"
 def _intake_cards(tenant_id: int):
     return WarrantyCard.objects.filter(tenant_id=tenant_id).select_related(
         "product", "partner", "sales_invoice", "manufacturer_warrantor",
-        "void_service_order", "end_return_line__invoice",
+        "void_service_order", "end_return_line__invoice", "origin_service_order",
     )
 
 

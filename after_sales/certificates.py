@@ -22,13 +22,14 @@ from .verify import _device as device_label
 LAYOUT_INVOICE = "invoice"
 LAYOUT_CARD = "card"
 LAYOUT_REFERRAL = "referral_slip"
+LAYOUT_REPAIR = "repair"
 
-#: قالبُ كل تخطيط. فرع الصيانة (#244) يُضاف هنا بقالبٍ جديد وتخطيطٍ جديد دون
-#: المساس بما سواهما.
+#: قالبُ كل تخطيط.
 TEMPLATES = {
     LAYOUT_INVOICE: "after_sales/certificates/certificate_invoice.html",
     LAYOUT_CARD: "after_sales/certificates/certificate_card.html",
     LAYOUT_REFERRAL: "after_sales/certificates/referral_slip.html",
+    LAYOUT_REPAIR: "after_sales/certificates/certificate_repair.html",
 }
 
 QR_MM_SINGLE = 25
@@ -159,6 +160,11 @@ def _terms_groups(cards, layout) -> list:
     return result
 
 
+def single_card_layout(card) -> str:
+    """تخطيط بطاقةٍ مفردة: كفالة الإصلاح ورقتها الخاصة، وما سواها بطاقة الجهاز."""
+    return LAYOUT_REPAIR if card.is_repair else LAYOUT_CARD
+
+
 def _customer_key(card) -> tuple:
     """هوية الزبون: الطرف المرتبط إن وُجد، وإلا الاسم والهاتف بعد التطبيع."""
     if card.partner_id:
@@ -221,6 +227,18 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
                 else _dealer_block(card, today, base_date, extension.get(card.pk))
             ),
             "manufacturer": manufacturer,
+            "repair": (
+                {
+                    "order_number": (
+                        card.origin_service_order.order_number
+                        if card.origin_service_order_id else ""
+                    ),
+                    "scope": card.coverage_scope,
+                    "from_": _fmt(card.start_date),
+                    "to": _fmt(card.end_date),
+                }
+                if card.is_repair else None
+            ),
             "qr": mark_safe(qr_svg(card, qr_mm)),
         })
 
@@ -240,6 +258,11 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
         doc_number = f"#{first.pk}"
         seller_label = "المحل"
         signer_label = "مركز الخدمة — استلام"
+    elif layout == LAYOUT_REPAIR:
+        title = f"كفالة إصلاح — #{first.pk}"
+        doc_kind = "كفالة إصلاح"
+        doc_number = f"#{first.pk}"
+        signer_label = "الزبون — استلمت الجهاز وقرأت الشروط"
     elif layout == LAYOUT_INVOICE:
         title = "شهادة كفالة" + (f" — {invoice.invoice_number}" if invoice else "")
         doc_kind = "شهادة كفالة"

@@ -53,6 +53,7 @@ const PAGE_SIZE = 25;
 const SOURCES: { key: WarrantySource; label: string }[] = [
   { key: "auto_sale", label: "تلقائية من فاتورة بيع" },
   { key: "manual", label: "يدوية" },
+  { key: "repair", label: "كفالة إصلاح" },
 ];
 
 const messageOf = (cause: unknown, fallback: string) =>

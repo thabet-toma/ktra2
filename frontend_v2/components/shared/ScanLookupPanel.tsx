@@ -31,6 +31,7 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { humanizeThrown } from "../../utils/drfError";
+import { pickScanWarrantyCard, scanWarrantyLabel } from "../../utils/warranty";
 import {
   scanApi,
   type ScanDeviceMatch,
@@ -38,6 +39,7 @@ import {
   type ScanProductMatch,
   type ScanResult,
   type ScanUnitMatch,
+  type ScanWarrantyCard,
 } from "../../services/scanApi";
 import { BarcodeScannerModal } from "./BarcodeScannerModal";
 
@@ -86,9 +88,10 @@ const DocLink: React.FC<{ href: string | null; label: string | null }> = ({ href
 const UnitCard: React.FC<{ unit: ScanUnitMatch }> = ({ unit }) => {
   const sold = unit.status === "sold";
   const warranty = unit.warranty;
-  const activeCard = warranty?.cards.find((card) => card.status === "active")
-    ?? warranty?.cards[0]
-    ?? null;
+  const activeCard = warranty
+    ? pickScanWarrantyCard<ScanWarrantyCard>(warranty.cards, warranty.covered)
+    : null;
+  const shielded = Boolean(warranty && (warranty.covered || warranty.repair_covered));
 
   return (
     <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-3">
@@ -147,17 +150,17 @@ const UnitCard: React.FC<{ unit: ScanUnitMatch }> = ({ unit }) => {
       {warranty && (
         <div
           className={`mt-3 flex flex-wrap items-center gap-2 rounded-md px-2.5 py-2 ${
-            warranty.covered
+            shielded
               ? "bg-emerald-50 text-emerald-900 dark:bg-emerald-900/25 dark:text-emerald-100"
               : "bg-[var(--color-muted)] text-[var(--color-text-muted)]"
           }`}
           data-testid="scan-warranty"
         >
-          {warranty.covered
+          {shielded
             ? <ShieldCheck className="h-4 w-4" />
             : <ShieldOff className="h-4 w-4" />}
           <span className="text-[var(--font-size-sm)] font-medium">
-            {warranty.covered ? "الكفالة سارية" : "لا كفالة سارية"}
+            {scanWarrantyLabel(warranty)}
           </span>
           {activeCard?.end_date && (
             <span className="text-[var(--font-size-xs)]">

@@ -20,10 +20,10 @@
 الحالة وحدها، كما في قرار رابط التحقّق.
 """
 from after_sales.certificates import (
-    LAYOUT_CARD,
     LAYOUT_INVOICE,
     certificate_context,
     render_certificate,
+    single_card_layout,
 )
 from after_sales.models import ServiceOrder, WarrantyCard
 from after_sales.services import ISSUE_CHANNEL_SHARE, mark_card_issued
@@ -137,6 +137,7 @@ def page_warranty_card(document, share):
         WarrantyCard.objects
         .select_related(
             "tenant", "partner", "product", "sales_invoice", "manufacturer_warrantor",
+            "origin_service_order",
         )
         .filter(pk=document.pk, tenant_id=document.tenant_id, ended_on__isnull=True)
         .first()
@@ -144,7 +145,7 @@ def page_warranty_card(document, share):
     if card is None:
         return None
     context = certificate_context(
-        [card], layout=LAYOUT_CARD, user=share.created_by, mark_reprint=False,
+        [card], layout=single_card_layout(card), user=share.created_by, mark_reprint=False,
     )
     return render_certificate(context)
 

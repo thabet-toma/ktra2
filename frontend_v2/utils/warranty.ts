@@ -15,8 +15,19 @@
 import { formatDateValue } from "./formatDate.ts";
 import { formatNumber } from "./formatNumber.ts";
 
-/** مصدر البطاقة — تلقائية من ترحيل فاتورة بيع، أو يدوية أنشأها مستخدم. */
-export type WarrantySource = "auto_sale" | "manual";
+/** مصدر البطاقة — تلقائية من فاتورة بيع، أو يدوية، أو كفالة إصلاح/استبدال من أمر صيانة. */
+export type WarrantySource = "auto_sale" | "manual" | "repair" | "replacement";
+
+/** مرآة `WarrantyCard.SOURCE_CHOICES` — غير المعروف يُعاد كما ورد لا فراغاً. */
+export const WARRANTY_SOURCE_LABELS: Record<WarrantySource, string> = {
+  auto_sale: "تلقائية من فاتورة بيع",
+  manual: "يدوية",
+  repair: "كفالة إصلاح",
+  replacement: "كفالة استبدال",
+};
+
+export const warrantySourceLabel = (source: string): string =>
+  WARRANTY_SOURCE_LABELS[source as WarrantySource] ?? source;
 
 /**
  * الحالة كما يردّها الخادم (`WarrantyCard.status_on`، #222): `ended` تغلب
@@ -385,12 +396,13 @@ export function phoneKeyOf(raw: string | null | undefined): string {
 }
 
 /** حكم الاستقبال كما يردّه الخادم (`intake_verdict`) — الواجهة ترسمه ولا تحسبه. */
-export type IntakeVerdict = "ended" | "dealer" | "referral" | "voided_paid" | "expired_paid";
+export type IntakeVerdict = "ended" | "dealer" | "repair" | "referral" | "voided_paid" | "expired_paid";
 
 export type IntakeVerdictTone = "green" | "grey" | "red";
 
 export const INTAKE_VERDICT_LABELS: Record<IntakeVerdict, string> = {
   dealer: "مغطى بكفالة التاجر",
+  repair: "كفالة إصلاح سارية — تغطي العطل نفسه أو قطعةً من ذلك الإصلاح فقط",
   referral: "خارج كفالة التاجر — كفالة المصنع سارية: يُحال إلى جهة الكفالة",
   voided_paid: "الكفالة ملغاة — الإصلاح مدفوع",
   expired_paid: "انتهت الكفالة — الإصلاح مدفوع",
@@ -402,7 +414,7 @@ export const intakeVerdictLabel = (verdict: IntakeVerdict): string =>
 
 /** الأخضر مكسبٌ للزبون (تغطية أو إحالة)، والأحمر إلغاءٌ بقرار التاجر، وما عداهما رمادي. */
 export function intakeVerdictTone(verdict: IntakeVerdict): IntakeVerdictTone {
-  if (verdict === "dealer" || verdict === "referral") return "green";
+  if (verdict === "dealer" || verdict === "repair" || verdict === "referral") return "green";
   if (verdict === "voided_paid") return "red";
   return "grey";
 }
@@ -504,6 +516,46 @@ export function warrantyShopDaysLine(effects: {
   if (!effects.extends) return effects.reason;
   const end = effects.new_end ? ` — النهاية الجديدة ${formatDateValue(effects.new_end)}` : "";
   return `ستُمدَّد كفالة التاجر ${formatNumber(effects.days)} يوماً${end}`;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * #244 — كفالة الإصلاح
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** نصّ خانة الاستقبال — يشترطها الخادم قبل احتساب أمرٍ مغطّىً بكفالة إصلاح. */
+export const REPAIR_FAULT_CONFIRM_TEXT = "العطل نفسه أو قطعة من هذا الإصلاح";
+
+/** ما تعلنه معاينة التسليم عن كفالة الإصلاح — السبب كما ردّه الخادم حين لا تُنشأ. */
+export interface RepairWarrantyPlan {
+  creates: boolean;
+  start: string | null;
+  end: string | null;
+  reason: string;
+}
+
+export function warrantyRepairLine(plan: RepairWarrantyPlan | null | undefined): string {
+  if (!plan) return "";
+  if (!plan.creates) return plan.reason;
+  return `ستُنشأ كفالة إصلاح حتى ${formatDateValue(plan.end)}`;
+}
+
+/** عنوان تغطية الماسح — كفالة الإصلاح لا تُقرأ «الكفالة سارية» (كفالة الجهاز). */
+export function scanWarrantyLabel(warranty: { covered: boolean; repair_covered?: boolean }): string {
+  if (warranty.covered) return "الكفالة سارية";
+  return warranty.repair_covered ? "كفالة إصلاح سارية" : "لا كفالة سارية";
+}
+
+/** البطاقة التي يُكتب تاريخها بجانب العنوان: السارية من نوع الحالة المذكورة، ثم أي سارية، ثم الأولى. */
+export function pickScanWarrantyCard<T extends { status: string; source?: string }>(
+  cards: readonly T[],
+  covered: boolean,
+): T | null {
+  const active = cards.filter((card) => card.status === "active");
+  if (covered) {
+    const sale = active.find((card) => card.source !== "repair");
+    if (sale) return sale;
+  }
+  return active[0] ?? cards[0] ?? null;
 }
 
 /** روابط عميقة تستهلكها الشاشتان القائمتان (`?order=` و`?card=`) — بلا مسار جديد. */

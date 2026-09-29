@@ -211,6 +211,9 @@ register(ReportSpec(
 #  3. كلفة قطع الكفالة حسب الفترة
 # ══════════════════════════════════════════════════════════════════════
 
+SOURCE_NO_CARD = "بلا بطاقة"
+
+
 def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
     """من حركات `SERVICE_ISSUE` وحدها — لا من أسعار البيع ولا من بنود الأمر.
 
@@ -218,7 +221,7 @@ def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
     الصرف، فالرقم هنا هو ما دخل الدفاتر فعلاً لا ما نُقدّره اليوم. والنوع
     `SERVICE_ISSUE` هو نفسه الذي يُبقي هذا المصروف خارج تكلفة المبيع.
     """
-    from after_sales.models import ServiceOrder
+    from after_sales.models import ServiceOrder, WarrantyCard
     from after_sales.service_orders import STOCK_REF_SERVICE_ISSUE
     from inventory.models import StockMovement
     from inventory.services import product_display_name
@@ -236,17 +239,27 @@ def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
 
     movements = list(queryset)
     # أرقام الأوامر باستعلام واحد — لا استعلام داخل الحلقة (درس التقارير).
+    order_ids = {m.reference_id for m in movements if m.reference_id}
     order_numbers = dict(
         ServiceOrder.objects
-        .filter(tenant_id=tenant_id, pk__in={m.reference_id for m in movements if m.reference_id})
+        .filter(tenant_id=tenant_id, pk__in=order_ids)
         .values_list("pk", "order_number")
     )
+    # #244: مصدر بطاقة الأمر يفصل كلفة الإصلاح عن كلفة كفالة البيع.
+    source_labels = dict(WarrantyCard.SOURCE_CHOICES)
+    sources = {
+        order_id: source_labels.get(source, source)
+        for order_id, source in ServiceOrder.objects
+        .filter(tenant_id=tenant_id, pk__in=order_ids, warranty_card__isnull=False)
+        .values_list("pk", "warranty_card__source")
+    }
 
     rows = []
     for movement in movements:
         rows.append({
             "movement_date": movement.movement_date,
             "order_number": order_numbers.get(movement.reference_id, ""),
+            "source": sources.get(movement.reference_id, SOURCE_NO_CARD),
             "product": product_display_name(movement.product) if movement.product_id else "",
             "customer": movement.partner.name if movement.partner_id else "",
             "quantity": _qty(movement.quantity),
@@ -268,6 +281,7 @@ register(ReportSpec(
     columns=(
         ReportColumn("movement_date", "التاريخ", KIND_DATE),
         ReportColumn("order_number", "أمر الصيانة", KIND_TEXT),
+        ReportColumn("source", "مصدر الكفالة", KIND_TEXT),
         ReportColumn("product", "المنتج", KIND_TEXT),
         ReportColumn("customer", "الزبون", KIND_TEXT),
         ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True),

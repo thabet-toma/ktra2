@@ -22,6 +22,8 @@ export interface ScanWarrantyCard {
   end_date: string | null;
   duration_months: number | null;
   status: "active" | "expired" | string;
+  /** #244: مصدر البطاقة — `repair` = كفالة إصلاح لا كفالة الجهاز. */
+  source?: string;
   days_remaining: number | null;
   customer_name: string;
   supplier_warranty_end_date: string | null;
@@ -62,6 +64,7 @@ export interface ScanUnitMatch {
   /** `null` حين لا تكون وحدة «ما بعد البيع» مرخَّصةً أو مصرّحاً بها. */
   warranty: {
     covered: boolean;
+    repair_covered?: boolean;
     supplier_covered: boolean;
     cards: ScanWarrantyCard[];
   } | null;

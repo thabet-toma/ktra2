@@ -1,0 +1,36 @@
+{% extends "after_sales/certificates/certificate_base.html" %}
+{% comment %}كفالة الإصلاح (#244): ورقةٌ لإصلاحٍ بعينه — رقم الأمر، ما يشمله، يوم التسليم، وحتى متى. لا طبقة تاجر ولا مصنع: تلك في بطاقة البيع.{% endcomment %}
+{% block body %}
+<div class="device-box keep">
+  <div>
+    <p class="dname"><bdi dir="ltr">{{ item.device }}</bdi></p>
+    {% if item.serial %}<span class="sn"><span class="ltr"><b>الرقم التسلسلي</b> {{ item.serial }}</span></span>{% endif %}
+    <p class="org-line who">{% if customer_name %}الكفالة باسم <b>{{ customer_name }}</b>{% endif %}{% if customer_phone %} · <span class="ltr">{{ customer_phone }}</span>{% endif %}</p>
+  </div>
+  <div>{{ item.qr }}<span class="qrcap">امسح للتحقق من حالة كفالة الإصلاح</span></div>
+</div>
+
+<div class="layers keep">
+  <div class="lrow">
+    <div class="k">كفالة إصلاح</div>
+    <div class="v">
+      <span class="dates">حتى {{ item.repair.to }}</span> · من {{ item.repair.from_ }}
+      <span class="svc">نحن نصلّح: {{ company.company_name_primary }}{% if company.address %}، {{ company.address }}{% endif %}.</span>
+    </div>
+  </div>
+  {% if item.repair.order_number %}
+  <div class="lrow">
+    <div class="k">أمر الصيانة</div>
+    <div class="v"><span class="ltr">{{ item.repair.order_number }}</span> · يوم التسليم {{ item.repair.from_ }}</div>
+  </div>
+  {% endif %}
+  {% if item.repair.scope %}
+  <div class="lrow">
+    <div class="k">ما تشمله</div>
+    <div class="v">{{ item.repair.scope }}</div>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}
+
+{% block foot %}<span>كفالة على هذا الإصلاح وحده — لا على الجهاز كله.</span><span>هذه الورقة لا تُغني عن أمر الصيانة.</span>{% endblock %}

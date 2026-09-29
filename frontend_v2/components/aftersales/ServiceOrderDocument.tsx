@@ -41,6 +41,7 @@ import {
   manufacturerWarrantyLine,
   warrantyCardLink,
   warrantyCoveredQuantityLabel,
+  warrantyRepairLine,
   warrantyShopDaysLine,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
@@ -48,6 +49,7 @@ import {
 } from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
 import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
+import { RepairWarrantyPrintBar, RepairWarrantyPrintButton } from "./RepairWarrantyPrint";
 import { useNavigate } from "react-router-dom";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -153,8 +155,9 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   }, []);
 
   const [deliveryLine, setDeliveryLine] = useState("");
-  const previewKey = order && order.warranty_card !== null && !isTerminalStatus(order.status)
-    ? `${order.id}:${order.status}:${order.warranty_covered}:${outcome}`
+  const [repairBarOpen, setRepairBarOpen] = useState(false);
+  const previewKey = order && !isTerminalStatus(order.status)
+    ? `${order.id}:${order.status}:${order.warranty_covered}:${outcome}:${order.warranty_card ?? ""}`
     : "";
 
   useEffect(() => {
@@ -164,7 +167,14 @@ export const ServiceOrderDocument: React.FC<Props> = ({
     }
     let cancelled = false;
     getServiceOrderDeliveryEffects(orderId, outcome)
-      .then((effects) => { if (!cancelled) setDeliveryLine(warrantyShopDaysLine(effects)); })
+      .then((effects) => {
+        if (cancelled) return;
+        const lines = [
+          order?.warranty_card ? warrantyShopDaysLine(effects) : "",
+          warrantyRepairLine(effects.repair_warranty),
+        ].filter(Boolean);
+        setDeliveryLine(lines.join(" · "));
+      })
       .catch(() => { if (!cancelled) setDeliveryLine(""); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -258,10 +268,14 @@ export const ServiceOrderDocument: React.FC<Props> = ({
 
   const move = (to: ServiceOrderStatus) =>
     run(
-      () => transitionServiceOrder(order.id, {
-        to_status: to,
-        outcome: to === "delivered" ? outcome : undefined,
-      }),
+      async () => {
+        const fresh = await transitionServiceOrder(order.id, {
+          to_status: to,
+          outcome: to === "delivered" ? outcome : undefined,
+        });
+        if (to === "delivered" && fresh.repair_warranty_card !== null) setRepairBarOpen(true);
+        return fresh;
+      },
       to === "delivered" ? "سُلّم الجهاز" : `الحالة الآن: ${SERVICE_STATUS_LABELS[to]}`,
     );
 
@@ -351,7 +365,18 @@ export const ServiceOrderDocument: React.FC<Props> = ({
         <span className="text-xs text-[var(--color-text-muted)]">
           استُلم {formatDateValue(order.order_date)}
         </span>
+        {canOpenCard && order.status === "delivered" && order.repair_warranty_card !== null && (
+          <RepairWarrantyPrintButton cardId={order.repair_warranty_card} />
+        )}
       </div>
+
+      {canOpenCard && repairBarOpen && order.repair_warranty_card !== null && (
+        <RepairWarrantyPrintBar
+          cardId={order.repair_warranty_card}
+          orderNumber={order.order_number}
+          onDismiss={() => setRepairBarOpen(false)}
+        />
+      )}
 
       {/* ── شريط التغطية ─────────────────────────────────────────────────── */}
       {order.warranty_status ? (

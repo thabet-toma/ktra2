@@ -122,9 +122,16 @@ class WarrantyCard(models.Model):
 
     SOURCE_AUTO_SALE = "auto_sale"
     SOURCE_MANUAL = "manual"
+    #: كفالة إصلاح (#244): تُنشأ عند تسليم أمر صيانة «أُصلح»، طبقةً واحدة هي طبقة
+    #: `start_date`/`end_date` نفسها (لا طبقة مصنع ولا فاتورة بيع). و`replacement`
+    #: محجوزٌ لاستبدال الجهاز (#245) — لا يكتبه أحدٌ بعد.
+    SOURCE_REPAIR = "repair"
+    SOURCE_REPLACEMENT = "replacement"
     SOURCE_CHOICES = [
         (SOURCE_AUTO_SALE, "تلقائية من فاتورة بيع"),
         (SOURCE_MANUAL, "يدوية"),
+        (SOURCE_REPAIR, "كفالة إصلاح"),
+        (SOURCE_REPLACEMENT, "كفالة استبدال"),
     ]
 
     #: أسباب انتهاء البطاقة. قائمةٌ مغلقة تُعَدّ في التقرير وتُقرأ في الشاشة —
@@ -213,6 +220,16 @@ class WarrantyCard(models.Model):
     source = models.CharField(
         max_length=20, choices=SOURCE_CHOICES, default=SOURCE_MANUAL,
     )
+    # ── كفالة الإصلاح (#244) ──────────────────────────────────────────────
+    # أمر الصيانة الذي وَلَّدها — مرساة فرادتها (بطاقة إصلاح واحدة لكل أمر). `PROTECT`:
+    # الأوامر لا تُحذف أصلاً، وحذفها كان سيُيتّم بطاقةً مطبوعة على مكتب الزبون.
+    origin_service_order = models.ForeignKey(
+        "ServiceOrder", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="repair_warranty_cards",
+    )
+    # نطاق ما أُصلح، مجمَّدٌ لحظة التسليم من `resolution` وأسماء القطع — لا يتبع
+    # الأمر إن تغيّر بعدها (والأمر المسلَّم مجمَّد أصلاً).
+    coverage_scope = models.CharField(max_length=500, blank=True, default="")
 
     # جانب المورد: نتتبّعه عرضاً وتأشيراً — موظف الكاونتر يرى أن القطعة ما زالت
     # بكفالة المورد فلا تتحمّل الشركة كلفةً يتحمّلها غيرها. لا مستند RMA هنا.
@@ -344,6 +361,18 @@ class WarrantyCard(models.Model):
             else self.STATUS_EXPIRED
         )
 
+    @property
+    def is_repair(self) -> bool:
+        return self.source == self.SOURCE_REPAIR
+
+    def repair_status_on(self, today: date | None = None) -> str | None:
+        """طبقة الإصلاح هي طبقة البطاقة الوحيدة (`start_date`/`end_date`) — `None` لغير بطاقات الإصلاح.
+
+        ليست عموداً ثانياً: بطاقة الإصلاح بلا طبقة مصنع، فحالتها هي `status_on` نفسها،
+        وهذه الدالة تفصل السؤال «أهذه كفالة إصلاح سارية؟» عن «أهذه كفالة تاجر سارية؟».
+        """
+        return self.status_on(today) if self.is_repair else None
+
     def supplier_active_on(self, today: date | None = None) -> bool:
         if self.ended_on is not None:
             return False
@@ -404,6 +433,7 @@ class WarrantyCardEvent(models.Model):
     TYPE_COVERAGE_REFUSED = "coverage_refused"
     TYPE_COVERAGE_RESTORED = "coverage_restored"
     TYPE_REPLACEMENT = "replacement"
+    TYPE_REPAIR_ISSUED = "repair_issued"
     TYPE_CHOICES = [
         (TYPE_VOID, "إلغاء كفالة التاجر"),
         (TYPE_UNVOID, "تراجع عن الإلغاء"),
@@ -415,6 +445,7 @@ class WarrantyCardEvent(models.Model):
         (TYPE_COVERAGE_REFUSED, "رفض الكفالة لهذا العطل"),
         (TYPE_COVERAGE_RESTORED, "استعادة الكفالة لهذا العطل"),
         (TYPE_REPLACEMENT, "استبدال الجهاز"),
+        (TYPE_REPAIR_ISSUED, "كفالة إصلاح من أمر صيانة"),
     ]
 
     #: مفردات `reason_code` للتمديد وحده — لا تُفرض بـ`choices` (انظر الشرح أعلاه).

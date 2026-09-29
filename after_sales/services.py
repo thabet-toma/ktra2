@@ -197,13 +197,51 @@ def _revive_invoice_card(card, invoice, customer, quantity: int) -> str:
     return REVIVED if reviving else KEPT
 
 
+def _live_repair_cards_by_unit(tenant_id: int, unit_ids) -> list:
+    """بطاقات الإصلاح الحيّة للوحدات، مقرونةً بـ`pk` وحدتها: `[(card, unit_pk)]`.
+
+    بطاقة الإصلاح لا تحمل مفتاح الوحدة (تُنشأ من أمر صيانةٍ يعرف الرقم التسلسلي نصّاً)،
+    فتُطابَق على (الرقم، المنتج) — الوحدة نفسها إن حمل الأمر منتجاً، وبالرقم وحده إن لم يحمل.
+    """
+    from inventory.models import ProductSerial
+
+    units = list(
+        ProductSerial.objects
+        .filter(tenant_id=tenant_id, pk__in=list(unit_ids))
+        .values_list("pk", "serial", "product_id")
+    )
+    if not units:
+        return []
+    cards = WarrantyCard.objects.filter(
+        tenant_id=tenant_id, source=WarrantyCard.SOURCE_REPAIR,
+        ended_on__isnull=True, serial__in={serial for _pk, serial, _product in units},
+    )
+    matched = []
+    for card in cards:
+        for unit_pk, serial, product_id in units:
+            if card.serial == serial and card.product_id in (None, product_id):
+                matched.append((card, unit_pk))
+                break
+    return matched
+
+
 def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
     """شفاءٌ ذاتي: بطاقةٌ تلقائية حيّة لهذه الوحدة على فاتورةٍ **أخرى** تُنهى.
 
     تُغطّي مرجعاً وقع والوحدة مطفأة، وبياناتٍ قديمة انقطعت مرساتها. البطاقة
-    **اليدوية لا تُمَسّ**: صاحبها كتبها بيده ولا علاقة لترحيلنا بها.
+    **اليدوية لا تُمَسّ**: صاحبها كتبها بيده ولا علاقة لترحيلنا بها. وكفالة
+    الإصلاح (#244) تُحَلّ محلّها إعادةُ البيع كذلك: زبونٌ جديد لا يرث إصلاح سابقه.
     """
-    ended = (
+    repair_ids = [
+        card.pk for card, _unit in _live_repair_cards_by_unit(invoice.tenant_id, unit_ids)
+    ]
+    repair_ended = (
+        WarrantyCard.objects.filter(pk__in=repair_ids).update(
+            ended_on=invoice.invoice_date, end_reason=WarrantyCard.END_SUPERSEDED,
+        )
+        if repair_ids else 0
+    )
+    ended = repair_ended + (
         WarrantyCard.objects
         .filter(
             tenant_id=invoice.tenant_id,
@@ -650,6 +688,18 @@ def on_sales_return_posted(return_invoice) -> int:
                 "after_sales.warranty_cards_returned return=%s original=%s tenant=%s cards=%d",
                 return_invoice.pk, original_id, return_invoice.tenant_id, len(cards),
             )
+        # #244: كفالة الإصلاح على الوحدة المرتجعة تنتهي معها؛ `end_return_line` هو ما يُحييها
+        # عند إلغاء ترحيل المرجع (`on_sales_return_unposted`) فلا مسار موازٍ.
+        for card, unit_pk in _live_repair_cards_by_unit(
+            return_invoice.tenant_id, list(return_line_by_unit),
+        ):
+            card.ended_on = return_invoice.invoice_date
+            card.end_reason = WarrantyCard.END_RETURNED
+            card.end_return_line_id = return_line_by_unit[unit_pk]
+            card.save(update_fields=[
+                "ended_on", "end_reason", "end_return_line", "updated_at",
+            ])
+            cards.append(card)
 
     invoice_touched = _apply_invoice_card_return(return_invoice, original_id, reverse=False)
     return len(cards) + invoice_touched
@@ -798,6 +848,11 @@ def _card_summary(card, today: date) -> dict:
         "end_date": card.end_date,
         "duration_months": card.duration_months,
         "source": card.source,
+        "source_label": card.get_source_display(),
+        "coverage_scope": card.coverage_scope,
+        "origin_order_number": (
+            card.origin_service_order.order_number if card.origin_service_order_id else ""
+        ),
         "status": card.status_on(today),
         "days_remaining": card.days_remaining(today),
         "customer_name": card.customer_name,
@@ -840,12 +895,14 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     today = today or timezone.localdate()
     serial = (serial or "").strip()
     if not serial:
-        return {"serial": "", "covered": False, "cards": [], "unit": None}
+        return {
+            "serial": "", "covered": False, "repair_covered": False, "cards": [], "unit": None,
+        }
 
     cards = list(
         WarrantyCard.objects
         .filter(tenant_id=tenant_id, serial=serial, ended_on__isnull=True)
-        .select_related("product", "manufacturer_warrantor")
+        .select_related("product", "manufacturer_warrantor", "origin_service_order")
         .order_by("-end_date", "-id")
     )
     unit = (
@@ -895,9 +952,16 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
         }
 
     summaries = [_card_summary(c, today) for c in cards]
+    repair_source = WarrantyCard.SOURCE_REPAIR
+    # #244: كفالة الإصلاح لا تجعل الجهاز «مغطّى» — صاحبها يسأل عن العطل نفسه، لا عن كفالة البيع.
     return {
         "serial": serial,
-        "covered": any(s["status"] == "active" for s in summaries),
+        "covered": any(
+            s["status"] == "active" and s["source"] != repair_source for s in summaries
+        ),
+        "repair_covered": any(
+            s["status"] == "active" and s["source"] == repair_source for s in summaries
+        ),
         "supplier_covered": any(s["supplier_warranty_active"] for s in summaries),
         "cards": summaries,
         "unit": unit_info,

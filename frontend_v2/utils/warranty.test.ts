@@ -330,6 +330,7 @@ test('#240 — لكل حكمٍ اسمٌ عربيّ ولونٌ: الأخضر لل
   const tones: Record<IntakeVerdict, string> = {
     dealer: 'green',
     referral: 'green',
+    repair: 'green',
     ended: 'grey',
     expired_paid: 'grey',
     voided_paid: 'red',
@@ -460,5 +461,70 @@ test('#243 — معاينة التسليم: بلا نهاية جديدة لا ي
   assert.equal(
     warrantyShopDaysLine({ extends: true, days: 3, new_end: null, reason: '' }),
     `ستُمدَّد كفالة التاجر ${formatNumber(3)} يوماً`,
+  );
+});
+
+import {
+  INTAKE_VERDICT_LABELS,
+  REPAIR_FAULT_CONFIRM_TEXT,
+  pickScanWarrantyCard,
+  scanWarrantyLabel,
+  warrantyRepairLine,
+  warrantySourceLabel,
+} from './warranty.ts';
+
+test('#244 — حكم الاستقبال «repair»: تسميته «كفالة إصلاح» ولونه أخضر لا رمادي', () => {
+  assert.match(intakeVerdictLabel('repair'), /كفالة إصلاح/);
+  assert.doesNotMatch(intakeVerdictLabel('repair'), /مكفول/);
+  assert.equal(intakeVerdictTone('repair'), 'green');
+  assert.ok(INTAKE_VERDICT_LABELS.repair);
+});
+
+test('#244 — تسميات المصدر تشمل الإصلاح والاستبدال، وغير المعروف يُعاد كما هو', () => {
+  assert.equal(warrantySourceLabel('repair'), 'كفالة إصلاح');
+  assert.equal(warrantySourceLabel('replacement'), 'كفالة استبدال');
+  assert.equal(warrantySourceLabel('manual'), 'يدوية');
+  assert.equal(warrantySourceLabel('auto_sale'), 'تلقائية من فاتورة بيع');
+  assert.equal(warrantySourceLabel('future_kind'), 'future_kind');
+});
+
+test('#244 — نص تأكيد العطل يطابق ما يطلبه الاستقبال', () => {
+  assert.equal(REPAIR_FAULT_CONFIRM_TEXT, 'العطل نفسه أو قطعة من هذا الإصلاح');
+});
+
+test('#244 — معاينة التسليم: كفالة الإصلاح تذكر النهاية، وعند عدمها يُعرض سبب الخادم', () => {
+  assert.equal(
+    warrantyRepairLine({ creates: true, start: '2026-10-01', end: '2026-12-30', reason: '' }),
+    `ستُنشأ كفالة إصلاح حتى ${formatDateValue('2026-12-30')}`,
+  );
+  assert.equal(
+    warrantyRepairLine({ creates: false, start: null, end: null, reason: 'كفالة التاجر أطول من كفالة الإصلاح.' }),
+    'كفالة التاجر أطول من كفالة الإصلاح.',
+  );
+  assert.equal(warrantyRepairLine(null), '');
+});
+
+test('#244 — الماسح: كفالة الإصلاح لا تُقرأ «الكفالة سارية»', () => {
+  assert.equal(scanWarrantyLabel({ covered: true, repair_covered: false }), 'الكفالة سارية');
+  assert.equal(scanWarrantyLabel({ covered: false, repair_covered: true }), 'كفالة إصلاح سارية');
+  assert.equal(scanWarrantyLabel({ covered: true, repair_covered: true }), 'الكفالة سارية');
+  assert.equal(scanWarrantyLabel({ covered: false, repair_covered: false }), 'لا كفالة سارية');
+  assert.equal(scanWarrantyLabel({ covered: false }), 'لا كفالة سارية');
+});
+
+test('#244 — الماسح: البطاقة المعروضة تطابق الحالة المذكورة لا بطاقة أخرى', () => {
+  const sale = { id: 1, status: 'active', source: 'auto_sale' };
+  const repair = { id: 2, status: 'active', source: 'repair' };
+  const dead = { id: 3, status: 'expired', source: 'manual' };
+  assert.equal(pickScanWarrantyCard([repair, sale], true)?.id, 1);
+  assert.equal(pickScanWarrantyCard([dead, repair], false)?.id, 2);
+  assert.equal(pickScanWarrantyCard([dead], false)?.id, 3);
+  assert.equal(pickScanWarrantyCard([], false), null);
+});
+
+test('#244 — كفالة الإصلاح لا تُحذف ولا تُسحب من الواجهة', () => {
+  assert.equal(
+    warrantyRemovalMode({ source: 'repair', can_delete: true, ended: false, end_reason: '' }),
+    null,
   );
 });

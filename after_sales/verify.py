@@ -148,7 +148,16 @@ def public_view_model(card, today=None) -> dict:
     company_name, logo_url = _company(card.tenant)
     is_invoice_card = card.quantity > 0 and not card.serial
     warrantor = card.manufacturer_warrantor if card.manufacturer_warrantor_id else None
+    # #244: كفالة الإصلاح تُسمّى باسمها لا «كفالة التاجر»، ومعها رقم الأمر ونطاقها — وحدهما.
+    # لا سعر ولا ملاحظات ولا نصّ شروط: القائمة البيضاء تبقى بالاسم.
+    is_repair = card.is_repair
     return {
+        "is_repair": is_repair,
+        "repair_order_number": (
+            card.origin_service_order.order_number
+            if is_repair and card.origin_service_order_id else ""
+        ),
+        "repair_scope": card.coverage_scope if is_repair else "",
         "company_name": company_name,
         "logo_url": logo_url,
         "device": _device(card),

@@ -70,11 +70,11 @@ from .services import (
     withdraw_card,
 )
 from .certificates import (
-    LAYOUT_CARD,
     LAYOUT_INVOICE,
     LAYOUT_REFERRAL,
     certificate_context,
     ensure_single_customer,
+    single_card_layout,
     render_certificate,
 )
 from .verify import qr_svg, resolve_scan, verify_url
@@ -144,6 +144,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
             .select_related(
                 "product", "partner", "supplier", "sales_invoice",
                 "sales_invoice_line__invoice", "voided_by", "void_service_order",
+                "origin_service_order",
             )
             .annotate(has_events=Exists(
                 WarrantyCardEvent.objects.filter(card=OuterRef("pk")),
@@ -417,7 +418,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         form.is_valid(raise_exception=True)
 
         queryset = self.get_queryset().select_related(
-            "sales_invoice", "manufacturer_warrantor", "partner",
+            "sales_invoice", "manufacturer_warrantor", "partner", "origin_service_order",
         )
         if "sales_invoice" in form.validated_data:
             from sales.models import SalesInvoice
@@ -436,8 +437,12 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
             found = {card.pk: card for card in queryset.filter(pk__in=ids)}
             if len(found) != len(ids):
                 raise NotFound("بطاقة الكفالة غير موجودة.")
-            layout = LAYOUT_CARD if len(ids) == 1 else LAYOUT_INVOICE
             cards = [found[pk] for pk in ids]
+            if len(ids) > 1 and any(card.is_repair for card in cards):
+                raise ValidationError({
+                    "detail": "كفالة الإصلاح تُطبع على ورقتها وحدها — لا تُضمّ إلى شهادة أجهزة.",
+                })
+            layout = single_card_layout(cards[0]) if len(ids) == 1 else LAYOUT_INVOICE
             try:
                 ensure_single_customer(cards)
             except DjangoValidationError as error:

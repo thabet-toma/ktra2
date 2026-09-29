@@ -55,10 +55,13 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     # #242: سجل الصيانات — لبطاقةٍ واحدة فقط (`with_service_history` في سياق العرض
     # من الـviewset)، فالقائمة لا تحسبه لكل صفّ ولا تحمل المفتاح أصلاً.
     service_history = serializers.SerializerMethodField()
+    # #244: كفالة الإصلاح — رقم الأمر الذي ولّدها، ونطاقها المجمَّد وقت التسليم.
+    origin_order_number = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
         fields = [
+            "origin_service_order", "origin_order_number", "coverage_scope",
             "id", "product", "product_name", "device_name", "serial",
             "product_serial", "sales_invoice_line", "sales_invoice",
             "sales_invoice_number", "partner", "partner_name", "customer_name",
@@ -77,7 +80,8 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
         # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
         # (#234) من محرّك الكفالة وحده — لا يكتبها عميلٌ لا عبر إنشاء ولا تعديل.
         read_only_fields = [
-            "source", "product_serial", "sales_invoice_line", "sales_invoice",
+            "source", "origin_service_order", "coverage_scope",
+            "product_serial", "sales_invoice_line", "sales_invoice",
             "ended_on", "end_reason", "quantity", "returned_quantity",
             "created_at", "updated_at",
         ]
@@ -115,6 +119,9 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
 
     def get_covered_quantity(self, obj):
         return obj.covered_quantity
+
+    def get_origin_order_number(self, obj):
+        return obj.origin_service_order.order_number if obj.origin_service_order_id else ""
 
     def get_verify_url(self, obj):
         from .verify import verify_url
@@ -629,12 +636,17 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
     # #241 — «إصلاح مدفوع بطلب الزبون» رغم الإحالة: الخادم يتحقّق أن الحكم `referral`
     # ويكتب التنبيه والقبول في الأمر بنفسه، والعميل لا يرسل نصاً.
     paid_despite_referral = serializers.BooleanField(write_only=True, required=False, default=False)
+    # #244 — «العطل نفسه أو قطعة من هذا الإصلاح»: شرط التغطية بكفالة الإصلاح، والخادم يفرضه.
+    repair_fault_confirmed = serializers.BooleanField(write_only=True, required=False, default=False)
+    # #244 — بطاقة كفالة الإصلاح التي أنشأها تسليم هذا الأمر (أو `None`): مرجعُ زرّ الطباعة.
+    repair_warranty_card = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceOrder
         fields = [
             "id", "order_number", "order_date",
             "invoice_piece_confirmed", "duplicate_open_reason", "paid_despite_referral",
+            "repair_fault_confirmed", "repair_warranty_card",
             "partner", "partner_name", "customer_name", "customer_phone",
             "product", "product_name", "serial", "device_description",
             "received_condition", "accessories",
@@ -669,6 +681,13 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         # بطاقة الفاتورة تغطّي قطعةً لا نعرف أنها من الفاتورة إلا بتأكيد الموظف:
         # بلا تأكيد يبقى الرابط بالبطاقة والأمر مدفوع.
         if card is not None and is_invoice_card(card) and not confirmed:
+            validated_data["warranty_covered"] = False
+        # كفالة الإصلاح تغطّي العطل نفسه لا الجهاز كلَّه: بلا تأكيدٍ، أو وهي منتهية، يبقى
+        # الرابط بالبطاقة والأمر مدفوع.
+        repair_confirmed = validated_data.pop("repair_fault_confirmed", False)
+        if card is not None and card.is_repair and not (
+            repair_confirmed and card.status_on() == card.STATUS_ACTIVE
+        ):
             validated_data["warranty_covered"] = False
         return super().create(validated_data)
 
@@ -719,6 +738,12 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             "supplier_warranty_end_date": card.supplier_warranty_end_date,
             "supplier_warranty_active": card.supplier_active_on(),
         }
+
+    def get_repair_warranty_card(self, obj):
+        return (
+            obj.repair_warranty_cards.filter(tenant_id=obj.tenant_id)
+            .order_by("-pk").values_list("pk", flat=True).first()
+        )
 
     def get_sales_invoice_number(self, obj):
         return obj.sales_invoice.invoice_number if obj.sales_invoice_id else None

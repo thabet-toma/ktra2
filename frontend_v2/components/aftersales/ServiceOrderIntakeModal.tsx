@@ -19,6 +19,7 @@ import {
   duplicateOpenOrderOf,
   duplicateReasonValid,
   INTAKE_VERDICT_TONE_CLASSES,
+  REPAIR_FAULT_CONFIRM_TEXT,
   intakeVerdictLabel,
   intakeVerdictTone,
   INVOICE_PIECE_CONFIRM_TEXT,
@@ -121,6 +122,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   const [looking, setLooking] = useState(false);
   const [selected, setSelected] = useState<IntakeResult | null>(null);
   const [pieceConfirmed, setPieceConfirmed] = useState(false);
+  const [repairConfirmed, setRepairConfirmed] = useState(false);
   // #241: مربوطٌ برقم البطاقة فيسقط تلقائياً عند اختيار بطاقةٍ أخرى أو تفريغ الاختيار.
   const [paidReferralCard, setPaidReferralCard] = useState<number | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateOpenOrder | null>(null);
@@ -150,6 +152,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     const { prefill } = result;
     setSelected(result);
     setPieceConfirmed(false);
+    setRepairConfirmed(false);
     setDraft((d) => ({
       ...d,
       partner: prefill.partner,
@@ -219,6 +222,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     markTouched();
     setSelected(null);
     setPieceConfirmed(false);
+    setRepairConfirmed(false);
     setDraft((d) => ({
       ...d,
       partner: unit.partner?.id ?? d.partner ?? null,
@@ -306,6 +310,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     setLookup(null);
     setSelected(null);
     setPieceConfirmed(false);
+    setRepairConfirmed(false);
     setSearchText("");
     setTouched(false);
     void discardDraft();
@@ -329,6 +334,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
         warranty_card: draft.warranty_card ?? null,
         // القطعة تُؤكَّد على بطاقة الفاتورة وحدها؛ والخادم يفرض ذلك عند الإنشاء.
         invoice_piece_confirmed: Boolean(selected?.prefill.requires_item_confirm && pieceConfirmed),
+        repair_fault_confirmed: Boolean(selected?.prefill.requires_repair_confirm && repairConfirmed),
         ...(paidDespiteReferral ? { paid_despite_referral: true, warranty_covered: false } : {}),
         ...(openDespiteReason ? { duplicate_open_reason: openDespiteReason.trim() } : {}),
       });
@@ -427,7 +433,9 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                         </span>
                       </div>
                       <div className="mt-1 text-[11px] text-[var(--color-text-muted)]">
-                        كفالة التاجر تنتهي {formatDateValue(dealer.end_date)} — {warrantyRemainingText(dealer.status, dealer.days_remaining)}
+                        {row.card.source === "repair" ? "كفالة إصلاح" : "كفالة التاجر"} تنتهي {formatDateValue(dealer.end_date)} — {warrantyRemainingText(dealer.status, dealer.days_remaining)}
+                        {row.card.source === "repair" && row.card.origin_order_number && ` · أمر ${row.card.origin_order_number}`}
+                        {row.card.source === "repair" && row.card.coverage_scope && ` · ${row.card.coverage_scope}`}
                         {row.card.customer_name && ` · ${row.card.customer_name}`}
                         {row.card.sales_invoice_number && ` · فاتورة ${row.card.sales_invoice_number}`}
                         {row.card.quantity > 0 && ` · المغطّى ${formatNumber(row.card.covered_quantity)} من ${formatNumber(row.card.quantity)}`}
@@ -558,6 +566,23 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                     />
                     <span>
                       {INVOICE_PIECE_CONFIRM_TEXT}
+                      <span className="block text-[11px] opacity-80">
+                        بدون هذا التأكيد يُفتح الأمر مدفوعاً وتبقى البطاقة مربوطة به.
+                      </span>
+                    </span>
+                  </label>
+                )}
+                {selected.prefill.requires_repair_confirm && (
+                  <label className="mt-2 flex items-start gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      className="mt-1"
+                      checked={repairConfirmed}
+                      onChange={(e) => setRepairConfirmed(e.target.checked)}
+                      data-testid="intake-repair-confirm"
+                    />
+                    <span>
+                      {REPAIR_FAULT_CONFIRM_TEXT}
                       <span className="block text-[11px] opacity-80">
                         بدون هذا التأكيد يُفتح الأمر مدفوعاً وتبقى البطاقة مربوطة به.
                       </span>

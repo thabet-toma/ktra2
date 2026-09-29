@@ -236,6 +236,56 @@ class AfterSalesReportsTest(APITestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(payload["totals"]["total_cost"], "0.00")
 
+    def test_warranty_cost_splits_by_the_source_of_the_linked_card(self):
+        """#244: كلفة قطع الإصلاح تُفصل عن كلفة كفالة البيع، وأمرٌ بلا بطاقة له خانته."""
+        product = Product.objects.create(tenant=self.tenant, sku="RP-SRC", name_ar="قطعة")
+        invoice = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number="RP-P2", partner=self.supplier,
+            currency=self.ils, invoice_date=self.today, exchange_rate=Decimal("1"),
+            grand_total=Decimal("400"),
+        )
+        PurchaseInvoiceItem.objects.create(
+            invoice=invoice, product=product, name="قطعة", quantity=Decimal("10"),
+            unit_price=Decimal("40"), total_price=Decimal("400"),
+        )
+        self.assertEqual(
+            self.client.post(
+                f"/api/logistics/purchase-invoices/{invoice.pk}/post-to-accounting/",
+                {}, format="json", **self.headers(),
+            ).status_code,
+            201,
+        )
+        sale_card = self.card("SRC-SALE", ends_in_days=10)
+        repair_card = self.card("SRC-REP", ends_in_days=10)
+        WarrantyCard.objects.filter(pk=repair_card.pk).update(
+            source=WarrantyCard.SOURCE_REPAIR,
+        )
+        repair_card.refresh_from_db()
+        expected = {}
+        for card, quantity in ((sale_card, "1"), (repair_card, "2"), (None, "3")):
+            order = self.order()
+            ServiceOrder.objects.filter(pk=order.pk).update(warranty_card=card)
+            self.client.post(
+                f"{ORDERS}{order.pk}/parts/",
+                {"product": product.pk, "quantity": quantity, "billing": "covered"},
+                format="json", **self.headers(),
+            )
+            posted = self.client.post(
+                f"{ORDERS}{order.pk}/post-covered/", {}, format="json", **self.headers(),
+            )
+            self.assertEqual(posted.status_code, 200, posted.content)
+            expected[order.order_number] = (
+                card.get_source_display() if card else "بلا بطاقة",
+                f"{Decimal(quantity) * 40:.2f}",
+            )
+
+        payload = self.run_spec("after-sales-warranty-cost")
+
+        got = {r["order_number"]: (r["source"], r["total_cost"]) for r in payload["rows"]}
+        self.assertEqual(got, expected)
+        self.assertEqual(len(set(source for source, _ in got.values())), 3)
+        self.assertEqual(payload["totals"]["total_cost"], "240.00")
+
     # ── العزل ──────────────────────────────────────────────────────────
     def test_every_report_is_scoped_to_the_active_company(self):
         other = create_company("شركة أخرى", self.user)
