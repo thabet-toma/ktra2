@@ -745,7 +745,7 @@ class AutoCardShorteningBypassTest(VoidTestBase):
 
 class VoidedCardListQueryCountTest(VoidTestBase):
     def voided_card(self, serial):
-        order = self.intake()
+        order = self.intake(serial=f"ORDER-{serial}")
         return self.make_card(
             serial=serial, voided_at="2026-06-16T10:00:00Z", voided_by=self.clerk,
             void_reason="liquid", void_service_order=order,
@@ -797,7 +797,10 @@ class OrderCoverageRefusedFlagTest(VoidTestBase):
 
     def test_a_refusal_on_another_order_does_not_flag_this_one(self):
         refused = self.covered_order()
-        other = self.intake(warranty_card=self.card.pk, warranty_covered=False)
+        other = self.intake(
+            warranty_card=self.card.pk, warranty_covered=False,
+            duplicate_open_reason="أمر ثانٍ لعطل مختلف",
+        )
         self.assertEqual(self.refuse(refused).status_code, 200)
 
         self.assertIs(self.flag(refused), True)

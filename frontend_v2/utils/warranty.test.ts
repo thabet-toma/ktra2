@@ -294,3 +294,83 @@ test('#238 — التلقائية والمنتهية بغير السحب بلا 
   assert.equal(warrantyRemovalMode(auto), null);
   assert.equal(warrantyRemovalMode({ ...auto, source: 'manual', ended: true, end_reason: 'returned' }), null);
 });
+
+
+// ── #240: الاستقبال الموحّد ────────────────────────────────────────────────
+import {
+  intakeVerdictLabel,
+  intakeVerdictTone,
+  phoneKeyOf,
+  type IntakeVerdict,
+} from './warranty.ts';
+
+test('#240 — مفتاح الهاتف آخر تسعة أرقام: 0599 و+970599 و00970599 مفتاحٌ واحد', () => {
+  const key = phoneKeyOf('0599123456');
+  assert.equal(key, '599123456');
+  assert.equal(phoneKeyOf('+970599123456'), key);
+  assert.equal(phoneKeyOf('00970599123456'), key);
+  assert.equal(phoneKeyOf('(059) 912-3456'), key);
+});
+
+test('#240 — الأرقام الهندية والفارسية تُحوَّل قبل أخذ آخر تسعة', () => {
+  assert.equal(phoneKeyOf('٠٥٩٩١٢٣٤٥٦'), '599123456');
+  assert.equal(phoneKeyOf('۰۵۹۹۱۲۳۴۵۶'), '599123456');
+  assert.equal(phoneKeyOf('٠٥٩٩-١٢٣٤٥٦'), phoneKeyOf('0599123456'));
+});
+
+test('#240 — أقصر من تسعة أرقام فراغٌ لا مفتاحٌ ناقص', () => {
+  assert.equal(phoneKeyOf('12345678'), '');
+  assert.equal(phoneKeyOf('١٢٣٤٥٦٧٨'), '');
+  assert.equal(phoneKeyOf(''), '');
+  assert.equal(phoneKeyOf(null), '');
+  assert.equal(phoneKeyOf('غير رقم'), '');
+});
+
+test('#240 — لكل حكمٍ اسمٌ عربيّ ولونٌ: الأخضر للتغطية والإحالة والأحمر للملغاة', () => {
+  const tones: Record<IntakeVerdict, string> = {
+    dealer: 'green',
+    referral: 'green',
+    ended: 'grey',
+    expired_paid: 'grey',
+    voided_paid: 'red',
+  };
+  for (const [verdict, tone] of Object.entries(tones)) {
+    assert.equal(intakeVerdictTone(verdict as IntakeVerdict), tone, verdict);
+    assert.notEqual(intakeVerdictLabel(verdict as IntakeVerdict), '', verdict);
+  }
+  // حكمٌ مجهول من خادمٍ أحدث لا يُلوَّن أخضر بالخطأ.
+  assert.equal(intakeVerdictTone('future' as IntakeVerdict), 'grey');
+  assert.equal(intakeVerdictLabel('future' as IntakeVerdict), '');
+});
+
+import { duplicateOpenOrderOf, duplicateReasonValid } from './warranty.ts';
+
+test('#240 — 409 التكرار يُستخرج منه الأمر القائم، وغيره من الأخطاء null', () => {
+  const existing = { id: 7, order_number: 'SO-7', status: 'received', status_display: 'مُستلَم' };
+  const duplicate = { status: 409, data: { code: 'duplicate_open_order', existing_order: existing } };
+  assert.deepEqual(duplicateOpenOrderOf(duplicate), existing);
+  assert.equal(duplicateOpenOrderOf({ status: 409, data: { code: 'other' } }), null);
+  assert.equal(duplicateOpenOrderOf({ status: 400, data: { code: 'duplicate_open_order', existing_order: existing } }), null);
+  assert.equal(duplicateOpenOrderOf(new Error('x')), null);
+  assert.equal(duplicateOpenOrderOf(null), null);
+});
+
+test('#240 — سبب الفتح المكرَّر خمسة أحرف فعلية بعد حذف الفراغ', () => {
+  assert.equal(duplicateReasonValid('    '), false);
+  assert.equal(duplicateReasonValid('عطل'), false);
+  assert.equal(duplicateReasonValid('عطلٌ آخر'), true);
+});
+
+import { looksLikeWarrantyScan } from './warranty.ts';
+
+test('#240 — رابط QR والرمز المجرّد يُحلّان بالمسح، والتسلسلي والفاتورة والهاتف لا', () => {
+  const token = 'Abc123_-Abc123_-Abc123';
+  assert.equal(token.length, 22);
+  assert.equal(looksLikeWarrantyScan(token), true);
+  assert.equal(looksLikeWarrantyScan(`https://x.example/api/w/${token}`), true);
+  assert.equal(looksLikeWarrantyScan(` https://x.example/api/w/${token}/ `), true);
+  assert.equal(looksLikeWarrantyScan('SN-12345'), false);
+  assert.equal(looksLikeWarrantyScan('0599123456'), false);
+  assert.equal(looksLikeWarrantyScan('356938035643809'), false);
+  assert.equal(looksLikeWarrantyScan(''), false);
+});

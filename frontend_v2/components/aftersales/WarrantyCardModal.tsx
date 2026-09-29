@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, Loader2, Printer, ShieldCheck, ShieldOff, Trash2, Undo2, X } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { CalendarPlus, Loader2, Printer, ShieldCheck, ShieldOff, Trash2, Undo2, Wrench, X } from "lucide-react";
 import {
   createWarrantyCard,
   deleteWarrantyCard,
@@ -37,6 +38,7 @@ import { formatNumber } from "../../utils/formatNumber";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { warrantyPillClass } from "./warrantyStatus";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
@@ -135,6 +137,9 @@ export const WarrantyCardModal: React.FC<Props> = ({
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  const navigate = useNavigate();
+  const { can } = usePermissions();
+  const canOpenOrder = can("aftersales.order.create");
 
   const [draft, setDraft] = useState<WarrantyCardDraft>(() =>
     card ? draftOf(card) : emptyDraft());
@@ -1077,6 +1082,17 @@ export const WarrantyCardModal: React.FC<Props> = ({
             <span className="ktra-status-item sm:me-auto" data-testid="draft-saved-indicator">
               مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
             </span>
+          )}
+          {card && canOpenOrder && (
+            <button
+              type="button"
+              onClick={() => navigate(`/after-sales/service-orders?card=${card.id}`)}
+              disabled={busy}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50 sm:w-44"
+              data-testid="warranty-open-service-order"
+            >
+              <Wrench className="h-4 w-4" /> افتح أمر صيانة
+            </button>
           )}
           {card && warrantyCardPrintable(card) && (
             <button

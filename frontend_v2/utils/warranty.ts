@@ -360,3 +360,76 @@ export function warrantyRemovalMode(card: {
 export function warrantyQrImageSrc(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
+
+// ── #240: الاستقبال الموحّد ────────────────────────────────────────────────
+
+/** مرآة `PHONE_KEY_LENGTH` في `after_sales/models.py` — مفتاح المطابقة آخر تسعة أرقام. */
+export const PHONE_KEY_LENGTH = 9;
+
+/**
+ * مرآة `phone_key_of` في الخادم: الأرقام الهندية والفارسية تُحوَّل إلى لاتينية،
+ * وأي رمز غير رقمي يسقط، وأقصر من تسعة أرقام يعطي فراغاً (لا يُبحث به).
+ * للعرض المسبق فقط — الحسم للخادم.
+ */
+export function phoneKeyOf(raw: string | null | undefined): string {
+  const digits = (raw || "")
+    .replace(/[\u0660-\u0669]/g, (ch) => String(ch.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, (ch) => String(ch.charCodeAt(0) - 0x06f0))
+    .replace(/\D/g, "");
+  return digits.length >= PHONE_KEY_LENGTH ? digits.slice(-PHONE_KEY_LENGTH) : "";
+}
+
+/** حكم الاستقبال كما يردّه الخادم (`intake_verdict`) — الواجهة ترسمه ولا تحسبه. */
+export type IntakeVerdict = "ended" | "dealer" | "referral" | "voided_paid" | "expired_paid";
+
+export type IntakeVerdictTone = "green" | "grey" | "red";
+
+export const INTAKE_VERDICT_LABELS: Record<IntakeVerdict, string> = {
+  dealer: "مغطى بكفالة التاجر",
+  referral: "كفالة التاجر منتهية — كفالة المصنع سارية: يُحال إلى جهة الكفالة",
+  voided_paid: "الكفالة ملغاة — الإصلاح مدفوع",
+  expired_paid: "انتهت الكفالة — الإصلاح مدفوع",
+  ended: "لم تعد الكفالة سارية (أُرجع الجهاز أو أُلغي البيع) — الإصلاح مدفوع",
+};
+
+export const intakeVerdictLabel = (verdict: IntakeVerdict): string =>
+  INTAKE_VERDICT_LABELS[verdict] ?? "";
+
+/** الأخضر مكسبٌ للزبون (تغطية أو إحالة)، والأحمر إلغاءٌ بقرار التاجر، وما عداهما رمادي. */
+export function intakeVerdictTone(verdict: IntakeVerdict): IntakeVerdictTone {
+  if (verdict === "dealer" || verdict === "referral") return "green";
+  if (verdict === "voided_paid") return "red";
+  return "grey";
+}
+
+export const INTAKE_VERDICT_TONE_CLASSES: Record<IntakeVerdictTone, string> = {
+  green: "border-emerald-300 bg-emerald-50 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-900/20 dark:text-emerald-200",
+  grey: "border-[var(--color-border)] bg-[var(--color-surface-2)] text-[var(--color-text)]",
+  red: "border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200",
+};
+
+/** نصّ تأكيد قطعة الفاتورة — يطابق ما يشترطه الخادم قبل احتساب التغطية. */
+export const INVOICE_PIECE_CONFIRM_TEXT = "تأكّدت أن القطعة من هذه الفاتورة";
+
+export interface DuplicateOpenOrder {
+  id: number;
+  order_number: string;
+  status: string;
+  status_display: string;
+}
+
+/** الأمر المفتوح الذي رفض الخادم (409 `duplicate_open_order`) الاستقبال بسببه، أو `null` لأي خطأ آخر. */
+export function duplicateOpenOrderOf(cause: unknown): DuplicateOpenOrder | null {
+  const failure = cause as { status?: number; data?: { code?: string; existing_order?: DuplicateOpenOrder } } | null;
+  if (!failure || failure.status !== 409 || failure.data?.code !== "duplicate_open_order") return null;
+  return failure.data.existing_order ?? null;
+}
+
+/** سبب الفتح رغم الأمر المفتوح: خمسة أحرف فعلية على الأقل، كسبب التراجع. */
+export const duplicateReasonValid = (reason: string): boolean => warrantyUndoReasonValid(reason);
+
+/** رابط QR ممسوح (`/api/w/<رمز>`) أو الرمز المجرّد (22 حرفاً) — يُحلّ بـ`resolve-scan` لا بالبحث. */
+export function looksLikeWarrantyScan(text: string): boolean {
+  const value = (text || "").trim();
+  return /^[A-Za-z0-9_-]{22}$/.test(value) || /\/api\/w\/[A-Za-z0-9_-]{22}\/?(?:[?#].*)?$/.test(value);
+}

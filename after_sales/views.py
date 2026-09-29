@@ -15,7 +15,7 @@ from django.utils import timezone
 from rest_framework import status as http_status
 from rest_framework import viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import NotFound, ValidationError
+from rest_framework.exceptions import APIException, NotFound, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -923,6 +923,27 @@ def _reraise_as_drf(error: DjangoValidationError):
     raise ValidationError(detail or str(error))
 
 
+class DuplicateOpenOrder(APIException):
+    """409 يحمل الأمر القائم كما هو (لا نصوصاً) — الواجهة تعرضه وتسأل عن السبب."""
+
+    status_code = http_status.HTTP_409_CONFLICT
+    default_code = "duplicate_open_order"
+
+    def __init__(self, order):
+        message = f"يوجد أمر صيانة مفتوح لهذه الوحدة: {order.order_number}"
+        super().__init__(message, code=self.default_code)
+        self.detail = {
+            "detail": message,
+            "code": self.default_code,
+            "existing_order": {
+                "id": order.pk,
+                "order_number": order.order_number,
+                "status": order.status,
+                "status_display": order.get_status_display(),
+            },
+        }
+
+
 class ServiceOrderViewSet(viewsets.ModelViewSet):
     """أمر الصيانة — الملف الذي يوثّق كل شيء من الشكوى حتى الحل.
 
@@ -939,6 +960,9 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         super().initial(request, *args, **kwargs)
         self.tenant = require_module(request, MODULE_KEY)
         required = _ORDER_ACTION_PERMS.get(self.action)
+        # مُنشئ الأمر يبحث قبل أن يُنشئ — من يملك الإنشاء يملك بحث الاستقبال.
+        if self.action == "lookup" and user_has_perm(request.user, self.tenant, ORDER_PERM_CREATE):
+            required = None
         if required:
             require_perm(request, required, tenant=self.tenant)
 
@@ -1003,9 +1027,20 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
                 raise ValidationError({field: "هذا السجل لا يتبع الشركة النشطة."})
 
     def perform_create(self, serializer):
-        from .service_orders import log_event, next_service_order_number
+        from .service_orders import (
+            find_duplicate_open_order,
+            log_event,
+            next_service_order_number,
+        )
 
         self._validate_tenant_links(serializer)
+        data = serializer.validated_data
+        existing = find_duplicate_open_order(
+            self.tenant.pk, card=data.get("warranty_card"), serial=data.get("serial") or "",
+        )
+        duplicate_reason = (data.get("duplicate_open_reason") or "").strip()
+        if existing is not None and not duplicate_reason:
+            raise DuplicateOpenOrder(existing)
         order = serializer.save(
             tenant=self.tenant,
             order_number=next_service_order_number(self.tenant.pk),
@@ -1020,6 +1055,12 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             to_status=order.status,
             user=self.request.user,
         )
+        if existing is not None:
+            log_event(
+                order,
+                text=f"فُتح رغم وجود الأمر المفتوح {existing.order_number} — السبب: {duplicate_reason}",
+                user=self.request.user,
+            )
 
     def perform_update(self, serializer):
         order = serializer.instance
@@ -1262,8 +1303,15 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="lookup")
     def lookup(self, request):
         """بحث الاستقبال بمعرّف واحد في ثلاثة مصادر — بلا مفتاح أجنبي بينها."""
-        from .service_orders import intake_lookup
+        from .service_orders import intake_card_lookup, intake_lookup
 
+        params = request.query_params
+        if "card" in params:
+            card_id = params.get("card") or ""
+            found = intake_card_lookup(self.tenant, int(card_id)) if card_id.isdigit() else None
+            if found is None:
+                raise NotFound()
+            return Response(found)
         return Response(
-            intake_lookup(self.tenant, request.query_params.get("serial") or "")
+            intake_lookup(self.tenant, params.get("q") or params.get("serial") or "")
         )

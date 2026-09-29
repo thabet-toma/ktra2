@@ -20,7 +20,7 @@ import {
   type PagedList,
 } from "./restApi";
 import { resolveTenantId } from "../utils/tenantContext";
-import type { WarrantySource, WarrantyStatus } from "../utils/warranty";
+import type { IntakeVerdict, WarrantySource, WarrantyStatus } from "../utils/warranty";
 
 const BASE = "after-sales/warranties/";
 
@@ -345,6 +345,14 @@ export function shortenWarrantyCard(
 export function checkWarrantyBySerial(serial: string): Promise<WarrantyCoverage> {
   return apiGetObject<WarrantyCoverage>(
     `${BASE}check/?serial=${encodeURIComponent(serial)}`,
+    tenantOpts(),
+  );
+}
+
+/** #240: يحلّ رابطاً ممسوحاً أو رمزاً مجرّداً إلى بطاقة هذه الشركة (404 إن لم توجد). */
+export function resolveWarrantyScan(text: string): Promise<WarrantyCardRow> {
+  return apiGetObject<WarrantyCardRow>(
+    `${BASE}resolve-scan/?q=${encodeURIComponent(text)}`,
     tenantOpts(),
   );
 }
@@ -760,6 +768,10 @@ export interface ServiceOrderDraft {
   estimated_amount: string | null;
   billing_waived_reason: string;
   notes: string;
+  /** #240: «تأكّدت أن القطعة من هذه الفاتورة» — شرط التغطية على بطاقة الفاتورة (يفرضه الخادم). */
+  invoice_piece_confirmed: boolean;
+  /** #240: سبب فتح أمرٍ ثانٍ رغم وجود أمرٍ مفتوح — بلا سبب يردّ الخادم 409. */
+  duplicate_open_reason: string;
 }
 
 export interface ServiceOrderListFilters {
@@ -784,18 +796,103 @@ export interface IntakeSensitiveDevice {
   registered_at: string;
 }
 
+export interface IntakeOpenOrder {
+  id: number;
+  order_number: string;
+  order_date: string;
+  status: ServiceOrderStatus;
+  status_display: string;
+  complaint: string;
+}
+
+/** طبقة كفالة على صف البحث — التاجر أو المصنع. */
+export interface IntakeLayer {
+  start_date: string;
+  end_date: string;
+  status: WarrantyStatus;
+  days_remaining: number;
+}
+
+/** ما يُعبَّأ في نموذج الأمر — يردّه الخادم جاهزاً؛ `sales_invoice` غائبٌ عمداً. */
+export interface IntakePrefill {
+  partner: number | null;
+  customer_name: string;
+  customer_phone: string;
+  product: number | null;
+  serial: string;
+  device_description: string;
+  warranty_card: number;
+  warranty_covered: boolean;
+  requires_item_confirm: boolean;
+}
+
+export interface IntakeCardRow {
+  id: number;
+  device_name: string;
+  serial: string;
+  product: number | null;
+  quantity: number;
+  returned_quantity: number;
+  covered_quantity: number;
+  partner: { id: number; name: string } | null;
+  customer_name: string;
+  customer_phone: string;
+  sales_invoice_number: string;
+  sale_date: string;
+  dealer: IntakeLayer;
+  manufacturer: (Omit<IntakeLayer, "status" | "days_remaining"> & {
+    warrantor: string;
+    status: WarrantyStatus | null;
+    days_remaining: number | null;
+  }) | null;
+  void: {
+    reason: string;
+    reason_label: string;
+    voided_at: string;
+    service_order_number: string;
+  } | null;
+  ended: {
+    ended_on: string;
+    end_reason: string;
+    end_reason_label: string;
+    document_number: string;
+  } | null;
+}
+
+export type IntakeMatchKind = "serial" | "invoice" | "phone" | "card";
+
+export interface IntakeResult {
+  card: IntakeCardRow;
+  verdict: IntakeVerdict;
+  matched_on: IntakeMatchKind;
+  open_orders: IntakeOpenOrder[];
+  /** الخادم يحسبه بقاعدة الإنشاء نفسها — ما يُعرض هنا هو ما سيُرفض هناك. */
+  duplicate_blocked: boolean;
+  prefill: IntakePrefill;
+}
+
+/** وحدة بعناها ولا بطاقة كفالة لها — تُعرض بدل «غير موجود». */
+export interface IntakeUnitWithoutCard {
+  id: number;
+  serial: string;
+  product: number | null;
+  product_name: string;
+  invoice_number: string;
+  sale_date: string | null;
+  partner: { id: number; name: string } | null;
+}
+
 export interface IntakeLookup {
   term: string;
+  /** المفتاح القديم — يبقى لمن يقرؤه؛ الاستقبال يقرأ `results`. */
   warranty: WarrantyCoverage;
   sensitive_devices: IntakeSensitiveDevice[];
-  open_orders: {
-    id: number;
-    order_number: string;
-    order_date: string;
-    status: ServiceOrderStatus;
-    status_display: string;
-    complaint: string;
-  }[];
+  open_orders: IntakeOpenOrder[];
+  results: IntakeResult[];
+  units_without_card: IntakeUnitWithoutCard[];
+  matched_on: IntakeMatchKind[];
+  truncated: boolean;
+  message: string;
 }
 
 export function listServiceOrders(
@@ -935,10 +1032,15 @@ export async function detachServiceInvoice(id: number): Promise<ServiceOrderDeta
   return res.order;
 }
 
-/** بحث الاستقبال بمعرّف واحد (تسلسلي/IMEI) في ثلاثة مصادر. */
-export function lookupIntake(serial: string): Promise<IntakeLookup> {
+/** بحث الاستقبال بنصٍّ واحد — تسلسلي/IMEI أو رقم فاتورة أو هاتف (مطابقة تامّة). */
+export function lookupIntake(term: string): Promise<IntakeLookup> {
   return apiGetObject<IntakeLookup>(
-    `${ORDERS}lookup/?serial=${encodeURIComponent(serial)}`,
+    `${ORDERS}lookup/?q=${encodeURIComponent(term)}`,
     tenantOpts(),
   );
+}
+
+/** سطرُ بطاقةٍ بعينها بحكمها وتعبئتها — بمعرّفها لا بإعادة اشتقاق مصطلح بحث. */
+export function lookupIntakeCard(cardId: number): Promise<IntakeLookup> {
+  return apiGetObject<IntakeLookup>(`${ORDERS}lookup/?card=${cardId}`, tenantOpts());
 }

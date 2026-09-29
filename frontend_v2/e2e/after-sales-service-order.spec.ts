@@ -75,6 +75,27 @@ const COVERAGE = {
   },
 };
 
+/** سطر الاستقبال كما يردّه `lookup/` (#240): البطاقة + الحكم + التعبئة الجاهزة. */
+const INTAKE_ROW = {
+  card: {
+    id: 1, device_name: "جهاز لوحي", serial: "SN-9", product: 7,
+    quantity: 0, returned_quantity: 0, covered_quantity: 0,
+    partner: { id: 3, name: "زبون تجريبي" }, customer_name: "زبون تجريبي",
+    customer_phone: "0599123456", sales_invoice_number: "SI-9", sale_date: "2026-08-01",
+    dealer: { start_date: "2026-08-01", end_date: "2027-08-01", status: "active", days_remaining: 300 },
+    manufacturer: null, void: null, ended: null,
+  },
+  verdict: "dealer",
+  matched_on: "serial",
+  open_orders: [],
+  duplicate_blocked: false,
+  prefill: {
+    partner: 3, customer_name: "زبون تجريبي", customer_phone: "0599123456", product: 7,
+    serial: "SN-9", device_description: "جهاز لوحي", warranty_card: 1,
+    warranty_covered: true, requires_item_confirm: false,
+  },
+};
+
 interface MockPart {
   id: number;
   product: number;
@@ -224,7 +245,9 @@ async function mockServer(page: Page): Promise<{ orders: MockOrder[] }> {
       const byId = (id: string) => orders.find((o) => String(o.id) === id);
 
       if (tail.startsWith("lookup/")) {
-        const term = url.searchParams.get("serial") || "";
+        const byCard = url.searchParams.get("card");
+        const term = url.searchParams.get("q") || "";
+        const hit = byCard === "1" || term === "SN-9";
         return json({
           term,
           warranty: term === "SN-9"
@@ -232,6 +255,11 @@ async function mockServer(page: Page): Promise<{ orders: MockOrder[] }> {
             : { serial: term, covered: false, cards: [], unit: null },
           sensitive_devices: [],
           open_orders: [],
+          results: hit ? [{ ...INTAKE_ROW, matched_on: byCard ? "card" : "serial" }] : [],
+          units_without_card: [],
+          matched_on: hit ? [byCard ? "card" : "serial"] : [],
+          truncated: false,
+          message: "",
         });
       }
 
@@ -360,11 +388,12 @@ test("رحلة كاملة: استقبال بتغطية ← إصلاح ← قطع
   await page.getByTestId("open-intake").click();
   const intake = page.getByTestId("service-order-intake");
   await expect(intake).toBeVisible();
-  await intake.getByLabel(/الرقم التسلسلي أو IMEI/).fill("SN-9");
-  await expect(intake.getByTestId("intake-lookup-results")).toContainText("بطاقة كفالة تنتهي");
-  await expect(intake.getByTestId("intake-lookup-results")).toContainText("بيعت بفاتورة SI-9");
+  await intake.getByLabel(/رقم تسلسلي أو IMEI/).fill("SN-9");
+  await expect(intake.getByTestId("intake-lookup-results")).toContainText("كفالة التاجر تنتهي");
+  await expect(intake.getByTestId("intake-lookup-results")).toContainText("فاتورة SI-9");
+  await expect(intake.getByTestId("intake-result-verdict")).toHaveAttribute("data-verdict", "dealer");
 
-  await intake.getByRole("button", { name: "تعبئة من الوحدة" }).click();
+  await intake.getByRole("button", { name: "استقبال على هذه البطاقة" }).click();
   await intake.getByLabel("شكوى الزبون (بكلماته)").fill("لا يشحن");
   await intake.getByRole("button", { name: "فتح أمر الصيانة" }).click();
 

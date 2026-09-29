@@ -44,6 +44,31 @@ def _days_in_month(year: int, month: int) -> int:
     return calendar.monthrange(year, month)[1]
 
 
+PHONE_KEY_LENGTH = 9
+_DIGIT_TABLE = str.maketrans("٠١٢٣٤٥٦٧٨٩۰۱۲۳۴۵۶۷۸۹", "01234567890123456789")
+
+
+def phone_digits(text: str | None) -> str:
+    """أرقام النص بعد تحويل الهندية والفارسية إلى لاتينية — بلا أي رمز آخر."""
+    return "".join(ch for ch in (text or "").translate(_DIGIT_TABLE) if ch.isdigit() and ch.isascii())
+
+
+def looks_like_phone(text: str | None) -> bool:
+    """أرقامٌ وفراغٌ وشرطاتٌ وأقواس وعلامة `+` أولاً — وإلا فهو رقم تسلسلي أو فاتورة."""
+    import re
+
+    return bool(re.fullmatch(r"\+?[\d\s\-()]+", (text or "").translate(_DIGIT_TABLE).strip()))
+
+
+def phone_key_of(text: str | None) -> str:
+    """آخر تسعة أرقام من الهاتف — مفتاح مطابقة واحد لـ0599… و+970599… و00970599….
+
+    أقصر من تسعة أرقام يعطي فارغاً: لا يُبحث به ولا يُفهرَس (الرقم الناقص يطابق كثيراً).
+    """
+    digits = phone_digits(text)
+    return digits[-PHONE_KEY_LENGTH:] if len(digits) >= PHONE_KEY_LENGTH else ""
+
+
 class WarrantyCardQuerySet(models.QuerySet):
     """كل فلترة على `end_date` تمرّ من هنا — لا مقارنة حرّة في مكان آخر (#229).
 
@@ -177,6 +202,9 @@ class WarrantyCard(models.Model):
     # لقطة الاسم والهاتف: الطرف قد يُحذف أو يتغيّر اسمه، والبطاقة وثيقة لحظتها.
     customer_name = models.CharField(max_length=150, blank=True, default="")
     customer_phone = models.CharField(max_length=32, blank=True, default="")
+    # #240: آخر تسعة أرقام من `customer_phone` (`phone_key_of`) — مفتاح بحث الاستقبال.
+    # يُملأ في `save()` وعند `bulk_create` صراحةً؛ لا يُكتب من الخارج.
+    phone_key = models.CharField(max_length=PHONE_KEY_LENGTH, blank=True, default="", editable=False)
 
     start_date = models.DateField()
     duration_months = models.PositiveSmallIntegerField(default=0)
@@ -276,11 +304,19 @@ class WarrantyCard(models.Model):
         indexes = [
             models.Index(fields=["tenant", "serial"], name="warranty_tenant_serial_idx"),
             models.Index(fields=["tenant", "end_date"], name="warranty_tenant_end_idx"),
+            models.Index(fields=["tenant", "phone_key"], name="warranty_tenant_phone_idx"),
         ]
         ordering = ["-end_date", "-id"]
 
     def __str__(self):
         return f"{self.serial or self.device_name or '—'} → {self.end_date}"
+
+    def save(self, *args, **kwargs):
+        self.phone_key = phone_key_of(self.customer_phone)
+        update_fields = kwargs.get("update_fields")
+        if update_fields is not None and "customer_phone" in update_fields:
+            kwargs["update_fields"] = {*update_fields, "phone_key"}
+        super().save(*args, **kwargs)
 
     # ── الحالة مشتقّة، لا مخزّنة ──────────────────────────────────────────
     def is_active_on(self, today: date | None = None) -> bool:

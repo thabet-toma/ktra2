@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Wrench,
 } from "lucide-react";
@@ -77,6 +78,26 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
 
   const [openId, setOpenId] = useState<number | null>(null);
   const [intakeOpen, setIntakeOpen] = useState(false);
+  const [intakeSeed, setIntakeSeed] = useState<{ cardId: number | null; serial: string }>({
+    cardId: null, serial: "",
+  });
+
+  // #240: روابط عميقة داخل الشاشة نفسها — `?card=<id>` و`?serial=<نص>` يفتحان الاستقبال،
+  // و`?order=<id>` يفتح الأمر. تُستهلك مرّةً وتُمحى كي لا يعيد تحديثُ الصفحة فتحَها.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const cardId = Number(searchParams.get("card")) || null;
+    const serial = (searchParams.get("serial") || "").trim();
+    const orderId = Number(searchParams.get("order")) || null;
+    if (!cardId && !serial && !orderId) return;
+    if (orderId) {
+      setOpenId(orderId);
+    } else if (canCreate) {
+      setIntakeSeed({ cardId, serial });
+      setIntakeOpen(true);
+    }
+    setSearchParams({}, { replace: true });
+  }, [searchParams, setSearchParams, canCreate]);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -145,7 +166,7 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
         {canCreate && (
           <button
             type="button"
-            onClick={() => setIntakeOpen(true)}
+            onClick={() => { setIntakeSeed({ cardId: null, serial: "" }); setIntakeOpen(true); }}
             className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-bold text-white"
             data-testid="open-intake"
           >
@@ -332,8 +353,11 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
         <ServiceOrderIntakeModal
           products={products}
           customers={customers}
+          initialCardId={intakeSeed.cardId}
+          initialSerial={intakeSeed.serial}
           onClose={() => setIntakeOpen(false)}
           onCreated={(order) => { setIntakeOpen(false); setOpenId(order.id); }}
+          onOpenOrder={(id) => { setIntakeOpen(false); setOpenId(id); }}
         />
       )}
     </div>

@@ -27,7 +27,16 @@ from core.modules import module_enabled
 from inventory.serials import assert_issue_serials_declared, issue_serials, unissue_serials
 from inventory.services import product_display_name, record_stock_movement
 
-from .models import ServiceOrder, ServiceOrderEvent, ServiceOrderPart, WarrantyCard
+from .models import (
+    PHONE_KEY_LENGTH,
+    ServiceOrder,
+    ServiceOrderEvent,
+    ServiceOrderPart,
+    WarrantyCard,
+    looks_like_phone,
+    phone_digits,
+    phone_key_of,
+)
 from .services import MODULE_KEY, get_or_create_after_sales_settings, warranty_coverage
 
 logger = logging.getLogger(__name__)
@@ -695,27 +704,394 @@ def detach_service_invoice(order: ServiceOrder, *, user=None) -> dict:
 # الاستقبال — البحث الموحّد بمعرّف واحد
 # ══════════════════════════════════════════════════════════════════════════
 
-def intake_lookup(tenant, term: str) -> dict:
-    """«ما الذي نعرفه عن هذا الرقم؟» — من ثلاثة مصادر بلا مفتاح أجنبي بينها.
+VERDICT_ENDED = "ended"
+VERDICT_DEALER = "dealer"
+# #244 (إصلاح مدفوع بكفالة إصلاح) يضيف حكمه هنا — بين `dealer` و`referral`.
+VERDICT_REFERRAL = "referral"
+VERDICT_VOIDED_PAID = "voided_paid"
+VERDICT_EXPIRED_PAID = "expired_paid"
 
-    الرابط معرّفٌ نصي (تسلسلي/IMEI) لا FK: سجل الأجهزة الحساسة وحدة مرخّصة
+MATCH_SERIAL = "serial"
+MATCH_INVOICE = "invoice"
+MATCH_PHONE = "phone"
+
+LOOKUP_SERIAL_CAP = 5
+LOOKUP_INVOICE_CAP = 50
+LOOKUP_PHONE_CAP = 20
+LOOKUP_UNITS_CAP = 20
+LOOKUP_ROW_ORDERS_CAP = 5
+# رقمٌ أطول (IMEI = 15) ليس هاتفاً: لا يُبحث بآخر تسعة أرقامه.
+MAX_PHONE_DIGITS = 14
+SHORT_PHONE_MESSAGE = "اكتب الرقم كاملاً"
+
+
+def is_invoice_card(card) -> bool:
+    return card.product_serial_id is None and card.quantity > 0
+
+
+def intake_verdict(card, today) -> str:
+    """الحكم الوحيد للاستقبال — الواجهة ترسم ما يردّه هنا ولا تحسب شيئاً.
+
+    الترتيب هو المواصفة: المنتهية بواقعة تغلب كل شيء، ثم كفالة التاجر السارية
+    (وعلى بطاقة الفاتورة: بقيت قطعٌ مكفولة)، ثم إحالة المصنع، ثم الملغاة، ثم المنتهية.
+    """
+    status = card.status_on(today)
+    if status == WarrantyCard.STATUS_ENDED:
+        return VERDICT_ENDED
+    if status == WarrantyCard.STATUS_ACTIVE and (
+        not is_invoice_card(card) or card.covered_quantity > 0
+    ):
+        return VERDICT_DEALER
+    if card.manufacturer_status_on(today) == WarrantyCard.STATUS_ACTIVE:
+        return VERDICT_REFERRAL
+    if status == WarrantyCard.STATUS_VOIDED:
+        return VERDICT_VOIDED_PAID
+    return VERDICT_EXPIRED_PAID
+
+
+def _order_matches(order, card, serial: str) -> bool:
+    if card is not None and order.warranty_card_id == card.pk:
+        return True
+    if card is not None and is_invoice_card(card):
+        return False
+    return bool(serial) and order.serial == serial
+
+
+def _blocking_order(card, orders):
+    """الأمر الذي يمنع فتح آخر — القاعدة نفسها للبحث وللإنشاء.
+
+    وحدةٌ مُرقَّمة: أيُّ أمرٍ مفتوح. بطاقة فاتورة: لا يُمنع إلا حين تبلغ الأوامر
+    المفتوحة عددَ القطع المكفولة (`covered_quantity`).
+    """
+    if not orders:
+        return None
+    if card is not None and is_invoice_card(card):
+        if card.covered_quantity > 0 and len(orders) >= card.covered_quantity:
+            return orders[0]
+        return None
+    return orders[0]
+
+
+def find_duplicate_open_order(tenant_id: int, *, card, serial: str):
+    """أمرٌ مفتوح (غير مسلَّم ولا ملغى) يمنع أمراً جديداً على البطاقة أو الرقم."""
+    from django.db.models import Q
+
+    serial = (serial or "").strip()
+    condition = Q()
+    if card is not None:
+        condition |= Q(warranty_card=card)
+    if serial:
+        condition |= Q(serial=serial)
+    if not condition:
+        return None
+    orders = [
+        order for order in ServiceOrder.objects
+        .filter(tenant_id=tenant_id).exclude(status__in=TERMINAL_STATUSES)
+        .filter(condition).order_by("-id")
+        if _order_matches(order, card, serial)
+    ]
+    return _blocking_order(card, orders)
+
+
+def _order_summary(order) -> dict:
+    return {
+        "id": order.pk,
+        "order_number": order.order_number,
+        "order_date": order.order_date,
+        "status": order.status,
+        "status_display": order.get_status_display(),
+        "complaint": order.complaint[:200],
+    }
+
+
+def _intake_prefill(card, verdict: str) -> dict:
+    """ما يُعبَّأ في نموذج الأمر. `sales_invoice` لا يُعبَّأ أبداً: أمر الصيانة لا يحمل
+    فاتورة بيع، والبطاقة (`warranty_card`) هي الرابط. والمنتهية لا تُعبّئ الزبون —
+    الشهادة لم تعد له."""
+    ended = verdict == VERDICT_ENDED
+    partner = None if ended or not card.partner_id else card.partner
+    if ended:
+        name, phone = "", ""
+    else:
+        name = partner.name if partner else card.customer_name
+        phone = (partner.phone if partner and partner.phone else card.customer_phone) or ""
+    return {
+        "partner": partner.pk if partner else None,
+        "customer_name": name,
+        "customer_phone": phone,
+        "product": card.product_id,
+        "serial": card.serial,
+        "device_description": card.device_name,
+        "warranty_card": card.pk,
+        "warranty_covered": verdict == VERDICT_DEALER,
+        "requires_item_confirm": is_invoice_card(card),
+    }
+
+
+def _intake_card_row(card, today, verdict: str) -> dict:
+    invoice = card.sales_invoice if card.sales_invoice_id else None
+    manufacturer = None
+    if card.manufacturer_warrantor_id:
+        manufacturer = {
+            "warrantor": card.manufacturer_warrantor.name,
+            "start_date": card.manufacturer_start_date,
+            "end_date": card.manufacturer_end_date,
+            "status": card.manufacturer_status_on(today),
+            "days_remaining": card.manufacturer_days_remaining(today),
+        }
+    void = None
+    if card.voided_at is not None:
+        void = {
+            "reason": card.void_reason,
+            "reason_label": card.get_void_reason_display(),
+            "voided_at": card.voided_at,
+            "service_order_number": (
+                card.void_service_order.order_number if card.void_service_order_id else ""
+            ),
+        }
+    ended = None
+    if card.ended_on is not None:
+        line = card.end_return_line if card.end_return_line_id else None
+        ended = {
+            "ended_on": card.ended_on,
+            "end_reason": card.end_reason,
+            "end_reason_label": card.get_end_reason_display(),
+            "document_number": (
+                line.invoice.invoice_number if line and line.invoice_id else ""
+            ),
+        }
+    return {
+        "id": card.pk,
+        "device_name": card.device_name,
+        "serial": card.serial,
+        "product": card.product_id,
+        "quantity": card.quantity,
+        "returned_quantity": card.returned_quantity,
+        "covered_quantity": card.covered_quantity,
+        "partner": (
+            {"id": card.partner_id, "name": card.partner.name} if card.partner_id else None
+        ),
+        "customer_name": card.customer_name,
+        "customer_phone": card.customer_phone,
+        "sales_invoice_number": invoice.invoice_number if invoice else "",
+        "sale_date": invoice.invoice_date if invoice else card.start_date,
+        "dealer": {
+            "start_date": card.start_date,
+            "end_date": card.end_date,
+            "status": card.status_on(today),
+            "days_remaining": card.days_remaining(today),
+        },
+        "manufacturer": manufacturer,
+        "void": void,
+        "ended": ended,
+    }
+
+
+def _latest_per_unit(cards, cap: int) -> list:
+    """أحدث بطاقة لكل وحدة (منتج + رقم)، وبطاقةُ الفاتورة وحدةٌ بذاتها."""
+    seen, picked = set(), []
+    for card in cards:
+        key = (card.product_id, card.serial) if card.serial else ("card", card.pk)
+        if key in seen:
+            continue
+        seen.add(key)
+        picked.append(card)
+        if len(picked) >= cap:
+            break
+    return picked
+
+
+def _units_without_card(tenant_id: int, *, serial: str, invoice_ids, partner_ids) -> list:
+    """وحداتٌ بعناها ولا بطاقة لها — يراها الاستقبال بدل «غير موجود» (منتجٌ بلا سياسة)."""
+    from django.db.models import Q
+
+    from inventory.models import ProductSerial
+
+    condition = Q()
+    if serial:
+        condition |= Q(serial=serial)
+    if invoice_ids:
+        condition |= Q(sales_line__invoice_id__in=invoice_ids)
+    if partner_ids:
+        condition |= Q(sales_line__invoice__customer_id__in=partner_ids)
+    if not condition:
+        return []
+    units = (
+        ProductSerial.objects
+        .filter(tenant_id=tenant_id, status=ProductSerial.STATUS_SOLD, warranty_cards__isnull=True)
+        .filter(condition)
+        .select_related("product", "sales_line__invoice__customer")
+        .order_by("-id")[:LOOKUP_UNITS_CAP]
+    )
+    rows = []
+    for unit in units:
+        invoice = unit.sales_line.invoice if unit.sales_line_id and unit.sales_line.invoice_id else None
+        customer = invoice.customer if invoice and invoice.customer_id else None
+        rows.append({
+            "id": unit.pk,
+            "serial": unit.serial,
+            "product": unit.product_id,
+            "product_name": product_display_name(unit.product),
+            "invoice_number": invoice.invoice_number if invoice else "",
+            "sale_date": invoice.invoice_date if invoice else None,
+            "partner": {"id": customer.pk, "name": customer.name} if customer else None,
+        })
+    return rows
+
+
+MATCH_CARD = "card"
+
+
+def _intake_cards(tenant_id: int):
+    return WarrantyCard.objects.filter(tenant_id=tenant_id).select_related(
+        "product", "partner", "sales_invoice", "manufacturer_warrantor",
+        "void_service_order", "end_return_line__invoice",
+    )
+
+
+def _intake_rows(tenant_id: int, matches, today) -> list[dict]:
+    """سطر الاستقبال لكل (بطاقة، سبب) — الطريق الوحيد لبنائه، بحثاً كان أم بمعرّف."""
+    from django.db.models import Q
+
+    cards = [card for card, _kind in matches]
+    open_all = []
+    if cards:
+        condition = Q(warranty_card_id__in=[card.pk for card in cards])
+        serials = {card.serial for card in cards if card.serial and not is_invoice_card(card)}
+        if serials:
+            condition |= Q(serial__in=serials)
+        open_all = list(
+            ServiceOrder.objects.filter(tenant_id=tenant_id)
+            .exclude(status__in=TERMINAL_STATUSES).filter(condition)
+            .order_by("-order_date", "-id")
+        )
+    rows = []
+    for card, kind in matches:
+        verdict = intake_verdict(card, today)
+        mine = [order for order in open_all if _order_matches(order, card, card.serial)]
+        rows.append({
+            "card": _intake_card_row(card, today, verdict),
+            "verdict": verdict,
+            "matched_on": kind,
+            "open_orders": [_order_summary(order) for order in mine[:LOOKUP_ROW_ORDERS_CAP]],
+            "duplicate_blocked": _blocking_order(card, mine) is not None,
+            "prefill": _intake_prefill(card, verdict),
+        })
+    return rows
+
+
+def _empty_lookup(tenant_id: int, term: str) -> dict:
+    return {
+        "term": term,
+        "warranty": warranty_coverage(tenant_id, term),
+        "sensitive_devices": [],
+        "open_orders": [],
+        "results": [],
+        "units_without_card": [],
+        "matched_on": [],
+        "truncated": False,
+        "message": "",
+    }
+
+
+def intake_card_lookup(tenant, card_id) -> dict | None:
+    """سطرٌ واحد لبطاقةٍ بعينها (الرابط العميق ومسح QR وزرّ «افتح أمر صيانة»).
+
+    «أحدث بطاقة لكل وحدة» قاعدةُ **البحث**؛ معرّفٌ صريح يعني هذه البطاقة نفسها
+    ولو سبقتها أحدث منها أو خلت من رقمٍ وفاتورة وهاتف. `None` ⇐ ليست في هذه الشركة.
+    """
+    tenant_id = getattr(tenant, "pk", tenant)
+    card = _intake_cards(tenant_id).filter(pk=card_id).first()
+    if card is None:
+        return None
+    result = _empty_lookup(tenant_id, "")
+    result["results"] = _intake_rows(tenant_id, [(card, MATCH_CARD)], timezone.localdate())
+    result["matched_on"] = [MATCH_CARD]
+    return result
+
+
+def _intake_matches(tenant_id: int, term: str):
+    """(البطاقات المطابقة مع سبب كلٍّ، معرّفات الفواتير المطابقة، مقتطع؟، رسالة).
+
+    مطابقة **تامّة** فقط — لا LIKE ولا icontains: بحثٌ بجزء رقمٍ يُظهر بطاقات
+    زبائن لا علاقة لهم ولا يخدم أحداً. رقم الفاتورة `iexact` (كتابة الكاشير تختلف
+    بالحالة) وهو مطابقةٌ تامّة تُهرَّب فيها `%` و`_`.
+    """
+    from sales.models import SalesInvoice
+
+    base = _intake_cards(tenant_id)
+    found: dict[int, tuple] = {}
+
+    def add(cards, kind):
+        for card in cards:
+            found.setdefault(card.pk, (card, kind))
+
+    add(
+        _latest_per_unit(base.filter(serial=term).order_by("-id")[:200], LOOKUP_SERIAL_CAP),
+        MATCH_SERIAL,
+    )
+
+    invoice_ids = list(
+        SalesInvoice.objects.filter(tenant_id=tenant_id, invoice_number__iexact=term)
+        .values_list("pk", flat=True)[:LOOKUP_INVOICE_CAP]
+    )
+    if invoice_ids:
+        add(
+            base.filter(sales_invoice_id__in=invoice_ids).order_by("-id")[:LOOKUP_INVOICE_CAP],
+            MATCH_INVOICE,
+        )
+
+    truncated = False
+    short_phone = False
+    if looks_like_phone(term):
+        digit_count = len(phone_digits(term))
+        if digit_count < PHONE_KEY_LENGTH:
+            short_phone = True
+        elif digit_count <= MAX_PHONE_DIGITS:
+            raw = list(
+                base.filter(phone_key=phone_key_of(term))
+                .order_by("-start_date", "-id")[:LOOKUP_PHONE_CAP + 1]
+            )
+            truncated = len(raw) > LOOKUP_PHONE_CAP
+            add(_latest_per_unit(raw[:LOOKUP_PHONE_CAP], LOOKUP_PHONE_CAP), MATCH_PHONE)
+
+    message = SHORT_PHONE_MESSAGE if short_phone and not found else ""
+    return list(found.values()), invoice_ids, truncated, message
+
+
+def intake_lookup(tenant, term: str) -> dict:
+    """«ما الذي نعرفه عن هذا الرقم؟» — سطرٌ لكل بطاقة بحكمها وتعبئتها، وما عداها.
+
+    `results` هو العقد الجديد (#240): بطاقة بطبقتيها + `verdict` + `open_orders` +
+    `prefill`، وبجانبه `units_without_card` و`sensitive_devices`. والمفاتيح القديمة
+    (`warranty` و`open_orders` و`term`) باقية كما كانت لمن يقرأها.
+
+    الرابط بسجل الأجهزة الحساسة معرّفٌ نصي (تسلسلي/IMEI) لا FK: وحدةٌ مرخّصة
     مستقلة محايدة مالياً، وربطها بمستندٍ يمسّ المال يكسر إطفاءها المستقل
     (صفٌّ يشير إلى وحدة معطّلة). التطابق المزدوج يُعرض كلاهما والمستخدم يختار.
     """
     term = (term or "").strip()
-    result = {
-        "term": term,
-        "warranty": warranty_coverage(getattr(tenant, "pk", tenant), term),
-        "sensitive_devices": [],
-        "open_orders": [],
-    }
+    tenant_id = getattr(tenant, "pk", tenant)
+    result = _empty_lookup(tenant_id, term)
     if not term:
         return result
 
-    tenant_id = getattr(tenant, "pk", tenant)
-    if module_enabled(tenant, "sensitive_devices"):
-        from django.db.models import Q
+    from django.db.models import Q
 
+    matches, invoice_ids, truncated, message = _intake_matches(tenant_id, term)
+    result["results"] = _intake_rows(tenant_id, matches, timezone.localdate())
+    result["matched_on"] = sorted({kind for _card, kind in matches})
+    result["truncated"] = truncated
+    result["message"] = message
+    result["units_without_card"] = _units_without_card(
+        tenant_id, serial=term, invoice_ids=invoice_ids,
+        partner_ids={
+            card.partner_id for card, kind in matches
+            if kind == MATCH_PHONE and card.partner_id
+        },
+    )
+
+    if module_enabled(tenant, "sensitive_devices"):
         from device_registry.models import SensitiveDevice
 
         result["sensitive_devices"] = [

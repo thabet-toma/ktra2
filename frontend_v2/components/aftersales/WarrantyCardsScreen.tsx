@@ -5,6 +5,7 @@ import {
 } from "lucide-react";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
+  getWarrantyCard,
   listWarrantyCards,
   lookupManufacturerWarrantors,
   printWarrantyCertificate,
@@ -92,7 +93,7 @@ export const WarrantyCardsScreen: React.FC = () => {
   // #231: رابط «سياسات الكفالة» على كرت المنتج (`ProductWarrantyPolicyLine.tsx`)
   // يصل بـ`?settings=policies` — يفتح نافذة الإعدادات مباشرةً على قسم السياسات
   // بدل أن يهبط المستخدم على قائمة البطاقات ثم يبحث عن زر «الإعدادات» بنفسه.
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   useEffect(() => {
     if (searchParams.get("settings") === "policies" && canViewSettings) {
       setShowSettings(true);
@@ -119,6 +120,17 @@ export const WarrantyCardsScreen: React.FC = () => {
 
   /** `null` = مغلقة · `"new"` = بطاقة يدوية جديدة · صف = بطاقة قائمة. */
   const [openCard, setOpenCard] = useState<WarrantyCardRow | "new" | null>(null);
+
+  // #240: `?card=<id>` يفتح نافذة البطاقة مباشرةً (رابط عميق من نتيجة QR أو من أمر صيانة)،
+  // ويُمحى بعد الاستهلاك كي لا يعيد تحديثُ الصفحة فتحَها.
+  useEffect(() => {
+    const cardId = Number(searchParams.get("card")) || null;
+    if (!cardId) return;
+    setSearchParams({}, { replace: true });
+    getWarrantyCard(cardId)
+      .then((card) => setOpenCard(card))
+      .catch((e) => setListErr(messageOf(e, "تعذّر فتح البطاقة")));
+  }, [searchParams, setSearchParams]);
 
   // البحث يضرب الخادم — الإبطاء 500ms هو ما يمنع طلباً لكل حرف.
   useEffect(() => {

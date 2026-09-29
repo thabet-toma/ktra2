@@ -604,11 +604,18 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
     sales_invoice_number = serializers.SerializerMethodField()
     delivery_blockers = serializers.SerializerMethodField()
     cancellation_blockers = serializers.SerializerMethodField()
+    # #240 — علَما إنشاءٍ فقط: لا يُخزَّنان ولا يخرجان. الأول تأكيد «القطعة من هذه
+    # الفاتورة» (شرط التغطية على بطاقة الفاتورة)، والثاني سبب فتح أمرٍ ثانٍ مفتوح.
+    invoice_piece_confirmed = serializers.BooleanField(write_only=True, required=False, default=False)
+    duplicate_open_reason = serializers.CharField(
+        write_only=True, required=False, allow_blank=True, default="", max_length=500,
+    )
 
     class Meta:
         model = ServiceOrder
         fields = [
             "id", "order_number", "order_date",
+            "invoice_piece_confirmed", "duplicate_open_reason",
             "partner", "partner_name", "customer_name", "customer_phone",
             "product", "product_name", "serial", "device_description",
             "received_condition", "accessories",
@@ -631,6 +638,18 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             "delivered_at", "sales_invoice", "approved_at", "approved_by",
             "created_at", "updated_at",
         ]
+
+    def create(self, validated_data):
+        from .service_orders import is_invoice_card
+
+        confirmed = validated_data.pop("invoice_piece_confirmed", False)
+        validated_data.pop("duplicate_open_reason", None)
+        card = validated_data.get("warranty_card")
+        # بطاقة الفاتورة تغطّي قطعةً لا نعرف أنها من الفاتورة إلا بتأكيد الموظف:
+        # بلا تأكيد يبقى الرابط بالبطاقة والأمر مدفوع.
+        if card is not None and is_invoice_card(card) and not confirmed:
+            validated_data["warranty_covered"] = False
+        return super().create(validated_data)
 
     def get_partner_name(self, obj):
         return obj.partner.name if obj.partner_id else obj.customer_name

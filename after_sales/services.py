@@ -39,6 +39,7 @@ from .models import (
     WarrantyCardEvent,
     WarrantyPolicy,
     add_months,
+    phone_key_of,
 )
 
 logger = logging.getLogger(__name__)
@@ -541,6 +542,8 @@ def create_auto_warranty_cards(invoice) -> int:
         ))
 
     if created:
+        for card in created:
+            card.phone_key = phone_key_of(card.customer_phone)  # bulk_create لا يمرّ بـsave()
         WarrantyCard.objects.bulk_create(created)
     total_revived = revived + invoice_revived
     if created or total_revived or cancelled:
