@@ -118,6 +118,14 @@ _AUTO_CARD_EDITABLE = {
     "manufacturer_start_date", "manufacturer_end_date",
 }
 
+#: بطاقاتٌ ينشئها النظام لا الموظف — فاتورة البيع، أو تسليم أمر صيانة (إصلاح #244،
+#: استبدال #245). تجميد الحقول ومنع التقصير بالتعديل يسريان عليها كلّها.
+_SYSTEM_CARD_SOURCES = {
+    WarrantyCard.SOURCE_AUTO_SALE,
+    WarrantyCard.SOURCE_REPAIR,
+    WarrantyCard.SOURCE_REPLACEMENT,
+}
+
 
 class WarrantyCardViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
@@ -199,6 +207,11 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         if invoice_id.isdigit():
             queryset = queryset.filter(sales_invoice_id=int(invoice_id))
 
+        # #238: `live=1` — البطاقات غير المنتهية وحدها (ما يُطبع)، فيأتي عدّها من
+        # `count` الترقيم لا من صفحةٍ أولى يعدّها المتصفّح.
+        if (params.get("live") or "").strip() in ("1", "true"):
+            queryset = queryset.filter(ended_on__isnull=True)
+
         expiring = (params.get("expiring_within_days") or "").strip()
         if expiring.isdigit():
             today = timezone.localdate()
@@ -240,7 +253,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 })
         new_end = serializer.validated_data.get("end_date")
         if (
-            card.source == WarrantyCard.SOURCE_AUTO_SALE
+            card.source in _SYSTEM_CARD_SOURCES
             and new_end is not None and new_end < card.end_date
         ):
             raise ValidationError({
@@ -249,7 +262,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                     "بصلاحية الإلغاء وسبب."
                 )
             })
-        if card.source == WarrantyCard.SOURCE_AUTO_SALE:
+        if card.source in _SYSTEM_CARD_SOURCES:
             touched = set(serializer.validated_data) - _AUTO_CARD_EDITABLE
             # `duration_months` و`end_date` يمرّان معاً من التحقق دائماً؛ المدة
             # وحدها بلا تغيّر فعلي ليست تعديلاً.
@@ -276,6 +289,9 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                     "detail": (
                         "هذه بطاقة تلقائية من ترحيل فاتورة — يُعدَّل عليها تاريخ "
                         "الانتهاء والملاحظات فقط. للباقي: تراجع عن ترحيل الفاتورة."
+                        if card.source == WarrantyCard.SOURCE_AUTO_SALE else
+                        "هذه بطاقة أنشأها تسليم أمر صيانة — يُعدَّل عليها تاريخ "
+                        "الانتهاء والملاحظات فقط."
                     )
                 })
         self._validate_tenant_links(serializer)
@@ -1077,6 +1093,7 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             VERDICT_REFERRAL,
             find_duplicate_open_order,
             intake_verdict,
+            log_courtesy_coverage,
             log_event,
             next_service_order_number,
         )
@@ -1114,6 +1131,7 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             to_status=order.status,
             user=self.request.user,
         )
+        log_courtesy_coverage(order, self.request.user)
         if existing is not None:
             log_event(
                 order,
@@ -1144,8 +1162,13 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
                     f"الأمر في حالة «{order.get_status_display()}» النهائية — لا يُعدَّل بعدها."
                 )
             })
+        from .service_orders import log_courtesy_coverage
+
         self._validate_tenant_links(serializer)
-        serializer.save()
+        was_covered = order.warranty_covered
+        order = serializer.save()
+        if not was_covered:
+            log_courtesy_coverage(order, self.request.user)
 
     def destroy(self, request, *args, **kwargs):
         raise ValidationError({

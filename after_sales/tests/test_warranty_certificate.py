@@ -140,6 +140,26 @@ class CertificateContentTest(CertificateTestBase):
         self.assertIn("تسري على الأجهزة 1 و2", text)
         self.assertIn("تسري على الجهاز 3", text)
 
+    def test_an_old_card_without_terms_prints_the_companys_current_terms(self):
+        """المواصفة: «البطاقة القديمة الفارغة تُطبع بشروط الشركة الحالية»."""
+        from after_sales.services import get_or_create_after_sales_settings
+
+        settings_row = get_or_create_after_sales_settings(self.tenant.pk)
+        settings_row.default_terms = "شرط-الشركة-الحالي"
+        settings_row.save(update_fields=["default_terms"])
+        empty = self.cert_card(serial="S-OLD", terms_text="")
+        frozen = self.cert_card(serial="S-NEW", terms_text="شرط-مجمَّد")
+
+        single = _text(self.print_(cards=[empty.pk]))
+        both = _text(self.print_(sales_invoice=self.invoice.pk))
+
+        self.assertIn("شرط-الشركة-الحالي", single)
+        self.assertIn("تسري على الجهاز 1", both)
+        self.assertEqual(both.count("شرط-الشركة-الحالي"), 1)
+        self.assertEqual(both.count("شرط-مجمَّد"), 1)
+        frozen.refresh_from_db()
+        self.assertEqual(frozen.terms_text, "شرط-مجمَّد")
+
     def test_terms_text_lines_become_list_items(self):
         card = self.cert_card(terms_text="البند الأول\nالبند الثاني")
 

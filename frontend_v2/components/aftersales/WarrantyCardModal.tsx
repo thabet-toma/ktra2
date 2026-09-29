@@ -25,6 +25,7 @@ import {
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
   warrantyCardPrintable,
+  isSystemWarrantySource,
   warrantyCoveredQuantityLabel,
   warrantyOrderCoverageLabel,
   warrantyQrImageSrc,
@@ -223,12 +224,14 @@ export const WarrantyCardModal: React.FC<Props> = ({
   }, [card]);
 
   const isAuto = card?.source === "auto_sale";
-  // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
-  const lineageLocked = isAuto || !canManage;
-  // #232: طبقة المصنع مجمَّدة (الجهة والمدة) على البطاقة التلقائية أيضاً —
+  // بطاقةٌ ينشئها النظام (التلقائية، والإصلاح والاستبدال من تسليم أمر): النسب
+  // والزبون والمنتج من مصدرها، لا يُحرَّرون هنا — مرآة حارس الخادم.
+  const isSystemCard = isSystemWarrantySource(card?.source);
+  const lineageLocked = isSystemCard || !canManage;
+  // #232: طبقة المصنع مجمَّدة (الجهة والمدة) على بطاقة النظام أيضاً —
   // البداية وحدها تبقى قابلة للتعديل بصلاحية `aftersales.warranty.manage`
   // (`canManage` نفسها) على الطبقتين معاً، تلقائية كانت البطاقة أم يدوية.
-  const manufacturerLineageLocked = isAuto || !canManage;
+  const manufacturerLineageLocked = isSystemCard || !canManage;
   const manufacturerStartLocked = !canManage;
 
   const patch = <K extends keyof WarrantyCardDraft>(key: K, value: WarrantyCardDraft[K]) => {
@@ -373,7 +376,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
         // التلقائية: لا نرسل إلا ما يقبله الخادم عليها، فلا نصطدم بحارسه.
         await updateWarrantyCard(
           card.id,
-          isAuto
+          isSystemCard
             ? {
                 end_date: payload.end_date,
                 supplier_warranty_end_date: payload.supplier_warranty_end_date,
@@ -631,6 +634,13 @@ export const WarrantyCardModal: React.FC<Props> = ({
               {card?.sales_invoice_number ? ` ${card.sales_invoice_number}` : ""} — يُعدَّل
               عليها تاريخ الانتهاء والملاحظات وكفالة المورد فقط. لتغيير الباقي: تراجع عن
               ترحيل الفاتورة.
+            </div>
+          )}
+          {isSystemCard && !isAuto && (
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2.5 text-sm text-[var(--color-text-muted)]">
+              بطاقة أنشأها تسليم أمر الصيانة
+              {card?.origin_order_number ? ` ${card.origin_order_number}` : ""} — يُعدَّل
+              عليها تاريخ الانتهاء (تمديداً) والملاحظات وكفالة المورد فقط.
             </div>
           )}
 

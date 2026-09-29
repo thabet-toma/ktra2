@@ -85,7 +85,7 @@ def strip_serials_when_off(rows, tenant_id, side: str) -> None:
     نائمة على المستندات تصبح فاعلة فجأةً لو شُغّل الإعداد لاحقاً.
 
     #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بندٌ لمنتجٍ
-    مفروضٍ بسياسة كفالة يبقى بأرقامه حتى إن كان نمط الشركة `off`؛ لهذا تغيّر
+    مفروضٍ عبر `serial_requirements` يبقى بأرقامه حتى إن كان نمط الشركة `off`؛ لهذا تغيّر
     التوقيع من نمطٍ واحد ثابت إلى `(tenant_id, side)` بنداءٍ واحد للدفعة.
     """
     candidates = [
@@ -188,8 +188,8 @@ def sales_serial_mode(tenant_id) -> str:
 def effective_serial_mode(tenant_id, product, side: str, *, requirement_map=None) -> str:
     """مصدر واحد لكل قرار نمطٍ في هذا الملف (#233) — البيع والشراء يمرّان من هنا.
 
-    منتجٌ يسمّيه `core.hooks.serial_requirements` (سياسة كفالة «برقم تسلسلي» في
-    `after_sales` — بلا استيراده هنا، الربط عبر الـhook وحده) مفروضٌ:
+    منتجٌ يسمّيه `core.hooks.serial_requirements` (مزوِّدٌ خارج هذه الوحدة —
+    بلا استيراده هنا، الربط عبر الـhook وحده) مفروضٌ:
     - `side='sale'`: `required` مهما كان إعداد الشركة — لا FIFO ولا بطاقة على
       رقم مخمَّن.
     - `side='purchase'`: `optional` على الأقل، و`required` إن كان إعداد
@@ -229,7 +229,7 @@ def assert_purchase_serials_declared(invoice) -> None:
     يبقى خط الدفاع الثاني كما هو (`apply_purchase_serials`).
 
     #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — منتجٌ
-    مفروضٌ بسياسة كفالة يصير `optional` هنا لا `required` تلقائياً (يُحرسه
+    مفروضٌ عبر `serial_requirements` يصير `optional` هنا لا `required` تلقائياً (يُحرسه
     مصدره أدناه)، فلا يدخل هذا الحارس إلا حين يكون إعداد الشركة نفسه `required`.
     """
     items = [
@@ -274,7 +274,7 @@ def assert_receipt_without_serials_allowed(tenant_id, products) -> None:
     بابٌ يُدخل المخزون بلا ترقيم يُنتج بالضبط المخزون الذي يرفض البيعُ بيعه؛
     والمخرج مُسمّى في الرسالة لا متروك للمستخدم يبحث عنه.
 
-    #233: لكل منتجٍ نمطه الفعّال الخاص — منتجٌ مفروضٌ بسياسة كفالة يصير على
+    #233: لكل منتجٍ نمطه الفعّال الخاص — منتجٌ مفروضٌ عبر `serial_requirements` يصير على
     الأقلّ `optional` (لا يُمنع الاستلام بلا رقم)، ويُمنع فقط حين يبلغ
     `required` فعلاً (إعداد الشركة نفسه `required`، أو الشركة أيضاً فرضته).
     """
@@ -356,7 +356,7 @@ def apply_purchase_serials(*, tenant, rows) -> int:
     كصفوف، فتبدأ الحصّة الجديدة من حيث انتهت. كل التحقق يسبق أي كتابة.
 
     #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بند لمنتجٍ
-    مفروضٍ بسياسة كفالة لا يتخطّاه `off` الشركة، ونداءٌ واحد لكل الدفعة لا لكل بند.
+    مفروضٍ عبر `serial_requirements` لا يتخطّاه `off` الشركة، ونداءٌ واحد لكل الدفعة لا لكل بند.
     """
     tenant_id = getattr(tenant, 'TenantID', tenant)
     rows = list(rows)
@@ -455,7 +455,7 @@ def _pre_sale_on_hand(invoice, product) -> Decimal:
 
 
 def unnumbered_serial_balance(tenant_id, product) -> int:
-    """رصيد المنتج غير المرقَّم الآن — للعرض (معاينة سياسة الكفالة قبل الحفظ،
+    """رصيد المنتج غير المرقَّم الآن — للعرض (معاينةٌ قبل حفظ ما يفرض الترقيم،
     #233) لا حارساً وقت الحفظ الفعلي؛ الرقم قد يتغيّر حتى لحظة التنفيذ."""
     on_hand = Decimal(str(product.quantity_on_hand or 0))
     balance = on_hand - _tracked_in_stock_count(tenant_id, product)
@@ -642,7 +642,7 @@ def assert_sales_serials_declared(invoice, lines) -> None:
     قاعدة الذرّية في `consume_sales_serials`.
 
     #233: النمط الفعّال **لكل بند** عبر `effective_serial_mode` — بند لمنتجٍ
-    مفروضٍ بسياسة كفالة يُطالَب دائماً بغضّ النظر عن إعداد الشركة.
+    مفروضٍ عبر `serial_requirements` يُطالَب دائماً بغضّ النظر عن إعداد الشركة.
     """
     lines = [ln for ln in lines if product_tracks_serials(ln.product)]
     if not lines:
@@ -692,17 +692,28 @@ def assert_sales_return_serials_declared(return_invoice, lines) -> None:
 
     مرجعٌ بلا فاتورة أصلية لا يستعيد شيئاً فلا يُطالَب بشيء، وبندٌ استُعيدت
     وحداته فعلاً (إعادة ترحيل) لا يُطالَب ثانيةً.
+
+    النمط لكل بند من `effective_serial_mode` لا من إعداد الشركة وحده: منتجٌ
+    يفرضه `core.hooks.serial_requirements` سُمّيت وحدته عند البيع، فتُسمّى عند
+    الإرجاع أيضاً ولو كان إعداد الشركة `off`.
     """
-    mode = sales_serial_mode(return_invoice.tenant_id)
-    if mode != SERIAL_MODE_REQUIRED:
-        return
     if getattr(return_invoice, 'original_invoice', None) is None:
         return
+    lines = [ln for ln in lines if product_tracks_serials(ln.product)]
+    if not lines:
+        return
+    from core.hooks import serial_requirements
+    requirement_map = serial_requirements(
+        return_invoice.tenant_id, [ln.product_id for ln in lines],
+    )
 
     incomplete: list[str] = []
     for line in lines:
         product = line.product
-        if not product_tracks_serials(product):
+        mode = effective_serial_mode(
+            return_invoice.tenant_id, product, 'sale', requirement_map=requirement_map,
+        )
+        if mode != SERIAL_MODE_REQUIRED:
             continue
         label = _product_label(product)
         needed = _whole_units(line.quantity, label=label)
@@ -721,7 +732,7 @@ def assert_sales_return_serials_declared(return_invoice, lines) -> None:
             'اختيار الأرقام التسلسلية إجباري قبل ترحيل مرجع البيع — سمِّ الوحدات '
             'المرتجعة في البنود التالية: ' + '؛ '.join(incomplete)
             + '. الوحدة المرتجعة تُسمّى ولا تُخمَّن: عليها تُبنى استعادة المخزن '
-            'وإنهاء بطاقة الكفالة.'
+            'وكلُّ ما يتبع الوحدة بعينها.'
         )
 
 
@@ -896,7 +907,7 @@ def release_sales_serials(invoice) -> int:
 
 
 def assert_no_defective_units(invoice) -> None:
-    """يرفض إلغاء ترحيل فاتورةٍ استُبدلت إحدى وحداتها تحت الكفالة (#245).
+    """يرفض إلغاء ترحيل فاتورةٍ استُبدلت إحدى وحداتها بعد عطلها (#245).
 
     الوحدة المعطوبة تحتفظ بـ`sales_line` أثراً لأنها بِيعت على هذه الفاتورة؛
     وإلغاءُ الترحيل كان سيُفرِّغ وحدةَ البديل وحدها ويترك الفاتورة تدّعي جهازاً
@@ -910,14 +921,14 @@ def assert_no_defective_units(invoice) -> None:
     )
     if defective:
         raise ValidationError(
-            f"تعذّر إلغاء ترحيل الفاتورة {invoice.invoice_number}: استُبدلت "
-            f"وحداتٌ منها تحت الكفالة ({'، '.join(defective)}) وحلّت بدائلها "
+            f"تعذّر إلغاء ترحيل الفاتورة {invoice.invoice_number}: وحداتٌ منها "
+            f"معطوبة استُبدلت ({'، '.join(defective)}) وحلّت بدائلها "
             f"محلّها على هذه الفاتورة."
         )
 
 
 def swap_sold_unit(old_unit, new_unit) -> bool:
-    """استبدال جهازٍ تحت الكفالة: البديل يرث موضع القديم على بند البيع (#245).
+    """استبدال جهازٍ معطوب: البديل يرث موضع القديم على بند البيع (#245).
 
     البديل `issued` (صُرف خارج البيع بـ`issue_serials`) فيصير `sold` على بند بيع
     القديم نفسه، والقديم `defective` ويحتفظ بالرابط أثراً. لا بند بيع للقديم

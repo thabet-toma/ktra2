@@ -1528,6 +1528,30 @@ def intake_verdict(card, today) -> str:
     return VERDICT_EXPIRED_PAID
 
 
+def log_courtesy_coverage(order, user=None):
+    """قصة ١١٢: «مغطّى» على جهازٍ لا يغطّيه حكم الاستقبال مجاملةٌ — تُسجَّل في الأمر.
+
+    يُنادى عند الإنشاء، وعند التعديل حين يُقلَب العلَم إلى «مغطّى». حكمٌ مغطٍّ
+    (`dealer`/`repair`) ليس مجاملة فلا يُكتب شيء.
+    """
+    if not order.warranty_covered:
+        return None
+    card = order.warranty_card if order.warranty_card_id else None
+    if card is not None and intake_verdict(card, timezone.localdate()) in (
+        VERDICT_DEALER, VERDICT_REPAIR,
+    ):
+        return None
+    return log_event(
+        order,
+        event_type=ServiceOrderEvent.TYPE_WARRANTY,
+        text=(
+            "وُسم الأمر «مغطّى» مجاملةً — "
+            + ("بلا بطاقة كفالة" if card is None else "الجهاز خارج الكفالة")
+        ),
+        user=user,
+    )
+
+
 def _order_matches(order, card, serial: str) -> bool:
     if card is not None and order.warranty_card_id == card.pk:
         return True

@@ -27,7 +27,7 @@ from sales.models import SalesInvoice
 from tenants.models import UserCompanyMembership
 
 from .test_service_orders import ORDERS
-from .test_warranty_lifecycle import WarrantyReturnTestBase
+from .test_warranty_lifecycle import BASE as WARRANTIES, WarrantyReturnTestBase
 
 DELIVERED = ServiceOrder.STATUS_DELIVERED
 
@@ -105,6 +105,44 @@ class ReplacementBase(WarrantyReturnTestBase):
         return WarrantyCard.objects.get(
             tenant=self.tenant, source=WarrantyCard.SOURCE_REPLACEMENT,
         )
+
+
+class ReplacementCoverageDropTest(ReplacementBase):
+    """مراجعة: سقوط الكفالة قبل ترحيل البديل يجعله قطعةً مدفوعة عادية.
+
+    كان يقلبه `billable` ويُبقي `replaces_device` — ففوترته تجعله «مرحَّلاً»،
+    فيطالب التسليم بنتيجة `replaced` ثم يرفضها `complete_replacement` لأن
+    البطاقة ملغاة: أمرٌ لا يُسلَّم.
+    """
+
+    def assert_plain_billable(self, order):
+        part = order.parts.get()
+        self.assertEqual(part.billing, "billable")
+        self.assertFalse(part.replaces_device)
+
+    def test_voiding_the_card_turns_the_replacement_into_a_plain_billable_part(self):
+        order = self.order()
+        self.assertEqual(self.replace_line(order).status_code, 201)
+
+        response = self.client.post(
+            f"{WARRANTIES}{self.card.pk}/void/", {"reason": "liquid", "note": ""},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assert_plain_billable(order)
+
+    def test_refusing_coverage_turns_the_replacement_into_a_plain_billable_part(self):
+        order = self.order()
+        self.assertEqual(self.replace_line(order).status_code, 201)
+
+        response = self.client.post(
+            f"{ORDERS}{order.pk}/refuse-coverage/",
+            {"reason": "physical_damage", "note": ""}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assert_plain_billable(order)
 
 
 # ══════════════════════════════════════════════════════════════════════════

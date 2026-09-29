@@ -84,6 +84,14 @@ def log_warranty_event(
     )
 
 
+def _log_card_endings(cards, *, reason_code: str, text: str) -> None:
+    """قصة ١١٨: كل انتهاءٍ بواقعة (مرجع، إلغاء ترحيل، إعادة بيع) حدثُ `ended` في سجلّ البطاقة."""
+    for card in cards:
+        log_warranty_event(
+            card, event_type=WarrantyCardEvent.TYPE_ENDED, reason_code=reason_code, text=text,
+        )
+
+
 def _supplier_side(unit, supplier_months: int):
     """(المورد، نهاية كفالته) من نسب الوحدة الشرائي — لا تخمين ولا افتراضي.
 
@@ -112,6 +120,13 @@ def _invoice_cards(invoice):
     return WarrantyCard.objects.filter(
         tenant_id=invoice.tenant_id, source=WarrantyCard.SOURCE_AUTO_SALE,
     ).filter(
+        Q(sales_invoice=invoice) | Q(sales_invoice_line__invoice=invoice)
+    )
+
+
+def _invoice_cards_of_any_source(invoice):
+    """كل بطاقات الفاتورة بأي مصدر — بالمرساتين كـ`_invoice_cards`."""
+    return WarrantyCard.objects.filter(tenant_id=invoice.tenant_id).filter(
         Q(sales_invoice=invoice) | Q(sales_invoice_line__invoice=invoice)
     )
 
@@ -163,6 +178,11 @@ def _revive(card, invoice, unit, customer) -> str:
         (getattr(customer, "phone", "") or "")[:32] if customer else ""
     )
     card.save(update_fields=fields + ["updated_at"])
+    if reviving:
+        log_warranty_event(
+            card, event_type=WarrantyCardEvent.TYPE_REVIVED,
+            text=f"أُعيد ترحيل الفاتورة {invoice.invoice_number}",
+        )
     return REVIVED if reviving else KEPT
 
 
@@ -194,6 +214,11 @@ def _revive_invoice_card(card, invoice, customer, quantity: int) -> str:
         (getattr(customer, "phone", "") or "")[:32] if customer else ""
     )
     card.save(update_fields=fields + ["updated_at"])
+    if reviving:
+        log_warranty_event(
+            card, event_type=WarrantyCardEvent.TYPE_REVIVED,
+            text=f"أُعيد ترحيل الفاتورة {invoice.invoice_number}",
+        )
     return REVIVED if reviving else KEPT
 
 
@@ -235,13 +260,7 @@ def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
     repair_ids = [
         card.pk for card, _unit in _live_repair_cards_by_unit(invoice.tenant_id, unit_ids)
     ]
-    repair_ended = (
-        WarrantyCard.objects.filter(pk__in=repair_ids).update(
-            ended_on=invoice.invoice_date, end_reason=WarrantyCard.END_SUPERSEDED,
-        )
-        if repair_ids else 0
-    )
-    ended = repair_ended + (
+    sale_ids = list(
         WarrantyCard.objects
         .filter(
             tenant_id=invoice.tenant_id,
@@ -250,12 +269,17 @@ def _supersede_stale_cards(invoice, unit_ids: list[int]) -> int:
             ended_on__isnull=True,
         )
         .exclude(sales_invoice=invoice)
-        .update(
-            ended_on=invoice.invoice_date,
-            end_reason=WarrantyCard.END_SUPERSEDED,
-        )
+        .values_list("pk", flat=True)
     )
+    stale = WarrantyCard.objects.filter(pk__in=repair_ids + sale_ids)
+    ended = stale.update(
+        ended_on=invoice.invoice_date, end_reason=WarrantyCard.END_SUPERSEDED,
+    ) if repair_ids or sale_ids else 0
     if ended:
+        _log_card_endings(
+            stale, reason_code=WarrantyCard.END_SUPERSEDED,
+            text=f"بِيعت الوحدة ثانيةً على الفاتورة {invoice.invoice_number}",
+        )
         logger.info(
             "after_sales.warranty_cards_superseded invoice=%s tenant=%s cards=%d",
             invoice.pk, invoice.tenant_id, ended,
@@ -598,14 +622,38 @@ def on_sale_unposted(invoice) -> int:
 
     البطاقة المنتهية بمرجعٍ لا تُمَسّ: واقعتها أصدق من هذه، ولا يجوز أن يمحوها
     إلغاءُ ترحيلٍ ثم يعيدها الترحيل «سارية» لزبونٍ أعاد جهازه.
+
+    **فاتورةٌ عليها بطاقة بديلٍ حيّة لا يُلغى ترحيلها (قصة ١٤٢)** — ولو أُعيد
+    الجهاز المعطوب للمخزن فرفع حارسَ `assert_no_defective_units`: الإلغاء كان
+    سيُعيد البديل الذي بيد الزبون للمخزن، وإعادة الترحيل تبيع المعطوبَ ثانيةً
+    (رقمه ما زال على البند). يُفحص قبل بوابة الترخيص: البطاقة قائمةٌ ولو أُطفئت.
     """
+    replacement = (
+        _invoice_cards_of_any_source(invoice)
+        .filter(source=WarrantyCard.SOURCE_REPLACEMENT, ended_on__isnull=True)
+        .select_related("replaces").order_by("pk").first()
+    )
+    if replacement is not None:
+        old_serial = replacement.replaces.serial if replacement.replaces_id else ""
+        raise ValidationError(
+            f"تعذّر إلغاء ترحيل الفاتورة {invoice.invoice_number}: استُبدل الجهاز "
+            f"{old_serial} منها ببديلٍ ({replacement.serial}) ما زال بيد الزبون."
+        )
     if not module_enabled(invoice.tenant_id, MODULE_KEY):
         return 0
-    suspended = _invoice_cards(invoice).filter(ended_on__isnull=True).update(
+    live_ids = list(
+        _invoice_cards(invoice).filter(ended_on__isnull=True).values_list("pk", flat=True)
+    )
+    live = WarrantyCard.objects.filter(pk__in=live_ids)
+    suspended = live.update(
         ended_on=timezone.localdate(),
         end_reason=WarrantyCard.END_INVOICE_UNPOSTED,
-    )
+    ) if live_ids else 0
     if suspended:
+        _log_card_endings(
+            live, reason_code=WarrantyCard.END_INVOICE_UNPOSTED,
+            text=f"أُلغي ترحيل الفاتورة {invoice.invoice_number}",
+        )
         logger.info(
             "after_sales.warranty_cards_suspended invoice=%s tenant=%s cards=%d",
             invoice.pk, invoice.tenant_id, suspended,
@@ -683,6 +731,10 @@ def on_sales_return_posted(return_invoice) -> int:
             card.save(update_fields=[
                 "ended_on", "end_reason", "end_return_line", "updated_at",
             ])
+        _log_card_endings(
+            cards, reason_code=WarrantyCard.END_RETURNED,
+            text=f"مرجع البيع {return_invoice.invoice_number}",
+        )
         if cards:
             logger.info(
                 "after_sales.warranty_cards_returned return=%s original=%s tenant=%s cards=%d",
@@ -699,6 +751,10 @@ def on_sales_return_posted(return_invoice) -> int:
             card.save(update_fields=[
                 "ended_on", "end_reason", "end_return_line", "updated_at",
             ])
+            _log_card_endings(
+                [card], reason_code=WarrantyCard.END_RETURNED,
+                text=f"مرجع البيع {return_invoice.invoice_number}",
+            )
             cards.append(card)
 
     invoice_touched = _apply_invoice_card_return(return_invoice, original_id, reverse=False)
@@ -717,10 +773,21 @@ def on_sales_return_unposted(return_invoice) -> int:
     """
     if not module_enabled(return_invoice.tenant_id, MODULE_KEY):
         return 0
-    revived = WarrantyCard.objects.filter(
-        tenant_id=return_invoice.tenant_id,
-        end_return_line__invoice=return_invoice,
-    ).update(ended_on=None, end_reason="", end_return_line=None)
+    returned_ids = list(
+        WarrantyCard.objects.filter(
+            tenant_id=return_invoice.tenant_id,
+            end_return_line__invoice=return_invoice,
+        ).values_list("pk", flat=True)
+    )
+    returned = WarrantyCard.objects.filter(pk__in=returned_ids)
+    revived = returned.update(
+        ended_on=None, end_reason="", end_return_line=None,
+    ) if returned_ids else 0
+    for card in returned:
+        log_warranty_event(
+            card, event_type=WarrantyCardEvent.TYPE_REVIVED,
+            text=f"أُلغي ترحيل مرجع البيع {return_invoice.invoice_number}",
+        )
     if revived:
         logger.info(
             "after_sales.warranty_cards_unreturned return=%s tenant=%s cards=%d",
@@ -1135,11 +1202,19 @@ def _bill_order_parts(order, *, user, headline: str) -> str:
 
     flipped = 0
     empty_names = []
+    unreplaced = 0
     for part in _pending_covered_parts(order):
         price, empty = _bill_price(part)
         part.billing = "billable"
         part.unit_price = price
-        part.save(update_fields=["billing", "unit_price"])
+        fields = ["billing", "unit_price"]
+        # بديلٌ لم يُرحَّل بعد يصير قطعةً مدفوعة عادية: الاستبدال تحت الكفالة
+        # سقط معها، وإبقاء العلَم يجعل فوترته «استبدالاً مرحَّلاً» لا يُسلَّم.
+        if part.replaces_device:
+            part.replaces_device = False
+            fields.append("replaces_device")
+            unreplaced += 1
+        part.save(update_fields=fields)
         flipped += 1
         if empty:
             empty_names.append(product_display_name(part.product))
@@ -1153,6 +1228,8 @@ def _bill_order_parts(order, *, user, headline: str) -> str:
     lines = [headline]
     if flipped:
         lines.append(f"{flipped} قطعة صارت مفوترة على الزبون بسعر البيع")
+    if unreplaced:
+        lines.append("سطر الاستبدال صار قطعةً مدفوعة عادية — لا استبدال بلا كفالة")
     if empty_names:
         lines.append(
             "بلا سعر (صفر): " + "، ".join(empty_names) + " — حدّد سعرها قبل الفوترة"

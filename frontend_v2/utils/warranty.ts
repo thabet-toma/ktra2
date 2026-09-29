@@ -30,6 +30,14 @@ export const warrantySourceLabel = (source: string): string =>
   WARRANTY_SOURCE_LABELS[source as WarrantySource] ?? source;
 
 /**
+ * بطاقةٌ ينشئها النظام لا الموظف (فاتورة البيع، أو تسليم أمر صيانة): مرآة
+ * `_SYSTEM_CARD_SOURCES` في الخادم — يُعدَّل عليها الانتهاء (تمديداً) والملاحظات
+ * وكفالة المورد وبداية طبقة المصنع فقط.
+ */
+export const isSystemWarrantySource = (source: string | null | undefined): boolean =>
+  source === "auto_sale" || source === "repair" || source === "replacement";
+
+/**
  * الحالة كما يردّها الخادم (`WarrantyCard.status_on`، #222): `ended` تغلب
  * دائماً — بطاقةٌ أُنهيت بمرجعٍ أو إلغاء ترحيلٍ لا تصير «سارية» أبداً حتى لو
  * بقي تاريخ انتهائها في المستقبل. وإلا فمشتقّةٌ من `end_date` كما كانت.

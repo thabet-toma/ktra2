@@ -184,6 +184,94 @@ class SalesReturnEndsTheCardTest(WarrantyReturnTestBase):
         self.assertEqual(response.status_code, 400, response.content)
         self.assertIn("إجباري", str(response.content, "utf-8"))
 
+    def test_a_serial_policy_forces_naming_the_returned_unit_under_an_optional_company(self):
+        """مراجعة: المرجع كان يقرأ إعداد الشركة وحده فيتخطّى فرض سياسة `serial`."""
+        self.stock_units("SN-Q2")
+        sale = self.sales_invoice(serials=["SN-Q2"])
+        self.assertEqual(self.post_sale(sale).status_code, 200)
+
+        response = self.post_sale(self.sales_return(sale))
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("إجباري", str(response.content, "utf-8"))
+
+
+class EndingIsOnTheTimelineTest(WarrantyReturnTestBase):
+    """قصة ١١٨: الانتهاء بمرجعٍ أو إلغاء ترحيلٍ أو إعادة بيع يظهر في سجلّ البطاقة."""
+
+    def kinds(self, card):
+        from after_sales.models import WarrantyCardEvent
+
+        return list(
+            WarrantyCardEvent.objects.filter(card=card).order_by("pk")
+            .values_list("event_type", "reason_code")
+        )
+
+    def test_a_return_and_its_undo_write_ended_then_revived(self):
+        self.stock_units("SN-T1")
+        sale = self.sales_invoice(serials=["SN-T1"])
+        self.assertEqual(self.post_sale(sale).status_code, 200)
+        card = self.cards().get()
+        sale_return = self.sales_return(sale, serials=["SN-T1"])
+        self.assertEqual(self.post_sale(sale_return).status_code, 200)
+        self.assertEqual(self.unpost_sale(sale_return).status_code, 200)
+
+        self.assertEqual(
+            self.kinds(card),
+            [("ended", WarrantyCard.END_RETURNED), ("revived", "")],
+        )
+
+    def test_unposting_and_reposting_the_sale_write_ended_then_revived(self):
+        self.stock_units("SN-T2")
+        sale = self.sales_invoice(serials=["SN-T2"])
+        self.assertEqual(self.post_sale(sale).status_code, 200)
+        card = self.cards().get()
+
+        self.assertEqual(self.unpost_sale(sale).status_code, 200)
+        self.assertEqual(self.post_sale(sale).status_code, 200)
+
+        self.assertEqual(
+            self.kinds(card),
+            [("ended", WarrantyCard.END_INVOICE_UNPOSTED), ("revived", "")],
+        )
+
+    def test_a_resale_writes_ended_superseded_on_the_stale_card(self):
+        self.stock_units("SN-T3")
+        first = self.sales_invoice(serials=["SN-T3"])
+        self.assertEqual(self.post_sale(first).status_code, 200)
+        stale = self.cards().get()
+        # بطاقةٌ حيّة بقيت على وحدةٍ عادت للمخزن بلا مرجع (بيانات قديمة) — تُشفى بالبيع.
+        from inventory.models import ProductSerial as Unit
+        Unit.objects.filter(serial="SN-T3").update(
+            status=Unit.STATUS_IN_STOCK, sales_line=None,
+        )
+        second = self.sales_invoice(serials=["SN-T3"])
+        self.assertEqual(self.post_sale(second).status_code, 200)
+
+        self.assertIn(("ended", WarrantyCard.END_SUPERSEDED), self.kinds(stale))
+
+
+class InvoiceLiveFilterTest(WarrantyReturnTestBase):
+    """#238: `warranties/?sales_invoice=<id>&live=1` — العدّ على الخادم لا في المتصفّح."""
+
+    def test_live_counts_only_the_unended_cards_of_the_invoice(self):
+        self.stock_units("SN-L1", "SN-L2")
+        sale = self.sales_invoice(serials=["SN-L1", "SN-L2"], qty="2")
+        self.assertEqual(self.post_sale(sale).status_code, 200)
+        sale_return = self.sales_return(sale, serials=["SN-L1"])
+        self.assertEqual(self.post_sale(sale_return).status_code, 200)
+
+        response = self.client.get(
+            f"{BASE}?sales_invoice={sale.pk}&live=1&page=1&page_size=1", **self.headers(),
+        )
+        every = self.client.get(
+            f"{BASE}?sales_invoice={sale.pk}&page=1&page_size=1", **self.headers(),
+        )
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(every.data["count"], 2)
+
 
 class SecondBuyerTest(WarrantyReturnTestBase):
     def test_reselling_a_returned_unit_writes_a_fresh_card_for_the_second_buyer(self):

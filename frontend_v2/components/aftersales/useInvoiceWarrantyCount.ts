@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { listWarrantyCards } from "../../services/afterSalesApi";
 import { usePermissions } from "../../contexts/PermissionsContext";
-import { countPrintableWarrantyCards } from "../../utils/warranty";
 
 /**
  * #238 — عدد بطاقات الكفالة القابلة للطباعة على فاتورة بيعٍ مرحَّلة. `0` يُخفي
@@ -29,8 +28,9 @@ export function useInvoiceWarrantyCount(
       return;
     }
     let cancelled = false;
-    listWarrantyCards({ sales_invoice: invoiceId }, 1, 200)
-      .then((paged) => { if (!cancelled) setCount(countPrintableWarrantyCards(paged.results)); })
+    // `live=1` يعدّ على الخادم — `count` الترقيم هو العدد، مهما كثرت البطاقات.
+    listWarrantyCards({ sales_invoice: invoiceId, live: true }, 1, 1)
+      .then((paged) => { if (!cancelled) setCount(paged.count); })
       .catch(() => { if (!cancelled) setCount(0); });
     return () => { cancelled = true; };
   }, [allowed, invoiceId, refreshKey]);

@@ -167,7 +167,9 @@ class RestockTest(ReturnedUnitBase):
         self.assertEqual(response.status_code, 200, response.content)
         self.assert_restocked_at(order, "1000.00")
 
-    def test_restock_returns_the_unit_to_stock_and_frees_the_original_invoice(self):
+    def test_restock_returns_the_unit_to_stock_and_the_original_invoice_stays_guarded(self):
+        """قصة ١٤٢: الإلغاء مرفوضٌ بعد الاستبدال ولو أُعيد المعطوب للمخزن —
+        كان سيُعيد البديل الذي بيد الزبون للمخزن، وإعادة الترحيل تبيع المعطوب."""
         order = self.delivered()
         self.assertEqual(self.unpost_sale(self.sale).status_code, 400)
         quantity_before = Product.objects.get(pk=self.product.pk).quantity_on_hand
@@ -185,7 +187,10 @@ class RestockTest(ReturnedUnitBase):
         order.refresh_from_db()
         self.assertEqual(order.returned_unit_state, "restocked")
         self.assertTrue(self.events(order, "عاد سليماً من الفحص").exists())
-        self.assertEqual(self.unpost_sale(self.sale).status_code, 200)
+        response = self.unpost_sale(self.sale)
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("OLD-1", str(response.content, "utf-8"))
+        self.assertEqual(self.unit("NEW-1").status, ProductSerial.STATUS_SOLD)
 
     def test_restock_is_all_or_nothing_when_the_period_is_closed(self):
         from accounting.models import FiscalPeriod
@@ -248,17 +253,6 @@ class UndoRestockTest(ReturnedUnitBase):
         self.assertEqual(self.unit("OLD-1").status, ProductSerial.STATUS_SOLD)
         order.refresh_from_db()
         self.assertEqual(order.returned_unit_state, "restocked")
-
-    def test_undo_after_the_original_invoice_was_unposted_is_refused(self):
-        order = self.delivered()
-        self.assertEqual(self.fate(order, "restocked").status_code, 200)
-        self.assertEqual(self.unpost_sale(self.sale).status_code, 200)
-
-        response = self.fate(order, "held")
-
-        self.assertEqual(response.status_code, 400, response.content)
-        self.assertEqual(self.restock_movements(order).count(), 1)
-        self.assertEqual(self.unit("OLD-1").status, ProductSerial.STATUS_IN_STOCK)
 
     def test_undo_needs_the_post_permission(self):
         order = self.delivered()

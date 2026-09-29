@@ -207,7 +207,7 @@ class Product(models.Model):
         db_column='ReorderMode',
     )
     is_serialized = models.BooleanField(default=False, db_column='IsSerialized')
-    # THA-24 → #231: سياسة الكفالة لم تعد عمودين هنا — انتقلت إلى صفٍّ مستقل
+    # THA-24 → #231: العمودان اللذان كانا هنا انتقلا إلى صفٍّ مستقل
     # `after_sales.WarrantyPolicy` (OneToOne على هذا المنتج/البراند)، فلا يمنع
     # تغييرُها ما صُرف من بطاقات. الهجرة `after_sales/migrations/
     # 0008_backfill_warranty_policies.py` نقلت كل قيمةٍ قائمة قبل حذف العمودين.

@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   addWarrantyMonths,
+  isSystemWarrantySource,
   dealWarrantyYearsToMonths,
   deriveWarrantyEnd,
   manufacturerWarrantyRemainingText,
@@ -606,4 +607,12 @@ test('#246 — الإتلاف وحده يستلزم ملاحظة غير فارغ
 
 test('#246 — مرشّح المتابعة يضم المحجوز وعند المورد فقط', () => {
   assert.equal(RETURNED_UNIT_FOLLOW_UP_FILTER, 'held,with_supplier');
+});
+
+test('مراجعة — بطاقات الإصلاح والاستبدال مجمَّدةٌ كالتلقائية، واليدوية حرّة', () => {
+  assert.equal(isSystemWarrantySource('auto_sale'), true);
+  assert.equal(isSystemWarrantySource('repair'), true);
+  assert.equal(isSystemWarrantySource('replacement'), true);
+  assert.equal(isSystemWarrantySource('manual'), false);
+  assert.equal(isSystemWarrantySource(undefined), false);
 });

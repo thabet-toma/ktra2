@@ -189,8 +189,8 @@ class ProductSerializer(serializers.ModelSerializer):
     # لا استعلامَ لكل صفّ.
     indicative_purchase_price = serializers.SerializerMethodField()
     indicative_purchase_price_source = serializers.SerializerMethodField()
-    # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (سياسة كفالة «برقم
-    # تسلسلي» في `after_sales` — عبر `core.hooks.serial_requirements` لا
+    # #233: سببٌ يفرض الرقم التسلسلي على هذا المنتج (نصُّه من مزوِّدٍ خارج
+    # هذه الوحدة — عبر `core.hooks.serial_requirements` لا
     # استيرادٍ مباشر) — `None` حين لا فرض. نداءٌ واحد للصفحة كلّها
     # (`ProductViewSet.list` يملأ `serial_requirement_map` في الـcontext مسبقاً).
     serial_required_by = serializers.SerializerMethodField()
@@ -356,8 +356,8 @@ class ProductSerializer(serializers.ModelSerializer):
         return attrs
 
     def _validate_serial_tracking_toggle(self, attrs):
-        """#233: إلغاء تتبّع الرقم التسلسلي مرفوضٌ ما دامت سياسة كفالة `serial`
-        قائمة على هذا المنتج والوحدة مفعّلة — عبر `core.hooks.serial_requirements`
+        """#233: إلغاء تتبّع الرقم التسلسلي مرفوضٌ ما دام مزوِّدٌ يفرضه على هذا
+        المنتج — عبر `core.hooks.serial_requirements`
         لا استيراد `after_sales` هنا (حدود الوحدة، #228).
 
         الحارس يفحص المنتج **وكل إخوته تحت نفس الأب**، لا هذا الصفّ وحده:
@@ -389,14 +389,14 @@ class ProductSerializer(serializers.ModelSerializer):
         # المنتج نفسه غير مفروض — لكن مزامنة العائلة ستُطفئ أخاً مفروضاً معه.
         from .services import product_display_name
 
-        forced_sibling = Product.objects.filter(
-            pk=next(iter(requirements)),
-        ).first()
+        forced_id = next(iter(requirements))
+        forced_sibling = Product.objects.filter(pk=forced_id).first()
         sibling_label = product_display_name(forced_sibling) if forced_sibling else 'براندٌ آخر'
+        # السبب نصُّ المزوِّد نفسه — هذه الوحدة لا تعرف من يفرض ولماذا.
         raise serializers.ValidationError({
             'is_serialized': (
-                f'لا يمكن إطفاء التتبّع — البراند الشقيق «{sibling_label}» مكفولٌ '
-                'بسياسة كفالة «برقم تسلسلي»، وإطفاء التتبّع هنا يُطفئه معه '
+                f'لا يمكن إطفاء التتبّع — البراند الشقيق «{sibling_label}»: '
+                f'{requirements[forced_id]} وإطفاء التتبّع هنا يُطفئه معه '
                 'لأنهما تحت المنتج نفسه.'
             )
         })

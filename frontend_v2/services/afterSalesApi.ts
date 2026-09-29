@@ -191,6 +191,8 @@ export interface WarrantyListFilters {
   product?: number | "";
   partner?: number | "";
   sales_invoice?: number | "";
+  /** غير المنتهية وحدها — `live=1` (#238). */
+  live?: boolean;
   expiring_within_days?: number | "";
 }
 
@@ -284,6 +286,7 @@ export function listWarrantyCards(
       product: filters.product || undefined,
       partner: filters.partner || undefined,
       sales_invoice: filters.sales_invoice || undefined,
+      live: filters.live ? 1 : undefined,
       expiring_within_days: filters.expiring_within_days || undefined,
     },
   });

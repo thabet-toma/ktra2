@@ -493,11 +493,46 @@ class RepairIntakeVerdictTest(RepairSurfaceBase):
         self.assertFalse(ServiceOrder.objects.get(pk=response.data["id"]).warranty_covered)
 
 
+class RepairCardEditFreezeTest(RepairSurfaceBase):
+    """مراجعة: التجميد ومنع التقصير بالتعديل كانا للتلقائية وحدها (#222 بند ٨)."""
+
+    def edit(self, card, **body):
+        return self.client.patch(
+            f"{WARRANTIES}{card.pk}/", body, format="json", **self.headers(),
+        )
+
+    def test_shortening_a_repair_card_by_editing_is_refused(self):
+        card, _order = self.repaired_card()
+
+        response = self.edit(card, end_date=(card.end_date - timedelta(days=10)).isoformat())
+
+        self.assertEqual(response.status_code, 400, response.content)
+        card.refresh_from_db()
+        self.assertEqual(card.end_date, card.start_date + timedelta(days=90))
+
+    def test_the_serial_of_a_repair_card_is_frozen(self):
+        card, _order = self.repaired_card()
+
+        response = self.edit(card, serial="OTHER-SERIAL")
+
+        self.assertEqual(response.status_code, 400, response.content)
+        card.refresh_from_db()
+        self.assertEqual(card.serial, "REP-1")
+
+    def test_notes_on_a_repair_card_stay_editable(self):
+        card, _order = self.repaired_card()
+
+        response = self.edit(card, notes="اتصل الزبون")
+
+        self.assertEqual(response.status_code, 200, response.content)
+
+
 class RepairPublicPageTest(RepairSurfaceBase):
     def open(self, card):
         return APIClient().get(f"/api/w/{card.verify_token}")
 
-    def test_the_public_page_says_repair_warranty_with_order_and_scope(self):
+    def test_the_public_page_says_repair_warranty_without_order_or_scope(self):
+        """المواصفة: «ولا يُعرض النطاق»، و«ما لا يُعرض أبداً: … الصيانات»."""
         card, order = self.repaired_card()
 
         response = self.open(card)
@@ -505,8 +540,8 @@ class RepairPublicPageTest(RepairSurfaceBase):
 
         self.assertEqual(response.status_code, 200)
         self.assertIn("كفالة إصلاح", html)
-        self.assertIn(order.order_number, html)
-        self.assertIn("استُبدل منفذ الشحن", html)
+        self.assertNotIn(order.order_number, html)
+        self.assertNotIn("استُبدل منفذ الشحن", html)
         self.assertIn("سارية", html)
         self.assertNotIn("مكفول", html)
         self.assertNotIn("كفالة التاجر", html)

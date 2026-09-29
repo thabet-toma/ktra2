@@ -10,9 +10,9 @@
 `supplier_claim*` — أن القطعة ما زالت تحت كفالة مورّدنا شأنٌ بيننا وبينه،
 وعرضُه للزبون يفتح تفاوضاً على من يتحمّل الكلفة لا شأن له به. و`technician`
 و`billing_waived_reason` و`estimated_amount` قبل الاعتماد كذلك. و**ملاحظاتُ
-بطاقة الكفالة** (#222 بند ٦): `WarrantyCardViewSet.extend` يُلحق بها سجلَّ
-التمديد بسببه الحرّ الذي يكتبه الموظف لنفسه، فنشرُه على الرابط العام إرسالٌ
-لمذكّرةٍ داخلية إلى صاحب الشأن.
+بطاقة الكفالة** (#222 بند ٦): مذكّرةٌ داخلية يكتبها الموظف لنفسه، فنشرُها على
+الرابط العام إرسالٌ لها إلى صاحب الشأن. (سجلّ التمديد لم يعد يُلحَق بها منذ #229
+— يُكتب حدثاً في `WarrantyCardEvent` — لكن الحقل نفسه يبقى داخلياً.)
 
 **وحالةُ البطاقة من `WarrantyCard.status_on` لا من مقارنة تاريخ** (#222 بند ٧):
 بطاقةُ جهازٍ أُرجع تبقى نهايتُها في المستقبل، فـ`end_date >= today` وحدها كانت
@@ -216,6 +216,12 @@ def issue_on_share(invoice, user=None) -> None:
         mark_card_issued(card, ISSUE_CHANNEL_SHARE, user=user)
 
 
+def issue_card_on_share(card, user=None) -> None:
+    """رابط البطاقة المفردة إصدارٌ لها كرابط الفاتورة — ما دامت حيّة."""
+    if card.ended_on is None:
+        mark_card_issued(card, ISSUE_CHANNEL_SHARE, user=user)
+
+
 # ── أمر الصيانة ─────────────────────────────────────────────────────────────
 
 def load_service_order(tenant_id: int, doc_id: int):
@@ -294,6 +300,7 @@ AFTERSALES_DOC_TYPES = {
         "expired": warranty_card_expired,
         #: مفتاحٌ اختياريّ: النوع يُصيِّر صفحته بنفسه بدل القالب العام (#239).
         "page": page_warranty_card,
+        "on_share": issue_card_on_share,
     },
     "warranty_certificate": {
         "label": "شهادة كفالة",

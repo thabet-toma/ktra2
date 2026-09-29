@@ -412,6 +412,57 @@ class InvoiceCardConfirmationTest(IntakeTestBase):
         self.assertTrue(order.warranty_covered)
 
 
+class CoverageAfterIntakeTest(IntakeTestBase):
+    """مراجعة: قلبُ «مغطّى» بـPATCH كان يتخطّى تأكيدَي الإنشاء، والمجاملة لا تُسجَّل (قصة ١١٢)."""
+
+    def patch(self, order, **body):
+        return self.client.patch(
+            f"{ORDERS}{order.pk}/", body, format="json", **self.headers(),
+        )
+
+    def courtesy_events(self, order):
+        return order.events.filter(
+            event_type=ServiceOrderEvent.TYPE_WARRANTY, text__contains="مجاملةً",
+        )
+
+    def test_patching_an_invoice_card_order_to_covered_needs_the_confirmation(self):
+        card = self.make_invoice_card()
+        order = self.intake(warranty_card=card.pk, warranty_covered=False)
+
+        refused = self.patch(order, warranty_covered=True)
+        order.refresh_from_db()
+        self.assertEqual(refused.status_code, 400, refused.content)
+        self.assertFalse(order.warranty_covered)
+
+        accepted = self.patch(order, warranty_covered=True, invoice_piece_confirmed=True)
+        order.refresh_from_db()
+        self.assertEqual(accepted.status_code, 200, accepted.content)
+        self.assertTrue(order.warranty_covered)
+
+    def test_covering_a_device_without_a_card_is_recorded_as_courtesy(self):
+        order = self.intake(warranty_covered=True)
+
+        self.assertTrue(order.warranty_covered)
+        self.assertEqual(self.courtesy_events(order).count(), 1)
+
+    def test_covering_an_expired_card_later_is_recorded_as_courtesy(self):
+        card = self.make_card(end_date=PAST_END)
+        order = self.intake(warranty_card=card.pk, warranty_covered=False)
+        self.assertFalse(self.courtesy_events(order).exists())
+
+        response = self.patch(order, warranty_covered=True)
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(self.courtesy_events(order).count(), 1)
+
+    def test_a_live_card_is_no_courtesy(self):
+        card = self.make_card()
+        order = self.intake(warranty_card=card.pk, warranty_covered=True)
+
+        self.assertTrue(order.warranty_covered)
+        self.assertFalse(self.courtesy_events(order).exists())
+
+
 class DuplicateOrderTest(IntakeTestBase):
     def test_second_order_on_the_same_card_is_409_with_the_existing_order(self):
         card = self.make_card()

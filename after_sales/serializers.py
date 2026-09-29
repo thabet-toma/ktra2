@@ -710,6 +710,43 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             validated_data["warranty_covered"] = False
         return super().create(validated_data)
 
+    def update(self, instance, validated_data):
+        """قلبُ الأمر إلى «مغطّى» بعد إنشائه يمرّ بشرطَي الإنشاء نفسيهما.
+
+        الإنشاء يُسقط التغطية بصمتٍ حين ينقص التأكيد (الموظف يرى الحكم أمامه)؛
+        التعديل لاحقاً طلبٌ صريح، فيُرفض برسالة بدل أن يُتجاهَل.
+        """
+        from .service_orders import is_invoice_card
+
+        confirmed = validated_data.pop("invoice_piece_confirmed", False)
+        repair_confirmed = validated_data.pop("repair_fault_confirmed", False)
+        validated_data.pop("duplicate_open_reason", None)
+        validated_data.pop("paid_despite_referral", None)
+        card = validated_data.get("warranty_card", instance.warranty_card)
+        covered = validated_data.get("warranty_covered", instance.warranty_covered)
+        card_changed = (
+            "warranty_card" in validated_data
+            and validated_data["warranty_card"] != instance.warranty_card
+        )
+        turning_on = covered and (not instance.warranty_covered or card_changed)
+        if turning_on and card is not None:
+            if is_invoice_card(card) and not confirmed:
+                raise serializers.ValidationError({
+                    "warranty_covered": (
+                        "بطاقة كفالة على الفاتورة — أكّد أن القطعة من هذه الفاتورة قبل وسم الأمر «مغطّى»."
+                    ),
+                })
+            if card.is_repair and not (
+                repair_confirmed and card.status_on() == card.STATUS_ACTIVE
+            ):
+                raise serializers.ValidationError({
+                    "warranty_covered": (
+                        "كفالة الإصلاح تغطّي العطل نفسه أو قطعة ذلك الإصلاح — أكّد ذلك، "
+                        "والبطاقة سارية، قبل وسم الأمر «مغطّى»."
+                    ),
+                })
+        return super().update(instance, validated_data)
+
     def get_partner_name(self, obj):
         return obj.partner.name if obj.partner_id else obj.customer_name
 

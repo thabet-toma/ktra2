@@ -548,6 +548,8 @@ class WarrantyApiTest(WarrantyTestBase):
         SalesInvoiceLine.objects.create(
             tenant=self.tenant, invoice=sale_return, product=self.product,
             quantity=Decimal("1"), unit_price=Decimal("2000"),
+            # سياسة `serial` تفرض تسمية الوحدة المرتجعة كما فرضتها عند البيع.
+            serials=["SN-RT1"],
         )
         self.assertEqual(self.post_sale(sale_return).status_code, 200)
 

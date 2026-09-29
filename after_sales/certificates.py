@@ -149,11 +149,25 @@ def _extension_lines_by_card(cards) -> dict:
 
 
 def _terms_groups(cards, layout) -> list:
+    """الشروط المجمَّدة على كل بطاقة، مجمَّعةً بالنص.
+
+    البطاقة القديمة الفارغة (قبل #231، أو يدويةٌ بلا نص) تُطبع بشروط الشركة
+    **الحالية** — `repair_terms` لكفالة الإصلاح و`default_terms` لغيرها — كما
+    تقول المواصفة؛ الفارغ هنا لا يعني «بلا شروط».
+    """
+    from .services import get_or_create_after_sales_settings
+
+    settings_row = None
     groups: dict = {}
     for index, card in enumerate(cards, start=1):
-        lines = tuple(
-            line.strip() for line in (card.terms_text or "").splitlines() if line.strip()
-        )
+        text = card.terms_text or ""
+        if not text.strip():
+            if settings_row is None:
+                settings_row = get_or_create_after_sales_settings(card.tenant_id)
+            text = (
+                settings_row.repair_terms if card.is_repair else settings_row.default_terms
+            ) or ""
+        lines = tuple(line.strip() for line in text.splitlines() if line.strip())
         if lines:
             groups.setdefault(lines, []).append(index)
     result = []

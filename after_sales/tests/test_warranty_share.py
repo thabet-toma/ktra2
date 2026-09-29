@@ -157,6 +157,17 @@ class ShareWritesIssuedTest(ShareTestBase):
 
         self.assertEqual(self.issued_count(card), 1)
 
+    def test_sharing_a_single_card_writes_issued_with_the_share_channel(self):
+        """مراجعة: «`issued`… عند أول طباعة أو مشاركة» — والمشاركة المفردة منها."""
+        card = self.cert_card()
+
+        response = self.share(CARD, card.pk)
+
+        self.assertEqual(response.status_code, 201, response.content)
+        event = self.issued_events(card).get()
+        self.assertEqual(event.reason_code, "share")
+        self.assertEqual(event.actor_id, self.user.pk)
+
     def test_a_card_printed_before_keeps_its_print_event_and_gets_no_second(self):
         printed = self.cert_card(serial="SN-PRINTED")
         fresh = self.cert_card(serial="SN-FRESH")
