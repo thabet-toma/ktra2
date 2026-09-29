@@ -29,7 +29,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `sales` | دورة البيع (عرض ← طلبية ← فاتورة ← تسليم ← تحصيل) + سندات صرف المورّدين | 14,800 | 13,200 | `/api/sales/` |
 | `inventory` | المنتجات والمستودعات و`StockMovement` (المصدر الوحيد للرصيد) وطبقات كلفة FIFO (`fifo.py` — والمتوسّط مشتقٌّ منها للعرض) والأرقام التسلسلية وحالة المخزون وحدود التجديد | 9,300 | 8,300 | `/api/inventory/` |
 | `hr` | الموظفون والرواتب والحضور الجغرافي والورديات والعقود والطلبات والسلف والخدمة الذاتية | 7,700 | 4,500 | `/api/hr/` |
-| `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة**، ولبطاقة الكفالة صفحة تحقق **عامة بلا مصادقة** يفتحها الزبون بمسح QR (#237) | 6,700 | 9,500 | `/api/after-sales/` · `/api/w/` |
+| `after_sales` | بطاقات الكفالة وأوامر الصيانة — **وحدة مرخّصة**، ولبطاقة الكفالة صفحة تحقق **عامة بلا مصادقة** يفتحها الزبون بمسح QR (#237) | 6,900 | 9,900 | `/api/after-sales/` · `/api/w/` |
 | `employee_ops` | متابعة الموظفين: المهامّ والنقاط والتوظيف الآمن (تقديمٌ عام وسيرةٌ محميّة) — **وحدة مرخّصة، معزولة** | 5,700 | 5,500 | `/api/employee-ops/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 5,500 | 4,900 | `/api/accountant/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون **أو المورّد** (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها. ستة عشر نوعاً بجمهورين ومفتاحَي صلاحية | 3,700 | 3,000 | `/s/` · `/api/share/` · `/api/document-shares/` |
@@ -178,6 +178,7 @@ API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضاف
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |
 | مشاركة مستند برابط عام / معاينة واتساب | `modules/docshare.md` | `docshare/services.py` (`create_share`), `docshare/documents/` (`DOC_TYPES`) |
+| تمديد كفالة التاجر بأيام الصيانة عند التسليم ومعاينته (#243) | `modules/after_sales.md` | `after_sales/service_orders.py` (`delivery_effects`, `apply_shop_days_extension`), `after_sales/views.py` (`ServiceOrderViewSet.delivery_effects`), `frontend_v2/utils/warranty.ts` (`warrantyShopDaysLine`) |
 | ورقة إحالة الكفالة إلى الوكيل (#241) | `modules/after_sales.md` | `after_sales/certificates.py` (`LAYOUT_REFERRAL`), `after_sales/views.py` (`WarrantyCardViewSet.referral_slip`), `after_sales/services.py` (`mark_card_referred`) |
 | طباعة شهادة الكفالة A5 وسحب البطاقة اليدوية (#238) | `modules/after_sales.md` | `after_sales/certificates.py` (`certificate_context`), `after_sales/views.py` (`WarrantyCardViewSet.print_certificate`), `tenants/letterhead.py` (`company_card`) |
 | صفحة التحقق العامة من الكفالة (QR) وحلّ الرمز الممسوح (#237) | `modules/after_sales.md` | `after_sales/public_views.py` (`WarrantyVerifyPublicView`), `after_sales/verify.py` (`public_view_model`, `resolve_scan`) |

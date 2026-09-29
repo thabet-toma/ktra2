@@ -437,3 +437,28 @@ test('#242 — الروابط العميقة داخل الشاشتين القا�
   assert.equal(warrantyServiceOrderLink(7), '/after-sales/service-orders?order=7');
   assert.equal(warrantyCardLink(3), '/after-sales?card=3');
 });
+
+
+import { warrantyShopDaysLine } from './warranty.ts';
+import { formatNumber } from './formatNumber.ts';
+
+test('#243 — معاينة التسليم: التمديد يذكر الأيام والنهاية الجديدة', () => {
+  assert.equal(
+    warrantyShopDaysLine({ extends: true, days: 20, new_end: '2027-01-27', reason: '' }),
+    `ستُمدَّد كفالة التاجر ${formatNumber(20)} يوماً — النهاية الجديدة ${formatDateValue('2027-01-27')}`,
+  );
+});
+
+test('#243 — معاينة التسليم: عند عدم التمديد يُعرض السبب كما ردّه الخادم لا نصٌّ مخترَع', () => {
+  assert.equal(
+    warrantyShopDaysLine({ extends: false, days: 0, new_end: null, reason: 'أيام الصيانة صفر — لا تمديد.' }),
+    'أيام الصيانة صفر — لا تمديد.',
+  );
+});
+
+test('#243 — معاينة التسليم: بلا نهاية جديدة لا يبقى «—» معلَّقاً', () => {
+  assert.equal(
+    warrantyShopDaysLine({ extends: true, days: 3, new_end: null, reason: '' }),
+    `ستُمدَّد كفالة التاجر ${formatNumber(3)} يوماً`,
+  );
+});

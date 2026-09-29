@@ -34,7 +34,7 @@
         {% elif item.dealer.kind == "voided" %}<span class="stamp">{{ item.dealer.text }}{% if item.dealer.date %}<small>بتاريخ {{ item.dealer.date }}</small>{% endif %}{% if item.dealer.reason %}<small>السبب: {{ item.dealer.reason }}</small>{% endif %}</span>
         {% else %}
           <span class="to">{{ item.dealer.to }}</span>{% if item.dealer.expired %} <span class="stamp stamp-grey">{{ item.dealer.expired_text }}</span>{% endif %}
-          <span class="from">{{ item.dealer.months }}{% if item.dealer.from_ %} · من {{ item.dealer.from_ }}{% endif %}{% if item.dealer.extended_days %} · مُدِّدت {{ item.dealer.extended_days }} يوماً{% endif %}</span>
+          <span class="from">{{ item.dealer.months }}{% if item.dealer.from_ %} · من {{ item.dealer.from_ }}{% endif %}{% for line in item.dealer.extension_lines %} · {{ line }}{% endfor %}</span>
         {% endif %}
       </td>
       <td class="layer">

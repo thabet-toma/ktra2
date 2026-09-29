@@ -80,7 +80,7 @@ def _issuer_name(user) -> str:
     return user.get_full_name() or user.get_username()
 
 
-def _dealer_block(card, today, base_date, extension_days) -> dict:
+def _dealer_block(card, today, base_date, extension_lines) -> dict:
     if card.duration_months == 0 and card.end_date <= card.start_date:
         return {"kind": "none"}
     status = card.status_on(today)
@@ -94,7 +94,7 @@ def _dealer_block(card, today, base_date, extension_days) -> dict:
         "kind": "dates", "to": _fmt(card.end_date),
         "months": _months_text(card.duration_months),
         "from_": _from_text(card.start_date, base_date),
-        "extended_days": extension_days, "expired": False,
+        "extension_lines": extension_lines or [], "expired": False,
     }
     if status in (WarrantyCard.STATUS_EXPIRED, WarrantyCard.STATUS_ENDED):
         block["expired"] = True
@@ -118,19 +118,25 @@ def _manufacturer_block(card, today, base_date, refs) -> dict:
     return block
 
 
-def _extension_days_by_card(cards) -> dict:
-    """صافي أيام التمديد بسبب أيام الصيانة (`shop_days` مطروحاً منها عكسها) لكل بطاقة."""
+def _extension_lines_by_card(cards) -> dict:
+    """سطر «مُدِّدت N يوماً — صيانة SO-…» لكل أمرٍ مدَّد البطاقة، صافيَ عكسه (`shop_days_reversed`)."""
     events = WarrantyCardEvent.objects.filter(
         tenant_id=cards[0].tenant_id,
         card_id__in=[card.pk for card in cards],
         event_type=WarrantyCardEvent.TYPE_EXTEND,
         reason_code__in=_SHOP_DAYS_CODES,
-    ).values_list("card_id", "old_end_date", "new_end_date")
+    ).values_list("card_id", "service_order__order_number", "old_end_date", "new_end_date")
     net: dict = {}
-    for card_id, old, new in events:
+    for card_id, order_number, old, new in events:
         if old is not None and new is not None:
-            net[card_id] = net.get(card_id, 0) + (new - old).days
-    return {card_id: days for card_id, days in net.items() if days > 0}
+            key = (card_id, order_number or "")
+            net[key] = net.get(key, 0) + (new - old).days
+    lines: dict = {}
+    for (card_id, order_number), days in net.items():
+        if days > 0:
+            suffix = f" — صيانة {order_number}" if order_number else ""
+            lines.setdefault(card_id, []).append(f"مُدِّدت {days} يوماً{suffix}")
+    return lines
 
 
 def _terms_groups(cards, layout) -> list:
@@ -186,7 +192,7 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
         for card in cards
     }
 
-    extension = _extension_days_by_card(cards)
+    extension = _extension_lines_by_card(cards)
     qr_mm = QR_MM_ROW if layout == LAYOUT_INVOICE else QR_MM_SINGLE
     refs: dict = {}
     warrantors: dict = {}

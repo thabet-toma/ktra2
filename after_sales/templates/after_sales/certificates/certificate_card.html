@@ -29,7 +29,7 @@
       {% else %}
         <span class="dates">حتى {{ item.dealer.to }}</span>{% if item.dealer.expired %} <span class="stamp stamp-grey">{{ item.dealer.expired_text }}</span>{% endif %}
         {% if item.dealer.months %} · {{ item.dealer.months }}{% endif %}{% if item.dealer.from_ %} · من {{ item.dealer.from_ }}{% endif %}
-        {% if item.dealer.extended_days %}<span class="svc">مُدِّدت {{ item.dealer.extended_days }} يوماً</span>{% endif %}
+        {% for line in item.dealer.extension_lines %}<span class="svc">{{ line }}</span>{% endfor %}
         <span class="svc">نحن نصلّح: {{ company.company_name_primary }}{% if company.address %}، {{ company.address }}{% endif %}.</span>
       {% endif %}
     </div>

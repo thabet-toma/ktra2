@@ -979,6 +979,27 @@ export function transitionServiceOrder(
   return apiPostObject<ServiceOrderDetail>(`${ORDERS}${id}/transition/`, body, tenantOpts());
 }
 
+/** معاينة أثر التسليم على كفالة التاجر — بلا كتابة، ومن الدالة نفسها التي يطبّقها التسليم. */
+export interface DeliveryEffects {
+  extends: boolean;
+  days: number;
+  old_end: string | null;
+  new_end: string | null;
+  reason: string;
+  reason_code: string;
+  repair_warranty: unknown | null;
+}
+
+export function getServiceOrderDeliveryEffects(
+  id: number,
+  outcome: ServiceOrderOutcome,
+): Promise<DeliveryEffects> {
+  return apiGetObject<DeliveryEffects>(
+    `${ORDERS}${id}/delivery-effects/?outcome=${encodeURIComponent(outcome)}`,
+    tenantOpts(),
+  );
+}
+
 export function addServiceOrderNote(
   id: number,
   text: string,

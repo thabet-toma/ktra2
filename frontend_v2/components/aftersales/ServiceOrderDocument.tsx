@@ -11,6 +11,7 @@ import {
   detachServiceInvoice,
   generateServiceInvoice,
   getServiceOrder,
+  getServiceOrderDeliveryEffects,
   postCoveredParts,
   restoreServiceOrderCoverage,
   transitionServiceOrder,
@@ -40,6 +41,7 @@ import {
   manufacturerWarrantyLine,
   warrantyCardLink,
   warrantyCoveredQuantityLabel,
+  warrantyShopDaysLine,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
   WARRANTY_MIN_UNDO_REASON_CHARS,
@@ -149,6 +151,24 @@ export const ServiceOrderDocument: React.FC<Props> = ({
       .catch(() => { /* الافتراض «معطّل» يكفي عطباً — لا زر بلا نمطٍ معروف */ });
     return () => { cancelled = true; };
   }, []);
+
+  const [deliveryLine, setDeliveryLine] = useState("");
+  const previewKey = order && order.warranty_card !== null && !isTerminalStatus(order.status)
+    ? `${order.id}:${order.status}:${order.warranty_covered}:${outcome}`
+    : "";
+
+  useEffect(() => {
+    if (!previewKey) {
+      setDeliveryLine("");
+      return undefined;
+    }
+    let cancelled = false;
+    getServiceOrderDeliveryEffects(orderId, outcome)
+      .then((effects) => { if (!cancelled) setDeliveryLine(warrantyShopDaysLine(effects)); })
+      .catch(() => { if (!cancelled) setDeliveryLine(""); });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
 
   const absorb = useCallback((fresh: ServiceOrderDetail) => {
     setOrder(fresh);
@@ -503,6 +523,11 @@ export const ServiceOrderDocument: React.FC<Props> = ({
             {order.delivery_blockers.length > 0 && (
               <p className="text-[11px] text-amber-700 dark:text-amber-400" data-testid="delivery-blockers">
                 يمنع التسليم: {order.delivery_blockers.join(" · ")}
+              </p>
+            )}
+            {deliveryLine && (
+              <p className="basis-full text-[11px] text-[var(--color-text-muted)]" data-testid="delivery-effects">
+                {deliveryLine}
               </p>
             )}
           </div>

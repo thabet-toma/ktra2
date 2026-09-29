@@ -16,6 +16,7 @@
 الكتابة المحاسبية كلها عبر `accounting.api` — الواجهة العامة الوحيدة (المرحلة 2).
 """
 import logging
+from datetime import timedelta
 from decimal import Decimal
 
 from django.core.exceptions import ValidationError
@@ -29,15 +30,23 @@ from inventory.services import product_display_name, record_stock_movement
 
 from .models import (
     PHONE_KEY_LENGTH,
+    AfterSalesSettings,
     ServiceOrder,
     ServiceOrderEvent,
     ServiceOrderPart,
     WarrantyCard,
+    WarrantyCardEvent,
     looks_like_phone,
     phone_digits,
     phone_key_of,
 )
-from .services import MODULE_KEY, get_or_create_after_sales_settings, warranty_coverage
+from .services import (
+    MODULE_KEY,
+    _lock_card,
+    get_or_create_after_sales_settings,
+    log_warranty_event,
+    warranty_coverage,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +266,163 @@ def cancellation_blockers(order: ServiceOrder) -> list[str]:
     return blockers
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# التمديد بأيام الصيانة (#243) — المعاينة والتنفيذ يقرآن دالةً واحدة
+# ══════════════════════════════════════════════════════════════════════════
+
+SHOP_DAYS_OUTCOMES = (ServiceOrder.OUTCOME_REPAIRED, ServiceOrder.OUTCOME_UNREPAIRED)
+
+_SHOP_DAYS_REASONS = {
+    "already_extended": "مُدِّدت كفالة هذا الأمر من قبل — لا تمديد ثانٍ.",
+    "setting_off": "التمديد بأيام الصيانة معطّل في إعدادات الكفالة.",
+    "not_covered": "الأمر غير مغطى بالكفالة.",
+    "no_outcome": "حدّد نتيجة الصيانة لتظهر أيام التمديد.",
+    "ended": "البطاقة منتهية — لا تُمدَّد.",
+    "voided": "كفالة التاجر ملغاة — لا تُمدَّد.",
+    "quantity_card": "بطاقة كمية على فاتورة — لا تُمدَّد.",
+    "not_active_on_receipt": "كفالة التاجر لم تكن سارية يوم الاستلام — لا تمديد.",
+    "zero_days": "أيام الصيانة صفر — لا تمديد.",
+}
+
+
+def _local_date(moment):
+    return timezone.localtime(moment).date()
+
+
+def _shop_days_start(order):
+    """الأقدم بين تاريخ الأمر وتاريخ إنشائه — الأمر قد يُدخَل متأخراً بتاريخ استلامٍ سابق."""
+    return min(order.order_date, _local_date(order.created_at))
+
+
+def _shop_days_stop(order, delivery_date):
+    """آخر انتقال إلى «جاهز» قبل التسليم، وإلا يوم التسليم — انتظار الزبون لا يُحسب."""
+    ready = (
+        order.events
+        .filter(event_type=ServiceOrderEvent.TYPE_STATUS, to_status=ServiceOrder.STATUS_READY)
+        .order_by("-created_at", "-id")
+        .first()
+    )
+    return _local_date(ready.created_at) if ready is not None else delivery_date
+
+
+def _shop_days_extension_exists(order, card) -> bool:
+    return WarrantyCardEvent.objects.filter(
+        tenant_id=order.tenant_id, card=card, service_order=order,
+        event_type=WarrantyCardEvent.TYPE_EXTEND,
+        reason_code=WarrantyCardEvent.EXTEND_REASON_SHOP_DAYS,
+    ).exists()
+
+
+def _shop_days_enabled(tenant_id) -> bool:
+    row = AfterSalesSettings.objects.filter(tenant_id=tenant_id).first()
+    if row is None:
+        return AfterSalesSettings._meta.get_field("extend_for_shop_days").default
+    return row.extend_for_shop_days
+
+
+def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
+    """ما سيكتبه التسليم على كفالة التاجر — معاينةٌ خالصة لا تكتب شيئاً.
+
+    `apply_shop_days_extension` يقرأ هذه الدالة نفسها، فالمعاينة لا تخالف التنفيذ.
+    النتيجة تُختار في حوار التسليم قبل أن تُخزَّن على الأمر، فتُمرَّر هنا؛ وإلا
+    فنتيجة الأمر المخزّنة. `reason_code` فارغٌ حين يُمدَّد أو حين لا بطاقة.
+    `repair_warranty` محجوز لكفالة الإصلاح (#244).
+    """
+    result = {
+        "extends": False, "days": 0, "old_end": None, "new_end": None,
+        "reason": "", "reason_code": "", "repair_warranty": None,
+    }
+
+    def refuse(code, reason=None):
+        result["reason_code"] = code
+        result["reason"] = reason or _SHOP_DAYS_REASONS[code]
+        return result
+
+    card = order.warranty_card if order.warranty_card_id else None
+    if card is None:
+        result["reason_code"] = "no_card"
+        return result
+    if _shop_days_extension_exists(order, card):
+        return refuse("already_extended")
+    if not _shop_days_enabled(order.tenant_id):
+        return refuse("setting_off")
+    if not order.warranty_covered:
+        return refuse("not_covered")
+
+    outcome = order.outcome if outcome is None else outcome
+    if not outcome:
+        return refuse("no_outcome")
+    if outcome not in SHOP_DAYS_OUTCOMES:
+        label = dict(ServiceOrder.OUTCOME_CHOICES).get(outcome, outcome)
+        return refuse(
+            "outcome_not_extending", f"نتيجة الصيانة «{label}» — لا تمديد.",
+        )
+
+    if card.ended_on is not None:
+        return refuse("ended")
+    if card.voided_at is not None:
+        return refuse("voided")
+    if is_invoice_card(card) and card.quantity > 1:
+        return refuse("quantity_card")
+    if card.status_on(order.order_date) != WarrantyCard.STATUS_ACTIVE:
+        return refuse("not_active_on_receipt")
+
+    delivery_date = (
+        _local_date(order.delivered_at) if order.delivered_at else timezone.localdate()
+    )
+    days = (_shop_days_stop(order, delivery_date) - _shop_days_start(order)).days
+    if days <= 0:
+        return refuse("zero_days")
+
+    result.update(
+        extends=True, days=days, old_end=card.end_date,
+        new_end=card.end_date + timedelta(days=days),
+    )
+    return result
+
+
+def apply_shop_days_extension(order: ServiceOrder, *, user=None) -> dict:
+    """يمدّد كفالة التاجر بأيام الصيانة ويكتب أثره — يُنادى من معاملة التسليم.
+
+    خطأٌ هنا يُلغي التسليم كلَّه (المعاملة واحدة). يمدّد مرةً واحدة للأمر: الحدث
+    المربوط بالأمر هو الحارس، فاستدعاءٌ ثانٍ لا يكتب شيئاً. لا بطاقة ⇒ لا حدث.
+    """
+    if not order.warranty_card_id:
+        return delivery_effects(order)
+    order.warranty_card = _lock_card(order.warranty_card)
+    effects = delivery_effects(order)
+    if effects["reason_code"] in ("no_card", "already_extended"):
+        return effects
+
+    if effects["extends"]:
+        card = order.warranty_card
+        card.end_date = effects["new_end"]
+        card.save(update_fields=["end_date", "updated_at"])
+        log_warranty_event(
+            card,
+            event_type=WarrantyCardEvent.TYPE_EXTEND,
+            reason_code=WarrantyCardEvent.EXTEND_REASON_SHOP_DAYS,
+            text=f"أيام الصيانة — {order.order_number}",
+            service_order=order,
+            user=user,
+            old_end_date=effects["old_end"],
+            new_end_date=effects["new_end"],
+        )
+        text = (
+            f"مُدِّدت كفالة التاجر {effects['days']} يوماً حتى "
+            f"{effects['new_end'].strftime('%d/%m/%Y')}"
+        )
+    else:
+        text = f"لم تُمدَّد كفالة التاجر: {effects['reason']}"
+    log_event(order, event_type=ServiceOrderEvent.TYPE_WARRANTY, text=text, user=user)
+    logger.info(
+        "after_sales.shop_days tenant=%s order=%s extends=%s days=%s reason=%s",
+        order.tenant_id, order.pk, effects["extends"], effects["days"],
+        effects["reason_code"],
+    )
+    return effects
+
+
 @transaction.atomic
 def transition_status(
     order: ServiceOrder,
@@ -315,6 +481,8 @@ def transition_status(
         order, event_type=ServiceOrderEvent.TYPE_STATUS, text=text,
         from_status=current, to_status=to_status, user=user,
     )
+    if to_status == ServiceOrder.STATUS_DELIVERED:
+        apply_shop_days_extension(order, user=user)
     logger.info(
         "after_sales.order_transition tenant=%s order=%s %s→%s",
         order.tenant_id, order.pk, current, to_status,

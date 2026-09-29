@@ -933,6 +933,7 @@ _ORDER_ACTION_PERMS = {
     "update": ORDER_PERM_EDIT,
     "partial_update": ORDER_PERM_EDIT,
     "transition": ORDER_PERM_EDIT,
+    "delivery_effects": ORDER_PERM_VIEW,
     "add_note": ORDER_PERM_EDIT,
     "approve": ORDER_PERM_EDIT,
     "add_part": ORDER_PERM_EDIT,
@@ -1158,6 +1159,17 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as error:
             _reraise_as_drf(error)
         return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["get"], url_path="delivery-effects")
+    def delivery_effects(self, request, pk=None):
+        """معاينة أثر التسليم على كفالة التاجر قبل التأكيد — لا تكتب شيئاً (#243)."""
+        from .service_orders import delivery_effects
+
+        order = self.get_object()
+        outcome = (request.query_params.get("outcome") or "").strip()
+        if outcome and outcome not in {choice for choice, _ in ServiceOrder.OUTCOME_CHOICES}:
+            raise ValidationError({"outcome": f"نتيجة غير معروفة: {outcome}"})
+        return Response(delivery_effects(order, outcome or None))
 
     @action(detail=True, methods=["post"], url_path="refuse-coverage")
     def refuse_coverage(self, request, pk=None):

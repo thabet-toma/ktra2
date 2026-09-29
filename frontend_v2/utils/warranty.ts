@@ -494,6 +494,18 @@ export function warrantyTimelineEventText(event: {
   return line;
 }
 
+/** سطر معاينة التسليم: «ستُمدَّد كفالة التاجر N يوماً — النهاية الجديدة …» أو سبب عدم التمديد كما ردّه الخادم. */
+export function warrantyShopDaysLine(effects: {
+  extends: boolean;
+  days: number;
+  new_end: string | null;
+  reason: string;
+}): string {
+  if (!effects.extends) return effects.reason;
+  const end = effects.new_end ? ` — النهاية الجديدة ${formatDateValue(effects.new_end)}` : "";
+  return `ستُمدَّد كفالة التاجر ${formatNumber(effects.days)} يوماً${end}`;
+}
+
 /** روابط عميقة تستهلكها الشاشتان القائمتان (`?order=` و`?card=`) — بلا مسار جديد. */
 export const warrantyServiceOrderLink = (orderId: number): string =>
   `/after-sales/service-orders?order=${orderId}`;

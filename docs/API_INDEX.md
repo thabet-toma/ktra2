@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **958**
+عدد النقاط: **959**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -160,6 +160,7 @@
 | `/api/after-sales/service-orders/lookup/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/approve/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/delivery-effects/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/detach-invoice/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/generate-invoice/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/note/` | `ServiceOrderViewSet` | `after_sales/views.py` |
