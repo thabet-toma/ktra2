@@ -52,6 +52,9 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     verify_url = serializers.SerializerMethodField()
     # #238: «حذف» لبطاقةٍ لم يَرَها أحد، و«سحب» لمن صدرت للزبون أو لها أثر.
     can_delete = serializers.SerializerMethodField()
+    # #242: سجل الصيانات — لبطاقةٍ واحدة فقط (`with_service_history` في سياق العرض
+    # من الـviewset)، فالقائمة لا تحسبه لكل صفّ ولا تحمل المفتاح أصلاً.
+    service_history = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -68,7 +71,7 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "quantity", "returned_quantity", "covered_quantity",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
             "end_reason_label", "void", "verify_url", "can_delete",
-            "created_at", "updated_at",
+            "service_history", "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
         # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
@@ -78,6 +81,19 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "ended_on", "end_reason", "quantity", "returned_quantity",
             "created_at", "updated_at",
         ]
+
+    def get_service_history(self, obj):
+        if not self.context.get("with_service_history"):
+            return None
+        from .service_orders import card_service_history
+
+        return card_service_history(obj)
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if not self.context.get("with_service_history"):
+            data.pop("service_history", None)
+        return data
 
     def get_status(self, obj):
         return obj.status_on()
@@ -680,6 +696,8 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         card = obj.warranty_card if obj.warranty_card_id else None
         if card is None:
             return None
+        # #242: الطبقتان معاً — كفالة التاجر (`status`/`end_date`/`void`/`ended`) وكفالة
+        # المصنع (`manufacturer_*`، و`None` حين لا جهة). المفاتيح القديمة باقية.
         return {
             "id": card.pk,
             "coverage_refused": (
@@ -688,6 +706,16 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             "end_date": card.end_date,
             "status": card.status_on(),
             "days_remaining": card.days_remaining(),
+            "void": card.voided_at is not None,
+            "ended": card.ended_on is not None,
+            "manufacturer_status": card.manufacturer_status_on(),
+            "manufacturer_end_date": card.manufacturer_end_date,
+            "manufacturer_days_remaining": card.manufacturer_days_remaining(),
+            "manufacturer_warrantor_name": (
+                card.manufacturer_warrantor.name if card.manufacturer_warrantor_id else ""
+            ),
+            "quantity": card.quantity,
+            "covered_quantity": card.covered_quantity,
             "supplier_warranty_end_date": card.supplier_warranty_end_date,
             "supplier_warranty_active": card.supplier_active_on(),
         }

@@ -130,6 +130,12 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         if required:
             require_perm(request, required, tenant=self.tenant)
 
+    def get_serializer_context(self):
+        context = super().get_serializer_context()
+        # سجل الصيانات (#242) على تفصيل البطاقة وحده — لا يُحسب لكل صفّ في القائمة.
+        context["with_service_history"] = self.action == "retrieve"
+        return context
+
     # ── الاستعلام ─────────────────────────────────────────────────────────
     def get_queryset(self):
         queryset = (

@@ -36,13 +36,17 @@ import {
   sumParts,
 } from "../../utils/serviceOrder";
 import {
-  warrantyRemainingText,
+  dealerWarrantyLine,
+  manufacturerWarrantyLine,
+  warrantyCardLink,
+  warrantyCoveredQuantityLabel,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
   WARRANTY_MIN_UNDO_REASON_CHARS,
 } from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
 import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
+import { useNavigate } from "react-router-dom";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -106,6 +110,8 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const canPost = can("aftersales.order.post");
   const canUnpost = can("aftersales.order.unpost");
   const canVoid = can("aftersales.warranty.void");
+  const canOpenCard = can("aftersales.warranty.view");
+  const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -334,10 +340,45 @@ export const ServiceOrderDocument: React.FC<Props> = ({
           <span className={warrantyPillClass(order.warranty_status.status, order.warranty_status.days_remaining)}>
             {warrantyStatusLabel(order.warranty_status.status)}
           </span>
-          <span className="text-sm text-[var(--color-text)]">
-            الكفالة تنتهي {formatDateValue(order.warranty_status.end_date)} —{" "}
-            {warrantyRemainingText(order.warranty_status.status, order.warranty_status.days_remaining)}
-          </span>
+          {(() => {
+            const ws = order.warranty_status;
+            const manufacturerLine = manufacturerWarrantyLine(
+              ws.manufacturer_status,
+              ws.manufacturer_end_date,
+              ws.manufacturer_days_remaining,
+              ws.manufacturer_warrantor_name,
+            );
+            const lines = (
+              <>
+                <span className="block text-sm text-[var(--color-text)]" data-testid="warranty-banner-dealer">
+                  {dealerWarrantyLine(ws.status, ws.end_date, ws.days_remaining)}
+                </span>
+                {manufacturerLine && (
+                  <span className="block text-sm text-[var(--color-text)]" data-testid="warranty-banner-manufacturer">
+                    {manufacturerLine}
+                  </span>
+                )}
+                {ws.quantity > 0 && (
+                  <span className="block text-[11px] text-[var(--color-text-muted)]">
+                    {warrantyCoveredQuantityLabel(ws.covered_quantity, ws.quantity)}
+                  </span>
+                )}
+              </>
+            );
+            return canOpenCard ? (
+              <button
+                type="button"
+                onClick={() => navigate(warrantyCardLink(ws.id))}
+                className="text-start hover:underline"
+                title="فتح بطاقة الكفالة"
+                data-testid="warranty-banner-open-card"
+              >
+                {lines}
+              </button>
+            ) : (
+              <div>{lines}</div>
+            );
+          })()}
           {order.warranty_status.supplier_warranty_active && (
             <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
               كفالة المورد سارية حتى {formatDateValue(order.warranty_status.supplier_warranty_end_date)} — طالِب المورد بدل تحمّل الكلفة

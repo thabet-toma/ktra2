@@ -85,8 +85,31 @@ export interface WarrantyCardRow {
   verify_url: string;
   /** #238: «حذف» لبطاقةٍ لم يَرَها أحد، و«سحب» لغيرها — يقرّره الخادم لا الواجهة. */
   can_delete: boolean;
+  /** #242: سجل الصيانات — على تفصيل البطاقة (`getWarrantyCard`) وحده، لا صفوف القائمة. */
+  service_history?: WarrantyServiceHistory;
   created_at: string;
   updated_at: string;
+}
+
+/** #242: أمر صيانة في سجل البطاقة — `covered` = مغطّى بالكفالة لا مدفوع. */
+export interface WarrantyHistoryOrder {
+  id: number;
+  order_number: string;
+  order_date: string;
+  status: string;
+  status_label: string;
+  covered: boolean;
+  complaint: string;
+}
+
+export type WarrantyHistoryEntry =
+  | (WarrantyHistoryOrder & { kind: "order"; date: string; at: string })
+  | (WarrantyCardEventRow & { kind: "event"; date: string; at: string });
+
+/** الأحدث أولاً. `maybe_related` للعرض فقط — أوامر غير مربوطة بالرقم نفسه، لا يربطها شيء. */
+export interface WarrantyServiceHistory {
+  timeline: WarrantyHistoryEntry[];
+  maybe_related: WarrantyHistoryOrder[];
 }
 
 /** #236: من ألغى الكفالة ولماذا — يقرؤه الموظف فقط، ولا يخرج للصفحة العامة. */
@@ -391,10 +414,6 @@ export interface WarrantyCardEventRow {
   new_end_date: string | null;
   quantity: number | null;
   created_at: string;
-}
-
-export function getWarrantyCardEvents(id: number): Promise<WarrantyCardEventRow[]> {
-  return apiGetObject<WarrantyCardEventRow[]>(`${BASE}${id}/events/`, tenantOpts());
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -739,6 +758,15 @@ export interface ServiceOrderDetail extends ServiceOrderListRow {
     supplier_warranty_end_date: string | null;
     supplier_warranty_active: boolean;
     coverage_refused: boolean;
+    // #242: طبقتا الكفالة — التاجر (`status`) والمصنع (`manufacturer_*`، `null` حين لا جهة).
+    void: boolean;
+    ended: boolean;
+    manufacturer_status: WarrantyStatus | null;
+    manufacturer_end_date: string | null;
+    manufacturer_days_remaining: number | null;
+    manufacturer_warrantor_name: string;
+    quantity: number;
+    covered_quantity: number;
   } | null;
   supplier_claim: boolean;
   supplier_claim_note: string;

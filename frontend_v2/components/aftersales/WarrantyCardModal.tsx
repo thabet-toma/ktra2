@@ -5,7 +5,7 @@ import {
   createWarrantyCard,
   deleteWarrantyCard,
   extendWarrantyCard,
-  getWarrantyCardEvents,
+  getWarrantyCard,
   getWarrantyCardQr,
   lookupIntakeCard,
   printWarrantyCertificate,
@@ -17,8 +17,8 @@ import {
   withdrawWarrantyCard,
   type ManufacturerWarrantorRow,
   type WarrantyCardDraft,
-  type WarrantyCardEventRow,
   type WarrantyCardRow,
+  type WarrantyServiceHistory,
 } from "../../services/afterSalesApi";
 import {
   deriveWarrantyEnd,
@@ -26,11 +26,13 @@ import {
   manufacturerWarrantyStatusLabel,
   warrantyCardPrintable,
   warrantyCoveredQuantityLabel,
-  warrantyEventLabel,
+  warrantyOrderCoverageLabel,
   warrantyQrImageSrc,
   warrantyRemainingText,
   warrantyRemovalMode,
+  warrantyServiceOrderLink,
   warrantyStatusLabel,
+  warrantyTimelineEventText,
   warrantyUndoReasonValid,
   WARRANTY_MIN_UNDO_REASON_CHARS,
   WARRANTY_PRINT_BLOCKED_TEXT,
@@ -156,8 +158,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const [shortenEnd, setShortenEnd] = useState("");
   const [shortenReason, setShortenReason] = useState("");
   // #229: التمديد لم يعد يُلحق سطراً في `notes` — سجلّ الأحداث الإلحاقي هو
-  // مصدر التاريخ الآن، ويُقرأ من نقطته الخاصة لا من حقل البطاقة.
-  const [events, setEvents] = useState<WarrantyCardEventRow[]>([]);
+  // مصدر التاريخ الآن. #242: يصل مع أوامر الصيانة في `service_history` من تفصيل
+  // البطاقة (القائمة لا تحمله)، فلا قائمة أحداثٍ ثانية.
+  const [history, setHistory] = useState<WarrantyServiceHistory | null>(null);
+  const canViewOrders = can("aftersales.order.view");
 
   /* ISSUE #121: مسودّة محلية (IndexedDB) — «لُمِس» يُرفَع مزامنةً داخل كل
    * معالج تعديلٍ حقيقي (patch/pickProduct/pickCustomer وحقول التمديد)، لا
@@ -187,14 +191,14 @@ export const WarrantyCardModal: React.FC<Props> = ({
     setTouched(false);
   }, [card]);
 
-  const loadEvents = useCallback(async () => {
-    if (!card) { setEvents([]); return; }
+  const loadHistory = useCallback(async () => {
+    if (!card) { setHistory(null); return; }
     try {
-      setEvents(await getWarrantyCardEvents(card.id));
-    } catch { setEvents([]); /* السجل تفصيلٌ إضافي — فشل قراءته لا يمنع فتح البطاقة */ }
+      setHistory((await getWarrantyCard(card.id)).service_history ?? null);
+    } catch { setHistory(null); /* السجل تفصيلٌ إضافي — فشل قراءته لا يمنع فتح البطاقة */ }
   }, [card]);
 
-  useEffect(() => { void loadEvents(); }, [loadEvents]);
+  useEffect(() => { void loadHistory(); }, [loadHistory]);
 
   // #241: حكم الاستقبال يحسبه الخادم (`lookup/?card=`) — لا يُعاد حسابه هنا؛ فشل قراءته يُخفي زر الإحالة فقط.
   const [cardVerdict, setCardVerdict] = useState<IntakeVerdict | null>(null);
@@ -421,7 +425,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
       void discardDraft();
       toast(`تم التمديد حتى ${formatDateValue(saved.end_date)}`, "success");
       onChanged();
-      void loadEvents();
+      void loadHistory();
     } catch (e) {
       setErr(messageOf(e, "تعذّر تمديد الكفالة"));
     } finally {
@@ -494,7 +498,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
     try {
       const outcome = await printWarrantyReferralSlip(card.id);
       if (outcome === "blocked") setErr(WARRANTY_PRINT_BLOCKED_TEXT);
-      else void loadEvents();
+      else void loadHistory();
     } catch (e) {
       setErr(messageOf(e, "تعذّرت طباعة ورقة الإحالة"));
     }
@@ -1075,27 +1079,67 @@ export const WarrantyCardModal: React.FC<Props> = ({
             </div>
           )}
 
-          {/* #229: سجل الأحداث الإلحاقي — التمديد يظهر هنا بتاريخيه وسببه بدل
-              سطرٍ كان يُلحق بالملاحظات. */}
-          {card && events.length > 0 && (
-            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
-              <div className="mb-2 text-sm font-bold text-[var(--color-text)]">سجل البطاقة</div>
+          {/* #229 + #242: أوامر الصيانة المربوطة وأحداث البطاقة (التمديد…) في خطٍّ زمنيٍّ واحد. */}
+          {card && history && history.timeline.length > 0 && (
+            <div
+              className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+              data-testid="warranty-service-history"
+            >
+              <div className="mb-2 text-sm font-bold text-[var(--color-text)]">سجل الصيانات والأحداث</div>
               <ul className="space-y-1.5">
-                {events.map((event) => (
-                  <li key={event.id} className="text-[12px] text-[var(--color-text)]">
-                    <span className="text-[var(--color-text-muted)]">
-                      {formatDateValue(event.created_at)}
-                    </span>
+                {history.timeline.map((entry) => (
+                  <li
+                    key={`${entry.kind}-${entry.id}`}
+                    className="text-[12px] text-[var(--color-text)]"
+                    data-testid={`warranty-history-${entry.kind}`}
+                  >
+                    <span className="text-[var(--color-text-muted)]">{formatDateValue(entry.date)}</span>
                     {" — "}
-                    <span className="font-semibold">
-                      {warrantyEventLabel(event.event_type, event.reason_code, event.event_type_label)}
-                    </span>
-                    {event.old_end_date && event.new_end_date && (
-                      <span>
-                        {" "}: {formatDateValue(event.old_end_date)} ← {formatDateValue(event.new_end_date)}
-                      </span>
+                    {entry.kind === "order" ? (
+                      <>
+                        {canViewOrders ? (
+                          <button
+                            type="button"
+                            onClick={() => navigate(warrantyServiceOrderLink(entry.id))}
+                            className="font-semibold text-[var(--color-primary)] underline"
+                            data-testid="warranty-history-order-link"
+                          >
+                            {entry.order_number}
+                          </button>
+                        ) : (
+                          <span className="font-semibold">{entry.order_number}</span>
+                        )}
+                        <span> · {entry.status_label} · {warrantyOrderCoverageLabel(entry.covered)}</span>
+                        {entry.complaint && <span> — {entry.complaint}</span>}
+                      </>
+                    ) : (
+                      <>
+                        <span className="font-semibold">{warrantyTimelineEventText(entry)}</span>
+                        {entry.actor_name && (
+                          <span className="text-[var(--color-text-muted)]"> · {entry.actor_name}</span>
+                        )}
+                      </>
                     )}
-                    {event.text && <span> — {event.text}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {card && history && history.maybe_related.length > 0 && (
+            <div
+              className="rounded-lg border border-dashed border-[var(--color-border)] p-3 opacity-80"
+              data-testid="warranty-maybe-related"
+            >
+              <div className="mb-1 text-sm font-bold text-[var(--color-text-muted)]">ربما مرتبطة</div>
+              <div className="mb-2 text-[11px] text-[var(--color-text-muted)]">
+                أوامر بالرقم التسلسلي نفسه غير مربوطة بهذه البطاقة — للاطّلاع فقط.
+              </div>
+              <ul className="space-y-1">
+                {history.maybe_related.map((order) => (
+                  <li key={order.id} className="text-[12px] text-[var(--color-text-muted)]">
+                    {formatDateValue(order.order_date)} — {order.order_number} · {order.status_label}
+                    {order.complaint && <span> — {order.complaint}</span>}
                   </li>
                 ))}
               </ul>

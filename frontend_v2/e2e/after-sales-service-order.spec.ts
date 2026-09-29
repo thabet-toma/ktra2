@@ -175,6 +175,10 @@ const orderJson = (order: MockOrder) => ({
     ? {
         id: 1, end_date: "2027-08-01", status: "active", days_remaining: 300,
         supplier_warranty_end_date: null, supplier_warranty_active: false,
+        coverage_refused: false, void: false, ended: false,
+        manufacturer_status: null, manufacturer_end_date: null,
+        manufacturer_days_remaining: null, manufacturer_warrantor_name: "",
+        quantity: 1, covered_quantity: 1,
       }
     : null,
   supplier_claim: false,
@@ -400,7 +404,7 @@ test("رحلة كاملة: استقبال بتغطية ← إصلاح ← قطع
   // ── المستند: شريط التغطية ثم نقل الحالة ──────────────────────────────
   const doc = page.getByTestId("service-order-document");
   await expect(doc).toBeVisible();
-  await expect(doc.getByTestId("warranty-banner")).toContainText("الكفالة تنتهي");
+  await expect(doc.getByTestId("warranty-banner")).toContainText("كفالة التاجر تنتهي");
   await expect(doc).toContainText("SO-42-1");
 
   await doc.getByRole("button", { name: "قيد الإصلاح" }).click();

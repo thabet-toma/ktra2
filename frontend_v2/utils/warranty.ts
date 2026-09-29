@@ -12,6 +12,7 @@
  * يحسبه الخادم عند الإنشاء.
  */
 // الامتداد صريح: `node --test` يشغّل هذا الملف مباشرةً ولا يحلّ الاستيراد بدونه.
+import { formatDateValue } from "./formatDate.ts";
 import { formatNumber } from "./formatNumber.ts";
 
 /** مصدر البطاقة — تلقائية من ترحيل فاتورة بيع، أو يدوية أنشأها مستخدم. */
@@ -437,3 +438,63 @@ export function looksLikeWarrantyScan(text: string): boolean {
   const value = (text || "").trim();
   return /^[A-Za-z0-9_-]{22}$/.test(value) || /\/api\/w\/[A-Za-z0-9_-]{22}\/?(?:[?#].*)?$/.test(value);
 }
+
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * #242 — سجل الصيانات في البطاقة وشريط الكفالة بطبقتيه (نصوص عرضٍ خالصة)
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/**
+ * سطر كفالة التاجر في شريط أمر الصيانة. الملغاة والمنتهية بواقعة لا يُقرآن من
+ * تاريخٍ ولا أيام (نهايتهما قد تبقى في المستقبل) — نصّ `warrantyRemainingText` وحده.
+ */
+export function dealerWarrantyLine(
+  status: WarrantyStatus,
+  endIso: string | null,
+  daysRemaining: number,
+): string {
+  if (status === "voided" || status === "ended") {
+    return `كفالة التاجر: ${warrantyRemainingText(status, daysRemaining)}`;
+  }
+  return `كفالة التاجر تنتهي ${formatDateValue(endIso)} — ${warrantyRemainingText(status, daysRemaining)}`;
+}
+
+/** سطر كفالة المصنع — فارغٌ حين لا جهة (`null`/غائب): لا سطر يُرسم، لا «لا يوجد». */
+export function manufacturerWarrantyLine(
+  status: WarrantyStatus | null | undefined,
+  endIso: string | null,
+  daysRemaining: number | null,
+  warrantorName: string,
+): string {
+  if (!status) return "";
+  const who = warrantorName ? `كفالة المصنع (${warrantorName})` : "كفالة المصنع";
+  if (status === "voided" || status === "ended") {
+    return `${who}: ${warrantyRemainingText(status, daysRemaining ?? 0)}`;
+  }
+  return `${who} تنتهي ${formatDateValue(endIso)} — ${warrantyRemainingText(status, daysRemaining ?? 0)}`;
+}
+
+export const warrantyOrderCoverageLabel = (covered: boolean): string =>
+  covered ? "مغطّى بالكفالة" : "مدفوع";
+
+/** نص حدثٍ في السجل: «تمديد: من ← إلى — النص». */
+export function warrantyTimelineEventText(event: {
+  event_type: string;
+  event_type_label: string;
+  reason_code: string;
+  text: string;
+  old_end_date: string | null;
+  new_end_date: string | null;
+}): string {
+  let line = warrantyEventLabel(event.event_type, event.reason_code, event.event_type_label);
+  if (event.old_end_date && event.new_end_date) {
+    line += `: ${formatDateValue(event.old_end_date)} ← ${formatDateValue(event.new_end_date)}`;
+  }
+  if (event.text) line += ` — ${event.text}`;
+  return line;
+}
+
+/** روابط عميقة تستهلكها الشاشتان القائمتان (`?order=` و`?card=`) — بلا مسار جديد. */
+export const warrantyServiceOrderLink = (orderId: number): string =>
+  `/after-sales/service-orders?order=${orderId}`;
+export const warrantyCardLink = (cardId: number): string => `/after-sales?card=${cardId}`;

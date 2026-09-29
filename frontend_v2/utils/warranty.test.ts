@@ -374,3 +374,66 @@ test('#240 — رابط QR والرمز المجرّد يُحلّان بالمس
   assert.equal(looksLikeWarrantyScan('356938035643809'), false);
   assert.equal(looksLikeWarrantyScan(''), false);
 });
+
+
+import {
+  dealerWarrantyLine,
+  manufacturerWarrantyLine,
+  warrantyCardLink,
+  warrantyOrderCoverageLabel,
+  warrantyServiceOrderLink,
+  warrantyTimelineEventText,
+} from './warranty.ts';
+import { formatDateValue } from './formatDate.ts';
+
+test('#242 — سطر التاجر: تنتهي/انتهت بتاريخها، والملغاة والمنتهية بواقعة بلا تاريخ ولا عدّاد أيام', () => {
+  assert.equal(
+    dealerWarrantyLine('active', '2027-08-01', 300),
+    `كفالة التاجر تنتهي ${formatDateValue('2027-08-01')} — ${warrantyRemainingText('active', 300)}`,
+  );
+  assert.equal(
+    dealerWarrantyLine('expired', '2026-01-01', -10),
+    `كفالة التاجر تنتهي ${formatDateValue('2026-01-01')} — ${warrantyRemainingText('expired', -10)}`,
+  );
+  assert.equal(dealerWarrantyLine('voided', '2999-01-01', 900), `كفالة التاجر: ${warrantyRemainingText('voided', 900)}`);
+  assert.equal(dealerWarrantyLine('ended', '2999-01-01', 900), `كفالة التاجر: ${warrantyRemainingText('ended', 900)}`);
+});
+
+test('#242 — سطر المصنع: فارغ حين لا جهة، وإلا باسم الجهة ومستقلٌّ عن إلغاء التاجر', () => {
+  assert.equal(manufacturerWarrantyLine(null, null, null, ''), '');
+  assert.equal(manufacturerWarrantyLine(undefined, null, null, ''), '');
+  assert.equal(
+    manufacturerWarrantyLine('active', '2028-01-01', 400, 'وكيل لينوفو'),
+    `كفالة المصنع (وكيل لينوفو) تنتهي ${formatDateValue('2028-01-01')} — ${warrantyRemainingText('active', 400)}`,
+  );
+  assert.equal(
+    manufacturerWarrantyLine('ended', '2028-01-01', 400, 'وكيل لينوفو'),
+    `كفالة المصنع (وكيل لينوفو): ${warrantyRemainingText('ended', 400)}`,
+  );
+  // بلا اسم جهة لا أقواس فارغة.
+  assert.equal(
+    manufacturerWarrantyLine('active', '2028-01-01', 400, ''),
+    `كفالة المصنع تنتهي ${formatDateValue('2028-01-01')} — ${warrantyRemainingText('active', 400)}`,
+  );
+});
+
+test('#242 — أمر الصيانة في السجل: مغطّى بالكفالة أو مدفوع', () => {
+  assert.equal(warrantyOrderCoverageLabel(true), 'مغطّى بالكفالة');
+  assert.equal(warrantyOrderCoverageLabel(false), 'مدفوع');
+});
+
+test('#242 — حدث السجل: تسمية النوع (والتقصير لا يُقرأ تمديداً) ثم التواريخ ثم النص', () => {
+  const base = { event_type: 'extend', event_type_label: 'تمديد', reason_code: 'courtesy', text: 'مجاملة', old_end_date: null, new_end_date: null };
+  assert.equal(warrantyTimelineEventText(base), 'تمديد — مجاملة');
+  assert.equal(
+    warrantyTimelineEventText({ ...base, old_end_date: '2027-01-01', new_end_date: '2027-02-01' }),
+    `تمديد: ${formatDateValue('2027-01-01')} ← ${formatDateValue('2027-02-01')} — مجاملة`,
+  );
+  assert.equal(warrantyTimelineEventText({ ...base, reason_code: 'shorten', text: '' }), 'تقصير');
+  assert.equal(warrantyTimelineEventText({ ...base, event_type: 'void', event_type_label: 'إلغاء', text: '' }), 'إلغاء');
+});
+
+test('#242 — الروابط العميقة داخل الشاشتين القائمتين (لا مسار جديد في App.tsx)', () => {
+  assert.equal(warrantyServiceOrderLink(7), '/after-sales/service-orders?order=7');
+  assert.equal(warrantyCardLink(3), '/after-sales?card=3');
+});

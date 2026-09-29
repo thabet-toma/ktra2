@@ -1131,3 +1131,60 @@ def intake_lookup(tenant, term: str) -> dict:
 
 def module_is_enabled(tenant) -> bool:
     return module_enabled(tenant, MODULE_KEY)
+
+
+# ── سجل الصيانات في البطاقة (#242) ─────────────────────────────────────────
+def _order_row(order) -> dict:
+    return {
+        "id": order.pk,
+        "order_number": order.order_number,
+        "order_date": order.order_date,
+        "status": order.status,
+        "status_label": order.get_status_display(),
+        "covered": order.warranty_covered,
+        "complaint": order.complaint,
+    }
+
+
+def card_service_history(card) -> dict:
+    """ما حدث للجهاز: أوامر البطاقة وأحداثها في قائمة واحدة، الأحدث أولاً.
+
+    الترتيب باليوم (`order_date` للأمر، ويوم `created_at` للحدث) ثم بلحظة
+    الإنشاء ثم المعرّف — فيوم واحد يُرتَّب بما كُتب أولاً فعلاً لا بما اتّفق.
+    و`maybe_related` أوامرُ **غير مربوطة** بالرقم التسلسلي نفسه (مطابقة تامة)
+    للعرض فقط: لا يُربط شيء هنا ولا يُكتب. ثلاثة استعلامات ثابتة مهما كثر السجل.
+    """
+    from .models import WarrantyCardEvent
+    from .serializers import WarrantyCardEventSerializer
+
+    orders = list(
+        ServiceOrder.objects.filter(tenant_id=card.tenant_id, warranty_card=card)
+    )
+    events = list(
+        WarrantyCardEvent.objects
+        .filter(tenant_id=card.tenant_id, card=card)
+        .select_related("actor", "service_order")
+    )
+
+    entries = [
+        (order.order_date, order.created_at, order.pk,
+         {"kind": "order", "date": order.order_date, "at": order.created_at, **_order_row(order)})
+        for order in orders
+    ] + [
+        (timezone.localtime(event.created_at).date(), event.created_at, event.pk,
+         {"kind": "event", "date": timezone.localtime(event.created_at).date(),
+          "at": event.created_at, **WarrantyCardEventSerializer(event).data})
+        for event in events
+    ]
+    entries.sort(key=lambda entry: entry[:3], reverse=True)
+
+    maybe_related = []
+    # بطاقة الفاتورة (بالكمية) لا رقم لها — وبلا رقم لا مطابقة تُعتمد.
+    if card.serial.strip():
+        maybe_related = [
+            _order_row(order)
+            for order in ServiceOrder.objects
+            .filter(tenant_id=card.tenant_id, serial=card.serial, warranty_card__isnull=True)
+            .order_by("-order_date", "-id")
+        ]
+    return {"timeline": [entry[3] for entry in entries], "maybe_related": maybe_related}
