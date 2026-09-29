@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowRight, CheckCircle2, ClipboardList, Loader2, Plus, Receipt, RotateCcw,
-  ShieldCheck, Trash2, Wrench,
+  ShieldCheck, ShieldOff, Trash2, Wrench,
 } from "lucide-react";
 import {
   addServiceOrderNote,
@@ -12,6 +12,7 @@ import {
   generateServiceInvoice,
   getServiceOrder,
   postCoveredParts,
+  restoreServiceOrderCoverage,
   transitionServiceOrder,
   unpostCoveredParts,
   updateServiceOrder,
@@ -34,8 +35,14 @@ import {
   serviceStatusPillClass,
   sumParts,
 } from "../../utils/serviceOrder";
-import { warrantyRemainingText, warrantyStatusLabel } from "../../utils/warranty";
+import {
+  warrantyRemainingText,
+  warrantyStatusLabel,
+  warrantyUndoReasonValid,
+  WARRANTY_MIN_UNDO_REASON_CHARS,
+} from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
+import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -98,6 +105,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const canEdit = can("aftersales.order.edit");
   const canPost = can("aftersales.order.post");
   const canUnpost = can("aftersales.order.unpost");
+  const canVoid = can("aftersales.warranty.void");
   const toast = useToast();
   const confirm = useConfirm();
 
@@ -113,6 +121,8 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const [estimate, setEstimate] = useState("");
   const [waiver, setWaiver] = useState("");
   const [note, setNote] = useState("");
+  const [voidDialog, setVoidDialog] = useState<"void" | "refuse" | null>(null);
+  const [restoreReason, setRestoreReason] = useState("");
 
   const [newPart, setNewPart] = useState<{
     product: string; quantity: string; billing: PartBilling; unit_price: string;
@@ -332,6 +342,52 @@ export const ServiceOrderDocument: React.FC<Props> = ({
             <span className="text-[11px] text-emerald-700 dark:text-emerald-400">
               كفالة المورد سارية حتى {formatDateValue(order.warranty_status.supplier_warranty_end_date)} — طالِب المورد بدل تحمّل الكلفة
             </span>
+          )}
+          {/* #236: زرّان متجاوران بأثرين مختلفين — الأول لهذا العطل وحده والثاني للبطاقة كلّها. */}
+          {canVoid && !frozen && order.warranty_status.status !== "voided" && (
+            <div className="flex w-full flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-2">
+              {order.warranty_covered ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setVoidDialog("refuse")}
+                  className="inline-flex items-center gap-1 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+                >
+                  <ShieldOff className="h-3.5 w-3.5" /> رفض الكفالة لهذا العطل
+                </button>
+              ) : order.warranty_status.coverage_refused ? (
+                <>
+                  <input
+                    className="h-8 w-56 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-2 text-xs text-[var(--color-text)]"
+                    aria-label="سبب استعادة الكفالة لهذا العطل"
+                    placeholder={`سبب الاستعادة (${formatNumber(WARRANTY_MIN_UNDO_REASON_CHARS)} أحرف على الأقل)`}
+                    value={restoreReason}
+                    disabled={busy}
+                    onChange={(e) => setRestoreReason(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy || !warrantyUndoReasonValid(restoreReason)}
+                    onClick={() => void run(async () => {
+                      const fresh = await restoreServiceOrderCoverage(order.id, restoreReason.trim());
+                      setRestoreReason("");
+                      return fresh;
+                    }, "استُعيدت الكفالة لهذا العطل")}
+                    className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-xs font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50"
+                  >
+                    استعادة الكفالة لهذا العطل
+                  </button>
+                </>
+              ) : null}
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setVoidDialog("void")}
+                className="inline-flex items-center gap-1 rounded-lg border border-red-300 px-3 py-1.5 text-xs font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+              >
+                <ShieldOff className="h-3.5 w-3.5" /> إلغاء الكفالة
+              </button>
+            </div>
           )}
         </div>
       ) : (
@@ -915,6 +971,25 @@ export const ServiceOrderDocument: React.FC<Props> = ({
             <p className="p-4 text-center text-sm text-[var(--color-text-muted)]">لا أحداث بعد.</p>
           )}
         </section>
+      )}
+
+      {voidDialog === "refuse" && (
+        <WarrantyVoidDialog
+          mode="refuse"
+          orderId={order.id}
+          orderNumber={order.order_number}
+          onClose={() => setVoidDialog(null)}
+          onDone={() => { setVoidDialog(null); toast("رُفضت الكفالة لهذا العطل", "success"); void load(); onChanged?.(); }}
+        />
+      )}
+      {voidDialog === "void" && order.warranty_card !== null && (
+        <WarrantyVoidDialog
+          mode="void"
+          cardId={order.warranty_card}
+          serviceOrderId={order.id}
+          onClose={() => setVoidDialog(null)}
+          onDone={() => { setVoidDialog(null); toast("أُلغيت الكفالة", "success"); void load(); onChanged?.(); }}
+        />
       )}
     </div>
   );

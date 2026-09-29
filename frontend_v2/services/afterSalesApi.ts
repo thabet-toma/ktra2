@@ -78,8 +78,49 @@ export interface WarrantyCardRow {
   ended_on: string | null;
   end_reason: string;
   end_reason_label: string;
+  /** #236: إلغاء كفالة التاجر — `null` ما لم تُلغَ. */
+  void: WarrantyVoidInfo | null;
   created_at: string;
   updated_at: string;
+}
+
+/** #236: من ألغى الكفالة ولماذا — يقرؤه الموظف فقط، ولا يخرج للصفحة العامة. */
+export interface WarrantyVoidInfo {
+  reason: string;
+  reason_label: string;
+  note: string;
+  voided_at: string;
+  voided_by_name: string;
+  service_order_number: string | null;
+}
+
+/** ما يُرسَل لإلغاء الكفالة أو لرفضها لهذا العطل. */
+export interface WarrantyVoidInput {
+  reason: string;
+  note: string;
+  service_order?: number | null;
+}
+
+/** معاينة أثر الإلغاء (`GET void-impact/`) — تُحسب بالدالة نفسها التي تنفّذه. */
+export interface WarrantyVoidImpact {
+  card_id: number;
+  can_void: boolean;
+  blockers: string[];
+  orders: Array<{
+    id: number;
+    order_number: string;
+    status: string;
+    status_label: string;
+    returns_to_approval: boolean;
+    parts: Array<{
+      id: number;
+      product_name: string;
+      quantity: string;
+      unit_price: string;
+      will_bill_price: string;
+      empty_price: boolean;
+    }>;
+  }>;
 }
 
 /** ما يُرسَل عند إنشاء بطاقة يدوية أو تعديلها — المصدر والنسب من الخادم وحده. */
@@ -225,6 +266,29 @@ export function extendWarrantyCard(
   input: WarrantyExtendInput,
 ): Promise<WarrantyCardRow> {
   return apiPostObject<WarrantyCardRow>(`${BASE}${id}/extend/`, input, tenantOpts());
+}
+
+export function getWarrantyVoidImpact(id: number): Promise<WarrantyVoidImpact> {
+  return apiGetObject<WarrantyVoidImpact>(`${BASE}${id}/void-impact/`, tenantOpts());
+}
+
+export function voidWarrantyCard(id: number, input: WarrantyVoidInput): Promise<WarrantyCardRow> {
+  return apiPostObject<WarrantyCardRow>(`${BASE}${id}/void/`, input, tenantOpts());
+}
+
+export function unvoidWarrantyCard(id: number, reason: string): Promise<WarrantyCardRow> {
+  return apiPostObject<WarrantyCardRow>(`${BASE}${id}/unvoid/`, { reason }, tenantOpts());
+}
+
+/** تقصير نهاية كفالة التاجر — بصلاحية الإلغاء وسببٍ موثَّق (يُسجَّل بتاريخيه). */
+export function shortenWarrantyCard(
+  id: number,
+  endDate: string,
+  reason: string,
+): Promise<WarrantyCardRow> {
+  return apiPostObject<WarrantyCardRow>(
+    `${BASE}${id}/shorten/`, { end_date: endDate, reason }, tenantOpts(),
+  );
 }
 
 /** «هل هذه الوحدة تحت الكفالة؟» — من البطاقة ومن نسب الوحدة معاً. */
@@ -597,6 +661,7 @@ export interface ServiceOrderDetail extends ServiceOrderListRow {
     days_remaining: number;
     supplier_warranty_end_date: string | null;
     supplier_warranty_active: boolean;
+    coverage_refused: boolean;
   } | null;
   supplier_claim: boolean;
   supplier_claim_note: string;
@@ -770,6 +835,20 @@ export async function unpostCoveredParts(id: number): Promise<ServiceOrderDetail
     `${ORDERS}${id}/unpost-covered/`, {}, tenantOpts(),
   );
   return res.order;
+}
+
+/** «رفض الكفالة لهذا العطل» (#236): البطاقة تبقى سارية والأمر وحده يفقد التغطية. */
+export function refuseServiceOrderCoverage(
+  id: number,
+  input: Omit<WarrantyVoidInput, "service_order">,
+): Promise<ServiceOrderDetail> {
+  return apiPostObject<ServiceOrderDetail>(`${ORDERS}${id}/refuse-coverage/`, input, tenantOpts());
+}
+
+export function restoreServiceOrderCoverage(id: number, reason: string): Promise<ServiceOrderDetail> {
+  return apiPostObject<ServiceOrderDetail>(
+    `${ORDERS}${id}/restore-coverage/`, { reason }, tenantOpts(),
+  );
 }
 
 export interface GeneratedServiceInvoice {

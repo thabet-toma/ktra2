@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **945**
+عدد النقاط: **951**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -166,6 +166,8 @@
 | `/api/after-sales/service-orders/{pk}/parts/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/parts/{part_id}/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/post-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/refuse-coverage/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/restore-coverage/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/transition/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/unpost-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/settings/` | `AfterSalesSettingsView` | `after_sales/views.py` |
@@ -174,6 +176,10 @@
 | `/api/after-sales/warranties/{pk}/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/events/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/extend/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/shorten/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/unvoid/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/void-impact/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/void/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/bulk/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranty-policies/for-products/` | `WarrantyPolicyViewSet` | `after_sales/views.py` |

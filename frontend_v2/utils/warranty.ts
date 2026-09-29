@@ -22,7 +22,7 @@ export type WarrantySource = "auto_sale" | "manual";
  * دائماً — بطاقةٌ أُنهيت بمرجعٍ أو إلغاء ترحيلٍ لا تصير «سارية» أبداً حتى لو
  * بقي تاريخ انتهائها في المستقبل. وإلا فمشتقّةٌ من `end_date` كما كانت.
  */
-export type WarrantyStatus = "active" | "expired" | "ended";
+export type WarrantyStatus = "active" | "expired" | "ended" | "voided";
 
 /** كفالة سارية تنتهي خلال هذه المدة تُعرض بلون تنبيه لا بلون اطمئنان. */
 export const WARRANTY_NEAR_EXPIRY_DAYS = 30;
@@ -71,6 +71,8 @@ export const warrantyStatusLabel = (status: WarrantyStatus): string => {
   // #222: «غير سارية» لا «منتهية» — الانتهاء بواقعة (مرجع/إلغاء ترحيل) ليس
   // انقضاء مدّة، ولا يجوز أن تظهر بطاقة جهازٍ أُرجع «سارية» أبداً.
   if (status === "ended") return "غير سارية";
+  // #236: الإلغاء قرارُ التاجر (تلاعب/سوء استخدام) لا انقضاء مدّة ولا واقعة بيع.
+  if (status === "voided") return "ملغاة";
   return "منتهية";
 };
 
@@ -86,6 +88,7 @@ export function warrantyRemainingText(
   daysRemaining: number,
 ): string {
   if (status === "ended") return "لم تعد سارية";
+  if (status === "voided") return "أُلغيت — لا تغطي أعطالاً جديدة";
   const days = Number(daysRemaining) || 0;
   if (status !== "active") return `انتهت منذ ${formatNumber(Math.abs(days))} يوماً`;
   if (days === 0) return "تنتهي اليوم";
@@ -250,4 +253,70 @@ export function purchaseLineWarrantyProblem(value: PurchaseLineWarrantyValue): s
     return "اخترت جهة كفالة مصنع — حدّد مدتها بالأشهر، أو أزل الجهة.";
   }
   return null;
+}
+
+
+// ── #236: إلغاء كفالة التاجر ورفضها لهذا العطل ─────────────────────────────
+
+/** أسباب الإلغاء والرفض — مرآة `WarrantyCard.VOID_REASON_CHOICES` حرفياً. */
+export const WARRANTY_VOID_REASONS: ReadonlyArray<{ value: string; label: string }> = [
+  { value: "physical_damage", label: "ضرر مادي" },
+  { value: "liquid", label: "تعرّض لسوائل" },
+  { value: "opened_outside", label: "فُتح خارج المركز" },
+  { value: "tampered", label: "عبث بالأختام أو البرمجيات" },
+  { value: "misuse", label: "سوء استخدام" },
+  { value: "other", label: "أخرى" },
+];
+
+/** الحدّ الأدنى لسبب التراجع/التقصير — مرآة `MIN_UNDO_REASON_CHARS` في الخادم. */
+export const WARRANTY_MIN_UNDO_REASON_CHARS = 5;
+
+export const warrantyVoidReasonLabel = (reason: string): string =>
+  WARRANTY_VOID_REASONS.find((r) => r.value === reason)?.label ?? "";
+
+/** فحصٌ مبكّر يطابق الخادم: سببٌ من القائمة، و«أخرى» تستلزم ملاحظة. */
+export function warrantyVoidProblem(reason: string, note: string): string | null {
+  if (!reason) return "اختر سبب الإلغاء.";
+  if (!WARRANTY_VOID_REASONS.some((r) => r.value === reason)) return "سبب الإلغاء غير معروف.";
+  if (reason === "other" && !note.trim()) return "اكتب ملاحظة توضّح السبب حين يكون «أخرى».";
+  return null;
+}
+
+/** سبب التراجع أو التقصير: خمسة أحرف فعلية على الأقل بعد حذف الفراغ. */
+export const warrantyUndoReasonValid = (reason: string): boolean =>
+  (reason || "").trim().length >= WARRANTY_MIN_UNDO_REASON_CHARS;
+
+/**
+ * سجلّ البطاقة: التقصير يُسجَّل بنوع «تمديد» و`reason_code="shorten"`، فتسميةُ
+ * الخادم وحدها تقرؤه تمديداً — وهو عكسه.
+ */
+export const warrantyEventLabel = (
+  eventType: string,
+  reasonCode: string,
+  serverLabel: string,
+): string => (eventType === "extend" && reasonCode === "shorten" ? "تقصير" : serverLabel);
+
+export interface WarrantyVoidImpactPart {
+  product_name: string;
+  empty_price: boolean;
+}
+
+export interface WarrantyVoidImpactOrder {
+  order_number: string;
+  returns_to_approval: boolean;
+  parts: WarrantyVoidImpactPart[];
+}
+
+/** سطرٌ عربيّ لكل أمر صيانة يمسّه الإلغاء — يُعرض في نافذة المعاينة. */
+export function warrantyVoidImpactLine(order: WarrantyVoidImpactOrder): string {
+  const parts: string[] = [];
+  if (order.parts.length > 0) {
+    parts.push(`${formatNumber(order.parts.length)} قطعة تُحاسَب بسعر البيع`);
+  }
+  const empty = order.parts.filter((p) => p.empty_price).length;
+  if (empty > 0) {
+    parts.push(`${formatNumber(empty)} منها بلا سعر (صفر)`);
+  }
+  if (order.returns_to_approval) parts.push("يعود إلى انتظار الموافقة");
+  return `${order.order_number}: ${parts.length ? parts.join("، ") : "يفقد تغطية الكفالة"}`;
 }

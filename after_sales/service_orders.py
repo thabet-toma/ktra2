@@ -27,7 +27,7 @@ from core.modules import module_enabled
 from inventory.serials import assert_issue_serials_declared, issue_serials, unissue_serials
 from inventory.services import product_display_name, record_stock_movement
 
-from .models import ServiceOrder, ServiceOrderEvent, ServiceOrderPart
+from .models import ServiceOrder, ServiceOrderEvent, ServiceOrderPart, WarrantyCard
 from .services import MODULE_KEY, get_or_create_after_sales_settings, warranty_coverage
 
 logger = logging.getLogger(__name__)
@@ -353,6 +353,17 @@ def post_covered_parts(order: ServiceOrder, *, user=None) -> dict:
     if order.status in TERMINAL_STATUSES:
         raise ValidationError(
             f"الأمر في حالة «{order.get_status_display()}» — لا ترحيل بعدها."
+        )
+    # #236: الكفالة الملغاة أو المنتهية لا تُصرف عليها قطعٌ بمصروف كفالة، أيّاً كان
+    # ما بقي على الأمر من علامة التغطية.
+    card = order.warranty_card if order.warranty_card_id else None
+    if card is not None and card.status_on() in (
+        WarrantyCard.STATUS_VOIDED, WarrantyCard.STATUS_ENDED,
+    ):
+        raise ValidationError(
+            "بطاقة الكفالة "
+            + ("ملغاة" if card.status_on() == WarrantyCard.STATUS_VOIDED else "منتهية")
+            + " — لا تُرحَّل قطع مغطاة عليها. حوّل القطع إلى مفوترة."
         )
 
     parts = list(

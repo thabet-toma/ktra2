@@ -20,8 +20,10 @@
 """
 import logging
 from datetime import date, timedelta
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from django.db.models import Q, Sum
 from django.utils import timezone
 
@@ -31,6 +33,8 @@ from .models import (
     AfterSalesSettings,
     ManufacturerWarrantor,
     PurchaseLineWarranty,
+    ServiceOrder,
+    ServiceOrderEvent,
     WarrantyCard,
     WarrantyCardEvent,
     WarrantyPolicy,
@@ -895,6 +899,377 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
         "cards": summaries,
         "unit": unit_info,
     }
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# إلغاء كفالة التاجر ورفضها لهذا العطل وتقصيرها (#236)
+# ══════════════════════════════════════════════════════════════════════════
+
+MIN_UNDO_REASON_CHARS = 5
+_VOID_REASON_LABELS = dict(WarrantyCard.VOID_REASON_CHOICES)
+
+
+def _clean_void_reason(reason, note) -> tuple[str, str]:
+    reason = (reason or "").strip()
+    note = (note or "").strip()
+    if reason not in _VOID_REASON_LABELS:
+        raise ValidationError({"reason": "اختر سبباً من القائمة."})
+    if reason == WarrantyCard.VOID_OTHER and not note:
+        raise ValidationError({"note": "السبب «أخرى» يحتاج ملاحظةً تشرحه."})
+    return reason, note
+
+
+def _clean_undo_reason(reason) -> str:
+    reason = (reason or "").strip()
+    if len(reason) < MIN_UNDO_REASON_CHARS:
+        raise ValidationError(
+            {"reason": f"اكتب سبب التراجع ({MIN_UNDO_REASON_CHARS} أحرف على الأقل)."}
+        )
+    return reason
+
+
+def _reason_text(reason: str, note: str) -> str:
+    label = _VOID_REASON_LABELS.get(reason, reason)
+    return f"{label} — {note}" if note else label
+
+
+def _bill_price(part) -> tuple[Decimal, bool]:
+    """(السعر، هل هو فارغ) — سعر الأمر إن وُجد، وإلا سعر بيع المنتج، وإلا صفر.
+
+    يطابق ما تفعله الواجهة حين يحوّل الموظف قطعةً من «مغطاة» إلى «مفوترة».
+    """
+    unit = part.unit_price or Decimal("0")
+    if unit > 0:
+        return unit, False
+    sale = getattr(part.product, "sale_price", None) if part.product_id else None
+    if sale is not None and sale > 0:
+        return sale, False
+    return Decimal("0"), True
+
+
+def _pending_covered_parts(order) -> list:
+    return list(
+        order.parts.select_related("product")
+        .filter(billing="covered", materialized_at__isnull=True)
+        .order_by("id")
+    )
+
+
+def _posted_covered_count(order) -> int:
+    return order.parts.filter(billing="covered", materialized_at__isnull=False).count()
+
+
+def _card_blocker(card) -> str:
+    status = card.status_on()
+    if status == WarrantyCard.STATUS_VOIDED:
+        return "كفالة التاجر ملغاة أصلاً."
+    if status == WarrantyCard.STATUS_ENDED:
+        return "البطاقة منتهية — الكفالة لم تعد قائمة."
+    return ""
+
+
+def void_impact(card) -> dict:
+    """ما سيحدث لو أُلغيت الكفالة الآن — المعاينة والتنفيذ يقرآن هذه الدالة نفسها.
+
+    الأوامر المفتوحة وحدها (`delivered`/`cancelled` لا تُمسّ). أمرٌ فيه قطعٌ
+    مغطاة **مرحّلة** يمنع الإلغاء كلَّه: ترحيلها قيدٌ ومخزونٌ لا يُقلَب بصمت.
+    """
+    from inventory.services import product_display_name
+
+    from .service_orders import TERMINAL_STATUSES
+
+    blockers = []
+    card_blocker = _card_blocker(card)
+    if card_blocker:
+        blockers.append(card_blocker)
+
+    rows = []
+    open_orders = (
+        ServiceOrder.objects
+        .filter(tenant_id=card.tenant_id, warranty_card=card)
+        .exclude(status__in=TERMINAL_STATUSES)
+        .order_by("id")
+    )
+    for order in open_orders:
+        posted = _posted_covered_count(order)
+        if posted:
+            blockers.append(
+                f"الأمر {order.order_number or order.pk} فيه {posted} قطعة مغطاة مرحّلة — "
+                "تراجع عن ترحيلها أولاً."
+            )
+        pending = _pending_covered_parts(order)
+        if not (order.warranty_covered or pending):
+            continue
+        parts = []
+        for part in pending:
+            price, empty = _bill_price(part)
+            parts.append({
+                "id": part.pk,
+                "product_name": product_display_name(part.product),
+                "quantity": str(part.quantity),
+                "unit_price": str(part.unit_price),
+                "will_bill_price": str(price),
+                "empty_price": empty,
+            })
+        rows.append({
+            "id": order.pk,
+            "order_number": order.order_number,
+            "status": order.status,
+            "status_label": order.get_status_display(),
+            "returns_to_approval": order.status in (
+                ServiceOrder.STATUS_IN_REPAIR, ServiceOrder.STATUS_READY,
+            ),
+            "parts": parts,
+        })
+    return {
+        "card_id": card.pk,
+        "can_void": not blockers,
+        "blockers": blockers,
+        "orders": rows,
+    }
+
+
+def _bill_order_parts(order, *, user, headline: str) -> str:
+    """يُسقط تغطية الأمر: قطعه المغطاة غير المرحّلة تصير مفوترة، ويُسجَّل الأثر.
+
+    موافقة الزبون كانت على إصلاحٍ مجاني — فأمرٌ في الإصلاح أو الجاهزية يعود إلى
+    «بانتظار الموافقة» في الإلغاء والرفض معاً (قصة ٨٧).
+    """
+    from inventory.services import product_display_name
+
+    from .service_orders import log_event, transition_status
+
+    flipped = 0
+    empty_names = []
+    for part in _pending_covered_parts(order):
+        price, empty = _bill_price(part)
+        part.billing = "billable"
+        part.unit_price = price
+        part.save(update_fields=["billing", "unit_price"])
+        flipped += 1
+        if empty:
+            empty_names.append(product_display_name(part.product))
+
+    was_open_work = order.status in (
+        ServiceOrder.STATUS_IN_REPAIR, ServiceOrder.STATUS_READY,
+    )
+    order.warranty_covered = False
+    order.save(update_fields=["warranty_covered", "updated_at"])
+
+    lines = [headline]
+    if flipped:
+        lines.append(f"{flipped} قطعة صارت مفوترة على الزبون بسعر البيع")
+    if empty_names:
+        lines.append(
+            "بلا سعر (صفر): " + "، ".join(empty_names) + " — حدّد سعرها قبل الفوترة"
+        )
+    if was_open_work:
+        transition_status(
+            order, ServiceOrder.STATUS_AWAITING_APPROVAL, user=user,
+            note="سقوط الكفالة يغيّر التكلفة على الزبون",
+        )
+        order = ServiceOrder.objects.get(pk=order.pk)
+        order.approved_at = None
+        order.approved_by = None
+        order.save(update_fields=["approved_at", "approved_by", "updated_at"])
+        lines.append("عاد الأمر إلى «بانتظار الموافقة» — يوافق الزبون على التكلفة من جديد")
+
+    summary = " — ".join(lines)
+    log_event(order, event_type=ServiceOrderEvent.TYPE_WARRANTY, text=summary, user=user)
+    return summary
+
+
+@transaction.atomic
+def void_dealer_warranty(card, *, reason, note="", user=None, service_order=None):
+    """يُلغي كفالة التاجر لهذه البطاقة (المصنع لا يُمسّ) ويُسقط تغطية أوامرها المفتوحة."""
+    reason, note = _clean_void_reason(reason, note)
+    card = WarrantyCard.objects.select_for_update().get(
+        pk=card.pk, tenant_id=card.tenant_id,
+    )
+    if service_order is not None and (
+        service_order.tenant_id != card.tenant_id
+        or service_order.warranty_card_id != card.pk
+    ):
+        raise ValidationError({"service_order": "أمر الصيانة ليس على بطاقة الكفالة هذه."})
+
+    impact = void_impact(card)
+    if not impact["can_void"]:
+        raise ValidationError(" • ".join(impact["blockers"]))
+
+    headline = "أُلغيت كفالة التاجر — " + _reason_text(reason, note)
+    for row in impact["orders"]:
+        order = ServiceOrder.objects.select_for_update().get(
+            pk=row["id"], tenant_id=card.tenant_id,
+        )
+        _bill_order_parts(order, user=user, headline=headline)
+
+    card.voided_at = timezone.now()
+    card.voided_by = user if (user is not None and getattr(user, "is_authenticated", False)) else None
+    card.void_reason = reason
+    card.void_note = note
+    card.void_service_order = service_order
+    card.save(update_fields=[
+        "voided_at", "voided_by", "void_reason", "void_note", "void_service_order",
+        "updated_at",
+    ])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_VOID, reason_code=reason,
+        text=_reason_text(reason, note), service_order=service_order, user=user,
+    )
+    logger.info(
+        "after_sales.warranty_voided tenant=%s card=%s reason=%s orders=%s",
+        card.tenant_id, card.pk, reason, len(impact["orders"]),
+    )
+    return card
+
+
+@transaction.atomic
+def unvoid_dealer_warranty(card, *, reason, user=None):
+    """التراجع عن الإلغاء — القطع التي تحوّلت إلى مفوترة **لا** تعود مغطاة."""
+    reason = _clean_undo_reason(reason)
+    card = WarrantyCard.objects.select_for_update().get(
+        pk=card.pk, tenant_id=card.tenant_id,
+    )
+    if card.voided_at is None:
+        raise ValidationError("كفالة التاجر ليست ملغاة.")
+    previous = _reason_text(card.void_reason, card.void_note)
+    card.voided_at = None
+    card.voided_by = None
+    card.void_reason = ""
+    card.void_note = ""
+    card.void_service_order = None
+    card.save(update_fields=[
+        "voided_at", "voided_by", "void_reason", "void_note", "void_service_order",
+        "updated_at",
+    ])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_UNVOID,
+        text=f"{reason} (سبب الإلغاء السابق: {previous})", user=user,
+    )
+    return card
+
+
+def _lock_order_with_card(order):
+    from .service_orders import TERMINAL_STATUSES
+
+    order = ServiceOrder.objects.select_for_update().get(
+        pk=order.pk, tenant_id=order.tenant_id,
+    )
+    if not order.warranty_card_id:
+        raise ValidationError("الأمر غير مرتبط ببطاقة كفالة.")
+    if order.status in TERMINAL_STATUSES:
+        raise ValidationError(
+            f"الأمر في حالة «{order.get_status_display()}» النهائية — لا يُعدَّل فيه."
+        )
+    return order, order.warranty_card
+
+
+def order_coverage_refused(order, card) -> bool:
+    """هل آخر حدثٍ (رفض/استعادة) لهذا الأمر على هذه البطاقة رفضٌ؟ — تقرؤها الاستعادة والواجهة."""
+    last = (
+        WarrantyCardEvent.objects
+        .filter(
+            tenant_id=card.tenant_id, card=card, service_order=order,
+            event_type__in=[
+                WarrantyCardEvent.TYPE_COVERAGE_REFUSED,
+                WarrantyCardEvent.TYPE_COVERAGE_RESTORED,
+            ],
+        )
+        .order_by("-created_at", "-id")
+        .values_list("event_type", flat=True)
+        .first()
+    )
+    return last == WarrantyCardEvent.TYPE_COVERAGE_REFUSED
+
+
+@transaction.atomic
+def refuse_order_coverage(order, *, reason, note="", user=None):
+    """«رفض الكفالة لهذا العطل» — على الأمر لا على البطاقة؛ البطاقة تبقى فعّالة."""
+    reason, note = _clean_void_reason(reason, note)
+    order, card = _lock_order_with_card(order)
+    blocker = _card_blocker(card)
+    if blocker:
+        raise ValidationError(blocker)
+    label = order.order_number or order.pk
+    if _posted_covered_count(order):
+        raise ValidationError(
+            f"الأمر {label} فيه قطع مغطاة مرحّلة — تراجع عن ترحيلها أولاً."
+        )
+    if not (order.warranty_covered or _pending_covered_parts(order)):
+        raise ValidationError(f"الأمر {label} ليس مغطى بالكفالة أصلاً.")
+
+    text = _reason_text(reason, note)
+    _bill_order_parts(
+        order, user=user, headline="رُفضت الكفالة لهذا العطل — " + text,
+    )
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_COVERAGE_REFUSED,
+        reason_code=reason, text=text, service_order=order, user=user,
+    )
+    return order
+
+
+@transaction.atomic
+def restore_order_coverage(order, *, reason, user=None):
+    """استعادة التغطية لأمرٍ رُفضت كفالته — القطع المفوترة **لا** تعود مغطاة."""
+    from .service_orders import log_event
+
+    reason = _clean_undo_reason(reason)
+    order, card = _lock_order_with_card(order)
+    blocker = _card_blocker(card)
+    if blocker:
+        raise ValidationError(
+            "لا تُستعاد التغطية على هذه البطاقة: " + blocker.rstrip(".")
+            + " — تراجع عن الإلغاء أولاً إن كان هو السبب."
+        )
+    if not order_coverage_refused(order, card):
+        raise ValidationError(
+            f"لم تُرفض الكفالة على الأمر {order.order_number or order.pk} كي تُستعاد."
+        )
+    order.warranty_covered = True
+    order.save(update_fields=["warranty_covered", "updated_at"])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_COVERAGE_RESTORED,
+        text=reason, service_order=order, user=user,
+    )
+    log_event(
+        order, event_type=ServiceOrderEvent.TYPE_WARRANTY, user=user,
+        text=f"استُعيدت الكفالة لهذا العطل — {reason} (القطع المفوترة تبقى مفوترة)",
+    )
+    return order
+
+
+@transaction.atomic
+def shorten_dealer_warranty(card, *, end_date, reason, user=None):
+    """تقصير نهاية كفالة التاجر — قرارٌ موثَّق بسببه، وليس «تمديداً» بتاريخ أقصر."""
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({"reason": "سبب التقصير مطلوب."})
+    card = WarrantyCard.objects.select_for_update().get(
+        pk=card.pk, tenant_id=card.tenant_id,
+    )
+    blocker = _card_blocker(card)
+    if blocker:
+        raise ValidationError(blocker)
+    if end_date >= card.end_date:
+        raise ValidationError({
+            "end_date": (
+                f"التقصير يُقدّم النهاية — التاريخ الجديد ({end_date}) ليس قبل "
+                f"نهايتها الحالية ({card.end_date})."
+            )
+        })
+    if end_date < card.start_date:
+        raise ValidationError({"end_date": "لا تسبق النهايةُ بدايةَ الكفالة."})
+    old_end = card.end_date
+    card.end_date = end_date
+    card.save(update_fields=["end_date", "updated_at"])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_EXTEND,
+        reason_code=WarrantyCardEvent.EXTEND_REASON_SHORTEN,
+        text=f"تقصير الكفالة من {old_end} إلى {end_date} — {reason}",
+        user=user, old_end_date=old_end, new_end_date=end_date,
+    )
+    return card
 
 
 # ══════════════════════════════════════════════════════════════════════════

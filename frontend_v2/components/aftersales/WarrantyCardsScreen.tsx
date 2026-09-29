@@ -245,6 +245,8 @@ export const WarrantyCardsScreen: React.FC = () => {
               <option value="expired">منتهية</option>
               {/* #222: غير سارية بواقعة — أُرجع الجهاز أو أُلغي ترحيل بيعه */}
               <option value="ended">غير سارية</option>
+              {/* #236: ألغاها التاجر (تلاعب/سوء استخدام) */}
+              <option value="voided">ملغاة</option>
             </select>
           </div>
           <div>
@@ -445,6 +447,7 @@ export const WarrantyCardsScreen: React.FC = () => {
         <WarrantyCardModal
           card={openCard === "new" ? null : openCard}
           canManage={canManage}
+          canVoid={can("aftersales.warranty.void")}
           products={products}
           customers={customers}
           suppliers={suppliers}

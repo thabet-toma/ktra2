@@ -46,6 +46,8 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     # الخادم وحده (ترحيل البيع والمرجع)، و`covered_quantity` محسوبةٌ لا
     # مخزَّنة أبداً. صفرٌ على بطاقة وحدة مُرقَّمة — لا معنى له هناك.
     covered_quantity = serializers.SerializerMethodField()
+    # #236: إلغاء كفالة التاجر — `null` ما لم تكن ملغاة. من مسار الإلغاء وحده.
+    void = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -61,7 +63,7 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "manufacturer_end_date", "manufacturer_status", "manufacturer_days_remaining",
             "quantity", "returned_quantity", "covered_quantity",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
-            "end_reason_label", "created_at", "updated_at",
+            "end_reason_label", "void", "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
         # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
@@ -92,6 +94,20 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
 
     def get_covered_quantity(self, obj):
         return obj.covered_quantity
+
+    def get_void(self, obj):
+        if obj.voided_at is None:
+            return None
+        by = obj.voided_by
+        order = obj.void_service_order
+        return {
+            "reason": obj.void_reason,
+            "reason_label": obj.get_void_reason_display(),
+            "note": obj.void_note,
+            "voided_at": obj.voided_at,
+            "voided_by_name": (by.get_full_name() or by.username) if by else "",
+            "service_order_number": (order.order_number or str(order.pk)) if order else "",
+        }
 
     def get_product_name(self, obj):
         if not obj.product_id:
@@ -260,6 +276,27 @@ class WarrantyExtendSerializer(serializers.Serializer):
                 )
             })
         return new_end
+
+
+class WarrantyVoidSerializer(serializers.Serializer):
+    """جسم إلغاء الكفالة أو رفضها لهذا العطل — السبب والملاحظة تتحقّق منهما الخدمة."""
+
+    reason = serializers.CharField(required=False, allow_blank=True, default="", max_length=20)
+    note = serializers.CharField(required=False, allow_blank=True, default="", max_length=1000)
+    service_order = serializers.IntegerField(required=False, allow_null=True, default=None)
+
+
+class WarrantyUndoSerializer(serializers.Serializer):
+    """جسم التراجع عن الإلغاء أو عن رفض التغطية — السبب إلزامي (الخدمة تفحص طوله)."""
+
+    reason = serializers.CharField(required=False, allow_blank=True, default="", max_length=300)
+
+
+class WarrantyShortenSerializer(serializers.Serializer):
+    """تقصير النهاية: تاريخٌ صريح وسببٌ موثَّق — لا أشهرٌ تُضاف كما في التمديد."""
+
+    end_date = serializers.DateField()
+    reason = serializers.CharField(required=False, allow_blank=True, default="", max_length=300)
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -582,11 +619,16 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         return ServiceOrderEventSerializer(obj.events.all(), many=True).data
 
     def get_warranty_status(self, obj):
+        from .services import order_coverage_refused
+
         card = obj.warranty_card if obj.warranty_card_id else None
         if card is None:
             return None
         return {
             "id": card.pk,
+            "coverage_refused": (
+                not obj.warranty_covered and order_coverage_refused(obj, card)
+            ),
             "end_date": card.end_date,
             "status": card.status_on(),
             "days_remaining": card.days_remaining(),
@@ -633,6 +675,15 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError(
                 {"estimated_amount": "التقدير لا يكون سالباً."}
             )
+
+        # #236: الحارس الدائم — أمرٌ على بطاقةٍ ملغاة لا يحمل علامة «مغطى».
+        card = attrs.get("warranty_card", getattr(instance, "warranty_card", None))
+        covered = attrs.get("warranty_covered", getattr(instance, "warranty_covered", False))
+        touched = "warranty_covered" in attrs or "warranty_card" in attrs
+        if touched and covered and card is not None and card.status_on() == card.STATUS_VOIDED:
+            raise serializers.ValidationError({
+                "warranty_covered": "كفالة التاجر لهذه البطاقة ملغاة — لا يُعلَّم الأمر «مغطى بالكفالة»."
+            })
         return attrs
 
 

@@ -45,21 +45,28 @@ def _days_in_month(year: int, month: int) -> int:
 class WarrantyCardQuerySet(models.QuerySet):
     """كل فلترة على `end_date` تمرّ من هنا — لا مقارنة حرّة في مكان آخر (#229).
 
-    الثلاثة لا تستثني إلا المنتهية بواقعة (`ended_on`): بطاقةٌ ملغاة تبقى
-    خارج نطاق هذا الملف — حقولها (`voided_at`…) لم تُضَف بعد (#236)، وتذكرة
-    الإلغاء هي من تُضيف `voided()` حين تُبنى الحقول فعلاً.
+    `active_on` و`expired_on` لا تُعدّان المنتهية بواقعة (`ended_on`) ولا
+    الملغاة (`voided_at`، #236)؛ و`voided()` الملغاة غير المنتهية — الانتهاء
+    يغلب الإلغاء إن اجتمعا، كما في `WarrantyCard.status_on`.
     """
 
     def active_on(self, today: date | None = None):
         today = today or timezone.localdate()
-        return self.filter(ended_on__isnull=True, end_date__gte=today)
+        return self.filter(
+            ended_on__isnull=True, voided_at__isnull=True, end_date__gte=today,
+        )
 
     def expired_on(self, today: date | None = None):
         today = today or timezone.localdate()
-        return self.filter(ended_on__isnull=True, end_date__lt=today)
+        return self.filter(
+            ended_on__isnull=True, voided_at__isnull=True, end_date__lt=today,
+        )
 
     def ended(self):
         return self.filter(ended_on__isnull=False)
+
+    def voided(self):
+        return self.filter(ended_on__isnull=True, voided_at__isnull=False)
 
 
 class WarrantyCard(models.Model):
@@ -110,6 +117,23 @@ class WarrantyCard(models.Model):
     STATUS_ACTIVE = "active"
     STATUS_EXPIRED = "expired"
     STATUS_ENDED = "ended"
+    STATUS_VOIDED = "voided"
+
+    #: أسباب إلغاء كفالة التاجر ورفضها لهذا العطل (#236) — قائمةٌ واحدة للفعلين.
+    VOID_PHYSICAL_DAMAGE = "physical_damage"
+    VOID_LIQUID = "liquid"
+    VOID_OPENED_OUTSIDE = "opened_outside"
+    VOID_TAMPERED = "tampered"
+    VOID_MISUSE = "misuse"
+    VOID_OTHER = "other"
+    VOID_REASON_CHOICES = [
+        (VOID_PHYSICAL_DAMAGE, "ضرر مادي"),
+        (VOID_LIQUID, "تعرّض لسوائل"),
+        (VOID_OPENED_OUTSIDE, "فُتح خارج المركز"),
+        (VOID_TAMPERED, "عبث بالأختام أو البرمجيات"),
+        (VOID_MISUSE, "سوء استخدام"),
+        (VOID_OTHER, "أخرى"),
+    ]
 
     objects = WarrantyCardQuerySet.as_manager()
 
@@ -205,6 +229,24 @@ class WarrantyCard(models.Model):
         help_text="بند مرجع البيع الذي أنهى البطاقة — ومنه يُحييها إلغاءُ ترحيله",
     )
 
+    # ── إلغاء كفالة التاجر (#236) ─────────────────────────────────────────
+    # طبقة التاجر وحدها: كفالة المصنع لا تُمسّ. واقعةٌ مؤرَّخة لا عمود حالة —
+    # `status_on` تشتقّ منها، والانتهاء (`ended_on`) يغلبها إن اجتمعا.
+    voided_at = models.DateTimeField(null=True, blank=True)
+    voided_by = models.ForeignKey(
+        "auth.User", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="voided_warranty_cards",
+    )
+    void_reason = models.CharField(
+        max_length=20, choices=VOID_REASON_CHOICES, blank=True, default="",
+    )
+    void_note = models.TextField(blank=True, default="")
+    void_service_order = models.ForeignKey(
+        "ServiceOrder", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="voided_warranty_cards",
+        help_text="أمر الصيانة الذي أُلغيت الكفالة من داخله، إن وُجد",
+    )
+
     notes = models.TextField(blank=True, default="")
     # #231: الشروط المجمَّدة لحظة الإنشاء — من `WarrantyPolicy.terms_override`
     # وإلا `AfterSalesSettings.default_terms`. لا تتغيّر بتعديل السياسة لاحقاً؛
@@ -231,8 +273,8 @@ class WarrantyCard(models.Model):
 
     # ── الحالة مشتقّة، لا مخزّنة ──────────────────────────────────────────
     def is_active_on(self, today: date | None = None) -> bool:
-        """داخل المدّة **وغير منتهية بواقعة** — سؤالٌ واحد لا سؤالان."""
-        if self.ended_on is not None:
+        """داخل المدّة **وغير منتهية بواقعة ولا ملغاة** — سؤالٌ واحد لا أسئلة."""
+        if self.ended_on is not None or self.voided_at is not None:
             return False
         return self.end_date >= (today or timezone.localdate())
 
@@ -240,13 +282,16 @@ class WarrantyCard(models.Model):
         return (self.end_date - (today or timezone.localdate())).days
 
     def status_on(self, today: date | None = None) -> str:
-        """`ended` أولاً ثم `active`/`expired` — الواقعة تغلب التاريخ.
+        """`ended` ثم `voided` ثم `active`/`expired` — الواقعة تغلب التاريخ.
 
         بطاقةٌ أُنهيت بمرجعٍ قد تبقى مدّتها سارية شهوراً؛ الجواب «غير سارية»
-        لا «سارية»، وإلا قال الاستقبال «مغطّى» عن جهازٍ في المخزن.
+        لا «سارية»، وإلا قال الاستقبال «مغطّى» عن جهازٍ في المخزن. و`voided`
+        لطبقة التاجر وحدها (#236) — `manufacturer_status_on` لا تقرؤه.
         """
         if self.ended_on is not None:
             return self.STATUS_ENDED
+        if self.voided_at is not None:
+            return self.STATUS_VOIDED
         return (
             self.STATUS_ACTIVE if self.end_date >= (today or timezone.localdate())
             else self.STATUS_EXPIRED
@@ -329,6 +374,9 @@ class WarrantyCardEvent(models.Model):
     EXTEND_REASON_COURTESY = "courtesy"
     EXTEND_REASON_SHOP_DAYS = "shop_days"
     EXTEND_REASON_SHOP_DAYS_REVERSED = "shop_days_reversed"
+    #: التقصير (#236) يُسجَّل بنوع `extend` نفسه ويتميّز بهذا الرمز، فتعرضه الواجهة
+    #: «تقصير» لا «تمديد» ولا يحتاج نوعاً جديداً في الترحيل.
+    EXTEND_REASON_SHORTEN = "shorten"
 
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="warranty_card_events",
@@ -557,6 +605,7 @@ class ServiceOrderEvent(models.Model):
     TYPE_POSTING = "posting"
     TYPE_INVOICE = "invoice"
     TYPE_APPROVAL = "approval"
+    TYPE_WARRANTY = "warranty"
     TYPE_CHOICES = [
         (TYPE_STATUS, "تغيير حالة"),
         (TYPE_NOTE, "ملاحظة"),
@@ -564,6 +613,7 @@ class ServiceOrderEvent(models.Model):
         (TYPE_POSTING, "ترحيل"),
         (TYPE_INVOICE, "فوترة"),
         (TYPE_APPROVAL, "موافقة"),
+        (TYPE_WARRANTY, "كفالة"),
     ]
 
     order = models.ForeignKey(

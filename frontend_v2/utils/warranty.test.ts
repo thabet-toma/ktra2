@@ -197,3 +197,60 @@ test('#235 — الفحص المبكّر يطابق قواعد الخادم', ()
   assert.match(purchaseLineWarrantyProblem({ ...ok, supplier_months: 601 }) ?? '', /المورّد/);
   assert.equal(purchaseLineWarrantyProblem({ ...ok, manufacturer_months: 600 }), null);
 });
+
+
+import {
+  WARRANTY_VOID_REASONS,
+  warrantyEventLabel,
+  warrantyUndoReasonValid,
+  warrantyVoidImpactLine,
+  warrantyVoidProblem,
+  warrantyVoidReasonLabel,
+} from './warranty.ts';
+
+test('#236 — «ملغاة» حالةٌ قائمة بذاتها لا «منتهية»', () => {
+  assert.equal(warrantyStatusLabel('voided'), 'ملغاة');
+  assert.notEqual(warrantyRemainingText('voided', 400), 'باقٍ 400 يوماً');
+  assert.match(warrantyRemainingText('voided', -5), /أُلغيت/);
+});
+
+test('#236 — «أخرى» تستلزم ملاحظة والسبب من القائمة وحدها', () => {
+  assert.equal(WARRANTY_VOID_REASONS.length, 6);
+  assert.equal(warrantyVoidReasonLabel('liquid'), 'تعرّض لسوائل');
+  assert.equal(warrantyVoidReasonLabel('nope'), '');
+  assert.match(warrantyVoidProblem('', '') ?? '', /اختر/);
+  assert.match(warrantyVoidProblem('nope', 'x') ?? '', /غير معروف/);
+  assert.match(warrantyVoidProblem('other', '   ') ?? '', /ملاحظة/);
+  assert.equal(warrantyVoidProblem('other', 'ختم مكسور'), null);
+  assert.equal(warrantyVoidProblem('misuse', ''), null);
+});
+
+test('#236 — سبب التراجع خمسة أحرف فعلية بعد حذف الفراغ', () => {
+  assert.equal(warrantyUndoReasonValid('    ab   '), false);
+  assert.equal(warrantyUndoReasonValid('1234'), false);
+  assert.equal(warrantyUndoReasonValid(' 12345 '), true);
+});
+
+test('#236 — التقصير لا يُقرأ «تمديداً» في السجلّ', () => {
+  assert.equal(warrantyEventLabel('extend', 'shorten', 'تمديد'), 'تقصير');
+  assert.equal(warrantyEventLabel('extend', '', 'تمديد'), 'تمديد');
+  assert.equal(warrantyEventLabel('void', 'liquid', 'إلغاء كفالة التاجر'), 'إلغاء كفالة التاجر');
+});
+
+test('#236 — سطر المعاينة يسمّي القطع بلا سعر وعودة الأمر للموافقة', () => {
+  const line = warrantyVoidImpactLine({
+    order_number: 'SO-7',
+    returns_to_approval: true,
+    parts: [
+      { product_name: 'شاشة', empty_price: false },
+      { product_name: 'لوحة', empty_price: true },
+    ],
+  });
+  assert.match(line, /^SO-7:/);
+  assert.match(line, /بلا سعر/);
+  assert.match(line, /انتظار الموافقة/);
+  assert.match(
+    warrantyVoidImpactLine({ order_number: 'SO-8', returns_to_approval: false, parts: [] }),
+    /يفقد تغطية الكفالة/,
+  );
+});

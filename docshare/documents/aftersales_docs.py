@@ -66,7 +66,7 @@ def load_warranty_card(tenant_id: int, doc_id: int):
         .only(
             "id", "tenant_id", "device_name", "serial", "start_date",
             "end_date", "duration_months", "customer_name",
-            "customer_phone", "ended_on", "end_reason",
+            "customer_phone", "ended_on", "end_reason", "voided_at",
             "partner__name", "partner__street_address", "partner__city",
             "partner__phone", "partner__tax_number",
             "product__name_ar", "product__name_en",

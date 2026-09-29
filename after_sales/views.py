@@ -46,11 +46,20 @@ from .serializers import (
     PurchaseLinePolicySerializer,
     WarrantyPolicyBulkSerializer,
     WarrantyPolicySerializer,
+    WarrantyShortenSerializer,
+    WarrantyUndoSerializer,
+    WarrantyVoidSerializer,
 )
 from .services import (
     MODULE_KEY,
     get_or_create_after_sales_settings,
     log_warranty_event,
+    refuse_order_coverage,
+    restore_order_coverage,
+    shorten_dealer_warranty,
+    unvoid_dealer_warranty,
+    void_dealer_warranty,
+    void_impact,
     warranty_coverage,
 )
 
@@ -58,6 +67,7 @@ logger = logging.getLogger(__name__)
 
 PERM_VIEW = "aftersales.warranty.view"
 PERM_MANAGE = "aftersales.warranty.manage"
+PERM_VOID = "aftersales.warranty.void"
 
 _ACTION_PERMS = {
     "list": PERM_VIEW,
@@ -69,6 +79,10 @@ _ACTION_PERMS = {
     "destroy": PERM_MANAGE,
     "extend": PERM_MANAGE,
     "events": PERM_VIEW,
+    "void": PERM_VOID,
+    "unvoid": PERM_VOID,
+    "void_impact": PERM_VOID,
+    "shorten": PERM_VOID,
 }
 
 # ما يُسمح بتعديله يدوياً على بطاقة **تلقائية**: البطاقة من إنتاج الترحيل،
@@ -101,7 +115,7 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
             .filter(tenant=self.tenant)
             .select_related(
                 "product", "partner", "supplier", "sales_invoice",
-                "sales_invoice_line__invoice",
+                "sales_invoice_line__invoice", "voided_by", "void_service_order",
             )
         )
         if self.action != "list":
@@ -125,10 +139,12 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         # ثالثة، و`WarrantyCardQuerySet` هو من يحسم الثلاثة — لا مقارنة
         # `end_date` حرّة هنا.
         status_filter = (params.get("status") or "").strip()
-        if status_filter in ("active", "expired", "ended"):
+        if status_filter in ("active", "expired", "ended", "voided"):
             today = timezone.localdate()
             if status_filter == "ended":
                 queryset = queryset.ended()
+            elif status_filter == "voided":
+                queryset = queryset.voided()
             elif status_filter == "active":
                 queryset = queryset.active_on(today)
             else:
@@ -173,6 +189,29 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
 
     def perform_update(self, serializer):
         card = serializer.instance
+        if card.ended_on is not None or card.voided_at is not None:
+            # `validate()` يملأ حقولاً مشتقّة دائماً؛ المعتبَر ما أرسله العميل وتغيّرت قيمته.
+            changed = {
+                field for field in set(serializer.initial_data) - {"notes"}
+                if field in serializer.validated_data
+                and serializer.validated_data[field] != getattr(card, field)
+            }
+            if changed:
+                state = "منتهية" if card.ended_on is not None else "ملغاة"
+                raise ValidationError({
+                    "detail": f"البطاقة {state} — لا يُعدَّل فيها إلا الملاحظات."
+                })
+        new_end = serializer.validated_data.get("end_date")
+        if (
+            card.source == WarrantyCard.SOURCE_AUTO_SALE
+            and new_end is not None and new_end < card.end_date
+        ):
+            raise ValidationError({
+                "end_date": (
+                    "لا يُقصَّر تاريخ الانتهاء بالتعديل — التقصير من زر «تقصير» "
+                    "بصلاحية الإلغاء وسبب."
+                )
+            })
         if card.source == WarrantyCard.SOURCE_AUTO_SALE:
             touched = set(serializer.validated_data) - _AUTO_CARD_EDITABLE
             # `duration_months` و`end_date` يمرّان معاً من التحقق دائماً؛ المدة
@@ -237,6 +276,10 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                     f"{card.ended_on} — لا تُمدَّد. تراجع عمّا أنهاها أولاً."
                 )
             })
+        if card.voided_at is not None:
+            raise ValidationError({
+                "detail": "كفالة التاجر ملغاة — لا تُمدَّد. تراجع عن الإلغاء أولاً."
+            })
         form = WarrantyExtendSerializer(data=request.data)
         form.is_valid(raise_exception=True)
         new_end = form.resolved_end_date(card)
@@ -258,6 +301,65 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
             "after_sales.warranty_extended tenant=%s card=%s %s→%s",
             self.tenant.pk, card.pk, previous, new_end,
         )
+        return Response(self.get_serializer(card).data)
+
+    # ── إلغاء كفالة التاجر وتقصيرها (#236) ────────────────────────────────
+    @action(detail=True, methods=["get"], url_path="void-impact")
+    def void_impact(self, request, pk=None):
+        """معاينة الإلغاء: الأوامر المفتوحة المتأثرة وما يمنعه — دون كتابة شيء."""
+        return Response(void_impact(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="void")
+    def void(self, request, pk=None):
+        card = self.get_object()
+        form = WarrantyVoidSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        order = None
+        order_id = form.validated_data.get("service_order")
+        if order_id is not None:
+            order = ServiceOrder.objects.filter(tenant=self.tenant, pk=order_id).first()
+            if order is None:
+                raise ValidationError({"service_order": "أمر الصيانة غير موجود."})
+        try:
+            card = void_dealer_warranty(
+                card,
+                reason=form.validated_data["reason"],
+                note=form.validated_data["note"],
+                user=request.user,
+                service_order=order,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(card).data)
+
+    @action(detail=True, methods=["post"], url_path="unvoid")
+    def unvoid(self, request, pk=None):
+        card = self.get_object()
+        form = WarrantyUndoSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            card = unvoid_dealer_warranty(
+                card, reason=form.validated_data["reason"], user=request.user,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(card).data)
+
+    @action(detail=True, methods=["post"], url_path="shorten")
+    def shorten(self, request, pk=None):
+        """تقصير نهاية كفالة التاجر — بصلاحية الإلغاء وسببٍ موثَّق، لا بصلاحية التمديد."""
+        card = self.get_object()
+        form = WarrantyShortenSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            card = shorten_dealer_warranty(
+                card,
+                end_date=form.validated_data["end_date"],
+                reason=form.validated_data["reason"],
+                user=request.user,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
         return Response(self.get_serializer(card).data)
 
     @action(detail=True, methods=["get"], url_path="events")
@@ -688,6 +790,9 @@ _ORDER_ACTION_PERMS = {
     "generate_invoice": ORDER_PERM_POST,
     "detach_invoice": ORDER_PERM_POST,
     "unpost_covered": ORDER_PERM_UNPOST,
+    # رفض الكفالة لهذا العطل قرارُ تاجرٍ بصلاحية الإلغاء نفسها (#236).
+    "refuse_coverage": PERM_VOID,
+    "restore_coverage": PERM_VOID,
 }
 
 
@@ -828,6 +933,36 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 outcome=form.validated_data.get("outcome") or "",
                 note=form.validated_data.get("note") or "",
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["post"], url_path="refuse-coverage")
+    def refuse_coverage(self, request, pk=None):
+        """«رفض الكفالة لهذا العطل»: يُسقط تغطية هذا الأمر وتبقى البطاقة فعّالة."""
+        order = self.get_object()
+        form = WarrantyVoidSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            refuse_order_coverage(
+                order,
+                reason=form.validated_data["reason"],
+                note=form.validated_data["note"],
+                user=request.user,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["post"], url_path="restore-coverage")
+    def restore_coverage(self, request, pk=None):
+        order = self.get_object()
+        form = WarrantyUndoSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            restore_order_coverage(
+                order, reason=form.validated_data["reason"], user=request.user,
             )
         except DjangoValidationError as error:
             _reraise_as_drf(error)

@@ -1,10 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, Loader2, ShieldCheck, Trash2, X } from "lucide-react";
+import { CalendarPlus, Loader2, ShieldCheck, ShieldOff, Trash2, X } from "lucide-react";
 import {
   createWarrantyCard,
   deleteWarrantyCard,
   extendWarrantyCard,
   getWarrantyCardEvents,
+  shortenWarrantyCard,
+  unvoidWarrantyCard,
   updateWarrantyCard,
   type ManufacturerWarrantorRow,
   type WarrantyCardDraft,
@@ -16,8 +18,11 @@ import {
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
   warrantyCoveredQuantityLabel,
+  warrantyEventLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
+  warrantyUndoReasonValid,
+  WARRANTY_MIN_UNDO_REASON_CHARS,
 } from "../../utils/warranty";
 import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
@@ -27,6 +32,7 @@ import { useToast } from "../../contexts/ToastContext";
 import { warrantyPillClass } from "./warrantyStatus";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
 
 /**
  * THA-24 م2 — بطاقة كفالة واحدة: إنشاء يدوية، تعديل، تمديد، حذف.
@@ -58,6 +64,8 @@ interface Props {
   /** بطاقة قائمة للعرض والتعديل، أو `null` لبطاقة يدوية جديدة. */
   card: WarrantyCardRow | null;
   canManage: boolean;
+  /** `aftersales.warranty.void` — إلغاء كفالة التاجر والتراجع عنه وتقصيرها. */
+  canVoid: boolean;
   products: ProductOption[];
   customers: PartnerOption[];
   suppliers: PartnerOption[];
@@ -114,7 +122,7 @@ const draftOf = (card: WarrantyCardRow): WarrantyCardDraft => ({
 });
 
 export const WarrantyCardModal: React.FC<Props> = ({
-  card, canManage, products, customers, suppliers, warrantors, onClose, onChanged,
+  card, canManage, canVoid, products, customers, suppliers, warrantors, onClose, onChanged,
 }) => {
   const toast = useToast();
   const confirm = useConfirm();
@@ -125,6 +133,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const [extendMonths, setExtendMonths] = useState("");
   const [extendReason, setExtendReason] = useState("");
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [undoReason, setUndoReason] = useState("");
+  const [shortenEnd, setShortenEnd] = useState("");
+  const [shortenReason, setShortenReason] = useState("");
   // #229: التمديد لم يعد يُلحق سطراً في `notes` — سجلّ الأحداث الإلحاقي هو
   // مصدر التاريخ الآن، ويُقرأ من نقطته الخاصة لا من حقل البطاقة.
   const [events, setEvents] = useState<WarrantyCardEventRow[]>([]);
@@ -372,6 +384,53 @@ export const WarrantyCardModal: React.FC<Props> = ({
       void loadEvents();
     } catch (e) {
       setErr(messageOf(e, "تعذّر تمديد الكفالة"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unvoid = async () => {
+    if (!card || !warrantyUndoReasonValid(undoReason)) return;
+    const ok = await confirm({
+      title: "التراجع عن إلغاء الكفالة",
+      message: "ستعود البطاقة إلى حالتها المشتقّة من تاريخ انتهائها. أوامر الصيانة التي حوسبت قطعها بسعر البيع لا تتغيّر.",
+      confirmText: "تراجع عن الإلغاء",
+      cancelText: "إبقاء الإلغاء",
+    });
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await unvoidWarrantyCard(card.id, undoReason.trim());
+      toast("أُعيدت الكفالة", "success");
+      onChanged();
+      onClose();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّر التراجع عن الإلغاء"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const shorten = async () => {
+    if (!card || !shortenEnd || !warrantyUndoReasonValid(shortenReason)) return;
+    const ok = await confirm({
+      title: "تقصير الكفالة",
+      message: `ستنتهي الكفالة في ${formatDateValue(shortenEnd)} بدل ${formatDateValue(card.end_date)}، ويُسجَّل التاريخان والسبب في سجل البطاقة.`,
+      confirmText: "تقصير",
+      cancelText: "تراجع",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await shortenWarrantyCard(card.id, shortenEnd, shortenReason.trim());
+      toast(`قُصّرت الكفالة حتى ${formatDateValue(shortenEnd)}`, "success");
+      onChanged();
+      onClose();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّر تقصير الكفالة"));
     } finally {
       setBusy(false);
     }
@@ -754,7 +813,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 <button
                   type="button"
                   onClick={() => void extend()}
-                  disabled={!canManage || busy || !extendMonths}
+                  disabled={!canManage || busy || !extendMonths || card.status === "voided"}
                   className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50 sm:w-32"
                 >
                   تمديد
@@ -765,6 +824,83 @@ export const WarrantyCardModal: React.FC<Props> = ({
                   ستنتهي بعد التمديد في{" "}
                   {formatDateValue(deriveWarrantyEnd(card.end_date, Number(extendMonths)))}
                   {" "}({formatNumber(Number(extendMonths))} شهراً)
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* #236: إلغاء كفالة التاجر — مستقلٌّ عن `canManage`، بصلاحيته وسببه. */}
+          {card && canVoid && (
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+              <div className="mb-2 flex flex-wrap items-center gap-2 text-sm text-[var(--color-text)]">
+                <ShieldOff className="h-4 w-4 text-red-600" />
+                <span className="font-bold">إلغاء الكفالة وتقصيرها</span>
+              </div>
+              {card.void ? (
+                <div className="space-y-2">
+                  <div className="text-[13px] text-[var(--color-text)]">
+                    أُلغيت بسبب «{card.void.reason_label}» في {formatDateValue(card.void.voided_at)}
+                    {card.void.voided_by_name ? ` بواسطة ${card.void.voided_by_name}` : ""}
+                    {card.void.service_order_number ? ` (الأمر ${card.void.service_order_number})` : ""}
+                    {card.void.note ? ` — ${card.void.note}` : ""}
+                  </div>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      className={`${fieldClass} flex-1`}
+                      disabled={busy}
+                      placeholder={`سبب التراجع (${formatNumber(WARRANTY_MIN_UNDO_REASON_CHARS)} أحرف على الأقل)`}
+                      aria-label="سبب التراجع عن الإلغاء"
+                      value={undoReason}
+                      onChange={(e) => setUndoReason(e.target.value)}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void unvoid()}
+                      disabled={busy || !warrantyUndoReasonValid(undoReason)}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50 sm:w-44"
+                    >
+                      تراجع عن الإلغاء
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  <button
+                    type="button"
+                    onClick={() => setVoidOpen(true)}
+                    disabled={busy || card.ended}
+                    className="inline-flex items-center justify-center gap-2 rounded-lg border border-red-300 px-4 py-2 text-sm font-bold text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950/30"
+                  >
+                    إلغاء الكفالة…
+                  </button>
+                  {!card.ended && (
+                    <div className="flex flex-col gap-2 sm:flex-row">
+                      <input
+                        className={`${fieldClass} sm:w-44`}
+                        type="date"
+                        disabled={busy}
+                        aria-label="تاريخ الانتهاء الجديد"
+                        value={shortenEnd}
+                        onChange={(e) => setShortenEnd(e.target.value)}
+                      />
+                      <input
+                        className={`${fieldClass} flex-1`}
+                        disabled={busy}
+                        placeholder={`سبب التقصير (${formatNumber(WARRANTY_MIN_UNDO_REASON_CHARS)} أحرف على الأقل)`}
+                        aria-label="سبب التقصير"
+                        value={shortenReason}
+                        onChange={(e) => setShortenReason(e.target.value)}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void shorten()}
+                        disabled={busy || !shortenEnd || !warrantyUndoReasonValid(shortenReason)}
+                        className="inline-flex items-center justify-center gap-2 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50 sm:w-32"
+                      >
+                        تقصير
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -782,7 +918,9 @@ export const WarrantyCardModal: React.FC<Props> = ({
                       {formatDateValue(event.created_at)}
                     </span>
                     {" — "}
-                    <span className="font-semibold">{event.event_type_label}</span>
+                    <span className="font-semibold">
+                      {warrantyEventLabel(event.event_type, event.reason_code, event.event_type_label)}
+                    </span>
                     {event.old_end_date && event.new_end_date && (
                       <span>
                         {" "}: {formatDateValue(event.old_end_date)} ← {formatDateValue(event.new_end_date)}
@@ -831,6 +969,19 @@ export const WarrantyCardModal: React.FC<Props> = ({
           </button>
         </div>
       </div>
+      {voidOpen && card && (
+        <WarrantyVoidDialog
+          mode="void"
+          cardId={card.id}
+          onClose={() => setVoidOpen(false)}
+          onDone={() => {
+            setVoidOpen(false);
+            toast("أُلغيت الكفالة", "success");
+            onChanged();
+            onClose();
+          }}
+        />
+      )}
     </div>
   );
 };
