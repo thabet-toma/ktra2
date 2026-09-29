@@ -14,6 +14,7 @@ import {
   getServiceOrderDeliveryEffects,
   postCoveredParts,
   restoreServiceOrderCoverage,
+  setReturnedUnitState,
   transitionServiceOrder,
   unpostCoveredParts,
   updateServiceOrder,
@@ -50,6 +51,7 @@ import {
 } from "../../utils/warranty";
 import { warrantyPillClass } from "./warrantyStatus";
 import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
+import { ReturnedUnitBox } from "./ReturnedUnitBox";
 import { RepairWarrantyPrintBar, RepairWarrantyPrintButton } from "./RepairWarrantyPrint";
 import { useNavigate } from "react-router-dom";
 import { usePermissions } from "../../contexts/PermissionsContext";
@@ -545,6 +547,20 @@ export const ServiceOrderDocument: React.FC<Props> = ({
         <div className={`${cardClass} text-sm text-[var(--color-text-muted)]`} data-testid="warranty-banner">
           لا بطاقة كفالة مربوطة بهذا الأمر — الإصلاح على حساب الزبون ما لم يُوسَم غير ذلك.
         </div>
+      )}
+
+      {order.status === "delivered" && order.returned_unit_state !== "" && (
+        <ReturnedUnitBox
+          state={order.returned_unit_state}
+          serial={order.returned_unit_serial}
+          canEdit={canEdit}
+          canPost={canPost}
+          busy={busy}
+          onApply={(target, fateNote) => run(
+            () => setReturnedUnitState(order.id, target, fateNote),
+            "حُدّث مصير الجهاز المعطوب",
+          )}
+        />
       )}
 
       {/* ── شريط الحالة ──────────────────────────────────────────────────── */}

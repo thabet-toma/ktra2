@@ -1240,6 +1240,7 @@ _REFERENCE_LABELS = {
     "GOODS_RECEIPT": "سند استلام",
     "DELIVERY_NOTE": "سند تسليم",
     "SERVICE_ISSUE": "أمر صيانة (قطع كفالة)",
+    "SERVICE_RESTOCK": "أمر صيانة (عودة وحدة معطوبة)",
     "MANUAL": "حركة يدوية",
 }
 

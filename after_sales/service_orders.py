@@ -25,7 +25,13 @@ from django.utils import timezone
 
 from accounting.api import ensure_account, post_document, unpost_document, validate_fiscal_period
 from core.modules import module_enabled
-from inventory.serials import assert_issue_serials_declared, issue_serials, unissue_serials
+from inventory.serials import (
+    assert_issue_serials_declared,
+    issue_serials,
+    restock_defective_unit,
+    unissue_serials,
+    unrestock_defective_unit,
+)
 from inventory.services import product_display_name, record_stock_movement
 
 from .models import (
@@ -56,8 +62,11 @@ logger = logging.getLogger(__name__)
 
 # نوع مرجع القيد — مستقل عن أي مستند آخر، فمرجعه لا يتقاطع مع فضاء معرّفاته.
 JOURNAL_REF_WARRANTY_PARTS = "SERVICE_WARRANTY_PARTS"
+# استرداد كلفة جهازٍ معطوب عاد للمخزن (#246) — مصروف الاستبدال يُخفَّض بقدره.
+JOURNAL_REF_WARRANTY_RECOVERY = "SERVICE_WARRANTY_RECOVERY"
 # نوع حركة المخزون (`inventory.StockMovement.REFERENCE_TYPES`).
 STOCK_REF_SERVICE_ISSUE = "SERVICE_ISSUE"
+STOCK_REF_SERVICE_RESTOCK = "SERVICE_RESTOCK"
 
 WARRANTY_EXPENSE_CODE = "5206"
 WARRANTY_EXPENSE_NAME = "مصاريف صيانة الكفالة"
@@ -744,6 +753,8 @@ def complete_replacement(order: ServiceOrder, *, user=None) -> dict:
     old_card.save(update_fields=["ended_on", "end_reason", "updated_at"])
 
     swapped = swap_sold_unit(old_unit, new_unit)
+    order.returned_unit_state = ServiceOrder.RETURNED_HELD
+    order.save(update_fields=["returned_unit_state", "updated_at"])
     new_card = WarrantyCard.objects.create(
         tenant_id=order.tenant_id,
         source=WarrantyCard.SOURCE_REPLACEMENT,
@@ -1082,6 +1093,217 @@ def unpost_covered_parts(order: ServiceOrder, *, user=None) -> dict:
     )
     result["parts_unlocked"] = unlocked
     return result
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# المال — ج. مصير الجهاز المعطوب بعد الاستبدال (#246)
+# ══════════════════════════════════════════════════════════════════════════
+
+# الانتقالات المشروعة وحدها. `held` هي نقطة الانطلاق (يضعها التسليم)؛ و`disposed`
+# نهائية؛ و`restocked → held` هو التراجع عن العودة للمخزن لا حالةٌ جديدة.
+_RETURNED_UNIT_TRANSITIONS = {
+    ServiceOrder.RETURNED_HELD: {
+        ServiceOrder.RETURNED_WITH_SUPPLIER,
+        ServiceOrder.RETURNED_RESTOCKED,
+        ServiceOrder.RETURNED_DISPOSED,
+    },
+    ServiceOrder.RETURNED_WITH_SUPPLIER: {
+        ServiceOrder.RETURNED_RESTOCKED,
+        ServiceOrder.RETURNED_DISPOSED,
+    },
+    ServiceOrder.RETURNED_RESTOCKED: {ServiceOrder.RETURNED_HELD},
+}
+
+
+def returned_unit_serial(order: ServiceOrder) -> str:
+    """الوحدة المعطوبة هي وحدة بطاقة الأمر القديمة (`product_serial`) — تُعرف برقمها."""
+    if not order.returned_unit_state or not order.warranty_card_id:
+        return ""
+    return order.warranty_card.serial
+
+
+def _unit_historical_cost(unit) -> Decimal | None:
+    """كلفة الوحدة يوم دخلت المخزن — بمنطق الاستلام نفسه (`landed` وإلا السعر × الصرف).
+
+    `None` = لا تاريخ معروف (وحدةٌ بلا بند شراء، أو كلفتها صفرٌ في المصدر)، فتقرّر
+    كلفة صرف البديل وحدها.
+    """
+    item = unit.purchase_item
+    if item is None:
+        return None
+    landed = Decimal(str(item.landed_unit_price_ils or 0))
+    if landed > 0:
+        return landed
+    rate = Decimal(str(item.invoice.exchange_rate or 1))
+    cost = Decimal(str(item.unit_price or 0)) * rate
+    return cost if cost > 0 else None
+
+
+def _defective_unit(order: ServiceOrder):
+    from inventory.models import ProductSerial
+
+    return ProductSerial.objects.select_for_update().select_related(
+        "product", "purchase_item__invoice",
+    ).get(pk=order.warranty_card.product_serial_id)
+
+
+def _restock_defective_unit(order: ServiceOrder, *, user=None) -> dict:
+    """الجهاز المعطوب يعود للمخزن بكلفة الأقل من (كلفة البديل الفعلية، كلفته التاريخية).
+
+    الأقل حذراً: لا نُدخل المخزن قيمةً أعلى مما دفعناه، ولا نسترد أكثر مما صرفناه
+    على البديل. الفرق (إن وُجد) يبقى مصروفاً حقيقياً في تقرير كلفة الكفالة.
+    """
+    unit = _defective_unit(order)
+    part = posted_replacement_part(order)
+    issued = (
+        Decimal(str(part.issued_cost))
+        if part is not None and part.issued_cost is not None else None
+    )
+    known = [c for c in (issued, _unit_historical_cost(unit)) if c is not None]
+    cost = min(known).quantize(DEC) if known else Decimal("0.00")
+
+    posting_date = timezone.localdate()
+    validate_fiscal_period(order.tenant_id, posting_date)
+    expense_account = resolve_warranty_expense_account(order.tenant_id)
+    inventory_account = _resolve_inventory_account(order.tenant_id)
+
+    restock_defective_unit(unit)
+    label = order.order_number or order.pk
+    record_stock_movement(
+        product=unit.product,
+        movement_type="IN",
+        quantity=Decimal("1"),
+        unit_cost=cost,
+        reference_type=STOCK_REF_SERVICE_RESTOCK,
+        reference_id=order.pk,
+        movement_date=posting_date,
+        tenant=order.tenant,
+        partner=order.partner,
+        notes=f"عودة الجهاز المعطوب {unit.serial} — أمر صيانة {label}"[:500],
+    )
+    journal = None
+    if cost > 0:
+        description = f"استرداد كلفة جهاز معطوب {unit.serial} — أمر صيانة {label}"
+        journal = post_document(
+            tenant_id=order.tenant_id,
+            transaction_date=posting_date,
+            reference_type=JOURNAL_REF_WARRANTY_RECOVERY,
+            reference_id=order.pk,
+            description=description,
+            lines_data=[
+                {
+                    "account": inventory_account.pk,
+                    "debit": cost,
+                    "credit": Decimal("0"),
+                    "description": description,
+                },
+                {
+                    "account": expense_account.pk,
+                    "debit": Decimal("0"),
+                    "credit": cost,
+                    "description": description,
+                },
+            ],
+            user=user,
+        )
+    else:
+        logger.warning(
+            "after_sales.restock_zero_cost tenant=%s order=%s unit=%s",
+            order.tenant_id, order.pk, unit.pk,
+        )
+    return {"cost": cost, "journal_id": journal.pk if journal is not None else None}
+
+
+def _unrestock_defective_unit(order: ServiceOrder, *, user=None) -> dict:
+    """يتراجع عن العودة للمخزن — ما دامت الوحدة في المخزن ولم يُبنَ عليها شيء.
+
+    الحذف بمرجع الأمر ونوعَي الحركة والقيد وحدهما (لا يمسّ صرف القطع). ويُعاد
+    ربط الوحدة ببند بيعها الأصلي من بطاقة البديل (`sales_invoice_line`) — هي التي
+    ورثت البند لحظة التبديل، فلا حاجة لحقلٍ جديد يحمله.
+    """
+    from inventory.models import ProductSerial
+
+    unit = _defective_unit(order)
+    new_card = WarrantyCard.objects.filter(replaces=order.warranty_card).first()
+    sales_line_id = new_card.sales_invoice_line_id if new_card is not None else None
+    if sales_line_id and not ProductSerial.objects.filter(
+        tenant_id=order.tenant_id, pk=new_card.product_serial_id,
+        sales_line_id=sales_line_id, status=ProductSerial.STATUS_SOLD,
+    ).exists():
+        raise ValidationError(
+            "البديل لم يعد على بند البيع الأصلي (أُلغي ترحيل الفاتورة أو تغيّر مالكه) — "
+            "لا تراجع عن إعادة الجهاز المعطوب."
+        )
+    if unit.status != ProductSerial.STATUS_IN_STOCK:
+        raise ValidationError(
+            f"الوحدة «{unit.serial}» لم تعد في المخزن (بِيعت أو صُرفت) — "
+            "لا تراجع عن إعادتها."
+        )
+
+    result = unpost_document(
+        tenant_id=order.tenant_id,
+        reference_id=order.pk,
+        journal_reference_types=[JOURNAL_REF_WARRANTY_RECOVERY],
+        stock_reference_types=(STOCK_REF_SERVICE_RESTOCK,),
+        user=user,
+        document_label=f"عودة جهاز معطوب — أمر صيانة {order.order_number or order.pk}",
+    )
+    unrestock_defective_unit(unit, sales_line_id)
+    return result
+
+
+@transaction.atomic
+def set_returned_unit_state(
+    order: ServiceOrder, state: str, *, note: str = "", user=None,
+) -> ServiceOrder:
+    """يقرّر مصير الجهاز المعطوب لأمر استبدالٍ مسلَّم — كل انتقالٍ يُسجَّل حدثاً.
+
+    `restocked` وتراجعه (`held` من `restocked`) يمسّان المخزن والدفاتر معاً في
+    معاملةٍ واحدة؛ والباقي علاماتٌ إدارية بلا حركة ولا قيد. الصلاحية تُفحص في
+    الـview (تتبع الحالة المطلوبة)، والانتقال المشروع هنا.
+    """
+    order = ServiceOrder.objects.select_for_update().select_related(
+        "warranty_card",
+    ).get(pk=order.pk)
+    note = (note or "").strip()
+    if order.status != ServiceOrder.STATUS_DELIVERED:
+        raise ValidationError("مصير الجهاز المعطوب يُحسم بعد تسليم أمر الاستبدال.")
+    current = order.returned_unit_state
+    if not current:
+        raise ValidationError("لا جهاز معطوب على هذا الأمر — لم يتم فيه استبدال.")
+    if state not in _RETURNED_UNIT_TRANSITIONS.get(current, ()):
+        labels = dict(ServiceOrder.RETURNED_UNIT_CHOICES)
+        raise ValidationError(
+            f"لا انتقال من «{labels.get(current, current)}» إلى «{labels.get(state, state)}»."
+        )
+    if state == ServiceOrder.RETURNED_DISPOSED and not note:
+        raise ValidationError({"note": "سبب الإتلاف مطلوب."})
+
+    update_fields = ["returned_unit_state", "updated_at"]
+    if state == ServiceOrder.RETURNED_RESTOCKED:
+        _restock_defective_unit(order, user=user)
+    elif current == ServiceOrder.RETURNED_RESTOCKED:
+        _unrestock_defective_unit(order, user=user)
+    elif state == ServiceOrder.RETURNED_WITH_SUPPLIER:
+        order.supplier_claim = True
+        update_fields.append("supplier_claim")
+
+    order.returned_unit_state = state
+    order.save(update_fields=update_fields)
+
+    labels = dict(ServiceOrder.RETURNED_UNIT_CHOICES)
+    text = (
+        f"الجهاز المعطوب {order.warranty_card.serial}: "
+        f"{labels.get(current, current)} ← {labels.get(state, state)}"
+    )
+    if note:
+        text += f" — {note}"
+    log_event(order, event_type=ServiceOrderEvent.TYPE_WARRANTY, text=text, user=user)
+    logger.info(
+        "after_sales.returned_unit tenant=%s order=%s %s→%s",
+        order.tenant_id, order.pk, current, state,
+    )
+    return order
 
 
 # ══════════════════════════════════════════════════════════════════════════

@@ -15,6 +15,7 @@ import { accountingApi } from "../../services/accountingApi";
 import { formatDateValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { SERVICE_STATUS_LABELS, serviceStatusPillClass } from "../../utils/serviceOrder";
+import { RETURNED_UNIT_FOLLOW_UP_FILTER } from "../../utils/warranty";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { ServiceOrderDocument } from "./ServiceOrderDocument";
 import { ServiceOrderIntakeModal } from "./ServiceOrderIntakeModal";
@@ -66,6 +67,7 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<ServiceOrderStatus | "">("");
   const [openOnly, setOpenOnly] = useState(true);
+  const [defectiveOnly, setDefectiveOnly] = useState(false);
 
   const [rows, setRows] = useState<ServiceOrderListRow[]>([]);
   const [total, setTotal] = useState(0);
@@ -111,8 +113,10 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
     q: query,
     status,
     // «المفتوحة» و«حالة بعينها» لا يجتمعان: الأضيق يفوز فلا يُلغي أحدهما الآخر.
-    open: status ? false : openOnly,
-  }), [query, status, openOnly]);
+    // والمعطوبة عندنا أوامر مُسلَّمة فلا تُقيَّد بـ«المفتوحة».
+    open: status || defectiveOnly ? false : openOnly,
+    returned_unit_state: defectiveOnly ? RETURNED_UNIT_FOLLOW_UP_FILTER : undefined,
+  }), [query, status, openOnly, defectiveOnly]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -213,14 +217,27 @@ export const ServiceOrdersScreen: React.FC<Props> = ({ onOpenInvoice }) => {
               <input
                 type="checkbox"
                 checked={openOnly}
-                disabled={Boolean(status)}
+                disabled={Boolean(status) || defectiveOnly}
                 onChange={(e) => { setOpenOnly(e.target.checked); setPage(1); }}
               />
               المفتوحة فقط
             </label>
             <button
               type="button"
-              onClick={() => { setSearchText(""); setQuery(""); setStatus(""); setOpenOnly(true); setPage(1); }}
+              aria-pressed={defectiveOnly}
+              onClick={() => { setDefectiveOnly((v) => !v); setPage(1); }}
+              className={`inline-flex h-10 items-center rounded-lg px-3 text-sm font-bold ${
+                defectiveOnly
+                  ? "bg-[var(--color-primary)] text-white"
+                  : "border border-[var(--color-border)] text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
+              }`}
+              data-testid="defective-units-filter"
+            >
+              أجهزة معطوبة لدينا
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSearchText(""); setQuery(""); setStatus(""); setOpenOnly(true); setDefectiveOnly(false); setPage(1); }}
               className="inline-flex h-10 items-center gap-1 rounded-lg border border-[var(--color-border)] px-3 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
             >
               <RotateCcw className="h-4 w-4" /> مسح

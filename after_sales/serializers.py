@@ -651,6 +651,8 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
     repair_fault_confirmed = serializers.BooleanField(write_only=True, required=False, default=False)
     # #244 — بطاقة كفالة الإصلاح التي أنشأها تسليم هذا الأمر (أو `None`): مرجعُ زرّ الطباعة.
     repair_warranty_card = serializers.SerializerMethodField()
+    # #246 — مصير الجهاز المعطوب بعد الاستبدال: القراءة هنا، والتغيير بنقطة `returned-unit` وحدها.
+    returned_unit_serial = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceOrder
@@ -658,6 +660,7 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
             "id", "order_number", "order_date",
             "invoice_piece_confirmed", "duplicate_open_reason", "paid_despite_referral",
             "repair_fault_confirmed", "repair_warranty_card",
+            "returned_unit_state", "returned_unit_serial",
             "partner", "partner_name", "customer_name", "customer_phone",
             "product", "product_name", "serial", "device_description",
             "received_condition", "accessories",
@@ -678,8 +681,13 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
         read_only_fields = [
             "order_number", "status", "outcome", "covered_posted_at",
             "delivered_at", "sales_invoice", "approved_at", "approved_by",
-            "created_at", "updated_at",
+            "returned_unit_state", "created_at", "updated_at",
         ]
+
+    def get_returned_unit_serial(self, obj):
+        from .service_orders import returned_unit_serial
+
+        return returned_unit_serial(obj)
 
     def create(self, validated_data):
         from .service_orders import is_invoice_card
@@ -823,6 +831,7 @@ class ServiceOrderListSerializer(serializers.ModelSerializer):
             "device_description", "complaint", "status", "status_label",
             "outcome", "outcome_label", "warranty_covered", "estimated_amount",
             "covered_posted_at", "sales_invoice", "delivered_at", "created_at",
+            "returned_unit_state",
         ]
 
     def get_partner_name(self, obj):
@@ -833,6 +842,13 @@ class ServiceOrderListSerializer(serializers.ModelSerializer):
             return obj.device_description
         from inventory.services import product_display_name
         return product_display_name(obj.product)
+
+
+class ReturnedUnitSerializer(serializers.Serializer):
+    state = serializers.ChoiceField(
+        choices=[choice for choice, _ in ServiceOrder.RETURNED_UNIT_CHOICES],
+    )
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
 
 
 class ServiceOrderTransitionSerializer(serializers.Serializer):

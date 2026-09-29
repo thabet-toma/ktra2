@@ -542,6 +542,19 @@ class ServiceOrder(models.Model):
         (OUTCOME_REPLACED, "استُبدل الجهاز"),
     ]
 
+    # مصير الجهاز المعطوب بعد الاستبدال (#246). فارغٌ حين لا استبدال؛ ويضعه
+    # `complete_replacement` «محجوزاً عندنا» لحظة التسليم.
+    RETURNED_HELD = "held"
+    RETURNED_WITH_SUPPLIER = "with_supplier"
+    RETURNED_RESTOCKED = "restocked"
+    RETURNED_DISPOSED = "disposed"
+    RETURNED_UNIT_CHOICES = [
+        (RETURNED_HELD, "محجوز عندنا"),
+        (RETURNED_WITH_SUPPLIER, "عند المورد"),
+        (RETURNED_RESTOCKED, "عاد للمخزن"),
+        (RETURNED_DISPOSED, "أُتلف"),
+    ]
+
     tenant = models.ForeignKey(
         Tenant, on_delete=models.CASCADE, related_name="service_orders",
     )
@@ -599,6 +612,9 @@ class ServiceOrder(models.Model):
     # لحظة ترحيل صرف القطع المغطاة — بوابة التسليم تقرأها، والتراجع يُفرِّغها.
     covered_posted_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
+    returned_unit_state = models.CharField(
+        max_length=20, choices=RETURNED_UNIT_CHOICES, blank=True, default="",
+    )
 
     sales_invoice = models.ForeignKey(
         "sales.SalesInvoice", on_delete=models.SET_NULL, null=True, blank=True,

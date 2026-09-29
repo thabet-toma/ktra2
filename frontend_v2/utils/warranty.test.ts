@@ -560,3 +560,50 @@ test('#245 — «استُبدل بـ…» تحمل البديل والأمر و�
   assert.equal(warrantyReplacedByLine(null), '');
   assert.equal(warrantyReplacedByLine(undefined), '');
 });
+
+import {
+  RETURNED_UNIT_FOLLOW_UP_FILTER,
+  returnedUnitActions,
+  returnedUnitLabel,
+  returnedUnitNoteValid,
+  returnedUnitPermission,
+} from './warranty.ts';
+
+test('#246 — أسماء المصير عربية، والفارغ يعني «لا استبدال» فلا اسم له', () => {
+  assert.equal(returnedUnitLabel('held'), 'محجوز عندنا');
+  assert.equal(returnedUnitLabel('with_supplier'), 'عند المورد');
+  assert.equal(returnedUnitLabel('restocked'), 'عاد للمخزن');
+  assert.equal(returnedUnitLabel('disposed'), 'أُتلف');
+  assert.equal(returnedUnitLabel(''), '');
+});
+
+test('#246 — الإجراءات المتاحة هي الانتقالات المشروعة وحدها', () => {
+  const targets = (s: string) => returnedUnitActions(s).map((a) => a.target);
+  assert.deepEqual(targets('held'), ['with_supplier', 'restocked', 'disposed']);
+  assert.deepEqual(targets('with_supplier'), ['restocked', 'disposed']);
+  assert.deepEqual(targets('restocked'), ['held']);
+  assert.deepEqual(targets('disposed'), []);
+  assert.deepEqual(targets(''), []);
+});
+
+test('#246 — «عاد للمخزن» والتراجع عنه يطلبان صلاحية الترحيل، والباقي التحرير', () => {
+  const [supplier, restock, dispose] = returnedUnitActions('held');
+  const [undo] = returnedUnitActions('restocked');
+  assert.equal(returnedUnitPermission(restock), 'aftersales.order.post');
+  assert.equal(returnedUnitPermission(undo), 'aftersales.order.post');
+  assert.equal(returnedUnitPermission(supplier), 'aftersales.order.edit');
+  assert.equal(returnedUnitPermission(dispose), 'aftersales.order.edit');
+});
+
+test('#246 — الإتلاف وحده يستلزم ملاحظة غير فارغة', () => {
+  const [supplier, restock, dispose] = returnedUnitActions('held');
+  assert.equal(returnedUnitNoteValid(dispose, ''), false);
+  assert.equal(returnedUnitNoteValid(dispose, '   '), false);
+  assert.equal(returnedUnitNoteValid(dispose, 'مكسور الشاشة'), true);
+  assert.equal(returnedUnitNoteValid(supplier, ''), true);
+  assert.equal(returnedUnitNoteValid(restock, ''), true);
+});
+
+test('#246 — مرشّح المتابعة يضم المحجوز وعند المورد فقط', () => {
+  assert.equal(RETURNED_UNIT_FOLLOW_UP_FILTER, 'held,with_supplier');
+});

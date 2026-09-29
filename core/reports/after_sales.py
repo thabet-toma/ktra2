@@ -6,8 +6,9 @@
 - كم كلّفتني الكفالة هذه الفترة؟ (مصروف تشغيلي حقيقي كان مخفياً في المخزون)
 
 كلها **مقيّدة بالوحدة المرخّصة** (`module="after_sales"` ⇒ 404 لا 403) وبمفاتيح
-صلاحياتها. والثالث يقرأ حركات `SERVICE_ISSUE` وحدها — النوع نفسه الذي يُبقي
-مصروف الكفالة خارج تكلفة المبيع، فلا يختلط الرقمان هنا كما لم يختلطا هناك.
+صلاحياتها. والثالث يقرأ حركات `SERVICE_ISSUE` (وما استُرد منها `SERVICE_RESTOCK`)
+وحدها — النوع نفسه الذي يُبقي مصروف الكفالة خارج تكلفة المبيع، فلا يختلط الرقمان
+هنا كما لم يختلطا هناك.
 """
 from __future__ import annotations
 
@@ -212,23 +213,32 @@ register(ReportSpec(
 # ══════════════════════════════════════════════════════════════════════
 
 SOURCE_NO_CARD = "بلا بطاقة"
+REPLACEMENT_ISSUE = "استبدال"
+REPLACEMENT_RECOVERY = "استرداد"
 
 
 def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
-    """من حركات `SERVICE_ISSUE` وحدها — لا من أسعار البيع ولا من بنود الأمر.
+    """من حركات `SERVICE_ISSUE` و`SERVICE_RESTOCK` وحدها — لا من أسعار البيع ولا من بنود الأمر.
 
     الحركة تحمل التكلفة التاريخية (`total_cost = qty × avg_cost_before`) لحظة
     الصرف، فالرقم هنا هو ما دخل الدفاتر فعلاً لا ما نُقدّره اليوم. والنوع
     `SERVICE_ISSUE` هو نفسه الذي يُبقي هذا المصروف خارج تكلفة المبيع.
+
+    **ما استُرد يظهر صفاً سالباً** (#246): جهازٌ معطوب عاد للمخزن (`SERVICE_RESTOCK`)
+    يُطرح بكميته وكلفته، فيبقى إجمالي التقرير هو الكلفة الصافية للكفالة، ويُرى
+    الاسترداد بتاريخه بدل أن يذوب في رقمٍ واحد.
     """
-    from after_sales.models import ServiceOrder, WarrantyCard
-    from after_sales.service_orders import STOCK_REF_SERVICE_ISSUE
+    from after_sales.models import ServiceOrder, ServiceOrderPart, WarrantyCard
+    from after_sales.service_orders import STOCK_REF_SERVICE_ISSUE, STOCK_REF_SERVICE_RESTOCK
     from inventory.models import StockMovement
     from inventory.services import product_display_name
 
     queryset = (
         StockMovement.objects
-        .filter(tenant_id=tenant_id, reference_type=STOCK_REF_SERVICE_ISSUE)
+        .filter(
+            tenant_id=tenant_id,
+            reference_type__in=(STOCK_REF_SERVICE_ISSUE, STOCK_REF_SERVICE_RESTOCK),
+        )
         .select_related("product", "partner")
         .order_by("movement_date", "id")
     )
@@ -254,17 +264,33 @@ def _warranty_parts_cost(tenant_id: int, params: dict) -> list[dict]:
         .values_list("pk", "warranty_card__source")
     }
 
+    # #246: أوامر فيها سطر استبدال — صرفُ بديلها وعودةُ معطوبها يُوسمان بالعمود.
+    replacement_orders = set(
+        ServiceOrderPart.objects
+        .filter(order__tenant_id=tenant_id, order_id__in=order_ids, replaces_device=True)
+        .values_list("order_id", flat=True)
+    )
+
     rows = []
     for movement in movements:
+        recovery = movement.reference_type == STOCK_REF_SERVICE_RESTOCK
+        sign = -1 if recovery else 1
+        if recovery:
+            replacement = REPLACEMENT_RECOVERY
+        elif movement.reference_id in replacement_orders:
+            replacement = REPLACEMENT_ISSUE
+        else:
+            replacement = ""
         rows.append({
             "movement_date": movement.movement_date,
             "order_number": order_numbers.get(movement.reference_id, ""),
             "source": sources.get(movement.reference_id, SOURCE_NO_CARD),
+            "replacement": replacement,
             "product": product_display_name(movement.product) if movement.product_id else "",
             "customer": movement.partner.name if movement.partner_id else "",
-            "quantity": _qty(movement.quantity),
+            "quantity": _qty(sign * movement.quantity),
             "unit_cost": _money(movement.unit_cost),
-            "total_cost": _money(movement.total_cost),
+            "total_cost": _money(sign * movement.total_cost),
             "id": movement.reference_id,
         })
     return rows
@@ -275,13 +301,15 @@ register(ReportSpec(
     title="كلفة قطع الكفالة حسب الفترة",
     category="after_sales",
     description=(
-        "ما صُرف من المخزن على إصلاحات الكفالة — بالتكلفة التاريخية لحظة الصرف. "
+        "ما صُرف من المخزن على إصلاحات الكفالة — بالتكلفة التاريخية لحظة الصرف، "
+        "مطروحاً منه ما استُرد من أجهزة معطوبة عادت للمخزن (صفٌّ سالب). "
         "مصروف تشغيلي لا تكلفة مبيع، فلا يظهر في ربح أي فاتورة."
     ),
     columns=(
         ReportColumn("movement_date", "التاريخ", KIND_DATE),
         ReportColumn("order_number", "أمر الصيانة", KIND_TEXT),
         ReportColumn("source", "مصدر الكفالة", KIND_TEXT),
+        ReportColumn("replacement", "استبدال", KIND_TEXT),
         ReportColumn("product", "المنتج", KIND_TEXT),
         ReportColumn("customer", "الزبون", KIND_TEXT),
         ReportColumn("quantity", "الكمية", KIND_NUMBER, total=True),

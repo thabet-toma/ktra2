@@ -24,6 +24,8 @@ import type {
   IntakeVerdict,
   RepairWarrantyPlan,
   ReplacementPlan,
+  ReturnedUnitState,
+  ReturnedUnitTarget,
   WarrantySource,
   WarrantyStatus,
 } from "../utils/warranty";
@@ -765,10 +767,14 @@ export interface ServiceOrderListRow {
   covered_posted_at: string | null;
   sales_invoice: number | null;
   delivered_at: string | null;
+  /** #246: مصير الجهاز المعطوب بعد الاستبدال — فارغ حين لا استبدال. */
+  returned_unit_state: ReturnedUnitState;
   created_at: string;
 }
 
 export interface ServiceOrderDetail extends ServiceOrderListRow {
+  /** #246: رقم الجهاز المعطوب (تسلسلي بطاقة الكفالة القديمة) — فارغ حين لا استبدال. */
+  returned_unit_serial: string;
   received_condition: string;
   accessories: string;
   diagnosis: string;
@@ -850,6 +856,8 @@ export interface ServiceOrderListFilters {
   partner?: number | "";
   date_from?: string;
   date_to?: string;
+  /** #246: «أجهزة معطوبة لدينا» — الحالات مفصولة بفاصلة كما يقبلها الخادم. */
+  returned_unit_state?: string;
 }
 
 /** ما يعرفه النظام عن معرّف واحد — ثلاثة مصادر بلا مفتاح أجنبي بينها. */
@@ -989,6 +997,7 @@ export function listServiceOrders(
       partner: filters.partner || undefined,
       date_from: filters.date_from || undefined,
       date_to: filters.date_to || undefined,
+      returned_unit_state: filters.returned_unit_state || undefined,
     },
   });
 }
@@ -1106,6 +1115,15 @@ export function restoreServiceOrderCoverage(id: number, reason: string): Promise
   return apiPostObject<ServiceOrderDetail>(
     `${ORDERS}${id}/restore-coverage/`, { reason }, tenantOpts(),
   );
+}
+
+/** #246: مصير الجهاز المعطوب — «عاد للمخزن» و«التراجع عنه» يمسّان المال فيلزمهما اعتماد. */
+export function setReturnedUnitState(
+  id: number,
+  state: ReturnedUnitTarget,
+  note = "",
+): Promise<ServiceOrderDetail> {
+  return apiPostObject<ServiceOrderDetail>(`${ORDERS}${id}/returned-unit/`, { state, note }, tenantOpts());
 }
 
 export interface GeneratedServiceInvoice {

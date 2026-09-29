@@ -596,3 +596,62 @@ export function warrantyReplacedByLine(
 export const warrantyServiceOrderLink = (orderId: number): string =>
   `/after-sales/service-orders?order=${orderId}`;
 export const warrantyCardLink = (cardId: number): string => `/after-sales?card=${cardId}`;
+
+/* ══════════════════════════════════════════════════════════════════════════
+ * #246 — مصير الجهاز المعطوب بعد الاستبدال
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** فارغ حين لا استبدال؛ وإلا إحدى أربع — الخادم هو من يقرّر الانتقال المشروع. */
+export type ReturnedUnitState = "" | "held" | "with_supplier" | "restocked" | "disposed";
+
+/** ما يقبله `returned-unit/` هدفاً: «held» هنا هو التراجع عن «عاد للمخزن». */
+export type ReturnedUnitTarget = Exclude<ReturnedUnitState, "">;
+
+export const RETURNED_UNIT_LABELS: Record<ReturnedUnitTarget, string> = {
+  held: "محجوز عندنا",
+  with_supplier: "عند المورد",
+  restocked: "عاد للمخزن",
+  disposed: "أُتلف",
+};
+
+export const returnedUnitLabel = (state: string): string =>
+  RETURNED_UNIT_LABELS[state as ReturnedUnitTarget] ?? "";
+
+/** «أجهزة معطوبة لدينا»: ما لم يُحسم بعد — يطابق مرشّح الخادم حرفياً. */
+export const RETURNED_UNIT_FOLLOW_UP_FILTER = "held,with_supplier";
+
+export interface ReturnedUnitAction {
+  target: ReturnedUnitTarget;
+  label: string;
+  needsNote: boolean;
+  /** «عاد للمخزن» والتراجع عنه يمسّان المخزون والقيد فيلزمهما اعتماد الترحيل. */
+  touchesMoney: boolean;
+  destructive: boolean;
+}
+
+const ACTION_WITH_SUPPLIER: ReturnedUnitAction = {
+  target: "with_supplier", label: "أُرسل للمورد", needsNote: false, touchesMoney: false, destructive: false,
+};
+const ACTION_RESTOCK: ReturnedUnitAction = {
+  target: "restocked", label: "إعادته للمخزن", needsNote: false, touchesMoney: true, destructive: false,
+};
+const ACTION_DISPOSE: ReturnedUnitAction = {
+  target: "disposed", label: "إتلافه", needsNote: true, touchesMoney: false, destructive: true,
+};
+const ACTION_UNDO_RESTOCK: ReturnedUnitAction = {
+  target: "held", label: "تراجع عن العودة للمخزن", needsNote: false, touchesMoney: true, destructive: false,
+};
+
+/** الانتقالات المشروعة كما يفرضها الخادم — «أُتلف» نهائي، والتراجع من «عاد» وحده. */
+export function returnedUnitActions(state: string): ReturnedUnitAction[] {
+  if (state === "held") return [ACTION_WITH_SUPPLIER, ACTION_RESTOCK, ACTION_DISPOSE];
+  if (state === "with_supplier") return [ACTION_RESTOCK, ACTION_DISPOSE];
+  if (state === "restocked") return [ACTION_UNDO_RESTOCK];
+  return [];
+}
+
+export const returnedUnitPermission = (action: ReturnedUnitAction): string =>
+  action.touchesMoney ? "aftersales.order.post" : "aftersales.order.edit";
+
+export const returnedUnitNoteValid = (action: ReturnedUnitAction, note: string): boolean =>
+  !action.needsNote || note.trim().length > 0;

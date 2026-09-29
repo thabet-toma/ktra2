@@ -940,6 +940,30 @@ def swap_sold_unit(old_unit, new_unit) -> bool:
     return True
 
 
+def restock_defective_unit(unit) -> None:
+    """وحدةٌ معطوبة عادت إلى المخزن: `in_stock` بلا بند بيع (#246).
+
+    الأثر الذي أبقاه `swap_sold_unit` (`sales_line`) يُفرَّغ: الوحدة لم تعد لأحد،
+    وبقاؤه كان سيمنع إلغاء ترحيل الفاتورة الأصلية (`assert_no_defective_units`).
+    """
+    if unit.status != ProductSerial.STATUS_DEFECTIVE:
+        raise ValidationError(f"الوحدة «{unit.serial}» ليست معطوبة — لا تعود للمخزن.")
+    unit.status = ProductSerial.STATUS_IN_STOCK
+    unit.sales_line = None
+    unit.save(update_fields=['status', 'sales_line'])
+
+
+def unrestock_defective_unit(unit, sales_line_id) -> None:
+    """يعكس `restock_defective_unit`: معطوبةٌ من جديد، مربوطةً ببند بيعها الأصلي."""
+    if unit.status != ProductSerial.STATUS_IN_STOCK:
+        raise ValidationError(
+            f"الوحدة «{unit.serial}» لم تعد في المخزن — لا تراجع عن إعادتها."
+        )
+    unit.status = ProductSerial.STATUS_DEFECTIVE
+    unit.sales_line_id = sales_line_id
+    unit.save(update_fields=['status', 'sales_line'])
+
+
 def restore_returned_sales_serials(return_invoice, lines) -> int:
     """مرجع البيع يُعيد البضاعة للمخزن (RETURN_IN) — ووحداتها المُباعة تعود معها.
 

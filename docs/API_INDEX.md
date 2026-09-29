@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **959**
+عدد النقاط: **960**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -169,6 +169,7 @@
 | `/api/after-sales/service-orders/{pk}/post-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/refuse-coverage/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/restore-coverage/` | `ServiceOrderViewSet` | `after_sales/views.py` |
+| `/api/after-sales/service-orders/{pk}/returned-unit/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/transition/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/service-orders/{pk}/unpost-covered/` | `ServiceOrderViewSet` | `after_sales/views.py` |
 | `/api/after-sales/settings/` | `AfterSalesSettingsView` | `after_sales/views.py` |

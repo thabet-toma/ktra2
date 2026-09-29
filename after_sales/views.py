@@ -35,6 +35,7 @@ from .serializers import (
     AfterSalesSettingsSerializer,
     GenerateServiceInvoiceSerializer,
     ManufacturerWarrantorSerializer,
+    ReturnedUnitSerializer,
     ServiceOrderEventSerializer,
     ServiceOrderListSerializer,
     ServiceOrderNoteSerializer,
@@ -953,6 +954,8 @@ _ORDER_ACTION_PERMS = {
     # رفض الكفالة لهذا العطل قرارُ تاجرٍ بصلاحية الإلغاء نفسها (#236).
     "refuse_coverage": PERM_VOID,
     "restore_coverage": PERM_VOID,
+    # #246: الصلاحية تتبع الحالة المطلوبة (العودة للمخزن وتراجعها مالٌ) فتُفحص في الفعل.
+    "returned_unit": None,
 }
 
 
@@ -1045,6 +1048,10 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(warranty_covered=True)
         elif covered in ("0", "false"):
             queryset = queryset.filter(warranty_covered=False)
+
+        returned_filter = (params.get("returned_unit_state") or "").strip()
+        if returned_filter:
+            queryset = queryset.filter(returned_unit_state__in=returned_filter.split(","))
 
         partner_id = (params.get("partner") or "").strip()
         if partner_id.isdigit():
@@ -1162,6 +1169,31 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
                 user=request.user,
                 outcome=form.validated_data.get("outcome") or "",
                 note=form.validated_data.get("note") or "",
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(self.get_object()).data)
+
+    @action(detail=True, methods=["post"], url_path="returned-unit")
+    def returned_unit(self, request, pk=None):
+        """مصير الجهاز المعطوب بعد الاستبدال (#246).
+
+        العودة للمخزن (`restocked`) وتراجعها (`held`، ولا انتقال آخر يصل إليها) يمسّان
+        المخزن والدفاتر: صلاحية الترحيل. والباقي علاماتٌ إدارية: صلاحية التعديل.
+        """
+        from .service_orders import set_returned_unit_state
+
+        form = ReturnedUnitSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        state = form.validated_data["state"]
+        touches_money = state in (ServiceOrder.RETURNED_RESTOCKED, ServiceOrder.RETURNED_HELD)
+        require_perm(
+            request, ORDER_PERM_POST if touches_money else ORDER_PERM_EDIT, tenant=self.tenant,
+        )
+        order = self.get_object()
+        try:
+            set_returned_unit_state(
+                order, state, note=form.validated_data.get("note") or "", user=request.user,
             )
         except DjangoValidationError as error:
             _reraise_as_drf(error)
