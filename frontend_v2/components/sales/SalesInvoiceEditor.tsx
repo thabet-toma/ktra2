@@ -55,6 +55,7 @@ import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { KitDatePicker } from "../ui/KitDatePicker";
 import { FieldHint } from "../ui/FieldHint";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
+import { useCanSendWarranty } from "../aftersales/useCanSendWarranty";
 import { useInvoiceWarrantyCount } from "../aftersales/useInvoiceWarrantyCount";
 import { WarrantyPrintBar } from "../aftersales/WarrantyPrintBar";
 import { printWarrantyCertificate } from "../../services/afterSalesApi";
@@ -568,6 +569,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     draftId, invoiceStatus === "posted", invoiceKind === "sale_return", invoiceStatus,
   );
   const [showShareModal, setShowShareModal] = useState(false);
+  // #239: «أرسل» الشهادة برابط مشاركة — نافذة المشاركة نفسها بنوع `warranty_certificate`.
+  const canSendWarranty = useCanSendWarranty();
+  const [showWarrantyShare, setShowWarrantyShare] = useState(false);
   // نافذة تسليم البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showDeliver, setShowDeliver] = useState(false);
   // T-SERVICELINE: نافذة «إضافة خدمة» — تُنشئ الخدمة وتضعها في سطر الفاتورة.
@@ -3449,6 +3453,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       icon: <Printer />,
       onClick: () => void handlePrintWarranties(),
     } as KitToolbarAction] : []),
+    ...(warrantyPrintCount > 0 && canSendWarranty ? [{
+      key: "send-warranties",
+      label: "أرسل الكفالات",
+      icon: <Share2 />,
+      onClick: () => setShowWarrantyShare(true),
+    } as KitToolbarAction] : []),
     // DOC-SHARE: المشاركة تلزمها فاتورة محفوظة — الرابط يشير إلى صفٍّ في
     // القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها بعد.
     {
@@ -4664,6 +4674,16 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           docType="sales_invoice"
           docId={draftId}
           docLabel={`${isReturn ? "مرتجع بيع" : "فاتورة"} ${invoiceNumber}`}
+          partyName={selectedCustomer?.name}
+        />
+      )}
+      {draftId != null && canSendWarranty && (
+        <ShareDocumentModal
+          open={showWarrantyShare}
+          onClose={() => setShowWarrantyShare(false)}
+          docType="warranty_certificate"
+          docId={draftId}
+          docLabel={`شهادة كفالة ${invoiceNumber}`}
           partyName={selectedCustomer?.name}
         />
       )}

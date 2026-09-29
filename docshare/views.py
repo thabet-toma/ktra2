@@ -10,7 +10,7 @@
 """
 import logging
 
-from django.http import HttpResponseRedirect
+from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status, viewsets
@@ -205,6 +205,10 @@ class DocSharePublicView(DocSharePublicBase):
             )
 
         services.record_view(share, request)
+        page = DOC_TYPES[share.doc_type].get("page")
+        html = page(document, share) if page is not None else None
+        if html is not None:
+            return _harden(HttpResponse(html, content_type="text/html; charset=utf-8"))
         return _harden(
             Response(_page_context(request, share, document, payload),
                      template_name=SHARE_TEMPLATE)

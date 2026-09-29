@@ -98,6 +98,7 @@ SAMPLE_FIXTURES = {
     "supplier_payment": "supplier_payment",
     "credit_debit_note": "credit_debit_note",
     "warranty_card": "warranty_card",
+    "warranty_certificate": "warranty_certificate_invoice",
     "service_order": "service_order",
     "purchase_rfq": "purchase_rfq",
 }
@@ -405,6 +406,20 @@ def warranty_card(env, aftersales_tenant):
         start_date="2026-08-01", duration_months=12, end_date="2099-08-01",
         supplier=None, notes="ملاحظات الكفالة",
     )
+
+
+@pytest.fixture
+def warranty_certificate_invoice(env, aftersales_tenant, invoice):
+    """فاتورةٌ عليها بطاقةٌ غير منتهية — شرطُ أن تُشارَك كشهادة."""
+    from after_sales.models import WarrantyCard
+
+    WarrantyCard.objects.create(
+        tenant=aftersales_tenant, product=env["product"], partner=env["customer"],
+        sales_invoice=invoice, device_name="جهاز الشهادة", serial="SN-SH-CERT-1",
+        start_date="2026-08-01", duration_months=12, end_date="2099-08-01",
+        supplier=None, notes="ملاحظات الكفالة",
+    )
+    return invoice
 
 
 @pytest.fixture

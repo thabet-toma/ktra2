@@ -166,8 +166,11 @@ def ensure_single_customer(cards) -> None:
         raise ValidationError("البطاقات لزبائن مختلفين — اطبع كل زبون على حدة.")
 
 
-def certificate_context(cards, *, layout, user, today=None) -> dict:
-    """كل ما يراه القالب — القائمة البيضاء الوحيدة. `cards` بطاقاتٌ قابلةٌ للطباعة (غير منتهية)."""
+def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -> dict:
+    """كل ما يراه القالب — القائمة البيضاء الوحيدة. `cards` بطاقاتٌ قابلةٌ للطباعة (غير منتهية).
+
+    `mark_reprint=False` لصفحة المشاركة: فتحُ الزبون للرابط ليس «إعادة طباعة».
+    """
     cards = list(cards)
     today = today or timezone.localdate()
     tenant = cards[0].tenant
@@ -209,7 +212,7 @@ def certificate_context(cards, *, layout, user, today=None) -> dict:
             "qr": mark_safe(qr_svg(card, qr_mm)),
         })
 
-    reprint = WarrantyCardEvent.objects.filter(
+    reprint = mark_reprint and WarrantyCardEvent.objects.filter(
         tenant_id=cards[0].tenant_id, card_id__in=[card.pk for card in cards],
         event_type=WarrantyCardEvent.TYPE_ISSUED,
     ).exists()

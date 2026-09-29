@@ -150,7 +150,7 @@ def build_sales_invoice(invoice) -> dict:
 
 # ── عرض السعر ───────────────────────────────────────────────────────────────
 
-def _send_draft_quotation(quotation) -> None:
+def _send_draft_quotation(quotation, user=None) -> None:
     """مشاركةُ عرضٍ ما زال مسودة **تُرسله**.
 
     بدون ذلك يضغط الزبون «موافق» فيسقط على آلة حالات `SalesQuotation`: القبول

@@ -1400,6 +1400,7 @@ def latest_purchase_line_warranties(tenant_id: int, product_ids) -> dict:
 # ══════════════════════════════════════════════════════════════════════════
 
 ISSUE_CHANNEL_PRINT = "print"
+ISSUE_CHANNEL_SHARE = "share"
 WITHDRAWN_REASON_CODE = "withdrawn"
 
 

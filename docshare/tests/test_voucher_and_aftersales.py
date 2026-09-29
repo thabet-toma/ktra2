@@ -127,10 +127,15 @@ def test_an_ended_warranty_card_is_never_shown_as_valid(
 def test_a_live_warranty_card_still_reads_valid(
     client, env, aftersales_tenant, warranty_card
 ):
-    """الاختبار السالب بلا موجب بلا قيمة — بطاقةٌ حيّة تبقى «سارية»."""
+    """الاختبار السالب بلا موجب بلا قيمة — بطاقةٌ حيّة تبقى شهادةً لا «منتهية».
+
+    منذ #239 صفحةُ البطاقة هي شهادةُ #238 المطبوعة لا القالب العام، فلا شارة
+    «سارية» فيها: يُثبَت الموجب بعنوان الشهادة وبتاريخ نهاية الكفالة.
+    """
     _, html = _html(client, aftersales_tenant, "warranty_card", warranty_card)
 
-    assert "سارية" in html
+    assert "بطاقة كفالة" in html
+    assert "01/08/2099" in html
     assert "منتهي الصلاحية" not in html
 
 

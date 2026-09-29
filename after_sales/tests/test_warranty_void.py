@@ -155,7 +155,7 @@ class RefuseCoverageForThisFaultTest(VoidTestBase):
         before = public.get(f"/s/{share.token}")
         self.assertEqual(before.status_code, 200)
         before_html = before.content.decode("utf-8")
-        self.assertIn("سارية", before_html)
+        self.assertIn("بطاقة كفالة", before_html)
         self.assertNotIn("منتهي", before_html)
 
         order = self.covered_order()
@@ -164,7 +164,7 @@ class RefuseCoverageForThisFaultTest(VoidTestBase):
         after = public.get(f"/s/{share.token}")
         self.assertEqual(after.status_code, 200)
         after_html = after.content.decode("utf-8")
-        self.assertIn("سارية", after_html)
+        self.assertIn("بطاقة كفالة", after_html)
         self.assertNotIn("منتهي", after_html)
 
     def test_other_reason_needs_a_note(self):

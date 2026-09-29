@@ -46,6 +46,7 @@ DOC_SUPPLIER_PAYMENT = "supplier_payment"
 DOC_CREDIT_DEBIT_NOTE = "credit_debit_note"
 DOC_WARRANTY_CARD = "warranty_card"
 DOC_SERVICE_ORDER = "service_order"
+DOC_WARRANTY_CERTIFICATE = "warranty_certificate"
 #: ISSUE #115 (مواصفة #108 §٥): رابط المورّد الخاص على الطلبية (طلب عروض
 #: أسعار) — مسارٌ ثانٍ داخل `docshare` يكتب أسعار بنود، لا قراراً. انظر
 #: `documents.purchase_docs` (`QUOTE_PURCHASE_RFQ`).
@@ -66,6 +67,7 @@ DOC_TYPE_CHOICES = [
     (DOC_WARRANTY_CARD, "بطاقة كفالة"),
     (DOC_SERVICE_ORDER, "أمر صيانة"),
     (DOC_PURCHASE_RFQ, "طلب عرض سعر"),
+    (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

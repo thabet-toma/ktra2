@@ -150,7 +150,7 @@ def create_share(tenant, doc_type: str, doc_id: int, *, days: int = DEFAULT_EXPI
     # سيضيف فرعاً ثانياً في خدمةٍ لا شأن لها بآلات حالات المبيعات.
     on_share = DOC_TYPES[doc_type].get("on_share")
     if on_share is not None:
-        on_share(document)
+        on_share(document, user=user)
 
     log_activity(
         action="create",

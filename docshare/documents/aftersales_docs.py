@@ -19,7 +19,14 @@
 تختمها «سارية» بالأخضر على شهادةٍ لم تعد لصاحبها. وسببُ الانتهاء **لا يخرج**:
 الحالة وحدها، كما في قرار رابط التحقّق.
 """
+from after_sales.certificates import (
+    LAYOUT_CARD,
+    LAYOUT_INVOICE,
+    certificate_context,
+    render_certificate,
+)
 from after_sales.models import ServiceOrder, WarrantyCard
+from after_sales.services import ISSUE_CHANNEL_SHARE, mark_card_issued
 from docshare.documents._contract import (
     AUDIENCE_CUSTOMER,
     TONE_DANGER,
@@ -33,6 +40,7 @@ from docshare.documents._contract import (
     tone_for,
     total,
 )
+from sales.models import SalesInvoice
 
 _ORDER_TONES = {
     "received": TONE_MUTED,
@@ -119,6 +127,94 @@ def build_warranty_card(card) -> dict:
     )
 
 
+def page_warranty_card(document, share):
+    """صفحة المشاركة = بطاقة الشهادة المطبوعة نفسها (#238) لا القالب العام.
+
+    المنتهية (`ended_on`) لا تُطبع فلا تُصيَّر شهادةً هنا أيضاً: يعيد `None`
+    فتسقط الصفحة إلى القالب العام الذي يختمها «منتهي الصلاحية».
+    """
+    card = (
+        WarrantyCard.objects
+        .select_related(
+            "tenant", "partner", "product", "sales_invoice", "manufacturer_warrantor",
+        )
+        .filter(pk=document.pk, tenant_id=document.tenant_id, ended_on__isnull=True)
+        .first()
+    )
+    if card is None:
+        return None
+    context = certificate_context(
+        [card], layout=LAYOUT_CARD, user=share.created_by, mark_reprint=False,
+    )
+    return render_certificate(context)
+
+
+# ── شهادة الفاتورة ──────────────────────────────────────────────────────────
+
+def _printable_invoice_cards(tenant_id: int, invoice_id: int):
+    """بطاقات الفاتورة القابلة للطباعة — نفس تصفية `POST warranties/print/`."""
+    return WarrantyCard.objects.filter(
+        tenant_id=tenant_id, sales_invoice_id=invoice_id, ended_on__isnull=True,
+    )
+
+
+def load_warranty_certificate(tenant_id: int, doc_id: int):
+    """فاتورة البيع التي عليها بطاقةٌ غير منتهية واحدة على الأقل، وإلا `None`.
+
+    فاتورةٌ بلا شهادةٍ تُطبع لا تُشارَك: رابطٌ يفتح صفحةً فارغة.
+    """
+    if not _printable_invoice_cards(tenant_id, doc_id).exists():
+        return None
+    return (
+        SalesInvoice.objects
+        .filter(pk=doc_id, tenant_id=tenant_id)
+        .only("id", "tenant_id", "invoice_number", "invoice_date")
+        .first()
+    )
+
+
+def build_warranty_certificate(invoice) -> dict:
+    # الصفحة تُصيَّر من `page_warranty_certificate` لا من القالب العام، فهذه
+    # الحمولة تحرس القائمة البيضاء وحدها ولا تحمل غير رقم الفاتورة وتاريخها.
+    return payload(
+        kind="warranty_certificate",
+        title="شهادة كفالة",
+        number=invoice.invoice_number,
+        date=invoice.invoice_date,
+        status_label="",
+        status_tone=TONE_MUTED,
+        party_title="",
+        party=None,
+        currency=None,
+        show_lines=False,
+    )
+
+
+def page_warranty_certificate(document, share):
+    cards = list(
+        _printable_invoice_cards(document.tenant_id, document.pk)
+        .select_related(
+            "tenant", "partner", "product", "sales_invoice", "manufacturer_warrantor",
+        )
+        .order_by("pk")
+    )
+    if not cards:
+        return None
+    context = certificate_context(
+        cards, layout=LAYOUT_INVOICE, user=share.created_by, mark_reprint=False,
+    )
+    return render_certificate(context)
+
+
+def issue_on_share(invoice, user=None) -> None:
+    """إنشاء الرابط = إصدار الشهادة: `issued` بقناة المشاركة لكل بطاقة، مرةً واحدة.
+
+    `mark_card_issued` يتجاهل ما صدر من قبل (طباعةً كان أو مشاركةً سابقة).
+    """
+    for card in _printable_invoice_cards(invoice.tenant_id, invoice.pk).order_by("pk"):
+        mark_card_issued(card, ISSUE_CHANNEL_SHARE, user=user)
+
+
 # ── أمر الصيانة ─────────────────────────────────────────────────────────────
 
 def load_service_order(tenant_id: int, doc_id: int):
@@ -195,6 +291,20 @@ AFTERSALES_DOC_TYPES = {
         #: مفتاحٌ اختياريّ: النوع يقرّر متى تنتهي صلاحيته بدل مقارنة تاريخٍ
         #: عامّة لا تعرف واقعة الانتهاء (#222 بند ٧).
         "expired": warranty_card_expired,
+        #: مفتاحٌ اختياريّ: النوع يُصيِّر صفحته بنفسه بدل القالب العام (#239).
+        "page": page_warranty_card,
+    },
+    "warranty_certificate": {
+        "label": "شهادة كفالة",
+        "loader": load_warranty_certificate,
+        "builder": build_warranty_certificate,
+        "permission": "sales.document.share",
+        "audience": AUDIENCE_CUSTOMER,
+        "decision": None,
+        "module": "after_sales",
+        "page": page_warranty_certificate,
+        #: مفتاحٌ اختياريّ: يُستدعى عند إنشاء رابطٍ جديد (`create_share`).
+        "on_share": issue_on_share,
     },
     "service_order": {
         "label": "أمر صيانة",

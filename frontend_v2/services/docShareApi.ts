@@ -25,6 +25,7 @@ export type ShareDocType =
   | "credit_debit_note"
   // ما بعد البيع — جمهوره الزبون، ووحدته مرخّصة
   | "warranty_card"
+  | "warranty_certificate"
   | "service_order"
   // جانب الشراء — جمهوره المورّد، ويلزمه `purchase.document.share`
   | "purchase_invoice"

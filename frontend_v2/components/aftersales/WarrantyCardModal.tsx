@@ -41,6 +41,7 @@ import { warrantyPillClass } from "./warrantyStatus";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { WarrantyVoidDialog } from "./WarrantyVoidDialog";
+import { WarrantySendButton } from "./WarrantySendButton";
 
 /**
  * THA-24 م2 — بطاقة كفالة واحدة: إنشاء يدوية، تعديل، تمديد، حذف.
@@ -1086,6 +1087,15 @@ export const WarrantyCardModal: React.FC<Props> = ({
             >
               <Printer className="h-4 w-4" /> طباعة الشهادة
             </button>
+          )}
+          {card && warrantyCardPrintable(card) && (
+            <WarrantySendButton
+              docType="warranty_card"
+              docId={card.id}
+              docLabel={`بطاقة كفالة #${card.id}`}
+              partyName={card.customer_name || undefined}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] sm:w-32"
+            />
           )}
           {card && canManage && removalMode === "delete" && (
             <button

@@ -7,6 +7,7 @@ import {
   warrantyInvoicePrintLabel,
 } from "../../utils/warranty";
 import { useInvoiceWarrantyCount } from "./useInvoiceWarrantyCount";
+import { WarrantySendButton } from "./WarrantySendButton";
 
 /**
  * #238 — شريطٌ غير حاجب بعد ترحيل بيعٍ: «اطبع كفالات الفاتورة (N)». مصدرٌ واحد
@@ -53,6 +54,12 @@ export const WarrantyPrintBar: React.FC<{
       >
         {warrantyInvoicePrintLabel(count)}
       </button>
+      <WarrantySendButton
+        docType="warranty_certificate"
+        docId={invoiceId}
+        docLabel={`شهادة كفالة ${invoiceNumber ?? `الفاتورة #${invoiceId}`}`}
+        className="rounded border border-current px-2 py-0.5 text-xs font-bold"
+      />
       <button
         type="button"
         className="rounded px-2 py-0.5 text-xs"
