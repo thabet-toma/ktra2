@@ -44,6 +44,7 @@ import {
   Wallet,
 } from "lucide-react";
 import { SalesInvoiceEditor, type PartnerRow, type ProductRow } from "./SalesInvoiceEditor";
+import { WarrantyPrintBar } from "../aftersales/WarrantyPrintBar";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { eventBus } from "../../utils/eventBus";
 import { openInNewTab } from "../../utils/openInNewTab";
@@ -125,6 +126,8 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
+  /** #238: فاتورة بيعٍ رُحِّلت الآن من القائمة — يُعرض لها شريط طباعة الكفالات. */
+  const [warrantyBarFor, setWarrantyBarFor] = useState<{ id: number; number: string } | null>(null);
   /** issue #167 م٤: نفس حوار المحرِّر — هذه القائمة مسارُ ترحيلٍ ثانٍ يستدعي
    *  نفس القاعدة الخادميّة، فالحوار هنا لا يُعيد حسابها. */
   const [refundDialog, setRefundDialog] = useState<{
@@ -371,6 +374,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
   const handlePostRow = async (row: ExtRow) => {
     setErr(null);
     setMsg(null);
+    setWarrantyBarFor(null);
     // issue #167 م٤: مرجع البيع فقط، وحين الإعداد التلقائي مطفأ — غيره يُرحَّل
     // كما كان بلا حقل `refund` (غيابه يعني «الخادم يقرّر»).
     let refundChoice: SalesReturnRefundChoice | undefined;
@@ -393,6 +397,7 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
       setMsg(
         refundMsg ? `تم ترحيل الفاتورة #${row.id}. ${refundMsg}` : `تم ترحيل الفاتورة #${row.id}`,
       );
+      if (row.invoice_kind !== "sale_return") setWarrantyBarFor({ id: row.id, number: posted.invoice_number || row.invoice_number });
       await loadRows();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الترحيل");
@@ -833,6 +838,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           <div style={{ padding: "8px" }}>
             {err && <div className="ktra-banner ktra-banner--err" style={{ marginBottom: "8px" }}>{err}</div>}
             {msg && <div className="ktra-banner" style={{ marginBottom: "8px", color: "var(--ktra-ok, #2d7d46)" }}>{msg}</div>}
+            {warrantyBarFor != null && (
+              <WarrantyPrintBar
+                key={warrantyBarFor.id}
+                invoiceId={warrantyBarFor.id}
+                invoiceNumber={warrantyBarFor.number}
+                onDismiss={() => setWarrantyBarFor(null)}
+              />
+            )}
             <KitDenseTable<ExtRow>
               columns={columns}
               rows={filteredRows}

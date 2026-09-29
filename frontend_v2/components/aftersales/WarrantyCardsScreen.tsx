@@ -1,12 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
-  ChevronLeft, ChevronRight, Loader2, Plus, RotateCcw, Search, Settings, ShieldCheck,
+  ChevronLeft, ChevronRight, Loader2, Plus, Printer, RotateCcw, Search, Settings, ShieldCheck,
 } from "lucide-react";
 import { ShareRowButton } from "../shared/ShareRowButton";
 import {
   listWarrantyCards,
   lookupManufacturerWarrantors,
+  printWarrantyCertificate,
   type ManufacturerWarrantorRow,
   type WarrantyCardRow,
   type WarrantyListFilters,
@@ -20,9 +21,11 @@ import { formatNumber } from "../../utils/formatNumber";
 import {
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  warrantyCardPrintable,
   warrantyCoveredQuantityLabel,
   warrantyRemainingText,
   warrantyStatusLabel,
+  WARRANTY_PRINT_BLOCKED_TEXT,
 } from "../../utils/warranty";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { WarrantyCardModal } from "./WarrantyCardModal";
@@ -151,6 +154,19 @@ export const WarrantyCardsScreen: React.FC = () => {
   }, [filters, page]);
 
   useEffect(() => { void load(); }, [load]);
+
+  // النافذة تُفتح داخل النقرة نفسها (انظر `printWarrantyCertificate`)؛ وبعد الطباعة
+  // تُحدَّث القائمة لأن البطاقة صارت «صدرت» فلا تُحذف بل تُسحب.
+  const printRow = async (row: WarrantyCardRow) => {
+    setListErr(null);
+    try {
+      const outcome = await printWarrantyCertificate({ cards: [row.id] });
+      if (outcome === "blocked") setListErr(WARRANTY_PRINT_BLOCKED_TEXT);
+      else void load();
+    } catch (e) {
+      setListErr(messageOf(e, "تعذّرت طباعة الشهادة"));
+    }
+  };
 
   // قوائم النافذة تُجلب مرة واحدة — البطاقة اليدوية نادرة، فلا تُحمَّل مع كل بحث.
   useEffect(() => {
@@ -313,6 +329,7 @@ export const WarrantyCardsScreen: React.FC = () => {
                 <th className="hidden lg:table-cell">المصدر</th>
                 <th className="hidden lg:table-cell">كفالة المورد</th>
                 <th>مشاركة</th>
+                <th>طباعة</th>
               </tr>
             </thead>
             <tbody>
@@ -397,6 +414,19 @@ export const WarrantyCardsScreen: React.FC = () => {
                       className="text-blue-600 hover:underline text-xs"
                       label=""
                     />
+                  </td>
+                  <td onClick={(e) => e.stopPropagation()}>
+                    {warrantyCardPrintable(row) && (
+                      <button
+                        type="button"
+                        onClick={() => void printRow(row)}
+                        className="rounded p-1 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
+                        title="طباعة شهادة الكفالة"
+                        aria-label={`طباعة شهادة الكفالة #${row.id}`}
+                      >
+                        <Printer className="h-4 w-4" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))}

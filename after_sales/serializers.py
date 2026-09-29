@@ -50,6 +50,8 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     void = serializers.SerializerMethodField()
     # #237: رابط التحقق العام للموظف فقط. الرمز نفسه لا يخرج حقلاً مستقلاً.
     verify_url = serializers.SerializerMethodField()
+    # #238: «حذف» لبطاقةٍ لم يَرَها أحد، و«سحب» لمن صدرت للزبون أو لها أثر.
+    can_delete = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -65,7 +67,8 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "manufacturer_end_date", "manufacturer_status", "manufacturer_days_remaining",
             "quantity", "returned_quantity", "covered_quantity",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
-            "end_reason_label", "void", "verify_url", "created_at", "updated_at",
+            "end_reason_label", "void", "verify_url", "can_delete",
+            "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
         # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
@@ -100,6 +103,14 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     def get_verify_url(self, obj):
         from .verify import verify_url
         return verify_url(obj)
+
+    def get_can_delete(self, obj):
+        if obj.source == WarrantyCard.SOURCE_AUTO_SALE:
+            return False
+        has_events = getattr(obj, "has_events", None)
+        if has_events is None:
+            has_events = obj.events.exists()
+        return not has_events
 
     def get_void(self, obj):
         if obj.voided_at is None:
@@ -296,6 +307,21 @@ class WarrantyUndoSerializer(serializers.Serializer):
     """جسم التراجع عن الإلغاء أو عن رفض التغطية — السبب إلزامي (الخدمة تفحص طوله)."""
 
     reason = serializers.CharField(required=False, allow_blank=True, default="", max_length=300)
+
+
+class WarrantyPrintSerializer(serializers.Serializer):
+    """جسم طباعة الشهادة: بطاقاتٌ بأرقامها أو فاتورةٌ — أحدهما بالضبط."""
+
+    cards = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False,
+        allow_empty=False, max_length=200,
+    )
+    sales_invoice = serializers.IntegerField(required=False, min_value=1)
+
+    def validate(self, attrs):
+        if ("cards" in attrs) == ("sales_invoice" in attrs):
+            raise serializers.ValidationError("أرسل إمّا بطاقات وإمّا فاتورة — أحدهما بالضبط.")
+        return attrs
 
 
 class WarrantyShortenSerializer(serializers.Serializer):

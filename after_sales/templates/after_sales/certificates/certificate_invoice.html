@@ -1,0 +1,63 @@
+{% extends "after_sales/certificates/certificate_base.html" %}
+{% comment %}شهادة الفاتورة: جدولٌ بكل الأجهزة المكفولة — صفٌّ لكل بطاقة، لا يُقسَم بين صفحتين، ورأسه يتكرّر.{% endcomment %}
+{% block body %}
+<div class="facts keep">
+  {% if customer_name %}<div><span>الكفالة باسم</span><strong>{{ customer_name }}</strong></div>{% endif %}
+  {% if customer_phone %}<div><span>الهاتف</span><strong class="ltr">{{ customer_phone }}</strong></div>{% endif %}
+</div>
+
+<h3 class="sec">الأجهزة المكفولة ({{ items|length }}) — تبدأ كفالاتها من تاريخ الفاتورة ما لم يُذكر غيره</h3>
+<table>
+  <thead>
+    <tr>
+      <th class="w-n">#</th>
+      <th>الجهاز والرقم التسلسلي</th>
+      <th class="w-dealer">كفالة التاجر حتى</th>
+      <th class="w-maker">كفالة المصنع حتى</th>
+      <th class="w-qr">تحقّق</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for item in items %}
+    <tr>
+      <td class="n">{{ item.index }}</td>
+      <td>
+        <bdi class="dev" dir="ltr">{{ item.device }}</bdi>
+        {% if item.is_quantity %}
+          <span class="sn"><b>الكمية المكفولة</b> <strong>{{ item.covered_quantity }}</strong>{% if item.partly_returned %} <b>من أصل {{ item.original_quantity }}</b>{% endif %}</span>
+        {% elif item.serial %}
+          <span class="sn"><span class="ltr"><b>الرقم التسلسلي</b> {{ item.serial }}</span></span>
+        {% endif %}
+      </td>
+      <td class="layer">
+        {% if item.dealer.kind == "none" %}<span class="none">لا يوجد</span>
+        {% elif item.dealer.kind == "voided" %}<span class="stamp">{{ item.dealer.text }}{% if item.dealer.date %}<small>بتاريخ {{ item.dealer.date }}</small>{% endif %}{% if item.dealer.reason %}<small>السبب: {{ item.dealer.reason }}</small>{% endif %}</span>
+        {% else %}
+          <span class="to">{{ item.dealer.to }}</span>{% if item.dealer.expired %} <span class="stamp stamp-grey">{{ item.dealer.expired_text }}</span>{% endif %}
+          <span class="from">{{ item.dealer.months }}{% if item.dealer.from_ %} · من {{ item.dealer.from_ }}{% endif %}{% if item.dealer.extended_days %} · مُدِّدت {{ item.dealer.extended_days }} يوماً{% endif %}</span>
+        {% endif %}
+      </td>
+      <td class="layer">
+        {% if item.manufacturer.kind == "none" %}<span class="none">لا يوجد</span>
+        {% else %}
+          <span class="to">{{ item.manufacturer.to }}</span><span class="ref">{{ item.manufacturer.ref }}</span>{% if item.manufacturer.expired %} <span class="stamp stamp-grey">{{ item.manufacturer.expired_text }}</span>{% endif %}
+          <span class="from">{{ item.manufacturer.months }}{% if item.manufacturer.from_ %} · من {{ item.manufacturer.from_ }}{% endif %}</span>
+        {% endif %}
+      </td>
+      <td class="qr">{{ item.qr }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% if warrantors %}
+<div class="centers keep">
+  <h3 class="sec">أين تُخدم كفالة المصنع</h3>
+  {% for warrantor in warrantors %}
+    <p><span class="ref">{{ warrantor.ref }}</span><b>{{ warrantor.name }}</b>{% if warrantor.address %} — {{ warrantor.address }}{% endif %}{% if warrantor.phone %} · <span class="ltr">{{ warrantor.phone }}</span>{% endif %}</p>
+  {% endfor %}
+</div>
+{% endif %}
+{% endblock %}
+
+{% block foot %}<span>امسح رمز الجهاز لمعرفة حالة كفالته اليوم.</span><span>هذه الشهادة لا تُغني عن الفاتورة.</span>{% endblock %}

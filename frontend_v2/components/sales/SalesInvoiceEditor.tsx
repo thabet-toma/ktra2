@@ -55,6 +55,10 @@ import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
 import { KitDatePicker } from "../ui/KitDatePicker";
 import { FieldHint } from "../ui/FieldHint";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
+import { useInvoiceWarrantyCount } from "../aftersales/useInvoiceWarrantyCount";
+import { WarrantyPrintBar } from "../aftersales/WarrantyPrintBar";
+import { printWarrantyCertificate } from "../../services/afterSalesApi";
+import { warrantyInvoicePrintLabel, WARRANTY_PRINT_BLOCKED_TEXT } from "../../utils/warranty";
 
 import { ProductCardModal } from "../shared/ProductCardModal";
 import { SerialEntryModal } from "../shared/SerialEntryModal";
@@ -558,6 +562,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [customerPickerOpen, setCustomerPickerOpen] = useState(false);
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
+  // #238: شريط «اطبع كفالات الفاتورة» بعد ترحيل بيعٍ فيه أجهزة مكفولة — غير حاجب.
+  const [warrantyBarOpen, setWarrantyBarOpen] = useState(false);
+  const warrantyPrintCount = useInvoiceWarrantyCount(
+    draftId, invoiceStatus === "posted", invoiceKind === "sale_return", invoiceStatus,
+  );
   const [showShareModal, setShowShareModal] = useState(false);
   // نافذة تسليم البضاعة (تُنشئ إرسالية بالبنود المؤشَّرة).
   const [showDeliver, setShowDeliver] = useState(false);
@@ -1714,6 +1723,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         : "تم الترحيل بنجاح.";
       const refundMsg = describeRefundOutcome(posted.refund_summary);
       setMsg(refundMsg ? `${postedMsg} ${refundMsg}` : postedMsg);
+      if (!isReturn) setWarrantyBarOpen(true);
       void discardDraft();
       onInvoiceSaved();
       return true;
@@ -1743,11 +1753,24 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       // «المحصَّل» القديم معروضاً على فاتورةٍ عادت مسودة.
       applyDetail(inv);
       setMsg("تم التراجع عن الترحيل وحذف القيود. الفاتورة الآن مسودة.");
+      setWarrantyBarOpen(false);
       onInvoiceSaved();
     } catch (e) {
       setLocalErr(humanizeThrown(e, "تعذر التراجع عن الترحيل"));
     } finally {
       setPosting(false);
+    }
+  };
+
+  // النافذة تُفتح داخل النقرة نفسها قبل أي await — انظر `printWarrantyCertificate`.
+  const handlePrintWarranties = async () => {
+    if (draftId == null) return;
+    setLocalErr(null);
+    try {
+      const outcome = await printWarrantyCertificate({ sales_invoice: draftId });
+      if (outcome === "blocked") setLocalErr(WARRANTY_PRINT_BLOCKED_TEXT);
+    } catch (e) {
+      setLocalErr(humanizeThrown(e, "تعذّرت طباعة الكفالات"));
     }
   };
 
@@ -3420,6 +3443,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       separatorBefore: true,
     } as KitToolbarAction]),
     { key: "print", label: "طباعة", icon: <Printer />, onClick: () => setShowPrintView(true) },
+    ...(warrantyPrintCount > 0 ? [{
+      key: "print-warranties",
+      label: warrantyInvoicePrintLabel(warrantyPrintCount),
+      icon: <Printer />,
+      onClick: () => void handlePrintWarranties(),
+    } as KitToolbarAction] : []),
     // DOC-SHARE: المشاركة تلزمها فاتورة محفوظة — الرابط يشير إلى صفٍّ في
     // القاعدة، ومسوّدةٌ في الذاكرة لا صفَّ لها بعد.
     {
@@ -4394,6 +4423,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       >
         <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={() => void handleUndoDraft()} isTouched={dirtyRef.current} readOnly={readOnly} />
         {banner}
+        {warrantyBarOpen && draftId != null && (
+          <WarrantyPrintBar invoiceId={draftId} onDismiss={() => setWarrantyBarOpen(false)} />
+        )}
         {reservedWarningBanner}
         {stockWarningBanner}
         {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}

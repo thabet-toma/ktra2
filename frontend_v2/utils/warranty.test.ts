@@ -255,6 +255,11 @@ test('#236 — سطر المعاينة يسمّي القطع بلا سعر وع�
   );
 });
 
+import {
+  countPrintableWarrantyCards,
+  warrantyInvoicePrintLabel,
+  warrantyRemovalMode,
+} from './warranty.ts';
 import { warrantyQrImageSrc } from './warranty.ts';
 
 test('#237 — مصدر صورة الـQR data URI مُرمَّز لا يُحقَن كما هو', () => {
@@ -265,4 +270,27 @@ test('#237 — مصدر صورة الـQR data URI مُرمَّز لا يُحق�
     decodeURIComponent(src.slice('data:image/svg+xml;charset=utf-8,'.length)),
     '<svg viewBox="0 0 1 1"><path d="M0 0"/></svg>',
   );
+});
+
+test('#238 — زرّ الفاتورة يعدّ القابلة للطباعة وحدها فيختفي عند الصفر', () => {
+  assert.equal(countPrintableWarrantyCards([]), 0);
+  assert.equal(countPrintableWarrantyCards([{ ended: true }, { ended: true }]), 0);
+  assert.equal(countPrintableWarrantyCards([{ ended: false }, { ended: true }, { ended: false }]), 2);
+  assert.equal(warrantyInvoicePrintLabel(3), 'اطبع كفالات الفاتورة (3)');
+});
+
+test('#238 — حذف لمن لم تصدر، سحب لمن صدرت، وتراجع لمن سُحبت', () => {
+  const manual = { source: 'manual' as const, can_delete: true, ended: false, end_reason: '' };
+  assert.equal(warrantyRemovalMode(manual), 'delete');
+  assert.equal(warrantyRemovalMode({ ...manual, can_delete: false }), 'withdraw');
+  assert.equal(
+    warrantyRemovalMode({ ...manual, can_delete: false, ended: true, end_reason: 'withdrawn' }),
+    'unwithdraw',
+  );
+});
+
+test('#238 — التلقائية والمنتهية بغير السحب بلا حذف ولا سحب', () => {
+  const auto = { source: 'auto_sale' as const, can_delete: false, ended: false, end_reason: '' };
+  assert.equal(warrantyRemovalMode(auto), null);
+  assert.equal(warrantyRemovalMode({ ...auto, source: 'manual', ended: true, end_reason: 'returned' }), null);
 });

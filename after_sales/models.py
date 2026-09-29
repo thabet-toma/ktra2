@@ -109,11 +109,14 @@ class WarrantyCard(models.Model):
     END_INVOICE_UNPOSTED = "invoice_unposted"
     END_SALE_CANCELLED = "sale_cancelled"
     END_SUPERSEDED = "superseded"
+    #: سحب البطاقة **اليدوية** الصادرة للزبون بدل حذفها (#238) — للبطاقة اليدوية وحدها.
+    END_WITHDRAWN = "withdrawn"
     END_REASON_CHOICES = [
         (END_RETURNED, "أُرجع الجهاز"),
         (END_INVOICE_UNPOSTED, "أُلغي ترحيل الفاتورة"),
         (END_SALE_CANCELLED, "أُلغي البيع"),
         (END_SUPERSEDED, "حلّت محلّها بطاقة أحدث"),
+        (END_WITHDRAWN, "سُحبت البطاقة"),
     ]
 
     STATUS_ACTIVE = "active"

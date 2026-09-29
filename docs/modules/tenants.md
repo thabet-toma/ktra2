@@ -53,6 +53,7 @@ app صغير (3,309 سطر Python) لكنه **عابر للنظام كله**: ي
 | `tenants/views.py` | ViewSets: الإعدادات، الدفاتر، العملات، الشركات والأعضاء، الفروع | 445 |
 | `tenants/services.py` | `create_company` + شجرة الحسابات `COA_DATA` + شركة المثال + الفروع | 383 |
 | `tenants/company_templates.py` | سِجلّ قوالب الشركة `COMPANY_TEMPLATES` (`general` · `accounting_firm` · `client_book` · `tyres`) — بذرة كل قالب وأنواع دفاتره، وتصنيفُ بابه (`BOOK_ONLY_TEMPLATES`/`SELF_SERVE_TEMPLATES` + `assert_self_serve_template`/`assert_book_template`) | 121 |
+| `tenants/letterhead.py` (#238) | ترويسة الشركة المطبوعة: `COMPANY_FIELDS` (القائمة البيضاء) و`company_card(tenant)` — مصدرٌ واحد يستهلكه `docshare/documents/_contract.py` (يعيد تصديرهما) و`after_sales/certificates.py`. تحمل `income_tax_file_no` و`licensed_dealer_no` لمستندات `docshare`، أما شهادة الكفالة فلا تطبع أيّاً منهما (`_LETTERHEAD_PRINTED` في `after_sales/certificates.py` قائمةٌ بيضاء أضيق). بلا استيراد نماذج في أعلاه | 30 |
 | `tenants/models.py` | 9 models (Tenant, Settings, Branch, Book, Membership, RolePermission, …) | 361 |
 | `tenants/serializers.py` | تمثيل الشركة والإعدادات والدفاتر والعضوية | 92 |
 | `tenants/urls.py` | router تحت `/api/tenants/` | 16 |

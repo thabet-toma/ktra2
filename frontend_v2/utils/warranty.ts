@@ -321,6 +321,41 @@ export function warrantyVoidImpactLine(order: WarrantyVoidImpactOrder): string {
   return `${order.order_number}: ${parts.length ? parts.join("، ") : "يفقد تغطية الكفالة"}`;
 }
 
+// ── #238: طباعة الشهادة وسحب البطاقة اليدوية ──────────────────────────────
+
+/** رسالة النافذة المحجوبة — الطباعة تحتاج نافذةً تُفتح من النقرة نفسها. */
+export const WARRANTY_PRINT_BLOCKED_TEXT =
+  "منع المتصفح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.";
+
+/** البطاقة المنتهية (سُحبت أو أُرجع جهازها…) لا تُطبع لها شهادة — يرفضها الخادم. */
+export const warrantyCardPrintable = (card: { ended: boolean }): boolean => !card.ended;
+
+/** عدد البطاقات القابلة للطباعة على فاتورة — 0 يُخفي زرّها وشريطها. */
+export const countPrintableWarrantyCards = (cards: ReadonlyArray<{ ended: boolean }>): number =>
+  cards.filter(warrantyCardPrintable).length;
+
+export const warrantyInvoicePrintLabel = (count: number): string =>
+  `اطبع كفالات الفاتورة (${formatNumber(count)})`;
+
+export type WarrantyRemovalMode = "delete" | "withdraw" | "unwithdraw" | null;
+
+/**
+ * «حذف» لبطاقةٍ لم يَرَها أحد، و«سحب» لما صدر للزبون، و«تراجع عن السحب» لما سُحب.
+ * الحسم للخادم (`can_delete`)؛ التلقائية لا حذف ولا سحب لها (تتبع فاتورتها)،
+ * والمنتهية لغير السحب (إرجاع جهاز…) لا يُسحب عليها شيء.
+ */
+export function warrantyRemovalMode(card: {
+  source: WarrantySource;
+  can_delete: boolean;
+  ended: boolean;
+  end_reason: string;
+}): WarrantyRemovalMode {
+  if (card.source !== "manual") return null;
+  if (card.can_delete) return "delete";
+  if (card.ended) return card.end_reason === "withdrawn" ? "unwithdraw" : null;
+  return "withdraw";
+}
+
 /** #237: مصدر `<img>` لرمز QR الخادميّ — data URI فلا يُنفَّذ أي سكربت داخل SVG. */
 export function warrantyQrImageSrc(svg: string): string {
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;

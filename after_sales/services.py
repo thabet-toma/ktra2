@@ -1393,3 +1393,76 @@ def latest_purchase_line_warranties(tenant_id: int, product_ids) -> dict:
         .select_related("manufacturer_warrantor")
     )
     return {row.product_id: row for row in rows.filter(recency=1)}
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# إصدار الشهادة وسحب البطاقة اليدوية (#238)
+# ══════════════════════════════════════════════════════════════════════════
+
+ISSUE_CHANNEL_PRINT = "print"
+WITHDRAWN_REASON_CODE = "withdrawn"
+
+
+def _lock_card(card):
+    return WarrantyCard.objects.select_for_update().get(
+        pk=card.pk, tenant_id=card.tenant_id,
+    )
+
+
+@transaction.atomic
+def mark_card_issued(card, channel, user=None):
+    """يكتب حدث `issued` **مرةً واحدة** للبطاقة — الطباعة الثانية لا تكتب شيئاً.
+
+    وجود الحدث هو ما يمنع الحذف ويُظهر وسم «إعادة طباعة»؛ القفل على صفّ
+    البطاقة يمنع طباعتين متزامنتين من كتابته مرتين. يعيد الحدث الجديد أو `None`.
+    """
+    card = _lock_card(card)
+    already = WarrantyCardEvent.objects.filter(
+        tenant_id=card.tenant_id, card=card, event_type=WarrantyCardEvent.TYPE_ISSUED,
+    ).exists()
+    if already:
+        return None
+    return log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_ISSUED, reason_code=channel, user=user,
+    )
+
+
+@transaction.atomic
+def withdraw_card(card, *, reason, user=None):
+    """سحب بطاقةٍ يدويةٍ صدرت للزبون: تنتهي بسببٍ موثَّق ولا تُحذف — هويتها ورمزها يبقيان."""
+    reason = (reason or "").strip()
+    if len(reason) < MIN_UNDO_REASON_CHARS:
+        raise ValidationError(
+            {"reason": f"اكتب سبب السحب ({MIN_UNDO_REASON_CHARS} أحرف على الأقل)."}
+        )
+    card = _lock_card(card)
+    if card.source == WarrantyCard.SOURCE_AUTO_SALE:
+        raise ValidationError("بطاقة تلقائية تتبع فاتورتها — لا تُسحب؛ تُنهيها الفاتورة نفسها.")
+    if card.ended_on is not None:
+        raise ValidationError("البطاقة منتهية أصلاً.")
+    card.ended_on = timezone.localdate()
+    card.end_reason = WarrantyCard.END_WITHDRAWN
+    card.save(update_fields=["ended_on", "end_reason", "updated_at"])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_ENDED,
+        reason_code=WITHDRAWN_REASON_CODE, text=reason, user=user,
+    )
+    logger.info("after_sales.warranty_withdrawn tenant=%s card=%s", card.tenant_id, card.pk)
+    return card
+
+
+@transaction.atomic
+def unwithdraw_card(card, *, reason, user=None):
+    """التراجع عن السحب — البطاقة نفسها بهويتها ورمزها، لا بطاقة جديدة."""
+    reason = _clean_undo_reason(reason)
+    card = _lock_card(card)
+    if card.end_reason != WarrantyCard.END_WITHDRAWN or card.ended_on is None:
+        raise ValidationError("البطاقة ليست مسحوبة.")
+    card.ended_on = None
+    card.end_reason = ""
+    card.save(update_fields=["ended_on", "end_reason", "updated_at"])
+    log_warranty_event(
+        card, event_type=WarrantyCardEvent.TYPE_REVIVED,
+        reason_code=WITHDRAWN_REASON_CODE, text=reason, user=user,
+    )
+    return card

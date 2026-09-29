@@ -9,7 +9,8 @@ from datetime import date, timedelta
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import transaction
-from django.db.models import ProtectedError, Q
+from django.db.models import Exists, OuterRef, ProtectedError, Q
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status as http_status
 from rest_framework import viewsets
@@ -43,6 +44,7 @@ from .serializers import (
     WarrantyCardEventSerializer,
     WarrantyCardSerializer,
     WarrantyExtendSerializer,
+    WarrantyPrintSerializer,
     PurchaseLinePolicySerializer,
     WarrantyPolicyBulkSerializer,
     WarrantyPolicySerializer,
@@ -57,10 +59,21 @@ from .services import (
     refuse_order_coverage,
     restore_order_coverage,
     shorten_dealer_warranty,
+    ISSUE_CHANNEL_PRINT,
+    mark_card_issued,
     unvoid_dealer_warranty,
+    unwithdraw_card,
     void_dealer_warranty,
     void_impact,
     warranty_coverage,
+    withdraw_card,
+)
+from .certificates import (
+    LAYOUT_CARD,
+    LAYOUT_INVOICE,
+    certificate_context,
+    ensure_single_customer,
+    render_certificate,
 )
 from .verify import qr_svg, resolve_scan, verify_url
 
@@ -76,6 +89,9 @@ _ACTION_PERMS = {
     "check": PERM_VIEW,
     "resolve_scan": PERM_VIEW,
     "qr": PERM_VIEW,
+    "print_certificate": PERM_VIEW,
+    "withdraw": PERM_MANAGE,
+    "unwithdraw": PERM_MANAGE,
     "create": PERM_MANAGE,
     "update": PERM_MANAGE,
     "partial_update": PERM_MANAGE,
@@ -120,6 +136,9 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 "product", "partner", "supplier", "sales_invoice",
                 "sales_invoice_line__invoice", "voided_by", "void_service_order",
             )
+            .annotate(has_events=Exists(
+                WarrantyCardEvent.objects.filter(card=OuterRef("pk")),
+            ))
         )
         if self.action != "list":
             return queryset
@@ -164,6 +183,10 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         partner_id = (params.get("partner") or "").strip()
         if partner_id.isdigit():
             queryset = queryset.filter(partner_id=int(partner_id))
+
+        invoice_id = (params.get("sales_invoice") or "").strip()
+        if invoice_id.isdigit():
+            queryset = queryset.filter(sales_invoice_id=int(invoice_id))
 
         expiring = (params.get("expiring_within_days") or "").strip()
         if expiring.isdigit():
@@ -256,10 +279,11 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
                 )
             })
         # `card` على `WarrantyCardEvent` بـPROTECT — الحذف كان سيرتدّ 500 دون
-        # هذا الفحص؛ هنا الرسالة تُقرأ (#229).
+        # هذا الفحص؛ هنا الرسالة تُقرأ (#229). وأي حدثٍ (إصدارٌ للزبون، تمديد،
+        # إلغاء…) يعني أن للبطاقة أثراً خارج النظام: تُسحب ولا تُحذف (#238).
         if instance.events.exists():
             raise ValidationError({
-                "detail": "على هذه البطاقة أحداث مسجّلة (مثل تمديد) — لا تُحذف.",
+                "detail": "صدرت هذه البطاقة للزبون فلا تُحذف — اسحبها",
             })
         instance.delete()
 
@@ -347,6 +371,86 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         except DjangoValidationError as error:
             _reraise_as_drf(error)
         return Response(self.get_serializer(card).data)
+
+    # ── سحب البطاقة اليدوية (#238) ────────────────────────────────────────
+    @action(detail=True, methods=["post"], url_path="withdraw")
+    def withdraw(self, request, pk=None):
+        """سحب بطاقةٍ يدويةٍ صدرت للزبون — تنتهي بسببٍ موثَّق ولا تُحذف."""
+        card = self.get_object()
+        form = WarrantyUndoSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            card = withdraw_card(
+                card, reason=form.validated_data["reason"], user=request.user,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(card).data)
+
+    @action(detail=True, methods=["post"], url_path="unwithdraw")
+    def unwithdraw(self, request, pk=None):
+        card = self.get_object()
+        form = WarrantyUndoSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+        try:
+            card = unwithdraw_card(
+                card, reason=form.validated_data["reason"], user=request.user,
+            )
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
+        return Response(self.get_serializer(card).data)
+
+    # ── طباعة الشهادة A5 (#238) ───────────────────────────────────────────
+    @action(detail=False, methods=["post"], url_path="print")
+    def print_certificate(self, request):
+        """شهادة الكفالة: HTML جاهز للطباعة، ويُكتب حدث `issued` مرةً واحدةً لكل بطاقة."""
+        form = WarrantyPrintSerializer(data=request.data)
+        form.is_valid(raise_exception=True)
+
+        queryset = self.get_queryset().select_related(
+            "sales_invoice", "manufacturer_warrantor", "partner",
+        )
+        if "sales_invoice" in form.validated_data:
+            from sales.models import SalesInvoice
+
+            invoice = SalesInvoice.objects.filter(
+                tenant=self.tenant, pk=form.validated_data["sales_invoice"],
+            ).first()
+            if invoice is None:
+                raise NotFound("الفاتورة غير موجودة.")
+            layout = LAYOUT_INVOICE
+            cards = list(queryset.filter(sales_invoice=invoice).order_by("pk"))
+            if not cards:
+                raise ValidationError({"detail": "لا بطاقات كفالة على هذه الفاتورة."})
+        else:
+            ids = list(dict.fromkeys(form.validated_data["cards"]))
+            found = {card.pk: card for card in queryset.filter(pk__in=ids)}
+            if len(found) != len(ids):
+                raise NotFound("بطاقة الكفالة غير موجودة.")
+            layout = LAYOUT_CARD if len(ids) == 1 else LAYOUT_INVOICE
+            cards = [found[pk] for pk in ids]
+            try:
+                ensure_single_customer(cards)
+            except DjangoValidationError as error:
+                _reraise_as_drf(error)
+
+        printable = [card for card in cards if card.ended_on is None]
+        if not printable:
+            raise ValidationError({
+                "detail": "البطاقة منتهية — لا تُطبع لها شهادة." if len(cards) == 1
+                else "كل البطاقات منتهية — لا شيء يُطبع.",
+            })
+
+        context = certificate_context(
+            printable, layout=layout, user=request.user,
+        )
+        html = render_certificate(context)
+        with transaction.atomic():
+            for card in printable:
+                mark_card_issued(card, ISSUE_CHANNEL_PRINT, user=request.user)
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        response["Cache-Control"] = "no-store"
+        return response
 
     @action(detail=True, methods=["post"], url_path="shorten")
     def shorten(self, request, pk=None):

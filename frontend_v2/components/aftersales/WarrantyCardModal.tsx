@@ -1,14 +1,17 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CalendarPlus, Loader2, ShieldCheck, ShieldOff, Trash2, X } from "lucide-react";
+import { CalendarPlus, Loader2, Printer, ShieldCheck, ShieldOff, Trash2, Undo2, X } from "lucide-react";
 import {
   createWarrantyCard,
   deleteWarrantyCard,
   extendWarrantyCard,
   getWarrantyCardEvents,
   getWarrantyCardQr,
+  printWarrantyCertificate,
   shortenWarrantyCard,
   unvoidWarrantyCard,
+  unwithdrawWarrantyCard,
   updateWarrantyCard,
+  withdrawWarrantyCard,
   type ManufacturerWarrantorRow,
   type WarrantyCardDraft,
   type WarrantyCardEventRow,
@@ -18,13 +21,16 @@ import {
   deriveWarrantyEnd,
   manufacturerWarrantyRemainingText,
   manufacturerWarrantyStatusLabel,
+  warrantyCardPrintable,
   warrantyCoveredQuantityLabel,
   warrantyEventLabel,
   warrantyQrImageSrc,
   warrantyRemainingText,
+  warrantyRemovalMode,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
   WARRANTY_MIN_UNDO_REASON_CHARS,
+  WARRANTY_PRINT_BLOCKED_TEXT,
 } from "../../utils/warranty";
 import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
@@ -137,6 +143,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
   const [extendReason, setExtendReason] = useState("");
   const [voidOpen, setVoidOpen] = useState(false);
   const [undoReason, setUndoReason] = useState("");
+  const [withdrawReason, setWithdrawReason] = useState("");
   const [shortenEnd, setShortenEnd] = useState("");
   const [shortenReason, setShortenReason] = useState("");
   // #229: التمديد لم يعد يُلحق سطراً في `notes` — سجلّ الأحداث الإلحاقي هو
@@ -448,6 +455,67 @@ export const WarrantyCardModal: React.FC<Props> = ({
       setBusy(false);
     }
   };
+
+  const printCard = async () => {
+    if (!card) return;
+    setErr(null);
+    try {
+      const outcome = await printWarrantyCertificate({ cards: [card.id] });
+      if (outcome === "blocked") setErr(WARRANTY_PRINT_BLOCKED_TEXT);
+      else onChanged();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّرت طباعة الشهادة"));
+    }
+  };
+
+  const withdraw = async () => {
+    if (!card || !warrantyUndoReasonValid(withdrawReason)) return;
+    const ok = await confirm({
+      title: "سحب بطاقة الكفالة",
+      message: "ستنتهي البطاقة وتصير صفحتها العامة «غير سارية»، ويبقى سجلّها. يمكن التراجع عن السحب لاحقاً بسببٍ موثَّق.",
+      confirmText: "سحب البطاقة",
+      cancelText: "تراجع",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await withdrawWarrantyCard(card.id, withdrawReason.trim());
+      toast("سُحبت البطاقة", "success");
+      onChanged();
+      onClose();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّر سحب البطاقة"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unwithdraw = async () => {
+    if (!card || !warrantyUndoReasonValid(withdrawReason)) return;
+    const ok = await confirm({
+      title: "التراجع عن سحب البطاقة",
+      message: "ستعود البطاقة نفسها برمزها نفسه، وتعود صفحتها العامة كما كانت.",
+      confirmText: "تراجع عن السحب",
+      cancelText: "إبقاء السحب",
+    });
+    if (!ok) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      await unwithdrawWarrantyCard(card.id, withdrawReason.trim());
+      toast("أُعيدت البطاقة", "success");
+      onChanged();
+      onClose();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّر التراجع عن السحب"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const removalMode = card ? warrantyRemovalMode(card) : null;
 
   const remove = async () => {
     if (!card) return;
@@ -919,6 +987,34 @@ export const WarrantyCardModal: React.FC<Props> = ({
             </div>
           )}
 
+          {/* #238: بطاقةٌ صدرت للزبون لا تُحذف — تُسحب بسببٍ موثَّق، ويُتراجع عن السحب بالسبب نفسه شرطاً. */}
+          {card && canManage && (removalMode === "withdraw" || removalMode === "unwithdraw") && (
+            <div className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3">
+              <div className="mb-2 text-sm font-bold text-[var(--color-text)]">
+                {removalMode === "withdraw" ? "سحب البطاقة" : "البطاقة مسحوبة"}
+              </div>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  className={`${fieldClass} flex-1`}
+                  disabled={busy}
+                  placeholder={`السبب (${formatNumber(WARRANTY_MIN_UNDO_REASON_CHARS)} أحرف على الأقل)`}
+                  aria-label={removalMode === "withdraw" ? "سبب سحب البطاقة" : "سبب التراجع عن السحب"}
+                  value={withdrawReason}
+                  onChange={(e) => setWithdrawReason(e.target.value)}
+                />
+                <button
+                  type="button"
+                  onClick={() => void (removalMode === "withdraw" ? withdraw() : unwithdraw())}
+                  disabled={busy || !warrantyUndoReasonValid(withdrawReason)}
+                  className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-bold text-[var(--color-text)] hover:bg-[var(--color-surface-3)] disabled:opacity-50 sm:w-44"
+                >
+                  {removalMode === "unwithdraw" && <Undo2 className="h-4 w-4" />}
+                  {removalMode === "withdraw" ? "سحب البطاقة" : "تراجع عن السحب"}
+                </button>
+              </div>
+            </div>
+          )}
+
           {/* #237: رمز QR الدائم ورابط التحقق العام — لا يتغيّر عند الاسترجاع أو إعادة الترحيل. */}
           {card && card.verify_url && (
             <div
@@ -981,7 +1077,17 @@ export const WarrantyCardModal: React.FC<Props> = ({
               مسودة محلية <b>حُفظ {formatTimeValue(draftSavedAt)}</b>
             </span>
           )}
-          {card && !isAuto && canManage && (
+          {card && warrantyCardPrintable(card) && (
+            <button
+              type="button"
+              onClick={() => void printCard()}
+              disabled={busy}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50 sm:w-40"
+            >
+              <Printer className="h-4 w-4" /> طباعة الشهادة
+            </button>
+          )}
+          {card && canManage && removalMode === "delete" && (
             <button
               type="button"
               onClick={() => void remove()}

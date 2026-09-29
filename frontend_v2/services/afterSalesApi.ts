@@ -15,6 +15,7 @@ import {
   apiGetObject,
   apiGetPagedList,
   apiPatchObject,
+  apiPostForText,
   apiPostObject,
   type PagedList,
 } from "./restApi";
@@ -82,6 +83,8 @@ export interface WarrantyCardRow {
   void: WarrantyVoidInfo | null;
   /** #237: رابط صفحة التحقق العامة — للموظف، والرمز نفسه لا يخرج حقلاً. */
   verify_url: string;
+  /** #238: «حذف» لبطاقةٍ لم يَرَها أحد، و«سحب» لغيرها — يقرّره الخادم لا الواجهة. */
+  can_delete: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -152,6 +155,7 @@ export interface WarrantyListFilters {
   source?: WarrantySource | "";
   product?: number | "";
   partner?: number | "";
+  sales_invoice?: number | "";
   expiring_within_days?: number | "";
 }
 
@@ -232,6 +236,7 @@ export function listWarrantyCards(
       source: filters.source || undefined,
       product: filters.product || undefined,
       partner: filters.partner || undefined,
+      sales_invoice: filters.sales_invoice || undefined,
       expiring_within_days: filters.expiring_within_days || undefined,
     },
   });
@@ -280,6 +285,49 @@ export function voidWarrantyCard(id: number, input: WarrantyVoidInput): Promise<
 
 export function unvoidWarrantyCard(id: number, reason: string): Promise<WarrantyCardRow> {
   return apiPostObject<WarrantyCardRow>(`${BASE}${id}/unvoid/`, { reason }, tenantOpts());
+}
+
+/** #238: سحب بطاقةٍ يدويةٍ صدرت للزبون — تنتهي بسببٍ موثَّق، وصفحتها العامة تصير «غير سارية». */
+export function withdrawWarrantyCard(id: number, reason: string): Promise<WarrantyCardRow> {
+  return apiPostObject<WarrantyCardRow>(`${BASE}${id}/withdraw/`, { reason }, tenantOpts());
+}
+
+/** التراجع عن السحب — البطاقة نفسها ورمزها نفسه. */
+export function unwithdrawWarrantyCard(id: number, reason: string): Promise<WarrantyCardRow> {
+  return apiPostObject<WarrantyCardRow>(`${BASE}${id}/unwithdraw/`, { reason }, tenantOpts());
+}
+
+/** #238: شهادة الكفالة A5 — HTML جاهز للطباعة، بطاقاتٌ بأرقامها أو فاتورةٌ. */
+export type WarrantyPrintTarget = { cards: number[] } | { sales_invoice: number };
+
+export function fetchWarrantyCertificateHtml(target: WarrantyPrintTarget): Promise<string> {
+  return apiPostForText(`${BASE}print/`, target, tenantOpts());
+}
+
+/**
+ * النافذة تُفتح **متزامنةً مع النقرة** قبل أي `await` — فتحُها بعد الطلب يعدّه
+ * المتصفح نافذةً منبثقةً غير مطلوبة ويحجبها. عنوان الصفحة (`<title>` من الخادم)
+ * هو اسم ملف الـPDF عند «حفظ كـ PDF». يُعيد `"blocked"` إن حُجبت النافذة، وعند
+ * فشل الطلب تُغلَق النافذة الفارغة ويُرمى الخطأ لتعرضه الشاشة.
+ */
+export async function printWarrantyCertificate(
+  target: WarrantyPrintTarget,
+): Promise<"printed" | "blocked"> {
+  const win = window.open("", "_blank");
+  if (!win) return "blocked";
+  try {
+    const html = await fetchWarrantyCertificateHtml(target);
+    win.document.open();
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    // الصفحة بلا سكربت — الطباعة تُستدعى من هنا؛ ورموز QR مضمَّنةٌ SVG فلا انتظار لتحميل.
+    win.setTimeout(() => win.print(), 150);
+    return "printed";
+  } catch (error) {
+    win.close();
+    throw error;
+  }
 }
 
 /** تقصير نهاية كفالة التاجر — بصلاحية الإلغاء وسببٍ موثَّق (يُسجَّل بتاريخيه). */
