@@ -929,6 +929,8 @@ ORDER_PERM_CREATE = "aftersales.order.create"
 ORDER_PERM_EDIT = "aftersales.order.edit"
 ORDER_PERM_POST = "aftersales.order.post"
 ORDER_PERM_UNPOST = "aftersales.order.unpost"
+# استبدال الجهاز قرارٌ ماليّ (جهازٌ كامل بمصروف كفالة): صلاحيةٌ مستقلة عن تعديل الأمر.
+PERM_REPLACE = "aftersales.warranty.replace"
 
 _ORDER_ACTION_PERMS = {
     "list": ORDER_PERM_VIEW,
@@ -1256,6 +1258,12 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             ServiceOrderPart.BILLING_COVERED if order.warranty_covered
             else ServiceOrderPart.BILLING_BILLABLE
         )
+        if form.validated_data.get("replaces_device"):
+            require_perm(request, PERM_REPLACE, tenant=self.tenant)
+            self._validate_replacement(
+                order, product=product, quantity=form.validated_data["quantity"],
+                billing=billing, serials=form.validated_data.get("serials") or [],
+            )
         part = form.save(order=order, billing=billing)
         self._log_part(order, part, "أُضيفت")
         return Response(
@@ -1289,9 +1297,29 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         product = form.validated_data.get("product")
         if product is not None and product.tenant_id != self.tenant.pk:
             raise ValidationError({"product": "هذا المنتج لا يتبع الشركة النشطة."})
+        data = form.validated_data
+        replaces = data.get("replaces_device", part.replaces_device)
+        if replaces or part.replaces_device:
+            require_perm(request, PERM_REPLACE, tenant=self.tenant)
+        if replaces:
+            self._validate_replacement(
+                order, part_id=part.pk,
+                product=data.get("product", part.product),
+                quantity=data.get("quantity", part.quantity),
+                billing=data.get("billing", part.billing),
+                serials=data.get("serials", part.serials),
+            )
         part = form.save()
         self._log_part(order, part, "عُدّلت")
         return Response(ServiceOrderPartSerializer(part).data)
+
+    def _validate_replacement(self, order, **fields):
+        from .service_orders import validate_replacement_line
+
+        try:
+            validate_replacement_line(order, **fields)
+        except DjangoValidationError as error:
+            _reraise_as_drf(error)
 
     def _log_part(self, order, part, verb: str):
         from .service_orders import log_event

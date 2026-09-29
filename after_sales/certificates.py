@@ -16,7 +16,7 @@ from django.utils.safestring import mark_safe
 from tenants.letterhead import company_card
 
 from .models import WarrantyCard, WarrantyCardEvent
-from .verify import TEXT_EXPIRED, TEXT_VOIDED, qr_svg
+from .verify import TEXT_EXPIRED, TEXT_VOIDED, mask_serial, qr_svg
 from .verify import _device as device_label
 
 LAYOUT_INVOICE = "invoice"
@@ -137,6 +137,14 @@ def _extension_lines_by_card(cards) -> dict:
         if days > 0:
             suffix = f" — صيانة {order_number}" if order_number else ""
             lines.setdefault(card_id, []).append(f"مُدِّدت {days} يوماً{suffix}")
+    # #245: بطاقة البديل تقول عمّا حلّت — الرقم مقنَّعٌ كالصفحة العامة، فالشهادة تُسلَّم للزبون.
+    for card in cards:
+        if card.replaces_id:
+            order = card.replacement_order if card.replacement_order_id else None
+            suffix = f" — أمر {order.order_number}" if order else ""
+            lines.setdefault(card.pk, []).insert(
+                0, f"بديلاً عن الجهاز {mask_serial(card.replaces.serial)}{suffix}",
+            )
     return lines
 
 

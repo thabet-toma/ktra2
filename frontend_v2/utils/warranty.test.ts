@@ -528,3 +528,35 @@ test('#244 — كفالة الإصلاح لا تُحذف ولا تُسحب من 
     null,
   );
 });
+
+import { warrantyReplacedByLine, warrantyReplacementLine } from './warranty.ts';
+
+test('#245 — معاينة التسليم: الاستبدال يذكر القديم والبديل ونهاية كفالته، وعند عدمه سبب الخادم', () => {
+  const plan = {
+    applies: true, reason: '', old_serial: 'OLD-1', new_serial: 'NEW-1',
+    product_differs: false, swaps_sale_line: true, new_end: '2027-06-15',
+    suggested_waiver_reason: 'استبدال الجهاز تحت الكفالة',
+  };
+  assert.equal(
+    warrantyReplacementLine(plan),
+    `سيُستبدل الجهاز OLD-1 بـNEW-1 ويُنقل البيع إلى البديل — كفالة البديل حتى ${formatDateValue('2027-06-15')}`,
+  );
+  assert.match(
+    warrantyReplacementLine({ ...plan, swaps_sale_line: false, new_end: null }),
+    /ويبقى البديل مصروفاً/,
+  );
+  assert.equal(
+    warrantyReplacementLine({ ...plan, applies: false, reason: 'لا سطر استبدال مرحَّل على الأمر.' }),
+    'لا سطر استبدال مرحَّل على الأمر.',
+  );
+  assert.equal(warrantyReplacementLine(null), '');
+});
+
+test('#245 — «استُبدل بـ…» تحمل البديل والأمر والتاريخ، وتغيب حين لا استبدال', () => {
+  assert.equal(
+    warrantyReplacedByLine({ serial: 'NEW-1', order_number: 'SO-1-1', date: '2026-09-29' }),
+    `استُبدل بـNEW-1 — أمر SO-1-1 (${formatDateValue('2026-09-29')})`,
+  );
+  assert.equal(warrantyReplacedByLine(null), '');
+  assert.equal(warrantyReplacedByLine(undefined), '');
+});

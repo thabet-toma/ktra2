@@ -451,6 +451,9 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   ومرتجع الشراء عبر `release_returned_purchase_serials`) يفحص كل حالةٍ غير `in_stock` —
   `sold` أو `issued` (صُرفت خارج البيع، #223) سواء — لا `sold` وحدها، ويسمّي الوحدة
   وحالتها في رسالة الرفض قبل أي حذف.
+- **`STATUS_DEFECTIVE`** (#245): وحدةٌ حلّ محلّها بديلٌ تحت الكفالة (`swap_sold_unit`) — لا تعود
+  للمخزن ولا تُباع، وتحتفظ بـ`sales_line` أثراً؛ `release_sales_serials` يفرّغ `sold` وحدها، و
+  `assert_no_defective_units` يمنع إلغاء ترحيل فاتورتها.
 - **`STATUS_ISSUED` ليس `STATUS_SOLD`**: `consume_sales_serials`/التخصيص التلقائي FIFO
   للبيع يستعلمان `in_stock` وحدها، فوحدةٌ صُرفت خارج البيع (`issue_serials`، #223) لا
   يخصّصها بيعٌ لاحق أبداً — الفرق حالةٌ لا مجرّد علم.

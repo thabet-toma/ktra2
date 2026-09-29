@@ -67,6 +67,8 @@ export interface ScanUnitMatch {
     repair_covered?: boolean;
     supplier_covered: boolean;
     cards: ScanWarrantyCard[];
+    /** #245: الجهاز استُبدل — رقم بديله وأمر الصيانة الذي استبدله. */
+    replaced_by?: { card: number; serial: string; date: string; order_number: string } | null;
   } | null;
   service_orders: ScanServiceOrder[];
 }

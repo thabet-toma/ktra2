@@ -42,6 +42,7 @@ import {
   warrantyCardLink,
   warrantyCoveredQuantityLabel,
   warrantyRepairLine,
+  warrantyReplacementLine,
   warrantyShopDaysLine,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
@@ -115,6 +116,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const canUnpost = can("aftersales.order.unpost");
   const canVoid = can("aftersales.warranty.void");
   const canOpenCard = can("aftersales.warranty.view");
+  const canReplace = can("aftersales.warranty.replace");
   const navigate = useNavigate();
   const toast = useToast();
   const confirm = useConfirm();
@@ -139,6 +141,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   }>({
     product: "", quantity: "1", billing: "billable", unit_price: "0",
   });
+  const [replacement, setReplacement] = useState({ product: "", serial: "" });
   const [outcome, setOutcome] = useState<ServiceOrderOutcome>("repaired");
   const [labour, setLabour] = useState("");
   // T-SERIAL (#223 مراجعة): نمط الأرقام التسلسلية مصدره إعدادات المبيعات —
@@ -172,8 +175,13 @@ export const ServiceOrderDocument: React.FC<Props> = ({
         const lines = [
           order?.warranty_card ? warrantyShopDaysLine(effects) : "",
           warrantyRepairLine(effects.repair_warranty),
+          outcome === "replaced" ? warrantyReplacementLine(effects.replacement) : "",
         ].filter(Boolean);
         setDeliveryLine(lines.join(" · "));
+        if (outcome === "replaced" && effects.replacement?.applies) {
+          const suggested = effects.replacement.suggested_waiver_reason;
+          setWaiver((current) => current || suggested);
+        }
       })
       .catch(() => { if (!cancelled) setDeliveryLine(""); });
     return () => { cancelled = true; };
@@ -235,6 +243,25 @@ export const ServiceOrderDocument: React.FC<Props> = ({
     () => (order?.parts || []).filter((p) => p.billing === "billable" && !p.is_materialized).length,
     [order],
   );
+  const hasReplacement = useMemo(
+    () => (order?.parts || []).some((p) => p.replaces_device),
+    [order],
+  );
+  useEffect(() => {
+    setOutcome((current) => {
+      if (hasReplacement) return "replaced";
+      return current === "replaced" ? "repaired" : current;
+    });
+  }, [hasReplacement]);
+  const [focusReplacement, setFocusReplacement] = useState(false);
+  useEffect(() => {
+    if (!focusReplacement || tab !== "parts") return;
+    const panel = document.querySelector<HTMLElement>('[data-testid="replacement-panel"]');
+    if (!panel) return;
+    panel.scrollIntoView({ block: "center" });
+    document.getElementById("replacement-product")?.focus();
+    setFocusReplacement(false);
+  }, [focusReplacement, tab]);
   if (loading && !order) {
     return (
       <div className="flex items-center justify-center gap-2 p-8 text-sm text-[var(--color-text-muted)]">
@@ -305,6 +332,33 @@ export const ServiceOrderDocument: React.FC<Props> = ({
         setNewPart((p) => ({ ...p, product: "", quantity: "1", unit_price: "0" }));
       },
       "أُضيفت القطعة",
+    );
+  };
+
+  const replaceableCard = !!order.warranty_status
+    && !order.warranty_status.void
+    && !order.warranty_status.ended
+    && order.warranty_status.quantity === 0;
+  const canOfferReplacement = editable && canReplace && !!order.warranty_card
+    && order.warranty_covered && !hasReplacement && replaceableCard;
+
+  const addReplacement = () => {
+    const productId = Number(replacement.product);
+    const serial = replacement.serial.trim();
+    if (!productId) { setErr("اختر منتج الجهاز البديل أولاً"); return; }
+    if (!serial) { setErr("الرقم التسلسلي للجهاز البديل إلزامي"); return; }
+    void run(
+      async () => {
+        await addServiceOrderPart(order.id, {
+          product: productId,
+          quantity: "1",
+          billing: "covered",
+          serials: [serial],
+          replaces_device: true,
+        });
+        setReplacement({ product: "", serial: "" });
+      },
+      "أُضيف الجهاز البديل — رحِّل الصرف ثم سلّم بنتيجة «استُبدل الجهاز»",
     );
   };
 
@@ -429,6 +483,17 @@ export const ServiceOrderDocument: React.FC<Props> = ({
               كفالة المورد سارية حتى {formatDateValue(order.warranty_status.supplier_warranty_end_date)} — طالِب المورد بدل تحمّل الكلفة
             </span>
           )}
+          {canOfferReplacement && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { setTab("parts"); setFocusReplacement(true); }}
+              className="inline-flex items-center gap-1 rounded-lg border border-[var(--color-primary)] px-3 py-1.5 text-xs font-bold text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10 disabled:opacity-50"
+              data-testid="warranty-replace-button"
+            >
+              <RotateCcw className="h-3.5 w-3.5" /> استبدال الجهاز
+            </button>
+          )}
           {/* #236: زرّان متجاوران بأثرين مختلفين — الأول لهذا العطل وحده والثاني للبطاقة كلّها. */}
           {canVoid && !frozen && order.warranty_status.status !== "voided" && (
             <div className="flex w-full flex-wrap items-center gap-2 border-t border-[var(--color-border)] pt-2">
@@ -531,9 +596,11 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                 value={outcome}
                 onChange={(e) => setOutcome(e.target.value as ServiceOrderOutcome)}
               >
-                {Object.entries(SERVICE_OUTCOME_LABELS).map(([key, label]) => (
-                  <option key={key} value={key}>{label}</option>
-                ))}
+                {Object.entries(SERVICE_OUTCOME_LABELS)
+                  .filter(([key]) => key !== "replaced" || hasReplacement)
+                  .map(([key, label]) => (
+                    <option key={key} value={key}>{label}</option>
+                  ))}
               </select>
             </div>
             <button
@@ -711,6 +778,51 @@ export const ServiceOrderDocument: React.FC<Props> = ({
 
       {tab === "parts" && (
         <section className={`${cardClass} space-y-3`}>
+          {canOfferReplacement && (
+            <div
+              className="grid grid-cols-1 gap-2 rounded-xl border border-dashed border-[var(--color-border)] p-3 sm:grid-cols-5"
+              data-testid="replacement-panel"
+            >
+              <p className="text-xs font-bold text-[var(--color-text)] sm:col-span-5">
+                استبدال الجهاز تحت الكفالة
+              </p>
+              <div className="sm:col-span-2">
+                <label className={labelClass} htmlFor="replacement-product">منتج الجهاز البديل</label>
+                <select
+                  id="replacement-product"
+                  className={inputClass}
+                  value={replacement.product}
+                  onChange={(e) => setReplacement((r) => ({ ...r, product: e.target.value }))}
+                >
+                  <option value="">— اختر —</option>
+                  {products.filter((p) => p.is_serialized).map((p) => (
+                    <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="sm:col-span-2">
+                <label className={labelClass} htmlFor="replacement-serial">الرقم التسلسلي للبديل</label>
+                <input
+                  id="replacement-serial"
+                  dir="ltr"
+                  className={`${inputClass} font-mono`}
+                  value={replacement.serial}
+                  onChange={(e) => setReplacement((r) => ({ ...r, serial: e.target.value }))}
+                />
+              </div>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={addReplacement}
+                  className="inline-flex h-10 w-full items-center justify-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 text-sm font-bold text-white disabled:opacity-50"
+                  data-testid="replacement-add"
+                >
+                  <RotateCcw className="h-4 w-4" /> استبدال
+                </button>
+              </div>
+            </div>
+          )}
           {editable && (
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-5">
               <div className="sm:col-span-2">
@@ -805,7 +917,22 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                   const canPickSerials = editable && !part.is_materialized && tracksSerials;
                   return (
                   <tr key={part.id}>
-                    <td>{part.product_name}</td>
+                    <td>
+                      {part.product_name}
+                      {part.replaces_device && (
+                        <span className="mr-2 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300">
+                          بديل الجهاز
+                        </span>
+                      )}
+                      {part.replacement_warning && (
+                        <p
+                          className="mt-1 text-[11px] text-amber-700 dark:text-amber-400"
+                          data-testid={`replacement-warning-${part.id}`}
+                        >
+                          {part.replacement_warning}
+                        </p>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap">{formatNumber(Number(part.quantity))}</td>
                     <td>
                       <span className={partBillingPillClass(part.billing)}>{part.billing_label}</span>
@@ -843,7 +970,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
                     </td>
                     <td className="whitespace-nowrap">
                       <div className="flex items-center gap-1">
-                      {editable && !part.is_materialized && part.billing === "covered" && (
+                      {editable && !part.is_materialized && part.billing === "covered" && !part.replaces_device && (
                         <button
                           type="button"
                           disabled={busy}

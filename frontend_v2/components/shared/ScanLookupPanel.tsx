@@ -31,7 +31,11 @@ import { openInNewTab } from "@/utils/openInNewTab";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { humanizeThrown } from "../../utils/drfError";
-import { pickScanWarrantyCard, scanWarrantyLabel } from "../../utils/warranty";
+import {
+  pickScanWarrantyCard,
+  scanWarrantyLabel,
+  warrantyReplacedByLine,
+} from "../../utils/warranty";
 import {
   scanApi,
   type ScanDeviceMatch,
@@ -173,6 +177,14 @@ const UnitCard: React.FC<{ unit: ScanUnitMatch }> = ({ unit }) => {
           {warranty.supplier_covered && (
             <span className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--font-size-xs)]">
               كفالة المورد سارية
+            </span>
+          )}
+          {warranty.replaced_by && (
+            <span
+              className="rounded bg-[var(--color-surface)] px-1.5 py-0.5 text-[var(--font-size-xs)] font-medium"
+              data-testid="scan-replaced-by"
+            >
+              {warrantyReplacedByLine(warranty.replaced_by)}
             </span>
           )}
         </div>

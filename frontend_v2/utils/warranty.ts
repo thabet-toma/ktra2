@@ -558,6 +558,40 @@ export function pickScanWarrantyCard<T extends { status: string; source?: string
   return active[0] ?? cards[0] ?? null;
 }
 
+/* ══════════════════════════════════════════════════════════════════════════
+ * #245 — استبدال الجهاز تحت الكفالة
+ * ══════════════════════════════════════════════════════════════════════════ */
+
+/** ما تعلنه معاينة التسليم عن نتيجة «استُبدل» — السبب كما ردّه الخادم حين لا تنطبق. */
+export interface ReplacementPlan {
+  applies: boolean;
+  reason: string;
+  old_serial: string;
+  new_serial: string;
+  product_differs: boolean;
+  swaps_sale_line: boolean;
+  new_end: string | null;
+  suggested_waiver_reason: string;
+}
+
+export function warrantyReplacementLine(plan: ReplacementPlan | null | undefined): string {
+  if (!plan) return "";
+  if (!plan.applies) return plan.reason;
+  const end = plan.new_end ? ` — كفالة البديل حتى ${formatDateValue(plan.new_end)}` : "";
+  const sale = plan.swaps_sale_line
+    ? "ويُنقل البيع إلى البديل"
+    : "ويبقى البديل مصروفاً (لا سطر بيع للجهاز القديم)";
+  return `سيُستبدل الجهاز ${plan.old_serial} بـ${plan.new_serial} ${sale}${end}`;
+}
+
+/** «استُبدل بـ…» لبطاقةٍ أو وحدةٍ أنهاها الاستبدال — فارغ حين لا استبدال. */
+export function warrantyReplacedByLine(
+  ref: { serial: string; order_number: string; date: string } | null | undefined,
+): string {
+  if (!ref) return "";
+  return `استُبدل بـ${ref.serial} — أمر ${ref.order_number} (${formatDateValue(ref.date)})`;
+}
+
 /** روابط عميقة تستهلكها الشاشتان القائمتان (`?order=` و`?card=`) — بلا مسار جديد. */
 export const warrantyServiceOrderLink = (orderId: number): string =>
   `/after-sales/service-orders?order=${orderId}`;

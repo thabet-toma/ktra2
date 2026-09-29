@@ -640,10 +640,14 @@ class ProductSerial(models.Model):
     # صُرفت خارج مسار البيع (بندُ مستندٍ في app آخر يشير إليها بـ`issued_to`) —
     # لا فاتورة بيع، فلا `sales_line`، ولا يجوز أن يخصّصها بيعٌ لاحق بـFIFO.
     STATUS_ISSUED = 'issued'
+    # وحدةٌ سلّمها الزبون وحلّت محلّها وحدة (#245): خرجت من عهدته وليست في مخزننا
+    # السليم. تحتفظ بـ`sales_line` أثراً لبيعها — فلا يُلغى ترحيل الفاتورة عليها.
+    STATUS_DEFECTIVE = 'defective'
     STATUS_CHOICES = [
         (STATUS_IN_STOCK, 'في المخزن'),
         (STATUS_SOLD, 'مُباع'),
         (STATUS_ISSUED, 'مصروفة خارج البيع'),
+        (STATUS_DEFECTIVE, 'معطوبة لدينا'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='ProductSerialID')

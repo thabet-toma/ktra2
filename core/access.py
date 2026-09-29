@@ -173,6 +173,7 @@ PERMISSIONS: list[dict] = [
     {"key": "aftersales.warranty.manage", "label": "إنشاء بطاقة كفالة وتمديدها", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.settings.manage", "label": "إدارة سياسات الكفالة وجهات المصنع وإعدادات الوحدة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.warranty.void", "label": "إلغاء كفالة التاجر ورفضها لهذا العطل وتقصيرها", "group": GROUP_AFTERSALES, "module": "after_sales"},
+    {"key": "aftersales.warranty.replace", "label": "استبدال جهاز الزبون بجهاز جديد تحت الكفالة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.view", "label": "عرض أوامر الصيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.create", "label": "استقبال جهاز وفتح أمر صيانة", "group": GROUP_AFTERSALES, "module": "after_sales"},
     {"key": "aftersales.order.edit", "label": "تعديل أمر صيانة ونقل حالته", "group": GROUP_AFTERSALES, "module": "after_sales"},

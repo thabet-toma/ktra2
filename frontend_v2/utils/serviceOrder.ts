@@ -37,6 +37,7 @@ export const SERVICE_OUTCOME_LABELS: Record<Exclude<ServiceOrderOutcome, "">, st
   unrepaired: "تعذّر الإصلاح",
   rejected_estimate: "رفض الزبون التقدير",
   no_fault: "لا عطل",
+  replaced: "استُبدل الجهاز",
 };
 
 export const PART_BILLING_LABELS: Record<PartBilling, string> = {

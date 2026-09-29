@@ -885,6 +885,7 @@ def release_sales_serials(invoice) -> int:
     """
     released = ProductSerial.objects.filter(
         tenant_id=invoice.tenant_id, sales_line__invoice=invoice,
+        status=ProductSerial.STATUS_SOLD,
     ).update(status=ProductSerial.STATUS_IN_STOCK, sales_line=None)
     if released:
         logger.info(
@@ -892,6 +893,51 @@ def release_sales_serials(invoice) -> int:
             invoice.pk, released,
         )
     return released
+
+
+def assert_no_defective_units(invoice) -> None:
+    """يرفض إلغاء ترحيل فاتورةٍ استُبدلت إحدى وحداتها تحت الكفالة (#245).
+
+    الوحدة المعطوبة تحتفظ بـ`sales_line` أثراً لأنها بِيعت على هذه الفاتورة؛
+    وإلغاءُ الترحيل كان سيُفرِّغ وحدةَ البديل وحدها ويترك الفاتورة تدّعي جهازاً
+    لا يملكه الزبون. تُسمّى الوحدات المعطوبة ليعرف المستخدم ما يعالجه.
+    """
+    defective = list(
+        ProductSerial.objects.filter(
+            tenant_id=invoice.tenant_id, sales_line__invoice=invoice,
+            status=ProductSerial.STATUS_DEFECTIVE,
+        ).order_by('id').values_list('serial', flat=True)
+    )
+    if defective:
+        raise ValidationError(
+            f"تعذّر إلغاء ترحيل الفاتورة {invoice.invoice_number}: استُبدلت "
+            f"وحداتٌ منها تحت الكفالة ({'، '.join(defective)}) وحلّت بدائلها "
+            f"محلّها على هذه الفاتورة."
+        )
+
+
+def swap_sold_unit(old_unit, new_unit) -> bool:
+    """استبدال جهازٍ تحت الكفالة: البديل يرث موضع القديم على بند البيع (#245).
+
+    البديل `issued` (صُرف خارج البيع بـ`issue_serials`) فيصير `sold` على بند بيع
+    القديم نفسه، والقديم `defective` ويحتفظ بالرابط أثراً. لا بند بيع للقديم
+    (بطاقة يدوية أو وحدةٌ لم تُبَع بفاتورة) → لا شيء يُربط به، فيبقى البديل
+    `issued` كما صرفه الترحيل. يُرجع هل انتقل البديل إلى «مُباع».
+    """
+    sales_line_id = old_unit.sales_line_id
+    old_unit.status = ProductSerial.STATUS_DEFECTIVE
+    old_unit.save(update_fields=['status'])
+    if not sales_line_id:
+        return False
+    new_unit.status = ProductSerial.STATUS_SOLD
+    new_unit.sales_line_id = sales_line_id
+    new_unit.issued_to = None
+    new_unit.save(update_fields=['status', 'sales_line', 'issued_to'])
+    logger.info(
+        'product serial swapped under warranty: old=%s new=%s sales_line=%s',
+        old_unit.pk, new_unit.pk, sales_line_id,
+    )
+    return True
 
 
 def restore_returned_sales_serials(return_invoice, lines) -> int:

@@ -159,6 +159,7 @@ def _warranty_for(tenant_id: int, term: str, scope: dict) -> dict | None:
         "repair_covered": coverage["repair_covered"],
         "supplier_covered": coverage.get("supplier_covered", False),
         "cards": coverage["cards"],
+        "replaced_by": coverage["replaced_by"],
     }
 
 

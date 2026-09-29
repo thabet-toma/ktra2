@@ -449,6 +449,10 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
             )
         try:
             with transaction.atomic():
+                # #245: فاتورةٌ استُبدل جهازٌ منها تحت الكفالة لا يُلغى ترحيلها.
+                from inventory.serials import assert_no_defective_units
+
+                assert_no_defective_units(invoice)
                 # T-ARINT: سند التسوية النقدية التلقائي من إنتاج الترحيل نفسه —
                 # يُحرَّر (قيوده + صفوفه) ذرّياً معه، فلا يبقى معلّقاً ولا يتكرّر
                 # عند إعادة الترحيل. سندات المستخدم يحرسها الفحص التالي فتُمنع.

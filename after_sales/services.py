@@ -878,6 +878,21 @@ def _card_summary(card, today: date) -> dict:
     }
 
 
+def replacement_summary(old_card) -> dict:
+    """«استُبدل بـ…» لبطاقةٍ انتهت بالاستبدال — للموظف وحده، لا للصفحة العامة (#245).
+
+    يتطلب `select_related("replaced_by__replacement_order")` كي لا يستعلم لكل بطاقة.
+    """
+    new = old_card.replaced_by
+    order = new.replacement_order if new.replacement_order_id else None
+    return {
+        "card": new.pk,
+        "serial": new.serial,
+        "date": old_card.ended_on,
+        "order_number": order.order_number if order else "",
+    }
+
+
 def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) -> dict:
     """التغطية بحسب رقم تسلسلي واحد — البطاقة أولاً، ثم نسب الوحدة.
 
@@ -897,13 +912,24 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
     if not serial:
         return {
             "serial": "", "covered": False, "repair_covered": False, "cards": [], "unit": None,
+            "replaced_by": None,
         }
 
-    cards = list(
+    # #245: البطاقة المستبدَلة منتهيةٌ لكنها تُقرأ هنا لتقول «استُبدل بـ…» — في الاستعلام
+    # نفسه (لا استعلامَ إضافياً على مسار المسح الساخن)، ولا تدخل قائمة `cards`.
+    rows = list(
         WarrantyCard.objects
-        .filter(tenant_id=tenant_id, serial=serial, ended_on__isnull=True)
-        .select_related("product", "manufacturer_warrantor", "origin_service_order")
+        .filter(tenant_id=tenant_id, serial=serial)
+        .filter(Q(ended_on__isnull=True) | Q(replaced_by__isnull=False))
+        .select_related(
+            "product", "manufacturer_warrantor", "origin_service_order",
+            "replaced_by__replacement_order",
+        )
         .order_by("-end_date", "-id")
+    )
+    cards = [c for c in rows if c.ended_on is None]
+    replaced_by = next(
+        (replacement_summary(c) for c in rows if getattr(c, "replaced_by", None)), None,
     )
     unit = (
         ProductSerial.objects
@@ -965,6 +991,7 @@ def warranty_coverage(tenant_id: int, serial: str, today: date | None = None) ->
         "supplier_covered": any(s["supplier_warranty_active"] for s in summaries),
         "cards": summaries,
         "unit": unit_info,
+        "replaced_by": replaced_by,
     }
 
 

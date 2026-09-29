@@ -23,6 +23,7 @@ import { resolveTenantId } from "../utils/tenantContext";
 import type {
   IntakeVerdict,
   RepairWarrantyPlan,
+  ReplacementPlan,
   WarrantySource,
   WarrantyStatus,
 } from "../utils/warranty";
@@ -242,6 +243,16 @@ export interface WarrantyCoverage {
   supplier_covered?: boolean;
   cards: WarrantyCoverageCard[];
   unit: WarrantyCoverageUnit | null;
+  /** #245: الجهاز استُبدل — بطاقته القديمة منتهية، وهذه هي بطاقة بديله. */
+  replaced_by?: ReplacedByRef | null;
+}
+
+/** #245: مرجع البديل كما يردّه الخادم — رقمه التسلسلي وأمر الصيانة الذي استبدله. */
+export interface ReplacedByRef {
+  card: number;
+  serial: string;
+  date: string;
+  order_number: string;
 }
 
 /** التمديد: تاريخ نهاية جديد صريح، أو عدد أشهر يُضاف إلى النهاية الحالية. */
@@ -692,7 +703,7 @@ export type ServiceOrderStatus =
   | "in_repair" | "ready" | "delivered" | "cancelled";
 
 export type ServiceOrderOutcome =
-  | "repaired" | "unrepaired" | "rejected_estimate" | "no_fault" | "";
+  | "repaired" | "unrepaired" | "rejected_estimate" | "no_fault" | "replaced" | "";
 
 export type PartBilling = "billable" | "covered";
 
@@ -706,6 +717,10 @@ export interface ServiceOrderPartRow {
   unit_price: string;
   /** أرقام تسلسلية مختارة لقطعةٍ مغطاة مرقّمة — تُستهلَك عند ترحيل صرفها. */
   serials: string[];
+  /** #245: هذا السطر هو الجهاز البديل — يستبدل جهاز الأمر تحت الكفالة. */
+  replaces_device: boolean;
+  replacement_product_differs: boolean;
+  replacement_warning: string;
   /** كلفة FIFO الفعلية لحركة الصرف — تُملأ بعد الترحيل، للقراءة فقط. */
   issued_cost: string | null;
   notes: string;
@@ -918,6 +933,8 @@ export interface IntakeCardRow {
     end_reason_label: string;
     document_number: string;
   } | null;
+  /** #245: بطاقة جهازٍ استُبدل — يُكتب «استُبدل بـ…» بدل بيانات التغطية. */
+  replaced_by?: ReplacedByRef | null;
 }
 
 export type IntakeMatchKind = "serial" | "invoice" | "phone" | "card";
@@ -1010,6 +1027,7 @@ export interface DeliveryEffects {
   reason: string;
   reason_code: string;
   repair_warranty: RepairWarrantyPlan | null;
+  replacement: ReplacementPlan | null;
 }
 
 export function getServiceOrderDeliveryEffects(
@@ -1037,7 +1055,7 @@ export function addServiceOrderPart(
   id: number,
   part: {
     product: number; quantity: string; billing: PartBilling; unit_price?: string;
-    serials?: string[]; notes?: string;
+    serials?: string[]; notes?: string; replaces_device?: boolean;
   },
 ): Promise<ServiceOrderPartRow> {
   return apiPostObject<ServiceOrderPartRow>(`${ORDERS}${id}/parts/`, part, tenantOpts());

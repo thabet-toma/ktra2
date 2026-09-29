@@ -36,6 +36,7 @@ from .models import (
     ServiceOrderPart,
     WarrantyCard,
     WarrantyCardEvent,
+    WarrantyPolicy,
     looks_like_phone,
     phone_digits,
     phone_key_of,
@@ -43,8 +44,11 @@ from .models import (
 from .services import (
     MODULE_KEY,
     _lock_card,
+    _resolve_manufacturer_layer,
+    _supplier_side,
     get_or_create_after_sales_settings,
     log_warranty_event,
+    replacement_summary,
     warranty_coverage,
 )
 
@@ -392,6 +396,7 @@ def delivery_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
     if card is not None:
         dealer_end = result["new_end"] if result["extends"] else card.end_date
     result["repair_warranty"] = repair_warranty_decision(order, outcome, dealer_end=dealer_end)
+    result["replacement"] = replacement_effects(order, outcome)
     return result
 
 
@@ -568,6 +573,228 @@ def apply_repair_warranty(order: ServiceOrder, *, user=None) -> dict:
     return plan
 
 
+# ══════════════════════════════════════════════════════════════════════════
+# استبدال الجهاز تحت الكفالة (#245) — سطرٌ مغطًّى يُرحَّل ثم يُبدَّل عند التسليم
+# ══════════════════════════════════════════════════════════════════════════
+
+SUGGESTED_REPLACEMENT_WAIVER = "استبدال الجهاز تحت الكفالة"
+
+# الحدّ الأدنى لكفالة البديل من يوم التسليم — ثابتٌ في المواصفة لا إعداد (مستقلٌّ عن `repair_warranty_days`).
+REPLACEMENT_MIN_DAYS = 90
+
+
+def _replacement_parts(order: ServiceOrder):
+    return order.parts.select_related("product").filter(replaces_device=True).order_by("id")
+
+
+def posted_replacement_part(order: ServiceOrder):
+    return _replacement_parts(order).filter(materialized_at__isnull=False).first()
+
+
+def replacement_blocker(order: ServiceOrder) -> str:
+    """لماذا لا يُستبدل جهاز هذا الأمر؟ — فارغ = يجوز. شروط الأمر لا شروط السطر.
+
+    بطاقةٌ **مُرقَّمة** (الفاتورة تغطّي كميةً لا وحدة معيّنة، والإصلاح يغطّي عطلاً)،
+    غير منتهية ولا ملغاة، وكفالة التاجر سارية **في تاريخ الأمر** (لا يوم التسليم:
+    الجهاز استُلم بكفالة، وتأخّر المركز ليس ذنب الزبون).
+    """
+    card = order.warranty_card if order.warranty_card_id else None
+    if card is None:
+        return "لا بطاقة كفالة على الأمر — لا استبدال."
+    if not order.warranty_covered:
+        return "الأمر غير مغطّى بالكفالة — لا استبدال."
+    if card.is_repair:
+        return "بطاقة كفالة الإصلاح لا يُستبدل جهازها."
+    if card.product_serial_id is None:
+        return "الاستبدال لبطاقة جهازٍ مُرقَّم — بطاقة الفاتورة لا وحدة معيّنة لها."
+    if card.ended_on is not None:
+        return "بطاقة الكفالة منتهية — لا استبدال."
+    if card.voided_at is not None:
+        return "كفالة التاجر ملغاة — لا استبدال."
+    if card.status_on(order.order_date) != WarrantyCard.STATUS_ACTIVE:
+        return "كفالة التاجر لم تكن سارية في تاريخ الأمر — لا استبدال."
+    return ""
+
+
+def validate_replacement_line(
+    order: ServiceOrder, *, product, quantity, billing, serials, part_id=None,
+) -> str:
+    """شروط سطر الاستبدال — يرفع `ValidationError` بمفتاح الحقل، ويُرجع الرقم المُطبَّع.
+
+    الحارس الوحيد لإضافة السطر وتعديله معاً. الوحدة تُتحقَّق أنها **في المخزن الآن**؛
+    الصرف الفعلي يعيد فحصها لحظة الترحيل (`issue_serials`).
+    """
+    from inventory.models import ProductSerial
+    from inventory.serials import normalize_serials, product_tracks_serials
+
+    blocker = replacement_blocker(order)
+    if blocker:
+        raise ValidationError({"replaces_device": blocker})
+    if Decimal(quantity) != 1:
+        raise ValidationError({"replaces_device": "سطر الاستبدال كميته واحدة بالضبط."})
+    if billing != ServiceOrderPart.BILLING_COVERED:
+        raise ValidationError({"replaces_device": "سطر الاستبدال مغطًّى بالكفالة، لا مفوتر."})
+    if not product_tracks_serials(product):
+        raise ValidationError({"replaces_device": "الجهاز البديل يجب أن يكون منتجاً مُرقَّم التسلسل."})
+    if _replacement_parts(order).exclude(pk=part_id).exists():
+        raise ValidationError({"replaces_device": "للأمر سطر استبدال واحد فقط."})
+
+    declared = normalize_serials(serials)
+    if len(declared) != 1:
+        raise ValidationError({"serials": "الرقم التسلسلي للجهاز البديل إجباري — رقمٌ واحد."})
+    serial = declared[0]
+    if serial in {order.serial, order.warranty_card.serial}:
+        raise ValidationError({"serials": "الجهاز البديل هو نفسه الجهاز المستبدَل."})
+    unit = ProductSerial.objects.filter(
+        tenant_id=order.tenant_id, product=product, serial=serial,
+    ).first()
+    if unit is None or unit.status != ProductSerial.STATUS_IN_STOCK:
+        raise ValidationError({
+            "serials": f"الرقم التسلسلي «{serial}» غير متوفر في المخزن لهذا المنتج.",
+        })
+    return serial
+
+
+def replacement_warning(part: ServiceOrderPart) -> str:
+    """تحذير طراز مختلف — يُسمح به (الاستبدال بطراز أحدث شائع) لكن يُقرأ قبل الترحيل."""
+    card = part.order.warranty_card if part.order.warranty_card_id else None
+    if not part.replaces_device or card is None or card.product_id == part.product_id:
+        return ""
+    return "الجهاز البديل من منتجٍ غير منتج البطاقة الأصلية — تأكّد من موافقة الزبون."
+
+
+def _replacement_new_end(order: ServiceOrder, old_card, delivery_date):
+    """الأطول من نهاية القديمة وتسليمٍ + `REPLACEMENT_MIN_DAYS` — لا تُقصَّر كفالة الزبون بالاستبدال."""
+    return max(old_card.end_date, delivery_date + timedelta(days=REPLACEMENT_MIN_DAYS))
+
+
+def replacement_effects(order: ServiceOrder, outcome: str | None = None) -> dict:
+    """ما سيفعله التسليم بنتيجة «استُبدل» — معاينةٌ خالصة تقرأ ما ينفّذه `complete_replacement`."""
+    result = {
+        "applies": False, "reason": "", "old_serial": "", "new_serial": "",
+        "product_differs": False, "swaps_sale_line": False, "new_end": None,
+        "suggested_waiver_reason": SUGGESTED_REPLACEMENT_WAIVER,
+    }
+    outcome = order.outcome if outcome is None else outcome
+    if outcome != ServiceOrder.OUTCOME_REPLACED:
+        return result
+    part = posted_replacement_part(order)
+    if part is None:
+        result["reason"] = "لا سطر استبدال مرحَّل على الأمر."
+        return result
+    blocker = replacement_blocker(order)
+    if blocker:
+        result["reason"] = blocker
+        return result
+    card = order.warranty_card
+    result.update(
+        applies=True,
+        old_serial=card.serial,
+        new_serial=part.serials[0] if part.serials else "",
+        product_differs=card.product_id != part.product_id,
+        swaps_sale_line=bool(card.product_serial.sales_line_id),
+        new_end=_replacement_new_end(order, card, _delivery_date(order)),
+    )
+    return result
+
+
+def complete_replacement(order: ServiceOrder, *, user=None) -> dict:
+    """تبديل الجهاز في معاملة التسليم: القديمة تنتهي، وتصدر بطاقة للبديل، والوحدتان تتبادلان.
+
+    خطأٌ هنا يُلغي التسليم كلَّه (المعاملة واحدة): تُقفل بطاقة القديم وتُفحص من جديد
+    لأنها قد تكون انتهت بين الترحيل والتسليم. طبقة المصنع للبديل تُحلّ بالمنطق نفسه
+    الذي يصدر به بيعٌ عادي (`_resolve_manufacturer_layer`) لكن من **يوم التسليم**.
+    """
+    from inventory.models import ProductSerial
+    from inventory.serials import swap_sold_unit
+
+    part = posted_replacement_part(order)
+    if part is None:
+        raise ValidationError({"outcome": "لا سطر استبدال مرحَّل على الأمر."})
+
+    old_card = _lock_card(order.warranty_card)
+    order.warranty_card = old_card
+    blocker = replacement_blocker(order)
+    if blocker:
+        raise ValidationError({"outcome": f"تعذّر الاستبدال: {blocker}"})
+
+    old_unit = ProductSerial.objects.select_for_update().get(pk=old_card.product_serial_id)
+    new_unit = ProductSerial.objects.select_for_update().select_related(
+        "product", "purchase_item__invoice",
+    ).get(
+        tenant_id=order.tenant_id, product_id=part.product_id, serial=part.serials[0],
+    )
+    if new_unit.status != ProductSerial.STATUS_ISSUED or new_unit.issued_to_id != part.pk:
+        raise ValidationError({
+            "outcome": f"تعذّر الاستبدال: الوحدة «{new_unit.serial}» لم تعد مصروفةً لهذا السطر.",
+        })
+
+    delivery = _delivery_date(order)
+    policy = WarrantyPolicy.objects.filter(
+        tenant_id=order.tenant_id, product_id=new_unit.product_id,
+    ).first()
+    layer = _resolve_manufacturer_layer(
+        order.tenant_id, [new_unit], {new_unit.product_id: policy}, delivery,
+    )[new_unit.pk]
+    supplier_id, supplier_end = _supplier_side(new_unit, layer.get("supplier_months", 0))
+    new_end = _replacement_new_end(order, old_card, delivery)
+
+    old_card.ended_on = delivery
+    old_card.end_reason = WarrantyCard.END_SUPERSEDED
+    old_card.save(update_fields=["ended_on", "end_reason", "updated_at"])
+
+    swapped = swap_sold_unit(old_unit, new_unit)
+    new_card = WarrantyCard.objects.create(
+        tenant_id=order.tenant_id,
+        source=WarrantyCard.SOURCE_REPLACEMENT,
+        product=new_unit.product,
+        device_name=product_display_name(new_unit.product)[
+            :WarrantyCard._meta.get_field("device_name").max_length
+        ],
+        serial=new_unit.serial,
+        product_serial=new_unit,
+        sales_invoice_id=old_card.sales_invoice_id,
+        sales_invoice_line_id=new_unit.sales_line_id,
+        partner_id=old_card.partner_id,
+        customer_name=old_card.customer_name,
+        customer_phone=old_card.customer_phone,
+        start_date=delivery,
+        duration_months=0,
+        end_date=new_end,
+        supplier_id=supplier_id,
+        supplier_warranty_end_date=supplier_end,
+        terms_text=old_card.terms_text,
+        manufacturer_warrantor_id=layer.get("manufacturer_warrantor_id"),
+        manufacturer_start_date=layer.get("manufacturer_start_date"),
+        manufacturer_duration_months=layer.get("manufacturer_duration_months") or 0,
+        manufacturer_end_date=layer.get("manufacturer_end_date"),
+        replaces=old_card,
+        replacement_order=order,
+        created_by=user if getattr(user, "is_authenticated", False) else None,
+    )
+    log_warranty_event(
+        old_card, event_type=WarrantyCardEvent.TYPE_REPLACEMENT, service_order=order,
+        user=user, text=f"استُبدل الجهاز بوحدة أخرى — {order.order_number}",
+    )
+    log_warranty_event(
+        new_card, event_type=WarrantyCardEvent.TYPE_REPLACEMENT, service_order=order,
+        user=user, text=f"بديلٌ عن الجهاز {old_card.serial} — {order.order_number}",
+        new_end_date=new_end,
+    )
+    log_event(
+        order, event_type=ServiceOrderEvent.TYPE_WARRANTY, user=user,
+        text=(
+            f"استُبدل الجهاز {old_card.serial} بـ {new_unit.serial} — صدرت بطاقة "
+            f"#{new_card.pk} حتى {new_end.strftime('%d/%m/%Y')}"
+        ),
+    )
+    logger.info(
+        "after_sales.replacement tenant=%s order=%s old_card=%s new_card=%s swapped=%s",
+        order.tenant_id, order.pk, old_card.pk, new_card.pk, swapped,
+    )
+    return {"applies": True, "card": new_card.pk, "swaps_sale_line": swapped}
+
+
 @transaction.atomic
 def transition_status(
     order: ServiceOrder,
@@ -606,6 +833,15 @@ def transition_status(
             )
         if outcome not in {choice for choice, _ in ServiceOrder.OUTCOME_CHOICES}:
             raise ValidationError({"outcome": f"نتيجة غير معروفة: {outcome}"})
+        has_replacement = posted_replacement_part(order) is not None
+        if has_replacement and outcome != ServiceOrder.OUTCOME_REPLACED:
+            raise ValidationError({
+                "outcome": "صُرف جهازٌ بديل على هذا الأمر — نتيجة التسليم «استُبدل الجهاز».",
+            })
+        if outcome == ServiceOrder.OUTCOME_REPLACED and not has_replacement:
+            raise ValidationError({
+                "outcome": "«استُبدل الجهاز» تتطلب سطر استبدالٍ مرحَّلاً على الأمر.",
+            })
         order.outcome = outcome
         order.delivered_at = timezone.now()
     elif to_status == ServiceOrder.STATUS_CANCELLED:
@@ -629,6 +865,8 @@ def transition_status(
     if to_status == ServiceOrder.STATUS_DELIVERED:
         apply_shop_days_extension(order, user=user)
         apply_repair_warranty(order, user=user)
+        if outcome == ServiceOrder.OUTCOME_REPLACED:
+            complete_replacement(order, user=user)
     logger.info(
         "after_sales.order_transition tenant=%s order=%s %s→%s",
         order.tenant_id, order.pk, current, to_status,
@@ -1210,6 +1448,9 @@ def _intake_card_row(card, today, verdict: str) -> dict:
         "manufacturer": manufacturer,
         "void": void,
         "ended": ended,
+        "replaced_by": (
+            replacement_summary(card) if getattr(card, "replaced_by", None) else None
+        ),
     }
 
 
@@ -1278,6 +1519,7 @@ def _intake_cards(tenant_id: int):
     return WarrantyCard.objects.filter(tenant_id=tenant_id).select_related(
         "product", "partner", "sales_invoice", "manufacturer_warrantor",
         "void_service_order", "end_return_line__invoice", "origin_service_order",
+        "replaced_by__replacement_order",
     )
 
 

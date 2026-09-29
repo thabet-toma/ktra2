@@ -231,6 +231,18 @@ class WarrantyCard(models.Model):
     # الأمر إن تغيّر بعدها (والأمر المسلَّم مجمَّد أصلاً).
     coverage_scope = models.CharField(max_length=500, blank=True, default="")
 
+    # ── استبدال الجهاز (#245) ─────────────────────────────────────────────
+    # بطاقة الجهاز البديل تشير إلى بطاقة الجهاز المستبدَل وإلى أمر الاستبدال. واحدةٌ
+    # لكل بطاقة قديمة: `OneToOne` هو ما يجعل «استُبدل بـ…» سؤالاً بلا غموض.
+    replaces = models.OneToOneField(
+        "self", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="replaced_by",
+    )
+    replacement_order = models.ForeignKey(
+        "ServiceOrder", on_delete=models.PROTECT, null=True, blank=True,
+        related_name="replacement_warranty_cards",
+    )
+
     # جانب المورد: نتتبّعه عرضاً وتأشيراً — موظف الكاونتر يرى أن القطعة ما زالت
     # بكفالة المورد فلا تتحمّل الشركة كلفةً يتحمّلها غيرها. لا مستند RMA هنا.
     supplier = models.ForeignKey(
@@ -521,11 +533,13 @@ class ServiceOrder(models.Model):
     OUTCOME_UNREPAIRED = "unrepaired"
     OUTCOME_REJECTED = "rejected_estimate"
     OUTCOME_NO_FAULT = "no_fault"
+    OUTCOME_REPLACED = "replaced"
     OUTCOME_CHOICES = [
         (OUTCOME_REPAIRED, "تم الإصلاح"),
         (OUTCOME_UNREPAIRED, "تعذّر الإصلاح"),
         (OUTCOME_REJECTED, "رفض الزبون التقدير"),
         (OUTCOME_NO_FAULT, "لا عطل"),
+        (OUTCOME_REPLACED, "استُبدل الجهاز"),
     ]
 
     tenant = models.ForeignKey(
@@ -649,8 +663,10 @@ class ServiceOrderPart(models.Model):
     # الأرقام المختارة لقطعةٍ مغطاة مرقّمة — على نمط `sales.SalesInvoiceLine.serials`
     # (نيّةٌ تُترجَم إلى صفوف `inventory.ProductSerial` عند الترحيل، #223).
     serials = models.JSONField(default=list, blank=True)
+    # سطر «استبدال الجهاز» (#245): وحدةٌ واحدة مُرقَّمة مغطاة تحلّ محلّ جهاز الزبون.
+    replaces_device = models.BooleanField(default=False)
     # كلفة FIFO الفعلية لحركة `SERVICE_ISSUE` — تُملأ عند `post_covered_parts`
-    # وتُفرَّغ عند التراجع؛ تحتاجها تذكرة استبدال الجهاز (#245).
+    # وتُفرَّغ عند التراجع.
     issued_cost = models.DecimalField(
         max_digits=18, decimal_places=2, null=True, blank=True,
     )

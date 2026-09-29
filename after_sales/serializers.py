@@ -553,6 +553,8 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
     product_name = serializers.SerializerMethodField()
     billing_label = serializers.CharField(source="get_billing_display", read_only=True)
     is_materialized = serializers.SerializerMethodField()
+    replacement_product_differs = serializers.SerializerMethodField()
+    replacement_warning = serializers.SerializerMethodField()
 
     class Meta:
         model = ServiceOrderPart
@@ -560,6 +562,7 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
             "id", "product", "product_name", "quantity", "billing", "billing_label",
             "unit_price", "serials", "issued_cost", "notes", "sales_invoice_line",
             "materialized_at", "is_materialized", "created_at",
+            "replaces_device", "replacement_product_differs", "replacement_warning",
         ]
         # القفل من الخادم وحده: البند المُجسَّد واقعةٌ في الدفاتر لا حقلٌ يُرسَل.
         read_only_fields = [
@@ -574,6 +577,14 @@ class ServiceOrderPartSerializer(serializers.ModelSerializer):
 
     def get_is_materialized(self, obj):
         return obj.materialized_at is not None
+
+    def get_replacement_warning(self, obj):
+        from .service_orders import replacement_warning
+
+        return replacement_warning(obj)
+
+    def get_replacement_product_differs(self, obj):
+        return bool(self.get_replacement_warning(obj))
 
     def validate_quantity(self, value):
         if value is None or value <= 0:

@@ -25,6 +25,7 @@ import {
   INVOICE_PIECE_CONFIRM_TEXT,
   looksLikeWarrantyScan,
   warrantyRemainingText,
+  warrantyReplacedByLine,
   warrantyStatusLabel,
   type DuplicateOpenOrder,
 } from "../../utils/warranty";
@@ -453,6 +454,14 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                       >
                         {intakeVerdictLabel(row.verdict)}
                       </div>
+                      {row.card.replaced_by && (
+                        <div
+                          className="mt-1 text-[11px] font-bold text-[var(--color-text)]"
+                          data-testid="intake-result-replaced-by"
+                        >
+                          {warrantyReplacedByLine(row.card.replaced_by)}
+                        </div>
+                      )}
                       {row.open_orders.length > 0 && (
                         <div className="mt-2 rounded-lg border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200">
                           أوامر مفتوحة عليها:{" "}
@@ -555,6 +564,11 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                   البطاقة #{formatNumber(selected.card.id)} — {selected.card.device_name || "جهاز"}
                   {selected.card.serial && ` · ${selected.card.serial}`}
                 </div>
+                {selected.card.replaced_by && (
+                  <div className="mt-0.5 text-[11px] font-bold" data-testid="intake-replaced-by">
+                    {warrantyReplacedByLine(selected.card.replaced_by)}
+                  </div>
+                )}
                 {selected.prefill.requires_item_confirm && (
                   <label className="mt-2 flex items-start gap-2 text-sm">
                     <input
