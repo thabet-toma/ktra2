@@ -31,6 +31,7 @@ import { warrantyPillClass } from "./warrantyStatus";
 import { useToast } from "../../contexts/ToastContext";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { ServiceOrderReferralPanel } from "./ServiceOrderReferralPanel";
 
 /**
  * THA-24 م4 — استقبال جهاز: معرّفٌ واحد يُسأل عنه، وثلاثة مصادر تُجيب.
@@ -120,6 +121,8 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   const [looking, setLooking] = useState(false);
   const [selected, setSelected] = useState<IntakeResult | null>(null);
   const [pieceConfirmed, setPieceConfirmed] = useState(false);
+  // #241: مربوطٌ برقم البطاقة فيسقط تلقائياً عند اختيار بطاقةٍ أخرى أو تفريغ الاختيار.
+  const [paidReferralCard, setPaidReferralCard] = useState<number | null>(null);
   const [duplicate, setDuplicate] = useState<DuplicateOpenOrder | null>(null);
   const [duplicateReason, setDuplicateReason] = useState("");
   const [busy, setBusy] = useState(false);
@@ -138,6 +141,8 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
   const serial = (draft.serial || "").trim();
 
   const searchTerm = searchText.trim();
+  const paidDespiteReferral = selected?.verdict === "referral" && paidReferralCard === selected.card.id;
+  const referralPending = selected?.verdict === "referral" && !paidDespiteReferral;
 
   /** اختيار صفّ: التعبئة كما يردّها الخادم، وتأكيد القطعة يبدأ غير مؤكَّد دائماً. */
   const applyResult = useCallback((result: IntakeResult, fromUser: boolean) => {
@@ -306,6 +311,13 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
     void discardDraft();
   }, [discardDraft]);
 
+  /** «تمّ» على شاشة الإحالة: انتهى المسار عمداً بلا أمر، فلا تبقى مسودّةٌ تُعرض للاستعادة. */
+  const finishReferral = () => {
+    setTouched(false);
+    void discardDraft();
+    onClose();
+  };
+
   const save = async (openDespiteReason?: string) => {
     if (problems.length > 0) { setErr(problems.join(" · ")); return; }
     setBusy(true);
@@ -317,6 +329,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
         warranty_card: draft.warranty_card ?? null,
         // القطعة تُؤكَّد على بطاقة الفاتورة وحدها؛ والخادم يفرض ذلك عند الإنشاء.
         invoice_piece_confirmed: Boolean(selected?.prefill.requires_item_confirm && pieceConfirmed),
+        ...(paidDespiteReferral ? { paid_despite_referral: true, warranty_covered: false } : {}),
         ...(openDespiteReason ? { duplicate_open_reason: openDespiteReason.trim() } : {}),
       });
       toast(`فُتح أمر الصيانة ${order.order_number}`, "success");
@@ -553,8 +566,26 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                 )}
               </div>
             )}
+
+            {referralPending && selected && (
+              <ServiceOrderReferralPanel
+                cardId={selected.card.id}
+                onDone={finishReferral}
+                onPaidRepair={() => setPaidReferralCard(selected.card.id)}
+              />
+            )}
           </section>
 
+          {paidDespiteReferral && (
+            <div
+              className="rounded-lg border border-amber-300 bg-amber-50 p-2.5 text-sm text-amber-900 dark:border-amber-800 dark:bg-amber-900/20 dark:text-amber-200"
+              data-testid="intake-referral-paid-banner"
+            >
+              إصلاح مدفوع بطلب الزبون رغم الإحالة — يُفتح الأمر غير مغطى بالكفالة، ويُسجَّل التحذير وموافقة الزبون في أحداثه.
+            </div>
+          )}
+
+          {!referralPending && (<>
           {/* ── الزبون والجهاز ─────────────────────────────────────────── */}
           <section className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div>
@@ -675,12 +706,14 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
             <label className="mt-2 flex items-center gap-2 text-sm text-[var(--color-text)]">
               <input
                 type="checkbox"
-                checked={Boolean(draft.warranty_covered)}
+                checked={!paidDespiteReferral && Boolean(draft.warranty_covered)}
+                disabled={paidDespiteReferral}
                 onChange={(e) => patch("warranty_covered", e.target.checked)}
               />
               الإصلاح مغطى بالكفالة — تُضاف قطع الغيار افتراضياً كمصروف كفالة لا كبند مفوتر
             </label>
           </section>
+          </>)}
 
           {err && (
             <div role="alert" className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-2.5 text-sm text-red-600 dark:text-red-400">
@@ -691,7 +724,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
 
         <footer className="flex items-center gap-2 border-t border-[var(--color-border)] p-3">
           <span className="text-[11px] text-[var(--color-text-muted)]">
-            {problems.length > 0 ? problems.join(" · ") : "جاهز للفتح"}
+            {referralPending ? "حكم البطاقة إحالة — لا يُفتح أمر" : problems.length > 0 ? problems.join(" · ") : "جاهز للفتح"}
           </span>
           {/* issue #109 §٦: مؤشّر دائم كي لا يضغط المستخدم «حفظ» احتياطاً كل دقيقة — لا يوجد حفظٌ خادميّ فوريّ في هذا المودال أصلاً. */}
           {draftSavedAt && (
@@ -709,7 +742,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
           </button>
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || referralPending}
             onClick={() => void save()}
             className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-bold text-white disabled:opacity-50"
           >

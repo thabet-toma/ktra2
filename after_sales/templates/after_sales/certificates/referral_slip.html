@@ -1,0 +1,37 @@
+{% extends "after_sales/certificates/certificate_base.html" %}
+{% comment %}ورقة إحالة إلى الوكيل (#241): جهاز خارج كفالة التاجر وداخل كفالة المصنع. لا كفالة التاجر ولا سببُ إلغائها ولا الشروط هنا — الوكيل يفحص بنفسه. عنوان الجهة وهاتفها من `ManufacturerWarrantor` حيّاً وقت الطباعة.{% endcomment %}
+{% block body %}
+<div class="device-box keep">
+  <div>
+    <p class="dname"><bdi dir="ltr">{{ item.device }}</bdi></p>
+    {% if item.is_quantity %}
+      <span class="sn qty"><b>الكمية</b> <strong>{{ item.covered_quantity }}</strong></span>
+    {% elif item.serial %}
+      <span class="sn"><span class="ltr"><b>الرقم التسلسلي</b> {{ item.serial }}</span></span>
+    {% endif %}
+    <p class="org-line who">{% if customer_name %}السيد/ة <b>{{ customer_name }}</b>{% endif %}{% if customer_phone %} · <span class="ltr">{{ customer_phone }}</span>{% endif %}</p>
+    <p class="org-line who">{% if invoice_number %}<b>فاتورة الشراء</b> <span class="ltr">{{ invoice_number }}</span>{% if invoice_date %} بتاريخ {{ invoice_date }}{% endif %}{% elif invoice_date %}<b>تاريخ الشراء</b> {{ invoice_date }}{% endif %}</p>
+  </div>
+  <div>{{ item.qr }}<span class="qrcap">امسح للتحقق من حالة الكفالة</span></div>
+</div>
+
+<div class="layers keep">
+  <div class="lrow">
+    <div class="k">كفالة المصنع</div>
+    <div class="v"><span class="dates">سارية حتى {{ item.manufacturer.to }}</span></div>
+  </div>
+</div>
+
+{% for warrantor in warrantors %}
+<div class="centers keep">
+  <h3 class="sec">يُخدم لدى</h3>
+  <p><b>{{ warrantor.name }}</b></p>
+  {% if warrantor.address %}<p>{{ warrantor.address }}</p>{% endif %}
+  {% if warrantor.phone %}<p>هاتف <span class="ltr">{{ warrantor.phone }}</span></p>{% endif %}
+</div>
+{% endfor %}
+
+<div class="notice keep">هذا الجهاز ما زال ضمن كفالة المصنع. يُرجى مراجعة المركز أعلاه مع هذه الورقة وفاتورة الشراء.</div>
+{% endblock %}
+
+{% block foot %}<span>هذه الورقة إحالةٌ إلى الوكيل، لا أمر صيانة.</span><span>تُرفق مع فاتورة الشراء.</span>{% endblock %}

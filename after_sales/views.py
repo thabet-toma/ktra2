@@ -61,6 +61,7 @@ from .services import (
     shorten_dealer_warranty,
     ISSUE_CHANNEL_PRINT,
     mark_card_issued,
+    mark_card_referred,
     unvoid_dealer_warranty,
     unwithdraw_card,
     void_dealer_warranty,
@@ -71,6 +72,7 @@ from .services import (
 from .certificates import (
     LAYOUT_CARD,
     LAYOUT_INVOICE,
+    LAYOUT_REFERRAL,
     certificate_context,
     ensure_single_customer,
     render_certificate,
@@ -90,6 +92,7 @@ _ACTION_PERMS = {
     "resolve_scan": PERM_VIEW,
     "qr": PERM_VIEW,
     "print_certificate": PERM_VIEW,
+    "referral_slip": PERM_VIEW,
     "withdraw": PERM_MANAGE,
     "unwithdraw": PERM_MANAGE,
     "create": PERM_MANAGE,
@@ -448,6 +451,28 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         with transaction.atomic():
             for card in printable:
                 mark_card_issued(card, ISSUE_CHANNEL_PRINT, user=request.user)
+        response = HttpResponse(html, content_type="text/html; charset=utf-8")
+        response["Cache-Control"] = "no-store"
+        return response
+
+    @action(detail=True, methods=["post"], url_path="referral-slip")
+    def referral_slip(self, request, pk=None):
+        """ورقة الإحالة إلى الوكيل (#241): لحكم `referral` وحده، تكتب حدث `referred` ولا تُنشئ أمراً."""
+        from .service_orders import VERDICT_REFERRAL, intake_verdict
+
+        card = self.get_object()
+        today = timezone.localdate()
+        if intake_verdict(card, today) != VERDICT_REFERRAL:
+            raise ValidationError({
+                "detail": (
+                    "لا تُحال هذه البطاقة إلى الوكيل — الإحالة لجهازٍ خارج كفالة التاجر "
+                    "وكفالة المصنع فيه سارية."
+                ),
+            })
+        html = render_certificate(
+            certificate_context([card], layout=LAYOUT_REFERRAL, user=request.user, today=today)
+        )
+        mark_card_referred(card, ISSUE_CHANNEL_PRINT, user=request.user)
         response = HttpResponse(html, content_type="text/html; charset=utf-8")
         response["Cache-Control"] = "no-store"
         return response
@@ -1028,7 +1053,9 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         from .service_orders import (
+            VERDICT_REFERRAL,
             find_duplicate_open_order,
+            intake_verdict,
             log_event,
             next_service_order_number,
         )
@@ -1041,6 +1068,17 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
         duplicate_reason = (data.get("duplicate_open_reason") or "").strip()
         if existing is not None and not duplicate_reason:
             raise DuplicateOpenOrder(existing)
+        referral_card = None
+        if data.get("paid_despite_referral"):
+            referral_card = data.get("warranty_card")
+            if referral_card is None or intake_verdict(
+                referral_card, timezone.localdate(),
+            ) != VERDICT_REFERRAL:
+                raise ValidationError({
+                    "paid_despite_referral": (
+                        "الإصلاح المدفوع بطلب الزبون رغم الإحالة لبطاقةٍ حكمها «إحالة للوكيل» وحدها."
+                    ),
+                })
         order = serializer.save(
             tenant=self.tenant,
             order_number=next_service_order_number(self.tenant.pk),
@@ -1059,6 +1097,21 @@ class ServiceOrderViewSet(viewsets.ModelViewSet):
             log_event(
                 order,
                 text=f"فُتح رغم وجود الأمر المفتوح {existing.order_number} — السبب: {duplicate_reason}",
+                user=self.request.user,
+            )
+        if referral_card is not None:
+            maker_end = referral_card.manufacturer_end_date.strftime("%d/%m/%Y")
+            log_event(
+                order,
+                text=(
+                    f"تنبيه: كفالة المصنع سارية حتى {maker_end}"
+                    f" ({referral_card.manufacturer_warrantor.name}) — الإصلاح عندنا قد يُسقطها."
+                ),
+                user=self.request.user,
+            )
+            log_event(
+                order,
+                text="وافق الزبون على إصلاح مدفوع عندنا رغم الإحالة إلى الوكيل.",
                 user=self.request.user,
             )
 

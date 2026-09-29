@@ -7,7 +7,9 @@ import {
   extendWarrantyCard,
   getWarrantyCardEvents,
   getWarrantyCardQr,
+  lookupIntakeCard,
   printWarrantyCertificate,
+  printWarrantyReferralSlip,
   shortenWarrantyCard,
   unvoidWarrantyCard,
   unwithdrawWarrantyCard,
@@ -32,6 +34,7 @@ import {
   warrantyUndoReasonValid,
   WARRANTY_MIN_UNDO_REASON_CHARS,
   WARRANTY_PRINT_BLOCKED_TEXT,
+  type IntakeVerdict,
 } from "../../utils/warranty";
 import { formatDateValue, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
@@ -192,6 +195,17 @@ export const WarrantyCardModal: React.FC<Props> = ({
   }, [card]);
 
   useEffect(() => { void loadEvents(); }, [loadEvents]);
+
+  // #241: حكم الاستقبال يحسبه الخادم (`lookup/?card=`) — لا يُعاد حسابه هنا؛ فشل قراءته يُخفي زر الإحالة فقط.
+  const [cardVerdict, setCardVerdict] = useState<IntakeVerdict | null>(null);
+  useEffect(() => {
+    if (!card) { setCardVerdict(null); return; }
+    let live = true;
+    lookupIntakeCard(card.id)
+      .then((lookup) => { if (live) setCardVerdict(lookup.results[0]?.verdict ?? null); })
+      .catch(() => { if (live) setCardVerdict(null); });
+    return () => { live = false; };
+  }, [card]);
 
   // #237: رمز التحقق العام — تفصيلٌ إضافي، فشل قراءته لا يمنع فتح البطاقة.
   const [qrSvg, setQrSvg] = useState<string | null>(null);
@@ -471,6 +485,18 @@ export const WarrantyCardModal: React.FC<Props> = ({
       else onChanged();
     } catch (e) {
       setErr(messageOf(e, "تعذّرت طباعة الشهادة"));
+    }
+  };
+
+  const printReferral = async () => {
+    if (!card) return;
+    setErr(null);
+    try {
+      const outcome = await printWarrantyReferralSlip(card.id);
+      if (outcome === "blocked") setErr(WARRANTY_PRINT_BLOCKED_TEXT);
+      else void loadEvents();
+    } catch (e) {
+      setErr(messageOf(e, "تعذّرت طباعة ورقة الإحالة"));
     }
   };
 
@@ -1102,6 +1128,17 @@ export const WarrantyCardModal: React.FC<Props> = ({
               className="inline-flex items-center justify-center gap-1 rounded-lg border border-[var(--color-border)] px-4 py-2 text-sm font-semibold text-[var(--color-text)] hover:bg-[var(--color-surface-2)] disabled:opacity-50 sm:w-40"
             >
               <Printer className="h-4 w-4" /> طباعة الشهادة
+            </button>
+          )}
+          {card && cardVerdict === "referral" && (
+            <button
+              type="button"
+              onClick={() => void printReferral()}
+              disabled={busy}
+              className="inline-flex items-center justify-center gap-1 rounded-lg border border-emerald-300 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-emerald-50 disabled:opacity-50 dark:border-emerald-800 dark:text-emerald-300 dark:hover:bg-emerald-900/20 sm:w-40"
+              data-testid="warranty-referral-slip"
+            >
+              <Printer className="h-4 w-4" /> ورقة إحالة
             </button>
           )}
           {card && warrantyCardPrintable(card) && (

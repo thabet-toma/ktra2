@@ -327,6 +327,10 @@ export function warrantyVoidImpactLine(order: WarrantyVoidImpactOrder): string {
 export const WARRANTY_PRINT_BLOCKED_TEXT =
   "منع المتصفح نافذة الطباعة. اسمح بالنوافذ المنبثقة لهذا الموقع ثم أعد المحاولة.";
 
+/** #241: تحذير الإصلاح المدفوع رغم الإحالة — يُعرض قبل القبول ويسجّله الخادم في أحداث الأمر. */
+export const REFERRAL_PAID_REPAIR_WARNING =
+  "الجهاز ما زال ضمن كفالة المصنع، والإصلاح عندنا قد يُسقطها. هل يصرّ الزبون على إصلاح مدفوع عندنا؟";
+
 /** البطاقة المنتهية (سُحبت أو أُرجع جهازها…) لا تُطبع لها شهادة — يرفضها الخادم. */
 export const warrantyCardPrintable = (card: { ended: boolean }): boolean => !card.ended;
 
@@ -386,7 +390,7 @@ export type IntakeVerdictTone = "green" | "grey" | "red";
 
 export const INTAKE_VERDICT_LABELS: Record<IntakeVerdict, string> = {
   dealer: "مغطى بكفالة التاجر",
-  referral: "كفالة التاجر منتهية — كفالة المصنع سارية: يُحال إلى جهة الكفالة",
+  referral: "خارج كفالة التاجر — كفالة المصنع سارية: يُحال إلى جهة الكفالة",
   voided_paid: "الكفالة ملغاة — الإصلاح مدفوع",
   expired_paid: "انتهت الكفالة — الإصلاح مدفوع",
   ended: "لم تعد الكفالة سارية (أُرجع الجهاز أو أُلغي البيع) — الإصلاح مدفوع",

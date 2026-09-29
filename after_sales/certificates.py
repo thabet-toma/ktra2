@@ -21,12 +21,14 @@ from .verify import _device as device_label
 
 LAYOUT_INVOICE = "invoice"
 LAYOUT_CARD = "card"
+LAYOUT_REFERRAL = "referral_slip"
 
-#: قالبُ كل تخطيط. ورقة الإحالة (#241) وفرع الصيانة (#244) تُضاف هنا بقالبٍ
-#: جديد وتخطيطٍ جديد دون المساس بما سواهما.
+#: قالبُ كل تخطيط. فرع الصيانة (#244) يُضاف هنا بقالبٍ جديد وتخطيطٍ جديد دون
+#: المساس بما سواهما.
 TEMPLATES = {
     LAYOUT_INVOICE: "after_sales/certificates/certificate_invoice.html",
     LAYOUT_CARD: "after_sales/certificates/certificate_card.html",
+    LAYOUT_REFERRAL: "after_sales/certificates/referral_slip.html",
 }
 
 QR_MM_SINGLE = 25
@@ -185,7 +187,7 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
     }
 
     extension = _extension_days_by_card(cards)
-    qr_mm = QR_MM_SINGLE if layout == LAYOUT_CARD else QR_MM_ROW
+    qr_mm = QR_MM_ROW if layout == LAYOUT_INVOICE else QR_MM_SINGLE
     refs: dict = {}
     warrantors: dict = {}
     items = []
@@ -207,27 +209,41 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
             "covered_quantity": card.covered_quantity if is_quantity else None,
             "original_quantity": card.quantity if is_quantity else None,
             "partly_returned": is_quantity and card.returned_quantity > 0,
-            "dealer": _dealer_block(card, today, base_date, extension.get(card.pk)),
+            # ورقة الإحالة لا تذكر كفالة التاجر ولا سبب إلغائها (#218): الوكيل يفحص بنفسه.
+            "dealer": (
+                {"kind": "hidden"} if layout == LAYOUT_REFERRAL
+                else _dealer_block(card, today, base_date, extension.get(card.pk))
+            ),
             "manufacturer": manufacturer,
             "qr": mark_safe(qr_svg(card, qr_mm)),
         })
 
     reprint = mark_reprint and WarrantyCardEvent.objects.filter(
         tenant_id=cards[0].tenant_id, card_id__in=[card.pk for card in cards],
-        event_type=WarrantyCardEvent.TYPE_ISSUED,
+        event_type=(
+            WarrantyCardEvent.TYPE_REFERRED if layout == LAYOUT_REFERRAL
+            else WarrantyCardEvent.TYPE_ISSUED
+        ),
     ).exists()
 
     first = cards[0]
-    if layout == LAYOUT_INVOICE:
+    seller_label = "البائع — التوقيع وختم المحل"
+    if layout == LAYOUT_REFERRAL:
+        title = f"ورقة إحالة إلى الوكيل — #{first.pk}"
+        doc_kind = "ورقة إحالة إلى الوكيل"
+        doc_number = f"#{first.pk}"
+        seller_label = "المحل"
+        signer_label = "مركز الخدمة — استلام"
+    elif layout == LAYOUT_INVOICE:
         title = "شهادة كفالة" + (f" — {invoice.invoice_number}" if invoice else "")
         doc_kind = "شهادة كفالة"
         doc_number = ""
-        customer_label = "استلمت الأجهزة وقرأت الشروط"
+        signer_label = "الزبون — استلمت الأجهزة وقرأت الشروط"
     else:
         title = f"بطاقة كفالة — #{first.pk}"
         doc_kind = "بطاقة كفالة"
         doc_number = f"#{first.pk}"
-        customer_label = "استلمت الجهاز وقرأت الشروط"
+        signer_label = "الزبون — استلمت الجهاز وقرأت الشروط"
 
     customer_name = first.customer_name or (first.partner.name if first.partner_id else "")
     customer_phone = first.customer_phone or (first.partner.phone if first.partner_id else "")
@@ -248,11 +264,11 @@ def certificate_context(cards, *, layout, user, today=None, mark_reprint=True) -
         "items": items,
         "item": items[0],
         "warrantors": sorted(warrantors.values(), key=lambda row: row["ref"]),
-        "terms_groups": _terms_groups(cards, layout),
+        "terms_groups": [] if layout == LAYOUT_REFERRAL else _terms_groups(cards, layout),
         "reprint_date": _fmt(today) if reprint else "",
         "issuer": _issuer_name(user),
-        "seller_label": "البائع — التوقيع وختم المحل",
-        "customer_label": f"الزبون — {customer_label}",
+        "seller_label": seller_label,
+        "customer_label": signer_label,
     }
 
 

@@ -1413,6 +1413,22 @@ def _lock_card(card):
     )
 
 
+def mark_card_referred(card, channel, user=None):
+    """يكتب حدث `referred` عن كل ورقة إحالة تُطبع — لا يُنشئ أمر صيانة (#241).
+
+    بخلاف `issued` لا يُكتب مرةً واحدة: كل إحالة واقعةٌ مستقلّة في سجل البطاقة،
+    واسم الجهة يُكتب نصاً ليبقى مقروءاً بعد أن تُغيَّر الجهة أو تُؤرشف.
+    """
+    warrantor = card.manufacturer_warrantor if card.manufacturer_warrantor_id else None
+    return log_warranty_event(
+        card,
+        event_type=WarrantyCardEvent.TYPE_REFERRED,
+        reason_code=channel,
+        text=f"أُحيل إلى الوكيل: {warrantor.name}" if warrantor else "أُحيل إلى الوكيل",
+        user=user,
+    )
+
+
 @transaction.atomic
 def mark_card_issued(card, channel, user=None):
     """يكتب حدث `issued` **مرةً واحدة** للبطاقة — الطباعة الثانية لا تكتب شيئاً.

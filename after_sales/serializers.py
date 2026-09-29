@@ -610,12 +610,15 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
     duplicate_open_reason = serializers.CharField(
         write_only=True, required=False, allow_blank=True, default="", max_length=500,
     )
+    # #241 — «إصلاح مدفوع بطلب الزبون» رغم الإحالة: الخادم يتحقّق أن الحكم `referral`
+    # ويكتب التنبيه والقبول في الأمر بنفسه، والعميل لا يرسل نصاً.
+    paid_despite_referral = serializers.BooleanField(write_only=True, required=False, default=False)
 
     class Meta:
         model = ServiceOrder
         fields = [
             "id", "order_number", "order_date",
-            "invoice_piece_confirmed", "duplicate_open_reason",
+            "invoice_piece_confirmed", "duplicate_open_reason", "paid_despite_referral",
             "partner", "partner_name", "customer_name", "customer_phone",
             "product", "product_name", "serial", "device_description",
             "received_condition", "accessories",
@@ -644,6 +647,8 @@ class ServiceOrderSerializer(serializers.ModelSerializer):
 
         confirmed = validated_data.pop("invoice_piece_confirmed", False)
         validated_data.pop("duplicate_open_reason", None)
+        if validated_data.pop("paid_despite_referral", False):
+            validated_data["warranty_covered"] = False
         card = validated_data.get("warranty_card")
         # بطاقة الفاتورة تغطّي قطعةً لا نعرف أنها من الفاتورة إلا بتأكيد الموظف:
         # بلا تأكيد يبقى الرابط بالبطاقة والأمر مدفوع.

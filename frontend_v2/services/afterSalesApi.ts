@@ -310,13 +310,22 @@ export function fetchWarrantyCertificateHtml(target: WarrantyPrintTarget): Promi
  * هو اسم ملف الـPDF عند «حفظ كـ PDF». يُعيد `"blocked"` إن حُجبت النافذة، وعند
  * فشل الطلب تُغلَق النافذة الفارغة ويُرمى الخطأ لتعرضه الشاشة.
  */
-export async function printWarrantyCertificate(
+export function printWarrantyCertificate(
   target: WarrantyPrintTarget,
 ): Promise<"printed" | "blocked"> {
+  return printHtmlInNewWindow(() => fetchWarrantyCertificateHtml(target));
+}
+
+/** #241: ورقة الإحالة إلى الوكيل — يكتب الخادم حدث «أُحيل» ولا تُنشئ أمراً. */
+export function printWarrantyReferralSlip(cardId: number): Promise<"printed" | "blocked"> {
+  return printHtmlInNewWindow(() => apiPostForText(`${BASE}${cardId}/referral-slip/`, {}, tenantOpts()));
+}
+
+async function printHtmlInNewWindow(load: () => Promise<string>): Promise<"printed" | "blocked"> {
   const win = window.open("", "_blank");
   if (!win) return "blocked";
   try {
-    const html = await fetchWarrantyCertificateHtml(target);
+    const html = await load();
     win.document.open();
     win.document.write(html);
     win.document.close();
@@ -772,6 +781,8 @@ export interface ServiceOrderDraft {
   invoice_piece_confirmed: boolean;
   /** #240: سبب فتح أمرٍ ثانٍ رغم وجود أمرٍ مفتوح — بلا سبب يردّ الخادم 409. */
   duplicate_open_reason: string;
+  /** #241: «إصلاح مدفوع بطلب الزبون» رغم الإحالة — الخادم يتحقّق من الحكم ويكتب التنبيه والقبول. */
+  paid_despite_referral: boolean;
 }
 
 export interface ServiceOrderListFilters {
