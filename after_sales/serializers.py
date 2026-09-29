@@ -48,6 +48,8 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
     covered_quantity = serializers.SerializerMethodField()
     # #236: إلغاء كفالة التاجر — `null` ما لم تكن ملغاة. من مسار الإلغاء وحده.
     void = serializers.SerializerMethodField()
+    # #237: رابط التحقق العام للموظف فقط. الرمز نفسه لا يخرج حقلاً مستقلاً.
+    verify_url = serializers.SerializerMethodField()
 
     class Meta:
         model = WarrantyCard
@@ -63,7 +65,7 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
             "manufacturer_end_date", "manufacturer_status", "manufacturer_days_remaining",
             "quantity", "returned_quantity", "covered_quantity",
             "status", "days_remaining", "ended", "ended_on", "end_reason",
-            "end_reason_label", "void", "created_at", "updated_at",
+            "end_reason_label", "void", "verify_url", "created_at", "updated_at",
         ]
         # المصدر والشركة والنسب من الخادم — بطاقة يدوية لا تدّعي أنها من ترحيل.
         # وواقعةُ الانتهاء من مسارها (ترحيل/مرجع/حذف) لا من PATCH. والكمية
@@ -94,6 +96,10 @@ class WarrantyCardSerializer(serializers.ModelSerializer):
 
     def get_covered_quantity(self, obj):
         return obj.covered_quantity
+
+    def get_verify_url(self, obj):
+        from .verify import verify_url
+        return verify_url(obj)
 
     def get_void(self, obj):
         if obj.voided_at is None:

@@ -21,6 +21,8 @@ from django.db import models
 from tenants.models import Tenant
 from django.utils import timezone
 
+from .verify import new_verify_token
+
 
 def add_months(start: date, months: int) -> date:
     """يضيف شهوراً تقويمية مع تثبيت اليوم على آخر الشهر حين يقصر.
@@ -247,6 +249,12 @@ class WarrantyCard(models.Model):
         help_text="أمر الصيانة الذي أُلغيت الكفالة من داخله، إن وُجد",
     )
 
+    # #237: رمز التحقق المطبوع بصيغة QR — 128 بت، يُولَّد عند الإدراج، **لا يُدوَّر أبداً**:
+    # الإحياء والترحيل المتكرّر يحدّثان الصفّ نفسه بـ`update_fields` فلا يمسّانه، وأوراقٌ
+    # مطبوعة على مكاتب الزبائن تعتمد عليه. ولا يخرج في أي serializer (الرابط وحده يخرج).
+    verify_token = models.CharField(
+        max_length=22, unique=True, editable=False, default=new_verify_token,
+    )
     notes = models.TextField(blank=True, default="")
     # #231: الشروط المجمَّدة لحظة الإنشاء — من `WarrantyPolicy.terms_override`
     # وإلا `AfterSalesSettings.default_terms`. لا تتغيّر بتعديل السياسة لاحقاً؛

@@ -320,3 +320,8 @@ export function warrantyVoidImpactLine(order: WarrantyVoidImpactOrder): string {
   if (order.returns_to_approval) parts.push("يعود إلى انتظار الموافقة");
   return `${order.order_number}: ${parts.length ? parts.join("، ") : "يفقد تغطية الكفالة"}`;
 }
+
+/** #237: مصدر `<img>` لرمز QR الخادميّ — data URI فلا يُنفَّذ أي سكربت داخل SVG. */
+export function warrantyQrImageSrc(svg: string): string {
+  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+}

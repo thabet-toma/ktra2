@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **951**
+عدد النقاط: **954**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -173,9 +173,11 @@
 | `/api/after-sales/settings/` | `AfterSalesSettingsView` | `after_sales/views.py` |
 | `/api/after-sales/warranties/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/check/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/resolve-scan/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/events/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/extend/` | `WarrantyCardViewSet` | `after_sales/views.py` |
+| `/api/after-sales/warranties/{pk}/qr/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/shorten/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/unvoid/` | `WarrantyCardViewSet` | `after_sales/views.py` |
 | `/api/after-sales/warranties/{pk}/void-impact/` | `WarrantyCardViewSet` | `after_sales/views.py` |
@@ -953,6 +955,7 @@
 | `/api/tenants/settings/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/current/` | `TenantSettingsViewSet` | `tenants/views.py` |
 | `/api/tenants/settings/{pk}/` | `TenantSettingsViewSet` | `tenants/views.py` |
+| `/api/w/{token}/?` | `WarrantyVerifyPublicView` | `after_sales/public_views.py` |
 | `/j/<str:token>` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/j/<str:token>/` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/s/<str:token>` | `DocSharePublicView` | `docshare/views.py` |

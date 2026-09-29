@@ -254,3 +254,15 @@ test('#236 — سطر المعاينة يسمّي القطع بلا سعر وع�
     /يفقد تغطية الكفالة/,
   );
 });
+
+import { warrantyQrImageSrc } from './warranty.ts';
+
+test('#237 — مصدر صورة الـQR data URI مُرمَّز لا يُحقَن كما هو', () => {
+  const src = warrantyQrImageSrc('<svg viewBox="0 0 1 1"><path d="M0 0"/></svg>');
+  assert.ok(src.startsWith('data:image/svg+xml;charset=utf-8,'));
+  assert.ok(!src.includes('<'));
+  assert.equal(
+    decodeURIComponent(src.slice('data:image/svg+xml;charset=utf-8,'.length)),
+    '<svg viewBox="0 0 1 1"><path d="M0 0"/></svg>',
+  );
+});

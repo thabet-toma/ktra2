@@ -161,6 +161,9 @@ urlpatterns = [
     path('api/devices/', include('device_registry.urls')),
     # THA-24: خدمة ما بعد البيع — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.
     path('api/after-sales/', include('after_sales.urls')),
+    # #237: صفحة التحقق العامة للكفالة (رمز QR) — كل كود `AllowAny` في
+    # `after_sales/public_views.py` وحده. تحت `/api/` عمداً فلا تحتاج سطراً في nginx.
+    path('api/w/', include('after_sales.public_urls')),
     # موديول متابعة الموظفين — كل نقطة خلفه ترد 404 لشركة غير مرخّصة.
     path('api/employee-ops/', include('employee_ops.urls')),
     # THA-114: ملف الاستيراد — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.

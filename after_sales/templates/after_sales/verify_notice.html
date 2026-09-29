@@ -1,0 +1,7 @@
+{% extends "after_sales/verify.html" %}
+
+{% comment %}404 بلا أي بيان عن الكفالة أو الشركة — الرسالة وحدها.{% endcomment %}
+
+{% block body %}
+  <div class="notice"><p>{{ notice_message }}</p></div>
+{% endblock %}

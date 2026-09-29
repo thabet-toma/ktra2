@@ -80,6 +80,8 @@ export interface WarrantyCardRow {
   end_reason_label: string;
   /** #236: إلغاء كفالة التاجر — `null` ما لم تُلغَ. */
   void: WarrantyVoidInfo | null;
+  /** #237: رابط صفحة التحقق العامة — للموظف، والرمز نفسه لا يخرج حقلاً. */
+  verify_url: string;
   created_at: string;
   updated_at: string;
 }
@@ -297,6 +299,16 @@ export function checkWarrantyBySerial(serial: string): Promise<WarrantyCoverage>
     `${BASE}check/?serial=${encodeURIComponent(serial)}`,
     tenantOpts(),
   );
+}
+
+/** #237: رابط التحقق ورمز QR (SVG من الخادم) للبطاقة. */
+export interface WarrantyCardQr {
+  verify_url: string;
+  svg: string;
+}
+
+export function getWarrantyCardQr(id: number): Promise<WarrantyCardQr> {
+  return apiGetObject<WarrantyCardQr>(`${BASE}${id}/qr/`, tenantOpts());
 }
 
 /** سجل أحداث البطاقة (#229) — إلحاقيّ، للقراءة فقط. */

@@ -5,6 +5,7 @@ import {
   deleteWarrantyCard,
   extendWarrantyCard,
   getWarrantyCardEvents,
+  getWarrantyCardQr,
   shortenWarrantyCard,
   unvoidWarrantyCard,
   updateWarrantyCard,
@@ -19,6 +20,7 @@ import {
   manufacturerWarrantyStatusLabel,
   warrantyCoveredQuantityLabel,
   warrantyEventLabel,
+  warrantyQrImageSrc,
   warrantyRemainingText,
   warrantyStatusLabel,
   warrantyUndoReasonValid,
@@ -177,6 +179,17 @@ export const WarrantyCardModal: React.FC<Props> = ({
   }, [card]);
 
   useEffect(() => { void loadEvents(); }, [loadEvents]);
+
+  // #237: رمز التحقق العام — تفصيلٌ إضافي، فشل قراءته لا يمنع فتح البطاقة.
+  const [qrSvg, setQrSvg] = useState<string | null>(null);
+  useEffect(() => {
+    if (!card) { setQrSvg(null); return; }
+    let live = true;
+    getWarrantyCardQr(card.id)
+      .then((qr) => { if (live) setQrSvg(qr.svg); })
+      .catch(() => { if (live) setQrSvg(null); });
+    return () => { live = false; };
+  }, [card]);
 
   const isAuto = card?.source === "auto_sale";
   // البطاقة التلقائية: النسب والزبون والمنتج من الفاتورة، لا يُحرَّرون هنا.
@@ -903,6 +916,34 @@ export const WarrantyCardModal: React.FC<Props> = ({
                   )}
                 </div>
               )}
+            </div>
+          )}
+
+          {/* #237: رمز QR الدائم ورابط التحقق العام — لا يتغيّر عند الاسترجاع أو إعادة الترحيل. */}
+          {card && card.verify_url && (
+            <div
+              className="flex items-center gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3"
+              data-testid="warranty-verify-qr"
+            >
+              {qrSvg && (
+                <img
+                  src={warrantyQrImageSrc(qrSvg)}
+                  alt="رمز QR للتحقق من الكفالة"
+                  className="h-24 w-24 shrink-0 rounded bg-white p-1"
+                />
+              )}
+              <div className="min-w-0 flex-1">
+                <div className="mb-1 text-sm font-bold text-[var(--color-text)]">التحقق الإلكتروني</div>
+                <a
+                  href={card.verify_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  dir="ltr"
+                  className="block break-all text-[12px] text-[var(--color-primary)] underline"
+                >
+                  {card.verify_url}
+                </a>
+              </div>
             </div>
           )}
 

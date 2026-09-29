@@ -62,6 +62,7 @@ from .services import (
     void_impact,
     warranty_coverage,
 )
+from .verify import qr_svg, resolve_scan, verify_url
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ _ACTION_PERMS = {
     "list": PERM_VIEW,
     "retrieve": PERM_VIEW,
     "check": PERM_VIEW,
+    "resolve_scan": PERM_VIEW,
+    "qr": PERM_VIEW,
     "create": PERM_MANAGE,
     "update": PERM_MANAGE,
     "partial_update": PERM_MANAGE,
@@ -379,6 +382,20 @@ class WarrantyCardViewSet(viewsets.ModelViewSet):
         return Response(
             warranty_coverage(self.tenant.pk, request.query_params.get("serial") or "")
         )
+
+    @action(detail=False, methods=["get"], url_path="resolve-scan")
+    def resolve_scan(self, request):
+        """يحلّ رابطاً ممسوحاً أو رمزاً مجرّداً إلى بطاقة **هذه الشركة** فقط (#237)."""
+        card = resolve_scan(self.tenant, request.query_params.get("q") or "")
+        if card is None:
+            raise NotFound("لا توجد كفالة لهذا الرمز في شركتك")
+        return Response(self.get_serializer(card).data)
+
+    @action(detail=True, methods=["get"], url_path="qr")
+    def qr(self, request, pk=None):
+        """رابط التحقق ورمز QR الخاص بالبطاقة — SVG من الخادم (#237)."""
+        card = self.get_object()
+        return Response({"verify_url": verify_url(card), "svg": qr_svg(card, 40)})
 
 
 # ══════════════════════════════════════════════════════════════════════════

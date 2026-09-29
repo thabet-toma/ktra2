@@ -345,6 +345,13 @@ PLATFORM_RATING_PUBLIC_BASE_URL = os.environ.get(
     "PLATFORM_RATING_PUBLIC_BASE_URL", DOCSHARE_PUBLIC_BASE_URL,
 ).rstrip("/")
 
+# AFTER-SALES (#237): أساس رابط التحقق **المطبوع** على شهادات الكفالة (`/api/w/<token>`).
+# يسقط إلى `DOCSHARE_PUBLIC_BASE_URL` المحسوبة (ثم نطاقها الافتراضي) لا إلى متغيّر بيئتها،
+# ولا يُبنى من ترويسة `Host`. **نطاقٌ يجب أن يثبت:** الرابط مطبوعٌ على ورقٍ لا يُسحب.
+WARRANTY_VERIFY_BASE_URL = (
+    os.environ.get("WARRANTY_VERIFY_BASE_URL") or DOCSHARE_PUBLIC_BASE_URL
+).rstrip("/")
+
 PLATFORM_RATING_PUBLIC_PATH = "/" + os.environ.get(
     "PLATFORM_RATING_PUBLIC_PATH", "rate",
 ).strip("/")
@@ -602,6 +609,9 @@ REST_FRAMEWORK = {
         # مستقلٌّ أضيق — كتابةٌ لا قراءة، ورابطٌ عامّ يملؤه غرباء لا مورّدٌ
         # واحد يفتحه مرّتين. لا سقفَ على عدد الردود ولا CAPTCHA (مخالفةٌ واعية).
         "doc_share_public_quote": os.environ.get("THROTTLE_RATE_DOC_SHARE_QUOTE", "20/min"),
+        # #237: صفحة تحقق الكفالة العامة (`after_sales/public_views.py`) — يفتحها الزبون
+        # بمسح رمزٍ فلا تُتصفَّح؛ والسقف يعيق تخمين الرموز (128 بت) لا استعمالاً عادياً.
+        "warranty_verify_public": os.environ.get("THROTTLE_RATE_WARRANTY_VERIFY", "30/min"),
         # T-HR: الخدمة الذاتية (`hr/ess_api.py`). القراءة أوسع لأن شاشة الموظف
         # تجلب يومه وشهره وجدوله معاً، والبصمة أضيق بكثير: الضغطة المتكرّرة على
         # زرّ التسجيل تُنتج صفوفاً في سجلٍّ لا يُحذف منه شيء.

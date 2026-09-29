@@ -21,6 +21,9 @@ django-cloudinary-storage==0.3.0
 cloudinary==1.44.1
 Pillow==12.1.0
 
+# ── رمز QR لصفحة تحقق الكفالة (after_sales/verify.py) — SVG من الخادم، بلا اعتمادية ──
+segno==1.6.6
+
 # ── Database driver ─────────────────────────────────────────────
 mysqlclient==2.2.7
 
