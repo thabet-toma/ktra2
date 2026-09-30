@@ -2,7 +2,7 @@ import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom';
 import { Pencil } from 'lucide-react';
 import { apiGetObject } from '../../services/restApi';
-import { formatMoney, formatNumber, formatQuantity } from '../../utils/formatNumber';
+import { formatMoney, formatNumber, formatPartyBalance, formatQuantity } from '../../utils/formatNumber';
 import { formatDateLocalized, todayIso } from '../../utils/formatDate';
 import { isReservationActive } from '../../utils/documentBadges';
 import {
@@ -75,6 +75,8 @@ interface PartnerApi {
 interface PartnerProfile {
   balance: string;
   balance_side: string;
+  /** جهة إشارة `balance` من الخادم (`is_creditor_party`) — لعرض «المدين سالب». */
+  is_creditor: boolean;
   outstanding_balance: string;
   total_sales: string;
   total_purchases: string;
@@ -165,6 +167,9 @@ interface StatementResponse {
   missing_count?: number;
   missing_base_balance?: string;
   fx?: StatementFx;
+  closing_balance?: string;
+  /** جهة إشارة الأرصدة في الكشف (`is_creditor_party`). */
+  is_creditor?: boolean;
 }
 
 /** مسار المستحق الذي ترسو عليه حركة الدائن — لنوع مرجعٍ بلا شاشةٍ خاصّة به. */
@@ -632,6 +637,9 @@ export const PartnerProfilePage: React.FC = () => {
     // paymentsRefreshKey: يُعيد الجلب بعد توزيع سند على الفواتير (تغيّر المدفوع/المتبقي).
   }, [id, tenantId, paymentsRefreshKey]);
 
+  // جهة إشارة أرصدة الكشف من الخادم نفسه — لا من نوع الطرف في الواجهة (#33/#69).
+  const stmtCreditor = stmtMeta.is_creditor ?? profile?.is_creditor ?? false;
+
   const stmtColumns: LedgerColumn<StatementDisplayRow>[] = [
     { key: 'date', header: 'التاريخ', render: (r) => formatDateLocalized(r.date) || '—' },
     {
@@ -712,7 +720,7 @@ export const PartnerProfilePage: React.FC = () => {
     },
     {
       key: 'debit',
-      header: stmtCurrency ? `مدين (${stmtCurrency})` : 'مدين (Dr)',
+      header: stmtCurrency ? `مدين (${stmtCurrency})` : 'مدين',
       align: 'right',
       render: (r) => r.currency_missing
         ? <span className="text-[var(--ktra-ink-soft)]">—</span>
@@ -720,7 +728,7 @@ export const PartnerProfilePage: React.FC = () => {
     },
     {
       key: 'credit',
-      header: stmtCurrency ? `دائن (${stmtCurrency})` : 'دائن (Cr)',
+      header: stmtCurrency ? `دائن (${stmtCurrency})` : 'دائن',
       align: 'right',
       render: (r) => r.currency_missing
         ? <span className="text-[var(--ktra-ink-soft)]">—</span>
@@ -732,7 +740,7 @@ export const PartnerProfilePage: React.FC = () => {
       align: 'right',
       render: (r) => r.reversal_member
         ? <span className="text-[var(--ktra-ink-soft)]">—</span>
-        : <b className="ktra-num">{r?.running_balance ?? ''}</b>,
+        : <b className="ktra-num">{formatPartyBalance(r?.running_balance, stmtCreditor, '')}</b>,
     },
     {
       key: 'details',
@@ -770,19 +778,19 @@ export const PartnerProfilePage: React.FC = () => {
         </div>
       ),
     },
-    { key: 'debit', header: 'مدين (Dr)', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
-    { key: 'credit', header: 'دائن (Cr)', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
+    { key: 'debit', header: 'مدين', align: 'right', render: (r) => <span className="ktra-num">{r?.debit ?? ''}</span> },
+    { key: 'credit', header: 'دائن', align: 'right', render: (r) => <span className="ktra-num">{r?.credit ?? ''}</span> },
     {
       key: 'balance_before',
       header: 'الرصيد قبل',
       align: 'right',
-      render: (r) => <span className="ktra-num">{formatMoney(r?.balance_before ?? '')}</span>,
+      render: (r) => <span className="ktra-num">{formatPartyBalance(r?.balance_before, stmtCreditor, '')}</span>,
     },
     {
       key: 'balance_after',
       header: 'الرصيد بعد',
       align: 'right',
-      render: (r) => <b className="ktra-num">{formatMoney(r?.running_balance ?? '')}</b>,
+      render: (r) => <b className="ktra-num">{formatPartyBalance(r?.running_balance, stmtCreditor, '')}</b>,
     },
   ];
 
@@ -904,7 +912,7 @@ export const PartnerProfilePage: React.FC = () => {
         <div className="p-4 grid grid-cols-2 md:grid-cols-4 gap-3">
           {profile ? (
             <>
-              <Kpi label="الرصيد الحالي" value={`${profile.balance} ${profile.balance_side}`} />
+              <Kpi label="الرصيد الحالي" value={formatPartyBalance(profile.balance, profile.is_creditor)} />
               <Kpi label="المتبقي المستحق" value={profile.outstanding_balance} />
               <Kpi
                 label={!isSupplier ? 'إجمالي المبيعات' : partner?.partner_type === 'Supplier' ? 'إجمالي المشتريات' : 'إجمالي المستحقّات'}
@@ -1133,7 +1141,11 @@ export const PartnerProfilePage: React.FC = () => {
                       return sum + (isNaN(val) ? 0 : val);
                     }, 0))}
                   </td>
-                  <td className="px-2 py-2"></td>
+                  <td className="px-2 py-2 text-right ktra-num" data-testid="statement-closing-balance">
+                    {stmtMeta.closing_balance != null
+                      ? <>الختامي: {formatPartyBalance(stmtMeta.closing_balance, stmtCreditor)}</>
+                      : null}
+                  </td>
                   <td className="px-2 py-2"></td>
                 </tr>
               ) : undefined
@@ -1144,14 +1156,14 @@ export const PartnerProfilePage: React.FC = () => {
               data-testid="statement-fx-row"
               className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-[var(--ktra-border)] bg-[var(--ktra-panel)] p-2 text-sm"
             >
-              <span>الرصيد بالدفاتر: <b className="ktra-num">{formatMoney(stmtMeta.fx.book_balance)}</b> ₪</span>
+              <span>الرصيد بالدفاتر: <b className="ktra-num">{formatPartyBalance(stmtMeta.fx.book_balance, stmtCreditor)}</b> ₪</span>
               {stmtMeta.fx.rate ? (
                 <>
                   <span>
-                    الرصيد بالدولار <b className="ktra-num">{formatMoney(stmtMeta.fx.currency_balance)}</b> $
+                    الرصيد بالدولار <b className="ktra-num">{formatPartyBalance(stmtMeta.fx.currency_balance, stmtCreditor)}</b> $
                     × {stmtMeta.fx.rate_source === 'exchange_rate' ? 'سعر اليوم' : 'سعر آخر قيد'}{' '}
                     <span className="ktra-num">{formatNumber(stmtMeta.fx.rate, { maxDecimals: 4 })}</span>
-                    {' '}= <b className="ktra-num">{formatMoney(stmtMeta.fx.revalued_balance)}</b> ₪
+                    {' '}= <b className="ktra-num">{formatPartyBalance(stmtMeta.fx.revalued_balance, stmtCreditor)}</b> ₪
                   </span>
                   <span className="font-bold">
                     الفرق (فرق صرف غير مقيَّد): <span className="ktra-num">{formatMoney(stmtMeta.fx.difference)}</span> ₪
@@ -1159,7 +1171,7 @@ export const PartnerProfilePage: React.FC = () => {
                 </>
               ) : (
                 <span className="text-[var(--ktra-ink-soft)]">
-                  الرصيد بالدولار <b className="ktra-num">{formatMoney(stmtMeta.fx.currency_balance)}</b> $ — لا سعر صرف مسجَّل لحساب الفرق.
+                  الرصيد بالدولار <b className="ktra-num">{formatPartyBalance(stmtMeta.fx.currency_balance, stmtCreditor)}</b> $ — لا سعر صرف مسجَّل لحساب الفرق.
                 </span>
               )}
             </div>
@@ -1502,7 +1514,7 @@ export const PartnerProfilePage: React.FC = () => {
         status={
           error || allocError ? <span className="text-[var(--ktra-danger)]">{error || allocError}</span> :
           loading ? <span>جاري التحميل...</span> :
-          <span className="ktra-status-item">{partnerTypeLabel(partner?.partner_type) || (isSupplier ? 'مورد' : 'عميل')}{profile ? ` · الرصيد ${profile.balance} ${profile.balance_side}` : ''}</span>
+          <span className="ktra-status-item">{partnerTypeLabel(partner?.partner_type) || (isSupplier ? 'مورد' : 'عميل')}{profile ? ` · الرصيد ${formatPartyBalance(profile.balance, profile.is_creditor)}` : ''}</span>
         }
       >
         <></>

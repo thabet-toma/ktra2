@@ -1,19 +1,18 @@
 import { test, expect } from "@playwright/test";
-import { formatBalanceWithSide, formatMoney } from "../utils/formatNumber";
+import { formatBalanceWithSide, formatMoney, formatPartyBalance } from "../utils/formatNumber";
 
 /**
- * شكوى المالك: «مش واضح آخر رقم دائن ولا مدين» — الأستاذ العام كان يعرض
- * «1,112-» والإشارة تُرسم في نهاية الرقم بصرياً في RTL فتلتبس.
+ * شكوى المالك الأولى: «مش واضح آخر رقم دائن ولا مدين» — والثانية (#33/#69): «لازم
+ * ينكتب بحدو دائن ولا مدين والمدين سالب». الإشارة والكلمة معاً، والرقم في عزلٍ
+ * اتّجاهيّ LTR كي لا يرسم RTL السالبَ في آخره («1,112-»). الحارس الأصليّ في
+ * `utils/formatNumber.test.ts` (يعمل في `npm test`)؛ هذا مرآته في Playwright.
  */
-test.describe("formatBalanceWithSide", () => {
-  test("يسمّي الجانب صراحةً بدل الإشارة", () => {
-    expect(formatBalanceWithSide(1888)).toBe("1,888 مدين");
-    expect(formatBalanceWithSide(-1112)).toBe("1,112 دائن");
-  });
+const iso = (s: string) => `\u2066${s}\u2069`;
 
-  test("لا يُبقي أي إشارة سالبة في المخرجات", () => {
-    expect(formatBalanceWithSide(-1112)).not.toContain("-");
-    expect(formatBalanceWithSide(-0.5)).not.toContain("-");
+test.describe("formatBalanceWithSide", () => {
+  test("المدين سالب ومسمّى، والدائن موجب ومسمّى", () => {
+    expect(formatBalanceWithSide(1888)).toBe(`${iso("-1,888")} مدين`);
+    expect(formatBalanceWithSide(-1112)).toBe(`${iso("1,112")} دائن`);
   });
 
   test("الصفر بلا جانب", () => {
@@ -22,21 +21,14 @@ test.describe("formatBalanceWithSide", () => {
     expect(formatBalanceWithSide(0.001)).toBe("0");
   });
 
-  test("يحافظ على تنسيق G1 (بلا أصفار عشرية غير دالّة)", () => {
-    expect(formatBalanceWithSide(2000)).toBe("2,000 مدين");
-    expect(formatBalanceWithSide(-187.5)).toBe("187.5 دائن");
-    expect(formatBalanceWithSide(1234.56)).toBe("1,234.56 مدين");
-  });
-
   test("المدخل غير الصالح يعيد الافتراضي", () => {
     expect(formatBalanceWithSide(null)).toBe("0");
-    expect(formatBalanceWithSide(undefined)).toBe("0");
-    expect(formatBalanceWithSide("")).toBe("0");
     expect(formatBalanceWithSide("abc")).toBe("0");
+    expect(formatMoney(1112)).toBe("1,112");
   });
 
-  test("يقبل النص الرقمي كما يفعل formatMoney", () => {
-    expect(formatBalanceWithSide("-1112")).toBe("1,112 دائن");
-    expect(formatMoney(1112)).toBe("1,112");
+  test("رصيد الطرف بإشارة الخادم يصل إلى القاعدة نفسها", () => {
+    expect(formatPartyBalance("9000", false)).toBe(`${iso("-9,000")} مدين`);
+    expect(formatPartyBalance("7551.5", true)).toBe(`${iso("7,551.5")} دائن`);
   });
 });

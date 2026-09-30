@@ -11,7 +11,7 @@ import {
   type QuickEntryKind,
   type QuickEntryTouched,
 } from "../../utils/journalQuickEntry";
-import { formatMoney, formatNumber } from "../../utils/formatNumber";
+import { formatBalanceWithSide, formatMoney, formatNumber } from "../../utils/formatNumber";
 import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
@@ -696,8 +696,7 @@ export const AccountingJournalEntryPage: React.FC<Props> = ({
         end_date: today.toISOString().split('T')[0],
       });
       const closing = Number((ledger as { closing_balance?: number | string })?.closing_balance ?? 0);
-      const fmt = (v: number) => formatMoney(v);
-      const label = `الرصيد: ${fmt(Math.abs(closing))} ${closing >= 0 ? 'مدين' : 'دائن'}`;
+      const label = `الرصيد: ${formatBalanceWithSide(closing)}`;
       setBalanceTooltip({ lineIdx, balance: label });
       tooltipTimerRef.current = setTimeout(() => setBalanceTooltip(null), 4000);
     } catch {

@@ -48,18 +48,35 @@ export function formatQuantity(value: unknown, fallback = ""): string {
 }
 
 /**
- * رصيد محاسبي بجانبه صريحاً: «1,112 دائن» بدل «1,112-».
+ * رصيد محاسبي بإشارته وجانبه معاً: «-1,888 مدين» / «1,112 دائن».
  *
- * الإشارة وحدها ملتبسة في واجهة RTL — المتصفح يرسم السالب في نهاية الرقم بصرياً
- * («1,112-») فلا يعرف القارئ أمدينٌ هو أم دائن. الاصطلاح: موجب = مدين، سالب = دائن
- * (الرصيد = مدين − دائن)، والصفر بلا جانب.
+ * المدخل بإشارة الأستاذ (الرصيد = مدين − دائن). المعروض بقرار المالك
+ * (2026-09-30، #33/#69): **المدين سالب** والدائن موجب، والكلمة بجانب الرقم دائماً
+ * فلا تكون الإشارة وحدها الدليل. والصفر بلا جانب.
+ *
+ * الرقم محصورٌ في عزلٍ اتّجاهيٍّ LTR (U+2066…U+2069): بدونه يرسم المتصفح في واجهة
+ * RTL السالبَ في نهاية الرقم («1,888-») — وهي الشكوى التي أسقطت الإشارة سابقاً.
  */
 export function formatBalanceWithSide(value: unknown, fallback = "0"): string {
   const n = typeof value === "number" ? value : Number(value);
   if (value === null || value === undefined || value === "" || !Number.isFinite(n)) {
     return fallback;
   }
-  const body = formatMoney(Math.abs(n));
-  if (Math.abs(n) < 0.005) return body;
-  return `${body} ${n > 0 ? "مدين" : "دائن"}`;
+  if (Math.abs(n) < 0.005) return formatMoney(0);
+  return `\u2066${formatMoney(-n)}\u2069 ${n > 0 ? "مدين" : "دائن"}`;
+}
+
+/**
+ * رصيد طرف (عميل/مورّد/مخلّص…) بإشارة الخادم إلى القاعدة الموحّدة أعلاه.
+ *
+ * الخادم يعطي رصيد الطرف بإشارةٍ تختلف بنوعه (`partners/models.py` — `is_creditor_party`):
+ * العميل مدين − دائن، والطرف الدائن دائن − مدين. `isCreditor` يأتي من الخادم نفسه
+ * (`is_creditor` في الـprofile والكشف) — لا يُشتقّ من نوع الطرف في الواجهة.
+ */
+export function formatPartyBalance(value: unknown, isCreditor: boolean, fallback = "0"): string {
+  const n = typeof value === "number" ? value : Number(value);
+  if (value === null || value === undefined || value === "" || !Number.isFinite(n)) {
+    return fallback;
+  }
+  return formatBalanceWithSide(isCreditor ? -n : n, fallback);
 }

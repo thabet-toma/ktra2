@@ -79,7 +79,7 @@ const profileResponder: ApiResponder = async (route, url) => {
     await route.fulfill({
       contentType: "application/json",
       body: JSON.stringify({
-        balance: "24751.50", balance_side: "Cr", outstanding_balance: "24751.50",
+        balance: "24751.50", balance_side: "Cr", is_creditor: true, outstanding_balance: "24751.50",
         total_sales: "0", total_purchases: "0", last_transaction_date: null,
       }),
     });
@@ -146,7 +146,7 @@ test("broker statement: a voucher over three clearances stays one row with a sub
         contentType: "application/json",
         body: JSON.stringify({
           count: 3,
-          closing_balance: "-4000.00",
+          closing_balance: "-4000.00", is_creditor: true,
           results: [
             row(3, {
               reference_type: "SUPPLIER_PAYMENT", reference_id: 2460, debit: "19000.00", credit: "0.00",
@@ -185,8 +185,11 @@ test("broker statement: a voucher over three clearances stays one row with a sub
   // السطر الفرعي داخل إطار مجموعة تخليصه، لا صفٌّ مستقلّ.
   const group14 = page.locator("tbody", { hasText: "مستحق تخليص #14" });
   await expect(group14.getByText(/↳ من سند صرف #2460/)).toBeVisible();
-  // صفّ السند نفسه مرّة واحدة: رصيده الجاري لا يتكرّر.
-  await expect(page.getByText("-4000.00")).toHaveCount(1);
+  // صفّ السند نفسه مرّة واحدة: رصيده الجاري لا يتكرّر (والثاني هو الختامي في الذيل).
+  // المخلّص دائنٌ بطبعه، فرصيده السالب «مدين» بقاعدة المالك (#33/#69).
+  // الرقم داخل عزلٍ اتّجاهيّ (U+2066…U+2069) فالنصّ الكامل «\u2066-4,000\u2069 مدين».
+  await expect(page.getByText("\u2066-4,000\u2069 مدين")).toHaveCount(2);
+  await expect(page.getByTestId("statement-closing-balance")).toContainText("\u2066-4,000\u2069 مدين");
 
   // بلا ربط: لا أسطر فرعية.
   await page.getByLabel("ربط الفاتورة بسندها").uncheck();
@@ -206,7 +209,7 @@ test("statement folds a payment and its reversal into one grey row; the option s
         contentType: "application/json",
         body: JSON.stringify({
           count: 4,
-          closing_balance: "7049.26",
+          closing_balance: "7049.26", is_creditor: true,
           results: [
             row(10980, {
               reference_type: "LOGISTICS_PAYMENT", debit: "4298.96", credit: "0.00",
@@ -241,20 +244,20 @@ test("statement folds a payment and its reversal into one grey row; the option s
 
   const summary = page.getByRole("button", { name: /قيد صُحّح: #283 ⇄ #10979 \(صافي 0\)/ });
   await expect(summary).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText("-2580.41")).toHaveCount(0);
+  await expect(page.getByText("-2,580.41")).toHaveCount(0);
   await expect(page.getByText("13928.63")).toHaveCount(0);
 
   // بكبسة يُفتح الزوج تحت سطره — بلا رصيدٍ جارٍ مضلّل.
   await summary.click();
   await expect(summary).toHaveAttribute("aria-expanded", "true");
   await expect(page.getByText("13928.63")).toHaveCount(2);
-  await expect(page.getByText("-2580.41")).toHaveCount(0);
+  await expect(page.getByText("-2,580.41")).toHaveCount(0);
 
   // الخيار يعيدهما كاملين بالرصيد الخام، والختامي نفسه.
   await page.getByLabel("إظهار القيود المعكوسة").check();
   await expect(summary).toHaveCount(0);
-  await expect(page.getByText("-2580.41")).toBeVisible();
-  await expect(page.getByText("7049.26")).toBeVisible();
+  await expect(page.getByText("\u2066-2,580.41\u2069 مدين")).toBeVisible();
+  await expect(page.getByTestId("statement-closing-balance")).toContainText("\u20667,049.26\u2069 دائن");
 });
 
 test("forwarder statement opens in dollars with the FX closing row; ₪ switches back", async ({ page }) => {
@@ -273,7 +276,7 @@ test("forwarder statement opens in dollars with the FX closing row; ₪ switches
     if (url.pathname.endsWith("/partners/35/profile/")) {
       await route.fulfill({
         contentType: "application/json",
-        body: JSON.stringify({ balance: "1060.00", balance_side: "Cr", outstanding_balance: "1060.00",
+        body: JSON.stringify({ balance: "1060.00", balance_side: "Cr", is_creditor: true, outstanding_balance: "1060.00",
           total_sales: "0", total_purchases: "0", last_transaction_date: null }),
       });
       return true;
@@ -282,7 +285,7 @@ test("forwarder statement opens in dollars with the FX closing row; ₪ switches
       const currency = url.searchParams.get("currency");
       requested.push(currency ?? "base");
       const body = currency === "USD" ? {
-        count: 3, closing_balance: "0.00", currency: "USD", currencies: ["USD"],
+        count: 3, closing_balance: "0.00", is_creditor: true, currency: "USD", currencies: ["USD"],
         missing_count: 1, missing_base_balance: "700.00",
         fx: { currency: "USD", book_balance: "1060.00", currency_balance: "0.00", rate: "3.240000",
           rate_source: "last_entry", revalued_balance: "0.00", difference: "1060.00" },
@@ -295,7 +298,7 @@ test("forwarder statement opens in dollars with the FX closing row; ₪ switches
             base_debit: "0.00", base_credit: "3600.00", currency_missing: false, running_balance: "1000.00" }),
         ],
       } : {
-        count: 3, closing_balance: "1060.00", currency: null, currencies: ["USD"],
+        count: 3, closing_balance: "1060.00", is_creditor: true, currency: null, currencies: ["USD"],
         results: [
           row(3, { reference_type: "SUPPLIER_PAYMENT", debit: "0.00", credit: "700.00", running_balance: "1060.00" }),
           row(2, { reference_type: "LOGISTICS_PAYMENT", debit: "3240.00", credit: "0.00", running_balance: "360.00" }),
@@ -322,7 +325,7 @@ test("forwarder statement opens in dollars with the FX closing row; ₪ switches
   expect(requested).toContain("USD");
 
   await page.getByRole("button", { name: "₪", exact: true }).click();
-  await expect(page.getByRole("columnheader", { name: "مدين (Dr)" })).toBeVisible();
+  await expect(page.getByRole("columnheader", { name: "مدين", exact: true })).toBeVisible();
   await expect(page.getByText("3240.00", { exact: true })).toBeVisible();
   await expect(fx).toHaveCount(0);
 });

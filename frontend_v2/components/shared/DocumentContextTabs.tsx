@@ -75,6 +75,8 @@ export type ContextLedgerResponse = {
   results: ContextLedgerRow[];
   count: number;
   closing_balance: string;
+  /** جهة إشارة الأرصدة (`is_creditor_party`) — لعرض «المدين سالب». */
+  is_creditor?: boolean;
   customer_name?: string | null;
   supplier_name?: string | null;
   anchor: {
@@ -105,7 +107,7 @@ export type DocumentContextApi = {
 
 /** بأيّ مفردات تُسمّى — الفارق الثاني والأخير. */
 export type DocumentContextSide = "customer" | "supplier";
-import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatPartyBalance, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized } from "../../utils/formatDate";
 
 const errText = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -220,7 +222,7 @@ export const InvoiceStockTab: React.FC<{
 
 /* ── 2) حساب العميل: الرصيد قبل الفاتورة وبعدها ────────────────────────────── */
 
-const ledgerColumns: LedgerColumn<ContextLedgerRow>[] = [
+const ledgerColumns = (isCreditor: boolean): LedgerColumn<ContextLedgerRow>[] => [
   { key: "date", header: "التاريخ", render: (r) => formatDateLocalized(r.date) || "—" },
   {
     key: "reference", header: "المستند",
@@ -236,11 +238,11 @@ const ledgerColumns: LedgerColumn<ContextLedgerRow>[] = [
   { key: "credit", header: "دائن", align: "center", render: (r) => formatMoney(r.credit, "—") },
   {
     key: "balance_before", header: "الرصيد قبل", align: "center",
-    render: (r) => formatMoney(r.balance_before),
+    render: (r) => formatPartyBalance(r.balance_before, isCreditor),
   },
   {
     key: "running_balance", header: "الرصيد بعد", align: "center",
-    render: (r) => <b>{formatMoney(r.running_balance)}</b>,
+    render: (r) => <b>{formatPartyBalance(r.running_balance, isCreditor)}</b>,
   },
 ];
 
@@ -271,6 +273,8 @@ export const InvoicePartnerLedgerTab: React.FC<{
   if (error) return <TabError message={`تعذّر تحميل حركة الحساب: ${error}`} onRetry={load} />;
 
   const anchor = data?.anchor ?? null;
+  // الجهة من الخادم؛ وبلا كشفٍ (لا طرف على الفاتورة) لا رصيد يُعرض أصلاً.
+  const isCreditor = data?.is_creditor ?? side === "supplier";
 
   return (
     <div className="p-2">
@@ -280,15 +284,15 @@ export const InvoicePartnerLedgerTab: React.FC<{
         <div className="mb-2 grid grid-cols-1 gap-2 sm:grid-cols-3">
           <div className="rounded border border-[var(--ktra-border)] p-2">
             <div className="text-xs text-[var(--ktra-ink-soft)]">الرصيد قبل الفاتورة</div>
-            <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.balance_before)}</div>
+            <div className="text-base font-bold" dir="ltr">{formatPartyBalance(anchor.balance_before, isCreditor)}</div>
           </div>
           <div className="rounded border border-[var(--ktra-border)] p-2">
             <div className="text-xs text-[var(--ktra-ink-soft)]">أثر الفاتورة</div>
-            <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.effect)}</div>
+            <div className="text-base font-bold" dir="ltr">{formatPartyBalance(anchor.effect, isCreditor)}</div>
           </div>
           <div className="rounded border border-[var(--ktra-border)] p-2">
             <div className="text-xs text-[var(--ktra-ink-soft)]">الرصيد بعدها</div>
-            <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.balance_after)}</div>
+            <div className="text-base font-bold" dir="ltr">{formatPartyBalance(anchor.balance_after, isCreditor)}</div>
           </div>
         </div>
       ) : !loading && (
@@ -299,7 +303,7 @@ export const InvoicePartnerLedgerTab: React.FC<{
         </Notice>
       )}
       <LedgerTable<ContextLedgerRow>
-        columns={ledgerColumns}
+        columns={ledgerColumns(isCreditor)}
         rows={data?.results || []}
         loading={loading}
         emptyText={`لا توجد حركات على حساب هذا ${partyWord}.`}
@@ -310,7 +314,7 @@ export const InvoicePartnerLedgerTab: React.FC<{
         summaryRow={
           data ? (
             <span>
-              الرصيد الختامي للحساب <b dir="ltr">{formatMoney(data.closing_balance)}</b>
+              الرصيد الختامي للحساب <b dir="ltr">{formatPartyBalance(data.closing_balance, isCreditor)}</b>
               {data.customer_name || data.supplier_name
                 ? ` — ${data.customer_name || data.supplier_name}`
                 : ""}

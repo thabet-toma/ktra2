@@ -73,3 +73,15 @@ class CreditorPartySignTest(APITestCase):
         self.assertTrue(is_creditor_party(Partner(partner_type="Carrier")))
         self.assertFalse(is_creditor_party("Customer"))
         self.assertFalse(is_creditor_party(None))
+
+    def test_profile_and_statement_expose_is_creditor_from_the_single_rule(self):
+        # الواجهة تحوّل إشارة الطرف إلى «المدين سالب» بهذا العلم وحده (#33/#69) —
+        # فلا تشتقّ الجهة من نوع الطرف بنسخةٍ ثانيةٍ من `is_creditor_party`.
+        for partner_type in CREDITOR_TYPES + ("Customer",):
+            with self.subTest(partner_type=partner_type):
+                partner = self._partner_with(partner_type, debit=100, credit=50)
+                expected = is_creditor_party(partner_type)
+                profile = self.client.get(f"/api/partners/{partner.id}/profile/", **self.h).data
+                self.assertIs(profile["is_creditor"], expected)
+                statement = self.client.get(f"/api/partners/{partner.id}/statement/", **self.h).data
+                self.assertIs(statement["is_creditor"], expected)

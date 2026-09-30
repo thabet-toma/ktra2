@@ -4674,6 +4674,8 @@ def partner_account_statement(
         "offset": offset,
         "ordering": normalized_ordering,
         "closing_balance": str(closing),
+        # إشارة الرصيد أعلاه تتبع جهة الطرف — العلم يُمكّن العرض من «المدين سالب» بلا اشتقاق.
+        "is_creditor": is_supplier,
         "currency": currency,
         "currencies": sorted({code for *_rest, code in ordered if code}),
     }

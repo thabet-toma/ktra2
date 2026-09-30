@@ -187,6 +187,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
             "credit": str(credit),
             "balance": str(balance),
             "balance_side": balance_side,
+            "is_creditor": is_supplier,
             "outstanding_balance": str(abs(balance)),
             "total_sales": str(sales_agg["total"] or Decimal("0")),
             "total_purchases": str(total_purchases),
