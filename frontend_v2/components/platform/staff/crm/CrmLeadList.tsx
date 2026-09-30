@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
-import { LockKeyhole, PhoneCall, Search, UserPlus } from 'lucide-react';
+import { LockKeyhole, PhoneCall, Search, UserPlus, X } from 'lucide-react';
 
 import type { CrmLead, CrmLeadStatus, CrmLookup } from '../../../../services/platformCrmApi';
 import type { CcTone } from '../../../../utils/ccTone';
 import { formatDateValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
 import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton } from '../../ui';
+import type { CrmEmployeePick } from './CrmManagerPanel';
 
 export const STATUS_LABELS: Record<CrmLeadStatus, string> = {
   new: 'جديد', contacted: 'تم الاتصال', interested: 'مهتم', follow_up: 'متابعة', customer: 'عميل',
@@ -33,6 +34,8 @@ interface CrmLeadListProps {
   lookup: CrmLookup | null; lookupLoading: boolean; onOpenLookup: (id: number) => void; onRequestLookupTransfer: (id: number) => void;
   /** استلامُ رقمٍ وُجد في المخزن من بطاقة البحث مباشرةً — الفعلُ الصحيح هناك. */
   onClaimLookup: (id: number) => void;
+  /** ترشيحُ «الكل» بموظّف (#69) — للمدير وحده؛ `none` = بلا موظّف. */
+  employeeFilter: CrmEmployeePick | null; employeeOptions: ReadonlyArray<{ id: number; name: string }>; onEmployeeFilter: (pick: CrmEmployeePick | null) => void;
 }
 
 const tabClass = (active: boolean) =>
@@ -53,13 +56,24 @@ const localStartOfToday = (): number => {
   return midnight.getTime();
 };
 
-export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonalDesk, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup }) => {
+export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonalDesk, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup, employeeFilter, employeeOptions, onEmployeeFilter }) => {
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<CrmLeadStatus | ''>('');
   const [phone, setPhone] = useState('');
   const startOfToday = localStartOfToday();
   const submitSearch = (event: React.FormEvent) => { event.preventDefault(); onFilters(q, status); };
   const lookupPhone = (event: React.FormEvent) => { event.preventDefault(); if (phone.trim()) onLookup(phone); };
+  const showEmployeeFilter = isManager && scope === 'all';
+  // موظّفٌ غادر وما زال يحمل أرقاماً يُختار من لوح الفريق وليس في الدليل: يُضاف خياراً كي لا يبدو الترشيحُ فارغاً.
+  const employeeChoices = employeeFilter && employeeFilter.id !== 'none' && !employeeOptions.some((option) => option.id === employeeFilter.id)
+    ? [...employeeOptions, { id: employeeFilter.id, name: employeeFilter.name }]
+    : employeeOptions;
+  const pickEmployee = (value: string) => {
+    if (!value) { onEmployeeFilter(null); return; }
+    if (value === 'none') { onEmployeeFilter({ id: 'none', name: 'المخزن المتاح' }); return; }
+    const option = employeeChoices.find((item) => String(item.id) === value);
+    if (option) onEmployeeFilter({ id: option.id, name: option.name });
+  };
 
   return (
     <section className="space-y-4" aria-label="قائمة العملاء">
@@ -75,7 +89,7 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
           <button type="button" className={tabClass(scope === 'pool')} onClick={() => onScope('pool')} role="tab" aria-selected={scope === 'pool'}>المخزن المتاح</button>
           {isManager && <button type="button" className={tabClass(scope === 'all')} onClick={() => onScope('all')} role="tab" aria-selected={scope === 'all'}>الكل</button>}
         </div>
-        <form className="mt-4 grid gap-2 sm:grid-cols-[1fr_auto_auto]" onSubmit={submitSearch}>
+        <form className={`mt-4 grid gap-2 ${showEmployeeFilter ? 'sm:grid-cols-[1fr_auto_auto_auto]' : 'sm:grid-cols-[1fr_auto_auto]'}`} onSubmit={submitSearch}>
           <label className="sr-only" htmlFor="crm-lead-search">ابحث بالاسم أو الرقم</label>
           <input
             id="crm-lead-search"
@@ -95,6 +109,20 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
               <option key={value} value={value}>{label}</option>
             ))}
           </select>
+          {showEmployeeFilter && (
+            <select
+              value={employeeFilter ? String(employeeFilter.id) : ''}
+              onChange={(event) => pickEmployee(event.target.value)}
+              className="rounded-xl border border-cc-border bg-cc-surface px-3 py-2 text-sm text-cc-text focus:border-cc-accent focus:outline-none"
+              aria-label="ترشيح بالموظف"
+            >
+              <option value="">كل الموظفين</option>
+              <option value="none">بلا موظف (المخزن)</option>
+              {employeeChoices.map((option) => (
+                <option key={option.id} value={option.id}>{option.name}</option>
+              ))}
+            </select>
+          )}
           <button
             type="submit"
             className="inline-flex items-center justify-center gap-2 rounded-xl bg-cc-accent px-4 py-2 text-sm font-extrabold text-cc-bg hover:opacity-90 transition-opacity"
@@ -103,6 +131,14 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
             بحث
           </button>
         </form>
+        {showEmployeeFilter && employeeFilter && (
+          <div className="mt-3 inline-flex items-center gap-2 rounded-full border border-sky-500/40 bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-300" data-testid="crm-employee-filter-chip">
+            أرقام: {employeeFilter.name}
+            <button type="button" onClick={() => onEmployeeFilter(null)} aria-label="إلغاء ترشيح الموظف" className="rounded-full p-0.5 hover:bg-sky-500/20">
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        )}
       </CcCard>
 
       <CcCard className="p-5">
@@ -224,6 +260,12 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
                       <div className="mt-1 flex items-center gap-2 text-xs text-cc-text-muted">
                         <span>{lead.owner_name || 'لا يوجد اسم مالك'}</span>
                         <span>·</span>
+                        {scope === 'all' && (
+                          <>
+                            <span className={lead.assigned_to ? 'text-cc-text' : 'text-emerald-400'}>{lead.assigned_to ? `عند ${lead.assigned_to.name}` : 'في المخزن'}</span>
+                            <span>·</span>
+                          </>
+                        )}
                         <span dir="ltr" className="text-sky-400 font-mono">
                           {lead.phones[0]?.raw || 'لا يوجد رقم'}
                         </span>

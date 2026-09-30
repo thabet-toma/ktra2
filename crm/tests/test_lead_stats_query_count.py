@@ -5,9 +5,11 @@
 الحالتين معاً (موظّفٌ واحد، ثمّ خمسة) — إن كبر العددُ مع الموظفين تسقط الحالةُ
 الثانية، وإن كبر مطلقاً تسقط الحالتان معاً.
 
-تركيبُ الرقم (٣): استعلامٌ واحدٌ مجمَّعٌ على `Lead` (حالات الإسناد لكلّ موظف) +
-استعلامٌ واحدٌ على `PlatformEmployee` بـ`select_related("user")` فلا N+1 على
-الاسم المعروض + استعلامُ عدّ واحد على مخزن العملاء المتاح.
+تركيبُ الرقم (٥): استعلامٌ واحدٌ مجمَّعٌ على `Lead` (حالات الإسناد لكلّ موظف) +
+استعلامان مجمَّعان على `LeadActivity` في المدّة (تواصلُ كلّ موظّف ونتيجتُه، ثمّ
+التحويلُ إلى «عميل» منسوباً لكاتبه أو لصاحب الرقم — #69) + استعلامٌ واحدٌ على
+`PlatformEmployee` بـ`select_related("user")` فلا N+1 على الاسم المعروض +
+استعلامُ عدّ واحد على مخزن العملاء المتاح.
 """
 from datetime import timedelta
 
@@ -20,7 +22,7 @@ from crm.services import create_lead
 
 from ._helpers import make_manager, make_staff_employee
 
-EXPECTED_QUERIES = 3
+EXPECTED_QUERIES = 5
 
 
 class LeadStatsQueryCountTest(TestCase):

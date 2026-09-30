@@ -7,7 +7,7 @@ import { captureScrollPosition, restoreScrollPosition, type ScrollPositionSnapsh
 import { CcCard, CcSectionTitle } from '../../ui';
 import { CrmLeadList } from './CrmLeadList';
 import { CrmLeadProfile } from './CrmLeadProfile';
-import { CrmManagerPanel } from './CrmManagerPanel';
+import { CrmManagerPanel, CrmTeamPanel, type CrmEmployeePick } from './CrmManagerPanel';
 import { CrmMyStats } from './CrmMyStats';
 import { CrmTransferInbox } from './CrmTransferInbox';
 
@@ -23,8 +23,9 @@ interface CrmPanelProps {
   myEmployeeId: number | null;
 }
 type Scope = 'mine' | 'pool' | 'all' | 'follow_ups';
-type LeadFilters = { q: string; status: CrmLeadStatus | '' };
-const EMPTY_FILTERS: LeadFilters = { q: '', status: '' };
+// `employee` يرشّح «الكل» بموظّفٍ أو بالمخزن (#69) — لا معنى له في النطاقات الأخرى فيسقط بتبديلها.
+type LeadFilters = { q: string; status: CrmLeadStatus | ''; employee: CrmEmployeePick | null };
+const EMPTY_FILTERS: LeadFilters = { q: '', status: '', employee: null };
 // المُمرِّر: `main.app-content` داخل غلاف التطبيق (مركز العمليات)، والنافذةُ في غلاف الموظّف.
 const scrollContainer = () => document.querySelector<HTMLElement>('main.app-content');
 const messageOf = (caught: unknown, fallback: string) => caught instanceof Error ? caught.message : fallback;
@@ -49,7 +50,7 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   // ما زالتا تعرضانه. والطلبُ الأحدثُ وحدَه يكتب النتيجة: ردٌّ بطيءٌ لطلبٍ أقدم يُهمَل.
   const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
   const listRequestRef = useRef(0);
-  const loadLeads = useCallback(async () => { const requestId = ++listRequestRef.current; setListLoading(true); setListError(''); try { const page = await listCrmLeads({ scope: scope === 'follow_ups' ? 'mine' : scope, follow_up: scope === 'follow_ups' ? 'due' : undefined, q: filters.q || undefined, status: filters.status || undefined }); if (requestId === listRequestRef.current) setLeads(page.results); } catch (caught: unknown) { if (requestId === listRequestRef.current) { setLeads([]); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } } finally { if (requestId === listRequestRef.current) setListLoading(false); } }, [scope, filters]);
+  const loadLeads = useCallback(async () => { const requestId = ++listRequestRef.current; setListLoading(true); setListError(''); try { const page = await listCrmLeads({ scope: scope === 'follow_ups' ? 'mine' : scope, follow_up: scope === 'follow_ups' ? 'due' : undefined, q: filters.q || undefined, status: filters.status || undefined, assigned_to: scope === 'all' ? filters.employee?.id : undefined }); if (requestId === listRequestRef.current) setLeads(page.results); } catch (caught: unknown) { if (requestId === listRequestRef.current) { setLeads([]); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } } finally { if (requestId === listRequestRef.current) setListLoading(false); } }, [scope, filters]);
   const loadColleagues = useCallback(async () => { try { setColleagues(await listCrmColleagues()); } catch { setColleagues([]); } }, []);
   useEffect(() => { void loadLeads(); }, [loadLeads]); useEffect(() => { void loadColleagues(); }, [loadColleagues]);
   // ملفُّ العميل في الرابط (`?lead=`) فزرُّ «رجوع» المتصفح يعيد القائمة، والقائمةُ تبقى
@@ -78,6 +79,9 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
     if (snapshot) window.requestAnimationFrame(() => restoreScrollPosition(snapshot, (top) => window.scrollTo(0, top)));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- المعاملُ وحدَه يقود فتحَ الملفّ وإغلاقَه
   }, [leadParam]);
+  // كبسةُ موظّفٍ في لوح الفريق: «الكل» مرشَّحاً بأرقامه، والشاشةُ تنزل إلى القائمة.
+  const listTopRef = useRef<HTMLDivElement>(null);
+  const pickEmployee = (employee: CrmEmployeePick) => { setScope('all'); setFilters((current) => ({ ...current, employee })); window.requestAnimationFrame(() => listTopRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })); };
   const claim = async (lead: CrmLead) => { try { await claimCrmLead(lead.id); setNotice(`تم استلام ${lead.store_name}.`); bumpStats(); await loadLeads(); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
   // استلامٌ من بطاقة البحث: الرقمُ وُجد في المخزن، والفعلُ الصحيح هناك أن يُستلَم
   // لا أن يُطلَب تحويلُه. وبعد الاستلام يُنقل النطاقُ إلى «عملائي» ليراه فوراً.
@@ -100,6 +104,8 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
     {selected && <CrmLeadProfile key={selected.id} lead={selected} activities={activities} stats={leadStats} loading={detailLoading} error={detailError} isManager={isManager} isOwner={Boolean(myEmployeeId && selected.assigned_to?.id === myEmployeeId)} colleagues={colleagues} onBack={closeLead} onStatus={saveStatus} onActivity={saveActivity} onTransfer={transfer} onRelease={release} />}
     <div className={selected ? 'hidden' : 'space-y-6'} data-testid="crm-list-view">
       {myEmployeeId !== null && <CrmMyStats refreshKey={refreshKey} />}
+      {isManager && <CrmTeamPanel isManager={isManager} refreshKey={refreshKey} onPickEmployee={pickEmployee} />}
+      <div ref={listTopRef} className="scroll-mt-4" />
       <CrmLeadList
         isManager={isManager}
         hasPersonalDesk={myEmployeeId !== null}
@@ -107,8 +113,11 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
         scope={scope}
         loading={listLoading}
         error={listError}
-        onScope={setScope}
-        onFilters={(q, status) => setFilters({ q: q.trim(), status })}
+        onScope={(nextScope) => { setScope(nextScope); if (nextScope !== 'all') setFilters((current) => current.employee ? { ...current, employee: null } : current); }}
+        onFilters={(q, status) => setFilters((current) => ({ ...current, q: q.trim(), status }))}
+        employeeFilter={filters.employee}
+        employeeOptions={colleagues}
+        onEmployeeFilter={(employee) => setFilters((current) => ({ ...current, employee }))}
         onSelect={(lead) => showLead(lead.id)}
         onClaim={(lead) => void claim(lead)}
         onLookup={(value) => void performLookup(value)}
@@ -215,7 +224,7 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
           </form>
         )}
       </CcCard>
-      {isManager && <CrmManagerPanel isManager={isManager} onLeadChanged={() => void loadLeads()} />}
+      {isManager && <CrmManagerPanel isManager={isManager} onLeadChanged={() => { bumpStats(); void loadLeads(); }} />}
       {notice && (
         <div className="rounded-xl border border-sky-500/30 bg-sky-500/10 p-3 text-sm text-sky-200" role="status">
           {notice}

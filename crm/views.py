@@ -1,4 +1,6 @@
 """نقاط نواة الـCRM تحت `/api/platform/crm/` — كلُّ نقطةٍ محروسةٌ بموظّف أو مدير عمليات."""
+import datetime as dt
+
 from django.db.models import Q
 from rest_framework import mixins, viewsets
 from rest_framework.decorators import action
@@ -6,6 +8,7 @@ from rest_framework.exceptions import PermissionDenied, ValidationError
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from core.date_ranges import resolve_preset
 from platform_ops.models import PlatformEmployee
 from platform_ops.permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
 
@@ -112,6 +115,16 @@ def _apply_lead_filters(qs, request):
         except PhoneNormalizationError:
             return qs.none()
         qs = qs.filter(phones__e164=e164)
+    # أرقامُ موظّفٍ بعينه (أو `none` للمخزن) — لوحُ المدير يفلتر بكبسةٍ على صفّ الموظّف (#69).
+    # يعمل **بعد** تضييق النطاق: لغير المدير لا يوسّع شيئاً، يضيّق دفترَه هو فقط.
+    assigned = params.get("assigned_to")
+    if assigned:
+        if assigned == "none":
+            qs = qs.filter(assigned_to__isnull=True)
+        elif assigned.isdigit():
+            qs = qs.filter(assigned_to_id=int(assigned))
+        else:
+            raise ValidationError({"assigned_to": ["القيمة يجب أن تكون معرّف موظف أو none."]})
     approval = params.get("approval_status")
     if approval:
         qs = qs.filter(approval_status=approval)
@@ -471,4 +484,20 @@ class ManagerLeadOverviewView(APIView):
     permission_classes = [IsPlatformOperationsManager]
 
     def get(self, request):
-        return Response(manager_lead_overview())
+        # المدّة: `date_from`/`date_to` صريحان، وإلا `period` جاهزٌ (افتراضاً الشهر الجاري).
+        params = request.query_params
+        if params.get("date_from") or params.get("date_to"):
+            date_from = _parse_day(params.get("date_from"), "date_from")
+            date_to = _parse_day(params.get("date_to"), "date_to")
+        else:
+            date_from, date_to = resolve_preset(params.get("period") or "month")
+        return Response(manager_lead_overview(date_from=date_from, date_to=date_to))
+
+
+def _parse_day(value, field):
+    if not value:
+        return None
+    try:
+        return dt.date.fromisoformat(value)
+    except ValueError:
+        raise ValidationError({field: ["تاريخٌ غير صالح — الصيغة YYYY-MM-DD."]})

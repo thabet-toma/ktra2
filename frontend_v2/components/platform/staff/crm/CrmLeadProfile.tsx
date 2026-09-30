@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Activity, ArrowRightLeft, MapPin, MessageCircle, Phone, StickyNote } from 'lucide-react';
 
-import type { CrmActivity, CrmActivityInput, CrmColleague, CrmLead, CrmLeadContactStats, CrmLeadStatus } from '../../../../services/platformCrmApi';
+import type { CrmActivity, CrmActivityInput, CrmActivityOutcome, CrmColleague, CrmLead, CrmLeadContactStats, CrmLeadStatus } from '../../../../services/platformCrmApi';
 import { formatDateTimeValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
 import { arabicDayCount, contactRecencyLabel, leadAttentionBadge } from '../../../../utils/leadContactStats';
@@ -9,6 +9,9 @@ import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton } from '.
 import { CRM_LEAD_PIPELINE, STATUS_LABELS, STATUS_TONES } from './CrmLeadList';
 
 const ACTIVITY_LABELS: Record<CrmActivity['kind'], string> = { call: 'مكالمة', whatsapp: 'واتساب', visit: 'زيارة', note: 'ملاحظة', status_change: 'تغيير حالة', assignment: 'إسناد', transfer: 'تحويل', materials_sent: 'إرسال مواد' };
+/** نتيجةُ المكالمة/الواتساب (#69): إلزاميّةٌ في الخادم (`crm.services.log_activity`)، ومنها يُعدّ «انردّ عليه» في لوح المدير. */
+export const CRM_OUTCOME_LABELS: Record<CrmActivityOutcome, string> = { answered: 'ردّ', no_answer: 'لم يردّ', busy: 'مشغول', unreachable: 'مغلق / خارج التغطية', wrong_number: 'رقم خاطئ', callback: 'طلب معاودة الاتصال' };
+const OUTCOME_KINDS: ReadonlyArray<CrmActivityInput['kind']> = ['call', 'whatsapp'];
 
 interface CrmLeadProfileProps {
   lead: CrmLead; activities: CrmActivity[]; loading: boolean; error: string; isManager: boolean; isOwner: boolean; colleagues: CrmColleague[];
@@ -22,7 +25,7 @@ interface CrmLeadProfileProps {
 
 export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities, stats, loading, error, isManager, isOwner, colleagues, onBack, onStatus, onActivity, onTransfer, onRelease }) => {
   const [noteOpen, setNoteOpen] = useState(false); const [activityKind, setActivityKind] = useState<CrmActivityInput['kind']>('note');
-  const [body, setBody] = useState(''); const [nextFollowUp, setNextFollowUp] = useState(''); const [status, setStatus] = useState<CrmLeadStatus>(lead.status);
+  const [outcome, setOutcome] = useState<CrmActivityOutcome | ''>(''); const [body, setBody] = useState(''); const [nextFollowUp, setNextFollowUp] = useState(''); const [status, setStatus] = useState<CrmLeadStatus>(lead.status);
   const [transferTo, setTransferTo] = useState(''); const [reason, setReason] = useState('');
   const [releaseOpen, setReleaseOpen] = useState(false); const [releaseReason, setReleaseReason] = useState('');
   const availableColleagues = useMemo(() => colleagues.filter((employee) => !employee.is_me), [colleagues]);
@@ -47,8 +50,9 @@ export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities
   // فيضيع ما كتبه على رسالة رفض. و**طلبُ** التحويل يبقى مفتوحاً للجميع:
   // ذاك غرضُه كلُّه (`transfer-requests/` في الخادم).
   const canWrite = isOwner || isManager;
-  const openActivity = (kind: CrmActivityInput['kind']) => { setActivityKind(kind); setNoteOpen(true); };
-  const submitActivity = (event: React.FormEvent) => { event.preventDefault(); onActivity({ kind: activityKind, body, next_follow_up_at: nextFollowUp ? `${nextFollowUp}T09:00:00` : null }); setBody(''); setNextFollowUp(''); setNoteOpen(false); };
+  const needsOutcome = OUTCOME_KINDS.includes(activityKind);
+  const openActivity = (kind: CrmActivityInput['kind']) => { setActivityKind(kind); setOutcome(''); setNoteOpen(true); };
+  const submitActivity = (event: React.FormEvent) => { event.preventDefault(); if (needsOutcome && !outcome) return; onActivity({ kind: activityKind, body, outcome: needsOutcome ? outcome : '', next_follow_up_at: nextFollowUp ? `${nextFollowUp}T09:00:00` : null }); setBody(''); setOutcome(''); setNextFollowUp(''); setNoteOpen(false); };
   const submitTransfer = (event: React.FormEvent) => { event.preventDefault(); if (!transferTo || !reason.trim()) return; onTransfer(Number(transferTo), reason, isOwner || isManager); setReason(''); setTransferTo(''); };
 
   return (
@@ -229,6 +233,7 @@ export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities
                 </div>
                 <p className="mt-2 text-sm font-bold text-cc-text">
                   {ACTIVITY_LABELS[activity.kind]}{activity.body ? `: ${activity.body}` : ''}
+                  {activity.outcome && <CcPill tone={activity.outcome === 'answered' || activity.outcome === 'callback' ? 'success' : 'warning'} className="ms-2">{CRM_OUTCOME_LABELS[activity.outcome as CrmActivityOutcome] || activity.outcome}</CcPill>}
                 </p>
                 {activity.kind === 'status_change' && activity.status_before && activity.status_after && (
                   <p className="mt-1 text-sm text-amber-300">
@@ -281,8 +286,27 @@ export const CrmLeadProfile: React.FC<CrmLeadProfileProps> = ({ lead, activities
 
       {noteOpen && canWrite && (
         <form onSubmit={submitActivity} className="rounded-2xl border border-sky-500/30 bg-cc-surface p-5 shadow-lg shadow-black/30">
-          <h2 className="font-extrabold text-cc-text">سجّل ما حدث</h2>
+          <h2 className="font-extrabold text-cc-text">سجّل ما حدث — {ACTIVITY_LABELS[activityKind]}</h2>
           <p className="mt-1 text-xs text-cc-text-muted">فتح واتساب لا يسجل نشاطاً؛ أضف ما حدث فقط إن رغبت.</p>
+          {needsOutcome && (
+            <>
+              <label className="mt-4 block text-xs font-bold text-cc-text" htmlFor="crm-activity-outcome">
+                النتيجة
+              </label>
+              <select
+                id="crm-activity-outcome"
+                required
+                value={outcome}
+                onChange={(event) => setOutcome(event.target.value as CrmActivityOutcome | '')}
+                className="mt-1.5 w-full rounded-xl border border-cc-border bg-cc-surface px-3 py-2 text-sm text-cc-text focus:border-cc-accent focus:outline-none sm:w-auto"
+              >
+                <option value="">اختر نتيجة الاتصال</option>
+                {Object.entries(CRM_OUTCOME_LABELS).map(([value, label]) => (
+                  <option key={value} value={value}>{label}</option>
+                ))}
+              </select>
+            </>
+          )}
           <label className="mt-4 block text-xs font-bold text-cc-text" htmlFor="crm-activity-body">
             التفاصيل
           </label>

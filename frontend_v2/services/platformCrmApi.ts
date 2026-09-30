@@ -53,8 +53,19 @@ export interface CrmLeadContactStats {
   next_follow_up_at: string | null;
 }
 export interface CrmStats { assigned: number; contacted: number; interested: number; follow_up: number; customer: number; not_interested: number; overdue: number; }
-export interface CrmOverviewEmployee { employee_id: number; employee_name: string; total: number; overdue: number; by_status: Partial<Record<CrmLeadStatus, number>>; }
-export interface CrmOverview { employees: CrmOverviewEmployee[]; pool_size: number; }
+/**
+ * صفُّ موظّفٍ في لوح المدير (#69). «الآن»: `total`/`by_status`/`overdue`. «في المدّة»:
+ * `attempts` تواصلٌ فعليّ كتبه، `reached` منه ما انردّ عليه، `converted` أرقامٌ صارت عميلاً.
+ */
+export interface CrmOverviewEmployee {
+  employee_id: number; employee_name: string; employee_status: string; total: number; overdue: number;
+  by_status: Partial<Record<CrmLeadStatus, number>>; attempts: number; reached: number; converted: number;
+  last_activity_at: string | null;
+}
+export type CrmOverviewPeriod = 'today' | 'week' | 'month' | 'all';
+export interface CrmOverview { employees: CrmOverviewEmployee[]; pool_size: number; period?: { date_from: string | null; date_to: string | null }; }
+/** نتائجُ المكالمة/الواتساب — نفسُ `LeadActivity.Outcome` في الخادم، وهي إلزاميّةٌ لهذين النوعين. */
+export type CrmActivityOutcome = 'answered' | 'no_answer' | 'busy' | 'unreachable' | 'wrong_number' | 'callback';
 export interface CrmImportBatch { id: number; file_name: string; total_rows: number; created_count: number; duplicate_count: number; invalid_count: number; duplicates: unknown[]; created_at: string; }
 export interface CrmLookup {
   normalized: string; found: boolean; lead: Pick<CrmLead, 'id' | 'store_name' | 'status'> | null;
@@ -62,16 +73,16 @@ export interface CrmLookup {
 }
 export interface CrmPage<T> { count: number; next: string | null; previous: string | null; results: T[]; }
 export interface CrmDuplicateError { detail: string; code: string; existing_lead_id?: number; existing_lead_name?: string; matched_phone?: string; assigned_to?: CrmEmployeeSummary | null; }
-export interface CrmLeadFilters { scope?: 'mine' | 'pool' | 'all'; follow_up?: CrmFollowUpFilter; status?: CrmLeadStatus; q?: string; phone?: string; approval_status?: CrmApprovalStatus; page?: number; }
+export interface CrmLeadFilters { scope?: 'mine' | 'pool' | 'all'; follow_up?: CrmFollowUpFilter; status?: CrmLeadStatus; q?: string; phone?: string; approval_status?: CrmApprovalStatus; assigned_to?: number | 'none'; page?: number; }
 export interface CrmLeadInput { store_name: string; owner_name?: string; city?: string; address?: string; activity?: string; phones: Array<{ raw: string; kind: CrmPhoneKind }>; }
 export interface CrmLeadPatch { owner_name?: string; city?: string; address?: string; activity?: string; }
-export interface CrmActivityInput { kind: Extract<CrmActivityKind, 'call' | 'whatsapp' | 'visit' | 'note'>; body?: string; outcome?: string; materials?: string[]; next_follow_up_at?: string | null; }
+export interface CrmActivityInput { kind: Extract<CrmActivityKind, 'call' | 'whatsapp' | 'visit' | 'note'>; body?: string; outcome?: CrmActivityOutcome | ''; materials?: string[]; next_follow_up_at?: string | null; }
 export interface CrmImportRow { store_name: string; phone: string; owner_name?: string; city?: string; address?: string; activity?: string; }
 
 const record = (value: object): Record<string, unknown> => value as Record<string, unknown>;
 const pageRows = <T>(value: CrmPage<T> | T[]): CrmPage<T> => Array.isArray(value) ? { count: value.length, next: null, previous: null, results: value } : value;
 
-export const listCrmLeads = async (filters: CrmLeadFilters = {}): Promise<CrmPage<CrmLead>> => pageRows(await apiGetObject<CrmPage<CrmLead> | CrmLead[]>(`${CRM_ROOT}leads/`, { query: { scope: filters.scope, follow_up: filters.follow_up, status: filters.status, q: filters.q, phone: filters.phone, approval_status: filters.approval_status, page: filters.page } }));
+export const listCrmLeads = async (filters: CrmLeadFilters = {}): Promise<CrmPage<CrmLead>> => pageRows(await apiGetObject<CrmPage<CrmLead> | CrmLead[]>(`${CRM_ROOT}leads/`, { query: { scope: filters.scope, follow_up: filters.follow_up, status: filters.status, q: filters.q, phone: filters.phone, approval_status: filters.approval_status, assigned_to: filters.assigned_to, page: filters.page } }));
 export const getCrmLead = (id: number) => apiGetObject<CrmLead>(`${CRM_ROOT}leads/${id}/`);
 export const createCrmLead = (input: CrmLeadInput) => apiPostObject<CrmLead>(`${CRM_ROOT}leads/`, record(input));
 export const patchCrmLead = (id: number, input: CrmLeadPatch) => apiPatchObject<CrmLead>(`${CRM_ROOT}leads/${id}/`, record(input));
@@ -92,4 +103,4 @@ export const getCrmTransferRequest = (id: number) => apiGetObject<CrmTransfer>(`
 export const decideCrmTransferRequest = (id: number, approve: boolean, note = '') => apiPostObject<CrmTransfer>(`${CRM_ROOT}transfer-requests/${id}/decide/`, { approve, note });
 export const listCrmColleagues = () => apiGetObject<CrmColleague[]>(`${CRM_ROOT}colleagues/`);
 export const getMyCrmStats = () => apiGetObject<CrmStats>(`${CRM_ROOT}stats/me/`);
-export const getCrmOverview = () => apiGetObject<CrmOverview>(`${CRM_ROOT}stats/overview/`);
+export const getCrmOverview = (period: CrmOverviewPeriod = 'month') => apiGetObject<CrmOverview>(`${CRM_ROOT}stats/overview/`, { query: { period } });

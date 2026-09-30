@@ -216,6 +216,19 @@ class LeadActivity(models.Model):
         TRANSFER = "transfer", "تحويل"
         MATERIALS_SENT = "materials_sent", "إرسال مواد"
 
+    class Outcome(models.TextChoices):
+        """نتيجةُ المكالمة/الواتساب نفسِها — لا حالةُ العميل (#69).
+
+        الحالةُ تقول أين وصل **العميل** (مهتمّ، مؤجَّل…)، والنتيجةُ تقول ماذا جرى في
+        **هذا الاتصال**. منها يُحسب «انردّ عليه» لكلّ موظّف (`REACHED_OUTCOMES`).
+        """
+        ANSWERED = "answered", "ردّ"
+        NO_ANSWER = "no_answer", "لم يردّ"
+        BUSY = "busy", "مشغول"
+        UNREACHABLE = "unreachable", "مغلق / خارج التغطية"
+        WRONG_NUMBER = "wrong_number", "رقم خاطئ"
+        CALLBACK = "callback", "طلب معاودة الاتصال"
+
     lead = models.ForeignKey(
         Lead,
         on_delete=models.PROTECT,
@@ -239,7 +252,7 @@ class LeadActivity(models.Model):
     )
     kind = models.CharField(max_length=20, choices=Kind.choices, verbose_name="النوع")
     body = models.TextField(blank=True, default="", verbose_name="ماذا حدث")
-    outcome = models.CharField(max_length=120, blank=True, default="", verbose_name="النتيجة")
+    outcome = models.CharField(max_length=120, blank=True, default="", choices=Outcome.choices, verbose_name="النتيجة")
     materials = models.JSONField(default=list, blank=True, verbose_name="المواد المُرسَلة")
     status_before = models.CharField(max_length=20, blank=True, default="", verbose_name="الحالة قبل")
     status_after = models.CharField(max_length=20, blank=True, default="", verbose_name="الحالة بعد")

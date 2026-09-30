@@ -1,12 +1,150 @@
-import React, { useEffect, useState } from 'react';
-import { Check, RotateCcw, X } from 'lucide-react';
+import React, { useEffect, useRef, useState } from 'react';
+import { Check, ChevronLeft, RotateCcw, X } from 'lucide-react';
 
-import { approveCrmLead, getCrmOverview, importCrmLeads, rejectCrmLead, releaseCrmLead, listCrmLeads, type CrmImportBatch, type CrmLead, type CrmOverview } from '../../../../services/platformCrmApi';
+import { approveCrmLead, getCrmOverview, importCrmLeads, rejectCrmLead, releaseCrmLead, listCrmLeads, type CrmImportBatch, type CrmLead, type CrmOverview, type CrmOverviewEmployee, type CrmOverviewPeriod } from '../../../../services/platformCrmApi';
+import { formatDateTimeValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
-import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton, CcStatTile, CcTable, CcTd, CcTh, CcThead, CcTr } from '../../ui';
+import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton, CcTable, CcTd, CcTh, CcThead, CcTr } from '../../ui';
 import { STATUS_LABELS } from './CrmLeadList';
 
 interface CrmManagerPanelProps { isManager: boolean; onLeadChanged: () => void; }
+/** «غير مُسنَد» = المخزن؛ وإلا معرّفُ الموظّف — نفسُ `assigned_to` في `GET leads/`. */
+export interface CrmEmployeePick { id: number | 'none'; name: string; }
+interface CrmTeamPanelProps { isManager: boolean; refreshKey: number; onPickEmployee: (pick: CrmEmployeePick) => void; }
+
+const PERIODS: ReadonlyArray<{ value: CrmOverviewPeriod; label: string }> = [
+  { value: 'today', label: 'اليوم' }, { value: 'week', label: 'هذا الأسبوع' }, { value: 'month', label: 'هذا الشهر' }, { value: 'all', label: 'كل الوقت' },
+];
+const periodClass = (active: boolean) =>
+  `rounded-lg px-3 py-1.5 text-xs font-bold transition-colors duration-150 ${active ? 'bg-cc-accent text-cc-bg' : 'text-cc-text-muted hover:text-cc-text hover:bg-cc-surface-2'}`;
+
+/**
+ * فريقُ التسويق عند المدير (#69): «كل موظف شو الأرقام اللي ماسكها وشو النتيجة».
+ *
+ * صفٌّ لكلّ موظّف: أرقامُه **الآن** وحالاتُها ومتأخّراتُها، ونتائجُه **في المدّة
+ * المختارة** — كم تواصل، وكم منها انردّ عليه، وكم رقماً صار عميلاً. الكبسةُ على
+ * الصفّ تفتح أرقامَه في القائمة تحته بدل فتحها رقماً رقماً. الأرقامُ كلّها من
+ * `crm.services.manager_lead_overview` ولا يُحسب منها شيءٌ هنا إلا نسبةُ الردّ.
+ */
+export const CrmTeamPanel: React.FC<CrmTeamPanelProps> = ({ isManager, refreshKey, onPickEmployee }) => {
+  const [overview, setOverview] = useState<CrmOverview | null>(null);
+  const [period, setPeriod] = useState<CrmOverviewPeriod>('month');
+  const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  const requestRef = useRef(0);
+  useEffect(() => {
+    if (!isManager) return;
+    const requestId = ++requestRef.current;
+    setLoading(true); setError('');
+    getCrmOverview(period)
+      .then((next) => { if (requestId === requestRef.current) setOverview(next); })
+      .catch((caught: unknown) => { if (requestId === requestRef.current) setError(caught instanceof Error ? caught.message : 'تعذر تحميل لوح الفريق.'); })
+      .finally(() => { if (requestId === requestRef.current) setLoading(false); });
+  }, [isManager, period, refreshKey]);
+  if (!isManager) return null;
+  const periodLabel = PERIODS.find((item) => item.value === period)?.label ?? '';
+  const pick = (employee: CrmOverviewEmployee) => onPickEmployee({ id: employee.employee_id, name: employee.employee_name });
+  return (
+    <CcCard className="p-5" aria-label="فريق التسويق">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <CcSectionTitle
+          title="فريق التسويق"
+          subtitle="اكبس على موظف لترى أرقامه في القائمة. النتائج محسوبة للمدة المختارة."
+          badge={overview?.employees.length}
+        />
+        <div className="flex flex-wrap gap-1 rounded-xl border border-cc-border p-1" role="group" aria-label="مدة النتائج">
+          {PERIODS.map((item) => (
+            <button key={item.value} type="button" className={periodClass(period === item.value)} aria-pressed={period === item.value} onClick={() => setPeriod(item.value)}>
+              {item.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      {loading && !overview ? (
+        <div className="mt-4"><CcSkeleton count={3} /></div>
+      ) : error ? (
+        <p className="mt-4 text-sm text-rose-400" role="alert">{error}</p>
+      ) : (
+        <>
+          <button
+            type="button"
+            onClick={() => onPickEmployee({ id: 'none', name: 'المخزن المتاح' })}
+            className="mt-4 inline-flex items-center gap-2 rounded-xl border border-cc-border bg-cc-surface-2 px-3 py-2 text-sm text-cc-text hover:border-cc-border-strong transition-colors"
+          >
+            في المخزن بلا موظف: <strong className="text-sky-400">{formatNumber(overview?.pool_size ?? 0)}</strong>
+            <ChevronLeft className="h-4 w-4 text-cc-text-muted" />
+          </button>
+          {overview && overview.employees.length === 0 ? (
+            <CcEmpty title="لا يوجد موظفون نشطون" className="mt-4 p-8" />
+          ) : (
+            <div className="mt-4">
+              <CcTable>
+                <CcThead>
+                  <tr>
+                    <CcTh>الموظف</CcTh>
+                    <CcTh>الأرقام الآن</CcTh>
+                    <CcTh>المتأخرات</CcTh>
+                    <CcTh>تواصل ({periodLabel})</CcTh>
+                    <CcTh>انردّ عليه</CcTh>
+                    <CcTh>صاروا عملاء</CcTh>
+                    <CcTh>آخر تواصل</CcTh>
+                    <CcTh>حسب الحالة</CcTh>
+                  </tr>
+                </CcThead>
+                <tbody>
+                  {overview?.employees.map((employee) => (
+                    <CcTr key={employee.employee_id} onClick={() => pick(employee)} className="cursor-pointer" data-testid={`crm-team-row-${employee.employee_id}`}>
+                      <CcTd>
+                        <button type="button" className="flex items-center gap-2 text-right" onClick={(event) => { event.stopPropagation(); pick(employee); }}>
+                          <CcAvatar name={employee.employee_name} size="sm" />
+                          <span className="font-bold text-cc-text hover:text-sky-400">{employee.employee_name}</span>
+                          {employee.employee_status !== 'active' && <CcPill tone="neutral">غير نشط</CcPill>}
+                        </button>
+                      </CcTd>
+                      <CcTd>
+                        <span className="font-bold text-sky-400">{formatNumber(employee.total)}</span>
+                      </CcTd>
+                      <CcTd>
+                        {employee.overdue > 0 ? (
+                          <CcPill tone="danger">{formatNumber(employee.overdue)} متأخرة</CcPill>
+                        ) : (
+                          <span className="text-xs text-cc-text-muted">{formatNumber(0)}</span>
+                        )}
+                      </CcTd>
+                      <CcTd>{formatNumber(employee.attempts)}</CcTd>
+                      <CcTd>
+                        {formatNumber(employee.reached)}
+                        {employee.attempts > 0 && <span className="ms-1 text-xs text-cc-text-muted">({formatNumber((employee.reached / employee.attempts) * 100, { maxDecimals: 0 })}%)</span>}
+                      </CcTd>
+                      <CcTd>
+                        <span className={employee.converted > 0 ? 'font-bold text-emerald-400' : 'text-cc-text-muted'}>{formatNumber(employee.converted)}</span>
+                      </CcTd>
+                      <CcTd>
+                        <span className="text-xs text-cc-text-muted">{employee.last_activity_at ? formatDateTimeValue(employee.last_activity_at) : '—'}</span>
+                      </CcTd>
+                      <CcTd>
+                        <div className="flex flex-wrap gap-1.5">
+                          {Object.entries(employee.by_status).map(([status, count]) => (
+                            <span
+                              key={status}
+                              className="inline-flex items-center gap-1 rounded-md bg-cc-surface-2 px-2 py-0.5 text-xs text-cc-text-muted border border-cc-border"
+                            >
+                              <span>{STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}:</span>
+                              <strong className="text-cc-text">{formatNumber(count)}</strong>
+                            </span>
+                          ))}
+                        </div>
+                      </CcTd>
+                    </CcTr>
+                  ))}
+                </tbody>
+              </CcTable>
+            </div>
+          )}
+        </>
+      )}
+    </CcCard>
+  );
+};
 
 const parseRows = (text: string) => text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
   const [store_name = '', phone = '', owner_name = '', city = '', address = '', activity = ''] = line.split(',').map((item) => item.trim());
@@ -14,7 +152,7 @@ const parseRows = (text: string) => text.split(/\r?\n/).map((line) => line.trim(
 });
 
 export const CrmManagerPanel: React.FC<CrmManagerPanelProps> = ({ isManager, onLeadChanged }) => {
-  const [overview, setOverview] = useState<CrmOverview | null>(null); const [pending, setPending] = useState<CrmLead[]>([]);
+  const [pending, setPending] = useState<CrmLead[]>([]);
   const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [rows, setRows] = useState(''); const [fileName, setFileName] = useState(''); const [notice, setNotice] = useState('');
   // نتيجةُ الدفعة تُحفَظ كاملةً لا تُلخَّص برقمٍ واحد: الخادمُ يعيد المُنشأَ
   // والمكرَّرَ وغيرَ الصالح وتفاصيلَ كلّ تكرار، وعرضُ «تمت معالجة ن صفاً» وحدَه
@@ -27,7 +165,7 @@ export const CrmManagerPanel: React.FC<CrmManagerPanelProps> = ({ isManager, onL
   const load = async () => {
     if (!isManager) return;
     setLoading(true); setError('');
-    try { const [nextOverview, nextPending] = await Promise.all([getCrmOverview(), listCrmLeads({ scope: 'all', approval_status: 'pending' })]); setOverview(nextOverview); setPending(nextPending.results); }
+    try { const nextPending = await listCrmLeads({ scope: 'all', approval_status: 'pending' }); setPending(nextPending.results); }
     catch (caught: unknown) { setError(caught instanceof Error ? caught.message : 'تعذر تحميل لوحة المدير.'); }
     finally { setLoading(false); }
   };
@@ -52,7 +190,7 @@ export const CrmManagerPanel: React.FC<CrmManagerPanelProps> = ({ isManager, onL
       <CcCard className="p-5">
         <CcSectionTitle
           title="لوحة المدير"
-          subtitle="المخزن والاقتراحات موزعان حسب بيانات الخادم."
+          subtitle="رفع الأرقام واعتماد اقتراحات الموظفين."
         />
       </CcCard>
       {loading ? (
@@ -65,70 +203,6 @@ export const CrmManagerPanel: React.FC<CrmManagerPanelProps> = ({ isManager, onL
         </CcCard>
       ) : (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <CcCard tone="accent" className="p-4">
-              <CcStatTile
-                label="حجم المخزن"
-                value={overview?.pool_size ?? 0}
-                tone="accent"
-              />
-            </CcCard>
-          </div>
-
-          <CcCard className="p-5">
-            <CcSectionTitle
-              title="توزيع العملاء على الموظفين"
-              badge={overview?.employees.length}
-            />
-            <div className="mt-4">
-              <CcTable>
-                <CcThead>
-                  <tr>
-                    <CcTh>الموظف</CcTh>
-                    <CcTh>إجمالي العملاء</CcTh>
-                    <CcTh>المتأخرات</CcTh>
-                    <CcTh>حسب الحالة</CcTh>
-                  </tr>
-                </CcThead>
-                <tbody>
-                  {overview?.employees.map((employee) => (
-                    <CcTr key={employee.employee_id}>
-                      <CcTd>
-                        <div className="flex items-center gap-2">
-                          <CcAvatar name={employee.employee_name} size="sm" />
-                          <span className="font-bold text-cc-text">{employee.employee_name}</span>
-                        </div>
-                      </CcTd>
-                      <CcTd>
-                        <span className="font-bold text-sky-400">{formatNumber(employee.total)}</span>
-                      </CcTd>
-                      <CcTd>
-                        {employee.overdue > 0 ? (
-                          <CcPill tone="danger">{formatNumber(employee.overdue)} متأخرة</CcPill>
-                        ) : (
-                          <span className="text-xs text-cc-text-muted">{formatNumber(0)}</span>
-                        )}
-                      </CcTd>
-                      <CcTd>
-                        <div className="flex flex-wrap gap-1.5">
-                          {Object.entries(employee.by_status).map(([status, count]) => (
-                            <span
-                              key={status}
-                              className="inline-flex items-center gap-1 rounded-md bg-cc-surface-2 px-2 py-0.5 text-xs text-cc-text-muted border border-cc-border"
-                            >
-                              <span>{STATUS_LABELS[status as keyof typeof STATUS_LABELS] || status}:</span>
-                              <strong className="text-cc-text">{formatNumber(count)}</strong>
-                            </span>
-                          ))}
-                        </div>
-                      </CcTd>
-                    </CcTr>
-                  ))}
-                </tbody>
-              </CcTable>
-            </div>
-          </CcCard>
-
           <CcCard className="p-5">
             <CcSectionTitle
               title="رفع الأرقام"

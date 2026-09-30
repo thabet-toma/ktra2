@@ -31,7 +31,17 @@ const LEADS = Array.from({ length: 60 }, (_, index) => ({
   updated_at: "2026-09-01T00:00:00Z",
 }));
 
-async function installMocks(page: Page, seenQueries: string[]) {
+const SAMI = { id: 7, name: "سامي" };
+const TEAM = {
+  employees: [{
+    employee_id: 7, employee_name: "سامي", employee_status: "active", total: 2, overdue: 1, by_status: { new: 2 },
+    attempts: 4, reached: 3, converted: 1, last_activity_at: "2026-09-29T10:00:00Z",
+  }],
+  pool_size: 58,
+  period: { date_from: "2026-09-01", date_to: "2026-09-30" },
+};
+
+async function installMocks(page: Page, seenQueries: string[], posted: unknown[] = []) {
   await page.addInitScript(() => {
     localStorage.setItem("token", "e2e-crm-token");
     localStorage.setItem("userId", "e2e-crm-admin");
@@ -64,16 +74,21 @@ async function installMocks(page: Page, seenQueries: string[]) {
     if (p.endsWith("/platform/crm/leads/")) {
       seenQueries.push(url.search);
       const q = url.searchParams.get("q") || "";
-      const rows = q ? LEADS.filter((lead) => lead.store_name.includes(q)) : LEADS;
+      const assigned = url.searchParams.get("assigned_to");
+      let rows = q ? LEADS.filter((lead) => lead.store_name.includes(q)) : LEADS;
+      if (assigned === "7") rows = rows.slice(0, 2).map((lead) => ({ ...lead, assigned_to: SAMI }));
       return json({ count: rows.length, next: null, previous: null, results: rows });
     }
     const leadMatch = p.match(/\/platform\/crm\/leads\/(\d+)\/$/);
     if (leadMatch) return json(LEADS[Number(leadMatch[1]) - 1]);
-    if (/\/platform\/crm\/leads\/\d+\/activities\/$/.test(p)) return json({ count: 0, next: null, previous: null, results: [] });
+    if (/\/platform\/crm\/leads\/\d+\/activities\/$/.test(p)) {
+      if (request.method() === "POST") { posted.push(request.postDataJSON()); return json({ id: 1 }, 201); }
+      return json({ count: 0, next: null, previous: null, results: [] });
+    }
     if (/\/platform\/crm\/leads\/\d+\/stats\/$/.test(p)) return json(null, 404);
-    if (p.endsWith("/platform/crm/stats/overview/")) return json({ employees: [], pool_size: 0 });
+    if (p.endsWith("/platform/crm/stats/overview/")) { seenQueries.push(`overview${url.search}`); return json(TEAM); }
     if (p.endsWith("/platform/crm/transfer-requests/")) return json({ count: 0, next: null, previous: null, results: [] });
-    if (p.endsWith("/platform/crm/colleagues/")) return json([]);
+    if (p.endsWith("/platform/crm/colleagues/")) return json([{ ...SAMI, job_title: "تسويق", is_me: false }]);
     return json([]);
   });
 }
@@ -134,4 +149,60 @@ test("الترشيح يبقى بعد فتح الملف وزرّ «رجوع» ا�
   await page.getByRole("tab", { name: "المخزن المتاح" }).click();
   await expect.poll(() => seen.some((query) => query.includes("scope=pool"))).toBe(true);
   expect(seen.filter((query) => query.includes("scope=pool")).every((query) => query.includes("q="))).toBe(true);
+});
+
+test("#69 — لوح الفريق: كبسةُ موظّفٍ تفتح أرقامَه في القائمة، والمدّةُ تُرسَل للخادم", async ({ page }) => {
+  const seen: string[] = [];
+  await installMocks(page, seen);
+  await page.goto("/super-admin/platform-ops?tab=crm");
+
+  const row = page.getByTestId("crm-team-row-7");
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  await expect(row).toContainText("1 متأخرة");
+  await expect(row).toContainText("(75%)");
+  expect(seen).toContain("overview?period=month");
+
+  await page.getByRole("button", { name: "هذا الأسبوع" }).click();
+  await expect.poll(() => seen.includes("overview?period=week")).toBe(true);
+
+  seen.length = 0;
+  await row.getByRole("button", { name: /سامي/ }).click();
+  await expect.poll(() => seen.some((query) => query.includes("scope=all") && query.includes("assigned_to=7"))).toBe(true);
+  await expect(page.getByTestId("crm-employee-filter-chip")).toContainText("سامي");
+  await expect(page.getByRole("combobox", { name: "ترشيح بالموظف" })).toHaveValue("7");
+  await expect(page.getByRole("button", { name: /محل رقم 1\b/ })).toContainText("عند سامي");
+  await expect(page.getByRole("button", { name: /محل رقم 3\b/ })).toHaveCount(0);
+
+  // البحثُ لا يُسقط الموظّف، و✕ يُسقطه وحده.
+  seen.length = 0;
+  await page.locator("#crm-lead-search").fill("محل");
+  await page.getByRole("button", { name: "بحث", exact: true }).click();
+  await expect.poll(() => seen.some((query) => query.includes("q=") && query.includes("assigned_to=7"))).toBe(true);
+  seen.length = 0;
+  await page.getByRole("button", { name: "إلغاء ترشيح الموظف" }).click();
+  await expect(page.getByTestId("crm-employee-filter-chip")).toHaveCount(0);
+  await expect.poll(() => seen.some((query) => query.includes("scope=all") && !query.includes("assigned_to"))).toBe(true);
+
+  // المخزن من اللوح = `assigned_to=none`.
+  seen.length = 0;
+  await page.getByRole("button", { name: /في المخزن بلا موظف/ }).click();
+  await expect.poll(() => seen.some((query) => query.includes("assigned_to=none"))).toBe(true);
+});
+
+test("#69 — تسجيلُ اتصالٍ لا يُحفظ بلا نتيجة، ويُرسل النتيجة المختارة", async ({ page }) => {
+  const seen: string[] = [];
+  const posted: unknown[] = [];
+  await installMocks(page, seen, posted);
+  await page.goto("/super-admin/platform-ops?tab=crm&lead=5");
+
+  await page.getByRole("button", { name: "تسجيل اتصال" }).click({ timeout: 30_000 });
+  const outcome = page.getByLabel("النتيجة");
+  await expect(outcome).toHaveValue("");
+  await page.getByRole("button", { name: "حفظ السجل" }).click();
+  expect(posted).toHaveLength(0);
+
+  await outcome.selectOption("no_answer");
+  await page.getByRole("button", { name: "حفظ السجل" }).click();
+  await expect.poll(() => posted.length).toBe(1);
+  expect(posted[0]).toMatchObject({ kind: "call", outcome: "no_answer" });
 });

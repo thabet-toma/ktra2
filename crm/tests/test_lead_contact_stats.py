@@ -19,7 +19,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient, APITestCase
 
 from crm.models import Lead, LeadActivity, LeadPhone
-from crm.services import change_lead_status, create_lead, lead_contact_stats, log_activity
+from crm.services import OUTCOME_REQUIRED_KINDS, change_lead_status, create_lead, lead_contact_stats, log_activity
 
 from ._helpers import make_manager, make_staff_employee
 
@@ -46,7 +46,9 @@ class LeadContactStatsServiceTest(TestCase):
         self.lead.save(update_fields=["assigned_to"])
 
     def _log(self, kind, days_ago=0):
-        activity = log_activity(lead=self.lead, employee=self.employee, kind=kind, actor=self.user)
+        # المكالمةُ والواتساب يلزمهما نتيجةٌ منذ #69 — والنتيجةُ لا تمسّ ما يعدّه هذا الملف.
+        outcome = LeadActivity.Outcome.ANSWERED if kind in OUTCOME_REQUIRED_KINDS else ""
+        activity = log_activity(lead=self.lead, employee=self.employee, kind=kind, actor=self.user, outcome=outcome)
         if days_ago:
             _backdate(activity, days_ago)
         return activity
@@ -173,6 +175,7 @@ class LeadContactStatsEndpointTest(APITestCase):
         self.lead.save(update_fields=["assigned_to"])
         log_activity(
             lead=self.lead, employee=self.owner, kind=LeadActivity.Kind.CALL, actor=self.owner_user,
+            outcome=LeadActivity.Outcome.ANSWERED,
         )
         self.url = f"/api/platform/crm/leads/{self.lead.pk}/stats/"
 

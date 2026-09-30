@@ -96,7 +96,9 @@ class LeadActivitySerializer(serializers.ModelSerializer):
 class LeadActivityCreateSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(choices=LeadActivity.Kind.choices)
     body = serializers.CharField(required=False, allow_blank=True, default="")
-    outcome = serializers.CharField(required=False, allow_blank=True, default="")
+    outcome = serializers.ChoiceField(
+        choices=LeadActivity.Outcome.choices, required=False, allow_blank=True, default="",
+    )
     materials = serializers.ListField(required=False, default=list)
     next_follow_up_at = serializers.DateTimeField(required=False, allow_null=True, default=None)
 

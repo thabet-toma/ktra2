@@ -6,12 +6,13 @@ from datetime import timedelta
 
 from django.db import IntegrityError, transaction
 from django.db.models import Count, Max, Q
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 # حدودُ اليوم المحلّيّ من الطبقة المشتركة — **لا `__date` أبداً**: جانغو يترجمها
 # إلى `DATE(CONVERT_TZ(...))` وجداولُ `mysql.time_zone` فارغةٌ على خادمنا فتعيد
 # `NULL` ⇒ صفرُ صفوفٍ بلا خطأٍ ولا أثرٍ في اللوج. الشرحُ كاملاً في الملفّ نفسِه.
-from core.date_ranges import local_day_start
+from core.date_ranges import filter_local_date_range, local_day_start
 
 # عضويّةُ عنقود المنصّة معلَنةٌ في `platform_ops/tests/test_isolation_guard.py`
 # (`PLATFORM_CLUSTER_APPS`)، فالاستيرادُ صريحٌ لا مُخبَّأٌ بـ`apps.get_model`:
@@ -229,6 +230,11 @@ def log_activity(
         raise LeadLockedError("lead_not_yours", "هذا العميلُ مُسنَدٌ لموظّفٍ آخر.")
     if kind not in LeadActivity.Kind.values:
         raise CrmValidationError("invalid_activity_kind", f"نوع نشاط غير معروف: {kind}")
+    if outcome and outcome not in LeadActivity.Outcome.values:
+        raise CrmValidationError("invalid_outcome", f"نتيجة اتصال غير معروفة: {outcome}")
+    # بلا نتيجةٍ لا «انردّ عليه» يُحسب لموظّف — المكالمةُ الصامتة لا تُعدّ في لوح المدير.
+    if kind in OUTCOME_REQUIRED_KINDS and not outcome:
+        raise CrmValidationError("outcome_required", "اختر نتيجة الاتصال.")
 
     activity = LeadActivity.objects.create(
         lead=lead, employee=employee, actor=actor, kind=kind, body=body,
@@ -506,6 +512,12 @@ CONTACT_ACTIVITY_KINDS = (
     LeadActivity.Kind.VISIT,
 )
 
+#: أنواعُ التواصل التي تُلزِم بنتيجة (`log_activity`). الزيارةُ وجهاً لوجه ليس فيها «لم يردّ».
+OUTCOME_REQUIRED_KINDS = (LeadActivity.Kind.CALL, LeadActivity.Kind.WHATSAPP)
+
+#: «انردّ عليه»: ردَّ فعلاً، أو ردَّ وطلب معاودة الاتصال.
+REACHED_OUTCOMES = (LeadActivity.Outcome.ANSWERED, LeadActivity.Outcome.CALLBACK)
+
 
 def _days_since(moment, today) -> int:
     """فارقُ الأيّام المحلّيّة — **يومٌ لا لحظة**، ولا ينزل تحت الصفر.
@@ -565,8 +577,20 @@ def lead_contact_stats(lead: Lead) -> dict:
     }
 
 
-def manager_lead_overview() -> dict:
-    """لكل موظف عداد حالاته والمتأخر، بعدد استعلامات ثابت بلا حلقة N+1."""
+def manager_lead_overview(*, date_from=None, date_to=None) -> dict:
+    """لوحُ المدير: لكلّ موظّفٍ أرقامُه الآن ونتائجُه في مدّة (#69) — بعدد استعلاماتٍ ثابت.
+
+    «الآن» (بلا مدّة): عددُ أرقامه وحالاتُها والمتأخّرُ منها. «في المدّة»
+    (`date_from`/`date_to` يومان محلّيان شاملان، `None` = بلا حدّ):
+    - `attempts`: تواصلٌ فعليٌّ كتبه هو (`CONTACT_ACTIVITY_KINDS` — لا ملاحظة ولا صفوف النظام).
+    - `reached`: منها ما انردّ عليه (`REACHED_OUTCOMES`).
+    - `converted`: أرقامٌ صارت «عميل». تُنسب لمن كتب التغيير، وإن كتبه مديرٌ بلا صفِّ
+      موظّف (`employee=None`) فلصاحب الرقم — التحويلُ ثمرةُ عمله لا عمل المدير.
+    - `last_activity_at`: آخرُ تواصلٍ فعليٍّ له في المدّة.
+
+    يظهر الموظّفُ النشطُ ولو بصفر (قابلٌ للإسناد)، وغيرُ النشط ما دام يحمل أرقاماً أو
+    عمل في المدّة — موظّفٌ غادر ولم يحمل شيئاً لا يزاحم اللوح.
+    """
     start_of_today, _ = follow_up_day_bounds()
     rows = (
         Lead.objects.filter(assigned_to__isnull=False)
@@ -582,17 +606,55 @@ def manager_lead_overview() -> dict:
         counts["by_status"][row["status"]] = row["n"]
         counts["overdue"] += row["overdue"]
 
-    employees = PlatformEmployee.objects.select_related("user").all()
+    in_period = filter_local_date_range(LeadActivity.objects.all(), "created_at", date_from, date_to)
+    contacts = {
+        row["employee_id"]: row
+        for row in in_period.filter(kind__in=CONTACT_ACTIVITY_KINDS, employee__isnull=False)
+        .values("employee_id")
+        .annotate(
+            attempts=Count("id"),
+            reached=Count("id", filter=Q(outcome__in=REACHED_OUTCOMES)),
+            last_activity_at=Max("created_at"),
+        )
+    }
+    converted = {
+        row["credited_to"]: row["n"]
+        for row in in_period.filter(
+            kind=LeadActivity.Kind.STATUS_CHANGE, status_after=Lead.Status.CUSTOMER,
+        )
+        .annotate(credited_to=Coalesce("employee_id", "lead__assigned_to_id"))
+        .exclude(credited_to__isnull=True)
+        .values("credited_to")
+        .annotate(n=Count("id"))
+    }
+
+    visible = set(by_employee) | set(contacts) | set(converted)
+    employees = PlatformEmployee.objects.select_related("user").filter(
+        Q(status=PlatformEmployee.Status.ACTIVE) | Q(pk__in=visible)
+    )
     overview = []
     for employee in employees:
         counts = by_employee.get(employee.pk, {"by_status": {}, "overdue": 0})
+        contact = contacts.get(employee.pk, {})
         overview.append({
             "employee_id": employee.pk,
             "employee_name": _employee_display_name(employee),
+            "employee_status": employee.status,
             "total": sum(counts["by_status"].values()),
             "by_status": counts["by_status"],
             "overdue": counts["overdue"],
+            "attempts": contact.get("attempts", 0),
+            "reached": contact.get("reached", 0),
+            "converted": converted.get(employee.pk, 0),
+            "last_activity_at": contact.get("last_activity_at"),
         })
 
     pool_size = Lead.objects.filter(assigned_to__isnull=True, approval_status=Lead.Approval.APPROVED).count()
-    return {"employees": overview, "pool_size": pool_size}
+    return {
+        "employees": overview,
+        "pool_size": pool_size,
+        "period": {
+            "date_from": date_from.isoformat() if date_from else None,
+            "date_to": date_to.isoformat() if date_to else None,
+        },
+    }
