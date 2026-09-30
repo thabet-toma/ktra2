@@ -17,6 +17,7 @@ import {
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
+import { salesSettingsWritablePayload } from "../../utils/salesSettingsPayload";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import {
@@ -150,38 +151,7 @@ export const SalesSettingsPage: React.FC = () => {
     setMsg(null);
     setErr(null);
     try {
-      const { id: _id, updated_at: _ua, ...rest } = settings;
-      // نرسل الحقول القابلة للكتابة فقط (نتجاهل الحقول الـ read-only مثل *_name)
-      const writable: Partial<SalesSettings> = {
-        default_customer: rest.default_customer,
-        default_currency: rest.default_currency,
-        default_revenue_account_product: rest.default_revenue_account_product,
-        default_revenue_account_service: rest.default_revenue_account_service,
-        default_cash_account: rest.default_cash_account,
-        default_inventory_account: rest.default_inventory_account,
-        default_cogs_account: rest.default_cogs_account,
-        default_ar_account: rest.default_ar_account,
-        default_payment_type: rest.default_payment_type,
-        stock_on_post_default: rest.stock_on_post_default,
-        allow_negative_stock_default: rest.allow_negative_stock_default,
-        default_vat_rate: rest.default_vat_rate,
-        prices_include_tax: rest.prices_include_tax,
-        auto_post_invoices: rest.auto_post_invoices,
-        auto_post_payments: rest.auto_post_payments,
-        auto_refund_on_sales_return: rest.auto_refund_on_sales_return,
-        show_journal_preview: rest.show_journal_preview,
-        warn_on_duplicate_item: rest.warn_on_duplicate_item,
-        block_loss_invoices: rest.block_loss_invoices,
-        dormant_customer_days: rest.dormant_customer_days,
-        quotation_valid_days: rest.quotation_valid_days,
-        order_reserve_days: rest.order_reserve_days,
-        allow_document_delete: rest.allow_document_delete,
-        block_reserved_stock_sale: rest.block_reserved_stock_sale,
-        serial_entry_mode: rest.serial_entry_mode,
-        default_shipping_origin: rest.default_shipping_origin,
-        default_shipping_destination: rest.default_shipping_destination,
-      };
-      const updated = await updateSalesSettings(writable);
+      const updated = await updateSalesSettings(salesSettingsWritablePayload(settings));
       setSettings(updated);
       setMsg("تم حفظ الإعدادات بنجاح");
       window.setTimeout(() => setMsg(null), 2500);
