@@ -327,6 +327,28 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), Decimal("-100"))
         self.assertEqual(res.data["rows"][-1]["side"], "مدين")
 
+    def test_partner_balances_use_the_unified_sign_and_a_true_net_total(self):
+        """#69: «أرصدة العملاء/الموردين» كانا يعرضان القيمة المطلقة ويجمعانها — فعميلٌ
+        مدين 300 وآخر دائن 100 مجموعهما «400». الآن المدين سالب والإجمالي صافٍ (-200)."""
+        creditor_customer = Partner.objects.create(
+            tenant=self.tenant, name="زبون دفع مقدّماً", partner_type="Customer")
+        self._post_line("2026-03-01", Decimal("300"), Decimal("0"), partner=self.customer)
+        self._post_line("2026-03-02", Decimal("0"), Decimal("100"), partner=creditor_customer)
+        self._post_line("2026-03-03", Decimal("0"), Decimal("400"), partner=self.supplier)
+
+        res = self._run("customer-balances")
+        self.assertEqual(res.status_code, 200, res.data)
+        rows = {r["partner_id"]: (Decimal(r["balance"]), r["side"]) for r in res.data["rows"]}
+        self.assertEqual(rows[self.customer.id], (Decimal("-300"), "مدين"))
+        self.assertEqual(rows[creditor_customer.id], (Decimal("100"), "دائن"))
+        self.assertEqual(Decimal(res.data["totals"]["balance"]), Decimal("-200"))
+        # الأكبر أثراً أولاً مهما كان جانبه — الترتيب بالمقدار لا بالإشارة.
+        self.assertEqual(res.data["rows"][0]["partner_id"], self.customer.id)
+
+        res = self._run("supplier-balances")
+        rows = {r["partner_id"]: (Decimal(r["balance"]), r["side"]) for r in res.data["rows"]}
+        self.assertEqual(rows[self.supplier.id], (Decimal("400"), "دائن"))
+
     def test_statement_columns_carry_the_balance_side(self):
         """عمود «طبيعة الرصيد» بجانب «الرصيد» في الكشف والأستاذ، والصفر بلا جانب."""
         for key in ("partner-statement", "account-ledger"):

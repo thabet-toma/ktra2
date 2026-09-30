@@ -43,6 +43,7 @@ from ._framework import (
     _apply_dates,
     _int_param,
     _money,
+    _balance_cells,
     _qty,
     _sum,
     _money_sum,
@@ -156,17 +157,6 @@ def _partner_is_customer(tenant_id: int, partner_id: int) -> bool:
     )
     # مصدر الإشارة الواحد — بطاقة الطرف وكشفه يقرآنه أيضاً.
     return not is_creditor_party(kind)
-
-
-def _balance_cells(debit_net: Decimal) -> dict:
-    """«الرصيد» و«طبيعة الرصيد» بالقاعدة الموحّدة لكل كشف (#33/#69): المدين سالب
-    وبجانبه «مدين»، والدائن موجب «دائن»، والصفر بلا جانب — كرتُ الطرف نفسه
-    (`frontend_v2/utils/formatNumber.ts` — `formatBalanceWithSide`)، فلا يقرأ
-    المستخدم الرصيدَ نفسه بإشارتين بين الكرت والتقرير. `debit_net` = مدين − دائن.
-    """
-    if not debit_net:
-        return {"balance": _money(ZERO), "side": ""}
-    return {"balance": _money(-debit_net), "side": "مدين" if debit_net > 0 else "دائن"}
 
 
 BALANCE_COLUMNS = (

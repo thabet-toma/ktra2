@@ -16,7 +16,11 @@ import {
   Banknote, Plus, Trash2, RefreshCw, ChevronRight, ChevronLeft, Loader2,
   Users, Clock, CalendarX, FileText, CheckCircle2, RotateCcw, Wallet, X, Printer,
 } from "lucide-react";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatBalanceWithSide, formatMoney } from "../../utils/formatNumber";
+
+/** رصيدُ حساب الموظف بالقاعدة الموحّدة (#69). الخادم يرسله دائن − مدين
+ *  (`hr/payroll.py` — `employee_balances`) فيُقلب إلى مدين − دائن قبل العرض. */
+const employeeBalanceText = (balance: unknown) => formatBalanceWithSide(-(Number(balance) || 0));
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { monthKeyLabel, monthKeyOf, monthKeyRange, shiftMonthKey } from "../../utils/monthKey";
 import {
@@ -533,7 +537,7 @@ export const PayrollPage: React.FC = () => {
         </select>
         {selected && (
           <span className="rounded-lg bg-[var(--color-surface-2)] px-3 py-1.5 text-sm">
-            رصيده: <b>{formatMoney(selected.balance)}</b>
+            رصيده: <b>{employeeBalanceText(selected.balance)}</b>
             {selected.account_code && (
               <span className="mr-2 text-[11px] text-[var(--color-text-muted)]">
                 ({selected.account_code})
@@ -717,7 +721,7 @@ export const PayrollPage: React.FC = () => {
                     <td className={`${cellClass} text-[var(--color-text-muted)]`}>
                       {row.account_code || "—"}
                     </td>
-                    <td className={`${cellClass} font-bold`}>{formatMoney(row.balance)}</td>
+                    <td className={`${cellClass} font-bold`}>{employeeBalanceText(row.balance)}</td>
                     <td className={cellClass}>{row.is_active ? "على رأس العمل" : "موقوف"}</td>
                     <td className={cellClass}>
                       {canManage && (

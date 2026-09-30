@@ -184,3 +184,12 @@ test("كشف الساعات: جدولٌ فيه كل يوم من الشهر وم�
   await expect(body).toContainText("توقيع الموظف");
   await sheetWindow.close();
 });
+
+test("رصيد الموظف بالقاعدة الموحّدة: المستحقّ له «دائن» بجانب الرقم (#69)", async ({ page }) => {
+  await installPayrollMocks(page);
+  await page.goto("/payroll");
+  // الخادم يرسل دائن − مدين: 1600 مستحقّةٌ لسامي ⇒ «1,600 دائن» لا رقمٌ بلا جانب.
+  const row = page.getByRole("row").filter({ hasText: "سامي" }).filter({ hasText: "21120002" });
+  await expect(row).toContainText("1,600", { timeout: 20000 });
+  await expect(row).toContainText("دائن");
+});

@@ -77,6 +77,12 @@ async function installMocks(page: Page, seenQueries: string[], posted: unknown[]
       const assigned = url.searchParams.get("assigned_to");
       let rows = q ? LEADS.filter((lead) => lead.store_name.includes(q)) : LEADS;
       if (assigned === "7") rows = rows.slice(0, 2).map((lead) => ({ ...lead, assigned_to: SAMI }));
+      if (assigned === "none") {
+        // المخزن مُصفَّحٌ كالخادم (50 في الصفحة) — ما تُرسله بقية الاختبارات يبقى صفحةً واحدة.
+        const pageNo = Number(url.searchParams.get("page") || 1);
+        const slice = rows.slice((pageNo - 1) * 50, pageNo * 50);
+        return json({ count: rows.length, next: pageNo * 50 < rows.length ? `?page=${pageNo + 1}` : null, previous: null, results: slice });
+      }
       return json({ count: rows.length, next: null, previous: null, results: rows });
     }
     const leadMatch = p.match(/\/platform\/crm\/leads\/(\d+)\/$/);
@@ -205,4 +211,43 @@ test("#69 — تسجيلُ اتصالٍ لا يُحفظ بلا نتيجة، وي
   await page.getByRole("button", { name: "حفظ السجل" }).click();
   await expect.poll(() => posted.length).toBe(1);
   expect(posted[0]).toMatchObject({ kind: "call", outcome: "no_answer" });
+});
+
+test("الترشيح في الرابط: تحديثُ الصفحة على ملفّ عميل ثم «العودة» يعيد القائمة مرشَّحة", async ({ page }) => {
+  const seen: string[] = [];
+  await installMocks(page, seen);
+  await page.goto("/super-admin/platform-ops?tab=crm");
+  await expect(page.getByRole("button", { name: /محل رقم 60/ })).toBeVisible({ timeout: 30_000 });
+
+  await page.locator("#crm-lead-search").fill("محل رقم 5");
+  await page.getByRole("button", { name: "بحث", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]q=/);
+  await page.getByRole("button", { name: /محل رقم 52/ }).click();
+  await expect(page).toHaveURL(/lead=52/);
+
+  await page.reload();
+  const back = page.getByRole("button", { name: /العودة إلى العملاء/ });
+  await expect(back).toBeVisible({ timeout: 30_000 });
+  await back.click();
+  await expect(page).not.toHaveURL(/lead=/);
+  await expect(page.locator("#crm-lead-search")).toHaveValue("محل رقم 5");
+  await expect(page.getByRole("button", { name: /محل رقم 59/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /محل رقم 1/ })).toHaveCount(0);
+  expect(seen.filter((q) => !q.startsWith("overview")).at(-1)).toContain("q=");
+});
+
+test("أرقامُ المخزن أكثر من صفحة: «عرض المزيد» يقول كم بقي ويُلحق الباقي", async ({ page }) => {
+  const seen: string[] = [];
+  await installMocks(page, seen);
+  await page.goto("/super-admin/platform-ops?tab=crm");
+  await page.getByRole("button", { name: /في المخزن بلا موظف/ }).click({ timeout: 30_000 });
+  await expect(page).toHaveURL(/employee=none/);
+
+  const more = page.getByTestId("crm-load-more");
+  await expect(more).toContainText(/50.*من.*60/);
+  await expect(page.getByRole("button", { name: /محل رقم 60/ })).toHaveCount(0);
+  await more.click();
+  await expect(page.getByRole("button", { name: /محل رقم 60/ })).toBeVisible();
+  await expect(more).toHaveCount(0);
+  expect(seen.some((q) => q.includes("assigned_to=none") && q.includes("page=2"))).toBe(true);
 });

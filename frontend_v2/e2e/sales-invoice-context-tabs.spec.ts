@@ -223,6 +223,9 @@ test("تبويب حساب العميل يعرض قبل/بعد من مرساة ك
   await expect(page.getByText("الرصيد قبل الفاتورة")).toBeVisible();
   await expect(page.getByText("الرصيد بعدها")).toBeVisible();
   await expect(page.locator("text=1,250").first()).toBeVisible();
+  // الأثرُ حركةٌ لا رصيد (#69): «1,000» كما هي — لا «-1,000 مدين» كأنها رصيد.
+  const effect = page.getByText("أثر الفاتورة").locator("xpath=following-sibling::div[1]");
+  await expect(effect).toHaveText("1,000");
 });
 
 test("حركة المخزون تعرض رقم الحركة ورصيد المنتج قبل وبعد", async ({ page }) => {

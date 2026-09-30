@@ -3,9 +3,10 @@ import { Plus } from 'lucide-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { claimCrmLead, createCrmActivity, createCrmLead, changeCrmLeadStatus, getCrmLead, getCrmLeadStats, listCrmActivities, listCrmColleagues, listCrmLeads, lookupCrmPhone, releaseCrmLead, requestCrmLeadTransfer, transferCrmLead, type CrmActivity, type CrmActivityInput, type CrmColleague, type CrmLead, type CrmLeadContactStats, type CrmLeadStatus, type CrmLookup } from '../../../../services/platformCrmApi';
+import { formatNumber } from '../../../../utils/formatNumber';
 import { captureScrollPosition, restoreScrollPosition, type ScrollPositionSnapshot } from '../../../../utils/scrollPosition';
 import { CcCard, CcSectionTitle } from '../../ui';
-import { CrmLeadList } from './CrmLeadList';
+import { CRM_POOL_LABEL, CrmLeadList, STATUS_LABELS } from './CrmLeadList';
 import { CrmLeadProfile } from './CrmLeadProfile';
 import { CrmManagerPanel, CrmTeamPanel, type CrmEmployeePick } from './CrmManagerPanel';
 import { CrmMyStats } from './CrmMyStats';
@@ -23,9 +24,8 @@ interface CrmPanelProps {
   myEmployeeId: number | null;
 }
 type Scope = 'mine' | 'pool' | 'all' | 'follow_ups';
-// `employee` يرشّح «الكل» بموظّفٍ أو بالمخزن (#69) — لا معنى له في النطاقات الأخرى فيسقط بتبديلها.
-type LeadFilters = { q: string; status: CrmLeadStatus | ''; employee: CrmEmployeePick | null };
-const EMPTY_FILTERS: LeadFilters = { q: '', status: '', employee: null };
+const SCOPES: readonly Scope[] = ['mine', 'pool', 'all', 'follow_ups'];
+const isLeadStatus = (value: string): value is CrmLeadStatus => Object.prototype.hasOwnProperty.call(STATUS_LABELS, value);
 // المُمرِّر: `main.app-content` داخل غلاف التطبيق (مركز العمليات)، والنافذةُ في غلاف الموظّف.
 const scrollContainer = () => document.querySelector<HTMLElement>('main.app-content');
 const messageOf = (caught: unknown, fallback: string) => caught instanceof Error ? caught.message : fallback;
@@ -37,7 +37,25 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   // مركز القيادة بلا صفّ `PlatformEmployee`، فكان يهبط على «عملائي» فيقرأ لوحةً
   // خاويةً على تبويبٍ سمّاه له النظام: وهو بعينه ما شكا منه («وين التسويق»).
   // ومن لا دفترَ له والمديرُ معاً: الدفترُ الذي يعنيه هو الكلُّ.
-  const [scope, setScope] = useState<Scope>(myEmployeeId === null && isManager ? 'all' : 'mine'); const [leads, setLeads] = useState<CrmLead[]>([]); const [listLoading, setListLoading] = useState(true); const [listError, setListError] = useState('');
+  const defaultScope: Scope = myEmployeeId === null && isManager ? 'all' : 'mine';
+  // #73/#69: النطاقُ والبحثُ والحالةُ والموظّفُ **في الرابط** (`scope`/`q`/`status`/`employee`)،
+  // بجانب `?lead=` — فتحديثُ الصفحة وملفُّ عميلٍ فُتح برابطٍ مباشر يعيدان القائمةَ مرشَّحةً
+  // كما تُركت. الترشيحُ يُبدَّل بـ`replace` (لا يملأ التاريخ)، وفتحُ الملفّ وحدَه يُدفع.
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const scopeParam = searchParams.get('scope') ?? '';
+  const scope: Scope = (SCOPES as readonly string[]).includes(scopeParam) && (scopeParam !== 'all' || isManager) ? scopeParam as Scope : defaultScope;
+  const filterQ = searchParams.get('q') ?? '';
+  const statusParam = searchParams.get('status') ?? '';
+  const filterStatus: CrmLeadStatus | '' = isLeadStatus(statusParam) ? statusParam : '';
+  // `employee` يرشّح «الكل» بموظّفٍ أو بالمخزن (#69) — لا معنى له في النطاقات الأخرى فيسقط بتبديلها.
+  const employeeParam = scope === 'all' ? searchParams.get('employee') : null;
+  const employeeId: number | 'none' | null = employeeParam === 'none' ? 'none' : Number(employeeParam) > 0 ? Number(employeeParam) : null;
+  const patchListParams = (patch: Record<string, string | null>) => setSearchParams((prev) => { const next = new URLSearchParams(prev); Object.entries(patch).forEach(([key, value]) => { if (value) next.set(key, value); else next.delete(key); }); return next; }, { replace: true });
+  const setScope = (next: Scope) => patchListParams({ scope: next === defaultScope ? null : next, ...(next === 'all' ? {} : { employee: null }) });
+  // الترقيم (#69): الخادمُ يعيد خمسين في الصفحة، فموظّفٌ يحمل 120 رقماً كان يُعرض منه 50 بلا إشارة.
+  const [leadCount, setLeadCount] = useState(0); const [nextPage, setNextPage] = useState<number | null>(null); const [loadingMore, setLoadingMore] = useState(false);
+  const [leads, setLeads] = useState<CrmLead[]>([]); const [listLoading, setListLoading] = useState(true); const [listError, setListError] = useState('');
   const [colleagues, setColleagues] = useState<CrmColleague[]>([]); const [selected, setSelected] = useState<CrmLead | null>(null); const [activities, setActivities] = useState<CrmActivity[]>([]); const [leadStats, setLeadStats] = useState<CrmLeadContactStats | null>(null); const [detailLoading, setDetailLoading] = useState(false); const [detailError, setDetailError] = useState('');
   const [lookup, setLookup] = useState<CrmLookup | null>(null); const [lookupLoading, setLookupLoading] = useState(false); const [notice, setNotice] = useState(''); const [suggestOpen, setSuggestOpen] = useState(false); const [requestLeadId, setRequestLeadId] = useState<number | null>(null); const [requestTo, setRequestTo] = useState(''); const [requestReason, setRequestReason] = useState('');
   const [storeName, setStoreName] = useState(''); const [phone, setPhone] = useState(''); const [ownerName, setOwnerName] = useState('');
@@ -48,16 +66,23 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   // المرشِّحاتُ هنا لا في القائمة (#73/#69): كلُّ إعادةِ تحميلٍ — تبديلُ النطاق، والاستلامُ،
   // والتحويلُ، والبتُّ في طلب — كانت تنادي بلا بحثٍ ولا حالة، فيضيع الترشيحُ والخانتان
   // ما زالتا تعرضانه. والطلبُ الأحدثُ وحدَه يكتب النتيجة: ردٌّ بطيءٌ لطلبٍ أقدم يُهمَل.
-  const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
+  // اسمُ موظّفٍ اختير من لوح الفريق — قد لا يكون في دليل الزملاء (الدليلُ للنشِطين وحدَهم).
+  const [pickedNames, setPickedNames] = useState<Record<number, string>>({});
+  const employeeFilter: CrmEmployeePick | null = employeeId === null ? null
+    : employeeId === 'none' ? { id: 'none', name: CRM_POOL_LABEL }
+      : { id: employeeId, name: pickedNames[employeeId] ?? colleagues.find((colleague) => colleague.id === employeeId)?.name ?? `موظف #${formatNumber(employeeId)}` };
+  const rememberName = (pick: CrmEmployeePick | null) => { if (pick && typeof pick.id === 'number') { const id = pick.id; const name = pick.name; setPickedNames((names) => (names[id] === name ? names : { ...names, [id]: name })); } };
+  const setEmployee = (pick: CrmEmployeePick | null) => { rememberName(pick); patchListParams({ employee: pick ? String(pick.id) : null }); };
   const listRequestRef = useRef(0);
-  const loadLeads = useCallback(async () => { const requestId = ++listRequestRef.current; setListLoading(true); setListError(''); try { const page = await listCrmLeads({ scope: scope === 'follow_ups' ? 'mine' : scope, follow_up: scope === 'follow_ups' ? 'due' : undefined, q: filters.q || undefined, status: filters.status || undefined, assigned_to: scope === 'all' ? filters.employee?.id : undefined }); if (requestId === listRequestRef.current) setLeads(page.results); } catch (caught: unknown) { if (requestId === listRequestRef.current) { setLeads([]); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } } finally { if (requestId === listRequestRef.current) setListLoading(false); } }, [scope, filters]);
+  const leadQuery = useCallback((page: number) => listCrmLeads({ scope: scope === 'follow_ups' ? 'mine' : scope, follow_up: scope === 'follow_ups' ? 'due' : undefined, q: filterQ || undefined, status: filterStatus || undefined, assigned_to: employeeId ?? undefined, page: page > 1 ? page : undefined }), [scope, filterQ, filterStatus, employeeId]);
+  const loadLeads = useCallback(async () => { const requestId = ++listRequestRef.current; setListLoading(true); setListError(''); try { const page = await leadQuery(1); if (requestId === listRequestRef.current) { setLeads(page.results); setLeadCount(page.count); setNextPage(page.next ? 2 : null); } } catch (caught: unknown) { if (requestId === listRequestRef.current) { setLeads([]); setLeadCount(0); setNextPage(null); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } } finally { if (requestId === listRequestRef.current) setListLoading(false); } }, [leadQuery]);
+  // «عرض المزيد» يُلحق الصفحةَ التالية؛ وترشيحٌ تبدّل أثناء الطلب يُسقط الردّ (نفسُ عدّاد القائمة).
+  const loadMore = async () => { if (nextPage === null) return; const requestId = listRequestRef.current; setLoadingMore(true); try { const page = await leadQuery(nextPage); if (requestId === listRequestRef.current) { setLeads((current) => [...current, ...page.results]); setLeadCount(page.count); setNextPage(page.next ? nextPage + 1 : null); } } catch (caught: unknown) { if (requestId === listRequestRef.current) setNotice(messageOf(caught, 'تعذر تحميل المزيد.')); } finally { setLoadingMore(false); } };
   const loadColleagues = useCallback(async () => { try { setColleagues(await listCrmColleagues()); } catch { setColleagues([]); } }, []);
   useEffect(() => { void loadLeads(); }, [loadLeads]); useEffect(() => { void loadColleagues(); }, [loadColleagues]);
   // ملفُّ العميل في الرابط (`?lead=`) فزرُّ «رجوع» المتصفح يعيد القائمة، والقائمةُ تبقى
   // مركَّبةً مخفيّةً تحته — فلا يضيع بحثُها ولا يُعاد تحميلُ لوح المدير — ويُستعاد موضعُ
   // التمرير حين يُغلق الملفّ. كان الملفُّ يستبدل القائمةَ كلَّها فيرجع المديرُ لرأسها.
-  const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const leadParam = Number(searchParams.get('lead')) || null;
   const pushedLeadRef = useRef(false);
   const listScrollRef = useRef<ScrollPositionSnapshot | null>(null);
@@ -81,7 +106,7 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   }, [leadParam]);
   // كبسةُ موظّفٍ في لوح الفريق: «الكل» مرشَّحاً بأرقامه، والشاشةُ تنزل إلى القائمة.
   const listTopRef = useRef<HTMLDivElement>(null);
-  const pickEmployee = (employee: CrmEmployeePick) => { setScope('all'); setFilters((current) => ({ ...current, employee })); window.requestAnimationFrame(() => listTopRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })); };
+  const pickEmployee = (employee: CrmEmployeePick) => { rememberName(employee); patchListParams({ scope: defaultScope === 'all' ? null : 'all', employee: String(employee.id) }); window.requestAnimationFrame(() => listTopRef.current?.scrollIntoView({ block: 'start', behavior: 'smooth' })); };
   const claim = async (lead: CrmLead) => { try { await claimCrmLead(lead.id); setNotice(`تم استلام ${lead.store_name}.`); bumpStats(); await loadLeads(); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
   // استلامٌ من بطاقة البحث: الرقمُ وُجد في المخزن، والفعلُ الصحيح هناك أن يُستلَم
   // لا أن يُطلَب تحويلُه. وبعد الاستلام يُنقل النطاقُ إلى «عملائي» ليراه فوراً.
@@ -113,11 +138,13 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
         scope={scope}
         loading={listLoading}
         error={listError}
-        onScope={(nextScope) => { setScope(nextScope); if (nextScope !== 'all') setFilters((current) => current.employee ? { ...current, employee: null } : current); }}
-        onFilters={(q, status) => setFilters((current) => ({ ...current, q: q.trim(), status }))}
-        employeeFilter={filters.employee}
+        onScope={setScope}
+        appliedQ={filterQ}
+        appliedStatus={filterStatus}
+        onFilters={(q, status) => patchListParams({ q: q.trim() || null, status: status || null })}
+        employeeFilter={employeeFilter}
         employeeOptions={colleagues}
-        onEmployeeFilter={(employee) => setFilters((current) => ({ ...current, employee }))}
+        onEmployeeFilter={setEmployee}
         onSelect={(lead) => showLead(lead.id)}
         onClaim={(lead) => void claim(lead)}
         onLookup={(value) => void performLookup(value)}
@@ -127,6 +154,19 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
         onRequestLookupTransfer={(id) => setRequestLeadId(id)}
         onClaimLookup={(id) => void claimFromLookup(id)}
       />
+      {nextPage !== null && !listLoading && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => void loadMore()}
+            disabled={loadingMore}
+            data-testid="crm-load-more"
+            className="rounded-xl border border-cc-border bg-cc-surface px-4 py-2 text-sm font-bold text-cc-text hover:border-cc-accent disabled:opacity-60"
+          >
+            {loadingMore ? 'جارٍ التحميل…' : `عرض المزيد — ${formatNumber(leads.length)} من ${formatNumber(leadCount)}`}
+          </button>
+        </div>
+      )}
       <CrmTransferInbox onDecided={() => { bumpStats(); void loadLeads(); }} onNotice={setNotice} />
       {requestLeadId && (
         <CcCard tone="warning" className="p-5">

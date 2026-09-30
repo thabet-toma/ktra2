@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatBalanceWithSide, formatMoney } from "../../utils/formatNumber";
 import {
   ArrowLeft,
   ArrowDownLeft,
@@ -82,8 +82,9 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
   useEffect(() => { void load(); }, [load]);
 
   const currency = link?.currency_code || cashBox.currency || "";
-  const money = useCallback(
-    (v: string | number) => `${formatMoney(Number(v) || 0)}${currency ? ` ${currency}` : ""}`,
+  // #69: رصيدُ الصندوق بالقاعدة الموحّدة (المدين سالب وبجانبه جانبه) — الخادم يرسله مدين − دائن.
+  const balanceText = useCallback(
+    (v: string | number) => `${formatBalanceWithSide(Number(v) || 0)}${currency ? ` ${currency}` : ""}`,
     [currency],
   );
 
@@ -118,7 +119,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                 فتختلف القائمة عن الكشف لنفس الصندوق. */}
             <p className="text-xs text-[var(--color-text-muted)]">الرصيد الحالي</p>
             <p className="text-2xl font-bold text-blue-600 tabular-nums">
-              {statement ? money(statement.closing_balance) : "—"}
+              {statement ? balanceText(statement.closing_balance) : "—"}
             </p>
           </div>
           <button
@@ -168,13 +169,13 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
             <div>
               <span className="text-[var(--color-text-muted)]">رصيد افتتاحي: </span>
               <span className="font-bold tabular-nums">
-                {statement ? money(statement.opening_balance) : "—"}
+                {statement ? balanceText(statement.opening_balance) : "—"}
               </span>
             </div>
             <div>
               <span className="text-[var(--color-text-muted)]">رصيد ختامي: </span>
               <span className="font-bold tabular-nums text-[var(--color-primary)]">
-                {statement ? money(statement.closing_balance) : "—"}
+                {statement ? balanceText(statement.closing_balance) : "—"}
               </span>
             </div>
             <div className="flex items-end gap-2 ms-auto">
@@ -263,7 +264,7 @@ export const CashBoxStatement: React.FC<CashBoxStatementProps> = ({
                         {Number(row.credit) > 0 ? formatMoney(Number(row.credit)) : "—"}
                       </td>
                       <td className="px-3 py-2 font-bold tabular-nums dark:text-white text-xs">
-                        {formatMoney(Number(row.balance))}
+                        {formatBalanceWithSide(Number(row.balance))}
                       </td>
                     </tr>
                   ))

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { formatMoney } from "../../utils/formatNumber";
+import { formatBalanceWithSide, formatMoney } from "../../utils/formatNumber";
 import { formatDateValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useToast } from "../../contexts/ToastContext";
@@ -207,7 +207,9 @@ export const BankReconciliationPage: React.FC = () => {
       key: "credit", header: "صادر", numeric: true,
       render: (r) => (Number(r.credit) > 0 ? formatMoney(r.credit, "") : ""),
     },
-    { key: "balance", header: "الرصيد", numeric: true, render: (r) => formatMoney(r.balance, "") },
+    // #69: الرصيدُ الجاري بالقاعدة الموحّدة (الخادم: مدين − دائن). أرقامُ المطابقة في الشريط
+    // (الدفاتر/المؤشَّر/الكشف/الفرق) تبقى بإشارة البنك: تُطرح من رصيد الكشف الذي يُكتب موجباً.
+    { key: "balance", header: "الرصيد", numeric: true, render: (r) => formatBalanceWithSide(r.balance, "") },
   ];
 
   const actions: KitToolbarAction[] = [

@@ -288,7 +288,8 @@ export const InvoicePartnerLedgerTab: React.FC<{
           </div>
           <div className="rounded border border-[var(--ktra-border)] p-2">
             <div className="text-xs text-[var(--ktra-ink-soft)]">أثر الفاتورة</div>
-            <div className="text-base font-bold" dir="ltr">{formatPartyBalance(anchor.effect, isCreditor)}</div>
+            {/* الأثرُ حركةٌ لا رصيد: مبلغُها كما هو، بلا «مدين/دائن» ولا قلبِ إشارة الرصيد. */}
+            <div className="text-base font-bold" dir="ltr">{formatMoney(anchor.effect)}</div>
           </div>
           <div className="rounded border border-[var(--ktra-border)] p-2">
             <div className="text-xs text-[var(--ktra-ink-soft)]">الرصيد بعدها</div>

@@ -185,6 +185,17 @@ def _money(value) -> str:
     return str(Decimal(str(value or 0)).quantize(DEC))
 
 
+def _balance_cells(debit_net: Decimal, zero_side: str = "") -> dict:
+    """«الرصيد» وجانبه بالقاعدة الموحّدة لكل كشفٍ وتقرير (#33/#69): المدين سالب
+    وبجانبه «مدين»، والدائن موجب «دائن» — كرتُ الطرف نفسه
+    (`frontend_v2/utils/formatNumber.ts` — `formatBalanceWithSide`)، فلا يقرأ
+    المستخدم الرصيدَ نفسه بإشارتين بين الكرت والتقرير. `debit_net` = مدين − دائن.
+    """
+    if not debit_net:
+        return {"balance": _money(ZERO), "side": zero_side}
+    return {"balance": _money(-debit_net), "side": "مدين" if debit_net > 0 else "دائن"}
+
+
 def _qty(value) -> str:
     """كمية بلا أصفار زائدة — الكميات كسرية أحياناً والقطع صحيحة غالباً."""
     dec = Decimal(str(value or 0)).normalize()

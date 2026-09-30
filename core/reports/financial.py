@@ -44,6 +44,7 @@ from ._framework import (
     _apply_dates,
     _int_param,
     _money,
+    _balance_cells,
     _qty,
     _sum,
     _money_sum,
@@ -261,7 +262,6 @@ def _partner_balances(tenant_id: int, params: dict, *, partner_types: tuple) -> 
         r = agg.get(p["id"]) or {}
         debit = Decimal(str(r.get("debit") or 0))
         credit = Decimal(str(r.get("credit") or 0))
-        balance = debit - credit
         if debit == ZERO and credit == ZERO:
             continue
         rows.append({
@@ -270,10 +270,12 @@ def _partner_balances(tenant_id: int, params: dict, *, partner_types: tuple) -> 
             "partner_type": PARTNER_TYPE_LABELS.get(p["partner_type"], p["partner_type"]),
             "debit": _money(debit),
             "credit": _money(credit),
-            "balance": _money(abs(balance)),
-            "side": "مدين" if balance > 0 else ("دائن" if balance < 0 else "متوازن"),
+            # #69: المدين سالب (القاعدة الموحّدة) — كانت القيمة المطلقة فيُجمَع
+            # المدين والدائن معاً في إجمالي العمود.
+            **_balance_cells(debit - credit, zero_side="متوازن"),
         })
-    rows.sort(key=lambda r: Decimal(r["balance"]), reverse=True)
+    # الأكبر أثراً أولاً مهما كان جانبه.
+    rows.sort(key=lambda r: abs(Decimal(r["balance"])), reverse=True)
     return rows
 
 
@@ -281,8 +283,9 @@ _BALANCE_COLUMNS = (
     ReportColumn("partner_name", "الطرف"),
     ReportColumn("debit", "مدين", KIND_MONEY, total=True),
     ReportColumn("credit", "دائن", KIND_MONEY, total=True),
+    # الإجمالي صافٍ بالإشارة الموحّدة: سالبٌ = صافي مدين.
     ReportColumn("balance", "الرصيد", KIND_MONEY, total=True),
-    ReportColumn("side", "الجهة", width="90px"),
+    ReportColumn("side", "طبيعة الرصيد", width="90px"),
 )
 
 register(ReportSpec(

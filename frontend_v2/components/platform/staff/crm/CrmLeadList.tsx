@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LockKeyhole, PhoneCall, Search, UserPlus, X } from 'lucide-react';
 
 import type { CrmLead, CrmLeadStatus, CrmLookup } from '../../../../services/platformCrmApi';
@@ -7,6 +7,9 @@ import { formatDateValue } from '../../../../utils/formatDate';
 import { formatNumber } from '../../../../utils/formatNumber';
 import { CcAvatar, CcCard, CcEmpty, CcPill, CcSectionTitle, CcSkeleton } from '../../ui';
 import type { CrmEmployeePick } from './CrmManagerPanel';
+
+/** اسمُ المخزن (الأرقام بلا موظّف) — شارةُ الترشيح ولوحُ الفريق يقرآنه من هنا. */
+export const CRM_POOL_LABEL = 'المخزن المتاح';
 
 export const STATUS_LABELS: Record<CrmLeadStatus, string> = {
   new: 'جديد', contacted: 'تم الاتصال', interested: 'مهتم', follow_up: 'متابعة', customer: 'عميل',
@@ -30,6 +33,8 @@ export const STATUS_TONES: Record<CrmLeadStatus, CcTone> = {
 interface CrmLeadListProps {
   isManager: boolean; hasPersonalDesk: boolean; leads: CrmLead[]; scope: 'mine' | 'pool' | 'all' | 'follow_ups'; loading: boolean; error: string;
   onScope: (scope: 'mine' | 'pool' | 'all' | 'follow_ups') => void; onFilters: (q: string, status: CrmLeadStatus | '') => void;
+  /** البحثُ والحالةُ المطبَّقان (من الرابط) — الخانتان تبدآن بهما وتتبعانهما حين يتغيّران من خارجهما. */
+  appliedQ: string; appliedStatus: CrmLeadStatus | '';
   onSelect: (lead: CrmLead) => void; onClaim: (lead: CrmLead) => void; onLookup: (phone: string) => void;
   lookup: CrmLookup | null; lookupLoading: boolean; onOpenLookup: (id: number) => void; onRequestLookupTransfer: (id: number) => void;
   /** استلامُ رقمٍ وُجد في المخزن من بطاقة البحث مباشرةً — الفعلُ الصحيح هناك. */
@@ -56,9 +61,11 @@ const localStartOfToday = (): number => {
   return midnight.getTime();
 };
 
-export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonalDesk, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup, employeeFilter, employeeOptions, onEmployeeFilter }) => {
-  const [q, setQ] = useState('');
-  const [status, setStatus] = useState<CrmLeadStatus | ''>('');
+export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonalDesk, leads, scope, loading, error, onScope, onFilters, onSelect, onClaim, onLookup, lookup, lookupLoading, onOpenLookup, onRequestLookupTransfer, onClaimLookup, employeeFilter, employeeOptions, onEmployeeFilter, appliedQ, appliedStatus }) => {
+  const [q, setQ] = useState(appliedQ);
+  const [status, setStatus] = useState<CrmLeadStatus | ''>(appliedStatus);
+  useEffect(() => { setQ(appliedQ); }, [appliedQ]);
+  useEffect(() => { setStatus(appliedStatus); }, [appliedStatus]);
   const [phone, setPhone] = useState('');
   const startOfToday = localStartOfToday();
   const submitSearch = (event: React.FormEvent) => { event.preventDefault(); onFilters(q, status); };
@@ -70,7 +77,7 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
     : employeeOptions;
   const pickEmployee = (value: string) => {
     if (!value) { onEmployeeFilter(null); return; }
-    if (value === 'none') { onEmployeeFilter({ id: 'none', name: 'المخزن المتاح' }); return; }
+    if (value === 'none') { onEmployeeFilter({ id: 'none', name: CRM_POOL_LABEL }); return; }
     const option = employeeChoices.find((item) => String(item.id) === value);
     if (option) onEmployeeFilter({ id: option.id, name: option.name });
   };

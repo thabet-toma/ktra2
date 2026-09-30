@@ -375,8 +375,9 @@ class CrmPanelLandsOnADeskThatHasRowsTest(TestCase):
         cls.panel = (CRM_UI / "CrmPanel.tsx").read_text(encoding="utf-8")
 
     def _initial_scope_expression(self) -> str:
+        # النطاقُ صار في الرابط (`?scope=`، #73/#69) وافتراضيُّه `defaultScope` حين يغيب.
         match = re.search(
-            r"useState<Scope>\((?P<expression>[^;]*)\);", self.panel
+            r"const defaultScope: Scope = (?P<expression>[^;]*);", self.panel
         )
         self.assertIsNotNone(match, "لم يُعثر على النطاق الابتدائيّ في `CrmPanel`.")
         return match.group("expression")
