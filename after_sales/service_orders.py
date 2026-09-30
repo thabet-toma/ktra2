@@ -645,6 +645,21 @@ def validate_replacement_line(
         raise ValidationError({"replaces_device": "سطر الاستبدال مغطًّى بالكفالة، لا مفوتر."})
     if not product_tracks_serials(product):
         raise ValidationError({"replaces_device": "الجهاز البديل يجب أن يكون منتجاً مُرقَّم التسلسل."})
+    card = order.warranty_card
+    # قرار المالك (مراجعة #245): البديل يرث بند بيع القديم (`swap_sold_unit`)،
+    # والمرتجع اللاحق يطابق وحداته على منتج البند — فطرازٌ آخر لا يُرجَع على
+    # فاتورته أبداً. بلا بند بيعٍ (بطاقة يدوية) لا مرتجع، فيبقى مسموحاً بتنبيه.
+    old_unit = card.product_serial if card.product_serial_id else None
+    if (
+        old_unit is not None and old_unit.sales_line_id
+        and product.pk != old_unit.product_id
+    ):
+        raise ValidationError({
+            "replaces_device": (
+                "الجهاز البديل من نفس المنتج فقط — الجهاز القديم مباعٌ على فاتورة، "
+                "والبديل يحلّ محلّه على بندها فيُرجَع عليه لاحقاً."
+            ),
+        })
     if _replacement_parts(order).exclude(pk=part_id).exists():
         raise ValidationError({"replaces_device": "للأمر سطر استبدال واحد فقط."})
 
@@ -665,7 +680,8 @@ def validate_replacement_line(
 
 
 def replacement_warning(part: ServiceOrderPart) -> str:
-    """تحذير طراز مختلف — يُسمح به (الاستبدال بطراز أحدث شائع) لكن يُقرأ قبل الترحيل."""
+    """تحذير طراز مختلف — يُسمح به حين لا بند بيع للقديم (`validate_replacement_line`
+    يرفضه وإلا)، لكن يُقرأ قبل الترحيل."""
     card = part.order.warranty_card if part.order.warranty_card_id else None
     if not part.replaces_device or card is None or card.product_id == part.product_id:
         return ""

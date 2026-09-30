@@ -329,14 +329,43 @@ class ReplacementLineTest(ReplacementBase):
 
         self.assertEqual(response.status_code, 400, response.content)
 
-    def test_a_different_product_is_allowed_with_a_warning(self):
+    def other_model(self):
         other = Product.objects.create(
             tenant=self.tenant, sku="ALT-1", name_ar="طراز أحدث", is_serialized=True,
             quantity_on_hand=Decimal("0"), avg_cost=Decimal("0"),
         )
         self.make_policy(other, dealer_months=12)
         self.stock_units("ALT-1", product=other)
+        return other
+
+    def test_a_different_product_is_refused_when_the_old_unit_sits_on_a_sale_line(self):
+        """قرار المالك: البديل يرث بند البيع، والمرتجع اللاحق يطابق منتج البند —
+        فطرازٌ آخر لا يُرجَع أبداً على فاتورته. يُرفض بدل مرتجعٍ خاص."""
+        other = self.other_model()
         order = self.order()
+
+        response = self.replace_line(order, "ALT-1", product=other)
+
+        self.assertEqual(response.status_code, 400, response.content)
+        self.assertIn("نفس المنتج", str(response.content, "utf-8"))
+        self.assertFalse(order.parts.exists())
+
+    def test_a_different_product_is_allowed_with_a_warning_without_a_sale_line(self):
+        manual = WarrantyCard.objects.create(
+            tenant=self.tenant, device_name="لابتوب", serial="OLD-1",
+            product=self.product, product_serial=self.old_unit,
+            start_date=self.today - timedelta(days=5), duration_months=12,
+            end_date=self.today + timedelta(days=300),
+            source=WarrantyCard.SOURCE_MANUAL,
+        )
+        WarrantyCard.objects.filter(pk=self.card.pk).update(
+            ended_on=self.today, end_reason=WarrantyCard.END_RETURNED,
+        )
+        ProductSerial.objects.filter(pk=self.old_unit.pk).update(
+            status=ProductSerial.STATUS_IN_STOCK, sales_line=None,
+        )
+        other = self.other_model()
+        order = self.order(warranty_card=manual.pk)
 
         response = self.replace_line(order, "ALT-1", product=other)
 
