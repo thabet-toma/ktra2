@@ -8,7 +8,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { humanizeThrown } from "../../utils/drfError";
 import { useConfirm } from "../../contexts/ConfirmContext";
-import { Loader2, Save, Info } from "lucide-react";
+import { Boxes, Info, Landmark, Loader2, MapPin, Network, Percent, Save, Send, SlidersHorizontal, Truck, UserRound, Wallet } from "lucide-react";
 import {
   getSalesSettings,
   updateSalesSettings,
@@ -19,6 +19,7 @@ import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { salesSettingsWritablePayload } from "../../utils/salesSettingsPayload";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
+import { SettingsIndex, type SettingsIndexSection } from "../settings/SettingsIndex";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import {
   SERIAL_ENTRY_MODE_HINT,
@@ -214,6 +215,565 @@ export const SalesSettingsPage: React.FC = () => {
     },
   ];
 
+  // #75/#69: الأقسامُ فهرسُ بطاقاتٍ يُفتح واحدُها — كانت عشرةً مكدّسةً في صفحةٍ واحدة.
+  const sections: SettingsIndexSection[] = [
+    {
+      id: 'customer', title: 'العميل الافتراضي', icon: UserRound,
+      description: 'الزبون العام / الكاش المستخدم تلقائيًا عند إنشاء فاتورة جديدة',
+      keywords: ['العميل الافتراضي'],
+      content: (
+          <Section
+            title="العميل الافتراضي"
+            description="الزبون العام / الكاش المستخدم تلقائيًا عند إنشاء فاتورة جديدة"
+          >
+            <FieldLabel label="العميل الافتراضي">
+              <select
+                className={input}
+                value={settings.default_customer ?? ""}
+                onChange={(e) =>
+                  setField(
+                    "default_customer",
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+              >
+                <option value="">— اختر —</option>
+                {customers.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+              {settings.default_customer_name && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  الحالي: {settings.default_customer_name}
+                </div>
+              )}
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'currency', title: 'العملات والدفع', icon: Wallet,
+      description: 'العملة وطريقة الدفع الافتراضيتان، والصندوق وحساب ذمم العملاء.',
+      keywords: ['العملة الافتراضية', 'نوع الدفع الافتراضي', 'حساب الصندوق الافتراضي (للنقدي)', 'حساب ذمم (AR) افتراضي', 'اختيار الصندوق / البنك', 'اختيار حساب ذمم العملاء'],
+      content: (
+          <Section title="العملات والدفع">
+            <FieldLabel label="العملة الافتراضية">
+              <select
+                className={input}
+                value={settings.default_currency ?? ""}
+                onChange={(e) =>
+                  setField(
+                    "default_currency",
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+              >
+                <option value="">— اختر —</option>
+                {currencies.map((c) => (
+                  <option key={c.CurrencyID} value={c.CurrencyID}>
+                    {c.Code} {c.Name ? `— ${c.Name}` : ""}
+                  </option>
+                ))}
+              </select>
+              {settings.default_currency_code && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  الحالي: {settings.default_currency_code}
+                </div>
+              )}
+            </FieldLabel>
+
+            <FieldLabel label="نوع الدفع الافتراضي">
+              <select
+                className={input}
+                value={settings.default_payment_type}
+                onChange={(e) =>
+                  setField(
+                    "default_payment_type",
+                    e.target.value as "cash" | "credit"
+                  )
+                }
+              >
+                <option value="credit">آجل</option>
+                <option value="cash">نقدي</option>
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="حساب الصندوق الافتراضي (للنقدي)">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_cash_account ?? ""}
+                onChange={(id) => setField("default_cash_account", id)}
+                purpose="cash"
+                allowParents
+                title="اختيار الصندوق / البنك"
+              />
+            </FieldLabel>
+
+            <FieldLabel label="حساب ذمم (AR) افتراضي">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_ar_account ?? ""}
+                onChange={(id) => setField("default_ar_account", id)}
+                purpose="receivable"
+                allowParents
+                title="اختيار حساب ذمم العملاء"
+              />
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'revenue', title: 'حسابات الإيرادات', icon: Landmark,
+      description: 'تُستخدم عند ترحيل الفاتورة حسب طبيعة البند (بضاعة/خدمة)',
+      keywords: ['حساب إيراد بيع البضائع (منتج)', 'حساب إيراد الخدمات', 'اختيار حساب إيراد البضائع', 'اختيار حساب إيراد الخدمات'],
+      content: (
+          <Section
+            title="حسابات الإيرادات"
+            description="تُستخدم عند ترحيل الفاتورة حسب طبيعة البند (بضاعة/خدمة)"
+          >
+            <FieldLabel label="حساب إيراد بيع البضائع (منتج)">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_revenue_account_product ?? ""}
+                onChange={(id) => setField("default_revenue_account_product", id)}
+                purpose="revenue"
+                allowParents
+                title="اختيار حساب إيراد البضائع"
+              />
+              {settings.default_revenue_account_product_name && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  الحالي: {settings.default_revenue_account_product_name}
+                </div>
+              )}
+            </FieldLabel>
+
+            <FieldLabel label="حساب إيراد الخدمات">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_revenue_account_service ?? ""}
+                onChange={(id) => setField("default_revenue_account_service", id)}
+                purpose="revenue"
+                allowParents
+                title="اختيار حساب إيراد الخدمات"
+              />
+              {settings.default_revenue_account_service_name && (
+                <div className="text-[11px] ktra-text-soft mt-1">
+                  الحالي: {settings.default_revenue_account_service_name}
+                </div>
+              )}
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'inventory', title: 'المخزون وتكلفة المبيعات', icon: Boxes,
+      description: 'حسابات افتراضية تُستخدم عند عدم تحديدها على فئة المنتج',
+      keywords: ['حساب مخزون افتراضي', 'حساب تكلفة مبيعات (COGS) افتراضي', 'خصم المخزون عند الترحيل (افتراضيًا)', 'سياسة الرصيد السالب (افتراضيًا)', 'اختيار حساب المخزون', 'اختيار حساب تكلفة المبيعات'],
+      content: (
+          <Section
+            title="المخزون وتكلفة المبيعات"
+            description="حسابات افتراضية تُستخدم عند عدم تحديدها على فئة المنتج"
+          >
+            <FieldLabel label="حساب مخزون افتراضي">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_inventory_account ?? ""}
+                onChange={(id) => setField("default_inventory_account", id)}
+                purpose="inventory"
+                allowParents
+                title="اختيار حساب المخزون"
+              />
+            </FieldLabel>
+
+            <FieldLabel label="حساب تكلفة مبيعات (COGS) افتراضي">
+              <AccountTreeField
+                accounts={accounts}
+                value={settings.default_cogs_account ?? ""}
+                onChange={(id) => setField("default_cogs_account", id)}
+                purpose="expense"
+                allowParents
+                title="اختيار حساب تكلفة المبيعات"
+              />
+            </FieldLabel>
+
+            <FieldLabel label="خصم المخزون عند الترحيل (افتراضيًا)">
+              <select
+                className={input}
+                value={settings.stock_on_post_default ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("stock_on_post_default", e.target.value === "yes")
+                }
+              >
+                <option value="yes">خصم المخزون عند الترحيل</option>
+                <option value="no">عدم خصم المخزون عند الترحيل</option>
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="سياسة الرصيد السالب (افتراضيًا)">
+              <select
+                className={input}
+                value={settings.allow_negative_stock_default ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("allow_negative_stock_default", e.target.value === "yes")
+                }
+              >
+                <option value="yes">السماح ببيع المخزون بالسالب (تحذير فقط)</option>
+                <option value="no">منع البيع إذا تجاوز الكمية المتوفرة</option>
+              </select>
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'taxes', title: 'الضرائب', icon: Percent,
+      description: 'نسبة الضريبة الافتراضية وهل الأسعار شاملة لها.',
+      keywords: ['نسبة ضريبة القيمة المضافة الافتراضية', 'الأسعار شاملة الضريبة؟'],
+      content: (
+          <Section title="الضرائب">
+            <FieldLabel label="نسبة ضريبة القيمة المضافة الافتراضية">
+              <select
+                className={input}
+                value={settings.default_vat_rate ?? ""}
+                onChange={(e) =>
+                  setField(
+                    "default_vat_rate",
+                    e.target.value ? Number(e.target.value) : null
+                  )
+                }
+              >
+                <option value="">— بدون —</option>
+                {taxRates.map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.code} — {t.name} ({t.rate}%)
+                  </option>
+                ))}
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="الأسعار شاملة الضريبة؟">
+              <select
+                className={input}
+                value={settings.prices_include_tax ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("prices_include_tax", e.target.value === "yes")
+                }
+              >
+                <option value="no">لا — تُضاف الضريبة فوق السعر</option>
+                <option value="yes">نعم — السعر يشمل الضريبة</option>
+              </select>
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    {
+      id: 'posting', title: 'سلوك الترحيل والمعاينة', icon: Send,
+      description: 'ماذا يحدث عند ترحيل الفاتورة ومعاينتها وطباعتها.',
+      keywords: ['ترحيل تلقائي بعد الحفظ', 'ترحيل سندات القبض والصرف بعد الحفظ', 'إظهار معاينة القيد قبل الترحيل', 'ردّ دفعة مرتجع البيع تلقائياً'],
+      content: (
+          <Section title="سلوك الترحيل والمعاينة">
+            <FieldLabel label="ترحيل تلقائي بعد الحفظ">
+              <select
+                className={input}
+                value={settings.auto_post_invoices ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("auto_post_invoices", e.target.value === "yes")
+                }
+              >
+                <option value="no">حفظ فقط بدون ترحيل</option>
+                <option value="yes">ترحيل تلقائي بعد الحفظ</option>
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="ترحيل سندات القبض والصرف بعد الحفظ">
+              <select
+                className={input}
+                value={settings.auto_post_payments ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("auto_post_payments", e.target.value === "yes")
+                }
+              >
+                <option value="yes">«حفظ» يرحّل السند مباشرةً (موصى به)</option>
+                <option value="no">حفظ كمسودة ثم ترحيل يدوي</option>
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="إظهار معاينة القيد قبل الترحيل">
+              <select
+                className={input}
+                value={settings.show_journal_preview ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("show_journal_preview", e.target.value === "yes")
+                }
+              >
+                <option value="yes">إظهار معاينة القيد</option>
+                <option value="no">إخفاء معاينة القيد</option>
+              </select>
+            </FieldLabel>
+
+            <FieldLabel label="ردّ دفعة مرتجع البيع تلقائياً">
+              <select
+                className={input}
+                value={settings.auto_refund_on_sales_return ? "yes" : "no"}
+                onChange={(e) =>
+                  setField("auto_refund_on_sales_return", e.target.value === "yes")
+                }
+              >
+                <option value="no">مطفأ — تُسأل عند كل ترحيل</option>
+                <option value="yes">مفعّل — ردّ تلقائي بلا سؤال</option>
+              </select>
+              <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
+                عند ترحيل مرتجع البيع يُردّ للزبون ما دفعه: الشيكُ الذي ما زال في
+                المحفظة يعود إليه ورقةً، وما وصل الصندوقَ يعود نقداً من الصندوق
+                الافتراضيّ. وما يقابله شيكٌ عند البنك لم يُحصَّل بعدُ لا يُردّ —
+                يبقى رصيداً دائناً للزبون. مطفأً: تُسأل عند كل ترحيل.
+              </p>
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    // T-S2: إعدادات عامة (سلوك) — مودلة على إعدادات التطبيق المكتبي (صورة 7).
+    {
+      id: 'behavior', title: 'إعدادات عامة (السلوك)', icon: SlidersHorizontal,
+      description: 'سلوكيات عامة لمحرّر الفاتورة. تُربط بسلوك حقيقي في الشاشة.',
+      keywords: ['عند تكرار المادة في الفاتورة', 'فاتورة البيع بخسارة (سعر أقل من التكلفة)', 'تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)', 'صلاحية عرض السعر (يوم)', 'حجز كمية الطلبية المؤكَّدة (يوم)', 'إظهار زر «حذف» في العروض والطلبيات', 'بيع الكمية المحجوزة لطلبية زبون آخر', 'إدخال الأرقام التسلسلية في فاتورة البيع'],
+      content: (
+          <Section
+            title="إعدادات عامة (السلوك)"
+            description="سلوكيات عامة لمحرّر الفاتورة. تُربط بسلوك حقيقي في الشاشة."
+          >
+            <FieldLabel label="عند تكرار المادة في الفاتورة">
+              <select
+                className={input}
+                value={settings.warn_on_duplicate_item ? "yes" : "no"}
+                onChange={(e) => setField("warn_on_duplicate_item", e.target.value === "yes")}
+              >
+                <option value="yes">إظهار رسالة تنبيه وتأكيد (مُوصى)</option>
+                <option value="no">إضافة سطر جديد مباشرة بلا تنبيه</option>
+              </select>
+            </FieldLabel>
+            <FieldLabel label="فاتورة البيع بخسارة (سعر أقل من التكلفة)">
+              <select
+                className={input}
+                value={settings.block_loss_invoices ? "yes" : "no"}
+                onChange={(e) => setField("block_loss_invoices", e.target.value === "yes")}
+              >
+                <option value="no">السماح بالحفظ (افتراضي)</option>
+                <option value="yes">منع الحفظ والترحيل</option>
+              </select>
+            </FieldLabel>
+            {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
+            <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">
+              <input
+                type="number"
+                min={0}
+                className={input}
+                value={settings.dormant_customer_days ?? 30}
+                onChange={(e) =>
+                  setField("dormant_customer_days", Math.max(0, Number(e.target.value) || 0))
+                }
+              />
+            </FieldLabel>
+            {/* T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف. */}
+            <FieldLabel label="صلاحية عرض السعر (يوم)">
+              <input
+                type="number"
+                min={0}
+                className={input}
+                value={settings.quotation_valid_days ?? 14}
+                onChange={(e) =>
+                  setField("quotation_valid_days", Math.max(0, Number(e.target.value) || 0))
+                }
+              />
+            </FieldLabel>
+            <FieldLabel label="حجز كمية الطلبية المؤكَّدة (يوم)">
+              <input
+                type="number"
+                min={0}
+                className={input}
+                value={settings.order_reserve_days ?? 7}
+                onChange={(e) =>
+                  setField("order_reserve_days", Math.max(0, Number(e.target.value) || 0))
+                }
+              />
+            </FieldLabel>
+            <FieldLabel label="إظهار زر «حذف» في العروض والطلبيات">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={settings.allow_document_delete !== false}
+                  onChange={(e) => setField("allow_document_delete", e.target.checked)}
+                />
+                <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
+              </label>
+            </FieldLabel>
+            {/* T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تسحبه. */}
+            <FieldLabel label="بيع الكمية المحجوزة لطلبية زبون آخر">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={settings.block_reserved_stock_sale !== false}
+                  onChange={(e) => setField("block_reserved_stock_sale", e.target.checked)}
+                />
+                <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
+              </label>
+            </FieldLabel>
+            {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على المنتجات المتتبَّعة وحدها. */}
+            <FieldLabel label="إدخال الأرقام التسلسلية في فاتورة البيع">
+              <select
+                className={input}
+                value={settings.serial_entry_mode ?? "off"}
+                onChange={(e) => setField("serial_entry_mode", e.target.value as SerialEntryMode)}
+              >
+                {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <div className="text-[11px] ktra-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    // مستند التسليم: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان.
+    {
+      id: 'delivery', title: 'مستند التسليم (الإرسالية)', icon: Truck,
+      description: 'سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر.',
+      keywords: ['اسم المستند المرتبط بفاتورة', 'اسم المستند بلا فاتورة', 'السماح بمستند تسليم بلا فاتورة مرتبطة', 'السماح بتعديل/إلغاء الإرسالية'],
+      content: (
+          <Section
+            title="مستند التسليم (الإرسالية)"
+            description="سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر."
+          >
+            <FieldLabel label="اسم المستند المرتبط بفاتورة">
+              <input
+                className={input}
+                value={settings.delivery_doc_label ?? ""}
+                placeholder="إرسالية بيع"
+                onChange={(e) => setField("delivery_doc_label", e.target.value)}
+              />
+            </FieldLabel>
+            <FieldLabel label="اسم المستند بلا فاتورة">
+              <input
+                className={input}
+                value={settings.standalone_delivery_label ?? ""}
+                placeholder="سند تسليم"
+                disabled={settings.allow_standalone_delivery === false}
+                onChange={(e) => setField("standalone_delivery_label", e.target.value)}
+              />
+            </FieldLabel>
+            <FieldLabel label="السماح بمستند تسليم بلا فاتورة مرتبطة">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={settings.allow_standalone_delivery !== false}
+                  onChange={(e) => setField("allow_standalone_delivery", e.target.checked)}
+                />
+                <span>يُرحَّل مقابل «بضاعة مسلَّمة لم تُفوتَر» حتى تصدر الفاتورة</span>
+              </label>
+            </FieldLabel>
+            <FieldLabel label="السماح بتعديل/إلغاء الإرسالية">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 accent-emerald-600"
+                  checked={settings.allow_edit_delivery !== false}
+                  onChange={(e) => setField("allow_edit_delivery", e.target.checked)}
+                />
+                <span>التعديل يعكس أثر الإرسالية القديم ويعيد تطبيقه</span>
+              </label>
+            </FieldLabel>
+          </Section>
+      ),
+    },
+    // T-S3: خريطة القيد المحاسبي لكل نوع فاتورة (صورة 6) + استعادة الافتراضي.
+    {
+      id: 'journal-map', title: 'خريطة القيد المحاسبي (الحسابات الافتراضية لكل نوع)', icon: Network,
+      description: 'الحسابات التي يُرحَّل إليها كل نوع فاتورة. تُعدَّل من حقول الحسابات أعلاه.',
+      keywords: ['حساب مدين ودائن لكل نوع فاتورة', 'استعادة الافتراضي'],
+      content: (
+          <Section
+            title="خريطة القيد المحاسبي (الحسابات الافتراضية لكل نوع)"
+            description="الحسابات التي يُرحَّل إليها كل نوع فاتورة. تُعدَّل من حقول الحسابات أعلاه."
+          >
+            <div className="md:col-span-2 overflow-x-auto">
+              <table className="w-full text-sm ktra-grid" data-variant="list">
+                <thead>
+                  <tr>
+                    <th className="text-right p-2">نوع الفاتورة / الحركة</th>
+                    <th className="text-right p-2">مدين</th>
+                    <th className="text-right p-2">دائن</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td className="p-2">بيع نقدي</td>
+                    <td className="p-2">{acctName(settings.default_cash_account)}</td>
+                    <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
+                  </tr>
+                  <tr>
+                    <td className="p-2">بيع آجل (ذمم)</td>
+                    <td className="p-2">ذمم العميل <span className="ktra-text-soft">(حساب العميل المرتبط، أو الافتراضي: {acctName(settings.default_ar_account)})</span></td>
+                    <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
+                  </tr>
+                  <tr>
+                    <td className="p-2">بيع خدمات</td>
+                    <td className="p-2">الصندوق / ذمم العميل</td>
+                    <td className="p-2">{acctName(settings.default_revenue_account_service)}</td>
+                  </tr>
+                  <tr>
+                    <td className="p-2">تكلفة المبيعات (عند خصم المخزون)</td>
+                    <td className="p-2">{acctName(settings.default_cogs_account)}</td>
+                    <td className="p-2">{acctName(settings.default_inventory_account)}</td>
+                  </tr>
+                </tbody>
+              </table>
+              <button
+                type="button"
+                onClick={handleRestoreDefaults}
+                disabled={saving}
+                className="mt-3 text-sm px-3 py-1.5 rounded-lg border ktra-border-soft hover:ktra-bg-panel disabled:opacity-40"
+              >
+                استعادة خريطة القيد الافتراضية
+              </button>
+            </div>
+          </Section>
+      ),
+    },
+    {
+      id: 'shipping', title: 'الشحن المحلي', icon: MapPin,
+      description: 'القيم الافتراضية لواجهة الشحن (From / To)',
+      keywords: ['الجهة (From)', 'إلى (To)'],
+      content: (
+          <Section
+            title="الشحن المحلي"
+            description="القيم الافتراضية لواجهة الشحن (From / To)"
+          >
+            <FieldLabel label="الجهة (From)">
+              <input
+                className={input}
+                value={settings.default_shipping_origin || ""}
+                onChange={(e) => setField("default_shipping_origin", e.target.value)}
+              />
+            </FieldLabel>
+
+            <FieldLabel label="إلى (To)">
+              <input
+                className={input}
+                value={settings.default_shipping_destination || ""}
+                onChange={(e) =>
+                  setField("default_shipping_destination", e.target.value)
+                }
+              />
+            </FieldLabel>
+          </Section>
+      ),
+    },
+  ];
+
   const innerContent = (
     <div className="max-w-6xl mx-auto p-4 md:p-6 space-y-5" dir="rtl">
       <div className="ktra-banner" style={{ display: "flex", alignItems: "center", gap: "8px", padding: "8px 12px", background: "var(--ktra-surface-2, #f4ede0)" }}>
@@ -236,501 +796,11 @@ export const SalesSettingsPage: React.FC = () => {
           {err}
         </div>
       )}
-
-      <Section
-        title="العميل الافتراضي"
-        description="الزبون العام / الكاش المستخدم تلقائيًا عند إنشاء فاتورة جديدة"
-      >
-        <FieldLabel label="العميل الافتراضي">
-          <select
-            className={input}
-            value={settings.default_customer ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_customer",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {customers.map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.name}
-              </option>
-            ))}
-          </select>
-          {settings.default_customer_name && (
-            <div className="text-[11px] ktra-text-soft mt-1">
-              الحالي: {settings.default_customer_name}
-            </div>
-          )}
-        </FieldLabel>
-      </Section>
-
-      <Section title="العملات والدفع">
-        <FieldLabel label="العملة الافتراضية">
-          <select
-            className={input}
-            value={settings.default_currency ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_currency",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— اختر —</option>
-            {currencies.map((c) => (
-              <option key={c.CurrencyID} value={c.CurrencyID}>
-                {c.Code} {c.Name ? `— ${c.Name}` : ""}
-              </option>
-            ))}
-          </select>
-          {settings.default_currency_code && (
-            <div className="text-[11px] ktra-text-soft mt-1">
-              الحالي: {settings.default_currency_code}
-            </div>
-          )}
-        </FieldLabel>
-
-        <FieldLabel label="نوع الدفع الافتراضي">
-          <select
-            className={input}
-            value={settings.default_payment_type}
-            onChange={(e) =>
-              setField(
-                "default_payment_type",
-                e.target.value as "cash" | "credit"
-              )
-            }
-          >
-            <option value="credit">آجل</option>
-            <option value="cash">نقدي</option>
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="حساب الصندوق الافتراضي (للنقدي)">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_cash_account ?? ""}
-            onChange={(id) => setField("default_cash_account", id)}
-            purpose="cash"
-            allowParents
-            title="اختيار الصندوق / البنك"
-          />
-        </FieldLabel>
-
-        <FieldLabel label="حساب ذمم (AR) افتراضي">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_ar_account ?? ""}
-            onChange={(id) => setField("default_ar_account", id)}
-            purpose="receivable"
-            allowParents
-            title="اختيار حساب ذمم العملاء"
-          />
-        </FieldLabel>
-      </Section>
-
-      <Section
-        title="حسابات الإيرادات"
-        description="تُستخدم عند ترحيل الفاتورة حسب طبيعة البند (بضاعة/خدمة)"
-      >
-        <FieldLabel label="حساب إيراد بيع البضائع (منتج)">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_revenue_account_product ?? ""}
-            onChange={(id) => setField("default_revenue_account_product", id)}
-            purpose="revenue"
-            allowParents
-            title="اختيار حساب إيراد البضائع"
-          />
-          {settings.default_revenue_account_product_name && (
-            <div className="text-[11px] ktra-text-soft mt-1">
-              الحالي: {settings.default_revenue_account_product_name}
-            </div>
-          )}
-        </FieldLabel>
-
-        <FieldLabel label="حساب إيراد الخدمات">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_revenue_account_service ?? ""}
-            onChange={(id) => setField("default_revenue_account_service", id)}
-            purpose="revenue"
-            allowParents
-            title="اختيار حساب إيراد الخدمات"
-          />
-          {settings.default_revenue_account_service_name && (
-            <div className="text-[11px] ktra-text-soft mt-1">
-              الحالي: {settings.default_revenue_account_service_name}
-            </div>
-          )}
-        </FieldLabel>
-      </Section>
-
-      <Section
-        title="المخزون وتكلفة المبيعات"
-        description="حسابات افتراضية تُستخدم عند عدم تحديدها على فئة المنتج"
-      >
-        <FieldLabel label="حساب مخزون افتراضي">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_inventory_account ?? ""}
-            onChange={(id) => setField("default_inventory_account", id)}
-            purpose="inventory"
-            allowParents
-            title="اختيار حساب المخزون"
-          />
-        </FieldLabel>
-
-        <FieldLabel label="حساب تكلفة مبيعات (COGS) افتراضي">
-          <AccountTreeField
-            accounts={accounts}
-            value={settings.default_cogs_account ?? ""}
-            onChange={(id) => setField("default_cogs_account", id)}
-            purpose="expense"
-            allowParents
-            title="اختيار حساب تكلفة المبيعات"
-          />
-        </FieldLabel>
-
-        <FieldLabel label="خصم المخزون عند الترحيل (افتراضيًا)">
-          <select
-            className={input}
-            value={settings.stock_on_post_default ? "yes" : "no"}
-            onChange={(e) =>
-              setField("stock_on_post_default", e.target.value === "yes")
-            }
-          >
-            <option value="yes">خصم المخزون عند الترحيل</option>
-            <option value="no">عدم خصم المخزون عند الترحيل</option>
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="سياسة الرصيد السالب (افتراضيًا)">
-          <select
-            className={input}
-            value={settings.allow_negative_stock_default ? "yes" : "no"}
-            onChange={(e) =>
-              setField("allow_negative_stock_default", e.target.value === "yes")
-            }
-          >
-            <option value="yes">السماح ببيع المخزون بالسالب (تحذير فقط)</option>
-            <option value="no">منع البيع إذا تجاوز الكمية المتوفرة</option>
-          </select>
-        </FieldLabel>
-      </Section>
-
-      <Section title="الضرائب">
-        <FieldLabel label="نسبة ضريبة القيمة المضافة الافتراضية">
-          <select
-            className={input}
-            value={settings.default_vat_rate ?? ""}
-            onChange={(e) =>
-              setField(
-                "default_vat_rate",
-                e.target.value ? Number(e.target.value) : null
-              )
-            }
-          >
-            <option value="">— بدون —</option>
-            {taxRates.map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.code} — {t.name} ({t.rate}%)
-              </option>
-            ))}
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="الأسعار شاملة الضريبة؟">
-          <select
-            className={input}
-            value={settings.prices_include_tax ? "yes" : "no"}
-            onChange={(e) =>
-              setField("prices_include_tax", e.target.value === "yes")
-            }
-          >
-            <option value="no">لا — تُضاف الضريبة فوق السعر</option>
-            <option value="yes">نعم — السعر يشمل الضريبة</option>
-          </select>
-        </FieldLabel>
-      </Section>
-
-      <Section title="سلوك الترحيل والمعاينة">
-        <FieldLabel label="ترحيل تلقائي بعد الحفظ">
-          <select
-            className={input}
-            value={settings.auto_post_invoices ? "yes" : "no"}
-            onChange={(e) =>
-              setField("auto_post_invoices", e.target.value === "yes")
-            }
-          >
-            <option value="no">حفظ فقط بدون ترحيل</option>
-            <option value="yes">ترحيل تلقائي بعد الحفظ</option>
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="ترحيل سندات القبض والصرف بعد الحفظ">
-          <select
-            className={input}
-            value={settings.auto_post_payments ? "yes" : "no"}
-            onChange={(e) =>
-              setField("auto_post_payments", e.target.value === "yes")
-            }
-          >
-            <option value="yes">«حفظ» يرحّل السند مباشرةً (موصى به)</option>
-            <option value="no">حفظ كمسودة ثم ترحيل يدوي</option>
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="إظهار معاينة القيد قبل الترحيل">
-          <select
-            className={input}
-            value={settings.show_journal_preview ? "yes" : "no"}
-            onChange={(e) =>
-              setField("show_journal_preview", e.target.value === "yes")
-            }
-          >
-            <option value="yes">إظهار معاينة القيد</option>
-            <option value="no">إخفاء معاينة القيد</option>
-          </select>
-        </FieldLabel>
-
-        <FieldLabel label="ردّ دفعة مرتجع البيع تلقائياً">
-          <select
-            className={input}
-            value={settings.auto_refund_on_sales_return ? "yes" : "no"}
-            onChange={(e) =>
-              setField("auto_refund_on_sales_return", e.target.value === "yes")
-            }
-          >
-            <option value="no">مطفأ — تُسأل عند كل ترحيل</option>
-            <option value="yes">مفعّل — ردّ تلقائي بلا سؤال</option>
-          </select>
-          <p className="text-xs ktra-text-soft dark:ktra-text-soft mt-1">
-            عند ترحيل مرتجع البيع يُردّ للزبون ما دفعه: الشيكُ الذي ما زال في
-            المحفظة يعود إليه ورقةً، وما وصل الصندوقَ يعود نقداً من الصندوق
-            الافتراضيّ. وما يقابله شيكٌ عند البنك لم يُحصَّل بعدُ لا يُردّ —
-            يبقى رصيداً دائناً للزبون. مطفأً: تُسأل عند كل ترحيل.
-          </p>
-        </FieldLabel>
-      </Section>
-
-      {/* T-S2: إعدادات عامة (سلوك) — مودلة على إعدادات التطبيق المكتبي (صورة 7). */}
-      <Section
-        title="إعدادات عامة (السلوك)"
-        description="سلوكيات عامة لمحرّر الفاتورة. تُربط بسلوك حقيقي في الشاشة."
-      >
-        <FieldLabel label="عند تكرار المادة في الفاتورة">
-          <select
-            className={input}
-            value={settings.warn_on_duplicate_item ? "yes" : "no"}
-            onChange={(e) => setField("warn_on_duplicate_item", e.target.value === "yes")}
-          >
-            <option value="yes">إظهار رسالة تنبيه وتأكيد (مُوصى)</option>
-            <option value="no">إضافة سطر جديد مباشرة بلا تنبيه</option>
-          </select>
-        </FieldLabel>
-        <FieldLabel label="فاتورة البيع بخسارة (سعر أقل من التكلفة)">
-          <select
-            className={input}
-            value={settings.block_loss_invoices ? "yes" : "no"}
-            onChange={(e) => setField("block_loss_invoices", e.target.value === "yes")}
-          >
-            <option value="no">السماح بالحفظ (افتراضي)</option>
-            <option value="yes">منع الحفظ والترحيل</option>
-          </select>
-        </FieldLabel>
-        {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
-        <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">
-          <input
-            type="number"
-            min={0}
-            className={input}
-            value={settings.dormant_customer_days ?? 30}
-            onChange={(e) =>
-              setField("dormant_customer_days", Math.max(0, Number(e.target.value) || 0))
-            }
-          />
-        </FieldLabel>
-        {/* T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف. */}
-        <FieldLabel label="صلاحية عرض السعر (يوم)">
-          <input
-            type="number"
-            min={0}
-            className={input}
-            value={settings.quotation_valid_days ?? 14}
-            onChange={(e) =>
-              setField("quotation_valid_days", Math.max(0, Number(e.target.value) || 0))
-            }
-          />
-        </FieldLabel>
-        <FieldLabel label="حجز كمية الطلبية المؤكَّدة (يوم)">
-          <input
-            type="number"
-            min={0}
-            className={input}
-            value={settings.order_reserve_days ?? 7}
-            onChange={(e) =>
-              setField("order_reserve_days", Math.max(0, Number(e.target.value) || 0))
-            }
-          />
-        </FieldLabel>
-        <FieldLabel label="إظهار زر «حذف» في العروض والطلبيات">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-emerald-600"
-              checked={settings.allow_document_delete !== false}
-              onChange={(e) => setField("allow_document_delete", e.target.checked)}
-            />
-            <span>عند الإطفاء يبقى «إلغاء» فقط (لا يحذف المستند)</span>
-          </label>
-        </FieldLabel>
-        {/* T-RESERVEGUARD: الحجز كان عرضاً بلا أثر — فاتورة لزبون آخر كانت تسحبه. */}
-        <FieldLabel label="بيع الكمية المحجوزة لطلبية زبون آخر">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-emerald-600"
-              checked={settings.block_reserved_stock_sale !== false}
-              onChange={(e) => setField("block_reserved_stock_sale", e.target.checked)}
-            />
-            <span>منع ترحيل فاتورة تسحب كمية محجوزة (يظهر المحجوز في «تقرير المحجوزات»)</span>
-          </label>
-        </FieldLabel>
-        {/* T-SERIAL: نمط الأرقام التسلسلية في بنود البيع — يُفعَّل على المنتجات المتتبَّعة وحدها. */}
-        <FieldLabel label="إدخال الأرقام التسلسلية في فاتورة البيع">
-          <select
-            className={input}
-            value={settings.serial_entry_mode ?? "off"}
-            onChange={(e) => setField("serial_entry_mode", e.target.value as SerialEntryMode)}
-          >
-            {SERIAL_ENTRY_MODE_OPTIONS.map((o) => (
-              <option key={o.value} value={o.value}>{o.label}</option>
-            ))}
-          </select>
-          <div className="text-[11px] ktra-text-soft mt-1">{SERIAL_ENTRY_MODE_HINT}</div>
-        </FieldLabel>
-      </Section>
-
-      {/* مستند التسليم: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
-      <Section
-        title="مستند التسليم (الإرسالية)"
-        description="سمِّ المستند كما تسميه شركتك — الاسم يظهر في الشاشات والطباعة. المستند المرتبط بفاتورة اسم، والمستند بلا فاتورة (بضاعة خرجت قبل فوترتها) اسم آخر."
-      >
-        <FieldLabel label="اسم المستند المرتبط بفاتورة">
-          <input
-            className={input}
-            value={settings.delivery_doc_label ?? ""}
-            placeholder="إرسالية بيع"
-            onChange={(e) => setField("delivery_doc_label", e.target.value)}
-          />
-        </FieldLabel>
-        <FieldLabel label="اسم المستند بلا فاتورة">
-          <input
-            className={input}
-            value={settings.standalone_delivery_label ?? ""}
-            placeholder="سند تسليم"
-            disabled={settings.allow_standalone_delivery === false}
-            onChange={(e) => setField("standalone_delivery_label", e.target.value)}
-          />
-        </FieldLabel>
-        <FieldLabel label="السماح بمستند تسليم بلا فاتورة مرتبطة">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-emerald-600"
-              checked={settings.allow_standalone_delivery !== false}
-              onChange={(e) => setField("allow_standalone_delivery", e.target.checked)}
-            />
-            <span>يُرحَّل مقابل «بضاعة مسلَّمة لم تُفوتَر» حتى تصدر الفاتورة</span>
-          </label>
-        </FieldLabel>
-        <FieldLabel label="السماح بتعديل/إلغاء الإرسالية">
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="w-4 h-4 accent-emerald-600"
-              checked={settings.allow_edit_delivery !== false}
-              onChange={(e) => setField("allow_edit_delivery", e.target.checked)}
-            />
-            <span>التعديل يعكس أثر الإرسالية القديم ويعيد تطبيقه</span>
-          </label>
-        </FieldLabel>
-      </Section>
-
-      {/* T-S3: خريطة القيد المحاسبي لكل نوع فاتورة (صورة 6) + استعادة الافتراضي. */}
-      <Section
-        title="خريطة القيد المحاسبي (الحسابات الافتراضية لكل نوع)"
-        description="الحسابات التي يُرحَّل إليها كل نوع فاتورة. تُعدَّل من حقول الحسابات أعلاه."
-      >
-        <div className="md:col-span-2 overflow-x-auto">
-          <table className="w-full text-sm ktra-grid" data-variant="list">
-            <thead>
-              <tr>
-                <th className="text-right p-2">نوع الفاتورة / الحركة</th>
-                <th className="text-right p-2">مدين</th>
-                <th className="text-right p-2">دائن</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td className="p-2">بيع نقدي</td>
-                <td className="p-2">{acctName(settings.default_cash_account)}</td>
-                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
-              </tr>
-              <tr>
-                <td className="p-2">بيع آجل (ذمم)</td>
-                <td className="p-2">ذمم العميل <span className="ktra-text-soft">(حساب العميل المرتبط، أو الافتراضي: {acctName(settings.default_ar_account)})</span></td>
-                <td className="p-2">{acctName(settings.default_revenue_account_product)} <span className="ktra-text-soft">+ ض.ق.م مخرجات</span></td>
-              </tr>
-              <tr>
-                <td className="p-2">بيع خدمات</td>
-                <td className="p-2">الصندوق / ذمم العميل</td>
-                <td className="p-2">{acctName(settings.default_revenue_account_service)}</td>
-              </tr>
-              <tr>
-                <td className="p-2">تكلفة المبيعات (عند خصم المخزون)</td>
-                <td className="p-2">{acctName(settings.default_cogs_account)}</td>
-                <td className="p-2">{acctName(settings.default_inventory_account)}</td>
-              </tr>
-            </tbody>
-          </table>
-          <button
-            type="button"
-            onClick={handleRestoreDefaults}
-            disabled={saving}
-            className="mt-3 text-sm px-3 py-1.5 rounded-lg border ktra-border-soft hover:ktra-bg-panel disabled:opacity-40"
-          >
-            استعادة خريطة القيد الافتراضية
-          </button>
-        </div>
-      </Section>
-
-      <Section
-        title="الشحن المحلي"
-        description="القيم الافتراضية لواجهة الشحن (From / To)"
-      >
-        <FieldLabel label="الجهة (From)">
-          <input
-            className={input}
-            value={settings.default_shipping_origin || ""}
-            onChange={(e) => setField("default_shipping_origin", e.target.value)}
-          />
-        </FieldLabel>
-
-        <FieldLabel label="إلى (To)">
-          <input
-            className={input}
-            value={settings.default_shipping_destination || ""}
-            onChange={(e) =>
-              setField("default_shipping_destination", e.target.value)
-            }
-          />
-        </FieldLabel>
-      </Section>
+      <SettingsIndex
+        title="إعدادات فواتير المبيعات"
+        showTitle={false}
+        sections={sections}
+      />
     </div>
   );
 

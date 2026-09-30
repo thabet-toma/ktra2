@@ -384,6 +384,8 @@ test('إعدادات البيع: تغيير نمط الأرقام يُحفَظ �
   await page.waitForLoadState('networkidle');
   // الشاشة chunk كسول على خادم التطوير — انتظرها بدل افتراض أنها جاهزة.
   await expect(page.getByRole('button', { name: /حفظ الإعدادات/ })).toBeVisible({ timeout: 30_000 });
+  // #75: الأقسامُ فهرسُ بطاقات — النمطُ في «إعدادات عامة (السلوك)».
+  await page.getByTestId('settings-card-behavior').click();
 
   const select = page.locator('label:has(span:text-is("إدخال الأرقام التسلسلية في فاتورة البيع")) select');
   await expect(select).toHaveValue('off');
@@ -405,7 +407,9 @@ test('إعدادات الشراء: تغيير نمط الأرقام يُحفَظ
   await install(page, state);
   await page.goto('/purchase-settings');
   await page.waitForLoadState('networkidle');
-  await expect(page.getByText('إدخال الأرقام التسلسلية في فاتورة الشراء')).toBeVisible({ timeout: 30_000 });
+  // #75: الأقسامُ فهرسُ بطاقات — البطاقةُ تحمل عنوانَ القسم نفسَه.
+  await page.getByTestId('settings-card-serials').click({ timeout: 30_000 });
+  await expect(page.getByRole('heading', { name: 'إدخال الأرقام التسلسلية في فاتورة الشراء' })).toBeVisible();
 
   const select = page.locator('select').filter({ hasText: 'اختياري' }).first();
   await expect(select).toHaveValue('off');

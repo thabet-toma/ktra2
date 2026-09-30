@@ -20,9 +20,12 @@ import { useSimpleUi } from '../hooks/useSimpleUi';
 import { humanizeThrown } from '../utils/drfError';
 import { formatDateTimeValue } from '../utils/formatDate';
 import { MyPlanCard } from './MyPlanCard';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { usePermissions } from '../contexts/PermissionsContext';
 import { SUPPORT_ACCESS_PATH } from './settings/SupportAccessPage';
+import { SETTINGS_SECTION_PARAM, SettingsIndex, type SettingsIndexSection } from './settings/SettingsIndex';
+import { moduleAllowsView, permForView, templateHidesView } from '../utils/viewPermissions';
+import { Building2, CreditCard, Database, KeyRound, LifeBuoy, Palette, Receipt, ShieldCheck, ShoppingCart, Store, UserRound } from 'lucide-react';
 import {
     listLoginDevices,
     evictLoginDevice,
@@ -31,6 +34,11 @@ import {
     renameLoginDevice,
     type LoginDevice,
 } from '../services/loginDevicesApi';
+
+// ثوابتُ المجموعة تُفتح هنا أيضاً (بطاقة «الشركة») لا بـF11 وحدَه — تُحمَّل حين يُفتح قسمُها فقط.
+const GroupConstantsPage = React.lazy(() => import('./settings/GroupConstantsPage').then((m) => ({ default: m.GroupConstantsPage })));
+/** مساراتُ الشاشات المستقلّة — نفسُ `VIEW_PATHS` في `App.tsx`. */
+const VIEW_SETTINGS_PATHS = { sales: '/sales/settings', purchase: '/purchase-settings', store: '/store-settings', permissions: '/permissions' } as const;
 
 interface SettingsPageProps {
     user: User;
@@ -41,8 +49,11 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const confirm = useConfirm();
     const { show: showAdv } = useSimpleUi();
     const navigate = useNavigate();
-    const { can, loading: permsLoading } = usePermissions();
+    const location = useLocation();
+    const { can, loading: permsLoading, modules, template } = usePermissions();
     const canManageSupport = !permsLoading && can('admin.members.manage');
+    const canManageCompany = !permsLoading && can('admin.settings.manage');
+    const canManagePermissions = !permsLoading && can('admin.permissions.manage');
     const [profileForm, setProfileForm] = useState({
         name: user.name,
         phone: user.phone || '',
@@ -152,13 +163,13 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     // مزامنة حقل الإدخال مع القيمة القادمة من الخادم بعد المزامنة الأوّلية.
     useEffect(() => { setIdleInput(String(idleTimeoutMinutes)); }, [idleTimeoutMinutes]);
 
-    // 211-P: حارسُ حدّ الخطّة يقود إلى `/settings#my-plan` — تنقّلٌ داخل نفس
-    // الـSPA لا يُحرّك تمرير المتصفّح تلقائياً كما يفعل تحميلُ صفحةٍ كاملة.
+    // 211-P: حارسُ حدّ الخطّة يقود إلى `/settings#my-plan`. الخطّةُ صارت قسماً في فهرس
+    // الإعدادات (#75)، فالمرساةُ تُترجَم إلى قسمها (`?section=plan`) بدل تمريرٍ إلى عنصرٍ مخفيّ.
     useEffect(() => {
-        if (window.location.hash === '#my-plan') {
-            document.getElementById('my-plan')?.scrollIntoView({ behavior: 'smooth' });
+        if (location.hash === '#my-plan') {
+            navigate({ pathname: location.pathname, search: `?${SETTINGS_SECTION_PARAM}=plan`, hash: '' }, { replace: true });
         }
-    }, []);
+    }, [location.hash, location.pathname, navigate]);
 
     // اعتماد قيمة الحقل: يقصّها ضمن النطاق ويحفظها خادمياً؛ الفارغ/غير الرقمي يُعاد للحالي.
     const commitIdleTimeout = () => {
@@ -236,13 +247,482 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
     const labelStyle: React.CSSProperties = { fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)', fontWeight: 500 };
     const gridStyle: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 };
 
-    return (
-        <div dir="rtl" style={{ padding: '8px 12px', maxWidth: 780 }}>
-            {/* العنوان */}
-            <div style={{ paddingBottom: 8, borderBottom: '1px solid var(--ktra-border)', marginBottom: 14 }}>
-                <strong style={{ fontSize: 'var(--ktra-fs-title, 14px)', color: 'var(--ktra-ink)' }}>الإعدادات</strong>
-            </div>
+    // #75/#69: «أوّل ما أفوت يكون بس عناوين الإعدادات» — بطاقاتٌ يُفتح واحدُها، والإعداداتُ
+    // التي تعيش في شاشاتها (المبيعات، الشراء، المتجر، الصلاحيات، دخول الدعم) بطاقاتٌ تنقل
+    // إليها، كلٌّ بشرط الشريط الجانبيّ نفسِه فلا تظهر بطاقةٌ تقود إلى «لا صلاحية».
+    const reachable = (view: string) => {
+        const perm = permForView(view);
+        return (!perm || can(perm)) && moduleAllowsView(view, modules) && !templateHidesView(view, template);
+    };
+    const sections: SettingsIndexSection[] = [
+        {
+            id: 'plan', title: 'خطّتي', icon: CreditCard,
+            description: 'خطّة الشركة وحدودها وما استُهلك منها.',
+            keywords: ['الاشتراك', 'الحدود', 'ترقية'],
+            content: (
+                <div id="my-plan">
+                    <MyPlanCard />
+                </div>
+            ),
+        },
+        {
+            id: 'profile', title: 'الملف الشخصي', icon: UserRound,
+            description: 'اسمك وهاتفك وعنوانك ومؤهّلك وسيرتك الذاتية.',
+            keywords: ['الاسم الكامل', 'رقم الهاتف', 'العنوان', 'المؤهل الدراسي', 'السيرة الذاتية'],
+            content: (
+                <div className="max-w-3xl">
+                {/* المعلومات الشخصية والمهنية */}
+                <form onSubmit={handleProfileUpdate}>
+                    <div style={sectionStyle}>
+                        <div style={sectionTitleStyle}>المعلومات الشخصية والمهنية</div>
+                        <div style={gridStyle}>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>الاسم الكامل</label>
+                                <input className="ktra-input" required value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} />
+                            </div>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>البريد الإلكتروني (للقراءة فقط)</label>
+                                <input className="ktra-input" type="email" value={user.email} disabled style={{ opacity: 0.6, cursor: 'not-allowed' }} />
+                            </div>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>رقم الهاتف</label>
+                                <input className="ktra-input" type="tel" value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} />
+                            </div>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>العنوان</label>
+                                <input className="ktra-input" value={profileForm.address} onChange={e => setProfileForm({ ...profileForm, address: e.target.value })} />
+                            </div>
+                        </div>
 
+                        {/* البيانات المهنية */}
+                        <div style={{ borderTop: '1px solid var(--ktra-border)', paddingTop: 12, marginTop: 12 }}>
+                            <div style={{ fontSize: 'var(--ktra-fs-base, 13px)', fontWeight: 600, color: 'var(--ktra-ink)', marginBottom: 10 }}>البيانات المهنية</div>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle}>المؤهل الدراسي</label>
+                                    <select className="ktra-input" value={profileForm.educationLevel} onChange={e => setProfileForm({ ...profileForm, educationLevel: e.target.value })}>
+                                        <option value="">اختر المؤهل...</option>
+                                        <option value="High School">ثانوية عامة</option>
+                                        <option value="Diploma">دبلوم</option>
+                                        <option value="Bachelor">بكالوريوس</option>
+                                        <option value="Master">ماجستير</option>
+                                        <option value="PhD">دكتوراه</option>
+                                    </select>
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle}>نبذة عن الخبرات</label>
+                                    <textarea
+                                        className="ktra-input"
+                                        rows={3}
+                                        value={profileForm.experienceDescription}
+                                        onChange={e => setProfileForm({ ...profileForm, experienceDescription: e.target.value })}
+                                        style={{ resize: 'vertical' }}
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle}>
+                                        تحديث السيرة الذاتية
+                                        {user.resumeData && <span style={{ color: 'var(--ktra-ok, #267346)', marginRight: 6, fontWeight: 400 }}>محفوظ: {user.resumeData.name}</span>}
+                                    </label>
+                                    <input type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} style={{ fontSize: 'var(--ktra-fs-sm)' }} />
+                                    <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>الحد الأقصى 800 كيلوبايت</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 14 }}>
+                            <button type="submit" className="ktra-toolbtn" disabled={loadingProfile} style={{ padding: '5px 16px', color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }}>
+                                {loadingProfile ? 'جاري الحفظ...' : 'حفظ التغييرات'}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                </div>
+            ),
+        },
+        {
+            id: 'security', title: 'الأمان والأجهزة', icon: ShieldCheck,
+            description: 'كلمة المرور، ومهلة الخمول قبل إنهاء الجلسة، وأجهزة الدخول.',
+            keywords: ['تغيير كلمة المرور', 'الجلسة والخمول', 'أجهزة الدخول', 'الجهاز الأساسي'],
+            content: (
+                <div className="max-w-3xl">
+                {/* تغيير كلمة المرور */}
+                <form onSubmit={handlePasswordChange}>
+                    <div style={sectionStyle}>
+                        <div style={sectionTitleStyle}>تغيير كلمة المرور</div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 380 }}>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>كلمة المرور الحالية</label>
+                                <input className="ktra-input" type="password" required value={passwordForm.oldPassword} onChange={e => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })} />
+                            </div>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>كلمة المرور الجديدة</label>
+                                <input className="ktra-input" type="password" required value={passwordForm.newPassword} onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} />
+                            </div>
+                            <div style={fieldStyle}>
+                                <label style={labelStyle}>تأكيد كلمة المرور الجديدة</label>
+                                <input className="ktra-input" type="password" required value={passwordForm.confirmPassword} onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} />
+                            </div>
+                        </div>
+                        <div style={{ marginTop: 14 }}>
+                            <button type="submit" className="ktra-toolbtn" disabled={loadingPassword} style={{ padding: '5px 16px', fontWeight: 700 }}>
+                                {loadingPassword ? 'جاري التحديث...' : 'تحديث كلمة المرور'}
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                {/* الجلسة والخمول — مهلة إنهاء الجلسة عند عدم النشاط */}
+                <div style={sectionStyle}>
+                    <div style={sectionTitleStyle}>الجلسة والخمول</div>
+                    <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                        عند عدم وجود أي نشاط (نقر/كتابة/تمرير) طوال هذه المدة تُنهى الجلسة تلقائياً وتُطلب
+                        إعادة الدخول. يظهر تنبيه بعدّاد تنازلي قبل الانتهاء لتمديد الجلسة. يُحفظ لهذه الشركة.
+                    </p>
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
+                        <div style={{ ...fieldStyle, maxWidth: 220 }}>
+                            <label style={labelStyle}>مدة الخمول قبل إنهاء الجلسة (بالدقائق)</label>
+                            <input
+                                className="ktra-input ktra-num"
+                                type="number"
+                                min={IDLE_MIN_MINUTES}
+                                max={IDLE_MAX_MINUTES}
+                                step={5}
+                                value={idleInput}
+                                onChange={e => setIdleInput(e.target.value)}
+                                onBlur={commitIdleTimeout}
+                                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitIdleTimeout(); } }}
+                            />
+                            <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>
+                                من {IDLE_MIN_MINUTES} دقائق حتى {IDLE_MAX_MINUTES} دقيقة (24 ساعة)
+                            </span>
+                        </div>
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                            {[30, 60, 120, 180].map((m) => (
+                                <button
+                                    key={m}
+                                    type="button"
+                                    className="ktra-toolbtn"
+                                    onClick={() => setIdleTimeoutMinutes(m)}
+                                    style={{
+                                        padding: '5px 12px', fontWeight: 700,
+                                        ...(idleTimeoutMinutes === m ? { color: 'var(--ktra-accent, #1857a4)', borderColor: 'var(--ktra-accent, #1857a4)' } : {}),
+                                    }}
+                                >
+                                    {m < 60 ? `${m} دقيقة` : `${m / 60} ساعة`}
+                                </button>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+                {/* أجهزةُ الدخول — ISSUE #168. شاشةُ أمانٍ شخصيّةٌ لصاحب الحساب، وموضعُها
+                    هنا بجانب «تغيير كلمة المرور» و«الجلسة والخمول» لا في لوحة إدارة. */}
+                <div style={sectionStyle}>
+                    <div style={sectionTitleStyle}>أجهزة الدخول</div>
+                    <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                        كلُّ جهازٍ دخل بحسابك له مفتاحُه الخاصّ، فإنهاءُ أحدها لا يُخرج البقيّة.
+                        «آخر نشاط» يُحدَّث كل خمس دقائق تقريباً.
+                    </p>
+
+                    {devicesGuard ? (
+                        // الجهازُ الثانويُّ يرى تفسيراً يسمّي الأساسيَّ لا فراغاً بلا سبب.
+                        <div style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
+                            <p style={{ marginBottom: 10 }}>{devicesGuard}</p>
+                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                                onClick={() => setPrimaryPrompt(true)}>
+                                اجعل هذا الجهاز أساسيّاً
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                            {devicesInvitation && (
+                                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-accent, #1857a4)', marginBottom: 10 }}>
+                                    {devicesInvitation}
+                                </p>
+                            )}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                                {devices.map((d) => (
+                                    <div key={d.id} style={{
+                                        border: '1px solid var(--ktra-border)', borderRadius: 6, padding: '10px 12px',
+                                        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+                                    }}>
+                                        <div style={{ flex: 1, minWidth: 200 }}>
+                                            <div style={{ fontSize: 'var(--ktra-fs-sm)', fontWeight: 600, color: 'var(--ktra-ink)' }}>
+                                                {d.name}
+                                                {d.is_current && (
+                                                    <span style={{ color: 'var(--ktra-ok, #267346)', marginRight: 6, fontWeight: 700 }}>
+                                                        — هذا الجهاز
+                                                    </span>
+                                                )}
+                                                {d.is_primary && (
+                                                    <span style={{ color: 'var(--ktra-accent, #1857a4)', marginRight: 6, fontWeight: 700 }}>
+                                                        — الأساسيّ
+                                                    </span>
+                                                )}
+                                            </div>
+                                            <div style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>
+                                                {d.ip_address || 'بلا عنوان'} · دخل {formatDateTimeValue(d.created_at) || '—'}
+                                                {' · '}آخر نشاط {formatDateTimeValue(d.last_active_at) || '—'}
+                                            </div>
+                                        </div>
+                                        {renamingId === d.id ? (
+                                            <>
+                                                <input
+                                                    className="ktra-input"
+                                                    style={{ maxWidth: 160 }}
+                                                    autoFocus
+                                                    placeholder="حاسوب المكتب"
+                                                    value={renameValue}
+                                                    onChange={e => setRenameValue(e.target.value)}
+                                                    onKeyDown={e => {
+                                                        if (e.key === 'Enter') { e.preventDefault(); void commitRename(d.id); }
+                                                        if (e.key === 'Escape') { setRenamingId(null); setRenameValue(''); }
+                                                    }}
+                                                />
+                                                <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', fontWeight: 700 }}
+                                                    onClick={() => void commitRename(d.id)}>
+                                                    حفظ
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px' }}
+                                                onClick={() => { setRenamingId(d.id); setRenameValue(d.label || ''); }}>
+                                                تسمية
+                                            </button>
+                                        )}
+                                        {/* الأساسيُّ لا يُخرَج من هنا — الخروجُ العاديُّ بابُه. */}
+                                        {!d.is_primary && (
+                                            <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-danger, #b42318)' }}
+                                                onClick={() => void handleEvictDevice(d)}>
+                                                إنهاء
+                                            </button>
+                                        )}
+                                    </div>
+                                ))}
+                                {devices.length === 0 && (
+                                    <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>
+                                        لا أجهزة لعرضها.
+                                    </span>
+                                )}
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
+                                <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                                    onClick={() => setPrimaryPrompt(true)}>
+                                    اجعل هذا الجهاز أساسيّاً
+                                </button>
+                                <button type="button" className="ktra-toolbtn"
+                                    style={{ padding: '5px 14px', fontWeight: 700, color: 'var(--ktra-danger, #b42318)' }}
+                                    onClick={() => void handleEvictOthers()}>
+                                    أخرِج كلَّ الأجهزة الأخرى
+                                </button>
+                            </div>
+                        </>
+                    )}
+
+                    {primaryPrompt && (
+                        <div style={{ borderTop: '1px solid var(--ktra-border)', marginTop: 12, paddingTop: 12, maxWidth: 320 }}>
+                            <div style={fieldStyle}>
+                                {/* حقلٌ داخل الصفحة لا `window.prompt` — كلمةُ المرور لا تمرّ بحوار متصفّح. */}
+                                <label style={labelStyle}>كلمة المرور لتأكيد التنصيب</label>
+                                <input className="ktra-input" type="password" value={primaryPassword}
+                                    onChange={e => setPrimaryPassword(e.target.value)} />
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                                <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
+                                    onClick={() => void handleSetPrimary()}>
+                                    تأكيد
+                                </button>
+                                <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px' }}
+                                    onClick={() => { setPrimaryPrompt(false); setPrimaryPassword(''); }}>
+                                    إلغاء
+                                </button>
+                            </div>
+                        </div>
+                    )}
+                </div>
+                </div>
+            ),
+        },
+        {
+            id: 'appearance', title: 'المظهر والعرض', icon: Palette,
+            description: 'مظهر الواجهة والخط، واختصارات الشريط العلوي، وزر إخفاء الأسعار.',
+            keywords: ['مظهر الواجهة', 'حجم الخط', 'نوع الخط', 'اختصارات الوصول السريع', 'زر العين', 'خصوصية الأسعار والأرباح'],
+            content: (
+                <div className="max-w-3xl">
+                {/* المظهر — حجم الخط ونوعه */}
+                <div style={sectionStyle}>
+                    <div style={sectionTitleStyle}>المظهر — الخط</div>
+                    <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                        تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذه الشركة (يثبت عند إعادة الدخول وعبر الأجهزة).
+                    </p>
+                    <div style={gridStyle}>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>مظهر الواجهة</label>
+                            <select
+                                className="ktra-input"
+                                value={uiSkin}
+                                onChange={e => setSkin(e.target.value as UiSkin)}
+                            >
+                                {/* الجلد الكلاسيكي **باقٍ خياراً كاملاً** (قرار
+                                    المالك 2026-08-25) — المُلغى مرجعيةُ «الأصيل»
+                                    لا مظهره. والقيمة القديمة `aseel` ما زالت
+                                    تُقرأ من تخزين المستخدمين (`styles/skin.ts`). */}
+                                <option value="classic">كلاسيكي</option>
+                                <option value="modern">حديث</option>
+                            </select>
+                        </div>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>حجم الخط</label>
+                            <select
+                                className="ktra-input"
+                                value={fontScale}
+                                onChange={e => setFontScale(e.target.value as any)}
+                            >
+                                {FONT_SCALE_OPTIONS.map(o => (
+                                    <option key={o.id} value={o.id}>{o.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                        <div style={fieldStyle}>
+                            <label style={labelStyle}>نوع الخط</label>
+                            <select
+                                className="ktra-input"
+                                value={fontFamily}
+                                onChange={e => setFontFamily(e.target.value as any)}
+                            >
+                                {FONT_FAMILY_OPTIONS.map(o => (
+                                    <option key={o.id} value={o.id}>{o.label}</option>
+                                ))}
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                {/* task16 D14: اختصارات الوصول السريع في الشريط العلوي */}
+                <div style={sectionStyle}>
+                    <div style={sectionTitleStyle}>اختصارات الوصول السريع (الشريط العلوي)</div>
+                    <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                        اختر الشاشات التي تظهر كأزرار اختصار أعلى الصفحة للوصول السريع.
+                    </p>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        {SHORTCUTABLE_VIEWS.map((s) => (
+                            <label key={s.view} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
+                                <input
+                                    type="checkbox"
+                                    checked={quickShortcuts.includes(s.view)}
+                                    onChange={() => toggleShortcut(s.view)}
+                                />
+                                {s.label}
+                            </label>
+                        ))}
+                    </div>
+                </div>
+                {/* خصوصية عرض الأسعار والأرباح (زر العين) */}
+                <div style={sectionStyle}>
+                    <div style={sectionTitleStyle}>خصوصية الأسعار والأرباح (زر العين)</div>
+                    <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
+                        زر العين في الشريط العلوي يُظهر/يُخفي أسعار القوائم والربح الإجمالي في الفاتورة —
+                        للخصوصية حين يجلس الزبون أمام الشاشة.
+                    </p>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
+                            <input
+                                type="checkbox"
+                                checked={showToggle}
+                                onChange={(e) => setShowToggle(e.target.checked)}
+                            />
+                            إظهار زر العين في الشريط العلوي (لإظهار/إخفاء الأسعار والأرباح)
+                        </label>
+                        {!showToggle && (
+                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)', paddingInlineStart: 24 }}>
+                                <input
+                                    type="checkbox"
+                                    checked={defaultVisible}
+                                    onChange={(e) => setDefaultVisible(e.target.checked)}
+                                />
+                                إظهار الأرباح والتكاليف في الفاتورة افتراضياً (بما أن زر العين مخفي)
+                            </label>
+                        )}
+                    </div>
+                </div>
+                </div>
+            ),
+        },
+        ...(showAdv('settings.local-cache') ? [{
+            id: 'local-cache', title: 'التخزين المحلي', icon: Database,
+            description: 'مسح البيانات المخزّنة محلياً للعمل دون اتصال.',
+            keywords: ['cache', 'كاش'],
+            content: (
+                <div className="max-w-3xl">
+                {/* P5-T1-b: إدارة التخزين المحلي.
+                    T-SIMPL2: زرٌّ تقنيّ للتشخيص — يُطوى في الوضع السهل. */}
+                <div className="ktra-form-section" style={{ marginTop: 20 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>إدارة التخزين المحلي</h3>
+                    <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
+                        البيانات المخزنة محلياً (cache) تتيح تصفح التطبيق بدون اتصال.
+                    </p>
+                    <button
+                        type="button"
+                        className="ktra-toolbtn"
+                        /* عطلان كانا هنا (وُجدا أثناء عملٍ آخر، خارج نطاقه):
+                           (1) رسالةُ **نجاحٍ** بنبرة `error` — حمراء تقول «تم»، فيظنّ
+                               المستخدم أن المسح أخفق وقد نجح.
+                           (2) `cleanOldCache` تفتح IndexedDB وقد ترمي (وضع خاص،
+                               حصّةٌ ممتلئة، قاعدة مقفولة) بلا `catch` — فالوعد يسقط
+                               في الفراغ والزرّ يبدو بلا أثر. لا فشل صامت. */
+                        onClick={async () => {
+                            try {
+                                const { cleanOldCache } = await import('../services/offline/cacheCleaner');
+                                const n = await cleanOldCache(7);
+                                toast(
+                                    n > 0 ? `تم حذف ${n} سجل قديم` : 'لا سجلات أقدم من 7 أيام — لا شيء ليُحذف',
+                                    n > 0 ? 'success' : 'info',
+                                );
+                            } catch (e) {
+                                toast(humanizeThrown(e, 'تعذّر مسح الـcache القديم'), 'error');
+                            }
+                        }}
+                        style={{ padding: '5px 16px', fontWeight: 700 }}
+                    >
+                        امسح cache قديم (أقدم من 7 أيام)
+                    </button>
+                </div>
+                </div>
+            ),
+        }] : []),
+        ...(canManageCompany ? [{
+            id: 'company', title: 'الشركة (ثوابت المجموعة)', icon: Building2,
+            description: 'بيانات الشركة والفترة المالية وأرقام الدفاتر والحسابات والضرائب الافتراضية.',
+            keywords: ['اسم الشركة', 'الشعار', 'الفترة المالية', 'أرقام الدفاتر', 'F11'],
+            lazy: true,
+            content: (
+                <React.Suspense fallback={<p className="text-sm ktra-text-soft">جارٍ التحميل…</p>}>
+                    <GroupConstantsPage currentUserName={user.name} />
+                </React.Suspense>
+            ),
+        }] : []),
+        ...(reachable('sales-settings') ? [{
+            id: 'sales', title: 'إعدادات المبيعات', icon: Receipt, to: VIEW_SETTINGS_PATHS.sales,
+            description: 'العميل الافتراضي والحسابات والضرائب والترحيل ومستند التسليم.',
+        }] : []),
+        ...(reachable('purchase-settings') ? [{
+            id: 'purchase', title: 'إعدادات الشراء', icon: ShoppingCart, to: VIEW_SETTINGS_PATHS.purchase,
+            description: 'تسعير بنود الشراء وأمر الشراء والاستلام ومحرّك التجديد.',
+        }] : []),
+        ...(reachable('store-settings') ? [{
+            id: 'store', title: 'المتجر', icon: Store, to: VIEW_SETTINGS_PATHS.store,
+            description: 'مظهر المتجر العام وصوره وحملاته ومنتجاته.',
+        }] : []),
+        ...(canManagePermissions ? [{
+            id: 'permissions', title: 'الصلاحيات', icon: KeyRound, to: VIEW_SETTINGS_PATHS.permissions,
+            description: 'ما يراه كلُّ عضوٍ في الشركة وما يفعله.',
+        }] : []),
+        ...(canManageSupport ? [{
+            id: 'support', title: 'دخول فريق كترا للدعم', icon: LifeBuoy, to: SUPPORT_ACCESS_PATH,
+            description: 'وافق على طلبات الدعم أو ارفضها، واسحب أي إذن ساري، وراجع سجلّها.',
+        }] : []),
+    ];
+
+    return (
+        <div dir="rtl" className="max-w-5xl px-3 py-2">
             {/* رسالة الحالة */}
             {message && (
                 <div style={{ padding: '8px 12px', borderRadius: 6, marginBottom: 12, fontSize: 'var(--ktra-fs-sm)', background: message.type === 'success' ? 'rgba(38,115,70,0.08)' : 'rgba(204,0,0,0.08)', color: message.type === 'success' ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)', border: `1px solid ${message.type === 'success' ? 'var(--ktra-ok, #267346)' : 'var(--ktra-danger, #c00)'}` }}>
@@ -250,419 +730,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({ user }) => {
                 </div>
             )}
 
-            {/* 211-O: «خطّتي» — بطاقةٌ جديدةٌ بـTailwind لا بالأنماط المضمَّنة
-                القديمة في هذا الملف، ومعرّفُها `my-plan` مقصدُ حارس حدّ الخطّة. */}
-            <div id="my-plan" className="mb-4">
-                <MyPlanCard />
-            </div>
-
-            {/* SA-8: بابٌ دائم لقرار دخول فريق كترا — لا يبقى وصوله رهنَ تنبيهٍ أو بريد. */}
-            {canManageSupport && (
-                <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
-                    <div>
-                        <p className="font-bold text-[var(--color-text)]">دخول فريق كترا للدعم</p>
-                        <p className="text-xs ktra-text-soft">وافق على طلبات الدعم أو ارفضها، واسحب أي إذن ساري، وراجع سجلّها.</p>
-                    </div>
-                    <button type="button" className="ktra-btn" onClick={() => navigate(SUPPORT_ACCESS_PATH)}>إدارة أذونات الدخول</button>
-                </div>
-            )}
-
-            {/* المعلومات الشخصية والمهنية */}
-            <form onSubmit={handleProfileUpdate}>
-                <div style={sectionStyle}>
-                    <div style={sectionTitleStyle}>المعلومات الشخصية والمهنية</div>
-                    <div style={gridStyle}>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>الاسم الكامل</label>
-                            <input className="ktra-input" required value={profileForm.name} onChange={e => setProfileForm({ ...profileForm, name: e.target.value })} />
-                        </div>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>البريد الإلكتروني (للقراءة فقط)</label>
-                            <input className="ktra-input" type="email" value={user.email} disabled style={{ opacity: 0.6, cursor: 'not-allowed' }} />
-                        </div>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>رقم الهاتف</label>
-                            <input className="ktra-input" type="tel" value={profileForm.phone} onChange={e => setProfileForm({ ...profileForm, phone: e.target.value })} />
-                        </div>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>العنوان</label>
-                            <input className="ktra-input" value={profileForm.address} onChange={e => setProfileForm({ ...profileForm, address: e.target.value })} />
-                        </div>
-                    </div>
-
-                    {/* البيانات المهنية */}
-                    <div style={{ borderTop: '1px solid var(--ktra-border)', paddingTop: 12, marginTop: 12 }}>
-                        <div style={{ fontSize: 'var(--ktra-fs-base, 13px)', fontWeight: 600, color: 'var(--ktra-ink)', marginBottom: 10 }}>البيانات المهنية</div>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle}>المؤهل الدراسي</label>
-                                <select className="ktra-input" value={profileForm.educationLevel} onChange={e => setProfileForm({ ...profileForm, educationLevel: e.target.value })}>
-                                    <option value="">اختر المؤهل...</option>
-                                    <option value="High School">ثانوية عامة</option>
-                                    <option value="Diploma">دبلوم</option>
-                                    <option value="Bachelor">بكالوريوس</option>
-                                    <option value="Master">ماجستير</option>
-                                    <option value="PhD">دكتوراه</option>
-                                </select>
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle}>نبذة عن الخبرات</label>
-                                <textarea
-                                    className="ktra-input"
-                                    rows={3}
-                                    value={profileForm.experienceDescription}
-                                    onChange={e => setProfileForm({ ...profileForm, experienceDescription: e.target.value })}
-                                    style={{ resize: 'vertical' }}
-                                />
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle}>
-                                    تحديث السيرة الذاتية
-                                    {user.resumeData && <span style={{ color: 'var(--ktra-ok, #267346)', marginRight: 6, fontWeight: 400 }}>محفوظ: {user.resumeData.name}</span>}
-                                </label>
-                                <input type="file" accept=".pdf,.doc,.docx" onChange={handleFileChange} style={{ fontSize: 'var(--ktra-fs-sm)' }} />
-                                <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>الحد الأقصى 800 كيلوبايت</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div style={{ display: 'flex', justifyContent: 'flex-start', marginTop: 14 }}>
-                        <button type="submit" className="ktra-toolbtn" disabled={loadingProfile} style={{ padding: '5px 16px', color: 'var(--ktra-accent, #1857a4)', fontWeight: 700 }}>
-                            {loadingProfile ? 'جاري الحفظ...' : 'حفظ التغييرات'}
-                        </button>
-                    </div>
-                </div>
-            </form>
-
-            {/* تغيير كلمة المرور */}
-            <form onSubmit={handlePasswordChange}>
-                <div style={sectionStyle}>
-                    <div style={sectionTitleStyle}>تغيير كلمة المرور</div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxWidth: 380 }}>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>كلمة المرور الحالية</label>
-                            <input className="ktra-input" type="password" required value={passwordForm.oldPassword} onChange={e => setPasswordForm({ ...passwordForm, oldPassword: e.target.value })} />
-                        </div>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>كلمة المرور الجديدة</label>
-                            <input className="ktra-input" type="password" required value={passwordForm.newPassword} onChange={e => setPasswordForm({ ...passwordForm, newPassword: e.target.value })} />
-                        </div>
-                        <div style={fieldStyle}>
-                            <label style={labelStyle}>تأكيد كلمة المرور الجديدة</label>
-                            <input className="ktra-input" type="password" required value={passwordForm.confirmPassword} onChange={e => setPasswordForm({ ...passwordForm, confirmPassword: e.target.value })} />
-                        </div>
-                    </div>
-                    <div style={{ marginTop: 14 }}>
-                        <button type="submit" className="ktra-toolbtn" disabled={loadingPassword} style={{ padding: '5px 16px', fontWeight: 700 }}>
-                            {loadingPassword ? 'جاري التحديث...' : 'تحديث كلمة المرور'}
-                        </button>
-                    </div>
-                </div>
-            </form>
-
-            {/* task16 D14: اختصارات الوصول السريع في الشريط العلوي */}
-            <div style={sectionStyle}>
-                <div style={sectionTitleStyle}>اختصارات الوصول السريع (الشريط العلوي)</div>
-                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
-                    اختر الشاشات التي تظهر كأزرار اختصار أعلى الصفحة للوصول السريع.
-                </p>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                    {SHORTCUTABLE_VIEWS.map((s) => (
-                        <label key={s.view} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
-                            <input
-                                type="checkbox"
-                                checked={quickShortcuts.includes(s.view)}
-                                onChange={() => toggleShortcut(s.view)}
-                            />
-                            {s.label}
-                        </label>
-                    ))}
-                </div>
-            </div>
-
-            {/* المظهر — حجم الخط ونوعه */}
-            <div style={sectionStyle}>
-                <div style={sectionTitleStyle}>المظهر — الخط</div>
-                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
-                    تحكّم بحجم الخط ونوعه في كامل الواجهة. يُطبَّق فوراً ويُحفظ لهذه الشركة (يثبت عند إعادة الدخول وعبر الأجهزة).
-                </p>
-                <div style={gridStyle}>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle}>مظهر الواجهة</label>
-                        <select
-                            className="ktra-input"
-                            value={uiSkin}
-                            onChange={e => setSkin(e.target.value as UiSkin)}
-                        >
-                            {/* الجلد الكلاسيكي **باقٍ خياراً كاملاً** (قرار
-                                المالك 2026-08-25) — المُلغى مرجعيةُ «الأصيل»
-                                لا مظهره. والقيمة القديمة `aseel` ما زالت
-                                تُقرأ من تخزين المستخدمين (`styles/skin.ts`). */}
-                            <option value="classic">كلاسيكي</option>
-                            <option value="modern">حديث</option>
-                        </select>
-                    </div>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle}>حجم الخط</label>
-                        <select
-                            className="ktra-input"
-                            value={fontScale}
-                            onChange={e => setFontScale(e.target.value as any)}
-                        >
-                            {FONT_SCALE_OPTIONS.map(o => (
-                                <option key={o.id} value={o.id}>{o.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle}>نوع الخط</label>
-                        <select
-                            className="ktra-input"
-                            value={fontFamily}
-                            onChange={e => setFontFamily(e.target.value as any)}
-                        >
-                            {FONT_FAMILY_OPTIONS.map(o => (
-                                <option key={o.id} value={o.id}>{o.label}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-            </div>
-
-            {/* الجلسة والخمول — مهلة إنهاء الجلسة عند عدم النشاط */}
-            <div style={sectionStyle}>
-                <div style={sectionTitleStyle}>الجلسة والخمول</div>
-                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
-                    عند عدم وجود أي نشاط (نقر/كتابة/تمرير) طوال هذه المدة تُنهى الجلسة تلقائياً وتُطلب
-                    إعادة الدخول. يظهر تنبيه بعدّاد تنازلي قبل الانتهاء لتمديد الجلسة. يُحفظ لهذه الشركة.
-                </p>
-                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 12, flexWrap: 'wrap' }}>
-                    <div style={{ ...fieldStyle, maxWidth: 220 }}>
-                        <label style={labelStyle}>مدة الخمول قبل إنهاء الجلسة (بالدقائق)</label>
-                        <input
-                            className="ktra-input ktra-num"
-                            type="number"
-                            min={IDLE_MIN_MINUTES}
-                            max={IDLE_MAX_MINUTES}
-                            step={5}
-                            value={idleInput}
-                            onChange={e => setIdleInput(e.target.value)}
-                            onBlur={commitIdleTimeout}
-                            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); commitIdleTimeout(); } }}
-                        />
-                        <span style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>
-                            من {IDLE_MIN_MINUTES} دقائق حتى {IDLE_MAX_MINUTES} دقيقة (24 ساعة)
-                        </span>
-                    </div>
-                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                        {[30, 60, 120, 180].map((m) => (
-                            <button
-                                key={m}
-                                type="button"
-                                className="ktra-toolbtn"
-                                onClick={() => setIdleTimeoutMinutes(m)}
-                                style={{
-                                    padding: '5px 12px', fontWeight: 700,
-                                    ...(idleTimeoutMinutes === m ? { color: 'var(--ktra-accent, #1857a4)', borderColor: 'var(--ktra-accent, #1857a4)' } : {}),
-                                }}
-                            >
-                                {m < 60 ? `${m} دقيقة` : `${m / 60} ساعة`}
-                            </button>
-                        ))}
-                    </div>
-                </div>
-            </div>
-
-            {/* أجهزةُ الدخول — ISSUE #168. شاشةُ أمانٍ شخصيّةٌ لصاحب الحساب، وموضعُها
-                هنا بجانب «تغيير كلمة المرور» و«الجلسة والخمول» لا في لوحة إدارة. */}
-            <div style={sectionStyle}>
-                <div style={sectionTitleStyle}>أجهزة الدخول</div>
-                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
-                    كلُّ جهازٍ دخل بحسابك له مفتاحُه الخاصّ، فإنهاءُ أحدها لا يُخرج البقيّة.
-                    «آخر نشاط» يُحدَّث كل خمس دقائق تقريباً.
-                </p>
-
-                {devicesGuard ? (
-                    // الجهازُ الثانويُّ يرى تفسيراً يسمّي الأساسيَّ لا فراغاً بلا سبب.
-                    <div style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
-                        <p style={{ marginBottom: 10 }}>{devicesGuard}</p>
-                        <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
-                            onClick={() => setPrimaryPrompt(true)}>
-                            اجعل هذا الجهاز أساسيّاً
-                        </button>
-                    </div>
-                ) : (
-                    <>
-                        {devicesInvitation && (
-                            <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-accent, #1857a4)', marginBottom: 10 }}>
-                                {devicesInvitation}
-                            </p>
-                        )}
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                            {devices.map((d) => (
-                                <div key={d.id} style={{
-                                    border: '1px solid var(--ktra-border)', borderRadius: 6, padding: '10px 12px',
-                                    display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-                                }}>
-                                    <div style={{ flex: 1, minWidth: 200 }}>
-                                        <div style={{ fontSize: 'var(--ktra-fs-sm)', fontWeight: 600, color: 'var(--ktra-ink)' }}>
-                                            {d.name}
-                                            {d.is_current && (
-                                                <span style={{ color: 'var(--ktra-ok, #267346)', marginRight: 6, fontWeight: 700 }}>
-                                                    — هذا الجهاز
-                                                </span>
-                                            )}
-                                            {d.is_primary && (
-                                                <span style={{ color: 'var(--ktra-accent, #1857a4)', marginRight: 6, fontWeight: 700 }}>
-                                                    — الأساسيّ
-                                                </span>
-                                            )}
-                                        </div>
-                                        <div style={{ fontSize: '10px', color: 'var(--ktra-ink-soft)' }}>
-                                            {d.ip_address || 'بلا عنوان'} · دخل {formatDateTimeValue(d.created_at) || '—'}
-                                            {' · '}آخر نشاط {formatDateTimeValue(d.last_active_at) || '—'}
-                                        </div>
-                                    </div>
-                                    {renamingId === d.id ? (
-                                        <>
-                                            <input
-                                                className="ktra-input"
-                                                style={{ maxWidth: 160 }}
-                                                autoFocus
-                                                placeholder="حاسوب المكتب"
-                                                value={renameValue}
-                                                onChange={e => setRenameValue(e.target.value)}
-                                                onKeyDown={e => {
-                                                    if (e.key === 'Enter') { e.preventDefault(); void commitRename(d.id); }
-                                                    if (e.key === 'Escape') { setRenamingId(null); setRenameValue(''); }
-                                                }}
-                                            />
-                                            <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', fontWeight: 700 }}
-                                                onClick={() => void commitRename(d.id)}>
-                                                حفظ
-                                            </button>
-                                        </>
-                                    ) : (
-                                        <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px' }}
-                                            onClick={() => { setRenamingId(d.id); setRenameValue(d.label || ''); }}>
-                                            تسمية
-                                        </button>
-                                    )}
-                                    {/* الأساسيُّ لا يُخرَج من هنا — الخروجُ العاديُّ بابُه. */}
-                                    {!d.is_primary && (
-                                        <button type="button" className="ktra-toolbtn" style={{ padding: '4px 10px', color: 'var(--ktra-danger, #b42318)' }}
-                                            onClick={() => void handleEvictDevice(d)}>
-                                            إنهاء
-                                        </button>
-                                    )}
-                                </div>
-                            ))}
-                            {devices.length === 0 && (
-                                <span style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)' }}>
-                                    لا أجهزة لعرضها.
-                                </span>
-                            )}
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 12, flexWrap: 'wrap' }}>
-                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
-                                onClick={() => setPrimaryPrompt(true)}>
-                                اجعل هذا الجهاز أساسيّاً
-                            </button>
-                            <button type="button" className="ktra-toolbtn"
-                                style={{ padding: '5px 14px', fontWeight: 700, color: 'var(--ktra-danger, #b42318)' }}
-                                onClick={() => void handleEvictOthers()}>
-                                أخرِج كلَّ الأجهزة الأخرى
-                            </button>
-                        </div>
-                    </>
-                )}
-
-                {primaryPrompt && (
-                    <div style={{ borderTop: '1px solid var(--ktra-border)', marginTop: 12, paddingTop: 12, maxWidth: 320 }}>
-                        <div style={fieldStyle}>
-                            {/* حقلٌ داخل الصفحة لا `window.prompt` — كلمةُ المرور لا تمرّ بحوار متصفّح. */}
-                            <label style={labelStyle}>كلمة المرور لتأكيد التنصيب</label>
-                            <input className="ktra-input" type="password" value={primaryPassword}
-                                onChange={e => setPrimaryPassword(e.target.value)} />
-                        </div>
-                        <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px', fontWeight: 700 }}
-                                onClick={() => void handleSetPrimary()}>
-                                تأكيد
-                            </button>
-                            <button type="button" className="ktra-toolbtn" style={{ padding: '5px 14px' }}
-                                onClick={() => { setPrimaryPrompt(false); setPrimaryPassword(''); }}>
-                                إلغاء
-                            </button>
-                        </div>
-                    </div>
-                )}
-            </div>
-
-            {/* خصوصية عرض الأسعار والأرباح (زر العين) */}
-            <div style={sectionStyle}>
-                <div style={sectionTitleStyle}>خصوصية الأسعار والأرباح (زر العين)</div>
-                <p style={{ fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink-soft)', marginBottom: 12 }}>
-                    زر العين في الشريط العلوي يُظهر/يُخفي أسعار القوائم والربح الإجمالي في الفاتورة —
-                    للخصوصية حين يجلس الزبون أمام الشاشة.
-                </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-                    <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)' }}>
-                        <input
-                            type="checkbox"
-                            checked={showToggle}
-                            onChange={(e) => setShowToggle(e.target.checked)}
-                        />
-                        إظهار زر العين في الشريط العلوي (لإظهار/إخفاء الأسعار والأرباح)
-                    </label>
-                    {!showToggle && (
-                        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 'var(--ktra-fs-sm)', color: 'var(--ktra-ink)', paddingInlineStart: 24 }}>
-                            <input
-                                type="checkbox"
-                                checked={defaultVisible}
-                                onChange={(e) => setDefaultVisible(e.target.checked)}
-                            />
-                            إظهار الأرباح والتكاليف في الفاتورة افتراضياً (بما أن زر العين مخفي)
-                        </label>
-                    )}
-                </div>
-            </div>
-
-            {/* P5-T1-b: إدارة التخزين المحلي.
-                T-SIMPL2: زرٌّ تقنيّ للتشخيص — يُطوى في الوضع السهل. */}
-            {showAdv('settings.local-cache') && (
-            <div className="ktra-form-section" style={{ marginTop: 20 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, marginBottom: 12 }}>إدارة التخزين المحلي</h3>
-                <p style={{ fontSize: 13, color: '#64748b', marginBottom: 12 }}>
-                    البيانات المخزنة محلياً (cache) تتيح تصفح التطبيق بدون اتصال.
-                </p>
-                <button
-                    type="button"
-                    className="ktra-toolbtn"
-                    /* عطلان كانا هنا (وُجدا أثناء عملٍ آخر، خارج نطاقه):
-                       (1) رسالةُ **نجاحٍ** بنبرة `error` — حمراء تقول «تم»، فيظنّ
-                           المستخدم أن المسح أخفق وقد نجح.
-                       (2) `cleanOldCache` تفتح IndexedDB وقد ترمي (وضع خاص،
-                           حصّةٌ ممتلئة، قاعدة مقفولة) بلا `catch` — فالوعد يسقط
-                           في الفراغ والزرّ يبدو بلا أثر. لا فشل صامت. */
-                    onClick={async () => {
-                        try {
-                            const { cleanOldCache } = await import('../services/offline/cacheCleaner');
-                            const n = await cleanOldCache(7);
-                            toast(
-                                n > 0 ? `تم حذف ${n} سجل قديم` : 'لا سجلات أقدم من 7 أيام — لا شيء ليُحذف',
-                                n > 0 ? 'success' : 'info',
-                            );
-                        } catch (e) {
-                            toast(humanizeThrown(e, 'تعذّر مسح الـcache القديم'), 'error');
-                        }
-                    }}
-                    style={{ padding: '5px 16px', fontWeight: 700 }}
-                >
-                    امسح cache قديم (أقدم من 7 أيام)
-                </button>
-            </div>
-            )}
+            <SettingsIndex title="الإعدادات" sections={sections} />
         </div>
     );
 };

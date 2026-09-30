@@ -5,13 +5,14 @@
  * تلقائياً عند اختيار منتج في بند فاتورة الشراء (آخر سعر شراء / أقل سعر شراء).
  */
 import React, { useCallback, useEffect, useState } from "react";
-import { Loader2, Save, Info } from "lucide-react";
+import { ClipboardList, FileText, Info, Loader2, PackageCheck, Save, ScanBarcode, Stamp, Tags, TrendingUp, Wallet } from "lucide-react";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { KitDocumentShell, type KitToolbarAction } from "../kit";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { ClearanceItemTypesSection } from "./ClearanceItemTypesSection";
+import { SettingsIndex, type SettingsIndexSection } from "../settings/SettingsIndex";
 import {
   SERIAL_ENTRY_MODE_HINT,
   SERIAL_ENTRY_MODE_OPTIONS,
@@ -141,67 +142,69 @@ const PurchaseSettingsPage: React.FC = () => {
     },
   ];
 
-  return (
-    <div className="min-h-[calc(100vh-5rem)]">
-      <KitDocumentShell title="إعدادات الشراء" actions={actions}>
-        {banner && (
-          <div
-            role="status"
-            className={`ktra-banner ${banner.ok ? "ktra-banner--ok" : "ktra-banner--err"}`}
-            style={{ margin: "8px" }}
-          >
-            {banner.msg}
-          </div>
-        )}
-        <div className="p-4 max-w-2xl">
-          <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
-            استراتيجية تسعير بنود الشراء
-          </h3>
-          <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
-            <Info className="h-4 w-4 mt-0.5 shrink-0" />
-            <span>
-              عند اختيار منتج في بند فاتورة شراء، يُقترح سعر الوحدة تلقائياً حسب
-              هذه الاستراتيجية. القيمة المقترحة تبقى قابلة للتعديل دائماً، ولا
-              تُدَس على سعر أدخلته يدوياً.
-            </span>
-          </p>
+  // #75/#69: الأقسامُ فهرسُ بطاقاتٍ يُفتح واحدُها — كانت ثمانيةً مكدّسةً في صفحةٍ واحدة.
+  const sections: SettingsIndexSection[] = [
+    {
+      id: 'pricing', title: 'استراتيجية تسعير بنود الشراء', icon: Tags,
+      description: 'السعر المقترح لبند الشراء: آخر سعر شراء أو أقلّه.',
+      keywords: ['آخر سعر شراء', 'أقل سعر شراء'],
+      content: (
+          <div>
+            <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
+              استراتيجية تسعير بنود الشراء
+            </h3>
+            <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
+              <Info className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>
+                عند اختيار منتج في بند فاتورة شراء، يُقترح سعر الوحدة تلقائياً حسب
+                هذه الاستراتيجية. القيمة المقترحة تبقى قابلة للتعديل دائماً، ولا
+                تُدَس على سعر أدخلته يدوياً.
+              </span>
+            </p>
 
-          {loading ? (
-            <div className="flex items-center gap-2 text-[var(--ktra-ink-soft)]">
-              <Loader2 className="h-4 w-4 animate-spin" /> جاري التحميل…
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {STRATEGIES.map((s) => (
-                <label
-                  key={s.value}
-                  className={`flex items-start gap-2 p-3 border rounded cursor-pointer ${
-                    strategy === s.value
-                      ? "border-[var(--ktra-accent)] bg-[var(--ktra-accent-soft,#f3f4f6)]"
-                      : "border-[var(--ktra-border)]"
-                  }`}
-                >
-                  <input
-                    type="radio"
-                    name="purchase_strategy"
-                    value={s.value}
-                    checked={strategy === s.value}
-                    onChange={() => setStrategy(s.value)}
-                    className="mt-1"
-                  />
-                  <span>
-                    <b className="text-[var(--ktra-ink)]">{s.label}</b>
-                    <span className="block text-sm text-[var(--ktra-ink-soft)]">
-                      {s.hint}
+            {loading ? (
+              <div className="flex items-center gap-2 text-[var(--ktra-ink-soft)]">
+                <Loader2 className="h-4 w-4 animate-spin" /> جاري التحميل…
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {STRATEGIES.map((s) => (
+                  <label
+                    key={s.value}
+                    className={`flex items-start gap-2 p-3 border rounded cursor-pointer ${
+                      strategy === s.value
+                        ? "border-[var(--ktra-accent)] bg-[var(--ktra-accent-soft,#f3f4f6)]"
+                        : "border-[var(--ktra-border)]"
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="purchase_strategy"
+                      value={s.value}
+                      checked={strategy === s.value}
+                      onChange={() => setStrategy(s.value)}
+                      className="mt-1"
+                    />
+                    <span>
+                      <b className="text-[var(--ktra-ink)]">{s.label}</b>
+                      <span className="block text-sm text-[var(--ktra-ink-soft)]">
+                        {s.hint}
+                      </span>
                     </span>
-                  </span>
-                </label>
-              ))}
-            </div>
-          )}
-
-          {/* ISSUE #117: أمر الشراء خطوة اختيارية — يحكم الإنشاء لا الرؤية. */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+      ),
+    },
+    // ISSUE #117: أمر الشراء خطوة اختيارية — يحكم الإنشاء لا الرؤية.
+    {
+      id: 'purchase-orders', title: 'خطوة أمر الشراء', icon: ClipboardList,
+      description: 'إضافة أمر شراء بين اعتماد عرض السعر والفاتورة.',
+      keywords: ['أمر شراء', 'طلبية', 'عروض'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">خطوة أمر الشراء</h3>
             <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
@@ -221,9 +224,15 @@ const PurchaseSettingsPage: React.FC = () => {
               <span>تفعيل خطوة أمر الشراء في سلسلة الشراء المحلي</span>
             </label>
           </div>
-
-          {/* استلام البضاعة مع الترحيل — مرآة «خصم المخزون عند الترحيل» في المبيعات. */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+      ),
+    },
+    // استلام البضاعة مع الترحيل — مرآة «خصم المخزون عند الترحيل» في المبيعات.
+    {
+      id: 'receive-on-post', title: 'استلام البضاعة مع الترحيل', icon: PackageCheck,
+      description: 'إدخال بنود الفاتورة للمستودع عند ترحيلها أو لاحقاً.',
+      keywords: ['استلام البضاعة', 'مستودع', 'مخزون'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">استلام البضاعة مع الترحيل</h3>
             <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
@@ -243,9 +252,15 @@ const PurchaseSettingsPage: React.FC = () => {
               <span>استلام بضاعة الفاتورة للمخزن تلقائياً عند الترحيل</span>
             </label>
           </div>
-
-          {/* مستند الاستلام: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان. */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+      ),
+    },
+    // مستند الاستلام: التسمية حرّة لكل شركة، والسند المستقل والتعديل اختياريان.
+    {
+      id: 'receipt-doc', title: 'مستند الاستلام', icon: FileText,
+      description: 'تسمية مستند الاستلام، والسند المستقل، والتعديل بعد الحفظ.',
+      keywords: ['إرسالية شراء', 'سند استلام', 'اسم المستند المرتبط بفاتورة', 'اسم المستند بلا فاتورة'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">مستند الاستلام</h3>
             <p className="text-sm text-[var(--ktra-ink-soft)] mb-3 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
@@ -299,9 +314,15 @@ const PurchaseSettingsPage: React.FC = () => {
               <span>السماح بتعديل/إلغاء الإرسالية بعد حفظها (يعكس أثرها ويعيد تطبيقه)</span>
             </label>
           </div>
-
-          {/* T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ المنتجات المتتبَّعة وحدها. */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+      ),
+    },
+    // T-SERIAL: نمط الأرقام التسلسلية في بنود الشراء — يخصّ المنتجات المتتبَّعة وحدها.
+    {
+      id: 'serials', title: 'إدخال الأرقام التسلسلية في فاتورة الشراء', icon: ScanBarcode,
+      description: 'متى وكيف تُدخَل الأرقام التسلسلية للمنتجات المتتبَّعة.',
+      keywords: ['سيريال', 'رقم تسلسلي'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
               إدخال الأرقام التسلسلية في فاتورة الشراء
             </h3>
@@ -320,9 +341,15 @@ const PurchaseSettingsPage: React.FC = () => {
               ))}
             </select>
           </div>
-
-          {/* T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات). */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+      ),
+    },
+    // T-A4: الصندوق الافتراضي لفواتير الشراء النقدية (مرآة إعدادات المبيعات).
+    {
+      id: 'cash-account', title: 'حساب الصندوق الافتراضي (للنقدي)', icon: Wallet,
+      description: 'الصندوق المستعمل تلقائياً لدفعات فواتير الشراء النقدية.',
+      keywords: ['اختيار الصندوق / البنك', 'نقدي'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">حساب الصندوق الافتراضي (للنقدي)</h3>
             <p className="text-sm text-[var(--ktra-ink-soft)] mb-2 flex items-start gap-1">
               <Info className="h-4 w-4 mt-0.5 shrink-0" />
@@ -341,10 +368,15 @@ const PurchaseSettingsPage: React.FC = () => {
               />
             </div>
           </div>
-
-          {/* #34: المقابض السبعة لمحرّك التجديد — رقمان قائمان (المهلة/المراجعة)
-              وخمسة تضبط تنبّؤ هولت والمسار التلقائي (ط11 على خريطة T-REORDER). */}
-          <div className="mt-6 pt-4 border-t border-[var(--ktra-border)]">
+      ),
+    },
+    // #34: المقابض السبعة لمحرّك التجديد — رقمان قائمان (المهلة/المراجعة) وخمسة تضبط تنبّؤ هولت والمسار التلقائي (ط11 على خريطة T-REORDER).
+    {
+      id: 'reorder', title: 'مقابض محرّك التجديد التلقائي', icon: TrendingUp,
+      description: 'حساسية التنبّؤ وهامش الأمان ومهلة التوريد وفترة المراجعة.',
+      keywords: ['حساسية النظام للجديد', 'حساسية الاتجاه', 'هامش الأمان', 'مهلة التوريد الافتراضية', 'فترة المراجعة', 'سقف الاتجاه الصاعد'],
+      content: (
+          <div>
             <h3 className="font-bold mb-1 text-[var(--ktra-ink)]">
               مقابض محرّك التجديد التلقائي
             </h3>
@@ -465,7 +497,30 @@ const PurchaseSettingsPage: React.FC = () => {
               </label>
             </div>
           </div>
-          <ClearanceItemTypesSection accounts={accounts} disabled={loading} />
+      ),
+    },
+    {
+      id: 'clearance-items', title: 'بنود المخلّص', icon: Stamp,
+      description: 'البنود التي تظهر في تخليص الشحنة وحساب كلٍّ منها.',
+      keywords: ['تخليص', 'مخلّص', 'جمارك'],
+      content: <ClearanceItemTypesSection accounts={accounts} disabled={loading} />,
+    },
+  ];
+
+  return (
+    <div className="min-h-[calc(100vh-5rem)]">
+      <KitDocumentShell title="إعدادات الشراء" actions={actions}>
+        {banner && (
+          <div
+            role="status"
+            className={`ktra-banner ${banner.ok ? "ktra-banner--ok" : "ktra-banner--err"}`}
+            style={{ margin: "8px" }}
+          >
+            {banner.msg}
+          </div>
+        )}
+        <div className="p-4 max-w-2xl">
+          <SettingsIndex title="إعدادات الشراء" showTitle={false} sections={sections} />
         </div>
       </KitDocumentShell>
     </div>
