@@ -86,7 +86,7 @@ export const CrmLeadList: React.FC<CrmLeadListProps> = ({ isManager, hasPersonal
           />
           <select
             value={status}
-            onChange={(event) => setStatus(event.target.value as CrmLeadStatus | '')}
+            onChange={(event) => { const next = event.target.value as CrmLeadStatus | ''; setStatus(next); onFilters(q, next); }}
             className="rounded-xl border border-cc-border bg-cc-surface px-3 py-2 text-sm text-cc-text focus:border-cc-accent focus:outline-none"
             aria-label="ترشيح بالحالة"
           >

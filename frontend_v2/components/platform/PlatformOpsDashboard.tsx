@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   getPlatformOpsDashboard,
   PlatformOpsDashboardData,
@@ -82,8 +83,18 @@ const DASHBOARD_TABS: CcTabItem[] = [
   { key: "meetings", label: "الاجتماعات", icon: <CalendarClock className="w-4 h-4" /> },
 ];
 
+const isDashboardTab = (value: string | null): value is DashboardTab =>
+  DASHBOARD_TABS.some((tab) => tab.key === value);
+
 export const PlatformOpsDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<DashboardTab>("overview");
+  // التبويبُ في الرابط (`?tab=crm`) لا في حالةٍ محلّيّة: ملفُّ العميل يُفتح بـ`&lead=`
+  // فيعيده زرُّ «رجوع» المتصفح إلى التبويب نفسه لا إلى «اللوحة» (#73/#69). تبديلُ
+  // التبويب يُسقط `lead` ويستبدل ولا يدفع — التنقّلُ بين التبويبات ليس تاريخاً.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tabParam = searchParams.get("tab");
+  const activeTab: DashboardTab = isDashboardTab(tabParam) ? tabParam : "overview";
+  const setActiveTab = (key: DashboardTab) =>
+    setSearchParams(key === "overview" ? {} : { tab: key }, { replace: true });
   const [data, setData] = useState<PlatformOpsDashboardData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);

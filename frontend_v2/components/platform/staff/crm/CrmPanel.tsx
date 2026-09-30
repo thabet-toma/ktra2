@@ -1,7 +1,9 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 
 import { claimCrmLead, createCrmActivity, createCrmLead, changeCrmLeadStatus, getCrmLead, getCrmLeadStats, listCrmActivities, listCrmColleagues, listCrmLeads, lookupCrmPhone, releaseCrmLead, requestCrmLeadTransfer, transferCrmLead, type CrmActivity, type CrmActivityInput, type CrmColleague, type CrmLead, type CrmLeadContactStats, type CrmLeadStatus, type CrmLookup } from '../../../../services/platformCrmApi';
+import { captureScrollPosition, restoreScrollPosition, type ScrollPositionSnapshot } from '../../../../utils/scrollPosition';
 import { CcCard, CcSectionTitle } from '../../ui';
 import { CrmLeadList } from './CrmLeadList';
 import { CrmLeadProfile } from './CrmLeadProfile';
@@ -21,6 +23,10 @@ interface CrmPanelProps {
   myEmployeeId: number | null;
 }
 type Scope = 'mine' | 'pool' | 'all' | 'follow_ups';
+type LeadFilters = { q: string; status: CrmLeadStatus | '' };
+const EMPTY_FILTERS: LeadFilters = { q: '', status: '' };
+// المُمرِّر: `main.app-content` داخل غلاف التطبيق (مركز العمليات)، والنافذةُ في غلاف الموظّف.
+const scrollContainer = () => document.querySelector<HTMLElement>('main.app-content');
 const messageOf = (caught: unknown, fallback: string) => caught instanceof Error ? caught.message : fallback;
 
 export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) => {
@@ -38,33 +44,61 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
   // من الخادم. لا تُحسَب من صفوف الشاشة: القائمةُ مُصفَّحةٌ ومُرشَّحة.
   const [refreshKey, setRefreshKey] = useState(0);
   const bumpStats = () => setRefreshKey((value) => value + 1);
-  const loadLeads = useCallback(async (nextScope: Scope = scope, q = '', status: CrmLeadStatus | '' = '') => { setListLoading(true); setListError(''); try { const page = await listCrmLeads({ scope: nextScope === 'follow_ups' ? 'mine' : nextScope, follow_up: nextScope === 'follow_ups' ? 'due' : undefined, q: q || undefined, status: status || undefined }); setLeads(page.results); } catch (caught: unknown) { setLeads([]); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } finally { setListLoading(false); } }, [scope]);
+  // المرشِّحاتُ هنا لا في القائمة (#73/#69): كلُّ إعادةِ تحميلٍ — تبديلُ النطاق، والاستلامُ،
+  // والتحويلُ، والبتُّ في طلب — كانت تنادي بلا بحثٍ ولا حالة، فيضيع الترشيحُ والخانتان
+  // ما زالتا تعرضانه. والطلبُ الأحدثُ وحدَه يكتب النتيجة: ردٌّ بطيءٌ لطلبٍ أقدم يُهمَل.
+  const [filters, setFilters] = useState<LeadFilters>(EMPTY_FILTERS);
+  const listRequestRef = useRef(0);
+  const loadLeads = useCallback(async () => { const requestId = ++listRequestRef.current; setListLoading(true); setListError(''); try { const page = await listCrmLeads({ scope: scope === 'follow_ups' ? 'mine' : scope, follow_up: scope === 'follow_ups' ? 'due' : undefined, q: filters.q || undefined, status: filters.status || undefined }); if (requestId === listRequestRef.current) setLeads(page.results); } catch (caught: unknown) { if (requestId === listRequestRef.current) { setLeads([]); setListError(messageOf(caught, 'تعذر تحميل العملاء.')); } } finally { if (requestId === listRequestRef.current) setListLoading(false); } }, [scope, filters]);
   const loadColleagues = useCallback(async () => { try { setColleagues(await listCrmColleagues()); } catch { setColleagues([]); } }, []);
   useEffect(() => { void loadLeads(); }, [loadLeads]); useEffect(() => { void loadColleagues(); }, [loadColleagues]);
+  // ملفُّ العميل في الرابط (`?lead=`) فزرُّ «رجوع» المتصفح يعيد القائمة، والقائمةُ تبقى
+  // مركَّبةً مخفيّةً تحته — فلا يضيع بحثُها ولا يُعاد تحميلُ لوح المدير — ويُستعاد موضعُ
+  // التمرير حين يُغلق الملفّ. كان الملفُّ يستبدل القائمةَ كلَّها فيرجع المديرُ لرأسها.
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const leadParam = Number(searchParams.get('lead')) || null;
+  const pushedLeadRef = useRef(false);
+  const listScrollRef = useRef<ScrollPositionSnapshot | null>(null);
+  const setLeadParam = (id: number | null, replace: boolean) => setSearchParams((prev) => { const next = new URLSearchParams(prev); if (id) next.set('lead', String(id)); else next.delete('lead'); return next; }, { replace });
+  const showLead = (id: number) => { if (!leadParam) listScrollRef.current = captureScrollPosition(scrollContainer(), window.scrollY); pushedLeadRef.current = true; setLeadParam(id, Boolean(leadParam)); };
+  // رجوعٌ في التاريخ إن كنّا دفعنا الملفَّ إليه، وإلا (رابطٌ مباشر) حذفُ المعامل بلا دفع.
+  const closeLead = () => { if (pushedLeadRef.current) { pushedLeadRef.current = false; navigate(-1); return; } setLeadParam(null, true); };
   // ستاتستكس الرقم تُطلَب مع الملفّ، وفشلُها **لا يُقفل الملفّ**: الأرقامُ زينةُ
   // قرارٍ والسجلُّ هو العمل. ولذلك `catch` على النداء نفسِه لا على `Promise.all`
   // كلِّه — الأخيرُ يسقط بسقوط واحد.
-  const openLead = async (id: number) => { setDetailLoading(true); setDetailError(''); try { const [lead, page, stats] = await Promise.all([getCrmLead(id), listCrmActivities(id), getCrmLeadStats(id).catch(() => null)]); setSelected(lead); setActivities(page.results); setLeadStats(stats); } catch (caught: unknown) { setDetailError(messageOf(caught, 'لا يمكن فتح ملف هذا العميل.')); setNotice(messageOf(caught, 'لا يمكن فتح ملف هذا العميل.')); setSelected(null); setLeadStats(null); } finally { setDetailLoading(false); } };
-  const claim = async (lead: CrmLead) => { try { await claimCrmLead(lead.id); setNotice(`تم استلام ${lead.store_name}.`); bumpStats(); await loadLeads('pool'); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
+  const openLead = async (id: number) => { setDetailLoading(true); setDetailError(''); try { const [lead, page, stats] = await Promise.all([getCrmLead(id), listCrmActivities(id), getCrmLeadStats(id).catch(() => null)]); setSelected(lead); setActivities(page.results); setLeadStats(stats); } catch (caught: unknown) { setDetailError(messageOf(caught, 'لا يمكن فتح ملف هذا العميل.')); setNotice(messageOf(caught, 'لا يمكن فتح ملف هذا العميل.')); setSelected(null); setLeadStats(null); setLeadParam(null, true); } finally { setDetailLoading(false); } };
+  useEffect(() => {
+    if (leadParam) {
+      void openLead(leadParam).then(() => { const el = scrollContainer(); if (el) el.scrollTop = 0; else window.scrollTo(0, 0); });
+      return;
+    }
+    pushedLeadRef.current = false; setSelected(null); setDetailError(''); setLeadStats(null);
+    const snapshot = listScrollRef.current; listScrollRef.current = null;
+    if (snapshot) window.requestAnimationFrame(() => restoreScrollPosition(snapshot, (top) => window.scrollTo(0, top)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- المعاملُ وحدَه يقود فتحَ الملفّ وإغلاقَه
+  }, [leadParam]);
+  const claim = async (lead: CrmLead) => { try { await claimCrmLead(lead.id); setNotice(`تم استلام ${lead.store_name}.`); bumpStats(); await loadLeads(); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
   // استلامٌ من بطاقة البحث: الرقمُ وُجد في المخزن، والفعلُ الصحيح هناك أن يُستلَم
   // لا أن يُطلَب تحويلُه. وبعد الاستلام يُنقل النطاقُ إلى «عملائي» ليراه فوراً.
-  const claimFromLookup = async (id: number) => { try { await claimCrmLead(id); setNotice('تم استلام العميل، وصار في «عملائي».'); setLookup(null); bumpStats(); setScope('mine'); await loadLeads('mine'); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
+  const claimFromLookup = async (id: number) => { try { await claimCrmLead(id); setNotice('تم استلام العميل، وصار في «عملائي».'); setLookup(null); bumpStats(); if (scope === 'mine') await loadLeads(); else setScope('mine'); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر استلام العميل.')); } };
   const performLookup = async (value: string) => { setLookupLoading(true); try { setLookup(await lookupCrmPhone(value)); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر التحقق من الرقم.')); setLookup(null); } finally { setLookupLoading(false); } };
   const saveStatus = async (status: CrmLeadStatus, body: string) => { if (!selected) return; try { const lead = await changeCrmLeadStatus(selected.id, status, body); setSelected(lead); bumpStats(); await openLead(lead.id); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر تغيير الحالة.')); } };
   const saveActivity = async (input: CrmActivityInput) => { if (!selected) return; try { await createCrmActivity(selected.id, input); await openLead(selected.id); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر حفظ سجل التواصل.')); } };
-  const transfer = async (toEmployee: number, reason: string, direct: boolean) => { if (!selected) return; try { if (direct) await transferCrmLead(selected.id, toEmployee, reason); else await requestCrmLeadTransfer(selected.id, toEmployee, reason); setNotice(direct ? 'تم تحويل العميل.' : 'أرسل طلب تحويل العميل.'); setSelected(null); bumpStats(); await loadLeads(); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر تنفيذ التحويل.')); } };
+  const transfer = async (toEmployee: number, reason: string, direct: boolean) => { if (!selected) return; try { if (direct) await transferCrmLead(selected.id, toEmployee, reason); else await requestCrmLeadTransfer(selected.id, toEmployee, reason); setNotice(direct ? 'تم تحويل العميل.' : 'أرسل طلب تحويل العميل.'); closeLead(); bumpStats(); await loadLeads(); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر تنفيذ التحويل.')); } };
   // السببُ يأتي من حقلٍ في الصفحة لا من `window.prompt`: حوارُ المتصفّح لا
   // يُنسَّق ولا يحمل اتّجاه RTL، ويحجبه بعضُ المتصفّحات، ونمطُ هذا المستودع
   // `ToastProvider`/`ConfirmProvider` لا نوافذُ المتصفّح.
-  const release = async (reason: string) => { if (!selected || !isManager || !reason.trim()) return; try { await releaseCrmLead(selected.id, reason); setNotice('أعيد العميل إلى المخزن المتاح.'); setSelected(null); bumpStats(); await loadLeads(); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر إعادة العميل إلى المخزن.')); } };
+  const release = async (reason: string) => { if (!selected || !isManager || !reason.trim()) return; try { await releaseCrmLead(selected.id, reason); setNotice('أعيد العميل إلى المخزن المتاح.'); closeLead(); bumpStats(); await loadLeads(); } catch (caught: unknown) { setDetailError(messageOf(caught, 'تعذر إعادة العميل إلى المخزن.')); } };
   const suggest = async (event: React.FormEvent) => { event.preventDefault(); try { const created = await createCrmLead({ store_name: storeName, owner_name: ownerName || undefined, phones: [{ raw: phone, kind: 'primary' }] }); setNotice(isManager ? `تمت إضافة ${created.store_name}.` : `أُرسل اقتراح ${created.store_name} للاعتماد.`); setSuggestOpen(false); setStoreName(''); setPhone(''); setOwnerName(''); await loadLeads(); } catch (caught: unknown) { const data = caught instanceof Error && 'data' in caught ? (caught as Error & { data?: { existing_lead_name?: string; assigned_to?: { name: string } | null } }).data : undefined; setNotice(data?.existing_lead_name ? `هذا الرقم مسجّل لدى ${data.existing_lead_name}، والمسؤول ${data.assigned_to?.name || 'غير محدد'}.` : messageOf(caught, 'تعذر حفظ الرقم.')); } };
   const submitLookupTransfer = async (event: React.FormEvent) => { event.preventDefault(); if (!requestLeadId || !requestTo || !requestReason.trim()) return; try { await requestCrmLeadTransfer(requestLeadId, Number(requestTo), requestReason); setNotice('أرسل طلب التحويل إلى الموظف المسؤول.'); setRequestLeadId(null); setRequestTo(''); setRequestReason(''); } catch (caught: unknown) { setNotice(messageOf(caught, 'تعذر إرسال طلب التحويل.')); } };
   // ‏`key` بمعرّف العميل: اللوحةُ تحمل حالةً محلّيّةً (الحالةُ المختارةُ ونصُّ
   // السبب ونموذجُ النشاط)، وبلا إعادةِ التركيب تنتقل تلك الحالةُ من عميلٍ إلى
   // الذي بعده — فيُحفَظ سببُ تحويلِ الأوّل على الثاني.
-  if (selected) return <CrmLeadProfile key={selected.id} lead={selected} activities={activities} stats={leadStats} loading={detailLoading} error={detailError} isManager={isManager} isOwner={Boolean(myEmployeeId && selected.assigned_to?.id === myEmployeeId)} colleagues={colleagues} onBack={() => { setSelected(null); setDetailError(''); }} onStatus={saveStatus} onActivity={saveActivity} onTransfer={transfer} onRelease={release} />;
   return (
-    <div className="space-y-6">
+    <>
+    {selected && <CrmLeadProfile key={selected.id} lead={selected} activities={activities} stats={leadStats} loading={detailLoading} error={detailError} isManager={isManager} isOwner={Boolean(myEmployeeId && selected.assigned_to?.id === myEmployeeId)} colleagues={colleagues} onBack={closeLead} onStatus={saveStatus} onActivity={saveActivity} onTransfer={transfer} onRelease={release} />}
+    <div className={selected ? 'hidden' : 'space-y-6'} data-testid="crm-list-view">
       {myEmployeeId !== null && <CrmMyStats refreshKey={refreshKey} />}
       <CrmLeadList
         isManager={isManager}
@@ -73,14 +107,14 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
         scope={scope}
         loading={listLoading}
         error={listError}
-        onScope={(nextScope) => { setScope(nextScope); void loadLeads(nextScope); }}
-        onFilters={(q, status) => void loadLeads(scope, q, status)}
-        onSelect={(lead) => void openLead(lead.id)}
+        onScope={setScope}
+        onFilters={(q, status) => setFilters({ q: q.trim(), status })}
+        onSelect={(lead) => showLead(lead.id)}
         onClaim={(lead) => void claim(lead)}
         onLookup={(value) => void performLookup(value)}
         lookup={lookup}
         lookupLoading={lookupLoading}
-        onOpenLookup={(id) => void openLead(id)}
+        onOpenLookup={showLead}
         onRequestLookupTransfer={(id) => setRequestLeadId(id)}
         onClaimLookup={(id) => void claimFromLookup(id)}
       />
@@ -188,5 +222,6 @@ export const CrmPanel: React.FC<CrmPanelProps> = ({ isManager, myEmployeeId }) =
         </div>
       )}
     </div>
+    </>
   );
 };

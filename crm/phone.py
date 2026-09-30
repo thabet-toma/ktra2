@@ -70,3 +70,19 @@ def normalize_phone(raw: str, *, default_country_code: str = DEFAULT_COUNTRY_COD
         raise PhoneNormalizationError(f"رقم الهاتف غير صالح: {raw!r}")
 
     return text
+
+
+# أقلُّ عددِ أرقامٍ يُبحث به في الهواتف: «05» أو «59» في كلّ رقمٍ محلّيّ تقريباً،
+# فالبحثُ بها يُرجع القائمةَ كلَّها — ليس بحثاً.
+MIN_PHONE_SEARCH_DIGITS = 4
+
+
+def phone_search_digits(text: str) -> str:
+    """أرقامُ نصِّ بحثٍ حرّ كما تظهر داخل `LeadPhone.e164` — بلا أصفارٍ بادئة.
+
+    الموظّفُ يكتب الرقم محلّياً («0599123») والمخزَّن E.164 («+972599123456»):
+    الصفرُ المحلّيّ و`00` الدوليّة كلاهما يسقطان فيبقى جزءٌ يطابق بالاحتواء.
+    ليس تطبيعاً (`normalize_phone` يرفض الرقم الجزئيّ) — مفتاحُ بحثٍ لا فرادة.
+    """
+    digits = re.sub(r"\D", "", (text or "").translate(_DIGIT_TRANSLATION))
+    return digits.lstrip("0")

@@ -10,7 +10,7 @@ from platform_ops.models import PlatformEmployee
 from platform_ops.permissions import IsPlatformOperationsManager, IsPlatformOperationsStaff
 
 from .models import Lead, LeadTransfer
-from .phone import PhoneNormalizationError, normalize_phone
+from .phone import MIN_PHONE_SEARCH_DIGITS, PhoneNormalizationError, normalize_phone, phone_search_digits
 from .serializers import (
     LeadActivityCreateSerializer,
     LeadActivitySerializer,
@@ -98,7 +98,13 @@ def _apply_lead_filters(qs, request):
         qs = qs.filter(status=status_param)
     q = params.get("q")
     if q:
-        qs = qs.filter(Q(store_name__icontains=q) | Q(owner_name__icontains=q))
+        # الخانةُ تقول «اسم المحل أو رقم الهاتف» — فالرقمُ الجزئيُّ يطابق الهواتف أيضاً.
+        # و`distinct` لأنّ للمحلّ أكثرَ من هاتفٍ قد يطابق كلٌّ منها فيتكرّر الصفّ.
+        match = Q(store_name__icontains=q) | Q(owner_name__icontains=q) | Q(city__icontains=q)
+        digits = phone_search_digits(q)
+        if len(digits) >= MIN_PHONE_SEARCH_DIGITS:
+            match |= Q(phones__e164__contains=digits)
+        qs = qs.filter(match).distinct()
     phone = params.get("phone")
     if phone:
         try:
@@ -138,7 +144,11 @@ def _scoped_queryset_for_list(base, request, view):
             return mine_qs
         if scope == "pool":
             return pool_qs
-        return base  # 'all' أو بلا تحديد: كلُّ الصفوف — هذا مدير.
+        # 'all' أو بلا تحديد: كلُّ الأرقام المعتمدة — هذا مدير. المعلَّقةُ والمرفوضةُ
+        # اقتراحاتٌ لها لوحتُها، تُطلب بـ`approval_status` صراحةً فتصل كاملة.
+        if request.query_params.get("approval_status"):
+            return base
+        return base.filter(approval_status=Lead.Approval.APPROVED)
 
     if scope == "pool":
         return pool_qs
