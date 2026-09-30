@@ -293,11 +293,14 @@ class ReportEngineTest(APITestCase):
         self.assertEqual(res.status_code, 200, res.data)
         rows = res.data["rows"]
         self.assertEqual(rows[0]["description"], "رصيد افتتاحي")
-        self.assertEqual(Decimal(rows[0]["balance"]), Decimal("300"))
+        # #69: القاعدة الموحّدة لكل كشف — المدين سالب وبجانبه «مدين» (كرت الطرف نفسه).
+        self.assertEqual(Decimal(rows[0]["balance"]), Decimal("-300"))
+        self.assertEqual(rows[0]["side"], "مدين")
         # الافتتاحي لا يُعرَض كحركة: 3 أسطر = افتتاحي + حركتا الفترة.
         self.assertEqual(len(rows), 3)
         self.assertEqual([r["description"] for r in rows[1:]], ["داخل الفترة", "تحصيل"])
-        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("450"))
+        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("-450"))
+        self.assertEqual(rows[-1]["side"], "مدين")
         # الإجمالي على حركات الفترة وحدها — الافتتاحي ليس مديناً ولا دائناً.
         self.assertEqual(Decimal(res.data["totals"]["debit"]), Decimal("200"))
         self.assertEqual(Decimal(res.data["totals"]["credit"]), Decimal("50"))
@@ -310,13 +313,27 @@ class ReportEngineTest(APITestCase):
 
         res = self._run("partner-statement", partner=self.customer.id,
                         **{"from": "1990-01-01", "to": "2099-12-31"})
-        self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), debit - credit)
+        self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), credit - debit)
 
-    def test_supplier_statement_flips_the_sign(self):
-        """المورد دائن بطبعه: دائن−مدين، وإلا قرأ الطرفان الرقم نفسه بإشارتين."""
+    def test_supplier_statement_reads_the_same_rule(self):
+        """المورد الدائن موجبٌ «دائن» — القاعدة واحدة للطرفين لا إشارةٌ تنقلب بنوع الطرف."""
         self._post_line("2026-02-01", Decimal("0"), Decimal("400"), partner=self.supplier)
         res = self._run("partner-statement", partner=self.supplier.id)
         self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), Decimal("400"))
+        self.assertEqual(res.data["rows"][-1]["side"], "دائن")
+        # مورّدٌ دفعنا له أكثر ممّا له: مدينٌ سالب — لا «400» موجبةً تُقرأ دَيناً علينا.
+        self._post_line("2026-02-02", Decimal("500"), Decimal("0"), partner=self.supplier)
+        res = self._run("partner-statement", partner=self.supplier.id)
+        self.assertEqual(Decimal(res.data["rows"][-1]["balance"]), Decimal("-100"))
+        self.assertEqual(res.data["rows"][-1]["side"], "مدين")
+
+    def test_statement_columns_carry_the_balance_side(self):
+        """عمود «طبيعة الرصيد» بجانب «الرصيد» في الكشف والأستاذ، والصفر بلا جانب."""
+        for key in ("partner-statement", "account-ledger"):
+            keys = [c.key for c in REPORTS[key].columns]
+            self.assertEqual(keys[keys.index("balance") + 1], "side", key)
+        res = self._run("partner-statement", partner=self.customer.id)
+        self.assertEqual(res.data["rows"][0]["side"], "")
 
     def test_partner_statement_without_a_partner_returns_nothing(self):
         """كشفٌ بلا طرف لا معنى له — لا يجرّ دفتر الشركة كله."""
@@ -330,7 +347,8 @@ class ReportEngineTest(APITestCase):
         res = self._run("account-ledger", account=self.ar_account.id)
         rows = res.data["rows"]
         self.assertEqual(rows[0]["description"], "رصيد افتتاحي")
-        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("50"))
+        self.assertEqual(Decimal(rows[-1]["balance"]), Decimal("-50"))
+        self.assertEqual(rows[-1]["side"], "مدين")
 
     def test_general_journal_shows_posted_entries_with_their_totals(self):
         self._post_line("2026-06-20", Decimal("75"), Decimal("0"), description="قيد اليومية")

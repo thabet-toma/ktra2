@@ -158,11 +158,29 @@ def _partner_is_customer(tenant_id: int, partner_id: int) -> bool:
     return not is_creditor_party(kind)
 
 
+def _balance_cells(debit_net: Decimal) -> dict:
+    """«الرصيد» و«طبيعة الرصيد» بالقاعدة الموحّدة لكل كشف (#33/#69): المدين سالب
+    وبجانبه «مدين»، والدائن موجب «دائن»، والصفر بلا جانب — كرتُ الطرف نفسه
+    (`frontend_v2/utils/formatNumber.ts` — `formatBalanceWithSide`)، فلا يقرأ
+    المستخدم الرصيدَ نفسه بإشارتين بين الكرت والتقرير. `debit_net` = مدين − دائن.
+    """
+    if not debit_net:
+        return {"balance": _money(ZERO), "side": ""}
+    return {"balance": _money(-debit_net), "side": "مدين" if debit_net > 0 else "دائن"}
+
+
+BALANCE_COLUMNS = (
+    ReportColumn("balance", "الرصيد", KIND_MONEY),
+    ReportColumn("side", "طبيعة الرصيد", width="90px"),
+)
+
+
 def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
     """كشف حساب طرف: رصيد افتتاحي قبل الفترة + حركات الفترة برصيد جارٍ.
 
-    نفس قاعدة `accounting.services.partner_account_statement`: للعميل
-    مدين−دائن، ولغيره دائن−مدين — كي لا يقرأ الطرفان الرقم نفسه بإشارتين.
+    الرصيد الجاري يُجمَع بقاعدة `accounting.services.partner_account_statement`
+    (للعميل مدين−دائن، ولغيره دائن−مدين)، ويُعرَض بالقاعدة الموحّدة
+    (`_balance_cells`): المدين سالب وبجانبه جانبه، للعميل والمورد سواء.
 
     «القيد المعكوس وعكسه» (`statement_reversal_pairs` — مصدر الشاشة نفسه) يُطوى
     افتراضياً في سطرٍ واحد «قيد صُحّح» بلا مدين ولا دائن، و`reversals=show` يطبعهما
@@ -177,6 +195,9 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
         return []
     is_customer = _partner_is_customer(tenant_id, partner_id)
     start, _end = _date_range(params)
+
+    def cells(party_balance: Decimal) -> dict:
+        return _balance_cells(party_balance if is_customer else -party_balance)
 
     base = JournalLine.objects.filter(
         tenant_id=tenant_id, partner_id=partner_id, journal__is_posted=True,
@@ -197,7 +218,7 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
         "description": "رصيد افتتاحي",
         "debit": _money(ZERO),
         "credit": _money(ZERO),
-        "balance": _money(opening),
+        **cells(opening),
     }]
     running = opening
     qs = _apply_dates(base, "journal__transaction_date", params).select_related("journal")
@@ -230,7 +251,7 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
                     "description": f"قيد صُحّح: #{pair[0]} ⇄ #{pair[1]} (صافي 0)",
                     "debit": _money(ZERO),
                     "credit": _money(ZERO),
-                    "balance": _money(running),
+                    **cells(running),
                 })
             continue
         running += (debit - credit) if is_customer else (credit - debit)
@@ -242,7 +263,7 @@ def _partner_statement(tenant_id: int, params: dict) -> list[dict]:
             "description": (line.description or line.journal.description or "")[:140],
             "debit": _money(debit),
             "credit": _money(credit),
-            "balance": _money(running),
+            **cells(running),
         })
     return rows
 
@@ -267,7 +288,7 @@ register(ReportSpec(
         ReportColumn("description", "البيان"),
         ReportColumn("debit", "مدين", KIND_MONEY, total=True),
         ReportColumn("credit", "دائن", KIND_MONEY, total=True),
-        ReportColumn("balance", "الرصيد", KIND_MONEY),
+        *BALANCE_COLUMNS,
     ),
     permission="accounting.journal.view",
     row_link="/accounting/journals/{id}",
@@ -276,7 +297,8 @@ register(ReportSpec(
 
 
 def _account_ledger(tenant_id: int, params: dict) -> list[dict]:
-    """دفتر أستاذ حساب واحد: افتتاحي + حركات الفترة برصيد جارٍ (مدين−دائن)."""
+    """دفتر أستاذ حساب واحد: افتتاحي + حركات الفترة برصيد جارٍ (مدين−دائن)،
+    يُعرَض بالقاعدة الموحّدة (`_balance_cells`): المدين سالب وبجانبه جانبه."""
     from accounting.models import JournalLine
 
     account_id = _int_param(params, "account")
@@ -302,7 +324,7 @@ def _account_ledger(tenant_id: int, params: dict) -> list[dict]:
         "description": "رصيد افتتاحي",
         "debit": _money(ZERO),
         "credit": _money(ZERO),
-        "balance": _money(opening),
+        **_balance_cells(opening),
     }]
     running = opening
     qs = _apply_dates(base, "journal__transaction_date", params).select_related(
@@ -321,7 +343,7 @@ def _account_ledger(tenant_id: int, params: dict) -> list[dict]:
             "description": (line.description or line.journal.description or "")[:140],
             "debit": _money(debit),
             "credit": _money(credit),
-            "balance": _money(running),
+            **_balance_cells(running),
         })
     return rows
 
@@ -340,7 +362,7 @@ register(ReportSpec(
         ReportColumn("description", "البيان"),
         ReportColumn("debit", "مدين", KIND_MONEY, total=True),
         ReportColumn("credit", "دائن", KIND_MONEY, total=True),
-        ReportColumn("balance", "الرصيد", KIND_MONEY),
+        *BALANCE_COLUMNS,
     ),
     permission="accounting.journal.view",
     row_link="/accounting/journals/{id}",
