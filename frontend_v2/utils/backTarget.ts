@@ -10,6 +10,10 @@
  * ننقله إلى **قائمة شاشته** (`VIEW_PATHS[activeView]`) — لا جدولَ مساراتٍ ثانياً
  * هنا يتفرّع عن الأول ويكذب لاحقاً — ونكتب اسم الوجهة على الزرّ ليعرف أين
  * سيذهب قبل أن يضغط.
+ *
+ * وحين فُتح التبويب **من شاشةٍ في التطبيق** (`openInNewTab`) نعرف أين كان المستخدم
+ * بالضبط — مسارَ الفاتح باستعلامه (`TabHandoff.openerPath`): القائمةَ بفلترها وصفحتها
+ * والصفِّ المختار. تلك الوجهةُ أصدق من رأس قائمة الشاشة (#73/#69).
  */
 
 export type BackKind = 'history' | 'fallback';
@@ -52,14 +56,32 @@ export function resolveBackTarget(input: {
   listPath?: string | null;
   /** اسم الشاشة الحالية — `VIEW_LABELS[activeView]`. */
   listLabel?: string | null;
+  /** مسار الشاشة التي فتحت هذا التبويب باستعلامه — `incomingHandoff().openerPath`. */
+  openerPath?: string | null;
+  /** اسم تلك الشاشة — `incomingHandoff().openerLabel`. */
+  openerLabel?: string | null;
 }): BackTarget {
-  const { canGoBack, currentPath, listPath, listLabel } = input;
+  const { canGoBack, currentPath, listPath, listLabel, openerPath, openerLabel } = input;
 
   if (canGoBack) {
     return { kind: 'history', path: '', label: 'رجوع', hint: 'رجوع للصفحة السابقة' };
   }
 
   const here = normalize(currentPath);
+  // مسارٌ داخليٌّ فقط (لا `//مضيف`)، ولا حلقةَ على الصفحة نفسها.
+  if (
+    openerPath && openerPath.startsWith('/') && !openerPath.startsWith('//')
+    && normalize(openerPath.split(/[?#]/)[0]) !== here
+  ) {
+    const label = openerLabel || 'الصفحة السابقة';
+    return {
+      kind: 'fallback',
+      path: openerPath,
+      label,
+      hint: `رجوع — إلى «${label}» حيث فُتح هذا التبويب`,
+    };
+  }
+
   if (listPath && normalize(listPath) !== here) {
     const label = listLabel || 'رجوع';
     return {

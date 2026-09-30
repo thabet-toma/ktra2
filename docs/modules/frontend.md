@@ -479,6 +479,11 @@
   نفسها** (`VIEW_PATHS[activeView]` يمرّره `App.tsx` إلى `AppLayout` ثم
   `Breadcrumb`) أو الرئيسية — واسم الوجهة يُكتب على الزرّ. الاسم المتاح يبدأ
   دائماً بـ«رجوع» ليبقى للزرّ هوية ثابتة (وشرط WCAG 2.5.3).
+  وتبويبٌ فتحته شاشةٌ في التطبيق يعرف **مكانَ فاتحه بالضبط**: المناولة تحمل
+  `openerPath` (المسار باستعلامه وقت الفتح) فيرجع الزرّ إلى القائمة بفلترها وصفحتها
+  وصفّها المختار لا إلى رأسها (#73/#69) — ويُقدَّم على قائمة الشاشة، ويُرفض إن كان
+  خارجياً أو هو الصفحةَ نفسها. شرطُه أن تحفظ القائمةُ حالتَها في الرابط كما تفعل
+  `components/sales/SalesCustomersPage.tsx` (`q`/`tier`/`inactive`/`page`/`sel`).
 
 قواعد هذه المنطقة:
 
@@ -497,6 +502,7 @@
 
 البراهين: `utils/tabSelection.test.ts` · `utils/tabLink.test.ts` ·
 `utils/backTarget.test.ts` · `e2e/new-tab-indicator.spec.ts` (تبويبان حقيقيان) ·
+`e2e/sales-customers-back-keeps-place.spec.ts` ·
 `e2e/back-button.spec.ts`.
 
 ## T-WIN — النوافذ العائمة وشريط الإجراءات

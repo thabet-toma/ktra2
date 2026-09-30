@@ -104,6 +104,10 @@ test('حارس شكل السجلّ', () => {
   assert.equal(isFreshHandoff({ openerId: 'a', openerLabel: 'x', at: now }, now), true);
   // ساعةٌ متقدّمة في تبويب آخر: سجلٌّ «من المستقبل» يُرفض بدل أن يبقى أبداً.
   assert.equal(isFreshHandoff({ openerId: 'a', openerLabel: 'x', at: now + 5_000 }, now), false);
+  assert.equal(isFreshHandoff({ openerId: 'a', openerLabel: 'x', openerPath: '/sales/customers?page=2', at: now }, now), true);
+  // مسارُ فاتحٍ خارجيٌّ أو مشوَّه يُسقط السجلّ كلَّه — «رجوع» لا يقود خارج التطبيق.
+  assert.equal(isFreshHandoff({ openerId: 'a', openerLabel: 'x', openerPath: '//evil.example', at: now }, now), false);
+  assert.equal(isFreshHandoff({ openerId: 'a', openerLabel: 'x', openerPath: 7, at: now }, now), false);
 });
 
 /**

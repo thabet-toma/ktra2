@@ -256,6 +256,7 @@ export function KitDenseTable<T extends Record<string, any>>({
             return (
               <tr
                 key={key}
+                data-row-key={key}
                 className={[
                   isSelected ? 'ktra-row--selected' : '',
                   isHovered ? 'ktra-row--hover' : '',

@@ -1,6 +1,7 @@
 import { useCallback, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { historyCanGoBack, resolveBackTarget, type BackTarget } from '../utils/backTarget';
+import { incomingHandoff } from '../utils/tabLink';
 import { uiLog } from '../utils/uiLog';
 
 export interface AppBack extends BackTarget {
@@ -23,11 +24,14 @@ export function useAppBack(listPath?: string | null, listLabel?: string | null):
     // `history.state` يُقرأ عند كل تغيّر مسار — `idx` يتقدّم مع كل دفعة.
     const canGoBack =
       typeof window !== 'undefined' && historyCanGoBack(window.history.state);
+    const opener = incomingHandoff();
     return resolveBackTarget({
       canGoBack,
       currentPath: location.pathname,
       listPath,
       listLabel,
+      openerPath: opener?.openerPath,
+      openerLabel: opener?.openerLabel,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.key, location.pathname, listPath, listLabel]);

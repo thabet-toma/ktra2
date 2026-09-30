@@ -44,6 +44,10 @@ export interface TabHandoff {
   openerId: string;
   /** اسم الشاشة التي كان عليها وقت الفتح («فواتير المبيعات»). */
   openerLabel: string;
+  /** مسار الفاتح **باستعلامه** وقت الفتح (`/sales/customers?q=…&page=3&sel=12`) —
+   *  وجهة «رجوع» في التبويب الجديد، فيعود المستخدم إلى مكانه في القائمة لا إلى
+   *  رأسها (#73/#69). اختياريّ: سجلّاتٌ كُتبت قبله تبقى صالحة. */
+  openerPath?: string;
   /** لحظة الفتح (ms). */
   at: number;
 }
@@ -96,6 +100,7 @@ export function isFreshHandoff(record: unknown, now: number): record is TabHando
   const r = record as Partial<TabHandoff>;
   if (typeof r.openerId !== 'string' || typeof r.at !== 'number') return false;
   if (typeof r.openerLabel !== 'string') return false;
+  if (r.openerPath !== undefined && (typeof r.openerPath !== 'string' || !isInternalPath(r.openerPath))) return false;
   return now - r.at >= 0 && now - r.at <= TAB_HANDOFF_TTL_MS;
 }
 
@@ -270,7 +275,12 @@ export function prepareHandoffUrl(url: string): string {
   if (!store) return url;
   const token = randomId();
   try {
-    writeHandoff(store, token, { openerId: tabId(), openerLabel: currentLabel, at: Date.now() });
+    writeHandoff(store, token, {
+      openerId: tabId(),
+      openerLabel: currentLabel,
+      openerPath: window.location.pathname + window.location.search,
+      at: Date.now(),
+    });
   } catch {
     return url; // حصّة التخزين ممتلئة — نفتح بلا وعي بدل أن نمنع الفتح
   }

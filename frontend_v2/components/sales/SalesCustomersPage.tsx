@@ -7,7 +7,8 @@
  *   end_of_dealing_date، assigned_price_tier — يَظهروا في النموذج
  *   كحقول optional (يَتم تجاهلها إذا backend لا يَدعمها).
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { apiDelete, apiGetPagedList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { Plus, Pencil, Trash2, RefreshCw } from "lucide-react";
@@ -66,11 +67,42 @@ export const SalesCustomersPage: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
-  const [search, setSearch] = useState("");
-  const [filterTier, setFilterTier] = useState("");
-  const [showInactive, setShowInactive] = useState(false);
-  const [selectedKey, setSelectedKey] = useState<number | null>(null);
-  const [page, setPage] = useState(1);
+  // #73/#69: الفلاترُ والصفحةُ والصفُّ المختار في الرابط — العميلُ يُفتح بتبويبٍ جديد
+  // يحمل هذا الرابطَ (`TabHandoff.openerPath`)، فـ«رجوع» منه يعيد القائمةَ كما تُركت
+  // لا رأسَها، وتحديثُ الصفحة لا يُضيّع الفلترة.
+  const [params, setParams] = useSearchParams();
+  const urlSearch = params.get("q") ?? "";
+  const filterTier = params.get("tier") ?? "";
+  const showInactive = params.get("inactive") === "1";
+  const page = Math.max(1, Math.floor(Number(params.get("page"))) || 1);
+  const selParam = Number(params.get("sel"));
+  const selectedKey = Number.isInteger(selParam) && selParam > 0 ? selParam : null;
+  const patchParams = useCallback((patch: Record<string, string | null>) => {
+    setParams((prev) => {
+      const next = new URLSearchParams(prev);
+      Object.entries(patch).forEach(([k, v]) => { if (v) next.set(k, v); else next.delete(k); });
+      return next;
+    }, { replace: true });
+  }, [setParams]);
+  const setPage = (p: number) => patchParams({ page: p > 1 ? String(p) : null });
+  const setSelectedKey = (k: number | null) => patchParams({ sel: k != null ? String(k) : null });
+  // حقلُ البحث محلّيٌّ أثناء الكتابة ويُكتب في الرابط بعد توقّفها؛ ويتبع الرابطَ إن تغيّر من خارجه.
+  const [search, setSearch] = useState(urlSearch);
+  const writtenSearchRef = useRef(urlSearch);
+  useEffect(() => {
+    if (urlSearch !== writtenSearchRef.current) {
+      writtenSearchRef.current = urlSearch;
+      setSearch(urlSearch);
+    }
+  }, [urlSearch]);
+  useEffect(() => {
+    if (search.trim() === urlSearch.trim()) return;
+    const timer = window.setTimeout(() => {
+      writtenSearchRef.current = search;
+      patchParams({ q: search.trim() ? search : null, page: null });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [patchParams, search, urlSearch]);
   const [total, setTotal] = useState(0);
   const pageSize = 50;
 
@@ -78,7 +110,10 @@ export const SalesCustomersPage: React.FC = () => {
 
   const tenantId = useMemo(() => resolveTenantId(), []);
 
+  // حارسُ الاستجابة القديمة: ردٌّ على فلترٍ سابقٍ وصل متأخّراً لا يكتب فوق نتيجة الفلتر الحالي.
+  const requestRef = useRef(0);
   const loadRows = useCallback(async () => {
+    const request = ++requestRef.current;
     setLoading(true);
     setErr(null);
     try {
@@ -86,24 +121,30 @@ export const SalesCustomersPage: React.FC = () => {
         tenantId,
         query: {
           page, page_size: pageSize, partner_type: "Customer",
-          search: search.trim() || undefined,
+          search: urlSearch.trim() || undefined,
           assigned_price_tier: filterTier || undefined,
           include_inactive: showInactive ? 1 : undefined,
         },
       });
+      if (request !== requestRef.current) return;
       setRows(result.results);
       setTotal(result.count);
     } catch (e: unknown) {
+      if (request !== requestRef.current) return;
       setErr(e instanceof Error ? e.message : "فشل التحميل");
     } finally {
-      setLoading(false);
+      if (request === requestRef.current) setLoading(false);
     }
-  }, [filterTier, page, search, showInactive, tenantId]);
+  }, [filterTier, page, urlSearch, showInactive, tenantId]);
 
+  useEffect(() => { void loadRows(); }, [loadRows]);
+
+  // العائدُ إلى القائمة يجد صفَّه في مجال النظر — مرّةً بعد كلّ تحميل، لا مع كلّ اختيار.
   useEffect(() => {
-    const timer = window.setTimeout(() => { void loadRows(); }, 250);
-    return () => window.clearTimeout(timer);
-  }, [loadRows]);
+    if (selectedKey == null) return;
+    document.querySelector(`[data-row-key="${selectedKey}"]`)?.scrollIntoView({ block: "center" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows]);
 
   const filtered = rows;
 
@@ -113,7 +154,9 @@ export const SalesCustomersPage: React.FC = () => {
     setMsg(null);
   };
 
+  // الاختيارُ يُكتب في الرابط **قبل** الفتح: التبويبُ الجديد يحمل مسارَنا وجهةً لـ«رجوع».
   const openEdit = (p: PartnerApi) => {
+    setSelectedKey(p.id);
     openInNewTab(`/partners/${p.id}?tab=edit`);
   };
 
@@ -160,6 +203,7 @@ export const SalesCustomersPage: React.FC = () => {
             data-ctx-partner-kind="customer"
             onClick={(e) => {
               e.stopPropagation();
+              setSelectedKey(r.id);
               openInNewTab(`/partners/${r.id}`);
             }}
           >
@@ -252,7 +296,7 @@ export const SalesCustomersPage: React.FC = () => {
           data-ktra-field="search"
           placeholder="بحث... (F6)"
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1); }}
+          onChange={(e) => setSearch(e.target.value)}
         />
       </label>
       {/* T-SIMPL2: فلتر فئة السعر يتبع عمودها في الطيّ — ويعود متى كان مفعّلاً
@@ -260,7 +304,7 @@ export const SalesCustomersPage: React.FC = () => {
       {showAdv("list.type-filter", Boolean(filterTier)) && (
         <label className="ktra-field" style={{ minWidth: "120px" }}>
           <span className="ktra-field-label">فئة السعر</span>
-          <select className="ktra-input" value={filterTier} onChange={(e) => { setFilterTier(e.target.value); setPage(1); }}>
+          <select className="ktra-input" value={filterTier} onChange={(e) => patchParams({ tier: e.target.value || null, page: null })}>
             <option value="">الكل</option>
             {PRICE_TIERS.filter((t) => t.v).map((t) => (
               <option key={t.v} value={t.v}>{t.l}</option>
@@ -273,7 +317,7 @@ export const SalesCustomersPage: React.FC = () => {
           type="checkbox"
           data-testid="show-inactive-partners"
           checked={showInactive}
-          onChange={(e) => { setShowInactive(e.target.checked); setPage(1); }}
+          onChange={(e) => patchParams({ inactive: e.target.checked ? "1" : null, page: null })}
         />
         إظهار الموقوفين
       </label>

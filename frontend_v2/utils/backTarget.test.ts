@@ -57,3 +57,27 @@ test('شاشة بلا مسار قائمة معروف → الرئيسية', () =
   assert.equal(t.path, '/dashboard');
   assert.equal(t.label, 'الرئيسية');
 });
+
+test('#73: تبويبٌ فُتح من قائمة → «رجوع» إلى القائمة نفسها بفلترها وصفحتها لا إلى رأسها', () => {
+  const t = resolveBackTarget({
+    canGoBack: false,
+    currentPath: '/partners/12',
+    listPath: '/partners-directory',
+    listLabel: 'دليل الأطراف',
+    openerPath: '/sales/customers?q=%D8%A3%D8%AD%D9%85%D8%AF&page=3&sel=12',
+    openerLabel: 'عملاء المبيعات',
+  });
+  assert.equal(t.kind, 'fallback');
+  assert.equal(t.path, '/sales/customers?q=%D8%A3%D8%AD%D9%85%D8%AF&page=3&sel=12');
+  assert.equal(t.label, 'عملاء المبيعات');
+  assert.ok(t.hint.startsWith('رجوع') && t.hint.includes(t.label));
+});
+
+test('مسار الفاتح لا يُصدَّق إن كان خارجياً أو هو الصفحة نفسها', () => {
+  const base = { canGoBack: false, currentPath: '/partners/12', listPath: '/partners-directory', listLabel: 'دليل الأطراف' };
+  assert.equal(resolveBackTarget({ ...base, openerPath: '//evil.example/x' }).path, '/partners-directory');
+  assert.equal(resolveBackTarget({ ...base, openerPath: 'https://evil.example/' }).path, '/partners-directory');
+  assert.equal(resolveBackTarget({ ...base, openerPath: '/partners/12?tab=edit' }).path, '/partners-directory');
+  // السابقةُ الحقيقية تبقى أوّلاً: تنقّلٌ داخل التبويب الجديد يرجع خطوةً لا إلى الفاتح.
+  assert.equal(resolveBackTarget({ ...base, canGoBack: true, openerPath: '/sales/customers' }).kind, 'history');
+});
