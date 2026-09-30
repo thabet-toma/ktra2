@@ -2,16 +2,24 @@ import { useEffect } from "react";
 
 /**
  * يضبط عنوان التبويب (وما يقرأه Google عند فهرسة الصفحة) لكل شاشة عامة على
- * حدة، بدل عنوان index.html الثابت الواحد لكل مسارات الموقع. يُستخدم فقط في
- * الشاشات العامة غير المصادَق عليها (الهبوط، من نحن، تواصل معنا، المتجر) —
- * الشاشات الداخلية لا تحتاج عنواناً مفهرَساً.
+ * حدة، بدل عنوان index.html الثابت الواحد لكل مسارات الموقع. يُستخدم في صفحات
+ * المتاجر ذات المعرّف (`/store/<slug>/…`) وشاشتي الدخول والتسجيل — الشاشات
+ * الداخلية لا تحتاج عنواناً مفهرَساً.
+ *
+ * `null` = لا شيء: الصفحات العامة في `constants/publicPages.ts` يتولّى عنوانها
+ * `<title>` من React 19 (`PublicPageHead`)، ووسمان `<title>` معاً يجعلان التبويب
+ * يعرض الأوّل منهما. وللسبب نفسه: وسمٌ أنشأه هذا الخطاف يُزال عند المغادرة.
  */
-export function useDocumentTitle(title: string): void {
+export function useDocumentTitle(title: string | null): void {
   useEffect(() => {
+    if (title === null) return;
+    const existed = Boolean(document.head.querySelector("title"));
     const previous = document.title;
     document.title = title;
+    const created = existed ? null : document.head.querySelector("title");
     return () => {
-      document.title = previous;
+      if (created) created.remove();
+      else document.title = previous;
     };
   }, [title]);
 }

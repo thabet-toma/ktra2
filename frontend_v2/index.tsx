@@ -34,6 +34,10 @@ applyThemeOnBoot();
 // وعي التبويبات: يلتقط رمز المناولة من الرابط وينظّفه **قبل** إقلاع الموجّه،
 // فلا يرى `react-router` معاملاً عابراً ولا يتسرّب إلى رابطٍ يُنسخ أو يُحفَظ.
 captureTabHandoffOnBoot();
+// SEO: وسوم `index.html` الثابتة (`data-seo`) لزاحفٍ يقرأ HTML الخام فقط — بعد
+// الإقلاع تتولّاها وسوم React 19 لكل صفحة (`PublicPageHead`، `NotFoundPage`)؛
+// بقاؤها كان يعطي canonical/title مكرَّرين متعارضين عند التنقّل بين الصفحات.
+document.head.querySelectorAll('[data-seo]').forEach((node) => node.remove());
 
 // المتجر العام: خارج `AuthProvider`/`CompanyProvider` عمداً — زائرٌ بلا جلسة لا
 // ينتظر إقلاع مساحة عمل لا تخصّه، ولا يحمّل chunk لوحة التحكم كي يرى منتجاً.

@@ -25,9 +25,13 @@
     
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 
-    <!-- ===== SEO: عنوان ووصف وكلمات مفتاحية تظهر في نتائج بحث جوجل ===== -->
-    <title>K.T.R.A — نظام متكامل لإدارة الاستيراد والمبيعات والمخزون والمحاسبة</title>
+    <!-- ===== SEO: عنوان ووصف وكلمات مفتاحية تظهر في نتائج بحث جوجل =====
+         `data-seo`: قيم الصفحة الرئيسية؛ البناء يستبدلها لكل صفحة عامة في
+         dist/<route>/index.html (constants/publicPages.ts)، و`index.tsx` يحذفها عند
+         الإقلاع لتتولّاها وسوم React 19 (`components/PublicPageHead.tsx`). -->
+    <title data-seo>K.T.R.A — نظام متكامل لإدارة الاستيراد والمبيعات والمخزون والمحاسبة</title>
     <meta
+      data-seo
       name="description"
       content="K.T.R.A نظام إدارة أعمال عربي متكامل: فواتير المبيعات والمشتريات، المخزون والمستودعات، الاستيراد والشحن والتخليص الجمركي، والمحاسبة المترابطة — في منصة واحدة."
     />
@@ -35,14 +39,14 @@
       name="keywords"
       content="K.T.R.A, كترا, نظام إدارة أعمال, برنامج محاسبة عربي, نظام فواتير, إدارة المخزون, برنامج مبيعات ومشتريات, إدارة الاستيراد, الشحن والتخليص الجمركي, نظام ERP عربي"
     />
-    <meta name="robots" content="index, follow" />
-    <link rel="canonical" href="https://ktra-pro.tech/" />
+    <meta data-seo name="robots" content="index, follow" />
+    <link rel="canonical" href="https://ktra-pro.tech" data-seo />
 
     <!-- Open Graph (معاينة الروابط في فيسبوك/واتساب/لينكدإن) -->
     <meta property="og:type" content="website" />
     <meta property="og:site_name" content="K.T.R.A" />
     <meta property="og:locale" content="ar_AR" />
-    <meta property="og:url" content="https://ktra-pro.tech/" />
+    <meta property="og:url" content="https://ktra-pro.tech" data-seo />
     <meta property="og:title" content="K.T.R.A — نظام متكامل لإدارة الاستيراد والمبيعات والمخزون والمحاسبة" />
     <meta
       property="og:description"

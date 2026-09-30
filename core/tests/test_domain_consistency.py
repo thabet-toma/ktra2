@@ -137,10 +137,12 @@ class DomainConsistencyTest(SimpleTestCase):
         )
 
     def test_sitemap_and_robots_announce_the_live_domain(self):
-        public = REPO_ROOT / "frontend_v2" / "public"
-        sitemap = (public / "sitemap.xml").read_text(encoding="utf-8")
-        robots = (public / "robots.txt").read_text(encoding="utf-8")
-        self.assertIn(f"<loc>https://{LIVE_DOMAIN}/", sitemap)
+        # `sitemap.xml` يتولّد وقت البناء من `constants/publicPages.ts` (`<loc>` =
+        # `SITE_ORIGIN` + المسار)، فالأصل هناك هو ما يُحرس لا ملفاً في `public/`.
+        frontend = REPO_ROOT / "frontend_v2"
+        pages = (frontend / "constants" / "publicPages.ts").read_text(encoding="utf-8")
+        robots = (frontend / "public" / "robots.txt").read_text(encoding="utf-8")
+        self.assertIn(f'SITE_ORIGIN = "https://{LIVE_DOMAIN}"', pages)
         self.assertIn(f"Sitemap: https://{LIVE_DOMAIN}/sitemap.xml", robots)
 
     def test_exemptions_are_real_paths(self):

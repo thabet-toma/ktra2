@@ -46,9 +46,12 @@ import { moduleAllowsView, permForView, templateHidesView } from "./utils/viewPe
 import { resolveHomeScreen } from "./utils/homeScreen";
 import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { resolvePublicAuthView } from "./utils/publicAuthRoutes";
+import { isUnknownAnonymousPath, pathRoot } from "./utils/seoHead";
 import { activeTasksService } from "./services/activeTasksService";
 import { autoDisableScheduler } from "./services/autoDisableScheduler";
 import { PublicNavbar } from "./components/layout/PublicNavbar";
+import { PublicPageHead } from "./components/PublicPageHead";
+import { NotFoundPage } from "./components/NotFoundPage";
 import { useLocation, useNavigate } from "react-router-dom";
 import { apiGetObject } from "./services/restApi";
 import { clientLogger } from "./services/logger";
@@ -374,6 +377,15 @@ const PATH_TO_VIEW: Record<string, AppView> = Object.fromEntries(
   (Object.entries(VIEW_PATHS) as [AppView, string][]).map(([view, path]) => [path, view])
 );
 
+// SEO 404: جذور المسارات التي يعرفها التطبيق — زائرٌ بلا جلسة على أيٍّ منها يبقى
+// على الهبوط/الدخول كما كان، وما سواها يرى `NotFoundPage` (noindex) لا الهبوط.
+// الإضافات يعالجها التطبيق خارج `VIEW_PATHS`: مساراتٌ بمعرّف، وروابط قديمة، وقشرة المكتب.
+const ANONYMOUS_KNOWN_ROOTS: ReadonlySet<string> = new Set([
+  ...Object.values(VIEW_PATHS).map(pathRoot),
+  "partners", "products", "office", "personal-expenses", "public-gallery",
+  "aseel-kit", "aseel-sales", "invoice-profits",
+]);
+
 const IMPORT_VIEWS = new Set<AppView>([
   "import-offers",
   "deals-management",
@@ -434,23 +446,21 @@ const App: React.FC = () => {
     if (resolved) setAuthView(resolved);
   }, [currentUser, location.pathname]);
 
-  // SEO: عنوان تبويب/فهرسة مختلف لكل شاشة عامة (غير مصادَق عليها) — index.html
-  // يحمل عنواناً افتراضياً واحداً لكل الموقع، وهذا يُخصّصه لكل صفحة يزورها زائر
-  // غير مسجَّل قبل تنفيذ React (Google يُفهرس ما بعد تنفيذ JS فيقرأ هذا).
+  const anonymousNotFound = !currentUser && isUnknownAnonymousPath(location.pathname, ANONYMOUS_KNOWN_ROOTS);
+
+  // SEO: عناوين الصفحات العامة (الهبوط، من نحن، تواصل، المعرض) وصفحة 404 وسومُ
+  // React 19 من `constants/publicPages.ts` (`PublicPageHead`) — `null` هنا يتركها
+  // لها. يبقى هذا الخطاف لما ليس صفحة مفهرَسة: الدخول والتسجيل وداخل التطبيق.
   useDocumentTitle(
     currentUser
       ? "K.T.R.A"
-      : appView === "about-us"
-      ? "من نحن — نظام K.T.R.A لإدارة الاستيراد والمبيعات والمخزون والمحاسبة"
-      : appView === "contact"
-      ? "تواصل معنا — نظام K.T.R.A"
-      : appView === "gallery"
-      ? "معرض الصور — نظام K.T.R.A"
+      : anonymousNotFound || appView === "about-us" || appView === "contact" || appView === "gallery"
+      ? null
       : authView === "login"
       ? "تسجيل الدخول — نظام K.T.R.A"
       : authView === "signup"
       ? "إنشاء حساب جديد — نظام K.T.R.A"
-      : "K.T.R.A — نظام متكامل لإدارة الاستيراد والمبيعات والمخزون والمحاسبة"
+      : null
   );
 
   /** مزامنة المسار مع الـ URL لكل شاشة مدعومة */
@@ -2460,9 +2470,15 @@ const App: React.FC = () => {
   }
 
   if (!currentUser) {
+    // قبل فروع `appView`: الأخيرة لا تُصفَّر عند مغادرة مسارها، فزائرٌ انتقل من
+    // /about-us إلى رابطٍ مكسور كان سيبقى على «من نحن».
+    if (anonymousNotFound) {
+      return <NotFoundPage path={location.pathname} />;
+    }
     if (appView === "about-us") {
       return (
         <div>
+          <PublicPageHead path="/about-us" />
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <AboutUs />
@@ -2473,6 +2489,7 @@ const App: React.FC = () => {
     if (appView === "gallery") {
       return (
         <div>
+          <PublicPageHead path="/gallery" />
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <PublicGallery />
@@ -2483,6 +2500,7 @@ const App: React.FC = () => {
     if (appView === "contact") {
       return (
         <div>
+          <PublicPageHead path="/contact" />
           <PublicNavbar />
           <div className="pt-20 min-h-screen bg-gray-50 dark:bg-gray-900">
             <Contact currentUser={null} />
@@ -2511,6 +2529,7 @@ const App: React.FC = () => {
     // صفحة هبوط تعريفية بالمنصة للزوّار غير الأعضاء (الافتراضية قبل تسجيل الدخول).
     return (
       <div>
+        <PublicPageHead path="/" />
         <LandingPage
           onLogin={() => setAuthView("login")}
           onSignup={() => setAuthView("signup")}

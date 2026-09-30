@@ -12,16 +12,12 @@
 import React from "react";
 import { Link2, Store as StoreIcon } from "lucide-react";
 
-import { useDocumentDescription, useDocumentTitle } from "../../hooks/useDocumentTitle";
+import { PublicPageHead } from "../PublicPageHead";
 
 export const StoreIndexPage: React.FC = () => {
-  useDocumentTitle("المتاجر الإلكترونية — K.T.R.A");
-  useDocumentDescription(
-    "لكل شركة على منصة K.T.R.A متجرها الإلكتروني الخاص برابطه المستقل — اطلب رابط المتجر من الشركة مباشرة.",
-  );
-
   return (
     <div dir="rtl" className="flex min-h-screen items-center justify-center bg-slate-100 p-6 dark:bg-slate-900">
+      <PublicPageHead path="/store" />
       <div className="w-full max-w-xl rounded-3xl bg-white p-8 text-center shadow-xl dark:bg-slate-800">
         <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-blue-600 text-white">
           <StoreIcon className="h-8 w-8" />
