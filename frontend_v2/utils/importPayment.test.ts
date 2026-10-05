@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importPaymentRows, importPaymentTooltip, purchasePayableTotal, type ImportPaymentBreakdown } from './importPayment.ts';
+import { importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
 
 test('صفوف طباعة الدولية: بالترتيب، وصفّ المورد حصّته − مدفوعه = باقيه', () => {
   const rows = importPaymentRows({
@@ -29,6 +29,24 @@ test('أساس الدفع: الدولية المرحّلة بحصّة المور
   // المحلية: الإجمالي + الرسوم مهما قال الخادم.
   assert.equal(
     purchasePayableTotal({ grandTotal: 100, feesTotal: 15, international: false, isPosted: true, serverPayableTotal: 1 }),
+    115,
+  );
+});
+
+test('أساس دفع المورد: المسودة الدولية بحصّته من الخادم لا بالمحمَّل', () => {
+  // INV-0022: المحمَّل 12,896.53؛ الترحيل سيدائن المورد بـ5,856 وحدها.
+  const draft = { payableTotal: 12896.53, international: true, isPosted: false };
+  assert.equal(purchaseSupplierPayBase({ ...draft, serverSupplierPayable: 5856 }), 5856);
+  // مسودةٌ لم تُحفظ بعد: لا رقم من الخادم — الإجمالي كما كان.
+  assert.equal(purchaseSupplierPayBase({ ...draft, serverSupplierPayable: undefined }), 12896.53);
+  // المرحّلة: `payableTotal` هو حصّة المورد أصلاً (من القيد).
+  assert.equal(
+    purchaseSupplierPayBase({ payableTotal: 7000, international: true, isPosted: true, serverSupplierPayable: 1 }),
+    7000,
+  );
+  // المحلية: الإجمالي مهما قال الخادم.
+  assert.equal(
+    purchaseSupplierPayBase({ payableTotal: 115, international: false, isPosted: false, serverSupplierPayable: 1 }),
     115,
   );
 });

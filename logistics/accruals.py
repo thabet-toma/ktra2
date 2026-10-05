@@ -405,7 +405,7 @@ def _journal_debit_sources(journal_ids, weight=None) -> List[tuple]:
     return [(acc, weight * _as_decimal(d) / total) for acc, d in rows]
 
 
-def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
+def import_invoice_accrual_credits(invoice, shares, *, warn_unaccrued=True) -> List[dict]:
     """أسطر الدائن التي تُعيد حصّة الفاتورة الدولية من كل تكلفة مشتركة إلى
     الحسابات التي دينها استحقاقُها عند الإفراج.
 
@@ -482,7 +482,7 @@ def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
                 continue
             key = (component, account_id)
             credits[key] = credits.get(key, Decimal('0')) + part
-        if unaccrued > 0:
+        if unaccrued > 0 and warn_unaccrued:
             logger.warning(
                 'import invoice %s: %s share %s has no posted accrual — stays on supplier',
                 invoice.pk, component, unaccrued,
@@ -491,3 +491,34 @@ def import_invoice_accrual_credits(invoice, shares) -> List[dict]:
         {'component': component, 'account': account_id, 'amount': amount}
         for (component, account_id), amount in credits.items() if amount > 0
     ]
+
+
+def import_invoice_supplier_split(invoice, *, fees_total=None, warn_unaccrued=True) -> dict:
+    """ما يدائن به ترحيلُ الفاتورة الدولية المورد — مصدرٌ واحد للترحيل وللمسودة.
+
+    الإجمالي + الرسوم ناقصَ أسطر `import_invoice_accrual_credits` (حصص الشحن
+    والتخليص والنقل المستحقّة لأصحابها)؛ وما لم يُستحقّ بعدُ يبقى على المورد.
+    الترحيل يكتب قيده منه (`PurchaseInvoiceViewSet.post_to_accounting`)، والمسودة
+    تُقاس به أساساً لدفع المورد (`services.purchase_invoice_supplier_payable`) —
+    فلا يُعرض للمورد قبل الترحيل غيرُ ما سيدائنه به.
+
+    يُرجع {'shares', 'accrual_credits', 'supplier_credit'}؛ `shares` None لفاتورةٍ
+    لم تكتمل مستنداتها، فيبقى الإجمالي كلّه على المورد.
+    """
+    from .landed_cost import import_invoice_cost_shares
+
+    if fees_total is None:
+        fees_total = sum(
+            (Decimal(str(f.amount or 0)) for f in invoice.fees.all()), Decimal('0'))
+    credit_total = Decimal(str(invoice.grand_total or 0)) + fees_total
+    shares = import_invoice_cost_shares(invoice)
+    accrual_credits = (
+        import_invoice_accrual_credits(invoice, shares, warn_unaccrued=warn_unaccrued)
+        if shares else []
+    )
+    return {
+        'shares': shares,
+        'accrual_credits': accrual_credits,
+        'supplier_credit': credit_total - sum(
+            (row['amount'] for row in accrual_credits), Decimal('0')),
+    }

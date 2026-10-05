@@ -168,3 +168,31 @@ test('INV-0022: مدفوعة للدائنين الأربعة — لا «متبق
   await expect(page.getByText('رصيد المورد وحده قبل احتساب حصّته المتبقية', { exact: false }).first()).toBeVisible();
   await page.screenshot({ path: 'e2e/receipt-remaining-shots/international-paid-all-detail.png', fullPage: true });
 });
+
+/* صاحب صلاحية الدفع: لوحة الدفع جانبُ المورد وحده. كان أساسها المحمَّل
+   (12,896.53 − 5,856 = 7,040.53)، فـ«المتبقي كاملاً» ثم «رحّل وادفع» يخرج المبلغ
+   سلفةً للمورد بدل الوكيل والمخلّص والناقل. أساسها الآن `supplier_payable_total`. */
+test('INV-0022 بصلاحية الدفع: اللوحة تدفع حصّة المورد — لا 7,040.53', async ({ page }) => {
+  await mockApi(page);
+  await page.route(/\/permissions\/me\/$/, (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({
+      role: 'manager', is_manager: true, modules: {}, ui_mode: 'advanced',
+      permissions: [
+        'purchase.invoice.view', 'purchase.invoice.create', 'purchase.invoice.edit',
+        'purchase.invoice.post', 'purchase.payment.create',
+      ],
+    }),
+  }));
+  await page.route(/\/logistics\/purchase-invoices\/2625\/$/, (route) => route.fulfill({
+    contentType: 'application/json',
+    body: JSON.stringify({ ...DRAFT_22, supplier_payable_total: '5856.00' }),
+  }));
+  await page.goto('/purchase-invoices/2625');
+  await expect(page.getByText('INV-0022').first()).toBeVisible({ timeout: 20000 });
+  await expect(page.getByTestId('payment-remaining').first()).toBeVisible({ timeout: 10000 });
+  await expect(page.getByText('7,040.53')).toHaveCount(0);
+  await expect(page.getByTestId('payment-remaining').first()).toHaveText('0');
+  await expect(page.getByText('دفع حصّة المورد').first()).toBeVisible();
+  await page.screenshot({ path: 'e2e/receipt-remaining-shots/international-supplier-pay-panel.png', fullPage: true });
+});

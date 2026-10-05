@@ -171,6 +171,8 @@ export interface PurchaseInvoiceDto {
   invoice_type?: "local" | "international";
   fees_total?: string;
   payable_total?: string;
+  /** أساس دفع المورد — للمسودة الدولية حصّته التي سيدائنه بها الترحيل. */
+  supplier_payable_total?: string;
   local_payments_json?: Record<string, unknown> | null;
   conversion_metadata_json?: Record<string, unknown> | null;
   status: string;

@@ -185,6 +185,8 @@ const WORDS: Record<DocumentPaymentSide, {
 
 export type DocumentPaymentPanelProps = {
   side: DocumentPaymentSide;
+  /** يحلّ محلّ عنوان الجهة — الفاتورة الدولية تدفع منها حصّة المورد وحدها. */
+  title?: string;
   derived: DocumentPaymentDerived;
   input: DocumentPaymentInput;
   isPosted: boolean;
@@ -210,7 +212,7 @@ export type DocumentPaymentPanelProps = {
 };
 
 export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
-  side, derived, input, isPosted, busy, cashAccountField, panelRef, cashInputRef,
+  side, title, derived, input, isPosted, busy, cashAccountField, panelRef, cashInputRef,
   chequesOpen, onToggleCheques, onCashChange, onFromBalanceChange, onAddCheque,
   onPatchCheque, onRemoveCheque, onFillCashShortfall, onFillFull, onMakeCredit,
   onSaveIntent, onSubmit,
@@ -226,7 +228,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <span className="text-xs font-bold text-[var(--color-text)]">
-          {w.title} {isPosted ? `(مرحّلة — يُسجَّل ${w.voucher} فوراً)` : "(تُحفظ وتُرحّل مع الدفعة)"}
+          {title ?? w.title} {isPosted ? `(مرحّلة — يُسجَّل ${w.voucher} فوراً)` : "(تُحفظ وتُرحّل مع الدفعة)"}
         </span>
         <span className="text-[11px] text-[var(--color-text-muted)]">
           المسدَّد سابقاً {fmt(input.paid)} · المتبقي قبل هذه الدفعة {fmt(derived.remainingBefore)}

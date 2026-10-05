@@ -66,6 +66,8 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     })),
     feesTotal: Number(dto.fees_total || 0),
     payableTotal: Number(dto.payable_total || dto.grand_total || 0),
+    supplierPayableTotal:
+      dto.supplier_payable_total != null ? Number(dto.supplier_payable_total) : undefined,
     amountPaid: Number(dto.amount_paid || 0),
     remainingBalance: Number(dto.remaining_balance || 0),
     pendingPaymentTotal: Number(dto.pending_payment_total || 0),

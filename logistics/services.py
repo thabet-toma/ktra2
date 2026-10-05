@@ -1081,6 +1081,30 @@ def purchase_invoice_payment_summary(invoice):
     return summary
 
 
+def purchase_invoice_supplier_payable(invoice, *, warn_unaccrued=True) -> Decimal:
+    """ما يخصّ المورد من فاتورة الشراء — أساس دفعه (سقف النيّة ولوحة الدفع).
+
+    = `payable_total` من الملخّص، إلا المسودة الدولية: الملخّص يقيسها بإجماليها
+    المحمَّل لأن لا قيد يحدّد حصّته بعد، فتُقاس بما سيدائنه به ترحيلُها
+    (`accruals.import_invoice_supplier_split`) — وإلا قُبلت حصص الوكيل والمخلّص
+    والناقل دفعاً للمورد.
+    """
+    summary = purchase_invoice_payment_summary(invoice)
+    if (
+        invoice.is_posted or not _is_import_supplier_doc(invoice)
+        or not (invoice.deal_id and invoice.shipment_id)
+    ):
+        return summary["payable_total"]
+    from logistics.accruals import import_invoice_supplier_split
+
+    split = import_invoice_supplier_split(
+        invoice, fees_total=summary["fees_total"], warn_unaccrued=warn_unaccrued,
+    )
+    return (
+        split["supplier_credit"] + purchase_invoice_note_totals(invoice)[1]
+    ).quantize(DEC)
+
+
 def _auto_purchase_settlement_note(invoice) -> str:
     """نصّ ملاحظات سند التسوية التلقائي — مصدر واحد يكتبه الترحيل ويقرأه التمييز."""
     return f"صرف نقدي تلقائي — فاتورة شراء {invoice.invoice_number}"
@@ -1574,9 +1598,16 @@ def attach_purchase_payment_voucher(
     cheques = cheques or []
     cheques_total = _validate_supplier_cheque_payloads(cheques, require_due_date=False)
 
-    payable = purchase_invoice_payment_summary(invoice)["payable_total"]
+    # المسودة الدولية: السقف حصّة المورد لا إجماليها المحمَّل — وإلا رُفض
+    # الترحيل عند كنس شيكاتٍ تتجاوز ما يدائنه به (`post_supplier_payment`).
+    payable = purchase_invoice_supplier_payable(invoice)
     intent_total = (cash_amount + cheques_total).quantize(DEC)
     if intent_total > payable:
+        if _is_import_supplier_doc(invoice):
+            raise ValidationError(
+                f"مجموع الدفعة المرفقة ({intent_total}) يتجاوز ما يخصّ المورد من "
+                f"الفاتورة ({payable}) — حصص الشحن والتخليص والنقل تُدفع لأصحابها."
+            )
         raise ValidationError(
             f"مجموع الدفعة المرفقة ({intent_total}) يتجاوز مبلغ الفاتورة {payable}."
         )

@@ -454,6 +454,8 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     import_payment = serializers.SerializerMethodField()
     fees_total = serializers.SerializerMethodField()
     payable_total = serializers.SerializerMethodField()
+    # أساس دفع المورد: للمسودة الدولية حصّته التي سيدائنه بها الترحيل.
+    supplier_payable_total = serializers.SerializerMethodField()
     supplier_balance_current = serializers.DecimalField(
         source='supplier_balance', max_digits=18, decimal_places=2, read_only=True,
     )
@@ -516,7 +518,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'payment_status', 'payment_status_display', 'import_payment',
             'supplier_balance_current', 'supplier_balance_before_invoice',
             'supplier_balance_after_invoice', 'payment_details',
-            'fees_total', 'payable_total',
+            'fees_total', 'payable_total', 'supplier_payable_total',
             'supplier_invoice_number', 'factory_name',
             'is_posted', 'is_return', 'original_invoice', 'original_invoice_number',
             'journal', 'journal_id_display',
@@ -608,6 +610,15 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
 
     def get_payable_total(self, obj):
         return str(self._payable_total(obj))
+
+    def get_supplier_payable_total(self, obj):
+        from logistics.services import purchase_invoice_supplier_payable
+        try:
+            return str(purchase_invoice_supplier_payable(obj, warn_unaccrued=False))
+        except Exception:
+            # عطبٌ في حساب الحصص لا يُسقط التفصيل: أساسُ الملخّص المعتاد.
+            logger.exception('supplier payable failed invoice=%s', obj.pk)
+            return str(self._payable_total(obj))
 
     def get_amount_paid(self, obj):
         return str(self._computed_amount_paid(obj))

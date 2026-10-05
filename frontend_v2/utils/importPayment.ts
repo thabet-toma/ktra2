@@ -50,6 +50,26 @@ export function purchasePayableTotal(input: {
   return (Number(grandTotal) || 0) + (Number(feesTotal) || 0);
 }
 
+/**
+ * أساس **دفع المورد** (لوحة الدفع، «مدفوعة»، الدفعة النقدية التلقائية، تسوية المورد).
+ * المسودة الدولية: ما سيدائنه به ترحيلُها (`supplier_payable_total` —
+ * `logistics/accruals.py` `import_invoice_supplier_split`)، لا `payableTotal` المحمَّل
+ * الذي يضمّ حصص الوكيل والمخلّص والناقل؛ وإلا دُفعت حصصهم للمورد سلفةً.
+ * غيرُها: `payableTotal` كما هو — وهو للمرحّلة حصّة المورد من قيدها أصلاً.
+ */
+export function purchaseSupplierPayBase(input: {
+  payableTotal: number;
+  international: boolean;
+  isPosted: boolean;
+  serverSupplierPayable?: number | null;
+}): number {
+  const { payableTotal, international, isPosted, serverSupplierPayable } = input;
+  if (international && !isPosted && typeof serverSupplierPayable === "number" && Number.isFinite(serverSupplierPayable)) {
+    return serverSupplierPayable;
+  }
+  return payableTotal;
+}
+
 export interface ImportPaymentRow {
   key: ImportPaymentComponentKey;
   label: string;

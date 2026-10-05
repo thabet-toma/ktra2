@@ -60,7 +60,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
-import { importPaymentTooltip, purchasePayableTotal } from "@/utils/importPayment";
+import { importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
@@ -2124,6 +2124,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     isPosted: Boolean(formData.isPosted),
     serverPayableTotal: formData.payableTotal,
   });
+  /* أساسُ دفع المورد وحده (اللوحة، «مدفوعة»، النقدية التلقائية): للمسودة الدولية
+     حصّتُه التي سيدائنه بها الترحيل — `payableTotal` فيها المحمَّل كلّه، ودفعُ فرقه
+     للمورد كان يخرج سلفةً له بدل الوكيل والمخلّص والناقل. */
+  const supplierPayBase = purchaseSupplierPayBase({
+    payableTotal,
+    international: formData.invoiceType === "international" && !formData.isReturn,
+    isPosted: Boolean(formData.isPosted),
+    serverSupplierPayable: formData.supplierPayableTotal,
+  });
   const defaultInlineFeeAccount =
     feeAccounts.find((account) => account.code === "5307") ||
     feeAccounts.find((account) => account.account_type === "Expense") ||
@@ -2465,17 +2474,17 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const intentIsAuto =
     !isPosted && !formData.isReturn && formData.paymentType === "cash";
   const autoCashIntent = intentIsAuto
-    ? Math.max(payableTotal - (Number(formData.amountPaid) || 0) - draftChequesTotal, 0)
+    ? Math.max(supplierPayBase - (Number(formData.amountPaid) || 0) - draftChequesTotal, 0)
     : 0;
   const settlement = useMemo(() => deriveInvoiceSettlement({
-    grandTotal: payableTotal,
+    grandTotal: supplierPayBase,
     paid: Number(formData.amountPaid) || 0,
     // النقدية: النيّة الفعلية هي التغطية الكاملة القادمة — لا حالة الخادم وحدها.
     pendingIntent: intentIsAuto
       ? autoCashIntent + draftChequesTotal
       : Number(formData.pendingPaymentTotal) || 0,
     isPosted,
-  }), [payableTotal, formData.amountPaid, formData.pendingPaymentTotal, isPosted,
+  }), [supplierPayBase, formData.amountPaid, formData.pendingPaymentTotal, isPosted,
        intentIsAuto, autoCashIntent, draftChequesTotal]);
   const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
   /* 3ب: الدولية تُقاس بتكاليفها الأربع ودفعاتها الأربع (`importPayment`) — فكلُّ
@@ -2557,14 +2566,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       formData.currency, purchaseDefaultCashAccountId, myDefaultBoxId]);
 
   const paymentInput = useMemo(() => ({
-    base: payableTotal,
+    base: supplierPayBase,
     paid: Number(formData.amountPaid) || 0,
     isCashDocument: formData.paymentType === "cash",
     cash: payCash,
     cheques: payCheques,
     fromBalance: payFromBalance,
     onAccountVouchers: payAdvances,
-  }), [payableTotal, formData.amountPaid, formData.paymentType, payCash, payCheques,
+  }), [supplierPayBase, formData.amountPaid, formData.paymentType, payCash, payCheques,
        payFromBalance, payAdvances]);
   const payment = useMemo(() => deriveDocumentPayment(paymentInput), [paymentInput]);
 
@@ -2805,7 +2814,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    if (saving || paying) return;
    try {
     clientLogger.info("purchase_invoice.pay_full_clicked", {
-      invoiceId: formData.id, isPosted, base: payableTotal,
+      invoiceId: formData.id, isPosted, base: supplierPayBase,
     });
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
 
@@ -2826,7 +2835,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       );
       return;
     }
-    if (payableTotal <= 0.009) {
+    if (supplierPayBase <= 0.009) {
       toast("لا مبلغ بعد — أضف بنود الفاتورة ثم اضغط «مدفوعة».", "info");
       return;
     }
@@ -2840,7 +2849,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (!savedId) return; // `handleSave` عرض السبب
     const dto = lastSavedRef.current;
     if (!dto) { toast("تعذّرت قراءة الفاتورة بعد الحفظ.", "error"); return; }
-    const grand = Number(dto.payable_total ?? dto.grand_total ?? 0);
+    // حصّة المورد من الخادم — للمسودة الدولية لا المحمَّل (سقف النيّة عنده هو نفسه).
+    const grand = Number(dto.supplier_payable_total ?? dto.payable_total ?? dto.grand_total ?? 0);
     const paidNow = Number(dto.amount_paid ?? 0);
     const draftCheques = (dto.cheques || []).filter((c) => c.status === "Draft");
     const chequesTotal = draftCheques.reduce((sum, c) => sum + Number(c.amount || 0), 0);
@@ -2992,6 +3002,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const payPanel = !showPayPanel ? null : (
     <DocumentPaymentPanel
       side="supplier"
+      title={isInternationalInvoice && !formData.isReturn ? "دفع حصّة المورد" : undefined}
       onSaveIntent={saveIntentFromPanel}
       derived={payment}
       input={paymentInput}

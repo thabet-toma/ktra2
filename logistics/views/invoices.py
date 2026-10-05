@@ -1781,10 +1781,9 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # وحده. قبلها كان المورد يُدائَن بالإجمالي المحمَّل كلّه.
         supplier_credit = credit_total
         if not is_local and invoice.deal_id and invoice.shipment_id:
-            from logistics.accruals import IMPORT_COMPONENT_LABELS, import_invoice_accrual_credits
-            from logistics.landed_cost import import_invoice_cost_shares
-            shares = import_invoice_cost_shares(invoice)
-            accrual_credits = import_invoice_accrual_credits(invoice, shares) if shares else []
+            from logistics.accruals import IMPORT_COMPONENT_LABELS, import_invoice_supplier_split
+            split = import_invoice_supplier_split(invoice, fees_total=fees_total)
+            shares, accrual_credits = split['shares'], split['accrual_credits']
             if accrual_credits:
                 # التكاليف لا الإجمالي: ضريبة الفاتورة وخصمها ملكُها وتُبقيهما
                 # إعادةُ الاحتساب، والصفّ الحيّ يأخذهما من الصفقة.
@@ -1809,8 +1808,7 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                             f"— {invoice.invoice_number}"
                         )[:500],
                     })
-                supplier_credit = credit_total - sum(
-                    (row['amount'] for row in accrual_credits), Decimal('0'))
+                supplier_credit = split['supplier_credit']
                 logger.info(
                     'import invoice %s posting: supplier=%s accrual_credits=%s',
                     invoice.pk, supplier_credit,

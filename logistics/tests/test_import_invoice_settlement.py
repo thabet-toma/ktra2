@@ -493,3 +493,59 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertIn(inv.pk, self._list_ids(payment_status="partially_paid"))
         self.assertNotIn(inv.pk, self._list_ids(payment_status="paid"))
         self.assertIn(inv.pk, self._list_ids(payment_status="overdue"))
+
+    # ── أساس دفع المورد على المسودة الدولية = ما سيدائنه به ترحيلُها ─────────
+    # الملخّص يقيس المسودة بإجماليها المحمَّل (لا قيد بعد)، فكانت لوحة الدفع
+    # وسقف النيّة يقبلان حصص الوكيل والمخلّص والناقل دفعاً للمورد.
+    def _supplier_payable(self, inv):
+        res = self.client.get(f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        return D(res.json()["supplier_payable_total"])
+
+    def _ap_credit(self, inv):
+        return inv.journal.lines.filter(account=self.ap).aggregate(c=Sum("credit"))["c"]
+
+    def test_draft_supplier_payable_is_what_posting_credits_the_supplier(self):
+        inv = self._release_and_import()[0]
+        draft = self._supplier_payable(inv)
+        self.assertLess(draft, inv.grand_total)
+        self.assertEqual(draft, self._ap_credit(self._post(inv)))
+        # بعد الترحيل: الحقل نفسه = ما دائنه به القيد.
+        self.assertEqual(self._supplier_payable(inv), draft)
+
+    def test_draft_supplier_payable_keeps_unaccrued_component_on_supplier(self):
+        # نقلٌ بلا استحقاق مرحّل يبقى على المورد عند الترحيل — والأساس يتبعه.
+        self._accrue(local=False)
+        with mock.patch(
+            "logistics.accruals.post_local_shipment_accrual",
+            side_effect=AccrualSkipped("الناقل بلا حساب"),
+        ):
+            res = self.client.post(
+                "/api/logistics/purchase-invoices/import-from-clearance/",
+                {"clearance_id": self.clearance.id, "deal_ids": [self.deals[0].id],
+                 "deal_remaining_rate": "3.5", "shipment_remaining_rate": "3.6"},
+                format="json", **self._auth())
+        self.assertEqual(res.status_code, 201, res.content)
+        inv = PurchaseInvoice.objects.get(tenant=self.tenant, deal=self.deals[0])
+        draft = self._supplier_payable(inv)
+        self.assertGreater(draft, D("3500.00"))  # البضاعة + حصّة النقل
+        self.assertEqual(draft, self._ap_credit(self._post(inv)))
+
+    def test_attached_cheques_capped_at_supplier_share_and_settle_on_post(self):
+        inv = self._release_and_import()[0]
+        share = self._supplier_payable(inv)
+        url = f"/api/logistics/purchase-invoices/{inv.pk}/attach-payment/"
+
+        def cheque(amount):
+            return {"cash_amount": "0", "cheques": [{
+                "cheque_number": "SUP-1", "amount": str(amount), "due_date": "2026-09-01"}]}
+
+        over = self.client.post(url, cheque(share + D("0.01")), format="json", **self._auth())
+        self.assertEqual(over.status_code, 400, over.content)
+        self.assertIn("المورد", over.json()["error"])
+
+        ok = self.client.post(url, cheque(share), format="json", **self._auth())
+        self.assertEqual(ok.status_code, 200, ok.content)
+        inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        detail = self.client.get(f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        self.assertEqual(D(detail["remaining_balance"]), D("0.00"))

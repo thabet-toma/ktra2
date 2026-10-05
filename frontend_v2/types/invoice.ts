@@ -296,6 +296,8 @@ export interface Invoice {
     fees?: PurchaseInvoiceFeeLine[];
     feesTotal?: number;
     payableTotal?: number;
+    /** أساس دفع المورد (`supplier_payable_total`) — `purchaseSupplierPayBase`. */
+    supplierPayableTotal?: number;
     amountPaid?: number;
     remainingBalance?: number;
     /** T-INTENT: دفعة مرفقة بمسودة لم تُرحَّل بعد — تُعرَض ولا تدخل «المدفوع». */
