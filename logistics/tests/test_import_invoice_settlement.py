@@ -419,3 +419,77 @@ class ImportInvoiceSettlementTest(APITestCase):
             "/api/logistics/purchase-invoices/", {"page_size": 50}, **self._auth()).json()
         row = next(r for r in listed.get("results", listed) if r["id"] == inv.pk)
         self.assertEqual(D(row["remaining_balance"]), D("0.00"))
+
+    # ── مصدرٌ واحد للعرض: كل ما تقرؤه الواجهة من التكاليف الأربع ────────────
+    # INV-0022 على الإنتاج: مسودةٌ دولية دائنوها الأربعة مسدَّدون لأطرافٍ مختلفة،
+    # والشاشة تقول «مدفوعة بالكامل» فوق و«المتبقي 7,040.53» تحت — لأن ملخّص
+    # المورد يقيس المسودة بإجماليها المحمَّل مقابل دفعات المورد وحده.
+    def _list_ids(self, **params):
+        res = self.client.get(
+            "/api/logistics/purchase-invoices/", {"page_size": 50, **params}, **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        data = res.json()
+        return {r["id"]: r for r in data.get("results", data)}
+
+    def _draft_with_past_due(self):
+        invoices = self._release_and_import()
+        for deal in self.deals:
+            self._pay_deal(deal)
+        inv = invoices[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(due_date="2026-08-01")
+        return inv
+
+    def _assert_supplier_rows_are_supplier_only(self, detail):
+        # «رصيد المورد قبل/بعد» جانبُ المورد وحده: حصّته مسدَّدة فلا أثر —
+        # لا شحن ولا تخليص ولا نقل مستحقّاً لغيره.
+        self.assertEqual(
+            D(detail["supplier_balance_after_invoice"]),
+            D(detail["supplier_balance_before_invoice"]))
+
+    def test_draft_paid_to_all_four_creditors_reads_paid_everywhere(self):
+        inv = self._draft_with_past_due()
+        self._pay_freight_and_local()
+        self._pay_clearance("690")
+
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        ip = detail["import_payment"]
+        self.assertEqual((ip["payment_status"], D(ip["remaining_balance"])), ("paid", D("0.00")))
+        self.assertFalse(detail["is_overdue"])
+        self._assert_supplier_rows_are_supplier_only(detail)
+
+        row = self._list_ids()[inv.pk]
+        self.assertEqual(
+            (row["import_payment"]["payment_status"], D(row["import_payment"]["remaining_balance"])),
+            ("paid", D("0.00")))
+        self.assertFalse(row["is_overdue"])
+        # فلتر القائمة يقول ما تقوله شارتها.
+        self.assertIn(inv.pk, self._list_ids(payment_status="paid"))
+        self.assertNotIn(inv.pk, self._list_ids(payment_status="partially_paid"))
+        self.assertNotIn(inv.pk, self._list_ids(payment_status="overdue"))
+
+    def test_draft_with_unpaid_freight_owes_exactly_the_freight_share(self):
+        from logistics.models import LocalShipmentPayment
+        inv = self._draft_with_past_due()
+        LocalShipmentPayment.objects.create(
+            tenant=self.tenant, local_shipment=self.local, amount=D("450"),
+            currency=self.ils, exchange_rate=D("1"), payment_date="2026-07-07",
+            cash_box_external_id="box", is_posted=True)
+        self._pay_clearance("690")
+
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        ip = detail["import_payment"]
+        freight = D(ip["components"]["freight"]["cost"])
+        self.assertGreater(freight, 0)
+        self.assertEqual(ip["payment_status"], "partially_paid")
+        self.assertEqual(D(ip["remaining_balance"]), freight)
+        self.assertTrue(detail["is_overdue"])
+        self._assert_supplier_rows_are_supplier_only(detail)
+
+        row = self._list_ids()[inv.pk]
+        self.assertEqual(D(row["import_payment"]["remaining_balance"]), freight)
+        self.assertTrue(row["is_overdue"])
+        self.assertIn(inv.pk, self._list_ids(payment_status="partially_paid"))
+        self.assertNotIn(inv.pk, self._list_ids(payment_status="paid"))
+        self.assertIn(inv.pk, self._list_ids(payment_status="overdue"))

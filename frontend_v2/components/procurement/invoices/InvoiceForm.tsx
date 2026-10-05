@@ -2478,6 +2478,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   }), [payableTotal, formData.amountPaid, formData.pendingPaymentTotal, isPosted,
        intentIsAuto, autoCashIntent, draftChequesTotal]);
   const supplierRemaining = Math.max(Number(formData.remainingBalance) || 0, 0);
+  /* 3ب: الدولية تُقاس بتكاليفها الأربع ودفعاتها الأربع (`importPayment`) — فكلُّ
+     مدفوعٍ ومتبقٍّ يُعرض على الشاشة من هنا، لا من ملخّص المورد (`amountPaid`) الذي
+     لا يرى ما سُدِّد للوكيل والمخلّص والناقل. أساسُ الدفع (`settlement`) جانبُ المورد. */
+  const importPay = formData.importPayment;
+  const shownPaid = importPay ? Number(importPay.amount_paid) || 0 : Number(formData.amountPaid) || 0;
+  const shownSettlement = useMemo(() => (importPay
+    ? deriveInvoiceSettlement({
+      grandTotal: Number(importPay.payable_total) || 0,
+      paid: shownPaid,
+      pendingIntent: settlement.pendingIntent,
+      isPosted,
+    })
+    : settlement), [importPay, shownPaid, settlement, isPosted]);
 
   /* T-APPAY: سلف المورّد المرحّلة غير الموزَّعة — «رصيدٌ لنا عنده» يصلح لتسديد
      هذه الفاتورة ربطاً بلا قيد جديد (مرآة «من رصيد العميل» في البيع). */
@@ -2961,8 +2974,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           : undefined;
       })()}
       intentCheques={intentCheques}
-      settlement={settlement}
-      paid={Number(formData.amountPaid) || 0}
+      settlement={shownSettlement}
+      paid={shownPaid}
       editable={!isPosted && canPerm("purchase.payment.create")}
       busy={paying}
       onAddPayment={focusPayPanel}
@@ -3250,8 +3263,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       metrics={[...(formData.importPayment ? [
         // 3ب: الدولية تُقاس بتكاليفها الأربع ودفعاتها الأربع — والتفصيل عند التمرير.
         { label: "إجمالي التكاليف", value: invMoney(Number(formData.importPayment.payable_total) || 0), tone: "info" as const },
-        { label: "المدفوع", value: invMoney(Number(formData.importPayment.amount_paid) || 0), tone: "ok" as const },
-        { label: "المتبقي للدفع", value: invMoney(Number(formData.importPayment.remaining_balance) || 0), tone: "warn" as const },
+        { label: "المدفوع", value: invMoney(shownPaid), tone: "ok" as const },
+        ...(shownSettlement.pendingIntent > 0.009
+          ? [{
+            label: "دفعة غير مرحّلة",
+            value: invMoney(shownSettlement.pendingIntent),
+            tone: "warn" as const,
+          }]
+          : []),
+        { label: "المتبقي للدفع", value: invMoney(shownSettlement.remainingAfterIntent), tone: "warn" as const },
         {
           label: "حالة الدفع",
           value: (
@@ -3388,14 +3408,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               { label: "المجموع قبل الضريبة", value: fmt((Number(formData.subtotal) || 0) + transferCommissionsIls) },
               { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
-              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(payableTotal), emphasis: true },
-              { label: "المدفوع المرحّل", value: fmt(Number(formData.amountPaid) || 0) },
-              ...(settlement.pendingIntent > 0.009
-                ? [{ label: "دفعة غير مرحّلة", value: fmt(settlement.pendingIntent) }]
+              // المرحّلة: `payableTotal` حصّة المورد وحده — والإجمالي هنا للتكاليف الأربع فوقه.
+              { label: "إجمالي المستحق بعد الضريبة والرسوم", value: fmt(importPay ? Number(importPay.payable_total) || 0 : payableTotal), emphasis: true },
+              { label: importPay ? "المدفوع المرحّل — للدائنين الأربعة" : "المدفوع المرحّل", value: fmt(shownPaid) },
+              ...(shownSettlement.pendingIntent > 0.009
+                ? [{ label: "دفعة غير مرحّلة", value: fmt(shownSettlement.pendingIntent) }]
                 : []),
-              { label: "المتبقي للدفع", value: fmt(settlement.remainingAfterIntent), tone: "warn" },
-              { label: "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
-              { label: "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
+              { label: importPay ? "المتبقي للدفع — للدائنين الأربعة" : "المتبقي للدفع", value: fmt(shownSettlement.remainingAfterIntent), tone: "warn" },
+              // قرار: رصيد المورد جانبُه وحده (حصّته المتبقية) — لا متبقّي الفاتورة الكلّي.
+              { label: importPay ? "رصيد المورد وحده قبل احتساب حصّته المتبقية (بالعملة الأساسية)" : "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
+              { label: importPay ? "رصيد المورد وحده بعد احتساب حصّته المتبقية (بالعملة الأساسية)" : "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
               { label: "إجمالي الكمية", value: formatQuantity(totalQty) },
               ...(showReceiptColumns
                 ? [{ label: "باقي الاستلام", value: formatQuantity(receiptProgress!.remaining) }]

@@ -301,14 +301,15 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                             </div>
                             <div className="flex justify-between pt-1.5">
                                 <span className="ktra-text-soft">حالة الدفع:</span>
-                                <span className="font-bold">{invoice.paymentStatusDisplay || "غير مدفوعة"}</span>
+                                {/* الدولية: حالة التكاليف الأربع — جدولها أدناه — لا ملخّص المورد وحده. */}
+                                <span className="font-bold">{invoice.importPayment?.payment_status_display || invoice.paymentStatusDisplay || "غير مدفوعة"}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
-                                <span className="ktra-text-soft">رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية):</span>
+                                <span className="ktra-text-soft">{supplierPart ? 'رصيد المورد وحده قبل احتساب حصّته المتبقية (بالعملة الأساسية):' : 'رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية):'}</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatMoney(invoice.partnerBalanceBeforeInvoice || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
-                                <span className="ktra-text-soft">الرصيد الحالي بعد احتسابه (بالعملة الأساسية):</span>
+                                <span className="ktra-text-soft">{supplierPart ? 'رصيد المورد وحده بعد احتساب حصّته المتبقية (بالعملة الأساسية):' : 'الرصيد الحالي بعد احتسابه (بالعملة الأساسية):'}</span>
                                 <span className="font-mono font-bold" dir="ltr">{formatMoney(invoice.partnerBalanceAfterInvoice || 0)}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">

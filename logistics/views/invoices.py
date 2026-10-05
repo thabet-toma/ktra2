@@ -212,17 +212,6 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         if s:
             qs = qs.filter(status=s)
         payment_status = params.get('payment_status')
-        if self.action == 'list' and payment_status in ('paid', 'partially_paid', 'unpaid'):
-            qs = qs.filter(list_payment_status=payment_status)
-        elif self.action == 'list' and payment_status == 'overdue':
-            # T-DUE: «متأخرة» ليست قيمةً في `payment_status` بل بُعدٌ فوقه —
-            # عليها متبقٍّ **و**استحقاقها مضى. بلا تاريخ استحقاق لا تأخّر.
-            from django.utils import timezone
-            qs = qs.filter(
-                due_date__isnull=False,
-                due_date__lt=timezone.localdate(),
-                list_remaining_balance__gt=0,
-            )
         posted = str(params.get('is_posted') or '').lower()
         if posted in ('true', '1', 'false', '0'):
             qs = qs.filter(is_posted=posted in ('true', '1'))
@@ -260,7 +249,52 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         from core.import_access import user_can_access_import
         if tenant and not user_can_access_import(self.request.user, tenant):
             qs = qs.filter(invoice_type=PurchaseInvoice.INVOICE_TYPE_LOCAL)
+        # آخر الفلاتر: الدولية تُحسب حالتها في بايثون، فعلى أضيق مجموعة.
+        if self.action == 'list' and payment_status in (
+            'paid', 'partially_paid', 'unpaid', 'overdue',
+        ):
+            qs = self._filter_payment_status(qs, payment_status)
         return qs
+
+    @staticmethod
+    def _filter_payment_status(qs, wanted):
+        """فلتر حالة الدفع بما تعرضه القائمة نفسها.
+
+        المحلية من نسخة SQL (`list_payment_status`/`list_remaining_balance`).
+        الدولية تُعرض بتكاليفها الأربع (`import_invoice_display_payment`) ولا
+        تُحسب في SQL — فتُقاس صفوفها المرشّحة واحداً واحداً، وإلا ظهرت «مدفوعة
+        بالكامل» تحت فلتر «مدفوعة جزئياً». T-DUE: «متأخرة» بُعدٌ فوق الحالة —
+        عليها متبقٍّ **و**استحقاقها مضى (`document_overdue_state`).
+        """
+        from core.payments import document_overdue_state
+        from logistics.domain.import_settlement import import_invoice_display_payment
+
+        today = timezone.localdate()
+        if wanted == 'overdue':
+            by_sql = Q(
+                due_date__isnull=False,
+                due_date__lt=today,
+                list_remaining_balance__gt=0,
+            )
+        else:
+            by_sql = Q(list_payment_status=wanted)
+        international = Q(
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, is_return=False,
+        )
+        matched = []
+        for inv in qs.filter(international):
+            data = import_invoice_display_payment(inv)
+            status_, remaining = (
+                (data['payment_status'], data['remaining_balance']) if data
+                else (inv.list_payment_status, inv.list_remaining_balance)
+            )
+            if wanted == 'overdue':
+                hit = document_overdue_state(inv.due_date, remaining, as_of=today)['is_overdue']
+            else:
+                hit = status_ == wanted
+            if hit:
+                matched.append(inv.pk)
+        return qs.filter((~international & by_sql) | Q(pk__in=matched))
 
     def _get_tenant(self):
         return get_tenant(self.request)

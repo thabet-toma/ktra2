@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import logging
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
@@ -31,6 +32,8 @@ from logistics.models import (
     LogisticsShipmentDeal,
     PurchaseInvoice,
 )
+
+logger = logging.getLogger(__name__)
 
 Q2 = Decimal('0.01')
 COMPONENTS = ('supplier', 'freight', 'clearance', 'local')
@@ -160,3 +163,25 @@ def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[
     result = document_payment_summary(total_cost, covered)
     result.update({'payable_total': total_cost, 'components': components})
     return result
+
+
+def import_invoice_display_payment(invoice: PurchaseInvoice) -> Optional[Dict[str, Any]]:
+    """ما تعرضه الشاشات مدفوعاً ومتبقّياً وحالةً للفاتورة الدولية — مصدرٌ واحد.
+
+    `import_invoice_payment_breakdown` مخزَّنةً على الكائن: التفصيل والتأخّر ورصيد
+    المورد وفلتر القائمة يقرؤونها في الطلب نفسه بلا إعادة حساب. None لغير الدولية
+    أو لما لم تكتمل مستنداتها — فيقرأ المستدعي ملخّص المورد
+    (`purchase_invoice_payment_summary`). عطبٌ في الحساب لا يُسقط الشاشة: يُسجَّل
+    ويعود None.
+    """
+    if invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL or invoice.is_return:
+        return None
+    if hasattr(invoice, '_import_display_payment'):
+        return invoice._import_display_payment
+    try:
+        data = import_invoice_payment_breakdown(invoice)
+    except Exception:
+        logger.exception('import payment breakdown failed invoice=%s', invoice.pk)
+        data = None
+    invoice._import_display_payment = data
+    return data

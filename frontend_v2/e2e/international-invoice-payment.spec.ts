@@ -119,3 +119,52 @@ test('قائمة الفواتير: شارة الدولية جزئية لا «م�
   await expect(page.getByTitle('تسجيل الدفع بكامل المتبقّي')).toHaveCount(0);
   await page.screenshot({ path: 'e2e/receipt-remaining-shots/international-payment-list.png', fullPage: true });
 });
+
+/* INV-0022 على الإنتاج: مسودةٌ دائنوها الأربعة مسدَّدون لأطرافٍ مختلفة. ملخّص
+   المورد يقيس المسودة بإجماليها المحمَّل مقابل دفعات المورد وحدها (5,856 مقابل
+   12,896.53) — فكان جدول التفصيل يقول «المتبقي للدفع 7,040.53» تحت «مدفوعة
+   بالكامل». كل مدفوعٍ ومتبقٍّ على الشاشة الآن من `import_payment`. */
+const PAID_ALL = {
+  payment_status: 'paid', payment_status_display: 'مدفوعة بالكامل',
+  payable_total: '12896.53', amount_paid: '12896.53', remaining_balance: '0.00',
+  components: {
+    supplier: { cost: '5856.00', paid: '5856.00', remaining: '0.00' },
+    freight: { cost: '1762.53', paid: '1762.53', remaining: '0.00' },
+    clearance: { cost: '4678.00', paid: '4678.00', remaining: '0.00' },
+    local: { cost: '600.00', paid: '600.00', remaining: '0.00' },
+  },
+};
+const DRAFT_22 = {
+  ...INVOICE,
+  id: 2625, invoice_number: 'INV-0022', status: 'draft', is_posted: false,
+  journal_id_display: null, grand_total: 12896.53, subtotal: 12896.53,
+  fees_total: '0', payable_total: '12896.53', amount_paid: '5856.00',
+  remaining_balance: '7040.53', payment_status: 'partially_paid',
+  payment_status_display: 'مدفوعة جزئياً',
+  supplier_balance_before_invoice: '0.00', supplier_balance_after_invoice: '0.00',
+  import_payment: PAID_ALL,
+  conversion_metadata_json: {
+    deal_total_ils: 5856, deal_local_shipping_from_clearance_ils: 600,
+    line_meta: {
+      subtotal_merch_ils: 5856, internal_shipping_ils: 0,
+      deal_ship_allocated_ils: 1762.53, deal_clearance_allocated_ils: 4678,
+    },
+  },
+};
+
+test('INV-0022: مدفوعة للدائنين الأربعة — لا «متبقٍّ 7,040.53» في أيّ موضع', async ({ page }) => {
+  await mockApi(page);
+  await page.route(/\/logistics\/purchase-invoices\/2625\/$/, (route) => route.fulfill({
+    contentType: 'application/json', body: JSON.stringify(DRAFT_22),
+  }));
+  await page.goto('/purchase-invoices/2625');
+  await expect(page.getByText('INV-0022').first()).toBeVisible({ timeout: 20000 });
+
+  await expect(page.getByText('مدفوعة بالكامل').first()).toBeVisible();
+  // ملخّص المورد لا يتسرّب إلى الشاشة: لا متبقّي 7,040.53 ولا حالة «جزئية».
+  await expect(page.getByText('7,040.53')).toHaveCount(0);
+  await expect(page.getByText('مدفوعة جزئياً')).toHaveCount(0);
+  await expect(page.getByText('المتبقي للدفع — للدائنين الأربعة').first()).toBeVisible();
+  await expect(page.getByText('رصيد المورد وحده قبل احتساب حصّته المتبقية', { exact: false }).first()).toBeVisible();
+  await page.screenshot({ path: 'e2e/receipt-remaining-shots/international-paid-all-detail.png', fullPage: true });
+});

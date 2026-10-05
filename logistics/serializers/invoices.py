@@ -137,17 +137,21 @@ RECEIVED_DOC_WARNING = (
 from ._helpers import _deal_title_for_list_preview
 
 
+def _import_display_payment(obj):
+    from logistics.domain.import_settlement import import_invoice_display_payment
+    return import_invoice_display_payment(obj)
+
+
+def _display_remaining(obj, supplier_remaining):
+    """المتبقّي الذي يُقاس به التأخّر: للدولية تكاليفها الأربع، ولغيرها ملخّص المورد."""
+    data = _import_display_payment(obj)
+    return data['remaining_balance'] if data else supplier_remaining
+
+
 def _import_payment_payload(obj):
     """3ب: تكاليف الفاتورة الدولية الأربع ودفعاتها — None لغيرها (يعرض الملخّص
     المعتاد). عطبٌ في الحساب لا يُسقط القائمة: يُسجَّل ويعود None."""
-    if obj.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL or obj.is_return:
-        return None
-    from logistics.domain.import_settlement import import_invoice_payment_breakdown
-    try:
-        data = import_invoice_payment_breakdown(obj)
-    except Exception:
-        logger.exception('import payment breakdown failed invoice=%s', obj.pk)
-        return None
+    data = _import_display_payment(obj)
     if not data:
         return None
     return {
@@ -334,12 +338,14 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
 
     def get_is_overdue(self, obj) -> bool:
         return document_overdue_state(
-            obj.due_date, getattr(obj, 'list_remaining_balance', 0),
+            obj.due_date,
+            _display_remaining(obj, getattr(obj, 'list_remaining_balance', 0)),
         )['is_overdue']
 
     def get_days_overdue(self, obj) -> int:
         return document_overdue_state(
-            obj.due_date, getattr(obj, 'list_remaining_balance', 0),
+            obj.due_date,
+            _display_remaining(obj, getattr(obj, 'list_remaining_balance', 0)),
         )['days_overdue']
 
     class Meta:
@@ -624,12 +630,14 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_is_overdue(self, obj) -> bool:
         """T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها."""
         return document_overdue_state(
-            obj.due_date, purchase_invoice_payment_summary(obj)['remaining_balance'],
+            obj.due_date,
+            _display_remaining(obj, purchase_invoice_payment_summary(obj)['remaining_balance']),
         )['is_overdue']
 
     def get_days_overdue(self, obj) -> int:
         return document_overdue_state(
-            obj.due_date, purchase_invoice_payment_summary(obj)['remaining_balance'],
+            obj.due_date,
+            _display_remaining(obj, purchase_invoice_payment_summary(obj)['remaining_balance']),
         )['days_overdue']
 
     def _balance_summary(self, obj):
@@ -643,9 +651,16 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         # لعقد الـAPI وحده. (نفس قرار جانب البيع حرفياً — والمرآة التي كانت
         # موثَّقةً كديْنٍ في `docs/modules/sales.md` أُغلقت بهذه النقطة.)
         summary = purchase_invoice_payment_summary(obj)
+        remaining = summary['remaining_balance']
+        # الدولية غير المرحّلة: ملخّص المورد يقيسها بإجماليها المحمَّل (لا قيد يحدّد
+        # حصّته بعد)، فمتبقّيه يضمّ ما للوكيل والمخلّص والناقل. رصيد المورد يُحسب
+        # بحصّته وحده — المرحّلة تقرؤها من قيدها أصلاً.
+        data = None if obj.is_posted else _import_display_payment(obj)
+        if data:
+            remaining = data['components']['supplier']['remaining']
         return document_partner_balance_summary(
             getattr(obj, 'supplier_balance', 0),
-            summary['remaining_balance'],
+            remaining,
             obj.exchange_rate,
             is_posted=obj.is_posted,
             direction=-1 if obj.is_return else 1,
