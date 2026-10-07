@@ -43,7 +43,9 @@ D = lambda v: Decimal(str(v))
 Q2 = D("0.01")
 
 
-class AccrualAdjustTest(APITestCase):
+class _AccrualAdjustBase(APITestCase):
+    """مستندات الاستحقاق الثلاثة مرحّلة — يرثها `test_accrual_snapshots.py` بلا اختباراتها."""
+
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="accadj", password="x")
@@ -158,6 +160,8 @@ class AccrualAdjustTest(APITestCase):
             d=Sum("base_debit"), c=Sum("base_credit"))
         return ((agg["c"] or D("0")) - (agg["d"] or D("0"))).quantize(Q2)
 
+
+class AccrualAdjustTest(_AccrualAdjustBase):
     # ── M3: قيد فرقٍ لا حذف ─────────────────────────────────────────────────
     def test_clearance_adjustment_posts_a_difference_journal_and_keeps_the_original(self):
         original = LogisticsClearance.objects.get(pk=self.clearance.pk).journal_id

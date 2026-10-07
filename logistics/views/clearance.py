@@ -105,8 +105,13 @@ class ClearanceItemTypeViewSet(BaseTenantViewSet):
     pagination_class = None
 
     def get_queryset(self):
+        # عزل الشركة صراحةً: تجاوزُ `get_queryset` يتخطّى `TenantQuerySetMixin` — كانت شركةٌ
+        # ترى بنود غيرها وتعدّلها.
         from logistics.models import ClearanceItemType
-        return ClearanceItemType.objects.select_related('account')
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return ClearanceItemType.objects.none()
+        return ClearanceItemType.objects.filter(tenant=tenant).select_related('account')
 
     def list(self, request, *args, **kwargs):
         from logistics.domain.clearance_items import ensure_clearance_item_types
@@ -709,3 +714,52 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
 
 
 # تفصيل حركة التعديل في سجل النشاط — نفس عقد فاتورة البيع (core.activity).
+
+
+class AccrualSnapshotViewSet(viewsets.GenericViewSet):
+    """«سجل الاستحقاق» — لقطات بنود قيود الاستحقاق وتعديلاته (`domain/accrual_snapshots.py`).
+
+    `GET ?kind=clearance|freight|local&document=<id>`: الأصلي ثم كل تعديلٍ بفرقه، و
+    `POST <id>/fill/` يعبّئ بنود لقطةٍ بلا تفصيل بمجموعٍ مطابق — تفاصيلُ لا قيد."""
+
+    pagination_class = None
+
+    def get_queryset(self):
+        # عزل الشركة صراحةً: تجاوزُ `get_queryset` يتخطّى `TenantQuerySetMixin`.
+        from logistics.models import AccrualLineSnapshot
+        tenant = get_tenant(self.request)
+        if not tenant:
+            return AccrualLineSnapshot.objects.none()
+        return AccrualLineSnapshot.objects.filter(tenant=tenant).select_related('journal', 'tenant')
+
+    @staticmethod
+    def _document(tenant, kind, doc_id):
+        from logistics.models import LocalShipment, LogisticsClearance, LogisticsShipment
+        model = {'clearance': LogisticsClearance, 'freight': LogisticsShipment,
+                 'local': LocalShipment}.get(kind)
+        if model is None or not str(doc_id or '').isdigit():
+            return None
+        return model.objects.filter(tenant=tenant, pk=int(doc_id)).first()
+
+    def list(self, request, *args, **kwargs):
+        from logistics.domain.accrual_snapshots import history
+        kind = request.query_params.get('kind')
+        doc = self._document(get_tenant(request), kind, request.query_params.get('document'))
+        if doc is None:
+            return Response({'error': 'حدّد المستند (kind و document).'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(history(kind, doc))
+
+    @action(detail=True, methods=['post'], url_path='fill')
+    @requires_perm('import.doc.unpost')
+    def fill(self, request, pk=None):
+        """بنود استحقاقٍ بلا تفصيل بأثرٍ رجعي — مجموعها = مبلغ لقطتها بالقرش، والقيود كما هي."""
+        from logistics.domain.accrual_snapshots import _KIND_FIELD, fill_snapshot, history
+        snapshot = self.get_object()
+        try:
+            with transaction.atomic():
+                # قفلٌ على اللقطة: تعبئتان متزامنتان لا تمرّان كلتاهما من فحص «بلا تفصيل».
+                snapshot = type(snapshot).objects.select_for_update().get(pk=snapshot.pk)
+                fill_snapshot(snapshot, request.data.get('lines'), user=request.user)
+        except DjangoValidationError as exc:
+            return Response({'error': '؛ '.join(exc.messages)}, status=status.HTTP_400_BAD_REQUEST)
+        return Response(history(snapshot.kind, getattr(snapshot, _KIND_FIELD[snapshot.kind])))

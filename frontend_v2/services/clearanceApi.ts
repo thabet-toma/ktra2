@@ -8,6 +8,7 @@ import {
 import type { ClearanceCostLine, ClearanceLine } from "@/constants/clearanceDefaults";
 import { resolveTenantId } from "@/utils/tenantContext";
 import type { AccrualKind, AccrualStatus } from "@/utils/voucherAllocation";
+import type { AccrualSnapshot, AccrualSnapshotLine } from "@/utils/accrualBreakdown";
 
 const tid = () => resolveTenantId();
 
@@ -305,6 +306,30 @@ export async function adjustClearanceAccrual(
   return apiPostObject(
     `logistics/clearances/${clearanceId}/adjust-accrual/`,
     { cost_lines: costLines, ...opts },
+    { tenantId: tid() },
+  );
+}
+
+export type { AccrualSnapshot, AccrualSnapshotLine, AccrualDiffRow } from "@/utils/accrualBreakdown";
+
+/** «سجل الاستحقاق»: لقطة الأصل ثم لقطة كل تعديل (الأقدم أولاً) لمستندٍ واحد.
+ *  `document` = التخليص، أو الشحنة الدولية (شحن الوكيل)، أو الإرسالية المحلية. */
+export async function listAccrualSnapshots(kind: AccrualKind, documentId: number): Promise<AccrualSnapshot[]> {
+  return apiGetList<AccrualSnapshot>("logistics/accrual-snapshots/", {
+    tenantId: tid(),
+    query: { kind, document: documentId },
+  });
+}
+
+/** «إضافة بنود» للقطةٍ بلا تفصيل: مجموعها = إجمالي اللقطة بالسنت وإلا رفضها الخادم (400).
+ *  لا يمسّ القيود. يرجع سجلَّ المستند كاملاً بعد الحفظ. */
+export async function fillAccrualSnapshot(
+  snapshotId: number,
+  lines: AccrualSnapshotLine[],
+): Promise<AccrualSnapshot[]> {
+  return apiPostObject(
+    `logistics/accrual-snapshots/${snapshotId}/fill/`,
+    { lines },
     { tenantId: tid() },
   );
 }

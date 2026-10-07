@@ -26,6 +26,7 @@ import {
   type StatementDetailLine, type StatementInfoKind,
 } from '../../utils/entityLinks';
 import { clientLogger } from '../../services/logger';
+import type { AccrualSnapshot } from '../../utils/accrualBreakdown';
 import {
   defaultStatementCurrency, partnerKindFromType, partnerTypeLabel, partnerVoucherDirections,
 } from '../../utils/partnerActions';
@@ -142,6 +143,8 @@ interface StatementRow {
   paid_on?: string | null;
   /** المستحق الذي تُفتح عليه الحركة (التخليص/الإرسالية/الشحن في ملف شحنته). */
   open_target?: AccrualOpenTarget | null;
+  /** قيد استحقاقٍ أو تعديله: لقطة بنوده — تعرضها نافذة «تفاصيل الحركة». */
+  accrual_breakdown?: AccrualSnapshot | null;
   base_debit?: string;
   base_credit?: string;
 }

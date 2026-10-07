@@ -14,6 +14,8 @@ import { accountingApi, type CashBoxLedgerLink } from "@/services/accountingApi"
 import type { ClearanceLine } from "@/constants/clearanceDefaults";
 import { listLocalShipments, LocalShipmentRow, createLocalShipment, updateLocalShipment, deleteLocalShipment, postLocalShipment, payLocalShipmentFromCashBox, adjustLocalShipmentAccrual } from "@/services/localShippingApi";
 import { AccrualAdjustDialog } from "./AccrualAdjustDialog";
+import { AccrualHistory } from "./AccrualHistory";
+import { CLEARANCE_LINE_TYPE_LABELS } from "@/utils/accrualBreakdown";
 import { KitDocumentShell, useRecordNavigation, KitToolbarAction, KitTab, KitDateInput } from "@/components/kit";
 import { effectiveDealTitleForDisplay } from "@/utils/dealTitleDisplay";
 import { getShippingWorkflowLabel } from "@/utils/shippingWorkflowLabels";
@@ -116,18 +118,6 @@ function VoucherLink({ row }: { row: VoucherAllocationRow }) {
 /** ذيلُ رسالة النجاح حين فصل الخادم زائد الدفعة سنداً «تحت الحساب». */
 const withOnAccountNote = (msg: string, voucher?: { id: number; amount: string } | null) =>
   voucher ? `${msg} وفُصل ${fmt(voucher.amount)} ₪ سند صرف #${voucher.id} تحت الحساب.` : msg;
-
-/** أسماء افتراضية لأنواع بنود التخليص — تُقترَح كـ«بيان» عند اختيار النوع لبند بلا بيان. */
-const CLEARANCE_LINE_TYPE_LABELS: Record<string, string> = {
-  vat: "ضريبة القيمة المضافة",
-  declaration_fee: "رسوم البيان",
-  terminal: "محطة الشحن",
-  permits: "تصاريح",
-  broker_commission: "عمولة المخلص",
-  customs_system: "نظام الجمارك",
-  "شحن محلي": "شحن محلي",
-  other: "أخرى",
-};
 
 // G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
 const fld = (label: string, node: React.ReactNode, error?: string | null) => (
@@ -416,6 +406,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     | null
   >(null);
   const [localShipments, setLocalShipments] = useState<LocalShipmentRow[]>([]);
+  // «سجل الاستحقاق»: يُعاد جلبه بعد كل «تعديل الاستحقاق»؛ والإرسالياتُ المفتوح سجلُّها تحت صفّها.
+  const [accrualRefresh, setAccrualRefresh] = useState(0);
+  const [localHistoryOpen, setLocalHistoryOpen] = useState<ReadonlySet<number>>(() => new Set());
   // مرفق الناقل: لوحةٌ واحدة تحت الجدول للإرسالية المختارة.
   const [localAttachFor, setLocalAttachFor] = useState<{ id: number; label: string } | null>(null);
   const [clearancePayments, setClearancePayments] = useState<ClearancePaymentRow[]>([]);
@@ -1351,6 +1344,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handleAccrualAdjusted = useCallback(async (result: AccrualAdjustResult) => {
     setAdjusting(null);
+    setAccrualRefresh((n) => n + 1);
     const revalued = result.revaluations.map((r) => r.invoice_number).join("، ");
     const onAccount = result.on_account;
     toast(
@@ -1901,6 +1895,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
             : "الاستحقاق يُثبَّت تلقائياً عند ترحيل الشحنة إلى فاتورة — أو أثبِته الآن يدوياً."}
         </span>
       </div>
+      {clearanceForm.journal && clearanceForm.id ? (
+        <AccrualHistory kind="clearance" documentId={clearanceForm.id} refreshKey={accrualRefresh} />
+      ) : null}
       {clearanceForm.id ? (
         <DocAttachments
           key={clearanceForm.id} label="مرفق مطالبة المخلّص" docId={clearanceForm.id}
@@ -2145,7 +2142,8 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         </tr></thead>
         <tbody>
           {localShipments.map((ls) => (
-            <tr key={ls.id} onClick={() => handleEditLocal(ls)} style={{ cursor: "pointer" }}>
+            <React.Fragment key={ls.id}>
+            <tr onClick={() => handleEditLocal(ls)} style={{ cursor: "pointer" }}>
               <td style={{ padding: "2px 4px" }}>{ls.shipment_number}</td>
               <td style={{ padding: "2px 4px" }}>{ls.carrier_name || "—"}</td>
               <td style={{ padding: "2px 4px", textAlign: "center" }}>{fmt(ls.amount)}</td>
@@ -2168,6 +2166,22 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                   <button type="button" className="ktra-toolbtn" onClick={(e) => { e.stopPropagation(); openLocalPayment(ls); }} disabled={saving} style={{ fontSize: "11px" }} title="دفع للناقل من الصندوق بقيد مستقل — يجوز تجاوز المتبقي (يصير دفعة مقدمة)">تسجيل دفعة</button>
                   {ls.is_posted && (
                     <button
+                      type="button" className="ktra-toolbtn text-[11px]" aria-expanded={localHistoryOpen.has(ls.id)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setLocalHistoryOpen((cur) => {
+                          const next = new Set(cur);
+                          if (next.has(ls.id)) next.delete(ls.id); else next.add(ls.id);
+                          return next;
+                        });
+                      }}
+                      title="لقطات بنود الاستحقاق الأصلي وتعديلاته"
+                    >
+                      سجل الاستحقاق
+                    </button>
+                  )}
+                  {ls.is_posted && (
+                    <button
                       type="button" className="ktra-toolbtn text-[11px]" disabled={saving}
                       onClick={(e) => { e.stopPropagation(); setAdjusting({ kind: "local", id: ls.id, label: ls.shipment_number || `#${ls.id}`, amount: String(ls.amount ?? "") }); }}
                       title="مبلغ الإرسالية الجديد ← قيدٌ بالفرق على الناقل، والقيد الأصلي يبقى"
@@ -2178,6 +2192,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 </span>
               </td>
             </tr>
+            {ls.is_posted && localHistoryOpen.has(ls.id) && (
+              <tr>
+                <td colSpan={8} className="px-2 pt-2">
+                  <AccrualHistory kind="local" documentId={ls.id} refreshKey={accrualRefresh} />
+                </td>
+              </tr>
+            )}
+            </React.Fragment>
           ))}
           {localShipments.length === 0 && (
             <tr><td colSpan={8} style={{ padding: "8px 4px", textAlign: "center", color: "#999" }}>لا توجد شحنات محلية</td></tr>
@@ -2388,6 +2410,9 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
               مدين «مصاريف الشحن الدولي» / دائن «ذمم الوكيل». هذا السعر هو الذي يحكم تكلفة الشحن
               بالشيكل في تكلفة الاستيراد — بلا حاجة لأي دفعة. ادفع للوكيل لاحقاً متى شئت.
             </p>
+            {freightAccrued && shipment?.id ? (
+              <AccrualHistory kind="freight" documentId={Number(shipment.id)} refreshKey={accrualRefresh} />
+            ) : null}
           </>
         )}
         {shipment?.id ? (

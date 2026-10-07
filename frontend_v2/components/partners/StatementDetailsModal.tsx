@@ -17,6 +17,8 @@ import {
 } from "../../utils/entityLinks";
 import { formatMoney } from "../../utils/formatNumber";
 import { clientLogger } from "../../services/logger";
+import type { AccrualSnapshot } from "../../utils/accrualBreakdown";
+import { AccrualBreakdownTable } from "../import-flow/AccrualBreakdownTable";
 import { formatDateLocalized } from "../../utils/formatDate";
 
 /**
@@ -40,6 +42,8 @@ export interface StatementMovement {
   paid_on?: string | null;
   /** مسار مستحقّها حين لا مسار لنوع المرجع نفسه. */
   open_path?: string | null;
+  /** قيد استحقاقٍ (أو تعديله): لقطة بنوده من الخادم — الأصل ببنوده، والتعديل بقبل/بعد/الفرق. */
+  accrual_breakdown?: AccrualSnapshot | null;
 }
 
 type Kind = "sales" | "purchase" | "customer_payment" | "other";
@@ -269,8 +273,18 @@ export const StatementDetailsModal: React.FC<{
             </ul>
           )}
 
+          {/* قيد استحقاق/تعديله — الجدول نفسه المعروض في «سجل الاستحقاق» */}
+          {movement.accrual_breakdown && (
+            <div className="space-y-1">
+              <h3 className="font-bold text-[var(--ktra-ink)]">
+                {movement.accrual_breakdown.role === "adjustment" ? "تعديل الاستحقاق — الفرق عمّا قبله" : "بنود الاستحقاق"}
+              </h3>
+              <AccrualBreakdownTable snapshot={movement.accrual_breakdown} />
+            </div>
+          )}
+
           {/* أنواع أخرى — ملخّص + رابط المستند إن وُجد */}
-          {!loading && kind === "other" && !error && !hasDetails && (
+          {!loading && kind === "other" && !error && !hasDetails && !movement.accrual_breakdown && (
             <div className="text-[var(--ktra-ink-soft)] py-2">
               لا تتوفر بنود تفصيلية لهذا النوع من الحركات. يظهر الملخّص أعلاه.
             </div>

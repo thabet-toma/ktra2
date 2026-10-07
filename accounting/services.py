@@ -4443,6 +4443,16 @@ def _attach_statement_shipment_labels(tenant_id: int, rows: list) -> None:
         row["shipment_label"] = labels.get((row["reference_type"], row["reference_id"]))
 
 
+def _attach_statement_accrual_breakdowns(tenant_id: int, rows: list) -> None:
+    """`accrual_breakdown` لحركة قيد استحقاقٍ لوجستي أو تعديله: بنوده، وللتعديل قبل/بعد/الفرق
+    — من لقطات «سجل الاستحقاق» نفسها (`logistics.domain.accrual_snapshots`). None لغيرها."""
+    from logistics.domain.accrual_snapshots import breakdowns_for_journals
+
+    breakdowns = breakdowns_for_journals(tenant_id, [row["journal_id"] for row in rows])
+    for row in rows:
+        row["accrual_breakdown"] = breakdowns.get(row["journal_id"])
+
+
 # «عكس قيد #283» · «عكس القيد #283» · «عكس #283» — كل صيغ `reverse_journal`
 # ومستدعيه (الوصف الافتراضي وبادئة السطر، ودفعات الصفقة والتخليص وفصل الدفعة
 # الزائدة). ووسمُ الأصل الملغى «عكس مرحّل #N» لا يطابق عمداً: الأصل الملغى لا
@@ -4753,6 +4763,7 @@ def partner_account_statement(
         rows.append(row)
     _attach_statement_document_links(rows, is_supplier=is_supplier, tenant_id=tenant_id)
     _attach_statement_shipment_labels(tenant_id, rows)
+    _attach_statement_accrual_breakdowns(tenant_id, rows)
     out = {
         "results": rows,
         "count": total,

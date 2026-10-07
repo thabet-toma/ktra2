@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **960**
+عدد النقاط: **962**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -428,6 +428,8 @@
 | `/api/inventory/warehouses/{pk}/stock/` | `WarehouseViewSet` | `inventory/views.py` |
 | `/api/logistics/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/logistics/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
+| `/api/logistics/accrual-snapshots/` | `AccrualSnapshotViewSet` | `logistics/views/clearance.py` |
+| `/api/logistics/accrual-snapshots/{pk}/fill/` | `AccrualSnapshotViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearance-item-types/` | `ClearanceItemTypeViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearance-item-types/{pk}/` | `ClearanceItemTypeViewSet` | `logistics/views/clearance.py` |
 | `/api/logistics/clearances/` | `LogisticsClearanceViewSet` | `logistics/views/clearance.py` |

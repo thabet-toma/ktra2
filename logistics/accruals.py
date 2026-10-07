@@ -150,6 +150,9 @@ def post_clearance_accrual(clearance, user=None) -> Optional[JournalHeader]:
     )
     clearance.journal = journal
     clearance.save(update_fields=['journal'])
+    # بنود الاستحقاق كما رُحِّل — التعديل يكتب فوق بنود التخليص فتضيع لولاها.
+    from logistics.domain.accrual_snapshots import record_original_snapshot
+    record_original_snapshot('clearance', clearance, journal, user)
     logger.info(
         'clearance accrual posted clearance=%s journal=%s total=%s',
         clearance.pk, journal.pk, total,
@@ -229,6 +232,8 @@ def post_local_shipment_accrual(shipment, user=None) -> Optional[JournalHeader]:
     shipment.is_posted = True
     shipment.journal = journal
     shipment.save(update_fields=['is_posted', 'journal'])
+    from logistics.domain.accrual_snapshots import record_original_snapshot
+    record_original_snapshot('local', shipment, journal, user)
     create_audit_log(
         tenant=tenant, user=user, action='local_shipment_posted',
         model_name='LocalShipment', object_id=shipment.pk,
@@ -314,6 +319,8 @@ def post_freight_accrual(shipment, rate, user=None) -> Optional[JournalHeader]:
     shipment.save(update_fields=[
         'freight_exchange_rate', 'freight_is_posted', 'freight_journal',
     ])
+    from logistics.domain.accrual_snapshots import record_original_snapshot
+    record_original_snapshot('freight', shipment, journal, user)
     create_audit_log(
         tenant=tenant, user=user, action='FREIGHT_ACCRUAL',
         model_name='LogisticsShipment', object_id=shipment.pk,

@@ -2751,5 +2751,70 @@ class LogisticsAccrualAllocation(models.Model):
         return f"AccrualAllocation(payment={self.payment_id}, amount={self.amount})"
 
 
+class AccrualLineSnapshot(models.Model):
+    """بنود قيد استحقاقٍ لوجستي كما رُحِّل — لقطةٌ لكل قيد: الأصلي ثم كل «تعديل استحقاق».
+
+    بنود التخليص (`LogisticsClearanceLine`) حالتُه الحالية وحدها، و«تعديل الاستحقاق» يكتب
+    فوقها ويرحّل قيد فرق — فكانت بنود الأصل تضيع ولا يُعرف ما تغيّر. اللقطة تحفظها مع القيد
+    (`logistics/domain/accrual_snapshots.py` يكتبها عند الترحيل والتعديل)، والفرق بين لقطتين
+    متتاليتين هو تفصيل قيد التعديل. تفاصيلُ لا قيد: لا تمسّ الدفتر.
+
+    `total` بالعملة الأساسية: الأصلي = دائن الطرف في قيده، والتعديل = المستحق بعده.
+    `detailed=False`: بلا تفصيل (سطر «إجمالي» من قيدٍ قديم، أو مبلغ الشحن/الإرسالية الواحد)
+    — تُعبّأ بنودُه لاحقاً بمجموعٍ مطابق بالقرش.
+    """
+
+    KIND_CHOICES = [('clearance', 'تخليص'), ('freight', 'شحن الوكيل'), ('local', 'نقل محلي')]
+    ROLE_ORIGINAL = 'original'
+    ROLE_ADJUSTMENT = 'adjustment'
+    ROLE_CHOICES = [(ROLE_ORIGINAL, 'الاستحقاق الأصلي'), (ROLE_ADJUSTMENT, 'تعديل استحقاق')]
+
+    id = models.AutoField(primary_key=True, db_column='AccrualSnapshotID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    kind = models.CharField(max_length=16, choices=KIND_CHOICES, db_column='Kind')
+    clearance = models.ForeignKey(
+        'LogisticsClearance', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='accrual_snapshots', db_column='ClearanceID',
+    )
+    shipment = models.ForeignKey(
+        'LogisticsShipment', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='freight_accrual_snapshots', db_column='ShipmentID',
+    )
+    local_shipment = models.ForeignKey(
+        'LocalShipment', on_delete=models.CASCADE, null=True, blank=True,
+        related_name='accrual_snapshots', db_column='LocalShipmentID',
+    )
+    journal = models.OneToOneField(
+        JournalHeader, on_delete=models.CASCADE, related_name='accrual_snapshot',
+        db_column='JournalID',
+    )
+    role = models.CharField(max_length=16, choices=ROLE_CHOICES, db_column='Role')
+    lines = models.JSONField(default=list, db_column='Lines', help_text='[{label, type, amount}] بالعملة الأساسية')
+    total = models.DecimalField(max_digits=18, decimal_places=2, db_column='Total')
+    detailed = models.BooleanField(default=True, db_column='Detailed')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, db_column='CreatedBy',
+        related_name='+',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'logistics_accrual_line_snapshots'
+        constraints = [
+            models.CheckConstraint(
+                name='accrual_snapshot_one_document',
+                condition=(
+                    models.Q(clearance__isnull=False, shipment__isnull=True, local_shipment__isnull=True)
+                    | models.Q(clearance__isnull=True, shipment__isnull=False, local_shipment__isnull=True)
+                    | models.Q(clearance__isnull=True, shipment__isnull=True, local_shipment__isnull=False)
+                ),
+            ),
+        ]
+        indexes = [models.Index(fields=['tenant', 'kind'], name='accr_snap_tenant_kind_idx')]
+
+    def __str__(self):
+        return f"AccrualLineSnapshot({self.kind}, journal={self.journal_id}, {self.role})"
+
+
 # Automatically connect signals for the logistics app
 import logistics.signals

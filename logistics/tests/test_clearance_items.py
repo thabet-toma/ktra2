@@ -50,6 +50,22 @@ class ClearanceItemsTest(APITestCase):
         self.assertEqual(by_type["broker_commission"]["account_code"], "5302")
         self.assertEqual(len(self._items()), 6, "البذرة مرّة واحدة")
 
+    def test_items_are_scoped_to_the_company(self):
+        # كانت شركةٌ ترى بنود غيرها وتعدّلها (`get_queryset` بلا فلتر شركة).
+        mine = {r["id"] for r in self._items()}
+        other = User.objects.create_user(username="items-other", password="x")
+        tenant = create_company("شركة أخرى", other)
+        tenant.import_enabled = True
+        tenant.save(update_fields=["import_enabled"])
+        self.client.force_authenticate(user=other)
+        h = {"HTTP_X_TENANT_ID": str(tenant.TenantID)}
+        theirs = {r["id"] for r in self.client.get("/api/logistics/clearance-item-types/", **h).json()}
+        self.assertEqual(len(theirs), 6)
+        self.assertFalse(mine & theirs)
+        res = self.client.patch(f"/api/logistics/clearance-item-types/{min(mine)}/", {"name": "x"},
+                                format="json", **h)
+        self.assertEqual(res.status_code, 404, res.content)
+
     def test_repeated_item_from_settings_carries_its_account_into_the_accrual(self):
         self._items()
         port = Account.objects.get(tenant=self.tenant, code="5307")

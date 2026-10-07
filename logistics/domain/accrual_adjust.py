@@ -165,6 +165,10 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
             before = accrual_status(kind, obj)
             shipment_id = shipment_id_of(kind, obj)
             snapshots = landed_revaluation.capture(obj.tenant_id, shipment_id)
+            # «لقطة قبل»: سلسلةٌ رُحِّلت قبل لقطات البنود تُكمَّل، وآخرها من بنود المستند الآن.
+            from logistics.domain.accrual_snapshots import ensure_snapshots, record_adjustment_snapshot
+            if not preview:
+                ensure_snapshots(kind, obj, user, latest_from_document=True)
 
             apply_changes()
 
@@ -184,6 +188,8 @@ def adjust_accrual(kind: str, obj, *, apply_changes, adjust_date=None, freight_r
                     currency=base_currency, exchange_rate=Decimal('1'), user=user,
                     idempotent=False,
                 )
+                # «لقطة بعد»: بنود المستند المعدَّل — فرقها عن السابقة تفصيلُ هذا القيد.
+                record_adjustment_snapshot(kind, obj, journal, user)
             if preview:
                 revaluations = [p.summary() for p in landed_revaluation.plan(snapshots)]
             else:
