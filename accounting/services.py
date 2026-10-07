@@ -343,6 +343,22 @@ def resolve_import_fee_accrual_account(tenant_id: int, name: str):
     return _resolve_named_account_under_parent(tenant_id, name, parent.code, "Liability")
 
 
+IMPORT_TAX_PAYABLE_NAME = "ضريبة الاستيراد المستحقة"
+
+
+def resolve_import_tax_payable_account(tenant_id: int, *, create: bool = True):
+    """(حساب، أُنشئ؟) دائن ضريبة الفاتورة الدولية (قرار المالك): التزامٌ للضريبة لا للمورد
+    الأجنبي، يُسدَّد بسند صرف عليه. بالاسم أينما كان في الشجرة (Liability)، وإلا يُنشأ تحت
+    «مستحقات رسوم الاستيراد». `create=False` للقراءة: (None, False) إن غاب."""
+    target = _normalize_account_name(IMPORT_TAX_PAYABLE_NAME)
+    for account in Account.objects.filter(tenant_id=tenant_id, account_type="Liability"):
+        if _normalize_account_name(account.name) == target:
+            return account, False
+    if not create:
+        return None, False
+    return resolve_import_fee_accrual_account(tenant_id, IMPORT_TAX_PAYABLE_NAME)
+
+
 def validate_fiscal_period(tenant_id, transaction_date):
     """
     Ensures transaction_date falls within an open fiscal period.

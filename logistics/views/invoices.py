@@ -1438,6 +1438,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
              └─ الدولية: الضريبة وكل رسم في المخزون/الوسيط — لا 1105 ولا مصروف
                 (`services.import_invoice_capitalizes_all`، قرار المالك 2026-10-07)
           دائن: ذمم المورد (partner.linked_account)                    = إجمالي + رسوم المورد
+             └─ الدولية: بلا ضريبتها — دائنُها «ضريبة الاستيراد المستحقة»
+                (`accounting.services.resolve_import_tax_payable_account`، قرار المالك)
           دائن: الطرف الدائن لكل رسمٍ له جهة/حساب (credit_partner/credit_account) = مبلغه
              └─ الدولية: ناقصاً حصصها من الشحن والتخليص والنقل، وتُدائَن بها حسابات
                 استحقاقها (5301/بنود التخليص/مصروف النقل) — `import_invoice_accrual_credits`
@@ -1627,6 +1629,20 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # والدولية: ضريبتها في البضاعة أيضاً (فيوزّعها الاستلام على البنود كالرسوم).
         capitalized_tax = tax_amt if capitalize_all else Decimal('0')
         inventory_debit = merchandise_net + capitalized_total + commission + capitalized_tax
+        # ودائنُها حساب الضريبة لا المورد — المورد الأجنبي لا يقبضها (قرار المالك).
+        import_tax_account = None
+        if capitalized_tax > 0:
+            from accounting.services import resolve_import_tax_payable_account
+            import_tax_account, created = resolve_import_tax_payable_account(tenant.TenantID)
+            if import_tax_account is None:
+                return Response(
+                    {'error': 'تعذّر إنشاء حساب «ضريبة الاستيراد المستحقة»: لا حساب «21» '
+                              '(الالتزامات المتداولة) في الشجرة.'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            if created:
+                logger.info('import tax payable account created tenant=%s code=%s',
+                            tenant.TenantID, import_tax_account.code)
         if capitalize_all:
             logger.info('import invoice %s posting: tax capitalized=%s fees capitalized=%s',
                         invoice.pk, capitalized_tax, capitalized_total)
@@ -1792,6 +1808,14 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
 
         for fee in party_fees:
             lines_payload.append(purchase_invoice_fee_credit_line(fee, invoice.invoice_number))
+        if import_tax_account is not None:
+            lines_payload.append({
+                'account': import_tax_account.id,
+                'debit': Decimal('0'),
+                'credit': capitalized_tax.quantize(Decimal('0.01')),
+                'partner': None,
+                'description': f"ضريبة الاستيراد المستحقة — {invoice.invoice_number}",
+            })
         if commission > 0:
             lines_payload.append({
                 'account': commission_account_id,
@@ -1812,7 +1836,9 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # في مصاريفها عند الإفراج ودُوئن بها الوكيلُ والمخلّص والناقل — فتُدائَن تلك
         # المصاريف هنا بالحصّة (تنتقل إلى البضاعة مرّةً واحدة)، والمورد بما يخصّه
         # وحده. قبلها كان المورد يُدائَن بالإجمالي المحمَّل كلّه.
-        supplier_credit = credit_total
+        # الدولية: بلا ضريبتها (سطر حسابها أعلاه)؛ والحصص تُخصم أدناه من المصدر نفسه
+        # (`import_invoice_supplier_split` بلا الضريبة أيضاً).
+        supplier_credit = credit_total - (capitalized_tax if import_tax_account else Decimal('0'))
         if not is_local and invoice.deal_id and invoice.shipment_id:
             from logistics.accruals import IMPORT_COMPONENT_LABELS, import_invoice_supplier_split
             split = import_invoice_supplier_split(invoice, fees_total=fees_total)

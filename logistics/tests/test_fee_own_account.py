@@ -7,6 +7,7 @@
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.db.models import Sum
 from rest_framework.test import APITestCase
 
 from accounting.models import Account, JournalHeader, JournalLine
@@ -145,6 +146,11 @@ class FeeOwnAccountTest(APITestCase):
         self.assertFalse(journal.lines.filter(account__code="1105").exists())
         self.assertFalse(journal.lines.filter(account=self.misc, debit__gt=0).exists())
         self.assertEqual(self._goods_debit(journal), D("1260.00"))  # 1000 + 160 + 100
+        # دائن الضريبة حسابُها لا المورد، والرسم حسابُه: المورد بالبضاعة وحدها.
+        self.assertTrue(journal.lines.filter(
+            account__name="ضريبة الاستيراد المستحقة", credit=D("160.00")).exists())
+        self.assertEqual(journal.lines.filter(account=self.ap).aggregate(c=Sum("credit"))["c"],
+                         D("1000.00"))
 
     def test_local_invoice_keeps_input_vat_and_fee_choice(self):
         invoice = self._taxed_invoice("FOA-T2", PurchaseInvoice.INVOICE_TYPE_LOCAL)
@@ -154,3 +160,7 @@ class FeeOwnAccountTest(APITestCase):
         self.assertTrue(journal.lines.filter(account__code="1105", debit=D("160.00")).exists())
         self.assertTrue(journal.lines.filter(account=self.misc, debit=D("100.00")).exists())
         self.assertEqual(self._goods_debit(journal), D("1000.00"))
+        # المحلية كما كانت: المورد دائنٌ بالضريبة ورسمه، ولا حساب لضريبة الاستيراد.
+        self.assertEqual(journal.lines.filter(account=self.ap).aggregate(c=Sum("credit"))["c"],
+                         D("1260.00"))
+        self.assertFalse(journal.lines.filter(account__name="ضريبة الاستيراد المستحقة").exists())

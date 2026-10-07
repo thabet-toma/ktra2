@@ -1575,13 +1575,14 @@ def _posted_commission_drifted(inv: PurchaseInvoice) -> bool:
 
 def _posted_capitalization_drifted(inv: PurchaseInvoice) -> bool:
     """قيدُها قبل «كل ما في الدولية تكلفة» (قرار المالك 2026-10-07): ضريبتها على المدخلات
-    أو رسمٌ مصروفاً (`services.import_invoice_posted_off_cost`) — «أعد الاحتساب والترحيل»
-    يرحّلها تكلفةً. فاتورة صفقة الأرشيف لا يُعاد ترحيلها فلا تُعدّ متأخّرة."""
+    أو رسمٌ مصروفاً، أو ضريبتها دائنةٌ للمورد لا لـ«ضريبة الاستيراد المستحقة»
+    (`services.import_invoice_posted_off_cost`) — «أعد الاحتساب والترحيل» يرحّلها على
+    القاعدة. فاتورة صفقة الأرشيف لا يُعاد ترحيلها فلا تُعدّ متأخّرة."""
     from logistics.payment_posting import live_archive_deal_journals
     from logistics.services import import_invoice_posted_off_cost
 
     off = import_invoice_posted_off_cost(inv)
-    if not (off['tax'] or off['fees']):
+    if not (off['tax'] or off['fees'] or off['tax_on_supplier']):
         return False
     return not (inv.deal_id and live_archive_deal_journals(inv.tenant_id, [inv.deal_id]))
 

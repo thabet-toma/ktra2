@@ -229,14 +229,15 @@ class ImportInvoiceSettlementTest(APITestCase):
         tax = (inv.subtotal * D("0.16")).quantize(Q2)
         self.assertEqual(inv.tax_amount, tax)
 
-        # ترحيلٌ قديم (قبل 51b12571): المورد دائنٌ بالإجمالي المحمَّل كلّه.
+        # ترحيلٌ قديم (قبل 51b12571): المورد دائنٌ بالإجمالي المحمَّل كلّه (بلا الضريبة —
+        # دائنُها «ضريبة الاستيراد المستحقة»).
         with mock.patch(
             "logistics.accruals.import_invoice_accrual_credits", return_value=[],
         ):
             inv = self._post(inv)
         old_supplier = inv.journal.lines.filter(account=self.ap).aggregate(
             c=Sum("credit"))["c"]
-        self.assertEqual(old_supplier, inv.grand_total)
+        self.assertEqual(old_supplier, inv.grand_total - tax)
 
         shares = import_invoice_cost_shares(inv)
         res = self._recalculate(auto_repost=True)
@@ -248,11 +249,11 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(
             sum((l.debit for l in lines), D("0")), sum((l.credit for l in lines), D("0")))
         new_supplier = sum((l.credit for l in lines if l.account_id == self.ap.id), D("0"))
-        # نقصت ذمّة المورد بحصص الشحن والتخليص والنقل، وبقيت له البضاعة + ضريبة فاتورته.
+        # نقصت ذمّة المورد بحصص الشحن والتخليص والنقل، وبقيت له البضاعة وحدها.
         self.assertEqual(
             old_supplier - new_supplier,
             shares["freight"] + shares["clearance"] + shares["local"])
-        self.assertEqual(new_supplier, D("3500.00") + tax)
+        self.assertEqual(new_supplier, D("3500.00"))
         # قرار المالك (2026-10-07): ضريبة الفاتورة الدولية تكلفة بضاعة — لا سطر 1105.
         self.assertFalse(any(l.account.code == "1105" for l in lines))
 
@@ -1028,3 +1029,93 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(posted.discount_amount, D("0"))
         drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
         self.assertEqual(drift["stale_posted_invoices"], [])
+
+    # ── ضريبة الفاتورة الدولية دائنُها «ضريبة الاستيراد المستحقة» لا المورد (قرار المالك) ──
+    def _taxed_invoice(self):
+        inv = self._release_and_import()[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv = PurchaseInvoice.objects.get(pk=inv.pk)
+        self.assertGreater(inv.tax_amount, 0)
+        return inv
+
+    def _tax_payable_account(self):
+        return Account.objects.get(tenant=self.tenant, name="ضريبة الاستيراد المستحقة")
+
+    def test_import_tax_credits_tax_payable_not_supplier(self):
+        """INV-0023: المورد Beijing دائنٌ 6,496.20 بضاعة + 1,912.40 ض.ق.م — والمورد الأجنبي لا
+        يقبض الضريبة. الدائن حساب «ضريبة الاستيراد المستحقة»، والمدين المخزون/2110 كما هو."""
+        inv = self._taxed_invoice()
+        tax = inv.tax_amount
+        self.assertEqual(self._supplier_payable(inv), D("3500.00"))  # البضاعة وحدها
+        draft = self._breakdown(inv)
+        self.assertEqual(D(draft["components"]["supplier"]["cost"]), D("3500.00"))
+        tax_row = next(r for r in draft["cost_rows"] if r["key"] == "tax")
+        self.assertEqual((D(tax_row["cost"]), D(tax_row["paid"])), (tax, D("0.00")))
+        payable = D(draft["payable_total"])
+
+        inv = self._post_and_receive(inv)
+        account = self._tax_payable_account()
+        self.assertEqual(account.account_type, "Liability")
+        lines = list(inv.journal.lines.all())
+        self.assertEqual(self._ap_credit(inv), D("3500.00"))
+        self.assertEqual(sum((l.credit for l in lines if l.account_id == account.id), D("0")), tax)
+        self.assertEqual(
+            sum((l.debit for l in lines), D("0")), sum((l.credit for l in lines), D("0")))
+        self.assertEqual(self._gr_ir_debit(inv), payable)
+        self.assertEqual(self._grn_inventory_debit(inv), payable)
+        self.assertEqual(self._supplier_payable(inv), D("3500.00"))
+        posted = self._breakdown(inv)
+        self.assertEqual(D(posted["payable_total"]), payable)
+        units = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in posted["unit_costs"]), D("0"))
+        self.assertEqual(units.quantize(Q2), payable)
+
+        # مدفوع الضريبة من حسابها: دفعات المورد لا تسدّدها، وسند صرفٍ عليه يسدّدها.
+        tax_row = next(r for r in posted["cost_rows"] if r["key"] == "tax")
+        self.assertEqual(D(tax_row["paid"]), D("0.00"))
+        from accounting.services import post_journal
+        post_journal(
+            tenant_id=self.tenant.TenantID, transaction_date="2026-07-10",
+            reference_type="MANUAL", reference_id=None, description="سداد ضريبة الاستيراد",
+            lines_data=[
+                {"account": account.id, "partner": None, "debit": tax, "credit": D("0"),
+                 "description": "ضريبة"},
+                {"account": Account.objects.get(tenant=self.tenant, code="1101").id,
+                 "partner": None, "debit": D("0"), "credit": tax, "description": "ضريبة"},
+            ],
+        )
+        tax_row = next(r for r in self._breakdown(inv)["cost_rows"] if r["key"] == "tax")
+        self.assertEqual((D(tax_row["paid"]), D(tax_row["remaining"])), (tax, D("0.00")))
+
+    def test_tax_credited_to_supplier_is_stale_and_repost_moves_it(self):
+        """INV-0023/INV-0025 رُحّلتا وضريبتهما دائنةٌ للمورد ⇒ «متأخّرة»، والأمر يعرضهما،
+        و«أعد الاحتساب والترحيل» ينقلها لحساب الضريبة."""
+        from io import StringIO
+        from django.core.management import call_command
+        from logistics.landed_cost import posted_invoices_cost_drift
+
+        inv = self._post(self._taxed_invoice())
+        tax = inv.tax_amount
+        # قيدٌ قبل القرار: سطر الضريبة على ذمّة المورد.
+        line = inv.journal.lines.get(account=self._tax_payable_account())
+        JournalLine.objects.filter(pk=line.pk).update(account=self.ap, partner=self.supplier)
+        self.assertEqual(self._ap_credit(inv), D("3500.00") + tax)
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertIn(inv.pk, [r["id"] for r in drift["stale_posted_invoices"]])
+        out = StringIO()
+        call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
+        self.assertIn(inv.invoice_number, out.getvalue())
+        self.assertIn("ضريبة دائنةٌ للمورد", out.getvalue())
+
+        res = self._recalculate(auto_repost=True)
+        self.assertEqual(res.status_code, 200, res.content)
+        inv.refresh_from_db()
+        self.assertEqual(self._ap_credit(inv), D("3500.00"))
+        self.assertEqual(
+            inv.journal.lines.filter(account=self._tax_payable_account()).aggregate(
+                c=Sum("credit"))["c"], tax)
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertEqual(drift["stale_posted_invoices"], [])
+        out = StringIO()
+        call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
+        self.assertNotIn(inv.invoice_number, out.getvalue())

@@ -2,7 +2,9 @@
 
 قرار المالك (2026-10-07): ضريبة الفاتورة الدولية وكل رسومها تكلفةُ بضاعتها
 (`logistics.services.import_invoice_capitalizes_all`). ما رُحِّل قبله ضريبتُه على المدخلات
-(1105) أو رسمٌ منه مصروفاً (INV-0022: رسم كترا 1,192.34 على 5309). يعرضها الأمر:
+(1105) أو رسمٌ منه مصروفاً (INV-0022: رسم كترا 1,192.34 على 5309). وقرارٌ تالٍ: ضريبتها
+دائنُها «ضريبة الاستيراد المستحقة» لا ذمّة المورد (`services.import_invoice_tax_payable`)
+— ما رُحِّل قبله ضريبتُه دائنةٌ للمورد (INV-0023: 1,912.40). يعرضها الأمر:
 
     python manage.py report_import_off_cost_postings --tenant 1
 
@@ -20,7 +22,8 @@ from logistics.services import import_invoice_posted_off_cost
 
 
 class Command(BaseCommand):
-    help = "الفواتير الدولية المرحّلة بضريبةٍ على المدخلات أو رسمٍ مصروفاً (قراءة فقط)."
+    help = ("الفواتير الدولية المرحّلة بضريبةٍ على المدخلات أو دائنةٍ للمورد، أو رسمٍ مصروفاً "
+            "(قراءة فقط).")
 
     def add_arguments(self, parser):
         parser.add_argument("--tenant", type=int, required=True, help="رقم المستأجر")
@@ -38,7 +41,7 @@ class Command(BaseCommand):
             if inv.pk in locks:
                 continue
             off = import_invoice_posted_off_cost(inv)
-            if not off['tax'] and not off['fees']:
+            if not off['tax'] and not off['fees'] and not off['tax_on_supplier']:
                 continue
             count += 1
             amount = off['tax'] + sum((a for _f, a in off['fees']), Decimal('0'))
@@ -47,11 +50,14 @@ class Command(BaseCommand):
             w(f"  {inv.invoice_number} (شحنة {shipment}): خارج التكلفة {amount:.2f}")
             if off['tax']:
                 w(f"    ضريبة على المدخلات: {off['tax']:.2f}")
+            if off['tax_on_supplier']:
+                w(f"    ضريبة دائنةٌ للمورد لا لـ«ضريبة الاستيراد المستحقة»: "
+                  f"{off['tax_on_supplier']:.2f}")
             for fee, fee_amount in off['fees']:
                 w(f"    رسم «{fee.description}» مصروفاً: {fee_amount:.2f}")
         if not count:
             w(self.style.SUCCESS("لا فواتير — كل الدولية المرحّلة على القاعدة."))
             return
-        w(f"العدد {count} · المجموع {total:.2f}")
+        w(f"العدد {count} · مجموع ما خارج التكلفة {total:.2f}")
         w("التصحيح: «أعد الاحتساب والترحيل» لشحنة كلٍّ منها، ثم "
           "reconcile_import_unit_costs --tenant <n> --apply.")

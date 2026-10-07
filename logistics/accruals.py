@@ -502,10 +502,13 @@ def import_invoice_supplier_split(invoice, *, fees_total=None, warn_unaccrued=Tr
     تُقاس به أساساً لدفع المورد (`services.purchase_invoice_supplier_payable`) —
     فلا يُعرض للمورد قبل الترحيل غيرُ ما سيدائنه به.
 
+    وضريبتها لا تُدائَن للمورد بل لـ«ضريبة الاستيراد المستحقة» (`services.import_invoice_tax_payable`).
+
     يُرجع {'shares', 'accrual_credits', 'supplier_credit'}؛ `shares` None لفاتورةٍ
-    لم تكتمل مستنداتها، فيبقى الإجمالي كلّه على المورد.
+    لم تكتمل مستنداتها، فيبقى الإجمالي كلّه (بلا الضريبة) على المورد.
     """
     from .landed_cost import import_invoice_cost_shares
+    from .services import import_invoice_tax_payable
 
     if fees_total is None:
         from .services import purchase_invoice_fees_total
@@ -519,6 +522,6 @@ def import_invoice_supplier_split(invoice, *, fees_total=None, warn_unaccrued=Tr
     return {
         'shares': shares,
         'accrual_credits': accrual_credits,
-        'supplier_credit': credit_total - sum(
+        'supplier_credit': credit_total - import_invoice_tax_payable(invoice) - sum(
             (row['amount'] for row in accrual_credits), Decimal('0')),
     }

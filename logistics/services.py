@@ -1131,16 +1131,41 @@ def import_invoice_capitalized_tax(invoice) -> Decimal:
     return max(tax - posted_vat, Decimal('0')).quantize(DEC)
 
 
+def import_invoice_tax_payable(invoice) -> Decimal:
+    """ضريبة الفاتورة الدولية التي دائنُها «ضريبة الاستيراد المستحقة» لا ذمّة المورد (قرار
+    المالك: المورد الأجنبي لا يقبضها): المسودة كلّها — ما سيكتبه ترحيلها؛ والمرحّلة ما دائن
+    به قيدُها الحسابَ فعلاً، فقيدٌ قديم دائن المورد بها يُبقيها عليه حتى «أعد الاحتساب
+    والترحيل». صفرٌ لغير الدولية."""
+    from django.db.models import Sum
+
+    from accounting.services import resolve_import_tax_payable_account
+
+    tax = Decimal(str(invoice.tax_amount or 0)).quantize(DEC)
+    if tax <= 0 or not import_invoice_capitalizes_all(invoice):
+        return Decimal('0')
+    if not invoice.is_posted:
+        return tax
+    account, _created = resolve_import_tax_payable_account(invoice.tenant_id, create=False)
+    if account is None or not invoice.journal_id:
+        return Decimal('0')
+    agg = invoice.journal.lines.filter(account=account).aggregate(d=Sum('debit'), c=Sum('credit'))
+    credited = Decimal(str(agg['c'] or 0)) - Decimal(str(agg['d'] or 0))
+    return min(max(credited, Decimal('0')), tax).quantize(DEC)
+
+
 def import_invoice_posted_off_cost(invoice) -> dict:
-    """ما رحّله قيدُ فاتورةٍ دولية خارج تكلفة بضاعتها قبل القرار: {'tax': ضريبةٌ على
-    المدخلات، 'fees': [(الرسم، مبلغه)] مصروفاً}. فارغٌ ⇒ قيدها على القاعدة. «أعد الاحتساب
-    والترحيل» يعيد بناءه (`landed_cost._posted_capitalization_drifted`)."""
+    """ما رحّله قيدُ فاتورةٍ دولية خلاف القاعدة: {'tax': ضريبةٌ على المدخلات، 'fees': [(الرسم،
+    مبلغه)] مصروفاً، 'tax_on_supplier': ضريبةٌ دائنُها ذمّة المورد لا «ضريبة الاستيراد
+    المستحقة»}. فارغٌ ⇒ قيدها على القاعدة. «أعد الاحتساب والترحيل» يعيد بناءه
+    (`landed_cost._posted_capitalization_drifted`)."""
     if not invoice.is_posted or not import_invoice_capitalizes_all(invoice):
-        return {'tax': Decimal('0'), 'fees': []}
+        return {'tax': Decimal('0'), 'fees': [], 'tax_on_supplier': Decimal('0')}
     tax = (Decimal(str(invoice.tax_amount or 0)) - import_invoice_capitalized_tax(invoice)).quantize(DEC)
     fees = [(f, Decimal(str(f.amount or 0)).quantize(DEC)) for f in invoice.fees.all()
             if not f.capitalize_to_inventory and Decimal(str(f.amount or 0)) > 0]
-    return {'tax': max(tax, Decimal('0')), 'fees': fees}
+    on_supplier = (Decimal(str(invoice.tax_amount or 0)) - import_invoice_tax_payable(invoice)).quantize(DEC)
+    return {'tax': max(tax, Decimal('0')), 'fees': fees,
+            'tax_on_supplier': max(on_supplier, Decimal('0'))}
 
 
 def bind_import_fee_credit_accounts(invoice, fees) -> None:
@@ -1275,11 +1300,11 @@ def purchase_invoice_supplier_payable(invoice, *, warn_unaccrued=True) -> Decima
     والناقل دفعاً للمورد.
     """
     summary = purchase_invoice_payment_summary(invoice)
-    if (
-        invoice.is_posted or not _is_import_supplier_doc(invoice)
-        or not (invoice.deal_id and invoice.shipment_id)
-    ):
+    if invoice.is_posted or not _is_import_supplier_doc(invoice):
         return summary["payable_total"]
+    if not (invoice.deal_id and invoice.shipment_id):
+        # ضريبتها لـ«ضريبة الاستيراد المستحقة» لا للمورد (`import_invoice_tax_payable`).
+        return (summary["payable_total"] - import_invoice_tax_payable(invoice)).quantize(DEC)
     from logistics.accruals import import_invoice_supplier_split
 
     split = import_invoice_supplier_split(

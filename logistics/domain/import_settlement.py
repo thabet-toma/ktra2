@@ -72,6 +72,7 @@ def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[
 
     from logistics.services import (
         import_deal_payments_ap_debit,
+        import_invoice_tax_payable,
         purchase_invoice_fees_total,
         purchase_invoice_recorded_paid,
     )
@@ -130,7 +131,10 @@ def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[
         'clearance': shares['clearance'],
         'local': shares['local'],
     }
-    costs['supplier'] = (grand + fees - sum(costs.values(), Decimal('0'))).quantize(Q2)
+    # ضريبتها على «ضريبة الاستيراد المستحقة» لا على المورد (`import_invoice_tax_payable`).
+    costs['supplier'] = (
+        grand + fees - import_invoice_tax_payable(invoice) - sum(costs.values(), Decimal('0'))
+    ).quantize(Q2)
     paid = {
         # دفعات الصفقة + سندات الفاتورة نفسها — مصدران منفصلان في الدفاتر فلا ازدواج.
         'supplier': import_deal_payments_ap_debit(invoice) + purchase_invoice_recorded_paid(invoice),
@@ -197,12 +201,8 @@ def _fee_paid_by_account(invoice, fees) -> Dict[int, Decimal]:
 
     حساب الرسم (ذمّةٌ باسمه أو حساب جهته) مشتركٌ بين فواتير: سندات الصرف عليه تُسدّد
     أقدم دائنٍ أولاً (تاريخ القيد ثم رقمه)، فمدفوعُ هذه الفاتورة ما وصلها من مجموع
-    المدين، ويُوزَّع على رسومها على الحساب نفسه بنسبة مبالغها.
+    المدين (`_journal_credit_paid`)، ويُوزَّع على رسومها على الحساب نفسه بنسبة مبالغها.
     """
-    from django.db.models import Sum
-
-    from accounting.services import JournalLine
-
     out: Dict[int, Decimal] = {}
     if not invoice.is_posted or not invoice.journal_id:
         return out
@@ -216,22 +216,7 @@ def _fee_paid_by_account(invoice, fees) -> Dict[int, Decimal]:
             continue
         groups.setdefault(key, []).append(fee)
     for (account_id, partner_id), group in groups.items():
-        lines = JournalLine.objects.filter(
-            tenant_id=invoice.tenant_id, account_id=account_id, journal__is_posted=True,
-        )
-        if partner_id:
-            lines = lines.filter(partner_id=partner_id)
-        debit_total = Decimal(str(lines.aggregate(d=Sum('base_debit'))['d'] or 0))
-        mine = Decimal('0')
-        for journal_id, credit in (
-            lines.filter(base_credit__gt=0)
-            .order_by('journal__transaction_date', 'journal_id', 'id')
-            .values_list('journal_id', 'base_credit')
-        ):
-            take = min(debit_total, Decimal(str(credit)))
-            debit_total -= take
-            if journal_id == invoice.journal_id:
-                mine += take
+        mine = _journal_credit_paid(invoice, account_id, partner_id)
         total = sum((Decimal(str(f.amount or 0)) for f in group), Decimal('0'))
         for fee in group:
             amount = Decimal(str(fee.amount or 0))
@@ -239,21 +224,55 @@ def _fee_paid_by_account(invoice, fees) -> Dict[int, Decimal]:
     return out
 
 
+def _journal_credit_paid(invoice, account_id, partner_id=None) -> Decimal:
+    """ما سُدِّد من دائن قيد الفاتورة على حسابٍ مشترك بين فواتير — FIFO: سندات الصرف عليه
+    تُسدّد أقدم دائنٍ أولاً (تاريخ القيد ثم رقمه)، فمدفوعها ما وصلها من مجموع المدين."""
+    from django.db.models import Sum
+
+    from accounting.services import JournalLine
+
+    lines = JournalLine.objects.filter(
+        tenant_id=invoice.tenant_id, account_id=account_id, journal__is_posted=True,
+    )
+    if partner_id:
+        lines = lines.filter(partner_id=partner_id)
+    debit_total = Decimal(str(lines.aggregate(d=Sum('base_debit'))['d'] or 0))
+    mine = Decimal('0')
+    for journal_id, credit in (
+        lines.filter(base_credit__gt=0)
+        .order_by('journal__transaction_date', 'journal_id', 'id')
+        .values_list('journal_id', 'base_credit')
+    ):
+        take = min(debit_total, Decimal(str(credit)))
+        debit_total -= take
+        if journal_id == invoice.journal_id:
+            mine += take
+    return mine
+
+
 def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal]]) -> List[Dict[str, Any]]:
     """سطور «إجمالي التكلفة»: المورد، الشحن، التخليص، النقل، عمولات التحويل، كل رسمٍ
     مرسمَل، الضريبة — لكلٍّ تكلفته ومدفوعه (مسقوفاً بها) ومتبقّيه.
 
-    حصّة المورد في `components` تشمل ضريبة الفاتورة ورسومه، فتُفصل هنا: مدفوعه يُسدّد
-    البضاعة أولاً ثم رسومه المرسملة ثم الضريبة، ومجموع سطوره = حصّته. كل رسمٍ مرسمَل
+    حصّة المورد في `components` تشمل رسومه (وضريبةً رحّلها قيدٌ قديم دائنةً له)، فتُفصل هنا:
+    مدفوعه يُسدّد البضاعة أولاً ثم رسومه المرسملة ثم تلك الضريبة، ومجموع سطوره = حصّته.
+    والضريبة على «ضريبة الاستيراد المستحقة» مدفوعها من سندات حسابها. كل رسمٍ مرسمَل
     (`services.purchase_fee_capitalized`: المسودة الدولية دائماً)؛ ورسمٌ رحّله قيدٌ قديم
     مصروفاً يبقى للمورد داخل سطره إن كان دائنَه، ولا سطر له إن كان بحسابه. العمولة
     مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)،
     والرسم ذو الطرف الدائن مدفوعه من سندات حسابه (`_fee_paid_by_account`).
     """
+    from accounting.services import resolve_import_tax_payable_account
     from logistics.payment_posting import import_invoice_booked_commission
-    from logistics.services import purchase_fee_capitalized
+    from logistics.services import import_invoice_tax_payable, purchase_fee_capitalized
 
     tax = lc._d(invoice.tax_amount).quantize(Q2)
+    tax_payable = import_invoice_tax_payable(invoice)
+    tax_paid = Decimal('0')
+    if tax_payable > 0 and invoice.is_posted and invoice.journal_id:
+        account, _created = resolve_import_tax_payable_account(invoice.tenant_id, create=False)
+        if account is not None:
+            tax_paid = _journal_credit_paid(invoice, account.id)
     fees = [f for f in invoice.fees.select_related('credit_partner').order_by('id')
             if purchase_fee_capitalized(invoice, f)]
     supplier_fees = [f for f in fees if not f.has_credit_party]
@@ -261,7 +280,7 @@ def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal
 
     supplier_paid = min(components['supplier']['paid'], components['supplier']['cost'])
     goods = max(
-        components['supplier']['cost'] - tax
+        components['supplier']['cost'] - (tax - tax_payable)
         - sum((lc._d(f.amount) for f in supplier_fees), Decimal('0')),
         Decimal('0.00'),
     ).quantize(Q2)
@@ -289,7 +308,7 @@ def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal
         paid = take(fee.amount) if not fee.has_credit_party else party_paid.get(fee.pk, Decimal('0'))
         rows.append(row(f'fee:{fee.pk}', fee.description or 'رسم', fee.amount, paid))
     if tax > 0:
-        rows.append(row('tax', 'الضريبة', tax, take(tax)))
+        rows.append(row('tax', 'الضريبة', tax, take(tax - tax_payable) + tax_paid))
     return rows
 
 

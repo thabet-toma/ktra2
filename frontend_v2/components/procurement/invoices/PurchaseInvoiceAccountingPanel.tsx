@@ -335,7 +335,11 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         });
       });
 
-    const creditTotal = grand + feeTotal;
+    // الدولية: دائن ضريبتها حسابُها لا المورد — المورد الأجنبي لا يقبضها (قرار المالك).
+    if (capitalizedTax > 0) {
+      lines.push({ account: "ضريبة الاستيراد المستحقة", debit: 0, credit: capitalizedTax });
+    }
+    const creditTotal = grand + feeTotal - capitalizedTax;
     const supplierLabel = `ذمم مورد (${invoice.partner_name || "—"})`;
     
     // إثبات الفاتورة على حساب المورد (Feature 2: لا تسوية نقدية في قيد الفاتورة —
