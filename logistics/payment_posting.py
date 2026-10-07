@@ -262,6 +262,29 @@ def post_shipment_agent_payment(payment, *, box_account, user=None):
 
 
 BANK_CHARGES_ACCOUNT_NAME = 'مصاريف بنكية وعمولات'
+# قيد تسوية عمولةٍ رُحّلت دفعتها قبل أن يكتبها قيدها (`post_unbooked_transfer_fees`).
+TRANSFER_FEE_ADJUST_REFERENCE = 'LOGISTICS_PAYMENT_FEE'
+
+
+def transfer_fee_adjusted(payment) -> bool:
+    """قيد تسويةٍ حيّ (لم يعكسه JOURNAL_REVERSAL) يحمل عمولة هذه الدفعة.
+
+    التراجع عن ترحيل الدفعة يعكس قيدها وحده (`views/deals.py` —
+    `unpost_payment_from_accounting`) والتسوية تبقى، فإعادة ترحيلها بالعمولة
+    كانت تخصمها من الصندوق مرّتين.
+    """
+    from accounting.services import JournalHeader
+
+    ids = list(JournalHeader.objects.filter(
+        reference_type=TRANSFER_FEE_ADJUST_REFERENCE, reference_id=payment.pk,
+        is_posted=True,
+    ).values_list('id', flat=True))
+    if not ids:
+        return False
+    reversed_ids = set(JournalHeader.objects.filter(
+        reference_type='JOURNAL_REVERSAL', is_posted=True, reference_id__in=ids,
+    ).values_list('reference_id', flat=True))
+    return any(jid not in reversed_ids for jid in ids)
 
 
 def _bank_charges_account_id(tenant) -> int:
@@ -303,6 +326,8 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
     foreign_amount = Decimal(str(payment.amount or 0))
     local_amount = payment_ils(payment)
     fee_foreign = max(Decimal(str(getattr(payment, 'transfer_cost', None) or 0)), Decimal('0'))
+    if fee_foreign > 0 and transfer_fee_adjusted(payment):
+        fee_foreign = Decimal('0')  # سوّاها قيد التسوية — لا تُخصم مرّتين
     fee_local = (fee_foreign * payment_usd_rate(payment)).quantize(Decimal('0.01'))
     fee_account_id = _bank_charges_account_id(tenant) if fee_foreign > 0 else None
     fee_description = f"عمولة حوالة | {description}"

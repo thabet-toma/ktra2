@@ -43,6 +43,12 @@ CLOUDINARY_STORAGE = {
 # لهذا السبب بالذات). `core/settings.py` الإنتاجي لا يُمسّ ويبقى على PBKDF2.
 PASSWORD_HASHERS = ["django.contrib.auth.hashers.MD5PasswordHasher"]
 
+# وجهة رابط المشاركة مثبَّتة على افتراضيّها: `.env` الإنتاج يضبطها `/api/share`
+# (`core/settings.py`)، فكانت بوّابة النشر على السيرفر تسقط في
+# `docshare/tests/test_admin_api.py` لإعدادٍ بيئي لا لعيبٍ في الكود. الاختبار
+# الذي يقيس الوجهة البديلة يضبطها بنفسه (`docshare/tests/test_mount_parity.py`).
+DOCSHARE_PUBLIC_PATH = "/s"
+
 
 class _DisableMigrations:
     """تُرجِع None لكل تطبيق ⇒ Django يعدّه بلا هجرات فيبني جداوله من النماذج (syncdb)."""
