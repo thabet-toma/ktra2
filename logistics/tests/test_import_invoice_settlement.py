@@ -688,11 +688,11 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(D(rows["commission"]["cost"]), D("35.00"))
         self.assertEqual(D(rows["commission"]["remaining"]), D("0.00"))
         self.assertEqual(
-            D(payment["total_cost"]), sum((D(r["cost"]) for r in rows.values()), D("0")))
+            D(payment["payable_total"]), sum((D(r["cost"]) for r in rows.values()), D("0")))
         # التكلفة النهائية للوحدة تحمل العمولة: مجموعها = مدين القيد بلا ضريبته (بلا رسوم هنا).
         unit_total = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in payment["unit_costs"]), D("0"))
         self.assertEqual(unit_total.quantize(Q2), sum((l.debit for l in lines), D("0")) - inv.tax_amount)
-        self.assertEqual(unit_total.quantize(Q2), D(payment["total_cost"]) - inv.tax_amount)
+        self.assertEqual(unit_total.quantize(Q2), D(payment["payable_total"]) - inv.tax_amount)
 
     def test_recalc_repost_adds_commission_to_old_posting_once(self):
         from logistics.landed_cost import posted_invoices_cost_drift
@@ -731,3 +731,33 @@ class ImportInvoiceSettlementTest(APITestCase):
             return_value={inv.deal_id: [1]},
         ):
             self.assertEqual(import_invoice_booked_commission(inv)[0], D("0"))
+
+    def test_total_cost_is_one_number_box_rows_journal_and_paid(self):
+        """INV-0022/0023: المربّع (`payable_total`) كان بلا العمولة والتفصيل والقيد بها.
+        رقمٌ واحد: مجموع `cost_rows` = مدين البضاعة في القيد = ما تعرضه القائمة،
+        والعمولة مدفوعةٌ يوم الدفع فالمسدَّدة كلّها «مدفوعة» لا متبقّي فيها."""
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        self._pay_deal(self.deals[1])
+        invoices = [self._post(inv) for inv in self._release_and_import()]
+        inv = invoices[0]
+        self.assertEqual(inv.tax_amount, D("0"))
+        self._pay_freight_and_local()
+        self._pay_clearance("690")
+
+        payment = self._breakdown(inv)
+        rows = {r["key"]: r for r in payment["cost_rows"]}
+        self.assertEqual(D(rows["commission"]["cost"]), D("35.00"))
+        box = D(payment["payable_total"])
+        self.assertEqual(box, sum((D(r["cost"]) for r in rows.values()), D("0")))
+        # مدين البضاعة (المخزون/2110) في القيد — بلا ضريبة ولا رسوم هنا = كل المدين.
+        goods_debit = sum((l.debit for l in inv.journal.lines.all()), D("0"))
+        self.assertEqual(box, goods_debit)
+        self.assertEqual(D(payment["amount_paid"]), box)
+        self.assertEqual(D(payment["remaining_balance"]), D("0.00"))
+        self.assertEqual(payment["payment_status"], "paid")
+        # القائمة تقرأ الرقم نفسه.
+        listed = self.client.get(
+            "/api/logistics/purchase-invoices/", {"page_size": 50}, **self._auth()).json()
+        row = next(r for r in listed.get("results", listed) if r["id"] == inv.pk)
+        self.assertEqual(D(row["import_payment"]["payable_total"]), box)
+        self.assertEqual(row["import_payment"]["payment_status"], "paid")

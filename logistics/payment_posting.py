@@ -363,7 +363,12 @@ def import_invoice_booked_commission(invoice) -> tuple[Decimal, int | None]:
     if (invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
             or invoice.is_return or not invoice.deal_id):
         return zero
-    if live_archive_deal_journals(invoice.tenant_id, [invoice.deal_id]):
+    if hasattr(invoice, '_archive_lock_reason'):
+        # قائمة الفواتير حسبت قفل الأرشيف لصفحتها كلّها (`invoice_archive_locks`).
+        archived = bool(invoice._archive_lock_reason)
+    else:
+        archived = bool(live_archive_deal_journals(invoice.tenant_id, [invoice.deal_id]))
+    if archived:
         return zero
     account_id = bank_charges_account_id(invoice.tenant_id)
     if not account_id:

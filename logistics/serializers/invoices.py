@@ -164,6 +164,11 @@ def _import_payment_payload(obj):
             key: {k: str(v) for k, v in comp.items()}
             for key, comp in data['components'].items()
         },
+        # سطور «إجمالي التكلفة» — `payable_total` مجموعها، فلا تجمعها الواجهة ثانيةً.
+        'cost_rows': [
+            {k: (str(v) if isinstance(v, Decimal) else v) for k, v in r.items()}
+            for r in data['cost_rows']
+        ],
     }
 
 class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
@@ -273,7 +278,12 @@ class ArchiveLockListSerializer(serializers.ListSerializer):
         from logistics.payment_posting import invoice_archive_locks
 
         rows = list(data.all() if isinstance(data, BaseManager) else data)
-        self._context['archive_locks'] = invoice_archive_locks(rows)
+        locks = invoice_archive_locks(rows)
+        self._context['archive_locks'] = locks
+        # على الصفّ أيضاً: عمولات التحويل في «إجمالي التكلفة» تستثني صفقة الأرشيف
+        # (`payment_posting.import_invoice_booked_commission`) فلا تسأل عنها لكل صفّ.
+        for row in rows:
+            row._archive_lock_reason = locks.get(row.pk)
         return super().to_representation(rows)
 
 
@@ -653,21 +663,16 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     def get_import_payment(self, obj):
         payload = _import_payment_payload(obj)
         if payload:
-            # التفصيل وحده (لا القائمة): تفصيل التكاليف بسطورها و«إجمالي التكلفة».
-            from logistics.domain.import_settlement import import_invoice_cost_rows
+            # التفصيل وحده (لا القائمة): التكلفة النهائية لكل وحدة.
+            from logistics.domain.import_settlement import import_invoice_unit_costs
             try:
-                detail = import_invoice_cost_rows(obj, _import_display_payment(obj))
+                unit_costs = import_invoice_unit_costs(obj, _import_display_payment(obj))
             except Exception:
-                logger.exception('import cost rows failed invoice=%s', obj.pk)
+                logger.exception('import unit costs failed invoice=%s', obj.pk)
             else:
-                payload['cost_rows'] = [
-                    {k: (str(v) if isinstance(v, Decimal) else v) for k, v in r.items()}
-                    for r in detail['rows']
-                ]
-                payload['total_cost'] = str(detail['total_cost'])
                 payload['unit_costs'] = [
                     {k: (str(v) if isinstance(v, Decimal) else v) for k, v in u.items()}
-                    for u in detail['unit_costs']
+                    for u in unit_costs
                 ]
         return payload
 

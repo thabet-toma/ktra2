@@ -3275,7 +3275,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const invMoney = (n: number) => `${fmt(n)} ${invCurrency}`;
   const invItems = (formData.items || []).filter((i) => (i.name || "").trim() || i.itemId);
   const invFees = (formData.fees || []).filter((f) => Number(f.amount) > 0);
-  // «تفصيل التكاليف» (الدولية، من الخادم): كل تكلفةٍ بمدفوعها و«إجمالي التكلفة».
+  // «تفصيل التكاليف» (الدولية، من الخادم): كل تكلفةٍ بمدفوعها، و«إجمالي التكلفة» =
+  // `payable_total` نفسه الذي يعرضه المربّع والقائمة.
   const costBreakdown = importCostRows(formData.importPayment);
 
   const invoiceDocumentView = (
@@ -3442,13 +3443,13 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               // المورد وحده (حصّته من القيد/الترحيل)؛ و«إجمالي التكلفة» كل ما كلّفته البضاعة.
               { label: "المستحق للمورد", value: fmt(supplierPayBase), emphasis: true },
               ...(importPay
-                ? [{ label: "إجمالي التكلفة", value: fmt(costBreakdown ? costBreakdown.totalCost : Number(importPay.payable_total) || 0), emphasis: true }]
+                ? [{ label: "إجمالي التكلفة", value: fmt(Number(importPay.payable_total) || 0), emphasis: true }]
                 : []),
-              { label: importPay ? "المدفوع المرحّل — للدائنين الأربعة" : "المدفوع المرحّل", value: fmt(shownPaid) },
+              { label: importPay ? "المدفوع المرحّل — من إجمالي التكلفة" : "المدفوع المرحّل", value: fmt(shownPaid) },
               ...(shownSettlement.pendingIntent > 0.009
                 ? [{ label: "دفعة غير مرحّلة", value: fmt(shownSettlement.pendingIntent) }]
                 : []),
-              { label: importPay ? "المتبقي للدفع — للدائنين الأربعة" : "المتبقي للدفع", value: fmt(shownSettlement.remainingAfterIntent), tone: "warn" },
+              { label: importPay ? "المتبقي للدفع — من إجمالي التكلفة" : "المتبقي للدفع", value: fmt(shownSettlement.remainingAfterIntent), tone: "warn" },
               // قرار: رصيد المورد جانبُه وحده (حصّته المتبقية) — لا متبقّي الفاتورة الكلّي.
               { label: importPay ? "رصيد المورد وحده قبل احتساب حصّته المتبقية (بالعملة الأساسية)" : "رصيد المورد قبل احتساب المتبقي (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceBeforeInvoice) || 0) },
               { label: importPay ? "رصيد المورد وحده بعد احتساب حصّته المتبقية (بالعملة الأساسية)" : "رصيد المورد الحالي بعد احتسابه (بالعملة الأساسية)", value: fmt(Number(formData.partnerBalanceAfterInvoice) || 0), emphasis: true },
@@ -3499,8 +3500,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                         key: "total",
                         label: "إجمالي التكلفة",
                         cost: costBreakdown.totalCost,
-                        paid: roundSqlMoney2(costBreakdown.rows.reduce((sum, r) => sum + r.paid, 0)),
-                        remaining: roundSqlMoney2(costBreakdown.rows.reduce((sum, r) => sum + r.remaining, 0)),
+                        paid: costBreakdown.totalPaid,
+                        remaining: costBreakdown.totalRemaining,
                       },
                     ]}
                     rowKey={(r) => r.key}
@@ -4003,7 +4004,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <div className="ktra-total-row ktra-total-row--grand">
                 {/* كل ما كلّفته البضاعة (المورد والشحن والتخليص والنقل والعمولات والرسوم والضريبة). */}
                 <span>إجمالي التكلفة</span>
-                <span className="ktra-total-value">{fmt(costBreakdown ? costBreakdown.totalCost : Number(importPay.payable_total) || 0)}</span>
+                <span className="ktra-total-value">{fmt(Number(importPay.payable_total) || 0)}</span>
               </div>
             )}
             <div className="ktra-total-row">

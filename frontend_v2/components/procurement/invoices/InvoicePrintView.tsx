@@ -5,7 +5,7 @@ import { formatMoney, formatQuantity } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 import { formatDateValue } from "../../../utils/formatDate";
-import { importPaymentRows } from "../../../utils/importPayment";
+import { importCostRows, importPaymentRows } from "../../../utils/importPayment";
 
 interface InvoicePrintViewProps {
     invoice: Invoice;
@@ -72,6 +72,10 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
     // وحده — فيُطبع صفّ المورد متّسقاً من الخادم، والتكاليف الأربع في جدولٍ مستقل.
     const importRows = importPaymentRows(invoice.importPayment);
     const supplierPart = importRows.find((row) => row.key === 'supplier');
+    // «إجمالي التكلفة» وتفصيله من الخادم — الرقم نفسه في الشاشة والقائمة؛ `grandTotal`
+    // للدولية بلا عمولات التحويل فلا يُطبع إجمالياً لها.
+    const costBreakdown = importCostRows(invoice.importPayment);
+    const printTotal = costBreakdown ? costBreakdown.totalCost : totals.grandTotal;
 
     return (
         <div className="fixed inset-0 z-50 ktra-bg-panel flex justify-center overflow-auto py-8 print:p-0 print:ktra-bg-field print:static print:block" dir="rtl">
@@ -153,7 +157,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                         { label: 'الحالة', value: invoice.status === 'completed' ? 'مكتملة' : 'قيد المعالجة', color: invoice.status === 'completed' ? 'bg-green-100 text-green-800' : 'ktra-bg-accent-bg ktra-text-ink' },
                         { label: 'التاريخ', value: formatDate(invoice.invoiceDate), mono: true },
                         { label: 'رقم الصفقة', value: invoice.dealNumber || '-', mono: true },
-                        { label: 'الإجمالي', value: formatCurrency(totals.grandTotal), color: 'text-green-700 font-black', mono: true }
+                        { label: costBreakdown ? 'إجمالي التكلفة' : 'الإجمالي', value: formatCurrency(printTotal), color: 'text-green-700 font-black', mono: true }
                     ].map((item, i) => (
                         <div key={i} className="border ktra-border-soft rounded-lg p-3 ktra-bg-panel">
                             <span className="text-[10px] ktra-text-soft font-bold uppercase block mb-1">{item.label}</span>
@@ -282,8 +286,8 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 <span className="font-mono font-bold" dir="ltr">{formatCurrency(totals.shippingCost)}</span>
                             </div>
                             <div className="flex justify-between pt-2 font-black text-lg ktra-bg-panel -mx-3 px-3 border-t ktra-border-soft">
-                                <span>{supplierPart ? 'الإجمالي المحمَّل:' : 'الإجمالي:'}</span>
-                                <span className="font-mono" dir="ltr">{formatCurrency(totals.grandTotal)}</span>
+                                <span>{costBreakdown ? 'إجمالي التكلفة:' : 'الإجمالي:'}</span>
+                                <span className="font-mono" dir="ltr">{formatCurrency(printTotal)}</span>
                             </div>
                             {supplierPart && (
                                 <div className="flex justify-between pt-1.5">
@@ -301,7 +305,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                             </div>
                             <div className="flex justify-between pt-1.5">
                                 <span className="ktra-text-soft">حالة الدفع:</span>
-                                {/* الدولية: حالة التكاليف الأربع — جدولها أدناه — لا ملخّص المورد وحده. */}
+                                {/* الدولية: حالة «إجمالي التكلفة» — جدولها أدناه — لا ملخّص المورد وحده. */}
                                 <span className="font-bold">{invoice.importPayment?.payment_status_display || invoice.paymentStatusDisplay || "غير مدفوعة"}</span>
                             </div>
                             <div className="flex justify-between pt-1.5">
@@ -320,7 +324,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                     </div>
                 </div>
 
-                {importRows.length > 0 && (
+                {(costBreakdown || importRows.length > 0) && (
                     <div className="mb-4 border ktra-border-soft rounded-lg overflow-hidden" data-testid="print-import-costs">
                         <div className="ktra-bg-panel px-3 py-2 border-b ktra-border-soft font-bold">تفصيل التكاليف ودفعاتها</div>
                         <table className="w-full text-[10px]">
@@ -333,7 +337,7 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                 </tr>
                             </thead>
                             <tbody>
-                                {importRows.map((row) => (
+                                {(costBreakdown ? costBreakdown.rows : importRows).map((row) => (
                                     <tr key={row.key} className="border-b ktra-border-soft">
                                         <td className="p-2">{row.label}</td>
                                         <td className="p-2 font-mono" dir="ltr">{formatCurrency(row.cost)}</td>
@@ -341,6 +345,14 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                         <td className="p-2 font-mono" dir="ltr">{formatCurrency(row.remaining)}</td>
                                     </tr>
                                 ))}
+                                {costBreakdown && (
+                                    <tr className="font-bold">
+                                        <td className="p-2">إجمالي التكلفة</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(costBreakdown.totalCost)}</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(costBreakdown.totalPaid)}</td>
+                                        <td className="p-2 font-mono" dir="ltr">{formatCurrency(costBreakdown.totalRemaining)}</td>
+                                    </tr>
+                                )}
                             </tbody>
                         </table>
                     </div>

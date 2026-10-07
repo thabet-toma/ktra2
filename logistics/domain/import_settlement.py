@@ -50,11 +50,16 @@ def _shipment_portion(total: Decimal, weights: List[Decimal], index: int) -> Dec
 
 
 def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[str, Any]]:
-    """{supplier|freight|clearance|local: {cost, paid, remaining}} + الإجماليات والحالة.
+    """{supplier|freight|clearance|local: {cost, paid, remaining}} + `cost_rows` + الإجماليات والحالة.
 
     None لغير الدولية أو لفاتورةٍ لم تكتمل مستنداتها (بلا تخليص) — يعرض المستدعي
     ملخّص السندات المعتاد. المدفوع لكل مكوّن يُسقَف بتكلفته في الإجمالي، فزيادةٌ
     في الشحن لا تُغطّي بضاعةً غير مدفوعة؛ والتفصيل يعرض المدفوع الفعلي.
+
+    **«إجمالي التكلفة» رقمٌ واحد** (قرار المالك): `payable_total` = مجموع `cost_rows`
+    (`_cost_rows` — المكوّنات الأربع + عمولات التحويل + الرسوم المرسملة + الضريبة)،
+    والمدفوع والحالة من السطور نفسها. كان مجموعَ المكوّنات الأربع وحدها، فغابت عنه
+    العمولة التي دخلت القيد (INV-0023: المربّع 11,952.50 والقيد 12,088.58).
     """
     if (
         invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
@@ -155,13 +160,13 @@ def import_invoice_payment_breakdown(invoice: PurchaseInvoice) -> Optional[Dict[
             'paid': got,
             'remaining': max(cost - got, Decimal('0.00')),
         }
-    total_cost = sum((c['cost'] for c in components.values()), Decimal('0.00'))
-    covered = sum(
-        (min(c['paid'], c['cost']) for c in components.values()), Decimal('0.00'))
+    rows = _cost_rows(invoice, components)
+    total_cost = sum((r['cost'] for r in rows), Decimal('0.00')).quantize(Q2)
+    covered = sum((r['paid'] for r in rows), Decimal('0.00')).quantize(Q2)
 
     from core.payments import document_payment_summary
     result = document_payment_summary(total_cost, covered)
-    result.update({'payable_total': total_cost, 'components': components})
+    result.update({'payable_total': total_cost, 'components': components, 'cost_rows': rows})
     return result
 
 
@@ -234,27 +239,27 @@ def _fee_paid_by_account(invoice, fees) -> Dict[int, Decimal]:
     return out
 
 
-def import_invoice_cost_rows(invoice: PurchaseInvoice, breakdown: Dict[str, Any]) -> Dict[str, Any]:
-    """تفصيل التكاليف للعرض (قرار المالك): المورد، الشحن، التخليص، النقل، عمولات التحويل،
-    كل رسم، الضريبة — لكلٍّ تكلفته ومدفوعه ومتبقّيه — و«إجمالي التكلفة» والتكلفة
-    النهائية لكل وحدة.
+def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal]]) -> List[Dict[str, Any]]:
+    """سطور «إجمالي التكلفة»: المورد، الشحن، التخليص، النقل، عمولات التحويل، كل رسمٍ
+    مرسمَل، الضريبة — لكلٍّ تكلفته ومدفوعه (مسقوفاً بها) ومتبقّيه.
 
-    للعرض وحده: حالة الدفع و`payable_total` تبقى للدائنين الأربعة (`components`). حصّة
-    المورد تشمل ضريبة الفاتورة ورسومه، فتُفصل هنا: مدفوعه يُسدّد البضاعة أولاً ثم رسومه
-    ثم الضريبة. العمولة مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)، والرسم ذو الطرف
-    الدائن مدفوعه من سندات حسابه (`_fee_paid_by_account`).
+    حصّة المورد في `components` تشمل ضريبة الفاتورة ورسومه، فتُفصل هنا: مدفوعه يُسدّد
+    البضاعة أولاً ثم رسومه المرسملة ثم الضريبة، ومجموع سطوره = حصّته. رسمٌ للمورد غير
+    مرسمَل (فاتورة صفقة أرشيف) يبقى داخل سطره — دَينٌ له؛ ورسمٌ بحسابه غير مرسمَل مصروفٌ
+    لا تكلفة بضاعة فلا سطر له. العمولة مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)،
+    والرسم ذو الطرف الدائن مدفوعه من سندات حسابه (`_fee_paid_by_account`).
     """
     from logistics.payment_posting import import_invoice_booked_commission
 
-    comps = breakdown['components']
     tax = lc._d(invoice.tax_amount).quantize(Q2)
-    fees = list(invoice.fees.select_related('credit_partner').order_by('id'))
+    fees = [f for f in invoice.fees.select_related('credit_partner').order_by('id')
+            if f.capitalize_to_inventory]
     supplier_fees = [f for f in fees if not f.has_credit_party]
     party_paid = _fee_paid_by_account(invoice, [f for f in fees if f.has_credit_party])
 
-    supplier_paid = min(comps['supplier']['paid'], comps['supplier']['cost'])
+    supplier_paid = min(components['supplier']['paid'], components['supplier']['cost'])
     goods = max(
-        comps['supplier']['cost'] - tax
+        components['supplier']['cost'] - tax
         - sum((lc._d(f.amount) for f in supplier_fees), Decimal('0')),
         Decimal('0.00'),
     ).quantize(Q2)
@@ -274,7 +279,7 @@ def import_invoice_cost_rows(invoice: PurchaseInvoice, breakdown: Dict[str, Any]
     rows = [row('supplier', 'المورد', goods, take(goods))]
     for key, label in (('freight', 'الشحن الدولي'), ('clearance', 'التخليص'),
                        ('local', 'النقل المحلي')):
-        rows.append(row(key, label, comps[key]['cost'], comps[key]['paid']))
+        rows.append(row(key, label, components[key]['cost'], components[key]['paid']))
     commission, _account = import_invoice_booked_commission(invoice)
     if commission > 0:
         rows.append(row('commission', 'عمولات التحويل', commission, commission))
@@ -283,17 +288,19 @@ def import_invoice_cost_rows(invoice: PurchaseInvoice, breakdown: Dict[str, Any]
         rows.append(row(f'fee:{fee.pk}', fee.description or 'رسم', fee.amount, paid))
     if tax > 0:
         rows.append(row('tax', 'الضريبة', tax, take(tax)))
-    total_cost = sum((r['cost'] for r in rows), Decimal('0.00')).quantize(Q2)
-    # التكلفة النهائية للوحدة: ما يُرسمَل على البضاعة (الإجمالي بلا الضريبة والرسوم غير
-    # المرسملة) موزّعاً كما يوزّعه قيد الاستلام نفسه (`goods_clearing_unit_costs`).
+    return rows
+
+
+def import_invoice_unit_costs(invoice: PurchaseInvoice, breakdown: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """التكلفة النهائية للوحدة (التفصيل وحده): «إجمالي التكلفة» بلا الضريبة — ما يُرسمَل
+    على البضاعة — موزّعاً كما يوزّعه قيد الاستلام نفسه (`goods_clearing_unit_costs`)."""
     from logistics.services import goods_clearing_unit_costs
 
-    inventory_cost = total_cost - tax - sum(
-        (lc._d(f.amount) for f in fees if not f.capitalize_to_inventory), Decimal('0'))
-    shares = goods_clearing_unit_costs(invoice, max(inventory_cost, Decimal('0')))
-    unit_costs = [
+    tax = sum((r['cost'] for r in breakdown['cost_rows'] if r['key'] == 'tax'), Decimal('0'))
+    inventory_cost = max(breakdown['payable_total'] - tax, Decimal('0'))
+    shares = goods_clearing_unit_costs(invoice, inventory_cost)
+    return [
         {'item_id': it.pk, 'name': it.name or (it.product.name if it.product_id else ''),
          'quantity': lc._d(it.quantity), 'unit_cost': shares[it.pk][0].quantize(Decimal('0.0001'))}
         for it in invoice.items.select_related('product').order_by('id') if it.pk in shares
     ]
-    return {'rows': rows, 'total_cost': total_cost, 'unit_costs': unit_costs}

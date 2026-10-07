@@ -164,7 +164,7 @@ test('INV-0022: مدفوعة للدائنين الأربعة — لا «متبق
   // ملخّص المورد لا يتسرّب إلى الشاشة: لا متبقّي 7,040.53 ولا حالة «جزئية».
   await expect(page.getByText('7,040.53')).toHaveCount(0);
   await expect(page.getByText('مدفوعة جزئياً')).toHaveCount(0);
-  await expect(page.getByText('المتبقي للدفع — للدائنين الأربعة').first()).toBeVisible();
+  await expect(page.getByText('المتبقي للدفع — من إجمالي التكلفة').first()).toBeVisible();
   await expect(page.getByText('رصيد المورد وحده قبل احتساب حصّته المتبقية', { exact: false }).first()).toBeVisible();
   await page.screenshot({ path: 'e2e/receipt-remaining-shots/international-paid-all-detail.png', fullPage: true });
 });

@@ -19,9 +19,9 @@ export interface ImportPaymentBreakdown {
   amount_paid: string;
   remaining_balance: string;
   components: Record<ImportPaymentComponentKey, ImportPaymentComponent>;
-  /** التفصيل وحده (لا القائمة): `import_invoice_cost_rows` — كل تكلفةٍ بمدفوعها. */
+  /** سطور «إجمالي التكلفة» (`_cost_rows`) — `payable_total` مجموعها من الخادم. */
   cost_rows?: ImportCostRowDto[];
-  total_cost?: string;
+  /** التفصيل وحده: التكلفة النهائية لكل وحدة (`import_invoice_unit_costs`). */
   unit_costs?: Array<{ item_id: number; name: string; quantity: string; unit_cost: string }>;
 }
 
@@ -130,12 +130,13 @@ export interface ImportCostRow {
 }
 
 /**
- * «تفصيل التكاليف» في وضع عرض الفاتورة الدولية: السطور كما رتّبها الخادم بأرقامها، و«إجمالي
- * التكلفة» منه (لا مجموعاً هنا). بلا `cost_rows` (القائمة/فاتورة غير دولية) ⇒ لا قسم.
+ * «تفصيل التكاليف» للفاتورة الدولية (العرض والطباعة): السطور كما رتّبها الخادم بأرقامها،
+ * و«إجمالي التكلفة» ومدفوعه ومتبقّيه من `payable_total`/`amount_paid`/`remaining_balance`
+ * — رقمٌ واحد مع المربّع والقائمة، لا مجموعٌ ثانٍ هنا. بلا `cost_rows` ⇒ لا قسم.
  */
 export function importCostRows(
   ip: ImportPaymentBreakdown | null | undefined,
-): { rows: ImportCostRow[]; totalCost: number } | null {
+): { rows: ImportCostRow[]; totalCost: number; totalPaid: number; totalRemaining: number } | null {
   if (!ip?.cost_rows?.length) return null;
   return {
     rows: ip.cost_rows.map((r) => ({
@@ -145,6 +146,8 @@ export function importCostRows(
       paid: Number(r.paid) || 0,
       remaining: Number(r.remaining) || 0,
     })),
-    totalCost: Number(ip.total_cost) || 0,
+    totalCost: Number(ip.payable_total) || 0,
+    totalPaid: Number(ip.amount_paid) || 0,
+    totalRemaining: Number(ip.remaining_balance) || 0,
   };
 }

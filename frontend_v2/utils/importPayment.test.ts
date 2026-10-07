@@ -78,7 +78,7 @@ test('بلا تفصيل: نصٌّ فارغ لا انهيار', () => {
   assert.equal(importPaymentTooltip(undefined), '');
 });
 
-test('تفصيل التكاليف: سطور الخادم بأرقامها وإجماليها منه — ولا قسم بلا سطور', () => {
+test('تفصيل التكاليف: سطور الخادم بأرقامها، وإجماليها ومدفوعه = المربّع (`payable_total`) — ولا قسم بلا سطور', () => {
   const ip = {
     payment_status: 'partially_paid', payment_status_display: 'مدفوعة جزئياً',
     payable_total: '1135.00', amount_paid: '1035.00', remaining_balance: '100.00',
@@ -88,13 +88,14 @@ test('تفصيل التكاليف: سطور الخادم بأرقامها وإج
       { key: 'commission', label: 'عمولات التحويل', cost: '35.00', paid: '35.00', remaining: '0.00' },
       { key: 'fee:7', label: 'تكاليف كترا', cost: '100.00', paid: '0.00', remaining: '100.00' },
     ],
-    total_cost: '1135.00',
   } as unknown as ImportPaymentBreakdown;
   const out = importCostRows(ip);
   assert.ok(out);
   assert.deepEqual(out.rows.map((r) => r.key), ['supplier', 'commission', 'fee:7']);
   assert.equal(out.rows[2].remaining, 100);
   assert.equal(out.totalCost, 1135);
+  assert.equal(out.totalPaid, 1035);
+  assert.equal(out.totalRemaining, 100);
   assert.equal(importCostRows({ ...ip, cost_rows: undefined }), null);
   assert.equal(importCostRows(null), null);
 });
