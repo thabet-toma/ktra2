@@ -2338,8 +2338,10 @@ def posted_goods_line_costs(invoice):
     نفسه الذي تُستلَم به البضاعة ويُرحَّل به قيد الاستلام، فيساوي مدينَه بالقرش.
     مصدرُ متوسط «تكلفة المنتجات» (`inventory.services.product_cost_breakdown`): كان
     `landed_line_total_ils` وحده فيسقط العمولة والرسوم المرسملة — «الكمية × avg_cost»
-    أقلّ من 1104 بها (INV-0022: 68.04). None لغيرها (محلية، مرتجع، غير مرحّلة، بندٌ بلا
-    تكلفة مستوردة) — يبقى للمستدعي مصدره المعتاد.
+    أقلّ من 1104 بها (INV-0022: 68.04). البند المجاني (تكلفته المستوردة 0 — قطع غيار هدية)
+    حصّته 0 كما في حركة استلامه، ولا يُسقط الفاتورة (INV-0024: كان المتوسط بلا الرسوم والعمولة
+    والضريبة). None لغيرها (محلية، مرتجع، غير مرحّلة، بندٌ لم تُحسب تكلفته المستوردة، أو كل
+    البنود صفر) — يبقى للمستدعي مصدره المعتاد.
     """
     from .models import PurchaseInvoice
     from .payment_posting import invoice_journal_commission_ils
@@ -2351,9 +2353,8 @@ def posted_goods_line_costs(invoice):
         it for it in invoice.items.all()
         if it.product_id and not it.expense_account_id and Decimal(str(it.quantity or 0)) > 0
     ]
-    if not goods or any(
-            it.landed_line_total_ils is None or Decimal(str(it.landed_line_total_ils)) <= 0
-            for it in goods):
+    if not goods or any(it.landed_line_total_ils is None for it in goods) or not any(
+            Decimal(str(it.landed_line_total_ils)) > 0 for it in goods):
         return None
     capitalized = sum(
         (Decimal(str(f.amount or 0)) for f in invoice.fees.all() if f.capitalize_to_inventory),

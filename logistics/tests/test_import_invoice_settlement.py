@@ -852,6 +852,44 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(JournalLine.objects.filter(
             tenant=self.tenant, account__code="1104").count(), inventory_lines)
 
+    def test_free_line_does_not_drop_invoice_cost_from_avg(self):
+        """بندٌ مجاني (سعره 0 — قطع غيار هدية) كان يُسقط الفاتورة كلّها من `posted_goods_line_costs`
+        فيُبنى المتوسط من السعر المستورد بلا العمولة (INV-0024: الإنفيرتر 704.65 بدل 901.43)،
+        ويتخطّاها `reconcile_import_unit_costs`. المجاني حصّته 0 ويُخفّض المتوسط بكميته وحدها."""
+        from io import StringIO
+
+        from django.core.management import call_command
+        from inventory.services import product_cost_breakdown
+
+        deal = self.deals[0]
+        paid = deal.items.get()
+        gift = Product.objects.create(
+            tenant=self.tenant, sku="SET-GIFT", name_ar="قطعة هدية",
+            quantity_on_hand=D("0"), avg_cost=D("0"))
+        LogisticsDealItem.objects.create(deal=deal, product=paid.product, quantity=D("2"), unit_price=D("0"))
+        LogisticsDealItem.objects.create(deal=deal, product=gift, quantity=D("3"), unit_price=D("0"))
+        self._post_deal_payment_with_commission(deal, "10")  # 35 ₪
+        inv = self._post_and_receive(self._release_and_import()[0])
+        self.assertEqual(inv.items.filter(landed_line_total_ils=0).count(), 2)
+        grn = self._grn_inventory_debit(inv)
+        self.assertEqual(self._receipt_value(inv), grn)
+
+        # المتوسط = مدين البضاعة ÷ الكمية كلّها (10 مدفوعة + 2 مجانية)، لا السعر المستورد.
+        breakdown = product_cost_breakdown(tenant_id=self.tenant.pk, product_id=paid.product_id)
+        self.assertEqual(D(breakdown["total_purchased_qty"]), D("12"))
+        self.assertLessEqual(abs(D(breakdown["average_cost"]) * 12 - grn), D("0.01"))
+        self.assertLessEqual(abs(self._stock_value_at_avg(inv) - grn), D("0.01"))
+
+        # والأمر لا يتخطّاها: حال الإنتاج (المتوسط بلا العمولة) يُكشف ويُصلَح.
+        Product.objects.filter(pk=paid.product_id).update(avg_cost=D("1"))
+        out = StringIO()
+        call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), stdout=out)
+        self.assertIn(inv.invoice_number, out.getvalue())
+        self.assertIn("35.00", out.getvalue())
+        call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), "--apply",
+                     stdout=StringIO())
+        self.assertLessEqual(abs(self._stock_value_at_avg(inv) - grn), D("0.01"))
+
     def test_reconcile_command_leaves_fifo_sales_alone(self):
         """المبيع كُلِّف من طبقة FIFO (بالعمولة) لا من avg_cost — فلا فرق مبيعٍ ولا قيد."""
         from io import StringIO
