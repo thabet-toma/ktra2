@@ -899,7 +899,11 @@ def build_purchase_invoice_row(
     # 2. New Subtotal includes ALL lines (which already have landed costs)
     subtotal = sum((it['total_price'] for it in items_payload), Decimal('0')).quantize(Q2, rounding=ROUND_HALF_UP)
     
-    discount = _d(deal.discount_amount)
+    # خصم الصفقة داخل مبلغها (`total_amount` = بنود − خصم + شحن) فداخل `deal_val_ils`:
+    # المدفوع بشيكله، والمتبقّي من الإجمالي الصافي بالدولار × سعر المتبقّي — مرّةً واحدة.
+    # نسخُه هنا (دولاراً) على فاتورةٍ بالشيكل كان يخصمه ثانيةً من حصّة المورد والضريبة
+    # (INV-0024/D-0107: 1,200$ ⇒ المورد 40,855.20 لا 42,055.20 ₪).
+    discount = Decimal('0')
     
     # 3. Zero out header fields since they are fully embedded in the line items now
     ship_cost_line = Decimal('0')
@@ -1322,6 +1326,9 @@ def recalculate_landed_for_shipment(
             inv.subtotal = payload['subtotal']
             inv.shipping_cost = payload['shipping_cost']
             inv.shipping_included = payload['shipping_included']
+            # الخصم من الصفّ (صفرٌ — داخل مبلغ الصفقة)، لا المحفوظ: فاتورةٌ بُنيت بخصمٍ منسوخ
+            # كانت تُبقيه وتحسب عليه الضريبة والإجمالي في كل إعادة.
+            inv.discount_amount = payload['discount_amount']
             taxable = max(
                 Decimal('0'),
                 Decimal(str(inv.subtotal or 0))
@@ -1502,8 +1509,9 @@ def import_invoice_cost_shares(inv: PurchaseInvoice) -> Optional[Dict[str, Any]]
 def _import_row_drifted(inv: PurchaseInvoice, row: Dict[str, Any]) -> bool:
     """هل تأخّرت تكاليف الفاتورة المحفوظة عن الصفّ المعاد بناؤه؟ على ما تكتبه
     `recalculate_landed_for_shipment` من الصفّ (الإجمالي الفرعي، والشحن، وكلفة
-    كل سطر) بدقّة الأغورة — لا على الإجمالي: ضريبةُ الفاتورة وخصمُها ملكُها
-    وتُبقيهما إعادةُ الاحتساب، والصفّ يأخذهما من الصفقة."""
+    كل سطر) بدقّة الأغورة — لا على الإجمالي: ضريبةُ الفاتورة ملكُها وتُبقيها
+    إعادةُ الاحتساب، والصفّ يأخذها من الصفقة. خصمُها صفرٌ دائماً (داخل مبلغ الصفقة)
+    — يقارنه `posted_invoices_cost_drift`."""
     def q(v) -> Decimal:
         return _d(v).quantize(Q2, rounding=ROUND_HALF_UP)
 
@@ -1542,7 +1550,8 @@ def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
         if not row:
             continue
         if (_import_row_drifted(inv, row) or _posted_commission_drifted(inv)
-                or _posted_capitalization_drifted(inv)):
+                or _posted_capitalization_drifted(inv)
+                or _posted_discount_drifted(inv, row)):
             stale.append({'id': inv.pk, 'invoice_number': inv.invoice_number})
     return {'posted_count': posted_count, 'stale_posted_invoices': stale}
 
@@ -1574,6 +1583,16 @@ def _posted_capitalization_drifted(inv: PurchaseInvoice) -> bool:
     off = import_invoice_posted_off_cost(inv)
     if not (off['tax'] or off['fees']):
         return False
+    return not (inv.deal_id and live_archive_deal_journals(inv.tenant_id, [inv.deal_id]))
+
+
+def _posted_discount_drifted(inv: PurchaseInvoice, row: Dict[str, Any]) -> bool:
+    """خصمٌ منسوخ من الصفقة قبل تصفيره (`build_purchase_invoice_row`) — «أعد الاحتساب
+    والترحيل» يعيد بناءها بلا خصم. فاتورة صفقة الأرشيف لا يُعاد ترحيلها فلا تُعدّ متأخّرة."""
+    if _d(inv.discount_amount) == _d(row.get('discount_amount')):
+        return False
+    from logistics.payment_posting import live_archive_deal_journals
+
     return not (inv.deal_id and live_archive_deal_journals(inv.tenant_id, [inv.deal_id]))
 
 

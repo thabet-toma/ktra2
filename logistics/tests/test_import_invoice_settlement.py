@@ -967,3 +967,64 @@ class ImportInvoiceSettlementTest(APITestCase):
         out = StringIO()
         call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
         self.assertNotIn(inv.invoice_number, out.getvalue())
+
+    # ── خصم الصفقة داخل مبلغها ودفعاتها — لا يُخصم ثانيةً من الفاتورة (INV-0024) ──
+    def test_deal_discount_is_inside_payments_not_deducted_again(self):
+        """D-0107: بنود 14,000$ − خصم 1,200$ = إجمالي الصفقة = الدفعات. كان البناء ينسخ
+        خصم الصفقة (دولاراً) إلى فاتورةٍ بالشيكل بضاعتُها من الدفعات ⇒ يُخصم مرّتين."""
+        deal = self.deals[0]
+        # بنود 1,200$ − خصم 200$ = 1,000$ = الدفعة (3,500 ₪).
+        LogisticsDeal.objects.filter(pk=deal.pk).update(discount_amount=D("200"))
+        LogisticsDealItem.objects.filter(deal=deal).update(unit_price=D("120"))
+        inv = self._release_and_import()[0]
+        self.assertEqual(inv.discount_amount, D("0"))
+        self.assertEqual(self._supplier_payable(inv), D("3500.00"))
+
+        # فاتورةٌ بُنيت قبل الإصلاح: إعادة الحساب تصفّر خصمها لا تُبقيه.
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(discount_amount=D("200"))
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv.refresh_from_db()
+        self.assertEqual(inv.discount_amount, D("0"))
+
+        payment = self._breakdown(inv)
+        payable = D(payment["payable_total"])
+        units = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in payment["unit_costs"]), D("0"))
+        self.assertEqual(units.quantize(Q2), payable)
+        inv = self._post(inv)
+        self.assertEqual(self._ap_credit(inv), D("3500.00"))  # الدفعات × السعر
+        self.assertEqual(self._gr_ir_debit(inv), payable)
+
+    def test_discount_command_zeroes_drafts_and_lists_posted(self):
+        from io import StringIO
+        from django.core.management import call_command
+        from logistics.landed_cost import posted_invoices_cost_drift
+
+        invoices = self._release_and_import()
+        draft = invoices[0]
+        PurchaseInvoice.objects.filter(pk=draft.pk).update(discount_amount=D("200"))
+        posted = self._post(invoices[1])
+        PurchaseInvoice.objects.filter(pk=posted.pk).update(discount_amount=D("150"))
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertIn(posted.pk, [r["id"] for r in drift["stale_posted_invoices"]])
+
+        out = StringIO()
+        call_command("fix_import_invoice_discounts", "--tenant", str(self.tenant.pk), stdout=out)
+        report = out.getvalue()
+        self.assertIn(draft.invoice_number, report)
+        self.assertIn(posted.invoice_number, report)
+        draft.refresh_from_db()
+        self.assertEqual(draft.discount_amount, D("200"))  # قراءةٌ فقط
+
+        call_command("fix_import_invoice_discounts", "--tenant", str(self.tenant.pk), "--apply",
+                     stdout=StringIO())
+        draft.refresh_from_db()
+        posted.refresh_from_db()
+        self.assertEqual(draft.discount_amount, D("0"))
+        self.assertEqual(posted.discount_amount, D("150"))  # المرحّلة من الشاشة
+
+        res = self._recalculate(auto_repost=True)
+        self.assertEqual(res.status_code, 200, res.content)
+        posted.refresh_from_db()
+        self.assertEqual(posted.discount_amount, D("0"))
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertEqual(drift["stale_posted_invoices"], [])
