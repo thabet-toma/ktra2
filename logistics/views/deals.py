@@ -580,7 +580,10 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
         try:
             with transaction.atomic():
                 total = {'journals_deleted': 0, 'lines_deleted': 0, 'stock_movements_deleted': 0}
+                from accounting.fx_fifo import release_fifo_for_unpost
                 for pay in posted_payments:
+                    release_fifo_for_unpost(pay.journal, tenant_id=deal.tenant_id,
+                                            reference_type='LOGISTICS_PAYMENT', reference_id=pay.id)
                     r = unpost_document(
                         tenant_id=deal.tenant_id,
                         reference_id=pay.id,
@@ -1003,6 +1006,11 @@ class LogisticsDealViewSet(PagePartnerBalanceMixin, BaseTenantViewSet):
                 # وتقارير الفترة الأصلية لا تتغيّر بأثر رجعي — نفس نمط دفعات
                 # التخليص. (النمط القديم كان يلغي ترحيل الأصل فيُظهر أثر العكس
                 # وحده بإشارة معكوسة في التقارير المرحّلة.)
+                # صندوق الدولار FIFO: الدولارات تعود لطبقاتها مع العكس (أو رفض إن رُحّلت
+                # قبل سجل الاستهلاك) — وإلا استهلكتها إعادة الترحيل مرّتين.
+                from accounting.fx_fifo import release_fifo_for_unpost
+                release_fifo_for_unpost(orig, tenant_id=deal.tenant_id,
+                                        reference_type="LOGISTICS_PAYMENT", reference_id=pay_row.id)
                 rev = accounting_api.reverse_journal(
                     orig,
                     reference_type="LOGISTICS_PAYMENT_UNPOST",

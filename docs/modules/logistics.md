@@ -501,7 +501,7 @@ def build_import_trace(invoice: PurchaseInvoice) -> Dict[str, Any]:     # تتب
 إلغاء ترحيل دفعة صفقة (`unpost_payment_from_accounting`) ودفعة تخليص (`unpost_payment`)
 كلاهما عبر `accounting.api.reverse_journal(..., copy_currency=True)`: **الأصل يبقى مرحّلاً**
 ويعادله قيد عكس بعملته وسعره ⇒ صافي الأثر صفر اسمياً وبالعملة الأساسية، وتقارير الفترة
-الأصلية لا تتغيّر بأثر رجعي. إعادة ترحيل دفعة صفقة تنشئ قيداً جديداً دائماً
+الأصلية لا تتغيّر بأثر رجعي. **ودولارات صندوق FIFO تعود لطبقاتها** مع العكس — ومع الحذف في `unpost` الصفقة والتخليص — عبر `accounting.fx_fifo.release_fifo_for_unpost` (سجلّ `CashBoxFxConsumption`)، ودفعةٌ رُحّلت من صندوقٍ له طبقات قبل السجلّ يُرفض فكّها بدل أن تُستهلك طبقاته مرّتين عند إعادة ترحيلها (`tests/test_fifo_unpost_restore.py`). إعادة ترحيل دفعة صفقة تنشئ قيداً جديداً دائماً
 (`post_payment` يمرّر `idempotent=False` — قيود المرجع السابقة تبقى في الدفاتر، وحارس
 التكرار هو قفل صف الدفعة + فحص `is_posted`). الاختبار المرجعي:
 `tests/test_deal_payment_unpost_cycle.py`. **بيانات تاريخية:** دورات إلغاء قديمة

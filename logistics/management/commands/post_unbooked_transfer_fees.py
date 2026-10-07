@@ -207,7 +207,9 @@ class Command(BaseCommand):
                             continue
                         fee = Decimal(str(locked.transfer_cost))
                         if plan['link']:
-                            amount, _breakdown = consume_fifo(plan['link'], fee)
+                            amount, _breakdown = consume_fifo(
+                                plan['link'], fee, reference_type=TRANSFER_FEE_ADJUST_REFERENCE,
+                                reference_id=locked.pk)
                         else:
                             amount = (fee * payment_usd_rate(locked)).quantize(Q2)
                         ref = locked.deal.ref_number if locked.deal_id else (

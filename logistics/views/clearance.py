@@ -277,7 +277,10 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
         try:
             with transaction.atomic():
                 total = {'journals_deleted': 0, 'lines_deleted': 0, 'stock_movements_deleted': 0}
+                from accounting.fx_fifo import release_fifo_for_unpost
                 for pay in posted_payments:
+                    release_fifo_for_unpost(pay.journal, tenant_id=clearance.tenant_id,
+                                            reference_type='CLEARANCE_PAYMENT', reference_id=pay.id)
                     r = unpost_document(
                         tenant_id=clearance.tenant_id,
                         reference_id=pay.id,
@@ -566,7 +569,8 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     lines_data = build_fx_payment_lines(
                         fifo_link=fifo_link, foreign_amount=amount, local_amount=local_amount,
                         debit_account_id=payee.linked_account_id, box_account_id=cash_link.account_id,
-                        partner_id=payee.pk, description=line_desc, tenant=clearance.tenant)
+                        partner_id=payee.pk, description=line_desc, tenant=clearance.tenant,
+                        reference_type="CLEARANCE_PAYMENT", reference_id=pay.id)
                     jcurrency, jrate = base_cur, Decimal("1")
                 else:
                     lines_data = [
@@ -666,6 +670,10 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
 
                 # المرحلة 2: القيد العكسي عبر accounting.api (يفحص الفترة
                 # والتوازن) مع نسخ عملة الأصل وسعر صرفه — الأصل يبقى مرحّلاً.
+                # صندوق الدولار FIFO: الدولارات تعود لطبقاتها مع العكس.
+                from accounting.fx_fifo import release_fifo_for_unpost
+                release_fifo_for_unpost(orig, tenant_id=clearance.tenant_id,
+                                        reference_type="CLEARANCE_PAYMENT", reference_id=payment.id)
                 rev = accounting_api.reverse_journal(
                     orig,
                     reference_type="CLEARANCE_PAYMENT_UNPOST",

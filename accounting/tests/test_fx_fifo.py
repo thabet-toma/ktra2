@@ -62,7 +62,7 @@ class FxFifoTest(APITestCase):
         fund_box_from_capital(self.usd, 1000, 3, date="2026-06-20", user=self.user)
         fund_box_from_capital(self.usd, 500, 4, date="2026-06-21", user=self.user)
         # ادفع 1200$ → 1000×3 + 200×4 = 3800 شيقل
-        ils_cost, breakdown = consume_fifo(self.usd, 1200)
+        ils_cost, breakdown = consume_fifo(self.usd, 1200, reference_type="TEST", reference_id=1)
         self.assertEqual(ils_cost, D("3800.00"))
         self.assertEqual(len(breakdown), 2)
         lots = list(self.usd.fx_lots.order_by("lot_date", "id"))
@@ -74,7 +74,7 @@ class FxFifoTest(APITestCase):
     def test_consume_insufficient_raises(self):
         fund_box_from_capital(self.usd, 100, 3, date="2026-06-20", user=self.user)
         with self.assertRaises(ValidationError):
-            consume_fifo(self.usd, 200)
+            consume_fifo(self.usd, 200, reference_type="TEST", reference_id=1)
 
     def test_fund_rejects_nonpositive(self):
         with self.assertRaises(ValidationError):

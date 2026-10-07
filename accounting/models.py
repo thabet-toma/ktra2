@@ -603,9 +603,11 @@ class CashBoxFxLot(models.Model):
 
     SOURCE_CAPITAL = 'capital'
     SOURCE_TRANSFER = 'transfer_ils'
+    SOURCE_OPENING = 'opening'
     SOURCE_CHOICES = [
         (SOURCE_CAPITAL, 'إيداع من رأس المال'),
         (SOURCE_TRANSFER, 'تحويل من صندوق الشيقل'),
+        (SOURCE_OPENING, 'طبقة افتتاحية (جرد فعلي)'),
     ]
 
     id = models.AutoField(primary_key=True, db_column='CashBoxFxLotID')
@@ -635,6 +637,44 @@ class CashBoxFxLot(models.Model):
 
     def __str__(self):
         return f"Lot {self.id}: {self.remaining_fc}/{self.original_fc} @ {self.rate}"
+
+
+class CashBoxFxConsumption(models.Model):
+    """سجلّ استهلاك: أيّ طبقةٍ أكل منها أيّ دفعٍ وكم — يكتبه `consume_fifo`.
+
+    نظير `inventory.StockLayerConsumption`: بدونه لا يُعرف بعد إنقاص `remaining_fc`
+    من أين أُخذ، ففكّ ترحيل الدفعة كان يعكس القيد وحده وإعادة ترحيلها تستهلك الطبقات
+    مرّتين. المرجع هو مرجع قيد المستند (`LOGISTICS_PAYMENT`/`CLEARANCE_PAYMENT`/...)
+    لأن الاستهلاك يسبق إنشاء القيد. الإرجاع (`fx_fifo.restore_fifo`) يردّ الكمية إلى
+    *نفس* الطبقة ويختم `restored_at` — لا يحذف الصف.
+    """
+
+    id = models.AutoField(primary_key=True, db_column='CashBoxFxConsumptionID')
+    tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')
+    lot = models.ForeignKey(
+        CashBoxFxLot, on_delete=models.CASCADE, db_column='CashBoxFxLotID',
+        related_name='consumptions')
+    fc = models.DecimalField(max_digits=18, decimal_places=4, db_column='FC',
+        help_text='المأخوذ من هذه الطبقة بالعملة الأجنبية')
+    rate = models.DecimalField(max_digits=18, decimal_places=6, db_column='Rate',
+        help_text='سعر الطبقة لحظة الاستهلاك — لقطة')
+    reference_type = models.CharField(max_length=50, db_column='ReferenceType')
+    reference_id = models.IntegerField(db_column='ReferenceID')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    restored_at = models.DateTimeField(null=True, blank=True, db_column='RestoredAt',
+        help_text='أُرجع إلى طبقته بفكّ ترحيل المستند')
+
+    class Meta:
+        db_table = 'cash_box_fx_consumptions'
+        managed = True
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['tenant', 'reference_type', 'reference_id'],
+                         name='idx_cbfc_tenant_ref'),
+        ]
+
+    def __str__(self):
+        return f"FxConsumption {self.id}: lot={self.lot_id} fc={self.fc}"
 
 
 class CashTransfer(models.Model):

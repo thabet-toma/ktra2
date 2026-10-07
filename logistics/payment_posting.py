@@ -341,7 +341,8 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
             lines = build_fx_payment_lines(
                 fifo_link=fifo_link, foreign_amount=foreign_amount, local_amount=local_amount,
                 debit_account_id=debit_account_id, box_account_id=box_account.id,
-                partner_id=partner_id, description=description, tenant=tenant)
+                partner_id=partner_id, description=description, tenant=tenant,
+                reference_type='LOGISTICS_PAYMENT', reference_id=payment.pk)
             # القيد بالشيكل وسطر الذمة وحده يحمل دولار الدفعة (كشف الطرف بالدولار).
             for line in lines:
                 if line.get("partner") == partner_id:
@@ -351,7 +352,8 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
                 lines += build_fx_payment_lines(
                     fifo_link=fifo_link, foreign_amount=fee_foreign, local_amount=fee_local,
                     debit_account_id=fee_account_id, box_account_id=box_account.id,
-                    partner_id=None, description=fee_description, tenant=tenant)
+                    partner_id=None, description=fee_description, tenant=tenant,
+                    reference_type='LOGISTICS_PAYMENT', reference_id=payment.pk)
             return lines, (base or usd), Decimal('1')
 
     if usd and base and usd.pk != base.pk:
