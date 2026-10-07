@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importCostRows, importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
+import { importCostRows, importFinalUnitCost, importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
 
 test('صفوف طباعة الدولية: بالترتيب، وصفّ المورد حصّته − مدفوعه = باقيه', () => {
   const rows = importPaymentRows({
@@ -98,4 +98,22 @@ test('تفصيل التكاليف: سطور الخادم بأرقامها، وإ
   assert.equal(out.totalRemaining, 100);
   assert.equal(importCostRows({ ...ip, cost_rows: undefined }), null);
   assert.equal(importCostRows(null), null);
+});
+
+test('التكلفة النهائية/وحدة: من unit_costs الخادم للبند المحفوظ، وإلا السلوك الحالي', () => {
+  // INV-0023: سعر البند 41.44، والخادم 46.0506 (رسم كترا المرسمَل + العمولة، بلا الضريبة).
+  const ip = {
+    unit_costs: [
+      { item_id: 7, name: 'أ', quantity: '10', unit_cost: '46.0506' },
+      { item_id: 8, name: 'ب', quantity: '5', unit_cost: '53.1354' },
+    ],
+  } as unknown as ImportPaymentBreakdown;
+  assert.equal(importFinalUnitCost(ip, 7, 41.44), 46.0506);
+  assert.equal(importFinalUnitCost(ip, 8, 47.81), 53.1354);
+  // بندٌ لم يُحفظ بعد (بلا serverId) أو غائبٌ عن التفصيل ⇒ القيمة المحسوبة في الشاشة.
+  assert.equal(importFinalUnitCost(ip, undefined, 41.44), 41.44);
+  assert.equal(importFinalUnitCost(ip, 99, 54.18), 54.18);
+  // بلا unit_costs (المحلية، أو قائمة بلا تفصيل) ⇒ كما كان، حتى الفراغ.
+  assert.equal(importFinalUnitCost(undefined, 7, 41.44), 41.44);
+  assert.equal(importFinalUnitCost({} as ImportPaymentBreakdown, 7, undefined), null);
 });

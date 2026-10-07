@@ -63,7 +63,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
-import { importCostRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
+import { importCostRows, importFinalUnitCost, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
@@ -1688,7 +1688,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       case "remainingQty": return formatQuantity(row.remainingQuantity || 0);
       case "unitPrice": return row.unitPrice || 0;
       case "totalPrice": return row.totalPrice || 0;
-      case "finalUnitCost": return finalItemCosts[idx]?.finalUnit || 0;
+      case "finalUnitCost": return importFinalUnitCost(formData.importPayment, row.serverId, finalItemCosts[idx]?.finalUnit) || 0;
       default: return "";
     }
   };
@@ -2010,7 +2010,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   if (finalUnitColumn) {
     finalUnitColumn.render = (row) => {
       const index = (formData.items || []).indexOf(row);
-      return formatNumber(finalItemCosts[index]?.finalUnit || 0, { maxDecimals: 4, group: true });
+      const unit = importFinalUnitCost(formData.importPayment, row.serverId, finalItemCosts[index]?.finalUnit);
+      return formatNumber(unit || 0, { maxDecimals: 4, group: true });
     };
   }
   const deleteColumn = itemColumns.find((column) => column.key === "del");
@@ -3414,7 +3415,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 width: "140px",
                 align: "left" as const,
                 numeric: true,
-                render: (r: InvoiceItem) => (r.landedUnitPriceIls ? fmt(r.landedUnitPriceIls) : "—"),
+                render: (r: InvoiceItem) => {
+                  const unit = importFinalUnitCost(formData.importPayment, r.serverId, r.landedUnitPriceIls);
+                  return unit ? formatNumber(unit, { maxDecimals: 4, group: true }) : "—";
+                },
               },
             ]
           : []),

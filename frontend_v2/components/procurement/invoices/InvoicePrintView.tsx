@@ -5,7 +5,7 @@ import { formatMoney, formatQuantity } from '../../../utils/formatNumber';
 import { useTenantSettings } from '../../../hooks/useTenantSettings';
 import { Printer, X, MapPin, Phone, Mail, FileText, Building2, Truck, Hash, Calendar, DollarSign, CreditCard, Edit, ExternalLink, Box } from 'lucide-react';
 import { formatDateValue } from "../../../utils/formatDate";
-import { importCostRows, importPaymentRows } from "../../../utils/importPayment";
+import { importCostRows, importFinalUnitCost, importPaymentRows } from "../../../utils/importPayment";
 
 interface InvoicePrintViewProps {
     invoice: Invoice;
@@ -37,7 +37,14 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
     const printLanded = invoice.items.some(
         (it) =>
             (it.landedUnitPriceIls ?? 0) > 0 && (it.landedLineTotalIls ?? 0) > 0
-    );
+    ) || (invoice.importPayment?.unit_costs?.length ?? 0) > 0;
+    // «نهائي / وحدة» و«إجمالي نهائي» من مصدر جدول البنود نفسه (`importFinalUnitCost`).
+    const finalUnit = (item: (typeof invoice.items)[number]) =>
+        importFinalUnitCost(invoice.importPayment, item.serverId, item.landedUnitPriceIls);
+    const finalLine = (item: (typeof invoice.items)[number]) => {
+        const unit = importFinalUnitCost(invoice.importPayment, item.serverId, null);
+        return unit != null ? unit * (Number(item.quantity) || 0) : item.landedLineTotalIls ?? null;
+    };
 
     const getSupplierAddress = () => {
         if (invoice.supplierSnapshot?.address) return invoice.supplierSnapshot.address;
@@ -245,13 +252,13 @@ export const InvoicePrintView: React.FC<InvoicePrintViewProps> = ({ invoice, cur
                                     <td className="py-2 px-2 text-left font-mono border-l ktra-border-soft" dir="ltr">{formatCurrency(item.unitPrice)}</td>
                                     {printLanded && (
                                         <td className="py-2 px-2 text-left font-mono border-l ktra-border-soft ktra-bg-panel" dir="ltr">
-                                            {item.landedUnitPriceIls != null ? formatCurrency(item.landedUnitPriceIls) : "—"}
+                                            {finalUnit(item) != null ? formatCurrency(finalUnit(item)!) : "—"}
                                         </td>
                                     )}
                                     <td className="py-2 px-2 text-left font-bold font-mono ktra-bg-panel text-sm border-l ktra-border-soft" dir="ltr">{formatCurrency(item.totalPrice)}</td>
                                     {printLanded && (
                                         <td className="py-2 px-2 text-left font-bold font-mono ktra-bg-panel text-sm" dir="ltr">
-                                            {item.landedLineTotalIls != null ? formatCurrency(item.landedLineTotalIls) : "—"}
+                                            {finalLine(item) != null ? formatCurrency(finalLine(item)!) : "—"}
                                         </td>
                                     )}
                                 </tr>

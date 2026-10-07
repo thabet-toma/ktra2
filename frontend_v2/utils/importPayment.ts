@@ -151,3 +151,23 @@ export function importCostRows(
     totalRemaining: Number(ip.remaining_balance) || 0,
   };
 }
+
+/**
+ * «التكلفة النهائية/وحدة» لبند الفاتورة الدولية (جدول البنود عرضاً وتحريراً، والطباعة):
+ * `unit_costs` من الخادم (`import_invoice_unit_costs` — توزيع قيد الاستلام نفسه، فيساوي
+ * `avg_cost` عند الاستلام: بالرسوم المرسملة والعمولة، بلا الضريبة) للبند المحفوظ
+ * (`serverId`)؛ وإلا `fallback` كما كان (بندٌ لم يُحفظ، المحلية، قائمةٌ بلا تفصيل).
+ * كان العمود سعرَ البند المستورد وحده فخالف «تفصيل التكاليف» (INV-0023: 41.44 مقابل 46.0506).
+ */
+export function importFinalUnitCost(
+  ip: ImportPaymentBreakdown | null | undefined,
+  serverId: number | null | undefined,
+  fallback: number | null | undefined,
+): number | null {
+  if (serverId != null) {
+    const row = ip?.unit_costs?.find((u) => u.item_id === serverId);
+    const unit = Number(row?.unit_cost);
+    if (row && Number.isFinite(unit)) return unit;
+  }
+  return fallback ?? null;
+}
