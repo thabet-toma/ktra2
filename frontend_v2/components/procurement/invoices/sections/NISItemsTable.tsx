@@ -1,10 +1,9 @@
 import React, { useMemo } from "react";
 import { Package, Tag, Layers, Anchor, Receipt } from "lucide-react";
-import type { Invoice, InvoiceItem, LocalPayments } from "@/types";
+import type { InvoiceItem, LocalPayments } from "@/types";
 import {
     allocateInvoiceFinalCosts,
     sumTaxesAndFeesExtras,
-    transferCommissionsIlsForVat,
 } from "@/utils/invoiceTaxesAndFees";
 import { formatMoney } from "@/utils/formatNumber";
 
@@ -17,8 +16,6 @@ interface NISItemsTableProps {
     taxableBaseIls?: number;
     /** لبنود «بعد ض.ق.م» — مجموع ما قبل ض.ق.م الفاتورة */
     invoiceVatBaseIls?: number;
-    /** لتوزيع عمولات التحويل على أسطر الجدول (نفس أوزان الضريبة والرسوم) */
-    conversionMetadata?: Invoice["conversionMetadata"] | null;
     /** رسوم PurchaseInvoiceFee المحفوظة — تدخل في التكلفة النهائية المعروضة. */
     additionalFeesTotal?: number;
     /** الفاتورة مرتبطة بشحنة، فتكون أسعار البنود تكاليف استيراد موزعة لا أسعار شراء خام. */
@@ -36,7 +33,6 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
     localPayments,
     taxableBaseIls = 0,
     invoiceVatBaseIls,
-    conversionMetadata,
     additionalFeesTotal = 0,
     isShipmentLinkedImport = false,
 }) => {
@@ -59,27 +55,21 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
         (Number(invoiceTaxAmount) || 0) +
         extrasPool +
         Math.max(0, Number(additionalFeesTotal) || 0);
-    const transferPoolIls = useMemo(
-        () => transferCommissionsIlsForVat(conversionMetadata as Record<string, unknown> | null),
-        [conversionMetadata]
-    );
     const showAllocColumns = items.length > 0;
 
     const perRowAlloc = useMemo(() => {
         return allocateInvoiceFinalCosts(items, {
-            transferTotalIls: transferPoolIls,
             taxAndFeesTotalIls: taxFeesPool,
         }).map((row) => ({
             taxFeesAlloc: row.taxAndFeesAllocation,
-            transferAlloc: row.transferAllocation,
-            preTaxWithTransfer: row.preTaxLine,
+            preTaxLine: row.preTaxLine,
             afterLine: row.finalLine,
             afterUnit: row.finalUnit,
         }));
-    }, [items, taxFeesPool, transferPoolIls]);
+    }, [items, taxFeesPool]);
 
     const sumMerchIls = items.reduce((s, it) => s + (Number(it.totalPrice) || 0), 0);
-    const sumLandedWithTransferIls = perRowAlloc.reduce((s, r) => s + r.preTaxWithTransfer, 0);
+    const sumLandedIls = perRowAlloc.reduce((s, r) => s + r.preTaxLine, 0);
     const sumTaxFeesAlloc = perRowAlloc.reduce((s, r) => s + r.taxFeesAlloc, 0);
     const sumAfter = perRowAlloc.reduce((s, r) => s + r.afterLine, 0);
     const totalQty = items.reduce((s, it) => s + (Number(it.quantity) || 0), 0);
@@ -199,7 +189,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                 <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft tabular-nums">
                                                     ₪
                                                     {formatMoney(
-                                                        alloc.preTaxWithTransfer /
+                                                        alloc.preTaxLine /
                                                         Math.max(Number(item.quantity) || 0, 0.0001)
                                                     )}
                                                 </span>
@@ -223,18 +213,10 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                                 <div className="space-y-0.5">
                                                     <span className="text-xs font-bold ktra-text-ink dark:ktra-text-soft tabular-nums">
                                                         ₪
-                                                        {alloc.preTaxWithTransfer.toLocaleString(undefined, {
+                                                        {alloc.preTaxLine.toLocaleString(undefined, {
                                                             minimumFractionDigits: 2,
                                                         })}
                                                     </span>
-                                                    {alloc.transferAlloc > 0.005 ? (
-                                                        <span className="block text-[9px] ktra-text-ink/90 dark:ktra-text-soft/80 tabular-nums">
-                                                            منها عمولات تحويل ₪
-                                                            {alloc.transferAlloc.toLocaleString(undefined, {
-                                                                minimumFractionDigits: 2,
-                                                            })}
-                                                        </span>
-                                                    ) : null}
                                                 </div>
                                             ) : (
                                                 <span className="ktra-text-soft text-xs">—</span>
@@ -275,7 +257,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                 </td>
                                 {showLanded ? (
                                     <td className="px-2 py-2 text-xs font-black ktra-text-ink dark:ktra-text-soft ktra-bg-panel/60 dark:ktra-bg-panel/50 tabular-nums">
-                                        {fmtIls(sumLandedWithTransferIls)}
+                                        {fmtIls(sumLandedIls)}
                                     </td>
                                 ) : null}
                                 {showAllocColumns ? (

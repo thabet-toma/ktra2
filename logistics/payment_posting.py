@@ -261,9 +261,35 @@ def post_shipment_agent_payment(payment, *, box_account, user=None):
     return journal
 
 
+BANK_CHARGES_ACCOUNT_NAME = 'مصاريف بنكية وعمولات'
+
+
+def _bank_charges_account_id(tenant) -> int:
+    """حساب عمولة الحوالة: بالاسم تحت «52» (`resolve_expense_account`)، يُنشأ إن غاب.
+
+    بالاسم لا بكود ثابت: الشجرة الافتراضية بلا حساب عمولات بنكية، و«5208» في شجرةٍ
+    قائمة قد يكون مصروفاً سمّاه المستخدم من سند المصروف (ترقيم الأبناء التلقائي).
+    """
+    from accounting.services import resolve_expense_account
+
+    account, created = resolve_expense_account(tenant.pk, BANK_CHARGES_ACCOUNT_NAME)
+    if account is None:
+        raise ValidationError(
+            f'تعذّر تحديد حساب «{BANK_CHARGES_ACCOUNT_NAME}» لعمولة الحوالة: '
+            'حساب المصاريف التشغيلية «52» غير موجود في شجرة الحسابات.')
+    if created:
+        logger.info('bank charges account created tenant=%s account=%s', tenant.pk, account.pk)
+    return account.id
+
+
 def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_account,
                               tenant, description, use_fifo=True):
     """(lines_data, currency, exchange_rate) لقيد: مدين الذمة / دائن الصندوق.
+
+    عمولة الحوالة (`transfer_cost`، دولار) مصروفٌ بنكي في القيد نفسه: مدين «مصاريف
+    بنكية وعمولات» / دائن الصندوق — خرجت منه مع الدفعة («خصم المبلغ + العمولة»)،
+    والمورد غير مدينٍ بها. قرار المالك 2026-10-07: لا تُحمَّل على الفاتورة الدولية.
+    في القيد نفسه فيعكسها التراجع عن الترحيل معها.
 
     use_fifo=False يتخطّى طبقات صندوق الدولار (أمر التصحيح يعيد ترحيل دفعة قديمة
     على نفس حساباتها — طبقاتها لم تُستهلك في الأصل ولا تُستهلك بأثر رجعي).
@@ -276,6 +302,10 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
             box_account=box_account, description=description)
     foreign_amount = Decimal(str(payment.amount or 0))
     local_amount = payment_ils(payment)
+    fee_foreign = max(Decimal(str(getattr(payment, 'transfer_cost', None) or 0)), Decimal('0'))
+    fee_local = (fee_foreign * payment_usd_rate(payment)).quantize(Decimal('0.01'))
+    fee_account_id = _bank_charges_account_id(tenant) if fee_foreign > 0 else None
+    fee_description = f"عمولة حوالة | {description}"
     usd = Currency.objects.filter(Code__iexact='USD').first()
     base = Currency.objects.filter(IsBaseCurrency=True).first()
 
@@ -291,12 +321,20 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
             for line in lines:
                 if line.get("partner") == partner_id:
                     line.update(amount_currency=foreign_amount, currency_code="USD")
+            if fee_account_id:
+                # العمولة تستهلك طبقات الصندوق نفسها؛ سطرها بلا طرف.
+                lines += build_fx_payment_lines(
+                    fifo_link=fifo_link, foreign_amount=fee_foreign, local_amount=fee_local,
+                    debit_account_id=fee_account_id, box_account_id=box_account.id,
+                    partner_id=None, description=fee_description, tenant=tenant)
             return lines, (base or usd), Decimal('1')
 
     if usd and base and usd.pk != base.pk:
         amount, currency, rate = foreign_amount, usd, payment_usd_rate(payment)
+        fee_amount = fee_foreign
     else:
         amount, currency, rate = local_amount, (base or usd), Decimal('1')
+        fee_amount = fee_local
     lines = [
         {"account": debit_account_id, "debit": amount, "credit": Decimal("0"),
          "partner": partner_id, "description": description},
@@ -304,4 +342,11 @@ def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_acco
         {"account": box_account.id, "debit": Decimal("0"), "credit": amount,
          "description": description},
     ]
+    if fee_account_id:
+        lines += [
+            {"account": fee_account_id, "debit": fee_amount, "credit": Decimal("0"),
+             "description": fee_description},
+            {"account": box_account.id, "debit": Decimal("0"), "credit": fee_amount,
+             "description": fee_description},
+        ]
     return lines, currency, rate

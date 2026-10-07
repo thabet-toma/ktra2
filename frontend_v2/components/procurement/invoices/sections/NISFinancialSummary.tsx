@@ -1,5 +1,5 @@
 import React from "react";
-import { ArrowLeftRight, Calculator, Wallet, CreditCard, Ship, TrendingDown, Percent } from "lucide-react";
+import { Calculator, Wallet, CreditCard, Ship, TrendingDown, Percent } from "lucide-react";
 import type { LocalPayments, PurchaseInvoiceFeeLine } from "@/types";
 import {
     hasAfterMainVatPercentageLines,
@@ -23,8 +23,6 @@ interface NISFinancialSummaryProps {
     /** إخفاء سطر شحن الفاتورة (فواتير شيكل) */
     hideShippingRow?: boolean;
     fees?: PurchaseInvoiceFeeLine[];
-    /** عمولات تحويل دفعات الصفقة — داخلة في تكلفة المنتج وأساس ض.ق.م */
-    transferCommissionsIls?: number;
 }
 
 export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
@@ -39,7 +37,6 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
     invoiceVatBaseIls,
     hideShippingRow,
     fees = [],
-    transferCommissionsIls = 0,
 }) => {
     const symbol = "₪";
     const lp = localPayments || {};
@@ -96,18 +93,6 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
                         <span className="font-bold tabular-nums">
                             -{symbol}
                             {formatMoney(discountAmount)}
-                        </span>
-                    </div>
-                )}
-
-                {transferCommissionsIls > 0 && (
-                    <div className="flex justify-between">
-                        <span className="ktra-text-soft flex items-center gap-1.5 text-xs">
-                            <ArrowLeftRight className="w-3.5 h-3.5" /> عمولات تحويل الدفعات
-                        </span>
-                        <span className="font-bold tabular-nums">
-                            {symbol}
-                            {formatMoney(transferCommissionsIls)}
                         </span>
                     </div>
                 )}

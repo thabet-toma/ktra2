@@ -443,6 +443,35 @@ class ImportPaymentSeparationTest(APITestCase):
         # العمولة صارت جزءاً من مدين البضاعة، لا سطراً معلّقاً.
         self.assertEqual(debit, D("1209.37"))
 
+    def test_draft_read_keeps_transfer_commissions_out_of_payable(self):
+        """قراءة المسودة الدولية: عمولات الحوالات مصروفٌ بنكي يوم الدفع (قرار المالك
+        2026-10-07) — لا تدخل أساس الضريبة ولا الإجمالي. كانت القراءة تقول 11,259.52
+        والشاشة 11,125.12 للفاتورة نفسها."""
+        from unittest import mock
+
+        from logistics.serializers import PurchaseInvoiceSerializer
+
+        invoice = PurchaseInvoice.objects.create(
+            tenant=self.tenant, invoice_number="IMP-XFER-READ",
+            invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+            invoice_date="2026-07-05", partner=self.broker, currency=self.ils,
+            subtotal=D("11125.12"), grand_total=D("11125.12"),
+            tax_type="percentage", tax_rate=D("16"),
+        )
+        live = {
+            "conversion_metadata_json": {"deal_transfer_commissions_ils": 134.4},
+            "subtotal": D("11125.12"),
+            "shipping_cost": D("0"),
+        }
+        with mock.patch(
+            "logistics.landed_cost.compute_live_purchase_invoice_read_payload",
+            return_value=live,
+        ):
+            data = PurchaseInvoiceSerializer(invoice).data
+        self.assertEqual(D(data["tax_amount"]), D("1780.02"))  # 16% × 11,125.12
+        self.assertEqual(D(data["grand_total"]), D("12905.14"))
+        self.assertEqual(D(data["payable_total"]), D("12905.14"))
+
     def test_additional_fee_posts_balanced_on_top_of_invoice_total(self):
         invoice = PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number="IMP-FEE-1",

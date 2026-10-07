@@ -56,7 +56,6 @@ import {
   invoiceVatBaseIls,
   purchaseInvoiceFeeAmount,
   sumTaxesAndFeesExtras,
-  transferCommissionsIlsForVat,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
@@ -1574,9 +1573,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       },
     );
     return allocateInvoiceFinalCosts(formData.items || [], {
-      transferTotalIls: transferCommissionsIlsForVat(
-        formData.conversionMetadata as Record<string, unknown> | null,
-      ),
       taxAndFeesTotalIls:
         Math.max(0, Number(formData.taxAmount) || 0) +
         localExtras +
@@ -1586,7 +1582,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     formData.items,
     formData.taxAmount,
     formData.localPayments,
-    formData.conversionMetadata,
     ilsMerchandiseBase,
     ilsVatBase,
     finalCostFeesTotal,
@@ -2113,10 +2108,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const feesTotal = (formData.fees || []).reduce(
     (sum, fee) => sum + (Number(fee.amount) || 0), 0,
   );
-  // عمولات تحويل دفعات الصفقة — داخلة في تكلفة المنتج وأساس ض.ق.م، فتُعرض كسطر في الملخص.
-  const transferCommissionsIls = transferCommissionsIlsForVat(
-    formData.conversionMetadata as Record<string, unknown> | null,
-  );
   const payableTotal = purchasePayableTotal({
     grandTotal: Number(formData.grandTotal) || 0,
     feesTotal,
@@ -2177,7 +2168,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             localPayments={formData.localPayments || {}}
             taxableBaseIls={ilsMerchandiseBase}
             invoiceVatBaseIls={ilsVatBase}
-            conversionMetadata={formData.conversionMetadata}
             additionalFeesTotal={feesTotal}
             isShipmentLinkedImport={isShipmentLinkedImport}
           />
@@ -2210,7 +2200,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             invoiceVatBaseIls={ilsVatBase}
             hideShippingRow
             fees={formData.fees || []}
-            transferCommissionsIls={transferCommissionsIls}
           />
         </>
       ) : (
@@ -3410,13 +3399,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               { label: "تكلفة الشحن الدولي", value: fmt(formData.conversionMetadata.line_meta.deal_ship_allocated_ils || 0) },
               { label: "تكلفة التخليص", value: fmt(formData.conversionMetadata.line_meta.deal_clearance_allocated_ils || 0) },
               { label: "تكلفة النقل", value: fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0) },
-              ...(transferCommissionsIls > 0
-                ? [{ label: "عمولات تحويل الدفعات", value: fmt(transferCommissionsIls) }]
-                : []),
               ...((Number(formData.discountAmount) || 0) > 0
                 ? [{ label: "الخصم", value: fmt(Number(formData.discountAmount) || 0) }]
                 : []),
-              { label: "المجموع قبل الضريبة", value: fmt((Number(formData.subtotal) || 0) + transferCommissionsIls) },
+              { label: "المجموع قبل الضريبة", value: fmt(Number(formData.subtotal) || 0) },
               { label: "الضريبة المضافة", value: fmt(Number(formData.taxAmount) || 0) },
               ...invFees.map((fee) => ({ label: fee.description || "رسم إضافي", value: fmt(Number(fee.amount) || 0) })),
               // المرحّلة: `payableTotal` حصّة المورد وحده — والإجمالي هنا للتكاليف الأربع فوقه.
@@ -3874,7 +3860,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           },
         ] : []),
       ]}
-      totals={viewMode ? undefined : (
+      /* قرار المالك 2026-10-07: اللوحة تبقى في وضع العرض أيضاً — كانت تختفي بعد
+         الحفظ والترحيل وينتقل الملخّص إلى بطاقةٍ تحت جدول البنود لا يراها أحد. */
+      totals={(
         formData.conversionMetadata?.line_meta ? (
           <>
             <div className="ktra-total-row">
@@ -3900,13 +3888,6 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <span>تكلفة النقل</span>
               <span className="ktra-total-value">{fmt(formData.conversionMetadata.deal_local_shipping_from_clearance_ils || 0)}</span>
             </div>
-            {/* عمولات تحويل دفعات الصفقة — كانت محسوبة في تكلفة المنتج وأساس ض.ق.م بلا سطر ظاهر هنا */}
-            {transferCommissionsIls > 0 && (
-              <div className="ktra-total-row">
-                <span>عمولات تحويل الدفعات</span>
-                <span className="ktra-total-value">{fmt(transferCommissionsIls)}</span>
-              </div>
-            )}
             <div className="border-t border-gray-400 my-1 w-full" style={{ borderStyle: "dashed", borderColor: "rgba(0,0,0,0.15)" }} />
             {(formData.discountAmount || 0) > 0 && (
               <div className="ktra-total-row">
@@ -3920,7 +3901,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               <>
                 <div className="ktra-total-row">
                   <span>المجموع قبل الضريبة</span>
-                  <span className="ktra-total-value">{fmt((formData.subtotal || 0) + transferCommissionsIls)}</span>
+                  <span className="ktra-total-value">{fmt(formData.subtotal || 0)}</span>
                 </div>
                 <div className="ktra-total-row">
                   <span>الضريبة المضافة</span>
@@ -3936,7 +3917,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             ))}
             <div className="ktra-total-row ktra-total-row--grand">
               <span>إجمالي المستحق بعد الضريبة والرسوم</span>
-              <span className="ktra-total-value">{fmt(payableTotal)}</span>
+              {/* المرحّلة: `payableTotal` حصّة المورد وحده — والإجمالي هنا للتكاليف كلّها
+                  فوقه، كما في بطاقة المستند. */}
+              <span className="ktra-total-value">{fmt(isPosted && importPay ? Number(importPay.payable_total) || 0 : payableTotal)}</span>
             </div>
             <div className="ktra-total-row">
               <span>إجمالي الكمية</span>

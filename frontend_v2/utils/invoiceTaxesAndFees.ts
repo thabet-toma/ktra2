@@ -17,7 +17,6 @@ export type InvoiceFinalCostItem = {
 export type InvoiceFinalCostAllocation = {
     share: number;
     landedBase: number;
-    transferAllocation: number;
     taxAndFeesAllocation: number;
     preTaxLine: number;
     finalLine: number;
@@ -26,7 +25,7 @@ export type InvoiceFinalCostAllocation = {
 
 export function allocateInvoiceFinalCosts(
     items: InvoiceFinalCostItem[],
-    pools: { transferTotalIls?: number; taxAndFeesTotalIls?: number },
+    pools: { taxAndFeesTotalIls?: number },
 ): InvoiceFinalCostAllocation[] {
     const weights = items.map((item) => {
         const landed = num(item.landedLineTotalIls);
@@ -34,22 +33,19 @@ export function allocateInvoiceFinalCosts(
         return Math.max(0, num(item.totalPrice));
     });
     const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
-    const transferTotal = Math.max(0, num(pools.transferTotalIls));
     const taxAndFeesTotal = Math.max(0, num(pools.taxAndFeesTotalIls));
     return items.map((item, index) => {
         const share = totalWeight > 0
             ? weights[index] / totalWeight
             : items.length > 0 ? 1 / items.length : 0;
         const landedBase = weights[index];
-        const transferAllocation = transferTotal * share;
         const taxAndFeesAllocation = taxAndFeesTotal * share;
-        const preTaxLine = landedBase + transferAllocation;
+        const preTaxLine = landedBase;
         const finalLine = preTaxLine + taxAndFeesAllocation;
         const quantity = Math.max(num(item.quantity), 0.0001);
         return {
             share,
             landedBase,
-            transferAllocation,
             taxAndFeesAllocation,
             preTaxLine,
             finalLine,
@@ -112,18 +108,6 @@ export function internationalFreightIlsForVat(meta: ConvMeta): number {
     return Math.max(0, num(v));
 }
 
-/** عمولات/تكاليف تحويل دفعات الصفقة المنفّذة (USD×سعر الدفعة) — من الخادم */
-export function transferCommissionsIlsForVat(meta: ConvMeta): number {
-    if (!meta) return 0;
-    const r = meta as Record<string, unknown>;
-    const lm = lineMetaFrom(meta);
-    const v =
-        r.dealTransferCommissionsIls ??
-        r.deal_transfer_commissions_ils ??
-        lm.deal_transfer_commissions_ils;
-    return Math.max(0, num(v));
-}
-
 /** نقل محلي: من metadata إن وُجد، وإلا من المدفوعات المحلية */
 export function localTransportIlsForVat(meta: ConvMeta, lp: LocalPayments | null | undefined): number {
     if (!meta) {
@@ -145,7 +129,8 @@ export function localTransportIlsForVat(meta: ConvMeta, lp: LocalPayments | null
 
 /**
  * أساس ض.ق.م الفاتورة: بضاعة + شحن دولي + تخليص (مخلص/جمارك/ميناء/جمركة) + نقل محلي
- * + عمولات تحويل دفعات الصفقة (كل ما قبل ض.ق.م الفاتورة وبنود النسب الإضافية مثل كترا)
+ * (كل ما قبل ض.ق.م الفاتورة وبنود النسب الإضافية مثل كترا). عمولات الحوالات خارجه:
+ * مصروفٌ بنكي في قيد الدفعة (`logistics/payment_posting.py` `build_usd_payment_journal`).
  */
 export function invoiceVatBaseIls(
     merchandiseBase: number,
@@ -153,15 +138,11 @@ export function invoiceVatBaseIls(
     lp: LocalPayments | null | undefined
 ): number {
     if (hasEmbeddedLandedAllocations(meta)) {
-        return (
-            Math.max(0, merchandiseBase) +
-            transferCommissionsIlsForVat(meta)
-        );
+        return Math.max(0, merchandiseBase);
     }
     return (
         Math.max(0, merchandiseBase) +
         internationalFreightIlsForVat(meta) +
-        transferCommissionsIlsForVat(meta) +
         clearanceStructuredFeesSubtotal(lp) +
         localTransportIlsForVat(meta, lp)
     );

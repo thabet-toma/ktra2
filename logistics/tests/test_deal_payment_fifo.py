@@ -83,6 +83,27 @@ class DealPaymentFifoTest(APITestCase):
         self.assertTrue(jh.lines.filter(account=self.box.account, credit=D("4000.00")).exists())
         self.assertTrue(jh.lines.filter(account=fx, debit=D("500.00")).exists())  # خسارة
 
+    def test_fifo_transfer_fee_consumes_box_as_bank_charge(self):
+        # 1020$ بسعر 3 في الصندوق؛ دفعة 1000$ + عمولة 20$ بسعر 3.5.
+        fund_box_from_capital(self.box, 1020, 3, date="2026-06-19", user=self.user)
+        pay = self._payment()
+        LogisticsPayment.objects.filter(pk=pay.pk).update(transfer_cost=D("20"))
+        resp = self._post(pay)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
+        from django.db.models import Sum
+        charges = Account.objects.get(tenant=self.tenant, name="مصاريف بنكية وعمولات")
+        self.assertEqual(jh.lines.get(account=self.partner.linked_account).debit, D("3500.00"))
+        self.assertEqual(jh.lines.get(account=charges).debit, D("70.00"))
+        self.assertIsNone(jh.lines.get(account=charges).partner_id)
+        box_credit = jh.lines.filter(account=self.box.account).aggregate(c=Sum("credit"))["c"]
+        self.assertEqual(box_credit, D("3060.00"))  # 1020$ × 3 — الصندوق نزل بالعمولة أيضاً
+        self.box.refresh_from_db()
+        from accounting.fx_fifo import box_fc_balance
+        self.assertEqual(box_fc_balance(self.box), D("0"))
+        agg = jh.lines.aggregate(d=Sum("debit"), c=Sum("credit"))
+        self.assertEqual(agg["d"], agg["c"])
+
     def test_non_fifo_box_keeps_legacy_behavior(self):
         # صندوق بلا طبقات ⇒ السلوك القديم: دائن الصندوق بنفس قيمة الذمة، بلا فرق صرف
         pay = self._payment()

@@ -801,18 +801,13 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         try:
             live_subtotal = Decimal(str(data.get('subtotal') or 0))
             live_shipping = Decimal(str(data.get('shipping_cost') or 0))
-            transfer_commissions = Decimal('0')
-            if isinstance(conv, dict):
-                line_meta = conv.get('line_meta') if isinstance(conv.get('line_meta'), dict) else {}
-                transfer_commissions = Decimal(str(
-                    conv.get('deal_transfer_commissions_ils')
-                    or line_meta.get('deal_transfer_commissions_ils')
-                    or 0
-                ))
+            # عمولات الحوالات خارج الأساس: مصروفٌ بنكي في قيد الدفعة
+            # (`payment_posting.build_usd_payment_journal`) — نفس ما يحسبه الترحيل
+            # وإعادة حساب التكلفة (`landed_cost`) والشاشة.
             vat_base = max(
                 Decimal('0'),
                 live_subtotal - Decimal(str(instance.discount_amount or 0))
-                + live_shipping + transfer_commissions,
+                + live_shipping,
             )
             if instance.tax_type == 'amount':
                 live_tax = Decimal(str(instance.tax_amount or 0))

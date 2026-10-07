@@ -67,8 +67,9 @@ test.describe("Imported invoice VAT totals", () => {
       internalShippingFees: 10,
     };
 
-    expect(invoiceVatBaseIls(100, metadata, localPayments)).toBe(105);
-    expect(invoiceGrandTotalIls(100, 16.8, metadata, localPayments)).toBeCloseTo(121.8);
+    // عمولات الحوالات (5) خارج الأساس والإجمالي: مصروفٌ بنكي في قيد الدفعة.
+    expect(invoiceVatBaseIls(100, metadata, localPayments)).toBe(100);
+    expect(invoiceGrandTotalIls(100, 16.8, metadata, localPayments)).toBeCloseTo(116.8);
   });
 
   test("keeps the legacy calculation when item totals do not embed landed allocations", () => {
@@ -89,7 +90,7 @@ test.describe("Imported invoice VAT totals", () => {
       internalShippingFees: 10,
     };
 
-    expect(invoiceVatBaseIls(100, metadata, localPayments)).toBe(165);
+    expect(invoiceVatBaseIls(100, metadata, localPayments)).toBe(160);
   });
 });
 
@@ -150,7 +151,6 @@ test("distributes VAT and added fees into the final unit cost without changing t
   ];
 
   const allocated = allocateInvoiceFinalCosts(items, {
-    transferTotalIls: 0,
     taxAndFeesTotalIls: 104,
   });
 

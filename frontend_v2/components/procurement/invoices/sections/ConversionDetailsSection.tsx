@@ -434,6 +434,7 @@ export const ConversionDetailsSection: React.FC<ConversionDetailsSectionProps> =
                         </span>
                         <span className="block text-[9px] ktra-text-ink/85 dark:ktra-text-soft/85 mb-0.5 leading-snug">
                             دفعات الصفقة + حصة من عمولات دفعات شحن الشحنة (بنفس نسبة الشحن الدولي)
+                            — للاطلاع: مصروفٌ بنكي في قيد كل دفعة، خارج الفاتورة وأساس ضريبتها
                         </span>
                         <div className="text-sm font-black ktra-text-ink dark:ktra-text-soft mt-0.5">
                             {fmtIlsZero(dealTransferCommissionsIls)}

@@ -95,6 +95,55 @@ class DealPaymentCurrencyTest(APITestCase):
         jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
         self.assertEqual(self._base(jh, self.bank), (D(0), D("350.00")))
 
+    # ── عمولة الحوالة: مصروف بنكي في قيد الدفعة نفسه ─────────────────────
+    # كانت `transfer_cost` تُطلب من الصندوق («خصم المبلغ + العمولة») ولا يكتبها قيد:
+    # الصندوق الدفتري أعلى من الحقيقي بها، وكانت تُحمَّل على أساس ضريبة الفاتورة الدولية.
+
+    def _bank_charges(self):
+        return Account.objects.get(tenant=self.tenant, name="مصاريف بنكية وعمولات")
+
+    def test_deal_payment_transfer_fee_posts_as_bank_charge(self):
+        deal = self._deal("D-FEE")
+        pay = self._payment(deal, "1000")
+        LogisticsPayment.objects.filter(pk=pay.pk).update(transfer_cost=D("15"))
+        resp = self.client.post(
+            f"/api/logistics/deals/{deal.pk}/post_payment/{pay.pk}/",
+            {"bank_account_id": self.bank.pk}, format="json", **self.h)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
+        # المورد بالدفعة وحدها — العمولة ليست ديناً عليه.
+        self.assertEqual(self._base(jh, self.supplier.linked_account), (D("3240.00"), D(0)))
+        self.assertEqual(self._base(jh, self._bank_charges()), (D("48.60"), D(0)))
+        self.assertEqual(self._base(jh, self.bank), (D(0), D("3288.60")))
+
+    def test_agent_payment_transfer_fee_posts_as_bank_charge(self):
+        agent = Partner.objects.create(
+            tenant=self.tenant, name="وكيل بعمولة", partner_type="Supplier",
+            linked_account=self.supplier.linked_account)
+        shipment = LogisticsShipment.objects.create(
+            tenant=self.tenant, shipment_number="SH-FEE", shipping_agent=agent,
+            total_shipping_cost_usd=D("1000"))
+        pay = LogisticsPayment.objects.create(
+            shipment=shipment, title="AP", amount=D("100"), transfer_cost=D("10"),
+            status="Confirmed", usd_to_ils=D("3.5"), transfer_date="2026-06-20")
+        resp = self.client.post(
+            f"/api/logistics/shipments/{shipment.pk}/post_agent_payment/{pay.pk}/",
+            {"bank_account_id": self.bank.pk}, format="json", **self.h)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
+        self.assertEqual(self._base(jh, self._bank_charges()), (D("35.00"), D(0)))
+        self.assertEqual(self._base(jh, self.bank), (D(0), D("385.00")))
+
+    def test_payment_without_transfer_fee_keeps_two_lines(self):
+        deal = self._deal("D-NOFEE")
+        pay = self._payment(deal, "1000")
+        resp = self.client.post(
+            f"/api/logistics/deals/{deal.pk}/post_payment/{pay.pk}/",
+            {"bank_account_id": self.bank.pk}, format="json", **self.h)
+        self.assertEqual(resp.status_code, 200, resp.content)
+        jh = JournalHeader.objects.get(reference_type="LOGISTICS_PAYMENT", reference_id=pay.id)
+        self.assertEqual(jh.lines.count(), 2)
+
     # ── أمر التصحيح ────────────────────────────────────────────────────────
 
     def _legacy_posted(self, deal, amount):
