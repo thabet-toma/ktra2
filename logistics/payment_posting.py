@@ -348,6 +348,24 @@ def booked_transfer_commission_ils(payments, account_id) -> Decimal:
     return (Decimal(str(agg['d'] or 0)) - Decimal(str(agg['c'] or 0))).quantize(Decimal('0.01'))
 
 
+def invoice_journal_commission_ils(invoice) -> Decimal:
+    """عمولات التحويل التي رسملها قيدُ الفاتورة المرحّل: صافي دائن «مصاريف بنكية وعمولات»
+    فيه (`views/invoices.py` — `post_to_accounting`). صفرٌ بلا قيد أو بلا الحساب."""
+    from django.db.models import Sum
+
+    from accounting.services import JournalLine
+
+    if not invoice.journal_id:
+        return Decimal('0')
+    account_id = bank_charges_account_id(invoice.tenant_id)
+    if not account_id:
+        return Decimal('0')
+    agg = JournalLine.objects.filter(
+        journal_id=invoice.journal_id, account_id=account_id,
+    ).aggregate(c=Sum('credit'), d=Sum('debit'))
+    return (Decimal(str(agg['c'] or 0)) - Decimal(str(agg['d'] or 0))).quantize(Decimal('0.01'))
+
+
 def import_invoice_booked_commission(invoice) -> tuple[Decimal, int | None]:
     """(شيكل، الحساب) عمولات التحويل التي تُحمَّل على تكلفة الفاتورة الدولية.
 

@@ -2221,6 +2221,46 @@ def goods_clearing_unit_costs(invoice, total_clearing):
     return out
 
 
+def posted_goods_line_costs(invoice):
+    """{item_id: قيمة السطر في المخزون} لفاتورة دولية مرحّلة — أو None.
+
+    قيمة البند = تكلفته المستوردة الحالية (`landed_line_total_ils`: بضاعة + شحن + تخليص
+    + نقل، وتعديلاتها بعد الترحيل — `domain/landed_revaluation.py` يحدّثها) + حصّته ممّا
+    رسمله قيدُها فوقها: الرسوم المرسملة وعمولات التحويل التي دائنها
+    (`payment_posting.invoice_journal_commission_ils`) — بتوزيع `goods_clearing_unit_costs`
+    نفسه الذي تُستلَم به البضاعة ويُرحَّل به قيد الاستلام، فيساوي مدينَه بالقرش.
+    مصدرُ متوسط «تكلفة المنتجات» (`inventory.services.product_cost_breakdown`): كان
+    `landed_line_total_ils` وحده فيسقط العمولة والرسوم المرسملة — «الكمية × avg_cost»
+    أقلّ من 1104 بها (INV-0022: 68.04). None لغيرها (محلية، مرتجع، غير مرحّلة، بندٌ بلا
+    تكلفة مستوردة) — يبقى للمستدعي مصدره المعتاد.
+    """
+    from .models import PurchaseInvoice
+    from .payment_posting import invoice_journal_commission_ils
+
+    if (invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+            or invoice.is_return or not invoice.is_posted):
+        return None
+    goods = [
+        it for it in invoice.items.all()
+        if it.product_id and not it.expense_account_id and Decimal(str(it.quantity or 0)) > 0
+    ]
+    if not goods or any(
+            it.landed_line_total_ils is None or Decimal(str(it.landed_line_total_ils)) <= 0
+            for it in goods):
+        return None
+    capitalized = sum(
+        (Decimal(str(f.amount or 0)) for f in invoice.fees.all() if f.capitalize_to_inventory),
+        Decimal('0'))
+    total = (
+        sum((Decimal(str(it.landed_line_total_ils)) for it in goods), Decimal('0'))
+        + capitalized + invoice_journal_commission_ils(invoice)
+    )
+    return {
+        item_id: share
+        for item_id, (_unit, share) in goods_clearing_unit_costs(invoice, total).items()
+    }
+
+
 def open_goods_clearing(invoice):
     """وسيط الاستلام (GR/IR) لفاتورة مرحّلة: (الحساب، إجمالي المدين، الرصيد المفتوح).
 

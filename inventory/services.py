@@ -2076,11 +2076,14 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
     Σ(كميات الشراء). المقام هو إجمالي الكمية المشتراة (لا الكمية الحالية المتبقية)،
     فلا يتأثر بما بِيع.
 
-    تكلفة بند الفاتورة تُؤخذ بأفضلية landed cost (السعر النازل الحقيقي للمستورد):
+    تكلفة بند الفاتورة: الدولية المرحّلة = قيمته في المخزون
+    (`logistics.services.posted_goods_line_costs` — يشمل عمولات التحويل والرسوم المرسملة،
+    ويطابق قيد الاستلام وحركته بالقرش)؛ وإلا بأفضلية landed cost:
       landed_line_total_ils ← landed_unit_price_ils × qty ← total_price.
     البنود متعددة لنفس المنتج داخل فاتورة واحدة تُجمَّع في صفّ فاتورة واحد.
     """
     from logistics.models import PurchaseInvoiceItem
+    from logistics.services import posted_goods_line_costs
 
     items = (
         PurchaseInvoiceItem.objects.filter(
@@ -2093,8 +2096,11 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
 
     by_invoice: dict[int, dict] = {}
     order: list[int] = []
+    posted_costs: dict[int, dict | None] = {}
     for it in items:
         inv = it.invoice
+        if inv.id not in posted_costs:
+            posted_costs[inv.id] = posted_goods_line_costs(inv)
         if inv.id not in by_invoice:
             order.append(inv.id)
             by_invoice[inv.id] = {
@@ -2107,7 +2113,10 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
                 '_cost': Decimal('0'),
             }
         qty = Decimal(str(it.quantity or 0))
-        if it.landed_line_total_ils is not None and Decimal(str(it.landed_line_total_ils)) > 0:
+        posted = posted_costs[inv.id]
+        if posted is not None and it.id in posted:
+            cost = posted[it.id]
+        elif it.landed_line_total_ils is not None and Decimal(str(it.landed_line_total_ils)) > 0:
             cost = Decimal(str(it.landed_line_total_ils))
         elif it.landed_unit_price_ils is not None and Decimal(str(it.landed_unit_price_ils)) > 0:
             cost = Decimal(str(it.landed_unit_price_ils)) * qty

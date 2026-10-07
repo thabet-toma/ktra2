@@ -761,3 +761,121 @@ class ImportInvoiceSettlementTest(APITestCase):
         row = next(r for r in listed.get("results", listed) if r["id"] == inv.pk)
         self.assertEqual(D(row["import_payment"]["payable_total"]), box)
         self.assertEqual(row["import_payment"]["payment_status"], "paid")
+
+    # ── تكلفة الوحدة في المخزون = حصّة البند من مدين البضاعة المرحّل (لا السعر المستورد) ──
+    def _post_and_receive(self, inv):
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/post-to-accounting/",
+            {"receive_on_post": True}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 201, res.content)
+        inv.refresh_from_db()
+        return inv
+
+    def _grn_inventory_debit(self, inv):
+        from accounting.models import JournalHeader
+        grn = JournalHeader.objects.get(
+            tenant=self.tenant, reference_type="PURCHASE_GRN", reference_id=inv.pk)
+        return sum((l.debit for l in grn.lines.all()), D("0"))
+
+    def _receipt_value(self, inv):
+        from inventory.models import StockMovement
+        moves = StockMovement.objects.filter(
+            tenant=self.tenant, reference_type="PURCHASE_INVOICE", reference_id=inv.pk,
+            movement_type="IN")
+        return sum((m.quantity * m.unit_cost for m in moves), D("0")).quantize(Q2)
+
+    def _stock_value_at_avg(self, inv):
+        """قيمة المخزون كما تقرؤها التقارير في النموذج الدوري: الكمية × avg_cost."""
+        total = D("0")
+        for it in inv.items.select_related("product"):
+            it.product.refresh_from_db()
+            total += it.quantity * it.product.avg_cost
+        return total.quantize(Q2)
+
+    def test_commission_enters_avg_cost_and_receipt_matches_grn(self):
+        self._post_deal_payment_with_commission(self.deals[0], "10")  # 35 ₪
+        inv = self._post_and_receive(self._release_and_import()[0])
+        grn = self._grn_inventory_debit(inv)
+        landed = sum((it.landed_line_total_ils for it in inv.items.all()), D("0"))
+        self.assertEqual(grn, (landed + D("35")).quantize(Q2))
+        # الثابت: Σ(كمية × تكلفة وحدة الحركة) = مدين المخزون في قيد الاستلام بالقرش.
+        self.assertEqual(self._receipt_value(inv), grn)
+        # والمتوسط (النموذج الدوري — الافتراضي) يحمل العمولة: كان السعرَ المستورد وحده.
+        self.assertEqual(self._stock_value_at_avg(inv), grn)
+
+    def test_capitalized_fee_enters_unit_cost_expensed_fee_does_not(self):
+        misc = Account.objects.get(tenant=self.tenant, code="5307")
+        inv = self._release_and_import()[0]
+        inv.fees.create(tenant=self.tenant, description="تكاليف كترا", amount=D("100"),
+                        expense_account=misc, capitalize_to_inventory=True)
+        inv.fees.create(tenant=self.tenant, description="رسم إداري", amount=D("50"),
+                        expense_account=misc, capitalize_to_inventory=False)
+        inv = self._post_and_receive(inv)
+        landed = sum((it.landed_line_total_ils for it in inv.items.all()), D("0"))
+        grn = self._grn_inventory_debit(inv)
+        self.assertEqual(grn, (landed + D("100")).quantize(Q2))
+        self.assertEqual(self._receipt_value(inv), grn)
+        self.assertEqual(self._stock_value_at_avg(inv), grn)
+
+    def test_reconcile_command_fixes_avg_without_touching_inventory(self):
+        from io import StringIO
+
+        from django.core.management import call_command
+        from inventory.models import Product
+
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        inv = self._post_and_receive(self._release_and_import()[0])
+        grn = self._grn_inventory_debit(inv)
+        item = inv.items.select_related("product").get()
+        # حال الإنتاج قبل الإصلاح: المتوسط = السعر المستورد بلا العمولة.
+        Product.objects.filter(pk=item.product_id).update(avg_cost=item.landed_unit_price_ils)
+        inventory_lines = JournalLine.objects.filter(
+            tenant=self.tenant, account__code="1104").count()
+
+        out = StringIO()
+        call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), stdout=out)
+        report = out.getvalue()
+        self.assertIn(inv.invoice_number, report)
+        self.assertIn("35.00", report)
+        item.product.refresh_from_db()
+        self.assertEqual(item.product.avg_cost, item.landed_unit_price_ils)  # قراءةٌ فقط
+
+        call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), "--apply",
+                     stdout=StringIO())
+        self.assertEqual(self._stock_value_at_avg(inv), grn)
+        # لا مبيع: لا قيد — 1104 كما هو.
+        self.assertEqual(JournalLine.objects.filter(
+            tenant=self.tenant, account__code="1104").count(), inventory_lines)
+
+    def test_reconcile_command_leaves_fifo_sales_alone(self):
+        """المبيع كُلِّف من طبقة FIFO (بالعمولة) لا من avg_cost — فلا فرق مبيعٍ ولا قيد."""
+        from io import StringIO
+
+        from django.core.management import call_command
+        from accounting.models import JournalHeader
+        from inventory.models import Product
+        from inventory.services import record_stock_movement
+
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        inv = self._post_and_receive(self._release_and_import()[0])
+        grn = self._grn_inventory_debit(inv)
+        item = inv.items.select_related("product").get()
+        Product.objects.filter(pk=item.product_id).update(avg_cost=item.landed_unit_price_ils)
+        product = Product.objects.get(pk=item.product_id)
+        sale = record_stock_movement(
+            product=product, movement_type="OUT", quantity=D("2"),
+            reference_type="SALE", reference_id=999, movement_date="2026-07-20",
+            tenant=self.tenant)
+        # كلفة البيع = خُمسا قيمة الاستلام (10 وحدات) — تحمل العمولة.
+        self.assertEqual(sale.total_cost, (grn * D("2") / D("10")).quantize(Q2))
+        journals = JournalHeader.objects.filter(tenant=self.tenant).count()
+
+        out = StringIO()
+        call_command("reconcile_import_unit_costs", "--tenant", str(self.tenant.pk), "--apply",
+                     stdout=out)
+        self.assertNotIn("حركة صرف", out.getvalue())
+        self.assertEqual(JournalHeader.objects.filter(tenant=self.tenant).count(), journals)
+        sale.refresh_from_db()
+        self.assertEqual(sale.total_cost, (grn * D("2") / D("10")).quantize(Q2))
+        product.refresh_from_db()
+        self.assertEqual((product.avg_cost * D("10")).quantize(Q2), grn)

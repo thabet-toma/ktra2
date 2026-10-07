@@ -1550,19 +1550,17 @@ def _posted_commission_drifted(inv: PurchaseInvoice) -> bool:
     """عمولات التحويل في قيد الفاتورة المرحّل ≠ ما قيّدته دفعاتها الآن — فاتورةٌ رُحّلت
     قبل تحميل العمولة على التكلفة (أو تغيّرت دفعاتها) متأخّرة، و«أعد الاحتساب والترحيل»
     يصلحها. خارج حارس الترحيل: المسودة تحسبها عند ترحيلها."""
-    from django.db.models import Sum
-
-    from logistics.payment_posting import import_invoice_booked_commission
+    from logistics.payment_posting import (
+        import_invoice_booked_commission,
+        invoice_journal_commission_ils,
+    )
 
     if not inv.journal_id:
         return False
     live, account_id = import_invoice_booked_commission(inv)
     if not account_id:
         return False
-    posted = inv.journal.lines.filter(account_id=account_id).aggregate(
-        c=Sum('credit'), d=Sum('debit'))
-    posted_net = _d(posted['c']) - _d(posted['d'])
-    return posted_net.quantize(Q2) != live.quantize(Q2)
+    return invoice_journal_commission_ils(inv) != live.quantize(Q2)
 
 
 def _json_friendly_value(x: Any) -> Any:
