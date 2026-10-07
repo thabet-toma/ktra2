@@ -549,3 +549,96 @@ class ImportInvoiceSettlementTest(APITestCase):
         inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
         detail = self.client.get(f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
         self.assertEqual(D(detail["remaining_balance"]), D("0.00"))
+
+    # ── الطرف الدائن للرسم: يُدائَن لجهته لا للمورد ─────────────────────────
+    def _ktra(self):
+        return Partner.objects.create(
+            tenant=self.tenant, name="كترا", partner_type="Supplier",
+            linked_account=Account.objects.create(
+                tenant=self.tenant, code="AP-KTRA", name="ذمم كترا",
+                account_type="Liability", is_active=True))
+
+    def _party_fee(self, inv, ktra, amount="420"):
+        return inv.fees.create(
+            tenant=self.tenant, description="تكاليف كترا", amount=D(amount),
+            expense_account=Account.objects.get(tenant=self.tenant, code="5307"),
+            capitalize_to_inventory=False, credit_partner=ktra)
+
+    def test_vat_base_fee_changes_only_tax_base(self):
+        invoices = self._release_and_import()
+        PurchaseInvoice.objects.filter(pk__in=[i.pk for i in invoices]).update(
+            tax_rate=D("16"), tax_type="percentage")
+        expense = Account.objects.get(tenant=self.tenant, code="5307")
+        inv = invoices[0]
+        inv.fees.create(tenant=self.tenant, description="رسم خارج الأساس", amount=D("50"),
+                        expense_account=expense, capitalize_to_inventory=False)
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv.refresh_from_db()
+        subtotal, tax_without = inv.subtotal, inv.tax_amount
+        self.assertEqual(tax_without, (subtotal * D("0.16")).quantize(Q2))
+
+        inv.fees.create(tenant=self.tenant, description="رسم ضمن الأساس", amount=D("100"),
+                        expense_account=expense, capitalize_to_inventory=False,
+                        is_taxable=True)
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv.refresh_from_db()
+        # الضريبة وحدها ارتفعت بضريبة الرسم؛ البضاعة والرسوم كما هي.
+        self.assertEqual(inv.subtotal, subtotal)
+        self.assertEqual(inv.tax_amount, ((subtotal + D("100")) * D("0.16")).quantize(Q2))
+        self.assertEqual(inv.tax_amount - tax_without, D("16.00"))
+        self.assertEqual(
+            sorted(f.amount for f in inv.fees.all()), [D("50.00"), D("100.00")])
+        # الشاشة (القراءة الحيّة للمسودة) تقول الرقم نفسه.
+        detail = self.client.get(
+            f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
+        self.assertEqual(D(detail["tax_amount"]), inv.tax_amount)
+
+    def test_import_payment_excludes_party_fees(self):
+        ktra = self._ktra()
+        inv = self._release_and_import()[0]
+        before = self._breakdown(inv)
+        supplier_payable = self._supplier_payable(inv)
+        self._party_fee(inv, ktra)
+        after = self._breakdown(inv)
+        self.assertEqual(after["components"]["supplier"], before["components"]["supplier"])
+        self.assertEqual(D(after["payable_total"]), D(before["payable_total"]))
+        self.assertEqual(D(after["remaining_balance"]), D(before["remaining_balance"]))
+        self.assertEqual(self._supplier_payable(inv), supplier_payable)
+
+        inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        self.assertEqual(self._ap_credit(inv), supplier_payable)
+        party = inv.journal.lines.get(account__code="AP-KTRA")
+        self.assertEqual((party.credit, party.partner_id), (D("420.00"), ktra.pk))
+        posted = self._breakdown(inv)
+        self.assertEqual(D(posted["components"]["supplier"]["cost"]), supplier_payable)
+
+    def test_unpost_repost_and_recalc_repost_keep_credit_party(self):
+        ktra = self._ktra()
+        inv = self._release_and_import()[0]
+        fee = self._party_fee(inv, ktra)
+
+        def party_line(invoice):
+            invoice.refresh_from_db()
+            line = invoice.journal.lines.get(account__code="AP-KTRA")
+            return line.credit, line.partner_id
+
+        # ترحيلٌ قديم الشكل (قبل 51b12571) يجعل «أعد الاحتساب والترحيل» يعيد القيد فعلاً.
+        with mock.patch(
+            "logistics.accruals.import_invoice_accrual_credits", return_value=[],
+        ):
+            inv = self._post(inv)
+        self.assertEqual(party_line(inv), (D("420.00"), ktra.pk))
+
+        res = self._recalculate(auto_repost=True)
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.json()["reconciliation"]["reposted"], 1)
+        self.assertEqual(party_line(inv), (D("420.00"), ktra.pk))
+        fee.refresh_from_db()
+        self.assertEqual(fee.credit_partner_id, ktra.pk)
+
+        res = self.client.post(
+            f"/api/logistics/purchase-invoices/{inv.pk}/unpost/", {}, format="json",
+            **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        self.assertEqual(party_line(inv), (D("420.00"), ktra.pk))

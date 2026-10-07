@@ -8,6 +8,7 @@ import {
   DealInvoiceInfo,
   InvoiceInstallment,
   DealActivity,
+  PurchaseInvoiceFeeLine,
 } from "@/types";
 import {
   Save,
@@ -56,6 +57,9 @@ import {
   invoiceVatBaseIls,
   purchaseInvoiceFeeAmount,
   sumTaxesAndFeesExtras,
+  feeHasCreditParty,
+  supplierFeesTotalIls,
+  vatBaseFeesIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
@@ -277,6 +281,21 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // المجموعة القابلة للاختيار التي يستعملها الاختيار التلقائي للرسوم.
   const [allAccounts, setAllAccounts] = useState<FeeAccountRow[]>([]);
   const feeAccounts = useMemo(() => allAccounts.filter(isFeeAccount), [allAccounts]);
+  /* الطرف الدائن للرسم: الجهات للاختيار، ووضع كل رسمٍ اختير له «جهة/حساب» ولم
+     يُحدَّد بعد (بلا هذا يرتدّ الاختيار «المورد» قبل أن يختار المستخدم). */
+  const [creditPartners, setCreditPartners] = useState<Array<{ id: number; name: string }>>([]);
+  const [feeCreditMode, setFeeCreditMode] = useState<Record<string, "supplier" | "partner" | "account">>({});
+
+  useEffect(() => {
+    accountingApi.getPartners()
+      .then((rows) => setCreditPartners(
+        (rows as Array<{ id: number; name: string }>).map((p) => ({ id: Number(p.id), name: String(p.name ?? "") })),
+      ))
+      .catch((error) => {
+        console.error("[PurchaseInvoiceFees] Failed to load credit partners", error);
+        setCreditPartners([]);
+      });
+  }, []);
 
   useEffect(() => {
     accountingApi.getAccounts()
@@ -608,7 +627,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     if (nextData.taxType === 'amount') {
       taxAmount = nextData.taxAmount || 0;
     } else {
-      taxAmount = vatBase * ((nextData.taxRate || 0) / 100);
+      // الرسوم «ضمن أساس الضريبة» تُضاف للأساس وحده — مرآة الخادم (`vatBaseFeesIls`).
+      taxAmount = (vatBase + vatBaseFeesIls(nextData.fees, merchandiseBase)) * ((nextData.taxRate || 0) / 100);
     }
     const mainVatRounded = roundSqlMoney2(taxAmount);
 
@@ -719,6 +739,15 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     );
     if (invalidFee) {
       toast("أكمل بيان ومبلغ وحساب كل بند في الضرائب والرسوم الإضافية", "error");
+      setActiveTabKey("fees");
+      return;
+    }
+    const partyPending = (formData.fees || []).find((fee, index) => {
+      const mode = feeCreditMode[fee.id || String(index)];
+      return (mode === "partner" && !fee.creditPartnerId) || (mode === "account" && !fee.creditAccountId);
+    });
+    if (partyPending) {
+      toast(`اختر الطرف الدائن للرسم «${partyPending.description}» أو أعده «المورد».`, "error");
       setActiveTabKey("fees");
       return;
     }
@@ -834,6 +863,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           expense_account: Number(fee.expenseAccountId),
           capitalize_to_inventory: Boolean(fee.capitalizeToInventory),
           is_taxable: Boolean(fee.isTaxable),
+          // الطرف الدائن يُرسَل دائماً: الحفظ يعيد بناء الرسوم، فغيابه يُرجعها للمورد.
+          credit_partner: fee.creditPartnerId || null,
+          credit_account: fee.creditAccountId || null,
         })),
         conversion_metadata_json: payload.conversionMetadata || null,
         currency: payload.currency || 'ILS',
@@ -1218,7 +1250,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         if (updated.taxType === 'amount') {
           taxAmount = updated.taxAmount || 0;
         } else {
-          taxAmount = vatBase * ((updated.taxRate || 0) / 100);
+          taxAmount = (vatBase + vatBaseFeesIls(updated.fees, merchandiseBase)) * ((updated.taxRate || 0) / 100);
         }
         const mainVatRounded = roundSqlMoney2(taxAmount);
 
@@ -2108,9 +2140,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const feesTotal = (formData.fees || []).reduce(
     (sum, fee) => sum + (Number(fee.amount) || 0), 0,
   );
+  /* رسمٌ له طرفٌ دائن (جهة/حساب) خارج مستحقّ المورد — مرآة `purchase_invoice_fees_total`. */
+  const supplierFeesTotal = supplierFeesTotalIls(formData.fees);
+  const partyFeesTotal = roundSqlMoney2(feesTotal - supplierFeesTotal);
   const payableTotal = purchasePayableTotal({
     grandTotal: Number(formData.grandTotal) || 0,
-    feesTotal,
+    feesTotal: supplierFeesTotal,
     international: formData.invoiceType === "international" && !formData.isReturn,
     isPosted: Boolean(formData.isPosted),
     serverPayableTotal: formData.payableTotal,
@@ -2124,6 +2159,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     isPosted: Boolean(formData.isPosted),
     serverSupplierPayable: formData.supplierPayableTotal,
   });
+  /* رسمٌ «ضمن أساس الضريبة» يغيّر ضريبة الفاتورة: تعديلٌ يمسّه يعيد احتساب الإجماليات،
+     وما عداه يُحفظ كما هو فلا تتحرّك ضريبةُ فاتورةٍ لا تعنيها. */
+  const applyFees = (fees: PurchaseInvoiceFeeLine[]) => {
+    if ([...(formData.fees || []), ...fees].some((fee) => fee.isTaxable)) recalculateTotals({ fees });
+    else setFormData((prev) => ({ ...prev, fees }));
+    markDirty();
+  };
+  const setFeeAt = (index: number, patch: Partial<PurchaseInvoiceFeeLine>) => {
+    const fees = [...(formData.fees || [])];
+    fees[index] = { ...fees[index], ...patch };
+    applyFees(fees);
+  };
   const defaultInlineFeeAccount =
     feeAccounts.find((account) => account.code === "5307") ||
     feeAccounts.find((account) => account.account_type === "Expense") ||
@@ -2183,10 +2230,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             onResolveFeeAccount={isInternationalInvoice ? resolveImportFeeAccount : undefined}
             readOnly={effectiveReadOnly}
             onFinancial={handleUpdateFinancial}
-            onFeesChange={(fees) => {
-              setFormData((prev) => ({ ...prev, fees }));
-              markDirty();
-            }}
+            onFeesChange={applyFees}
           />
           <NISFinancialSummary
             subtotal={formData.subtotal || 0}
@@ -2309,12 +2353,65 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     console.info("[PurchaseInvoiceFees] Added fee editor line", { kind, invoiceId: formData.id || null });
     window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-fee-amount='${id}']`)?.focus(), 0);
   };
+  const chooseFeeCreditMode = (index: number, mode: "supplier" | "partner" | "account") => {
+    const fee = (formData.fees || [])[index];
+    if (!fee) return;
+    setFeeCreditMode((prev) => ({ ...prev, [fee.id || String(index)]: mode }));
+    setFeeAt(index, {
+      creditPartnerId: null, creditPartnerName: undefined,
+      creditAccountId: null, creditAccountCode: undefined, creditAccountName: undefined,
+      // رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة (يرفضه الخادم).
+      ...(mode === "supplier" ? {} : { isTaxable: false }),
+    });
+  };
+  /* عمولات حوالات الصفقة على التكلفة: الدفعة رحّلتها مصروفاً بنكياً، والرسم يرسملها
+     ويُدائن «مصاريف بنكية وعمولات» — فينقل المصروف إلى المخزون ولا يمسّ المورد. */
+  const loadTransferCommissionsFee = () => {
+    if (!enterFeeEditMode()) return;
+    const meta = (formData.conversionMetadata || {}) as Record<string, unknown>;
+    const lineMeta = (meta.line_meta && typeof meta.line_meta === "object" ? meta.line_meta : {}) as Record<string, unknown>;
+    const amount = roundSqlMoney2(Number(meta.deal_transfer_commissions_ils ?? lineMeta.deal_transfer_commissions_ils) || 0);
+    if (amount <= 0) {
+      toast("لا عمولات حوالات مسجّلة على صفقة هذه الفاتورة.", "error");
+      return;
+    }
+    const bankCharges = allAccounts.find((account) => (account.name || "").trim() === "مصاريف بنكية وعمولات");
+    if (!bankCharges) {
+      toast("لا يوجد حساب «مصاريف بنكية وعمولات» في شجرة الحسابات — أنشئه أولاً.", "error");
+      return;
+    }
+    const debit = defaultInlineFeeAccount;
+    const line: PurchaseInvoiceFeeLine = {
+      id: crypto.randomUUID(),
+      description: "عمولات الحوالات",
+      amount,
+      calculationType: "amount",
+      calculationValue: amount,
+      percentageBasis: "goods",
+      expenseAccountId: debit?.id || null,
+      expenseAccountCode: debit?.code,
+      expenseAccountName: debit?.name,
+      capitalizeToInventory: true,
+      isTaxable: false,
+      creditAccountId: Number(bankCharges.id),
+      creditAccountCode: bankCharges.code,
+      creditAccountName: bankCharges.name ?? undefined,
+    };
+    const current = formData.fees || [];
+    const existing = current.findIndex((fee) => Number(fee.creditAccountId) === Number(bankCharges.id));
+    applyFees(existing >= 0
+      ? current.map((fee, i) => (i === existing ? { ...fee, amount, calculationValue: amount } : fee))
+      : [...current, line]);
+    console.info("[PurchaseInvoiceFees] Loaded transfer commissions fee", { invoiceId: formData.id || null, amount });
+  };
   const feesTab = (
     <div className="ktra-legacy-tab">
       <div className="mb-3 grid grid-cols-1 gap-2 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-2)] p-3 sm:grid-cols-3">
         <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي الفاتورة الأساسي</span><b>{formatMoney(formData.grandTotal || 0)} ₪</b></div>
         <div><span className="block text-xs text-[var(--color-text-muted)]">ضرائب ورسوم إضافية</span><b className="text-amber-700">{formatMoney(feesTotal)} ₪</b></div>
-        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b></div>
+        <div><span className="block text-xs text-[var(--color-text-muted)]">إجمالي المستحق</span><b className="text-emerald-700">{formatMoney(payableTotal)} ₪</b>
+          {partyFeesTotal > 0 && <span className="block text-xs text-[var(--color-text-muted)]">بلا {formatMoney(partyFeesTotal)} ₪ رسومٌ دائنُها غيرُ المورد</span>}
+        </div>
       </div>
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
@@ -2332,6 +2429,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <button type="button" className="ktra-toolbtn" onClick={() => appendFeeLine("fee")}>
               <Plus size={14} /> {feeEditorState.requiresEdit ? "تحرير وإضافة رسم" : "إضافة رسم"}
             </button>
+            {isInternationalInvoice && (
+              <button type="button" className="ktra-toolbtn" onClick={loadTransferCommissionsFee}>
+                <Banknote size={14} /> تحميل عمولات الحوالات
+              </button>
+            )}
           </div>
         )}
       </div>
@@ -2349,20 +2451,46 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <th className="p-1 text-start">البيان</th>
             <th className="p-1 text-start">الحساب</th>
             <th className="w-32 p-1 text-center">المبلغ (₪)</th>
-            <th className="w-24 p-1 text-center">رسملة</th>
+            <th className="w-44 p-1 text-start">الطرف الدائن</th>
+            <th className="w-24 p-1 text-center">ضمن أساس الضريبة</th>
+            <th className="w-24 p-1 text-center">يُضاف للتكلفة</th>
             <th className="w-14 p-1"></th>
           </tr></thead>
           <tbody>
-            {(formData.fees || []).map((fee, index) => (
+            {(formData.fees || []).map((fee, index) => {
+              const creditMode = feeCreditMode[fee.id || String(index)]
+                ?? (fee.creditPartnerId ? "partner" : fee.creditAccountId ? "account" : "supplier");
+              return (
               <tr key={fee.id || index}>
-                <td className="p-1"><input className="ktra-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, description: e.target.value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1"><input className="ktra-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; const fees = [...(formData.fees || [])]; fees[index] = { ...fee, amount: value, calculationValue: value }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} checked={fee.capitalizeToInventory} onChange={(e) => { const fees = [...(formData.fees || [])]; fees[index] = { ...fee, capitalizeToInventory: e.target.checked }; setFormData((prev) => ({ ...prev, fees })); markDirty(); }} /></td>
-                <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="ktra-toolbtn" onClick={() => { setFormData((prev) => ({ ...prev, fees: (prev.fees || []).filter((_, i) => i !== index) })); markDirty(); }}><Trash2 size={14} /></button>}</td>
+                <td className="p-1"><input className="ktra-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => setFeeAt(index, { description: e.target.value })} /></td>
+                <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => setFeeAt(index, { expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined })} /></td>
+                <td className="p-1"><input className="ktra-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; setFeeAt(index, { amount: value, calculationValue: value }); }} /></td>
+                <td className="p-1">
+                  <select className="ktra-input w-full" disabled={effectiveReadOnly} value={creditMode} title="من يُدائَن بهذا الرسم في قيد الترحيل" onChange={(e) => chooseFeeCreditMode(index, e.target.value as "supplier" | "partner" | "account")}>
+                    <option value="supplier">المورد</option>
+                    <option value="partner">جهة…</option>
+                    <option value="account">حساب…</option>
+                  </select>
+                  {creditMode === "partner" && (
+                    <select className="ktra-input mt-1 w-full" disabled={effectiveReadOnly} value={fee.creditPartnerId || ""} onChange={(e) => { const id = Number(e.target.value) || null; setFeeAt(index, { creditPartnerId: id, creditPartnerName: creditPartners.find((p) => p.id === id)?.name }); }}>
+                      <option value="">اختر الجهة…</option>
+                      {fee.creditPartnerId && !creditPartners.some((p) => p.id === fee.creditPartnerId) && (
+                        <option value={fee.creditPartnerId}>{fee.creditPartnerName || `#${fee.creditPartnerId}`}</option>
+                      )}
+                      {creditPartners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                    </select>
+                  )}
+                  {creditMode === "account" && (
+                    <div className="mt-1"><AccountTreeField accounts={allAccounts} value={fee.creditAccountId || ""} disabled={effectiveReadOnly} title="الحساب الدائن — لا صندوق ولا بنك" isSelectable={(account) => !accountMatchesPurpose(account, "cash")} onChange={(id, account) => setFeeAt(index, { creditAccountId: id, creditAccountCode: account?.code, creditAccountName: account?.name ?? undefined })} /></div>
+                  )}
+                </td>
+                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly || creditMode !== "supplier" || (fee.calculationType === "percentage" && fee.percentageBasis === "after_main_vat")} title={creditMode !== "supplier" ? "رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة" : "يُضاف مبلغه لأساس ضريبة الفاتورة"} checked={Boolean(fee.isTaxable)} onChange={(e) => setFeeAt(index, { isTaxable: e.target.checked })} /></td>
+                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} title="يُرسمَل على تكلفة البضاعة بدل المصروف" checked={fee.capitalizeToInventory} onChange={(e) => setFeeAt(index, { capitalizeToInventory: e.target.checked })} /></td>
+                <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="ktra-toolbtn" onClick={() => applyFees((formData.fees || []).filter((_, i) => i !== index))}><Trash2 size={14} /></button>}</td>
               </tr>
-            ))}
-            {(formData.fees || []).length === 0 && <tr><td colSpan={5} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
+              );
+            })}
+            {(formData.fees || []).length === 0 && <tr><td colSpan={7} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
           </tbody>
         </table>
       </div>
@@ -3911,7 +4039,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             )}
             {(formData.fees || []).map((fee, index) => (
               <div className="ktra-total-row" key={fee.id || index}>
-                <span>{fee.description || "رسم إضافي"}</span>
+                {/* رسمٌ دائنُه غيرُ المورد خارج «المستحق» أدناه — يُسمّى دائنُه. */}
+                <span>{fee.description || "رسم إضافي"}{feeHasCreditParty(fee) && ` — دائن ${fee.creditPartnerName || fee.creditAccountName || ""}`}</span>
                 <span className="ktra-total-value">{fmt(fee.amount || 0)}</span>
               </div>
             ))}
@@ -3958,7 +4087,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             )}
             {(formData.fees || []).map((fee, index) => (
               <div className="ktra-total-row" key={fee.id || index}>
-                <span>{fee.description || "رسم إضافي"}</span>
+                {/* رسمٌ دائنُه غيرُ المورد خارج «المستحق» أدناه — يُسمّى دائنُه. */}
+                <span>{fee.description || "رسم إضافي"}{feeHasCreditParty(fee) && ` — دائن ${fee.creditPartnerName || fee.creditAccountName || ""}`}</span>
                 <span className="ktra-total-value">{fmt(fee.amount || 0)}</span>
               </div>
             ))}

@@ -984,10 +984,75 @@ def import_invoice_ap_credit(invoice) -> Decimal | None:
 
 
 def purchase_invoice_fees_total(invoice) -> Decimal:
+    """رسوم الفاتورة التي يدائن بها **المورد** — بلا رسمٍ له طرفٌ دائن غيره
+    (`PurchaseInvoiceFee.credit_partner`/`credit_account`): ذاك يُدائَن لجهته في قيد
+    الترحيل، فلا يدخل ذمّة المورد ولا مستحقّه ولا مدفوعه/متبقّيه. نسخة SQL في
+    `annotate_purchase_invoice_payment_summary`."""
     return sum(
-        (Decimal(str(f.amount or 0)) for f in invoice.fees.all()),
+        (Decimal(str(f.amount or 0)) for f in invoice.fees.all() if not f.has_credit_party),
         Decimal("0"),
     ).quantize(DEC)
+
+
+def purchase_invoice_vat_base_fees_total(invoice, fees=None) -> Decimal:
+    """مبالغ الرسوم «ضمن أساس الضريبة» (`is_taxable`) — تُضاف لأساس ضريبة الفاتورة.
+    مرآتها في الواجهة `frontend_v2/utils/invoiceTaxesAndFees.ts` (`vatBaseFeesIls`)."""
+    rows = invoice.fees.all() if fees is None else fees
+    return sum(
+        (Decimal(str(f.amount or 0)) for f in rows if f.is_taxable),
+        Decimal("0"),
+    ).quantize(DEC)
+
+
+def fee_credit_party_error(fee, invoice) -> str | None:
+    """سبب رفض الطرف الدائن لرسم، أو None. مصدرٌ واحد للحفظ (`serializers/invoices.py`)
+    وللترحيل. يقبل صفّ رسمٍ أو قاموس حقوله."""
+    from accounting.services import is_cash_or_bank_account
+
+    get = (fee.get if isinstance(fee, dict) else (lambda k, d=None: getattr(fee, k, d)))
+    partner, account = get('credit_partner'), get('credit_account')
+    if partner is not None and account is not None:
+        return 'الطرف الدائن للرسم جهةٌ أو حساب — لا الاثنان معاً.'
+    if partner is None and account is None:
+        return None
+    if get('is_taxable'):
+        # ضريبة الرسم تدخل ضريبة الفاتورة التي يُدائَن بها المورد — لا جهتُه.
+        return 'رسمٌ دائنُه جهةٌ غير المورد لا يدخل أساس ضريبة الفاتورة.'
+    if partner is not None:
+        if partner.tenant_id != invoice.tenant_id:
+            return 'الجهة الدائنة من شركةٍ أخرى.'
+        if not partner.linked_account_id:
+            return f'الجهة «{partner.name}» بلا حساب ذمم مربوط — اربطها بحسابها أولاً.'
+        target = partner.linked_account
+    else:
+        if account.tenant_id != invoice.tenant_id:
+            return 'الحساب الدائن من شركةٍ أخرى.'
+        target = account
+    if is_cash_or_bank_account(target):
+        return ('الطرف الدائن لا يكون صندوقاً أو بنكاً — ذاك دفعٌ لا تحميل؛ '
+                'سجّل الرسم على جهته ثم ادفعه بسند صرف.')
+    if invoice.deal_id:
+        from logistics.payment_posting import live_archive_deal_journals
+        if live_archive_deal_journals(invoice.tenant_id, [invoice.deal_id]):
+            return 'فاتورة صفقة أرشيف — ترحيلها مقفل، فلا رسم بطرفٍ دائن عليها.'
+    return None
+
+
+def purchase_invoice_fee_credit_line(fee, invoice_number) -> dict:
+    """سطر الدائن لرسمٍ له طرفٌ دائن: حساب الجهة المربوط بوسمها، أو الحساب بلا طرف."""
+    if fee.credit_partner_id:
+        account_id, partner_id = fee.credit_partner.linked_account_id, fee.credit_partner_id
+        who = fee.credit_partner.name
+    else:
+        account_id, partner_id = fee.credit_account_id, None
+        who = fee.credit_account.name
+    return {
+        'account': account_id,
+        'debit': Decimal('0'),
+        'credit': Decimal(str(fee.amount or 0)).quantize(DEC),
+        'partner': partner_id,
+        'description': f"{fee.description} — دائن {who} — {invoice_number}"[:500],
+    }
 
 
 def purchase_invoice_note_totals(invoice) -> tuple[Decimal, Decimal]:
@@ -1308,7 +1373,9 @@ def annotate_purchase_invoice_payment_summary(queryset):
             .values("total")[:1]
         )
 
-    fee_total = total_subquery(PurchaseInvoiceFee)
+    # رسوم المورد وحده — نفس `purchase_invoice_fees_total`.
+    fee_total = total_subquery(
+        PurchaseInvoiceFee, credit_partner__isnull=True, credit_account__isnull=True)
     # T-ONACC: نفس قاعدة purchase_invoice_payment_summary — السند الموزَّع يُستثنى
     # من الربط المفرد ويُحسب بمبالغ توزيعه وحدها (فلا يتكرّر الاحتساب).
     linked_paid = (

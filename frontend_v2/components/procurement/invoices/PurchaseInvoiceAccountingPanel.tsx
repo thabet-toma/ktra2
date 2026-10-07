@@ -179,6 +179,9 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
           expense_account: f.expense_account,
           capitalize_to_inventory: !!f.capitalize_to_inventory,
           is_taxable: !!f.is_taxable,
+          // الحفظ يعيد بناء الرسوم: الطرف الدائن يُرسَل كما جاء وإلا عاد الرسم للمورد.
+          credit_partner: f.credit_partner ?? null,
+          credit_account: f.credit_account ?? null,
         })),
         items: items,
       };

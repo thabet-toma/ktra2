@@ -63,6 +63,11 @@ export interface PurchaseInvoiceFeeDto {
   expense_account_type?: string | null;
   capitalize_to_inventory?: boolean;
   is_taxable?: boolean;
+  credit_partner?: number | null;
+  credit_partner_name?: string | null;
+  credit_account?: number | null;
+  credit_account_code?: string | null;
+  credit_account_name?: string | null;
 }
 
 export interface PurchaseInvoiceListDto {

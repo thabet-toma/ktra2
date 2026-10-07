@@ -2391,7 +2391,26 @@ class PurchaseInvoiceFee(models.Model):
         default=False, db_column='IsTaxable',
         help_text='إذا True يُحتسب ضريبة VAT على هذا الرسم ضمن فاتورة الشراء',
     )
+    # `is_taxable` = «ضمن أساس الضريبة»: مبلغ الرسم يُضاف لأساس ضريبة الفاتورة
+    # (`services.purchase_invoice_vat_base_fees_total`)؛ الافتراضي خارجه كما كان دائماً.
+    # الطرف الدائن (قرار المالك): رسمٌ لجهةٍ غير المورد. `credit_partner` يُدائَن حسابه
+    # المربوط بوسمه فتسدّده سندات الصرف ككلّ ذمّة؛ `credit_account` لحسابٍ بلا طرف (عمولة
+    # حوالةٍ خرجت يوم الدفع على «مصاريف بنكية وعمولات»). لا يجتمعان؛ وكلاهما فارغ = مورد
+    # الفاتورة كما كان. ذمّة المورد بلا هذه الرسوم (`services.purchase_invoice_fees_total`).
+    credit_partner = models.ForeignKey(
+        Partner, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='CreditPartnerID', related_name='credited_purchase_fees',
+    )
+    credit_account = models.ForeignKey(
+        Account, on_delete=models.PROTECT, null=True, blank=True,
+        db_column='CreditAccountID', related_name='credited_purchase_fees',
+    )
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    @property
+    def has_credit_party(self) -> bool:
+        """رسمٌ دائنُه غير مورد الفاتورة."""
+        return bool(self.credit_partner_id or self.credit_account_id)
 
     class Meta:
         db_table = 'purchase_invoice_fees'

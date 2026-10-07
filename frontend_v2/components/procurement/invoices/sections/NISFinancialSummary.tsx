@@ -4,6 +4,8 @@ import type { LocalPayments, PurchaseInvoiceFeeLine } from "@/types";
 import {
     hasAfterMainVatPercentageLines,
     sumTaxesAndFeesExtras,
+    feeHasCreditParty,
+    supplierFeesTotalIls,
 } from "@/utils/invoiceTaxesAndFees";
 import { formatTaxPercentLabel } from "@/utils/sqlMoneyRound";
 import { formatMoney } from "@/utils/formatNumber";
@@ -61,8 +63,8 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
         (lp.customsDuties || 0) +
         (lp.portFees || 0) +
         (lp.palestinianTaxCustoms || 0);
-    const feesTotal = fees.reduce((sum, fee) => sum + (Number(fee.amount) || 0), 0);
-    const payableTotal = grandTotal + feesTotal;
+    // رسمٌ له طرفٌ دائن (جهة/حساب) خارج مستحقّ المورد — `purchase_invoice_fees_total`.
+    const payableTotal = grandTotal + supplierFeesTotalIls(fees);
 
     return (
         <div className="ktra-bg-field dark:ktra-bg-panel rounded-xl border ktra-border-soft dark:ktra-border-soft shadow-sm overflow-hidden">
@@ -109,7 +111,10 @@ export const NISFinancialSummary: React.FC<NISFinancialSummaryProps> = ({
 
                 {fees.map((fee, index) => (
                     <div key={fee.id || index} className="flex justify-between text-xs gap-2">
-                        <span className="ktra-text-soft">{fee.description || "رسم إضافي"}</span>
+                        <span className="ktra-text-soft">
+                            {fee.description || "رسم إضافي"}
+                            {feeHasCreditParty(fee) && ` — دائن ${fee.creditPartnerName || fee.creditAccountName || ""}`}
+                        </span>
                         <span className="font-bold tabular-nums shrink-0">
                             {symbol}{formatMoney(fee.amount)}
                         </span>

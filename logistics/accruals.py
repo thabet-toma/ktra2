@@ -508,8 +508,8 @@ def import_invoice_supplier_split(invoice, *, fees_total=None, warn_unaccrued=Tr
     from .landed_cost import import_invoice_cost_shares
 
     if fees_total is None:
-        fees_total = sum(
-            (Decimal(str(f.amount or 0)) for f in invoice.fees.all()), Decimal('0'))
+        from .services import purchase_invoice_fees_total
+        fees_total = purchase_invoice_fees_total(invoice)  # رسوم المورد وحده
     credit_total = Decimal(str(invoice.grand_total or 0)) + fees_total
     shares = import_invoice_cost_shares(invoice)
     accrual_credits = (

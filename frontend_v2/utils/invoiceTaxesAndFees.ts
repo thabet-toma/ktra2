@@ -83,6 +83,40 @@ export function purchaseInvoiceFeeAmount(
     return Math.round(((basis * value) / 100) * 100) / 100;
 }
 
+type FeeForTotals = Pick<
+    PurchaseInvoiceFeeLine,
+    "amount" | "calculationType" | "calculationValue" | "percentageBasis" | "isTaxable"
+    | "creditPartnerId" | "creditAccountId"
+>;
+
+/** رسمٌ يُدائَن لجهةٍ غير المورد (`creditPartnerId`/`creditAccountId`) — خارج ذمّته ومستحقّه. */
+export function feeHasCreditParty(fee: Pick<PurchaseInvoiceFeeLine, "creditPartnerId" | "creditAccountId">): boolean {
+    return Boolean(fee.creditPartnerId || fee.creditAccountId);
+}
+
+/** رسوم **المورد** فوق إجمالي الفاتورة — مرآة `logistics/services.py` (`purchase_invoice_fees_total`). */
+export function supplierFeesTotalIls(fees: FeeForTotals[] | null | undefined): number {
+    const total = (fees || []).reduce(
+        (sum, fee) => sum + (feeHasCreditParty(fee) ? 0 : Number(fee.amount) || 0), 0,
+    );
+    return Math.round(total * 100) / 100;
+}
+
+/**
+ * مبالغ الرسوم «ضمن أساس الضريبة» (`isTaxable`) — تُضاف لأساس ضريبة الفاتورة وحده، لا لإجماليها
+ * ولا لأساس النسب. مرآة `logistics/services.py` (`purchase_invoice_vat_base_fees_total`) و
+ * `landed_cost.recalculate_landed_for_shipment`: النسبة على البضاعة تُحلّ أولاً، ونسبةُ «بعد
+ * الضريبة» لا تدخل الأساس (تُحسب منه) — يرفضها الخادم.
+ */
+export function vatBaseFeesIls(fees: FeeForTotals[] | null | undefined, goodsBaseIls: number): number {
+    const total = (fees || []).reduce((sum, fee) => {
+        if (!fee.isTaxable) return sum;
+        if (fee.calculationType === "percentage" && fee.percentageBasis === "after_main_vat") return sum;
+        return sum + purchaseInvoiceFeeAmount(fee, goodsBaseIls, 0, 0);
+    }, 0);
+    return Math.round(total * 100) / 100;
+}
+
 /** مخلص + جمارك + ميناء + جمركة ضرائب (بدون شحن محلي منفصل — يُدار مع metadata) */
 export function clearanceStructuredFeesSubtotal(lp: LocalPayments | null | undefined): number {
     if (!lp || lp.includedInPrice) return 0;

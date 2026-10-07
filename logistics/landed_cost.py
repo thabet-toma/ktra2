@@ -1328,9 +1328,24 @@ def recalculate_landed_for_shipment(
                 - Decimal(str(inv.discount_amount or 0))
                 + Decimal(str(inv.shipping_cost or 0)),
             )
+            fees = list(inv.fees.all())
+
+            def _resize(fee, basis):
+                fee.amount = (
+                    basis * Decimal(str(fee.calculation_value or 0)) / Decimal('100')
+                ).quantize(Q2, rounding=ROUND_HALF_UP)
+                fee.save(update_fields=['amount'])
+
+            # رسوم «على البضاعة» أولاً: منها ما هو «ضمن أساس الضريبة» (`is_taxable`).
+            for fee in fees:
+                if (fee.calculation_type == fee.CALCULATION_PERCENTAGE
+                        and fee.percentage_basis != fee.BASIS_AFTER_MAIN_VAT):
+                    _resize(fee, taxable)
             if inv.tax_type == 'percentage':
+                from .services import purchase_invoice_vat_base_fees_total
                 inv.tax_amount = (
-                    taxable * Decimal(str(inv.tax_rate or 0)) / Decimal('100')
+                    (taxable + purchase_invoice_vat_base_fees_total(inv, fees))
+                    * Decimal(str(inv.tax_rate or 0)) / Decimal('100')
                 ).quantize(Q2, rounding=ROUND_HALF_UP)
             inv.grand_total = (
                 taxable + Decimal(str(inv.tax_amount or 0))
@@ -1341,18 +1356,10 @@ def recalculate_landed_for_shipment(
             inv.import_use_cost_lines = inv_use_cost_lines
             inv.clearance_id = clr.id
             inv.save()
-            for fee in inv.fees.all():
-                if fee.calculation_type != fee.CALCULATION_PERCENTAGE:
-                    continue
-                basis = (
-                    Decimal(str(inv.grand_total or 0))
-                    if fee.percentage_basis == fee.BASIS_AFTER_MAIN_VAT
-                    else taxable
-                )
-                fee.amount = (
-                    basis * Decimal(str(fee.calculation_value or 0)) / Decimal('100')
-                ).quantize(Q2, rounding=ROUND_HALF_UP)
-                fee.save(update_fields=['amount'])
+            for fee in fees:
+                if (fee.calculation_type == fee.CALCULATION_PERCENTAGE
+                        and fee.percentage_basis == fee.BASIS_AFTER_MAIN_VAT):
+                    _resize(fee, Decimal(str(inv.grand_total or 0)))
             sync_recalculated_items(inv, payload['items'])
             # الكميات المستلَمة تبقى على بنودها، فتُعاد المزامنة مع حركات الشحنة
             # القديمة وتُشتقّ الحالة منها — لا تبقى فاتورةٌ «مستلمة» بكميات صفرية.

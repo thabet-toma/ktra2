@@ -29,7 +29,14 @@ export interface PurchaseInvoiceFeeLine {
     expenseAccountCode?: string;
     expenseAccountName?: string;
     capitalizeToInventory: boolean;
+    /** «ضمن أساس الضريبة»: مبلغه يُضاف لأساس ضريبة الفاتورة (`vatBaseFeesIls`). */
     isTaxable: boolean;
+    /** الطرف الدائن: جهة أو حساب — فارغان = المورد. يُدائَن لجهته لا للمورد. */
+    creditPartnerId?: number | null;
+    creditPartnerName?: string;
+    creditAccountId?: number | null;
+    creditAccountCode?: string;
+    creditAccountName?: string;
 }
 
 export interface LocalPayments {

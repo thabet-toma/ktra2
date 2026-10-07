@@ -219,6 +219,9 @@ class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
     expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
     expense_account_type = serializers.CharField(source='expense_account.account_type', read_only=True)
+    credit_partner_name = serializers.CharField(source='credit_partner.name', read_only=True, default=None)
+    credit_account_code = serializers.CharField(source='credit_account.code', read_only=True, default=None)
+    credit_account_name = serializers.CharField(source='credit_account.name', read_only=True, default=None)
 
     class Meta:
         model = PurchaseInvoiceFee
@@ -227,8 +230,20 @@ class PurchaseInvoiceFeeSerializer(serializers.ModelSerializer):
             'calculation_type', 'calculation_value', 'percentage_basis',
             'expense_account', 'expense_account_code', 'expense_account_name', 'expense_account_type',
             'capitalize_to_inventory', 'is_taxable',
+            # الطرف الدائن: جهة (`credit_partner`) أو حساب (`credit_account`)؛ فارغان = المورد.
+            'credit_partner', 'credit_partner_name',
+            'credit_account', 'credit_account_code', 'credit_account_name',
         ]
         read_only_fields = ['id']
+
+    def validate(self, attrs):
+        # «ضمن أساس الضريبة» مع نسبةٍ «بعد الضريبة» دائرة: الرسم يدخل الضريبة التي يُحسب منها.
+        if (attrs.get('is_taxable')
+                and attrs.get('calculation_type') == PurchaseInvoiceFee.CALCULATION_PERCENTAGE
+                and attrs.get('percentage_basis') == PurchaseInvoiceFee.BASIS_AFTER_MAIN_VAT):
+            raise serializers.ValidationError(
+                'رسمٌ نسبته «بعد الضريبة» لا يدخل أساس الضريبة — تُحسب منه.')
+        return attrs
 
     def validate_amount(self, value):
         if value is None or value < 0:
@@ -802,8 +817,11 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             live_subtotal = Decimal(str(data.get('subtotal') or 0))
             live_shipping = Decimal(str(data.get('shipping_cost') or 0))
             # عمولات الحوالات خارج الأساس: مصروفٌ بنكي في قيد الدفعة
-            # (`payment_posting.build_usd_payment_journal`) — نفس ما يحسبه الترحيل
-            # وإعادة حساب التكلفة (`landed_cost`) والشاشة.
+            # (`payment_posting.build_usd_payment_journal`)، وتُحمَّل على التكلفة برسمٍ
+            # دائنه «مصاريف بنكية وعمولات» — نفس ما يحسبه الترحيل وإعادة حساب التكلفة
+            # (`landed_cost`) والشاشة. الرسوم «ضمن أساس الضريبة» تُضاف للأساس وحده.
+            from logistics.services import purchase_invoice_vat_base_fees_total
+
             vat_base = max(
                 Decimal('0'),
                 live_subtotal - Decimal(str(instance.discount_amount or 0))
@@ -812,9 +830,10 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             if instance.tax_type == 'amount':
                 live_tax = Decimal(str(instance.tax_amount or 0))
             else:
-                live_tax = (vat_base * Decimal(str(instance.tax_rate or 0)) / Decimal('100')).quantize(
-                    Decimal('0.01')
-                )
+                live_tax = (
+                    (vat_base + purchase_invoice_vat_base_fees_total(instance))
+                    * Decimal(str(instance.tax_rate or 0)) / Decimal('100')
+                ).quantize(Decimal('0.01'))
             live_grand = (vat_base + live_tax).quantize(Decimal('0.01'))
             live_payable = (live_grand + self._fees_total(instance)).quantize(Decimal('0.01'))
             paid = min(Decimal(str(data.get('amount_paid') or 0)), live_payable)
@@ -899,6 +918,15 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return fee_data
 
     @staticmethod
+    def _guard_fee_credit_party(invoice, fee_data):
+        from logistics.services import fee_credit_party_error
+
+        error = fee_credit_party_error(fee_data, invoice)
+        if error:
+            raise serializers.ValidationError(
+                {'fees': f"الرسم «{fee_data.get('description') or ''}»: {error}"})
+
+    @staticmethod
     def _normalize_fee_amount(invoice, fee_data):
         calculation_type = fee_data.get(
             'calculation_type', PurchaseInvoiceFee.CALCULATION_AMOUNT,
@@ -957,6 +985,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 item = PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
                 self._write_item_extensions(invoice, item, extensions)
             for fee_data in fees_data:
+                self._guard_fee_credit_party(invoice, fee_data)
                 fee_data = self._normalize_fee_amount(invoice, fee_data)
                 fee_data = self._bind_import_expense_account(invoice, fee_data)
                 PurchaseInvoiceFee.objects.create(
@@ -1087,6 +1116,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             if fees_data is not None:
                 instance.fees.all().delete()
                 for fee_data in fees_data:
+                    self._guard_fee_credit_party(instance, fee_data)
                     fee_data = self._normalize_fee_amount(instance, fee_data)
                     fee_data = self._bind_import_expense_account(instance, fee_data)
                     PurchaseInvoiceFee.objects.create(

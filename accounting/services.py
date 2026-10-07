@@ -2864,6 +2864,28 @@ def cheque_maturity_timeline(tenant_id: int, *, today=None,
 BANK_PARENT_ACCOUNT_CODE = "1102"
 
 
+def is_cash_or_bank_account(account) -> bool:
+    """حساب صندوقٍ أو بنك: مربوطٌ بصندوق أو حساب بنكي، أو تحت «النقدية»/«البنوك»/
+    «صناديق النقدية» في الشجرة. الدائن عليه دفعٌ لا التزام — فلا يكون طرفاً دائناً لرسم."""
+    from django.conf import settings
+    from .models import BankAccount
+
+    if account is None:
+        return False
+    if (CashBoxLedgerAccount.objects.filter(account_id=account.pk).exists()
+            or BankAccount.objects.filter(account_id=account.pk).exists()):
+        return True
+    roots = {"1101", BANK_PARENT_ACCOUNT_CODE,
+             str(getattr(settings, "CASH_BOX_PARENT_ACCOUNT_CODE", None) or "1110").strip()}
+    node, seen = account, set()
+    while node is not None and node.pk not in seen:
+        if str(node.code or "") in roots:
+            return True
+        seen.add(node.pk)
+        node = node.parent
+    return False
+
+
 def get_bank_parent_account(tenant):
     """حساب الأب «البنوك» في الشجرة — يُنشأ تحت الأصول المتداولة إن غاب.
 

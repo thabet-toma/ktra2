@@ -1184,6 +1184,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                     percentage_basis=fee.percentage_basis,
                     capitalize_to_inventory=fee.capitalize_to_inventory,
                     is_taxable=fee.is_taxable,
+                    credit_partner=fee.credit_partner,
+                    credit_account=fee.credit_account,
                 )
         log_activity(
             action='create', entity_type='purchase_invoice', entity_id=clone.id,
@@ -1433,7 +1435,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
           مدين: ضريبة مدخلات (1105)    = tax_amount                    (إن > 0)
           مدين: حساب مصروف لكل رسم     = fee.amount                    (لكل PurchaseInvoiceFee)
              └─ إن كان capitalize_to_inventory=True يُضاف للمخزون بدل المصروف
-          دائن: ذمم المورد (partner.linked_account)                    = إجمالي + مجموع الرسوم
+          دائن: ذمم المورد (partner.linked_account)                    = إجمالي + رسوم المورد
+          دائن: الطرف الدائن لكل رسمٍ له جهة/حساب (credit_partner/credit_account) = مبلغه
              └─ الدولية: ناقصاً حصصها من الشحن والتخليص والنقل، وتُدائَن بها حسابات
                 استحقاقها (5301/بنود التخليص/مصروف النقل) — `import_invoice_accrual_credits`
           (Section B) ثم تسوية الدفعة النقدية عبر ذمم المورد:
@@ -1601,8 +1604,19 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 )
 
         # ─── 4) تجهيز الرسوم (Fees) ─────────────────────────────────────────────
-        fees_qs = list(invoice.fees.select_related('expense_account').all())
-        fees_total = sum((Decimal(str(f.amount or 0)) for f in fees_qs), Decimal('0'))
+        fees_qs = list(invoice.fees.select_related(
+            'expense_account', 'credit_partner', 'credit_account').all())
+        # رسمٌ له طرفٌ دائن (جهة/حساب) يُدائَن لجهته في سطرٍ مستقل — ذمّة المورد
+        # بلا مبلغه (`services.purchase_invoice_fees_total` المصدر نفسه للمستحق).
+        party_fees = [f for f in fees_qs if f.has_credit_party and Decimal(str(f.amount or 0)) > 0]
+        from logistics.services import fee_credit_party_error, purchase_invoice_fee_credit_line
+        for fee in party_fees:
+            error = fee_credit_party_error(fee, invoice)
+            if error:
+                return Response({'error': f'الرسم «{fee.description}»: {error}'},
+                                status=status.HTTP_400_BAD_REQUEST)
+        fees_total = sum(
+            (Decimal(str(f.amount or 0)) for f in fees_qs if not f.has_credit_party), Decimal('0'))
         # نفصل: الرسوم المرسملة (capitalize → تُضاف للمخزون) عن غير المرسملة (Expense)
         capitalized_total = sum(
             (Decimal(str(f.amount or 0)) for f in fees_qs if f.capitalize_to_inventory),
@@ -1772,6 +1786,12 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 'partner': None,
                 'description': f"{fee.description} — {invoice.invoice_number}"[:500],
             })
+
+        for fee in party_fees:
+            lines_payload.append(purchase_invoice_fee_credit_line(fee, invoice.invoice_number))
+        if party_fees:
+            logger.info('purchase invoice %s posting: fee credit parties=%s', invoice.pk,
+                        {f.pk: str(f.amount) for f in party_fees})
 
         credit_total = grand + fees_total
 
