@@ -281,10 +281,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   // المجموعة القابلة للاختيار التي يستعملها الاختيار التلقائي للرسوم.
   const [allAccounts, setAllAccounts] = useState<FeeAccountRow[]>([]);
   const feeAccounts = useMemo(() => allAccounts.filter(isFeeAccount), [allAccounts]);
-  /* الطرف الدائن للرسم: الجهات للاختيار، ووضع كل رسمٍ اختير له «جهة/حساب» ولم
-     يُحدَّد بعد (بلا هذا يرتدّ الاختيار «المورد» قبل أن يختار المستخدم). */
+  /* الطرف الدائن للرسم يُكتب اسماً: الجهات للاقتراح، والنصّ المكتوب لكل رسمٍ حتى يُحَلّ
+     (عند مغادرة الحقل) إلى جهةٍ أو حساب. */
   const [creditPartners, setCreditPartners] = useState<Array<{ id: number; name: string }>>([]);
-  const [feeCreditMode, setFeeCreditMode] = useState<Record<string, "supplier" | "partner" | "account">>({});
+  const [feeCreditDraft, setFeeCreditDraft] = useState<Record<string, string>>({});
 
   useEffect(() => {
     accountingApi.getPartners()
@@ -743,11 +743,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       return;
     }
     const partyPending = (formData.fees || []).find((fee, index) => {
-      const mode = feeCreditMode[fee.id || String(index)];
-      return (mode === "partner" && !fee.creditPartnerId) || (mode === "account" && !fee.creditAccountId);
+      const draft = feeCreditDraft[fee.id || String(index)];
+      return draft !== undefined && draft.trim() !== (fee.creditPartnerName || fee.creditAccountName || "").trim();
     });
     if (partyPending) {
-      toast(`اختر الطرف الدائن للرسم «${partyPending.description}» أو أعده «المورد».`, "error");
+      toast(`الطرف الدائن للرسم «${partyPending.description}» لم يُربط بعد — انتظر لحظة ثم احفظ.`, "error");
       setActiveTabKey("fees");
       return;
     }
@@ -2353,16 +2353,49 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     console.info("[PurchaseInvoiceFees] Added fee editor line", { kind, invoiceId: formData.id || null });
     window.setTimeout(() => document.querySelector<HTMLInputElement>(`[data-fee-amount='${id}']`)?.focus(), 0);
   };
-  const chooseFeeCreditMode = (index: number, mode: "supplier" | "partner" | "account") => {
+  /* الطرف الدائن بالاسم المكتوب — كاسم الرسم نفسه: فارغ = المورد؛ اسم جهةٍ ⇒ الجهة؛
+     اسم حسابٍ (غير صندوق/بنك) ⇒ الحساب؛ وإلا يُنشأ حسابٌ بالاسم تحت «مصاريف الاستيراد». */
+  const resolveFeeCreditName = async (index: number, typed: string) => {
     const fee = (formData.fees || [])[index];
     if (!fee) return;
-    setFeeCreditMode((prev) => ({ ...prev, [fee.id || String(index)]: mode }));
-    setFeeAt(index, {
+    const key = fee.id || String(index);
+    const name = typed.trim();
+    const clearDraft = () => setFeeCreditDraft((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    const none = {
       creditPartnerId: null, creditPartnerName: undefined,
       creditAccountId: null, creditAccountCode: undefined, creditAccountName: undefined,
-      // رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة (يرفضه الخادم).
-      ...(mode === "supplier" ? {} : { isTaxable: false }),
+    };
+    if (!name || name === "المورد") {
+      setFeeAt(index, none);
+      clearDraft();
+      return;
+    }
+    if (name === (fee.creditPartnerName || fee.creditAccountName || "").trim()) {
+      clearDraft();
+      return;
+    }
+    // رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة (يرفضه الخادم).
+    const partner = creditPartners.find((p) => p.name.trim() === name);
+    if (partner) {
+      setFeeAt(index, { ...none, creditPartnerId: partner.id, creditPartnerName: partner.name, isTaxable: false });
+      clearDraft();
+      return;
+    }
+    let account: { id: number; code?: string; name?: string | null } | null | undefined = allAccounts.find(
+      (a) => (a.name || "").trim() === name && !accountMatchesPurpose(a, "cash"),
+    );
+    if (!account) account = await resolveImportFeeAccount(name);
+    if (!account) return; // الرسالة قيلت؛ يبقى النصّ ليُصحَّح.
+    setFeeAt(index, {
+      ...none, creditAccountId: Number(account.id), creditAccountCode: account.code,
+      creditAccountName: account.name ?? name, isTaxable: false,
     });
+    clearDraft();
+    console.info("[PurchaseInvoiceFees] Fee credit party resolved by name", { invoiceId: formData.id || null, accountId: account.id });
   };
   /* عمولات حوالات الصفقة على التكلفة: الدفعة رحّلتها مصروفاً بنكياً، والرسم يرسملها
      ويُدائن «مصاريف بنكية وعمولات» — فينقل المصروف إلى المخزون ولا يمسّ المورد. */
@@ -2458,33 +2491,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           </tr></thead>
           <tbody>
             {(formData.fees || []).map((fee, index) => {
-              const creditMode = feeCreditMode[fee.id || String(index)]
-                ?? (fee.creditPartnerId ? "partner" : fee.creditAccountId ? "account" : "supplier");
+              const creditKey = fee.id || String(index);
+              const creditText = feeCreditDraft[creditKey] ?? (fee.creditPartnerName || fee.creditAccountName || "");
+              const hasCreditParty = Boolean(fee.creditPartnerId || fee.creditAccountId);
               return (
               <tr key={fee.id || index}>
                 <td className="p-1"><input className="ktra-input w-full" disabled={effectiveReadOnly} value={fee.description} placeholder="مثال: رسوم فحص أو ضريبة إضافية" onChange={(e) => setFeeAt(index, { description: e.target.value })} /></td>
                 <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => setFeeAt(index, { expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined })} /></td>
                 <td className="p-1"><input className="ktra-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; setFeeAt(index, { amount: value, calculationValue: value }); }} /></td>
                 <td className="p-1">
-                  <select className="ktra-input w-full" disabled={effectiveReadOnly} value={creditMode} title="من يُدائَن بهذا الرسم في قيد الترحيل" onChange={(e) => chooseFeeCreditMode(index, e.target.value as "supplier" | "partner" | "account")}>
-                    <option value="supplier">المورد</option>
-                    <option value="partner">جهة…</option>
-                    <option value="account">حساب…</option>
-                  </select>
-                  {creditMode === "partner" && (
-                    <select className="ktra-input mt-1 w-full" disabled={effectiveReadOnly} value={fee.creditPartnerId || ""} onChange={(e) => { const id = Number(e.target.value) || null; setFeeAt(index, { creditPartnerId: id, creditPartnerName: creditPartners.find((p) => p.id === id)?.name }); }}>
-                      <option value="">اختر الجهة…</option>
-                      {fee.creditPartnerId && !creditPartners.some((p) => p.id === fee.creditPartnerId) && (
-                        <option value={fee.creditPartnerId}>{fee.creditPartnerName || `#${fee.creditPartnerId}`}</option>
-                      )}
-                      {creditPartners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
-                  )}
-                  {creditMode === "account" && (
-                    <div className="mt-1"><AccountTreeField accounts={allAccounts} value={fee.creditAccountId || ""} disabled={effectiveReadOnly} title="الحساب الدائن — لا صندوق ولا بنك" isSelectable={(account) => !accountMatchesPurpose(account, "cash")} onChange={(id, account) => setFeeAt(index, { creditAccountId: id, creditAccountCode: account?.code, creditAccountName: account?.name ?? undefined })} /></div>
-                  )}
+                  <input className="ktra-input w-full" list="fee-credit-names" disabled={effectiveReadOnly} placeholder="المورد" title="من يُدائَن بهذا الرسم: فارغ = المورد، أو اكتب اسم جهة أو حساب (يُنشأ تحت «مصاريف الاستيراد» إن لم يوجد)" value={creditText} onChange={(e) => { const value = e.target.value; setFeeCreditDraft((prev) => ({ ...prev, [creditKey]: value })); markDirty(); }} onBlur={(e) => void resolveFeeCreditName(index, e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }} />
                 </td>
-                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly || creditMode !== "supplier" || (fee.calculationType === "percentage" && fee.percentageBasis === "after_main_vat")} title={creditMode !== "supplier" ? "رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة" : "يُضاف مبلغه لأساس ضريبة الفاتورة"} checked={Boolean(fee.isTaxable)} onChange={(e) => setFeeAt(index, { isTaxable: e.target.checked })} /></td>
+                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly || hasCreditParty || (fee.calculationType === "percentage" && fee.percentageBasis === "after_main_vat")} title={hasCreditParty ? "رسمٌ دائنُه غيرُ المورد لا يدخل أساس ضريبة الفاتورة" : "يُضاف مبلغه لأساس ضريبة الفاتورة"} checked={Boolean(fee.isTaxable)} onChange={(e) => setFeeAt(index, { isTaxable: e.target.checked })} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} title="يُرسمَل على تكلفة البضاعة بدل المصروف" checked={fee.capitalizeToInventory} onChange={(e) => setFeeAt(index, { capitalizeToInventory: e.target.checked })} /></td>
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="ktra-toolbtn" onClick={() => applyFees((formData.fees || []).filter((_, i) => i !== index))}><Trash2 size={14} /></button>}</td>
               </tr>
@@ -2493,6 +2511,10 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             {(formData.fees || []).length === 0 && <tr><td colSpan={7} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
           </tbody>
         </table>
+        <datalist id="fee-credit-names">
+          {creditPartners.map((p) => <option key={`p-${p.id}`} value={p.name} />)}
+          {allAccounts.filter((a) => a.name && !accountMatchesPurpose(a, "cash")).map((a) => <option key={`a-${a.id}`} value={a.name ?? ""} label={a.code} />)}
+        </datalist>
       </div>
       {!viewMode && !effectiveReadOnly && (
         <div className="mt-3 flex justify-end">
