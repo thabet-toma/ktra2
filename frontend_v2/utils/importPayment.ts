@@ -3,6 +3,7 @@
  * الخادم يحسب (`logistics/domain/import_settlement.py`)، وهنا العرض وحده.
  */
 import { formatMoney } from "./formatNumber.ts";
+import type { InvoiceFinalCostAllocation } from "./invoiceTaxesAndFees.ts";
 
 export type ImportPaymentComponentKey = "supplier" | "freight" | "clearance" | "local";
 
@@ -170,4 +171,26 @@ export function importFinalUnitCost(
     if (row && Number.isFinite(unit)) return unit;
   }
   return fallback ?? null;
+}
+
+/**
+ * تكلفة كل بند في الشاشة (شبكة التحرير وجدول بنود الشيكل) من مصدر الخادم: البند المحفوظ
+ * الذي له `unit_costs` تُستبدل وحدته وسطره (= وحدة × كمية) وحصّته من «ض.ق.م + رسوم» (السطر
+ * − ما قبل الضريبة) — فمجموع الأسطر = «إجمالي التكلفة» = مدين المخزون عند الاستلام. كان
+ * `allocateInvoiceFinalCosts` يوزّع الضريبة والرسوم وحده بلا العمولة (INV-0023: 15,060.15
+ * مقابل 15,196.23). بندٌ لم يُحفظ أو فاتورةٌ بلا تفصيل: التوزيع المحلي كما هو.
+ */
+export function applyImportUnitCosts<T extends InvoiceFinalCostAllocation>(
+  allocations: T[],
+  items: Array<{ serverId?: number | null; quantity?: number | string | null }>,
+  ip: ImportPaymentBreakdown | null | undefined,
+): T[] {
+  if (!ip?.unit_costs?.length) return allocations;
+  return allocations.map((alloc, index) => {
+    const item = items[index];
+    const unit = importFinalUnitCost(ip, item?.serverId, null);
+    if (unit == null) return alloc;
+    const finalLine = unit * (Number(item?.quantity) || 0);
+    return { ...alloc, finalUnit: unit, finalLine, taxAndFeesAllocation: finalLine - alloc.preTaxLine };
+  });
 }

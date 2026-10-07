@@ -6,6 +6,7 @@ import {
     sumTaxesAndFeesExtras,
 } from "@/utils/invoiceTaxesAndFees";
 import { formatMoney } from "@/utils/formatNumber";
+import { applyImportUnitCosts, type ImportPaymentBreakdown } from "@/utils/importPayment";
 
 interface NISItemsTableProps {
     items: InvoiceItem[];
@@ -20,6 +21,8 @@ interface NISItemsTableProps {
     additionalFeesTotal?: number;
     /** الفاتورة مرتبطة بشحنة، فتكون أسعار البنود تكاليف استيراد موزعة لا أسعار شراء خام. */
     isShipmentLinkedImport?: boolean;
+    /** الدولية: `unit_costs` الخادم تحلّ محلّ التوزيع المحلي للبند المحفوظ (`applyImportUnitCosts`). */
+    importPayment?: ImportPaymentBreakdown | null;
 }
 
 function fmtIls(v: number) {
@@ -35,6 +38,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
     invoiceVatBaseIls,
     additionalFeesTotal = 0,
     isShipmentLinkedImport = false,
+    importPayment,
 }) => {
     const showLanded = items.some(
         (it) =>
@@ -58,15 +62,16 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
     const showAllocColumns = items.length > 0;
 
     const perRowAlloc = useMemo(() => {
-        return allocateInvoiceFinalCosts(items, {
+        const local = allocateInvoiceFinalCosts(items, {
             taxAndFeesTotalIls: taxFeesPool,
-        }).map((row) => ({
+        });
+        return applyImportUnitCosts(local, items, importPayment).map((row) => ({
             taxFeesAlloc: row.taxAndFeesAllocation,
             preTaxLine: row.preTaxLine,
             afterLine: row.finalLine,
             afterUnit: row.finalUnit,
         }));
-    }, [items, taxFeesPool]);
+    }, [items, taxFeesPool, importPayment]);
 
     const sumMerchIls = items.reduce((s, it) => s + (Number(it.totalPrice) || 0), 0);
     const sumLandedIls = perRowAlloc.reduce((s, r) => s + r.preTaxLine, 0);
@@ -263,7 +268,7 @@ export const NISItemsTable: React.FC<NISItemsTableProps> = ({
                                 {showAllocColumns ? (
                                     <>
                                         <td className="px-2 py-2 text-xs font-black text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/30 tabular-nums">
-                                            {taxFeesPool > 0 ? fmtIls(sumTaxFeesAlloc) : "—"}
+                                            {sumTaxFeesAlloc > 0 ? fmtIls(sumTaxFeesAlloc) : "—"}
                                         </td>
                                         <td className="px-2 py-2 text-[var(--color-primary)] dark:text-[var(--color-primary)] bg-[var(--color-surface-2)]/50 dark:bg-[var(--color-surface-2)]/30 tabular-nums">
                                             <div className="text-sm font-black leading-tight">

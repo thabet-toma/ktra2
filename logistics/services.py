@@ -1062,6 +1062,87 @@ def import_fee_credit_account(invoice, description):
     return account
 
 
+def import_invoice_capitalizes_all(invoice) -> bool:
+    """قرار المالك (2026-10-07): كل ما في الفاتورة الدولية تكلفةُ بضاعتها — ضريبتها
+    (ض.ق.م الأساسية) وكل رسومها (والضريبة المستقلة رسمٌ) فوق المورد والشحن والتخليص
+    والنقل والعمولات؛ لا مصروف ولا ضريبة مدخلات. المحلية بخيار رسمها و1105 كما هي.
+    المرتجع يعكس قيد أصله (`_international_return_split`) فلا تمرّ عليه القاعدة."""
+    from logistics.models import PurchaseInvoice
+
+    return (invoice.invoice_type == PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+            and not invoice.is_return)
+
+
+def purchase_fee_capitalized(invoice, fee) -> bool:
+    """يدخل الرسم تكلفة البضاعة؟ المرحّلة كما رُحِّلت (`capitalize_to_inventory` — يثبّته
+    الترحيل، فرسمٌ رُحِّل مصروفاً قبل القرار يبقى كذلك حتى «أعد الاحتساب والترحيل»)؛
+    والمسودة الدولية دائماً، والمحلية بخيارها."""
+    if fee.capitalize_to_inventory:
+        return True
+    return not invoice.is_posted and import_invoice_capitalizes_all(invoice)
+
+
+def capitalize_import_fees(invoice, fees) -> None:
+    """يثبّت رسملة كل رسمٍ دوليّ قبل قيده (يحفظ) — رسمٌ قديم الخيار يُرحَّل تكلفةً."""
+    if not import_invoice_capitalizes_all(invoice):
+        return
+    for fee in fees:
+        if fee.capitalize_to_inventory:
+            continue
+        fee.capitalize_to_inventory = True
+        fee.save(update_fields=['capitalize_to_inventory'])
+        logger.info('import fee capitalized invoice=%s fee=%s amount=%s',
+                    invoice.pk, fee.pk, fee.amount)
+
+
+def resolve_purchase_vat_input_account(tenant):
+    """حساب ضريبة المدخلات لقيد فاتورة الشراء — أو None: ربط إعدادات المبيعات
+    (`SalesSettings.vat_input_account`)، ثم ضريبة شراء فعّالة بحساب أصول، ثم 1105."""
+    from accounting.models import TaxRate
+    from sales.models import SalesSettings
+
+    ss = SalesSettings.objects.filter(tenant=tenant).first()
+    if ss and ss.vat_input_account_id:
+        return ss.vat_input_account
+    purchase_tax = TaxRate.objects.filter(
+        tenant=tenant, is_active=True, direction='purchase',
+    ).select_related('tax_account').first()
+    if purchase_tax and purchase_tax.tax_account and purchase_tax.tax_account.account_type == 'Asset':
+        return purchase_tax.tax_account
+    return Account.objects.filter(tenant=tenant, code="1105").first()
+
+
+def import_invoice_capitalized_tax(invoice) -> Decimal:
+    """ضريبة الفاتورة التي في تكلفة بضاعتها (`import_invoice_capitalizes_all`): المسودة
+    كلّها؛ والمرحّلة ما لم يُدِنه قيدُها ضريبةَ مدخلات — رُحّلت قبل القرار ⇒ صفر حتى
+    «أعد الاحتساب والترحيل». صفرٌ لغير الدولية."""
+    from django.db.models import Sum
+
+    tax = Decimal(str(invoice.tax_amount or 0)).quantize(DEC)
+    if tax <= 0 or not import_invoice_capitalizes_all(invoice):
+        return Decimal('0')
+    if not invoice.is_posted or not invoice.journal_id:
+        return tax
+    vat_account = resolve_purchase_vat_input_account(invoice.tenant)
+    if vat_account is None:
+        return tax
+    agg = invoice.journal.lines.filter(account=vat_account).aggregate(d=Sum('debit'), c=Sum('credit'))
+    posted_vat = Decimal(str(agg['d'] or 0)) - Decimal(str(agg['c'] or 0))
+    return max(tax - posted_vat, Decimal('0')).quantize(DEC)
+
+
+def import_invoice_posted_off_cost(invoice) -> dict:
+    """ما رحّله قيدُ فاتورةٍ دولية خارج تكلفة بضاعتها قبل القرار: {'tax': ضريبةٌ على
+    المدخلات، 'fees': [(الرسم، مبلغه)] مصروفاً}. فارغٌ ⇒ قيدها على القاعدة. «أعد الاحتساب
+    والترحيل» يعيد بناءه (`landed_cost._posted_capitalization_drifted`)."""
+    if not invoice.is_posted or not import_invoice_capitalizes_all(invoice):
+        return {'tax': Decimal('0'), 'fees': []}
+    tax = (Decimal(str(invoice.tax_amount or 0)) - import_invoice_capitalized_tax(invoice)).quantize(DEC)
+    fees = [(f, Decimal(str(f.amount or 0)).quantize(DEC)) for f in invoice.fees.all()
+            if not f.capitalize_to_inventory and Decimal(str(f.amount or 0)) > 0]
+    return {'tax': max(tax, Decimal('0')), 'fees': fees}
+
+
 def bind_import_fee_credit_accounts(invoice, fees) -> None:
     """يربط كلَّ رسمٍ دوليٍّ بلا طرفٍ دائن بحسابه (يحفظ) — الرسوم القديمة تُربط عند
     الترحيل فلا يُدائَن المورد برسمٍ ليس له."""
@@ -2226,8 +2307,9 @@ def posted_goods_line_costs(invoice):
 
     قيمة البند = تكلفته المستوردة الحالية (`landed_line_total_ils`: بضاعة + شحن + تخليص
     + نقل، وتعديلاتها بعد الترحيل — `domain/landed_revaluation.py` يحدّثها) + حصّته ممّا
-    رسمله قيدُها فوقها: الرسوم المرسملة وعمولات التحويل التي دائنها
-    (`payment_posting.invoice_journal_commission_ils`) — بتوزيع `goods_clearing_unit_costs`
+    رسمله قيدُها فوقها: الرسوم المرسملة، وعمولات التحويل التي دائنها
+    (`payment_posting.invoice_journal_commission_ils`)، وضريبتها إن لم يُدِنها مدخلاتٍ
+    (`import_invoice_capitalized_tax`) — بتوزيع `goods_clearing_unit_costs`
     نفسه الذي تُستلَم به البضاعة ويُرحَّل به قيد الاستلام، فيساوي مدينَه بالقرش.
     مصدرُ متوسط «تكلفة المنتجات» (`inventory.services.product_cost_breakdown`): كان
     `landed_line_total_ils` وحده فيسقط العمولة والرسوم المرسملة — «الكمية × avg_cost»
@@ -2254,6 +2336,7 @@ def posted_goods_line_costs(invoice):
     total = (
         sum((Decimal(str(it.landed_line_total_ils)) for it in goods), Decimal('0'))
         + capitalized + invoice_journal_commission_ils(invoice)
+        + import_invoice_capitalized_tax(invoice)
     )
     return {
         item_id: share

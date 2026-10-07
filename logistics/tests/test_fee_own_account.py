@@ -124,3 +124,33 @@ class FeeOwnAccountTest(APITestCase):
         self.assertIsNone(fee.credit_account_id)
         journal = self._post(invoice)
         self.assertTrue(journal.lines.filter(account=self.ap, credit=D("1100.00")).exists())
+
+    # ── قرار المالك (2026-10-07): الدولية كلّها تكلفة، والمحلية كما هي ──
+    def _taxed_invoice(self, number, invoice_type):
+        invoice = self._invoice(number, invoice_type)
+        PurchaseInvoice.objects.filter(pk=invoice.pk).update(
+            tax_type="amount", tax_amount=D("160"), grand_total=D("1160"))
+        invoice.refresh_from_db()
+        return invoice
+
+    def _goods_debit(self, journal):
+        vat = Account.objects.get(tenant=self.tenant, code="1105")
+        return sum((l.debit for l in journal.lines.exclude(account__in=[vat, self.misc])), D("0"))
+
+    def test_international_tax_and_fee_are_goods_cost(self):
+        invoice = self._taxed_invoice("FOA-T1", PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL)
+        fee = self._save_fee(invoice)
+        self.assertTrue(fee.capitalize_to_inventory)  # الحفظ يرسمله — لا خانة في الدولية
+        journal = self._post(invoice)
+        self.assertFalse(journal.lines.filter(account__code="1105").exists())
+        self.assertFalse(journal.lines.filter(account=self.misc, debit__gt=0).exists())
+        self.assertEqual(self._goods_debit(journal), D("1260.00"))  # 1000 + 160 + 100
+
+    def test_local_invoice_keeps_input_vat_and_fee_choice(self):
+        invoice = self._taxed_invoice("FOA-T2", PurchaseInvoice.INVOICE_TYPE_LOCAL)
+        fee = self._save_fee(invoice, description="رسوم توصيل")
+        self.assertFalse(fee.capitalize_to_inventory)
+        journal = self._post(invoice)
+        self.assertTrue(journal.lines.filter(account__code="1105", debit=D("160.00")).exists())
+        self.assertTrue(journal.lines.filter(account=self.misc, debit=D("100.00")).exists())
+        self.assertEqual(self._goods_debit(journal), D("1000.00"))

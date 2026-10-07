@@ -1541,7 +1541,8 @@ def posted_invoices_cost_drift(*, tenant, shipment_id: int) -> Dict[str, Any]:
         row = _rebuild_import_invoice_row(inv)
         if not row:
             continue
-        if _import_row_drifted(inv, row) or _posted_commission_drifted(inv):
+        if (_import_row_drifted(inv, row) or _posted_commission_drifted(inv)
+                or _posted_capitalization_drifted(inv)):
             stale.append({'id': inv.pk, 'invoice_number': inv.invoice_number})
     return {'posted_count': posted_count, 'stale_posted_invoices': stale}
 
@@ -1561,6 +1562,19 @@ def _posted_commission_drifted(inv: PurchaseInvoice) -> bool:
     if not account_id:
         return False
     return invoice_journal_commission_ils(inv) != live.quantize(Q2)
+
+
+def _posted_capitalization_drifted(inv: PurchaseInvoice) -> bool:
+    """قيدُها قبل «كل ما في الدولية تكلفة» (قرار المالك 2026-10-07): ضريبتها على المدخلات
+    أو رسمٌ مصروفاً (`services.import_invoice_posted_off_cost`) — «أعد الاحتساب والترحيل»
+    يرحّلها تكلفةً. فاتورة صفقة الأرشيف لا يُعاد ترحيلها فلا تُعدّ متأخّرة."""
+    from logistics.payment_posting import live_archive_deal_journals
+    from logistics.services import import_invoice_posted_off_cost
+
+    off = import_invoice_posted_off_cost(inv)
+    if not (off['tax'] or off['fees']):
+        return False
+    return not (inv.deal_id and live_archive_deal_journals(inv.tenant_id, [inv.deal_id]))
 
 
 def _json_friendly_value(x: Any) -> Any:

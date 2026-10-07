@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importCostRows, importFinalUnitCost, importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
+import { applyImportUnitCosts, importCostRows, importFinalUnitCost, importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
 
 test('صفوف طباعة الدولية: بالترتيب، وصفّ المورد حصّته − مدفوعه = باقيه', () => {
   const rows = importPaymentRows({
@@ -116,4 +116,23 @@ test('التكلفة النهائية/وحدة: من unit_costs الخادم ل�
   // بلا unit_costs (المحلية، أو قائمة بلا تفصيل) ⇒ كما كان، حتى الفراغ.
   assert.equal(importFinalUnitCost(undefined, 7, 41.44), 41.44);
   assert.equal(importFinalUnitCost({} as ImportPaymentBreakdown, 7, undefined), null);
+});
+
+test('تكلفة البند في الشاشة = unit_costs الخادم (بالضريبة والرسوم والعمولة)، وإلا التوزيع المحلي', () => {
+  // INV-0023: التوزيع المحلي بلا العمولة؛ الخادم يحملها — مجموع الأسطر = إجمالي التكلفة.
+  const local = [
+    { share: 0.6, landedBase: 414.4, taxAndFeesAllocation: 90, preTaxLine: 414.4, finalLine: 504.4, finalUnit: 50.44 },
+    { share: 0.4, landedBase: 276.0, taxAndFeesAllocation: 60, preTaxLine: 276.0, finalLine: 336.0, finalUnit: 33.6 },
+  ];
+  const items = [{ serverId: 7, quantity: 10 }, { quantity: 10 }];
+  const ip = { unit_costs: [{ item_id: 7, name: 'أ', quantity: '10', unit_cost: '51.25' }] } as unknown as ImportPaymentBreakdown;
+  const out = applyImportUnitCosts(local, items, ip);
+  assert.equal(out[0].finalUnit, 51.25);
+  assert.equal(out[0].finalLine, 512.5);
+  assert.equal(out[0].taxAndFeesAllocation, 512.5 - 414.4);
+  assert.equal(out[0].preTaxLine, 414.4);
+  // بندٌ لم يُحفظ: التوزيع المحلي كما هو.
+  assert.deepEqual(out[1], local[1]);
+  // بلا unit_costs: لا تغيير.
+  assert.deepEqual(applyImportUnitCosts(local, items, undefined), local);
 });

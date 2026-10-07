@@ -73,6 +73,8 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
   const [accounts, setAccounts] = useState<AccountDto[]>([]);
   const [fees, setFees] = useState<PurchaseInvoiceFeeDto[]>([]);
   const [items, setItems] = useState<PurchaseInvoiceItemDto[]>([]);
+  // الدولية: الضريبة وكل رسم تكلفة بضاعة (`services.import_invoice_capitalizes_all`) — لا خانة.
+  const capitalizeAll = invoice?.invoice_type === "international" && !invoice?.is_return;
   const [paymentType, setPaymentType] = useState<PaymentType>("credit");
   const [cashAccountId, setCashAccountId] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
@@ -143,7 +145,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         calculation_value: 0,
         percentage_basis: "goods",
         expense_account: firstExp?.id || 0,
-        capitalize_to_inventory: false,
+        capitalize_to_inventory: capitalizeAll,
         is_taxable: false,
       },
     ]);
@@ -265,10 +267,11 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
     const tax = Number(invoice.tax_amount) || 0;
     const feeTotal = fees.reduce((s, f) => s + (Number(f.amount) || 0), 0);
     const capitalizedFees = fees
-      .filter((f) => f.capitalize_to_inventory)
+      .filter((f) => capitalizeAll || f.capitalize_to_inventory)
       .reduce((s, f) => s + (Number(f.amount) || 0), 0);
     const nonCapFees = feeTotal - capitalizedFees;
-    const merchandiseNet = grand - tax - nonCapFees;
+    const capitalizedTax = capitalizeAll ? tax : 0;
+    const merchandiseNet = grand - tax - nonCapFees + capitalizedTax;
     const inventoryDebit = merchandiseNet + capitalizedFees;
 
     const lines: {
@@ -303,12 +306,14 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
         debit: remainingInventoryDebit,
         credit: 0,
         note:
-          capitalizedFees > 0
+          capitalizedTax > 0
+            ? `البضاعة + الضريبة (${formatMoney(capitalizedTax)}) + الرسوم (${formatMoney(capitalizedFees)})`
+            : capitalizedFees > 0
             ? `صافي البضاعة + رسوم مرسملة (${formatMoney(capitalizedFees)})`
             : "صافي البضاعة غير المخصصة",
       });
     }
-    if (tax > 0) {
+    if (tax > 0 && !capitalizeAll) {
       lines.push({
         account: "ضريبة مدخلات (1105)",
         debit: tax,
@@ -316,7 +321,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
       });
     }
     fees
-      .filter((f) => !f.capitalize_to_inventory && (Number(f.amount) || 0) > 0)
+      .filter((f) => !capitalizeAll && !f.capitalize_to_inventory && (Number(f.amount) || 0) > 0)
       .forEach((f) => {
         const acc = accounts.find((a) => a.id === f.expense_account);
         const label = acc
@@ -594,7 +599,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                   <th className="px-3 py-2 text-right font-medium">الوصف</th>
                   <th className="px-3 py-2 text-right font-medium">الحساب المحاسبي</th>
                   <th className="px-3 py-2 text-right font-medium">المبلغ</th>
-                  <th className="px-3 py-2 text-center font-medium">رسملة على المخزون</th>
+                  {!capitalizeAll && <th className="px-3 py-2 text-center font-medium">رسملة على المخزون</th>}
                   <th className="px-3 py-2"></th>
                 </tr>
               </thead>
@@ -602,7 +607,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                 {fees.length === 0 && (
                   <tr>
                     <td
-                      colSpan={5}
+                      colSpan={capitalizeAll ? 4 : 5}
                       className="px-3 py-6 text-center ktra-text-soft"
                     >
                       لا توجد رسوم — اضغط "إضافة رسم" لإضافة رسم شحن/تخليص/…
@@ -653,7 +658,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         className="w-full h-9 px-2 border ktra-border-soft dark:ktra-border-soft rounded ktra-bg-field dark:ktra-bg-panel text-right"
                       />
                     </td>
-                    <td className="px-3 py-2 text-center">
+                    {!capitalizeAll && <td className="px-3 py-2 text-center">
                       <input
                         type="checkbox"
                         checked={!!fee.capitalize_to_inventory}
@@ -665,7 +670,7 @@ export const PurchaseInvoiceAccountingPanel: React.FC<Props> = ({
                         disabled={disableEdit}
                         title="رسملة على المخزون بدل تسجيله كمصروف"
                       />
-                    </td>
+                    </td>}
                     <td className="px-3 py-2 w-10">
                       {!disableEdit && (
                         <button

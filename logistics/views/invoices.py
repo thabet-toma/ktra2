@@ -37,7 +37,7 @@ from logistics.serializers import (
     GoodsReceiptSerializer,
     GoodsReceiptListSerializer,
 )
-from accounting.models import Account, TaxRate
+from accounting.models import Account
 from inventory.models import StockMovement
 from partners.models import Partner
 from tenants.models import Tenant, Currency
@@ -1435,6 +1435,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
           مدين: ضريبة مدخلات (1105)    = tax_amount                    (إن > 0)
           مدين: حساب مصروف لكل رسم     = fee.amount                    (لكل PurchaseInvoiceFee)
              └─ إن كان capitalize_to_inventory=True يُضاف للمخزون بدل المصروف
+             └─ الدولية: الضريبة وكل رسم في المخزون/الوسيط — لا 1105 ولا مصروف
+                (`services.import_invoice_capitalizes_all`، قرار المالك 2026-10-07)
           دائن: ذمم المورد (partner.linked_account)                    = إجمالي + رسوم المورد
           دائن: الطرف الدائن لكل رسمٍ له جهة/حساب (credit_partner/credit_account) = مبلغه
              └─ الدولية: ناقصاً حصصها من الشحن والتخليص والنقل، وتُدائَن بها حسابات
@@ -1557,29 +1559,14 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # الدولية: ضريبتها تكلفة بضاعة لا مدخلات — فلا حساب 1105 يُطلب لها.
+        from logistics.services import import_invoice_capitalizes_all
+        capitalize_all = import_invoice_capitalizes_all(invoice)
         vat_input_account = None
-        if tax_amt > 0:
-            # Priority 1: explicit binding in company settings (SalesSettings.vat_input_account)
-            from sales.models import SalesSettings
-            ss = SalesSettings.objects.filter(tenant=tenant).first()
-            if ss and ss.vat_input_account_id:
-                vat_input_account = ss.vat_input_account
-
-            # Priority 2: TaxRate with direction=purchase (explicit accounting configuration)
-            if not vat_input_account:
-                purchase_tax = TaxRate.objects.filter(
-                    tenant=tenant, is_active=True, direction='purchase',
-                ).select_related('tax_account').first()
-                if (
-                    purchase_tax
-                    and purchase_tax.tax_account
-                    and purchase_tax.tax_account.account_type == 'Asset'
-                ):
-                    vat_input_account = purchase_tax.tax_account
-
-            # Priority 3: well-known account code 1105 (standard CoA seed)
-            if not vat_input_account:
-                vat_input_account = Account.objects.filter(tenant=tenant, code="1105").first()
+        if tax_amt > 0 and not capitalize_all:
+            # إعدادات المبيعات ← ضريبة شراء فعّالة ← 1105.
+            from logistics.services import resolve_purchase_vat_input_account
+            vat_input_account = resolve_purchase_vat_input_account(tenant)
 
             if not vat_input_account:
                 return Response(
@@ -1609,6 +1596,9 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # رسم الدولية دائنُه حسابُه هو — ورسمٌ قديم لم يُربط بعد يُربط هنا قبل القيد.
         from logistics.services import bind_import_fee_credit_accounts
         bind_import_fee_credit_accounts(invoice, fees_qs)
+        # والدولية: كل رسمٍ تكلفة بضاعة مهما كان خياره المحفوظ.
+        from logistics.services import capitalize_import_fees
+        capitalize_import_fees(invoice, fees_qs)
         # رسمٌ له طرفٌ دائن (جهة/حساب) يُدائَن لجهته في سطرٍ مستقل — ذمّة المورد
         # بلا مبلغه (`services.purchase_invoice_fees_total` المصدر نفسه للمستحق).
         party_fees = [f for f in fees_qs if f.has_credit_party and Decimal(str(f.amount or 0)) > 0]
@@ -1634,7 +1624,12 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # خارج الإجمالي والضريبة وذمّة المورد.
         from logistics.payment_posting import import_invoice_booked_commission
         commission, commission_account_id = import_invoice_booked_commission(invoice)
-        inventory_debit = merchandise_net + capitalized_total + commission
+        # والدولية: ضريبتها في البضاعة أيضاً (فيوزّعها الاستلام على البنود كالرسوم).
+        capitalized_tax = tax_amt if capitalize_all else Decimal('0')
+        inventory_debit = merchandise_net + capitalized_total + commission + capitalized_tax
+        if capitalize_all:
+            logger.info('import invoice %s posting: tax capitalized=%s fees capitalized=%s',
+                        invoice.pk, capitalized_tax, capitalized_total)
 
         items_with_landed = list(invoice.items.all())
         use_landed = False
@@ -1774,7 +1769,7 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                 'description': f"بند مشتريات: {names} — {invoice.invoice_number}"[:500],
             })
 
-        if tax_amt > 0:
+        if tax_amt > 0 and not capitalize_all:
             lines_payload.append({
                 'account': vat_input_account.id,
                 'debit': tax_amt.quantize(Decimal('0.01')),

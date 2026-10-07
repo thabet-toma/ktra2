@@ -244,16 +244,18 @@ def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal
     مرسمَل، الضريبة — لكلٍّ تكلفته ومدفوعه (مسقوفاً بها) ومتبقّيه.
 
     حصّة المورد في `components` تشمل ضريبة الفاتورة ورسومه، فتُفصل هنا: مدفوعه يُسدّد
-    البضاعة أولاً ثم رسومه المرسملة ثم الضريبة، ومجموع سطوره = حصّته. رسمٌ للمورد غير
-    مرسمَل (فاتورة صفقة أرشيف) يبقى داخل سطره — دَينٌ له؛ ورسمٌ بحسابه غير مرسمَل مصروفٌ
-    لا تكلفة بضاعة فلا سطر له. العمولة مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)،
+    البضاعة أولاً ثم رسومه المرسملة ثم الضريبة، ومجموع سطوره = حصّته. كل رسمٍ مرسمَل
+    (`services.purchase_fee_capitalized`: المسودة الدولية دائماً)؛ ورسمٌ رحّله قيدٌ قديم
+    مصروفاً يبقى للمورد داخل سطره إن كان دائنَه، ولا سطر له إن كان بحسابه. العمولة
+    مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)،
     والرسم ذو الطرف الدائن مدفوعه من سندات حسابه (`_fee_paid_by_account`).
     """
     from logistics.payment_posting import import_invoice_booked_commission
+    from logistics.services import purchase_fee_capitalized
 
     tax = lc._d(invoice.tax_amount).quantize(Q2)
     fees = [f for f in invoice.fees.select_related('credit_partner').order_by('id')
-            if f.capitalize_to_inventory]
+            if purchase_fee_capitalized(invoice, f)]
     supplier_fees = [f for f in fees if not f.has_credit_party]
     party_paid = _fee_paid_by_account(invoice, [f for f in fees if f.has_credit_party])
 
@@ -292,12 +294,15 @@ def _cost_rows(invoice: PurchaseInvoice, components: Dict[str, Dict[str, Decimal
 
 
 def import_invoice_unit_costs(invoice: PurchaseInvoice, breakdown: Dict[str, Any]) -> List[Dict[str, Any]]:
-    """التكلفة النهائية للوحدة (التفصيل وحده): «إجمالي التكلفة» بلا الضريبة — ما يُرسمَل
-    على البضاعة — موزّعاً كما يوزّعه قيد الاستلام نفسه (`goods_clearing_unit_costs`)."""
-    from logistics.services import goods_clearing_unit_costs
+    """التكلفة النهائية للوحدة (التفصيل وحده): «إجمالي التكلفة» كلّه — ضريبته ورسومه
+    وعمولاته تكلفة بضاعة (`services.import_invoice_capitalizes_all`) — موزّعاً كما يوزّعه
+    قيد الاستلام نفسه (`goods_clearing_unit_costs`)، فـΣ(كمية × وحدة) = مدين البضاعة في
+    القيد = مدين المخزون في قيد الاستلام. مرحّلةٌ قبل القرار: بلا ما رحّله قيدها مدخلاتٍ."""
+    from logistics.services import goods_clearing_unit_costs, import_invoice_capitalized_tax
 
     tax = sum((r['cost'] for r in breakdown['cost_rows'] if r['key'] == 'tax'), Decimal('0'))
-    inventory_cost = max(breakdown['payable_total'] - tax, Decimal('0'))
+    off_cost_tax = max(tax - import_invoice_capitalized_tax(invoice), Decimal('0'))
+    inventory_cost = max(breakdown['payable_total'] - off_cost_tax, Decimal('0'))
     shares = goods_clearing_unit_costs(invoice, inventory_cost)
     return [
         {'item_id': it.pk, 'name': it.name or (it.product.name if it.product_id else ''),

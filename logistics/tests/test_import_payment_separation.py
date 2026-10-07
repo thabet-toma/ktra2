@@ -504,8 +504,9 @@ class ImportPaymentSeparationTest(APITestCase):
         credit = sum((line.credit for line in journal.lines.all()), D("0"))
         self.assertEqual(debit, D("1100.00"))
         self.assertEqual(credit, D("1100.00"))
-        self.assertTrue(journal.lines.filter(
-            account=self.clearance_expense, debit=D("100.00"),
+        # قرار المالك (2026-10-07): رسم الدولية تكلفة بضاعة — لا مدين مصروف.
+        self.assertFalse(journal.lines.filter(
+            account=self.clearance_expense, debit__gt=0,
         ).exists())
 
 

@@ -253,9 +253,8 @@ class ImportInvoiceSettlementTest(APITestCase):
             old_supplier - new_supplier,
             shares["freight"] + shares["clearance"] + shares["local"])
         self.assertEqual(new_supplier, D("3500.00") + tax)
-        # ضريبة الفاتورة مدخلاتٌ في 1105، لا تكلفة: البضاعة لم تتغيّر بها.
-        vat = sum((l.debit for l in lines if l.account.code == "1105"), D("0"))
-        self.assertEqual(vat, tax)
+        # قرار المالك (2026-10-07): ضريبة الفاتورة الدولية تكلفة بضاعة — لا سطر 1105.
+        self.assertFalse(any(l.account.code == "1105" for l in lines))
 
     def test_posting_still_refuses_when_shipment_costs_changed(self):
         # الحارس باقٍ لما وُضع له: تكلفةٌ أُضيفت للشحنة بعد بناء الفاتورة.
@@ -593,16 +592,17 @@ class ImportInvoiceSettlementTest(APITestCase):
             f"/api/logistics/purchase-invoices/{inv.pk}/", **self._auth()).json()
         self.assertEqual(D(detail["tax_amount"]), inv.tax_amount)
 
-    def test_import_payment_excludes_party_fees(self):
+    def test_party_fee_is_cost_not_supplier_debt(self):
         ktra = self._ktra()
         inv = self._release_and_import()[0]
         before = self._breakdown(inv)
         supplier_payable = self._supplier_payable(inv)
         self._party_fee(inv, ktra)
         after = self._breakdown(inv)
+        # حصّة المورد كما هي؛ والرسم — ولو بخيار «لا يُرسمَل» محفوظاً — تكلفةٌ في الإجمالي.
         self.assertEqual(after["components"]["supplier"], before["components"]["supplier"])
-        self.assertEqual(D(after["payable_total"]), D(before["payable_total"]))
-        self.assertEqual(D(after["remaining_balance"]), D(before["remaining_balance"]))
+        self.assertEqual(D(after["payable_total"]), D(before["payable_total"]) + D("420"))
+        self.assertEqual(D(after["remaining_balance"]), D(before["remaining_balance"]) + D("420"))
         self.assertEqual(self._supplier_payable(inv), supplier_payable)
 
         inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
@@ -689,10 +689,10 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(D(rows["commission"]["remaining"]), D("0.00"))
         self.assertEqual(
             D(payment["payable_total"]), sum((D(r["cost"]) for r in rows.values()), D("0")))
-        # التكلفة النهائية للوحدة تحمل العمولة: مجموعها = مدين القيد بلا ضريبته (بلا رسوم هنا).
+        # التكلفة النهائية للوحدة تحمل العمولة والضريبة: مجموعها = كل مدين القيد = إجمالي التكلفة.
         unit_total = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in payment["unit_costs"]), D("0"))
-        self.assertEqual(unit_total.quantize(Q2), sum((l.debit for l in lines), D("0")) - inv.tax_amount)
-        self.assertEqual(unit_total.quantize(Q2), D(payment["payable_total"]) - inv.tax_amount)
+        self.assertEqual(unit_total.quantize(Q2), sum((l.debit for l in lines), D("0")))
+        self.assertEqual(unit_total.quantize(Q2), D(payment["payable_total"]))
 
     def test_recalc_repost_adds_commission_to_old_posting_once(self):
         from logistics.landed_cost import posted_invoices_cost_drift
@@ -803,17 +803,21 @@ class ImportInvoiceSettlementTest(APITestCase):
         # والمتوسط (النموذج الدوري — الافتراضي) يحمل العمولة: كان السعرَ المستورد وحده.
         self.assertEqual(self._stock_value_at_avg(inv), grn)
 
-    def test_capitalized_fee_enters_unit_cost_expensed_fee_does_not(self):
+    def test_every_import_fee_enters_unit_cost(self):
+        """قرار المالك: كل رسمٍ دوليّ تكلفة — والخيار المحفوظ «لا يُرسمَل» (رسمٌ قديم) لا يغيّره."""
         misc = Account.objects.get(tenant=self.tenant, code="5307")
         inv = self._release_and_import()[0]
         inv.fees.create(tenant=self.tenant, description="تكاليف كترا", amount=D("100"),
                         expense_account=misc, capitalize_to_inventory=True)
-        inv.fees.create(tenant=self.tenant, description="رسم إداري", amount=D("50"),
-                        expense_account=misc, capitalize_to_inventory=False)
+        old = inv.fees.create(tenant=self.tenant, description="رسم إداري", amount=D("50"),
+                              expense_account=misc, capitalize_to_inventory=False)
         inv = self._post_and_receive(inv)
         landed = sum((it.landed_line_total_ils for it in inv.items.all()), D("0"))
         grn = self._grn_inventory_debit(inv)
-        self.assertEqual(grn, (landed + D("100")).quantize(Q2))
+        self.assertEqual(grn, (landed + D("150")).quantize(Q2))
+        old.refresh_from_db()
+        self.assertTrue(old.capitalize_to_inventory)  # الترحيل يثبّته
+        self.assertFalse(inv.journal.lines.filter(account=misc, debit__gt=0).exists())
         self.assertEqual(self._receipt_value(inv), grn)
         self.assertEqual(self._stock_value_at_avg(inv), grn)
 
@@ -879,3 +883,87 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(sale.total_cost, (grn * D("2") / D("10")).quantize(Q2))
         product.refresh_from_db()
         self.assertEqual((product.avg_cost * D("10")).quantize(Q2), grn)
+
+    # ── قرار المالك (2026-10-07): كل ما في الفاتورة الدولية تكلفة — رقمٌ واحد ──
+    def _gr_ir_debit(self, inv):
+        from logistics.services import _resolve_gr_ir_account
+        clearing = _resolve_gr_ir_account(self.tenant)
+        return sum((l.debit for l in inv.journal.lines.filter(account=clearing)), D("0"))
+
+    def test_tax_fee_and_commission_all_cost_one_number_everywhere(self):
+        """ض.ق.م 16% + رسمٌ بعد الضريبة + عمولة (INV-0023): Σ(كمية × unit_cost) = إجمالي التكلفة
+        = مدين الوسيط (2110) في قيد الفاتورة = مدين المخزون في قيد الاستلام، و1105 لا يتحرّك."""
+        self._post_deal_payment_with_commission(self.deals[0], "10")  # 35 ₪
+        inv = self._release_and_import()[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv = PurchaseInvoice.objects.get(pk=inv.pk)
+        self.assertGreater(inv.tax_amount, 0)
+        # رسم كترا: 10% من (الأساس + الضريبة) — يُحفظ من الشاشة بلا خيار «يُضاف للتكلفة».
+        res = self.client.patch(
+            f"/api/logistics/purchase-invoices/{inv.pk}/",
+            {"fees": [{"description": "تكاليف كترا", "amount": "0",
+                       "calculation_type": "percentage", "calculation_value": "10",
+                       "percentage_basis": "after_main_vat",
+                       "expense_account": Account.objects.get(tenant=self.tenant, code="5307").id}]},
+            format="json", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+        fee = inv.fees.get()
+        self.assertTrue(fee.capitalize_to_inventory)
+        self.assertGreater(fee.amount, 0)
+
+        draft = self._breakdown(inv)
+        payable = D(draft["payable_total"])
+        draft_units = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in draft["unit_costs"]), D("0"))
+        self.assertEqual(draft_units.quantize(Q2), payable)
+
+        vat_before = self._net("1105")
+        inv = self._post_and_receive(PurchaseInvoice.objects.get(pk=inv.pk))
+        self.assertEqual(self._net("1105"), vat_before)  # لا مدخلات من الفاتورة الدولية
+        self.assertEqual(self._gr_ir_debit(inv), payable)
+        self.assertEqual(self._grn_inventory_debit(inv), payable)
+        self.assertEqual(self._receipt_value(inv), payable)
+        self.assertEqual(self._stock_value_at_avg(inv), payable)
+        posted = self._breakdown(inv)
+        self.assertEqual(D(posted["payable_total"]), payable)
+        units = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in posted["unit_costs"]), D("0"))
+        self.assertEqual(units.quantize(Q2), payable)
+
+    def test_old_posting_with_input_vat_is_stale_and_repost_capitalizes_it(self):
+        """INV-0022: رُحّلت قبل القرار (الضريبة على 1105، الرسم مصروفاً) ⇒ «متأخّرة»، والأمر
+        يعرضها؛ و«أعد الاحتساب والترحيل» يرحّلها تكلفةً."""
+        from io import StringIO
+        from django.core.management import call_command
+        from logistics.landed_cost import posted_invoices_cost_drift
+
+        misc = Account.objects.get(tenant=self.tenant, code="5307")
+        inv = self._release_and_import()[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        fee = PurchaseInvoice.objects.get(pk=inv.pk).fees.create(
+            tenant=self.tenant, description="تكاليف كترا", amount=D("100"),
+            expense_account=misc, capitalize_to_inventory=False)
+        # الترحيل القديم: بلا القاعدة.
+        with mock.patch("logistics.services.import_invoice_capitalizes_all", return_value=False), \
+                mock.patch("logistics.services.capitalize_import_fees"):
+            inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
+        self.assertTrue(inv.journal.lines.filter(account__code="1105", debit__gt=0).exists())
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertIn(inv.pk, [r["id"] for r in drift["stale_posted_invoices"]])
+        out = StringIO()
+        call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
+        self.assertIn(inv.invoice_number, out.getvalue())
+        self.assertIn("تكاليف كترا", out.getvalue())
+
+        res = self._recalculate(auto_repost=True)
+        self.assertEqual(res.status_code, 200, res.content)
+        inv.refresh_from_db()
+        fee.refresh_from_db()
+        self.assertTrue(fee.capitalize_to_inventory)
+        self.assertFalse(inv.journal.lines.filter(account__code="1105").exists())
+        self.assertFalse(inv.journal.lines.filter(account=misc, debit__gt=0).exists())
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertEqual(drift["stale_posted_invoices"], [])
+        out = StringIO()
+        call_command("report_import_off_cost_postings", "--tenant", str(self.tenant.pk), stdout=out)
+        self.assertNotIn(inv.invoice_number, out.getvalue())

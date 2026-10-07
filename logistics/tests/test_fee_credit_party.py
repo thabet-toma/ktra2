@@ -101,8 +101,10 @@ class FeeCreditPartyPostingTest(APITestCase):
         invoice = self._invoice("FCP-1", credit_partner=self.ktra)
         self._post(invoice)
         lines = self._lines(invoice)
-        # المدين كما كان، والدائن انقسم: المورد بالإجمالي وحده، وكترا برسمها بوسمها.
-        self.assertIn(("5307", D("100.00"), D("0.00"), None), lines)
+        # المدين: الرسم تكلفة بضاعة (قرار المالك 2026-10-07 — الدولية كلّها تكلفة)، والدائن
+        # انقسم: المورد بالإجمالي وحده، وكترا برسمها بوسمها.
+        self.assertIn(("2110", D("1100.00"), D("0.00"), None), lines)
+        self.assertNotIn("5307", [l[0] for l in lines])
         self.assertIn(("2101", D("0.00"), D("1000.00"), self.supplier.pk), lines)
         self.assertIn(("AP-KTRA", D("0.00"), D("100.00"), self.ktra.pk), lines)
         self.assertEqual(sum(l[1] for l in lines), sum(l[2] for l in lines))

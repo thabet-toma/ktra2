@@ -941,6 +941,16 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return fee_data
 
     @staticmethod
+    def _capitalize_import_fee(invoice, fee_data):
+        """رسم الدولية تكلفة بضاعة دائماً (`services.import_invoice_capitalizes_all`)."""
+        from logistics.services import import_invoice_capitalizes_all
+
+        if import_invoice_capitalizes_all(invoice) and not fee_data.get('capitalize_to_inventory'):
+            fee_data = dict(fee_data)
+            fee_data['capitalize_to_inventory'] = True
+        return fee_data
+
+    @staticmethod
     def _bind_import_fee_credit_account(invoice, fee_data):
         """رسم الدولية دائنُه حسابُه هو: ذمّةٌ باسمه (`services.import_fee_credit_account`)
         — تُحسب من الاسم في كل حفظ، فتغيير الاسم ينقل الدائن معه. الجهة الصريحة تبقى."""
@@ -1023,6 +1033,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 self._write_item_extensions(invoice, item, extensions)
             for fee_data in fees_data:
                 fee_data = self._bind_import_fee_credit_account(invoice, fee_data)
+                fee_data = self._capitalize_import_fee(invoice, fee_data)
                 self._guard_fee_credit_party(invoice, fee_data)
                 fee_data = self._normalize_fee_amount(invoice, fee_data)
                 fee_data = self._bind_import_expense_account(invoice, fee_data)
@@ -1155,6 +1166,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 instance.fees.all().delete()
                 for fee_data in fees_data:
                     fee_data = self._bind_import_fee_credit_account(instance, fee_data)
+                    fee_data = self._capitalize_import_fee(instance, fee_data)
                     self._guard_fee_credit_party(instance, fee_data)
                     fee_data = self._normalize_fee_amount(instance, fee_data)
                     fee_data = self._bind_import_expense_account(instance, fee_data)

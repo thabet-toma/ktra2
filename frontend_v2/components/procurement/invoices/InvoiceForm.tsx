@@ -63,7 +63,7 @@ import {
 } from "@/utils/invoiceTaxesAndFees";
 import { roundSqlMoney2, roundSqlMoney4 } from "@/utils/sqlMoneyRound";
 import { formatMoney, formatNumber, formatQuantity } from "@/utils/formatNumber";
-import { importCostRows, importFinalUnitCost, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
+import { applyImportUnitCosts, importCostRows, importFinalUnitCost, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase } from "@/utils/importPayment";
 import { buildPurchasePriceHintChips } from "@/utils/purchasePriceHint";
 import { inventoryApi } from "@/services/inventoryApi";
 import { getReservedStock, type ReservedStockRow } from "@/services/salesApi";
@@ -1581,13 +1581,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         invoiceVatBaseIls: ilsVatBase,
       },
     );
-    return allocateInvoiceFinalCosts(formData.items || [], {
+    const local = allocateInvoiceFinalCosts(formData.items || [], {
       taxAndFeesTotalIls:
         Math.max(0, Number(formData.taxAmount) || 0) +
         localExtras +
         finalCostFeesTotal,
     });
+    // الدولية: unit_costs الخادم (بالضريبة والرسوم والعمولة) للبند المحفوظ.
+    return applyImportUnitCosts(local, formData.items || [], formData.importPayment);
   }, [
+    formData.importPayment,
     formData.items,
     formData.taxAmount,
     formData.localPayments,
@@ -1688,7 +1691,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       case "remainingQty": return formatQuantity(row.remainingQuantity || 0);
       case "unitPrice": return row.unitPrice || 0;
       case "totalPrice": return row.totalPrice || 0;
-      case "finalUnitCost": return importFinalUnitCost(formData.importPayment, row.serverId, finalItemCosts[idx]?.finalUnit) || 0;
+      case "finalUnitCost": return finalItemCosts[idx]?.finalUnit || 0;
       default: return "";
     }
   };
@@ -2010,8 +2013,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   if (finalUnitColumn) {
     finalUnitColumn.render = (row) => {
       const index = (formData.items || []).indexOf(row);
-      const unit = importFinalUnitCost(formData.importPayment, row.serverId, finalItemCosts[index]?.finalUnit);
-      return formatNumber(unit || 0, { maxDecimals: 4, group: true });
+      return formatNumber(finalItemCosts[index]?.finalUnit || 0, { maxDecimals: 4, group: true });
     };
   }
   const deleteColumn = itemColumns.find((column) => column.key === "del");
@@ -2197,6 +2199,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             invoiceVatBaseIls={ilsVatBase}
             additionalFeesTotal={feesTotal}
             isShipmentLinkedImport={isShipmentLinkedImport}
+            importPayment={formData.importPayment}
           />
           <NISInvoiceTaxStrip
             taxType={formData.taxType || "percentage"}
@@ -2325,7 +2328,8 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         expenseAccountId: preferred?.id || null,
         expenseAccountCode: preferred?.code,
         expenseAccountName: preferred?.name,
-        capitalizeToInventory: false,
+        // الدولية: كل رسمٍ تكلفة بضاعة (`services.import_invoice_capitalizes_all`).
+        capitalizeToInventory: isInternationalInvoice,
         isTaxable: false,
       }],
     }));
@@ -2345,7 +2349,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       <div className="mb-2 flex items-center justify-between gap-2">
         <div>
           <h4 className="text-sm font-semibold">بنود الضرائب والرسوم الإضافية</h4>
-          <p className="text-xs text-[var(--color-text-muted)]">كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف.</p>
+          <p className="text-xs text-[var(--color-text-muted)]">{isInternationalInvoice ? "كل بندٍ — ضريبةً كان أو رسماً — يدخل تكلفة البضاعة، كضريبة الفاتورة الأساسية." : "كل بند له حساب واضح؛ ويمكن رسملته على تكلفة المخزون أو تحميله كمصروف."}</p>
         </div>
         {feeEditorState.canAdd && (
           <div className="flex flex-wrap justify-end gap-2">
@@ -2377,7 +2381,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
             <th className="p-1 text-start">الحساب</th>
             <th className="w-32 p-1 text-center">المبلغ (₪)</th>
             <th className="w-24 p-1 text-center">ضمن أساس الضريبة</th>
-            <th className="w-24 p-1 text-center">يُضاف للتكلفة</th>
+            {!isInternationalInvoice && <th className="w-24 p-1 text-center">يُضاف للتكلفة</th>}
             <th className="w-14 p-1"></th>
           </tr></thead>
           <tbody>
@@ -2390,12 +2394,12 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
                 <td className="p-1"><AccountTreeField accounts={allAccounts} value={fee.expenseAccountId || ""} disabled={effectiveReadOnly} purpose={FEE_PURPOSE} title="اختيار حساب الرسم" onChange={(id, account) => setFeeAt(index, { expenseAccountId: id, expenseAccountCode: account?.code, expenseAccountName: account?.name ?? undefined })} /></td>
                 <td className="p-1"><input className="ktra-input w-full text-center" data-fee-amount={fee.id} type="number" min="0" step="0.01" disabled={effectiveReadOnly || fee.calculationType === "percentage"} value={fee.calculationType === "percentage" ? fee.amount : (fee.calculationValue ?? fee.amount)} onChange={(e) => { const value = Number(e.target.value) || 0; setFeeAt(index, { amount: value, calculationValue: value }); }} /></td>
                 <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly || hasCreditParty || (fee.calculationType === "percentage" && fee.percentageBasis === "after_main_vat")} title={hasCreditParty ? "رسمٌ يُدائَن لحسابه لا للمورد — لا يدخل أساس ضريبة الفاتورة" : "يُضاف مبلغه لأساس ضريبة الفاتورة"} checked={Boolean(fee.isTaxable)} onChange={(e) => setFeeAt(index, { isTaxable: e.target.checked })} /></td>
-                <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} title="يُرسمَل على تكلفة البضاعة بدل المصروف" checked={fee.capitalizeToInventory} onChange={(e) => setFeeAt(index, { capitalizeToInventory: e.target.checked })} /></td>
+                {!isInternationalInvoice && <td className="p-1 text-center"><input type="checkbox" disabled={effectiveReadOnly} title="يُرسمَل على تكلفة البضاعة بدل المصروف" checked={fee.capitalizeToInventory} onChange={(e) => setFeeAt(index, { capitalizeToInventory: e.target.checked })} /></td>}
                 <td className="p-1 text-center">{!effectiveReadOnly && <button type="button" className="ktra-toolbtn" onClick={() => applyFees((formData.fees || []).filter((_, i) => i !== index))}><Trash2 size={14} /></button>}</td>
               </tr>
               );
             })}
-            {(formData.fees || []).length === 0 && <tr><td colSpan={6} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
+            {(formData.fees || []).length === 0 && <tr><td colSpan={isInternationalInvoice ? 5 : 6} className="p-6 text-center text-[var(--color-text-muted)]">لا توجد ضرائب أو رسوم إضافية. استخدم «إضافة ضريبة مستقلة» أو «إضافة رسم» عند الحاجة.</td></tr>}
           </tbody>
         </table>
       </div>
