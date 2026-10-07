@@ -1606,6 +1606,9 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # ─── 4) تجهيز الرسوم (Fees) ─────────────────────────────────────────────
         fees_qs = list(invoice.fees.select_related(
             'expense_account', 'credit_partner', 'credit_account').all())
+        # رسم الدولية دائنُه حسابُه هو — ورسمٌ قديم لم يُربط بعد يُربط هنا قبل القيد.
+        from logistics.services import bind_import_fee_credit_accounts
+        bind_import_fee_credit_accounts(invoice, fees_qs)
         # رسمٌ له طرفٌ دائن (جهة/حساب) يُدائَن لجهته في سطرٍ مستقل — ذمّة المورد
         # بلا مبلغه (`services.purchase_invoice_fees_total` المصدر نفسه للمستحق).
         party_fees = [f for f in fees_qs if f.has_credit_party and Decimal(str(f.amount or 0)) > 0]
@@ -1626,7 +1629,12 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         # grand_total هو إجمالي الفاتورة قبل بنود fees الإضافية. الرسوم تُضاف فوقه:
         # غير المرسملة → حساب مصروف مستقل، المرسملة → تكلفة المخزون.
         merchandise_net = grand - tax_amt
-        inventory_debit = merchandise_net + capitalized_total
+        # عمولات التحويل (قرار المالك): مصروفٌ بنكي يوم الدفع، وتنتقل إلى البضاعة هنا —
+        # مدين المخزون/الوسيط (فيوزّعها الاستلام على البنود) / دائن حسابها الذي قيّدها.
+        # خارج الإجمالي والضريبة وذمّة المورد.
+        from logistics.payment_posting import import_invoice_booked_commission
+        commission, commission_account_id = import_invoice_booked_commission(invoice)
+        inventory_debit = merchandise_net + capitalized_total + commission
 
         items_with_landed = list(invoice.items.all())
         use_landed = False
@@ -1789,6 +1797,16 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
 
         for fee in party_fees:
             lines_payload.append(purchase_invoice_fee_credit_line(fee, invoice.invoice_number))
+        if commission > 0:
+            lines_payload.append({
+                'account': commission_account_id,
+                'debit': Decimal('0'),
+                'credit': commission,
+                'partner': None,
+                'description': f"عمولات التحويل على التكلفة — {invoice.invoice_number}",
+            })
+            logger.info('purchase invoice %s posting: transfer commission capitalized=%s',
+                        invoice.pk, commission)
         if party_fees:
             logger.info('purchase invoice %s posting: fee credit parties=%s', invoice.pk,
                         {f.pk: str(f.amount) for f in party_fees})

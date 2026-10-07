@@ -19,6 +19,16 @@ export interface ImportPaymentBreakdown {
   amount_paid: string;
   remaining_balance: string;
   components: Record<ImportPaymentComponentKey, ImportPaymentComponent>;
+  /** التفصيل وحده (لا القائمة): `import_invoice_cost_rows` — كل تكلفةٍ بمدفوعها. */
+  cost_rows?: ImportCostRowDto[];
+  total_cost?: string;
+  unit_costs?: Array<{ item_id: number; name: string; quantity: string; unit_cost: string }>;
+}
+
+/** سطر «تفصيل التكاليف»: مورد، شحن، تخليص، محلي، عمولات التحويل، `fee:<id>`، ضريبة. */
+export interface ImportCostRowDto extends ImportPaymentComponent {
+  key: string;
+  label: string;
 }
 
 export const IMPORT_PAYMENT_LABELS: Record<ImportPaymentComponentKey, string> = {
@@ -109,4 +119,32 @@ export function importPaymentTooltip(ip: ImportPaymentBreakdown | null | undefin
       return `${IMPORT_PAYMENT_LABELS[key]} ${formatMoney(c.paid)} / ${formatMoney(c.cost)}`;
     })
     .join(" · ");
+}
+
+export interface ImportCostRow {
+  key: string;
+  label: string;
+  cost: number;
+  paid: number;
+  remaining: number;
+}
+
+/**
+ * «تفصيل التكاليف» في وضع عرض الفاتورة الدولية: السطور كما رتّبها الخادم بأرقامها، و«إجمالي
+ * التكلفة» منه (لا مجموعاً هنا). بلا `cost_rows` (القائمة/فاتورة غير دولية) ⇒ لا قسم.
+ */
+export function importCostRows(
+  ip: ImportPaymentBreakdown | null | undefined,
+): { rows: ImportCostRow[]; totalCost: number } | null {
+  if (!ip?.cost_rows?.length) return null;
+  return {
+    rows: ip.cost_rows.map((r) => ({
+      key: r.key,
+      label: r.label,
+      cost: Number(r.cost) || 0,
+      paid: Number(r.paid) || 0,
+      remaining: Number(r.remaining) || 0,
+    })),
+    totalCost: Number(ip.total_cost) || 0,
+  };
 }

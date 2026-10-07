@@ -295,6 +295,54 @@ def resolve_import_expense_account(tenant_id: int, name: str):
     return resolve_expense_account(tenant_id, name, IMPORT_EXPENSE_PARENT_CODE)
 
 
+IMPORT_FEE_ACCRUALS_PARENT_NAME = "مستحقات رسوم الاستيراد"
+
+
+def _import_fee_accruals_parent(tenant_id: int):
+    """أب «مستحقات رسوم الاستيراد» (Liability) — بالاسم، ويُنشأ تحت «21» بأوّل رمزٍ
+    رباعيٍّ شاغر إن غاب. None إن غاب «21» نفسه."""
+    target = _normalize_account_name(IMPORT_FEE_ACCRUALS_PARENT_NAME)
+    for account in Account.objects.filter(tenant_id=tenant_id, account_type="Liability"):
+        if _normalize_account_name(account.name) == target:
+            return account
+    root = Account.objects.filter(tenant_id=tenant_id, code="21").first()
+    if root is None:
+        logger.warning("import fee accruals parent: «21» missing tenant=%s", tenant_id)
+        return None
+    used = {
+        code for code in Account.objects.filter(
+            tenant_id=tenant_id, code__startswith="21").values_list("code", flat=True)
+        if len(str(code)) == 4
+    }
+    for serial in range(12, 100):
+        code = f"21{serial:02d}"
+        if code in used:
+            continue
+        try:
+            with transaction.atomic():
+                parent = Account.objects.create(
+                    tenant_id=tenant_id, code=code, name=IMPORT_FEE_ACCRUALS_PARENT_NAME,
+                    parent=root, account_type="Liability", is_active=True,
+                )
+        except IntegrityError:
+            continue
+        logger.info("import fee accruals parent created tenant=%s code=%s", tenant_id, code)
+        return parent
+    return None
+
+
+def resolve_import_fee_accrual_account(tenant_id: int, name: str):
+    """(حساب، أُنشئ؟) ذمّةُ رسمِ الفاتورة الدولية باسمه تحت «مستحقات رسوم الاستيراد».
+
+    دائن الرسم حسابُه هو (قرار المالك): التزامٌ يُسدَّد بسند صرف عليه. البحث تحت الأب
+    وحده — فحسابُ مصروفٍ بالاسم نفسه (مدين الرسم تحت «53») لا يُلتقط دائناً.
+    """
+    parent = _import_fee_accruals_parent(tenant_id)
+    if parent is None:
+        return None, False
+    return _resolve_named_account_under_parent(tenant_id, name, parent.code, "Liability")
+
+
 def validate_fiscal_period(tenant_id, transaction_date):
     """
     Ensures transaction_date falls within an open fiscal period.

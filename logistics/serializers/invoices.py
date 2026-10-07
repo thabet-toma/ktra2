@@ -651,7 +651,25 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return purchase_invoice_payment_summary(obj)['payment_status_display']
 
     def get_import_payment(self, obj):
-        return _import_payment_payload(obj)
+        payload = _import_payment_payload(obj)
+        if payload:
+            # التفصيل وحده (لا القائمة): تفصيل التكاليف بسطورها و«إجمالي التكلفة».
+            from logistics.domain.import_settlement import import_invoice_cost_rows
+            try:
+                detail = import_invoice_cost_rows(obj, _import_display_payment(obj))
+            except Exception:
+                logger.exception('import cost rows failed invoice=%s', obj.pk)
+            else:
+                payload['cost_rows'] = [
+                    {k: (str(v) if isinstance(v, Decimal) else v) for k, v in r.items()}
+                    for r in detail['rows']
+                ]
+                payload['total_cost'] = str(detail['total_cost'])
+                payload['unit_costs'] = [
+                    {k: (str(v) if isinstance(v, Decimal) else v) for k, v in u.items()}
+                    for u in detail['unit_costs']
+                ]
+        return payload
 
     def get_is_overdue(self, obj) -> bool:
         """T-DUE: «متأخرة» بُعدٌ فوق حالة الدفع لا قيمةٌ رابعة فيها."""
@@ -918,6 +936,20 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
         return fee_data
 
     @staticmethod
+    def _bind_import_fee_credit_account(invoice, fee_data):
+        """رسم الدولية دائنُه حسابُه هو: ذمّةٌ باسمه (`services.import_fee_credit_account`)
+        — تُحسب من الاسم في كل حفظ، فتغيير الاسم ينقل الدائن معه. الجهة الصريحة تبقى."""
+        if fee_data.get('credit_partner') is not None:
+            return fee_data
+        from logistics.services import import_fee_credit_account
+
+        account = import_fee_credit_account(invoice, fee_data.get('description'))
+        if account is not None:
+            fee_data = dict(fee_data)
+            fee_data['credit_account'] = account
+        return fee_data
+
+    @staticmethod
     def _guard_fee_credit_party(invoice, fee_data):
         from logistics.services import fee_credit_party_error
 
@@ -985,6 +1017,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
                 item = PurchaseInvoiceItem.objects.create(invoice=invoice, **item_data)
                 self._write_item_extensions(invoice, item, extensions)
             for fee_data in fees_data:
+                fee_data = self._bind_import_fee_credit_account(invoice, fee_data)
                 self._guard_fee_credit_party(invoice, fee_data)
                 fee_data = self._normalize_fee_amount(invoice, fee_data)
                 fee_data = self._bind_import_expense_account(invoice, fee_data)
@@ -1116,6 +1149,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             if fees_data is not None:
                 instance.fees.all().delete()
                 for fee_data in fees_data:
+                    fee_data = self._bind_import_fee_credit_account(instance, fee_data)
                     self._guard_fee_credit_party(instance, fee_data)
                     fee_data = self._normalize_fee_amount(instance, fee_data)
                     fee_data = self._bind_import_expense_account(instance, fee_data)

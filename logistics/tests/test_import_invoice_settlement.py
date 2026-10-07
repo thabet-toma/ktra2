@@ -642,3 +642,92 @@ class ImportInvoiceSettlementTest(APITestCase):
         self.assertEqual(res.status_code, 200, res.content)
         inv = self._post(PurchaseInvoice.objects.get(pk=inv.pk))
         self.assertEqual(party_line(inv), (D("420.00"), ktra.pk))
+
+    # ── عمولة التحويل في التكلفة تلقائياً: حيث قيّدها قيد الدفعة ─────────────
+    def _post_deal_payment_with_commission(self, deal, transfer_usd):
+        payment = LogisticsPayment.objects.get(deal=deal)
+        LogisticsPayment.objects.filter(pk=payment.pk).update(transfer_cost=D(transfer_usd))
+        cash = Account.objects.get(tenant=self.tenant, code="1101")
+        res = self.client.post(
+            f"/api/logistics/deals/{deal.pk}/post_payment/{payment.pk}/",
+            {"bank_account_id": cash.pk}, format="json", **self._auth())
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def _bank_charges(self):
+        return Account.objects.get(tenant=self.tenant, name="مصاريف بنكية وعمولات")
+
+    def _net_debit(self, account):
+        agg = JournalLine.objects.filter(
+            tenant=self.tenant, account=account, journal__is_posted=True,
+        ).aggregate(d=Sum("base_debit"), c=Sum("base_credit"))
+        return (agg["d"] or D("0")) - (agg["c"] or D("0"))
+
+    def test_posting_capitalizes_booked_transfer_commission(self):
+        self._post_deal_payment_with_commission(self.deals[0], "10")  # 10$ × 3.5
+        bank = self._bank_charges()
+        self.assertEqual(self._net_debit(bank), D("35.00"))
+        inv = self._release_and_import()[0]
+        PurchaseInvoice.objects.filter(pk=inv.pk).update(tax_rate=D("16"), tax_type="percentage")
+        self.assertEqual(self._recalculate().status_code, 200)
+        inv = PurchaseInvoice.objects.get(pk=inv.pk)
+        supplier_share = self._supplier_payable(inv)
+
+        inv = self._post(inv)
+        lines = list(inv.journal.lines.all())
+        self.assertIn((bank.id, D("35.00")), [(l.account_id, l.credit) for l in lines])
+        self.assertEqual(
+            sum((l.debit for l in lines), D("0")), sum((l.credit for l in lines), D("0")))
+        # المصروف البنكي صار تكلفة: «مصاريف بنكية وعمولات» عاد صفراً، والمورد لا يتأثّر.
+        self.assertEqual(self._net_debit(bank), D("0.00"))
+        self.assertEqual(self._ap_credit(inv), supplier_share)
+        # خارج أساس الضريبة.
+        self.assertEqual(inv.tax_amount, (inv.subtotal * D("0.16")).quantize(Q2))
+        # وفي تفصيل التكاليف سطراً.
+        payment = self._breakdown(inv)
+        rows = {r["key"]: r for r in payment["cost_rows"]}
+        self.assertEqual(D(rows["commission"]["cost"]), D("35.00"))
+        self.assertEqual(D(rows["commission"]["remaining"]), D("0.00"))
+        self.assertEqual(
+            D(payment["total_cost"]), sum((D(r["cost"]) for r in rows.values()), D("0")))
+        # التكلفة النهائية للوحدة تحمل العمولة: مجموعها = مدين القيد بلا ضريبته (بلا رسوم هنا).
+        unit_total = sum((D(u["unit_cost"]) * D(u["quantity"]) for u in payment["unit_costs"]), D("0"))
+        self.assertEqual(unit_total.quantize(Q2), sum((l.debit for l in lines), D("0")) - inv.tax_amount)
+        self.assertEqual(unit_total.quantize(Q2), D(payment["total_cost"]) - inv.tax_amount)
+
+    def test_recalc_repost_adds_commission_to_old_posting_once(self):
+        from logistics.landed_cost import posted_invoices_cost_drift
+
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        inv = self._release_and_import()[0]
+        # ترحيلٌ قبل هذا التعديل: بلا عمولة في التكلفة.
+        with mock.patch(
+            "logistics.payment_posting.import_invoice_booked_commission",
+            return_value=(D("0"), None),
+        ):
+            inv = self._post(inv)
+        bank = self._bank_charges()
+        self.assertFalse(inv.journal.lines.filter(account=bank).exists())
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertIn(inv.pk, [r["id"] for r in drift["stale_posted_invoices"]])
+
+        for _ in range(2):
+            res = self._recalculate(auto_repost=True)
+            self.assertEqual(res.status_code, 200, res.content)
+            inv.refresh_from_db()
+            credit = inv.journal.lines.filter(account=bank).aggregate(c=Sum("credit"))["c"]
+            self.assertEqual(credit, D("35.00"))
+            self.assertEqual(self._net_debit(bank), D("0.00"))
+        drift = posted_invoices_cost_drift(tenant=self.tenant, shipment_id=self.shipment.id)
+        self.assertEqual(drift["stale_posted_invoices"], [])
+
+    def test_archive_deal_commission_is_not_capitalized(self):
+        from logistics.payment_posting import import_invoice_booked_commission
+
+        self._post_deal_payment_with_commission(self.deals[0], "10")
+        inv = self._release_and_import()[0]
+        self.assertEqual(import_invoice_booked_commission(inv)[0], D("35.00"))
+        with mock.patch(
+            "logistics.payment_posting.live_archive_deal_journals",
+            return_value={inv.deal_id: [1]},
+        ):
+            self.assertEqual(import_invoice_booked_commission(inv)[0], D("0"))

@@ -244,9 +244,11 @@ class ImportPaymentSeparationTest(APITestCase):
         self.assertEqual(created.status_code, 201, created.content)
         body = created.json()
         self.assertEqual(len(body["fees"]), 1)
-        self.assertEqual(D(body["fees_total"]), D("100.00"))
-        self.assertEqual(D(body["payable_total"]), D("1100.00"))
-        self.assertEqual(D(body["remaining_balance"]), D("1100.00"))
+        # رسم الدولية دائنُه حسابُه هو (ذمّةٌ باسمه) — لا يدخل مستحقّ المورد.
+        self.assertEqual(body["fees"][0]["credit_account_name"], "رسوم فحص إضافية")
+        self.assertEqual(D(body["fees_total"]), D("0.00"))
+        self.assertEqual(D(body["payable_total"]), D("1000.00"))
+        self.assertEqual(D(body["remaining_balance"]), D("1000.00"))
 
         updated = self.client.patch(
             f"/api/logistics/purchase-invoices/{body['id']}/",
@@ -266,8 +268,10 @@ class ImportPaymentSeparationTest(APITestCase):
         self.assertEqual(saved_fee["description"], "رسوم فحص معدّلة")
         self.assertEqual(D(saved_fee["amount"]), D("125.00"))
         self.assertTrue(saved_fee["capitalize_to_inventory"])
-        self.assertEqual(D(detail.json()["fees_total"]), D("125.00"))
-        self.assertEqual(D(detail.json()["payable_total"]), D("1125.00"))
+        # الاسم الجديد ينقل الدائن معه.
+        self.assertEqual(saved_fee["credit_account_name"], "رسوم فحص معدّلة")
+        self.assertEqual(D(detail.json()["fees_total"]), D("0.00"))
+        self.assertEqual(D(detail.json()["payable_total"]), D("1000.00"))
 
     def test_percentage_fee_persists_basis_and_calculates_amount_on_server(self):
         created = self.client.post(
@@ -303,7 +307,8 @@ class ImportPaymentSeparationTest(APITestCase):
         self.assertEqual(D(fee["calculation_value"]), D("10.00"))
         self.assertEqual(fee["percentage_basis"], "after_main_vat")
         self.assertEqual(D(fee["amount"]), D("116.00"))
-        self.assertEqual(D(created.json()["payable_total"]), D("1276.00"))
+        # الرسم على حسابه هو — مستحقّ المورد الإجماليُّ وحده.
+        self.assertEqual(D(created.json()["payable_total"]), D("1160.00"))
 
         updated = self.client.patch(
             f"/api/logistics/purchase-invoices/{created.json()['id']}/",
@@ -321,7 +326,7 @@ class ImportPaymentSeparationTest(APITestCase):
         )
         self.assertEqual(updated.status_code, 200, updated.content)
         self.assertEqual(D(updated.json()["fees"][0]["amount"]), D("232.00"))
-        self.assertEqual(D(updated.json()["payable_total"]), D("2552.00"))
+        self.assertEqual(D(updated.json()["payable_total"]), D("2320.00"))
 
     def test_international_fee_binds_to_named_import_expense_account(self):
         """اسم الرسم يحدّد حسابه على الخادم — لا يبقى على الافتراضي 5307.

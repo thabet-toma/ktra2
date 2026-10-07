@@ -16,7 +16,7 @@
 from __future__ import annotations
 
 import logging
-from decimal import Decimal
+from decimal import ROUND_HALF_UP, Decimal
 
 from django.core.exceptions import ValidationError
 
@@ -303,6 +303,83 @@ def _bank_charges_account_id(tenant) -> int:
     if created:
         logger.info('bank charges account created tenant=%s account=%s', tenant.pk, account.pk)
     return account.id
+
+
+def bank_charges_account_id(tenant_id: int) -> int | None:
+    """حساب «مصاريف بنكية وعمولات» القائم تحت «52» (مطابقة `resolve_expense_account`
+    بالاسم المطبَّع) — قراءةٌ بلا إنشاء. None إن لم يُقيَّد عليه شيءٌ بعد."""
+    from accounting.services import (
+        EXPENSE_VOUCHER_PARENT_CODE, Account, _normalize_account_name,
+    )
+
+    target = _normalize_account_name(BANK_CHARGES_ACCOUNT_NAME)
+    for account_id, name in Account.objects.filter(
+        tenant_id=tenant_id, code__startswith=EXPENSE_VOUCHER_PARENT_CODE,
+    ).exclude(code=EXPENSE_VOUCHER_PARENT_CODE).values_list('id', 'name'):
+        if _normalize_account_name(name) == target:
+            return account_id
+    return None
+
+
+def booked_transfer_commission_ils(payments, account_id) -> Decimal:
+    """عمولات حوالات الدفعات **كما قيّدها قيدُها**: صافي مدين «مصاريف بنكية وعمولات» في
+    قيد الدفعة المرحّلة وقيود تسويتها (`TRANSFER_FEE_ADJUST_REFERENCE`)، بلا ما عكسه
+    JOURNAL_REVERSAL. بالأساس — صندوق FIFO يقيّدها بتكلفة طبقاته لا بسعر الدفعة."""
+    from django.db.models import Sum
+
+    from accounting.services import JournalHeader, JournalLine
+
+    payments = list(payments)
+    if not account_id or not payments:
+        return Decimal('0')
+    ids = {p.journal_id for p in payments if p.is_posted and p.journal_id}
+    ids |= set(JournalHeader.objects.filter(
+        reference_type=TRANSFER_FEE_ADJUST_REFERENCE, is_posted=True,
+        reference_id__in=[p.pk for p in payments],
+    ).values_list('id', flat=True))
+    if not ids:
+        return Decimal('0')
+    ids -= set(JournalHeader.objects.filter(
+        reference_type='JOURNAL_REVERSAL', is_posted=True, reference_id__in=ids,
+    ).values_list('reference_id', flat=True))
+    agg = JournalLine.objects.filter(
+        journal_id__in=ids, journal__is_posted=True, account_id=account_id,
+    ).aggregate(d=Sum('base_debit'), c=Sum('base_credit'))
+    return (Decimal(str(agg['d'] or 0)) - Decimal(str(agg['c'] or 0))).quantize(Decimal('0.01'))
+
+
+def import_invoice_booked_commission(invoice) -> tuple[Decimal, int | None]:
+    """(شيكل، الحساب) عمولات التحويل التي تُحمَّل على تكلفة الفاتورة الدولية.
+
+    قرار المالك: مصروفٌ يوم الدفع (`build_usd_payment_journal`)، ثم تنتقل إلى البضاعة
+    عند ترحيل الفاتورة: مدين المخزون/الوسيط / دائن الحساب الذي قيّدها — بالمبلغ الذي
+    قيّده فعلاً، فلا يُدائَن بعمولةٍ لم تُقيَّد. عمولات دفعات الصفقة كلّها + حصّتها
+    بالحجم من عمولات دفعات وكيل الشحنة (كـ`build_purchase_invoice_row`). صفقة الأرشيف
+    (ترحيلها مقفل) والمرتجع وغير الدولية: صفر.
+    """
+    from logistics.models import PurchaseInvoice
+
+    zero = (Decimal('0'), None)
+    if (invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL
+            or invoice.is_return or not invoice.deal_id):
+        return zero
+    if live_archive_deal_journals(invoice.tenant_id, [invoice.deal_id]):
+        return zero
+    account_id = bank_charges_account_id(invoice.tenant_id)
+    if not account_id:
+        return zero
+    deal = invoice.deal
+    total = booked_transfer_commission_ils(deal.payments.all(), account_id)
+    if invoice.shipment_id:
+        from logistics.landed_cost import deal_volume_share_on_shipment
+
+        shipment = invoice.shipment
+        agent = booked_transfer_commission_ils(
+            shipment.agent_payments.filter(deal__isnull=True), account_id)
+        if agent:
+            share = deal_volume_share_on_shipment(deal, shipment)
+            total += (agent * share).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    return max(total, Decimal('0')).quantize(Decimal('0.01')), account_id
 
 
 def build_usd_payment_journal(payment, *, debit_account_id, partner_id, box_account,

@@ -1038,6 +1038,45 @@ def fee_credit_party_error(fee, invoice) -> str | None:
     return None
 
 
+def import_fee_credit_account(invoice, description):
+    """دائن رسم الفاتورة الدولية = حسابُه هو: ذمّةٌ باسم الرسم تحت «مستحقات رسوم
+    الاستيراد» (`accounting.services.resolve_import_fee_accrual_account`، يُنشأ إن غاب).
+    None لغير الدولية (رسم المحلية على المورد كما كان) أو لاسمٍ فارغ."""
+    from logistics.models import PurchaseInvoice
+
+    if invoice.invoice_type != PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL or invoice.is_return:
+        return None
+    if not str(description or '').strip():
+        return None
+    if invoice.deal_id:
+        # صفقة أرشيف: ترحيلها مقفل — لا ربط، فيبقى تعديلُ رسومها كما كان.
+        from logistics.payment_posting import live_archive_deal_journals
+        if live_archive_deal_journals(invoice.tenant_id, [invoice.deal_id]):
+            return None
+    from accounting.services import resolve_import_fee_accrual_account
+
+    account, created = resolve_import_fee_accrual_account(invoice.tenant_id, description)
+    if created:
+        logger.info('import fee accrual account created invoice=%s fee=%s account=%s',
+                    invoice.pk, description, account.code)
+    return account
+
+
+def bind_import_fee_credit_accounts(invoice, fees) -> None:
+    """يربط كلَّ رسمٍ دوليٍّ بلا طرفٍ دائن بحسابه (يحفظ) — الرسوم القديمة تُربط عند
+    الترحيل فلا يُدائَن المورد برسمٍ ليس له."""
+    for fee in fees:
+        if fee.has_credit_party:
+            continue
+        account = import_fee_credit_account(invoice, fee.description)
+        if account is None:
+            continue
+        fee.credit_account = account
+        fee.save(update_fields=['credit_account'])
+        logger.info('import fee bound to its accrual account invoice=%s fee=%s account=%s',
+                    invoice.pk, fee.pk, account.code)
+
+
 def purchase_invoice_fee_credit_line(fee, invoice_number) -> dict:
     """سطر الدائن لرسمٍ له طرفٌ دائن: حساب الجهة المربوط بوسمها، أو الحساب بلا طرف."""
     if fee.credit_partner_id:

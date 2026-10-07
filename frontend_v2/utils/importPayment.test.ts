@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
+import { importCostRows, importPaymentRows, importPaymentTooltip, purchasePayableTotal, purchaseSupplierPayBase, type ImportPaymentBreakdown } from './importPayment.ts';
 
 test('صفوف طباعة الدولية: بالترتيب، وصفّ المورد حصّته − مدفوعه = باقيه', () => {
   const rows = importPaymentRows({
@@ -76,4 +76,25 @@ test('التفصيل بترتيب الدائنين الأربعة: المدفو�
 test('بلا تفصيل: نصٌّ فارغ لا انهيار', () => {
   assert.equal(importPaymentTooltip(null), '');
   assert.equal(importPaymentTooltip(undefined), '');
+});
+
+test('تفصيل التكاليف: سطور الخادم بأرقامها وإجماليها منه — ولا قسم بلا سطور', () => {
+  const ip = {
+    payment_status: 'partially_paid', payment_status_display: 'مدفوعة جزئياً',
+    payable_total: '1135.00', amount_paid: '1035.00', remaining_balance: '100.00',
+    components: { supplier: { cost: '1000.00', paid: '1000.00', remaining: '0.00' } },
+    cost_rows: [
+      { key: 'supplier', label: 'المورد', cost: '1000.00', paid: '1000.00', remaining: '0.00' },
+      { key: 'commission', label: 'عمولات التحويل', cost: '35.00', paid: '35.00', remaining: '0.00' },
+      { key: 'fee:7', label: 'تكاليف كترا', cost: '100.00', paid: '0.00', remaining: '100.00' },
+    ],
+    total_cost: '1135.00',
+  } as unknown as ImportPaymentBreakdown;
+  const out = importCostRows(ip);
+  assert.ok(out);
+  assert.deepEqual(out.rows.map((r) => r.key), ['supplier', 'commission', 'fee:7']);
+  assert.equal(out.rows[2].remaining, 100);
+  assert.equal(out.totalCost, 1135);
+  assert.equal(importCostRows({ ...ip, cost_rows: undefined }), null);
+  assert.equal(importCostRows(null), null);
 });

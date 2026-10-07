@@ -185,3 +185,115 @@ def import_invoice_display_payment(invoice: PurchaseInvoice) -> Optional[Dict[st
         data = None
     invoice._import_display_payment = data
     return data
+
+
+def _fee_paid_by_account(invoice, fees) -> Dict[int, Decimal]:
+    """{fee.pk: مدفوع} لرسوم الفاتورة المرحّلة ذات الطرف الدائن — FIFO على حساب الرسم.
+
+    حساب الرسم (ذمّةٌ باسمه أو حساب جهته) مشتركٌ بين فواتير: سندات الصرف عليه تُسدّد
+    أقدم دائنٍ أولاً (تاريخ القيد ثم رقمه)، فمدفوعُ هذه الفاتورة ما وصلها من مجموع
+    المدين، ويُوزَّع على رسومها على الحساب نفسه بنسبة مبالغها.
+    """
+    from django.db.models import Sum
+
+    from accounting.services import JournalLine
+
+    out: Dict[int, Decimal] = {}
+    if not invoice.is_posted or not invoice.journal_id:
+        return out
+    groups: Dict[tuple, List] = {}
+    for fee in fees:
+        if fee.credit_partner_id:
+            key = (fee.credit_partner.linked_account_id, fee.credit_partner_id)
+        elif fee.credit_account_id:
+            key = (fee.credit_account_id, None)
+        else:
+            continue
+        groups.setdefault(key, []).append(fee)
+    for (account_id, partner_id), group in groups.items():
+        lines = JournalLine.objects.filter(
+            tenant_id=invoice.tenant_id, account_id=account_id, journal__is_posted=True,
+        )
+        if partner_id:
+            lines = lines.filter(partner_id=partner_id)
+        debit_total = Decimal(str(lines.aggregate(d=Sum('base_debit'))['d'] or 0))
+        mine = Decimal('0')
+        for journal_id, credit in (
+            lines.filter(base_credit__gt=0)
+            .order_by('journal__transaction_date', 'journal_id', 'id')
+            .values_list('journal_id', 'base_credit')
+        ):
+            take = min(debit_total, Decimal(str(credit)))
+            debit_total -= take
+            if journal_id == invoice.journal_id:
+                mine += take
+        total = sum((Decimal(str(f.amount or 0)) for f in group), Decimal('0'))
+        for fee in group:
+            amount = Decimal(str(fee.amount or 0))
+            out[fee.pk] = ((mine * amount / total) if total > 0 else Decimal('0')).quantize(Q2)
+    return out
+
+
+def import_invoice_cost_rows(invoice: PurchaseInvoice, breakdown: Dict[str, Any]) -> Dict[str, Any]:
+    """تفصيل التكاليف للعرض (قرار المالك): المورد، الشحن، التخليص، النقل، عمولات التحويل،
+    كل رسم، الضريبة — لكلٍّ تكلفته ومدفوعه ومتبقّيه — و«إجمالي التكلفة» والتكلفة
+    النهائية لكل وحدة.
+
+    للعرض وحده: حالة الدفع و`payable_total` تبقى للدائنين الأربعة (`components`). حصّة
+    المورد تشمل ضريبة الفاتورة ورسومه، فتُفصل هنا: مدفوعه يُسدّد البضاعة أولاً ثم رسومه
+    ثم الضريبة. العمولة مدفوعةٌ بطبيعتها (خرجت من الصندوق مع الدفعة)، والرسم ذو الطرف
+    الدائن مدفوعه من سندات حسابه (`_fee_paid_by_account`).
+    """
+    from logistics.payment_posting import import_invoice_booked_commission
+
+    comps = breakdown['components']
+    tax = lc._d(invoice.tax_amount).quantize(Q2)
+    fees = list(invoice.fees.select_related('credit_partner').order_by('id'))
+    supplier_fees = [f for f in fees if not f.has_credit_party]
+    party_paid = _fee_paid_by_account(invoice, [f for f in fees if f.has_credit_party])
+
+    supplier_paid = min(comps['supplier']['paid'], comps['supplier']['cost'])
+    goods = max(
+        comps['supplier']['cost'] - tax
+        - sum((lc._d(f.amount) for f in supplier_fees), Decimal('0')),
+        Decimal('0.00'),
+    ).quantize(Q2)
+
+    def row(key, label, cost, paid):
+        cost = lc._d(cost).quantize(Q2)
+        paid = min(lc._d(paid), cost).quantize(Q2)
+        return {'key': key, 'label': label, 'cost': cost, 'paid': paid,
+                'remaining': (cost - paid).quantize(Q2)}
+
+    def take(amount):
+        nonlocal supplier_paid
+        got = min(supplier_paid, lc._d(amount))
+        supplier_paid -= got
+        return got
+
+    rows = [row('supplier', 'المورد', goods, take(goods))]
+    for key, label in (('freight', 'الشحن الدولي'), ('clearance', 'التخليص'),
+                       ('local', 'النقل المحلي')):
+        rows.append(row(key, label, comps[key]['cost'], comps[key]['paid']))
+    commission, _account = import_invoice_booked_commission(invoice)
+    if commission > 0:
+        rows.append(row('commission', 'عمولات التحويل', commission, commission))
+    for fee in fees:
+        paid = take(fee.amount) if not fee.has_credit_party else party_paid.get(fee.pk, Decimal('0'))
+        rows.append(row(f'fee:{fee.pk}', fee.description or 'رسم', fee.amount, paid))
+    if tax > 0:
+        rows.append(row('tax', 'الضريبة', tax, take(tax)))
+    total_cost = sum((r['cost'] for r in rows), Decimal('0.00')).quantize(Q2)
+    # التكلفة النهائية للوحدة: ما يُرسمَل على البضاعة (الإجمالي بلا الضريبة والرسوم غير
+    # المرسملة) موزّعاً كما يوزّعه قيد الاستلام نفسه (`goods_clearing_unit_costs`).
+    from logistics.services import goods_clearing_unit_costs
+
+    inventory_cost = total_cost - tax - sum(
+        (lc._d(f.amount) for f in fees if not f.capitalize_to_inventory), Decimal('0'))
+    shares = goods_clearing_unit_costs(invoice, max(inventory_cost, Decimal('0')))
+    unit_costs = [
+        {'item_id': it.pk, 'name': it.name or (it.product.name if it.product_id else ''),
+         'quantity': lc._d(it.quantity), 'unit_cost': shares[it.pk][0].quantize(Decimal('0.0001'))}
+        for it in invoice.items.select_related('product').order_by('id') if it.pk in shares
+    ]
+    return {'rows': rows, 'total_cost': total_cost, 'unit_costs': unit_costs}

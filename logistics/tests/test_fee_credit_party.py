@@ -55,10 +55,10 @@ class FeeCreditPartyPostingTest(APITestCase):
         self.client.force_authenticate(user=self.user)
         return {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
 
-    def _invoice(self, number, **fee):
+    def _invoice(self, number, invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL, **fee):
         invoice = PurchaseInvoice.objects.create(
             tenant=self.tenant, invoice_number=number,
-            invoice_type=PurchaseInvoice.INVOICE_TYPE_INTERNATIONAL,
+            invoice_type=invoice_type,
             invoice_date="2026-07-05", partner=self.supplier, currency=self.ils,
             subtotal=D("1000"), grand_total=D("1000"))
         invoice.items.create(
@@ -86,7 +86,9 @@ class FeeCreditPartyPostingTest(APITestCase):
 
     def test_fee_without_credit_party_journal_unchanged(self):
         # قبل الطرف الدائن: مدين البضاعة + مدين مصروف الرسم / دائن المورد بالإجمالي + الرسم.
-        invoice = self._invoice("FCP-0", description="رسم فحص")
+        # المحلية وحدها — رسم الدولية صار دائنُه حسابَه هو (`test_fee_own_account.py`).
+        invoice = self._invoice(
+            "FCP-0", PurchaseInvoice.INVOICE_TYPE_LOCAL, description="رسم فحص")
         self._post(invoice)
         lines = self._lines(invoice)
         self.assertIn(("5307", D("100.00"), D("0.00"), None), lines)
@@ -139,8 +141,9 @@ class FeeCreditPartyPostingTest(APITestCase):
         self.assertFalse([l for l in lines if l[0] == "5307"])
 
     def test_cash_or_bank_credit_party_is_refused(self):
+        # المحلية: الدولية يُحسب دائنُ رسمها من اسمه فلا يُختار.
         for target in (self.cash, Account.objects.get(tenant=self.tenant, code="1101")):
-            invoice = self._invoice(f"FCP-3-{target.code}")
+            invoice = self._invoice(f"FCP-3-{target.code}", PurchaseInvoice.INVOICE_TYPE_LOCAL)
             res = self.client.patch(
                 f"/api/logistics/purchase-invoices/{invoice.pk}/",
                 {"fees": [{"description": "رسم", "amount": "50",
