@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 import { Loader2, Package, X } from "lucide-react";
 import {
   createWarrantyPolicy,
@@ -26,6 +27,8 @@ import { serialImpactConfirmationLines, serialImpactNeedsConfirmation } from "..
 
 interface ProductOption extends SalesProductPickerItem {
   is_serialized?: boolean;
+  /** T4: موقوف — يصل من جلب منتج السياسة القائمة لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 }
 
 interface Props {
@@ -80,10 +83,18 @@ export const WarrantyPolicyModal: React.FC<Props> = ({ policy, products, onClose
     lookupManufacturerWarrantors().then(setWarrantors).catch(() => setWarrantors([]));
   }, []);
 
+  /* T4: سياسة كفالة قائمة لبراندٍ أُوقف بعد وضعها غاب عن المنتقي (نشطٌ فقط) — فكان
+     `pickedProduct` فارغاً: يضيع اسمه في معاينة أثر الرقم التسلسلي ويضيع `is_service` فتُتاح
+     له طريقة «برقم تسلسلي» وهو خدمة. يُجلب فرداً للقراءة وحدها؛ منتقي البراند الجديد على `products`. */
+  const heldProducts = useMissingProducts<ProductOption>([policy?.product], products);
   useEffect(() => {
     if (!policy) return;
-    setPickedProduct(products.find((p) => p.id === policy.product) || null);
-  }, [policy, products]);
+    setPickedProduct(
+      products.find((p) => p.id === policy.product)
+        || heldProducts.find((p) => p.id === policy.product)
+        || null,
+    );
+  }, [policy, products, heldProducts]);
 
   const patch = <K extends keyof WarrantyPolicyDraft>(key: K, value: WarrantyPolicyDraft[K]) =>
     setDraft((d) => ({ ...d, [key]: value }));

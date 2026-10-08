@@ -59,6 +59,8 @@ export type KitDenseTableProps<T> = {
   loading?: boolean;
   /** Key on each row that holds a HEX color string for row-level text-color override. */
   rowColorKey?: string;
+  /** Extra class names per row (e.g. mute an inactive record). */
+  rowClassName?: (row: T) => string;
   /** Show export CSV button in top-right. */
   exportable?: boolean;
   /** Filename for CSV export (without .csv). */
@@ -85,6 +87,7 @@ export function KitDenseTable<T extends Record<string, any>>({
   emptyHint = 'لا توجد سجلات',
   loading = false,
   rowColorKey,
+  rowClassName,
   exportable = false,
   exportFilename = 'export',
   resizable = true,
@@ -260,6 +263,7 @@ export function KitDenseTable<T extends Record<string, any>>({
                 className={[
                   isSelected ? 'ktra-row--selected' : '',
                   isHovered ? 'ktra-row--hover' : '',
+                  rowClassName?.(row) ?? '',
                 ].filter(Boolean).join(' ')}
                 style={rowColorKey && row[rowColorKey] ? { color: row[rowColorKey] } : undefined}
                 onClick={() => onRowClick?.(row)}

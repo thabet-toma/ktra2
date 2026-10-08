@@ -177,6 +177,11 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     # وأسطر الإرسالية معلّقةً على البند نفسه. غيابه = بندٌ جديد.
     id = serializers.IntegerField(required=False)
     product_name = serializers.SerializerMethodField()
+    # T3: الصنف الموقوف بعد حفظ المسودّة يمنع ترحيلها (`core.active_guard`).
+    # البند بلا صنف (product=None) يُخرج `null` لا `false` — لا شيء يُعلَّم.
+    product_is_active = serializers.BooleanField(
+        source='product.is_active', read_only=True, allow_null=True,
+    )
     expense_account_code = serializers.CharField(source='expense_account.code', read_only=True)
     expense_account_name = serializers.CharField(source='expense_account.name', read_only=True)
     # T-RECVIS: الباقي على البند. `received_quantity` كان مكشوفاً وحده فتُركت
@@ -190,7 +195,7 @@ class PurchaseInvoiceItemSerializer(serializers.ModelSerializer):
     class Meta:
         model = PurchaseInvoiceItem
         fields = [
-            'id', 'extensions', 'product', 'product_name', 'name',
+            'id', 'extensions', 'product', 'product_name', 'product_is_active', 'name',
             'quantity', 'received_quantity', 'remaining_quantity',
             'unit_price', 'total_price',
             'notes', 'hs_code',
@@ -300,6 +305,7 @@ def _archive_lock_reason(serializer, obj):
 
 class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
     partner_name = serializers.CharField(source='partner.name', read_only=True)
+    partner_is_active = serializers.BooleanField(source='partner.is_active', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
     items_count = serializers.IntegerField(read_only=True)
@@ -379,7 +385,7 @@ class PurchaseInvoiceListSerializer(serializers.ModelSerializer):
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
             'due_date', 'payment_terms_days', 'is_overdue', 'days_overdue',
             'invoice_type',
-            'partner', 'partner_name',
+            'partner', 'partner_name', 'partner_is_active',
             'deal', 'deal_ref', 'deal_title',
             'shipment', 'shipment_number', 'shipment_name', 'shipment_label', 'clearance',
             'currency', 'currency_code', 'exchange_rate',
@@ -450,6 +456,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
     items = PurchaseInvoiceItemSerializer(many=True, required=False)
     fees = PurchaseInvoiceFeeSerializer(many=True, required=False)
     partner_name = serializers.CharField(source='partner.name', read_only=True)
+    partner_is_active = serializers.BooleanField(source='partner.is_active', read_only=True)
     deal_ref = serializers.CharField(source='deal.ref_number', read_only=True, default=None)
     currency_code = serializers.CharField(source='currency.Code', read_only=True, default=None)
     journal_id_display = serializers.IntegerField(source='journal.id', read_only=True, default=None)
@@ -519,7 +526,7 @@ class PurchaseInvoiceSerializer(serializers.ModelSerializer):
             'id', 'invoice_number', 'invoice_name', 'invoice_date',
             'due_date', 'payment_terms_days', 'is_overdue', 'days_overdue',
             'invoice_type',
-            'partner', 'partner_name',
+            'partner', 'partner_name', 'partner_is_active',
             'deal', 'deal_ref',
             'shipment', 'shipment_number', 'shipment_name', 'shipment_label',
             'clearance',

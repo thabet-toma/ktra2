@@ -12,7 +12,11 @@ import { RefreshCw, Search, Plus, Pencil, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { PartnerEditorModal, type PartnerType, type SupplierScope } from "../partners/PartnerEditorModal";
 import { partnerTypeLabel } from "../../utils/partnerActions";
+import { formatNumber } from "../../utils/formatNumber";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
+import { usePartnerActive } from "../../hooks/usePartnerActive";
+import { ActiveStatusFilter, InactiveBadge } from "../shared/ActiveStatusControls";
+import type { ActiveStatus } from "../../utils/activeStatus";
 
 type Partner = {
   id: number;
@@ -84,7 +88,8 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
   const [search, setSearch] = useState("");
   // لا اختيار = كل الأصناف.
   const [kinds, setKinds] = useState<string[]>(readStoredKinds);
-  const [showInactive, setShowInactive] = useState(false);
+  const [status, setStatus] = useState<ActiveStatus>("active");
+  const { setPartnerActive, bulkSetPartnersActive } = usePartnerActive(tenantId);
   const [checked, setChecked] = useState<Set<number>>(new Set());
   const [selected, setSelected] = useState<number | null>(initialPartnerId ?? null);
   const [chooserOpen, setChooserOpen] = useState(false);
@@ -104,7 +109,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     setErr(null);
     const common = {
       search: search.trim() || undefined,
-      include_inactive: showInactive ? 1 : undefined,
+      status,
     };
     try {
       const [result, kindCounts] = await Promise.all([
@@ -127,7 +132,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     } finally {
       setLoading(false);
     }
-  }, [kinds, page, search, showInactive, tenantId]);
+  }, [kinds, page, search, status, tenantId]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => { void load(); }, 250);
@@ -179,6 +184,38 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     }
   };
 
+  const toggleActive = async (p: Partner, nextActive: boolean) => {
+    setErr(null);
+    setMsg(null);
+    try {
+      if (await setPartnerActive(p, nextActive)) {
+        setMsg(nextActive ? `نُشِّط «${p.name}».` : `أُوقف «${p.name}» — صار غير نشط.`);
+        await load();
+      }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل تغيير الحالة");
+    }
+  };
+
+  const bulkSetActive = async (nextActive: boolean) => {
+    if (!checked.size) return;
+    setBulkBusy(true);
+    setErr(null);
+    setMsg(null);
+    try {
+      const updated = await bulkSetPartnersActive([...checked], nextActive);
+      if (updated != null) {
+        setMsg(nextActive ? `نُشِّط ${formatNumber(updated, { maxDecimals: 0 })} من الأطراف.` : `أُوقف ${formatNumber(updated, { maxDecimals: 0 })} من الأطراف — صاروا غير نشطين.`);
+        setChecked(new Set());
+        await load();
+      }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل تغيير الحالة");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
   const allColumns: DenseColumn<Partner>[] = [
     { key: "pick", header: "", width: "32px", align: "center",
       render: (p) => p.partner_type === "Supplier" ? (
@@ -214,9 +251,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           }}
         >
           {p.name}
-          {p.is_active === false && (
-            <span className="mr-1 rounded bg-gray-200 px-1 text-[10px] font-normal text-gray-700">موقوف</span>
-          )}
+          {p.is_active === false && <InactiveBadge className="mr-1" />}
         </button>
       ) },
     { key: "scope", header: "النطاق", width: "95px", align: "center",
@@ -239,7 +274,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
     { key: "email", header: "البريد الإلكتروني", render: (p) => <>{p.email || "—"}</> },
     { key: "limit", header: "حد الائتمان", width: "110px", align: "center", numeric: true,
       render: (p) => <>{p.credit_limit ?? "—"}</> },
-    { key: "actions", header: "", width: "150px", align: "center",
+    { key: "actions", header: "", width: "210px", align: "center",
       render: (p) => (
         <div className="flex justify-center gap-1">
           <button
@@ -257,6 +292,15 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
             onClick={(e) => { e.stopPropagation(); setEditingPartnerId(p.id); }}
           >
             <Pencil className="h-4 w-4" />
+          </button>
+          <button
+            type="button"
+            className="ktra-toolbtn text-[11px]"
+            title={p.is_active === false ? "تنشيط الطرف" : "إيقاف الطرف"}
+            data-testid={p.is_active === false ? "partner-activate" : "partner-deactivate"}
+            onClick={(e) => { e.stopPropagation(); void toggleActive(p, p.is_active === false); }}
+          >
+            {p.is_active === false ? "تنشيط" : "إيقاف"}
           </button>
         </div>
       ) },
@@ -281,15 +325,11 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         </strong>
         <span className="ktra-status-item">المعروض: <b>{total}</b></span>
         <div className="flex-1" />
-        <label className="flex items-center gap-1 text-xs">
-          <input
-            type="checkbox"
-            data-testid="show-inactive-partners"
-            checked={showInactive}
-            onChange={(e) => { setShowInactive(e.target.checked); setPage(1); }}
-          />
-          إظهار الموقوفين
-        </label>
+        <ActiveStatusFilter
+          value={status}
+          testId="partner-status-filter"
+          onChange={(next) => { setStatus(next); setPage(1); setChecked(new Set()); }}
+        />
         <div className="relative">
           <Search className="pointer-events-none absolute right-1.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ktra-ink-soft)]" />
           <input
@@ -376,6 +416,12 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
           <button type="button" className="ktra-toolbtn" disabled={bulkBusy} onClick={() => void bulkClassify("international")}>
             اجعلهم دوليين
           </button>
+          <button type="button" className="ktra-toolbtn" disabled={bulkBusy} onClick={() => void bulkSetActive(false)}>
+            إيقاف المحدَّدين
+          </button>
+          <button type="button" className="ktra-toolbtn" disabled={bulkBusy} onClick={() => void bulkSetActive(true)}>
+            تنشيط المحدَّدين
+          </button>
           <button type="button" className="ktra-toolbtn" onClick={() => setChecked(new Set())}>
             إلغاء الاختيار
           </button>
@@ -394,6 +440,7 @@ export const SupplierManagement: React.FC<SupplierManagementProps> = ({
         selectedKey={selected}
         onSelect={(k) => setSelected(k as number | null)}
         onRowDoubleClick={(r) => navigate(`/partners/${r.id}`)}
+        rowClassName={(p) => (p.is_active === false ? "opacity-60" : "")}
         emptyHint="لا أطراف بهذا الاختيار"
         pagination={{ page, pageSize: PAGE_SIZE, total, onChange: setPage }}
       />

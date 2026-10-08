@@ -31,6 +31,7 @@ from inventory.serials import (
 from inventory.services import product_display_name, record_stock_movement
 from partners.models import Partner
 from accounting.api import ensure_partner_account
+from core.active_guard import assert_active_for_posting
 from tenants.models import Tenant
 
 from sales.models import (
@@ -123,6 +124,11 @@ def confirm_sales_order(order, *, user=None):
             for product in Product.objects.select_for_update().filter(
                 tenant_id=locked.tenant_id, pk__in=requested.keys())
         }
+        # صنفٌ أو عميلٌ أُوقف بعد حفظ المسودّة ⇒ لا تأكيد (التأكيد يحجز كمية).
+        assert_active_for_posting(
+            partner=locked.customer, products=products.values(),
+            action="تأكيد", document_label="الطلبية",
+        )
         existing_reservations = reserved_quantity_map(
             locked.tenant_id, product_ids=requested.keys())
         shortages = []
@@ -174,6 +180,11 @@ def convert_quotation_to_order(quotation, *, user=None):
         )
 
     tenant_id = quotation.tenant_id
+    quotation_lines = list(quotation.lines.select_related("product"))
+    assert_active_for_posting(
+        partner=quotation.customer, products=[ln.product for ln in quotation_lines],
+        action="تحويل", document_label="عرض السعر",
+    )
     with transaction.atomic():
         order = SalesOrder.objects.create(
             tenant=quotation.tenant,
@@ -190,7 +201,7 @@ def convert_quotation_to_order(quotation, *, user=None):
             notes=quotation.notes or "",
             created_by=user if (user and getattr(user, "is_authenticated", False)) else None,
         )
-        for ln in quotation.lines.all():
+        for ln in quotation_lines:
             SalesOrderLine.objects.create(
                 tenant=quotation.tenant,
                 order=order,
@@ -226,6 +237,11 @@ def convert_order_to_invoice(order, *, user=None):
     if order.status == SalesOrder.STATUS_CANCELLED:
         raise ValidationError(f"الطلبية {order.order_number} ملغاة — لا تُحوَّل.")
 
+    order_lines = list(order.lines.select_related("product"))
+    assert_active_for_posting(
+        partner=order.customer, products=[ln.product for ln in order_lines],
+        action="تحويل", document_label="الطلبية",
+    )
     lines_data = [
         {
             "product": ln.product_id,
@@ -234,7 +250,7 @@ def convert_order_to_invoice(order, *, user=None):
             "line_discount": ln.line_discount,
             "tax_rate": ln.tax_rate_id,
         }
-        for ln in order.lines.all()
+        for ln in order_lines
     ]
     inv_ser = SalesInvoiceSerializer(data={
         "invoice_number": next_invoice_number(order.tenant_id),
@@ -396,10 +412,15 @@ def convert_quotation_to_invoice(quotation, user=None):
         )
 
     tenant = quotation.tenant
+    quotation_lines = list(quotation.lines.select_related("product"))
+    assert_active_for_posting(
+        partner=quotation.customer, products=[ln.product for ln in quotation_lines],
+        action="تحويل", document_label="عرض السعر",
+    )
     invoice_number = next_invoice_number(tenant.TenantID)
 
     lines_data = []
-    for ln in quotation.lines.all():
+    for ln in quotation_lines:
         lines_data.append({
             "product": ln.product_id,
             "quantity": ln.quantity,

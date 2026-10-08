@@ -27,6 +27,8 @@ import {
 import { Plus, Save, X, RefreshCw, AlertTriangle, Trash2 } from "lucide-react";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { HeldProductOption } from "../shared/HeldRecordOptions";
+import { useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 
 type Product = {
   id: number;
@@ -36,6 +38,8 @@ type Product = {
   sku?: string;
   display_name?: string;
   unit_price?: string;
+  /** T4: موقوف — يصل من جلب منتجات سطور المرجع القائم لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 };
 
 /** اسم المنتج للعرض — المنتجات تُعاد بحقول name_ar/display_name/sku لا name. */
@@ -112,6 +116,10 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
   const [lines, setLines] = useState<ReturnLine[]>([
     { _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" },
   ]);
+
+  // T4: بنود مرجعٍ منتجها أُوقف بعد الفاتورة الأصلية (مرتجعٌ مشروع) تغيب عن المنتقي
+  // (نشطٌ فقط) فيظهر خيار السطر فارغاً؛ يُجلب فرداً ويُعرض خياراً للسطر ذاته وحده.
+  const heldProducts = useMissingProducts<Product>(lines.map((l) => l.product_id), products);
 
   // W6: منتقي بنود المرجع.
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -398,6 +406,10 @@ export const PurchaseReturnEditor: React.FC<Props> = ({ onBack }) => {
     >
       <option value="">— اختر —</option>
       {products.map((p) => <option key={p.id} value={p.id}>{productLabel(p)}</option>)}
+      <HeldProductOption
+        value={row.product_id} products={products} extras={heldProducts}
+        label={productLabel} fallbackName={row.product_name}
+      />
     </select>
   );
 

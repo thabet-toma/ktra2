@@ -37,6 +37,8 @@ import {
 import { Plus, Save, X, RefreshCw, AlertTriangle, Search, Trash2 } from "lucide-react";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { HeldProductOption } from "../shared/HeldRecordOptions";
+import { useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 import { SalesReturnRefundDialog } from "./SalesReturnRefundDialog";
 
 type Product = {
@@ -47,6 +49,8 @@ type Product = {
   sku?: string;
   display_name?: string;
   unit_price?: string;
+  /** T4: موقوف — يصل من جلب منتجات سطور المرجع القائم لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 };
 
 /** اسم المنتج للعرض — المنتجات تُعاد بحقول name_ar/display_name/sku لا name. */
@@ -105,6 +109,9 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
     { _idx: 0, product_id: "", product_name: "", quantity: "1", unit_price: "", total: "0" },
   ]);
   const [showPicker, setShowPicker] = useState(false);
+  // T4: بنودٌ منسوخةٌ من فاتورةٍ أصلية منتجها أُوقف بعدها (مرتجعٌ مشروع) — يغيب عن المنتقي
+  // (نشطٌ فقط) فيظهر خيار السطر فارغاً؛ يُجلب فرداً ويُعرض خياراً للسطر ذاته وحده.
+  const heldProducts = useMissingProducts<Product>(lines.map((l) => l.product_id), products);
 
   // ISSUE #121: علامة «لُمِس» — تُرفَع مزامنةً داخل كل معالج تعديل مستخدم (لا
   // مشتقّة داخل useEffect؛ راجع تعليق الخطّاف نفسه: حالةٌ مشتقّة تفوّت بالضبط
@@ -448,6 +455,10 @@ export const SalesReturnEditor: React.FC<Props> = ({ onBack }) => {
         {products.map((p) => (
           <option key={p.id} value={p.id}>{productLabel(p)}</option>
         ))}
+        <HeldProductOption
+          value={row.product_id} products={products} extras={heldProducts}
+          label={productLabel} fallbackName={row.product_name}
+        />
       </select>
     );
   };

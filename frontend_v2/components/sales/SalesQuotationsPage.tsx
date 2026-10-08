@@ -37,6 +37,9 @@ import { formatTimeValue } from "../../utils/formatDate";
 import { computeInvoiceTotals, type LineInput } from "../../utils/salesInvoiceMath";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { InactiveBadge } from "../shared/ActiveStatusControls";
+import { useMissingPartners } from "../../hooks/useMissingDocumentRecords";
+import { HeldPartnerOption } from "../shared/HeldRecordOptions";
 import type { SqlProduct } from "../../types/inventory";
 import {
   useRecordNavigation,
@@ -68,7 +71,7 @@ import {
 } from "../shared/CommercialDocumentsList";
 import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 
-type Partner = { id: number; name: string };
+type Partner = { id: number; name: string; is_active?: boolean };
 /** نسبة ضريبة من شجرة الحسابات — الحقل على البند مفتاحُها لا نسبتها المئوية. */
 type TaxRateRow = { id: number; name: string; rate: string | number; direction?: string };
 type Product = SalesProductPickerItem & { name: string; unit_price?: string };
@@ -125,6 +128,9 @@ export const SalesQuotationsPage: React.FC = () => {
   // Form state
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formCustomer, setFormCustomer] = useState("");
+  // T4: زبون عرضٍ قائم أُوقف بعد كتابته — يغيب عن `partners` (نشطون) فيُجلب فرداً للعرض.
+  const inactiveCustomers = useMissingPartners<Partner>([formCustomer], partners);
+  const [inactiveProductIds, setInactiveProductIds] = useState<ReadonlySet<number>>(new Set());
   const [formDate, setFormDate] = useState(() => new Date().toISOString().slice(0, 10));
   const [formValidUntil, setFormValidUntil] = useState("");
   const [formNotes, setFormNotes] = useState("");
@@ -310,6 +316,11 @@ export const SalesQuotationsPage: React.FC = () => {
       setFormValidUntil(detail.valid_until?.slice(0, 10) || "");
       setFormNotes(detail.notes || "");
       setFormDiscount(String(detail.discount_amount ?? "0"));
+      // T4: منتجات سطور العرض الموقوفة (من الخادم). مجموعة معرّفات لا علَمٌ على السطر —
+      // تبديلُ منتج السطر يُخرجه منها تلقائياً بلا تتبّعٍ في كل مسار اختيار.
+      setInactiveProductIds(new Set(
+        (detail.lines || []).filter((l) => l.product_is_active === false).map((l) => Number(l.product)),
+      ));
       setFormLines((detail.lines || []).map((l) => ({
         id: l.id,
         product_id: String(l.product),
@@ -853,6 +864,9 @@ export const SalesQuotationsPage: React.FC = () => {
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>{partner.name}</option>
           ))}
+          {/* T4: زبون العرض القائم إن أُوقف غاب عن `partners/lookup/` فيظهر فارغاً —
+              يُعرض خياراً **ما دام المحدَّد** وحده، فلا يُختار لعرضٍ آخر. */}
+          <HeldPartnerOption value={formCustomer} partners={partners} extras={inactiveCustomers} />
         </select>
       ),
     },
@@ -860,7 +874,7 @@ export const SalesQuotationsPage: React.FC = () => {
       key: "customerName",
       label: "الاسم",
       control: <input className="ktra-input" readOnly
-        value={partners.find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
+        value={[...partners, ...inactiveCustomers].find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
     },
     {
       key: "address",
@@ -920,6 +934,7 @@ export const SalesQuotationsPage: React.FC = () => {
           {/* بطاقة المنتج المشتركة: التكلفة وسعر البيع وآخر سعر شراء/بيع والربح
               وحركة الصنف — نفس البطاقة التي في فاتورة البيع، فلا يُسعَّر العرض
               على العمياء. */}
+          {inactiveProductIds.has(Number(line.product_id)) && <InactiveBadge className="shrink-0" />}
           {line.product_id && Number(line.product_id) > 0 && (
             <button type="button" className="ktra-iconbtn"
               title="بطاقة المنتج — التكلفة والأسعار"

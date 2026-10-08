@@ -12,7 +12,7 @@ import { AddBrandModal } from "./AddBrandModal";
 import { MergeProductsModal } from "./MergeProductsModal";
 import {
   Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink,
-  FolderTree, Merge, Undo2, X,
+  FolderTree, Merge, Undo2, X, Power, PowerOff,
 } from "lucide-react";
 import { ItemForm } from "./ItemForm";
 import { useProductInsights, useGroupInsights } from "./ProductInsightTabs";
@@ -39,6 +39,10 @@ import type { MergeCandidate } from "../../utils/productMerge";
 import type { MergeProductsResult } from "../../services/inventoryApi";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { ActiveStatusFilter, InactiveBadge } from "../shared/ActiveStatusControls";
+import { useProductActive } from "../../hooks/useProductActive";
+import { labelWithStatus } from "../../utils/activeStatus";
+import type { ActiveStatus } from "../../utils/activeStatus";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -221,6 +225,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [hasNext, setHasNext] = useState(false);
   // جدول المنتجات: فلتر حالة المخزون + ترتيب حسب العمود (خادمي) + قائمة التصدير.
   const [statusFilter, setStatusFilter] = useState<StockStatus>("");
+  // T4: نشط (الافتراضي) · غير نشط · الكل — مستقلٌّ عن `statusFilter` أعلاه (حالة المخزون).
+  const [activeFilter, setActiveFilter] = useState<ActiveStatus>("active");
   const [sortKey, setSortKey] = useState<string>("");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("asc");
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -239,6 +245,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [undoingMerge, setUndoingMerge] = useState(false);
   const toast = useToast();
   const confirm = useConfirm();
+  const { setProductActive } = useProductActive();
   const [addBrandRequest, setAddBrandRequest] = useState<AddBrandRequest | null>(null);
 
   const orderingParam = sortKey
@@ -250,11 +257,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [fromCache, setFromCache] = useState(false);
 
   const load = useCallback(async (opts: {
-    search?: string; status?: StockStatus; ordering?: string;
+    search?: string; status?: StockStatus; active?: ActiveStatus; ordering?: string;
     page?: number; mode?: "tree" | "table";
   } = {}) => {
     const {
-      search: currentSearch = "", status = "", ordering = "",
+      search: currentSearch = "", status = "", active = "active", ordering = "",
       page = 1, mode = "table",
     } = opts;
     const tenantId = resolveTenantId();
@@ -265,6 +272,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       const params: Record<string, string | number> = {};
       if (currentSearch) params.search = currentSearch;
       if (status) params.stock_status = status;
+      params.status = active;
       if (ordering) params.ordering = ordering;
       // المرحلة 5 / P0-12: العرض الجدولي (الافتراضي) يجلب **صفحة واحدة** —
       // كان يدور على كل الصفحات (page_size=200) فيُصدر 8 طلبات متسلسلة لـ1490
@@ -318,10 +326,14 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       try {
         const cached = await db.products.where("tenant_id").equals(tenantId).toArray();
         if (cached.length > 0) {
-          setProducts(cached.map((c) => JSON.parse(c.data) as SqlProduct));
+          // T4: اللقطة قد تحمل موقوفاً (جُلب بـ«الكل») — يُفلتر بالحالة المطلوبة كما يفعل الخادم.
+          const rows = cached.map((c) => JSON.parse(c.data) as SqlProduct).filter((r) => (
+            active === "all" || (active === "inactive") === (r.is_active === false)
+          ));
+          setProducts(rows);
           // أوفلاين: المعروض هو لقطة الكاش كاملةً، فالإجمالي هو طولها — وإلا
           // بقي العدّاد على count الخادم من آخر اتصال ناجح فأشار لعدد غير معروض.
-          setTotal(cached.length);
+          setTotal(rows.length);
           setHasNext(false);
           const meta = await db.cache_meta.get(cacheMetaKey);
           setLastSync(meta?.updated_at ?? cached[0].updated_at);
@@ -340,26 +352,26 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   // من نتيجة لم تعد موجودة. مفصول عن تأثير الجلب كي لا يجلب مرتين.
   useEffect(() => {
     setPage(1);
-  }, [search, statusFilter, orderingParam, displayMode]);
+  }, [search, statusFilter, activeFilter, orderingParam, displayMode]);
 
   // مصدر تحميل واحد: البحث (debounced) + فلتر الحالة + الترتيب + الصفحة.
   useEffect(() => {
     const t = setTimeout(() => {
       load({
-        search, status: statusFilter, ordering: orderingParam,
+        search, status: statusFilter, active: activeFilter, ordering: orderingParam,
         page, mode: displayMode,
       });
     }, 250);
     return () => clearTimeout(t);
-  }, [load, search, statusFilter, orderingParam, page, displayMode]);
+  }, [load, search, statusFilter, activeFilter, orderingParam, page, displayMode]);
 
   // إعادة تحميل يدوي (زر التحديث / بعد الحفظ) يحافظ على الفلاتر والصفحة الحالية.
   const reload = useCallback(() => {
     load({
-      search, status: statusFilter, ordering: orderingParam,
+      search, status: statusFilter, active: activeFilter, ordering: orderingParam,
       page, mode: displayMode,
     });
-  }, [load, search, statusFilter, orderingParam, page, displayMode]);
+  }, [load, search, statusFilter, activeFilter, orderingParam, page, displayMode]);
 
   // #24: تبديل تحديد صفٍّ واحد — يلتقط الصفّ من `products` الحالية عند الإضافة
   // (هي معروضة فعلاً وقت النقر)، ويكتفي بالمعرّف عند الإزالة.
@@ -425,6 +437,19 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       setUndoingMerge(false);
     }
   }, [lastMerge, confirm, toast, reload]);
+
+  /** إيقاف/تنشيط من صفّ القائمة. صفّ العائلة يشمل كل براندَاته (`family_member_ids`). */
+  const toggleProductActive = useCallback(async (row: SqlProduct, nextActive: boolean) => {
+    const name = row.display_name || row.name_ar || row.name_en || row.sku || `#${row.id}`;
+    try {
+      if (await setProductActive({ id: row.id, name, memberIds: row.family_member_ids }, nextActive)) {
+        toast(nextActive ? `نُشِّط «${name}».` : `أُوقف «${name}» — صار غير نشط.`, "success");
+        reload();
+      }
+    } catch (e: unknown) {
+      toast(humanizeThrown(e, "تعذّر تغيير حالة المنتج"), "error");
+    }
+  }, [setProductActive, toast, reload]);
 
   const beginNameEdit = useCallback((row: SqlProduct) => {
     if (nameSavingRef.current) return;
@@ -498,6 +523,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           page: pg, page_size: 200, complete_families: 1,
         };
         if (status) params.stock_status = status;
+        // T4: التصدير يحترم فلتر الحالة المختار على الشاشة (نشط/غير نشط/الكل).
+        params.status = activeFilter;
         const data = await inventoryApi.getProducts(params);
         const rows = (Array.isArray(data) ? data : (data.results ?? [])) as SqlProduct[];
         all.push(...rows);
@@ -511,7 +538,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       if (!printWindow) { setErr("الرجاء السماح بالنوافذ المنبثقة (Pop-ups) للطباعة"); return; }
 
       const today = new Date().toISOString().slice(0, 10);
-      const subset = status ? `المنتجات: ${STATUS_LABEL[status]}` : "كل المنتجات";
+      const activeNote = activeFilter === "active" ? "" : activeFilter === "inactive" ? " (غير النشطة)" : " (النشطة وغير النشطة)";
+      const subset = (status ? `المنتجات: ${STATUS_LABEL[status]}` : "كل المنتجات") + activeNote;
       const esc = (v: unknown) => String(v ?? "—")
         .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
       // التقرير يطبع **منتجات** لا براندات — نفس ما تعرضه الشاشة، ومن نفس
@@ -524,7 +552,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         (g) => (g.familyId == null ? g.members[0] : buildFamilyRow(g.members)),
       );
       const rowsHtml = printableRows.map((p) => {
-        const name = esc(p.name_ar || p.name_en || p.sku);
+        const name = esc(labelWithStatus(p.name_ar || p.name_en || p.sku || "", p.is_active));
         const qty = Number(p.quantity_on_hand);
         // #133: نفس رقم الشاشة (أقلّ شراء ضمن آخر ٥ فواتير) — لا avg_cost —
         // كي تتطابق الورقة مع الجدول. فراغه (بلا شراء مرحَّل) يُطبع "—" لا صفراً.
@@ -580,13 +608,13 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       printWindow.document.open();
       printWindow.document.write(html);
       printWindow.document.close();
-      clientLogger.info("items.export_pdf", { status: status || "all", count: all.length });
+      clientLogger.info("items.export_pdf", { status: status || "all", active: activeFilter, count: all.length });
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "تعذّر التصدير");
     } finally {
       setExporting(false);
     }
-  }, []);
+  }, [activeFilter]);
 
   const allColumns: DenseColumn<SqlProduct>[] = [
     // W8: الأعمدة القيادية بالترتيب المطلوب — الكمية المشتراة (الوارد التراكمي)،
@@ -677,6 +705,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             {p.display_name || p.name_ar || p.name_en || "—"}
           </button>
         )}
+        {p.is_active === false && <InactiveBadge className="shrink-0" />}
         <button
           type="button"
           className="ktra-iconbtn opacity-60 group-hover:opacity-100 focus-visible:opacity-100"
@@ -742,6 +771,19 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
             onClick={(e) => { e.stopPropagation(); setDuplicateId(p.id); setEditId(null); setView("form"); }}>
             <Copy className="h-3.5 w-3.5" />
           </button>
+          {p.is_active === false ? (
+            <button className="ktra-iconbtn text-emerald-700 hover:bg-emerald-50" title="تنشيط"
+              aria-label="تنشيط" data-testid="product-activate"
+              onClick={(e) => { e.stopPropagation(); void toggleProductActive(p, true); }}>
+              <Power className="h-3.5 w-3.5" />
+            </button>
+          ) : (
+            <button className="ktra-iconbtn text-amber-700 hover:bg-amber-50" title="إيقاف"
+              aria-label="إيقاف" data-testid="product-deactivate"
+              onClick={(e) => { e.stopPropagation(); void toggleProductActive(p, false); }}>
+              <PowerOff className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
       )
     },
@@ -834,6 +876,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         <input className="ktra-input" style={{ width: 200 }}
           placeholder="بحث SKU / الاسم…"
           value={search} onChange={(e) => { setSearch(e.target.value); }} />
+        {/* T4: نشط / غير نشط / الكل (خادمي، `status`) — غير فلتر حالة المخزون التالي. */}
+        <ActiveStatusFilter value={activeFilter} onChange={setActiveFilter} testId="items-active-filter" />
         {/* فلتر حالة المخزون: الكل / نفذ / منخفض / متوفر (خادمي) */}
         <select className="ktra-input" style={{ width: 130 }}
           value={statusFilter}

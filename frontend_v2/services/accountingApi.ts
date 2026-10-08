@@ -5,6 +5,8 @@ import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { apiFetch, toPagedList } from "./restApi";
 import { humanizeDrfError } from "../utils/drfError";
 import { tenantScopedOfflineKey } from "../utils/offlineTenantScope";
+import { staleCachedPartnerIds, visibleCachedPartners } from "../utils/partnerActiveStatus";
+import type { ActiveStatus } from "../utils/activeStatus";
 import type {
   BankAccountDto,
   BankBranchDto,
@@ -232,21 +234,27 @@ export const accountingApi = {
   //
   // T-PARTYPURE: `partnerType` يفلتر على الخادم — شاشة الزبائن لا تعرض موردين
   // وبالعكس. الفلترة هنا لا في كل شاشة، فلا تتكرر القاعدة ولا تُنسى في واحدة.
-  getPartners: async (partnerType?: string) => {
+  //
+  // T5: `status` — 'active' (الافتراضي) لمنتقيات المستندات الجديدة، و'all' لشاشات الدفع
+  // (سندات · شيكات · إشعارات) كي يُسدَّد رصيد الموقوف. وكل جلبٍ ناجح يستبدل المخزَّن في
+  // نطاقه: الطرف الذي أُوقف أو حُذف يختفي دون اتصال أيضاً، لا يبقى في لقطةٍ قديمة.
+  getPartners: async (partnerType?: string, status: ActiveStatus = "active") => {
     const db = (await import("./offline/db")).default;
     const tenantId = resolveTenantId();
     const cacheMetaKey = tenantScopedOfflineKey(
       tenantId, partnerType ? `partners:list:${partnerType}` : "partners:list");
     try {
-      const query = partnerType
-        ? `?limit=500&partner_type=${encodeURIComponent(partnerType)}`
-        : "?limit=500";
-      const data = await fetch(`${API_BASE}/partners/lookup/${query}`, { headers: headers() }).then(asList);
+      const params = new URLSearchParams({ limit: "500" });
+      if (partnerType) params.set("partner_type", partnerType);
+      if (status !== "active") params.set("status", status);
+      const data = await fetch(`${API_BASE}/partners/lookup/?${params.toString()}`, { headers: headers() }).then(asList);
       try {
         const now = new Date().toISOString();
+        const fetchedIds: number[] = [];
         for (const p of data as Array<Record<string, unknown>>) {
           const id = Number(p.id);
           if (!Number.isFinite(id)) continue;
+          fetchedIds.push(id);
           await db.partners.put({
             id,
             tenant_id: tenantId,
@@ -256,6 +264,8 @@ export const accountingApi = {
             updated_at: now,
           });
         }
+        const cachedRows = await db.partners.where("tenant_id").equals(tenantId).toArray();
+        await db.partners.bulkDelete(staleCachedPartnerIds(cachedRows, fetchedIds, partnerType, status));
         await db.cache_meta.put({ key: cacheMetaKey, updated_at: now });
       } catch { /* IndexedDB unavailable in private mode — non-fatal */ }
       return data;
@@ -263,10 +273,8 @@ export const accountingApi = {
       // Network failed — fall back to the last cached snapshot.
       try {
         const cached = await db.partners.where("tenant_id").equals(tenantId).toArray();
-        return cached
-          // النوع قد يكون قائمة مفصولة بفاصلة (الأطراف الدائنة) كما يقبلها الخادم.
-          .filter((c) => !partnerType || partnerType.split(",").includes(c.partner_type))
-          .map((c) => JSON.parse(c.data));
+        // النوع قد يكون قائمة مفصولة بفاصلة (الأطراف الدائنة) كما يقبلها الخادم.
+        return visibleCachedPartners(cached, partnerType, status).map((c) => JSON.parse(c.data));
       } catch {
         return [];
       }

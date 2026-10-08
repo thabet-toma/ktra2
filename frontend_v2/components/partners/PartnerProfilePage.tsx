@@ -46,6 +46,8 @@ import {
 import { purchaseInvoiceApi } from '../../services/purchaseInvoiceApi';
 import { useAppBack } from '../../hooks/useAppBack';
 import { usePermissions } from '../../contexts/PermissionsContext';
+import { usePartnerActive } from '../../hooks/usePartnerActive';
+import { InactiveBanner } from '../shared/ActiveStatusControls';
 
 interface PartnerApi {
   id: number;
@@ -61,6 +63,8 @@ interface PartnerApi {
   postal_code?: string | null;
   tax_number?: string | null;
   credit_limit?: string | null;
+  /** غير نشط ⇒ يغيب عن المستندات الجديدة، والدفع له وكشفه يبقيان. */
+  is_active?: boolean;
   bank_accounts?: Array<{
     id: number;
     bank_name: string;
@@ -377,6 +381,24 @@ export const PartnerProfilePage: React.FC = () => {
   const [paymentsRefreshKey, setPaymentsRefreshKey] = useState(0);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
+  const { setPartnerActive } = usePartnerActive(tenantId);
+  const [activeBusy, setActiveBusy] = useState(false);
+  // الإيقاف يمرّ بنافذة أثرٍ تؤكّده؛ التنشيط مباشر. بعدهما تُعاد قراءة البطاقة والسجلّ.
+  const toggleActive = async (nextActive: boolean) => {
+    if (!partner) return;
+    setActiveBusy(true);
+    try {
+      if (await setPartnerActive(partner, nextActive)) {
+        clientLogger.info('partner.set_active', { partner_id: partner.id, is_active: nextActive });
+        setProfileRefreshKey((current) => current + 1);
+        setActivityRefreshKey((current) => current + 1);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setActiveBusy(false);
+    }
+  };
   // جانب الشراء كلّه لا «مورد» وحده: المخلّص ووكيل الشحن والناقل كانوا يُعامَلون
   // عملاءً هنا («سند قبض» وفواتير بيع). القاعدة نفسها التي تقرؤها قائمة زر اليمين.
   const isSupplier = partnerKindFromType(partner?.partner_type) === 'supplier';
@@ -1402,6 +1424,16 @@ export const PartnerProfilePage: React.FC = () => {
   return (
     <div className="min-h-[calc(100vh-5rem)]">
       <PartnerNoteAlert partnerId={id} className="mb-2" />
+      {partner?.is_active === false && (
+        <div className="mb-2">
+          <InactiveBanner
+            title="هذا الطرف غير نشط"
+            description="لا يظهر في الفواتير والطلبيات الجديدة، والسندات والدفعات له مسموحة."
+            onActivate={() => { void toggleActive(true); }}
+            busy={activeBusy}
+          />
+        </div>
+      )}
       <KitDocumentShell
         title={partner ? `كشف حساب: ${partner.name}` : 'جاري التحميل...'}
         actions={[
@@ -1416,6 +1448,13 @@ export const PartnerProfilePage: React.FC = () => {
                   setActiveTabKey('edit');
                   clientLogger.info('partner.edit_card_open', { partner_id: id });
                 },
+              }]
+            : []),
+          ...(id && partner?.is_active !== false
+            ? [{
+                key: 'deactivate',
+                label: 'إيقاف',
+                onClick: () => { void toggleActive(false); },
               }]
             : []),
           // T-P2: سند قبض سريع من كشف الحساب — العميل مُعبّأ مسبقاً.
@@ -1449,16 +1488,22 @@ export const PartnerProfilePage: React.FC = () => {
                       },
                     }]
                   : []),
-                {
-                  key: 'new-invoice',
-                  label: `${term('doc.sales_invoice')} جديدة`,
-                  onClick: () => navigate(`/sales/invoices/new?customer_id=${id}`),
-                },
-                {
-                  key: 'new-quotation',
-                  label: 'عرض سعر جديد',
-                  onClick: () => navigate(`/sales/quotations?action=new&customer_id=${id}`),
-                },
+                // T4: الطرف الموقوف لا يدخل مستنداً جديداً — تغيب أزرار المستندات الجديدة (والخادم
+                // يرفض ترحيل أيّ مسودّة تحمله) وتبقى السندات والإشعارات (السداد له مسموح).
+                ...(partner?.is_active !== false
+                  ? [
+                      {
+                        key: 'new-invoice',
+                        label: `${term('doc.sales_invoice')} جديدة`,
+                        onClick: () => navigate(`/sales/invoices/new?customer_id=${id}`),
+                      },
+                      {
+                        key: 'new-quotation',
+                        label: 'عرض سعر جديد',
+                        onClick: () => navigate(`/sales/quotations?action=new&customer_id=${id}`),
+                      },
+                    ]
+                  : []),
               ]
             : []),
           // سند صرف سريع + فاتورة شراء للمورد — مرآة أزرار العميل (المورد مُعبّأ مسبقاً).
@@ -1482,7 +1527,7 @@ export const PartnerProfilePage: React.FC = () => {
                     }]
                   : []),
                 // المخلّص/الوكيل/الناقل تُستحقّ لهم تخاليص وشحن وإرساليات لا فواتير شراء.
-                ...(partner?.partner_type === 'Supplier'
+                ...(partner?.partner_type === 'Supplier' && partner?.is_active !== false
                   ? [{
                       key: 'new-purchase',
                       label: 'فاتورة مشتريات جديدة',

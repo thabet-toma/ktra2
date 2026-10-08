@@ -104,5 +104,8 @@ export function buildFamilyRow(members: SqlProduct[]): SqlProduct {
     // شارته، وهو تحديداً العيب الذي أصلحته هذه التذكرة.
     min_stock_level: anchor.effective_min_stock_level ?? anchor.min_stock_level,
     max_stock_level: anchor.effective_max_stock_level ?? anchor.max_stock_level,
+    // T4: صفّ المنتج موقوفٌ حين تكون **كل** براندَاته موقوفة؛ ومعرّفاتها تُمكّن إيقافه كاملاً.
+    is_active: members.some((m) => m.is_active !== false),
+    family_member_ids: members.map((m) => m.id),
   };
 }

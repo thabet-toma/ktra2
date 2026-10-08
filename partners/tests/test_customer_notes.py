@@ -172,3 +172,161 @@ class CustomerNotesTest(APITestCase):
             format="json", HTTP_X_TENANT_ID="1")
         self.assertEqual(unsafe_path.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("target_path", unsafe_path.data)
+
+
+def _page_note(tenant, **overrides):
+    values = dict(
+        tenant=tenant, target_type="page", target_id="/sales/invoices",
+        target_label="فواتير المبيعات", target_path="/sales/invoices", title="ملاحظة",
+    )
+    values.update(overrides)
+    return CustomerNote.objects.create(**values)
+
+
+class PinnedPageNotesTest(APITestCase):
+    """«تثبيت على الصفحة»: ملاحظة الصفحة المثبّتة تظهر بشريط أصفر لكل مستخدمي الشركة."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.tenant_a = Tenant.objects.create(
+            TenantID=1, CompanyName="A", SubscriptionPlan="Enterprise", Status="Active")
+        cls.tenant_b = Tenant.objects.create(
+            TenantID=2, CompanyName="B", SubscriptionPlan="Enterprise", Status="Active")
+        cls.user = User.objects.create_user(username="pin", password="x")
+        UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_a, role="manager", is_default=True)
+        UserCompanyMembership.objects.create(user=cls.user, tenant=cls.tenant_b, role="manager")
+        cls.cust_a = Partner.objects.create(tenant=cls.tenant_a, name="زبون A", partner_type="Customer")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.user)
+
+    def _page_payload(self, **overrides):
+        payload = {
+            "target_type": "page", "target_id": "/sales/invoices",
+            "target_label": "فواتير المبيعات", "target_path": "/sales/invoices?tab=draft",
+            "title": "راجع الفواتير المعلّقة",
+        }
+        payload.update(overrides)
+        return payload
+
+    def test_is_pinned_defaults_false_and_is_writable(self):
+        plain = self.client.post(
+            "/api/customer-notes/", self._page_payload(), format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(plain.status_code, status.HTTP_201_CREATED, plain.data)
+        self.assertIs(plain.data["is_pinned"], False)
+
+        pinned = self.client.post(
+            "/api/customer-notes/", self._page_payload(is_pinned=True),
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(pinned.status_code, status.HTTP_201_CREATED, pinned.data)
+        self.assertIs(pinned.data["is_pinned"], True)
+        self.assertTrue(CustomerNote.objects.get(pk=pinned.data["id"]).is_pinned)
+
+        # التبديل لاحقاً بـPATCH — فك التثبيت لا يمسّ باقي الحقول.
+        unpinned = self.client.patch(
+            f"/api/customer-notes/{pinned.data['id']}/", {"is_pinned": False},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(unpinned.status_code, status.HTTP_200_OK, unpinned.data)
+        self.assertIs(unpinned.data["is_pinned"], False)
+        self.assertEqual(unpinned.data["title"], "راجع الفواتير المعلّقة")
+
+    def test_pinned_filter_returns_only_pinned_notes_of_that_page(self):
+        pinned = _page_note(self.tenant_a, title="مثبّتة", is_pinned=True)
+        _page_note(self.tenant_a, title="غير مثبّتة")
+        _page_note(self.tenant_a, title="صفحة أخرى", target_id="/purchase-invoices", is_pinned=True)
+
+        res = self.client.get(
+            "/api/customer-notes/?target_type=page&target_id=/sales/invoices&pinned=1",
+            HTTP_X_TENANT_ID="1")
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual([row["id"] for row in res.data], [pinned.id])
+
+        as_true = self.client.get(
+            "/api/customer-notes/?target_type=page&target_id=/sales/invoices&pinned=true",
+            HTTP_X_TENANT_ID="1")
+        self.assertEqual([row["id"] for row in as_true.data], [pinned.id])
+
+        # بلا `pinned` تعود كل ملاحظات الصفحة (النافذة الكاملة وشارة العدّاد).
+        everything = self.client.get(
+            "/api/customer-notes/?target_type=page&target_id=/sales/invoices",
+            HTTP_X_TENANT_ID="1")
+        self.assertEqual(len(everything.data), 2)
+
+    def test_pinned_list_is_tenant_isolated(self):
+        mine = _page_note(self.tenant_a, title="لي", is_pinned=True)
+        _page_note(self.tenant_b, title="لشركة أخرى", is_pinned=True)
+
+        res = self.client.get(
+            "/api/customer-notes/?target_type=page&target_id=/sales/invoices&pinned=1",
+            HTTP_X_TENANT_ID="1")
+        self.assertEqual([row["id"] for row in res.data], [mine.id])
+
+    def test_pinning_a_partner_note_is_rejected(self):
+        res = self.client.post(
+            "/api/customer-notes/",
+            {"partner": self.cust_a.id, "title": "ملاحظة طرف", "is_pinned": True},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("is_pinned", res.data)
+
+        partner_note = CustomerNote.objects.create(
+            tenant=self.tenant_a, partner=self.cust_a, title="ملاحظة طرف")
+        patched = self.client.patch(
+            f"/api/customer-notes/{partner_note.id}/", {"is_pinned": True},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(patched.status_code, status.HTTP_400_BAD_REQUEST)
+        partner_note.refresh_from_db()
+        self.assertFalse(partner_note.is_pinned)
+
+    def test_marking_pinned_note_done_keeps_it_pinned(self):
+        note = _page_note(self.tenant_a, is_pinned=True)
+        res = self.client.patch(
+            f"/api/customer-notes/{note.id}/", {"is_done": True},
+            format="json", HTTP_X_TENANT_ID="1")
+        self.assertEqual(res.status_code, status.HTTP_200_OK, res.data)
+        self.assertIs(res.data["is_done"], True)
+        self.assertIs(res.data["is_pinned"], True)
+
+
+def _load_pinned_migration():
+    import importlib
+    return importlib.import_module("partners.migrations.0018_customernote_is_pinned")
+
+
+class PageNoteTargetIdMigrationTest(APITestCase):
+    """الهجرة 0018: مفتاح ملاحظة الصفحة صار المسار وحده، و`target_path` يبقى كاملاً."""
+
+    def test_strip_query_and_fragment_cuts_at_first_marker(self):
+        strip = _load_pinned_migration().strip_query_and_fragment
+        self.assertEqual(strip("/sales/invoices?tab=draft"), "/sales/invoices")
+        self.assertEqual(strip("/sales/invoices#row-3"), "/sales/invoices")
+        self.assertEqual(strip("/a?x=1#frag"), "/a")
+        self.assertEqual(strip("/a#frag?x=1"), "/a")
+        self.assertEqual(strip("/sales/invoices"), "/sales/invoices")
+        self.assertEqual(strip(""), "")
+
+    def test_normalize_rewrites_only_page_notes_and_keeps_target_path(self):
+        from django.apps import apps as global_apps
+
+        tenant = Tenant.objects.create(
+            TenantID=1, CompanyName="A", SubscriptionPlan="Enterprise", Status="Active")
+        with_query = _page_note(
+            tenant, target_id="/import-price-offers?doc=quote-12",
+            target_path="/import-price-offers?doc=quote-12")
+        clean = _page_note(tenant, target_id="/dashboard", target_path="/dashboard")
+        # نوعٌ آخر قد يحمل علامة استفهام في معرّفه الثابت — لا يُمسّ.
+        other_type = _page_note(
+            tenant, target_type="supplier_quotation", target_id="quote?12",
+            target_path="/import-price-offers")
+        stamp = CustomerNote.objects.get(pk=with_query.pk).updated_at
+
+        _load_pinned_migration().normalize_page_note_target_ids(global_apps, None)
+
+        with_query.refresh_from_db()
+        clean.refresh_from_db()
+        other_type.refresh_from_db()
+        self.assertEqual(with_query.target_id, "/import-price-offers")
+        self.assertEqual(with_query.target_path, "/import-price-offers?doc=quote-12")
+        self.assertEqual(with_query.updated_at, stamp)
+        self.assertEqual(clean.target_id, "/dashboard")
+        self.assertEqual(other_type.target_id, "quote?12")

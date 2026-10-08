@@ -47,9 +47,9 @@ from .services import (
 def _run_loss_guard(invoice, lines):
     """W1: يشغّل حارس الخسارة على مستوى السطر عند الحفظ (لا الترحيل فقط). يفترض أن
     `lines` جُلبت بـ select_related('product') وأن `recalculate_invoice_amounts`
-    مُلئت مسبقاً. لا يفعل شيئاً إن كان الإعداد مطفأً أو الفاتورة مرجعاً."""
+    مُلئت مسبقاً. لا يفعل شيئاً إلا إذا كانت السياسة `block` (يمنع الحفظ) والفاتورة بيعاً."""
     products_by_id = {l.product_id: l.product for l in lines}
-    guard_loss_invoice(invoice, lines, products_by_id)
+    guard_loss_invoice(invoice, lines, products_by_id, stage=SalesSettings.STAGE_SAVE)
 
 
 def _as_product(value):
@@ -68,7 +68,9 @@ def _as_product(value):
 
 
 def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return: bool = False) -> None:
-    """يمنع بيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل.
+    """يمنع **حفظ** فاتورة تبيع كمية أكبر من الرصيد عند تفعيل خصم المخزون عند الترحيل
+    إذا كانت `SalesSettings.negative_stock_policy` = `block`. `save_only` تحفظها مسودةً
+    ويمنع ترحيلها `inventory.services.record_stock_movement`؛ `allow` تسمح بالاثنين.
 
     للمراجيع (`is_return`) البضاعة تدخل للمخزون (مرجع بيع) — لا فحص توفّر، بل
     يُكتفى بالتحقق من الكمية الموجبة ووجود المنتج (يتم أدناه في create/update).
@@ -77,9 +79,9 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
         return
     # M3: resolve the global negative-stock policy once (not per line — avoids N+1).
     # Default to allowing negative stock when no settings row exists yet.
-    from .models import SalesSettings
     ss = SalesSettings.objects.filter(tenant_id=tenant.TenantID).first()
-    global_allow = ss.allow_negative_stock_default if ss else True
+    policy = ss.negative_stock_policy if ss else SalesSettings.POLICY_ALLOW
+    global_allow = not SalesSettings.policy_blocks(policy, SalesSettings.STAGE_SAVE)
     for row in lines_data:
         d = dict(row) if isinstance(row, dict) else row
         pid = d.get("product")
@@ -109,7 +111,8 @@ def _validate_stock_lines(tenant, lines_data, stock_on_post: bool, *, is_return:
             raise serializers.ValidationError(
                 {
                     "lines": (
-                        f"«{prod.sku}»: الكمية ({qty}) تتجاوز المتوفر في المخزون ({prod.quantity_on_hand})."
+                        f"«{prod.sku}»: الكمية ({qty}) تتجاوز المتوفر في المخزون ({prod.quantity_on_hand}). "
+                        + SalesSettings.policy_refusal(SalesSettings.NEGATIVE_STOCK_SETTING_LABEL, policy)
                     )
                 }
             )
@@ -120,6 +123,11 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
     # اسم المنتج (قراءة فقط) لعرض بنود الفاتورة في «تفاصيل الحركة» بكشف الحساب —
     # لقطةُ الترحيل إن وُجدت، وإلا Product.__str__ (name_ar ← name_en ← sku).
     product_name = serializers.SerializerMethodField(read_only=True)
+    # T3: الصنف الموقوف بعد حفظ المسودّة يمنع ترحيلها (`core.active_guard`) — الواجهة
+    # تعلّم السطر به قبل أن يضغط المستخدم «رحّل».
+    product_is_active = serializers.BooleanField(
+        source="product.is_active", read_only=True, allow_null=True,
+    )
 
     class Meta:
         model = SalesInvoiceLine
@@ -127,6 +135,7 @@ class SalesInvoiceLineSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_is_active",
             "quantity",
             "delivered_quantity",
             "unit_price",
@@ -236,6 +245,7 @@ class SalesInvoiceListSerializer(
     _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
 ):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    customer_is_active = serializers.BooleanField(source="customer.is_active", read_only=True)
     delivery_status_display = serializers.CharField(
         source="get_delivery_status_display", read_only=True,
     )
@@ -249,6 +259,7 @@ class SalesInvoiceListSerializer(
             "invoice_kind",
             "customer",
             "customer_name",
+            "customer_is_active",
             "invoice_date",
             "due_date",
             "payment_terms_days",
@@ -291,6 +302,7 @@ class SalesInvoiceSerializer(
 ):
     lines = SalesInvoiceLineSerializer(many=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
+    customer_is_active = serializers.BooleanField(source="customer.is_active", read_only=True)
     invoice_number = serializers.CharField(required=False, allow_blank=True)
     # N8-T11: نوع الفاتورة (بيع/مرجع بيع…) + الفاتورة الأصلية للمرجع. مكشوفان
     # للكتابة كي تُنشئ شاشة «مرجع البيع» فاتورة من نوع sale_return مربوطة بأصلها.
@@ -408,6 +420,7 @@ class SalesInvoiceSerializer(
             "original_invoice_number",
             "customer",
             "customer_name",
+            "customer_is_active",
             "invoice_date",
             "due_date",
             "payment_terms_days",
@@ -977,7 +990,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "default_ar_account",
             "default_payment_type",
             "stock_on_post_default",
-            "allow_negative_stock_default",
+            "negative_stock_policy",
             "default_vat_rate",
             "default_vat_rate_code",
             "default_vat_rate_value",
@@ -989,7 +1002,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "auto_refund_on_sales_return",
             "show_journal_preview",
             "warn_on_duplicate_item",
-            "block_loss_invoices",
+            "loss_invoice_policy",
             "serial_entry_mode",
             "dormant_customer_days",
             # T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف.
@@ -1139,6 +1152,9 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     # اسم المنتج (قراءة فقط) لعرض بنود عرض السعر بوضوح — يتبع product_display_name.
     product_name = serializers.SerializerMethodField(read_only=True)
+    product_is_active = serializers.BooleanField(
+        source="product.is_active", read_only=True, allow_null=True,
+    )
 
     class Meta:
         model = SalesQuotationLine
@@ -1146,6 +1162,7 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_is_active",
             "quantity",
             "unit_price",
             "line_discount",
@@ -1164,6 +1181,9 @@ class SalesQuotationLineSerializer(serializers.ModelSerializer):
 class SalesOrderLineSerializer(serializers.ModelSerializer):
     id = serializers.IntegerField(required=False)
     product_name = serializers.SerializerMethodField(read_only=True)
+    product_is_active = serializers.BooleanField(
+        source="product.is_active", read_only=True, allow_null=True,
+    )
 
     class Meta:
         model = SalesOrderLine
@@ -1171,6 +1191,7 @@ class SalesOrderLineSerializer(serializers.ModelSerializer):
             "id",
             "product",
             "product_name",
+            "product_is_active",
             "quantity",
             "unit_price",
             "line_discount",

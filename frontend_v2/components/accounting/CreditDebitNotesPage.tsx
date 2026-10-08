@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { KitSpinner } from "../kit/KitStates";
@@ -66,7 +67,7 @@ import {
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 
-type PartnerOption = { id: number; name: string; partner_type?: string | null };
+type PartnerOption = { id: number; name: string; partner_type?: string | null; is_active?: boolean };
 type CurrencyOption = { CurrencyID: number; Code: string; IsBaseCurrency?: boolean };
 
 /** مستندٌ قابلٌ للربط: نوعه ومعرّفه ووسمه ومتبقّيه. */
@@ -183,7 +184,7 @@ export const CreditDebitNotesPage: React.FC = () => {
     try {
       const [ns, parts, accs, curs] = await Promise.all([
         listCreditDebitNotes(),
-        accountingApi.getPartners() as Promise<PartnerOption[]>,
+        accountingApi.getPartners(undefined, "all") as Promise<PartnerOption[]>,
         accountingApi.getAccounts() as Promise<AccountNodeLike[]>,
         accountingApi.getCurrencies() as Promise<CurrencyOption[]>,
       ]);
@@ -374,7 +375,7 @@ export const CreditDebitNotesPage: React.FC = () => {
     () =>
       partners
         .filter((p) => !typeFilter || p.partner_type === typeFilter)
-        .map((p) => ({ id: p.id, label: p.name, sub: partnerTypeLabel(p.partner_type) })),
+        .map((p) => ({ id: p.id, label: labelWithStatus(p.name, p.is_active), sub: partnerTypeLabel(p.partner_type) })),
     [partners, typeFilter],
   );
 
@@ -798,7 +799,7 @@ export const CreditDebitNotesPage: React.FC = () => {
                   <div className="block">
                     <span className="mb-1 block text-xs font-medium">الطرف *</span>
                     <KitAutocomplete
-                      value={partner ? `${partner.name} — ${partnerTypeLabel(partner.partner_type)}` : ""}
+                      value={partner ? `${labelWithStatus(partner.name, partner.is_active)} — ${partnerTypeLabel(partner.partner_type)}` : ""}
                       options={partnerOptions}
                       maxResults={12}
                       placeholder="اكتب اسم الطرف…"

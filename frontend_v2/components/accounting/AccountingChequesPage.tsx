@@ -1,6 +1,7 @@
 import React, { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { accountingApi } from "../../services/accountingApi";
@@ -200,10 +201,10 @@ export const AccountingChequesPage: React.FC = () => {
           page,
           page_size: PAGE_SIZE,
         }),
-        soft("الأطراف", accountingApi.getPartners()),
+        soft("الأطراف", accountingApi.getPartners(undefined, "all")),
         soft("الحسابات البنكية", accountingApi.getBankAccounts({ activeOnly: true })),
         // التظهير يسدّد أيّ طرفٍ دائن (مورد، مخلّص، وكيل شحن، ناقل) — الخادم يقبلهم كلّهم.
-        soft("الأطراف الدائنة", accountingApi.getPartners(CREDITOR_PARTNER_TYPES.join(","))),
+        soft("الأطراف الدائنة", accountingApi.getPartners(CREDITOR_PARTNER_TYPES.join(","), "all")),
       ]);
       setRows(ch.results);
       setTotalCount(ch.count);
@@ -666,7 +667,7 @@ export const AccountingChequesPage: React.FC = () => {
         <label className="ktra-field-label">الشريك</label>
         <select className="ktra-input" value={filterPartner} onChange={(e) => setFilterPartner(e.target.value)}>
           <option value="">الكل</option>
-          {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+          {partners.map((p) => <option key={p.id} value={p.id}>{labelWithStatus(p.name, p.is_active)}</option>)}
         </select>
       </div>
     </div>
@@ -998,7 +999,8 @@ export const AccountingChequesPage: React.FC = () => {
                     {suppliers.map((sup) => (
                       <option key={sup.id} value={sup.id}>
                         {sup.partner_type && sup.partner_type !== "Supplier"
-                          ? `${sup.name} — ${partnerTypeLabel(sup.partner_type)}` : sup.name}
+                          ? `${labelWithStatus(sup.name, sup.is_active)} — ${partnerTypeLabel(sup.partner_type)}`
+                          : labelWithStatus(sup.name, sup.is_active)}
                       </option>
                     ))}
                   </select>

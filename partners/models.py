@@ -238,6 +238,10 @@ class CustomerNote(models.Model):
         max_length=10, choices=PRIORITY_CHOICES, default=PRIORITY_NORMAL,
         db_column='Priority',
         help_text='أولوية الملاحظة — «عاجل» تُنبّه عند أي معاملة للطرف بعد حلول موعدها')
+    is_pinned = models.BooleanField(
+        default=False, db_column='IsPinned',
+        help_text='تثبيت على الصفحة — ملاحظة الصفحة المثبّتة غير المنجزة تظهر بشريط أصفر '
+                  'أعلى الصفحة لكل مستخدمي الشركة')
     created_by = models.ForeignKey(
         'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='CreatedBy_UserID', related_name='+')

@@ -269,8 +269,8 @@ class Command(BaseCommand):
         ss.default_cogs_account = code_map['5101']
         ss.default_ar_account = code_map['1103']
         ss.vat_input_account = code_map['1105']
-        ss.allow_negative_stock_default = True
-        ss.block_loss_invoices = False
+        ss.negative_stock_policy = SalesSettings.POLICY_ALLOW
+        ss.loss_invoice_policy = SalesSettings.POLICY_ALLOW
         ss.save()
 
         # إعدادات الشراء

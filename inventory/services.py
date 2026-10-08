@@ -780,7 +780,8 @@ def record_stock_movement(
     طبقة مؤقّتة (`is_provisional=True`) بالكمية غير المغطّاة، بآخر كلفةٍ
     معروفة (`avg_before` إن كان > 0، وإلا `_last_layer_unit_cost`، وإلا صفر)،
     ثم تُستهلك فوراً — حارس منع المخزون السالب (`SalesSettings.
-    allow_negative_stock_default`) لا يتغيّر بحرف؛ هذا يعالج فقط ما يتجاوزه أصلاً.
+    negative_stock_policy`، يمنع الصرف عند `save_only` و`block`) لا يتغيّر بحرف؛
+    هذا يعالج فقط ما يتجاوزه أصلاً.
 
     `restores_movement`: مرّرها مع حركةٍ واردة (مرتجع بيعٍ يشير إلى حركة
     الصرف الأصلية) لإرجاع البضاعة إلى *نفس* طبقتها وموقعها في رتل FIFO
@@ -843,17 +844,25 @@ def record_stock_movement(
             if qty_before < quantity:
                 from sales.models import SalesSettings
                 ss = SalesSettings.objects.filter(tenant_id=tenant.TenantID if tenant else prod.tenant_id).first()
-                allow_negative = ss.allow_negative_stock_default if ss else True
-                if not allow_negative:
+                # الصرف هو الترحيل (المسودة لا تحرّك مخزوناً): يُمنع في `save_only`
+                # و`block` معاً — قاعدة `SalesSettings.policy_blocks` وحدها.
+                policy = ss.negative_stock_policy if ss else SalesSettings.POLICY_ALLOW
+                if SalesSettings.policy_blocks(policy, SalesSettings.STAGE_POST):
+                    logger.warning(
+                        "NEGATIVE STOCK BLOCKED: product=%s sku=%s qty_before=%s outbound=%s policy=%s",
+                        prod.pk, prod.sku, qty_before, quantity, policy,
+                    )
                     raise ValidationError(
                         f"لا يمكن صرف {quantity} من المنتج «{prod.sku}» — "
                         f"الرصيد المتاح: {qty_before}. "
-                        f"تأكد من استلام البضاعة أولاً أو قم بتسوية المخزون."
+                        f"تأكد من استلام البضاعة أولاً أو قم بتسوية المخزون. "
+                        + SalesSettings.policy_refusal(
+                            SalesSettings.NEGATIVE_STOCK_SETTING_LABEL, policy)
                     )
                 else:
                     logger.warning(
-                        "NEGATIVE STOCK ALLOWED: product=%s sku=%s qty_before=%s outbound=%s",
-                        prod.pk, prod.sku, qty_before, quantity,
+                        "NEGATIVE STOCK ALLOWED: product=%s sku=%s qty_before=%s outbound=%s policy=%s",
+                        prod.pk, prod.sku, qty_before, quantity, policy,
                     )
 
             new_qty = qty_before - quantity
@@ -2461,3 +2470,108 @@ def post_stocktake(stocktake, user=None):
         stocktake.save(update_fields=['is_posted', 'journal', 'stocktake_number', 'updated_at'])
     logger.info("Stocktake #%s posted (journal=%s)", stocktake.id, journal.id if journal else None)
     return stocktake
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# T2: أثر تعطيل المنتج — ما يحذّر منه المستخدم قبل التأكيد.
+# التعطيل بوجود رصيد **مسموح** (قرار المالك)، لكنه لا يمسّ المستندات غير المرحَّلة
+# التي ما زالت تحمل المنتج: تبقى كما هي وتُرحَّل لاحقاً (حارس الترحيل تذكرة T3).
+# قراءةٌ بلا أي أثر — لا حركة مخزون ولا قيد.
+# ──────────────────────────────────────────────────────────────────────────
+DEACTIVATION_IMPACT_MAX_ROWS = 20
+
+
+def draft_documents_holding(tenant, *, product_id=None, partner_id=None,
+                            max_rows=DEACTIVATION_IMPACT_MAX_ROWS):
+    """(العدد الكلي، أحدث `max_rows` مستنداً) من المستندات **غير المرحَّلة** التي تحمل
+    المنتج في سطرٍ (`product_id`) أو تخصّ الطرف (`partner_id`) — مصدرٌ واحد لنافذتي أثر
+    إيقاف المنتج (`product_deactivation_impact`) والطرف (`partners/views.py`).
+
+    «غير مرحَّل» = ما قد يُرحَّل/يُؤكَّد/يُحوَّل لاحقاً فيرفضه حارس «غير نشط»
+    (`core/active_guard.py`): فواتير بيع مسودة وشراء غير مرحَّلة (إلا المؤرشفة)، عروض
+    أسعار وطلبيات مفتوحة، عروض الموردين وطلباتها المفتوحة، تحويلات المستودعات وجردها
+    غير المرحَّل (للمنتج وحده — لا طرف لها). التسمية من معجم الشركة حيث له مفتاح.
+    كل استعلامٍ مقيَّد بالشركة. الأحدث أولاً (التاريخ ثم المعرّف).
+    """
+    from logistics.models import (
+        PurchaseInvoice, PurchaseOrder, PurchaseRFQ, SupplierQuotation,
+    )
+    from core.terminology import term
+    from sales.models import SalesInvoice, SalesOrder, SalesQuotation
+    from .models import Stocktake, WarehouseTransfer
+
+    # (النوع، التسمية، الاستعلام، حقل الرقم، حقل التاريخ، علاقة السطور، حقل الطرف)
+    specs = [
+        ('sales_invoice', term(tenant, 'doc.sales_invoice'),
+         SalesInvoice.objects.filter(status=SalesInvoice.STATUS_DRAFT),
+         'invoice_number', 'invoice_date', 'lines', 'customer_id'),
+        ('sales_quotation', term(tenant, 'doc.quotation'),
+         SalesQuotation.objects.filter(status__in=[
+             SalesQuotation.STATUS_DRAFT, SalesQuotation.STATUS_SENT,
+             SalesQuotation.STATUS_ACCEPTED]),
+         'quotation_number', 'quotation_date', 'lines', 'customer_id'),
+        ('sales_order', 'طلبية زبون',
+         SalesOrder.objects.filter(status__in=[
+             SalesOrder.STATUS_DRAFT, SalesOrder.STATUS_CONFIRMED]),
+         'order_number', 'order_date', 'lines', 'customer_id'),
+        ('purchase_invoice', term(tenant, 'doc.purchase_invoice'),
+         PurchaseInvoice.objects.filter(is_posted=False).exclude(status='archived'),
+         'invoice_number', 'invoice_date', 'items', 'partner_id'),
+        ('purchase_order', 'أمر شراء',
+         PurchaseOrder.objects.filter(status__in=[
+             PurchaseOrder.STATUS_DRAFT, PurchaseOrder.STATUS_CONFIRMED]),
+         'order_number', 'order_date', 'lines', 'supplier_id'),
+        ('supplier_quotation', 'عرض سعر مورّد',
+         SupplierQuotation.objects.filter(status__in=[
+             SupplierQuotation.STATUS_DRAFT, SupplierQuotation.STATUS_SENT,
+             SupplierQuotation.STATUS_PENDING_INFO,
+             SupplierQuotation.STATUS_UNDER_DISCUSSION,
+             SupplierQuotation.STATUS_ACCEPTED]),
+         'quotation_number', 'quotation_date', 'lines', 'supplier_id'),
+        ('purchase_rfq', term(tenant, 'doc.purchase_rfq'),
+         PurchaseRFQ.objects.filter(status__in=[
+             PurchaseRFQ.STATUS_DRAFT, PurchaseRFQ.STATUS_SENT]),
+         'rfq_number', 'rfq_date', 'lines', None),
+        ('warehouse_transfer', 'تحويل مستودعات',
+         WarehouseTransfer.objects.filter(is_posted=False),
+         'transfer_number', 'transfer_date', 'lines', None),
+        ('stocktake', 'جرد',
+         Stocktake.objects.filter(is_posted=False),
+         'stocktake_number', 'stocktake_date', 'lines', None),
+    ]
+
+    total = 0
+    rows = []
+    for kind, label, qs, number_field, date_field, lines_rel, partner_field in specs:
+        if product_id is not None:
+            qs = qs.filter(**{f'{lines_rel}__product_id': product_id})
+        if partner_id is not None:
+            if partner_field is None:
+                continue
+            qs = qs.filter(**{partner_field: partner_id})
+        qs = qs.filter(tenant_id=tenant.TenantID).distinct()
+        total += qs.count()
+        newest = qs.order_by(f'-{date_field}', '-id').values('id', number_field, date_field)
+        for doc in newest[:max_rows]:
+            when = doc[date_field]
+            rows.append({
+                'kind': kind,
+                'kind_label': label,
+                'id': doc['id'],
+                'number': doc[number_field] or str(doc['id']),
+                'date': when.isoformat() if when else None,
+            })
+    rows.sort(key=lambda r: (r['date'] or '', r['id']), reverse=True)
+    return total, rows[:max_rows]
+
+
+def product_deactivation_impact(product, *, max_rows=DEACTIVATION_IMPACT_MAX_ROWS):
+    """الرصيد الحالي + المستندات غير المرحَّلة التي تحمل المنتج في سطر
+    (`draft_documents_holding`). قراءةٌ بلا أي أثر — لا حركة مخزون ولا قيد."""
+    total, rows = draft_documents_holding(
+        product.tenant, product_id=product.id, max_rows=max_rows)
+    return {
+        'quantity_on_hand': str(product.quantity_on_hand),
+        'draft_documents_count': total,
+        'draft_documents': rows,
+    }

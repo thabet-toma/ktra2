@@ -194,6 +194,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         'max_stock_level': 'حد المخزون الأقصى',
         'is_serialized': 'التتبع التسلسلي',
         'is_service': 'نوع الخدمة',
+        'is_active': 'نشط',
         'is_for_sale_online': 'البيع عبر الإنترنت',
         'online_price': 'سعر الإنترنت',
         'online_description': 'وصف الإنترنت',
@@ -222,6 +223,19 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         `ProductLookupViewSet` (أسفله) تُعيدها `True` دائماً بصرف النظر عن
         المُرسَل — نفس المنطق حرفياً بلا نسخة ثانية منه."""
         return self.request.query_params.get('view') == 'lookup'
+
+    @staticmethod
+    def _active_status_param(params):
+        """فلتر الحالة في القوائم: `status=active|inactive|all` (والافتراضي
+        `active`)، و`include_inactive=1|true` اسمٌ بديل لـ`all`. قيمة `status`
+        الصالحة تغلب البديل؛ وما لا يُعرف يسقط إلى الافتراضي لا إلى «الكل» —
+        الخطأ الإملائي لا يُظهر المعطَّلين في منتقي المستندات."""
+        raw = (params.get('status') or '').strip().lower()
+        if raw in ('active', 'inactive', 'all'):
+            return raw
+        if (params.get('include_inactive') or '').strip().lower() in ('1', 'true'):
+            return 'all'
+        return 'active'
 
     def get_serializer_class(self):
         if self.action == 'list' and self._is_lookup():
@@ -365,6 +379,16 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
             return Product.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
         params = self.request.query_params
+
+        # T2: المعطَّل يغيب عن **القوائم** (عادية أو منتقٍ) فلا يدخل مستنداً جديداً،
+        # ويبقى مفتوحاً بكرته وسجلّه (`retrieve` وسائر الإجراءات بلا فلتر حالة —
+        # وإلا تعذّرت إعادة التفعيل نفسها). نفس منطق `ProductLookupViewSet` الموروث.
+        if self.action == 'list':
+            active_state = self._active_status_param(params)
+            if active_state == 'active':
+                qs = qs.filter(is_active=True)
+            elif active_state == 'inactive':
+                qs = qs.filter(is_active=False)
 
         # استبعاد المنتجات الخاصة بالمتجر فقط من الكتالوج المخزني ومحددات الفواتير
         store_only_param = params.get('is_store_only')
@@ -1129,6 +1153,119 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
                 user=request.user,
             )
         return Response({'updated': len(products), 'fields': fields})
+
+    # ── T2: نشط / غير نشط ──────────────────────────────────────────────
+    @staticmethod
+    def _parse_is_active(data):
+        """`is_active` من جسم الطلب: منطقيٌّ صريح أو `None` إن غاب/لم يصحّ —
+        الغياب خطأٌ لا «افتراضي»: تعطيلٌ بالخطأ يُخفي منتجاً من المنتقيات."""
+        raw = data.get('is_active', None)
+        if raw is None:
+            return None
+        try:
+            return serializers.BooleanField().to_internal_value(raw)
+        except serializers.ValidationError:
+            return None
+
+    @action(detail=True, methods=['post'], url_path='set-active')
+    @requires_perm('inventory.item.manage')
+    def set_active(self, request, pk=None):
+        """يعطّل المنتج أو يعيد تفعيله — `{"is_active": bool}` ⇒ المنتج مُسلسَلاً.
+
+        التعطيل بوجود رصيد **مسموح** (قرار المالك): الواجهة تستدعي
+        `deactivation-impact` أولاً وتحذّر. لا حركة مخزون ولا قيد هنا — علامةٌ
+        على الكتالوج فقط. `get_object` لا يفلتر بالحالة، فيُعاد تفعيل المعطَّل.
+        """
+        value = self._parse_is_active(request.data)
+        if value is None:
+            return Response(
+                {'error': 'is_active مطلوب ويجب أن يكون true أو false'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        product = self.get_object()
+        product.is_active = value
+        product.save(update_fields=['is_active', 'updated_at'])
+        logger.info(
+            'product set-active tenant=%s products=%s user=%s is_active=%s',
+            product.tenant_id, [product.id], request.user.id, value,
+        )
+        label = product.name_ar or product.name_en or product.sku
+        log_activity(
+            action='update',
+            entity_type='product',
+            entity_id=product.id,
+            entity_label=label,
+            description=f'{"فعّل" if value else "عطّل"} المنتج «{label}»',
+            metadata={'is_active': value},
+            request=request,
+        )
+        return Response(self.get_serializer(product).data)
+
+    @action(detail=False, methods=['post'], url_path='bulk-set-active')
+    @requires_perm('inventory.item.manage')
+    def bulk_set_active(self, request):
+        """يعطّل/يفعّل منتجاتٍ دفعةً — `{"ids": [...], "is_active": bool}` ⇒ `{"updated": n}`.
+
+        معرّفات شركةٍ أخرى **تُتجاهل بصمت** (كما `bulk-set-group`): الفلتر
+        بالشركة في الاستعلام نفسه، و`updated` عدد ما طابق فعلاً. المحدِّد في
+        **جسم** الطلب لا في عنوانه (درس nginx 414).
+        """
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+        value = self._parse_is_active(request.data)
+        if value is None:
+            return Response(
+                {'error': 'is_active مطلوب ويجب أن يكون true أو false'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw = request.data.get('ids') or []
+        if not isinstance(raw, list) or not raw:
+            return Response(
+                {'error': 'لم تُحدَّد منتجات'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        try:
+            ids = [int(pid) for pid in raw]
+        except (TypeError, ValueError):
+            return Response(
+                {'error': 'معرّف منتج غير صالح في القائمة'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        matched = list(
+            Product.objects.filter(tenant=tenant, pk__in=ids).values_list('pk', flat=True)
+        )
+        if matched:
+            # `update` لا يمرّ بـ`auto_now` — الختمُ يُكتب صراحةً.
+            Product.objects.filter(tenant=tenant, pk__in=matched).update(
+                is_active=value, updated_at=timezone.now(),
+            )
+            logger.info(
+                'product bulk-set-active tenant=%s products=%s user=%s is_active=%s',
+                tenant.TenantID, matched[:200], request.user.id, value,
+            )
+            log_activity(
+                action='update',
+                entity_type='product',
+                entity_label=f'{len(matched)} منتجاً',
+                description=(
+                    f'{"فعّل" if value else "عطّل"} {len(matched)} منتجاً دفعةً واحدة'
+                ),
+                metadata={'product_ids': matched[:200], 'is_active': value},
+                request=request,
+                tenant=tenant,
+                user=request.user,
+            )
+        return Response({'updated': len(matched)})
+
+    @action(detail=True, methods=['get'], url_path='deactivation-impact')
+    def deactivation_impact(self, request, pk=None):
+        """ما يحذّر منه قبل التعطيل: الرصيد الحالي والمستندات غير المرحَّلة التي
+        ما زالت تحمل المنتج (ستبقى تحمله — التعطيل لا يمسّها). قراءةٌ بلا أثر."""
+        from .services import product_deactivation_impact
+
+        product = self.get_object()
+        return Response(product_deactivation_impact(product))
 
     # ── الباركود والأرقام التسلسلية ────────────────────────────────────
     @action(detail=False, methods=['post'], url_path='generate_barcode')

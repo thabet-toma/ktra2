@@ -53,6 +53,8 @@ export interface AccountingPartner {
   name: string;
   legal_name?: string | null;
   partner_type?: string | null;
+  /** false ⇒ غير نشط: يظهر في شاشات الدفع بوسمه، ويغيب عن المستندات الجديدة. */
+  is_active?: boolean;
 }
 
 /**

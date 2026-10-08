@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **962**
+عدد النقاط: **967**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -388,6 +388,7 @@
 | `/api/inventory/products/add-brand/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/apply-replenishment/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/brands/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/bulk-set-active/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/bulk-set-group/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/generate_barcode/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/generate_serials/` | `ProductViewSet` | `inventory/views.py` |
@@ -401,10 +402,12 @@
 | `/api/inventory/products/{pk}/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/cost-breakdown/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/datasheets/{att_id}/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/{pk}/deactivation-impact/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/invoices/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/profile/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/serials/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/serials/register/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/{pk}/set-active/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/stock-ledger/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/stock-movements/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/serials/` | `ProductSerialViewSet` | `inventory/views.py` |
@@ -574,10 +577,12 @@
 | `/api/my-plan/usage/` | `my_plan_usage` | `core/plan_usage_api.py` |
 | `/api/partners/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/bulk-scope/` | `PartnerViewSet` | `partners/views.py` |
+| `/api/partners/bulk-set-active/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/kind-counts/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/lookup/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/balance/` | `PartnerViewSet` | `partners/views.py` |
+| `/api/partners/{pk}/deactivation-impact/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/invoices/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/payment-defaults/` | `PartnerViewSet` | `partners/views.py` |
 | `/api/partners/{pk}/profile/` | `PartnerViewSet` | `partners/views.py` |

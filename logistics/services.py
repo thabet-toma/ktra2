@@ -11,6 +11,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from accounting.models import Account, Cheque
+from core.active_guard import assert_active_for_posting
 from core.payments import document_payment_summary
 from django.utils import timezone
 
@@ -179,6 +180,10 @@ def convert_local_quotation_to_order(quotation, *, user=None):
     lines = list(quotation.lines.select_related('product').all())
     if not lines:
         raise ValidationError('لا يمكن تحويل عرض سعر بلا منتجات.')
+    assert_active_for_posting(
+        partner=quotation.supplier, products=[line.product for line in lines],
+        action='تحويل', document_label='عرض السعر',
+    )
     number = next_document_number(quotation.tenant_id, 'purchase_order')
     order = PurchaseOrder.objects.create(
         tenant=quotation.tenant,
@@ -244,16 +249,23 @@ def _next_purchase_invoice_number(tenant) -> str:
 
 def _draft_purchase_invoice_from_document(
     source, *, lines, invoice_name, invoice_date, supplier, shipping_cost,
-    user=None, **extra_fields,
+    user=None, document_label='المستند', **extra_fields,
 ):
     """فاتورة شراء محلية **مسودة** من مستند سابق (طلبية أو عرض سعر).
 
     مصدر واحد للطريقين: لا قيد ولا حركة مخزون قبل الترحيل/الاستلام، ونفس عقد
     البنود والضريبة في الحالتين — فلا تختلف فاتورةٌ عن أخرى بحسب طريق وصولها.
+    وحارس «غير نشط» هنا أيضاً مرّةً واحدة للطريقين: مورّدٌ أو صنفٌ أُوقف بعد حفظ
+    المصدر لا يتحوّل إلى فاتورة (`document_label` = اسم المصدر في الرسالة).
     """
     from logistics.models import PurchaseInvoice, PurchaseInvoiceItem
     from inventory.services import product_display_name
 
+    lines = list(lines)
+    assert_active_for_posting(
+        partner=supplier, products=[line.product for line in lines],
+        action='تحويل', document_label=document_label,
+    )
     name_max_length = PurchaseInvoiceItem._meta.get_field('name').max_length
 
     invoice = PurchaseInvoice.objects.create(
@@ -324,8 +336,15 @@ def confirm_purchase_order(order):
         return locked
     if locked.status != PurchaseOrder.STATUS_DRAFT:
         raise ValidationError('يمكن تأكيد الطلبية المسودة فقط.')
-    if not locked.lines.exists():
+    order_lines = list(locked.lines.select_related('product'))
+    if not order_lines:
         raise ValidationError('لا يمكن تأكيد طلبية بلا منتجات.')
+    # مورّدٌ أو صنفٌ أُوقف بعد حفظ المسودّة ⇒ لا تأكيد، أياً كان المُقِرّ (نحن
+    # أو المورّد من رابط المشاركة العام — القاعدة هنا لا في الـview).
+    assert_active_for_posting(
+        partner=locked.supplier, products=[line.product for line in order_lines],
+        action='تأكيد', document_label='الطلبية',
+    )
     locked.status = PurchaseOrder.STATUS_CONFIRMED
     locked.save(update_fields=['status', 'updated_at'])
     logger.info(
@@ -826,6 +845,7 @@ def convert_purchase_order_to_invoice(order, *, user=None):
         supplier=order.supplier,
         shipping_cost=order.shipping_cost,
         user=user,
+        document_label='الطلبية',
     )
     order.invoice = invoice
     order.status = PurchaseOrder.STATUS_CONVERTED
@@ -885,6 +905,7 @@ def convert_local_quotation_to_invoice(quotation, *, user=None):
         supplier=quotation.supplier,
         shipping_cost=quotation.shipping_cost_estimate,
         user=user,
+        document_label='عرض السعر',
         source_quotation=quotation,
     )
     quotation.status = SupplierQuotation.STATUS_CONVERTED
@@ -2676,6 +2697,16 @@ def receive_purchase_invoice(invoice, *, lines, branch=None, user=None, movement
 
     if not lines:
         raise ValidationError("حدّد البنود والكميات المراد استلامها.")
+
+    # المسار القديم: استلامُ فاتورةٍ غير مرحّلة **هو** ترحيلها (قيدٌ + إثباتٌ لذمم
+    # المورد) — فيخضع لحارس «غير نشط» كترحيلها. أمّا استلامُ فاتورةٍ مرحّلة أصلاً
+    # فتسوية بضاعةٍ لا مستند جديد، ويبقى مسموحاً لمورّدٍ أو صنفٍ موقوف.
+    if not invoice.is_posted and not invoice.is_return:
+        assert_active_for_posting(
+            partner=invoice.partner,
+            products=[it.product for it in invoice.items.select_related('product')],
+            document_label='الفاتورة',
+        )
 
     if movement_date is None:
         movement_date = invoice.invoice_date or timezone.localdate()

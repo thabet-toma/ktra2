@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 import {
   ArrowRight, CheckCircle2, ClipboardList, Loader2, Plus, Receipt, RotateCcw,
   ShieldCheck, ShieldOff, Trash2, Wrench,
@@ -85,6 +86,8 @@ interface ProductOption {
   sku?: string;
   sale_price?: string | number | null;
   is_serialized?: boolean;
+  /** T4: موقوف — يصل من جلب منتجات قطع الأمر القائم لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 }
 
 interface Props {
@@ -124,6 +127,14 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   const confirm = useConfirm();
 
   const [order, setOrder] = useState<ServiceOrderDetail | null>(null);
+  /* T4: أمر صيانة قائم فيه قطعة منتجُها أُوقف بعد إضافتها غاب عن المنتقي (نشطٌ فقط) —
+     فكان `products.find` يعيد فارغاً، فيسقط تتبّع الرقم التسلسلي لبندٍ مغطًى مرقَّم ويُسعَّر
+     بصفر. يُجلب فرداً ويدخل **قراءة القطع القائمة** (`productsWithHeld`) وحدها؛ مُنتقيات
+     القطعة الجديدة والجهاز البديل تبقى على `products` النشطة. */
+  const heldProducts = useMissingProducts<ProductOption>(
+    (order?.parts ?? []).map((p) => p.product), products,
+  );
+  const productsWithHeld = useMemo(() => [...products, ...heldProducts], [products, heldProducts]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -367,13 +378,13 @@ export const ServiceOrderDocument: React.FC<Props> = ({
   /** بندٌ مغطًى لمنتجٍ مرقَّم — وحده يحتاج اختيار وحدة عبر `SerialEntryModal`. */
   const partTracksSerials = (part: ServiceOrderDetail["parts"][number]) => {
     if (part.billing !== "covered") return false;
-    const product = products.find((p) => p.id === part.product);
+    const product = productsWithHeld.find((p) => p.id === part.product);
     return !!product?.is_serialized;
   };
 
   /** قلب القطعة مغطاة → مفوترة: يملأ سعر البيع من المنتج إن كانت صفراً. */
   const convertToBillable = (part: ServiceOrderDetail["parts"][number]) => {
-    const product = products.find((p) => p.id === part.product);
+    const product = productsWithHeld.find((p) => p.id === part.product);
     const price = Number(part.unit_price) > 0
       ? part.unit_price
       : (product?.sale_price != null ? String(product.sale_price) : "0");
@@ -1027,7 +1038,7 @@ export const ServiceOrderDocument: React.FC<Props> = ({
           {serialsPartId != null && (() => {
             const part = order.parts.find((p) => p.id === serialsPartId);
             if (!part) return null;
-            const product = products.find((p) => p.id === part.product);
+            const product = productsWithHeld.find((p) => p.id === part.product);
             return (
               <SerialEntryModal
                 mode="pick"

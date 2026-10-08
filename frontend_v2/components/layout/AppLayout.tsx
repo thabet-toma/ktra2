@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useLocation } from 'react-router-dom';
 import { Sidebar } from '../Sidebar';
 import { User, AppView } from '../../types';
 import {
@@ -31,7 +32,10 @@ import { formatNumber } from '../../utils/formatNumber';
 // استيراد مباشر لا عبر barrel الـimport-flow: البرميل يجرّ ImportDocumentScreen
 // كاملةً إلى حزمة القشرة ويُبطل تقسيم الحِزَم.
 import { ImportJourneyGuide } from '../import-flow/ImportJourneyGuide';
-import { platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
+import { pageNotePathname, platformNoteTarget, type PlatformNoteTarget } from '../../utils/entityLinks';
+import { splitPageNotes } from '../../utils/pinnedPageNotes';
+import { usePageNotes } from '../../hooks/usePageNotes';
+import { PinnedPageNotes } from './PinnedPageNotes';
 import { openInNewTab, TAB_OPENED_EVENT, type TabOpenedDetail } from '../../utils/openInNewTab';
 import { setCurrentTabLabel } from '../../utils/tabLink';
 import { VIEW_LABELS } from './Breadcrumb';
@@ -142,6 +146,19 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
   const toast = useToast();
   const [density, setDensity] = useState<'comfortable' | 'compact'>('comfortable');
   const [notesTarget, setNotesTarget] = useState<PlatformNoteTarget | null>(null);
+  const { currentCompany } = useCompany();
+  const { pathname } = useLocation();
+  // مفتاح ملاحظات الصفحة هو المسار وحده — طلبٌ واحد يغذّي الشريط الأصفر وشارة الزر.
+  const pageKey = pageNotePathname(pathname);
+  const { notes: pageNotes, refresh: refreshPageNotes } = usePageNotes(pageKey, currentCompany?.TenantID);
+  const { open: openPageNotes, pinned: pinnedPageNotes } = useMemo(
+    () => splitPageNotes(pageNotes),
+    [pageNotes],
+  );
+  const closePlatformNotes = () => {
+    setNotesTarget(null);
+    refreshPageNotes();
+  };
   /**
    * حضورُ موظّف المنصّة يُسجَّل **من هنا أيضاً** (212-N1).
    *
@@ -243,11 +260,21 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <button
             type="button"
             onClick={openPlatformNotes}
-            className="flex items-center justify-center rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
+            className="relative flex items-center justify-center rounded-md p-1.5 text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-3)] hover:text-[var(--color-text)]"
             title="ملاحظة / تذكير على الصفحة الحالية"
-            aria-label="ملاحظة أو تذكير على الصفحة الحالية"
+            aria-label={openPageNotes.length > 0
+              ? `ملاحظة أو تذكير على الصفحة الحالية (${formatNumber(openPageNotes.length, { maxDecimals: 0 })} مفتوحة)`
+              : 'ملاحظة أو تذكير على الصفحة الحالية'}
           >
             <NotebookPen className="h-4 w-4" />
+            {openPageNotes.length > 0 && (
+              <span
+                data-testid="page-notes-count"
+                className="absolute -top-1 -end-1 flex min-w-4 items-center justify-center rounded-full bg-amber-500 px-1 text-[10px] font-bold leading-4 text-white"
+              >
+                {formatNumber(openPageNotes.length, { maxDecimals: 0 })}
+              </span>
+            )}
           </button>
           {/* إشعارات الموقع (الجرس) — تذكيرات الزبائن/الشحنات */}
           <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
@@ -314,6 +341,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           <ManagedBookBanner />
           <SubscriptionExpiryBanner />
           <main className="app-content overflow-auto flex-1">
+            <PinnedPageNotes
+              key={pageKey}
+              notes={pinnedPageNotes}
+              userId={user.id}
+              pathname={pageKey}
+              onOpenAll={openPlatformNotes}
+              onChanged={refreshPageNotes}
+            />
             {children}
           </main>
         </div>
@@ -335,7 +370,7 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
         <div
           className="ktra-overlay-mask z-[70] flex items-center justify-center p-3"
           onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setNotesTarget(null);
+            if (event.target === event.currentTarget) closePlatformNotes();
           }}
         >
           <section
@@ -353,14 +388,14 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
                 type="button"
                 autoFocus
                 className="ktra-toolbtn"
-                onClick={() => setNotesTarget(null)}
+                onClick={closePlatformNotes}
                 aria-label="إغلاق ملاحظات الصفحة"
               >
                 إغلاق
               </button>
             </header>
             <div className="overflow-y-auto">
-              <CustomerNotesTab target={notesTarget} />
+              <CustomerNotesTab target={notesTarget} onChanged={refreshPageNotes} />
             </div>
           </section>
         </div>

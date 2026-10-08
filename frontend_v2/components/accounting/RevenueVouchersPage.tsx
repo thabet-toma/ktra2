@@ -18,6 +18,7 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { AccountTreeField } from "./AccountTreePicker";
@@ -70,7 +71,7 @@ export const RevenueVouchersPage: React.FC = () => {
         accountingApi.getRevenueVouchers(),
         accountingApi.getAccounts() as Promise<AccountRow[]>,
         accountingApi.getCurrencies() as Promise<CurrencyRow[]>,
-        accountingApi.getPartners() as Promise<AccountingPartner[]>,
+        accountingApi.getPartners(undefined, "all") as Promise<AccountingPartner[]>,
       ]);
       setRows(vouchers);
       setAccounts(accs || []);
@@ -490,7 +491,7 @@ const NewRevenueVoucherModal: React.FC<{
               onChange={(e) => { setPayerPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setPayerName(""); markTouched(); }}
             >
               <option value="">— بلا دافع —</option>
-              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {partners.map((p) => <option key={p.id} value={p.id}>{labelWithStatus(p.name, p.is_active)}</option>)}
             </select>
           </label>
           <label className="ktra-field">

@@ -22,6 +22,7 @@ import {
 } from "../../utils/partnerChequeDefaults";
 import type { BankAccountDto } from "../../types/accounting";
 import { formatMoney, formatNumber } from "@/utils/formatNumber";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { formatTimeValue } from "../../utils/formatDate";
 import { buildVoucherEntryPreview } from "../../utils/voucherEntryPreview";
 import { PartnerNoteAlert } from "../partners/PartnerNoteAlert";
@@ -36,7 +37,7 @@ import { partnerKindFromType, partnerTypeLabel } from "../../utils/partnerAction
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 
-export type SupplierPaymentPartner = { id: number; name: string; partner_type?: string };
+export type SupplierPaymentPartner = { id: number; name: string; partner_type?: string; is_active?: boolean };
 /** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الأطراف الدائنة. */
 type PartnerRow = SupplierPaymentPartner;
 type Account = {
@@ -192,7 +193,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
         accountingApi.getCurrencies() as Promise<Currency[]>,
         lockPartner && initialPartner
           ? Promise.resolve([initialPartner as PartnerRow])
-          : (accountingApi.getPartners() as Promise<PartnerRow[]>),
+          : (accountingApi.getPartners(undefined, "all") as Promise<PartnerRow[]>),
       ];
       const [accs, currs, parts, settings] = await Promise.allSettled([
         ...tasks,
@@ -338,8 +339,8 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
               {partners.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.partner_type && p.partner_type !== "Supplier"
-                    ? `${p.name} — ${partnerTypeLabel(p.partner_type)}`
-                    : p.name}
+                    ? `${labelWithStatus(p.name, p.is_active)} — ${partnerTypeLabel(p.partner_type)}`
+                    : labelWithStatus(p.name, p.is_active)}
                 </option>
               ))}
             </select>

@@ -98,6 +98,8 @@ export type SalesInvoiceDetail = SalesInvoiceRow & {
     id: number;
     product: number;
     product_name?: string | null;
+    /** T4: المنتج أُوقف بعد كتابة السطر. غائبٌ = نشط. */
+    product_is_active?: boolean;
     /** THA-18: لقطة الاسم المجمَّدة عند الترحيل — فارغة على المسودّة. */
     name_snapshot?: string;
     quantity: string;
@@ -936,6 +938,16 @@ export async function deallocateCustomerPayment(
 // -------------------------------------------------------------
 // Sales Settings (إعدادات المبيعات المركزية)
 // -------------------------------------------------------------
+/** سياسة المخزون السالب / فاتورة الخسارة: سماح (تحذير) | حفظ كمسودة ومنع الترحيل | منع الحفظ والترحيل. */
+export type StockLossPolicy = "allow" | "save_only" | "block";
+
+/** تسميات الخيارات الثلاثة — تطابق `SalesSettings.POLICY_CHOICES` (مصدر واحد للإعدادات والمحرّر). */
+export const STOCK_LOSS_POLICY_LABELS: Record<StockLossPolicy, string> = {
+  allow: "السماح (تحذير فقط)",
+  save_only: "السماح بالحفظ كمسودة ومنع الترحيل",
+  block: "منع الحفظ والترحيل",
+};
+
 export type SalesSettings = {
   id: number;
   default_customer: number | null;
@@ -953,7 +965,8 @@ export type SalesSettings = {
   default_ar_account: number | null;
   default_payment_type: "cash" | "credit";
   stock_on_post_default: boolean;
-  allow_negative_stock_default: boolean;
+  /** بيع كمية تتجاوز المتوفر (الافتراضي «allow»). المسودة لا تحرّك مخزوناً. */
+  negative_stock_policy: StockLossPolicy;
   default_vat_rate: number | null;
   default_vat_rate_code?: string;
   default_vat_rate_value?: string;
@@ -966,8 +979,8 @@ export type SalesSettings = {
   show_journal_preview: boolean;
   /** T-S2: تنبيه عند تكرار المنتج (يقود T-R3). */
   warn_on_duplicate_item: boolean;
-  /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
-  block_loss_invoices: boolean;
+  /** فاتورة بيع بسعر أقل من التكلفة (الافتراضي «allow»). */
+  loss_invoice_policy: StockLossPolicy;
   /** T-DORMANT: أيام صمت العميل قبل إشعار «عميل مختفٍ» (0 = تعطيل، الافتراضي 30). */
   dormant_customer_days: number;
   /** T-ORDERS: أيام صلاحية عرض السعر افتراضياً (0 = بلا انتهاء، الافتراضي 14). */
@@ -1112,6 +1125,8 @@ export type SalesQuotationDetail = SalesQuotationRow & {
     id: number;
     product: number;
     product_name?: string;
+    /** T4: المنتج أُوقف بعد كتابة السطر. غائبٌ = نشط. */
+    product_is_active?: boolean;
     quantity: string;
     unit_price: string;
     line_discount: string;
@@ -1190,6 +1205,8 @@ export type SalesOrderLineRow = {
   id?: number;
   product: number;
   product_name?: string;
+  /** T4: المنتج أُوقف بعد كتابة السطر. غائبٌ = نشط. */
+  product_is_active?: boolean;
   quantity: string;
   unit_price: string;
   line_discount?: string;

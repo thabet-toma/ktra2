@@ -583,7 +583,7 @@ export const PartnerEditorModal: React.FC<{
                             setForm((current) => ({ ...current, is_active: !e.target.checked }));
                           }}
                         />
-                        موقوف — يختفي من القوائم والمنتقيات وتبقى حركاته
+                        غير نشط — يختفي من المستندات الجديدة وتبقى حركاته ودفعاته
                       </span>
                     </label>
                   )}

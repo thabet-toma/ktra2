@@ -28,6 +28,7 @@ import {
   itemsService,
   suppliersService,
 } from "../../../services/firestoreService";
+import { useMissingPartners } from "../../../hooks/useMissingDocumentRecords";
 import { purchaseInvoiceApi } from "../../../services/purchaseInvoiceApi";
 import { formatMoney, formatNumber, formatQuantity } from "../../../utils/formatNumber";
 import { getShippingWorkflowLabel } from "../../../utils/shippingWorkflowLabels";
@@ -292,7 +293,14 @@ export const DealForm: React.FC<DealFormProps> = ({
       كانت تفتح على نموذج التحرير مباشرة بلا وضع عرض إطلاقاً. */
   const [viewMode, setViewMode] = useState<boolean>(!!deal?.id);
   const [viewSupplierId, setViewSupplierId] = useState<string | null>(null);
-  const selectedSupplier = suppliers.find(s => s.id === formData.supplierId);
+  // T4: مورّد صفقةٍ قائمة أُوقف بعد كتابتها غاب عن `suppliers` (نشطون) — يُجلب فرداً للعرض والطباعة.
+  const heldSupplierRows = useMissingPartners<Record<string, unknown> & { id: number }>(
+    [formData.supplierId], suppliers,
+  );
+  const selectedSupplier = suppliers.find(s => s.id === formData.supplierId)
+    ?? heldSupplierRows
+      .map(p => suppliersService._mapPartnerToSupplier(p))
+      .find(s => s.id === formData.supplierId);
 
   /* ج7: «تم الشحن» و«بانتظار التخليص» مراحل في مسار حي — لا تقفل النموذج.
      القفل فقط عند الإلغاء أو التحويل لفاتورة (sw_released) أو الإغلاق القديم. */

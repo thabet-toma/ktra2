@@ -218,6 +218,23 @@ class RecalculateLandedItemsTest(APITestCase):
         assert units.count() == 3
         assert {u.purchase_item_id for u in units} == {item_id}
 
+    def test_auto_repost_is_not_blocked_by_a_product_deactivated_after_posting(self):
+        """إعادة الترحيل الآلية بعد احتساب التكلفة ليست مستنداً جديداً: صنفٌ أُوقف
+        بعد ترحيل الفاتورة لا يُفشل إعادة الاحتساب (حارس «غير نشط» للترحيل الأول وحده)."""
+        widget = self._product("R-INACTIVE")
+        self._deal_item(widget, "2", "300")
+        assert self._import().status_code == 201
+        inv = self._invoice()
+        assert self._post(inv).status_code == 201
+        Product.objects.filter(pk=widget.pk).update(is_active=False)
+
+        self._add_capitalized_local_transport()
+        recalc = self._recalculate(auto_repost=True)
+        assert recalc.status_code == 200, recalc.content
+        assert recalc.json()["reconciliation"]["reposted"] == 1
+        inv.refresh_from_db()
+        assert inv.is_posted
+
     # ── بنود تُضاف وتُحذف ──────────────────────────────────────────────────
     def test_recalculate_adds_a_new_deal_product_and_deletes_an_untouched_one(self):
         cable = self._product("R-ADD-1")

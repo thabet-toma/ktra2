@@ -41,6 +41,8 @@ import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { HeldPartnerOption } from "../shared/HeldRecordOptions";
+import { useMissingPartners } from "../../hooks/useMissingDocumentRecords";
 import { KitAutocomplete, KitDateInput } from "../kit";
 import {
   CommercialDocumentEditor,
@@ -57,7 +59,7 @@ import {
 } from "../shared/InvoicePickerModal";
 
 type WarehouseOpt = { id: number; name: string; is_default?: boolean };
-type PartnerOpt = { id: number; name: string; partner_type?: string };
+type PartnerOpt = { id: number; name: string; partner_type?: string; is_active?: boolean };
 type ProductOpt = { id: number; sku?: string; name_ar?: string; name_en?: string; display_name?: string | null };
 
 type LineState = {
@@ -154,6 +156,8 @@ export const DeliveryNotesPage: React.FC = () => {
   const [formInvoice, setFormInvoice] = useState<number | "">("");
   const [formInvoiceLabel, setFormInvoiceLabel] = useState("");
   const [formPartner, setFormPartner] = useState<number | "">("");
+  // T4: عميل إرساليةٍ مستقلة قائمة أُوقف بعد كتابتها — يغيب عن `partners` (نشطون) فيُجلب فرداً للعرض.
+  const inactiveCustomers = useMissingPartners<PartnerOpt>([formPartner], partners);
   const [formCustomerRef, setFormCustomerRef] = useState("");
   const [formDate, setFormDate] = useState(() => todayIso());
   const [formNotes, setFormNotes] = useState("");
@@ -1141,6 +1145,7 @@ export const DeliveryNotesPage: React.FC = () => {
                       {p.name}
                     </option>
                   ))}
+                  <HeldPartnerOption value={formPartner} partners={partners} extras={inactiveCustomers} />
                 </select>
               ),
             },

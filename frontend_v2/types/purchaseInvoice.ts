@@ -4,6 +4,8 @@ export interface PurchaseInvoiceItemDto {
   id?: number;
   product?: number | null;
   product_name?: string | null;
+  /** T4: المنتج أُوقف بعد كتابة البند. غائبٌ = نشط. */
+  product_is_active?: boolean;
   name: string;
   quantity: number;
   received_quantity?: number;
@@ -144,6 +146,8 @@ export interface PurchaseInvoiceDto {
   invoice_date?: string | null;
   partner: number;
   partner_name?: string;
+  /** T4: المورّد أُوقف بعد كتابة الفاتورة. غائبٌ = نشط. */
+  partner_is_active?: boolean;
   deal?: number | null;
   deal_ref?: string | null;
   /** اسم الصفقة المحوَّلة (من قائمة الصفقات) */

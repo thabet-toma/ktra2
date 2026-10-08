@@ -22,6 +22,41 @@ class SalesSettings(models.Model):
         (PAYMENT_CREDIT, "آجل"),
     ]
 
+    # سياستا «الرصيد السالب» و«فاتورة البيع بخسارة»: ثلاث حالات لا حالتان. كانتا
+    # منطقيَّين (سماح = حفظ+ترحيل، منع = لا حفظ ولا ترحيل) فقرأ المالك «السماح
+    # بالحفظ» حفظاً فقط ورُحِّلت فاتورته. المسودة لا تحرّك مخزوناً ولا قيداً، فالحالة
+    # الوسطى آمنة: تُحفظ مسودةً ويُمنع ترحيلها. القاعدة في `policy_blocks` وحدها.
+    POLICY_ALLOW = "allow"
+    POLICY_SAVE_ONLY = "save_only"
+    POLICY_BLOCK = "block"
+    POLICY_CHOICES = [
+        (POLICY_ALLOW, "السماح (تحذير فقط)"),
+        (POLICY_SAVE_ONLY, "السماح بالحفظ كمسودة ومنع الترحيل"),
+        (POLICY_BLOCK, "منع الحفظ والترحيل"),
+    ]
+    STAGE_SAVE = "save"
+    STAGE_POST = "post"
+    # أسماء الإعدادين كما تظهر في «إعدادات المبيعات» — تُذكر في رسائل الرفض.
+    NEGATIVE_STOCK_SETTING_LABEL = "سياسة الرصيد السالب"
+    LOSS_INVOICE_SETTING_LABEL = "فاتورة البيع بخسارة"
+
+    @classmethod
+    def policy_blocks(cls, policy: str, stage: str) -> bool:
+        """هل تمنع `policy` العمليةَ في المرحلة `stage` (`save` أو `post`)؟
+
+        الحفظ يُمنع في `block` وحدها؛ الترحيل يُمنع في `save_only` و`block`.
+        مصدر القاعدة الوحيد لحارس الخسارة وحارس الرصيد السالب (حفظاً وترحيلاً).
+        """
+        if stage == cls.STAGE_SAVE:
+            return policy == cls.POLICY_BLOCK
+        return policy in (cls.POLICY_SAVE_ONLY, cls.POLICY_BLOCK)
+
+    @classmethod
+    def policy_refusal(cls, setting_label: str, policy: str) -> str:
+        """جملة تُلحَق برسالة الرفض: تسمّي الإعداد وخياره الحالي ليعرف المستخدم سببه وأين يغيّره."""
+        option = dict(cls.POLICY_CHOICES).get(policy, policy)
+        return f"إعداد «{setting_label}» في إعدادات المبيعات مضبوط على «{option}»."
+
     id = models.AutoField(primary_key=True, db_column="SalesSettingsID")
     tenant = models.OneToOneField(
         Tenant,
@@ -151,10 +186,15 @@ class SalesSettings(models.Model):
         db_column="StockOnPostDefault",
         help_text="خصم المخزون الافتراضي عند الترحيل",
     )
-    allow_negative_stock_default = models.BooleanField(
-        default=True,
-        db_column="AllowNegativeStockDefault",
-        help_text="السماح ببيع المخزون بالسالب افتراضياً (يمكن تجاوزه على مستوى المنتج)",
+    negative_stock_policy = models.CharField(
+        max_length=12,
+        choices=POLICY_CHOICES,
+        default=POLICY_ALLOW,
+        db_column="NegativeStockPolicy",
+        help_text=(
+            "بيع كمية تتجاوز المتوفر: السماح (تحذير فقط) | الحفظ كمسودة ومنع الترحيل | "
+            "منع الحفظ والترحيل. المسودة لا تحرّك مخزوناً."
+        ),
     )
     # طريقة احتساب تكلفة المخزون (متوسط التكلفة):
     #   False (افتراضي) = النموذج الدوري «تكلفة المنتجات»: avg_cost = متوسط كل
@@ -225,11 +265,16 @@ class SalesSettings(models.Model):
         db_column="WarnOnDuplicateItem",
         help_text="عند تكرار المادة في الفاتورة: إظهار رسالة تنبيه وتأكيد",
     )
-    # منع حفظ/ترحيل فاتورة بيع بخسارة (الإيراد الصافي < التكلفة بمتوسط التكلفة).
-    block_loss_invoices = models.BooleanField(
-        default=False,
-        db_column="BlockLossInvoices",
-        help_text="رفض حفظ/ترحيل فاتورة بيع فيها خسارة (سعر البيع أقل من التكلفة)",
+    # فاتورة بيع بخسارة (الإيراد الصافي < التكلفة بمتوسط التكلفة) على مستوى السطر.
+    loss_invoice_policy = models.CharField(
+        max_length=12,
+        choices=POLICY_CHOICES,
+        default=POLICY_ALLOW,
+        db_column="LossInvoicePolicy",
+        help_text=(
+            "فاتورة بيع فيها سعر أقل من التكلفة: السماح (تحذير فقط) | الحفظ كمسودة ومنع "
+            "الترحيل | منع الحفظ والترحيل."
+        ),
     )
 
     # تسمية مستند التسليم — لكل شركة عُرفها (إرسالية/إذن تسليم/بوليصة…).

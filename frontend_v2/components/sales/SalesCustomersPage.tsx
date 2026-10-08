@@ -23,6 +23,9 @@ import {
 import { openInNewTab } from "@/utils/openInNewTab";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { PartnerEditorModal } from "../partners/PartnerEditorModal";
+import { usePartnerActive } from "../../hooks/usePartnerActive";
+import { ActiveStatusFilter, InactiveBadge } from "../shared/ActiveStatusControls";
+import { parseActiveStatus, type ActiveStatus } from "../../utils/activeStatus";
 
 type PartnerApi = {
   id: number;
@@ -73,7 +76,7 @@ export const SalesCustomersPage: React.FC = () => {
   const [params, setParams] = useSearchParams();
   const urlSearch = params.get("q") ?? "";
   const filterTier = params.get("tier") ?? "";
-  const showInactive = params.get("inactive") === "1";
+  const status = parseActiveStatus(params.get("status"));
   const page = Math.max(1, Math.floor(Number(params.get("page"))) || 1);
   const selParam = Number(params.get("sel"));
   const selectedKey = Number.isInteger(selParam) && selParam > 0 ? selParam : null;
@@ -109,6 +112,7 @@ export const SalesCustomersPage: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
 
   const tenantId = useMemo(() => resolveTenantId(), []);
+  const { setPartnerActive } = usePartnerActive(tenantId);
 
   // حارسُ الاستجابة القديمة: ردٌّ على فلترٍ سابقٍ وصل متأخّراً لا يكتب فوق نتيجة الفلتر الحالي.
   const requestRef = useRef(0);
@@ -123,7 +127,7 @@ export const SalesCustomersPage: React.FC = () => {
           page, page_size: pageSize, partner_type: "Customer",
           search: urlSearch.trim() || undefined,
           assigned_price_tier: filterTier || undefined,
-          include_inactive: showInactive ? 1 : undefined,
+          status,
         },
       });
       if (request !== requestRef.current) return;
@@ -135,7 +139,7 @@ export const SalesCustomersPage: React.FC = () => {
     } finally {
       if (request === requestRef.current) setLoading(false);
     }
-  }, [filterTier, page, urlSearch, showInactive, tenantId]);
+  }, [filterTier, page, urlSearch, status, tenantId]);
 
   useEffect(() => { void loadRows(); }, [loadRows]);
 
@@ -189,6 +193,18 @@ export const SalesCustomersPage: React.FC = () => {
     }
   };
 
+  const toggleActive = async (p: PartnerApi, nextActive: boolean) => {
+    setErr(null); setMsg(null);
+    try {
+      if (await setPartnerActive(p, nextActive)) {
+        setMsg(nextActive ? `نُشِّط «${p.name}».` : `أُوقف «${p.name}» — صار غير نشط.`);
+        await loadRows();
+      }
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : "فشل تغيير الحالة");
+    }
+  };
+
   const allColumns: DenseColumn<PartnerApi>[] = [
     {
       key: "name",
@@ -208,9 +224,7 @@ export const SalesCustomersPage: React.FC = () => {
             }}
           >
             {r.name}
-            {r.is_active === false && (
-              <span className="mr-1 rounded bg-gray-200 px-1 text-[10px] font-normal text-gray-700">موقوف</span>
-            )}
+            {r.is_active === false && <InactiveBadge className="mr-1" />}
           </button>
           {r.legal_name && <span className="text-[10px]" style={{ color: "var(--ktra-ink-soft)" }}>{r.legal_name}</span>}
         </div>
@@ -249,7 +263,7 @@ export const SalesCustomersPage: React.FC = () => {
     {
       key: "actions",
       header: "إجراءات",
-      width: "130px",
+      width: "180px",
       align: "center",
       render: (r) => (
         <div style={{ display: "flex", gap: "4px", justifyContent: "center" }}>
@@ -261,6 +275,15 @@ export const SalesCustomersPage: React.FC = () => {
             title="تعديل (F2)"
           >
             <Pencil className="w-3 h-3" /> تعديل
+          </button>
+          <button
+            type="button"
+            className="ktra-toolbtn px-1.5 py-0.5 text-[10px]"
+            data-testid={r.is_active === false ? "partner-activate" : "partner-deactivate"}
+            onClick={(e) => { e.stopPropagation(); void toggleActive(r, r.is_active === false); }}
+            title={r.is_active === false ? "تنشيط العميل" : "إيقاف العميل"}
+          >
+            {r.is_active === false ? "تنشيط" : "إيقاف"}
           </button>
           <button
             type="button"
@@ -312,15 +335,13 @@ export const SalesCustomersPage: React.FC = () => {
           </select>
         </label>
       )}
-      <label className="flex items-center gap-1 pb-2 text-xs">
-        <input
-          type="checkbox"
-          data-testid="show-inactive-partners"
-          checked={showInactive}
-          onChange={(e) => patchParams({ inactive: e.target.checked ? "1" : null, page: null })}
+      <div className="pb-1">
+        <ActiveStatusFilter
+          value={status}
+          testId="partner-status-filter"
+          onChange={(next: ActiveStatus) => patchParams({ status: next === "active" ? null : next, page: null })}
         />
-        إظهار الموقوفين
-      </label>
+      </div>
     </div>
   );
 
@@ -347,6 +368,7 @@ export const SalesCustomersPage: React.FC = () => {
             columns={columns}
             rows={filtered}
             getRowKey={(r) => r.id}
+            rowClassName={(r) => (r.is_active === false ? "opacity-60" : "")}
             loading={loading}
             emptyHint="لا عملاء — اضغط Ctrl+Ins للإضافة"
             selectable

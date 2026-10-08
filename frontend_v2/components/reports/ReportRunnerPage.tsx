@@ -40,10 +40,11 @@ import { printReport } from "../../utils/printReport";
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { KitDocumentShell, KitReportTable, KitSidePanel } from "../kit";
+import { labelWithStatus } from "../../utils/activeStatus";
 import type { KitTab, KitToolbarAction, ReportColumn } from "../kit";
 
-type PartnerRow = { id: number; name: string; partner_type?: string };
-type ProductRow = { id: number; sku?: string; name_ar?: string; name_en?: string; name?: string };
+type PartnerRow = { id: number; name: string; partner_type?: string; is_active?: boolean };
+type ProductRow = { id: number; sku?: string; name_ar?: string; name_en?: string; name?: string; is_active?: boolean };
 type WarehouseRow = { id: number; name?: string };
 
 const PARTNER_KINDS = new Set(["partner", "customer", "supplier"]);
@@ -125,8 +126,10 @@ export const ReportRunnerPage: React.FC = () => {
     void (async () => {
       const tenantId = resolveTenantId();
       const [p, pr, wh, acc] = await Promise.allSettled([
-        needed.partners ? (accountingApi.getPartners() as Promise<PartnerRow[]>) : Promise.resolve([]),
-        needed.products ? listPickerProducts<ProductRow>(tenantId) : Promise.resolve([]),
+        // T4: التقرير يسأل عن التاريخ لا عن مستند جديد — فمرشّحاته تشمل الموقوف
+        // (منتجاً وطرفاً) كي يُستخرج كشف طرفٍ أُوقف ورصيدُ منتجٍ أُوقف.
+        needed.partners ? (accountingApi.getPartners(undefined, "all") as Promise<PartnerRow[]>) : Promise.resolve([]),
+        needed.products ? listPickerProducts<ProductRow>(tenantId, { includeInactive: true }) : Promise.resolve([]),
         needed.warehouses ? apiGetList<WarehouseRow>("inventory/warehouses/", { tenantId }) : Promise.resolve([]),
         needed.accounts ? (accountingApi.getAccounts() as Promise<AccountNodeLike[]>) : Promise.resolve([]),
       ]);
@@ -192,7 +195,7 @@ export const ReportRunnerPage: React.FC = () => {
           onChange={(e) => setValue(filter.key, e.target.value)}>
           <option value="">الكل</option>
           {partnersFor(filter.kind).map((p) => (
-            <option key={p.id} value={p.id}>{p.name}</option>
+            <option key={p.id} value={p.id}>{labelWithStatus(p.name, p.is_active)}</option>
           ))}
         </select>
       );
@@ -204,7 +207,9 @@ export const ReportRunnerPage: React.FC = () => {
           <option value="">الكل</option>
           {products.map((p) => (
             <option key={p.id} value={p.id}>
-              {[p.sku, p.name_ar || p.name_en || p.name].filter(Boolean).join(" — ")}
+              {labelWithStatus(
+                [p.sku, p.name_ar || p.name_en || p.name].filter(Boolean).join(" — "), p.is_active,
+              )}
             </option>
           ))}
         </select>

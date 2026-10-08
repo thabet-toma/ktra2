@@ -11,6 +11,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
 import { useNavigate } from "react-router-dom";
 import {
@@ -89,7 +90,7 @@ import {
   type SurplusRow,
 } from "../../utils/partySurplus";
 
-type Partner = { id: number; name: string; legal_name?: string | null };
+type Partner = { id: number; name: string; legal_name?: string | null; is_active?: boolean };
 type Account = { id: number; code: string; name: string; account_type?: string };
 type Currency = { CurrencyID: number; Code: string; Name?: string };
 
@@ -240,7 +241,7 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
         // على هذه النافذة؛ الأقدم يُفتح من كشف حساب الشريك).
         listCustomerPayments({ page: 1, page_size: 200 }),
         // T-PARTYPURE: سند قبض من زبون — قائمة الأطراف زبائن فقط.
-        accountingApi.getPartners("Customer") as Promise<Partner[]>,
+        accountingApi.getPartners("Customer", "all") as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
         accountingApi.getCurrencies() as Promise<Currency[]>,
         getAgingReport(),
@@ -948,7 +949,7 @@ export const NewPaymentModal: React.FC<{
         ? Promise.resolve(providedPartners)
         : lockPartner && initialPartner
           ? Promise.resolve([initialPartner])
-          : accountingApi.getPartners("Customer") as Promise<Partner[]>,
+          : accountingApi.getPartners("Customer", "all") as Promise<Partner[]>,
       providedAccounts !== undefined
         ? Promise.resolve(providedAccounts)
         : accountingApi.getAccounts() as Promise<Account[]>,
@@ -1276,7 +1277,7 @@ export const NewPaymentModal: React.FC<{
               }}
             >
               <option value="">— اختر —</option>
-              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {partners.map((p) => <option key={p.id} value={p.id}>{labelWithStatus(p.name, p.is_active)}</option>)}
             </select>
           )}
         </label>

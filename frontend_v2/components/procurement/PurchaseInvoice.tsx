@@ -10,6 +10,7 @@ import type { PurchaseInvoiceDto, PurchaseInvoiceListDto } from '@/types/purchas
 import { mapPurchaseInvoiceDtoToInvoice } from '@/utils/mapPurchaseInvoiceDto';
 import { roundSqlMoney2, roundSqlMoney4 } from '@/utils/sqlMoneyRound';
 import { InvoiceForm } from './invoices/InvoiceForm';
+import { useMissingPartners } from '@/hooks/useMissingDocumentRecords';
 import { dealsService } from '@/services/dealsService';
 import { InvoiceList, type InvoiceListFilters } from './invoices/InvoiceList';
 import { ClearanceImportModal, ShipmentImportContext } from './invoices/ClearanceImportModal';
@@ -181,6 +182,10 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
   const [importing, setImporting] = useState(false);
   const [showPrintView, setShowPrintView] = useState(false);
   const [printInvoice, setPrintInvoice] = useState<Invoice | null>(null);
+  // T4: مورّد فاتورةٍ تُطبع أُوقف بعد كتابتها غاب عن `suppliers` (نشطون) — يُجلب فرداً ليحمل الطباعة عنوانه وهاتفه.
+  const heldPrintSupplierRows = useMissingPartners<Record<string, unknown> & { id: number }>(
+    [printInvoice?.supplierId], suppliers,
+  );
   const invoiceRouteRequestRef = useRef<string | null>(null);
 
   const loadInvoices = useCallback(async (options?: { feedback?: boolean; blocking?: boolean }) => {
@@ -601,7 +606,10 @@ export const PurchaseInvoice: React.FC<PurchaseInvoiceProps> = ({
         <InvoicePrintView
           invoice={printInvoice}
           currentUser={currentUser}
-          supplier={suppliers.find(s => s.id === printInvoice.supplierId)}
+          supplier={suppliers.find(s => s.id === printInvoice.supplierId)
+            ?? heldPrintSupplierRows
+              .map(p => suppliersService._mapPartnerToSupplier(p))
+              .find(s => s.id === printInvoice.supplierId)}
           onClose={() => {
             setShowPrintView(false);
             setPrintInvoice(null);

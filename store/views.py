@@ -142,6 +142,12 @@ def published_products(tenant):
     """
     qs = (
         StoreProduct.objects.filter(tenant=tenant, is_active=True)
+        # T2: نسخةٌ من منتج مخزونٍ صار غير نشط تُحجب عن الزائر. `imported_from_
+        # product_id` رقمٌ مجرَّد (لا FK) فالمقارنة بمعرّفات منتجات **الشركة
+        # نفسها** المعطَّلة؛ ما بلا أصلٍ (يدوي) أو أصله نشط يمرّ كما كان.
+        .exclude(imported_from_product_id__in=Product.objects.filter(
+            tenant=tenant, is_active=False,
+        ).values("id"))
         .select_related("brand")
         .prefetch_related(
             Prefetch(
@@ -1461,8 +1467,21 @@ class StoreProductAdminViewSet(InvalidatesStoreCacheMixin, BaseTenantViewSet):
             .only(
                 "id", "tenant_id", "name_ar", "name_en", "description", "brand",
                 "online_price", "sale_price", "allow_preorder", "uom_id", "uom__name_ar",
+                "is_active", "sku",
             )
         )
+        # T2: منتجٌ معطَّل في المخزون لا يُنسخ إلى المتجر — الرفض للطلب كلِّه
+        # (كالوحدة الذرّية أدناه) وباسم المنتجات، ليعرف التاجر ماذا يُخرج من قائمته.
+        inactive = [p for p in products if not p.is_active]
+        if inactive:
+            names = "، ".join(f"«{p.name_ar or p.name_en or p.sku}»" for p in inactive[:10])
+            more = f" و{len(inactive) - 10} غيرها" if len(inactive) > 10 else ""
+            raise ValidationError({
+                "product_ids": (
+                    f"لا يمكن استيراد أصنافٍ غير نشطة: {names}{more}. "
+                    "أعد تفعيلها في المخزون أو أخرجها من القائمة."
+                ),
+            })
         found_ids = [p.id for p in products]
 
         already_imported_ids = set(

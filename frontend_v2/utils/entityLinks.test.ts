@@ -5,6 +5,7 @@ import {
   entityPathForReference,
   foldStatementReversals,
   isSafeInternalPath,
+  pageNotePathname,
   platformNoteTarget,
   productGroupPath,
   referenceTypeLabel,
@@ -74,7 +75,7 @@ test("ما عدا ذلك محايد بلا لون", () => {
   assert.equal(statementToneRowClass("PARTNER_OPENING"), "");
 });
 
-test("هدف الملاحظة العامة يحفظ الصفحة ومعامل السجل كرابط داخلي ثابت", () => {
+test("مفتاح ملاحظة الصفحة هو المسار وحده، والمسار الكامل بالـquery يبقى للتنقّل", () => {
   assert.deepEqual(
     platformNoteTarget(
       "/import-price-offers",
@@ -83,11 +84,33 @@ test("هدف الملاحظة العامة يحفظ الصفحة ومعامل ا
     ),
     {
       target_type: "page",
-      target_id: "/import-price-offers?doc=quote-12",
+      target_id: "/import-price-offers",
       target_label: "عرض استيراد SQ-12",
       target_path: "/import-price-offers?doc=quote-12",
     },
   );
+});
+
+test("تبديل الفلتر أو التبويب لا يغيّر مفتاح الصفحة", () => {
+  const draft = platformNoteTarget("/sales/invoices", "?tab=draft", "فواتير المبيعات");
+  const paid = platformNoteTarget("/sales/invoices", "?status=paid#row-9", "فواتير المبيعات");
+  assert.equal(draft.target_id, "/sales/invoices");
+  assert.equal(paid.target_id, draft.target_id);
+  assert.equal(platformNoteTarget("/sales/invoices", "", "x").target_path, "/sales/invoices");
+});
+
+test("pageNotePathname يقطع query وhash ويُسقط غير الآمن إلى لوحة التحكم", () => {
+  assert.equal(pageNotePathname("/sales/invoices"), "/sales/invoices");
+  assert.equal(pageNotePathname("/sales/invoices?tab=draft#x"), "/sales/invoices");
+  assert.equal(pageNotePathname(""), "/");
+  assert.equal(pageNotePathname("//evil.example"), "/dashboard");
+  assert.equal(pageNotePathname("/\\evil"), "/dashboard");
+  assert.deepEqual(platformNoteTarget("//evil.example", "?a=1", "x"), {
+    target_type: "page",
+    target_id: "/dashboard",
+    target_label: "x",
+    target_path: "/dashboard",
+  });
 });
 
 test("روابط التذكيرات تقبل المسار الداخلي وترفض الخارجي والمزدوج", () => {

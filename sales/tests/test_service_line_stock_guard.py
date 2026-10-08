@@ -40,7 +40,7 @@ def env():
     create_fiscal_year(tenant, 2026)
     # الشرط الذي يُفعّل الحارس أصلاً: الشركة تمنع المخزون السالب.
     SalesSettings.objects.update_or_create(
-        tenant=tenant, defaults={"allow_negative_stock_default": False})
+        tenant=tenant, defaults={"negative_stock_policy": SalesSettings.POLICY_BLOCK})
     ar = Account.objects.create(
         tenant=tenant, code="1103-S", name="ذمم", account_type="Asset", is_active=True)
     customer = Partner.objects.create(

@@ -173,3 +173,10 @@ test('stock_status/is_service/available_quantity/quantity_on_hand غائبون �
   assert.equal(item.available_quantity, undefined);
   assert.equal(item.quantity_on_hand, undefined);
 });
+
+test('T4: منتجٌ موقوف يحمل isProductInactive، والنشط أو الغائب حقله لا يحمله أصلاً', () => {
+  assert.equal(mapPickerProductToItem({ ...fullProduct, is_active: false }, fullScreenOpts).isProductInactive, true);
+  const active = mapPickerProductToItem({ ...fullProduct, is_active: true }, fullScreenOpts);
+  assert.equal('isProductInactive' in active, false);
+  assert.equal('isProductInactive' in mapPickerProductToItem(fullProduct, fullScreenOpts), false);
+});

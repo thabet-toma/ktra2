@@ -55,7 +55,10 @@ def agent_products(request):
         tenant, err = _resolve_agent_tenant(request.query_params.get("tenant_id"))
         if tenant is None:
             return Response({"error": err}, status=status.HTTP_400_BAD_REQUEST)
-        qs = Product.objects.filter(tenant_id=tenant.TenantID).order_by("name_ar", "name_en")
+        # T2: الوكيل يبني مستنداتٍ جديدة — المنتج المعطَّل لا يُعرض عليه.
+        qs = Product.objects.filter(
+            tenant_id=tenant.TenantID, is_active=True,
+        ).order_by("name_ar", "name_en")
         search = request.query_params.get("search", "").strip()
         if search:
             from django.db.models import Q

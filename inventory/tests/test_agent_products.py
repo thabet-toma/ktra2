@@ -40,6 +40,19 @@ def test_lookup_exposes_brand(client, env):
     assert row["brand"] == "ميشلان"
 
 
+def test_inactive_product_is_hidden_from_agent(client, env):
+    """T2 — الوكيل يبني مستنداتٍ جديدة: المنتج المعطَّل لا يُعرض عليه."""
+    tenant = env
+    Product.objects.create(
+        tenant=tenant, sku="AGP-OFF", name_ar="معطَّل", is_active=False)
+
+    res = client.get(URL, {"tenant_id": tenant.TenantID}, HTTP_X_AGENT_KEY=KEY)
+
+    skus = {r["sku"] for r in res.json()["results"]}
+    assert "AGP-1" in skus
+    assert "AGP-OFF" not in skus
+
+
 def test_endpoint_still_answers_on_its_public_path(client, env):
     """المسار العام لم يتغيّر بالنقل — لو سقط سطر urls لظهر هنا 404."""
     tenant = env

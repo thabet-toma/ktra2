@@ -13,6 +13,7 @@ import { inventoryApi, type ProductCostBreakdown, type ProductCostInvoiceRow } f
 import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { DocRefCell } from "../shared/LedgerTable";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { BarChart3, RefreshCw, Search, Info } from "lucide-react";
 
 interface ProductLite {
@@ -20,6 +21,7 @@ interface ProductLite {
   sku: string;
   name_ar?: string | null;
   name_en?: string | null;
+  is_active?: boolean;
 }
 
 export const ProductCostPage: React.FC = () => {
@@ -40,7 +42,8 @@ export const ProductCostPage: React.FC = () => {
   // قائمة المنتجات (للاختيار/البحث).
   useEffect(() => {
     inventoryApi
-      .getProducts()
+      // تقرير لا منتقٍ لمستند جديد: الصنف الموقوف تبقى تكلفته قابلةً للعرض.
+      .getProducts({ status: "all" })
       .then((d: unknown) => {
         const arr = Array.isArray(d) ? d : ((d as { results?: ProductLite[] })?.results ?? []);
         setProducts(arr as ProductLite[]);
@@ -216,7 +219,7 @@ export const ProductCostPage: React.FC = () => {
                   onMouseEnter={(e) => (e.currentTarget.style.background = "var(--ktra-row-alt, #f0f0f0)")}
                   onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
                 >
-                  <b>{p.sku}</b> — {p.name_ar || p.name_en || "—"}
+                  <b>{p.sku}</b> — {labelWithStatus(p.name_ar || p.name_en || "—", p.is_active)}
                 </button>
               ))}
             </div>

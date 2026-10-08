@@ -24,6 +24,8 @@ import {
   type SalesReturnRefundChoice,
   type SalesReturnRefundOptions,
   salesInvoiceContextApi,
+  STOCK_LOSS_POLICY_LABELS,
+  type StockLossPolicy,
 } from "../../services/salesApi";
 import {
   SalesReturnRefundDialog,
@@ -122,6 +124,8 @@ import { SalesInvoicePrintView } from "./SalesInvoicePrintView";
 import { formatTimeValue } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
+import { useMissingPartners, useMissingProducts } from "../../hooks/useMissingDocumentRecords";
+import { InactiveBadge } from "../shared/ActiveStatusControls";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { PostedTextFields } from "../shared/PostedTextDialog";
 import { FieldError } from "../ui/FieldError";
@@ -169,12 +173,16 @@ export type ProductRow = {
   /** لافتة مصدر السعر التقديري (`core/pricing.py` — `INDICATIVE_PRICE_LABEL`،
    *  «أقلّ شراء (آخر ٥)») — تصل جاهزة من الخادم، لا تُعاد صياغتها هنا. */
   indicative_purchase_price_source?: string | null;
+  /** T4: موقوفٌ — لا يصل من المنتقي (نشطٌ فقط) بل من جلب منتجات المستند القائم. */
+  is_active?: boolean;
 };
 
 export type PartnerRow = {
   id: number;
   name: string;
   partner_type: string;
+  /** T4: موقوف — لا يصل من `partners/lookup/` بل من جلب طرف المستند القائم. */
+  is_active?: boolean;
   /** يصل من `partners/lookup/` — يُبحَث فيه ولا يُعرض في السطر. */
   phone?: string | null;
   credit_limit?: string | null;
@@ -219,6 +227,8 @@ export type DraftLine = {
    *  من فاتورة مرحَّلة. فارغةٌ على المسودّة وعلى السطر الجديد، فيُشتقّ الاسم
    *  حياً بصيغة الشاشة نفسها كما كان قبل THA-18. */
   name_snapshot?: string;
+  /** T4: المنتج موقوف كما وصل مع السطر المحمَّل (الخادم) — يسقط عند تبديل المنتج. */
+  product_is_active?: boolean;
   quantity: string;
   unit_price: string;
   line_discount: string;
@@ -393,8 +403,10 @@ type Props = {
     show_journal_preview: boolean;
     /** T-R3: تنبيه عند تكرار المنتج على سطر جديد (الافتراضي مُفعّل). */
     warn_on_duplicate_item?: boolean;
-    /** منع حفظ/ترحيل فاتورة بيع بخسارة (الافتراضي مُعطّل). */
-    block_loss_invoices?: boolean;
+    /** فاتورة بيع بخسارة: سماح | حفظ كمسودة ومنع الترحيل | منع الحفظ والترحيل (الافتراضي «allow»). */
+    loss_invoice_policy?: StockLossPolicy;
+    /** بيع كمية تتجاوز المتوفر — الثلاث نفسها (الافتراضي «allow»). */
+    negative_stock_policy?: StockLossPolicy;
     /** T-SERIAL: نمط اختيار الوحدة المباعة — `off` يخفي العمود بالكامل. */
     serial_entry_mode?: SerialEntryMode;
   } | null;
@@ -589,24 +601,36 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
      مسنداً!) — وعلى شركةٍ بأكثر من 500 عميل يبقى فارغاً للأبد لأن
      `partners/lookup/` مسقوفة عند 500. */
   const [extraCustomers, setExtraCustomers] = useState<PartnerRow[]>([]);
+  /* T4: عميل الفاتورة القائمة قد يكون أُوقف بعد كتابتها فلا يصل من `partners/lookup/`
+     (نشطون فقط) — يُجلب فرداً ويُضاف لقائمة **العرض** وحدها؛ لا يدخل خيارات الاختيار
+     (`customerChoices`)، فيُرى اسمه وبطاقته ولا يُختار لفاتورةٍ جديدة. */
+  const inactiveCustomers = useMissingPartners<PartnerRow>([customerId], partners);
   const customers = useMemo(() => {
     const own = partners.filter((p) => p.partner_type === "Customer");
-    if (extraCustomers.length === 0) return own;
+    if (extraCustomers.length === 0 && inactiveCustomers.length === 0) return own;
     const known = new Set(own.map((p) => p.id));
-    return [...own, ...extraCustomers.filter((p) => !known.has(p.id))];
-  }, [partners, extraCustomers]);
+    const out = [...own];
+    for (const p of [...extraCustomers, ...inactiveCustomers]) {
+      if (!known.has(p.id)) { known.add(p.id); out.push(p); }
+    }
+    return out;
+  }, [partners, extraCustomers, inactiveCustomers]);
+  const customerChoices = useMemo(
+    () => customers.filter((c) => c.is_active !== false),
+    [customers],
+  );
 
   /** خيارات الإكمال التلقائي لحقل العميل — الرقم سطرٌ ثانوي كي يبقى قابلاً للبحث. */
   const customerOptions = useMemo(
     // T-SEARCH: الهاتف والرقم يُبحَث فيهما — كان الاسم وحده، والبائع يعرف
     // زبونه برقمه غالباً. الهاتف يصل من `partners/lookup/` أصلاً.
-    () => customers.map((c) => ({
+    () => customerChoices.map((c) => ({
       id: c.id,
       label: c.name,
       sub: `#${c.id}`,
       keywords: [String(c.id), c.phone || ""].filter(Boolean).join(" ").toLowerCase(),
     })),
-    [customers],
+    [customerChoices],
   );
 
   /** T-QUICKPARTY: الاسم المكتوب في حقل العميل يُحمل إلى نافذة الإضافة. */
@@ -671,11 +695,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     });
   }, []);
 
+  /* T4: منتجات سطور فاتورةٍ قائمة أُوقفت بعد كتابتها لا تصل من المنتقي (نشطٌ فقط) —
+     تُجلب فرادى (نقطة الاسترجاع لا تفلتر بالحالة) وتدخل **خريطة العرض** وحدها. خيارات
+     الاختيار (`productOptions`) وسائر عمليات البحث تبقى على `products` النشطة، فالموقوف
+     يُرى باسمه على سطره القديم ولا يُختار لسطرٍ جديد. الأصل يغلب عند التعارض. */
+  const inactiveProducts = useMissingProducts<ProductRow>(lines.map((l) => l.product), productsProp);
   const productsById = useMemo(() => {
     const m = new Map<number, ProductRow>();
+    inactiveProducts.forEach((p) => m.set(Number(p.id), p));
     products.forEach((p) => m.set(p.id, p));
     return m;
-  }, [products]);
+  }, [products, inactiveProducts]);
+  /** سطرٌ منتجه موقوف: من الخادم مع السطر، أو من المنتج المجلوب. */
+  const isLineProductInactive = (row: DraftLine) =>
+    row.product_is_active === false || productsById.get(Number(row.product))?.is_active === false;
 
   /* T-RESERVEVIS: الحجوزات السارية — نفس صفوف «تقرير المحجوزات» التي يحرسها
      الخادم، فما يُعرض على السطر هو بعينه ما سيُقاس عليه الترحيل. تُجلب مرة عند
@@ -751,19 +784,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   // M3: selling below available stock is ALLOWED — but we surface a
   // non-blocking warning so the user is aware the stock will go negative.
   const overSellWarnings = useMemo(() => {
-    if (invoiceStatus === "posted" || !stockOnPost) return [] as { name: string; qty: number; available: number }[];
+    if (invoiceStatus === "posted" || !stockOnPost || isReturn) return [] as { name: string; qty: number; available: number }[];
     const out: { name: string; qty: number; available: number }[] = [];
     for (const l of lines) {
       if (l.product === "") continue;
       const pr = productsById.get(Number(l.product));
-      if (!pr) continue;
+      // الخدمة بلا مخزون ولا يقيسها الخادم على الرصيد — لا تحذير لها (ولا وعد برفض الترحيل).
+      if (!pr || pr.is_service) continue;
       const q = Number(l.quantity) || 0;
       const avail = Number(pr.quantity_on_hand) || 0;
       if (q > avail + 1e-6) out.push({ name: formatProductPrimaryName(pr), qty: q, available: avail });
     }
     return out;
     // lines/quantities are strings in state; recompute whenever they change
-  }, [lines, productsById, stockOnPost, invoiceStatus]);
+  }, [lines, productsById, stockOnPost, invoiceStatus, isReturn]);
 
   /** نسب الضرائب المسموحة للمبيعات: direction ∈ {sales, both} أو بدون direction (قديم). */
   const salesTaxRates = useMemo(
@@ -1215,6 +1249,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         id: ln.id,
         product: ln.product,
         name_snapshot: ln.name_snapshot || "",
+        product_is_active: ln.product_is_active,
         quantity: formatQuantity(ln.quantity, "0"),
         unit_price: formatQuantity(ln.unit_price, "0"),
         line_discount: formatQuantity(ln.line_discount ?? 0, "0"),
@@ -1572,17 +1607,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     return null;
   };
 
-  // منع فاتورة الخسارة (إعداد اختياري) — يُطابق الحارس الخادمي guard_loss_invoice:
+  // سياسة «فاتورة البيع بخسارة» (ثلاث حالات) — تُطابق الحارس الخادمي guard_loss_invoice:
   // على مستوى **السطر** (صافي إيراد السطر بعد الخصومات < كمية×متوسط التكلفة)، حتى لو
-  // كان إجمالي الفاتورة رابحاً. يسمّي الأسطر المخالفة. المفتاح OFF = السماح بالحفظ.
-  const lossBlockMessage = (): string | null => {
-    if (!salesSettings?.block_loss_invoices) return null;
+  // كان إجمالي الفاتورة رابحاً. الحفظ يُمنع في `block` وحدها، والترحيل في `save_only`
+  // و`block` (المسودة لا تحرّك مخزوناً ولا قيداً). المراجيع والخدمات معفاة.
+  const lossPolicy: StockLossPolicy = salesSettings?.loss_invoice_policy ?? "allow";
+  const negativeStockPolicy: StockLossPolicy = salesSettings?.negative_stock_policy ?? "allow";
+  const lossOffenders = (): string[] => {
+    if (isReturn) return [];
     const offenders: string[] = [];
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       if (l.product === "") continue;
       const p = productsById.get(Number(l.product));
-      if (!p) continue;
+      if (!p || p.is_service) continue;
       const cost = Number(p.avg_cost || 0) * Number(l.quantity || 0);
       const revenue = totals.perLine[i]?.lineNetAdjusted ?? 0;
       if (revenue - cost < 0) {
@@ -1590,10 +1628,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         offenders.push(`«${name}» (التكلفة ${fmt(cost)} أعلى من صافي البيع ${fmt(revenue)})`);
       }
     }
+    return offenders;
+  };
+  const lossBlockMessage = (stage: "save" | "post"): string | null => {
+    const blocked = lossPolicy === "block" || (stage === "post" && lossPolicy === "save_only");
+    if (!blocked) return null;
+    const offenders = lossOffenders();
     if (offenders.length === 0) return null;
     return (
-      `لا يُسمح بحفظ فاتورة تحتوي بنداً يُباع بخسارة: ${offenders.join("؛ ")}. ` +
-      "عدّل الأسعار أو فعّل «السماح بحفظ فاتورة بخسارة» من إعدادات المبيعات."
+      `لا يُسمح بـ${stage === "save" ? "حفظ" : "ترحيل"} فاتورة تحتوي بنداً يُباع بخسارة: ${offenders.join("؛ ")}. ` +
+      `إعداد «فاتورة البيع بخسارة» في إعدادات المبيعات مضبوط على «${STOCK_LOSS_POLICY_LABELS[lossPolicy]}». ` +
+      "عدّل الأسعار أو غيّر الإعداد."
     );
   };
 
@@ -1617,7 +1662,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLocalErr(v);
       return;
     }
-    const lossErr = lossBlockMessage();
+    const lossErr = lossBlockMessage("save");
     if (lossErr) {
       setLocalErr(lossErr);
       return;
@@ -1687,7 +1732,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLocalErr(v);
       return false;
     }
-    const lossErr = lossBlockMessage();
+    const lossErr = lossBlockMessage("post");
     if (lossErr) {
       setLocalErr(lossErr);
       return false;
@@ -2062,6 +2107,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       // THA-18: تبديل المنتج على السطر يُسقط لقطة الاسم المحمَّلة (تخصّ المنتج
       // القديم) — يعود العرض للبحث الحي عن المنتج المختار حديثاً.
       name_snapshot: "",
+      product_is_active: undefined,
       unit_price: price,
       priceSource: opts?.source ?? null,
       // T-SERIAL: وحدات المنتج السابق لا معنى لها على منتج جديد.
@@ -2296,8 +2342,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         const active = document.activeElement as HTMLElement | null;
         if (active?.getAttribute?.("data-ktra-field") === "customer") {
           noteKey("* الحساب التالي");
-          const idx = customers.findIndex((c) => c.id === Number(customerId));
-          const nextC = customers[idx + 1] ?? customers[0];
+          const idx = customerChoices.findIndex((c) => c.id === Number(customerId));
+          const nextC = customerChoices[idx + 1] ?? customerChoices[0];
           if (nextC) {
             setCustomerId(nextC.id);
             markDirty();
@@ -2308,8 +2354,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         const active = document.activeElement as HTMLElement | null;
         if (active?.getAttribute?.("data-ktra-field") === "customer") {
           noteKey("- الحساب السابق");
-          const idx = customers.findIndex((c) => c.id === Number(customerId));
-          const prevC = customers[idx - 1] ?? customers[customers.length - 1];
+          const idx = customerChoices.findIndex((c) => c.id === Number(customerId));
+          const prevC = customerChoices[idx - 1] ?? customerChoices[customerChoices.length - 1];
           if (prevC) {
             setCustomerId(prevC.id);
             markDirty();
@@ -2598,6 +2644,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           title="بطاقة المنتج"
         ><Info className="w-3.5 h-3.5" /></button>
       )}
+      {selectedId != null && isLineProductInactive(row) && <InactiveBadge className="shrink-0" />}
       {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل المنتج دون مغادرة الفاتورة. */}
       {selectedId != null && !readOnly && (
         <button
@@ -3491,25 +3538,51 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       </div>
     ) : null;
 
-  // M3: non-blocking warning when one or more lines exceed available stock.
+  // M3: تحذير حين يتجاوز بندٌ المتوفر — نصّه يتبع سياسة «الرصيد السالب»:
+  // allow يتابع، save_only يحفظ مسودةً ويرفض الترحيل، block لا يحفظ.
   const stockWarningBanner =
     overSellWarnings.length > 0 ? (
       <div
-        className="ktra-banner"
+        className={`ktra-banner ${negativeStockPolicy === "block" ? "ktra-banner--err" : "ktra-banner--warn"}`}
         role="status"
-        style={{
-          backgroundColor: "#fef9c3",
-          color: "#854d0e",
-          border: "1px solid #fde047",
-        }}
+        data-testid="negative-stock-warning"
       >
         <AlertCircle className="h-4 w-4 shrink-0" />
         <span>
-          تنبيه: الكمية تتجاوز المتوفر وسيصبح المخزون بالسالب —{" "}
+          {negativeStockPolicy === "block"
+            ? "الكمية تتجاوز المتوفر — "
+            : "تنبيه: الكمية تتجاوز المتوفر وسيصبح المخزون بالسالب — "}
           {overSellWarnings
-            .map((w) => `«${w.name}» (المطلوب ${w.qty} / المتوفر ${w.available})`)
+            .map((w) => `«${w.name}» (المطلوب ${formatQuantity(w.qty)} / المتوفر ${formatQuantity(w.available)})`)
             .join("، ")}
-          . البيع مسموح ويمكنك المتابعة.
+          {negativeStockPolicy === "allow"
+            ? ". البيع مسموح ويمكنك المتابعة."
+            : negativeStockPolicy === "save_only"
+              ? `. يمكن حفظ الفاتورة مسودةً لكن سيُرفض ترحيلها (إعداد «سياسة الرصيد السالب»: «${STOCK_LOSS_POLICY_LABELS.save_only}»).`
+              : `. لن تُحفظ الفاتورة ولن تُرحَّل (إعداد «سياسة الرصيد السالب»: «${STOCK_LOSS_POLICY_LABELS.block}»).`}
+        </span>
+      </div>
+    ) : null;
+
+  // تحذير البيع بخسارة — يظهر في السياسات الثلاث (كان `block` وحدها)، ونصّه يتبعها.
+  const lossOffenderList = invoiceStatus === "posted" ? [] : lossOffenders();
+  const lossWarningBanner =
+    lossOffenderList.length > 0 ? (
+      <div
+        className={`ktra-banner ${lossPolicy === "block" ? "ktra-banner--err" : "ktra-banner--warn"}`}
+        role="status"
+        data-testid="loss-line-warning"
+      >
+        <AlertCircle className="h-4 w-4 shrink-0" />
+        <span>
+          {lossPolicy === "block" ? "بند يُباع بخسارة" : "تنبيه: بند يُباع بخسارة"}
+          {" — "}
+          {lossOffenderList.join("؛ ")}
+          {lossPolicy === "allow"
+            ? ". البيع مسموح ويمكنك المتابعة."
+            : lossPolicy === "save_only"
+              ? `. يمكن حفظ الفاتورة مسودةً لكن سيُرفض ترحيلها (إعداد «فاتورة البيع بخسارة»: «${STOCK_LOSS_POLICY_LABELS.save_only}»).`
+              : `. لن تُحفظ الفاتورة ولن تُرحَّل (إعداد «فاتورة البيع بخسارة»: «${STOCK_LOSS_POLICY_LABELS.block}»).`}
         </span>
       </div>
     ) : null;
@@ -3777,6 +3850,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             return (
               <span className="font-semibold">
                 {name || "—"}
+                {isLineProductInactive(row) && <InactiveBadge className="mr-1" />}
               </span>
             );
           },
@@ -3992,6 +4066,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                   >
                     …
                   </button>
+                  {selectedCustomer?.is_active === false && <InactiveBadge className="shrink-0" />}
                   {selectedCustomer && (
                     <button
                       type="button"
@@ -4438,6 +4513,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         )}
         {reservedWarningBanner}
         {stockWarningBanner}
+        {lossWarningBanner}
         {/* وضع القراءة: مستند مُنسَّق بدل شبكة الإدخال المعطّلة. */}
         {viewMode && documentView}
         {/* الشجرة انتقلت إلى الشريط الجانبي (aside) ليرتفع لأعلى المستند. */}
@@ -4502,7 +4578,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       <KitIndexPicker<PartnerRow>
         open={customerPickerOpen}
         title="فهرس الحسابات — العملاء"
-        rows={customers}
+        rows={customerChoices}
         columns={[
           { key: "id", header: "الرقم", width: "70px", value: (r) => r.id },
           { key: "name", header: "الاسم", value: (r) => r.name },

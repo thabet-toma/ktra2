@@ -21,6 +21,8 @@ export interface CustomerNote {
   is_done: boolean;
   priority: CustomerNotePriority;
   priority_display?: string;
+  /** «تثبيت على الصفحة»: غير المنجزة منها تظهر بشريط أصفر أعلى الصفحة لكل المستخدمين. */
+  is_pinned: boolean;
   created_by_name?: string;
   created_at: string;
   updated_at: string;
@@ -70,6 +72,14 @@ export function listTargetNotes(target: CustomerNoteTargetInput): Promise<Custom
   });
 }
 
+/** كل ملاحظات صفحة (مفتاحها مسارها) — الشريط يشتقّ منها المثبّت، والشارة تعدّ المفتوح. */
+export function listPageNotes(pathname: string): Promise<CustomerNote[]> {
+  return apiGetList<CustomerNote>('customer-notes/', {
+    tenantId: resolveTenantId(),
+    query: { target_type: 'page', target_id: pathname },
+  });
+}
+
 export function createCustomerNote(input: {
   partner?: number | null;
   target_type?: string;
@@ -80,13 +90,14 @@ export function createCustomerNote(input: {
   body?: string;
   remind_on?: string | null;
   priority?: CustomerNotePriority;
+  is_pinned?: boolean;
 }): Promise<CustomerNote> {
   return apiPostObject<CustomerNote>('customer-notes/', input, { tenantId: resolveTenantId() });
 }
 
 export function updateCustomerNote(
   id: number,
-  patch: Partial<Pick<CustomerNote, 'title' | 'body' | 'remind_on' | 'is_done' | 'priority'>>,
+  patch: Partial<Pick<CustomerNote, 'title' | 'body' | 'remind_on' | 'is_done' | 'priority' | 'is_pinned'>>,
 ): Promise<CustomerNote> {
   return apiPatchObject<CustomerNote>(`customer-notes/${id}/`, patch, { tenantId: resolveTenantId() });
 }

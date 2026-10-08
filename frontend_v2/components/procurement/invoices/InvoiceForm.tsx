@@ -38,6 +38,7 @@ import { SerialEntryModal } from "../../shared/SerialEntryModal";
 import type { SerialEntryMode } from "@/types/inventory";
 import { KitDatePicker } from "../../ui/KitDatePicker";
 import {
+  itemsService,
   suppliersService,
 } from "@/services/firestoreService";
 import { purchaseInvoiceApi, purchaseInvoiceContextApi } from "@/services/purchaseInvoiceApi";
@@ -144,6 +145,8 @@ import { invoiceActionPermissions } from "@/utils/viewPermissions";
 import { getPurchaseInvoiceFeeEditorState } from "./purchaseInvoiceFeeEditorState";
 import { formatDateLocalized, formatTimeValue } from "../../../utils/formatDate";
 import { useDocumentDraft } from "@/hooks/useDocumentDraft";
+import { useMissingPartners, useMissingProducts } from "@/hooks/useMissingDocumentRecords";
+import { InactiveBadge } from "../../shared/ActiveStatusControls";
 import { DocumentDraftBanners } from "@/components/shared/DocumentDraftBanners";
 import { PostedTextFields } from "@/components/shared/PostedTextDialog";
 
@@ -1490,9 +1493,19 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
   const { show: showAdv } = useSimpleUi();
   const invoiceHasTax = Number(formData.taxRate || 0) > 0 || Number(formData.taxAmount || 0) > 0.0001;
 
+  /* T4: مورّد فاتورةٍ قائمة أُوقف بعد كتابتها لا يصل من `partners/lookup/` (نشطون) — يُجلب
+     فرداً للعرض (رقمه وبطاقته وطباعته)، ولا يدخل `suppliers` فلا يُختار لفاتورةٍ جديدة. */
+  const heldSupplierRows = useMissingPartners<Record<string, unknown> & { id: number }>(
+    [formData.supplierId], suppliers,
+  );
   const selectedSupplier = formData.supplierId
-    ? suppliers.find((s) => s.id === formData.supplierId)
+    ? (suppliers.find((s) => s.id === formData.supplierId)
+      ?? heldSupplierRows
+        .map((p) => ({ ...suppliersService._mapPartnerToSupplier(p), isInactive: p.is_active === false }))
+        .find((s) => s.id === formData.supplierId))
     : undefined;
+  const supplierInactive = formData.supplierIsActive === false
+    || (selectedSupplier as { isInactive?: boolean } | undefined)?.isInactive === true;
   const shipmentLinkId = formData.importLogistics?.shipmentId || formData.shipment;
   const shipmentDisplayNumber = formData.importLogistics?.shipmentLabel
     || formData.importLogistics?.shipmentNumber || `#${shipmentLinkId || ""}`;
@@ -1601,11 +1614,18 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
 
   /* T-SERIAL: من يتتبّع وحداته؟ الجواب من كتالوج المنتجات (`view=lookup`)، فالبند
      نفسه لا يحمل العَلَم. الخدمة مستثناة — بلا مخزون فبلا وحدات. */
+  /* T4: منتجات بنود فاتورةٍ قائمة أُوقفت بعد كتابتها لا تصل من المنتقي (نشطٌ فقط) —
+     تُجلب فرادى وتدخل **هذه الخريطة** وحدها (تتبّع الأرقام التسلسلية، وشارة «غير نشط»)،
+     لا `itemOptions` ولا `allDbItems`: يُرى الموقوف على بنده ولا يُختار لبندٍ جديد. */
+  const heldProductRows = useMissingProducts<Record<string, unknown> & { id: number }>(
+    (formData.items || []).map((i) => i.itemId), allDbItems,
+  );
   const dbItemsById = useMemo(() => {
     const m = new Map<string, Item>();
+    heldProductRows.forEach((p) => m.set(String(p.id), itemsService._mapProductToItem(p)));
     allDbItems.forEach((it) => m.set(String(it.id), it));
     return m;
-  }, [allDbItems]);
+  }, [allDbItems, heldProductRows]);
   /* #233: منتجٌ مفروضٌ بسياسة كفالة `serial` (`serialRequiredBy`) يُظهر عمود
      الأرقام دائماً، حتى لو كان نمط الشركة `off`. */
   const itemTracksSerials = useCallback(
@@ -1956,6 +1976,9 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           title="بطاقة المنتج"
         ><Info className="w-3.5 h-3.5" /></button>
       )}
+      {selectedId != null
+        && (row.productIsActive === false || dbItemsById.get(String(selectedId))?.isProductInactive === true)
+        && <InactiveBadge className="shrink-0" />}
       {/* T-ITEMS M3: قلمٌ بجانب (i) — تعديل المنتج دون مغادرة الفاتورة.
           الفاتورة المرحّلة للقراءة فقط، فلا قلم عليها — كما في محرّر فاتورة البيع. */}
       {selectedId != null && !effectiveReadOnly && (
@@ -3694,6 +3717,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               >
                 …
               </button>
+              {supplierInactive && <InactiveBadge className="shrink-0" />}
             </div>,
             fe("supplier")
           )}

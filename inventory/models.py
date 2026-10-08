@@ -216,6 +216,14 @@ class Product(models.Model):
         db_column='IsService',
         help_text='إذا مفعّل: يُعامل المنتج كخدمة — لا يُخصم من المخزون ويُرحّل لحساب مبيعات الخدمات',
     )
+    # T2: نشط/غير نشط (زوهو «Mark as Inactive» · BC «Blocked» · أودو Archive).
+    # المعطَّل يغيب عن كل قائمة/منتقٍ للمستندات الجديدة ويبقى على المستندات
+    # القديمة والتقارير وشاشات المخزون — فلا حذف ولا فقدان تاريخ. يختلف عن
+    # `is_for_sale_online` (النشر على المتجر) وعن `is_store_only`.
+    is_active = models.BooleanField(
+        default=True, db_column='IsActive',
+        help_text='المنتج النشط وحده يظهر في قوائم ومنتقيات المستندات الجديدة؛ المعطَّل يبقى على المستندات القديمة والتقارير',
+    )
     is_for_sale_online = models.BooleanField(default=False, db_column='IsForSaleOnline')
     is_store_only = models.BooleanField(
         default=False,

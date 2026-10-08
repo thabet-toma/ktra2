@@ -1,7 +1,8 @@
 import { humanizeDrfError } from "../utils/drfError";
 import type { AddBrandTarget } from "../utils/brandActions";
+import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
-import { apiFetch, apiGetList, toPagedList } from "./restApi";
+import { apiFetch, apiGetList, apiGetObject, apiPostObject, toPagedList } from "./restApi";
 
 // أبقِ عقد الخدمة كما هو، مع مهلة/إلغاء موحّدين لكل طلباتها.
 const fetch = apiFetch;
@@ -420,6 +421,35 @@ export const inventoryApi = {
     return res.json();
   },
 
+  /** T4: ما يتأثر بإيقاف المنتج — الكمية الموجودة والمسوّدات التي تحمله. قراءةٌ بلا أثر. */
+  getProductDeactivationImpact: (productId: number): Promise<ProductDeactivationImpact> =>
+    apiGetObject<ProductDeactivationImpact>(
+      `inventory/products/${productId}/deactivation-impact/`,
+      { tenantId: resolveTenantId() },
+    ),
+
+  /** T4: إيقاف المنتج/تنشيطه (علامةٌ على الكتالوج فقط، لا حركة مخزون ولا قيد). */
+  setProductActive: async (productId: number, isActive: boolean) => {
+    const product = await apiPostObject<{ id: number; is_active: boolean }>(
+      `inventory/products/${productId}/set-active/`,
+      { is_active: isActive },
+      { tenantId: resolveTenantId() },
+    );
+    invalidatePickerProducts();
+    return product;
+  },
+
+  /** T4: إيقاف/تنشيط عدّة منتجاتٍ (براندات صفّ عائلة) دفعةً — الخادم يتجاهل ما ليس لشركتك. */
+  bulkSetProductsActive: async (ids: number[], isActive: boolean) => {
+    const res = await apiPostObject<{ updated: number }>(
+      "inventory/products/bulk-set-active/",
+      { ids, is_active: isActive },
+      { tenantId: resolveTenantId() },
+    );
+    invalidatePickerProducts();
+    return res;
+  },
+
   getProductStockMovements: async (productId: number) => {
     const res = await fetch(`${INV}/products/${productId}/stock-movements/`, {
       headers: headers(),
@@ -765,8 +795,15 @@ export const invalidatePickerProducts = (): void => {
  * يفتحه. مسارٌ واحد لكل القوالب — لا تفريعَ بالقالب هنا؛ `ProductLookupViewSet`
  * (`inventory/views.py`) تفرض عقد المنتقي نفسه بصرف النظر عن الاستعلام.
  */
-export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
-  const key = pickerCacheKey(tenantId);
+export const listPickerProducts = <T>(
+  tenantId?: number,
+  opts?: { includeInactive?: boolean },
+): Promise<T[]> => {
+  // T4: الافتراضي نشطٌ فقط — المنتج الموقوف لا يدخل مستنداً جديداً. شاشات التصفية
+  // (جرد، حركات مخزون، تحويل، مرشّحات التقارير، فرادة HS) تطلب `includeInactive` فتبقى
+  // ترى الموقوف الذي ما زال في رصيده بقيّة. نافذةٌ مستقلة بمفتاحها كي لا يختلط الاثنان.
+  const includeInactive = opts?.includeInactive === true;
+  const key = includeInactive ? `${pickerCacheKey(tenantId)}:all` : pickerCacheKey(tenantId);
   const cached = pickerProductsCache.get(key);
   // نسخة سطحية لكل مستدعٍ: الشاشات تضع المصفوفة في state وبعضها يفرزها
   // موضعياً، ومشاركة المرجع نفسه تجعل فرز شاشةٍ يعيد ترتيب أخرى.
@@ -776,7 +813,10 @@ export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
   let req = pickerProductsInFlight.get(key);
   if (!req) {
     const generationAtLaunch = pickerProductsGeneration;
-    req = apiGetList<T>("lookup/products/", { tenantId })
+    req = apiGetList<T>("lookup/products/", {
+      tenantId,
+      query: includeInactive ? { status: "all" } : undefined,
+    })
       .then((rows) => {
         if (generationAtLaunch === pickerProductsGeneration) {
           pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });
@@ -791,4 +831,16 @@ export const listPickerProducts = <T>(tenantId?: number): Promise<T[]> => {
     pickerProductsInFlight.set(key, req);
   }
   return req.then((rows) => (rows as T[]).slice());
+};
+
+/**
+ * T4 — منتجاتٌ يحملها مستندٌ قائم وغابت عن المنتقي لأنها موقوفة: تُجلب فرادى من نقطة
+ * الاسترجاع (`inventory/products/{id}/`) التي لا تفلتر بالحالة، فيبقى المستند القديم
+ * يعرض اسم منتجه. فشل واحدٍ منها (محذوف/غير مصرَّح) يُتجاهل بصمت فيبقى كما كان قبل T4.
+ */
+export const fetchProductsByIds = async <T>(ids: number[], tenantId?: number): Promise<T[]> => {
+  const settled = await Promise.allSettled(
+    ids.map((id) => apiGetObject<T>(`inventory/products/${id}/`, { tenantId })),
+  );
+  return settled.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
 };

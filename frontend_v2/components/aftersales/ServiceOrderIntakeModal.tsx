@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { HeldPartnerOption, HeldProductOption } from "../shared/HeldRecordOptions";
+import { useMissingPartners, useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 import { Loader2, Search, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import {
   createServiceOrder,
@@ -58,12 +60,15 @@ interface ProductOption {
   name_ar?: string;
   name_en?: string;
   sku?: string;
+  /** T4: موقوف — يصل من جلب منتج البطاقة المحمَّلة لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 }
 
 interface PartnerOption {
   id: number;
   name: string;
   phone?: string;
+  is_active?: boolean;
 }
 
 interface Props {
@@ -118,6 +123,10 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
 }) => {
   const toast = useToast();
   const [draft, setDraft] = useState<Partial<ServiceOrderDraft>>(buildDefaultDraft);
+  /* T4: استقبال جهازٍ من بطاقة كفالة يعبّئ المنتج والزبون منها — وجهازٌ بيع قبل إيقاف منتجه
+     شائع، فكان الحقلان يظهران فارغين (والقيمة محفوظة وتُرسل). يُعرضان خياراً **للمحدَّد وحده**. */
+  const heldProducts = useMissingProducts<ProductOption>([draft.product], products);
+  const heldCustomers = useMissingPartners<PartnerOption>([draft.partner], customers);
   const [searchText, setSearchText] = useState(initialSerial);
   const [lookup, setLookup] = useState<IntakeLookup | null>(null);
   const [looking, setLooking] = useState(false);
@@ -648,6 +657,7 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                 {customers.map((c) => (
                   <option key={c.id} value={c.id}>{c.name}</option>
                 ))}
+                <HeldPartnerOption value={draft.partner ?? ""} partners={customers} extras={heldCustomers} />
               </select>
             </div>
             <div>
@@ -690,6 +700,10 @@ export const ServiceOrderIntakeModal: React.FC<Props> = ({
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
                 ))}
+                <HeldProductOption
+                  value={draft.product ?? ""} products={products} extras={heldProducts}
+                  label={formatProductPrimaryName}
+                />
               </select>
             </div>
             <div>

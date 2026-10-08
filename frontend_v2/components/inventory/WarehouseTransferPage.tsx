@@ -11,16 +11,17 @@ import { Plus, Save, Send, Trash2, RefreshCw, X } from "lucide-react";
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { labelWithStatus } from "../../utils/activeStatus";
 
 type Wh = { id: number; name: string; code?: string };
-type Prod = { id: number; sku: string; name_ar?: string; name_en?: string };
+type Prod = { id: number; sku: string; name_ar?: string; name_en?: string; is_active?: boolean };
 type Line = { product: number | ""; quantity: string };
 type TransferRow = {
   id: number; transfer_number: string; transfer_date: string;
   source_warehouse_name?: string; dest_warehouse_name?: string; is_posted: boolean;
 };
 
-const prodLabel = (p?: Prod) => (p ? `${p.sku} — ${p.name_ar || p.name_en || ""}` : "");
+const prodLabel = (p?: Prod) => (p ? labelWithStatus(`${p.sku} — ${p.name_ar || p.name_en || ""}`, p.is_active) : "");
 
 export const WarehouseTransferPage: React.FC = () => {
   const navigate = useNavigate();
@@ -51,7 +52,8 @@ export const WarehouseTransferPage: React.FC = () => {
     try {
       const [whs, prods, transfers] = await Promise.all([
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<Wh[]>,
-        inventoryApi.getProducts() as Promise<Prod[]>,
+        // T4: التحويل يشمل الموقوف — رصيده الباقي يُنقل أو يُصفَّى.
+        inventoryApi.getProducts({ status: "all" }) as Promise<Prod[]>,
         inventoryApi.getWarehouseTransfers() as Promise<TransferRow[]>,
       ]);
       setWarehouses(whs || []);

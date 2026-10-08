@@ -57,6 +57,7 @@ from logistics.accruals import (
     AccrualSkipped, post_clearance_accrual, post_freight_accrual,
     post_local_shipment_accrual,
 )
+from core.active_guard import assert_active_for_posting
 from core.activity import (
     build_activity_changes,
     build_document_snapshot_changes,
@@ -911,10 +912,14 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                     # كان سيُسقط البضاعة من المخزن، ومفعّلٌ كان سيستلم الباقي كلّه
                     # في المستودع الافتراضي.
                     self._forced_receive_on_post = False
+                    # إعادةُ ترحيلِ فاتورةٍ كانت مرحّلة ليست مستنداً جديداً: صنفٌ أو مورّدٌ
+                    # أُوقف بعد ترحيلها لا يُفشل إعادة احتساب التكلفة (`_skip_active_guard`).
+                    self._skip_active_guard = True
                     try:
                         post_response = call_detail_action('post_to_accounting', invoice_id)
                     finally:
                         self._forced_receive_on_post = None
+                        self._skip_active_guard = False
                     if post_response.status_code < 400:
                         from logistics.services import receive_purchase_invoice
                         invoice_obj = PurchaseInvoice.objects.get(pk=invoice_id, tenant=tenant)
@@ -1499,6 +1504,23 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
         from inventory.serials import assert_purchase_serials_declared
         try:
             assert_purchase_serials_declared(invoice)
+        except DjangoValidationError as e:
+            return Response(
+                {'error': e.message if hasattr(e, 'message') else '؛ '.join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # مورّدٌ أو صنفٌ أُوقف بعد حفظ المسودّة ⇒ لا ترحيل (محلية ودولية، و`pay`
+        # يمرّ من هنا). المرجع مُعفى — خرج أعلاه عبر `post_purchase_return`، وكذا
+        # إعادة الترحيل الآلية بعد احتساب التكلفة (`_skip_active_guard`).
+        # البنود تُقرأ طازجةً من القاعدة لا من prefetch `get_object`.
+        try:
+            if not getattr(self, '_skip_active_guard', False):
+                assert_active_for_posting(
+                    partner=partner,
+                    products=[it.product for it in invoice.items.select_related('product')],
+                    document_label='الفاتورة',
+                )
         except DjangoValidationError as e:
             return Response(
                 {'error': e.message if hasattr(e, 'message') else '؛ '.join(e.messages)},

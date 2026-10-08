@@ -11,6 +11,7 @@ import { productProfilePath } from "../../utils/entityLinks";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
 import { ItemQuickEditModal } from "../items/ItemQuickEditModal";
+import { InactiveBadge } from "../shared/ActiveStatusControls";
 
 // مبالغ مالية — يحذف الأصفار العشرية غير الدالّة (6.00 ⇒ 6، 6.50 ⇒ 6.5) عبر المُنسّق الموحّد.
 const fmt = (n: number | string) => formatMoney(n, "0");
@@ -44,7 +45,8 @@ export const StockLevelsPage: React.FC = () => {
     setErr(null);
     try {
       const [prods, sum] = await Promise.all([
-        inventoryApi.getProducts(),
+        // T4: أرصدة المخزون تشمل الموقوف — رصيده الباقي يجب أن يُرى ليُصفَّى.
+        inventoryApi.getProducts({ status: "all" }),
         inventoryApi.getStockSummary(),
       ]);
       setProducts(prods as SqlProduct[]);
@@ -250,6 +252,7 @@ export const StockLevelsPage: React.FC = () => {
           <span className="min-w-0 flex-1 truncate text-start" title={p.name_ar || p.name_en || undefined}>
             {p.name_ar || p.name_en || "—"}
           </span>
+          {p.is_active === false && <InactiveBadge className="shrink-0" />}
           <button
             type="button"
             className="ktra-iconbtn opacity-60 group-hover:opacity-100 focus-visible:opacity-100"

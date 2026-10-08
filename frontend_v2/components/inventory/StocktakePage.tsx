@@ -19,12 +19,14 @@ import {
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { labelWithStatus } from "../../utils/activeStatus";
 
 type Wh = { id: number; name: string };
 type Prod = {
   id: number; sku: string; name_ar?: string; name_en?: string; quantity_on_hand?: string;
   // التصنيف (لتجميع الجرد شجرياً بأي عمق) + اسم العرض (يحمل البراند).
   category?: number | null; brand?: string | null; display_name?: string | null;
+  is_active?: boolean;
 };
 // sys/variance: لقطة محفوظة تُستخدم فقط عند عرض جرد مُرحَّل (read-only)؛ في المسودة
 // يُحسب الفرق حياً من رصيد النظام الحالي.
@@ -113,7 +115,8 @@ export const StocktakePage: React.FC = () => {
     try {
       const [whs, prods, takes, cats] = await Promise.all([
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<Wh[]>,
-        inventoryApi.getAllProducts() as Promise<Prod[]>,
+        // T4: الجرد يشمل الموقوف — رصيده الباقي يُعدّ ويُصحَّح.
+        inventoryApi.getAllProducts({ status: "all" }) as Promise<Prod[]>,
         inventoryApi.getStocktakes() as Promise<StocktakeRow[]>,
         inventoryApi.getCategories() as Promise<Array<{ id: number; name: string; parent: number | null }>>,
       ]);
@@ -207,7 +210,7 @@ export const StocktakePage: React.FC = () => {
   const productOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`,
+      label: labelWithStatus(p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`, p.is_active),
     })),
     [sortedProducts],
   );
@@ -216,7 +219,7 @@ export const StocktakePage: React.FC = () => {
   const locateOptions = useMemo(
     () => sortedProducts.map((p) => ({
       id: p.id,
-      label: p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`,
+      label: labelWithStatus(p.display_name || p.name_ar || p.name_en || p.sku || `منتج #${p.id}`, p.is_active),
     })),
     [sortedProducts],
   );

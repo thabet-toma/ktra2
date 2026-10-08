@@ -13,7 +13,9 @@ import {
   getSalesSettings,
   updateSalesSettings,
   restoreSalesSettingsDefaults,
+  STOCK_LOSS_POLICY_LABELS,
   type SalesSettings,
+  type StockLossPolicy,
 } from "../../services/salesApi";
 import { apiGetList } from "../../services/restApi";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -26,6 +28,13 @@ import {
   SERIAL_ENTRY_MODE_OPTIONS,
   type SerialEntryMode,
 } from "../../types/inventory";
+
+// ثلاث حالات للسياستين (الرصيد السالب / البيع بخسارة) — تطابق `SalesSettings.POLICY_CHOICES`.
+const POLICY_OPTIONS = (Object.keys(STOCK_LOSS_POLICY_LABELS) as StockLossPolicy[]).map(
+  (value) => ({ value, label: STOCK_LOSS_POLICY_LABELS[value] }),
+);
+const POLICY_HINT =
+  "المسودة لا تحرّك مخزونًا ولا قيدًا محاسبيًا؛ «السماح بالحفظ كمسودة» يمنع الترحيل وحده، و«المنع» يرفض الحفظ أيضًا.";
 
 type AccountOpt = {
   id: number;
@@ -370,7 +379,7 @@ export const SalesSettingsPage: React.FC = () => {
     {
       id: 'inventory', title: 'المخزون وتكلفة المبيعات', icon: Boxes,
       description: 'حسابات افتراضية تُستخدم عند عدم تحديدها على فئة المنتج',
-      keywords: ['حساب مخزون افتراضي', 'حساب تكلفة مبيعات (COGS) افتراضي', 'خصم المخزون عند الترحيل (افتراضيًا)', 'سياسة الرصيد السالب (افتراضيًا)', 'اختيار حساب المخزون', 'اختيار حساب تكلفة المبيعات'],
+      keywords: ['حساب مخزون افتراضي', 'حساب تكلفة مبيعات (COGS) افتراضي', 'خصم المخزون عند الترحيل (افتراضيًا)', 'سياسة الرصيد السالب (افتراضيًا)', 'السماح بالحفظ كمسودة ومنع الترحيل', 'منع الترحيل بالسالب', 'اختيار حساب المخزون', 'اختيار حساب تكلفة المبيعات'],
       content: (
           <Section
             title="المخزون وتكلفة المبيعات"
@@ -414,14 +423,18 @@ export const SalesSettingsPage: React.FC = () => {
             <FieldLabel label="سياسة الرصيد السالب (افتراضيًا)">
               <select
                 className={input}
-                value={settings.allow_negative_stock_default ? "yes" : "no"}
+                value={settings.negative_stock_policy ?? "allow"}
                 onChange={(e) =>
-                  setField("allow_negative_stock_default", e.target.value === "yes")
+                  setField("negative_stock_policy", e.target.value as StockLossPolicy)
                 }
               >
-                <option value="yes">السماح ببيع المخزون بالسالب (تحذير فقط)</option>
-                <option value="no">منع البيع إذا تجاوز الكمية المتوفرة</option>
+                {POLICY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
+              <div className="text-[11px] ktra-text-soft mt-1">
+                عند بيع كمية تتجاوز المتوفر. {POLICY_HINT}
+              </div>
             </FieldLabel>
           </Section>
       ),
@@ -556,12 +569,16 @@ export const SalesSettingsPage: React.FC = () => {
             <FieldLabel label="فاتورة البيع بخسارة (سعر أقل من التكلفة)">
               <select
                 className={input}
-                value={settings.block_loss_invoices ? "yes" : "no"}
-                onChange={(e) => setField("block_loss_invoices", e.target.value === "yes")}
+                value={settings.loss_invoice_policy ?? "allow"}
+                onChange={(e) => setField("loss_invoice_policy", e.target.value as StockLossPolicy)}
               >
-                <option value="no">السماح بالحفظ (افتراضي)</option>
-                <option value="yes">منع الحفظ والترحيل</option>
+                {POLICY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
               </select>
+              <div className="text-[11px] ktra-text-soft mt-1">
+                عند بيع بند بأقل من تكلفته. {POLICY_HINT}
+              </div>
             </FieldLabel>
             {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}
             <FieldLabel label="تنبيه «عميل مختفٍ» بعد (يوم بلا شراء)">

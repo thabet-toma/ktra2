@@ -26,7 +26,7 @@ import {
   useRecordNavigation,
   type KitToolbarAction,
 } from "../kit";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText, Power, PowerOff } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { accountingApi } from "../../services/accountingApi";
@@ -43,6 +43,9 @@ import { formatMoney, formatNumber, formatQuantity } from "../../utils/formatNum
 import { completeEan13, ean13Svg, isValidEan13, printBarcodeLabels } from "../../utils/barcode";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { InactiveBanner } from "../shared/ActiveStatusControls";
+import { useProductActive } from "../../hooks/useProductActive";
+import { humanizeThrown } from "../../utils/drfError";
 import { formatTimeValue } from "../../utils/formatDate";
 
 type Props = {
@@ -283,6 +286,10 @@ export const ItemForm: React.FC<Props> = ({
   const insights = useProductInsights(currentId, {
     isSerialized: form.is_serialized,
   });
+  // T4: المنتج الموقوف يغيب عن المستندات الجديدة — يُعلَن في شريط أعلى الكرت ويُنشَّط منه.
+  const [isActive, setIsActive] = useState(true);
+  const [activeBusy, setActiveBusy] = useState(false);
+  const { setProductActive } = useProductActive();
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -544,6 +551,7 @@ export const ItemForm: React.FC<Props> = ({
       datasheets: isDuplicate ? [] : extractDatasheets(p),
     }));
     setCurrentId(isDuplicate ? null : Number(p.id));
+    setIsActive(isDuplicate || p.is_active !== false);
     setDocUpdatedAt(isDuplicate || p.updated_at == null ? null : String(p.updated_at));
     setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» بدل النسخ." : null);
   }, []);
@@ -753,11 +761,36 @@ export const ItemForm: React.FC<Props> = ({
     CtrlPageDown: () => { setLastKey("Ctrl+PgDn"); nav.next(); },
   }, { enabled: true });
 
+  /** إيقاف/تنشيط المنتج المفتوح — لا يلمس النموذج (تعديلات غير محفوظة تبقى) ولا يتطلّب حفظاً. */
+  const handleToggleActive = async (next: boolean) => {
+    if (currentId == null || activeBusy) return;
+    setActiveBusy(true); setErr(null); setMsg(null);
+    try {
+      const name = form.name_ar || form.name_en || form.sku || `#${currentId}`;
+      if (await setProductActive({ id: currentId, name }, next)) {
+        setIsActive(next);
+        setMsg(next ? "نُشِّط المنتج." : "أُوقف المنتج — صار غير نشط.");
+        insights.reload();
+      }
+    } catch (ex: unknown) {
+      setErr(humanizeThrown(ex, "تعذّر تغيير حالة المنتج"));
+    } finally {
+      setActiveBusy(false);
+    }
+  };
+
   const toolbarActions: KitToolbarAction[] = [
     { key: "new", label: "إضافة", icon: <Plus />, onClick: () => { void discardDraft(); resetToBlank(true); } },
     { key: "save", label: saving ? "...تخزين" : "تخزين (F12)",
       icon: saving ? <Loader2 className="animate-spin" /> : <Save />,
       onClick: !saving ? () => void handleSave() : undefined, disabled: saving },
+    ...(currentId != null ? [{
+      key: "toggle-active",
+      label: isActive ? "إيقاف" : "تنشيط",
+      icon: isActive ? <PowerOff /> : <Power />,
+      onClick: !activeBusy ? () => void handleToggleActive(!isActive) : undefined,
+      disabled: activeBusy,
+    }] : []),
     ...extraActions,
     { key: "cancel", label: cancelLabel, icon: <X />, onClick: () => onCancel(), danger: true },
   ];
@@ -1374,6 +1407,14 @@ export const ItemForm: React.FC<Props> = ({
               insights.reload();
               return result;
             }}
+          />
+        )}
+        {currentId != null && !isActive && (
+          <InactiveBanner
+            title="هذا المنتج غير نشط — لا يظهر في المستندات الجديدة"
+            description="تبقى مستنداته القديمة وحركاته وتقاريره كما هي، وتُرفض مسوّداته عند الترحيل حتى تنشّطه."
+            onActivate={() => void handleToggleActive(true)}
+            busy={activeBusy}
           />
         )}
         <DocumentDraftBanners draft={draftApi} onApplyDraft={onRestoreDraft} onUndo={handleUndoDraft} isTouched={dirtyRef.current} />

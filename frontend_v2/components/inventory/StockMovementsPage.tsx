@@ -9,6 +9,7 @@ import { invoicePathForReference, productProfilePath } from "../../utils/entityL
 import { openInNewTab } from "@/utils/openInNewTab";
 import { formatMoney, formatQuantity } from "../../utils/formatNumber";
 import { stockMovementReferenceLabel } from "../../utils/documentTypeLabels";
+import { labelWithStatus } from "../../utils/activeStatus";
 
 const TYPES: Record<string, string> = {
   IN: "استلام", OUT: "صرف",
@@ -81,7 +82,8 @@ export const StockMovementsPage: React.FC = () => {
       pageRef.current = 1;
       const [mvs, prods] = await Promise.all([
         inventoryApi.getStockMovementsPaged(buildParams(1)),
-        inventoryApi.getProducts(),
+        // T4: الموقوف يبقى مرئياً في حركات المخزون (ما زالت له حركاتٌ ورصيد).
+        inventoryApi.getProducts({ status: "all" }),
       ]);
       setMovements(mvs.results as StockMovementDto[]);
       setTotalCount(mvs.count);
@@ -232,7 +234,7 @@ export const StockMovementsPage: React.FC = () => {
             value={filterProduct} onChange={(e) => setFilterProduct(e.target.value)}>
             <option value="">كل المنتجات</option>
             {products.map((p) => (
-              <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en || "—"}</option>
+              <option key={p.id} value={p.id}>{labelWithStatus(`${p.sku} — ${p.name_ar || p.name_en || "—"}`, p.is_active)}</option>
             ))}
           </select>
           <select className="ktra-input w-[130px]"
@@ -294,7 +296,7 @@ export const StockMovementsPage: React.FC = () => {
                   onChange={(e) => setForm((f) => ({ ...f, product: e.target.value }))}>
                   <option value="">— اختر منتجاً —</option>
                   {products.map((p) => (
-                    <option key={p.id} value={p.id}>{p.sku} — {p.name_ar || p.name_en}</option>
+                    <option key={p.id} value={p.id}>{labelWithStatus(`${p.sku} — ${p.name_ar || p.name_en || ""}`, p.is_active)}</option>
                   ))}
                 </select>
               </label>

@@ -64,8 +64,11 @@ import {
 } from "../shared/CommercialDocumentsList";
 import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 import { KitAutocomplete } from "../kit";
+import { InactiveBadge } from "../shared/ActiveStatusControls";
+import { useMissingPartners } from "../../hooks/useMissingDocumentRecords";
+import { HeldPartnerOption } from "../shared/HeldRecordOptions";
 
-type Partner = { id: number; name: string };
+type Partner = { id: number; name: string; is_active?: boolean };
 type Account = {
   id: number; code: string; name: string; parent: number | null; account_type?: string;
 };
@@ -122,6 +125,9 @@ export const SalesOrdersPage: React.FC = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [formCustomer, setFormCustomer] = useState("");
+  // T4: زبون طلبيةٍ قائمة أُوقف بعد كتابتها — يغيب عن `partners` (نشطون) فيُجلب فرداً للعرض.
+  const inactiveCustomers = useMissingPartners<Partner>([formCustomer], partners);
+  const [inactiveProductIds, setInactiveProductIds] = useState<ReadonlySet<number>>(new Set());
   const [formDate, setFormDate] = useState(() => todayIso());
   const [formDelivery, setFormDelivery] = useState("");
   const [formNotes, setFormNotes] = useState("");
@@ -346,6 +352,11 @@ export const SalesOrdersPage: React.FC = () => {
       setFormDate(detail.order_date?.slice(0, 10) || todayIso());
       setFormDelivery(detail.delivery_date?.slice(0, 10) || "");
       setFormNotes(detail.notes || "");
+      // T4: منتجات سطور الطلبية الموقوفة (من الخادم) — مجموعة معرّفات لا علَمٌ على السطر،
+      // فتبديل منتج السطر يُخرجه منها تلقائياً بلا تتبّعٍ في كل مسار اختيار.
+      setInactiveProductIds(new Set(
+        (detail.lines || []).filter((l) => l.product_is_active === false).map((l) => Number(l.product)),
+      ));
       setFormLines(
         (detail.lines || []).map((l) => ({
           id: l.id,
@@ -515,6 +526,9 @@ export const SalesOrdersPage: React.FC = () => {
           {partners.map((partner) => (
             <option key={partner.id} value={partner.id}>{partner.name}</option>
           ))}
+          {/* T4: زبون الطلبية القائمة إن أُوقف غاب عن `partners/lookup/` فيظهر فارغاً —
+              يُعرض خياراً **ما دام المحدَّد** وحده، فلا يُختار لطلبيةٍ أخرى. */}
+          <HeldPartnerOption value={formCustomer} partners={partners} extras={inactiveCustomers} />
         </select>
       ),
     },
@@ -522,7 +536,7 @@ export const SalesOrdersPage: React.FC = () => {
       key: "customerName",
       label: "الاسم",
       control: <input className="ktra-input" readOnly
-        value={partners.find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
+        value={[...partners, ...inactiveCustomers].find((partner) => String(partner.id) === formCustomer)?.name || ""} />,
     },
     {
       key: "reserve",
@@ -597,6 +611,7 @@ export const SalesOrdersPage: React.FC = () => {
             onFreeText={(text) => { setQuickCreateName(text); setQuickCreateLineIdx(index); }}
             createLabel={(text) => `إضافة «${text}» كمنتج جديد`}
           />
+          {inactiveProductIds.has(Number(line.product_id)) && <InactiveBadge className="shrink-0" />}
           {line.product_id && Number(line.product_id) > 0 && (
             <button type="button" className="ktra-iconbtn"
               title="بطاقة المنتج — التكلفة والأسعار"

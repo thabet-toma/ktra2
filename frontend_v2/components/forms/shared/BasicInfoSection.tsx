@@ -14,6 +14,8 @@ import {
 } from 'lucide-react';
 import { SupplierModal } from '@/components/common/SupplierModal';
 import { SupplierSearch } from '@/components/procurement/old-invoices/SupplierSearch';
+import { InactiveBadge } from '@/components/shared/ActiveStatusControls';
+import { useMissingPartners } from '@/hooks/useMissingDocumentRecords';
 import { SupplierViewModal } from '@/components/common/SupplierViewModal';
 
 interface BasicInfoProps {
@@ -141,6 +143,14 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
     return '';
   };
 
+  // T4: مورّد صفقةٍ قائمة أُوقف بعد كتابتها لا يصل من `partners/lookup/` (نشطون) فكان حقل المورد
+  // يبدو فارغاً — يُجلب فرداً لاسمه وشارته، ولا يدخل `suppliers` فلا يُقترح لصفقةٍ جديدة.
+  const heldSupplierRows = useMissingPartners<{ id: number; name?: string; is_active?: boolean }>(
+    [data.supplierId], suppliers,
+  );
+  const heldSupplier = heldSupplierRows.find((p) => String(p.id) === String(data.supplierId));
+  const supplierInactive = heldSupplier?.is_active === false;
+
   const enhancedSuppliers = suppliers.map(supplier => ({
     ...supplier,
     displayName: getSupplierDisplayName(supplier)
@@ -157,6 +167,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
           <label className="text-xs font-semibold text-[var(--color-text-muted)] flex items-center gap-1">
             <Building className="w-3 h-3 text-blue-500" />
             المورد <span className="text-red-500">*</span>
+            {supplierInactive && <InactiveBadge />}
           </label>
           <div className="h-10">
             <SupplierSearch
@@ -174,6 +185,7 @@ export const BasicInfoSection: React.FC<BasicInfoProps> = ({
               // عند طلب العرض (أيقونة العين)
               onViewSupplier={handleViewSupplier}
               type="factory"
+              documentFallbackName={heldSupplier?.name || data.factoryName}
             />
           </div>
         </div>

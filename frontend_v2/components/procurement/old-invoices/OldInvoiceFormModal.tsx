@@ -599,6 +599,9 @@ export const OldInvoiceFormModal: React.FC<OldInvoiceFormModalProps> = ({
                                 }}
                                 type="factory"
                                 onOpenAddModal={onAddSupplier} // اختياري: إذا أردت تفعيل زر الإضافة
+                                // T4: مورّد فاتورةٍ قديمة أُوقف بعدها غاب عن `suppliers` (نشطون) — يسقط العرض
+                                // إلى اسم المصنع المحفوظ على الفاتورة بدل حقلٍ فارغ.
+                                documentFallbackName={factoryName}
                             />
                         </div>
                     </div>

@@ -68,17 +68,33 @@ export function isSafeInternalPath(path: string): boolean {
     && !Array.from(path).some((char) => char.charCodeAt(0) < 32);
 }
 
-/** هدف افتراضي لملاحظة عامة: الصفحة الحالية كاملةً، بما فيها معرّف السجل في query. */
+/**
+ * مفتاح ملاحظة الصفحة: المسار وحده بلا `?query` ولا `#hash` (قرار المالك) — فالملاحظة
+ * المثبّتة على «فواتير المبيعات» تظهر أياً كان التبويب أو الفلتر المفتوح. المسار غير
+ * الآمن يسقط إلى `/dashboard` كما في `platformNoteTarget`.
+ */
+export function pageNotePathname(pathname: string): string {
+  const raw = (pathname || '/').split(/[?#]/)[0] || '/';
+  return isSafeInternalPath(raw) ? raw : '/dashboard';
+}
+
+/**
+ * هدف افتراضي لملاحظة عامة: المفتاح `target_id` هو مسار الصفحة وحده، و`target_path`
+ * يحفظ المسار الكامل مع query للعودة إليه من التذكير.
+ */
 export function platformNoteTarget(
   pathname: string,
   search: string,
   label: string,
 ): PlatformNoteTarget {
+  const pageKey = pageNotePathname(pathname);
   const candidate = `${pathname || '/'}${search || ''}`;
-  const targetPath = isSafeInternalPath(candidate) ? candidate : '/dashboard';
+  const targetPath = pageKey === (pathname || '/') && isSafeInternalPath(candidate)
+    ? candidate
+    : pageKey;
   return {
     target_type: 'page',
-    target_id: targetPath,
+    target_id: pageKey,
     target_label: label.trim() || 'الصفحة الحالية',
     target_path: targetPath,
   };

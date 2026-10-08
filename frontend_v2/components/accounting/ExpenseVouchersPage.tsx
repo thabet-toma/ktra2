@@ -18,6 +18,7 @@ import { usePermissions } from "../../contexts/PermissionsContext";
 import { useSimpleUi } from "../../hooks/useSimpleUi";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { voucherAccountEntryIsLinked } from "../../utils/voucherAccountEntryMode";
 import { formatMoney } from "../../utils/formatNumber";
 import { formatDateLocalized, formatTimeValue } from "../../utils/formatDate";
@@ -70,7 +71,7 @@ export const ExpenseVouchersPage: React.FC = () => {
         accountingApi.getExpenseVouchers(),
         accountingApi.getAccounts() as Promise<AccountRow[]>,
         accountingApi.getCurrencies() as Promise<CurrencyRow[]>,
-        accountingApi.getPartners() as Promise<AccountingPartner[]>,
+        accountingApi.getPartners(undefined, "all") as Promise<AccountingPartner[]>,
       ]);
       setRows(vouchers);
       setAccounts(accs || []);
@@ -494,7 +495,7 @@ const NewExpenseVoucherModal: React.FC<{
               onChange={(e) => { setBeneficiaryPartnerId(e.target.value ? Number(e.target.value) : ""); if (e.target.value) setBeneficiaryName(""); markTouched(); }}
             >
               <option value="">— بلا مستفيد —</option>
-              {partners.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              {partners.map((p) => <option key={p.id} value={p.id}>{labelWithStatus(p.name, p.is_active)}</option>)}
             </select>
           </label>
           <label className="ktra-field">

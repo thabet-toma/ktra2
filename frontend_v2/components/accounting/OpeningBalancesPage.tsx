@@ -22,6 +22,7 @@ import { formatDateLocalized } from "../../utils/formatDate";
 import { humanizeThrown } from "../../utils/drfError";
 import { formatProductPrimaryName } from "../../utils/productDisplayName";
 import { partnerTypeLabel } from "../../utils/partnerActions";
+import { isInactiveRecord, labelWithStatus } from "../../utils/activeStatus";
 import { KitDocumentShell, KitAutocomplete, KitDateInput } from "../kit";
 import type { KitTab, KitToolbarAction } from "../kit";
 import { AccountTreeField } from "./AccountTreePicker";
@@ -29,7 +30,7 @@ import type { AccountingAccount, OpeningBalanceDto } from "../../types/accountin
 
 type Warehouse = { id: number; name: string };
 type Product = { id: number; sku?: string; name_ar?: string; name_en?: string; display_name?: string | null };
-type PartnerLookup = { id: number; name: string; partner_type?: string; linked_account?: number | null };
+type PartnerLookup = { id: number; name: string; partner_type?: string; linked_account?: number | null; is_active?: boolean };
 
 /** سطر حساب في المسودة — `key` محليّ كي لا يقفز التركيز عند إعادة الترقيم. */
 type AccountRow = { key: string; account: number | ""; debit: string; credit: string; notes: string };
@@ -123,8 +124,10 @@ export const OpeningBalancesPage: React.FC = () => {
       const [payload, accs, prts, prods, whs] = await Promise.all([
         accountingApi.getOpeningBalance(),
         accountingApi.getAccounts() as Promise<AccountingAccount[]>,
-        accountingApi.getPartners() as Promise<PartnerLookup[]>,
-        inventoryApi.getAllProducts() as Promise<Product[]>,
+        // الموقوفون يُجلبون أيضاً: حساب الطرف الموقوف يبقى ممنوعاً في تبويب «حسابات»، وسطر بضاعةٍ
+        // لصنفٍ موقوف يبقى باسمه — والمنتقيات وحدها تُسقطهم (لا سطر جديد لموقوف).
+        accountingApi.getPartners(undefined, "all") as Promise<PartnerLookup[]>,
+        inventoryApi.getAllProducts({ status: "all" }) as Promise<Product[]>,
         inventoryApi.getWarehouses({ active_only: "true" }) as Promise<Warehouse[]>,
       ]);
       applyPayload(payload);
@@ -407,7 +410,7 @@ export const OpeningBalancesPage: React.FC = () => {
 
   const partnerRows = data?.partners ?? [];
   const partnerOptions = useMemo(
-    () => partners.map((p) => ({ id: p.id, label: `${p.name}${p.partner_type ? ` — ${partnerTypeLabel(p.partner_type)}` : ""}` })),
+    () => partners.filter((p) => !isInactiveRecord(p)).map((p) => ({ id: p.id, label: `${p.name}${p.partner_type ? ` — ${partnerTypeLabel(p.partner_type)}` : ""}` })),
     [partners],
   );
 
@@ -614,11 +617,11 @@ export const OpeningBalancesPage: React.FC = () => {
               <tr key={row.key}>
                 <td>
                   {row.product !== "" ? (
-                    <span>{product ? formatProductPrimaryName(product) : `منتج #${row.product}`}</span>
+                    <span>{product ? labelWithStatus(formatProductPrimaryName(product), product.is_active) : `منتج #${row.product}`}</span>
                   ) : (
                     <KitAutocomplete
                       value=""
-                      options={products.map((p) => ({ id: p.id, label: formatProductPrimaryName(p) }))}
+                      options={products.filter((p) => !isInactiveRecord(p)).map((p) => ({ id: p.id, label: formatProductPrimaryName(p) }))}
                       onPick={(id) =>
                         setStockRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, product: Number(id) } : r)))
                       }

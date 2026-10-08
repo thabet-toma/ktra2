@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Bell, Check, Loader2, Plus, Trash2, Undo2, User } from 'lucide-react';
+import { Bell, Check, Loader2, Pin, PinOff, Plus, Trash2, Undo2, User } from 'lucide-react';
 import {
   CustomerNote,
   CustomerNotePriority,
@@ -53,9 +53,11 @@ export interface CustomerNotesTabProps {
   target?: PlatformNoteTarget;
   /** معرّف ملاحظة لتحديدها/التمرير إليها (عند الوصول من إشعار تذكير). */
   focusNoteId?: string | null;
+  /** يُنادى بعد أي إنشاء/تعديل/حذف ناجح — ليحدّث الشريط الأصفر أعلى الصفحة نفسه. */
+  onChanged?: () => void;
 }
 
-export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, target, focusNoteId }) => {
+export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, target, focusNoteId, onChanged }) => {
   const toast = useToast();
   const confirm = useConfirm();
   const [notes, setNotes] = useState<CustomerNote[]>([]);
@@ -63,10 +65,12 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [form, setForm] = useState<{
-    title: string; body: string; remind_on: string; priority: CustomerNotePriority;
+    title: string; body: string; remind_on: string; priority: CustomerNotePriority; is_pinned: boolean;
   }>({
-    title: '', body: '', remind_on: '', priority: 'normal',
+    title: '', body: '', remind_on: '', priority: 'normal', is_pinned: false,
   });
+  // التثبيت على الصفحة معنى ملاحظات الصفحات وحدها (الخادم يرفضه لغيرها).
+  const canPin = !customerId && target?.target_type === 'page';
   const focusRef = useRef<HTMLDivElement | null>(null);
 
   // العاجل أولاً ثم المتوسط، والمنجز في الذيل — الترتيب داخل الأولوية يبقى الأحدث أولاً.
@@ -115,10 +119,12 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
         body: form.body.trim(),
         remind_on: form.remind_on || null,
         priority: form.priority,
+        ...(canPin && form.is_pinned ? { is_pinned: true } : {}),
       });
       setNotes((prev) => [created, ...prev]);
-      setForm({ title: '', body: '', remind_on: '', priority: 'normal' });
+      setForm({ title: '', body: '', remind_on: '', priority: 'normal', is_pinned: false });
       toast('أُضيفت الملاحظة.', 'success');
+      onChanged?.();
       // تذكير مستحق اليوم/فائت ⇒ ادفع إشعار الموقع فوراً (لا انتظار لإعادة التحميل).
       if (created.remind_on && !created.is_done && daysUntil(created.remind_on) <= 0) {
         void runCustomerNoteReminders(localStorage.getItem('userId') || 'self');
@@ -134,8 +140,20 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
     try {
       const updated = await updateCustomerNote(n.id, { is_done: !n.is_done });
       setNotes((prev) => prev.map((x) => (x.id === n.id ? updated : x)));
+      onChanged?.();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'تعذّر التحديث.', 'error');
+    }
+  };
+
+  const togglePinned = async (n: CustomerNote) => {
+    try {
+      const updated = await updateCustomerNote(n.id, { is_pinned: !n.is_pinned });
+      setNotes((prev) => prev.map((x) => (x.id === n.id ? updated : x)));
+      toast(updated.is_pinned ? 'ثُبّتت الملاحظة على الصفحة.' : 'أُلغي تثبيت الملاحظة.', 'success');
+      onChanged?.();
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'تعذّر تغيير التثبيت.', 'error');
     }
   };
 
@@ -145,6 +163,7 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
       await deleteCustomerNote(n.id);
       setNotes((prev) => prev.filter((x) => x.id !== n.id));
       toast('حُذفت الملاحظة.', 'success');
+      onChanged?.();
     } catch (e) {
       toast(e instanceof Error ? e.message : 'تعذّر الحذف.', 'error');
     }
@@ -188,6 +207,16 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
               title="يوم التذكير (اختياري) — يظهر في إشعارات الموقع"
             />
           </label>
+          {canPin && (
+            <label className="flex items-center gap-2 text-xs text-[var(--ktra-ink-soft)] md:col-span-3">
+              <input
+                type="checkbox"
+                checked={form.is_pinned}
+                onChange={(e) => setForm({ ...form, is_pinned: e.target.checked })}
+              />
+              تثبيت على الصفحة (تظهر بالأصفر أعلى الصفحة لكل المستخدمين)
+            </label>
+          )}
           <textarea
             className="ktra-input md:col-span-3"
             rows={2}
@@ -270,6 +299,20 @@ export const CustomerNotesTab: React.FC<CustomerNotesTabProps> = ({ customerId, 
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
+                    {canPin && (
+                      <button
+                        type="button"
+                        onClick={() => togglePinned(n)}
+                        title={n.is_pinned ? 'إلغاء التثبيت على الصفحة' : 'تثبيت على الصفحة'}
+                        aria-label={n.is_pinned ? 'إلغاء تثبيت الملاحظة' : 'تثبيت الملاحظة على الصفحة'}
+                        aria-pressed={n.is_pinned}
+                        className="p-1.5 rounded-md text-[var(--color-text-muted)] hover:bg-[var(--color-surface-3)]"
+                      >
+                        {n.is_pinned
+                          ? <PinOff className="w-4 h-4 text-amber-600" />
+                          : <Pin className="w-4 h-4" />}
+                      </button>
+                    )}
                     <button
                       type="button"
                       onClick={() => toggleDone(n)}

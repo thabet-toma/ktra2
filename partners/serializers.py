@@ -68,7 +68,7 @@ class CustomerNoteSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'partner', 'title', 'body', 'remind_on', 'is_done',
             'target_type', 'target_id', 'target_label', 'target_path',
-            'priority', 'priority_display',
+            'priority', 'priority_display', 'is_pinned',
             'created_by', 'created_by_name', 'created_at', 'updated_at',
         ]
         read_only_fields = [
@@ -110,6 +110,13 @@ class CustomerNoteSerializer(serializers.ModelSerializer):
                 raise serializers.ValidationError({
                     field: 'هذا الحقل مطلوب للملاحظة العامة.' for field in missing
                 })
+        # التثبيت بشريط أصفر أعلى الصفحة معنى «صفحة» وحدها؛ ملاحظة الطرف تُعرض في
+        # بطاقته وتنبيهاتها العاجلة، فتثبيتها لا يظهر في أي مكان ويضلّل صاحبه.
+        pinned = attrs.get('is_pinned', getattr(instance, 'is_pinned', False))
+        if pinned and target['target_type'] != 'page':
+            raise serializers.ValidationError({
+                'is_pinned': 'التثبيت على الصفحة متاح لملاحظات الصفحات فقط.',
+            })
         return attrs
 
 class PartnerBankAccountSerializer(serializers.ModelSerializer):

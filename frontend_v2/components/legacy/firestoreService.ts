@@ -1328,7 +1328,8 @@ export const itemsService = {
   checkItemHsCodeUnique: async (hsCode: string, excludeItemId?: string): Promise<boolean> => {
     if (!hsCode) return true;
     try {
-      const all = await listPickerProducts<any>(resolveTenantId());
+      // T4: الفرادة تشمل الموقوف — رمزٌ جمركي يحمله منتج موقوف ما زال مأخوذاً.
+      const all = await listPickerProducts<any>(resolveTenantId(), { includeInactive: true });
       return !all.some((p: any) => String(p.id) !== String(excludeItemId || "") && (p.hs_code || "") === hsCode);
     } catch {
       return true;
@@ -1649,81 +1650,13 @@ export const suppliersService = {
           `partners/lookup/?limit=500&partner_type=Supplier${scopeQuery}`,
           { tenantId: resolveTenantId() },
         );
-        let mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
-
-        // Fallback: if partners list is empty but deals exist, synthesize supplier list from deals.
-        if (mapped.length === 0) {
-              const deals = (await apiGetPagedList<any>("logistics/deals/", { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })).results;
-          const byName = new Map<string, Supplier>();
-          deals.forEach((d: any) => {
-            const rawPartner = d?.partner;
-            const partnerId =
-              typeof rawPartner === "object" && rawPartner !== null ? String(rawPartner.id || "") : String(d?.partner || "");
-            const legalName =
-              (typeof rawPartner === "object" ? (rawPartner?.legal_name || rawPartner?.legalName || rawPartner?.alias) : "") || "";
-            // الاسم الرسمي أولاً؛ اللقب (`legal_name`) يبقى في `alias` وحده.
-            const partnerName = (typeof rawPartner === "object" ? rawPartner?.name : "") || d?.partner_name || d?.factory_name || legalName || "";
-            if (!partnerName) return;
-            const key = partnerId || partnerName;
-            if (!byName.has(key)) {
-              byName.set(key, {
-                id: partnerId || `virtual-${partnerName}`,
-                tradeName: partnerName,
-                alias: legalName || "",
-                supplierId: partnerId || partnerName,
-                currency: "USD",
-                openingBalance: 0,
-                type: "factory",
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              } as Supplier);
-            }
-          });
-          mapped = Array.from(byName.values());
-        }
-
+        // قائمةٌ فارغة هي الجواب: كانت تُبنى هنا موردون من الصفقات فيعود الموقوفُ إلى المنتقيات.
+        const mapped = partners.map((p: any) => suppliersService._mapPartnerToSupplier(p));
         if (alive) callback(mapped);
       } catch (e) {
-        // console suppressed
-        try {
-          const deals = (await apiGetPagedList<any>("logistics/deals/", { tenantId: resolveTenantId(), query: { page: 1, page_size: 200 } })).results;
-          const byName = new Map<string, Supplier>();
-          deals.forEach((d: any) => {
-            const rawPartner = d?.partner;
-            const partnerId =
-              typeof rawPartner === "object" && rawPartner !== null ? rawPartner.id : rawPartner;
-            const legalName =
-              typeof rawPartner === "object" && rawPartner !== null
-                ? (rawPartner.legal_name || rawPartner.legalName || rawPartner.alias || "")
-                : "";
-            const partnerName =
-              (typeof rawPartner === "object" ? rawPartner?.name : "") ||
-              d?.partner_name ||
-              d?.factory_name ||
-              legalName ||
-              "";
-            if (!partnerName) return;
-            const key = String(partnerId || partnerName);
-            if (!byName.has(key)) {
-              byName.set(key, {
-                id: String(partnerId || `virtual-${partnerName}`),
-                tradeName: partnerName,
-                alias: legalName || "",
-                supplierId: String(partnerId || partnerName),
-                currency: "USD",
-                openingBalance: 0,
-                type: "factory",
-                createdAt: new Date().toISOString(),
-                updatedAt: new Date().toISOString(),
-              } as Supplier);
-            }
-          });
-          if (alive) callback(Array.from(byName.values()));
-        } catch (e2) {
-          // console suppressed
-          // فشل المصدرين ليس «لا يوجد موردون»؛ احتفظ بآخر لقطة ناجحة.
-          if (alive) onError?.(e2);
-        }
+        // فشل القراءة ليس «لا يوجد موردون»؛ احتفظ بآخر لقطة ناجحة. لا تركيب من الصفقات:
+        // لا يعرف الموقوف من غيره فكان يُعيد موقوفاً إلى منتقيات المستندات الجديدة.
+        if (alive) onError?.(e);
       }
     };
     load();

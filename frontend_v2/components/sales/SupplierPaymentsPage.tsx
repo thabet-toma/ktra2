@@ -14,6 +14,7 @@ import React, { useEffect, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { apiGetList } from "../../services/restApi";
 import { humanizeThrown } from "../../utils/drfError";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { accountingApi } from "../../services/accountingApi";
 import {
@@ -34,7 +35,7 @@ import { NewSupplierPaymentModal } from "./NewSupplierPaymentModal";
 import { PostedTextDialog } from "../shared/PostedTextDialog";
 import { splitOriginPath, splitOriginSource, splitOriginText, type SplitOrigin } from "../../utils/partySurplus";
 
-type Partner = { id: number; name: string };
+type Partner = { id: number; name: string; is_active?: boolean };
 type Account = { id: number; code: string; name: string; account_type?: string };
 
 interface SupplierPaymentRow {
@@ -120,7 +121,7 @@ export const SupplierPaymentsPage: React.FC = () => {
         // كان يستدعي purchase/payments/ غير الموجود فيفشل بـ 404 عند الفتح.
         // P0-5: القائمة مُرقَّمة إلزامياً — أحدث 200 سند صرف.
         apiGetList<SupplierPaymentRow>("logistics/supplier-payments/", { tenantId, query: { page: 1, page_size: 200 } }),
-        accountingApi.getPartners() as Promise<Partner[]>,
+        accountingApi.getPartners(undefined, "all") as Promise<Partner[]>,
         accountingApi.getAccounts() as Promise<Account[]>,
       ]);
       if (pays.status === "fulfilled") setPayments(pays.value || []);
@@ -280,7 +281,10 @@ export const SupplierPaymentsPage: React.FC = () => {
     }
   };
 
-  const partnerName = (id: number) => partners.find((p) => p.id === id)?.name || `#${id}`;
+  const partnerName = (id: number) => {
+    const p = partners.find((x) => x.id === id);
+    return p ? labelWithStatus(p.name, p.is_active) : `#${id}`;
+  };
   const accountName = (id: number) => {
     const a = accounts.find((x) => x.id === id);
     return a ? `${a.code} ${a.name}` : `#${id}`;

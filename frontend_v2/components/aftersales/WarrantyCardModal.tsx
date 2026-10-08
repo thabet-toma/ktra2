@@ -1,4 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { HeldPartnerOption, HeldProductOption } from "../shared/HeldRecordOptions";
+import { useMissingPartners, useMissingProducts } from "../../hooks/useMissingDocumentRecords";
 import { useNavigate } from "react-router-dom";
 import { CalendarPlus, Loader2, Printer, ShieldCheck, ShieldOff, Trash2, Undo2, Wrench, X } from "lucide-react";
 import {
@@ -69,12 +71,15 @@ interface ProductOption {
   name_ar?: string;
   name_en?: string;
   sku?: string;
+  /** T4: موقوف — يصل من جلب منتج البطاقة القائمة لا من المنتقي (نشطٌ فقط). */
+  is_active?: boolean;
 }
 
 interface PartnerOption {
   id: number;
   name: string;
   phone?: string;
+  is_active?: boolean;
 }
 
 interface Props {
@@ -149,6 +154,11 @@ export const WarrantyCardModal: React.FC<Props> = ({
 
   const [draft, setDraft] = useState<WarrantyCardDraft>(() =>
     card ? draftOf(card) : emptyDraft());
+  /* T4: بطاقة كفالة قائمة لمنتجٍ/زبونٍ/موردٍ أُوقف بعد البيع (شائعٌ جداً) — المنتقيات
+     تُخفيه فيظهر حقله فارغاً. يُجلب فرداً ويُعرض خياراً **للمحدَّد وحده**، فلا يُختار لبطاقةٍ جديدة. */
+  const heldProducts = useMissingProducts<ProductOption>([draft.product], products);
+  const heldCustomers = useMissingPartners<PartnerOption>([draft.partner], customers);
+  const heldSuppliers = useMissingPartners<PartnerOption>([draft.supplier], suppliers);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [extendMonths, setExtendMonths] = useState("");
@@ -658,6 +668,10 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 {products.map((p) => (
                   <option key={p.id} value={p.id}>{formatProductPrimaryName(p)}</option>
                 ))}
+                <HeldProductOption
+                  value={draft.product ?? ""} products={products} extras={heldProducts}
+                  label={formatProductPrimaryName} fallbackName={card?.product_name || undefined}
+                />
               </select>
             </div>
 
@@ -700,6 +714,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 {customers.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+                <HeldPartnerOption value={draft.partner ?? ""} partners={customers} extras={heldCustomers} />
               </select>
             </div>
 
@@ -788,6 +803,7 @@ export const WarrantyCardModal: React.FC<Props> = ({
                 {suppliers.map((p) => (
                   <option key={p.id} value={p.id}>{p.name}</option>
                 ))}
+                <HeldPartnerOption value={draft.supplier ?? ""} partners={suppliers} extras={heldSuppliers} />
               </select>
             </div>
 

@@ -129,3 +129,26 @@ test('لا رقم مجمَّع يُخزَّن: `buildFamilyRow` نقيّةٌ —
   buildFamilyRow(members);
   assert.deepEqual(members, snapshot);
 });
+
+test('T4: صفّ المنتج نشطٌ ما دام أحد براندَاته نشطاً، ويحمل معرّفات كل براندَاته للإيقاف الجماعي', () => {
+  const mixed = buildFamilyRow([
+    brand({ id: 1, family_id: 8, is_active: false }),
+    brand({ id: 2, family_id: 8, is_active: true }),
+    brand({ id: 3, family_id: 8 }),
+  ]);
+  assert.equal(mixed.is_active, true);
+  assert.deepEqual(mixed.family_member_ids, [1, 2, 3]);
+});
+
+test('T4: كل البراندات موقوفة ⇒ الصفّ موقوف (يُلمَّع ويُنشَّط)', () => {
+  const allOff = buildFamilyRow([
+    brand({ id: 4, family_id: 9, is_active: false }),
+    brand({ id: 5, family_id: 9, is_active: false }),
+  ]);
+  assert.equal(allOff.is_active, false);
+  assert.deepEqual(allOff.family_member_ids, [4, 5]);
+});
+
+test('T4: غياب الحقل يعني نشطاً (خادمٌ لا يُعلنه بعد)', () => {
+  assert.equal(buildFamilyRow([brand({ id: 6, family_id: 10 })]).is_active, true);
+});

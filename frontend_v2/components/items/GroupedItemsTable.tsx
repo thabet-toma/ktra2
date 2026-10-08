@@ -13,6 +13,7 @@ import { formatQuantity } from "../../utils/formatNumber";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../utils/categoryTree";
 import { groupProductsByFamily, buildFamilyRow, type ProductGroup } from "../../utils/familyGrouping";
 import { brandTargetOf, type AddBrandTarget } from "../../utils/brandActions";
+import { InactiveBadge } from "../shared/ActiveStatusControls";
 
 export type TreeCategory = { id: number; name: string; parent: number | null };
 
@@ -118,7 +119,12 @@ export const GroupedItemsTable: React.FC<Props> = ({
     reveal?: { count: number; expanded: boolean; onToggle: () => void; rowKey: string },
     brandAction?: AddBrandRequest,
   ) => (
-    <tr key={reveal ? reveal.rowKey : `p-${getRowKey(p)}`} onDoubleClick={() => onRowDoubleClick?.(p)}>
+    <tr
+      key={reveal ? reveal.rowKey : `p-${getRowKey(p)}`}
+      onDoubleClick={() => onRowDoubleClick?.(p)}
+      // T4: الموقوف باهتٌ في القائمة (يظهر بفلتر «غير نشط»/«الكل»).
+      className={p.is_active === false ? "opacity-60" : undefined}
+    >
       {selection && (
         <td style={{ textAlign: "center", width: 34 }} onClick={(e) => e.stopPropagation()}>
           {/* صفّ ملخّص المجموعة (`reveal`) بلا مربّع — معرّفه مرجعيٌّ لا يمثّل
@@ -156,6 +162,7 @@ export const GroupedItemsTable: React.FC<Props> = ({
             >
               {p.display_name || p.name_ar || p.name_en || "—"}
             </span>
+            {p.is_active === false && <InactiveBadge className="shrink-0" />}
           </span>
         ) : (
           col.render ? col.render(p, 0) : String((p as unknown as Record<string, unknown>)[col.key] ?? "")

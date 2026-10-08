@@ -14,6 +14,7 @@ import { Loader2, Save, AlertCircle } from "lucide-react";
 import { inventoryApi } from "../../services/inventoryApi";
 import { KitFloatWindow } from "../kit/KitFloatWindow";
 import { CategoryPicker } from "../inventory/CategoryPicker";
+import { InactiveBanner } from "../shared/ActiveStatusControls";
 import { eventBus } from "../../utils/eventBus";
 import { resolveTenantId } from "../../utils/tenantContext";
 import {
@@ -45,6 +46,8 @@ export const ItemQuickEditModal: React.FC<Props> = ({
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [label, setLabel] = useState("");
+  // T4: منتجٌ موقوف يُفتح للتعديل من مستندٍ قديم — يُنبَّه، والتنشيط من الكرت الكامل.
+  const [inactive, setInactive] = useState(false);
 
   useEffect(() => {
     let alive = true;
@@ -61,6 +64,7 @@ export const ItemQuickEditModal: React.FC<Props> = ({
         setUoms(unitList);
         const p = product as Record<string, unknown>;
         setLabel(String(p.display_name ?? p.name_ar ?? p.name_en ?? p.sku ?? ""));
+        setInactive(p.is_active === false);
       })
       .catch((e: unknown) => {
         if (alive) setErr(e instanceof Error ? e.message : "فشل تحميل المنتج");
@@ -133,6 +137,14 @@ export const ItemQuickEditModal: React.FC<Props> = ({
       }
     >
       <div dir="rtl" className="p-3">
+        {inactive && (
+          <div className="mb-3">
+            <InactiveBanner
+              title="هذا المنتج غير نشط — لا يظهر في المستندات الجديدة"
+              description="للتنشيط افتح الكرت الكامل."
+            />
+          </div>
+        )}
         {err && (
           <div className="flex items-center gap-2 mb-3 p-2 rounded bg-red-50 text-red-700 text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />

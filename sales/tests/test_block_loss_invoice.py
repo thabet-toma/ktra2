@@ -1,7 +1,8 @@
-"""إعداد «منع فاتورة الخسارة» (W1) — عند تفعيل `SalesSettings.block_loss_invoices`،
-يُرفض **حفظ أو ترحيل** فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع < متوسط
-التكلفة)، حتى لو كان إجمالي الفاتورة رابحاً. المفتاح OFF = السماح بالحفظ بخسارة.
-المراجيع مُعفاة. معطّلاً افتراضياً فلا يؤثر على السلوك القائم.
+"""إعداد «فاتورة البيع بخسارة» (W1) — عند ضبط `SalesSettings.loss_invoice_policy` على
+`block`، يُرفض **حفظ أو ترحيل** فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع <
+متوسط التكلفة)، حتى لو كان إجمالي الفاتورة رابحاً. `allow` = السماح بالحفظ والترحيل
+بخسارة. المراجيع مُعفاة. `allow` افتراضياً فلا يؤثر على السلوك القائم. الحالة الوسطى
+`save_only` في `test_stock_loss_policies.py`.
 """
 from decimal import Decimal
 
@@ -53,7 +54,8 @@ def _invoice(tenant, customer, product, *, unit_price, number):
 
 def _settings(tenant, *, block):
     SalesSettings.objects.update_or_create(
-        tenant=tenant, defaults={"block_loss_invoices": block})
+        tenant=tenant, defaults={"loss_invoice_policy": (
+            SalesSettings.POLICY_BLOCK if block else SalesSettings.POLICY_ALLOW)})
 
 
 def test_loss_invoice_blocked_when_setting_on(env):

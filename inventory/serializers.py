@@ -228,6 +228,8 @@ class ProductSerializer(serializers.ModelSerializer):
             # #33: مفتاحٌ لكل صنف — أيّ مسارٍ يحكم اقتراح التجديد (يدوي/تلقائي).
             'reorder_mode',
             'is_serialized', 'is_service',
+            # T2: نشط/غير نشط — يُقرأ في القوائم ويُكتب بالتعديل (و`set-active`).
+            'is_active',
             'is_for_sale_online', 'online_price', 'online_description',
             'quantity_on_hand', 'reserved_quantity', 'available_quantity', 'avg_cost',
             # كرت المنتج: سعر البيع الافتراضي — قابل للتحرير بجانب التكلفة المحسوبة.
@@ -599,6 +601,8 @@ class ProductLookupSerializer(ProductSerializer):
             # #233: سببُ فرض الرقم التسلسلي — عمود «الأرقام» في محرِّري البيع
             # والشراء يظهر لهذا البند حتى إن كان نمط الشركة `off`.
             'serial_required_by',
+            # T2: حقلٌ قصير — يتيح للمنتقي وصف خيارٍ معطَّل حين يُطلب `status=all`.
+            'is_active',
             # #133: السعر التقديري — أقلّ شراء ضمن آخر ٥ فواتير شراء مرحَّلة،
             # ومعه لافتة مصدره (لا يُخلط برقم تكلفة). حقلان قصيران فقط — لا
             # توسيع للعقد الضيّق عمداً (قياس 1490 منتجاً: 1,145 كيلوبايت مقابل 685).

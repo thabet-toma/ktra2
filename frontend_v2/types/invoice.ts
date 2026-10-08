@@ -97,6 +97,8 @@ export interface InvoiceItem {
     serials?: string[];
     /** #235: كفالة المصنع على السطر — غيابها = السياسة (لا صفّ على الخادم). */
     manufacturerWarranty?: PurchaseLineWarrantyValue;
+    /** T4: المنتج موقوف كما وصل البند من الخادم. يسقط حين يُستبدل المنتج (البند يُبنى من جديد). */
+    productIsActive?: boolean;
 }
 
 /** مصدر استيراد الفاتورة من تخليص + شحنة (نفس منطق ربط الصفقات بالشحنة) */
@@ -162,6 +164,8 @@ export interface Invoice {
     invoiceNumber: string;
     invoiceName?: string;
     supplierId: string;
+    /** T4: المورّد موقوف كما وصلت الفاتورة من الخادم (`partner_is_active`). */
+    supplierIsActive?: boolean;
     factoryName?: string;
     factoryEmail?: string;
     factoryPhone?: string;

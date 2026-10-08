@@ -49,6 +49,10 @@ export interface SqlProduct {
   indicative_purchase_price_source?: string | null;
   /** T-SERIAL: المنتج يتتبّع وحداته برقم تسلسلي (يفعّله كرت المنتج). */
   is_serialized?: boolean;
+  /** T4: المنتج الموقوف يغيب عن المنتقيات والمستندات الجديدة. غائبٌ = نشط. */
+  is_active?: boolean;
+  /** T4: على صفّ العائلة المجمَّع وحده — معرّفات براندَاته (يُوقَف المنتج بكلها معاً). */
+  family_member_ids?: number[];
   /** T-REORDER: «overstock» = فوق الحدّ الأقصى. */
   stock_status: "in_stock" | "low_stock" | "out_of_stock" | "overstock";
 }

@@ -76,6 +76,8 @@ export const mapPickerProductToItem = (
     is_service: (p as any).is_service,
     available_quantity: (p as any).available_quantity,
     quantity_on_hand: (p as any).quantity_on_hand,
+    // T4: المنتقي لا يعيد الموقوف أصلاً؛ الحقل يصل فقط من جلب منتج مستندٍ قائم.
+    ...((p as any).is_active === false ? { isProductInactive: true } : {}),
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

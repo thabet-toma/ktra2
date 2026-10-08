@@ -32,6 +32,7 @@ from inventory.serials import (
 from inventory.services import record_stock_movement
 from partners.models import Partner, PartnerGroup
 from accounting.api import ensure_partner_account
+from core.active_guard import assert_active_for_posting
 from tenants.models import Tenant
 
 from sales.models import (
@@ -1601,7 +1602,16 @@ def post_sales_invoice(
             line.product = products_by_id[line.product_id]
 
         # منع فاتورة الخسارة (إعداد اختياري، على مستوى السطر) — بعد قفل المنتجات والإجماليات.
-        guard_loss_invoice(invoice, lines, products_by_id)
+        guard_loss_invoice(invoice, lines, products_by_id, stage=SalesSettings.STAGE_POST)
+
+        # صنفٌ أو عميلٌ أُوقف بعد حفظ المسودّة ⇒ لا ترحيل. البيع وحده: مرجع البيع
+        # ومرجع الشراء مُعفَيان (BC: المرتجع/مذكّرة الدائن لا يُحجَبان) كي تُسوّى
+        # البضاعة والذمّة لطرفٍ أو صنفٍ موقوف. يُفحص على المنتجات المقفلة الطازجة.
+        if kind == SalesInvoice.INVOICE_KIND_SALE:
+            assert_active_for_posting(
+                partner=invoice.customer, products=products_by_id.values(),
+                document_label="الفاتورة",
+            )
 
         # T-RESERVEGUARD: الكمية المحجوزة لطلبية زبون آخر ليست متاحة للبيع —
         # يُفحص بعد قفل المنتجات كي لا تسبق فاتورتان بعضهما على نفس الحجز.

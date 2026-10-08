@@ -551,17 +551,22 @@ def guard_loss_invoice(
     invoice: SalesInvoice,
     lines: list[SalesInvoiceLine],
     products_by_id: dict[int, Product],
+    *,
+    stage: str,
 ) -> None:
-    """W1: يمنع حفظ/ترحيل فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من
-    متوسط التكلفة) عند تفعيل `SalesSettings.block_loss_invoices` — حتى لو كان إجمالي
-    الفاتورة رابحاً. المراجيع مُعفاة. المفتاح OFF = السماح بحفظ فاتورة بخسارة (تجاوز
-    الحارس). يسمّي الأسطر المخالفة بالعربية (اسم المنتج + التكلفة مقابل صافي البيع).
+    """W1: يرفض فاتورة بيع فيها **أي سطر** يُباع بخسارة (صافي البيع أقل من متوسط
+    التكلفة) بحسب `SalesSettings.loss_invoice_policy` — حتى لو كان إجمالي الفاتورة
+    رابحاً. `stage` = `save` (الحفظ) أو `post` (الترحيل): `allow` لا يمنع شيئاً،
+    `save_only` يمنع الترحيل وحده، `block` يمنعهما (القاعدة في
+    `SalesSettings.policy_blocks`). المراجيع مُعفاة. يسمّي الأسطر المخالفة بالعربية
+    (اسم المنتج + التكلفة مقابل صافي البيع) ويذكر الإعداد وخياره الحالي.
     """
     kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
     if kind != SalesInvoice.INVOICE_KIND_SALE:
         return
     ss = SalesSettings.objects.filter(tenant_id=invoice.tenant_id).first()
-    if not (ss and ss.block_loss_invoices):
+    policy = ss.loss_invoice_policy if ss else SalesSettings.POLICY_ALLOW
+    if not SalesSettings.policy_blocks(policy, stage):
         return
     offenders = _loss_lines(invoice, lines, products_by_id)
     if not offenders:
@@ -571,12 +576,14 @@ def guard_loss_invoice(
         for (_line, p, revenue, cost) in offenders
     )
     logger.warning(
-        "Blocked loss invoice %s — %d loss line(s): %s",
-        invoice.invoice_number, len(offenders), detail,
+        "Blocked loss invoice %s at %s (policy=%s) — %d loss line(s): %s",
+        invoice.invoice_number, stage, policy, len(offenders), detail,
     )
+    action = "حفظ" if stage == SalesSettings.STAGE_SAVE else "ترحيل"
     raise ValidationError(
-        f"لا يُسمح بحفظ فاتورة تحتوي بنداً يُباع بخسارة: {detail}. "
-        "عدّل الأسعار أو فعّل «السماح بحفظ فاتورة بخسارة» من إعدادات المبيعات."
+        f"لا يُسمح بـ{action} فاتورة تحتوي بنداً يُباع بخسارة: {detail}. "
+        + SalesSettings.policy_refusal(SalesSettings.LOSS_INVOICE_SETTING_LABEL, policy)
+        + " عدّل الأسعار أو غيّر الإعداد."
     )
 
 

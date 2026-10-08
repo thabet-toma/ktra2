@@ -64,6 +64,8 @@ export interface Item {
     createdAt: string;
     updatedAt: string;
     isActive?: boolean;
+    /** T4: المنتج موقوف (`Product.is_active=false`) — يصل من جلب منتجات المستند القائم لا من المنتقي. */
+    isProductInactive?: boolean;
     storeName?: string;
     storeDescription?: string;
     salePrice?: number;

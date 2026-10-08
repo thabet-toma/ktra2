@@ -9,6 +9,7 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 
+from core.activity import log_activity
 from core.api_defaults import ApiAuthAndUser
 from core.plans import enforce_limits
 from core.tenant_utils import get_tenant
@@ -77,6 +78,19 @@ def _csv_param(value) -> list[str]:
     return [v.strip() for v in str(value or "").split(",") if v.strip()]
 
 
+def _partner_balance(partner):
+    """(مدين، دائن، الرصيد) من القيود المرحَّلة — مصدرٌ واحد للرصيد الذي تقرؤه البطاقة
+    و`balance/` و`deactivation-impact/`. الرصيد: دائن−مدين للطرف الدائن، ومدين−دائن لغيره."""
+    from accounting.services import partner_posted_balance
+    debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
+    return debit, credit, ((credit - debit) if is_creditor_party(partner) else (debit - credit))
+
+
+#: فلتر الحالة في القوائم: النشطون افتراضاً — والموقوف يبقى متاحاً للدفع له (شاشات السندات
+#: والشيكات والإشعارات تطلب `all`) وللمراجعة (`inactive`).
+PARTNER_STATUS_FILTERS = {"active", "inactive", "all"}
+
+
 class PartnerViewSet(viewsets.ModelViewSet):
     authentication_classes = ApiAuthAndUser["authentication_classes"]
     permission_classes = ApiAuthAndUser["permission_classes"]
@@ -99,11 +113,9 @@ class PartnerViewSet(viewsets.ModelViewSet):
         تُمكِّن شاشتي البيع/الشراء من عرض «الرصيد قبل/بعد» الفاتورة.
         """
         from decimal import Decimal
-        from accounting.services import partner_posted_balance
         partner = self.get_object()
-        debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
         is_supplier = is_creditor_party(partner)
-        open_balance = (credit - debit) if is_supplier else (debit - credit)
+        debit, credit, open_balance = _partner_balance(partner)
         try:
             proposed = Decimal(str(request.query_params.get("proposed_total", "0")))
         except Exception:
@@ -136,14 +148,12 @@ class PartnerViewSet(viewsets.ModelViewSet):
         + تاريخ آخر معاملة. تُطابق الأرصدة المصدر القانوني (القيود المرحَّلة)."""
         from decimal import Decimal
         from django.db.models import Sum, Max
-        from accounting.services import partner_posted_balance
         from sales.models import SalesInvoice
         from logistics.models import PurchaseInvoice
 
         partner = self.get_object()
         is_supplier = is_creditor_party(partner)
-        debit, credit = partner_posted_balance(partner.tenant_id, partner.id)
-        balance = (credit - debit) if is_supplier else (debit - credit)
+        debit, credit, balance = _partner_balance(partner)
 
         sales_agg = SalesInvoice.objects.filter(
             tenant_id=partner.tenant_id, customer_id=partner.id,
@@ -299,6 +309,15 @@ class PartnerViewSet(viewsets.ModelViewSet):
             out.extend(_party_accrual_invoice_rows(partner))
         return Response(out)
 
+    def _status_filter(self) -> str:
+        params = self.request.query_params
+        raw = (params.get("status") or "").strip().lower()
+        if not raw:
+            return "all" if params.get("include_inactive") in {"1", "true"} else "active"
+        if raw not in PARTNER_STATUS_FILTERS:
+            raise ValidationError({"status": "الحالة يجب أن تكون active أو inactive أو all."})
+        return raw
+
     def get_queryset(self):
         # task11 M7: القراءة كانت بلا فلترة tenant — موردو/زبائن كل الشركات
         # كانوا يظهرون لأي شركة. .none() عند غياب الشركة حتى لا يتسرب شيء.
@@ -307,11 +326,12 @@ class PartnerViewSet(viewsets.ModelViewSet):
             return Partner.objects.none()
         qs = super().get_queryset().filter(tenant=tenant)
         # الموقوف يختفي من القوائم والمنتقيات فقط — كرته وتعديله وكشفه تبقى.
-        if (
-            self.action in {"list", "lookup", "kind_counts"}
-            and self.request.query_params.get("include_inactive") not in {"1", "true"}
-        ):
-            qs = qs.filter(is_active=True)
+        # `status`: active (الافتراضي) | inactive | all؛ و`include_inactive=1|true` اسمٌ
+        # قديم لـ`all` ويغلبه `status` الصريح.
+        if self.action in {"list", "lookup", "kind_counts"}:
+            active_filter = self._status_filter()
+            if active_filter != "all":
+                qs = qs.filter(is_active=(active_filter == "active"))
         # النوع والنطاق يقبلان قيمة أو قائمة مفصولة بفاصلة.
         partner_types = _csv_param(self.request.query_params.get("partner_type"))
         if partner_types:
@@ -361,6 +381,60 @@ class PartnerViewSet(viewsets.ModelViewSet):
             **{kind: Count("id", filter=q) for kind, q in PARTNER_KINDS.items()}
         )
         return Response(counts)
+
+    @action(detail=True, methods=["get"], url_path="deactivation-impact")
+    def deactivation_impact(self, request, pk=None):
+        """ما يعنيه إيقاف الطرف الآن — رصيده المفتوح ومستنداته غير المكتملة — تعرضه
+        الواجهة في نافذة التأكيد قبل الإيقاف. الإيقاف نفسه يبقى جائزاً بأي رصيد.
+        `get_object` حارس العزل: طرف شركةٍ أخرى لا يُبلَغ."""
+        partner = self.get_object()
+        _debit, _credit, balance = _partner_balance(partner)
+        natural, opposite = ("Cr", "Dr") if is_creditor_party(partner) else ("Dr", "Cr")
+        side = natural if balance >= 0 else opposite
+        from inventory.services import draft_documents_holding
+        count, documents = draft_documents_holding(partner.tenant, partner_id=partner.id)
+        return Response({
+            "open_balance": str(balance),
+            "balance_side_label": "" if balance == 0 else ("مدين" if side == "Dr" else "دائن"),
+            "draft_documents_count": count,
+            "draft_documents": documents,
+        })
+
+    @action(detail=False, methods=["post"], url_path="bulk-set-active")
+    def bulk_set_active(self, request):
+        """إيقاف/تنشيط جماعي — أطراف هذه الشركة وحدها. `update` واحد بلا إشارات الحفظ
+        (الحساب المحاسبي لا يتأثر بالإيقاف)."""
+        flag = request.data.get("is_active")
+        if not isinstance(flag, bool):
+            raise ValidationError({"is_active": "يجب أن تكون القيمة true أو false."})
+        try:
+            ids = [int(i) for i in request.data.get("ids") or []]
+        except (TypeError, ValueError):
+            raise ValidationError({"ids": "معرّفات غير صالحة."})
+        tenant = self._get_tenant()
+        if not tenant or not ids:
+            raise ValidationError({"ids": "لم يُختر أي طرف."})
+        matched = list(Partner.objects.filter(tenant=tenant, pk__in=ids).values_list("pk", flat=True))
+        updated = Partner.objects.filter(tenant=tenant, pk__in=matched).update(
+            is_active=flag, updated_at=timezone.now())
+        logger.info(
+            "partner.bulk_set_active tenant=%s is_active=%s ids=%s updated=%s user=%s",
+            tenant.TenantID, flag, ids, updated, getattr(request.user, "pk", None),
+        )
+        if matched:
+            # `partner_ids` يربط الحدث بكل طرفٍ مسّه فيظهر في تبويب «النشاط» لكلٍّ منهم.
+            log_activity(
+                action="update",
+                entity_type="partner",
+                entity_label=f"{len(matched)} طرفاً",
+                description=f'{"نشّط" if flag else "أوقف"} {len(matched)} طرفاً دفعةً واحدة',
+                metadata={"partner_ids": matched[:200], "is_active": flag},
+                partner_ids=matched,
+                request=request,
+                tenant=tenant,
+                user=request.user,
+            )
+        return Response({"updated": updated})
 
     @action(detail=False, methods=["post"], url_path="bulk-scope")
     def bulk_scope(self, request):
@@ -613,6 +687,7 @@ class PartnerViewSet(viewsets.ModelViewSet):
         tenant = self._get_tenant()
         partial = kwargs.pop('partial', False)
         instance = self.get_object()
+        was_active = instance.is_active
 
         # Prepare partner data
         partner_data = request.data.copy()
@@ -635,6 +710,11 @@ class PartnerViewSet(viewsets.ModelViewSet):
             partner.id, tenant.TenantID, partner.partner_type,
             partner.bank_accounts.count(), getattr(request.user, "pk", None),
         )
+        if partner.is_active != was_active:
+            logger.info(
+                "partner.set_active id=%s tenant=%s is_active=%s user=%s",
+                partner.id, tenant.TenantID, partner.is_active, getattr(request.user, "pk", None),
+            )
         return Response(self._with_account_warning(partner))
 
     #: ما يُحذف مع الطرف — بياناته هو لا حركاته: حساباته البنكية وملاحظاته وسجلّ
@@ -754,6 +834,8 @@ class CustomerNoteViewSet(viewsets.ModelViewSet):
             qs = qs.filter(target_type=target_type)
         if target_id:
             qs = qs.filter(target_id=target_id)
+        if self.request.query_params.get('pinned', '').lower() in ('1', 'true'):
+            qs = qs.filter(is_pinned=True)
         return qs
 
     @action(detail=False, methods=["get"], url_path="alerts")

@@ -7,6 +7,7 @@ import {
 } from "../../services/salesApi";
 import { accountingApi } from "../../services/accountingApi";
 import { formatMoney, formatNumber } from "../../utils/formatNumber";
+import { labelWithStatus } from "../../utils/activeStatus";
 import { formatDateLocalized, todayIso } from "../../utils/formatDate";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { useConfirm } from "../../contexts/ConfirmContext";
@@ -36,7 +37,7 @@ const addDays = (days: number): string => {
   return d.toISOString().slice(0, 10);
 };
 
-type Customer = { id: number; name: string };
+type Customer = { id: number; name: string; is_active?: boolean };
 
 export const ReservedStockReportPage: React.FC = () => {
   const confirm = useConfirm();
@@ -76,7 +77,8 @@ export const ReservedStockReportPage: React.FC = () => {
     void (async () => {
       try {
         // T-PARTYPURE: الحجز حجز زبون — القائمة زبائن فقط.
-        const list = await accountingApi.getPartners("Customer") as Customer[];
+        // فلتر تقرير: الزبون الموقوف قد يبقى له حجزٌ قائم فيبقى قابلاً للاختيار.
+        const list = await accountingApi.getPartners("Customer", "all") as Customer[];
         if (alive) setCustomers(list || []);
       } catch { /* الفلتر يبقى «كل الزبائن» — التقرير نفسه لا يتوقف */ }
     })();
@@ -230,7 +232,7 @@ export const ReservedStockReportPage: React.FC = () => {
           onChange={(e) => setCustomerId(e.target.value ? Number(e.target.value) : "")}
         >
           <option value="">كل الزبائن</option>
-          {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          {customers.map((c) => <option key={c.id} value={c.id}>{labelWithStatus(c.name, c.is_active)}</option>)}
         </select>
       </div>
       <div className="ktra-field" style={{ minWidth: "140px" }}>

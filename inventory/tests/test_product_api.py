@@ -232,6 +232,9 @@ class ProductApiTest(APITestCase):
             "indicative_purchase_price", "indicative_purchase_price_source",
             "image_url",
             "serial_required_by",
+            # T2: `is_active` — المنتقي يعرض المعطَّل حين تُطلب `status=all`
+            # (مستندٌ قديم يحمل منتجاً عُطِّل لاحقاً)، فيلزمه أن يعرف أيّها معطَّل.
+            "is_active",
         }
 
     def test_lookup_list_exposes_every_brand_of_a_family_each_with_the_brand_in_its_name(self):

@@ -38,6 +38,9 @@ import {
 import { getScreenColumns } from "../../../utils/procurementColumns";
 import { PROCUREMENT_KIND_LABELS, procurementShareTarget } from "../../../utils/documentBadges";
 import { useConfirm } from "../../../contexts/ConfirmContext";
+import { useMissingPartners } from "../../../hooks/useMissingDocumentRecords";
+import { suppliersService } from "../../../services/firestoreService";
+import { labelWithStatus } from "../../../utils/activeStatus";
 import { useDocumentDraft } from "../../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../../shared/DocumentDraftBanners";
 
@@ -247,7 +250,17 @@ export const PriceOfferForm: React.FC<Props> = ({
   const shipping = shippingIncluded ? 0 : (Number(shippingCost) || 0);
   const grandTotal = afterDiscount + tax + shipping;
 
-  const selectedSupplier = suppliers.find((s) => s.id === supplierId);
+  /* T4: مورّد عرضٍ قائم أُوقف بعد كتابته لا يصل من `partners/lookup/` (نشطون) فكان حقل المورد
+     فارغاً وسقطت لقطته (`supplierSnapshot`) — يُجلب فرداً للعرض والحفظ، ولا يدخل `suppliers`
+     فلا يُقترح لعرضٍ جديد. */
+  const heldSupplierRows = useMissingPartners<Record<string, unknown> & { id: number }>([supplierId], suppliers);
+  const heldSupplier = useMemo(
+    () => heldSupplierRows
+      .map((p) => ({ ...suppliersService._mapPartnerToSupplier(p), isInactive: p.is_active === false }))
+      .find((s) => s.id === supplierId),
+    [heldSupplierRows, supplierId],
+  );
+  const selectedSupplier = suppliers.find((s) => s.id === supplierId) ?? heldSupplier;
   const supplierAddress = selectedSupplier
     ? [selectedSupplier.street, selectedSupplier.city, selectedSupplier.country].filter(Boolean).join(", ")
     : "";
@@ -1121,8 +1134,9 @@ export const PriceOfferForm: React.FC<Props> = ({
           className="ktra-input"
           readOnly
           value={
-            selectedSupplier?.tradeName
-            ?? (supplierDraftName ? `${supplierDraftName} — مبدئي` : factoryName)
+            selectedSupplier
+              ? labelWithStatus(selectedSupplier.tradeName, heldSupplier?.isInactive ? false : null)
+              : (supplierDraftName ? `${supplierDraftName} — مبدئي` : factoryName)
           }
         />
       ),
