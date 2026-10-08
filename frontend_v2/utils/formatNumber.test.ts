@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { formatBalanceWithSide, formatPartyBalance } from './formatNumber.ts';
+import { balanceExportValue, formatBalanceWithSide, formatPartyBalance } from './formatNumber.ts';
 
 // عزلٌ اتّجاهيّ حول الرقم: بدونه يرسم RTL السالبَ في آخر الرقم («1,112-»).
 const iso = (s: string) => `\u2066${s}\u2069`;
@@ -45,4 +45,12 @@ test('القاعدة واحدة للطرفين: الجهة نفسها تُكتب
   // عميلٌ عليه 1000 ومورّدٌ علينا له… عكسه: مورّدٌ دفعنا له زيادةً 1000 — كلاهما «مدين».
   assert.equal(formatPartyBalance(1000, false), formatPartyBalance(-1000, true));
   assert.equal(formatPartyBalance(0, true), '0');
+});
+
+test('التصدير بالإشارة الموحّدة نفسها: المدين سالب، والرقم يبقى رقماً يُحسب (#69)', () => {
+  assert.equal(balanceExportValue(1888), -1888, 'مدين − دائن موجبٌ ⇒ مدين ⇒ سالب كما على الشاشة');
+  assert.equal(balanceExportValue(-1112), 1112);
+  assert.ok(Object.is(balanceExportValue(0), 0), 'الصفر صفرٌ لا «-0» في Excel');
+  assert.equal(balanceExportValue('250.50'), -250.5);
+  assert.equal(balanceExportValue('ليس رقماً'), 0);
 });

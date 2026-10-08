@@ -273,8 +273,10 @@ export const InvoicePartnerLedgerTab: React.FC<{
   if (error) return <TabError message={`تعذّر تحميل حركة الحساب: ${error}`} onRetry={load} />;
 
   const anchor = data?.anchor ?? null;
-  // الجهة من الخادم؛ وبلا كشفٍ (لا طرف على الفاتورة) لا رصيد يُعرض أصلاً.
-  const isCreditor = data?.is_creditor ?? side === "supplier";
+  // الجهة من الخادم **وحده** (`is_creditor` من `partner_account_statement`) — لا تُستنتج
+  // من جهة الفاتورة: عميلٌ من نوعٍ دائن على فاتورة بيع يُقرأ بإشارته الصحيحة. وبلا
+  // طرفٍ على الفاتورة لا كشفَ ولا رصيد (صفرٌ بلا جانب)، فلا جهةَ تُفترض.
+  const isCreditor = data?.is_creditor === true;
 
   return (
     <div className="p-2">

@@ -106,7 +106,8 @@ const openInvoice = async (page: Page): Promise<Calls> => {
           description: 'فاتورة شراء PINV-0088', debit: '0', credit: '500',
           balance_before: '0', running_balance: '500', is_anchor: true,
         }],
-        count: 1, closing_balance: '500', supplier_name: 'مورّد السياق',
+        // `is_creditor` يرسله الخادم دائماً مع الكشف (`partner_account_statement`).
+        count: 1, closing_balance: '500', supplier_name: 'مورّد السياق', is_creditor: true,
         anchor: {
           line_ids: [9], balance_before: '0', balance_after: '500', effect: '500',
         },
@@ -153,6 +154,10 @@ test('تبويبا السياق لا يُجلبان حتى يُفتحا، ثم �
   // أثر الفاتورة = كامل قيد الذمم (500) لا «المتبقّي» منه.
   await expect(page.getByText('أثر الفاتورة').first()).toBeVisible();
   await expect(page.getByText('الرصيد قبل الفاتورة').first()).toBeVisible();
+  // المورّد دائنٌ: «500 دائن» بجهة الخادم — لا «-500 مدين».
+  const after = page.getByText('الرصيد بعدها').first().locator('xpath=following-sibling::div[1]');
+  await expect(after).toContainText('500');
+  await expect(after).toContainText('دائن');
   await page.screenshot({
     path: 'e2e/pay-panel-shots/purchase-supplier-ledger-tab.png', fullPage: true,
   });

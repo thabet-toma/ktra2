@@ -67,6 +67,17 @@ export function formatBalanceWithSide(value: unknown, fallback = "0"): string {
 }
 
 /**
+ * الرصيد **رقماً** للتصدير (Excel/CSV) بالقاعدة الموحّدة نفسها: المدين سالب — فلا يقرأ
+ * المستخدم الملفَّ بعكس إشارة الشاشة وتقارير الخادم (`core/reports/_framework.py` —
+ * `_balance_cells`)، ويبقى رقماً يُجمع ويُحسب لا نصّاً بجانب. `value` = مدين − دائن.
+ */
+export function balanceExportValue(value: unknown): number {
+  const n = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(n) || n === 0) return 0;
+  return -n;
+}
+
+/**
  * رصيد طرف (عميل/مورّد/مخلّص…) بإشارة الخادم إلى القاعدة الموحّدة أعلاه.
  *
  * الخادم يعطي رصيد الطرف بإشارةٍ تختلف بنوعه (`partners/models.py` — `is_creditor_party`):

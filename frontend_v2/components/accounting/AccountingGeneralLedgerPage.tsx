@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { accountingApi } from "../../services/accountingApi";
-import { formatMoney, formatBalanceWithSide, formatNumber } from "../../utils/formatNumber";
+import { formatMoney, formatBalanceWithSide, formatNumber, balanceExportValue } from "../../utils/formatNumber";
 import type { AccountingAccount, GeneralLedgerResponse, CurrencyDto } from "../../types/accounting";
 import {
   KitDocumentShell,
@@ -132,8 +132,8 @@ export const AccountingGeneralLedgerPage: React.FC<AccountingGeneralLedgerPagePr
     { key: "debit", header: "مدين", numeric: true, render: (r) => fmt(Number(r.debit)), exportValue: (r) => Number(r.debit) },
     { key: "credit", header: "دائن", numeric: true, render: (r) => fmt(Number(r.credit)), exportValue: (r) => Number(r.credit) },
     // الجانب صريح: «1,112 دائن» — الإشارة وحدها تُرسم في نهاية الرقم بـRTL فتلتبس.
-    // التصدير يحمل الرصيد الموقّع الخام (لا نص الجانب) كي يُعاد حسابه آلياً.
-    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmtBalance(Number(r.balance)), exportValue: (r) => Number(r.balance) },
+    // التصدير رقمٌ (لا نص الجانب) كي يُعاد حسابه آلياً — بإشارة الشاشة نفسها: المدين سالب (#69).
+    { key: "balance", header: "الرصيد المتراكم", numeric: true, render: (r) => fmtBalance(Number(r.balance)), exportValue: (r) => balanceExportValue(r.balance) },
   ];
 
   const totalDebit = ledgerRows.reduce((s, r) => s + Number(r.debit), 0);
