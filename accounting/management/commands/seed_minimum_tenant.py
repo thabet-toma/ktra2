@@ -81,8 +81,8 @@ class Command(BaseCommand):
             defaults={
                 'start_date': date(year, 1, 1),
                 'end_date': date(year, 12, 31),
+                'status': 'Open',
                 'is_closed': False,
-                'is_active': True,
             }
         )
         if fp_created:
