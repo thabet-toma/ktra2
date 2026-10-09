@@ -194,6 +194,7 @@ DEFAULT_TEMPLATE = 'general'
 _GOODS_MOVEMENT_HIDDEN_PATHS = (
     '/api/inventory/',
     '/api/logistics/supplier-quotations/',
+    '/api/logistics/price-boards/',
     '/api/logistics/purchase-orders/',
     '/api/logistics/deals/',
     '/api/logistics/shipments/',

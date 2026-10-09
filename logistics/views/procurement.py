@@ -14,6 +14,7 @@ from django.db.models import (
     Value,
 )
 from django.db.models.functions import Coalesce
+from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from logistics.models import (
@@ -22,6 +23,7 @@ from logistics.models import (
     PurchaseRFQLine,
     PurchaseRFQRecipient,
     PublicSupplierQuoteRequest,
+    PriceBoard, PriceBoardItem, PriceBoardPrice, PriceBoardSupplier,
     PurchaseOrder,
     LogisticsDeal, LogisticsDealItem, LogisticsShipment,
     LogisticsClearance, LogisticsShipmentDeal,
@@ -37,6 +39,8 @@ from logistics.serializers import (
     PurchaseRFQRecipientSerializer,
     PublicSupplierQuoteRequestSerializer,
     PurchaseOrderSerializer,
+    PriceBoardSerializer, PriceBoardItemSerializer, PriceBoardSupplierSerializer,
+    PriceBoardPriceSerializer, PriceBoardCellInputSerializer, PriceBoardDetailSerializer,
     LogisticsDealSerializer, LogisticsDealListSerializer, LogisticsDealItemSerializer,
     LogisticsShipmentSerializer, LogisticsShipmentListSerializer, LogisticsClearanceSerializer,
     LogisticsPaymentSerializer,
@@ -101,6 +105,9 @@ from logistics.services import (
     confirm_purchase_order,
     approve_public_quote_request,
     reject_public_quote_request,
+    add_price_board_items,
+    add_price_board_supplier,
+    touch_price_board,
 )
 
 logger = logging.getLogger("logistics.views")
@@ -121,7 +128,12 @@ class ProcurementScopeViewPermissionMixin:
     القائمة تُفحَص بـ`?scope=` (وغيابه = المحلّي، مرآةُ افتراض `get_queryset`)،
     والتفصيل بنطاق **المستند نفسه** — وإلا قرأ من مُنح الاستيراد وحده طلبيةً
     محلّيةً بمعرّفها. الكتابة تبقى على فحوصها القائمة (خارج هذا الحارس عمداً).
+
+    `fixed_scope` (PB-1): مورد لا نطاق له على سجلّه (لوحة أسعار الاستيراد) يثبّت
+    نطاقه هنا فيُفحَص دائماً بذلك النطاق لا بـ`?scope=` ولا بـ`obj.scope`.
     """
+
+    fixed_scope = None
 
     def _require_scope_view(self, scope):
         key = PROCUREMENT_SCOPE_VIEW_PERMS.get(scope)
@@ -129,14 +141,14 @@ class ProcurementScopeViewPermissionMixin:
             require_perm(self.request, key)
 
     def list(self, request, *args, **kwargs):
-        scope = str(request.query_params.get('scope') or '').strip()
+        scope = self.fixed_scope or str(request.query_params.get('scope') or '').strip()
         self._require_scope_view(scope or SupplierQuotation.SCOPE_LOCAL)
         return super().list(request, *args, **kwargs)
 
     def get_object(self):
         obj = super().get_object()
         if self.request.method in SAFE_METHODS:
-            self._require_scope_view(obj.scope)
+            self._require_scope_view(self.fixed_scope or obj.scope)
         return obj
 
 
@@ -1243,3 +1255,184 @@ class PurchaseOrderViewSet(BaseTenantViewSet):
         )
 
 
+# ── PB-1: لوحة أسعار الاستيراد ──────────────────────────────────────────────
+class PriceBoardViewSet(ProcurementScopeViewPermissionMixin, BaseTenantViewSet):
+    """جدول مقارنة أسعار لجولة استيراد — منفصلٌ عن `SupplierQuotation`/الطلبية.
+
+    اللوحة «استيراد» دائماً: القراءة تشترط `import.procurement.view`
+    (`fixed_scope`)، والكتابة على فحص الدور القائم كعروض المورّدين تماماً.
+    كلُّ مسارٍ فرعي يمرّ بـ`get_object()` فيرث عزل الشركة (404 لغريبة).
+    """
+
+    serializer_class = PriceBoardSerializer
+    queryset = PriceBoard.objects.all()
+    fixed_scope = SupplierQuotation.SCOPE_IMPORT
+
+    def get_serializer_class(self):
+        if self.action == 'retrieve':
+            return PriceBoardDetailSerializer
+        return PriceBoardSerializer
+
+    def _annotated(self, qs):
+        return qs.annotate(
+            items_count=Count('items', distinct=True),
+            suppliers_count=Count('suppliers', distinct=True),
+            prices_count=Count('items__prices', distinct=True),
+        )
+
+    def get_queryset(self):
+        qs = super().get_queryset()
+        if self.action == 'list':
+            archived = str(self.request.query_params.get('archived') or '0').strip().lower()
+            return self._annotated(
+                qs.filter(is_archived=archived in ('1', 'true')),
+            ).order_by('-updated_at', '-id')
+        if self.action == 'retrieve':
+            return qs.prefetch_related(
+                Prefetch('items', queryset=PriceBoardItem.objects.select_related('product')),
+                Prefetch(
+                    'items__prices',
+                    queryset=PriceBoardPrice.objects.select_related('board_supplier'),
+                ),
+                Prefetch(
+                    'suppliers',
+                    queryset=PriceBoardSupplier.objects.select_related('currency'),
+                ),
+            )
+        return qs
+
+    def _row(self, pk):
+        """صفّ القائمة (بالأعداد) لما أُنشئ/عُدِّل — شكلٌ واحد للقراءة والكتابة."""
+        board = self._annotated(PriceBoard.objects.filter(pk=pk)).get()
+        return PriceBoardSerializer(board, context=self.get_serializer_context()).data
+
+    def create(self, request, *args, **kwargs):
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        board = serializer.save(
+            tenant=get_tenant(request),
+            created_by=request.user if request.user.is_authenticated else None,
+        )
+        logger.info('price_board.create board=%s tenant=%s', board.pk, board.tenant_id)
+        return Response(self._row(board.pk), status=status.HTTP_201_CREATED)
+
+    def update(self, request, *args, **kwargs):
+        board = self.get_object()
+        serializer = self.get_serializer(
+            board, data=request.data, partial=kwargs.get('partial', False),
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response(self._row(board.pk))
+
+    def perform_destroy(self, instance):
+        board_id, tenant_id = instance.pk, instance.tenant_id
+        instance.delete()
+        logger.info('price_board.delete board=%s tenant=%s', board_id, tenant_id)
+
+    # ── البنود (الصفوف) ───────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='items')
+    def add_items(self, request, pk=None):
+        board = self.get_object()
+        raw = request.data.get('items') if isinstance(request.data, dict) else None
+        if not isinstance(raw, list) or not raw:
+            raise ValidationError({'items': 'أرسل بنداً واحداً على الأقل.'})
+        context = self.get_serializer_context()
+        entries, errors = [], []
+        for entry in raw:
+            serializer = PriceBoardItemSerializer(data=entry, context=context)
+            if serializer.is_valid():
+                entries.append(dict(serializer.validated_data))
+                errors.append({})
+            else:
+                errors.append(serializer.errors)
+        if any(errors):
+            raise ValidationError({'items': errors})
+        created, skipped = add_price_board_items(board, entries)
+        return Response(
+            {
+                'created': PriceBoardItemSerializer(created, many=True, context=context).data,
+                'skipped_duplicates': skipped,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'items/(?P<item_id>\d+)')
+    def item_detail(self, request, pk=None, item_id=None):
+        board = self.get_object()
+        item = get_object_or_404(PriceBoardItem, pk=item_id, board=board)
+        if request.method == 'DELETE':
+            item.delete()
+            touch_price_board(board)
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        serializer = PriceBoardItemSerializer(
+            item, data=request.data, partial=True,
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        touch_price_board(board)
+        return Response(serializer.data)
+
+    # ── الموردون (الأعمدة) ────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='suppliers')
+    def add_supplier(self, request, pk=None):
+        board = self.get_object()
+        serializer = PriceBoardSupplierSerializer(
+            data=request.data, context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        supplier = add_price_board_supplier(board, serializer)
+        return Response(
+            PriceBoardSupplierSerializer(
+                supplier, context=self.get_serializer_context(),
+            ).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=['patch', 'delete'], url_path=r'suppliers/(?P<supplier_id>\d+)')
+    def supplier_detail(self, request, pk=None, supplier_id=None):
+        board = self.get_object()
+        supplier = get_object_or_404(PriceBoardSupplier, pk=supplier_id, board=board)
+        if request.method == 'DELETE':
+            deleted_prices = supplier.prices.count()
+            supplier.delete()
+            touch_price_board(board)
+            return Response({'deleted_prices': deleted_prices})
+        serializer = PriceBoardSupplierSerializer(
+            supplier, data=request.data, partial=True,
+            context=self.get_serializer_context(),
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        touch_price_board(board)
+        return Response(serializer.data)
+
+    # ── الخلايا ───────────────────────────────────────────────────────────
+    @action(detail=True, methods=['post'], url_path='set-cell')
+    def set_cell(self, request, pk=None):
+        board = self.get_object()
+        payload = PriceBoardCellInputSerializer(data=request.data)
+        payload.is_valid(raise_exception=True)
+        data = payload.validated_data
+        item = PriceBoardItem.objects.filter(pk=data['item'], board=board).first()
+        if item is None:
+            raise ValidationError({'item': 'البند لا يخص هذه اللوحة.'})
+        column = PriceBoardSupplier.objects.filter(
+            pk=data['board_supplier'], board=board,
+        ).first()
+        if column is None:
+            raise ValidationError({'board_supplier': 'المورد لا يخص هذه اللوحة.'})
+        if data['unit_price'] is None:
+            PriceBoardPrice.objects.filter(board_item=item, board_supplier=column).delete()
+            touch_price_board(board)
+            return Response({'deleted': True})
+        defaults = {'unit_price': data['unit_price'], 'tenant_id': board.tenant_id}
+        if 'note' in data:
+            defaults['note'] = data['note']
+        price, _created = PriceBoardPrice.objects.update_or_create(
+            board_item=item, board_supplier=column, defaults=defaults,
+        )
+        price.board_supplier = column
+        touch_price_board(board)
+        return Response(PriceBoardPriceSerializer(price).data)

@@ -2816,5 +2816,162 @@ class AccrualLineSnapshot(models.Model):
         return f"AccrualLineSnapshot({self.kind}, journal={self.journal_id}, {self.role})"
 
 
+# ── PB-1: لوحة أسعار الاستيراد ──────────────────────────────────────────────
+# جدولُ مقارنةٍ بحت لجولة تسعير: صفوفٌ = بنود، أعمدةٌ = موردون، خلايا = أسعار.
+# **منفصلةٌ بنيوياً عن `SupplierQuotation`/`PurchaseRFQ`**: لا سلسلة حالات ولا
+# ترقيم ولا قيد ولا مخزون ولا تحويل — ما يُكتب هنا لا يمسّ أيّ مستندٍ آخر.
+class PriceBoard(models.Model):
+    id = models.AutoField(primary_key=True, db_column='PriceBoardID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='price_boards',
+    )
+    title = models.CharField(max_length=200, db_column='Title')
+    notes = models.TextField(blank=True, default='', db_column='Notes')
+    is_archived = models.BooleanField(default=False, db_column='IsArchived')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedBy_UserID', related_name='created_price_boards',
+    )
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'price_boards'
+        ordering = ['-updated_at', '-id']
+        indexes = [
+            models.Index(fields=['tenant', 'is_archived', '-updated_at'],
+                         name='idx_pb_tenant_archived'),
+        ]
+
+    def __str__(self):
+        return self.title
+
+
+class PriceBoardItem(models.Model):
+    """صفّ اللوحة. `product` اختياري و`SET_NULL` عمداً: لوحةُ مقارنةٍ لا تحجب
+    حذف منتج — والاسم (`name`) يبقى فيُقرأ الصفّ بعد الحذف."""
+
+    id = models.AutoField(primary_key=True, db_column='PriceBoardItemID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='price_board_items',
+    )
+    board = models.ForeignKey(
+        PriceBoard, on_delete=models.CASCADE, db_column='PriceBoardID',
+        related_name='items',
+    )
+    seq = models.PositiveIntegerField(default=1, db_column='Seq')
+    name = models.CharField(max_length=255, db_column='Name')
+    product = models.ForeignKey(
+        Product, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='ProductID', related_name='price_board_items',
+    )
+    unit_of_measure = models.CharField(
+        max_length=20, blank=True, default='', db_column='UnitOfMeasure',
+    )
+    quantity = models.DecimalField(
+        max_digits=18, decimal_places=3, null=True, blank=True, db_column='Quantity',
+    )
+    note = models.TextField(blank=True, default='', db_column='Note')
+
+    class Meta:
+        db_table = 'price_board_items'
+        ordering = ['seq', 'id']
+        constraints = [
+            models.CheckConstraint(
+                condition=~models.Q(name=''), name='price_board_item_named',
+            ),
+        ]
+
+    def __str__(self):
+        return self.name
+
+
+class PriceBoardSupplier(models.Model):
+    """عمود اللوحة (مورّد). عملتُه وسعرُ صرفها **يُحسمان عند الكتابة** ويُخزَّنان
+    على العمود — لا تُعاد قراءة سعر الصرف لاحقاً فتتغيّر قيمة الخلية بصمت (نفس
+    مبدأ `SupplierQuotation.exchange_rate`). غيابُ سعرٍ مسجَّل لعملةٍ غير الأساس
+    خطأٌ صريح لا 1 صامتة (`logistics.services` — `resolve_price_board_rate`)."""
+
+    id = models.AutoField(primary_key=True, db_column='PriceBoardSupplierID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='price_board_suppliers',
+    )
+    board = models.ForeignKey(
+        PriceBoard, on_delete=models.CASCADE, db_column='PriceBoardID',
+        related_name='suppliers',
+    )
+    seq = models.PositiveIntegerField(default=1, db_column='Seq')
+    supplier_name = models.CharField(max_length=200, db_column='SupplierName')
+    supplier = models.ForeignKey(
+        Partner, on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='SupplierID', related_name='price_board_suppliers',
+    )
+    currency = models.ForeignKey(
+        Currency, on_delete=models.PROTECT, db_column='CurrencyID',
+        related_name='price_board_suppliers',
+    )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, db_column='ExchangeRate',
+    )
+    offer_date = models.DateField(null=True, blank=True, db_column='OfferDate')
+    terms = models.TextField(blank=True, default='', db_column='Terms')
+    # رابط Google Drive ملصوقٌ أو ملفٌّ مرفوع — كلاهما {name,url,type,size}.
+    attachments = models.JSONField(
+        default=list, blank=True, db_column='Attachments',
+        help_text='[{name,url,type,size}] مرفقات عرض المورد',
+    )
+
+    class Meta:
+        db_table = 'price_board_suppliers'
+        ordering = ['seq', 'id']
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(exchange_rate__gt=0),
+                name='price_board_supplier_rate_gt_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return self.supplier_name
+
+
+class PriceBoardPrice(models.Model):
+    """خليّة اللوحة: سعر الوحدة لبندٍ عند مورّد، بعملة عمود المورّد."""
+
+    id = models.AutoField(primary_key=True, db_column='PriceBoardPriceID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='price_board_prices',
+    )
+    board_item = models.ForeignKey(
+        PriceBoardItem, on_delete=models.CASCADE, db_column='PriceBoardItemID',
+        related_name='prices',
+    )
+    board_supplier = models.ForeignKey(
+        PriceBoardSupplier, on_delete=models.CASCADE, db_column='PriceBoardSupplierID',
+        related_name='prices',
+    )
+    unit_price = models.DecimalField(max_digits=18, decimal_places=4, db_column='UnitPrice')
+    note = models.TextField(blank=True, default='', db_column='Note')
+
+    class Meta:
+        db_table = 'price_board_prices'
+        constraints = [
+            models.UniqueConstraint(
+                fields=['board_item', 'board_supplier'], name='uniq_price_board_cell',
+            ),
+            models.CheckConstraint(
+                condition=models.Q(unit_price__gte=0),
+                name='price_board_price_gte_zero',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.board_item_id}×{self.board_supplier_id}={self.unit_price}"
+
+
 # Automatically connect signals for the logistics app
 import logistics.signals

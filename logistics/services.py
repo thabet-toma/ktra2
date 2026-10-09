@@ -3660,3 +3660,101 @@ def post_purchase_return(invoice, *, user=None):
         invoice.id, len(movements), journal.id if journal else None, gross,
     )
     return invoice
+
+
+# ── PB-1: لوحة أسعار الاستيراد ──────────────────────────────────────────────
+PRICE_BOARD_BASE_QUANT = Decimal("0.0001")
+
+
+def price_board_base_currency():
+    """عملة الأساس — نفس اختيار مسارات العروض (`IsBaseCurrency` وإلا أول عملة)."""
+    from tenants.models import Currency
+
+    return (
+        Currency.objects.filter(IsBaseCurrency=True).first()
+        or Currency.objects.order_by('CurrencyID').first()
+    )
+
+
+def price_board_base_value(unit_price, exchange_rate) -> Decimal:
+    """قيمة الخلية بالعملة الأساسية = السعر × سعر صرف **عمودها**، مقرَّبةً إلى 4
+    منازل. المصدر الوحيد لهذا الحساب — الخادم يحسبه والواجهة تعرضه فقط."""
+    return (Decimal(str(unit_price)) * Decimal(str(exchange_rate))).quantize(
+        PRICE_BOARD_BASE_QUANT, rounding=ROUND_HALF_UP,
+    )
+
+
+def resolve_price_board_rate(tenant_id, currency, offer_date=None):
+    """سعر صرف عمودٍ إلى عملة الأساس، أو `None` حين لا سعرَ مسجَّلاً.
+
+    الأساس = 1. غيرُه يُحسم من جدول الأسعار بتاريخ العرض (وإلا اليوم) **ولا
+    يسقط إلى 1 أبداً**: عمودٌ أجنبي بسعر 1 يدخل المقارنة بقيمةٍ ملفَّقة فيبدو
+    أرخص مما هو. المستدعي يحوّل `None` إلى 400 يطلب إدخال السعر يدوياً.
+    """
+    base = price_board_base_currency()
+    if base is None or currency.pk == base.pk:
+        return Decimal('1')
+    from accounting.services import get_exchange_rate
+
+    try:
+        return get_exchange_rate(tenant_id, currency.pk, base.pk, offer_date)
+    except ValidationError:
+        return None
+
+
+def touch_price_board(board):
+    """يرفع `updated_at` للوحة بعد أيّ تعديلٍ في بنودها أو أعمدتها أو خلاياها —
+    فالقائمة مرتّبةٌ به، ولوحةٌ عُمل عليها للتوّ يجب أن تصعد إلى أعلاها."""
+    from logistics.models import PriceBoard
+
+    PriceBoard.objects.filter(pk=board.pk).update(updated_at=timezone.now())
+
+
+def _lock_price_board_top_seq(board, related):
+    """يقفل صفّ اللوحة ويعيد أكبر `seq` في `related` (`items`/`suppliers`) —
+    فلا تأخذ إضافتان متزامنتان الترقيمَ نفسه. يُستدعى داخل `transaction.atomic`."""
+    from django.db.models import Max
+    from logistics.models import PriceBoard
+
+    PriceBoard.objects.select_for_update().filter(pk=board.pk).first()
+    return getattr(board, related).aggregate(top=Max('seq'))['top'] or 0
+
+
+def add_price_board_supplier(board, serializer):
+    """يحفظ عمود مورّدٍ جديد (من مُسلسِلٍ صالح) بترقيمٍ يلحق بعد الأكبر."""
+    with transaction.atomic():
+        top = _lock_price_board_top_seq(board, 'suppliers')
+        supplier = serializer.save(tenant_id=board.tenant_id, board=board, seq=top + 1)
+    touch_price_board(board)
+    return supplier
+
+
+def add_price_board_items(board, entries):
+    """يضيف بنوداً إلى لوحة ويعيد `(created, skipped_duplicates)`.
+
+    المكرَّر = الاسم نفسه بعد `strip` و`casefold` داخل اللوحة وداخل الدفعة
+    ذاتها (يُؤخذ الأول). `seq` يلحق بعد أكبر قيمةٍ حالية. القفل على صفّ اللوحة
+    يمنع دفعتين متزامنتين من أخذ الترقيم نفسه.
+    """
+    from logistics.models import PriceBoardItem
+
+    with transaction.atomic():
+        seq = _lock_price_board_top_seq(board, 'items')
+        existing = {
+            name.strip().casefold()
+            for name in board.items.values_list('name', flat=True)
+        }
+        created, skipped = [], 0
+        for entry in entries:
+            key = entry['name'].strip().casefold()
+            if key in existing:
+                skipped += 1
+                continue
+            existing.add(key)
+            seq += 1
+            created.append(PriceBoardItem.objects.create(
+                tenant_id=board.tenant_id, board=board, seq=seq, **entry,
+            ))
+    if created:
+        touch_price_board(board)
+    return created, skipped

@@ -31,6 +31,7 @@ import {
 } from "../../services/procurementDocumentsApi";
 import { PurchaseRFQForm } from "./price-offers/PurchaseRFQForm";
 import { PublicQuoteRequestsSection } from "./price-offers/PublicQuoteRequestsSection";
+import { PriceBoardList } from "./price-offers/board/PriceBoardList";
 import { quotationToDraftDeal } from "../../utils/quotationToDraftDeal";
 import { rfqToDraftOffer } from "../../utils/rfqToDraftOffer";
 import { documentSerialDisplay, elideDocumentNumber } from "../../utils/documentNumberDisplay";
@@ -93,7 +94,7 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
   // بلا سعر إلزامي) وإنشاء «عرض» (`SupplierQuotation`، كما كانت). `rfq-form`
   // مسارٌ مستقلّ لا يمرّ بـ`offerType` المحذوف.
   const [viewMode, setViewMode] = useState<"list" | "form" | "rfq-form">("list");
-  const [activeTab, setActiveTab] = useState<"offers" | "rfqs">("offers");
+  const [activeTab, setActiveTab] = useState<"offers" | "rfqs" | "boards">("offers");
   const [offers, setOffers] = useState<PriceOffer[]>([]);
   const [rfqs, setRfqs] = useState<PurchaseRFQDto[]>([]);
   const [currentRfq, setCurrentRfq] = useState<PurchaseRFQDto | null>(null);
@@ -792,8 +793,20 @@ export const PriceOfferManagement: React.FC<Props> = (props) => {
           onClick={() => setActiveTab("rfqs")}>
           الطلبيات ({rfqs.length})
         </button>
+        {/* PB-2: جداول الأسعار (أصناف × موردون) للاستيراد وحده — الشراء المحلي بلا هذا التبويب. */}
+        {scope === "import" && (
+          <button type="button"
+            className={`rounded-t-lg px-3 py-1.5 text-xs font-semibold ${
+              activeTab === "boards" ? "ktra-bg-panel ktra-text-ink" : "ktra-text-soft"
+            }`}
+            onClick={() => setActiveTab("boards")}>
+            جداول الأسعار
+          </button>
+        )}
       </div>
-      {activeTab === "rfqs" ? (
+      {scope === "import" && activeTab === "boards" ? (
+        <PriceBoardList products={items} suppliers={suppliers} />
+      ) : activeTab === "rfqs" ? (
         <CommercialDocumentsList<PurchaseRFQDto>
           title={scope === "import" ? "طلبيات دولية" : "طلبيات الشراء"}
           state="بلا سعر إلزامي — يُرسل للموردين ليسعّروا"

@@ -45,6 +45,10 @@ from logistics.models import (
     PurchaseRFQRecipient,
     PublicSupplierQuoteRequest,
     PublicSupplierQuoteRequestLine,
+    PriceBoard,
+    PriceBoardItem,
+    PriceBoardPrice,
+    PriceBoardSupplier,
     PurchaseOrder,
     PurchaseOrderLine,
     LogisticsDeal,
@@ -164,6 +168,30 @@ class SupplierQuotationLineSerializer(serializers.ModelSerializer):
 
     def get_internal_note_by_name(self, obj):
         return obj.internal_note_by.get_username() if obj.internal_note_by_id else ''
+
+def validate_attachments_list(attachments, *, http_only=False):
+    """قاعدة مرفقات المستند: قائمةُ قواميس لكلٍّ منها `url` غير فارغ.
+
+    مصدرٌ واحد لعرض المورّد ولوحة الأسعار (PB-1). `http_only` تضيف شرط أن
+    يبدأ الرابط بـ`http://` أو `https://` — اللوحة تقبل رابط Google Drive
+    ملصوقاً فيجب ألّا يمرّ `javascript:` ولا ما يشبهه.
+    """
+    if not isinstance(attachments, list):
+        raise serializers.ValidationError({
+            'attachments': 'المرفقات يجب أن تكون قائمة ملفات.',
+        })
+    for entry in attachments:
+        if not isinstance(entry, dict) or not str(entry.get('url') or '').strip():
+            raise serializers.ValidationError({
+                'attachments': 'كل مرفق يجب أن يحمل رابط ملف (url).',
+            })
+        if http_only and not str(entry['url']).strip().lower().startswith(
+            ('http://', 'https://'),
+        ):
+            raise serializers.ValidationError({
+                'attachments': 'رابط المرفق يجب أن يبدأ بـ http:// أو https://.',
+            })
+
 
 class SupplierQuotationSerializer(serializers.ModelSerializer):
     lines = SupplierQuotationLineSerializer(many=True)
@@ -421,15 +449,7 @@ class SupplierQuotationSerializer(serializers.ModelSerializer):
 
         attachments = attrs.get('attachments')
         if attachments is not None:
-            if not isinstance(attachments, list):
-                raise serializers.ValidationError({
-                    'attachments': 'المرفقات يجب أن تكون قائمة ملفات.',
-                })
-            for entry in attachments:
-                if not isinstance(entry, dict) or not str(entry.get('url') or '').strip():
-                    raise serializers.ValidationError({
-                        'attachments': 'كل مرفق يجب أن يحمل رابط ملف (url).',
-                    })
+            validate_attachments_list(attachments)
 
         quotation_date = attrs.get(
             'quotation_date', getattr(instance, 'quotation_date', None),
@@ -1075,3 +1095,154 @@ class PurchaseOrderSerializer(serializers.ModelSerializer):
             ])
         self._recalculate(instance)
         return instance
+
+
+# ── PB-1: لوحة أسعار الاستيراد ──────────────────────────────────────────────
+PRICE_BOARD_NO_RATE_MESSAGE = 'لا يوجد سعر صرف مسجّل لهذه العملة — أدخله يدوياً'
+
+
+class PriceBoardSerializer(serializers.ModelSerializer):
+    """صفّ القائمة وجسم الإنشاء/التعديل. الأعداد من `annotate` في العرض."""
+
+    items_count = serializers.IntegerField(read_only=True)
+    suppliers_count = serializers.IntegerField(read_only=True)
+    prices_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = PriceBoard
+        fields = [
+            'id', 'title', 'notes', 'is_archived', 'created_at', 'updated_at',
+            'items_count', 'suppliers_count', 'prices_count',
+        ]
+        read_only_fields = ['id', 'created_at', 'updated_at']
+
+
+class PriceBoardItemSerializer(serializers.ModelSerializer):
+    product_name = serializers.SerializerMethodField()
+    quantity = serializers.DecimalField(
+        max_digits=18, decimal_places=3, required=False, allow_null=True, min_value=0,
+    )
+
+    class Meta:
+        model = PriceBoardItem
+        fields = [
+            'id', 'seq', 'name', 'product', 'product_name',
+            'unit_of_measure', 'quantity', 'note',
+        ]
+        read_only_fields = ['id', 'seq']
+
+    def get_product_name(self, obj):
+        from inventory.services import product_display_name
+
+        return product_display_name(obj.product) if obj.product_id else ''
+
+    def validate_product(self, product):
+        tenant = get_tenant(self.context.get('request'))
+        if product is not None and (tenant is None or product.tenant_id != tenant.pk):
+            raise serializers.ValidationError('المنتج لا يخص هذه الشركة.')
+        return product
+
+
+class PriceBoardSupplierSerializer(serializers.ModelSerializer):
+    currency_code = serializers.CharField(source='currency.Code', read_only=True)
+    exchange_rate = serializers.DecimalField(
+        max_digits=18, decimal_places=6, required=False, min_value=Decimal('0.000001'),
+    )
+
+    class Meta:
+        model = PriceBoardSupplier
+        fields = [
+            'id', 'seq', 'supplier_name', 'supplier', 'currency', 'currency_code',
+            'exchange_rate', 'offer_date', 'terms', 'attachments',
+        ]
+        read_only_fields = ['id', 'seq']
+
+    def validate_supplier(self, supplier):
+        tenant = get_tenant(self.context.get('request'))
+        if supplier is not None and (tenant is None or supplier.tenant_id != tenant.pk):
+            raise serializers.ValidationError('المورد لا يخص هذه الشركة.')
+        return supplier
+
+    def validate(self, attrs):
+        if 'attachments' in attrs:
+            validate_attachments_list(attrs['attachments'], http_only=True)
+        instance = self.instance
+        from logistics.services import price_board_base_currency
+
+        base = price_board_base_currency()
+        currency = attrs.get('currency', getattr(instance, 'currency', None))
+        if base is not None and currency is not None and currency.pk == base.pk:
+            # عمودٌ بعملة الأساس سعرُه 1 حتماً: غيرُه يضخّم أسعاره في المقارنة بصمت.
+            attrs['exchange_rate'] = Decimal('1')
+            return attrs
+        currency_changed = (
+            'currency' in attrs and instance is not None
+            and attrs['currency'].pk != instance.currency_id
+        )
+        # سعر الصرف يُحسم عند الكتابة: عند الإنشاء بلا سعر، أو عند تغيير العملة
+        # بلا سعرٍ صريح. تعديلٌ آخر (شروط، تاريخ…) لا يلمس السعر المخزَّن.
+        if 'exchange_rate' not in attrs and (instance is None or currency_changed):
+            from logistics.services import resolve_price_board_rate
+
+            tenant = get_tenant(self.context.get('request'))
+            offer_date = attrs.get(
+                'offer_date', instance.offer_date if instance is not None else None,
+            )
+            rate = resolve_price_board_rate(tenant.pk, attrs['currency'], offer_date)
+            if rate is None:
+                raise serializers.ValidationError(
+                    {'exchange_rate': [PRICE_BOARD_NO_RATE_MESSAGE]},
+                )
+            attrs['exchange_rate'] = rate
+        return attrs
+
+
+class PriceBoardPriceSerializer(serializers.ModelSerializer):
+    item = serializers.PrimaryKeyRelatedField(source='board_item', read_only=True)
+    unit_price_base = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PriceBoardPrice
+        fields = ['id', 'item', 'board_supplier', 'unit_price', 'unit_price_base', 'note']
+
+    def get_unit_price_base(self, obj):
+        from logistics.services import price_board_base_value
+
+        return str(price_board_base_value(obj.unit_price, obj.board_supplier.exchange_rate))
+
+
+class PriceBoardCellInputSerializer(serializers.Serializer):
+    item = serializers.IntegerField()
+    board_supplier = serializers.IntegerField()
+    unit_price = serializers.DecimalField(
+        max_digits=18, decimal_places=4, allow_null=True, min_value=0,
+    )
+    note = serializers.CharField(required=False, allow_blank=True)
+
+
+class PriceBoardDetailSerializer(serializers.ModelSerializer):
+    """اللوحة كاملةً في استجابةٍ واحدة. يتوقّع `prefetch_related` من العرض
+    (`items__prices` بـ`board_supplier` محمَّلاً) كي لا يتضاعف عدد الاستعلامات
+    مع حجم اللوحة — يحرسه `PriceBoardDetailTest`."""
+
+    base_currency_code = serializers.SerializerMethodField()
+    items = PriceBoardItemSerializer(many=True, read_only=True)
+    suppliers = PriceBoardSupplierSerializer(many=True, read_only=True)
+    prices = serializers.SerializerMethodField()
+
+    class Meta:
+        model = PriceBoard
+        fields = [
+            'id', 'title', 'notes', 'is_archived', 'created_at', 'updated_at',
+            'base_currency_code', 'items', 'suppliers', 'prices',
+        ]
+
+    def get_base_currency_code(self, obj):
+        from logistics.services import price_board_base_currency
+
+        base = price_board_base_currency()
+        return base.Code if base is not None else ''
+
+    def get_prices(self, obj):
+        rows = [price for item in obj.items.all() for price in item.prices.all()]
+        return PriceBoardPriceSerializer(rows, many=True, context=self.context).data

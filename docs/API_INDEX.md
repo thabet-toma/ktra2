@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **967**
+عدد النقاط: **974**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -479,6 +479,13 @@
 | `/api/logistics/local-shipments/{pk}/unpost/` | `LocalShipmentViewSet` | `logistics/views/transport.py` |
 | `/api/logistics/payments/` | `LogisticsPaymentViewSet` | `logistics/views/deals.py` |
 | `/api/logistics/payments/{pk}/` | `LogisticsPaymentViewSet` | `logistics/views/deals.py` |
+| `/api/logistics/price-boards/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/items/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/items/{item_id}/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/set-cell/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/suppliers/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
+| `/api/logistics/price-boards/{pk}/suppliers/{supplier_id}/` | `PriceBoardViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/public-supplier-quote-requests/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/public-supplier-quote-requests/{pk}/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |
 | `/api/logistics/public-supplier-quote-requests/{pk}/approve/` | `PublicSupplierQuoteRequestViewSet` | `logistics/views/procurement.py` |

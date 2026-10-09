@@ -2,7 +2,7 @@ from django.urls import path, include
 from rest_framework.routers import DefaultRouter
 from .views import (
     SupplierQuotationViewSet, PurchaseRFQViewSet,
-    PublicSupplierQuoteRequestViewSet, PurchaseOrderViewSet,
+    PublicSupplierQuoteRequestViewSet, PurchaseOrderViewSet, PriceBoardViewSet,
     LogisticsDealViewSet, LogisticsShipmentViewSet,
     LogisticsClearanceViewSet, ClearanceItemTypeViewSet, AccrualSnapshotViewSet,
     LogisticsPaymentViewSet, PurchaseInvoiceViewSet,
@@ -20,6 +20,7 @@ router.register(
     basename='public-supplier-quote-requests',
 )
 router.register(r'purchase-orders', PurchaseOrderViewSet, basename='purchase-orders')
+router.register(r'price-boards', PriceBoardViewSet, basename='price-boards')
 router.register(r'deals', LogisticsDealViewSet)
 router.register(r'shipments', LogisticsShipmentViewSet)
 router.register(r'clearances', LogisticsClearanceViewSet)

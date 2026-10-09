@@ -10,7 +10,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { usePasteZone } from '../../utils/clipboardImage';
 import { formatBytes } from '../../utils/formatBytes';
 
-export type FileDropAccept = 'image' | 'pdf' | 'image-pdf';
+export type FileDropAccept = 'image' | 'pdf' | 'image-pdf' | 'image-pdf-excel';
 
 interface FileDropZoneProps {
   /** المخرج الوحيد: الملفات المقبولة بعد فحص النوع والحجم. */
@@ -48,6 +48,10 @@ const ACCEPT_ATTR: Record<FileDropAccept, string> = {
   image: 'image/*',
   pdf: 'application/pdf',
   'image-pdf': 'image/*,application/pdf',
+  // الامتدادات بجانب الأنواع: ويندوز بلا Office يسلّم ملف xlsx بنوع فارغ، فمنتقي الملفات
+  // يُخفيه إن اكتفينا بنوع MIME.
+  'image-pdf-excel':
+    'image/*,application/pdf,.xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel',
 };
 
 const ACCEPT_LABEL: Record<FileDropAccept, string> = {
@@ -55,13 +59,24 @@ const ACCEPT_LABEL: Record<FileDropAccept, string> = {
   // منطقة PDF تجاور دائماً منطقة صور (§4.2)، فالرسالة تدلّ على البديل بدل أن ترفض فقط.
   pdf: 'ملفات PDF فقط — الصور تُرفَع في منطقة الصور',
   'image-pdf': 'الصور وملفات PDF فقط',
+  'image-pdf-excel': 'الصور وملفات PDF وExcel فقط',
 };
+
+const EXCEL_TYPES = new Set([
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  'application/vnd.ms-excel',
+]);
 
 function matchesAccept(file: File, accept: FileDropAccept): boolean {
   const isImage = file.type.startsWith('image/');
   const isPdf = file.type === 'application/pdf';
   if (accept === 'image') return isImage;
   if (accept === 'pdf') return isPdf;
+  if (accept === 'image-pdf-excel') {
+    // النوع قد يصل فارغاً (سحب/إفلات على ويندوز) فالامتداد هو الحكم حينها.
+    const isExcel = EXCEL_TYPES.has(file.type) || /\.xlsx?$/i.test(file.name);
+    return isImage || isPdf || isExcel;
+  }
   return isImage || isPdf;
 }
 

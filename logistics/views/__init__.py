@@ -7,6 +7,7 @@ from .procurement import (
     PurchaseRFQViewSet,
     PublicSupplierQuoteRequestViewSet,
     PurchaseOrderViewSet,
+    PriceBoardViewSet,
 )
 from .deals import LogisticsDealViewSet, LogisticsPaymentViewSet
 from .shipments import LogisticsShipmentViewSet
@@ -29,7 +30,7 @@ from .purchase_settings import PurchaseSettingsViewSet
 
 __all__ = [
     "SupplierQuotationViewSet", "PurchaseRFQViewSet",
-    "PublicSupplierQuoteRequestViewSet", "PurchaseOrderViewSet",
+    "PublicSupplierQuoteRequestViewSet", "PurchaseOrderViewSet", "PriceBoardViewSet",
     "LogisticsDealViewSet", "LogisticsPaymentViewSet",
     "LogisticsShipmentViewSet", "LogisticsClearanceViewSet", "ClearanceItemTypeViewSet",
     "AccrualSnapshotViewSet",
