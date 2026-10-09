@@ -271,6 +271,12 @@ class SupplierPaymentSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'amount': 'قيمة غير صالحة.'})
         if not (attrs.get('payment_date') or (current.payment_date if current else None)):
             raise serializers.ValidationError({'payment_date': 'تاريخ الدفعة مطلوب.'})
+        # سعر الصرف من الطلب: الشيكل 1 بلا خانة، وغيره إلزاميٌّ لا افتراضي 1 من النموذج.
+        from accounting.services import require_payment_rate
+        attrs['exchange_rate'] = require_payment_rate(
+            attrs.get('currency', current.currency if current else None),
+            attrs.get('exchange_rate', current.exchange_rate if current else None),
+        )
         # T-DEFACC: الصندوق يُملأ من افتراضي الشركة بدل رفض السند لفراغه.
         attrs = apply_default_cash_account(self, attrs)
         invoice = attrs.get(

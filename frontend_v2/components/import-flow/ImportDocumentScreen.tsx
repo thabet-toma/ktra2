@@ -28,7 +28,9 @@ import { ImportPartyDuesPanel, type ImportPartyDue } from "./ImportPartyDuesPane
 import { purchaseInvoiceApi } from "@/services/purchaseInvoiceApi";
 import { shipmentsService } from "@/services/shipmentsService";
 import { openInNewTab } from "@/utils/openInNewTab";
-import { usdRateForPayload } from "@/utils/paymentRate";
+import { isBaseCurrency, rateForPayload, usdRateForPayload, validateRate } from "@/utils/paymentRate";
+import { ExchangeRateField } from "@/components/shared/ExchangeRateField";
+import type { CurrencyDto } from "@/types/accounting";
 import { captureScrollPosition, restoreScrollPosition as applyScrollPosition, type ScrollPositionSnapshot } from "@/utils/scrollPosition";
 import { formatDateLocalized } from "../../utils/formatDate";
 import { PostedTextDialog } from "@/components/shared/PostedTextDialog";
@@ -119,6 +121,12 @@ function VoucherLink({ row }: { row: VoucherAllocationRow }) {
 const withOnAccountNote = (msg: string, voucher?: { id: number; amount: string } | null) =>
   voucher ? `${msg} وفُصل ${fmt(voucher.amount)} ₪ سند صرف #${voucher.id} تحت الحساب.` : msg;
 
+/** عملة الدفعة المختارة: الصريحة، وإلا الأساسية (الشيكل) — بلا قائمة عملات تُعامَل أساسية. */
+const payCurrency = (list: CurrencyDto[], id: number | "") => {
+  const cur = list.find((c) => c.CurrencyID === id) ?? list.find((c) => isBaseCurrency(c)) ?? null;
+  return { isBase: isBaseCurrency(cur), id: cur?.CurrencyID as number };
+};
+
 // G6: تحقّق حقلي — عند تمرير `error` يُحاط الحقل بإطار أحمر وتظهر الرسالة أسفله.
 const fld = (label: string, node: React.ReactNode, error?: string | null) => (
   <label
@@ -132,6 +140,48 @@ const fld = (label: string, node: React.ReactNode, error?: string | null) => (
     ) : null}
   </label>
 );
+
+/**
+ * عملة الدفعة وسعرها لدفعات الصندوق (التخليص والنقل المحلي): العملة تبدأ بالشيكل،
+ * ولا يظهر سعر الصرف إلا لعملةٍ أجنبية — وبالشيكل لا شيء يتغيّر عن السابق.
+ */
+const PayCurrencyRate: React.FC<{
+  currencies: CurrencyDto[];
+  currencyId: number | "";
+  onCurrency: (id: number | "") => void;
+  rate: string;
+  onRate: (value: string) => void;
+  date: string;
+  tried: boolean;
+}> = ({ currencies, currencyId, onCurrency, rate, onRate, date, tried }) => {
+  if (currencies.length === 0) return null;
+  const base = currencies.find((c) => isBaseCurrency(c)) ?? null;
+  const cur = currencies.find((c) => c.CurrencyID === currencyId) ?? base;
+  const isBase = isBaseCurrency(cur);
+  return (
+    <>
+      {fld("العملة", (
+        <select
+          className="ktra-input"
+          value={cur?.CurrencyID ?? ""}
+          onChange={(e) => { onCurrency(e.target.value ? Number(e.target.value) : ""); onRate(""); }}
+        >
+          {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
+        </select>
+      ))}
+      <ExchangeRateField
+        currencyCode={cur?.Code ?? ""}
+        isBase={isBase}
+        value={rate}
+        onChange={onRate}
+        date={date}
+        fromCurrencyId={cur?.CurrencyID}
+        baseCurrencyId={base?.CurrencyID}
+        error={tried ? validateRate(rate) : undefined}
+      />
+    </>
+  );
+};
 
 interface ImportDocumentScreenProps {
   shipmentId: string | null;
@@ -449,6 +499,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
   const [payNotes, setPayNotes] = useState("");
   const [cashBoxes, setCashBoxes] = useState<CashBoxLedgerLink[]>([]);
   const [payCashBoxId, setPayCashBoxId] = useState("");
+  // عملة دفعة الصندوق (""= الشيكل الافتراضي) وسعرها — لكل نموذجٍ حالته، والسعر يكتبه المستخدم.
+  const [currencyList, setCurrencyList] = useState<CurrencyDto[]>([]);
+  const [clearanceCurrencyId, setClearanceCurrencyId] = useState<number | "">("");
+  const [clearanceRate, setClearanceRate] = useState("");
+  const [clearanceRateTried, setClearanceRateTried] = useState(false);
+  const [localCurrencyId, setLocalCurrencyId] = useState<number | "">("");
+  const [localRate, setLocalRate] = useState("");
+  const [localRateTried, setLocalRateTried] = useState(false);
   // «تسجيل سريع» لتكلفة التخليص: إجمالي واحد بدون بنود مفصّلة
   const [quickClearanceTotal, setQuickClearanceTotal] = useState("");
   const [showAdvancedShipment, setShowAdvancedShipment] = useState(false);
@@ -1206,7 +1264,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
 
   const handlePayLocal = useCallback(async () => {
     if (!payingLocalId || !payCashBoxId || Number(localPayAmount) <= 0) return;
-    if (!(await confirmOverpaymentSplit("local", payingLocalId, localPayAmount, "الناقل"))) return;
+    const localCur = payCurrency(currencyList, localCurrencyId);
+    setLocalRateTried(true);
+    if (!localCur.isBase) {
+      const rateError = validateRate(localRate);
+      if (rateError) { setError(rateError); return; }
+    }
+    // فحص الزائد بالشيكل: لا معنى لمقارنة مبلغٍ أجنبي بمتبقٍّ بالشيكل — الخادم يفصل على كل حال.
+    if (localCur.isBase && !(await confirmOverpaymentSplit("local", payingLocalId, localPayAmount, "الناقل"))) return;
     setSaving(true); setError(null);
     try {
       const res = await payLocalShipmentFromCashBox(payingLocalId, {
@@ -1214,10 +1279,15 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         cash_box_external_id: payCashBoxId,
         payment_date: localPayDate || undefined,
         notes: localPayNotes || undefined,
+        // العملة صريحةً دائماً متى عُرفت — غيابها يجعل الخادم يأخذ عملة المستند فيطلب سعراً لدفعة شيكل.
+        ...(localCur.id ? { currency_id: localCur.id } : {}),
+        ...(localCur.isBase ? {} : { exchange_rate: rateForPayload(false, localRate) }),
       });
       setPayingLocalId(null);
       setLocalPayAmount("");
       setLocalPayNotes("");
+      setLocalRate("");
+      setLocalRateTried(false);
       await reloadLocal();
       toast(withOnAccountNote("تم تسجيل دفعة الناقل وبقيت داخل رحلة الاستيراد.", res.on_account_voucher), "success");
     } catch (e) {
@@ -1225,7 +1295,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, reloadLocal, toast, confirmOverpaymentSplit]);
+  }, [payingLocalId, payCashBoxId, localPayAmount, localPayDate, localPayNotes, currencyList, localCurrencyId, localRate, reloadLocal, toast, confirmOverpaymentSplit]);
 
   // ── تراجع عن الترحيل (task17 — كانت الـ endpoints جاهزة backend بلا واجهة) ──
   const handleUnpostShipment = useCallback(async () => {
@@ -1277,6 +1347,28 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } catch { /* ignore */ }
   }, [clearance]);
 
+  // العملات مرة واحدة — بلا قائمة لا يظهر اختيار عملة والدفع شيكلاً كما كان.
+  useEffect(() => {
+    let alive = true;
+    accountingApi.getCurrencies()
+      .then((list) => { if (alive) setCurrencyList(list as CurrencyDto[]); })
+      .catch(() => { /* الدفع بالشيكل يبقى متاحاً */ });
+    return () => { alive = false; };
+  }, []);
+
+  // عملة الدفعة تتبع عملة الصندوق المختار (الخادم يرفض الدفع بالشيكل من صندوقٍ أجنبي)؛
+  // ويبقى للمستخدم تغييرها بعد ذلك. السعر يُفرَّغ مع كل تبديل.
+  useEffect(() => {
+    const box = cashBoxes.find((b) => b.external_id === payCashBoxId);
+    const cur = box ? currencyList.find((c) => c.Code === box.currency_code) : undefined;
+    if (!cur) return;
+    const id = isBaseCurrency(cur) ? "" : cur.CurrencyID;
+    setClearanceCurrencyId(id);
+    setLocalCurrencyId(id);
+    setClearanceRate("");
+    setLocalRate("");
+  }, [payCashBoxId, cashBoxes, currencyList]);
+
   // Load cash boxes once (used in E-payment form)
   useEffect(() => {
     if (cashBoxes.length > 0) return;
@@ -1298,7 +1390,14 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
       setError("اختر الصندوق قبل تسجيل الدفعة.");
       return;
     }
-    if (!(await confirmOverpaymentSplit("clearance", clearance.id, payAmount, "المخلّص"))) return;
+    const clearanceCur = payCurrency(currencyList, clearanceCurrencyId);
+    setClearanceRateTried(true);
+    if (!clearanceCur.isBase) {
+      const rateError = validateRate(clearanceRate);
+      if (rateError) { setError(rateError); return; }
+    }
+    // فحص الزائد بالشيكل: لا معنى لمقارنة مبلغٍ أجنبي بمتبقٍّ بالشيكل — الخادم يفصل على كل حال.
+    if (clearanceCur.isBase && !(await confirmOverpaymentSplit("clearance", clearance.id, payAmount, "المخلّص"))) return;
     setSaving(true); setError(null);
     try {
       const res = await payClearanceFromCashBox(clearance.id, {
@@ -1307,8 +1406,13 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
         payment_kind: "clearance",
         payment_date: payDate || undefined,
         notes: payNotes || undefined,
+        // العملة صريحةً دائماً متى عُرفت — غيابها يجعل الخادم يأخذ عملة المستند فيطلب سعراً لدفعة شيكل.
+        ...(clearanceCur.id ? { currency_id: clearanceCur.id } : {}),
+        ...(clearanceCur.isBase ? {} : { exchange_rate: rateForPayload(false, clearanceRate) }),
       });
       setShowPaymentForm(false);
+      setClearanceRate("");
+      setClearanceRateTried(false);
       setPayAmount("");
       setPayDate(new Date().toISOString().slice(0, 10));
       setPayNotes("");
@@ -1319,7 +1423,7 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
     } finally {
       setSaving(false);
     }
-  }, [clearance, payAmount, payDate, payNotes, payCashBoxId, reloadPayments, toast, confirmOverpaymentSplit]);
+  }, [clearance, payAmount, payDate, payNotes, payCashBoxId, currencyList, clearanceCurrencyId, clearanceRate, reloadPayments, toast, confirmOverpaymentSplit]);
 
   const openClearancePayment = useCallback(() => {
     setPayAmount(String(clearanceSettlementOf(clearance, clearanceForm, clearancePayments).remaining));
@@ -2223,6 +2327,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-4">
             {fld("المبلغ", <input className="ktra-input" type="number" step="0.01" value={localPayAmount} onChange={(e) => setLocalPayAmount(e.target.value)} />)}
             {fld("الصندوق", <select className="ktra-input" value={payCashBoxId} onChange={(e) => setPayCashBoxId(e.target.value)}><option value="">— اختر —</option>{cashBoxes.map((box) => <option key={box.external_id} value={box.external_id}>{box.name} ({box.currency_code})</option>)}</select>)}
+            <PayCurrencyRate
+              currencies={currencyList} currencyId={localCurrencyId} onCurrency={setLocalCurrencyId}
+              rate={localRate} onRate={setLocalRate} date={localPayDate} tried={localRateTried}
+            />
             {fld("التاريخ", <input className="ktra-input" type="date" value={localPayDate} onChange={(e) => setLocalPayDate(e.target.value)} />)}
             {fld("ملاحظات", <input className="ktra-input" value={localPayNotes} onChange={(e) => setLocalPayNotes(e.target.value)} />)}
           </div>
@@ -2590,6 +2698,10 @@ export function ImportDocumentScreen({ shipmentId, onClose }: ImportDocumentScre
                 <option key={cb.external_id} value={cb.external_id}>{cb.name} ({cb.currency_code})</option>
               ))}
             </select>)}
+            <PayCurrencyRate
+              currencies={currencyList} currencyId={clearanceCurrencyId} onCurrency={setClearanceCurrencyId}
+              rate={clearanceRate} onRate={setClearanceRate} date={payDate} tried={clearanceRateTried}
+            />
             {fld("التاريخ", <input className="ktra-input" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />)}
             {fld("ملاحظات", <input className="ktra-input" value={payNotes} onChange={(e) => setPayNotes(e.target.value)} />)}
           </div>

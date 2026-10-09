@@ -92,6 +92,9 @@ class Command(BaseCommand):
             return "بلا طرف — لا يمكن تحديد حساب الذمم"
         if cheque.status in ("Returned", "Settled"):
             return f"حالة «{cheque.status}» منتهية — يحتاج مراجعة يدوية"
+        if cheque.currency_id and not cheque.currency.IsBaseCurrency:
+            # سندٌ أجنبي يلزمه سعر يوم الشيك — لا يُخمَّن ولا يُرحَّل بسعر 1.
+            return f"عملة {cheque.currency.Code} — سجّل سنده يدوياً بسعر صرفه"
         return None
 
     def _wrap(self, cheque, cash_account):

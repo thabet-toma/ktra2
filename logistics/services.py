@@ -1904,6 +1904,7 @@ def settle_attached_purchase_intent(invoice, *, user=None) -> Decimal:
 
     يُعيد المبلغ الذي سُوّي (صفر إن لا نيّة).
     """
+    from accounting.services import require_payment_rate
     from sales.models import SupplierPayment, SupplierPaymentAllocation
     from sales.services import post_supplier_payment
 
@@ -1958,7 +1959,9 @@ def settle_attached_purchase_intent(invoice, *, user=None) -> Decimal:
         payment_date=invoice.invoice_date or timezone.localdate(),
         amount=amount,
         currency_id=invoice.currency_id,
-        exchange_rate=invoice.exchange_rate or Decimal("1"),
+        # نيّة الدفع تتجسّد لحظة ترحيل الفاتورة: سعرها الذي أُدخل للتو — وفاتورةٌ
+        # أجنبية بسعر 1 تُرفض هنا بدل أن يُرحَّل سندها بالشيكل.
+        exchange_rate=require_payment_rate(invoice.currency_id, invoice.exchange_rate),
         cash_or_bank_account_id=cash_account_id,
         auto_settled_invoice=invoice,
         notes=_attached_purchase_settlement_note(invoice),
@@ -2070,6 +2073,7 @@ def pay_purchase_invoice(
     cheques=None,
     from_on_account=None,
     payment_date=None,
+    exchange_rate=None,
     user=None,
 ):
     """T-APPAY: دفع فاتورة الشراء من نقطة واحدة — نقد + شيكات + سلف المورّد، ذرّياً.
@@ -2093,9 +2097,17 @@ def pay_purchase_invoice(
     `transaction.atomic()` واحد فلا تُترك فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
 
     from_on_account: `[{"payment_id": <id>, "amount": <Decimal|str>}, ...]`
+
+    exchange_rate: سعر صرف الدفعة لفاتورةٍ بعملةٍ غير الشيكل — إلزامي (يوم الدفع غير يوم
+    الفاتورة). الفاتورة النقدية وحدها تُدفع لحظتها فتأخذ سعرها الذي أُدخل للتو.
     """
+    from accounting.services import require_payment_rate
     from sales.models import SupplierPayment, SupplierPaymentAllocation
     from sales.services import allocate_supplier_payment, post_supplier_payment
+
+    if exchange_rate in (None, '') and invoice.payment_type == 'cash':
+        exchange_rate = invoice.exchange_rate
+    pay_rate = require_payment_rate(invoice.currency_id, exchange_rate)
 
     cheque_rows = list(cheques or [])
     on_account_rows = list(from_on_account or [])
@@ -2167,7 +2179,7 @@ def pay_purchase_invoice(
                 payment_date=payment_date or invoice.invoice_date or timezone.localdate(),
                 amount=amount,
                 currency_id=invoice.currency_id,
-                exchange_rate=invoice.exchange_rate or Decimal('1'),
+                exchange_rate=pay_rate,
                 cash_or_bank_account_id=resolved_cash_id,
                 notes="سند صرف من داخل الفاتورة",
             )

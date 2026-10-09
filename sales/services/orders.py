@@ -17,6 +17,7 @@ from accounting.services import (
     convert_amount,
     create_audit_log,
     post_journal,
+    require_payment_rate,
     resolve_forex_account,
     unpost_document,
     validate_fiscal_period,
@@ -323,7 +324,8 @@ def cancel_quotation(quotation, *, user=None, reason: str = ""):
     return quotation
 
 
-def record_order_deposit(order, *, amount, cash_account_id, user=None, payment_date=None):
+def record_order_deposit(order, *, amount, cash_account_id, user=None, payment_date=None,
+                         exchange_rate=None):
     """عربون الطلبية = سند قبض «على الحساب» مرحَّل ومربوط بها.
 
     لا قيد خاص بالطلبية: العربون مالٌ قُبض فعلاً، فيمرّ من نفس محرّك سندات
@@ -361,7 +363,8 @@ def record_order_deposit(order, *, amount, cash_account_id, user=None, payment_d
             payment_date=payment_date or timezone.localdate(),
             amount=amount,
             currency=order.currency,
-            exchange_rate=order.exchange_rate,
+            # سعر يوم العربون من الطلب — لا سعر الطلبية ولا افتراضيّ 1 لعملةٍ أجنبية.
+            exchange_rate=require_payment_rate(order.currency_id, exchange_rate),
             cash_or_bank_account_id=cash_account_id,
             sales_order=order,
             notes=f"عربون طلبية {order.order_number}"[:500],

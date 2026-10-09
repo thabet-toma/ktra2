@@ -254,6 +254,8 @@ type OnAccountVoucherRow = {
   /** رقم الإشعار — صفّ المصدر «إشعار». */
   number?: string;
   currency_code?: string | null;
+  /** عملة السند (معرّف) — للسندات لا للإشعارات. */
+  currency?: number | null;
 };
 
 interface InvoiceRow {
@@ -458,6 +460,7 @@ export const PartnerProfilePage: React.FC = () => {
             amount: p.amount,
             is_posted: p.is_posted,
             unallocated_amount: p.unallocated_amount,
+            currency: p.currency,
             source: 'voucher' as const,
           })),
         )
@@ -468,6 +471,7 @@ export const PartnerProfilePage: React.FC = () => {
             amount: p.amount,
             is_posted: p.is_posted,
             unallocated_amount: p.unallocated_amount,
+            currency: p.currency,
             source: 'voucher' as const,
           })),
         );
@@ -1671,6 +1675,7 @@ export const PartnerProfilePage: React.FC = () => {
             amount: allocTarget.amount,
             unallocated: Number(allocTarget.unallocated_amount ?? 0),
             is_posted: allocTarget.is_posted,
+            currency: allocTarget.currency,
           }}
           partnerLabel={partner.name}
           docs={allocDocs}

@@ -208,6 +208,9 @@ export interface ChequeDto {
   /** CHQ-1: الطرف الذي ظُهِّر له الشيك. */
   endorsed_to?: number | null;
   currency: number;
+  /** السند الذي دخل الشيك بقيده (قبض/صرف) — كلاهما فارغ = شيكٌ بلا سند فيحتاج سعراً عند حركةٍ تُرحِّل قيداً. */
+  customer_payment?: number | null;
+  supplier_payment?: number | null;
   notes?: string | null;
 }
 

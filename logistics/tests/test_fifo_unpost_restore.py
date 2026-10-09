@@ -156,7 +156,7 @@ class ClearancePaymentUnpostRestoresLotsTest(_FifoBox):
     def _pay(self):
         resp = self.client.post(
             f"/api/logistics/clearances/{self.clearance.pk}/pay_from_cashbox/",
-            {"payment_kind": "clearance", "amount": "800", "currency_id": self.usd.pk,
+            {"payment_kind": "clearance", "amount": "800", "currency_id": self.usd.pk, "exchange_rate": "3.5",
              "cash_box_external_id": "usd1", "payment_date": "2026-06-20"},
             format="json", **self.h)
         self.assertEqual(resp.status_code, 201, resp.content)

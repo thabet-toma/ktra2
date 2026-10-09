@@ -13,7 +13,7 @@ from django.db.models import Q, Sum
 
 from accounting.models import Account, JournalLine
 from accounting.services import (
-    convert_amount,
+    allocation_in_invoice_currency,
     create_audit_log,
     post_journal,
     resolve_forex_account,
@@ -218,6 +218,8 @@ def allocate_supplier_payment(
         (int(a["invoice"]), Decimal(str(a.get("amount") or "0")))
         for a in (allocations or [])
     ]
+    # كم يسدّد كل توزيع من فاتورته بعملتها — حين لا يكفي سعر السند للتحويل.
+    stated_rows = [a.get("amount_in_invoice_currency") for a in (allocations or [])]
     if not rows:
         raise ValidationError("لا توزيعات مُرسَلة.")
     if any(amt <= 0 for _inv_id, amt in rows):
@@ -255,7 +257,7 @@ def allocate_supplier_payment(
                 pk__in={inv_id for inv_id, _amt in rows}, tenant_id=payment.tenant_id
             )
         }
-        for inv_id, amt in rows:
+        for (inv_id, amt), stated_in in zip(rows, stated_rows):
             inv = invoices.get(inv_id)
             if inv is None:
                 raise ValidationError(f"فاتورة الشراء #{inv_id} غير موجودة في هذه الشركة.")
@@ -266,16 +268,10 @@ def allocate_supplier_payment(
             if not inv.is_posted:
                 raise ValidationError(f"فاتورة الشراء #{inv.invoice_number} غير مرحّلة.")
 
-            if payment.currency_id == inv.currency_id:
-                amount_in_inv_curr, conv_rate = amt, Decimal("1")
-            else:
-                amount_in_inv_curr, conv_rate = convert_amount(
-                    amount=amt,
-                    from_currency_id=payment.currency_id,
-                    to_currency_id=inv.currency_id,
-                    tenant_id=payment.tenant_id,
-                    effective_date=payment.payment_date,
-                )
+            amount_in_inv_curr, conv_rate = allocation_in_invoice_currency(
+                amt, pay_currency=payment.currency_id, pay_rate=payment.exchange_rate,
+                invoice_currency=inv.currency_id, stated_in_invoice=stated_in,
+            )
             remaining = purchase_invoice_payment_summary(inv)["remaining_balance"]
             if amount_in_inv_curr > remaining + DEC:
                 raise ValidationError(

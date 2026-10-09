@@ -226,7 +226,8 @@ def test_refund_on_legacy_return_in_other_currency_uses_its_own_open_credit(env)
     def _refund(amount):
         pay = _payment(tenant, customer, cash, usd, amount, [(ret, amount)])
         pay.kind = CustomerPayment.KIND_REFUND
-        pay.save(update_fields=["kind"])
+        pay.exchange_rate = Decimal("3.7")  # سند دولار بسعر 1 يرفضه حارس `post_journal`
+        pay.save(update_fields=["kind", "exchange_rate"])
         return pay
 
     too_much = _refund(41)
@@ -287,7 +288,7 @@ class CustomerPaymentApiOnAccountTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="onaccount_api", password="x")
         cls.currency, _ = Currency.objects.get_or_create(
-            Code="OAC", defaults={"Name": "OnAccount", "Symbol": "O"})
+            Code="OAC", defaults={"Name": "OnAccount", "Symbol": "O", "IsBaseCurrency": True})
         cls.tenant = create_company("شركة على الحساب API", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         cls.ar = Account.objects.create(

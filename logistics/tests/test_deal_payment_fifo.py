@@ -290,7 +290,7 @@ class ClearancePaymentFifoTest(APITestCase):
         fund_box_from_capital(self.box, 1000, 3, date="2026-06-19", user=self.user)
         resp = self.client.post(
             f"/api/logistics/clearances/{self.clearance.pk}/pay_from_cashbox/",
-            {"payment_kind": "clearance", "amount": "1000", "currency_id": self.usd.pk,
+            {"payment_kind": "clearance", "amount": "1000", "currency_id": self.usd.pk, "exchange_rate": "3.5",
              "cash_box_external_id": "usd1", "payment_date": "2026-06-20"},
             format="json", **self._auth())
         self.assertEqual(resp.status_code, 201, resp.content)

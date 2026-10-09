@@ -21,7 +21,7 @@ class PaymentAutoPostTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="autopost", password="x")
         cls.currency, _ = Currency.objects.get_or_create(
-            Code="APT", defaults={"Name": "AutoPost", "Symbol": "A"})
+            Code="APT", defaults={"Name": "AutoPost", "Symbol": "A", "IsBaseCurrency": True})
         cls.tenant = create_company("شركة الترحيل التلقائي", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         cls.ar = Account.objects.create(

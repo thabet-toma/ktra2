@@ -147,6 +147,8 @@ import { formatDateLocalized, formatTimeValue } from "../../../utils/formatDate"
 import { useDocumentDraft } from "@/hooks/useDocumentDraft";
 import { useMissingPartners, useMissingProducts } from "@/hooks/useMissingDocumentRecords";
 import { InactiveBadge } from "../../shared/ActiveStatusControls";
+import { ExchangeRateField } from "@/components/shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "@/utils/paymentRate";
 import { DocumentDraftBanners } from "@/components/shared/DocumentDraftBanners";
 import { PostedTextFields } from "@/components/shared/PostedTextDialog";
 
@@ -255,6 +257,16 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
      واحدة، وهي نفس مكوّن لوحة التحصيل في فاتورة البيع (`DocumentPaymentPanel`)
      بمفرداتِ جانب المورّد. */
   const [payCash, setPayCash] = useState("");
+  // سعر صرف الدفع من داخل فاتورة آجلة بعملة أجنبية — يكتبه المستخدم ويبدأ فارغاً.
+  const [payRate, setPayRate] = useState("");
+  const [currencyList, setCurrencyList] = useState<Array<{ CurrencyID: number; Code: string; IsBaseCurrency?: boolean }>>([]);
+  useEffect(() => {
+    let alive = true;
+    accountingApi.getCurrencies()
+      .then((list) => { if (alive) setCurrencyList(list); })
+      .catch(() => { /* بلا قائمة عملات لا زرّ «آخر سعر» — الإدخال اليدوي يكفي */ });
+    return () => { alive = false; };
+  }, []);
   const [payCashAccountId, setPayCashAccountId] = useState<number | null>(null);
   /** T-CASHBOX M1: مدخلات سلّم الصندوق — الصناديق المسجَّلة، وإعداد الشركة،
       وتفضيل المستخدم. بديل «أوّل حساب نقدي في الشجرة». */
@@ -730,6 +742,14 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
       setActiveTabKey("fees");
       return;
     }
+    // عملة أجنبية ⇒ سعر صرف كتبه المستخدم — الخادم يرفض ترحيل قيدٍ أجنبي بسعر 1.
+    if (!isBaseCurrency({ Code: formData.currency || "ILS" })) {
+      const rateError = validateRate(String(formData.exchangeRate ?? ""));
+      if (rateError) {
+        toast(rateError, "error");
+        return;
+      }
+    }
     /* T-PAYFULL2: نقول الشرط قبل الرحلة — الخادم يرفض الفاتورة النقدية بلا
        صندوق، والرفض كان يصل بعد الحفظ بلا حقلٍ مرئي يُصلحه. مرآة حارس البيع. */
     if (formData.paymentType === "cash" && !formData.cashOrBankAccountId) {
@@ -849,6 +869,11 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         })),
         conversion_metadata_json: payload.conversionMetadata || null,
         currency: payload.currency || 'ILS',
+        // الشيكل: لا حقل (الخادم يفرض 1). الأجنبية: ما كتبه المستخدم.
+        ...(rateForPayload(isBaseCurrency({ Code: payload.currency || 'ILS' }), String(payload.exchangeRate ?? ''))
+          !== undefined
+          ? { exchange_rate: String(payload.exchangeRate ?? '').trim() }
+          : {}),
         status: payload.status || 'draft',
         notes: payload.notes || null,
         supplier_invoice_number: payload.supplierInvoiceNumber || null,
@@ -2635,6 +2660,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
     && !(isPosted && supplierRemaining <= 0.009);
 
   const resetPayInputs = () => {
+    setPayRate("");
     setPayCash("");
     setPayCheques([]);
     setPayChequesOpen(false);
@@ -2775,12 +2801,20 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
    * سند الصرف داخل معاملة الخادم نفسها (`post_invoice`)، وعلى المرحّلة يُسجَّل
    * السند فوراً. الكلّ أو لا شيء — لا فاتورةٌ مرحّلة بسندٍ نصفِ مولود.
    */
+  /** فاتورة آجلة بعملة أجنبية: سعر الدفع يكتبه المستخدم؛ النقدية تُدفع بسعر فاتورتها. */
+  const payNeedsRate =
+    !isBaseCurrency({ Code: formData.currency || "ILS" }) && formData.paymentType !== "cash";
+
   const submitPayment = async (opts?: { saveFirst?: boolean }) => {
     if (!formData.supplierId) { toast("اختر المورد أولاً.", "error"); return; }
     if (!payment.canSubmit) return;
     if ((Number(payCash) || 0) > 0 && !payCashAccountId) {
       toast("اختر حساب الصندوق أو البنك للمبلغ النقدي.", "error");
       return;
+    }
+    if (payNeedsRate) {
+      const payRateError = validateRate(payRate);
+      if (payRateError) { toast(payRateError, "error"); return; }
     }
     setPaying(true);
     try {
@@ -2817,6 +2851,7 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
           amount: String(row.amount),
         })),
         post_invoice: !isPosted,
+        ...(payNeedsRate ? { exchange_rate: payRate.trim() } : {}),
         ...(receiveOnPost !== undefined ? { receive_on_post: receiveOnPost } : {}),
       });
       clientLogger.info("purchase_invoice.paid", {
@@ -3078,6 +3113,23 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
         setPayCash(((Number(payCash) || 0) + payment.cashShortfall).toFixed(2))
       }
       onFillFull={() => setPayCash(payment.remainingBefore.toFixed(2))}
+      rateField={payNeedsRate ? (
+        <ExchangeRateField
+          currencyCode={formData.currency || "ILS"}
+          isBase={false}
+          value={payRate}
+          onChange={setPayRate}
+          date={new Date().toISOString().slice(0, 10)}
+          fromCurrencyId={currencyList.find((c) => c.Code === (formData.currency || "ILS"))?.CurrencyID}
+          baseCurrencyId={currencyList.find((c) => c.IsBaseCurrency)?.CurrencyID}
+          suggestions={validateRate(String(formData.exchangeRate ?? "")) === null
+            ? [{
+                label: `سعر الفاتورة ${formatNumber(formData.exchangeRate, { maxDecimals: 6 })}`,
+                value: formatNumber(formData.exchangeRate, { maxDecimals: 6 }),
+              }]
+            : []}
+        />
+      ) : undefined}
       // T-INTENT: المخرج الثاني من حارس الفاتورة النقدية — كان جانب البيع وحده
       // يمرّره، فيقف مشترٍ لا يملك تغطية الفاتورة كاملةً أمام طريق مسدود لا
       // مخرج منه إلا «أكمل المبلغ».
@@ -3750,12 +3802,27 @@ export const InvoiceForm: React.FC<InvoiceFormProps> = ({
               className="ktra-input"
               disabled={effectiveReadOnly}
               value={formData.currency || "ILS"}
-              onChange={(e) => handleUpdateFinancial("currency", e.target.value)}
+              onChange={(e) => {
+                handleUpdateFinancial("currency", e.target.value);
+                // عند تغيير العملة يُفرَّغ السعر: لا سعر يُورَّث من عملةٍ أخرى.
+                setFormData((prev) => ({ ...prev, exchangeRate: "" }));
+                setPayRate("");
+              }}
             >
               <option value="USD">USD — دولار</option>
               <option value="ILS">ILS — شيكل</option>
             </select>
           )}
+          <ExchangeRateField
+            currencyCode={formData.currency || "ILS"}
+            isBase={isBaseCurrency({ Code: formData.currency || "ILS" })}
+            value={String(formData.exchangeRate ?? "")}
+            onChange={(v) => { setFormData((prev) => ({ ...prev, exchangeRate: v })); markDirty(); }}
+            date={formData.invoiceDate || new Date().toISOString().slice(0, 10)}
+            fromCurrencyId={currencyList.find((c) => c.Code === (formData.currency || "ILS"))?.CurrencyID}
+            baseCurrencyId={currencyList.find((c) => c.IsBaseCurrency)?.CurrencyID}
+            disabled={effectiveReadOnly}
+          />
           {formData.currency === "ILS" && showAdv("doc.tax", invoiceHasTax) && fld(
             "نسبة الضريبة %",
             <input

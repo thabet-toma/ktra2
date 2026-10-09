@@ -339,6 +339,11 @@ def clearance_payment_amount_ils(
     usd_to_ils: Decimal,
 ) -> Decimal:
     amt = _d(p.amount)
+    # سعر الدفعة كما أدخله المستخدم عند الدفع — مصدرُ الحقيقة متى وُجد (الدفعات القديمة
+    # قبل الحقل null فتبقى على سلوكها أدناه).
+    stored = getattr(p, 'exchange_rate', None)
+    if stored is not None and _d(stored) > 0:
+        return (amt * _d(stored)).quantize(Q2, rounding=ROUND_HALF_UP)
     cur = getattr(p, 'currency', None)
     code = (getattr(cur, 'Code', None) or '').upper() if cur else ''
     if code == 'USD':
@@ -350,12 +355,12 @@ def clearance_payment_amount_ils(
         from accounting.models import ExchangeRate
         ils_cur = get_ils_currency()
         if ils_cur and cur:
-            er = (
-                ExchangeRate.objects
-                .filter(from_currency=cur, to_currency=ils_cur)
-                .order_by('-effective_date')
-                .first()
-            )
+            # أسعار شركة الدفعة نفسها حتى تاريخها — كانت تُقرأ من أي شركة وأي تاريخ.
+            rates = ExchangeRate.objects.filter(
+                tenant_id=p.tenant_id, from_currency=cur, to_currency=ils_cur)
+            if p.payment_date:
+                rates = rates.filter(effective_date__lte=p.payment_date)
+            er = rates.order_by('-effective_date').first()
             if er:
                 return (amt * Decimal(str(er.rate))).quantize(Q2, rounding=ROUND_HALF_UP)
     except Exception:

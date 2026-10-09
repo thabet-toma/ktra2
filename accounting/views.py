@@ -387,6 +387,8 @@ class ChequeViewSet(viewsets.ModelViewSet):
                 bank_account_id=request.data.get("bank_account") or None,
                 # CHQ-1: المستفيد من التظهير — بدونه لا يكون للحركة قيد ذمم.
                 endorsed_to_id=request.data.get("endorsed_to") or None,
+                # شيكٌ أجنبي يتيم بلا سند وحده يحتاجه — غيره يتبع سعر سنده.
+                exchange_rate=request.data.get("exchange_rate"),
             )
         except DjangoValidationError as e:
             raise ValidationError(
@@ -1708,7 +1710,7 @@ class CashTransferViewSet(viewsets.ModelViewSet):
                 from_bank_account=_bank("from_bank_account"),
                 to_cash_box=_box("to_cash_box"),
                 to_bank_account=_bank("to_bank_account"),
-                rate=request.data.get("rate") or 1,
+                rate=request.data.get("rate"),
                 notes=request.data.get("notes"),
                 user=request.user,
             )
@@ -1830,7 +1832,7 @@ class ExpenseVoucherViewSet(viewsets.ModelViewSet):
                 amount=data.get("amount"),
                 tax_amount=data.get("tax_amount") or 0,
                 currency=currency,
-                exchange_rate=data.get("exchange_rate") or 1,
+                exchange_rate=data.get("exchange_rate"),
                 payment_method=data.get("payment_method") or ExpenseVoucher.PAYMENT_CASH,
                 expense_account=expense_account,
                 expense_account_name=data.get("expense_account_name"),
@@ -1927,7 +1929,7 @@ class RevenueVoucherViewSet(viewsets.ModelViewSet):
                 amount=data.get("amount"),
                 tax_amount=data.get("tax_amount") or 0,
                 currency=currency,
-                exchange_rate=data.get("exchange_rate") or 1,
+                exchange_rate=data.get("exchange_rate"),
                 payment_method=data.get("payment_method") or RevenueVoucher.PAYMENT_CASH,
                 revenue_account=revenue_account,
                 revenue_account_name=data.get("revenue_account_name"),
@@ -2090,7 +2092,7 @@ class VoucherBatchSaveView(views.APIView):
                 "amount": raw.get("amount"),
                 "tax_amount": raw.get("tax_amount") or 0,
                 "currency": currency,
-                "exchange_rate": raw.get("exchange_rate") or 1,
+                "exchange_rate": raw.get("exchange_rate"),
                 "payment_method": raw.get("payment_method") or ExpenseVoucher.PAYMENT_CASH,
                 "account": account,
                 "account_name": raw.get("account_name"),

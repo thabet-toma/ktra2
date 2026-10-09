@@ -4,6 +4,7 @@ import { accountingApi, type CashBoxLedgerLink } from "../../../services/account
 import { useToast } from "../../../contexts/ToastContext";
 import { humanizeThrown } from "../../../utils/drfError";
 import { formatMoney } from "../../../utils/formatNumber";
+import { validateRate } from "../../../utils/paymentRate";
 
 interface CashTransferModalProps {
   isOpen: boolean;
@@ -63,8 +64,10 @@ export const CashTransferModal: React.FC<CashTransferModalProps> = ({
       setFormError("لا يمكن التحويل من الخزينة إلى نفسها.");
       return;
     }
-    if (crossCurrency && Number(rate) <= 0) {
-      setFormError("العملتان مختلفتان — أدخل سعر الصرف.");
+    // عملتان مختلفتان ⇒ سعرٌ حقيقي كتبه المستخدم: يُرفض الفارغ والصفر و1 (`validateRate`).
+    const rateError = crossCurrency ? validateRate(rate) : null;
+    if (rateError) {
+      setFormError(`العملتان مختلفتان — ${rateError}`);
       return;
     }
     setIsLoading(true);

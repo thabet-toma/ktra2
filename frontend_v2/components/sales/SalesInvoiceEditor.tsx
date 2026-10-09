@@ -129,6 +129,8 @@ import { InactiveBadge } from "../shared/ActiveStatusControls";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
 import { PostedTextFields } from "../shared/PostedTextDialog";
 import { FieldError } from "../ui/FieldError";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
 import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 import {
   KitDocumentShell,
@@ -202,7 +204,7 @@ type CollectChequeRow = {
 /** T4: سند قبض مرحّل بقي منه رصيد «على الحساب» يصلح لتسديد هذه الفاتورة. */
 type OnAccountVoucher = { id: number; unallocated: number };
 
-export type CurrRow = { CurrencyID: number; Code: string; Name?: string | null };
+export type CurrRow = { CurrencyID: number; Code: string; Name?: string | null; IsBaseCurrency?: boolean };
 export type AccountRow = {
   id: number;
   code?: string | null;
@@ -462,7 +464,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [dueDate, setDueDate] = useState("");
   const [invType, setInvType] = useState<"cash" | "credit">("credit");
   const [currencyId, setCurrencyId] = useState<number | "">("");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  // سعر صرف الفاتورة بعملة غير أساسية: يكتبه المستخدم — فارغ لفاتورةٍ جديدة، ويُحمَّل المخزَّن عند فتح فاتورة قائمة.
+  const [exchangeRate, setExchangeRate] = useState("");
+  // سعر صرف التحصيل من داخل فاتورة آجلة بعملة أجنبية (يكتبه المستخدم، فارغ دائماً عند البدء).
+  const [collectRate, setCollectRate] = useState("");
   const [invoiceDiscount, setInvoiceDiscount] = useState("0");
   const [cashAccountId, setCashAccountId] = useState<number | "">("");
   const [revenueAccountId, setRevenueAccountId] = useState<number | "">("");
@@ -842,6 +847,15 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const docCurrencyCode = useMemo(
     () => (currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined),
     [currencyId, currencies],
+  );
+  const docCurrency = useMemo(
+    () => (currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId) ?? null : null),
+    [currencyId, currencies],
+  );
+  const rateIsBase = isBaseCurrency(docCurrency);
+  const baseCurrencyId = useMemo(
+    () => currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null,
+    [currencies],
   );
   const revenueAccounts = useMemo(
     () => accounts.filter(isRevenueAccount).sort((a, b) => (a.code || "").localeCompare(b.code || "")),
@@ -1415,7 +1429,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       due_date: dueDate || null,
       invoice_type: invType,
       currency: currencyId,
-      exchange_rate: Number(exchangeRate) || 1,
+      // الأساسية: 1 (الخادم يفرضه)؛ الأجنبية: ما كتبه المستخدم (validateClient تمنع الفارغ).
+      exchange_rate: rateIsBase ? 1 : Number(exchangeRate) || 0,
       invoice_discount: Number(invoiceDiscount) || 0,
       stock_on_post: stockOnPost,
       notes: notes || "",
@@ -1459,6 +1474,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     invType,
     currencyId,
     exchangeRate,
+    rateIsBase,
     invoiceDiscount,
     stockOnPost,
     notes,
@@ -1590,6 +1606,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const validateClient = (): string | null => {
     if (customerId === "") return "اختر العميل.";
     if (currencyId === "") return "اختر العملة.";
+    if (!rateIsBase) {
+      const rateError = validateRate(exchangeRate);
+      if (rateError) return rateError;
+    }
     if (invType === "cash" && cashAccountId === "")
       return "حساب الصندوق/البنك غير مُعيَّن في إعدادات المبيعات.";
     if (revenueAccountId === "") return "حساب الإيراد غير مُعيَّن في إعدادات المبيعات.";
@@ -1852,7 +1872,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setInvType("credit");
     if (salesSettings?.default_currency) setCurrencyId(salesSettings.default_currency);
     else if (currencies.length) setCurrencyId(currencies[0].CurrencyID);
-    setExchangeRate("1");
+    setExchangeRate("");
+    setCollectRate("");
     setInvoiceDiscount("0");
     setCashAccountId(salesSettings?.default_cash_account ?? "");
     if (salesSettings?.default_revenue_account_product)
@@ -2941,6 +2962,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const onAccountPlan = payment.onAccountPlan;
   const collectChequeError = payment.chequeError;
   const cashInvoiceShortfall = payment.cashShortfall;
+  /** الفاتورة الآجلة بعملةٍ أجنبية: سعر التحصيل يكتبه المستخدم؛ النقدية تُحصَّل بسعر فاتورتها. */
+  const collectNeedsRate = !rateIsBase && invType === "credit";
 
   /** اللوحة تظهر لمن يملك التحصيل، على فاتورة بيع لها عميل وما زال عليها متبقٍّ. */
   const showCollectPanel =
@@ -3106,6 +3129,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   };
 
   const resetCollectInputs = () => {
+    setCollectRate("");
     setCollectCash("");
     setCollectCheques([]);
     setChequesOpen(false);
@@ -3266,6 +3290,13 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       setLocalErr("اختر حساب الصندوق أو البنك للمبلغ النقدي.");
       return;
     }
+    if (collectNeedsRate) {
+      const collectRateError = validateRate(collectRate);
+      if (collectRateError) {
+        setLocalErr(collectRateError);
+        return;
+      }
+    }
     if ((Number(collectFromBalance) || 0) > payment.onAccountAvailable + 0.01) {
       setLocalErr("المطلوب من رصيد العميل يتجاوز رصيده المتاح على الحساب.");
       return;
@@ -3319,6 +3350,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           amount: row.amount.toFixed(2),
         })),
         post_invoice: !alreadyPosted,
+        ...(collectNeedsRate ? { exchange_rate: rateForPayload(false, collectRate) } : {}),
       });
       applyDetail(detail);
       resetCollectInputs();
@@ -3998,6 +4030,20 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
       onFillFull={() => setCollectCash(payment.remainingBefore.toFixed(2))}
       onMakeCredit={() => setInvType("credit")}
       onSubmit={() => void submitCollect()}
+      rateField={collectNeedsRate ? (
+        <ExchangeRateField
+          currencyCode={docCurrency?.Code ?? ""}
+          isBase={rateIsBase}
+          value={collectRate}
+          onChange={setCollectRate}
+          date={new Date().toISOString().slice(0, 10)}
+          fromCurrencyId={docCurrency?.CurrencyID}
+          baseCurrencyId={baseCurrencyId}
+          suggestions={validateRate(exchangeRate) === null
+            ? [{ label: `سعر الفاتورة ${formatNumber(exchangeRate, { maxDecimals: 6 })}`, value: formatNumber(exchangeRate, { maxDecimals: 6 }) }]
+            : []}
+        />
+      ) : undefined}
       cashAccountField={(
         <AccountTreeField
           className="ktra-input"
@@ -4227,7 +4273,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                       <div className="flex items-center gap-1">
                         <span className="text-[var(--color-text-muted)] text-[10px] min-w-[30px]">عملة</span>
                         <FieldHint hint="invoice.currency" />
-                        <select className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markDirty(); }}>
+                        <select className="bg-[var(--color-surface-2)] border border-[var(--color-border)] rounded px-1 py-0.5 text-[11px] outline-none focus:ring-1 focus:ring-emerald-500" disabled={readOnly} value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); setExchangeRate(""); setCollectRate(""); markDirty(); }}>
                           <option value="">—</option>
                           {currencies.map((c) => (<option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>))}
                         </select>
@@ -4241,6 +4287,17 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
                     )}
                   </div>
                 )}
+                {/* سعر صرف الفاتورة — لعملةٍ غير الأساسية فقط، يكتبه المستخدم ولا افتراضي له. */}
+                <ExchangeRateField
+                  currencyCode={docCurrency?.Code ?? ""}
+                  isBase={rateIsBase}
+                  value={exchangeRate}
+                  onChange={(v) => { setExchangeRate(v); markDirty(); }}
+                  date={invDate}
+                  fromCurrencyId={docCurrency?.CurrencyID}
+                  baseCurrencyId={baseCurrencyId}
+                  disabled={readOnly}
+                />
               </div>
 
             </div>

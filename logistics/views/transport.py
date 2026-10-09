@@ -268,8 +268,20 @@ class LocalShipmentViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
             payment_date = datetime.date.fromisoformat(str(raw_date)[:10]) if raw_date else timezone.localdate()
         except (TypeError, ValueError):
             payment_date = timezone.localdate()
-        currency = shipment.currency or Currency.objects.filter(Code__iexact='ILS').first()
-        exchange_rate = Decimal(str(shipment.exchange_rate or 1))
+        # الشيكل 1 بلا خانة؛ وغيره سعر يوم الدفع من الطلب — لا سعر الإرسالية ولا `or 1`.
+        from accounting.fx_fifo import assert_box_pays_in_its_currency
+        from accounting.services import payment_currency, require_payment_rate
+        cur_raw = request.data.get('currency_id')
+        try:
+            currency = (
+                payment_currency(cur_raw) if cur_raw not in (None, '') else None
+            ) or shipment.currency or Currency.objects.filter(Code__iexact='ILS').first()
+            exchange_rate = require_payment_rate(currency, request.data.get('exchange_rate'))
+            assert_box_pays_in_its_currency(cash_link.account, shipment.tenant, currency)
+        except (TypeError, ValueError):
+            return Response({'error': 'عملة غير صالحة.'}, status=status.HTTP_400_BAD_REQUEST)
+        except DjangoValidationError as e:
+            return Response({'error': '؛ '.join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
         from logistics.domain.overpayment_split import (
             accrual_label, create_on_account_voucher, split_incoming,
         )

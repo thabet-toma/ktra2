@@ -49,6 +49,7 @@ from accounting.services import (
     create_audit_log,
     get_exchange_rate,
     post_journal,
+    require_payment_rate,
     unpost_document,
     validate_fiscal_period,
     next_document_number,
@@ -1411,6 +1412,7 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
                     cheques=payload.get('cheques') or [],
                     from_on_account=payload.get('from_on_account') or [],
                     payment_date=payload.get('payment_date') or None,
+                    exchange_rate=payload.get('exchange_rate'),
                     user=request.user,
                 )
         except DjangoValidationError as e:
@@ -2191,7 +2193,8 @@ class PurchaseInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, BaseT
             payment_date=invoice.invoice_date or timezone.localdate(),
             amount=amount,
             currency=invoice.currency,
-            exchange_rate=invoice.exchange_rate or Decimal('1'),
+            # التسوية النقدية لحظة الترحيل: سعر الفاتورة الذي أُدخل للتو، لا `or 1`.
+            exchange_rate=require_payment_rate(invoice.currency_id, invoice.exchange_rate),
             cash_or_bank_account_id=cash_account_id,
             notes=_auto_purchase_settlement_note(invoice),
         )

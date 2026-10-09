@@ -13,9 +13,10 @@ from django.db.models import Q, Sum
 
 from accounting.models import Account, JournalLine
 from accounting.services import (
-    convert_amount,
+    allocation_in_invoice_currency,
     create_audit_log,
     post_journal,
+    require_payment_rate,
     resolve_forex_account,
     unpost_document,
     validate_fiscal_period,
@@ -264,6 +265,8 @@ def attach_voucher_and_post(
             cash=cash_amount or None,
             cash_account_id=cash_account_id,
             post_invoice=True,
+            # يولد مع إنشاء الفاتورة: سعرها الذي أُدخل للتو.
+            exchange_rate=invoice.exchange_rate,
             user=user,
         )
     return invoice
@@ -1081,7 +1084,7 @@ def _auto_settle_cash_sale(invoice: SalesInvoice, *, user=None) -> None:
         payment_date=invoice.invoice_date,
         amount=remaining,
         currency_id=invoice.currency_id,
-        exchange_rate=invoice.exchange_rate or Decimal("1"),
+        exchange_rate=require_payment_rate(invoice.currency_id, invoice.exchange_rate),
         cash_or_bank_account_id=cash_account_id,
         # T-ARINT: العلامة تجعل السند مملوكاً للفاتورة — يُحرَّر معها عند إلغاء
         # ترحيلها بدل أن يبقى معلّقاً ويتكرّر عند إعادته.
@@ -1212,7 +1215,7 @@ def _settle_attached_cheques(invoice: SalesInvoice, *, user=None) -> None:
         payment_date=invoice.invoice_date,
         amount=amount,
         currency_id=invoice.currency_id,
-        exchange_rate=invoice.exchange_rate or Decimal("1"),
+        exchange_rate=require_payment_rate(invoice.currency_id, invoice.exchange_rate),
         cash_or_bank_account_id=cash_account_id,
         auto_settled_invoice=invoice,
         notes=_attached_settlement_note(invoice),
@@ -1431,7 +1434,7 @@ def _process_sales_return_refund(
             payment_date=invoice.invoice_date,
             amount=cash_to_refund,
             currency_id=invoice.currency_id,
-            exchange_rate=invoice.exchange_rate or Decimal("1"),
+            exchange_rate=require_payment_rate(invoice.currency_id, invoice.exchange_rate),
             cash_or_bank_account_id=cash_account_id,
             kind=CustomerPayment.KIND_REFUND,
             refund_for_invoice=invoice,
@@ -1944,6 +1947,7 @@ def collect_invoice_payment(
     from_on_account: list[dict] | None = None,
     post_invoice: bool = False,
     payment_date=None,
+    exchange_rate=None,
     user=None,
 ) -> CustomerPayment | None:
     """T2: تحصيل الفاتورة من نقطة واحدة — نقد + شيكات + رصيد العميل، ذرّياً.
@@ -1970,9 +1974,14 @@ def collect_invoice_payment(
     واحدة لا يجوز أن تترك فاتورةً مرحّلة وسنداً نصفَ مولود لم يره المستخدم.
 
     from_on_account: `[{"payment_id": <id>, "amount": <Decimal|str>}, ...]`
+
+    exchange_rate: سعر صرف سند القبض لفاتورةٍ بعملةٍ غير الشيكل — إلزامي (يوم التحصيل غير
+    يوم الفاتورة). الفاتورة النقدية وحدها تُحصَّل لحظتها فتأخذ سعرها الذي أُدخل للتو.
     """
     from accounting.models import Cheque
 
+    if exchange_rate in (None, "") and invoice.invoice_type == SalesInvoice.INVOICE_CASH:
+        exchange_rate = invoice.exchange_rate
     kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
     cheque_rows = list(cheques or [])
     on_account_rows = list(from_on_account or [])
@@ -2090,7 +2099,7 @@ def collect_invoice_payment(
                 payment_date=payment_date or invoice.invoice_date,
                 amount=amount,
                 currency_id=invoice.currency_id,
-                exchange_rate=invoice.exchange_rate or Decimal("1"),
+                exchange_rate=require_payment_rate(invoice.currency_id, exchange_rate),
                 cash_or_bank_account_id=resolved_cash_id,
                 # السند المولود مع الترحيل يملكه الترحيل: يُحرَّر معه عند إلغائه
                 # (`release_auto_cash_settlement`) فلا يبقى دائن ذمم بلا مقابل.
@@ -2942,12 +2951,10 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
             amount_in_inv_curr = Decimal(str(alloc.amount))
             conv_rate = Decimal("1")
         else:
-            amount_in_inv_curr, conv_rate = convert_amount(
-                amount=Decimal(str(alloc.amount)),
-                from_currency_id=payment_currency_id,
-                to_currency_id=inv_currency_id,
-                tenant_id=payment.tenant_id,
-                effective_date=payment.payment_date,
+            amount_in_inv_curr, conv_rate = allocation_in_invoice_currency(
+                alloc.amount, pay_currency=payment_currency_id, pay_rate=payment.exchange_rate,
+                invoice_currency=inv_currency_id,
+                stated_in_invoice=alloc.amount_in_invoice_currency,
             )
 
         # ملاحظة: التحقق من تجاوز المتبقي يتم لاحقاً تحت قفل select_for_update
@@ -3138,17 +3145,12 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         cash_by_invoice: dict[int, Decimal] = {}
         ar_by_invoice: dict[int, Decimal] = {}
         invoice_order: list[int] = []
-        for alloc, amount_in_inv_curr, _rate in alloc_conversions:
+        for alloc, amount_in_inv_curr, conv_rate in alloc_conversions:
             inv_curr_id = alloc.invoice.currency_id
             if payment_currency_id and inv_curr_id and inv_curr_id != payment_currency_id:
-                # P-H-8: كل توزيع يُحوَّل من عملة فاتورته إلى عملة الدفعة على حدة.
-                ar_amt, _ = convert_amount(
-                    amount=amount_in_inv_curr,
-                    from_currency_id=inv_curr_id,
-                    to_currency_id=payment_currency_id,
-                    tenant_id=payment.tenant_id,
-                    effective_date=payment.payment_date,
-                )
+                # P-H-8: كل توزيع يُحوَّل من عملة فاتورته إلى عملة الدفعة على حدة —
+                # بمعامل التوزيع نفسه (سعر السند أو ما ذكره المستخدم)، لا بجدول الأسعار.
+                ar_amt = (amount_in_inv_curr / conv_rate).quantize(DEC)
             else:
                 ar_amt = Decimal(str(alloc.amount))  # نفس العملة — لا فرق صرف
             if alloc.invoice_id not in cash_by_invoice:
@@ -3380,6 +3382,8 @@ def allocate_customer_payment(
         (int(a["invoice"]), Decimal(str(a.get("amount") or "0")))
         for a in (allocations or [])
     ]
+    # كم يسدّد كل توزيع من فاتورته بعملتها — حين لا يكفي سعر السند للتحويل.
+    stated_rows = [a.get("amount_in_invoice_currency") for a in (allocations or [])]
     if not rows:
         raise ValidationError("لا توزيعات مُرسَلة.")
     if any(amt <= 0 for _inv_id, amt in rows):
@@ -3423,7 +3427,7 @@ def allocate_customer_payment(
         incoming_by_invoice: dict[int, Decimal] = {}
         refund_increments_by_original: dict[int, Decimal] = {}
         prepared_allocations: list[tuple[SalesInvoice, Decimal, Decimal, Decimal]] = []
-        for inv_id, amt in rows:
+        for (inv_id, amt), stated_in in zip(rows, stated_rows):
             inv = invoices.get(inv_id)
             if inv is None:
                 raise ValidationError(f"الفاتورة #{inv_id} غير موجودة في هذه الشركة.")
@@ -3443,16 +3447,10 @@ def allocate_customer_payment(
                     f"لا يجوز توزيع سند قبض على مرتجع البيع #{inv.invoice_number}."
                 )
 
-            if payment.currency_id == inv.currency_id:
-                amount_in_inv_curr, conv_rate = amt, Decimal("1")
-            else:
-                amount_in_inv_curr, conv_rate = convert_amount(
-                    amount=amt,
-                    from_currency_id=payment.currency_id,
-                    to_currency_id=inv.currency_id,
-                    tenant_id=payment.tenant_id,
-                    effective_date=payment.payment_date,
-                )
+            amount_in_inv_curr, conv_rate = allocation_in_invoice_currency(
+                amt, pay_currency=payment.currency_id, pay_rate=payment.exchange_rate,
+                invoice_currency=inv.currency_id, stated_in_invoice=stated_in,
+            )
             remaining = _allocation_open_amount(
                 inv,
                 collectible_summaries=collectible_summaries,

@@ -198,6 +198,22 @@ def fifo_link_for_box(box_account, tenant):
     return None
 
 
+def assert_box_pays_in_its_currency(box_account, tenant, currency) -> None:
+    """صندوقٌ بعملة أجنبية (له طبقات FIFO) لا يدفع بالشيكل.
+
+    كانت دفعة التخليص بلا عملة تُعدّ شيكلاً فتُدائن صندوق الدولار بالرقم نفسه بسعر 1
+    وتتخطّى FIFO. الصحيح أن يختار المستخدم عملة الصندوق ويُدخل سعر صرفها.
+    """
+    link = fifo_link_for_box(box_account, tenant)
+    if link is None:
+        return
+    if currency is None or currency.IsBaseCurrency:
+        raise ValidationError(
+            f"الصندوق «{link.name}» بعملة {link.currency_code} — اختر عملة الدفعة "
+            f"{link.currency_code} وأدخل سعر صرفها."
+        )
+
+
 def build_fx_payment_lines(*, fifo_link, foreign_amount, local_amount, debit_account_id,
                            box_account_id, partner_id, description, tenant,
                            reference_type, reference_id):

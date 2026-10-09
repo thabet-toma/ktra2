@@ -236,6 +236,9 @@ export async function payClearanceFromCashBox(
     /** افتراضي: clearance — للشحن يُمرَّر shipping مع payee_partner_id */
     payment_kind?: "clearance" | "shipping";
     payee_partner_id?: number;
+    /** عملة الدفعة — تُحذف فتكون الشيكل؛ والأجنبية تلزمها `exchange_rate` يكتبها المستخدم. */
+    currency_id?: number;
+    exchange_rate?: string;
   }
 ): Promise<ClearancePaymentResult> {
   return apiPostObject<ClearancePaymentResult>(

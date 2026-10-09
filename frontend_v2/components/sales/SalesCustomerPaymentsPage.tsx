@@ -78,6 +78,8 @@ import {
 } from "../../utils/partnerChequeDefaults";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
 import {
   eligibleTotal,
   fillRefundPicks,
@@ -92,7 +94,7 @@ import {
 
 type Partner = { id: number; name: string; legal_name?: string | null; is_active?: boolean };
 type Account = { id: number; code: string; name: string; account_type?: string };
-type Currency = { CurrencyID: number; Code: string; Name?: string };
+type Currency = { CurrencyID: number; Code: string; Name?: string; IsBaseCurrency?: boolean };
 
 type AgingInvoice = {
   invoice_id: number;
@@ -815,7 +817,9 @@ export const NewPaymentModal: React.FC<{
     initialInvoice ? String(initialInvoice.remaining) : "",
   ); // N4-T4: نقد جزء
   const [currencyId, setCurrencyId] = useState<number | "">("");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  // سعر الصرف يكتبه المستخدم لعملة غير أساسية — يبدأ فارغاً ولا افتراضي 1.
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [submitTried, setSubmitTried] = useState(false);
   const [cashAccountId, setCashAccountId] = useState<number | "">(effectiveDefaultCashAccountId);
   const [notes, setNotes] = useState("");
   // N4-T4: withholding (خصم المصدر) — يُحسَب من المجموع
@@ -918,7 +922,8 @@ export const NewPaymentModal: React.FC<{
     setDate(today);
     setCashAmount(initialInvoice ? String(initialInvoice.remaining) : "");
     setCurrencyId("");
-    setExchangeRate("1");
+    setExchangeRate("");
+    setSubmitTried(false);
     setCashAccountId(effectiveDefaultCashAccountId);
     setNotes("");
     setWithholdingPct("0");
@@ -1076,7 +1081,9 @@ export const NewPaymentModal: React.FC<{
     const cur = first.currency ?? currencyId;
     if (cur !== currencyId) {
       setCurrencyId(cur);
-      setExchangeRate(first.exchange_rate || "1");
+      // سعر السند الأصلي يُعبَّأ ظاهراً في الحقل (لا يُرسَل ما لم يره المستخدم)، وبالشيكل لا سعر.
+      const curDto = currencies.find((c) => c.CurrencyID === cur);
+      setExchangeRate(isBaseCurrency(curDto) ? "" : (first.exchange_rate || ""));
     }
     const total = eligibleTotal(surplusRows, cur);
     setCashAmount(total.toFixed(2));
@@ -1089,6 +1096,9 @@ export const NewPaymentModal: React.FC<{
   const refundError = refundMode && surplusRows
     ? refundPicksError(surplusRows, refundPicks, amtNum, currencyId)
     : null;
+  const selectedCurrency = currencies.find((c) => c.CurrencyID === Number(currencyId)) ?? null;
+  const rateIsBase = isBaseCurrency(selectedCurrency);
+  const baseCurrencyId = currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null;
   const canSubmit =
     !!partnerId &&
     amtNum > 0 &&
@@ -1170,6 +1180,12 @@ export const NewPaymentModal: React.FC<{
       setError(chequeError);
       return;
     }
+    setSubmitTried(true);
+    const rateError = rateIsBase ? null : validateRate(exchangeRate);
+    if (rateError) {
+      setError(rateError);
+      return;
+    }
     setSubmitting(true);
     try {
       const saved = await createCustomerPayment({
@@ -1177,7 +1193,7 @@ export const NewPaymentModal: React.FC<{
         payment_date: date,
         amount: amtNum.toFixed(2),
         currency: currencyId as number,
-        exchange_rate: exchangeRate,
+        exchange_rate: rateForPayload(rateIsBase, exchangeRate),
         cash_or_bank_account: cashAccountId as number,
         notes,
         auto_post: autoPost,
@@ -1298,16 +1314,22 @@ export const NewPaymentModal: React.FC<{
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">العملة *</span>
-          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
+          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); setExchangeRate(""); setSubmitTried(false); markTouched(); }}>
             {currencies.map((c) => (
               <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}{c.Name ? ` — ${c.Name}` : ""}</option>
             ))}
           </select>
         </label>
-        <label className="ktra-field">
-          <span className="ktra-field-label">سعر الصرف</span>
-          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markTouched(); }} />
-        </label>
+        <ExchangeRateField
+          currencyCode={selectedCurrency?.Code ?? ""}
+          isBase={rateIsBase}
+          value={exchangeRate}
+          onChange={(v) => { setExchangeRate(v); markTouched(); }}
+          date={date}
+          fromCurrencyId={selectedCurrency?.CurrencyID}
+          baseCurrencyId={baseCurrencyId}
+          error={submitTried ? validateRate(exchangeRate) : undefined}
+        />
       </div>
 
       <PaymentFinanceFields
@@ -1469,6 +1491,7 @@ export const PaymentAllocationModal: React.FC<{
       amount: payment.amount,
       unallocated: unallocatedOf(payment),
       is_posted: payment.is_posted,
+      currency: payment.currency,
     }}
     partnerLabel={partnerLabel}
     summary={<CustomerLedgerBalance partnerId={payment.partner} />}

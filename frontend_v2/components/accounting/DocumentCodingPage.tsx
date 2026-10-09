@@ -26,6 +26,7 @@ import { humanizeThrown } from "../../utils/drfError";
 import { formatMoney } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { pickDefaultCashAccount } from "../../utils/cashBox";
+import { isBaseCurrency } from "../../utils/paymentRate";
 import {
   CODING_PAYMENT_METHODS, DEFAULT_CODING_PAYMENT_METHOD, paymentFieldsForRow,
   type CodingPaymentMethod,
@@ -45,7 +46,7 @@ import type { AccountingPartner, CodingRuleDto, VoucherBatchSaveRow } from "../.
 type AccountRow = {
   id: number; code: string | null; name: string | null; parent: number | null; account_type?: string | null;
 };
-type CurrencyRow = { CurrencyID: number; Code: string };
+type CurrencyRow = { CurrencyID: number; Code: string; IsBaseCurrency?: boolean };
 type Direction = "expense" | "revenue";
 
 type CodingRow = {
@@ -153,7 +154,9 @@ export const DocumentCodingPage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
-  const defaultCurrencyId = currencies[0]?.CurrencyID ?? null;
+  // العملة الأساسية صراحةً لا «الأولى في القائمة»: الشبكة بلا عمود عملة، فكل سند
+  // بالأساسية ولا سعر صرف يُرسَل (الخادم يفرض 1 للشيكل).
+  const defaultCurrencyId = currencies.find((c) => isBaseCurrency(c))?.CurrencyID ?? null;
 
   const codingRuleByPartner = useMemo(() => {
     const map = new Map<number, CodingRuleDto>();
@@ -244,7 +247,7 @@ export const DocumentCodingPage: React.FC = () => {
 
   const handleSave = useCallback(async () => {
     if (defaultCurrencyId == null) {
-      setErr("لا عملة معرَّفة لهذه الشركة بعد");
+      setErr("لا عملة أساسية معرَّفة لهذه الشركة بعد");
       return;
     }
     const candidates = rows.map((r, idx) => ({ r, idx })).filter(({ r }) => rowIsFillable(r));
@@ -259,7 +262,6 @@ export const DocumentCodingPage: React.FC = () => {
         amount: r.amount || "0",
         tax_amount: r.taxAmount || "0",
         currency: defaultCurrencyId,
-        exchange_rate: "1",
         // متابعة #85: طريقة الدفع فعلية من الصفّ — «نقد» يُرفق بصندوقٍ افتراضي
         // معلوم إن وُجد، و«على الحساب» كما كانت دوماً بلا حقل إضافي.
         ...paymentFieldsForRow(r.paymentMethod, defaultCashAccountId),

@@ -801,7 +801,10 @@ class PaymentAllocationSerializer(serializers.ModelSerializer):
             "amount_in_invoice_currency",
             "conversion_rate",
         ]
-        read_only_fields = ["id", "amount_in_invoice_currency", "conversion_rate"]
+        # `amount_in_invoice_currency` يُرسَل حين لا يكفي سعر السند للتحويل (سند شيكل على
+        # فاتورة دولار، أو عملتان أجنبيتان) — `allocation_in_invoice_currency`.
+        read_only_fields = ["id", "conversion_rate"]
+        extra_kwargs = {"amount_in_invoice_currency": {"required": False}}
 
 
 class _PaymentChequeInputSerializer(serializers.Serializer):
@@ -844,6 +847,13 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
     )
 
     def validate(self, attrs):
+        # سعر الصرف من الطلب: الشيكل 1 بلا خانة، وغيره إلزاميٌّ لا افتراضي 1 من النموذج.
+        from accounting.services import require_payment_rate
+        current = self.instance
+        attrs["exchange_rate"] = require_payment_rate(
+            attrs.get("currency", current.currency if current else None),
+            attrs.get("exchange_rate", current.exchange_rate if current else None),
+        )
         # T-ONACC: التوزيع اختياري وجزئي مسموح — الباقي يُسجَّل على حساب العميل.
         # الممنوع فقط أن يتجاوز مجموع التوزيعات مبلغ السند.
         if self.instance is None and self.initial_data.get("allocations") is not None:

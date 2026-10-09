@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
-  docKey, docSettlement, fifoFill, noteAllocationRows, noteTargetDocs, overpaymentExcess, type AllocatableDoc,
+  docKey, docSettlement, fifoFill, needsInvoiceCurrencyAmount, noteAllocationRows, noteTargetDocs, overpaymentExcess, type AllocatableDoc,
 } from "./voucherAllocation.ts";
 
 const clearance = (id: number, remaining: string, date: string): AllocatableDoc => ({
@@ -65,4 +65,18 @@ test("note targets keep accrual kinds and send invoices with the note's side", (
     { kind: "purchase_invoice", id: 3, amount: "10.00" },
   ]);
   assert.deepEqual(noteAllocationRows([{ doc: docs[0], amount: "0" }], "sales_invoice"), []);
+});
+
+const ILS = { Code: "ILS", IsBaseCurrency: true };
+const USD = { Code: "USD", IsBaseCurrency: false };
+const EUR = { Code: "EUR", IsBaseCurrency: false };
+
+test("المبلغ بعملة الفاتورة: لأي زوجٍ غير الأساسية/المتطابقة فقط", () => {
+  assert.equal(needsInvoiceCurrencyAmount(USD, USD), false, "عملة واحدة");
+  assert.equal(needsInvoiceCurrencyAmount(USD, ILS), false, "فاتورة بالأساسية: سعر السند يكفي");
+  assert.equal(needsInvoiceCurrencyAmount(ILS, ILS), false);
+  assert.equal(needsInvoiceCurrencyAmount(ILS, USD), true, "سند شيكل على فاتورة دولار");
+  assert.equal(needsInvoiceCurrencyAmount(USD, EUR), true, "دولار على يورو");
+  assert.equal(needsInvoiceCurrencyAmount(null, USD), false, "عملة السند مجهولة");
+  assert.equal(needsInvoiceCurrencyAmount(USD, undefined), false, "عملة الفاتورة مجهولة");
 });

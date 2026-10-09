@@ -21,7 +21,25 @@ export type AllocatableDoc = {
   date?: string | null;
   /** مستحقٌّ لوجستي؛ غيابه = فاتورة (شراء أو بيع). */
   target?: { kind: AccrualKind; id: number };
+  /** عملة الفاتورة (معرّف) إن عرفها المصدر؛ غيابها تُجلبها النافذة عند الإضافة. */
+  currency?: number | null;
 };
+
+/**
+ * هل يحتاج توزيعٌ على فاتورة حقل «المبلغ بعملة الفاتورة»؟ قاعدة الخادم: عملتان
+ * متطابقتان ← لا؛ فاتورةٌ بالأساسية والسند أجنبي ← لا (يستعمل سعر السند)؛ وأي زوجٍ
+ * آخر (سند شيكل على فاتورة دولار، أو دولار على يورو) ← نعم. عملةٌ مجهولة ← لا
+ * (يردّ الخادم برسالته إن لزم).
+ */
+export function needsInvoiceCurrencyAmount(
+  voucherCurrency: { Code?: string | null; IsBaseCurrency?: boolean | null } | null | undefined,
+  invoiceCurrency: { Code?: string | null; IsBaseCurrency?: boolean | null } | null | undefined,
+): boolean {
+  if (!voucherCurrency || !invoiceCurrency) return false;
+  if (voucherCurrency.Code && voucherCurrency.Code === invoiceCurrency.Code) return false;
+  if (invoiceCurrency.IsBaseCurrency === true) return false;
+  return true;
+}
 
 /** حالة مستحقٍّ لوجستي — من `supplier-payments/accrual-status/`. */
 export type AccrualStatus = {

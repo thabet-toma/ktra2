@@ -172,6 +172,78 @@ def convert_amount(
     return converted, rate
 
 
+PAYMENT_RATE_REQUIRED = (
+    "أدخل سعر صرف {code} — كم شيكلاً تساوي الوحدة (رقم أكبر من صفر وغير 1)."
+)
+
+
+def payment_currency(currency):
+    """`Currency` من كائنٍ أو معرّف — None يبقى None (عملة الأساس في المستندات القديمة)."""
+    if currency is None or isinstance(currency, Currency):
+        return currency
+    obj = Currency.objects.filter(pk=currency).first()
+    if obj is None:
+        raise ValidationError({"currency": ["عملة غير معروفة."]})
+    return obj
+
+
+def require_payment_rate(currency, rate, *, field: str = "exchange_rate") -> Decimal:
+    """سعر صرف الدفعة كما أدخله المستخدم — القاعدة الواحدة لكل مسار دفع.
+
+    عملة الأساس (أو بلا عملة) ⇒ 1 حتماً أيّاً كان المُرسَل: لا خانة ولا خطأ.
+    غيرها ⇒ السعر من الطلب إلزامي: غائبٌ أو ≤ 0 **أو 1** ⇒ `ValidationError` على
+    الحقل `field`. سعر 1 لعملةٍ أجنبية هو بالضبط الخطأ الصامت الذي كان يُرحِّل الدولار
+    بالشيكل؛ فلا افتراضي ولا جدول أسعار ولا سعر المستند الأب.
+    """
+    cur = payment_currency(currency)
+    if cur is None or cur.IsBaseCurrency:
+        return Decimal("1")
+    try:
+        value = Decimal(str(rate).strip()) if rate not in (None, "") else None
+    except (InvalidOperation, ValueError):
+        value = None
+    if value is None or not value.is_finite() or value <= 0 or value == 1:
+        logger.info("payment rate rejected currency=%s rate=%r field=%s", cur.Code, rate, field)
+        raise ValidationError({field: [PAYMENT_RATE_REQUIRED.format(code=cur.Code)]})
+    return value
+
+
+def allocation_in_invoice_currency(
+    amount, *, pay_currency, pay_rate, invoice_currency, stated_in_invoice=None,
+) -> tuple[Decimal, Decimal]:
+    """(المبلغ بعملة الفاتورة، معامل التحويل) لتوزيع سندٍ على فاتورة — بلا جدول أسعار الصرف.
+
+    - العملة نفسها ⇒ المبلغ نفسه، معامل 1.
+    - الفاتورة بالشيكل والسند أجنبي ⇒ سعر السند الذي أدخله المستخدم (`require_payment_rate`).
+    - غير ذلك (سند شيكل على فاتورة دولار، أو عملتان أجنبيتان) ⇒ سعر السند لا يكفي:
+      يذكر المستخدم كم يسدّد هذا التوزيع من الفاتورة بعملتها (`stated_in_invoice`)
+      والمعامل نسبتُه. كان كل ذلك يقرأ جدول الأسعار بتاريخ الدفعة ويتجاهل سعر السند.
+    """
+    amount = Decimal(str(amount))
+    pay_cur = payment_currency(pay_currency)
+    inv_cur = payment_currency(invoice_currency)
+    pay_base = pay_cur is None or pay_cur.IsBaseCurrency
+    inv_base = inv_cur is None or inv_cur.IsBaseCurrency
+    if (pay_base and inv_base) or (
+            pay_cur is not None and inv_cur is not None and pay_cur.pk == inv_cur.pk):
+        return amount, Decimal("1")
+    if inv_base:
+        factor = require_payment_rate(pay_cur, pay_rate)
+        return (amount * factor).quantize(Decimal("0.01")), factor
+    try:
+        stated = Decimal(str(stated_in_invoice)) if stated_in_invoice not in (None, "") else None
+    except (InvalidOperation, ValueError):
+        stated = None
+    if stated is None or not stated.is_finite() or stated <= 0 or amount <= 0:
+        pay_code = pay_cur.Code if pay_cur is not None else "الشيكل"
+        raise ValidationError(
+            f"حدّد كم يسدّد هذا التوزيع من الفاتورة بعملتها ({inv_cur.Code}) — "
+            f"لا سعر صرف ضمني بين {pay_code} و{inv_cur.Code}."
+        )
+    stated = stated.quantize(Decimal("0.01"))
+    return stated, (stated / amount).quantize(Decimal("0.000001"))
+
+
 def resolve_forex_account(tenant_id: int) -> Account | None:
     """
     يبحث عن حساب فروقات العملة (Forex Gain/Loss).
@@ -872,6 +944,20 @@ def post_journal(
     assert_no_final_vat_statement(tenant_id, transaction_date, posting=True)
     mock_hdr = JournalHeader(tenant_id=tenant_id, transaction_date=transaction_date)
     validate_journal_entry(mock_hdr, lines_data)
+    # شبكة أمان لكل مسار: قيدٌ بعملةٍ غير الأساس وسعره 1 هو الدولار مُرحَّلاً بالشيكل —
+    # الخطأ الصامت الذي تمنعه `require_payment_rate` في مسارات الدفع، وهنا يُمسك ما نُسي.
+    # المرآةُ مستثناة: تعادل قيداً قديماً مرحّلاً كما هو، ورفضُها يُبقي نصفه بلا تصحيح.
+    journal_currency = payment_currency(currency) if currency is not None else None
+    if (not mirrors_posted_lines
+            and journal_currency is not None and not journal_currency.IsBaseCurrency
+            and Decimal(str(exchange_rate)) == 1):
+        _logger.warning(
+            "post_journal refused unit rate: type=%s ref_id=%s currency=%s",
+            reference_type, reference_id, journal_currency.Code,
+        )
+        raise ValidationError(
+            f"قيدٌ بعملة {journal_currency.Code} بسعر صرف 1 — أدخل سعر الصرف الحقيقي."
+        )
     line_currencies = [_line_amount_currency(row) for row in lines_data]
     foreign = [] if mirrors_posted_lines else foreign_partner_tag_rows(tenant_id, lines_data)
     if foreign:
@@ -2217,8 +2303,22 @@ def _cheque_movement_gl(cheque, movement_type, account_id=None):
     return dr, cr, dr_partner_id, cr_partner_id, desc
 
 
+def cheque_exchange_rate(cheque, exchange_rate=None) -> Decimal:
+    """سعر صرف حركات الشيك: سعر سنده (القبض/الصرف) الذي أدخله المستخدم — لا افتراضي 1.
+
+    الشيك بالشيكل 1. الأجنبي يتبع سنده؛ وشيكٌ أجنبي يتيم بلا سند (إرثٌ قديم) يطلب
+    سعره في الحركة نفسها (`exchange_rate`). كان `post_journal` يأخذ افتراضيّه 1 لكل
+    شيكٍ بالدولار في التحصيل والإيداع والارتداد والتظهير.
+    """
+    if exchange_rate in (None, ""):
+        voucher = cheque.customer_payment or cheque.supplier_payment
+        exchange_rate = voucher.exchange_rate if voucher is not None else None
+    return require_payment_rate(cheque.currency_id, exchange_rate)
+
+
 def post_cheque_movement_journal(cheque, movement_type, *, when, movement_id,
-                                 user=None, account_id=None, branch_id=None):
+                                 user=None, account_id=None, branch_id=None,
+                                 exchange_rate=None):
     """ترحيل قيد حركة شيك واحدة — Idempotent عبر (CHEQUE_<MOVE>, movement_id).
 
     CHQ-1: كان المفتاح `(CHEQUE_<MOVE>, cheque_id)` — أي حركةٌ واحدة من كل نوع
@@ -2243,6 +2343,7 @@ def post_cheque_movement_journal(cheque, movement_type, *, when, movement_id,
              "debit": Decimal("0"), "credit": amount, "description": desc},
         ],
         currency=cheque.currency,
+        exchange_rate=cheque_exchange_rate(cheque, exchange_rate),
         user=user,
         branch_id=branch_id,
     )
@@ -2259,7 +2360,7 @@ _CHEQUE_GL_FROM_RECEIVED_ONLY = frozenset({'deposit', 'return_to_customer'})
 
 def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                     account_id=None, movement_date=None, bank_account_id=None,
-                    endorsed_to_id=None, sales_return_id=None):
+                    endorsed_to_id=None, sales_return_id=None, exchange_rate=None):
     """task11 R2-A3 — تحويل حالة شيك مع القيد المحاسبي المرافق.
 
     كانت آلة الحالات بلا قيود محاسبية (والواجهة تتجاوزها أصلاً بـ PATCH خام)
@@ -2425,6 +2526,7 @@ def transfer_cheque(cheque_id, movement_type, *, user=None, notes='',
                 account_id=account_id,
                 branch_id=(cheque.sales_invoice.branch_id
                            if cheque.sales_invoice_id else None),
+                exchange_rate=exchange_rate,
             )
             movement.journal = journal
             movement.save(update_fields=['journal'])
@@ -3374,7 +3476,8 @@ def _transfer_side(box=None, bank_account=None):
         return box.account_id, box.name, (box.currency_code or "").upper()
     return (
         bank_account.account_id, bank_account.name,
-        (getattr(bank_account.currency, "code", "") or "").upper(),
+        # `Currency.Code` لا `code`: كان يُقرأ فارغاً دائماً فيُعامَل البنك الأجنبي شيكلاً.
+        (getattr(bank_account.currency, "Code", "") or "").upper(),
     )
 
 
@@ -3399,15 +3502,33 @@ def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None,
     if src_account_id == dst_account_id:
         raise ValidationError("لا يمكن التحويل من الخزينة إلى نفسها.")
 
+    base = Currency.objects.filter(IsBaseCurrency=True).first()
+    base_code = (base.Code if base else "ILS").upper()
+    src_code, dst_code = (src_currency or base_code), (dst_currency or base_code)
+    if src_code != dst_code and base_code not in (src_code, dst_code):
+        raise ValidationError(
+            f"التحويل بين عملتين أجنبيتين ({src_code} ← {dst_code}) غير مدعوم — حوّل عبر الشيكل."
+        )
+    # الطرف الأجنبي في تحويلٍ بين عملتين — سعرُه من الطلب إلزاماً (لا `or 1`).
+    foreign_code = dst_code if src_code == base_code else src_code
+    if src_code != dst_code:
+        foreign = Currency.objects.filter(Code__iexact=foreign_code).first()
+        if foreign is None:
+            raise ValidationError(f"العملة {foreign_code} غير معرّفة في النظام.")
+        fx_rate = require_payment_rate(foreign, rate, field="rate")
+    else:
+        fx_rate = Decimal("1")
+
+    # الرصيد الدفتري بالشيكل — يُقارَن بمبلغٍ بالشيكل وحده؛ المصدر الأجنبي يحرسه FIFO.
     available = (
-        cash_box_balance(from_cash_box, as_of=when) if from_cash_box is not None else None
+        cash_box_balance(from_cash_box, as_of=when)
+        if from_cash_box is not None and src_code == base_code else None
     )
     if available is not None and value > available:
         raise ValidationError(
             f"رصيد {src_name} لا يكفي: المتاح {available}، والمطلوب {value}."
         )
 
-    fx_rate = Decimal(str(rate or 1))
     label = notes or f"تحويل من {src_name} إلى {dst_name}"
 
     with transaction.atomic():
@@ -3419,13 +3540,11 @@ def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None,
             created_by=user if getattr(user, "is_authenticated", False) else None,
         )
         transfer.number = transfer.id
-        if to_cash_box is not None and dst_currency and dst_currency != src_currency:
-            # الوجهة بعملة أخرى ⇒ المبلغ المُدخل بعملة المصدر، والوارد
-            # للصندوق الأجنبي = المبلغ ÷ السعر، وطبقة FIFO تحفظ سعرها.
+        # المبلغ المُدخل بعملة المصدر دائماً.
+        if src_code == base_code and dst_code != base_code and to_cash_box is not None:
+            # شيكل ← صندوق أجنبي: الوارد = المبلغ ÷ السعر، وطبقة FIFO تحفظ سعرها.
             from .fx_fifo import transfer_ils_to_fx
 
-            if fx_rate <= 0:
-                raise ValidationError("سعر الصرف مطلوب للتحويل بين عملتين مختلفتين.")
             if from_cash_box is None:
                 raise ValidationError(
                     "التحويل إلى صندوق عملة أجنبية يبدأ من صندوق نقدي لا من حساب بنكي."
@@ -3435,6 +3554,50 @@ def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None,
                 to_cash_box, from_cash_box, fc, fx_rate, date=when, user=user,
             )
             transfer.journal = lot.journal
+        elif src_code != dst_code:
+            # قيدٌ بالشيكل وطرفُه الأجنبي يحمل مبلغه بعملته (`amount_currency`).
+            # أجنبي ← شيكل: الوارد = المبلغ × السعر؛ والصندوق الأجنبي يُخرج تكلفته FIFO
+            # وفرقُ الصرف محقَّق — كان يمرّ بـ`transfer_ils_to_fx` معكوساً فيُنشئ طبقةً
+            # على صندوق الشيكل ويقسم بدل أن يضرب. شيكل ← بنك أجنبي: كان 1:1.
+            from .fx_fifo import build_fx_payment_lines, fifo_link_for_box
+
+            if src_code != base_code:
+                local = (value * fx_rate).quantize(Decimal("0.01"))
+                fifo_link = (
+                    fifo_link_for_box(from_cash_box.account, tenant)
+                    if from_cash_box is not None else None
+                )
+                if fifo_link is not None:
+                    lines = build_fx_payment_lines(
+                        fifo_link=fifo_link, foreign_amount=value, local_amount=local,
+                        debit_account_id=dst_account_id, box_account_id=src_account_id,
+                        partner_id=None, description=label, tenant=tenant,
+                        reference_type="CASH_TRANSFER", reference_id=transfer.id,
+                    )
+                else:
+                    lines = [
+                        {"account": dst_account_id, "debit": local,
+                         "credit": Decimal("0"), "description": label},
+                        {"account": src_account_id, "debit": Decimal("0"), "credit": local,
+                         "amount_currency": -value, "currency_code": src_code,
+                         "description": label},
+                    ]
+            else:
+                received = (value / fx_rate).quantize(Decimal("0.01"))
+                lines = [
+                    {"account": dst_account_id, "debit": value, "credit": Decimal("0"),
+                     "amount_currency": received, "currency_code": dst_code,
+                     "description": label},
+                    {"account": src_account_id, "debit": Decimal("0"),
+                     "credit": value, "description": label},
+                ]
+            jh = post_journal(
+                tenant_id=tenant.pk, transaction_date=when,
+                reference_type="CASH_TRANSFER", reference_id=transfer.id,
+                description=label, lines_data=lines,
+                currency=base, exchange_rate=Decimal("1"), user=user,
+            )
+            transfer.journal = jh
         else:
             jh = post_journal(
                 tenant_id=tenant.pk, transaction_date=when,
@@ -3520,7 +3683,7 @@ EXPENSE_VOUCHER_TRADE_PAYABLES_CODE = "2101"
 
 
 def create_expense_voucher(
-    *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"),
+    *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=None,
     payment_method, expense_account=None, expense_account_name=None, expense_parent_code=None,
     cash_or_bank_account_id=None, beneficiary_partner=None, beneficiary_name="",
     description="", attachment_url="", kind=None, user=None,
@@ -3548,7 +3711,8 @@ def create_expense_voucher(
     tax_amount = Decimal(str(tax_amount or 0)).quantize(Decimal("0.01"))
     if tax_amount < 0 or tax_amount > amount:
         raise ValidationError("ضريبة المدخلات غير صالحة.")
-    exchange_rate = Decimal(str(exchange_rate or 1))
+    # الشيكل 1؛ وغيره سعر السند المُدخَل إلزاماً — لا `or 1` صامت.
+    exchange_rate = require_payment_rate(currency, exchange_rate)
     when = date or timezone.localdate()
     kind = kind or ExpenseVoucher.KIND_NORMAL
     if kind not in (ExpenseVoucher.KIND_NORMAL, ExpenseVoucher.KIND_RETURN):
@@ -3752,7 +3916,7 @@ def _voucher_account_entry_is_linked(tenant_id: int) -> bool:
 
 
 def create_revenue_voucher(
-    *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=Decimal("1"),
+    *, tenant, date, amount, currency, tax_amount=Decimal("0"), exchange_rate=None,
     payment_method, revenue_account=None, revenue_account_name=None, revenue_parent_code=None,
     cash_or_bank_account_id=None, payer_partner=None, payer_name="",
     description="", attachment_url="", kind=None, user=None,
@@ -3787,7 +3951,8 @@ def create_revenue_voucher(
     tax_amount = Decimal(str(tax_amount or 0)).quantize(Decimal("0.01"))
     if tax_amount < 0 or tax_amount > amount:
         raise ValidationError("ضريبة المخرجات غير صالحة.")
-    exchange_rate = Decimal(str(exchange_rate or 1))
+    # الشيكل 1؛ وغيره سعر السند المُدخَل إلزاماً — لا `or 1` صامت.
+    exchange_rate = require_payment_rate(currency, exchange_rate)
     when = date or timezone.localdate()
     kind = kind or RevenueVoucher.KIND_NORMAL
     if kind not in (RevenueVoucher.KIND_NORMAL, RevenueVoucher.KIND_RETURN):
@@ -3994,7 +4159,7 @@ def batch_save_vouchers(*, tenant, rows: list[dict], user=None) -> dict:
                         amount=row.get("amount"),
                         tax_amount=row.get("tax_amount") or Decimal("0"),
                         currency=row.get("currency"),
-                        exchange_rate=row.get("exchange_rate") or Decimal("1"),
+                        exchange_rate=row.get("exchange_rate"),
                         payment_method=row.get("payment_method") or ExpenseVoucher.PAYMENT_CASH,
                         expense_account=row.get("account"),
                         expense_account_name=row.get("account_name"),
@@ -4015,7 +4180,7 @@ def batch_save_vouchers(*, tenant, rows: list[dict], user=None) -> dict:
                         amount=row.get("amount"),
                         tax_amount=row.get("tax_amount") or Decimal("0"),
                         currency=row.get("currency"),
-                        exchange_rate=row.get("exchange_rate") or Decimal("1"),
+                        exchange_rate=row.get("exchange_rate"),
                         payment_method=row.get("payment_method") or RevenueVoucher.PAYMENT_CASH,
                         revenue_account=row.get("account"),
                         revenue_account_name=row.get("account_name"),

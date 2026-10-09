@@ -44,6 +44,7 @@ interface SupplierPaymentRow {
   partner_name?: string;
   payment_date: string;
   amount: string;
+  currency?: number | null;
   cash_or_bank_account: number;
   is_posted: boolean;
   journal?: number | null;
@@ -540,6 +541,7 @@ export const SupplierPaymentsPage: React.FC = () => {
             amount: allocating.amount,
             unallocated: unallocatedOf(allocating),
             is_posted: allocating.is_posted,
+            currency: allocating.currency,
           }}
           partnerLabel={allocating.partner_name || partnerName(allocating.partner)}
           docs={allocDocs}

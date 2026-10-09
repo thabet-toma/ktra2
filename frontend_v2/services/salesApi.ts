@@ -281,6 +281,8 @@ export type InvoiceCollectPayload = {
   from_on_account?: Array<{ payment_id: number; amount: string }>;
   post_invoice?: boolean;
   payment_date?: string;
+  /** مطلوب لفاتورة آجلة بعملة غير أساسية (يكتبه المستخدم)؛ النقدية تُحصَّل بسعر فاتورتها. */
+  exchange_rate?: string;
 };
 
 /**
@@ -918,7 +920,7 @@ export async function unpostCustomerPayment(id: number): Promise<CustomerPayment
  */
 export async function allocateCustomerPayment(
   id: number,
-  allocations: Array<{ invoice: number; amount: string | number }>,
+  allocations: Array<{ invoice: number; amount: string | number; amount_in_invoice_currency?: string }>,
 ): Promise<CustomerPaymentRow> {
   return apiPostObject(`${BASE}/payments/${id}/allocate/`, { allocations }, { tenantId: tid() });
 }
@@ -1228,6 +1230,9 @@ export type SalesOrderRow = {
   grand_total: string;
   deposit_amount: string;
   remaining_amount: string;
+  /** عملة الطلبية وسعرها — بهما يُحسم أن العربون يحتاج سعر صرف. */
+  currency?: number | null;
+  exchange_rate?: string | number | null;
   quotation?: number | null;
   quotation_number?: string | null;
   invoice?: number | null;
@@ -1281,7 +1286,13 @@ export async function convertSalesOrderToInvoice(
 /** عربون الطلبية — سند قبض مرحَّل «على الحساب» مربوط بها. */
 export async function recordOrderDeposit(
   id: number,
-  body: { amount: string | number; cash_or_bank_account: number; payment_date?: string },
+  body: {
+    amount: string | number;
+    cash_or_bank_account: number;
+    payment_date?: string;
+    /** مطلوب حين عملة الطلبية غير الأساسية (يكتبه المستخدم). */
+    exchange_rate?: string;
+  },
 ): Promise<SalesOrderRow> {
   return apiPostObject(`${BASE}/orders/${id}/deposit/`, body, { tenantId: tid() });
 }

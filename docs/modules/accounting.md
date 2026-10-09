@@ -173,9 +173,13 @@
 - `cash_box_adjustment(direction='in'|'out')` — إيداع/سحب بقيدٍ واحد مقابل حساب
   رأس المال (أو حسابٍ مقابل صريح). السحب يُرفض إن جاوز الرصيد. عمّم
   `deposit-journal` القديمة (إيداعٌ فقط ومفتاحها `external_id`)، وهي باقية للتوافق.
-- `create_cash_transfer` — تحويل بين خزينتين بمستندٍ واحد وقيدٍ واحد؛ والوجهةُ
-  صندوقُ عملةٍ أجنبية تُفوَّض إلى `fx_fifo.transfer_ils_to_fx` لأن طبقات FIFO
-  مصدر تكلفة العملة، وقيدٌ مباشر بجانبها يفسدها بصمت.
+- `create_cash_transfer` — تحويل بين خزينتين بمستندٍ واحد وقيدٍ واحد؛ المبلغ بعملة المصدر،
+  وسعر التحويل بين عملتين **من الطلب إلزاماً** (`require_payment_rate`، لا `or 1`). شيكل ←
+  صندوقُ عملةٍ أجنبية تُفوَّض إلى `fx_fifo.transfer_ils_to_fx` لأن طبقات FIFO مصدر تكلفة
+  العملة، وقيدٌ مباشر بجانبها يفسدها بصمت. أجنبي ← شيكل: قيدٌ بالشيكل، والصندوق الأجنبي
+  يُخرج تكلفته FIFO بفرق صرفٍ محقَّق (`fx_fifo.build_fx_payment_lines`) — كان يمرّ
+  بـ`transfer_ils_to_fx` معكوساً. البنك الأجنبي طرفُه يحمل مبلغه بعملته (`amount_currency`)
+  — كانت عملته تُقرأ `code` لا `Code` فيُرحَّل 1:1. عملتان أجنبيتان معاً مرفوضتان.
 - `post_cash_count` — فرق الجرد إلى «زيادة الصندوق» (`4202`) أو «عجز الصندوق»
   (`5206`) — نمط Odoo (Profit/Loss Account). الفرق صفراً ⇒ لا قيد.
 - الأمر `backfill_cash_boxes` (`--link` و`--history`): يربط صناديق ما قبل توحيد
@@ -270,11 +274,14 @@ def post_journal_entry(journal_id, user=None):  # ترحيل قيد موجود �
 def year_end_close(*, tenant_id: int, fiscal_year: int, retained_earnings_account_id: int, user=None) -> dict:  # تصفير الإيراد/المصروف إلى الأرباح المحتجزة
 def next_document_number(tenant_id: int, document_type: str, book_number: int = 0, branch_id: int | None = None) -> int:  # ترقيم المستندات عبر TenantBook مع select_for_update
 def get_exchange_rate(tenant_id: int, from_currency_id: int, to_currency_id: int, effective_date=None) -> Decimal:  # أحدث سعر ≤ التاريخ، أو مقلوب الاتجاه المعاكس
-def convert_amount(amount: Decimal, from_currency_id: int, to_currency_id: int, tenant_id: int, effective_date=None, explicit_rate: Decimal | None = None) -> tuple[Decimal, Decimal]:  # (المبلغ المحوَّل، السعر)
-def transfer_cheque(cheque_id, movement_type, *, user=None, notes='', account_id=None, movement_date=None, bank_account_id=None, endorsed_to_id=None):  # تحويل حالة شيك + قيده؛ يرفض حركةً على سندٍ غير مرحّل، ومسودةً داخل مستند، وتاريخاً مستقبلياً أو أسبق من آخر حركة مرحّلة، وإيداعاً بلا بنك متى كان للشركة بنوك نشطة
+def convert_amount(amount: Decimal, from_currency_id: int, to_currency_id: int, tenant_id: int, effective_date=None, explicit_rate: Decimal | None = None) -> tuple[Decimal, Decimal]:  # (المبلغ المحوَّل، السعر) — لا تستعملها لدفعة: تقرأ جدول الأسعار
+def require_payment_rate(currency, rate, *, field="exchange_rate") -> Decimal:  # القاعدة الواحدة لسعر الدفعة: الأساس 1 حتماً، وغيرها السعر المُدخَل (غائب/≤0/1 ⇒ ValidationError على الحقل)
+def allocation_in_invoice_currency(amount, *, pay_currency, pay_rate, invoice_currency, stated_in_invoice=None) -> tuple[Decimal, Decimal]:  # تحويل توزيع سندٍ على فاتورة بلا جدول: سعر السند للفاتورة بالشيكل، وإلا ما ذكره المستخدم بعملة الفاتورة
+def transfer_cheque(cheque_id, movement_type, *, user=None, notes='', account_id=None, movement_date=None, bank_account_id=None, endorsed_to_id=None, exchange_rate=None):  # تحويل حالة شيك + قيده (بسعر `cheque_exchange_rate`)؛ يرفض حركةً على سندٍ غير مرحّل، ومسودةً داخل مستند، وتاريخاً مستقبلياً أو أسبق من آخر حركة مرحّلة، وإيداعاً بلا بنك متى كان للشركة بنوك نشطة
 def deposit_cheques_batch(tenant_id, cheque_ids, *, bank_account_id=None, user=None, movement_date=None, notes='') -> dict:  # إيداع حزمة شيكات ذرّياً (الكلّ أو لا شيء) + بيانات قسيمة الإيداع
 def cheque_source_document(cheque) -> dict | None:  # المستند الذي دخل الشيك الدفاتر ضمنه: نوعه ورقمه وهل رُحِّل
-def post_cheque_movement_journal(cheque, movement_type, *, when, user=None, account_id=None, branch_id=None):  # قيد حركة شيك واحدة، idempotent
+def cheque_exchange_rate(cheque, exchange_rate=None) -> Decimal:  # سعر حركات الشيك: سعر سنده؛ الأجنبي بلا سند يطلبه في الحركة
+def post_cheque_movement_journal(cheque, movement_type, *, when, user=None, account_id=None, branch_id=None, exchange_rate=None):  # قيد حركة شيك واحدة، idempotent، بسعر `cheque_exchange_rate` (كان افتراضي `post_journal` = 1)
 def cheque_wallet(tenant_id: int, *, today=None) -> dict:  # محفظة الشيكات المفتوحة حسب الحالة والاستحقاق
 def create_bank_account(*, tenant, bank, name, currency, branch=None, account_number=None, iban=None, is_default=False, notes=None, user=None):  # حساب بنكي + حسابه في الشجرة تحت «1102»
 def bank_account_statement(bank_account, *, start_date=None, end_date=None, posted_only=True):  # حركة الحساب البنكي + حالة المطابقة
@@ -304,7 +311,7 @@ def set_default_cash_box(box, *, user=None):  # افتراضيٌّ واحد لك
 def cash_box_statement(cash_box, *, start_date=None, end_date=None, posted_only=True):  # افتتاحي + صفوف برصيد جارٍ + ختامي
 def cash_box_balance(cash_box, *, as_of=None) -> Decimal:  # الرصيد الدفتري من الأسطر المرحّلة
 def cash_box_adjustment(cash_box, *, direction, amount, contra_account=None, date=None, memo="", user=None):  # إيداع/سحب بقيدٍ واحد؛ السحب فوق الرصيد مرفوض
-def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None, from_bank_account=None, to_cash_box=None, to_bank_account=None, rate=None, notes=None, user=None):  # تحويل بمستند واحد؛ الوجهة FX تمرّ بـfx_fifo
+def create_cash_transfer(*, tenant, transfer_date, amount, from_cash_box=None, from_bank_account=None, to_cash_box=None, to_bank_account=None, rate=None, notes=None, user=None):  # تحويل بمستند واحد؛ السعر بين عملتين إلزامي؛ شيكل←FX بـtransfer_ils_to_fx، وFX←شيكل باستهلاك FIFO
 def post_cash_count(count, *, user=None):  # فرق الجرد إلى 4202 (زيادة) أو 5206 (عجز)
 def resolve_forex_account(tenant_id: int) -> Account | None:  # حساب فروقات العملة
 def create_audit_log(tenant, user, action, model_name, object_id, change_details):  # سطر تدقيق معزول لا يُسقط المستدعي
@@ -367,6 +374,13 @@ def create_audit_log(tenant, user, action, model_name, object_id, change_details
 - **من خارج accounting الكتابة عبر `accounting.api` فقط** (المرحلة 2): `post_document` للقيود، `reverse_journal` للعكس (ومعه التجاوز الوحيد المشروع لغارد القيد المرحّل عند `unpost_original=True`)، `purge_journals` للتطهير الإداري — عقد `no-direct-accounting-models` في `.importlinter` يمنع أي استيراد جديد لـ`accounting.models`.
 - **لا تعديل على قيد مرحّل**: `JournalHeader.save` يرمي `ValidationError` إن كان `is_posted` سابقاً (`accounting/models.py` (`JournalHeader`)) — أنشئ قيداً عكسياً.
 - **التوازن دقيق بعد `quantize('0.01')`** ولا يُقبل قيد بمجموع صفر (`accounting/services.py` (`validate_journal_entry`)).
+- **كل دفعة بعملةٍ غير الشيكل سعرُها من المستخدم — لا افتراضي صامت** (قرار المالك 2026-10-09):
+  مسارات الدفع كلها تمرّ بـ`accounting/services.py` (`require_payment_rate`) — سند القبض والصرف
+  (مُسلسِلاهما)، المصروف والإيراد والحفظ الجماعي، الدفع والتحصيل من الفاتورة، العربون، التخليص
+  والنقل، التحويل بين الصناديق — والشيك بسعر سنده (`cheque_exchange_rate`)، والتوزيع على فاتورة
+  بعملةٍ أخرى بـ`allocation_in_invoice_currency` لا بجدول الأسعار. الشيكل لا خانة ولا سؤال.
+  التسوية المولودة مع ترحيل الفاتورة النقدية تأخذ سعر الفاتورة نفسها (أُدخل للتو). **وشبكة أمان في
+  `post_journal`**: قيدٌ بعملةٍ غير الأساس وسعره 1 يُرفض قبل إنشائه — يمسك أي مسار نُسي.
 - **`base_debit`/`base_credit` تُحسب في `JournalLine.save` من `exchange_rate` الرأس**، وسعر مفقود أو ≤ 0 يفشل بصوت عالٍ لا يسقط إلى 1 (`accounting/models.py` (`JournalLine`)).
 - **`amount_currency` عمودٌ واحد موقَّع لا مدين/دائن منفصلان** (مرآة Odoo): إشارته إشارة (مدين − دائن) فمجموعه رصيدٌ مباشرة. قيدٌ بعملةٍ أجنبية بسعرٍ غير 1 يملؤه `JournalLine.save` من الاسميّ دائماً؛ وقيدٌ بالشيكل دولارُه معروف يمرّره المسار في `lines_data` و`post_journal` يرفض إشارةً مخالفة أو رمزاً غائباً (`services.py` — `_line_amount_currency`). المسارات: `logistics/payment_posting.py` (`build_usd_payment_journal` — فرعا FIFO والأرشيف)، `logistics/accruals.py` (`post_freight_accrual`)، `logistics/views/invoices.py` (سطر مورد الدولية = مبلغ الصفقة)، `logistics/services.py` (`_international_return_split` بالنسبة). والعكس — `accounting/api.py` (`reverse_journal`) والعكس اليدوي في `views.py` — يعكسه، **والعكس اليدوي ينسخ عملة الأصل وسعره** (كان يعكس قيد الدولار بسعر 1). القديم يعبّئه `logistics/management/commands/backfill_foreign_party_currency.py`.
 - **`nature` الحساب مفروضة على الترحيل**: `debit_only` يرفض أي دائن و`credit_only` يرفض أي مدين (`accounting/services.py` (`post_journal`)).

@@ -193,6 +193,8 @@ export type DocumentPaymentPanelProps = {
   busy: boolean;
   /** حقل حساب الصندوق/البنك — يبنيه المحرّر لأن مصدر الحسابات يخصّه. */
   cashAccountField: React.ReactNode;
+  /** سعر الصرف (`ExchangeRateField`) حين تكون عملة المستند غير الأساسية والدفع آجلاً — يبنيه المحرّر. */
+  rateField?: React.ReactNode;
   panelRef?: React.Ref<HTMLDivElement>;
   cashInputRef?: React.Ref<HTMLInputElement>;
   chequesOpen: boolean;
@@ -212,7 +214,7 @@ export type DocumentPaymentPanelProps = {
 };
 
 export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
-  side, title, derived, input, isPosted, busy, cashAccountField, panelRef, cashInputRef,
+  side, title, derived, input, isPosted, busy, cashAccountField, rateField, panelRef, cashInputRef,
   chequesOpen, onToggleCheques, onCashChange, onFromBalanceChange, onAddCheque,
   onPatchCheque, onRemoveCheque, onFillCashShortfall, onFillFull, onMakeCredit,
   onSaveIntent, onSubmit,
@@ -268,6 +270,7 @@ export const DocumentPaymentPanel: React.FC<DocumentPaymentPanelProps> = ({
             </button>
           )}
           {cashAccountField}
+          {rateField}
         </div>
 
         {/* شيكات */}

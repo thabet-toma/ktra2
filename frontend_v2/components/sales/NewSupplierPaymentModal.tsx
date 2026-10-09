@@ -36,6 +36,8 @@ import {
 import { partnerKindFromType, partnerTypeLabel } from "../../utils/partnerActions";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
 
 export type SupplierPaymentPartner = { id: number; name: string; partner_type?: string; is_active?: boolean };
 /** صف الشريك كما يعيده lookup (يحمل النوع) — نفلتره على الأطراف الدائنة. */
@@ -47,7 +49,7 @@ type Account = {
 // الأطراف الدائنة كلّها لا «مورد» وحده — المخلّص ووكيل الشحن والناقل يُصرف لهم
 // بنفس السند والقيد (Dr ذمّة الطرف / Cr الصندوق). نفس قاعدة كرت الطرف.
 const isCreditorRow = (p: PartnerRow) => partnerKindFromType(p.partner_type) === "supplier";
-type Currency = { CurrencyID: number; Code: string };
+type Currency = { CurrencyID: number; Code: string; IsBaseCurrency?: boolean };
 
 interface Props {
   /** المورد المثبّت مسبقاً (من بطاقة الشريك مثلاً). */
@@ -81,7 +83,9 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
   );
   const [cashAccountId, setCashAccountId] = useState<number | "">("");
   const [currencyId, setCurrencyId] = useState<number | "">("");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  // سعر الصرف يكتبه المستخدم لعملة غير أساسية — يبدأ فارغاً ولا افتراضي 1.
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [submitTried, setSubmitTried] = useState(false);
   const [notes, setNotes] = useState("");
   const [withholdingPct, setWithholdingPct] = useState("0");
   const [withholdingAmt, setWithholdingAmt] = useState("0");
@@ -165,7 +169,8 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     setCashAmount(initialInvoice ? String(initialInvoice.remaining) : "");
     setCashAccountId("");
     setCurrencyId("");
-    setExchangeRate("1");
+    setExchangeRate("");
+    setSubmitTried(false);
     setNotes("");
     setWithholdingPct("0");
     setWithholdingAmt("0");
@@ -174,6 +179,10 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     void discardDraft();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialPartner, initialInvoice, today, discardDraft]);
+
+  const selectedCurrency = currencies.find((c) => c.CurrencyID === Number(currencyId)) ?? null;
+  const rateIsBase = isBaseCurrency(selectedCurrency);
+  const baseCurrencyId = currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null;
 
   const totalCheques = cheques.reduce((s, c) => s + (Number(c.amount) || 0), 0);
   const cashNum = Number(cashAmount) || 0;
@@ -271,14 +280,22 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
       setErr(chequeError);
       return;
     }
+    setSubmitTried(true);
+    const rateError = rateIsBase ? null : validateRate(exchangeRate);
+    if (rateError) {
+      setErr(rateError);
+      return;
+    }
     setSubmitting(true);
     setErr(null);
     try {
+      const rate = rateForPayload(rateIsBase, exchangeRate);
       const saved = await purchaseInvoiceApi.addSupplierPayment({
         partner: Number(supplierId),
         payment_date: paymentDate,
         amount: String(computedTotal.toFixed(2)),
         currency: currencyId ? Number(currencyId) : null,
+        ...(rate !== undefined ? { exchange_rate: rate } : {}),
         cash_or_bank_account: Number(cashAccountId),
         notes: notes || (initialInvoice ? `سند صرف فاتورة ${initialInvoice.number || initialInvoice.id}` : undefined),
         ...(initialInvoice ? { purchase_invoice: initialInvoice.id } : {}),
@@ -312,7 +329,7 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
     } finally {
       setSubmitting(false);
     }
-  }, [supplierId, cashAccountId, computedTotal, paymentDate, currencyId, notes, cheques, initialInvoice, onSaved]);
+  }, [supplierId, cashAccountId, computedTotal, paymentDate, currencyId, exchangeRate, rateIsBase, notes, cheques, initialInvoice, onSaved]);
 
   return (
     <PaymentVoucherModal
@@ -363,15 +380,21 @@ export const NewSupplierPaymentModal: React.FC<Props> = ({
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">العملة</span>
-          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
+          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); setExchangeRate(""); setSubmitTried(false); markTouched(); }}>
             <option value="">—</option>
             {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
           </select>
         </label>
-        <label className="ktra-field">
-          <span className="ktra-field-label">سعر الصرف</span>
-          <input type="number" step="0.000001" className="ktra-input ktra-num" value={exchangeRate} onChange={(e) => { setExchangeRate(e.target.value); markTouched(); }} />
-        </label>
+        <ExchangeRateField
+          currencyCode={selectedCurrency?.Code ?? ""}
+          isBase={rateIsBase}
+          value={exchangeRate}
+          onChange={(v) => { setExchangeRate(v); markTouched(); }}
+          date={paymentDate}
+          fromCurrencyId={selectedCurrency?.CurrencyID}
+          baseCurrencyId={baseCurrencyId}
+          error={submitTried ? validateRate(exchangeRate) : undefined}
+        />
       </div>
 
       <PaymentFinanceFields

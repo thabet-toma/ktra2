@@ -139,7 +139,7 @@ class OmittedCashAccountApiTest(APITestCase):
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="defacc-api", password="x")
         cls.currency, _ = Currency.objects.get_or_create(
-            Code="DFA", defaults={"Name": "Defacc", "Symbol": "D"})
+            Code="DFA", defaults={"Name": "Defacc", "Symbol": "D", "IsBaseCurrency": True})
         cls.tenant = create_company("شركة سندات بلا صندوق", cls.user)
         create_fiscal_year(cls.tenant, 2026)
         cls.customer = Partner.objects.create(

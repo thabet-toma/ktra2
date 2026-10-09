@@ -714,6 +714,7 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
                 from_on_account=request.data.get("from_on_account") or [],
                 post_invoice=want_post,
                 payment_date=request.data.get("payment_date") or None,
+                exchange_rate=request.data.get("exchange_rate"),
                 user=request.user,
             )
         except ValidationError as e:
@@ -2122,9 +2123,11 @@ class SalesOrderViewSet(viewsets.ModelViewSet):
                 cash_account_id=request.data.get("cash_or_bank_account"),
                 user=request.user,
                 payment_date=request.data.get("payment_date") or None,
+                exchange_rate=request.data.get("exchange_rate"),
             )
         except ValidationError as e:
-            return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+            # خطأ السعر قاموسٌ على حقله — `str(e)` كان يطبع تمثيل بايثون لا جملة.
+            return Response({"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
         order.refresh_from_db()
         return Response(SalesOrderSerializer(order).data)
 

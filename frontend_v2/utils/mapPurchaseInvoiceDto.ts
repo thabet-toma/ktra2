@@ -1,6 +1,7 @@
 import type { PurchaseInvoiceDto } from "@/types/purchaseInvoice";
 import type { Invoice } from "@/types";
 import { normalizeTaxRatePercent } from "@/utils/sqlMoneyRound";
+import { formatNumber } from "@/utils/formatNumber";
 
 /** Map SQL full DTO → frontend Invoice shape for InvoiceForm / القوائم */
 export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice {
@@ -122,6 +123,11 @@ export function mapPurchaseInvoiceDtoToInvoice(dto: PurchaseInvoiceDto): Invoice
     conversionMetadata:
       (dto.conversion_metadata_json as Invoice["conversionMetadata"]) || undefined,
     currency: dto.currency_code === "USD" ? "USD" : "ILS",
+    // السعر يُعرض لعملةٍ أجنبية فقط؛ للشيكل يفرض الخادم 1 ولا شيء يُعرض.
+    exchangeRate:
+      dto.currency_code === "USD" && dto.exchange_rate != null
+        ? formatNumber(dto.exchange_rate, { maxDecimals: 6 })
+        : undefined,
     invoiceDate: dto.invoice_date || undefined,
     createdAt: dto.created_at || new Date().toISOString(),
     updatedAt: dto.updated_at || new Date().toISOString(),

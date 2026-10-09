@@ -33,7 +33,7 @@ import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
 import { listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
-import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatNumber, formatQuantity } from "../../utils/formatNumber";
 import { formatDateLocalized, formatTimeValue, todayIso } from "../../utils/formatDate";
 import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
@@ -64,6 +64,9 @@ import {
 } from "../shared/CommercialDocumentsList";
 import { hasRecordedCustomerPrice } from "../../utils/customerPriceList";
 import { KitAutocomplete } from "../kit";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
+import type { CurrencyDto } from "../../types/accounting";
 import { InactiveBadge } from "../shared/ActiveStatusControls";
 import { useMissingPartners } from "../../hooks/useMissingDocumentRecords";
 import { HeldPartnerOption } from "../shared/HeldRecordOptions";
@@ -151,6 +154,20 @@ export const SalesOrdersPage: React.FC = () => {
   const [depositFor, setDepositFor] = useState<SalesOrderRow | null>(null);
   const [depositAmount, setDepositAmount] = useState("");
   const [depositAccount, setDepositAccount] = useState<number | "">("");
+  // سعر صرف العربون: لطلبية بعملةٍ غير الأساسية فقط، يكتبه المستخدم ويبدأ فارغاً.
+  const [depositRate, setDepositRate] = useState("");
+  const [depositTried, setDepositTried] = useState(false);
+  const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
+  useEffect(() => {
+    let alive = true;
+    accountingApi.getCurrencies()
+      .then((list) => { if (alive) setCurrencies(list as CurrencyDto[]); })
+      .catch(() => { /* بلا قائمة عملات لا حقل سعر — يردّ الخادم برسالته إن لزم */ });
+    return () => { alive = false; };
+  }, []);
+  const depositCurrency = currencies.find((c) => c.CurrencyID === depositFor?.currency) ?? null;
+  const depositRateIsBase = isBaseCurrency(depositCurrency);
+  const baseCurrencyId = currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null;
 
   const applyProductUpdate = useCallback((updated: Record<string, unknown>) => {
     const row = updated as { id?: number };
@@ -459,15 +476,21 @@ export const SalesOrdersPage: React.FC = () => {
     if (!depositFor) return;
     if (!(Number(depositAmount) > 0)) { setErr("أدخل مبلغ العربون."); return; }
     if (!depositAccount) { setErr("اختر حساب الصندوق/البنك."); return; }
+    setDepositTried(true);
+    if (!depositRateIsBase && validateRate(depositRate)) return; // الخطأ ظاهر تحت الحقل داخل النافذة
+    const rate = rateForPayload(depositRateIsBase, depositRate);
     await act(
       () => recordOrderDeposit(depositFor.id, {
         amount: depositAmount,
         cash_or_bank_account: Number(depositAccount),
+        ...(rate !== undefined ? { exchange_rate: rate } : {}),
       }),
       "تم تسجيل العربون وترحيل سند القبض",
     );
     setDepositFor(null);
     setDepositAmount("");
+    setDepositRate("");
+    setDepositTried(false);
   };
 
   const inputClass =
@@ -721,7 +744,7 @@ export const SalesOrdersPage: React.FC = () => {
           )}
           {order.status !== "converted" && order.status !== "cancelled" && (
             <>
-              <button onClick={() => { setDepositFor(order); setDepositAmount(""); }}
+              <button onClick={() => { setDepositFor(order); setDepositAmount(""); setDepositRate(""); setDepositTried(false); }}
                 className="text-emerald-700 hover:underline">عربون</button>
               <button onClick={() => void act(
                 () => convertSalesOrderToInvoice(order.id), "تم تحويل الطلبية إلى فاتورة")}
@@ -1009,6 +1032,22 @@ export const SalesOrdersPage: React.FC = () => {
                   title="اختيار الصندوق / البنك"
                 />
               </label>
+              <ExchangeRateField
+                currencyCode={depositCurrency?.Code ?? ""}
+                isBase={depositRateIsBase}
+                value={depositRate}
+                onChange={setDepositRate}
+                date={todayIso()}
+                fromCurrencyId={depositCurrency?.CurrencyID}
+                baseCurrencyId={baseCurrencyId}
+                error={depositTried ? validateRate(depositRate) : undefined}
+                suggestions={validateRate(String(depositFor.exchange_rate ?? "")) === null
+                  ? [{
+                      label: `سعر الطلبية ${formatNumber(depositFor.exchange_rate, { maxDecimals: 6 })}`,
+                      value: formatNumber(depositFor.exchange_rate, { maxDecimals: 6 }),
+                    }]
+                  : []}
+              />
               <p className="text-[11px] text-[var(--color-text-muted)]">
                 يُسجَّل سند قبض مرحَّل «على الحساب» باسم الزبون ويُربط بهذه الطلبية.
               </p>

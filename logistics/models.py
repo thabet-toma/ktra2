@@ -1677,6 +1677,11 @@ class LogisticsClearancePayment(models.Model):
         related_name='clearance_payments',
         help_text='Payment amount currency; null = ILS (legacy)',
     )
+    exchange_rate = models.DecimalField(
+        max_digits=18, decimal_places=6, null=True, blank=True,
+        db_column='ExchangeRate_ClearancePay',
+        help_text='سعر صرف الدفعة كما أدخله المستخدم (1 للشيكل)؛ null = دفعة قديمة قبل الحقل',
+    )
     payment_date = models.DateField(null=True, blank=True, db_column='PaymentDate')
     payment_purpose = models.CharField(
         max_length=32, choices=PAYMENT_PURPOSE_CHOICES, default='other',

@@ -248,6 +248,8 @@ export interface Invoice {
         dealTransferCommissionsFromShipmentShareIls?: number;
     };
     currency?: 'USD' | 'ILS';
+    /** سعر صرف الفاتورة لعملة غير الشيكل (نص كما يكتبه المستخدم أو يعيده الخادم). */
+    exchangeRate?: number | string;
     imageUrls?: string[];
     quoteImages?: string[];
     quotePdfs?: {

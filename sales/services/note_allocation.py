@@ -23,7 +23,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Sum
 
-from accounting.services import convert_amount, create_audit_log
+from accounting.services import allocation_in_invoice_currency, create_audit_log
 from sales.models import CreditDebitNote, CreditDebitNoteAllocation, SalesInvoice
 
 logger = logging.getLogger("sales.services")
@@ -100,17 +100,18 @@ def _sales_invoice_open(inv) -> Decimal:
     return _money(linked_return_credit_summary([inv])[inv.pk]["collectible"])
 
 
-def _to_invoice_currency(note, inv, amount: Decimal) -> Decimal:
+def _to_invoice_currency(note, inv, amount: Decimal, stated=None) -> Decimal:
+    """بسعر الإشعار نفسه إن كانت الفاتورة بالشيكل، وإلا بما ذكره المستخدم — لا جدول أسعار."""
     if note.currency_id == inv.currency_id:
         return amount
-    converted, _rate_used = convert_amount(
-        amount=amount, from_currency_id=note.currency_id, to_currency_id=inv.currency_id,
-        tenant_id=note.tenant_id, effective_date=note.note_date,
+    converted, _factor = allocation_in_invoice_currency(
+        amount, pay_currency=note.currency_id, pay_rate=note.exchange_rate,
+        invoice_currency=inv.currency_id, stated_in_invoice=stated,
     )
     return _money(converted)
 
 
-def _allocate_to_sales_invoice(note, inv_id: int, amount: Decimal) -> str:
+def _allocate_to_sales_invoice(note, inv_id: int, amount: Decimal, stated=None) -> str:
     from .flow import guard_invoice_allocation_total
 
     inv = SalesInvoice.objects.select_for_update().filter(pk=inv_id, tenant_id=note.tenant_id).first()
@@ -124,7 +125,7 @@ def _allocate_to_sales_invoice(note, inv_id: int, amount: Decimal) -> str:
         raise ValidationError(f"الفاتورة #{inv.invoice_number} غير مرحّلة.")
     if inv.invoice_kind != SalesInvoice.INVOICE_KIND_SALE:
         raise ValidationError(f"الإشعار لا يُوزَّع على مرتجع البيع #{inv.invoice_number}.")
-    in_invoice = _to_invoice_currency(note, inv, amount)
+    in_invoice = _to_invoice_currency(note, inv, amount, stated)
     remaining = _sales_invoice_open(inv)
     if in_invoice > remaining + DEC:
         raise ValidationError(
@@ -139,7 +140,7 @@ def _allocate_to_sales_invoice(note, inv_id: int, amount: Decimal) -> str:
     return inv.invoice_number
 
 
-def _allocate_to_purchase_invoice(note, inv_id: int, amount: Decimal) -> str:
+def _allocate_to_purchase_invoice(note, inv_id: int, amount: Decimal, stated=None) -> str:
     from logistics.models import PurchaseInvoice
     from logistics.services import purchase_invoice_payment_summary
 
@@ -154,7 +155,7 @@ def _allocate_to_purchase_invoice(note, inv_id: int, amount: Decimal) -> str:
         raise ValidationError(f"فاتورة الشراء #{inv.invoice_number} غير مرحّلة.")
     if inv.is_return:
         raise ValidationError(f"الإشعار لا يُوزَّع على مرتجع الشراء #{inv.invoice_number}.")
-    in_invoice = _to_invoice_currency(note, inv, amount)
+    in_invoice = _to_invoice_currency(note, inv, amount, stated)
     remaining = _money(purchase_invoice_payment_summary(inv)["remaining_balance"])
     if in_invoice > remaining + DEC:
         raise ValidationError(
@@ -198,6 +199,8 @@ def allocate_note(note, allocations: list[dict], *, user=None):
     "id": <pk>, "amount": <بعملة الإشعار>}]``.
     """
     rows = _parse_rows(allocations)
+    # كم يسدّد كل توزيع من فاتورته بعملتها — حين لا يكفي سعر الإشعار للتحويل.
+    stated_rows = [a.get("amount_in_invoice_currency") for a in allocations or []]
     with transaction.atomic():
         note = CreditDebitNote.objects.select_for_update().select_related("partner").get(pk=note.pk)
         if note.status != CreditDebitNote.STATUS_POSTED:
@@ -211,11 +214,11 @@ def allocate_note(note, allocations: list[dict], *, user=None):
         if total_new > free + DEC:
             raise ValidationError(f"مجموع التوزيعات ({total_new}) يتجاوز غير الموزَّع من الإشعار ({free}).")
         labels = []
-        for kind, pk, amount in rows:
+        for (kind, pk, amount), stated in zip(rows, stated_rows):
             if kind == "sales_invoice":
-                labels.append(_allocate_to_sales_invoice(note, pk, amount))
+                labels.append(_allocate_to_sales_invoice(note, pk, amount, stated))
             elif kind == "purchase_invoice":
-                labels.append(_allocate_to_purchase_invoice(note, pk, amount))
+                labels.append(_allocate_to_purchase_invoice(note, pk, amount, stated))
             else:
                 labels.append(_allocate_to_accrual(note, kind, pk, amount))
             logger.info("credit_debit_note.allocate note=%s %s=%s amount=%s", note.id, kind, pk, amount)

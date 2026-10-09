@@ -5,13 +5,15 @@
  * نفس النافذة ونفس التحقّقات، يتبدّل فقط مصدر البيانات عبر `kind`. التوزيع بعد
  * الترحيل **ربط فقط بلا قيد جديد** (الذمم عولجت وقت الترحيل).
  */
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ListOrdered, Plus, Trash2 } from "lucide-react";
 import { formatMoney } from "@/utils/formatNumber";
 import { PaymentVoucherModal } from "../sales/PaymentVoucherParts";
-import { allocateCustomerPayment } from "../../services/salesApi";
+import { allocateCustomerPayment, getSalesInvoice } from "../../services/salesApi";
+import { accountingApi } from "../../services/accountingApi";
 import { purchaseInvoiceApi } from "../../services/purchaseInvoiceApi";
-import { docKey, fifoFill, type AllocatableDoc } from "../../utils/voucherAllocation";
+import { docKey, fifoFill, needsInvoiceCurrencyAmount, type AllocatableDoc } from "../../utils/voucherAllocation";
+import type { CurrencyDto } from "../../types/accounting";
 
 export type { AllocatableDoc };
 
@@ -21,6 +23,8 @@ export type AllocatableVoucher = {
   /** المتبقّي غير الموزَّع من السند. */
   unallocated: number;
   is_posted: boolean;
+  /** عملة السند (معرّف) — بها تُحسم الصفوف التي تحتاج «المبلغ بعملة الفاتورة». */
+  currency?: number | null;
 };
 
 interface Props {
@@ -44,14 +48,53 @@ export const VoucherAllocationModal: React.FC<Props> = ({
 }) => {
   const isCustomer = kind === "customer";
   const available = voucher.unallocated;
-  const [rows, setRows] = useState<Array<{ key: string; doc: AllocatableDoc; amount: string }>>([]);
+  const [rows, setRows] = useState<Array<{ key: string; doc: AllocatableDoc; amount: string; inInvoiceCur?: string }>>([]);
+  const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
+  // عملة كل فاتورة مضافة (معرّف) حين لا يحملها المصدر — تُجلب مرة لكل فاتورة.
+  const [fetchedCur, setFetchedCur] = useState<Record<string, number | null>>({});
   const [pickKey, setPickKey] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
+  useEffect(() => {
+    if (!voucher.currency) return;
+    let alive = true;
+    accountingApi.getCurrencies()
+      .then((list) => { if (alive) setCurrencies(list as CurrencyDto[]); })
+      .catch(() => { /* بلا قائمة عملات لا حقل إضافي — يردّ الخادم برسالته إن لزم */ });
+    return () => { alive = false; };
+  }, [voucher.currency]);
+
+  useEffect(() => {
+    if (!voucher.currency) return;
+    for (const r of rows) {
+      if (r.doc.target || r.doc.currency != null || r.key in fetchedCur) continue;
+      setFetchedCur((m) => ({ ...m, [r.key]: null }));
+      const request = isCustomer
+        ? getSalesInvoice(r.doc.id).then((inv) => inv.currency ?? null)
+        : purchaseInvoiceApi.get(r.doc.id).then((inv) => inv.currency ?? null);
+      request
+        .then((cur) => setFetchedCur((m) => ({ ...m, [r.key]: cur })))
+        .catch(() => { /* عملة مجهولة ← لا حقل إضافي */ });
+    }
+  }, [rows, voucher.currency, isCustomer, fetchedCur]);
+
+  const voucherCur = useMemo(
+    () => currencies.find((c) => c.CurrencyID === voucher.currency) ?? null,
+    [currencies, voucher.currency],
+  );
+  /** عملة فاتورة الصفّ إن كان يحتاج «المبلغ بعملة الفاتورة»، وإلا `null`. */
+  const neededCurrency = (r: { key: string; doc: AllocatableDoc }): CurrencyDto | null => {
+    if (r.doc.target) return null;
+    const id = r.doc.currency ?? fetchedCur[r.key] ?? null;
+    const invCur = currencies.find((c) => c.CurrencyID === id) ?? null;
+    return needsInvoiceCurrencyAmount(voucherCur, invCur) ? invCur : null;
+  };
+  const missingInInvoice = rows.some((r) => neededCurrency(r) && !(Number(r.inInvoiceCur) > 0));
+
   const totalNew = rows.reduce((s, r) => s + (Number(r.amount) || 0), 0);
   const remainingAfter = available - totalNew;
-  const canSubmit = rows.length > 0 && totalNew > 0 && remainingAfter >= -0.01;
+  const canSubmit = rows.length > 0 && totalNew > 0 && remainingAfter >= -0.01 && !missingInInvoice;
 
   const addRow = () => {
     const doc = docs.find((d) => docKey(d) === pickKey);
@@ -78,7 +121,11 @@ export const VoucherAllocationModal: React.FC<Props> = ({
     try {
       const invoiceRows = rows
         .filter((r) => !r.doc.target)
-        .map((r) => ({ invoice: r.doc.id, amount: r.amount }));
+        .map((r) => ({
+          invoice: r.doc.id,
+          amount: r.amount,
+          ...(neededCurrency(r) ? { amount_in_invoice_currency: String(r.inInvoiceCur).trim() } : {}),
+        }));
       const accrualRows = rows.flatMap((r) =>
         r.doc.target ? [{ kind: r.doc.target.kind, id: r.doc.target.id, amount: r.amount }] : []);
       if (onSubmitRows) {
@@ -185,6 +232,20 @@ export const VoucherAllocationModal: React.FC<Props> = ({
                     value={r.amount}
                     onChange={(e) => setRows((rs) => rs.map((x, i) => (i === idx ? { ...x, amount: e.target.value } : x)))}
                   />
+                  {neededCurrency(r) && (
+                    <label className="mt-1 flex flex-col gap-0.5 text-[11px]">
+                      <span>المبلغ بعملة الفاتورة ({neededCurrency(r)?.Code}) *</span>
+                      <input
+                        type="number" step="0.01" min="0" dir="ltr" aria-label={`المبلغ بعملة الفاتورة (${neededCurrency(r)?.Code})`}
+                        className={`ktra-input ktra-num ${Number(r.inInvoiceCur) > 0 ? "" : "border-red-500"}`}
+                        value={r.inInvoiceCur ?? ""}
+                        onChange={(e) => setRows((rs) => rs.map((x, i) => (i === idx ? { ...x, inInvoiceCur: e.target.value } : x)))}
+                      />
+                      {!(Number(r.inInvoiceCur) > 0) && (
+                        <span className="text-red-600" role="alert">كم يسدّد هذا التوزيع من الفاتورة بعملتها؟ (أكبر من صفر)</span>
+                      )}
+                    </label>
+                  )}
                 </td>
                 <td style={{ padding: "2px", textAlign: "center" }}>
                   <button type="button" onClick={() => setRows((rs) => rs.filter((_, i) => i !== idx))} style={{ color: "var(--ktra-err, #c0392b)" }}>

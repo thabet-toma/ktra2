@@ -48,8 +48,8 @@ from accounting.services import resolve_cash_account
 from accounting.services import (
     annotate_partner_posted_balance,
     create_audit_log,
-    get_exchange_rate,
     post_journal,
+    require_payment_rate,
     unpost_document,
     validate_fiscal_period,
     next_document_number,
@@ -488,12 +488,10 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     pay_currency = Currency.objects.filter(Code__iexact='ILS').first()
 
                 base_cur = Currency.objects.filter(IsBaseCurrency=True).first()
-                if pay_currency and base_cur and pay_currency.pk != base_cur.pk:
-                    pay_rate = get_exchange_rate(
-                        clearance.tenant_id, pay_currency.pk, base_cur.pk, payment_date,
-                    )
-                else:
-                    pay_rate = Decimal("1")
+                # الشيكل 1 بلا خانة؛ وغيره سعر يوم الدفع من الطلب — لا جدول الأسعار.
+                pay_rate = require_payment_rate(pay_currency, request.data.get('exchange_rate'))
+                from accounting.fx_fifo import assert_box_pays_in_its_currency
+                assert_box_pays_in_its_currency(cash_link.account, clearance.tenant, pay_currency)
 
                 purpose = 'shipping' if kind == 'shipping' else 'clearance_fee'
 
@@ -545,6 +543,7 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                     customs_broker=payee,
                     amount=amount,
                     currency=pay_currency,
+                    exchange_rate=pay_rate,
                     payment_date=payment_date,
                     payment_purpose=purpose,
                     cash_box_external_id=ext[:128],
@@ -630,7 +629,8 @@ class LogisticsClearanceViewSet(DocumentAttachmentsMixin, BaseTenantViewSet):
                 status=status.HTTP_201_CREATED,
             )
         except (ValidationError, DjangoValidationError) as ve:
-            msg = ve.message if hasattr(ve, 'message') else str(ve)
+            msg = ve.message if hasattr(ve, 'message') else (
+                '؛ '.join(ve.messages) if hasattr(ve, 'messages') else str(ve))
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
         except Exception:
             logger.exception("clearance pay_from_cashbox failed")

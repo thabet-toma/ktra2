@@ -32,6 +32,8 @@ import {
 } from "../../utils/expenseVoucherEntryPreview";
 import { useDocumentDraft } from "../../hooks/useDocumentDraft";
 import { DocumentDraftBanners } from "../shared/DocumentDraftBanners";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { defaultCurrency, isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
 import { KitDocumentShell, KitDenseTable } from "../kit";
 import type { KitToolbarAction, DenseColumn } from "../kit";
 import { Plus, RotateCcw } from "lucide-react";
@@ -40,7 +42,7 @@ import type { AccountingPartner, ExpenseVoucherDto } from "../../types/accountin
 type AccountRow = {
   id: number; code: string | null; name: string | null; parent: number | null; account_type?: string | null;
 };
-type CurrencyRow = { CurrencyID: number; Code: string };
+type CurrencyRow = { CurrencyID: number; Code: string; IsBaseCurrency?: boolean };
 
 const PAYMENT_METHOD_LABEL: Record<ExpensePaymentMethod, string> =
   Object.fromEntries(EXPENSE_PAYMENT_METHODS.map((m) => [m.value, m.label])) as Record<ExpensePaymentMethod, string>;
@@ -219,8 +221,10 @@ const NewExpenseVoucherModal: React.FC<{
   const [date, setDate] = useState(today());
   const [amount, setAmount] = useState("");
   const [taxAmount, setTaxAmount] = useState("0");
-  const [currencyId, setCurrencyId] = useState<number | "">(currencies[0]?.CurrencyID ?? "");
-  const [exchangeRate, setExchangeRate] = useState("1");
+  const [currencyId, setCurrencyId] = useState<number | "">(defaultCurrency<CurrencyRow>(currencies)?.CurrencyID ?? "");
+  // سعر الصرف يكتبه المستخدم لعملة غير أساسية — يبدأ فارغاً ولا افتراضي 1.
+  const [exchangeRate, setExchangeRate] = useState("");
+  const [submitTried, setSubmitTried] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState<ExpensePaymentMethod>("cash");
   const [expenseAccountId, setExpenseAccountId] = useState<number | "">("");
   const [expenseAccountName, setExpenseAccountName] = useState("");
@@ -338,8 +342,9 @@ const NewExpenseVoucherModal: React.FC<{
     setDate(today());
     setAmount("");
     setTaxAmount("0");
-    setCurrencyId(currencies[0]?.CurrencyID ?? "");
-    setExchangeRate("1");
+    setCurrencyId(defaultCurrency<CurrencyRow>(currencies)?.CurrencyID ?? "");
+    setExchangeRate("");
+    setSubmitTried(false);
     setPaymentMethod("cash");
     setExpenseAccountId("");
     setExpenseAccountName("");
@@ -350,6 +355,10 @@ const NewExpenseVoucherModal: React.FC<{
     setTouched(false);
     void discardDraft();
   }, [currencies, discardDraft]);
+
+  const selectedCurrency = currencies.find((c) => c.CurrencyID === Number(currencyId)) ?? null;
+  const rateIsBase = isBaseCurrency(selectedCurrency);
+  const baseCurrencyId = currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null;
 
   const submit = useCallback(async () => {
     if (amountNum <= 0) {
@@ -370,6 +379,12 @@ const NewExpenseVoucherModal: React.FC<{
       setErr("العملة مطلوبة");
       return;
     }
+    setSubmitTried(true);
+    const rateError = rateIsBase ? null : validateRate(exchangeRate);
+    if (rateError) {
+      setErr(rateError);
+      return;
+    }
     setSubmitting(true);
     setErr(null);
     try {
@@ -378,7 +393,7 @@ const NewExpenseVoucherModal: React.FC<{
         amount: amountNum,
         tax_amount: taxNum,
         currency: Number(currencyId),
-        exchange_rate: exchangeRate || "1",
+        exchange_rate: rateForPayload(rateIsBase, exchangeRate),
         payment_method: paymentMethod,
         ...(expenseAccountId ? { expense_account: Number(expenseAccountId) } : {}),
         ...(!expenseAccountId && expenseAccountName.trim() ? { expense_account_name: expenseAccountName.trim() } : {}),
@@ -394,7 +409,7 @@ const NewExpenseVoucherModal: React.FC<{
     } finally {
       setSubmitting(false);
     }
-  }, [amountNum, taxNum, currencyId, exchangeRate, paymentMethod, expenseAccountId, expenseAccountName,
+  }, [amountNum, taxNum, currencyId, exchangeRate, rateIsBase, paymentMethod, expenseAccountId, expenseAccountName,
       linkedOnly, cashAccountId, beneficiaryPartnerId, beneficiaryName, description, date, onSaved, toast]);
 
   // قاعدة السقوط للظهور: مستفيدٌ سُمِّي فعلاً (من فتح النافذة على تعديل لاحق
@@ -428,11 +443,22 @@ const NewExpenseVoucherModal: React.FC<{
         </label>
         <label className="ktra-field">
           <span className="ktra-field-label">العملة</span>
-          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); markTouched(); }}>
+          <select className="ktra-input" value={currencyId} onChange={(e) => { setCurrencyId(e.target.value ? Number(e.target.value) : ""); setExchangeRate(""); setSubmitTried(false); markTouched(); }}>
             <option value="">—</option>
             {currencies.map((c) => <option key={c.CurrencyID} value={c.CurrencyID}>{c.Code}</option>)}
           </select>
         </label>
+        <ExchangeRateField
+          className="col-span-3"
+          currencyCode={selectedCurrency?.Code ?? ""}
+          isBase={rateIsBase}
+          value={exchangeRate}
+          onChange={(v) => { setExchangeRate(v); markTouched(); }}
+          date={date}
+          fromCurrencyId={selectedCurrency?.CurrencyID}
+          baseCurrencyId={baseCurrencyId}
+          error={submitTried ? validateRate(exchangeRate) : undefined}
+        />
 
         <label className="ktra-field" style={{ gridColumn: linkedOnly ? "span 3" : "span 2" }}>
           <span className="ktra-field-label">حساب المصروف — ماذا صُرف *</span>

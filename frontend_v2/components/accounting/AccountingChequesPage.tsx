@@ -31,6 +31,9 @@ import { Plus, X, ArrowRightLeft, Loader2, Upload, Banknote, Printer } from "luc
 import OfflineGuard from "../offline/OfflineGuard";
 import { CREDITOR_PARTNER_TYPES, partnerTypeLabel } from "../../utils/partnerActions";
 import { formatDateLocalized, formatDateTimeValue } from "../../utils/formatDate";
+import { ExchangeRateField } from "../shared/ExchangeRateField";
+import { isBaseCurrency, rateForPayload, validateRate } from "../../utils/paymentRate";
+import type { CurrencyDto } from "../../types/accounting";
 
 const DIRECTIONS = [
   { v: "", l: "الكل" },
@@ -102,6 +105,17 @@ export const AccountingChequesPage: React.FC = () => {
   const [transferBankAccount, setTransferBankAccount] = useState("");
   // CHQ-4: المستفيد من التظهير — يُطلب فقط حين تعلن الحركة `requires_endorsee`.
   const [transferEndorsee, setTransferEndorsee] = useState("");
+  // سعر الصرف: لشيكٍ أجنبي بلا سند فقط (القيد لا يجد سعر سنده) — يكتبه المستخدم ويبدأ فارغاً.
+  const [transferRate, setTransferRate] = useState("");
+  const [transferRateTried, setTransferRateTried] = useState(false);
+  const [currencies, setCurrencies] = useState<CurrencyDto[]>([]);
+  useEffect(() => {
+    let alive = true;
+    accountingApi.getCurrencies()
+      .then((list) => { if (alive) setCurrencies(list as CurrencyDto[]); })
+      .catch(() => { /* بلا قائمة عملات لا حقل سعر — يردّ الخادم برسالته إن لزم */ });
+    return () => { alive = false; };
+  }, []);
   // T-CHQ2: مسار الشيك — الحركات كانت تُسجَّل في الخادم ولا تُعرض في أي مكان.
   const [movements, setMovements] = useState<ChequeMovementDto[]>([]);
   const [walletKey, setWalletKey] = useState(0);
@@ -118,6 +132,12 @@ export const AccountingChequesPage: React.FC = () => {
   // المتاحة وتسمياتها وما تطلبه من مدخلات تصل مع كل شيك (`allowed_movements`)،
   // فحالةٌ جديدة في الخادم تظهر هنا، وحركةٌ مُنعت هناك تختفي من الشاشة بدل أن
   // تبقى زرّاً يعطي 400.
+  const transferCurrency = currencies.find((c) => c.CurrencyID === transferCheque?.currency) ?? null;
+  const baseCurrencyId = currencies.find((c) => c.IsBaseCurrency)?.CurrencyID ?? null;
+  const transferNeedsRate = Boolean(
+    transferCheque && transferCurrency && !isBaseCurrency(transferCurrency)
+    && !transferCheque.customer_payment && !transferCheque.supplier_payment,
+  );
   const moves = transferCheque?.allowed_movements ?? [];
   const selectedMove = moves.find((m) => m.value === newMovement) || null;
 
@@ -343,6 +363,10 @@ export const AccountingChequesPage: React.FC = () => {
 
   const doTransfer = async () => {
     if (!transferCheque || !newMovement || busy) return;
+    setTransferRateTried(true);
+    // اختياريٌّ هنا: الحركة التي لا تُرحِّل قيداً لا تحتاج سعراً، والخادم يرفض بسببٍ مقروء إن لزم.
+    // لكن ما كُتب يجب أن يكون سعراً صالحاً.
+    if (transferNeedsRate && transferRate.trim() && validateRate(transferRate)) return;
     setBusy(true);
     setErr(null);
     try {
@@ -350,6 +374,8 @@ export const AccountingChequesPage: React.FC = () => {
         movement_type: newMovement,
         movement_date: transferDate,
         notes: transferNotes,
+        ...(transferNeedsRate && transferRate.trim()
+          ? { exchange_rate: rateForPayload(false, transferRate) } : {}),
         ...(selectedMove?.requires_bank_account && transferBankAccount
           ? { bank_account: parseInt(transferBankAccount, 10) } : {}),
         ...(selectedMove?.requires_endorsee && transferEndorsee
@@ -359,6 +385,8 @@ export const AccountingChequesPage: React.FC = () => {
       setTransferNotes("");
       setTransferBankAccount("");
       setTransferEndorsee("");
+      setTransferRate("");
+      setTransferRateTried(false);
       setWalletKey((k) => k + 1);
       toast("تم تحويل حالة الشيك", "success");
       await load();
@@ -558,6 +586,8 @@ export const AccountingChequesPage: React.FC = () => {
               setTransferNotes("");
               setTransferBankAccount("");
               setTransferEndorsee("");
+              setTransferRate("");
+              setTransferRateTried(false);
               setMovements([]);
               accountingApi.getChequeMovements(r.id)
                 .then((rows) => setMovements(rows as ChequeMovementDto[]))
@@ -1016,6 +1046,18 @@ export const AccountingChequesPage: React.FC = () => {
                 <input type="date" className="ktra-input" value={transferDate}
                   onChange={(e) => setTransferDate(e.target.value)} />
               </div>
+              <ExchangeRateField
+                currencyCode={transferCurrency?.Code ?? ""}
+                isBase={!transferNeedsRate}
+                optional
+                value={transferRate}
+                onChange={setTransferRate}
+                date={transferDate}
+                fromCurrencyId={transferCurrency?.CurrencyID}
+                baseCurrencyId={baseCurrencyId}
+                label={`سعر صرف ${transferCurrency?.Code ?? ""} (كم شيكلاً) — يلزم إن كانت الحركة تُرحِّل قيداً`}
+                error={transferRateTried && transferRate.trim() ? validateRate(transferRate) : undefined}
+              />
               <div className="ktra-field">
                 <label className="ktra-field-label">ملاحظات</label>
                 <textarea className="ktra-input" rows={2} value={transferNotes}

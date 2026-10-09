@@ -402,6 +402,8 @@ export const purchaseInvoiceApi = {
       from_on_account?: Array<{ payment_id: number; amount: string }>;
       post_invoice?: boolean;
       payment_date?: string | null;
+      /** مطلوب لفاتورة آجلة بعملة غير أساسية (يكتبه المستخدم)؛ النقدية تُدفع بسعر فاتورتها. */
+      exchange_rate?: string;
       /** T-PAYFULL2: يمرّ إلى `post_to_accounting` داخل النداء نفسه — الترحيل
           مع الدفع يخضع لخيار «الاستلام مع الترحيل» كالترحيل المجرّد. */
       receive_on_post?: boolean;
@@ -454,6 +456,8 @@ export const purchaseInvoiceApi = {
     payment_date: string;
     amount: string;
     currency?: number | null;
+    /** سعر الصرف لعملة غير أساسية (يكتبه المستخدم) — يُحذف بالشيكل فيفرض الخادم 1. */
+    exchange_rate?: string;
     cash_or_bank_account: number;
     notes?: string;
     /** T-ONEPAY: شيكات صادرة — مبالغها جزء من `amount` لا إضافة عليه. */
@@ -500,7 +504,7 @@ export const purchaseInvoiceApi = {
    */
   allocateSupplierPayment: async (
     id: number,
-    allocations: Array<{ invoice: number; amount: string | number }>,
+    allocations: Array<{ invoice: number; amount: string | number; amount_in_invoice_currency?: string }>,
   ): Promise<SupplierPaymentDto> => {
     const res = await safeFetch(`${API_BASE}/logistics/supplier-payments/${id}/allocate/`, {
       method: "POST",
@@ -535,7 +539,7 @@ export const purchaseInvoiceApi = {
         partner: String(partnerId), is_posted: "true", page: "1", page_size: "200",
       }) as Promise<Array<{
         id: number; invoice_number?: string; remaining_balance?: string;
-        due_date?: string | null; invoice_date?: string | null;
+        due_date?: string | null; invoice_date?: string | null; currency?: number | null;
       }>>,
       safeFetch(
         `${API_BASE}/logistics/supplier-payments/logistics-accruals/?partner=${encodeURIComponent(String(partnerId))}`,
@@ -554,6 +558,7 @@ export const purchaseInvoiceApi = {
           label: inv.invoice_number || `#${inv.id}`,
           remaining: String(inv.remaining_balance ?? "0"),
           date: inv.due_date || inv.invoice_date || null,
+          currency: inv.currency ?? null,
         })),
       ...(accruals || []).map((a) => ({
         id: a.id, label: a.label, remaining: a.remaining, date: a.date,

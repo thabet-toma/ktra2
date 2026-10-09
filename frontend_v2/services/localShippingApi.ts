@@ -165,6 +165,9 @@ export async function payLocalShipmentFromCashBox(
     cash_box_external_id: string;
     payment_date?: string;
     notes?: string;
+    /** عملة الدفعة — تُحذف فتكون الشيكل؛ والأجنبية تلزمها `exchange_rate` يكتبها المستخدم. */
+    currency_id?: number;
+    exchange_rate?: string;
   },
 ): Promise<{
   status: string;
