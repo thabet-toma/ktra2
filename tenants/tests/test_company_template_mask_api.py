@@ -45,6 +45,20 @@ class AccountingFirmMaskedApiTest(APITestCase):
                 res = self.client.get(path, **self._auth())
                 self.assertEqual(res.status_code, 404, res.content)
 
+    def test_offers_and_rfq_flows_under_logistics_are_404(self):
+        """شاشتا «عروض أسعار الشراء» و«عروض وطلبيات دولية» مخفيّتان عن القالب
+        (`frontend_v2/utils/viewPermissions.ts` — `GOODS_MOVEMENT_HIDDEN_VIEWS`)
+        — فمسارات API ما تعرضانه تُقنَّع معهما، لا الشاشة وحدها."""
+        for path in (
+            "/api/logistics/supplier-quotations/",
+            "/api/logistics/purchase-rfqs/",
+            "/api/logistics/public-supplier-quote-requests/",
+            "/api/logistics/price-boards/",
+        ):
+            with self.subTest(path=path):
+                res = self.client.get(path, **self._auth())
+                self.assertEqual(res.status_code, 404, res.content)
+
     def test_supplier_payment_voucher_stays_open_under_logistics(self):
         """سند الصرف يعيش تحت `/api/logistics/` لأسبابٍ تاريخية، والتذكرة
         تُبقي «سندات القبض والصرف» صراحةً — فقناعٌ ببادئة `/api/logistics/`
