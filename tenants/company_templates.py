@@ -201,6 +201,8 @@ _GOODS_MOVEMENT_HIDDEN_PATHS = (
     '/api/logistics/deals/',
     '/api/logistics/shipments/',
     '/api/logistics/clearances/',
+    '/api/logistics/clearance-item-types/',
+    '/api/logistics/accrual-snapshots/',
     '/api/logistics/payments/',
     '/api/logistics/purchase-invoices/',
     '/api/logistics/local-shipments/',

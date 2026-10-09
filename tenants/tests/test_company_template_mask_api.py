@@ -59,6 +59,18 @@ class AccountingFirmMaskedApiTest(APITestCase):
                 res = self.client.get(path, **self._auth())
                 self.assertEqual(res.status_code, 404, res.content)
 
+    def test_clearance_settings_and_accrual_history_are_404(self):
+        """أنواع بنود التخليص (إعدادات المشتريات) وسجل الاستحقاق (رحلة الاستيراد)
+        لا تستعملهما إلا شاشاتٌ مخفيّة عن القالب. كشف حساب الطرف يبقى يعرض بنود
+        الاستحقاق — تصله مضمَّنةً في حمولة الشركاء لا من هذا المسار."""
+        for path in (
+            "/api/logistics/clearance-item-types/",
+            "/api/logistics/accrual-snapshots/",
+        ):
+            with self.subTest(path=path):
+                res = self.client.get(path, **self._auth())
+                self.assertEqual(res.status_code, 404, res.content)
+
     def test_supplier_payment_voucher_stays_open_under_logistics(self):
         """سند الصرف يعيش تحت `/api/logistics/` لأسبابٍ تاريخية، والتذكرة
         تُبقي «سندات القبض والصرف» صراحةً — فقناعٌ ببادئة `/api/logistics/`
