@@ -24,7 +24,6 @@ import logging
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
-from django.db.models import Sum
 
 from logistics.domain.party_accruals import Q2, ZERO, _ALLOCATION_FIELD, accrual_journal_ids
 
@@ -98,14 +97,11 @@ def _stored(lines: list[dict]) -> list[dict]:
 
 def _party_credit(journal_ids) -> Decimal:
     """Σ(دائن − مدين) بالأساس لأسطر الطرف (الموسومة) في قيود السلسلة — المستحق بعدها."""
-    from accounting.models import JournalLine
+    from accounting.api import journal_lines_parties_net
 
     if not journal_ids:
         return ZERO
-    agg = JournalLine.objects.filter(
-        journal_id__in=journal_ids, partner_id__isnull=False,
-    ).aggregate(c=Sum('base_credit'), d=Sum('base_debit'))
-    return _money(Decimal(str(agg['c'] or 0)) - Decimal(str(agg['d'] or 0)))
+    return _money(journal_lines_parties_net(journal_ids))
 
 
 def _create(kind: str, obj, journal_id: int, role: str, total: Decimal, lines, detailed: bool, user):

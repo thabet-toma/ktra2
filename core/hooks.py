@@ -1,6 +1,7 @@
 _tax_period_guards = []
 _serial_requirement_providers = []
 _purchase_line_extensions = {}
+_purchase_line_cost_providers = []
 
 
 def register_tax_period_guard(guard) -> None:
@@ -88,3 +89,25 @@ def write_purchase_line_extensions(tenant_id, item, extensions, user) -> None:
     for key, (_read, write) in tuple(_purchase_line_extensions.items()):
         if key in extensions:
             write(tenant_id, item, extensions[key], user)
+
+
+def register_purchase_line_cost_provider(provider) -> None:
+    """سجّل مزوّد تكلفة بنود فاتورة الشراء — `provider(invoice) -> {item_id: تكلفة} | None`.
+
+    على نمط `register_serial_requirement`: يسجّله `logistics` عند الإقلاع
+    (`AppConfig.ready`) بـ`posted_goods_line_costs`، فيسأل `inventory` عن تكلفة بنود
+    الفاتورة الدولية المرحّلة دون أن يستورد `logistics` (عقد import-linter 3).
+    """
+    if not callable(provider):
+        raise TypeError("purchase line cost provider must be callable")
+    if provider not in _purchase_line_cost_providers:
+        _purchase_line_cost_providers.append(provider)
+
+
+def purchase_line_costs(invoice):
+    """أول جوابٍ غير None من المزوّدين المسجَّلين — أو None (لا مزوّد، أو لا يخصّه)."""
+    for provider in tuple(_purchase_line_cost_providers):
+        costs = provider(invoice)
+        if costs is not None:
+            return costs
+    return None

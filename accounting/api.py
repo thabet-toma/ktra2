@@ -566,6 +566,20 @@ def journal_lines_party_net(journal_ids, partner_id) -> Decimal:
     return Decimal(str(totals['c'] or 0)) - Decimal(str(totals['d'] or 0))
 
 
+def journal_lines_parties_net(journal_ids) -> Decimal:
+    """Σ(base_credit − base_debit) لأسطر **كل** الأطراف (الموسومة بطرف) في قيود بعينها.
+
+    أخو `journal_lines_party_net` لطرفٍ غير مسمّى: مصدر «المستحق بعد القيد» في لقطات
+    سجل الاستحقاق (`logistics/domain/accrual_snapshots.py`). بلا تقريب — يقرّبه المستدعي.
+    """
+    from django.db.models import Sum
+
+    totals = JournalLine.objects.filter(
+        journal_id__in=list(journal_ids), partner_id__isnull=False,
+    ).aggregate(c=Sum('base_credit'), d=Sum('base_debit'))
+    return Decimal(str(totals['c'] or 0)) - Decimal(str(totals['d'] or 0))
+
+
 def posted_journal_ids_by_reference(tenant_id, reference_type: str, reference_ids) -> dict[int, list[int]]:
     """{المرجع: [قيوده المرحّلة]} لنوع مرجعٍ واحد — الأقدم أولاً، باستعلامٍ واحد.
 

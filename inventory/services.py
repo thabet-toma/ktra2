@@ -2087,12 +2087,13 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
 
     تكلفة بند الفاتورة: الدولية المرحّلة = قيمته في المخزون
     (`logistics.services.posted_goods_line_costs` — يشمل عمولات التحويل والرسوم المرسملة،
-    ويطابق قيد الاستلام وحركته بالقرش)؛ وإلا بأفضلية landed cost:
+    ويطابق قيد الاستلام وحركته بالقرش؛ يصل عبر `core.hooks.purchase_line_costs` الذي تسجّله
+    logistics عند الإقلاع، فلا يستورد inventory خدماتِها)؛ وإلا بأفضلية landed cost:
       landed_line_total_ils ← landed_unit_price_ils × qty ← total_price.
     البنود متعددة لنفس المنتج داخل فاتورة واحدة تُجمَّع في صفّ فاتورة واحد.
     """
+    from core.hooks import purchase_line_costs
     from logistics.models import PurchaseInvoiceItem
-    from logistics.services import posted_goods_line_costs
 
     items = (
         PurchaseInvoiceItem.objects.filter(
@@ -2109,7 +2110,7 @@ def product_cost_breakdown(*, tenant_id: int, product_id: int) -> dict:
     for it in items:
         inv = it.invoice
         if inv.id not in posted_costs:
-            posted_costs[inv.id] = posted_goods_line_costs(inv)
+            posted_costs[inv.id] = purchase_line_costs(inv)
         if inv.id not in by_invoice:
             order.append(inv.id)
             by_invoice[inv.id] = {

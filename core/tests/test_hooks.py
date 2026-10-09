@@ -44,3 +44,22 @@ class TaxPeriodHookRegistryTest(TestCase):
 
         guard.assert_called_once_with(77, "2026-08-01")
         self.assertFalse(JournalHeader.objects.exists())
+
+
+class PurchaseLineCostProviderTest(TestCase):
+    """`inventory` يسأل عن تكلفة بنود الفاتورة الدولية عبر السجل لا باستيراد `logistics`."""
+
+    def test_logistics_registers_posted_goods_line_costs_at_startup(self):
+        from core.hooks import _purchase_line_cost_providers
+        from logistics.services import posted_goods_line_costs
+
+        self.assertIn(posted_goods_line_costs, _purchase_line_cost_providers)
+
+    def test_first_non_none_answer_wins_and_empty_registry_is_none(self):
+        from core.hooks import purchase_line_costs, register_purchase_line_cost_provider
+
+        with patch("core.hooks._purchase_line_cost_providers", []):
+            self.assertIsNone(purchase_line_costs(object()))
+            register_purchase_line_cost_provider(lambda invoice: None)
+            register_purchase_line_cost_provider(lambda invoice: {1: 5})
+            self.assertEqual(purchase_line_costs(object()), {1: 5})
