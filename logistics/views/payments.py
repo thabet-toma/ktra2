@@ -143,6 +143,10 @@ class SupplierPaymentViewSet(PostedTextEditMixin, BaseTenantViewSet):
 
     def perform_create(self, serializer):
         tenant = get_tenant(self.request)
+        # T-AUTOPOST: القرار قبل الحفظ — رفض الراية الصريحة بلا صلاحية لا يترك سنداً.
+        from core.payments import describe_auto_post_failure, should_auto_post_payment
+        auto_post = should_auto_post_payment(
+            tenant, self.request, post_perm="purchase.payment.post")
         payment = serializer.save(tenant=tenant)
         from logistics.services import _resolve_ap_account
         try:
@@ -158,8 +162,7 @@ class SupplierPaymentViewSet(PostedTextEditMixin, BaseTenantViewSet):
         )
         # T-AUTOPOST: سند الصرف يُرحَّل فور الحفظ (لا مسودة) ما لم يُطلب خلاف ذلك —
         # نفس مصدر القرار المشترك مع سند القبض (core.payments).
-        from core.payments import describe_auto_post_failure, should_auto_post_payment
-        if should_auto_post_payment(tenant, self.request.data):
+        if auto_post:
             try:
                 from sales.services import post_supplier_payment
                 post_supplier_payment(payment, user=self.request.user)

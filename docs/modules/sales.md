@@ -106,7 +106,7 @@ def guard_refund_sources(payment):  # post_customer_payment: ما يُطفئه �
 | GET/POST | `invoices/` | `SalesInvoiceViewSet` (`views.py`) |
 | POST | `invoices/{id}/post/` | `SalesInvoiceViewSet.post_invoice` (473) |
 | POST | `invoices/{id}/unpost/` | `SalesInvoiceViewSet.unpost_invoice` (328) |
-| POST | `invoices/{id}/deliver/` · `invoices/{id}/delivery-order/` | `deliver` (681) · `create_delivery_order` (655) |
+| POST | `invoices/{id}/deliver/` · `invoices/{id}/delivery-order/` | `deliver` (681) · `create_delivery_order` (655) — الثانية إرسالية «قيد التنفيذ» بلا مخزون ولا قيد، صلاحية `sales.invoice.edit`؛ وتسليمها `delivery-orders/{id}/deliver/` (`DeliveryOrderViewSet.deliver`) يُخرج البضاعة فصلاحيته `sales.invoice.post` كإنشاء الإرسالية المباشر؛ وكلاهما في سجل نشاط `sales_delivery_note` |
 | GET | `invoices/{id}/delivery-lines/` · `invoices/lookup/` · `invoices/next-number/` | (666) · (189) · (640) |
 | GET | `invoices/last-price/` · `invoices/resolve-price/` · `invoices/profits/` · `invoices/credit-preview/` | (577) · (594) · (623) · (551) |
 | POST | `invoices/{id}/collect/` | `collect` — التحصيل من داخل الفاتورة (نقد/شيكات/رصيد العميل)، صلاحية `sales.payment.create` (+`sales.invoice.post` مع `post_invoice`) |
@@ -116,6 +116,7 @@ def guard_refund_sources(payment):  # post_customer_payment: ما يُطفئه �
 | GET/POST · DELETE | `invoices/{id}/attachments/` · `attachments/{attachment_id}/` | `SalesInvoiceViewSet.attachments` · `delete_attachment` — تُحفظ **فوراً** لا مع الفاتورة، فيبقى الإرفاق ممكناً بعد الترحيل |
 | POST | `invoices/{id}/payment-voucher/` · `invoices/{id}/duplicate/` | (498) · (400) — الأولى غلاف قديم فوق `collect` |
 | POST | `invoices/repeat-last-month/` | `SalesInvoiceViewSet.repeat_last_month` (`views.py`) — «كرّر فاتورة الشهر الماضي» (ISSUE #53، قرار 22): يكتشف المصدر من `customer_id` في الجسم بدل pk صريح، ثم نفس آلية `duplicate` |
+| POST | `payments/` | `CustomerPaymentViewSet.perform_create` — صلاحية `sales.payment.create`؛ والترحيل عند الحفظ من `core/payments.py` (`should_auto_post_payment`): `auto_post=true` بلا `sales.payment.post` ⇒ 403 قبل الحفظ، وإعداد `auto_post_payments` بلاها ⇒ يبقى مسودة |
 | POST | `payments/{id}/post/` · `payments/{id}/unpost/` · `payments/{id}/allocate/` · `payments/{id}/deallocate/` | `CustomerPaymentViewSet` — `deallocate` بجسم `{"allocation": id}`، والتوزيع مُنطاق بالسند (404 لغيره) |
 | POST | `quotations/{id}/convert/` · `orders/{id}/confirm/` · `orders/{id}/convert/` · `orders/{id}/deposit/` | (1396) · (1505) · (1526) · (1539) |
 | GET/PUT | `settings/current/` · POST `settings/restore-defaults/` | `SalesSettingsViewSet` (1169/1183) |

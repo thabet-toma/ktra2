@@ -152,15 +152,24 @@ def validate_payment(ctx: PaymentContext) -> list[str]:
     return errors
 
 
-def should_auto_post_payment(tenant, request_data: Any = None) -> bool:
+def should_auto_post_payment(tenant, request, *, post_perm: str) -> bool:
     """T-AUTOPOST: هل يُرحَّل السند فور الحفظ؟ (سند قبض العميل وسند صرف المورد).
 
     مصدر حقيقة واحد للطرفين: الراية الصريحة `auto_post` في جسم الطلب تسمو على
     إعداد الشركة `SalesSettings.auto_post_payments` (الافتراضي: مُفعَّل — لا معنى
     لمسودة سند دفع). نفس عقد `auto_post` المستخدم في فواتير المبيعات.
+
+    والترحيل صلاحيةٌ لا إعداد: الراية الصريحة بلا `post_perm` ⇒ 403 (`require_perm`)،
+    وإعداد الشركة بلا `post_perm` ⇒ يبقى السند مسودة لمن يملك الترحيل. كان الإعداد
+    وحده يقرّر فيُرحِّل كلُّ عضوٍ قيوداً لا يملك ترحيلها من زرّ «ترحيل». يُستدعى
+    **قبل** الحفظ كي لا يبقى سندٌ محفوظ خلف رفض 403.
     """
-    flag = (request_data or {}).get("auto_post") if hasattr(request_data, "get") else None
+    from core.access import require_perm, user_has_perm
+
+    request_data = getattr(request, "data", None)
+    flag = request_data.get("auto_post") if hasattr(request_data, "get") else None
     if flag is True or str(flag).lower() == "true":
+        require_perm(request, post_perm, tenant=tenant)
         return True
     if flag is False or str(flag).lower() == "false":
         return False
@@ -169,7 +178,10 @@ def should_auto_post_payment(tenant, request_data: Any = None) -> bool:
     from sales.services import get_or_create_sales_settings
 
     ss = get_or_create_sales_settings(tenant)
-    return bool(ss and ss.auto_post_payments)
+    return bool(
+        ss and ss.auto_post_payments
+        and user_has_perm(getattr(request, "user", None), tenant, post_perm)
+    )
 
 
 def describe_auto_post_failure(exc: BaseException, *, document_label: str) -> str:

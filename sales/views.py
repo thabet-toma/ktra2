@@ -901,13 +901,24 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
         return Response({"next_number": next_num})
 
     @action(detail=True, methods=["post"], url_path="delivery-order")
+    @requires_perm("sales.invoice.edit")
     def create_delivery_order(self, request, pk=None):
+        """إرسالية «قيد التنفيذ» — لا تحرّك مخزوناً ولا قيداً، فتكفيها صلاحية التعديل.
+
+        الإخراج الفعلي في `DeliveryOrderViewSet.deliver` وصلاحيته صلاحية الترحيل.
+        """
         invoice = self.get_object()
         tenant = get_tenant(request)
         do = DeliveryOrder.objects.create(
             tenant_id=tenant.TenantID if tenant else invoice.tenant_id,
             invoice=invoice,
             notes=request.data.get("notes", "")[:500],
+        )
+        log_activity(
+            action="create", entity_type="sales_delivery_note", entity_id=do.id,
+            entity_label=do.delivery_number or f"#{do.id}",
+            description=f"إنشاء إرسالية بيع قيد التنفيذ للفاتورة {invoice.invoice_number}",
+            partner_ids=[invoice.customer_id], request=request,
         )
         return Response(DeliveryOrderSerializer(do).data, status=status.HTTP_201_CREATED)
 
@@ -1434,12 +1445,21 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
         return Response({"message": "تم إلغاء الإرسالية وعكس أثرها.", **result})
 
     @action(detail=True, methods=["post"], url_path="deliver")
+    @requires_perm("sales.invoice.post")
     def deliver(self, request, pk=None):
+        # يُخرج البضاعة ويقيّد التكلفة ⇒ صلاحية الترحيل نفسها التي يطلبها `_apply`.
         d = self.get_object()
         try:
             deliver_delivery_order(d, user=request.user)
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        log_activity(
+            action="deliver", entity_type="sales_delivery_note", entity_id=d.id,
+            entity_label=d.delivery_number or f"#{d.id}", description="تسليم إرسالية بيع",
+            partner_ids=[d.invoice.customer_id] if d.invoice_id else (
+                [d.partner_id] if d.partner_id else []),
+            request=request,
+        )
         return Response(DeliveryOrderSerializer(d).data)
 
 
@@ -1494,6 +1514,7 @@ class CustomerPaymentViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
         return Response(data, status=status.HTTP_201_CREATED, headers=headers)
 
     def perform_create(self, serializer):
+        require_perm(self.request, "sales.payment.create")
         tenant = get_tenant(self.request)
         if not tenant:
             from rest_framework.exceptions import ValidationError as DRFValidationError
@@ -1511,6 +1532,9 @@ class CustomerPaymentViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
         from rest_framework.exceptions import ValidationError as DRFValidationError
         from sales.services.party_surplus import attach_refund_sources
 
+        # T-AUTOPOST: القرار قبل الحفظ — رفض الراية الصريحة بلا صلاحية لا يترك سنداً.
+        auto_post = should_auto_post_payment(
+            tenant, self.request, post_perm="sales.payment.post")
         with transaction.atomic():
             payment = serializer.save(tenant=tenant)
             ctx = PaymentContext.from_customer_payment(payment)
@@ -1530,7 +1554,7 @@ class CustomerPaymentViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
         )
         # T-AUTOPOST: السند يُرحَّل فور الحفظ (لا مسودة) ما لم يُطلب خلاف ذلك —
         # نفس عقد فواتير المبيعات: راية auto_post تسمو على إعداد الشركة.
-        if should_auto_post_payment(tenant, self.request.data):
+        if auto_post:
             try:
                 post_customer_payment(payment, user=self.request.user)
                 # post_customer_payment يُعيد ربط اسمه الداخلي بصفّ مقفول، فلا
