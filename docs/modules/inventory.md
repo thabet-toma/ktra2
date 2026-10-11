@@ -147,8 +147,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET/POST/DELETE | `supplier-products/?product=&supplier=&sku=` | `SupplierProductViewSet` |
 | GET/POST | `stock-movements/` · GET `stock-movements/summary/` | `StockMovementViewSet` (689) · (792) |
 | GET | `warehouses/` · `warehouses/{id}/stock/` | `WarehouseViewSet` (615) · (662) |
-| POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (844) · (856) |
-| POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (881) |
+| POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (`post_doc`) · (`unpost_doc`) — يشترطان `inventory.doc.post` · `inventory.doc.unpost`. `DELETE` على تحويلٍ مرحَّل يُرفض بـ400 (`POSTED_DOC_WARNING`)؛ ومنتجات البنود والمستودعان حقولُ `TenantScopedPrimaryKeyRelatedField` فـpk شركةٍ أخرى يُرفض 400 |
+| POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (`post_doc`) — يشترط `inventory.doc.post` (دورا `staff` و`sales` يكتبان المسودّة ويعدّلانها ولا يرحّلانها: 403). `DELETE` على جردٍ مرحَّل يُرفض بـ400 (الحذف كان يُسقط البنود ويُبقي الحركات والقيد)، والمسودّة تُحذف 204. المنتج والمستودع حقلا `TenantScopedPrimaryKeyRelatedField`. بندان لمنتجٍ واحد يُرفضان في `StocktakeSerializer` (`validate_lines`) وفي `post_stocktake` (صفوفٌ قديمة) — الرصيد يُقرأ مرة واحدة فكان المخزون يُسوّى مرتين |
 | GET | `categories/` · `uom/` | `CategoryViewSet` (38) · `UnitOfMeasureViewSet` (77) |
 | GET | `product-families/` | `ProductFamilyViewSet` (task20) — «المنتج» الأب، **قراءةٌ فقط عمداً**: يُنشأ حصراً مع براندِه الضمنيّ عبر `products/` (`create_product_with_family`) فلا يوجد «منتج بلا براندات»، والكتابة عليه مباشرةً تفتح اتجاه كتابةٍ ثانياً يترك القرّاء الحاليين (وكلّهم يقرأ من صفّ البراند) على قيمةٍ قديمة. `get_queryset` (task24) يستثني الأب اليتيم (فقد كل برانداته بالضمّ، `brands__isnull=False`) — باقٍ في القاعدة للتراجع، محجوبٌ عن كل قراءة |
 

@@ -2389,6 +2389,15 @@ def post_stocktake(stocktake, user=None):
     lines = list(stocktake.lines.select_related('product').all())
     if not lines:
         raise ValidationError("أضف بنداً واحداً على الأقل.")
+    # بندان لمنتجٍ واحد (صفوفٌ قديمة): الرصيد يُقرأ مرة واحدة فيحسب الثاني فرقه
+    # على رصيدٍ قديم ويُسوَّى المخزون مرتين — نرفض قبل أي أثر.
+    seen_products = set()
+    for ln in lines:
+        if ln.product_id in seen_products:
+            raise ValidationError(
+                f"المنتج «{product_display_name(ln.product)}» مكرَّر في بنود الجرد — "
+                "ادمج كمياته في بند واحد قبل الترحيل.")
+        seen_products.add(ln.product_id)
 
     # تجميع أطراف القيد حسب الحساب (مخزون/ت.ب.م) عبر كل البنود.
     debit_by_acct = {}   # account_id -> Decimal

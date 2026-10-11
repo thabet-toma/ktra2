@@ -1,4 +1,5 @@
 from rest_framework import serializers
+from core.api_defaults import TenantScopedPrimaryKeyRelatedField
 from .models import (
     ProductCategory, ProductFamily, Product, ProductPriceTier, UnitOfMeasure,
     StockMovement, SupplierProduct, Warehouse, WarehouseTransfer,
@@ -652,6 +653,7 @@ class StockMovementSerializer(serializers.ModelSerializer):
 # ── Phase 7 (T-I1/T-I2): مستندات المخزون ──────────────────────────────
 
 class WarehouseTransferLineSerializer(serializers.ModelSerializer):
+    product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
     product_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -666,6 +668,8 @@ class WarehouseTransferLineSerializer(serializers.ModelSerializer):
 
 
 class WarehouseTransferSerializer(serializers.ModelSerializer):
+    source_warehouse = TenantScopedPrimaryKeyRelatedField(queryset=Warehouse.objects.all())
+    dest_warehouse = TenantScopedPrimaryKeyRelatedField(queryset=Warehouse.objects.all())
     lines = WarehouseTransferLineSerializer(many=True)
     source_warehouse_name = serializers.CharField(source='source_warehouse.name', read_only=True)
     dest_warehouse_name = serializers.CharField(source='dest_warehouse.name', read_only=True)
@@ -709,6 +713,7 @@ class WarehouseTransferSerializer(serializers.ModelSerializer):
 
 
 class StocktakeLineSerializer(serializers.ModelSerializer):
+    product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
     product_name = serializers.SerializerMethodField()
 
     class Meta:
@@ -723,6 +728,8 @@ class StocktakeLineSerializer(serializers.ModelSerializer):
 
 
 class StocktakeSerializer(serializers.ModelSerializer):
+    warehouse = TenantScopedPrimaryKeyRelatedField(
+        queryset=Warehouse.objects.all(), required=False, allow_null=True)
     lines = StocktakeLineSerializer(many=True)
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default=None)
 
@@ -734,6 +741,20 @@ class StocktakeSerializer(serializers.ModelSerializer):
             'is_posted', 'journal', 'created_at', 'updated_at', 'lines',
         ]
         read_only_fields = ['id', 'stocktake_number', 'is_posted', 'journal', 'created_at', 'updated_at']
+
+    def validate_lines(self, lines):
+        # بندان لمنتجٍ واحد: `post_stocktake` يقرأ الرصيد مرة واحدة فيحسب الثاني
+        # فرقه على رصيدٍ قديم ويُسوَّى المخزون مرتين.
+        seen = set()
+        for ln in lines:
+            product = ln['product']
+            if product.pk in seen:
+                from .services import product_display_name
+                raise serializers.ValidationError(
+                    f'المنتج «{product_display_name(product)}» مكرَّر في بنود الجرد — '
+                    'ادمج كمياته في بند واحد.')
+            seen.add(product.pk)
+        return lines
 
     def create(self, validated_data):
         lines = validated_data.pop('lines', [])

@@ -428,3 +428,211 @@ class WarehouseCodeGuardTest(APITestCase):
             format="json",
         )
         self.assertEqual(res.status_code, 201, res.content)
+
+
+class StocktakeApiSecurityTest(APITestCase):
+    """‏**ثلاث ثغراتٍ في `StocktakeViewSet` + تكرارُ المنتج في الجرد.**
+
+    1. `post_doc` بلا `@requires_perm` — أيُّ عضوٍ كتب مسودّة يرحّلها (حركاتُ
+       مخزون وقيد) رغم أنّ `inventory.doc.post` يغطّي «تحويل/جرد/تسوية».
+    2. `destroy` غير محروس — حذفُ جردٍ مرحَّل يُسقط بنودَه ويُبقي حركاتِه وقيدَه.
+    3. `product` و`warehouse` كانا `PrimaryKeyRelatedField(queryset=all())` —
+       pk شركةٍ أخرى يُقبل، والترحيلُ يحرّك مخزونها.
+    4. بندان لمنتجٍ واحد: الثاني يحسب فرقه على رصيدٍ قديم فيُسوَّى المخزون مرتين.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="skt-owner", password="x")
+        cls.tenant = create_company("شركة أمان الجرد", cls.owner)
+        cls.manager = User.objects.create_user(username="skt-manager", password="x")
+        cls.staff = User.objects.create_user(username="skt-staff", password="x")
+        UserCompanyMembership.objects.create(user=cls.manager, tenant=cls.tenant, role="manager")
+        UserCompanyMembership.objects.create(user=cls.staff, tenant=cls.tenant, role="staff")
+        cls.inv_acct = Account.objects.create(
+            tenant=cls.tenant, code="9104", name="مخزون الاختبار", account_type="Asset", is_active=True)
+        cls.cogs_acct = Account.objects.create(
+            tenant=cls.tenant, code="9101", name="ت.ب.م الاختبار", account_type="Expense", is_active=True)
+        cls.cat = ProductCategory.objects.create(
+            tenant=cls.tenant, name="فئة", inventory_account=cls.inv_acct, cogs_account=cls.cogs_acct)
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="SKT-1", name_ar="منتج الجرد", category=cls.cat,
+            quantity_on_hand=Decimal("100"), avg_cost=Decimal("10"))
+        cls.warehouse = Warehouse.objects.create(tenant=cls.tenant, name="مستودع", code="SKT-W")
+        FiscalPeriod.objects.create(
+            tenant=cls.tenant, name="2026", start_date="2026-01-01",
+            end_date="2026-12-31", is_closed=False)
+        cls.foreign_owner = User.objects.create_user(username="skt-foreign", password="x")
+        cls.foreign_tenant = create_company("شركة جرد أخرى", cls.foreign_owner)
+        cls.foreign_product = Product.objects.create(
+            tenant=cls.foreign_tenant, sku="SKT-F", name_ar="منتج غريب",
+            quantity_on_hand=Decimal("50"), avg_cost=Decimal("5"))
+        cls.foreign_warehouse = Warehouse.objects.create(
+            tenant=cls.foreign_tenant, name="مستودع غريب", code="SKT-FW")
+
+    def _as(self, user):
+        self.client.force_authenticate(user=user)
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def _body(self, **over):
+        body = {
+            "stocktake_date": "2026-07-01",
+            "lines": [{"product": self.product.id, "counted_quantity": "120"}],
+        }
+        body.update(over)
+        return body
+
+    def _posted_stocktake(self):
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-01")
+        StocktakeLine.objects.create(stocktake=s, product=self.product, counted_quantity=Decimal("120"))
+        post_stocktake(s)
+        s.refresh_from_db()
+        return s
+
+    # ── 1) صلاحية الترحيل ──
+    def test_staff_can_create_draft_but_cannot_post(self):
+        self._as(self.staff)
+        res = self.client.post("/api/inventory/stocktakes/", self._body(), format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertFalse(res.data["is_posted"])
+        post = self.client.post(f"/api/inventory/stocktakes/{res.data['id']}/post/")
+        self.assertEqual(post.status_code, 403, post.content)
+        self.assertFalse(Stocktake.objects.get(pk=res.data["id"]).is_posted)
+        self.assertFalse(StockMovement.objects.filter(reference_type="STOCKTAKE").exists())
+
+    def test_manager_can_post(self):
+        self._as(self.staff)
+        created = self.client.post("/api/inventory/stocktakes/", self._body(), format="json")
+        self._as(self.manager)
+        res = self.client.post(f"/api/inventory/stocktakes/{created.data['id']}/post/")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertTrue(res.data["is_posted"])
+
+    # ── 2) حذف المرحَّل ──
+    def test_delete_posted_stocktake_is_refused_and_row_survives(self):
+        s = self._posted_stocktake()
+        self._as(self.manager)
+        res = self.client.delete(f"/api/inventory/stocktakes/{s.id}/")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertTrue(Stocktake.objects.filter(pk=s.pk).exists())
+        self.assertEqual(s.lines.count(), 1)
+
+    def test_delete_draft_stocktake_succeeds(self):
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-01")
+        self._as(self.manager)
+        res = self.client.delete(f"/api/inventory/stocktakes/{s.id}/")
+        self.assertEqual(res.status_code, 204, res.content)
+        self.assertFalse(Stocktake.objects.filter(pk=s.pk).exists())
+
+    # ── 3) pk شركةٍ أخرى ──
+    def test_line_with_foreign_product_is_refused(self):
+        self._as(self.manager)
+        body = self._body(lines=[{"product": self.foreign_product.id, "counted_quantity": "1"}])
+        res = self.client.post("/api/inventory/stocktakes/", body, format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+    def test_foreign_warehouse_is_refused(self):
+        self._as(self.manager)
+        res = self.client.post(
+            "/api/inventory/stocktakes/",
+            self._body(warehouse=self.foreign_warehouse.id), format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+    def test_own_product_and_warehouse_still_accepted(self):
+        self._as(self.manager)
+        res = self.client.post(
+            "/api/inventory/stocktakes/",
+            self._body(warehouse=self.warehouse.id), format="json")
+        self.assertEqual(res.status_code, 201, res.content)
+
+    # ── 4) منتجٌ مكرَّر ──
+    def test_serializer_rejects_duplicate_product_lines(self):
+        self._as(self.manager)
+        body = self._body(lines=[
+            {"product": self.product.id, "counted_quantity": "120"},
+            {"product": self.product.id, "counted_quantity": "130"},
+        ])
+        res = self.client.post("/api/inventory/stocktakes/", body, format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("منتج الجرد", str(res.data))
+        self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+    def test_post_stocktake_rejects_legacy_duplicate_lines(self):
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-01")
+        StocktakeLine.objects.create(stocktake=s, product=self.product, counted_quantity=Decimal("120"))
+        StocktakeLine.objects.create(stocktake=s, product=self.product, counted_quantity=Decimal("130"))
+        with self.assertRaises(ValidationError):
+            post_stocktake(s)
+        s.refresh_from_db()
+        self.assertFalse(s.is_posted)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("100"))
+        self.assertFalse(StockMovement.objects.filter(reference_type="STOCKTAKE").exists())
+
+
+class WarehouseTransferApiSecurityTest(APITestCase):
+    """نفس ثغرتَي الحذف والـpk الأجنبي في `WarehouseTransferViewSet`."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="trf-owner", password="x")
+        cls.tenant = create_company("شركة أمان التحويل", cls.owner)
+        cls.wh_a = Warehouse.objects.create(tenant=cls.tenant, name="A", code="TA")
+        cls.wh_b = Warehouse.objects.create(tenant=cls.tenant, name="B", code="TB")
+        cls.product = Product.objects.create(
+            tenant=cls.tenant, sku="TRS-1", name_ar="منتج", quantity_on_hand=Decimal("100"),
+            avg_cost=Decimal("10"))
+        cls.foreign_owner = User.objects.create_user(username="trf-foreign", password="x")
+        cls.foreign_tenant = create_company("شركة تحويل أخرى", cls.foreign_owner)
+        cls.foreign_product = Product.objects.create(
+            tenant=cls.foreign_tenant, sku="TRS-F", name_ar="غريب", quantity_on_hand=Decimal("50"),
+            avg_cost=Decimal("5"))
+        cls.foreign_wh = Warehouse.objects.create(tenant=cls.foreign_tenant, name="F", code="TF")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.client.credentials(HTTP_X_TENANT_ID=str(self.tenant.TenantID))
+
+    def _body(self, **over):
+        body = {
+            "transfer_date": "2026-07-01",
+            "source_warehouse": self.wh_a.id,
+            "dest_warehouse": self.wh_b.id,
+            "lines": [{"product": self.product.id, "quantity": "5"}],
+        }
+        body.update(over)
+        return body
+
+    def test_delete_posted_transfer_is_refused(self):
+        t = WarehouseTransfer.objects.create(
+            tenant=self.tenant, transfer_date="2026-07-01",
+            source_warehouse=self.wh_a, dest_warehouse=self.wh_b)
+        WarehouseTransferLine.objects.create(transfer=t, product=self.product, quantity=Decimal("5"))
+        post_warehouse_transfer(t)
+        res = self.client.delete(f"/api/inventory/warehouse-transfers/{t.id}/")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertTrue(WarehouseTransfer.objects.filter(pk=t.pk).exists())
+
+    def test_delete_draft_transfer_succeeds(self):
+        t = WarehouseTransfer.objects.create(
+            tenant=self.tenant, transfer_date="2026-07-01",
+            source_warehouse=self.wh_a, dest_warehouse=self.wh_b)
+        res = self.client.delete(f"/api/inventory/warehouse-transfers/{t.id}/")
+        self.assertEqual(res.status_code, 204, res.content)
+
+    def test_foreign_product_line_is_refused(self):
+        body = self._body(lines=[{"product": self.foreign_product.id, "quantity": "5"}])
+        res = self.client.post("/api/inventory/warehouse-transfers/", body, format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+
+    def test_foreign_warehouse_is_refused(self):
+        res = self.client.post(
+            "/api/inventory/warehouse-transfers/",
+            self._body(dest_warehouse=self.foreign_wh.id), format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+
+    def test_own_objects_still_accepted(self):
+        res = self.client.post("/api/inventory/warehouse-transfers/", self._body(), format="json")
+        self.assertEqual(res.status_code, 201, res.content)

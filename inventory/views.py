@@ -28,6 +28,7 @@ from .services import (
 )
 from tenants.models import Tenant
 from core.access import requires_perm
+from core.api_defaults import POSTED_DOC_WARNING
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
 from core.date_ranges import filter_local_date_range
@@ -1769,6 +1770,12 @@ class WarehouseTransferViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(tenant=get_tenant(self.request))
 
+    def destroy(self, request, *args, **kwargs):
+        # الحذف يُسقط البنود ويُبقي الحركات المرحَّلة — لا حذف قبل التراجع عن الترحيل.
+        if self.get_object().is_posted:
+            return Response({'error': POSTED_DOC_WARNING}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='post')
     @requires_perm('inventory.doc.post')
     def post_doc(self, request, pk=None):
@@ -1806,7 +1813,15 @@ class StocktakeViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(tenant=get_tenant(self.request))
 
+    def destroy(self, request, *args, **kwargs):
+        # الحذف يُسقط البنود ويُبقي الحركات والقيد — الجرد المرحَّل لا يُحذف.
+        # (ولا مسار تراجع عن ترحيل الجرد اليوم، فالتصحيح بجردٍ جديد.)
+        if self.get_object().is_posted:
+            return Response({'error': POSTED_DOC_WARNING}, status=status.HTTP_400_BAD_REQUEST)
+        return super().destroy(request, *args, **kwargs)
+
     @action(detail=True, methods=['post'], url_path='post')
+    @requires_perm('inventory.doc.post')
     def post_doc(self, request, pk=None):
         stocktake = self.get_object()
         try:
