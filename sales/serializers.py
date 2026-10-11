@@ -912,6 +912,7 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             "allocated_amount",
             "unallocated_amount",
             "created_at",
+            "updated_at",
         ]
         read_only_fields = [
             "id",
@@ -919,6 +920,7 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             "is_posted",
             "refund_for_invoice",
             "created_at",
+            "updated_at",
             "partner_name",
             "attached_cheques",
             "allocated_amount",

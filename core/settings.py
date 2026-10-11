@@ -318,7 +318,12 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "x-tenant-id",
     "x-branch-id",
+    # التزامن المتفائل (`core.concurrency`): ليس من الترويسات الآمنة في CORS، فبدونه
+    # يُسقط الـpreflight أيّ PATCH من متصفحٍ يحمل `If-Match`.
+    "if-match",
 ]
+# ... و`ETag` لا يقرؤه المتصفح من الاستجابة عبر الأصول ما لم يُكشف صراحةً.
+CORS_EXPOSE_HEADERS = ["ETag"]
 
 CSRF_TRUSTED_ORIGINS = list(CORS_ALLOWED_ORIGINS)
 

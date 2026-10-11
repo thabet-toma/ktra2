@@ -205,7 +205,7 @@ def attach_payment_voucher(
         invoice.attached_cash_amount = cash_amount
         invoice.attached_cash_account_id = cash_account_id if cash_amount > 0 else None
         invoice.save(update_fields=[
-            "attached_cash_amount", "attached_cash_account",
+            "attached_cash_amount", "attached_cash_account", "updated_at",
         ])
 
         # 2) Cheques side — REPLACE previously-linked DRAFT cheques only
@@ -994,7 +994,7 @@ def unpost_customer_payment(payment: CustomerPayment, *, user=None) -> dict:
         _reverse_allocations_amount_paid(allocations)
         payment.is_posted = False
         payment.journal = None
-        payment.save(update_fields=["is_posted", "journal"])
+        payment.save(update_fields=["is_posted", "journal", "updated_at"])
 
         record_document_cheque_unposting(payment_cheques, user=user)
 
@@ -1871,7 +1871,7 @@ def post_sales_invoice(
         # T1: الترحيل نفسه لا يمسّ `amount_paid` — كل زيادة عليه تأتي من
         # `post_customer_payment` مقرونةً بصفّ `PaymentAllocation`، فيبقى
         # الثابت «المدفوع = مجموع توزيعات السندات المرحّلة» صحيحاً بالبناء.
-        invoice.save(update_fields=["journal", "status"])
+        invoice.save(update_fields=["journal", "status", "updated_at"])
 
         # الشيكات المرفقة تُرقّى إلى «برسم التحصيل» بترحيل سندها لا بترحيل
         # الفاتورة (`post_customer_payment`) — فلا تُرقّى هنا.
@@ -3322,7 +3322,7 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
         # reference_id فيشمل كل القيود.
         payment.journal = journals[0] if journals else None
         payment.is_posted = True
-        payment.save(update_fields=["journal", "is_posted"])
+        payment.save(update_fields=["journal", "is_posted", "updated_at"])
 
         # CHQ-2: شيكات السند تنتقل من مسودة إلى «مستلَم» بترحيله، ومعها صفّ
         # حركة مربوط بقيده — بدل `.update()` أخرس كان يُسقط أهمّ حدث في حياة

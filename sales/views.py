@@ -22,6 +22,7 @@ from core.activity import (
     snapshot_document_lines,
     snapshot_fields,
 )
+from core.concurrency import OptimisticConcurrencyMixin
 from core.pagination import EnforcedPageNumberPagination
 from core.api_defaults import ApiAuthAndUser, PagePartnerBalanceMixin, POSTED_DOC_WARNING
 from core.plans import enforce_limits
@@ -128,7 +129,9 @@ def _invoice_line_snapshot(invoice):
     )
 
 
-class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets.ModelViewSet):
+class SalesInvoiceViewSet(
+    OptimisticConcurrencyMixin, PostedTextEditMixin, PagePartnerBalanceMixin, viewsets.ModelViewSet,
+):
     # المرحّلة: ملاحظتها وحدها تُعدَّل (`core.posted_text`) — وذيل وصف قيدها يتبعها.
     posted_text_entity_type = "sales_invoice"
     posted_text_perm = "sales.invoice.edit"
@@ -495,7 +498,7 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
                 invoice.amount_paid = Decimal("0")
                 invoice.delivery_status = SalesInvoice.DELIVERY_NOT
                 invoice.save(update_fields=[
-                    "status", "journal", "amount_paid", "delivery_status",
+                    "status", "journal", "amount_paid", "delivery_status", "updated_at",
                 ])
                 # حركات المخزون عُكِست أعلاه ⇒ تُصفَّر الكميات المسلَّمة وتُحذف
                 # الإرساليات المبنية عليها (تُعاد بالتسليم بعد إعادة الترحيل).
@@ -1204,7 +1207,7 @@ class SalesInvoiceViewSet(PostedTextEditMixin, PagePartnerBalanceMixin, viewsets
         })
 
 
-class DeliveryOrderViewSet(viewsets.ModelViewSet):
+class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
     # P0-5: ترقيم إلزامي — DeliveryNotesPage صارت على أحدث 200 مع بحث خادمي،
     # وoutstanding نقطة action مستقلة.
     pagination_class = EnforcedPageNumberPagination
@@ -1411,6 +1414,10 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
         from .services import get_or_create_sales_settings
 
         delivery = self.get_object()
+        # قبل أيّ عكسٍ: `If-Match` قديم ⇒ 412 والإرسالية بأثرها كما هي.
+        stale = self.precondition_failed(request, delivery)
+        if stale is not None:
+            return stale
         if not get_or_create_sales_settings(get_tenant(request)).allow_edit_delivery:
             return Response(
                 {"error": "تعديل الإرسالية معطّل من إعدادات المبيعات."},
@@ -1463,7 +1470,7 @@ class DeliveryOrderViewSet(viewsets.ModelViewSet):
         return Response(DeliveryOrderSerializer(d).data)
 
 
-class CustomerPaymentViewSet(PostedTextEditMixin, viewsets.ModelViewSet):
+class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, viewsets.ModelViewSet):
     # المرحَّل: ملاحظته وحدها تُعدَّل — وأوّل وصف قيده يتبعها (`customer_payment_note_text`).
     posted_text_entity_type = "customer_payment"
 

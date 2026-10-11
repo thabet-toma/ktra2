@@ -940,6 +940,8 @@ class CustomerPayment(models.Model):
     )
     notes = models.CharField(max_length=500, blank=True, default="", db_column="Notes")
     created_at = models.DateTimeField(auto_now_add=True, db_column="CreatedAt")
+    # التزامن المتفائل: يشتقّ منه `ETag` (`core.concurrency`) — يتحرّك مع كل تعديلٍ حقيقي.
+    updated_at = models.DateTimeField(auto_now=True, db_column="UpdatedAt")
 
     class Meta:
         db_table = "sales_module_customer_payments"
