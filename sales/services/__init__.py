@@ -139,6 +139,13 @@ from .party_surplus import (
     attach_refund_sources,
     guard_refund_sources,
 )
+from .customer_approval import (
+    approval_fingerprint,
+    record_customer_approval,
+    drop_approval_if_changed,
+    snapshot_customer_approval,
+    restore_customer_approval,
+)
 from .supplier_vat import (
     post_supplier_payment,
     unpost_supplier_payment,
@@ -265,6 +272,11 @@ __all__ = [
     "party_surplus_rows",
     "attach_refund_sources",
     "guard_refund_sources",
+    "approval_fingerprint",
+    "record_customer_approval",
+    "drop_approval_if_changed",
+    "snapshot_customer_approval",
+    "restore_customer_approval",
     "post_supplier_payment",
     "unpost_supplier_payment",
     "allocate_supplier_payment",

@@ -40,6 +40,7 @@ class ActivityLog(models.Model):
         ('view', 'عرض'),
         ('login', 'تسجيل دخول'),
         ('logout', 'تسجيل خروج'),
+        ('customer_approval', 'موافقة العميل'),
     ]
 
     id = models.AutoField(primary_key=True)

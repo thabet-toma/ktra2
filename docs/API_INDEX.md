@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **974**
+عدد النقاط: **977**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -868,6 +868,7 @@
 | `/api/sales/delivery-orders/` | `DeliveryOrderViewSet` | `sales/views.py` |
 | `/api/sales/delivery-orders/outstanding/` | `DeliveryOrderViewSet` | `sales/views.py` |
 | `/api/sales/delivery-orders/{pk}/` | `DeliveryOrderViewSet` | `sales/views.py` |
+| `/api/sales/delivery-orders/{pk}/customer-approval/` | `DeliveryOrderViewSet` | `sales/views.py` |
 | `/api/sales/delivery-orders/{pk}/deliver/` | `DeliveryOrderViewSet` | `sales/views.py` |
 | `/api/sales/invoices/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/credit-preview/` | `SalesInvoiceViewSet` | `sales/views.py` |
@@ -881,6 +882,7 @@
 | `/api/sales/invoices/{pk}/attachments/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/attachments/{attachment_id}/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/collect/` | `SalesInvoiceViewSet` | `sales/views.py` |
+| `/api/sales/invoices/{pk}/customer-approval/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/customer-ledger/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/deliver/` | `SalesInvoiceViewSet` | `sales/views.py` |
 | `/api/sales/invoices/{pk}/delivery-lines/` | `SalesInvoiceViewSet` | `sales/views.py` |
@@ -902,6 +904,7 @@
 | `/api/sales/payments/suggest-fifo-allocations/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/allocate/` | `CustomerPaymentViewSet` | `sales/views.py` |
+| `/api/sales/payments/{pk}/customer-approval/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/deallocate/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/post/` | `CustomerPaymentViewSet` | `sales/views.py` |
 | `/api/sales/payments/{pk}/unpost/` | `CustomerPaymentViewSet` | `sales/views.py` |

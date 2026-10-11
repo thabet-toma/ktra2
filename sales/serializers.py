@@ -241,8 +241,26 @@ class _SalesInvoicePaymentDetailSerializer(serializers.Serializer):
         return str(obj.amount_in_invoice_currency if obj.amount_in_invoice_currency is not None else obj.amount)
 
 
+#: موافقة الزبون (T2) — للقراءة فقط في كل المستندات الثلاثة؛ تُكتب من نقطة
+#: `customer-approval/` وحدها. البصمة تبقى داخلية فلا تُعرض.
+CUSTOMER_APPROVAL_READ_FIELDS = [
+    "customer_approval_status",
+    "customer_approval_status_display",
+    "customer_approval_at",
+    "customer_approval_by",
+    "customer_approval_note",
+]
+
+
+class _CustomerApprovalDisplaySerializer(serializers.Serializer):
+    customer_approval_status_display = serializers.CharField(
+        source="get_customer_approval_status_display", read_only=True,
+    )
+
+
 class SalesInvoiceListSerializer(
-    _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
+    _SalesInvoicePaymentSummarySerializer, _CustomerApprovalDisplaySerializer,
+    serializers.ModelSerializer,
 ):
     customer_name = serializers.CharField(source="customer.name", read_only=True)
     customer_is_active = serializers.BooleanField(source="customer.is_active", read_only=True)
@@ -279,6 +297,7 @@ class SalesInvoiceListSerializer(
             "delivery_status",
             "delivery_status_display",
             "book_number",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
         ]
 
 
@@ -298,7 +317,8 @@ class _AttachedChequeSerializer(serializers.Serializer):
 
 
 class SalesInvoiceSerializer(
-    _SalesInvoicePaymentSummarySerializer, serializers.ModelSerializer,
+    _SalesInvoicePaymentSummarySerializer, _CustomerApprovalDisplaySerializer,
+    serializers.ModelSerializer,
 ):
     lines = SalesInvoiceLineSerializer(many=True)
     customer_name = serializers.CharField(source="customer.name", read_only=True)
@@ -475,10 +495,12 @@ class SalesInvoiceSerializer(
             "attached_cash_amount",
             "attached_cash_account",
             "cheques",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
         ]
         read_only_fields = [
             "id",
             "status",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
             "subtotal_excl_tax",
             "tax_amount",
             "grand_total",
@@ -828,7 +850,7 @@ class _PaymentChequeInputSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True, default="")
 
 
-class CustomerPaymentSerializer(serializers.ModelSerializer):
+class CustomerPaymentSerializer(_CustomerApprovalDisplaySerializer, serializers.ModelSerializer):
     allocations = PaymentAllocationSerializer(many=True, required=False)
     # الشيكات تُكتب مع إنشاء السند وتُقرأ من الشيكات المرتبطة به.
     cheques = _PaymentChequeInputSerializer(many=True, required=False, write_only=True)
@@ -913,9 +935,11 @@ class CustomerPaymentSerializer(serializers.ModelSerializer):
             "unallocated_amount",
             "created_at",
             "updated_at",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
         ]
         read_only_fields = [
             "id",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
             "journal",
             "is_posted",
             "refund_for_invoice",
@@ -1089,7 +1113,7 @@ class DeliveryOrderLineSerializer(serializers.ModelSerializer):
         return str(max(Decimal("0"), ordered - delivered))
 
 
-class DeliveryOrderListSerializer(serializers.ModelSerializer):
+class DeliveryOrderListSerializer(_CustomerApprovalDisplaySerializer, serializers.ModelSerializer):
     invoice_number = serializers.CharField(
         source="invoice.invoice_number", read_only=True, default=None,
     )
@@ -1110,6 +1134,7 @@ class DeliveryOrderListSerializer(serializers.ModelSerializer):
             "status", "status_display", "auto_created", "notes",
             "lines_count", "total_quantity", "total_remaining",
             "delivered_at", "created_at", "updated_at",
+            *CUSTOMER_APPROVAL_READ_FIELDS,
         ]
         read_only_fields = fields
 

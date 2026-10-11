@@ -1,7 +1,7 @@
 import React from "react";
 import {
   Plus, Pencil, Trash2, CheckCircle2, RotateCcw, Copy,
-  DollarSign, Eye, LogIn, LogOut, Activity as ActivityIcon,
+  DollarSign, Eye, LogIn, LogOut, UserCheck, Activity as ActivityIcon,
 } from "lucide-react";
 import { formatDateTimeValue } from "../../utils/formatDate";
 
@@ -23,6 +23,7 @@ export const ACTION_META: Record<string, ActionMeta> = {
   unpost:    { label: "إلغاء ترحيل",   icon: <RotateCcw className={cls("text-amber-600")} />,   badge: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-300" },
   duplicate: { label: "نسخ",           icon: <Copy className={cls("text-indigo-600")} />,       badge: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-300" },
   payment:   { label: "دفعة",          icon: <DollarSign className={cls("text-teal-600")} />,   badge: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-300" },
+  customer_approval: { label: "موافقة العميل", icon: <UserCheck className={cls("text-sky-600")} />, badge: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-300" },
   view:      { label: "عرض",           icon: <Eye className={cls("ktra-text-soft")} />,        badge: "ktra-bg-panel ktra-text-soft" },
   login:     { label: "تسجيل دخول",    icon: <LogIn className={cls("text-green-600")} />,       badge: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-300" },
   logout:    { label: "تسجيل خروج",    icon: <LogOut className={cls("ktra-text-soft")} />,     badge: "ktra-bg-panel ktra-text-soft" },

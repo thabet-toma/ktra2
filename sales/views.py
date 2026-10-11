@@ -67,12 +67,16 @@ from .services import (
     duplicate_invoice_for_today,
     last_month_invoice_for_customer,
     log_order_activity,
+    record_customer_approval,
     record_order_deposit,
+    restore_customer_approval,
+    snapshot_customer_approval,
     credit_preview_for_sale,
     customer_price_list,
     save_customer_quotes,
     deliver_delivery_order,
     deliver_invoice_lines,
+    drop_approval_if_changed,
     get_or_create_sales_settings,
     guard_invoice_payments_before_unpost,
     invoice_profits,
@@ -127,6 +131,28 @@ def _invoice_line_snapshot(invoice):
         ),
         fields=INVOICE_ACTIVITY_LINE_LABELS,
     )
+
+
+def _customer_approval_action(view, request, *, perm):
+    """جسم نقطة `customer-approval/` للأنواع الثلاثة — تنفيذٌ واحد (`customer_approval.py`).
+
+    Body: { "status": "pending|approved|rejected", "by_name": str, "note": str }
+    `If-Match` قديم ⇒ 412 قبل أيّ كتابة؛ والاستجابة تحمل `ETag` الجديد (`finalize_response`).
+    """
+    require_perm(request, perm)
+    doc = view.get_object()
+    stale = view.precondition_failed(request, doc)
+    if stale is not None:
+        return stale
+    data = request.data if hasattr(request.data, "get") else {}
+    try:
+        record_customer_approval(
+            doc, status=data.get("status"), by_name=data.get("by_name"),
+            note=data.get("note"), request=request,
+        )
+    except ValidationError as e:
+        return Response({"error": "؛ ".join(e.messages)}, status=status.HTTP_400_BAD_REQUEST)
+    return Response(view.get_serializer(doc).data)
 
 
 class SalesInvoiceViewSet(
@@ -385,6 +411,8 @@ class SalesInvoiceViewSet(
             partner_ids=[invoice.customer_id],
             request=self.request,
         )
+        # موافقة الزبون (T2): تغيّر البنود/المبالغ بعدها يُسقطها؛ الملاحظة وحدها لا.
+        drop_approval_if_changed(invoice, request=self.request)
 
     def destroy(self, request, *args, **kwargs):
         require_perm(request, "sales.invoice.delete")
@@ -1162,6 +1190,11 @@ class SalesInvoiceViewSet(
         )
         return Response(status=status.HTTP_204_NO_CONTENT)
 
+    @action(detail=True, methods=["post"], url_path="customer-approval")
+    def customer_approval(self, request, pk=None):
+        """قرار الزبون على الفاتورة (بانتظار/وافق/اعترض) — صلاحية التعديل؛ مسموح بعد الترحيل."""
+        return _customer_approval_action(self, request, perm="sales.invoice.edit")
+
     @action(detail=True, methods=["post"], url_path="deliver")
     @requires_perm("sales.invoice.post")
     def deliver(self, request, pk=None):
@@ -1320,6 +1353,8 @@ class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
         notes = str(request.data.get("notes", "") or "")[:500]
         customer_ref = str(request.data.get("customer_ref", "") or "")[:100]
         delivery_date = request.data.get("delivery_date") or None
+        # الصفّ القديم يُحذف ويُنشأ بدله صفٌّ جديد: موافقة الزبون تنتقل معه ثم تُقارَن بمحتواه.
+        approval = snapshot_customer_approval(existing) if existing is not None else None
 
         try:
             with transaction.atomic():
@@ -1341,6 +1376,8 @@ class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
                         delivery_date=delivery_date, notes=notes,
                         customer_ref=customer_ref,
                     )
+                if approval is not None:
+                    restore_customer_approval(delivery, approval, request=request)
         except ValidationError as e:
             msg = "؛ ".join(e.messages) if hasattr(e, "messages") else str(e)
             return Response({"error": msg}, status=status.HTTP_400_BAD_REQUEST)
@@ -1450,6 +1487,11 @@ class DeliveryOrderViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
             entity_label=number, description="إلغاء إرسالية بيع", request=request,
         )
         return Response({"message": "تم إلغاء الإرسالية وعكس أثرها.", **result})
+
+    @action(detail=True, methods=["post"], url_path="customer-approval")
+    def customer_approval(self, request, pk=None):
+        """قرار الزبون على الإرسالية — يؤكّد استلامها بعد التسليم، فمسموح على أيّ حالة غير الملغاة."""
+        return _customer_approval_action(self, request, perm="sales.invoice.edit")
 
     @action(detail=True, methods=["post"], url_path="deliver")
     @requires_perm("sales.invoice.post")
@@ -1589,6 +1631,8 @@ class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, vi
             description="تعديل سند قبض عميل", request=self.request,
             partner_ids=[payment.partner_id],
         )
+        # موافقة الزبون (T2): تغيّر المبلغ/الحساب/الشيكات بعدها يُسقطها؛ الملاحظة وحدها لا.
+        drop_approval_if_changed(payment, request=self.request)
 
     def destroy(self, request, *args, **kwargs):
         payment = self.get_object()
@@ -1654,6 +1698,11 @@ class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, vi
             partner_ids=[payment.partner_id],
         )
         return Response(CustomerPaymentSerializer(payment).data)
+
+    @action(detail=True, methods=["post"], url_path="customer-approval")
+    def customer_approval(self, request, pk=None):
+        """قرار الزبون على سند القبض — قبل الترحيل أو بعده؛ صلاحية إنشاء السند."""
+        return _customer_approval_action(self, request, perm="sales.payment.create")
 
     @action(detail=True, methods=["post"], url_path="allocate")
     def allocate(self, request, pk=None):

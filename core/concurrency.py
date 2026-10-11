@@ -10,7 +10,7 @@
   (`save()` الكامل يفعل، و`save(update_fields=[...])` لا يفعل إلا إن ذُكر فيها).
 - غياب `If-Match` ⇒ لا فحص (الواجهة الداخلية تعمل كما كانت)، و`*` ⇒ «أيّ نسخةٍ قائمة».
 - القائمة المفصولة بفواصل مقبولة. المقارنة قوية (لا `W/` ضعيفة) كما يوجب RFC لـIf-Match.
-- ترويسة `ETag` تُحقن في ردود retrieve/create/update/partial_update فقط، وتُقرأ من القاعدة
+- ترويسة `ETag` تُحقن في ردود retrieve/create/update/partial_update و`customer_approval` فقط، وتُقرأ من القاعدة
   بالمعرّف الذي تحمله الاستجابة: الإرسالية تُستبدل بصفٍّ جديد عند التعديل (عكس ثم تطبيق)
   فتحمل الاستجابة معرّفها الجديد، والترحيل التلقائي عند الإنشاء يعدّل الصفّ بعد التسلسل.
 """
@@ -30,7 +30,8 @@ _MICROSECOND = timedelta(microseconds=1)
 STALE_DOCUMENT_MESSAGE = "المستند عُدّل منذ قراءتك — أعد قراءته ثم أعد التعديل"
 STALE_DOCUMENT_CODE = "stale_document"
 
-_ETAG_ACTIONS = {"retrieve", "create", "update", "partial_update"}
+# `customer_approval`: نقطة قرار الزبون على المبيعات تعدّل المستند فتُرجع توكنه الجديد.
+_ETAG_ACTIONS = {"retrieve", "create", "update", "partial_update", "customer_approval"}
 
 
 def etag_from_stamp(stamp: datetime) -> str:

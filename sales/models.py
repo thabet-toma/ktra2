@@ -354,7 +354,50 @@ class SalesSettings(models.Model):
         return f"SalesSettings(tenant={self.tenant_id})"
 
 
-class SalesInvoice(models.Model):
+class CustomerApprovalFields(models.Model):
+    """موافقة الزبون على مستند جهّزه غيره (تطبيق المستودع الخارجي) — فاتورة أو إرسالية أو سند قبض.
+
+    الافتراضي «غير مطلوبة»: مستندات المنصة لا تمرّ بموافقةٍ أصلاً. تُكتب الحقول من
+    `sales/services/customer_approval.py` وحده (نقطة `customer-approval/`)، وتسقط الموافقة
+    تلقائياً إلى «بانتظار» إن تغيّر محتوى المال بعدها (`customer_approval_fingerprint`).
+    """
+
+    APPROVAL_NOT_REQUIRED = "not_required"
+    APPROVAL_PENDING = "pending"
+    APPROVAL_APPROVED = "approved"
+    APPROVAL_REJECTED = "rejected"
+    APPROVAL_CHOICES = [
+        (APPROVAL_NOT_REQUIRED, "غير مطلوبة"),
+        (APPROVAL_PENDING, "بانتظار موافقة الزبون"),
+        (APPROVAL_APPROVED, "وافق الزبون"),
+        (APPROVAL_REJECTED, "اعترض الزبون"),
+    ]
+
+    customer_approval_status = models.CharField(
+        max_length=20, choices=APPROVAL_CHOICES, default=APPROVAL_NOT_REQUIRED,
+        db_index=True, db_column="CustomerApprovalStatus",
+    )
+    customer_approval_at = models.DateTimeField(
+        null=True, blank=True, db_column="CustomerApprovalAt",
+        help_text="وقت قرار الزبون (موافقة أو اعتراض) — فارغ ما دام بانتظار",
+    )
+    # اسم الشخص عند الزبون كما أرسله التطبيق — نصٌّ حرّ لا مستخدم في المنصة.
+    customer_approval_by = models.CharField(
+        max_length=150, blank=True, default="", db_column="CustomerApprovalBy",
+    )
+    customer_approval_note = models.CharField(
+        max_length=500, blank=True, default="", db_column="CustomerApprovalNote",
+    )
+    # sha256 لمحتوى المال وقت القرار — تقارنه `drop_approval_if_changed` بعد كل تعديل.
+    customer_approval_fingerprint = models.CharField(
+        max_length=64, blank=True, default="", db_column="CustomerApprovalFingerprint",
+    )
+
+    class Meta:
+        abstract = True
+
+
+class SalesInvoice(CustomerApprovalFields, models.Model):
     STATUS_DRAFT = "draft"
     STATUS_POSTED = "posted"
     STATUS_CANCELLED = "cancelled"
@@ -721,7 +764,7 @@ class SalesInvoiceLine(models.Model):
         return f"Line {self.id} inv={self.invoice_id}"
 
 
-class DeliveryOrder(models.Model):
+class DeliveryOrder(CustomerApprovalFields, models.Model):
     STATUS_PENDING = "pending"
     STATUS_DELIVERED = "delivered"
     STATUS_CANCELLED = "cancelled"
@@ -855,7 +898,7 @@ class DeliveryOrderLine(models.Model):
         return f"DOLine {self.id} do={self.delivery_id}"
 
 
-class CustomerPayment(models.Model):
+class CustomerPayment(CustomerApprovalFields, models.Model):
     KIND_RECEIPT = "receipt"
     KIND_REFUND = "refund"
     KIND_CHOICES = [
