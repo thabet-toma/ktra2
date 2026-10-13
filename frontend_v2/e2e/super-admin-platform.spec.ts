@@ -297,7 +297,12 @@ test("super admin gets a separate platform dashboard and development notes sheet
 
   await expect(page.getByRole("heading", { name: "لوحة تحكم السوبر أدمن" })).toBeVisible();
   await expect(page.getByText("إجمالي الشركات")).toBeVisible();
-  await expect(page.getByRole("button", { name: "إدارة المنصة" })).toBeVisible();
+  // صفحة الهبوط نفسها: المجموعة مطويّةٌ فلا تزحم القائمة — يفتحها المستخدم بيده.
+  const platform = page.getByRole("button", { name: "إدارة المنصة" });
+  await expect(platform).toBeVisible();
+  await expect(platform).toHaveAttribute("aria-expanded", "false");
+  await platform.click();
+  await expect(platform).toHaveAttribute("aria-expanded", "true");
   // SA-5: الأقسام صفحاتٌ بمساراتها — الشركات في `/super-admin/companies` لا في «نظرة عامة».
   await page.getByRole("button", { name: "الشركات", exact: true }).click();
   await expect(page).toHaveURL(/\/super-admin\/companies$/);
@@ -325,6 +330,31 @@ test("super admin gets a separate platform dashboard and development notes sheet
   await page.getByLabel("العنوان *").fill("إضافة تقرير هامش الربح");
   await page.getByRole("button", { name: "إضافة الملاحظة" }).click();
   await expect(page.getByText("إضافة تقرير هامش الربح", { exact: true })).toBeVisible();
+});
+
+test("«إدارة المنصة» تبدأ مطويّةً على شاشات الشركة وتُفتح بالضغط", async ({ page }) => {
+  await installMocks(page, true);
+  // شاشة شركة لا شاشة منصة — «إدارة المنصة» ليست أول ما يحتاجه السوبر أدمن هنا.
+  await page.goto("/dashboard");
+
+  const platform = page.getByRole("button", { name: "إدارة المنصة" });
+  await expect(platform).toBeVisible();
+  await expect(platform).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "الشركات", exact: true })).toHaveCount(0);
+
+  await platform.click();
+  await expect(platform).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "الشركات", exact: true })).toBeVisible();
+});
+
+test("رابطٌ عميق لقسمٍ من اللوحة يفتح «إدارة المنصة» تلقائياً", async ({ page }) => {
+  await installMocks(page, true);
+  // قسمٌ لا النظرة العامة — الشاشة المطلوبة هي التي تفتح مجموعتها، بلا ضغطة.
+  await page.goto("/super-admin/companies");
+
+  const platform = page.getByRole("button", { name: "إدارة المنصة" });
+  await expect(platform).toHaveAttribute("aria-expanded", "true");
+  await expect(page.getByRole("button", { name: "الشركات", exact: true })).toBeVisible();
 });
 
 test("لوحة المنصة: مؤشرات التشغيل في «نظرة عامة»، وأعمدة القياس في جدول الشركات", async ({ page }) => {

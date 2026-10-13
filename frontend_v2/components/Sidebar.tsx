@@ -82,6 +82,9 @@ const PLATFORM_CONSOLE_LINKS: { path: string; label: string; icon: React.ReactNo
   { path: "/super-admin/health", label: "صحة النظام", icon: <HeartPulse className="h-4 w-4" /> },
 ];
 
+/** عروض أزرار «إدارة المنصة» الأربعة — روابط اللوحة نفسها عرض `super-admin` واحد، يفتحها مسارُ قسمٍ لا العرض. */
+const PLATFORM_BLOCK_VIEWS: AppView[] = ["platform-ops", "platform-hiring", "platform-billing", "development-notes"];
+
 export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) => {
   // صلاحية الاستيراد للشركة النشطة (تتفاعل مع تبديل الشركة) — لا تعتمد على علم ثابت من تسجيل الدخول.
   const { canAccessImport } = useCompany();
@@ -161,9 +164,11 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // A5: في «وضع المحاسب» تبدأ المحاسبة مفتوحة — وهي أول ما جاء المستخدم لأجله.
   const [accountingExpanded, setAccountingExpanded] = useState(accountantMode);
   const [userManagementExpanded, setUserManagementExpanded] = useState(false);
-  const [employeeOpsExpanded, setEmployeeOpsExpanded] = useState(true);
+  // مطويّةٌ كبقية المجموعات — تُفتح على شاشاتها (`employee-ops-*`) بأثر الفتح التلقائي أدناه.
+  const [employeeOpsExpanded, setEmployeeOpsExpanded] = useState(false);
   const [afterSalesExpanded, setAfterSalesExpanded] = useState(false);
-  const [platformExpanded, setPlatformExpanded] = useState(true);
+  // «إدارة المنصة» مطويّةٌ افتراضياً — ومنها صفحةُ النظرة العامة التي يهبط عليها السوبر أدمن: تُفتح على أقسامها وحدها.
+  const [platformExpanded, setPlatformExpanded] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   // ISSUE #83: مجموعات بيان الشريط تُوسَّع بمفتاحها (id) لا بفهرسها — إدراج
@@ -388,8 +393,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     if (activeView.startsWith("accounting-") || activeView === "property-rental") setAccountingExpanded(true);
     if (inAny(afterSalesLinks)) setAfterSalesExpanded(true);
     if (activeView.startsWith("employee-ops-")) setEmployeeOpsExpanded(true);
+    if (location.pathname.startsWith("/super-admin/") || PLATFORM_BLOCK_VIEWS.includes(activeView)) setPlatformExpanded(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeView]);
+  }, [activeView, location.pathname]);
 
   // ISSUE #83: يفتح مجموعة البيان التي تحوي الشاشة النشطة — بمفتاحها (id) لا
   // بفهرسها، فترتيب البيان لا يقفز بالمستخدم عند تبديل الشاشة.
