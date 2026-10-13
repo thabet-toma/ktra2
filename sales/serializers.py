@@ -1039,6 +1039,7 @@ class SalesSettingsSerializer(serializers.ModelSerializer):
             "show_journal_preview",
             "warn_on_duplicate_item",
             "loss_invoice_policy",
+            "customer_approval_post_policy",
             "serial_entry_mode",
             "dormant_customer_days",
             # T-ORDERS: صلاحية العرض، مدة حجز الطلبية، وإظهار زر الحذف.

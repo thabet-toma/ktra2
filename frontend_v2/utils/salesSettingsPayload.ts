@@ -23,6 +23,7 @@ const WRITABLE_KEYS = [
   'show_journal_preview',
   'warn_on_duplicate_item',
   'loss_invoice_policy',
+  'customer_approval_post_policy',
   'dormant_customer_days',
   'quotation_valid_days',
   'order_reserve_days',

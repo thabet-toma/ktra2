@@ -67,6 +67,7 @@ from .services import (
     duplicate_invoice_for_today,
     last_month_invoice_for_customer,
     log_order_activity,
+    current_approval_issue,
     record_customer_approval,
     record_order_deposit,
     restore_customer_approval,
@@ -686,6 +687,8 @@ class SalesInvoiceViewSet(
             if isinstance(request.data, dict) and "refund" in request.data
             else None
         )
+        # T3: تحذير الموافقة يُقرأ قبل الترحيل (حالة المستند وقتها)؛ المنع يرفعه post_sales_invoice.
+        approval_warning = current_approval_issue(invoice)
         try:
             post_sales_invoice(invoice, user=request.user, refund_choice=refund_choice)
         except ValidationError as e:
@@ -709,6 +712,8 @@ class SalesInvoiceViewSet(
         refund_summary = getattr(invoice, "_refund_summary", None)
         if refund_summary is not None:
             data["refund_summary"] = refund_summary
+        if approval_warning:
+            data["customer_approval_warning"] = approval_warning
         return Response(data)
 
     @action(detail=True, methods=["post"], url_path="collect")
@@ -1685,8 +1690,16 @@ class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, vi
     @requires_perm("sales.payment.post")
     def post_payment(self, request, pk=None):
         payment = self.get_object()
+        # T3: كما في ترحيل الفاتورة — التحذير قبل الترحيل، والمنع من الخدمة.
+        approval_warning = current_approval_issue(payment)
         try:
             post_customer_payment(payment, user=request.user)
+        except ValidationError as e:
+            # `str(ValidationError)` يطبع `['…']` — الرسالة العربية للحارس تُعاد جملةً.
+            return Response(
+                {"error": e.message if hasattr(e, "message") else "؛ ".join(e.messages)},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         except Exception as e:
             return Response({"error": str(e)}, status=status.HTTP_400_BAD_REQUEST)
         # الخدمة تُعيد ربط اسمها الداخلي بصفّ مقفول — نُحدّث الكائن قبل التسلسل.
@@ -1697,7 +1710,10 @@ class CustomerPaymentViewSet(OptimisticConcurrencyMixin, PostedTextEditMixin, vi
             description="ترحيل سند قبض عميل", request=request,
             partner_ids=[payment.partner_id],
         )
-        return Response(CustomerPaymentSerializer(payment).data)
+        data = dict(CustomerPaymentSerializer(payment).data)
+        if approval_warning:
+            data["customer_approval_warning"] = approval_warning
+        return Response(data)
 
     @action(detail=True, methods=["post"], url_path="customer-approval")
     def customer_approval(self, request, pk=None):

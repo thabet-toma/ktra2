@@ -14,6 +14,8 @@ import {
   updateSalesSettings,
   restoreSalesSettingsDefaults,
   STOCK_LOSS_POLICY_LABELS,
+  CUSTOMER_APPROVAL_POLICY_LABELS,
+  type CustomerApprovalPostPolicy,
   type SalesSettings,
   type StockLossPolicy,
 } from "../../services/salesApi";
@@ -33,6 +35,10 @@ import {
 const POLICY_OPTIONS = (Object.keys(STOCK_LOSS_POLICY_LABELS) as StockLossPolicy[]).map(
   (value) => ({ value, label: STOCK_LOSS_POLICY_LABELS[value] }),
 );
+// T3: خياران فقط لموافقة الزبون — «منع الحفظ» بلا معنى (المستند يُحفظ ليراه الزبون).
+const CUSTOMER_APPROVAL_POLICY_OPTIONS = (
+  Object.keys(CUSTOMER_APPROVAL_POLICY_LABELS) as CustomerApprovalPostPolicy[]
+).map((value) => ({ value, label: CUSTOMER_APPROVAL_POLICY_LABELS[value] }));
 const POLICY_HINT =
   "المسودة لا تحرّك مخزونًا ولا قيدًا محاسبيًا؛ «السماح بالحفظ كمسودة» يمنع الترحيل وحده، و«المنع» يرفض الحفظ أيضًا.";
 
@@ -578,6 +584,24 @@ export const SalesSettingsPage: React.FC = () => {
               </select>
               <div className="text-[11px] ktra-text-soft mt-1">
                 عند بيع بند بأقل من تكلفته. {POLICY_HINT}
+              </div>
+            </FieldLabel>
+            {/* T3: اسم الإعداد مطابق لـ`CUSTOMER_APPROVAL_SETTING_LABEL` — يُذكر في رسالة رفض الخادم. */}
+            <FieldLabel label="ترحيل مستند لم يوافق عليه الزبون">
+              <select
+                className={input}
+                value={settings.customer_approval_post_policy ?? "allow"}
+                onChange={(e) =>
+                  setField("customer_approval_post_policy", e.target.value as CustomerApprovalPostPolicy)
+                }
+              >
+                {CUSTOMER_APPROVAL_POLICY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </select>
+              <div className="text-[11px] ktra-text-soft mt-1">
+                فاتورة أو سند قبض جهّزه تطبيق المستودع وما زال بانتظار موافقة الزبون أو اعترض عليه. «السماح» يحذّر
+                المحاسب ويرحّل بعد تأكيده؛ «المنع» يرفض الترحيل حتى يوافق الزبون. مستندات المنصة لا تتأثر.
               </div>
             </FieldLabel>
             {/* T-DORMANT: عتبة إشعار «عميل مختفٍ» (توقّف عن الشراء). 0 = تعطيل. */}

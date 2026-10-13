@@ -141,6 +141,9 @@ from .party_surplus import (
 )
 from .customer_approval import (
     approval_fingerprint,
+    approval_post_issue,
+    current_approval_issue,
+    assert_customer_approval_allows_post,
     record_customer_approval,
     drop_approval_if_changed,
     snapshot_customer_approval,
@@ -273,6 +276,9 @@ __all__ = [
     "attach_refund_sources",
     "guard_refund_sources",
     "approval_fingerprint",
+    "approval_post_issue",
+    "current_approval_issue",
+    "assert_customer_approval_allows_post",
     "record_customer_approval",
     "drop_approval_if_changed",
     "snapshot_customer_approval",

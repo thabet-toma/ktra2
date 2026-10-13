@@ -32,3 +32,10 @@ test('الحقول المقروءة فقط لا تُرسَل', () => {
   }
   assert.equal(payload.default_customer, 3);
 });
+
+test('سياسة ترحيل ما لم يوافق عليه الزبون تُرسَل عند الحفظ', () => {
+  const payload = salesSettingsWritablePayload({
+    ...base, customer_approval_post_policy: 'save_only',
+  } as SalesSettings);
+  assert.equal(payload.customer_approval_post_policy, 'save_only');
+});

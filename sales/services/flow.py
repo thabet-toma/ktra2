@@ -57,6 +57,7 @@ DEC = Decimal("0.01")
 # المرحلة 3: مراجع عبر وحدات الحزمة (نفس الملف سابقاً) — الرسم البياني لا-دوري.
 from .foundation import get_or_create_sales_settings
 from .numbering import guard_reserved_stock
+from .customer_approval import assert_customer_approval_allows_post
 from .pricing import SALES_STOCK_REFERENCE_TYPES
 from .calc import _build_cogs_journal_line_dicts, _build_tax_buckets, _lock_products_for_lines, _partner_open_balance_excluding_invoice, _resolve_ar_account, _revenue_credit_journal_rows, guard_loss_invoice, linked_return_credit_summary, recalculate_invoice_amounts, resolve_cheques_under_collection_account, sales_return_open_credit
 
@@ -1503,6 +1504,8 @@ def post_sales_invoice(
         raise ValidationError("الفاتورة مرحّلة مسبقاً.")
     if invoice.status == SalesInvoice.STATUS_CANCELLED:
         raise ValidationError("لا يمكن ترحيل فاتورة ملغاة.")
+    # T3: موافقة الزبون (إن طُلبت) — إعداد الشركة يحذّر أو يمنع؛ في الخدمة فيشمل كل مسار ترحيل.
+    assert_customer_approval_allows_post(invoice)
 
     # N8-T11: sign multiplier للمراجيع
     kind = invoice.invoice_kind or SalesInvoice.INVOICE_KIND_SALE
@@ -2898,6 +2901,8 @@ def post_customer_payment(payment: CustomerPayment, *, user=None) -> CustomerPay
     """
     if payment.is_posted:
         raise ValidationError("الدفعة مرحّلة مسبقاً.")
+    # T3: موافقة الزبون (إن طُلبت) — كما في ترحيل الفاتورة.
+    assert_customer_approval_allows_post(payment)
 
     if payment.partner.tenant_id != payment.tenant_id:
         raise ValidationError("العميل لا يتبع نفس الشركة.")

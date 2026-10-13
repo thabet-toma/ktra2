@@ -17,6 +17,7 @@ import {
   unpostSalesInvoice,
   type AttachedCheque,
   type CreditPreviewResponse,
+  type CustomerApprovalFields,
   type InvoiceIntentPayload,
   type ReservedStockRow,
   type SalesInvoiceDetail,
@@ -36,6 +37,13 @@ import { pickDefaultCashAccount } from "../../utils/cashBox";
 import { useOnlineStatus } from "../../hooks/useOnlineStatus";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareDocumentModal } from "../shared/ShareDocumentModal";
+import { CustomerApprovalBadge } from "../shared/CustomerApprovalBadge";
+import {
+  approvalWarningReason,
+  customerApprovalBadge,
+  needsApprovalWarning,
+  pickCustomerApproval,
+} from "../../utils/customerApproval";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { usePriceVisibility } from "../../contexts/PriceVisibilityContext";
 import { useStaleConfirm } from "../offline/StaleDataConfirm";
@@ -500,6 +508,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
   const [cardSuggestedPrice, setCardSuggestedPrice] = useState<number | null>(null);
   const [cardPriceSource, setCardPriceSource] = useState<DraftLine["priceSource"]>(null);
   const [invoiceStatus, setInvoiceStatus] = useState<string>("draft");
+  // T3: موافقة الزبون كما أعادها الخادم (للشارة وتحذير الترحيل) — `undefined` = لا موافقة مطلوبة.
+  const [customerApproval, setCustomerApproval] = useState<CustomerApprovalFields>({});
   const [postedJournalId, setPostedJournalId] = useState<number | null>(null);
   // task18: المدفوع/الإجمالي المحفوظان — لحساب المتبقي عند تسجيل سند قبض على فاتورة مرحّلة.
   const [paidAmount, setPaidAmount] = useState(0);
@@ -1216,6 +1226,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setRevenueAccountId(d.revenue_account ?? "");
     setDraftId(d.id);
     setInvoiceStatus(d.status || "draft");
+    setCustomerApproval(pickCustomerApproval(d));
     setPostedJournalId(d.journal ?? null);
     setPaidAmount(Number((d as { amount_paid?: number | string }).amount_paid ?? 0));
     setPendingIntent(
@@ -1733,9 +1744,21 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
   };
 
+  /** T3: تأكيد ترحيل فاتورة لم يوافق عليها الزبون (بانتظار/اعتراض) بسببه. إن ضُبطت الشركة على
+   *  «منع الترحيل» رفض الخادم الترحيل برسالة عربية تظهر في `localErr` (`humanizeThrown`). */
+  const confirmUnapprovedPost = async (approval: CustomerApprovalFields): Promise<boolean> => {
+    if (!needsApprovalWarning(approval.customer_approval_status)) return true;
+    return confirm({
+      title: "ترحيل فاتورة لم يوافق عليها الزبون",
+      message: `${approvalWarningReason(approval)}. هل تريد ترحيل الفاتورة رغم ذلك؟`,
+      confirmText: "ترحيل",
+      danger: false,
+    });
+  };
+
   /** يرحّل الفاتورة. `idOverride` لمن يحفظ ويرحّل في نفس النقرة (حالة الـid لم
    *  تُحدَّث بعد). يُعيد true عند النجاح كي يتابع المتصل خطوته التالية. */
-  const handlePost = async (idOverride?: number) => {
+  const handlePost = async (idOverride?: number, savedApproval?: CustomerApprovalFields) => {
     if (!invoicePermissions.canPost) {
       setLocalErr("لا تملك صلاحية ترحيل فاتورة البيع.");
       return false;
@@ -1766,7 +1789,11 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
 
     setPosting(true);
     try {
-      if (dirtyRef.current) await patchSalesInvoice(targetId, buildPayload());
+      // T3: الحفظ قبل السؤال — تعديل بعد الموافقة يُسقطها إلى «بانتظار» على الخادم، فيُسأل
+      // المحاسب عن الحالة الفعلية بعد الحفظ لا قبله. `savedApproval` من «حفظ وترحيل» الذي حفظ للتو.
+      let approval = savedApproval ?? customerApproval;
+      if (dirtyRef.current) approval = pickCustomerApproval(await patchSalesInvoice(targetId, buildPayload()));
+      if (!(await confirmUnapprovedPost(approval))) return false;
 
       // issue #167 م٤: مرجع البيع فقط، وحين الإعداد التلقائي مطفأ — غيره
       // يُرحَّل بالمسار القديم حرفياً بلا حقل `refund` (غيابه يعني «الخادم
@@ -1847,6 +1874,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     setDraftId(null);
     setInvoiceNumber("");
     setInvoiceStatus("draft");
+    setCustomerApproval({});
     setPostedJournalId(null);
     setPaidAmount(0);
     setPendingIntent(0);
@@ -3328,6 +3356,8 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
         if (!saved) return; // `handleSaveDraft` عرض سبب الفشل
         targetId = saved.id;
         alreadyPosted = saved.posted;
+        // T3: التحصيل مع الترحيل يرحّل الفاتورة — نفس تأكيد «ترحيل» لمن لم يوافق زبونه.
+        if (!alreadyPosted && !(await confirmUnapprovedPost(pickCustomerApproval(saved.detail)))) return;
       }
       if (!targetId) {
         setLocalErr("احفظ الفاتورة أولاً ثم حصّلها.");
@@ -3383,7 +3413,7 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     }
     const saved = await handleSaveDraft();
     if (!saved) return;
-    if (!saved.posted && !(await handlePost(saved.id))) return;
+    if (!saved.posted && !(await handlePost(saved.id, pickCustomerApproval(saved.detail)))) return;
     clientLogger.info("invoice.save_and_post_completed", {
       invoiceType: "sales",
       invoiceId: saved.id,
@@ -3754,6 +3784,10 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
     currencyId !== "" ? currencies.find((c) => c.CurrencyID === currencyId)?.Code : undefined;
   const money = (n: number) => `${fmt(n)}${currencyCode ? ` ${currencyCode}` : ""}`;
   const filledLines = lines.filter((l) => l.product !== "");
+  // T3: شارة موافقة الزبون (null ⇒ لا تُعرض) تُستعمل في عرض المستند وشريط الحالة.
+  const customerApprovalBadgeMeta = customerApprovalBadge(
+    customerApproval.customer_approval_status,
+  );
 
   /**
    * مسار المستند الأب. لا مسار بمعرّف للطلبية/العرض (شاشة تبويبات واحدة)، فيُمرَّر
@@ -3849,6 +3883,9 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
           : []),
         ...(postedJournalId != null
           ? [{ label: "قيد اليومية", value: `#${postedJournalId}` }]
+          : []),
+        ...(customerApprovalBadgeMeta
+          ? [{ label: "موافقة الزبون", value: <CustomerApprovalBadge doc={customerApproval} /> }]
           : []),
         // T-SLINEAGE: الفاتورة تقول من أين جاءت، والرقم يفتح مستنده الأب.
         ...(sourceDocument
@@ -4542,6 +4579,12 @@ export const SalesInvoiceEditor: React.FC<Props> = ({
             <span className="ktra-status-item">
               الحالة <b>{isPosted ? "مرحّلة" : draftId ? "مسودة" : "جديدة"}</b>
             </span>
+            {/* T3: موافقة الزبون — لا شيء لما أنشأته المنصة (`not_required`). */}
+            {customerApprovalBadgeMeta && (
+              <span className="ktra-status-item">
+                موافقة الزبون <CustomerApprovalBadge doc={customerApproval} />
+              </span>
+            )}
             <span className="ktra-status-item">
               السجل <b>{nav.position}/{nav.total}</b>
             </span>

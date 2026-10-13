@@ -5,7 +5,8 @@
 صريحة على المستند + بصمة محتوى المال وقت القرار، فإن تغيّرت البنود/المبالغ بعد الموافقة
 سقطت إلى «بانتظار» وسُجّل ذلك — الملاحظات لا تدخل البصمة فلا تُسقطها.
 
-لا علاقة للترحيل بهذه الحالة (T3 يضيف التحذير عنده)، ولا أثر محاسبي ولا مخزني هنا.
+الترحيل يقرأ هذه الحالة في `approval_post_issue` / `assert_customer_approval_allows_post` (T3:
+تحذير افتراضاً أو منع بحسب إعداد الشركة)؛ وما عدا ذلك لا أثر محاسبي ولا مخزني هنا.
 المفردات والسجل مقتبسان من `docshare/services.py` (`record_decision`): قرار + اسم + ملاحظة.
 """
 from __future__ import annotations
@@ -28,6 +29,7 @@ from sales.models import (
     DeliveryOrderLine,
     SalesInvoice,
     SalesInvoiceLine,
+    SalesSettings,
 )
 
 logger = logging.getLogger("sales.services")
@@ -269,6 +271,54 @@ def drop_approval_if_changed(doc, *, request) -> bool:
     return True
 
 
+# ── الترحيل (T3) ──
+
+def approval_post_issue(doc) -> str | None:
+    """سببٌ عربي لأن المستند يحتاج موافقة الزبون ولا يملك موافقةً سارية، وإلا `None`.
+
+    `not_required` (كل مستندات المنصة) و«موافق ومحتواه كما وُوفق عليه» لا مشكلة فيهما. موافقةٌ
+    بصمتها غير بصمة المحتوى الحالي تعني تعديلاً مرّ بمسارٍ لا يستدعي `drop_approval_if_changed`.
+    """
+    status = doc.customer_approval_status
+    if status == CustomerApprovalFields.APPROVAL_PENDING:
+        return _decision_description(status, "", "")
+    if status == CustomerApprovalFields.APPROVAL_REJECTED:
+        return _decision_description(status, doc.customer_approval_by, doc.customer_approval_note)
+    if (
+        status == CustomerApprovalFields.APPROVAL_APPROVED
+        and approval_fingerprint(doc) != doc.customer_approval_fingerprint
+    ):
+        return "عُدّل بعد موافقة الزبون"
+    return None
+
+
+def current_approval_issue(doc) -> str | None:
+    """`approval_post_issue` على حالةٍ طازجة من القاعدة — الكائن في يد المستدعي قد يسبق قرار الزبون."""
+    if doc.pk:
+        doc.refresh_from_db(fields=_APPROVAL_FIELDS)
+    return approval_post_issue(doc)
+
+
+def assert_customer_approval_allows_post(doc) -> None:
+    """يرفع `ValidationError` عربياً إن كان المستند بلا موافقة سارية وإعداد الشركة يمنع الترحيل.
+
+    في الخدمة لا في نقطة الترحيل: كل مسار (نقطة الترحيل، التحصيل، الترحيل التلقائي) بقاعدةٍ واحدة.
+    السندات التي تنشئها الخدمات داخلياً (تسوية البيع النقدي، دفعة الطلبية…) `not_required` دائماً.
+    """
+    issue = current_approval_issue(doc)
+    if not issue:
+        return
+    ss = SalesSettings.objects.filter(tenant_id=doc.tenant_id).first()
+    policy = ss.customer_approval_post_policy if ss else SalesSettings.POLICY_ALLOW
+    if SalesSettings.policy_blocks(policy, SalesSettings.STAGE_POST):
+        raise ValidationError(
+            f"{issue}. " + SalesSettings.policy_refusal(
+                SalesSettings.CUSTOMER_APPROVAL_SETTING_LABEL, policy,
+                SalesSettings.CUSTOMER_APPROVAL_POLICY_CHOICES,
+            )
+        )
+
+
 def snapshot_customer_approval(doc) -> dict:
     """حقول الموافقة قبل أن يُستبدل الصفّ (الإرسالية تُعكس ثم تُنشأ من جديد عند التعديل)."""
     return {name: getattr(doc, name) for name in _APPROVAL_FIELDS}
@@ -285,6 +335,8 @@ def restore_customer_approval(doc, snapshot: dict, *, request) -> None:
 
 
 __all__ = [
-    "SETTABLE_STATUSES", "approval_fingerprint", "record_customer_approval",
+    "SETTABLE_STATUSES", "approval_fingerprint", "approval_post_issue",
+    "current_approval_issue", "assert_customer_approval_allows_post",
+    "record_customer_approval",
     "drop_approval_if_changed", "snapshot_customer_approval", "restore_customer_approval",
 ]

@@ -11,6 +11,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { ShareRowButton } from "../shared/ShareRowButton";
+import { CustomerApprovalBadge } from "../shared/CustomerApprovalBadge";
 import {
   FileSearch, Loader2, PackageCheck, Pencil, Printer, Save, Trash2, X,
 } from "lucide-react";
@@ -881,6 +882,14 @@ export const DeliveryNotesPage: React.FC = () => {
           </span>
         );
       },
+    },
+    {
+      // T3: موافقة الزبون على استلام الإرسالية — شارة فقط (لا حارس ترحيل: الزبون يؤكد بعد التسليم).
+      key: "customer_approval",
+      header: "موافقة الزبون",
+      width: "130px",
+      align: "center",
+      render: (r) => <CustomerApprovalBadge doc={r} />,
     },
     {
       key: "actions",

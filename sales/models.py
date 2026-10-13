@@ -36,9 +36,15 @@ class SalesSettings(models.Model):
     ]
     STAGE_SAVE = "save"
     STAGE_POST = "post"
-    # أسماء الإعدادين كما تظهر في «إعدادات المبيعات» — تُذكر في رسائل الرفض.
+    # أسماء الإعدادات كما تظهر في «إعدادات المبيعات» — تُذكر في رسائل الرفض.
     NEGATIVE_STOCK_SETTING_LABEL = "سياسة الرصيد السالب"
     LOSS_INVOICE_SETTING_LABEL = "فاتورة البيع بخسارة"
+    CUSTOMER_APPROVAL_SETTING_LABEL = "ترحيل مستند لم يوافق عليه الزبون"
+    # موافقة الزبون لا تعني «منع الحفظ» (المستند يجب أن يُحفظ ليراه الزبون) فخياراها اثنان.
+    CUSTOMER_APPROVAL_POLICY_CHOICES = [
+        (POLICY_ALLOW, "السماح (تحذير فقط)"),
+        (POLICY_SAVE_ONLY, "منع الترحيل حتى موافقة الزبون"),
+    ]
 
     @classmethod
     def policy_blocks(cls, policy: str, stage: str) -> bool:
@@ -52,9 +58,12 @@ class SalesSettings(models.Model):
         return policy in (cls.POLICY_SAVE_ONLY, cls.POLICY_BLOCK)
 
     @classmethod
-    def policy_refusal(cls, setting_label: str, policy: str) -> str:
-        """جملة تُلحَق برسالة الرفض: تسمّي الإعداد وخياره الحالي ليعرف المستخدم سببه وأين يغيّره."""
-        option = dict(cls.POLICY_CHOICES).get(policy, policy)
+    def policy_refusal(cls, setting_label: str, policy: str, choices=None) -> str:
+        """جملة تُلحَق برسالة الرفض: تسمّي الإعداد وخياره الحالي ليعرف المستخدم سببه وأين يغيّره.
+
+        `choices` لإعدادٍ خياراته غير الثلاثة العامة (موافقة الزبون) فتُسمّى الرسالة كما تُعرض في الشاشة.
+        """
+        option = dict(choices or cls.POLICY_CHOICES).get(policy, policy)
         return f"إعداد «{setting_label}» في إعدادات المبيعات مضبوط على «{option}»."
 
     id = models.AutoField(primary_key=True, db_column="SalesSettingsID")
@@ -274,6 +283,18 @@ class SalesSettings(models.Model):
         help_text=(
             "فاتورة بيع فيها سعر أقل من التكلفة: السماح (تحذير فقط) | الحفظ كمسودة ومنع "
             "الترحيل | منع الحفظ والترحيل."
+        ),
+    )
+    # مستند وصل من تطبيق المستودع الخارجي ولم يوافق عليه الزبون (T2: pending/rejected/عُدّل بعد
+    # الموافقة): السماح بترحيله مع تحذير للمحاسب، أو منع الترحيل. مستندات المنصة لا تتأثر.
+    customer_approval_post_policy = models.CharField(
+        max_length=20,
+        choices=CUSTOMER_APPROVAL_POLICY_CHOICES,
+        default=POLICY_ALLOW,
+        db_column="CustomerApprovalPostPolicy",
+        help_text=(
+            "ترحيل فاتورة أو سند قبض لم يوافق عليه الزبون: السماح (تحذير فقط) | "
+            "منع الترحيل حتى موافقة الزبون."
         ),
     )
 

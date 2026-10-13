@@ -48,6 +48,8 @@ import { accountingApi } from "../../services/accountingApi";
 import { apiGetObject } from "../../services/restApi";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { ShareRowButton } from "../shared/ShareRowButton";
+import { CustomerApprovalBadge } from "../shared/CustomerApprovalBadge";
+import { approvalWarningReason, needsApprovalWarning } from "../../utils/customerApproval";
 import { useToast } from "../../contexts/ToastContext";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import {
@@ -312,13 +314,18 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
 
   const handlePost = async (p: CustomerPaymentRow) => {
     const unalloc = unallocatedOf(p);
+    // T3: سند لم يوافق عليه الزبون (بانتظار/اعتراض) ⇒ تحذيرٌ صريح بسببه قبل التأكيد.
+    // الرفض عند ضبط الشركة على «منع الترحيل» يأتي من الخادم ويظهر في toast الخطأ أدناه.
+    const approvalReason = needsApprovalWarning(p.customer_approval_status)
+      ? approvalWarningReason(p) : "";
     const ok = await confirm({
       title: "ترحيل السند",
       message:
-        unalloc > 0.009
+        (approvalReason ? `تنبيه: ${approvalReason}. ` : "")
+        + (unalloc > 0.009
           ? `ترحيل السند سينشئ قيداً محاسبياً. المبلغ غير الموزَّع (${fmt(unalloc)}) `
             + "سيُسجَّل على حساب العميل (رصيد لصالحه) ويمكن توزيعه على الفواتير لاحقاً. متابعة؟"
-          : "ترحيل السند سينشئ قيداً محاسبياً ويسدّد الفواتير الموزَّعة. متابعة؟",
+          : "ترحيل السند سينشئ قيداً محاسبياً ويسدّد الفواتير الموزَّعة. متابعة؟"),
       confirmText: "ترحيل",
       danger: false,
     });
@@ -486,6 +493,11 @@ export const SalesCustomerPaymentsPage: React.FC = () => {
           {r.is_posted ? `مرحَّل ${r.journal ? "#" + r.journal : ""}` : "مسودة"}
         </span>
       ),
+    },
+    {
+      // T3: موافقة الزبون على السند — لا شارة لما أنشأته المنصة (`not_required`).
+      key: "customer_approval", header: "موافقة الزبون", width: "130px", align: "center",
+      render: (r) => <CustomerApprovalBadge doc={r} />,
     },
     {
       key: "actions", header: "إجراءات", width: "130px", align: "center",

@@ -11,6 +11,7 @@ import {
 import type { PagedList } from "./restApi";
 import type { SerialEntryMode } from "../types/inventory";
 import type { NoteTarget } from "../utils/voucherAllocation";
+import type { CustomerApprovalStatus } from "../utils/customerApproval";
 
 const tid = () => resolveTenantId();
 const BASE = "sales";
@@ -24,7 +25,22 @@ export type DeliveryStatus =
 /** N8-T11: نوع المستند الموحّد — فاتورة بيع/شراء أو مرجعهما. */
 export type InvoiceKind = "sale" | "sale_return" | "purchase" | "purchase_return";
 
-export type SalesInvoiceRow = {
+/**
+ * موافقة الزبون (T2/T3) — للقراءة فقط؛ تُكتب من نقطة `customer-approval/` وحدها.
+ * `not_required` (الأصل لمستندات المنصة) لا تُعرض له شارة ولا تحذير.
+ */
+export type CustomerApprovalFields = {
+  customer_approval_status?: CustomerApprovalStatus;
+  customer_approval_status_display?: string;
+  customer_approval_at?: string | null;
+  customer_approval_by?: string;
+  customer_approval_note?: string;
+};
+
+/** T3: يرافق ردّ ترحيل الفاتورة/السند حين رُحِّل بلا موافقة سارية (إعداد «السماح»). */
+export type CustomerApprovalPostWarning = { customer_approval_warning?: string };
+
+export type SalesInvoiceRow = CustomerApprovalFields & {
   id: number;
   invoice_number: string;
   /** T-RETURNUI: يميّز مرجع البيع عن الفاتورة في القائمة والعرض. */
@@ -253,7 +269,9 @@ export type SalesReturnRefundSummary = {
 export async function postSalesInvoice(
   id: number,
   refund?: SalesReturnRefundChoice,
-): Promise<SalesInvoiceDetail & { refund_summary?: SalesReturnRefundSummary }> {
+): Promise<
+  SalesInvoiceDetail & { refund_summary?: SalesReturnRefundSummary } & CustomerApprovalPostWarning
+> {
   return apiPostObject(
     `${BASE}/invoices/${id}/post/`,
     refund ? { refund } : {},
@@ -533,7 +551,7 @@ export type DeliveryNoteLineDto = {
   warehouse_name?: string | null;
 };
 
-export type DeliveryNoteRow = {
+export type DeliveryNoteRow = CustomerApprovalFields & {
   id: number;
   delivery_number: string;
   delivery_date: string | null;
@@ -827,7 +845,7 @@ export type CustomerPaymentAllocation = {
   conversion_rate?: string;
 };
 
-export type CustomerPaymentRow = {
+export type CustomerPaymentRow = CustomerApprovalFields & {
   id: number;
   partner: number;
   partner_name?: string;
@@ -897,7 +915,9 @@ export async function createCustomerPayment(
   return apiPostObject(`${BASE}/payments/`, body, { tenantId: tid() });
 }
 
-export async function postCustomerPayment(id: number): Promise<CustomerPaymentRow> {
+export async function postCustomerPayment(
+  id: number,
+): Promise<CustomerPaymentRow & CustomerApprovalPostWarning> {
   return apiPostObject(`${BASE}/payments/${id}/post/`, {}, { tenantId: tid() });
 }
 
@@ -950,6 +970,14 @@ export const STOCK_LOSS_POLICY_LABELS: Record<StockLossPolicy, string> = {
   block: "منع الحفظ والترحيل",
 };
 
+/** سياسة ترحيل مستند لم يوافق عليه الزبون: سماح (تحذير) | منع الترحيل — تطابق `CUSTOMER_APPROVAL_POLICY_CHOICES`. */
+export type CustomerApprovalPostPolicy = "allow" | "save_only";
+
+export const CUSTOMER_APPROVAL_POLICY_LABELS: Record<CustomerApprovalPostPolicy, string> = {
+  allow: "السماح (تحذير فقط)",
+  save_only: "منع الترحيل حتى موافقة الزبون",
+};
+
 export type SalesSettings = {
   id: number;
   default_customer: number | null;
@@ -983,6 +1011,8 @@ export type SalesSettings = {
   warn_on_duplicate_item: boolean;
   /** فاتورة بيع بسعر أقل من التكلفة (الافتراضي «allow»). */
   loss_invoice_policy: StockLossPolicy;
+  /** T3: ترحيل فاتورة/سند لم يوافق عليه الزبون (الافتراضي «allow» = تحذير فقط). */
+  customer_approval_post_policy: CustomerApprovalPostPolicy;
   /** T-DORMANT: أيام صمت العميل قبل إشعار «عميل مختفٍ» (0 = تعطيل، الافتراضي 30). */
   dormant_customer_days: number;
   /** T-ORDERS: أيام صلاحية عرض السعر افتراضياً (0 = بلا انتهاء، الافتراضي 14). */

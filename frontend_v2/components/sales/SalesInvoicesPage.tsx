@@ -51,6 +51,7 @@ import { openInNewTab } from "../../utils/openInNewTab";
 import { isOfflineRecordForTenant } from "../../utils/offlineTenantScope";
 import { clientLogger } from "../../services/logger";
 import { PaymentStatusBadge } from "../shared/PaymentStatusBadge";
+import { CustomerApprovalBadge } from "../shared/CustomerApprovalBadge";
 import { deriveInvoiceSettlement } from "../shared/DocumentPaymentPanel";
 import {
   KitDocumentShell,
@@ -532,6 +533,14 @@ export const SalesInvoicesPage: React.FC<SalesInvoicesPageProps> = ({
           {r.status === "posted" ? "مرحَّلة" : r.status === "draft" ? "مسودة" : r.status}
         </span>
       ),
+    },
+    {
+      // T3: موافقة الزبون — لا شارة لما أنشأته المنصة (`not_required`).
+      key: "customer_approval",
+      header: "موافقة الزبون",
+      width: "130px",
+      align: "center",
+      render: (r) => <CustomerApprovalBadge doc={r} />,
     },
     {
       key: "delivery_status",
