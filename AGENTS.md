@@ -195,7 +195,10 @@
 و`npm run build` ← `migrate` ← `collectstatic` ونشر الـstatic ← `rsync` لـ`dist/` **مستثنياً كل ما في
 جذر الويب وليس من `dist/`** (مجلد مشاركة PDF يعيش هناك و`--delete` يمحوه) ←
 `systemctl restart ktra.service` ← ثلاثُ `curl` تردّ 200 (`127.0.0.1:8000/api/health/`،
-`https://ktra-pro.tech/api/health/`، `https://ktra-pro.tech/`) ← `git push origin modern`.
+`https://ktra-pro.tech/api/health/`، `https://ktra-pro.tech/`) ← `git push origin modern` **تقديماً سريعاً فقط**
+(إن كان `origin/modern` قد تباعد عن الخادم: لا دفع ولا `--force` — يُبلَّغ المالك).
+تعارضُ الدمج ← `git merge --abort` والتوقّف؛ وأيّ فشلٍ قبل `migrate` ← `git reset --hard` إلى ما قبل الدمج
+(الخدمة لم يُعَد تشغيلها بعد، فالإنتاج لم يتغيّر).
 
 ---
 
