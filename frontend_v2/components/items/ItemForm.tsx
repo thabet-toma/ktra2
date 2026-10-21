@@ -13,11 +13,13 @@ import {
   addBrandChip,
   brandedNamesPreview,
   brandTargetOf,
+  canAppendBrandChip,
   createProductWithBrands,
   createWithBrandsMessage,
 } from "../../utils/brandActions";
 import type { AddBrandTarget } from "../../utils/brandActions";
 import { useProductNameOffer } from "../../hooks/useProductNameOffer";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import type { SqlProduct } from "../../types/inventory";
 import { useToast } from "../../contexts/ToastContext";
 import {
@@ -265,6 +267,10 @@ export const ItemForm: React.FC<Props> = ({
   initialTab,
 }) => {
   const toast = useToast();
+  // إضافةُ براندٍ (ومنها اقتراحُ «هذا موجود») تشترط `inventory.item.manage` على
+  // الخادم — فتُخفى كي لا يُعرض زرٌّ يردّ 403. إنشاءُ المنتج وتعديله لكلّ دور.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   // #231: يحكم عرض تسمية «كفالة الزبون/المصنع/المورّد» **والمكوّن معاً** —
   // مصدرٌ واحد كي لا يفترق الشرطان (راجع `ProductWarrantyPolicyLine.tsx`).
   const warrantyPolicyVisible = useProductWarrantyPolicyVisible();
@@ -429,7 +435,12 @@ export const ItemForm: React.FC<Props> = ({
     setForm((f) => ({ ...f, [k]: v }));
   };
 
+  // غيرُ مالك مفتاح الكتالوج يكتب برانداً واحداً عند الإنشاء: الثاني فصاعداً
+  // يُضاف بعد الإنشاء عبر `products/add-brand/` فيردّ 403 (منتجٌ أُنشئ وبرانداتٌ لم تُضَف).
+  const canAddAnotherBrand = canAppendBrandChip(form.new_brands, canManageCatalog);
+
   const appendNewBrand = () => {
+    if (!canAddAnotherBrand) return;
     const next = addBrandChip(form.new_brands, newBrandDraft);
     if (next.length !== form.new_brands.length) patch("new_brands", next);
     setNewBrandDraft("");
@@ -553,7 +564,7 @@ export const ItemForm: React.FC<Props> = ({
     setCurrentId(isDuplicate ? null : Number(p.id));
     setIsActive(isDuplicate || p.is_active !== false);
     setDocUpdatedAt(isDuplicate || p.updated_at == null ? null : String(p.updated_at));
-    setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» بدل النسخ." : null);
+    setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» في كرته بدل النسخ (يتطلّب صلاحية «إدارة المنتجات والفئات»)." : null);
   }, []);
 
   useEffect(() => {
@@ -634,9 +645,11 @@ export const ItemForm: React.FC<Props> = ({
         // تحت أبه؛ فشلُ براندٍ لا يُبتلَع — يُسمّى في الرسالة ويُعاد من شريط البراندات.
         // براندٌ مكتوبٌ في الحقل لم يُضغط له Enter بعد يُحسب — كان يُسقَط صامتاً عند الحفظ.
         const chips = addBrandChip(form.new_brands, newBrandDraft);
-        const brands = chips.length > 0
+        const typedBrands = chips.length > 0
           ? chips
           : (form.brand.trim() ? [form.brand.trim()] : []);
+        // غيرُ مالك المفتاح: براندٌ واحد — الباقي كان يُفشَل بـ403 بعد إنشاء المنتج.
+        const brands = canManageCatalog ? typedBrands : typedBrands.slice(0, 1);
         const { product: created, steps } = await createProductWithBrands(
           {
             createProduct: (body) => inventoryApi.createProduct(body) as Promise<Record<string, unknown> & { id: number }>,
@@ -835,6 +848,7 @@ export const ItemForm: React.FC<Props> = ({
               className="ktra-input min-w-[180px] flex-1"
               value={newBrandDraft}
               placeholder="اكتب اسم البراند"
+              disabled={!canAddAnotherBrand}
               onChange={(event) => setNewBrandDraft(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
@@ -846,14 +860,16 @@ export const ItemForm: React.FC<Props> = ({
             <button
               type="button"
               className="ktra-btn ktra-btn-primary shrink-0"
-              disabled={!newBrandDraft.trim()}
+              disabled={!newBrandDraft.trim() || !canAddAnotherBrand}
               onClick={appendNewBrand}
             >
               إضافة
             </button>
           </div>
           <p className="mt-1.5 text-xs text-[var(--ktra-ink-soft)]">
-            منتجٌ بعدّة براندات؟ اكتبها هنا — لكلِّ براندٍ رصيدُه وسعرُه. فارغ = بلا براند.
+            {canManageCatalog
+              ? "منتجٌ بعدّة براندات؟ اكتبها هنا — لكلِّ براندٍ رصيدُه وسعرُه. فارغ = بلا براند."
+              : "براندٌ واحد عند الإنشاء — البراندات الإضافية يضيفها مدير المنتجات."}
           </p>
           {form.new_brands.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5" aria-label="البراندات المضافة">
@@ -891,23 +907,26 @@ export const ItemForm: React.FC<Props> = ({
             يوجد منتجٌ مسجَّلٌ بهذا الاسم: «{nameOffer.name_ar || nameOffer.name_en}». أضف براندًا
             إليه بدل تسجيل منتجٍ منفصل — أو تجاهل هذا إن كان الاسم فعلاً منتجاً آخر.
           </span>
-          <AddBrandField
-            placeholder="اسم البراند"
-            buttonLabel="أضف براند إلى هذا المنتج"
-            onSubmit={async (brandName) => {
-              const target = brandTargetOf(nameOffer);
-              if (target == null) return;
-              try {
-                await submitAddBrand(target, brandName);
-                nameOfferApi.clear();
-                void discardDraft();
-                resetToBlank(true);
-                onSaved();
-              } catch (e: unknown) {
-                toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
-              }
-            }}
-          />
+          {/* عرضُ الاسم الموجود معلومةٌ للجميع؛ إضافةُ البراند وحدها مقفلةٌ بالمفتاح. */}
+          {canManageCatalog && (
+            <AddBrandField
+              placeholder="اسم البراند"
+              buttonLabel="أضف براند إلى هذا المنتج"
+              onSubmit={async (brandName) => {
+                const target = brandTargetOf(nameOffer);
+                if (target == null) return;
+                try {
+                  await submitAddBrand(target, brandName);
+                  nameOfferApi.clear();
+                  void discardDraft();
+                  resetToBlank(true);
+                  onSaved();
+                } catch (e: unknown) {
+                  toast(e instanceof Error ? e.message : "تعذّر إضافة البراند", "error");
+                }
+              }}
+            />
+          )}
           <button type="button" onClick={nameOfferApi.dismiss}
             className="shrink-0 text-xs underline ktra-text-soft">
             تجاهل ومتابعة تسجيل منتجٍ جديد

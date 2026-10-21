@@ -25,6 +25,7 @@ import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { productToItem } from "../price-offers/ItemSearchModal";
 import { buildCategoryIndex, descendantIds as descendantCategoryIds } from "../../../utils/categoryTree";
+import { usePermissions } from "../../../contexts/PermissionsContext";
 
 /**
  * task18 DEF-B1/B3: شجرة منتجات مرساة بجانب الفاتورة (نمط الأصيل).
@@ -76,6 +77,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const [cats, setCats] = useState<Cat[]>([]);
   const toast = useToast();
   const confirmDialog = useConfirm();
+  // كتابةُ الشجرة (إنشاء/تعديل/حذف تصنيف) تشترط `inventory.item.manage` على
+  // الخادم — تُخفى هنا كي لا يفتح المستخدم نموذجاً يردّه 403. إنشاء المنتج
+  // وتعديله لا يُمسّان.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingCats, setLoadingCats] = useState(false);
@@ -192,6 +198,9 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     if (disabled) return;
     e.preventDefault();
     e.stopPropagation();
+    // «إضافة منتج هنا» متاحةٌ للجميع في الوضع العادي، فلا تُحجب القائمة عمّن
+    // لا يملك مفتاح الكتابة — تُحجب فقط في وضع إدارة التصنيفات، حيث لا يبقى فيها شيء.
+    if (manageMode && !canManageCatalog) return;
     setMenu({ x: e.clientX, y: e.clientY, catId });
   };
 
@@ -359,18 +368,22 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         </div>
         {!disabled && (
           <div className="flex gap-1 mt-1.5">
-            <input
-              type="text"
-              className="ktra-input flex-1"
-              ref={rootNameInputRef}
-              placeholder="تصنيف رئيسي جديد..."
-              value={newRootName}
-              onChange={(e) => setNewRootName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { void createCat(newRootName, null); setNewRootName(""); } }}
-            />
-            <button type="button" className="ktra-toolbtn" title="إضافة تصنيف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
-              <FolderPlus className="w-4 h-4" />
-            </button>
+            {canManageCatalog && (
+              <>
+                <input
+                  type="text"
+                  className="ktra-input flex-1"
+                  ref={rootNameInputRef}
+                  placeholder="تصنيف رئيسي جديد..."
+                  value={newRootName}
+                  onChange={(e) => setNewRootName(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") { void createCat(newRootName, null); setNewRootName(""); } }}
+                />
+                <button type="button" className="ktra-toolbtn" title="إضافة تصنيف رئيسي" onClick={() => { void createCat(newRootName, null); setNewRootName(""); }}>
+                  <FolderPlus className="w-4 h-4" />
+                </button>
+              </>
+            )}
             {!manageMode && (
               <button type="button" className="ktra-toolbtn" title="إضافة منتج (بدون تصنيف)" onClick={() => openAddItem(null)}>
                 <Plus className="w-4 h-4" />
@@ -418,15 +431,17 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { rootNameInputRef.current?.focus(); } setMenu(null); }}>
-            <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
-          </button>
+          {canManageCatalog && (
+            <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { rootNameInputRef.current?.focus(); } setMenu(null); }}>
+              <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
+            </button>
+          )}
           {!manageMode && (
             <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
               <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
             </button>
           )}
-          {menu.catId && (
+          {menu.catId && canManageCatalog && (
             <>
               <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => {
                 const c = cats.find((x) => x.id === menu.catId);

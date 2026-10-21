@@ -4,6 +4,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import { Plus, Edit2, Trash2, X, Check, RefreshCw } from "lucide-react";
 import { KitDenseTable, type DenseColumn } from "../kit/KitDenseTable";
 import { eligibleParents, sortCategoryRows } from "../../utils/categoryTree";
+import { usePermissions } from "../../contexts/PermissionsContext";
 
 type Category = {
   id: number;
@@ -13,6 +14,10 @@ type Category = {
 
 export const CategoriesManagement: React.FC = () => {
   const confirm = useConfirm();
+  // كتابةُ التصنيفات تشترط `inventory.item.manage` على الخادم — تُخفى أفعالها
+  // عمّن لا يملكه، ولا يُعرض زرٌّ سيردّ 403.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   const [list, setList] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -190,6 +195,11 @@ export const CategoriesManagement: React.FC = () => {
     }
   ];
 
+  // عمودُ الأفعال يُخفى كاملاً عمّن لا يملك المفتاح — لا أزرارَ معطّلة.
+  const visibleColumns = canManageCatalog
+    ? columns
+    : columns.filter((col) => col.key !== "actions");
+
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%", gap: 8 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
@@ -203,20 +213,22 @@ export const CategoriesManagement: React.FC = () => {
         <button className="ktra-toolbtn" onClick={load} title="تحديث">
           <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
         </button>
-        <button className="ktra-toolbtn" onClick={startNew} disabled={editId !== null} title="إضافة تصنيف">
-          <Plus className="h-4 w-4" /> إضافة
-        </button>
+        {canManageCatalog && (
+          <button className="ktra-toolbtn" onClick={startNew} disabled={editId !== null} title="إضافة تصنيف">
+            <Plus className="h-4 w-4" /> إضافة
+          </button>
+        )}
       </div>
 
       {err && <div className="ktra-banner ktra-banner--err">{err}</div>}
 
       <KitDenseTable<Category>
-        columns={columns}
+        columns={visibleColumns}
         rows={displayList}
         getRowKey={(c) => c.id}
         loading={loading}
         emptyHint="لا توجد تصنيفات"
-        onRowDoubleClick={(c) => { if (editId === null) startEdit(c); }}
+        onRowDoubleClick={(c) => { if (editId === null && canManageCatalog) startEdit(c); }}
       />
     </div>
   );

@@ -5,6 +5,7 @@ import {
   attachBrandToExisting,
   brandTargetOf,
   brandedNamesPreview,
+  canAppendBrandChip,
   createProductWithBrands,
   createWithBrandsMessage,
 } from './brandActions.ts';
@@ -48,6 +49,18 @@ test('المعاينة: «الاسم (البراند)» لكلّ براند، و
 
 test('المعاينة: براندٌ مذكورٌ في الاسم لا يُكرَّر — كصيغة الخادم', () => {
   assert.deepEqual(brandedNamesPreview('شاشة LG 55', ['LG']), ['شاشة LG 55']);
+});
+
+// ── الإنشاء: كم برانداً يُقبل عند التسجيل ──────────────────────────────────
+
+test('الإنشاء: براندٌ واحدٌ لغير مدير الأصناف، والإضافي يستلزم المفتاح', () => {
+  // الشارة الأولى مسموحة دائماً — هي البراند الوحيد الذي يُنشأ مع المنتج.
+  assert.equal(canAppendBrandChip([], false), true);
+  // الثانية تعني نداء `add-brand` بعد الإنشاء، وهو مقفلٌ على مالك المفتاح.
+  assert.equal(canAppendBrandChip(['ميشلان'], false), false);
+  assert.equal(canAppendBrandChip(['ميشلان', 'بريجستون'], false), false);
+  // مدير الأصناف بلا حدّ — كل برانداته تُسجَّل.
+  assert.equal(canAppendBrandChip(['ميشلان'], true), true);
 });
 
 // ── الإنشاء بعدّة براندات ───────────────────────────────────────────────────

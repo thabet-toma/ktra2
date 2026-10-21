@@ -24,6 +24,7 @@ import { relatedInvoiceTypeLabel, stockLedgerMovementTypeLabel } from "../../uti
 import { openInNewTab } from "../../utils/openInNewTab";
 import { productProfilePath } from "../../utils/entityLinks";
 import { AddBrandModal } from "./AddBrandModal";
+import { usePermissions } from "../../contexts/PermissionsContext";
 
 export interface ProductProfileData {
   id: number;
@@ -261,6 +262,10 @@ export const ProductBrandStrip: React.FC<{
   productId, familyId, currentBrand, currentName, currentQuantity, onSelect, onAddBrand,
 }) => {
   const [modalOpen, setModalOpen] = useState(false);
+  // «+ براند» ينادي `products/add-brand/` — مقفلٌ على `inventory.item.manage`،
+  // فلا يُعرض زرٌّ يردّ 403 ولا تُركَّب نافذته.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   const [resolvedFamilyId, setResolvedFamilyId] = useState<number | null>(familyId ?? null);
   useEffect(() => { setResolvedFamilyId(familyId ?? null); }, [familyId, productId]);
 
@@ -320,21 +325,25 @@ export const ProductBrandStrip: React.FC<{
           {loading && <span className="text-xs text-[var(--ktra-ink-soft)]">جارٍ التحديث…</span>}
           {error && <span role="alert" className="text-xs text-[var(--ktra-danger)]">تعذّر تحميل بقية البراندات.</span>}
         </div>
-        <button type="button" className="ktra-toolbtn shrink-0" onClick={() => setModalOpen(true)}>
-          + براند
-        </button>
+        {canManageCatalog && (
+          <button type="button" className="ktra-toolbtn shrink-0" onClick={() => setModalOpen(true)}>
+            + براند
+          </button>
+        )}
       </div>
-      <AddBrandModal
-        isOpen={modalOpen}
-        productName={profile?.name || currentName}
-        existingBrands={existingBrands}
-        onClose={() => setModalOpen(false)}
-        onAdd={onAddBrand}
-        onAdded={(result) => {
-          if (result.family_id !== resolvedFamilyId) setResolvedFamilyId(result.family_id);
-          else setReloadKey((key) => key + 1);
-        }}
-      />
+      {canManageCatalog && (
+        <AddBrandModal
+          isOpen={modalOpen}
+          productName={profile?.name || currentName}
+          existingBrands={existingBrands}
+          onClose={() => setModalOpen(false)}
+          onAdd={onAddBrand}
+          onAdded={(result) => {
+            if (result.family_id !== resolvedFamilyId) setResolvedFamilyId(result.family_id);
+            else setReloadKey((key) => key + 1);
+          }}
+        />
+      )}
     </section>
   );
 };

@@ -52,6 +52,16 @@ export function addBrandChip(chips: readonly string[], raw: string): string[] {
   return [...chips, clean];
 }
 
+/**
+ * هل يُقبل براندٌ (شارة) أخرى في شاشة الإنشاء؟ الشارة الأولى تُنشأ **مع**
+ * المنتج، والباقي يُضاف بعد الإنشاء عبر `products/add-brand/` — وهو مقفلٌ
+ * على `inventory.item.manage`. فغيرُ مالك المفتاح يكتب برانداً واحداً هنا،
+ * وإلا أُنشئ المنتج وفشل كلُّ براندٍ إضافي بـ403 (نتيجةٌ جزئية).
+ */
+export function canAppendBrandChip(chips: readonly string[], canManageCatalog: boolean): boolean {
+  return canManageCatalog || chips.length === 0;
+}
+
 /** معاينةُ ما سيُسجَّل: «الاسم (البراند)» لكلِّ براند، أو الاسمُ وحدَه بلا براند.
  *  نفسُ صيغة الخادم (`inventory.services.product_display_name`). */
 export function brandedNamesPreview(name: string, brands: readonly string[]): string[] {

@@ -3,6 +3,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import { Plus, X, FolderTree } from "lucide-react";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
 import { categoryPathLabel, sortCategoryRows } from "../../utils/categoryTree";
+import { usePermissions } from "../../contexts/PermissionsContext";
 
 type Category = {
   id: number;
@@ -19,6 +20,11 @@ type Props = {
 };
 
 export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, disabled }) => {
+  // إنشاء تصنيفٍ من هنا كتابةُ شجرةٍ تشترط `inventory.item.manage` على الخادم
+  // (كشجرة الفاتورة) — يُخفى زرّا الإنشاء والإدارة عمّن لا يملكه. اختيار
+  // تصنيفٍ قائم يبقى للجميع.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
   const [showManage, setShowManage] = useState(false);
@@ -93,24 +99,28 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
             </option>
           ))}
         </select>
-        <button
-          type="button"
-          className="ktra-toolbtn"
-          onClick={() => { setAdding((v) => !v); setAddErr(null); }}
-          disabled={disabled}
-          title={value ? "تصنيف فرعي تحت المختار" : "تصنيف جذري جديد"}
-        >
-          <Plus className="h-4 w-4" />
-        </button>
-        <button
-          type="button"
-          className="ktra-toolbtn"
-          onClick={() => setShowManage(true)}
-          disabled={disabled}
-          title="إدارة التصنيفات (شجرة)"
-        >
-          <FolderTree className="h-4 w-4" />
-        </button>
+        {canManageCatalog && (
+          <>
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              onClick={() => { setAdding((v) => !v); setAddErr(null); }}
+              disabled={disabled}
+              title={value ? "تصنيف فرعي تحت المختار" : "تصنيف جذري جديد"}
+            >
+              <Plus className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              className="ktra-toolbtn"
+              onClick={() => setShowManage(true)}
+              disabled={disabled}
+              title="إدارة التصنيفات (شجرة)"
+            >
+              <FolderTree className="h-4 w-4" />
+            </button>
+          </>
+        )}
       </div>
 
       {/* المسار الكامل للمختار — «أين يقع هذا التصنيف» يُقرأ بلا فتح الشجرة. */}

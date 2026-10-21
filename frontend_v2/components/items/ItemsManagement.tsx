@@ -39,6 +39,7 @@ import type { MergeCandidate } from "../../utils/productMerge";
 import type { MergeProductsResult } from "../../services/inventoryApi";
 import { useToast } from "../../contexts/ToastContext";
 import { useConfirm } from "../../contexts/ConfirmContext";
+import { usePermissions } from "../../contexts/PermissionsContext";
 import { ActiveStatusFilter, InactiveBadge } from "../shared/ActiveStatusControls";
 import { useProductActive } from "../../hooks/useProductActive";
 import { labelWithStatus } from "../../utils/activeStatus";
@@ -246,6 +247,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const toast = useToast();
   const confirm = useConfirm();
   const { setProductActive } = useProductActive();
+  // «+ براند» في صفّ المنتج ينادي `products/add-brand/` — مقفلٌ على
+  // `inventory.item.manage`، فلا يُمرَّر الفعلُ أصلاً لمن لا يملكه (الجدول
+  // يرسم الزرّ فقط حين يصل `onAddBrand`).
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
   const [addBrandRequest, setAddBrandRequest] = useState<AddBrandRequest | null>(null);
 
   const orderingParam = sortKey
@@ -1056,7 +1062,7 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
           // بعد #28: صار حكماً على المنتج فيُعيد **كل** براندات المنتج
           // المطابق، فصفّ المنتج مكتملٌ ولا يدّعي مجموعاً ناقصاً.
           brandFilterActive={Boolean(search)}
-          onAddBrand={setAddBrandRequest}
+          onAddBrand={canManageCatalog ? setAddBrandRequest : undefined}
         />
       )}
 

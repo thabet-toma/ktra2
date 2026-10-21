@@ -27,7 +27,7 @@ from .services import (
     warehouse_stock_summary,
 )
 from tenants.models import Tenant
-from core.access import requires_perm
+from core.access import require_perm, requires_perm
 from core.api_defaults import POSTED_DOC_WARNING
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
@@ -44,7 +44,25 @@ from django.utils import timezone
 logger = logging.getLogger(__name__)
 
 
-class CategoryViewSet(viewsets.ModelViewSet):
+class CatalogWriteGuardMixin:
+    """كتابةُ الكتالوج قرارُ إدارة أصناف: تشترط `inventory.item.manage`.
+
+    القراءة لا تُمسّ. تُحصى كتاباتُ شجرة التصنيفات وحذفُ المنتج — ولا يُحصى
+    إنشاءُ المنتج ولا تعديله: البيع يعدّل من الفاتورة (قرار المالك 2026-10-21).
+    الحارس في `initial` كي يسبق التحقّقَ من صحّة الطلب، على نمط `_ACTION_PERMS`
+    في `after_sales/views.py`.
+    """
+    catalog_write_actions: tuple = ()
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        if self.action in self.catalog_write_actions:
+            require_perm(request, 'inventory.item.manage')
+
+
+class CategoryViewSet(CatalogWriteGuardMixin, viewsets.ModelViewSet):
+    catalog_write_actions = ('create', 'update', 'partial_update', 'destroy')
+
     queryset = ProductCategory.objects.all().order_by('name')
     serializer_class = CategorySerializer
 
@@ -157,7 +175,10 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
         }})
 
 
-class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
+class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewsets.ModelViewSet):
+    # الحذف وحده قرارُ كتالوج — الإنشاء والتعديل يبقيان على قاعدة الأدوار العامة.
+    catalog_write_actions = ('destroy',)
+
     # task14 M2 (DEF-A5): ترتيب افتراضي حتمي «الأحدث أولاً» + بحث/فرز/ترقيم خادمي
     # #22: `family` هنا أيضاً — `ProductLookupSerializer.get_family_name` يقرأ
     # `obj.family.name_ar`، وبلا هذا الجلب المسبق صار استعلاماً لكل صفّ من 1490.
@@ -850,6 +871,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, viewsets.ModelViewSet):
         return Response(self._distinct_values(tenant, 'name_ar'))
 
     @action(detail=False, methods=['post'], url_path='add-brand')
+    @requires_perm('inventory.item.manage')
     def add_brand(self, request):
         """#21: يضيف براندًا إلى منتجٍ قائم من داخل شاشة المنتج. أوّل براندٍ
         صريح يُسمّي البراند الضمنيّ الوحيد بدل أن يُنشئ صفّاً جديداً — انظر

@@ -4,6 +4,7 @@ import { inventoryApi } from "../../services/inventoryApi";
 import { blankSimpleFields, simplePayload, validateSimpleFields } from "../../utils/itemSimpleFields";
 import { useProductNameOffer } from "../../hooks/useProductNameOffer";
 import { attachBrandToExisting } from "../../utils/brandActions";
+import { usePermissions } from "../../contexts/PermissionsContext";
 
 export type ItemQuickCreateModalProps = {
   isOpen: boolean;
@@ -29,6 +30,10 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
   const [error, setError] = useState<string | null>(null);
   const nameOfferApi = useProductNameOffer(nameAr.trim() || nameEn.trim(), true);
   const nameOffer = nameOfferApi.offer;
+  // «أضف «X» تحته» ينادي `products/add-brand/` — مقفلٌ على `inventory.item.manage`،
+  // فيبقى التنبيه «الاسم موجود» ويُخفى الفعلُ عمّن لا يملكه.
+  const { can } = usePermissions();
+  const canManageCatalog = can("inventory.item.manage");
 
   // T-ITEMS M1: وحدة القياس صارت اختياراً من الجدول. كانت نصّاً حرّاً يُرسَل
   // باسم `uom_primary` — وهو ليس في عقد الخادم، فيرميه DRF بصمت: يكتب
@@ -131,18 +136,20 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
               <div>
                 يوجد منتجٌ بهذا الاسم: «{nameOffer.name_ar || nameOffer.name_en}»
               </div>
-              {!brand.trim() && (
+              {canManageCatalog && !brand.trim() && (
                 <div className="text-xs text-[var(--ktra-warn-fg)]">اكتب اسم البراند أولاً لتضيفه تحت المنتج القائم.</div>
               )}
               <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  className="ktra-btn ktra-btn-primary"
-                  disabled={saving || !brand.trim()}
-                  onClick={() => void handleAttachToExisting()}
-                >
-                  {brand.trim() ? `أضف «${brand.trim()}» تحته` : "أضف البراند تحته"}
-                </button>
+                {canManageCatalog && (
+                  <button
+                    type="button"
+                    className="ktra-btn ktra-btn-primary"
+                    disabled={saving || !brand.trim()}
+                    onClick={() => void handleAttachToExisting()}
+                  >
+                    {brand.trim() ? `أضف «${brand.trim()}» تحته` : "أضف البراند تحته"}
+                  </button>
+                )}
                 <button
                   type="button"
                   className="ktra-btn"
