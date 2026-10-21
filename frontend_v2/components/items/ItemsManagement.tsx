@@ -10,6 +10,7 @@ import { type DenseColumn } from "../kit/KitDenseTable";
 import { GroupedItemsTable, type AddBrandRequest, type TreeCategory } from "./GroupedItemsTable";
 import { AddBrandModal } from "./AddBrandModal";
 import { MergeProductsModal } from "./MergeProductsModal";
+import { CategoryMoveModal } from "../inventory/CategoryMoveModal";
 import {
   Plus, RefreshCw, Edit2, Package, Boxes, ListTree, Table2, Printer, Copy, ExternalLink,
   FolderTree, Merge, Undo2, X, Power, PowerOff,
@@ -25,7 +26,7 @@ import db from "../../services/offline/db";
 import { openInNewTab } from "@/utils/openInNewTab";
 import { productGroupPath, productProfilePath } from "../../utils/entityLinks";
 import { clientLogger } from "../../services/logger";
-import { formatMoney, formatQuantity } from "../../utils/formatNumber";
+import { formatMoney, formatNumber, formatQuantity } from "../../utils/formatNumber";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { tenantScopedOfflineKey } from "../../utils/offlineTenantScope";
 import { useKeepOnce, useSimpleUi } from "../../hooks/useSimpleUi";
@@ -265,6 +266,10 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
     mergeId: number; targetName: string; mergedCount: number;
   } | null>(null);
   const [undoingMerge, setUndoingMerge] = useState(false);
+  // C3: نقل المحدَّد إلى تصنيف (نفس وضع التحديد، فعلٌ ثانٍ عليه) — والنتيجة
+  // تبقى في شريطٍ مثل شريط الضمّ حتى يُغلق.
+  const [moveSelectedOpen, setMoveSelectedOpen] = useState(false);
+  const [lastMove, setLastMove] = useState<{ moved: number; extraBrands: number; skipped: number } | null>(null);
   const toast = useToast();
   const confirm = useConfirm();
   const { setProductActive } = useProductActive();
@@ -964,9 +969,9 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                   return !m;
                 });
               }}
-              title="تحديد منتجات لضمّها تحت منتج واحد"
+              title="تحديد منتجات لضمّها أو نقلها إلى تصنيف"
             >
-              <Merge className="h-4 w-4" /> {mergeMode ? "إنهاء التحديد" : "ضمّ منتجات"}
+              <Merge className="h-4 w-4" /> {mergeMode ? "إنهاء التحديد" : "تحديد منتجات"}
             </button>
             {mergeMode && (
               <button
@@ -977,6 +982,17 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
                 title={mergeSelected.size < 2 ? "حدّد منتجين على الأقل" : undefined}
               >
                 ضمّ المحدَّد ({mergeSelected.size})
+              </button>
+            )}
+            {mergeMode && canManageCatalog && (
+              <button
+                type="button"
+                className="ktra-btn"
+                disabled={mergeSelected.size < 1}
+                onClick={() => setMoveSelectedOpen(true)}
+                title={mergeSelected.size < 1 ? "حدّد منتجاً واحداً على الأقل" : undefined}
+              >
+                نقل المحدَّد إلى تصنيف… ({mergeSelected.size})
               </button>
             )}
           </>
@@ -1018,6 +1034,31 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         </div>
       )}
 
+      {lastMove && (
+        <div className="ktra-banner ktra-banner--ok">
+          <span className="flex-1">
+            {lastMove.moved === 0
+              ? "لا تغيير — المنتجات المحدَّدة في هذا التصنيف أصلاً"
+              : `نُقل ${formatNumber(lastMove.moved)} منتجاً${
+                  lastMove.extraBrands > 0
+                    ? ` (ومعه ${formatNumber(lastMove.extraBrands)} براند)`
+                    : ""
+                }`}
+            {lastMove.skipped > 0
+              && ` · تُجوهل ${formatNumber(lastMove.skipped)} غير موجود`}
+          </span>
+          <button
+            type="button"
+            className="ktra-iconbtn"
+            onClick={() => setLastMove(null)}
+            aria-label="إغلاق"
+            title="إغلاق"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+
       {displayMode === "tree" ? (
         // T-N3: شجرة التصنيفات/المنتجات (نفس مكوّن شجرة المنتجات في الفواتير).
         // نقرة مفردة على منتج → بطاقته؛ نقرة مزدوجة/اختيار → تعديله.
@@ -1041,6 +1082,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
               })}
             onPickItem={(it) => { setEditId(Number(it.id)); setView("form"); }}
             onItemCreated={() => reload()}
+            allowCatalogEdit
+            onCatalogChanged={reload}
           />
           {/* الفراغ الذي كان بجانب الشجرة: بطاقة ما هو محدَّد فيها. */}
           <div className="min-w-0 flex-1 overflow-hidden rounded border border-[var(--ktra-border)] bg-[var(--ktra-panel)]">
@@ -1118,6 +1161,30 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         candidates={mergeCandidates}
         onMerged={handleMerged}
       />
+
+      {moveSelectedOpen && (
+        <CategoryMoveModal
+          mode="products"
+          title="نقل المنتجات المحدَّدة إلى تصنيف"
+          categories={treeCategories}
+          // اختيارٌ مختلط: لا تصنيفَ حالٍّ واحد — `undefined` تُبقي خانةَ
+          // «إزالة التصنيف» معروضة (بين المحدَّد ما له تصنيف).
+          initialValue={undefined}
+          onClose={() => setMoveSelectedOpen(false)}
+          onConfirm={async (target) => {
+            const ids = [...mergeSelected.keys()];
+            const result = await inventoryApi.bulkSetCategory(ids, target);
+            setLastMove({
+              moved: result.moved,
+              extraBrands: Math.max(0, result.brands_moved - result.moved),
+              skipped: result.skipped.length,
+            });
+            setMergeSelected(new Map());
+            setMergeMode(false);
+            reload();
+          }}
+        />
+      )}
 
       {/* المرحلة 5 / P0-12: تنقّل الصفحات — للعرض الجدولي وحده (الشجري يجمّع
           المجموعة كاملةً فلا معنى لتصفّحه). يظهر فقط عند وجود أكثر من صفحة. */}

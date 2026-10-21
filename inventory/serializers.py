@@ -174,8 +174,8 @@ class ProductSerializer(serializers.ModelSerializer):
     # الأب واسمه لتقرّر أيّ صفوفٍ تتجمّع (مرآة `ProductLookupSerializer`).
     family_id = serializers.IntegerField(read_only=True)
     family_name = serializers.SerializerMethodField()
-    # C2: عدد براندات المنتج الأب — يقرؤه كرت المنتج ليحذّر «سينتقل معه N براند»
-    # قبل تغيير التصنيف (فـ`category` حقلُ عائلةٍ لا حقلُ صفّ).
+    # C2: عدد براندات المنتج الأب — يقرؤه كرت المنتج ليحذّر «ينتقل المنتج كلّه
+    # ببراندَاته الـN» قبل تغيير التصنيف (فـ`category` حقلُ عائلةٍ لا حقلُ صفّ).
     family_brand_count = serializers.SerializerMethodField()
     # #35: الحدّ **الحاكم** — نفس المصدر الذي حكمت به `stock_status` (حدّ
     # الأب إن كان له أبٌ ظاهرٌ في `family_thresholds`، وإلا حدّ الصفّ نفسه).

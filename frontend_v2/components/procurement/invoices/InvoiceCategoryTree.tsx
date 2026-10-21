@@ -18,10 +18,12 @@ import {
   Copy,
   PanelRightClose,
   PanelRightOpen,
+  ArrowRightLeft,
 } from "lucide-react";
 import { inventoryApi } from "../../../services/inventoryApi";
 import { Item } from "../../../types";
 import { ItemQuickCreateModal } from "../../items/ItemQuickCreateModal";
+import { CategoryMoveModal } from "../../inventory/CategoryMoveModal";
 import { useToast } from "../../../contexts/ToastContext";
 import { useConfirm } from "../../../contexts/ConfirmContext";
 import { productToItem } from "../price-offers/ItemSearchModal";
@@ -38,6 +40,8 @@ import { usePermissions } from "../../../contexts/PermissionsContext";
  * - زر الماوس الأيمن: على تصنيف → «إضافة تصنيف فرعي» · «إضافة منتج هنا» · تعديل/حذف؛
  *   على منتج → «فتح الكرت» · «إضافة منتج في نفس التصنيف» · «نسخ الرمز»؛ على الفراغ →
  *   «إضافة تصنيف رئيسي» · «إضافة منتج هنا» (بلا تصنيف).
+ * - النقل (C3) فعلُ كتابةٍ لا يظهر إلا بـ`allowCatalogEdit` ومع `inventory.item.manage`:
+ *   «نقل إلى تصنيف…» على منتج و«نقل تحت…» على تصنيف — شاشة المنتجات وحدها.
  * - النقر المفرد على منتج يفتح بطاقته، ومنها يُدرَج في الفاتورة بزرّ «موافق»
  *   (الإدراج بالنقر المزدوج أُلغي — كان التعليق يصفه بعد زواله).
  * + بحث فوري.
@@ -57,6 +61,11 @@ interface Props {
   onItemCreated?: (item: Item) => void;
   disabled?: boolean;
   manageMode?: boolean; // If true, hides product-specific UI and acts purely as a category manager.
+  /** C3: يُظهر أفعال النقل (منتجٌ إلى تصنيف · تصنيفٌ تحت أب) — لشاشة المنتجات
+   *  وحدها. غيابها (شاشات الفواتير ومنتقي التصنيف) يعني قائمةً بلا كتابةٍ جديدة. */
+  allowCatalogEdit?: boolean;
+  /** بعد نجاح نقل — تُعيد الشاشة الأم تحميل صفوفها (المنتج ظاهرٌ في موضعه الجديد). */
+  onCatalogChanged?: () => void;
 }
 
 // تجميع البراندات أصبح حقيقياً (Category).
@@ -75,13 +84,24 @@ type MenuTarget =
   | { kind: "category"; id: string }
   | { kind: "item"; item: Item };
 
+/** C3: ما تفتحه نافذة النقل — منتجٌ واحد إلى تصنيف، أو تصنيفٌ تحت أب. */
+type MoveTarget =
+  | {
+    mode: "products";
+    productId: number;
+    categoryId: number | null;
+    brandCount: number;
+    title: string;
+  }
+  | { mode: "category"; categoryId: number; parentId: number | null; title: string };
+
 const ctxItemStyle: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 6, width: "100%",
   padding: "6px 9px", border: 0, background: "transparent", cursor: "pointer",
   fontSize: 13, color: "#333426", textAlign: "start", borderRadius: 5,
 };
 
-export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onShowGroup, onItemCreated, disabled, manageMode }) => {
+export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShowCard, onShowGroup, onItemCreated, disabled, manageMode, allowCatalogEdit, onCatalogChanged }) => {
   // نقرة مفردة على المنتج → تفتح بطاقة المنتج (وفيها «موافق» للإضافة). لا إدراج
   // بالنقر المزدوج. (الإدراج المباشر يبقى فقط عند إنشاء منتج جديد من الشجرة.)
   const handleLeafClick = (it: Item) => {
@@ -96,6 +116,10 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   // وتعديله لا يُمسّان.
   const { can } = usePermissions();
   const canManageCatalog = can("inventory.item.manage");
+  // C3: النقل فعلُ كتابة — لا يظهر إلا حيث سمحت الشاشة الأم (المنتجات) وملك
+  // المستخدم `inventory.item.manage`. شاشات الفواتير لا تُمرّر الخاصية أصلاً.
+  const canMoveCatalog = Boolean(allowCatalogEdit) && canManageCatalog;
+  const [moveTarget, setMoveTarget] = useState<MoveTarget | null>(null);
   const [query, setQuery] = useState("");
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [loadingCats, setLoadingCats] = useState(false);
@@ -164,6 +188,33 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   // الخوارزمية نفسها. الوحدة تطبّع المفاتيح نصّياً، فيلتقي معرّفُ العقدة النصّي
   // هنا بمعرّف الأب الرقمي القادم من الخادم.
   const childrenOf = useMemo(() => buildCategoryIndex<Cat>(cats).childrenOf, [cats]);
+
+  // معرّفات التصنيفات رقميّة في المنتقي (`CategoryTreeSelect`) ونصّية في هذه
+  // الشجرة — التحويل في موضعٍ واحد عند فتح نافذة النقل.
+  const moveCategories = useMemo(
+    () => cats.map((c) => ({ id: Number(c.id), name: c.name, parent: c.parent })),
+    [cats],
+  );
+
+  const openProductMove = (it: Item) => {
+    setMoveTarget({
+      mode: "products",
+      productId: Number(it.id),
+      categoryId: it.categoryId ? Number(it.categoryId) : null,
+      brandCount: Number(it.family_brand_count) || 1,
+      title: `نقل «${displayNameOf(it)}» إلى تصنيف`,
+    });
+  };
+
+  const openCategoryMove = (catId: string) => {
+    const category = cats.find((c) => c.id === catId);
+    setMoveTarget({
+      mode: "category",
+      categoryId: Number(catId),
+      parentId: category?.parent ?? null,
+      title: `نقل «${category?.name || ""}» تحت تصنيف`,
+    });
+  };
 
   const q = query.trim().toLowerCase();
   const itemMatches = (it: Item) => !q || (it.name || "").toLowerCase().includes(q);
@@ -257,6 +308,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
         <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(catKey); setMenu(null); }}>
           <PackagePlus className="w-3.5 h-3.5" /> {catKey ? "إضافة منتج في نفس التصنيف" : "إضافة منتج بدون تصنيف"}
         </button>
+        {canMoveCatalog && (
+          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openProductMove(it); setMenu(null); }}>
+            <ArrowRightLeft className="w-3.5 h-3.5" /> نقل إلى تصنيف…
+          </button>
+        )}
         {sku && (
           <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { void copySku(sku); setMenu(null); }}>
             <Copy className="w-3.5 h-3.5" /> نسخ الرمز
@@ -510,6 +566,11 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
               )}
               {menuCatId && canManageCatalog && (
                 <>
+                  {canMoveCatalog && (
+                    <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openCategoryMove(menuCatId); setMenu(null); }}>
+                      <ArrowRightLeft className="w-3.5 h-3.5" /> نقل تحت…
+                    </button>
+                  )}
                   <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => {
                     const c = cats.find((x) => x.id === menuCatId);
                     setEditId(menuCatId); setEditName(c?.name || ""); setMenu(null);
@@ -527,6 +588,33 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           )}
         </div>,
         document.body,
+      )}
+
+      {moveTarget && (
+        <CategoryMoveModal
+          mode={moveTarget.mode}
+          title={moveTarget.title}
+          categories={moveCategories}
+          excludeCategoryId={moveTarget.mode === "category" ? moveTarget.categoryId : undefined}
+          initialValue={
+            moveTarget.mode === "products" ? moveTarget.categoryId : moveTarget.parentId
+          }
+          brandCount={moveTarget.mode === "products" ? moveTarget.brandCount : undefined}
+          onClose={() => setMoveTarget(null)}
+          onConfirm={async (target) => {
+            if (moveTarget.mode === "products") {
+              await inventoryApi.bulkSetCategory([moveTarget.productId], target);
+            } else {
+              // الشجرة تعرض التصنيف في موضعه الجديد فوراً من `loadCats`.
+              await inventoryApi.updateCategory(moveTarget.categoryId, { parent: target });
+              await loadCats();
+            }
+            // إعادةُ الجلب للشاشة الأم في الحالتين: صفوفُ المنتجات في الشجرة تحمل
+            // اسم التصنيف ومسارَه، فتغييرُ الأب يغيّر ما يعرضه صفُّ المنتج ولو
+            // لم يتغيّر المنتج نفسه.
+            onCatalogChanged?.();
+          }}
+        />
       )}
 
       {showAddItem && (

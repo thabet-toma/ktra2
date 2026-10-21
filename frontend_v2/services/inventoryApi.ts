@@ -325,6 +325,26 @@ export const inventoryApi = {
   },
 
   /**
+   * C3: نقل منتجاتٍ محدَّدة إلى تصنيف — أو إلى «بدون تصنيف» بـ`null`.
+   *
+   * `category` حقلُ **منتجٍ** (عائلة): الخادم يكتب على صفّ البراند ثم يمرّ
+   * بـ`sync_family_from_product` فينقل إخوته معه. الردّ يفصل ما طُلب
+   * (`moved`) عمّا تحرّك فعلاً (`brands_moved`) ويسمّي غير الموجود (`skipped`).
+   */
+  bulkSetCategory: async (
+    productIds: number[],
+    category: number | null,
+  ): Promise<{ moved: number; brands_moved: number; skipped: number[] }> => {
+    const res = await fetch(`${INV}/products/bulk-set-category/`, {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ product_ids: productIds, category }),
+    });
+    await handle(res, "bulkSetCategory");
+    return res.json();
+  },
+
+  /**
    * #24: ضمٌّ جماعي — منتجاتٌ قائمة (براندات منتجٍ واحد فعلياً) تحت أبٍ واحد.
    * **بلا حركة مخزون ولا قيد محاسبي**، ومحدِّدها في **جسم** الطلب لا عنوانه
    * (نفس درس كرت المجموعة: تعداد ~1500 معرّف تجاوز حدّ nginx في الإنتاج).

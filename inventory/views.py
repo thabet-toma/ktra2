@@ -1181,6 +1181,133 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
             )
         return Response({'updated': len(products), 'fields': fields})
 
+    @action(detail=False, methods=['post'], url_path='bulk-set-category')
+    @requires_perm('inventory.item.manage')
+    def bulk_set_category(self, request):
+        """C3: ينقل منتجاتٍ محدَّدة إلى تصنيف — أو إلى «بدون تصنيف» بـ`null`.
+
+        `category` حقلُ **منتجٍ** (عائلة) لا حقلُ براند: الكتابة على صفّ البراند
+        ثم `sync_family_from_product` تنزل بالتصنيف على إخوته. لا كتابة مباشرةً
+        على `ProductFamily` هنا — الكاتب واحدٌ في النظام (`services.py`).
+
+        المحدِّد في **جسم** الطلب لا في عنوانه (درس كرت المجموعة: تعداد ألف
+        معرّف في السطر يتجاوز حدّ nginx). ولا شيء يُكتب على أيّ 400: كل التحقّق
+        قبل المعاملة. معرّفات شركةٍ أخرى **تُتجاهَل** وتُعاد في `skipped`،
+        والمنتج الذي تصنيفه هو الهدف أصلاً لا يُعدّ منقولاً.
+
+        وأشكال الـ400: كلُّها `{"error": "…"}` عدا «تصنيفٌ غير موجود لهذه الشركة»
+        فيأتي بشكل حقل DRF `{"category": ["…"]}` — مطابقةً لـ`_validate_category_tenant`
+        ولِما تنتظره الواجهة في حقل التصنيف.
+        """
+        tenant = self._get_tenant()
+        if not tenant:
+            return Response({'error': 'الشركة غير محددة'}, status=status.HTTP_400_BAD_REQUEST)
+
+        raw_ids = request.data.get('product_ids')
+        if not isinstance(raw_ids, list) or not raw_ids:
+            return Response(
+                {'error': 'لم تُحدَّد منتجات'}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        ids = []
+        for raw in raw_ids:
+            # `bool` عددٌ صحيحٌ في بايثون — و`true` في JSON ليس معرّف منتج.
+            if isinstance(raw, bool) or not isinstance(raw, int):
+                return Response(
+                    {'error': 'معرّف منتج غير صالح في القائمة'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            ids.append(raw)
+
+        # سقفٌ صريح: قائمةُ معرّفاتٍ في الجسم درسُها أن تعداداً غير محدود يصنع
+        # `IN` أضخم من أن يُخدَم — والحدّ يُرفض قبل أيّ استعلام، لا بعده.
+        if len(ids) > 1000:
+            return Response(
+                {'error': 'الحدّ الأقصى 1000 منتج في الطلب الواحد'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # غياب المفتاح ≠ `null`: الأول خطأٌ في العقد، والثاني طلبٌ صريح «بدون تصنيف».
+        if 'category' not in request.data:
+            return Response(
+                {'error': 'category مطلوب — معرّف تصنيف أو null'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        raw_category = request.data.get('category')
+        category = None
+        if raw_category is not None:
+            if isinstance(raw_category, bool) or not isinstance(raw_category, int):
+                return Response(
+                    {'error': 'category يجب أن يكون معرّف تصنيف أو null'},
+                    status=status.HTTP_400_BAD_REQUEST,
+                )
+            category = ProductCategory.objects.filter(
+                tenant=tenant, pk=raw_category,
+            ).first()
+            if category is None:
+                raise serializers.ValidationError(
+                    {'category': 'التصنيف غير موجود لهذه الشركة.'}
+                )
+
+        target_id = category.pk if category is not None else None
+        with transaction.atomic():
+            products = list(
+                Product.objects.select_for_update()
+                .filter(tenant=tenant, pk__in=ids)
+                # ترتيبٌ ثابتٌ لأخذ الأقفال: طلبان متداخلان يأخذان الصفوف بالترتيب
+                # نفسه فلا يدور كلٌّ منهما حول الآخر (deadlock).
+                .order_by('pk')
+                .select_related('family')
+            )
+            found = {product.pk for product in products}
+            skipped = sorted({product_id for product_id in ids if product_id not in found})
+            moving = [product for product in products if product.category_id != target_id]
+            family_ids = {product.family_id for product in moving if product.family_id}
+            # نطاقُ ما قد يتغيّر: الصفوف المطلوبة وكلُّ صفوف عائلاتها — بنداءٍ واحدٍ
+            # مقيَّدٍ بالشركة. `brands_moved` هو فرقُ عدد الصفوف المخالفة للهدف قبل
+            # الكتابة وبعدها: عائلةٌ متناقضة (مرآتها على الهدف وصفوفُها على غيره)
+            # لا يدفع فيها `sync_family_from_product` شيئاً، فعدُّ الصفوف كلَّها
+            # كان يُحصي إخوةً لم يتحرّكوا. والاستعلام يُعاد تنفيذه بعد الكتابة
+            # (`.count()` لا يحفظ نتيجةً قديمة)، فالفرق هو ما تغيّر فعلاً.
+            out_of_target = Product.objects.filter(
+                tenant=tenant,
+            ).filter(
+                Q(pk__in=[product.pk for product in moving])
+                | Q(family_id__in=family_ids)
+            )
+            if target_id is None:
+                out_of_target = out_of_target.filter(category__isnull=False)
+            else:
+                out_of_target = out_of_target.exclude(category_id=target_id)
+            before = out_of_target.count()
+            for product in moving:
+                product.category = category
+                product.save(update_fields=['category', 'updated_at'])
+                sync_family_from_product(product)
+            brands_moved = before - out_of_target.count()
+
+        if moving:
+            target_label = (
+                f'تصنيف «{category.name}»' if category is not None else 'بدون تصنيف'
+            )
+            log_activity(
+                action='update',
+                entity_type='product',
+                entity_label=f'{len(moving)} منتجاً',
+                description=f'نقل {len(moving)} منتجاً إلى {target_label}',
+                metadata={
+                    'product_ids': [product.id for product in moving][:200],
+                    'category': target_id,
+                },
+                request=request,
+                tenant=tenant,
+                user=request.user,
+            )
+        return Response({
+            'moved': len(moving),
+            'brands_moved': brands_moved,
+            'skipped': skipped,
+        })
+
     # ── T2: نشط / غير نشط ──────────────────────────────────────────────
     @staticmethod
     def _parse_is_active(data):

@@ -240,6 +240,10 @@ const TreeRows: React.FC<TreeRowsProps> = (props) => {
       // multi: Enter لا يؤشّر — ضغطةٌ عابرة لا تُغيّر النطاق؛ Space وحده يؤشّر.
       if (e.key === ' ') props.onToggleCheck(current.category);
     } else if (e.key === 'Escape' && props.mode === 'single') {
+      // Esc تُغلق قائمة المنتقي وحدها: نمنع الحدث هنا (`preventDefault`) قبل
+      // `props.onEscape`، فلا يجد مستمع `document` في نافذة النقل حدثاً غير
+      // ممنوعٍ يُغلق به النافذة مع القائمة.
+      e.preventDefault();
       props.onEscape();
     }
   };
@@ -631,8 +635,13 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
             e.preventDefault();
             if (!open) openPanel();
           } else if (e.key === 'Escape') {
-            e.preventDefault();
-            if (open) closePanel({ refocus: true });
+            // القائمة المفتوحة وحدها تستهلك Esc (`preventDefault` ثم الإغلاق)،
+            // فلا تصل النافذةَ حول المنتقي. وإن كانت مغلقة لا نمنع الحدث فيصل
+            // إلى مستمع `document` في نافذة النقل فتُغلقها Esc.
+            if (open) {
+              e.preventDefault();
+              closePanel({ refocus: true });
+            }
           }
         }}
         className={`ktra-input flex cursor-pointer items-center justify-between gap-2 ${

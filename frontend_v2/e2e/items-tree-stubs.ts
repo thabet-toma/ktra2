@@ -30,9 +30,20 @@ export type ItemsTreeProductRow = {
   stock_status: string;
   has_group: boolean;
   group_key: string | null;
+  /** C3: عدد براندات العائلة — تقرؤه نافذة النقل لتحذير انتقال المنتج كلّه
+   *  ببرانداته. */
+  family_brand_count?: number;
 };
 
 const CATEGORIES = [{ id: 3, name: 'إطارات', parent: null }];
+
+/**
+ * 403 الذي يردّه `requires_perm` — الرسالة تبنيها `core/access.require_perm`
+ * بالاسم العربي للصلاحية والدور، والدور هنا `manager` كما يردّ `/permissions/me/`.
+ */
+const PERMISSION_DENIED = {
+  detail: 'صلاحية «إدارة المنتجات والفئات» غير ممنوحة لدورك (manager).',
+};
 
 /** عقدة تصنيف كما يردّها `/inventory/categories/` — يُعاد استخدام النوع في اختبارات C2. */
 export type ItemsTreeCategory = { id: number; name: string; parent: number | null };
@@ -86,6 +97,10 @@ export type ItemsTreeStubsOptions = {
   productDetails?: Record<number, Record<string, unknown>>;
   /** تُنادى بجسم كل PATCH، ويُردّ صفُّ الكرت بعد الدمج. */
   onUpdateProduct?: (id: number, body: Record<string, unknown>) => void;
+  /** C3: تُنادى بجسم `bulk-set-category/` قبل تطبيقه على الحالة المحاكية. */
+  onBulkSetCategory?: (body: Record<string, unknown>) => void;
+  /** C3: تُنادى بجسم PATCH لتصنيفٍ (إعادة الربط) بعد اجتياز حارس الحلقة. */
+  onUpdateCategory?: (id: number, body: Record<string, unknown>) => void;
   /** صلاحيات `/permissions/me/` (الافتراضي: عرض وإدارة المنتجات). */
   permissions?: string[];
 };
@@ -114,6 +129,33 @@ function categoryFieldError(
   if (!Number.isInteger(id)) return 'Incorrect type. Expected pk value.';
   if (!categories.some((c) => c.id === id)) {
     return `Invalid pk "${String(raw)}" - object does not exist.`;
+  }
+  return null;
+}
+
+/**
+ * C3: ما يرفضه `CategorySerializer._validate_parent` — العقدة أباً لنفسها، أو
+ * أحد أحفادها أباً لها (حلقة)، أو أبٌ غير موجود. المحاكي يردّ 400 بالشكل نفسه
+ * الذي يردّه DRF (`{"parent": ["…"]}`) كي لا يكون الاختبار أرخى من الخادم.
+ */
+function categoryParentError(
+  id: number, parent: unknown, categories: ItemsTreeCategory[],
+): string | null {
+  if (parent === null) return null;
+  if (typeof parent !== 'number' || !Number.isInteger(parent)) {
+    return 'Incorrect type. Expected pk value.';
+  }
+  if (parent === id) return 'لا يصلح التصنيف أباً لنفسه.';
+  const byId = new Map(categories.map((c) => [c.id, c]));
+  if (!byId.has(parent)) return `Invalid pk "${parent}" - object does not exist.`;
+  let node = byId.get(parent);
+  const seen = new Set<number>();
+  while (node && !seen.has(node.id)) {
+    if (node.id === id) {
+      return 'لا يصلح تصنيفٌ فرعي أباً لأصله — تنشأ حلقة في الشجرة.';
+    }
+    seen.add(node.id);
+    node = node.parent == null ? undefined : byId.get(node.parent);
   }
   return null;
 }
@@ -166,10 +208,13 @@ function createdProductRow(
  * «إطارات» + المنتجات المطلوبة). كلُّ ما لا يُعرف يردّ `[]`.
  */
 export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStubsOptions = {}) {
-  const products = [...PRODUCTS, ...(options.extraProducts ?? [])];
-  const categories = options.categories ?? CATEGORIES;
+  // نسخةٌ سطحيّة لكل تركيب: نقلُ منتجٍ أو إعادةُ ربط تصنيفٍ في اختبارٍ لا يجوز
+  // أن تتسرّب إلى الاختبار التالي عبر الكائنات المشتركة في هذا الملف.
+  const products = [...PRODUCTS, ...(options.extraProducts ?? [])].map((p) => ({ ...p }));
+  const categories = (options.categories ?? CATEGORIES).map((c) => ({ ...c }));
   const permissions = options.permissions
     ?? ['inventory.item.view', 'inventory.item.manage'];
+  const canManageCatalog = permissions.includes('inventory.item.manage');
 
   await page.addInitScript(() => {
     localStorage.setItem('token', 'items-tree-e2e-token');
@@ -189,6 +234,14 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
     // (لا محاكٍ يقبل كل شيء). الترتيب ترتيبُ DRF: الكائن أوّلاً ثم حقوله.
     const detail = path.match(/\/inventory\/products\/(\d+)\/$/);
     if (detail && method === 'PATCH') {
+      // فحصُ الصلاحية يسبق وجودَ الكائن في DRF (المزيّن قبل جسم الإجراء).
+      if (!canManageCatalog) {
+        await route.fulfill({
+          status: 403, contentType: 'application/json',
+          body: JSON.stringify(PERMISSION_DENIED),
+        });
+        return;
+      }
       const id = Number(detail[1]);
       const known = options.productDetails?.[id];
       if (!known) {
@@ -217,6 +270,13 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
 
     // إنشاء منتج من الشجرة — يُلتقط الجسم ويُردّ صفٌّ بشكله الحقيقي.
     if (method === 'POST' && path.endsWith('/inventory/products/')) {
+      if (!canManageCatalog) {
+        await route.fulfill({
+          status: 403, contentType: 'application/json',
+          body: JSON.stringify(PERMISSION_DENIED),
+        });
+        return;
+      }
       const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
       const categoryError = categoryFieldError(sent, categories);
       if (categoryError) {
@@ -231,6 +291,129 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
       // يظهر في القوائم التالية — وإلا «أُنشئ» منتجٌ لا تعرفه الشجرة أبداً.
       products.push(created as unknown as ItemsTreeProductRow);
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(created) });
+      return;
+    }
+
+    // C3: نقل منتجاتٍ دفعةً — نفس تحقّق الخادم: قائمةٌ غير فارغة، معرّفاتٌ
+    // صحيحة، مفتاح `category` حاضر (null صريحٌ = بدون تصنيف)، وتصنيفٌ من شجرة
+    // الشركة. ثم تُحدَّث الحالة المحاكية كي تُظهر إعادةُ الجلب الموضعَ الجديد.
+    if (method === 'POST' && path.endsWith('/inventory/products/bulk-set-category/')) {
+      if (!canManageCatalog) {
+        await route.fulfill({
+          status: 403, contentType: 'application/json',
+          body: JSON.stringify(PERMISSION_DENIED),
+        });
+        return;
+      }
+      const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const rawIds = sent.product_ids;
+      if (!Array.isArray(rawIds) || rawIds.length === 0) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ error: 'لم تُحدَّد منتجات' }),
+        });
+        return;
+      }
+      if (!rawIds.every((id) => typeof id === 'number' && Number.isInteger(id))) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ error: 'معرّف منتج غير صالح في القائمة' }),
+        });
+        return;
+      }
+      if (!('category' in sent)) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ error: 'category مطلوب — معرّف تصنيف أو null' }),
+        });
+        return;
+      }
+      const rawCategory = sent.category;
+      if (
+        rawCategory !== null
+        && (typeof rawCategory !== 'number' || !Number.isInteger(rawCategory))
+      ) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ error: 'category يجب أن يكون معرّف تصنيف أو null' }),
+        });
+        return;
+      }
+      const category = rawCategory === null
+        ? null
+        : categories.find((c) => c.id === rawCategory) ?? null;
+      if (rawCategory !== null && !category) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ category: ['التصنيف غير موجود لهذه الشركة.'] }),
+        });
+        return;
+      }
+      options.onBulkSetCategory?.(sent);
+      const requested = rawIds as number[];
+      const skipped: number[] = [];
+      let moved = 0;
+      let brandsMoved = 0;
+      for (const id of requested) {
+        const row = products.find((p) => p.id === id);
+        if (!row) {
+          if (!skipped.includes(id)) skipped.push(id);
+          continue;
+        }
+        const target = category ? category.id : null;
+        if (row.category !== target) {
+          row.category = target;
+          row.category_name = category ? category.name : '';
+          moved += 1;
+          // إخوة العائلة ليسوا صفوفاً في هذه القائمة المحاكية: يُضافون بالعدد
+          // كما يعيدهم الخادم (نقل صفٍّ واحد ينقل كل براندات المنتج).
+          const familyBrands = row.family_brand_count ?? 1;
+          brandsMoved += 1 + (familyBrands > 1 ? familyBrands - 1 : 0);
+        }
+      }
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ moved, brands_moved: brandsMoved, skipped }),
+      });
+      return;
+    }
+
+    // C3: إعادة ربط تصنيف — 404 لمعرّفٍ مجهول، و400 بالشكل الحقيقي للحلقة.
+    const categoryDetail = path.match(/\/inventory\/categories\/(\d+)\/$/);
+    if (categoryDetail && method === 'PATCH') {
+      if (!canManageCatalog) {
+        await route.fulfill({
+          status: 403, contentType: 'application/json',
+          body: JSON.stringify(PERMISSION_DENIED),
+        });
+        return;
+      }
+      const id = Number(categoryDetail[1]);
+      const node = categories.find((c) => c.id === id);
+      if (!node) {
+        await route.fulfill({
+          status: 404, contentType: 'application/json',
+          body: JSON.stringify({ detail: 'No ProductCategory matches the given query.' }),
+        });
+        return;
+      }
+      const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      if ('parent' in sent) {
+        const parentError = categoryParentError(id, sent.parent, categories);
+        if (parentError) {
+          await route.fulfill({
+            status: 400, contentType: 'application/json',
+            body: JSON.stringify({ parent: [parentError] }),
+          });
+          return;
+        }
+      }
+      if (typeof sent.name === 'string') node.name = sent.name;
+      if ('parent' in sent) {
+        node.parent = sent.parent === null ? null : Number(sent.parent);
+      }
+      options.onUpdateCategory?.(id, sent);
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(node) });
       return;
     }
 

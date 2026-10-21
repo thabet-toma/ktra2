@@ -81,6 +81,9 @@ export interface Item {
      *  في عقد `view=lookup`. الأب نفسه لا يظهر أبداً كبندٍ قابلٍ للإدراج. */
     familyId?: string;
     familyName?: string;
+    /** C3: عدد براندات المنتج (العائلة) — يقرؤه منادي النقل ليحذّر قبل نقل
+     *  تصنيف المنتج كلّه؛ `undefined` يعني غير معروف فيُعامَل كبراندٍ واحد. */
+    family_brand_count?: number;
     /** ISSUE #133: حالة المخزون (نفذ/منخفض) كما يحسمها الخادم
      *  (`inventory/stock_status.py`) — تصل جاهزة ضمن عقد `view=lookup`، لا
      *  تُعاد حسابها هنا. تغذّي شارة المنتقي (`utils/stockBadge`). */

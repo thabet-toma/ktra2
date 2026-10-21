@@ -312,8 +312,9 @@ export const ItemForm: React.FC<Props> = ({
   const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
   // C2: التصنيف كما هو **محفوظٌ الآن** على الخادم، وعدد براندات المنتج الأب.
-  // الاثنان معاً يقودان تحذير «سينتقل معه N براند»: `category` حقلُ عائلةٍ لا
-  // حقلُ صفّ (`sync_family_from_product`)، فتغييره هنا ينقل كل البراندات.
+  // الاثنان معاً يقودان تحذير «ينتقل المنتج كلّه ببراندَاته الـN»: `category`
+  // حقلُ عائلةٍ لا حقلُ صفّ (`sync_family_from_product`)، فتغييره هنا ينقل كل
+  // البراندات.
   const [savedCategory, setSavedCategory] = useState<number | null>(null);
   const [familyBrandCount, setFamilyBrandCount] = useState(1);
   // القفز من شارة الشريط إلى الحقل: التبويب لا يُرسم قبل تنشيطه، فالتركيز ينتظر
@@ -682,7 +683,8 @@ export const ItemForm: React.FC<Props> = ({
         patch("datasheets", extractDatasheets(refreshed));
         // C2: الإنشاء يبدأ والعدّاد 1، والبراندات تُضاف بعده في
         // `createProductWithBrands` — والكرت يبقى مفتوحاً إن فشل أحدها. بلا هذا
-        // السطر يبقى «1» فيغيب تحذير «سينتقل معه N براند» عن تغيير التصنيف.
+        // السطر يبقى «1» فيغيب تحذير «ينتقل المنتج كلّه ببراندَاته الـN» عن
+        // تغيير التصنيف.
         setFamilyBrandCount(Number(refreshed.family_brand_count ?? 1) || 1);
       } catch { /* تجاهل */ }
       // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
@@ -1026,7 +1028,7 @@ export const ItemForm: React.FC<Props> = ({
           </div>
           {currentId != null && form.category !== savedCategory && familyBrandCount > 1 && (
             <div className="ktra-note ktra-note--warn mt-1">
-              سينتقل معه {formatNumber(familyBrandCount)} براند — التصنيف للمنتج كلّه لا لهذا البراند وحده
+              ينتقل المنتج كلّه ببراندَاته الـ{formatNumber(familyBrandCount)} — التصنيف للمنتج لا لهذا البراند وحده
             </div>
           )}
         </div>
@@ -1516,7 +1518,8 @@ export const ItemForm: React.FC<Props> = ({
               if (target == null) throw new Error("لم يُعرَف المنتج.");
               const result = await submitAddBrand(target, brandName);
               // براندٌ جديدٌ صار للتوّ: العددُ المحمَّل قديم، وبه يُقاس تحذير
-              // «سينتقل معه N براند» — فبلا الزيادة ينتقل براندان بلا تحذير.
+              // «ينتقل المنتج كلّه ببراندَاته الـN» — فبلا الزيادة ينتقل
+              // براندان بلا تحذير.
               if (result.created) setFamilyBrandCount((count) => count + 1);
               if (!result.created && result.id === currentId) {
                 // الخادم سمّى صفَّ البراند الضمنيّ نفسه؛ حدّث الرأس من الردّ
