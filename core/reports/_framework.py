@@ -64,7 +64,7 @@ class ReportColumn:
 class ReportFilter:
     key: str
     label: str
-    #: date | partner | customer | supplier | product | warehouse | select | text
+    #: date | partner | customer | supplier | product | family | warehouse | select | text
     kind: str
     options: tuple[tuple[str, str], ...] = ()
     default: str | None = None
@@ -79,6 +79,9 @@ class ReportSpec:
     columns: tuple[ReportColumn, ...]
     build: Callable[[int, dict], list[dict]]
     filters: tuple[ReportFilter, ...] = ()
+    #: سطرٌ فوق الجدول يشرح حبيبة التقرير حين لا يكفي العنوان. يعرفه التقرير
+    #: نفسه لا الشاشة العامّة — وإلا عرفت الشاشة التقاريرَ بمفاتيحها.
+    hint: str = ""
     permission: str | None = None
     #: وحدة مرخّصة يتبعها التقرير. الصلاحية وحدها تكفي عملياً (مفاتيح الوحدة
     #: تسقط من كتالوج شركةٍ غير مرخّصة فيصير `user_has_perm` كاذباً)، لكن الحارس
@@ -241,6 +244,7 @@ def report_catalog() -> list[dict]:
             "key": spec.key,
             "title": spec.title,
             "description": spec.description,
+            "hint": spec.hint,
             "permission": spec.permission,
             # وحدة التقرير إن كان تقرير وحدةٍ مرخّصة — يصفّي بها `reports_catalog`
             # (الفهرس هنا لا يعرف الشركة، فالتصفية عند من يعرفها).
@@ -299,6 +303,7 @@ def run_report(key: str, tenant_id: int, params: dict) -> dict:
         "title": spec.title,
         "category": spec.category,
         "description": spec.description,
+        "hint": spec.hint,
         # #34/ط5: تنبيهٌ فوق الجدول — `None` لا يظهر شيئاً، فبقية التقارير بلا أثر.
         "notice": spec.notice(tenant_id, params) if spec.notice is not None else None,
         "row_link": spec.row_link,

@@ -269,6 +269,7 @@ register(spec: ReportSpec)                       # تسجيل تقرير جدي�
 run_report(key, tenant_id, params) -> dict       # أعمدة + صفوف + إجماليات
 report_catalog() -> list                         # الفهرس مجمَّعاً بالفئات
 ReportSpec.columns_for(tenant_id, params)        # أعمدة تُحسب عند التشغيل (عمود لكل يوم)
+ReportSpec.hint                                  # سطرٌ يشرح حبيبة التقرير فوق الجدول — الشاشة تعرضه ولا تعرف التقارير بمفاتيحها
 ReportSpec.notice(tenant_id, params) -> str|None # تنبيهٌ اختياري فوق الجدول (#34: أرقام قديمة) — لا يُعيد الحساب أبداً
 ReportSpec.drill(tenant_id, params) + drill_keys # فتح صفّ مجمَّع على الأسطر التي كوّنته
 run_drill(key, tenant_id, params) -> dict        # أسطر التفصيل + مجموعها للمقارنة برقم الصفّ

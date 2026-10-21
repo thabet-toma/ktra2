@@ -281,6 +281,103 @@ class FamilyRollupReportsTest(APITestCase):
         self.assertEqual(Decimal(drill["totals"]["net_sales"]), Decimal(family_row["net_sales"]))
         self.assertEqual(Decimal(drill["totals"]["profit"]), Decimal(family_row["profit"]))
 
+    # ── R1 — «المنتج» مقابل «البراند»: عمودٌ يقول كم برانداً تحت الصفّ ──
+    def test_sales_by_product_row_states_how_many_brands_it_sells(self):
+        data = _run(self.client, "sales-by-product", self.tenant.TenantID, **self._params())
+        family_row = next(r for r in data["rows"] if r["name"] == "مقاس 195/85/15")
+
+        # برندان بيعا من العائلة — والثالث المخزَّن لم يُبع فلا يُعَدّ.
+        self.assertEqual(family_row["brand_count"], 2)
+        # الصفّ الرئيسي صفُّ منتجٍ لا براند: لا براند له، ولا رمز.
+        self.assertEqual(family_row["brand"], "")
+        self.assertEqual(family_row["sku"], "")
+
+    def test_sales_by_product_main_columns_announce_the_brand_count_and_the_drill_announces_brand_and_sku(self):
+        data = _run(self.client, "sales-by-product", self.tenant.TenantID, **self._params())
+        main_headers = [c["header"] for c in data["columns"]]
+        drill_headers = [c["header"] for c in data["drill"]["columns"]]
+
+        self.assertIn("عدد البراندات", main_headers)
+        self.assertIn("البراند", drill_headers)
+        self.assertIn("الرمز", drill_headers)
+        # التفصيل لا يعيد عمود العدد: صفّه براندٌ واحد، والعدد هناك لغو.
+        self.assertNotIn("عدد البراندات", drill_headers)
+
+    def test_sales_by_product_drill_names_each_brand_with_its_sku(self):
+        data = _run(self.client, "sales-by-product", self.tenant.TenantID, **self._params())
+        family_row = next(r for r in data["rows"] if r["name"] == "مقاس 195/85/15")
+        drill = _drill(
+            self.client, "sales-by-product", self.tenant.TenantID, family_row,
+            **self._params(),
+        )
+        self.assertEqual(
+            {(r["brand"], r["sku"]) for r in drill["rows"]},
+            {("دانتير", "TIRE-A"), ("أوتولوكس", "TIRE-B")},
+        )
+
+    def test_sales_by_product_filters_name_the_two_tables_explicitly(self):
+        from core.reports import REPORTS
+
+        by_key = {f.key: f for f in REPORTS["sales-by-product"].filters}
+        self.assertEqual(by_key["product"].label, "البراند", "الكلمة الواحدة لجدولين هي العطل")
+        self.assertEqual(by_key["family_id"].label, "المنتج")
+        self.assertEqual(by_key["family_id"].kind, "family")
+
+    def test_sales_by_product_family_filter_keeps_the_family_grain_and_all_its_brands(self):
+        data = _run(
+            self.client, "sales-by-product", self.tenant.TenantID,
+            **self._params(family_id=self.family.id),
+        )
+        self.assertEqual(len(data["rows"]), 1)
+        row = data["rows"][0]
+        # الحبيبة لا تتغيّر باختيار «المنتج»: الصفّ ما زال مجموع براندات العائلة.
+        self.assertEqual(row["name"], "مقاس 195/85/15")
+        self.assertEqual(row["sku"], "")
+        self.assertEqual(row["brand_count"], 2)
+        self.assertEqual(Decimal(row["quantity"]), Decimal("4"))
+        self.assertEqual(Decimal(row["net_sales"]), Decimal("230"))
+
+    def test_sales_by_product_family_filter_with_a_foreign_id_yields_an_empty_report(self):
+        data = _run(
+            self.client, "sales-by-product", self.tenant.TenantID,
+            **self._params(family_id=self.other_family.pk),
+        )
+        # معرّفُ شركةٍ أخرى ليس عائلةً «أخرى» بل معرّفٌ لا يخصّ هذه الشركة هنا.
+        self.assertEqual(data["rows"], [])
+
+    def test_sales_by_product_product_filter_with_a_foreign_id_yields_an_empty_report(self):
+        foreign_product = Product.objects.filter(tenant=self.other_tenant).first()
+        data = _run(
+            self.client, "sales-by-product", self.tenant.TenantID,
+            **self._params(product=foreign_product.id),
+        )
+        self.assertEqual(data["rows"], [])
+
+    def test_family_product_ids_helper_is_tenant_scoped(self):
+        """الاختبار المباشر للحلّ نفسه: النطاق الذي يعتمد عليه الفرعان معاً.
+
+        اختبارات التقرير أعلاه لا تستطيع إسقاطه — مجموعة الأسطر مقيَّدةٌ بالشركة
+        أصلاً — فتصفّي الحلّ بلا `tenant_id` يمرّ فيها بلا أثر.
+        """
+        from core.reports.sales import _family_product_ids
+
+        self.assertEqual(
+            _family_product_ids(self.tenant.TenantID, self.other_family.pk), set(),
+        )
+        self.assertEqual(
+            _family_product_ids(self.tenant.TenantID, self.family.pk),
+            {self.brand_a.pk, self.brand_b.pk, self.brand_c.pk},
+        )
+
+    def test_sales_by_product_grain_hint_comes_from_the_server_and_only_for_that_report(self):
+        data = _run(self.client, "sales-by-product", self.tenant.TenantID, **self._params())
+        self.assertEqual(
+            data["hint"], "كل صفّ منتجٌ بكلّ براندَاته — افتح الصفّ لترى البراندات",
+        )
+        # الشاشة عامّة: تقريرٌ لا يعلن `hint` يعود بفراغ فلا يظهر عليه سطر.
+        other = _run(self.client, "sales-by-brand", self.tenant.TenantID, **self._params())
+        self.assertEqual(other["hint"], "")
+
     # ── المشتريات حسب المنتج ─────────────────────────────────────────
     def test_purchases_by_product_rolls_up_the_family(self):
         data = _run(self.client, "purchases-by-product", self.tenant.TenantID, **self._params())

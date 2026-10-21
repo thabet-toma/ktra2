@@ -35,6 +35,8 @@ export interface ReportSummaryDto {
   key: string;
   title: string;
   description: string;
+  /** سطرٌ يشرح حبيبة التقرير (`ReportSpec.hint`) — يعلنه الخادم، وفارغٌ لتقريرٍ لا يحتاجه. */
+  hint?: string;
   permission: string | null;
   screen_path: string | null;
   /** مسار المستند خلف السطر بقوالب من مفاتيح الصف — «/sales/invoices/{id}». */
@@ -77,6 +79,8 @@ export interface ReportResultDto {
   title: string;
   category: string;
   description: string;
+  /** سطرٌ يشرح حبيبة التقرير (`ReportSpec.hint`) — يعرضه الناتج تحت الوصف. */
+  hint?: string;
   row_link?: string | null;
   /** `null` لتقرير لا يُنقَّب — الشاشة تقرأ منه وحده، فلا معرفةٌ مزدوجة. */
   drill?: ReportDrillDto | null;

@@ -783,6 +783,8 @@ export const inventoryApi = {
 // القائمة ثم المحرّر) — والنافذة تُحوّل التكرار إلى إصابة ذاكرة بلا اقتطاع أي
 // صف. مفتاحها الشركة كي لا تتسرّب قائمة شركةٍ إلى أخرى.
 const PICKER_PRODUCTS_TTL_MS = 60_000;
+/** سقف نتائج بحث المنتقي — يكفي للاختيار ولا يحوّل حرفاً واحداً إلى كتالوج كامل. */
+const PICKER_SEARCH_PAGE_SIZE = 20;
 const pickerProductsCache = new Map<string, { at: number; rows: unknown[] }>();
 const pickerProductsInFlight = new Map<string, Promise<unknown[]>>();
 // عدّاد أجيال: الإفراغ وحده لا يكفي — طلبٌ طائر لحظة الإفراغ كان يهبط بعده
@@ -825,14 +827,18 @@ export const invalidatePickerProducts = (): void => {
  */
 export const listPickerProducts = <T>(
   tenantId?: number,
-  opts?: { includeInactive?: boolean },
+  opts?: { includeInactive?: boolean; search?: string },
 ): Promise<T[]> => {
   // T4: الافتراضي نشطٌ فقط — المنتج الموقوف لا يدخل مستنداً جديداً. شاشات التصفية
   // (جرد، حركات مخزون، تحويل، مرشّحات التقارير، فرادة HS) تطلب `includeInactive` فتبقى
   // ترى الموقوف الذي ما زال في رصيده بقيّة. نافذةٌ مستقلة بمفتاحها كي لا يختلط الاثنان.
   const includeInactive = opts?.includeInactive === true;
-  const key = includeInactive ? `${pickerCacheKey(tenantId)}:all` : pickerCacheKey(tenantId);
-  const cached = pickerProductsCache.get(key);
+  // `search` خادميّ (`ProductViewSet.search_fields`: الرمز والاسم والبراند ورمز
+  // المورّد). نتيجته خاصةٌ باستعلامها فلا تُخدم من نافذة الكتالوج الكامل ولا
+  // تُخزَّن: كل حرفٍ يكتبه المستخدم استعلامه، وردُّ استعلامٍ سابق لا يصلح للحالي.
+  const search = (opts?.search ?? "").trim();
+  const key = `${pickerCacheKey(tenantId)}${includeInactive ? ":all" : ""}${search ? `:q:${search}` : ""}`;
+  const cached = search ? undefined : pickerProductsCache.get(key);
   // نسخة سطحية لكل مستدعٍ: الشاشات تضع المصفوفة في state وبعضها يفرزها
   // موضعياً، ومشاركة المرجع نفسه تجعل فرز شاشةٍ يعيد ترتيب أخرى.
   if (cached && Date.now() - cached.at < PICKER_PRODUCTS_TTL_MS) {
@@ -843,10 +849,16 @@ export const listPickerProducts = <T>(
     const generationAtLaunch = pickerProductsGeneration;
     req = apiGetList<T>("lookup/products/", {
       tenantId,
-      query: includeInactive ? { status: "all" } : undefined,
+      query: {
+        ...(includeInactive ? { status: "all" } : {}),
+        ...(search ? { search } : {}),
+        // بحثُ الخادم بـ`icontains`: حرفٌ واحد يطابق الكتالوج كلّه، فيُسقَف
+        // الردّ بصفحةٍ واحدة بدل مئات الكيلوبايت لكل ضغطة مفتاح.
+        ...(search ? { page: 1, page_size: PICKER_SEARCH_PAGE_SIZE } : {}),
+      },
     })
       .then((rows) => {
-        if (generationAtLaunch === pickerProductsGeneration) {
+        if (!search && generationAtLaunch === pickerProductsGeneration) {
           pickerProductsCache.set(key, { at: Date.now(), rows: rows as unknown[] });
         }
         return rows as unknown[];
@@ -859,6 +871,24 @@ export const listPickerProducts = <T>(
     pickerProductsInFlight.set(key, req);
   }
   return req.then((rows) => (rows as T[]).slice());
+};
+
+/**
+ * عائلات المنتجات («المنتج» فوق البراند) لفلاتر التقارير — بحثٌ خادميّ
+ * (`ProductFamilyViewSet.search_fields`)، فلا ينزّل المنقّي الكتالوج كلّه ليكتب
+ * حرفاً. المفتاح `inventory/product-families/` لا `lookup/`: النقطة قائمةٌ
+ * للقراءة فقط ومقيَّدةٌ بالمستأجر في `get_queryset`.
+ */
+export const listPickerFamilies = <T>(
+  tenantId: number | undefined,
+  search: string,
+): Promise<T[]> => {
+  const q = search.trim();
+  return apiGetList<T>("inventory/product-families/", {
+    tenantId,
+    // السقف نفسه الذي يحكم بحث المنتجات: صفحةٌ واحدة تكفي للاختيار.
+    query: q ? { search: q, page: 1, page_size: PICKER_SEARCH_PAGE_SIZE } : undefined,
+  });
 };
 
 /**

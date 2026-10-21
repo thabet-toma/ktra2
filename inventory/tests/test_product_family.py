@@ -402,3 +402,40 @@ class FamilyFieldsStayOneTruthTest(APITestCase):
         assert second.brand == "براند ثانٍ"
         first.refresh_from_db()
         assert first.brand == "براند أول"
+
+
+class ProductFamilySearchTest(APITestCase):
+    """منتقي «المنتج» في التقارير يبحث في الخادم — لا ينزّل الكتالوج كلّه ليكتب
+    حرفاً. البحث على الاسمين، ومقيَّدٌ بالشركة كبقية `get_queryset`."""
+
+    @classmethod
+    def setUpTestData(cls):
+        cls.owner = User.objects.create_user(username="fam_search", password="x")
+        cls.outsider = User.objects.create_user(username="fam_search_out", password="x")
+        cls.tenant = create_company("شركة البحث", cls.owner)
+        cls.other_tenant = create_company("شركة البحث الأخرى", cls.outsider)
+        from inventory.services import create_product_with_family
+
+        cls.family, _ = create_product_with_family(
+            tenant=cls.tenant, name_ar="مقاس 195/85/15", sku="FAM-195")
+        cls.other_family, _ = create_product_with_family(
+            tenant=cls.tenant, name_ar="مقاس 205/55/16", sku="FAM-205")
+        cls.foreign_family, _ = create_product_with_family(
+            tenant=cls.other_tenant, name_ar="مقاس 195/85/15 الجار", sku="FAM-GAR")
+
+    def setUp(self):
+        self.client.force_authenticate(user=self.owner)
+        self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def test_search_narrows_to_the_matching_family_only(self):
+        res = self.client.get(f"{FAMILIES_URL}?search=205", **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        ids = {row["id"] for row in res.json()}
+        assert ids == {self.other_family.id}
+
+    def test_search_never_returns_another_company_family(self):
+        res = self.client.get(f"{FAMILIES_URL}?search=195", **self.hdr)
+        assert res.status_code == 200, res.content[:300]
+        ids = {row["id"] for row in res.json()}
+        assert self.family.id in ids
+        assert self.foreign_family.id not in ids

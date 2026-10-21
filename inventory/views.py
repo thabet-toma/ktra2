@@ -121,6 +121,10 @@ class ProductFamilyViewSet(viewsets.ReadOnlyModelViewSet):
     """
     queryset = ProductFamily.objects.all().select_related('category', 'uom')
     serializer_class = ProductFamilySerializer
+    # منتقي «المنتج» في فلاتر التقارير — بحثٌ خادميّ بالاسمين، كما في
+    # `ProductViewSet.search_fields`، فلا ينزّل المنقّي الكتالوج كلّه ليكتب حرفاً.
+    filter_backends = [filters.SearchFilter]
+    search_fields = ['name_ar', 'name_en']
 
     def get_queryset(self):
         tenant = get_tenant(self.request)

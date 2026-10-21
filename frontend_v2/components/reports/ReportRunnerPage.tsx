@@ -3,16 +3,17 @@
  *
  * شاشة واحدة تخدم كل تقارير المنصة: تقرأ مواصفة التقرير من الخادم (فلاتره
  * وأعمدته) وترسمها، فلا تُكتب شاشة لكل تقرير. الفلاتر تُرسَم حسب نوعها:
- * تاريخ، طرف (عميل/مورد)، منتج، مستودع، حساب من الشجرة، قائمة، أو نص.
+ * تاريخ، طرف (عميل/مورد)، منتج/عائلة بمنقّي بحثيّ، مستودع، حساب من الشجرة،
+ * قائمة، أو نص.
  */
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { ArrowRight, CheckCheck, Download, FileSpreadsheet, Printer, Search } from "lucide-react";
+import { ArrowRight, CheckCheck, ChevronLeft, Download, FileSpreadsheet, Printer, Search, X } from "lucide-react";
 
 import { reportsApi } from "../../services/reportsApi";
 import { accountingApi } from "../../services/accountingApi";
 import { apiGetList } from "../../services/restApi";
-import { listPickerProducts } from "../../services/inventoryApi";
+import { listPickerFamilies, listPickerProducts } from "../../services/inventoryApi";
 import { resolveTenantId } from "../../utils/tenantContext";
 import { useCompany } from "../../contexts/CompanyContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -40,20 +41,150 @@ import { printReport } from "../../utils/printReport";
 import type { AccountNodeLike } from "../../utils/accountTree";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
 import { KitDocumentShell, KitReportTable, KitSidePanel } from "../kit";
+import { KitAutocomplete, type KitAutocompleteOption } from "../kit/KitAutocomplete";
 import { labelWithStatus } from "../../utils/activeStatus";
 import type { KitTab, KitToolbarAction, ReportColumn } from "../kit";
 
 type PartnerRow = { id: number; name: string; partner_type?: string; is_active?: boolean };
-type ProductRow = { id: number; sku?: string; name_ar?: string; name_en?: string; name?: string; is_active?: boolean };
+type ProductPickerRow = {
+  id: number; sku?: string; brand?: string; name_ar?: string; name_en?: string;
+  display_name?: string; barcode?: string; category_name?: string;
+  supplier_codes_text?: string; family_id?: number | null; family_name?: string | null;
+  is_active?: boolean;
+};
+type FamilyPickerRow = { id: number; name_ar?: string; name_en?: string };
 type WarehouseRow = { id: number; name?: string };
 
 const PARTNER_KINDS = new Set(["partner", "customer", "supplier"]);
 const ACCOUNT_KINDS = new Set(["account", "cash_account"]);
+/** «المنتج» (الأب) و«البراند» (الصفّ القابل للبيع) — فلتران بحثيّان لا `<select>`. */
+const PRODUCT_FILTER_KINDS = new Set(["product", "family"]);
+
+/** فراغ الحقل يقول «الكل» صراحةً: بدونه بدا الفلتر مطلوباً لا اختيارياً. */
+const EMPTY_PLACEHOLDERS: Record<string, string> = {
+  product: "الكل — ابحث بالاسم أو الرمز أو البراند",
+  // العائلة تُبحث باسمها وحده (`ProductFamilyViewSet.search_fields`).
+  family: "الكل — ابحث باسم المنتج",
+};
+
+/** ما تحتاجه الطباعة من الفلتر المختار: اسم + رمز + براند لا معرّفاً خاماً. */
+type PickedFilter = { display: string; print: string };
+
+const productPickerOption = (p: ProductPickerRow): KitAutocompleteOption => ({
+  id: p.id,
+  // T4: كما كان `<select>` يقول: الموقوف يبقى معروضاً ومعه لافتته — التقرير
+  // يسأل عن التاريخ لا عن مستندٍ جديد.
+  label: labelWithStatus(
+    p.display_name || p.name_ar || p.name_en || p.sku || `#${p.id}`, p.is_active,
+  ),
+  sub: [p.sku, p.family_name].filter(Boolean).join(" · ") || undefined,
+  // البحث على كل ما يبحث فيه الخادم (`ProductViewSet.search_fields`): الرمز
+  // والاسم والبراند ورمز المورّد والباركود والتصنيف — وإلا أسقط الترتيبُ هنا
+  // صفّاً جلبه الخادم لأنه بحث في حقلٍ لا يعرفه هذا الصفّ.
+  keywords: [
+    p.sku, p.name_ar, p.name_en, p.brand, p.barcode, p.category_name,
+    p.supplier_codes_text, p.family_name,
+  ].filter(Boolean).join(" ").toLowerCase(),
+});
+
+const familyPickerOption = (f: FamilyPickerRow): KitAutocompleteOption => ({
+  id: f.id,
+  label: f.name_ar || f.name_en || `#${f.id}`,
+  keywords: [f.name_ar, f.name_en].filter(Boolean).join(" ").toLowerCase(),
+});
+
+/**
+ * فلتر «المنتج»/«البراند» البحثيّ — قائمته تُجلب من الخادم عند الكتابة (`?search=`)
+ * لا عند فتح الشاشة: الكتالوج ~1490 صفاً و~1.1MB لكل فتح تقرير، وهي العلّة نفسها
+ * التي جاء هذا المنقّي لحلّها. المكوّن محليٌّ هنا كي تبقى `renderFilter` رسمَ ما
+ * يُرسَم لا مستودعَ حالةٍ ثانياً.
+ */
+const ReportSearchFilter: React.FC<{
+  kind: string;
+  value: string;
+  /** لافتة الاختيار من الأب وحده — لا نسخةً ثانية هنا تفترق عنها. */
+  label: string;
+  onChange: (id: string, picked: PickedFilter) => void;
+}> = ({ kind, value, label, onChange }) => {
+  const tenantId = resolveTenantId();
+  const [options, setOptions] = useState<KitAutocompleteOption[]>([]);
+  const [searching, setSearching] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** جيل البحث: نتيجة استعلامٍ سابق لا تدهس نتيجة اللاحق. */
+  const seq = useRef(0);
+
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
+
+  const search = (text: string) => {
+    if (timer.current) clearTimeout(timer.current);
+    const q = text.trim();
+    if (!q) { setOptions([]); setSearching(false); return; }
+    timer.current = setTimeout(() => {
+      const mine = ++seq.current;
+      setSearching(true);
+      void (async () => {
+        try {
+          if (kind === "family") {
+            const rows = await listPickerFamilies<FamilyPickerRow>(tenantId, q);
+            if (mine !== seq.current) return;
+            setOptions(rows.map(familyPickerOption));
+          } else {
+            const rows = await listPickerProducts<ProductPickerRow>(
+              tenantId, { includeInactive: true, search: q });
+            if (mine !== seq.current) return;
+            setOptions(rows.map(productPickerOption));
+          }
+        } catch {
+          if (mine === seq.current) setOptions([]);
+        } finally {
+          if (mine === seq.current) setSearching(false);
+        }
+      })();
+    }, 250);
+  };
+
+  const pick = (id: string | number) => {
+    const option = options.find((o) => String(o.id) === String(id));
+    if (!option) return;
+    onChange(String(id), {
+      display: option.label,
+      print: [option.label, option.sub].filter(Boolean).join(" · "),
+    });
+  };
+
+  return (
+    <div className="flex items-center gap-1">
+      <div className="min-w-[220px]">
+        <KitAutocomplete
+          value={label || (value ? `#${value}` : "")}
+          options={options}
+          onPick={pick}
+          onTextChange={search}
+          maxResults={20}
+          placeholder={searching ? "يبحث…" : (EMPTY_PLACEHOLDERS[kind] ?? "الكل")}
+        />
+      </div>
+      {value && (
+        <button
+          type="button"
+          className="ktra-toolbtn"
+          title="مسح الفلتر — الكل"
+          aria-label="مسح الفلتر"
+          onClick={() => {
+            setOptions([]);
+            onChange("", { display: "", print: "" });
+          }}
+        >
+          <X className="w-4 h-4" />
+        </button>
+      )}
+    </div>
+  );
+};
 
 /** أي بيانات مساعدة يحتاجها هذا التقرير؟ لا نُحمّل ما لا تطلبه فلاتره. */
 const lookupsNeeded = (filters: ReportFilterDto[]) => ({
   partners: filters.some((f) => PARTNER_KINDS.has(f.kind)),
-  products: filters.some((f) => f.kind === "product"),
   warehouses: filters.some((f) => f.kind === "warehouse"),
   accounts: filters.some((f) => ACCOUNT_KINDS.has(f.kind)),
 });
@@ -88,9 +219,10 @@ export const ReportRunnerPage: React.FC = () => {
   const [drillError, setDrillError] = useState<string | null>(null);
 
   const [partners, setPartners] = useState<PartnerRow[]>([]);
-  const [products, setProducts] = useState<ProductRow[]>([]);
   const [warehouses, setWarehouses] = useState<WarehouseRow[]>([]);
   const [accounts, setAccounts] = useState<AccountNodeLike[]>([]);
+  /** ما اختاره المستخدم في فلترٍ بحثيّ — الطباعة تكتب الاسم والرمز والبراند. */
+  const [pickedFilters, setPickedFilters] = useState<Record<string, PickedFilter>>({});
 
   /** المواصفة من الفهرس — نحتاج الفلاتر قبل أول تشغيل. */
   useEffect(() => {
@@ -125,17 +257,15 @@ export const ReportRunnerPage: React.FC = () => {
     let alive = true;
     void (async () => {
       const tenantId = resolveTenantId();
-      const [p, pr, wh, acc] = await Promise.allSettled([
+      const [p, wh, acc] = await Promise.allSettled([
         // T4: التقرير يسأل عن التاريخ لا عن مستند جديد — فمرشّحاته تشمل الموقوف
         // (منتجاً وطرفاً) كي يُستخرج كشف طرفٍ أُوقف ورصيدُ منتجٍ أُوقف.
         needed.partners ? (accountingApi.getPartners(undefined, "all") as Promise<PartnerRow[]>) : Promise.resolve([]),
-        needed.products ? listPickerProducts<ProductRow>(tenantId, { includeInactive: true }) : Promise.resolve([]),
         needed.warehouses ? apiGetList<WarehouseRow>("inventory/warehouses/", { tenantId }) : Promise.resolve([]),
         needed.accounts ? (accountingApi.getAccounts() as Promise<AccountNodeLike[]>) : Promise.resolve([]),
       ]);
       if (!alive) return;
       if (p.status === "fulfilled") setPartners(p.value || []);
-      if (pr.status === "fulfilled") setProducts(pr.value || []);
       if (wh.status === "fulfilled") setWarehouses(wh.value || []);
       if (acc.status === "fulfilled") setAccounts(acc.value || []);
     })();
@@ -200,19 +330,21 @@ export const ReportRunnerPage: React.FC = () => {
         </select>
       );
     }
-    if (filter.kind === "product") {
+    if (PRODUCT_FILTER_KINDS.has(filter.kind)) {
       return (
-        <select className="ktra-input" style={{ minWidth: "200px" }} value={value}
-          onChange={(e) => setValue(filter.key, e.target.value)}>
-          <option value="">الكل</option>
-          {products.map((p) => (
-            <option key={p.id} value={p.id}>
-              {labelWithStatus(
-                [p.sku, p.name_ar || p.name_en || p.name].filter(Boolean).join(" — "), p.is_active,
-              )}
-            </option>
-          ))}
-        </select>
+        <ReportSearchFilter
+          kind={filter.kind}
+          value={value}
+          label={pickedFilters[filter.key]?.display ?? ""}
+          onChange={(id, picked) => {
+            // الاختيار والمسح يُشغّلان التقرير فوراً: الفلتر سؤال، وتركُ النتيجة
+            // القديمة معروضةً تحت حقلٍ يقول غيرها أسوأ من الانتظار.
+            const next = { ...values, [filter.key]: id };
+            setValue(filter.key, id);
+            setPickedFilters((prev) => ({ ...prev, [filter.key]: picked }));
+            void run(next);
+          }}
+        />
       );
     }
     if (filter.kind === "warehouse") {
@@ -378,6 +510,32 @@ export const ReportRunnerPage: React.FC = () => {
     setDrillError(null);
   }, []);
 
+  /** صفٌّ يُفتح على تفصيله يقول ذلك قبل النقر — الزرّ يظهر في الشاشة والطباعة
+   *  تبقى على أعمدة التقرير وحدها (`result.columns`). */
+  const tableColumns: ReportColumn<ReportRow>[] = useMemo(() => {
+    if (!result?.drill) return columns;
+    return [
+      {
+        key: "__drill",
+        header: "",
+        width: "32px",
+        align: "center",
+        render: (row: ReportRow) => (
+          <button
+            type="button"
+            title="افتح تفصيل السطر"
+            aria-label="افتح تفصيل السطر"
+            className="text-[var(--color-text-muted)] transition-colors hover:text-[var(--color-primary)]"
+            onClick={(e) => { e.stopPropagation(); openDrill(row); }}
+          >
+            <ChevronLeft className="w-4 h-4" />
+          </button>
+        ),
+      },
+      ...columns,
+    ];
+  }, [columns, result?.drill, openDrill]);
+
   const totals = useMemo(() => {
     if (!result || Object.keys(result.totals || {}).length === 0) return undefined;
     const out: Record<string, string> = {};
@@ -459,9 +617,9 @@ export const ReportRunnerPage: React.FC = () => {
         if (PARTNER_KINDS.has(f.kind)) {
           return { label: f.label, value: partners.find((p) => String(p.id) === raw)?.name ?? raw };
         }
-        if (f.kind === "product") {
-          const p = products.find((x) => String(x.id) === raw);
-          return { label: f.label, value: p ? (p.name_ar || p.name_en || p.name || raw) : raw };
+        if (PRODUCT_FILTER_KINDS.has(f.kind)) {
+          // الاسم + الرمز + البراند — لا معرّفاً خاماً ولا اسماً وحده.
+          return { label: f.label, value: pickedFilters[f.key]?.print || raw };
         }
         if (f.kind === "warehouse") {
           return { label: f.label, value: warehouses.find((w) => String(w.id) === raw)?.name ?? raw };
@@ -494,7 +652,7 @@ export const ReportRunnerPage: React.FC = () => {
       emptyHint: "لا توجد بيانات في النطاق المحدد",
     });
     if (!opened) toast("المتصفح منع نافذة الطباعة — اسمح بالنوافذ المنبثقة لهذا الموقع.", "error");
-  }, [result, filters, values, partners, products, warehouses, accounts,
+  }, [result, filters, values, partners, pickedFilters, warehouses, accounts,
       currentCompany, periodLabel, totals, toast]);
 
   /**
@@ -617,9 +775,12 @@ export const ReportRunnerPage: React.FC = () => {
       {result?.description && (
         <p className="mb-2 text-xs text-[var(--color-text-muted)]">{result.description}</p>
       )}
+      {result?.hint && (
+        <p className="mb-2 text-xs text-[var(--color-text-muted)]">{result.hint}</p>
+      )}
       <KitReportTable<ReportRow>
         filterBar={filterBar}
-        columns={columns}
+        columns={tableColumns}
         rows={result?.rows ?? []}
         totals={totals}
         exportable
