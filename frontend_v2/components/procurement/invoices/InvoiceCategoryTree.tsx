@@ -15,6 +15,7 @@ import {
   PackagePlus,
   Pencil,
   Trash2,
+  Copy,
   PanelRightClose,
   PanelRightOpen,
 } from "lucide-react";
@@ -34,7 +35,9 @@ import { usePermissions } from "../../../contexts/PermissionsContext";
  * العقدة الورقية (leaf). كانت هذه الشاشة وحدها تعكسهما — تسمّي التصنيفَ «صنفاً»
  * بينما بقية الموديول تسمّي المنتجَ بذلك. صارت على المصطلح الواحد: كلُّ ما
  * يُنشئ عقدةً هنا «تصنيف»، وكلُّ ما يُنشئ سجلّاً قابلاً للبيع «منتج».
- * - زر الماوس الأيمن على أي عقدة → قائمة: «إضافة تصنيف فرعي» · «إضافة منتج» · «تعديل».
+ * - زر الماوس الأيمن: على تصنيف → «إضافة تصنيف فرعي» · «إضافة منتج هنا» · تعديل/حذف؛
+ *   على منتج → «فتح الكرت» · «إضافة منتج في نفس التصنيف» · «نسخ الرمز»؛ على الفراغ →
+ *   «إضافة تصنيف رئيسي» · «إضافة منتج هنا» (بلا تصنيف).
  * - النقر المفرد على منتج يفتح بطاقته، ومنها يُدرَج في الفاتورة بزرّ «موافق»
  *   (الإدراج بالنقر المزدوج أُلغي — كان التعليق يصفه بعد زواله).
  * + بحث فوري.
@@ -59,7 +62,18 @@ interface Props {
 // تجميع البراندات أصبح حقيقياً (Category).
 const displayNameOf = (it: Item) => String((it as unknown as { display_name?: string }).display_name || it.name || "");
 
+// الرمز لا يحمله نوع `Item` (يُضاف إليه من `Product` عند بناء أوراق الشجرة)،
+// فنقرأه بنفس أسلوب `display_name` أعلاه بدل توسيع النوع لسطرٍ واحد.
+const skuOf = (it: Item) => String((it as unknown as { sku?: string }).sku || "");
+
 const UNCAT = "__uncat__";
+
+/** هدف قائمة زر الماوس الأيمن — كان `catId` وحده، فكبسةُ اليمين على منتج
+ *  تُظهر قائمة الفراغ وتُنشئ منتجاً بلا تصنيف (خطأ D6). */
+type MenuTarget =
+  | { kind: "empty" }
+  | { kind: "category"; id: string }
+  | { kind: "item"; item: Item };
 
 const ctxItemStyle: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 6, width: "100%",
@@ -97,7 +111,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
   const [addItemCat, setAddItemCat] = useState<string | number | null>(null);
   const [showAddItem, setShowAddItem] = useState(false);
   // قائمة زر الماوس الأيمن
-  const [menu, setMenu] = useState<{ x: number; y: number; catId: string | null } | null>(null);
+  const [menu, setMenu] = useState<{ x: number; y: number; target: MenuTarget } | null>(null);
   // طيّ اللوحة كاملة لتوفير المساحة الأفقية
   const [panelCollapsed, setPanelCollapsed] = useState(false);
 
@@ -194,14 +208,62 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
     setShowAddItem(true);
   };
 
-  const openMenu = (e: React.MouseEvent, catId: string | null) => {
+  const openMenuAt = (e: React.MouseEvent, target: MenuTarget) => {
     if (disabled) return;
     e.preventDefault();
     e.stopPropagation();
     // «إضافة منتج هنا» متاحةٌ للجميع في الوضع العادي، فلا تُحجب القائمة عمّن
     // لا يملك مفتاح الكتابة — تُحجب فقط في وضع إدارة التصنيفات، حيث لا يبقى فيها شيء.
     if (manageMode && !canManageCatalog) return;
-    setMenu({ x: e.clientX, y: e.clientY, catId });
+    setMenu({ x: e.clientX, y: e.clientY, target });
+  };
+
+  const openMenu = (e: React.MouseEvent, catId: string | null) => {
+    openMenuAt(e, catId ? { kind: "category", id: catId } : { kind: "empty" });
+  };
+
+  // كبسةٌ يمين على ورقة منتج: قائمته وحدها. بلا `stopPropagation` يفقّع الحدث
+  // إلى `.ktra-tree-body` فتُستبدل قائمةُ المنتج بقائمة الفراغ.
+  const openItemMenu = (e: React.MouseEvent, it: Item) => {
+    openMenuAt(e, { kind: "item", item: it });
+  };
+
+  const copySku = async (sku: string) => {
+    try {
+      await navigator.clipboard.writeText(sku);
+      toast("نُسخ الرمز", "success");
+    } catch {
+      toast("تعذّر النسخ", "error");
+    }
+  };
+
+  /**
+   * قائمة المنتج — قراءةٌ فقط في هذه التذكرة: فتح الكرت · إضافة منتج في نفس
+   * التصنيف · نسخ الرمز. **لا** أفعال كتابة على التصنيفات هنا، و**لا** «إضافة
+   * منتج هنا»: تلك كانت تُنشئ منتجاً بلا تصنيف لأنها تأخذ تصنيف الفراغ (D6).
+   */
+  const itemMenu = (it: Item) => {
+    // مفتاح التصنيف نفسه الذي تُوضع تحته الورقة في `itemsByCat` — والمنتج بلا
+    // تصنيف يبقى بلا تصنيف، ويُقال ذلك في نصّ البند لا يُخفى.
+    const catKey = it.categoryId ? String(it.categoryId) : null;
+    const sku = skuOf(it);
+    return (
+      <>
+        {onShowCard && (
+          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { onShowCard(it); setMenu(null); }}>
+            <Package className="w-3.5 h-3.5" /> فتح الكرت
+          </button>
+        )}
+        <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(catKey); setMenu(null); }}>
+          <PackagePlus className="w-3.5 h-3.5" /> {catKey ? "إضافة منتج في نفس التصنيف" : "إضافة منتج بدون تصنيف"}
+        </button>
+        {sku && (
+          <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { void copySku(sku); setMenu(null); }}>
+            <Copy className="w-3.5 h-3.5" /> نسخ الرمز
+          </button>
+        )}
+      </>
+    );
   };
 
   // ورقة منتج مفردة (نقرة → بطاقة المنتج). اسم العرض يحمل البراند.
@@ -212,6 +274,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
       disabled={disabled}
       className="ktra-tree-leaf"
       onClick={() => handleLeafClick(it)}
+      onContextMenu={(e) => openItemMenu(e, it)}
       title={`${displayNameOf(it)} — انقر لعرض بطاقة المنتج`}
     >
       <Package className="w-3 h-3 shrink-0" />
@@ -323,6 +386,8 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
 
   const rootCats = childrenOf.get(null) || [];
   const uncategorizedItems = (itemsByCat.get(UNCAT) || []).filter(itemMatches);
+  // تصنيفُ القائمة المفتوحة الآن (null لقائمة الفراغ أو قائمة المنتج).
+  const menuCatId = menu?.target.kind === "category" ? menu.target.id : null;
 
   if (panelCollapsed && !manageMode) {
     // شريط مطويّ لا لوحة فارغة: `.ktra-tree-panel` تفرض `flex: 0 0 240px` من
@@ -404,7 +469,7 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
             {rootCats.map((c) => renderNode(c, 0))}
             {!manageMode && uncategorizedItems.length > 0 && (
               <div className="mt-1">
-                <div className="ktra-tree-cat">
+                <div className="ktra-tree-cat" onContextMenu={(e) => openMenu(e, null)}>
                   <FolderTree className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
                   <span className="truncate flex-1">بدون تصنيف</span>
                   <span className="ktra-tree-count">{uncategorizedItems.length}</span>
@@ -431,29 +496,33 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          {canManageCatalog && (
-            <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menu.catId) { setSubParent(menu.catId); setExpanded((e) => ({ ...e, [menu.catId!]: true })); setSubName(""); } else { rootNameInputRef.current?.focus(); } setMenu(null); }}>
-              <FolderPlus className="w-3.5 h-3.5" /> {menu.catId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
-            </button>
-          )}
-          {!manageMode && (
-            <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menu.catId); setMenu(null); }}>
-              <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
-            </button>
-          )}
-          {menu.catId && canManageCatalog && (
+          {menu.target.kind === "item" ? itemMenu(menu.target.item) : (
             <>
-              <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => {
-                const c = cats.find((x) => x.id === menu.catId);
-                setEditId(menu.catId); setEditName(c?.name || ""); setMenu(null);
-              }}>
-                <Pencil className="w-3.5 h-3.5" /> تعديل اسم التصنيف
-              </button>
-              <button type="button" className="ktra-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
-                const id = menu.catId; setMenu(null); void deleteCat(id!);
-              }}>
-                <Trash2 className="w-3.5 h-3.5" /> حذف التصنيف
-              </button>
+              {canManageCatalog && (
+                <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { if (menuCatId) { setSubParent(menuCatId); setExpanded((e) => ({ ...e, [menuCatId]: true })); setSubName(""); } else { rootNameInputRef.current?.focus(); } setMenu(null); }}>
+                  <FolderPlus className="w-3.5 h-3.5" /> {menuCatId ? "إضافة تصنيف فرعي" : "إضافة تصنيف رئيسي"}
+                </button>
+              )}
+              {!manageMode && (
+                <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => { openAddItem(menuCatId); setMenu(null); }}>
+                  <PackagePlus className="w-3.5 h-3.5" /> إضافة منتج هنا
+                </button>
+              )}
+              {menuCatId && canManageCatalog && (
+                <>
+                  <button type="button" className="ktra-ctxmenu-item" style={ctxItemStyle} onClick={() => {
+                    const c = cats.find((x) => x.id === menuCatId);
+                    setEditId(menuCatId); setEditName(c?.name || ""); setMenu(null);
+                  }}>
+                    <Pencil className="w-3.5 h-3.5" /> تعديل اسم التصنيف
+                  </button>
+                  <button type="button" className="ktra-ctxmenu-item text-red-600 hover:bg-red-50" style={{...ctxItemStyle, color: "#dc2626"}} onClick={() => {
+                    const id = menuCatId; setMenu(null); void deleteCat(id!);
+                  }}>
+                    <Trash2 className="w-3.5 h-3.5" /> حذف التصنيف
+                  </button>
+                </>
+              )}
             </>
           )}
         </div>,
