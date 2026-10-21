@@ -79,6 +79,27 @@ const exportItemStyle: React.CSSProperties = {
   background: "none", border: "none", cursor: "pointer", color: "var(--ktra-ink)",
 };
 
+// آخر وضع عرضٍ اختاره المستخدم — لكل متصفح، لا لكل حساب (تفضيل جهازٍ لا صلاحية).
+const DISPLAY_MODE_STORAGE_KEY = "ktra.items.displayMode";
+type DisplayMode = "tree" | "table";
+
+function readDisplayMode(): DisplayMode {
+  try {
+    const raw = window.localStorage.getItem(DISPLAY_MODE_STORAGE_KEY);
+    return raw === "tree" || raw === "table" ? raw : "tree";
+  } catch {
+    return "tree";
+  }
+}
+
+function storeDisplayMode(mode: DisplayMode) {
+  try {
+    window.localStorage.setItem(DISPLAY_MODE_STORAGE_KEY, mode);
+  } catch {
+    /* تخزين محجوب (نافذة خاصّة) — الاختيار يبقى للجلسة وحدها */
+  }
+}
+
 /**
  * البطاقة الجانبية للعرض الشجري — العرض الشجري كان يشغل شريط 240px ويترك بقية
  * عرض الشاشة بياضاً، والنقر على منتج (أو تصنيف) يقذف المستخدم إلى تبويب جديد.
@@ -213,8 +234,8 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
   const [err, setErr] = useState<string | null>(null);
   const [view, setView] = useState<View>("list");
   // T-N3: عرض المنتجات كشجرة تصنيفات (مثل شجرة المنتجات في الفواتير) أو كجدول.
-  // الافتراضي «جدول» (بطلب المالك) — يفتح على وضعية الجدول مباشرةً.
-  const [displayMode, setDisplayMode] = useState<"tree" | "table">("table");
+  // الافتراضي «شجرة» (بطلب المالك 2026-10-21)، ويُحفظ آخر اختيارٍ في المتصفح.
+  const [displayMode, setDisplayMode] = useState<DisplayMode>(readDisplayMode);
   const [editId, setEditId] = useState<number | null>(null);
   const [duplicateId, setDuplicateId] = useState<number | null>(null);
   // المعروض في بطاقة العرض الشجري (يمين: الشجرة · يسار: بطاقة ما اخترته).
@@ -280,11 +301,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
       if (status) params.stock_status = status;
       params.status = active;
       if (ordering) params.ordering = ordering;
-      // المرحلة 5 / P0-12: العرض الجدولي (الافتراضي) يجلب **صفحة واحدة** —
+      // المرحلة 5 / P0-12: العرض الجدولي يجلب **صفحة واحدة** —
       // كان يدور على كل الصفحات (page_size=200) فيُصدر 8 طلبات متسلسلة لـ1490
       // منتجاً، ويُعيد ذلك كاملاً بعد كل دورة بحث (debounce 250ms).
-      // العرض الشجري يجمّع حسب التصنيف فيحتاج المجموعة كاملة بطبيعته — يبقى
-      // على الجلب الكامل، وهو ليس الوضع الافتراضي.
+      // العرض الشجري هو الافتراضي (B3)، ويجمّع حسب التصنيف فيحتاج المجموعة
+      // كاملة بطبيعته — يبقى على الجلب الكامل.
       let allRows: SqlProduct[];
       if (mode === "tree") {
         allRows = await inventoryApi.getAllProducts(params) as SqlProduct[];
@@ -919,7 +940,11 @@ export const ItemsManagement: React.FC<{ user?: unknown, initialTab?: "products"
         {/* T-N3: مبدّل عرض الشجرة/الجدول */}
         <button
           className="ktra-toolbtn"
-          onClick={() => setDisplayMode(displayMode === "tree" ? "table" : "tree")}
+          onClick={() => {
+            const next = displayMode === "tree" ? "table" : "tree";
+            setDisplayMode(next);
+            storeDisplayMode(next);
+          }}
           title={displayMode === "tree" ? "عرض كجدول" : "عرض كشجرة تصنيفات"}
         >
           {displayMode === "tree" ? <Table2 className="h-4 w-4" /> : <ListTree className="h-4 w-4" />}

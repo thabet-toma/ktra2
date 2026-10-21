@@ -22,11 +22,10 @@ test.beforeEach(async ({ page }) => {
   });
 });
 
-/** الشجرة مفتوحة على شاشة المنتجات، والتصنيف «إطارات» مفتوح بأوراقه. */
+/** الشجرة مفتوحة على شاشة المنتجات (هي الافتراضية، B3)، والتصنيف «إطارات» مفتوح بأوراقه. */
 async function openTreeWithProducts(page: import('@playwright/test').Page) {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
-  await page.getByTitle('عرض كشجرة تصنيفات').click();
   const tree = page.locator('.ktra-tree-panel');
   await expect(tree).toBeVisible();
   await tree.getByTitle('فتح').first().click();

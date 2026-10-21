@@ -1,4 +1,5 @@
 import { test, expect, type Locator, type Page } from '@playwright/test';
+import { switchItemsToTable } from './items-view';
 
 /**
  * B2 — البراند قابلٌ للتعديل من كل سطح تعديل، ولا يُمسح بالخطأ.
@@ -171,6 +172,8 @@ const floatWin = (page: Page, titlePart: string) =>
 const openItemCard = async (page: Page) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
+  // الشجرة صارت الافتراضية (B3) — هذه الاختبارات تبدأ من الجدول.
+  await switchItemsToTable(page);
   // نقرتان على خلية الرمز تفتحان الكرت الكامل (المنفذ القائم).
   await page.getByTitle('SKU-7').first().dblclick();
   await page.locator('.ktra-title-chip', { hasText: 'كرت المنتج' }).waitFor();

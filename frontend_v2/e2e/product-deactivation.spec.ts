@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import type { Page, Route } from '@playwright/test';
+import { switchItemsToTable } from './items-view';
 
 /**
  * T4 — إيقاف المنتج من قائمة المنتجات.
@@ -102,8 +103,17 @@ const signIn = async (page: Page) => {
   });
 };
 
-test('الافتراضي نشط، والإيقاف يطلب تأكيداً بالرصيد والمسوّدات، والإلغاء لا يكتب شيئاً', async ({ page }) => {
+/**
+ * الشجرة صارت الافتراضية (B3) — هذه الاختبارات تخصّ الجدول، فتُبدّله صراحةً
+ * بعد الإقلاع.
+ */
+const openTable = async (page: Page) => {
   await page.goto('/items');
+  await switchItemsToTable(page);
+};
+
+test('الافتراضي نشط، والإيقاف يطلب تأكيداً بالرصيد والمسوّدات، والإلغاء لا يكتب شيئاً', async ({ page }) => {
+  await openTable(page);
   await expect(page.getByText('إطار 205/55').first()).toBeVisible({ timeout: 20000 });
   await expect(page.getByText('بطارية')).toHaveCount(0);
   expect(listQueries.length).toBeGreaterThan(0);
@@ -123,7 +133,7 @@ test('الافتراضي نشط، والإيقاف يطلب تأكيداً با�
 });
 
 test('التأكيد يرسل set-active مرّةً واحدة، ومرشّح «موقوف» يعرض الصفّ بشارته وزرّ التنشيط', async ({ page }) => {
-  await page.goto('/items');
+  await openTable(page);
   await expect(page.getByText('إطار 205/55').first()).toBeVisible({ timeout: 20000 });
 
   await page.getByTestId('product-deactivate').first().click();
@@ -145,7 +155,7 @@ test('التأكيد يرسل set-active مرّةً واحدة، ومرشّح «
 });
 
 test('بطاقة المنتج الموقوف: شريط «غير نشط» وزرّ تنشيط، وتنشيطه يُخفي الشريط', async ({ page }) => {
-  await page.goto('/items');
+  await openTable(page);
   await page.getByTestId('items-active-filter-inactive').click();
   await expect(page.getByText('بطارية').first()).toBeVisible({ timeout: 20000 });
   await page.getByTitle('تعديل', { exact: true }).first().click();

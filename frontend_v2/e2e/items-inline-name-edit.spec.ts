@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { switchItemsToTable } from './items-view';
 
 /**
  * T-PRODUCT M2 — اسم المنتج في الجدول: نصٌّ يُحرَّر في مكانه، لا رابطٌ يُنقَل عنه.
@@ -114,6 +115,9 @@ test.beforeEach(async ({ page }) => {
 const openItems = async (page: import('@playwright/test').Page) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
+  // الشجرة صارت الافتراضية (B3)، وهذه الاختبارات تخصّ الجدول — تُبدّله وتنتظر
+  // جلبها (وإلا وصل ردٌّ متأخّر بعد الحفظ فمحا الاسم المُعدَّل).
+  await switchItemsToTable(page);
 };
 
 const nameCell = (page: import('@playwright/test').Page) =>

@@ -2,6 +2,7 @@ import { humanizeDrfError } from "../utils/drfError";
 import type { AddBrandTarget } from "../utils/brandActions";
 import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
+import { remainingPageNumbers } from "../utils/paging";
 import { apiFetch, apiGetList, apiGetObject, apiPostObject, toPagedList } from "./restApi";
 
 // أبقِ عقد الخدمة كما هو، مع مهلة/إلغاء موحّدين لكل طلباتها.
@@ -233,25 +234,52 @@ export const inventoryApi = {
   },
 
   /**
-   * كل المنتجات عبر حلقة صفحات. **لا تستخدمها لعرض قائمة** — بقيت لعمليات
+   * كل المنتجات عبر صفحات. **لا تستخدمها لعرض قائمة** — بقيت لعمليات
    * تحتاج المجموعة كاملةً بطبيعتها (التصدير للطباعة، والعرض الشجري الذي
    * يجمّع حسب التصنيف). العرض الجدولي يستخدم getProductsPaged.
+   *
+   * الصفحة الأولى وحدها تعطي `count`، فتُطلب الباقي **بالتوازي** بسقف أربعة
+   * طلبات بدل الحلقة المتتالية (الشجرة كانت تنزّل الكتالوج كاملاً طلباً بعد
+   * طلب). وأرقامُ الصفحات تتبع حجم الصفحة **الفعلي** الذي يعيده الخادم
+   * (`utils/paging`): خادمٌ يحدّ `page_size` بأقلّ ممّا طُلب يُحسب على حجمه هو،
+   * فلا يُفقد صفّ. والصفوف تُعاد بترتيب الصفحات، فالنتيجة للبيانات الثابتة هي
+   * نفسها التي كانت تعطيها الحلقة القديمة صفّاً بصفّ.
    */
   getAllProducts: async (params?: Record<string, string | number>) => {
-    const allRows: any[] = [];
-    let pg = 1;
-    for (;;) {
-      const p = { ...params, page: pg, page_size: 200 };
+    const pageSize = 200;
+    const fetchPage = async (pg: number) => {
+      const p = { ...params, page: pg, page_size: pageSize };
       const q = `?${new URLSearchParams(p as unknown as Record<string, string>)}`;
       const res = await fetch(`${INV}/products/${q}`, { headers: headers() });
       await handle(res, "inventory");
-      const data = await res.json();
-      const rows = Array.isArray(data) ? data : (data.results ?? []);
-      allRows.push(...rows);
-      const count = Array.isArray(data) ? rows.length : (data.count ?? allRows.length);
-      if (rows.length === 0 || allRows.length >= count) break;
-      pg++;
-    }
+      return res.json();
+    };
+
+    const first = await fetchPage(1);
+    // استجابةٌ غير مُرقَّمة (مصفوفة) — كما كانت الحلقة القديمة تُنهيها فوراً.
+    if (Array.isArray(first)) return first;
+    const firstRows: any[] = first.results ?? [];
+    const count: number = first.count ?? firstRows.length;
+    const pages = remainingPageNumbers(count, pageSize, firstRows.length);
+
+    // عاملون متوازون بسقفٍ واحد: `next` يُقرأ ويُزاد قبل أيّ `await`، فلا
+    // صفحة تُطلب مرتين. وفشلُ أيّ صفحة يرفض الوعد كلّه (`Promise.all`).
+    const rowsByPage: any[][] = [];
+    let next = 0;
+    const worker = async () => {
+      for (;;) {
+        const i = next++;
+        if (i >= pages.length) return;
+        const data = await fetchPage(pages[i]);
+        rowsByPage[i] = Array.isArray(data) ? data : (data.results ?? []);
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(4, pages.length) }, () => worker()),
+    );
+
+    const allRows: any[] = [...firstRows];
+    for (const rows of rowsByPage) allRows.push(...rows);
     return allRows;
   },
 

@@ -225,7 +225,12 @@ const install = async (page: Page, state: ServerState) => {
     if (path.endsWith("/product-families/check-name/") && method === "GET") {
       const name = (url.searchParams.get("name") || "").trim();
       if (state.family && name && name === state.family.name_ar) {
-        return json({ match: { id: state.family.id, name_ar: state.family.name_ar, name_en: state.family.name_en } });
+        // العقد نفسه الذي يردّه الخادم (inventory/views.py `check_name`):
+        // `family_id` و`product_id` صريحان — والباقي يجعل الواجهة تخمّن هدفاً خاطئاً.
+        return json({ match: {
+          id: state.family.id, family_id: state.family.id, product_id: null,
+          name_ar: state.family.name_ar, name_en: state.family.name_en,
+        } });
       }
       return json({ match: null });
     }
@@ -346,7 +351,7 @@ test("سجّل منتجاً ← اقترح أضف براند ← أضفه ← ا
 
   // ── 1) تسجيل المنتج بالاسم فقط — الأب يُنشأ ضمنياً، لا اختيار له هنا. ──
   await page.goto("/items");
-  await page.getByTitle("إضافة منتج (Ctrl+Ins)").click();
+  await page.getByTitle("منتج جديد (Ctrl+Ins)").click();
 
   const nameField = page.locator('.ktra-field:has(span:text-is("اسم المنتج")) input').first();
   await expect(nameField).toBeVisible();
@@ -358,11 +363,11 @@ test("سجّل منتجاً ← اقترح أضف براند ← أضفه ← ا
   expect(state.product).not.toBeNull();
   // المنتج الضمنيّ وُلد بلا براند — لم يُخترع اسمٌ من عندنا.
   expect(state.product!.brand).toBe("");
-  // عاد إلى القائمة (لا يزال زرّ «إضافة منتج» ظاهراً) — لم يبقَ الكرت مفتوحاً.
-  await expect(page.getByTitle("إضافة منتج (Ctrl+Ins)")).toBeVisible();
+  // عاد إلى القائمة (لا يزال زرّ «منتج جديد» ظاهراً) — لم يبقَ الكرت مفتوحاً.
+  await expect(page.getByTitle("منتج جديد (Ctrl+Ins)")).toBeVisible();
 
   // ── 2) تسجيل نفس الاسم ثانيةً ← اقتراح «هذا موجود — أضف براند». ──
-  await page.getByTitle("إضافة منتج (Ctrl+Ins)").click();
+  await page.getByTitle("منتج جديد (Ctrl+Ins)").click();
   const nameField2 = page.locator('.ktra-field:has(span:text-is("اسم المنتج")) input').first();
   await expect(nameField2).toHaveValue("");
   await nameField2.fill(PRODUCT_NAME);
@@ -372,7 +377,7 @@ test("سجّل منتجاً ← اقترح أضف براند ← أضفه ← ا
   await expect(offerBanner).toContainText(PRODUCT_NAME);
 
   // ── 3) أضف ذلك البراند — يُسمّي البراند الضمنيّ لنفس الصفّ، لا صفّاً ثانياً. ──
-  await page.getByPlaceholder("اسم البراند").fill(BRAND_NAME);
+  await page.getByPlaceholder("اسم البراند", { exact: true }).fill(BRAND_NAME);
   await page.getByRole("button", { name: "أضف براند إلى هذا المنتج" }).click();
 
   await expect.poll(() => state.addBrandCalls.length).toBe(1);

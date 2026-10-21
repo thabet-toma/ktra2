@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { installItemsTreeApiStubs } from './items-tree-stubs';
+import { switchItemsToTable } from './items-view';
 
 /**
  * العرض الشجري للمنتجات: الشجرة شريط 240px على اليمين، وبقية عرض الشاشة — التي
@@ -18,8 +19,8 @@ test('الفراغ بجانب شجرة المنتجات يصير بطاقة ال
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
 
-  // التبديل إلى العرض الشجري (الافتراضي جدول).
-  await page.getByTitle('عرض كشجرة تصنيفات').click();
+  // الشجرة هي الافتراضية (B3) — بلا تبديلٍ من الشريط.
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
 
   const hint = page.getByText('اختر منتجاً من الشجرة لتظهر بطاقته هنا');
   await expect(hint).toBeVisible();
@@ -49,7 +50,7 @@ test('الفراغ بجانب شجرة المنتجات يصير بطاقة ال
 test('اختيار منتج آخر يبدّل البطاقة في مكانها', async ({ page }) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
-  await page.getByTitle('عرض كشجرة تصنيفات').click();
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
 
   const tree = page.locator('.ktra-tree-panel');
   await tree.getByTitle('فتح').first().click();
@@ -66,7 +67,7 @@ test('اختيار منتج آخر يبدّل البطاقة في مكانها',
 test('النقر على تصنيف يعرض كرته المجمّع في البطاقة نفسها — لا تبويب جديد', async ({ page }) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
-  await page.getByTitle('عرض كشجرة تصنيفات').click();
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
 
   const tree = page.locator('.ktra-tree-panel');
   await tree.getByRole('button', { name: 'إطارات' }).click();
@@ -92,7 +93,7 @@ test('النقر على تصنيف يعرض كرته المجمّع في الب�
 test('طيّ الشجرة يسلّم عرضها للبطاقة — شريط لا لوحة فارغة', async ({ page }) => {
   await page.goto('/items');
   await page.waitForLoadState('networkidle');
-  await page.getByTitle('عرض كشجرة تصنيفات').click();
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
   await page.locator('.ktra-tree-panel').getByRole('button', { name: 'إطارات' }).click();
 
   const paneBefore = (await page.getByRole('tablist').boundingBox())!;
@@ -134,4 +135,28 @@ test('الكرت المجمّع الكامل (/product-group) يعرض التب�
   await expect(page.getByRole('tab', { name: 'نظرة عامة (مجمّع)' })).toBeVisible();
   await expect(page.getByText('عدد البراندات')).toBeVisible();
   await expect(page.getByRole('tab', { name: 'حركة المخزون (مجمّعة)' })).toBeVisible();
+});
+
+/**
+ * B3: الشجرة افتراضيةٌ (بطلب المالك 2026-10-21)، وآخرُ اختيارٍ يُحفظ في
+ * المتصفح فلا يعيد المستخدمُ التبديل كلَّ مرّة. لسانُ الحالة لقبُ زرّ التبديل:
+ * «عرض كجدول» في الشجرة، و«عرض كشجرة تصنيفات» في الجدول.
+ */
+test('الافتراضي شجرة، والاختيار يُحفظ بعد إعادة التحميل', async ({ page }) => {
+  await page.goto('/items');
+  await page.waitForLoadState('networkidle');
+  await expect(page.locator('.ktra-tree-panel')).toBeVisible();
+  expect(await page.evaluate(() => localStorage.getItem('ktra.items.displayMode'))).toBeNull();
+
+  await switchItemsToTable(page);
+  await expect(page.locator('.ktra-tree-panel')).toHaveCount(0);
+  await expect(page.getByTitle('نقرتان أو F2 لتعديل الاسم').first()).toBeVisible();
+
+  expect(await page.evaluate(() => localStorage.getItem('ktra.items.displayMode'))).toBe('table');
+
+  await page.reload();
+  await page.waitForLoadState('networkidle');
+  await expect(page.getByTitle('عرض كشجرة تصنيفات')).toBeVisible();
+  await expect(page.getByTitle('نقرتان أو F2 لتعديل الاسم').first()).toBeVisible();
+  await expect(page.locator('.ktra-tree-panel')).toHaveCount(0);
 });
