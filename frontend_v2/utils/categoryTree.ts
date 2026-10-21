@@ -28,7 +28,13 @@ export interface CategoryNodeLike {
 }
 
 /** مفتاح الفهرسة — نصٌّ دائماً، فلا يفترق `3` عن `"3"`. */
-const keyOf = (id: CategoryId): string => String(id);
+export const categoryKey = (id: CategoryId): string => String(id);
+
+/** الاسم الداخلي القصير للمفتاح نفسه — لا نسخة ثانية من القاعدة. */
+const keyOf = categoryKey;
+
+/** فاصل المسار «أ ‹ ب» — يُبنى به النصّ في كل موضع، فلا يفترق فاصلٌ عن آخر. */
+export const PATH_SEPARATOR = ' ‹ ';
 
 export interface CategoryIndex<T extends CategoryNodeLike> {
   /** مفاتيحها نصّية — استعمل `String(id)` عند الاستعلام. */
@@ -148,21 +154,53 @@ export const descendantIds = <T extends CategoryNodeLike>(
   return out;
 };
 
+/**
+ * العُقد من عقدةٍ صعوداً إلى الجذر (العقدة نفسها أولاً) — المشي الصعودي الوحيد
+ * في الوحدة، وعليه تُبنى المسارات والأسلاف معاً. محروسٌ من الحلقات، ويتوقّف
+ * عند الأب الغائب عن القائمة (تصنيفٌ يتيم).
+ */
+const walkUpToRoot = <T extends CategoryNodeLike>(
+  byId: Map<string, T>, start: T | undefined,
+): T[] => {
+  const out: T[] = [];
+  const seen = new Set<string>();
+  let node = start;
+  while (node && !seen.has(keyOf(node.id))) {
+    seen.add(keyOf(node.id));
+    out.push(node);
+    const parent = parentKeyOf(node, byId);
+    node = parent != null ? byId.get(parent) : undefined;
+  }
+  return out;
+};
+
+/** أسلاف العقدة (الأب حتى الجذر) من فهرسٍ جاهز. */
+const ancestorsOf = <T extends CategoryNodeLike>(
+  byId: Map<string, T>, idKey: string,
+): T[] => walkUpToRoot(byId, byId.get(idKey)).slice(1);
+
+/** أسماء المسار من الجذر إلى العقدة — الفاصل يضيفه المستدعي. محروسٌ من الحلقات. */
+const pathNamesTo = <T extends CategoryNodeLike>(
+  byId: Map<string, T>, start: T | undefined,
+): string[] => walkUpToRoot(byId, start).map(nameOf).reverse();
+
+/**
+ * معرّفات الأسلاف من الأب حتى الجذر (بلا العقدة نفسها) — لفتح المسار إلى
+ * تصنيفٍ محدَّد. تُعاد كما هي على العُقد، ويتوقّف المشي عند اليتيم والحلقة.
+ */
+export const ancestorIds = <T extends CategoryNodeLike>(
+  categories: T[], categoryId: CategoryId,
+): Array<T['id']> => {
+  const { byId } = buildCategoryIndex(categories);
+  return ancestorsOf(byId, keyOf(categoryId)).map((node) => node.id);
+};
+
 /** أسماء المسار من الجذر إلى التصنيف — للـbreadcrumb «أ ‹ ب ‹ ج». */
 export const categoryPath = <T extends CategoryNodeLike>(
   categories: T[], categoryId: CategoryId,
 ): string[] => {
   const { byId } = buildCategoryIndex(categories);
-  const names: string[] = [];
-  const seen = new Set<string>();
-  let node = byId.get(keyOf(categoryId));
-  while (node && !seen.has(keyOf(node.id))) {
-    seen.add(keyOf(node.id));
-    names.unshift(nameOf(node));
-    const parent = parentKeyOf(node, byId);
-    node = parent != null ? byId.get(parent) : undefined;
-  }
-  return names;
+  return pathNamesTo(byId, byId.get(keyOf(categoryId)));
 };
 
 /** المسار نصّاً — الفاصل «‹» يقرأ من اليمين لليسار طبيعياً في العربية. */
@@ -171,7 +209,7 @@ export const categoryPathLabel = <T extends CategoryNodeLike>(
 ): string => {
   if (categoryId == null) return fallback;
   const path = categoryPath(categories, categoryId);
-  return path.length ? path.join(' ‹ ') : fallback;
+  return path.length ? path.join(PATH_SEPARATOR) : fallback;
 };
 
 /**
@@ -186,4 +224,296 @@ export const eligibleParents = <T extends CategoryNodeLike>(
   if (categoryId == null) return categories;
   const banned = new Set(descendantIds(categories, categoryId).map(keyOf));
   return categories.filter((c) => !banned.has(keyOf(c.id)));
+};
+
+// ─── C1 — الاختيار: مجموعةٌ صريحة من المعرّفات المؤشَّرة ─────────────────────
+
+/**
+ * دلالة الاختيار (قرار الخطة 3): كل عقدة مؤشَّرة تعني **منتجاتها المباشرة**،
+ * لا أحفادها. الأب المؤشَّر يؤشّر أحفاده بصرياً كي يبقى «تحديد الكل» بضغطة،
+ * لكن إلغاء ابنٍ يُبقي منتجات الأب المباشرة مشمولة ويجعل الأب «جزئياً» —
+ * ولهذا لم تُعرَّف الحالة بأنها «الأب يعني كل أحفاده»: ذاك التعبير يمحو
+ * «الجزئي» ولا يُكتب.
+ */
+export type CategoryCheckState = 'on' | 'off' | 'partial';
+
+/**
+ * حالة مربّع عقدة: مؤشَّرة وكل أحفادها · لا هي ولا أيّ حفيد · وإلا جزئية.
+ *
+ * عقدةٌ يتيمة (أبوها خارج القائمة) تُقرأ جذراً، وحلقة بياناتٍ لا تُعلّقها —
+ * كلتاهما محروستان في `descendantIds`.
+ */
+export const checkState = <T extends CategoryNodeLike>(
+  categories: T[], checked: ReadonlySet<T['id']>, categoryId: T['id'],
+): CategoryCheckState => {
+  const keys = new Set<string>();
+  for (const id of checked) keys.add(keyOf(id));
+  const selfKey = keyOf(categoryId);
+  const descendants = descendantIds(categories, categoryId)
+    .map(keyOf)
+    .filter((key) => key !== selfKey);
+  if (!keys.has(selfKey)) {
+    return descendants.some((key) => keys.has(key)) ? 'partial' : 'off';
+  }
+  return descendants.every((key) => keys.has(key)) ? 'on' : 'partial';
+};
+
+/**
+ * حالة **كل** العُقد في مرورٍ واحد (فهرسٌ واحد + مشيٌ بعديّ واحد) بدل
+ * `checkState` لكل صفّ — فتُبنى الشجرة مرّةً لكل رسمٍ لا مرّةً لكل عقدة.
+ *
+ * الحساب على مكوّنات الاتصال القويّ (Tarjan): عُقد الحلقة الواحدة تتشارك
+ * مجموعة أحفادها، فيُطوى كلُّ مكوّنٍ عقدةً واحدة في التكثيف ثم تُجمع أعداد
+ * الأحفاد من الأسفل. النتيجة مطابقةٌ لـ`checkState` عقدةً بعقدة، حتى في حلقة
+ * بياناتٍ قديمة — اختبار التكافؤ يحرس ذلك.
+ *
+ * القاعدة المختصرة: مؤشَّرٌ من كل الأحفاد ⇒ `on` · بعضهم ⇒ `partial` · لا شيء ⇒ `off`.
+ */
+export const checkStates = <T extends CategoryNodeLike>(
+  categories: T[], checked: ReadonlySet<T['id']>,
+): Map<string, CategoryCheckState> => {
+  const { byId, childrenOf } = buildCategoryIndex(categories);
+  const checkedKeys = new Set<string>();
+  for (const id of checked) checkedKeys.add(keyOf(id));
+
+  const visitedAt = new Map<string, number>();
+  const low = new Map<string, number>();
+  const compOf = new Map<string, number>();
+  const stack: string[] = [];
+  const onStack = new Set<string>();
+  const compSize: number[] = [];
+  const compReach: number[] = [];
+  const compCheckedReach: number[] = [];
+  let counter = 0;
+
+  const connect = (key: string) => {
+    visitedAt.set(key, counter);
+    low.set(key, counter);
+    counter += 1;
+    stack.push(key);
+    onStack.add(key);
+
+    for (const child of childrenOf.get(key) ?? []) {
+      const childKey = keyOf(child.id);
+      if (!visitedAt.has(childKey)) {
+        connect(childKey);
+        low.set(key, Math.min(low.get(key) as number, low.get(childKey) as number));
+      } else if (onStack.has(childKey)) {
+        low.set(key, Math.min(low.get(key) as number, visitedAt.get(childKey) as number));
+      }
+    }
+
+    if (low.get(key) !== visitedAt.get(key)) return;
+
+    const comp = compSize.length;
+    const members: string[] = [];
+    let member: string;
+    do {
+      member = stack.pop() as string;
+      onStack.delete(member);
+      compOf.set(member, comp);
+      members.push(member);
+    } while (member !== key);
+
+    let checkedCount = 0;
+    for (const m of members) if (checkedKeys.has(m)) checkedCount += 1;
+    compSize.push(members.length);
+
+    // أحفاد المكوّن: مكوّنات أبنائه في التكثيف، بلا نفسه وبلا تكرار.
+    const successors = new Set<number>();
+    for (const m of members) {
+      for (const child of childrenOf.get(m) ?? []) {
+        const childComp = compOf.get(keyOf(child.id));
+        if (childComp != null && childComp !== comp) successors.add(childComp);
+      }
+    }
+    let reach = members.length;
+    let reachChecked = checkedCount;
+    for (const successor of successors) {
+      reach += compReach[successor];
+      reachChecked += compCheckedReach[successor];
+    }
+    compReach.push(reach);
+    compCheckedReach.push(reachChecked);
+  };
+
+  // كل عقدة تُزار — بما فيها عُقدُ حلقةٍ لا يبلغها أيّ جذر.
+  for (const key of byId.keys()) if (!visitedAt.has(key)) connect(key);
+
+  const states = new Map<string, CategoryCheckState>();
+  for (const key of byId.keys()) {
+    const comp = compOf.get(key) as number;
+    const reach = compReach[comp];
+    const reachChecked = compCheckedReach[comp];
+    states.set(
+      key,
+      reachChecked === 0 ? 'off' : reachChecked < reach ? 'partial' : 'on',
+    );
+  }
+  return states;
+};
+
+/**
+ * تبديل عقدةٍ وشجرتها: من «مؤشَّرة» يُزيلها مع أحفادها، ومن «مطفأة» أو
+ * «جزئية» يُضيفها مع أحفادها. المجموعة المُدخلة لا تُمَسّ — تعود مجموعةٌ جديدة.
+ *
+ * التمثيل يُطبَّع: `3` و`"3"` لا يقبعان معاً في النتيجة، كما تتساوى العُرفان
+ * في الفهرس.
+ */
+export const toggleSubtree = <T extends CategoryNodeLike>(
+  categories: T[], checked: ReadonlySet<T['id']>, categoryId: T['id'],
+): Set<T['id']> => {
+  const descendants = descendantIds(categories, categoryId);
+  // معرّفٌ خارج القائمة (تصنيفٌ حُذف بين رسمتين) لا يُضاف شبحاً إلى القيمة.
+  if (!descendants.length) return new Set<T['id']>(checked);
+  const targetKeys = new Set(descendants.map(keyOf));
+  const next = new Set<T['id']>(checked);
+  for (const id of checked) {
+    if (targetKeys.has(keyOf(id))) next.delete(id);
+  }
+  if (checkState(categories, checked, categoryId) !== 'on') {
+    for (const id of descendants) next.add(id);
+  }
+  return next;
+};
+
+/**
+ * شجرة `restrictTo`: العُقد المسموحة وحدها، وكلُّ عقدةٍ يُعاد ربط أبٍ لها
+ * بأقرب أبٍ **مسموح** (أو `null` إن لم يوجد) — لا بالمسار الكامل.
+ *
+ * لولا هذا الربط لكان تأشير الأب في نطاقٍ مقصور يُدخل في القيمة أحفاداً خارج
+ * النطاق لم يرها المستخدم، فصار إلغاء تأشير الأب مستحيلاً: `checkState` ترى
+ * أحفاداً لا يمكن الوصول إليها. بالربط الأقرب يصير التأشير والإلغاء دورةً
+ * مغلقة داخل النطاق: أ ⟵ ب ⟵ ج والمسموح {أ, ج} ⇒ أ مؤشَّرة تعني {أ, ج}.
+ */
+export const restrictCategories = <T extends CategoryNodeLike>(
+  categories: T[], allowedIds: ReadonlyArray<CategoryId>,
+): T[] => {
+  const { byId } = buildCategoryIndex(categories);
+  const allowed = new Set<string>(allowedIds.map(keyOf));
+  const out: T[] = [];
+  for (const category of categories) {
+    const selfKey = keyOf(category.id);
+    if (!allowed.has(selfKey)) continue;
+    const nearest = ancestorsOf(byId, selfKey)
+      .find((node) => allowed.has(keyOf(node.id)));
+    const copy = { ...category };
+    copy.parent = nearest ? nearest.id : null;
+    out.push(copy);
+  }
+  return out;
+};
+
+/**
+ * مفاتيح صفوف المسار في نطاقٍ مقصور: أسلاف كل عقدةٍ مسموحة، بلا العُقد
+ * المسموحة نفسها. تُزرَع بها `expanded` كي يُرى المسموح عند أوّل رسم — وإلا
+ * بقي مخبوئاً تحت جذورٍ مطويّة يفتحها المستخدم واحدةً واحدة بيده.
+ */
+export const restrictPathKeys = <T extends CategoryNodeLike>(
+  categories: T[], allowedIds: ReadonlyArray<CategoryId>,
+): Set<string> => {
+  const { byId } = buildCategoryIndex(categories);
+  const keys = new Set<string>();
+  for (const id of allowedIds) {
+    for (const ancestor of ancestorsOf(byId, keyOf(id))) keys.add(keyOf(ancestor.id));
+  }
+  return keys;
+};
+
+export interface VisibleTreeRowOptions {
+  /** مفاتيح العُقد المفتوحة — الاستعلام يُلغي أثرها ويفتح المسارات المطابقة. */
+  expanded: ReadonlySet<string>;
+  /** نطاقٌ مقصور: المسار إلى كل عقدةٍ مسموحة يُعرض غير قابلٍ للاختيار. */
+  restrictTo?: ReadonlyArray<CategoryId> | null;
+  query?: string;
+}
+
+export interface VisibleCategoryRow<T extends CategoryNodeLike> {
+  category: T;
+  id: T['id'];
+  depth: number;
+  hasChildren: boolean;
+  /** خارج `restrictTo`: سطرُ مسارٍ للوصول وحده، لا اختيار. */
+  selectable: boolean;
+}
+
+/**
+ * صفوف العرض بترتيب العمق: تتقيّد بالطيّ و`restrictTo` واستعلام البحث، وتُبقي
+ * `depth` و`hasChildren` للرسم ولوحة المفاتيح. المشي محروسٌ من الحلقات.
+ */
+export const visibleTreeRows = <T extends CategoryNodeLike>(
+  categories: T[], options: VisibleTreeRowOptions,
+): Array<VisibleCategoryRow<T>> => {
+  const { byId, childrenOf } = buildCategoryIndex(categories);
+  const allowed = options.restrictTo
+    ? new Set<string>(options.restrictTo.map(keyOf))
+    : null;
+  const q = (options.query ?? '').trim();
+  let visible: Set<string> | null = null;
+
+  if (allowed) {
+    visible = new Set<string>(allowed);
+    for (const key of allowed) {
+      for (const ancestor of ancestorsOf(byId, key)) visible.add(keyOf(ancestor.id));
+    }
+  }
+  if (q) {
+    // مع `restrictTo` البحثُ **تقاطعٌ لا اتحاد**: مطابقاتُ النطاق ومساراتها
+    // وحدها. الاتّحاد كان يعرض المسموح كلَّه فوق نتائج البحث، فلا يُرشَّح شيء
+    // ولا تبلغ الشاشةُ «لا تطابق» أبداً، وتظهر صفوفٌ لا علاقة لها بالاستعلام.
+    const hits = searchCategories(categories, q).filter(
+      (hit) => !allowed || allowed.has(keyOf(hit.id)),
+    );
+    visible = new Set<string>();
+    for (const hit of hits) {
+      const key = keyOf(hit.id);
+      visible.add(key);
+      for (const ancestor of ancestorsOf(byId, key)) visible.add(keyOf(ancestor.id));
+    }
+  }
+
+  const rows: Array<VisibleCategoryRow<T>> = [];
+  const seen = new Set<string>();
+  const walk = (parent: string | null, depth: number) => {
+    for (const category of childrenOf.get(parent) ?? []) {
+      const key = keyOf(category.id);
+      if (seen.has(key)) continue;
+      if (visible && !visible.has(key)) continue;
+      seen.add(key);
+      const children = childrenOf.get(key) ?? [];
+      const hasChildren = children.some((c) => !visible || visible.has(keyOf(c.id)));
+      rows.push({
+        category,
+        id: category.id,
+        depth,
+        hasChildren,
+        selectable: !allowed || allowed.has(key),
+      });
+      // استعلام البحث يفتح الفروع المطابقة تلقائياً، وإلا فحالة الطيّ هي الحكم.
+      if (hasChildren && (q || options.expanded.has(key))) walk(key, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
+};
+
+/**
+ * بحث التصنيفات: مطابقةٌ غير حسّاسة لحالة الأحرف على **أي مقطعٍ** من المسار،
+ * والنتيجة تحمل المسار الكامل كي يتميّز تصنيفان بالاسم نفسه. مرتّبةً بالمسار،
+ * والاستعلام الفارغ يعيد `[]` — فالشجرة وحدها هي شاشة الفراغ.
+ */
+export const searchCategories = <T extends CategoryNodeLike>(
+  categories: T[], query: string,
+): Array<{ id: T['id']; pathLabel: string }> => {
+  const q = query.trim().toLocaleLowerCase('ar');
+  if (!q) return [];
+  const { byId } = buildCategoryIndex(categories);
+  const hits: Array<{ id: T['id']; pathLabel: string }> = [];
+  for (const category of categories) {
+    const path = pathNamesTo(byId, byId.get(keyOf(category.id)));
+    if (!path.some((segment) => segment.toLocaleLowerCase('ar').includes(q))) continue;
+    hits.push({ id: category.id, pathLabel: path.join(PATH_SEPARATOR) || nameOf(category) });
+  }
+  hits.sort((a, b) => a.pathLabel.localeCompare(b.pathLabel, 'ar'));
+  return hits;
 };
