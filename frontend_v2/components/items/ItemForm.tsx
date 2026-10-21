@@ -28,8 +28,9 @@ import {
   useRecordNavigation,
   type KitToolbarAction,
 } from "../kit";
-import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText, Power, PowerOff } from "lucide-react";
+import { Plus, Save, Trash2, X, Loader2, AlertCircle, CheckCircle2, Upload, FileText, Power, PowerOff, FolderTree } from "lucide-react";
 import { CategoryPicker } from "../inventory/CategoryPicker";
+import { categoryPathLabel } from "../../utils/categoryTree";
 import { ValuePicker } from "../inventory/ValuePicker";
 import { accountingApi } from "../../services/accountingApi";
 import { AccountTreeField } from "../accounting/AccountTreePicker";
@@ -310,6 +311,15 @@ export const ItemForm: React.FC<Props> = ({
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
   const [categories, setCategories] = useState<CategoryNode[]>([]);
+  // C2: التصنيف كما هو **محفوظٌ الآن** على الخادم، وعدد براندات المنتج الأب.
+  // الاثنان معاً يقودان تحذير «سينتقل معه N براند»: `category` حقلُ عائلةٍ لا
+  // حقلُ صفّ (`sync_family_from_product`)، فتغييره هنا ينقل كل البراندات.
+  const [savedCategory, setSavedCategory] = useState<number | null>(null);
+  const [familyBrandCount, setFamilyBrandCount] = useState(1);
+  // القفز من شارة الشريط إلى الحقل: التبويب لا يُرسم قبل تنشيطه، فالتركيز ينتظر
+  // `activeTab` (أثرٌ أدناه) — ولو كان التبويب نشطاً أصلاً يأخذ التركيز فوراً.
+  const categoryFieldRef = useRef<HTMLDivElement>(null);
+  const focusCategoryAfterTabRef = useRef(false);
 
   const [currencies, setCurrencies] = useState<Array<{ CurrencyID: number; CurrencyCode: string }>>([]);
   const [accounts, setAccounts] = useState<AccountNodeLike[]>([]);
@@ -321,28 +331,18 @@ export const ItemForm: React.FC<Props> = ({
     accountingApi.getAccounts().then(setAccounts).catch(() => setAccounts([]));
   }, []);
 
-  // مسار التصنيف المختار — يُعرض قبل الحفظ («سيُحفظ تحت: أ ‹ ب») كي لا يبقى
-  // موضع المنتج في الشجرة مفاجأةً تُكتشف بعد الحفظ.
+  // مسار التصنيف المختار — يُعرض كشارةٍ في الشريط، وحقلُ المنتقي نفسه يعرض
+  // المسار الكامل فلا يبقى موضع المنتج في الشجرة مفاجأةً تُكتشف بعد الحفظ.
+  // البناء كلّه في `categoryPathLabel` وحدها (C2) — لا نسخةً ثانية منه هنا.
   const loadCategories = useCallback(() => {
     inventoryApi.getCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
   useEffect(() => { loadCategories(); }, [loadCategories]);
 
-  const categoryPath = React.useMemo(() => {
-    if (form.category == null) return null;
-    const byId: Record<number, CategoryNode> = {};
-    for (const c of categories) byId[c.id] = c;
-    const names: string[] = [];
-    const seen = new Set<number>();
-    let node: CategoryNode | undefined = byId[form.category];
-    // الصعود محروسٌ بـ`seen`: بياناتٌ قديمة قد تحمل حلقةً سبقت حارس الخادم.
-    while (node && !seen.has(node.id)) {
-      seen.add(node.id);
-      names.unshift(node.name);
-      node = node.parent != null ? byId[node.parent] : undefined;
-    }
-    return names.length ? names.join(" ‹ ") : (form.category_name || null);
-  }, [form.category, form.category_name, categories]);
+  const categoryLabel = React.useMemo(
+    () => categoryPathLabel(categories, form.category, form.category_name),
+    [form.category, form.category_name, categories],
+  );
 
   // #21: «هذا موجود — أضف براند؟» — القاعدةُ في `hooks/useProductNameOffer` يتقاسمها
   // هذا الكرت والإنشاءُ السريع من المستندات. منتجٌ **جديد** وحدَه: المحفوظُ يطابق نفسَه.
@@ -474,6 +474,8 @@ export const ItemForm: React.FC<Props> = ({
     setForm(blankForm());
     setNewBrandDraft("");
     setCurrentId(null);
+    setSavedCategory(null);
+    setFamilyBrandCount(1);
   }, []);
 
   // ── T-SERIAL: الباركود ─────────────────────────────────────────────────
@@ -564,6 +566,10 @@ export const ItemForm: React.FC<Props> = ({
     setCurrentId(isDuplicate ? null : Number(p.id));
     setIsActive(isDuplicate || p.is_active !== false);
     setDocUpdatedAt(isDuplicate || p.updated_at == null ? null : String(p.updated_at));
+    // C2: مرجعُ التحذير — التصنيف المحفوظ (والنسخة تبدأ منتجاً جديداً بلا مرجع)
+    // وعددُ براندات الأب. غيابُ الرقم (خادمٌ أقدم) يعني «براندٌ واحد» فلا تحذير.
+    setSavedCategory(isDuplicate ? null : (p.category ? Number(p.category) : null));
+    setFamilyBrandCount(isDuplicate ? 1 : Number(p.family_brand_count ?? 1) || 1);
     setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» في كرته بدل النسخ (يتطلّب صلاحية «إدارة المنتجات والفئات»)." : null);
   }, []);
 
@@ -639,6 +645,8 @@ export const ItemForm: React.FC<Props> = ({
       if (currentId) {
         await inventoryApi.updateProduct(currentId, payload);
         savedId = currentId;
+        // صار المحفوظُ هو المختار — يذهب تحذير البراندات فوراً (والبراندات كما هي).
+        setSavedCategory(categoryId);
         setMsg("تم الحفظ.");
       } else {
         // شاراتُ البراندات إن كُتبت، وإلّا حقلُ البراند الواحد. الأوّلُ مع الإنشاء والباقي
@@ -660,6 +668,7 @@ export const ItemForm: React.FC<Props> = ({
         );
         savedId = Number(created.id);
         setCurrentId(savedId);
+        setSavedCategory(categoryId);
         setForm((f) => ({ ...f, brand: brands[0] ?? "", new_brands: [] }));
         setNewBrandDraft("");
         const outcome = createWithBrandsMessage(String(created.sku ?? ""), brands.length, steps, (n) => formatNumber(n));
@@ -671,6 +680,10 @@ export const ItemForm: React.FC<Props> = ({
       try {
         const refreshed = await inventoryApi.getProduct(savedId) as Record<string, unknown>;
         patch("datasheets", extractDatasheets(refreshed));
+        // C2: الإنشاء يبدأ والعدّاد 1، والبراندات تُضاف بعده في
+        // `createProductWithBrands` — والكرت يبقى مفتوحاً إن فشل أحدها. بلا هذا
+        // السطر يبقى «1» فيغيب تحذير «سينتقل معه N براند» عن تغيير التصنيف.
+        setFamilyBrandCount(Number(refreshed.family_brand_count ?? 1) || 1);
       } catch { /* تجاهل */ }
       // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
       insights.reload();
@@ -818,6 +831,58 @@ export const ItemForm: React.FC<Props> = ({
    */
   const [activeTab, setActiveTab] = useState(openingTab);
 
+  /**
+   * تركيز حقل التصنيف — المنتقي يعلن نفسه `combobox`.
+   *
+   * وحقلُ تبويب «بيانات عامة» يُرسم بعد تنشيطه فقط، والمنتقي يعرض «جارٍ
+   * التحميل…» مكانه حتى تستقرّ قائمته (C2) — فلا `combobox` في اللحظة الأولى.
+   * يُنتظر ظهوره مرّةً واحدة بمهلةٍ قصيرة: فشلُ التحميل يعرض «تعذّر تحميل
+   * التصنيفات» وزرَّ إعادة محاولة بدل المنتقي، فلا حقلَ يُركَّز، والمهلة تُنهي
+   * الانتظار بدل مراقبةٍ لا تنتهي.
+   *
+   * ولا يُسرق تركيزُ المستخدم: يُحفظ العنصر النشط لحظةَ بدء الانتظار، ولا
+   * يُركَّز المنتقي إن انتقل التركيز إلى غيره في أثنائه.
+   */
+  const focusCategoryCombo = () => {
+    const root = categoryFieldRef.current;
+    if (!root) return;
+    const startActive = document.activeElement;
+    const mayFocus = () =>
+      document.activeElement === startActive
+      || document.activeElement === document.body
+      || document.activeElement == null;
+    const focusIfReady = () => {
+      const combo = root.querySelector<HTMLElement>('[role="combobox"]');
+      if (!combo) return false;
+      if (mayFocus()) combo.focus();
+      return true;
+    };
+    if (focusIfReady()) return;
+    let timer: number | undefined;
+    const observer = new MutationObserver(() => {
+      if (!focusIfReady()) return;
+      observer.disconnect();
+      window.clearTimeout(timer);
+    });
+    observer.observe(root, { childList: true, subtree: true });
+    timer = window.setTimeout(() => observer.disconnect(), 3000);
+  };
+
+  /** شارةُ الشريط تقفز بحقل التصنيف: تُنشِّط تبويب «بيانات عامة» ثم تُركِّز الحقل. */
+  const focusCategoryField = () => {
+    if (activeTab === "general") { focusCategoryCombo(); return; }
+    focusCategoryAfterTabRef.current = true;
+    setActiveTab("general");
+  };
+
+  // التبويب لا يُرسم قبل تنشيطه (`{tab?.content}` في `KitDocumentShell`)، فالحقل
+  // لا وجود له في الشجرة حين تُضغط الشارة من تبويبٍ آخر — التركيز ينتظر الرسم.
+  useEffect(() => {
+    if (activeTab !== "general" || !focusCategoryAfterTabRef.current) return;
+    focusCategoryAfterTabRef.current = false;
+    focusCategoryCombo();
+  }, [activeTab]);
+
   const banner = (err || msg) ? (
     <div className={`ktra-banner ${err ? "ktra-banner--err" : "ktra-banner--ok"}`}>
       {err ? <AlertCircle className="h-4 w-4 shrink-0" /> : <CheckCircle2 className="h-4 w-4 shrink-0" />}
@@ -939,11 +1004,33 @@ export const ItemForm: React.FC<Props> = ({
           </button>
         </div>
       )}
-      {fld("التصنيف",
-        <CategoryPicker value={form.category} onChange={(id, name) => {
-          patch("category", id);
-          patch("category_name", name ?? "");
-        }} />)}
+      {/* C2: حقل التصنيف **الوحيد** في الكرت — هنا حيث يُدخَل المنتج، لا في
+          الشريط (الشريط يعرض المسار شارةً تقفز إلى هذا الحقل). والمنتقي نفسه
+          يعرض المسار الكامل في حقله، فلا سطرَ ثانٍ تحته يكرّره؛ وتحت الحقل
+          سطرُ الحسابات، وتحذيرُ انتقال البراندات حين يلزم.
+          و`<div>` لا `<label>` (خلافاً لـ`fld`): داخل الحقل أزرارٌ (مسح، إدارة،
+          إنشاء) — و`<label>` يَنتقي أوّل عنصرٍ قابلٍ للتسمية فيه فيُفعّله بنقرةٍ
+          على عنوان الحقل؛ أي أن نقرةً على «التصنيف» كانت ستمحو الاختيار. */}
+      <div className="ktra-field">
+        <span className="ktra-field-label self-start mt-1">التصنيف</span>
+        <div className="min-w-0 flex-1" ref={categoryFieldRef}>
+          <CategoryPicker value={form.category} onChange={(id, name) => {
+            patch("category", id);
+            patch("category_name", name ?? "");
+            // C2: تصنيفٌ أُنشئ داخل المنتقي لا يصل قائمةَ الكرت (لكلٍّ جلبُه) —
+            // فتُعاد كي تُبنى شارةُ الشريط من الشجرة لا من اسمٍ مجرّد.
+            if (id != null && !categories.some((c) => c.id === id)) loadCategories();
+          }} />
+          <div className="mt-0.5 text-xs text-[var(--ktra-ink-soft)]">
+            يحدّد حسابات الإيراد والتكلفة والمخزون
+          </div>
+          {currentId != null && form.category !== savedCategory && familyBrandCount > 1 && (
+            <div className="ktra-note ktra-note--warn mt-1">
+              سينتقل معه {formatNumber(familyBrandCount)} براند — التصنيف للمنتج كلّه لا لهذا البراند وحده
+            </div>
+          )}
+        </div>
+      </div>
       {fld("وحدة القياس",
         <select className="ktra-input" value={form.uom_id ?? ""}
           onChange={(e) => patch("uom_id", e.target.value ? Number(e.target.value) : null)}>
@@ -1110,13 +1197,6 @@ export const ItemForm: React.FC<Props> = ({
           )}
         </div>, 3)}
       </>}
-      {/* معاينة موضع الحفظ — تُقرأ قبل الضغط لا بعده. */}
-      <div style={{
-        gridColumn: "1 / -1", marginTop: 4, fontSize: "var(--ktra-fs-sm)",
-        color: "var(--ktra-ink-soft)",
-      }}>
-        سيُحفظ تحت: <b style={{ color: "var(--ktra-ink)" }}>{categoryPath || "بدون تصنيف"}</b>
-      </div>
     </div>
   );
 
@@ -1341,11 +1421,28 @@ export const ItemForm: React.FC<Props> = ({
             {fld("اسم المنتج", <input className="ktra-input ktra-input--hl" value={form.name_ar}
               onChange={(e) => patch("name_ar", e.target.value)}
               placeholder="اسم المنتج" autoFocus={productId == null} />, currentId == null ? 2 : undefined)}
-            {fld("التصنيف",
-              <CategoryPicker value={form.category} onChange={(id, name) => {
-                patch("category", id);
-                patch("category_name", name ?? "");
-              }} />)}
+            {/* C2: الشريط يعرض مسار التصنيف **شارةً** لا منتقياً — حقلٌ واحدٌ في
+                «بيانات عامة» كي لا يتفرّق الحقلان ويتباعدا. الضغط يقفز إليه.
+                `.badge` (حشوةٌ صغيرة وخطٌّ صغير) لا `ktra-input`: الشكلُ الثاني
+                يقرأ كحقل إدخالٍ ثانٍ، وهو لبسُ المالك نفسه.
+                `<div>` لا `<label>`: الزرّ داخل `<label>` يأخذ اسمه من العنوان
+                («التصنيف») فلا يُقرأ مسارُه، ويُفعَّل بنقرةٍ على العنوان نفسه. */}
+            <div className="ktra-field">
+              <span className="ktra-field-label">التصنيف</span>
+              <div className="min-w-0">
+                <button
+                  type="button"
+                  onClick={focusCategoryField}
+                  title="تغيير التصنيف من «بيانات عامة»"
+                  className="badge max-w-full gap-1 border border-[var(--ktra-border-soft)] bg-[var(--ktra-surface-2)] text-start text-[var(--ktra-ink)] hover:border-[var(--ktra-accent)] hover:underline"
+                >
+                  <FolderTree className="h-3.5 w-3.5 shrink-0" />
+                  <span className={`truncate ${categoryLabel ? "" : "text-[var(--ktra-ink-soft)]"}`}>
+                    {categoryLabel || "بدون تصنيف"}
+                  </span>
+                </button>
+              </div>
+            </div>
             {fld("طبيعة المنتج", <select className="ktra-input" value={form.item_type}
               onChange={(e) => patch("item_type", e.target.value)}>
               {ITEM_TYPES.map((t) => <option key={t.v} value={t.v}>{t.l}</option>)}
@@ -1418,6 +1515,9 @@ export const ItemForm: React.FC<Props> = ({
               const target = brandTargetOf({ family_id: insights.profile?.family_id, id: currentId });
               if (target == null) throw new Error("لم يُعرَف المنتج.");
               const result = await submitAddBrand(target, brandName);
+              // براندٌ جديدٌ صار للتوّ: العددُ المحمَّل قديم، وبه يُقاس تحذير
+              // «سينتقل معه N براند» — فبلا الزيادة ينتقل براندان بلا تحذير.
+              if (result.created) setFamilyBrandCount((count) => count + 1);
               if (!result.created && result.id === currentId) {
                 // الخادم سمّى صفَّ البراند الضمنيّ نفسه؛ حدّث الرأس من الردّ
                 // بلا وسم النموذج «ملموساً» لأن الكتابة تمّت بالفعل.

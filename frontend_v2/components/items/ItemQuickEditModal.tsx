@@ -171,9 +171,15 @@ export const ItemQuickEditModal: React.FC<Props> = ({
                 fetchOptions={inventoryApi.getBrands}
                 emptyLabel="— بلا براند —" addPlaceholder="مثال: ميشلان" addTitle="براند جديد"
                 className={input} />, 2)}
-            {field("التصنيف",
+            {/* `<div>` لا `label` (خلافاً لـ`field`) للتصنيف وحده: داخل المنتقي
+                أزرار (مسح/إدارة/إنشاء)، و`<label>` يَنتقي أوّل عنصرٍ قابلٍ
+                للتسمية فيه فيُفعّله بنقرةٍ على العنوان — أي نقرةٌ على «التصنيف»
+                كانت ستمسح الاختيار. الشكل نفسُه. */}
+            <div className="flex flex-col gap-1 col-span-2">
+              <span className="text-xs text-[var(--color-text-muted)]">التصنيف</span>
               <CategoryPicker value={form.category}
-                onChange={(id) => patch("category", id)} />, 2)}
+                onChange={(id) => patch("category", id)} />
+            </div>
             {field("وحدة القياس",
               <select className={input} value={form.uom_id ?? ""}
                 onChange={(e) => patch("uom_id", e.target.value ? Number(e.target.value) : null)}>

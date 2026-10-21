@@ -5,6 +5,7 @@ import { blankSimpleFields, simplePayload, validateSimpleFields } from "../../ut
 import { useProductNameOffer } from "../../hooks/useProductNameOffer";
 import { attachBrandToExisting } from "../../utils/brandActions";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { CategoryPicker } from "../inventory/CategoryPicker";
 
 export type ItemQuickCreateModalProps = {
   isOpen: boolean;
@@ -22,6 +23,9 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
   const [nameAr, setNameAr] = useState(initialName || "");
   const [nameEn, setNameEn] = useState("");
   const [brand, setBrand] = useState("");
+  // C2: التصنيف صار حقلاً يُرى ويُعدَّل هنا (كان يُرسَل من خاصيةٍ خفيّة فلا
+  // يعرف المستخدم أين يُحفظ منتجه)، ومصدره الوحيد للحمولة هو هذه القيمة.
+  const [category, setCategory] = useState<number | null>(null);
   const [uomId, setUomId] = useState<number | null>(null);
   const [uoms, setUoms] = useState<Array<{ id: number; name_ar: string; name_en: string; code: string }>>([]);
   const [salePrice, setSalePrice] = useState("");
@@ -41,14 +45,18 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
   useEffect(() => {
     if (!isOpen) return;
     inventoryApi.getUoms().then(setUoms).catch(() => setUoms([]));
-  }, [isOpen]);
+    // النافذة تبقى مركَّبةً بين الفتحات، و`categoryId` يأتي من العقدة التي
+    // فُتحت منها (الشجرة/الفاتورة) — فبلا هذه المزامنة يُنشأ منتجٌ ثانٍ تحت
+    // تصنيف الفتحة الأولى.
+    setCategory(categoryId != null && categoryId !== "" ? Number(categoryId) : null);
+  }, [isOpen, categoryId]);
 
   if (!isOpen) return null;
 
   const handleSave = async () => {
     const fields = {
       ...blankSimpleFields(),
-      name_ar: nameAr, name_en: nameEn, brand, uom_id: uomId,
+      name_ar: nameAr, name_en: nameEn, brand, category, uom_id: uomId,
       sale_price: salePrice, is_service: isService,
     };
     const invalid = validateSimpleFields(fields);
@@ -59,8 +67,9 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
       // الحمولة تُبنى مرّةً واحدة في `utils/itemSimpleFields` — والبراند منها
       // (حقلٌ في `fields`)، فلا نسخةَ ثانية تُشذَّب هنا وتتباعد عن `simplePayload`.
       const payload = simplePayload(fields);
-      // التصنيف يأتي من المستدعي (عقدة الشجرة) ويسبق قيمة النموذج الفارغة.
-      if (categoryId != null && categoryId !== "") payload.category = Number(categoryId);
+      // إفراغ المنتقي = «بلا تصنيف»: لا يُرسَل المفتاح أصلاً، فلا يبقى تصنيفُ
+      // العقدة التي فُتحت منها النافذة على منتجٍ أفرغه المستخدم عمداً.
+      if (payload.category == null) delete payload.category;
       const created = await inventoryApi.createProduct(payload);
       onSaved(created);
     } catch (e: any) {
@@ -169,6 +178,11 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
               value={nameEn}
               onChange={(e) => setNameEn(e.target.value)}
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium mb-1 text-[var(--color-text)]">التصنيف</label>
+            <CategoryPicker value={category} onChange={(id) => setCategory(id)} />
           </div>
 
           <div>

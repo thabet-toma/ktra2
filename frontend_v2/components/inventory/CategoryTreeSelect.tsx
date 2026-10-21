@@ -23,7 +23,7 @@
  * هناك)، وEnter أو Space يختار في single، وEnter/Space على سطر مسارٍ يفتحه أو
  * يطويه. Esc يغلق في single ويعيد التركيز إلى الحقل.
  */
-import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Check, ChevronDown, ChevronLeft, Plus, Search, X } from 'lucide-react';
 import { inventoryApi } from '../../services/inventoryApi';
@@ -362,7 +362,9 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
   const [activeIndex, setActiveIndex] = useState(0);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [open, setOpen] = useState(false);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null);
+  const [pos, setPos] = useState<
+    { top: number; left: number; width: number; maxHeight: number | null } | null
+  >(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [newName, setNewName] = useState('');
   const [createPosition, setCreatePosition] = useState<CreatePosition>('root');
@@ -373,6 +375,8 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
   const panelRef = useRef<HTMLDivElement>(null);
   // اسمٌ فريد لمجموعة أزرار الموضع: منتقيان مركّبان معاً لا يتنازعان الاختيار.
   const createGroupName = useId();
+  // ومعرّفٌ فريد للوحة: يربطه `aria-controls` بالحقل وهي مفتوحة وحدها.
+  const panelId = useId();
 
   const selectedId = value;
   const selectedLabel = categoryPathLabel(allCategories, selectedId);
@@ -389,6 +393,17 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
    * موضع اللوحة من مستطيل الحقل — النمط نفسه في `components/kit/KitAutocomplete.tsx`
    * (بوّابةٌ على `body` و`position:fixed`): المنسدلة تُقصّ داخل نافذةٍ فيها
    * `overflow-hidden` (مثل `ItemQuickCreateModal`)، وهذا يخرجها من القصّ.
+   *
+   * **والقلب للأعلى شرطُ وصولٍ لا تجميل**: البوّابة خارج كل تمرير، فحقلٌ قريبٌ
+   * من أسفل الشاشة يفتح لوحةً أسفل حدّها — والنتيجة الثانية فيها لا يمكن
+   * النقر عليها أصلاً (قِيس في كرت المنتج على ارتفاع 720px: خيارُ البحث الثاني
+   * صار «outside of the viewport»). تُقاس اللوحة بعد رسمها وتُقلَب متى ضاق
+   * ما تحتها وكان فوقها أوسع.
+   *
+   * **والقياسُ الأوّل يقع لحظةَ تركيب اللوحة** (`attachPanel`)، لا في نداء
+   * الفتح: قبل التركيب لا عقدةَ فتُقرأ صفراً — وحين يُحكَم بلا قياسٍ تُسقَط
+   * اللوحة في أعلى الشاشة منفصلةً عن الحقل. فما دام الارتفاع صفراً تُوضع تحت
+   * الحقل بلا سقفٍ مؤقّتاً، ثم تُقاس عند التركيب فتُقلَب أو تُسقَّف.
    */
   const reposition = useCallback(() => {
     const r = comboRef.current?.getBoundingClientRect();
@@ -396,8 +411,52 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
     const width = Math.max(r.width, 280);
     // RTL: نحاذي حافة الحقل اليمنى ونمنع الخروج عن يسار الشاشة.
     const left = Math.max(4, Math.min(r.right - width, window.innerWidth - width - 4));
-    setPos({ top: r.bottom + 2, left, width });
+    // الارتفاع **الطبيعي** لا المرسوم: اللوحة المقصوصة يبقى `scrollHeight` فيها
+    // أكبر من `offsetHeight`، وقياسُ المقصوص يجعل القرار يقيس نفسه فيتذبذب بين
+    // «اقصص» و«لا تقصص» بلا نهاية.
+    const panel = panelRef.current;
+    const height = Math.max(panel?.offsetHeight ?? 0, panel?.scrollHeight ?? 0);
+    const below = window.innerHeight - r.bottom - 4;
+    const above = r.top - 4;
+    // لم تُقس بعد: تحت الحقل بلا سقفٍ مؤقّتاً — القرار بعد التركيب (`attachPanel`).
+    if (height === 0) {
+      setPos({ top: r.bottom + 2, left, width, maxHeight: null });
+      return;
+    }
+    // يكفي ما تحته ⇒ تحته، وإلّا وفوقه يكفي ⇒ فوقه (القلب).
+    if (height <= below) {
+      setPos({ top: r.bottom + 2, left, width, maxHeight: null });
+      return;
+    }
+    if (height <= above) {
+      setPos({ top: Math.max(4, r.top - height - 2), left, width, maxHeight: null });
+      return;
+    }
+    // لا يكفي أيُّ الجانبين: الجانب الأوسع، بارتفاعٍ محدودٍ بما فيه — فتُمرَّر
+    // اللوحة داخلياً ولا تغطّي الحقل أبداً.
+    const maxHeight = Math.max(below, above);
+    const top = below >= above
+      ? r.bottom + 2
+      : Math.max(4, r.top - maxHeight - 2);
+    setPos({ top, left, width, maxHeight });
   }, []);
+
+  /**
+   * مرجعُ اللوحة: يُخزّن العقدة **ويقيس لحظةَ تركيبها** — وهو القياسُ الأوّل.
+   * مرجعُه مستقرّ (`reposition` لا يتغيّر) فلا يُعاد تركيب اللوحة، و`reposition`
+   * لا يُبدّل هويّة العقدة، فلا دورةَ قياسٍ↔تركيب.
+   */
+  const attachPanel = useCallback((node: HTMLDivElement | null) => {
+    panelRef.current = node;
+    if (node) reposition();
+  }, [reposition]);
+
+  // القياس يتبع ما يُطيل اللوحة أو يقصّرها من حالاتها (نتائجُ البحث، انتهاءُ
+  // التحميل، خطأُ تحميلٍ ظهر أو زال)؛ والقياسُ الأوّل عند التركيب نفسه.
+  useLayoutEffect(() => {
+    if (!open) return;
+    reposition();
+  }, [open, reposition, query, createOpen, createError, loading, loadError, searchResults.length, rows.length]);
 
   /**
    * الإغلاق الوحيد: يُطفئ اللوحة ويمحو الاستعلام ونموذج الإنشاء (فإعادةُ
@@ -558,6 +617,7 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
         role="combobox"
         aria-expanded={open}
         aria-haspopup="tree"
+        aria-controls={open ? panelId : undefined}
         aria-label="التصنيف"
         tabIndex={disabled ? -1 : 0}
         onClick={() => {
@@ -606,15 +666,20 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
 
       {open && pos && createPortal(
         <div
-          ref={panelRef}
+          ref={attachPanel}
+          id={panelId}
           dir="rtl"
           // فوق النوافذ: المستوى نفسه الذي يحمله `.ktra-autocomplete-pop`
           // (`z-index: 10000`). بـ`z-50` كانت اللوحة تفتح **خلف** نافذة
           // `ItemQuickCreateModal` (`z-[70]`) — وهي الحالة التي بُنيت لها البوّابة.
-          className="z-[10000] overflow-hidden rounded-md border border-[var(--ktra-border)] bg-[var(--ktra-surface)] shadow-lg"
-          // الإحداثيات المحسوبة وحدها — الاستثناء الوحيد لـ«Tailwind فقط»، والنمط
-          // نفسه في `KitAutocomplete` (ومنها `position:fixed`).
-          style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
+          className="z-[10000] flex flex-col overflow-hidden rounded-md border border-[var(--ktra-border)] bg-[var(--ktra-surface)] shadow-lg"
+          // الإحداثيات المحسوبة وحدها — ومعها سقفُ الارتفاع حين لا يكفي أيُّ
+          // الجانبين؛ الاستثناء الوحيد لـ«Tailwind فقط»، والنمط نفسه في
+          // `KitAutocomplete` (ومنها `position:fixed`).
+          style={{
+            position: 'fixed', top: pos.top, left: pos.left, width: pos.width,
+            maxHeight: pos.maxHeight ?? undefined,
+          }}
         >
           <div className="relative border-b border-[var(--ktra-border)] p-1.5">
             <Search className="pointer-events-none absolute end-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-[var(--ktra-ink-soft)]" />
@@ -629,7 +694,7 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
             />
           </div>
 
-          <div className="max-h-64 overflow-y-auto p-1">
+          <div className="min-h-0 max-h-64 flex-1 overflow-y-auto p-1">
             {loading && allCategories.length === 0 ? (
               <div className="p-3 text-center text-xs text-[var(--ktra-ink-soft)]">
                 جارٍ تحميل التصنيفات…

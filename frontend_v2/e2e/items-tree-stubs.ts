@@ -34,6 +34,9 @@ export type ItemsTreeProductRow = {
 
 const CATEGORIES = [{ id: 3, name: 'إطارات', parent: null }];
 
+/** عقدة تصنيف كما يردّها `/inventory/categories/` — يُعاد استخدام النوع في اختبارات C2. */
+export type ItemsTreeCategory = { id: number; name: string; parent: number | null };
+
 /** المنتجان الأساسيان — التصنيف «إطارات» (3) وحده. */
 export const PRODUCTS: ItemsTreeProductRow[] = [
   {
@@ -74,19 +77,60 @@ export type ItemsTreeStubsOptions = {
   extraProducts?: ItemsTreeProductRow[];
   /** تُنادى بجسم كل POST إلى `/inventory/products/` — إثباتُ ما أرسلته الشاشة فعلاً. */
   onCreateProduct?: (body: Record<string, unknown>) => void;
+  /** تصنيفات الشجرة (الافتراضي: جذرٌ واحد «إطارات» على المعرّف 3). */
+  categories?: ItemsTreeCategory[];
+  /**
+   * كرت منتجٍ (`GET /inventory/products/{id}/`) بمفاتيحه — ومعرّفٌ غير موجود فيه
+   * يردّ 404 بشكل DRF (`{"detail": …}`)، لا `[]` بـ200.
+   */
+  productDetails?: Record<number, Record<string, unknown>>;
+  /** تُنادى بجسم كل PATCH، ويُردّ صفُّ الكرت بعد الدمج. */
+  onUpdateProduct?: (id: number, body: Record<string, unknown>) => void;
+  /** صلاحيات `/permissions/me/` (الافتراضي: عرض وإدارة المنتجات). */
+  permissions?: string[];
 };
+
+/**
+ * ردُّ DRF لكائنٍ غير موجود على مسارٍ تفصيليّ (404 وجسمُ `detail`)، لا `[]`
+ * بـ200 — محاكٍ يردّ نجاحاً على معرّفٍ مجهول يُخفي عطباً حقيقياً في الكرت.
+ */
+const PRODUCT_NOT_FOUND = { detail: 'No Product matches the given query.' };
+
+/**
+ * ما يرفضه الخادم فعلاً في `category`: ليس عدداً صحيحاً، أو تصنيفٌ ليس للشركة
+ * (هنا: ليس في الشجرة). شكلُ الردّ كما يعيده DRF: `{"category": ["…"]}`.
+ * محاكٍ يقبل كل شيء يُخفي عطباً حقيقياً — القاعدة في §6 من تذكرة C2.
+ */
+function categoryFieldError(
+  body: Record<string, unknown>, categories: ItemsTreeCategory[],
+): string | null {
+  if (!('category' in body)) return null;
+  const raw = body.category;
+  if (raw === null) return null;
+  if (typeof raw !== 'number' && typeof raw !== 'string') {
+    return 'Incorrect type. Expected pk value, received ' + typeof raw + '.';
+  }
+  const id = Number(raw);
+  if (!Number.isInteger(id)) return 'Incorrect type. Expected pk value.';
+  if (!categories.some((c) => c.id === id)) {
+    return `Invalid pk "${String(raw)}" - object does not exist.`;
+  }
+  return null;
+}
 
 /**
  * ردُّ الإنشاء الحقيقي: `POST /inventory/products/` يعيد صفَّ `ProductSerializer`
  * كاملاً، وواجهةُ الإنشاء السريع تمرّره إلى `productToItem` التي تقرأ منه
  * `id` و`name_ar` و`category`. ردٌّ بـ`{}` يمرّ في المحاكي ويسقط في الإنتاج.
  */
-function createdProductRow(sent: Record<string, unknown>, id: number): Record<string, unknown> {
+function createdProductRow(
+  sent: Record<string, unknown>, id: number, categories: ItemsTreeCategory[],
+): Record<string, unknown> {
   const category = sent.category == null ? null : Number(sent.category);
   const nameAr = sent.name_ar == null ? '' : String(sent.name_ar);
   const nameEn = sent.name_en == null ? '' : String(sent.name_en);
   const sku = `SKU-${id}`;
-  const categoryName = CATEGORIES.find((c) => c.id === category)?.name ?? '';
+  const categoryName = categories.find((c) => c.id === category)?.name ?? '';
   return {
     id, tenant: 1, sku, barcode: sent.barcode ?? null,
     name_ar: nameAr || null, name_en: nameEn || null,
@@ -123,6 +167,9 @@ function createdProductRow(sent: Record<string, unknown>, id: number): Record<st
  */
 export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStubsOptions = {}) {
   const products = [...PRODUCTS, ...(options.extraProducts ?? [])];
+  const categories = options.categories ?? CATEGORIES;
+  const permissions = options.permissions
+    ?? ['inventory.item.view', 'inventory.item.manage'];
 
   await page.addInitScript(() => {
     localStorage.setItem('token', 'items-tree-e2e-token');
@@ -138,11 +185,51 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
     const path = url.pathname;
     const method = route.request().method();
 
+    // تعديل منتج — معرّفٌ مجهول 404، وتصنيفٌ غير صالح يُرفض كما يرفضه الخادم
+    // (لا محاكٍ يقبل كل شيء). الترتيب ترتيبُ DRF: الكائن أوّلاً ثم حقوله.
+    const detail = path.match(/\/inventory\/products\/(\d+)\/$/);
+    if (detail && method === 'PATCH') {
+      const id = Number(detail[1]);
+      const known = options.productDetails?.[id];
+      if (!known) {
+        await route.fulfill({
+          status: 404, contentType: 'application/json',
+          body: JSON.stringify(PRODUCT_NOT_FOUND),
+        });
+        return;
+      }
+      const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const categoryError = categoryFieldError(sent, categories);
+      if (categoryError) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ category: [categoryError] }),
+        });
+        return;
+      }
+      options.onUpdateProduct?.(id, sent);
+      await route.fulfill({
+        contentType: 'application/json',
+        body: JSON.stringify({ ...known, ...sent }),
+      });
+      return;
+    }
+
     // إنشاء منتج من الشجرة — يُلتقط الجسم ويُردّ صفٌّ بشكله الحقيقي.
     if (method === 'POST' && path.endsWith('/inventory/products/')) {
       const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const categoryError = categoryFieldError(sent, categories);
+      if (categoryError) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ category: [categoryError] }),
+        });
+        return;
+      }
       options.onCreateProduct?.(sent);
-      const created = createdProductRow(sent, 100);
+      const created = createdProductRow(sent, 100, categories);
+      // يظهر في القوائم التالية — وإلا «أُنشئ» منتجٌ لا تعرفه الشجرة أبداً.
+      products.push(created as unknown as ItemsTreeProductRow);
       await route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify(created) });
       return;
     }
@@ -167,10 +254,20 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
     } else if (path.endsWith('/permissions/me/')) {
       body = {
         role: 'manager', is_manager: true, ui_mode: 'advanced',
-        permissions: ['inventory.item.view', 'inventory.item.manage'],
+        permissions,
       };
     } else if (path.endsWith('/inventory/categories/')) {
-      body = CATEGORIES;
+      body = categories;
+    } else if (detail && method === 'GET') {
+      const known = options.productDetails?.[Number(detail[1])];
+      if (!known) {
+        await route.fulfill({
+          status: 404, contentType: 'application/json',
+          body: JSON.stringify(PRODUCT_NOT_FOUND),
+        });
+        return;
+      }
+      body = known;
     } else if (/\/inventory\/products\/\d+\/profile\/$/.test(path)) {
       const id = Number(path.match(/products\/(\d+)\/profile/)![1]);
       body = id === 7 ? PROFILE_7 : { ...PROFILE_7, id, sku: `SKU-${id}`, name: 'بطارية 70A' };
@@ -194,7 +291,12 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
     } else if (path.endsWith('/inventory/products/group-invoices/')) {
       body = [];
     } else if (path.endsWith('/inventory/products/')) {
-      body = { count: products.length, results: products, next: null, previous: null };
+      // `OptionalPageNumberPagination`: بلا `page` يعيد الخادم مصفوفةً عارية،
+      // ومع `page` يعيد `{count, results, …}` — والمحاكي يقول ما يقوله الخادم
+      // (شاشة الأرصدة تطلب بلا `page` وتقرأ مصفوفة، والشجرة تطلب بصفحات).
+      body = url.searchParams.has('page')
+        ? { count: products.length, results: products, next: null, previous: null }
+        : products;
     }
     await route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
   });

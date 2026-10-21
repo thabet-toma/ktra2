@@ -174,6 +174,9 @@ class ProductSerializer(serializers.ModelSerializer):
     # الأب واسمه لتقرّر أيّ صفوفٍ تتجمّع (مرآة `ProductLookupSerializer`).
     family_id = serializers.IntegerField(read_only=True)
     family_name = serializers.SerializerMethodField()
+    # C2: عدد براندات المنتج الأب — يقرؤه كرت المنتج ليحذّر «سينتقل معه N براند»
+    # قبل تغيير التصنيف (فـ`category` حقلُ عائلةٍ لا حقلُ صفّ).
+    family_brand_count = serializers.SerializerMethodField()
     # #35: الحدّ **الحاكم** — نفس المصدر الذي حكمت به `stock_status` (حدّ
     # الأب إن كان له أبٌ ظاهرٌ في `family_thresholds`، وإلا حدّ الصفّ نفسه).
     # قراءةٌ فقط عمداً وباسمٍ جديد: `min_stock_level`/`max_stock_level`
@@ -240,6 +243,8 @@ class ProductSerializer(serializers.ModelSerializer):
             'indicative_purchase_price', 'indicative_purchase_price_source',
             'stock_status', 'group_key', 'display_name', 'has_group',
             'family_id', 'family_name',
+            # C2: عددُ براندات الأب — لا على عقد `view=lookup` (القائمة أدناه صريحة).
+            'family_brand_count',
             'effective_min_stock_level', 'effective_max_stock_level',
             'serial_required_by',
             'created_at', 'updated_at',
@@ -284,6 +289,30 @@ class ProductSerializer(serializers.ModelSerializer):
         if not obj.family_id:
             return None
         return obj.family.name_ar or obj.family.name_en or None
+
+    def get_family_brand_count(self, obj):
+        """عددُ براندات المنتج الأب — براندٌ بلا أب (بياناتٌ قديمة) واحدٌ بذاته.
+
+        الخريطة الجاهزة أوّلاً (`family_brand_counts` — استعلامٌ واحدٌ للشركة
+        كلّها، نفس ما يُغذّي `has_group`)، وإلّا استعلامٌ واحدٌ لهذا الأب وحده
+        **مقيَّدٌ بالشركة**: الـFK لا يعرف الشركة، وصفٌّ دخيلٌ يشير إلى نفس الأب
+        كان يعدّ برانداً ليس لنا.
+        """
+        if not obj.family_id:
+            return 1
+        counts = self.context.get('family_brand_counts')
+        if counts is not None:
+            return counts.get(obj.family_id) or 1
+        request = self.context.get('request')
+        if request is None:
+            return 1
+        from core.tenant_utils import get_tenant
+        tenant = get_tenant(request)
+        if tenant is None:
+            return 1
+        return Product.objects.filter(
+            tenant_id=tenant.TenantID, family_id=obj.family_id,
+        ).count() or 1
 
     def _governing_thresholds(self, obj):
         """#35: نفس شرط `stock_status_of` حرفاً — أبٌ ظاهرٌ في

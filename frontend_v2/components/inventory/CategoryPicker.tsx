@@ -1,9 +1,29 @@
-import React, { useEffect, useState } from "react";
+/**
+ * C2 — غلافٌ رقيقٌ فوق `CategoryTreeSelect` (وضع `single`): كلُّ مستدعٍ
+ * (كرت المنتج، التحرير السريع، الإنشاء السريع من المستندات) يكسب منتقي الشجرة
+ * — بحثاً بالمسار الكامل، تصفّحاً، وإنشاءً بموضعٍ صريح — بلا لمس مواضعه.
+ *
+ * العقد الخارجي لم يتغيّر عمداً: `value`/`onChange(id, name?)`/`className`/
+ * `disabled`. والاسم الثاني هو **اسم التصنيف نفسه** لا المسار (هذا ما تقرؤه
+ * `ItemForm` في `category_name`)؛ يُقرأ من القائمة المحمَّلة هنا، وإن كان
+ * التصنيف قد أُنشئ داخل المنتقي فلن يكون فيها بعد ⇒ تُعاد القائمة ويُؤخذ آخر
+ * مقطعٍ من المسار، وهو اسمه.
+ *
+ * «إدارة التصنيفات» (شجرة الفاتورة) باقية كما هي، ومخفيةٌ عمّن لا يملك
+ * `inventory.item.manage` — وكذلك «إنشاء تصنيف» داخل المنتقي نفسه.
+ *
+ * وقبل استقرار أوّل جلبٍ يعرض شكلاً معطَّلاً «جارٍ التحميل…» مكان المنتقي: تمريرُ
+ * قائمةٍ فارغةٍ قبلها كان يُظهر «—» لمنتجٍ له تصنيف. وإن فشل الجلب عُرِض مكانه
+ * «تعذّر تحميل التصنيفات» وزرُّ «إعادة المحاولة» (يعود «جارٍ التحميل…» ثم
+ * المنتقي عند نجاحها) — لا منتقٍ بقائمةٍ فارغةٍ يُظهر «—» كذلك.
+ */
+import React, { useCallback, useEffect, useState } from "react";
 import { inventoryApi } from "../../services/inventoryApi";
-import { Plus, X, FolderTree } from "lucide-react";
+import { X, FolderTree } from "lucide-react";
 import { InvoiceCategoryTree } from "../procurement/invoices/InvoiceCategoryTree";
-import { categoryPathLabel, sortCategoryRows } from "../../utils/categoryTree";
+import { PATH_SEPARATOR } from "../../utils/categoryTree";
 import { usePermissions } from "../../contexts/PermissionsContext";
+import { CategoryTreeSelect } from "./CategoryTreeSelect";
 
 type Category = {
   id: number;
@@ -20,149 +40,108 @@ type Props = {
 };
 
 export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, disabled }) => {
-  // إنشاء تصنيفٍ من هنا كتابةُ شجرةٍ تشترط `inventory.item.manage` على الخادم
-  // (كشجرة الفاتورة) — يُخفى زرّا الإنشاء والإدارة عمّن لا يملكه. اختيار
-  // تصنيفٍ قائم يبقى للجميع.
   const { can } = usePermissions();
   const canManageCatalog = can("inventory.item.manage");
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(false);
   const [showManage, setShowManage] = useState(false);
-  // T-ITEMS M2: إنشاء تصنيفٍ فرعي في مكانه — كان لا بدّ من فتح نافذة الإدارة
-  // والعودة، وهو ما يقطع الإدخال. يُنشأ تحت المختار مباشرةً، أو جذراً إن لم يُختر.
-  const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState("");
-  const [addErr, setAddErr] = useState<string | null>(null);
-  const [addBusy, setAddBusy] = useState(false);
+  // C2: حتى تستقرّ القائمة الأولى يُعرض شكلٌ معطَّل بدل المنتقي — تمريرُ
+  // `categories=[]` قبلها كان يُظهر «—» لمنتجٍ له تصنيف.
+  const [loaded, setLoaded] = useState(false);
+  // وفشلُ الجلب لا يُعرض منتقياً بقائمةٍ فارغة («—» لمنتجٍ له تصنيف)، بل
+  // رسالةٌ وزرُّ إعادة محاولة.
+  const [loadError, setLoadError] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
+  const load = useCallback(async () => {
     try {
       const data = await inventoryApi.getCategories();
-      setCategories(data);
+      setCategories(Array.isArray(data) ? (data as Category[]) : []);
+      setLoadError(false);
     } catch (e) {
       console.error("Failed to load categories", e);
+      setLoadError(true);
     } finally {
-      setLoading(false);
+      setLoaded(true);
     }
+  }, []);
+
+  /** إعادة المحاولة تعود إلى «جارٍ التحميل…» ثم تعرض المنتقي أو الرسالة. */
+  const retryLoad = () => {
+    setLoaded(false);
+    setLoadError(false);
+    void load();
   };
 
   useEffect(() => {
-    load();
-  }, []);
+    void load();
+  }, [load]);
 
-  const handleAdd = async () => {
-    const name = newName.trim();
-    if (!name) { setAddErr("اسم التصنيف مطلوب."); return; }
-    setAddBusy(true); setAddErr(null);
-    try {
-      const created = await inventoryApi.createCategory({
-        name, parent: value ?? null,
-      }) as Category;
-      await load();
-      onChange(created.id, created.name);
-      setNewName("");
-      setAdding(false);
-    } catch (e: unknown) {
-      // خطأ الخادم يُعرَض لا يُبتلع — وإلا بدا الزرّ معطّلاً بلا سبب.
-      setAddErr(e instanceof Error ? e.message : "تعذّر إنشاء التصنيف");
-    } finally {
-      setAddBusy(false);
+  const handleChange = (id: number | null, pathLabel: string) => {
+    if (id == null) {
+      onChange(null, undefined);
+      return;
     }
+    const known = categories.find((category) => category.id === id);
+    if (known) {
+      onChange(id, known.name);
+      return;
+    }
+    // أُنشئ داخل المنتقي للتوّ: القائمة هنا لم تحتوِه بعد — تُحدَّث، والاسم من المسار.
+    void load();
+    onChange(id, pathLabel.split(PATH_SEPARATOR).pop());
   };
 
   return (
-    <div style={{ width: "100%" }}>
-      <div style={{ display: "flex", gap: "4px", width: "100%" }}>
-        <select
-          className={className || "ktra-input"}
-          value={value ?? ""}
-          onChange={(e) => {
-            const val = e.target.value;
-            if (!val) {
-              onChange(null);
-              return;
-            }
-            const id = Number(val);
-            const cat = categories.find((c) => c.id === id);
-            onChange(id, cat?.name);
-          }}
-          disabled={disabled || loading}
-          style={{ flex: 1 }}
-        >
-          <option value="">-- بدون تصنيف --</option>
-          {/* الإزاحة بمسافات NBSP لا عادية: المتصفح يطوي المسافات العادية داخل
-              الخيار فيستوي العمق ويضيع شكل الشجرة. */}
-          {sortCategoryRows(categories).map(({ category, depth }) => (
-            <option key={category.id} value={category.id}>
-              {" ".repeat(depth * 4)}{depth > 0 ? "└─ " : ""}{category.name}
-            </option>
-          ))}
-        </select>
+    <div>
+      <div className="flex w-full items-center gap-1">
+        {loaded ? (
+          loadError ? (
+            <>
+              <div className={`ktra-input min-w-0 flex-1 text-[var(--ktra-danger)] ${className ?? ""}`}>
+                تعذّر تحميل التصنيفات
+              </div>
+              <button
+                type="button"
+                className="ktra-toolbtn shrink-0"
+                onClick={retryLoad}
+                disabled={disabled}
+              >
+                إعادة المحاولة
+              </button>
+            </>
+          ) : (
+            <CategoryTreeSelect
+              mode="single"
+              value={value}
+              onChange={handleChange}
+              categories={categories}
+              className={`min-w-0 flex-1 ${className ?? ""}`}
+              disabled={disabled}
+              allowCreate
+            />
+          )
+        ) : (
+          <div className={`ktra-input min-w-0 flex-1 opacity-60 ${className ?? ""}`}>
+            جارٍ التحميل…
+          </div>
+        )}
         {canManageCatalog && (
-          <>
-            <button
-              type="button"
-              className="ktra-toolbtn"
-              onClick={() => { setAdding((v) => !v); setAddErr(null); }}
-              disabled={disabled}
-              title={value ? "تصنيف فرعي تحت المختار" : "تصنيف جذري جديد"}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-            <button
-              type="button"
-              className="ktra-toolbtn"
-              onClick={() => setShowManage(true)}
-              disabled={disabled}
-              title="إدارة التصنيفات (شجرة)"
-            >
-              <FolderTree className="h-4 w-4" />
-            </button>
-          </>
+          <button
+            type="button"
+            className="ktra-toolbtn shrink-0"
+            onClick={() => setShowManage(true)}
+            disabled={disabled}
+            title="إدارة التصنيفات (شجرة)"
+          >
+            <FolderTree className="h-4 w-4" />
+          </button>
         )}
       </div>
-
-      {/* المسار الكامل للمختار — «أين يقع هذا التصنيف» يُقرأ بلا فتح الشجرة. */}
-      {value != null && (
-        <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-ink-soft)", marginTop: 2 }}>
-          {categoryPathLabel(categories, value)}
-        </div>
-      )}
-
-      {adding && (
-        <div style={{ display: "flex", gap: 4, marginTop: 4, alignItems: "center" }}>
-          <input
-            className="ktra-input"
-            style={{ flex: 1 }}
-            autoFocus
-            value={newName}
-            placeholder={value ? "اسم التصنيف الفرعي" : "اسم التصنيف الجذري"}
-            onChange={(e) => setNewName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") { e.preventDefault(); void handleAdd(); }
-              if (e.key === "Escape") { e.preventDefault(); setAdding(false); setNewName(""); }
-            }}
-          />
-          <button type="button" className="ktra-toolbtn" disabled={addBusy}
-            onClick={() => void handleAdd()}>إضافة</button>
-          <button type="button" className="ktra-toolbtn"
-            onClick={() => { setAdding(false); setNewName(""); setAddErr(null); }}>
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-      )}
-      {addErr && (
-        <div style={{ fontSize: "var(--ktra-fs-sm)", color: "var(--ktra-danger, #c0392b)", marginTop: 2 }}>
-          {addErr}
-        </div>
-      )}
 
       {showManage && (
         <CategoryManageModal
           onClose={() => {
             setShowManage(false);
-            load();
+            void load();
           }}
         />
       )}
@@ -173,7 +152,7 @@ export const CategoryPicker: React.FC<Props> = ({ value, onChange, className, di
 const CategoryManageModal: React.FC<{ onClose: () => void }> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4" dir="rtl">
-      <div className="bg-[var(--color-surface)] rounded shadow-xl w-full max-w-md flex flex-col" style={{ maxHeight: "80vh", height: "600px" }}>
+      <div className="bg-[var(--color-surface)] rounded shadow-xl w-full max-w-md flex flex-col max-h-[80vh] h-[600px]">
         <div className="flex items-center justify-between p-3 border-b bg-[var(--color-surface-2)]">
           <h3 className="font-bold text-[var(--ktra-ink)]">إدارة التصنيفات (شجرة)</h3>
           <button onClick={onClose} className="text-[var(--color-text-muted)] hover:text-[var(--color-text-muted)]"><X className="h-5 w-5" /></button>
