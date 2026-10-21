@@ -312,8 +312,8 @@ def create_company(
             currency=base_currency
         )
 
-        # 3. Seed TenantBooks — أنواع القالب فقط (`document_types=None` = الخمسة
-        # عشر كاملةً كما تُنتَج اليوم).
+        # 3. Seed TenantBooks — أنواع القالب فقط (`document_types=None` = كل أنواع
+        # `TenantBook.DOCUMENT_TYPES`).
         doc_type_labels = dict(TenantBook.DOCUMENT_TYPES)
         doc_types = template_config['document_types'] or list(doc_type_labels)
         for doc_type in doc_types:

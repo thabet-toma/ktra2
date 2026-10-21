@@ -2292,6 +2292,14 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
 # Phase 7 (T-I1/T-I2): ترحيل مستندات المخزون — تحويل + جرد
 # ════════════════════════════════════════════════════════════════════
 
+def _doc_number_suffix(number):
+    """ذيل رقم مستند بصيغة PREFIX-nnnn، و`None` إن لم يكن رقمياً."""
+    try:
+        return int(str(number).rsplit('-', 1)[-1])
+    except ValueError:
+        return None
+
+
 def _next_doc_number(tenant_id, model, field, prefix):
     """رقم تسلسلي بسيط لكل شركة: PREFIX-0001 (مرآة منطق توليد SKU)."""
     last = (
@@ -2303,11 +2311,49 @@ def _next_doc_number(tenant_id, model, field, prefix):
     )
     n = 0
     if last:
-        try:
-            n = int(str(last).split('-')[-1])
-        except (ValueError, IndexError):
+        n = _doc_number_suffix(last)
+        if n is None:
             n = model.objects.filter(tenant_id=tenant_id).count()
     return f"{prefix}-{n + 1:04d}"
+
+
+def _next_stocktake_number(tenant_id):
+    """رقم الجرد التالي من دفتر `TenantBook` (قفلٌ وذرّية) بدل MAX+1.
+
+    CONTINUITY: شركةٌ جردت قبل وجود دفتر الجرد عندها أرقام JRD-nnnn بلا دفتر —
+    فيُزرع الدفتر مرّةً واحدة من **أعلى** رقمٍ قائم، وإلّا عاد التسلسل إلى
+    JRD-0001 وكرّر رقماً مستعملاً.
+    """
+    from .models import Stocktake
+    from tenants.models import Tenant, TenantBook
+    from accounting.services import next_document_number
+
+    book_key = dict(
+        tenant_id=tenant_id, branch_id=None,
+        document_type='stocktake', book_number=0,
+    )
+    if not TenantBook.objects.filter(**book_key).exists():
+        # قفل صفّ الشركة يُسلسِل الزرع: `branch=NULL` يُبطل قيد الفرادة على MySQL،
+        # فترحيلان متزامنان كانا يُنشئان دفترين فينكسر الترقيم بعدهما للأبد.
+        Tenant.objects.select_for_update().get(pk=tenant_id)
+        # إعادة الفحص بعد القفل قراءةٌ حالّة (select_for_update) لا لقطةً قديمة
+        # تحت REPEATABLE READ، فترى الدفتر الذي زرعه الترحيل الذي سبقنا.
+        if TenantBook.objects.select_for_update().filter(**book_key).first() is None:
+            highest = 0
+            numbers = (
+                Stocktake.objects.filter(tenant_id=tenant_id)
+                .exclude(stocktake_number='')
+                .values_list('stocktake_number', flat=True)
+            )
+            for number in numbers:
+                suffix = _doc_number_suffix(number)
+                if suffix is not None:
+                    highest = max(highest, suffix)
+            TenantBook.objects.create(
+                **book_key,
+                name='stocktake [0]', last_used_number=highest, is_active=True,
+            )
+    return f"JRD-{next_document_number(tenant_id, 'stocktake'):04d}"
 
 
 def post_warehouse_transfer(transfer, user=None):
@@ -2386,18 +2432,6 @@ def post_stocktake(stocktake, user=None):
     from accounting.services import post_journal
     if stocktake.is_posted:
         raise ValidationError("الجرد مُرحَّل مسبقاً.")
-    lines = list(stocktake.lines.select_related('product').all())
-    if not lines:
-        raise ValidationError("أضف بنداً واحداً على الأقل.")
-    # بندان لمنتجٍ واحد (صفوفٌ قديمة): الرصيد يُقرأ مرة واحدة فيحسب الثاني فرقه
-    # على رصيدٍ قديم ويُسوَّى المخزون مرتين — نرفض قبل أي أثر.
-    seen_products = set()
-    for ln in lines:
-        if ln.product_id in seen_products:
-            raise ValidationError(
-                f"المنتج «{product_display_name(ln.product)}» مكرَّر في بنود الجرد — "
-                "ادمج كمياته في بند واحد قبل الترحيل.")
-        seen_products.add(ln.product_id)
 
     # تجميع أطراف القيد حسب الحساب (مخزون/ت.ب.م) عبر كل البنود.
     debit_by_acct = {}   # account_id -> Decimal
@@ -2409,11 +2443,50 @@ def post_stocktake(stocktake, user=None):
         acct_obj[acct.id] = acct
 
     with transaction.atomic():
-        if not stocktake.stocktake_number:
-            stocktake.stocktake_number = _next_doc_number(
-                stocktake.tenant_id, Stocktake, 'stocktake_number', 'JRD')
+        # الحارس هو الصفّ المقفول لا الكائن الممرَّر: نسخةٌ قديمة (`is_posted=False`)
+        # تمرّ من الفحص أعلاه، والحركة دلتا بينما القيد idempotent — فينحرف
+        # المخزون عن الدفاتر. القفل وإعادة الفحص يمنعان الترحيل المزدوج.
+        locked = (
+            Stocktake.objects.select_for_update()
+            .filter(pk=stocktake.pk, tenant_id=stocktake.tenant_id)
+            .first()
+        )
+        if locked is None:
+            raise ValidationError("الجرد غير موجود.")
+        if locked.is_posted:
+            raise ValidationError("الجرد مُرحَّل مسبقاً.")
+
+        lines = list(locked.lines.select_related('product').all())
+        if not lines:
+            raise ValidationError("أضف بنداً واحداً على الأقل.")
+        # بندان لمنتجٍ واحد (صفوفٌ قديمة): الرصيد يُقرأ مرة واحدة فيحسب الثاني فرقه
+        # على رصيدٍ قديم ويُسوَّى المخزون مرتين — نرفض قبل أي أثر.
+        seen_products = set()
         for ln in lines:
-            prod = ln.product
+            if ln.product_id in seen_products:
+                raise ValidationError(
+                    f"المنتج «{product_display_name(ln.product)}» مكرَّر في بنود الجرد — "
+                    "ادمج كمياته في بند واحد قبل الترحيل.")
+            seen_products.add(ln.product_id)
+
+        # ترتيب الأقفال: الجرد ← الشركة/الدفتر ← المنتجات؛ الرقم قبل المنتجات لأن الترقيم قد يقفل صفّ
+        # الشركة (زرع الدفتر: `Tenant.select_for_update`) أو يُدخل الدفتر (قفل FK مشترك عليه)، فقفلُ منتجٍ قبله يُغلق الحلقة مع بيعٍ ينتظره (1213).
+        if not locked.stocktake_number:
+            locked.stocktake_number = _next_stocktake_number(locked.tenant_id)
+
+        # رصيد النظام يُقرأ من صفوف المنتجات المقفولة في هذه المعاملة نفسها — لا من
+        # `ln.product` الذي جُلب قبل القفل فرآه ترحيلٌ متزامنٌ آخر برصيدٍ قديم.
+        # قفلٌ واحدٌ مرتَّب بالفهرس (كل الصفوف دفعةً) بدل قفلٍ صفّاً صفّاً بترتيب
+        # البنود، فلا يتصادم ترحيلان بترتيبَي بنودٍ مختلفين.
+        products = {
+            p.pk: p for p in Product.objects.select_for_update().filter(
+                tenant_id=locked.tenant_id, pk__in=seen_products).order_by('pk')
+        }
+        if seen_products - set(products):
+            raise ValidationError("بند جردٍ يشير إلى منتجٍ لا يتبع الشركة.")
+
+        for ln in lines:
+            prod = products[ln.product_id]
             system_qty = Decimal(str(prod.quantity_on_hand))
             counted = Decimal(str(ln.counted_quantity))
             variance = (counted - system_qty).quantize(Decimal('0.0001'))
@@ -2424,15 +2497,15 @@ def post_stocktake(stocktake, user=None):
                 continue
             avg = Decimal(str(prod.avg_cost))
             value = (abs(variance) * avg).quantize(Decimal('0.01'))
-            inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=stocktake.tenant_id)
-            cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=stocktake.tenant_id)
+            inv_acct = _resolve_line_account(prod, 'inventory', tenant_id=locked.tenant_id)
+            cogs_acct = _resolve_line_account(prod, 'cogs', tenant_id=locked.tenant_id)
             if variance > 0:
                 # فائض: زيادة مخزون
                 record_stock_movement(
                     product=prod, movement_type='ADJUST_IN', quantity=variance, unit_cost=avg,
-                    reference_type='STOCKTAKE', reference_id=stocktake.id,
-                    movement_date=stocktake.stocktake_date, tenant=stocktake.tenant,
-                    warehouse=stocktake.warehouse, notes="فائض جرد",
+                    reference_type='STOCKTAKE', reference_id=locked.id,
+                    movement_date=locked.stocktake_date, tenant=locked.tenant,
+                    warehouse=locked.warehouse, notes="فائض جرد",
                 )
                 if value > 0:
                     _add(debit_by_acct, inv_acct, value)
@@ -2441,9 +2514,9 @@ def post_stocktake(stocktake, user=None):
                 # عجز: نقص مخزون
                 record_stock_movement(
                     product=prod, movement_type='ADJUST_OUT', quantity=abs(variance),
-                    reference_type='STOCKTAKE', reference_id=stocktake.id,
-                    movement_date=stocktake.stocktake_date, tenant=stocktake.tenant,
-                    warehouse=stocktake.warehouse, notes="عجز جرد",
+                    reference_type='STOCKTAKE', reference_id=locked.id,
+                    movement_date=locked.stocktake_date, tenant=locked.tenant,
+                    warehouse=locked.warehouse, notes="عجز جرد",
                 )
                 if value > 0:
                     _add(debit_by_acct, cogs_acct, value)
@@ -2467,18 +2540,24 @@ def post_stocktake(stocktake, user=None):
         journal = None
         if lines_data:
             journal = post_journal(
-                tenant_id=stocktake.tenant_id,
-                transaction_date=stocktake.stocktake_date,
+                tenant_id=locked.tenant_id,
+                transaction_date=locked.stocktake_date,
                 reference_type='STOCKTAKE',
-                reference_id=stocktake.id,
-                description=f"فرق جرد {stocktake.stocktake_number}",
+                reference_id=locked.id,
+                description=f"فرق جرد {locked.stocktake_number}",
                 lines_data=lines_data,
                 user=user,
             )
-        stocktake.is_posted = True
-        stocktake.journal = journal
-        stocktake.save(update_fields=['is_posted', 'journal', 'stocktake_number', 'updated_at'])
-    logger.info("Stocktake #%s posted (journal=%s)", stocktake.id, journal.id if journal else None)
+        locked.is_posted = True
+        locked.journal = journal
+        locked.save(update_fields=['is_posted', 'journal', 'stocktake_number', 'updated_at'])
+
+    # المستدعي (و`StocktakeViewSet.post_doc`) يقرأ الكائن الممرَّر بعد الترحيل.
+    stocktake.is_posted = locked.is_posted
+    stocktake.stocktake_number = locked.stocktake_number
+    stocktake.journal = locked.journal
+    stocktake.updated_at = locked.updated_at
+    logger.info("Stocktake #%s posted (journal=%s)", locked.id, journal.id if journal else None)
     return stocktake
 
 

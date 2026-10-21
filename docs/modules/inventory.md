@@ -92,6 +92,7 @@ def undo_product_merge(*, tenant, merge_id):  # (task24) يعكس ضمّاً ب�
 def post_warehouse_transfer(transfer, user=None):  # (1208)
 def unpost_warehouse_transfer(transfer, user=None):  # (1248)
 def post_stocktake(stocktake, user=None):  # (1274)
+def _next_stocktake_number(tenant_id):  # رقم الجرد من دفتر `stocktake` في `TenantBook`، مع زرعٍ متواصلٍ من أعلى رقمٍ قائم عند غياب الدفتر
 ```
 ```python
 # inventory/serials.py — الأرقام التسلسلية (نيّة على البند ← حالة في ProductSerial)
@@ -461,6 +462,22 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
   للبيع يستعلمان `in_stock` وحدها، فوحدةٌ صُرفت خارج البيع (`issue_serials`، #223) لا
   يخصّصها بيعٌ لاحق أبداً — الفرق حالةٌ لا مجرّد علم.
 - **لا يُعدَّل `quantity_on_hand` أو `avg_cost` إلا عبر `record_stock_movement`** (أو `_recompute_product_stock` بعد حذف حركات). هي الدالة الوحيدة التي تقفل المنتج بـ`select_for_update` داخل `transaction.atomic` (`services.py:187-188`) وتحفظ لقطات before/after على الحركة.
+- **ترحيل الجرد يقفل صفّه ويُرقَّم من دفتر `stocktake`** (`inventory/services.py` — `post_stocktake`):
+  **القفل وإعادة الفحص هما الحارس** — الفحص الأوّلي على `is_posted` لا يكفي (نسخةٌ قديمة
+  تمرّ منه)؛ داخل المعاملة يُعاد جلب صفّ الجرد بـ`select_for_update()` ويُعاد فحص `is_posted`
+  على الصفّ المقفول، ورصيد النظام لكل بند يُقرأ من صفوف المنتجات المقفولة في المعاملة نفسها
+  (بـ`order_by('pk')` حتى لا يتصادم ترحيلان بترتيبَي بنودٍ مختلفين) — لا من `ln.product`
+  المجلوب قبل القفل. **وترتيب الأقفال: الجرد ← الشركة/الدفتر ← المنتجات** — الرقم يُؤخذ قبل
+  قفل المنتجات لأن إدخال الدفتر يأخذ قفلاً مشتركاً على صفّ الشركة (مفتاح أجنبي في InnoDB)،
+  فقفلُ منتجٍ قبله يُغلق الحلقة مع بيعٍ يمسك الشركة وينتظر المنتج (خطأ 1213). الحركة دلتا بينما
+  `post_journal` idempotent على `(tenant, reference_type, reference_id)`، فبلا القفل يمرّ
+  ترحيلان ويُسوَّى المخزون مرتين بقيدٍ واحد. `stocktake_number` من
+  `accounting.services.next_document_number(tenant_id, 'stocktake')` بصيغة `JRD-{n:04d}`؛
+  وعند غياب الدفتر يُقفل صفّ الشركة أوّلاً ثم يُعاد الفحص
+  ويُزرع آخرُ رقمٍ مستعمل من **أعلى** رقم جردٍ قائم للشركة (`_next_stocktake_number`) فلا
+  يتكرّر `JRD-0001` ولا يُنشأ دفتران: `branch=NULL` يُبطل قيد الفرادة على MySQL فالقفل هو ما
+  يُسلسِل الزرع. **لا قيد فرادة على `(tenant, stocktake_number)` بعد** — ينتظر فحص تكرارات
+  قاعدة الإنتاج.
 - **«السعر التقديري» ليس `avg_cost` ولا يُقرأ منه ولا يمسّه بأي حال** (ISSUE #111/#133، `core/pricing.py` — `indicative_purchase_prices`/`_purchase_lowest_prices_base_currency`) — أقلّ سعر شراء ضمن آخر `INDICATIVE_PRICE_INVOICE_WINDOW` (٥) فواتير شراء **مرحَّلة** تحتوي المنتج فقط، لا كلّ الفترات، ومصدره فواتير الشراء وحدها بلا سقوطٍ إلى `avg_cost` عند غيابها: منتجٌ بلا شراء مرحَّل يغيب من القاموس المُعاد لا يظهر صفراً ولا بأي رقمٍ آخر. رقمٌ للقراءة والتفاوض مع المورّد لا تكلفة — خلطه بـ`avg_cost` كلّف الجلسات مرّتين. يظهر في شاشة الأصناف وتقرير الطباعة مكان «متوسط التكلفة» (`indicative_purchase_price`/`indicative_purchase_price_source` على المُسلسِل و`ProductLookupSerializer`)، بينما `avg_cost` يبقى كما هو على شاشتَي مستويات المخزون والتقييم.
 - **المنتج المعطَّل (`is_active=False`, T2) يغيب عن قوائم المستندات الجديدة ولا يُحذف ولا يُصفَّر** (زوهو · BC «Blocked» · دفترة · أودو Archive): `ProductViewSet.get_queryset` يفلتر على `action == 'list'` وحده (`_active_status_param`)؛ المستندات القديمة والتقارير وكرت المنتج وشاشات المخزون تبقى تراه، ورصيده يبقى في مجاميع العائلة. **حارس الترحيل (T3)**: مستندٌ مسوّدة يحمل منتجاً عُطِّل **لا يُرحَّل ولا يُؤكَّد ولا يتحوّل** (`core/active_guard.py` — `assert_active_for_posting`؛ مواضعه في `modules/sales.md` و`modules/logistics.md`)، أمّا المرتجعات وتسليم/استلام المرحَّل وحركات المخزون والتحويل والجرد المباشرة فتبقى مسموحة ولا حارس في `record_stock_movement`؛ و`deactivation-impact` يُبيّن للمستخدم تلك المسوّدات قبل التعطيل. الفرق عن `is_for_sale_online` (نشر المتجر) و`is_store_only`: هذا الحقل يخصّ المنتج في كل واجهات المخزون والمستندات. `agent_products` (`/api/agent/products/`) يعرض النشط وحده؛ وفي المتجر `published_products` تحجب نسخة `StoreProduct` من منتجٍ معطَّل و`import_from_inventory` يرفضه (`docs/modules/store.md`). **الواجهة (T4)**: قائمة المنتجات تحمل مرشّح «نشط/غير نشط/الكل» (`status=`) وإيقافاً/تنشيطاً بنافذة تأكيد من `deactivation-impact/` (`useProductActive`)، وكرت المنتج يعرض شريط «غير نشط»؛ والجرد وحركات المخزون والتحويل بين المستودعات وأرصدة المخزون وفلاتر التقارير تطلب `status=all` فيبقى الموقوف فيها ظاهراً بوسم «(غير نشط)»؛ ومحرّرات المستندات القديمة تجلب منتجها الموقوف فرداً (`GET products/{id}/` غير مفلتر) فلا يظهر سطرها فارغاً (`docs/modules/frontend.md`).
 - **الكمية موجبة دائماً**: `record_stock_movement` يرفض `quantity <= 0` (`services.py`) — الاتجاه يأتي من `movement_type` لا من إشارة الكمية.
@@ -717,7 +734,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 | `inventory/tests/test_rebuild_fifo_layers.py` | أمرُ «قِس أوّلاً»: الحالةُ المطابقة، **الفرقُ البنيويّ بلا كميّةٍ يتيمة**، الكميّةُ اليتيمة، وحارسُ «لا يكتب صفّاً» |
 | `inventory/tests/test_product_serials.py` | مصفوفة الأنماط (بدون/اختياري/إجباري) على الجانبين، دورة بيع ⇄ إلغاء ترحيل، تخصيص FIFO |
 | `inventory/tests/test_serial_invoice_journey.py` | نفس الرحلة عبر HTTP بحمولة المحرِّرين (`items[].serials` / `lines[].serials`) |
-| `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق) |
+| `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق، وقفل الصفّ/رفض الترحيل بنسخةٍ قديمة مع بقاء رابط القيد، وترقيم `TenantBook` مع الزرع المتواصل، وحارس منتج شركةٍ أخرى) |
 | `inventory/tests/test_product_profile.py` | بطاقة المنتج: المؤشرات، سجلّ الحركة (الرصيد الجاري يطابق on-hand)، الفواتير المرتبطة |
 | `inventory/tests/test_item_aggregates.py` | التجميعات من `StockMovement` كمصدر وحيد (وارد تراكمي، متوسط مبيعات 90/28 يوماً) |
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |

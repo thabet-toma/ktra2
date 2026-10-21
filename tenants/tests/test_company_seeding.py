@@ -22,6 +22,7 @@ from inventory.models import Product
 from partners.models import Partner
 from sales.models import SalesInvoice
 from tenants.models import Tenant, TenantBook, TenantSettings, UserCompanyMembership
+from tenants.serializers import TenantBookSerializer
 from tenants.services import COA_DATA, create_company
 
 pytestmark = pytest.mark.django_db
@@ -84,6 +85,20 @@ def test_create_company_rejects_blank_name(creator):
     with pytest.raises(ValidationError):
         create_company("   ", creator)
     assert Tenant.objects.count() == 0
+
+
+def test_stocktake_book_type_is_labeled_and_serializable(creator):
+    """نوع دفتر الجرد ظاهرٌ بوسمٍ عربيّ وقابلٌ لدورة PUT — لا نوعٌ صامت."""
+    tenant = create_company("شركة الجرد", creator)
+    book = TenantBook.objects.filter(tenant=tenant, document_type="stocktake").first()
+    assert book is not None
+    assert book.get_document_type_display() == "جرد المخزون"
+
+    payload = dict(TenantBookSerializer(book).data)
+    payload["name"] = "دفتر الجرد"
+    serializer = TenantBookSerializer(book, data=payload)
+    assert serializer.is_valid(), serializer.errors
+    assert serializer.validated_data["document_type"] == "stocktake"
 
 
 # ─────────────────────────────────────────────────────────────────────────────

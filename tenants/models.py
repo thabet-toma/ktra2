@@ -323,6 +323,9 @@ class TenantBook(models.Model):
         ('clearance', 'تخليص جمركي'),
         # ISSUE #112: طلبية (طلب عروض أسعار) تسبق عرض المورّد — مواصفة #108.
         ('purchase_rfq', 'طلبية شراء (طلب عروض)'),
+        # S1: ترقيم الجرد (JRD-nnnn) على الدفتر 0 وحده، يزرعه `inventory.services._next_stocktake_number`
+        # كسولاً عند أوّل ترحيل؛ والدفاتر 1..10 التي يزرعها إنشاء الشركة لكل نوعٍ لا يستعملها الترقيم.
+        ('stocktake', 'جرد المخزون'),
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')

@@ -11,7 +11,7 @@ from django.core.exceptions import ValidationError
 from django.test import TestCase
 from rest_framework.test import APITestCase
 
-from accounting.models import Account, FiscalPeriod, JournalLine
+from accounting.models import Account, FiscalPeriod, JournalHeader, JournalLine
 from core.models import ActivityLog
 from inventory.models import (
     Product, ProductCategory, Warehouse, StockMovement,
@@ -20,7 +20,7 @@ from inventory.models import (
 from inventory.services import (
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
 )
-from tenants.models import Tenant, UserCompanyMembership
+from tenants.models import Tenant, TenantBook, UserCompanyMembership
 from tenants.services import create_company
 
 
@@ -160,6 +160,102 @@ class StocktakeTest(TestCase):
         mov = StockMovement.objects.get(reference_type="STOCKTAKE", reference_id=s.id)
         self.assertEqual(mov.movement_type, "ADJUST_IN")
         self.assertEqual(mov.quantity, Decimal("20.0000"))
+
+    def test_second_post_from_stale_instance_is_rejected_and_applies_once(self):
+        """نسخةٌ قديمة (`is_posted=False`) بعد الترحيل: يُرفض إعادة الترحيل ويبقى
+        رابط القيد كما هو. (التزامن الحقيقي لا يُحاكى على SQLite — المُثبَت هنا رفضُ
+        النسخة القديمة وحفظُ القيد؛ قفل الصفّ يحمي مسار MySQL.)"""
+        other = Product.objects.create(
+            tenant=self.tenant, sku="JRD-2", name_ar="منتج جرد ثانٍ", category=self.cat,
+            quantity_on_hand=Decimal("50"), avg_cost=Decimal("10"))
+        s = self._make_stocktake("120")
+        StocktakeLine.objects.create(stocktake=s, product=other, counted_quantity=Decimal("60"))
+        stale = Stocktake.objects.get(pk=s.pk)
+        self.assertFalse(stale.is_posted)
+
+        post_stocktake(s)
+        journal_id = Stocktake.objects.get(pk=s.pk).journal_id
+        self.assertIsNotNone(journal_id)
+
+        with self.assertRaises(ValidationError) as ctx:
+            post_stocktake(stale)
+        self.assertIn("مُرحَّل مسبقاً", str(ctx.exception))
+
+        self.product.refresh_from_db()
+        other.refresh_from_db()
+        self.assertEqual(self.product.quantity_on_hand, Decimal("120.0000"))
+        self.assertEqual(other.quantity_on_hand, Decimal("60.0000"))
+        moves = StockMovement.objects.filter(reference_type="STOCKTAKE", reference_id=s.id)
+        self.assertEqual(moves.filter(product=self.product).count(), 1)
+        self.assertEqual(moves.filter(product=other).count(), 1)
+        self.assertEqual(moves.get(product=self.product).movement_type, "ADJUST_IN")
+        self.assertEqual(
+            JournalHeader.objects.filter(
+                tenant=self.tenant, reference_type="STOCKTAKE", reference_id=s.id).count(), 1)
+        self.assertEqual(Stocktake.objects.get(pk=s.pk).journal_id, journal_id)
+
+    def test_stocktake_numbers_follow_tenant_book_sequence(self):
+        first = self._make_stocktake("100")
+        post_stocktake(first)
+        second = self._make_stocktake("100")
+        post_stocktake(second)
+        first.refresh_from_db()
+        second.refresh_from_db()
+        self.assertEqual(first.stocktake_number, "JRD-0001")
+        self.assertEqual(second.stocktake_number, "JRD-0002")
+        book = TenantBook.objects.get(tenant=self.tenant, document_type="stocktake")
+        self.assertEqual(book.last_used_number, 2)
+
+    def test_stocktake_book_starts_after_existing_numbers(self):
+        """شركةٌ عندها جرداتٌ سابقة بأرقام JRD بلا دفتر: الدفتر يُزرع من أعلى
+        رقمٍ قائم، فلا يتكرّر JRD-0001 أبداً."""
+        Stocktake.objects.create(
+            tenant=self.tenant, stocktake_date="2026-06-01",
+            stocktake_number="JRD-0007", is_posted=True)
+        self.assertFalse(
+            TenantBook.objects.filter(tenant=self.tenant, document_type="stocktake").exists())
+
+        s = self._make_stocktake("100")
+        post_stocktake(s)
+        s.refresh_from_db()
+        self.assertEqual(s.stocktake_number, "JRD-0008")
+        books = TenantBook.objects.filter(tenant=self.tenant, document_type="stocktake")
+        self.assertEqual(books.count(), 1)
+        book = books.get()
+        self.assertEqual(book.last_used_number, 8)
+        # اسم افتراضي بنفس صيغة next_document_number — لا اسم خاصّ بالجرد وحده.
+        self.assertEqual(book.name, "stocktake [0]")
+
+        nxt = self._make_stocktake("100")
+        post_stocktake(nxt)
+        nxt.refresh_from_db()
+        self.assertEqual(nxt.stocktake_number, "JRD-0009")
+
+    def test_line_pointing_at_another_tenants_product_is_rejected(self):
+        """بندٌ أُنشئ مباشرةً عبر ORM بمنتج شركةٍ أخرى: لا حركة ولا ترحيل، والرقم
+        والدفتر يسقطان مع المعاملة — الترقيم صار قبل قفل المنتجات."""
+        self.assertFalse(
+            TenantBook.objects.filter(tenant=self.tenant, document_type="stocktake").exists())
+        other_tenant = Tenant.objects.create(TenantID=703, CompanyName="JRD Foreign")
+        foreign = Product.objects.create(
+            tenant=other_tenant, sku="JRD-X", name_ar="منتج شركة أخرى",
+            quantity_on_hand=Decimal("10"), avg_cost=Decimal("10"))
+        s = Stocktake.objects.create(tenant=self.tenant, stocktake_date="2026-07-01")
+        StocktakeLine.objects.create(stocktake=s, product=foreign, counted_quantity=Decimal("0"))
+
+        with self.assertRaisesMessage(
+                ValidationError, "بند جردٍ يشير إلى منتجٍ لا يتبع الشركة."):
+            post_stocktake(s)
+
+        self.assertFalse(
+            StockMovement.objects.filter(reference_type="STOCKTAKE", reference_id=s.id).exists())
+        s.refresh_from_db()
+        self.assertEqual(s.stocktake_number, "")
+        self.assertFalse(
+            TenantBook.objects.filter(tenant=self.tenant, document_type="stocktake").exists())
+        self.assertFalse(s.is_posted)
+        foreign.refresh_from_db()
+        self.assertEqual(foreign.quantity_on_hand, Decimal("10"))
 
 
 class WarehouseDetailApiTest(APITestCase):
