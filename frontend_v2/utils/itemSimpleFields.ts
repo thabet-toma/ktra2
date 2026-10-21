@@ -1,20 +1,24 @@
 /**
  * T-ITEMS M1 — تعريفٌ واحد لـ«الوضع البسيط» في المنتج.
  *
- * ثلاث شاشات تكتب المنتج: الكرت الكامل (`ItemForm`)، الإنشاء السريع من
- * المستند (`ItemQuickCreateModal`)، والتحرير السريع من المستند
- * (`ItemQuickEditModal`). كانت كلٌّ منها تبني حمولتها بيدها، فاختلفن: واحدة
- * ترسل وحدة القياس باسمٍ لا يعرفه الخادم، وأخرى لا ترسلها أصلاً، وثالثة تكتب
- * `""` حيث يريد الخادم `null`. القاعدة هنا مرّةً واحدة، والشكل في كلٍّ منهنّ.
+ * النافذتان السريعتان تبنيان حمولتهما من هنا: `ItemQuickEditModal`
+ * (`dirtySimplePayload`) و`ItemQuickCreateModal` (`simplePayload`)، وكذلك تعديل
+ * الاسم في مكانه (`ItemsManagement`). ثلاث شاشات تبني حمولتها بيدها = ثلاث
+ * حمولات متباعدة، وقد كان ذلك حاصلاً: الإنشاء السريع يرسل وحدة القياس باسمٍ
+ * ليس في العقد فتُبتلع.
  *
- * لماذا هذه الثمانية دون غيرها: هي ما يلزم لبيع المنتج وشرائه وإيجاده — والباقي
- * (البراند، النوع، حدود المخزون، الكفالات، الحسابات) يبقى خلف «متقدم» لأن
- * تركه فارغاً لا يمنع شيئاً. هذا هو الكشف التدريجي الذي تفعله Odoo وZoho.
+ * التسعة هي ما يلزم لبيع المنتج وشرائه وإيجاده. الباقي (النوع، حدود المخزون،
+ * الكفالات، الحسابات) في الكرت الكامل `ItemForm` الذي فيه قسم «متقدم» — أما
+ * النوافذ السريعة فلا قسمَ متقدّم فيها، فلا حقلَ مخفيٌّ وراءه.
+ *
+ * **والبراند منها** (B2): حقلُ صفٍّ لا حقلُ عائلة — «المنتج» عائلةٌ و«البراند»
+ * صفٌّ قابلٌ للبيع، وتسميةُ العائلة تأتي من الاسم.
  */
 
 export type ItemSimpleFields = {
   name_ar: string;
   name_en: string;
+  brand: string;
   category: number | null;
   uom_id: number | null;
   sale_price: string;
@@ -26,6 +30,7 @@ export type ItemSimpleFields = {
 export const blankSimpleFields = (): ItemSimpleFields => ({
   name_ar: "",
   name_en: "",
+  brand: "",
   category: null,
   uom_id: null,
   sale_price: "",
@@ -38,6 +43,7 @@ export const blankSimpleFields = (): ItemSimpleFields => ({
 export const simpleFieldsFromProduct = (p: Record<string, unknown>): ItemSimpleFields => ({
   name_ar: String(p.name_ar ?? ""),
   name_en: String(p.name_en ?? ""),
+  brand: String(p.brand ?? ""),
   category: p.category != null && p.category !== "" ? Number(p.category) : null,
   uom_id: p.uom_id != null && p.uom_id !== "" ? Number(p.uom_id) : null,
   sale_price: p.sale_price != null ? String(p.sale_price) : "",
@@ -53,10 +59,14 @@ export const simpleFieldsFromProduct = (p: Record<string, unknown>): ItemSimpleF
  * متصادمين في حارس التفرّد، وسعر البيع الفارغ نصّاً يصير صفراً في القراءة
  * فيبدو أن المنتج يُباع مجّاناً — بينما `null` يعني «لا سعر محفوظ» فيرجع
  * محرّك التسعير إلى مصادره الأخرى.
+ *
+ * البراند نصٌّ فارغٌ لا `null`: الخادم `CharField(blank=True)` بلا NULL، فارغُه
+ * «بلا براند» شرعاً.
  */
 export const simplePayload = (f: ItemSimpleFields): Record<string, unknown> => ({
   name_ar: f.name_ar.trim() || null,
   name_en: f.name_en.trim() || null,
+  brand: f.brand.trim(),
   category: f.category,
   uom_id: f.uom_id,
   sale_price: f.sale_price.trim() ? Number(f.sale_price) : null,

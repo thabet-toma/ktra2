@@ -48,7 +48,7 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
   const handleSave = async () => {
     const fields = {
       ...blankSimpleFields(),
-      name_ar: nameAr, name_en: nameEn, uom_id: uomId,
+      name_ar: nameAr, name_en: nameEn, brand, uom_id: uomId,
       sale_price: salePrice, is_service: isService,
     };
     const invalid = validateSimpleFields(fields);
@@ -56,10 +56,9 @@ export const ItemQuickCreateModal: React.FC<ItemQuickCreateModalProps> = ({ isOp
     setSaving(true);
     setError(null);
     try {
-      // نفس تعريف «الوضع البسيط» الذي يستعمله الكرت الكامل — الحمولة تُبنى
-      // مرّةً واحدة في `utils/itemSimpleFields` فلا تتباعد الشاشتان.
+      // الحمولة تُبنى مرّةً واحدة في `utils/itemSimpleFields` — والبراند منها
+      // (حقلٌ في `fields`)، فلا نسخةَ ثانية تُشذَّب هنا وتتباعد عن `simplePayload`.
       const payload = simplePayload(fields);
-      payload.brand = brand.trim();
       // التصنيف يأتي من المستدعي (عقدة الشجرة) ويسبق قيمة النموذج الفارغة.
       if (categoryId != null && categoryId !== "") payload.category = Number(categoryId);
       const created = await inventoryApi.createProduct(payload);

@@ -52,10 +52,26 @@ test('الخدمة لا تحمل تتبّعاً تسلسلياً مهما كان
   assert.equal(payload.is_serialized, false);
 });
 
-test('تغيير الاسم وحده يرسل الاسم وحده', () => {
-  const before = withFields({ category: 3, sale_price: '100' });
+test('تغيير الاسم وحده يرسل الاسم وحده — والبراند القائم لا يُمسّ', () => {
+  const before = withFields({ category: 3, sale_price: '100', brand: 'ميشلان' });
   const after = { ...before, name_ar: 'إطار جديد' };
   assert.deepEqual(dirtySimplePayload(before, after), { name_ar: 'إطار جديد' });
+});
+
+test('البراند حقلٌ من حقول الوضع البسيط — يُقرأ من صفّ الخادم', () => {
+  assert.equal(simpleFieldsFromProduct({ name_ar: 'إطار', brand: 'ميشلان' }).brand, 'ميشلان');
+  assert.equal(simpleFieldsFromProduct({ name_ar: 'إطار' }).brand, '');
+});
+
+test('البراند يُرسَل نصّاً مُشذَّباً لا null', () => {
+  assert.equal(simplePayload(withFields({ brand: '  ميشلان  ' })).brand, 'ميشلان');
+  assert.equal(simplePayload(withFields()).brand, '');
+});
+
+test('تغيير البراند وحده يرسل البراند وحده', () => {
+  const before = withFields({ brand: 'ميشلان', category: 3 });
+  const after = { ...before, brand: 'تويو' };
+  assert.deepEqual(dirtySimplePayload(before, after), { brand: 'تويو' });
 });
 
 test('بلا تغيير: حمولة فارغة ولا حفظ', () => {

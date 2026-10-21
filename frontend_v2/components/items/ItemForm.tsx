@@ -837,6 +837,12 @@ export const ItemForm: React.FC<Props> = ({
           onChange={(e) => patch("name_ar", e.target.value)} placeholder="اسم المنتج" />, 2)}
       {fld("اسم المنتج (إنجليزي)", <input className="ktra-input" value={form.name_en}
         onChange={(e) => patch("name_en", e.target.value)} />)}
+      {/* B2/D5: البراند حقلُ صفٍّ — مكانُه هنا حيث يعمل المستخدم، لا شريط الهوية.
+          وفي الإنشاء يُكتب بشارات البراندات أدناه (لا حقلَ ثانٍ). */}
+      {currentId != null && fld("البراند",
+        <ValuePicker value={form.brand} onChange={(brand) => patch("brand", brand)}
+          fetchOptions={inventoryApi.getBrands}
+          emptyLabel="— بلا براند —" addPlaceholder="مثال: ميشلان" addTitle="براند جديد" />)}
       {currentId == null && (
         <div className="col-span-3 rounded border border-[var(--ktra-border-soft)] bg-[var(--ktra-surface-2)] p-3">
           <label htmlFor="new-product-brand" className="mb-1 block text-xs font-bold text-[var(--ktra-ink)]">
@@ -1335,10 +1341,6 @@ export const ItemForm: React.FC<Props> = ({
             {fld("اسم المنتج", <input className="ktra-input ktra-input--hl" value={form.name_ar}
               onChange={(e) => patch("name_ar", e.target.value)}
               placeholder="اسم المنتج" autoFocus={productId == null} />, currentId == null ? 2 : undefined)}
-            {currentId != null && fld("البراند",
-              <ValuePicker value={form.brand} onChange={(brand) => patch("brand", brand)}
-                fetchOptions={inventoryApi.getBrands}
-                emptyLabel="— بلا براند —" addPlaceholder="مثال: ميشلان" addTitle="براند جديد" />)}
             {fld("التصنيف",
               <CategoryPicker value={form.category} onChange={(id, name) => {
                 patch("category", id);

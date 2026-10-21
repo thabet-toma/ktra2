@@ -14,6 +14,7 @@ import { Loader2, Save, AlertCircle } from "lucide-react";
 import { inventoryApi } from "../../services/inventoryApi";
 import { KitFloatWindow } from "../kit/KitFloatWindow";
 import { CategoryPicker } from "../inventory/CategoryPicker";
+import { ValuePicker } from "../inventory/ValuePicker";
 import { InactiveBanner } from "../shared/ActiveStatusControls";
 import { eventBus } from "../../utils/eventBus";
 import { resolveTenantId } from "../../utils/tenantContext";
@@ -163,6 +164,13 @@ export const ItemQuickEditModal: React.FC<Props> = ({
             {field("الاسم بالإنجليزية",
               <input className={input} value={form.name_en}
                 onChange={(e) => patch("name_en", e.target.value)} />, 2)}
+            {/* B2: البراند حقلُ صفٍّ قابلٌ للكتابة — يُعدَّل من هنا كما من الكرت،
+                عبر نفس `ValuePicker` ومن نفس مصدر القيم (`products/brands/`). */}
+            {field("البراند",
+              <ValuePicker value={form.brand} onChange={(brand) => patch("brand", brand)}
+                fetchOptions={inventoryApi.getBrands}
+                emptyLabel="— بلا براند —" addPlaceholder="مثال: ميشلان" addTitle="براند جديد"
+                className={input} />, 2)}
             {field("التصنيف",
               <CategoryPicker value={form.category}
                 onChange={(id) => patch("category", id)} />, 2)}
