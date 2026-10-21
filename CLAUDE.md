@@ -188,19 +188,25 @@
 | e2e المعنيّ | `cd frontend_v2 && npx playwright test e2e/<spec>.spec.ts --reporter=line` |
 | الوثائق | `python manage.py sync_docs` (محلياً بلا MySQL: `--settings=core.test_settings`) |
 
-**النشر (الخطوة 7):** الإنتاج `ktra-pro.tech` هو `root@187.124.164.58`، المجلد `/root/ktra`، الفرع `modern`،
-والاتصال `ssh -i ~/.ssh/hostenger2/id_ed25519 root@187.124.164.58`. على الخادم بالترتيب — إجراء مهارة
-`deploy-multica-5` مع `origin/newktra` مكان `origin/Multica`:
-`git fetch` ← `git merge origin/newktra` ← `makemigrations --check` ← **إن وُجدت هجرة: نسخةٌ احتياطية
-للقاعدة أوّلاً** (`mysqldump` ببيانات `.env` الخادم إلى `/root/backups/`) ← اختبارات backend بـ
-`DOCSHARE_PUBLIC_PATH=/s/` (الـ`.env` هناك يُسقط اختبار docshare واحداً لسببٍ بيئي) و`tsc` و`npm test`
-و`npm run build` ← `migrate` ← `collectstatic` ونشر الـstatic ← `rsync` لـ`dist/` **مستثنياً كل ما في
-جذر الويب وليس من `dist/`** (مجلد مشاركة PDF يعيش هناك و`--delete` يمحوه) ←
-`systemctl restart ktra.service` ← ثلاثُ `curl` تردّ 200 (`127.0.0.1:8000/api/health/`،
-`https://ktra-pro.tech/api/health/`، `https://ktra-pro.tech/`) ← `git push origin modern` **تقديماً سريعاً فقط**
-(إن كان `origin/modern` قد تباعد عن الخادم: لا دفع ولا `--force` — يُبلَّغ المالك).
+**النشر (الخطوة 7) — بإجراء مهارة الخادم `deploy-local-to-modern` (بطلب المالك 2026-10-22):** الإنتاج
+`ktra-pro.tech` هو `root@187.124.164.58`، المجلد `/root/ktra`، الفرع `modern`، والاتصال
+`ssh -i ~/.ssh/hostenger2/id_ed25519 root@187.124.164.58`. **المهارة على الخادم هي المرجع**
+(`/root/.claude/skills/deploy-local-to-modern/SKILL.md`) — تُقرأ قبل كل نشرٍ إن تغيّرت. التسلسل:
+`git push origin newktra` محلياً ← **CI أخضر على آخر commit** (`gh run list --branch newktra` — `failure` ⇒
+لا نشر حتى يُصلَح أو يُثبَت أنه الفشل البيئي المعروف وحده) ← على الخادم: `git fetch` ← `git merge origin/newktra`
+← **الثابت**: `git diff origin/newktra` لا يُظهر إلا إعدادات المضيف (`core/settings.py` · `frontend_v2/vite.config.ts`
+— صار فارغاً بعد ترحيلهما إلى `newktra`)؛ أيّ ملفٍ ثالث ⇒ توقّف ← `pip install` و`npm install` ← البوّابات
+**الخفيفة وحدها** (`manage.py check` · `makemigrations --check` · الهجرات المعلّقة) و`npm run build` —
+**لا `pytest` ولا `tsc` على الخادم** (نواةٌ واحدة بلا swap وهو الإنتاج الحي؛ CI يشغّلها) ← مراجعة كل هجرةٍ جديدة
+(`RemoveField`/`DeleteModel`/`RunSQL` ⇒ توقّف واسأل) ← **إن وُجدت هجرة: نسخةٌ احتياطية أوّلاً** (`mysqldump` ببيانات
+`.env` الخادم إلى `/root/backups/`) ← `migrate` ← `collectstatic` ونشر الـstatic ← `rsync` لـ`dist/` **مستثنياً كل
+ما في جذر الويب وليس من `dist/`** (مجلد مشاركة PDF يعيش هناك و`--delete` يمحوه) ← `systemctl restart ktra.service`
+← التحقّق: `is-active` و`NRestarts` = 0، ثلاثُ `curl` تردّ 200 (`127.0.0.1:8000/api/health/`،
+`https://ktra-pro.tech/api/health/`، `https://ktra-pro.tech/`)، سجلّ `logs/gunicorn-error.log`، ونقاط الوكيل
+`/api/agent/{products,customers,suppliers,invoices}/`. **لا `push` من الخادم** (المهارة تمنعه بلا إذنٍ صريح).
 تعارضُ الدمج ← `git merge --abort` والتوقّف؛ وأيّ فشلٍ قبل `migrate` ← `git reset --hard` إلى ما قبل الدمج
-(الخدمة لم يُعَد تشغيلها بعد، فالإنتاج لم يتغيّر).
+(الخدمة لم يُعَد تشغيلها بعد، فالإنتاج لم يتغيّر). السكربت: `deploy2.sh` في الـscratchpad (يُعاد إنشاؤه من هذه
+الخطوات إن ضاع).
 
 ---
 
