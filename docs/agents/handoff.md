@@ -22,7 +22,7 @@
   الفرق كاملاً. جولة التصليح 1 انتهت (`C3fixrun`: Esc، مربّع «إزالة التصنيف»، تعليق، أشكال الأخطاء) وقرأها
   المنسّق. المراجعتان النهائيتان: لا عائق، ودقّةٌ استحقّت جولة 2 (`C3fix2run`) + تعليقين (`C3fix3run`) — قرأها المنسّق.
   **C3 مستلَمة: commit `32ca072e`** (بوّابات 6498 · 1294 · e2e 38 · لقطات رآها المنسّق) — **لم تُدفع بعد**.
-- **DST1 تعمل** (`DST1.txt` ← `DST1run`) ← قراءة الفرق ← بوّابات ← commit ← push (C3+DST1 معاً) ← CI أخضر
+- **DST1 مستلَمة** (بوّابة 6503 ✓، الهجرات ✓) ← commit ← بوّابات ← commit ← push (C3+DST1 معاً) ← CI أخضر
   (`gh run list --branch newktra`) ← نشر بـ`deploy2.sh` (`deploy11.log`).
 - **C2 منشورة على الإنتاج** (`deploy10.log`: الخادم على `c06fd274`، الفحوص الثلاثة 200، NRestarts 0).
 - **النشر من الآن بإجراء مهارة الخادم `deploy-local-to-modern`** (طلب المالك 2026-10-22): push ← CI أخضر ← على الخادم
@@ -30,7 +30,9 @@
   والخطوات في CLAUDE.md الخطوة 7. CI على `4deebda3` أحمر بسبب اختبار DST وحده ⇒ **DST1 قبل نشر C3**.
 - **طابور ما بعد C3:** DST1 (`DST1.txt` جاهز) ← **SEC1**: `inventory/services.py` `_push_family_fields_to_siblings`
   يحدّث الإخوة بـ`family_id` بلا فلتر شركة (أبلغ عنه منفّذ C3؛ لا يصل إليه API اليوم — دفاعٌ في العمق، يُصلَح
-  بلا سؤال بقاعدة الذاكرة) ← K1 ← K2 ← K3 ← K4.
+  بلا سؤال بقاعدة الذاكرة) ← K1 ← K2 ← K3 ← K4. **موجزا `SEC1.txt` و`K1.txt` جاهزان** في الـscratchpad
+  (K1: هجرة إضافية، `create_stocktake_from_scope` بمطابقة صريحة + `all`، upsert + `replace_lines`، أختام العادّ،
+  ETag/412، `uncounted_as_zero`، قائمة مختصرة، وسطر `replace_lines: true` وحده في `StocktakePage.tsx`).
 - الـscratchpad: `C:\Users\asus\AppData\Local\Temp\claude\D--Users-asus-Desktop-ktra\e50319dd-86ab-4bfd-8e17-8dad24be7397\scratchpad`
   (الموجزات `C2*.txt`، سكربت النشر `deploy.sh`، آخر سجلّ نشر `deploy8.log`).
 - **كل تشغيلٍ للمنفّذ بـ`--variant max`** (قاعدة في CLAUDE.md منذ 2026-10-22).
@@ -54,6 +56,10 @@ C2 ← C3 ← K1 ← K2 ← K3 ← K4، كلٌّ بحلقة CLAUDE.md (موجز 
 ## مفتوح
 
 - قيد فرادة `(tenant, stocktake_number)` بعد فحص تكرارات قاعدة الإنتاج.
+- مسح DST1 (تقريرٌ لم يُصلَح): مقارنات بنفس `tzinfo` قد تعبر الساعة المتكرّرة في `activate_subscription_policy`
+  و`activate_performance_evaluation_policy` و`activate_employee_compensation_policy` و`activate_service_unit_catalog`
+  (`platform_ops/services.py`)، و`hr/attendance.py` (`resolve_attendance_date`، `recompute_attendance_day`،
+  و`scheduled_minutes` تطرح 60 بدل 120 لوردية تعبر التحوّل).
 - قرص الخادم 94% (3.2G حرّة) — النسخ الاحتياطية في `/root/backups` و`/root/ktra/db/` تأكل المساحة.
 - `modern` على الخادم و`origin/modern` متباعدان (632 مقابل 29 commit من دمجات `localAccount`) — الدفع تقديمٌ
   سريع فقط، فيُتخطّى حتى يقرّر المالك.

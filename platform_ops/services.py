@@ -11693,7 +11693,11 @@ def _clean_meeting_window(start, end):
     """
     start = _as_meeting_datetime(start, "start")
     end = _as_meeting_datetime(end, "end")
-    if end <= start:
+    # باللحظة لا بالساعة الحائطيّة: الاثنتان تعودان من `DateTimeField` بنفس
+    # `tzinfo`، فبايثون يقارن الحائطَ ويتجاهل `fold` — نافذة تعبر ساعةَ تحوّل
+    # التوقيت الصيفيّ (01:00–02:00 تتكرّر في `Asia/Hebron` ليلة 2026-10-24)
+    # كانت تُرفض وهي صحيحة، ويُقبل عكسها وهو مقلوب.
+    if end.timestamp() <= start.timestamp():
         raise ValidationError({"end": "نهايةُ الاجتماع يجب أن تكون بعد بدايته."})
     return start, end
 

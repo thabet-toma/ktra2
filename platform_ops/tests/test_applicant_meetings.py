@@ -8,13 +8,14 @@
 وما تحرسه هذه الاختباراتُ هو ما لا يمسكه المُسلسِلُ ولا الـ`tsc`: أنّ القواعدَ
 في الخدمة لا في الشاشة، وأنّ معرّفَ حاضرٍ من اجتماعٍ آخر لا يُكتَب عليه من هنا.
 """
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
 from django.test import TestCase
 from django.utils import timezone
+from rest_framework.exceptions import ValidationError
 from rest_framework.test import APIClient
 
 from platform_ops.models import (
@@ -24,8 +25,17 @@ from platform_ops.models import (
     JobPosting,
     PlatformRecruiter,
 )
+from platform_ops.services import _clean_meeting_window
 
 MEETINGS = "/api/platform/ops/applicant-meetings/"
+
+#: نافذةٌ حقيقيّةٌ مدّتُها 45 دقيقة تعبر **الساعةَ المتكرّرة** في `Asia/Hebron`
+#: ليلة 2026-10-24: البداية 01:30+03:00 والنهاية 01:15+02:00 — النهايةُ متأخّرةٌ
+#: فعلاً ومتقدّمةٌ على الساعة الحائطيّة، فيرفضها أيُّ فحصٍ يقارن الحائطَ وحده.
+#: ثابتتان لا `timezone.now()`: العطب يقع في ساعةٍ واحدةٍ في السنة، فاختبارٌ
+#: نسبيٌّ يمرّ 364 يوماً ويسقط في اليوم الذي يُشحن فيه.
+DST_FALL_BACK_START = "2026-10-23T22:30:00+00:00"
+DST_FALL_BACK_END = "2026-10-23T23:15:00+00:00"
 
 
 class ApplicantMeetingTestBase(TestCase):
@@ -117,6 +127,48 @@ class TheMeetingItselfTest(ApplicantMeetingTestBase):
                     title="مقلوب", start=self.end, end=self.start
                 )
 
+    def test_a_window_inside_the_repeated_dst_hour_is_accepted(self):
+        """ليلة 2026-10-24 تتكرّر الساعة 01:00–02:00 محليّاً: النافذة هنا نهايةٌ
+        بعد بدايتها بخمسٍ وأربعين دقيقةً حقيقيّة، وإن كانت النهاية أسبقَ على
+        الساعة الحائطيّة (01:30 ثمّ 01:15). وقارئُ الحقلين يُعيدهما بنفس
+        `tzinfo`، فمقارنة بايثون المباشرة تحكم بالحائطيّ وترفض نافذةً صحيحة.
+        """
+        res = self._create_meeting(start=DST_FALL_BACK_START, end=DST_FALL_BACK_END)
+        self.assertEqual(res.status_code, 201, res.data)
+        # اللحظتان نفسُهما، والإزاحتان تُثبتان أنّ النافذة فعلاً داخل الساعة
+        # المتكرّرة (01:30+03:00 ثمّ 01:15+02:00) — و`==` بين محليٍّ غامضٍ
+        # وUTC تُرجع False عمداً (PEP 495)، فالمقارنةُ بالطابع الزمنيّ.
+        self.assertEqual(
+            datetime.fromisoformat(res.data["start"]).timestamp(),
+            datetime.fromisoformat(DST_FALL_BACK_START).timestamp(),
+        )
+        self.assertEqual(
+            datetime.fromisoformat(res.data["end"]).timestamp(),
+            datetime.fromisoformat(DST_FALL_BACK_END).timestamp(),
+        )
+        self.assertEqual(datetime.fromisoformat(res.data["start"]).utcoffset(), timedelta(hours=3))
+        self.assertEqual(datetime.fromisoformat(res.data["end"]).utcoffset(), timedelta(hours=2))
+
+    def test_an_edit_into_the_repeated_dst_hour_is_accepted(self):
+        """نفسُ النافذة من مسار التعديل، وفيه يُقارَن طرفٌ نصّيٌّ بطرفٍ من الصفّ."""
+        meeting_id = self._create_meeting().data["id"]
+        res = self.client.post(
+            f"{MEETINGS}{meeting_id}/update/",
+            {"start": DST_FALL_BACK_START, "end": DST_FALL_BACK_END},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 200, res.data)
+
+    def test_a_real_backwards_window_inside_the_repeated_hour_is_refused(self):
+        """العكسُ بالضبط: النهاية 22:30Z والبداية 23:15Z — متأخّرةٌ فعلاً
+        ومتقدّمةٌ حائطيّاً، فيمرّ فحصُ الساعة الحائطيّة ويصدّها قيدُ القاعدة
+        بخمسمئة. والمطلوب ٤٠٠ بالنصّ نفسِه قبل أن تصل الكتابة إلى القاعدة.
+        """
+        self.client.raise_request_exception = False
+        res = self._create_meeting(start=DST_FALL_BACK_END, end=DST_FALL_BACK_START)
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("end", res.data)
+
     def test_editing_the_time_does_not_wipe_the_agenda(self):
         """‏`None` تعني «لم يُرسَل» لا «امسحه» — وإلاّ ضاع نصٌّ بتعديل وقت."""
         res = self._create_meeting(agenda="أسئلةُ الجولة الأولى")
@@ -179,6 +231,26 @@ class TheMeetingItselfTest(ApplicantMeetingTestBase):
         res = self._create_meeting(start="غداً بعد الظهر")
         self.assertEqual(res.status_code, 400, res.data)
         self.assertIn("start", res.data)
+
+
+class TheWindowComparisonItselfTest(TestCase):
+    """`_clean_meeting_window` تقارن **لحظتين** لا ساعتين حائطيّتين (DST1).
+
+    الاثنتان تعودان من `DateTimeField` بنفس `tzinfo` (`Asia/Hebron`)، فمقارنةُ
+    بايثون `<` تتجاهل `fold` والفرقَ الحقيقيّ بينهما.
+    """
+
+    def test_a_window_inside_the_repeated_hour_comes_back_untouched(self):
+        start, end = _clean_meeting_window(DST_FALL_BACK_START, DST_FALL_BACK_END)
+        self.assertEqual(start.timestamp(), datetime.fromisoformat(DST_FALL_BACK_START).timestamp())
+        self.assertEqual(end.timestamp(), datetime.fromisoformat(DST_FALL_BACK_END).timestamp())
+        self.assertEqual(start.utcoffset(), timedelta(hours=3))
+        self.assertEqual(end.utcoffset(), timedelta(hours=2))
+
+    def test_a_real_backwards_window_inside_the_repeated_hour_is_refused(self):
+        with self.assertRaises(ValidationError) as caught:
+            _clean_meeting_window(DST_FALL_BACK_END, DST_FALL_BACK_START)
+        self.assertIn("بعد بدايته", str(caught.exception.detail))
 
 
 class WhoWasInTheRoomTest(ApplicantMeetingTestBase):
