@@ -1,14 +1,13 @@
-"""خوانق عمليات المنصة (مشتركة بين المراحل م٤ وم٧)."""
-from rest_framework.throttling import ScopedRateThrottle, SimpleRateThrottle
+"""خوانق عمليات المنصة (مشتركة بين المراحل م٤ وم٧).
+
+`ClientIpScopedThrottle` يُعاد تصديره من `core.throttles`: نسخةٌ ثانية من الصنف
+تنحرف يوماً عن الأصل، ثم تُصلَح إحداهما وحدها. والهويّةُ في `core.throttles`.
+"""
+from rest_framework.throttling import SimpleRateThrottle
+
+from core.throttles import ClientIpScopedThrottle  # noqa: F401
 
 from .models import IntegrationKey
-
-
-class ClientIpScopedThrottle(ScopedRateThrottle):
-    """نطاقٌ مسمّىً بهويّةٍ من `REMOTE_ADDR` حصراً لا من ترويسةٍ يرسلها العميل (م٧)."""
-
-    def get_ident(self, request):
-        return request.META.get("REMOTE_ADDR")
 
 
 class IntegrationKeyThrottle(SimpleRateThrottle):

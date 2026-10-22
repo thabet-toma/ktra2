@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **979**
+عدد النقاط: **983**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -419,6 +419,8 @@
 | `/api/inventory/stocktakes/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/stocktakes/scope-counts/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/stocktakes/{pk}/` | `StocktakeViewSet` | `inventory/views.py` |
+| `/api/inventory/stocktakes/{pk}/count-links/` | `StocktakeViewSet` | `inventory/views.py` |
+| `/api/inventory/stocktakes/{pk}/count-links/{link_id}/revoke/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/stocktakes/{pk}/post/` | `StocktakeViewSet` | `inventory/views.py` |
 | `/api/inventory/supplier-products/` | `SupplierProductViewSet` | `inventory/views.py` |
 | `/api/inventory/supplier-products/{pk}/` | `SupplierProductViewSet` | `inventory/views.py` |
@@ -922,6 +924,7 @@
 | `/api/scan/` | `scan_lookup` | `core/scan.py` |
 | `/api/share/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
 | `/api/share/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
+| `/api/share/<str:token>/count/` | `StocktakeCountView` | `docshare/views.py` |
 | `/api/share/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
 | `/api/share/<str:token>/quote/` | `DocShareQuoteView` | `docshare/views.py` |
 | `/api/store/<slug:slug>/` | `StoreProfileView` | `store/views.py` |
@@ -985,6 +988,7 @@
 | `/j/<str:token>/` | `PublicJobPageView` | `platform_ops/public_hiring/views.py` |
 | `/s/<str:token>` | `DocSharePublicView` | `docshare/views.py` |
 | `/s/<str:token>/` | `DocSharePublicView` | `docshare/views.py` |
+| `/s/<str:token>/count/` | `StocktakeCountView` | `docshare/views.py` |
 | `/s/<str:token>/decision/` | `DocShareDecisionView` | `docshare/views.py` |
 | `/s/<str:token>/quote/` | `DocShareQuoteView` | `docshare/views.py` |
 <!-- AUTO:api_index:END -->

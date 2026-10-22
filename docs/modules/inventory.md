@@ -41,6 +41,7 @@
 | `SupplierProduct` | `supplier_sku`, `supplier_name`, `min_order_qty` (#34، اختياري) | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل. `min_order_qty` خاصّية العلاقة لا الصنف — المورّد الصيني يفرض خمسين والمحلّي يبيع بالقطعة، للصنف نفسه |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity` (`null` = لم يُعدّ بعد، K1)، `counted_by_name`/`counted_at` (مَن عدّ ومتى)، `system_quantity`, `variance`, `scope` (JSON نطاق التوليد — `null` = يدوي وكل صفٍّ قائم)، `created_by` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
+| `StocktakeCountLink` (K3) | `counter_name` (≤80، اسم العادّ)، `categories` (JSON: تصنيفات مباشرة، `null` = الجرد كلّه)، `finished_at`، `created_by` | `stocktake→Stocktake` (`related_name='count_links'`, CASCADE) و`share→docshare.DocumentShare` (`OneToOne`, CASCADE) — **التوكن والانتهاء والإبطال في المشاركة وحدها**، لا عمودَ توكنٍ ثانٍ ولا آلةَ صلاحيةٍ ثانية |
 
 ## دوال الـservices العامة
 ```python
@@ -94,6 +95,8 @@ def unpost_warehouse_transfer(transfer, user=None):  # (1248)
 def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, notes, scope) -> Stocktake:  # K1 — يتحقّق من النطاق (تصنيفات الشركة وحدها) ويولّد بنداً `counted_quantity=None` لكل منتجٍ مطابق؛ الترقيم يبقى في `post_stocktake`
 def post_stocktake(stocktake, user=None, uncounted_as_zero=False):  # الأسطر `null` تُستثنى افتراضاً (لقطة رصيدٍ للتدقيق بلا حركة)، أو تُعتبر صفراً بالعلم (ق٢)
 def _next_stocktake_number(tenant_id):  # رقم الجرد من دفتر `stocktake` في `TenantBook`، مع زرعٍ متواصلٍ من أعلى رقمٍ قائم عند غياب الدفتر
+def stocktake_count_scope_category_ids(categories):  # K3 — نطاق رابط العدّ: `None` = الجرد كلّه، وقيمةٌ معطوبة ⇒ مجموعة فارغة (فشلٌ آمن)
+def stocktake_line_in_count_scope(line, category_ids) -> bool:  # التصنيف **المباشر** للمنتج وحده يدخل النطاق — لا أحفاد ضمنياً
 ```
 ```python
 # inventory/serials.py — الأرقام التسلسلية (نيّة على البند ← حالة في ProductSerial)
@@ -154,6 +157,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET/POST/PUT/PATCH/DELETE | `stocktakes/` · `stocktakes/{id}/` | `StocktakeViewSet` (`views.py`). **K1**: الإنشاء إمّا `scope` (الخادم يولّد البنود) أو `lines` (يدوي — وقد تكون فارغة = «يدوي (فارغ)»)، ولا الاثنان معاً؛ `scope` في التعديل: مطابقٌ للمخزَّن يُقبل ويُهمَل والمختلف 400. التعديل upsert مفتاحه `product`: البند الذي تغيّرت كميته يُختم بـ`counted_by_name`/`counted_at`، والذي لم يتغيّر يبقى بخاتمه، وما لم يُرسَل يبقى ما دام `replace_lines` غائباً (`true` يحذفه)، و`counted_quantity` إلزاميٌّ في كل بندٍ مُرسَل (`null` تمسح). القائمة ملخّصٌ بلا `lines` مع `line_count`/`counted_count` مُرمَّزين في `get_queryset`، والبطاقة/الإنشاء/التعديل تحمل `ETag` ويقبل التعديل `If-Match` (412 `stale_document`)، وتعديلُ المسودّة يقفل صفّ الجرد ويعيد فحص `is_posted` عليه. |
 | POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (`post_doc`) — يشترط `inventory.doc.post` (دورا `staff` و`sales` يكتبان المسودّة ويعدّلانها ولا يرحّلانها: 403). الجسم اختياري `{"uncounted_as_zero": bool}` — `true` يعتبر الأسطر غير المعدودة صفراً ويختمها باسم المستخدم؛ غيابه يستثنيها بلا حركة ولا أثرٍ في القيد. كل الأسطر `null` بلا العلم ⇒ 400 قبل أي كتابة. جسمٌ غير Boolean ⇒ 400 `{"error": …}`. `DELETE` على جردٍ مرحَّل يُرفض بـ400 (الحذف كان يُسقط البنود ويُبقي الحركات والقيد)، والمسودّة تُحذف 204. المنتج والمستودع حقلا `TenantScopedPrimaryKeyRelatedField`. بندان لمنتجٍ واحد يُرفضان في `StocktakeSerializer` (`validate_lines`) وفي `post_stocktake` (صفوفٌ قديمة) — الرصيد يُقرأ مرة واحدة فكان المخزون يُسوّى مرتين |
 | GET | `stocktakes/scope-counts/` | **K2**: عدّادات «ما سنجرده» قبل إنشاء الجرد — `StocktakeViewSet` (`scope_counts`) ← `services.stocktake_scope_counts`. الردّ `{"categories": {"<id>": n}, "uncategorized": n, "all": n}` لمنتجات كل تصنيفٍ **المباشرة**، بلا خدمات، ونشطة إلا بـ`include_inactive=true` (غيابه `false`، وأي قيمةٍ أخرى ⇒ 400 عربي). القراءة تمرّ بـ`services._stocktake_scope_products` نفسِها التي تبني البنود، و`create_stocktake_from_scope` يستعملها، فلا يختلف العدّاد عن عدد البنود المولَّدة. استعلامٌ تجميعيٌّ واحد (`values('category_id').annotate(Count('id'))`) بعد فحص الشركة |
+| GET/POST | `stocktakes/{id}/count-links/` | **K3**: روابط عدّ الموظفين — `StocktakeViewSet` (`count_links`). `POST {counter_name, days ∈ {1,3,7}, categories?: [ids] \| null}` ⇒ 201 بصفّ القائمة نفسه من `_count_link_row` `{id, token, url_path, counter_name, categories, status, expires_at, finished_at, progress, created_at}` (الاسم إلزاميٌّ مطبَّع ≤80، والافتراضي 3 أيام، و`categories` تصنيفاتٌ **للشركة ولها بندٌ في هذا الجرد** وإلا 400، و`[]` ⇒ 400، و`null` ⇒ الجرد كلّه)؛ و`GET` قائمةٌ بالحالة (`revoked` ← `expired` ← `finished` ← `active` بأولويةٍ تفصل الميّت عن المكتمل) والتقدّم `{lines, counted}` **على نطاق الرابط نفسه**. جردٌ مُرحَّل ⇒ 400. الصلاحية شرطُ `PATCH` نفسه (غير «مستعرض»)، وقراءةُ القائمة ترفض «مستعرض» 403 لأن الصفّ يحمل توكناً حيّاً يكتب |
+| POST | `stocktakes/{id}/count-links/{link_id}/revoke/` | **K3**: `revoke_share` فوراً (الصفّ يبقى أثراً) — والجرد/الرابط محصوران بالشركة (رابط شركةٍ أخرى ⇒ 404) |
 | GET/POST/PUT/PATCH/DELETE | `categories/` · `uom/` | `CategoryViewSet` · `UnitOfMeasureViewSet` (`views.py`). كتابةُ التصنيفات (إنشاء/تعديل/إعادة ربط/حذف) تشترط `inventory.item.manage` — القراءة لكلّ عضوٍ كما هي. `uom/` قراءةٌ فقط |
 | GET | `product-families/` | `ProductFamilyViewSet` (task20) — «المنتج» الأب، **قراءةٌ فقط عمداً**: يُنشأ حصراً مع براندِه الضمنيّ عبر `products/` (`create_product_with_family`) فلا يوجد «منتج بلا براندات»، والكتابة عليه مباشرةً تفتح اتجاه كتابةٍ ثانياً يترك القرّاء الحاليين (وكلّهم يقرأ من صفّ البراند) على قيمةٍ قديمة. `get_queryset` (task24) يستثني الأب اليتيم (فقد كل برانداته بالضمّ، `brands__isnull=False`) — باقٍ في القاعدة للتراجع، محجوبٌ عن كل قراءة. ويقبل `?search=` على الاسمين (`name_ar`/`name_en`، `SearchFilter`) — بحثُ منتقي «المنتج» في فلاتر التقارير داخل الخادم لا بتنزيل الكتالوج، ومقيَّدٌ بالشركة عبر `get_queryset` |
 
@@ -306,6 +311,57 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 (`useDocumentDraft`) تغطّي الرأس ومرجعيته والبنود — بما فيها الإضافات اليدوية غير المحفوظة —
 وحذفاتها المحلية. وقوالب نوافذ الجرد الثلاث (جديد/ترحيل/تقادم) مكوّنٌ واحد
 `StocktakeDialog.tsx` موصولٌ بـ`useDialogFocusTrap` (الحبس وEsc وعودة التركيز).
+
+### رابط عدّ الموظف: سطحٌ عامٌّ يكتب كمياتٍ لا مالاً (K3)
+`StocktakeCountLink` (هجرة `0044_stocktake_count_link`) يربط جرداً مسودّةً بمشاركة
+`docshare.DocumentShare` من نوع `stocktake_count` — **التوكن والانتهاء والإبطال في
+`DocumentShare` وحده**، والنموذج يحمل فقط `counter_name` و`categories`. نطاق الرابط
+تصنيفاتٌ **مباشرة** (`line.product.category_id`)، `null` = الجرد كلّه؛ والتحقّق عند
+الإنشاء: كل تصنيفٍ للشركة **وله بندٌ في هذا الجرد**، وإلا 400 (`[]` مرفوضة).
+`create_share(..., dedupe=False)` — لكل موظفٍ رابطه، ولا يُعاد رابط غيره.
+
+**الإداري** (داخل `StocktakeViewSet` بصلاحية تعديل الجرد نفسها): `POST/GET
+stocktakes/{id}/count-links/` و`POST …/{link}/revoke/`. القائمة تحمل الحالة
+(`revoked` ← `expired` ← `finished` ← `active`) والتقدّم `{lines, counted}` على نطاق
+الرابط، ومفتاح `url_path` هو مسار الـAPI العامّ (يُبنى بـ`reverse` لا نصاً مثبَّتاً).
+جردٌ مُرحَّل ⇒ 400. **وقراءةُ القائمة ترفض «مستعرض» 403**: الصفّ يحمل توكناً حيّاً
+يكتب، و`TenantRolePermission` يعدّ GET قراءةً فلا يسأله — وهو الشرط نفسه الذي يمنعه
+من `PATCH`.
+
+**العام** (`docshare/views.py` — `StocktakeCountView`، `authentication_classes=[]`،
+`AllowAny`، `ClientIpScopedThrottle` بسقفَي `doc_share_count_read` 60/د و
+`doc_share_count_write` 30/د — الهوية `REMOTE_ADDR` بلا `DRF_NUM_PROXIES`، وآخرُ
+`X-Forwarded-For` بإزاحة عدد الوكلاء معه):
+- `GET /api/share/<token>/count/` ⇒ مفاتيح **قائمة سماح**: `{company_name,
+  stocktake_number, date, warehouse, counter_name, finished, lines}`، وكل سطر
+  `{line_id, sku, name, brand, category_path, uom, system_quantity,
+  counted_quantity, counted_by_name}`. `system_quantity` = **رصيد الشركة الحالي**
+  (`Product.quantity_on_hand`) وقت القراءة — المستودع على الجرد وسمٌ للحركات،
+  والرصيد في هذا النظام على مستوى الشركة. لا تكلفة ولا سعر ولا قيمة، والأعمدة
+  المالية **لا تُحمَّل من القاعدة أصلاً** (`.only` صريح).
+- `POST` بجسم `{entries: [{line_id, counted_quantity}], finished?: bool}`:
+  داخل `transaction.atomic` مع `select_for_update` على الجرد ثم المشاركة ثم الأسطر؛
+  الكتابة على أسطر **هذا الجرد وفي نطاق الرابط** فقط، وما عداها يُتجاهل ويُعدّ في
+  `ignored` (لا خطأ — رسالةُ خطأٍ تكشف وجود معرّف شركةٍ أخرى). `line_id` معرّفٌ
+  صحيحٌ ≥1 (`int` ليس `bool`، أو نصٌّ ASCII من 1–18 خانة — لا `isdigit` الذي
+  يقبل `²` و`①`)، و`counted_quantity` بقاعدة `CountedQuantityField` نفسها: ≥0
+  وبحدود العمود `max_digits=18, decimal_places=4` (14 رقماً صحيحاً) أو `null`
+  (تمسح الخاتمين) — وأي خطأ ⇒ 400 ولا شيء يُكتب.
+  الكتابة عبر `StocktakeLine.set_count` فتختم `counted_by_name = counter_name`
+  و`counted_at`، ثم `save(update_fields=['updated_at'])` **فيحرّك ETag المدير** ⇒
+  حفظُه القديم 412 ويكمل K2 بالدمج (عقد التزامن). `finished: true` يضبط
+  `finished_at` مرّةً (idempotent) ولا يقفل الكتابة — الباب يُقفل بالترحيل.
+  `ActivityLog` بـ`user=None` باسم العادّ، وآخر نشاطٍ على المشاركة في
+  `decided_name`/`decided_ip`/`decided_at` (نمط `submit_quote`).
+  الحدود: 500 سطرٍ ⇒ 400، وجسمٌ >256 ك.ب ⇒ 413 **قبل** التفسير، وجسمٌ متداخلٌ
+  بعمقٍ يُسقط محلّل JSON بالعودية ⇒ 400 لا 500. توكن مجهول ⇒ 404،
+  ومنتهٍ/مُبطَل/جردٌ مُرحَّل ⇒ 410.
+- **الترحيل يُبطل كل روابط الجرد** داخل معاملة `post_stocktake` نفسها؛ والمسار
+  العامّ لا يُرحّل ولا يُنشئ سطراً ولا يمسّ إلا `counted_quantity` والخاتمين.
+- **لا بوابة وحدةٍ هنا**: `inventory` ليس وحدةً مرخّصة في `core/modules.py` (تطبيقٌ
+  جوهريّ لكل شركة)، فالحالات التي تُغلق الرابط هي انتهاؤه أو إبطاله أو ترحيل الجرد —
+  لا «وحدةٌ أُطفئت». بوابةُ `DOC_TYPES[…]["module"]` القائمة تعمل تلقائياً لأيّ نوعٍ
+  يعلنها مستقبلاً.
 
 ### الكرت المجمّع: المحدِّد في الجسم لا في العنوان
 النقاط الثلاث تقبل `POST` بجسم JSON فيه أحد محدِّدَين:
@@ -925,6 +981,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 | `inventory/tests/test_serial_invoice_journey.py` | نفس الرحلة عبر HTTP بحمولة المحرِّرين (`items[].serials` / `lines[].serials`) |
 | `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق، وقفل الصفّ/رفض الترحيل بنسخةٍ قديمة مع بقاء رابط القيد، وترقيم `TenantBook` مع الزرع المتواصل، وحارس منتج شركةٍ أخرى) |
 | `inventory/tests/test_stocktake_scope.py` | الجرد من نطاق تصنيفات (دلالةٌ صريحة لا أحفاد، وعزل الشركة، ورسائل رفض النطاق كلٌّ بنصّه، وصفر منتجات)، والتعديل upsert (كميةٌ إلزامية حتى في `PATCH` مع بقاء الخاتمين، ونطاقٌ مطابقٌ يُقبل والمختلف 400، و`replace_lines`، والذرّية والقفل/إعادة الفحص على الصفّ المقفول)، و`ETag`/`If-Match` ⇒ 412، والقائمة المختصرة بلا بنود مع ثبات عدد الاستعلامات، والترحيل (الاستثناء أو الصفر، ورفضُ ما لا كمية فيه قبل الترقيم والدفتر، وقفل منتجات ما سيُرحَّل وحده بكتابة لقطةٍ مجمّعة)، ودورة هجرة 0043 ذهاباً وإياباً |
+| `inventory/tests/test_stocktake_count_link.py` (K3) | رابط العدّ العامّ: إنشاء/قائمة/إبطال إداريّاً (أيام 1/3/7 فقط، تصنيفات الشركة **التي لها بندٌ في الجرد**، جردٌ مُرحَّل 400، «مستعرض» 403 على القائمة والإنشاء، شركةٌ أخرى 404)، وعزل الشركة قراءةً وكتابةً (وتوكن شركةٍ أخرى لا يكتب بنودنا)، ونطاق الرابط الجزئي (خارج النطاق يُتجاهل ويُعدّ)، وذرّية الكمية غير الصالحة، وحدود العمود (`1e15`/`123456789012345` ⇒ 400 و`99999999999999.9999` ⇒ 200)، ومعرّفات بنودٍ يونيكودية أو أطول من الحدّ ⇒ 400، وجسمُ JSON متداخلٌ ⇒ 400، وختم الاسم/الوقت وتحريك `updated_at` ⇒ 412 على حفظ المدير، والمسح بـ`null`، و`finished` idempotent، والانتهاء/الإبطال/الترحيل (410) والمجهول (404)، وسقفا 500 سطر و256 ك.ب (413)، والخانق (سكوب الكتابة مستقلاً عن القراءة)، ورمزُ العدّ لا يخدم `/s/` ولا يسجّل مشاهدة، ومساواة مفاتيح JSON حرفياً وخلوّه من أيّ حقلٍ ماليّ، ومنع إنشاء النوع من `/api/document-shares/` |
 | `inventory/tests/test_product_profile.py` | بطاقة المنتج: المؤشرات، سجلّ الحركة (الرصيد الجاري يطابق on-hand)، الفواتير المرتبطة |
 | `inventory/tests/test_item_aggregates.py` | التجميعات من `StockMovement` كمصدر وحيد (وارد تراكمي، متوسط مبيعات 90/28 يوماً) |
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |

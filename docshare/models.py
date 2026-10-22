@@ -51,6 +51,10 @@ DOC_WARRANTY_CERTIFICATE = "warranty_certificate"
 #: أسعار) — مسارٌ ثانٍ داخل `docshare` يكتب أسعار بنود، لا قراراً. انظر
 #: `documents.purchase_docs` (`QUOTE_PURCHASE_RFQ`).
 DOC_PURCHASE_RFQ = "purchase_rfq"
+#: K3: رابط عدّ جردٍ لموظف مستودع مسمّى — مسارٌ ثالث يكتب **كميات عدّ** على
+#: مسودّة جرد، لا قراراً ولا سعراً. انظر `documents.inventory_docs`
+#: (`STOCKTAKE_COUNT_SPEC`) و`inventory.models.StocktakeCountLink`.
+DOC_STOCKTAKE_COUNT = "stocktake_count"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -68,6 +72,7 @@ DOC_TYPE_CHOICES = [
     (DOC_SERVICE_ORDER, "أمر صيانة"),
     (DOC_PURCHASE_RFQ, "طلب عرض سعر"),
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
+    (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

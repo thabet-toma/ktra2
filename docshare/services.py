@@ -27,7 +27,9 @@ logger = logging.getLogger(__name__)
 
 #: مدد الصلاحية المعروضة في نافذة المشاركة. «بلا انتهاء» ليس خياراً عمداً:
 #: رابط أبدي على واتساب يُعاد توجيهه بعد سنة إلى من لم يُقصد به.
-ALLOWED_EXPIRY_DAYS = (7, 30, 90)
+#: K3: 1 و3 أُضيفتا لمدة رابط عدّ الجرد (قرار المالك ق٣: 1/3/7 افتراضي 3)؛
+#: إضافةٌ لا حذف — نوافذ المشاركة القائمة (7/30/90) كما هي.
+ALLOWED_EXPIRY_DAYS = (1, 3, 7, 30, 90)
 DEFAULT_EXPIRY_DAYS = 30
 
 #: الطول بالبايت قبل ترميز base64 — 32 بايت = 43 محرفاً و256 بت عشوائية.
@@ -54,7 +56,13 @@ class DecisionRefused(Exception):
     """قرارٌ لا يجوز الآن — مع سبب عربي يُعرض للزائر كما هو."""
 
 
-def _client_ip(request) -> str:
+def client_ip(request) -> str:
+    """عنوان الزائر كما نسجّله — ترويسة الوكيل أولاً ثم `REMOTE_ADDR`.
+
+    عامّةٌ (لا `_client_ip`) لأن سطح العدّ في `documents/inventory_docs.py`
+    يسجّل نشاط الرابط بالحقول نفسها؛ نسخةٌ ثانية من القاعدة تنحرف يوم يتغيّر
+    ترتيب الترويسات.
+    """
     forwarded = (request.META.get("HTTP_X_FORWARDED_FOR") or "").split(",")[0].strip()
     return (forwarded or request.META.get("REMOTE_ADDR") or "")[:64]
 
@@ -289,7 +297,7 @@ def record_decision(token: str, decision: str, name: str, request,
 
     share.decision = decision
     share.decided_at = timezone.now()
-    share.decided_ip = _client_ip(request)
+    share.decided_ip = client_ip(request)
     share.decided_name = name
     share.decided_note = note
     share.save(update_fields=[
@@ -366,7 +374,7 @@ def submit_quote(token: str, name: str, prices: dict, request) -> DocumentShare:
     if not quote_spec["is_open"](document):
         raise DecisionRefused(quote_spec["closed_reason"](document))
 
-    ip = _client_ip(request)
+    ip = client_ip(request)
     try:
         quote_spec["apply"](
             document, name=name, prices=prices, request=request,

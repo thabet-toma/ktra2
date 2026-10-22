@@ -1,23 +1,7 @@
-"""خوانقُ متابعة الموظفين — هويّةٌ لا تُلفَّق بترويسة.
+"""يُعيد تصدير الخانق المشترك من `core.throttles` (K3).
 
-`ScopedRateThrottle` يبني الهويّة من `X-Forwarded-For` حين يكون `NUM_PROXIES`
-غيرَ مضبوط، وهو غيرُ مضبوطٍ افتراضياً في هذا المستودع. فترويسةٌ واحدةٌ يكتبها
-العميلُ تعطيه دلواً جديداً في كلّ طلب: **٥/ساعة تصير بلا حدّ**، ويصير حدُّ الحجم
-بلا حدٍّ معه.
-
-وفحصُ النظام في `employee_ops/checks.py` يبقى خطَّ دفاعٍ ثانياً — لكنّه **لا
-يمنع إقلاعَ gunicorn**: جانغو لا يشغّل فحوصَ النظام تحت WSGI أصلاً. فالحارسُ
-الحقيقيُّ أن تكون الهويّةُ صحيحةً بلا اعتمادٍ على انضباطِ نشرٍ لم يقع.
-
-`REMOTE_ADDR` وحده: خلف وكيلٍ عكسيٍّ يضبطه المشغّل تصير قيمتُه عنوانَ الوكيل —
-فيُخنق الجميعُ معاً وهو تشدّدٌ آمن، لا انفلاتٌ صامتٌ كالحال اليوم. وضبطُ
-`DRF_NUM_PROXIES` يعيد الدقّةَ لكلّ عميلٍ على حدة.
+كان الصنف يعيش هنا، وانتقل إلى `core` لأن `employee_ops` وحدةٌ معزولة لا يجوز
+أن يستوردها `docshare` — وسطحُ عدّ الجرد يحتاج القاعدة نفسها. إعادةُ التصدير
+تُبقي كلّ مستوردٍ قائمٍ (`from .throttles import ClientIpScopedThrottle`) كما هو.
 """
-from rest_framework.throttling import ScopedRateThrottle
-
-
-class ClientIpScopedThrottle(ScopedRateThrottle):
-    """نطاقٌ مسمّىً بهويّةٍ من `REMOTE_ADDR` لا من ترويسةٍ يرسلها العميل."""
-
-    def get_ident(self, request):
-        return request.META.get("REMOTE_ADDR")
+from core.throttles import ClientIpScopedThrottle  # noqa: F401

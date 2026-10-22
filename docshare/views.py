@@ -9,11 +9,12 @@
 `window.print()` في زر واحد لا يعتمد عليه شيء آخر.
 """
 import logging
+import re
 
 from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny
@@ -22,14 +23,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.access import require_perm, user_has_perm
-from core.api_defaults import ApiAuthAndUser
+from core.api_defaults import ApiAuthAndUser, CountedQuantityField
 from core.mixins import TenantQuerySetMixin
 from core.modules import module_enabled, require_module
 from core.tenant_utils import get_tenant
+from core.throttles import ClientIpScopedThrottle
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
-    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PURCHASE_RFQ, DocumentShare,
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PURCHASE_RFQ, DOC_STOCKTAKE_COUNT,
+    DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
 
@@ -204,6 +207,18 @@ class DocSharePublicView(DocSharePublicBase):
                 status.HTTP_404_NOT_FOUND,
             )
 
+        if share.doc_type == DOC_STOCKTAKE_COUNT:
+            # سطح العدّ له مساره (`count/`). التوكن نفسه صالح للعدّ، فلا يجوز
+            # أن يخدم صفحة `/s/` العامة أيضاً: تلك الصفحة تُظهر ملاحظات الجرد
+            # وتُسجّل مشاهدة — سطحٌ ثانٍ لم يُطلب ولم يُراجَع. **قبل**
+            # `record_view` كي لا يتحرّك عدّاد المشاهدة على طلبٍ مرفوض.
+            return _notice(
+                request,
+                "الرابط غير صالح",
+                "لا يوجد مستند خلف هذا الرابط. تأكّد من نسخه كاملاً.",
+                status.HTTP_404_NOT_FOUND,
+            )
+
         services.record_view(share, request)
         page = DOC_TYPES[share.doc_type].get("page")
         html = page(document, share) if page is not None else None
@@ -341,6 +356,228 @@ class DocShareQuoteView(DocSharePublicBase):
         return _harden(HttpResponseRedirect(f"{url}?submitted=1"), status_code=302)
 
 
+#: سقف جسم طلب العدّ قبل أيّ تفسير — 256 ك.ب تكفي 500 سطرٍ بأريحية، وأكثرُ
+#: منها ليس عدّاً بل إساءة. الفحص على الطول الخام قبل `request.data`.
+MAX_COUNT_BODY_BYTES = 256 * 1024
+MAX_COUNT_ENTRIES = 500
+
+
+def _harden_json(response):
+    """ترويسات سطح العدّ العامّ: لا تخزين ولا فهرسة — كما `_harden` للصفحة."""
+    response["X-Robots-Tag"] = "noindex, nofollow, noarchive"
+    response["Cache-Control"] = "no-store, no-cache, must-revalidate, private"
+    response["Pragma"] = "no-cache"
+    return response
+
+
+def _count_error(detail, status_code):
+    return _harden_json(Response({"detail": detail}, status=status_code))
+
+
+def _count_field_error(field, message):
+    """خطأ حقلٍ واحد على سطح العدّ — الشكل `{field: [message]}`."""
+    return _harden_json(
+        Response({field: [message]}, status=status.HTTP_400_BAD_REQUEST))
+
+
+def _count_share_error(exc):
+    """`ShareGone` ⇒ 410 و`ShareNotFound` ⇒ 404 — برسائل العدّ نفسها في المواضع الثلاثة."""
+    if isinstance(exc, services.ShareGone):
+        return _count_error(
+            "انتهى هذا الرابط — الجرد رُحِّل أو انتهت صلاحية الرابط. "
+            "راجع المسؤول.",
+            status.HTTP_410_GONE,
+        )
+    return _count_error("الرابط غير صحيح.", status.HTTP_404_NOT_FOUND)
+
+
+def _resolve_count_share(token):
+    """توكن ← (المشاركة، الجرد، مواصفة العدّ) — يرمي 404/410 عبر `services`."""
+    share, document, _payload = services.resolve_share(token)
+    if share.doc_type != DOC_STOCKTAKE_COUNT:
+        # توكن نوعٍ آخر لا يكسب سطح عدّ: نفس صمت «غير موجود» أمام من يخمّن.
+        raise services.ShareNotFound(token)
+    count_spec = (DOC_TYPES.get(share.doc_type) or {}).get("count")
+    if not count_spec:
+        raise services.ShareNotFound(share.doc_type)
+    return share, document, count_spec
+
+
+#: قاعدة الكمية الوحيدة — `core.api_defaults.CountedQuantityField` نفسها التي
+#: يعرّف بها `StocktakeLineSerializer.counted_quantity` (وهو نفسه عمودُ
+#: `StocktakeLine.counted_quantity`). نسخةٌ ثانية من الحدود تنحرف يوماً.
+_COUNTED_QUANTITY = CountedQuantityField(
+    max_digits=18, decimal_places=4, min_value=0)
+
+#: معرّف بندٍ عدديٌّ ASCII، 18 خانةً كحدّ أقصى — بلا `isdigit` الذي يقبل `²` و`①`.
+_LINE_ID = re.compile(r"[0-9]{1,18}")
+
+#: مفتاح البند في عمود `BIGINT` — أقصى ما يسعه MySQL.
+_LINE_ID_MAX = 2**63 - 1
+
+
+def _parse_line_id(raw_id):
+    """`int` صالح أو `None` — `int` ليس `bool`، أو نصٌّ ASCII قصيرٌ ≥1."""
+    if isinstance(raw_id, bool):
+        return None
+    if isinstance(raw_id, int):
+        value = raw_id
+    elif isinstance(raw_id, str):
+        text = raw_id.strip()
+        if not _LINE_ID.fullmatch(text):
+            return None
+        value = int(text)
+    else:
+        return None
+    if not 1 <= value <= _LINE_ID_MAX:
+        return None
+    return value
+
+
+def _parse_quantity(value):
+    """(Decimal | None، رسالةُ خطأ | None) — بالحقل نفسه لا بفحوصٍ يدوية.
+
+    الفحص اليدوي كان يترك `max_digits` بلا حارس، فكميةٌ كـ`1e15` تمرّ التفسير
+    ثم تُسقط `bulk_update` على MySQL بخطأ 500 (العمود `max_digits=18,
+    decimal_places=4` ⇒ 14 رقماً صحيحاً). و`null` تبقى «امسح».
+    """
+    if value is None:
+        return None, None
+    try:
+        return _COUNTED_QUANTITY.run_validation(value), None
+    except serializers.ValidationError as exc:
+        detail = exc.detail[0] if isinstance(exc.detail, list) else exc.detail
+        return None, str(detail)
+
+
+def _parse_count_entries(raw_entries):
+    """يتحقّق من كل الأسطر **قبل** أي كتابة؛ خطأٌ واحد يُسقط الطلب كلّه."""
+    entries = []
+    errors = {}
+    for index, raw in enumerate(raw_entries):
+        if not isinstance(raw, dict):
+            errors[index] = ["سطر العدّ غير صالح."]
+            continue
+        line_id = _parse_line_id(raw.get("line_id"))
+        if line_id is None:
+            errors[index] = {"line_id": ["معرّف البند غير صالح."]}
+            continue
+        if "counted_quantity" not in raw:
+            errors[index] = {
+                "counted_quantity": ["الكمية مطلوبة — استعمل null للمسح."]
+            }
+            continue
+        quantity, message = _parse_quantity(raw.get("counted_quantity"))
+        if message is not None:
+            errors[index] = {"counted_quantity": [message]}
+            continue
+        entries.append((line_id, quantity))
+    return entries, errors
+
+
+def _request_length(request) -> int:
+    """طول الجسم بالبايت من الترويسة، وإلا من الجسم الخام نفسه."""
+    raw = request.META.get("CONTENT_LENGTH")
+    if raw not in (None, ""):
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            pass
+    try:
+        return len(request.body)
+    except Exception:
+        return 0
+
+
+class StocktakeCountView(APIView):
+    """سطح عدّ الجرد العامّ — `GET|POST /api/share/<token>/count/` (K3).
+
+    **بلا مصادقة إطلاقاً** (`authentication_classes = []`): توكنٌ يُرسل إلى هنا
+    لا يقدر أن يغيّر حرفاً في الرد. الشركة تُشتقّ من صفّ المشاركة وحده — لا من
+    ترويسةٍ ولا استعلامٍ ولا جسم. والخانق `ClientIpScopedThrottle` من
+    `core.throttles`: بلا `DRF_NUM_PROXIES` هويّتُه `REMOTE_ADDR`، ومعه هويّةٌ
+    من آخر `X-Forwarded-For` بإزاحة عدد الوكلاء — فلا يلفّقها العميل.
+
+    سقفان مختلفان بطبيعتهما: القراءة 60/دقيقة (صفحةٌ تُفتح مرّة)، والكتابة
+    30/دقيقة (حفظٌ تلقائيّ مؤجَّل يرسل دفعاتٍ صغيرة).
+    """
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ClientIpScopedThrottle]
+    throttle_scope = "doc_share_count_read"
+
+    def get_throttles(self):
+        self.throttle_scope = (
+            "doc_share_count_read" if self.request.method == "GET"
+            else "doc_share_count_write"
+        )
+        return super().get_throttles()
+
+    def get(self, request, token):
+        try:
+            share, stocktake, count_spec = _resolve_count_share(token)
+            data = count_spec["read"](share, stocktake)
+        except (services.ShareGone, services.ShareNotFound) as exc:
+            return _count_share_error(exc)
+        return _harden_json(Response(data))
+
+    def post(self, request, token):
+        # الحجم **قبل** تفسير الجسم: طلبٌ ضخم لا يُكلِّف الذاكرة أصلاً.
+        if _request_length(request) > MAX_COUNT_BODY_BYTES:
+            return _count_error(
+                "حجم الطلب كبير جداً — الحدّ 256 كيلوبايت.",
+                status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            )
+
+        try:
+            share, stocktake, count_spec = _resolve_count_share(token)
+        except (services.ShareGone, services.ShareNotFound) as exc:
+            return _count_share_error(exc)
+
+        # الجرد المُرحَّل 410 **قبل** تفسير الجسم: لا معنى لفحص عدٍّ على بابٍ
+        # أُغلق، والعقد يقول 410 لا 400. والكتابة تعيد الفحص تحت القفل.
+        if stocktake.is_posted:
+            return _count_error(
+                "انتهى هذا الرابط — الجرد رُحِّل. راجع المسؤول.",
+                status.HTTP_410_GONE,
+            )
+
+        try:
+            data = request.data
+        except RecursionError:
+            # JSON متداخلٌ بعمقٍ يُسقط محلّل بايثون بالعودية. سطحٌ بلا مصادقة
+            # لا يجوز أن يعرض أثرَ استدعاءٍ (ولا 500) لجسمٍ كتبه الغريب.
+            return _count_error(
+                "جسم الطلب غير صالح.", status.HTTP_400_BAD_REQUEST)
+        if not isinstance(data, dict):
+            return _count_error(
+                "جسم الطلب يجب أن يكون كائناً JSON.",
+                status.HTTP_400_BAD_REQUEST,
+            )
+        raw_entries = data.get("entries", [])
+        if not isinstance(raw_entries, list):
+            return _count_field_error(
+                "entries", "قائمة العدّ يجب أن تكون مصفوفة.")
+        if len(raw_entries) > MAX_COUNT_ENTRIES:
+            return _count_field_error(
+                "entries", f"الحدّ الأقصى {MAX_COUNT_ENTRIES} سطراً في الطلب الواحد.")
+        finished = data.get("finished", False)
+        if not isinstance(finished, bool):
+            return _count_field_error(
+                "finished", "قيمة finished يجب أن تكون true أو false.")
+        entries, errors = _parse_count_entries(raw_entries)
+        if errors:
+            return _harden_json(
+                Response({"entries": errors}, status=status.HTTP_400_BAD_REQUEST))
+
+        try:
+            result = count_spec["write"](share, entries, finished, request)
+        except (services.ShareGone, services.ShareNotFound) as exc:
+            return _count_share_error(exc)
+        return _harden_json(Response(result))
+
+
 class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     """سطح الإدارة المصادَق عليه — إنشاء الرابط وقراءته وإبطاله.
 
@@ -420,6 +657,17 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
                 {"detail": (
                     "طلب عرض السعر لا يُشارَك من هنا — استعمل رابط الطلبية العامّ "
                     "(POST /api/logistics/purchase-rfqs/<id>/public-link/)."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type == DOC_STOCKTAKE_COUNT:
+            # K3: رابط العدّ لا معنى له بلا `StocktakeCountLink` (اسم العادّ
+            # ونطاقه). إنشاءُ مشاركةٍ من هنا كان يُنتج توكناً ميتاً يردّ 404 على
+            # صفحة العدّ — فيُمنع من الباب العامّ ويُطلب من باب الجرد وحده.
+            return Response(
+                {"detail": (
+                    "رابط عدّ الجرد يُنشأ من الجرد نفسه — "
+                    "POST /api/inventory/stocktakes/<id>/count-links/."
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

@@ -4,6 +4,7 @@
 """
 from rest_framework import serializers
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.fields import empty
 from hr.authentication import DeviceTokenAuthentication as TokenAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -24,6 +25,26 @@ ApiAuthAndUser = {
 POSTED_DOC_WARNING = (
     "هذا المستند مرحَّل. يجب التراجع عن الترحيل قبل تعديله أو حذفه."
 )
+
+
+class CountedQuantityField(serializers.DecimalField):
+    """كمية العدّ — الغياب فيها ليس قيمة: `null` تمسح، والرقم يكتب.
+
+    DRF يُسقط الحقل المطلوب الغائب في التعديل الجزئي (`SkipField` على `PATCH`)،
+    فيمرّ بندٌ بلا كمية ويُقرأ في `_upsert_lines` «امسح العدّ» فيمحو
+    `counted_by_name`/`counted_at` اللذين كتبهما موظف الرابط بصمت. هنا الغياب
+    مرفوضٌ في `PATCH` كما هو في `PUT`، والمسح بـ`null` صريحة.
+
+    **وفي `core` لا في `inventory.serializers` (جولة تصليح K3):** سطحُ عدّ الجرد
+    العامّ في `docshare` يحتاج الحدود نفسها، و`docshare` لا يجوز أن يستورد
+    `serializers` تطبيقٍ آخر (عقد `no-cross-app-internals`). تصديرُه من
+    `inventory.serializers` يبقى قائماً فلا يتغيّر مستوردٌ داخل التطبيق.
+    """
+
+    def validate_empty_values(self, data):
+        if data is empty and not self.read_only:
+            self.fail('required')
+        return super().validate_empty_values(data)
 
 
 class TenantScopedPrimaryKeyRelatedField(serializers.PrimaryKeyRelatedField):

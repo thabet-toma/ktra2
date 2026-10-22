@@ -851,6 +851,55 @@ class StocktakeLine(models.Model):
             self.counted_at = at
 
 
+class StocktakeCountLink(models.Model):
+    """K3: رابط عدّ عام **لموظف مستودع مسمّى** على مسودّة جرد.
+
+    النموذج لا يحمل توكناً ولا صلاحية: كلاهما في `docshare.DocumentShare`
+    (التوكن، الانتهاء، الإبطال، نشاط آخر كتابة). هنا فقط **مَن** يعدّ
+    (`counter_name`) و**ماذا** يرى (`categories`)، على نمط
+    `logistics.PurchaseRFQRecipient` (مستقبِلٌ مسمّى خلف مشاركة).
+
+    `categories = null` = الجرد كلّه (القرار ق٤: رابطٌ واحد افتراضاً، وتقسيمٌ
+    اختياري بتصنيفات). والقائمة **تصنيفات مباشرة**: سطرٌ يدخل النطاق إذا كان
+    `line.product.category_id` فيها — لا أحفاد ضمنياً، بنفس دلالة نطاق الجرد
+    في K1 (قرار ٣ في الخطة).
+    """
+
+    id = models.AutoField(primary_key=True, db_column='StocktakeCountLinkID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='stocktake_count_links')
+    stocktake = models.ForeignKey(
+        Stocktake, on_delete=models.CASCADE, db_column='StocktakeID',
+        related_name='count_links')
+    #: `CASCADE`: رابطٌ بلا صفّ مشاركته لا معنى له (خلافاً لمستقبِل الـRFQ الذي
+    #: يسجّل «أُرسلت له» فيبقى بعد إبطال رابطه).
+    share = models.OneToOneField(
+        'docshare.DocumentShare', on_delete=models.CASCADE,
+        db_column='DocumentShareID', related_name='stocktake_count_link')
+    #: اسم العادّ كما كتبه المدير — هو ما يُختم على السطر (`counted_by_name`)
+    #: ويُسمّى في `ActivityLog`. 80 لأن الاسم على ورقةٍ لا سيرة.
+    counter_name = models.CharField(max_length=80, db_column='CounterName')
+    categories = models.JSONField(null=True, blank=True, db_column='Categories')
+    finished_at = models.DateTimeField(null=True, blank=True, db_column='FinishedAt')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedByID', related_name='stocktake_count_links')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+
+    class Meta:
+        db_table = 'stocktake_count_links'
+        managed = True
+        ordering = ['-created_at', '-id']
+        indexes = [
+            models.Index(
+                fields=['tenant', 'stocktake'], name='stk_count_link_idx'),
+        ]
+
+    def __str__(self):
+        return f"{self.stocktake_id} ← {self.counter_name}"
+
+
 # ════════════════════════════════════════════════════════════════════
 # مواصفة #137 — المرحلة 1: طبقات FIFO للمخزون (`inventory/fifo.py`)
 # ════════════════════════════════════════════════════════════════════

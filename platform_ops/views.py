@@ -2671,7 +2671,8 @@ class PublicDailyRatingView(APIView):
     """الرابط اليومي العام للتقييم المهشر بلا تسجيل دخول (م٧).
 
     - لا يتطلب مصادقة (AllowAny).
-    - محمي بالخانق ClientIpScopedThrottle (بربط REMOTE_ADDR حصراً).
+    - محمي بالخانق ClientIpScopedThrottle (هويّة `core.throttles`: `REMOTE_ADDR`
+      بلا `DRF_NUM_PROXIES`، وآخر `X-Forwarded-For` بإزاحة الوكلاء معه).
     - يعيد 404 للرمز غير الصالح، و410 صريحة للرمز المنتهي أو المبطل.
     - حمولة الرد مقيدة بقائمة بيضاء صارمة لمنع أي تسريب لمعلومات الشركة أو الموظف.
     """

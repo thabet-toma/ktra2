@@ -1,8 +1,7 @@
 from rest_framework import serializers
-from rest_framework.fields import empty
 from django.db import transaction
 from django.utils import timezone
-from core.api_defaults import TenantScopedPrimaryKeyRelatedField
+from core.api_defaults import CountedQuantityField, TenantScopedPrimaryKeyRelatedField
 from core.user_roles import user_display_name
 from .models import (
     ProductCategory, ProductFamily, Product, ProductPriceTier, UnitOfMeasure,
@@ -743,21 +742,6 @@ class WarehouseTransferSerializer(serializers.ModelSerializer):
             for ln in lines:
                 WarehouseTransferLine.objects.create(transfer=instance, **ln)
         return instance
-
-
-class CountedQuantityField(serializers.DecimalField):
-    """كمية العدّ — الغياب فيها ليس قيمة: `null` تمسح، والرقم يكتب.
-
-    DRF يُسقط الحقل المطلوب الغائب في التعديل الجزئي (`SkipField` على `PATCH`)،
-    فيمرّ بندٌ بلا كمية ويُقرأ في `_upsert_lines` «امسح العدّ» فيمحو
-    `counted_by_name`/`counted_at` اللذين كتبهما موظف الرابط بصمت. هنا الغياب
-    مرفوضٌ في `PATCH` كما هو في `PUT`، والمسح بـ`null` صريحة.
-    """
-
-    def validate_empty_values(self, data):
-        if data is empty and not self.read_only:
-            self.fail('required')
-        return super().validate_empty_values(data)
 
 
 class StocktakeLineSerializer(serializers.ModelSerializer):

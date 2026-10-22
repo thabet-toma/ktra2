@@ -596,7 +596,9 @@ REST_FRAMEWORK = {
         # #207 م٤: نقطة استقبال أوامر العمل من القنوات — الهويّة **مفتاحُ القناة**
         # لا عنوانُ IP، فالسقف لكل (شركة × قناة). ومن البيئة كي يُوسَّع بلا نشر كود.
         "platform_ops_intake": os.environ.get("THROTTLE_RATE_PLATFORM_INTAKE", "60/min"),
-        # #207 م٧: خانق الرابط اليومي العام للتقييم — الهوية REMOTE_ADDR حصراً
+        # #207 م٧: خانق الرابط اليومي العام للتقييم — الهوية من `core.throttles`
+        # (`REMOTE_ADDR` بلا `DRF_NUM_PROXIES`، وآخر `X-Forwarded-For` بإزاحة
+        # الوكلاء معه).
         "platform_ops_public_rating": os.environ.get("THROTTLE_RATE_PLATFORM_RATING", "30/min"),
         # الجلسة الأمنية 2026-08-11 (P0-8): رفع الوسائط — كل رفع يقفل worker
         # طوال رفع Cloudinary المتزامن، فالسقف يمنع إشباع الـworkers الثلاثة.
@@ -614,6 +616,15 @@ REST_FRAMEWORK = {
         # مستقلٌّ أضيق — كتابةٌ لا قراءة، ورابطٌ عامّ يملؤه غرباء لا مورّدٌ
         # واحد يفتحه مرّتين. لا سقفَ على عدد الردود ولا CAPTCHA (مخالفةٌ واعية).
         "doc_share_public_quote": os.environ.get("THROTTLE_RATE_DOC_SHARE_QUOTE", "20/min"),
+        # K3: رابط عدّ الجرد العامّ (`StocktakeCountView`) — سقفان لأنه سطحان في
+        # مسارٍ واحد: القراءة صفحةٌ تُفتح مرّة، والكتابة حفظٌ تلقائيّ مؤجَّل
+        # يرسل دفعاتٍ صغيرة أثناء العدّ. الهوية في `ClientIpScopedThrottle`
+        # تتبع `DRF_NUM_PROXIES` وحده (انظر `core/throttles.py`): بدونه
+        # `REMOTE_ADDR`، والترويسة لا تشتري دلواً.
+        "doc_share_count_read": os.environ.get(
+            "THROTTLE_RATE_DOC_SHARE_COUNT_READ", "60/min"),
+        "doc_share_count_write": os.environ.get(
+            "THROTTLE_RATE_DOC_SHARE_COUNT_WRITE", "30/min"),
         # #237: صفحة تحقق الكفالة العامة (`after_sales/public_views.py`) — يفتحها الزبون
         # بمسح رمزٍ فلا تُتصفَّح؛ والسقف يعيق تخمين الرموز (128 بت) لا استعمالاً عادياً.
         "warranty_verify_public": os.environ.get("THROTTLE_RATE_WARRANTY_VERIFY", "30/min"),
@@ -629,8 +640,9 @@ REST_FRAMEWORK = {
         # التقديم أضيقُ من أضيقِ خانقٍ قائم. كتابةٌ من مجهولٍ تفتح ملفاً وتُنشئ
         # صفّاً، لا قراءةٌ تُعاد. والقراءةُ العامّة لصفحة الوظيفة أوسع: الرابطُ
         # يُفتح ويُعاد تحميلُه، وليس وراءه كتابة.
-        # وهذان المقبضان **زينةٌ بلا `DRF_NUM_PROXIES`** — يحرس ذلك فحصُ النظام
-        # `employee_ops.W001`/`E001`.
+        # وبلا `DRF_NUM_PROXIES` يهوي خانقُهما إلى `REMOTE_ADDR`: دلوٌ واحدٌ
+        # للجميع خلف الوكيل — تشدّدٌ آمن لا انفلات، ويُضبط المتغيّر لتوزيع
+        # الدلاء؛ يحرس التذكيرَ `employee_ops.W001`/`E001`.
         "employee_ops_apply": os.environ.get("THROTTLE_RATE_EMPLOYEE_APPLY", "5/hour"),
         "employee_ops_job_public": os.environ.get("THROTTLE_RATE_EMPLOYEE_JOB", "60/min"),
         # #207 م٨: بوابة التوظيف المنصية — قراءة عامة للوظيفة، تقديم طلب، ودعوة المرشح

@@ -2491,6 +2491,30 @@ def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, note
     return stocktake
 
 
+def stocktake_count_scope_category_ids(categories):
+    """نطاق رابط العدّ ← مجموعة معرّفات تصنيفٍ مباشرة، أو `None` = الجرد كلّه.
+
+    دلالةٌ واحدة يستعملها العرض والإدارة والكتابة العامة (K3)، فلا تنحرف
+    «الأسطر التي يراها الموظف» عن «الأسطر التي يكتبها». لا أحفاد ضمنياً —
+    نفس دلالة نطاق الجرد في K1 (قرار ٣ في الخطة).
+
+    وقيمةٌ معطوبة (ليست قائمة) تُقرأ **نطاقاً فارغاً** لا `None`: الخطأ في
+    الاتجاه الآمن (لا سطر) لا في اتجاه «كل الأسطر».
+    """
+    if categories is None:
+        return None
+    if not isinstance(categories, (list, tuple)):
+        return set()
+    return {int(category_id) for category_id in categories}
+
+
+def stocktake_line_in_count_scope(line, category_ids) -> bool:
+    """هل يدخل هذا السطر نطاق الرابط؟ التصنيف **المباشر** للمنتج وحده."""
+    if category_ids is None:
+        return True
+    return line.product.category_id in category_ids
+
+
 def _next_stocktake_number(tenant_id):
     """رقم الجرد التالي من دفتر `TenantBook` (قفلٌ وذرّية) بدل MAX+1.
 
@@ -2782,6 +2806,17 @@ def post_stocktake(stocktake, user=None, uncounted_as_zero=False):
         locked.is_posted = True
         locked.journal = journal
         locked.save(update_fields=['is_posted', 'journal', 'stocktake_number', 'updated_at'])
+
+        # K3: الترحيل يُبطل كل روابط العدّ في المعاملة نفسها — الرابط حيٌّ ما
+        # دام الجرد مسودّة، وترحيلُه آخر لحظةٍ يجوز أن يكتب فيها موظف. الإبطال
+        # هنا لا في العرض، فأي مسار ترحيلٍ آخر (أمر إداري، اختبار) يحميه أيضاً.
+        from docshare.services import revoke_share
+        from .models import StocktakeCountLink
+
+        for count_link in (
+            StocktakeCountLink.objects.filter(stocktake=locked).select_related('share')
+        ):
+            revoke_share(count_link.share, user=user)
 
     # المستدعي (و`StocktakeViewSet.post_doc`) يقرأ الكائن الممرَّر بعد الترحيل.
     stocktake.is_posted = locked.is_posted

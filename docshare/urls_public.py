@@ -6,12 +6,16 @@ nginx على الإنتاج يخدم الـSPA من القرص ويمرّر `/ap
 """
 from django.urls import path
 
-from docshare.views import DocShareDecisionView, DocSharePublicView, DocShareQuoteView
+from docshare.views import (
+    DocShareDecisionView, DocSharePublicView, DocShareQuoteView, StocktakeCountView,
+)
 
 urlpatterns = [
     path("<str:token>/decision/", DocShareDecisionView.as_view(), name="docshare-decision"),
     # ISSUE #115: مسارٌ ثالثٌ مستقلّ — تسعير المورّد على الطلبية.
     path("<str:token>/quote/", DocShareQuoteView.as_view(), name="docshare-quote"),
+    # K3: مسارٌ رابعٌ مستقلّ — عدّ الجرد من رابط موظف المستودع (JSON لا HTML).
+    path("<str:token>/count/", StocktakeCountView.as_view(), name="docshare-count"),
     path("<str:token>/", DocSharePublicView.as_view(), name="docshare-public"),
     # وبلا شرطة مائلة أخيرة أيضاً: الرابط المنسوخ إلى واتساب أقصر وأنظف، ولا
     # نتّكل على تحويل `APPEND_SLASH` لأنه يحوّل POST إلى GET ويُفقِد جسم الطلب.

@@ -3,7 +3,8 @@
 كل كود AllowAny في مكان واحد داخل هذه الحزمة.
 - authentication_classes = [] (تجنباً لـ DeviceTokenAuthentication الافتراضي)
 - permission_classes = [AllowAny]
-- throttle_classes = [ClientIpScopedThrottle] (بهوية من REMOTE_ADDR حصراً)
+- throttle_classes = [ClientIpScopedThrottle] (هويّة `core.throttles`: `REMOTE_ADDR`
+  بلا `DRF_NUM_PROXIES`، وآخر `X-Forwarded-For` بإزاحة الوكلاء معه)
 - فحص حجم وجسم الطلب بالبايتات الحقيقية
 - فحص نوع السيرة الذاتية بالبايتات الحقيقية
 - لا وجود لحساب المستخدم User قبل قبول الدعوة

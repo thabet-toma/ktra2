@@ -60,6 +60,9 @@ ALLOWLISTED_PLATFORM_MODULES = frozenset({
     # والدعوة والقبول. **يُستورَد صراحةً**: إخفاءُ الاستيراد عن الحارس
     # (`importlib.import_module`) أسوأُ من إعلانه — يجعل الحارس يكذب بدل أن يحرس.
     "core.plans",         # `enforce_limits` وتوابعها
+    # K3: خانق الهويّة من `REMOTE_ADDR` انتقل إلى `core.throttles` كي يستعمله
+    # سطحُ عدّ الجرد في `docshare` بلا كسر عزل هذه الوحدة (يُعاد تصديره هنا).
+    "core.throttles",     # `ClientIpScopedThrottle`
     "hr.models",          # `Employee`
     "tenants.models",     # `Tenant` والعضويّة
     "tenants.services",   # `create_company` في الاختبارات

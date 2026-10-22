@@ -32,7 +32,11 @@ from tenants.letterhead import COMPANY_FIELDS, company_card  # noqa: F401
 # المورّد بلا سعر بيعٍ وأن مستند الزبون بلا تكلفة.
 AUDIENCE_CUSTOMER = "customer"
 AUDIENCE_SUPPLIER = "supplier"
-AUDIENCES = (AUDIENCE_CUSTOMER, AUDIENCE_SUPPLIER)
+#: K3: موظف المستودع صاحبُ رابط العدّ — لا زبونٌ ولا مورّد، وجمهوره ثالثٌ
+#: حقيقةً: يرى كمياتٍ لا أسعاراً، ويكتب عدّاً لا قراراً. إضافتُه هنا تجعل
+#: `AUDIENCES` المصدرَ الوحيد لقائمة الجماهير بدل نسخةٍ ثانيةٍ في اختبار السجلّ.
+AUDIENCE_WAREHOUSE = "warehouse"
+AUDIENCES = (AUDIENCE_CUSTOMER, AUDIENCE_SUPPLIER, AUDIENCE_WAREHOUSE)
 
 
 # ── عقد الحمولة العامة ──────────────────────────────────────────────────────

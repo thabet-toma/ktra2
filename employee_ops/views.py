@@ -1273,7 +1273,7 @@ class PublicJobView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    # كسابقتها: الهويّةُ من `REMOTE_ADDR` لا من ترويسةٍ يرسلها العميل.
+    # كسابقتها: الهويّةُ لا تُتّخذ من ترويسةٍ يختارها العميل (`core.throttles`).
     throttle_classes = [ClientIpScopedThrottle]
     throttle_scope = "employee_ops_job_public"
 

@@ -17,6 +17,7 @@
 from docshare.documents._contract import (  # noqa: F401  (سطح عام مُعاد التصدير)
     AUDIENCE_CUSTOMER,
     AUDIENCE_SUPPLIER,
+    AUDIENCE_WAREHOUSE,
     AUDIENCES,
     COMPANY_FIELDS,
     DECISION_DISPLAY_KEYS,
@@ -79,6 +80,14 @@ from docshare.documents.voucher_docs import (  # noqa: F401
     load_sales_order,
     load_supplier_payment,
 )
+from docshare.documents.inventory_docs import (  # noqa: F401
+    STOCKTAKE_COUNT_SPEC,
+    STOCKTAKE_DOC_TYPES,
+    build_stocktake_count,
+    load_stocktake_count,
+    read_stocktake_count,
+    write_stocktake_count,
+)
 from docshare.documents.sales_docs import (  # noqa: F401
     DECISION_QUOTATION,
     SALES_DOC_TYPES,
@@ -101,4 +110,5 @@ def _merge(*registries) -> dict[str, dict]:
 
 DOC_TYPES: dict[str, dict] = _merge(
     SALES_DOC_TYPES, PURCHASE_DOC_TYPES, VOUCHER_DOC_TYPES, AFTERSALES_DOC_TYPES,
+    STOCKTAKE_DOC_TYPES,
 )

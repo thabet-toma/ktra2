@@ -6,12 +6,13 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
 from django.db.models import F, Sum, Q, Value, DecimalField, Count
 from django.db.models.functions import Coalesce
+from django.urls import reverse
 from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import (
     ProductCategory, ProductFamily, Product, UnitOfMeasure, StockMovement,
-    SupplierProduct, Warehouse, WarehouseTransfer, Stocktake,
+    SupplierProduct, Warehouse, WarehouseTransfer, Stocktake, StocktakeCountLink,
 )
 from .serializers import (
     CategorySerializer, ProductFamilySerializer, ProductSerializer,
@@ -25,9 +26,10 @@ from .services import (
     generate_next_sku, record_stock_movement, sync_family_from_product,
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
     warehouse_stock_summary, stocktake_scope_counts,
+    stocktake_count_scope_category_ids, stocktake_line_in_count_scope,
 )
 from tenants.models import Tenant
-from core.access import require_perm, requires_perm
+from core.access import require_perm, requires_perm, user_tenant_role
 from core.api_defaults import POSTED_DOC_WARNING
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
@@ -1953,6 +1955,63 @@ class WarehouseTransferViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(transfer).data)
 
 
+#: حالات رابط العدّ كما تعرضها الشاشة — الترتيب هو الأولوية: ميّتٌ قبل
+#: «أنهى»، والمنتهي قبل المكتمل لأن صلاحية الرابط تحكم ما يمكن فعله الآن.
+COUNT_LINK_STATUS_REVOKED = "revoked"
+COUNT_LINK_STATUS_EXPIRED = "expired"
+COUNT_LINK_STATUS_FINISHED = "finished"
+COUNT_LINK_STATUS_ACTIVE = "active"
+
+
+def _iso(value):
+    return serializers.DateTimeField().to_representation(value) if value else None
+
+
+def _count_link_status(link):
+    if link.share.revoked_at is not None:
+        return COUNT_LINK_STATUS_REVOKED
+    if link.share.is_expired:
+        return COUNT_LINK_STATUS_EXPIRED
+    if link.finished_at is not None:
+        return COUNT_LINK_STATUS_FINISHED
+    return COUNT_LINK_STATUS_ACTIVE
+
+
+def _count_link_progress(link, lines):
+    """(أسطر نطاق الرابط، المعدود منها) — النطاق نفسه الذي تقرأه الصفحة العامة."""
+    category_ids = stocktake_count_scope_category_ids(link.categories)
+    scoped = [line for line in lines if stocktake_line_in_count_scope(line, category_ids)]
+    return {
+        "lines": len(scoped),
+        "counted": sum(1 for line in scoped if line.counted_quantity is not None),
+    }
+
+
+def _count_link_progress_lines(stocktake):
+    """أسطر الجرد بما يكفي للتقدّم وحده — تصنيف المنتج في الاستعلام نفسه لا سطراً سطراً."""
+    return list(
+        stocktake.lines.select_related('product')
+        .only('id', 'counted_quantity', 'product__category_id')
+    )
+
+
+def _count_link_row(link, lines):
+    return {
+        "id": link.pk,
+        "token": link.share.token,
+        # المسار العامّ الذي تناديه صفحة العدّ (K4) — يُبنى من الراوتر لا نصاً
+        # مثبَّتاً، فيبقى صحيحاً لو تغيّر التركيب.
+        "url_path": reverse("docshare-api:docshare-count", args=[link.share.token]),
+        "counter_name": link.counter_name,
+        "categories": link.categories,
+        "status": _count_link_status(link),
+        "expires_at": _iso(link.share.expires_at),
+        "finished_at": _iso(link.finished_at),
+        "progress": _count_link_progress(link, lines),
+        "created_at": _iso(link.created_at),
+    }
+
+
 class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
     """T-I2: جرد فعلي — معزول بالشركة. الترحيل عبر action /post/ (يسوّي المخزون + قيد الفرق).
 
@@ -2026,6 +2085,148 @@ class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST)
         return Response(stocktake_scope_counts(
             tenant=tenant, include_inactive=include_inactive))
+
+    # ── K3: روابط عدّ الموظفين ──────────────────────────────────────────
+    #
+    # الصلاحية هي صلاحية تعديل الجرد نفسها (`PATCH`): الحارس الافتراضي
+    # `TenantRolePermission` يمنع «مستعرض» على POST ويسمح لغيره، تماماً كما في
+    # تعديل المسودّة — لا مفتاح `inventory.*` إضافياً يفوق ما يشترطه PATCH.
+    # والعزل بالشركة من `get_object()` نفسه (404 لا 403 لشركةٍ أخرى).
+
+    @action(detail=True, methods=['get', 'post'], url_path='count-links')
+    def count_links(self, request, pk=None):
+        """`GET` قائمة روابط العدّ بحالتها وتقدّمها · `POST` رابطٌ لموظفٍ مسمّى."""
+        stocktake = self.get_object()
+        if request.method == 'POST':
+            return self._create_count_link(request, stocktake)
+        # القائمة تحمل توكناً حيّاً يكتب على الجرد: قراءةُ «مستعرض» هنا تمنحه
+        # كتابةً من الباب العامّ. الشرط هو شرط PATCH نفسه (ليس مستعرضاً)، لكن
+        # `TenantRolePermission` يعدّ GET قراءةً فلا يسأله.
+        if user_tenant_role(request.user, stocktake.tenant) == 'viewer':
+            return Response(
+                {'detail': 'صلاحيتك في هذه الشركة «مستعرض» — قراءة فقط.'},
+                status=status.HTTP_403_FORBIDDEN)
+        lines = _count_link_progress_lines(stocktake)
+        links = (
+            StocktakeCountLink.objects
+            .filter(tenant=stocktake.tenant, stocktake=stocktake)
+            .select_related('share')
+            .order_by('-created_at', '-id')
+        )
+        return Response([_count_link_row(link, lines) for link in links])
+
+    def _create_count_link(self, request, stocktake):
+        from docshare import services as docshare_services
+        from docshare.models import DOC_STOCKTAKE_COUNT
+
+        tenant = get_tenant(request)
+        if stocktake.is_posted:
+            return Response(
+                {'error': 'لا يمكن إنشاء رابط عدّ لجرد مُرحَّل.'},
+                status=status.HTTP_400_BAD_REQUEST)
+        data = request.data
+        if not isinstance(data, dict):
+            return Response(
+                {'error': 'جسم الطلب يجب أن يكون كائناً JSON.'},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        counter_name = str(data.get('counter_name') or '').strip()
+        if not counter_name:
+            return Response(
+                {'counter_name': ['اسم الموظف مطلوب.']},
+                status=status.HTTP_400_BAD_REQUEST)
+        if len(counter_name) > 80:
+            return Response(
+                {'counter_name': ['اسم الموظف 80 محرفاً كحدّ أقصى.']},
+                status=status.HTTP_400_BAD_REQUEST)
+
+        raw_days = data.get('days', 3)
+        if isinstance(raw_days, bool) or str(raw_days).strip() not in ('1', '3', '7'):
+            return Response(
+                {'days': ['مدة الصلاحية يجب أن تكون 1 أو 3 أو 7 أيام.']},
+                status=status.HTTP_400_BAD_REQUEST)
+        days = int(str(raw_days).strip())
+
+        categories = None
+        raw_categories = data.get('categories')
+        if raw_categories is not None:
+            if not isinstance(raw_categories, list) or not raw_categories:
+                return Response(
+                    {'categories': [
+                        'اختر تصنيفاً واحداً على الأقل، أو اتركه فارغاً للجرد كلّه.']},
+                    status=status.HTTP_400_BAD_REQUEST)
+            category_ids = set()
+            for value in raw_categories:
+                if isinstance(value, bool) or not isinstance(value, int):
+                    return Response(
+                        {'categories': [f'معرّف التصنيف غير صالح: {value}']},
+                        status=status.HTTP_400_BAD_REQUEST)
+                category_ids.add(value)
+            tenant_category_ids = set(
+                ProductCategory.objects
+                .filter(tenant=tenant)
+                .values_list('id', flat=True)
+            )
+            missing = sorted(category_ids - tenant_category_ids)
+            if missing:
+                return Response(
+                    {'categories': [
+                        f'تصنيفات غير موجودة لهذه الشركة: {missing}']},
+                    status=status.HTTP_400_BAD_REQUEST)
+            # «له بندٌ في هذا الجرد» لا «موجودٌ في الشركة»: نطاق الرابط مجموعةٌ
+            # فرعية من نطاق الجرد، وتصنيفٌ خارج البنود يعطي رابطاً فارغاً.
+            line_category_ids = set(
+                stocktake.lines
+                .filter(product__category__isnull=False)
+                .values_list('product__category_id', flat=True)
+            )
+            outside = sorted(category_ids - line_category_ids)
+            if outside:
+                return Response(
+                    {'categories': [
+                        f'تصنيفات لا بنود لها في هذا الجرد: {outside}']},
+                    status=status.HTTP_400_BAD_REQUEST)
+            categories = sorted(category_ids)
+
+        with transaction.atomic():
+            share = docshare_services.create_share(
+                tenant, DOC_STOCKTAKE_COUNT, stocktake.pk,
+                days=days, user=request.user, request=request, dedupe=False)
+            link = StocktakeCountLink.objects.create(
+                tenant=tenant, stocktake=stocktake, share=share,
+                counter_name=counter_name, categories=categories,
+                created_by=request.user if request.user.is_authenticated else None,
+            )
+        # الجسم من صفّ القائمة نفسه: التوكن والرابط والحالة والتقدّم تعيش في
+        # موضعٍ واحد، فلا يفقد 201 مفتاحاً أضافه `_count_link_row` لاحقاً.
+        return Response(
+            _count_link_row(link, _count_link_progress_lines(stocktake)),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(
+        detail=True, methods=['post'],
+        url_path=r'count-links/(?P<link_id>[0-9]+)/revoke',
+    )
+    def revoke_count_link(self, request, pk=None, link_id=None):
+        from docshare import services as docshare_services
+
+        stocktake = self.get_object()
+        link = (
+            StocktakeCountLink.objects
+            .filter(
+                pk=link_id, tenant=stocktake.tenant, stocktake=stocktake,
+            )
+            .select_related('share')
+            .first()
+        )
+        if link is None:
+            return Response(
+                {'detail': 'الرابط غير موجود.'},
+                status=status.HTTP_404_NOT_FOUND)
+        docshare_services.revoke_share(
+            link.share, user=request.user, request=request)
+        return Response(_count_link_row(link, _count_link_progress_lines(stocktake)))
 
     @action(detail=True, methods=['post'], url_path='post')
     @requires_perm('inventory.doc.post')

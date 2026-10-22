@@ -101,6 +101,7 @@ SAMPLE_FIXTURES = {
     "warranty_certificate": "warranty_certificate_invoice",
     "service_order": "service_order",
     "purchase_rfq": "purchase_rfq",
+    "stocktake_count": "stocktake_count",
 }
 
 
@@ -432,3 +433,18 @@ def service_order(env, aftersales_tenant):
         device_description="جهاز المشاركة", complaint="لا يعمل",
         accessories="شاحن", notes="ملاحظات الصيانة",
     )
+
+
+@pytest.fixture
+def stocktake_count(env):
+    """K3: جردٌ مسودّة بسطرٍ واحد — عيّنة نوع `stocktake_count` في السجلّ.
+
+    الصفحة العامة لهذا النوع `count/` لا القالب العامّ؛ هذه العيّنة تكفي
+    لاختبار الباني (رأسٌ بلا بنودٍ ولا أرقام مالية) وقائمة السماح.
+    """
+    from inventory.models import Stocktake, StocktakeLine
+
+    row = Stocktake.objects.create(
+        tenant=env["tenant"], stocktake_date="2026-08-13", notes="جرد عيّنة")
+    StocktakeLine.objects.create(stocktake=row, product=env["product"])
+    return row

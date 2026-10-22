@@ -5,7 +5,7 @@
 """
 import pytest
 
-from docshare.documents import DOC_TYPES
+from docshare.documents import AUDIENCES, DOC_TYPES
 from docshare.models import DOC_TYPE_CHOICES, DOC_TYPE_MAX_LENGTH, DocumentShare
 
 
@@ -42,7 +42,9 @@ def test_every_type_declares_a_complete_spec():
         assert required <= set(spec), f"{doc_type}: ينقصه {required - set(spec)}"
         assert callable(spec["loader"]), doc_type
         assert callable(spec["builder"]), doc_type
-        assert spec["audience"] in ("customer", "supplier"), doc_type
+        # `AUDIENCES` هي المصدر الوحيد: كانت القائمة مثبَّتةً هنا فتفترق عن
+        # العقد يوم يُضاف جمهورٌ ثالث (K3: موظف المستودع).
+        assert spec["audience"] in AUDIENCES, doc_type
 
 
 def test_every_decision_spec_is_complete():
