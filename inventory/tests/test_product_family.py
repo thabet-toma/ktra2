@@ -370,10 +370,21 @@ class FamilyFieldsStayOneTruthTest(APITestCase):
         cls.owner = User.objects.create_user(username="fam_truth", password="x")
         cls.tenant = create_company("شركة الحقيقة الواحدة", cls.owner)
         cls.cat = ProductCategory.objects.create(tenant=cls.tenant, name="تصنيف جديد")
+        cls.other_owner = User.objects.create_user(username="fam_truth_other", password="x")
+        cls.other_tenant = create_company("شركة أخرى للحقيقة الواحدة", cls.other_owner)
 
     def setUp(self):
         self.client.force_authenticate(user=self.owner)
         self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
+
+    def _foreign_brand_pointing_at(self, family):
+        """صفٌّ لشركةٍ أخرى تلف مفتاح أبيه فأشار إلى أب هذه الشركة — يدوياً
+        بـ`.update()` كما يحدث في القاعدة فعلاً (لا يفلتر المفتاحَ الأجنبيّ)."""
+        intruder = Product.objects.create(
+            tenant=self.other_tenant, sku="FOREIGN-1", name_ar="اسم الشركة الأخرى")
+        Product.objects.filter(pk=intruder.pk).update(family_id=family.pk)
+        intruder.refresh_from_db()
+        return intruder
 
     def test_renaming_from_one_brand_row_reaches_its_siblings(self):
         from inventory.services import add_brand_to_family, create_product_with_family
@@ -402,6 +413,56 @@ class FamilyFieldsStayOneTruthTest(APITestCase):
         assert second.brand == "براند ثانٍ"
         first.refresh_from_db()
         assert first.brand == "براند أول"
+
+    def test_family_sync_never_writes_into_another_companys_brand(self):
+        """صفٌّ فاسدٌ من شركةٍ أخرى يشير إلى أب هذه الشركة لا ينزل عليه اسمُها.
+
+        لا مسار API يصل إلى عائلةٍ عبر شركتين اليوم، لكن صفّاً واحداً تلف مفتاحه
+        كان يكفي لينزل عليه اسمُ هذه الشركة وتصنيفُها وحساباتها — فيصير صفَّ
+        الشركة الأخرى ببيانات شركةٍ لا تخصّه، بلا خطأٍ ظاهر.
+        """
+        from inventory.services import (
+            add_brand_to_family, create_product_with_family, sync_family_from_product,
+        )
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="اسم قديم")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        sibling, created = add_brand_to_family(
+            family=family, brand_name="براند ثانٍ", tenant=self.tenant)
+        assert created is True
+        intruder = self._foreign_brand_pointing_at(family)
+
+        first.name_ar = "اسم جديد"
+        assert sync_family_from_product(first) is True
+
+        sibling.refresh_from_db()
+        intruder.refresh_from_db()
+        assert sibling.name_ar == "اسم جديد"
+        assert intruder.name_ar == "اسم الشركة الأخرى"
+
+    def test_batch_family_sync_never_writes_into_another_companys_brand(self):
+        """نفس الحارس على النسخة الدفعة (`sync_families_from_products`)."""
+        from inventory.services import (
+            add_brand_to_family, create_product_with_family, sync_families_from_products,
+        )
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="منتج الحدود")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        sibling, created = add_brand_to_family(
+            family=family, brand_name="براند ثانٍ", tenant=self.tenant)
+        assert created is True
+        intruder = self._foreign_brand_pointing_at(family)
+
+        first.min_stock_level = 9
+        first.save(update_fields=["min_stock_level"])
+        sync_families_from_products([first])
+
+        sibling.refresh_from_db()
+        intruder.refresh_from_db()
+        assert sibling.min_stock_level == 9
+        assert intruder.min_stock_level is None
 
 
 class ProductFamilySearchTest(APITestCase):

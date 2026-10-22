@@ -150,7 +150,10 @@ class TheMeetingItselfTest(ApplicantMeetingTestBase):
         self.assertEqual(datetime.fromisoformat(res.data["end"]).utcoffset(), timedelta(hours=2))
 
     def test_an_edit_into_the_repeated_dst_hour_is_accepted(self):
-        """نفسُ النافذة من مسار التعديل، وفيه يُقارَن طرفٌ نصّيٌّ بطرفٍ من الصفّ."""
+        """نفسُ النافذة من مسار التعديل — والطرفان يصلان معاً في الطلب،
+        فيمرّان بمحلّل `DateTimeField` نفسِه الذي يمرّ به الإنشاء (لا طرفٌ
+        نصّيٌّ وآخرُ يُقرأ من الصفّ؛ ذلك مسارُ تعديلِ طرفٍ واحد).
+        """
         meeting_id = self._create_meeting().data["id"]
         res = self.client.post(
             f"{MEETINGS}{meeting_id}/update/",
@@ -158,6 +161,21 @@ class TheMeetingItselfTest(ApplicantMeetingTestBase):
             format="json",
         )
         self.assertEqual(res.status_code, 200, res.data)
+
+    def test_a_real_backwards_edit_inside_the_repeated_hour_is_refused(self):
+        """المقلوبُ نفسُه من مسار التعديل: النهاية 22:30Z والبداية 23:15Z —
+        متأخّرةٌ فعلاً ومتقدّمةٌ حائطيّاً، فيمرّ فحصُ الساعة الحائطيّة ويصدّها
+        قيدُ القاعدة بخمسمئة. والمطلوب ٤٠٠ بالنصّ نفسِه قبل أن تصل الكتابة.
+        """
+        meeting_id = self._create_meeting().data["id"]
+        self.client.raise_request_exception = False
+        res = self.client.post(
+            f"{MEETINGS}{meeting_id}/update/",
+            {"start": DST_FALL_BACK_END, "end": DST_FALL_BACK_START},
+            format="json",
+        )
+        self.assertEqual(res.status_code, 400, res.data)
+        self.assertIn("بعد بدايته", str(res.data["end"]))
 
     def test_a_real_backwards_window_inside_the_repeated_hour_is_refused(self):
         """العكسُ بالضبط: النهاية 22:30Z والبداية 23:15Z — متأخّرةٌ فعلاً
@@ -168,6 +186,7 @@ class TheMeetingItselfTest(ApplicantMeetingTestBase):
         res = self._create_meeting(start=DST_FALL_BACK_END, end=DST_FALL_BACK_START)
         self.assertEqual(res.status_code, 400, res.data)
         self.assertIn("end", res.data)
+        self.assertIn("بعد بدايته", str(res.data["end"]))
 
     def test_editing_the_time_does_not_wipe_the_agenda(self):
         """‏`None` تعني «لم يُرسَل» لا «امسحه» — وإلاّ ضاع نصٌّ بتعديل وقت."""

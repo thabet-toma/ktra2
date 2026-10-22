@@ -302,7 +302,7 @@ def _push_family_fields_to_siblings(family, *, exclude_id, fields) -> int:
     # (`.update()` لا يمرّ بـ`auto_now`).
     values['updated_at'] = timezone.now()
     return (
-        Product.objects.filter(family_id=family.pk)
+        Product.objects.filter(tenant_id=family.tenant_id, family_id=family.pk)
         .exclude(pk=exclude_id)
         .update(**values)
     )
