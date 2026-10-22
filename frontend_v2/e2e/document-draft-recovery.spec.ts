@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { installStocktakeApiStubs } from './stocktake-stubs';
 
 /**
  * ISSUE #118 — الرحلة الأمّ لمسودّات المستندات المحلية: فاتورة الشراء (أول
@@ -667,8 +668,7 @@ const BATCH4_SCREENS: Array<{
     touch: '[data-testid="note-reason"]', value: 'NOTE-DRAFT-001' , newLabel: 'إشعار جديد' , reopensItself: true },
   { name: 'إرسالية الشراء', route: '/purchase-receipts', permissions: ['purchase.invoice.view', 'purchase.invoice.create'],
     touch: '[data-testid="receipt-supplier-ref"]', value: 'GR-DRAFT-001' , newLabel: 'إرسالية جديدة' , reopensItself: true },
-  { name: 'الجرد المخزني', route: '/stocktake', permissions: ['inventory.doc.post', 'inventory.item.view'],
-    touch: '[data-testid="stocktake-notes"]', value: 'STK-DRAFT-001' , newLabel: 'جرد جديد' , reopensItself: true },
+  // «الجرد المخزني» خرج من الجدول: «جرد جديد» صار نافذةً تُنشئ الجرد في الخادم أوّلاً، والمسودّات صارت لكل جردٍ مفتوح — وحالته المخصّصة أدناه.
   { name: 'التحويل المستودعي', route: '/warehouse-transfer', permissions: ['inventory.doc.post', 'inventory.item.view'],
     touch: '[data-testid="transfer-notes"]', value: 'TRF-DRAFT-001' , newLabel: 'تحويل جديد' , reopensItself: true },
 ];
@@ -713,3 +713,47 @@ for (const screen of BATCH4_SCREENS) {
     await expect(page.locator(screen.touch)).toHaveValue(screen.value);
   });
 }
+
+/**
+ * ISSUE #121 — «الجرد المخزني» بعد K2: الإنشاء نافذةٌ تُنشئ الجرد في الخادم
+ * أوّلاً، فلا مسودّة لورقةٍ لم تُنشأ بعد. الوعدُ الباقي — والمنقوص في الجدول
+ * أعلاه — مسودّةُ **جردٍ مفتوح** تُستعاد عند إعادة فتح الجرد نفسه.
+ *
+ * المحاكي `stocktake-stubs.ts` يردّ بعقد `StocktakeSerializer` نفسه ويُبقي
+ * `updated_at` ثابتاً ما لم يُحفظ شيء — فالحكم `restore` (استعادةٌ تلقائية) لا
+ * `stale`، وهو ما يؤكّده نصّ الشريط.
+ */
+test('الجرد المخزني: افتح جرداً قائماً، اكتب، أخفِ التبويب، أعِد التحميل، أعِد فتحه ← المسودّة مستعادة (issue #121)', async ({ page }) => {
+  test.setTimeout(90_000);
+  await installStocktakeApiStubs(page);
+
+  const openSameStocktake = async () => {
+    await page.locator('tbody tr').filter({ hasText: 'JRD-0001' })
+      .getByRole('button', { name: 'فتح' }).click();
+    await expect(page.getByTestId('stocktake-sheet')).toBeVisible({ timeout: 30_000 });
+  };
+
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+  await openSameStocktake();
+
+  await page.getByTestId('stocktake-notes').fill('STK-DRAFT-001');
+  await page.getByTestId('stocktake-count-101').fill('7');
+  await expect(page.getByTestId('stocktake-count-101')).toHaveValue('7');
+
+  // إخفاءُ التبويب — الحدُّ الأخير المضمون للكتابة (لا `beforeunload`، #109 §٣).
+  await page.evaluate(() => {
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    document.dispatchEvent(new Event('visibilitychange'));
+  });
+  await expect.poll(() => documentDraftCount(page), { timeout: 10_000 }).toBeGreaterThan(0);
+
+  await page.reload();
+  await openSameStocktake();
+
+  // الخادم لم يتغيّر ⇒ استعادةٌ تلقائية (لا «تغيّر المستند»)، والرأس والعدّ عادا.
+  await expect(page.getByTestId('draft-restored-banner'))
+    .toContainText('استُعيدت مسودةٌ غير محفوظة', { timeout: 30_000 });
+  await expect(page.getByTestId('stocktake-notes')).toHaveValue('STK-DRAFT-001');
+  await expect(page.getByTestId('stocktake-count-101')).toHaveValue('7');
+});

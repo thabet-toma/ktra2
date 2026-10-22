@@ -73,6 +73,12 @@ export type CategoryTreeSelectMultiProps = CommonProps & {
   productCounts?: Record<number, number>;
   /** يُعرض هؤلاء ومسار الوصول إليهم فقط (نطاق رابط الجرد). */
   restrictTo?: number[];
+  /**
+   * ملخّص سفلي بديل — شاشة الجرد تجمع فيه «بدون تصنيف» و«غير الفعّالة» مع
+   * عدّادات التصنيفات في سطرٍ واحد، فلا يُعرض ملخّصان يختلف رقمانهما.
+   * غيابه يُبقي الملخّص الافتراضي كما هو لكل مستدعٍ آخر.
+   */
+  summary?: React.ReactNode;
   disabled?: boolean;
 };
 
@@ -983,8 +989,12 @@ const MultiCategoryTreeSelect: React.FC<CategoryTreeSelectMultiProps> = (props) 
       </div>
 
       <div className="border-t border-[var(--ktra-border)] px-2 py-1.5 text-xs text-[var(--ktra-ink-soft)]">
-        التصنيفات المحدّدة: {formatNumber(checkedInList.length)}
-        {productTotal != null && <> · المنتجات: {formatNumber(productTotal)}</>}
+        {props.summary ?? (
+          <>
+            التصنيفات المحدّدة: {formatNumber(checkedInList.length)}
+            {productTotal != null && <> · المنتجات: {formatNumber(productTotal)}</>}
+          </>
+        )}
       </div>
     </div>
   );

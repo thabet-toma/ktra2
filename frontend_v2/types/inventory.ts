@@ -116,3 +116,86 @@ export interface StockSummaryResponse {
   total_inventory_value: number;
   total_products_in_stock: number;
 }
+
+// ─── الجرد (K1/K2) — مطابقة حقول `inventory/serializers.py` بالحرف ────────────
+
+/**
+ * نطاق الجرد المخزَّن على المستند (K1). المفاتيح الأربعة كلها حاضرة دائماً في
+ * ردّ الخادم؛ `null` على `Stocktake.scope` يعني جرداً يدوياً بلا نطاق.
+ */
+export interface StocktakeScope {
+  all: boolean;
+  categories: number[];
+  uncategorized: boolean;
+  include_inactive: boolean;
+}
+
+/** بند الجرد كما يعيده `StocktakeLineSerializer` — بلا أي حقل تكلفةٍ أو سعر. */
+export interface StocktakeLine {
+  id: number;
+  product: number;
+  product_name: string;
+  /** `null` = لم يُعدّ بعد (K1). */
+  counted_quantity: string | null;
+  /** مَن عدّ السطر — فارغ حتى يُعدّ. */
+  counted_by_name: string;
+  counted_at: string | null;
+  product_sku: string;
+  product_category: number | null;
+  /** رصيد الشركة لا رصيد المستودع (المستودع وسمٌ على الحركات). */
+  product_quantity_on_hand: string;
+  product_is_active: boolean;
+  system_quantity: string | null;
+  variance: string | null;
+}
+
+/** بطاقة الجرد الكاملة `StocktakeSerializer` — البنود تُقرأ منها لا من الكتالوج. */
+export interface Stocktake {
+  id: number;
+  stocktake_number: string;
+  stocktake_date: string;
+  warehouse: number | null;
+  warehouse_name: string | null;
+  notes: string;
+  is_posted: boolean;
+  journal: number | null;
+  scope: StocktakeScope | null;
+  created_by: number | null;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+  lines: StocktakeLine[];
+  line_count: number;
+  counted_count: number;
+}
+
+/** صفّ القائمة `StocktakeListSerializer` — ملخّص بلا بنود. */
+export interface StocktakeListRow {
+  id: number;
+  stocktake_number: string;
+  stocktake_date: string;
+  warehouse: number | null;
+  warehouse_name: string | null;
+  notes: string;
+  is_posted: boolean;
+  journal: number | null;
+  created_at: string;
+  updated_at: string;
+  created_by_name: string;
+  line_count: number;
+  counted_count: number;
+}
+
+/** ردّ `GET stocktakes/scope-counts/` — المنتجات المباشرة لكل تصنيف. */
+export interface StocktakeScopeCounts {
+  /** مفاتيح JSON نصّية دائماً — تُقرأ بـ`counts.categories[String(id)]`. */
+  categories: Record<string, number>;
+  uncategorized: number;
+  all: number;
+}
+
+/** خيار مستودع في منتقيات الجرد — ما تعيده `inventory/warehouses/` (`id`/`name`). */
+export interface WarehouseOption {
+  id: number;
+  name: string;
+}

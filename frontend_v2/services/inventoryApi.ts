@@ -1,6 +1,9 @@
-import { humanizeDrfError } from "../utils/drfError";
+import { httpErrorMessage } from "../utils/drfError";
 import type { AddBrandTarget } from "../utils/brandActions";
 import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
+import type {
+  Stocktake, StocktakeListRow, StocktakeScopeCounts,
+} from "../types/inventory";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { remainingPageNumbers } from "../utils/paging";
 import { apiFetch, apiGetList, apiGetObject, apiPostObject, toPagedList } from "./restApi";
@@ -140,17 +143,17 @@ const headers = (): HeadersInit => {
 
 async function handle(res: Response, ctx: string): Promise<void> {
   if (res.ok) return;
-  let msg = `${ctx}: ${res.status}`;
-  try {
-    // G2: خطأ حقل من DRF ({"barcode": ["…"]}) كان يسقط هنا فيصل للمستخدم «‎: 400»
-    // بلا أي سبب — يمرّ الآن على نفس المحوّل الذي يستعمله restApi.
-    const humanized = humanizeDrfError(await res.json());
-    if (humanized) msg = humanized;
-  } catch {
-    const t = await res.text();
-    if (t) msg = t.slice(0, 400);
-  }
-  throw new Error(msg);
+  // يُقرأ الجسم نصّاً مرّةً واحدة: قراءة `res.json()` ثم `res.text()` عند
+  // فشلها كانت تقرأ جسماً مستهلكاً فتُسقط الرسالة الخادمية وتُبقي «‎: 400».
+  // وJSON غير المفهوم يبقى «ctx: status» — لا يُعرض JSON خام للمستخدم.
+  const raw = await res.text();
+  const parsed = httpErrorMessage(ctx, res.status, raw);
+  // F2: 412 يجب أن يصل للشاشة بحالته لا برسالةٍ نصّية وحدها — نافذة «حدّث»
+  // تُفتح على `error.status === 412`، وهذا هو الموضع الوحيد الذي يعرف الحالة.
+  const error = new Error(parsed.message) as Error & { status?: number; data?: unknown };
+  error.status = res.status;
+  error.data = parsed.data;
+  throw error;
 }
 
 async function asList(res: Response): Promise<any[]> {
@@ -768,35 +771,82 @@ export const inventoryApi = {
   },
 
   // ── Phase 7 (T-I2): جرد ───────────────────────────────────────────
-  getStocktakes: () =>
+  /**
+   * K2: قائمة الجرد ملخّصٌ بلا بنود. البنود تُقرأ من بطاقة الجرد وحدها، فلا
+   * ينزّل هذا الاستدعاء كتالوجاً ولا آلاف الأسطر.
+   */
+  getStocktakes: (): Promise<StocktakeListRow[]> =>
     fetch(`${INV}/stocktakes/`, { headers: headers() }).then(asList),
-  getStocktake: async (id: number) => {
+  /**
+   * بطاقة الجرد + توكنها (`ETag`). التوكن لقطةُ هذا القارئ: يُرسَل `If-Match`
+   * في التعديل التالي، فيُرفض 412 إن سبقه أحد.
+   */
+  getStocktake: async (id: number): Promise<{ stocktake: Stocktake; etag: string | null }> => {
     const res = await fetch(`${INV}/stocktakes/${id}/`, { headers: headers() });
     await handle(res, "getStocktake");
-    return res.json();
+    return {
+      stocktake: (await res.json()) as Stocktake,
+      etag: res.headers.get("ETag"),
+    };
   },
-  createStocktake: async (body: Record<string, unknown>) => {
+  createStocktake: async (
+    body: object,
+  ): Promise<{ stocktake: Stocktake; etag: string | null }> => {
     const res = await fetch(`${INV}/stocktakes/`, {
       method: "POST", headers: headers(), body: JSON.stringify(body),
     });
     await handle(res, "createStocktake");
-    return res.json();
+    return {
+      stocktake: (await res.json()) as Stocktake,
+      etag: res.headers.get("ETag"),
+    };
   },
-  updateStocktake: async (id: number, body: Record<string, unknown>) => {
+  updateStocktake: async (
+    id: number,
+    body: object,
+    etag?: string | null,
+  ): Promise<{ stocktake: Stocktake; etag: string | null }> => {
     const res = await fetch(`${INV}/stocktakes/${id}/`, {
-      method: "PATCH", headers: headers(), body: JSON.stringify(body),
+      method: "PATCH",
+      headers: {
+        ...headers(),
+        // RFC 9110: التوكن قويٌّ مقتبس كما أعاده الخادم — لا يُعاد بناؤه هنا.
+        ...(etag ? { "If-Match": etag } : {}),
+      },
+      body: JSON.stringify(body),
     });
     await handle(res, "updateStocktake");
-    return res.json();
+    return {
+      stocktake: (await res.json()) as Stocktake,
+      etag: res.headers.get("ETag"),
+    };
   },
-  postStocktake: async (id: number) => {
+  /** الترحيل يرسل العلم صراحةً دائماً (ق٢) — لا يعتمد على افتراض الخادم. */
+  postStocktake: async (
+    id: number, body: { uncounted_as_zero: boolean } = { uncounted_as_zero: false },
+  ) => {
     const res = await fetch(`${INV}/stocktakes/${id}/post/`, {
-      method: "POST", headers: headers(),
+      method: "POST", headers: headers(), body: JSON.stringify(body),
     });
     await handle(res, "postStocktake");
     return res.json();
   },
+  /** عدّادات «ما سنجرده» — قاعدة الخادم نفسها التي تولّد البنود. */
+  getStocktakeScopeCounts: async (
+    includeInactive: boolean,
+  ): Promise<StocktakeScopeCounts> => {
+    const res = await fetch(
+      `${INV}/stocktakes/scope-counts/?include_inactive=${includeInactive ? "true" : "false"}`,
+      { headers: headers() },
+    );
+    await handle(res, "getStocktakeScopeCounts");
+    return (await res.json()) as StocktakeScopeCounts;
+  },
 };
+
+/** 412 من `handle`: المستند تغيّر بين قراءته وكتابته — للشاشة قرار «حدّث». */
+export const isStaleDocumentError = (error: unknown): boolean =>
+  (error as { status?: number } | null)?.status === 412;
 
 // P1-9: نافذة مشتركة قصيرة + دمج الطلبات الطائرة. الحمل الموثّق أدناه لم يكن
 // يُدفع مرة واحدة بل مرة لكل فتح شاشة (9 شاشات مستندات، وبعضها يطلبها مرتين:

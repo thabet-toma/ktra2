@@ -24,7 +24,7 @@ from .stock_status import filter_by_stock_status, stock_status_of
 from .services import (
     generate_next_sku, record_stock_movement, sync_family_from_product,
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
-    warehouse_stock_summary,
+    warehouse_stock_summary, stocktake_scope_counts,
 )
 from tenants.models import Tenant
 from core.access import require_perm, requires_perm
@@ -2000,6 +2000,32 @@ class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
         if self.get_object().is_posted:
             return Response({'error': POSTED_DOC_WARNING}, status=status.HTTP_400_BAD_REQUEST)
         return super().destroy(request, *args, **kwargs)
+
+    @action(detail=False, methods=['get'], url_path='scope-counts')
+    def scope_counts(self, request):
+        """K2: عدّادات «ما سنجرده» قبل الإنشاء — القراءة نفسها التي تبني البنود.
+
+        تُرجع المنتجات المباشرة لكل تصنيف + «بلا تصنيف» + الإجمالي، فتختار
+        الشاشة أيّ تصنيفات وتجمع عدّاداتها بلا تنزيل كتالوج. وقاعدة العدّ
+        (`_stocktake_scope_products`) هي بعينها قاعدة التوليد، فلا يختلف الرقم
+        المعروض عن عدد البنود.
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محدّدة لهذا الطلب'},
+                status=status.HTTP_400_BAD_REQUEST)
+        raw = request.query_params.get('include_inactive')
+        if raw is None or raw == 'false':
+            include_inactive = False
+        elif raw == 'true':
+            include_inactive = True
+        else:
+            return Response(
+                {'error': 'قيمة include_inactive يجب أن تكون true أو false'},
+                status=status.HTTP_400_BAD_REQUEST)
+        return Response(stocktake_scope_counts(
+            tenant=tenant, include_inactive=include_inactive))
 
     @action(detail=True, methods=['post'], url_path='post')
     @requires_perm('inventory.doc.post')

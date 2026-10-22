@@ -25,7 +25,7 @@ export interface DocumentDraftBannersProps<TPayload> {
   onApplyDraft: (payload: TPayload) => void;
   /** «تراجع» على شريط الاستعادة: يعيد الشاشة لحالتها المحفوظة ويمسح المسودّة. */
   onUndo: () => void;
-  /** علامة «لُمِس» الحالية — تحكم تحذير «سيستبدل عملك الحالي» عند فتح يتيم. */
+  /** علامة «لُمِس» الحالية — تحكم تحذير «سيستبدل عملك الحالي» عند فتح يتيم وعند «استعرض مسودتي». */
   isTouched: boolean;
   /**
    * الشاشة للقراءة فقط (مرحَّلة، مقفلة، أو بلا صلاحية تحرير) — يُخفي شريط
@@ -94,6 +94,26 @@ export function DocumentDraftBanners<TPayload>({
     await deleteOrphanDraft(key);
   };
 
+  /* «استعرض مسودتي» في شريط المسودّة المتأخّرة يطبّق حمولةً أقدم فوق ما على
+   * الشاشة الآن — فقد يمحو تعديلاً كُتب في هذه الجلسة. الحارس والتحذير نفسهما
+   * اللذان يحرسان فتح اليتيم، لا استبدالٌ صامت. */
+  const applyStaleDraft = async () => {
+    if (!restoredBanner) return;
+    if (
+      wouldOpeningOrphanClobberUnsavedWork({ isTouched }) &&
+      !(await confirm({
+        title: "استعراض المسودّة",
+        message:
+          "لديك تعديلٌ غير محفوظ على الشاشة الآن — استعراض هذه المسودّة يستبدله. متابعة؟",
+        confirmText: "استعرض المسودّة",
+        danger: true,
+      }))
+    ) {
+      return;
+    }
+    onApplyDraft(restoredBanner.payload);
+  };
+
   return (
     <>
       {draftSaveFailed && !readOnly && (
@@ -128,7 +148,7 @@ export function DocumentDraftBanners<TPayload>({
               <button
                 type="button"
                 className="ktra-toolbtn"
-                onClick={() => onApplyDraft(restoredBanner.payload)}
+                onClick={() => void applyStaleDraft()}
                 data-testid="draft-stale-preview"
               >
                 استعرض مسودتي

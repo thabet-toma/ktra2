@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { humanizeDrfError, extractDrfFieldErrors } from "./drfError.ts";
+import { humanizeDrfError, extractDrfFieldErrors, httpErrorMessage } from "./drfError.ts";
 
 test("flat field error gets an Arabic label prefix", () => {
   assert.equal(
@@ -74,6 +74,26 @@ test("extractDrfFieldErrors keeps the first message per field and skips general 
 test("extractDrfFieldErrors returns empty for strings/null", () => {
   assert.deepEqual(extractDrfFieldErrors(null), {});
   assert.deepEqual(extractDrfFieldErrors("boom"), {});
+});
+
+test("httpErrorMessage: JSON غير مفهوم يبقى «ctx: status» ولا يُعرض خاماً", () => {
+  const json = httpErrorMessage("updateStocktake", 500, '{"unexpected": {}}');
+  assert.equal(json.message, "updateStocktake: 500");
+  assert.doesNotMatch(json.message, /[{}]/);
+  assert.deepEqual(json.data, { unexpected: {} });
+
+  assert.equal(httpErrorMessage("getStocktake", 500, "{}").message, "getStocktake: 500");
+  assert.equal(httpErrorMessage("getStocktake", 502, "").message, "getStocktake: 502");
+});
+
+test("httpErrorMessage: نصٌّ غير JSON يُعرض كما هو، وخطأ DRF يُترجم", () => {
+  assert.equal(httpErrorMessage("getStocktake", 502, "Bad Gateway").message, "Bad Gateway");
+  assert.equal(httpErrorMessage("getStocktake", 502, "<html>").data, null);
+  assert.equal(
+    httpErrorMessage("updateStocktake", 400, '{"lines": [{"counted_quantity": ["كمية غير صالحة"]}]}')
+      .message,
+    "كمية غير صالحة",
+  );
 });
 
 test('humanizeThrown يقرأ رسالة Error وجسم DRF المُسلسَل', async () => {

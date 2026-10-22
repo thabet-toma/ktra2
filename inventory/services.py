@@ -2409,6 +2409,46 @@ def _normalize_stocktake_scope(scope, tenant):
     return normalized
 
 
+def _stocktake_scope_products(tenant, include_inactive):
+    """المنتجات المؤهّلة لأيّ جرد: شركةٌ واحدة، بلا خدمات، ونشطة إلا بعلمٍ صريح.
+
+    مصدرٌ واحد يقرأه **توليد البنود** و**عدّادات النطاق** معاً: نسخةٌ ثانية من
+    الشرطين كانت ستجعل الشاشة تعدّ منتجاً لا يدخل الجرد (أو العكس) بلا أن يحمرّ
+    شيء حتى يختلف الرقمان أمام المستخدم.
+    """
+    products = Product.objects.filter(tenant=tenant, is_service=False)
+    if not include_inactive:
+        products = products.filter(is_active=True)
+    return products
+
+
+def stocktake_scope_counts(*, tenant, include_inactive):
+    """عدّادات المنتجات المباشرة لكل تصنيف + بلا تصنيف + الإجمالي.
+
+    استعلامٌ واحد مجمَّع (لا استعلام لكل عقدة): الشجرة في الإنتاج آلاف العُقد،
+    والعدّاد يُفتح مع كل «جرد جديد».
+    """
+    from django.db.models import Count
+
+    rows = (
+        _stocktake_scope_products(tenant, include_inactive)
+        .values('category_id')
+        .annotate(total=Count('id'))
+    )
+    categories = {}
+    uncategorized = 0
+    total = 0
+    for row in rows:
+        count = row['total']
+        total += count
+        category_id = row['category_id']
+        if category_id is None:
+            uncategorized = count
+        else:
+            categories[str(category_id)] = count
+    return {'categories': categories, 'uncategorized': uncategorized, 'all': total}
+
+
 def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, notes, scope):
     """K1: يولّد جرداً من نطاق تصنيفات — بندٌ لكل منتج مطابق، بلا كتالوجٍ في العميل.
 
@@ -2424,9 +2464,7 @@ def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, note
     # الكتالوج — فتولد البنود من مجموعةٍ ليست ما تحقّق منه النطاق.
     with transaction.atomic():
         normalized = _normalize_stocktake_scope(scope, tenant)
-        products = Product.objects.filter(tenant=tenant, is_service=False)
-        if not normalized['include_inactive']:
-            products = products.filter(is_active=True)
+        products = _stocktake_scope_products(tenant, normalized['include_inactive'])
         if not normalized['all']:
             condition = Q(category_id__in=normalized['categories'])
             if normalized['uncategorized']:

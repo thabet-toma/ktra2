@@ -146,6 +146,31 @@ export function extractDrfFieldErrors(data: unknown): Record<string, string> {
 }
 
 /**
+ * رسالة طلبٍ فاشل وجسمه المفسَّر — قرار العرض الوحيد لكل نداء خدمة:
+ * جسمٌ JSON يمرّ على `humanizeDrfError`؛ وإن لم يُفهم يبقى «ctx: status» ولا
+ * يُعرض JSON خام للمستخدم. والنصّ الخام يُعرض فقط حين لا يكون الجسم JSON أصلاً
+ * (بوّابة/بروكسي ردّت HTML مثلاً).
+ */
+export function httpErrorMessage(
+  ctx: string,
+  status: number,
+  raw: string,
+): { message: string; data: unknown } {
+  const fallback = `${ctx}: ${status}`;
+  if (!raw) return { message: fallback, data: null };
+  let data: unknown = null;
+  let isJson = false;
+  try {
+    data = JSON.parse(raw);
+    isJson = true;
+  } catch {
+    data = null;
+  }
+  if (!isJson) return { message: raw.slice(0, 400), data: null };
+  return { message: humanizeDrfError(data) || fallback, data };
+}
+
+/**
  * رسالة خطأ مقروءة من أي شكل مرمي: `Error` (تُقرأ رسالته) أو جسم DRF أو نص.
  * `humanizeDrfError` وحده يعيد "" لكائن Error لأن رسالته ليست خاصية قابلة للتعداد.
  */
