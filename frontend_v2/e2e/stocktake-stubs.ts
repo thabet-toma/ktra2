@@ -113,6 +113,56 @@ export type StocktakeSaveRequest = {
   body: Record<string, unknown>;
 };
 
+/** K4 — رابط عدٍّ في المحاكي: الحالة كلها كما في `StocktakeCountLink` + `DocumentShare`. */
+export type StubCountLink = {
+  id: number;
+  stocktakeId: number;
+  token: string;
+  counter_name: string;
+  categories: number[] | null;
+  expires_at: string | null;
+  finished_at: string | null;
+  revoked_at: string | null;
+  created_at: string;
+};
+
+export type PublicCountWrite = {
+  entries: Array<{ line_id: number; counted_quantity: string | null }>;
+  finished: boolean;
+};
+
+/**
+ * الحالة المشتركة بين صفحة المدير (المصادَقة) والصفحة العامة في سياقِ متصفّحٍ
+ * آخر: نفس «الخادم» في الذاكرة، فيرى الموظفُ ما كتبه المديرُ والعكس.
+ */
+export type CountApiBackend = {
+  stocktakes: InternalStocktake[];
+  links: StubCountLink[];
+  /** الكتابات الناجحة وحدها — يشهد بها اختبار «دفعة واحدة». */
+  publicWrites: PublicCountWrite[];
+  /** كل محاولة كتابةٍ وصلت (ومنها المرفوضة بالشبكة) — للتشخيص. */
+  publicAttempts: PublicCountWrite[];
+  /** عدد ردود 400 لأسطرٍ في `rejectLineIds` — دليلٌ حتميّ على وصول الرفض. */
+  publicRejects: number;
+  publicReads: number;
+  /** قراءات قائمة الروابط الإدارية — يشهد بها اختبار إعادة الجلب التلقائية. */
+  adminReads: number;
+  publicWriteFailure: number | null;
+  publicReadFailure: number | null;
+  /** أسطرٌ يرفضها المحاكي 400 كأنها خرجت من النطاق — لاختبار رسالةٍ قديمة. */
+  rejectLineIds: number[];
+  /** تأخير ردّ الكتابة — لاختبار تعديلٍ يقع أثناء الطيران. */
+  delayWritesMs: number;
+  /** يضيف حقولاً مالية إلى الحمولة العامة — يثبت أن الصفحة ترسم قائمةً ثابتة. */
+  leakMoneyFields: boolean;
+  /** كم حمولةً عامة خرجت بالحقول المالية — دليلٌ على أن التسريب وقع فعلاً. */
+  publicLeaks: number;
+  nextLinkId: number;
+  nextTokenSeq: number;
+  /** كتابةُ عدٍّ تحرّك `updated_at` والتوكن كما في الخادم (عقد K1/K2). */
+  touchStocktake: (stocktakeId: number) => void;
+};
+
 export type StocktakeStubHandle = {
   /** طلبات قائمة المنتجات بلا `search` — يجب أن تبقى صفراً. */
   productListCallsWithoutSearch: string[];
@@ -136,12 +186,26 @@ export type StocktakeStubHandle = {
   setServerNotes: (notes: string) => void;
   /** توكن الجرد الحالي في «الخادم» — الأول (900) ما لم يُمرَّر معرّفٌ آخر. */
   currentEtag: (stocktakeId?: number) => string;
+  /** K4: الحالة المشتركة لروابط العدّ — تمرَّر إلى `installPublicCountStubs`. */
+  countBackend: CountApiBackend;
+  /** K4: طلبات `GET stocktakes/<id>/` — يشهد بها اختبار التحديث كل 30 ث. */
+  stocktakeGetCount: number;
+  /** K4: يُفشل كتابات العدّ العامة القادمة (503 مثلاً) — لاختبار النسخة المحلية. */
+  setPublicWriteFailure: (status: number | null) => void;
+  /** K4: يُفشل قراءات العدّ العامة (429 مثلاً) — لشاشة «حاول بعد قليل». */
+  setPublicReadFailure: (status: number | null) => void;
+  /** K4: يُخرج سطراً من نطاق كل رابطٍ لا يشمل تصنيف «محركات» (12). */
+  moveLineOutOfScope: (lineId: number) => void;
 };
 
 const nowIso = () => new Date().toISOString();
 
 /** كميةٌ كما يقبلها `CountedQuantityField`: null، أو رقمٌ غير سالب بأربع منازل. */
 const QUANTITY_TEXT = /^(?:\d+(?:\.\d*)?|\.\d+)$/;
+
+/** رسالة `CountedQuantityField` نفسها — لا نسخةً ثانية في المحاكي. */
+const INVALID_QUANTITY_MESSAGE =
+  'كمية غير صالحة — رقمٌ غير سالب بأربع منازل عشرية على الأكثر.';
 
 const parseQuantity = (raw: unknown): { ok: true; value: string | null } | { ok: false } => {
   if (raw == null) return { ok: true, value: null };
@@ -263,10 +327,387 @@ const json = (
       // متقاطع الأصل — وواجهةُ الإنتاج تضبطها في `CORS_EXPOSE_HEADERS`.
       'Access-Control-Allow-Origin': '*',
       'Access-Control-Expose-Headers': 'ETag',
+      // طلباتُ الكتابة تحمل `Content-Type: application/json` و`If-Match`،
+      // فالمتصفح يسبقها بـOPTIONS؛ محاكيٌ لا يجيب عنه يُفشل الطلب قبل وصوله.
+      'Access-Control-Allow-Headers': 'content-type, if-match, x-tenant-id, x-branch-id',
+      'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
       ...headers,
     },
     body: JSON.stringify(body),
   });
+
+// ── K4: روابط العدّ — منطق المحاكي المشترك ────────────────────────────────
+
+const categoryPathText = (categoryId: number | null): string => {
+  if (categoryId == null) return '';
+  const parts: string[] = [];
+  const seen = new Set<number>();
+  let current = STUB_CATEGORIES.find((row) => row.id === categoryId);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    parts.unshift(current.name);
+    current = current.parent == null
+      ? undefined
+      : STUB_CATEGORIES.find((row) => row.id === current?.parent);
+  }
+  return parts.join(' ‹ ');
+};
+
+const lineCategoryOf = (line: InternalLine): number | null =>
+  productOf(line.product)?.category ?? null;
+
+const inCountScope = (line: InternalLine, categories: number[] | null): boolean => {
+  if (categories == null) return true;
+  const category = lineCategoryOf(line);
+  return category != null && categories.includes(category);
+};
+
+/** `_count_link_status`: ميّت ← منتهٍ ← مكتمل ← حيّ. */
+const countLinkStatusOf = (
+  link: StubCountLink, stocktake: InternalStocktake,
+): 'active' | 'finished' | 'expired' | 'revoked' => {
+  if (link.revoked_at || stocktake.is_posted) return 'revoked';
+  if (link.expires_at && Date.parse(link.expires_at) <= Date.now()) return 'expired';
+  if (link.finished_at) return 'finished';
+  return 'active';
+};
+
+const countLinkProgressOf = (link: StubCountLink, stocktake: InternalStocktake) => {
+  const scoped = stocktake.lines.filter((line) => inCountScope(line, link.categories));
+  return {
+    lines: scoped.length,
+    counted: scoped.filter((line) => line.counted != null).length,
+  };
+};
+
+/** `_count_link_row` — المفاتيح نفسها بالحرف. */
+const countLinkRow = (link: StubCountLink, stocktake: InternalStocktake) => ({
+  id: link.id,
+  token: link.token,
+  url_path: `/api/share/${link.token}/count/`,
+  counter_name: link.counter_name,
+  categories: link.categories,
+  status: countLinkStatusOf(link, stocktake),
+  expires_at: link.expires_at,
+  finished_at: link.finished_at,
+  progress: countLinkProgressOf(link, stocktake),
+  created_at: link.created_at,
+});
+
+/** `GET /api/share/<token>/count/` — قائمة سماحٍ بلا حقلٍ ماليّ واحد. */
+const publicCountPayload = (
+  link: StubCountLink, stocktake: InternalStocktake, backend: CountApiBackend,
+) => ({
+  company_name: 'شركة الجرد',
+  stocktake_number: stocktake.number,
+  date: stocktake.date,
+  warehouse: stocktake.warehouse == null
+    ? ''
+    : WAREHOUSES.find((row) => row.id === stocktake.warehouse)?.name ?? '',
+  counter_name: link.counter_name,
+  finished: link.finished_at != null,
+  lines: stocktake.lines
+    .filter((line) => inCountScope(line, link.categories))
+    .map((line) => {
+      const product = productOf(line.product);
+      return {
+        line_id: line.id,
+        sku: product?.sku ?? '',
+        name: product?.display_name ?? product?.name_ar ?? '',
+        brand: product?.brand ?? '',
+        category_path: categoryPathText(product?.category ?? null),
+        uom: 'حبة',
+        system_quantity: product?.quantity_on_hand ?? '0.0000',
+        counted_quantity: line.counted,
+        counted_by_name: line.by,
+        // تسريبٌ متعمَّد يثبت أن الصفحة ترسم قائمةً ثابتة لا كل ما يصل.
+        ...(backend.leakMoneyFields
+          ? { cost_price: '9.99', unit_price: '19.50', total_value: '99.00' }
+          : {}),
+      };
+    }),
+});
+
+const lineInStocktake = (stocktake: InternalStocktake, lineId: number): InternalLine | undefined =>
+  stocktake.lines.find((line) => line.id === lineId);
+
+/** يستجيب لطلبات سطح العدّ العامّ؛ `false` يعني «ليس طلبي» (يمرّر المستدعي). */
+async function serveCountShare(route: Route, backend: CountApiBackend): Promise<boolean> {
+  const url = new URL(route.request().url());
+  const match = url.pathname.match(/\/api\/share\/([^/]+)\/count\/$/);
+  if (!match) return false;
+  const method = route.request().method();
+  if (method === 'OPTIONS') {
+    await json(route, 200, {});
+    return true;
+  }
+  const token = decodeURIComponent(match[1]);
+  const link = backend.links.find((row) => row.token === token);
+  const stocktake = link
+    ? backend.stocktakes.find((row) => row.id === link.stocktakeId)
+    : undefined;
+  if (!link || !stocktake) {
+    await json(route, 404, { detail: 'الرابط غير صحيح.' });
+    return true;
+  }
+  const status = countLinkStatusOf(link, stocktake);
+  if (status === 'revoked' || status === 'expired') {
+    await json(route, 410, {
+      detail: 'انتهى هذا الرابط — الجرد رُحِّل أو انتهت صلاحية الرابط. راجع المسؤول.',
+    });
+    return true;
+  }
+
+  if (method === 'GET') {
+    backend.publicReads += 1;
+    if (backend.publicReadFailure) {
+      await json(route, backend.publicReadFailure, { detail: 'حاول بعد قليل.' });
+      return true;
+    }
+    if (backend.leakMoneyFields) backend.publicLeaks += 1;
+    await json(route, 200, publicCountPayload(link, stocktake, backend));
+    return true;
+  }
+
+  if (method !== 'POST') {
+    await json(route, 405, { detail: 'الطريقة غير مدعومة.' });
+    return true;
+  }
+
+  const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+  const rawEntries = body.entries ?? [];
+  const finished = body.finished ?? false;
+  if (!Array.isArray(rawEntries)) {
+    await json(route, 400, { entries: ['قائمة العدّ يجب أن تكون مصفوفة.'] });
+    return true;
+  }
+  if (rawEntries.length > 500) {
+    await json(route, 400, { entries: ['الحدّ الأقصى 500 سطراً في الطلب الواحد.'] });
+    return true;
+  }
+  if (typeof finished !== 'boolean') {
+    await json(route, 400, { finished: ['قيمة finished يجب أن تكون true أو false.'] });
+    return true;
+  }
+
+  const errors: Record<string, unknown> = {};
+  const parsed: Array<{ lineId: number; sent: string | null; stored: string | null }> = [];
+  rawEntries.forEach((raw, index) => {
+    if (raw == null || typeof raw !== 'object' || Array.isArray(raw)) {
+      // `_parse_count_entries`: رسالةُ سطرٍ ليس كائناً **قائمةٌ** لا خريطة حقل.
+      errors[String(index)] = ['سطر العدّ غير صالح.'];
+      return;
+    }
+    const entry = raw as Record<string, unknown>;
+    const rawId = entry.line_id;
+    const lineId = typeof rawId === 'number'
+      ? rawId
+      : typeof rawId === 'string' && /^[0-9]{1,18}$/.test(rawId.trim())
+        ? Number(rawId.trim())
+        : NaN;
+    if (!Number.isInteger(lineId) || lineId < 1) {
+      errors[String(index)] = { line_id: ['معرّف البند غير صالح.'] };
+      return;
+    }
+    if (!('counted_quantity' in entry)) {
+      errors[String(index)] = { counted_quantity: ['الكمية مطلوبة — استعمل null للمسح.'] };
+      return;
+    }
+    const quantity = parseQuantity(entry.counted_quantity);
+    if (!quantity.ok) {
+      errors[String(index)] = {
+        counted_quantity: [INVALID_QUANTITY_MESSAGE],
+      };
+      return;
+    }
+    parsed.push({
+      lineId,
+      sent: entry.counted_quantity == null ? null : String(entry.counted_quantity),
+      stored: quantity.value,
+    });
+  });
+  if (Object.keys(errors).length) {
+    await json(route, 400, { entries: errors });
+    return true;
+  }
+
+  const attempt: PublicCountWrite = {
+    entries: parsed.map((row) => ({
+      line_id: row.lineId,
+      counted_quantity: row.sent,
+    })),
+    finished,
+  };
+  backend.publicAttempts.push(attempt);
+  // لقطة الرفض عند **وصول** الطلب: الخادم يقرّر في زمن المعالجة، لا في زمن
+  // الردّ المتأخّر — وبها يستطيع الاختبار إزالة الرفض فور تعديل القيمة.
+  const rejectedIds = [...backend.rejectLineIds];
+  if (backend.delayWritesMs > 0) {
+    // الردّ يتأخّر بعد وصول الطلب — تعديلٌ يقع في هذه النافذة هو محلّ الاختبار.
+    await new Promise((resolve) => { setTimeout(resolve, backend.delayWritesMs); });
+  }
+  if (backend.publicWriteFailure) {
+    await json(route, backend.publicWriteFailure, { detail: 'تعذّر الحفظ الآن.' });
+    return true;
+  }
+  if (rejectedIds.length) {
+    const rejected: Record<string, unknown> = {};
+    rawEntries.forEach((raw, index) => {
+      const entry = raw as Record<string, unknown>;
+      const lineId = Number(entry.line_id);
+      if (rejectedIds.includes(lineId)) {
+        rejected[String(index)] = { counted_quantity: [INVALID_QUANTITY_MESSAGE] };
+      }
+    });
+    if (Object.keys(rejected).length) {
+      backend.publicRejects += 1;
+      await json(route, 400, { entries: rejected });
+      return true;
+    }
+  }
+
+  let written = 0;
+  let ignored = 0;
+  for (const row of parsed) {
+    const line = lineInStocktake(stocktake, row.lineId);
+    if (!line || !inCountScope(line, link.categories)) {
+      ignored += 1;
+      continue;
+    }
+    line.counted = row.stored;
+    line.by = row.stored == null ? '' : link.counter_name;
+    line.at = row.stored == null ? null : nowIso();
+    written += 1;
+  }
+  if (finished && link.finished_at == null) link.finished_at = nowIso();
+  if (written) {
+    stocktake.updated_at = nowIso();
+    // الخادم يحرّك ختم الجرد فيتقادم ETag المدير — والمحاكي يفعلها كي يبقى
+    // اختبار «عدّ موظف لا يُمحى بحفظٍ قديم» صادقاً. و`finished` وحده **لا**
+    // يحرّك الختم (`write_stocktake_count`: `if changed:` حول `locked.save`).
+    backend.touchStocktake(stocktake.id);
+  }
+  backend.publicWrites.push(attempt);
+  await json(route, 200, {
+    written,
+    ignored,
+    finished: link.finished_at != null,
+  });
+  return true;
+}
+
+/** مسارات المدير: قائمة/إنشاء/إبطال تحت `stocktakes/<id>/count-links/`. */
+async function serveAdminCount(
+  route: Route, backend: CountApiBackend, path: string, method: string,
+): Promise<boolean> {
+  const revokeMatch = path.match(
+    /\/inventory\/stocktakes\/(\d+)\/count-links\/(\d+)\/revoke\/$/,
+  );
+  if (revokeMatch && method === 'POST') {
+    const stocktake = backend.stocktakes.find((row) => row.id === Number(revokeMatch[1]));
+    const link = backend.links.find(
+      (row) => row.id === Number(revokeMatch[2]) && row.stocktakeId === stocktake?.id,
+    );
+    if (!stocktake || !link) {
+      await json(route, 404, { detail: 'الرابط غير موجود.' });
+      return true;
+    }
+    link.revoked_at = nowIso();
+    await json(route, 200, countLinkRow(link, stocktake));
+    return true;
+  }
+
+  const listMatch = path.match(/\/inventory\/stocktakes\/(\d+)\/count-links\/$/);
+  if (!listMatch || (method !== 'GET' && method !== 'POST')) return false;
+  const stocktake = backend.stocktakes.find((row) => row.id === Number(listMatch[1]));
+  if (!stocktake) {
+    await json(route, 404, { detail: 'No Stocktake matches the given query.' });
+    return true;
+  }
+
+  if (method === 'GET') {
+    backend.adminReads += 1;
+    const rows = backend.links
+      .filter((row) => row.stocktakeId === stocktake.id)
+      .sort((a, b) => b.id - a.id)
+      .map((row) => countLinkRow(row, stocktake));
+    await json(route, 200, rows);
+    return true;
+  }
+
+  if (stocktake.is_posted) {
+    await json(route, 400, { error: 'لا يمكن إنشاء رابط عدّ لجرد مُرحَّل.' });
+    return true;
+  }
+  const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+  const counterName = String(body.counter_name ?? '').trim();
+  if (!counterName) {
+    await json(route, 400, { counter_name: ['اسم الموظف مطلوب.'] });
+    return true;
+  }
+  if (counterName.length > 80) {
+    await json(route, 400, { counter_name: ['اسم الموظف 80 محرفاً كحدّ أقصى.'] });
+    return true;
+  }
+  const rawDays = body.days ?? 3;
+  if (typeof rawDays === 'boolean' || !['1', '3', '7'].includes(String(rawDays).trim())) {
+    await json(route, 400, { days: ['مدة الصلاحية يجب أن تكون 1 أو 3 أو 7 أيام.'] });
+    return true;
+  }
+  const days = Number(String(rawDays).trim());
+
+  let categories: number[] | null = null;
+  const rawCategories = body.categories;
+  if (rawCategories !== undefined && rawCategories !== null) {
+    if (!Array.isArray(rawCategories) || !rawCategories.length) {
+      await json(route, 400, {
+        categories: ['اختر تصنيفاً واحداً على الأقل، أو اتركه فارغاً للجرد كلّه.'],
+      });
+      return true;
+    }
+    if (rawCategories.some((value) => typeof value !== 'number' || !Number.isInteger(value))) {
+      await json(route, 400, { categories: ['معرّف التصنيف غير صالح.'] });
+      return true;
+    }
+    const tenantCategoryIds = new Set(STUB_CATEGORIES.map((row) => row.id));
+    const missing = (rawCategories as number[]).filter((id) => !tenantCategoryIds.has(id));
+    if (missing.length) {
+      await json(route, 400, {
+        categories: [`تصنيفات غير موجودة لهذه الشركة: ${missing.join('، ')}`],
+      });
+      return true;
+    }
+    const lineCategoryIds = new Set(
+      stocktake.lines
+        .map((line) => lineCategoryOf(line))
+        .filter((id): id is number => id != null),
+    );
+    const outside = (rawCategories as number[]).filter((id) => !lineCategoryIds.has(id));
+    if (outside.length) {
+      await json(route, 400, {
+        categories: [`تصنيفات لا بنود لها في هذا الجرد: ${outside.join('، ')}`],
+      });
+      return true;
+    }
+    categories = [...new Set(rawCategories as number[])].sort((a, b) => a - b);
+  }
+
+  backend.nextTokenSeq += 1;
+  const link: StubCountLink = {
+    id: backend.nextLinkId++,
+    stocktakeId: stocktake.id,
+    token: `count-token-${backend.nextTokenSeq}`,
+    counter_name: counterName,
+    categories,
+    expires_at: new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString(),
+    finished_at: null,
+    revoked_at: null,
+    created_at: nowIso(),
+  };
+  backend.links.push(link);
+  await json(route, 201, countLinkRow(link, stocktake));
+  return true;
+}
 
 export async function installStocktakeApiStubs(
   page: Page,
@@ -326,7 +767,56 @@ export async function installStocktakeApiStubs(
       created_at: '2026-10-21T08:00:00Z',
       updated_at: '2026-10-21T10:00:00Z',
     },
+    // جردٌ بلا أيّ عدٍّ بعد — «لم يبدأ» في K4 حالةٌ حقيقية لا تُصنع بجردٍ
+    // فيه سطرٌ معدودٌ سلفاً (JRD-0001 فيه عدُّ مدير).
+    {
+      id: 960,
+      number: 'JRD-0003',
+      date: '2026-10-22',
+      warehouse: 1,
+      notes: 'جرد رابط الموظف',
+      scope: { all: false, categories: [11, 14], uncategorized: false, include_inactive: false },
+      is_posted: false,
+      journal: null,
+      lines: [
+        {
+          id: 6, product: 101, counted: null, by: '', at: null,
+          system_quantity: null, variance: null,
+        },
+        {
+          id: 7, product: 102, counted: null, by: '', at: null,
+          system_quantity: null, variance: null,
+        },
+        {
+          id: 8, product: 106, counted: null, by: '', at: null,
+          system_quantity: null, variance: null,
+        },
+      ],
+      created_by: 1,
+      created_by_name: 'مدير الجرد',
+      created_at: '2026-10-22T08:00:00Z',
+      updated_at: '2026-10-22T08:00:00Z',
+    },
   ];
+  const countBackend: CountApiBackend = {
+    stocktakes,
+    links: [],
+    publicWrites: [],
+    publicAttempts: [],
+    publicRejects: 0,
+    publicReads: 0,
+    adminReads: 0,
+    publicWriteFailure: null,
+    publicReadFailure: null,
+    rejectLineIds: [],
+    delayWritesMs: 0,
+    leakMoneyFields: false,
+    publicLeaks: 0,
+    nextLinkId: 1,
+    nextTokenSeq: 0,
+    touchStocktake: (id) => bumpEtag(id),
+  };
+  let stocktakeGetCount = 0;
   let nextStocktakeId = 901;
   let nextLineId = 10;
   // توكنٌ لكل مستند — لا عدّادٌ عالميّ: تعديل جردٍ لا يجوز أن يُبطل توكن آخر.
@@ -340,6 +830,7 @@ export async function installStocktakeApiStubs(
   };
   issueEtag(initial.id);
   issueEtag(950);
+  issueEtag(960);
   const bumpEtag = (stocktakeId = initial.id) => { issueEtag(stocktakeId); };
   const currentEtag = (stocktakeId = initial.id) => {
     const value = etags.get(stocktakeId);
@@ -381,6 +872,20 @@ export async function installStocktakeApiStubs(
       issueEtag(initial.id);
     },
     currentEtag: (stocktakeId) => currentEtag(stocktakeId),
+    countBackend,
+    get stocktakeGetCount() { return stocktakeGetCount; },
+    setPublicWriteFailure: (status) => { countBackend.publicWriteFailure = status; },
+    setPublicReadFailure: (status) => { countBackend.publicReadFailure = status; },
+    moveLineOutOfScope: (lineId) => {
+      for (const stocktake of countBackend.stocktakes) {
+        const line = stocktake.lines.find((row) => row.id === lineId);
+        if (!line) continue;
+        // تصنيف «محركات» (12) خارج نطاقَي JRD-0003 (11/14): السطر يخرج من كل
+        // رابطٍ مقيَّد بهذين التصنيفين، ويبقى في «كل الجرد» كما يفعل الخادم.
+        line.product = 104;
+        stocktake.updated_at = nowIso();
+      }
+    },
   };
 
   await page.addInitScript(() => {
@@ -397,6 +902,10 @@ export async function installStocktakeApiStubs(
     const path = url.pathname;
     const method = route.request().method();
     const search = url.searchParams.get('search');
+
+    // K4 — سطح العدّ العامّ وروابط العدّ الإدارية قبل أيّ مسارٍ آخر.
+    if (await serveCountShare(route, countBackend)) return;
+    if (await serveAdminCount(route, countBackend, path, method)) return;
 
     // 3) كل طلب كتالوج بلا استعلام بحثٍ يُسجَّل — وجوده يعني تنزيل كتالوج.
     if (method === 'GET' && path.endsWith('/inventory/products/')) {
@@ -604,6 +1113,12 @@ export async function installStocktakeApiStubs(
       stocktake.journal = 77;
       stocktake.number = stocktake.number || 'JRD-0007';
       stocktake.updated_at = nowIso();
+      // `post_stocktake` يُبطل كل روابط الجرد في المعاملة نفسها.
+      for (const link of countBackend.links) {
+        if (link.stocktakeId === stocktake.id && !link.revoked_at) {
+          link.revoked_at = nowIso();
+        }
+      }
       bumpEtag(stocktake.id);
       await json(route, 200, stocktakeView(stocktake), {
         ETag: currentEtag(stocktake.id),
@@ -619,6 +1134,7 @@ export async function installStocktakeApiStubs(
         return;
       }
       if (method === 'GET') {
+        stocktakeGetCount += 1;
         if (stocktakeGetDelays.length) {
           const wait = stocktakeGetDelays.shift() ?? 0;
           if (wait) await new Promise((resolve) => { setTimeout(resolve, wait); });
@@ -772,4 +1288,22 @@ export async function installStocktakeApiStubs(
   });
 
   return handle;
+}
+
+/**
+ * K4 — محاكي الصفحة العامة وحدها، في سياق متصفّحٍ **بلا جلسة**: لا
+ * `addInitScript` ولا توكن. الحالةُ مشتركة مع محاكي المدير عبر `countBackend`,
+ * فما يكتبه الموظف هنا يقرأه المدير هناك.
+ */
+export async function installPublicCountStubs(
+  page: Page,
+  backend: CountApiBackend,
+): Promise<void> {
+  await page.route('**/*', async (route) => {
+    const url = new URL(route.request().url());
+    const isApi = url.port === '8000' || url.pathname.startsWith('/api/');
+    if (!isApi) return route.continue();
+    if (await serveCountShare(route, backend)) return;
+    return route.continue();
+  });
 }

@@ -21,7 +21,9 @@ import { ProductCardModal } from '../shared/ProductCardModal';
 import { DocumentDraftBanners } from '../shared/DocumentDraftBanners';
 import { NewStocktakeModal } from './NewStocktakeModal';
 import { StocktakeDialog } from './StocktakeDialog';
+import { StocktakeCountLinksDialog } from './StocktakeCountLinksDialog';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { useDocumentDraft } from '../../hooks/useDocumentDraft';
 import { formatNumber, formatQuantity } from '../../utils/formatNumber';
 import {
@@ -50,10 +52,10 @@ import {
   type StocktakeSheetLine,
 } from '../../utils/stocktake';
 import type {
-  Stocktake, StocktakeListRow, WarehouseOption,
+  Stocktake, StocktakeCountLinkRow, StocktakeListRow, WarehouseOption,
 } from '../../types/inventory';
 import {
-  Plus, Send, Trash2, RefreshCw, X, Save, Printer, Info, AlertTriangle,
+  Plus, Send, Trash2, RefreshCw, X, Save, Printer, Info, AlertTriangle, Link2,
 } from 'lucide-react';
 
 type TreeCategory = CategoryNodeLike & { name: string };
@@ -249,6 +251,15 @@ export const StocktakePage: React.FC = () => {
   const [removedIds, setRemovedIds] = useState<number[]>([]);
   const [saving, setSaving] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  // مرايا الحالة الحيّة التي تقرأها الدورة التلقائية بعد `await`: قيمةُ `saving`
+  // في الإغلاق القديم لا ترى حفظاً بدأ بعد بدء الدورة.
+  const savingRef = useRef(saving);
+  savingRef.current = saving;
+  // آخر تعديلٍ محلي في الورقة (كل نداءٍ لـ`markTouched`): دورةٌ تمرّ عليه بأقلّ من
+  // 5 ثوانٍ لا تُدخل ردّها فوق ما يكتبه المدير الآن.
+  const lastLocalEditAtRef = useRef(0);
+  // دورةُ تحديثٍ تلقائي في الطيران — الثانية تُتخطّى ولا تصطفّ خلفها.
+  const autoRefreshInFlightRef = useRef(false);
   const [docUpdatedAt, setDocUpdatedAt] = useState<string | null>(null);
   const [touched, setTouched] = useState(false);
   const [cardProductId, setCardProductId] = useState<number | null>(null);
@@ -271,8 +282,23 @@ export const StocktakePage: React.FC = () => {
   const [postUncountedAsZero, setPostUncountedAsZero] = useState(false);
   const [postBusy, setPostBusy] = useState(false);
   const [postError, setPostError] = useState<string | null>(null);
+  // K4 — نافذة «رابط للموظف» وقائمة روابط الجرد المفتوح. القائمة تُجلب مع فتح
+  // الجرد (لا عند فتح النافذة فقط) لأن وجود رابطٍ حيّ يحكم التحديث التلقائي.
+  const [countLinksOpen, setCountLinksOpen] = useState(false);
+  const [countLinks, setCountLinks] = useState<StocktakeCountLinkRow[]>([]);
 
-  const markTouched = () => setTouched(true);
+  const { role } = usePermissions();
+  const isViewer = role === 'viewer';
+  // K4/جولة 1 — الرابط «الحيّ» للغرضين: `active` يعدّ، و`finished` ما زال
+  // يستطيع التعديل حتى يُرحَّل الجرد — فالتحديث التلقائي يشملهما.
+  const hasCountLink = countLinks.some(
+    (link) => link.status === 'active' || link.status === 'finished',
+  );
+
+  const markTouched = () => {
+    lastLocalEditAtRef.current = Date.now();
+    setTouched(true);
+  };
 
   // قراءةٌ من الخادم جارية (تحديث/412): كل ما يعدّل الورقة معطَّل حتى يُطبَّق
   // الدمج — لا تعديل يقع بين القراءة والتطبيق.
@@ -380,6 +406,20 @@ export const StocktakePage: React.FC = () => {
 
   useEffect(() => { void load(); }, [load]);
 
+  /**
+   * K4 — روابط العدّ تُقرأ مع فتح الجرد، وبصمت: فشلُها لا يمنع الورقة، لكنه
+   * يُبقي القائمة السابقة (فلا يُوقف تحديثاً تلقائياً لرابطٍ حيّ بسبب هفوة شبكة).
+   */
+  const loadCountLinks = useCallback(async (id: number) => {
+    try {
+      const rows = await inventoryApi.getStocktakeCountLinks(id);
+      if (editingIdRef.current !== id) return;
+      setCountLinks(rows);
+    } catch {
+      // صامتٌ عمداً: النافذة تعرض خطأها بنفسها حين تُفتح.
+    }
+  }, []);
+
   const applyStocktake = useCallback((
     stocktake: Stocktake,
     token: string | null,
@@ -419,6 +459,10 @@ export const StocktakePage: React.FC = () => {
     try {
       const { stocktake, etag: token } = await inventoryApi.getStocktake(id);
       applyStocktake(stocktake, token);
+      // K4: قائمة الروابط تُقرأ الآن لا عند فتح النافذة فقط — وجود رابطٍ حيّ
+      // هو شرط التحديث التلقائي كل 30 ث.
+      setCountLinks([]);
+      void loadCountLinks(id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return true;
     } catch (reason) {
@@ -427,7 +471,7 @@ export const StocktakePage: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  }, [applyStocktake, confirmDiscardEdits, discardSheetDraft]);
+  }, [applyStocktake, confirmDiscardEdits, discardSheetDraft, loadCountLinks]);
 
   const closeSheet = useCallback(() => {
     setEditingId(null);
@@ -444,6 +488,8 @@ export const StocktakePage: React.FC = () => {
     setHeaderBaseline({ date: today, warehouse: '', notes: '' });
     setAddQuery('');
     setAddRows([]);
+    setCountLinksOpen(false);
+    setCountLinks([]);
     serverSnapshotRef.current = null;
   }, [today]);
 
@@ -601,16 +647,33 @@ export const StocktakePage: React.FC = () => {
       .toLocaleLowerCase('ar'),
   })), [addRows, treeCategories]);
 
-  /** قراءة الجديدة ثم وضع التعديلات المحلية فوقها — تُستعمل في «تحديث» و412. */
-  const refreshWithLocalEdits = useCallback(async (source: 'manual' | 'stale') => {
+  /** قراءة الجديدة ثم وضع التعديلات المحلية فوقها — تُستعمل في «تحديث» و412 والتلقائي. */
+  const refreshWithLocalEdits = useCallback(async (source: 'manual' | 'stale' | 'auto') => {
     const requestedId = editingId;
     if (requestedId == null) return;
+    const isAuto = source === 'auto';
+    // **التحديث التلقائي لا يلمس أيّ حالة busy**: `sheetBusy` يُعطّل خانات
+    // الكمية، فدورةٌ كل 30 ث كانت تسحب التركيز من خانة المدير وتُسقط ما يكتبه.
+    if (isAuto) {
+      if (autoRefreshInFlightRef.current) return;
+      autoRefreshInFlightRef.current = true;
+    }
     const setBusy = source === 'stale' ? setStaleBusy : setRefreshing;
-    const setFailure = source === 'stale' ? setStaleError : setErr;
-    setBusy(true);
-    setFailure(null);
+    // التحديث التلقائي صامت: لا يكتب رسالة نجاحٍ كل 30 ثانية، ولا يغطّي الشاشة
+    // بخطأ شبكةٍ عابر — الورقة تبقى كما هي ويُعاد في الدورة التالية.
+    const setFailure = (message: string | null) => {
+      if (source === 'stale') setStaleError(message);
+      else if (source !== 'auto') setErr(message);
+    };
+    if (!isAuto) {
+      setBusy(true);
+      setFailure(null);
+    }
     try {
       const { stocktake, etag: token } = await inventoryApi.getStocktake(requestedId);
+      // بدأ حفظٌ أثناء طيران الدورة: ردُّها أقدم من تعديل المدير، فلا يُطبَّق —
+      // الدورة التالية تقرأ ما بعد الحفظ وتدمج عليه.
+      if (isAuto && savingRef.current) return;
       // فُتح جردٌ آخر أثناء القراءة: ردُّ هذا لا يُكتب فوقه (لا توكن ولا لقطة ولا بنود).
       if (editingIdRef.current !== requestedId) return;
       const fresh = sheetLinesFromStocktake(stocktake.lines || []);
@@ -644,17 +707,57 @@ export const StocktakePage: React.FC = () => {
       setEditingPosted(!!stocktake.is_posted);
       const keptCount = merged.reapplied + rebasedHeader.kept;
       if (keptCount > 0) {
-        setMsg(`أُعيد تطبيق تعديلاتك على ${arabicCount(keptCount, REAPPLY_FORMS)} — راجعها واحفظ`);
-      } else {
+        if (source !== 'auto') {
+          setMsg(`أُعيد تطبيق تعديلاتك على ${arabicCount(keptCount, REAPPLY_FORMS)} — راجعها واحفظ`);
+        }
+      } else if (source !== 'auto') {
         setMsg('✓ حُدِّث الجرد');
       }
       if (source === 'stale') setStaleOpen(false);
     } catch (reason) {
       setFailure(reason instanceof Error ? reason.message : 'تعذّر التحديث');
     } finally {
-      setBusy(false);
+      if (isAuto) autoRefreshInFlightRef.current = false;
+      else setBusy(false);
     }
   }, [editingId, today]);
+
+  /**
+   * K4/§5.4 — تحديث الورقة كل 30 ث ما دام للجرد رابطٌ حيّ أو منتهٍ (من آخر جلبٍ
+   * للقائمة). يستدعي **نفس** مسار «تحديث» (`refreshWithLocalEdits`) فلا مسارَ
+   * ثانياً للدمج، ويكتفي بالمرور حين تكون الصفحة مخفيّة أو الورقة مشغولة أو
+   * نافذةٌ مفتوحة. ولا يحمل رسالةَ نجاحٍ كل دورة — الصمت جزء التجربة.
+   *
+   * **ولا يقطع كتابةً جارية**: التركيز في حقلٍ داخل الورقة، أو تعديلٌ محليّ مرّ
+   * عليه أقلّ من 5 ثوانٍ، يمنع الدورة — وإلا سُحب التركيز من خانة المدير.
+   */
+  useEffect(() => {
+    if (editingId == null || editingPosted || !hasCountLink) return undefined;
+    const timer = window.setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      if (
+        sheetBusy || saving || newOpen || postOpen || staleOpen
+        || countLinksOpen || cardProductId != null
+      ) return;
+      const active = document.activeElement as HTMLElement | null;
+      const activeTag = active?.tagName ?? '';
+      const inSheet = active?.closest('[data-testid="stocktake-sheet"]') != null;
+      if (inSheet && (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT')) {
+        return;
+      }
+      if (Date.now() - lastLocalEditAtRef.current < 5_000) return;
+      void (async () => {
+        await refreshWithLocalEdits('auto');
+        const stillOpen = editingIdRef.current;
+        if (stillOpen != null) await loadCountLinks(stillOpen);
+      })();
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [
+    editingId, editingPosted, hasCountLink, sheetBusy, saving, newOpen,
+    postOpen, staleOpen, countLinksOpen, cardProductId,
+    refreshWithLocalEdits, loadCountLinks,
+  ]);
 
   const saveDraft = async (): Promise<boolean> => {
     if (editingId == null || editingPosted) return false;
@@ -712,6 +815,9 @@ export const StocktakePage: React.FC = () => {
       applyStocktake(stocktake, token, { resetView: false });
       setPostOpen(false);
       setMsg('✓ تم الترحيل (تسوية المخزون + قيد الفرق)');
+      // الترحيل يُبطل الروابط على الخادم: القائمة المحلية تُحدَّث فوراً فيتوقف
+      // التحديث التلقائي ويُعرض «مُبطَل».
+      void loadCountLinks(editingId);
       void discardDraft();
       await load();
     } catch (reason) {
@@ -747,6 +853,27 @@ export const StocktakePage: React.FC = () => {
     () => groupStocktakeLines(filtered, treeCategories),
     [filtered, treeCategories],
   );
+
+  // K4 — نطاق رابط الموظف يُبنى من **آخر لقطةٍ من الخادم** لا من أسطر الورقة
+  // الحيّة: الخادم يتحقّق من الأسطر المحفوظة، فسطرٌ أُضيف محلياً لم يُحفظ بعد
+  // (أو تصنيفُ سطرٍ حُذف محلياً) يجعل إنشاء الرابط 400 بلا سببٍ ظاهر للمدير.
+  // والعدّاد وحده يُمرَّر؛ النافذة تشتقّ المعرّفات منه (`Object.keys`).
+  const countLinkScopeLines = editingId != null
+    && serverSnapshotRef.current?.docId === editingId
+    ? serverSnapshotRef.current.lines
+    : [];
+  const countLinkCounts = useMemo(() => {
+    const counts: Record<number, number> = {};
+    for (const line of countLinkScopeLines) {
+      if (line.product_category == null) continue;
+      counts[line.product_category] = (counts[line.product_category] ?? 0) + 1;
+    }
+    return counts;
+  }, [countLinkScopeLines]);
+  const countLinkStocktakeLabel = useMemo(() => {
+    const row = rows.find((item) => item.id === editingId);
+    return row?.stocktake_number || formatDateLocalized(date);
+  }, [rows, editingId, date]);
 
   const openNewStocktake = async () => {
     const decision = await confirmDiscardEdits();
@@ -972,6 +1099,18 @@ export const StocktakePage: React.FC = () => {
                   <Printer className="h-4 w-4" />
                   طباعة
                 </button>
+                {!editingPosted && !isViewer && (
+                  <button
+                    type="button"
+                    className="ktra-toolbtn"
+                    data-testid="stocktake-count-links"
+                    onClick={() => setCountLinksOpen(true)}
+                    title="أنشئ رابطاً عاماً لموظفٍ يعدّ بنود هذا الجرد"
+                  >
+                    <Link2 className="h-4 w-4" />
+                    رابط للموظف
+                  </button>
+                )}
               </div>
 
               {!editingPosted && (
@@ -1227,6 +1366,17 @@ export const StocktakePage: React.FC = () => {
         </div>
       </KitDocumentShell>
 
+      {countLinksOpen && editingId != null && (
+        <StocktakeCountLinksDialog
+          stocktakeId={editingId}
+          stocktakeLabel={countLinkStocktakeLabel}
+          categories={treeCategories}
+          lineCountsByCategory={countLinkCounts}
+          onClose={() => setCountLinksOpen(false)}
+          onLinksChanged={setCountLinks}
+        />
+      )}
+
       {newOpen && (
         <NewStocktakeModal
           categories={treeCategories}
@@ -1243,6 +1393,8 @@ export const StocktakePage: React.FC = () => {
             }
             applyStocktake(stocktake, token);
             setMsg('✓ أُنشئ الجرد — ابدأ العدّ');
+            setCountLinks([]);
+            void loadCountLinks(stocktake.id);
             void load();
           }}
         />

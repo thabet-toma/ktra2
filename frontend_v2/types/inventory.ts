@@ -194,6 +194,49 @@ export interface StocktakeScopeCounts {
   all: number;
 }
 
+/** حالات رابط العدّ كما يحسمها الخادم (`_count_link_status`). */
+export type StocktakeCountLinkStatus = 'active' | 'finished' | 'expired' | 'revoked';
+
+/** صفّ `GET|POST stocktakes/<id>/count-links/` — `_count_link_row` حرفياً. */
+export interface StocktakeCountLinkRow {
+  id: number;
+  token: string;
+  /** مسار الـAPI العامّ كما يبنيه الخادم بـ`reverse` — لا رابط الصفحة. */
+  url_path: string;
+  counter_name: string;
+  /** `null` = الجرد كلّه، وإلا تصنيفاتٌ مباشرة. */
+  categories: number[] | null;
+  status: StocktakeCountLinkStatus;
+  expires_at: string | null;
+  finished_at: string | null;
+  progress: { lines: number; counted: number };
+  created_at: string | null;
+}
+
+/** سطر `GET /api/share/<token>/count/` — قائمة سماحٍ بلا أيّ رقم ماليّ. */
+export interface PublicStocktakeCountLine {
+  line_id: number;
+  sku: string;
+  name: string;
+  brand: string;
+  category_path: string;
+  uom: string;
+  system_quantity: string;
+  counted_quantity: string | null;
+  counted_by_name: string;
+}
+
+/** حمولة `GET /api/share/<token>/count/` — رأسٌ وبنود، ولا مال. */
+export interface PublicStocktakeCount {
+  company_name: string;
+  stocktake_number: string;
+  date: string;
+  warehouse: string;
+  counter_name: string;
+  finished: boolean;
+  lines: PublicStocktakeCountLine[];
+}
+
 /** خيار مستودع في منتقيات الجرد — ما تعيده `inventory/warehouses/` (`id`/`name`). */
 export interface WarehouseOption {
   id: number;

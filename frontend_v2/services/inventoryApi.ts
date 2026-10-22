@@ -2,7 +2,7 @@ import { httpErrorMessage } from "../utils/drfError";
 import type { AddBrandTarget } from "../utils/brandActions";
 import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
 import type {
-  Stocktake, StocktakeListRow, StocktakeScopeCounts,
+  Stocktake, StocktakeCountLinkRow, StocktakeListRow, StocktakeScopeCounts,
 } from "../types/inventory";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { remainingPageNumbers } from "../utils/paging";
@@ -841,6 +841,37 @@ export const inventoryApi = {
     );
     await handle(res, "getStocktakeScopeCounts");
     return (await res.json()) as StocktakeScopeCounts;
+  },
+
+  /**
+   * K4: روابط عدّ هذا الجرد — `_count_link_row` نفسُه في القائمة والإنشاء
+   * والإبطال، فالشاشة لا تفقد مفتاحاً أضافه الخادم لاحقاً.
+   */
+  getStocktakeCountLinks: async (id: number): Promise<StocktakeCountLinkRow[]> => {
+    const res = await fetch(`${INV}/stocktakes/${id}/count-links/`, {
+      headers: headers(),
+    });
+    await handle(res, "getStocktakeCountLinks");
+    return (await res.json()) as StocktakeCountLinkRow[];
+  },
+  createStocktakeCountLink: async (
+    id: number,
+    body: { counter_name: string; days: 1 | 3 | 7; categories: number[] | null },
+  ): Promise<StocktakeCountLinkRow> => {
+    const res = await fetch(`${INV}/stocktakes/${id}/count-links/`, {
+      method: "POST", headers: headers(), body: JSON.stringify(body),
+    });
+    await handle(res, "createStocktakeCountLink");
+    return (await res.json()) as StocktakeCountLinkRow;
+  },
+  revokeStocktakeCountLink: async (
+    id: number, linkId: number,
+  ): Promise<StocktakeCountLinkRow> => {
+    const res = await fetch(`${INV}/stocktakes/${id}/count-links/${linkId}/revoke/`, {
+      method: "POST", headers: headers(),
+    });
+    await handle(res, "revokeStocktakeCountLink");
+    return (await res.json()) as StocktakeCountLinkRow;
   },
 };
 

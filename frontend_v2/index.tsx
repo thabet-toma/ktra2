@@ -52,6 +52,8 @@ const PublicJobPage = React.lazy(() => import('./components/employee-ops/PublicJ
 const PlatformPublicJobPage = React.lazy(() => import('./components/platform-hiring/PlatformPublicJobPage').then((module) => ({ default: module.PlatformPublicJobPage })));
 const PlatformInvitationPage = React.lazy(() => import('./components/platform-hiring/PlatformInvitationPage').then((module) => ({ default: module.PlatformInvitationPage })));
 const PublicRatingPage = React.lazy(() => import('./components/my-agent/PublicRatingPage').then((module) => ({ default: module.PublicRatingPage })));
+// K4: صفحة عدّ الجرد للموظف — خارج المصادقة والشركة كصفحات الروابط العامة.
+const PublicStocktakeCountPage = React.lazy(() => import('./components/inventory/PublicStocktakeCountPage').then((module) => ({ default: module.PublicStocktakeCountPage })));
 const StaffLoginPage = React.lazy(() => import('./components/platform/StaffLoginPage').then((module) => ({ default: module.StaffLoginPage })));
 const StaffShell = React.lazy(() => import('./components/platform/staff/StaffShell').then((module) => ({ default: module.StaffShell })));
 const StorefrontPage = React.lazy(() => import('./components/store/StorefrontPage').then((module) => ({ default: module.StorefrontPage })));
@@ -266,6 +268,9 @@ root.render(
 
           {/* تقييمُ يوم عمل الوكيل برابطٍ مهشَّر — يفتحه صاحبُ الشركة بلا تسجيل دخول (#207 م٧) */}
           <Route path="/rate/:token" element={<ToastProvider><PublicRatingPage /></ToastProvider>} />
+
+          {/* K4: عدُّ الجرد من الجوال برابط موظف — بلا مصادقة، وبلا شركة جلسة */}
+          <Route path="/count/:token" element={<ToastProvider><ConfirmProvider><PublicStocktakeCountPage /></ConfirmProvider></ToastProvider>} />
 
           {/* توظيف المنصة: رابط وظيفة عامة · قبول دعوة توظيف — خارج المصادقة والشركة (#207 م٨) */}
           <Route path="/careers/job/:token" element={<ToastProvider><ConfirmProvider><PlatformPublicJobPage /></ConfirmProvider></ToastProvider>} />
