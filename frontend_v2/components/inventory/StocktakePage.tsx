@@ -358,6 +358,9 @@ export const StocktakePage: React.FC = () => {
         stocktake_date: date,
         warehouse: warehouse || null,
         notes,
+        // الشاشة الحالية ترسل قائمة البنود كاملةً وتتوقّع اختفاء ما حذفه المستخدم؛
+        // عقد K1 يحفظ غير المُرسَل افتراضاً، فالعلم يعيد دلالة «استبدال» لهذه الشاشة وحدها.
+        ...(editingId != null ? { replace_lines: true } : {}),
         lines: filled.map((l) => ({ product: l.product, counted_quantity: l.counted_quantity })),
       };
       // مستند مفتوح ⇒ تحديث (PATCH)، وإلا إنشاء جديد.

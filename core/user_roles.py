@@ -1,6 +1,8 @@
 """
 أدوار التطبيق كما تُعاد في /api/auth/login (مرآة users/<id> + قواعد المستخدم النشط الوحيد).
 تُستخدم لفحوص الـ API التي يجب أن تطابق ما يراه المستخدم في الواجهة.
+ومعها `user_display_name` — اسم المستخدم للعرض، نسخةٌ واحدة تشترك فيها التقارير
+وخواتم المستندات (كانت خاصّةً في `core/reports_api` ومكرَّرةً في وحداتٍ تختم).
 """
 
 from __future__ import annotations
@@ -9,6 +11,17 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from django.contrib.auth.models import AbstractUser
+
+
+def user_display_name(user: AbstractUser | None) -> str:
+    """اسم المستخدم كما يُعرض في المستندات والتقارير — الاسم الكامل أو اسم الدخول.
+
+    `""` لمستخدمٍ مجهولٍ أو غائب (نداءٌ خادميّ بلا مستخدم). نسخةٌ واحدة: التقارير
+    وخواتم `counted_by_name`/`created_by_name` في الجرد تعرض اسم الشخص نفسه.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return ""
+    return user.get_full_name() or user.username
 
 
 def django_user_app_role(user: AbstractUser | None) -> str:

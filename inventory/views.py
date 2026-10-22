@@ -4,7 +4,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db import IntegrityError, transaction
-from django.db.models import F, Sum, Q, Value, DecimalField
+from django.db.models import F, Sum, Q, Value, DecimalField, Count
 from django.db.models.functions import Coalesce
 from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
@@ -17,7 +17,7 @@ from .serializers import (
     CategorySerializer, ProductFamilySerializer, ProductSerializer,
     ProductLookupSerializer, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
-    WarehouseTransferSerializer, StocktakeSerializer,
+    WarehouseTransferSerializer, StocktakeSerializer, StocktakeListSerializer,
     SupplierProductSerializer,
 )
 from .stock_status import filter_by_stock_status, stock_status_of
@@ -31,6 +31,7 @@ from core.access import require_perm, requires_perm
 from core.api_defaults import POSTED_DOC_WARNING
 from core.pagination import EnforcedPageNumberPagination
 from core.activity import build_activity_changes, log_activity, log_view
+from core.concurrency import OptimisticConcurrencyMixin
 from core.date_ranges import filter_local_date_range
 from django.utils.dateparse import parse_date
 from core.tenant_utils import get_tenant
@@ -1952,19 +1953,46 @@ class WarehouseTransferViewSet(viewsets.ModelViewSet):
         return Response(self.get_serializer(transfer).data)
 
 
-class StocktakeViewSet(viewsets.ModelViewSet):
-    """T-I2: جرد فعلي — معزول بالشركة. الترحيل عبر action /post/ (يسوّي المخزون + قيد الفرق)."""
-    queryset = Stocktake.objects.all().prefetch_related('lines__product').order_by('-stocktake_date', '-id')
+class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
+    """T-I2: جرد فعلي — معزول بالشركة. الترحيل عبر action /post/ (يسوّي المخزون + قيد الفرق).
+
+    K1: `ETag`/`If-Match` (مزيج `sales.DeliveryOrderViewSet`) يمنع تعديل المدير أن
+    يمحو عدّ موظف الرابط بصمت؛ والقائمة ملخّصٌ مُرمَّز بلا بنود.
+    """
+    queryset = Stocktake.objects.all().order_by('-stocktake_date', '-id')
     serializer_class = StocktakeSerializer
 
     def get_queryset(self):
         tenant = get_tenant(self.request)
         if not tenant:
             return Stocktake.objects.none()
-        return super().get_queryset().filter(tenant=tenant)
+        qs = super().get_queryset().filter(tenant=tenant).select_related(
+            'warehouse', 'created_by')
+        if self.action == 'list':
+            # الملخّص يُحسب في القاعدة: استعلامان لكل صفٍّ (بنوده ومعدودها) يُلغيان الغرض.
+            return qs.annotate(
+                line_count=Count('lines', distinct=True),
+                counted_count=Count(
+                    'lines', filter=Q(lines__counted_quantity__isnull=False), distinct=True),
+            )
+        return qs.prefetch_related('lines__product')
+
+    def get_serializer_class(self):
+        if self.action == 'list':
+            return StocktakeListSerializer
+        return StocktakeSerializer
 
     def perform_create(self, serializer):
-        serializer.save(tenant=get_tenant(self.request))
+        instance = serializer.save(tenant=get_tenant(self.request))
+        # جردُ النطاق يولد بمئات البنود: نقرأ ردّ الإنشاء من الاستعلام المجهَّز
+        # بدل استعلامٍ لكل بند (وإلا صار الإنشاء نفسه N+1).
+        serializer.instance = self.get_queryset().get(pk=instance.pk)
+
+    def perform_update(self, serializer):
+        instance = serializer.save()
+        # بنود التعديل تُحدَّث/تُضاف/تُحذف بعد الجلب المسبق لكائن الطلب، فقراءة
+        # الردّ من الكاش القديم كانت ستُظهر البند المحذوف وتُخفي المضاف.
+        serializer.instance = self.get_queryset().get(pk=instance.pk)
 
     def destroy(self, request, *args, **kwargs):
         # الحذف يُسقط البنود ويُبقي الحركات والقيد — الجرد المرحَّل لا يُحذف.
@@ -1977,11 +2005,27 @@ class StocktakeViewSet(viewsets.ModelViewSet):
     @requires_perm('inventory.doc.post')
     def post_doc(self, request, pk=None):
         stocktake = self.get_object()
+        # الجسم اختياري (الواجهة القائمة ترسل POST بلا جسم): جسمٌ فارغٌ يُفسَّر
+        # خريطةً فارغة في `request.data`، فلا حاجة لبوّابةٍ على `request.body`.
+        data = request.data
+        if not isinstance(data, dict):
+            return Response(
+                {'error': 'جسم الطلب يجب أن يكون كائناً JSON'},
+                status=status.HTTP_400_BAD_REQUEST)
+        uncounted_as_zero = data.get('uncounted_as_zero', False)
+        if not isinstance(uncounted_as_zero, bool):
+            return Response(
+                {'error': 'قيمة uncounted_as_zero يجب أن تكون true أو false'},
+                status=status.HTTP_400_BAD_REQUEST)
         try:
-            post_stocktake(stocktake, user=request.user)
+            post_stocktake(
+                stocktake, user=request.user, uncounted_as_zero=uncounted_as_zero)
         except serializers.ValidationError:
             raise
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        # الترحيل يكتب الكميات/اللقطات على صفوف البنود في استعلامٍ آخر؛ الجلب
+        # المسبق لكائن الطلب قديم، فنعيد قراءة المستند قبل تسلسل الردّ.
+        stocktake = self.get_queryset().get(pk=stocktake.pk)
         return Response(self.get_serializer(stocktake).data)
 

@@ -19,6 +19,7 @@ from rest_framework.response import Response
 from core.access import require_perm, user_has_perm
 from core.reports import REPORTS, report_catalog, run_drill, run_report
 from core.tenant_utils import get_tenant
+from core.user_roles import user_display_name
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +76,6 @@ def _validation_message(exc: ValidationError) -> str:
             return "مُدخل غير صالح."
         detail = next(iter(detail.values())) if isinstance(detail, dict) else detail[0]
     return str(detail)
-
-
-def _user_display(user) -> str:
-    if not user or not getattr(user, "is_authenticated", False):
-        return ""
-    return user.get_full_name() or user.username
 
 
 @api_view(["GET"])
@@ -160,7 +155,7 @@ def report_run(request, key: str):
         return Response({"error": f"تعذّر توليد تقرير «{spec.title}»."}, status=500)
     # مَن ولّد التقرير — يُطبع في ترويسته وملفّه. آمن داخل الكاش: مفتاحه يحمل
     # المستخدم أصلاً، فلا تُقدَّم نسخة مستخدمٍ لآخر.
-    payload["generated_by"] = _user_display(getattr(request, "user", None))
+    payload["generated_by"] = user_display_name(getattr(request, "user", None))
     if cache_key is not None:
         cache.set(cache_key, payload, REPORT_CACHE_SECONDS)
     return Response(payload)

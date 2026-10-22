@@ -1,5 +1,9 @@
 from rest_framework import serializers
+from rest_framework.fields import empty
+from django.db import transaction
+from django.utils import timezone
 from core.api_defaults import TenantScopedPrimaryKeyRelatedField
+from core.user_roles import user_display_name
 from .models import (
     ProductCategory, ProductFamily, Product, ProductPriceTier, UnitOfMeasure,
     StockMovement, SupplierProduct, Warehouse, WarehouseTransfer,
@@ -741,14 +745,46 @@ class WarehouseTransferSerializer(serializers.ModelSerializer):
         return instance
 
 
+class CountedQuantityField(serializers.DecimalField):
+    """كمية العدّ — الغياب فيها ليس قيمة: `null` تمسح، والرقم يكتب.
+
+    DRF يُسقط الحقل المطلوب الغائب في التعديل الجزئي (`SkipField` على `PATCH`)،
+    فيمرّ بندٌ بلا كمية ويُقرأ في `_upsert_lines` «امسح العدّ» فيمحو
+    `counted_by_name`/`counted_at` اللذين كتبهما موظف الرابط بصمت. هنا الغياب
+    مرفوضٌ في `PATCH` كما هو في `PUT`، والمسح بـ`null` صريحة.
+    """
+
+    def validate_empty_values(self, data):
+        if data is empty and not self.read_only:
+            self.fail('required')
+        return super().validate_empty_values(data)
+
+
 class StocktakeLineSerializer(serializers.ModelSerializer):
     product = TenantScopedPrimaryKeyRelatedField(queryset=Product.objects.all())
     product_name = serializers.SerializerMethodField()
+    counted_quantity = CountedQuantityField(
+        max_digits=18, decimal_places=4, allow_null=True, min_value=0)
+    product_sku = serializers.CharField(source='product.sku', read_only=True, default='')
+    product_category = serializers.IntegerField(
+        source='product.category_id', read_only=True, allow_null=True)
+    product_quantity_on_hand = serializers.DecimalField(
+        source='product.quantity_on_hand', max_digits=18, decimal_places=4, read_only=True)
+    product_is_active = serializers.BooleanField(source='product.is_active', read_only=True)
 
     class Meta:
         model = StocktakeLine
-        fields = ['id', 'product', 'product_name', 'counted_quantity', 'system_quantity', 'variance']
-        read_only_fields = ['id', 'system_quantity', 'variance']
+        fields = [
+            'id', 'product', 'product_name', 'counted_quantity',
+            'counted_by_name', 'counted_at',
+            'product_sku', 'product_category', 'product_quantity_on_hand', 'product_is_active',
+            'system_quantity', 'variance',
+        ]
+        read_only_fields = [
+            'id', 'system_quantity', 'variance',
+            'counted_by_name', 'counted_at',
+            'product_sku', 'product_category', 'product_quantity_on_hand', 'product_is_active',
+        ]
 
     def get_product_name(self, obj):
         if not obj.product: return ""
@@ -756,20 +792,43 @@ class StocktakeLineSerializer(serializers.ModelSerializer):
         return product_display_name(obj.product)
 
 
+def _stocktake_line_counts(obj):
+    """(عدد البنود، عدد المعدود) من الجلب المسبق وحده.
+
+    `len()` على مديرٍ مُجلَبٍ مسبقاً يقرأ الذاكرة، فلا استعلام لكل جردٍ في البطاقة.
+    """
+    lines = list(obj.lines.all())
+    return len(lines), sum(1 for line in lines if line.counted_quantity is not None)
+
+
 class StocktakeSerializer(serializers.ModelSerializer):
     warehouse = TenantScopedPrimaryKeyRelatedField(
         queryset=Warehouse.objects.all(), required=False, allow_null=True)
-    lines = StocktakeLineSerializer(many=True)
+    lines = StocktakeLineSerializer(many=True, required=False)
     warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default=None)
+    # `scope` يُقرأ في البطاقة (ما هذا الجرد؟)، وفي التعديل تُقبل قيمته المطابقة
+    # للمخزَّن وتُهمَل، والمخالفة تُرفض (400)؛ `replace_lines` علمُ كتابةٍ فقط:
+    # «ما لم يُرسَل من البنود يُحذف».
+    scope = serializers.JSONField(required=False, allow_null=True)
+    replace_lines = serializers.BooleanField(write_only=True, required=False, default=False)
+    created_by_name = serializers.CharField(read_only=True)
+    line_count = serializers.SerializerMethodField()
+    counted_count = serializers.SerializerMethodField()
 
     class Meta:
         model = Stocktake
         fields = [
             'id', 'stocktake_number', 'stocktake_date',
             'warehouse', 'warehouse_name', 'notes',
-            'is_posted', 'journal', 'created_at', 'updated_at', 'lines',
+            'is_posted', 'journal', 'scope', 'created_by', 'created_by_name',
+            'created_at', 'updated_at', 'lines', 'line_count', 'counted_count',
+            'replace_lines',
         ]
-        read_only_fields = ['id', 'stocktake_number', 'is_posted', 'journal', 'created_at', 'updated_at']
+        read_only_fields = [
+            'id', 'stocktake_number', 'is_posted', 'journal',
+            'created_by', 'created_by_name', 'created_at', 'updated_at',
+            'line_count', 'counted_count',
+        ]
 
     def validate_lines(self, lines):
         # بندان لمنتجٍ واحد: `post_stocktake` يقرأ الرصيد مرة واحدة فيحسب الثاني
@@ -785,25 +844,139 @@ class StocktakeSerializer(serializers.ModelSerializer):
             seen.add(product.pk)
         return lines
 
+    def validate(self, attrs):
+        # نطاقٌ وبنودٌ معاً في الإنشاء: كلٌّ منهما يحدّد مصدر البنود، والاثنان
+        # يفتحان سؤالاً بلا جواب («أيّهما يُنفَّذ؟») — والرفض قبل أي كتابة.
+        if (self.instance is None and attrs.get('scope') is not None
+                and attrs.get('lines') is not None):
+            raise serializers.ValidationError('اختر نطاقاً أو بنوداً لا الاثنين')
+        return attrs
+
+    def _current_user(self):
+        """المستخدم الحقيقيّ من `request` السياق، أو `None` لمستخدمٍ مجهول.
+
+        قاعدةٌ واحدة لخواتم العدّ و`created_by` (نفس حارس `create_stocktake_from_scope`)،
+        بدل مفتاح `user` مخصّص في السياق يمرّره الـViewSet.
+        """
+        request = self.context.get('request')
+        user = getattr(request, 'user', None)
+        return user if getattr(user, 'pk', None) else None
+
+    def get_line_count(self, obj):
+        return _stocktake_line_counts(obj)[0]
+
+    def get_counted_count(self, obj):
+        return _stocktake_line_counts(obj)[1]
+
     def create(self, validated_data):
-        lines = validated_data.pop('lines', [])
-        stocktake = Stocktake.objects.create(**validated_data)
-        for ln in lines:
-            StocktakeLine.objects.create(stocktake=stocktake, **ln)
+        from .services import create_stocktake_from_scope
+
+        scope = validated_data.pop('scope', None)
+        lines = validated_data.pop('lines', None)
+        validated_data.pop('replace_lines', None)
+        tenant = validated_data.pop('tenant')
+        user = self._current_user()
+
+        if scope is not None:
+            return create_stocktake_from_scope(
+                tenant=tenant, user=user,
+                stocktake_date=validated_data.pop('stocktake_date'),
+                warehouse=validated_data.pop('warehouse', None),
+                notes=validated_data.pop('notes', ''),
+                scope=scope,
+            )
+
+        # الرأس وبنوده معاملةٌ واحدة: عطلٌ في منتصف كتابة البنود لا يترك جرداً
+        # بلا بنوده يبدو كأنّه أُنشئ بنجاح.
+        with transaction.atomic():
+            stocktake = Stocktake.objects.create(
+                tenant=tenant, created_by=user, **validated_data)
+            self._create_lines(stocktake, lines or [], user)
         return stocktake
 
+    @staticmethod
+    def _create_lines(stocktake, rows, user):
+        counter_name = user_display_name(user)
+        now = timezone.now()
+        for row in rows:
+            line = StocktakeLine(stocktake=stocktake, **row)
+            line.set_count(row['counted_quantity'], counter_name, now)
+            line.save()
+
     def update(self, instance, validated_data):
-        if instance.is_posted:
-            raise serializers.ValidationError('لا يمكن تعديل جرد مُرحَّل.')
+        replace_lines = validated_data.pop('replace_lines', False)
         lines = validated_data.pop('lines', None)
-        for k, v in validated_data.items():
-            setattr(instance, k, v)
-        instance.save()
-        if lines is not None:
-            instance.lines.all().delete()
-            for ln in lines:
-                StocktakeLine.objects.create(stocktake=instance, **ln)
-        return instance
+        with transaction.atomic():
+            # القفل أوّلاً: نسخةٌ قديمة (`is_posted=False`) تمرّ من فحص الكائن،
+            # والصفّ المقفول هو من يُسأل — فلا يكتب تعديلٌ على جردٍ رُحّل بين
+            # قراءته وكتابته، وكتابات K3 المقفولة على الصفّ نفسه تتسلسل معه.
+            locked = (
+                Stocktake.objects.select_for_update()
+                .filter(pk=instance.pk, tenant_id=instance.tenant_id)
+                .first()
+            )
+            if locked is None:
+                raise serializers.ValidationError('الجرد غير موجود.')
+            if locked.is_posted:
+                raise serializers.ValidationError('لا يمكن تعديل جرد مُرحَّل.')
+            # نطاقٌ مطابقٌ للمخزَّن (عميلٌ يعيد حمولة البطاقة كما قرأها) يُقبل
+            # ويُهمَل؛ والاختلاف وحده مرفوض — النطاق يُحدَّد عند الإنشاء.
+            if 'scope' in validated_data and validated_data.pop('scope') != locked.scope:
+                raise serializers.ValidationError(
+                    {'scope': 'النطاق يُحدَّد عند إنشاء الجرد فقط'})
+            for k, v in validated_data.items():
+                setattr(locked, k, v)
+            # الحفظ الكامل يحرّك `updated_at` دائماً — وعليه يقوم `ETag` (412 عند التزامن).
+            locked.save()
+            if lines is not None:
+                self._upsert_lines(locked, lines, replace_lines)
+            return locked
+
+    def _upsert_lines(self, instance, rows, replace_lines):
+        """إضافة/تعديل بندٍ ببند بمعرّف المنتج — لا حذفَ واستبدال (D4 في الخطة).
+
+        حذفُ الأسطر وإعادة إنشائها كان يمحو `counted_by_name`/`counted_at` التي
+        كتبها موظف رابط العدّ بصمت. الحذف صار بعلمٍ صريح `replace_lines=true` فقط.
+        """
+        counter_name = user_display_name(self._current_user())
+        now = timezone.now()
+        existing = {ln.product_id: ln for ln in instance.lines.all()}
+        seen = set()
+        for row in rows:
+            product = row['product']
+            seen.add(product.pk)
+            # المفتاح إلزاميٌّ (يتكفّل به `StocktakeLineSerializer`): `None` وحدها تمسح.
+            quantity = row['counted_quantity']
+            line = existing.get(product.pk)
+            if line is None:
+                line = StocktakeLine(stocktake=instance, **row)
+                line.set_count(quantity, counter_name, now)
+                line.save()
+                continue
+            if line.counted_quantity == quantity:
+                # لم تتغيّر الكمية ⇒ لا نمسّ خاتم مَن عدّها أوّلاً.
+                continue
+            line.set_count(quantity, counter_name, now)
+            line.save(update_fields=['counted_quantity', 'counted_by_name', 'counted_at'])
+        if replace_lines:
+            instance.lines.exclude(product_id__in=seen).delete()
+
+
+class StocktakeListSerializer(serializers.ModelSerializer):
+    """ملخّص القائمة — بلا بنود (ولها ترميزٌ من `get_queryset` لا استعلام لكل صفّ)."""
+    warehouse_name = serializers.CharField(source='warehouse.name', read_only=True, default=None)
+    created_by_name = serializers.CharField(read_only=True)
+    line_count = serializers.IntegerField(read_only=True)
+    counted_count = serializers.IntegerField(read_only=True)
+
+    class Meta:
+        model = Stocktake
+        fields = [
+            'id', 'stocktake_number', 'stocktake_date', 'warehouse', 'warehouse_name',
+            'notes', 'is_posted', 'journal', 'created_at', 'updated_at',
+            'created_by_name', 'line_count', 'counted_count',
+        ]
+        read_only_fields = fields
 
 
 class SupplierProductSerializer(serializers.ModelSerializer):

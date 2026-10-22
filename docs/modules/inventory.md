@@ -40,7 +40,7 @@
 | `ProductDemandForecast` (#32) | `level`, `trend` (ستّ خانات عشرية)، `weeks_observed`, `mad`, `last_week_start`, `computed_at` | `product→Product` (`OneToOneField` — صفٌّ واحد لكل منتج). يكتبه حصراً `python manage.py recompute_demand_forecast` (`core/replenishment.py` — `holt_forecast`/`weekly_demand_series`)؛ يقرأه المسار `auto` (#33) في `core/replenishment.py` (`_product_row`) دفعةً واحدة للشركة (`_forecast_map`) |
 | `SupplierProduct` | `supplier_sku`, `supplier_name`, `min_order_qty` (#34، اختياري) | `supplier→partners.Partner`، `product→Product`؛ فريد `(tenant, supplier, supplier_sku)` — **لا** على `(tenant, supplier, product)`: للمورّد أن يحمل أكثر من رقم للمنتج الواحد، والممنوع عكسُه (رقمٌ واحد لمنتجين يجعل المطابقة تخميناً). محايد مالياً بالكامل. `min_order_qty` خاصّية العلاقة لا الصنف — المورّد الصيني يفرض خمسين والمحلّي يبيع بالقطعة، للصنف نفسه |
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
-| `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity`, `system_quantity`, `variance` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
+| `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity` (`null` = لم يُعدّ بعد، K1)، `counted_by_name`/`counted_at` (مَن عدّ ومتى)، `system_quantity`, `variance`, `scope` (JSON نطاق التوليد — `null` = يدوي وكل صفٍّ قائم)، `created_by` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
 
 ## دوال الـservices العامة
 ```python
@@ -91,7 +91,8 @@ def merge_products(*, tenant, target_product_id, product_ids, brands=None, user=
 def undo_product_merge(*, tenant, merge_id):  # (task24) يعكس ضمّاً بالكامل من `ProductMerge.snapshot` — الأب والاسم والبراند كما كانوا حرفياً
 def post_warehouse_transfer(transfer, user=None):  # (1208)
 def unpost_warehouse_transfer(transfer, user=None):  # (1248)
-def post_stocktake(stocktake, user=None):  # (1274)
+def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, notes, scope) -> Stocktake:  # K1 — يتحقّق من النطاق (تصنيفات الشركة وحدها) ويولّد بنداً `counted_quantity=None` لكل منتجٍ مطابق؛ الترقيم يبقى في `post_stocktake`
+def post_stocktake(stocktake, user=None, uncounted_as_zero=False):  # الأسطر `null` تُستثنى افتراضاً (لقطة رصيدٍ للتدقيق بلا حركة)، أو تُعتبر صفراً بالعلم (ق٢)
 def _next_stocktake_number(tenant_id):  # رقم الجرد من دفتر `stocktake` في `TenantBook`، مع زرعٍ متواصلٍ من أعلى رقمٍ قائم عند غياب الدفتر
 ```
 ```python
@@ -150,7 +151,8 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET/POST | `stock-movements/` · GET `stock-movements/summary/` | `StockMovementViewSet` (689) · (792) |
 | GET | `warehouses/` · `warehouses/{id}/stock/` | `WarehouseViewSet` (615) · (662) |
 | POST | `warehouse-transfers/{id}/post/` · `warehouse-transfers/{id}/unpost/` | `WarehouseTransferViewSet` (`post_doc`) · (`unpost_doc`) — يشترطان `inventory.doc.post` · `inventory.doc.unpost`. `DELETE` على تحويلٍ مرحَّل يُرفض بـ400 (`POSTED_DOC_WARNING`)؛ ومنتجات البنود والمستودعان حقولُ `TenantScopedPrimaryKeyRelatedField` فـpk شركةٍ أخرى يُرفض 400 |
-| POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (`post_doc`) — يشترط `inventory.doc.post` (دورا `staff` و`sales` يكتبان المسودّة ويعدّلانها ولا يرحّلانها: 403). `DELETE` على جردٍ مرحَّل يُرفض بـ400 (الحذف كان يُسقط البنود ويُبقي الحركات والقيد)، والمسودّة تُحذف 204. المنتج والمستودع حقلا `TenantScopedPrimaryKeyRelatedField`. بندان لمنتجٍ واحد يُرفضان في `StocktakeSerializer` (`validate_lines`) وفي `post_stocktake` (صفوفٌ قديمة) — الرصيد يُقرأ مرة واحدة فكان المخزون يُسوّى مرتين |
+| GET/POST/PUT/PATCH/DELETE | `stocktakes/` · `stocktakes/{id}/` | `StocktakeViewSet` (`views.py`). **K1**: الإنشاء إمّا `scope` (الخادم يولّد البنود) أو `lines` (يدوي — وقد تكون فارغة = «يدوي (فارغ)»)، ولا الاثنان معاً؛ `scope` في التعديل: مطابقٌ للمخزَّن يُقبل ويُهمَل والمختلف 400. التعديل upsert مفتاحه `product`: البند الذي تغيّرت كميته يُختم بـ`counted_by_name`/`counted_at`، والذي لم يتغيّر يبقى بخاتمه، وما لم يُرسَل يبقى ما دام `replace_lines` غائباً (`true` يحذفه)، و`counted_quantity` إلزاميٌّ في كل بندٍ مُرسَل (`null` تمسح). القائمة ملخّصٌ بلا `lines` مع `line_count`/`counted_count` مُرمَّزين في `get_queryset`، والبطاقة/الإنشاء/التعديل تحمل `ETag` ويقبل التعديل `If-Match` (412 `stale_document`)، وتعديلُ المسودّة يقفل صفّ الجرد ويعيد فحص `is_posted` عليه. |
+| POST | `stocktakes/{id}/post/` | `StocktakeViewSet` (`post_doc`) — يشترط `inventory.doc.post` (دورا `staff` و`sales` يكتبان المسودّة ويعدّلانها ولا يرحّلانها: 403). الجسم اختياري `{"uncounted_as_zero": bool}` — `true` يعتبر الأسطر غير المعدودة صفراً ويختمها باسم المستخدم؛ غيابه يستثنيها بلا حركة ولا أثرٍ في القيد. كل الأسطر `null` بلا العلم ⇒ 400 قبل أي كتابة. جسمٌ غير Boolean ⇒ 400 `{"error": …}`. `DELETE` على جردٍ مرحَّل يُرفض بـ400 (الحذف كان يُسقط البنود ويُبقي الحركات والقيد)، والمسودّة تُحذف 204. المنتج والمستودع حقلا `TenantScopedPrimaryKeyRelatedField`. بندان لمنتجٍ واحد يُرفضان في `StocktakeSerializer` (`validate_lines`) وفي `post_stocktake` (صفوفٌ قديمة) — الرصيد يُقرأ مرة واحدة فكان المخزون يُسوّى مرتين |
 | GET/POST/PUT/PATCH/DELETE | `categories/` · `uom/` | `CategoryViewSet` · `UnitOfMeasureViewSet` (`views.py`). كتابةُ التصنيفات (إنشاء/تعديل/إعادة ربط/حذف) تشترط `inventory.item.manage` — القراءة لكلّ عضوٍ كما هي. `uom/` قراءةٌ فقط |
 | GET | `product-families/` | `ProductFamilyViewSet` (task20) — «المنتج» الأب، **قراءةٌ فقط عمداً**: يُنشأ حصراً مع براندِه الضمنيّ عبر `products/` (`create_product_with_family`) فلا يوجد «منتج بلا براندات»، والكتابة عليه مباشرةً تفتح اتجاه كتابةٍ ثانياً يترك القرّاء الحاليين (وكلّهم يقرأ من صفّ البراند) على قيمةٍ قديمة. `get_queryset` (task24) يستثني الأب اليتيم (فقد كل برانداته بالضمّ، `brands__isnull=False`) — باقٍ في القاعدة للتراجع، محجوبٌ عن كل قراءة. ويقبل `?search=` على الاسمين (`name_ar`/`name_en`، `SearchFilter`) — بحثُ منتقي «المنتج» في فلاتر التقارير داخل الخادم لا بتنزيل الكتالوج، ومقيَّدٌ بالشركة عبر `get_queryset` |
 
@@ -178,6 +180,64 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 «نُقل N منتجاً» مع «(ومعه M براند)» حين تحرّك إخوة، أو «لا تغيير — المنتجات المحدَّدة في هذا
 التصنيف أصلاً» حين `moved` صفر، ويُلحَق به «· تُجوهل K غير موجود» إن سقط معرّفٌ من الطلب.
 لا سحب وإفلات — القائمة اليمنى وحدها.
+
+### الجرد من نطاق تصنيفات (K1)
+`POST stocktakes/` يقبل `scope` بدل `lines`، فيولّد الخادم بنداً لكل منتجٍ مطابق —
+نهاية تنزيل الكتالوج كاملاً في العميل. شكل النطاق:
+`{"all": bool, "categories": [int], "uncategorized": bool, "include_inactive": bool}`؛
+كل مفتاحٍ اختياري وافتراضه `false`/`[]`، و`all` امتدادٌ لخيار «كل المنتجات» في الشاشة
+حتى لا يرسل العميل كل معرّفات التصنيفات. **الدلالة صريحة لا ضمنية** (قرار ٣): التصنيف
+المختار يعني منتجاته المباشرة وحدها؛ منتجٌ في تصنيفٍ ابنٍ غير مختار **لا يدخل**.
+`uncategorized` يضيف منتجات بلا تصنيف. الخدمات تُستبعد دائماً (`Product.is_service`)،
+والمعطَّلة تُستبعد إلا بـ`include_inactive`. النطاق يُخزَّن معيارياً على الجرد
+(`categories` مرتّبة، المفاتيح الأربعة كلها) في `Stocktake.scope`، و`null` لجردٍ يدوي.
+
+**الرفض (400 على حقل `scope`):** نطاقٌ ليس كائناً، مفتاحٌ مجهول، علمٌ ليس `bool` حصراً
+(`1` و`"true"` مرفوضان — قبولهما يفتح نطاقاً بلا قصد)، `categories` ليست قائمة أو تحوي
+غير عددٍ صحيح، أكثر من 2000 تصنيف، تصنيفٌ ليس لهذه الشركة (الرسالة تسمّي المعرّفات
+المرفوضة: «تصنيفات غير موجودة لهذه الشركة: 12، 40») — والتحقّق قبل أي إنشاء فيُحفظ
+العزل. نطاقٌ بلا اختيار ⇒ «اختر تصنيفاً واحداً على الأقل»، وصفر منتجات ⇒ «لا منتجات
+في هذا الاختيار». `scope` و`lines` معاً ⇒ 400.
+
+**البنود تولَّد بـ`counted_quantity = null`** (لم تُعدّ) داخل معاملةٍ واحدة عبر
+`bulk_create`، ولا رقم للجرد هنا — `post_stocktake` يرقّمه عند الترحيل كما كان.
+والتحقّق من النطاق وقراءة المنتجات المطابقة يجريان **داخل المعاملة نفسها** التي
+تكتب: قائمةٌ مقروءة قبلها تُقرأ على لقطةٍ تسبق الإنشاء.
+
+**التعديل upsert لا استبدال (D4).** الحذف وإعادة الإنشاء كانا سيمحوان `counted_by_name`
+و`counted_at` اللذين كتبهما موظف رابط العدّ بصمت. الآن: البند الذي تغيّرت كميته يُحدَّث
+ويُختم باسم المستخدم الحالي ووقته، والبند الذي أُرسل بلا تغييرٍ لا يُمَسّ، والبند غير
+المُرسَل يبقى — ويُحذف فقط بـ`replace_lines: true`. و`counted_quantity` **إلزاميٌّ في
+كل بندٍ مُرسَل** (`null` صريحة تمسح الخاتمين، والغياب 400 حتى في `PATCH` — وإلا قُرئ
+«امسح العدّ» ومحا خاتمَ من عدّه بصمت). `scope` في التعديل: قيمةٌ **مطابقةٌ للمخزَّن**
+(عميلٌ يعيد حمولة البطاقة كما قرأها، بما فيها `null` = `null` لجردٍ يدوي) تُقبل وتُهمَل،
+والمختلفة ⇒ 400 «النطاق يُحدَّد عند إنشاء الجرد فقط». الحفظ الكامل للرأس يحرّك
+`updated_at` دائماً لأن `ETag` مشتقٌّ منه.
+
+**الترحيل (ق٢).** الأسطر غير المعدودة تُستثنى افتراضاً: لا حركة مخزون ولا أثر في القيد،
+`variance = 0`، لكن `system_quantity` يُحفظ كلقطةٍ للتدقيق. `post/` يقبل
+`{"uncounted_as_zero": true}` فيعتبرها صفراً ويختمها باسم المستخدم؛ وكل الأسطر `null`
+بلا العلم ⇒ 400 قبل أي كتابة. كل حركةٍ ما زالت عبر `record_stock_movement` وكل قيدٍ عبر
+`post_journal`.
+
+**التزامن.** `StocktakeViewSet` صار `(OptimisticConcurrencyMixin, ModelViewSet)`:
+`ETag` على البطاقة والإنشاء والتعديل، و`If-Match` بائت ⇒ 412 `stale_document` بلا كتابة —
+فلا يمحو تعديلُ المدير عدَّ الموظف. **وهذا الفحص نفسه ليس تحت قفل الصفّ** (تصميم
+`OptimisticConcurrencyMixin` القائم: يقارن `updated_at` من قراءةٍ سابقة، ولا يقفل)؛
+الحارس داخل الكتابة هو **قفلُ صفّ الجرد**: `update()` يأخذ `select_for_update` على الصفّ
+ويعيد فحص `is_posted` عليه قبل حفظ الرأس أو مسّ البنود، فتتسلسل الكتابات المتزامنة على
+الصفّ نفسه (ومعها كتابات K3 المقفولة عليه)، وترحيلٌ وقع بين القراءة والكتابة يُرفض 400.
+القائمة ترمّز `line_count` و`counted_count` في `get_queryset` (بلا `prefetch` للبنود ولا
+استعلامٍ لكل صفّ)، والبطاقة تجلب `lines__product` مرةً واحدة فتثبت استعلاماتها مهما كثرت
+البنود. الردّ التفصيلي يضيف `created_by`/`created_by_name` و`scope` و
+`line_count`/`counted_count`، وبندُه يضيف `counted_by_name`/`counted_at` و
+`product_sku`/`product_category`/`product_quantity_on_hand` و`product_is_active`،
+بلا أي حقل تكلفةٍ أو سعر. و**`product_quantity_on_hand` رصيد الشركة** لا رصيد المستودع —
+المستودع المجرود وسمٌ على الحركات كما كان (`Stocktake.warehouse`).
+
+**عكس هجرة 0043** يقتضي أن تكون كل `StocktakeLine.counted_quantity` غير `null` أوّلاً:
+`AlterField` يُعيد العمود إلى NOT NULL ويفشل إن بقي سطرٌ بلا كمية، ولا عملية بياناتٍ
+عكسية فيها.
 
 ### الكرت المجمّع: المحدِّد في الجسم لا في العنوان
 النقاط الثلاث تقبل `POST` بجسم JSON فيه أحد محدِّدَين:
@@ -512,9 +572,13 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 - **ترحيل الجرد يقفل صفّه ويُرقَّم من دفتر `stocktake`** (`inventory/services.py` — `post_stocktake`):
   **القفل وإعادة الفحص هما الحارس** — الفحص الأوّلي على `is_posted` لا يكفي (نسخةٌ قديمة
   تمرّ منه)؛ داخل المعاملة يُعاد جلب صفّ الجرد بـ`select_for_update()` ويُعاد فحص `is_posted`
-  على الصفّ المقفول، ورصيد النظام لكل بند يُقرأ من صفوف المنتجات المقفولة في المعاملة نفسها
-  (بـ`order_by('pk')` حتى لا يتصادم ترحيلان بترتيبَي بنودٍ مختلفين) — لا من `ln.product`
-  المجلوب قبل القفل. **وترتيب الأقفال: الجرد ← الشركة/الدفتر ← المنتجات** — الرقم يُؤخذ قبل
+  على الصفّ المقفول، ورصيد النظام لكل بندٍ **سيُرحَّل** يُقرأ من صفوف منتجاته المقفولة في
+  المعاملة نفسها (`_lock_stocktake_products` بـ`order_by('pk')` حتى لا يتصادم ترحيلان
+  بترتيبَي بنودٍ مختلفين) — لا من `ln.product` المجلوب قبل القفل. والأسطر **المستثناة**
+  (غير معدودةٍ بلا «اعتبرها صفراً») لا تُقفل: لقطتها للتدقيق من قراءةٍ مقيَّدة بالشركة بلا
+  قفل، وتُكتب بكتابةٍ واحدة مجمّعة (`bulk_update(['system_quantity', 'variance'])`) بدل
+  UPDATE لكل سطر — فبندُ نطاقٍ كبيرٍ غير معدود لا يُثقل حلقة الأقفال. **وترتيب الأقفال:
+  الجرد ← الشركة/الدفتر ← المنتجات** — الرقم يُؤخذ قبل
   قفل المنتجات لأن إدخال الدفتر يأخذ قفلاً مشتركاً على صفّ الشركة (مفتاح أجنبي في InnoDB)،
   فقفلُ منتجٍ قبله يُغلق الحلقة مع بيعٍ يمسك الشركة وينتظر المنتج (خطأ 1213). الحركة دلتا بينما
   `post_journal` idempotent على `(tenant, reference_type, reference_id)`، فبلا القفل يمرّ
@@ -792,6 +856,7 @@ trend_cap_ratio/safety_factor`)، تُقرأ جميعاً عبر مُحمِّل�
 | `inventory/tests/test_product_serials.py` | مصفوفة الأنماط (بدون/اختياري/إجباري) على الجانبين، دورة بيع ⇄ إلغاء ترحيل، تخصيص FIFO |
 | `inventory/tests/test_serial_invoice_journey.py` | نفس الرحلة عبر HTTP بحمولة المحرِّرين (`items[].serials` / `lines[].serials`) |
 | `inventory/tests/test_inventory_documents.py` | التحويل (أثر صفري، حركتان موسومتان) والجرد (تسوية + قيد الفرق، وقفل الصفّ/رفض الترحيل بنسخةٍ قديمة مع بقاء رابط القيد، وترقيم `TenantBook` مع الزرع المتواصل، وحارس منتج شركةٍ أخرى) |
+| `inventory/tests/test_stocktake_scope.py` | الجرد من نطاق تصنيفات (دلالةٌ صريحة لا أحفاد، وعزل الشركة، ورسائل رفض النطاق كلٌّ بنصّه، وصفر منتجات)، والتعديل upsert (كميةٌ إلزامية حتى في `PATCH` مع بقاء الخاتمين، ونطاقٌ مطابقٌ يُقبل والمختلف 400، و`replace_lines`، والذرّية والقفل/إعادة الفحص على الصفّ المقفول)، و`ETag`/`If-Match` ⇒ 412، والقائمة المختصرة بلا بنود مع ثبات عدد الاستعلامات، والترحيل (الاستثناء أو الصفر، ورفضُ ما لا كمية فيه قبل الترقيم والدفتر، وقفل منتجات ما سيُرحَّل وحده بكتابة لقطةٍ مجمّعة)، ودورة هجرة 0043 ذهاباً وإياباً |
 | `inventory/tests/test_product_profile.py` | بطاقة المنتج: المؤشرات، سجلّ الحركة (الرصيد الجاري يطابق on-hand)، الفواتير المرتبطة |
 | `inventory/tests/test_item_aggregates.py` | التجميعات من `StockMovement` كمصدر وحيد (وارد تراكمي، متوسط مبيعات 90/28 يوماً) |
 | `inventory/tests/test_account_overrides.py` | سلسلة الحسابات: تجاوز المنتج ← تجاوز الفئة ← الافتراضي |

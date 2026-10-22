@@ -2346,6 +2346,113 @@ def _next_doc_number(tenant_id, model, field, prefix):
     return f"{prefix}-{n + 1:04d}"
 
 
+STOCKTAKE_SCOPE_KEYS = {'all', 'categories', 'uncategorized', 'include_inactive'}
+STOCKTAKE_SCOPE_MAX_CATEGORIES = 2000
+
+
+def _scope_error(message):
+    """خطأ نطاق الجرد بشكل حقل `scope` نفسه — 400 لا 500.
+
+    خطأُ جانغو (`message_dict`) يحوّله `core.exception_handler.custom_exception_handler`
+    إلى خطأ DRF بالشكل نفسه، فلا يستورد `services.py` إطارَ REST لخطأٍ واحد.
+    """
+    return ValidationError({'scope': [message]})
+
+
+def _normalize_stocktake_scope(scope, tenant):
+    """يتحقّق من نطاق الجرد ويُعيده بشكله المعياري (المفاتيح الأربعة، تصنيفات مرتّبة).
+
+    الدلالة **صريحة لا ضمنية** (قرار ٣ في خطة الجرد): التصنيف المختار يعني منتجاته
+    المباشرة وحدها، لا أحفاده. توسيعُ الأحفاد هنا كان سيجعل «جزئي» غير قابلٍ للتعبير.
+    """
+    from .models import ProductCategory
+
+    if not isinstance(scope, dict):
+        raise _scope_error('نطاق الجرد غير صالح')
+    unknown = sorted(set(scope) - STOCKTAKE_SCOPE_KEYS)
+    if unknown:
+        raise _scope_error(f'مفتاح غير معروف في نطاق الجرد: {unknown[0]}')
+    for key in ('all', 'uncategorized', 'include_inactive'):
+        # `bool` وحدها: `1` و`"true"` ليست علَماً، وقبولُهما يفتح نطاقاً بلا قصد.
+        if key in scope and not isinstance(scope[key], bool):
+            raise _scope_error(f'قيمة «{key}» في نطاق الجرد يجب أن تكون صحيحاً أو خطأً')
+
+    categories = scope.get('categories', [])
+    if not isinstance(categories, list):
+        raise _scope_error('قائمة التصنيفات في نطاق الجرد غير صالحة')
+    if any(not isinstance(cid, int) or isinstance(cid, bool) for cid in categories):
+        raise _scope_error('معرّفات التصنيفات يجب أن تكون أعداداً صحيحة')
+    # الحدّ قبل فحص الوجود: قائمة 2001 معرّفاً كلّها غير موجودة تُرفض بالحدّ،
+    # لا برسالةٍ تسمّي ألفَي تصنيف.
+    if len(categories) > STOCKTAKE_SCOPE_MAX_CATEGORIES:
+        raise _scope_error(
+            f'الحد الأقصى {STOCKTAKE_SCOPE_MAX_CATEGORIES} تصنيف في الجرد الواحد')
+    categories = sorted(set(categories))
+
+    found = set(
+        ProductCategory.objects.filter(tenant=tenant, pk__in=categories)
+        .values_list('pk', flat=True)
+    )
+    missing = [cid for cid in categories if cid not in found]
+    if missing:
+        listed = '، '.join(str(cid) for cid in missing)
+        raise _scope_error(f'تصنيفات غير موجودة لهذه الشركة: {listed}')
+
+    normalized = {
+        'all': scope.get('all', False),
+        'categories': categories,
+        'uncategorized': scope.get('uncategorized', False),
+        'include_inactive': scope.get('include_inactive', False),
+    }
+    if not normalized['all'] and not categories and not normalized['uncategorized']:
+        raise _scope_error('اختر تصنيفاً واحداً على الأقل')
+    return normalized
+
+
+def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, notes, scope):
+    """K1: يولّد جرداً من نطاق تصنيفات — بندٌ لكل منتج مطابق، بلا كتالوجٍ في العميل.
+
+    البنود تُنشأ `counted_quantity=None` (لم تُعدّ بعد)، والترقيم يبقى في
+    `post_stocktake` كما هو — الجرد مسودّةٌ حتى يرحّله المدير.
+    """
+    from django.db.models import Q
+
+    from .models import Stocktake, StocktakeLine
+
+    # التحقّق وقراءة المعرّفات داخل المعاملة نفسها التي تكتب: قائمة المنتجات
+    # المقروءة قبلها كانت تُقرأ على لقطةٍ تسبق الإنشاء، وبينهما يمكن أن يتغيّر
+    # الكتالوج — فتولد البنود من مجموعةٍ ليست ما تحقّق منه النطاق.
+    with transaction.atomic():
+        normalized = _normalize_stocktake_scope(scope, tenant)
+        products = Product.objects.filter(tenant=tenant, is_service=False)
+        if not normalized['include_inactive']:
+            products = products.filter(is_active=True)
+        if not normalized['all']:
+            condition = Q(category_id__in=normalized['categories'])
+            if normalized['uncategorized']:
+                condition |= Q(category__isnull=True)
+            products = products.filter(condition)
+        product_ids = list(products.order_by('pk').values_list('pk', flat=True))
+        if not product_ids:
+            raise _scope_error('لا منتجات في هذا الاختيار')
+
+        stocktake = Stocktake.objects.create(
+            tenant=tenant, stocktake_date=stocktake_date, warehouse=warehouse,
+            notes=notes or '', scope=normalized,
+            created_by=user if getattr(user, 'pk', None) else None,
+        )
+        StocktakeLine.objects.bulk_create(
+            [StocktakeLine(stocktake=stocktake, product_id=pid, counted_quantity=None)
+             for pid in product_ids],
+            batch_size=500,
+        )
+    # بلا PII: معرّفات وعدد فقط.
+    logger.info(
+        "Stocktake #%s created from scope (tenant=%s, lines=%d)",
+        stocktake.id, tenant.pk, len(product_ids))
+    return stocktake
+
+
 def _next_stocktake_number(tenant_id):
     """رقم الجرد التالي من دفتر `TenantBook` (قفلٌ وذرّية) بدل MAX+1.
 
@@ -2451,13 +2558,30 @@ def unpost_warehouse_transfer(transfer, user=None):
     return transfer
 
 
-def post_stocktake(stocktake, user=None):
+def _lock_stocktake_products(tenant_id, product_ids):
+    """قفل صفوف منتجات الجرد دفعةً واحدة بترتيب `pk` لا بترتيب البنود، فلا
+    يتصادم ترحيلان بترتيبَي بنودٍ مختلفين — نفس مبدأ `record_stock_movement`.
+
+    منفصلةٌ عن حلقة التسوية لتُقاس وحدها: أيّ منتجاتٍ تُقفل قرارٌ مستقلٌّ عن
+    كيف تُسوّى (K1: بنودُ النطاق غير المعدودة لا تُقفل).
+    """
+    return {
+        p.pk: p for p in Product.objects.select_for_update().filter(
+            tenant_id=tenant_id, pk__in=product_ids).order_by('pk')
+    }
+
+
+def post_stocktake(stocktake, user=None, uncounted_as_zero=False):
     """T-I2: يرحّل جرداً — يسوّي رصيد كل منتج ليطابق الكمية المعدودة عبر حركات
     ADJUST_IN/ADJUST_OUT، ويُنشئ قيد فرق الجرد (المخزون مقابل تكلفة البضاعة المباعة).
       فائض (عُدّ > النظام): مدين المخزون / دائن ت.ب.م.
       عجز  (عُدّ < النظام): مدين ت.ب.م / دائن المخزون.
+
+    K1: الأسطر غير المعدودة (`counted_quantity is None`) **تُستثنى** افتراضاً — لا
+    حركة ولا قيد، مع لقطة رصيدٍ للتدقيق — أو تُعتبر صفراً بـ`uncounted_as_zero`
+    (قرار المالك ق٢). وإن كانت كل الأسطر غير معدودة بلا العلم نرفض قبل أي كتابة.
     """
-    from .models import Stocktake
+    from .models import Stocktake, StocktakeLine
     from accounting.services import post_journal
     if stocktake.is_posted:
         raise ValidationError("الجرد مُرحَّل مسبقاً.")
@@ -2498,6 +2622,19 @@ def post_stocktake(stocktake, user=None):
                     "ادمج كمياته في بند واحد قبل الترحيل.")
             seen_products.add(ln.product_id)
 
+        # لا شيء عُدّ إطلاقاً وبلا «اعتبرها صفراً»: رفضٌ قبل الترقيم وأي حركة/قيد.
+        uncounted = [ln for ln in lines if ln.counted_quantity is None]
+        if len(uncounted) == len(lines) and not uncounted_as_zero:
+            raise ValidationError(
+                "لم يُعدّ أيّ بند — أدخل الكميات أو اختر «اعتبرها صفراً»")
+
+        # من عدّ الأسطر التي تُعتبر صفراً — نفس دالّة عرض المستخدم في التقارير.
+        counter_name = ''
+        counted_at = timezone.now()
+        if uncounted_as_zero and uncounted:
+            from core.user_roles import user_display_name
+            counter_name = user_display_name(user)
+
         # ترتيب الأقفال: الجرد ← الشركة/الدفتر ← المنتجات؛ الرقم قبل المنتجات لأن الترقيم قد يقفل صفّ
         # الشركة (زرع الدفتر: `Tenant.select_for_update`) أو يُدخل الدفتر (قفل FK مشترك عليه)، فقفلُ منتجٍ قبله يُغلق الحلقة مع بيعٍ ينتظره (1213).
         if not locked.stocktake_number:
@@ -2505,23 +2642,50 @@ def post_stocktake(stocktake, user=None):
 
         # رصيد النظام يُقرأ من صفوف المنتجات المقفولة في هذه المعاملة نفسها — لا من
         # `ln.product` الذي جُلب قبل القفل فرآه ترحيلٌ متزامنٌ آخر برصيدٍ قديم.
-        # قفلٌ واحدٌ مرتَّب بالفهرس (كل الصفوف دفعةً) بدل قفلٍ صفّاً صفّاً بترتيب
-        # البنود، فلا يتصادم ترحيلان بترتيبَي بنودٍ مختلفين.
-        products = {
-            p.pk: p for p in Product.objects.select_for_update().filter(
-                tenant_id=locked.tenant_id, pk__in=seen_products).order_by('pk')
+        # ويُقفل من الأسطر ما سيُرحَّل وحده (معدوداً، أو غير معدودٍ بـ«اعتبرها صفراً»):
+        # بندُ نطاقٍ كبيرٍ غير معدود لا حركة له ولا تسوية، فلا يُقفل ولا يُثقل الأقفال.
+        posting_ids = {
+            ln.product_id for ln in lines
+            if ln.counted_quantity is not None or uncounted_as_zero
         }
-        if seen_products - set(products):
+        products = _lock_stocktake_products(locked.tenant_id, posting_ids)
+        # المستثناة: لقطةُ رصيدٍ للتدقيق من قراءةٍ مقيَّدة بالشركة **بلا قفل**
+        # (لا تُسوّى)، وتُكتب كلقطةٍ واحدة مجمّعة بدل UPDATE لكل سطر.
+        excluded = [] if uncounted_as_zero else uncounted
+        balances = {}
+        if excluded:
+            balances = dict(
+                Product.objects.filter(
+                    tenant_id=locked.tenant_id,
+                    pk__in=[ln.product_id for ln in excluded],
+                ).values_list('pk', 'quantity_on_hand')
+            )
+        # الحارس يغطّي منتجات كل الأسطر — المقفولة والمستثناة معاً.
+        if seen_products - (set(products) | set(balances)):
             raise ValidationError("بند جردٍ يشير إلى منتجٍ لا يتبع الشركة.")
+        for ln in excluded:
+            ln.system_quantity = balances[ln.product_id]
+            ln.variance = Decimal('0')
+        if excluded:
+            StocktakeLine.objects.bulk_update(excluded, ['system_quantity', 'variance'])
 
         for ln in lines:
+            if ln.counted_quantity is None and not uncounted_as_zero:
+                continue   # مستثنى: لقطته كُتبت أعلاه، ولا حركة ولا أثر في القيد.
             prod = products[ln.product_id]
             system_qty = Decimal(str(prod.quantity_on_hand))
-            counted = Decimal(str(ln.counted_quantity))
+            counted = ln.counted_quantity
+            if counted is None:
+                # «اعتبرها صفراً»: عُدّت فعلاً بصفرٍ الآن، ويُختم مَن اعتبرها.
+                counted = Decimal('0')
+                ln.set_count(counted, counter_name, counted_at)
+            counted = Decimal(str(counted))
             variance = (counted - system_qty).quantize(Decimal('0.0001'))
             ln.system_quantity = system_qty
             ln.variance = variance
-            ln.save(update_fields=['system_quantity', 'variance'])
+            ln.save(update_fields=[
+                'counted_quantity', 'counted_by_name', 'counted_at',
+                'system_quantity', 'variance'])
             if variance == 0:
                 continue
             avg = Decimal(str(prod.avg_cost))

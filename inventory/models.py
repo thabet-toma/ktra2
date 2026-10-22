@@ -2,6 +2,7 @@ from django.db import models
 from django.db.models.functions import NullIf
 from tenants.models import Tenant
 from partners.models import Partner
+from core.user_roles import user_display_name
 
 class UnitOfMeasure(models.Model):
     id = models.AutoField(primary_key=True, db_column='UOMID')
@@ -793,6 +794,11 @@ class Stocktake(models.Model):
     journal = models.ForeignKey(
         'accounting.JournalHeader', on_delete=models.SET_NULL, null=True, blank=True,
         db_column='JournalID', related_name='stocktakes')
+    # K1: نطاق الجرد الذي وُلدت بنوده في الخادم — `null` لجردٍ يدويّ (وكلّ صفٍّ قائم).
+    scope = models.JSONField(null=True, blank=True, db_column='Scope')
+    created_by = models.ForeignKey(
+        'auth.User', on_delete=models.SET_NULL, null=True, blank=True,
+        db_column='CreatedByID', related_name='stocktakes')
     created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
     updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
 
@@ -804,12 +810,22 @@ class Stocktake(models.Model):
     def __str__(self):
         return f"جرد {self.stocktake_number or self.id}"
 
+    @property
+    def created_by_name(self) -> str:
+        """اسم مَن أنشأ الجرد للعرض — `""` لجردٍ بلا مستخدم."""
+        return user_display_name(self.created_by) if self.created_by_id else ''
+
 
 class StocktakeLine(models.Model):
     id = models.AutoField(primary_key=True, db_column='StocktakeLineID')
     stocktake = models.ForeignKey(Stocktake, on_delete=models.CASCADE, db_column='StocktakeID', related_name='lines')
     product = models.ForeignKey(Product, on_delete=models.PROTECT, db_column='ProductID')
-    counted_quantity = models.DecimalField(max_digits=18, decimal_places=4, db_column='CountedQuantity')
+    # K1: `null` = لم يُعدّ بعد. الأسطر المولَّدة من نطاقٍ تبدأ فارغةً هكذا.
+    counted_quantity = models.DecimalField(
+        max_digits=18, decimal_places=4, null=True, blank=True, db_column='CountedQuantity')
+    # من عدّ هذا السطر ومتى — يكتبهما الخادم من المستخدم أو من رابط العدّ (K3).
+    counted_by_name = models.CharField(max_length=120, blank=True, default='', db_column='CountedByName')
+    counted_at = models.DateTimeField(null=True, blank=True, db_column='CountedAt')
     # لقطة رصيد النظام لحظة الترحيل (للتدقيق) + الفرق المُرحَّل.
     system_quantity = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='SystemQuantity')
     variance = models.DecimalField(max_digits=18, decimal_places=4, default=0, db_column='Variance')
@@ -820,6 +836,19 @@ class StocktakeLine(models.Model):
 
     def __str__(self):
         return f"{self.product}: عُدّ {self.counted_quantity}"
+
+    def set_count(self, quantity, counter_name, at):
+        """يضبط الكمية المعدودة وخاتمَ مَن عدّها — `None` تمسح الخاتمين.
+
+        لا يحفظ: كل موقعٍ يختار `save`/`update_fields`/`bulk_update` المناسب له.
+        """
+        self.counted_quantity = quantity
+        if quantity is None:
+            self.counted_by_name = ''
+            self.counted_at = None
+        else:
+            self.counted_by_name = counter_name
+            self.counted_at = at
 
 
 # ════════════════════════════════════════════════════════════════════
