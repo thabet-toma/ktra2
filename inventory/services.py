@@ -254,6 +254,17 @@ def create_product_with_family(*, tenant=None, tenant_id=None, **fields):
     return family, product
 
 
+def _warn_foreign_family_sync(product, family) -> None:
+    """تحذيرٌ بمعرّفاتٍ فقط حين يشير براندٌ إلى عائلة شركةٍ أخرى (SEC2).
+
+    لا اسمَ ولا رقمَ في السجلّ — المعرّفات تكفي لتتبّع الصفّ الفاسد.
+    """
+    logger.warning(
+        "FAMILY SYNC SKIPPED: product=%s product_tenant=%s family=%s family_tenant=%s",
+        product.pk, product.tenant_id, family.pk, family.tenant_id,
+    )
+
+
 def sync_family_from_product(product) -> bool:
     """يُبقي مرآة الأب مطابقةً لصفّ البراند بعد أي تعديلٍ عليه (#20).
 
@@ -262,11 +273,17 @@ def sync_family_from_product(product) -> bool:
     بدون هذا التزامن يقرأ `resolve_family_field` من أبٍ متجمّدٍ على قيمة
     الإنشاء، فيُظهر كرت المنتج تصنيفاً قديماً بعد تعديله فعلاً.
 
+    صفٌّ فاسدٌ يشير إلى عائلة شركةٍ أخرى لا يُكتب على أبٍ ليس له ولا على
+    إخوته: المزامنة تُتخطّى بتحذيرٍ وتُعيد `False` (SEC2).
+
     يُعاد `True` إن تغيّر شيءٌ فعلاً (لتفادي كتابةٍ بلا داعٍ).
     """
     if not product.family_id:
         return False
     family = product.family
+    if product.tenant_id != family.tenant_id:
+        _warn_foreign_family_sync(product, family)
+        return False
     changed = [
         name for name in FAMILY_FIELD_NAMES
         if getattr(family, f'{name}_id', getattr(family, name, None))
@@ -315,24 +332,30 @@ def sync_families_from_products(products) -> int:
     المفردة: القراءة تفضّل الأب، فكاتبٌ لا يزامن يترك الشاشة على قيمةٍ قديمة
     بلا أي خطأٍ ظاهر. (اليوم لكل أبٍ براندٌ واحد، فلا تنازع؛ حين تتعدّد
     البراندات يصير حدّ التجديد قرار #25 لأنه حدُّ الأب لا حدُّ كل براند.)
+
+    صفٌّ يشير إلى عائلة شركةٍ أخرى يُتخطّى بتحذيرٍ (SEC2) — لا يُحدَّث أبوه
+    ولا يُدفع إلى إخوته، وبقية الدفعة تُعالَج كما هي.
     """
-    families, fields = [], set()
+    families, fields, written = [], set(), {}
     for product in products:
         if not product.family_id:
             continue
         family = product.family
+        if product.tenant_id != family.tenant_id:
+            _warn_foreign_family_sync(product, family)
+            continue
         for name in FAMILY_FIELD_NAMES:
             attr = f'{name}_id' if hasattr(product, f'{name}_id') else name
             if getattr(family, attr) != getattr(product, attr):
                 setattr(family, attr, getattr(product, attr))
                 fields.add(attr)
         families.append(family)
+        written[family.pk] = product.pk
     if not families or not fields:
         return 0
     ProductFamily.objects.bulk_update(families, sorted(fields))
     # وتنزل إلى بقية الإخوة كما في النسخة المفردة — الحقول حقول المنتج، فبقاؤها
     # مختلفةً بين إخوةٍ تحت أبٍ واحد تناقضٌ في النموذج.
-    written = {p.family_id: p.pk for p in products if p.family_id}
     for family in families:
         _push_family_fields_to_siblings(
             family, exclude_id=written.get(family.pk), fields=sorted(fields),
@@ -447,15 +470,21 @@ def add_brand_to_family(*, family, brand_name: str, tenant=None, sku: str | None
 
     **بلا حركة مخزون ولا قيد محاسبي في الحالتين** — لا نداء هنا لـ
     `record_stock_movement` ولا `accounting.services.post_journal`.
+
+    شركةٌ مفروضةٌ تخالف شركة الأب تُرفض قبل أي استعلامٍ أو كتابة، وبراندات
+    الأب تُقرأ بفلتر شركته — صفٌّ دخيلٌ لا يُسمّى ولا يُعدّ (SEC2).
     """
     brand_name = (brand_name or '').strip()
     if not brand_name:
         raise ValidationError('اسم البراند مطلوب.')
+    if tenant is not None and tenant.pk != family.tenant_id:
+        raise ValidationError('البراند والمنتج من شركتين مختلفتين.')
     tenant = tenant or family.tenant
 
     with transaction.atomic():
         brands = list(
-            Product.objects.select_for_update().filter(family=family).order_by('id')
+            Product.objects.select_for_update()
+            .filter(tenant_id=family.tenant_id, family=family).order_by('id')
         )
         if len(brands) == 1 and not (brands[0].brand or '').strip():
             product = brands[0]

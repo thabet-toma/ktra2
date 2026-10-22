@@ -5,6 +5,7 @@
 «الأبوية» تُقرأ من الأب إن كان للبراند أب، وإلا من صفّه هو.
 """
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from rest_framework.test import APITestCase
 
 from inventory.models import Product, ProductCategory, ProductFamily
@@ -377,10 +378,13 @@ class FamilyFieldsStayOneTruthTest(APITestCase):
         self.client.force_authenticate(user=self.owner)
         self.hdr = {"HTTP_X_TENANT_ID": str(self.tenant.TenantID)}
 
-    def _foreign_brand_pointing_at(self, family):
+    def _foreign_brand_pointing_at(self, family, intruder=None):
         """صفٌّ لشركةٍ أخرى تلف مفتاح أبيه فأشار إلى أب هذه الشركة — يدوياً
-        بـ`.update()` كما يحدث في القاعدة فعلاً (لا يفلتر المفتاحَ الأجنبيّ)."""
-        intruder = Product.objects.create(
+        بـ`.update()` كما يحدث في القاعدة فعلاً (لا يفلتر المفتاحَ الأجنبيّ).
+
+        `intruder` لمن يُنشأ قبل العائلة فيأخذ معرّفاً أصغر من برانداتها.
+        """
+        intruder = intruder or Product.objects.create(
             tenant=self.other_tenant, sku="FOREIGN-1", name_ar="اسم الشركة الأخرى")
         Product.objects.filter(pk=intruder.pk).update(family_id=family.pk)
         intruder.refresh_from_db()
@@ -463,6 +467,110 @@ class FamilyFieldsStayOneTruthTest(APITestCase):
         intruder.refresh_from_db()
         assert sibling.min_stock_level == 9
         assert intruder.min_stock_level is None
+
+    def test_sync_from_a_foreign_brand_writes_nothing_and_returns_false(self):
+        """براندٌ من شركةٍ أخرى يُزامَن فلا يكتب شيئاً — لا على أبينا ولا على إخوته.
+
+        لا مسار API يمنع تعديل صفٍّ فاسدٍ كُتب مفتاحُ أبيه يدوياً، فتمريره إلى
+        `sync_family_from_product` كان ينزل باسمه وحدّه على أبٍ ليس له.
+        """
+        from inventory.services import (
+            add_brand_to_family, create_product_with_family, sync_family_from_product,
+        )
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="اسم عائلتنا")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        intruder = self._foreign_brand_pointing_at(family)
+
+        intruder.name_ar = "اسم الدخيل"
+        intruder.min_stock_level = 99
+        assert sync_family_from_product(intruder) is False
+
+        family.refresh_from_db()
+        first.refresh_from_db()
+        assert family.name_ar == "اسم عائلتنا"
+        assert family.min_stock_level is None
+        assert first.name_ar == "اسم عائلتنا"
+        assert first.min_stock_level is None
+
+    def test_batch_sync_skips_the_foreign_row_and_still_processes_ours(self):
+        """الدفعة تُسقط صفَّ الشركة الأخرى من الكتابة ولا تُسقط بقية الدفعة."""
+        from inventory.services import (
+            add_brand_to_family, create_product_with_family, sync_families_from_products,
+        )
+
+        family, first = create_product_with_family(
+            tenant=self.tenant, name_ar="اسم عائلتنا")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        sibling, created = add_brand_to_family(
+            family=family, brand_name="براند ثانٍ", tenant=self.tenant)
+        assert created is True
+        intruder = self._foreign_brand_pointing_at(family)
+
+        first.min_stock_level = 7
+        first.save(update_fields=["min_stock_level"])
+        intruder.name_ar = "اسم الدخيل"
+        intruder.min_stock_level = 99
+        intruder.save(update_fields=["name_ar", "min_stock_level"])
+
+        sync_families_from_products([intruder, first])
+
+        family.refresh_from_db()
+        sibling.refresh_from_db()
+        intruder.refresh_from_db()
+        assert family.name_ar == "اسم عائلتنا"
+        assert family.min_stock_level == 7
+        assert sibling.name_ar == "اسم عائلتنا"
+        assert sibling.min_stock_level == 7
+        assert intruder.name_ar == "اسم الدخيل"
+        assert intruder.min_stock_level == 99
+
+    def test_add_brand_rejects_a_tenant_that_is_not_the_familys(self):
+        """شركةٌ مفروضةٌ تخالف شركة الأب تُرفض قبل أي استعلامٍ أو كتابة."""
+        from inventory.services import add_brand_to_family, create_product_with_family
+
+        family, _first = create_product_with_family(
+            tenant=self.tenant, name_ar="منتج محروس")
+        add_brand_to_family(family=family, brand_name="براند أول", tenant=self.tenant)
+        before_family = Product.objects.filter(family=family).count()
+        before_other = Product.objects.filter(tenant=self.other_tenant).count()
+
+        # العدّاد خارج `assertRaises` عمداً: `assertNumQueries` لا يفحص متى
+        # خرج استثناءٌ من جسمه — و`assertRaises` لا يستعلم فالتغطية للنداء وحده.
+        with self.assertNumQueries(0):
+            with self.assertRaises(ValidationError) as ctx:
+                add_brand_to_family(
+                    family=family, brand_name="براند غريب", tenant=self.other_tenant)
+
+        assert ctx.exception.messages == ['البراند والمنتج من شركتين مختلفتين.']
+        assert Product.objects.filter(family=family).count() == before_family
+        assert Product.objects.filter(tenant=self.other_tenant).count() == before_other
+
+    def test_add_brand_names_our_implicit_row_despite_a_foreign_row_under_our_family(self):
+        """«البراند الضمنيّ» يُبحث عنه في شركتنا وحدها: صفٌّ دخيلٌ بمعرّفٍ أصغر
+        كان يُعدّ فيُسقِط الحالة إلى إنشاء صفٍّ جديد، أو يُسمَّى هو لو اقتصر
+        الاختيار على أوّل صفّ بلا فلتر شركة."""
+        from inventory.services import add_brand_to_family, create_product_with_family
+
+        # الدخيل يُنشأ أولاً فيأخذ معرّفاً أصغر من براندنا، ثم يُوجَّه إلى أبينا.
+        foreign = Product.objects.create(
+            tenant=self.other_tenant, sku="FOREIGN-1", name_ar="اسم الشركة الأخرى")
+        family, own = create_product_with_family(
+            tenant=self.tenant, name_ar="منتج بلا براند")
+        foreign = self._foreign_brand_pointing_at(family, intruder=foreign)
+        assert foreign.pk < own.pk
+
+        product, created = add_brand_to_family(
+            family=family, brand_name="البراند الأول", tenant=self.tenant)
+
+        assert created is False
+        assert product.pk == own.pk
+        own.refresh_from_db()
+        foreign.refresh_from_db()
+        assert own.brand == "البراند الأول"
+        assert (foreign.brand or "") == ""
+        assert Product.objects.filter(family=family).count() == 2
 
 
 class ProductFamilySearchTest(APITestCase):

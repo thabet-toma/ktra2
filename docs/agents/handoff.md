@@ -23,7 +23,7 @@
   المنسّق. المراجعتان النهائيتان: لا عائق، ودقّةٌ استحقّت جولة 2 (`C3fix2run`) + تعليقين (`C3fix3run`) — قرأها المنسّق.
   **C3 مستلَمة: commit `32ca072e`** (بوّابات 6498 · 1294 · e2e 38 · لقطات رآها المنسّق) — دُفعت مع DST1.
 - **DST1 مستلَمة: commit `44ea8200`، ودُفعت `newktra` مع C3** ← CI أخضر ✓ ← **C3+DST1 منشورتان على الإنتاج** (`deploy11.log`: الخادم على `82aade47`، active، NRestarts 0، الفحوص الثلاثة 200، نقاط الوكيل الأربع 200، صفر أخطاء gunicorn، لا هجرات؛ جذر الويب كلّه من `dist/`).
-- **SEC1 انتهت** (`SEC1run`، $0.03): فلتر `tenant_id` في `_push_family_fields_to_siblings` + اختباران أُحمِرا؛ قرأ المنسّق الفرق. بوّابة كاملة + مراجعتا Standards/Spec (على DST1+SEC1) تعملان. مسح SEC1 يقترح **SEC2**: `sync_family_from_product`/`sync_families_from_products` تكتب صفّ الأب من براندٍ لشركةٍ أخرى بلا تحقّق تطابق `tenant_id`، و`add_brand_to_family` يقرأ `filter(family=family)` بلا شركة. بوّابة SEC1 الكاملة 6505 ✓. المراجعتان: لا عائق — دقّة صياغة ⇒ جولة تصليح (`SEC1fixrun`) قرأها المنسّق، بوّابة 6506 ✓ ⇒ **SEC1 مستلَمة ومدفوعة**. **التالي: SEC2** (`SEC2.txt` جاهز) ثم K1 (`K1.txt` جاهز).
+- **SEC1 انتهت** (`SEC1run`، $0.03): فلتر `tenant_id` في `_push_family_fields_to_siblings` + اختباران أُحمِرا؛ قرأ المنسّق الفرق. بوّابة كاملة + مراجعتا Standards/Spec (على DST1+SEC1) تعملان. مسح SEC1 يقترح **SEC2**: `sync_family_from_product`/`sync_families_from_products` تكتب صفّ الأب من براندٍ لشركةٍ أخرى بلا تحقّق تطابق `tenant_id`، و`add_brand_to_family` يقرأ `filter(family=family)` بلا شركة. بوّابة SEC1 الكاملة 6505 ✓. المراجعتان: لا عائق — دقّة صياغة ⇒ جولة تصليح (`SEC1fixrun`) قرأها المنسّق، بوّابة 6506 ✓ ⇒ **SEC1 مستلَمة ومدفوعة**. **SEC2 انتهت** (`SEC2run`، $0.05): حارس تطابق الشركة في `sync_family_from_product`/`sync_families_from_products` (تخطٍّ بتحذير)، و`add_brand_to_family` يرفض شركةً مخالفة ويقرأ بفلترها؛ 4 اختبارات أُحمِرت. قرأ المنسّق الفرق؛ المراجعة: لا عائق ⇒ جولة تصليح (`SEC2fixrun`: `assertNumQueries(0)` خارج `assertRaises` لأن عدّاد Django لا يفحص عند الاستثناء، اسم معامل، صياغة) قرأها المنسّق؛ بوّابة 6510 ✓ ⇒ **SEC2 مستلَمة ومدفوعة** ← CI أخضر ← **نشر SEC1+SEC2 معاً** (`deploy12.log`) ← K1 (`K1.txt` جاهز).
 - **C2 منشورة على الإنتاج** (`deploy10.log`: الخادم على `c06fd274`، الفحوص الثلاثة 200، NRestarts 0).
 - **النشر من الآن بإجراء مهارة الخادم `deploy-local-to-modern`** (طلب المالك 2026-10-22): push ← CI أخضر ← على الخادم
   بوّابات خفيفة + بناء فقط (لا pytest/tsc على الإنتاج) ← لا push من الخادم. السكربت `deploy2.sh` في الـscratchpad،
@@ -56,6 +56,7 @@ C2 ← C3 ← K1 ← K2 ← K3 ← K4، كلٌّ بحلقة CLAUDE.md (موجز 
 ## مفتوح
 
 - قيد فرادة `(tenant, stocktake_number)` بعد فحص تكرارات قاعدة الإنتاج.
+- من منفّذ SEC2 (لم يُصلَح، صفٌّ فاسدٌ فقط): `ProductViewSet.add_brand` يحسب `will_create`/حدّ الخطة من `Product.objects.filter(family=family)` بلا شركة؛ و`adopt_family_for_product` يقبل `tenant` مخالفاً لشركة المنتج (مستدعيه الوحيد آمن).
 - مسح DST1 (تقريرٌ لم يُصلَح): مقارنات بنفس `tzinfo` قد تعبر الساعة المتكرّرة في `activate_subscription_policy`
   و`activate_performance_evaluation_policy` و`activate_employee_compensation_policy` و`activate_service_unit_catalog`
   (`platform_ops/services.py`)، و`hr/attendance.py` (`resolve_attendance_date`، `recompute_attendance_day`،

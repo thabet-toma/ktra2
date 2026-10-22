@@ -81,7 +81,7 @@ def reconcile_product_cogs(*, tenant_id: int, product_id: int, apply: bool = Fal
 def warehouse_stock_summary(*, tenant_id: int, warehouse_id: int) -> dict:  # (78)
 def generate_next_sku(tenant) -> str:  # (140)
 def create_product_with_family(*, tenant=None, tenant_id=None, **fields) -> tuple[ProductFamily, Product]:  # نقطة الإنشاء الموحّدة الوحيدة (task20) — أربعة مسارات حيّة تمرّ من هنا: واجهة المنتجات، وتجسيد عرض المورّد، ومنتج الأجرة في `after_sales`، وجسر المزامنة `bridge`
-def sync_family_from_product(product) -> bool:  # (task20) الأب مرآةٌ تتبع صفّ البراند — اتجاه الكتابة واحدٌ لا اثنان أثناء الانتقال، ونزولُه على إخوته مقيَّدٌ بشركة العائلة في `inventory/services.py` (`_push_family_fields_to_siblings`) فلا يمسّ صفّاً دخيلاً من شركةٍ أخرى
+def sync_family_from_product(product) -> bool:  # (task20) الأب مرآةٌ تتبع صفّ البراند — اتجاه الكتابة واحدٌ لا اثنان أثناء الانتقال، ونزولُه على إخوته مقيَّدٌ بشركة العائلة في `inventory/services.py` (`_push_family_fields_to_siblings`) فلا يمسّ صفّاً دخيلاً من شركةٍ أخرى؛ **ولا تقع المزامنة نفسها** (ولا الدفعة `sync_families_from_products`) على براندٍ يخالف `tenant_id` أبيه: المفردة `sync_family_from_product` تُعيد `False` بلا كتابة، والدفعة تُسقط ذلك الصفّ بتحذيرٍ بمعرّفاتٍ فقط وتُكمل بقية الصفوف، و`add_brand_to_family` ترفض شركةً مخالفة وتقرأ براندات الأب بفلتر شركته فلا تُسمّي صفّاً دخيلاً ولا تعدّه
 def resolve_family_field(product, field_name: str):  # قاعدة التعايش (task20) — من الأب إن وُجد، وإلا من صفّ البراند نفسه
 def normalize_product_name(name) -> str:  # (task21) تطبيعٌ إملائي عربي — تشكيل/تطويل/مسافات/ألف-همزة، بلا مطابقة صوتية
 def find_by_normalized_name(queryset, name, *, fields=('name_ar', 'name_en')):  # (task21) مطابقةٌ واحدة — شاشة التسجيل عبر `check-name`
