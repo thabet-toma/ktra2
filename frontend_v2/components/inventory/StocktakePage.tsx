@@ -420,6 +420,14 @@ export const StocktakePage: React.FC = () => {
     }
   }, []);
 
+  // TKT-ST-3 — «سجل الجرد» قسمٌ مستقلّ: مفتوحٌ حين لا ورقة مفتوحة، ومطويٌّ حين تُفتح
+  // (فلا تُقرأ صفوفُ الجرود القديمة بنوداً للورقة)، وزرُّه يقلب الافتراضي. والتصفيرُ
+  // معلَّقٌ بـ**حدث** فتحِ ورقةٍ أو إغلاقِها لا بتغيّر قيمةٍ منطقية — فتبديلُ ورقةٍ
+  // بورقةٍ انتقالٌ أيضاً، وإلا بقي السجل مفتوحاً تحت الورقة الجديدة. والجدول لا يتغيّر.
+  const [historyChoice, setHistoryChoice] = useState<boolean | null>(null);
+  const sheetOpen = editingId != null;
+  const historyOpen = historyChoice ?? !sheetOpen;
+
   const applyStocktake = useCallback((
     stocktake: Stocktake,
     token: string | null,
@@ -446,6 +454,10 @@ export const StocktakePage: React.FC = () => {
     if (options.resetView !== false) {
       setSearch('');
       setFilterMode('all');
+      // فتحُ ورقة (و«جرد جديد») حدثُ انتقالٍ يُصفّر اختيار المستخدم — لا الحفظُ ولا
+      // الترحيل (يمرّان بـ`resetView: false`)، ولا «تحديث» فذاك لا يمرّ بهذه الدالة
+      // أصلاً (`refreshWithLocalEdits`).
+      setHistoryChoice(null);
     }
   }, [today]);
 
@@ -490,6 +502,9 @@ export const StocktakePage: React.FC = () => {
     setAddRows([]);
     setCountLinksOpen(false);
     setCountLinks([]);
+    // «إغلاق» حدثُ الانتقال الثاني: يعود الافتراضي «مفتوح»، لا ما اختاره المستخدم
+    // للورقة التي أُغلقت.
+    setHistoryChoice(null);
     serverSnapshotRef.current = null;
   }, [today]);
 
@@ -1308,6 +1323,32 @@ export const StocktakePage: React.FC = () => {
             </div>
           )}
 
+          <section
+            aria-labelledby="stocktake-history-heading"
+            className="ktra-bg-panel rounded border border-[var(--ktra-border)]"
+          >
+            <div className="flex flex-wrap items-center gap-2 p-2">
+              <h2
+                id="stocktake-history-heading"
+                className="text-sm font-bold text-[var(--ktra-ink)]"
+              >
+                سجل الجرد
+                <span className="ms-1 font-normal text-[var(--ktra-ink-soft)]">
+                  ({formatNumber(rows.length)})
+                </span>
+              </h2>
+              <span className="text-xs text-[var(--ktra-ink-soft)]">الأحدث أولاً</span>
+              <button
+                type="button"
+                className="ktra-toolbtn ms-auto"
+                aria-expanded={historyOpen}
+                aria-controls="stocktake-history-body"
+                onClick={() => setHistoryChoice(!historyOpen)}
+              >
+                {historyOpen ? 'طيّ السجل' : 'إظهار السجل'}
+              </button>
+            </div>
+            <div id="stocktake-history-body" hidden={!historyOpen}>
           <table className="ktra-grid" data-variant="list">
             <thead>
               <tr>
@@ -1363,6 +1404,8 @@ export const StocktakePage: React.FC = () => {
               ))}
             </tbody>
           </table>
+            </div>
+          </section>
         </div>
       </KitDocumentShell>
 

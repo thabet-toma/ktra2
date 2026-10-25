@@ -461,6 +461,161 @@ export const isApplicableStocktakeDraft = (
   openDocId: number | null | undefined,
 ): boolean => payload?.v === 3 && openDocId != null && payload.docId === openDocId;
 
+/**
+ * ST-2 — الاختيار داخل النطاق: تصنيفٌ مشمولٌ بكامله، أو منتجاتٌ صريحةٌ بمعرّفاتها.
+ * الحالة هنا صرفة (لا React ولا قاعدة عرض) والشجرة ترسمها. الخادم يُسقط المغطّى
+ * ثانيةً عند الحفظ، لكن الإسقاط هنا هو ما يجعل «ما سيُجرد» صادقاً قبل الحفظ، وما
+ * يجعل الترقية إلى التصنيف تعبيراً مكافئاً لا زيادةً في الحمولة.
+ */
+export interface ScopeProductPick {
+  id: number;
+  category: number | null;
+  isActive: boolean;
+}
+
+export interface ScopePickState {
+  /** تصنيفاتٌ مشمولةٌ بكاملها. */
+  categories: number[];
+  /** منتجاتٌ مشمولةٌ صراحةً — `Map` لأن كلَّ منتجٍ يظهر مرّةً ويُقرأ بمعرّفه. */
+  products: ReadonlyMap<number, ScopeProductPick>;
+  /** «بدون تصنيف» بكامله. */
+  uncategorized: boolean;
+}
+
+/** هل يغطّي الاختيارُ هذا المنتج دون ذكره صراحةً؟ */
+const coveredByScope = (state: ScopePickState, pick: ScopeProductPick): boolean =>
+  (pick.category === null ? state.uncategorized : state.categories.includes(pick.category));
+
+/**
+ * إسقاط ما لا يضيفه ذكره: منتجٌ تصنيفُه مشمولٌ بكامله، أو بلا تصنيفٍ مع شمول
+ * «بدون تصنيف». هو الفرقُ بين اختيارٍ متّسقٍ وآخر يعدّ المنتج مرّتين.
+ */
+export const reconcileScopeProducts = (state: ScopePickState): ScopePickState => {
+  const products = new Map<number, ScopeProductPick>();
+  for (const [id, pick] of state.products) {
+    if (coveredByScope(state, pick)) continue;
+    products.set(id, pick);
+  }
+  // بلا محذوفٍ تبقى الهوية نفسها: لا إعادة رسمٍ بلا تغيير.
+  if (products.size === state.products.size) return state;
+  return { ...state, products };
+};
+
+/**
+ * مربّع منتجٍ واحد: تصنيفٌ مشمولٌ بكامله ⇒ يُنزع من `categories` وتُضاف بقية
+ * منتجاته صريحةً (المنتج المنزوع وحده يخرج). منتجٌ صريحٌ موجود ⇒ يُنزع. غير ذلك
+ * ⇒ يُضاف صريحاً. وفي الحالتين الأخيرتين: إذا صارت كلُّ منتجات التصنيف صريحةً
+ * رُقّي الاختيارُ إلى التصنيف ونُظِّف الصريح — التعبير المكافئ الأصغر هو الذي
+ * يُرسَل ويُعرض.
+ *
+ * و`siblings` هي منتجاتُ التصنيف كما حمّلها المستدعي بالعلم نفسه، ومنها المنتجُ
+ * نفسه — فما يُضاف صريحاً هو عينُ ما عُرض في الشجرة. ومنتجٌ من تصنيفٍ مشمولٍ لم
+ * يصل في قائمته لا يُلمس: نزعُ التصنيف هنا كان يُخرجه كلّه من النطاق بلا أن
+ * يُضاف أحدٌ مكانه — لا تغييرَ بمعرفةٍ ناقصة.
+ *
+ * و`category = null` القاعدةُ نفسها على «بدون تصنيف»، والترقيةُ فيه إلى العلم
+ * `uncategorized` لأنه لا تصنيفَ يُرقّى إليه.
+ */
+export const toggleScopeProduct = (
+  state: ScopePickState,
+  pick: ScopeProductPick,
+  siblings: ScopeProductPick[],
+): ScopePickState => {
+  const { category } = pick;
+  if (coveredByScope(state, pick)) {
+    if (!siblings.some((sibling) => sibling.id === pick.id)) return state;
+    const products = new Map(state.products);
+    for (const sibling of siblings) {
+      if (sibling.id !== pick.id) products.set(sibling.id, sibling);
+    }
+    return category === null
+      ? { ...state, products, uncategorized: false }
+      : { ...state, products, categories: state.categories.filter((id) => id !== category) };
+  }
+  const products = new Map(state.products);
+  if (products.has(pick.id)) products.delete(pick.id);
+  else products.set(pick.id, pick);
+  // الترقية بشرط اكتمال القائمة المحمَّلة كلها؛ وقائمةٌ فارغةٌ ليست اكتمالاً.
+  if (siblings.length === 0 || !siblings.every((sibling) => products.has(sibling.id))) {
+    return { ...state, products };
+  }
+  return category === null
+    ? reconcileScopeProducts({ ...state, products, uncategorized: true })
+    : reconcileScopeProducts({
+      ...state, products, categories: [...state.categories, category],
+    });
+};
+
+/**
+ * تصنيفٌ (أو «بدون تصنيف») كاملاً أو ملغى بالجملة: الحكم على مستوى التصنيف وحده،
+ * وصريحُه يُسقط في الحالين — المغطّى زائدٌ، والملغى لا يُعبَّر عن استثنائه
+ * بقائمة منتجات. و`siblings` في التوقيع لتماثل النداء مع `toggleScopeProduct`
+ * لا لأنه يُحسم به شيء.
+ */
+export const setCategoryProducts = (
+  state: ScopePickState,
+  categoryId: number | null,
+  mode: 'all' | 'none',
+  siblings: ScopeProductPick[],
+): ScopePickState => {
+  const products = new Map<number, ScopeProductPick>();
+  for (const [id, pick] of state.products) {
+    const sameCategory = categoryId === null ? pick.category === null : pick.category === categoryId;
+    if (!sameCategory) products.set(id, pick);
+  }
+  if (categoryId === null) return { ...state, products, uncategorized: mode === 'all' };
+  const categories = mode === 'all'
+    ? [...state.categories.filter((id) => id !== categoryId), categoryId]
+    : state.categories.filter((id) => id !== categoryId);
+  return { ...state, products, categories };
+};
+
+/**
+ * كنسُ ما لم يبقَ صالحاً للجرد بعد إعادة القراءة، ويُعلَن عدده ليُنبَّه المستخدم
+ * بدل أن يختفي منتجُه من نطاقه بصمت. **والحذف بقرينتين لا بواحدة:** علَمُ
+ * الاختيار نفسه يقول «عُطِّل» (وهو ما يعرفه المستخدم من شجرته)، أو تصنيفُه أُعيدت
+ * قراءته (`loaded` تحمل صفّاً منه) ومعرّفه غاب عنها — أي أنه خرج من قائمة
+ * الأهلية: عُطِّل أو حُذف.
+ *
+ * **ولماذا الغياب لا `isActive:false`؟** الخادم لا يردّ صفاً غير فعّالٍ أصلاً حين
+ * يكون `include_inactive` مطفيّاً (`_stocktake_scope_products` تُرشّح
+ * `is_active=True`)، فمنتجٌ عُطِّل بعد اختياره لا يظهر غيرَ فعّالٍ بل يغيب. وحصرُ
+ * الحذف بالصفّ غير الفعّال كان يُبقي هذا المنتج في الاختيار فيُرسَل ويرفضه الخادم
+ * 400 «منتجات لا تدخل هذا الجرد».
+ *
+ * وحدُّ القرينة: تصنيفٌ عاد فارغاً من الخادم لا صفَّ فيه يدلّ على أنه قُرئ، فلا
+ * يُكنس منه شيء — الفارغُ لا يُفرَّق عن غير المقروء.
+ */
+export const pruneInactiveScopeProducts = (
+  state: ScopePickState,
+  loaded: ScopeProductPick[],
+): { state: ScopePickState; removed: number } => {
+  const loadedIds = new Set(loaded.map((pick) => pick.id));
+  // تصنيفٌ ظهر في المحمَّل = أُعيدت قراءته، فغياب منتجه عنه خبرٌ لا صمت.
+  const loadedCategories = new Set(loaded.map((pick) => pick.category));
+  const products = new Map<number, ScopeProductPick>();
+  for (const [id, pick] of state.products) {
+    const gone = loadedCategories.has(pick.category) && !loadedIds.has(id);
+    if (!pick.isActive || gone) continue;
+    products.set(id, pick);
+  }
+  const removed = state.products.size - products.size;
+  return { state: removed === 0 ? state : { ...state, products }, removed };
+};
+
+/**
+ * التصنيفات الجزئية: فيها منتجٌ صريحٌ وليست مشمولةً بكاملها — مربّعُ الشجرة
+ * الناقص وعدُّ الملخّص يحتاجانها.
+ */
+export const partialCategoryIds = (state: ScopePickState): number[] => {
+  const ids = new Set<number>();
+  for (const pick of state.products.values()) {
+    if (pick.category == null || state.categories.includes(pick.category)) continue;
+    ids.add(pick.category);
+  }
+  return [...ids].sort((a, b) => a - b);
+};
+
 export interface ScopeSelectionSummary {
   /** N — عدد المنتجات التي ستُجرد. */
   products: number;
@@ -468,12 +623,20 @@ export interface ScopeSelectionSummary {
   categories: number;
 }
 
-/** ملخّص «سيُجرد N منتجاً في M تصنيفات» — من عدّادات الخادم وحدها. */
+/**
+ * ملخّص «سيُجرد N منتجاً في M تصنيفات» — من عدّادات الخادم ومنتجات الاختيار
+ * الصريحة. المنتجُ الصريح المغطّى بتصنيفٍ مشمولٍ (أو بعلم «بدون تصنيف») لا
+ * يُزاد مرّتين — نفسُ ما يُسقطه الخادم — فـN صحيحٌ ولو وصلت الحالة غير منقّاة.
+ * وصريحُ «بدون تصنيف» يشهد أن «بدون تصنيف» اختيارٌ قائم، فيُحسب تصنيفاً واحداً
+ * بالعلم أو بدونه، مرّةً واحدةً لا مرّتين.
+ */
 export const summarizeScopeSelection = (options: {
   mode: StocktakeScopeMode;
   checkedIds: number[];
   uncategorized: boolean;
   counts: StocktakeScopeCounts | null;
+  /** `ScopePickState.products` — المنتجات المشمولة صراحةً. */
+  products?: ReadonlyMap<number, ScopeProductPick>;
 }): ScopeSelectionSummary => {
   const { mode, checkedIds, uncategorized, counts } = options;
   if (!counts || mode === 'manual') return { products: 0, categories: 0 };
@@ -484,10 +647,29 @@ export const summarizeScopeSelection = (options: {
       categories: populated + (counts.uncategorized > 0 ? 1 : 0),
     };
   }
+  const explicit = options.products ?? new Map<number, ScopeProductPick>();
   const unique = [...new Set(checkedIds)];
-  let products = uncategorized ? counts.uncategorized : 0;
+  const included = new Set<number>(unique);
+  const covered = new Set<number>(included);
+  let chosen = 0;
+  let partialUncategorized = false;
+  for (const pick of explicit.values()) {
+    if (pick.category === null) {
+      // مغطّىً بالعلم ⇒ عدّاده في `counts.uncategorized` وحده؛ وغيرُه اختيارٌ جزئيّ.
+      if (uncategorized) continue;
+      partialUncategorized = true;
+    } else {
+      if (included.has(pick.category)) continue;
+      covered.add(pick.category);
+    }
+    chosen += 1;
+  }
+  let products = (uncategorized ? counts.uncategorized : 0) + chosen;
   for (const id of unique) products += counts.categories?.[String(id)] ?? 0;
-  return { products, categories: unique.length + (uncategorized ? 1 : 0) };
+  return {
+    products,
+    categories: covered.size + (uncategorized || partialUncategorized ? 1 : 0),
+  };
 };
 
 export interface StocktakeCreateBody {
@@ -500,6 +682,8 @@ export interface StocktakeCreateBody {
 /**
  * جسم `POST stocktakes/`: نطاقٌ بالكامل لـ«كل/تصنيفات»، وبلا `scope` إطلاقاً
  * لـ«يدوي» (الخادم يقرؤه جرداً يدوياً بلا بنود). لا `lines` في أيّ وضع.
+ * و`products` مرتّبةً فريدةً في وضع التصنيفات وحده، ومتى بقي صريحٌ واحد على
+ * الأقل: `products: []` ضجيجٌ يقرؤه الخادم ويُسقطه، والغياب أصدق.
  */
 export const buildStocktakeCreateBody = (options: {
   mode: StocktakeScopeMode;
@@ -509,6 +693,8 @@ export const buildStocktakeCreateBody = (options: {
   checkedIds: number[];
   uncategorized: boolean;
   includeInactive: boolean;
+  /** `ScopePickState.products` — المنتجات المشمولة صراحةً. */
+  products?: ReadonlyMap<number, ScopeProductPick>;
 }): StocktakeCreateBody => {
   const body: StocktakeCreateBody = {
     stocktake_date: options.stocktakeDate,
@@ -531,6 +717,8 @@ export const buildStocktakeCreateBody = (options: {
     uncategorized: options.uncategorized,
     include_inactive: options.includeInactive,
   };
+  const products = [...(options.products?.keys() ?? [])].sort((a, b) => a - b);
+  if (products.length) body.scope.products = products;
   return body;
 };
 

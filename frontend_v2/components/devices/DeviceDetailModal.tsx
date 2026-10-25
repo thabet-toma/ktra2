@@ -12,10 +12,12 @@ import {
   type DeviceStatus,
   type SensitiveDeviceRow,
 } from "../../services/devicesApi";
-import { imeiDigits, imeiState, isValidPhone, normalizePhone } from "../../utils/imei";
+import { imeiDigits, imeiState, isValidPhone } from "../../utils/imei";
+import { buildDeviceBody } from "../../utils/deviceDraft";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { useConfirm } from "../../contexts/ConfirmContext";
 import { useToast } from "../../contexts/ToastContext";
+import { DevicePhotoField } from "./DevicePhotoField";
 import { statusPillClass } from "./deviceStatus";
 
 /**
@@ -84,6 +86,8 @@ export const DeviceDetailModal: React.FC<Props> = ({
   const [err, setErr] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState<SensitiveDeviceRow | null>(null);
+  // رفع الصورة قائم — «حفظ» يُعطَّل حتى يصل رابطه، فلا يُحفظ رابطٌ لم يُكتَب بعد.
+  const [photoBusy, setPhotoBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -118,19 +122,13 @@ export const DeviceDetailModal: React.FC<Props> = ({
   }, [draft]);
 
   const saveEdits = async () => {
-    if (!draft || draftErrors.length > 0) return;
+    if (!draft || photoBusy || draftErrors.length > 0) return;
     setBusy(true);
     setErr(null);
     try {
-      const saved = await updateDevice(draft.id, {
-        customer_name: draft.customer_name.trim(),
-        customer_phone: normalizePhone(draft.customer_phone),
-        model_name: draft.model_name.trim(),
-        serial_number: draft.serial_number.trim(),
-        imei: imeiDigits(draft.imei),
-        technical_notes: draft.technical_notes,
-        status: draft.status,
-      });
+      // الجسم من `buildDeviceBody` وحدها — يحمل `photo_url` دائماً (الفارغ يمحو
+      // الصورة)، ونموذجُ التسجيل يبني جسمه منها بالدالة نفسها.
+      const saved = await updateDevice(draft.id, buildDeviceBody(draft));
       setDevice(saved);
       setDraft(saved);
       setEditing(false);
@@ -233,20 +231,37 @@ export const DeviceDetailModal: React.FC<Props> = ({
           {!loading && device && draft && (
             <>
               <div className="flex flex-col gap-4 md:flex-row">
-                <div className="flex h-40 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] md:w-40">
-                  {device.photo_url ? (
-                    <img src={device.photo_url} alt="صورة الجهاز" className="h-full w-full object-cover" />
-                  ) : (
-                    <div className="flex flex-col items-center gap-1 text-[var(--color-text-muted)]">
-                      <ImageOff className="h-6 w-6" />
-                      <span className="text-[11px]">بلا صورة</span>
-                    </div>
-                  )}
-                </div>
+                {/* صندوق الصورة للقراءة وحدها — في وضع التعديل تحلّ محلّه كتلة
+                    الصورة داخل النموذج، ومعاينتُها من المسودّة لا من المحفوظ. */}
+                {!editing && (
+                  <div className="flex h-40 w-full shrink-0 items-center justify-center overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface-2)] md:w-40">
+                    {device.photo_url ? (
+                      <img src={device.photo_url} alt="صورة الجهاز" className="h-full w-full object-cover" />
+                    ) : (
+                      <div className="flex flex-col items-center gap-1 text-[var(--color-text-muted)]">
+                        <ImageOff className="h-6 w-6" />
+                        <span className="text-[11px]">بلا صورة</span>
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 <div className="min-w-0 flex-1">
                   {editing ? (
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      {/* صورةٌ بسطرٍ وحدها: `max-w-56` يُبقي عرض الصندوق بسقف
+                          224px قريباً من نموذج الاستقبال، فلا يقتطع من صورة الهاتف
+                          الطولية شريطاً.
+                          و`disabled` أثناء الحفظ: لا يبدأ رفعٌ يُفكَّك حقله قبل ردّه
+                          فتبقى إشارته معلَّقة. */}
+                      <DevicePhotoField
+                        className="sm:col-span-2 max-w-56"
+                        photoUrl={draft.photo_url}
+                        onChange={(url) => setDraft((d) => (d ? { ...d, photo_url: url } : d))}
+                        onBusyChange={setPhotoBusy}
+                        disabled={busy}
+                        failureHint="يمكن حفظ التعديل بلا صورة"
+                      />
                       <label className="block">
                         <span className="text-[11px] text-[var(--color-text-muted)]">اسم العميل</span>
                         <input
@@ -363,17 +378,19 @@ export const DeviceDetailModal: React.FC<Props> = ({
                     <>
                       <button
                         type="button"
-                        disabled={busy || draftErrors.length > 0}
+                        disabled={busy || photoBusy || draftErrors.length > 0}
                         onClick={() => void saveEdits()}
                         className="inline-flex items-center gap-1 rounded-lg bg-[var(--color-primary)] px-3 py-1.5 text-sm font-semibold text-white disabled:opacity-50"
                       >
                         {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                         حفظ
                       </button>
+                      {/* «إلغاء» يبقى متاحاً أثناء رفع الصورة — مخرجُ من رفعٍ طويل
+                          لا يُحبَس فيه المستخدم؛ وردُّه المتأخر يُهمل. */}
                       <button
                         type="button"
                         disabled={busy}
-                        onClick={() => { setDraft(device); setEditing(false); }}
+                        onClick={() => { setDraft(device); setPhotoBusy(false); setEditing(false); }}
                         className="rounded-lg border border-[var(--color-border)] px-3 py-1.5 text-sm text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"
                       >
                         إلغاء

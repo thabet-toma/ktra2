@@ -2346,8 +2346,10 @@ def _next_doc_number(tenant_id, model, field, prefix):
     return f"{prefix}-{n + 1:04d}"
 
 
-STOCKTAKE_SCOPE_KEYS = {'all', 'categories', 'uncategorized', 'include_inactive'}
+STOCKTAKE_SCOPE_KEYS = {
+    'all', 'categories', 'products', 'uncategorized', 'include_inactive'}
 STOCKTAKE_SCOPE_MAX_CATEGORIES = 2000
+STOCKTAKE_SCOPE_MAX_PRODUCTS = 5000
 
 
 def _scope_error(message):
@@ -2359,11 +2361,57 @@ def _scope_error(message):
     return ValidationError({'scope': [message]})
 
 
+def _scope_flag(value):
+    """علمُ النطاق كما هو إن كان `bool`، وإلا موسوماً بنوعه.
+
+    `1 == True` في بايثون: بلا وسمِ النوع يمرّ علمٌ غير صالح في المقارنة كأنه
+    `true`، وهو ما يرفضه التحقّق عند الإنشاء — فلا يُقبل صداه في التعديل.
+    """
+    return value if isinstance(value, bool) else (type(value).__name__, value)
+
+
+def _scope_id_list(value):
+    """قائمة معرّفات ترتيبُها لا يعني شيئاً ⇒ مجموعةٌ مرتّبة؛ وغيرُها تُعاد خاماً."""
+    if isinstance(value, list) and all(
+            isinstance(item, int) and not isinstance(item, bool) for item in value):
+        return sorted(set(value))
+    return value
+
+
+def stocktake_scope_signature(value):
+    """الشكل المعياريّ لنطاق الجرد — دالةٌ صرفة، بلا استعلامٍ واحد على القاعدة.
+
+    **لماذا:** المقارنة في تعديل الجرد (`StocktakeSerializer.update`) تقع بين ما
+    يرسله العميل وما خُزِّن وقت الإنشاء، والصدى المكافئ ليس تعديلاً: ترتيبُ
+    تصنيفاتٍ مختلف، أو مفتاحُ افتراضٍ غائب، أو `products: []` في صدى عميلٍ قديم —
+    ومقارنةُ القاموس الخام كانت ترفضها 400 وهي ليست اختلافاً. **وشكلٌ واحد
+    للطرفين** يُكمّل المفاتيح الخمسة افتراضاتها قبل المقارنة
+    (`all/uncategorized/include_inactive = False`، و`categories/products = []`)
+    لأن المفتاح الجديد (منتجات) سيأتي `[]` في صدى العملاء القدامى، فيُقرأ صدىً لا
+    اختلافاً. والمفاتيح المجهولة **تبقى** في الشكل المعياري: إسقاطُها كان سيجعل
+    نطاقاً بمفتاحٍ زائد مطابقاً لنطاقٍ بلا المفتاح فيمرّ ما يجب أن يُرفض.
+    """
+    if not isinstance(value, dict):
+        return value
+    signature = dict(value)
+    for key in ('all', 'uncategorized', 'include_inactive'):
+        signature[key] = _scope_flag(value.get(key, False))
+    for key in ('categories', 'products'):
+        signature[key] = _scope_id_list(value.get(key, []))
+    return signature
+
+
 def _normalize_stocktake_scope(scope, tenant):
-    """يتحقّق من نطاق الجرد ويُعيده بشكله المعياري (المفاتيح الأربعة، تصنيفات مرتّبة).
+    """يتحقّق من نطاق الجرد ويُعيده بشكله المعياري (المفاتيح الأربعة، و`products`
+    إن بقي غير فارغ).
 
     الدلالة **صريحة لا ضمنية** (قرار ٣ في خطة الجرد): التصنيف المختار يعني منتجاته
     المباشرة وحدها، لا أحفاده. توسيعُ الأحفاد هنا كان سيجعل «جزئي» غير قابلٍ للتعبير.
+
+    `products` منتجاتٌ صريحة **اتحاداً** مع التصنيفات و«بلا تصنيف»، وتُسقَط منها —
+    لا تُرفض — ما يغطّيه اختيارٌ آخر أصلاً: منتجٌ تصنيفه مؤشَّر، أو بلا تصنيفٍ مع
+    `uncategorized`. الإسقاط هنا هو ما يُبقي المعنى واحداً وقت البناء: `all` يبتلع
+    كلّ منتجٍ صريح، فالمفتاح لا يُخزَّن إلا إن بقي له معنى.
     """
     from .models import ProductCategory
 
@@ -2398,13 +2446,62 @@ def _normalize_stocktake_scope(scope, tenant):
         listed = '، '.join(str(cid) for cid in missing)
         raise _scope_error(f'تصنيفات غير موجودة لهذه الشركة: {listed}')
 
+    products = scope.get('products', [])
+    if not isinstance(products, list):
+        raise _scope_error('قائمة المنتجات في نطاق الجرد غير صالحة')
+    if any(not isinstance(pid, int) or isinstance(pid, bool) for pid in products):
+        raise _scope_error('معرّفات المنتجات يجب أن تكون أعداداً صحيحة')
+    if len(products) > STOCKTAKE_SCOPE_MAX_PRODUCTS:
+        raise _scope_error(
+            f'الحد الأقصى {STOCKTAKE_SCOPE_MAX_PRODUCTS} منتج في الجرد الواحد')
+    products = sorted(set(products))
+
+    # قراءةٌ واحدة للأعمدة الأربعة التي يحتاجها التحقّق والتطبيع معاً: الوجود
+    # (عزل الشركة)، والأهلية (الخدمة والحالة)، والتصنيف (إسقاطُ المكرَّر). ثلاثةُ
+    # استعلاماتٍ منفصلة كانت ستقرأ الصفوف نفسها ثلاث مرّات داخل معاملة الكتابة.
+    rows = {}
+    if products:
+        rows = {
+            row['pk']: row
+            for row in Product.objects.filter(tenant=tenant, pk__in=products)
+            .values('pk', 'category_id', 'is_service', 'is_active')
+        }
+    missing = [pid for pid in products if pid not in rows]
+    if missing:
+        listed = '، '.join(str(pid) for pid in missing)
+        raise _scope_error(f'منتجات غير موجودة لهذه الشركة: {listed}')
+
+    include_inactive = scope.get('include_inactive', False)
+    rejected = [
+        pid for pid in products
+        if rows[pid]['is_service'] or (not rows[pid]['is_active'] and not include_inactive)
+    ]
+    if rejected:
+        listed = '، '.join(str(pid) for pid in rejected)
+        raise _scope_error(f'منتجات لا تدخل هذا الجرد (خدمة أو غير فعّال): {listed}')
+
     normalized = {
         'all': scope.get('all', False),
         'categories': categories,
         'uncategorized': scope.get('uncategorized', False),
-        'include_inactive': scope.get('include_inactive', False),
+        'include_inactive': include_inactive,
     }
-    if not normalized['all'] and not categories and not normalized['uncategorized']:
+    # المفتاح يُخزَّن فقط إن بقي غير فارغ بعد الإسقاط — و`products: []` ضجيجٌ في
+    # كل نطاقٍ يدويّ، والصدى يقرأ الغياب كما يقرأ الفراغ (stocktake_scope_signature).
+    if not normalized['all']:
+        covered = set(categories)
+        products = [
+            pid for pid in products
+            if not (rows[pid]['category_id'] in covered
+                    or (rows[pid]['category_id'] is None and normalized['uncategorized']))
+        ]
+    else:
+        products = []
+    if products:
+        normalized['products'] = products
+
+    if (not normalized['all'] and not categories and not normalized['uncategorized']
+            and not products):
         raise _scope_error('اختر تصنيفاً واحداً على الأقل')
     return normalized
 
@@ -2466,7 +2563,11 @@ def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, note
         normalized = _normalize_stocktake_scope(scope, tenant)
         products = _stocktake_scope_products(tenant, normalized['include_inactive'])
         if not normalized['all']:
+            # اتحادٌ واحد: تصنيفاتٌ مؤشَّرة ∪ منتجاتٌ صريحة ∪ «بلا تصنيف» — فوق
+            # قاعدة الأهلية نفسها، فلا يُولَّد منتجٌ لم يعدّه العدّاد ولا العكس.
             condition = Q(category_id__in=normalized['categories'])
+            if normalized.get('products'):
+                condition |= Q(pk__in=normalized['products'])
             if normalized['uncategorized']:
                 condition |= Q(category__isnull=True)
             products = products.filter(condition)
@@ -2486,8 +2587,8 @@ def create_stocktake_from_scope(*, tenant, user, stocktake_date, warehouse, note
         )
     # بلا PII: معرّفات وعدد فقط.
     logger.info(
-        "Stocktake #%s created from scope (tenant=%s, lines=%d)",
-        stocktake.id, tenant.pk, len(product_ids))
+        "Stocktake #%s created from scope (tenant=%s, lines=%d, products=%d)",
+        stocktake.id, tenant.pk, len(product_ids), len(normalized.get('products', [])))
     return stocktake
 
 

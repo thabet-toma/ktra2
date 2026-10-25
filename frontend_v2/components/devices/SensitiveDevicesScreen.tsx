@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ShieldAlert, Camera, Loader2, Check, AlertTriangle, Search, RotateCcw, Eye,
-  Trash2, X, ImageOff, ChevronRight, ChevronLeft,
+  X, ImageOff, ChevronRight, ChevronLeft,
 } from "lucide-react";
 import {
   DEVICE_STATUSES,
@@ -10,21 +10,21 @@ import {
   listDeviceModelNames,
   listDevices,
   restoreDevice,
-  uploadDevicePhoto,
   type DeviceDuplicateMatch,
   type DeviceListFilters,
   type DeviceStatus,
   type SensitiveDeviceRow,
 } from "../../services/devicesApi";
-import { IMEI_LENGTH, imeiDigits, imeiState, isValidPhone, normalizePhone } from "../../utils/imei";
+import { IMEI_LENGTH, imeiDigits, imeiState, isValidPhone } from "../../utils/imei";
+import { buildDeviceBody } from "../../utils/deviceDraft";
 import { formatDateTimeValue } from "../../utils/formatDate";
 import { formatNumber } from "../../utils/formatNumber";
 import { usePermissions } from "../../contexts/PermissionsContext";
 import { useToast } from "../../contexts/ToastContext";
 import { DeviceDetailModal } from "./DeviceDetailModal";
+import { DevicePhotoField } from "./DevicePhotoField";
 import { statusPillClass } from "./deviceStatus";
 import { BarcodeScannerModal } from "../shared/BarcodeScannerModal";
-import { FileDropZone } from "../ui/FileDropZone";
 
 /**
  * THA-45 M2 — «تسجيل وتتبع الأجهزة الحساسة»: ثلاث مناطق فوق بعضها كما في نموذج
@@ -187,20 +187,6 @@ export const SensitiveDevicesScreen: React.FC = () => {
     return () => { alive = false; clearTimeout(timer); };
   }, [draft.imei, currentImeiState]);
 
-  const pickPhoto = async (file: File | null) => {
-    if (!file) return;
-    setPhotoBusy(true);
-    try {
-      const url = await uploadDevicePhoto(file);
-      setDraft((d) => ({ ...d, photo_url: url }));
-    } catch (e) {
-      // فشل الرفع لا يمنع التسجيل — الصورة اختيارية والسجل هو المطلوب.
-      toast(`${messageOf(e, "تعذّر رفع الصورة")} — يمكن التسجيل بلا صورة`, "error");
-    } finally {
-      setPhotoBusy(false);
-    }
-  };
-
   const validationProblems = useMemo(() => {
     const problems: string[] = [];
     if (!draft.customer_name.trim()) problems.push("اسم العميل مطلوب");
@@ -229,15 +215,8 @@ export const SensitiveDevicesScreen: React.FC = () => {
     setSaving(true);
     setFormErr(null);
     try {
-      const created = await createDevice({
-        customer_name: draft.customer_name.trim(),
-        customer_phone: normalizePhone(draft.customer_phone),
-        model_name: draft.model_name.trim(),
-        serial_number: draft.serial_number.trim(),
-        imei: imeiDigits(draft.imei),
-        technical_notes: draft.technical_notes,
-        photo_url: draft.photo_url,
-      });
+      // الجسم من `buildDeviceBody` وحدها — نموذجُ التعديل يبني جسمه منها أيضاً.
+      const created = await createDevice(buildDeviceBody(draft));
       toast(
         created.imei
           ? `تم تسجيل الجهاز — IMEI ${created.imei}`
@@ -445,49 +424,16 @@ export const SensitiveDevicesScreen: React.FC = () => {
           </div>
 
           {/* صورة الجهاز — التقاط مباشر من كاميرا الجهاز المحمول (`capture="environment"`
-              يُمرَّر إلى `input` داخل المنطقة)، أو سحب، أو لصق (Ctrl+V). */}
-          <div className="w-full shrink-0 md:w-44">
-            <span className={labelClass}>صورة الجهاز</span>
-            {draft.photo_url ? (
-              <>
-                <div className="flex h-36 w-full items-center justify-center overflow-hidden rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface-2)]">
-                  <img src={draft.photo_url} alt="صورة الجهاز" className="h-full w-full object-cover" />
-                </div>
-                <div className="mt-1 flex items-center gap-2">
-                  <FileDropZone
-                    onFiles={(files) => { void pickPhoto(files[0]); }}
-                    accept="image"
-                    capture="environment"
-                    variant="compact"
-                    busy={photoBusy}
-                    disabled={!canCreate}
-                    hint="تغيير الصورة"
-                    className="flex-1"
-                  />
-                  <button
-                    type="button"
-                    className="rounded-lg p-1.5 text-[var(--color-text-muted)] hover:bg-[var(--color-surface-2)]"
-                    title="إزالة الصورة"
-                    onClick={() => setDraft({ ...draft, photo_url: "" })}
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </button>
-                </div>
-              </>
-            ) : (
-              <FileDropZone
-                onFiles={(files) => { void pickPhoto(files[0]); }}
-                accept="image"
-                capture="environment"
-                variant="compact"
-                busy={photoBusy}
-                disabled={!canCreate}
-                hint="صورة الجهاز — اضغط أو التقطها"
-                subHint="أو اسحب الصورة إلى هنا، أو الصق (Ctrl+V)"
-                className="h-36 w-full"
-              />
-            )}
-          </div>
+              يُمرَّر إلى `input` داخل المنطقة)، أو سحب، أو لصق (Ctrl+V). الكتلة نفسها
+              يستعملها نموذج التعديل في نافذة المعاينة. */}
+          <DevicePhotoField
+            className="w-full shrink-0 md:w-44"
+            photoUrl={draft.photo_url}
+            onChange={(url) => setDraft((d) => ({ ...d, photo_url: url }))}
+            onBusyChange={setPhotoBusy}
+            disabled={!canCreate}
+            failureHint="يمكن التسجيل بلا صورة"
+          />
         </div>
 
         {imeiMatches.length > 0 && (

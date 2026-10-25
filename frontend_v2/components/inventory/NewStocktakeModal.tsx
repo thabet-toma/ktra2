@@ -9,11 +9,26 @@
  * كل الأرقام من `GET stocktakes/scope-counts/` لا من كتالوجٍ منزَّل، والملخّص
  * الوحيد المرسوم هو هذا السطر — مكوّن الشجرة يستقبل `summary` بديلاً بدل
  * ملخّصه الافتراضي كي لا يقرأ المستخدم رقمين مختلفين.
+ *
+ * **ST-2 — منتجاتٌ صريحة تحت كل تصنيف:** زرُّ «منتجات» في صفّ التصنيف (وفي صفّ
+ * «بدون تصنيف») يفتح لوحةً **كسولاً**: تُطلب منتجاتُ ذلك التصنيف وحدها من
+ * `stocktakes/scope-products/` أوّل مرّة، بكاشٍ مفتاحه `(category,
+ * include_inactive)` وحارسِ تسابقٍ لكل مفتاح. اللوحة تُفتح **بلا أيّ تأشير**، ومنها
+ * يُختار منتجٌ منتجاً أو يُرقّى الاختيار إلى التصنيف كامله. والحالة كلها —
+ * `categories` + `products` + `uncategorized` — تُدار بدوالّ `utils/stocktake.ts`
+ * وحدها (`toggleScopeProduct` · `setCategoryProducts` · `reconcileScopeProducts` ·
+ * `pruneInactiveScopeProducts` · `partialCategoryIds`)، فيبقى المعروض والمرسَل
+ * تعبيراً واحداً عن الاختيار نفسه.
  */
-import React, { useCallback, useEffect, useId, useRef, useState } from 'react';
+import React, {
+  useCallback, useEffect, useId, useMemo, useReducer, useRef, useState,
+} from 'react';
 import { ChevronLeft, RefreshCw } from 'lucide-react';
 import { CategoryTreeSelect, type CategoryTreeOption } from './CategoryTreeSelect';
 import { StocktakeDialog } from './StocktakeDialog';
+import {
+  StocktakeScopeProducts, type ScopeProductsLoad,
+} from './StocktakeScopeProducts';
 import { inventoryApi } from '../../services/inventoryApi';
 import { formatNumber } from '../../utils/formatNumber';
 import { todayIso } from '../../utils/formatDate';
@@ -21,11 +36,17 @@ import {
   arabicCount,
   buildStocktakeCreateBody,
   canCreateFromScope,
+  partialCategoryIds,
+  pruneInactiveScopeProducts,
+  reconcileScopeProducts,
+  setCategoryProducts,
   summarizeScopeSelection,
+  toggleScopeProduct,
+  type ScopeProductPick,
   type StocktakeScopeMode,
 } from '../../utils/stocktake';
 import type {
-  Stocktake, StocktakeScopeCounts, WarehouseOption,
+  Stocktake, StocktakeScopeCounts, StocktakeScopeProduct, WarehouseOption,
 } from '../../types/inventory';
 
 type Props = {
@@ -41,9 +62,28 @@ const MODES: { value: StocktakeScopeMode; label: string; hint: string }[] = [
     label: 'كل المنتجات',
     hint: 'كل منتجٍ غير خدمي — النشطة فقط ما لم تختر غير الفعّالة.',
   },
-  { value: 'categories', label: 'تصنيفات محدّدة', hint: 'تختار فروع الشجرة بنفسك — كل تصنيف يعني منتجاته المباشرة.' },
+  { value: 'categories', label: 'تصنيفات محدّدة', hint: 'تختار فروع الشجرة أو منتجاتٍ بعينها تحت كل تصنيف.' },
   { value: 'manual', label: 'يدوي (فارغ)', hint: 'جردٌ بلا بنود — تضيفها من الورقة واحداً واحداً.' },
 ];
+
+/** مفتاحُ اللوحة: `none` لـ«بدون تصنيف»، والتصنيفُ معرّفه. */
+const scopeProductPanelKey = (category: number | null): string =>
+  (category === null ? 'none' : String(category));
+
+/** مفتاحُ الكاش: التصنيفُ والعلم معاً — قراءتان مختلفتان لقائمتين مختلفتين. */
+const scopeProductCacheKey = (category: number | null, inactive: boolean): string =>
+  `${scopeProductPanelKey(category)}|${inactive ? 1 : 0}`;
+
+/**
+ * نصّ ما استُبعد عند إطفاء «غير الفعّالة» — القاعدة العربية في `arabicCount` نفسها
+ * (الذيل ثابت، والعدد يصوغ ما يليه)، فلا نسخةَ ثانية من قاعدة العدد.
+ */
+const prunedNotice = (count: number): string => `استُبعد ${arabicCount(count, {
+  one: 'منتجٌ واحد غير فعّال',
+  two: 'منتجان غير فعّالين',
+  few: 'منتجات غير فعّالة',
+  many: 'منتجاً غير فعّال',
+})} من الاختيار`;
 
 export const NewStocktakeModal: React.FC<Props> = ({
   categories, warehouses, onClose, onCreated,
@@ -56,7 +96,22 @@ export const NewStocktakeModal: React.FC<Props> = ({
   const [notes, setNotes] = useState('');
   const [mode, setMode] = useState<StocktakeScopeMode>('categories');
   const [checkedIds, setCheckedIds] = useState<number[]>([]);
+  /** ST-2: منتجاتٌ مشمولة صراحةً — بمعرّف المنتج، كما تطلب دوالّ `utils/stocktake.ts`. */
+  const [products, setProducts] = useState<ReadonlyMap<number, ScopeProductPick>>(new Map());
   const [uncategorized, setUncategorized] = useState(false);
+  /** ST-2: لوحات المنتجات المفتوحة (`none` = «بدون تصنيف») — الجلب كسولٌ عند الفتح. */
+  const [openProducts, setOpenProducts] = useState<ReadonlySet<string>>(new Set());
+  /** ST-2: ما استُبعد بإطفاء «غير الفعّالة» — يُعلَن ولا يُبتلع. */
+  const [pruned, setPruned] = useState(0);
+  /**
+   * كاشُ منتجات التصنيفات: `ref` لأن قراءته تقع لحظةَ الفتح وفي `siblings` قبل
+   * إعادة الرسم، و`bump` يُعيد الرسم بعد كل تغيير. ومفتاحُه `(category,
+   * include_inactive)` فلا تُقرأ قائمةُ العلم برسم العلم الآخر.
+   */
+  const productsCacheRef = useRef(new Map<string, ScopeProductsLoad>());
+  /** حارسُ التسابق لكل مفتاح — تبديلُ العلم بسرعة يُطلق طلبين لتصنيفٍ واحد. */
+  const productsRequestRef = useRef(new Map<string, number>());
+  const [, bumpProductsCache] = useReducer((value: number) => value + 1, 0);
   const [includeInactive, setIncludeInactive] = useState(false);
   const [counts, setCounts] = useState<StocktakeScopeCounts | null>(null);
   const [countsLoading, setCountsLoading] = useState(true);
@@ -88,8 +143,168 @@ export const NewStocktakeModal: React.FC<Props> = ({
   // تبديل «غير الفعّالة» يعيد القراءة من الخادم: العدّاد يجب أن يطابق البنود.
   useEffect(() => { void loadCounts(); }, [loadCounts]);
 
+  /**
+   * جلبُ منتجات تصنيفٍ واحد — كسولٌ (أوّلَ فتحٍ للوحة) ولا يُطلب مرّتين لنفس
+   * المفتاح. والخطأُ لا يُخزَّن نهائياً: `force` (زرّ «إعادة المحاولة») يعيده.
+   */
+  const loadScopeProducts = useCallback(async (
+    category: number | null, inactive: boolean, force = false,
+  ) => {
+    const cacheKey = scopeProductCacheKey(category, inactive);
+    const cached = productsCacheRef.current.get(cacheKey);
+    if (!force && cached && cached.status !== 'error') return;
+    const requestId = (productsRequestRef.current.get(cacheKey) ?? 0) + 1;
+    productsRequestRef.current.set(cacheKey, requestId);
+    productsCacheRef.current.set(cacheKey, { status: 'loading', rows: cached?.rows ?? [] });
+    bumpProductsCache();
+    try {
+      const rows = await inventoryApi.getStocktakeScopeProducts(
+        category === null ? 'none' : category, inactive,
+      );
+      if (productsRequestRef.current.get(cacheKey) !== requestId) return;
+      productsCacheRef.current.set(cacheKey, { status: 'ready', rows });
+    } catch (reason) {
+      if (productsRequestRef.current.get(cacheKey) !== requestId) return;
+      productsCacheRef.current.set(cacheKey, {
+        status: 'error',
+        rows: cached?.rows ?? [],
+        message: reason instanceof Error ? reason.message : 'تعذّر تحميل منتجات التصنيف',
+      });
+    }
+    bumpProductsCache();
+  }, []);
+
+  const toggleProductsPanel = (category: number | null) => {
+    const key = scopeProductPanelKey(category);
+    const open = openProducts.has(key);
+    setOpenProducts((prev) => {
+      const next = new Set(prev);
+      if (open) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+    if (!open) void loadScopeProducts(category, includeInactive);
+  };
+
+  /** منتجاتُ التصنيف كما حُمِّلت — هي `siblings` في دوالّ ST-2A. */
+  const picksOf = (
+    category: number | null, rows: StocktakeScopeProduct[],
+  ): ScopeProductPick[] => rows.map((row) => ({
+    id: row.id, category, isActive: row.is_active,
+  }));
+
+  /** منتجٌ واحد: قد يرقّي الاختيار إلى تصنيفٍ كامل أو يُنزعه (دلالة ST-2A). */
+  const toggleScopePick = (
+    category: number | null, product: StocktakeScopeProduct, rows: StocktakeScopeProduct[],
+  ) => {
+    const next = toggleScopeProduct(
+      { categories: checkedIds, products, uncategorized },
+      { id: product.id, category, isActive: product.is_active },
+      picksOf(category, rows),
+    );
+    setCheckedIds(next.categories);
+    setProducts(next.products);
+    setUncategorized(next.uncategorized);
+  };
+
+  /** «تحديد الكل/مسح الكل» **للتصنيف** لا للمعروض بعد البحث. */
+  const setScopeCategory = (
+    category: number | null, selection: 'all' | 'none', rows: StocktakeScopeProduct[],
+  ) => {
+    const next = setCategoryProducts(
+      { categories: checkedIds, products, uncategorized },
+      category,
+      selection,
+      picksOf(category, rows),
+    );
+    setCheckedIds(next.categories);
+    setProducts(next.products);
+    setUncategorized(next.uncategorized);
+  };
+
+  /** تأشيرُ تصنيفٍ يغطّي منتجاته الصريحة ⇒ تُسقَط (لا تُذكر مرّتين ولا تُرسَل). */
+  const changeCategories = (next: number[]) => {
+    setCheckedIds(next);
+    setProducts(reconcileScopeProducts({
+      categories: next, products, uncategorized,
+    }).products);
+  };
+
+  /** «إلغاء الكل» في الشجرة: العلمُ والمنتجاتُ الصريحة لا يعرفها `onChange` وحده. */
+  const clearScopeSelection = () => {
+    setProducts(new Map());
+    setUncategorized(false);
+  };
+
+  const changeUncategorized = (next: boolean) => {
+    setUncategorized(next);
+    setProducts(reconcileScopeProducts({
+      categories: checkedIds, products, uncategorized: next,
+    }).products);
+  };
+
+  const changeIncludeInactive = (next: boolean) => {
+    setIncludeInactive(next);
+    if (next) {
+      setPruned(0);
+    } else {
+      // كلُّ ما حُمِّل بالعلم يقرّر: منتجٌ غيرُ فعّالٍ اختير صراحةً يخرج، ومنتجٌ غاب
+      // عن تصنيفٍ أُعيدت قراءته خرج من الأهلية — والعددُ يُعلَن.
+      const loaded: ScopeProductPick[] = [];
+      for (const [key, entry] of productsCacheRef.current) {
+        if (!key.endsWith('|1')) continue;
+        const category = key === 'none|1' ? null : Number(key.split('|1')[0]);
+        for (const row of entry.rows) {
+          loaded.push({ id: row.id, category, isActive: row.is_active });
+        }
+      }
+      const prunedState = pruneInactiveScopeProducts(
+        { categories: checkedIds, products, uncategorized }, loaded,
+      );
+      setProducts(prunedState.state.products);
+      setPruned(prunedState.removed);
+    }
+    // اللوحات المفتوحة تنتقل إلى مفتاح العلم الجديد: تُطلب إن لم تكن في كاشها،
+    // وتُترك كما هي إن كانت (لا طلبَ ثانٍ ولا مسحَ لقائمةٍ محمَّلة).
+    for (const key of openProducts) {
+      void loadScopeProducts(key === 'none' ? null : Number(key), next);
+    }
+  };
+
+  /** لوحةُ منتجات تصنيفٍ واحد بحالتها ومعرّفاتها المشمولة. */
+  const scopeProductsPanel = (category: number | null, categoryName: string) => {
+    const load = productsCacheRef.current.get(scopeProductCacheKey(category, includeInactive))
+      ?? { status: 'loading' as const, rows: [] };
+    const rows = load.rows;
+    // المشمولُ بكامله لا يحمل منتجاتٍ صريحة (الترقية تنقّيها) — فتُقرأ كلُّ صفوفه
+    // مؤشَّرةً، وإلّا قال العدّاد «محدَّد 0 من 3» عن تصنيفٍ مشمولٍ كلّه.
+    const covered = category === null ? uncategorized : checkedIds.includes(category);
+    const selectedIds = covered
+      ? new Set(rows.map((row) => row.id))
+      : new Set(
+        [...products.values()]
+          .filter((pick) => (pick.category ?? null) === category)
+          .map((pick) => pick.id),
+      );
+    return (
+      <StocktakeScopeProducts
+        categoryName={categoryName}
+        load={load}
+        selectedIds={selectedIds}
+        disabled={creating}
+        onToggle={(product) => toggleScopePick(category, product, rows)}
+        onSetAll={(selection) => setScopeCategory(category, selection, rows)}
+        onRetry={() => void loadScopeProducts(category, includeInactive, true)}
+      />
+    );
+  };
+
+  const partialIds = useMemo(
+    () => partialCategoryIds({ categories: checkedIds, products, uncategorized }),
+    [checkedIds, products, uncategorized],
+  );
   const summary = summarizeScopeSelection({
-    mode, checkedIds, uncategorized, counts,
+    mode, checkedIds, uncategorized, counts, products,
   });
   // اليدوي لا ينتظر عدّاداتٍ أصلاً: فشلُها لا يمنع جرداً فارغاً مشروعاً.
   const canCreate = step === 2
@@ -110,6 +325,7 @@ export const NewStocktakeModal: React.FC<Props> = ({
         checkedIds,
         uncategorized,
         includeInactive,
+        products,
       }));
       onCreated(result);
     } catch (reason) {
@@ -282,30 +498,68 @@ export const NewStocktakeModal: React.FC<Props> = ({
                   mode="multi"
                   categories={categories}
                   value={checkedIds}
-                  onChange={setCheckedIds}
+                  onChange={changeCategories}
                   productCounts={counts?.categories ?? {}}
+                  partialIds={partialIds}
                   disabled={creating}
+                  onClearAll={clearScopeSelection}
+                  renderRowAction={(category) => (
+                    // الزوج `aria-expanded`/`aria-label` على الزرّ وحده: النقر
+                    // لا يبلغ الصفّ (الغلاف يوقف الانتشار) فلا يتغيّر التأشير.
+                    <button
+                      type="button"
+                      className="rounded px-1 py-0.5 text-xs text-[var(--ktra-accent)] hover:bg-[var(--ktra-active)]"
+                      aria-label={`منتجات ${category.name}`}
+                      aria-expanded={openProducts.has(scopeProductPanelKey(category.id))}
+                      disabled={creating}
+                      onClick={() => toggleProductsPanel(category.id)}
+                    >
+                      منتجات
+                    </button>
+                  )}
+                  renderRowPanel={(category) => (
+                    openProducts.has(scopeProductPanelKey(category.id))
+                      ? scopeProductsPanel(category.id, category.name)
+                      : null
+                  )}
                   summary={(
                     <span data-testid="stocktake-scope-summary">{summaryText}</span>
                   )}
                 />
               )}
 
-              <label className="flex items-center gap-2 text-sm text-[var(--ktra-ink)]">
-                <input
-                  type="checkbox"
-                  className="h-3.5 w-3.5 accent-[var(--ktra-accent)]"
-                  checked={uncategorized}
-                  disabled={creating || !counts}
-                  onChange={(event) => setUncategorized(event.target.checked)}
-                />
-                بدون تصنيف
-                {counts && (
-                  <span className="text-xs text-[var(--ktra-ink-soft)]">
-                    ({formatNumber(counts.uncategorized)})
-                  </span>
-                )}
-              </label>
+              <div className="space-y-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <label className="flex items-center gap-2 text-sm text-[var(--ktra-ink)]">
+                    <input
+                      type="checkbox"
+                      className="h-3.5 w-3.5 accent-[var(--ktra-accent)]"
+                      checked={uncategorized}
+                      disabled={creating || !counts}
+                      onChange={(event) => changeUncategorized(event.target.checked)}
+                    />
+                    بدون تصنيف
+                    {counts && (
+                      <span className="text-xs text-[var(--ktra-ink-soft)]">
+                        ({formatNumber(counts.uncategorized)})
+                      </span>
+                    )}
+                  </label>
+                  {/* الشجرة لا تحتوي «بدون تصنيف»، ولوحةُ منتجاتها هي اللوحة نفسها
+                      بـ`category=none` — والخانة تبقى شمولَها بكامله. */}
+                  <button
+                    type="button"
+                    className="rounded px-1 py-0.5 text-xs text-[var(--ktra-accent)] hover:bg-[var(--ktra-hover)]"
+                    aria-label="منتجات بدون تصنيف"
+                    aria-expanded={openProducts.has('none')}
+                    disabled={creating}
+                    onClick={() => toggleProductsPanel(null)}
+                  >
+                    منتجات
+                  </button>
+                </div>
+                {openProducts.has('none') && scopeProductsPanel(null, 'بدون تصنيف')}
+              </div>
             </div>
           )}
 
@@ -326,13 +580,18 @@ export const NewStocktakeModal: React.FC<Props> = ({
                   className="h-3.5 w-3.5 accent-[var(--ktra-accent)]"
                   checked={includeInactive}
                   disabled={creating}
-                  onChange={(event) => setIncludeInactive(event.target.checked)}
+                  onChange={(event) => changeIncludeInactive(event.target.checked)}
                 />
                 شمل المنتجات غير الفعّالة
               </label>
               <p className="text-xs text-[var(--ktra-ink-soft)]">
                 الخدمات تُستبعد دائماً. المنتج غير الفعّال قد يكون له رصيدٌ باقٍ يُعدّ.
               </p>
+              {mode === 'categories' && pruned > 0 && (
+                <div role="status" className="ktra-banner ktra-banner--warn text-sm">
+                  {prunedNotice(pruned)}
+                </div>
+              )}
             </>
           )}
 

@@ -22,6 +22,14 @@ const openSheet = async (page: Page, number: string) => {
   await expect(page.getByTestId('stocktake-sheet')).toBeVisible();
 };
 
+/** «سجل الجرد» مطويٌّ حين تكون ورقةٌ مفتوحة — يُفتح قبل النقر على صفٍّ منه. */
+const openHistory = async (page: Page) => {
+  const toggle = page.getByRole('region', { name: 'سجل الجرد' })
+    .getByRole('button', { name: /السجل/ });
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+};
+
 const openCountDialog = async (page: Page) => {
   await page.getByTestId('stocktake-count-links').click();
   const dialog = page.getByRole('dialog', { name: 'رابط للموظف' });
@@ -383,6 +391,7 @@ test('تحديث تلقائي كل 30 ث مع رابطٍ حيّ — ولا جل�
   // الانتقال إلى جردٍ بلا روابط يوقف المؤقّت (cleanup عند تغيير الجرد).
   await page.waitForTimeout(500);
   const linksBeforeSwitch = handle.countBackend.adminReads;
+  await openHistory(page);
   const secondRow = page.locator('tbody tr').filter({ hasText: 'JRD-0002' }).first();
   await secondRow.getByRole('button', { name: 'فتح' }).click();
   await expect(page.getByTestId('stocktake-sheet')).toBeVisible();

@@ -3,6 +3,7 @@ import type { AddBrandTarget } from "../utils/brandActions";
 import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
 import type {
   Stocktake, StocktakeCountLinkRow, StocktakeListRow, StocktakeScopeCounts,
+  StocktakeScopeProduct,
 } from "../types/inventory";
 import { resolveBranchId, resolveTenantId } from "../utils/tenantContext";
 import { remainingPageNumbers } from "../utils/paging";
@@ -841,6 +842,24 @@ export const inventoryApi = {
     );
     await handle(res, "getStocktakeScopeCounts");
     return (await res.json()) as StocktakeScopeCounts;
+  },
+  /**
+   * ST-2: المنتجات المباشرة لتصنيفٍ واحد (`'none'` = «بدون تصنيف») — قائمةُ
+   * سماحٍ بلا ترقيم وبلا أيّ عمود كلفةٍ أو سعر. الأهليةُ للخادم (لا خدمات،
+   * وغيرُ الفعّال بالعلم وحده)، و`includeInactive` يجب أن يطابق ما تُعرضه الشجرة
+   * وإلا اختلف المعروض عن البنود المولَّدة.
+   */
+  getStocktakeScopeProducts: async (
+    category: number | 'none',
+    includeInactive: boolean,
+  ): Promise<StocktakeScopeProduct[]> => {
+    const res = await fetch(
+      `${INV}/stocktakes/scope-products/?category=${category}`
+      + `&include_inactive=${includeInactive ? "true" : "false"}`,
+      { headers: headers() },
+    );
+    await handle(res, "getStocktakeScopeProducts");
+    return (await res.json()) as StocktakeScopeProduct[];
   },
 
   /**

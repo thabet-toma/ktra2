@@ -27,6 +27,7 @@ from .services import (
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
     warehouse_stock_summary, stocktake_scope_counts,
     stocktake_count_scope_category_ids, stocktake_line_in_count_scope,
+    _stocktake_scope_products, product_display_name,
 )
 from tenants.models import Tenant
 from core.access import require_perm, requires_perm, user_tenant_role
@@ -2012,6 +2013,20 @@ def _count_link_row(link, lines):
     }
 
 
+def _scope_include_inactive(request):
+    """علم «شمل المنتجات غير الفعّالة» من الاستعلام — قاعدةٌ واحدة لإجراءَي النطاق.
+
+    يُعيد `True`/`False`، أو `None` إن كانت القيمة غير صالحة فيردّ الإجراء 400
+    برسالتها. نسخةٌ ثانية من الفحص كانت ستجعل إجراءً يقبل `1` والآخر يرفضه.
+    """
+    raw = request.query_params.get('include_inactive')
+    if raw is None or raw == 'false':
+        return False
+    if raw == 'true':
+        return True
+    return None
+
+
 class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
     """T-I2: جرد فعلي — معزول بالشركة. الترحيل عبر action /post/ (يسوّي المخزون + قيد الفرق).
 
@@ -2074,17 +2089,63 @@ class StocktakeViewSet(OptimisticConcurrencyMixin, viewsets.ModelViewSet):
             return Response(
                 {'error': 'الشركة غير محدّدة لهذا الطلب'},
                 status=status.HTTP_400_BAD_REQUEST)
-        raw = request.query_params.get('include_inactive')
-        if raw is None or raw == 'false':
-            include_inactive = False
-        elif raw == 'true':
-            include_inactive = True
-        else:
+        include_inactive = _scope_include_inactive(request)
+        if include_inactive is None:
             return Response(
                 {'error': 'قيمة include_inactive يجب أن تكون true أو false'},
                 status=status.HTTP_400_BAD_REQUEST)
         return Response(stocktake_scope_counts(
             tenant=tenant, include_inactive=include_inactive))
+
+    @action(detail=False, methods=['get'], url_path='scope-products')
+    def scope_products(self, request):
+        """ST-1: المنتجات المباشرة لتصنيفٍ واحد — لاختيار منتجاتٍ صريحة في النطاق.
+
+        القاعدة هي قاعدة التوليد نفسها (`_stocktake_scope_products`)، والدلالة
+        مباشرة (قرار ٣): منتجات التصنيف الابن ليست هنا. و`category=none` تعني
+        «بلا تصنيف» وهي غيرُ غياب المعامل: الغيابُ 400، فقراءةُ كتالوج الشركة
+        كلّه بطلبٍ ناقص تُرفض لا تُخمَّن.
+
+        بلا ترقيم، و`.only()` بلا عمود كلفةٍ أو سعر: الشجرة تحمّل تصنيفاً واحداً
+        في كل مرّة، وكلُّ حقلٍ مؤجَّلٍ يُقرأ في الحلقة استعلامٌ لكل صفّ.
+        """
+        tenant = get_tenant(request)
+        if not tenant:
+            return Response(
+                {'error': 'الشركة غير محدّدة لهذا الطلب'},
+                status=status.HTTP_400_BAD_REQUEST)
+        raw_category = request.query_params.get('category')
+        if raw_category == 'none':
+            category = None
+        else:
+            try:
+                category = int(raw_category)
+            except (TypeError, ValueError):
+                return Response(
+                    {'category': ['معرّف التصنيف يجب أن يكون عدداً صحيحاً أو none']},
+                    status=status.HTTP_400_BAD_REQUEST)
+        include_inactive = _scope_include_inactive(request)
+        if include_inactive is None:
+            return Response(
+                {'error': 'قيمة include_inactive يجب أن تكون true أو false'},
+                status=status.HTTP_400_BAD_REQUEST)
+        if (category is not None
+                and not ProductCategory.objects.filter(
+                    tenant=tenant, pk=category).exists()):
+            return Response(
+                {'category': ['تصنيف غير موجود لهذه الشركة']},
+                status=status.HTTP_400_BAD_REQUEST)
+        products = _stocktake_scope_products(tenant, include_inactive)
+        products = (products.filter(category__isnull=True) if category is None
+                    else products.filter(category_id=category))
+        rows = products.only(
+            'id', 'name_ar', 'name_en', 'sku', 'brand', 'is_active',
+        ).order_by('name_ar', 'id')
+        return Response([
+            {'id': row.pk, 'name': product_display_name(row),
+             'sku': row.sku, 'is_active': row.is_active}
+            for row in rows
+        ])
 
     # ── K3: روابط عدّ الموظفين ──────────────────────────────────────────
     #

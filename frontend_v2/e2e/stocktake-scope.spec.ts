@@ -21,7 +21,16 @@ const goToScopeStep = async (dialog: Locator) => {
   await dialog.getByRole('button', { name: /التالي/ }).click();
 };
 
+/** «سجل الجرد» مطويٌّ حين تكون ورقةٌ مفتوحة — يُفتح قبل النقر على صفٍّ منه. */
+const openHistory = async (page: Page) => {
+  const toggle = page.getByRole('region', { name: 'سجل الجرد' })
+    .getByRole('button', { name: /السجل/ });
+  if (await toggle.getAttribute('aria-expanded') === 'false') await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+};
+
 const openRow = async (page: Page, number: string) => {
+  await openHistory(page);
   const row = page.locator('tbody tr').filter({ hasText: number }).first();
   await row.getByRole('button', { name: 'فتح' }).click();
 };
@@ -126,6 +135,288 @@ test('اختيارٌ بصفر منتجات يعطّل «إنشاء» ويقول 
     .toHaveText('سيُجرد 0 منتج في تصنيفٍ واحد');
   await expect(dialog.getByText('لا منتجات في هذا الاختيار')).toBeVisible();
   await expect(dialog.getByRole('button', { name: 'إنشاء', exact: true })).toBeDisabled();
+});
+
+/**
+ * ST-2 — منتجاتٌ صريحة تحت كل تصنيف: تُجلب اللوحة كسولاً عند الطلب، وتُفتح
+ * **بلا أيّ تأشير**، ويُختار منتجٌ منتجاً أو بالجملة داخل التصنيف وحده. الملخّص
+ * يقول «منتجان في تصنيفٍ واحد» من المعرّفات وحدها (لا عدّاد تصنيفٍ مشمول)، والجسم
+ * يحمل `products` ولا يحمل تصنيفاً.
+ */
+test('منتجان تحت تصنيف واحد: طلبٌ واحد للوحة، بلا تأشيرٍ مسبق، والجسم يحمل المعرّفين', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  // الشجرة لا تختار شيئاً من تلقاء نفسها.
+  await expect(dialog.getByTestId('stocktake-scope-summary')).toHaveText('سيُجرد 0 منتج في 0 تصنيف');
+
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  // الكسل قبل النقر: لا طلبَ منتجاتٍ واحد حتى يُفتح صنفٌ بعينه — ولو جُلبت كل
+  // التصنيفات عند فتح النافذة لسقط هذا التأكيد.
+  expect(handle.scopeProductRequests).toEqual([]);
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel).toBeVisible();
+  // تُفتح بلا أيّ تأشير: كلُّ منتجات التصنيف معروضة ولا واحد منها مشمول.
+  await expect(panel.getByText('محدَّد 0 من 3')).toBeVisible();
+  await expect(panel.getByRole('checkbox', { checked: true })).toHaveCount(0);
+
+  // طلبٌ واحد للتصنيف — بالعلم نفسه الذي تُرسله الشجرة.
+  const calls = handle.scopeProductRequests.filter(
+    (url) => new URL(url).searchParams.get('category') === '14',
+  );
+  expect(calls).toHaveLength(1);
+  expect(new URL(calls[0]).searchParams.get('include_inactive')).toBe('false');
+
+  // البحث محليٌّ في المحمَّل: يرشّح الصفوف الظاهرة بلا طلبٍ جديد للخادم.
+  await panel.getByLabel('ابحث في منتجات هذا التصنيف').fill('ميشلان');
+  await expect(panel.getByText('ظاهر 1 من 3')).toBeVisible();
+  await expect(panel.getByRole('checkbox')).toHaveCount(1);
+  expect(handle.scopeProductRequests.filter(
+    (url) => new URL(url).searchParams.get('category') === '14',
+  )).toHaveLength(1);
+  await panel.getByLabel('ابحث في منتجات هذا التصنيف').fill('');
+  await expect(panel.getByRole('checkbox')).toHaveCount(3);
+
+  await panel.getByRole('checkbox', { name: 'اختيار إطار 205/55 — ميشلان' }).check();
+  await panel.getByRole('checkbox', { name: 'اختيار إطار 195/65 — بريدجستون' }).check();
+  await expect(panel.getByText('محدَّد 2 من 3')).toBeVisible();
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد منتجان في تصنيفٍ واحد');
+
+  await dialog.getByRole('button', { name: 'إنشاء', exact: true }).click();
+  await expect.poll(() => handle.createdBodies.length).toBe(1);
+  const scope = handle.createdBodies[0].scope as Record<string, unknown>;
+  expect(scope.categories).toEqual([]);
+  expect(scope.products).toEqual([105, 106]);
+  expect(scope.uncategorized).toBe(false);
+
+  // بندان في الورقة — لا ثلاثة.
+  await expect(page.getByTestId('stocktake-line')).toHaveCount(2);
+  // ولا كتالوجَ نُزّل في الطريق.
+  expect(handle.productListCallsWithoutSearch).toEqual([]);
+});
+
+/**
+ * عطبٌ حاجب أمسكته المراجعة: اللوحة تُرسم **داخل** `<ul role="tree" onKeyDown>`،
+ * فكانت المسافة في بحثها تُلغى وتُؤشّر التصنيف النشط (فتُمحى المنتجات المختارة
+ * صراحةً بـ`reconcileScopeProducts`)، والأسهم تخطف التركيز إلى الصفوف.
+ */
+test('لوحة المفاتيح: الكتابة في بحث اللوحة لا تُؤشّر التصنيف ولا تخطف التركيز', async ({ page }) => {
+  await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  const search = panel.getByLabel('ابحث في منتجات هذا التصنيف');
+  const categoryRow = dialog.getByRole('treeitem').filter({ hasText: 'إطارات' });
+
+  await search.click();
+  // مسافةٌ داخل النصّ: كانت تُلغى فلا تُكتب، وتُؤشّر التصنيف النشط.
+  await search.pressSequentially('إطار 205');
+
+  await expect(search).toHaveValue('إطار 205');
+  await expect(categoryRow).toHaveAttribute('aria-checked', 'false');
+  await expect(dialog.getByTestId('stocktake-scope-summary')).toHaveText('سيُجرد 0 منتج في 0 تصنيف');
+  // والبحث عمل محلياً: صفٌّ واحد ظاهر من ثلاثة.
+  await expect(panel.getByText('ظاهر 1 من 3')).toBeVisible();
+
+  // الأسهم في الحقل لا تخطف التركيز إلى صفوف الشجرة.
+  await search.press('ArrowDown');
+  await search.press('Home');
+  await expect(search).toBeFocused();
+
+  // وEsc من زرّ «منتجات» تصل إلى النافذة فتُغلق: الإيقاف مقصورٌ على المسافة/Enter.
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).focus();
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+});
+
+test('«تحديد الكل/مسح الكل» داخل التصنيف: تصنيفٌ واحد بلا منتجات، ثم لا منتجات أصلاً', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel.getByText('محدَّد 0 من 3')).toBeVisible();
+
+  // «الكل» يرقّي الاختيار إلى التصنيف نفسه: لا منتجاتَ صريحة في الجسم.
+  await panel.getByRole('button', { name: 'تحديد الكل' }).click();
+  await expect(panel.getByText('محدَّد 3 من 3')).toBeVisible();
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد 3 منتجات في تصنيفٍ واحد');
+
+  await dialog.getByRole('button', { name: 'إنشاء', exact: true }).click();
+  await expect.poll(() => handle.createdBodies.length).toBe(1);
+  const scope = handle.createdBodies[0].scope as Record<string, unknown>;
+  expect(scope.categories).toEqual([14]);
+  expect('products' in scope).toBe(false);
+
+  // و«المسح» يُلغي التصنيف نفسه: صفر منتجات ⇒ «إنشاء» معطّل والسبب ظاهر.
+  const again = await openNewModal(page);
+  await goToScopeStep(again);
+  await again.getByLabel('بحث التصنيفات').fill('إطارات');
+  await again.getByRole('button', { name: 'منتجات إطارات' }).click();
+  const panelAgain = again.getByTestId('stocktake-scope-products');
+  await panelAgain.getByRole('button', { name: 'تحديد الكل' }).click();
+  await expect(again.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد 3 منتجات في تصنيفٍ واحد');
+
+  await panelAgain.getByRole('button', { name: 'مسح الكل' }).click();
+  await expect(again.getByTestId('stocktake-scope-summary')).toHaveText('سيُجرد 0 منتج في 0 تصنيف');
+  await expect(again.getByText('لا منتجات في هذا الاختيار')).toBeVisible();
+  await expect(again.getByRole('button', { name: 'إنشاء', exact: true })).toBeDisabled();
+});
+
+test('إلغاء منتج من تصنيف مؤشَّر: التصنيف «جزئي» والجسم يحمل الباقيات بلا تصنيفات', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  await dialog.getByRole('checkbox', { name: 'تحديد إطارات' }).check();
+  const categoryRow = dialog.getByRole('treeitem').filter({ hasText: 'إطارات' });
+  await expect(categoryRow).toHaveAttribute('aria-checked', 'true');
+
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel.getByText('محدَّد 3 من 3')).toBeVisible();
+  await panel.getByRole('checkbox', { name: 'اختيار إطار 215/60 — بيريللي' }).uncheck();
+
+  // التصنيف ما عاد مشمولاً بكامله: مربّعٌ ناقص، والباقي منتجاتٌ صريحة.
+  await expect(panel.getByText('محدَّد 2 من 3')).toBeVisible();
+  await expect(categoryRow).toHaveAttribute('aria-checked', 'mixed');
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد منتجان في تصنيفٍ واحد');
+
+  await dialog.getByRole('button', { name: 'إنشاء', exact: true }).click();
+  await expect.poll(() => handle.createdBodies.length).toBe(1);
+  const scope = handle.createdBodies[0].scope as Record<string, unknown>;
+  expect(scope.categories).toEqual([]);
+  expect(scope.products).toEqual([105, 106]);
+});
+
+test('منتج من «بدون تصنيف»: لوحةٌ بـcategory=none، والجسم يحمله بلا شمول التصنيف', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  // «غير الفعّالة» مشمولةٌ هنا: قائمة «بدون تصنيف» فيها صفٌّ معطَّل، فاختيار
+  // منتجٍ واحدٍ لا يكمل القائمة فلا يُرقّى إلى شمول «بدون تصنيف» كلّه (ترقية ST-2A).
+  await dialog.getByRole('checkbox', { name: 'شمل المنتجات غير الفعّالة' }).check();
+  await dialog.getByRole('button', { name: 'منتجات بدون تصنيف' }).click();
+
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel).toBeVisible();
+  await expect(panel.getByText('محدَّد 0 من 2')).toBeVisible();
+  // المنتج غير الفعّال معروضٌ بشارته لا مخفياً.
+  await expect(panel).toContainText('غير فعّال');
+  const noneCalls = handle.scopeProductRequests.filter(
+    (url) => new URL(url).searchParams.get('category') === 'none',
+  );
+  expect(noneCalls).toHaveLength(1);
+  expect(new URL(noneCalls[0]).searchParams.get('include_inactive')).toBe('true');
+
+  await panel.getByRole('checkbox', { name: 'اختيار زيت محرك — موبيل' }).check();
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد منتجٌ واحد في تصنيفٍ واحد');
+
+  await dialog.getByRole('button', { name: 'إنشاء', exact: true }).click();
+  await expect.poll(() => handle.createdBodies.length).toBe(1);
+  const scope = handle.createdBodies[0].scope as Record<string, unknown>;
+  expect(scope.products).toEqual([108]);
+  expect(scope.uncategorized).toBe(false);
+
+  await expect(page.getByTestId('stocktake-line')).toHaveCount(1);
+});
+
+test('إطفاء «غير الفعّالة» يُسقط ما اختير منها صراحةً ويُعلن عدده', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  // بالعلم مشمولاً تُعرض «فلتر قديم» (103) — وهي غير فعّالة في اختيارها الصريح.
+  await dialog.getByRole('checkbox', { name: 'شمل المنتجات غير الفعّالة' }).check();
+  await dialog.getByLabel('بحث التصنيفات').fill('قطع غيار');
+  await dialog.getByRole('button', { name: 'منتجات قطع غيار' }).click();
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel.getByText('محدَّد 0 من 3')).toBeVisible();
+  await panel.getByRole('checkbox', { name: 'اختيار فلتر قديم — مان' }).check();
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد منتجٌ واحد في تصنيفٍ واحد');
+
+  // إطفاؤها: المنتج غير الفعّال يخرج من الاختيار، والقائمة تُعاد قراءتها نشطةً فقط.
+  await dialog.getByRole('checkbox', { name: 'شمل المنتجات غير الفعّالة' }).uncheck();
+  await expect(dialog.getByRole('status'))
+    .toHaveText('استُبعد منتجٌ واحد غير فعّال من الاختيار');
+  await expect(panel.getByText('محدَّد 0 من 2')).toBeVisible();
+  await expect(dialog.getByTestId('stocktake-scope-summary')).toHaveText('سيُجرد 0 منتج في 0 تصنيف');
+  await expect(dialog.getByRole('button', { name: 'إنشاء', exact: true })).toBeDisabled();
+
+  // ولا اختيارَ صريحاً يُرسَل: لا إنشاء أصلاً.
+  expect(handle.createdBodies).toHaveLength(0);
+});
+
+test('«تحديد الكل» في اللوحة يعمل على كل صفوف التصنيف ولو أخفى البحث بعضها', async ({ page }) => {
+  await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+  const panel = dialog.getByTestId('stocktake-scope-products');
+
+  await panel.getByLabel('ابحث في منتجات هذا التصنيف').fill('ميشلان');
+  await expect(panel.getByText('ظاهر 1 من 3')).toBeVisible();
+  // «الكل» على التصنيف لا على المعروض: الصفّان المخفيّان مشمولان أيضاً.
+  await panel.getByRole('button', { name: 'تحديد الكل' }).click();
+  await expect(panel.getByText('محدَّد 3 من 3')).toBeVisible();
+  await expect(dialog.getByTestId('stocktake-scope-summary'))
+    .toHaveText('سيُجرد 3 منتجات في تصنيفٍ واحد');
+});
+
+test('فشل جلب منتجات التصنيف: رسالةٌ ظاهرة و«إعادة المحاولة» تُنجحها', async ({ page }) => {
+  const handle = await installStocktakeApiStubs(page);
+  handle.setScopeProductFailure(500);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const dialog = await openNewModal(page);
+  await goToScopeStep(dialog);
+  await dialog.getByLabel('بحث التصنيفات').fill('إطارات');
+  await dialog.getByRole('button', { name: 'منتجات إطارات' }).click();
+
+  const panel = dialog.getByTestId('stocktake-scope-products');
+  await expect(panel.getByText(/تعذّر تحميل منتجات التصنيف/)).toBeVisible();
+  await expect(panel.getByText('محدَّد 0 من 3')).not.toBeVisible();
+
+  handle.setScopeProductFailure(null);
+  await panel.getByRole('button', { name: 'إعادة المحاولة' }).click();
+  await expect(panel.getByText('محدَّد 0 من 3')).toBeVisible();
+  await expect(panel.getByRole('checkbox')).toHaveCount(3);
+  // والاختيار ما زال صفراً: الفشل لم يُشّر شيئاً ولا أسقط شيئاً.
+  await expect(dialog.getByTestId('stocktake-scope-summary')).toHaveText('سيُجرد 0 منتج في 0 تصنيف');
 });
 
 test('فتح الصفحة وفتح جردٍ لا يطلبان قائمة المنتجات بلا بحث', async ({ page }) => {
@@ -418,6 +709,7 @@ test('فتح جردٍ آخر أو «جرد جديد» مع تعديلاتٍ غي
   await page.getByTestId('stocktake-count-101').fill('7');
 
   // صفٌّ آخر: سؤالٌ صريح، والإلغاء يُبقي الورقة كما هي.
+  await openHistory(page);
   await page.locator('tbody tr').filter({ hasText: 'JRD-0002' })
     .getByRole('button', { name: 'فتح' }).click();
   const dialog = page.getByRole('alertdialog');
@@ -434,6 +726,7 @@ test('فتح جردٍ آخر أو «جرد جديد» مع تعديلاتٍ غي
   await expect(page.getByTestId('stocktake-count-101')).toHaveValue('7');
 
   // والمتابعة تفتح الجرد الآخر فعلاً.
+  await openHistory(page);
   await page.locator('tbody tr').filter({ hasText: 'JRD-0002' })
     .getByRole('button', { name: 'فتح' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'تجاهلها والمتابعة' }).click();
@@ -675,4 +968,60 @@ test('حقل البحث يأخذ عرض الشاشة الضيّقة بدل أن 
   expect(box).not.toBeNull();
   // w-56 القديمة = 224px؛ العرض الكامل داخل الورقة أكبر من ذلك بكثير.
   expect(box?.width ?? 0).toBeGreaterThan(280);
+});
+
+/**
+ * TKT-ST-3 — الجرود القديمة كانت تُقرأ بنوداً للجرد المفتوح: تُلصق تحته بلا
+ * عنوان. القائمة صارت قسماً بعنوانه «سجل الجرد»، مطويّاً حين تُفتح ورقة، وزرُّه
+ * يقلب الافتراض حتى **حدث** الانتقال التالي: فتحُ ورقة — ولو كانت الثانية —
+ * أو إغلاقُها. والجدول نفسه لم يتغيّر: نفس الصفوف والأعمدة والنصوص.
+ */
+test('«سجل الجرد» قسمٌ مستقلّ: مفتوحٌ بلا ورقة، مطويٌّ حين تُفتح، وزرُّه يغلب الافتراض', async ({ page }) => {
+  await installStocktakeApiStubs(page);
+  await page.goto('/stocktake');
+  await page.waitForLoadState('networkidle');
+
+  const history = page.getByRole('region', { name: 'سجل الجرد' });
+  const toggle = history.getByRole('button', { name: /السجل/ });
+  const firstRow = history.locator('tbody tr').first();
+
+  // بلا ورقة مفتوحة: قسمٌ بعنوانه وعدده وتلميحه، وقائمته ظاهرة.
+  await expect(history).toBeVisible();
+  await expect(history.getByRole('heading', { name: /سجل الجرد/ })).toContainText('(3)');
+  await expect(history).toContainText('الأحدث أولاً');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveText('طيّ السجل');
+  await expect(firstRow).toContainText('#900');
+
+  // فتح جرد ⇒ الافتراضي مطويّ، وصفوف السجل غير مرئية فلا تُقرأ بنوداً للورقة.
+  await openRow(page, 'JRD-0001');
+  await expect(page.getByTestId('stocktake-sheet')).toBeVisible();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(toggle).toHaveText('إظهار السجل');
+  await expect(firstRow).toBeHidden();
+
+  // نقرُ الزرّ يفتحها — واختيارُ المستخدم يغلب الافتراضي ما دامت الورقة مفتوحة.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(toggle).toHaveText('طيّ السجل');
+  await expect(firstRow).toBeVisible();
+
+  // فتحُ ورقةٍ **ثانية** حدثٌ ثانٍ يُصفّر الاختيار — وإلا بقي السجل مفتوحاً تحت
+  // الورقة الجديدة، وهو العطب نفسه الذي جاءت التذكرة لإصلاحه.
+  await openRow(page, 'JRD-0002');
+  await expect(page.getByTestId('stocktake-sheet')).toContainText('تعديل مسودة جرد #950');
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await expect(firstRow).toBeHidden();
+
+  // وطِيُّه بالزرّ ثم «إغلاق» الورقة: حدثُ الإغلاق يُصفّر اختيارَ «مطوي» فيعود
+  // الافتراضي «مفتوحاً» — لا أن يبقى ما اختاره المستخدم الورقةَ السابقة.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  await page.getByTestId('stocktake-sheet')
+    .getByRole('button', { name: 'إغلاق', exact: true }).click();
+  await expect(page.getByTestId('stocktake-sheet')).toHaveCount(0);
+  await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  await expect(firstRow).toBeVisible();
 });

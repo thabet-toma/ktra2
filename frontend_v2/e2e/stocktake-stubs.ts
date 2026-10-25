@@ -4,6 +4,13 @@ import { Page, type Route } from '@playwright/test';
  * K2 — محاكي الجرد: نفس عقد `inventory/serializers.py` (بنود بلا أسعار ولا
  * تكاليف)، ويرفض ما يرفضه الخادم فعلاً:
  *   - `scope` و`lines` معاً ⇒ 400، ونطاقٌ فارغ ⇒ 400، وتصنيفٌ خارج الشركة ⇒ 400.
+ *   - `scope.products` (ST-1) بحرفها: قائمةٌ وأعدادٌ صحيحة وسقفٌ ووجودٌ وأهلية، ثم
+ *     **إسقاطٌ لا رفض** لما يغطّيه تصنيفٌ مؤشَّر أو «بدون تصنيف» (و`all` يُسقطها
+ *     كلها)، ولا يُخزَّن المفتاح إلا غيرَ فارغ — والتوليد اتحادُ التصنيفات
+ *     والمنتجات الصريحة و«بدون تصنيف» فوق قاعدة الأهلية نفسها.
+ *   - `stocktakes/scope-products/` بقائمة سماحها `{id, name, sku, is_active}` وترتيبها
+ *     (`name_ar` ثم `id`) ورسائل رفضها: 400 على `category` الغائب/غير الصحيح/غير
+ *     الموجود وعلى `include_inactive` غير الصالح.
  *   - نطاقٌ بلا منتجات مطابقة ⇒ 400 «لا منتجات في هذا الاختيار».
  *   - `If-Match` بائت ⇒ 412 `stale_document` قبل أي كتابة.
  *   - ترحيلٌ وكلُّ بنوده غير معدودة بلا العلم ⇒ 400 قبل أي كتابة.
@@ -74,6 +81,14 @@ export const STUB_PRODUCTS: StubProduct[] = [
     id: 109, sku: 'SP-109', name_ar: 'خدمة تركيب', name_en: 'Fitting service',
     display_name: 'خدمة تركيب', brand: '', category: 11,
     quantity_on_hand: '0.0000', is_active: true, is_service: true,
+  },
+  // ST-2: منتجٌ ثانٍ بلا تصنيف وغير فعّال — يُظهر شارةَ «غير فعّال» في اللوحة،
+  // ويُبقي لـ«بدون تصنيف» أكثر من صفٍّ واحد فلا يُرقّى اختيارُ منتجٍ واحدٍ إلى
+  // العلم (ترقية ST-2A). ولا يمسّ عدّادات العلم المطفأ (7 منتجات، 4 تصنيفات).
+  {
+    id: 110, sku: 'SP-110', name_ar: 'شحم فرامل', name_en: 'Brake grease',
+    display_name: 'شحم فرامل — شل', brand: 'شل', category: null,
+    quantity_on_hand: '3.0000', is_active: false, is_service: false,
   },
 ];
 
@@ -167,6 +182,10 @@ export type StocktakeStubHandle = {
   /** طلبات قائمة المنتجات بلا `search` — يجب أن تبقى صفراً. */
   productListCallsWithoutSearch: string[];
   productListCallsWithSearch: string[];
+  /** ST-2: طلبات `stocktakes/scope-products/` — يشهد بها اختبار «طلبٌ واحد لكل لوحة». */
+  scopeProductRequests: string[];
+  /** ST-2: يُفشل قراءة منتجات التصنيف التالية (500 مثلاً) — لاختبار «إعادة المحاولة». */
+  setScopeProductFailure: (status: number | null) => void;
   createdBodies: Record<string, unknown>[];
   saveRequests: StocktakeSaveRequest[];
   postRequests: Record<string, unknown>[];
@@ -218,7 +237,13 @@ const parseQuantity = (raw: unknown): { ok: true; value: string | null } | { ok:
   return { ok: true, value: number.toFixed(4) };
 };
 
-/** مقارنة النطاق بالقيمة لا بترتيب المفاتيح (الخادم يقارن القاموس المخزَّن). */
+/**
+ * مقارنة النطاق بالقيمة لا بترتيب المفاتيح (الخادم يقارن القاموس المخزَّن).
+ *
+ * و`products` تُقارَن كغياب == فراغ: الخادم لا يخزّن المفتاح إلا غيرَ فارغ، و
+ * `stocktake_scope_signature` تقرأ الغياب كما تقرأ `[]` — فصدى عميلٍ يحمل
+ * `products: []` بعد أن أُسقطت كلُّها ليس اختلافاً.
+ */
 const scopeEquals = (a: unknown, b: unknown): boolean => {
   if (a == null || b == null || typeof a !== 'object' || typeof b !== 'object') {
     return a === b;
@@ -228,12 +253,17 @@ const scopeEquals = (a: unknown, b: unknown): boolean => {
   const categories = (value: unknown) => (
     Array.isArray(value) ? [...value].map(Number).sort((x, y) => x - y) : value
   );
+  const products = (value: unknown) => categories(value ?? []);
   return left.all === right.all
     && left.uncategorized === right.uncategorized
     && left.include_inactive === right.include_inactive
     && JSON.stringify(categories(left.categories))
-      === JSON.stringify(categories(right.categories));
+      === JSON.stringify(categories(right.categories))
+    && JSON.stringify(products(left.products)) === JSON.stringify(products(right.products));
 };
+
+/** الرسالة نفسها التي ترفعها `_normalize_stocktake_scope` عند تجاوز السقف. */
+const STOCKTAKE_SCOPE_MAX_PRODUCTS = 5000;
 
 const productOf = (id: number): StubProduct | undefined =>
   STUB_PRODUCTS.find((row) => row.id === id);
@@ -316,6 +346,24 @@ const countsFor = (includeInactive: boolean) => {
   }
   return { categories, uncategorized, all: eligible.length };
 };
+
+/**
+ * `GET stocktakes/scope-products/` — قاعدة الأهلية نفسها، ثم تصنيفٌ واحد، بترتيب
+ * الخادم (`name_ar` ثم `id`) وبقائمة السماح الأربعة حرفاً.
+ */
+const scopeProductsFor = (category: number | null, includeInactive: boolean) =>
+  STUB_PRODUCTS
+    .filter((product) => !product.is_service && (includeInactive || product.is_active))
+    .filter((product) => (category === null
+      ? product.category == null
+      : product.category === category))
+    .sort((a, b) => a.name_ar.localeCompare(b.name_ar, 'ar') || a.id - b.id)
+    .map((product) => ({
+      id: product.id,
+      name: product.display_name,
+      sku: product.sku,
+      is_active: product.is_active,
+    }));
 
 const json = (
   route: Route, status: number, body: unknown, headers: Record<string, string> = {},
@@ -839,10 +887,12 @@ export async function installStocktakeApiStubs(
   const scopeCountsDelays: number[] = [];
   const stocktakeGetDelays: number[] = [];
   let scopeCountsFailure = false;
+  let scopeProductFailure: number | null = null;
 
   const handle: StocktakeStubHandle = {
     productListCallsWithoutSearch: [],
     productListCallsWithSearch: [],
+    scopeProductRequests: [],
     createdBodies: [],
     saveRequests: [],
     postRequests: [],
@@ -850,6 +900,7 @@ export async function installStocktakeApiStubs(
     delayNextScopeCounts: (ms) => { scopeCountsDelays.push(ms); },
     delayNextStocktakeGet: (ms) => { stocktakeGetDelays.push(ms); },
     setScopeCountsFailure: (fail) => { scopeCountsFailure = fail; },
+    setScopeProductFailure: (status) => { scopeProductFailure = status; },
     scopeCountsDelayedAnswered: 0,
     setServerCounted: (product, quantity, by = 'مدير آخر') => {
       const line = initial.lines.find((row) => row.product === product);
@@ -952,6 +1003,39 @@ export async function installStocktakeApiStubs(
       return;
     }
 
+    // ST-2: المنتجات المباشرة لتصنيفٍ واحد — الرسائل والترتيب كما في ST-1.
+    if (method === 'GET' && path.endsWith('/inventory/stocktakes/scope-products/')) {
+      handle.scopeProductRequests.push(route.request().url());
+      if (scopeProductFailure) {
+        await json(route, scopeProductFailure, { detail: 'تعذّر تحميل منتجات التصنيف' });
+        return;
+      }
+      const rawCategory = url.searchParams.get('category');
+      const rawInactive = url.searchParams.get('include_inactive');
+      const text = (rawCategory ?? '').trim();
+      const category = rawCategory === 'none'
+        ? null
+        : (/^[+-]?\d+$/.test(text) ? Number(text) : undefined);
+      if (category === undefined) {
+        await json(route, 400, {
+          category: ['معرّف التصنيف يجب أن يكون عدداً صحيحاً أو none'],
+        });
+        return;
+      }
+      if (rawInactive !== null && rawInactive !== 'true' && rawInactive !== 'false') {
+        await json(route, 400, {
+          error: 'قيمة include_inactive يجب أن تكون true أو false',
+        });
+        return;
+      }
+      if (category !== null && !STUB_CATEGORIES.some((row) => row.id === category)) {
+        await json(route, 400, { category: ['تصنيف غير موجود لهذه الشركة'] });
+        return;
+      }
+      await json(route, 200, scopeProductsFor(category, rawInactive === 'true'));
+      return;
+    }
+
     // إنشاء جرد من نطاق (أو يدوي بلا بنود).
     if (method === 'POST' && path.endsWith('/inventory/stocktakes/')) {
       const body = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
@@ -987,7 +1071,7 @@ export async function installStocktakeApiStubs(
         return;
       }
       const keys = Object.keys(scope);
-      if (keys.some((key) => !['all', 'categories', 'uncategorized', 'include_inactive'].includes(key))) {
+      if (keys.some((key) => !['all', 'categories', 'uncategorized', 'include_inactive', 'products'].includes(key))) {
         await json(route, 400, { scope: ['مفتاح غير معروف في نطاق الجرد'] });
         return;
       }
@@ -1010,18 +1094,59 @@ export async function installStocktakeApiStubs(
         });
         return;
       }
-      const all = scope.all === true;
-      const uncategorized = scope.uncategorized === true;
-      if (!all && !categories.length && !uncategorized) {
-        await json(route, 400, { scope: ['اختر تصنيفاً واحداً على الأقل'] });
+      // ST-1: `products` — قائمةٌ ثم أعداداً صحيحةً ثم السقف ثم الوجود ثم الأهلية،
+      // بالترتيب نفسه والرسائل نفسها.
+      const rawProducts = scope.products ?? [];
+      if (!Array.isArray(rawProducts)) {
+        await json(route, 400, { scope: ['قائمة المنتجات في نطاق الجرد غير صالحة'] });
+        return;
+      }
+      if (rawProducts.some((id) => typeof id !== 'number' || !Number.isInteger(id))) {
+        await json(route, 400, { scope: ['معرّفات المنتجات يجب أن تكون أعداداً صحيحة'] });
+        return;
+      }
+      if (rawProducts.length > STOCKTAKE_SCOPE_MAX_PRODUCTS) {
+        await json(route, 400, {
+          scope: [`الحد الأقصى ${STOCKTAKE_SCOPE_MAX_PRODUCTS} منتج في الجرد الواحد`],
+        });
+        return;
+      }
+      const products = [...new Set(rawProducts as number[])].sort((a, b) => a - b);
+      const missingProducts = products.filter((id) => !productOf(id));
+      if (missingProducts.length) {
+        await json(route, 400, {
+          scope: [`منتجات غير موجودة لهذه الشركة: ${missingProducts.join('، ')}`],
+        });
         return;
       }
       const includeInactive = scope.include_inactive === true;
+      const rejectedProducts = products.filter((id) => {
+        const product = productOf(id);
+        return product?.is_service || (!product?.is_active && !includeInactive);
+      });
+      if (rejectedProducts.length) {
+        await json(route, 400, {
+          scope: [`منتجات لا تدخل هذا الجرد (خدمة أو غير فعّال): ${rejectedProducts.join('، ')}`],
+        });
+        return;
+      }
+      const all = scope.all === true;
+      const uncategorized = scope.uncategorized === true;
       const selected = new Set(categories as number[]);
+      // الإسقاط لا الرفض: `all` يُسقطها، وما يغطّيه تصنيفٌ مؤشَّر أو «بدون تصنيف» يُسقَط.
+      const explicit = new Set(all ? [] : products.filter((id) => {
+        const category = productOf(id)?.category ?? null;
+        return !(selected.has(category as number) || (category == null && uncategorized));
+      }));
+      if (!all && !categories.length && !uncategorized && !explicit.size) {
+        await json(route, 400, { scope: ['اختر تصنيفاً واحداً على الأقل'] });
+        return;
+      }
       const eligible = STUB_PRODUCTS.filter((product) => {
         if (product.is_service) return false;
         if (!includeInactive && !product.is_active) return false;
         if (all) return true;
+        if (explicit.has(product.id)) return true;
         if (product.category == null) return uncategorized;
         return selected.has(product.category);
       });
@@ -1029,18 +1154,21 @@ export async function installStocktakeApiStubs(
         await json(route, 400, { scope: ['لا منتجات في هذا الاختيار'] });
         return;
       }
+      // التخزين عند عدم الفراغ وحده — و`products: []` ضجيجٌ لا يُخزَّن.
+      const storedScope: Record<string, unknown> = {
+        all,
+        categories: [...selected].sort((a, b) => a - b),
+        uncategorized,
+        include_inactive: includeInactive,
+      };
+      if (explicit.size) storedScope.products = [...explicit].sort((a, b) => a - b);
       const created: InternalStocktake = {
         id: nextStocktakeId++,
         number: '',
         date: String(body.stocktake_date ?? ''),
         warehouse: body.warehouse == null ? null : Number(body.warehouse),
         notes: String(body.notes ?? ''),
-        scope: {
-          all,
-          categories: [...new Set(categories as number[])].sort((a, b) => a - b),
-          uncategorized,
-          include_inactive: includeInactive,
-        },
+        scope: storedScope,
         is_posted: false,
         journal: null,
         lines: eligible.map((product) => ({

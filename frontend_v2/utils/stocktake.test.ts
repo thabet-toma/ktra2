@@ -12,16 +12,23 @@ import {
   isLocallyEdited,
   newSheetLineFromProduct,
   normalizeQuantity,
+  partialCategoryIds,
   productLabel,
+  pruneInactiveScopeProducts,
   quantityEquals,
   reapplyLocalEdits,
   rebaseDraftRestore,
   rebaseHeader,
+  reconcileScopeProducts,
+  setCategoryProducts,
   sheetLinesFromStocktake,
   stocktakeStampText,
   stocktakeVariance,
   summarizeScopeSelection,
+  toggleScopeProduct,
   validateCountedQuantity,
+  type ScopePickState,
+  type ScopeProductPick,
   type StocktakeDraftIdentity,
   type StocktakeHeader,
   type StocktakeSheetLine,
@@ -550,4 +557,250 @@ test('سطر الإضافة اليدوية يحمل الاسم والعشيرة 
   assert.equal(added.product_quantity_on_hand, '12.0000');
   assert.equal(added.baseline, undefined);
   assert.equal(added.counted_quantity, '');
+});
+
+// ─── ST-2: اختيار منتجات النطاق (تصنيفٌ كامل · منتجاتٌ صريحة) ────────────────
+
+const pick = (id: number, category: number | null = 10, isActive = true): ScopeProductPick =>
+  ({ id, category, isActive });
+
+const picks = (...items: ScopeProductPick[]): ReadonlyMap<number, ScopeProductPick> =>
+  new Map(items.map((item) => [item.id, item]));
+
+const pickState = (overrides: Partial<ScopePickState> = {}): ScopePickState => ({
+  categories: [],
+  products: new Map(),
+  uncategorized: false,
+  ...overrides,
+});
+
+const scopeKeys = (state: ScopePickState): number[] =>
+  [...state.products.keys()].sort((a, b) => a - b);
+
+test('تنقية الاختيار: ما يغطّيه تصنيفٌ مشمول أو «بدون تصنيف» يُسقط من الصريح', () => {
+  assert.deepEqual(
+    scopeKeys(reconcileScopeProducts(pickState({
+      categories: [10], uncategorized: true,
+      products: picks(pick(1, 10), pick(2, 11), pick(3, null)),
+    }))),
+    [2],
+  );
+  // علمُ «بدون تصنيف» مطفي: منتجُه الصريح يبقى — اختيارُه جزئيٌّ لا مغطّى.
+  assert.deepEqual(
+    scopeKeys(reconcileScopeProducts(pickState({
+      categories: [10], uncategorized: false,
+      products: picks(pick(1, 10), pick(3, null)),
+    }))),
+    [3],
+  );
+});
+
+test('إلغاء منتجٍ من تصنيفٍ مشمولٍ بكامله: يُنزع التصنيف وتبقى بقية منتجاته صريحة', () => {
+  const next = toggleScopeProduct(
+    pickState({ categories: [10, 11] }),
+    pick(5, 10),
+    [pick(5, 10), pick(6, 10), pick(7, 10)],
+  );
+  assert.deepEqual(next.categories, [11]);
+  assert.deepEqual(scopeKeys(next), [6, 7]);
+  assert.equal(next.uncategorized, false);
+});
+
+test('منتجٌ من تصنيفٍ مشمولٍ غاب عن قائمته: لا يُنزع التصنيف بمعرفةٍ ناقصة', () => {
+  const state = pickState({ categories: [10], products: picks(pick(9, 11)) });
+  // قائمةٌ ناقصةٌ لا تحوي المنتج نفسه: نزعُ التصنيف هنا يُخرجه كلّه من النطاق.
+  assert.equal(toggleScopeProduct(state, pick(5, 10), [pick(6, 10), pick(7, 10)]), state);
+  // وبقائمةٍ كاملةٍ يُنزع ويُضاف الباقي — الفرق كلّه في المعرفة.
+  const next = toggleScopeProduct(state, pick(5, 10), [pick(5, 10), pick(6, 10)]);
+  assert.deepEqual(next.categories, []);
+  assert.deepEqual(scopeKeys(next), [6, 9]);
+});
+
+test('بلا قائمةِ منتجاتٍ للتصنيف: يُضاف المنتج صريحاً ولا يُرقّى التصنيف', () => {
+  const next = toggleScopeProduct(pickState(), pick(5, 10), []);
+  // اكتمالُ قائمةٍ فارغةٍ ليس اكتمالاً: الترقية هنا تُدخل التصنيف كلّه بلا علم.
+  assert.deepEqual(next.categories, []);
+  assert.deepEqual(scopeKeys(next), [5]);
+});
+
+test('تأشير منتجٍ صريح: يُزاد وحده حتى يكتمل التصنيف فيُرقّى ويُفرغ الصريح', () => {
+  const partial = toggleScopeProduct(
+    pickState({ products: picks(pick(6, 10)) }),
+    pick(5, 10),
+    [pick(5, 10), pick(6, 10), pick(7, 10)],
+  );
+  assert.deepEqual(partial.categories, []);
+  assert.deepEqual(scopeKeys(partial), [5, 6]);
+
+  const promoted = toggleScopeProduct(
+    pickState({ products: picks(pick(6, 10), pick(7, 10)) }),
+    pick(5, 10),
+    [pick(5, 10), pick(6, 10), pick(7, 10)],
+  );
+  assert.deepEqual(promoted.categories, [10]);
+  assert.equal(promoted.products.size, 0);
+
+  const removed = toggleScopeProduct(
+    pickState({ products: picks(pick(5, 10), pick(6, 10)) }),
+    pick(5, 10),
+    [pick(5, 10), pick(6, 10)],
+  );
+  assert.deepEqual(removed.categories, []);
+  assert.deepEqual(scopeKeys(removed), [6]);
+});
+
+test('«بدون تصنيف»: الإلغاء من الشمول الكامل يُصرّح الباقي، وتأشير الأخير يرقّي إلى العلم', () => {
+  const unchecked = toggleScopeProduct(
+    pickState({ uncategorized: true }),
+    pick(3, null),
+    [pick(3, null), pick(4, null)],
+  );
+  assert.equal(unchecked.uncategorized, false);
+  assert.deepEqual(scopeKeys(unchecked), [4]);
+
+  const promoted = toggleScopeProduct(
+    pickState({ products: picks(pick(4, null)) }),
+    pick(3, null),
+    [pick(3, null), pick(4, null)],
+  );
+  assert.equal(promoted.uncategorized, true);
+  assert.equal(promoted.products.size, 0);
+  assert.deepEqual(promoted.categories, []);
+});
+
+test('تصنيفٌ كاملٌ أو ملغى بالجملة: يحسم التصنيف ويُسقط صريحَه', () => {
+  const all = setCategoryProducts(
+    pickState({ categories: [11], products: picks(pick(5, 10), pick(9, 11)) }),
+    10,
+    'all',
+    [pick(5, 10), pick(6, 10)],
+  );
+  assert.deepEqual([...all.categories].sort((a, b) => a - b), [10, 11]);
+  assert.deepEqual(scopeKeys(all), [9]);
+
+  const none = setCategoryProducts(
+    pickState({ categories: [10], products: picks(pick(5, 10), pick(9, 11)) }), 10, 'none', [],
+  );
+  assert.deepEqual(none.categories, []);
+  assert.deepEqual(scopeKeys(none), [9]);
+
+  const allUncategorized = setCategoryProducts(
+    pickState({ products: picks(pick(3, null)) }), null, 'all', [pick(3, null)],
+  );
+  assert.equal(allUncategorized.uncategorized, true);
+  assert.equal(allUncategorized.products.size, 0);
+
+  const noneUncategorized = setCategoryProducts(
+    pickState({ uncategorized: true }), null, 'none', [],
+  );
+  assert.equal(noneUncategorized.uncategorized, false);
+});
+
+test('كنس غير الصالح: المعطَّلُ في اللقطة والغائبُ عن تصنيفٍ أُعيدت قراءته', () => {
+  // الخادم لا يردّ صفاً غير فعّالٍ حين يكون include_inactive مطفيّاً: المعطَّل
+  // **يغيب**، فعلَمُ الاختيار نفسه هو القرينة الأولى على تعطّله.
+  const staleFlag = pruneInactiveScopeProducts(
+    pickState({ products: picks(pick(4, 12, false)) }),
+    [pick(1, 10, true)],
+  );
+  assert.equal(staleFlag.removed, 1);
+  assert.deepEqual(scopeKeys(staleFlag.state), []);
+
+  // تصنيفُه (10) في المحمَّل ⇒ أُعيدت قراءته، ومعرّفه غاب ⇒ خرج من الأهلية.
+  const gone = pruneInactiveScopeProducts(
+    pickState({ products: picks(pick(1, 10, true), pick(2, 10, true), pick(5, 11, true)) }),
+    [pick(1, 10, true), pick(6, 10, true)],
+  );
+  assert.equal(gone.removed, 1);
+  assert.deepEqual(scopeKeys(gone.state), [1, 5]);
+
+  // حاضرٌ نشطٌ في المحمَّل، وتصنيفٌ لم يُقرأ (11) ⇒ يُبقى الاثنان.
+  const kept = pruneInactiveScopeProducts(
+    pickState({ products: picks(pick(1, 10, true), pick(5, 11, true)) }),
+    [pick(1, 10, true), pick(6, 10, true)],
+  );
+  assert.equal(kept.removed, 0);
+  assert.deepEqual(scopeKeys(kept.state), [1, 5]);
+});
+
+test('التصنيفات الجزئية: فيها منتجٌ صريح وليست مشمولةً بكاملها', () => {
+  assert.deepEqual(
+    partialCategoryIds(pickState({
+      categories: [11],
+      products: picks(pick(1, 10), pick(2, 10), pick(3, 11), pick(4, null)),
+    })),
+    [10],
+  );
+  assert.deepEqual(partialCategoryIds(pickState()), []);
+});
+
+test('ملخّص النطاق مع منتجاتٍ صريحة: تُجمع بالنوعين ولا يتكرّر تصنيفُ المنتج الصريح', () => {
+  assert.deepEqual(
+    summarizeScopeSelection({
+      mode: 'categories', checkedIds: [10], uncategorized: false, counts: COUNTS,
+      products: picks(pick(1, 11), pick(2, 11)),
+    }),
+    { products: 3 + 2, categories: 2 },
+  );
+  // «بدون تصنيف» مرّةً واحدة، والتصنيف الجزئي يُحسب تصنيفاً.
+  assert.deepEqual(
+    summarizeScopeSelection({
+      mode: 'categories', checkedIds: [], uncategorized: true, counts: COUNTS,
+      products: picks(pick(3, 10)),
+    }),
+    { products: 2 + 1, categories: 1 + 1 },
+  );
+  // منتجٌ صريحٌ بلا تصنيف: «بدون تصنيف» اختيارٌ قائم يُحسب تصنيفاً واحداً.
+  assert.deepEqual(
+    summarizeScopeSelection({
+      mode: 'categories', checkedIds: [], uncategorized: false, counts: COUNTS,
+      products: picks(pick(4, null)),
+    }),
+    { products: 1, categories: 1 },
+  );
+  // والصريحُ المغطّى لا يُزاد مرّتين: نفسُ ما يُسقطه الخادم قبل الحفظ.
+  assert.deepEqual(
+    summarizeScopeSelection({
+      mode: 'categories', checkedIds: [10], uncategorized: true, counts: COUNTS,
+      products: picks(pick(1, 10), pick(4, null)),
+    }),
+    { products: 2 + 3, categories: 1 + 1 },
+  );
+});
+
+test('جسم الإنشاء مع منتجاتٍ صريحة: مرتّبةٌ في وضع التصنيفات وحده وغير فارغةٍ فقط', () => {
+  const categories = buildStocktakeCreateBody({
+    mode: 'categories', stocktakeDate: '2026-10-22', warehouse: null, notes: '',
+    checkedIds: [11, 10, 10], uncategorized: true, includeInactive: false,
+    products: picks(pick(12, 10), pick(5, 10)),
+  });
+  assert.deepEqual(categories.scope, {
+    all: false, categories: [10, 11], uncategorized: true, include_inactive: false,
+    products: [5, 12],
+  });
+
+  const empty = buildStocktakeCreateBody({
+    mode: 'categories', stocktakeDate: '2026-10-22', warehouse: null, notes: '',
+    checkedIds: [10], uncategorized: false, includeInactive: false,
+    products: new Map(),
+  });
+  assert.deepEqual(empty.scope, {
+    all: false, categories: [10], uncategorized: false, include_inactive: false,
+  });
+
+  const all = buildStocktakeCreateBody({
+    mode: 'all', stocktakeDate: '2026-10-22', warehouse: null, notes: '',
+    checkedIds: [], uncategorized: false, includeInactive: true,
+    products: picks(pick(5, 10)),
+  });
+  assert.deepEqual(all.scope, {
+    all: true, categories: [], uncategorized: false, include_inactive: true,
+  });
+
+  const manual = buildStocktakeCreateBody({
+    mode: 'manual', stocktakeDate: '2026-10-22', warehouse: null, notes: '',
+    checkedIds: [], uncategorized: false, includeInactive: false,
+    products: picks(pick(5, 10)),
+  });
+  assert.equal('scope' in manual, false);
 });

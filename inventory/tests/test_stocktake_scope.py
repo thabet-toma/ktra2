@@ -12,7 +12,7 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import connection, models
 from django.db.migrations.state import ModelState, ProjectState
-from django.test import TransactionTestCase
+from django.test import SimpleTestCase, TransactionTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.serializers import ValidationError as SerializerValidationError
@@ -160,6 +160,109 @@ class StocktakeScopeTest(APITestCase):
         self.assertEqual(res.data["scope"]["categories"], [self.cat_a.id])
         self.assertEqual(self._line_ids(res), {self.p_a1.id})
 
+    # ── منتجاتٌ صريحة اتحاداً مع التصنيفات (ST-1) ──
+    def test_products_only_scope_generates_exactly_those_products(self):
+        self._as(self.manager)
+        res = self._create_scope({"products": [self.p_a1.id, self.p_none.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._line_ids(res), {self.p_a1.id, self.p_none.id})
+        self.assertEqual(
+            Stocktake.objects.get(pk=res.data["id"]).scope["products"],
+            sorted([self.p_a1.id, self.p_none.id]))
+
+    def test_products_union_with_categories_and_uncategorized(self):
+        self._as(self.manager)
+        res = self._create_scope({
+            "products": [self.p_child.id], "categories": [self.cat_a.id],
+            "uncategorized": True,
+        })
+        self.assertEqual(res.status_code, 201, res.content)
+        # منتج الابن لا يدخل بتصنيف أبيه (قرار ٣)، ويدخل هنا لأنّه مذكورٌ صريحاً.
+        self.assertEqual(
+            self._line_ids(res), {self.p_a1.id, self.p_child.id, self.p_none.id})
+        self.assertEqual(
+            Stocktake.objects.get(pk=res.data["id"]).scope["products"], [self.p_child.id])
+
+    def test_product_inside_checked_category_is_dropped_as_redundant(self):
+        self._as(self.manager)
+        res = self._create_scope({"categories": [self.cat_a.id], "products": [self.p_a1.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._line_ids(res), {self.p_a1.id})
+        # مُسقَطٌ لا مرفوض: المفتاح لا يُخزَّن فارغاً في النطاق المعياري.
+        self.assertNotIn("products", Stocktake.objects.get(pk=res.data["id"]).scope)
+        self.assertNotIn("products", res.data["scope"])
+
+    def test_all_drops_products(self):
+        self._as(self.manager)
+        res = self._create_scope({"all": True, "products": [self.p_a1.id, self.p_child.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertNotIn("products", Stocktake.objects.get(pk=res.data["id"]).scope)
+        self.assertEqual(
+            self._line_ids(res),
+            {self.p_a1.id, self.p_child.id, self.p_b.id, self.p_none.id})
+
+    def test_products_dropped_deduplicated_and_rejected(self):
+        """ثلاثة مصائر للمنتج الصريح — وكلٌّ منها يُختبَر على حِدة فيسقط وحده.
+
+        الإسقاط **يسبق** الرفض: منتجُ تصنيفٍ مؤشَّرٍ غيرُ مؤهّل يُرفض ولا يُسقَط
+        بصمت (وإلا مرّت حمولةٌ بمنتجٍ لا يدخل الجرد أبداً)، والمغطّى بمؤهّلٍ يُسقَط
+        ولا يُخزَّن، والتكرار يُطوى إلى معرّفٍ واحد.
+        """
+        self._as(self.manager)
+
+        # (١) «بدون تصنيف» يغطّي منتجاً بلا تصنيف ⇒ يُسقَط فلا يُخزَّن المفتاح.
+        res = self._create_scope(
+            {"uncategorized": True, "products": [self.p_none.id, self.p_none.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._line_ids(res), {self.p_none.id})
+        self.assertNotIn("products", Stocktake.objects.get(pk=res.data["id"]).scope)
+
+        # (٢) التكرار يُطوى: المُخزَّن معرّفٌ واحد لا اثنان.
+        res = self._create_scope({"products": [self.p_child.id, self.p_child.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._line_ids(res), {self.p_child.id})
+        self.assertEqual(
+            Stocktake.objects.get(pk=res.data["id"]).scope["products"], [self.p_child.id])
+
+        # (٣) غير المؤهّل يُرفض ولو غطّاه تصنيفٌ مؤشَّر — ولا يُنشأ شيء.
+        before = Stocktake.objects.count()
+        res = self._create_scope(
+            {"categories": [self.cat_a.id], "products": [self.p_inactive.id]})
+        self.assertEqual(res.status_code, 400, res.content)
+        message = f"منتجات لا تدخل هذا الجرد (خدمة أو غير فعّال): {self.p_inactive.id}"
+        self.assertIn(message, res.data["scope"])
+        self.assertEqual(Stocktake.objects.count(), before)
+
+    def test_category_only_scope_keeps_four_keys(self):
+        self._as(self.manager)
+        res = self._create_scope({"categories": [self.cat_a.id]})
+        self.assertEqual(res.status_code, 201, res.content)
+        # النطاق الخالي من منتجاتٍ صريحة يبقى على مفاتيحه الأربعة حرفاً.
+        self.assertEqual(
+            Stocktake.objects.get(pk=res.data["id"]).scope,
+            {"all": False, "categories": [self.cat_a.id],
+             "uncategorized": False, "include_inactive": False})
+
+    def test_products_validation_messages(self):
+        self._as(self.manager)
+        cases = [
+            ({"products": "x"}, "قائمة المنتجات في نطاق الجرد غير صالحة"),
+            ({"products": ["x"]}, "معرّفات المنتجات يجب أن تكون أعداداً صحيحة"),
+            ({"products": [1.5]}, "معرّفات المنتجات يجب أن تكون أعداداً صحيحة"),
+            ({"products": [True]}, "معرّفات المنتجات يجب أن تكون أعداداً صحيحة"),
+            ({"products": list(range(1, 5002))},
+             "الحد الأقصى 5000 منتج في الجرد الواحد"),
+        ]
+        for scope, message in cases:
+            with self.subTest(scope=str(scope)[:40]):
+                res = self._create_scope(scope)
+                self.assertEqual(res.status_code, 400, res.content)
+                self.assertIn("scope", res.data)
+                self.assertIsInstance(res.data["scope"], list)
+                self.assertIn(message, res.data["scope"])
+                self.assertIn(message, str(res.data))
+                self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
     # ── العزل والتحقق ──
     def test_foreign_category_is_rejected_and_nothing_is_created(self):
         self._as(self.manager)
@@ -172,6 +275,40 @@ class StocktakeScopeTest(APITestCase):
         self.assertIn(message, res.data["scope"])
         self.assertIn(message, str(res.data))
         self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+    def test_foreign_product_is_rejected_and_nothing_is_created(self):
+        self._as(self.manager)
+        before = Stocktake.objects.count()
+        res = self._create_scope({"products": [self.p_a1.id, self.foreign_product.id]})
+        self.assertEqual(res.status_code, 400, res.content)
+        message = f"منتجات غير موجودة لهذه الشركة: {self.foreign_product.id}"
+        self.assertIn("scope", res.data)
+        self.assertIsInstance(res.data["scope"], list)
+        self.assertIn(message, res.data["scope"])
+        self.assertEqual(Stocktake.objects.count(), before)
+        self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+    def test_service_or_inactive_product_rejected_unless_flag(self):
+        self._as(self.manager)
+        cases = [
+            ({"products": [self.p_inactive.id]}, self.p_inactive.id),
+            ({"products": [self.p_service.id]}, self.p_service.id),
+            ({"products": [self.p_service.id], "include_inactive": True},
+             self.p_service.id),
+        ]
+        for scope, rejected in cases:
+            with self.subTest(scope=scope):
+                res = self._create_scope(scope)
+                self.assertEqual(res.status_code, 400, res.content)
+                message = f"منتجات لا تدخل هذا الجرد (خدمة أو غير فعّال): {rejected}"
+                self.assertIn(message, res.data["scope"])
+                self.assertFalse(Stocktake.objects.filter(tenant=self.tenant).exists())
+
+        # غير الفعّال يدخل بالعلم الصريح — والخدمة لا تدخل أبداً.
+        res = self._create_scope(
+            {"products": [self.p_inactive.id], "include_inactive": True})
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(self._line_ids(res), {self.p_inactive.id})
 
     def test_scope_validation_messages(self):
         self._as(self.manager)
@@ -350,6 +487,54 @@ class StocktakeScopeTest(APITestCase):
             f"/api/inventory/stocktakes/{st_id}/", {"scope": None}, format="json")
         self.assertEqual(res.status_code, 200, res.content)
         self.assertIsNone(Stocktake.objects.get(pk=st_id).scope)
+
+    # ── الصدى المكافئ يُقبل والمختلف يبقى مرفوضاً (المقارنة بعد التطبيع المعياري) ──
+    def test_update_accepts_an_echo_with_unsorted_categories(self):
+        """ترتيبُ التصنيفات لا معنى له: صدىً مرتّباً بشكلٍ آخر ليس تعديلاً."""
+        self._as(self.manager)
+        created = self._create_scope({"categories": [self.cat_a.id, self.cat_b.id]})
+        st_id = created.data["id"]
+        res = self.client.patch(f"/api/inventory/stocktakes/{st_id}/", {
+            "scope": {"all": False, "uncategorized": False, "include_inactive": False,
+                      "categories": [self.cat_b.id, self.cat_a.id]},
+        }, format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        # والمخزَّن لم يتغيّر: الصدى يُهمَل ولا يُكتب.
+        self.assertEqual(
+            Stocktake.objects.get(pk=st_id).scope["categories"],
+            sorted([self.cat_a.id, self.cat_b.id]))
+
+    def test_update_accepts_an_echo_missing_default_keys(self):
+        """مفتاحُ افتراضٍ غائبٌ (`false`/`[]`) هو نفسه — لا فارق في الشكل."""
+        self._as(self.manager)
+        created = self._create_scope({"categories": [self.cat_a.id]})
+        st_id = created.data["id"]
+        res = self.client.patch(
+            f"/api/inventory/stocktakes/{st_id}/",
+            {"scope": {"categories": [self.cat_a.id]}}, format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_update_accepts_an_echo_with_empty_products_key(self):
+        """المفتاح الجديد (`products`) يأتي `[]` في صدى العملاء القدامى — صدىً لا اختلافاً."""
+        self._as(self.manager)
+        created = self._create_scope({"categories": [self.cat_a.id]})
+        st_id = created.data["id"]
+        res = self.client.patch(
+            f"/api/inventory/stocktakes/{st_id}/",
+            {"scope": {"categories": [self.cat_a.id], "products": []}}, format="json")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertNotIn("products", Stocktake.objects.get(pk=st_id).scope)
+
+    def test_update_rejects_different_categories_after_canonicalization(self):
+        """الترتيب لا يفرّق والمحتوى يفرّق: تصنيفٌ آخر يبقى 400 بعد التطبيع."""
+        self._as(self.manager)
+        created = self._create_scope({"categories": [self.cat_a.id]})
+        st_id = created.data["id"]
+        res = self.client.patch(
+            f"/api/inventory/stocktakes/{st_id}/",
+            {"scope": {"categories": [self.cat_b.id]}}, format="json")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("النطاق يُحدَّد عند إنشاء الجرد فقط", str(res.data))
 
     def test_update_line_without_quantity_is_rejected_and_keeps_the_stamps(self):
         """بندٌ بلا مفتاح `counted_quantity` ليس «امسح العدّ»: الحقل إلزاميٌّ في
@@ -649,6 +834,129 @@ class StocktakeScopeTest(APITestCase):
         post_stocktake(st)
         st.refresh_from_db()
         self.assertTrue(st.is_posted)
+
+    # ── نقطة المنتجات المباشرة لتصنيفٍ واحد (ST-1) ──
+    def _scope_products(self, query=""):
+        self._as(self.manager)
+        url = "/api/inventory/stocktakes/scope-products/" + query
+        return self.client.get(url)
+
+    def test_scope_products_lists_direct_products_only(self):
+        # اسمٌ يسبق «منتج أ» ترتيباً ليُقاس الترتيب لا المجموعة وحدها.
+        first = Product.objects.create(
+            tenant=self.tenant, sku="SC-AA", name_ar="أقدم منتج", category=self.cat_a,
+            quantity_on_hand=Decimal("1"), avg_cost=Decimal("1"))
+        res = self._scope_products(f"?category={self.cat_a.id}")
+        self.assertEqual(res.status_code, 200, res.content)
+        # منتج الابن ليس هنا (دلالةٌ مباشرة، قرار ٣)، والخدمة والمعطَّل خارجها.
+        self.assertEqual([row["id"] for row in res.data], [first.id, self.p_a1.id])
+
+        res = self._scope_products(f"?category={self.cat_a.id}&include_inactive=true")
+        self.assertEqual(
+            {row["id"] for row in res.data},
+            {first.id, self.p_a1.id, self.p_inactive.id})
+        self.assertNotIn(self.p_service.id, {row["id"] for row in res.data})
+
+    def test_scope_products_none_lists_uncategorized(self):
+        res = self._scope_products("?category=none")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual({row["id"] for row in res.data}, {self.p_none.id})
+
+    def test_scope_products_rejects_missing_bad_or_foreign_category(self):
+        for query in ("", "?category=", "?category=abc", "?category=1.5"):
+            with self.subTest(query=query):
+                res = self._scope_products(query)
+                self.assertEqual(res.status_code, 400, res.content)
+                self.assertIn("category", res.data)
+                self.assertIsInstance(res.data["category"], list)
+                self.assertIn(
+                    "معرّف التصنيف يجب أن يكون عدداً صحيحاً أو none",
+                    res.data["category"])
+
+        res = self._scope_products(f"?category={self.foreign_cat.id}")
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("category", res.data)
+        self.assertIsInstance(res.data["category"], list)
+        self.assertIn("تصنيف غير موجود لهذه الشركة", res.data["category"])
+
+    def test_scope_products_keys_are_an_allow_list(self):
+        res = self._scope_products(f"?category={self.cat_a.id}")
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(len(res.data), 1)
+        row = res.data[0]
+        self.assertEqual(set(row), {"id", "name", "sku", "is_active"})
+        self.assertEqual(row["sku"], "SC-A1")
+        self.assertEqual(row["name"], "منتج أ")
+        self.assertIs(row["is_active"], True)
+
+    def test_scope_products_query_count_is_constant(self):
+        def add(category, sku, name):
+            Product.objects.create(
+                tenant=self.tenant, sku=sku, name_ar=name, category=category,
+                quantity_on_hand=Decimal("1"), avg_cost=Decimal("1"))
+
+        add(self.cat_a, "SC-C1", "منتج تصنيف أ")
+        for index in range(19):
+            add(self.cat_b, f"SC-D{index}", f"منتج {index}")
+        self._as(self.manager)
+        url = "/api/inventory/stocktakes/scope-products/"
+        # تسخين المصادقة/الشركة قبل القياس كما في بقيّة عدّادات هذا الملف.
+        self.client.get(f"{url}?category={self.cat_a.id}")
+        with CaptureQueriesContext(connection) as small:
+            small_res = self.client.get(f"{url}?category={self.cat_a.id}")
+        with CaptureQueriesContext(connection) as large:
+            large_res = self.client.get(f"{url}?category={self.cat_b.id}")
+        self.assertEqual(len(small_res.data), 2)
+        self.assertEqual(len(large_res.data), 20)
+        self.assertEqual(len(small.captured_queries), len(large.captured_queries))
+
+    def test_scope_products_matches_generated_lines(self):
+        listed = {row["id"] for row in self._scope_products(
+            f"?category={self.cat_a.id}").data}
+        generated = self._create_scope({"categories": [self.cat_a.id]})
+        self.assertEqual(generated.status_code, 201, generated.content)
+        self.assertEqual(listed, self._line_ids(generated))
+
+
+class StocktakeScopeSignatureTest(SimpleTestCase):
+    """الشكل المعياري للنطاق — دالةٌ صرفة تقرّب الصدى المكافئ وتبقي الاختلاف اختلافاً."""
+
+    def test_non_dict_values_are_returned_as_is(self):
+        for value in (None, [], ["a"], "all", 3):
+            with self.subTest(value=value):
+                self.assertIs(inventory_services.stocktake_scope_signature(value), value)
+
+    def test_missing_keys_take_the_defaults(self):
+        self.assertEqual(
+            inventory_services.stocktake_scope_signature({"categories": [2, 1, 2]}),
+            inventory_services.stocktake_scope_signature({
+                "all": False, "uncategorized": False, "include_inactive": False,
+                "categories": [1, 2], "products": [],
+            }))
+
+    def test_a_list_that_is_not_all_int_is_returned_raw(self):
+        # التطبيع للمعرّفات الرقمية وحدها؛ قائمةُ نصوصٍ تُقارن كما هي فلا تُقارَب صورُها.
+        self.assertNotEqual(
+            inventory_services.stocktake_scope_signature({"categories": ["b", "a"]}),
+            inventory_services.stocktake_scope_signature({"categories": ["a", "b"]}))
+
+    def test_unknown_key_keeps_the_two_shapes_different(self):
+        self.assertIn("bogus", inventory_services.stocktake_scope_signature({"bogus": True}))
+        self.assertNotEqual(
+            inventory_services.stocktake_scope_signature({"categories": [1]}),
+            inventory_services.stocktake_scope_signature({"categories": [1], "bogus": True}))
+
+    def test_int_one_is_not_the_true_flag(self):
+        # `1 == True` في بايثون: بلا وسمِ النوع يمرّ علمٌ غير صالح كأنه `true`.
+        self.assertNotEqual(
+            inventory_services.stocktake_scope_signature({"all": 1}),
+            inventory_services.stocktake_scope_signature({"all": True}))
+        self.assertNotEqual(
+            inventory_services.stocktake_scope_signature({"all": "true"}),
+            inventory_services.stocktake_scope_signature({"all": True}))
+        self.assertEqual(
+            inventory_services.stocktake_scope_signature({"all": True}),
+            inventory_services.stocktake_scope_signature({"all": True}))
 
 
 class StocktakeScopeMigrationTest(TransactionTestCase):

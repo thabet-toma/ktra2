@@ -904,10 +904,16 @@ class StocktakeSerializer(serializers.ModelSerializer):
             if locked.is_posted:
                 raise serializers.ValidationError('لا يمكن تعديل جرد مُرحَّل.')
             # نطاقٌ مطابقٌ للمخزَّن (عميلٌ يعيد حمولة البطاقة كما قرأها) يُقبل
-            # ويُهمَل؛ والاختلاف وحده مرفوض — النطاق يُحدَّد عند الإنشاء.
-            if 'scope' in validated_data and validated_data.pop('scope') != locked.scope:
-                raise serializers.ValidationError(
-                    {'scope': 'النطاق يُحدَّد عند إنشاء الجرد فقط'})
+            # ويُهمَل؛ والاختلاف وحده مرفوض — النطاق يُحدَّد عند الإنشاء. والمقارنة
+            # على **الشكل المعياري** للطرفين (`stocktake_scope_signature`) فلا يُردّ
+            # صدىً مكافئ: ترتيبُ تصنيفاتٍ مختلف، أو مفتاحُ افتراضٍ غائب، أو
+            # `products: []` — والمختلف فعلاً يبقى 400.
+            if 'scope' in validated_data:
+                from .services import stocktake_scope_signature
+                sent = stocktake_scope_signature(validated_data.pop('scope'))
+                if sent != stocktake_scope_signature(locked.scope):
+                    raise serializers.ValidationError(
+                        {'scope': 'النطاق يُحدَّد عند إنشاء الجرد فقط'})
             for k, v in validated_data.items():
                 setattr(locked, k, v)
             # الحفظ الكامل يحرّك `updated_at` دائماً — وعليه يقوم `ETag` (412 عند التزامن).

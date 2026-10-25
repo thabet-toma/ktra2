@@ -80,6 +80,26 @@ export type CategoryTreeSelectMultiProps = CommonProps & {
    */
   summary?: React.ReactNode;
   disabled?: boolean;
+  /**
+   * ST-2: تصنيفاتٌ فيها منتجاتٌ مختارةٌ صريحة وليست مشمولةً بكاملها — تُرسم
+   * «جزئية» وإن كانت `checkStates` تقول `off` (لا تأشير على التصنيف نفسه).
+   * غيابها يُبقي الرسم حرفاً كما هو.
+   */
+  partialIds?: ReadonlyArray<number>;
+  /**
+   * ST-2: زرٌّ في الصفّ نفسه (فتحُ منتجات التصنيف) — يُرسم داخل عنصرٍ يمنع
+   * انتشار **النقر والمسافة/Enter** عن الصفّ، فلا يُبدَّل الاختيار بفتح المنتجات؛
+   * وما عدا ذلك يصعد كما هو (`Esc` للنافذة، والأسهم للشجرة).
+   */
+  renderRowAction?: (category: CategoryTreeOption) => React.ReactNode;
+  /**
+   * ST-2: لوحةٌ تحت الصفّ مباشرةً في `<li role="none">` شقيقة — خارج `rows`،
+   * فلا تعرفها `visibleTreeRows` ولا يطولها `onKeyDown` (يتجاهل ما ليس من
+   * `treeitem`)، و`null` لا يُرسم.
+   */
+  renderRowPanel?: (category: CategoryTreeOption) => React.ReactNode;
+  /** ST-2: ما بعد «إلغاء الكل» — يمسح المستدعي اختيارَه الصريح وعلمَه معاً. */
+  onClearAll?: () => void;
 };
 
 export type CategoryTreeSelectProps =
@@ -157,6 +177,9 @@ type TreeRowsProps = TreeRowsCommonProps & (
     onToggleCheck: (category: CategoryTreeOption) => void;
     /** عدّاد المنتجات المباشرة لكل عقدة — يُرسم ويُجمع في الملخّص. */
     productCounts?: Record<number, number>;
+    /** ST-2: زرٌّ داخل الصفّ نفسه، ولوحةٌ في `<li role="none">` شقيقة له. */
+    renderRowAction?: (category: CategoryTreeOption) => React.ReactNode;
+    renderRowPanel?: (category: CategoryTreeOption) => React.ReactNode;
   }
 );
 
@@ -193,6 +216,11 @@ const TreeRows: React.FC<TreeRowsProps> = (props) => {
   const isExpandedKey = (key: string) => autoExpandAll || expandedKeys.has(key);
 
   const onKeyDown = (e: React.KeyboardEvent<HTMLUListElement>) => {
+    // لوحةُ منتجات التصنيف تُرسم في `<li role="none">` داخل هذا `<ul>` نفسه، فأحداثها
+    // تصعد إليه: المسافة في بحثها كانت تُلغى وتُؤشّر الصفّ النشط، والأسهم تخطف
+    // التركيز، والأفقيان يطويان الصفّ أو يفتحانه. ما ليس من صفّ شجرةٍ يُترك لحاله —
+    // والمربّع وزرّ الطيّ داخل الصفوف يبقيان على المسار نفسه (نمط الشجرة واحد).
+    if (!(e.target as HTMLElement).closest('[role="treeitem"]')) return;
     if (disabled || !rows.length) return;
     const index = rows.findIndex((row) => categoryKey(row.id) === activeKey);
     const current = index >= 0 ? rows[index] : null;
@@ -273,82 +301,107 @@ const TreeRows: React.FC<TreeRowsProps> = (props) => {
         const expanded = row.hasChildren && isExpandedKey(key);
         const count = props.mode === 'multi' ? props.productCounts?.[row.id] : undefined;
         const tabIndex = activeKey === key ? 0 : -1;
+        const action = props.mode === 'multi' ? props.renderRowAction?.(row.category) : undefined;
+        const panel = props.mode === 'multi' ? props.renderRowPanel?.(row.category) : undefined;
 
         return (
-          <li
-            key={key}
-            ref={(el) => {
-              if (el) rowRefs.current.set(key, el);
-              else rowRefs.current.delete(key);
-            }}
-            role="treeitem"
-            aria-level={row.depth + 1}
-            aria-expanded={row.hasChildren ? expanded : undefined}
-            aria-selected={props.mode === 'single' ? selected : undefined}
-            aria-checked={state == null
-              ? undefined
-              : (state === 'partial' ? 'mixed' : state === 'on')}
-            aria-disabled={row.selectable ? undefined : true}
-            tabIndex={tabIndex}
-            onFocus={() => setFocusKey(key)}
-            onClick={() => {
-              if (disabled) return;
-              if (!row.selectable) { onToggleExpand(key); return; }
-              if (props.mode === 'multi') props.onToggleCheck(row.category);
-              else props.onPick(row.category);
-            }}
-            className={[
-              'flex items-center gap-1.5 rounded px-1.5 py-1 text-sm outline-none',
-              'focus-visible:ring-2 focus-visible:ring-[var(--ktra-accent)]',
-              DEPTH_PAD[Math.min(row.depth, DEPTH_PAD.length - 1)],
-              selected ? 'bg-[var(--ktra-active)] font-medium' : 'hover:bg-[var(--ktra-hover)]',
-              row.selectable ? 'text-[var(--ktra-ink)]' : 'text-[var(--ktra-ink-soft)]',
-            ].join(' ')}
-          >
-            {row.hasChildren ? (
-              <button
-                type="button"
-                tabIndex={-1}
-                aria-label={expanded ? 'طيّ' : 'فتح'}
-                className="shrink-0 rounded p-0.5 text-[var(--ktra-ink-soft)] hover:bg-[var(--ktra-active)]"
-                onClick={(e) => { e.stopPropagation(); onToggleExpand(key); }}
-              >
-                {expanded
-                  ? <ChevronDown className="h-3.5 w-3.5" />
-                  : <ChevronLeft className="h-3.5 w-3.5" />}
-              </button>
-            ) : (
-              <span className="w-[18px] shrink-0" />
-            )}
-
-            {props.mode === 'multi' && row.selectable && (
-              <label
-                className="flex shrink-0 items-center"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <input
-                  type="checkbox"
+          <React.Fragment key={key}>
+            <li
+              ref={(el) => {
+                if (el) rowRefs.current.set(key, el);
+                else rowRefs.current.delete(key);
+              }}
+              role="treeitem"
+              aria-level={row.depth + 1}
+              aria-expanded={row.hasChildren ? expanded : undefined}
+              aria-selected={props.mode === 'single' ? selected : undefined}
+              aria-checked={state == null
+                ? undefined
+                : (state === 'partial' ? 'mixed' : state === 'on')}
+              aria-disabled={row.selectable ? undefined : true}
+              tabIndex={tabIndex}
+              onFocus={() => setFocusKey(key)}
+              onClick={() => {
+                if (disabled) return;
+                if (!row.selectable) { onToggleExpand(key); return; }
+                if (props.mode === 'multi') props.onToggleCheck(row.category);
+                else props.onPick(row.category);
+              }}
+              className={[
+                'flex items-center gap-1.5 rounded px-1.5 py-1 text-sm outline-none',
+                'focus-visible:ring-2 focus-visible:ring-[var(--ktra-accent)]',
+                DEPTH_PAD[Math.min(row.depth, DEPTH_PAD.length - 1)],
+                selected ? 'bg-[var(--ktra-active)] font-medium' : 'hover:bg-[var(--ktra-hover)]',
+                row.selectable ? 'text-[var(--ktra-ink)]' : 'text-[var(--ktra-ink-soft)]',
+              ].join(' ')}
+            >
+              {row.hasChildren ? (
+                <button
+                  type="button"
                   tabIndex={-1}
-                  className="h-3.5 w-3.5 accent-[var(--ktra-accent)]"
-                  checked={state === 'on'}
-                  ref={(el) => { if (el) el.indeterminate = state === 'partial'; }}
-                  onChange={() => { if (!disabled) props.onToggleCheck(row.category); }}
-                  aria-label={`تحديد ${row.category.name}`}
-                />
-              </label>
-            )}
+                  aria-label={expanded ? 'طيّ' : 'فتح'}
+                  className="shrink-0 rounded p-0.5 text-[var(--ktra-ink-soft)] hover:bg-[var(--ktra-active)]"
+                  onClick={(e) => { e.stopPropagation(); onToggleExpand(key); }}
+                >
+                  {expanded
+                    ? <ChevronDown className="h-3.5 w-3.5" />
+                    : <ChevronLeft className="h-3.5 w-3.5" />}
+                </button>
+              ) : (
+                <span className="w-[18px] shrink-0" />
+              )}
 
-            <span className="truncate">{row.category.name}</span>
+              {props.mode === 'multi' && row.selectable && (
+                <label
+                  className="flex shrink-0 items-center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="checkbox"
+                    tabIndex={-1}
+                    className="h-3.5 w-3.5 accent-[var(--ktra-accent)]"
+                    checked={state === 'on'}
+                    ref={(el) => { if (el) el.indeterminate = state === 'partial'; }}
+                    onChange={() => { if (!disabled) props.onToggleCheck(row.category); }}
+                    aria-label={`تحديد ${row.category.name}`}
+                  />
+                </label>
+              )}
 
-            {props.mode === 'single' && selected && (
-              <Check className="ms-auto h-3.5 w-3.5 shrink-0 text-[var(--ktra-accent)]" />
+              <span className="truncate">{row.category.name}</span>
+
+              {action != null && (
+                // نقرُ الزرّ و**مسافته/Enter** لا تبلغان الصفّ (فتحُ المنتجات لا
+                // يؤشّر التصنيف). وما عدا ذلك يبقى صاعداً: Esc يجب أن تصل النافذة
+                // فتُغلق، والأسهم تنتقل إلى الشجرة كما هي.
+                <span
+                  className="ms-auto flex shrink-0 items-center"
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === ' ' || e.key === 'Enter') e.stopPropagation();
+                  }}
+                >
+                  {action}
+                </span>
+              )}
+
+              {props.mode === 'single' && selected && (
+                <Check className="ms-auto h-3.5 w-3.5 shrink-0 text-[var(--ktra-accent)]" />
+              )}
+              {props.mode === 'multi' && props.productCounts && (
+                <span className={`${action == null ? 'ms-auto ' : ''}shrink-0 text-xs text-[var(--ktra-ink-soft)]`}>
+                  {formatNumber(count ?? 0)}
+                </span>
+              )}
+            </li>
+            {panel != null && (
+              // `role="none"`: عنصرٌ عارضٌ لا عقدةَ شجرة — لوحةُ المفاتيح و
+              // `visibleTreeRows` لا تعرفانه أصلاً (خارج `rows`).
+              <li role="none" className="list-none">
+                {panel}
+              </li>
             )}
-            {props.mode === 'multi' && props.productCounts && (
-              <span className="ms-auto shrink-0 text-xs text-[var(--ktra-ink-soft)]">
-                {formatNumber(count ?? 0)}
-              </span>
-            )}
-          </li>
+          </React.Fragment>
         );
       })}
     </ul>
@@ -836,7 +889,10 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
 };
 
 const MultiCategoryTreeSelect: React.FC<CategoryTreeSelectMultiProps> = (props) => {
-  const { categories, className, disabled, value, onChange, productCounts, restrictTo } = props;
+  const {
+    categories, className, disabled, value, onChange, productCounts, restrictTo,
+    partialIds, renderRowAction, renderRowPanel, onClearAll,
+  } = props;
   const { allCategories, loading, loadError, load } = useCategoryList(categories);
   const [query, setQuery] = useState('');
   // نطاقٌ مقصور يبدأ مساراتِه مفتوحة **في أوّل رسم** — البذر الكسول هنا يمنع
@@ -879,10 +935,18 @@ const MultiCategoryTreeSelect: React.FC<CategoryTreeSelectMultiProps> = (props) 
     [allCategories, expanded, query, restrictTo],
   );
   /** الحالة الثلاثية لكل العُقد مرّةً واحدة لكل رسم — لا `checkState` لكل صفّ. */
-  const states = useMemo(
-    () => checkStates(selectionCategories, checkedSet),
-    [checkedSet, selectionCategories],
-  );
+  const states = useMemo(() => {
+    const base = checkStates(selectionCategories, checkedSet);
+    // ST-2: تصنيفٌ فيه منتجاتٌ مختارةٌ صريحة وليس مشمولاً بكامله ليس `off` بل
+    // «جزئي» — بلا لمس `checkStates` نفسها (الحالة تُشتقّ من التأشير وحده هناك).
+    const partial = (partialIds ?? []).map(categoryKey);
+    if (!partial.length) return base;
+    const merged = new Map(base);
+    for (const key of partial) {
+      if (merged.get(key) === 'off') merged.set(key, 'partial');
+    }
+    return merged;
+  }, [checkedSet, partialIds, selectionCategories]);
   /** ما في القائمة وحدها: معرّفٌ حُذف منها لا يُحسب في الملخّص. */
   const checkedInList = useMemo(
     () => allCategories.filter((c) => checkedSet.has(c.id)),
@@ -921,6 +985,9 @@ const MultiCategoryTreeSelect: React.FC<CategoryTreeSelectMultiProps> = (props) 
   const clearAll = () => {
     if (disabled) return;
     onChange([]);
+    // اختيارُ المستدعي الصريح (منتجاتٌ بعينها أو علمُ «بدون تصنيف») لا يعرفه
+    // `onChange` وحده — يُمسح هناك، وإلّا بقي الاختيار ظاهراً بعد «إلغاء الكل».
+    onClearAll?.();
   };
 
   return (
@@ -983,6 +1050,8 @@ const MultiCategoryTreeSelect: React.FC<CategoryTreeSelectMultiProps> = (props) 
             disabled={disabled}
             onToggleExpand={toggleExpanded}
             onToggleCheck={toggleCheck}
+            renderRowAction={renderRowAction}
+            renderRowPanel={renderRowPanel}
             ariaLabel="شجرة تصنيفات الجرد"
           />
         )}

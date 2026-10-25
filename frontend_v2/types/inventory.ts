@@ -122,12 +122,16 @@ export interface StockSummaryResponse {
 /**
  * نطاق الجرد المخزَّن على المستند (K1). المفاتيح الأربعة كلها حاضرة دائماً في
  * ردّ الخادم؛ `null` على `Stocktake.scope` يعني جرداً يدوياً بلا نطاق.
+ * و`products` (ST-2) منتجاتٌ صريحةٌ تُضاف اتحاداً مع التصنيفات، ويغيب المفتاح
+ * حين لا يبقى صريحٌ خارج المغطّى — الغيابُ والفراغُ سواءٌ عند الخادم.
  */
 export interface StocktakeScope {
   all: boolean;
   categories: number[];
   uncategorized: boolean;
   include_inactive: boolean;
+  /** معرّفات منتجاتٍ صريحة — اتحادٌ مع `categories`/`uncategorized`. */
+  products?: number[];
 }
 
 /** بند الجرد كما يعيده `StocktakeLineSerializer` — بلا أي حقل تكلفةٍ أو سعر. */
@@ -192,6 +196,14 @@ export interface StocktakeScopeCounts {
   categories: Record<string, number>;
   uncategorized: number;
   all: number;
+}
+
+/** صفّ `GET stocktakes/scope-products/` (ST-1) — قائمة سماحٍ بلا كلفةٍ ولا سعر. */
+export interface StocktakeScopeProduct {
+  id: number;
+  name: string;
+  sku: string;
+  is_active: boolean;
 }
 
 /** حالات رابط العدّ كما يحسمها الخادم (`_count_link_status`). */
