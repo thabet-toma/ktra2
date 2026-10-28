@@ -1,6 +1,7 @@
 import { httpErrorMessage } from "../utils/drfError";
 import type { AddBrandTarget } from "../utils/brandActions";
 import type { ProductDeactivationImpact } from "../utils/productActiveStatus";
+import type { StorageLocationBody, StorageLocationRow } from "../utils/storageLocations";
 import type {
   Stocktake, StocktakeCountLinkRow, StocktakeListRow, StocktakeScopeCounts,
   StocktakeScopeProduct,
@@ -470,6 +471,34 @@ export const inventoryApi = {
   getProduct: async (id: number) => {
     const res = await fetch(`${INV}/products/${id}/`, { headers: headers() });
     await handle(res, "getProduct");
+    return res.json();
+  },
+
+  // ─── TASK-2b: مواقع التخزين لكل مخزن ───
+
+  /** مواقعُ المنتج في مخازن شركته — كلُّ صفٍّ `{warehouse, warehouse_name, kind, …, label}`. */
+  getProductStorageLocations: async (productId: number): Promise<StorageLocationRow[]> => {
+    const res = await fetch(`${INV}/products/${productId}/storage-locations/`, {
+      headers: headers(),
+    });
+    await handle(res, "getProductStorageLocations");
+    return res.json();
+  },
+
+  /**
+   * استبدالُ مواقع المنتج **كاملةً**: الجسم قائمةٌ تصف الحالة النهائية، و`[]` يمسح
+   * الكلّ. والردّ بالقائمة الجديدة بشكل `GET` نفسِه — فالمحمَّل يُحدَّث منه.
+   */
+  setProductStorageLocations: async (
+    productId: number,
+    rows: StorageLocationBody[],
+  ): Promise<StorageLocationRow[]> => {
+    const res = await fetch(`${INV}/products/${productId}/storage-locations/`, {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify(rows),
+    });
+    await handle(res, "setProductStorageLocations");
     return res.json();
   },
 

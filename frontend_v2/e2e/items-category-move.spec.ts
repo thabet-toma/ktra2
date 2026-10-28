@@ -23,10 +23,20 @@ import { switchItemsToTable } from './items-view';
  *      في الجدول — الخادم يردّه 403 أصلاً، والواجهة لا تعرض ما سيُرفض.
  *   5. منتجٌ له 3 براندات: تحذير «ينتقل المنتج كلّه ببراندَاته الـ3» داخل النافذة
  *      قبل النقل.
+ *   6. TASK-1 — «أضف «X»»: اسمٌ غير موجودٍ في القائمة يُنشأ **رئيسياً**
+ *      (`parent: null`) بضغطةٍ من نتائج البحث، ويُختار فوراً هدفاً — فالجسم
+ *      يحمل معرّفه — ثم يظهر في الشجرة بلا إعادة تحميل الصفحة.
+ *   7. TASK-1 — وفشلُ الإنشاء: نصُّ خطأ الخادم يظهر في اللوحة (لا رسالة الواجهة
+ *      الاحتياطية)، واللوحة تبقى مفتوحةٍ بالاستعلام كما هو، وطلبٌ واحد لا اثنان.
+ *   8. TASK-1 — ولا يظهر «أضف» لاسمٍ موجودٍ بالضبط ولا لاسمٍ يختلف بالهمزة
+ *      وحدها («اطارات» مقابل «إطارات»)، ولا لدورٍ بلا `inventory.item.manage`.
+ *      والنافذة نفسها محجوبةٌ عن هذا الدور (البند 4)، فتُقاس بوابةُ الصلاحية على
+ *      حقل منتقي كرت المنتج — وهو يمرّر `allowCreate` دائماً.
  *
  * المحاكي `items-tree-stubs.ts` يرفض ما يرفضه الخادم (قائمة معرّفاتٍ فارغة أو
- * غير صحيحة، مفتاح `category` غائب، تصنيفٌ خارج الشجرة، والحلقة في الأب) ويحدّث
- * حالته الداخلية كي تُظهر إعادةُ الجلب النتيجة — محاكٍ يقبل كل شيء يُخفي عطباً.
+ * غير صحيحة، مفتاح `category` غائب، تصنيفٌ خارج الشجرة، الحلقة في الأب، واسمُ
+ * تصنيفٍ فارغ عند الإنشاء) ويحدّث حالته الداخلية كي تُظهر إعادةُ الجلب النتيجة —
+ * محاكٍ يقبل كل شيء يُخفي عطباً.
  */
 
 const CATEGORIES: ItemsTreeCategory[] = [
@@ -48,10 +58,13 @@ const FAMILY_PRODUCT: ItemsTreeProductRow = {
 
 let bulkBodies: Array<Record<string, unknown>> = [];
 let categoryPatches: Array<{ id: number; body: Record<string, unknown> }> = [];
+/** TASK-1: أجسام `POST /inventory/categories/` كما أرسلتها الشاشة. */
+let createdCategoryBodies: Array<Record<string, unknown>> = [];
 
 const start = async (page: Page, permissions?: string[]): Promise<void> => {
   bulkBodies = [];
   categoryPatches = [];
+  createdCategoryBodies = [];
   await installItemsTreeApiStubs(page, {
     // نسخةٌ جديدة في كل اختبار: المحاكي يعدّل التصنيفات والمنتجات في مكانها.
     categories: CATEGORIES.map((c) => ({ ...c })),
@@ -59,6 +72,7 @@ const start = async (page: Page, permissions?: string[]): Promise<void> => {
     permissions,
     onBulkSetCategory: (body) => { bulkBodies.push(body); },
     onUpdateCategory: (id, body) => { categoryPatches.push({ id, body }); },
+    onCreateCategory: (body) => { createdCategoryBodies.push(body); },
   });
 };
 
@@ -286,4 +300,165 @@ test('منتجٌ له 3 براندات يُحذَّر قبل النقل: «ين�
   await expect(
     page.getByText('ينتقل المنتج كلّه ببراندَاته الـ3 — التصنيف للمنتج لا لهذا البراند وحده'),
   ).toBeVisible();
+});
+
+test('«أضف «X»»: تصنيفٌ رئيسي بـضغطة، يُختار هدفاً، ثم يظهر في الشجرة بلا إعادة تحميل', async ({ page }) => {
+  await start(page);
+  const tree = await openTree(page);
+  await expandCategory(tree, 'إطارات');
+
+  await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'نقل إلى تصنيف…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'التصنيف' }).click();
+  await page.getByLabel('بحث التصنيفات').fill('مكاتب');
+
+  // لا اسمَ «مكاتب» في القائمة ⇒ خيارُ الإضافة بدل «لا تطابق».
+  await expect(page.getByText('لا تطابق')).toHaveCount(0);
+  const created = page.waitForResponse((response) =>
+    response.url().endsWith('/inventory/categories/')
+    && response.request().method() === 'POST');
+  await page.getByRole('option', { name: 'أضف «مكاتب»' }).click();
+  const createdId = (await (await created).json()).id as number;
+
+  // أُنشئ **رئيسياً** (`parent: null`) واختير فوراً: الحقل يعرض اسمه، والنافذة
+  // لم تُغلق — المستخدم ما زال يضغط «نقل» للتأكيد.
+  await expect.poll(() => createdCategoryBodies.length).toBe(1);
+  expect(createdCategoryBodies[0]).toEqual({ name: 'مكاتب', parent: null });
+  await expect(dialog.getByRole('combobox', { name: 'التصنيف' })).toContainText('مكاتب');
+  await expect(dialog).toBeVisible();
+
+  const refetched = page.waitForResponse((response) =>
+    response.url().includes('/inventory/products/') && response.request().method() === 'GET');
+  await dialog.getByRole('button', { name: 'نقل', exact: true }).click();
+
+  await expect.poll(() => bulkBodies.length).toBe(1);
+  expect(bulkBodies[0]).toEqual({ product_ids: [7], category: createdId });
+
+  // التصنيف الجديد صفٌّ في الشجرة بلا إعادة تحميل الصفحة، والمنتج تحته.
+  await refetched;
+  const row = tree.locator('.ktra-tree-cat').filter({ hasText: 'مكاتب' }).first();
+  await expect(row).toBeVisible();
+  await row.locator('.ktra-tree-twisty').click();
+  await expect(
+    row.locator('xpath=..').getByRole('button', { name: /إطار 205\/55 — ميشلان/ }),
+  ).toBeVisible();
+});
+
+test('فشل الإنشاء: الخطأ يظهر في اللوحة والاستعلام كما هو، وطلبٌ واحد لا اثنان', async ({ page }) => {
+  await start(page);
+  const tree = await openTree(page);
+  await expandCategory(tree, 'إطارات');
+
+  await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'نقل إلى تصنيف…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'التصنيف' }).click();
+  await page.getByLabel('بحث التصنيفات').fill('مكاتب');
+
+  // مسارٌ يُسجَّل **بعد** المحاكي فيغلب (الأحدث أولاً): فشلٌ خادميّ في الإنشاء
+  // وحده — والقراءة تمرّ إلى المحاكي (`fallback`) فاللوحة تبقى حيّة.
+  let posts = 0;
+  await page.route('**/inventory/categories/', async (route) => {
+    if (route.request().method() !== 'POST') { await route.fallback(); return; }
+    posts += 1;
+    await route.fulfill({
+      status: 500, contentType: 'application/json',
+      body: JSON.stringify({ detail: 'اسم التصنيف مرفوض من الخادم.' }),
+    });
+  });
+
+  await page.getByRole('option', { name: 'أضف «مكاتب»' }).click();
+
+  // خطأ الخادم بنصّه هو (لا رسالة الواجهة الاحتياطية)، واللوحة مفتوحة بالاستعلام
+  // نفسه والخيار عاد قابلاً للضغط — لا تُغلق فيضيع ما كتبه المستخدم.
+  await expect(page.getByText('اسم التصنيف مرفوض من الخادم.')).toBeVisible();
+  await expect(page.getByLabel('بحث التصنيفات')).toHaveValue('مكاتب');
+  await expect(page.getByRole('option', { name: 'أضف «مكاتب»' })).toBeEnabled();
+  expect(posts).toBe(1);
+  expect(bulkBodies).toEqual([]);
+});
+
+test('«أضف» يوّحد المسافات: «مكاتب  جديدة» يُرسَل ويُعرض «مكاتب جديدة»', async ({ page }) => {
+  await start(page);
+  const tree = await openTree(page);
+  await expandCategory(tree, 'إطارات');
+
+  await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'نقل إلى تصنيف…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'التصنيف' }).click();
+  // مسافتان بين الكلمتين — الاسم المطبَّع للعرض والإرسال بمسافةٍ واحدة،
+  // والأحرف كما كتبها المستخدم.
+  await page.getByLabel('بحث التصنيفات').fill('مكاتب  جديدة');
+  await page.getByRole('option', { name: 'أضف «مكاتب جديدة»' }).click();
+
+  await expect.poll(() => createdCategoryBodies.length).toBe(1);
+  expect(createdCategoryBodies[0]).toEqual({ name: 'مكاتب جديدة', parent: null });
+  await expect(dialog.getByRole('combobox', { name: 'التصنيف' })).toContainText('مكاتب جديدة');
+});
+
+test('خطأ نموذج التذييل لا يظهر مرتين: موضعٌ واحد لكل خطأ', async ({ page }) => {
+  await start(page);
+  const tree = await openTree(page);
+  await expandCategory(tree, 'إطارات');
+
+  await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'نقل إلى تصنيف…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'التصنيف' }).click();
+  // خيار «أضف» ظاهر في النتائج، ونموذج التذييل مفتوح في اللحظة نفسها.
+  await page.getByLabel('بحث التصنيفات').fill('مكاتب');
+  await page.getByRole('button', { name: 'إنشاء تصنيف' }).click();
+  // «إضافة» باسمٍ فارغ ⇒ خطأ التذييل المحلي.
+  await page.getByRole('button', { name: 'إضافة', exact: true }).click();
+
+  await expect(page.getByText('اسم التصنيف مطلوب.')).toHaveCount(1);
+});
+
+test('«أضف» لا يظهر لاسمٍ موجودٍ بالضبط ولا لاسمٍ يختلف بالهمزة وحدها', async ({ page }) => {
+  await start(page);
+  const tree = await openTree(page);
+  await expandCategory(tree, 'إطارات');
+
+  await tree.getByRole('button', { name: /إطار 205\/55 — ميشلان/ }).click({ button: 'right' });
+  await page.getByRole('button', { name: 'نقل إلى تصنيف…' }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('combobox', { name: 'التصنيف' }).click();
+  const search = page.getByLabel('بحث التصنيفات');
+
+  // الاسم موجودٌ حرفاً: النتيجةُ نفسها ولا خيار إضافة.
+  await search.fill('إطارات');
+  await expect(page.getByRole('option', { name: 'إطارات', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^أضف/ })).toHaveCount(0);
+
+  // وهمزةٌ مختلفة لا تعني اسماً آخر — «اطارات» هو «إطارات» بعد التطبيع العربي.
+  await search.fill('اطارات');
+  await expect(page.getByRole('option', { name: 'إطارات', exact: true })).toBeVisible();
+  await expect(page.getByRole('option', { name: /^أضف/ })).toHaveCount(0);
+  expect(createdCategoryBodies).toEqual([]);
+});
+
+test('بلا inventory.item.manage: لا «أضف» — والمنتقي يبقى على «لا تطابق»', async ({ page }) => {
+  await start(page, ['inventory.item.view']);
+  await page.goto('/items');
+  await page.waitForLoadState('networkidle');
+
+  // نافذة النقل نفسها لا تُفتح لهذا الدور (البند 4 أثبته)، فالبوابة تُقاس على
+  // حقل منتقي كرت المنتج — وهو يمرّر `allowCreate` دائماً، والمقصود هنا بوابةُ
+  // `inventory.item.manage` وحدها.
+  await page.getByTitle('منتج جديد (Ctrl+Ins)').click();
+  await page.getByRole('tab', { name: 'بيانات عامة' }).click();
+  await page.getByRole('combobox', { name: 'التصنيف' }).first().click();
+  await page.getByLabel('بحث التصنيفات').fill('مكاتب');
+
+  await expect(page.getByText('لا تطابق')).toBeVisible();
+  await expect(page.getByRole('option', { name: /^أضف/ })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'إنشاء تصنيف' })).toHaveCount(0);
+  expect(createdCategoryBodies).toEqual([]);
 });

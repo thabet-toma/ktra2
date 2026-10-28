@@ -50,6 +50,20 @@ import { InactiveBanner } from "../shared/ActiveStatusControls";
 import { useProductActive } from "../../hooks/useProductActive";
 import { humanizeThrown } from "../../utils/drfError";
 import { formatTimeValue } from "../../utils/formatDate";
+import {
+  STORAGE_CODE_MAX,
+  STORAGE_COLUMN_MAX,
+  STORAGE_ROW_MAX,
+  blankStorageLocationDraft,
+  nextStorageWarehouse,
+  storageDraftsFromRows,
+  storageLocationIssues,
+  storageLocationLabel,
+  storageLocationsChanged,
+  storageLocationsPayload,
+  storageWarehouseChoices,
+} from "../../utils/storageLocations";
+import type { StorageLocationDraft, WarehouseOption } from "../../utils/storageLocations";
 
 type Props = {
   productId: number | null;
@@ -153,8 +167,6 @@ type FormState = {
   description: string;
   /** #147 M2: صورة البراند المرجعية الواحدة — يراها المورّد على رابط طلب عرض السعر. */
   image_url: string;
-  /** موقع التخزين (رفّ/ممر) — إرشادي بلا أثر مخزني. */
-  storage_location: string;
   /** وحدة القياس — معرّفٌ من جدول الوحدات لا نصّ حرّ: النصّ لم يكن يُحفظ أصلاً. */
   uom_id: number | null;
   uom2: number | null; uom2_factor: string;
@@ -179,7 +191,7 @@ const blankForm = (): FormState => ({
   new_brands: [],
   variant_group: "",
   barcode: "", is_serialized: false,
-  description: "", storage_location: "",
+  description: "",
   image_url: "",
   uom_id: null, uom2: null, uom2_factor: "",
   uom3: null, uom3_factor: "",
@@ -322,6 +334,54 @@ export const ItemForm: React.FC<Props> = ({
   const categoryFieldRef = useRef<HTMLDivElement>(null);
   const focusCategoryAfterTabRef = useRef(false);
 
+  // ── TASK-2b: مواقع التخزين لكل مخزن ─────────────────────────────────
+  const [storageDrafts, setStorageDrafts] = useState<StorageLocationDraft[]>([]);
+  /** ما حُمِّل من الخادم — مرجعُ المقارنة قبل أي `PUT` (الخادم يستبدل القائمة كلها). */
+  const [storageSaved, setStorageSaved] = useState<StorageLocationDraft[]>([]);
+  const [storageLoading, setStorageLoading] = useState(false);
+  /** فشلُ جلب المواقع: القسم يعرض سببه ولا يُرسَل عند الحفظ. */
+  const [storageLoadError, setStorageLoadError] = useState<string | null>(null);
+  const [warehouses, setWarehouses] = useState<WarehouseOption[]>([]);
+  /** النصّ القديم غير المنقول (`Product.storage_location`) — عرضٌ للقراءة وحده. */
+  const [legacyStorageLocation, setLegacyStorageLocation] = useState("");
+  /** حارسُ سباق: ردُّ منتجٍ سابقٍ لا يدهس مواقع المنتج المفتوح الآن. */
+  const storageLoadSeqRef = useRef(0);
+
+  /**
+   * TASK-2b: جلبُ مواقع المنتج من نقطتها المستقلّة. فشلُه **لا يكسر النموذج**:
+   * القسم يعرض سببه ولا يُرسَل عند الحفظ — لا نكتب فوق مواقع لم نقرأها.
+   */
+  const loadStorageLocations = useCallback((id: number) => {
+    const seq = ++storageLoadSeqRef.current;
+    setStorageLoading(true);
+    setStorageLoadError(null);
+    // تُفرَّغ فوراً: مواقعُ منتجٍ سابقٍ لا تُقارَن بمنتجٍ فُتح للتوّ.
+    setStorageDrafts([]);
+    setStorageSaved([]);
+    inventoryApi.getProductStorageLocations(id)
+      .then((rows) => {
+        if (seq !== storageLoadSeqRef.current) return;
+        const drafts = storageDraftsFromRows(rows);
+        setStorageDrafts(drafts);
+        setStorageSaved(drafts);
+      })
+      .catch((ex: unknown) => {
+        if (seq !== storageLoadSeqRef.current) return;
+        setStorageLoadError(ex instanceof Error ? ex.message : "تعذّر تحميل مواقع التخزين");
+      })
+      .finally(() => {
+        if (seq === storageLoadSeqRef.current) setStorageLoading(false);
+      });
+  }, []);
+
+  const clearStorageLocations = useCallback(() => {
+    storageLoadSeqRef.current += 1;
+    setStorageDrafts([]);
+    setStorageSaved([]);
+    setStorageLoadError(null);
+    setStorageLoading(false);
+  }, []);
+
   const [currencies, setCurrencies] = useState<Array<{ CurrencyID: number; CurrencyCode: string }>>([]);
   const [accounts, setAccounts] = useState<AccountNodeLike[]>([]);
 
@@ -330,6 +390,11 @@ export const ItemForm: React.FC<Props> = ({
     // العملات لشرائح الأسعار، والحسابات لتجاوزات الترحيل — كلاهما صار يُحفظ.
     accountingApi.getCurrencies().then(setCurrencies).catch(() => setCurrencies([]));
     accountingApi.getAccounts().then(setAccounts).catch(() => setAccounts([]));
+    // TASK-2b: مخازن الشركة لاختيار موقع التخزين — الفعّالُ منها يُقترح، والمحفوظُ
+    // على المنتج يبقى معروضاً ولو صار معطَّلاً (الفِلترة في `storageWarehouseChoices`).
+    inventoryApi.getWarehouses().then(
+      (rows) => setWarehouses(rows as WarehouseOption[]),
+    ).catch(() => setWarehouses([]));
   }, []);
 
   // مسار التصنيف المختار — يُعرض كشارةٍ في الشريط، وحقلُ المنتقي نفسه يعرض
@@ -477,7 +542,10 @@ export const ItemForm: React.FC<Props> = ({
     setCurrentId(null);
     setSavedCategory(null);
     setFamilyBrandCount(1);
-  }, []);
+    // TASK-2b: منتجٌ جديد بلا مواقع محفوظة ولا نصٍّ قديم.
+    clearStorageLocations();
+    setLegacyStorageLocation("");
+  }, [clearStorageLocations]);
 
   // ── T-SERIAL: الباركود ─────────────────────────────────────────────────
   const [barcodeBusy, setBarcodeBusy] = useState(false);
@@ -522,6 +590,11 @@ export const ItemForm: React.FC<Props> = ({
 
   const applyProduct = useCallback((p: Record<string, unknown>, isDuplicate = false) => {
     setNewBrandDraft("");
+    // TASK-2b: النصّ القديم يُقرأ للعرض وحده — لم يبقَ حقلاً في النموذج ولا في الحمولة.
+    setLegacyStorageLocation(isDuplicate ? "" : String(p.storage_location ?? ""));
+    // TASK-2b: المواقع تُجلَب بنقطةٍ مستقلّة؛ والنسخة تبدأ بلا مواقع.
+    if (isDuplicate) clearStorageLocations();
+    else loadStorageLocations(Number(p.id));
     setForm((prev) => ({
       ...prev,
       sku: isDuplicate ? "" : String(p.sku ?? ""),
@@ -536,7 +609,6 @@ export const ItemForm: React.FC<Props> = ({
       new_brands: [],
       variant_group: String(p.variant_group ?? ""),
       description: String(p.description ?? ""),
-      storage_location: String(p.storage_location ?? ""),
       image_url: String(p.image_url ?? ""),
       uom_id: p.uom_id != null ? Number(p.uom_id) : null,
       uom2: p.uom2 != null ? Number(p.uom2) : null,
@@ -572,7 +644,7 @@ export const ItemForm: React.FC<Props> = ({
     setSavedCategory(isDuplicate ? null : (p.category ? Number(p.category) : null));
     setFamilyBrandCount(isDuplicate ? 1 : Number(p.family_brand_count ?? 1) || 1);
     setErr(null); setMsg(isDuplicate ? "أنت تنسخ هذا المنتج إلى منتجٍ منفصل. لإضافة براندٍ للمنتج نفسِه استعمل «+ براند» في كرته بدل النسخ (يتطلّب صلاحية «إدارة المنتجات والفئات»)." : null);
-  }, []);
+  }, [clearStorageLocations, loadStorageLocations]);
 
   useEffect(() => {
     if (duplicateId != null) {
@@ -589,6 +661,14 @@ export const ItemForm: React.FC<Props> = ({
 
   const handleSave = async () => {
     if (!form.name_ar.trim() && !form.name_en.trim()) { setErr("اسم المنتج مطلوب."); return; }
+    // TASK-2b: التحقّق من المواقع **قبل** حفظ المنتج أصلاً — سطرٌ ناقص لا يُحفظ
+    // معه شيء، ورسالته عند حقله في «بيانات أخرى» (والتبويب يُفتح كي تُرى).
+    if (storageLocationIssues(storageDrafts).length > 0) {
+      setMsg(null);
+      setErr("موقع التخزين ناقص — أكمل حقوله أو احذف سطره. لم يُحفظ المنتج.");
+      setActiveTab("other");
+      return;
+    }
     setSaving(true); setErr(null); setMsg(null);
     try {
       // T-ITEMS M1: المنتج يُحفَظ تحت التصنيف المختار حرفياً.
@@ -621,7 +701,6 @@ export const ItemForm: React.FC<Props> = ({
         uom3: form.uom3,
         uom3_factor: form.uom3_factor.trim() ? Number(form.uom3_factor) : null,
         description: form.description.trim() || null,
-        storage_location: form.storage_location.trim() || null,
         // #147 M2: صورة البراند المرجعية — فارغة تعني بلا صورة (لا null، الحقل نصّي بلا NULL).
         image_url: form.image_url.trim(),
         sale_account_override: form.sale_account,
@@ -687,6 +766,25 @@ export const ItemForm: React.FC<Props> = ({
         // تغيير التصنيف.
         setFamilyBrandCount(Number(refreshed.family_brand_count ?? 1) || 1);
       } catch { /* تجاهل */ }
+      // TASK-2b: المواقع تُحفَظ **بعد** المنتج لأنها تحتاج معرّفه — وهو `savedId`
+      // في التعديل والإنشاء معاً. ولا تُرسَل إلا إن تغيّرت عمّا حُمِّل (الخادم
+      // يستبدل القائمة كاملةً)، ولا إن فشل جلبُها (لا كتابةٌ فوق ما لم يُقرأ).
+      let storageFailed = false;
+      if (storageLoadError == null && storageLocationsChanged(storageSaved, storageDrafts)) {
+        try {
+          const rows = await inventoryApi.setProductStorageLocations(
+            savedId, storageLocationsPayload(storageDrafts));
+          const saved = storageDraftsFromRows(rows);
+          setStorageDrafts(saved);
+          setStorageSaved(saved);
+        } catch (ex: unknown) {
+          // المنتج حُفظ فعلاً: الرسالة تقول ذلك ولا تدّعي نجاح المواقع، والكرت
+          // يبقى مفتوحاً بقيمه لإعادة المحاولة (`onSaved` لا يُنادى).
+          storageFailed = true;
+          setErr(`حُفظ المنتج، وتعذّر حفظ موقع التخزين: ${
+            ex instanceof Error ? ex.message : "خطأ غير متوقع"}`);
+        }
+      }
       // النظرة العامة تُقرأ من الخادم — أعِد تحميلها كي يظهر سعر البيع الجديد وربحه.
       insights.reload();
       // ISSUE #121: حفظٌ صريحٌ ناجح ⇒ انتهت وظيفة المسودّة المحلية.
@@ -694,7 +792,7 @@ export const ItemForm: React.FC<Props> = ({
       void discardDraft();
       // براندٌ لم يُضَف ⇒ يبقى الكرتُ مفتوحاً على رسالته وشريطِ البراندات لإعادة المحاولة؛
       // `onSaved` عند `ItemsManagement` يُغلق الكرت فتختفي الرسالةُ قبل أن تُقرأ.
-      if (!partialBrands) onSaved();
+      if (!partialBrands && !storageFailed) onSaved();
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "فشل الحفظ");
     } finally {
@@ -1353,6 +1451,193 @@ export const ItemForm: React.FC<Props> = ({
     </div>
   );
 
+  // ── TASK-2b: مواقع التخزين — سطرٌ لكل مخزن ─────────────────────────────
+  /*
+   * كان هنا حقلٌ نصّيٌّ واحد («رفّ/ممر») لا يعرف أيَّ مخزنٍ يصف، ولا يفرّق
+   * «عمود ٣ صف ٧» من «A86» — صار موقعاً لكل مخزن على عقد
+   * `products/{id}/storage-locations/`. ونصُّه القديم يبقى ظاهراً للقراءة وحدها
+   * حتى يُنقل إلى مخزن (`Product.storage_location` ما زال على الخادم، ويُتجاهل
+   * حين لا يُرسَل).
+   */
+  const storageIssues = storageLocationIssues(storageDrafts);
+  /** خيارات السطر: المخازن المتاحة له، ويبقى مخزنه المحفوظ معروضاً وإن غاب عن القائمة. */
+  const storageRowChoices = (index: number): WarehouseOption[] => {
+    const choices = storageWarehouseChoices(warehouses, storageDrafts, index);
+    const draft = storageDrafts[index];
+    if (draft?.warehouse != null && !choices.some((w) => w.id === draft.warehouse)) {
+      return [{
+        id: draft.warehouse,
+        name: draft.warehouse_name || `#${draft.warehouse}`,
+      }, ...choices];
+    }
+    return choices;
+  };
+  const patchStorageRow = (index: number, next: Partial<StorageLocationDraft>) => {
+    dirtyRef.current = true;
+    setStorageDrafts((rows) => rows.map((row, i) => (i === index ? { ...row, ...next } : row)));
+  };
+  const addStorageRow = () => {
+    const warehouse = nextStorageWarehouse(warehouses, storageDrafts);
+    if (!warehouse) return;
+    dirtyRef.current = true;
+    setStorageDrafts((rows) => [...rows, blankStorageLocationDraft(warehouse)]);
+  };
+  const removeStorageRow = (index: number) => {
+    dirtyRef.current = true;
+    setStorageDrafts((rows) => rows.filter((_, i) => i !== index));
+  };
+
+  const storageLocationsSection = (
+    <div className="col-span-2 border-t border-[var(--ktra-border)] pt-2" data-testid="storage-locations">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <span className="text-sm font-bold text-[var(--ktra-ink)]">موقع التخزين</span>
+        <span className="text-xs text-[var(--ktra-ink-soft)]">
+          إرشاديٌّ لكل مخزن — لا رصيد عليه ولا حركة مخزون
+        </span>
+      </div>
+
+      {storageLoading && (
+        <div className="mb-2 text-xs text-[var(--ktra-ink-soft)]">…جارٍ تحميل المواقع</div>
+      )}
+      {storageLoadError != null && (
+        <div role="alert" className="mb-2 text-xs text-[var(--ktra-danger)]">
+          تعذّر تحميل مواقع التخزين ({storageLoadError}) — لن تُرسَل مواقع هذا المنتج عند الحفظ.
+        </div>
+      )}
+      {!storageLoading && storageLoadError == null
+        && storageDrafts.length === 0 && legacyStorageLocation.trim() !== "" && (
+        <div className="mb-2 text-xs text-[var(--ktra-ink-soft)]" data-testid="legacy-storage-location">
+          موقع قديم (نص): {legacyStorageLocation.trim()} — أضفه لمخزنٍ ليُحفظ بالشكل الجديد
+        </div>
+      )}
+
+      {storageDrafts.map((draft, index) => {
+        const rowIssues = storageIssues.filter((issue) => issue.index === index);
+        return (
+          <div
+            key={index}
+            data-testid={`storage-row-${index}`}
+            className="mb-2 rounded border border-[var(--ktra-border)] p-2"
+          >
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
+                المخزن
+                <select
+                  className="ktra-input min-w-40"
+                  value={draft.warehouse ?? ""}
+                  onChange={(e) => {
+                    const warehouseId = Number(e.target.value) || null;
+                    const warehouse = warehouses.find((w) => w.id === warehouseId);
+                    patchStorageRow(index, {
+                      warehouse: warehouseId,
+                      warehouse_name: warehouse?.name ?? "",
+                    });
+                  }}
+                >
+                  <option value="">— اختر مخزناً —</option>
+                  {storageRowChoices(index).map((warehouse) => (
+                    <option key={warehouse.id} value={warehouse.id}>
+                      {warehouse.name}{warehouse.is_active === false ? " (غير نشط)" : ""}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <div className="flex items-center gap-3 text-xs text-[var(--ktra-ink)]">
+                <label className="flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name={`storage-kind-${index}`}
+                    checked={draft.kind === "grid"}
+                    onChange={() => patchStorageRow(index, { kind: "grid" })}
+                  />
+                  عمود وصف
+                </label>
+                <label className="flex items-center gap-1">
+                  <input
+                    type="radio"
+                    name={`storage-kind-${index}`}
+                    checked={draft.kind === "code"}
+                    onChange={() => patchStorageRow(index, { kind: "code" })}
+                  />
+                  رمز القسم
+                </label>
+              </div>
+
+              {draft.kind === "grid" ? (
+                <>
+                  <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
+                    العمود
+                    <input
+                      className="ktra-input w-24"
+                      value={draft.column}
+                      maxLength={STORAGE_COLUMN_MAX}
+                      placeholder="B"
+                      onChange={(e) => patchStorageRow(index, { column: e.target.value })}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
+                    الصف
+                    <input
+                      className="ktra-input w-24"
+                      value={draft.row}
+                      maxLength={STORAGE_ROW_MAX}
+                      placeholder="7"
+                      onChange={(e) => patchStorageRow(index, { row: e.target.value })}
+                    />
+                  </label>
+                </>
+              ) : (
+                <label className="flex flex-col gap-1 text-xs text-[var(--ktra-ink-soft)]">
+                  رمز القسم
+                  <input
+                    className="ktra-input w-40"
+                    value={draft.code}
+                    maxLength={STORAGE_CODE_MAX}
+                    placeholder="مثال: A86"
+                    onChange={(e) => patchStorageRow(index, { code: e.target.value })}
+                  />
+                </label>
+              )}
+
+              {rowIssues.length === 0 && (
+                <span className="text-xs text-[var(--ktra-ink-soft)]">
+                  سيُعرض: {storageLocationLabel(draft.kind, draft.column, draft.row, draft.code)}
+                </span>
+              )}
+              <button
+                type="button"
+                title="حذف الموقع"
+                onClick={() => removeStorageRow(index)}
+                className="ms-auto rounded px-1 text-[var(--ktra-ink-soft)] hover:text-[var(--ktra-danger)]"
+              >
+                <Trash2 className="h-4 w-4" />
+              </button>
+            </div>
+            {rowIssues.map((issue) => (
+              <div key={issue.field} className="mt-1 text-xs text-[var(--ktra-danger)]">
+                {issue.message}
+              </div>
+            ))}
+          </div>
+        );
+      })}
+
+      {/* لا إضافةَ حين لم تُقرأ المواقع: سطرٌ جديد فوق مواقعَ مجهولة يُرسَل بدلَها
+          عند أوّل نجاح — فالكتابةُ تُقفل حتى يُعاد فتح الكرت. */}
+      {storageLoadError == null && nextStorageWarehouse(warehouses, storageDrafts) != null && (
+        <button type="button" className="ktra-btn ktra-btn-primary" onClick={addStorageRow}>
+          <Plus className="h-4 w-4" /> إضافة موقع
+        </button>
+      )}
+      {warehouses.length === 0 && (
+        <div className="text-xs text-[var(--ktra-ink-soft)]">
+          لم تُحمَّل المخازن — أعد فتح الكرت لإضافة موقع.
+        </div>
+      )}
+    </div>
+  );
+
   // ── صفحة 5: بيانات أخرى ──
   const tabOther = (
     <div style={{ padding: "8px 4px" }}>
@@ -1361,11 +1646,7 @@ export const ItemForm: React.FC<Props> = ({
           <input className="ktra-input" value={form.description}
             title="وصفٌ داخلي — غير وصف المتجر الذي يراه الزبون"
             onChange={(e) => patch("description", e.target.value)} />, 2)}
-        {fld("موقع التخزين (رفّ/ممر)",
-          <input className="ktra-input" value={form.storage_location}
-            placeholder="مثال: A-3"
-            title="إرشادي — لا رصيد عليه ولا حركة مخزون"
-            onChange={(e) => patch("storage_location", e.target.value)} />)}
+        {storageLocationsSection}
         {/* T-ITEMS M5: وحدتان إضافيتان بمعاملَي تحويلٍ إلى الوحدة الرئيسية. */}
         {fld("الوحدة الثانية",
           <select className="ktra-input" value={form.uom2 ?? ""}

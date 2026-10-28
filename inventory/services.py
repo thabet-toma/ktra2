@@ -12,8 +12,8 @@ from django.db import IntegrityError, transaction
 from django.core.exceptions import ValidationError
 
 from .models import (
-    Product, ProductFamily, ProductMerge, StockLayer, StockLayerConsumption,
-    StockMovement,
+    Product, ProductFamily, ProductMerge, ProductStorageLocation, StockLayer,
+    StockLayerConsumption, StockMovement,
 )
 from django.utils import timezone
 from . import fifo
@@ -1641,6 +1641,35 @@ def _sold_totals_by_product(tenant_id: int, product_ids: list[int]) -> dict:
     return {r['product_id']: (r['q'] or 0, r['v'] or 0) for r in rows}
 
 
+def product_storage_locations(*, tenant_id: int, product_id: int) -> list[dict]:
+    """مواقع تخزين المنتج في مخازن شركته — استعلامٌ واحد مرتّبٌ باسم المخزن ثم id.
+
+    الموقع **إرشادي**: لا رصيدَ لكل موقع ولا حركةَ مخزونٍ ولا قيدَ عليه. يقرؤه
+    إجراءُ `products/{id}/storage-locations/` وكرتُ المنتج (`product_profile`)
+    معاً، فشكلُ الصفّ — ومنه `label` — مصدرُه واحد. والفلترة بالشركة هنا صريحة
+    لا اعتماداً على حقل المنتج: كلُّ استعلامٍ على هذا الجدول مقيَّدٌ بها.
+    """
+    rows = (
+        ProductStorageLocation.objects
+        .filter(tenant_id=tenant_id, product_id=product_id)
+        .select_related('warehouse')
+        .order_by('warehouse__name', 'id')
+    )
+    return [
+        {
+            'id': row.id,
+            'warehouse': row.warehouse_id,
+            'warehouse_name': row.warehouse.name,
+            'kind': row.kind,
+            'column': row.column,
+            'row': row.row,
+            'code': row.code,
+            'label': row.label,
+        }
+        for row in rows
+    ]
+
+
 def product_profile(*, tenant_id: int, product_id: int) -> dict:
     """Header KPIs for the product profile. Totals come from posted documents;
     on-hand / valuation come from the canonical Product fields (A4)."""
@@ -1722,6 +1751,23 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
     # مكانها الأب؛ تُقرأ منه إن كان للبراند أب، وإلا من صفّه (كما كانت دائماً).
     resolved_category = resolve_family_field(p, 'category')
 
+    # TASK-2a: مواقع التخزين لكل مخزن — استعلامٌ واحد. المفتاح `warehouse_id`
+    # هنا (لا `warehouse` كما في الإجراء) لأن كل صفوف الكرت تسمّي معرّفاتها
+    # `..._id`؛ والقيم نفسها و`label` من `product_storage_locations` وحدها.
+    storage_locations = [
+        {
+            'warehouse_id': row['warehouse'],
+            'warehouse_name': row['warehouse_name'],
+            'kind': row['kind'],
+            'column': row['column'],
+            'row': row['row'],
+            'code': row['code'],
+            'label': row['label'],
+        }
+        for row in product_storage_locations(
+            tenant_id=tenant_id, product_id=product_id)
+    ]
+
     return {
         'id': p.id,
         'sku': p.sku,
@@ -1764,6 +1810,7 @@ def product_profile(*, tenant_id: int, product_id: int) -> dict:
         'sold_value': str(sold['v'] or 0),
         'avg_weekly_sales': str(_net_rate(28, '4')),
         'avg_monthly_sales': str(_net_rate(90, '3')),
+        'storage_locations': storage_locations,
     }
 
 

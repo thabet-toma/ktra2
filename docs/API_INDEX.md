@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **984**
+عدد النقاط: **985**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -411,6 +411,7 @@
 | `/api/inventory/products/{pk}/set-active/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/stock-ledger/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/products/{pk}/stock-movements/` | `ProductViewSet` | `inventory/views.py` |
+| `/api/inventory/products/{pk}/storage-locations/` | `ProductViewSet` | `inventory/views.py` |
 | `/api/inventory/serials/` | `ProductSerialViewSet` | `inventory/views.py` |
 | `/api/inventory/stock-movements/` | `StockMovementViewSet` | `inventory/views.py` |
 | `/api/inventory/stock-movements/summary/` | `StockMovementViewSet` | `inventory/views.py` |

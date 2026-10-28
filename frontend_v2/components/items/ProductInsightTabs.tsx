@@ -26,6 +26,17 @@ import { productProfilePath } from "../../utils/entityLinks";
 import { AddBrandModal } from "./AddBrandModal";
 import { usePermissions } from "../../contexts/PermissionsContext";
 
+/** TASK-2b: موقعُ المنتج في مخزنٍ كما يعيده كرت المنتج — المفتاح `warehouse_id` هنا (لا `warehouse`). */
+export interface ProductProfileStorageLocation {
+  warehouse_id: number;
+  warehouse_name: string;
+  kind: "grid" | "code";
+  column: string;
+  row: string;
+  code: string;
+  label: string;
+}
+
 export interface ProductProfileData {
   id: number;
   sku: string;
@@ -60,6 +71,8 @@ export interface ProductProfileData {
   profit_per_unit?: string | null;
   profit_margin_pct?: string | null;
   sale_valuation?: string | null;
+  /** TASK-2b: موقعُ المنتج في كل مخزن — يُعرض باسم المخزن و`label` الموقع. */
+  storage_locations?: ProductProfileStorageLocation[];
 }
 
 export interface LedgerRow {
@@ -203,6 +216,25 @@ export const ProductOverview: React.FC<{
         <Kpi label="الوحدة" value={profile.uom || "—"} />
         <Kpi label="طبيعة المنتج" value={profile.is_service ? "خدمة" : "بضاعة"} />
       </Section>
+
+      {/* TASK-2b: موقعُ التخزين لكل مخزن — بطاقةٌ باسم المخزن تحمل `label` الموقع.
+          الخدمة لا موقعَ مادّياً لها فلا قسمَ لها (القسم كلُّه يُخفى). */}
+      {!profile.is_service && (
+        <Section title="موقع التخزين">
+          {(profile.storage_locations ?? []).length === 0 ? (
+            <Kpi label="المواقع" value="لم يُحدَّد" />
+          ) : (
+            (profile.storage_locations ?? []).map((location) => (
+              <Kpi
+                key={location.warehouse_id}
+                label={location.warehouse_name || `#${location.warehouse_id}`}
+                value={location.label || "—"}
+                hint={location.kind === "grid" ? "عمود وصف" : "رمز القسم"}
+              />
+            ))
+          )}
+        </Section>
+      )}
 
       {/* #23: «كرت المنتج يعرض المجمَّع والتفصيل معاً» — حين يتبع هذا البراند
           منتجاً له إخوة، يظهر مجمّعهم وتفصيلهم هنا بلا مغادرة الكرت. */}

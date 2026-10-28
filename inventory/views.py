@@ -11,12 +11,14 @@ from rest_framework import filters, serializers, viewsets, status
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import (
-    ProductCategory, ProductFamily, Product, UnitOfMeasure, StockMovement,
-    SupplierProduct, Warehouse, WarehouseTransfer, Stocktake, StocktakeCountLink,
+    ProductCategory, ProductFamily, Product, ProductStorageLocation, UnitOfMeasure,
+    StockMovement, SupplierProduct, Warehouse, WarehouseTransfer, Stocktake,
+    StocktakeCountLink,
 )
 from .serializers import (
     CategorySerializer, ProductFamilySerializer, ProductSerializer,
-    ProductLookupSerializer, UnitOfMeasureSerializer,
+    ProductLookupSerializer, ProductStorageLocationWriteSerializer,
+    STORAGE_LOCATIONS_MAX, UnitOfMeasureSerializer,
     StockMovementSerializer, WarehouseSerializer,
     WarehouseTransferSerializer, StocktakeSerializer, StocktakeListSerializer,
     SupplierProductSerializer,
@@ -27,7 +29,7 @@ from .services import (
     post_warehouse_transfer, unpost_warehouse_transfer, post_stocktake,
     warehouse_stock_summary, stocktake_scope_counts,
     stocktake_count_scope_category_ids, stocktake_line_in_count_scope,
-    _stocktake_scope_products, product_display_name,
+    _stocktake_scope_products, product_display_name, product_storage_locations,
 )
 from tenants.models import Tenant
 from core.access import require_perm, requires_perm, user_tenant_role
@@ -798,6 +800,104 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
         product = self.get_object()
         return Response(product_cost_breakdown(
             tenant_id=product.tenant_id, product_id=product.id))
+
+    # ── TASK-2a: مواقع التخزين لكل مخزن ─────────────────────────────────
+    @action(detail=True, methods=['get', 'put'], url_path='storage-locations')
+    def storage_locations(self, request, pk=None):
+        """مواقعُ المنتج في المخازن — `GET` قراءةٌ و`PUT` استبدالُ القائمة كاملةً.
+
+        الموقع **إرشادي**: لا حركةَ مخزونٍ ولا رصيدَ لكل موقع ولا قيد — الرصيد
+        يبقى رقمَ الشركة الواحد (`Product.quantity_on_hand`). والصلاحية هي
+        قاعدةُ تعديل المنتج نفسها (قرار المالك 2026-10-21: البائع يعدّل المنتج
+        من الفاتورة) — **لا** `inventory.item.manage`، فـ«مستعرض» يقرأ ولا
+        يكتب (`TenantRolePermission` ترفض `PUT` عليه 403 قبل قراءة الحمولة).
+        """
+        product = self.get_object()  # مقيَّدٌ بالشركة ⇒ منتجُ غيرها 404
+        tenant_id = product.tenant_id
+        if request.method == 'GET':
+            return Response(product_storage_locations(
+                tenant_id=tenant_id, product_id=product.id))
+
+        payload = request.data
+        if not isinstance(payload, list):
+            return Response(
+                {'error': 'جسم الطلب يجب أن يكون قائمةَ مواقع'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if len(payload) > STORAGE_LOCATIONS_MAX:
+            return Response(
+                {'error': f'الحدّ الأقصى {STORAGE_LOCATIONS_MAX} موقعاً في الطلب الواحد'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        # `{'request': request}` وحده لا `get_serializer_context()`: تلك تبني
+        # خرائطَ كرت المنتج (المحجوز والحدود والاقتراحات) ولا يقرؤها هذا
+        # السيريالايزر — استعلاماتٌ لا لزوم لها في مسار كتابة.
+        serializer = ProductStorageLocationWriteSerializer(
+            data=payload, many=True, context={'request': request})
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            # قفلُ صفّ المنتج مُسلسِلٌ لكتابتين متزامنتين على مواقعه: بلا قفلٍ
+            # يقرأ الطلبان الصفوفَ نفسها فيُدخل كلٌّ منهما مخزناً يراه الآخر
+            # غائباً ⇒ ينكسر القيد الفريد بخطأ 500 بدل أن ينتظر دوره.
+            Product.objects.select_for_update().filter(pk=product.pk).first()
+            self._replace_storage_locations(product, serializer.validated_data)
+        rows = product_storage_locations(
+            tenant_id=tenant_id, product_id=product.id)
+        logger.info(
+            'product storage-locations tenant=%s product=%s count=%s user=%s',
+            tenant_id, product.id, len(rows), request.user.id,
+        )
+        label = product.name_ar or product.name_en or product.sku
+        log_activity(
+            action='update',
+            entity_type='product',
+            entity_id=product.id,
+            entity_label=label,
+            description=f'حدّد مواقع تخزين المنتج «{label}» ({len(rows)} موقعاً)',
+            metadata={
+                'storage_locations': len(rows),
+                'warehouse_ids': [row['warehouse'] for row in rows],
+            },
+            request=request,
+        )
+        return Response(rows)
+
+    def _replace_storage_locations(self, product, rows):
+        """الحمولة تصف الحالة النهائية: الباقي يُحدَّث في مكانه، والغائب يُحذف.
+
+        الحذفُ وإعادةُ الإنشاء كانا سيغيّران معرّفَ كلّ صفٍّ في حفظٍ لم يتغيّر
+        فيه شيء — والصفّ يبقى مرجعاً لكل ما يشير إليه لاحقاً.
+        """
+        existing = {
+            row.warehouse_id: row
+            for row in ProductStorageLocation.objects.filter(
+                tenant_id=product.tenant_id, product_id=product.id)
+        }
+        wanted = {row['warehouse'].pk: row for row in rows}
+        for warehouse_id, data in wanted.items():
+            values = {
+                'kind': data['kind'],
+                'column': data.get('column', ''),
+                'row': data.get('row', ''),
+                'code': data.get('code', ''),
+            }
+            current = existing.get(warehouse_id)
+            if current is None:
+                ProductStorageLocation.objects.create(
+                    tenant_id=product.tenant_id, product_id=product.id,
+                    warehouse_id=warehouse_id, **values)
+                continue
+            for field, value in values.items():
+                setattr(current, field, value)
+            current.save(
+                update_fields=['kind', 'column', 'row', 'code', 'updated_at'])
+        stale = [
+            row.pk for warehouse_id, row in existing.items()
+            if warehouse_id not in wanted
+        ]
+        if stale:
+            ProductStorageLocation.objects.filter(
+                tenant_id=product.tenant_id, pk__in=stale).delete()
 
     # ── تجميع البراندات: الكرت المجمّع (مجموع كل البراندات لنفس المقاس/الأساس) ──
     # النقر على عقدة التصنيف في الشجرة/الجرد يفتح هذه الكروت. أعضاء المجموعة

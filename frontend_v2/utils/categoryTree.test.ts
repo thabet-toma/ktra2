@@ -11,6 +11,8 @@ import {
   checkStates,
   descendantIds,
   eligibleParents,
+  normalizeArabic,
+  normalizeSpaces,
   PATH_SEPARATOR,
   restrictCategories,
   restrictPathKeys,
@@ -282,6 +284,102 @@ test('visibleTreeRows: حلقة البيانات لا تُعلّق الرسم', 
   const looped: CategoryNodeLike[] = [cat(1, 'أ', 2), cat(2, 'ب', 1)];
   const rows = visibleTreeRows(looped, { expanded: new Set(['1', '2']) });
   assert.equal(rows.length <= 2, true);
+});
+
+// ─── TASK-1: بحثٌ ببداية الكلمة داخل أي مقطع، ورتبةٌ ثابتة للترتيب ─────────
+
+test('البحث ببداية الكلمة: «ش» يصيب ما تبدأ كلمةٌ به ولا يصيب ما تحويه في وسطها', () => {
+  // «شواحن» أوّلُ كلمة، «قطع شاحنات» كلمةٌ ثانية، و«مشاحن» تحوي «ش» في وسطها —
+  // المطابقة ببداية الكلمة لا بـ«يحوي» في أيّ موضع.
+  const tree: CategoryNodeLike[] = [cat(1, 'شواحن'), cat(2, 'قطع شاحنات'), cat(3, 'مشاحن')];
+  assert.deepEqual(searchCategories(tree, 'ش').map((hit) => hit.id), [1, 2]);
+});
+
+test('بحثٌ من كلمتين يبدأ به الاسم نفسه يصيب — لا يُفكَّك الاستعلام كلمةً كلمة', () => {
+  // «قطع غيار» تكتبها الشاشات فعلاً؛ وقاعدة «بداية كلمة» على الاستعلام كاملاً
+  // كانت تُسقطها فلا يبقى للتصنيف المسمّى بها نتيجة.
+  const tree: CategoryNodeLike[] = [cat(1, 'قطع غيار سيارات'), cat(2, 'محركات')];
+  assert.deepEqual(searchCategories(tree, 'قطع غيار').map((hit) => hit.id), [1]);
+  // ويبقى الاختبار على حدّ الكلمة: «طقطق» لا تصيب «قطع غيار».
+  assert.deepEqual(searchCategories(tree, 'طقطق'), []);
+});
+
+test('استعلامٌ من كلمتين يصيب من وسط الاسم على حدّ كلمة', () => {
+  // «قطع غيار» تبدأ بها «قطع غيار» (رتبة 0)، وتَلي في «زيت قطع غيار» (رتبة 1) —
+  // والفحص على كلمةٍ مفردة لا يبلغها أبداً لأن الاستعلام نفسه فيه مسافة.
+  const tree: CategoryNodeLike[] = [cat(1, 'قطع غيار'), cat(2, 'زيت قطع غيار')];
+  assert.deepEqual(searchCategories(tree, 'قطع غيار').map((hit) => hit.id), [1, 2]);
+  // ومقطعٌ أعلى يبدأ بها: المطابقة في الأب (رتبة 2 لابنه).
+  const nested: CategoryNodeLike[] = [cat(3, 'قطع غيار'), cat(4, 'فلتر', 3)];
+  assert.deepEqual(searchCategories(nested, 'قطع غيار').map((hit) => hit.id), [3, 4]);
+  // ويبقى على حدّ كلمة: «طع غيار» ليست بداية كلمةٍ في أيّ اسم.
+  assert.deepEqual(searchCategories(tree, 'طع غيار'), []);
+});
+
+test('مسافةٌ مكرّرة في الاستعلام لا تمنع المطابقة — المسافات تُوحَّد قبل المقارنة', () => {
+  const tree: CategoryNodeLike[] = [cat(1, 'قطع غيار')];
+  assert.deepEqual(searchCategories(tree, 'قطع  غيار').map((hit) => hit.id), [1]);
+  assert.deepEqual(searchCategories(tree, '  قطع   غيار  ').map((hit) => hit.id), [1]);
+  // واسمٌ في القائمة نفسها بمسافةٍ مكرّرة لا يفلت من البحث.
+  assert.deepEqual(searchCategories([cat(3, 'قطع  غيار')], 'قطع غيار').map((hit) => hit.id), [3]);
+});
+
+test('الترتيب بالرتب: اسم التصنيف، فكلمةٌ غير أولى فيه، فمقطعٌ أعلى في المسار', () => {
+  const tree: CategoryNodeLike[] = [
+    cat(1, 'شحن سريع'), // رتبة 0 — أوّل كلمةٍ في اسم التصنيف نفسه
+    cat(2, 'قطع شحن'), // رتبة 1 — كلمةٌ غير الأولى في الاسم نفسه
+    cat(3, 'شحن بري'), // رتبة 0 أيضاً، واسمُه أبو «ملحقات»
+    cat(4, 'ملحقات', 3), // رتبة 2 — المطابقة في المقطع الأعلى وحده
+  ];
+  // لو رُتّبت بالمسار وحدها لسبق «شحن بري ‹ ملحقات» (4) «شحن سريع» (1) و«قطع
+  // شحن» (2) — الرتبة تسبق ترتيب المسار. وداخل الرتبة 0 المسارُ يقرّر: «شحن بري»
+  // قبل «شحن سريع».
+  assert.deepEqual(searchCategories(tree, 'شحن').map((hit) => hit.id), [3, 1, 2, 4]);
+  assert.equal(searchCategories(tree, 'شحن')[3].pathLabel, 'شحن بري ‹ ملحقات');
+});
+
+test('التطبيع العربي: «ا» تجد «إطارات» و«آلات»، و«مكتبه» تجد «مكتبة»، و«علي» تجد «على»', () => {
+  const hamza: CategoryNodeLike[] = [cat(1, 'إطارات'), cat(2, 'آلات')];
+  assert.deepEqual(searchCategories(hamza, 'ا').map((hit) => hit.id).sort(), [1, 2]);
+  assert.deepEqual(searchCategories([cat(1, 'مكتبة')], 'مكتبه'), [{ id: 1, pathLabel: 'مكتبة' }]);
+  assert.deepEqual(searchCategories([cat(1, 'على')], 'علي'), [{ id: 1, pathLabel: 'على' }]);
+  // والتشكيل في الاستعلام يُحذف أيضاً قبل المقارنة.
+  assert.deepEqual(
+    searchCategories([cat(1, 'محمد')], 'م\u064Fح\u064Eم\u0651\u064Eد').map((hit) => hit.id),
+    [1],
+  );
+  // النصّ المعروض يبقى الأصل غير المطبَّع — التطبيع للمقارنة وحدها.
+  assert.deepEqual(searchCategories([cat(1, 'إطارات')], 'اطارات'), [
+    { id: 1, pathLabel: 'إطارات' },
+  ]);
+});
+
+test('normalizeArabic: الهمزات والألف المقصورة والتاء المربوطة والتشكيل والتطويل وحالة الأحرف', () => {
+  // أ/إ/آ/ٱ ← ا
+  assert.equal(normalizeArabic('أإآٱ'), 'اااا');
+  assert.equal(normalizeArabic('إطارات'), 'اطارات');
+  assert.equal(normalizeArabic('آلات'), 'الات');
+  // ى ← ي
+  assert.equal(normalizeArabic('على'), 'علي');
+  assert.equal(normalizeArabic('مصطفى'), 'مصطفي');
+  // ة ← ه
+  assert.equal(normalizeArabic('مكتبة'), 'مكتبه');
+  assert.equal(normalizeArabic('إدارة'), 'اداره');
+  // التشكيل (U+064B–U+0652 و U+0670) والتطويل (U+0640) يُحذفان
+  assert.equal(normalizeArabic('م\u064Fح\u064Eم\u0651\u064Eد'), 'محمد');
+  assert.equal(normalizeArabic('م\u0670ح\u0640م\u0640د'), 'محمد');
+  // حالة الأحرف غير حسّاسة
+  assert.equal(normalizeArabic('SUV'), 'suv');
+  // المسافات تُقصّ وتُوحَّد إلى واحدة — «قطع  غيار» و«قطع غيار» نصٌّ واحد للمقارنة
+  assert.equal(normalizeArabic('  قطع   غيار '), 'قطع غيار');
+});
+
+test('normalizeSpaces: قصٌّ وتوحيدٌ للمسافات بلا مسّ الأحرف', () => {
+  // يستعمله المنتقي للاسم المرسَل والمعروض، فيبقى «إطارات» مهموزاً كما كتبه
+  // المستخدم مع مسافاتٍ موحَّدة.
+  assert.equal(normalizeSpaces('  مكاتب   جديدة '), 'مكاتب جديدة');
+  assert.equal(normalizeSpaces('إطارات'), 'إطارات');
+  assert.equal(normalizeSpaces('   '), '');
 });
 
 test('checkStates يعطي كل عقدةٍ ما يعطيه checkState منفردةً', () => {

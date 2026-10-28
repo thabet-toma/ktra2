@@ -139,6 +139,10 @@ export const CategoryMoveModal: React.FC<Props> = ({
             value={value}
             onChange={(id) => setValue(id)}
             placeholder={placeholder}
+            // «أضف «X»» في نقل المنتج وحده: التصنيف الهدف يُنشأ رئيسياً (بلا أب)
+            // ويُختار فوراً. أمّا «نقل تحت…» فإفراغُه يعني «تصنيف رئيسي» أصلاً،
+            // وإنشاءُ تصنيفٍ من داخل نافذة إعادة الربط يغيّر معنى الفراغ هناك.
+            allowCreate={mode === "products"}
             disabled={saving || clearToNone}
           />
 

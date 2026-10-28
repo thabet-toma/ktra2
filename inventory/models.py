@@ -561,6 +561,70 @@ class ProductPriceTier(models.Model):
         return f"{self.product} — {self.tier_type} #{self.tier_number}: {self.price}"
 
 
+class ProductStorageLocation(models.Model):
+    """موقع تخزين المنتج في **مخزنٍ بعينه** — «عمود وصف» أو رمزُ قسم.
+
+    `Product.storage_location` (T-ITEMS M5) عمودٌ نصّيٌّ واحد بلا مخزن: المنتج
+    الواحد يُخزَّن في أكثر من مستودع ولكلٍّ عنوانُه، والنصّ الواحد لا يحمل «أيّ
+    مستودع»، ولا يفصل «عمود ٣ صف ٧» عن «A86». هذا الصفّ يحمل البُعدين: المخزن،
+    وشكلَ العنوان (`kind`) بحقوله — و`label` هي صيغة العرض الوحيدة فلا تختلف
+    بين نقطةٍ وأخرى.
+
+    **إرشاديٌّ بالكامل**: لا رصيدَ لكل موقع، ولا حركةَ مخزونٍ ولا قيدَ عليه.
+    `Product.quantity_on_hand` يبقى رقمَ الشركة الواحد — نفس مبدأ `StockLayer`
+    الذي يتجاهل `warehouse` في الاستهلاك.
+    """
+
+    KIND_GRID = 'grid'
+    KIND_CODE = 'code'
+    KIND_CHOICES = [
+        (KIND_GRID, 'عمود وصف'),
+        (KIND_CODE, 'رمز القسم'),
+    ]
+
+    id = models.AutoField(primary_key=True, db_column='ProductStorageLocationID')
+    tenant = models.ForeignKey(
+        Tenant, on_delete=models.CASCADE, db_column='TenantID',
+        related_name='product_storage_locations')
+    product = models.ForeignKey(
+        Product, on_delete=models.CASCADE, db_column='ProductID',
+        related_name='storage_locations')
+    warehouse = models.ForeignKey(
+        Warehouse, on_delete=models.CASCADE, db_column='WarehouseID',
+        related_name='product_locations')
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES, db_column='Kind')
+    #: `Column`/`Row` أسماءٌ محجوزةٌ في MySQL، وجانغو يقتبس كلَّ معرّفٍ بعلاماتٍ
+    #: خلفية فيمرّان كما هما — والتسمية تبقى على نمط بقيّة الأعمدة (PascalCase).
+    column = models.CharField(
+        max_length=20, blank=True, default='', db_column='Column')
+    row = models.CharField(
+        max_length=20, blank=True, default='', db_column='Row')
+    code = models.CharField(
+        max_length=50, blank=True, default='', db_column='Code')
+    created_at = models.DateTimeField(auto_now_add=True, db_column='CreatedAt')
+    updated_at = models.DateTimeField(auto_now=True, db_column='UpdatedAt')
+
+    class Meta:
+        db_table = 'product_storage_locations'
+        managed = True
+        constraints = [
+            models.UniqueConstraint(
+                fields=['product', 'warehouse'],
+                name='idx_product_storage_location_unique',
+            ),
+        ]
+
+    @property
+    def label(self):
+        """النصّ المعروض: «عمود B · صف 7» أو رمز القسم كما هو."""
+        if self.kind == self.KIND_GRID:
+            return f'عمود {self.column} · صف {self.row}'
+        return self.code
+
+    def __str__(self):
+        return f'{self.product_id}@{self.warehouse_id}: {self.label}'
+
+
 class SupplierProduct(models.Model):
     """رقم المنتج عند المورّد — جدول ربط (شركة × مورّد × رقم).
 

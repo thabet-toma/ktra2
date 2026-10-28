@@ -18,7 +18,7 @@
 | `inventory/services.py` | `record_stock_movement` + التحام FIFO، عكس الحركات، بطاقة المنتج، نماذج التكلفة، ترحيل التحويل والجرد | 1368 |
 | `inventory/views.py` | ViewSets: المنتجات، الحركات، المستودعات، التحويلات، الجرد | 891 |
 | `inventory/serials.py` | كل منطق الأرقام التسلسلية للشراء والبيع (وحدة مستقلة عن services) | 1285 |
-| `inventory/models.py` | 13 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد، وسلسلة الطلب الأسبوعية المحسوبة (`ProductDemandForecast`، #32) | 465 |
+| `inventory/models.py` | 14 موديل: المنتج (البراند)، المنتج الأب (`ProductFamily`)، الفئة، الوحدة، المستودع، الحركة، الشرائح، الوحدة المُرقَّمة، التحويل، الجرد، وسلسلة الطلب الأسبوعية المحسوبة (`ProductDemandForecast`، #32)، وموقعُ التخزين لكلّ مخزن (`ProductStorageLocation`، TASK-2a) | 465 |
 | `inventory/fifo.py` | **محرّك طبقات FIFO** (#137، نظير `accounting/fx_fifo.py`): إنشاء طبقة · استهلاكٌ بالأقدم أوّلاً · ردٌّ دقيقٌ إلى الطبقة وموقعِها · طبقةٌ افتتاحيّةٌ كسولة للبضاعة القائمة · تسويةُ الطبقات المؤقّتة · متوسّطٌ مشتقّ |
 | `inventory/stock_status.py` | **مصدر الحقيقة الوحيد لحالة المخزون** (نفذ/منخفض/فائض/متوفّر): تعبير ORM ودالّة بايثون وفلتر — يستهلكها السيريالايزر والجدول والداشبورد والتقارير | 150 |
 
@@ -42,6 +42,7 @@
 | `WarehouseTransfer` / `WarehouseTransferLine` | `transfer_number`, `is_posted`, `quantity` | `source_warehouse` / `dest_warehouse` (PROTECT) — بلا قيد محاسبي (`:384`) |
 | `Stocktake` / `StocktakeLine` | `is_posted`, `counted_quantity` (`null` = لم يُعدّ بعد، K1)، `counted_by_name`/`counted_at` (مَن عدّ ومتى)، `system_quantity`, `variance`, `scope` (JSON نطاق التوليد — `null` = يدوي وكل صفٍّ قائم)، `created_by` | `journal→accounting.JournalHeader` — قيد فرق الجرد |
 | `StocktakeCountLink` (K3) | `counter_name` (≤80، اسم العادّ)، `categories` (JSON: تصنيفات مباشرة، `null` = الجرد كلّه)، `finished_at`، `created_by` | `stocktake→Stocktake` (`related_name='count_links'`, CASCADE) و`share→docshare.DocumentShare` (`OneToOne`, CASCADE) — **التوكن والانتهاء والإبطال في المشاركة وحدها**، لا عمودَ توكنٍ ثانٍ ولا آلةَ صلاحيةٍ ثانية |
+| `ProductStorageLocation` (TASK-2a) | `kind` (`grid` = عمود وصف، `code` = رمز القسم)، `column` (≤20)، `row` (≤20)، `code` (≤50)، وخاصّية `label` (النصّ المعروض وحده: `عمود {column} · صف {row}` أو `code`) | `product→Product` (CASCADE، `related_name='storage_locations'`)، `warehouse→Warehouse` (CASCADE، `related_name='product_locations'`)؛ فريد `(product, warehouse)` (`idx_product_storage_location_unique`). **إرشاديٌّ محض**: لا رصيدَ لكل موقع ولا حركةَ مخزونٍ ولا قيد — الرصيد يبقى رقمَ الشركة الواحد، و`Product.storage_location` النصّيّ القديم يبقى حقلَه وعمودَه وسلوكَه في `ProductSerializer` بلا تغيير. **وأين يُرى (TASK-2b)**: يُحرَّر في قسم «موقع التخزين» بتبويب «بيانات أخرى» في `frontend_v2/components/items/ItemForm.tsx` (سطرٌ لكل مخزن، والتحقّق والتحويل في `frontend_v2/utils/storageLocations.ts`)، ويُعرض في `ProductOverview` بـ`frontend_v2/components/items/ProductInsightTabs.tsx` باسم المخزن و`label` الموقع — ومنها في `ProductCardModal` نفسِه، ويُخفى للخدمة |
 
 ## دوال الـservices العامة
 ```python
@@ -64,7 +65,8 @@ def record_stock_movement(
 def reverse_stock_movements(*, tenant_id, reference_id, reference_types) -> int:  # حذف حركات مستند + إعادة احتساب (302)
 def find_stock_dependents(*, tenant_id, reference_id, reference_types) -> list[dict]:  # من بنى على هذه البضاعة (371)
 def receive_shipment_stock(shipment, movement_date=None):  # استلام شحنة استيراد — مسارٌ قديم: لم تعد إشارة «Cleared» تستدعيه، البضاعة تُستلَم من الفاتورة الدولية (431)
-def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة المنتج (710)
+def product_profile(*, tenant_id: int, product_id: int) -> dict:  # بطاقة المنتج (710) — ومعه `storage_locations` (TASK-2a)
+def product_storage_locations(*, tenant_id: int, product_id: int) -> list[dict]:  # مواقع التخزين لكل مخزن، استعلامٌ واحد (`select_related('warehouse')`) مرتّبٌ باسم المخزن ثم id — يقرؤه إجراءُ `storage-locations/` وكرتُ المنتج معاً، ويختلف شكلُ مفتاح المخزن وحده (`warehouse` في النقطة، `warehouse_id` في الكرت)
 def category_descendant_ids(*, tenant_id: int, category_id: int) -> list[int]:  # التصنيف وكل أحفاده — نسخة واحدة يقرؤها الكرت المجمّع وفلتر `?category=` معاً
 def category_descendant_product_ids(*, tenant_id: int, category_id: int) -> list[int]:  # منتجات تصنيفٍ وأحفاده — الخادم يشتقّها بدل تعدادها في الطلب
 def product_group_profile(*, tenant_id: int, product_ids: list[int]) -> dict:  # الكرت المجمّع (823)
@@ -134,6 +136,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 | GET/POST/PUT/PATCH/DELETE | `products/` | `ProductViewSet` (`views.py`). **القائمة (`list`) تُخفي المنتج المعطَّل افتراضياً** (T2): `?status=active\|inactive\|all` و`?include_inactive=1\|true` (= `all`)؛ قيمةٌ مجهولة تسقط إلى `active` لا إلى `all`. الفلتر على `list` وحده (عادياً أو `view=lookup` أو `/api/lookup/products/`) — `retrieve` وسائر الإجراءات بلا فلتر حالة، فكرت المعطَّل وسجلّه وبطاقته تُفتح. **`DELETE`** على منتجٍ واحدٍ يشترط `inventory.item.manage` — أما `POST` (الإنشاء) و`PUT`/`PATCH` (التعديل) فباقية على قاعدة الأدوار العامة (البائع يعدّل من الفاتورة؛ قرار المالك 2026-10-21) |
 | GET | `/api/lookup/products/` (خارج `/api/inventory/`، مركَّبة في `core/urls.py`) | `ProductLookupViewSet` (`views.py`) — ISSUE #88: فرعٌ من `ProductViewSet` يفرض عقد `?view=lookup` دائماً (`_is_lookup`)، بلا نسخة ثانية من الفلاتر أو السيريالايزر. يخدم منتقي المستندات كلَّه (`listPickerProducts`، `frontend_v2/services/inventoryApi.ts`) — بادئةٌ مستقلة كي لا يبتلعها قناع قالب `accounting_firm`/`client_book` (`TemplateSurfacePermission` يفحص بادئة المسار لا معاملات الاستعلام)، وإلا استحال على تلك القوالب اختيار بنودها الخدمية (#78) من شاشة الفاتورة. `GET` وحده — لا كتابة على هذه النقطة. العزل والصلاحية موروثان من `ProductViewSet` كأي نقطة أخرى (تصفية `tenant` + `DEFAULT_PERMISSION_CLASSES`) |
 | GET | `products/{id}/profile/` · `products/{id}/stock-ledger/` · `products/{id}/cost-breakdown/` | (405) · (411) · (433) |
+| GET/**PUT** | `products/{id}/storage-locations/` | **TASK-2a**: مواقع تخزين المنتج في المخازن — `ProductViewSet` (`storage_locations`). `GET` قائمةٌ مرتّبة باسم المخزن ثم id، كلُّ صفٍّ `{id, warehouse, warehouse_name, kind, column, row, code, label}`؛ و`PUT` جسمُه **قائمة** `[{warehouse, kind, column?, row?, code?}]` **تستبدل** كلَّ مواقع المنتج داخل `transaction.atomic()` (الباقي يُحدَّث في مكانه بلا تغيير معرّفه، والغائب يُحذف، و`[]` يمسح الكلّ) ويردّ 200 بالقائمة الجديدة بشكل `GET`. كلُّ 400 **قبل أيّ كتابة**: جسمٌ ليس قائمة، أكثر من 200 موقع، `warehouse` بـ`TenantScopedPrimaryKeyRelatedField` (مخزن شركةٍ أخرى ⇒ غير موجود)، مخزنٌ مكرَّرٌ في القائمة (والرسالة تسمّيه)، `grid` بلا `column` و`row` غير فارغين بعد القصّ، و`code` بلا رمزٍ غير فارغ. ويُفرَّغ الحقلُ الذي لا يخصّ النوع (`grid` ⇒ `code=''`، و`code` ⇒ `column`/`row` فارغان). الصلاحية **قاعدة تعديل المنتج** لا `inventory.item.manage` (قرار المالك 2026-10-21): «مستعرض» يقرأ ولا يكتب (403)، والمنتج يُجلَب بـ`get_object` فيُردّ منتجُ شركةٍ أخرى 404. لا حركةَ مخزونٍ ولا قيد ولا `record_stock_movement` — موقعٌ إرشاديٌّ وحده |
 | GET | `products/{id}/stock-movements/` · `products/{id}/invoices/` | (398) · (426) |
 | GET | `products/{id}/serials/` · POST `products/{id}/serials/register/` | (559) · (570) |
 | **POST** | `products/bulk-set-group/` | تعيين «النوع» (`variant_group`) و/أو البراند على منتجاتٍ محدَّدة دفعةً واحدة — `ProductViewSet` (`bulk_set_group`). الحقل الغائب من الجسم لا يُمَسّ، والفارغ يُمحى. يشترط `inventory.item.manage` |
@@ -169,7 +172,7 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 و«نقل تحت…» في قائمة التصنيف **بصلاحية `inventory.item.manage` وحدها**. لا تظهر على
 صفّ «بدون تصنيف» ولا على قائمة الفراغ (كلتاهما `kind: 'empty'`)، وشاشات الفواتير ومنتقي
 التصنيف لا تمرّر الخاصية فلا تتغيّر قوائمها. النافذة `CategoryMoveModal` واحدةٌ للحالتين
-(منتقي `CategoryTreeSelect` بوضع `single`، بلا إنشاءٍ من داخلها). وفيها **«بدون تصنيف» قرارٌ
+(منتقي `CategoryTreeSelect` بوضع `single`). وفيها **«بدون تصنيف» قرارٌ
 صريح**: خانةُ «إزالة التصنيف (بدون تصنيف)» تحت المنتقي تُعطّل المنتقي وتجعل الهدف `null` —
 وإفراغُ المنتقي وحده ليس اختياراً، فلا يُفعَّل «نقل» إلا بخانةٍ مؤشَّرة أو بتصنيفٍ يختلف عن
 الحالي (تُخفى الخانة لمنتجٍ بلا تصنيف، وتُعرض لمجموعةٍ مختلطةٍ من الجدول حيث `initialValue`
@@ -186,7 +189,27 @@ def generate_product_barcode(tenant_id, *, attempts: int = 40) -> str:  # EAN-13
 (بصلاحية الإدارة، ومعرّفٌ واحد على الأقل)، وبعد النجاح يُفرَّغ التحديد ويُعرض شريط
 «نُقل N منتجاً» مع «(ومعه M براند)» حين تحرّك إخوة، أو «لا تغيير — المنتجات المحدَّدة في هذا
 التصنيف أصلاً» حين `moved` صفر، ويُلحَق به «· تُجوهل K غير موجود» إن سقط معرّفٌ من الطلب.
-لا سحب وإفلات — القائمة اليمنى وحدها.
+لا سحب وإفلات — القائمة اليمنى وحدها. وفي **نقل المنتجات وحده** تمرّر النافذة `allowCreate`
+إلى المنتقي، فيظهر آخرَ خيارات نتيجة البحث «أضف «X»»: تصنيفٌ **رئيسي** (`parent: null`) يُنشأ
+بالاسم المقصوص عبر نقطة `categories/` القائمة نفسها (لا نداءَ ثانياً للإنشاء: `submitCreate`
+القديم وخيارُ البحث يمرّان من `createCategory` واحدة)، ويُختار فوراً هدفاً — تُغلق لوحة
+المنتقي وحدها وتبقى النافذة على «نقل» ليؤكّد المستخدم، ويُعاد جلب تصنيفات الشجرة بعد النقل
+(`loadCats` في فرع المنتجات، و`reload()` في شاشة المنتجات يجلبها أصلاً) فيظهر التصنيف
+الجديد بلا إعادة تحميل الصفحة. ولا يظهر الخيار حين يوجد في القائمة **كلّها** تصنيفٌ اسمُه
+المطبَّع (آخر مقطع) هو الاستعلام المطبَّع حرفاً — «اطارات» اسمٌ موجود إن كان «إطارات» — ولا
+لدورٍ بلا `inventory.item.manage`؛ وبلا نتيجةٍ إطلاقاً يكون هو الخيار الوحيد بدل «لا تطابق»،
+وأثناء الإنشاء يُعطَّل بنصّ «جارٍ الإضافة…» فلا إرسالَ مزدوج، وخطأُ الخادم يُعرض داخل اللوحة
+والاستعلام كما هو (بلا إغلاقها). و«نقل تحت…» لا إنشاءَ من داخله. وبحثُ المنتقي — وكل مستهلكي
+`searchCategories` ومنهم بحث الوضع `multi` — يطابق **بداية أيّ كلمةٍ في أيّ مقطع** من المسار
+لا «يحوي» في أيّ موضع («ش» تصيب «شواحن» و«قطع شاحنات» ولا تصيب «مشاحن»، و«شاحن» تجد
+«إطارات ‹ شاحنات ‹ ثقيلة»)، والاستعلام يُقارن **كاملاً بمسافته** بكلّ موضع بداية كلمة —
+«قطع غيار» تصيب «قطع غيار» و«زيت قطع غيار» ولا تصيبها «طع غيار» — بتطبيعٍ عربي على الطرفين
+لفظاً واحداً في `normalizeArabic` (همزاتٌ وألفٌ مقصورة وتاءٌ مربوطة وتشكيلٌ وتطويل، والمسافات
+تُقصّ وتُوحَّد إلى واحدة، والنصّ المعروض يبقى الأصل). والترتيب
+بالرتب: اسمُ التصنيف نفسه يبدأ بالاستعلام، فالاستعلامُ يبدأ عند كلمةٍ غير أولى فيه، فمقطعٌ
+أعلى في المسار — وبالمسار (`localeCompare(…, 'ar')`) داخل كل رتبة كما كان. والاسمُ
+المُنشأ من «أضف» مقصوصٌ بمسافاتٍ موحَّدةٍ وبأحرفه الأصلية، ولخطئه حالةٌ مستقلة (`addError`)
+عن خطأ نموذج التذييل فلا تظهر رسالةٌ واحدة في موضعين.
 
 ### الجرد من نطاق تصنيفات (K1)
 `POST stocktakes/` يقبل `scope` بدل `lines`، فيولّد الخادم بنداً لكل منتجٍ مطابق —

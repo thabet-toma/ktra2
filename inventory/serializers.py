@@ -4,9 +4,9 @@ from django.utils import timezone
 from core.api_defaults import CountedQuantityField, TenantScopedPrimaryKeyRelatedField
 from core.user_roles import user_display_name
 from .models import (
-    ProductCategory, ProductFamily, Product, ProductPriceTier, UnitOfMeasure,
-    StockMovement, SupplierProduct, Warehouse, WarehouseTransfer,
-    WarehouseTransferLine, Stocktake, StocktakeLine,
+    ProductCategory, ProductFamily, Product, ProductPriceTier,
+    ProductStorageLocation, UnitOfMeasure, StockMovement, SupplierProduct,
+    Warehouse, WarehouseTransfer, WarehouseTransferLine, Stocktake, StocktakeLine,
 )
 
 
@@ -134,6 +134,72 @@ class ProductPriceTierSerializer(serializers.ModelSerializer):
         model = ProductPriceTier
         fields = ['id', 'tier_type', 'tier_number', 'price', 'currency', 'tax_inclusive']
         read_only_fields = ['id']
+
+
+#: سقفُ مواقع المنتج في الطلب الواحد — يُفحَص قبل أيّ استعلام (نمط سقف
+#: `bulk-set-category`)، فقائمةٌ من ألف صفٍّ لا تُكلِّف ألفَ استعلامٍ لتُرفض.
+STORAGE_LOCATIONS_MAX = 200
+
+
+class ProductStorageLocationListSerializer(serializers.ListSerializer):
+    """قائمةُ مواقع المنتج في جسم `PUT` — التكرار يُرفض هنا لا في الصفّ.
+
+    صفٌّ واحد لا يرى أخاه: `warehouse` مكرَّراً مرّتين قائمتان صحيحتان وقيدُ
+    الفرادة ينكسر عند الحفظ، فيصل المستخدمَ خطأُ قاعدةِ بياناتٍ بعد كتابةٍ
+    جزئية. الرفض قبل أيّ كتابة، والرسالة تسمّي المخزن فيُصلَح لا يُخمَّن.
+    """
+
+    def validate(self, attrs):
+        seen = set()
+        for row in attrs:
+            warehouse = row['warehouse']
+            if warehouse.pk in seen:
+                raise serializers.ValidationError({'error': (
+                    f'المخزن «{warehouse.name}» مكرَّر في القائمة — '
+                    'موقعٌ واحد لكل منتجٍ في المخزن'
+                )})
+            seen.add(warehouse.pk)
+        return attrs
+
+
+class ProductStorageLocationWriteSerializer(serializers.ModelSerializer):
+    """صفُّ موقعٍ في جسم استبدال `products/{id}/storage-locations/`.
+
+    `grid` يحتاج عموداً وصفاً ويُفرَّغ رمزُه، و`code` يحتاج رمزاً ويُفرَّغ
+    عمودُه وصفُّه — وإلا خُزِّن حقلٌ لا يعرضه `label` فيُقرأ الموقع ناقصاً أو
+    ينسب عموداً لرمز قسم. و`warehouse` حقلُ `TenantScopedPrimaryKeyRelatedField`
+    فمخزنُ شركةٍ أخرى «غير موجود» (400) كما في بقيّة المستندات.
+    """
+
+    warehouse = TenantScopedPrimaryKeyRelatedField(queryset=Warehouse.objects.all())
+
+    class Meta:
+        model = ProductStorageLocation
+        fields = ['warehouse', 'kind', 'column', 'row', 'code']
+        list_serializer_class = ProductStorageLocationListSerializer
+
+    def validate(self, attrs):
+        kind = attrs['kind']
+        column = (attrs.get('column') or '').strip()
+        row = (attrs.get('row') or '').strip()
+        code = (attrs.get('code') or '').strip()
+        if kind == ProductStorageLocation.KIND_GRID:
+            if not column:
+                raise serializers.ValidationError(
+                    {'column': 'عمود الموقع مطلوب لنوع «عمود وصف»'})
+            if not row:
+                raise serializers.ValidationError(
+                    {'row': 'صفّ الموقع مطلوب لنوع «عمود وصف»'})
+            code = ''
+        else:
+            if not code:
+                raise serializers.ValidationError(
+                    {'code': 'رمز القسم مطلوب لنوع «رمز القسم»'})
+            column = row = ''
+        attrs['column'] = column
+        attrs['row'] = row
+        attrs['code'] = code
+        return attrs
 
 
 def _indicative_purchase_price_map(context) -> dict:

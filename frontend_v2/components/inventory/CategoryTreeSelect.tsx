@@ -34,6 +34,8 @@ import {
   categoryKey,
   categoryPathLabel,
   checkStates,
+  normalizeArabic,
+  normalizeSpaces,
   restrictCategories,
   restrictPathKeys,
   searchCategories,
@@ -432,7 +434,13 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
   const [newName, setNewName] = useState('');
   const [createPosition, setCreatePosition] = useState<CreatePosition>('root');
   const [createBusy, setCreateBusy] = useState(false);
+  /**
+   * خطأ الإنشاء حالتان لا واحدة: نموذجُ التذييل («إضافة» بمواضعه الثلاثة) وخطأُ
+   * «أضف «X»» — بحالةٍ مشتركة كانت الرسالة تظهر في الموضعين معاً حين يكون
+   * النموذج مفتوحاً والاستعلام بلا مطابقة.
+   */
   const [createError, setCreateError] = useState<string | null>(null);
+  const [addError, setAddError] = useState<string | null>(null);
   const wrapRef = useRef<HTMLDivElement>(null);
   const comboRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -451,6 +459,26 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
     () => (query.trim() ? searchCategories(allCategories, query) : []),
     [allCategories, query],
   );
+
+  /**
+   * «أضف «X»»: تصنيفٌ رئيسيٌّ بالاسم المكتوب، هدفاً للنقل بضغطةٍ واحدة.
+   *
+   * يظهر في `single` (وهو هذا الوضع وحده) مع `allowCreate` وصلاحية الإدارة معاً،
+   * ولا يظهر حين يوجد في **كلّ** القائمة تصنيفٌ اسمُه المطبَّع هو الاستعلام
+   * المطبَّع حرفاً — وإلا عُرض «أضف» لاسمٍ موجودٍ بالفعل فصار المستخدم يُنشئ
+   * تكراراً بنفسه. التطبيع يُقارن الهمزات والياء والتاء المربوطة والتشكيل
+   * والمسافات: «اطارات» اسمٌ موجود إن كان في الشجرة «إطارات».
+   *
+   * والاسم المرسَل والمعروض مقصوصٌ بمسافاتٍ **موحَّدة** وبأحرفه الأصلية —
+   * التطبيع للمقارنة وحدها.
+   */
+  const trimmedQuery = normalizeSpaces(query);
+  const canAddFromSearch = Boolean(
+    props.allowCreate && canManageCatalog && trimmedQuery
+    && !allCategories.some((c) => normalizeArabic(c.name ?? '') === normalizeArabic(trimmedQuery)),
+  );
+  /** ما يُنتقَل إليه بالأسهم في `listbox` البحث: النتائج ثم خيار الإضافة آخراً. */
+  const optionCount = searchResults.length + (canAddFromSearch ? 1 : 0);
 
   /**
    * موضع اللوحة من مستطيل الحقل — النمط نفسه في `components/kit/KitAutocomplete.tsx`
@@ -515,11 +543,12 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
   }, [reposition]);
 
   // القياس يتبع ما يُطيل اللوحة أو يقصّرها من حالاتها (نتائجُ البحث، انتهاءُ
-  // التحميل، خطأُ تحميلٍ ظهر أو زال)؛ والقياسُ الأوّل عند التركيب نفسه.
+  // التحميل، خطأُ تحميلٍ ظهر أو زال، خيارُ «أضف» ظهر أو غاب، وخطؤه)؛ والقياسُ
+  // الأوّل عند التركيب نفسه.
   useLayoutEffect(() => {
     if (!open) return;
     reposition();
-  }, [open, reposition, query, createOpen, createError, loading, loadError, searchResults.length, rows.length]);
+  }, [open, reposition, query, createOpen, createError, addError, loading, loadError, searchResults.length, rows.length, canAddFromSearch]);
 
   /**
    * الإغلاق الوحيد: يُطفئ اللوحة ويمحو الاستعلام ونموذج الإنشاء (فإعادةُ
@@ -535,6 +564,7 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
     setCreateOpen(false);
     setNewName('');
     setCreateError(null);
+    setAddError(null);
     if (refocus) comboRef.current?.focus();
   }, []);
 
@@ -615,6 +645,21 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
     setCreateError(null);
   };
 
+  /**
+   * الإنشاء الوحيد: نموذجُ التذييل (بمواضعه الثلاثة) وخيارُ «أضف «X»» في نتائج
+   * البحث يمرّان من هنا — نسخةٌ ثانية من النداء تتباعد صامتة.
+   */
+  const createCategory = async (name: string, parent: number | null) => {
+    const node = (await inventoryApi.createCategory({ name, parent })) as CategoryTreeOption;
+    addCreated(node);
+    if (parent != null) {
+      setExpanded((prev) => new Set(prev).add(categoryKey(parent)));
+    }
+    // تحديثٌ من الخادم حين جلبنا القائمة بنفسنا — والدمج أعلاه يحفظ الاختيار فوراً.
+    if (categories === undefined) void load();
+    onChange(node.id, categoryPathLabel([...allCategories, node], node.id));
+  };
+
   const submitCreate = async () => {
     if (createBusy) return;
     const name = newName.trim();
@@ -629,19 +674,31 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
     setCreateBusy(true);
     setCreateError(null);
     try {
-      const node = (await inventoryApi.createCategory({ name, parent })) as CategoryTreeOption;
-      addCreated(node);
-      if (parent != null) {
-        setExpanded((prev) => new Set(prev).add(categoryKey(parent)));
-      }
-      // تحديثٌ من الخادم حين جلبنا القائمة بنفسنا — والدمج أعلاه يحفظ الاختيار فوراً.
-      if (categories === undefined) void load();
-      onChange(node.id, categoryPathLabel([...allCategories, node], node.id));
+      await createCategory(name, parent);
       setNewName('');
       setCreateOpen(false);
       closePanel({ refocus: true });
     } catch (e) {
       setCreateError(e instanceof Error ? e.message : 'تعذّر إنشاء التصنيف');
+    } finally {
+      setCreateBusy(false);
+    }
+  };
+
+  /**
+   * «أضف «X»»: تصنيفٌ **رئيسي** بالاسم المكتوب (`parent: null`) ويُختار فوراً
+   * هدفاً — والنقلة نفسها تُغلق القائمة وحدها، فتبقى نافذة النقل مفتوحةً
+   * بـ«نقل» للمستخدم يؤكّد بها. والخطأ يبقيها مفتوحةً بالاستعلام كما هو.
+   */
+  const submitAddFromSearch = async () => {
+    if (createBusy || !canAddFromSearch) return;
+    setCreateBusy(true);
+    setAddError(null);
+    try {
+      await createCategory(trimmedQuery, null);
+      closePanel({ refocus: true });
+    } catch (e) {
+      setAddError(e instanceof Error ? e.message : 'تعذّر إنشاء التصنيف');
     } finally {
       setCreateBusy(false);
     }
@@ -659,15 +716,20 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
       }
       return;
     }
-    if (!searchResults.length) return;
+    if (!optionCount) return;
     if (e.key === 'ArrowDown') {
       e.preventDefault();
-      setActiveIndex((i) => Math.min(i + 1, searchResults.length - 1));
+      setActiveIndex((i) => Math.min(i + 1, optionCount - 1));
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setActiveIndex((i) => Math.max(i - 1, 0));
     } else if (e.key === 'Enter') {
       e.preventDefault();
+      // خيار الإضافة آخرُ الخيارات — يليه لا غير.
+      if (canAddFromSearch && activeIndex >= searchResults.length) {
+        void submitAddFromSearch();
+        return;
+      }
       const hit = searchResults[Math.min(activeIndex, searchResults.length - 1)];
       if (hit) choose(hit.id, hit.pathLabel);
     }
@@ -757,9 +819,15 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
               placeholder="ابحث بالاسم أو داخل المسار…"
               aria-label="بحث التصنيفات"
               value={query}
-              onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); }}
+              onChange={(e) => { setQuery(e.target.value); setActiveIndex(0); setAddError(null); }}
               onKeyDown={onSearchKeyDown}
             />
+            {/* خطأُ «أضف «X»» تحت الحقل نفسه — يبقى ظاهراً مهما مرّرت النتائج،
+                واللوحة مفتوحة والاستعلام كما كتبه المستخدم. وحالتُه مستقلة عن
+                `createError` فلا تتكرّر رسالةُ نموذج التذييل هنا. */}
+            {canAddFromSearch && addError && (
+              <div className="mt-1 px-0.5 text-xs text-[var(--ktra-danger)]">{addError}</div>
+            )}
           </div>
 
           <div className="min-h-0 max-h-64 flex-1 overflow-y-auto p-1">
@@ -779,7 +847,7 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
                 </button>
               </div>
             ) : query.trim() ? (
-              searchResults.length ? (
+              optionCount ? (
                 <ul role="listbox" aria-label="نتائج البحث" className="m-0 list-none p-0">
                   {searchResults.map((hit, i) => (
                     <li
@@ -800,6 +868,29 @@ const SingleCategoryTreeSelect: React.FC<CategoryTreeSelectSingleProps> = (props
                       )}
                     </li>
                   ))}
+                  {canAddFromSearch && (
+                    // آخرُ خيارٍ في اللوحة نفسها: يُنتقَل إليه بالأسهم كغيره،
+                    // وEnter عليه يُنشئ. وبلا نتائج يبقى هو الخيار الوحيد.
+                    <li
+                      role="option"
+                      aria-selected={activeIndex >= searchResults.length}
+                      aria-disabled={createBusy || undefined}
+                      onMouseEnter={() => setActiveIndex(searchResults.length)}
+                      onClick={() => { if (!createBusy) void submitAddFromSearch(); }}
+                      className={`flex items-center gap-1.5 rounded px-1.5 py-1 text-sm ${
+                        createBusy ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                      } ${
+                        activeIndex >= searchResults.length
+                          ? 'bg-[var(--ktra-active)] text-[var(--ktra-ink)]'
+                          : 'text-[var(--ktra-ink)]'
+                      }`}
+                    >
+                      <Plus className="h-3.5 w-3.5 shrink-0 text-[var(--ktra-accent)]" />
+                      <span className="truncate">
+                        {createBusy ? 'جارٍ الإضافة…' : `أضف «${trimmedQuery}»`}
+                      </span>
+                    </li>
+                  )}
                 </ul>
               ) : (
                 <div className="p-3 text-center text-xs text-[var(--ktra-ink-soft)]">لا تطابق</div>

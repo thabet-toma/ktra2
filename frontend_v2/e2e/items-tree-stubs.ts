@@ -101,6 +101,8 @@ export type ItemsTreeStubsOptions = {
   onBulkSetCategory?: (body: Record<string, unknown>) => void;
   /** C3: تُنادى بجسم PATCH لتصنيفٍ (إعادة الربط) بعد اجتياز حارس الحلقة. */
   onUpdateCategory?: (id: number, body: Record<string, unknown>) => void;
+  /** TASK-1: تُنادى بجسم `POST /inventory/categories/` بعد اجتياز تحقّق الاسم. */
+  onCreateCategory?: (body: Record<string, unknown>) => void;
   /** صلاحيات `/permissions/me/` (الافتراضي: عرض وإدارة المنتجات). */
   permissions?: string[];
 };
@@ -374,6 +376,45 @@ export async function installItemsTreeApiStubs(page: Page, options: ItemsTreeStu
       await route.fulfill({
         contentType: 'application/json',
         body: JSON.stringify({ moved, brands_moved: brandsMoved, skipped }),
+      });
+      return;
+    }
+
+    // TASK-1: إنشاء تصنيف — نفس ما يرفضه `CategorySerializer`: اسمٌ فارغ 400
+    // (`validate_name`)، وأبٌ غير موجودٍ للشركة 400 (`_validate_parent`). ويُضاف
+    // إلى الحالة المحاكية كي تُظهره إعادةُ الجلب التالية (كان «أُنشئ» تصنيفاً لا
+    // تعرفه الشجرة أبداً). الجسمُ بردّ `CategorySerializer` نفسه.
+    if (method === 'POST' && path.endsWith('/inventory/categories/')) {
+      if (!canManageCatalog) {
+        await route.fulfill({
+          status: 403, contentType: 'application/json',
+          body: JSON.stringify(PERMISSION_DENIED),
+        });
+        return;
+      }
+      const sent = (route.request().postDataJSON() ?? {}) as Record<string, unknown>;
+      const name = typeof sent.name === 'string' ? sent.name.trim() : '';
+      if (!name) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ name: ['اسم التصنيف مطلوب.'] }),
+        });
+        return;
+      }
+      const parent = sent.parent == null ? null : Number(sent.parent);
+      if (parent !== null && !categories.some((c) => c.id === parent)) {
+        await route.fulfill({
+          status: 400, contentType: 'application/json',
+          body: JSON.stringify({ parent: ['التصنيف الأب غير موجود لهذه الشركة.'] }),
+        });
+        return;
+      }
+      options.onCreateCategory?.(sent);
+      const created = { id: Math.max(0, ...categories.map((c) => c.id)) + 1, name, parent };
+      categories.push(created);
+      await route.fulfill({
+        status: 201, contentType: 'application/json',
+        body: JSON.stringify({ ...created, tenant: 1, children: [] }),
       });
       return;
     }

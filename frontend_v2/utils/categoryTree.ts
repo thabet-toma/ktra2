@@ -498,22 +498,89 @@ export const visibleTreeRows = <T extends CategoryNodeLike>(
 };
 
 /**
- * بحث التصنيفات: مطابقةٌ غير حسّاسة لحالة الأحرف على **أي مقطعٍ** من المسار،
- * والنتيجة تحمل المسار الكامل كي يتميّز تصنيفان بالاسم نفسه. مرتّبةً بالمسار،
- * والاستعلام الفارغ يعيد `[]` — فالشجرة وحدها هي شاشة الفراغ.
+ * قصٌّ وتوحيدُ المسافات إلى مسافةٍ واحدة — **بلا مسّ الأحرف**، فيصلح لما يُرسَل
+ * إلى الخادم ويُعرض («مكاتب  جديدة» ⇒ «مكاتب جديدة») قبل أيّ تطبيعٍ للمقارنة.
+ */
+export const normalizeSpaces = (text: string): string => text.trim().replace(/\s+/g, ' ');
+
+/**
+ * التطبيع العربي **للمقارنة وحدها**: أ/إ/آ/ٱ ← ا · ى ← ي · ة ← ه · وحذف
+ * التشكيل (U+064B–U+0652 و U+0670) والتطويل (U+0640)، ثم حالة الأحرف، ومعه
+ * `normalizeSpaces` فمسافتان مكرّرتان لا تمنعان مطابقةً.
+ *
+ * النصّ المعروض يبقى الأصل — مطابقةُ «اطارات» لـ«إطارات» لا تعني عرض المعرّف
+ * مطبَّعاً في الشجرة ولا في المسار.
+ */
+export const normalizeArabic = (text: string): string => normalizeSpaces(text
+  .replace(/[\u064B-\u0652\u0670]/g, '')
+  .replace(/\u0640/g, '')
+  .replace(/[\u0623\u0625\u0622\u0671]/g, '\u0627')
+  .replace(/\u0649/g, '\u064A')
+  .replace(/\u0629/g, '\u0647')
+  .toLocaleLowerCase('ar'));
+
+/** كلمات النصّ بعد التطبيع — تفصلها أيُّ مسافةٍ بيضاء. */
+const wordsOf = (text: string): string[] => normalizeArabic(text).split(/\s+/).filter(Boolean);
+
+/**
+ * رتبة مقطعٍ واحد: 0 يبدأ المقطع بالاستعلام · 1 الاستعلام يبدأ **عند حدّ كلمةٍ**
+ * لا هي الأولى · `null` لا مطابقة.
+ *
+ * المقارنة على حدّ كلمة لا في أيّ موضع، فـ«ش» تصيب «شواحن» و«قطع شاحنات» ولا
+ * تصيب «مشاحن». والاستعلام يُقارن كاملاً (بما فيه مسافته) بكلّ لاحقةٍ من كلماته:
+ * «قطع غيار» تبدأ بها «قطع غيار» (رتبة 0) وتَلي في «زيت قطع غيار» (رتبة 1)،
+ * و«طع غيار» لا تصيب شيئاً — وفحصُ كلمةٍ مفردة وحدها كان يُسقط الأولى.
+ */
+const segmentRank = (segment: string, query: string): 0 | 1 | null => {
+  const words = wordsOf(segment);
+  if (!words.length) return null;
+  if (words.join(' ').startsWith(query)) return 0;
+  for (let i = 1; i < words.length; i += 1) {
+    if (words.slice(i).join(' ').startsWith(query)) return 1;
+  }
+  return null;
+};
+
+/**
+ * رتبة مطابقة الاستعلام المطبَّع على مسارٍ من الأسماء (الجذر أولاً):
+ * 0 اسمُ التصنيف نفسه يبدأ بالاستعلام · 1 كلمةٌ غير الأولى في اسمه تبدأ به ·
+ * 2 مقطعٌ أعلى في المسار وحده (الأب أو الجدّ) · `null` لا مطابقة.
+ *
+ * الرتبة هي التي تُقدّم ما يبدأ به المستخدمُ بحثَه على ما صادفه في أبٍ بعيد —
+ * وترتيب المسار يحكم داخل كل رتبة وحدها.
+ */
+const searchRank = (path: string[], query: string): number | null => {
+  const own = segmentRank(path[path.length - 1] ?? '', query);
+  if (own != null) return own;
+  return path.slice(0, -1).some((segment) => segmentRank(segment, query) != null) ? 2 : null;
+};
+
+/**
+ * بحث التصنيفات: مطابقةٌ غير حسّاسة لحالة الأحرف على **بداية أيّ كلمةٍ في أيّ
+ * مقطع** من المسار — لا «يحوي» في أيّ موضع (فـ«ش» تصيب «شواحن» و«قطع شاحنات»
+ * ولا تصيب «مشاحن») — بتطبيعٍ عربي على الطرفين (`normalizeArabic`).
+ *
+ * والنتيجة تحمل المسار الكامل كي يتميّز تصنيفان بالاسم نفسه، مرتّبةً بـ`searchRank`
+ * ثم بالمسار داخل الرتبة. والاستعلام الفارغ يعيد `[]` — فالشجرة وحدها شاشةُ الفراغ.
  */
 export const searchCategories = <T extends CategoryNodeLike>(
   categories: T[], query: string,
 ): Array<{ id: T['id']; pathLabel: string }> => {
-  const q = query.trim().toLocaleLowerCase('ar');
+  // الاستعلام يمرّ بالتطبيع نفسه: قصٌّ وتوحيدُ مسافاتٍ وحذفُ تشكيل (…).
+  const q = normalizeArabic(query);
   if (!q) return [];
   const { byId } = buildCategoryIndex(categories);
-  const hits: Array<{ id: T['id']; pathLabel: string }> = [];
+  const hits: Array<{ id: T['id']; pathLabel: string; rank: number }> = [];
   for (const category of categories) {
     const path = pathNamesTo(byId, byId.get(keyOf(category.id)));
-    if (!path.some((segment) => segment.toLocaleLowerCase('ar').includes(q))) continue;
-    hits.push({ id: category.id, pathLabel: path.join(PATH_SEPARATOR) || nameOf(category) });
+    const rank = searchRank(path, q);
+    if (rank == null) continue;
+    hits.push({
+      id: category.id,
+      pathLabel: path.join(PATH_SEPARATOR) || nameOf(category),
+      rank,
+    });
   }
-  hits.sort((a, b) => a.pathLabel.localeCompare(b.pathLabel, 'ar'));
-  return hits;
+  hits.sort((a, b) => a.rank - b.rank || a.pathLabel.localeCompare(b.pathLabel, 'ar'));
+  return hits.map(({ id, pathLabel }) => ({ id, pathLabel }));
 };

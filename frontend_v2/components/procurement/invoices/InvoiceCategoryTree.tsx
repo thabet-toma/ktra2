@@ -604,6 +604,9 @@ export const InvoiceCategoryTree: React.FC<Props> = ({ items, onPickItem, onShow
           onConfirm={async (target) => {
             if (moveTarget.mode === "products") {
               await inventoryApi.bulkSetCategory([moveTarget.productId], target);
+              // النقل قد يختار تصنيفاً أُنشئ من داخل النافذة نفسها («أضف «X»»)،
+              // و`loadCats` هي ما يجعله يظهر في الشجرة بلا إعادة تحميل الصفحة.
+              await loadCats();
             } else {
               // الشجرة تعرض التصنيف في موضعه الجديد فوراً من `loadCats`.
               await inventoryApi.updateCategory(moveTarget.categoryId, { parent: target });
