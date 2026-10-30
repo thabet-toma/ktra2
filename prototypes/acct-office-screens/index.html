@@ -1,0 +1,37 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. بيانات وهمية بالكامل. -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>نموذج أولي — شاشات مكتب المحاسبة</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<style type="text/tailwindcss">
+  @theme {
+    --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+    --default-font-family: var(--font-sans);
+  }
+</style>
+</head>
+<body class="bg-slate-100 font-sans text-slate-900 antialiased">
+<main class="mx-auto w-full max-w-[760px] px-6 py-10">
+  <p class="text-[11px] font-bold text-rose-700">PROTOTYPE — نموذج أولي ببيانات وهمية، للتفاوض على التصميم فقط</p>
+  <h1 class="mt-2 text-[22px] font-bold">شاشات مكتب المحاسبة — مكتب النور، الخليل</h1>
+  <p class="mt-1 text-[12.5px] text-slate-500">ست شاشات: شاشتين موبايل، ملف زبون، مستندين A4، وجدول نسب. الدورة: تشرين الأول 2026 · اليوم: الأحد 08/11/2026</p>
+
+  <ul class="mt-6 divide-y divide-slate-200 overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <li><a href="01-today.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">01 — اليوم (موبايل)</span><span class="text-[11px] text-slate-400">390 px</span></a></li>
+    <li><a href="02-ready-to-send.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">02 — جاهز للإرسال (موبايل)</span><span class="text-[11px] text-slate-400">390 px</span></a></li>
+    <li><a href="03-client-file.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">03 — ملف الزبون: الأوراق</span><span class="text-[11px] text-slate-400">1440 px</span></a></li>
+    <li><a href="04-fee-invoice.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">04 — فاتورة أتعاب</span><span class="text-[11px] text-slate-400">A4</span></a></li>
+    <li><a href="05-payment-notice.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">05 — إشعار دفع</span><span class="text-[11px] text-slate-400">A4</span></a></li>
+    <li><a href="06-expense-accounts.html" class="flex items-center justify-between gap-3 px-4 py-3 hover:bg-slate-50"><span class="text-[13px] font-semibold">06 — حسابات المصروفات بالنسب</span><span class="text-[11px] text-slate-400">1440 px</span></a></li>
+  </ul>
+
+  <p class="mt-4 text-[11px] text-slate-500">الصور الجاهزة للإرسال في مجلد <span class="font-semibold text-slate-700">screenshots/</span> — تتولّد بـ <span class="font-semibold text-slate-700">node shoot.mjs</span></p>
+</main>
+</body>
+</html>

@@ -1,0 +1,320 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. بيانات وهمية بالكامل. -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>اليوم — مكتب النور للمحاسبة والتدقيق</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<style type="text/tailwindcss">
+  @theme {
+    --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+    --default-font-family: var(--font-sans);
+  }
+</style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-900 antialiased">
+<div class="mx-auto flex min-h-screen w-full max-w-[390px] flex-col">
+
+  <!-- Top bar -->
+  <header class="sticky top-0 z-20 border-b border-slate-200 bg-white">
+    <div class="flex items-center gap-2.5 px-4 py-3">
+      <span class="grid size-8 shrink-0 place-items-center rounded-xl bg-teal-700 text-[13px] font-bold text-white">ن</span>
+      <p class="min-w-0 flex-1 truncate text-[12.5px] font-semibold text-slate-900">مكتب النور للمحاسبة والتدقيق</p>
+      <button type="button" class="relative grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"/><path d="M10.3 21a2 2 0 0 0 3.4 0"/></svg>
+        <span class="absolute -end-1 -top-1 grid size-[18px] place-items-center rounded-full border-2 border-white bg-rose-600 text-[10px] font-bold tabular-nums text-white">3</span>
+      </button>
+      <div class="flex shrink-0 items-center gap-1.5">
+        <span class="grid size-7 place-items-center rounded-full bg-teal-50 text-[11px] font-bold text-teal-700 border border-teal-100">س</span>
+        <span class="text-[11px] font-semibold text-slate-600">سامر</span>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 px-4 pb-2.5 text-[11px] text-slate-500">
+      <span class="font-medium text-slate-600">الأحد 08/11/2026</span>
+      <span class="size-1 rounded-full bg-slate-300"></span>
+      <span>الدورة: تشرين الأول 2026</span>
+    </div>
+  </header>
+
+  <main class="flex-1 px-4 pb-4">
+    <!-- Counters -->
+    <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pt-3 pb-1 [scrollbar-width:none] [&amp;::-webkit-scrollbar]:hidden">
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-rose-600">2</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">متأخّر رسمي</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-amber-600">3</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">متأخّر داخلي</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-slate-900">4</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">قريب هالأسبوع</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-amber-600">5</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">ناقصه أوراق</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-slate-900">2</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">للإدخال</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-teal-700">6</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">جاهز للإرسال</p>
+      </div>
+      <div class="shrink-0 rounded-xl border border-slate-200 bg-white px-3 py-2 text-center">
+        <p class="text-[17px] font-bold leading-6 tabular-nums text-slate-900">2</p>
+        <p class="mt-0.5 whitespace-nowrap text-[10px] font-medium text-slate-500">مواعيد اليوم</p>
+      </div>
+    </div>
+
+    <!-- Saved filters -->
+    <div class="-mx-4 mt-2 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&amp;::-webkit-scrollbar]:hidden">
+      <button type="button" class="shrink-0 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white">شغلي</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">هالأسبوع</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">بانتظار أوراق الزبون</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">متأخّر</button>
+    </div>
+
+    <!-- Obligations list -->
+    <div class="mt-4 flex items-baseline justify-between">
+      <h2 class="text-[13px] font-bold text-slate-900">الالتزامات والشغلات</h2>
+      <span class="text-[10.5px] font-medium text-slate-400">مرتّبة حسب أقرب موعد</span>
+    </div>
+
+    <div class="mt-2 flex flex-col gap-2.5">
+
+      <!-- 1 -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="truncate text-[14px] font-semibold text-slate-900">مخبز السنابل</h3>
+            <span class="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">رسمي</span>
+          </div>
+          <span class="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">متأخّر</span>
+        </div>
+        <div class="mt-1.5 flex items-start justify-between gap-2">
+          <p class="text-[12.5px] font-medium text-slate-600">سلفة ضريبة دخل — الربع 3</p>
+          <p class="shrink-0 whitespace-nowrap text-[12.5px] font-bold tabular-nums text-rose-600">عليه 620 ₪</p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
+            داخلي <b class="font-semibold tabular-nums text-slate-700">30/10</b>
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M5 21V5h9l1.5 3H20v13"/><path d="M9 12h6"/></svg>
+            رسمي <b class="font-semibold tabular-nums text-slate-700">31/10</b>
+          </span>
+          <span class="ms-auto inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+            <b class="font-semibold tabular-nums text-rose-600">2/3</b> وصلت
+          </span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
+          <button type="button" class="rounded-lg bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white">انقدّم</button>
+          <button type="button" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">مش لازم هالفترة</button>
+          <button type="button" class="ms-auto text-[11px] font-semibold text-teal-700">افتح الزبون</button>
+        </div>
+      </article>
+
+      <!-- 2 -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="truncate text-[14px] font-semibold text-slate-900">صيدلية الشفاء</h3>
+            <span class="shrink-0 rounded-md border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-500">من المكتب</span>
+          </div>
+          <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">متأخّر</span>
+        </div>
+        <div class="mt-1.5 flex items-start justify-between gap-2">
+          <p class="text-[12.5px] font-medium text-slate-600">مطابقة كشف البنك</p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
+            داخلي <b class="font-semibold tabular-nums text-amber-700">05/11</b>
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M5 21V5h9l1.5 3H20v13"/><path d="M9 12h6"/></svg>
+            رسمي <b class="font-semibold text-slate-300">—</b>
+          </span>
+          <span class="ms-auto inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+            <b class="font-semibold tabular-nums text-emerald-600">4/4</b> وصلت
+          </span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
+          <button type="button" class="rounded-lg bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white">انقدّم</button>
+          <button type="button" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">مش لازم هالفترة</button>
+          <button type="button" class="ms-auto text-[11px] font-semibold text-teal-700">افتح الزبون</button>
+        </div>
+      </article>
+
+      <!-- 3 -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="truncate text-[14px] font-semibold text-slate-900">سوبرماركت الأمل — أبو أحمد</h3>
+            <span class="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">رسمي</span>
+          </div>
+          <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">ناقصه أوراق</span>
+        </div>
+        <div class="mt-1.5 flex items-start justify-between gap-2">
+          <p class="text-[12.5px] font-medium text-slate-600">إقرار ض.ق.م — تشرين الأول</p>
+          <p class="shrink-0 whitespace-nowrap text-[12.5px] font-bold tabular-nums text-rose-600">عليه 2,250 ₪</p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
+            داخلي <b class="font-semibold tabular-nums text-slate-700">08/11</b>
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M5 21V5h9l1.5 3H20v13"/><path d="M9 12h6"/></svg>
+            رسمي <b class="font-semibold tabular-nums text-slate-700">15/11</b>
+          </span>
+          <span class="ms-auto inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+            <b class="font-semibold tabular-nums text-amber-700">3/5</b> وصلت
+          </span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
+          <button type="button" class="rounded-lg bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white">انقدّم</button>
+          <button type="button" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">مش لازم هالفترة</button>
+          <button type="button" class="ms-auto text-[11px] font-semibold text-teal-700">افتح الزبون</button>
+        </div>
+      </article>
+
+      <!-- 4 -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="truncate text-[14px] font-semibold text-slate-900">سوبرماركت الأمل — أبو أحمد</h3>
+            <span class="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">رسمي</span>
+          </div>
+          <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">قريب</span>
+        </div>
+        <div class="mt-1.5 flex items-start justify-between gap-2">
+          <p class="text-[12.5px] font-medium text-slate-600">اقتطاع رواتب — تشرين الأول</p>
+          <p class="shrink-0 whitespace-nowrap text-[12.5px] font-bold tabular-nums text-rose-600">عليه 380 ₪</p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
+            داخلي <b class="font-semibold tabular-nums text-slate-700">11/11</b>
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M5 21V5h9l1.5 3H20v13"/><path d="M9 12h6"/></svg>
+            رسمي <b class="font-semibold tabular-nums text-slate-700">15/11</b>
+          </span>
+          <span class="ms-auto inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+            <b class="font-semibold tabular-nums text-emerald-600">5/5</b> وصلت
+          </span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
+          <button type="button" class="rounded-lg bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white">انقدّم</button>
+          <button type="button" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">مش لازم هالفترة</button>
+          <button type="button" class="ms-auto text-[11px] font-semibold text-teal-700">افتح الزبون</button>
+        </div>
+      </article>
+
+      <!-- 5 -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start justify-between gap-2">
+          <div class="flex min-w-0 items-center gap-1.5">
+            <h3 class="truncate text-[14px] font-semibold text-slate-900">ورشة النجار للألمنيوم</h3>
+            <span class="shrink-0 rounded-md border border-slate-200 bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">رسمي</span>
+          </div>
+          <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">قريب</span>
+        </div>
+        <div class="mt-1.5 flex items-start justify-between gap-2">
+          <p class="text-[12.5px] font-medium text-slate-600">إقرار ض.ق.م — تشرين الأول</p>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500">
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v5l3 2"/></svg>
+            داخلي <b class="font-semibold tabular-nums text-slate-700">12/11</b>
+          </span>
+          <span class="inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M5 21V5h9l1.5 3H20v13"/><path d="M9 12h6"/></svg>
+            رسمي <b class="font-semibold tabular-nums text-slate-700">15/11</b>
+          </span>
+          <span class="ms-auto inline-flex items-center gap-1">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5 text-slate-400" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+            <b class="font-semibold tabular-nums text-emerald-600">5/5</b> وصلت
+          </span>
+        </div>
+        <div class="mt-2.5 flex items-center gap-1.5 border-t border-slate-100 pt-2.5">
+          <button type="button" class="rounded-lg bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white">انقدّم</button>
+          <button type="button" class="rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600">مش لازم هالفترة</button>
+          <button type="button" class="ms-auto text-[11px] font-semibold text-teal-700">افتح الزبون</button>
+        </div>
+      </article>
+
+    </div>
+
+    <!-- Today's appointments -->
+    <div class="mt-5 flex items-baseline justify-between">
+      <h2 class="text-[13px] font-bold text-slate-900">مواعيد اليوم</h2>
+      <span class="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold tabular-nums text-slate-500">2</span>
+    </div>
+    <div class="mt-2 divide-y divide-slate-100 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div class="flex items-center gap-3 px-3.5 py-3">
+        <span class="w-11 shrink-0 text-center text-[13px] font-bold tabular-nums text-teal-700">10:30</span>
+        <span class="h-8 w-px shrink-0 bg-slate-200"></span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-[13px] font-semibold text-slate-900">مخبز السنابل</p>
+          <p class="mt-0.5 text-[11px] text-slate-500">زيارة · شارع عين سارة</p>
+        </div>
+        <span class="shrink-0 rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">زيارة</span>
+      </div>
+      <div class="flex items-center gap-3 px-3.5 py-3">
+        <span class="w-11 shrink-0 text-center text-[13px] font-bold tabular-nums text-teal-700">13:00</span>
+        <span class="h-8 w-px shrink-0 bg-slate-200"></span>
+        <div class="min-w-0 flex-1">
+          <p class="truncate text-[13px] font-semibold text-slate-900">عيادة د. ليلى</p>
+          <p class="mt-0.5 text-[11px] text-slate-500">مكالمة · متابعة أوراق أيلول</p>
+        </div>
+        <span class="shrink-0 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-500">مكالمة</span>
+      </div>
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="mt-auto border-t border-slate-200 bg-white">
+    <div class="grid grid-cols-5">
+      <a href="01-today.html" class="flex flex-col items-center gap-1 py-2.5 text-teal-700">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="m3 10.5 9-7 9 7V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+        <span class="text-[10px] font-semibold">اليوم</span>
+      </a>
+      <a href="02-ready-to-send.html" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <span class="relative">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M21 3 3 10.5l7.5 3L14 21 21 3Z"/><path d="M10.5 13.5 21 3"/></svg>
+          <span class="absolute -end-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-teal-700 px-1 text-[9px] font-bold tabular-nums text-white">6</span>
+        </span>
+        <span class="text-[10px] font-medium">جاهز للإرسال</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M15 19.2a7 7 0 0 0-12 0"/><circle cx="9" cy="7.5" r="3.5"/><path d="M17 10.5a2.5 2.5 0 1 0 0-5"/><path d="M20.5 19.2a5 5 0 0 0-3.5-4.8"/></svg>
+        <span class="text-[10px] font-medium">الزبائن</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M7 3v3m10-3v3M4 9h16"/><rect x="4" y="5" width="16" height="15" rx="1"/></svg>
+        <span class="text-[10px] font-medium">التقويم</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M6 12h.01M12 12h.01M18 12h.01"/></svg>
+        <span class="text-[10px] font-medium">المزيد</span>
+      </a>
+    </div>
+  </nav>
+
+</div>
+</body>
+</html>

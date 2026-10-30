@@ -1,0 +1,228 @@
+<!doctype html>
+<!-- PROTOTYPE — throwaway. بيانات وهمية بالكامل. -->
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>جاهز للإرسال — مكتب النور للمحاسبة والتدقيق</title>
+<script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&display=swap">
+<style type="text/tailwindcss">
+  @theme {
+    --font-sans: "IBM Plex Sans Arabic", ui-sans-serif, system-ui, sans-serif;
+    --default-font-family: var(--font-sans);
+  }
+</style>
+</head>
+<body class="bg-slate-50 font-sans text-slate-900 antialiased">
+<div class="mx-auto flex min-h-screen w-full max-w-[390px] flex-col">
+
+  <!-- Top bar -->
+  <header class="sticky top-0 z-20 border-b border-slate-200 bg-white">
+    <div class="flex items-center gap-2.5 px-4 py-3">
+      <button type="button" class="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-white text-slate-500">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" class="size-[18px]" aria-hidden="true"><path d="m9 5 7 7-7 7"/></svg>
+      </button>
+      <div class="min-w-0 flex-1">
+        <h1 class="text-[15px] font-bold text-slate-900">جاهز للإرسال</h1>
+        <p class="mt-0.5 text-[11px] font-medium text-slate-500">رسالة وحدة لكل شخص — بتنفتح على واتساب</p>
+      </div>
+      <span class="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-bold tabular-nums text-teal-700">6 جاهزة</span>
+    </div>
+  </header>
+
+  <main class="flex-1 px-4 pb-4">
+    <!-- Filters -->
+    <div class="-mx-4 flex gap-2 overflow-x-auto px-4 pt-3 pb-1 [scrollbar-width:none] [&amp;::-webkit-scrollbar]:hidden">
+      <button type="button" class="shrink-0 rounded-full bg-slate-900 px-3 py-1.5 text-[11px] font-semibold text-white">الكل</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">أوراق</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">مواعيد</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">اللي عليه</button>
+      <button type="button" class="shrink-0 rounded-full border border-slate-200 bg-white px-3 py-1.5 text-[11px] font-medium text-slate-600">أتعاب</button>
+    </div>
+
+    <p class="mt-3 text-[10.5px] font-medium text-slate-400">4 أشخاص · 6 بنود — رسالة وحدة لكل شخص</p>
+
+    <div class="mt-2 flex flex-col gap-2.5">
+
+      <!-- Abu Ahmad -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start gap-2.5">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full border border-teal-100 bg-teal-50 text-[12px] font-bold text-teal-700">أ</span>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-[13.5px] font-semibold text-slate-900">أبو أحمد — سوبرماركت الأمل</h2>
+            <p class="mt-0.5 text-[10.5px] text-slate-500">آخر تواصل 06/11 · 3 بنود في رسالة وحدة</p>
+          </div>
+        </div>
+
+        <div class="mt-2.5 flex flex-wrap gap-1.5">
+          <span class="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-semibold text-teal-700">إشعار دفع</span>
+          <span class="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">موعد 15/11</span>
+          <span class="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">أوراق ناقصة</span>
+        </div>
+
+        <div class="mt-2.5 flex items-center justify-between">
+          <span class="text-[10px] font-semibold text-slate-400">معاينة الرسالة</span>
+          <button type="button" class="text-[10.5px] font-semibold text-teal-700 underline decoration-teal-200 underline-offset-4">عدّل</button>
+        </div>
+        <div class="mt-1.5 rounded-2xl rounded-tr-sm border border-emerald-100 bg-emerald-50 p-3">
+          <p class="text-[10px] font-bold text-emerald-700">مكتب النور · واتساب</p>
+          <p class="mt-1 text-[12px] leading-6 text-slate-800">مرحبا أبو أحمد، تذكير من مكتب النور: موعد تقديم ضريبة تشرين الأول يوم الأحد 15/11. المطلوب منك هالشهر: ض.ق.م 2,250 ₪ + اقتطاع رواتب 380 ₪ = 2,630 ₪ (الإشعار مرفق). وناقصنا منك: كشف البنك وفواتير مشتريات آخر أسبوع. شكراً 🌿</p>
+        </div>
+        <div class="mt-2 flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-4 shrink-0 text-rose-500" aria-hidden="true"><path d="M14 3v5h5M7 3h7l5 5v12a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1Z"/></svg>
+          <span class="min-w-0 flex-1 truncate text-[11px] font-medium text-slate-700">إشعار-دفع-تشرين1.pdf</span>
+          <span class="shrink-0 text-[10px] font-semibold text-slate-400">PDF · 96 KB</span>
+        </div>
+
+        <button type="button" class="mt-3 flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2.5 text-[12.5px] font-semibold text-white">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="size-4" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.25-.46-2.39-1.47-.88-.79-1.48-1.76-1.66-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.91-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.62.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.42-.08-.12-.28-.2-.57-.34M11.05 21.8a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.89 9.89-9.89a9.82 9.82 0 0 1 6.99 2.9 9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.43 9.89-9.88 9.89m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.9c0 2.09.55 4.14 1.59 5.94L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.49-8.42"/></svg>
+          ابعت على واتساب
+        </button>
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <button type="button" class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1.5 text-[10.5px] font-medium text-slate-600">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="M2.5 5.5a2 2 0 0 1 2-2h2a1 1 0 0 1 1 .8l.7 3a1 1 0 0 1-.5 1.1l-1.4.8a12 12 0 0 0 5.5 5.5l.8-1.4a1 1 0 0 1 1.1-.5l3 .7a1 1 0 0 1 .8 1v2a2 2 0 0 1-2 2A16 16 0 0 1 2.5 5.5Z"/></svg>
+            ذكّرته بالتلفون
+          </button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-600">أجّل</button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-500">شيل</button>
+        </div>
+      </article>
+
+      <!-- Restaurant -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start gap-2.5">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-100 text-[12px] font-bold text-slate-600">م</span>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-[13.5px] font-semibold text-slate-900">مطعم البيت القديم</h2>
+            <p class="mt-0.5 text-[10.5px] text-slate-500">آخر تواصل 02/11</p>
+          </div>
+          <span class="shrink-0 rounded-full border border-rose-200 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-700">اللي عليه</span>
+        </div>
+
+        <div class="mt-2 flex items-center justify-between rounded-lg border border-rose-100 bg-rose-50 px-2.5 py-1.5">
+          <span class="text-[10.5px] font-semibold text-rose-700">أتعاب متأخرة — تشرين الأول</span>
+          <span class="text-[11.5px] font-bold tabular-nums text-rose-700">600 ₪</span>
+        </div>
+
+        <div class="mt-2.5 rounded-2xl rounded-tr-sm border border-emerald-100 bg-emerald-50 p-3">
+          <p class="text-[10px] font-bold text-emerald-700">مكتب النور · واتساب</p>
+          <p class="mt-1 text-[12px] leading-6 text-slate-800">مرحبا أبو خليل، تذكير ودّي: أتعاب تشرين الأول 600 ₪ لسّا ما وصلت. بتبعتلك الفاتورة على الواتساب، وبتقدر تحوّلها على حساب المكتب. شكراً 🌿</p>
+        </div>
+
+        <button type="button" class="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-[12px] font-semibold text-white">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.25-.46-2.39-1.47-.88-.79-1.48-1.76-1.66-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.91-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.62.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.42-.08-.12-.28-.2-.57-.34M11.05 21.8a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.89 9.89-9.89a9.82 9.82 0 0 1 6.99 2.9 9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.43 9.89-9.88 9.89m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.9c0 2.09.55 4.14 1.59 5.94L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.49-8.42"/></svg>
+          ابعت على واتساب
+        </button>
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <button type="button" class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1.5 text-[10.5px] font-medium text-slate-600">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="M2.5 5.5a2 2 0 0 1 2-2h2a1 1 0 0 1 1 .8l.7 3a1 1 0 0 1-.5 1.1l-1.4.8a12 12 0 0 0 5.5 5.5l.8-1.4a1 1 0 0 1 1.1-.5l3 .7a1 1 0 0 1 .8 1v2a2 2 0 0 1-2 2A16 16 0 0 1 2.5 5.5Z"/></svg>
+            ذكّرته بالتلفون
+          </button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-600">أجّل</button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-500">شيل</button>
+        </div>
+      </article>
+
+      <!-- Pharmacy -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start gap-2.5">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-100 text-[12px] font-bold text-slate-600">ص</span>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-[13.5px] font-semibold text-slate-900">صيدلية الشفاء</h2>
+            <p class="mt-0.5 text-[10.5px] text-slate-500">آخر تواصل 05/11</p>
+          </div>
+          <span class="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">أوراق ناقصة</span>
+        </div>
+
+        <div class="mt-2.5 rounded-2xl rounded-tr-sm border border-emerald-100 bg-emerald-50 p-3">
+          <p class="text-[10px] font-bold text-emerald-700">مكتب النور · واتساب</p>
+          <p class="mt-1 text-[12px] leading-6 text-slate-800">مرحبا د. عمر، ناقصنا منك كشف البنك لشهر تشرين الأول + فواتير مشتريات آخر أسبوعين. بتقدر تبعتهم صور أو PDF على الواتساب. شكراً 🌿</p>
+        </div>
+
+        <button type="button" class="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-[12px] font-semibold text-white">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.25-.46-2.39-1.47-.88-.79-1.48-1.76-1.66-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.91-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.62.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.42-.08-.12-.28-.2-.57-.34M11.05 21.8a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.89 9.89-9.89a9.82 9.82 0 0 1 6.99 2.9 9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.43 9.89-9.88 9.89m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.9c0 2.09.55 4.14 1.59 5.94L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.49-8.42"/></svg>
+          ابعت على واتساب
+        </button>
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <button type="button" class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1.5 text-[10.5px] font-medium text-slate-600">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="M2.5 5.5a2 2 0 0 1 2-2h2a1 1 0 0 1 1 .8l.7 3a1 1 0 0 1-.5 1.1l-1.4.8a12 12 0 0 0 5.5 5.5l.8-1.4a1 1 0 0 1 1.1-.5l3 .7a1 1 0 0 1 .8 1v2a2 2 0 0 1-2 2A16 16 0 0 1 2.5 5.5Z"/></svg>
+            ذكّرته بالتلفون
+          </button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-600">أجّل</button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-500">شيل</button>
+        </div>
+      </article>
+
+      <!-- Clinic -->
+      <article class="rounded-xl border border-slate-200 bg-white p-3.5">
+        <div class="flex items-start gap-2.5">
+          <span class="grid size-9 shrink-0 place-items-center rounded-full border border-slate-200 bg-slate-100 text-[12px] font-bold text-slate-600">ل</span>
+          <div class="min-w-0 flex-1">
+            <h2 class="truncate text-[13.5px] font-semibold text-slate-900">عيادة د. ليلى</h2>
+            <p class="mt-0.5 text-[10.5px] text-slate-500">آخر تواصل 07/11</p>
+          </div>
+          <span class="shrink-0 rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10px] font-bold text-teal-700">موعد زيارة</span>
+        </div>
+
+        <div class="mt-2 flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5">
+          <span class="text-[10.5px] font-semibold text-slate-600">الموعد المقترح</span>
+          <span class="text-[11px] font-bold tabular-nums text-slate-700">الثلاثاء 10/11 · 11:00</span>
+        </div>
+
+        <div class="mt-2.5 rounded-2xl rounded-tr-sm border border-emerald-100 bg-emerald-50 p-3">
+          <p class="text-[10px] font-bold text-emerald-700">مكتب النور · واتساب</p>
+          <p class="mt-1 text-[12px] leading-6 text-slate-800">مرحبا د. ليلى، منأكّد زيارة المكتب إلك يوم الثلاثاء 10/11 الساعة 11:00 لمراجعة أوراق أيلول وتشرين الأول. بتبلّغني إذا الموعد ما بيناسبك. شكراً 🌿</p>
+        </div>
+
+        <button type="button" class="mt-2.5 flex w-full items-center justify-center gap-2 rounded-lg bg-teal-700 px-3 py-2 text-[12px] font-semibold text-white">
+          <svg viewBox="0 0 24 24" fill="currentColor" class="size-3.5" aria-hidden="true"><path d="M17.47 14.38c-.3-.15-1.76-.87-2.03-.97-.27-.1-.47-.15-.67.15-.2.3-.77.97-.94 1.17-.17.2-.35.22-.64.07-.3-.15-1.25-.46-2.39-1.47-.88-.79-1.48-1.76-1.66-2.06-.17-.3-.02-.46.13-.6.13-.14.3-.35.45-.52.15-.18.2-.3.3-.5.1-.2.05-.37-.03-.52-.07-.15-.67-1.61-.91-2.2-.24-.58-.49-.5-.67-.51h-.57c-.2 0-.52.07-.79.37-.27.3-1.04 1.02-1.04 2.48s1.07 2.88 1.21 3.08c.15.2 2.1 3.2 5.08 4.49.71.3 1.26.49 1.7.62.71.23 1.36.2 1.87.12.57-.09 1.76-.72 2-1.41.25-.7.25-1.29.18-1.42-.08-.12-.28-.2-.57-.34M11.05 21.8a9.87 9.87 0 0 1-5.03-1.38l-.36-.21-3.74.98 1-3.65-.24-.37a9.86 9.86 0 0 1-1.51-5.26c0-5.45 4.44-9.89 9.89-9.89a9.82 9.82 0 0 1 6.99 2.9 9.83 9.83 0 0 1 2.89 6.99c0 5.45-4.43 9.89-9.88 9.89m8.41-18.3A11.82 11.82 0 0 0 12.05 0C5.5 0 .16 5.34.16 11.9c0 2.09.55 4.14 1.59 5.94L.06 24l6.3-1.65a11.88 11.88 0 0 0 5.69 1.45c6.55 0 11.89-5.34 11.89-11.89 0-3.18-1.24-6.17-3.49-8.42"/></svg>
+          ابعت على واتساب
+        </button>
+        <div class="mt-1.5 flex items-center gap-1.5">
+          <button type="button" class="flex flex-1 items-center justify-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1.5 text-[10.5px] font-medium text-slate-600">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-3.5" aria-hidden="true"><path d="M2.5 5.5a2 2 0 0 1 2-2h2a1 1 0 0 1 1 .8l.7 3a1 1 0 0 1-.5 1.1l-1.4.8a12 12 0 0 0 5.5 5.5l.8-1.4a1 1 0 0 1 1.1-.5l3 .7a1 1 0 0 1 .8 1v2a2 2 0 0 1-2 2A16 16 0 0 1 2.5 5.5Z"/></svg>
+            ذكّرته بالتلفون
+          </button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-600">أجّل</button>
+          <button type="button" class="shrink-0 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[10.5px] font-medium text-slate-500">شيل</button>
+        </div>
+      </article>
+
+    </div>
+  </main>
+
+  <!-- Bottom nav -->
+  <nav class="mt-auto border-t border-slate-200 bg-white">
+    <div class="grid grid-cols-5">
+      <a href="01-today.html" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="m3 10.5 9-7 9 7V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1v-9.5Z"/></svg>
+        <span class="text-[10px] font-medium">اليوم</span>
+      </a>
+      <a href="02-ready-to-send.html" class="flex flex-col items-center gap-1 py-2.5 text-teal-700">
+        <span class="relative">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M21 3 3 10.5l7.5 3L14 21 21 3Z"/><path d="M10.5 13.5 21 3"/></svg>
+          <span class="absolute -end-2 -top-1.5 grid h-4 min-w-4 place-items-center rounded-full bg-teal-700 px-1 text-[9px] font-bold tabular-nums text-white">6</span>
+        </span>
+        <span class="text-[10px] font-semibold">جاهز للإرسال</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M15 19.2a7 7 0 0 0-12 0"/><circle cx="9" cy="7.5" r="3.5"/><path d="M17 10.5a2.5 2.5 0 1 0 0-5"/><path d="M20.5 19.2a5 5 0 0 0-3.5-4.8"/></svg>
+        <span class="text-[10px] font-medium">الزبائن</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M7 3v3m10-3v3M4 9h16"/><rect x="4" y="5" width="16" height="15" rx="1"/></svg>
+        <span class="text-[10px] font-medium">التقويم</span>
+      </a>
+      <a href="#" class="flex flex-col items-center gap-1 py-2.5 text-slate-400">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" class="size-5" aria-hidden="true"><path d="M6 12h.01M12 12h.01M18 12h.01"/></svg>
+        <span class="text-[10px] font-medium">المزيد</span>
+      </a>
+    </div>
+  </nav>
+
+</div>
+</body>
+</html>
