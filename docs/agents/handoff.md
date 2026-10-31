@@ -147,6 +147,32 @@
     - إخفاء «مخصَّص عند N» للإعداد المكتبي.
     - سطر الوثيقة.
   - **بعدها:** أقرأ الفرق وأشغّل البوّابات. فإن كانت نظيفة: commit، ثم push، ثم CI، ثم النشر (بنسخة احتياطية، فالهجرة جديدة)، ثم إغلاق #271.
+- **تحديث 2026-10-31 03:30:** **#271 مُلتزَمة `392d7165` ومدفوعة** إلى `newktra`. الـCI run هو `41155237663`، وبيأخذ نحو ساعة.
+  - **النشر بعد CI أخضر:**
+    - هجرة جديدة `accounting_office.0001`، فخذ نسخة احتياطية أولاً.
+    - الخادم `modern`، والـrsync لـ`dist/` يستثني كل ما في جذر الويب وليس من `dist/`.
+    - بعد النشر: أغلق #271.
+  - **#272 جارية على DeepSeek:** المحاولة `attempt-9f04e474-63c5-46ca-9279-0d5fff61a358`، والـjob `delegation-28`.
+    - **قرارات الموجز:**
+      - **الأدوار:** مالك = `manager`، ومدير = `office_manager` جديد، ومحاسب = `accountant`، وقارئ = `viewer`.
+      - **مفاتيح الصلاحيات:** `office.clients.write`/`all`/`assign`، و`office.amounts.view`، و`office.settings.manage`.
+      - **الموظف المسؤول:** `responsible` FK بهجرة 0002، والتحويل عبر `POST assign/`.
+      - **مصدرا الرؤية والمبالغ:** `visible_clients` للرؤية (زبون غيره ⇒ 404)، و`can_see_amounts`/`mask_amounts` مع حارسٍ للمبالغ.
+      - **الواجهة:** الأدوار عبر الـAPI القائمة `members/change-role/` و`/api/permissions/member/`.
+  - **#273 بعد #272، لا بالتوازي:** الاثنتان تلمسان `accounting_office` والهجرة.
+- **تحديث 2026-10-31 05:20:** **#271 نُشرت وأُغلقت.**
+  - **النشر:** دمج `a239776b` على `modern`، والنسخة الاحتياطية في `/root/backups/ktra-before-271-20261031-023401.sql`.
+  - **سكربت النشر:** `%TEMP%\wf-acct\deploy-271.sh`، ويُشغَّل بـ`bash -s` بعد تحويل CRLF.
+  - **#272، جولة التصليح 1 عند DeepSeek:** المحاولة `attempt-42431db4…`، وقرأتُها.
+    - أنجزت 12 بنداً، منها `visible_contacts` و`register_document_history_guard` و`_assert_role_assignable` و`select_for_update`.
+    - البوّابة الكاملة عندي: `4 failed` (البيئية) و`6773 passed`.
+  - **المراجعتان النهائيتان لـ#272:** Standards `attempt-93f369f5…`، وSpec `attempt-3b4d01ae…`، وكلتاهما مختتمة.
+  - **الجولة 2 جارية عند Sonnet 5.5** عبر `claude-delegate` بـ`--effort high`:
+    - الـjob: `pwsh-920`.
+    - الـrelay: `%TEMP%\wf-acct\relay\272-r2`.
+    - الموجز: `%TEMP%\wf-acct\briefs\272-round2-sonnet.md`.
+    - **البنود الأربعة:** قفل حقل المبلغ، وإنشاء الزبون لغير العضو، و`user` مطلوب، وتأكيد الحارس.
+  - **بعدها:** أقرأ الفرق وأشغّل البوّابات، ثم commit ونشر. فيها هجرتان: `tenants.0037` و`accounting_office.0002`.
 - **الخطوة التالية (القديمة):**
   1. ~~`delegation_wait`~~ — تمّ.
   2. `delegation_review` (مُنادى)، ثم قراءة الفرق كاملاً بنفسي.

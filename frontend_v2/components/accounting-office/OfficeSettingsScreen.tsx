@@ -1,21 +1,46 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import {
   getOfficeSettings,
   listCustomizingClients,
+  listOfficeMembers,
   resetOfficeSetting,
   setOfficeSetting,
   type OfficeClientRow,
+  type OfficeMemberRow,
   type OfficeSettingsPayload,
 } from '../../services/accountingOfficeApi';
-import { clientFilePath, missingFirstRunLabels } from '../../utils/accountingOffice';
+import {
+  changeMemberRole,
+  getPermissionMembers,
+  getPermissionRoles,
+  saveMemberPermissions,
+  type PermissionMember,
+} from '../../services/permissionsApi';
+import {
+  OFFICE_OWNER_ROLE,
+  clientFilePath,
+  missingFirstRunLabels,
+  officeAssignableRoles,
+  officeRoleLabel,
+  officeSizeOf,
+  showsOfficeAssignment,
+} from '../../utils/accountingOffice';
+import { userRoleLabel } from '../../utils/userRoleLabel';
 import { humanizeThrown } from '../../utils/drfError';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SettingControl } from './SettingControl';
-import { OfficeCard, OfficeError, OfficeSkeleton } from './OfficeUi';
+import { OfficeCard, OfficeError, OfficeSkeleton, officeInputClass } from './OfficeUi';
 
 type CustomizingClient = Pick<OfficeClientRow, 'id' | 'name' | 'status' | 'status_label'>;
+
+/** المفتاحان اللذان يُمنحان لكل عضو على حدة (#272) — تجاوزُ عضوٍ لا جدولَ جديد. */
+const MEMBER_OFFICE_KEYS = [
+  { key: 'office.clients.all', label: 'يرى زبائن غيره' },
+  { key: 'office.amounts.view', label: 'يرى المبالغ' },
+] as const;
 
 /**
  * ISSUE #271 — شاشة إعدادات المكتب، بمجموعة «المكتب» وحدها الآن.
@@ -27,14 +52,30 @@ type CustomizingClient = Pick<OfficeClientRow, 'id' | 'name' | 'status' | 'statu
  *
  * وتخصيصُ الزبون **ليس** هنا: مكانه ملفّه — الإعدادُ المكتبيّ سقفٌ، والتخصيص
  * استثناءٌ يُرى حيث يُقرأ الزبون.
+ *
+ * **وقسم «الموظفون والأدوار» (#272)** يظهر لمن يملك `office.settings.manage`
+ * وفي مكتبٍ فيه أكثر من شخص. أدوارُه الأربعة على الكتالوج القائم — بلا محرّكٍ
+ * موازياً: تغييرُ الدور عبر `members/change-role/`، والمفتاحان عبر
+ * `permissions/member/` (خدماتُ الواجهة القائمة، ونقاطُ الـAPI القائمة). ولأن
+ * هاتين النقطتين محميّتان بـ`admin.members.manage` و`admin.permissions.manage`،
+ * تبقى الكتابةُ ظاهرةً لمن يملكهما وحده — والمالكُ (`manager`) يملك كل شيء
+ * ولا يُغيَّر دوره.
  */
 export const OfficeSettingsScreen: React.FC = () => {
   const toast = useToast();
   const navigate = useNavigate();
+  const { can } = usePermissions();
   const [payload, setPayload] = useState<OfficeSettingsPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [expanded, setExpanded] = useState<Record<string, CustomizingClient[] | undefined>>({});
+  const [members, setMembers] = useState<OfficeMemberRow[]>([]);
+  const [roles, setRoles] = useState<{ key: string; label: string }[]>([]);
+  const [overrideRows, setOverrideRows] = useState<Record<number, PermissionMember>>({});
+  const [savingMember, setSavingMember] = useState<number | null>(null);
+
+  const canEditRoles = can('admin.members.manage');
+  const canEditOverrides = can('admin.permissions.manage');
 
   const load = useCallback(() => {
     setLoading(true);
@@ -84,6 +125,96 @@ export const OfficeSettingsScreen: React.FC = () => {
     }
   };
 
+  const officeSize = useMemo(
+    () => (payload ? officeSizeOf(payload.settings) : null),
+    [payload],
+  );
+  // «شخص واحد» لا قسمَ أدوارٍ فيه — صاحبُ المكتب يعرف موظفيه (ولا موظفين).
+  const showsStaff = showsOfficeAssignment(officeSize);
+  const canManageSettings = can('office.settings.manage');
+
+  const roleLabelOf = useCallback(
+    (role: string) =>
+      officeRoleLabel(
+        role,
+        roles.find((entry) => entry.key === role)?.label ?? userRoleLabel(role),
+      ),
+    [roles],
+  );
+
+  /**
+   * موظفو المكتب وأدوارُهم — من نقاط الـAPI القائمة ولا شيء غيرها:
+   * `tenants/companies/<id>/members/` للقائمة (متاحةٌ لكل عضو)،
+   * و`permissions/roles/` لمفردة الأدوار المرشَّحة بترخيص الوحدة،
+   * و`permissions/members/` لتجاوزات الأعضاء ومفاتيحهم الفعلية.
+   */
+  const loadStaff = useCallback(() => {
+    if (!canManageSettings || !showsStaff) return;
+    listOfficeMembers()
+      .then(setMembers)
+      .catch((failure) => toast(humanizeThrown(failure, 'تعذّر تحميل موظفي المكتب.'), 'error'));
+    getPermissionRoles()
+      .then(setRoles)
+      .catch(() => {
+        /* التسميةُ تسقط إلى مصدرها العامّ (`userRoleLabel`) ولا تُخفي القسم. */
+      });
+    if (!canEditOverrides) return;
+    getPermissionMembers()
+      .then((rows) => {
+        setOverrideRows(
+          Object.fromEntries(rows.map((row) => [row.membership_id, row])),
+        );
+      })
+      .catch((failure) => {
+        toast(humanizeThrown(failure, 'تعذّر تحميل مفاتيح الموظفين.'), 'error');
+      });
+  }, [canEditOverrides, canManageSettings, showsStaff, toast]);
+
+  useEffect(() => {
+    loadStaff();
+  }, [loadStaff]);
+
+  const changeRole = async (member: OfficeMemberRow, role: string) => {
+    if (!role || role === member.role) return;
+    setSavingMember(member.membership_id);
+    try {
+      await changeMemberRole(member.membership_id, role);
+      setMembers((prev) =>
+        prev.map((row) => (row.membership_id === member.membership_id ? { ...row, role } : row)),
+      );
+      toast('حُفظ دور الموظف', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تغيير دور الموظف.'), 'error');
+    } finally {
+      setSavingMember(null);
+    }
+  };
+
+  /**
+   * مفتاحُ عضوٍ واحد: النقرُ يكتب تجاوزاً صريحاً (`allowed` = عكس الحالة الفعلية).
+   * والحالةُ المعروضة من `effective` التي يحسبها الخادم — لا حسابَ موازياً هنا.
+   *
+   * **ولا نكتب بلا صفٍّ محمَّل**: بلا `current` كنا نقرأ «غير ممنوح» فنمنح مفتاحاً
+   * ممنوحاً بدل أن نقلبه. والمربّعُ معطَّلٌ حتى يصل صفُّه (أدناه) احتياطاً ثانياً.
+   */
+  const toggleMemberKey = async (member: OfficeMemberRow, key: string) => {
+    const current = overrideRows[member.membership_id];
+    if (!current) return;
+    const granted = current.effective.includes(key);
+    setSavingMember(member.membership_id);
+    try {
+      const updated = await saveMemberPermissions(member.membership_id, [
+        { permission_key: key, allowed: !granted },
+      ]);
+      setOverrideRows((prev) => ({ ...prev, [member.membership_id]: updated }));
+      toast('حُفظ مفتاح الموظف', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر حفظ مفتاح الموظف.'), 'error');
+    } finally {
+      setSavingMember(null);
+    }
+  };
+
   if (loading && !payload) return <OfficeSkeleton />;
   if (error) return <OfficeError message={error} onRetry={load} />;
   if (!payload) return null;
@@ -123,6 +254,7 @@ export const OfficeSettingsScreen: React.FC = () => {
                 setting={setting}
                 value={setting.value}
                 canReset={setting.can_reset === true}
+                disabled={!canManageSettings}
                 onReset={() => reset(setting.key)}
                 onSave={(value) => save(setting.key, value)}
               />
@@ -165,6 +297,104 @@ export const OfficeSettingsScreen: React.FC = () => {
           );
         })}
       </OfficeCard>
+
+      {canManageSettings && showsStaff ? (
+        <OfficeCard title="الموظفون والأدوار">
+          {!canEditRoles && !canEditOverrides ? (
+            <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+              العرض فقط: منحُ الأدوار يتطلّب «إدارة الأعضاء»، ومنحُ المفتاحين يتطلّب
+              «إدارة الصلاحيات» — والمالك يملكهما.
+            </p>
+          ) : null}
+          {members.length === 0 ? (
+            <p className="text-[12px] text-slate-500 dark:text-slate-400">
+              لا موظفَ غيرك في هذا المكتب بعد.
+            </p>
+          ) : (
+            <table className="w-full">
+              <thead>
+                <tr className="border-b border-slate-200 text-[10.5px] font-medium text-slate-400 dark:border-slate-700 dark:text-slate-500">
+                  <th className="py-2 text-start">الموظف</th>
+                  <th className="py-2 text-start">الدور</th>
+                  {MEMBER_OFFICE_KEYS.map((entry) => (
+                    <th key={entry.key} className="py-2 text-start">
+                      {entry.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {members.map((member) => {
+                  // المالكُ (`manager`) يملك كل شيء ولا يُغيَّر دوره ولا مفاتيحه.
+                  const isOwner = member.role === OFFICE_OWNER_ROLE;
+                  const row = overrideRows[member.membership_id];
+                  const options = officeAssignableRoles(roles, officeSize, member.role);
+                  const busy = savingMember === member.membership_id;
+                  return (
+                    <tr
+                      key={member.membership_id}
+                      className="border-b border-slate-100 last:border-b-0 dark:border-slate-800"
+                    >
+                      <td className="py-2 text-[12px] font-medium text-slate-700 dark:text-slate-200">
+                        {member.full_name || member.username}
+                      </td>
+                      <td className="py-2">
+                        {isOwner ? (
+                          <span className="rounded-full border border-teal-200 bg-teal-50 px-2 py-0.5 text-[10.5px] font-semibold text-teal-800 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300">
+                            {roleLabelOf(member.role)}
+                          </span>
+                        ) : canEditRoles && options.length > 0 ? (
+                          <select
+                            value={member.role}
+                            disabled={busy}
+                            aria-label={`دور ${member.full_name || member.username}`}
+                            onChange={(event) => {
+                              void changeRole(member, event.target.value);
+                            }}
+                            className={`${officeInputClass} h-8`}
+                          >
+                            {options.map((option) => (
+                              <option key={option.key} value={option.key}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10.5px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            {roleLabelOf(member.role)}
+                          </span>
+                        )}
+                      </td>
+                      {MEMBER_OFFICE_KEYS.map((entry) => (
+                        <td key={entry.key} className="py-2">
+                          {isOwner ? (
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">
+                              كل الصلاحيات
+                            </span>
+                          ) : canEditOverrides ? (
+                            <input
+                              type="checkbox"
+                              checked={row ? row.effective.includes(entry.key) : false}
+                              disabled={busy || !row}
+                              aria-label={`${entry.label} — ${member.full_name || member.username}`}
+                              onChange={() => {
+                                void toggleMemberKey(member, entry.key);
+                              }}
+                              className="size-4 rounded border-slate-300"
+                            />
+                          ) : (
+                            <span className="text-[11px] text-slate-400 dark:text-slate-500">—</span>
+                          )}
+                        </td>
+                      ))}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </OfficeCard>
+      ) : null}
     </div>
   );
 };

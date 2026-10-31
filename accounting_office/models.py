@@ -17,9 +17,25 @@
   `is_primary` و`NULL` حين لا، وMySQL تسمح بتكرار `NULL`.
 - مستلِمٌ واحد لكل (زبون، نوع تذكير).
 """
+from django.conf import settings
 from django.db import models
 
-from tenants.models import Tenant
+from tenants.models import Tenant, UserCompanyMembership
+
+
+def is_tenant_member(tenant_id, user_id) -> bool:
+    """هل هذا المستخدم عضوٌ في هذه الشركة؟ — **قاعدةٌ واحدة** يقرؤها الاثنان.
+
+    يستهلكها حارسُ النموذج (`OfficeClient._assert_responsible_is_member`) وحارسُ
+    الخدمة (`accounting_office/services.py` — `_assert_member_of_tenant`)، فيبقى
+    معنى «عضو» واحداً. نسخةٌ ثانية من الشرط تفترق عن الأولى عند أوّل تعديل: حارسٌ
+    يقبل مسؤولاً ويرفضه الآخر.
+    """
+    if not tenant_id or not user_id:
+        return False
+    return UserCompanyMembership.objects.filter(
+        tenant_id=tenant_id, user_id=user_id,
+    ).exists()
 
 # ── البطاقة الضريبية: اختياراتٌ لكل نظام ضريبي ──────────────────────────────
 #
@@ -116,6 +132,17 @@ class OfficeClient(models.Model):
         verbose_name="المكتب",
     )
     name = models.CharField(max_length=200, verbose_name="الاسم")
+    # #272: الموظف المسؤول — **مسؤولٌ واحد لكل زبون**، وكلُّ شغلةٍ ترثه.
+    # `SET_NULL` لا `CASCADE`: خروجُ الموظف من الشركة لا يمحو زبائنها؛ يصيرون
+    # بلا مسؤولٍ حتى يُسندوا، ويبقى تاريخهم. والتحويلُ فعلٌ مُسجَّل لا كتابةٌ صامتة.
+    responsible = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_clients_responsible",
+        verbose_name="الموظف المسؤول",
+    )
     tax_file_number = models.CharField(
         max_length=60, blank=True, default="", verbose_name="رقم الملف الضريبي",
     )
@@ -135,6 +162,8 @@ class OfficeClient(models.Model):
         ordering = ["name", "id"]
         indexes = [
             models.Index(fields=["tenant", "status"], name="office_client_tenant_status"),
+            # «زبائن هذا الموظف» هو استعلامُ كلِّ قائمةٍ لعضوٍ لا يرى زبائن غيره.
+            models.Index(fields=["tenant", "responsible"], name="office_client_tenant_resp"),
         ]
         constraints = [
             # الحالة وتاريخها لا يفترقان: «منتهٍ» عليه تاريخ، و«نشط» بلا تاريخ.
@@ -149,6 +178,30 @@ class OfficeClient(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.get_status_display()})"
+
+    def save(self, *args, **kwargs):
+        # الحارسُ على **كتابة المسؤول** لا على كل حفظ: موظّفٌ يخرج من المكتب
+        # (تُحذف عضويّته) يبقى `responsible` على زبائنه حتى يُسندوا — وحارسٌ على
+        # كل حفظ كان يمنع إنهاء زبونٍ أو تعديل ملاحظاته بسبب عضويّةٍ قديمة.
+        update_fields = kwargs.get("update_fields")
+        if update_fields is None or "responsible" in update_fields:
+            self._assert_responsible_is_member()
+        super().save(*args, **kwargs)
+
+    def _assert_responsible_is_member(self) -> None:
+        """المسؤولُ عضوٌ في شركة الزبون — حارسُ النموذج بعد حارس الخدمة.
+
+        الخدمةُ تردّ 400 بالسبب، وهذا يغلق مسار `save()` **وحده**: مسؤولٌ من خارج
+        الشركة يجعل «زبائني» صفوفاً لا يراها أحدٌ في المكتب ولا يراها هو.
+        و`QuerySet.update()` لا يمرّ بالنموذج فلا يحرسه هذا — إصلاحٌ جماعيٌّ مباشر
+        على الجدول مسؤوليةُ من يكتبه.
+        """
+        if not self.responsible_id or not self.tenant_id:
+            return
+        if not is_tenant_member(self.tenant_id, self.responsible_id):
+            raise ValueError(
+                "الموظف المسؤول ليس عضواً في شركة الزبون — لا يُسند زبونٌ لغير عضوه.",
+            )
 
 
 class TaxCard(models.Model):

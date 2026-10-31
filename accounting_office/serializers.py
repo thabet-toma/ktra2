@@ -30,7 +30,11 @@ class TaxCardWriteSerializer(serializers.Serializer):
 
 
 class TaxCardField(serializers.Field):
-    """حقلٌ واحدٌ يُقرأ منه شكل البطاقة ويُكتب به تعديلها مع الزبون."""
+    """حقلٌ واحدٌ يُقرأ منه شكل البطاقة ويُكتب به تعديلها مع الزبون.
+
+    **والقناع يمرّ من هنا أيضاً**: التفصيلُ يحمل البطاقة داخله — فحقلُ مبلغٍ
+    يُقرأ من `tax_card_payload` بلا مستخدمٍ كان يُظهر لكل عضوٍ ما لا يملكه.
+    """
 
     def to_representation(self, value):
         if not value:
@@ -38,7 +42,10 @@ class TaxCardField(serializers.Field):
         client = getattr(value, "client", None)
         if client is None:
             return None
-        return services.tax_card_payload(client)
+        request = self.context.get("request") if self.context else None
+        return services.tax_card_payload(
+            client, user=getattr(request, "user", None),
+        )
 
     def to_internal_value(self, data):
         serializer = TaxCardWriteSerializer(data=data)
@@ -84,7 +91,22 @@ class TaxSystemFieldsMixin(serializers.Serializer):
         return services.tax_system_label(self.get_tax_system(obj))
 
 
-class OfficeClientListSerializer(TaxSystemFieldsMixin, serializers.ModelSerializer):
+class ResponsibleFieldsMixin(serializers.Serializer):
+    """الموظف المسؤول — **للقراءة وحدها**: تحويلُه له نقطته (`clients/<pk>/assign/`).
+
+    يظهر في القائمة وفي التفصيل لأنّه العمودُ الذي يعرف به العضو «زبوني أم لا».
+    """
+
+    responsible_id = serializers.IntegerField(read_only=True)
+    responsible_name = serializers.SerializerMethodField()
+
+    def get_responsible_name(self, obj):
+        return services.user_display_name(obj.responsible)
+
+
+class OfficeClientListSerializer(
+    ResponsibleFieldsMixin, TaxSystemFieldsMixin, serializers.ModelSerializer,
+):
     """صفُّ القائمة: بلا بطاقة، ونظامُه من الحساب الجماعيّ."""
 
     status_label = serializers.CharField(source="get_status_display", read_only=True)
@@ -94,12 +116,15 @@ class OfficeClientListSerializer(TaxSystemFieldsMixin, serializers.ModelSerializ
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
+            "responsible_id", "responsible_name",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
 
 
-class OfficeClientSerializer(TaxSystemFieldsMixin, serializers.ModelSerializer):
+class OfficeClientSerializer(
+    ResponsibleFieldsMixin, TaxSystemFieldsMixin, serializers.ModelSerializer,
+):
     """زبون المكتب — والنظامُ الضريبيّ الفعليّ يُقرأ من المحلّل لا من حقلٍ هنا."""
 
     tax_card = TaxCardField(required=False)
@@ -110,9 +135,13 @@ class OfficeClientSerializer(TaxSystemFieldsMixin, serializers.ModelSerializer):
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
-            "tax_card", "created_at", "updated_at",
+            "tax_card", "responsible_id", "responsible_name",
+            "created_at", "updated_at",
         ]
-        read_only_fields = ["status", "ended_on", "created_at", "updated_at"]
+        read_only_fields = [
+            "status", "ended_on", "responsible_id", "responsible_name",
+            "created_at", "updated_at",
+        ]
 
 
 class ContactSerializer(serializers.ModelSerializer):

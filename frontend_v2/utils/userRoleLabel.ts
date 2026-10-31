@@ -26,6 +26,8 @@
 export const USER_ROLE_LABEL: Record<string, string> = {
   // أدوارُ العضويّة (`UserCompanyMembership.ROLE_CHOICES`).
   manager: 'مدير',
+  // #272: دورُ مكتب المحاسبة الثاني — يظهر لشركةٍ مرخّصةٍ لوحدة المكتب وحدها.
+  office_manager: 'مدير مكتب',
   accountant: 'محاسب',
   legal_accountant: 'محاسب قانوني خارجي',
   sales: 'موظف مبيعات',

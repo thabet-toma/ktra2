@@ -12,8 +12,11 @@ import {
   CLIENT_QUERY_PARAM,
   clientIdFromSearch,
   clientStatusBadgeClass,
+  officeSizeOf,
+  showsOfficeAssignment,
 } from '../../utils/accountingOffice';
 import { humanizeThrown } from '../../utils/drfError';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { OfficeClientFile } from './OfficeClientFile';
 import { OfficeFirstRunStep } from './OfficeFirstRunStep';
@@ -48,6 +51,10 @@ const FILTERS: { key: StatusFilter; label: string }[] = [
  */
 export const OfficeClientsScreen: React.FC = () => {
   const toast = useToast();
+  // الخادم هو الحكم: هذه الأعلام تُخفي أزرار الكتابة ولا تحميها (وهي محميّةٌ
+  // بـ`office.clients.write` على كل نقطة). وحجمُ المكتب يخفي **عرضاً** لا صلاحية.
+  const { can } = usePermissions();
+  const canWrite = can('office.clients.write');
   const [searchParams, setSearchParams] = useSearchParams();
   const [settings, setSettings] = useState<OfficeSettingsPayload | null>(null);
   const [clients, setClients] = useState<OfficeClientRow[]>([]);
@@ -161,10 +168,15 @@ export const OfficeClientsScreen: React.FC = () => {
     );
   }
 
+  const officeSize = officeSizeOf(settings.settings);
+  // «شخص واحد» لا عمودَ مسؤولٍ ولا إسنادَ فيه: صاحبُ المكتب يعرف زبائنه.
+  const showsResponsible = showsOfficeAssignment(officeSize);
+
   if (selectedId !== null) {
     return (
       <OfficeClientFile
         clientId={selectedId}
+        officeSize={officeSize}
         onBack={backToList}
         onMissing={handleMissingClient}
       />
@@ -181,16 +193,18 @@ export const OfficeClientsScreen: React.FC = () => {
               كلُّ زبونٍ منشأةٌ بملفّ ضريبيٍّ واحد. محلّان لصاحبٍ واحد = زبونان.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setAdding((prev) => !prev)}
-            className={officePrimaryButtonClass}
-          >
-            {adding ? 'إلغاء' : 'أضف زبون'}
-          </button>
+          {canWrite ? (
+            <button
+              type="button"
+              onClick={() => setAdding((prev) => !prev)}
+              className={officePrimaryButtonClass}
+            >
+              {adding ? 'إلغاء' : 'أضف زبون'}
+            </button>
+          ) : null}
         </div>
 
-        {adding ? (
+        {adding && canWrite ? (
           <form
             onSubmit={submitNewClient}
             className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/50"
@@ -261,6 +275,10 @@ export const OfficeClientsScreen: React.FC = () => {
                 <th className="px-4 py-2 text-start">الزبون</th>
                 <th className="px-4 py-2 text-start">رقم الملف الضريبي</th>
                 <th className="px-4 py-2 text-start">النظام الضريبي</th>
+                {/* «شخص واحد» يخفي عمود الموظف: لا موظفَ غيره في المكتب. */}
+                {showsResponsible ? (
+                  <th className="px-4 py-2 text-start">المسؤول</th>
+                ) : null}
                 <th className="px-4 py-2 text-start">الحالة</th>
               </tr>
             </thead>
@@ -280,6 +298,11 @@ export const OfficeClientsScreen: React.FC = () => {
                   <td className="px-4 py-2.5 text-[12px] text-slate-600 dark:text-slate-300">
                     {client.tax_system_label}
                   </td>
+                  {showsResponsible ? (
+                    <td className="px-4 py-2.5 text-[12px] text-slate-600 dark:text-slate-300">
+                      {client.responsible_name || '—'}
+                    </td>
+                  ) : null}
                   <td className="px-4 py-2.5">
                     <span
                       className={`rounded-full border px-2 py-0.5 text-[10.5px] font-semibold ${clientStatusBadgeClass(client.status)}`}

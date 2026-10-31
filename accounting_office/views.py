@@ -12,11 +12,17 @@
 `http_method_names` — لأن فكَّ ربط الجهة فعلُ حذفٍ يسكن هذا الـViewSet نفسه.
 «منتهٍ» حالةٌ تُكتب بقيمتها الحقيقية، لا صفٌّ يُطوى.
 """
+from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import MethodNotAllowed, NotFound, ValidationError
+from rest_framework.exceptions import (
+    MethodNotAllowed,
+    NotFound,
+    PermissionDenied,
+    ValidationError,
+)
 from rest_framework.response import Response
 
 from accounting_office import services
@@ -30,6 +36,12 @@ from accounting_office.serializers import (
     ReminderRecipientSerializer,
     SettingValueSerializer,
     TaxCardWriteSerializer,
+)
+from core.access import (
+    OFFICE_CLIENTS_ASSIGN_KEY,
+    OFFICE_CLIENTS_WRITE_KEY,
+    OFFICE_SETTINGS_MANAGE_KEY,
+    require_perm,
 )
 from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
@@ -55,6 +67,24 @@ class OfficeModuleViewSet(viewsets.GenericViewSet):
             detail = exc.message_dict if hasattr(exc, "error_dict") else list(exc.messages)
             exc = ValidationError(detail)
         return super().handle_exception(exc)
+
+    def require_write(self):
+        """كلُّ كتابةٍ في الموديول — زبائن، بطاقة، جهات، ربط، مستلِمون، تخصيص."""
+        require_perm(self.request, OFFICE_CLIENTS_WRITE_KEY, tenant=self.tenant)
+
+    def reject_amount_writes(self, payload):
+        """كتابةُ مبلغٍ بلا `office.amounts.view` ⇒ **403** — لا يكتب ما لا يراه.
+
+        والحقلُ المخفيّ لا يُمسّ حين يحفظ العضو حقولاً أخرى: القناع يمنع الطلبَ
+        من الأصل، فلا يُعاد كتابةُ المبلغ المخزَّن بـ`None`.
+        """
+        if not payload:
+            return
+        hidden = [key for key in services.AMOUNT_KEYS if key in payload]
+        if hidden and not services.can_see_amounts(self.tenant, self.request.user):
+            raise PermissionDenied(
+                "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تكتب مبلغاً لا تراه.",
+            )
 
     def _contact(self, contact_id):
         contact = (
@@ -88,12 +118,15 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         return OfficeClientSerializer
 
     def get_queryset(self):
-        queryset = OfficeClient.objects.filter(tenant=self.tenant)
+        # **مصدر الرؤية الوحيد** (`services.visible_clients`): بلا
+        # `office.clients.all` لا يُرى إلا زبون العضو — والقائمةُ والتفصيلُ
+        # وأفعالُه المتداخلة كلُّها تمرّ من هنا، فزبونُ غيرك **404** لا 403.
+        queryset = services.visible_clients(self.tenant, self.request.user)
         if self.action == "list":
             queryset = self._filtered(queryset)
         else:
             queryset = queryset.select_related("tax_card", "tenant")
-        return queryset.order_by("name", "id")
+        return queryset.select_related("responsible").order_by("name", "id")
 
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset())
@@ -126,30 +159,35 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
 
     # ── الكتابة عبر الخدمات، لا عبر `serializer.save` ────────────────────
     def create(self, request, *args, **kwargs):
+        self.require_write()
         serializer = self.get_serializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
         tax_card = data.pop("tax_card", None)
+        self.reject_amount_writes(tax_card)
         client = services.create_office_client(
-            tenant=self.tenant, tax_card=tax_card, **data,
+            tenant=self.tenant, actor=request.user, tax_card=tax_card, **data,
         )
         return Response(
             self.get_serializer(client).data, status=status.HTTP_201_CREATED,
         )
 
     def update(self, request, *args, **kwargs):
+        self.require_write()
         partial = kwargs.pop("partial", False)
         client = self.get_object()
         serializer = self.get_serializer(client, data=request.data, partial=partial)
         serializer.is_valid(raise_exception=True)
         data = dict(serializer.validated_data)
+        tax_card = data.pop("tax_card", None)
+        self.reject_amount_writes(tax_card)
         # البطاقةُ تُمرَّر للخدمة مع الاسم: كتابةٌ واحدة في معاملةٍ واحدة.
         services.update_office_client(
             client,
             name=data.get("name"),
             tax_file_number=data.get("tax_file_number"),
             notes=data.get("notes"),
-            tax_card=data.pop("tax_card", None),
+            tax_card=tax_card,
         )
         client.refresh_from_db()
         return Response(self.get_serializer(client).data)
@@ -159,6 +197,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     # `request.user` أيضاً، لكن تمريرَه صراحةً يجعل الخدمة صالحةً للنداء البرمجي.
     @action(detail=True, methods=["post"], url_path="end")
     def end(self, request, pk=None):
+        self.require_write()
         client = services.end_office_client(
             self.get_object(), actor=request.user, request=request,
         )
@@ -166,8 +205,32 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["post"], url_path="reactivate")
     def reactivate(self, request, pk=None):
+        self.require_write()
         client = services.reactivate_office_client(
             self.get_object(), actor=request.user, request=request,
+        )
+        return Response(self.get_serializer(client).data)
+
+    # ── الموظف المسؤول والتحويل ─────────────────────────────────────────
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign(self, request, pk=None):
+        """`{"user": <id>}` — تحويلُ الزبون، بمفتاحه وحده (`office.clients.assign`).
+
+        مفتاحٌ ثانٍ لا `office.clients.write`: من يكتب بيانات زبونٍ لا يسلبه من
+        صاحبه بضغطةٍ في نموذج التعديل.
+        """
+        require_perm(request, OFFICE_CLIENTS_ASSIGN_KEY, tenant=self.tenant)
+        client = self.get_object()
+        user_id = request.data.get("user")
+        try:
+            user_id = int(user_id)
+        except (TypeError, ValueError):
+            raise ValidationError({"user": "معرّف الموظف مطلوب."}) from None
+        target = get_user_model().objects.filter(pk=user_id, is_active=True).first()
+        if target is None:
+            raise ValidationError({"user": "لا يوجد مستخدم مفعَّل بهذا المعرّف."})
+        client = services.assign_office_client(
+            client, user=target, actor=request.user, request=request,
         )
         return Response(self.get_serializer(client).data)
 
@@ -176,17 +239,20 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     def tax_card(self, request, pk=None):
         client = self.get_object()
         if request.method == "PATCH":
+            self.require_write()
             serializer = TaxCardWriteSerializer(data=request.data, partial=True)
             serializer.is_valid(raise_exception=True)
+            self.reject_amount_writes(serializer.validated_data)
             services.update_tax_card(client, **serializer.validated_data)
             client.refresh_from_db()
-        return Response(services.tax_card_payload(client))
+        return Response(services.tax_card_payload(client, user=request.user))
 
     # ── الجهات المربوطة ─────────────────────────────────────────────────
     @action(detail=True, methods=["get", "post"], url_path="contacts")
     def contacts(self, request, pk=None):
         client = self.get_object()
         if request.method == "POST":
+            self.require_write()
             serializer = ClientContactLinkSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             link = services.link_client_contact(
@@ -207,6 +273,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         url_path=r"contacts/(?P<contact_id>[0-9]+)",
     )
     def unlink_contact(self, request, pk=None, contact_id=None):
+        self.require_write()
         client = self.get_object()
         link = self._link(client, contact_id)
         services.unlink_client_contact(client=client, contact=link.contact)
@@ -217,6 +284,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         url_path=r"contacts/(?P<contact_id>[0-9]+)/primary",
     )
     def promote_contact(self, request, pk=None, contact_id=None):
+        self.require_write()
         client = self.get_object()
         link = self._link(client, contact_id)
         services.set_primary_client_contact(client=client, contact=link.contact)
@@ -240,6 +308,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     def reminders(self, request, pk=None):
         client = self.get_object()
         if request.method == "POST":
+            self.require_write()
             serializer = ReminderRecipientSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             contact_id = serializer.validated_data.get("contact")
@@ -261,6 +330,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
 
     @action(detail=True, methods=["put", "delete"], url_path=r"settings/(?P<key>[a-z_]+)")
     def setting(self, request, pk=None, key=None):
+        self.require_write()
         client = self.get_object()
         if request.method == "DELETE":
             services.reset_client_setting(client, key)
@@ -277,7 +347,10 @@ class OfficeContactViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     serializer_class = ContactSerializer
 
     def get_queryset(self):
-        queryset = self._contacts()
+        # **مصدر رؤية الجهات** (`services.visible_contacts`): بلا
+        # `office.clients.all` لا تُقرأ جهةُ زبونٍ لا يراه العضو (ولا تُعدَّل ولا
+        # تُحذف) — وغيرُ المربوطة تبقى ليجدها المنتقي.
+        queryset = services.visible_contacts(self.tenant, self.request.user)
         if self.action == "list":
             term = (self.request.query_params.get("q") or "").strip()
             if term:
@@ -287,10 +360,16 @@ class OfficeContactViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         return queryset.order_by("name", "id")
 
     def perform_create(self, serializer):
+        self.require_write()
         serializer.save(tenant=self.tenant)
+
+    def perform_update(self, serializer):
+        self.require_write()
+        serializer.save()
 
     def destroy(self, request, *args, **kwargs):
         """الحذفُ من دفتر المكتب مشروطٌ بلا ربط — والقاعدة في الخدمة لا هنا."""
+        self.require_write()
         contact = self.get_object()
         services.delete_contact(contact)
         return Response(status=status.HTTP_204_NO_CONTENT)
@@ -309,18 +388,31 @@ class OfficeSettingsViewSet(OfficeModuleViewSet):
         raise NotFound("لا كائن مفرد لسجلّ الإعدادات.")
 
     def list(self, request, *args, **kwargs):
-        return Response(services.office_settings_payload(self.tenant))
+        # عدّادُ «مخصَّص عند N زبون» رقمٌ عن الزبائن — يُحسب على ما يراه العضو.
+        return Response(
+            services.office_settings_payload(self.tenant, user=request.user),
+        )
 
     @action(detail=False, methods=["put", "delete"], url_path=r"(?P<key>[a-z_]+)")
     def setting(self, request, key=None):
+        # كتابةُ إعداد المكتب بمفتاحها: `office.settings.manage` لا مفتاح الكتابة
+        # العامّ — من يكتب بيانات الزبائن لا يغيّر النظام الضريبي للمكتب كلّه.
+        require_perm(request, OFFICE_SETTINGS_MANAGE_KEY, tenant=self.tenant)
         if request.method == "DELETE":
             services.reset_office_setting(self.tenant, key)
         else:
             serializer = SettingValueSerializer(data=request.data)
             serializer.is_valid(raise_exception=True)
             services.set_office_setting(self.tenant, key, serializer.validated_data["value"])
-        return Response(services.office_setting_row(self.tenant, key))
+        return Response(
+            services.office_setting_row(self.tenant, key, user=request.user),
+        )
 
     @action(detail=False, methods=["get"], url_path=r"(?P<key>[a-z_]+)/clients")
     def customized_clients(self, request, key=None):
-        return Response(services.clients_customized_payload(self.tenant, key))
+        # تُرجع زبائن — فتمرّ بـ`visible_clients` كسائر النقاط (#272).
+        return Response(
+            services.clients_customized_payload(
+                self.tenant, key, user=request.user,
+            ),
+        )

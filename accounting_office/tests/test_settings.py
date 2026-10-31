@@ -240,9 +240,9 @@ class ResetWithoutDefaultTest(SettingTestCase):
         set_office_setting(self.tenant, "tax_system", "PS")
         set_office_setting(self.tenant, "filing_method", "manual")
 
-        self.assertFalse(office_setting_row(self.tenant, "tax_system")["can_reset"])
-        self.assertTrue(office_setting_row(self.tenant, "filing_method")["can_reset"])
-        self.assertFalse(office_setting_row(self.tenant, "rest_days")["can_reset"])
+        self.assertFalse(office_setting_row(self.tenant, "tax_system", user=None)["can_reset"])
+        self.assertTrue(office_setting_row(self.tenant, "filing_method", user=None)["can_reset"])
+        self.assertFalse(office_setting_row(self.tenant, "rest_days", user=None)["can_reset"])
 
 
 class LevelPermissionTest(SettingTestCase):
@@ -343,17 +343,17 @@ class CustomizationCountTest(SettingTestCase):
         elsewhere = OfficeClient.objects.create(tenant=other_tenant, name="زبون المكتب المجاور")
         set_client_setting(elsewhere, "tax_system", "IL")
 
-        self.assertEqual(clients_customized_for(self.tenant, "tax_system").count(), 2)
+        self.assertEqual(clients_customized_for(self.tenant, "tax_system", user=None).count(), 2)
         self.assertEqual(
-            sorted(client.name for client in clients_customized_for(self.tenant, "tax_system")),
+            sorted(client.name for client in clients_customized_for(self.tenant, "tax_system", user=None)),
             ["الأول", "الثاني"],
         )
         self.assertEqual(
-            office_setting_row(self.tenant, "tax_system")["client_customization_count"], 2,
+            office_setting_row(self.tenant, "tax_system", user=None)["client_customization_count"], 2,
         )
         set_client_setting(one, "filing_method", "manual")
-        self.assertEqual(clients_customized_for(self.tenant, "tax_system").count(), 2)
-        self.assertEqual(clients_customized_for(self.tenant, "filing_method").count(), 1)
+        self.assertEqual(clients_customized_for(self.tenant, "tax_system", user=None).count(), 2)
+        self.assertEqual(clients_customized_for(self.tenant, "filing_method", user=None).count(), 1)
 
 
 class FirstRunTest(SettingTestCase):

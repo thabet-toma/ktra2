@@ -32,8 +32,12 @@ export interface TaxCard {
   entity_type_label: string;
   vat_classification: string;
   vat_classification_label: string;
-  /** DecimalField يُسلسَل نصّاً — لا تحوّله إلى float في العرض. */
-  annual_sales: string;
+  /**
+   * DecimalField يُسلسَل نصّاً — لا تحوّله إلى float في العرض.
+   * **و`null` معناها «لا تملك رؤية المبالغ»** (#272): الخادم يرسل المبلغ فارغاً
+   * لعضوٍ بلا `office.amounts.view`، فتعرض الشاشة «—» ولا ترسله في الحفظ.
+   */
+  annual_sales: string | null;
   has_employees: boolean;
   employees_count: number;
   is_self_employed: boolean;
@@ -54,8 +58,20 @@ export interface OfficeClientRow {
   tax_system: string | null;
   tax_system_label: string;
   tax_card: TaxCard | null;
+  /** الموظف المسؤول (#272) — للقراءة وحدها؛ التحويلُ لنقطته `assign/`. */
+  responsible_id: number | null;
+  responsible_name: string;
   created_at: string;
   updated_at: string;
+}
+
+/** عضوُ المكتب كما يعيده `tenants/companies/<id>/members/` (متاحٌ لكل عضو). */
+export interface OfficeMemberRow {
+  membership_id: number;
+  user_id: number;
+  username: string;
+  full_name: string;
+  role: string;
 }
 
 export interface ContactRow {
@@ -135,6 +151,17 @@ export const endOfficeClient = (id: number): Promise<OfficeClientRow> =>
 
 export const reactivateOfficeClient = (id: number): Promise<OfficeClientRow> =>
   apiPostObject<OfficeClientRow>(`${CLIENTS}${id}/reactivate/`, {}, tenantOpts());
+
+/**
+ * تحويلُ الزبون لموظّفٍ آخر (#272) — يتطلّب `office.clients.assign` خادمياً،
+ * ويُسجَّل الحدثُ في سجلّ النشاط (من ← إلى). والقراءةُ من `responsible_name`.
+ */
+export const assignOfficeClient = (id: number, userId: number): Promise<OfficeClientRow> =>
+  apiPostObject<OfficeClientRow>(`${CLIENTS}${id}/assign/`, { user: userId }, tenantOpts());
+
+/** أعضاء المكتب — المصدرُ الوحيد لمنتقي «حوّل» وقسم «الموظفون والأدوار». */
+export const listOfficeMembers = (): Promise<OfficeMemberRow[]> =>
+  apiGetList<OfficeMemberRow>(`tenants/companies/${resolveTenantId()}/members/`, tenantOpts());
 
 export const getTaxCard = (clientId: number): Promise<TaxCard> =>
   apiGetObject<TaxCard>(`${CLIENTS}${clientId}/tax-card/`, tenantOpts());

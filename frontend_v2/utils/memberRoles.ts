@@ -49,7 +49,7 @@ export interface CompanyMemberUser {
  * و«مستعرض (قراءة فقط)» هنا، والحارسُ لا يرى نسخةً لا يعرف مكانَها.
  */
 export const MEMBER_ROLES = [
-  "manager", "accountant", "legal_accountant",
+  "manager", "office_manager", "accountant", "legal_accountant",
   // T-PERM: دورا الموظف المتخصّص — صلاحياتهما تُضبط من شاشة «الصلاحيات والأدوار».
   "sales", "procurement", "staff", "ess", "field_staff", "viewer",
 ] as const;

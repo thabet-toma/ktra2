@@ -189,6 +189,30 @@ def _client_ip(request) -> str | None:
     return (request.META.get("REMOTE_ADDR") or None)
 
 
+#: حرّاسُ رؤيةٍ لسجلّ المستند، لكل نوع كيان: يملؤها الموديول المالك في `ready`.
+_DOCUMENT_HISTORY_GUARDS: dict[str, object] = {}
+
+
+def register_document_history_guard(entity_type: str, fn) -> None:
+    """يسجّل حارسَ رؤيةٍ لسجلّ كيانٍ بعينه: `fn(request, tenant, entity_id) -> bool`.
+
+    سجلُّ المستند في `core/activity_views.py` متاحٌ لكل عضو (بلا بوّابة مدير) —
+    وهذا صحيحٌ للمستندات التي يراها كلُّ عضو. لكنّ كياناً مقيَّدَ الرؤية (زبونُ
+    مكتبٍ مثلاً) يحوّل ذلك إلى تسريبٍ: تاريخُ كيانٍ لا تراه. فالبوّابةُ تُوضع حيث
+    تعرف الطبقةُ صاحبةُ الكيان من يرى كيانها — بلا أن يستورد `core` موديولاً
+    يعتمد عليه (عقود `.importlinter` تمنع الاتجاه المعاكس).
+    """
+    _DOCUMENT_HISTORY_GUARDS[entity_type] = fn
+
+
+def document_history_visible(request, tenant, entity_type, entity_id) -> bool:
+    """رأيُ الحارس المسجَّل — و`True` لغير المسجَّل: لا حارسَ يعني الحكمَ القديم."""
+    guard = _DOCUMENT_HISTORY_GUARDS.get(entity_type)
+    if guard is None:
+        return True
+    return bool(guard(request, tenant, entity_id))
+
+
 def log_activity(
     *,
     action: str,

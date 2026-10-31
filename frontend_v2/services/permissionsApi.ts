@@ -63,6 +63,15 @@ export async function getPermissionsMatrix(): Promise<PermissionsMatrix> {
   return apiGetObject("permissions/matrix/", { tenantId: tid() });
 }
 
+/**
+ * أدوارُ الشركة المرئية بتسمياتها — مرشَّحةٌ خادمياً بترخيص وحداتها (دورُ
+ * `office_manager` يختفي بلا وحدة المكتب). تقرؤها شاشاتُ الأدوار بدل نسخةٍ
+ * محليّة من مفردة `ROLE_LABELS`.
+ */
+export async function getPermissionRoles(): Promise<{ key: string; label: string }[]> {
+  return apiGetList("permissions/roles/", { tenantId: tid() });
+}
+
 export async function savePermissionsMatrix(
   changes: { role: string; permission_key: string; allowed: boolean }[],
 ): Promise<PermissionsMatrix> {

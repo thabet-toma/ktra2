@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count
+from django.db.models import Count, Q
 from django.utils import timezone
 
 from accounting_office import settings_registry
@@ -25,7 +25,13 @@ from accounting_office.models import (
     OfficeClient,
     OfficeSettingValue,
     TaxCard,
+    is_tenant_member,
     tax_card_choices,
+)
+from core.access import (
+    OFFICE_AMOUNTS_VIEW_KEY,
+    OFFICE_CLIENTS_ALL_KEY,
+    user_has_perm,
 )
 from core.activity import log_activity
 
@@ -54,6 +60,87 @@ NOT_CHOSEN_LABEL = settings_registry.NOT_CHOSEN_LABEL
 
 #: قائمةُ أيامٍ فارغة مقصودة: «بلا أيام عطلة» — ليست «غير مختار».
 NO_REST_DAYS_LABEL = "بلا أيام عطلة"
+
+
+# ── الرؤية والمبالغ: مصدرٌ واحد لكلٍّ منهما (#272) ─────────────────────────
+#
+# **لا يُكتب شرطُ «زبائن هذا العضو» في نقطةٍ ثانية.** كلُّ قائمةٍ أو نقطةٍ تُرجع
+# زبوناً تمرّ بـ`visible_clients`، وكلُّ مبلغٍ يمرّ بـ`can_see_amounts` و
+# `mask_amounts`. نسخةٌ ثانيةٌ من الشرط تفترق عن الأولى عند أوّل تعديلٍ بصمت —
+# وهي بعينها الطريقة التي تُسرَّب بها بيانات مكتبٍ إلى غيره.
+
+#: مفاتيح المبالغ في حمولة البطاقة الضريبية. مبلغٌ جديدٌ يُضاف هنا **أولاً**،
+#: وإلا سقط حارسُ `accounting_office/tests/test_amounts_guard.py`.
+TAX_CARD_AMOUNT_KEYS: tuple[str, ...] = ("annual_sales",)
+
+#: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
+#: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
+#: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
+AMOUNT_KEYS: frozenset[str] = frozenset(TAX_CARD_AMOUNT_KEYS)
+
+
+def visible_clients(tenant, user):
+    """**مصدر الرؤية الوحيد**: كلُّ قائمةٍ أو نقطةٍ تُرجع زبوناً تمرّ من هنا.
+
+    بلا `office.clients.all` («يرى زبائن غيره») لا تُرجع إلا زبائنَ هذا العضو
+    (`responsible=user`)، ومعها كلُّ زبائن المكتب. والتفصيلُ المحجوب يُترجم في
+    الـview إلى **404 لا 403**: 403 يثبت وجودَ الزبون، و404 لا يثبت شيئاً.
+
+    **تذكرةُ الشغلات ستوسّع هذه الدالة وحدها** بـ«المحوَّلة له شغلاتهم»: الشغلةُ
+    التي تُحوَّل إلى موظّفٍ تُريهِ زبونها ولو لم يكن مسؤولَه. موضعُ التوسيع هذا —
+    لا شرطٌ جديدٌ في نقطةٍ ثانية يفترق عنه.
+    """
+    queryset = OfficeClient.objects.filter(tenant=tenant)
+    if user_has_perm(user, tenant, OFFICE_CLIENTS_ALL_KEY):
+        return queryset
+    if user is None or not getattr(user, "is_authenticated", False):
+        return queryset.none()
+    return queryset.filter(responsible=user)
+
+
+def visible_contacts(tenant, user):
+    """**مصدر رؤية الجهات الوحيد**: ما يراه العضو من دفتر جهات المكتب.
+
+    بلا `office.clients.all` تبقى له جهتان: **مربوطةٌ بزبونٍ يراه** (فهو يعمل
+    عليه)، و**غيرُ مربوطةٍ بأيّ زبون** (وإلا لم يجد المنتقي جهةً جديدة فأنشأها
+    مكرَّرة). وأمّا جهةٌ مربوطةٌ بزبونٍ لا يراه فاسمُها وهاتفُها ليسا له — حجبُ
+    الزبون وحده كان يترك دفترَ الجهات كاملاً مفتوحاً على أسماء وهواتف.
+    """
+    queryset = Contact.objects.filter(tenant=tenant)
+    if user_has_perm(user, tenant, OFFICE_CLIENTS_ALL_KEY):
+        return queryset
+    if user is None or not getattr(user, "is_authenticated", False):
+        return queryset.none()
+    linked_to_visible = ClientContact.objects.filter(
+        client__in=visible_clients(tenant, user).values("pk"),
+    ).values("contact_id")
+    linked_at_all = ClientContact.objects.filter(tenant=tenant).values("contact_id")
+    return queryset.filter(Q(pk__in=linked_to_visible) | ~Q(pk__in=linked_at_all))
+
+
+def can_see_amounts(tenant, user) -> bool:
+    """هل يملك هذا العضو «يرى المبالغ»؟ كلُّ قراءةِ مبلغٍ وكتابتِه تمرّ من هنا."""
+    return user_has_perm(user, tenant, OFFICE_AMOUNTS_VIEW_KEY)
+
+
+def mask_amounts(row: dict, keys=AMOUNT_KEYS) -> dict:
+    """نسخةٌ من الصفّ بمفاتيح المبالغ `None` — لا حذفَ للمفتاح.
+
+    الشكلُ يبقى ثابتاً بين من يرى ومن لا يرى: الواجهةُ تعرض «—» على `null`،
+    وغيابُ المفتاح كان يجعلها تخمّن.
+    """
+    masked = dict(row)
+    for key in keys:
+        if key in masked:
+            masked[key] = None
+    return masked
+
+
+def user_display_name(user) -> str:
+    """اسمُ الموظف كما يُعرض ويُسجَّل: الاسمُ الكامل، وإلا اسم المستخدم."""
+    if user is None:
+        return ""
+    return (user.get_full_name() or "").strip() or user.username
 
 
 # ── المحلّل: القراءة الوحيدة للإعدادات ─────────────────────────────────────
@@ -208,18 +295,27 @@ def reset_client_setting(client, key, *, tenant=None) -> None:
         _propagate_tax_system(tenant, key, [client])
 
 
-def clients_customized_for(tenant, key):
-    """«مخصَّص عند N زبون» — القائمة نفسها، لا عدّاً منفصلاً يفترق عنها."""
+def clients_customized_for(tenant, key, *, user):
+    """«مخصَّص عند N زبون» — القائمة نفسها، لا عدّاً منفصلاً يفترق عنها.
+
+    تمرّ بـ`visible_clients` حين يُمرَّر عضو: قائمةُ المخصِّصين تُرجع زبائن،
+    ومن لا يرى زبائنَ غيره لا يقرأ أسماءهم من هنا. و`user` **مطلوبٌ بلا افتراضي**:
+    افتراضُ `None` كان يُرجع التصفية الكاملة لمن ينسى تمريره. و`user=None` صراحةً
+    نداءٌ داخليٌّ بلا طلب (كل زبائن المكتب).
+    """
     settings_registry.get_definition(key)
+    base = (
+        OfficeClient.objects.filter(tenant=tenant) if user is None
+        else visible_clients(tenant, user)
+    )
     return (
-        OfficeClient.objects
-        .filter(tenant=tenant, setting_overrides__key=key)
+        base.filter(setting_overrides__key=key)
         .distinct()
         .order_by("name", "id")
     )
 
 
-def clients_customized_payload(tenant, key) -> list[dict]:
+def clients_customized_payload(tenant, key, *, user) -> list[dict]:
     """صفوفُ قائمة المخصِّصين — تُبنى هنا لا في الـview (مصدرٌ واحد للشكل)."""
     return [
         {
@@ -228,17 +324,23 @@ def clients_customized_payload(tenant, key) -> list[dict]:
             "status": client.status,
             "status_label": client.get_status_display(),
         }
-        for client in clients_customized_for(tenant, key)
+        for client in clients_customized_for(tenant, key, user=user)
     ]
 
 
-def _customization_counts(tenant) -> dict[str, int]:
-    rows = (
-        ClientSettingOverride.objects
-        .filter(tenant=tenant)
-        .values("key")
-        .annotate(total=Count("id"))
-    )
+def _customization_counts(tenant, *, user) -> dict[str, int]:
+    """عددُ الزبائن المخصِّصين لكل مفتاح — **فوق الزبائن الذين يراهم العضو**.
+
+    الرقمُ يقول شيئاً عن الزبائن، فيمرّ بالقاعدة نفسها التي تمرّ بها قائمةُ
+    `settings/<key>/clients/`: عدٌّ على كل المكتب كان يخبر عضوٌ بلا
+    `office.clients.all` كم زبوناً لغير يخصَّص، ويخالف القائمةَ المفلترة تحته.
+    """
+    queryset = ClientSettingOverride.objects.filter(tenant=tenant)
+    if user is not None:
+        queryset = queryset.filter(
+            client__in=visible_clients(tenant, user).values("pk"),
+        )
+    rows = queryset.values("key").annotate(total=Count("id"))
     return {row["key"]: row["total"] for row in rows}
 
 
@@ -351,9 +453,13 @@ def first_run_status(tenant) -> dict:
     }
 
 
-def office_settings_payload(tenant) -> dict:
-    """سجلّ الإعدادات بقيمة المكتب الفعليّة والافتراضيِّ وعدد المخصِّصين."""
-    counts = _customization_counts(tenant)
+def office_settings_payload(tenant, *, user) -> dict:
+    """سجلّ الإعدادات بقيمة المكتب الفعليّة والافتراضيِّ وعدد المخصِّصين.
+
+    و`user` يُمرَّر من الـview بلا افتراضي: عدّادُ المخصِّصين يُحسب على ما يراه
+    العضو وحده (`_customization_counts`)، فمَن لا يرى زبائن غيره لا يقرأ عددهم.
+    """
+    counts = _customization_counts(tenant, user=user)
     return {
         **first_run_status(tenant),
         "groups": [
@@ -361,13 +467,13 @@ def office_settings_payload(tenant) -> dict:
             for group_id, label in settings_registry.SETTING_GROUPS
         ],
         "settings": [
-            office_setting_row(tenant, key, counts=counts)
+            office_setting_row(tenant, key, counts=counts, user=user)
             for key in settings_registry.SETTINGS_REGISTRY
         ],
     }
 
 
-def office_setting_row(tenant, key, *, counts=None) -> dict:
+def office_setting_row(tenant, key, *, counts=None, user) -> dict:
     """سطرُ إعدادٍ واحدٍ على مستوى المكتب — يستعمله العرض وردُّ الضبط والمسح."""
     definition = settings_registry.get_definition(key)
     stored = OfficeSettingValue.objects.filter(tenant=tenant, key=key).first()
@@ -377,7 +483,7 @@ def office_setting_row(tenant, key, *, counts=None) -> dict:
         else (None if definition.has_no_default else copy.deepcopy(definition.default))
     )
     default = None if definition.has_no_default else copy.deepcopy(definition.default)
-    counts = counts if counts is not None else _customization_counts(tenant)
+    counts = counts if counts is not None else _customization_counts(tenant, user=user)
     return {
         **_setting_row(definition),
         "value": value,
@@ -423,13 +529,19 @@ def client_settings_payload(client) -> dict:
     }
 
 
-def tax_card_payload(client) -> dict:
-    """البطاقة بتسميات نظام الزبون — لا بتسميات نظامٍ آخر."""
+def tax_card_payload(client, *, user) -> dict:
+    """البطاقة بتسميات نظام الزبون — لا بتسميات نظامٍ آخر.
+
+    **وتمرّ بقناع المبالغ**: عضوٌ بلا `office.amounts.view` يصله `annual_sales`
+    = `None` (والواجهة تعرض «—»)، ولا يصل القناعُ إلى تسميات النظام ولا إلى
+    الاختيارات. و`user` إلزاميٌّ بلا افتراضيّ: `user=None` **الصريح** وحده نداءٌ
+    داخليٌّ بلا ردٍّ — لا يُقنَّع؛ ومن نسي المستخدم يسقط لا يأخذ حمولةً كاملة.
+    """
     card = client.tax_card
     system = resolve_setting(client.tenant, TAX_SYSTEM_KEY, client=client)
     entity_labels = dict(tax_card_choices(system, "entity_type"))
     vat_labels = dict(tax_card_choices(system, "vat_classification"))
-    return {
+    payload = {
         "id": card.pk,
         "entity_type": card.entity_type,
         "entity_type_label": entity_labels.get(card.entity_type, ""),
@@ -450,17 +562,36 @@ def tax_card_payload(client) -> dict:
         ],
         "updated_at": card.updated_at,
     }
+    if user is not None and not can_see_amounts(client.tenant, user):
+        return mask_amounts(payload, TAX_CARD_AMOUNT_KEYS)
+    return payload
 
 
 # ── دورة حياة الزبون ──────────────────────────────────────────────────────
+def _assert_member_of_tenant(tenant, user) -> None:
+    """الموظف المسؤول عضوٌ في شركة الزبون — وإلا كان الزبون صفّاً لا يراه أحد.
+
+    حارسُ الخدمة (400 بالسبب) وحارسُ النموذج (`OfficeClient.save`) كلاهما قائم:
+    الأوّل يُخبر الـAPI، والثاني يُغلق مسار `save()`.
+    """
+    if not is_tenant_member(getattr(tenant, "pk", tenant), getattr(user, "pk", None)):
+        raise ValidationError({"user": "هذا المستخدم ليس عضواً في شركة الزبون."})
+
+
 def create_office_client(
     *, tenant, name, tax_file_number="", notes="", tax_card=None,
+    actor=None, responsible=None,
 ) -> OfficeClient:
     """الزبون وبطاقته في كتابةٍ واحدة — بطاقةٌ بلا زبون أو زبونٌ بلا بطاقة عطل.
 
     **وقبل ذلك: المكتب جاهز؟** زبونٌ يُنشأ قبل اختيار النظام الضريبي وحجم المكتب
     يولد ببطاقةٍ لا اختياراتِ لها، ثم يُفتح ملفُّه على أول تشغيلٍ ناقص. فيُرفض
     الإنشاء حتى يكتمل — والقاعدة نفسها تحرس شاشة القائمة (`first_run_status`).
+
+    **والمسؤولُ = المُنشئ افتراضاً حين يكون عضواً** (#272): زبونٌ بلا مسؤولٍ لا يراه
+    عضوٌ لا يملك «يرى زبائن غيره» — يُنشئه ثم يختفي من قائمته. أمّا المُنشئ غيرُ
+    العضو (سوبر أدمن، جلسة دعم) فيمرّ `require_write` ولا يُسنَد إليه شيء: يبقى
+    الزبون بلا مسؤول. و`responsible` الممرَّر صراحةً يُرفض لغير العضو.
     """
     if first_run_status(tenant)["first_run_required"]:
         raise ValidationError({
@@ -468,6 +599,13 @@ def create_office_client(
         })
     if not (name or "").strip():
         raise ValidationError({"name": "اسم الزبون مطلوب."})
+    if responsible is not None:
+        _assert_member_of_tenant(tenant, responsible)
+        assigned = responsible
+    elif actor is not None and is_tenant_member(tenant.pk, actor.pk):
+        assigned = actor
+    else:
+        assigned = None
     card_fields = _clean_tax_card_fields(tenant, None, tax_card or {})
     with transaction.atomic():
         client = OfficeClient.objects.create(
@@ -475,9 +613,50 @@ def create_office_client(
             name=name.strip(),
             tax_file_number=(tax_file_number or "").strip(),
             notes=notes or "",
+            responsible=assigned,
         )
         TaxCard.objects.create(client=client, **card_fields)
     return client
+
+
+def assign_office_client(client, *, user, actor=None, request=None) -> OfficeClient:
+    """تحويلُ الزبون لموظّفٍ آخر — **فعلٌ يُسجَّل** (من ← إلى) لا كتابةٌ صامتة.
+
+    ويُسجَّل الحدثُ في المعاملة نفسها: مسؤولٌ تبدّل بلا أثرٍ في السجلّ يجعل «من
+    كان مسؤولاً عنه في آذار؟» سؤالاً بلا جواب.
+
+    **والصفُّ يُقرأ تحت قفلٍ داخل المعاملة**: تحويلان متزامنان على نسخةٍ قديمة
+    كانا يُسجّلان «من» مسؤولاً لم يعد مسؤولاً — والسجلُّ يكذب. فالمقروءُ هو ما
+    سُيَكتب فوقه فعلاً.
+    """
+    _assert_member_of_tenant(client.tenant, user)
+    with transaction.atomic():
+        locked = OfficeClient.objects.select_for_update().get(pk=client.pk)
+        previous = locked.responsible
+        if previous is not None and previous.pk == user.pk:
+            return locked
+        locked.responsible = user
+        locked.save(update_fields=["responsible", "updated_at"])
+        log_activity(
+            action="update",
+            entity_type="office_client",
+            entity_id=locked.pk,
+            entity_label=locked.name,
+            description=(
+                f"تحويل زبون المكتب «{locked.name}» من «{user_display_name(previous)}» "
+                f"إلى «{user_display_name(user)}»"
+            ),
+            metadata={
+                "from": None if previous is None else previous.pk,
+                "to": user.pk,
+                "from_label": user_display_name(previous),
+                "to_label": user_display_name(user),
+            },
+            request=request,
+            tenant=locked.tenant,
+            user=actor,
+        )
+    return locked
 
 
 def update_office_client(

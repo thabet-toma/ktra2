@@ -12,11 +12,12 @@ from django.db.models import Q
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, viewsets
 from rest_framework.decorators import action
-from rest_framework.exceptions import PermissionDenied, ValidationError
+from rest_framework.exceptions import NotFound, PermissionDenied, ValidationError
 from rest_framework.pagination import PageNumberPagination
 from rest_framework.response import Response
 
 from core.api_defaults import ApiAuthAndUser
+from core.activity import document_history_visible
 from core.date_ranges import RANGE_PRESETS, filter_local_date_range, resolve_preset
 from core.models import ActivityLog
 from core.tenant_utils import get_tenant
@@ -175,6 +176,13 @@ class ActivityLogViewSet(viewsets.ReadOnlyModelViewSet):
         is_scoped = is_document_scoped or is_partner_scoped
         if not is_scoped and not user_is_admin(self.request.user):
             raise PermissionDenied("سجل النشاط العام متاح للمدير فقط.")
+        # و«سجل مستند» ليس تصريحاً عاماً: كيانٌ مقيَّدُ الرؤية يُسجّل الموديولُ
+        # المالك حارسَه (`register_document_history_guard`)، وغيابُ الحارس يعني
+        # الحكمَ القديم (مستندٌ يراه كل عضو).
+        if is_document_scoped and not document_history_visible(
+            self.request, tenant, entity_type, entity_id,
+        ):
+            raise NotFound("لا سجلَّ لهذا الكيان في هذه الشركة.")
 
         if entity_type:
             qs = qs.filter(entity_type=entity_type)

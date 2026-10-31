@@ -7,6 +7,7 @@ import {
 } from '../../services/accountingOfficeApi';
 import { humanizeThrown } from '../../utils/drfError';
 import { missingFirstRunLabels } from '../../utils/accountingOffice';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { OfficeCard, officePrimaryButtonClass } from './OfficeUi';
 
 /**
@@ -19,11 +20,17 @@ import { OfficeCard, officePrimaryButtonClass } from './OfficeUi';
  *
  * **اختيارٌ مباشر**: كبسةٌ على الخيار تحسمه فوراً (بلا «احفظ» لكل حقل)، ثم
  * «ابدأ العمل» واحد. والاختياراتُ من `setting.choices` كما يرسلها الخادم.
+ *
+ * **ومَن لا يملك `office.settings.manage` لا يرى أزراراً تردّ 403**: الكتابةُ
+ * مقيّدةٌ بالمفتاح خادمياً، فيُقال له إن أول التشغيل يكمله مالك المكتب أو مديره
+ * بدل عرض خيارٍ لا يعمل.
  */
 export const OfficeFirstRunStep: React.FC<{
   payload: OfficeSettingsPayload;
   onDone: () => void;
 }> = ({ payload, onDone }) => {
+  const { can } = usePermissions();
+  const canManage = can('office.settings.manage');
   const [draft, setDraft] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -68,52 +75,66 @@ export const OfficeFirstRunStep: React.FC<{
       </header>
 
       <OfficeCard>
-        {missing.map((setting) => (
-          <div key={setting.key} className="border-b border-slate-100 py-3 last:border-b-0 dark:border-slate-800">
-            <p className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-100">
-              {setting.label}
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {setting.choices.map((choice) => {
-                const on = currentValue(setting) === choice.value;
-                return (
-                  <button
-                    key={choice.value}
-                    type="button"
-                    aria-pressed={on}
-                    onClick={() => setDraft((prev) => ({ ...prev, [setting.key]: choice.value }))}
-                    className={
-                      on
-                        ? 'rounded-lg border border-teal-700 bg-teal-700 px-3 py-1.5 text-[12px] font-semibold text-white'
-                        : 'rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
-                    }
-                  >
-                    {choice.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-        ))}
+        {canManage ? (
+          <>
+            {missing.map((setting) => (
+              <div key={setting.key} className="border-b border-slate-100 py-3 last:border-b-0 dark:border-slate-800">
+                <p className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-100">
+                  {setting.label}
+                </p>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {setting.choices.map((choice) => {
+                    const on = currentValue(setting) === choice.value;
+                    return (
+                      <button
+                        key={choice.value}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => setDraft((prev) => ({ ...prev, [setting.key]: choice.value }))}
+                        className={
+                          on
+                            ? 'rounded-lg border border-teal-700 bg-teal-700 px-3 py-1.5 text-[12px] font-semibold text-white'
+                            : 'rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-[12px] font-medium text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200'
+                        }
+                      >
+                        {choice.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ))}
 
-        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-          <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
-            الناقص:{' '}
-            {missingFirstRunLabels(pending.map((setting) => setting.key), payload.settings).join(' و')
-              || 'لا شيء'}
-          </p>
-          <button
-            type="button"
-            onClick={submit}
-            disabled={pending.length > 0 || saving}
-            className={officePrimaryButtonClass}
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+              <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+                الناقص:{' '}
+                {missingFirstRunLabels(pending.map((setting) => setting.key), payload.settings).join(' و')
+                  || 'لا شيء'}
+              </p>
+              <button
+                type="button"
+                onClick={submit}
+                disabled={pending.length > 0 || saving}
+                className={officePrimaryButtonClass}
+              >
+                {saving ? 'جاري الحفظ…' : 'ابدأ العمل'}
+              </button>
+            </div>
+            {error ? (
+              <p className="mt-2 text-[11.5px] font-medium text-rose-600 dark:text-rose-400">{error}</p>
+            ) : null}
+          </>
+        ) : (
+          // لا أزرارَ لمن لا يملك المفتاح: الكتابةُ تردّ 403 خادمياً، والطريقُ
+          // الصادق أن يُقال له مَن يكمله لا أن يُعرض عليه اختيارٌ لا يعمل.
+          <p
+            role="status"
+            className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] font-medium text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
           >
-            {saving ? 'جاري الحفظ…' : 'ابدأ العمل'}
-          </button>
-        </div>
-        {error ? (
-          <p className="mt-2 text-[11.5px] font-medium text-rose-600 dark:text-rose-400">{error}</p>
-        ) : null}
+            أول تشغيلٍ يكمله مالك المكتب أو مديره — لم يُختَر بعد نظامُ المكتب
+            الضريبي وحجمه.
+          </p>
+        )}
       </OfficeCard>
     </div>
   );

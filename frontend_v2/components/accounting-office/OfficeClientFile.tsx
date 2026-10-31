@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  assignOfficeClient,
   createContact,
   deleteContact,
   endOfficeClient,
@@ -9,6 +10,7 @@ import {
   linkClientContact,
   listClientContacts,
   listContacts,
+  listOfficeMembers,
   listReminderRecipients,
   promoteClientContact,
   reactivateOfficeClient,
@@ -22,18 +24,23 @@ import {
   type ClientContactRow,
   type ContactRow,
   type OfficeClientRow,
+  type OfficeMemberRow,
   type ReminderRecipientRow,
   type SettingRow,
   type TaxCard,
 } from '../../services/accountingOfficeApi';
 import {
+  AMOUNT_MASK,
   clientStatusBadgeClass,
   customizedSettingCount,
+  formatOfficeAmount,
+  showsOfficeAssignment,
   visibleClientSettings,
 } from '../../utils/accountingOffice';
 import { formatDateValue } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SettingControl } from './SettingControl';
 import {
@@ -84,14 +91,25 @@ const statusOf = (failure: unknown): number | undefined =>
  * كلَّه فتمسح تعديلاً غير محفوظٍ في البطاقة أو الملاحظات. اليوم يُحدَّث سطرُ
  * الإعداد والرأسُ وحدهما — إلا `tax_system` فيُعاد جلبه لأن اختيارات
  * البطاقة تغيّرت وقد فُرّغ بعضها.
+ *
+ * **والصلاحيات تُخفي ولا تحمي** (#272): كلُّ زرِّ كتابةٍ يختفي بلا
+ * `office.clients.write`، و«حوّل» بلا `office.clients.assign`، والخادم يردّ 403
+ * على كلٍّ منها على أيّ حال. والمبلغُ `null` (بلا «يرى المبالغ») يُعرض «—»، ولا
+ * يُرسَل في الحفظ — فلا يُمحى المخزَّن بحفظ عضوٍ لا يراه.
  */
 export const OfficeClientFile: React.FC<{
   clientId: number;
+  officeSize: string | null;
   onBack: () => void;
   onMissing: () => void;
-}> = ({ clientId, onBack, onMissing }) => {
+}> = ({ clientId, officeSize, onBack, onMissing }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  const { can } = usePermissions();
+  const canWrite = can('office.clients.write');
+  const canAssign = can('office.clients.assign');
+  const canSeeAmounts = can('office.amounts.view');
+  const showsResponsible = showsOfficeAssignment(officeSize);
   const [client, setClient] = useState<OfficeClientRow | null>(null);
   const [settings, setSettings] = useState<SettingRow[]>([]);
   const [links, setLinks] = useState<ClientContactRow[]>([]);
@@ -107,6 +125,8 @@ export const OfficeClientFile: React.FC<{
   const [editingContact, setEditingContact] = useState<number | null>(null);
   const [contactDraft, setContactDraft] = useState({ name: '', phone: '', language: 'ar' as 'ar' | 'he' });
   const [newContact, setNewContact] = useState({ name: '', phone: '', language: 'ar' as 'ar' | 'he' });
+  const [members, setMembers] = useState<OfficeMemberRow[]>([]);
+  const [assigning, setAssigning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
@@ -181,6 +201,41 @@ export const OfficeClientFile: React.FC<{
     refreshLinks();
   }, [refreshLinks]);
 
+  /**
+   * أعضاءُ الشركة لمنتقي «حوّل» — يُجلبون حين يملك العضو `office.clients.assign`
+   * وفي مكتبٍ فيه أكثر من شخص. و«شخص واحد» لا منتقيَ فيه أصلاً.
+   */
+  useEffect(() => {
+    if (!canAssign || !showsResponsible) return;
+    let cancelled = false;
+    listOfficeMembers()
+      .then((rows) => {
+        if (!cancelled) setMembers(rows);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          toast(humanizeThrown(failure, 'تعذّر تحميل أعضاء المكتب.'), 'error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [canAssign, showsResponsible, toast]);
+
+  /** التحويلُ فعلٌ مُسجَّل خادمياً (من ← إلى) — والردُّ يحمل المسؤول الجديد. */
+  const transfer = async (userId: number) => {
+    if (!userId) return;
+    setAssigning(true);
+    try {
+      setClient(await assignOfficeClient(clientId, userId));
+      toast('حُوّل الزبون إلى موظّفٍ آخر', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تحويل الزبون.'), 'error');
+    } finally {
+      setAssigning(false);
+    }
+  };
+
   /** بحثُ المنتقي في أثره المستقلّ: تأخيرٌ 250مث وتجاهلُ الردود خارج الترتيب. */
   useEffect(() => {
     let cancelled = false;
@@ -215,7 +270,9 @@ export const OfficeClientFile: React.FC<{
       const updated = await updateTaxCard(clientId, {
         entity_type: card.entity_type,
         vat_classification: card.vat_classification,
-        annual_sales: card.annual_sales,
+        // المبلغُ لا يُرسَل لمن لا يملك رؤيته: إرسالُه يمحو المخزَّن أو يردّ 403 بلا داعٍ.
+        // والحكمُ للصلاحية لا لفراغ القيمة: من يملكها ومسح الحقل يُرسَل كما هو.
+        ...(canSeeAmounts ? { annual_sales: card.annual_sales ?? '' } : {}),
         has_employees: card.has_employees,
         employees_count: card.employees_count,
         is_self_employed: card.is_self_employed,
@@ -525,13 +582,15 @@ export const OfficeClientFile: React.FC<{
                     {customizedCount} إعداد مخصَّص
                   </span>
                 ) : null}
-                <button
-                  type="button"
-                  onClick={startEditIdentity}
-                  className="text-[10.5px] font-medium text-slate-600 hover:underline dark:text-slate-300"
-                >
-                  عدّل
-                </button>
+                {canWrite ? (
+                  <button
+                    type="button"
+                    onClick={startEditIdentity}
+                    className="text-[10.5px] font-medium text-slate-600 hover:underline dark:text-slate-300"
+                  >
+                    عدّل
+                  </button>
+                ) : null}
               </div>
             )}
             <div className="mt-2 flex flex-wrap items-center gap-1.5 text-[11px]">
@@ -548,19 +607,48 @@ export const OfficeClientFile: React.FC<{
                   منتهٍ بتاريخ {formatDateValue(client.ended_on)}
                 </span>
               ) : null}
+              {/* الموظف المسؤول — لا يُعرض في مكتب «شخص واحد». */}
+              {showsResponsible ? (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                  المسؤول: {client.responsible_name || '— بلا مسؤول —'}
+                </span>
+              ) : null}
             </div>
+            {/* «حوّل» لأصحاب `office.clients.assign` وحدهم — وقائمةُ أعضاء الشركة. */}
+            {canAssign && showsResponsible ? (
+              <label className="mt-2 inline-flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                حوّل إلى
+                <select
+                  value=""
+                  disabled={assigning}
+                  onChange={(event) => {
+                    void transfer(Number(event.target.value));
+                  }}
+                  className={`${officeInputClass} h-8`}
+                >
+                  <option value="">— اختر موظفاً —</option>
+                  {members.map((member) => (
+                    <option key={member.user_id} value={member.user_id}>
+                      {member.full_name || member.username}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
-          <button
-            type="button"
-            onClick={toggleStatus}
-            className={
-              client.status === 'active'
-                ? 'rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12px] font-medium text-rose-700 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300'
-                : officePrimaryButtonClass
-            }
-          >
-            {client.status === 'active' ? 'أنهِ الزبون' : 'أعِد نشاطاً'}
-          </button>
+          {canWrite ? (
+            <button
+              type="button"
+              onClick={toggleStatus}
+              className={
+                client.status === 'active'
+                  ? 'rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12px] font-medium text-rose-700 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300'
+                  : officePrimaryButtonClass
+              }
+            >
+              {client.status === 'active' ? 'أنهِ الزبون' : 'أعِد نشاطاً'}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -622,12 +710,23 @@ export const OfficeClientFile: React.FC<{
 
               <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
                 المبيعات السنوية
-                <input
-                  value={card.annual_sales}
-                  onChange={(event) => setCard({ ...card, annual_sales: event.target.value })}
-                  inputMode="decimal"
-                  className={`${officeInputClass} mt-1 block w-full tabular-nums`}
-                />
+                {/* من لا يملك رؤية المبالغ يرى «—» ولا يُرسَل في الحفظ (#272). */}
+                {canSeeAmounts ? (
+                  <input
+                    value={card.annual_sales ?? ''}
+                    onChange={(event) => setCard({ ...card, annual_sales: event.target.value })}
+                    inputMode="decimal"
+                    className={`${officeInputClass} mt-1 block w-full tabular-nums`}
+                  />
+                ) : (
+                  <input
+                    value={formatOfficeAmount(card.annual_sales)}
+                    readOnly
+                    disabled
+                    aria-label={`المبيعات السنوية ${AMOUNT_MASK}`}
+                    className={`${officeInputClass} mt-1 block w-full tabular-nums`}
+                  />
+                )}
               </label>
 
               <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
@@ -663,9 +762,11 @@ export const OfficeClientFile: React.FC<{
                 />
                 עצמאי يدفع ביטוח לאומי
               </label>
-              <button type="button" onClick={saveCard} className={`ms-auto ${officePrimaryButtonClass}`}>
-                احفظ البطاقة
-              </button>
+              {canWrite ? (
+                <button type="button" onClick={saveCard} className={`ms-auto ${officePrimaryButtonClass}`}>
+                  احفظ البطاقة
+                </button>
+              ) : null}
             </div>
           </OfficeCard>
 
@@ -682,6 +783,7 @@ export const OfficeClientFile: React.FC<{
                   value={setting.value}
                   canReset={setting.is_customized === true}
                   resetLabel="ارجع لإعداد المكتب"
+                  disabled={!canWrite}
                   onReset={() => resetSetting(setting)}
                   onSave={(value) => saveSetting(setting, value)}
                 />
@@ -761,7 +863,7 @@ export const OfficeClientFile: React.FC<{
                           <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
                             رئيسية
                           </span>
-                        ) : (
+                        ) : canWrite ? (
                           <button
                             type="button"
                             onClick={() => promote(link.contact.id)}
@@ -769,23 +871,25 @@ export const OfficeClientFile: React.FC<{
                           >
                             اجعلها الرئيسية
                           </button>
-                        )}
-                        <div className="ms-auto flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => startEditContact(link.contact)}
-                            className="text-[10.5px] font-medium text-slate-600 hover:underline dark:text-slate-300"
-                          >
-                            عدّل
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => unlink(link.contact.id)}
-                            className="text-[10.5px] font-medium text-rose-600 hover:underline dark:text-rose-400"
-                          >
-                            افكّ الربط
-                          </button>
-                        </div>
+                        ) : null}
+                        {canWrite ? (
+                          <div className="ms-auto flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditContact(link.contact)}
+                              className="text-[10.5px] font-medium text-slate-600 hover:underline dark:text-slate-300"
+                            >
+                              عدّل
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => unlink(link.contact.id)}
+                              className="text-[10.5px] font-medium text-rose-600 hover:underline dark:text-rose-400"
+                            >
+                              افكّ الربط
+                            </button>
+                          </div>
+                        ) : null}
                       </div>
                     )}
                   </li>
@@ -816,63 +920,68 @@ export const OfficeClientFile: React.FC<{
                     >
                       <button
                         type="button"
+                        disabled={!canWrite}
                         onClick={() => addExistingContact(contact.id)}
-                        className="font-medium text-slate-700 hover:underline dark:text-slate-200"
+                        className="font-medium text-slate-700 hover:underline disabled:no-underline dark:text-slate-200"
                       >
                         {contact.name}
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => removeContact(contact)}
-                        title="حذف الجهة من دفتر المكتب"
-                        className="text-rose-600 hover:underline dark:text-rose-400"
-                      >
-                        ×
-                      </button>
+                      {canWrite ? (
+                        <button
+                          type="button"
+                          onClick={() => removeContact(contact)}
+                          title="حذف الجهة من دفتر المكتب"
+                          className="text-rose-600 hover:underline dark:text-rose-400"
+                        >
+                          ×
+                        </button>
+                      ) : null}
                     </li>
                   ))}
                 </ul>
               )}
             </div>
 
-            <form
-              onSubmit={addNewContact}
-              className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40"
-            >
-              <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
-                جهة جديدة
-                <input
-                  value={newContact.name}
-                  onChange={(event) => setNewContact({ ...newContact, name: event.target.value })}
-                  required
-                  className={`${officeInputClass} mt-1 block w-48`}
-                />
-              </label>
-              <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
-                الهاتف
-                <input
-                  value={newContact.phone}
-                  onChange={(event) => setNewContact({ ...newContact, phone: event.target.value })}
-                  className={`${officeInputClass} mt-1 block w-36 tabular-nums`}
-                />
-              </label>
-              <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
-                اللغة
-                <select
-                  value={newContact.language}
-                  onChange={(event) =>
-                    setNewContact({ ...newContact, language: event.target.value as 'ar' | 'he' })
-                  }
-                  className={`${officeInputClass} mt-1 block w-24`}
-                >
-                  <option value="ar">عربي</option>
-                  <option value="he">عبري</option>
-                </select>
-              </label>
-              <button type="submit" className={officePrimaryButtonClass}>
-                أضف واربط
-              </button>
-            </form>
+            {canWrite ? (
+              <form
+                onSubmit={addNewContact}
+                className="mt-4 flex flex-wrap items-end gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40"
+              >
+                <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                  جهة جديدة
+                  <input
+                    value={newContact.name}
+                    onChange={(event) => setNewContact({ ...newContact, name: event.target.value })}
+                    required
+                    className={`${officeInputClass} mt-1 block w-48`}
+                  />
+                </label>
+                <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                  الهاتف
+                  <input
+                    value={newContact.phone}
+                    onChange={(event) => setNewContact({ ...newContact, phone: event.target.value })}
+                    className={`${officeInputClass} mt-1 block w-36 tabular-nums`}
+                  />
+                </label>
+                <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                  اللغة
+                  <select
+                    value={newContact.language}
+                    onChange={(event) =>
+                      setNewContact({ ...newContact, language: event.target.value as 'ar' | 'he' })
+                    }
+                    className={`${officeInputClass} mt-1 block w-24`}
+                  >
+                    <option value="ar">عربي</option>
+                    <option value="he">عبري</option>
+                  </select>
+                </label>
+                <button type="submit" className={officePrimaryButtonClass}>
+                  أضف واربط
+                </button>
+              </form>
+            ) : null}
           </OfficeCard>
 
           <OfficeCard title="مستلِم كل نوع تذكير">
@@ -906,6 +1015,7 @@ export const OfficeClientFile: React.FC<{
                         value={
                           row.is_fallback || !row.recipient ? '' : String(row.recipient.contact_id)
                         }
+                        disabled={!canWrite}
                         onChange={(event) =>
                           assignRecipient(
                             row.reminder_type,
@@ -936,18 +1046,21 @@ export const OfficeClientFile: React.FC<{
             value={notes}
             onChange={(event) => setNotes(event.target.value)}
             rows={8}
+            readOnly={!canWrite}
             className="w-full rounded-lg border border-slate-200 bg-white p-3 text-[12.5px] text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
-          <div className="mt-3 flex items-center justify-end gap-2">
-            {notesDirty ? (
-              <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
-                تعديلات غير محفوظة
-              </span>
-            ) : null}
-            <button type="button" onClick={saveNotes} className={officePrimaryButtonClass}>
-              احفظ الملاحظات
-            </button>
-          </div>
+          {canWrite ? (
+            <div className="mt-3 flex items-center justify-end gap-2">
+              {notesDirty ? (
+                <span className="text-[11px] font-medium text-amber-700 dark:text-amber-400">
+                  تعديلات غير محفوظة
+                </span>
+              ) : null}
+              <button type="button" onClick={saveNotes} className={officePrimaryButtonClass}>
+                احفظ الملاحظات
+              </button>
+            </div>
+          ) : null}
         </OfficeCard>
       ) : null}
     </div>

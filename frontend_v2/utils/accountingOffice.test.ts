@@ -1,11 +1,17 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  AMOUNT_MASK,
   clientFilePath,
   clientIdFromSearch,
   clientStatusBadgeClass,
   customizedSettingCount,
+  formatOfficeAmount,
   missingFirstRunLabels,
+  officeAssignableRoles,
+  officeRoleLabel,
+  officeSizeOf,
+  showsOfficeAssignment,
   visibleClientSettings,
   type SettingRow,
 } from './accountingOffice.ts';
@@ -102,6 +108,76 @@ test('عنوانٌ بلا معرّف أو بمعرّف فاسد يعود للق�
   assert.equal(clientIdFromSearch('?client=abc'), null);
   assert.equal(clientIdFromSearch('?client=0'), null);
   assert.equal(clientIdFromSearch('?client=-4'), null);
+});
+
+const OFFICE_SIZE = row({
+  key: 'office_size',
+  label: 'حجم المكتب',
+  kind: 'choice',
+  choices: [
+    { value: 'solo', label: 'شخص واحد' },
+    { value: 'small', label: 'صغير' },
+    { value: 'large', label: 'كبير' },
+  ],
+  has_default: false,
+  value: 'solo',
+  value_label: 'شخص واحد',
+});
+
+test('«شخص واحد» يُخفي عمود المسؤول والإسناد', () => {
+  assert.equal(showsOfficeAssignment('solo'), false);
+  assert.equal(showsOfficeAssignment('small'), true);
+  assert.equal(showsOfficeAssignment('large'), true);
+  // حجمٌ غائب لا يُخفي شيئاً: الخادم هو الحكم، والإخفاء عرضٌ فقط.
+  assert.equal(showsOfficeAssignment(null), true);
+});
+
+test('حجم المكتب يُقرأ من سطر الإعداد وحده', () => {
+  assert.equal(officeSizeOf([TAX_SYSTEM, OFFICE_SIZE]), 'solo');
+  assert.equal(
+    officeSizeOf([{ ...OFFICE_SIZE, value: 'large' }]),
+    'large',
+  );
+  assert.equal(officeSizeOf([TAX_SYSTEM]), null);
+});
+
+test('المبلغ المخفيّ يُعرض «—»', () => {
+  assert.equal(formatOfficeAmount(null), AMOUNT_MASK);
+  assert.equal(formatOfficeAmount(undefined), AMOUNT_MASK);
+  assert.equal(formatOfficeAmount(''), AMOUNT_MASK);
+  assert.equal(formatOfficeAmount('1200.00'), '1200.00');
+  assert.equal(formatOfficeAmount(0), '0');
+});
+
+test('«مالك» تسميةُ دور المدير في قسم أدوار المكتب وحده', () => {
+  assert.equal(officeRoleLabel('manager', 'مدير'), 'مالك');
+  assert.equal(officeRoleLabel('accountant', 'محاسب'), 'محاسب');
+  assert.equal(officeRoleLabel('office_manager', 'مدير مكتب'), 'مدير مكتب');
+});
+
+const SERVER_ROLES = [
+  { key: 'manager', label: 'مدير' },
+  { key: 'office_manager', label: 'مدير مكتب' },
+  { key: 'accountant', label: 'محاسب' },
+  { key: 'viewer', label: 'مستعرض' },
+  { key: 'sales', label: 'موظف مبيعات' },
+];
+
+test('أدوار المكتب أربعة، والقارئ في المكتب الكبير وحده', () => {
+  assert.deepEqual(
+    officeAssignableRoles(SERVER_ROLES, 'small').map((role) => role.key),
+    ['manager', 'office_manager', 'accountant'],
+  );
+  assert.deepEqual(
+    officeAssignableRoles(SERVER_ROLES, 'large').map((role) => role.key),
+    ['manager', 'office_manager', 'accountant', 'viewer'],
+  );
+  // «شخص واحد» لا قسمَ أدوارٍ أصلاً.
+  assert.deepEqual(officeAssignableRoles(SERVER_ROLES, 'solo'), []);
+  // الدور الحاليّ خارج الأربعة يُعرض كما هو — وإلا كذب المنتقي على صاحبه.
+  const withSales = officeAssignableRoles(SERVER_ROLES, 'small', 'sales');
+  assert.equal(withSales[0].key, 'sales');
+  assert.equal(withSales[0].label, 'موظف مبيعات');
 });
 
 test('الرابط يُبنى ويُقرأ بالدالة نفسها — لا نسختان تفترقان', () => {

@@ -439,6 +439,9 @@ class BookHandoverRequest(models.Model):
 class UserCompanyMembership(models.Model):
     ROLE_CHOICES = [
         ('manager', 'مدير (Manager)'),
+        # #272: الدور الثاني في مكتب المحاسبة — يظهر فقط لشركةٍ مرخّصةٍ للوحدة
+        # (`core.access.ROLE_MODULES`)، وصلاحياته في `core.access.ROLE_DEFAULTS`.
+        ('office_manager', 'مدير مكتب (Office manager)'),
         ('accountant', 'محاسب (Accountant)'),
         ('legal_accountant', 'محاسب قانوني خارجي'),
         # T-PERM: دورا الموظف المتخصّص — لكلٍّ مصفوفة صلاحيات في core.access

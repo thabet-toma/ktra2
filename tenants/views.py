@@ -361,13 +361,7 @@ class TenantViewSet(viewsets.ModelViewSet):
 
         ident = str(request.data.get("username_or_email") or "").strip()
         role = str(request.data.get("role") or "staff").strip()
-        valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
-        if role not in valid_roles:
-            raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
-        if role == "legal_accountant":
-            raise DRFValidationError({
-                "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
-            })
+        self._assert_role_assignable(tenant, role)
         if not ident:
             raise DRFValidationError({"username_or_email": "اسم المستخدم أو البريد مطلوب."})
         target = AuthUser.objects.filter(Q(username__iexact=ident) | Q(email__iexact=ident)).first()
@@ -416,13 +410,17 @@ class TenantViewSet(viewsets.ModelViewSet):
         if is_last_manager(tenant, membership):
             raise DRFValidationError({"detail": "لا يمكن إزالة/تخفيض آخر مدير في الشركة."})
 
-    @action(detail=True, methods=["post"], url_path="members/change-role")
-    def change_member_role(self, request, pk=None):
-        """body: {"membership_id": n, "role": "..."} — مدير فقط، مع حماية آخر مدير."""
-        tenant = self.get_object()
-        self._require_company_manager(request, tenant)
-        m = self._get_member_or_400(tenant, request)
-        role = str(request.data.get("role") or "").strip()
+    @staticmethod
+    def _assert_role_assignable(tenant, role):
+        """دورٌ مقبولٌ في هذه الشركة: في المفردة **ومرخَّصٌ لوحدته**.
+
+        `ROLE_CHOICES` مفردةُ المنصّة كلها، وبعضُها مربوطٌ بوحدة (`ROLE_MODULES`:
+        `office_manager` لمكتب المحاسبة، `ess` للموارد البشرية، `field_staff`
+        لمتابعة الموظفين…). إسنادُه لشركةٍ بلا ترخيصه يُنشئ عضويّةً بدورٍ يختفي
+        من كل شاشةٍ ولا يعمل مفتاحٌ من مفاتيحه — فيُرفض 400 بالسبب.
+        """
+        from core.access import visible_role_labels
+
         valid_roles = {r for r, _ in UserCompanyMembership.ROLE_CHOICES}
         if role not in valid_roles:
             raise DRFValidationError({"role": f"دور غير صالح. المسموح: {sorted(valid_roles)}"})
@@ -430,6 +428,20 @@ class TenantViewSet(viewsets.ModelViewSet):
             raise DRFValidationError({
                 "role": "يُنشأ دور المحاسب القانوني من دورة الارتباط المحمية فقط."
             })
+        licensed = {r for r, _label in visible_role_labels(tenant)}
+        if role not in licensed:
+            raise DRFValidationError({
+                "role": "هذا الدور يتبع وحدةً غير مرخّصة لهذه الشركة.",
+            })
+
+    @action(detail=True, methods=["post"], url_path="members/change-role")
+    def change_member_role(self, request, pk=None):
+        """body: {"membership_id": n, "role": "..."} — مدير فقط، مع حماية آخر مدير."""
+        tenant = self.get_object()
+        self._require_company_manager(request, tenant)
+        m = self._get_member_or_400(tenant, request)
+        role = str(request.data.get("role") or "").strip()
+        self._assert_role_assignable(tenant, role)
         if role != "manager":
             self._assert_not_last_manager(tenant, m)
         old_role = m.role

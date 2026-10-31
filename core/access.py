@@ -39,6 +39,31 @@ GROUP_TAX = "الضريبة والمراجعة"
 GROUP_DEVICES = "الأجهزة الحساسة"
 GROUP_AFTERSALES = "خدمة ما بعد البيع"
 GROUP_EMPLOYEE_OPS = "متابعة الموظفين"
+GROUP_OFFICE = "مكتب المحاسبة"
+
+# ── مفاتيح مكتب المحاسبة (#272) ─────────────────────────────────────────────
+#
+# تُذكر مرّةً واحدةً هنا وتُقرأ في الكتالوج ومصفوفة الأدوار وفي
+# `accounting_office/services.py` (مصدر الرؤية والمبالغ) — فلا مفتاحَ حرفيٌّ
+# ثانٍ يفترق عن هذا عند أوّل تعديل.
+#: يضيف ويعدّل الزبائن وبطاقاتهم وجهاتهم وتخصيصاتهم.
+OFFICE_CLIENTS_WRITE_KEY = "office.clients.write"
+#: «يرى زبائن غيره» — تجاوزُ عضوٍ عليه يفتح كلَّ زبائن المكتب له.
+OFFICE_CLIENTS_ALL_KEY = "office.clients.all"
+#: «يرى المبالغ» — بدونها كلُّ مبلغٍ في الردّ `null`، وكتابتُه 403.
+OFFICE_AMOUNTS_VIEW_KEY = "office.amounts.view"
+#: إسنادُ الزبون وتحويله لموظّفٍ آخر.
+OFFICE_CLIENTS_ASSIGN_KEY = "office.clients.assign"
+#: إعداداتُ المكتب (كتابةً).
+OFFICE_SETTINGS_MANAGE_KEY = "office.settings.manage"
+
+OFFICE_PERMISSION_KEYS = frozenset({
+    OFFICE_CLIENTS_WRITE_KEY,
+    OFFICE_CLIENTS_ALL_KEY,
+    OFFICE_AMOUNTS_VIEW_KEY,
+    OFFICE_CLIENTS_ASSIGN_KEY,
+    OFFICE_SETTINGS_MANAGE_KEY,
+})
 
 PERMISSIONS: list[dict] = [
     # المبيعات
@@ -182,6 +207,12 @@ PERMISSIONS: list[dict] = [
     # متابعة الموظفين — لا تظهر إلا للشركات المرخّصة للوحدة.
     {"key": "employee_ops.self", "label": "متابعة الموظفين — مهامّي ونقاطي", "group": GROUP_EMPLOYEE_OPS, "module": "employee_ops"},
     {"key": "employee_ops.manage", "label": "إدارة متابعة الموظفين — الإسناد والمراجعة والتوظيف", "group": GROUP_EMPLOYEE_OPS, "module": "employee_ops"},
+    # مكتب المحاسبة — لا تظهر إلا للشركات المرخّصة للوحدة.
+    {"key": OFFICE_CLIENTS_WRITE_KEY, "label": "إضافة زبائن المكتب وتعديلهم", "group": GROUP_OFFICE, "module": "accounting_office"},
+    {"key": OFFICE_CLIENTS_ALL_KEY, "label": "يرى زبائن غيره", "group": GROUP_OFFICE, "module": "accounting_office"},
+    {"key": OFFICE_AMOUNTS_VIEW_KEY, "label": "يرى المبالغ", "group": GROUP_OFFICE, "module": "accounting_office"},
+    {"key": OFFICE_CLIENTS_ASSIGN_KEY, "label": "إسناد الزبون وتحويله لموظّفٍ آخر", "group": GROUP_OFFICE, "module": "accounting_office"},
+    {"key": OFFICE_SETTINGS_MANAGE_KEY, "label": "إعدادات المكتب", "group": GROUP_OFFICE, "module": "accounting_office"},
 ]
 
 # القراءة المجرّدة — ما يملكه «المستعرض» ويرثه كل دور أعلى منه.
@@ -305,6 +336,10 @@ _ACCOUNTANT = _VIEW_ONLY | _ACCOUNTING_VIEW | _AFTERSALES_READ | _EMPLOYEE_SELF 
     "hr.contracts.view",
     "hr.requests.view",
     "employee_ops.self",
+    # #272: المحاسب يكتب زبائن المكتب وحدها من مفاتيحه — لا يرى زبائن غيره، ولا
+    # المبالغ، ولا يسند زبوناً، ولا يكتب إعدادات المكتب. مفاتيحُ الموديول نفسها
+    # تمرّ بـ`permission_keys(tenant)` فلا تصل شركةً بلا ترخيص الوحدة.
+    OFFICE_CLIENTS_WRITE_KEY,
 }
 
 _LEGAL_ACCOUNTANT = {
@@ -362,12 +397,20 @@ FIELD_STAFF_ROLE = "field_staff"
 
 _FIELD_STAFF = frozenset({"employee_ops.self"})
 
+#: «مدير مكتب» (#272) — الدور الثاني في مكتب المحاسبة بعد المالك: يرى كلَّ
+#: زبائن المكتب ومبالغهم، ويكتب ويُسند ويضبط إعداداته، ولا يمسّ أعضاء الشركة
+#: وصلاحياتهم (تلك للمالك=`manager` وحده). و`_VIEW_ONLY` قاعدتُه كسائر الأدوار،
+#: ومفاتيحُ المكتب كلُّها فوقها. ويختفي من الشاشات مع ترخيص وحدته
+#: (`ROLE_MODULES`) — دورُ مكتبٍ بلا مكتبٍ لا معنى له.
+_OFFICE_MANAGER = _VIEW_ONLY | set(OFFICE_PERMISSION_KEYS)
+
 # SA-2: دور جلسة دعم كترا — ليس في `ROLE_DEFAULTS` عمداً: لا صلاحيات افتراضية له،
 # و`user_permissions` تمنح الجلسة صلاحياتها صراحةً (مدير ناقص `SUPPORT_FORBIDDEN_PERMS`).
 SUPPORT_ROLE = "support"
 
 ROLE_DEFAULTS: dict[str, object] = {
     "manager": "*",
+    "office_manager": _OFFICE_MANAGER,
     "accountant": _ACCOUNTANT,
     "legal_accountant": _LEGAL_ACCOUNTANT,
     "sales": _SALES_EMPLOYEE,
@@ -381,6 +424,8 @@ ROLE_DEFAULTS: dict[str, object] = {
 # الأدوار المعروضة في شاشة الصلاحيات (المدير أولاً) وتسمياتها العربية.
 ROLE_LABELS = (
     ("manager", "مدير"),
+    # #272: دورُ مكتب المحاسبة الثاني — يظهر فقط لشركةٍ مرخّصةٍ لوحدتها.
+    ("office_manager", "مدير مكتب"),
     ("accountant", "محاسب"),
     ("legal_accountant", "محاسب قانوني خارجي"),
     ("sales", "موظف مبيعات"),
@@ -393,6 +438,8 @@ ROLE_LABELS = (
 ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
 ROLE_MODULES = {
     "legal_accountant": "accountant_portal",
+    # دور مكتب المحاسبة بلا معنى بلا وحدته — يختفي معها.
+    "office_manager": "accounting_office",
     # دور الخدمة الذاتية بلا معنى بلا وحدة الموارد البشرية — يختفي معها.
     "ess": "hr_suite",
     # دور الموظف الميداني بلا معنى بلا وحدة متابعة الموظفين — يختفي معها.
