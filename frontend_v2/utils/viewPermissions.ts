@@ -167,6 +167,10 @@ export const VIEW_MODULES: Record<string, string> = {
   "employee-ops-people": "employee_ops",
   "employee-ops-points": "employee_ops",
   "employee-ops-hiring": "employee_ops",
+  // ISSUE #271 — مكتب المحاسبة: نفس عقد employee_ops (404 خادمياً من
+  // `require_module`)، وبلا ترخيص لا يُطلب chunk الشاشة.
+  "office-clients": "accounting_office",
+  "office-settings": "accounting_office",
 };
 
 /**
@@ -209,6 +213,9 @@ const GOODS_MOVEMENT_HIDDEN_VIEWS = [
 
 export const TEMPLATE_HIDDEN_VIEWS: Record<string, readonly string[]> = {
   accounting_firm: GOODS_MOVEMENT_HIDDEN_VIEWS,
+  // ISSUE #271 — القالب الجديد للمكتب: قناعُ `accounting_firm` حرفياً، مرآةً
+  // لـ`tenants/company_templates.py` (`_GOODS_MOVEMENT_HIDDEN_PATHS`).
+  accounting_office: GOODS_MOVEMENT_HIDDEN_VIEWS,
   // ISSUE #81: «دفتر عميل» يُمسَك بالسندات وحدها — فوق قناع `accounting_firm`
   // يسقط البيع نفسه: لا فاتورة بيع ولا أمر بيع ولا عرض سعر. سند القبض
   // (`sales-customer-payments`) يبقى — أحد الدفاتر الخمسة المزروعة.

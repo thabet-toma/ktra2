@@ -100,6 +100,8 @@ export type AppView =
     | "accounting-revenue-vouchers"
     | "document-coding"
     | "client-books"
+    | "office-clients"
+    | "office-settings"
     | "sales-return"
     | "purchase-return"
     | "supplier-payments"

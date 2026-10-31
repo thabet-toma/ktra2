@@ -218,6 +218,9 @@ _GOODS_MOVEMENT_HIDDEN_PATHS = (
 
 TEMPLATE_HIDDEN_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     'accounting_firm': _GOODS_MOVEMENT_HIDDEN_PATHS,
+    # ISSUE #271: قالب الموديول الجديد يقنّع ما يقنّعه `accounting_firm` حرفياً —
+    # لا بضاعة في مكتب محاسبة، ولا نسخةً ثانية من القائمة تفترق عنها لاحقاً.
+    'accounting_office': _GOODS_MOVEMENT_HIDDEN_PATHS,
     # ISSUE #81: `client_book` يُقنِّع كل ما يُقنِّعه `accounting_firm` — ويزيد
     # عليه فواتير البيع نفسها (لا فواتير بيع/شراء في هذا القالب، السندات وحدها)
     # وأوامر البيع وعروض الأسعار والإرساليات والمحجوزات — بضاعةٌ لا مكان لها في
@@ -277,6 +280,33 @@ COMPANY_TEMPLATES = {
         'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
         'masked_views': [],
         'services': ACCOUNTING_FIRM_SERVICES,
+    },
+    # ── ISSUE #271 — القالب الجديد لموديول مكتب المحاسبة، **بجانب** القديم ──
+    #
+    # `accounting_firm` لا يُلمَس: له مستخدموه، وشاشاته (`client-books`،
+    # `office-desk`) وطبقةُ المكتب القديمة في `accountant_portal` تعمل كما هي.
+    # هذا مفتاحٌ مستقلّ يفتح الموديول الجديد وحده.
+    #
+    # شجرةُ الحسابات وأنواعُ المستندات **بالإشارة** إلى بذرة القديم لا نسخةً
+    # منها: نسختان تفترقان عند أول تعديل، فيصير في المنصّة مكتبان بشجرةٍ
+    # مختلفة بلا قرارٍ يقول ذلك. وقناعُ المسارات نفسه (`_GOODS_MOVEMENT_HIDDEN_PATHS`):
+    # مكتبُ محاسبةٍ لا حركة بضاعة فيه.
+    #
+    # `services: None` مقصود: خدماتُ `ACCOUNTING_FIRM_SERVICES` بذرةُ **القالب
+    # القديم** — لها أتعابُها المرتبطة بحسابات `4103`-`4106`. كتالوج خدمات
+    # المكتب الجديد يأتي في تذكرة الأتعاب، ولا يُزرع قبله شيءٌ لا شاشة له.
+    'accounting_office': {
+        'key': 'accounting_office',
+        'name': 'مكتب محاسبة (الجديد)',
+        'icon': 'calculator',
+        'description': (
+            'مكتب محاسبة بموديول المكتب الجديد — زبون المكتب وبطاقته الضريبية '
+            'وجهاته وإعداداته، بلا مخزون ولا استيراد.'
+        ),
+        'coa': ACCOUNTING_FIRM_COA,
+        'document_types': ACCOUNTING_FIRM_DOCUMENT_TYPES,
+        'masked_views': [],
+        'services': None,
     },
     'client_book': {
         'key': 'client_book',

@@ -17,6 +17,7 @@
 root_packages =
     accountant_portal
     accounting
+    accounting_office
     after_sales
     bridge
     core
@@ -46,6 +47,7 @@ type = forbidden
 source_modules =
     accountant_portal
     accounting
+    accounting_office
     after_sales
     bridge
     core
@@ -142,6 +144,7 @@ name = accounting.models ليس واجهة عامة — استعمل accounting.
 type = forbidden
 source_modules =
     accountant_portal
+    accounting_office
     after_sales
     bridge
     core

@@ -40,6 +40,12 @@ def _default_terms() -> dict[str, str]:
     terms["nav.declarations"] = "الإقرارات"
     terms["nav.results"] = "النتيجة والضريبة"
     terms["nav.settings"] = "الإعدادات"
+    # ISSUE #271: بيانُ موديول مكتب المحاسبة — مجموعةُ الزبائن وإعداداتُ المكتب
+    # وإجراؤه الأول. مفاتيحُ مصطلحاتٍ لا شاشات، كأخواتها أعلاه.
+    terms["nav.office_clients"] = "الزبائن"
+    terms["nav.office_settings"] = "إعدادات المكتب"
+    terms["action.add_office_client"] = "أضف زبون"
+    terms["empty.office_shell"] = "لا زبائن بعد — أضف أول زبون ليبدأ ملفّه."
     terms["action.document_coding"] = "ترميز مستندات"
     terms["empty.shell"] = "لا يوجد شيء هنا بعد."
     return terms

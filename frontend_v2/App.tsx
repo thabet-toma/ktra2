@@ -57,6 +57,8 @@ import { apiGetObject } from "./services/restApi";
 import { clientLogger } from "./services/logger";
 import { useToast } from "./contexts/ToastContext";
 import { humanizeThrown } from "./utils/drfError";
+// ISSUE #271 — مسارا شاشتَي المكتب: مصدرٌ واحدٌ يقرؤه الجدولُ والشاشاتُ معاً.
+import { OFFICE_CLIENTS_PATH, OFFICE_SETTINGS_PATH } from "./utils/accountingOffice";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -126,6 +128,11 @@ const RevenueVouchersPage = lazyPage(() => import("./components/accounting/Reven
 // ISSUE #85: شاشة الترميز الدفعي — القسم ٧ من #77، فوق نقطة الحفظ التي بنتها #84.
 const DocumentCodingPage = lazyPage(() => import("./components/accounting/DocumentCodingPage").then((m) => ({ default: m.DocumentCodingPage })));
 const ClientBooksPanel = lazyPage(() => import("./components/office/ClientBooksPanel").then((m) => ({ default: m.ClientBooksPanel })));
+// ISSUE #271 — موديول مكتب المحاسبة: قائمة الزبائن (وتركّب ملفّ الزبون) والإعدادات.
+const OfficeClientsScreen = lazyPage(() => import("./components/accounting-office/OfficeClientsScreen").then((m) => ({ default: m.OfficeClientsScreen })));
+const OfficeSettingsScreen = lazyPage(() => import("./components/accounting-office/OfficeSettingsScreen").then((m) => ({ default: m.OfficeSettingsScreen })));
+// الترخيصُ يُمنَح من إدارة المنصّة لا من داخل الشركة — نصٌّ واحدٌ لحالتَي الشاشة.
+const OFFICE_MODULE_UNLICENSED = "وحدة مكتب المحاسبة غير مفعّلة لهذه الشركة — تُفعَّل من إدارة المنصّة.";
 // ISSUE #87: شاشتا بداية القالبين — لوحة المكتب (accounting_firm) والوضع المالي (client_book).
 const OfficeHomeDashboard = lazyPage(() => import("./components/office/OfficeHomeDashboard").then((m) => ({ default: m.OfficeHomeDashboard })));
 const ClientBookFinancialPosition = lazyPage(() => import("./components/office/ClientBookFinancialPosition").then((m) => ({ default: m.ClientBookFinancialPosition })));
@@ -351,6 +358,13 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-revenue-vouchers": "/accounting/revenue-vouchers",
   "document-coding": "/accounting/document-coding",
   "client-books": "/client-books",
+  // ISSUE #271 — موديول مكتب المحاسبة. مساران صريحان كي يعمل التحديث والرجوع.
+  // **ليس `/office/…`**: تلك البادئة محجوزةٌ لقشرة المحاسب القانوني القديمة —
+  // `App.tsx` يعترض كل ما يبدأ بها ويعرض «هذا الحساب ليس مكتب محاسبة قانونية»،
+  // و`utils/officeShell.ts` يقرؤها علماً لقشرة المنصّة. مسارٌ مستقلّ يمنع التقاطع.
+  // والمساران كلاهما يُقرآن من `utils/accountingOffice.ts` — نسخةٌ ثانية هنا تفترق عنهما.
+  "office-clients": OFFICE_CLIENTS_PATH,
+  "office-settings": OFFICE_SETTINGS_PATH,
   "property-rental": "/property-rental",
   "cash-boxes": "/cash-boxes",
   reports: "/reports",
@@ -2353,6 +2367,23 @@ const App: React.FC = () => {
           return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
         }
         return <ClientBooksPanel />;
+
+      // ISSUE #271 — موديول مكتب المحاسبة. الحارس يقول السبب عند غياب الترخيص
+      // بدل شاشةٍ بيضاء من 404 خام. الوحدةُ تُرخَّص من إدارة المنصّة لا من داخل
+      // الشركة؛ والنصُّ ثابتٌ واحدٌ أعلاه لا نسختان تفترقان.
+      case "office-clients":
+        return (
+          <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
+            <OfficeClientsScreen />
+          </ModuleLicenseGuard>
+        );
+
+      case "office-settings":
+        return (
+          <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
+            <OfficeSettingsScreen />
+          </ModuleLicenseGuard>
+        );
 
       case "stock-levels":
         return <StockLevelsPage />;

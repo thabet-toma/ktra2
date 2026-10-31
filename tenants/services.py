@@ -15,6 +15,26 @@ from core.plans import trial_end_date
 
 logger = logging.getLogger(__name__)
 
+# ── القالب ← الوحدة المرخّصة التي **تُزرع معه** عند الإنشاء ────────────────
+#
+# نقطةُ الزرع واحدة (القرار 8 في #46) و`switch_company_template` لا تمنح تراخيص.
+# والعلاقة هنا لا في `tenants/company_templates.py`: سِجلّ القوالب يصف **قالباً**
+# (شجرةً ودفاترَ وقناعَ مسارات)، والترخيصُ شأنُ `core.modules` — خلطُ الاثنين
+# يجعل القالب يحمل سياسة تسعير.
+_TEMPLATE_MODULE_LICENCES: dict[str, tuple[str, str]] = {
+    # ISSUE #87 — دفتر العميل بابُه مكتب محاسبة يدفع `office.managed_books`.
+    # النصُّ كما هو حرفياً منذ ذلك الحين: سجلُّ تراخيص الشركات القائمة يقرؤه إنسان.
+    'client_book': (
+        'accountant_portal',
+        'زُرعت تلقائياً مع قالب دفتر العميل — ISSUE #87',
+    ),
+    # ISSUE #271 — الموديول الجديد كلّه خلف `require_module`.
+    'accounting_office': (
+        'accounting_office',
+        'زُرعت تلقائياً مع قالب مكتب محاسبة (الجديد) — ISSUE #271',
+    ),
+}
+
 # ISSUE #54: صلاحية طلب التسليم — أسبوعان، مثل دعوة الارتباط المحاسبي
 # (`accountant_portal.PortalSettings.invitation_expiry_days` الافتراضي).
 HANDOVER_REQUEST_EXPIRY_DAYS = 14
@@ -363,26 +383,30 @@ def create_company(
                 sale_account_override=account_map.get(account_code),
             )
 
-        # 4.8 ترخيص `accountant_portal` لدفتر العميل وحده (ISSUE #87 — مراجعة).
-        # القالب **هو** المنتج: `client_book` لا يُفتح إلا مكتبُ محاسبةٍ يدفع
-        # حصّة `office.managed_books`، وشاشة بدايته («الوضع المالي»،
-        # `ClientBookFinancialPosition.tsx`) تستهلك نقاطاً تحت `guard_module_surface`
-        # فتردّ 404 بلا هذا الترخيص — كانت شاشة الإقلاع الوحيدة التي بُنيت لهذا
-        # القالب تفتح على عطل من أول يوم. `accounting_firm` لا يُلمَس: لوحته
-        # (`practice/dashboard/`) هوياتيّة النطاق ولا تمرّ بهذا الحارس أصلاً
-        # (`accountant_portal/services.py` — `getPracticeDashboard` بلا
-        # `X-Tenant-Id` عمداً)، و`general` لا علاقة له بالوحدة إطلاقاً. **لا
-        # تُكرَّر هذه البذرة في `switch_company_template`** — نقطة الزرع واحدة
-        # (القرار 8 في #46)، وتبديل القالب لاحقاً لا يمنح تراخيص وحدات.
-        if template_config['key'] == 'client_book':
+        # 4.8 ترخيصُ الوحدة التي **قالبُ الشركة هو منتجُها** (ISSUE #87، و#271).
+        # `client_book` لا يُفتح إلا مكتبُ محاسبةٍ يدفع حصّة `office.managed_books`،
+        # وشاشة بدايته («الوضع المالي»، `ClientBookFinancialPosition.tsx`) تستهلك
+        # نقاطاً تحت `guard_module_surface` فتردّ 404 بلا هذا الترخيص — كانت شاشة
+        # الإقلاع الوحيدة التي بُنيت لهذا القالب تفتح على عطل من أول يوم.
+        # و`accounting_office` (#271) قالبُ الموديول الجديد: كلُّ نقطةٍ تحت
+        # `/api/accounting-office/` تمرّ بـ`require_module`، فبلا هذا السطر تفتح
+        # الشركة على 404 في القائمة وملف الزبون والإعدادات معاً.
+        # `accounting_firm` لا يُلمَس: لوحته (`practice/dashboard/`) هوياتيّة
+        # النطاق ولا تمرّ بهذا الحارس أصلاً (`accountant_portal/services.py` —
+        # `getPracticeDashboard` بلا `X-Tenant-Id` عمداً)، و`general` لا علاقة له
+        # بالوحدة إطلاقاً. **لا تُكرَّر هذه البذرة في `switch_company_template`** —
+        # نقطة الزرع واحدة (القرار 8 في #46)، وتبديل القالب لاحقاً لا يمنح تراخيص.
+        licensed = _TEMPLATE_MODULE_LICENCES.get(template_config['key'])
+        if licensed:
+            licensed_module, plan_note = licensed
             from core.modules import invalidate_module_cache
             TenantModule.objects.create(
                 tenant=tenant,
-                module_key='accountant_portal',
+                module_key=licensed_module,
                 enabled=True,
                 enabled_by=creator_user,
                 enabled_at=timezone.now(),
-                plan_note='زُرعت تلقائياً مع قالب دفتر العميل — ISSUE #87',
+                plan_note=plan_note,
             )
             invalidate_module_cache(tenant.pk)
 

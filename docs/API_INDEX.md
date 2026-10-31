@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **985**
+عدد النقاط: **1001**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -65,6 +65,22 @@
 | `/api/accountant/tax/periods/prepare/` | `TaxPeriodPrepareView` | `accountant_portal/views.py` |
 | `/api/accountant/verify-email/` | `VerifyEmailView` | `accountant_portal/views.py` |
 | `/api/accountant/workspace/companies/` | `WorkspaceCompaniesView` | `accountant_portal/views.py` |
+| `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/contacts/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/contacts/{contact_id}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/contacts/{contact_id}/primary/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/end/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/reactivate/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/reminders/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/settings/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/settings/{key}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/tax-card/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/settings/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/settings/{key}/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/settings/{key}/clients/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
 | `/api/accounting/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/accounting/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/accounting/accounts/` | `AccountViewSet` | `accounting/views.py` |

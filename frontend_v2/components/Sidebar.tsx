@@ -366,6 +366,10 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     "client-books": { label: "دفاتر عملائي", icon: <BookOpenCheck className="h-4 w-4" /> },
     "accounting-journal-entry": { label: "قيد اليومية", icon: <ArrowLeftRight className="h-4 w-4" /> },
     settings: { label: "الإعدادات", icon: <SettingsIcon className="h-4 w-4" /> },
+    // ISSUE #271 — شاشتان لا تظهران في أيّ مصفوفةٍ يدوية أعلاه (بيانهما وحده
+    // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
+    "office-clients": { label: "الزبائن", icon: <Users className="h-4 w-4" /> },
+    "office-settings": { label: "إعدادات المكتب", icon: <SettingsIcon className="h-4 w-4" /> },
   };
   ([
     ...accountingLinks, ...salesLinksAll, ...customersLinks, ...purchasesLinksAll,
@@ -519,6 +523,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       accounts: <BookMarked className="h-5 w-5 flex-shrink-0" />,
       declarations: <ClipboardList className="h-5 w-5 flex-shrink-0" />,
       settings: <SettingsIcon className="h-5 w-5 flex-shrink-0" />,
+      // ISSUE #271 — مجموعة «إعدادات المكتب» في بيان مكتب المحاسبة.
+      "office-settings": <SettingsIcon className="h-5 w-5 flex-shrink-0" />,
     };
     const manifestSections = shellSections.map((g) => {
       const links: NavLink[] = g.views.map((v) => {

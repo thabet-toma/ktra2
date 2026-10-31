@@ -127,6 +127,7 @@ INSTALLED_APPS = [
     'realestate',
     'sales',
     'accountant_portal.apps.AccountantPortalConfig',
+    'accounting_office.apps.AccountingOfficeConfig',
     'device_registry.apps.DeviceRegistryConfig',
     'after_sales.apps.AfterSalesConfig',
     'employee_ops.apps.EmployeeOpsConfig',

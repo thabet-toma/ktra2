@@ -21,11 +21,79 @@ class ShellManifestFunctionTest(SimpleTestCase):
         self.assertEqual(manifest["start_view"], "dashboard")
         self.assertEqual(manifest["first_action"]["view"], "sales-invoices")
         self.assertEqual(manifest["first_action"]["label_term"], "doc.sales_invoice")
-        group_ids = [g["id"] for g in manifest["groups"]]
+        # الشاشاتُ كاملةً لا المعرّفات وحدها: حذفُ شاشةٍ من ثابتٍ مشتركٍ (مثل
+        # `TREASURY_VIEWS`) يجب أن يُسقط هذا الاختبار، لا أن يمرّ صامتاً.
         self.assertEqual(
-            group_ids,
-            ["home", "clients", "fees", "treasury", "office-accounting", "reports", "office"],
+            {group["id"]: group["views"] for group in manifest["groups"]},
+            {
+                "home": ["dashboard"],
+                "clients": ["client-books"],
+                "fees": [
+                    "sales-invoices", "sales-quotations",
+                    "sales-return", "sales-customers", "sales-customer-payments",
+                    "sales-settings",
+                ],
+                "treasury": [
+                    "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",
+                    "accounting-cheques", "accounting-expense-vouchers",
+                    "accounting-revenue-vouchers", "credit-debit-notes",
+                    "supplier-payments", "supplier-management",
+                ],
+                "office-accounting": [
+                    "accounting-coa", "accounting-journals", "accounting-journal-entry",
+                    "accounting-general-ledger", "accounting-trial-balance",
+                    "accounting-vat-report", "accounting-fiscal-periods",
+                    "accounting-opening-balances", "accounting-exchange-rates",
+                    "accounting-balance-sheet", "accounting-income-statement",
+                    "accounting-vat-statements", "accounting-year-end-close",
+                ],
+                "reports": [
+                    "reports", "stock-movements", "accounting-trial-balance",
+                    "accounting-income-statement", "accounting-balance-sheet",
+                    "accounting-vat-report",
+                ],
+                "office": ["office-desk"],
+            },
         )
+
+    def test_accounting_office_manifest_shape(self):
+        """ISSUE #271 — بيانُ الموديول الجديد: شاشتُه أولاً، وبلا أتعاب ولا مكتبٍ قديم."""
+        manifest = shell_manifest("accounting_office")
+        self.assertIsNotNone(manifest)
+        self.assertEqual(manifest["start_view"], "office-clients")
+        self.assertEqual(manifest["first_action"]["view"], "office-clients")
+        self.assertEqual(manifest["first_action"]["label_term"], "action.add_office_client")
+        self.assertEqual(manifest["empty_state_term"], "empty.office_shell")
+        self.assertEqual(
+            {group["id"]: group["views"] for group in manifest["groups"]},
+            {
+                "clients": ["office-clients"],
+                "office-settings": ["office-settings"],
+                "treasury": [
+                    "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",
+                    "accounting-cheques", "accounting-expense-vouchers",
+                    "accounting-revenue-vouchers", "credit-debit-notes",
+                    "supplier-payments", "supplier-management",
+                ],
+                "office-accounting": [
+                    "accounting-coa", "accounting-journals", "accounting-journal-entry",
+                    "accounting-general-ledger", "accounting-trial-balance",
+                    "accounting-vat-report", "accounting-fiscal-periods",
+                    "accounting-opening-balances", "accounting-exchange-rates",
+                    "accounting-balance-sheet", "accounting-income-statement",
+                    "accounting-vat-statements", "accounting-year-end-close",
+                ],
+                "reports": [
+                    "reports", "stock-movements", "accounting-trial-balance",
+                    "accounting-income-statement", "accounting-balance-sheet",
+                    "accounting-vat-report",
+                ],
+            },
+        )
+        every_view = {view for group in manifest["groups"] for view in group["views"]}
+        self.assertNotIn("client-books", every_view)
+        self.assertNotIn("office-desk", every_view)
+        self.assertNotIn("sales-invoices", every_view, "لا مجموعةَ أتعابٍ في هذه التذكرة")
 
     def test_client_book_manifest_shape(self):
         manifest = shell_manifest("client_book")

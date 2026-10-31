@@ -4,9 +4,166 @@
 **وبطلب المالك (2026-10-22): يُحدَّث بعد كل تذكرة، وبعد كل جولة تصليح، وقبل أي ضغطٍ للسياق** — هو ذاكرة
 المنسّق بعد الـcompact. الإكمال حتى آخر تذكرة بلا توقّف.
 
-**آخر تحديث:** 2026-10-30 (قبل compact بطلب المالك)
+**آخر تحديث:** 2026-10-30 23:50 (قبل compact بطلب المالك)
 
-## الآن بالضبط — wayfinder: موديول مكتب محاسبة احترافي من الصفر
+## الآن بالضبط — بناء موديول مكتب المحاسبة (#271–#291)
+
+### الطلب والقواعد
+- **طلب المالك 2026-10-30، وهو «نفّذ»:** «/implement كل التذاكر باستخدام وكيل تنفيذ … وبين كل تذكره وتذكره راجع انت
+  باستخدام git diff ومهارة كود ريفيو … ما توقف لتخلص كل شي واعمل ملف تقدم كل تذكره بتخلص حدثو».
+  - هناك هدف (goal) نشط بهذا المعنى.
+- **ملف التقدّم:** `docs/agents/acct-office-build.md`. فيه جدول الـ21 تذكرة وسجلّ، ويُحدَّث بعد كل تذكرة تُستلَم.
+- **التصعيد حسب جولة التصليح، لكل تذكرة:**
+  - **المرّة الأولى:** `delegation_correct` للمنفّذ نفسه.
+  - **المرّة الثانية:** Sonnet 5.5.
+  - **المرّة الثالثة:** Opus 5.5.
+  - Sonnet وOpus ليسا في الأسطول، فاستعمل `delegate_choose_model` عند الحاجة. يسأل المالك، ويُستهلك تأكيده مع أوّل إرسال.
+- **الأسطول:**
+  - **التنفيذ:** `lane-7587384e-b0bf-4913-8361-67a1a1b59325`، وهو DeepSeek V4.1 Flash بجهد **max**.
+  - **القراءة:** `lane-da7d75a7-91f6-4032-ae4a-be40c4285cc8`، بجهد **high**.
+  - **المراجعتان** (Standards وSpec، مهارة `code-review`) تُرسلان متوازيتين على خط القراءة، بموجز «قراءة فقط».
+  - **سأل المالك:** لماذا المراجعة عبر وكيل؟ جوابي: أقرأ الفرق بنفسي أوّلاً، والوكيلان «عين ثانية» تطلبها المهارة.
+  - **اقترحت:** نقل المراجعة إلى خط `max`. **لم يُجب بعد.**
+- **الحلقة لكل تذكرة:**
+  1. موجز مكتفٍ بذاته يبدأ بـ«شغّل `/engineering-protocol` أولاً».
+  2. `delegate` على خط التنفيذ، ثم `delegation_wait`.
+  3. `delegation_review`، وأقرأ كل ملف بنفسي.
+  4. المراجعتان المتوازيتان. أتحقّق من كل ملاحظة، وأرفض ما يخالف قراراً محسوماً.
+  5. موجز تصليح واحد يجمع الكل.
+  6. بعد النظافة: البوّابات بنفسي.
+  7. commit، ثم `git push origin newktra`، ثم CI أخضر، ثم النشر حسب `CLAUDE.md` (`deploy-local-to-modern`).
+     - إن وُجدت هجرة: نسخة احتياطية أوّلاً.
+  8. إغلاق التذكرة، وسطر في `docs/agents/runs.md`، وتحديث `acct-office-build.md`.
+- **البوّابة الكاملة على هذا الجهاز تُسقط 8 اختبارات بيئياً، بقول المنفّذ إنها تسقط على HEAD نظيفاً:**
+  - **أربعة تاريخية:** `after_sales/tests/test_shop_days_extension.py` (2) و`crm/tests/test_lead_contact_stats.py` (2).
+  - **أربعة حرّاس مسحٍ** تقرأ `.agents/worktrees/` غير المتتبَّعة، ومنها worktree النموذج المرئي:
+    - `employee_ops/tests/test_isolation_guard.py`
+    - `platform_ops/tests/test_isolation_guard.py`
+    - `core/tests/test_docs_freshness.py` (`test_production_code_has_one_source_of_today`)
+    - `core/tests/test_terminology_guard.py`
+  - **لم أتحقّق بنفسي على HEAD بعد.** للتحقّق: أنشئ worktree خارج المستودع على HEAD وشغّل الثمانية هناك. وCI النظيف هو الحكم.
+  - **إصلاح مقترح، مفصول ولم يُبلَّغ للمالك بعد:** أن تُقلِّم الحرّاس الأربعة `.agents`.
+
+### الحالة الآن — #271 «الأساس»
+- **الأساس قبل البناء:** commit `bc52288a`، وفيه الوثائق وملف التقدّم.
+- **التسليم الأوّل:** المحاولة `attempt-34e41843-9fe4-421d-8c08-b69e7b0f7728`. قرأته كاملاً واختُتم `correction-required`.
+  - **ما بناه:**
+    - app `accounting_office` بنماذجه السبعة.
+    - `settings_registry.py` والمحلّل `resolve_setting`.
+    - API تحت `/api/accounting-office/`.
+    - قالب `accounting_office` يرخّص الوحدة عند الإنشاء.
+    - الواجهة: `frontend_v2/components/accounting-office/` (القائمة، والملف، والإعدادات، وأول تشغيل).
+    - `CONTEXT.md` و`docs/modules/accounting_office.md`.
+  - **البوّابة الكاملة عندي:** 8 failed، وهي البيئية نفسها، و6697 passed.
+- **المراجعتان مختتمتان** `reviewed-completion`:
+  - Standards: `attempt-9744aeeb-…`
+  - Spec: `attempt-1ddd127d-…`
+  - **أخطر ما وجدتاه:** الهجرة `0001` تنشئ العمود المولَّد `primary_client_key` قبل حقل `client`، فلا تُطبَّق. والاختبارات بـ`--nomigrations` لا تراه.
+- **جولة التصليح 1 (للمنفّذ نفسه) جارية:** المحاولة `attempt-f10ecdce-54e9-412b-9d3f-df7f2efaadf5`، الـjob `delegation-19`. فيها 26 بنداً محسوماً.
+  - **الخادم:**
+    - ترتيب الهجرة وإثبات `migrate` على SQLite فارغة.
+    - تصنيفات البطاقة الرسمية:
+      - **PS:** licensed / exempt / unregistered.
+      - **IL:** authorized / exempt / nonprofit.
+    - تفريغ تصنيفات البطاقة غير الصالحة عند تغيّر `tax_system`.
+    - منع إنشاء زبون قبل أول تشغيل.
+    - `save()` يرفض شركةً مخالفة.
+    - N+1: `resolve_setting_for_clients`، وقائمةٌ بلا بطاقة، واختبار `assertNumQueries`.
+    - المستلِمون باستعلامين.
+    - `client_label` «يوم راحة الزبون».
+    - رفض «ارجع للافتراضي» لإعدادٍ بلا افتراضي.
+    - حذف جهة غير مربوطة فقط، وبحث `?q=` في الجهات.
+    - تحقّق `annual_sales`.
+    - `log_activity` للإنهاء والإعادة.
+  - **الواجهة:**
+    - لا استيراد من `components/accountant/office/`.
+    - «الزبائن» في كل مكان.
+    - تسميات الخادم بدل الثوابت المحلية.
+    - رابط `?client=<id>` للملف.
+    - لا مسح لتعديلات البطاقة غير المحفوظة.
+    - `useConfirm` قبل «أنهِ».
+    - منتقي جهات بالبحث.
+    - رسائل `utils/drfError.ts`.
+    - أول تشغيل بأزرار اختيار.
+    - رسالة `ModuleLicenseGuard` ثابتاً واحداً.
+    - ثوابت مجموعات `shell_manifest` المشتركة، وبيان `accounting_firm` مطابقاً حرفياً.
+  - **الوثائق:**
+    - `CONTEXT.md` بالمعجم كاملاً من `%TEMP%\wf-acct\spec\254-glossary.md`، وبلا قسم «ما بُني».
+    - تصحيح وثيقة الموديول (`core` يُستورد، و«طلبٌ مجهول»).
+- **تحديث 2026-10-31 00:25:** جولة التصليح 1 **انتهت** (`attempt-f10ecdce-54e9-412b-9d3f-df7f2efaadf5`، completed). نُودي
+  `delegation_review` عليها، و**لم تُقرأ ملفاتها بعد ولم تُختتم**.
+  - **تقرير المنفّذ (ادّعاء لا دليل):** البنود الـ26 كلها منجزة.
+    - `accounting_office/tests`: 98 passed.
+    - `migrate` على SQLite فارغة: OK.
+    - `makemigrations --check`: نظيف.
+    - `lint-imports`: 3 kept.
+    - `tsc` وnpm test (1386) وbuild: خضراء.
+    - البوّابة الكاملة: `4 failed, 6719 passed`. الأربعة حرّاس المسح على `.agents/worktrees/`، والأربعة التاريخية مرّت هذه المرّة.
+  - **انحرافاته:**
+    - `value_label` يأتي من الخادم (`setting_value_label`).
+    - علم `can_reset` جديد.
+    - `popstate` صناعيّ لفتح الملفّ من شاشة الإعدادات.
+    - `OfficeUi.tsx` محليّ داخل `components/accounting-office/`.
+- **تحديث 00:35 قبل الـcompact:** قرأتُ `services.py` النهائي وترتيب الهجرة، وهما سليمان.
+  - **فحوصي:**
+    - `accounting_office/tests` و`core/tests/test_shell_manifest.py` و`tenants/tests`: **311 passed** ✓.
+    - `makemigrations --check`: No changes ✓.
+    - `lint-imports` غير معروف في shell PowerShell، فيُشغَّل من بيئة المشروع: `python -m importlinter` أو مسار venv.
+    - فحص الواجهة أُلغي قبل أن ينتهي، فأعِده.
+  - **مراجعتا Standards/Spec على الحالة النهائية** (`attempt-0dda0691…` و`attempt-6b7c0c4c…`) **أوقفتُهما** لأجل الـcompact. **أعِد إرسالهما**: الموجز نفسه، على خط القراءة.
+  - **بقي:** قراءة الواجهة النهائية، والمراجعتان، ثم البوّابة الكاملة، ثم الاستلام.
+- **تحديث 2026-10-31 00:40:** فحصتُ بنفسي: الواجهة (tsc/1386/build) ✓، و`lint-imports` بمسار
+  `C:\Users\asus\AppData\Roaming\Python\Python313\Scripts\lint-imports.exe` (3 kept) ✓. قرأتُ الواجهة والـviews/serializers/models
+  كاملة. المراجعتان أُعيدتا واختُتمتا (`attempt-06959532…` Standards، و`attempt-aee4b903…` Spec).
+  - **جولة التصليح 2 (27 بنداً) جارية:** `attempt-4bdef7d9-5b80-43ef-9236-ab8e5394c746` (job `delegation-24`)، تصحيحٌ
+    لـ`attempt-f10ecdce…` على DeepSeek. Sonnet غير متاح، والمالك اختار «كمّل مع DeepSeek».
+  - أهمّ البنود: `onMissing` يُعيد تحميل الملف (يمسح التعديلات)، و`useSearchParams` بدل `popstate`، و`**` حرفية، وN+1 في
+    `_propagate_tax_system`، و`update` بلا معاملة، و`CONTEXT.md` بعمود العلاقات، واختبارات البيان والحارس.
+  - **بعدها:** قراءة الفرق، ثم مراجعتان على الحالة النهائية. إن بقي شيء فهي الجولة 3 (Opus غير متاح، فـDeepSeek).
+- **تحديث 2026-10-31 02:45:** الجولة 2 (`attempt-4bdef7d9…`) قُرئت وفحصتُ `makemigrations`/`lint-imports` ✓، واختُتمت
+  `correction-required` بأربعة بنود: «جلبه جلبه» في `OfficeClientFile.tsx:84`؛ الجهة المحذوفة تبقى في `pickerContacts`؛
+  `test_settings_guard` يكتب `_guard_probe_app/` في جذر المستودع (سباق xdist) → شجرة `tempfile`؛ اختبار البوّابة المرخَّصة
+  بـ`resolve()` لا يثبت شيئاً → `OPTIONS` = 200 مرخّصاً و404 بلا ترخيص.
+  - أُرسلت لـDeepSeek (`attempt-362f2b5f…`) ثم **أوقفتُها** بطلب المالك: الجولة 2 لـSonnet 5.5 والثالثة لـOpus 5.5 **عبر
+    `/claude-delegate`** (`node C:\Users\asus\.agents\skills\claude-delegate\scripts\relay.mjs --brief … --cd … --model opus`).
+  - **العائق:** `claude` بلا تسجيل دخول (OAuth منتهٍ). بعد `/login` من المالك: راجع ما تركه `attempt-362f2b5f` جزئياً، ثم
+    أرسل البنود الأربعة لـOpus بالـrelay، ثم البوّابات كاملة والمراجعتان والاستلام.
+- **تحديث 2026-10-31 03:00:** الجولة 3 أخذها **Sonnet 5.5** عبر `claude-delegate`. الـrelay موجود في
+  `%TEMP%\wf-acct\relay\271-r3` و`271-r3b`، والجلسة `77197a6b-c997-4854-85eb-634bfdfcd667`.
+  - **ما أنجزته:** شجرة `tempfile` للحارس، و`OPTIONS` للبوّابة. ووجدت 500 حقيقياً على `OPTIONS settings/<key>/`، فأُصلح بـ`OfficeSettingsViewSet.get_object`، ومعه اختبار انحدار.
+  - **فحوصي بعدها:**
+    - الموديول: 323 ✓.
+    - الواجهة: tsc و1386 وbuild ✓.
+    - البوّابة الكاملة: `4 failed, 6731 passed` (الحرّاس الأربعة البيئيون).
+  - **المراجعتان النهائيتان** اختُتمتا: Standards `attempt-564cfb13…`، وSpec `attempt-3aa0e3f1…`.
+  - **الجولة 4 لـOpus 5.5 بـ`--effort high` جارية:** الـjob `pwsh-697`، والـrelay في `%TEMP%\wf-acct\relay\271-r4`، والموجز في `%TEMP%\wf-acct\briefs\271-round4-opus.md`. فيها 11 بنداً:
+    - `select_related` في `_propagate_tax_system` مع اختباره.
+    - فحص المستوى في `reset_office_setting`.
+    - رمزا الاختبارين.
+    - `OFFICE_SETTINGS_PATH`.
+    - debounce لبحث القائمة.
+    - جلب الرأس المكرّر.
+    - تحرير الاسم ورقم الملف.
+    - إخفاء «مخصَّص عند N» للإعداد المكتبي.
+    - سطر الوثيقة.
+  - **بعدها:** أقرأ الفرق وأشغّل البوّابات. فإن كانت نظيفة: commit، ثم push، ثم CI، ثم النشر (بنسخة احتياطية، فالهجرة جديدة)، ثم إغلاق #271.
+- **الخطوة التالية (القديمة):**
+  1. ~~`delegation_wait`~~ — تمّ.
+  2. `delegation_review` (مُنادى)، ثم قراءة الفرق كاملاً بنفسي.
+  3. المراجعتان من جديد على الحالة النهائية.
+  4. إن بقيت ملاحظات فهذه **المرّة الثانية**: تذهب إلى Sonnet 5.5 بـ`delegate_choose_model`.
+  5. وإلا: البوّابات، ثم الاستلام والنشر. الهجرة جديدة، فخذ نسخة احتياطية قبلها.
+  6. إغلاق #271 وتحديث ملف التقدّم، ثم #272 و#273. كلاهما يحجبه 271 وحده؛ أُرسلهما متوازيين إن لم تتقاطع الملفات.
+- **مراجع الموجزات:**
+  - التذاكر بـ`gh issue view N`، والمواصفة #270، وتعديلها `6532297968` (الانتقال مباشر).
+  - قرارات الحسم في `%TEMP%\wf-acct\spec\*.md`.
+  - البحوث على فروع `research/acct-*` (`git show research/acct-X:docs/research/accounting-office-X.md`).
+  - النموذج المرئي: `.agents/worktrees/prototype/acct-office-screens/prototypes/acct-office-screens/*.html`.
+- **ما زال معلّقاً عند المالك:**
+  - #209 مصباح الحضور.
+  - هل تُنقل المراجعة إلى خط `max`.
+
+## سابقاً — wayfinder: موديول مكتب محاسبة احترافي من الصفر
 
 - **الطلب (2026-10-30):** قالب/موديول «مكتب محاسبة» احترافي **من الصفر** — «لا تركن ولا تبني على الشغل الحالي
   بالمرة». المحاسب طلب: إشعارات للزباين، مواعيد، وإشعارات «باللي عليهم». مسجَّل في `progress.md`.

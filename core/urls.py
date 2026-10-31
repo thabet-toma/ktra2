@@ -157,6 +157,8 @@ urlpatterns = [
     path('api/realestate/', include('realestate.urls')),
     path('api/sales/', include('sales.urls')),
     path('api/accountant/', include('accountant_portal.urls')),
+    # #271: مكتب المحاسبة — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.
+    path('api/accounting-office/', include('accounting_office.urls')),
     # THA-45: وحدة الأجهزة الحساسة — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.
     path('api/devices/', include('device_registry.urls')),
     # THA-24: خدمة ما بعد البيع — كل نقطة خلفها ترد 404 لشركة غير مرخّصة.

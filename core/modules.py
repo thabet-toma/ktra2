@@ -11,6 +11,11 @@ MODULES = {
         "plans": ("Pro", "Enterprise"),
         "legacy_flag": None,
     },
+    "accounting_office": {
+        "label": "مكتب المحاسبة",
+        "plans": ("Pro", "Enterprise"),
+        "legacy_flag": None,
+    },
     "after_sales": {
         "label": "خدمة ما بعد البيع",
         "plans": ("Pro", "Enterprise"),

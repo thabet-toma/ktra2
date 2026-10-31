@@ -1640,7 +1640,9 @@ def platform_company_usage(request, pk):
 
 # `client_book` خارج القائمة: دفتر العميل يولد من مكتب محاسبة (`managed_by`)
 # عبر مساره، لا من لوحة المنصة بلا مكتب.
-_CREATABLE_TEMPLATES = ('general', 'accounting_firm', 'tyres')
+# ISSUE #271: `accounting_office` **داخل** القائمة — مكتبُ محاسبة يُنشئه سوبر
+# أدمن لعميلٍ صار مكتباً حقيقياً بنفسه، لا دفتراً تابعاً لمكتبٍ قائم.
+_CREATABLE_TEMPLATES = ('general', 'accounting_firm', 'tyres', 'accounting_office')
 MAX_TRIAL_DAYS = 90
 
 
