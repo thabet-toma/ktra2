@@ -15,6 +15,7 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.utils.dateparse import parse_date
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import (
@@ -26,14 +27,27 @@ from rest_framework.exceptions import (
 from rest_framework.response import Response
 
 from accounting_office import services
-from accounting_office.models import ClientContact, Contact, OfficeClient
+from accounting_office.models import (
+    ClientContact,
+    ClientService,
+    Contact,
+    OfficeClient,
+    OfficeService,
+    ServicePackage,
+)
 from accounting_office.serializers import (
+    ApplyPackageSerializer,
     ClientContactLinkSerializer,
     ClientContactRowSerializer,
+    ClientServiceFrequencyWriteSerializer,
+    ClientServiceStopSerializer,
+    ClientServiceWriteSerializer,
     ContactSerializer,
     OfficeClientListSerializer,
     OfficeClientSerializer,
+    OfficeServiceSerializer,
     ReminderRecipientSerializer,
+    ServicePackageWriteSerializer,
     SettingValueSerializer,
     TaxCardWriteSerializer,
 )
@@ -71,6 +85,10 @@ class OfficeModuleViewSet(viewsets.GenericViewSet):
     def require_write(self):
         """كلُّ كتابةٍ في الموديول — زبائن، بطاقة، جهات، ربط، مستلِمون، تخصيص."""
         require_perm(self.request, OFFICE_CLIENTS_WRITE_KEY, tenant=self.tenant)
+
+    def require_settings_manage(self):
+        """كتابةُ كتالوج الخدمات والباقات — مفتاحُ الإعدادات لا مفتاحُ الزبائن."""
+        require_perm(self.request, OFFICE_SETTINGS_MANAGE_KEY, tenant=self.tenant)
 
     def reject_amount_writes(self, payload):
         """كتابةُ مبلغٍ بلا `office.amounts.view` ⇒ **403** — لا يكتب ما لا يراه.
@@ -340,6 +358,112 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
             services.set_client_setting(client, key, serializer.validated_data["value"])
         return Response(services.client_setting_row(client, key))
 
+    # ── خدمات الزبون (#273) ─────────────────────────────────────────────
+    #
+    # كلُّ فعلٍ هنا يبدأ بـ`get_object()`: الرؤيةُ أوّلاً (`visible_clients`) فيأخذ
+    # مَن لا يرى الزبون **404** لا 403، ثم مفتاحُ الكتابة فيأخذ القارئُ 403.
+    @action(detail=True, methods=["get", "post"], url_path="services")
+    def client_services(self, request, pk=None):
+        client = self.get_object()
+        if request.method == "POST":
+            self.require_write()
+            serializer = ClientServiceWriteSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            data = serializer.validated_data
+            # الخدمةُ تُحلّ من كتالوج الشركة وحدها — معرّفٌ من مكتبٍ آخر 400 لا 404.
+            service = services.service_or_raise(self.tenant, data["service"])
+            services.add_client_service(
+                client=client,
+                service=service,
+                starts_on=data.get("starts_on"),
+                responsible_from=data.get("responsible_from"),
+                # `null` الواصل يعني «لم يُختَر» فيُقترح — لا دوريةَ بقيمة None.
+                frequency=data.get("frequency") or None,
+                actor=request.user,
+            )
+            return Response(
+                services.client_services_payload(client, user=request.user),
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(services.client_services_payload(client, user=request.user))
+
+    @action(detail=True, methods=["get"], url_path="services/suggest")
+    def client_service_suggest(self, request, pk=None):
+        """`?service=<code>&on=<date>` — الاقتراحُ وسببُه، ولا كتابةَ هنا."""
+        client = self.get_object()
+        code = (request.query_params.get("service") or "").strip()
+        if not code:
+            raise ValidationError({"service": "كود الخدمة مطلوب."})
+        raw_date = (request.query_params.get("on") or "").strip()
+        on_date = None
+        if raw_date:
+            on_date = parse_date(raw_date)
+            if on_date is None:
+                raise ValidationError({"on": "تاريخٌ غير صالح."})
+        service = services.service_by_code(self.tenant, code)
+        return Response(
+            services.suggestion_payload(client, service, on_date=on_date),
+        )
+
+    @action(
+        detail=True, methods=["post"],
+        url_path=r"services/(?P<client_service_id>[0-9]+)/frequency",
+    )
+    def client_service_frequency(self, request, pk=None, client_service_id=None):
+        client = self.get_object()
+        self.require_write()
+        row = self._client_service(client, client_service_id)
+        serializer = ClientServiceFrequencyWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.change_client_service_frequency(
+            row,
+            frequency=serializer.validated_data["frequency"],
+            effective_from=serializer.validated_data["effective_from"],
+            actor=request.user,
+        )
+        return Response(services.client_services_payload(client, user=request.user))
+
+    @action(
+        detail=True, methods=["post"],
+        url_path=r"services/(?P<client_service_id>[0-9]+)/stop",
+    )
+    def client_service_stop(self, request, pk=None, client_service_id=None):
+        client = self.get_object()
+        self.require_write()
+        row = self._client_service(client, client_service_id)
+        serializer = ClientServiceStopSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.stop_client_service(
+            row, ends_on=serializer.validated_data["ends_on"],
+        )
+        return Response(services.client_services_payload(client, user=request.user))
+
+    @action(detail=True, methods=["post"], url_path="apply-package")
+    def apply_package(self, request, pk=None):
+        """تعبئةُ خدمات الزبون من باقة — **نسخٌ لا ربط**، ويُبلَّغ بما تُخطّي."""
+        client = self.get_object()
+        self.require_write()
+        serializer = ApplyPackageSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        package = services.package_or_raise(
+            self.tenant, serializer.validated_data["package"],
+        )
+        return Response(
+            services.apply_package(client, package, actor=request.user),
+        )
+
+    def _client_service(self, client, client_service_id):
+        """صفُّ `ClientService` — **معرّفُ خدمة الزبون** لا معرّفُ الكتالوج."""
+        row = (
+            ClientService.objects
+            .select_related("service", "client")
+            .filter(client=client, pk=client_service_id)
+            .first()
+        )
+        if row is None:
+            raise NotFound("خدمةُ الزبون هذه غير موجودة.")
+        return row
+
 
 class OfficeContactViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     """جهات اتصال المكتب — شخصٌ يملكه المكتب ويُربط بأكثر من زبون."""
@@ -416,3 +540,123 @@ class OfficeSettingsViewSet(OfficeModuleViewSet):
                 self.tenant, key, user=request.user,
             ),
         )
+
+
+class OfficeServiceViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
+    """كتالوج خدمات المكتب — **قراءةٌ لكل عضو، وكتابةٌ بـ`office.settings.manage`**.
+
+    ولا `DELETE`: خدمةٌ استُعملت لا تُحذف أبداً (`ClientService.service` على
+    `PROTECT`) — تُعطَّل فتُخفى من الإضافة ويبقى تاريخُ من اشتراها.
+    """
+
+    serializer_class = OfficeServiceSerializer
+    # `delete` خارج القائمة: الـAPI لا يعرف حذف خدمة، والتعطيلُ هو الفعل.
+    http_method_names = ["get", "post", "put", "patch", "head", "options"]
+
+    def get_queryset(self):
+        return OfficeService.objects.filter(tenant=self.tenant).order_by(
+            "position", "name", "id",
+        )
+
+    def list(self, request, *args, **kwargs):
+        # القائمةُ تُزرع عند أوّل قراءة — فلا مكتبَ بكتالوجٍ فارغ.
+        return Response(services.services_catalog_payload(self.tenant))
+
+    def create(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        serializer = OfficeServiceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        row = services.create_office_service(
+            self.tenant, name=data.get("name", ""), position=data.get("position"),
+        )
+        return Response(
+            OfficeServiceSerializer(row).data, status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        partial = kwargs.pop("partial", False)
+        row = self.get_object()
+        serializer = OfficeServiceSerializer(
+            row, data=request.data, partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.update_office_service(
+            row,
+            name=data.get("name"),
+            is_active=data.get("is_active"),
+            position=data.get("position"),
+        )
+        return Response(OfficeServiceSerializer(row).data)
+
+
+class OfficePackageViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
+    """الباقات الجاهزة — **الحذفُ مباحٌ هنا وحده**: قالبٌ لا تاريخَ زبونٍ فيه.
+
+    قراءةُ الباقة تمرّ بـ`package_payload`: `suggested_price` مبلغ، فيُقنَّع عن
+    عضوٍ بلا `office.amounts.view`، وكتابتُه من دونه 403 (`reject_amount_writes`).
+    """
+
+    serializer_class = ServicePackageWriteSerializer
+
+    def get_queryset(self):
+        return ServicePackage.objects.filter(tenant=self.tenant).prefetch_related(
+            "services",
+        )
+
+    def list(self, request, *args, **kwargs):
+        return Response(services.packages_payload(self.tenant, user=request.user))
+
+    def retrieve(self, request, *args, **kwargs):
+        return Response(
+            services.package_payload(self.get_object(), user=request.user),
+        )
+
+    def create(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        self.reject_amount_writes(data)
+        package = services.create_service_package(
+            self.tenant,
+            name=data.get("name", ""),
+            suggested_price=data.get("suggested_price"),
+            service_ids=data.get("services"),
+        )
+        return Response(
+            services.package_payload(package, user=request.user),
+            status=status.HTTP_201_CREATED,
+        )
+
+    def update(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        partial = kwargs.pop("partial", False)
+        package = self.get_object()
+        serializer = self.get_serializer(
+            data=request.data, partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        self.reject_amount_writes(data)
+        # `suggested_price` تُمرَّر وحدها إن وصلت — `None` الواصلةُ تمسح السعر،
+        # وغيابُها لا يمسّه (`_UNSET`).
+        kwargs = {}
+        if "suggested_price" in data:
+            kwargs["suggested_price"] = data["suggested_price"]
+        services.update_service_package(
+            package,
+            name=data.get("name"),
+            service_ids=data.get("services"),
+            **kwargs,
+        )
+        return Response(
+            services.package_payload(package, user=request.user),
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        services.delete_service_package(self.get_object())
+        return Response(status=status.HTTP_204_NO_CONTENT)

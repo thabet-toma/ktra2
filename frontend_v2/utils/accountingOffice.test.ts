@@ -2,17 +2,25 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AMOUNT_MASK,
+  applyPackageSummary,
+  frequencyAfterSuggestion,
+  availableServicesForClient,
   clientFilePath,
   clientIdFromSearch,
+  clientServiceStatusClass,
   clientStatusBadgeClass,
   customizedSettingCount,
+  firstOfMonth,
+  firstOfNextMonth,
   formatOfficeAmount,
+  frequencyLabelFrom,
   missingFirstRunLabels,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
   showsOfficeAssignment,
   visibleClientSettings,
+  type OfficeServiceRow,
   type SettingRow,
 } from './accountingOffice.ts';
 
@@ -186,4 +194,105 @@ test('الرابط يُبنى ويُقرأ بالدالة نفسها — لا ن
   assert.equal(clientFilePath(9), '/accounting-office/clients?client=9');
   const search = clientFilePath(9).slice('/accounting-office/clients'.length);
   assert.equal(clientIdFromSearch(search), 9);
+});
+
+// ── #273: الخدمات والباقات ──────────────────────────────────────────────
+const SERVICE = (overrides: Partial<OfficeServiceRow> & Pick<OfficeServiceRow, 'id' | 'code'>): OfficeServiceRow => ({
+  name: overrides.code,
+  is_active: true,
+  is_builtin: true,
+  position: 0,
+  ...overrides,
+});
+
+test('«من أيّ فترةٍ المكتب مسؤول» افتراضُها أولُ الشهر الحالي', () => {
+  assert.equal(firstOfMonth('2026-04-17'), '2026-04-01');
+  assert.equal(firstOfMonth('2026-04-01'), '2026-04-01');
+  assert.equal(firstOfMonth('2026-12-31T23:10:00+02:00'), '2026-12-01');
+  // سطرٌ فارغ أو غير مؤرَّخ لا يخترع تاريخاً — الحقلُ يبقى فارغاً.
+  assert.equal(firstOfMonth(''), '');
+  assert.equal(firstOfMonth('غير تاريخ'), '');
+});
+
+test('«سارية من» في تغيير الدورية = أولُ الشهر القادم', () => {
+  assert.equal(firstOfNextMonth('2026-04-17'), '2026-05-01');
+  assert.equal(firstOfNextMonth('2026-04-01'), '2026-05-01');
+  // كانون الأول يعبر السنة — لا `2026-13-01`.
+  assert.equal(firstOfNextMonth('2026-12-31'), '2027-01-01');
+  assert.equal(firstOfNextMonth('2026-12-01T10:00:00'), '2027-01-01');
+  assert.equal(firstOfNextMonth(''), '');
+  assert.equal(firstOfNextMonth('غير تاريخ'), '');
+});
+
+test('منتقي «أضف خدمة» يُخفي المعطَّلة والمضافة نشطةً ويُبقي الموقوفة', () => {
+  const bookkeeping = SERVICE({ id: 1, code: 'bookkeeping', name: 'مسك دفاتر' });
+  const vat = SERVICE({ id: 2, code: 'vat', name: 'قيمة مضافة' });
+  const payroll = SERVICE({ id: 3, code: 'payroll', name: 'رواتب' });
+  const stoppedCatalog = SERVICE({ id: 4, code: 'custom-a', name: 'معطَّلة', is_active: false });
+  const services = [
+    { service: { id: 2 }, is_active: true },
+    { service: { id: 3 }, is_active: false },
+  ];
+  assert.deepEqual(
+    availableServicesForClient([bookkeeping, vat, payroll, stoppedCatalog], services).map((row) => row.code),
+    ['bookkeeping', 'payroll'],
+  );
+  // زبونٌ بلا خدمات: كلُّ المفعّلة متاحة.
+  assert.deepEqual(
+    availableServicesForClient([bookkeeping, vat, stoppedCatalog], []).map((row) => row.code),
+    ['bookkeeping', 'vat'],
+  );
+});
+
+test('شارة حالة خدمة الزبون: النشطة أخضر والموقوفة رماديّ — والنصّ من الخادم', () => {
+  assert.match(clientServiceStatusClass('active'), /emerald/);
+  assert.match(clientServiceStatusClass('stopped'), /slate/);
+});
+
+test('تسميةُ الدورية تُقرأ من اختيارات الخادم وحدها', () => {
+  const choices = [
+    { value: 'monthly', label: 'شهري' },
+    { value: 'bimonthly', label: 'كل شهرين' },
+  ];
+  assert.equal(frequencyLabelFrom(choices, 'bimonthly'), 'كل شهرين');
+  assert.equal(frequencyLabelFrom(choices, ''), '');
+  assert.equal(frequencyLabelFrom(choices, null), '');
+  // قيمةٌ لا يعرفها الخادم تُعرض كما هي — لا تُطوى إلى تسميةٍ كاذبة.
+  assert.equal(frequencyLabelFrom(choices, 'weekly'), 'weekly');
+});
+
+test('المقترحُ الجديد لا يكتب فوق دوريةٍ اختارها الموظف بيده', () => {
+  assert.equal(
+    frequencyAfterSuggestion({ frequency: 'annual', frequencyTouched: true }, 'monthly'),
+    'annual',
+  );
+  assert.equal(
+    frequencyAfterSuggestion({ frequency: 'annual', frequencyTouched: false }, 'monthly'),
+    'monthly',
+  );
+  // بلا مقترحٍ ولم يلمس الموظف شيئاً ⇒ فراغٌ يطلب اختياراً صريحاً.
+  assert.equal(
+    frequencyAfterSuggestion({ frequency: 'annual', frequencyTouched: false }, null),
+    '',
+  );
+});
+
+test('ملخّص تطبيق الباقة يُسمّي ما أُضيف وما تُخطّي بأسماء الخادم', () => {
+  const result = {
+    added: [
+      { service_id: 2, service_name: 'قيمة مضافة', client_service_id: 9, frequency: 'monthly' },
+    ],
+    skipped: [
+      { service_id: 3, service_name: 'رواتب', reason: 'فترةٌ متداخلةٌ عند الزبون — لم تُمسّ دوريتُها' },
+      { service_id: 4, service_name: 'استشارات ومعاملات', reason: 'معطَّلة في كتالوج المكتب' },
+    ],
+  };
+  const summary = applyPackageSummary(result);
+  assert.match(summary, /أُضيفت 1/);
+  assert.match(summary, /قيمة مضافة/);
+  // سببُ التخطّي يصل من الخادم فيظهر بجانب اسم كل خدمةٍ متخطّاة.
+  assert.match(summary, /تُخطّي 2: رواتب \(فترةٌ متداخلةٌ عند الزبون — لم تُمسّ دوريتُها\)/);
+  assert.match(summary, /استشارات ومعاملات \(معطَّلة في كتالوج المكتب\)/);
+  // باقةٌ فارغة لا تقول «أُضيفت 0» بلا سبب — تقول إنها لم تُضف شيئاً.
+  assert.match(applyPackageSummary({ added: [], skipped: [] }), /لم تُضف شيئاً/);
 });

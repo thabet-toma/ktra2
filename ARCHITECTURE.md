@@ -33,9 +33,9 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 | `employee_ops` | متابعة الموظفين: المهامّ والنقاط والتوظيف الآمن (تقديمٌ عام وسيرةٌ محميّة) — **وحدة مرخّصة، معزولة** | 5,700 | 5,500 | `/api/employee-ops/` |
 | `accountant_portal` | بوابة محاسب قانوني خارجي يخدم عدة شركات: ارتباطات، مراجعة، فترات ضريبية — وفوقها **طبقة مكتب** بنطاق `accountant=` لا `tenant=`: زبائن المكتب (ولو لم يكونوا شركات على المنصة) وبرامجه ومواعيده ومستنداته | 5,500 | 4,900 | `/api/accountant/` |
 | `docshare` | مشاركة المستند برابط عام: صفحة **بلا مصادقة** يفتحها الزبون **أو المورّد** (‏HTML خادمي بوسوم Open Graph لمعاينة واتساب) + قبول/رفض عرض السعر منها، وعدّ جردٍ JSON لموظف المستودع (K3). سبعة عشر نوعاً بثلاثة جماهير وثلاثة مفاتيح صلاحية | 4,400 | 3,000 | `/s/` · `/api/share/` · `/api/document-shares/` |
+| `accounting_office` | موديول مكتب المحاسبة الجديد (#271–#272): زبون المكتب وبطاقته الضريبية وجهاته وسجلّ الإعدادات والمحلّل الواحد، **وأدوارُ المكتب الأربعة والموظف المسؤول** (رؤيةٌ ومبالغُ بمصدرٍ واحد خادمي) — **وحدة مرخّصة**، و**خدماتُ المكتب وباقاتُه ودورياتُ الزبون المؤرَّخة** (#273) | 3,700 | 4,000 | `/api/accounting-office/` |
 | `tenants` | تعريف الشركة وعزلها: الأعضاء، الأدوار، الفروع، دفاتر الترقيم، إقلاع شركة جديدة | 3,400 | 3,400 | `/api/tenants/` |
 | `store` | المتجر العام: خمس نقاط قراءة **بلا مصادقة** مُقيَّدة بـ`Tenant.store_slug`، ولوحة إدارته المصادَق عليها (مظهر · صور · حملات · منتجات متجر) | 3,100 | 4,100 | `/api/store/` |
-| `accounting_office` | موديول مكتب المحاسبة الجديد (#271–#272): زبون المكتب وبطاقته الضريبية وجهاته وسجلّ الإعدادات والمحلّل الواحد، **وأدوارُ المكتب الأربعة والموظف المسؤول** (رؤيةٌ ومبالغُ بمصدرٍ واحد خادمي) — **وحدة مرخّصة** | 2,300 | 2,800 | `/api/accounting-office/` |
 | `crm` | نواةُ CRM كترا التسويقيّة: زبائنُ كترا المحتمَلون (محلّات) قبل أن يصيروا شركاتٍ على المنصّة — مفتاحُهم رقمُ الهاتف المطبَّع، حارسُ ملكيةٍ يمنع عمل موظّفين على عميلٍ واحد، سجلُّ تواصلٍ لا يُحذَف، ونقلٌ رسميٌّ بسببٍ مكتوب، وستاتستكسُ كلِّ رقمٍ مجمَّعةٌ في الخادم (تواصلٌ فعليٌّ لا كلُّ صفٍّ في السجلّ). **وحدةٌ داخليّة لموظّفي كترا أنفسِهم لا للشركات** | 1,800 | 2,000 | `/api/platform/crm/` |
 | `partners` | بطاقة الطرف الموحّدة (عميل/مورّد/…) وحساباتها البنكية وربطها بشجرة الحسابات | 1,700 | 1,700 | `/api/partners/` |
 | `import_file` | ملف الاستيراد: قائمة تحقّق مستندات ومهامّ لكل صفقة، ترسو على الصفقة أو على شحنتها — **وحدة مرخّصة، محايدة مالياً بالكامل** | 800 | 1,000 | `/api/import-file/` |
@@ -67,7 +67,7 @@ Frontend: React 19 + TypeScript + Vite في `frontend_v2/` (بلا `src/`).
 
 hr · accountant_portal · after_sales · core  ──►  accounting (+ غيره)
 platform_ops ──► core · tenants · sales · partners · inventory · hr
-accounting_office ──► core · tenants   ← لا شيء يستورده بعد (#271)
+accounting_office ──► core · tenants   ← لا شيء يستورده بعد (#271–#273)
 ```
 
 **`accounting` هو الـgod module**: مستورد مباشرةً من `sales`, `logistics`, `inventory`, `partners`, `hr`, `tenants`, `accountant_portal`, `core`.
@@ -187,7 +187,7 @@ API كاملة (404) لقالب شركة بعينه — طرحيّ لا إضاف
 | صلاحيات | `modules/tenants.md` | `core/access.py` |
 | محاسب خارجي / ارتباطات | `modules/accountant_portal.md` | `accountant_portal/services.py` |
 | مكتب المحاسب: زبائنه وبرامجه ومواعيده | `modules/accountant_portal.md` | `accountant_portal/practice.py` (`list_office_partners`) |
-| موديول مكتب المحاسبة الجديد (#271–#272): زبون المكتب وبطاقته وإعداداته وأدواره ومسؤوله | `modules/accounting_office.md` | `accounting_office/services.py` (`resolve_setting`, `visible_clients`, `visible_contacts`, `mask_amounts`), `accounting_office/settings_registry.py` (`SETTINGS_REGISTRY`), `core/access.py` (`ROLE_DEFAULTS`), `core/activity.py` (`register_document_history_guard`) |
+| موديول مكتب المحاسبة الجديد (#271–#273) — بخدماته وباقاته وخدمات زبائنه: زبون المكتب وبطاقته وإعداداته وأدواره ومسؤوله | `modules/accounting_office.md` | `accounting_office/services.py` (`resolve_setting`, `visible_clients`, `visible_contacts`, `mask_amounts`, `frequency_on`, `suggest_frequency`), `accounting_office/settings_registry.py` (`SETTINGS_REGISTRY`), `core/access.py` (`ROLE_DEFAULTS`), `core/activity.py` (`register_document_history_guard`) |
 | تقارير | `modules/core.md` | `core/reports/` (`run_report`), `core/reports_api.py` |
 | عزل الشركة / حلّ الـtenant | `modules/core.md` + هذا الملف §1 | `core/tenant_utils.py` (`get_tenant`) |
 | صلاحيات / وحدات مرخّصة / كاش | `modules/core.md` | `core/access.py`, `core/modules.py` |

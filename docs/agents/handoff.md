@@ -4,7 +4,74 @@
 **وبطلب المالك (2026-10-22): يُحدَّث بعد كل تذكرة، وبعد كل جولة تصليح، وقبل أي ضغطٍ للسياق** — هو ذاكرة
 المنسّق بعد الـcompact. الإكمال حتى آخر تذكرة بلا توقّف.
 
-**آخر تحديث:** 2026-10-30 23:50 (قبل compact بطلب المالك)
+**آخر تحديث:** 2026-10-31 09:50 (قبل compact بطلب المالك بعد انقطاع الجلسة)
+
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-10-31 09:50)
+
+**الجلسة انقطعت قرابة 05:50 والمنفّذ في منتصف #273، فلا job حيّ الآن** (`job_list` فارغ).
+
+### الحالة الآن
+- **#271 الأساس:** ✅ مُلتزَمة `392d7165`، ومنشورة (الدمج `a239776b` على `modern`)، ومغلقة.
+- **#272 الأدوار:** ✅ نُشرت (الدمج `3004b083`، نسخة `/root/backups/ktra-before-272-20261031-075255.sql`) وأُغلقت.
+- **تحديث 09:57:** المحاولة القديمة عالقة «not finished» بلا job فلا تُصحَّح؛ أُرسل موجز تكملة جديد لـDeepSeek:
+  `attempt-de6b75ef-7421-4b26-8410-b144485c9771` (job `delegation-1`).
+- **تحديث ~11:30:** التكملة سُلّمت وقُرئت كاملاً، ومعها مراجعتا Standards/Spec. **جولة التصليح 1 (DeepSeek max)** جارية:
+  `attempt-45d1e5d3-6d99-4da0-b7f2-accf38fb091e` (job `delegation-4`)، 17 بنداً. أخطرها أن الحالة «موقوفة» تُشتقّ من وجود `ends_on` فتسمح
+  بتداخل الفترات، واختبار قناع `suggested_price` الذي لا يسقط، وبيانات الهجرة غير المحروسة. **الجولة 2 لـSonnet والثالثة لـOpus** (`--effort high`).
+- **تحديث 12:30:** الجولة 1 مستلَمة وفحوصها خضراء عندي: 214 من اختبارات الموديول، وmigrate من صفر `exit=0`، والكاملة 4 بيئية فقط
+  (أثبتُّ أن مخالفيها كلهم `.agents`). **ملاحظة:** `delegation_verify` يقطع الأوامر الطويلة (migrate من صفر والبوّابة الكاملة)
+  ويسجّلها فاشلة بلا مخرَج، فشغّلهما في `pwsh` بالخلفية. المراجعة النهائية وجدت 9 ملاحظات، قُبل منها 8.
+  **الجولة 2 عند Sonnet** (job `pwsh-241`، relay `%TEMP%\wf-acct\relay\273-r2`، والموجز `briefs\273-round2-sonnet.md`).
+- **#273 الخدمات والباقات:** **نصف منجزة، غير مُلتزَمة** في الشجرة. المحاولة `attempt-9b5ef424-c954-44cc-acba-0708cca8cc79`
+  (DeepSeek، الـjob `delegation-34`) انقطعت أثناء الواجهة.
+  - **حسب آخر نشاطه:** الخادم «أخضر»، والاختبارات أولاً، والواجهة بدأها (`utils` والاختبار)، وكان ينتقل إلى `accountingOfficeApi.ts`.
+  - **الملفات المعدَّلة:**
+    - الخادم: `accounting_office/{models,serializers,services,urls,views}.py`، و`tests/test_amounts_guard.py`، و`tests/test_module_gate.py`.
+    - الواجهة: `OfficeClientFile.tsx` و`OfficeSettingsScreen.tsx` و`accountingOfficeApi.ts`، و`utils/accountingOffice.ts` واختباره.
+  - **الجديدة:** `accounting_office/migrations/0003_services_packages_thresholds.py` و`accounting_office/tests/test_services.py`.
+  - **لم تُحدَّث بعد:** الوثائق (`docs/modules/accounting_office.md`، و`CONTEXT.md`، و`CHANGELOG`).
+  - **الموجز كاملاً** في نداء `delegate` بالجلسة (ابحث `تذكرة #273 — مكتب المحاسبة ٣`). قراراته المحسومة:
+    - **الكتالوج:** `OfficeService` (كود، اسم، تفعيل، مضمَّنة، ترتيب)، يُزرع بـ`ensure_default_services` (idempotent) بالأكواد الخمسة
+      `bookkeeping`/`vat`/`payroll`/`annual_accounts`/`consulting`.
+    - **الباقة:** `ServicePackage`، وفيها `suggested_price` مبلغٌ مقنَّع يُسجَّل في `AMOUNT_KEYS`.
+    - **خدمة الزبون:** `ClientService` (`starts_on`/`ends_on`/`responsible_from`، لا حذف) و`ClientServiceFrequency` (`effective_from`،
+      و`frequency_on(day)` = أكبر تاريخ ≤ اليوم).
+    - **السقف:** `TaxThreshold` بيانات منصّة بلا `tenant` (IL `vat_monthly_reporting` 2026=1,775,000 و2027=1,805,000،
+      و`vat_exempt_dealer` 2026=122,833)، وعليه إعفاءٌ معلَن في حارس المبالغ.
+    - **الاقتراح:** `suggest_frequency` (IL: المعفى سنوي، والمرخّص شهري إن تجاوز سقف سنته وإلا كل شهرين، وسنةٌ بلا سقف تأخذ آخر سقفٍ
+      سابق «تقديري»؛ PS: المسجّل شهري، وغير المسجّل `None`؛ الرواتب ومسك الدفاتر شهري، والميزانية سنوي، والاستشارات `on_demand`).
+      والسبب بلا أرقام مبالغ.
+    - **تطبيق الباقة:** نسخ لا ربط.
+    - **الصلاحيات:** كل شيء عبر `visible_clients`؛ الكتابة `office.clients.write`، والكتالوج والباقات `office.settings.manage`.
+
+### الخطوات التالية بالترتيب
+1. **نشر #272** (CI أخضر)، بنفس سكربت #271 (`%TEMP%\wf-acct\deploy-271.sh`، وغيّر اسم النسخة الاحتياطية). يُشغَّل بـ`bash -s` بعد
+   تحويل CRLF إلى LF، وهو يأخذ النسخة الاحتياطية بنفسه. **قبله على الخادم:**
+   - `git fetch`، ثم `git merge origin/newktra`، ثم `git diff origin/newktra --stat` (يجب أن يكون فارغاً).
+   - `pip install`، و`npm install`، و`manage.py check`، و`makemigrations --check`، و`npm run build`.
+   - **فيها هجرتان:** `tenants.0037` (AlterField لخيارات الدور، آمنة) و`accounting_office.0002` (AddField + AddIndex، آمنة).
+     والسكربت يشغّل `migrate accounting_office` وحدها، **فغيّره إلى `migrate` كاملة** لتشمل `tenants.0037`.
+   - ثم أغلق #272 بتعليق، وحدّث `docs/agents/acct-office-build.md`.
+2. **أكمل #273:**
+   - إمّا `delegation_correct` على `attempt-9b5ef424…` إن قبلها، وإمّا موجز تكملة جديد لـDeepSeek: «أكمل الواجهة والوثائق، ثم البوّابات».
+   - اقرأ أولاً ما في الشجرة بنفسك (`git diff`، و`git status`).
+   - ثم الحلقة كاملة: قراءة الفرق، ثم مراجعتا Standards وSpec على خط القراءة، ثم جولات التصليح (الأولى DeepSeek، والثانية Sonnet،
+     والثالثة Opus)، ثم البوّابات بنفسي، ثم commit ونشر وإغلاق.
+3. **بعدها #274** (اللائحة والتقويم، يحجبها 273) ثم البقية بترتيب جدول `acct-office-build.md`.
+
+### قواعد ثابتة (من طلبات المالك)
+- **التصعيد لكل تذكرة:**
+  - التنفيذ والجولة الأولى: DeepSeek على خط التنفيذ بجهد **max** (`delegation_correct`). **`--effort high` لـSonnet/Opus وحدهما.**
+  - الثانية: **Sonnet 5.5**، والثالثة: **Opus 5.5**، كلاهما عبر `/claude-delegate`:
+    `node C:\Users\asus\.agents\skills\claude-delegate\scripts\relay.mjs --brief <ملف> --cd D:\Users\asus\Desktop\ktra --model sonnet|opus --effort high --timeout 1h30m --out-dir %TEMP%\wf-acct\relay\<id>`.
+    شغّله بالخلفية، وتحقّق من `effort=high` في `result.json`.
+  - الموجزات في `%TEMP%\wf-acct\briefs\`.
+- **`claude` مسجَّل الدخول الآن.** إن ظهر «OAuth expired» فاطلب من المالك `/login`.
+- **`lint-imports`:** `C:\Users\asus\AppData\Roaming\Python\Python313\Scripts\lint-imports.exe`.
+- **البوّابة الكاملة محلياً تُسقط 4 حرّاس بيئياً** يمسحون `.agents/worktrees/`. أثبتُّ أنها بيئية: لا مخالِف خارج `.agents`. وCI
+  أخضر هو الحكم.
+- **migrate من صفر:** `$env:KTRA_MIGRATIONS_DB=<temp>.sqlite3; python manage.py migrate --settings=core.test_settings`.
+  الاختبارات بـ`--nomigrations` لا ترى ترتيب الهجرات.
 
 ## الآن بالضبط — بناء موديول مكتب المحاسبة (#271–#291)
 

@@ -1,7 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
+  addClientService,
+  applyServicePackage,
   assignOfficeClient,
+  changeClientServiceFrequency,
   createContact,
   deleteContact,
   endOfficeClient,
@@ -9,35 +12,51 @@ import {
   getOfficeClient,
   linkClientContact,
   listClientContacts,
+  listClientServices,
   listContacts,
   listOfficeMembers,
+  listOfficeServices,
   listReminderRecipients,
+  listServicePackages,
   promoteClientContact,
   reactivateOfficeClient,
   resetClientSetting,
   setClientSetting,
   setReminderRecipient,
+  stopClientService,
+  suggestClientService,
   unlinkClientContact,
   updateContact,
   updateOfficeClient,
   updateTaxCard,
   type ClientContactRow,
+  type ClientServicesPayload,
   type ContactRow,
   type OfficeClientRow,
   type OfficeMemberRow,
+  type OfficeServiceRow,
   type ReminderRecipientRow,
+  type ServicePackageRow,
+  type ServiceSuggestion,
   type SettingRow,
   type TaxCard,
 } from '../../services/accountingOfficeApi';
 import {
   AMOUNT_MASK,
+  applyPackageSummary,
+  frequencyAfterSuggestion,
+  availableServicesForClient,
+  clientServiceStatusClass,
   clientStatusBadgeClass,
   customizedSettingCount,
+  firstOfMonth,
+  firstOfNextMonth,
   formatOfficeAmount,
+  frequencyLabelFrom,
   showsOfficeAssignment,
   visibleClientSettings,
 } from '../../utils/accountingOffice';
-import { formatDateValue } from '../../utils/formatDate';
+import { formatDateValue, todayIso } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
@@ -45,6 +64,7 @@ import { useToast } from '../../contexts/ToastContext';
 import { SettingControl } from './SettingControl';
 import {
   OfficeCard,
+  OfficeEmpty,
   OfficeError,
   OfficeSkeleton,
   officeInputClass,
@@ -52,13 +72,32 @@ import {
   officeSecondaryButtonClass,
 } from './OfficeUi';
 
-type TabKey = 'tax-card' | 'contacts' | 'notes';
+type TabKey = 'tax-card' | 'services' | 'contacts' | 'notes';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'tax-card', label: 'البطاقة الضريبية' },
+  { key: 'services', label: 'الخدمات' },
   { key: 'contacts', label: 'جهات الاتصال' },
   { key: 'notes', label: 'ملاحظات' },
 ];
+
+/** مسوّدةُ «أضف خدمة» — التواريخُ افتراضاتٌ يراها الموظف قبل الحفظ.
+ *
+ * `responsible_from` **شهرٌ** (`YYYY-MM`) لأن الحقل `input[type=month]`: المكتبُ
+ * مسؤولٌ عن فترةٍ كاملة، والخدمةُ تُرسَل `YYYY-MM-01`.
+ */
+interface AddServiceDraft {
+  service: string;
+  starts_on: string;
+  responsible_from: string;
+  frequency: string;
+  /** `true` حين غيّر الموظفُ الدوريةَ من القائمة بيده — فلا يكتب المقترحُ فوقها. */
+  frequencyTouched: boolean;
+}
+
+const EMPTY_ADD_DRAFT: AddServiceDraft = {
+  service: '', starts_on: '', responsible_from: '', frequency: '', frequencyTouched: false,
+};
 
 const EMPTY_CARD: TaxCard = {
   id: 0,
@@ -129,6 +168,22 @@ export const OfficeClientFile: React.FC<{
   const [assigning, setAssigning] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // ── تبويب «الخدمات» (#273) ─────────────────────────────────────────────
+  const [clientServices, setClientServices] = useState<ClientServicesPayload | null>(null);
+  const [catalog, setCatalog] = useState<OfficeServiceRow[]>([]);
+  const [packages, setPackages] = useState<ServicePackageRow[]>([]);
+  const [servicesError, setServicesError] = useState('');
+  const [addDraft, setAddDraft] = useState<AddServiceDraft | null>(null);
+  const [suggestion, setSuggestion] = useState<ServiceSuggestion | null>(null);
+  const [suggesting, setSuggesting] = useState(false);
+  const [editingFrequency, setEditingFrequency] = useState<number | null>(null);
+  const [frequencyDraft, setFrequencyDraft] = useState({ frequency: '', effective_from: '' });
+  const [stopping, setStopping] = useState<number | null>(null);
+  const [stopDate, setStopDate] = useState('');
+  const [packageChoice, setPackageChoice] = useState('');
+  // عدّادُ طلبات الاقتراح: يمنع ردَّ اختيارٍ قديم أن يكتب فوق أحدث منه.
+  const suggestionSeq = useRef(0);
 
   // `onMissing` تصل دالّةً جديدة مع كل رسمٍ للأب. لو دخلت في تبعيّات `load`
   // لأُعيد التحميل مع كل رسم، فتُمسح تعديلاتُ البطاقة والملاحظات غير المحفوظة.
@@ -514,6 +569,166 @@ export const OfficeClientFile: React.FC<{
     }
   };
 
+  // ── الخدمات والباقات (#273) ────────────────────────────────────────────
+  //
+  // التبويبُ يجلب حالته عند فتحه: الكتالوج والباقات لا لازمة لهما في البطاقة
+  // والملاحظات، وطلبُهما مع كل فتح ملفّ يجعل الشاشة أثقل بلا مقابل.
+  const refreshClientServices = useCallback(async (alive?: () => boolean) => {
+    setServicesError('');
+    try {
+      const payload = await listClientServices(clientId);
+      // إلغاءُ التبويب: ردٌّ وصل بعد خروجه لا يكتب فوق حالةٍ أحدث.
+      if (alive && !alive()) return;
+      setClientServices(payload);
+    } catch (failure) {
+      if (alive && !alive()) return;
+      setServicesError(humanizeThrown(failure, 'تعذّر تحميل خدمات الزبون.'));
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (tab !== 'services') return;
+    let cancelled = false;
+    const alive = () => !cancelled;
+    refreshClientServices(alive);
+    Promise.all([listOfficeServices(), listServicePackages()])
+      .then(([catalogRows, packageRows]) => {
+        if (cancelled) return;
+        setCatalog(catalogRows);
+        setPackages(packageRows);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          toast(humanizeThrown(failure, 'تعذّر تحميل كتالوج الخدمات.'), 'error');
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, refreshClientServices, toast]);
+
+  /** الاقتراحُ يُطلب عند اختيار الخدمة أو تغيير تاريخ البدء — ثم يؤكّده الموظف. */
+  const loadSuggestion = useCallback(
+    async (serviceId: string, startsOn: string) => {
+      const chosen = catalog.find((row) => String(row.id) === serviceId);
+      if (!chosen) {
+        setSuggestion(null);
+        return;
+      }
+      // عدّادُ طلبات: اختيارٌ سريعٌ لخدمتين لا يجعل ردَّ الأولى يكتب فوق الثانية.
+      const seq = ++suggestionSeq.current;
+      setSuggesting(true);
+      try {
+        const payload = await suggestClientService(clientId, chosen.code, startsOn || undefined);
+        if (seq !== suggestionSeq.current) return;
+        setSuggestion(payload);
+        setAddDraft((prev) =>
+          prev
+            ? { ...prev, frequency: frequencyAfterSuggestion(prev, payload.frequency) }
+            : prev,
+        );
+      } catch (failure) {
+        if (seq !== suggestionSeq.current) return;
+        setSuggestion(null);
+        toast(humanizeThrown(failure, 'تعذّر اقتراح الدورية.'), 'error');
+      } finally {
+        if (seq === suggestionSeq.current) setSuggesting(false);
+      }
+    },
+    [catalog, clientId, toast],
+  );
+
+  const openAddService = () => {
+    const today = todayIso();
+    setAddDraft({
+      ...EMPTY_ADD_DRAFT,
+      starts_on: today,
+      // الحقلُ شهرٌ (`input[type=month]`) والخدمةُ تُرسَل أولَ الشهر.
+      responsible_from: firstOfMonth(today).slice(0, 7),
+    });
+    setSuggestion(null);
+  };
+
+  const submitAddService = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!addDraft || !addDraft.service) return;
+    try {
+      setClientServices(await addClientService(clientId, {
+        service: Number(addDraft.service),
+        starts_on: addDraft.starts_on || undefined,
+        responsible_from: addDraft.responsible_from
+          ? `${addDraft.responsible_from}-01`
+          : undefined,
+        // فارغةٌ ⇒ `null`: الخادم يستعمل المقترحَ من البطاقة، ويرفض 400 إن لم يوجد مقترح.
+        frequency: addDraft.frequency || null,
+      }));
+      setAddDraft(null);
+      setSuggestion(null);
+      toast('أُضيفت الخدمة بدوريتها', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر إضافة الخدمة.'), 'error');
+    }
+  };
+
+  const startFrequencyChange = (row: { id: number; frequency: string | null }) => {
+    setEditingFrequency(row.id);
+    setStopping(null);
+    setFrequencyDraft({
+      frequency: row.frequency ?? '',
+      // الشهرُ القادم: اليومُ قد يكون تاريخَ سريانٍ مسجَّلاً فيرفضه الخادم.
+      effective_from: firstOfNextMonth(todayIso()),
+    });
+  };
+
+  const submitFrequencyChange = async (rowId: number) => {
+    if (!frequencyDraft.frequency || !frequencyDraft.effective_from) return;
+    try {
+      setClientServices(await changeClientServiceFrequency(clientId, rowId, frequencyDraft));
+      setEditingFrequency(null);
+      toast('حُفظت الدورية الجديدة من تاريخ سريانها', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تغيير الدورية.'), 'error');
+    }
+  };
+
+  const startStop = (rowId: number) => {
+    setStopping(rowId);
+    setEditingFrequency(null);
+    setStopDate(todayIso());
+  };
+
+  const submitStop = async (row: { id: number; service: { name: string } }) => {
+    if (!stopDate) return;
+    const ok = await confirm({
+      title: 'إيقاف الخدمة',
+      message:
+        `تتوقّف «${row.service.name}» بتاريخ ${formatDateValue(stopDate)}، ويبقى تاريخها كاملاً — لا يُحذف شيء.`,
+      confirmText: 'أوقف الخدمة',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      setClientServices(await stopClientService(clientId, row.id, stopDate));
+      setStopping(null);
+      toast('أُوقفت الخدمة وبقي تاريخها', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر إيقاف الخدمة.'), 'error');
+    }
+  };
+
+  const applyPackage = async () => {
+    if (!packageChoice) return;
+    try {
+      const result = await applyServicePackage(clientId, Number(packageChoice));
+      // باقةٌ لم تُضف شيئاً خبرٌ لا خطأ — «error» كان يلوّن رسالةً صحيحة بالأحمر.
+      toast(applyPackageSummary(result), result.added.length ? 'success' : 'info');
+      setPackageChoice('');
+      await refreshClientServices();
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تطبيق الباقة.'), 'error');
+    }
+  };
+
   if (loading && !client) return <OfficeSkeleton />;
   if (error) return <OfficeError message={error} onRetry={load} />;
   if (!client) return null;
@@ -790,6 +1005,340 @@ export const OfficeClientFile: React.FC<{
               </div>
             ))}
           </OfficeCard>
+        </div>
+      ) : null}
+
+      {tab === 'services' ? (
+        <div className="space-y-4">
+          <OfficeCard
+            title="خدمات الزبون"
+            actions={
+              canWrite ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={openAddService}
+                    className={officeSecondaryButtonClass}
+                  >
+                    أضف خدمة
+                  </button>
+                  {packages.length > 0 ? (
+                    <>
+                      <select
+                        value={packageChoice}
+                        onChange={(event) => setPackageChoice(event.target.value)}
+                        aria-label="باقة جاهزة"
+                        className={`${officeInputClass} h-8`}
+                      >
+                        <option value="">— باقة جاهزة —</option>
+                        {packages.map((row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.name}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        type="button"
+                        disabled={!packageChoice}
+                        onClick={applyPackage}
+                        className={officeSecondaryButtonClass}
+                      >
+                        طبّق باقة
+                      </button>
+                    </>
+                  ) : null}
+                </div>
+              ) : undefined
+            }
+          >
+            {servicesError ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <p role="alert" className="text-[12px] font-medium text-rose-700 dark:text-rose-300">
+                  {servicesError}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => refreshClientServices()}
+                  className={officeSecondaryButtonClass}
+                >
+                  أعد المحاولة
+                </button>
+              </div>
+            ) : clientServices === null ? (
+              <p className="text-[12px] text-slate-500 dark:text-slate-400">
+                جارٍ التحميل…
+              </p>
+            ) : clientServices.services.length === 0 ? (
+              <OfficeEmpty
+                title="لا خدمةَ لهذا الزبون بعد"
+                hint="أضِف خدمةً من الكتالوج، أو طبّق باقةً جاهزة ثم عدّلها."
+              />
+            ) : (
+              <ul className="divide-y divide-slate-100 dark:divide-slate-800">
+                {clientServices.services.map((row) => (
+                  <li key={row.id} className="py-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-100">
+                        {row.service.name}
+                      </span>
+                      <span
+                        className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${clientServiceStatusClass(row.status)}`}
+                      >
+                        {row.status_label}
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        من {formatDateValue(row.starts_on)}
+                        {row.ends_on
+                          ? ` إلى ${formatDateValue(row.ends_on)}`
+                          : ' — حتى الآن'}
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        المكتب مسؤول من {formatDateValue(row.responsible_from)}
+                      </span>
+                      {row.frequency ? (
+                        <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10.5px] font-medium text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {row.frequency_label} من {formatDateValue(row.frequency_from)}
+                        </span>
+                      ) : null}
+                      {canWrite && row.is_active ? (
+                        <div className="ms-auto flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startFrequencyChange(row)}
+                            className="text-[10.5px] font-medium text-teal-700 hover:underline dark:text-teal-400"
+                          >
+                            غيّر الدورية من…
+                          </button>
+                          {/* صفٌّ له `ends_on` (ولو مستقبليّ) موقوفٌ مُسبقاً: لا إيقافَ ثانٍ. */}
+                          {row.ends_on ? null : (
+                            <button
+                              type="button"
+                              onClick={() => startStop(row.id)}
+                              className="text-[10.5px] font-medium text-rose-600 hover:underline dark:text-rose-400"
+                            >
+                              أوقف بتاريخ…
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                    </div>
+
+                    {row.frequencies.length > 1 ? (
+                      <details className="mt-1.5">
+                        <summary className="cursor-pointer text-[10.5px] text-slate-500 dark:text-slate-400">
+                          تاريخ الدوريات ({row.frequencies.length})
+                        </summary>
+                        <ul className="mt-1 space-y-0.5">
+                          {row.frequencies.map((entry) => (
+                            <li
+                              key={entry.id}
+                              className="text-[10.5px] text-slate-500 dark:text-slate-400"
+                            >
+                              من {formatDateValue(entry.effective_from)} — {entry.frequency_label}
+                              {entry.suggested && entry.suggested !== entry.frequency
+                                ? ` (المقترح وقتها: ${frequencyLabelFrom(
+                                    clientServices.frequency_choices,
+                                    entry.suggested,
+                                  )})`
+                                : ''}
+                            </li>
+                          ))}
+                        </ul>
+                      </details>
+                    ) : null}
+
+                    {editingFrequency === row.id ? (
+                      <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/40">
+                        <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          الدورية الجديدة
+                          <select
+                            value={frequencyDraft.frequency}
+                            onChange={(event) =>
+                              setFrequencyDraft({
+                                ...frequencyDraft, frequency: event.target.value,
+                              })
+                            }
+                            className={`${officeInputClass} mt-1 block`}
+                          >
+                            <option value="">— اختر —</option>
+                            {clientServices.frequency_choices.map((choice) => (
+                              <option key={choice.value} value={choice.value}>
+                                {choice.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                        <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          سارية من
+                          <input
+                            type="date"
+                            value={frequencyDraft.effective_from}
+                            onChange={(event) =>
+                              setFrequencyDraft({
+                                ...frequencyDraft, effective_from: event.target.value,
+                              })
+                            }
+                            className={`${officeInputClass} mt-1 block tabular-nums`}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => submitFrequencyChange(row.id)}
+                          className={officePrimaryButtonClass}
+                        >
+                          احفظ
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setEditingFrequency(null)}
+                          className={officeSecondaryButtonClass}
+                        >
+                          إلغاء
+                        </button>
+                        <p className="w-full text-[10.5px] text-slate-500 dark:text-slate-400">
+                          ما قبل هذا التاريخ يبقى بدوريته — التغييرُ يسري من تاريخٍ ولقدّام.
+                        </p>
+                      </div>
+                    ) : null}
+
+                    {stopping === row.id ? (
+                      <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800/40">
+                        <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          أوقف بتاريخ
+                          <input
+                            type="date"
+                            value={stopDate}
+                            onChange={(event) => setStopDate(event.target.value)}
+                            className={`${officeInputClass} mt-1 block tabular-nums`}
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => submitStop(row)}
+                          className="rounded-lg border border-rose-200 bg-white px-3 py-2 text-[12px] font-medium text-rose-700 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300"
+                        >
+                          أوقف الخدمة
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setStopping(null)}
+                          className={officeSecondaryButtonClass}
+                        >
+                          إلغاء
+                        </button>
+                      </div>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </OfficeCard>
+
+          {canWrite && addDraft ? (
+            <OfficeCard title="أضف خدمة">
+              <form onSubmit={submitAddService} className="space-y-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                    الخدمة
+                    <select
+                      value={addDraft.service}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        // خدمةٌ أخرى ⇒ مقترحٌ آخر، فيعود اختيارُ الموظف لمقترحها.
+                        setAddDraft({ ...addDraft, service: value, frequencyTouched: false });
+                        loadSuggestion(value, addDraft.starts_on);
+                      }}
+                      required
+                      className={`${officeInputClass} mt-1 block w-full`}
+                    >
+                      <option value="">— اختر خدمة —</option>
+                      {availableServicesForClient(catalog, clientServices?.services ?? []).map(
+                        (row) => (
+                          <option key={row.id} value={row.id}>
+                            {row.name}
+                          </option>
+                        ),
+                      )}
+                    </select>
+                  </label>
+                  <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                    تبدأ في
+                    <input
+                      type="date"
+                      value={addDraft.starts_on}
+                      onChange={(event) => {
+                        const value = event.target.value;
+                        setAddDraft({ ...addDraft, starts_on: value });
+                        if (addDraft.service) loadSuggestion(addDraft.service, value);
+                      }}
+                      className={`${officeInputClass} mt-1 block w-full tabular-nums`}
+                    />
+                  </label>
+                  <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                    من أيّ فترةٍ المكتب مسؤول؟
+                    <input
+                      type="month"
+                      value={addDraft.responsible_from}
+                      onChange={(event) =>
+                        setAddDraft({ ...addDraft, responsible_from: event.target.value })
+                      }
+                      className={`${officeInputClass} mt-1 block w-full tabular-nums`}
+                    />
+                  </label>
+                  <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                    الدورية
+                    <select
+                      value={addDraft.frequency}
+                      onChange={(event) =>
+                        setAddDraft({
+                          ...addDraft, frequency: event.target.value, frequencyTouched: true,
+                        })
+                      }
+                      className={`${officeInputClass} mt-1 block w-full`}
+                    >
+                      <option value="">— اختر —</option>
+                      {(suggestion?.frequency_choices
+                        ?? clientServices?.frequency_choices
+                        ?? []
+                      ).map((choice) => (
+                        <option key={choice.value} value={choice.value}>
+                          {choice.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                </div>
+
+                {suggesting ? (
+                  <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                    جارٍ اقتراح الدورية…
+                  </p>
+                ) : suggestion ? (
+                  <p className="rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-[11.5px] text-teal-900 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-200">
+                    {suggestion.frequency
+                      ? `المقترح: ${suggestion.frequency_label} — ${suggestion.reason}`
+                      : `لا اقتراحَ تلقائياً — ${suggestion.reason}. اختر الدورية بنفسك.`}
+                  </p>
+                ) : null}
+
+                <div className="flex items-center gap-2">
+                  <button type="submit" className={officePrimaryButtonClass}>
+                    أضف الخدمة
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddDraft(null);
+                      setSuggestion(null);
+                    }}
+                    className={officeSecondaryButtonClass}
+                  >
+                    إلغاء
+                  </button>
+                </div>
+              </form>
+            </OfficeCard>
+          ) : null}
         </div>
       ) : null}
 

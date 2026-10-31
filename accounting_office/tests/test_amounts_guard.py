@@ -38,9 +38,13 @@ from tenants.services import create_company
 
 APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 
-#: حقولُ مبلغٍ في النماذج معفاةٌ من الحارس **بسببٍ مكتوب** — لا شيء الآن: كلُّ
-#: مبلغٍ في الموديول يمرّ بالقناع. إعفاءٌ بلا سببٍ يفتح باباً بلا حرس.
-MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset()
+#: حقولُ مبلغٍ في النماذج معفاةٌ من الحارس **بسببٍ مكتوب** — بمفتاحٍ مؤهَّل
+#: `النموذج.الحقل` كي لا يُعفى أيُّ حقلٍ آخر يُسمّى `amount` في الموديول.
+#:
+#: `TaxThreshold.amount` (#273): سقفٌ ضريبيّ **منشور** في `source_url` — بياناتُ
+#: منصّةٍ واحدةٌ لكل المكاتب (بلا `tenant`)، وليس مبلغَ زبونٍ فيمرّ بالقناع. ولو
+#: قُنِّع لاختفى أساسُ الاقتراح من كل شاشة، وهو رقمٌ عامٌّ في التشريع لا سرّ عميل.
+MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({"TaxThreshold.amount"})
 
 
 def declared_amount_fields(source: str) -> list[str]:
@@ -54,9 +58,9 @@ def unregistered_amount_fields(source: str, registered) -> list[str]:
 
 
 def model_amount_fields(models) -> list[str]:
-    """أسماءُ حقول `DecimalField` في مجموعة نماذج — نواةُ مسح النماذج."""
+    """حقولُ `DecimalField` في مجموعة نماذج — مؤهَّلةً بـ`النموذج.الحقل`."""
     return sorted(
-        field.name
+        f"{getattr(model, '__name__', type(model).__name__)}.{field.name}"
         for model in models
         for field in model._meta.get_fields()
         if isinstance(field, django_models.DecimalField)
@@ -64,11 +68,15 @@ def model_amount_fields(models) -> list[str]:
 
 
 def unregistered_model_amount_fields(registered, exemptions=MODEL_AMOUNT_EXEMPTIONS) -> list[str]:
-    """حقولُ المبالغ في نماذج الموديول غير المسجَّلة — أيُّها يُسقِط الحارس."""
+    """حقولُ المبالغ في نماذج الموديول غير المسجَّلة — أيُّها يُسقِط الحارس.
+
+    المقارنةُ **باسم النموذج والحقل معاً** للإعفاء، وباسم الحقل وحده للثابت
+    (`AMOUNT_KEYS` مفاتيحُ حمولةٍ لا مساراتُ نماذج).
+    """
     configured = apps.get_app_config("accounting_office")
     return [
         name for name in model_amount_fields(configured.get_models())
-        if name not in registered and name not in exemptions
+        if name.split(".")[-1] not in registered and name not in exemptions
     ]
 
 
@@ -82,6 +90,9 @@ def fake_amount_model(field_name: str):
             return self._fields
 
     class _FakeModel:
+        # اسمُ نموذجٍ صريحٌ كي يُقارَن مفتاحُ الإعفاء المؤهَّل (`FakeModel.service_fee`).
+        __name__ = "FakeModel"
+
         def __init__(self, fields):
             self._meta = _FakeMeta(fields)
 
@@ -123,7 +134,7 @@ class AmountKeysGuardTest(SimpleTestCase):
         """أي تغييرٍ في الثابت يجب أن يُرى هنا — وإلا كان المسح زينة."""
         self.assertEqual(
             declared_amount_fields((APP_DIR / "serializers.py").read_text(encoding="utf-8")),
-            ["annual_sales"],
+            ["annual_sales", "suggested_price"],
         )
         self.assertEqual(
             unregistered_amount_fields(
@@ -157,19 +168,34 @@ class ModelAmountGuardTest(SimpleTestCase):
 
     def test_the_model_scan_finds_the_known_amounts(self):
         """أضيقُ من التسجيل: يُثبت أن المسح يقرأ النماذج فعلاً لا قائمةً فارغة."""
-        self.assertEqual(model_amount_fields(apps.get_app_config("accounting_office").get_models()), ["annual_sales"])
+        self.assertEqual(
+            model_amount_fields(apps.get_app_config("accounting_office").get_models()),
+            [
+                "ServicePackage.suggested_price",
+                "TaxCard.annual_sales",
+                "TaxThreshold.amount",
+            ],
+        )
 
     def test_the_guard_falls_on_a_synthetic_model(self):
         """لو صار مسحُ النماذج أعمى (نمطٌ خاطئ أو قائمةٌ فارغة) يسقط هذا الاختبار."""
         with mock.patch("django.apps.apps.get_app_config") as get_config:
             get_config.return_value.get_models.return_value = [fake_amount_model("service_fee")]
             self.assertEqual(
-                unregistered_model_amount_fields(services.AMOUNT_KEYS), ["service_fee"],
+                unregistered_model_amount_fields(services.AMOUNT_KEYS),
+                ["FakeModel.service_fee"],
             )
         # ومبلغٌ مسجَّلٌ لا يُسقطه — وإلا كان الإعفاءُ العامَّ هو الحارس.
         with mock.patch("django.apps.apps.get_app_config") as get_config:
             get_config.return_value.get_models.return_value = [fake_amount_model("annual_sales")]
             self.assertEqual(unregistered_model_amount_fields(services.AMOUNT_KEYS), [])
+        # وإعفاءٌ مؤهَّلٌ لا يُعفى به حقلٌ آخر بالاسم نفسه في نموذجٍ آخر.
+        with mock.patch("django.apps.apps.get_app_config") as get_config:
+            get_config.return_value.get_models.return_value = [fake_amount_model("amount")]
+            self.assertEqual(
+                unregistered_model_amount_fields(services.AMOUNT_KEYS),
+                ["FakeModel.amount"],
+            )
 
 
 class AmountPayloadGuardTest(TestCase):

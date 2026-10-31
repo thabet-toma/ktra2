@@ -55,6 +55,7 @@ class AccountingOfficeLicenceGateTest(APITestCase):
         def concretize(route: str) -> str:
             route = re.sub(r"\(\?P<pk>[^)]*\)", "1", route)
             route = re.sub(r"\(\?P<contact_id>[^)]*\)", "1", route)
+            route = re.sub(r"\(\?P<client_service_id>[^)]*\)", "1", route)
             route = re.sub(r"\(\?P<key>[^)]*\)", "tax_system", route)
             route = re.sub(r"<[^>]*pk>", "1", route)
             route = re.sub(r"<[^>]+>", "x", route)

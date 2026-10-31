@@ -11,7 +11,13 @@
 from rest_framework import serializers
 
 from accounting_office import services
-from accounting_office.models import ClientReminderRecipient, Contact, OfficeClient
+from accounting_office.models import (
+    CLIENT_SERVICE_FREQUENCY_CHOICES,
+    ClientReminderRecipient,
+    Contact,
+    OfficeClient,
+    OfficeService,
+)
 
 
 class TaxCardWriteSerializer(serializers.Serializer):
@@ -181,3 +187,54 @@ class SettingValueSerializer(serializers.Serializer):
     """قيمة إعدادٍ كما تصل — نوعُها ومُتحقِّقُها في السجلّ، لا هنا."""
 
     value = serializers.JSONField()
+
+
+# ── الخدمات والباقات وخدمات الزبون (#273) ────────────────────────────────────
+class OfficeServiceSerializer(serializers.ModelSerializer):
+    """سطرُ كتالوج — **`code` و`is_builtin` للقراءة وحدها**: الكودُ عقدُ الاقتراح."""
+
+    class Meta:
+        model = OfficeService
+        fields = ["id", "code", "name", "is_active", "is_builtin", "position"]
+        read_only_fields = ["id", "code", "is_builtin"]
+
+
+class ServicePackageWriteSerializer(serializers.Serializer):
+    """باقةٌ كما تصل — **`suggested_price` مبلغ** يُفحص بالقناع في الـview."""
+
+    name = serializers.CharField(max_length=200, required=False, allow_blank=True)
+    suggested_price = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True, min_value=0,
+    )
+    #: معرّفاتُ خدمات الكتالوج — تُتحقَّق شركتُها في الخدمة، لا في الاستعلام هنا.
+    services = serializers.ListField(
+        child=serializers.IntegerField(min_value=1), required=False,
+    )
+
+
+class ClientServiceWriteSerializer(serializers.Serializer):
+    """إضافةُ خدمةٍ لزبون — والدوريةُ تُترك فارغةً ليُقترح ويُؤكَّد."""
+
+    service = serializers.IntegerField(min_value=1)
+    starts_on = serializers.DateField(required=False)
+    responsible_from = serializers.DateField(required=False)
+    frequency = serializers.ChoiceField(
+        choices=CLIENT_SERVICE_FREQUENCY_CHOICES, required=False, allow_null=True,
+    )
+
+
+class ClientServiceFrequencyWriteSerializer(serializers.Serializer):
+    """تغييرُ الدورية **من تاريخ** — والتاريخُ المكرَّر يُستبدل أو يُرفض في الخدمة."""
+
+    frequency = serializers.ChoiceField(choices=CLIENT_SERVICE_FREQUENCY_CHOICES)
+    effective_from = serializers.DateField()
+
+
+class ClientServiceStopSerializer(serializers.Serializer):
+    """إيقافُ خدمةٍ بتاريخ — الصفُّ يبقى، و`ends_on` يُكتب."""
+
+    ends_on = serializers.DateField()
+
+
+class ApplyPackageSerializer(serializers.Serializer):
+    package = serializers.IntegerField(min_value=1)

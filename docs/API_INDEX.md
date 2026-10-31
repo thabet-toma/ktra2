@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1002**
+عدد النقاط: **1011**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -67,6 +67,7 @@
 | `/api/accountant/workspace/companies/` | `WorkspaceCompaniesView` | `accountant_portal/views.py` |
 | `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/apply-package/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/assign/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -74,11 +75,19 @@
 | `/api/accounting-office/clients/{pk}/end/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reactivate/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reminders/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/services/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/services/suggest/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/services/{client_service_id}/frequency/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/services/{client_service_id}/stop/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/settings/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/settings/{key}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/tax-card/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/packages/` | `OfficePackageViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/packages/{pk}/` | `OfficePackageViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/services/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/services/{pk}/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/{key}/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/{key}/clients/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |

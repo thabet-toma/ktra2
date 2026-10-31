@@ -168,6 +168,178 @@ export function officeRoleLabel(role: string, serverLabel: string): string {
   return role === OFFICE_OWNER_ROLE ? OFFICE_OWNER_ROLE_LABEL : serverLabel;
 }
 
+// ── الخدمات والباقات (#273) ─────────────────────────────────────────────
+//
+// **ولا تسميةَ دوريةٍ هنا**: أسماءُ الدوريات وحالاتِ الخدمة تصل من الخادم
+// (`frequency_label` · `status_label` · `frequency_choices`)، والثواني في هذا
+// الملفّ منطقٌ لا نصوص: أولُ الشهر، وما يتاح لمنتقي الإضافة، وملخّصُ الباقة.
+
+/** سطرُ كتالوج خدمة — كما يعيده الخادم. */
+export interface OfficeServiceRow {
+  id: number;
+  code: string;
+  name: string;
+  is_active: boolean;
+  is_builtin: boolean;
+  position: number;
+}
+
+/** باقةٌ جاهزة — `suggested_price` نصٌّ عشريّ أو `null` بلا رؤية مبالغ. */
+export interface ServicePackageRow {
+  id: number;
+  name: string;
+  suggested_price: string | null;
+  services: OfficeServiceRow[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** صفُّ دوريةٍ مؤرَّخ — تاريخٌ لكل تغيير، ولا يُعدَّل ما قبله. */
+export interface ClientServiceFrequencyRow {
+  id: number;
+  frequency: string;
+  frequency_label: string;
+  effective_from: string;
+  suggested: string | null;
+  created_by_name: string;
+  created_at: string;
+}
+
+/** خدمةُ زبون: تواريخُها وحالتُها ودوريتُها اليوم وتاريخُ دورياتها. */
+export interface ClientServiceRow {
+  id: number;
+  service: OfficeServiceRow;
+  starts_on: string;
+  ends_on: string | null;
+  responsible_from: string;
+  is_active: boolean;
+  status: string;
+  status_label: string;
+  frequency: string | null;
+  frequency_label: string;
+  frequency_from: string | null;
+  frequencies: ClientServiceFrequencyRow[];
+}
+
+export interface ClientServicesPayload {
+  client: number;
+  today: string;
+  services: ClientServiceRow[];
+  frequency_choices: SettingChoice[];
+}
+
+/** اقتراحُ الدورية وسببُه — السببُ نصٌّ بلا أرقام مبالغ. */
+export interface ServiceSuggestion {
+  service: string;
+  service_id: number;
+  service_name: string;
+  on: string;
+  frequency: string | null;
+  frequency_label: string;
+  reason: string;
+  frequency_choices: SettingChoice[];
+}
+
+export interface ApplyPackageResult {
+  added: {
+    service_id: number;
+    service_name: string;
+    client_service_id: number;
+    frequency: string;
+  }[];
+  skipped: { service_id: number; service_name: string; reason: string }[];
+}
+
+/**
+ * أولُ يومٍ في شهر تاريخٍ ما — افتراضُ «من أيّ فترةٍ المكتب مسؤول».
+ *
+ * التاريخُ نصٌّ ISO من الخادم أو من `input[type=date]`، فلا كائنَ `Date` ولا
+ * انزياحَ منطقةٍ زمنيّة: `2026-04-30T23:00-05:00` يبقى نيسان. وسطرٌ فارغ أو
+ * غير مؤرَّخ يعيد `''` — لا تاريخَ مخترعاً يُحفظ بلا أن يراه الموظف.
+ */
+export function firstOfMonth(day: string): string {
+  const match = /^(\d{4})-(\d{2})/.exec(day ?? '');
+  return match ? `${match[1]}-${match[2]}-01` : '';
+}
+
+/**
+ * أولُ يومٍ في الشهر **التالي** — افتراضُ «سارية من» عند تغيير الدورية.
+ *
+ * اليومُ يرفضه الخادم لخدمةٍ أُضيفت اليوم (تاريخُ سريانٍ مسجَّل)، والشهرُ القادم
+ * أولُ تاريخٍ صالحٍ دائماً. والسطرُ غيرُ المؤرَّخ يعيد `''` كـ`firstOfMonth`.
+ */
+export function firstOfNextMonth(day: string): string {
+  const first = firstOfMonth(day);
+  if (!first) return '';
+  const [year, month] = first.split('-').map(Number);
+  if (month === 12) return `${year + 1}-01-01`;
+  return `${year}-${String(month + 1).padStart(2, '0')}-01`;
+}
+
+/**
+ * ما يُعرض في منتقي «أضف خدمة»: خدماتُ الكتالوج **المفعّلة** التي ليست **نشطةً**
+ * عند الزبون. والمعطَّلةُ لا تُضاف، والموقوفةُ تُعرض لإعادة الإضافة بعد إيقافها.
+ */
+export function availableServicesForClient(
+  catalog: readonly OfficeServiceRow[],
+  services: readonly { service: { id: number }; is_active: boolean }[],
+): OfficeServiceRow[] {
+  const activeIds = new Set(
+    services.filter((row) => row.is_active).map((row) => row.service.id),
+  );
+  return catalog.filter((row) => row.is_active && !activeIds.has(row.id));
+}
+
+/** تسميةُ قيمة دورية من **اختيارات الخادم** — لا جدولَ تسمياتٍ محليّاً. */
+export function frequencyLabelFrom(
+  choices: readonly SettingChoice[],
+  value: string | null | undefined,
+): string {
+  if (!value) return '';
+  return choices.find((choice) => choice.value === value)?.label ?? value;
+}
+
+/** أصناف Tailwind لشارة حالة خدمة الزبون — العرضُ وحده، والنصُّ من `status_label`. */
+export function clientServiceStatusClass(status: string): string {
+  if (status === 'active') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'stopped') {
+    return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
+/**
+ * الدوريةُ في مسوّدة «أضف خدمة» بعد وصول مقترحٍ جديد: ما اختاره الموظفُ بيده
+ * (`frequencyTouched`) لا يُكتب فوقه، وإلا أخذ المقترحَ (أو فراغاً إن لم يوجد).
+ */
+export function frequencyAfterSuggestion(
+  draft: { frequency: string; frequencyTouched: boolean },
+  suggested: string | null | undefined,
+): string {
+  return draft.frequencyTouched ? draft.frequency : (suggested ?? '');
+}
+
+/**
+ * ملخّصُ «طبّق باقة» كما يُعرض في التنبيه — بأسماء الخادم لا بمعرّفات.
+ * وتُخطّي الخدمةِ سببٌ يرسله الخادم، فيُعرض نصُّه كما وصل بجانب الاسم
+ * «<الاسم> (<السبب>)» ولا يُعاد بناؤه هنا.
+ */
+export function applyPackageSummary(result: ApplyPackageResult): string {
+  const added = result.added.map((row) => row.service_name).join('، ');
+  const skipped = result.skipped
+    .map((row) => (row.reason ? `${row.service_name} (${row.reason})` : row.service_name))
+    .join('، ');
+  if (!result.added.length && !result.skipped.length) {
+    return 'لم تُضف شيئاً — لا خدمةَ مفعّلةً في هذه الباقة';
+  }
+  const parts: string[] = [];
+  if (result.added.length) parts.push(`أُضيفت ${result.added.length}: ${added}`);
+  if (result.skipped.length) parts.push(`تُخطّي ${result.skipped.length}: ${skipped}`);
+  return parts.join(' · ');
+}
+
 /**
  * خياراتُ إسناد الدور في قسم «الموظفون والأدوار».
  *

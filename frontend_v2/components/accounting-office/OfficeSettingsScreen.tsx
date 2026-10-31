@@ -2,14 +2,23 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import {
+  createOfficeService,
+  createServicePackage,
+  deleteServicePackage,
   getOfficeSettings,
   listCustomizingClients,
   listOfficeMembers,
+  listOfficeServices,
+  listServicePackages,
   resetOfficeSetting,
   setOfficeSetting,
+  updateOfficeService,
+  updateServicePackage,
   type OfficeClientRow,
   type OfficeMemberRow,
+  type OfficeServiceRow,
   type OfficeSettingsPayload,
+  type ServicePackageRow,
 } from '../../services/accountingOfficeApi';
 import {
   changeMemberRole,
@@ -21,6 +30,7 @@ import {
 import {
   OFFICE_OWNER_ROLE,
   clientFilePath,
+  formatOfficeAmount,
   missingFirstRunLabels,
   officeAssignableRoles,
   officeRoleLabel,
@@ -29,12 +39,28 @@ import {
 } from '../../utils/accountingOffice';
 import { userRoleLabel } from '../../utils/userRoleLabel';
 import { humanizeThrown } from '../../utils/drfError';
+import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { SettingControl } from './SettingControl';
-import { OfficeCard, OfficeError, OfficeSkeleton, officeInputClass } from './OfficeUi';
+import {
+  OfficeCard,
+  OfficeError,
+  OfficeSkeleton,
+  officeInputClass,
+  officePrimaryButtonClass,
+  officeSecondaryButtonClass,
+} from './OfficeUi';
 
 type CustomizingClient = Pick<OfficeClientRow, 'id' | 'name' | 'status' | 'status_label'>;
+
+/** مسوّدةُ باقةٍ في مجموعة «الخدمات والباقات» — `id === null` تعني باقةً جديدة. */
+interface PackageDraft {
+  id: number | null;
+  name: string;
+  price: string;
+  services: number[];
+}
 
 /** المفتاحان اللذان يُمنحان لكل عضو على حدة (#272) — تجاوزُ عضوٍ لا جدولَ جديد. */
 const MEMBER_OFFICE_KEYS = [
@@ -64,6 +90,7 @@ const MEMBER_OFFICE_KEYS = [
 export const OfficeSettingsScreen: React.FC = () => {
   const toast = useToast();
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const { can } = usePermissions();
   const [payload, setPayload] = useState<OfficeSettingsPayload | null>(null);
   const [loading, setLoading] = useState(true);
@@ -74,8 +101,31 @@ export const OfficeSettingsScreen: React.FC = () => {
   const [overrideRows, setOverrideRows] = useState<Record<number, PermissionMember>>({});
   const [savingMember, setSavingMember] = useState<number | null>(null);
 
+  // ── الخدمات والباقات (#273) ─────────────────────────────────────────────
+  const [catalog, setCatalog] = useState<OfficeServiceRow[]>([]);
+  const [packages, setPackages] = useState<ServicePackageRow[]>([]);
+  const [servicesLoading, setServicesLoading] = useState(true);
+  const [servicesError, setServicesError] = useState('');
+  const [newServiceName, setNewServiceName] = useState('');
+  const [serviceDraft, setServiceDraft] = useState<{ id: number; name: string } | null>(null);
+  const [packageDraft, setPackageDraft] = useState<PackageDraft | null>(null);
+
   const canEditRoles = can('admin.members.manage');
   const canEditOverrides = can('admin.permissions.manage');
+  const canSeeAmounts = can('office.amounts.view');
+
+  /**
+   * خدماتُ محرّر الباقة: **المفعّلةُ وحدها**، إضافةً إلى ما اختِير سابقاً وهو
+   * معطَّل — وإلا اختفت خدمةٌ من باقةٍ قائمة عند تعطيلها فحُفظت الباقةُ بلا أن
+   * يراها الموظف. والمعطَّلةُ تُعلَّم «معطّلة» كي لا تُختار عن جهل.
+   */
+  const packageServiceChoices = useMemo(
+    () =>
+      catalog.filter(
+        (row) => row.is_active || Boolean(packageDraft?.services.includes(row.id)),
+      ),
+    [catalog, packageDraft],
+  );
 
   const load = useCallback(() => {
     setLoading(true);
@@ -173,6 +223,131 @@ export const OfficeSettingsScreen: React.FC = () => {
   useEffect(() => {
     loadStaff();
   }, [loadStaff]);
+
+  /**
+   * الكتالوج والباقات (#273): تُقرأ لكل عضو، وتُكتب بـ`office.settings.manage`.
+   * وكتالوجُ الخادم يزرع الخمسة الافتراضية عند أول قراءة — لا زرعَ في الواجهة.
+   *
+   * `alive` تُمرَّر من التبويب/الجبل: ردٌّ وصل بعد تفكيك الشاشة لا يكتب فوق حالةٍ
+   * أحدث، والخطأُ يُعرض في الكرت بزرّ «أعد المحاولة» لا كتنبيهٍ عابرٍ يضيع.
+   */
+  const loadServices = useCallback((alive?: () => boolean) => {
+    setServicesError('');
+    setServicesLoading(true);
+    const still = () => !alive || alive();
+    Promise.all([listOfficeServices(), listServicePackages()])
+      .then(([catalogRows, packageRows]) => {
+        if (!still()) return;
+        setCatalog(catalogRows);
+        setPackages(packageRows);
+      })
+      .catch((failure) => {
+        if (!still()) return;
+        setServicesError(humanizeThrown(failure, 'تعذّر تحميل الخدمات والباقات.'));
+      })
+      .finally(() => {
+        if (still()) setServicesLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadServices(() => !cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadServices]);
+
+  const toggleService = async (row: OfficeServiceRow) => {
+    try {
+      const updated = await updateOfficeService(row.id, { is_active: !row.is_active });
+      setCatalog((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      toast(updated.is_active ? 'فُعّلت الخدمة' : 'عُطّلت الخدمة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تغيير تفعيل الخدمة.'), 'error');
+    }
+  };
+
+  const saveServiceName = async (row: OfficeServiceRow) => {
+    if (!serviceDraft || !serviceDraft.name.trim()) return;
+    try {
+      const updated = await updateOfficeService(row.id, { name: serviceDraft.name.trim() });
+      setCatalog((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      setServiceDraft(null);
+      toast('حُدّث اسم الخدمة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تعديل اسم الخدمة.'), 'error');
+    }
+  };
+
+  const addService = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newServiceName.trim()) return;
+    try {
+      const created = await createOfficeService({ name: newServiceName.trim() });
+      setCatalog((prev) => [...prev, created]);
+      setNewServiceName('');
+      toast('أُضيفت الخدمة إلى الكتالوج', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر إضافة الخدمة.'), 'error');
+    }
+  };
+
+  const toggleDraftService = (serviceId: number) => {
+    setPackageDraft((prev) => {
+      if (!prev) return prev;
+      const chosen = prev.services.includes(serviceId)
+        ? prev.services.filter((id) => id !== serviceId)
+        : [...prev.services, serviceId];
+      return { ...prev, services: chosen };
+    });
+  };
+
+  /**
+   * حفظُ الباقة: `suggested_price` **لا تُرسل** لمن لا يملك رؤية المبالغ — الخادم
+   * يردّ 403 على كتابتها، وإرسالُ `null` يحمل المفتاح نفسه فيُرفض كذلك.
+   */
+  const savePackage = async () => {
+    if (!packageDraft || !packageDraft.name.trim()) return;
+    const body: { name: string; services: number[]; suggested_price?: string | null } = {
+      name: packageDraft.name.trim(),
+      services: packageDraft.services,
+    };
+    if (canSeeAmounts) {
+      body.suggested_price = packageDraft.price.trim() === '' ? null : packageDraft.price.trim();
+    }
+    try {
+      const saved = packageDraft.id === null
+        ? await createServicePackage(body)
+        : await updateServicePackage(packageDraft.id, body);
+      setPackages((prev) => {
+        const others = prev.filter((row) => row.id !== saved.id);
+        return [...others, saved].sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+      });
+      setPackageDraft(null);
+      toast('حُفظت الباقة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر حفظ الباقة.'), 'error');
+    }
+  };
+
+  const removePackage = async (row: ServicePackageRow) => {
+    const ok = await confirm({
+      title: 'حذف الباقة',
+      message:
+        `تُحذف باقة «${row.name}» من القوالب. خدماتُ الزبائن التي طُبّقت عليها سابقاً لا تتغيّر.`,
+      confirmText: 'احذف الباقة',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      await deleteServicePackage(row.id);
+      setPackages((prev) => prev.filter((item) => item.id !== row.id));
+      toast('حُذفت الباقة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر حذف الباقة.'), 'error');
+    }
+  };
 
   const changeRole = async (member: OfficeMemberRow, role: string) => {
     if (!role || role === member.role) return;
@@ -296,6 +471,248 @@ export const OfficeSettingsScreen: React.FC = () => {
             </div>
           );
         })}
+      </OfficeCard>
+
+      <OfficeCard title="الخدمات والباقات">
+        {servicesError ? (
+          <OfficeError
+            message={servicesError}
+            onRetry={() => loadServices()}
+          />
+        ) : servicesLoading ? (
+          <OfficeSkeleton />
+        ) : (
+          <>
+        <h3 className="text-[12.5px] font-bold text-slate-800 dark:text-slate-100">
+          كتالوج الخدمات
+        </h3>
+        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+          الخمسةُ الافتراضية تُزرع تلقائياً. عطّل ما لا تقدّمه، وأضِف ما تقدّمه — والخدمةُ
+          المستعملة لا تُحذف، تُعطَّل فيبقى تاريخُ من اشتراها.
+        </p>
+        <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+          {catalog.map((row) => (
+            <li key={row.id} className="flex flex-wrap items-center gap-2 py-2">
+              {serviceDraft?.id === row.id ? (
+                <>
+                  <input
+                    value={serviceDraft.name}
+                    onChange={(event) =>
+                      setServiceDraft({ id: row.id, name: event.target.value })
+                    }
+                    className={`${officeInputClass} w-48`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => saveServiceName(row)}
+                    className={officePrimaryButtonClass}
+                  >
+                    احفظ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setServiceDraft(null)}
+                    className={officeSecondaryButtonClass}
+                  >
+                    إلغاء
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span
+                    className={
+                      row.is_active
+                        ? 'text-[12.5px] font-semibold text-slate-800 dark:text-slate-100'
+                        : 'text-[12.5px] font-semibold text-slate-400 line-through dark:text-slate-500'
+                    }
+                  >
+                    {row.name}
+                  </span>
+                  {row.is_builtin ? (
+                    <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                      افتراضية
+                    </span>
+                  ) : null}
+                  {canManageSettings ? (
+                    <div className="ms-auto flex items-center gap-3">
+                      <label className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                        <input
+                          type="checkbox"
+                          checked={row.is_active}
+                          onChange={() => toggleService(row)}
+                          aria-label={`تفعيل ${row.name}`}
+                          className="size-4 rounded border-slate-300"
+                        />
+                        مفعّلة
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => setServiceDraft({ id: row.id, name: row.name })}
+                        className="text-[10.5px] font-medium text-teal-700 hover:underline dark:text-teal-400"
+                      >
+                        عدّل الاسم
+                      </button>
+                    </div>
+                  ) : null}
+                </>
+              )}
+            </li>
+          ))}
+        </ul>
+        {canManageSettings ? (
+          <form onSubmit={addService} className="mt-3 flex flex-wrap items-center gap-2">
+            <input
+              value={newServiceName}
+              onChange={(event) => setNewServiceName(event.target.value)}
+              placeholder="خدمة جديدة…"
+              aria-label="خدمة جديدة"
+              className={`${officeInputClass} w-56`}
+            />
+            <button type="submit" className={officePrimaryButtonClass}>
+              أضف خدمة
+            </button>
+          </form>
+        ) : null}
+
+        <h3 className="mt-6 text-[12.5px] font-bold text-slate-800 dark:text-slate-100">
+          الباقات الجاهزة
+        </h3>
+        <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+          قالبٌ يعبّئ خدمات الزبون بكبسةٍ ثم تُعدَّل — نسخٌ لا ربط: تعديلُ الباقة بعدها
+          لا يمسّ زبوناً.
+        </p>
+        {packages.length === 0 ? (
+          <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">
+            لا باقةَ بعد. اجمع خدماتٍ في باقةٍ وسعرٍ مقترحٍ اختياريّ.
+          </p>
+        ) : (
+          <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+            {packages.map((row) => (
+              <li key={row.id} className="py-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[12.5px] font-semibold text-slate-800 dark:text-slate-100">
+                    {row.name}
+                  </span>
+                  <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10.5px] tabular-nums text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                    السعر المقترح: {formatOfficeAmount(row.suggested_price)}
+                  </span>
+                  <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                    {row.services.length === 0
+                      ? 'بلا خدمات'
+                      : row.services.map((service) => service.name).join('، ')}
+                  </span>
+                  {canManageSettings ? (
+                    <div className="ms-auto flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPackageDraft({
+                            id: row.id,
+                            name: row.name,
+                            price: row.suggested_price ?? '',
+                            services: row.services.map((service) => service.id),
+                          })
+                        }
+                        className="text-[10.5px] font-medium text-teal-700 hover:underline dark:text-teal-400"
+                      >
+                        عدّل
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removePackage(row)}
+                        className="text-[10.5px] font-medium text-rose-600 hover:underline dark:text-rose-400"
+                      >
+                        احذف
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {canManageSettings ? (
+          packageDraft ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                  اسم الباقة
+                  <input
+                    value={packageDraft.name}
+                    onChange={(event) =>
+                      setPackageDraft({ ...packageDraft, name: event.target.value })
+                    }
+                    className={`${officeInputClass} mt-1 block w-full`}
+                  />
+                </label>
+                {canSeeAmounts ? (
+                  <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                    السعر المقترح (اختياري)
+                    <input
+                      value={packageDraft.price}
+                      onChange={(event) =>
+                        setPackageDraft({ ...packageDraft, price: event.target.value })
+                      }
+                      inputMode="decimal"
+                      className={`${officeInputClass} mt-1 block w-full tabular-nums`}
+                    />
+                  </label>
+                ) : null}
+              </div>
+              <fieldset className="mt-3">
+                <legend className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
+                  خدمات الباقة
+                </legend>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {packageServiceChoices.map((service) => (
+                    <label
+                      key={service.id}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[11px] text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={packageDraft.services.includes(service.id)}
+                        onChange={() => toggleDraftService(service.id)}
+                        className="size-3.5 rounded border-slate-300"
+                      />
+                      {service.name}
+                      {service.is_active ? null : (
+                        <span className="rounded-full border border-amber-200 bg-amber-50 px-1.5 text-[9.5px] font-semibold text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+                          معطّلة
+                        </span>
+                      )}
+                    </label>
+                  ))}
+                </div>
+              </fieldset>
+              <div className="mt-3 flex items-center gap-2">
+                <button type="button" onClick={savePackage} className={officePrimaryButtonClass}>
+                  احفظ الباقة
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPackageDraft(null)}
+                  className={officeSecondaryButtonClass}
+                >
+                  إلغاء
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() =>
+                setPackageDraft({ id: null, name: '', price: '', services: [] })
+              }
+              className={`mt-3 ${officeSecondaryButtonClass}`}
+            >
+              باقة جديدة
+            </button>
+          )
+        ) : null}
+          </>
+        )}
       </OfficeCard>
 
       {canManageSettings && showsStaff ? (

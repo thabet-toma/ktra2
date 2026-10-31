@@ -9,12 +9,16 @@ from rest_framework.routers import SimpleRouter
 from accounting_office.views import (
     OfficeClientViewSet,
     OfficeContactViewSet,
+    OfficePackageViewSet,
+    OfficeServiceViewSet,
     OfficeSettingsViewSet,
 )
 
 router = SimpleRouter()
 router.register("clients", OfficeClientViewSet, basename="accounting-office-clients")
 router.register("contacts", OfficeContactViewSet, basename="accounting-office-contacts")
+router.register("services", OfficeServiceViewSet, basename="accounting-office-services")
+router.register("packages", OfficePackageViewSet, basename="accounting-office-packages")
 router.register("settings", OfficeSettingsViewSet, basename="accounting-office-settings")
 
 urlpatterns = [

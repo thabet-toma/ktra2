@@ -10,21 +10,44 @@
 """
 import copy
 from decimal import Decimal, InvalidOperation
+from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Q
+from django.db.models import Count, Max, Q
 from django.utils import timezone
 
 from accounting_office import settings_registry
 from accounting_office.models import (
+    CLIENT_SERVICE_FREQUENCY_CHOICES,
+    CLIENT_SERVICE_STATUS_ACTIVE,
+    CLIENT_SERVICE_STATUS_LABELS,
+    DEFAULT_SERVICES,
+    FREQUENCY_ANNUAL,
+    FREQUENCY_BIMONTHLY,
+    FREQUENCY_KEYS,
+    FREQUENCY_LABELS,
+    FREQUENCY_MONTHLY,
+    FREQUENCY_ON_DEMAND,
+    SERVICE_CODE_ANNUAL_ACCOUNTS,
+    SERVICE_CODE_BOOKKEEPING,
+    SERVICE_CODE_CONSULTING,
+    SERVICE_CODE_PAYROLL,
+    SERVICE_CODE_VAT,
+    THRESHOLD_KIND_VAT_EXEMPT_DEALER,
+    THRESHOLD_KIND_VAT_MONTHLY_REPORTING,
     ClientContact,
     ClientReminderRecipient,
+    ClientService,
+    ClientServiceFrequency,
     ClientSettingOverride,
     Contact,
     OfficeClient,
+    OfficeService,
     OfficeSettingValue,
+    ServicePackage,
     TaxCard,
+    TaxThreshold,
     is_tenant_member,
     tax_card_choices,
 )
@@ -73,10 +96,14 @@ NO_REST_DAYS_LABEL = "بلا أيام عطلة"
 #: وإلا سقط حارسُ `accounting_office/tests/test_amounts_guard.py`.
 TAX_CARD_AMOUNT_KEYS: tuple[str, ...] = ("annual_sales",)
 
+#: مفاتيح مبالغ الباقات — الباقة تُقترح بسعرٍ اختياريّ، وهو مبلغُ تسويقٍ لا مبلغُ
+#: زبون، لكنه يُعرض لعضوٍ قد لا يملك رؤية المبالغ فيمرّ بالقناع كغيره.
+PACKAGE_AMOUNT_KEYS: tuple[str, ...] = ("suggested_price",)
+
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
 #: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
 #: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
-AMOUNT_KEYS: frozenset[str] = frozenset(TAX_CARD_AMOUNT_KEYS)
+AMOUNT_KEYS: frozenset[str] = frozenset(TAX_CARD_AMOUNT_KEYS + PACKAGE_AMOUNT_KEYS)
 
 
 def visible_clients(tenant, user):
@@ -966,3 +993,705 @@ def reminder_recipients_payload(client) -> list[dict]:
             ),
         })
     return rows
+
+
+# ── كتالوج خدمات المكتب (#273) ───────────────────────────────────────────────
+#
+# الخمسةُ الافتراضية تُزرع بدالّةٍ لا بهجرة بياناتٍ لكل شركة: الهجرةُ تُنشئ صفوفاً
+# للمكاتب الموجودة، وكلُّ مكتبٍ يُنشأ بعدها يحتاج زرعاً — فالدالّةُ وحدها تكفي
+# الاثنين، لأنها idempotent بفرادة `(tenant, code)`.
+def ensure_default_services(tenant) -> list[OfficeService]:
+    """يزرع الخدمات الخمس الافتراضية للمكتب — **idempotent** (مرّتان = خمسٌ).
+
+    تُنادى من قائمة الكتالوج ومن كل قراءةٍ تحتاج كود خدمة، فلا يبدأ مكتبٌ جديدٌ
+    بكتالوجٍ فارغ، ولا يضاعف الصفوفَ نداءٌ ثانٍ. ولا يمسّ المكتبُ ما زرعه: يغيّر
+    الاسمَ ويعطّل — والكودُ يبقى.
+    """
+    existing = set(
+        OfficeService.objects.filter(tenant=tenant).values_list("code", flat=True),
+    )
+    with transaction.atomic():
+        for position, (code, name) in enumerate(DEFAULT_SERVICES):
+            if code in existing:
+                continue
+            OfficeService.objects.get_or_create(
+                tenant=tenant,
+                code=code,
+                defaults={"name": name, "is_builtin": True, "position": position},
+            )
+    return list(OfficeService.objects.filter(tenant=tenant))
+
+
+def office_service_row(service) -> dict:
+    """سطرُ خدمةٍ كما يراه المنتقي والشاشة — الكودُ فيه لأنه عقدُ الاقتراح."""
+    return {
+        "id": service.pk,
+        "code": service.code,
+        "name": service.name,
+        "is_active": service.is_active,
+        "is_builtin": service.is_builtin,
+        "position": service.position,
+    }
+
+
+def services_catalog_payload(tenant) -> list[dict]:
+    """كتالوج المكتب — الخمسةُ الافتراضية تُزرع عند أول قراءةٍ لهذه الشاشة."""
+    return [
+        office_service_row(row) for row in ensure_default_services(tenant)
+    ]
+
+
+#: رسائلُ «ليس من كتالوج المكتب» و«باقةٌ غير موجودة» — **موضعٌ واحد** لكلٍّ منهما،
+#: تناديه الخدمةُ والـviews معاً، فلا تفترق صياغتان لنفس الرفض.
+SERVICE_NOT_IN_CATALOG = "خدمةٌ ليست من كتالوج هذا المكتب."
+_PACKAGE_NOT_FOUND = "باقةٌ غير موجودةٍ في هذا المكتب."
+
+
+def service_by_code(tenant, code) -> OfficeService:
+    """خدمةٌ بكودها — والزرعُ أوّلاً كي يعمل الاقتراحُ على مكتبٍ جديد."""
+    ensure_default_services(tenant)
+    service = OfficeService.objects.filter(
+        tenant=tenant, code=(code or "").strip(),
+    ).first()
+    if service is None:
+        raise ValidationError({"service": "خدمةٌ غير معروفةٍ في كتالوج هذا المكتب."})
+    return service
+
+
+def service_or_raise(tenant, pk) -> OfficeService:
+    """خدمةُ كتالوج المكتب بمعرّفها — والـviews تناديها بدل استعلامٍ ثانٍ برسالته."""
+    service = OfficeService.objects.filter(tenant=tenant, pk=pk).first()
+    if service is None:
+        raise ValidationError({"service": SERVICE_NOT_IN_CATALOG})
+    return service
+
+
+def package_or_raise(tenant, pk) -> ServicePackage:
+    """باقةُ المكتب بمعرّفها — ورسالةُ الرفض في `_PACKAGE_NOT_FOUND` وحدها."""
+    package = ServicePackage.objects.filter(tenant=tenant, pk=pk).first()
+    if package is None:
+        raise ValidationError({"package": _PACKAGE_NOT_FOUND})
+    return package
+
+
+def _assert_service_of_tenant(tenant, service) -> None:
+    if service is None or service.tenant_id != getattr(tenant, "pk", tenant):
+        raise ValidationError({"service": SERVICE_NOT_IN_CATALOG})
+
+
+def _generated_service_code(tenant) -> str:
+    """كودٌ مولَّدٌ لخدمةٍ أضافها المكتب — `custom-<8 hex>`، والفرادةُ للقاعدة."""
+    for _attempt in range(5):
+        code = f"custom-{uuid4().hex[:8]}"
+        if not OfficeService.objects.filter(tenant=tenant, code=code).exists():
+            return code
+    raise ValidationError({"name": "تعذّر توليد كودٍ للخدمة — أعد المحاولة."})
+
+
+def create_office_service(tenant, *, name, position=None) -> OfficeService:
+    """خدمةٌ يضيفها المكتب: `is_builtin=False` وكودٌ مولَّد لا يُكتب باليد."""
+    clean = (name or "").strip()
+    if not clean:
+        raise ValidationError({"name": "اسم الخدمة مطلوب."})
+    ensure_default_services(tenant)
+    with transaction.atomic():
+        if position is None:
+            top = OfficeService.objects.filter(tenant=tenant).aggregate(
+                top=Max("position"),
+            )["top"]
+            position = (top or 0) + 1
+        return OfficeService.objects.create(
+            tenant=tenant,
+            code=_generated_service_code(tenant),
+            name=clean,
+            is_builtin=False,
+            position=position,
+        )
+
+
+def update_office_service(service, *, name=None, is_active=None, position=None) -> OfficeService:
+    """تعديلُ تسمية الخدمة وتفعيلها وترتيبها — **لا كودَ ولا `is_builtin`**.
+
+    الكودُ عقدٌ يقرؤه الاقتراح، وتغييرُه كان يقلب خدمةً مضافةً إلى «مسك دفاتر»
+    أو العكس بكتابةِ كلمةٍ في الشاشة.
+    """
+    changed = []
+    if name is not None:
+        clean = name.strip()
+        if not clean:
+            raise ValidationError({"name": "اسم الخدمة مطلوب."})
+        service.name = clean
+        changed.append("name")
+    if is_active is not None:
+        service.is_active = bool(is_active)
+        changed.append("is_active")
+    if position is not None:
+        service.position = position
+        changed.append("position")
+    if changed:
+        service.save(update_fields=[*changed, "updated_at"])
+    return service
+
+
+# ── الباقات الجاهزة (#273) ──────────────────────────────────────────────────
+#: «لم يُرسَل» — تُميَّز به الكتابةُ الفارغةُ عن `None` الذي يمسح السعر المقترح.
+_UNSET = object()
+
+
+def _clean_suggested_price(value):
+    """سعرُ الباقة: فارغٌ ⇒ `None` (لا سعرَ مقترحاً)، وسالبٌ ⇒ رفض."""
+    if value is None or value == "":
+        return None
+    try:
+        amount = Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({"suggested_price": "سعرٌ غير صالح."}) from None
+    if amount < 0:
+        raise ValidationError({"suggested_price": "السعر المقترح لا يكون سالباً."})
+    return amount
+
+
+def _services_of_ids(tenant, service_ids) -> list[OfficeService]:
+    """خدماتُ باقةٍ من معرّفاتها — **كلُّ معرّفٍ يُتحقَّق أنه من كتالوج المكتب**."""
+    ids = list(dict.fromkeys(service_ids or []))
+    services = list(OfficeService.objects.filter(tenant=tenant, pk__in=ids))
+    if len(services) != len(ids):
+        raise ValidationError({"services": SERVICE_NOT_IN_CATALOG})
+    return services
+
+
+def _package_row(package, *, masked: bool) -> dict:
+    """سطرُ باقةٍ وقرارُ القناع **مُمرَّرٌ جاهزاً** — لا يُحسب لكل صفّ.
+
+    `package.tenant` لا يُلمس هنا: قراءتُه كانت استعلاماً لكل باقة، و
+    `can_see_amounts` ثلاثةَ استعلاماتٍ لكل صفّ. القرارُ يُحسب مرّةً في
+    `packages_payload`.
+    """
+    price = None if package.suggested_price is None else f"{package.suggested_price:.2f}"
+    row = {
+        "id": package.pk,
+        "name": package.name,
+        "suggested_price": price,
+        "services": [office_service_row(item) for item in package.services.all()],
+        "created_at": package.created_at,
+        "updated_at": package.updated_at,
+    }
+    return mask_amounts(row, PACKAGE_AMOUNT_KEYS) if masked else row
+
+
+def package_payload(package, *, user) -> dict:
+    """سطرُ باقة — **بتمرير القناع**: `suggested_price` مبلغٌ ولو لم يكن مبلغَ زبون.
+
+    والمبلغُ يُرسَل **نصّاً** كـ`annual_sales` (ردّ الـserializer العشريّ): واجهةٌ
+    تقرأ `'1750.00'` لا `1750.0` العائم.
+    """
+    masked = user is not None and not can_see_amounts(package.tenant, user)
+    return _package_row(package, masked=masked)
+
+
+def packages_payload(tenant, *, user) -> list[dict]:
+    """قائمةُ الباقات — **قرارُ القناع مرّةً واحدة**، لا `can_see_amounts` لكل صفّ.
+
+    وكانت `package_payload` تُنادى لكل باقة فتحسب `package.tenant` و
+    `can_see_amounts` (استعلاماتِ صلاحياتٍ ثلاثة) لكل صفّ: صفحةٌ بعشر باقات =
+    ثلاثون استعلاماً لا واحد.
+    """
+    masked = user is not None and not can_see_amounts(tenant, user)
+    rows = ServicePackage.objects.filter(tenant=tenant).prefetch_related("services")
+    return [_package_row(row, masked=masked) for row in rows]
+
+
+def create_service_package(tenant, *, name, suggested_price=None, service_ids=None) -> ServicePackage:
+    clean = (name or "").strip()
+    if not clean:
+        raise ValidationError({"name": "اسم الباقة مطلوب."})
+    services = _services_of_ids(tenant, service_ids)
+    with transaction.atomic():
+        package = ServicePackage.objects.create(
+            tenant=tenant,
+            name=clean,
+            suggested_price=_clean_suggested_price(suggested_price),
+        )
+        package.services.set(services)
+    return package
+
+
+def update_service_package(
+    package, *, name=None, suggested_price=_UNSET, service_ids=None,
+) -> ServicePackage:
+    """تعديلُ الباقة — **لا يمسّ خدمةَ زبونٍ واحد**: التطبيقُ نسخٌ لا ربط."""
+    changed = []
+    if name is not None:
+        clean = name.strip()
+        if not clean:
+            raise ValidationError({"name": "اسم الباقة مطلوب."})
+        package.name = clean
+        changed.append("name")
+    if suggested_price is not _UNSET:
+        package.suggested_price = _clean_suggested_price(suggested_price)
+        changed.append("suggested_price")
+    services = None if service_ids is None else _services_of_ids(package.tenant, service_ids)
+    with transaction.atomic():
+        if changed:
+            package.save(update_fields=[*changed, "updated_at"])
+        if services is not None:
+            package.services.set(services)
+    return package
+
+
+def delete_service_package(package) -> None:
+    """الحذفُ مباحٌ **للباقة وحدها**: قالبٌ لا تاريخَ لزبونٍ فيه."""
+    package.delete()
+
+
+# ── خدمات الزبون: الإضافة والدورية والإيقاف (#273) ─────────────────────────
+def frequency_on(client_service, day, *, rows=None):
+    """**القاعدةُ الوحيدة**: الدوريةُ في يومٍ ما = الصفُّ ذو أكبر `effective_from <= day`.
+
+    `rows` تُمرَّر حين تكون الدورياتُ محمَّلةً سلفاً (قائمةُ خدمات الزبون) فلا
+    استعلامَ لكل خدمة — والقاعدةُ هي هي، لا نسخةٌ ثانية لها في القائمة.
+    """
+    if rows is None:
+        return (
+            client_service.frequencies
+            .filter(effective_from__lte=day)
+            .order_by("-effective_from", "-id")
+            .first()
+        )
+    eligible = [row for row in rows if row.effective_from <= day]
+    return max(eligible, key=lambda row: (row.effective_from, row.pk), default=None)
+
+
+def frequency_label(value) -> str:
+    """تسميةُ الدورية من ثابت النموذج — الواجهة ترسمها ولا تعرف جدولاً محلياً."""
+    return FREQUENCY_LABELS.get(value or "", "")
+
+
+def frequency_choices() -> list[dict]:
+    return [
+        {"value": value, "label": label}
+        for value, label in CLIENT_SERVICE_FREQUENCY_CHOICES
+    ]
+
+
+def _first_of_month(day):
+    return day.replace(day=1)
+
+
+def _frequency_row_payload(item) -> dict:
+    return {
+        "id": item.pk,
+        "frequency": item.frequency,
+        "frequency_label": frequency_label(item.frequency),
+        "effective_from": item.effective_from.isoformat(),
+        "suggested": item.suggested or None,
+        "created_by_name": user_display_name(item.created_by),
+        "created_at": item.created_at,
+    }
+
+
+def client_service_row(row, *, today, frequencies) -> dict:
+    """سطرُ خدمة زبون: تواريخُها وحالتُها ودوريتُها **اليوم** وتاريخُ دورياتها.
+
+    الحالةُ `status_on(today)` لا «هل لها `ends_on`»: إيقافٌ بتاريخٍ مستقبليّ
+    يبقى نشطاً اليوم، و`is_active` في الحمولة تتبع الحالةَ لا وجودَ التاريخ.
+    """
+    current = frequency_on(row, today, rows=frequencies)
+    status = row.status_on(today)
+    return {
+        "id": row.pk,
+        "service": office_service_row(row.service),
+        "starts_on": row.starts_on.isoformat(),
+        "ends_on": None if row.ends_on is None else row.ends_on.isoformat(),
+        "responsible_from": row.responsible_from.isoformat(),
+        "is_active": status == CLIENT_SERVICE_STATUS_ACTIVE,
+        "status": status,
+        "status_label": CLIENT_SERVICE_STATUS_LABELS[status],
+        "frequency": None if current is None else current.frequency,
+        "frequency_label": frequency_label(None if current is None else current.frequency),
+        "frequency_from": None if current is None else current.effective_from.isoformat(),
+        "frequencies": [_frequency_row_payload(item) for item in frequencies],
+    }
+
+
+def client_services_payload(client, *, user, today=None) -> dict:
+    """تبويب «الخدمات»: النشطُ والموقوف، والدوريةُ الحالية وتاريخُ الدوريات.
+
+    `user` **مفتاحيٌّ إلزامي** كسائر دوالّ الحمولة (#272) ولو لم تكن فيها مبالغُ
+    اليوم — فنسخةٌ ثانية من التوقيع تفترق عند أول مبلغٍ يُضاف إليها. والمبالغُ
+    تبقى في البطاقة والباقات.
+    """
+    today = today or timezone.localdate()
+    rows = (
+        client.services
+        .select_related("service")
+        .prefetch_related("frequencies__created_by")
+        .order_by("starts_on", "id")
+    )
+    return {
+        "client": client.pk,
+        "today": today.isoformat(),
+        "services": [
+            client_service_row(
+                row, today=today, frequencies=list(row.frequencies.all()),
+            )
+            for row in rows
+        ],
+        "frequency_choices": frequency_choices(),
+    }
+
+
+def overlapping_client_service(client, service, starts_on):
+    """**قاعدةُ التداخل الوحيدة**: الصفُّ الذي يمنع بدايةً جديدةً لـ(زبون، خدمة).
+
+    يمنع إن كان الصفُّ بلا نهاية (`ends_on is null`) أو امتدّ إلى البداية الجديدة
+    أو بعدها (`ends_on >= starts_on`). فالإيقافُ بتاريخٍ مستقبليّ **لا يفتح** الباب
+    لفترةٍ متداخلة — كان `ends_on__isnull=True` يفعلها ويصنع تقريرين لشهرٍ واحد.
+
+    ترجع الصفّ المتداخل أو `None`؛ و`add_client_service` يرفض به و
+    `apply_package` يتخطّى به بسببٍ مكتوب — قاعدةٌ واحدة لا نسختان.
+    """
+    return (
+        client.services
+        .filter(service=service)
+        .filter(Q(ends_on__isnull=True) | Q(ends_on__gte=starts_on))
+        .order_by("starts_on", "id")
+        .first()
+    )
+
+
+def _insert_client_service(
+    *, client, service, starts_on, responsible_from, frequency, suggestion, actor,
+) -> ClientService:
+    """صفُّ خدمةٍ وأولُ صفّ دوريةٍ له في المعاملة نفسها — **موضعُ الإنشاء الوحيد**.
+
+    الدوريةُ والمقترحُ يصلان جاهزين: المنادي (إضافةً أو تطبيقَ باقة) يحسب
+    الاقتراح مرّةً واحدة، فلا يُحسب مرّتين ولا يُقرأ السقفُ مرّتين. وشركةُ الخدمة
+    تُفحص هنا أيضاً (دفاعٌ في العمق): باقةٌ رُبطت برمجياً بخدمةٍ من كتالوج مكتبٍ
+    آخر لا تُنسخ إلى هذا الزبون.
+    """
+    _assert_service_of_tenant(client.tenant, service)
+    with transaction.atomic():
+        row = ClientService.objects.create(
+            tenant=client.tenant,
+            client=client,
+            service=service,
+            starts_on=starts_on,
+            responsible_from=responsible_from,
+        )
+        ClientServiceFrequency.objects.create(
+            client_service=row,
+            frequency=frequency,
+            effective_from=starts_on,
+            suggested=suggestion or "",
+            created_by=actor if getattr(actor, "pk", None) else None,
+        )
+    return row
+
+
+def add_client_service(
+    *, client, service, starts_on=None, responsible_from=None,
+    frequency=None, actor=None, today=None,
+) -> ClientService:
+    """إضافةُ خدمةٍ لزبون — و**أولُ صفّ دوريةٍ** بتاريخ بدئها في المعاملة نفسها.
+
+    الدورية: الممرَّرة، وإلا المقترحة من البطاقة والسقف المؤرَّخ. وإن لم تكن هناك
+    مقترحة (غيرُ مسجّلٍ في فلسطين مثلاً) فالطلبُ **يُرفض 400** بطلب اختيارٍ صريح —
+    لا تخمينَ نيابةً عن الموظف. و«من أيّ فترةٍ المكتب مسؤول» تُطبَّع أولَ الشهر
+    دائماً: المكتبُ مسؤولٌ عن فترةٍ كاملة أو لا.
+    """
+    today = today or timezone.localdate()
+    _assert_service_of_tenant(client.tenant, service)
+    if not service.is_active:
+        raise ValidationError({"service": "هذه الخدمة معطَّلة في كتالوج المكتب."})
+    starts_on = starts_on or today
+    responsible_from = _first_of_month(responsible_from or today)
+    if overlapping_client_service(client, service, starts_on) is not None:
+        raise ValidationError({
+            "service": (
+                "فترةٌ متداخلةٌ مع صفٍّ قائمٍ لهذه الخدمة — حدّد تاريخاً بعد انتهائه."
+            ),
+        })
+
+    suggestion, reason = suggest_frequency(client, service.code, starts_on)
+    chosen = frequency or suggestion
+    if chosen not in FREQUENCY_KEYS:
+        if frequency:
+            raise ValidationError({"frequency": "دورية غير معروفة."})
+        raise ValidationError({"frequency": reason or "اختر دورية الخدمة."})
+
+    return _insert_client_service(
+        client=client,
+        service=service,
+        starts_on=starts_on,
+        responsible_from=responsible_from,
+        frequency=chosen,
+        suggestion=suggestion,
+        actor=actor,
+    )
+
+
+def change_client_service_frequency(
+    client_service, *, frequency, effective_from, actor=None, today=None,
+):
+    """**التغييرُ يسري من تاريخٍ ولقدّام**: صفٌّ جديد، ولا يُعدَّل ما قبله أبداً.
+
+    وتاريخٌ مسجَّلٌ سابقاً: يُستبدل صفُّه **فقط** إن كان مستقبلياً بعد اليوم (خطأُ
+    إدخالٍ لم يقع بعد)، وإلا فهو تاريخٌ وقع — يُرفض ولا يُعاد كتابته.
+    """
+    today = today or timezone.localdate()
+    if frequency not in FREQUENCY_KEYS:
+        raise ValidationError({"frequency": "دورية غير معروفة."})
+    if effective_from is None:
+        raise ValidationError({"effective_from": "تاريخ السريان مطلوب."})
+    if effective_from < client_service.starts_on:
+        raise ValidationError({
+            "effective_from": "التغيير لا يسبق بدء الخدمة.",
+        })
+    if client_service.ends_on is not None and effective_from > client_service.ends_on:
+        raise ValidationError({
+            "effective_from": "الخدمة موقوفة — لا دوريةَ بعد تاريخ الإيقاف.",
+        })
+    suggestion, _reason = suggest_frequency(
+        client_service.client, client_service.service.code, effective_from,
+    )
+    created_by = actor if getattr(actor, "pk", None) else None
+    with transaction.atomic():
+        existing = client_service.frequencies.filter(
+            effective_from=effective_from,
+        ).first()
+        if existing is not None:
+            if effective_from <= today:
+                raise ValidationError({
+                    "effective_from": (
+                        "دوريةٌ مسجَّلةٌ في هذا التاريخ — التغيير يسري من تاريخٍ لاحق."
+                    ),
+                })
+            existing.frequency = frequency
+            existing.suggested = suggestion or ""
+            existing.created_by = created_by
+            existing.save(update_fields=["frequency", "suggested", "created_by"])
+            return existing
+        return ClientServiceFrequency.objects.create(
+            client_service=client_service,
+            frequency=frequency,
+            effective_from=effective_from,
+            suggested=suggestion or "",
+            created_by=created_by,
+        )
+
+
+def stop_client_service(client_service, *, ends_on) -> ClientService:
+    """الإيقافُ يكتب `ends_on` ويُبقي الصفّ — **ولا حذف**: التاريخُ سؤالٌ له جواب.
+
+    وثلاثةُ رفوضٍ قبله: تاريخٌ مطلوب، وصفٌّ موقوفٌ سابقاً (الإيقافُ مرّةٌ واحدة —
+    كتابةُ تاريخٍ ثانٍ كانت تمحو الأول بلا أثر)، و`ends_on` يسبق تاريخَ سريان
+    دوريةٍ مسجَّلة (فلا دوريةَ تُسجَّل بعد انتهاء الخدمة). والتحقّقُ والكتابةُ في
+    معاملةٍ واحدة كالإضافة وتغيير الدورية.
+    """
+    if ends_on is None:
+        raise ValidationError({"ends_on": "تاريخ الإيقاف مطلوب."})
+    if client_service.ends_on is not None:
+        raise ValidationError({
+            "ends_on": (
+                f"الخدمة موقوفةٌ بتاريخ {client_service.ends_on.isoformat()} — "
+                "لا إيقافَ ثانٍ."
+            ),
+        })
+    if ends_on < client_service.starts_on:
+        raise ValidationError({"ends_on": "الإيقاف لا يسبق بدء الخدمة."})
+    latest = client_service.frequencies.order_by("-effective_from").first()
+    if latest is not None and ends_on < latest.effective_from:
+        raise ValidationError({
+            "ends_on": (
+                "الإيقاف يسبق تاريخ سريان دوريةٍ مسجَّلة — "
+                f"أقربُ سريانٍ {latest.effective_from.isoformat()}."
+            ),
+        })
+    with transaction.atomic():
+        client_service.ends_on = ends_on
+        client_service.save(update_fields=["ends_on"])
+    return client_service
+
+
+def apply_package(client, package, *, actor=None, today=None) -> dict:
+    """تطبيقُ باقةٍ على زبون: **نسخٌ لا ربط** — ويُرجع ما أُضيف وما تُخطّي.
+
+    كلُّ خدمةٍ في الباقة تُفحص: المعطَّلةُ في الكتالوج تُبلَّغ بسببها، والمتداخلةُ
+    مع فترةٍ قائمةٍ تُبلَّغ بذلك، والباقي يُنسخ بالدورية المقترحة (`on_demand` إن
+    لا اقتراح). والاقتراحُ يُحسب هنا **مرّةً واحدة** ويُسلَّم لـ
+    `_insert_client_service` جاهزاً. وتعديلُ الباقة بعدها لا يمسّ الزبون، وتعديلُ
+    خدمات الزبون لا يمسّ الباقة — لا حقلَ ربطٍ بينهما.
+    """
+    if package is None or package.tenant_id != client.tenant_id:
+        raise ValidationError({"package": _PACKAGE_NOT_FOUND})
+    today = today or timezone.localdate()
+    added: list[dict] = []
+    skipped: list[dict] = []
+    with transaction.atomic():
+        for service in package.services.order_by("position", "name", "id"):
+            if not service.is_active:
+                skipped.append({
+                    "service_id": service.pk,
+                    "service_name": service.name,
+                    "reason": "معطَّلة في كتالوج المكتب",
+                })
+                continue
+            if overlapping_client_service(client, service, today) is not None:
+                skipped.append({
+                    "service_id": service.pk,
+                    "service_name": service.name,
+                    "reason": "فترةٌ متداخلةٌ عند الزبون — لم تُمسّ دوريتُها",
+                })
+                continue
+            suggestion, _reason = suggest_frequency(client, service.code, today)
+            chosen = suggestion or FREQUENCY_ON_DEMAND
+            row = _insert_client_service(
+                client=client,
+                service=service,
+                starts_on=today,
+                responsible_from=_first_of_month(today),
+                frequency=chosen,
+                suggestion=suggestion,
+                actor=actor,
+            )
+            added.append({
+                "service_id": service.pk,
+                "service_name": service.name,
+                "client_service_id": row.pk,
+                "frequency": chosen,
+            })
+    return {"added": added, "skipped": skipped}
+
+
+# ── اقتراحُ الدورية من البطاقة والسقف المؤرَّخ (#273) ───────────────────────
+def _vat_classification(client) -> str:
+    card = getattr(client, "tax_card", None)
+    return (card.vat_classification if card is not None else "") or ""
+
+
+def _vat_label(tax_system, value) -> str:
+    """تسميةُ تصنيف ق.م **من اختيارات البطاقة** لا من نصٍّ مكتوبٍ هنا."""
+    labels = dict(tax_card_choices(tax_system, "vat_classification"))
+    return labels.get(value, value or "")
+
+
+def _threshold_for(tax_system, kind, day):
+    """`(الصفّ, تقديريّ؟)` — سنةٌ بلا سقفٍ منشورٍ تأخذ آخر سقفٍ سابق وتُعلَن تقديرية."""
+    row = TaxThreshold.objects.filter(
+        tax_system=tax_system, kind=kind, year=day.year,
+    ).first()
+    if row is not None:
+        return row, False
+    fallback = (
+        TaxThreshold.objects
+        .filter(tax_system=tax_system, kind=kind, year__lt=day.year)
+        .order_by("-year")
+        .first()
+    )
+    if fallback is None:
+        return None, False
+    return fallback, True
+
+
+def _suggest_palestinian_vat(client):
+    """فلسطين: المسجّل (مرخّص أو معفى) يقدّم دورياً، وغيرُ المسجّل لا تقريرَ له."""
+    classification = _vat_classification(client)
+    if not classification:
+        return None, "البطاقة بلا تصنيف ق.م — أكملها لتُقترح الدورية"
+    label = _vat_label("PS", classification)
+    if classification in ("licensed", "exempt"):
+        return FREQUENCY_MONTHLY, f"فلسطيني · {label} — تقرير ق.م شهريّ"
+    return None, f"فلسطيني · {label} — لا تقرير دوري"
+
+
+def _suggest_israeli_vat(client, on_date):
+    """إسرائيل: منشورٌ من المبيعات السنوية مقابل سقف السنة — والسقفُ بياناتٌ مؤرَّخة."""
+    classification = _vat_classification(client)
+    if not classification:
+        return None, "البطاقة بلا تصنيف ق.م — أكملها لتُقترح الدورية"
+    label = _vat_label("IL", classification)
+    card = getattr(client, "tax_card", None)
+    annual_sales = card.annual_sales if card is not None else Decimal("0")
+    if classification == "exempt":
+        # المعفى يبقى سنوياً، لكن سقفَ עוסק פטור **يُقرأ لا يُترك خاملاً**: تجاوزُه
+        # يعني أن التصنيفَ صار موضعَ مراجعة — والسببُ نصٌّ بلا أرقام مبالغ.
+        reason = f"إسرائيلي · {label} — הצהרת עוסק פטור سنوية"
+        threshold, estimated = _threshold_for(
+            "IL", THRESHOLD_KIND_VAT_EXEMPT_DEALER, on_date,
+        )
+        if threshold is not None and annual_sales > threshold.amount:
+            basis = (
+                f"تقديري: سقف עוסק פטור لسنة {threshold.year}" if estimated
+                else f"سقف עוסק פטור لسنة {threshold.year}"
+            )
+            reason += f"؛ المبيعات تتجاوز {basis} — راجع التصنيف"
+        return FREQUENCY_ANNUAL, reason
+    if classification not in ("authorized", "nonprofit"):
+        return None, f"إسرائيلي · {label} — تصنيفٌ لا تقريرَ دوري له"
+
+    threshold, estimated = _threshold_for(
+        "IL", THRESHOLD_KIND_VAT_MONTHLY_REPORTING, on_date,
+    )
+    if threshold is None:
+        return None, f"إسرائيلي · {label} — لا سقفَ منشوراً لهذه السنة"
+    # السببُ **بلا أرقام مبالغ**: السنةُ ونظامُها وتصنيفُها فقط — فلا يحتاج قناعاً.
+    basis = f"تقديري: سقف {threshold.year}" if estimated else f"سقف {threshold.year}"
+    if annual_sales == 0:
+        return (
+            FREQUENCY_BIMONTHLY,
+            f"إسرائيلي · {label} — {basis}: لا مبيعات سنوية في البطاقة",
+        )
+    if annual_sales > threshold.amount:
+        return (
+            FREQUENCY_MONTHLY,
+            f"إسرائيلي · {label} — {basis}: المبيعات تتجاوزه ⇒ تقرير شهريّ",
+        )
+    return (
+        FREQUENCY_BIMONTHLY,
+        f"إسرائيلي · {label} — {basis}: المبيعات في حدوده ⇒ تقرير كل شهرين",
+    )
+
+
+def suggest_frequency(client, service_code, on_date=None):
+    """الدوريةُ المقترحةُ لخدمةٍ عند تاريخ — `(frequency | None, reason: str)`.
+
+    النظامُ من `resolve_setting(... "tax_system", client=client)` — بطاقةُ الزبون لا
+    إعدادُ المكتب. والاقتراحُ **اقتراح**: الموظف يؤكّده أو يغيّره، والباقي يُخزَّن
+    بتاريخ سريانه.
+    """
+    on_date = on_date or timezone.localdate()
+    code = (service_code or "").strip()
+    if code == SERVICE_CODE_PAYROLL:
+        return FREQUENCY_MONTHLY, "رواتب — تقريرٌ شهريّ"
+    if code == SERVICE_CODE_BOOKKEEPING:
+        return FREQUENCY_MONTHLY, "مسك دفاتر — عملٌ شهريّ"
+    if code == SERVICE_CODE_ANNUAL_ACCOUNTS:
+        return FREQUENCY_ANNUAL, "ميزانية وتدقيق — عملٌ سنويّ"
+    if code == SERVICE_CODE_CONSULTING:
+        return FREQUENCY_ON_DEMAND, "استشارات ومعاملات — عند الطلب"
+    if code != SERVICE_CODE_VAT:
+        return FREQUENCY_ON_DEMAND, "خدمةٌ يضيفها المكتب — عند الطلب"
+
+    system = resolve_setting(client.tenant, TAX_SYSTEM_KEY, client=client)
+    if system == "PS":
+        return _suggest_palestinian_vat(client)
+    if system == "IL":
+        return _suggest_israeli_vat(client, on_date)
+    return None, "لم يُختَر النظام الضريبي بعد — اختره من إعدادات المكتب"
+
+
+def suggestion_payload(client, service, *, on_date=None) -> dict:
+    """حمولةُ نقطة الاقتراح: المقترحُ وسببه واختياراتُ الدوريات — كلها من الخادم."""
+    day = on_date or timezone.localdate()
+    suggestion, reason = suggest_frequency(client, service.code, day)
+    return {
+        "service": service.code,
+        "service_id": service.pk,
+        "service_name": service.name,
+        "on": day.isoformat(),
+        "frequency": suggestion,
+        "frequency_label": frequency_label(suggestion),
+        "reason": reason,
+        "frequency_choices": frequency_choices(),
+    }

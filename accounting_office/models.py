@@ -20,6 +20,7 @@
 from django.conf import settings
 from django.db import models
 
+from accounting_office import settings_registry
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -480,3 +481,342 @@ class ClientSettingOverride(models.Model):
     def save(self, *args, **kwargs):
         _fill_tenant_from_client(self)
         super().save(*args, **kwargs)
+
+
+# ── الخدمات والباقات (#273) ──────────────────────────────────────────────────
+#
+# **الخدمةُ ما يقدّمه المكتب، وخدمةُ الزبون ما اشتراه زبونٌ بعينه** (المعجم #254):
+# الأولى صفٌّ في كتالوج المكتب يُفعَّل ويُضاف ولا يُحذف بعد استعماله، والثانية صفٌّ
+# مؤرَّخ `من ← إلى` لا يُحذف أصلاً — الإيقاف يكتب `ends_on` ويُبقي التاريخ.
+#
+# **والدوريةُ مؤرَّخة**: تغييرُها من نيسان لا يمسّ آذار، لأنّ `ClientServiceFrequency`
+# يضيف صفّاً جديداً ولا يعدّل القديم. الدوريةُ في يومٍ ما = الصفُّ ذو أكبر
+# `effective_from <= اليوم`، وتقرؤه دالّةٌ واحدة (`services.frequency_on`).
+
+#: أكوادُ الخدمات الخمس الافتراضية — **عقودٌ ثابتة** يقرؤها الاقتراحُ وتذاكر
+#: الالتزامات القادمة، فلا تتغيّر بتسميةٍ في الشاشة. والتسميةُ `name` تُعدَّل.
+DEFAULT_SERVICES: tuple[tuple[str, str], ...] = (
+    ("bookkeeping", "مسك دفاتر"),
+    ("vat", "قيمة مضافة"),
+    ("payroll", "رواتب"),
+    ("annual_accounts", "ميزانية وتدقيق"),
+    ("consulting", "استشارات ومعاملات"),
+)
+
+#: أكوادُ الاقتراح المعروفة — كلُّ كودٍ آخر (خدمةٌ أضافها المكتب) «عند الطلب».
+SERVICE_CODE_BOOKKEEPING = "bookkeeping"
+SERVICE_CODE_VAT = "vat"
+SERVICE_CODE_PAYROLL = "payroll"
+SERVICE_CODE_ANNUAL_ACCOUNTS = "annual_accounts"
+SERVICE_CODE_CONSULTING = "consulting"
+
+FREQUENCY_MONTHLY = "monthly"
+FREQUENCY_BIMONTHLY = "bimonthly"
+FREQUENCY_QUARTERLY = "quarterly"
+FREQUENCY_ANNUAL = "annual"
+FREQUENCY_ON_DEMAND = "on_demand"
+
+CLIENT_SERVICE_FREQUENCY_CHOICES: list[tuple[str, str]] = [
+    (FREQUENCY_MONTHLY, "شهري"),
+    (FREQUENCY_BIMONTHLY, "كل شهرين"),
+    (FREQUENCY_QUARTERLY, "ربع سنوي"),
+    (FREQUENCY_ANNUAL, "سنوي"),
+    (FREQUENCY_ON_DEMAND, "عند الطلب"),
+]
+
+FREQUENCY_KEYS: tuple[str, ...] = tuple(
+    value for value, _label in CLIENT_SERVICE_FREQUENCY_CHOICES
+)
+FREQUENCY_LABELS: dict[str, str] = dict(CLIENT_SERVICE_FREQUENCY_CHOICES)
+
+#: حالتا خدمة الزبون — نصّان من الخادم وحده، والواجهة ترسمهما كما وصلا.
+CLIENT_SERVICE_STATUS_ACTIVE = "active"
+CLIENT_SERVICE_STATUS_STOPPED = "stopped"
+CLIENT_SERVICE_STATUS_LABELS: dict[str, str] = {
+    CLIENT_SERVICE_STATUS_ACTIVE: "نشطة",
+    CLIENT_SERVICE_STATUS_STOPPED: "موقوفة",
+}
+
+#: سقوفٌ ضريبية **مؤرَّخة** — بياناتُ منصّةٍ واحدةٌ لكل المكاتب، لا رقمٌ في الكود
+#: ولا قيمةُ إعدادٍ لمكتب. سنةٌ بلا صفٍّ تأخذ آخر سقفٍ سابق وتقول «تقديري».
+THRESHOLD_KIND_VAT_MONTHLY_REPORTING = "vat_monthly_reporting"
+THRESHOLD_KIND_VAT_EXEMPT_DEALER = "vat_exempt_dealer"
+THRESHOLD_KIND_CHOICES: list[tuple[str, str]] = [
+    (THRESHOLD_KIND_VAT_MONTHLY_REPORTING, "سقف التقرير الدوري لق.م"),
+    (THRESHOLD_KIND_VAT_EXEMPT_DEALER, "سقف עוסק פטור"),
+]
+
+
+def _tax_system_choices() -> list[tuple[str, str]]:
+    """تسمياتُ النظام الضريبي من **سجلّ الإعدادات** وحده — لا نسخةً ثانية هنا."""
+    definition = settings_registry.SETTINGS_REGISTRY["tax_system"]
+    return [
+        (value, definition.labels.get(value, value))
+        for value in definition.choices
+    ]
+
+
+TAX_SYSTEM_CHOICES: list[tuple[str, str]] = _tax_system_choices()
+
+
+def _fill_tenant_from_client_service(instance) -> None:
+    """شركةُ صفّ الدورية تتبع خدمةَ زبونها — الملءُ عند الغياب والرفضُ عند المخالفة.
+
+    `ClientServiceFrequency` لا زبونَ لها مباشرةً، فقاعدتُها كقاعدة النماذج الابنة
+    الأخرى: تمتلئ من أبيها ولا تُكتب لشركةٍ مخالفة.
+    """
+    if not instance.client_service_id:
+        return
+    expected = instance.client_service.tenant_id
+    if instance.tenant_id is None:
+        instance.tenant_id = expected
+    elif instance.tenant_id != expected:
+        raise ValueError(
+            "شركةُ صفّ الدورية تخالف شركة خدمة الزبون — لا يُكتب سجلٌّ عابرٌ للمكاتب.",
+        )
+
+
+class OfficeService(models.Model):
+    """خدمةٌ في كتالوج المكتب — تسميةٌ وكودٌ وحالةُ تفعيلٍ وترتيب.
+
+    **الكودُ عقدٌ لا تسمية**: الخمسةُ الافتراضية أكوادُها ثابتة (`DEFAULT_SERVICES`)
+    لأنّ اقتراحَ الدورية وتذاكرَ الالتزامات تقرؤها، وتغييرُ اسمٍ في الشاشة لا يغيّر
+    سلوكها. والخدمةُ التي يضيفها المكتب `is_builtin=False` بكودٍ مولَّد.
+
+    **ولا حذفَ لخدمةٍ استُعملت**: `ClientService.service` على `PROTECT`، والـAPI لا
+    يعرف `DELETE` هنا أصلاً — التعطيلُ (`is_active=False`) هو ما يُخفيها من الإضافة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_services",
+        verbose_name="المكتب",
+    )
+    code = models.SlugField(max_length=60, verbose_name="الكود")
+    name = models.CharField(max_length=120, verbose_name="الاسم")
+    is_active = models.BooleanField(default=True, verbose_name="مفعّلة")
+    is_builtin = models.BooleanField(default=False, verbose_name="من الافتراضي")
+    position = models.PositiveSmallIntegerField(default=0, verbose_name="الترتيب")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "خدمة مكتب"
+        verbose_name_plural = "خدمات المكتب"
+        ordering = ["position", "name", "id"]
+        constraints = [
+            # فرادةٌ **غير مشروطة** — الشرطُ في `UniqueConstraint` تتجاهله MySQL
+            # بصمت فتمرّ الهجرة ويغيب القيد في الإنتاج.
+            models.UniqueConstraint(
+                fields=["tenant", "code"], name="uniq_office_service_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.name} ({self.code})"
+
+
+class ServicePackage(models.Model):
+    """باقةٌ جاهزة: خدماتُ المكتب وسعرٌ مقترحٌ اختياري.
+
+    **مبلغٌ من أوّله**: `suggested_price` مُسجَّلٌ في `AMOUNT_KEYS` ويمرّ بـ
+    `mask_amounts`، وكتابتُه بلا `office.amounts.view` ⇒ 403. والباقةُ **قالب**:
+    تطبيقُها ينسخ خدماتِ الزبون ولا يربطها بها.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_service_packages",
+        verbose_name="المكتب",
+    )
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    suggested_price = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="السعر المقترح",
+    )
+    services = models.ManyToManyField(
+        OfficeService,
+        blank=True,
+        related_name="packages",
+        verbose_name="الخدمات",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "باقة خدمات"
+        verbose_name_plural = "باقات الخدمات"
+        ordering = ["name", "id"]
+
+    def __str__(self) -> str:
+        return self.name
+
+
+class ClientService(models.Model):
+    """خدمةٌ لزبونٍ بعينه: من–لتاريخ، ومن أيّ فترةٍ المكتب مسؤول.
+
+    **لا حذف**: الإيقافُ يكتب `ends_on` ويُبقي الصفَّ في التاريخ — «رواتب من آذار»
+    سؤالٌ له جوابٌ بعد أن تتوقّف الخدمة.
+
+    **و`responsible_from` يُخزَّن فقط** (#273): أولُ يومٍ في الفترة التي يبدأ المكتب
+    مسؤوليته منها. لا توليدَ التزاماتٍ ولا فترات هنا — تلك تذاكرُها.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_services",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="services",
+        verbose_name="الزبون",
+    )
+    service = models.ForeignKey(
+        # `PROTECT` لا `CASCADE`: حذفُ خدمةٍ من الكتالوج كان يمحو تاريخ كل زبونٍ
+        # اشتراها. والتعطيلُ هو الطريق، والـAPI لا يعرف `DELETE` على الكتالوج.
+        OfficeService,
+        on_delete=models.PROTECT,
+        related_name="client_services",
+        verbose_name="الخدمة",
+    )
+    starts_on = models.DateField(verbose_name="تبدأ في")
+    ends_on = models.DateField(null=True, blank=True, verbose_name="تنتهي في")
+    responsible_from = models.DateField(verbose_name="المكتب مسؤول من فترة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "خدمة زبون"
+        verbose_name_plural = "خدمات الزبائن"
+        ordering = ["starts_on", "id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client"], name="office_client_service_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}:{self.service_id}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+    def status_on(self, day) -> str:
+        """حالةُ الخدمة **في يومٍ ما**: موقوفةٌ ⇔ انتهت قبل ذلك اليوم.
+
+        الإيقافُ بتاريخٍ مستقبليّ لا يجعلها موقوفةً اليوم: من كتب «تنتهي في 31/12»
+        يعمل عليها حتى ذلك اليوم. ولذلك لا تُشتقّ الحالةُ من `ends_on is None` —
+        ذلك كان يقول «موقوفة» فورَ الكتابة، ويسمح بفترةٍ متداخلة.
+        """
+        if self.ends_on is not None and self.ends_on < day:
+            return CLIENT_SERVICE_STATUS_STOPPED
+        return CLIENT_SERVICE_STATUS_ACTIVE
+
+
+class ClientServiceFrequency(models.Model):
+    """دوريةُ خدمة الزبون **بتاريخ سريان** — صفٌّ لكل تغيير، ولا تعديلَ لما قبله.
+
+    فرادةُ `(client_service, effective_from)` تجعل «غيّرها من نيسان» كتابةً واحدةً في
+    يومٍ واحد: الطلبُ المكرَّر يستبدل صفَّه المستقبليّ وحده، أو يُرفض إن كان ماضياً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_service_frequencies",
+        verbose_name="المكتب",
+    )
+    client_service = models.ForeignKey(
+        ClientService,
+        on_delete=models.CASCADE,
+        related_name="frequencies",
+        verbose_name="خدمة الزبون",
+    )
+    frequency = models.CharField(
+        max_length=20,
+        choices=CLIENT_SERVICE_FREQUENCY_CHOICES,
+        verbose_name="الدورية",
+    )
+    effective_from = models.DateField(verbose_name="سارية من")
+    #: القيمةُ المقترحة وقت الكتابة — للتمييز بين «قبلها الموظف» و«غيّرها».
+    suggested = models.CharField(
+        max_length=20,
+        choices=CLIENT_SERVICE_FREQUENCY_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="المقترحة وقتها",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_service_frequencies",
+        verbose_name="أنشأها",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الكتابة")
+
+    class Meta:
+        verbose_name = "دورية خدمة زبون"
+        verbose_name_plural = "دوريات خدمات الزبائن"
+        ordering = ["effective_from", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client_service", "effective_from"],
+                name="uniq_client_service_frequency_date",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_service_id}@{self.effective_from}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client_service(self)
+        super().save(*args, **kwargs)
+
+
+class TaxThreshold(models.Model):
+    """سقفٌ ضريبيّ **مؤرَّخ** — بياناتُ منصّةٍ لا بياناتُ مكتب.
+
+    **بلا `tenant` عمداً**: السقفُ واحدٌ لكل المكاتب كاللائحة القادمة في #274،
+    ونسخةٌ لكل شركة تعني سقفين مختلفين لنفس السنة في منصّةٍ واحدة. ولذلك لا يمرّ
+    `amount` بقناع المبالغ: ليس مبلغَ زبون، بل رقمٌ منشورٌ في `source_url`.
+    """
+
+    KIND_VAT_MONTHLY_REPORTING = THRESHOLD_KIND_VAT_MONTHLY_REPORTING
+    KIND_VAT_EXEMPT_DEALER = THRESHOLD_KIND_VAT_EXEMPT_DEALER
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    kind = models.CharField(
+        max_length=40, choices=THRESHOLD_KIND_CHOICES, verbose_name="نوع السقف",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    amount = models.DecimalField(
+        max_digits=14, decimal_places=2, verbose_name="السقف",
+    )
+    #: المصدرُ الرسميّ المنشور — بلا رابطٍ يصير الرقم رأياً.
+    source_url = models.URLField(max_length=300, verbose_name="المصدر")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "سقف ضريبي"
+        verbose_name_plural = "السقوف الضريبية"
+        ordering = ["tax_system", "kind", "year"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tax_system", "kind", "year"], name="uniq_tax_threshold",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.kind}/{self.year}"

@@ -15,13 +15,32 @@ import {
   apiPutObject,
 } from './restApi';
 import { resolveTenantId } from '../utils/tenantContext';
-import type { SettingRow } from '../utils/accountingOffice';
+import type {
+  ApplyPackageResult,
+  ClientServiceRow,
+  ClientServicesPayload,
+  OfficeServiceRow,
+  ServicePackageRow,
+  ServiceSuggestion,
+  SettingRow,
+} from '../utils/accountingOffice';
 
-export type { SettingRow };
+export type {
+  ApplyPackageResult,
+  ClientServiceFrequencyRow,
+  ClientServiceRow,
+  ClientServicesPayload,
+  OfficeServiceRow,
+  ServicePackageRow,
+  ServiceSuggestion,
+  SettingRow,
+} from '../utils/accountingOffice';
 
 const BASE = 'accounting-office/';
 const CLIENTS = `${BASE}clients/`;
 const CONTACTS = `${BASE}contacts/`;
+const SERVICES = `${BASE}services/`;
+const PACKAGES = `${BASE}packages/`;
 const SETTINGS = `${BASE}settings/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
@@ -258,3 +277,94 @@ export const setClientSetting = (
 
 export const resetClientSetting = (clientId: number, key: string): Promise<void> =>
   apiDelete(`${CLIENTS}${clientId}/settings/${key}/`, tenantOpts());
+
+// ── كتالوج الخدمات (#273) ───────────────────────────────────────────────
+/** الكتالوج بأسطرِه الخمسة الافتراضية — يُزرع خادمياً عند أول قراءة. */
+export const listOfficeServices = (): Promise<OfficeServiceRow[]> =>
+  apiGetList<OfficeServiceRow>(SERVICES, tenantOpts());
+
+export const createOfficeService = (payload: {
+  name: string;
+  position?: number;
+}): Promise<OfficeServiceRow> => apiPostObject<OfficeServiceRow>(SERVICES, payload, tenantOpts());
+
+export const updateOfficeService = (
+  id: number,
+  payload: Partial<Pick<OfficeServiceRow, 'name' | 'is_active' | 'position'>>,
+): Promise<OfficeServiceRow> =>
+  apiPatchObject<OfficeServiceRow>(`${SERVICES}${id}/`, payload, tenantOpts());
+
+// ── الباقات (#273) ──────────────────────────────────────────────────────
+export const listServicePackages = (): Promise<ServicePackageRow[]> =>
+  apiGetList<ServicePackageRow>(PACKAGES, tenantOpts());
+
+export const createServicePackage = (payload: {
+  name: string;
+  suggested_price?: string | null;
+  services?: number[];
+}): Promise<ServicePackageRow> => apiPostObject<ServicePackageRow>(PACKAGES, payload, tenantOpts());
+
+export const updateServicePackage = (
+  id: number,
+  payload: {
+    name?: string;
+    suggested_price?: string | null;
+    services?: number[];
+  },
+): Promise<ServicePackageRow> =>
+  apiPatchObject<ServicePackageRow>(`${PACKAGES}${id}/`, payload, tenantOpts());
+
+export const deleteServicePackage = (id: number): Promise<void> =>
+  apiDelete(`${PACKAGES}${id}/`, tenantOpts());
+
+// ── خدمات الزبون (#273) ─────────────────────────────────────────────────
+export const listClientServices = (clientId: number): Promise<ClientServicesPayload> =>
+  apiGetObject<ClientServicesPayload>(`${CLIENTS}${clientId}/services/`, tenantOpts());
+
+/** الاقتراحُ وسببُه — نقطةُ قراءةٍ لا كتابة: الموظف يؤكّد أو يغيّر بعدها. */
+export const suggestClientService = (
+  clientId: number,
+  serviceCode: string,
+  onDate?: string,
+): Promise<ServiceSuggestion> =>
+  apiGetObject<ServiceSuggestion>(`${CLIENTS}${clientId}/services/suggest/`, {
+    ...tenantOpts(),
+    query: { service: serviceCode, on: onDate || undefined },
+  });
+
+export const addClientService = (
+  clientId: number,
+  payload: {
+    service: number;
+    starts_on?: string;
+    responsible_from?: string;
+    frequency?: string | null;
+  },
+): Promise<ClientServicesPayload> =>
+  apiPostObject<ClientServicesPayload>(`${CLIENTS}${clientId}/services/`, payload, tenantOpts());
+
+export const changeClientServiceFrequency = (
+  clientId: number,
+  serviceRowId: number,
+  payload: { frequency: string; effective_from: string },
+): Promise<ClientServicesPayload> =>
+  apiPostObject<ClientServicesPayload>(
+    `${CLIENTS}${clientId}/services/${serviceRowId}/frequency/`, payload, tenantOpts(),
+  );
+
+export const stopClientService = (
+  clientId: number,
+  serviceRowId: number,
+  endsOn: string,
+): Promise<ClientServicesPayload> =>
+  apiPostObject<ClientServicesPayload>(
+    `${CLIENTS}${clientId}/services/${serviceRowId}/stop/`, { ends_on: endsOn }, tenantOpts(),
+  );
+
+export const applyServicePackage = (
+  clientId: number,
+  packageId: number,
+): Promise<ApplyPackageResult> =>
+  apiPostObject<ApplyPackageResult>(
+    `${CLIENTS}${clientId}/apply-package/`, { package: packageId }, tenantOpts(),
+  );

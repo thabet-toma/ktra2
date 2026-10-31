@@ -1,4 +1,4 @@
-# accounting_office — موديول مكتب المحاسبة: زبون المكتب وبطاقته وجهاته وإعداداته وأدواره
+# accounting_office — موديول مكتب المحاسبة: زبون المكتب وبطاقته وجهاته وإعداداته وأدواره وخدماته وباقاته
 
 > مبني على قراءة الكود مباشرةً بتاريخ 2026-10-31. عند تعارض هذا الملف مع الكود، الكود هو المرجع.
 
@@ -7,11 +7,12 @@
 مكتبُ المحاسبة كمنتجٍ مستقلّ على المنصّة (المواصفة #270، وتذكرة الأساس #271).
 المكتب **شركةٌ** على المنصّة بقالب `accounting_office`، وتحت كل شركةٍ سجلٌّ خاصّ
 بها: زبائنها (منشآت بملفٍ ضريبيٍّ واحد)، وبطاقاتها الضريبية، وجهاتُ الاتصال،
-وسجلُّ إعداداتها، **وموظّفوها وأدوارهم ومسؤولُ كل زبون** (#272).
+وسجلُّ إعداداتها، **وموظّفوها وأدوارهم ومسؤولُ كل زبون** (#272)، **وكتالوجُ خدماته وباقاتُه الجاهزة، وخدماتُ كل زبونٍ بدوريتها المؤرَّخة** (#273).
 
-هذا الملفّ يوثّق **الطبقتين الأولى والثانية**: الزبون وبطاقته وجهاته وإعداداته،
-**والأدوار والصلاحيات والموظف المسؤول**. الخدماتُ والأتعابُ والالتزاماتُ
-والمواعيدُ والأوراقُ والتذكيراتُ تأتي في تذاكرها، والملفّ يُحدَّث معها.
+هذا الملفّ يوثّق **الطبقات الثلاث الأولى**: الزبون وبطاقته وجهاته وإعداداته،
+**والأدوار والصلاحيات والموظف المسؤول**، **والخدمات والباقات وخدمات الزبون**.
+الأتعابُ والالتزاماتُ والمواعيدُ والأوراقُ والتذكيراتُ تأتي في تذاكرها، والملفّ
+يُحدَّث معها.
 
 **مفتاح الترخيص:** `accounting_office` في `core/modules.py` (`MODULES`) — تسميتُه
 «مكتب المحاسبة»، خططُه `Pro` و`Enterprise`، و`legacy_flag: None` (لا عَلَم قديم
@@ -30,16 +31,16 @@
 
 | الملف | الغرض |
 |---|---|
-| `accounting_office/models.py` | النماذج السبعة، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()` |
+| `accounting_office/models.py` | النماذج الاثنا عشر، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()` |
 | `accounting_office/settings_registry.py` | سجلّ الإعدادات: المفتاح والنوع والمستويات والافتراضيِّ ومُتحقِّقُ القيمة |
-| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`** |
+| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`**، وكتالوجُ الخدمات وباقاتُها، وخدماتُ الزبون ودورياتُها المؤرَّخة، و**`suggest_frequency`** (#273) |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
-| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها |
+| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273) |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
 | `accounting_office/urls.py` | `SimpleRouter` (لا `DefaultRouter`: جذرُه فهرسٌ غير محروس) |
 | `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` |
-| `frontend_v2/utils/accountingOffice.ts` | الدوالّ الخالصة: تخصيصُ بطاقة الزبون، وحالةُ المخصَّص، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وما يخفيه حجم «شخص واحد»، وقناعُ المبلغ المخفيّ («—»)، وأدوارُ قسم المكتب (بلا جدول تسميات). والشاشة تحفظ الحالة في العنوان عبر `useSearchParams` من react-router — لا `pushState`/`popstate` يدوياً |
-| `frontend_v2/components/accounting-office/` | شاشات: القائمة (وتركّب ملفّ الزبون)، والإعدادات (وفيه قسم «الموظفون والأدوار»)، وخطوة أول تشغيل، و`OfficeUi.tsx` عناصرُ عرضٍ محليّةٌ على الوضع الداكن |
+| `frontend_v2/utils/accountingOffice.ts` | الدوالّ الخالصة: تخصيصُ بطاقة الزبون، وحالةُ المخصَّص، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وما يخفيه حجم «شخص واحد»، وقناعُ المبلغ المخفيّ («—»)، وأدوارُ قسم المكتب (بلا جدول تسميات). والشاشة تحفظ الحالة في العنوان عبر `useSearchParams` من react-router — لا `pushState`/`popstate` يدوياً، وأولُ الشهر ومنتقي الخدمات المتاحة وتسميةُ الدورية من اختيارات الخادم وملخّصُ الباقة (#273) |
+| `frontend_v2/components/accounting-office/` | شاشات: القائمة (وتركّب ملفّ الزبون)، والإعدادات (وفيه قسم «الموظفون والأدوار»)، وخطوة أول تشغيل، و`OfficeUi.tsx` عناصرُ عرضٍ محليّةٌ على الوضع الداكن، وتبويبُ «الخدمات» ومجموعةُ «الخدمات والباقات» (#273) |
 
 ## الـModels
 
@@ -52,6 +53,11 @@
 | `ClientReminderRecipient` | `reminder_type` (`documents`/`deadline`/`balance`/`appointment`) | `(client, reminder_type)` فريد ← `ClientContact`. غيابُ الصفّ = الرئيسية |
 | `OfficeSettingValue` | `key`, `value` (JSON) | `(tenant, key)` فريد — قيمةُ المكتب |
 | `ClientSettingOverride` | `key`, `value` (JSON) | `(tenant, client, key)` فريد — تخصيصُ الزبون |
+| `OfficeService` | `code` (`SlugField`), `name`, `is_active`, `is_builtin`, `position` | `tenant` FK. **كتالوجُ المكتب**: فرادةٌ غير مشروطة على `(tenant, code)`، والخمسةُ الافتراضية أكوادُها ثابتة (`DEFAULT_SERVICES`) لأنّ الاقتراحَ يقرؤها، وتُزرع بـ`ensure_default_services` لا بهجرة بيانات. **لا حذفَ لخدمةٍ استُعملت** — `ClientService.service` على `PROTECT` والتعطيلُ هو الطريق |
+| `ServicePackage` | `name`, `suggested_price` (`Decimal(14, 2)`, `null=True`) | `tenant` FK، و`services` M2M إلى `OfficeService`. **مبلغٌ يمرّ بالقناع**: `suggested_price` في `AMOUNT_KEYS`، وكتابتُه بلا `office.amounts.view` ⇒ 403. والحذفُ مباحٌ للباقة وحدها: قالبٌ لا تاريخَ زبونٍ فيه |
+| `ClientService` | `starts_on`, `ends_on` (nullable = الإيقاف), `responsible_from`, `created_at` | `tenant` FK، و`client` FK، و`service` FK. **لا حذف**: الإيقافُ يكتب `ends_on` ويُبقي الصفَّ في التاريخ. ولا فترةَ متداخلةً لنفس `(زبون، خدمة)` — `overlapping_client_service` ترفضها في الخدمة، و`status_on(day)` وحدها تقول «نشطة أم موقوفة». و`responsible_from` يُخزَّن أولَ الشهر فقط: لا توليدَ فتراتٍ هنا (#274/#275) |
+| `ClientServiceFrequency` | `frequency` (`monthly`/`bimonthly`/`quarterly`/`annual`/`on_demand`), `effective_from`, `suggested`, `created_by` | `client_service` FK، فرادةٌ على `(client_service, effective_from)`. **الدوريةُ بتاريخ سريان**: تغييرُها **يضيف صفّاً** ولا يعدّل ما قبله، والدوريةُ في يومٍ ما = الصفُّ ذو أكبر `effective_from <= اليوم` (`frequency_on`) |
+| `TaxThreshold` | `tax_system`, `kind` (`vat_monthly_reporting`/`vat_exempt_dealer`), `year`, `amount`, `source_url` | **بلا `tenant` عمداً**: بياناتُ منصّةٍ مؤرَّخة واحدةٌ لكل المكاتب، فرادةٌ على `(tax_system, kind, year)`، وتُزرع بهجرة بياناتٍ من البحث. و`amount` **ليس مبلغَ زبون** فلا يُقنَّع — مُعفى في `test_amounts_guard.py` بسببٍ مكتوب |
 
 ## دوال الـservices العامة
 
@@ -87,13 +93,33 @@ update_tax_card(client, **fields)                             # المبيعات
 link_client_contact(...) / unlink_client_contact(...) / set_primary_client_contact(...)
 delete_contact(contact)                                       # يُرفض إن كانت مربوطةً بزبون
 set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) / reminder_recipients_payload(client)
+# ── الخدمات والباقات وخدمات الزبون (#273) ──
+ensure_default_services(tenant)                               # idempotent: الخمسةُ الافتراضية
+services_catalog_payload(tenant) / office_service_row(service)
+service_by_code(tenant, code) / create_office_service(tenant, *, name, position=None)
+update_office_service(service, *, name=None, is_active=None, position=None)
+packages_payload(tenant, *, user) / package_payload(package, *, user)
+create_service_package(tenant, *, name, suggested_price=None, service_ids=None)
+update_service_package(package, *, name=None, suggested_price=_UNSET, service_ids=None)
+delete_service_package(package)                               # الباقةُ وحدها تُحذف
+frequency_on(client_service, day, *, rows=None)               # القاعدةُ الوحيدة
+frequency_label(value) / frequency_choices()
+client_services_payload(client, *, user, today=None) / client_service_row(...)
+add_client_service(*, client, service, starts_on=None, responsible_from=None, frequency=None, actor=None, today=None)
+change_client_service_frequency(client_service, *, frequency, effective_from, actor=None)
+stop_client_service(client_service, *, ends_on)
+apply_package(client, package, *, actor=None, today=None)     # نسخٌ لا ربط
+overlapping_client_service(client, service, starts_on)         # قاعدةُ التداخل الوحيدة
+service_or_raise(tenant, pk) / package_or_raise(tenant, pk)    # حلُّ الكائن ورسالتُه واحدة
+suggest_frequency(client, service_code, on_date=None)         # (frequency | None, reason)
+suggestion_payload(client, service, *, on_date=None)
 ```
 
 ## أهم الـAPI endpoints
 
 كلّها تحت `/api/accounting-office/`، وكلّها مصادَقةٌ بعضوية الشركة. بلا `AllowAny`.
 **القراءةُ لكلّ عضو، والكتابةُ بمفاتيحها** (#272): كلُّ نقطة كتابةٍ تتطلّب
-`office.clients.write` (`require_perm`)، وكتابةُ `settings/<key>/` تتطلّب
+`office.clients.write` (`require_perm`)، وكتابةُ `settings/<key>/` و`services/` و`packages/` تتطلّب
 `office.settings.manage`، و`assign/` تتطلّب `office.clients.assign`.
 
 | Method | المسار | الـview |
@@ -114,6 +140,15 @@ set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) 
 | `GET` | `settings/` | `OfficeSettingsViewSet` (`list`) |
 | `PUT/DELETE` | `settings/<key>/` | `OfficeSettingsViewSet` (`setting`) |
 | `GET` | `settings/<key>/clients/` | `OfficeSettingsViewSet` (`customized_clients`) |
+| `GET/POST` | `services/` | `OfficeServiceViewSet` (`list`, `create`) — الكتالوجُ يُزرع عند أول قراءة |
+| `GET/PUT/PATCH` | `services/<pk>/` | `OfficeServiceViewSet` (`retrieve`, `update`, `partial_update`) — **لا `DELETE`** (405) |
+| `GET/POST` | `packages/` | `OfficePackageViewSet` (`list`, `create`) |
+| `GET/PUT/PATCH/DELETE` | `packages/<pk>/` | `OfficePackageViewSet` — الحذفُ مباحٌ للباقة وحدها |
+| `GET/POST` | `clients/<pk>/services/` | `OfficeClientViewSet` (`client_services`) — القائمةُ بالتاريخ والدورية الحالية وتاريخ الدوريات، والإضافة |
+| `GET` | `clients/<pk>/services/suggest/?service=<code>&on=<date>` | `OfficeClientViewSet` (`client_service_suggest`) — الاقتراحُ وسببُه |
+| `POST` | `clients/<pk>/services/<client_service_id>/frequency/` | `OfficeClientViewSet` (`client_service_frequency`) |
+| `POST` | `clients/<pk>/services/<client_service_id>/stop/` | `OfficeClientViewSet` (`client_service_stop`) |
+| `POST` | `clients/<pk>/apply-package/` | `OfficeClientViewSet` (`apply_package`) — يُرجع ما أُضيف وما تُخطّي |
 
 **لا `DELETE` للزبون**: `destroy` ترفع `MethodNotAllowed` (405)، و«منتهٍ» حالةٌ
 تُكتب بقيمتها الحقيقية لا صفٌّ يُطوى.
@@ -152,6 +187,68 @@ set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) 
 «المسؤول» وزرّ «حوّل» وقسم الأدوار — والصلاحياتُ هي الحكم على كل حال. وخطوةُ
 أول تشغيلٍ لا تعرض خياراتٍ على مَن لا يملك `office.settings.manage`: تقول إن
 مالك المكتب أو مديره يكمله.
+
+## الخدمات والباقات وخدمات الزبون (#273)
+
+**ثلاثةُ مستوياتٍ لا مستويان**: «الخدمة» صفٌّ في **كتالوج المكتب** (`OfficeService`)
+يفعّله ويضيف عليه ولا يحذف ما استُعمل، و**الباقة** (`ServicePackage`) قالبٌ يضمّ
+خدماتٍ وسعراً مقترحاً اختيارياً، و**خدمةُ الزبون** (`ClientService`) ما اشتراه
+زبونٌ بعينه بتاريخِ بدءٍ وانتهاءٍ و«من أيّ فترةٍ المكتب مسؤول». والتطبيقُ **نسخٌ
+لا ربط**: تعديلُ الباقة بعدها لا يمسّ زبوناً، وتعديلُ خدمات الزبون لا يمسّ الباقة.
+
+**«التغييرُ يسري من تاريخٍ ولقدّام» قاعدةٌ لا خيار.** الدوريةُ لا تُعدَّل في
+مكانها: `ClientServiceFrequency` صفٌّ لكل تغيير بتاريخ سريانه، و
+`frequency_on(client_service, day)` وحدها تجيب «ما دوريتُها في يومٍ ما؟» (الصفُّ ذو
+أكبر `effective_from <= day`). فمن غيّرها من نيسان لا يمسّ آذار، ويُقرأ تاريخُ
+الدوريات كاملاً في التبويب. وتاريخٌ مسجَّلٌ سابقاً يُرفض (400) إن وقع، ويُستبدل
+صفُّه وحده إن كان مستقبلياً بعد اليوم — خطأُ إدخالٍ لم يقع بعد.
+
+**الحالةُ نسبةً إلى اليوم، والفتراتُ لا تتداخل.** `ClientService.status_on(day)`
+وحدها تجيب «نشطة أم موقوفة»: موقوفةٌ ⇔ `ends_on is not None and ends_on < day` —
+فإيقافٌ بتاريخٍ مستقبليّ يبقى نشطاً اليوم ويُعرض «حتى <التاريخ>». و
+`overlapping_client_service(client, service, starts_on)` قاعدةُ التداخل الوحيدة:
+ترفض بدايةً جديدةً إن وُجد صفٌّ `ends_on is null OR ends_on >= starts_on` — وكان
+`ends_on__isnull` وحده يسمح بفترةٍ متداخلةٍ مع إيقافٍ مستقبليّ (تقريران لشهرٍ
+واحد). `add_client_service` يرفض بها، و`apply_package` يتخطّى بها بسببٍ مكتوب.
+والإيقافُ **مرّةٌ واحدة** (صفٌّ له `ends_on` يُرفض بـ400)، ولا يسبق تاريخَ سريان
+دوريةٍ مسجَّلة. و«من أيّ فترةٍ المكتب مسؤول» تُطبَّع أولَ الشهر دائماً
+(`_first_of_month`): المكتبُ مسؤولٌ عن فترةٍ كاملة أو لا.
+
+**الاقتراحُ من البطاقة لا من رقمٍ في الكود.** `suggest_frequency(client, code, day)`
+تُرجع `(الدورية | None, السبب)` وتقرأ النظامَ بـ`resolve_setting(… "tax_system",
+client=client)` — أي بطاقة الزبون لا إعداد المكتب:
+- **إسرائيل، `vat`**: معفى (`exempt`) ⇒ سنوي؛ مرخّص/غير ربحيّ: المبيعاتُ السنوية
+  فوق سقف `vat_monthly_reporting` لسنة `day` ⇒ شهري، وإلا كل شهرين.
+- **إسرائيل، معفى فوق سقف `vat_exempt_dealer`**: يبقى سنوياً، ويُضاف إلى السبب
+  «المبيعات تتجاوز سقف עוסק פטור لسنة <سنة> — راجع التصنيف» (ومعه «تقديري» إن
+  كان السقفُ مستعاراً من سنةٍ سابقة) — بلا أرقام مبالغ.
+- **صفرُ مبيعاتٍ إسرائيليّ**: الدوريةُ تبقى كل شهرين والسببُ يقول «لا مبيعات سنوية
+  في البطاقة» بدل «المبيعات في حدوده».
+- **فلسطين، `vat`**: المسجّل (مرخّص/معفى) ⇒ شهري، وغيرُ المسجّل ⇒ `None` (لا
+  تقريرَ دوريّ) فيُطلب من الموظف اختيارٌ صريح بدل التخمين.
+- `payroll` و`bookkeeping` ⇒ شهري · `annual_accounts` ⇒ سنوي · `consulting` وكلُّ
+  خدمةٍ يضيفها المكتب ⇒ عند الطلب.
+- **السقوفُ بياناتٌ مؤرَّخة** في `TaxThreshold` (بلا `tenant`) تُزرع بهجرة بياناتٍ
+  من البحث بروابطها: IL `vat_monthly_reporting` 2026 = 1,775,000 و2027 =
+  1,805,000، وIL `vat_exempt_dealer` 2026 = 122,833. سنةٌ بلا سقفٍ منشور تأخذ
+  آخر سقفٍ سابق ويقول السبب «تقديري: سقف <سنة>»، وسنةٌ **قبل أقدم سقف** ⇒ `None`
+  (لا استعارةَ من مستقبل).
+- **السببُ نصٌّ بلا أرقام مبالغ**: النظامُ والتصنيفُ والسنةُ فقط، فلا يحتاج قناعاً.
+  والاقتراحُ اقتراح: الموظف يؤكّده أو يغيّره، والمُسجَّل هو اختياره لا المقترح
+  (`ClientServiceFrequency.suggested` يحفظ المقترحَ وقتها للسجلّ).
+
+**الواجهة**: تبويبُ «الخدمات» في ملفّ الزبون يعرض النشطَ والموقوف (بتسمية
+`status_label` من الخادم)، والدوريةَ الحالية و«من تاريخ»، و«غيّر الدورية من…»
+(افتراضُ «سارية من» أولُ الشهر القادم، `firstOfNextMonth` — اليومُ قد يكون تاريخَ
+سريانٍ مسجَّلاً فيرفضه الخادم)، و«أوقف بتاريخ…» (بتأكيد `useConfirm`، ويُخفى عن
+صفٍّ له `ends_on`)، و«أضف خدمة» يسأل «من أيّ فترةٍ المكتب مسؤول؟» بحقل شهرٍ
+(`input[type=month]` يُرسَل `<شهر>-01`) ويعرض المقترحَ وسببَه لتأكيده أو تغييره،
+و«طبّق باقة» (ونتيجتُه بلا إضافةٍ تنبيهٌ معلوماتيّ لا خطأ). وردُّ اقتراحٍ قديم لا
+يكتب فوق أحدث (عدّادُ طلبات). ومجموعةُ «الخدمات والباقات» في الإعدادات: الكتالوج
+(تفعيل، إضافة، إعادة تسمية) والباقات (اسم، خدمات، سعر مقترح يُعرض «—» لمن لا يرى
+المبالغ)، ومحرّرُ الباقة يعرض المفعّلةَ وحدها **وما اختِير سابقاً وهو معطَّل**
+معلَّماً «معطّلة»، وحالتُها تحميلٌ وخطأٌ بزرّ «أعد المحاولة». والأزرارُ لمن يملك
+المفتاح، والخادمُ هو الحكم.
 
 ## الاعتماديات
 
@@ -233,7 +330,7 @@ set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) 
   أولاً**، وإلا سقط الحارس.
 - **الكتابةُ بمفاتيحها لا بالدور.** كلُّ نقطة كتابةٍ في `views.py` (زبائن، بطاقة،
   جهات، ربط، مستلِمون، تخصيص زبون) تتطلّب `office.clients.write`، وكتابةُ
-  `settings/<key>/` تتطلّب `office.settings.manage`، والتحويل
+  `settings/<key>/` تتطلّب `office.settings.manage` (ومعها الكتالوجُ والباقات، #273)، والتحويل
   `office.clients.assign`. **القارئ لا يكتب: 403**، والقراءةُ تبقى لكل عضو.
 - **الموظف المسؤول عضوٌ في شركة الزبون.** قاعدةُ `is_tenant_member` في
   `accounting_office/models.py` وحدها يجيب عنها الخدمةُ (`ValidationError` ← 400)
@@ -277,6 +374,48 @@ set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) 
   أدوار المكتب وحدها (`OFFICE_OWNER_ROLE_LABEL`؛ تسميتُه في `ROLE_LABELS` «مدير»
   ولكلّ الشاشات، ولا تُبدَّل من أجله).
 
+- **الدوريةُ بتاريخ سريانٍ لا في مكانها.** `ClientServiceFrequency` تُضاف ولا
+  تُعدَّل، و`frequency_on` وحدها تقرأ «دوريةَ اليوم» — لا شرطٌ ثانٍ في نقطةٍ أو
+  شاشة. تغييرُ الدورية بعد `ends_on` مرفوض، وقبل `starts_on` مرفوض، وتاريخٌ وقع
+  لا يُعاد كتابته (400)؛ والمستقبليُّ يُستبدل صفُّه وحده.
+- **الإيقافُ لا يمحو، والفتراتُ لا تتداخل.** `stop_client_service` يكتب `ends_on`
+  ويُبقي الصفَّ، و`ClientService` لا `DELETE` لها في الـAPI: تقريرُ آذار المستحقُّ
+  في نيسان يحتاج صفَّ آذار. والإيقافُ **مرّةٌ واحدة** (صفٌّ له `ends_on` يُرفض 400)،
+  ولا يسبق تاريخَ سريان دوريةٍ مسجَّلة. و`overlapping_client_service` قاعدةُ
+  التداخل الوحيدة (`ends_on is null OR ends_on >= starts_on`): الإيقافُ المستقبليّ
+  **لا يفتح** فترةً متداخلة — كان `ends_on__isnull` يفتحها ويصنع تقريرين لشهرٍ واحد.
+- **الحالةُ نسبةً إلى اليوم لا إلى وجود تاريخ.** `ClientService.status_on(day)`
+  وحدها: موقوفةٌ ⇔ `ends_on < day`. «أوقف بتاريخ 31/12» يبقى نشطاً اليوم ويُعرض
+  «حتى 31/12»، ولا `is_active` مشتقٌّ من `ends_on is None`.
+- **«من أيّ فترةٍ المكتب مسؤول» فترةٌ كاملة.** تُطبَّع أولَ الشهر دائماً
+  (`_first_of_month`): إرسالُ 17/5 يُخزَّن 1/5 — لا مكتبَ مسؤولٌ عن نصف فترة.
+- **الباقةُ نسخٌ لا ربط.** `apply_package` يمرّ على كل خدمةٍ في الباقة: المعطَّلةُ
+  في الكتالوج والمتداخلةُ مع فترةٍ قائمةٍ تُبلَّغ في `skipped` بسببهما (لا تختفي
+  بصمت)، والباقي يُنسخ عبر `_insert_client_service` نفسها التي تستعملها الإضافة،
+  والاقتراحُ يُحسب **مرّةً واحدة** (`on_demand` إن لا اقتراح). ولا حقلَ ربطٍ بين
+  الباقة وخدمات الزبون — تعديلُ أحدهما لا يمسّ الآخر.
+- **السقوفُ بياناتُ منصّةٍ مؤرَّخة لا رقمٌ في الكود.** `TaxThreshold` بلا `tenant`
+  وتُقرأ بسنة اليوم (وآخر سقفٍ سابق عند الغياب، و«تقديري» معلَنةً)؛ رقمٌ في
+  `services.py` كان يتعفّن مع كل نشرٍ رسميّ. وسقفُ `vat_exempt_dealer` **يُقرأ لا
+  يُترك خاملاً**: تجاوزُ المعفى له يُضيف إلى السبب «راجع التصنيف» بلا أرقام مبالغ.
+  و`amount` مُعفى من القناع بسببٍ مكتوب في `accounting_office/tests/test_amounts_guard.py`
+  لأنه سقفٌ منشور لا مبلغُ زبون (والإعفاءُ مفتاحُه `TaxThreshold.amount` مؤهَّلاً،
+  فلا يُعفى حقلٌ آخر بالاسم نفسه).
+- **`suggested_price` مبلغ.** مُسجَّلٌ في `AMOUNT_KEYS` ويمرّ بـ`mask_amounts`
+  في `package_payload`، وكتابتُه بلا `office.amounts.view` ⇒ 403؛ ومفتاحُ مبلغٍ
+  جديد يمرّ بالثابت نفسه أو يسقط الحارس. وقرارُ القناع في `packages_payload`
+  يُحسب **مرّةً للقائمة** لا لكل صفّ (كان `package.tenant` و`can_see_amounts`
+  استعلاماتٍ لكل باقة).
+- **كتالوجُ الخدمات والباقات بمفتاح الإعدادات.** إنشاءُ الخدمة وتعديلُها
+  وتفعيلُها وكلُّ كتابةِ باقةٍ تتطلّب `office.settings.manage`، ونقاطُ خدمات
+  الزبون `office.clients.write` مع `visible_clients` (زبونُ غيرك 404). والقارئُ
+  403 على كل كتابة، **ويُحرَس المفتاحُ لا الدور**: `viewer` يمنعه
+  `TenantRolePermission` قبل النقطة، فيُثبت الحارسُ بعضوٍ يكتب فعلاً (محاسب)
+  لا يملك مفتاحَ الإعدادات.
+- **لا حذفَ لخدمةٍ في الكتالوج.** لا `DELETE` على `services/` (405)،
+  و`ClientService.service` على `PROTECT` — التعطيلُ (`is_active=False`) يُخفيها
+  من الإضافة ويُبقي تاريخَ من اشتراها.
+
 ## الاختبارات المهمة
 
 | الملف | ما يغطيه |
@@ -289,3 +428,4 @@ set_reminder_recipient(...) / resolve_reminder_recipient(client, reminder_type) 
 | `accounting_office/tests/test_settings.py` | المستويات والافتراضيُّ والتخصيصُ للشغلة، رفضُ مستوىً غير مسموحٍ وقيمةٍ غير صالحة، «ارجع للافتراضي» و«ارجع لإعداد المكتب» ورفضُ الأول لمن لا افتراضي له، تفريغُ البطاقة عند تبديل النظام، عدُّ المخصِّصين، وأول تشغيل |
 | `accounting_office/tests/test_settings_guard.py` | لا ذِكرَ لنموذجَي التخزين خارج وحدة المحلّل |
 | `frontend_v2/utils/accountingOffice.test.ts` | إخفاءُ `filing_method` لغير الإسرائيليّ، واشتقاقُ «مخصَّص»، وشارةُ الحالة، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وإخفاءُ الإسناد في «شخص واحد»، وعرضُ «—» للمبلغ المخفيّ، وأدوارُ المكتب الأربعة |
+| `accounting_office/tests/test_services.py` | الخمسةُ الافتراضية و`ensure_default_services` idempotent والكودُ المولَّد يتخطّى المأخوذ، وبياناتُ السقوف من هجرة `0003` نفسها (أرقامُها وروابطها حرفاً)، وتغييرُ الدورية من تاريخٍ لا يمسّ ما قبله، والإيقافُ يُبقي الصفَّ ويمنع تعديلَ الدورية بعده ويقع مرّةً واحدة ولا يسبق سريانَ دورية، والحالةُ نسبةً لليوم (إيقافٌ مستقبليّ = نشطة)، ومنعُ التداخل (قبل `ends_on` أو فيه ⇒ رفض، وبعده ⇒ قبول)، وتطبيعُ `responsible_from` أولَ الشهر، والباقةُ نسخٌ لا ربط (وإعادةُ إضافةِ الموقوفة، وتخطّي المعطَّلةِ والمتداخلةِ بسببهما، وفرعُ «لا اقتراح» فعلاً)، والاقتراحُ لنظامين ولسقفين في سنتين وبلا سقف («تقديري») وقبل أقدم سقف (`None` + 400)، وتحذيرُ تجاوز سقف עוסק פטור وصفرُ المبيعات، والسببُ بلا أرقام، وحارسا المفتاحين (محاسبٌ بلا `office.settings.manage`، وعضوٌ يرى الزبونَ بلا مفتاح الكتابة)، و404 لزبونٍ غيرك على كل نقطة، وقناعُ `suggested_price` ورفضُ كتابته بعضوٍ يملك مفتاحَ الإعدادات ولا يرى المبالغ، وعددُ استعلاماتِ قائمة الباقات لا يكبر بعددها |
