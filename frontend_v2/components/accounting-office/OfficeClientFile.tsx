@@ -72,6 +72,7 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeClientEvents } from './OfficeClientEvents';
 import { OfficeObligationRow } from './OfficeObligationRow';
 import { SettingControl } from './SettingControl';
 import {
@@ -1144,6 +1145,13 @@ export const OfficeClientFile: React.FC<{
 
       {tab === 'obligations' ? (
         <div className="space-y-4">
+          {/* #277: «صار حدث» — خبرٌ يولّد التزامَه، وقائمتُه لا تُمحى. */}
+          <OfficeClientEvents
+            clientId={clientId}
+            canWrite={canWrite}
+            onRecorded={reloadObligations}
+            onError={(message) => toast(message, 'error')}
+          />
           {obligationsError ? (
             <OfficeError
               message={obligationsError}

@@ -18,13 +18,17 @@ import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
   CalendarPayload,
+  ClientEventsPayload,
+  ClientEventRow,
   ClientObligationsPayload,
   ClientTaskRow,
   ClientServiceRow,
   ClientServicesPayload,
+  DeadlineRuleOverrideRow,
   DeadlineRuleRow,
   OfficeAlertRow,
   OfficeAlertsPayload,
+  OfficeCustomRulesPayload,
   OfficeServiceRow,
   ObligationRow,
   ServicePackageRow,
@@ -38,16 +42,22 @@ export type {
   ApplyPackageResult,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientEventRow,
+  ClientEventsPayload,
   ClientObligationsPayload,
   ClientServiceFrequencyRow,
   ClientServiceRow,
   ClientServicesPayload,
   ClientTaskRow,
+  DeadlineRuleOverrideRow,
   DeadlineRuleRow,
+  EventKindChoice,
   ObligationBadge,
   ObligationRow,
   OfficeAlertRow,
   OfficeAlertsPayload,
+  OfficeCustomRuleRow,
+  OfficeCustomRulesPayload,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
@@ -65,6 +75,7 @@ const PACKAGES = `${BASE}packages/`;
 const SETTINGS = `${BASE}settings/`;
 const CALENDAR = `${BASE}calendar/`;
 const DEADLINE_RULES = `${BASE}deadline-rules/`;
+const CUSTOM_RULES = `${BASE}custom-rules/`;
 const TODAY = `${BASE}today/`;
 const OBLIGATIONS = `${BASE}obligations/`;
 const TASKS = `${BASE}tasks/`;
@@ -504,3 +515,86 @@ export const markOfficeAlertSeen = (id: number): Promise<OfficeAlertRow> =>
 /** «شفتهم كلهم» — `{"seen": n}` عددُ ما كُتب له وقتُ الشوفة. */
 export const markAllOfficeAlertsSeen = (): Promise<{ seen: number }> =>
   apiPostObject<{ seen: number }>(`${ALERTS}seen-all/`, {}, tenantOpts());
+
+// ── تعديل المكتب على اللائحة، والتمديد، والتزامات المكتب، والأحداث (#277) ──
+//
+// **الكتابةُ بمفتاحها خادمياً**: اللائحةُ والتزاماتُ المكتب بـ
+// `office.settings.manage` (403 لغيره)، والأحداثُ والتمديد بـ`office.clients.write`.
+// والقراءةُ تُرجع الحمولة كاملةً بعد كل تعديل، فتحدّث الشاشةُ من ردّ الخادم بدل
+// تخمين الحال.
+export const setDeadlineRuleOverride = (
+  payload: {
+    system: 'PS' | 'IL';
+    code: string;
+    rule_day?: number | null;
+    rule_month?: number | null;
+    electronic_extension_days?: number | null;
+    note?: string;
+  },
+): Promise<{
+  override: DeadlineRuleOverrideRow;
+  changed_obligations: number;
+}> => apiPostObject(`${DEADLINE_RULES}override/`, payload, tenantOpts());
+
+/** «رجّع للمنصة» — صفُّ `cleared` في السجلّ؛ لا حذفَ لتعديلٍ سابق. */
+export const clearDeadlineRuleOverride = (
+  system: 'PS' | 'IL',
+  code: string,
+): Promise<{ override: DeadlineRuleOverrideRow; changed_obligations: number }> =>
+  apiPostObject(`${DEADLINE_RULES}clear-override/`, { system, code }, tenantOpts());
+
+/** «أُبقي تاريخي» — لقطةٌ من النسخة الجديدة فتصير السارية ويسقط التنبيه. */
+export const keepDeadlineRuleOverride = (
+  system: 'PS' | 'IL',
+  code: string,
+): Promise<{ override: DeadlineRuleOverrideRow; changed_obligations: number }> =>
+  apiPostObject(`${DEADLINE_RULES}keep-override/`, { system, code }, tenantOpts());
+
+export const listOfficeCustomRules = (): Promise<OfficeCustomRulesPayload> =>
+  apiGetObject<OfficeCustomRulesPayload>(CUSTOM_RULES, tenantOpts());
+
+export const createOfficeCustomRule = (payload: {
+  name: string;
+  service: number;
+  cadence: string;
+  rule_kind: string;
+  rule_day?: number | null;
+  rule_month?: number | null;
+}): Promise<OfficeCustomRulesPayload> =>
+  apiPostObject<OfficeCustomRulesPayload>(CUSTOM_RULES, payload, tenantOpts());
+
+export const updateOfficeCustomRule = (
+  id: number,
+  payload: {
+    name?: string;
+    service?: number;
+    cadence?: string;
+    rule_kind?: string;
+    rule_day?: number | null;
+    rule_month?: number | null;
+    is_active?: boolean;
+  },
+): Promise<OfficeCustomRulesPayload> =>
+  apiPatchObject<OfficeCustomRulesPayload>(`${CUSTOM_RULES}${id}/`, payload, tenantOpts());
+
+/** أحداثُ الزبون وأنواعُها المفعّلة — حمولةٌ واحدة تكفي تبويبَ «الالتزامات». */
+export const getClientEvents = (clientId: number): Promise<ClientEventsPayload> =>
+  apiGetObject<ClientEventsPayload>(`${CLIENTS}${clientId}/events/`, tenantOpts());
+
+export const recordClientEvent = (
+  clientId: number,
+  payload: { kind: string; occurred_on: string; note?: string },
+): Promise<{ event: ClientEventRow; obligations: ObligationRow[] }> =>
+  apiPostObject(`${CLIENTS}${clientId}/events/`, payload, tenantOpts());
+
+/** «مدّد» — تاريخٌ وملاحظة، والردُّ سطرُ الالتزام المحدَّث. */
+export const extendObligation = (
+  id: number,
+  payload: { until: string; note: string },
+): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/extend/`, payload, tenantOpts());
+
+export const clearObligationExtension = (id: number): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(
+    `${OBLIGATIONS}${id}/clear-extension/`, {}, tenantOpts(),
+  );

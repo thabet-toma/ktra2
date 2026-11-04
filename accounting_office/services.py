@@ -18,10 +18,12 @@ from uuid import uuid4
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, Max, OuterRef, Q
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from accounting_office import deadlines, settings_registry
 from accounting_office.models import (
+    CADENCE_EVENT,
     CADENCE_SERVICE,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CLIENT_SERVICE_STATUS_ACTIVE,
@@ -31,7 +33,10 @@ from accounting_office.models import (
     CONDITION_HAS_EMPLOYEES,
     CONDITION_IS_SELF_EMPLOYED,
     CONDITION_VAT_CLASSIFICATION_IN,
+    DEADLINE_CADENCE_CHOICES,
     DEFAULT_SERVICES,
+    EVENT_KIND_CHOICES,
+    EVENT_KIND_LABELS,
     FREQUENCY_ANNUAL,
     FREQUENCY_BIMONTHLY,
     FREQUENCY_KEYS,
@@ -43,35 +48,60 @@ from accounting_office.models import (
     OBLIGATION_BADGE_LATE,
     OBLIGATION_BADGE_LATE_INTERNAL,
     OBLIGATION_BADGE_NEAR,
+    OBLIGATION_CHANGE_EXTENSION,
+    OBLIGATION_CHANGE_EXTENSION_CLEARED,
+    OBLIGATION_CHANGE_OFFICE_OVERRIDE,
+    OBLIGATION_CHANGE_PLATFORM_UPDATE,
     OBLIGATION_DIRECTION_CHOICES,
     OBLIGATION_DIRECTION_LABELS,
+    OBLIGATION_ORIGIN_EVENT,
     OBLIGATION_ORIGIN_LABELS,
+    OBLIGATION_ORIGIN_OFFICE,
+    OBLIGATION_ORIGIN_OFFICIAL,
     OBLIGATION_STATUS_LABELS,
     OBLIGATION_STATUS_NOT_REQUIRED,
     OBLIGATION_STATUS_PENDING,
     OBLIGATION_STATUS_SUBMITTED,
+    OFFICE_ALERT_DEFAULT_OPENS,
     OFFICE_ALERT_KIND_BADGES,
     OFFICE_ALERT_KIND_LABELS,
     OFFICE_ALERT_KIND_OBLIGATION_LATE,
+    OFFICE_ALERT_KIND_OPENS,
+    OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED,
+    OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED,
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL,
+    OFFICE_CUSTOM_RULE_CADENCE_CHOICES,
+    OFFICE_CUSTOM_RULE_KIND_CHOICES,
+    OFFICE_RULE_OVERRIDE_FIELDS,
+    RULE_KIND_CHOICES,
+    RULE_KIND_DAYS_AFTER_EVENT,
+    RULE_KIND_DAY_OF_NEXT_MONTH,
+    RULE_KIND_END_OF_PERIOD,
+    RULE_KIND_MONTH_DAY_NEXT_YEAR,
     SERVICE_CODE_ANNUAL_ACCOUNTS,
     SERVICE_CODE_BOOKKEEPING,
     SERVICE_CODE_CONSULTING,
     SERVICE_CODE_PAYROLL,
     SERVICE_CODE_VAT,
+    TAX_SYSTEM_CHOICES,
     THRESHOLD_KIND_VAT_EXEMPT_DEALER,
     THRESHOLD_KIND_VAT_MONTHLY_REPORTING,
     ClientContact,
+    ClientEvent,
     ClientReminderRecipient,
     ClientService,
     ClientServiceFrequency,
     ClientSettingOverride,
     Contact,
+    DeadlineRule,
     DeadlineSchedule,
     Obligation,
+    ObligationDateChange,
     OfficeAlert,
     OfficeClient,
+    OfficeCustomRule,
     OfficeRefreshRun,
+    OfficeRuleOverride,
     OfficeService,
     OfficeSettingValue,
     PeriodTask,
@@ -487,6 +517,10 @@ def setting_value_label(definition, value) -> str:
         return "نعم" if value else "لا"
     if definition.kind == settings_registry.KIND_CHOICE:
         return setting_choice_label(definition, value)
+    if definition.kind == settings_registry.KIND_MULTI_CHOICE:
+        keys = value if isinstance(value, (list, tuple)) else []
+        labels = definition.labels
+        return "، ".join(labels.get(key, key) for key in keys) or NOT_CHOSEN_LABEL
     return str(value)
 
 
@@ -1933,6 +1967,10 @@ class CalendarContext:
     (`resolve_setting_for_clients` مفتاحاً مفتاحاً). وخدماتُ الزبائن تُجلب بـ
     `prefetch_related` على استعلام الزبائن الأب.
 
+    **ويحمل تعديلات المكتب وقواعده (#277) قِراءةً واحدة**: الساري لكل
+    `(نظام, كود)` وقواعدُ المكتب المفعّلة مجمَّعةً بكود الخدمة — فلا استعلامَ لكل
+    سطرٍ ولا لكل زبون.
+
     و`client_deadlines(client, …)` بلا سياقٍ تبني سياقَها لزبونٍ واحد، فتبقى
     صالحةً منفردةً (اختبارٌ أو نداءٌ داخليّ) بلا كلفةٍ إضافية.
     """
@@ -1946,6 +1984,10 @@ class CalendarContext:
     thresholds: dict[tuple[str, str, int], tuple] = field(
         default_factory=dict, repr=False,
     )
+    #: #277: الساري من تعديلات المكتب، بمفتاح `(النظام, كود السطر)`.
+    overrides: dict[tuple[str, str], Any] = field(default_factory=dict, repr=False)
+    #: #277: قواعدُ المكتب المفعّلة، مجمَّعةً بكود خدمة الزبون.
+    custom_rules: dict[str, list] = field(default_factory=dict, repr=False)
 
     def setting(self, client, key):
         """قيمةُ إعدادٍ لزبون — من المجموعة إن حُلّت، وإلا بالمحلّل."""
@@ -1963,8 +2005,56 @@ class CalendarContext:
         return _schedule_bundle(self.schedules, tax_system, year)
 
 
+#: أقصى ما يُعرض من سجلّ تعديلاتٍ لسطرٍ واحد في شاشة اللائحة.
+OVERRIDE_HISTORY_LIMIT = 20
+
+
+def _override_index(tenant):
+    """`(الساري, السجلّ)` في مرورٍ واحد — بمفتاح `(النظام, كود السطر)`.
+
+    الصفوفُ مرتَّبةً `-created_at, -id`، فأوّلُ صفٍّ لكل مفتاح هو **الساري**، وما
+    بعده تاريخٌ يُعرض ولا يحكم. و«رجّع للمنصة» صفٌّ `cleared` يُسقط المفتاح من
+    الساري ولا يُحذف من السجلّ.
+    """
+    active: dict[tuple[str, str], OfficeRuleOverride] = {}
+    history: dict[tuple[str, str], list[dict]] = {}
+    for row in (
+        OfficeRuleOverride.objects
+        .filter(tenant=tenant)
+        .select_related("created_by")
+        .order_by("-created_at", "-id")
+    ):
+        key = (row.tax_system, row.rule_code)
+        active.setdefault(key, row)
+        entries = history.setdefault(key, [])
+        if len(entries) < OVERRIDE_HISTORY_LIMIT:
+            entries.append(_override_row(row))
+    return {key: row for key, row in active.items() if not row.cleared}, history
+
+
+def active_rule_overrides(tenant) -> dict[tuple[str, str], OfficeRuleOverride]:
+    """**الساري** من تعديلات المكتب: أحدثُ صفٍّ لكل (نظام، كود) وغيرُ مُرجَع."""
+    return _override_index(tenant)[0]
+
+
+def _active_custom_rules(tenant) -> dict[str, list]:
+    """قواعدُ المكتب المفعّلة مجمَّعةً بكود خدمتها — استعلامٌ واحد."""
+    grouped: dict[str, list] = {}
+    for row in (
+        OfficeCustomRule.objects
+        .filter(tenant=tenant, is_active=True)
+        .select_related("service")
+        .order_by("name", "id")
+    ):
+        grouped.setdefault(row.service.code, []).append(row)
+    return grouped
+
+
 def calendar_context(tenant, clients) -> CalendarContext:
-    """سياقُ الطلب: الإعداداتُ القابلة للتخصيص جماعياً + عطلةُ المكتب مرّةً."""
+    """سياقُ الطلب: الإعداداتُ القابلة للتخصيص جماعياً + عطلةُ المكتب مرّةً.
+
+    ومعها تعديلاتُ المكتب وقواعدُه (#277): قراءتان ثابتتان مهما كثر الزبائن.
+    """
     clients = list(clients)
     resolved: dict[str, dict[int, Any]] = {}
     if clients:
@@ -1974,11 +2064,146 @@ def calendar_context(tenant, clients) -> CalendarContext:
         tenant=tenant,
         settings=resolved,
         office_rest_days=resolve_setting(tenant, "rest_days") or [],
+        overrides=active_rule_overrides(tenant),
+        custom_rules=_active_custom_rules(tenant),
+    )
+
+
+@dataclass(frozen=True)
+class RuleSpec:
+    """لقطةُ سطرٍ بالشكل الذي يقرؤه المحرّك — لا نموذجَ ثانٍ للقاعدة.
+
+    `compute_deadline` يقرأ `code`/`rule_kind`/`rule_day`/`rule_month`/
+    `electronic_extension_days`/`period_overrides` وحدها، فتكفي هذه اللقطة بدل
+    الكائن المحفوظ. وهي لقطةُ قاعدة مكتبٍ كما هي لقطةُ سطر منصةٍ بقيم المكتب —
+    **ولقطةٌ لا نسخةٌ من الصفّ**: `copy.copy` على صفّ `DeadlineRule` يتشارك
+    `_state`، فأيّ `save()` عليه يكتب قيم المكتب فوق لائحة المنصة.
+    """
+
+    code: str
+    rule_kind: str
+    rule_day: int | None = None
+    rule_month: int | None = None
+    electronic_extension_days: int = 0
+    period_overrides: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class DeadlineItem:
+    """بندُ موعدٍ واحد كما يُخرجه المولّد الوحيد — للتقويم والتحديث معاً.
+
+    يحمل أصلَه (`official`/`office`) ومصدرَه: سطرُ منصةٍ (`rule`) أو قاعدةُ
+    مكتبٍ (`custom_rule`). و`code`/`name` يُقرآن من المصدر صراحةً فلا فرعان في
+    كل مستهلك.
+    """
+
+    client: Any
+    client_service: Any
+    result: deadlines.DeadlineResult
+    rule: Any = None
+    custom_rule: Any = None
+    origin: str = OBLIGATION_ORIGIN_OFFICIAL
+
+    @property
+    def code(self) -> str:
+        return self.rule.code if self.rule is not None else self.custom_rule.code
+
+    @property
+    def name(self) -> str:
+        return self.rule.name if self.rule is not None else self.custom_rule.name
+
+    @property
+    def needs_review(self) -> bool:
+        return bool(getattr(self.rule, "needs_review", False))
+
+
+def custom_rule_spec(custom_rule) -> RuleSpec:
+    """لقطةُ قاعدة مكتبٍ للمحرّك — بلا تمديدٍ إلكترونيّ ولا نشرةٍ منشورة."""
+    return RuleSpec(
+        code=custom_rule.code,
+        rule_kind=custom_rule.rule_kind,
+        rule_day=custom_rule.rule_day,
+        rule_month=custom_rule.rule_month,
+    )
+
+
+def _rule_with_override(rule, override) -> RuleSpec:
+    """سطرُ المنصة بقيم المكتب — **لقطةٌ** لا تُحفظ ولا تمسّ الصفّ المحفوظ.
+
+    و`None` في التعديل تعني «كالمنصة». و`period_overrides` المنشورة **تُسقط**
+    حين يُعدَّل السطر: قرارُ المكتب يغلب نشرةَ المنصة (#277). وسياسةُ يوم الراحة
+    للنسخة تبقى سارية: المكتبُ عدّل التاريخ لا القاعدة.
+    """
+    return RuleSpec(
+        code=rule.code,
+        rule_kind=rule.rule_kind,
+        rule_day=rule.rule_day if override.rule_day is None else override.rule_day,
+        rule_month=(
+            rule.rule_month if override.rule_month is None else override.rule_month
+        ),
+        electronic_extension_days=(
+            rule.electronic_extension_days
+            if override.electronic_extension_days is None
+            else override.electronic_extension_days
+        ),
+        period_overrides={},
+    )
+
+
+def _deadline_result(
+    client, *, period_start, period_end, cadence, context, system,
+    rule=None, custom_rule=None, override=None,
+):
+    """**مدخلاتُ المحرّك الوحيدة** لموعدٍ واحد — يقرؤها المولّد وإعادةُ الحساب.
+
+    تقرأ كلَّ إعدادٍ بالمحلّل والسياق، وتستدعي `deadlines.compute_deadline` بنفس
+    الترتيب، ثم تُلحق تحذيرَ السقف التقديري **هنا** لا في مستهلكٍ دون آخر: من
+    يُعيد حساب التزامٍ محفوظٍ يأخذ التحذيرَ نفسَه الذي أخذه المولّد، فلا تمحوه
+    الإعادة (#277).
+
+    وإذا كان للسطر تعديلُ مكتبٍ حُسب موعدُ المنصة أيضاً، فإن اختلف `official_date`
+    حُمِل في `platform_official_date` — وإلا بقي `None` (لا نسخةً ثانية من القيمة
+    بلا سبب).
+
+    تُرجع `None` لسنةٍ بلا أيّ نسخةِ لائحة: لا موعدَ بلا قانون.
+    """
+    schedule, estimated, _grouped = context.schedule(system, period_end.year)
+    if schedule is None:
+        return None
+    inputs = {
+        "period_start": period_start,
+        "period_end": period_end,
+        "estimated": estimated,
+        "client_rest_days": context.setting(client, "rest_days") or [],
+        "office_rest_days": context.office_rest_days,
+        "filing_method": context.setting(client, "filing_method"),
+        "internal_lead_days": context.lead_days(
+            client, INTERNAL_LEAD_SETTING_BY_CADENCE.get(cadence),
+        ),
+        "schedule_policy": schedule.rest_day_policy,
+        "authority_closed_days": schedule.authority_closed_days or [],
+    }
+    if custom_rule is not None:
+        result = deadlines.compute_deadline(custom_rule_spec(custom_rule), **inputs)
+    elif override is not None:
+        result = deadlines.compute_deadline(
+            _rule_with_override(rule, override), **inputs,
+        )
+        platform = deadlines.compute_deadline(rule, **inputs)
+        if platform.official_date != result.official_date:
+            result = replace(result, platform_official_date=platform.official_date)
+    else:
+        result = deadlines.compute_deadline(rule, **inputs)
+    if rule is None:
+        return result
+    return _with_estimated_threshold_warning(
+        result, rule,
+        ThresholdContext(tax_system=system, day=period_end, cache=context.thresholds),
     )
 
 
 def _deadline_items(client, *, floor, end, context):
-    """**المولّدُ الوحيد**: `(الزبون, خدمةُ الزبون, السطر, النتيجة)` لمدىً.
+    """**المولّدُ الوحيد**: بندُ موعدٍ لكل `(الزبون, خدمةُ الزبون, السطر, الفترة)`.
 
     لكل خدمةٍ عند الزبون، ولكل سطرٍ في **نسخة نظامه** يخصّ خدمتها، فتراتٌ فقاعدته:
 
@@ -1987,22 +2212,22 @@ def _deadline_items(client, *, floor, end, context):
     - **دوريةٌ ثابتة** (`monthly`/`quarterly`/`annual`): الفتراتُ من
       `deadlines.periods_for` على `rule.cadence`، **مستقلّةً عن دورية الخدمة** —
       وإلا وُلّد التقريرُ السنوي اثنتَي عشرة مرّةً لخدمةٍ شهرية، والرُّبعيُّ شهرياً.
+    - **`cadence == "event"`** (#277): لا تُولَّد دورياً أبداً — سطرُ الحدث يُولَّد
+      من حدثٍ مسجَّلٍ وحده (`record_client_event`).
 
     ثم تُصفّى بالفترة التي تخصّ المكتب (`_period_is_ours`) — بلا شرطٍ على
     `actual_deadline`: **التقويمُ** يقصّ على المدى، و**التحديثُ** يقصّ على
     `period_end < يومه`. ونسختان من توليد الفترات والقواعد كانتا تفترقان عند
     أول تصحيحٍ في اللائحة: التقويمُ يرى الجديد والتحديثُ يحفظ القديم.
 
-    وكلُّ إعدادٍ يُقرأ **بالمحلّل** وبالزبون: النظامُ ويومُ راحته وطريقةُ تقديمه
-    وأيامُ إعداده بحسب دورية الفترة، وأيامُ عطلة المكتب بلا زبون. و`context` سياقُ
-    طلبٍ يجمعها لزبائن الطلب مرّةً واحدة (لا N+1).
+    **وسطرٌ عليه تعديلُ مكتبٍ يُحسب بقيم المكتب** ويُحمل موعدُ المنصة بجانبه إن
+    اختلف. و**قواعدُ المكتب الخاصة** تُولَّد بالفترات نفسها وبلا شروط بطاقة —
+    المكتبُ عرّفها لنفسه، واللائحةُ لم تشترطها.
     """
     system = context.setting(client, TAX_SYSTEM_KEY)
     if not system:
         return
 
-    client_rest_days = context.setting(client, "rest_days") or []
-    filing_method = context.setting(client, "filing_method")
     # بطاقةٌ غائبةٌ (صفٌّ شُطب يدوياً) لا تُسقِط تقويمَ المكتب: الشروطُ المشروطة
     # بالبطاقة لا تنطبق عليها، فيبقى ما لا شرطَ له (دفترٌ بلا بطاقةٍ لا مواعيدَ له).
     card = getattr(client, "tax_card", None)
@@ -2010,43 +2235,65 @@ def _deadline_items(client, *, floor, end, context):
     for client_service in client_services_of(client, context):
         frequencies = list(client_service.frequencies.all())
         service_code = client_service.service.code
+        custom_rules = context.custom_rules.get(service_code, [])
         for period_start, period_end, source, cadence in _periods_for_service(
             client_service, service_code, frequencies,
             system=system, floor=floor, end=end, context=context,
         ):
             if not _period_is_ours(client_service, period_end):
                 continue
-            schedule, estimated, grouped = context.schedule(system, period_end.year)
+            schedule, _estimated, grouped = context.schedule(system, period_end.year)
             if schedule is None:
                 continue
             thresholds = ThresholdContext(
                 tax_system=system, day=period_end, cache=context.thresholds,
             )
-            setting_key = INTERNAL_LEAD_SETTING_BY_CADENCE.get(cadence)
             for rule in grouped.get(service_code, []):
                 # السطرُ يولّد فتراتِ مصدره وحده: سطرٌ سنويّ لا يُولَّد لكل شهر،
-                # وسطرُ «service» يولّد فترات دورية الخدمة وحدها.
-                if rule.cadence != source:
+                # وسطرُ «service» يولّد فترات دورية الخدمة وحدها. وسطرُ الحدث لا
+                # يُولَّد دورياً بحال.
+                if rule.cadence == CADENCE_EVENT or rule.cadence != source:
                     continue
                 if not rule_applies(rule, card, thresholds):
                     continue
-                result = deadlines.compute_deadline(
-                    rule,
+                result = _deadline_result(
+                    client,
+                    rule=rule,
+                    override=context.overrides.get((system, rule.code)),
                     period_start=period_start,
                     period_end=period_end,
-                    estimated=estimated,
-                    client_rest_days=client_rest_days,
-                    office_rest_days=context.office_rest_days,
-                    filing_method=filing_method,
-                    internal_lead_days=context.lead_days(client, setting_key),
-                    schedule_policy=schedule.rest_day_policy,
-                    authority_closed_days=schedule.authority_closed_days or [],
+                    cadence=cadence,
+                    context=context,
+                    system=system,
                 )
-                yield (
+                if result is None:
+                    continue
+                yield DeadlineItem(
+                    client=client,
+                    client_service=client_service,
+                    rule=rule,
+                    result=result,
+                )
+            for custom_rule in custom_rules:
+                if custom_rule.cadence != source:
+                    continue
+                result = _deadline_result(
                     client,
-                    client_service,
-                    rule,
-                    _with_estimated_threshold_warning(result, rule, thresholds),
+                    custom_rule=custom_rule,
+                    period_start=period_start,
+                    period_end=period_end,
+                    cadence=cadence,
+                    context=context,
+                    system=system,
+                )
+                if result is None:
+                    continue
+                yield DeadlineItem(
+                    client=client,
+                    client_service=client_service,
+                    custom_rule=custom_rule,
+                    result=result,
+                    origin=OBLIGATION_ORIGIN_OFFICE,
                 )
 
 
@@ -2062,19 +2309,24 @@ def client_deadlines(client, *, start, end, context=None) -> list[dict]:
     """
     context = context or calendar_context(client.tenant, [client])
     rows: list[dict] = []
-    for _client, client_service, rule, result in _deadline_items(
+    for item in _deadline_items(
         client,
         floor=deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS),
         end=end,
         context=context,
     ):
-        if not start <= result.actual_deadline <= end:
+        if not start <= item.result.actual_deadline <= end:
             continue
         rows.append({
             "client": client,
-            "service": client_service.service,
-            "rule": rule,
-            "result": result,
+            "service": item.client_service.service,
+            "rule": item.rule,
+            "custom_rule": item.custom_rule,
+            "code": item.code,
+            "name": item.name,
+            "needs_review": item.needs_review,
+            "origin": item.origin,
+            "result": item.result,
         })
     return rows
 
@@ -2158,7 +2410,11 @@ def _periods_for_service(
 
 
 def _cadences_for_service(context, tax_system, service_code, floor, end) -> set:
-    """دورياتُ أسطر خدمةٍ في نسخ السنوات التي يمسّها المدى."""
+    """دورياتُ أسطر خدمةٍ في نسخ السنوات التي يمسّها المدى.
+
+    ومعها دورياتُ قواعد المكتب المفعّلة (#277) — تُولَّد بالفترات نفسها، فلا
+    نسخةً ثانية من حساب الفترات لهذا المصدر.
+    """
     cadences: set[str] = set()
     for schedule, _estimated, grouped in _schedules_for_range(
         context, tax_system, floor, end,
@@ -2166,8 +2422,13 @@ def _cadences_for_service(context, tax_system, service_code, floor, end) -> set:
         if schedule is None:
             continue
         cadences.update(
-            rule.cadence for rule in grouped.get(service_code, []) if rule.is_generated
+            rule.cadence
+            for rule in grouped.get(service_code, [])
+            if rule.is_generated and rule.cadence != CADENCE_EVENT
         )
+    cadences.update(
+        custom.cadence for custom in context.custom_rules.get(service_code, ())
+    )
     return cadences
 
 
@@ -2210,10 +2471,12 @@ def calendar_row(item) -> dict:
             "name": item["service"].name,
         },
         "rule": {
-            "code": item["rule"].code,
-            "name": item["rule"].name,
-            "needs_review": item["rule"].needs_review,
+            "code": item["code"],
+            "name": item["name"],
+            "needs_review": item["needs_review"],
         },
+        "origin": item["origin"],
+        "origin_label": OBLIGATION_ORIGIN_LABELS.get(item["origin"], ""),
         "period_start": result.period_start.isoformat(),
         "period_end": result.period_end.isoformat(),
         "period_label": deadlines.period_label(result.period_start, result.period_end),
@@ -2221,6 +2484,11 @@ def calendar_row(item) -> dict:
         "official_date": result.official_date.isoformat(),
         "actual_deadline": result.actual_deadline.isoformat(),
         "internal_deadline": result.internal_deadline.isoformat(),
+        # #277: تاريخُ المنصة حين يختلف عن موعد المكتب المعدَّل، وإلا `None`.
+        "platform_official_date": (
+            None if result.platform_official_date is None
+            else result.platform_official_date.isoformat()
+        ),
         "estimated": result.estimated,
         "postponed": result.postponed,
         "warnings": list(result.warnings),
@@ -2262,7 +2530,7 @@ def calendar_payload(
         for item in client_deadlines(
             office_client, start=start, end=end, context=context,
         ):
-            if rule_code and item["rule"].code != rule_code:
+            if rule_code and item["code"] != rule_code:
                 continue
             rows.append(calendar_row(item))
     rows.sort(key=lambda row: (
@@ -2276,11 +2544,21 @@ def calendar_payload(
     }
 
 
-def deadline_rules_payload(tax_system) -> dict:
+def deadline_rules_payload(tax_system, *, tenant=None) -> dict:
     """أسطرُ النسخة السارية لكل سنةٍ متاحةٍ في نظام — للفلتر ولعرض اللائحة.
 
     **استعلامان لا استعلامان لكل سنة**: النسخُ كلُّها بـ`prefetch_related("rules")`
     مرّةً، والأخذُ من أوّلها لكل سنة (المرتَّبةُ `-version` ⇒ السارية = أكبر نسخة).
+
+    **ومفاتيحُ المكتب (#277) تُضاف بلا حذف مفتاح**: `rule_code` صريحاً (الكودُ
+    يتكرّر لكل سنة، فلا مفتاحَ به)، و`platform` قيمُ المنصة، و`override` تعديلُ
+    المكتب الساري أو `null`، و`history` آخرُ 20 صفّ تعديل، و`awaiting_decision`
+    True حين تكون نسخةُ السطر أحدثَ من نسخة اللقطة وقيمُها تخالفها — **بالمسند
+    نفسه** الذي يبني عليه التنبيه (`_based_on_matches`)، فلا تُنسخ القاعدة ولا
+    تُقرأ من نصّ التنبيه.
+
+    وتُقرأ مرّةً واحدةً للطلب (لا استعلامَ لكل سطر) — ولا تُقرأ أصلاً حين لا
+    يُمرَّر `tenant`، فتبقى قراءةُ التقويم استعلامين كما كانت.
     """
     schedules = (
         DeadlineSchedule.objects
@@ -2288,6 +2566,22 @@ def deadline_rules_payload(tax_system) -> dict:
         .prefetch_related("rules")
         .order_by("year", "-version")
     )
+    overrides: dict[tuple[str, str], Any] = {}
+    history: dict[tuple[str, str], list[dict]] = {}
+    snapshot_versions: dict[int, int] = {}
+    if tenant is not None:
+        overrides, history = _override_index(tenant)
+        snapshot_ids = {
+            (override.based_on or {}).get("schedule_id")
+            for override in overrides.values()
+        } - {None}
+        if snapshot_ids:
+            snapshot_versions = dict(
+                DeadlineSchedule.objects
+                .filter(pk__in=snapshot_ids)
+                .values_list("pk", "version"),
+            )
+    kinds = dict(RULE_KIND_CHOICES)
     rows = []
     seen_years: set[int] = set()
     for schedule in schedules:
@@ -2295,8 +2589,20 @@ def deadline_rules_payload(tax_system) -> dict:
             continue
         seen_years.add(schedule.year)
         for rule in schedule.rules.all():
+            key = (tax_system, rule.code)
+            override = overrides.get(key)
+            awaiting = False
+            if override is not None:
+                snapshot = override.based_on or {}
+                awaiting = (
+                    schedule.version > snapshot_versions.get(
+                        snapshot.get("schedule_id"), 0,
+                    )
+                    and not _based_on_matches(snapshot, rule)
+                )
             rows.append({
                 "code": rule.code,
+                "rule_code": rule.code,
                 "name": rule.name,
                 "service_code": rule.service_code,
                 "is_generated": rule.is_generated,
@@ -2304,6 +2610,16 @@ def deadline_rules_payload(tax_system) -> dict:
                 "year": schedule.year,
                 "version": schedule.version,
                 "source_url": rule.source_url,
+                "platform": {
+                    "rule_kind": rule.rule_kind,
+                    "rule_kind_label": kinds.get(rule.rule_kind, ""),
+                    "rule_day": rule.rule_day,
+                    "rule_month": rule.rule_month,
+                    "electronic_extension_days": rule.electronic_extension_days,
+                },
+                "override": None if override is None else _override_row(override),
+                "history": history.get(key, []),
+                "awaiting_decision": awaiting,
             })
     return {"system": tax_system, "rules": rows}
 
@@ -2314,8 +2630,10 @@ def deadline_rules_payload(tax_system) -> dict:
 # والنتائج. التقويمُ يقصّه على `actual_deadline`، والتحديثُ يقصّه على
 # `period_end < today` — فلا نسختان تفترقان عند أول تصحيحٍ في اللائحة.
 #
-# **والمشتقُّ لا يُخزَّن**: شارةٌ واحدةٌ لكل صفّ — أحمرُ `late` (`actual_deadline < day`) ثم أصفرُ
-# `late_internal` (`task.internal_deadline < day`) ثم `near`؛ و`week` نافذةُ `actual_deadline` مستقلّة (`_in_near_window`).
+# **والمشتقُّ لا يُخزَّن**: شارةٌ واحدةٌ لكل صفّ — أحمرُ `late` (`due_date < day`) ثم أصفرُ
+# `late_internal` (`task.internal_deadline < day`) ثم `near`؛ و`week` نافذةُ `due_date` مستقلّة (`_in_near_window`).
+# والموعدُ الساري `due_date` = `extended_to or actual_deadline`: الأحمرُ ونافذةُ `week` عليه،
+# والأصفرُ وحده على `task.internal_deadline`.
 
 #: نافذةُ «قريب هالأسبوع»: من اليوم إلى ستة أيامٍ بعده (اليومُ السابع يومُ عملٍ آخر).
 NEAR_WINDOW_DAYS = 6
@@ -2401,6 +2719,37 @@ def _close_pending_last_periods(client_service) -> int:
     )
 
 
+def _obligation_defaults(
+    tenant, client, *, task, result, origin, name, rule=None, custom_rule=None,
+    event=None,
+) -> dict:
+    """حقولُ `Obligation` المشتقّة من نتيجة المحرّك — **موضعُها الوحيد**.
+
+    يقرؤها التوليدُ الدوريّ والحدثُ معاً، فلا نسختان تفترقان عند أول حقلٍ يُضاف
+    إلى الالتزام. و`tenant` يُمرَّر صريحاً: الزبونُ يُحمَّل بلا `tenant` في مسح
+    التحديث، وقراءتُه من الصفّ استعلامٌ لكل زبون.
+    """
+    return {
+        "tenant": tenant,
+        "client": client,
+        "task": task,
+        "rule": rule,
+        "custom_rule": custom_rule,
+        "event": event,
+        "origin": origin,
+        "name": name,
+        "period_start": result.period_start,
+        "legal_date": result.legal_date,
+        "official_date": result.official_date,
+        "actual_deadline": result.actual_deadline,
+        "internal_deadline": result.internal_deadline,
+        "platform_official_date": result.platform_official_date,
+        "estimated": result.estimated,
+        "postponed": result.postponed,
+        "warnings": list(result.warnings),
+    }
+
+
 def _refresh_client(client, *, tenant, day, end, context, skip):
     """زبونٌ واحد: يحفظ شغلاته والتزاماتِه المستحقّة — `(شغلات, التزامات)` جديدتان.
 
@@ -2433,9 +2782,9 @@ def _refresh_client(client, *, tenant, day, end, context, skip):
     )
     created_tasks = 0
     created_obligations = 0
-    for _client, client_service, rule, result in _deadline_items(
-        client, floor=floor, end=end, context=context,
-    ):
+    for item in _deadline_items(client, floor=floor, end=end, context=context):
+        result = item.result
+        client_service = item.client_service
         # **ما حان وقتُه = فترةٌ انتهت قبل اليوم**: تقريرُ كانون الثاني يظهر في
         # 1 شباط لا في 31 كانون الثاني، والفترةُ التي تحتوي اليوم لم تنتهِ بعد.
         if result.period_end >= day:
@@ -2461,31 +2810,26 @@ def _refresh_client(client, *, tenant, day, end, context, skip):
             known_tasks[task_key] = task
             if task_created:
                 created_tasks += 1
-        obligation_key = (client_service.pk, rule.code, result.period_end)
+        obligation_key = (client_service.pk, item.code, result.period_end)
         if obligation_key in known_obligations:
             # **صفٌّ قائمٌ لا يُحدَّث**: تواريخُه ما رآه الموظف، وتصحيحُها تذكرة.
             continue
         _obligation, obligation_created = Obligation.objects.get_or_create(
             client_service=client_service,
-            rule_code=rule.code,
+            rule_code=item.code,
             period_end=result.period_end,
-            defaults={
-                "tenant": tenant,
-                "client": client,
-                "task": task,
+            defaults=_obligation_defaults(
+                tenant, client,
+                task=task,
+                result=result,
+                origin=item.origin,
+                name=item.name,
                 # الالتزامُ يشير إلى **نسخة اللائحة الفعلية** التي حُسب عليها،
-                # فلا يصير يتيماً حين تُنشر نسخةُ سنةٍ أعلى.
-                "rule": rule,
-                "name": rule.name,
-                "period_start": result.period_start,
-                "legal_date": result.legal_date,
-                "official_date": result.official_date,
-                "actual_deadline": result.actual_deadline,
-                "internal_deadline": result.internal_deadline,
-                "estimated": result.estimated,
-                "postponed": result.postponed,
-                "warnings": list(result.warnings),
-            },
+                # فلا يصير يتيماً حين تُنشر نسخةُ سنةٍ أعلى. والتزامُ المكتب
+                # يشير إلى قاعدته هو (`custom_rule`) ويبقى `rule` فارغاً.
+                rule=item.rule,
+                custom_rule=item.custom_rule,
+            ),
         )
         known_obligations.add(obligation_key)
         if not obligation_created:
@@ -2568,8 +2912,9 @@ def _new_alert_rows(
 def _generate_late_alerts(tenant, *, day) -> int:
     """يولّد تنبيهات التأخير ليومٍ صريح ويُرجع **ما أنشأه هذا النداء**.
 
-    - كلُّ التزامٍ `pending` و`actual_deadline < day` ⇒ «التزام تجاوز موعده
-      الرسمي ولم يُقدَّم» لمستلِمي `late_official_alert_to`.
+    - كلُّ التزامٍ `pending` و`due_date < day` ⇒ «التزام تجاوز موعده الرسمي ولم
+      يُقدَّم» لمستلِمي `late_official_alert_to`. و`due_date` هو
+      `extended_to or actual_deadline` (#277): التمديدُ يُسكِت الأحمرَ إلى موعده.
     - كلُّ شغلةٍ فيها التزامٌ منتظرٌ و`internal_deadline < day` ⇒ «شغلة تجاوزت
       موعدها الداخلي» لمستلِمي `late_internal_alert_to` — وشغلةٌ صار التزامُها
       أحمرَ تأخذ الأحمرَ أيضاً (مرجعان مختلفان، والفرادةُ تمنع التكرار).
@@ -2586,9 +2931,14 @@ def _generate_late_alerts(tenant, *, day) -> int:
     candidates = list(
         Obligation.objects
         .filter(tenant=tenant, status=OBLIGATION_STATUS_PENDING)
-        # المتأخّرُ وحده يُحمَّل: الرسميُّ أو شغلتُه الداخليّ — والقصُّ في SQL لا في
-        # بايثون، فمكتبٌ بآلاف الالتزامات المنتظِرة لا يُحمَّل كلُّها كلَّ يوم.
-        .filter(Q(actual_deadline__lt=day) | Q(task__internal_deadline__lt=day))
+        # المتأخّرُ وحده يُحمَّل: الرسميُّ (أو الممدَّد) أو شغلتُه الداخليّ — والقصُّ
+        # في SQL لا في بايثون، فمكتبٌ بآلاف الالتزامات المنتظِرة لا يُحمَّل كلُّها
+        # كلَّ يوم. والتعبيرُ هو `due_date` نفسُه: الممدَّدُ يُقارَن بتمدیده.
+        .filter(
+            Q(extended_to__isnull=True, actual_deadline__lt=day)
+            | Q(extended_to__lt=day)
+            | Q(task__internal_deadline__lt=day),
+        )
         .select_related(
             "client",
             "client__responsible",
@@ -2604,7 +2954,7 @@ def _generate_late_alerts(tenant, *, day) -> int:
     ref_keys = {
         f"obligation:{obligation.pk}"
         for obligation in candidates
-        if obligation.actual_deadline < day
+        if obligation.due_date < day
     }
     ref_keys |= {
         f"task:{obligation.task_id}"
@@ -2623,7 +2973,7 @@ def _generate_late_alerts(tenant, *, day) -> int:
         client = obligation.client
         assignee = task.effective_assignee
         assignee_id = getattr(assignee, "pk", None)
-        if obligation.actual_deadline < day:
+        if obligation.due_date < day:
             rows.extend(_new_alert_rows(
                 tenant=tenant,
                 kind=OFFICE_ALERT_KIND_OBLIGATION_LATE,
@@ -2667,33 +3017,12 @@ def _generate_late_alerts(tenant, *, day) -> int:
     return len(rows)
 
 
-def refresh_office(tenant, *, day) -> dict:
-    """«حدّث المكتب ليوم X» — يحفظ ما حان وقته، **idempotent وبلا ساعة**.
+def _save_due_for_clients(tenant, clients, *, day, context) -> tuple[int, int]:
+    """يحفظ المستحقَّ لكل زبونٍ في معاملته — `(شغلات, التزامات)` جديدتان.
 
-    **ما حان وقتُه**: كلُّ التزامٍ انتهت فترتُه قبل `day` (`period_end < day`) —
-    فق.م كانون الثاني تظهر في 1 شباط ولا تظهر في 31 كانون الثاني.
-
-    **والأرضيةُ `max(starts_on, responsible_from)` بلا سقف 24 شهراً**: تشغيلٌ
-    متأخّرٌ يلحق كلَّ ما فات، وزبونٌ جديدٌ بفترةٍ ماضيةٍ تُولَّد كلُّ فتراتها.
-    والتقويمُ يقرأ المولّدَ نفسه بسقفه — **محرّكٌ واحد**.
-
-    **والصفُّ القائم لا يُحدَّث**: `get_or_create` للشغلة بـ`(client_service,
-    period_start, period_end)` وللالتزام بـ`(client_service, rule_code,
-    period_end)`. فتشغيلُ اليوم نفسه مرّتين لا يكتب صفّاً، وتشغيلُ يومٍ لاحقٍ
-    يضيف الجديد فقط. **ومعاملةٌ لكل زبون**: مكتبٌ بألف زبون لا يُحبَس في واحدة.
-
-    ويُسجَّل `OfficeRefreshRun` لليوم (`get_or_create`)، فالسجلُّ صفٌّ واحدٌ لكل
-    (مكتب، يوم) وعدّادُه ما أنشأه أوّلُ تشغيل. ويُرجع ما أنشأه **هذا** النداء:
-    صفراً في اليوم نفسه، والجديدَ في يومٍ لاحق.
+    **موضعُ الحفظ الوحيد**: يقرؤه `refresh_office` لكل زبائن المكتب، ويقرؤه
+    إنشاءُ قاعدة المكتب لزبائن خدمتها وحدهم (#277) — فلا مسارَ ثانٍ للتوليد.
     """
-    clients = list(
-        OfficeClient.objects
-        .filter(tenant=tenant)
-        .select_related("tax_card", "responsible")
-        .prefetch_related("services__service", "services__frequencies")
-        .order_by("id"),
-    )
-    context = calendar_context(tenant, clients)
     end = day - timedelta(days=1)
     created_tasks = 0
     created_obligations = 0
@@ -2709,12 +3038,58 @@ def refresh_office(tenant, *, day) -> dict:
             )
         created_tasks += tasks
         created_obligations += obligations
+    return created_tasks, created_obligations
+
+
+def refresh_office(tenant, *, day) -> dict:
+    """«حدّث المكتب ليوم X» — يحفظ ما حان وقته، **idempotent وبلا ساعة**.
+
+    **ما حان وقتُه**: كلُّ التزامٍ انتهت فترتُه قبل `day` (`period_end < day`) —
+    فق.م كانون الثاني تظهر في 1 شباط ولا تظهر في 31 كانون الثاني.
+
+    **والأرضيةُ `max(starts_on, responsible_from)` بلا سقف 24 شهراً**: تشغيلٌ
+    متأخّرٌ يلحق كلَّ ما فات، وزبونٌ جديدٌ بفترةٍ ماضيةٍ تُولَّد كلُّ فتراتها.
+    والتقويمُ يقرأ المولّدَ نفسه بسقفه — **محرّكٌ واحد**.
+
+    **والصفُّ القائم لا يُحدَّث**: `get_or_create` للشغلة بـ`(client_service,
+    period_start, period_end)` وللالتزام بـ`(client_service, rule_code,
+    period_end)`. فتشغيلُ اليوم نفسه مرّتين لا يكتب صفّاً، وتشغيلُ يومٍ لاحقٍ
+    يضيف الجديد فقط. **ومعاملةٌ لكل زبون**: مكتبٌ بألف زبون لا يُحبَس في واحدة.
+
+    **وقبل حفظ الجديد** يُطبَّق تحديثُ المنصة (#277): كلُّ التزامٍ غيرِ مقدَّمٍ
+    يشير إلى نسخةِ لائحةٍ لم تبقَ ساريةً ينتقل إلى سطر الكود نفسه في النسخة
+    السارية ويُعاد حسابه بالدالّة الواحدة — والمقدَّمُ لا يُمسّ، وسطرٌ غاب من
+    الجديد يُضاف إلى `warnings` وحده.
+
+    ويُسجَّل `OfficeRefreshRun` لليوم (`get_or_create`)، فالسجلُّ صفٌّ واحدٌ لكل
+    (مكتب، يوم) وعدّادُه ما أنشأه أوّلُ تشغيل. ويُرجع ما أنشأه **هذا** النداء:
+    صفراً في اليوم نفسه، والجديدَ في يومٍ لاحق.
+    """
+    clients = list(
+        OfficeClient.objects
+        .filter(tenant=tenant)
+        .select_related("tax_card", "responsible")
+        .prefetch_related("services__service", "services__frequencies")
+        .order_by("id"),
+    )
+    context = calendar_context(tenant, clients)
+    # **قبل حفظ الجديد**: الالتزامُ غيرُ المقدَّم يلحق نسخةَ المنصة السارية (#277)،
+    # فلا يبقى صفٌّ محفوظٌ على نسخةٍ سُحبت. وما تغيّر تاريخُه يُبنى عليه تنبيهُ
+    # «تغيّر موعد N التزامات».
+    with transaction.atomic():
+        schedule_changes = _apply_platform_updates(tenant, day=day, context=context)
+    created_tasks, created_obligations = _save_due_for_clients(
+        tenant, clients, day=day, context=context,
+    )
 
     OfficeRefreshRun.objects.get_or_create(
         tenant=tenant, day=day, defaults={"created_obligations": created_obligations},
     )
     # التنبيهاتُ بعد حفظ الالتزامات: تقرأ ما صار محفوظاً في هذا النداء أيضاً.
     created_alerts = _generate_late_alerts(tenant, day=day)
+    created_alerts += _generate_schedule_alerts(
+        tenant, day=day, context=context, schedule_changes=schedule_changes,
+    )
     return {
         "day": day.isoformat(),
         "created_tasks": created_tasks,
@@ -2911,11 +3286,11 @@ def _badge_keys(obligation, day, *, task=None) -> list[str]:
 
     **درجتان لا واحدة (#276)، والأولوية محسومة:**
 
-    - **أحمر `late`**: منتظرٌ و`actual_deadline < day` — الموعدُ الرسميُّ (مع
-      التمديد الإلكترونيّ) تجاوز ولم يُقدَّم.
+    - **أحمر `late`**: منتظرٌ و`due_date < day` — الموعدُ الساري (مع التمديد
+      الإلكترونيّ، ومع التمديد اليدويّ إن وُجد #277) تجاوز ولم يُقدَّم.
     - **أصفر `late_internal`**: منتظرٌ و`internal_deadline` لشغلتِه قبل اليوم،
       وليس أحمر — الموعدُ الداخليُّ هو ما يراه الموظف قبل الرسميّ.
-    - **`near`**: منتظرٌ وموعدُه الفعليّ من اليوم إلى ستة أيامٍ بعده، ودونهما.
+    - **`near`**: منتظرٌ وموعدُه الساريّ من اليوم إلى ستة أيامٍ بعده، ودونهما.
 
     وشارةٌ **واحدةٌ على الأكثر** لكل صفّ: الأحمرُ يسبق الأصفر، والأصفرُ يسبق
     «قريب» — فصفٌّ تجاوز داخليُّه لا يقول «قريب هالأسبوع» أيضاً. والمُقدَّمُ
@@ -2923,12 +3298,13 @@ def _badge_keys(obligation, day, *, task=None) -> list[str]:
     """
     if obligation.status != OBLIGATION_STATUS_PENDING:
         return []
-    if obligation.actual_deadline < day:
+    due = obligation.due_date
+    if due < day:
         return [OBLIGATION_BADGE_LATE]
     task = obligation.task if task is None else task
     if task.internal_deadline < day:
         return [OBLIGATION_BADGE_LATE_INTERNAL]
-    if 0 <= (obligation.actual_deadline - day).days <= NEAR_WINDOW_DAYS:
+    if 0 <= (due - day).days <= NEAR_WINDOW_DAYS:
         return [OBLIGATION_BADGE_NEAR]
     return []
 
@@ -2968,6 +3344,17 @@ def _obligation_row(obligation, *, day, client, task, masked, badge_keys=None) -
         "official_date": obligation.official_date.isoformat(),
         "actual_deadline": obligation.actual_deadline.isoformat(),
         "internal_deadline": obligation.internal_deadline.isoformat(),
+        # #277: الموعدُ الساري (الممدَّد أو الفعليّ) وتاريخُ المنصة حين اختلف.
+        "due_date": obligation.due_date.isoformat(),
+        "extended_to": (
+            None if obligation.extended_to is None
+            else obligation.extended_to.isoformat()
+        ),
+        "extension_note": obligation.extension_note,
+        "platform_official_date": (
+            None if obligation.platform_official_date is None
+            else obligation.platform_official_date.isoformat()
+        ),
         "estimated": obligation.estimated,
         "warnings": list(obligation.warnings or []),
         "badges": _badge_payloads(obligation, day, keys=badge_keys, task=task),
@@ -3034,19 +3421,28 @@ def _visible_pending_obligations(tenant, user):
             "task__assignee",
             "task__client__responsible",
         )
-        .order_by("actual_deadline", "internal_deadline", "client__name")
+        .order_by(
+            # #277: الترتيبُ بالموعد الساري — الممدَّدُ إلى أيار لا يتصدّر صفَّ
+            # اليوم على أنه متأخّر.
+            Coalesce("extended_to", "actual_deadline"),
+            "internal_deadline",
+            "client__name",
+        )
     )
 
 
 def _in_near_window(obligation, day) -> bool:
-    """هل يقع `actual_deadline` في نافذة «قريب هالأسبوع»؟ — **مستقلٌّ عن الشارة**.
+    """هل يقع الموعدُ الساري في نافذة «قريب هالأسبوع»؟ — **مستقلٌّ عن الشارة**.
 
     عدّادُ `week` وفلترُه يُحسبان بهذا الشرط وحده: صفٌّ صفرتُه «متأخّر داخليّ»
     وموعدُه الفعليُّ داخل النافذة يُعدّ ويظهر تحت `week` — فالشارةُ واحدةٌ
     بالأولوية، والنافذةُ سؤالٌ آخر («ماذا يستحقّ هذا الأسبوع؟»). ولولا ذلك لصار
     «قريب» مستحيلاً للربعيّ (7 أيامٍ داخليّة) والسنويّ (30).
+
+    والموعدُ الساري (`due_date`) هو المقصود: تمديدٌ إلى ما بعد الأسبوع يُخرج
+    الصفَّ من النافذة (#277).
     """
-    return 0 <= (obligation.actual_deadline - day).days <= NEAR_WINDOW_DAYS
+    return 0 <= (obligation.due_date - day).days <= NEAR_WINDOW_DAYS
 
 
 def today_payload(tenant, *, user, day, filter="") -> dict:
@@ -3055,7 +3451,7 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
     **العدّاداتُ (`late` · `late_internal` · `week` · `all`) على كل الميل المحفوظ**
     ثم يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر رسمي» لا تُصفّر «متأخّر داخليّ».
     والفلاترُ خمسةٌ: `mine` (المسؤولُ الفعليُّ هو العضو) · `week` (نافذةُ
-    `actual_deadline` مستقلّةً عن الشارة) · `late` (الأحمرُ وحده) · `late_internal`
+    `due_date` = `extended_to or actual_deadline` مستقلّةً عن الشارة) · `late` (الأحمرُ وحده) · `late_internal`
     (الأصفرُ وحده)، والفارغُ «الكل»؛ وغيرُها **400**.
 
     و`day` يُمرَّر صريحاً ولا يُقرأ من الساعة: الشاراتُ تُحسب عنه، فالصفُّ نفسُه
@@ -3121,20 +3517,41 @@ RESOLVED_ALERT_KINDS: tuple[str, ...] = (
 )
 
 
-def _visible_alerts(tenant, user):
+def _live_override_alerts_q(tenant):
+    """شرطُ بقاء تنبيه «تُبقي تاريخك أم تأخذ الجديد؟» — تعديلٌ ما زال سارياً.
+
+    النوعُ خارج `RESOLVED_ALERT_KINDS` فلا يسقط بالحالة، لكنه يسقط على القراءة إن
+    رُجّع التعديلُ أو أُكِّد: `ref_key` يبدأ بـ`"override:<id>:"`، والمُقارَنةُ
+    بمجموعة تعديلاتٍ ساريةٍ **مقروءةٍ مرّة** (لا استعلامَ لكل صفّ).
+    """
+    alive = [
+        Q(ref_key__startswith=f"override:{override.pk}:")
+        for override in active_rule_overrides(tenant).values()
+    ]
+    if not alive:
+        return Q(pk__in=[])
+    condition = alive[0]
+    for clause in alive[1:]:
+        condition |= clause
+    return Q(kind=OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED) & condition
+
+
+def _visible_alerts(tenant, user, day=None):
     """تنبيهاتُ هذا المستخدم وحدها، **المعروضُ له وحده وبلا المحسوم**.
 
     **والرؤيةُ تتبع الزبون**: تنبيهُ زبونٍ لا يراه العضو لا يُعرض — وإلا بقي
     تنبيهُ زبونٍ حُوِّل لغيره في جرسه بعد أن حُرِم زبونَه. والشرطُ استعلامٌ
     فرعيٌّ واحد على `visible_clients` (مصدرُ الرؤية الوحيد)، فلا N+1؛ وتنبيهٌ بلا
-    زبون (لا يولّده شيء اليوم) يبقى ظاهراً لمستلِمه.
+    زبون يبقى ظاهراً لمستلِمه — ونوعا اللائحة (#277) بلا زبونٍ أصلاً.
 
-    وتنبيهُ التزامٍ لا يُعرض إن لم يبقَ الالتزامُ منتظراً، وتنبيهُ شغلةٍ لا يُعرض
-    إن لم يبقَ فيها التزامٌ منتظرٌ — بـ`Exists` كذلك.
+    وتنبيهُ التزامٍ لا يُعرض إن لم يبقَ الالتزامُ منتظراً **أو صار موعدُه الساريّ
+    بعد اليوم** (مُدَّد)، وتنبيهُ شغلةٍ لا يُعرض إن لم يبقَ فيها التزامٌ منتظرٌ —
+    بـ`Exists` كذلك. و`day` يُمرَّر صريحاً من الـview (لا ساعةً في الخدمة).
     """
+    day = day or timezone.localdate()
     pending_obligation = Obligation.objects.filter(
         pk=OuterRef("obligation_id"), status=OBLIGATION_STATUS_PENDING,
-    )
+    ).filter(Q(extended_to__isnull=True, actual_deadline__lt=day) | Q(extended_to__lt=day))
     pending_task = Obligation.objects.filter(
         task_id=OuterRef("task_id"), status=OBLIGATION_STATUS_PENDING,
     )
@@ -3152,7 +3569,12 @@ def _visible_alerts(tenant, user):
         .filter(
             Q(kind=OFFICE_ALERT_KIND_OBLIGATION_LATE, obligation_pending=True)
             | Q(kind=OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, task_pending=True)
-            | ~Q(kind__in=RESOLVED_ALERT_KINDS)
+            # نوعُ اللائحة المعدَّلة يُحكم بشرطه وحده — لا بشرط «كل ما لم يُحسَم».
+            | _live_override_alerts_q(tenant)
+            | (
+                ~Q(kind__in=RESOLVED_ALERT_KINDS)
+                & ~Q(kind=OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED)
+            )
         )
     )
 
@@ -3162,13 +3584,15 @@ def alert_row(alert) -> dict:
 
     و`badge` **مفتاحُ شارة النوع من الخادم** (`OFFICE_ALERT_KIND_BADGES`)، فتُلوَّن
     الشارةُ في الواجهة بلا معرفة أنواعٍ فيها: نوعٌ لاحقٌ يُضاف صفّاً في الخريطة
-    ويأخذ محايداً (`""`) حتى يُلوَّن.
+    ويأخذ محايداً (`""`) حتى يُلوَّن. و`opens` (#277) خريطةُ الوجهة من الخادم
+    كذلك: `"client"` أو `"deadline_rules"`.
     """
     return {
         "id": alert.pk,
         "kind": alert.kind,
         "kind_label": OFFICE_ALERT_KIND_LABELS.get(alert.kind, ""),
         "badge": OFFICE_ALERT_KIND_BADGES.get(alert.kind, ""),
+        "opens": OFFICE_ALERT_KIND_OPENS.get(alert.kind, OFFICE_ALERT_DEFAULT_OPENS),
         "message": alert.message,
         "client": (
             None if alert.client is None
@@ -3182,14 +3606,15 @@ def alert_row(alert) -> dict:
     }
 
 
-def alerts_payload(tenant, *, user, limit=50) -> dict:
+def alerts_payload(tenant, *, user, day=None, limit=50) -> dict:
     """حمولةُ الجرس: `{"unseen": عددُ غير المرئيّ وغير المحسوم, "rows": [...]}`.
 
     **تنبيهاتُ هذا المستخدم وحده** (`recipient=user`) الأحدثُ أوّلاً، والمحسومُ
     مستبعَدٌ عند القراءة (`_visible_alerts`). و`unseen` يُعدّ على المجموعة كلّها
-    لا على الصفحة المعروضة، فالسقفُ لا يكذب على العدّاد.
+    لا على الصفحة المعروضة، فالسقفُ لا يكذب على العدّاد. و`day` يومُ القياس
+    (يُمرَّر من الـview) فتمديدُ التزامٍ يُسقط تنبيهَه بلا كتابة.
     """
-    queryset = _visible_alerts(tenant, user)
+    queryset = _visible_alerts(tenant, user, day=day)
     unseen = queryset.filter(seen_at__isnull=True).count()
     rows = [
         alert_row(alert)
@@ -3212,7 +3637,7 @@ def mark_alert_seen(alert, *, user):
     return alert
 
 
-def mark_all_alerts_seen(tenant, *, user) -> int:
+def mark_all_alerts_seen(tenant, *, user, day=None) -> int:
     """«شفتهم كلهم» — **المعروضُ وحده**: عددُ ما كُتب له `seen_at`.
 
     يمرّ بـ`_visible_alerts` نفسها، فلا يُكتب على تنبيهٍ محسوم: «رجّعها» بعدها
@@ -3222,7 +3647,7 @@ def mark_all_alerts_seen(tenant, *, user) -> int:
     # المعرّفاتُ تُقرأ أولاً ثم تُكتب: `UPDATE … WHERE id IN (SELECT … FROM` الجدولِ
     # نفسِه يرفضه MySQL (خطأ 1093) ويقبله SQLite — فيمرّ الاختبارُ ويسقط الإنتاج.
     ids = list(
-        _visible_alerts(tenant, user)
+        _visible_alerts(tenant, user, day=day)
         .filter(seen_at__isnull=True)
         .values_list("pk", flat=True),
     )
@@ -3257,4 +3682,1234 @@ def client_obligations_payload(client, *, user, day) -> dict:
             for task in tasks
         ],
         "direction_choices": obligation_direction_choices(),
+    }
+
+
+# ── تعديل المكتب على اللائحة، والتمديد، والتزامات المكتب، والأحداث (#277) ────
+#
+# **اللائحةُ بياناتُ منصّةٍ لا تُعدَّل**، وتعديلُ المكتب عليها **صفٌّ إلحاقيّ** في
+# `OfficeRuleOverride`: الساري = أحدثُ صفٍّ لكل (مكتب، نظام، كود)، و«رجّع للمنصة»
+# صفٌّ `cleared` لا حذف — فالسجلُّ لا يُمحى.
+#
+# **والحسابُ واحد**: `_deadline_result` هي مدخلاتُ المحرّك الوحيدة، يقرؤها المولّد
+# (`_deadline_items`) **وإعادةُ الحساب** (`_recompute_obligations`) معاً — فلا
+# نسختان تفترقان عند أول تعديل. وما قُدِّم (`submitted`) لا يدخل إعادةَ الحساب
+# أصلاً: «ما قُدِّم لا يغيّره تحديث اللائحة».
+
+#: الحقولُ التي تُعاد كتابتها في الالتزام المحفوظ — ولا `status` ولا مبلغَ ولا لقطةَ
+#: اسم. و`rule` معها: تحديثُ المنصة ينقل الصفَّ إلى السطر الجديد فيُكتب معه.
+RECOMPUTED_OBLIGATION_FIELDS: tuple[str, ...] = (
+    "rule",
+    "legal_date",
+    "official_date",
+    "actual_deadline",
+    "internal_deadline",
+    "postponed",
+    "warnings",
+    "platform_official_date",
+    "updated_at",
+)
+
+#: نصُّ سطرٍ سُحب من النسخة الجديدة — يُضاف إلى `warnings` ولا يغيّر تاريخاً.
+PLATFORM_MISSING_LINE_WARNING = "السطر لم يعد في لائحة المنصة — راجع"
+
+#: حدُّ التمديد الإلكترونيّ الذي يقبله تعديلُ المكتب (يوماً).
+MAX_OVERRIDE_EXTENSION_DAYS = 60
+
+#: سقفُ أيام سطر الحدث («بعد N يوماً من الحدث») — مدىً لا يومَ شهر. وحدُّه
+#: معقوليّةٌ لا تاريخُ قانون: القانونُ في `rule_day` الأصليّ في اللائحة.
+MAX_OVERRIDE_EVENT_DAYS = 180
+
+
+def _override_row(override) -> dict:
+    """سطرُ تعديلٍ كما يُعرض ويُسجَّل — و`based_on` لقطةُ المنصة وقت التعديل."""
+    return {
+        "id": override.pk,
+        "tax_system": override.tax_system,
+        "rule_code": override.rule_code,
+        "rule_day": override.rule_day,
+        "rule_month": override.rule_month,
+        "electronic_extension_days": override.electronic_extension_days,
+        "cleared": override.cleared,
+        "note": override.note,
+        "based_on": dict(override.based_on or {}),
+        "created_by_name": user_display_name(override.created_by),
+        "created_at": (
+            None if override.created_at is None else override.created_at.isoformat()
+        ),
+    }
+
+
+def _latest_platform_rule(tax_system, rule_code):
+    """سطرُ الكود في **أحدث نسخةٍ نُشرت** لنظام — مصدرُ اللقطة والتحقّق.
+
+    الترتيبُ بتاريخ النشر لا بالسنة: «النسخة الجديدة» هي آخرُ ما نشرته المنصة لهذا
+    السطر، وتصحيحُ 2026 يُنشر بعد لائحة 2027 فيكون هو الأحدث. والسنةُ والنسخةُ
+    يكسران التعادل.
+    """
+    return (
+        DeadlineRule.objects
+        .filter(schedule__tax_system=tax_system, code=rule_code)
+        .select_related("schedule")
+        .order_by(
+            "-schedule__published_on", "-schedule__year", "-schedule__version",
+        )
+        .first()
+    )
+
+
+def _override_based_on(rule) -> dict:
+    """لقطةُ قيم المنصة وقت التعديل — بها يُقال «المنصة غيّرت موعداً أنت معدّله»."""
+    return {
+        "rule_kind": rule.rule_kind,
+        "rule_day": rule.rule_day,
+        "rule_month": rule.rule_month,
+        "electronic_extension_days": rule.electronic_extension_days,
+        "schedule_id": rule.schedule_id,
+    }
+
+
+def _based_on_matches(based_on, rule) -> bool:
+    """هل لقطةُ التعديل تطابق السطرَ الساري؟ — القيمُ التي يعدّلها المكتب وحدها."""
+    snapshot = based_on or {}
+    return all(
+        snapshot.get(field) == getattr(rule, field)
+        for field in ("rule_kind", *OFFICE_RULE_OVERRIDE_FIELDS)
+    )
+
+
+def _clean_override_number(value, field, *, minimum, maximum):
+    """عددٌ صحيحٌ في حدّيه، أو `None` («كالمنصة») — وإلا رفضٌ بالحقل."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValidationError({field: "عددٌ صحيحٌ مطلوب."})
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        raise ValidationError({field: "عددٌ صحيحٌ مطلوب."}) from None
+    if not minimum <= number <= maximum:
+        raise ValidationError({field: f"القيمةُ بين {minimum} و{maximum}."})
+    return number
+
+
+def _dates_snapshot(obligation) -> dict:
+    """التواريخُ التي تُكتب في سجلّ التغيّر — نصوصاً ISO فلا تنسيقَ JSON يفترق."""
+    snapshot = {
+        "legal_date": obligation.legal_date.isoformat(),
+        "official_date": obligation.official_date.isoformat(),
+        "actual_deadline": obligation.actual_deadline.isoformat(),
+        "internal_deadline": obligation.internal_deadline.isoformat(),
+        "postponed": obligation.postponed,
+        "platform_official_date": (
+            None if obligation.platform_official_date is None
+            else obligation.platform_official_date.isoformat()
+        ),
+    }
+    if obligation.extended_to is not None:
+        snapshot["extended_to"] = obligation.extended_to.isoformat()
+    return snapshot
+
+
+def _stream_obligation_result(
+    obligation, *, client_service, context, system, bounds, streams,
+):
+    """نتيجةُ التزامٍ **دوريّ**: فترتُه من مجاري خدمته، ثم `_deadline_result`.
+
+    مجاري كل خدمةٍ تُحسب مرّةً في النداء (`streams`) بمداها الكامل (`bounds`) —
+    فلا استعلامَ لكل التزام. وفترةٌ لم تعد في المجاري (دوريةٌ تبدّلت أو سطرٌ
+    سُحب) تُرجع `None`: لا تاريخَ يُخترَع.
+    """
+    periods = streams.get(client_service.pk)
+    if periods is None:
+        floor, end = bounds[client_service.pk]
+        periods = {
+            (start, finish): cadence
+            for start, finish, _source, cadence in _periods_for_service(
+                client_service,
+                client_service.service.code,
+                list(client_service.frequencies.all()),
+                system=system,
+                floor=min(
+                    client_service.starts_on, client_service.responsible_from, floor,
+                ),
+                end=end,
+                context=context,
+            )
+        }
+        streams[client_service.pk] = periods
+    cadence = periods.get((obligation.period_start, obligation.period_end))
+    if cadence is None:
+        return None
+    return _deadline_result(
+        obligation.client,
+        rule=obligation.rule,
+        custom_rule=obligation.custom_rule,
+        override=(
+            None if obligation.rule_id is None
+            else context.overrides.get((system, obligation.rule_code))
+        ),
+        period_start=obligation.period_start,
+        period_end=obligation.period_end,
+        cadence=cadence,
+        context=context,
+        system=system,
+    )
+
+
+def _recomputed_warnings(obligation, result) -> list:
+    """تحذيراتُ الإعادة: ما يحسبه المحرّك، ومعه «السطر لم يعد في اللائحة» إن كان مكتوباً.
+
+    ذلك التحذيرُ يكتبه تحديثُ المنصة لا المحرّك، فالإعادةُ التي تستبدل `warnings`
+    بنتيجة المحرّك وحدها كانت تمحوه. وحين ينقل التحديثُ الالتزامَ إلى نسخةٍ فيها
+    السطرُ يُسقطه قبل الإعادة (`_apply_platform_updates`) فلا يبقى كاذباً.
+    """
+    warnings = list(result.warnings)
+    if (
+        PLATFORM_MISSING_LINE_WARNING in (obligation.warnings or [])
+        and PLATFORM_MISSING_LINE_WARNING not in warnings
+    ):
+        warnings.append(PLATFORM_MISSING_LINE_WARNING)
+    return warnings
+
+
+def _recompute_obligations(obligations, *, context, reason, actor=None):
+    """يُعيد حسابَ مواعيد التزاماتٍ محفوظة **بدالّة المحرّك نفسها** — بلا نسخةٍ ثانية.
+
+    كلُّ التزامٍ يُطابَق بفترته في مجاري خدمته (`_periods_for_service`) فتُعرف
+    دوريةُ الفترة (وهي ما يحكم أيامَ الإعداد)، ثم يُنادى `_deadline_result` بمدخلات
+    المولّد نفسها. وما تغيّر فعلاً يُسجَّل في `ObligationDateChange`، ويُرجع النداءُ
+    قائمةَ ما تغيّر وحدها.
+
+    **ودفعةٌ واحدة**: مجاري كل خدمةٍ تُحسب مرّةً، والكتابةُ `bulk_update` واحدة،
+    وأبكرُ داخليٍّ لكل شغلةٍ استعلامٌ واحد ثم `bulk_update` ثانٍ — فالكلفةُ لا تكبر
+    بعدد الالتزامات. و`submitted` لا يدخل هنا أصلاً.
+    """
+    processed: list = []
+    changed: list = []
+    befores: dict[int, dict] = {}
+    streams: dict[int, dict[tuple, str]] = {}
+    # مدى كل خدمةٍ **من كل التزاماتها** لا من أوّلها: مكتبةٌ تُقرأ بترتيبٍ عشوائيّ
+    # كانت تُسقط فتراتٍ لاحقة فتخرج الإعادةُ ناقصة.
+    bounds: dict[int, tuple] = {}
+    for obligation in obligations:
+        service_id = obligation.client_service_id
+        floor, end = bounds.get(
+            service_id, (obligation.period_start, obligation.period_end),
+        )
+        bounds[service_id] = (
+            min(floor, obligation.period_start),
+            max(end, obligation.period_end),
+        )
+    for obligation in obligations:
+        client = obligation.client
+        system = context.setting(client, TAX_SYSTEM_KEY)
+        if not system:
+            continue
+        if obligation.origin == OBLIGATION_ORIGIN_EVENT and obligation.event_id:
+            # **فترةُ الحدث ليست في أيّ مجرى لائحة**، فتُحسب بالدالّة التي يقرؤها
+            # التوليدُ نفسُه — وإلا سقطت الإعادةُ عليها بصمت (#277).
+            result = _event_obligation_result(
+                client, rule=obligation.rule,
+                occurred_on=obligation.period_end,
+                context=context, system=system,
+            )
+        else:
+            result = _stream_obligation_result(
+                obligation,
+                client_service=obligation.client_service,
+                context=context,
+                system=system,
+                bounds=bounds,
+                streams=streams,
+            )
+        if result is None:
+            continue
+        before = _dates_snapshot(obligation)
+        obligation.legal_date = result.legal_date
+        obligation.official_date = result.official_date
+        obligation.actual_deadline = result.actual_deadline
+        obligation.internal_deadline = result.internal_deadline
+        obligation.postponed = result.postponed
+        obligation.warnings = _recomputed_warnings(obligation, result)
+        obligation.platform_official_date = result.platform_official_date
+        obligation.updated_at = timezone.now()
+        processed.append(obligation)
+        if _dates_snapshot(obligation) != before:
+            befores[obligation.pk] = before
+            changed.append(obligation)
+    if processed:
+        Obligation.objects.bulk_update(
+            list(processed), list(RECOMPUTED_OBLIGATION_FIELDS),
+        )
+    if changed:
+        actor_row = actor if getattr(actor, "pk", None) else None
+        ObligationDateChange.objects.bulk_create([
+            ObligationDateChange(
+                tenant_id=obligation.tenant_id,
+                obligation=obligation,
+                reason=reason,
+                before=befores[obligation.pk],
+                after=_dates_snapshot(obligation),
+                changed_by=actor_row,
+            )
+            for obligation in changed
+        ])
+        _reset_task_internal_deadlines({row.task_id for row in changed})
+    return changed
+
+
+def _reset_task_internal_deadlines(task_ids) -> None:
+    """أبكرُ موعدٍ داخليٍّ لالتزامات كل شغلةٍ متغيّرة — استعلامٌ واحد وكتابةٌ واحدة."""
+    if not task_ids:
+        return
+    earliest: dict[int, Any] = {}
+    for task_id, internal in (
+        Obligation.objects
+        .filter(task_id__in=task_ids)
+        .values_list("task_id", "internal_deadline")
+    ):
+        if task_id not in earliest or internal < earliest[task_id]:
+            earliest[task_id] = internal
+    touched = []
+    for task in PeriodTask.objects.filter(pk__in=task_ids):
+        earliest_day = earliest.get(task.pk)
+        if earliest_day is None or earliest_day == task.internal_deadline:
+            continue
+        task.internal_deadline = earliest_day
+        touched.append(task)
+    if touched:
+        PeriodTask.objects.bulk_update(touched, ["internal_deadline"])
+
+
+def _recompute_for_code(tenant, rule_code, *, reason, actor=None, tax_system=None):
+    """إعادةُ حساب كل التزامات المكتب **غير المقدَّمة** لكود سطرٍ — لا المقدَّم.
+
+    و`tax_system` يقصرها على التزامات أسطر ذلك النظام: تعديلُ المكتب مفتاحُه
+    `(النظام، الكود)`، فلا يمسّ التزاماً بالكود نفسه في النظام الآخر. والتزامُ
+    المكتب الخاص (`rule=None`) يُنادى بلا نظام فيبقى داخلاً.
+    """
+    obligations = Obligation.objects.filter(
+        tenant=tenant,
+        rule_code=rule_code,
+        status__in=(OBLIGATION_STATUS_PENDING, OBLIGATION_STATUS_NOT_REQUIRED),
+    )
+    if tax_system is not None:
+        obligations = obligations.filter(rule__schedule__tax_system=tax_system)
+    obligations = list(
+        obligations
+        .select_related(
+            "client",
+            "client_service__service",
+            "task",
+            "rule",
+            "custom_rule",
+        )
+        .prefetch_related("client_service__frequencies")
+    )
+    if not obligations:
+        return []
+    context = calendar_context(tenant, [row.client for row in obligations])
+    return _recompute_obligations(
+        obligations, context=context, reason=reason, actor=actor,
+    )
+
+
+def _assert_tax_system(tax_system) -> str:
+    """نظامٌ ضريبيّ معروف — تحقّقٌ واحدٌ لثلاثة أفعالٍ على اللائحة."""
+    if tax_system not in dict(TAX_SYSTEM_CHOICES):
+        raise ValidationError({"system": "النظام الضريبي غير معروف."})
+    return tax_system
+
+
+def set_rule_override(
+    tenant, *, tax_system, rule_code, rule_day=None, rule_month=None,
+    electronic_extension_days=None, note="", actor,
+) -> dict:
+    """**يعدّل المكتب سطرَ اللائحة** على مسؤوليته: صفٌّ جديد، ثم إعادةُ حساب غير المقدَّم.
+
+    المكتبُ يعدّل الأيامَ وحدها: `rule_day`/`rule_month`/`electronic_extension_days`،
+    و`None` تعني «كالمنصة». ونوعُ القاعدة (`rule_kind`) يبقى من اللقطة — تغييرُه
+    تغييرُ قانونٍ لا تأخيرُ موعد.
+
+    **والملاحظةُ إلزامية**: التعديلُ قرارٌ على مسؤوليّة المكتب، وقرارٌ بلا سببٍ
+    مكتوبٍ لا يُفسَّر بعد شهرين — والواجهةُ تطلبه، والخادمُ يرفض غيابه.
+
+    وتحقّقان قبل الكتابة: الكودُ موجودٌ في نسخة المنصة (وإلا كان تعديلاً على لا
+    شيء)، والقيمُ في حدودها.
+
+    ويُرجع `{"override": …، "changed_obligations": N}` — و`N` عدّادُ ما تغيّر
+    تاريخُه فعلاً، لا كلَّ ما مُسّ.
+    """
+    _assert_tax_system(tax_system)
+    rule = _latest_platform_rule(tax_system, rule_code)
+    if rule is None:
+        raise ValidationError({
+            "code": (
+                f"السطر «{rule_code}» غير موجود في لائحة "
+                f"{tax_system_label(tax_system)}."
+            ),
+        })
+    if rule.rule_kind == RULE_KIND_DAYS_AFTER_EVENT:
+        # سطرُ الحدث: `rule_day` **مدىً بالأيام بعد الحدث** لا يومَ شهر.
+        clean_day = _clean_override_number(
+            rule_day, "rule_day", minimum=0, maximum=MAX_OVERRIDE_EVENT_DAYS,
+        )
+    else:
+        clean_day = _clean_override_number(
+            rule_day, "rule_day", minimum=1, maximum=31,
+        )
+    if clean_day is not None and rule.rule_kind == RULE_KIND_END_OF_PERIOD:
+        # المحرّكُ يُرجع نهايةَ الفترة لهذا النوع ولا يقرأ اليوم — فقبولُه كتابةٌ بلا أثر.
+        raise ValidationError({
+            "rule_day": "هذا الموعد آخرُ يومٍ في الفترة — لا يومَ يُعدَّل فيه.",
+        })
+    clean_month = _clean_override_number(rule_month, "rule_month", minimum=1, maximum=12)
+    if clean_month is not None and rule.rule_kind != RULE_KIND_MONTH_DAY_NEXT_YEAR:
+        raise ValidationError({
+            "rule_month": (
+                "شهرُ القاعدة لسطر «يوم في السنة التالية» وحده — غيره يومٌ في شهر."
+            ),
+        })
+    clean_extension = _clean_override_number(
+        electronic_extension_days, "electronic_extension_days",
+        minimum=0, maximum=MAX_OVERRIDE_EXTENSION_DAYS,
+    )
+    clean_note = (note or "").strip()
+    if not clean_note:
+        raise ValidationError({"note": "ملاحظة التعديل مطلوبة — القرارُ يُفسَّر بها."})
+    with transaction.atomic():
+        override = OfficeRuleOverride.objects.create(
+            tenant=tenant,
+            tax_system=tax_system,
+            rule_code=rule_code,
+            rule_day=clean_day,
+            rule_month=clean_month,
+            electronic_extension_days=clean_extension,
+            based_on=_override_based_on(rule),
+            note=clean_note,
+            created_by=actor if getattr(actor, "pk", None) else None,
+        )
+        changed = _recompute_for_code(
+            tenant, rule_code, reason=OBLIGATION_CHANGE_OFFICE_OVERRIDE, actor=actor,
+            tax_system=tax_system,
+        )
+    return {"override": _override_row(override), "changed_obligations": len(changed)}
+
+
+def clear_rule_override(tenant, *, tax_system, rule_code, actor) -> dict:
+    """**«رجّع لتاريخ المنصة»** — صفٌّ `cleared=True` ثم الإعادةُ نفسها. لا حذف."""
+    _assert_tax_system(tax_system)
+    rule = _latest_platform_rule(tax_system, rule_code)
+    if rule is None:
+        raise ValidationError({
+            "code": f"السطر «{rule_code}» غير موجود في لائحة المنصة.",
+        })
+    with transaction.atomic():
+        override = OfficeRuleOverride.objects.create(
+            tenant=tenant,
+            tax_system=tax_system,
+            rule_code=rule_code,
+            cleared=True,
+            based_on=_override_based_on(rule),
+            note="رجّع للمنصة",
+            created_by=actor if getattr(actor, "pk", None) else None,
+        )
+        changed = _recompute_for_code(
+            tenant, rule_code, reason=OBLIGATION_CHANGE_OFFICE_OVERRIDE, actor=actor,
+            tax_system=tax_system,
+        )
+    return {"override": _override_row(override), "changed_obligations": len(changed)}
+
+
+def keep_rule_override(tenant, *, tax_system, rule_code, actor) -> dict:
+    """**«أُبقي تاريخي»** — صفٌّ بالقيم نفسها ولقطةٍ من النسخة السارية.
+
+    فيصير الساري الجديد ويسقط تنبيهُ «تُبقي تاريخك أم تأخذ الجديد؟» بلا أن يتغيّر
+    تاريخُ التزامٍ واحد. ولا تعديلَ ساري ⇒ رفضٌ بالطريق الصحيح: «تأخذ الجديد» هو
+    `clear_rule_override`.
+    """
+    _assert_tax_system(tax_system)
+    current = active_rule_overrides(tenant).get((tax_system, rule_code))
+    if current is None:
+        raise ValidationError({
+            "code": (
+                "لا تعديلَ سارياً لهذا السطر — و«تأخذ الجديد» هو «رجّع للمنصة»."
+            ),
+        })
+    rule = _latest_platform_rule(tax_system, rule_code)
+    with transaction.atomic():
+        override = OfficeRuleOverride.objects.create(
+            tenant=tenant,
+            tax_system=tax_system,
+            rule_code=rule_code,
+            rule_day=current.rule_day,
+            rule_month=current.rule_month,
+            electronic_extension_days=current.electronic_extension_days,
+            based_on=(
+                _override_based_on(rule) if rule is not None else dict(current.based_on)
+            ),
+            note=current.note,
+            created_by=actor if getattr(actor, "pk", None) else None,
+        )
+        changed = _recompute_for_code(
+            tenant, rule_code, reason=OBLIGATION_CHANGE_OFFICE_OVERRIDE, actor=actor,
+            tax_system=tax_system,
+        )
+    return {"override": _override_row(override), "changed_obligations": len(changed)}
+
+
+def _append_warnings(obligations, warning) -> int:
+    """يُضيف تنبيهاً **مرّةً**: تشغيلٌ ثانٍ لا يكرّره، ولا يمحو تنبيهات المحرّك."""
+    touched = []
+    for obligation in obligations:
+        warnings = list(obligation.warnings or [])
+        if warning in warnings:
+            continue
+        obligation.warnings = [*warnings, warning]
+        obligation.updated_at = timezone.now()
+        touched.append(obligation)
+    if touched:
+        Obligation.objects.bulk_update(touched, ["warnings", "updated_at"])
+    return len(touched)
+
+
+def _override_conflict_candidates(overrides, *, label) -> list[tuple[str, str, str]]:
+    """«المنصة غيّرت موعداً أنت معدّله» — **مستقلٌّ عن نقل الالتزامات**.
+
+    التنبيهُ قرارُ مكتبٍ لا نتيجةَ تحديث: يُفحص **كلُّ تعديلٍ ساري × سطرِه في
+    النسخة السارية لنظامه**، ولو لم يكن للمكتب التزامٌ غيرُ مقدَّمٍ يُنقل أصلاً.
+
+    والشرط: نسخةٌ **أحدث** (بـ`version` أعلى) من نسخة اللقطة، وقيمُ سطرها لا
+    تطابق `based_on`. فنسخةٌ جديدةٌ نسخت السطر حرفاً لا تُنبِّه؛ والتعديلُ يسري على
+    كل سنوات نظامه، فنسخةٌ أحدثُ لأيّ سنةٍ يخالف سطرُها `based_on` تُنبِّه.
+
+    والكلفةُ ثابتة: نسخُ الأنظمة المعنيّة استعلامٌ واحد، ونسخُ اللقطات استعلامٌ
+    واحد، وأسطرُها استعلامٌ واحد — لا استعلامَ لكل تعديل.
+    """
+    systems = {override.tax_system for override in overrides.values()}
+    if not systems:
+        return []
+    current: dict[tuple[str, int], Any] = {}
+    for schedule in (
+        DeadlineSchedule.objects
+        .filter(tax_system__in=systems)
+        .order_by("tax_system", "year", "-version")
+    ):
+        current.setdefault((schedule.tax_system, schedule.year), schedule)
+    snapshot_ids = {
+        (override.based_on or {}).get("schedule_id")
+        for override in overrides.values()
+    } - {None}
+    snapshot_versions = dict(
+        DeadlineSchedule.objects
+        .filter(pk__in=snapshot_ids)
+        .values_list("pk", "version"),
+    )
+    codes = {code for _system, code in overrides}
+    rules = {
+        (rule.schedule_id, rule.code): rule
+        for rule in DeadlineRule.objects.filter(
+            schedule__in=list(current.values()), code__in=codes,
+        )
+    }
+    candidates: list[tuple[str, str, str]] = []
+    for (system, code), override in overrides.items():
+        snapshot = override.based_on or {}
+        snapshot_version = snapshot_versions.get(snapshot.get("schedule_id"), 0)
+        for (tax_system, _year), schedule in current.items():
+            if tax_system != system or schedule.version <= snapshot_version:
+                continue
+            rule = rules.get((schedule.pk, code))
+            if rule is None or _based_on_matches(snapshot, rule):
+                continue
+            candidates.append((
+                OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED,
+                f"override:{override.pk}:schedule:{schedule.pk}",
+                (
+                    f"المنصة غيّرت موعداً أنت معدّله: {rule.name} ({label(system)}) "
+                    "— تُبقي تاريخك أم تأخذ الجديد؟"
+                ),
+            ))
+            break
+    return candidates
+
+
+def _apply_platform_updates(tenant, *, day, context) -> dict:
+    """**تحديثُ المنصة للائحة**: «التحديث» = نسخةٌ أحدث، والالتزامُ غيرُ المقدَّم يلحقها.
+
+    كلُّ التزامٍ `pending`/`not_required` يشير إلى نسخةٍ ليست السارية لنظام زبونه
+    وسنة `period_end`:
+
+    - سطرُ كوده موجودٌ في النسخة السارية ⇒ يُنقل إليه ويُعاد حسابه (`platform_update`).
+    - سطرُه غاب من الجديد ⇒ لا تاريخَ يتغيّر، وتُضاف `warnings` وحدها.
+
+    **والمقدَّمُ لا يُمسّ** ولا يُنقل سطرُه. والكلفةُ ثابتة: التزاماتُ المكتب استعلامٌ
+    واحد، وأسطرُ النسخ الجديدة استعلامٌ واحد مجمَّعةً بالكود، والكتابةُ دفعةٌ واحدة
+    (`_recompute_obligations`). ولا `UPDATE … WHERE id IN (SELECT … من الجدول نفسه)`.
+
+    ويُرجع `{schedule_id: (schedule, عددُ ما تغيّر تاريخُه)}` لتُبنى عليه تنبيهاتُ
+    اللائحة.
+    """
+    obligations = list(
+        Obligation.objects
+        .filter(
+            tenant=tenant,
+            status__in=(OBLIGATION_STATUS_PENDING, OBLIGATION_STATUS_NOT_REQUIRED),
+            rule__isnull=False,
+        )
+        .select_related(
+            "rule__schedule",
+            "client",
+            "client_service__service",
+            "task",
+        )
+        .prefetch_related("client_service__frequencies")
+    )
+    stale = []
+    for obligation in obligations:
+        system = context.setting(obligation.client, TAX_SYSTEM_KEY)
+        if not system:
+            continue
+        schedule = context.schedule(system, obligation.period_end.year)[0]
+        if schedule is None or obligation.rule.schedule_id == schedule.pk:
+            continue
+        stale.append((obligation, schedule))
+    if not stale:
+        return {}
+    wanted: dict[int, set] = {}
+    for obligation, schedule in stale:
+        wanted.setdefault(schedule.pk, set()).add(obligation.rule_code)
+    rules = {
+        (rule.schedule_id, rule.code): rule
+        for rule in DeadlineRule.objects.filter(
+            schedule_id__in=list(wanted),
+            code__in={code for codes in wanted.values() for code in codes},
+        )
+    }
+    moved: list = []
+    missing: list = []
+    schedules: dict[int, Any] = {}
+    for obligation, schedule in stale:
+        rule = rules.get((schedule.pk, obligation.rule_code))
+        if rule is None:
+            missing.append(obligation)
+            continue
+        obligation.rule = rule
+        # السطرُ عاد في النسخة السارية: تحذيرُ «لم يعد» السابقُ لم يعد صادقاً.
+        obligation.warnings = [
+            warning for warning in (obligation.warnings or [])
+            if warning != PLATFORM_MISSING_LINE_WARNING
+        ]
+        moved.append(obligation)
+        schedules[schedule.pk] = schedule
+    _append_warnings(missing, PLATFORM_MISSING_LINE_WARNING)
+    if not moved:
+        return {}
+    changed = _recompute_obligations(
+        moved, context=context, reason=OBLIGATION_CHANGE_PLATFORM_UPDATE,
+    )
+    counts: dict[int, int] = {pk: 0 for pk in schedules}
+    for obligation in changed:
+        schedule_id = obligation.rule.schedule_id
+        if schedule_id in counts:
+            counts[schedule_id] += 1
+    return {
+        schedule_id: (schedules[schedule_id], count)
+        for schedule_id, count in counts.items()
+    }
+
+
+def _generate_schedule_alerts(tenant, *, day, context, schedule_changes=None) -> int:
+    """تنبيهاتُ اللائحة لأصحاب المكتب (`MANAGER_ROLE` النشطون) — بلا زبونٍ ولا مبلغ.
+
+    - `schedule_dates_changed` **مرّةً لكل نسخةٍ** تغيّر بها التزامٌ واحدٌ على الأقل
+      («تغيّر موعد N التزامات»)، و`ref_key="schedule:<id>"` — فالفرادةُ غيرُ
+      المشروطة تمنع التكرار بتشغيلٍ ثانٍ.
+    - `override_platform_changed` لكل تعديلٍ ساري تختلف لقطتُه `based_on` عن قيم
+      السطر في النسخة السارية — «تُبقي تاريخك أم تأخذ الجديد؟»،
+      و`ref_key="override:<id>:schedule:<sid>"`.
+
+    ونوعاهما خارج `RESOLVED_ALERT_KINDS` فيبقيان حتى «شفته» — ويسقط الثاني وحده
+    على القراءة إن لم يعد التعديلُ سارياً (`_live_override_alerts_q`).
+    """
+    recipients = _office_owner_ids(tenant)
+    if not recipients:
+        return 0
+    candidates: list[tuple[str, str, str]] = []
+    for schedule, count in (schedule_changes or {}).values():
+        if count <= 0:
+            continue
+        candidates.append((
+            OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED,
+            f"schedule:{schedule.pk}",
+            (
+                f"تغيّر موعد {count} التزامات في لائحة "
+                f"{tax_system_label(schedule.tax_system)} لسنة {schedule.year}"
+            ),
+        ))
+    # **قرارُ المكتب مستقلٌّ عن النقل**: يُفحص كلُّ تعديلٍ ساري ولو لم يُنقل التزام.
+    candidates.extend(
+        _override_conflict_candidates(context.overrides, label=tax_system_label),
+    )
+    if not candidates:
+        return 0
+    ref_keys = {ref_key for _kind, ref_key, _message in candidates}
+    existing = set(
+        OfficeAlert.objects
+        .filter(
+            tenant=tenant,
+            kind__in=(
+                OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED,
+                OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED,
+            ),
+            ref_key__in=ref_keys,
+        )
+        .values_list("recipient_id", "kind", "ref_key"),
+    )
+    rows: list = []
+    for kind, ref_key, message in candidates:
+        rows.extend(_new_alert_rows(
+            tenant=tenant,
+            kind=kind,
+            ref_key=ref_key,
+            recipients=recipients,
+            message=message,
+            day=day,
+            client=None,
+            task=None,
+            obligation=None,
+            existing=existing,
+        ))
+    if not rows:
+        return 0
+    OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
+    return len(rows)
+
+
+def _log_obligation_change(obligation, *, description, metadata, actor) -> None:
+    """أثرُ التمديد وإلغائه في سجلّ **الزبون** — الوجهةُ التي يفتحها المكتب."""
+    log_activity(
+        action="update",
+        entity_type="office_client",
+        entity_id=obligation.client_id,
+        entity_label=obligation.client.name,
+        description=description,
+        metadata=metadata,
+        tenant=obligation.tenant,
+        user=actor,
+    )
+
+
+def extend_obligation(obligation, *, until, note, actor) -> Obligation:
+    """**«مدّد»**: تاريخٌ وملاحظة — يُسكِت الأحمرَ إلى الموعد الجديد.
+
+    المنتظرُ وحده يُمدَّد: «انقدّم» نهائيٌّ، و«مش لازم هالفترة» تُرجَّع أوّلاً.
+    والموعدُ الجديد **بعد الفعليّ** وملاحظتُه مطلوبة — تمديدٌ بلا سببٍ مكتوبٍ رقمٌ
+    لا يُفسَّر بعد شهرين. والتاريخُ الرسميُّ لا يُكتب فوقه: التمديدُ قرارٌ زائدٌ
+    يُلغى فيُرجع الفعليَّ كما كان.
+    """
+    if obligation.status == OBLIGATION_STATUS_SUBMITTED:
+        raise ValidationError({"status": SUBMITTED_LOCKED})
+    if obligation.status != OBLIGATION_STATUS_PENDING:
+        raise ValidationError({"status": "مش لازم: رجّعها أولاً ثم مدّد."})
+    if until is None:
+        raise ValidationError({"until": "تاريخ التمديد مطلوب."})
+    if until <= obligation.actual_deadline:
+        raise ValidationError({
+            "until": "التمديد بعد الموعد الفعلي — وما قبله تقديمٌ لا تمديد.",
+        })
+    clean_note = (note or "").strip()
+    if not clean_note:
+        raise ValidationError({"note": "ملاحظة التمديد مطلوبة."})
+    before = _dates_snapshot(obligation)
+    with transaction.atomic():
+        obligation.extended_to = until
+        obligation.extension_note = clean_note
+        obligation.extended_by = actor if getattr(actor, "pk", None) else None
+        obligation.extended_at = timezone.now()
+        obligation.save(update_fields=[
+            "extended_to",
+            "extension_note",
+            "extended_by",
+            "extended_at",
+            "updated_at",
+        ])
+        ObligationDateChange.objects.create(
+            tenant=obligation.tenant,
+            obligation=obligation,
+            reason=OBLIGATION_CHANGE_EXTENSION,
+            before=before,
+            after=_dates_snapshot(obligation),
+            changed_by=obligation.extended_by,
+        )
+    _log_obligation_change(
+        obligation,
+        description=(
+            f"تمديد «{obligation.name}» في {obligation.client.name} إلى {until}"
+        ),
+        metadata={
+            "obligation": obligation.pk,
+            "until": until.isoformat(),
+            "from": obligation.actual_deadline.isoformat(),
+        },
+        actor=actor,
+    )
+    return obligation
+
+
+def clear_obligation_extension(obligation, *, actor) -> Obligation:
+    """**«ألغِ التمديد»**: يرجع إلى الموعد الفعليّ، بصفٍّ `extension_cleared`."""
+    if obligation.status == OBLIGATION_STATUS_SUBMITTED:
+        raise ValidationError({"status": SUBMITTED_LOCKED})
+    if obligation.extended_to is None:
+        raise ValidationError({"status": "لا تمديدَ لهذا الالتزام لتُلغى."})
+    before = _dates_snapshot(obligation)
+    with transaction.atomic():
+        obligation.extended_to = None
+        obligation.extension_note = ""
+        obligation.extended_by = None
+        obligation.extended_at = None
+        obligation.save(update_fields=[
+            "extended_to",
+            "extension_note",
+            "extended_by",
+            "extended_at",
+            "updated_at",
+        ])
+        ObligationDateChange.objects.create(
+            tenant=obligation.tenant,
+            obligation=obligation,
+            reason=OBLIGATION_CHANGE_EXTENSION_CLEARED,
+            before=before,
+            after=_dates_snapshot(obligation),
+            changed_by=actor if getattr(actor, "pk", None) else None,
+        )
+    _log_obligation_change(
+        obligation,
+        description=(
+            f"إلغاء تمديد «{obligation.name}» في {obligation.client.name} — "
+            f"الموعد الفعليّ {obligation.actual_deadline}"
+        ),
+        metadata={
+            "obligation": obligation.pk,
+            "to": obligation.actual_deadline.isoformat(),
+        },
+        actor=actor,
+    )
+    return obligation
+
+
+def _custom_rule_row(row) -> dict:
+    """سطرُ التزام مكتبٍ كما يُعرض — بكوده المشتقّ وتسمياته من الثوابت."""
+    return {
+        "id": row.pk,
+        "code": row.code,
+        "name": row.name,
+        "service": {
+            "id": row.service_id,
+            "code": row.service.code,
+            "name": row.service.name,
+        },
+        "cadence": row.cadence,
+        "cadence_label": dict(DEADLINE_CADENCE_CHOICES).get(row.cadence, ""),
+        "rule_kind": row.rule_kind,
+        "rule_kind_label": dict(OFFICE_CUSTOM_RULE_KIND_CHOICES).get(row.rule_kind, ""),
+        "rule_day": row.rule_day,
+        "rule_month": row.rule_month,
+        "is_active": row.is_active,
+        "origin_label": OBLIGATION_ORIGIN_LABELS.get(OBLIGATION_ORIGIN_OFFICE, ""),
+    }
+
+
+def custom_rules_payload(tenant) -> dict:
+    """شاشةُ «التزامات المكتب»: القائمةُ مع اختياراتها — **قراءةٌ لا تزرع شيئاً**.
+
+    والخدماتُ تُقرأ بلا `ensure_default_services`: القراءةُ لا تكتب، وزرعُ الكتالوج
+    فعلُ شاشة الخدمات (`GET services/`).
+    """
+    return {
+        "custom_rules": [
+            _custom_rule_row(row)
+            for row in (
+                OfficeCustomRule.objects
+                .filter(tenant=tenant)
+                .select_related("service")
+                .order_by("name", "id")
+            )
+        ],
+        "cadence_choices": [
+            {"value": value, "label": label}
+            for value, label in OFFICE_CUSTOM_RULE_CADENCE_CHOICES
+        ],
+        "rule_kind_choices": [
+            {"value": value, "label": label}
+            for value, label in OFFICE_CUSTOM_RULE_KIND_CHOICES
+        ],
+        "services": [
+            {"id": row.pk, "code": row.code, "name": row.name}
+            for row in (
+                OfficeService.objects
+                .filter(tenant=tenant, is_active=True)
+                .order_by("position", "name", "id")
+            )
+        ],
+    }
+
+
+def _clean_custom_rule_payload(*, cadence, rule_kind, rule_day, rule_month):
+    """حدودُ قاعدة المكتب: دوريةٌ تُولّد، ونوعُ قاعدةٍ دوريّ، ويومٌ/شهرٌ في حدّيهما."""
+    if cadence not in {value for value, _label in DEADLINE_CADENCE_CHOICES}:
+        raise ValidationError({"cadence": "دورية غير معروفة."})
+    if cadence == CADENCE_EVENT:
+        raise ValidationError({
+            "cadence": "التزامُ المكتب دوريٌّ — والحدثُ يُسجَّل من ملفّ الزبون.",
+        })
+    if rule_kind not in {value for value, _label in OFFICE_CUSTOM_RULE_KIND_CHOICES}:
+        raise ValidationError({"rule_kind": "نوعُ قاعدة غير معروف لالتزام المكتب."})
+    clean_day = _clean_override_number(rule_day, "rule_day", minimum=1, maximum=31)
+    clean_month = _clean_override_number(rule_month, "rule_month", minimum=1, maximum=12)
+    if rule_kind == RULE_KIND_MONTH_DAY_NEXT_YEAR:
+        if clean_month is None or clean_day is None:
+            raise ValidationError({
+                "rule_day": "«يوم في السنة التالية» يحتاج شهراً ويوماً.",
+            })
+        return clean_day, clean_month
+    if clean_day is None and rule_kind == RULE_KIND_DAY_OF_NEXT_MONTH:
+        raise ValidationError({"rule_day": "«يوم في الشهر التالي» يحتاج يوماً."})
+    return clean_day, None
+
+
+def create_custom_rule(
+    tenant, *, name, service, cadence, rule_kind, rule_day=None, rule_month=None,
+    is_active=True, actor, day=None,
+) -> OfficeCustomRule:
+    """**التزامٌ خاص بالمكتب**: اسمٌ وخدمةٌ ودوريةٌ وقاعدة — يُولّد كالرسميّ.
+
+    **ويُولَّد فور إنشائه** لزبائن خدمته (`_generate_for_service`): `refresh_office`
+    لا يعمل إلا مرّةً في اليوم، فالقاعدةُ المنشأةُ بعد تشغيل اليوم كانت تنتظر الغد.
+    و`day` هو يومُ التوليد نفسُه الذي يقرؤه التحديث (افتراضُه `timezone.localdate()`).
+    """
+    _assert_service_of_tenant(tenant, service)
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValidationError({"name": "اسمُ الالتزام مطلوب."})
+    clean_day, clean_month = _clean_custom_rule_payload(
+        cadence=cadence, rule_kind=rule_kind, rule_day=rule_day, rule_month=rule_month,
+    )
+    row = OfficeCustomRule.objects.create(
+        tenant=tenant,
+        name=clean_name,
+        service=service,
+        cadence=cadence,
+        rule_kind=rule_kind,
+        rule_day=clean_day,
+        rule_month=clean_month,
+        is_active=bool(is_active),
+        created_by=actor if getattr(actor, "pk", None) else None,
+    )
+    if row.is_active:
+        _generate_for_service(tenant, service, day=day or timezone.localdate())
+    return row
+
+
+def _generate_for_service(tenant, service, *, day) -> None:
+    """يحفظ المستحقَّ لزبائن خدمةٍ واحدة — **بمسار الحفظ نفسه** الذي يقرؤه `refresh_office`.
+
+    الزبائنُ من لهم `ClientService` على هذه الخدمة لم تنتهِ قبل `day`. والحفظُ
+    idempotent (القائمُ يُقرأ ولا يُكتب)، فتشغيلُ اليوم بعدها لا يكرّر صفّاً.
+    """
+    clients = list(
+        OfficeClient.objects
+        .filter(
+            Q(services__ends_on__isnull=True) | Q(services__ends_on__gte=day),
+            tenant=tenant,
+            services__service=service,
+        )
+        .select_related("tax_card", "responsible")
+        .prefetch_related("services__service", "services__frequencies")
+        .distinct()
+        .order_by("id"),
+    )
+    if not clients:
+        return
+    _save_due_for_clients(
+        tenant, clients, day=day, context=calendar_context(tenant, clients),
+    )
+
+
+def update_custom_rule(
+    row, *, name=None, service=None, cadence=None, rule_kind=None,
+    rule_day=_UNSET, rule_month=_UNSET, is_active=None, actor, day=None,
+) -> OfficeCustomRule:
+    """تعديلُ التزام مكتبٍ — ويعيد حسابَ غير المقدَّم منه بالدالّة الواحدة.
+
+    **والتعطيلُ لا يمحو شيئاً**: يوقف توليد الفترات الجديدة، وما وُلد يبقى بتاريخه.
+    ولقطةُ الاسم والموعد في الالتزام المحفوظ لا تتغيّر بالاسم الجديد — تُحدَّث
+    التواريخُ وحدها (`office_override`).
+
+    **وتُولَّد الفتراتُ المستحقّة** (`_generate_for_service`) حين تتبدّل خدمتُها أو
+    دوريتُها أو يعود المعطَّلُ إلى التفعيل — لا عند كل تعديل، فتعديلُ اليوم أو الاسم
+    لا يفتح فتراتٍ جديدة.
+    """
+    changed = False
+    regenerate = False
+    if name is not None:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValidationError({"name": "اسمُ الالتزام مطلوب."})
+        row.name = clean_name
+        changed = True
+    if service is not None:
+        _assert_service_of_tenant(row.tenant, service)
+        regenerate = regenerate or service.pk != row.service_id
+        row.service = service
+        changed = True
+    next_cadence = row.cadence if cadence is None else cadence
+    next_kind = row.rule_kind if rule_kind is None else rule_kind
+    next_day = row.rule_day if rule_day is _UNSET else rule_day
+    next_month = row.rule_month if rule_month is _UNSET else rule_month
+    clean_day, clean_month = _clean_custom_rule_payload(
+        cadence=next_cadence, rule_kind=next_kind,
+        rule_day=next_day, rule_month=next_month,
+    )
+    if (next_cadence, next_kind, clean_day, clean_month) != (
+        row.cadence, row.rule_kind, row.rule_day, row.rule_month,
+    ):
+        regenerate = regenerate or next_cadence != row.cadence
+        row.cadence = next_cadence
+        row.rule_kind = next_kind
+        row.rule_day = clean_day
+        row.rule_month = clean_month
+        changed = True
+    if is_active is not None and bool(is_active) != row.is_active:
+        regenerate = regenerate or bool(is_active)
+        row.is_active = bool(is_active)
+        changed = True
+    if not changed:
+        return row
+    row.save()
+    _recompute_for_code(
+        row.tenant, row.code, reason=OBLIGATION_CHANGE_OFFICE_OVERRIDE, actor=actor,
+    )
+    if regenerate and row.is_active:
+        _generate_for_service(
+            row.tenant, row.service, day=day or timezone.localdate(),
+        )
+    return row
+
+
+def enabled_event_kinds(tenant) -> list[dict]:
+    """أنواعُ الأحداث المفعّلة بتسمياتها — مصدرُ التحقّق والشاشة واحد."""
+    enabled = resolve_setting(tenant, "enabled_event_kinds") or []
+    return [
+        {"value": key, "label": EVENT_KIND_LABELS.get(key, key)}
+        for key, _label in EVENT_KIND_CHOICES
+        if key in enabled
+    ]
+
+
+def _active_client_services(client, *, day) -> dict[str, Any]:
+    """خدماتُ الزبون **النشطة** بتاريخ الحدث، بمفتاح كود الخدمة."""
+    rows: dict[str, Any] = {}
+    for row in client_services_of(client):
+        if row.starts_on > day:
+            continue
+        if row.ends_on is not None and day > row.ends_on:
+            continue
+        rows[row.service.code] = row
+    return rows
+
+
+def _event_obligation_result(client, *, rule, occurred_on, context, system):
+    """موعدُ التزام حدثٍ — **دالّةٌ واحدة** يقرؤها التوليدُ وإعادةُ الحساب.
+
+    فترةُ الحدث (يومُ وقوعه، يومُ وقوعه) ليست في أيّ مجرى لائحةٍ، فتُحسب بقاعدة
+    `days_after_event` وأيامِ الدورية الشهرية، وموعدُها الداخليُّ **لا يسبق يومَ
+    الحدث** (`max`) — فلا نسخةَ ثانية من هذا الحساب في مسارٍ آخر ولا في الإعادة.
+    """
+    result = _deadline_result(
+        client,
+        rule=rule,
+        override=context.overrides.get((system, rule.code)),
+        period_start=occurred_on,
+        period_end=occurred_on,
+        cadence=FREQUENCY_MONTHLY,
+        context=context,
+        system=system,
+    )
+    if result is None:
+        return None
+    return replace(
+        result, internal_deadline=max(occurred_on, result.internal_deadline),
+    )
+
+
+def _event_obligation(client, *, tenant, event, rule, client_service, context, system):
+    """التزامُ حدثٍ واحد: فترتُه يومُ وقوعه، وقاعدتُه سطرُ `days_after_event`."""
+    day = event.occurred_on
+    result = _event_obligation_result(
+        client, rule=rule, occurred_on=day, context=context, system=system,
+    )
+    if result is None:
+        raise ValidationError({
+            "kind": f"لا لائحةَ لسنة {day.year} في هذا النظام — لا موعدَ للحدث.",
+        })
+    task, _task_created = PeriodTask.objects.get_or_create(
+        client_service=client_service,
+        period_start=day,
+        period_end=day,
+        defaults={
+            "tenant": tenant,
+            "client": client,
+            "internal_deadline": day,
+        },
+    )
+    obligation, _created = Obligation.objects.get_or_create(
+        client_service=client_service,
+        rule_code=rule.code,
+        period_end=day,
+        defaults=_obligation_defaults(
+            tenant, client,
+            task=task,
+            result=result,
+            origin=OBLIGATION_ORIGIN_EVENT,
+            name=rule.name,
+            rule=rule,
+            event=event,
+        ),
+    )
+    if (
+        obligation.task_id == task.pk
+        and result.internal_deadline < task.internal_deadline
+    ):
+        task.internal_deadline = result.internal_deadline
+        task.save(update_fields=["internal_deadline"])
+    return obligation
+
+
+def record_client_event(client, *, kind, occurred_on, note="", actor):
+    """**«صار حدث»**: يسجّل الخبرَ ويولّد التزامَه من أسطر اللائحة لهذا النوع.
+
+    الشروطُ قبل الكتابة: النوعُ مفعَّلٌ في إعداد المكتب، والتاريخُ ليس في المستقبل،
+    وسطرُ الحدث موجودٌ في لائحة نظام الزبون (وإلا «لا قاعدة»)، وخدمةُ السطر
+    نشطةٌ عند الزبون يومَ الحدث (وإلا لا جهةَ تُقدَّم لها).
+
+    والالتزامُ يُولَّد بـ`compute_deadline` نفسها: `legal_date` من `days_after_event`
+    (اقتطاعٌ في X ⇒ الالتزام في X+30)، والرسميُّ بسياسة يوم الراحة للنسخة،
+    والداخليُّ بأيام الدورية الشهرية ولا يسبق يومَ الحدث.
+
+    **وحدثان في اليوم نفسه بنفس النوع ⇒ التزامٌ واحد** (الفرادةُ القائمة على
+    `(خدمة, كود, نهاية الفترة)`)، ويُرجع القائمَ كما هو. ويُرجع `(الحدث, التزاماتُه)`.
+    """
+    tenant = client.tenant
+    enabled = resolve_setting(tenant, "enabled_event_kinds") or []
+    if kind not in enabled:
+        raise ValidationError({"kind": "نوع الحدث غير مفعّل — فعّله في إعدادات المكتب."})
+    if occurred_on is None:
+        raise ValidationError({"occurred_on": "تاريخ الحدث مطلوب."})
+    if occurred_on > timezone.localdate():
+        raise ValidationError({"occurred_on": "تاريخ الحدث لا يكون في المستقبل."})
+    system = resolve_setting(tenant, TAX_SYSTEM_KEY, client=client)
+    schedule, _estimated = schedule_for(system, occurred_on.year)
+    rules = (
+        []
+        if schedule is None
+        else [
+            rule
+            for rule in schedule.rules.all()
+            if rule.cadence == CADENCE_EVENT and rule.event_kind == kind
+        ]
+    )
+    if not rules:
+        raise ValidationError({
+            "kind": f"لا قاعدة لهذا الحدث في لائحة {tax_system_label(system)}.",
+        })
+    services_by_code = _active_client_services(client, day=occurred_on)
+    for rule in rules:
+        if rule.service_code in services_by_code:
+            continue
+        service = service_by_code(tenant, rule.service_code)
+        raise ValidationError({
+            "kind": f"الزبون ما عنده خدمة {service.name} نشطة بتاريخ الحدث.",
+        })
+    context = calendar_context(tenant, [client])
+    with transaction.atomic():
+        event = ClientEvent.objects.create(
+            tenant=tenant,
+            client=client,
+            kind=kind,
+            occurred_on=occurred_on,
+            note=(note or "").strip(),
+            created_by=actor if getattr(actor, "pk", None) else None,
+        )
+        obligations = [
+            _event_obligation(
+                client,
+                tenant=tenant,
+                event=event,
+                rule=rule,
+                client_service=services_by_code[rule.service_code],
+                context=context,
+                system=system,
+            )
+            for rule in rules
+        ]
+    return event, obligations
+
+
+def client_event_row(event, *, client, user, day=None, masked=None) -> dict:
+    """سطرُ حدثٍ في ملفّ الزبون — والتزاماتُه بالشكل نفسه الذي يعرضه التبويب.
+
+    و`day`/`masked` يُمرَّران من الحمولة حين تُبنى لأحداثٍ كثيرة: القناعُ يُحسب
+    مرّةً للحمولة، واليومُ مرّةً للطلب — فلا استعلامَ مفتاحِ مبالغٍ لكل حدث.
+    """
+    day = day or timezone.localdate()
+    if masked is None:
+        masked = user is not None and not can_see_amounts(client.tenant, user)
+    return {
+        "id": event.pk,
+        "kind": event.kind,
+        "kind_label": EVENT_KIND_LABELS.get(event.kind, ""),
+        "occurred_on": event.occurred_on.isoformat(),
+        "note": event.note,
+        "created_by_name": user_display_name(event.created_by),
+        "created_at": event.created_at.isoformat(),
+        "obligations": [
+            _obligation_row(
+                obligation, day=day, client=client,
+                task=obligation.task, masked=masked,
+            )
+            for obligation in event.obligations.all()
+        ],
+    }
+
+
+def client_events_payload(client, *, user, day=None) -> dict:
+    """أحداثُ الزبون الأحدثَ وقوعاً أولاً، مع الأنواع المفعّلة لمنتقي التسجيل.
+
+    **والكلفةُ ثابتة**: الأحداثُ استعلامٌ واحد، والتزاماتُها بشغلاتها ومسؤوليها
+    **مُجلَبةٌ سلفاً** (`prefetch_related`) — فلا استعلامَ لكل حدثٍ ولا لكل
+    التزام. والقناعُ واليومُ يُحسبان مرّةً للحمولة.
+    """
+    day = day or timezone.localdate()
+    masked = user is not None and not can_see_amounts(client.tenant, user)
+    events = list(
+        client.events
+        .select_related("created_by")
+        .prefetch_related(
+            "obligations__task__assignee",
+            "obligations__task__client__responsible",
+        )
+        .order_by("-occurred_on", "-id")
+    )
+    return {
+        "client": {"id": client.pk, "name": client.name},
+        "event_kinds": enabled_event_kinds(client.tenant),
+        "events": [
+            client_event_row(
+                event, client=client, user=user, day=day, masked=masked,
+            )
+            for event in events
+        ],
     }

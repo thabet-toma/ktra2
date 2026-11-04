@@ -11,9 +11,10 @@
 
 هذا الملفّ يوثّق الطبقاتِ المبنية: الزبون وبطاقته وجهاته وإعداداته، والأدوار
 والصلاحيات والموظف المسؤول، والخدمات والباقات وخدمات الزبون، ولائحةَ المواعيد
-والتقويم، والالتزاماتِ والشغلات، والتنبيهاتِ الداخلية وجرسَها. الأتعابُ والأوراقُ
-والتذكيراتُ وأصلُ «من المكتب» وتصعيدُ التذكير وتغيّرُ اللائحة والمسودّةُ غير
-المعتمدة تأتي في تذاكرها، والملفّ يُحدَّث معها.
+والتقويم، والالتزاماتِ والشغلات، والتنبيهاتِ الداخلية وجرسَها، **وتعديلَ المكتب
+على اللائحة والتمديدَ والتزاماتِ المكتب والأحداث** (#277). الأتعابُ والأوراقُ
+والتذكيراتُ وتصعيدُ التذكير والمسودّةُ غير المعتمدة تأتي في تذاكرها، والملفّ
+يُحدَّث معها.
 
 **مفتاح الترخيص:** `accounting_office` في `core/modules.py` (`MODULES`) — تسميتُه
 «مكتب المحاسبة»، خططُه `Pro` و`Enterprise`، و`legacy_flag: None` (لا عَلَم قديم
@@ -61,12 +62,16 @@
 | `ClientServiceFrequency` | `frequency` (`monthly`/`bimonthly`/`quarterly`/`annual`/`on_demand`), `effective_from`, `suggested`, `created_by` | `client_service` FK، فرادةٌ على `(client_service, effective_from)`. **الدوريةُ بتاريخ سريان**: تغييرُها **يضيف صفّاً** ولا يعدّل ما قبله، والدوريةُ في يومٍ ما = الصفُّ ذو أكبر `effective_from <= اليوم` (`frequency_on`) |
 | `TaxThreshold` | `tax_system`, `kind` (`vat_monthly_reporting`/`vat_exempt_dealer`/`vat_detailed_reporting`), `year`, `amount`, `source_url` | **بلا `tenant` عمداً**: بياناتُ منصّةٍ مؤرَّخة واحدةٌ لكل المكاتب، فرادةٌ على `(tax_system, kind, year)`، وتُزرع بهجرة بياناتٍ من البحث. و`amount` **ليس مبلغَ زبون** فلا يُقنَّع — مُعفى في `test_amounts_guard.py` بسببٍ مكتوب |
 | `DeadlineSchedule` | `tax_system`, `year`, `version`, `source_url`, `published_on`, `rest_day_policy` (`warn`/`postpone_client`), `authority_closed_days` (JSON)، `note` | **بلا `tenant`**: لائحةُ المنصّة واحدةٌ لكل المكاتب كالسقوف. فرادةٌ غير مشروطة على `(tax_system, year, version)`، و**النسخةُ السارية = أكبر `version`** ولا تُعدَّل نسخةٌ منشورة |
-| `DeadlineRule` | `schedule`, `code`, `name`, `service_code` (من `DEFAULT_SERVICES`), `cadence` (`service`/`monthly`/`quarterly`/`annual`), `rule_kind` (`day_of_next_month`/`end_of_period`/`month_day_next_year`), `rule_day`, `rule_month`, `conditions` (JSON)، `is_generated`، `electronic_extension_days`، `period_overrides` (JSON)، `needs_review`، `source_url`، `position` | فرادةٌ على `(schedule, code)`. `conditions` مفاتيحها **`CONDITION_KEYS` وحدها** (`vat_classification_in` · `entity_type_in` · `has_employees` · `is_self_employed` · `annual_sales_above`)، ومفتاحٌ غيرها يرفعه `clean()`. و`period_overrides` بمفتاح شهر **نهاية** الفترة |
+| `DeadlineRule` | `schedule`, `code`, `name`, `service_code` (من `DEFAULT_SERVICES`), `cadence` (`service`/`monthly`/`bimonthly`/`quarterly`/`annual`/`event`), `rule_kind` (`day_of_next_month`/`end_of_period`/`month_day_next_year`/`days_after_event`), `rule_day`, `rule_month`, `event_kind` (#277)، `conditions` (JSON)، `is_generated`، `electronic_extension_days`، `period_overrides` (JSON)، `needs_review`، `source_url`، `position` | فرادةٌ على `(schedule, code)`. `conditions` مفاتيحها **`CONDITION_KEYS` وحدها** (`vat_classification_in` · `entity_type_in` · `has_employees` · `is_self_employed` · `annual_sales_above`)، ومفتاحٌ غيرها يرفعه `clean()`. و`period_overrides` بمفتاح شهر **نهاية** الفترة. وسطرُ `cadence="event"` لا يُولَّد دورياً أبداً: `event_kind` يطابق نوعَ حدثٍ مسجَّل |
 
 | `PeriodTask` | `period_start`, `period_end`, `internal_deadline` (أبكرُ مواعيد التزاماتها), `assignee` (nullable), `created_at` | `tenant` FK، و`client` و`client_service` على `PROTECT`. **فرادةٌ غير مشروطة** على `(client_service, period_start, period_end)` — شغلةٌ واحدة لكل خدمةٍ في فترة. `assignee=None` تعني **الوراثة** لا «بلا مسؤول»: `effective_assignee` تُعيد `assignee or client.responsible` |
-| `Obligation` | `rule_code`/`name` (لقطةُ السطر), `origin` (`official`/`office`), `period_start`/`period_end`, `legal_date`/`official_date`/`actual_deadline`/`internal_deadline`, `estimated`, `postponed`, `warnings` (JSON), `status` (`pending`/`submitted`/`not_required`), `submitted_on`/`submitted_by`/`submission_number`, `prior_to_office`, `amount` (Decimal، nullable), `direction` (`due`/`refund`), `client_paid` | `tenant` FK، و`client`/`client_service`/`task`/`rule` على `PROTECT`. **فرادةٌ غير مشروطة** على `(client_service, rule_code, period_end)`. `amount` **مبلغٌ يُقنَّع**: في `OBLIGATION_AMOUNT_KEYS` و`AMOUNT_KEYS`، وكتابتُه بلا `office.amounts.view` ⇒ 403 |
+| `Obligation` | `rule` (**nullable** #277)/`custom_rule`/`event`، `rule_code`/`name` (لقطةُ السطر), `origin` (`official`/`office`/`event`), `period_start`/`period_end`, `legal_date`/`official_date`/`actual_deadline`/`internal_deadline`, `platform_official_date` (nullable #277), `extended_to`/`extension_note`/`extended_by`/`extended_at` (#277), `estimated`, `postponed`, `warnings` (JSON), `status` (`pending`/`submitted`/`not_required`), `submitted_on`/`submitted_by`/`submission_number`, `prior_to_office`, `amount` (Decimal، nullable), `direction` (`due`/`refund`), `client_paid` | `tenant` FK، و`client`/`client_service`/`task`/`rule`/`custom_rule`/`event` على `PROTECT`. **فرادةٌ غير مشروطة** على `(client_service, rule_code, period_end)`، و**`CheckConstraint`** يضمن **مصدراً واحداً بالضبط**: `rule` أو `custom_rule`، لا كليهما ولا دونهما. و`due_date` خاصيّة = `extended_to or actual_deadline` — يقرؤها الأحمرُ والنافذةُ والترتيبُ وتوليدُ التنبيه. `amount` **مبلغٌ يُقنَّع**: في `OBLIGATION_AMOUNT_KEYS` و`AMOUNT_KEYS`، وكتابتُه بلا `office.amounts.view` ⇒ 403 |
+| `OfficeRuleOverride` (#277) | `tax_system`, `rule_code`, `rule_day`/`rule_month`/`electronic_extension_days` (nullable = «كالمنصة»), `cleared`, `based_on` (JSON: لقطةُ قيم المنصة وقت التعديل + `schedule_id`), `note`, `created_by`, `created_at` | `tenant` FK. **سجلٌّ إلحاقيّ لا يُعدَّل ولا يُحذف**: الساري = أحدثُ صفٍّ لكل `(مكتب، نظام، كود)` بترتيب `-created_at, -id`، و`cleared=True` = «رجّع للمنصة». وفهرسٌ على `(tenant, tax_system, rule_code)`، والتعديلُ يسري على كل السنوات وكل زباين المكتب على نظامه الضريبي (`_recompute_for_code` يُقصر بـ`tax_system`) |
+| `OfficeCustomRule` (#277) | `name`, `service` (FK `OfficeService`), `cadence` (بلا `event`), `rule_kind` (الثلاثة الدوريّة), `rule_day`, `rule_month`, `is_active`, `created_by`, `created_at`/`updated_at` | `tenant` FK، وكودُه المشتقّ `office-<pk>` هو `rule_code` في الالتزام — فتُصيبه الفرادةُ والفلترة. **يُعطَّل ولا يُحذف** (405)، والتعطيلُ يوقف الفترات الجديدة وحدها |
+| `ClientEvent` (#277) | `kind` (من `EVENT_KIND_CHOICES`)، `occurred_on`, `note`, `created_by`, `created_at` | `tenant` FK، و`client` على `PROTECT`. **لا تعديلَ ولا حذف** («التاريخ لا يُمحى»)، ولكل حدثٍ التزاماتُه من أسطر `cadence="event"` |
+| `ObligationDateChange` (#277) | `reason` (`office_override`/`platform_update`/`extension`/`extension_cleared`), `before` (JSON), `after` (JSON), `changed_by` (null للتلقائي), `created_at` | `tenant` FK، و`obligation` على `CASCADE`. **سجلٌّ إلحاقيّ**: كلُّ تغيّرِ تاريخٍ بسببه ومَن غيّره — والصفُّ لا يُعدَّل |
 | `OfficeRefreshRun` | `day`, `ran_at`, `created_obligations` | `tenant` FK، **فرادةٌ غير مشروطة** على `(tenant, day)` — صفٌّ واحدٌ لكل (مكتب، يوم)، وهو ما يجعل `ensure_office_refreshed` لا تعمل مرّتين |
-| `OfficeAlert` | `kind` (`task_late_internal`/`obligation_late` …)، `ref_key`، `message`، `day`، `seen_at`، `created_at` | `tenant` FK، و`recipient` FK إلى `auth.User` على `CASCADE` (المستلِمُ الوحيد)، و`client`/`task`/`obligation` **nullable على `CASCADE`** (مكانُ الفتح لا سندُ التنبيه). **فرادةٌ غير مشروطة** على `(tenant, recipient, kind, ref_key)` = «مرّةٌ واحدةٌ لكل مرجع»، وفهرسٌ `(tenant, recipient, seen_at)`. `ref_key` نصٌّ `"task:<id>"` أو `"obligation:<id>"`، و`message` لقطةٌ **بلا أيّ مبلغ** |
+| `OfficeAlert` | `kind` (`task_late_internal`/`obligation_late`/`schedule_dates_changed`/`override_platform_changed`)، `ref_key`، `message`، `day`، `seen_at`، `created_at` | `tenant` FK، و`recipient` FK إلى `auth.User` على `CASCADE` (المستلِمُ الوحيد)، و`client`/`task`/`obligation` **nullable على `CASCADE`** (مكانُ الفتح لا سندُ التنبيه). **فرادةٌ غير مشروطة** على `(tenant, recipient, kind, ref_key)` = «مرّةٌ واحدةٌ لكل مرجع»، وفهرسٌ `(tenant, recipient, seen_at)`. `ref_key` نصٌّ `"task:<id>"` أو `"obligation:<id>"` أو `"schedule:<id>"` أو `"override:<id>:schedule:<id>"` (#277)، و`message` لقطةٌ **بلا أيّ مبلغ**. ونوعا اللائحة **بلا `client`**: وجهتُهما `OFFICE_ALERT_KIND_OPENS` ⇒ `deadline_rules` |
 
 ## دوال الـservices العامة
 
@@ -152,9 +157,27 @@ MANAGER_ROLE                                                  # «صاحب ال�
 _office_owner_ids(tenant)                                     # أعضاءُ المكتب النشطون بذلك الدور
 _alert_recipient_ids(choice, *, assignee_id, owners)          # المستلِمون من الاختيار — بلا تكرار
 _generate_late_alerts(tenant, *, day)                         # داخل `refresh_office`؛ يُرجع ما أنشأه النداء
-alerts_payload(tenant, *, user, limit=50)                     # {"unseen": n, "rows": [...]} — تنبيهاتُه وحده بلا المحسوم
-alert_row(alert)                                              # سطرُ الجرس — بلا مبلغ
-mark_alert_seen(alert, *, user) / mark_all_alerts_seen(tenant, *, user) -> int
+alerts_payload(tenant, *, user, day=None, limit=50)            # {"unseen": n, "rows": [...]} — تنبيهاتُه وحده بلا المحسوم
+alert_row(alert)                                              # سطرُ الجرس — بلا مبلغ، و`opens` وجهتُه
+mark_alert_seen(alert, *, user) / mark_all_alerts_seen(tenant, *, user, day=None) -> int
+# ── تعديل المكتب والتمديد والتزامات المكتب والأحداث (#277) ──
+active_rule_overrides(tenant)                                 # الساري: أحدثُ صفٍّ لكل (نظام، كود) وغيرُ مُرجَع
+custom_rules_payload(tenant)                                  # قائمةُ التزامات المكتب باختياراتها — قراءةٌ لا تزرع
+_deadline_result(client, *, …, rule=, custom_rule=, override=)  # **مدخلاتُ المحرّك الوحيدة**: المولّد وإعادةُ الحساب
+_recompute_obligations(obligations, *, context, reason, actor=None)   # دفعةٌ واحدة؛ يُرجع ما تغيّر
+set_rule_override(tenant, *, tax_system, rule_code, rule_day=, rule_month=, electronic_extension_days=, note=, actor)
+clear_rule_override(tenant, *, tax_system, rule_code, actor)  # «رجّع للمنصة»: صفٌّ cleared لا حذف
+keep_rule_override(tenant, *, tax_system, rule_code, actor)   # «أُبقي تاريخي»: لقطةٌ من النسخة السارية
+_apply_platform_updates(tenant, *, day, context)              # نسخةٌ أحدث ⇒ نقلُ غير المقدَّم وإعادةُ حسابه
+_generate_schedule_alerts(tenant, *, day, context, schedule_changes=None)  # تنبيهُ اللائحة لأصحاب المكتب
+extend_obligation(obligation, *, until, note, actor)          # pending وحده؛ وبعد الفعليّ؛ بملاحظة
+clear_obligation_extension(obligation, *, actor)              # يرجع إلى الفعليّ بصفٍّ extension_cleared
+create_custom_rule(tenant, *, name, service, cadence, rule_kind, rule_day=, rule_month=, is_active=True, actor, day=None)  # يولّد المستحقَّ لزبائن الخدمة فوراً
+update_custom_rule(row, *, name=, service=, cadence=, rule_kind=, rule_day=, rule_month=, is_active=, actor, day=None)  # يولّد عند تبدّل الخدمة/الدورية/التفعيل
+enabled_event_kinds(tenant)                                   # الأنواعُ المفعّلة بتسمياتها
+record_client_event(client, *, kind, occurred_on, note="", actor)     # (الحدث, التزاماتُه)
+client_events_payload(client, *, user) / client_event_row(event, *, client, user)
+deadline_rules_payload(tax_system, *, tenant=None)            # + rule_code/platform/override/history/awaiting_decision
 ```
 
 `deadlines.py` وحدها تقرأ حسابَ الأشهر: `add_months(day, months)` (مقيَّدةٌ بآخر
@@ -198,15 +221,21 @@ mark_alert_seen(alert, *, user) / mark_all_alerts_seen(tenant, *, user) -> int
 | `POST` | `clients/<pk>/services/<client_service_id>/stop/` | `OfficeClientViewSet` (`client_service_stop`) |
 | `POST` | `clients/<pk>/apply-package/` | `OfficeClientViewSet` (`apply_package`) — يُرجع ما أُضيف وما تُخطّي |
 | `GET` | `calendar/?from=&to=&client=&member=&rule=` | `OfficeCalendarViewSet` (`list`) — **قراءةٌ خالصة، لا تحفظ سطراً** |
-| `GET` | `deadline-rules/?system=PS\|IL` | `OfficeDeadlineRuleViewSet` (`list`) — أسطرُ اللائحة السارية |
+| `GET` | `deadline-rules/?system=PS\|IL` | `OfficeDeadlineRuleViewSet` (`list`) — أسطرُ اللائحة السارية، ولكل سطرٍ `rule_code` و`platform` و`override` و`history` و`awaiting_decision` (#277) |
+| `POST` | `deadline-rules/override/` | `OfficeDeadlineRuleViewSet` (`override`) — **`office.settings.manage`**؛ `{system, code, rule_day?, rule_month?, electronic_extension_days?, note}` → `{override, changed_obligations}` |
+| `POST` | `deadline-rules/clear-override/` · `keep-override/` | `OfficeDeadlineRuleViewSet` (`clear_override`, `keep_override`) — «تأخذ الجديد» / «أُبقي تاريخي»، وكلاهما صفٌّ جديد |
+| `GET/POST` | `custom-rules/` | `OfficeCustomRuleViewSet` (`list`, `create`) — الالتزاماتُ الخاصة: **قراءةً وكتابةً بمفتاح `office.settings.manage`** |
+| `PATCH` | `custom-rules/<id>/` | `OfficeCustomRuleViewSet` (`partial_update`) — الاسمُ والأيامُ والتفعيل. **لا `DELETE`** (405) |
 | `GET` | `today/?filter=mine\|week\|late\|late_internal` | `OfficeTodayViewSet` (`list`) — **يُشغّل التحديثَ اليوميّ أوّلاً** ثم يقرأ |
 | `POST` | `obligations/<id>/submit/` | `OfficeObligationViewSet` (`submit`) — «انقدّم» بتاريخٍ ورقمٍ اختياريّين |
 | `POST` | `obligations/<id>/not-required/` · `reopen/` | `OfficeObligationViewSet` (`not_required`, `reopen`) |
 | `POST` | `obligations/<id>/amount/` | `OfficeObligationViewSet` (`amount`) — **مفتاحان**: الكتابة ورؤية المبالغ |
 | `POST` | `obligations/<id>/client-paid/` | `OfficeObligationViewSet` (`client_paid`) — في كلّ الحالات |
+| `POST` | `obligations/<id>/extend/` · `clear-extension/` | `OfficeObligationViewSet` (`extend`, `clear_extension`) — «مدّد» بتاريخٍ وملاحظة / «ألغِ التمديد» (#277) |
 | `POST` | `tasks/<id>/assign/` | `OfficeTaskViewSet` (`assign`) — `{"assignee": <id> \| null}` |
 | `GET` | `clients/<pk>/obligations/` | `OfficeClientViewSet` (`client_obligations`) — الشغلاتُ بكلّ التزاماتها |
 | `POST` | `clients/<pk>/obligations/close-prior/` | `OfficeClientViewSet` (`close_prior`) — `{"before"?}` → `{"closed": n}` |
+| `GET/POST` | `clients/<pk>/events/` | `OfficeClientViewSet` (`events`) — «صار حدث»: `GET` الأحداثُ والأنواعُ المفعّلة، و`POST` `{kind, occurred_on, note?}` ⇒ `{event, obligations}` (#277) |
 | `GET` | `alerts/` | `OfficeAlertsViewSet` (`list`) — تنبيهاتُ العضو نفسه، المحسومُ مستبعَدٌ عند القراءة → `{"unseen": n, "rows": [...]}` |
 | `POST` | `alerts/<id>/seen/` | `OfficeAlertsViewSet` (`seen`) — **تنبيهُ غيرك 404**، ويُرجع السطرَ المحدَّث |
 | `POST` | `alerts/seen-all/` | `OfficeAlertsViewSet` (`seen_all`) — `{"seen": n}` |
@@ -443,9 +472,11 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
   (بدءٌ ومسؤوليةٌ وإيقاف)، و`ended_on` للزبون المنتهي (لا فترةَ تنتهي بعده)،
   و`last_period_ours=False` تُسقط آخر فترةٍ في كل سلسلة.
 - **`get_or_create` للشغلة بـ`(client_service, period_start, period_end)` وللالتزام
-  بـ`(client_service, rule_code, period_end)`، والصفُّ القائم لا يُحدَّث**: تواريخُه
-  ما رآه الموظف وأرسله، وتصحيحُها تذكرةٌ أخرى (#277). والموعدُ الداخليُّ للشغلة
-  **ينخفض** إن انضمّ التزامٌ أبكر، ولا يتأخّر أبداً.
+  بـ`(client_service, rule_code, period_end)`، والصفُّ القائم لا يُحدَّث في التوليد**:
+  تواريخُه ما رآه الموظف وأرسله. **والاستثناءُ المحسوم (#277)**: تحديثُ المنصة
+  وتعديلُ المكتب يُعيدان حسابَ **غير المقدَّم** وحده (`_recompute_obligations`)،
+  ويُسجَّل كلُّ تغيّرٍ في `ObligationDateChange` — و`submitted` لا يُمسّ أبداً.
+  والموعدُ الداخليُّ للشغلة **ينخفض** إن انضمّ التزامٌ أبكر، ولا يتأخّر.
 - **معاملةٌ لكل زبون**: مكتبٌ بألف زبون لا يُحبَس في معاملةٍ واحدة. والبندُ
   «التقديري» يُحفظ بـ`estimated=True`.
 - **والكلفةُ لا تكبر بتاريخ الزبون**: `_refresh_client` يقرأ القائمَ استعلامين
@@ -522,8 +553,8 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 `office.clients.assign`.
 
 - **`today/?filter=mine|week|late|late_internal`**: يُشغّل `ensure_office_refreshed(day=localdate)`
-  أوّلاً ثم `today_payload`. والصفوفُ **المنتظِرة** وحدها مرتَّبةً بـ`actual_deadline`
-  ثم `internal_deadline` ثم اسم الزبون. و**العدّاداتُ الأربعة (`late`/`late_internal`/`week`/`all`) تُحسب على
+  أوّلاً ثم `today_payload`. والصفوفُ **المنتظِرة** وحدها مرتَّبةً بـ**الموعد الساري**
+  (`Coalesce("extended_to", "actual_deadline")` #277) ثم `internal_deadline` ثم اسم الزبون. و**العدّاداتُ الأربعة (`late`/`late_internal`/`week`/`all`) تُحسب على
   كلِّ الميل المحفوظ قبل الفلتر** — فكبسةُ «متأخّر رسمي» لا تُصفّر «متأخّر داخلي». والفلترُ
   المجهول ⇒ 400. **وعددُ الاستعلامات لا يكبر بعدد الصفوف** (`select_related` للعلاقات
   كافّة، واختبارُ `CaptureQueriesContext` بين صفٍّ وخمسة).
@@ -561,31 +592,34 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 
 | الشارة | معناها | الشرط |
 |---|---|---|
-| `late` — «متأخّر رسمي» **أحمر** | الموعدُ الرسميُّ (الفعليُّ، والتمديدُ الإلكترونيّ داخله) تجاوز ولم يُقدَّم | `status = pending` و`actual_deadline < day` |
+| `late` — «متأخّر رسمي» **أحمر** | **الموعدُ الساري** (`due_date` = الممدَّد أو الفعليّ، والتمديدُ الإلكترونيّ داخله) تجاوز ولم يُقدَّم | `status = pending` و`due_date < day` |
 | `late_internal` — «متأخّر داخلي» **أصفر** | الشغلةُ تجاوزت موعدَها الداخليَّ والرسميُّ لم يبلغ | `status = pending` و`task.internal_deadline < day` وليس أحمر |
-| `near` — «قريب هالأسبوع» | نافذةُ `NEAR_WINDOW_DAYS = 6` كما في #275 | `0 ≤ (actual_deadline − day).days ≤ 6`، ودون الأصفر |
+| `near` — «قريب هالأسبوع» | نافذةُ `NEAR_WINDOW_DAYS = 6` كما في #275 | `0 ≤ (due_date − day).days ≤ 6`، ودون الأصفر |
 
 **والأولوية: أحمر ← أصفر ← قريب ← لا شيء.** شارةٌ **واحدةٌ على الأكثر** لكل صفّ
 (فشكلُ `badges` قائمةٌ بعنصرٍ واحد)، وتسمياتُها من `OBLIGATION_BADGE_LABELS`.
+و**التمديد (#277) يحرّك الأحمرَ وحدَه**: `due_date` هو المقروء، و`internal_deadline`
+لا يتغيّر بالتمديد — فالأصفرُ يبقى على الموعد الداخليّ.
 فصفٌّ تجاوز داخليُّه لا يحمل شارةَ «قريب». و«انقدّم» و«مش لازم هالفترة» بلا شارة:
 ما انتهى أمرُه لا يُنبَّه عليه.
 
 **و«قريب» شارةٌ و`week` نافذة — يفترقان.** شارةُ `near` تخضع للأولوية (فلا تظهر
-على صفٍّ أصفر)، أمّا **عدّادُ `week` وفلترُه فعلى `actual_deadline` وحدهما**:
-`0 ≤ (actual_deadline − day).days ≤ 6` مستقلاً عن الشارة — فصفٌّ صفرتُه «متأخّر
-داخليّ» وموعدُه الفعليُّ داخل النافذة **يُعدّ ويظهر تحت `week`**. لولا ذلك لصار
+على صفٍّ أصفر)، أمّا **عدّادُ `week` وفلترُه فعلى الموعد الساري (`due_date`) وحدهما**:
+`0 ≤ (due_date − day).days ≤ 6` مستقلاً عن الشارة — فصفٌّ صفرتُه «متأخّر
+داخليّ» وموعدُه الساريُّ داخل النافذة **يُعدّ ويظهر تحت `week`**. لولا ذلك لصار
 «قريب» مستحيلاً للربعيّ (7 أيامٍ داخليّة) والسنويّ (30)، ويومَين فقط للشهريّ.
 فتُقرأ النافذةُ «ماذا يستحقّ هذا الأسبوع؟» والشارةُ «أين وقفتُ؟» — سؤالان.
 
 **العدّاداتُ والفلاتر:** `today_payload.counters` = `{"late", "late_internal",
 "week", "all"}` — تُحسب على كلِّ الميل المحفوظ **قبل** الفلتر، و`week` نافذةُ
-`actual_deadline` أعلاه. و`TODAY_FILTERS` خمسةٌ (والفارغُ «الكل»)، والفلترُ `late`
+`due_date` أعلاه. و`TODAY_FILTERS` خمسةٌ (والفارغُ «الكل»)، والفلترُ `late`
 هو الأحمرُ وحده و`late_internal` الأصفرُ وحده، والمجهولُ 400.
 
 **`OfficeAlert` — تنبيهٌ داخليٌّ لمستلِمٍ واحد.** النوعُ `task_late_internal`
 («شغلة تجاوزت موعدها الداخلي») أو `obligation_late` («التزام تجاوز موعده الرسمي
 ولم يُقدَّم»)، و**الأنواعُ تُضاف صفّاً في `OFFICE_ALERT_KIND_CHOICES`** لا فرعاً في
-الكود (تصعيدُ التذكير وتغيّرُ اللائحة والمسودّةُ غير المعتمدة تذاكرُها)، و`ref_key`
+الكود (تصعيدُ التذكير والمسودّةُ غير المعتمدة تذاكرُها؛ **وتغيّرُ اللائحة نُفِّذ
+في #277** — انظر §تعديل المكتب على اللائحة والتمديد والتزامات المكتب والأحداث)، و`ref_key`
 `"task:<id>"` أو `"obligation:<id>"`. و`client`/`task`/`obligation` هي
 **مكانُ الفتح** لا سندُ التنبيه، فحذفُها يحذف التنبيهَ (`CASCADE`) ولا يبقى صفٌّ
 يشير إلى العدم. و`message` لقطةُ «اسم الزبون — اسم الالتزام/الفترة» وقت التوليد
@@ -599,14 +633,16 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 التذكير يرمّز دورتَه في `ref_key` (`"reminder:3:day:2"` مثلاً) أو يأخذ نوعاً لكل
 درجة، فيبقى «مرّةً لكل مرجع» صادقاً بلا تعديل الفرادة.
 
-**والدرجتان مشتقّتان من أيام الإعداد لا من رقمٍ هنا**: الأحمرُ من `actual_deadline`
-(وهو `official_date` + التمديد الإلكترونيّ)، والأصفرُ من `task.internal_deadline`
+**والدرجتان مشتقّتان من أيام الإعداد لا من رقمٍ هنا**: الأحمرُ من **`due_date`**
+(`extended_to or actual_deadline`، وهو `official_date` + التمديد الإلكترونيّ حين
+لا تمديدَ يدويّ — #277)، والأصفرُ من `task.internal_deadline`
 = **أبكر مواعيد التزامات الشغلة**، وهو `actual_deadline` ناقصَ أيام الإعداد
 (#274: 5 شهرياً، 7 ربعياً، 30 سنوياً — مستوى الشغلة ← الزبون ← المكتب). **وإعدادُ
-#276 للمستلِمين وحده**، لا لعدد الأيام.
+#276 للمستلِمين وحده**، لا لعدد الأيام. **والأصفرُ وحده على الموعد الداخليّ**:
+التمديدُ يحرّك الأحمرَ ولا يمسّ `task.internal_deadline`.
 
 **التوليدُ داخل `refresh_office`** (`_generate_late_alerts`، بلا ساعة):
-كلُّ التزامٍ `pending` بـ`actual_deadline < day` ⇒ «الرسميّ» لمستلِمي
+كلُّ التزامٍ `pending` بـ`due_date < day` ⇒ «الرسميّ» لمستلِمي
 `late_official_alert_to`؛ وكلُّ شغلةٍ فيها التزامٌ منتظرٌ و`internal_deadline < day`
 ⇒ «الداخليّ» لمستلِمي `late_internal_alert_to` — **وشغلةٌ صار التزامُها أحمرَ تأخذ
 الأحمرَ أيضاً** (مرجعان، والفرادةُ تمنع التكرار). **والكلفةُ لا تكبر بعدد
@@ -667,6 +703,121 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 «أعد المحاولة». **ولا يظهر إلا لمكتبِ محاسبةٍ مرخَّص** بالمصدر القائم نفسه
 (`VIEW_MODULES`/`moduleAllowsView` مع `usePermissions().modules`) — لا شرطَ ترخيصٍ
 جديد.
+
+## تعديل المكتب على اللائحة، والتمديد، والتزامات المكتب، والأحداث (#277)
+
+**اللائحةُ تبقى بياناتَ منصّةٍ لا تُعدَّل** (قرار #274) — والمكتبُ يعدّل عليها
+**على مسؤوليته** بصفٍّ إلحاقيّ في `OfficeRuleOverride` يحمل قيمَه ولقطةَ المنصة
+(`based_on`) ومَن عدّل ومتى. **والساري أحدثُ صفّ** لكل `(مكتب، نظام، كود)`
+بترتيب `-created_at, -id`، و«رجّع للمنصة» صفٌّ `cleared=True` — **فالسجلُّ لا يُمحى**
+(قرار #255)، وتاريخُ المنصة يبقى مقروءاً بجانبه في الشاشة.
+
+**والحسابُ واحدٌ لا نسختان.** `services._deadline_result` هي مدخلاتُ المحرّك
+الوحيدة: تقرأ النظامَ وإعدادات الزبون وعطلةَ المكتب وسياسة النسخة، ثم تنادي
+`deadlines.compute_deadline`. يقرؤها **المولّد** (`_deadline_items`، للتقويم
+والتحديث) و**إعادةُ الحساب** (`_recompute_obligations`) معاً — فأولُ تعديلٍ في
+قاعدةٍ لا يفترق بينهما.
+
+- **سطرٌ عليه تعديلُ مكتب**: يُحسب بكائنٍ نسخةٍ من السطر بقيم المكتب
+  (`_rule_with_override`)، و`period_overrides` المنشورة **تُسقط** حين يُعدَّل السطر:
+  قرارُ المكتب يغلب نشرةَ المنصة. وسياسةُ يوم الراحة للنسخة تبقى. ويُحسب موعدُ
+  المنصة أيضاً؛ فإن اختلف `official_date` حُمِل في `platform_official_date`، وإلا
+  بقي `None`.
+- **التزامُ المكتب** (`OfficeCustomRule`): يُولَّد بالفترات نفسها (`periods_for` أو
+  دورية الخدمة) وبلا **أيّ شرط بطاقة** — المكتبُ عرّفه لنفسه. كودُه `office-<pk>`
+  فيسري عليه ما يسري على كودٍ رسميّ (الفرادةُ والفلترة)، و`origin="office"`.
+  **ويُولَّد فور إنشائه** (`_generate_for_service`) لزبائن خدمته، وعند تبدّل خدمته
+  أو دوريته أو عودته إلى التفعيل — بـ`_save_due_for_clients` نفسها التي يقرؤها
+  `refresh_office`، فلا مسارَ ثانٍ، ولا ينتظر الالتزامُ الجديد الغدَ.
+- **سطرُ الحدث** (`cadence="event"`) **لا يُولَّد دورياً أبداً** — يُتخطّى في
+  `_deadline_items`، وتُولَّد فترتُه من الحدث وحده.
+
+**تحديثُ المنصة = نسخةٌ أحدث** (`version` أكبر) لنفس `(tax_system, year)`،
+و`schedule_for` يلتقطها. وقبل حفظ الجديد في `refresh_office`
+(`_apply_platform_updates`): كلُّ التزامٍ **غيرِ مقدَّمٍ** (`pending`/`not_required`)
+يشير إلى نسخةٍ لم تبقَ ساريةً ينتقل إلى سطر الكود نفسه في النسخة السارية ويُعاد
+حسابه؛ وسطرٌ غاب من الجديد **لا يغيّر تاريخاً** ويُضاف «السطر لم يعد في لائحة
+المنصة — راجع» إلى `warnings` (وتحفظه إعادةُ الحساب اللاحقة `_recomputed_warnings`،
+ويسقط حين تنقله النسخةُ التي عاد فيها السطر). **والمقدَّمُ لا يُمسّ** ولا يُنقل سطرُه. والكلفةُ
+ثابتة: الالتزاماتُ استعلامٌ واحد، وأسطرُ النسخ الجديدة استعلامٌ واحد، والكتابةُ
+دفعةٌ واحدة.
+
+وتنبيهان جديدان يستلمهما **أصحاب المكتب** (`MANAGER_ROLE` النشطون) بلا `client`:
+
+| النوع | متى | `ref_key` | وجهتُه |
+|---|---|---|---|
+| `schedule_dates_changed` | تغيّر تاريخُ التزامٍ واحدٍ على الأقل بنسخةٍ جديدة — **«تغيّر موعد N التزامات»**، مرّةً لكل نسخة | `"schedule:<id>"` | `deadline_rules` |
+| `override_platform_changed` | المنصة غيّرت سطراً عدّله المكتب (`based_on` لم يعد يطابق النسخة الجديدة) — **«تُبقي تاريخك أم تأخذ الجديد؟»** | `"override:<id>:schedule:<id>"` | `deadline_rules` |
+
+ونوعاهما **خارج `RESOLVED_ALERT_KINDS`** فيبقيان حتى «شفته»، ويسقط الثاني وحده على
+القراءة إن لم يعد ذلك التعديلُ سارياً (رُجّع أو أُكِّد) — بشرطٍ في `_visible_alerts`.
+و**`alert_row` يحمل `opens`** من `OFFICE_ALERT_KIND_OPENS` (الافتراض `client`)،
+فتعرف الواجهةُ الوجهةَ بلا معرفة أنواع. و«أُبقي تاريخي»
+(`keep_rule_override`) صفٌّ بالقيم نفسها ولقطةٍ من النسخة السارية؛ و«تأخذ الجديد»
+(`clear_rule_override`) صفُّ `cleared`.
+
+**التمديد**: `Obligation.due_date` = `extended_to or actual_deadline` — وهو وحده ما
+يقرؤه **الأحمر** في `_badge_keys`، ونافذةُ `week` في `_in_near_window`، ومرشّحا
+`obligation_late` في `_generate_late_alerts` (في SQL: `Q(extended_to__isnull=True,
+actual_deadline__lt=day) | Q(extended_to__lt=day)`)، وترتيبُ «اليوم»
+(`Coalesce("extended_to", "actual_deadline")`). **والأصفرُ يبقى على
+`task.internal_deadline`**: الموعدُ الداخليُّ قرارُ المكتب الداخليّ، والتمديدُ
+للموعد الرسميّ. و`extend_obligation` للمنتظِر وحده، بتاريخٍ **بعد الفعليّ**
+وبملاحظةٍ غير فارغة، وتكتب `extended_*` وصفّاً في `ObligationDateChange`
+(`reason="extension"`) وأثراً في سجلّ الزبون. و`clear_obligation_extension` ترجع
+إلى الفعليّ بصفٍّ `extension_cleared`. **وتنبيهُ `obligation_late` المولَّد سابقاً
+يسقط من الجرس بعد التمديد** ما دام `due_date >= اليوم` — شرطٌ في `_visible_alerts`
+يمرّ بـ`alerts_payload(..., day=)`، ولا صفَّ يُحذف.
+
+**الأحداث («صار حدث»)**: `EVENT_KIND_CHOICES` في `settings_registry.py` (قائمةٌ
+تُوسَّع صفّاً، ونوعٌ واحدٌ الآن: `withholding` = «اقتطاع ضريبة مصدر»)، وإعداد
+`enabled_event_kinds` من نوع `KIND_MULTI_CHOICE` (مستوى المكتب، مجموعة `schedule`)،
+و`record_client_event`:
+
+1. النوعُ مفعَّلٌ وإلا رفض، والتاريخُ ليس في المستقبل.
+2. سطرُ `cadence="event"` و`event_kind` المطابق في نسخة نظام الزبون لسنة وقوعه —
+   وإلا «لا قاعدة لهذا الحدث في لائحة <النظام>».
+3. خدمةُ السطر (`service_code`) **نشطةٌ** عند الزبون يومَ الحدث — وإلا رفضٌ باسمها.
+4. ينشئ `ClientEvent`، ثم `PeriodTask` بفترةٍ هي يومُ الحدث نفسُه
+   (`period_start=period_end`)، والتزاماً بـ`compute_deadline`: `legal_date` من
+   `RULE_KIND_DAYS_AFTER_EVENT`
+   (**اقتطاعٌ في X ⇒ الالتزام في X+30**)، والرسميُّ بسياسة يوم الراحة للنسخة،
+   والداخليُّ بأيام الدورية الشهرية ولا يسبق يومَ الحدث (`max`).
+5. حدثان في اليوم نفسه بنفس النوع ⇒ **التزامٌ واحد** (الفرادةُ القائمة)، والسجلُّ
+   يحتفظ بالصفّين.
+
+**وإسرائيل بلا سطر حدثٍ الآن** — لا مصدرَ بحثيّ له، فسطرُها يُضاف بنسخةٍ لاحقةٍ
+حين يوجد مصدر.
+
+**وهجرة `0007`** تنشئ **v2** لكل نسخة فلسطين قائمة (2026 و2027): تنسخ أسطرها حرفاً
+(بما فيها `period_overrides` و`needs_review`) وتضيف سطر
+`ps_withholding_event`، وتُبقي النسخَ القائمة كما هي. والالتزاماتُ الفلسطينية
+القائمة تنتقل إلى v2 عند أول تحديث **بلا تغيّر تاريخٍ ولا تنبيه (N=0)**.
+
+**وعكسُ الهجرة مشروطٌ بغياب بياناتٍ مولَّدة**: يحذف نسخ v2 التي أنشأتها وحدها
+(بمفاتيحها الطبيعية، لا بأرقامها) — لكنه لا يمرّ بعد أن تُنشأ التزامات: أسطرُ v2
+على `PROTECT` من `Obligation.rule`، فحذفُها يرفع `ProtectedError` ولا يمحو شيئاً
+(والتاريخُ لا يُمحى — قرار #255). وهو صالحٌ في قاعدةٍ بعد الهجرة قبل التوليد
+(اختبارٌ أو بيئةٌ جديدة). والتزامُ المكتب (`custom_rule`) والحدث (`event`) لا
+يشيران إلى سطر لائحةٍ أصلاً — `rule` صار `null=True` — فليسا داخل هذا الحذف.
+
+**الواجهة**: في `OfficeSettingsScreen` — مجموعة «الضريبة ولائحة المواعيد» — قسمُ
+«لائحة المواعيد» (`OfficeDeadlineRulesSection`: وصفُ قاعدة المنصة من أرقامها،
+وتعديلُ المكتب بارزاً وبجانبه «المنصة: …»، وزرّا «عدّل» و«رجّع للمنصة»، والسجلّ،
+وشريطُ «تُبقي تاريخك أم تأخذ الجديد؟» بزرّيه) وقسمُ «التزامات المكتب»
+(`OfficeCustomRulesSection`: إضافةٌ وتعديلٌ وتعطيل، **قراءةً وكتابةً بمفتاح
+الإعدادات** — والدورُ في `list` أيضاً). والقسمان يُرسمان لمن يملك
+`office.settings.manage` وحده، ومع نظامٍ غير مختارٍ يُعرض «اختر النظام الضريبي
+أولاً» بدل افتراض `IL`. و`?group=schedule` تفتح الشاشة
+على المجموعة (`settingsGroupFromSearch`، دالّةٌ خالصة)، وشريطُ «تُبقي تاريخك أم
+تأخذ الجديد؟» يقرأ `awaiting_decision` من الخادم (لا مطابقةَ نصّ التنبيه)، ومفتاحُ
+حالة التحرير والسجلّ `${rule_code}-${year}-${version}` لأن الكودَ يتكرّر لكل سنة. وملفُّ الزبون في تبويب
+«الالتزامات والشغلات» فيه `OfficeClientEvents` («صار حدث») وأزرارُ «مدّد»/«ألغِ
+التمديد» في `OfficeObligationActions`. و`OfficeObligationRow` و`OfficeCalendarScreen`
+يحملان شارةَ «من المكتب»/«حدث» (بلونٍ محايد، والرسميُّ بلا شارة)، و«ممدَّد حتى …»
+بملاحظتها، و«المنصة: …» (`obligationExtensionText` · `platformOfficialText` ·
+`obligationOriginLabel` · `deadlineRuleDescription`، كلُّها خالصةٌ ومُختبَرة).
+و`SettingControl` يرسم `multi_choice` مجموعةَ مربّعات (Tailwind فقط).
 
 ## الاعتماديات
 
@@ -844,6 +995,14 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
   بـ`version` أعلى، والساريةُ أكبرُ `version`. وسنةٌ بلا نسخةٍ ⇒ «تقديري» **بلا
   تعديلاتها المنشورة** لأنها لسنةٍ أخرى. شروطُ السطر مفاتيحُها في `CONDITION_KEYS`
   وحدها، ومفتاحٌ غيرها `ValidationError` من `clean()`.
+  **وتعديلُ المكتب (#277) لا يمسّها**: صفٌّ إلحاقيّ في `OfficeRuleOverride` مِلكُ
+  المكتب يحمل لقطةَ المنصة، و«رجّع للمنصة» صفٌّ `cleared` — **لا `UPDATE` ولا
+  `DELETE` على سطر لائحة أبداً**، ولا على صفّ تعديل.
+- **`submitted` لا يُمسّ** (#277): لا تحديثُ لائحةٍ ولا تعديلُ مكتبٍ ولا تمديدٌ
+  يغيّر تاريخَ ما قُدِّم — والاختبارُ يثبته في كل مسار.
+- **التمديدُ على الموعد الساري وحده**: `due_date = extended_to or actual_deadline`،
+  والأصفرُ يبقى على `task.internal_deadline`. من يقرأ `actual_deadline` للتحذير
+  بعد #277 يخالف القرار.
 - **التقويمُ تقريرٌ لا سجلّ.** `GET calendar/` لا يكتب سطراً (يحرسه اختبارُ عدّ
   صفوفِ كل نماذج الموديول قبل الطلب وبعده)، ولا ينادي `ensure_default_services`.
   ولا مبلغَ فيه، فلا حارسَ مبالغ يتأثّر.
@@ -855,13 +1014,15 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
   نفسَه؛ نسخةٌ ثانية تفترق عند أول تصحيحٍ في اللائحة. والقاعدةُ نفسها للأسطر:
   السطرُ يولّد فتراتِ مصدره وحده (`rule.cadence != source` ⇒ لا بند).
 - **«حدّث المكتب ليوم X» idempotent وبلا ساعة.** اليومُ يُمرَّر صريحاً، والصفُّ القائم
-  لا يُحدَّث (`get_or_create` بفرادةٍ غير مشروطة)، ومعاملةٌ لكل زبون،
+  لا يُحدَّث في التوليد (`get_or_create` بفرادةٍ غير مشروطة)، ومعاملةٌ لكل زبون،
   و`OfficeRefreshRun` صفٌّ واحدٌ لكل (مكتب، يوم). ولا `date.today()` في كود
-  الإنتاج — `timezone.localdate()` وحده عند حدود الطلبات.
+  الإنتاج — `timezone.localdate()` وحده عند حدود الطلبات. **والاستثناءُ المحسوم
+  (#277)**: تحديثُ المنصة يُعيد حسابَ غير المقدَّم قبل حفظ الجديد، بكتابةٍ دفعيّةٍ
+  واحدة (`bulk_update`) لا بنداً بنداً.
 - **ما حان وقتُه = `period_end < day`.** لا `actual_deadline`: ق.م كانون الثاني
-  تظهر في 1 شباط. والدرجاتُ تُحسب عند القراءة: **الأحمرُ من `actual_deadline`،
-  والأصفرُ من `task.internal_deadline`** (أبكر مواعيد التزامات الشغلة)،
-  **و«قريب» شارةٌ بالأولوية** بينما **عدّادُ/فلترُ `week` نافذةٌ على `actual_deadline`**
+  تظهر في 1 شباط. والدرجاتُ تُحسب عند القراءة: **الأحمرُ من `due_date`
+  (`extended_to or actual_deadline`)، والأصفرُ من `task.internal_deadline`** (أبكر مواعيد التزامات الشغلة)،
+  **و«قريب» شارةٌ بالأولوية** بينما **عدّادُ/فلترُ `week` نافذةٌ على `due_date`**
   مستقلةٌ عن الشارة (#276) — فصفٌّ أصفرُ داخل النافذة يُعدّ ويظهر تحت `week`.
 - **المبلغُ يُقفل عند «انقدّم»، و«انقدّم» لا يُتراجَع عنه.** أيُّ انتقالٍ من
   `submitted` ⇒ `ValidationError` «انقدّم لا يُتراجَع عنه»، و`client_paid` وحدها
@@ -872,8 +1033,9 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
   الخادم (خطوةُ نشر)، و`ensure_office_refreshed` تغطّي أوّل فتحٍ في اليوم.
 - **الدرجتان مشتقّتان ولا تُخزَّنان** (#276). لا عمودَ «متأخّر داخلي»، وشارةٌ
   **واحدةٌ على الأكثر** لكل صفّ بالترتيب **أحمر ← أصفر ← قريب ← لا شيء**؛
-  و`week` عدّاداً وفلتراً **نافذةُ `actual_deadline` وحدها** لا الشارة — فصفٌّ
-  أصفرُ داخل النافذة يُعدّ. أيُّ قراءةٍ تُخزّن الحالةَ تفترق عن اليوم الذي يراه
+  و`week` عدّاداً وفلتراً **نافذةُ `due_date` وحدها** (`extended_to or
+  actual_deadline`) لا الشارة — فصفٌّ أصفرُ داخل النافذة يُعدّ. والأحمرُ و`week`
+  على `due_date`، والأصفرُ وحده على `task.internal_deadline`. أيُّ قراءةٍ تُخزّن الحالةَ تفترق عن اليوم الذي يراه
   الموظف. يحرسه اختبارُ `ResolvedBadgeTest` على `client_obligations_payload`
   (كلُّ الحالات) لأن `today_payload` يقرأ المنتظِرَ وحده.
 - **التنبيهُ مرّةٌ واحدةٌ لكل (مستلِم، نوع، مرجع)**. الفرادةُ غير المشروطة في
@@ -896,9 +1058,15 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 - **الجرسُ لمكتبٍ مرخَّصٍ وحده، وكلُّ عضوٍ تنبيهاتُه هو.** الظهورُ من
   `VIEW_MODULES`/`moduleAllowsView` (المصدرُ القائم)، والقراءةُ والكتابةُ
   بـ`recipient=request.user` — ولا مفتاحَ إضافياً هنا، **وتنبيهُ غيرك 404**.
-- **الواجهةُ لا تعرف أنواعَ التنبيه.** الخادمُ يُرسل `kind_label` و`badge`، والجرسُ
-  يُلوّن بـ`obligationBadgeClass(alert.badge)`؛ نوعٌ لاحقٌ يصل `""` فيأخذ المحايد
-  بلا حزمةٍ جديدة. ومفتاحُ الشارة يُضاف صفّاً في `OFFICE_ALERT_KIND_BADGES`.
+- **الواجهةُ لا تعرف أنواعَ التنبيه.** الخادمُ يُرسل `kind_label` و`badge` و`opens`،
+  والجرسُ يُلوّن بـ`obligationBadgeClass(alert.badge)` ويُوجّه بـ`alertTargetPath`
+  من `opens`؛ نوعٌ لاحقٌ يصل `""` فيأخذ المحايد بلا حزمةٍ جديدة. ومفتاحُ الشارة
+  يُضاف صفّاً في `OFFICE_ALERT_KIND_BADGES`، والوجهةُ في `OFFICE_ALERT_KIND_OPENS`.
+- **إعادةُ الحساب دفعةٌ واحدة ولها مصدرٌ واحد.** `_recompute_obligations` وحدها
+  تُعيد حسابَ التزامٍ محفوظ (تعديلُ مكتبٍ أو تحديثُ منصة)، وبدالّة المحرّك نفسها —
+  ولا نسخةَ ثانية من الحساب في خدمةٍ أو شاشة. وممنوعٌ
+  `UPDATE … WHERE id IN (SELECT … من الجدول نفسه)` (MySQL 1093): تُقرأ المعرّفات
+  أولاً، ثم يُكتب (كما في `mark_all_alerts_seen`).
 
 ## الاختبارات المهمة
 
@@ -913,8 +1081,10 @@ context)` هو المولّدُ الوحيد لكل بند `(الزبون, خد�
 | `accounting_office/tests/test_settings_guard.py` | لا ذِكرَ لنموذجَي التخزين خارج وحدة المحلّل |
 | `accounting_office/tests/test_alerts.py` | **التأخيرُ بدرجتين والتنبيهاتُ #276**: الأصفرُ بعد الموعد الداخليّ ولا شيءَ معه، والأحمرُ يغلب ويأتي وحده، والأصفرُ يغلب «قريب»، و«قريب» لا يبقى بعد الداخليّ، **والمحسومُ بلا شارة في `client_obligations_payload`** (كلُّ الحالات؛ يسقط لو حُذف شرطُ الحالة)، **والتمديدُ الإلكترونيّ ليس تأخيراً** (`official_date < day ≤ actual_deadline` ⇒ لا أحمرَ ولا تنبيه، و`day == actual` كذلك)؛ والتنبيهُ الداخليُّ للمسؤول وحده افتراضاً والرسميُّ له ولصاحبَي المكتب، وإعدادا المستلِمين (`owner` يُبعد الأحمرَ عن المسؤول و`assignee` يُبعده عن المالك)، وزبونٌ بلا مسؤول ⇒ صاحبُ المكتب، ومستلِمٌ جامعٌ للدورين ⇒ صفٌّ واحد، والرسالةُ بلا مبلغ، و`badge` يُرسله الخادم من خريطة الأنواع (ونوعٌ مجهول ⇒ `""`)؛ ولا تكرارَ في اليوم نفسه ولا في يومٍ لاحق مع `created_alerts`، والجديدُ يأخذ تنبيهَه؛ والمحسومُ («انقدّم»/«مش لازم»/«رجّعها») يُسقط عند القراءة ولا يُحذف، وشغلةٌ فيها التزامٌ منتظرٌ يبقى تنبيهُها؛ **والتنبيهُ يتبع رؤية الزبون** (زبونٌ حُوِّل لغيره ⇒ لا يظهر)، **و«شفتهم كلهم» لا يكتب على محسوم** (رجيعُه يعود غيرَ مقروء ويُعدّ)؛ و«شفته» يُنقص العدّاد و«شفتهم كلهم» يُصفّره لكل مستلِمٍ على حِدة؛ **والعدّاداتُ الأربعة قبل الفلتر و`week` نافذةٌ مستقلّةٌ عن الشارة** (صفٌّ أصفرُ داخل النافذة يُعدّ ويظهر تحتها) وفلترا الأحمر والأصفر منفصلان والمجهولُ مرفوض؛ وكلفةُ التوليد ثابتةٌ بين التزامٍ وخمسة (`CaptureQueriesContext`)؛ والأمرُ يطبع «تنبيهات n»؛ **وعزلُ المكتبين بمستلِمٍ واحدٍ فيهما** (تنبيهٌ بلا زبون لا يفصله إلا `tenant` — يسقط لو حُذف)؛ ولا `DecimalField` ولا مفتاحَ مبلغ |
 | `accounting_office/tests/test_alerts_api.py` | **نقاطُ الجرس #276**: شكلُ `{"unseen", "rows"}` ومفاتيحُ السطر (ومنها `badge`)، وكلُّ عضوٍ تنبيهاتُه وحدها، وطلبٌ مجهولٌ 401 ووحدةٌ غير مرخَّصة 404، وعددُ استعلامات `GET alerts/` لا يكبر بعدد الصفوف، و`seen/` يُنقص العدّاد (ومرّتان لا تغيّران)، و`seen-all/` يُرجِع العددَ ويُصفّر، **وتنبيهُ غيرك 404** (ولا يُكتب فيه)، **وتنبيهُ مكتبٍ آخر 404 ولا يظهر** (للمستخدم نفسِه وبلا زبون، فلا يفصله إلا `tenant`)، وتنبيهُ التزامٍ انقدّم يخرج من الجرس مع بقاء صفّه |
-| `frontend_v2/utils/accountingOffice.test.ts` | إخفاءُ `filing_method` لغير الإسرائيليّ، واشتقاقُ «مخصَّص»، وشارةُ الحالة، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وإخفاءُ الإسناد في «شخص واحد»، وعرضُ «—» للمبلغ المخفيّ، وأدوارُ المكتب الأربعة، و**تقويمُ #274**: شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع، وتنقّلُ الشهور عبر السنة، والتجميعُ على يوم الموعد، وتسميةُ الفترة، ووسمُ «متوقَّع»، و**«اليوم» (#275)**: تسمياتُ الحالة/الاتجاه/الشارة من الخادم وحدها (والقيمةُ الخام احتياطاً)، ونصُّ المبلغ بالاتجاه والقناع («—»)، وقراءةُ الفلتر من العنوان وكتابتُه، والتاريخُ القصير `dd/MM` بلا `Date`، و**#276**: `late_internal` فلترٌ مقروءٌ ومكتوب، وأصنافُ الشارات الثلاث (أحمر/أصفر/محايد)، وشارةُ التنبيه من `badge` وحده (ونوعٌ مجهولٌ محايد)، و`alertTargetPath` بـ`task=`، و`clientTabFromSearch`، و`taskIdFromSearch`/`officeTaskAnchorId` |
+| `frontend_v2/utils/accountingOffice.test.ts` | إخفاءُ `filing_method` لغير الإسرائيليّ، واشتقاقُ «مخصَّص»، وشارةُ الحالة، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وإخفاءُ الإسناد في «شخص واحد»، وعرضُ «—» للمبلغ المخفيّ، وأدوارُ المكتب الأربعة، و**تقويمُ #274**: شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع، وتنقّلُ الشهور عبر السنة، والتجميعُ على يوم الموعد، وتسميةُ الفترة، ووسمُ «متوقَّع»، و**«اليوم» (#275)**: تسمياتُ الحالة/الاتجاه/الشارة من الخادم وحدها (والقيمةُ الخام احتياطاً)، ونصُّ المبلغ بالاتجاه والقناع («—»)، وقراءةُ الفلتر من العنوان وكتابتُه، والتاريخُ القصير `dd/MM` بلا `Date`، و**#276**: `late_internal` فلترٌ مقروءٌ ومكتوب، وأصنافُ الشارات الثلاث (أحمر/أصفر/محايد)، وشارةُ التنبيه من `badge` وحده (ونوعٌ مجهولٌ محايد)، و`alertTargetPath` بـ`task=`، و`clientTabFromSearch`، و`taskIdFromSearch`/`officeTaskAnchorId`، و**#277**: وصفُ قاعدة السطر من أرقامها (والنوعُ المجهول يعيد تسميةَ الخادم)، و`settingsGroupFromSearch`، و`alertTargetPath` بـ`opens=deadline_rules`، ونصُّ التمديد وشارةُ الأصل و«المنصة: …»، وتاريخُ التمديد المقترح بعد ثلاثين يوماً |
 | `accounting_office/tests/test_services.py` | الخمسةُ الافتراضية و`ensure_default_services` idempotent والكودُ المولَّد يتخطّى المأخوذ، وبياناتُ السقوف من هجرة `0003` نفسها (أرقامُها وروابطها حرفاً)، وتغييرُ الدورية من تاريخٍ لا يمسّ ما قبله، والإيقافُ يُبقي الصفَّ ويمنع تعديلَ الدورية بعده ويقع مرّةً واحدة ولا يسبق سريانَ دورية، والحالةُ نسبةً لليوم (إيقافٌ مستقبليّ = نشطة)، ومنعُ التداخل (قبل `ends_on` أو فيه ⇒ رفض، وبعده ⇒ قبول)، وتطبيعُ `responsible_from` أولَ الشهر، والباقةُ نسخٌ لا ربط (وإعادةُ إضافةِ الموقوفة، وتخطّي المعطَّلةِ والمتداخلةِ بسببهما، وفرعُ «لا اقتراح» فعلاً)، والاقتراحُ لنظامين ولسقفين في سنتين وبلا سقف («تقديري») وقبل أقدم سقف (`None` + 400)، وتحذيرُ تجاوز سقف עוסק פטור وصفرُ المبيعات، والسببُ بلا أرقام، وحارسا المفتاحين (محاسبٌ بلا `office.settings.manage`، وعضوٌ يرى الزبونَ بلا مفتاح الكتابة)، و404 لزبونٍ غيرك على كل نقطة، وقناعُ `suggested_price` ورفضُ كتابته بعضوٍ يملك مفتاحَ الإعدادات ولا يرى المبالغ، وعددُ استعلاماتِ قائمة الباقات لا يكبر بعددها |
 | `accounting_office/tests/test_deadlines.py` | **محرّكُ #274**: ق.م فلسطينيُّ كانون الثاني = 15 شباط، والجمعةُ تبقى مع التنبيه؛ والتأجيلُ الإسرائيليُّ بعد يوم راحة مسلم/يهودي/مسيحي؛ و`rest_day_only` يُعاد حسابه وغيره يُؤخذ؛ والتمديدُ الإلكترونيّ والموعدُ الداخليّ (والرجوعُ من الجمعة) وأيامُه 5/7/30 بتخصيص الزبون؛ و`periods_for`/`service_periods` محاذاةً بلا فجوة (والتقصيرُ يقطع الحزمة قبل التغيير، ودوريةُ الفترة المقطوعة تحدّد أيامَ إعدادها)؛ وسياقُ الطلب لا يُسقط زبوناً خارج مجموعته، وتنبيهُ «تقديري: سقف» على سطر السقف، وزبونٌ بلا بطاقة بلا 500، والفلترةُ بالزبون/الموظف تجلب خدماتِ المفلتَرين وحدهم؛ وسطرُ الدورية الثابتة يُولَّد مرّةً في السنة (و`on_demand` لا تُسقطه)؛ وشهرٌ بدأ في منتصفه يُدرَك؛ والربعُ نفسُه في مديين مختلفين؛ وبياناتُ هجرة `0004` حرفاً (عدُّ الأسطر لكل نسخة، وآذار 2026 = 27.4 وشباط 2026 = 26.3 وأيلول 2027 = 28.10)؛ و«עוסק פטור» لا يولّد الدوري؛ والسقفُ المفصّل؛ وسنةٌ بلا لائحة «تقديري» (بتعديلٍ يُزرع على شهرها فيُثبت تجاهلَه)؛ والخدمةُ الموقوفة؛ وحارسُ «لا تاريخَ قانونيّاً» بمسح `ast` وإسقاطِه على `15` و`-15`؛ والتقويمُ لا يحفظ سطراً ولا يكبر عددُ استعلاماته بعدد الزبائن؛ وتغييرُ السطر يظهر فوراً؛ والفلترةُ والمدى والأفقُ وتاريخٌ فاسدُ اليوم ⇒ 400 |
 | `accounting_office/tests/test_obligations.py` | **التزاماتُ وشغلاتُ #275**: التشغيلُ مرّتين ليومٍ واحدٍ = مرّة (لا صفَّ مكرّرٌ ولا سجلَّان)، و`ensure` لا تعمل ليومٍ مسجَّل، وق.م كانون الثاني غائبةٌ في 31/1 وحاضرةٌ في 1/2، والتشغيلُ المتأخّرُ يلحق الفترات كلَّها، ورواتبُ إسرائيل الشهرية بموظّفين ⇒ شغلةٌ واحدةٌ والتزامان (`il_withholding_102` + `il_bl_employees`) وموعدُها الداخليُّ أبكرُهما، والتقريرُ السنويُّ 126/856 (شغلةٌ لعام 2026 تُحفظ من 1/1/2027)، وسنةٌ تقديرية (2028) تُحفظ بعلامتها، والصفُّ القائمُ لا تتغيّر تواريخُه بتعديل اللائحة، والتقويمُ ما زال يحسب ولا يحفظ، والشاراتُ تُحسب من اليوم بلا كتابةٍ في القاعدة، والمبلغُ يُقفل عند «انقدّم» و«انقدّم» لا يُتراجَع عنه و«مش لازم» تُفتح، وتاريخُ تقديمٍ مستقبليٌّ يُرفض، والاتجاهُ مطلوبٌ مع المبلغ، و«هدول انقدّموا قبل…» تُغلق المنتظِرَ قبل تاريخها وحده، وإيقافُ 31/3 يُبقي آذار ويُسقط نيسان، و`last_period_ours=False` لا تُولَّد وتُسكِتُ المنتظِر، والزبونُ المنتهي لا فترةَ بعد `ended_on`، ودالّةُ «آخر فترةٍ في سلسلة» نقيّةً، وتحويلُ الشغلة (عضوُ مكتبٍ آخر يُرفض، والمحوَّلُ إليه يرى الزبونَ بلا `office.clients.all`، و`None` يعيد الوراثة)، والأمرُ (المرخَّص وحده، و`--day` كما ورد، وتاريخٌ فاسدٌ `CommandError`)، وشكلُ السطر المحسوم، والقناعُ على المبلغ، والعدّاداتُ قبل الفلتر **ونافذةُ `week` على `actual_deadline` مستقلةً عن الشارة** (صفٌّ أصفرُ داخل النافذة يظهر تحت `week` و`late_internal` معاً) والفلاترُ الخمسة والمجهولُ 400 |
 | `accounting_office/tests/test_obligations_api.py` | **نقاطُ #275**: المحاسبُ يرى زبائنه وحدهم في `today/`، والمبلغُ `null` بلا `office.amounts.view` وكتابتُه 403، والكتابةُ لمن يراه، و«انقدّم/مش لازم/رجّعها» عبر الـAPI (والانتقالُ من «انقدّم» 400)، و`client_paid` في كلّ الحالات، والعدّاداتُ قبل الفلتر والفلترُ المجهولُ 400، والتزامُ غيرك وشغلتُه وزبونُه 404، وعزلُ مكتبٍ آخر 404، وطلبان في يومٍ واحدٍ ⇒ سجلُّ تحديثٍ واحد، وعددُ استعلامات `today/` لا يكبر بين صفٍّ وخمسة (`CaptureQueriesContext`)، وشغلاتُ الزبون الأحدثَ أوّلاً بكلّ الحالات وبشكلها المحسوم، و«أغلق السابق» على زبونه وحده، والإسنادُ بمفتاحه (403 بدونه، و400 لعضوٍ من خارج المكتب) |
+| `accounting_office/tests/test_schedule_overrides.py` | **تعديلُ المكتب والتمديد والتزامات المكتب والأحداث #277**: التعديلُ يُحرّك المنتظِرَ و«مش لازم» ولا يمسّ المقدَّم (وعددُ `ObligationDateChange` بعدد ما تغيّر)، و`platform_official_date` يُملأ ثم يُمسح بالرجوع للمنصة، ونشرةُ المنصة تُتجاهل حين يُعدَّل السطر، والسجلُّ إلحاقيٌّ والساري آخرُ صفّ، ورفضُ كودٍ مجهولٍ وقيمةٍ خارج حدّيها، **وكلفةُ الإعادة لا تكبر بعدد الالتزامات**؛ وتحديثُ المنصة: غيرُ المعدَّل يتبع النسخة الجديدة (و«مش لازم» معه) والمقدَّمُ لا، وتنبيهُ `schedule_dates_changed` بعددِه الصحيحِ ومرّةً واحدة، وسطرٌ سقط من الجديدة يُنبِّه في `warnings` ولا يغيّر تاريخاً؛ والمعدَّلُ يبقى مع تنبيه «تُبقي أم تأخذ الجديد؟» ثم «أُبقي تاريخي» يُسقطه و«آخذ الجديد» يُطبّق المنصة؛ **والتمديد**: يحرّك الأحمرَ وحده ويُبقي الأصفرَ على الموعد الداخليّ، ونافذةُ `week` تتبعه، ويُرفض للمقدَّم ولتاريخٍ ليس بعد الفعليّ وللملاحظة الفارغة، ويُسقط تنبيهَ `obligation_late` من الجرس بلا حذف صفّه، وإلغاؤه يكتب `extension_cleared`؛ **والتزامُ المكتب**: يظهر في «اليوم» والتقويم بعلامة «من المكتب» ويُحفظ بالتحديث، وتعطيلُه يوقف الجديد فقط، وتعديلُه يُعيد حسابَ غير المقدَّم وحده؛ **والحدث**: اقتطاعٌ في X ⇒ `X+30` و`origin=event`، ونوعٌ غيرُ مفعَّلٍ يُرفض، وزبونٌ بلا خدمة الرواتب يُرفض، وحدثٌ مكرّرٌ ⇒ التزامٌ واحد، وإسرائيل «لا قاعدة»، وسطرُ الحدث لا يُولَّد دورياً؛ **والهجرة**: فلسطين v2 بستة أسطرٍ (5 منسوخة + الحدث) وتاريخُ نشرها، والتزاماتُ فلسطين القائمة تنتقل إليها بلا تغيّرٍ ولا تنبيه، وعكسُها يحذف ما أنشأته وحدَه |
+| `accounting_office/tests/test_schedule_overrides_api.py` | **نقاطُ #277**: `GET deadline-rules/` يحمل مفاتيحَه القديمة ويضيف `platform`/`override`/`history`؛ و`override/` بلا `office.settings.manage` ⇒ 403 وبالمفتاح ⇒ 200 والعدّادُ صادق، و`keep-override/` و`clear-override/`، ورمزٌ مجهول ⇒ 400؛ والتمديد عبر API (`extend/` و`clear-extension/`) بالمفتاح، وملاحظةٌ فارغة ⇒ 400، والتزامُ غيرك ⇒ 404؛ و`custom-rules/` إنشاءٌ وتعديلٌ و`DELETE` ⇒ 405، وقراءةٌ لكل عضو وكتابةٌ بالإعدادات، وعزلُ مكتبٍ آخر، ونوعُ قاعدةٍ مجهول ⇒ 400؛ والأحداث (`clients/<pk>/events/`) تسجيلٌ يُرجع الحدثَ والتزامَه، وزبونٌ لا تراه 404 أو زبونُ مكتبٍ آخر 404، وبلا مفتاح الكتابة 403، ونوعٌ معطَّل ⇒ 400؛ و`opens` في سطر الجرس (`deadline_rules` لنوعَي اللائحة و`client` لغيرهما) |

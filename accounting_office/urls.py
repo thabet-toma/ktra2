@@ -11,6 +11,7 @@ from accounting_office.views import (
     OfficeCalendarViewSet,
     OfficeClientViewSet,
     OfficeContactViewSet,
+    OfficeCustomRuleViewSet,
     OfficeDeadlineRuleViewSet,
     OfficeObligationViewSet,
     OfficePackageViewSet,
@@ -39,6 +40,10 @@ router.register(
 router.register("tasks", OfficeTaskViewSet, basename="accounting-office-tasks")
 # #276: الجرس — تنبيهاتُ العضو نفسه، و«شفته»، و«شفتهم كلهم».
 router.register("alerts", OfficeAlertsViewSet, basename="accounting-office-alerts")
+# #277: التزاماتُ المكتب الخاصة — بلا حذف (التعطيلُ هو الفعل).
+router.register(
+    "custom-rules", OfficeCustomRuleViewSet, basename="accounting-office-custom-rules",
+)
 
 urlpatterns = [
     path("", include(router.urls)),

@@ -14,6 +14,8 @@ import {
   clientServiceStatusClass,
   clientStatusBadgeClass,
   customizedSettingCount,
+  deadlineRuleDescription,
+  defaultExtensionDate,
   firstOfMonth,
   firstOfNextMonth,
   formatOfficeAmount,
@@ -25,16 +27,21 @@ import {
   nextMonthKey,
   obligationAmountText,
   obligationBadgeClass,
+  obligationExtensionText,
+  obligationOriginLabel,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
   officeTaskAnchorId,
+  overriddenRuleInput,
   periodLabel,
+  platformOfficialText,
   previousMonthKey,
   readTodayFilter,
   shiftWeek,
   shortIsoDate,
   showsOfficeAssignment,
+  settingsGroupFromSearch,
   statusLabelOf,
   taskIdFromSearch,
   todayFilterParams,
@@ -330,12 +337,15 @@ const CALENDAR_ROW = (
   client: { id: 1, name: 'زبون' },
   service: { code: 'vat', name: 'قيمة مضافة' },
   rule: { code: 'ps_vat_periodic', name: 'التقرير الدوري', needs_review: false },
+  origin: 'official',
+  origin_label: 'رسمي',
   period_start: '2026-01-01',
   period_end: '2026-01-31',
   period_label: 'كانون الثاني 2026',
   legal_date: overrides.actual_deadline,
   official_date: overrides.actual_deadline,
   internal_deadline: overrides.actual_deadline,
+  platform_official_date: null,
   estimated: false,
   postponed: false,
   warnings: [],
@@ -432,10 +442,17 @@ test('أيام الأسبوع سبعةٌ من الأحد، وتُزاح أسبو
 });
 
 test('فلتر النوع بلا تكرارٍ بالكود — الأحدثُ سنةً يغلب، والترتيبُ بالاسم لا بالكود', () => {
+  const PLATFORM = {
+    rule_kind: 'day_of_next_month',
+    rule_kind_label: '',
+    rule_day: 15,
+    rule_month: null,
+    electronic_extension_days: 0,
+  };
   const rules = [
-    { code: 'ps_vat_periodic', name: 'أ قديم', service_code: 'vat', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '' },
-    { code: 'ps_vat_periodic', name: 'أ ضريبة', service_code: 'vat', is_generated: true, needs_review: false, year: 2027, version: 1, source_url: '' },
-    { code: 'ps_annual_return', name: 'سنوي', service_code: 'annual_accounts', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '' },
+    { code: 'ps_vat_periodic', rule_code: 'ps_vat_periodic', name: 'أ قديم', service_code: 'vat', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '', platform: PLATFORM, override: null, history: [], awaiting_decision: false },
+    { code: 'ps_vat_periodic', rule_code: 'ps_vat_periodic', name: 'أ ضريبة', service_code: 'vat', is_generated: true, needs_review: false, year: 2027, version: 1, source_url: '', platform: PLATFORM, override: null, history: [], awaiting_decision: false },
+    { code: 'ps_annual_return', rule_code: 'ps_annual_return', name: 'سنوي', service_code: 'annual_accounts', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '', platform: PLATFORM, override: null, history: [], awaiting_decision: false },
   ];
   const unique = uniqueDeadlineRules(rules);
 
@@ -463,6 +480,10 @@ function OBLIGATION(overrides: Partial<ObligationRow> = {}): ObligationRow {
     official_date: '2026-02-15',
     actual_deadline: '2026-02-19',
     internal_deadline: '2026-02-10',
+    due_date: '2026-02-19',
+    extended_to: null,
+    extension_note: '',
+    platform_official_date: null,
     estimated: false,
     warnings: [],
     badges: [],
@@ -588,4 +609,114 @@ test('التاريخ القصير dd/MM من ISO بلا كائن Date', () => {
   assert.equal(shortIsoDate(''), '');
   assert.equal(shortIsoDate(null), '');
   assert.equal(shortIsoDate('غير تاريخ'), '');
+});
+
+
+// ── تعديل المكتب والتمديد والأحداث (#277) ────────────────────────────────
+
+test('وصفُ قاعدة السطر — نصٌّ مقروءٌ من نوعها وأيامها', () => {
+  assert.equal(
+    deadlineRuleDescription({ rule_kind: 'day_of_next_month', rule_day: 15 }),
+    'يوم 15 من الشهر التالي',
+  );
+  assert.equal(
+    deadlineRuleDescription({ rule_kind: 'end_of_period' }),
+    'آخر يوم في الفترة',
+  );
+  assert.equal(
+    deadlineRuleDescription({
+      rule_kind: 'month_day_next_year', rule_month: 4, rule_day: 30,
+    }),
+    'يوم 30 من الشهر 4 من السنة التالية',
+  );
+  assert.equal(
+    deadlineRuleDescription({ rule_kind: 'days_after_event', rule_day: 30 }),
+    'بعد 30 يوماً من الحدث',
+  );
+  // ونوعٌ لا وصفَ حسابيّاً له يعيد تسميةَ الخادم — لا فراغاً.
+  assert.equal(
+    deadlineRuleDescription({ rule_kind: 'brand_new', rule_kind_label: 'نوع جديد' }),
+    'نوع جديد',
+  );
+  assert.equal(deadlineRuleDescription({ rule_kind: 'day_of_next_month' }), 'الشهر التالي');
+});
+
+test('وصفُ تعديلٍ جزئيّ — الحقلُ الفارغ يأخذ قيمةَ المنصة لا يُفرغ الوصف', () => {
+  // `ps_annual_return`: يوم 30 من الشهر 4 من السنة التالية على المنصة.
+  const platform = {
+    rule_kind: 'month_day_next_year',
+    rule_kind_label: 'يوم في السنة التالية',
+    rule_day: 30,
+    rule_month: 4,
+  };
+
+  // الشهرُ متروك ⇒ شهرُ المنصة.
+  assert.equal(
+    deadlineRuleDescription(overriddenRuleInput(platform, { rule_day: 15, rule_month: null })),
+    'يوم 15 من الشهر 4 من السنة التالية',
+  );
+  // اليومُ متروك ⇒ يومُ المنصة.
+  assert.equal(
+    deadlineRuleDescription(overriddenRuleInput(platform, { rule_day: null, rule_month: 6 })),
+    'يوم 30 من الشهر 6 من السنة التالية',
+  );
+  // الاثنان معاً ⇒ تعديلُ المكتب يغلب.
+  assert.equal(
+    deadlineRuleDescription(overriddenRuleInput(platform, { rule_day: 15, rule_month: 6 })),
+    'يوم 15 من الشهر 6 من السنة التالية',
+  );
+});
+
+test('تبويبُ الإعدادات يُقرأ من العنوان — والمعروفُ وحده', () => {
+  assert.equal(settingsGroupFromSearch('?group=schedule'), 'schedule');
+  assert.equal(settingsGroupFromSearch('group=alerts'), 'alerts');
+  assert.equal(settingsGroupFromSearch('?group=someday'), null);
+  assert.equal(settingsGroupFromSearch('?group='), null);
+  assert.equal(settingsGroupFromSearch(''), null);
+});
+
+test('وجهةُ التنبيه تتبع opens — وشاشةُ اللائحة لمن تعدّى ملفَّ الزبون', () => {
+  assert.equal(
+    alertTargetPath({
+      client: null, opens: 'deadline_rules',
+    }),
+    '/accounting-office/settings?group=schedule',
+  );
+  // ونوعُ الالتزام يبقى على ملفّ الزبون ولو حمل opens فارغاً.
+  assert.equal(
+    alertTargetPath({
+      client: { id: 7 }, task_id: 12, opens: 'client',
+    }),
+    '/accounting-office/clients?client=7&tab=obligations&task=12',
+  );
+  assert.equal(alertTargetPath({ client: null, opens: 'client' }), '');
+});
+
+test('نصُّ التمديد وشارةُ الأصل — من حقول الخادم وحدها', () => {
+  assert.equal(
+    obligationExtensionText({ extended_to: '2026-04-15', extension_note: 'مدّدنا' }),
+    'ممدَّد حتى 15/04 — مدّدنا',
+  );
+  assert.equal(
+    obligationExtensionText({ extended_to: '2026-04-15', extension_note: '  ' }),
+    'ممدَّد حتى 15/04',
+  );
+  assert.equal(obligationExtensionText({ extended_to: null, extension_note: '' }), '');
+  // والرسميُّ بلا شارة: العلامةُ لما جاء من المكتب أو من حدث.
+  assert.equal(obligationOriginLabel({ origin: 'official', origin_label: 'رسمي' }), '');
+  assert.equal(
+    obligationOriginLabel({ origin: 'office', origin_label: 'من المكتب' }), 'من المكتب',
+  );
+  assert.equal(obligationOriginLabel({ origin: 'event', origin_label: 'حدث' }), 'حدث');
+  // والمنصة: تاريخها يظهر بجانب تاريخ المكتب حين يختلفان.
+  assert.equal(platformOfficialText({ platform_official_date: '2026-02-16' }), 'المنصة: 16/02');
+  assert.equal(platformOfficialText({ platform_official_date: null }), '');
+});
+
+test('تاريخُ التمديد المقترح بعد الموعد الساري بثلاثين يوماً', () => {
+  assert.equal(defaultExtensionDate('2026-02-15'), '2026-03-17');
+  // عبورُ السنة والشهر القصير لا يكسران الحساب (UTC بلا منطقةٍ زمنية).
+  assert.equal(defaultExtensionDate('2026-12-20'), '2027-01-19');
+  assert.equal(defaultExtensionDate('2026-01-31'), '2026-03-02');
+  assert.equal(defaultExtensionDate('غير تاريخ'), '');
 });

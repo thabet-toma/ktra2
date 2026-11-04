@@ -27,6 +27,7 @@ from accounting_office import settings_registry
 from accounting_office.models import (
     CADENCE_SPAN_MONTHS,
     REST_DAY_POLICY_POSTPONE_CLIENT,
+    RULE_KIND_DAYS_AFTER_EVENT,
     RULE_KIND_END_OF_PERIOD,
     RULE_KIND_MONTH_DAY_NEXT_YEAR,
 )
@@ -54,7 +55,12 @@ WEEKDAY_KEYS_BY_PYTHON_INDEX: tuple[str, ...] = (
 
 @dataclasses.dataclass(frozen=True)
 class DeadlineResult:
-    """نتيجةُ حساب موعدٍ واحد — أربعةُ تواريخَ وثلاثُ علاماتٍ وتنبيهاتُها."""
+    """نتيجةُ حساب موعدٍ واحد — أربعةُ تواريخَ وثلاثُ علاماتٍ وتنبيهاتُها.
+
+    و`platform_official_date` (#277) يُملأ حين يعدّل المكتبُ السطرَ فيختلف
+    موعدُه الرسميُّ عن موعد المنصة — يُعرض بجانبه ولا يُخزَّن في عمودٍ ثانٍ
+    بلا سبب.
+    """
 
     legal_date: datetime.date
     official_date: datetime.date
@@ -66,6 +72,7 @@ class DeadlineResult:
     rule_code: str
     period_start: datetime.date
     period_end: datetime.date
+    platform_official_date: datetime.date | None = None
 
 
 def weekday_key(day: datetime.date) -> str:
@@ -122,6 +129,9 @@ def _legal_date(rule, period_end: datetime.date) -> datetime.date:
         return _clamped_date(
             period_end.year + 1, rule.rule_month or 1, rule.rule_day or 1,
         )
+    if rule.rule_kind == RULE_KIND_DAYS_AFTER_EVENT:
+        # #277: سطرُ الحدث — نهايتُه يومُ وقوعه، فيقع موعدُه بعد `rule_day` يوماً.
+        return period_end + datetime.timedelta(days=rule.rule_day or 0)
     year, month = _next_month(period_end)
     return _clamped_date(year, month, rule.rule_day or 1)
 

@@ -36,6 +36,7 @@ from accounting_office.models import (
     Obligation,
     OfficeAlert,
     OfficeClient,
+    OfficeCustomRule,
     OfficeService,
     PeriodTask,
     ServicePackage,
@@ -44,18 +45,24 @@ from accounting_office.serializers import (
     ApplyPackageSerializer,
     ClientContactLinkSerializer,
     ClientContactRowSerializer,
+    ClientEventSerializer,
     ClientServiceFrequencyWriteSerializer,
     ClientServiceStopSerializer,
     ClientServiceWriteSerializer,
     ClosePriorSerializer,
     ContactSerializer,
+    CustomRuleUpdateSerializer,
+    CustomRuleWriteSerializer,
     ObligationAmountSerializer,
     ObligationClientPaidSerializer,
+    ObligationExtensionSerializer,
     ObligationSubmitSerializer,
     OfficeClientListSerializer,
     OfficeClientSerializer,
     OfficeServiceSerializer,
     ReminderRecipientSerializer,
+    RuleCodeSerializer,
+    RuleOverrideSerializer,
     ServicePackageWriteSerializer,
     SettingValueSerializer,
     TaskAssignSerializer,
@@ -474,6 +481,46 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
             client, user=request.user, day=timezone.localdate(),
         ))
 
+    # ── الأحداث (#277) ──────────────────────────────────────────────────
+    @action(detail=True, methods=["get", "post"], url_path="events")
+    def events(self, request, pk=None):
+        """«صار حدث»: `GET` أحداثُ الزبون، و`POST` يسجّل حدثاً ويولّد التزامَه.
+
+        الرؤيةُ أوّلاً (`get_object` عبر `visible_clients`) فيأخذ من لا يرى الزبون
+        **404**، ثم مفتاحُ الكتابة فيأخذ القارئُ 403. والكتابةُ تعيد الحدثَ
+        والتزاماتِه الجديدة (`{event, obligations}`) لا القائمةَ كلَّها.
+        """
+        client = self.get_object()
+        if request.method == "GET":
+            return Response(services.client_events_payload(client, user=request.user))
+        self.require_write()
+        serializer = ClientEventSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        event, obligations = services.record_client_event(
+            client,
+            kind=data["kind"],
+            occurred_on=data["occurred_on"],
+            note=data.get("note", ""),
+            actor=request.user,
+        )
+        return Response(
+            {
+                "event": services.client_event_row(
+                    event, client=client, user=request.user,
+                ),
+                "obligations": [
+                    services.obligation_row(
+                        obligation,
+                        day=timezone.localdate(),
+                        masked=not services.can_see_amounts(self.tenant, request.user),
+                    )
+                    for obligation in obligations
+                ],
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
     @action(
         detail=True, methods=["post"], url_path="obligations/close-prior",
     )
@@ -772,15 +819,143 @@ class OfficeCalendarViewSet(OfficeModuleViewSet):
 
 
 class OfficeDeadlineRuleViewSet(OfficeModuleViewSet):
-    """أسطرُ اللائحة السارية لكل سنة — لفلتر «النوع» ولعرض اللائحة، بلا كتابة."""
+    """أسطرُ اللائحة السارية لكل سنة — للفلتر، ولعرض اللائحة وتعديلها (#277).
 
-    http_method_names = ["get", "head", "options"]
+    القراءةُ مفتوحةٌ لكل عضو (يكفيها الترخيص)، و**الكتابةُ بمفتاح
+    `office.settings.manage`**: تعديلُ سطرٍ يسري على كل زبائن المكتب، فليس فعلاً
+    لكل من يكتب زبوناً.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    serializer_class = RuleOverrideSerializer
 
     def list(self, request, *args, **kwargs):
         system = (request.query_params.get("system") or "").strip()
         if system not in {value for value, _label in TAX_SYSTEM_CHOICES}:
             raise ValidationError({"system": "النظام الضريبي مطلوب: PS أو IL."})
-        return Response(services.deadline_rules_payload(system))
+        return Response(services.deadline_rules_payload(system, tenant=self.tenant))
+
+    def _body(self, serializer_class):
+        serializer = serializer_class(data=self.request.data)
+        serializer.is_valid(raise_exception=True)
+        return serializer.validated_data
+
+    @action(detail=False, methods=["post"], url_path="override")
+    def override(self, request):
+        """`{system, code, rule_day?, rule_month?, electronic_extension_days?, note}`."""
+        require_perm(request, OFFICE_SETTINGS_MANAGE_KEY, tenant=self.tenant)
+        data = self._body(RuleOverrideSerializer)
+        return Response(services.set_rule_override(
+            self.tenant,
+            tax_system=data["system"],
+            rule_code=data["code"],
+            rule_day=data.get("rule_day"),
+            rule_month=data.get("rule_month"),
+            electronic_extension_days=data.get("electronic_extension_days"),
+            note=data.get("note", ""),
+            actor=request.user,
+        ))
+
+    @action(detail=False, methods=["post"], url_path="clear-override")
+    def clear_override(self, request):
+        """«تأخذ الجديد»: صفُّ `cleared` — **لا حذفَ لسجلّ التعديل**."""
+        require_perm(request, OFFICE_SETTINGS_MANAGE_KEY, tenant=self.tenant)
+        data = self._body(RuleCodeSerializer)
+        return Response(services.clear_rule_override(
+            self.tenant,
+            tax_system=data["system"],
+            rule_code=data["code"],
+            actor=request.user,
+        ))
+
+    @action(detail=False, methods=["post"], url_path="keep-override")
+    def keep_override(self, request):
+        """«أُبقي تاريخي»: صفٌّ بالقيم نفسها ولقطةٍ من النسخة السارية."""
+        require_perm(request, OFFICE_SETTINGS_MANAGE_KEY, tenant=self.tenant)
+        data = self._body(RuleCodeSerializer)
+        return Response(services.keep_rule_override(
+            self.tenant,
+            tax_system=data["system"],
+            rule_code=data["code"],
+            actor=request.user,
+        ))
+
+
+class OfficeCustomRuleViewSet(OfficeModuleViewSet):
+    """التزاماتُ المكتب الخاصة (#277) — **قراءةً وكتابةً بمفتاح الإعدادات**.
+
+    القرارُ قرارُ مكتبٍ لا سطرُ بيانات زبون، فحتى قراءتُه لصاحب الصلاحية وحده
+    (`office.settings.manage`) كما في موجز #277 §7. **ولا حذف**: التعطيلُ
+    (`PATCH is_active=false`) يوقف توليد الفترات الجديدة، وما وُلد يبقى بتاريخه —
+    و`delete` خارج `http_method_names` فيردّ الـview 405.
+    """
+
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    serializer_class = CustomRuleWriteSerializer
+
+    def list(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        return Response(services.custom_rules_payload(self.tenant))
+
+    def create(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        serializer = CustomRuleWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.create_custom_rule(
+            self.tenant,
+            name=data["name"],
+            service=services.service_or_raise(self.tenant, data["service"]),
+            cadence=data["cadence"],
+            rule_kind=data["rule_kind"],
+            rule_day=data.get("rule_day"),
+            rule_month=data.get("rule_month"),
+            is_active=data.get("is_active", True),
+            actor=request.user,
+            day=timezone.localdate(),
+        )
+        return Response(
+            services.custom_rules_payload(self.tenant),
+            status=status.HTTP_201_CREATED,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        row = self._row(kwargs.get("pk"))
+        serializer = CustomRuleUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        service = self.request.data.get("service")
+        services.update_custom_rule(
+            row,
+            name=data.get("name"),
+            service=(
+                None if service is None
+                else services.service_or_raise(self.tenant, data["service"])
+            ),
+            cadence=data.get("cadence"),
+            rule_kind=data.get("rule_kind"),
+            is_active=data.get("is_active"),
+            **{
+                key: data[key]
+                for key in ("rule_day", "rule_month")
+                if key in self.request.data
+            },
+            actor=request.user,
+            day=timezone.localdate(),
+        )
+        return Response(services.custom_rules_payload(self.tenant))
+
+    def _row(self, pk):
+        row = (
+            OfficeCustomRule.objects
+            .select_related("service")
+            .filter(tenant=self.tenant, pk=pk)
+            .first()
+        )
+        if row is None:
+            raise NotFound("التزامُ المكتب هذا غير موجود.")
+        return row
 
 
 # ── «اليوم» والالتزامات والشغلات (#275) ──────────────────────────────────────
@@ -899,6 +1074,30 @@ class OfficeObligationViewSet(OfficeModuleViewSet):
         )
         return self._row(obligation)
 
+    # ── التمديد (#277) ──────────────────────────────────────────────────
+    @action(detail=True, methods=["post"], url_path="extend")
+    def extend(self, request, pk=None):
+        """«مدّد»: تاريخٌ + ملاحظة ⇒ `due_date` يتحرّك والأحمرُ معه."""
+        obligation = self.get_object()
+        self.require_write()
+        serializer = ObligationExtensionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.extend_obligation(
+            obligation,
+            until=serializer.validated_data["until"],
+            note=serializer.validated_data["note"],
+            actor=request.user,
+        )
+        return self._row(obligation)
+
+    @action(detail=True, methods=["post"], url_path="clear-extension")
+    def clear_extension(self, request, pk=None):
+        """«ألغِ التمديد»: يرجع إلى الموعد الفعليّ بصفٍّ في سجلّ التغيّر."""
+        obligation = self.get_object()
+        self.require_write()
+        services.clear_obligation_extension(obligation, actor=request.user)
+        return self._row(obligation)
+
 
 class OfficeTaskViewSet(OfficeModuleViewSet):
     """تحويلُ شغلةِ فترةٍ لعضو — بمفتاح `office.clients.assign` وحده.
@@ -964,8 +1163,11 @@ class OfficeAlertsViewSet(OfficeModuleViewSet):
     def list(self, request, *args, **kwargs):
         # الجرسُ لا ينتظر أن يفتح أحدٌ «اليوم»: cron فاتَه يومٌ ⇒ يلحقه أولُ فتحٍ هنا.
         # وفي اليوم المسجَّل استعلامُ وجودٍ واحد (`OfficeRefreshRun`).
-        services.ensure_office_refreshed(self.tenant, day=timezone.localdate())
-        return Response(services.alerts_payload(self.tenant, user=request.user))
+        today = timezone.localdate()
+        services.ensure_office_refreshed(self.tenant, day=today)
+        return Response(services.alerts_payload(
+            self.tenant, user=request.user, day=today,
+        ))
 
     def get_object(self):
         alert = (
@@ -993,5 +1195,7 @@ class OfficeAlertsViewSet(OfficeModuleViewSet):
     def seen_all(self, request):
         """«شفتهم كلهم» — `{"seen": n}` عددُ ما كُتب له وقتُ الشوفة."""
         return Response({
-            "seen": services.mark_all_alerts_seen(self.tenant, user=request.user),
+            "seen": services.mark_all_alerts_seen(
+                self.tenant, user=request.user, day=timezone.localdate(),
+            ),
         })

@@ -20,8 +20,17 @@
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
+from django.db.models import Q
 
 from accounting_office import settings_registry
+#: أنواعُ الأحداث (#277) — تُعرَّف في السجلّ لأن إعداد `enabled_event_kinds` يقرأ
+#: مفاتيحها، والسجلَّ لا يستورد النماذج (دَّورة). وتُعاد تصديراً هنا فتُقرأ من
+#: النماذج كسائر ثوابت الموديول (`as` نفسَه = تصديرٌ مقصود لا استيرادٌ عابر).
+from accounting_office.settings_registry import (
+    EVENT_KIND_CHOICES,
+    EVENT_KIND_LABELS as EVENT_KIND_LABELS,
+    EVENT_KIND_WITHHOLDING as EVENT_KIND_WITHHOLDING,
+)
 from tenants.models import Tenant, UserCompanyMembership
 
 
@@ -858,20 +867,42 @@ CADENCE_SERVICE = "service"
 CADENCE_MONTHLY = FREQUENCY_MONTHLY
 CADENCE_QUARTERLY = FREQUENCY_QUARTERLY
 CADENCE_ANNUAL = FREQUENCY_ANNUAL
+#: #277: «كل شهرين» — دوريةٌ قائمة في `FREQUENCY_*`، أُضيفت هنا لأن التزامَ
+#: المكتب يختارها. و`event` ليست دوريةَ توليدٍ: سطرُ الحدث يُولَّد من الحدث وحده.
+CADENCE_BIMONTHLY = FREQUENCY_BIMONTHLY
+CADENCE_EVENT = "event"
 DEADLINE_CADENCE_CHOICES: list[tuple[str, str]] = [
     (CADENCE_SERVICE, "يتبع دورية خدمة الزبون"),
     (CADENCE_MONTHLY, "شهري"),
+    (CADENCE_BIMONTHLY, "كل شهرين"),
     (CADENCE_QUARTERLY, "ربع سنوي"),
     (CADENCE_ANNUAL, "سنوي"),
+    (CADENCE_EVENT, "حدث — يُولَّد عند تسجيله لا دورياً"),
 ]
 
 RULE_KIND_DAY_OF_NEXT_MONTH = "day_of_next_month"
 RULE_KIND_END_OF_PERIOD = "end_of_period"
 RULE_KIND_MONTH_DAY_NEXT_YEAR = "month_day_next_year"
+#: #277: `legal_date = period_end + rule_day أيام` — قاعدةُ سطر الحدث: اقتطاعٌ
+#: بتاريخ X يستحق خلال ثلاثين يوماً منه.
+RULE_KIND_DAYS_AFTER_EVENT = "days_after_event"
 RULE_KIND_CHOICES: list[tuple[str, str]] = [
     (RULE_KIND_DAY_OF_NEXT_MONTH, "يوم في الشهر التالي لنهاية الفترة"),
     (RULE_KIND_END_OF_PERIOD, "آخر يوم في الفترة"),
     (RULE_KIND_MONTH_DAY_NEXT_YEAR, "يوم في السنة التالية لنهاية الفترة"),
+    (RULE_KIND_DAYS_AFTER_EVENT, "عدد أيام بعد الحدث"),
+]
+#: أنواعُ القاعدة التي يختارها المكتب لالتزامه الخاص (#277) — الثلاثةُ الدوريّة
+#: وحدها: قاعدةُ «بعد الحدث» لا معنى لها في التزامٍ لا حدثَ له. والمصدرُ
+#: `RULE_KIND_CHOICES` نفسه، فلا تسميتان لنوعٍ واحد.
+OFFICE_CUSTOM_RULE_KIND_CHOICES: list[tuple[str, str]] = [
+    (key, label) for key, label in RULE_KIND_CHOICES
+    if key != RULE_KIND_DAYS_AFTER_EVENT
+]
+#: دورياتُ التزام المكتب (#277) — بلا `event`: التزامُ المكتب دوريٌّ يُولَّد،
+#: والحدثُ يُسجَّل من ملفّ الزبون فيأخذ سطرَ اللائحة لا قاعدةَ مكتب.
+OFFICE_CUSTOM_RULE_CADENCE_CHOICES: list[tuple[str, str]] = [
+    (key, label) for key, label in DEADLINE_CADENCE_CHOICES if key != CADENCE_EVENT
 ]
 
 #: مفاتيح شروط السطر المسموحة — **وحدها**: مفتاحٌ آخر يرفعه `clean()`، فالشروطُ
@@ -900,6 +931,7 @@ CONDITION_KEYS: frozenset[str] = frozenset({
 #: القيمةَ الواحدة عائلتان.
 CADENCE_SPAN_MONTHS: dict[str, int] = {
     CADENCE_SERVICE: 0,
+    CADENCE_EVENT: 0,
     FREQUENCY_MONTHLY: 1,
     FREQUENCY_BIMONTHLY: 2,
     FREQUENCY_QUARTERLY: 3,
@@ -995,6 +1027,12 @@ class DeadlineRule(models.Model):
     conditions = models.JSONField(default=dict, blank=True, verbose_name="الشروط")
     #: False = «لا يُولَّد» (مثل الضمان الاجتماعي الفلسطيني الموقوف بقرار 4/2019).
     is_generated = models.BooleanField(default=True, verbose_name="يُولَّد")
+    #: #277: نوعُ الحدث الذي يُولّد هذا السطر — من `EVENT_KIND_CHOICES`، وفارغٌ في
+    #: كل سطرٍ دوريّ. وسطرُ الحدث `cadence="event"` ولا يُولَّد إلا من حدثٍ مسجَّل.
+    event_kind = models.CharField(
+        max_length=40, choices=EVENT_KIND_CHOICES, blank=True, default="",
+        verbose_name="نوع الحدث",
+    )
     #: أيامُ التقديم الإلكترونيّ فوق الموعد الرسميّ: **أربعةٌ في إسرائيل** (حتى
     #: 19 بدل 15 لتقرير الـמע"מ والسلفيات)، وصفرٌ حيث لا تمديدَ منشوراً.
     electronic_extension_days = models.PositiveSmallIntegerField(
@@ -1031,6 +1069,186 @@ class DeadlineRule(models.Model):
             })
 
 
+# ── تعديل المكتب على اللائحة والالتزامات الخاصة والأحداث (#277) ─────────────
+#
+# **اللائحةُ بياناتُ منصّةٍ لا تُعدَّل** (قرار #274). وتعديلُ المكتب عليها **صفٌّ
+# إلحاقيّ** في جدولٍ مِلكُ المكتب: الساري = أحدثُ صفٍّ لكل (مكتب، نظام، كود)،
+# و«رجّع للمنصة» صفٌّ `cleared` لا حذف. فتاريخُ التعديل — مَن واتّى — لا يُمحى
+# (قرار #255)، وتاريخُ المنصة يبقى مقروءاً في `based_on`.
+OFFICE_RULE_OVERRIDE_FIELDS = (
+    "rule_day", "rule_month", "electronic_extension_days",
+)
+
+
+class OfficeRuleOverride(models.Model):
+    """تعديلُ المكتب على سطر لائحة — **سجلٌّ إلحاقيّ لا يُعدَّل ولا يُحذف**.
+
+    القيمةُ `None` في أي حقلٍ تعني «كالمنصة»: المكتب يعدّل الأيام وحدها ولا
+    يغيّر نوعَ القاعدة (`rule_kind` يبقى من `based_on`). والتعديلُ يسري على كل
+    السنوات وكل زباين المكتب لهذا الكود — لا على فترةٍ بعينها.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_rule_overrides",
+        verbose_name="المكتب",
+    )
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    rule_code = models.SlugField(max_length=60, verbose_name="كود السطر")
+    rule_day = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="يوم القاعدة",
+    )
+    rule_month = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="شهر القاعدة",
+    )
+    electronic_extension_days = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="تمديد التقديم الإلكتروني",
+    )
+    #: صفُّ «رجّع لتاريخ المنصة»: هو أحدثُ صفٍّ ⇒ لا تعديلَ ساري.
+    cleared = models.BooleanField(default=False, verbose_name="رجّع للمنصة")
+    #: لقطةُ قيم المنصة وقت التعديل: `{rule_kind, rule_day, rule_month,
+    #: electronic_extension_days, schedule_id}` — تُقارَن بنسخة المنصة الجديدة
+    #: فتقول «المنصة غيّرت موعداً أنت معدّله» بلا أن تُقرأ نسخةٌ قديمة.
+    based_on = models.JSONField(default=dict, blank=True, verbose_name="لقطة المنصة")
+    note = models.CharField(max_length=300, blank=True, default="", verbose_name="ملاحظة")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_rule_overrides",
+        verbose_name="عدّله",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "تعديل مكتب على سطر لائحة"
+        verbose_name_plural = "تعديلات المكتب على اللائحة"
+        # الأحدثُ أوّلاً: الساري هو أوّلُ صفٍّ يُقرأ لكل (نظام، كود).
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "tax_system", "rule_code"],
+                name="office_override_active",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.rule_code}"
+
+
+class OfficeCustomRule(models.Model):
+    """التزامٌ خاص بالمكتب: اسمٌ ودوريةٌ وقاعدةٌ وخدمةٌ — يُولّد كالرسميّ.
+
+    **يُعطَّل ولا يُحذف**: التعطيلُ يوقف توليد الفترات الجديدة، وما وُلد يبقى
+    بتاريخه (`Obligation.custom_rule` على `PROTECT`). وكوده المشتقّ
+    `office-<pk>` هو `rule_code` في الالتزام، فيسري عليه كلُّ ما يسري على كودٍ
+    رسميّ — الفرادةُ والبحثُ والفلترة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_custom_rules",
+        verbose_name="المكتب",
+    )
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    service = models.ForeignKey(
+        OfficeService,
+        on_delete=models.PROTECT,
+        related_name="custom_rules",
+        verbose_name="الخدمة",
+    )
+    cadence = models.CharField(
+        max_length=20,
+        choices=OFFICE_CUSTOM_RULE_CADENCE_CHOICES,
+        default=CADENCE_MONTHLY,
+        verbose_name="الدورية",
+    )
+    rule_kind = models.CharField(
+        max_length=30,
+        choices=OFFICE_CUSTOM_RULE_KIND_CHOICES,
+        verbose_name="نوع القاعدة",
+    )
+    rule_day = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="يوم القاعدة",
+    )
+    rule_month = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="شهر القاعدة",
+    )
+    is_active = models.BooleanField(default=True, verbose_name="مفعَّل")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_custom_rules",
+        verbose_name="أنشأه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "التزام خاص بالمكتب"
+        verbose_name_plural = "التزامات المكتب الخاصة"
+        ordering = ["name", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.name}"
+
+    @property
+    def code(self) -> str:
+        """كودُ السطر المشتقّ — فريدٌ بين أسطر المنصة المكوَّدة بـ`ps_`/`il_`."""
+        return f"office-{self.pk}"
+
+
+class ClientEvent(models.Model):
+    """«صار حدث»: اقتطاعٌ أو ما يُضاف صفّاً في `EVENT_KIND_CHOICES`.
+
+    **لا يُعدَّل ولا يُحذف** (قرار #255: «التاريخ لا يُمحى»): الصفُّ خبرٌ عن يومٍ
+    وقع، وتصحيحُه حدثٌ جديد. ولكل حدثٍ التزاماتُه من أسطر `cadence="event"` في
+    لائحة نظام الزبون.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_events",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="events",
+        verbose_name="الزبون",
+    )
+    kind = models.CharField(
+        max_length=40, choices=EVENT_KIND_CHOICES, verbose_name="نوع الحدث",
+    )
+    occurred_on = models.DateField(verbose_name="تاريخ الحدث")
+    note = models.CharField(max_length=300, blank=True, default="", verbose_name="ملاحظة")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_client_events",
+        verbose_name="سجّله",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التسجيل")
+
+    class Meta:
+        verbose_name = "حدث زبون"
+        verbose_name_plural = "أحداث الزبائن"
+        ordering = ["-occurred_on", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.kind}@{self.occurred_on}"
+
+
 # ── الالتزامات والشغلات (#275) ───────────────────────────────────────────────
 #
 # **الالتزامُ سطرٌ محفوظ، وحالتُه المشتقّة تُحسب عند القراءة**: «قريب هالأسبوع»
@@ -1041,9 +1259,12 @@ class DeadlineRule(models.Model):
 # **والأصلُ «رسمي»** — «من المكتب» (#277) أصلٌ ثانٍ يُضاف صفّاً لا فرعاً في الكود.
 OBLIGATION_ORIGIN_OFFICIAL = "official"
 OBLIGATION_ORIGIN_OFFICE = "office"
+#: #277:التزامٌ وُلد من «صار حدث» في ملفّ الزبون — لا من سطرٍ دوريّ.
+OBLIGATION_ORIGIN_EVENT = "event"
 OBLIGATION_ORIGIN_CHOICES: list[tuple[str, str]] = [
     (OBLIGATION_ORIGIN_OFFICIAL, "رسمي"),
     (OBLIGATION_ORIGIN_OFFICE, "من المكتب"),
+    (OBLIGATION_ORIGIN_EVENT, "حدث"),
 ]
 OBLIGATION_ORIGIN_LABELS: dict[str, str] = dict(OBLIGATION_ORIGIN_CHOICES)
 
@@ -1191,11 +1412,33 @@ class Obligation(models.Model):
         verbose_name="شغلة الفترة",
     )
     #: سطرُ اللائحة الأصليّ — `PROTECT`: الالتزامُ يُفسَّر بسنده ولا يبقى يتيماً.
+    #: و`null` في التزامات المكتب (`custom_rule`) والحدث (`event`) — والقيدُ أدناه
+    #: يضمن مصدراً واحداً بالضبط.
     rule = models.ForeignKey(
         DeadlineRule,
         on_delete=models.PROTECT,
         related_name="obligations",
+        null=True,
+        blank=True,
         verbose_name="سطر اللائحة",
+    )
+    #: #277: التزامٌ عرّفه المكتب لنفسه — يُولَّد كالرسميّ بكوده `office-<pk>`.
+    custom_rule = models.ForeignKey(
+        OfficeCustomRule,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        null=True,
+        blank=True,
+        verbose_name="قاعدة المكتب",
+    )
+    #: #277: الحدثُ الذي وُلد منه الالتزام («صار حدث»).
+    event = models.ForeignKey(
+        ClientEvent,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        null=True,
+        blank=True,
+        verbose_name="الحدث",
     )
     #: لقطةُ السطر وقت الحفظ: اللائحةُ المنشورة لا تُعدَّل، والاسمُ يبقى مقروءاً
     #: حتى لو صار كودُ السطر في نسخةٍ لاحقةٍ غيره.
@@ -1216,6 +1459,26 @@ class Obligation(models.Model):
     estimated = models.BooleanField(default=False, verbose_name="تقديري")
     postponed = models.BooleanField(default=False, verbose_name="مؤجَّل")
     warnings = models.JSONField(default=list, blank=True, verbose_name="تنبيهات")
+    #: #277: موعدُ المنصة الرسميّ حين يختلف عن الموعد الساري بسبب تعديل المكتب —
+    #: يُعرض «المنصة: …» بجانبه، وإلا `None` (لا نسخةَ ثانية من القيمة بلا سبب).
+    platform_official_date = models.DateField(
+        null=True, blank=True, verbose_name="موعد المنصة",
+    )
+    #: #277: التمديد — تاريخٌ وملاحظةٌ ومَن ومتى، و`due_date` تقرؤه وحده. والتاريخُ
+    #: الرسميُّ (`actual_deadline`) لا يُكتب فوقه: التمديدُ قرارٌ زائدٌ يُلغى.
+    extended_to = models.DateField(null=True, blank=True, verbose_name="ممدَّد حتى")
+    extension_note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="ملاحظة التمديد",
+    )
+    extended_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_extended_obligations",
+        verbose_name="مدّده",
+    )
+    extended_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت التمديد")
     status = models.CharField(
         max_length=20,
         choices=OBLIGATION_STATUS_CHOICES,
@@ -1265,6 +1528,15 @@ class Obligation(models.Model):
                 fields=["client_service", "rule_code", "period_end"],
                 name="uniq_obligation_period_rule",
             ),
+            # #277: مصدرٌ واحدٌ بالضبط — سطرُ منصةٍ أو قاعدةُ مكتب. والشرطُ في
+            # `CheckConstraint` لا `UniqueConstraint` (تلك تتجاهل شرطها في MySQL).
+            models.CheckConstraint(
+                condition=(
+                    (Q(rule__isnull=False) & Q(custom_rule__isnull=True))
+                    | (Q(rule__isnull=True) & Q(custom_rule__isnull=False))
+                ),
+                name="obligation_one_source",
+            ),
         ]
         indexes = [
             models.Index(
@@ -1274,6 +1546,79 @@ class Obligation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.rule_code}@{self.period_end}"
+
+    @property
+    def due_date(self):
+        """**الموعدُ الساري**: الممدَّد إن وُجد، وإلا الفعليّ.
+
+        وهو وحده ما يقرؤه التأخيرُ الأحمرُ ونافذةُ «قريب هالأسبوع» وتنبيهُ
+        `obligation_late` وترتيبُ «اليوم» — والموعدُ الداخليُّ (الأصفر) يبقى على
+        `PeriodTask.internal_deadline`: الموعدُ الداخليُّ قرارُ المكتب الداخليّ،
+        والتمديدُ للموعد الرسميّ.
+        """
+        return self.extended_to or self.actual_deadline
+
+
+#: أسبابُ تغيّر تواريخ التزام — **سجلٌّ إلحاقيّ** لا يُعدَّل ولا يُحذف.
+OBLIGATION_CHANGE_OFFICE_OVERRIDE = "office_override"
+OBLIGATION_CHANGE_PLATFORM_UPDATE = "platform_update"
+OBLIGATION_CHANGE_EXTENSION = "extension"
+OBLIGATION_CHANGE_EXTENSION_CLEARED = "extension_cleared"
+OBLIGATION_CHANGE_REASON_CHOICES: list[tuple[str, str]] = [
+    (OBLIGATION_CHANGE_OFFICE_OVERRIDE, "تعديل المكتب على اللائحة"),
+    (OBLIGATION_CHANGE_PLATFORM_UPDATE, "تحديث المنصة للائحة"),
+    (OBLIGATION_CHANGE_EXTENSION, "تمديد"),
+    (OBLIGATION_CHANGE_EXTENSION_CLEARED, "إلغاء تمديد"),
+]
+OBLIGATION_CHANGE_REASON_LABELS: dict[str, str] = dict(
+    OBLIGATION_CHANGE_REASON_CHOICES,
+)
+
+
+class ObligationDateChange(models.Model):
+    """تغيّرُ تواريخ التزامٍ محفوظ: قبلُ وبعدُ وسببه ومَن.
+
+    **لا يُثبت شيءٌ بلا سبب** (قرار #255: «التاريخ لا يُمحى»): تصحيحُ لائحةٍ أو
+    تعديلُ مكتبٍ أو تمديدٌ يترك أثراً يُقرأ. و`before`/`after` لقطتان JSON
+    بالتواريخ الأربعة (والممدَّد حين يخصّه السبب)، و`changed_by` فارغٌ للتلقائي.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_obligation_date_changes",
+        verbose_name="المكتب",
+    )
+    obligation = models.ForeignKey(
+        Obligation,
+        on_delete=models.CASCADE,
+        related_name="date_changes",
+        verbose_name="الالتزام",
+    )
+    reason = models.CharField(
+        max_length=20,
+        choices=OBLIGATION_CHANGE_REASON_CHOICES,
+        verbose_name="السبب",
+    )
+    before = models.JSONField(default=dict, blank=True, verbose_name="قبل")
+    after = models.JSONField(default=dict, blank=True, verbose_name="بعد")
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_obligation_date_changes",
+        verbose_name="غيّره",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التغيّر")
+
+    class Meta:
+        verbose_name = "تغيّر تاريخ التزام"
+        verbose_name_plural = "تغيّرات تواريخ الالتزامات"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.obligation_id}:{self.reason}"
 
 
 class OfficeRefreshRun(models.Model):
@@ -1321,9 +1666,15 @@ class OfficeRefreshRun(models.Model):
 # و`ref_key` يُميّز الصفوف داخل النوع الواحد.
 OFFICE_ALERT_KIND_TASK_LATE_INTERNAL = "task_late_internal"
 OFFICE_ALERT_KIND_OBLIGATION_LATE = "obligation_late"
+#: #277: تغيّرت تواريخُ التزامات المكتب بنسخة لائحةٍ جديدة (مرّةً لكل نسخة).
+OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED = "schedule_dates_changed"
+#: #277: المنصة غيّرت موعداً عدّله المكتب — «تُبقي تاريخك أم تأخذ الجديد؟».
+OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED = "override_platform_changed"
 OFFICE_ALERT_KIND_CHOICES: list[tuple[str, str]] = [
     (OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, "شغلة تجاوزت موعدها الداخلي"),
     (OFFICE_ALERT_KIND_OBLIGATION_LATE, "التزام تجاوز موعده الرسمي ولم يُقدَّم"),
+    (OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED, "تغيّر موعد التزامات بنسخة لائحة جديدة"),
+    (OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED, "المنصة غيّرت موعداً معدَّلاً من المكتب"),
 ]
 OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
 #: شارةُ كل نوعٍ في الواجهة — **مفتاحُ صنفٍ لا لون**، يُرسَل في `alert_row` فيُلوَّن
@@ -1331,7 +1682,22 @@ OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
 OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OBLIGATION_BADGE_LATE_INTERNAL,
     OFFICE_ALERT_KIND_OBLIGATION_LATE: OBLIGATION_BADGE_LATE,
+    # نوعا اللائحة قرارُ مكتبٍ لا تأخيرُ موعد — أصفر محايدٌ بلا ادّعاء تأخير.
+    OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED: OBLIGATION_BADGE_LATE_INTERNAL,
+    OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED: OBLIGATION_BADGE_LATE_INTERNAL,
 }
+#: **أين يُفتح التنبيه** — مفتاحٌ خادميّ يقرؤه `alert_row` فتبني الواجهةُ الوجهةَ
+#: بلا معرفة أنواع. الافتراضُ ملفُّ الزبون، ونوعا اللائحة يفتحان شاشة الإعدادات
+#: على مجموعة «الضريبة ولائحة المواعيد».
+OFFICE_ALERT_OPENS_CLIENT = "client"
+OFFICE_ALERT_OPENS_DEADLINE_RULES = "deadline_rules"
+OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
+    OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OFFICE_ALERT_OPENS_CLIENT,
+    OFFICE_ALERT_KIND_OBLIGATION_LATE: OFFICE_ALERT_OPENS_CLIENT,
+    OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED: OFFICE_ALERT_OPENS_DEADLINE_RULES,
+    OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED: OFFICE_ALERT_OPENS_DEADLINE_RULES,
+}
+OFFICE_ALERT_DEFAULT_OPENS = OFFICE_ALERT_OPENS_CLIENT
 
 
 class OfficeAlert(models.Model):

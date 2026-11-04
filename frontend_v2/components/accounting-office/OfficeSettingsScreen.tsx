@@ -29,12 +29,15 @@ import {
 } from '../../services/permissionsApi';
 import {
   OFFICE_OWNER_ROLE,
+  OFFICE_SETTINGS_PATH,
+  SETTINGS_GROUP_SCHEDULE,
   clientFilePath,
   formatOfficeAmount,
   missingFirstRunLabels,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
+  settingsGroupFromSearch,
   showsOfficeAssignment,
   type SettingRow,
 } from '../../utils/accountingOffice';
@@ -43,6 +46,8 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeCustomRulesSection } from './OfficeCustomRulesSection';
+import { OfficeDeadlineRulesSection } from './OfficeDeadlineRulesSection';
 import { SettingControl } from './SettingControl';
 import {
   OfficeCard,
@@ -398,12 +403,21 @@ export const OfficeSettingsScreen: React.FC = () => {
   // المجموعاتُ من السجلّ وحده (`payload.groups`) — لا اسمٌ ولا ترتيبٌ محليّان
   // يفترقان عنه عند أوّل مجموعةٍ تُضاف. وكلُّ إعدادٍ يظهر تحت مجموعته (#274:
   // «الضريبة ولائحة المواعيد» بجانب «المكتب»).
+  //
+  // و`?group=` (#277) تفتح الشاشة على مجموعةٍ بعينها — وجهةُ تنبيه «تغيّر موعد
+  // التزامات» من الجرس. والمعروضُ حينها تلك المجموعةُ وحدها مع رابطٍ يعيد الكلّ،
+  // فالتنبيهُ لا يهبط على قائمةٍ بعشرة إعدادات يبحث فيها عن سطره.
+  const requestedGroup = settingsGroupFromSearch(window.location.search);
   const groupedSettings = payload.groups
     .map((group) => ({
       group,
       rows: payload.settings.filter((setting) => setting.group === group.id),
     }))
-    .filter((entry) => entry.rows.length > 0);
+    .filter((entry) => entry.rows.length > 0)
+    .filter((entry) => requestedGroup === null || entry.group.id === requestedGroup);
+  const officeSystem = payload.settings.find(
+    (setting) => setting.key === 'tax_system',
+  )?.value;
 
   const renderSetting = (setting: SettingRow) => {
     const clients = expanded[setting.key];
@@ -478,9 +492,42 @@ export const OfficeSettingsScreen: React.FC = () => {
         ) : null}
       </header>
 
+      {requestedGroup !== null ? (
+        <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+          تُعرض مجموعةٌ واحدة (من التنبيه).{' '}
+          <button
+            type="button"
+            onClick={() => navigate(OFFICE_SETTINGS_PATH)}
+            className="font-semibold text-teal-700 hover:underline dark:text-teal-400"
+          >
+            اعرض كل الإعدادات
+          </button>
+        </p>
+      ) : null}
+
       {groupedSettings.map(({ group, rows }) => (
         <OfficeCard key={group.id} title={group.label}>
+          {/* #277: قسمُ اللائحة والتزاماتِ المكتب لمن يملك مفتاح الإعدادات وحده
+              (والخادم يردّ 403 على قراءة الالتزامات وكتابتها). */}
+          {group.id === SETTINGS_GROUP_SCHEDULE && canManageSettings ? (
+            <>
+              {officeSystem === 'PS' || officeSystem === 'IL' ? (
+                <OfficeDeadlineRulesSection system={officeSystem} />
+              ) : (
+                <p className="text-[11.5px] font-medium text-amber-800 dark:text-amber-300">
+                  اختر النظام الضريبي أولاً — لائحة المواعيد لكل نظامٍ على حِدة.
+                </p>
+              )}
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+            </>
+          ) : null}
           {rows.map(renderSetting)}
+          {group.id === SETTINGS_GROUP_SCHEDULE && canManageSettings ? (
+            <>
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              <OfficeCustomRulesSection />
+            </>
+          ) : null}
         </OfficeCard>
       ))}
 

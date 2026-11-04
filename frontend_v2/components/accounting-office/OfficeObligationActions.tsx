@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 
 import {
+  clearObligationExtension,
+  extendObligation,
   markObligationNotRequired,
   reopenObligation,
   setObligationAmount,
@@ -9,6 +11,7 @@ import {
   type ObligationRow,
 } from '../../services/accountingOfficeApi';
 import type { SettingChoice } from '../../utils/accountingOffice';
+import { defaultExtensionDate } from '../../utils/accountingOffice';
 import { humanizeThrown } from '../../utils/drfError';
 import {
   officeInputClass,
@@ -56,6 +59,9 @@ export const OfficeObligationActions: React.FC<{
     amount: obligation.amount ?? '',
     direction: obligation.direction || (directionChoices[0]?.value ?? ''),
   });
+  // #277: «مدّد» — تاريخٌ وملاحظة، وافتراضُ التاريخ يومٌ بعد الموعد الساري.
+  const [extendOpen, setExtendOpen] = useState(false);
+  const [extendDraft, setExtendDraft] = useState({ until: '', note: '' });
 
   const submitted = obligation.status === 'submitted';
   const notRequired = obligation.status === 'not_required';
@@ -66,6 +72,7 @@ export const OfficeObligationActions: React.FC<{
       await action();
       setSubmitting(false);
       setAmountOpen(false);
+      setExtendOpen(false);
       onChanged();
     } catch (failure) {
       onError(humanizeThrown(failure, failureMessage));
@@ -81,6 +88,13 @@ export const OfficeObligationActions: React.FC<{
       direction: obligation.direction || (directionChoices[0]?.value ?? ''),
     });
     setAmountOpen(true);
+  };
+
+  const openExtend = () => {
+    // افتراضُ التاريخ **ثلاثون يوماً بعد الموعد الساري**: التمديدُ إلى تاريخٍ
+    // ليس بعده يرفضه الخادم، والموعدُ الساري نفسُه يرفضه كذلك.
+    setExtendDraft({ until: defaultExtensionDate(obligation.due_date), note: '' });
+    setExtendOpen(true);
   };
 
   return (
@@ -126,6 +140,25 @@ export const OfficeObligationActions: React.FC<{
         {canWrite && canSeeAmounts && !submitted ? (
           <button type="button" onClick={openAmount} className={officeSecondaryButtonClass}>
             المبلغ
+          </button>
+        ) : null}
+        {/* #277: التمديدُ على الموعد المنتظِر وحده — يُسكِت الأحمرَ إلى موعده،
+            ويُلغى فيرجع الفعليُّ كما كان. */}
+        {canWrite && !submitted && !notRequired ? (
+          <button type="button" disabled={pending} onClick={openExtend} className={officeSecondaryButtonClass}>
+            مدّد
+          </button>
+        ) : null}
+        {canWrite && !submitted && obligation.extended_to ? (
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() => run(
+              () => clearObligationExtension(obligation.id), 'تعذّر إلغاء التمديد.',
+            )}
+            className={officeSecondaryButtonClass}
+          >
+            ألغِ التمديد
           </button>
         ) : null}
         {onOpenClient ? (
@@ -198,6 +231,53 @@ export const OfficeObligationActions: React.FC<{
           <button
             type="button"
             onClick={() => setSubmitting(false)}
+            className={officeSecondaryButtonClass}
+          >
+            إلغاء
+          </button>
+        </div>
+      ) : null}
+
+      {extendOpen ? (
+        <div className="flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-2 dark:border-slate-700">
+          <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+            مدّد حتى
+            <input
+              type="date"
+              value={extendDraft.until}
+              onChange={(event) =>
+                setExtendDraft({ ...extendDraft, until: event.target.value })
+              }
+              className={`${officeInputClass} mt-1 block`}
+            />
+          </label>
+          <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+            الملاحظة (مطلوبة)
+            <input
+              value={extendDraft.note}
+              onChange={(event) =>
+                setExtendDraft({ ...extendDraft, note: event.target.value })
+              }
+              className={`${officeInputClass} mt-1 block w-56`}
+            />
+          </label>
+          <button
+            type="button"
+            disabled={pending || !extendDraft.until || !extendDraft.note.trim()}
+            onClick={() => run(
+              () => extendObligation(obligation.id, {
+                until: extendDraft.until,
+                note: extendDraft.note.trim(),
+              }),
+              'تعذّر تمديد الالتزام.',
+            )}
+            className={officePrimaryButtonClass}
+          >
+            سجّل التمديد
+          </button>
+          <button
+            type="button"
+            onClick={() => setExtendOpen(false)}
             className={officeSecondaryButtonClass}
           >
             إلغاء

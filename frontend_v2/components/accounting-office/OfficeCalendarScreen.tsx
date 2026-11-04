@@ -19,6 +19,7 @@ import {
   isExpectedDeadline,
   monthGrid,
   nextMonthKey,
+  obligationOriginLabel,
   officeSizeOf,
   periodLabel,
   previousMonthKey,
@@ -200,6 +201,12 @@ export const OfficeCalendarScreen: React.FC = () => {
               className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-200"
             >
               تقديري
+            </span>
+          ) : null}
+          {/* #277: شارةُ الأصل — «من المكتب» و«حدث» وحدَهما، والرسميُّ بلا شارة. */}
+          {obligationOriginLabel(row) ? (
+            <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:bg-slate-900 dark:text-slate-300">
+              {obligationOriginLabel(row)}
             </span>
           ) : null}
           {row.rule.needs_review ? (

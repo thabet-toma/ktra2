@@ -25,6 +25,18 @@ export const OFFICE_SETTINGS_PATH = '/accounting-office/settings';
 /** مسار شاشة التقويم (#274) — بجانبهما، ومصدرٌ واحدٌ للموجّه والقائمة. */
 export const OFFICE_CALENDAR_PATH = '/accounting-office/calendar';
 
+/** اسم معامل مجموعة الإعدادات — يُقرأ ويُبنى في مكانٍ واحد (#277). */
+export const SETTINGS_GROUP_PARAM = 'group';
+
+/** مجموعة «الضريبة ولائحة المواعيد» — وجهةُ تنبيهَي اللائحة. */
+export const SETTINGS_GROUP_SCHEDULE = 'schedule';
+
+/** مجموعاتُ شاشة الإعدادات المعروفة — `?group=` خارجها يُتجاهَل. */
+export const OFFICE_SETTING_GROUPS = ['office', 'schedule', 'alerts'] as const;
+
+/** مفتاحُ وجهة التنبيه الذي يفتح شاشة اللائحة (#277) — من الخادم في `opens`. */
+export const ALERT_OPENS_DEADLINE_RULES = 'deadline_rules';
+
 /** اسم معامل العنوان الذي يحمل معرّف الزبون المفتوح. */
 export const CLIENT_QUERY_PARAM = 'client';
 
@@ -148,14 +160,35 @@ export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
  *
  * التنبيهُ يحمل مكانَه لا محتواه: `client` هو ما يفتحه، و`task_id` هو **السطرُ
  * المقصود** فيُبرز ويُمرَّر إليه (`officeTaskAnchorId`)، والتبويبُ يُقرأ من
- * العنوان. وتنبيهٌ بلا زبون (لا يولّده شيء اليوم) يعيد `''` فلا زرَّ يفتح العدم.
+ * العنوان. وتنبيهٌ بلا زبون (مثل نوعَي اللائحة #277) لا وجهةَ له إلا إن قال
+ * الخادمُ غير ذلك في `opens`: `deadline_rules` ⇒ شاشةُ الإعدادات على مجموعة
+ * «الضريبة ولائحة المواعيد».
  */
 export function alertTargetPath(
-  alert: { client: { id: number } | null; task_id?: number | null },
+  alert: {
+    client: { id: number } | null;
+    task_id?: number | null;
+    opens?: string | null;
+  },
 ): string {
+  if (alert.opens === ALERT_OPENS_DEADLINE_RULES) {
+    return `${OFFICE_SETTINGS_PATH}?${SETTINGS_GROUP_PARAM}=${SETTINGS_GROUP_SCHEDULE}`;
+  }
   if (!alert.client) return '';
   const base = `${clientFilePath(alert.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_OBLIGATIONS_TAB}`;
   return alert.task_id ? `${base}&${TASK_QUERY_PARAM}=${alert.task_id}` : base;
+}
+
+/**
+ * المجموعةُ المطلوبة من عنوان شاشة الإعدادات — المعروفةُ وحدها، وإلا `null`.
+ *
+ * الفسادُ (رابطٌ قديمٌ أو معدَّلٌ يدوياً) لا يُرمى به: الشاشةُ تفتح على الافتراضي
+ * بدل أن تنكسر.
+ */
+export function settingsGroupFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const raw = params.get(SETTINGS_GROUP_PARAM) ?? '';
+  return (OFFICE_SETTING_GROUPS as readonly string[]).includes(raw) ? raw : null;
 }
 
 /** التبويبُ المطلوب من العنوان — المعروفُ وحده، وإلا `null` (الافتراضُ للشاشة). */
@@ -445,6 +478,9 @@ export interface CalendarDeadlineRow {
   client: { id: number; name: string };
   service: { code: string; name: string };
   rule: { code: string; name: string; needs_review: boolean };
+  /** «رسمي» أو «من المكتب» أو «حدث» — وتسميتُه من الخادم (#277). */
+  origin: string;
+  origin_label: string;
   period_start: string;
   period_end: string;
   period_label: string;
@@ -452,6 +488,7 @@ export interface CalendarDeadlineRow {
   official_date: string;
   actual_deadline: string;
   internal_deadline: string;
+  platform_official_date: string | null;
   estimated: boolean;
   postponed: boolean;
   warnings: string[];
@@ -471,9 +508,11 @@ export interface CalendarDay {
   inMonth: boolean;
 }
 
-/** سطرُ لائحة المواعيد — لفلتر «النوع» ولعرض اللائحة. */
+/** سطرُ لائحة المواعيد — لفلتر «النوع» ولعرض اللائحة وتعديلها (#277). */
 export interface DeadlineRuleRow {
   code: string;
+  /** الكودُ صريحاً (= `code`) — يتكرّر لكل سنة فلا مفتاحَ به وحده. */
+  rule_code: string;
   name: string;
   service_code: string;
   is_generated: boolean;
@@ -481,6 +520,82 @@ export interface DeadlineRuleRow {
   year: number;
   version: number;
   source_url: string;
+  /** قيمُ المنصة — والوصفُ منها ومن `rule_kind_label`. */
+  platform: {
+    rule_kind: string;
+    rule_kind_label: string;
+    rule_day: number | null;
+    rule_month: number | null;
+    electronic_extension_days: number;
+  };
+  /** تعديلُ المكتب الساري، أو `null` إن لم يُعدَّل السطر. */
+  override: DeadlineRuleOverrideRow | null;
+  /** آخرُ صفوف تعديلٍ (الأحدث أوّلاً) — و«رجّع للمنصة» صفٌّ `cleared`. */
+  history: DeadlineRuleOverrideRow[];
+  /** المنصة غيّرت السطرَ بعد تعديل المكتب — يحسبه الخادم بمسند التنبيه نفسه. */
+  awaiting_decision: boolean;
+}
+
+/** صفُّ تعديل مكتبٍ على سطر — **سجلٌّ إلحاقيّ** لا يُعدَّل ولا يُحذف. */
+export interface DeadlineRuleOverrideRow {
+  id: number;
+  tax_system: string;
+  rule_code: string;
+  rule_day: number | null;
+  rule_month: number | null;
+  electronic_extension_days: number | null;
+  cleared: boolean;
+  note: string;
+  based_on: Record<string, unknown>;
+  created_by_name: string;
+  created_at: string | null;
+}
+
+/** التزامٌ خاص بالمكتب (#277) — يُعطَّل ولا يُحذف. */
+export interface OfficeCustomRuleRow {
+  id: number;
+  code: string;
+  name: string;
+  service: { id: number; code: string; name: string };
+  cadence: string;
+  cadence_label: string;
+  rule_kind: string;
+  rule_kind_label: string;
+  rule_day: number | null;
+  rule_month: number | null;
+  is_active: boolean;
+  origin_label: string;
+}
+
+export interface OfficeCustomRulesPayload {
+  custom_rules: OfficeCustomRuleRow[];
+  cadence_choices: SettingChoice[];
+  rule_kind_choices: SettingChoice[];
+  services: { id: number; code: string; name: string }[];
+}
+
+/** نوعُ حدثٍ مفعَّل — كما يرسله الخادم (`event_kinds`). */
+export interface EventKindChoice {
+  value: string;
+  label: string;
+}
+
+/** حدثُ زبون مسجَّل («صار حدث») — والتزاماتُه كما في تبويب الالتزامات. */
+export interface ClientEventRow {
+  id: number;
+  kind: string;
+  kind_label: string;
+  occurred_on: string;
+  note: string;
+  created_by_name: string;
+  created_at: string;
+  obligations: ObligationRow[];
+}
+
+export interface ClientEventsPayload {
+  client: { id: number; name: string };
+  event_kinds: EventKindChoice[];
+  events: ClientEventRow[];
 }
 
 const pad2 = (value: number) => String(value).padStart(2, '0');
@@ -683,6 +798,8 @@ export interface ObligationTaskRef {
  *
  * `amount` نصٌّ عشريّ أو `null`؛ **و`null` تعني «لا ترى المبالغ»** فيُعرض «—».
  * و`badges` تُحسب على يوم الطلب: الصفُّ نفسه قد يكون «قريباً» اليوم وغيرَه غداً.
+ * و`due_date` (#277) هو الموعدُ الساري — الممدَّدُ إن وُجد — وما تُقرأ عليه
+ * الشاراتُ والتصفيةُ في الخادم.
  */
 export interface ObligationRow {
   id: number;
@@ -696,6 +813,12 @@ export interface ObligationRow {
   official_date: string;
   actual_deadline: string;
   internal_deadline: string;
+  /** الموعدُ الساري: `extended_to` أو `actual_deadline`. */
+  due_date: string;
+  extended_to: string | null;
+  extension_note: string;
+  /** تاريخُ المنصة حين يختلف عن موعد المكتب المعدَّل (#277). */
+  platform_official_date: string | null;
   estimated: boolean;
   warnings: string[];
   badges: ObligationBadge[];
@@ -853,6 +976,8 @@ export interface OfficeAlertRow {
   kind_label: string;
   /** مفتاحُ شارة النوع (`late`/`late_internal`) أو `''` لنوعٍ لم تُعرَّف شارته. */
   badge: string;
+  /** وجهةُ الفتح: `client` (ملفّ الزبون) أو `deadline_rules` (شاشة اللائحة). */
+  opens: string;
   message: string;
   client: { id: number; name: string } | null;
   task_id: number | null;
@@ -866,4 +991,117 @@ export interface OfficeAlertsPayload {
   /** عددُ غير المرئيّ **وغير المحسوم** — يُنقصه «شفته». */
   unseen: number;
   rows: OfficeAlertRow[];
+}
+
+// ── تعديل المكتب والتمديد والأحداث (#277) ────────────────────────────────
+//
+// **ولا تسميةَ نوعِ قاعدةٍ هنا**: `rule_kind_label` يصل من الخادم، ويُستعمل بديلاً
+// حين لا يكون للنوع وصفٌ حسابيّ. والوصفُ نفسُه تركيبٌ من اليوم والشهر — لا تاريخٌ
+// قانونيّ مكتوبٌ في الواجهة.
+
+/**
+ * وصفُ قاعدة سطر اللائحة كما يُعرض: «يوم 15 من الشهر التالي».
+ *
+ * يُركَّب من `rule_day`/`rule_month` لأن الرقم هو ما يعدّله المكتب، ويُرجَع نصُّ
+ * الخادم (`rule_kind_label`) لنوعٍ لا وصفَ حسابيّ له — ولا فراغ.
+ */
+export function deadlineRuleDescription(rule: {
+  rule_kind: string;
+  rule_kind_label?: string | null;
+  rule_day?: number | null;
+  rule_month?: number | null;
+}): string {
+  const label = (rule.rule_kind_label ?? '').trim();
+  const day = rule.rule_day ?? null;
+  const month = rule.rule_month ?? null;
+  if (rule.rule_kind === 'end_of_period') return label || 'آخر يوم في الفترة';
+  if (rule.rule_kind === 'day_of_next_month') {
+    return day === null ? 'الشهر التالي' : `يوم ${day} من الشهر التالي`;
+  }
+  if (rule.rule_kind === 'month_day_next_year') {
+    return day === null || month === null
+      ? 'السنة التالية'
+      : `يوم ${day} من الشهر ${month} من السنة التالية`;
+  }
+  if (rule.rule_kind === 'days_after_event') {
+    return day === null ? 'بعد الحدث' : `بعد ${day} يوماً من الحدث`;
+  }
+  return label || rule.rule_kind || '';
+}
+
+/**
+ * مدخلُ `deadlineRuleDescription` لسطرٍ معدَّل: **التعديلُ جزئيّ**، و`null` فيه
+ * «كالمنصة» — فكلُّ حقلٍ يُدمج وحده (`التعديل ?? المنصة`) لا يُمرَّر خاماً.
+ */
+export function overriddenRuleInput(
+  platform: {
+    rule_kind: string;
+    rule_kind_label?: string | null;
+    rule_day?: number | null;
+    rule_month?: number | null;
+  },
+  override: { rule_day?: number | null; rule_month?: number | null },
+): {
+  rule_kind: string;
+  rule_kind_label?: string | null;
+  rule_day: number | null;
+  rule_month: number | null;
+} {
+  return {
+    rule_kind: platform.rule_kind,
+    rule_kind_label: platform.rule_kind_label,
+    rule_day: override.rule_day ?? platform.rule_day ?? null,
+    rule_month: override.rule_month ?? platform.rule_month ?? null,
+  };
+}
+
+/**
+ * نصُّ التمديد: «ممدَّد حتى 15/04 — مدّدنا». وصفٌّ بلا تمديدٍ يعيد `''`.
+ *
+ * والملاحظةُ تُقرأ من الخادم كما هي ولا تُعاد صياغتها.
+ */
+export function obligationExtensionText(row: {
+  extended_to?: string | null;
+  extension_note?: string | null;
+}): string {
+  if (!row.extended_to) return '';
+  const day = shortIsoDate(row.extended_to);
+  const note = (row.extension_note ?? '').trim();
+  return note ? `ممدَّد حتى ${day} — ${note}` : `ممدَّد حتى ${day}`;
+}
+
+/**
+ * شارةُ أصل الالتزام: «من المكتب» أو «حدث» — والرسميُّ بلا شارة.
+ *
+ * النصُّ من `origin_label` الذي يرسله الخادم، فإضافةُ أصلٍ ثالثٍ لا تلمس الواجهة.
+ */
+export function obligationOriginLabel(row: {
+  origin: string;
+  origin_label?: string | null;
+}): string {
+  return row.origin === 'official' ? '' : (row.origin_label ?? '').trim();
+}
+
+/** «المنصة: 16/02» — تاريخُ المنصة بجانب تاريخ المكتب حين يختلفان، وإلا `''`. */
+export function platformOfficialText(row: {
+  platform_official_date?: string | null;
+}): string {
+  if (!row.platform_official_date) return '';
+  return `المنصة: ${shortIsoDate(row.platform_official_date)}`;
+}
+
+/** ثلاثون يوماً — مدىً شهريٌّ معتادٌ للتمديد، لا تاريخٌ قانونيّ. */
+const EXTENSION_DEFAULT_DAYS = 30;
+
+/**
+ * تاريخُ تمديدٍ مقترح: **ثلاثون يوماً بعد الموعد الساري**.
+ *
+ * التمديدُ بعده شرطٌ خادميّ (وإلا فهو تقديمٌ لا تمديد)، فالافتراضُ لا يقع في
+ * تاريخٍ يرفضه. والناتجُ نصُّ ISO بلا كائن `Date` منطقةً زمنية، والسطرُ الفاسد
+ * يعيد `''` فلا يُملأ حقلُ التاريخ بقيمةٍ مخترعة.
+ */
+export function defaultExtensionDate(dueDate: string): string {
+  const ms = msFromIso(dueDate);
+  if (ms === null) return '';
+  return isoFromMs(ms + EXTENSION_DEFAULT_DAYS * MS_PER_DAY);
 }

@@ -82,11 +82,11 @@ export const SettingControl: React.FC<SettingControlProps> = ({
     }
   };
 
-  const toggleDay = (day: string) => {
+  const toggleChoice = (key: string) => {
     const current = asStringList(draft);
-    const next = current.includes(day)
-      ? current.filter((item) => item !== day)
-      : [...current, day];
+    const next = current.includes(key)
+      ? current.filter((item) => item !== key)
+      : [...current, key];
     // الترتيبُ من `choices` كما يرسله الخادم — لا ترتيبُ نقرِ المستخدم.
     setDraft(setting.choices.filter((choice) => next.includes(choice.value)).map((c) => c.value));
   };
@@ -158,7 +158,7 @@ export const SettingControl: React.FC<SettingControlProps> = ({
                   type="button"
                   disabled={disabled}
                   aria-pressed={on}
-                  onClick={() => toggleDay(choice.value)}
+                  onClick={() => toggleChoice(choice.value)}
                   className={
                     on
                       ? 'rounded-full border border-teal-700 bg-teal-700 px-2.5 py-1 text-[11px] font-semibold text-white'
@@ -169,6 +169,26 @@ export const SettingControl: React.FC<SettingControlProps> = ({
                 </button>
               );
             })}
+          </div>
+        ) : null}
+
+        {setting.kind === 'multi_choice' ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5">
+            {setting.choices.map((choice) => (
+              <label
+                key={choice.value}
+                className="inline-flex items-center gap-2 text-[12px] text-slate-700 dark:text-slate-200"
+              >
+                <input
+                  type="checkbox"
+                  checked={asStringList(draft).includes(choice.value)}
+                  disabled={disabled}
+                  onChange={() => toggleChoice(choice.value)}
+                  className="size-4 rounded border-slate-300"
+                />
+                {choice.label}
+              </label>
+            ))}
           </div>
         ) : null}
 

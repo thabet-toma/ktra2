@@ -285,3 +285,76 @@ class ClosePriorSerializer(serializers.Serializer):
     """«هدول انقدّموا قبل ما يجي علينا» — التاريخُ افتراضُه اليوم."""
 
     before = serializers.DateField(required=False)
+
+
+# ── تعديل المكتب على اللائحة، والتمديد، والتزامات المكتب، والأحداث (#277) ────
+#
+# **الحدودُ هنا شكلُ الطلب لا قيمتُه**: المدى (1..31، ومدى أيام سطر الحدث) والرسائل و«كالمنصة» تُقرأ في
+# الخدمة وحدها، فنداءٌ برمجيّ لا يمرّ بالمسلسِل يأخذ الرفضَ نفسه.
+class RuleOverrideSerializer(serializers.Serializer):
+    """تعديلُ سطرٍ: النظامُ والكودُ مطلوبان، والقيمُ الفارغة تعني «كالمنصة»."""
+
+    system = serializers.CharField(max_length=2)
+    code = serializers.SlugField(max_length=60)
+    # بلا حدودٍ عدديّة: `rule_day` لسطر الحدث مدىً بالأيام (حتى 180) لا يومَ شهر،
+    # والخدمةُ تعرف نوعَ السطر فتحكم.
+    rule_day = serializers.IntegerField(required=False, allow_null=True)
+    rule_month = serializers.IntegerField(required=False, allow_null=True)
+    electronic_extension_days = serializers.IntegerField(
+        required=False, allow_null=True,
+    )
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class RuleCodeSerializer(serializers.Serializer):
+    """«رجّع للمنصة» و«أُبقي تاريخي»: السطرُ وحده، بلا قيم."""
+
+    system = serializers.CharField(max_length=2)
+    code = serializers.SlugField(max_length=60)
+
+
+class CustomRuleWriteSerializer(serializers.Serializer):
+    """التزامٌ خاص بالمكتب — والخدمةُ تُحلّ من كتالوج الشركة في الخدمة."""
+
+    name = serializers.CharField(max_length=200)
+    service = serializers.IntegerField(min_value=1)
+    cadence = serializers.CharField(max_length=20)
+    rule_kind = serializers.CharField(max_length=30)
+    rule_day = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=31,
+    )
+    rule_month = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=12,
+    )
+    is_active = serializers.BooleanField(required=False)
+
+
+class CustomRuleUpdateSerializer(serializers.Serializer):
+    """تعديلُ التزام مكتبٍ بحقولٍ كلُّها اختيارية — والغيابُ لا يمسّ."""
+
+    name = serializers.CharField(required=False, max_length=200)
+    service = serializers.IntegerField(required=False, min_value=1)
+    cadence = serializers.CharField(required=False, max_length=20)
+    rule_kind = serializers.CharField(required=False, max_length=30)
+    rule_day = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=31,
+    )
+    rule_month = serializers.IntegerField(
+        required=False, allow_null=True, min_value=1, max_value=12,
+    )
+    is_active = serializers.BooleanField(required=False)
+
+
+class ObligationExtensionSerializer(serializers.Serializer):
+    """«مدّد»: تاريخُ التمديد وملاحظتُه — والرفضُ الدلاليّ في الخدمة."""
+
+    until = serializers.DateField()
+    note = serializers.CharField(max_length=300)
+
+
+class ClientEventSerializer(serializers.Serializer):
+    """«صار حدث»: النوعُ والتاريخُ وملاحظةٌ اختيارية — والفعّالُ يُفحص في الخدمة."""
+
+    kind = serializers.CharField(max_length=40)
+    occurred_on = serializers.DateField()
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)

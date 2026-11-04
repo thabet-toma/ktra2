@@ -705,6 +705,7 @@ class RowShapeTest(OfficeTestCase):
                 "period_label", "official_date", "actual_deadline", "internal_deadline",
                 "estimated", "warnings", "badges", "amount", "direction",
                 "direction_label", "client_paid", "status", "status_label",
+                "due_date", "extended_to", "extension_note", "platform_official_date",
             },
         )
         self.assertEqual(set(row["client"]), {"id", "name"})

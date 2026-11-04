@@ -81,6 +81,7 @@ class RegistryShapeTest(SettingTestCase):
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
+                "enabled_event_kinds",
                 "late_internal_alert_to", "late_official_alert_to",
             },
         )
@@ -433,6 +434,7 @@ class SettingsApiTest(SettingTestCase):
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
+                "enabled_event_kinds",
                 "late_internal_alert_to", "late_official_alert_to",
             },
         )

@@ -24,6 +24,8 @@ KIND_CHOICE = "choice"
 KIND_BOOL = "bool"
 KIND_INTEGER = "integer"
 KIND_WEEKDAYS = "weekdays"
+#: #277: قائمةُ مفاتيحَ من `choices` بلا تكرار — «أنواع الأحداث المفعّلة».
+KIND_MULTI_CHOICE = "multi_choice"
 
 LEVEL_OFFICE = "office"
 LEVEL_CLIENT = "client"
@@ -63,6 +65,18 @@ ALERT_TO_LABELS: dict[str, str] = {
 
 #: نصّ القيمة الغائبة — ثابتٌ واحدٌ في الخادم، لا نسخةٌ في كل شاشة.
 NOT_CHOSEN_LABEL = "غير مختار"
+
+#: أنواعُ الأحداث التي تُسجَّل في ملفّ الزبون («صار حدث») — **قائمةٌ تُوسَّع صفّاً**،
+#: ولكل نوعٍ سطرٌ في لائحة المنصة بـ`cadence="event"` و`event_kind` يطابقه. ونوعٌ
+#: واحدٌ الآن: الاقتطاع. وإسرائيل بلا سطر حدثٍ حتى يوجد مصدرٌ بحثيّ له.
+#:
+#: **وهي هنا لا في النماذج** لأن إعداد `enabled_event_kinds` يقرأ مفاتيحها،
+#: والسجلَّ لا يستورد النماذج (دَّورةُ استيراد)، والنماذجُ تستورد السجلّ.
+EVENT_KIND_WITHHOLDING = "withholding"
+EVENT_KIND_CHOICES: tuple[tuple[str, str], ...] = (
+    (EVENT_KIND_WITHHOLDING, "اقتطاع ضريبة مصدر"),
+)
+EVENT_KIND_LABELS: dict[str, str] = dict(EVENT_KIND_CHOICES)
 
 
 class _NoDefault:
@@ -158,6 +172,22 @@ def _canonical_weekdays(value) -> list[str]:
     return [key for key in WEEKDAY_KEYS if key in set(keys)]
 
 
+def _canonical_multi_choice(definition, value) -> list[str]:
+    """قائمةٌ فرعيةٌ من اختيارات الإعداد، بترتيب الإعداد، بلا تكرار — أو رفض."""
+    if not isinstance(value, (list, tuple)):
+        raise ValidationError({"value": f"«{definition.label}» تُرسَل قائمةً."})
+    keys = list(value)
+    if any(
+        not isinstance(key, str) or key not in definition.choices for key in keys
+    ):
+        raise ValidationError({
+            "value": f"قيمةٌ غير معروفة في «{definition.label}».",
+        })
+    if len(set(keys)) != len(keys):
+        raise ValidationError({"value": f"قيمةٌ مكرَّرة في «{definition.label}»."})
+    return [key for key in definition.choices if key in set(keys)]
+
+
 def validate_value(definition: SettingDefinition, value):
     """يُعيد القيمة مُطبَّعةً، أو يرفع `ValidationError` — نقطة التحقّق الوحيدة."""
     if definition.kind == KIND_CHOICE:
@@ -183,6 +213,8 @@ def validate_value(definition: SettingDefinition, value):
         return value
     if definition.kind == KIND_WEEKDAYS:
         return _canonical_weekdays(value)
+    if definition.kind == KIND_MULTI_CHOICE:
+        return _canonical_multi_choice(definition, value)
     raise ValidationError({"value": f"نوع إعداد غير معروف: {definition.kind}."})
 
 
@@ -291,6 +323,19 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         min_value=0,
         group=GROUP_SCHEDULE,
         note="إلى أيّ مدىً يُحسب التقويم قدّاماً.",
+    ),
+    #: #277: «صار حدث» يولّد التزامه من سطر اللائحة — والأنواعُ المفعّلة تحدّ ما
+    #: يُسجَّل. الافتراضُ كلُّ الأنواع: المكتبُ يقلّص لا يبدأ بقائمةٍ فارغة.
+    "enabled_event_kinds": SettingDefinition(
+        key="enabled_event_kinds",
+        label="أنواع الأحداث المفعّلة",
+        kind=KIND_MULTI_CHOICE,
+        levels=(LEVEL_OFFICE,),
+        choices=tuple(key for key, _label in EVENT_KIND_CHOICES),
+        labels=EVENT_KIND_LABELS,
+        default=[key for key, _label in EVENT_KIND_CHOICES],
+        group=GROUP_SCHEDULE,
+        note="«صار حدث» في ملفّ الزبون يولّد التزامه لِما يُفعَّل هنا وحده.",
     ),
     # ── التأخير والتنبيهات (#276) ──
     #

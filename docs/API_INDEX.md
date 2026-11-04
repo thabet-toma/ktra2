@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1025**
+عدد النقاط: **1033**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -77,6 +77,7 @@
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/primary/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/end/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/events/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/obligations/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/obligations/close-prior/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reactivate/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -90,9 +91,16 @@
 | `/api/accounting-office/clients/{pk}/tax-card/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/custom-rules/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/custom-rules/{pk}/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/deadline-rules/clear-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/deadline-rules/keep-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/deadline-rules/override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/amount/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/clear-extension/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/client-paid/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/extend/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/not-required/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/reopen/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/submit/` | `OfficeObligationViewSet` | `accounting_office/views.py` |

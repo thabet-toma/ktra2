@@ -5,7 +5,10 @@ import {
   badgeLabelOf,
   obligationAmountText,
   obligationBadgeClass,
+  obligationExtensionText,
+  obligationOriginLabel,
   obligationStatusClass,
+  platformOfficialText,
   shortIsoDate,
   statusLabelOf,
 } from '../../utils/accountingOffice';
@@ -54,7 +57,12 @@ export const OfficeObligationRow: React.FC<{
   showStatus = false,
   showAssignee = false,
   dates = 'internal-official',
-}) => (
+}) => {
+  // النصوصُ المشتقّة تُحسب **مرّةً** للسطر: كلُّ نداءٍ يمرّ على عدّة حقول.
+  const originLabel = obligationOriginLabel(obligation);
+  const extensionText = obligationExtensionText(obligation);
+  const platformText = platformOfficialText(obligation);
+  return (
   <div className="space-y-2">
     <div className="flex flex-wrap items-start justify-between gap-2">
       <div className="min-w-0">
@@ -72,9 +80,13 @@ export const OfficeObligationRow: React.FC<{
               {obligation.name}
             </span>
           )}
-          <span className="rounded-full border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-800 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300">
-            {obligation.origin_label}
-          </span>
+          {/* #277: «من المكتب» و«حدث» وحدَهما — الرسميُّ أصلٌ افتراضيّ لا شارةَ له،
+              ولونُهما محايدٌ فلا يلتبسان بالأحمر ولا بالأصفر. */}
+          {originLabel ? (
+            <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+              {originLabel}
+            </span>
+          ) : null}
           {showStatus ? (
             <span
               className={`rounded-full border px-1.5 py-0.5 text-[10px] font-semibold ${obligationStatusClass(obligation.status)}`}
@@ -133,6 +145,19 @@ export const OfficeObligationRow: React.FC<{
           ) : null}
         </div>
 
+        {/* #277: التمديد والموعدُ الرسميّ للمنصّة يظهران بجانب التاريخ الساريّ —
+            والملاحظةُ نصُّ المكتب كما كتبها. */}
+        {extensionText ? (
+          <p className="mt-1 text-[10.5px] font-semibold text-slate-600 dark:text-slate-300">
+            {extensionText}
+          </p>
+        ) : null}
+        {platformText ? (
+          <p className="mt-1 text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+            {platformText}
+          </p>
+        ) : null}
+
         {obligation.warnings.map((warning) => (
           <p
             key={warning}
@@ -167,3 +192,4 @@ export const OfficeObligationRow: React.FC<{
     />
   </div>
 );
+};

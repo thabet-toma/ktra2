@@ -1801,6 +1801,7 @@ class CalendarApiTest(DeadlineApiTestCase):
                 "client", "service", "rule", "period_start", "period_end",
                 "period_label", "legal_date", "official_date", "actual_deadline",
                 "internal_deadline", "estimated", "postponed", "warnings", "expected",
+                "origin", "origin_label", "platform_official_date",
             },
         )
         self.assertTrue(row["expected"])
@@ -2080,6 +2081,8 @@ class DeadlineRulesApiTest(DeadlineApiTestCase):
             {
                 "code", "name", "service_code", "is_generated", "needs_review",
                 "year", "version", "source_url",
+                "platform", "override", "history",
+                "rule_code", "awaiting_decision",
             },
         )
         social = next(row for row in rows if row["code"] == "ps_social_security")

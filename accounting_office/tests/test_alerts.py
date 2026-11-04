@@ -598,7 +598,7 @@ class SeenTest(AlertsTestCase):
         self.assertEqual(
             set(row),
             {
-                "id", "kind", "kind_label", "badge", "message", "client",
+                "id", "kind", "kind_label", "badge", "opens", "message", "client",
                 "task_id", "obligation_id", "day", "seen", "created_at",
             },
         )
