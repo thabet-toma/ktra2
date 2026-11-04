@@ -44,6 +44,9 @@ def _default_terms() -> dict[str, str]:
     # وإجراؤه الأول. مفاتيحُ مصطلحاتٍ لا شاشات، كأخواتها أعلاه.
     terms["nav.office_clients"] = "الزبائن"
     terms["nav.office_settings"] = "إعدادات المكتب"
+    # #274: مجموعةُ التقويم ومفتاحُ شاشته («تسميةُ الشاشة» في `Sidebar.tsx`
+    # محليّةٌ كأخواتها، والمصطلحُ هنا لمجموعة البيان).
+    terms["nav.office_calendar"] = "التقويم"
     terms["action.add_office_client"] = "أضف زبون"
     terms["empty.office_shell"] = "لا زبائن بعد — أضف أول زبون ليبدأ ملفّه."
     terms["action.document_coding"] = "ترميز مستندات"

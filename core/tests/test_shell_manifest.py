@@ -68,6 +68,8 @@ class ShellManifestFunctionTest(SimpleTestCase):
             {group["id"]: group["views"] for group in manifest["groups"]},
             {
                 "clients": ["office-clients"],
+                # #274: التقويم شاشةٌ مستقلّة، فمجموعتُه مستقلّة كإعدادات المكتب.
+                "calendar": ["office-calendar"],
                 "office-settings": ["office-settings"],
                 "treasury": [
                     "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",

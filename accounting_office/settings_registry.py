@@ -34,7 +34,12 @@ SETTING_LEVELS: tuple[str, ...] = (LEVEL_OFFICE, LEVEL_CLIENT, LEVEL_ITEM)
 #: مجموعات شاشة الإعدادات — ثابتٌ مستقلّ عن المستويات وإن تشارك `office` اسماً:
 #: المستوى يقول «أين تُضبط القيمة»، والمجموعة تقول «أين تُعرض» — وقد تختلفان.
 GROUP_OFFICE = "office"
-SETTING_GROUPS: tuple[tuple[str, str], ...] = ((GROUP_OFFICE, "المكتب"),)
+#: #274: مجموعةُ الضريبة ولائحة المواعيد — الموعدُ الداخليّ ومدى التقويم.
+GROUP_SCHEDULE = "schedule"
+SETTING_GROUPS: tuple[tuple[str, str], ...] = (
+    (GROUP_OFFICE, "المكتب"),
+    (GROUP_SCHEDULE, "الضريبة ولائحة المواعيد"),
+)
 
 #: نصّ القيمة الغائبة — ثابتٌ واحدٌ في الخادم، لا نسخةٌ في كل شاشة.
 NOT_CHOSEN_LABEL = "غير مختار"
@@ -86,6 +91,9 @@ class SettingDefinition:
     default: Any = NO_DEFAULT
     group: str = GROUP_OFFICE
     note: str = ""
+    #: حدٌّ أدنى للأنواع العددية — والسالبُ لا معنى له في «أيامٍ قبل الموعد» ولا
+    #: في «مدىً بالأشهر». `None` تعني «لا حدَّ زائداً على النوع».
+    min_value: int | None = None
     #: تسميةُ الإعداد من منظور الزبون حين تختلف عن تسمية المكتب — «أيام عطلة
     #: المكتب» للمكتب، و«يوم راحة الزبون» تخصيصاً فوقه. القيمةُ والتسميةُ من
     #: السجلّ نفسه، فلا تصنع الواجهة اسماً ثانياً يفترق عنه.
@@ -146,6 +154,12 @@ def validate_value(definition: SettingDefinition, value):
         # `bool` نوعٌ فرعيٌّ من `int` في بايثون — يُستثنى صراحةً وإلا مرّ True = 1.
         if isinstance(value, bool) or not isinstance(value, int):
             raise ValidationError({"value": f"«{definition.label}» عددٌ صحيح."})
+        if definition.min_value is not None and value < definition.min_value:
+            raise ValidationError({
+                "value": (
+                    f"«{definition.label}» لا يقلّ عن {definition.min_value}."
+                ),
+            })
         return value
     if definition.kind == KIND_WEEKDAYS:
         return _canonical_weekdays(value)
@@ -209,6 +223,54 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         labels={"electronic": "إلكتروني", "manual": "يدوي"},
         default="electronic",
         note="معناه في إسرائيل (19/23)؛ تُظهره البطاقة للزبون الإسرائيلي وحده.",
+    ),
+    # ── الضريبة ولائحة المواعيد (#274) ──
+    #
+    # أيامُ الموعد الداخلي لكل دورية، ومدى التقويم قدّاماً. والقيمُ الافتراضية من
+    # المواصفة (#270): شهريٌّ وكلُّ شهرين خمسةُ أيام، ورُبعيٌّ سبعة، وسنويٌّ ثلاثون.
+    #
+    # **و`item` هنا للشغلة في #275 ولا يُستهلك اليوم**: المستوى مسموحٌ فيصل إعدادُ
+    # الشغلة الواحدة بلا تغيير المحرّك، وإضافتُه لاحقاً كانت تكسر توقيعاً.
+    "internal_lead_days_monthly": SettingDefinition(
+        key="internal_lead_days_monthly",
+        label="أيام الموعد الداخلي — شهري وكل شهرين",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT, LEVEL_ITEM),
+        default=5,
+        min_value=0,
+        group=GROUP_SCHEDULE,
+        note="كم يوماً قبل آخر موعد فعليّ يقف الموعد الداخليّ للفترات الشهرية.",
+    ),
+    "internal_lead_days_quarterly": SettingDefinition(
+        key="internal_lead_days_quarterly",
+        label="أيام الموعد الداخلي — ربع سنوي",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT, LEVEL_ITEM),
+        default=7,
+        min_value=0,
+        group=GROUP_SCHEDULE,
+        note="كم يوماً قبل آخر موعد فعليّ للفترات الربعية.",
+    ),
+    "internal_lead_days_annual": SettingDefinition(
+        key="internal_lead_days_annual",
+        label="أيام الموعد الداخلي — سنوي",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT, LEVEL_ITEM),
+        default=30,
+        min_value=0,
+        group=GROUP_SCHEDULE,
+        note="كم يوماً قبل آخر موعد فعليّ للفترات السنوية.",
+    ),
+    "calendar_months_ahead": SettingDefinition(
+        key="calendar_months_ahead",
+        label="مدى التقويم للأمام (بالأشهر)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE,),
+        default=12,
+        # صفرٌ مباحٌ ومعناه «لا تقويمَ مستقبليّ» — والسالبُ لا معنى له.
+        min_value=0,
+        group=GROUP_SCHEDULE,
+        note="إلى أيّ مدىً يُحسب التقويم قدّاماً.",
     ),
 }
 

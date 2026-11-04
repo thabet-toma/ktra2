@@ -78,6 +78,13 @@ SHELL_MANIFESTS: dict[str, dict] = {
         "empty_state_term": "empty.office_shell",
         "groups": [
             {"id": "clients", "label_term": "nav.office_clients", "views": ["office-clients"]},
+            # #274: التقويم شاشةٌ مستقلّة عن قائمة الزبائن (تُقرأ من لائحة المواعيد
+            # المحسوبة)، فمجموعتُها مستقلّة كما استقلّت «إعدادات المكتب» في #271.
+            {
+                "id": "calendar",
+                "label_term": "nav.office_calendar",
+                "views": ["office-calendar"],
+            },
             {
                 "id": "office-settings",
                 "label_term": "nav.office_settings",

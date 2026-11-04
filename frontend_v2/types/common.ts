@@ -101,6 +101,7 @@ export type AppView =
     | "document-coding"
     | "client-books"
     | "office-clients"
+    | "office-calendar"
     | "office-settings"
     | "sales-return"
     | "purchase-return"

@@ -9,7 +9,10 @@
 (نوعُ الإعداد ومُتحقِّقه)، فيستحيل أن يدخل الجدولَ ما لا يعرفه السجلّ.
 """
 import copy
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from uuid import uuid4
 
 from django.core.exceptions import ValidationError
@@ -17,11 +20,17 @@ from django.db import transaction
 from django.db.models import Count, Max, Q
 from django.utils import timezone
 
-from accounting_office import settings_registry
+from accounting_office import deadlines, settings_registry
 from accounting_office.models import (
+    CADENCE_SERVICE,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CLIENT_SERVICE_STATUS_ACTIVE,
     CLIENT_SERVICE_STATUS_LABELS,
+    CONDITION_ANNUAL_SALES_ABOVE,
+    CONDITION_ENTITY_TYPE_IN,
+    CONDITION_HAS_EMPLOYEES,
+    CONDITION_IS_SELF_EMPLOYED,
+    CONDITION_VAT_CLASSIFICATION_IN,
     DEFAULT_SERVICES,
     FREQUENCY_ANNUAL,
     FREQUENCY_BIMONTHLY,
@@ -29,6 +38,7 @@ from accounting_office.models import (
     FREQUENCY_LABELS,
     FREQUENCY_MONTHLY,
     FREQUENCY_ON_DEMAND,
+    FREQUENCY_QUARTERLY,
     SERVICE_CODE_ANNUAL_ACCOUNTS,
     SERVICE_CODE_BOOKKEEPING,
     SERVICE_CODE_CONSULTING,
@@ -42,6 +52,7 @@ from accounting_office.models import (
     ClientServiceFrequency,
     ClientSettingOverride,
     Contact,
+    DeadlineSchedule,
     OfficeClient,
     OfficeService,
     OfficeSettingValue,
@@ -1695,3 +1706,529 @@ def suggestion_payload(client, service, *, on_date=None) -> dict:
         "reason": reason,
         "frequency_choices": frequency_choices(),
     }
+
+
+# ── لائحة المواعيد والتقويم (#274) ──────────────────────────────────────────
+#
+# **المحرّكُ نقيٌّ في `accounting_office/deadlines.py`، وهذا الموضع يربطه بالقاعدة
+# والإعدادات:** يقرأ النسخةَ السارية، ويحلّ إعدادات الزبون **بالمحلّل وحده**،
+# ويولّد الفترات من دورية الخدمة المؤرَّخة، ثم ينادي `compute_deadline`.
+#
+# **ولا يُحفظ شيء**: التقويمُ يُحسب عند كل قراءة، فتغييرُ سطرٍ في اللائحة يظهر في
+# الطلب التالي بلا إعادة توليدٍ ولا وظيفةٍ خلفية.
+
+#: أقصى ما يفصل الموعدَ عن نهاية فترته: قاعدتان تُلقيه في السنة التالية
+#: (`month_day_next_year`)، فالفترةُ السنوية التي انتهت في 2025 قد يكون موعدُها في
+#: 2026. فتُقرأ السلاسل من سنتين قبل بداية المدى كي لا تسقط فترةٌ موعدُها داخله.
+DEADLINE_LOOKBACK_MONTHS = 12 * 2
+
+#: أطولُ مدىً يطلبه التقويم — **شهران**: شبكةُ الشهر تصل 42 يوماً، والرُّبع (92)
+#: يُرفض. ولا يصير الطلبُ مسحاً لسنوات.
+CALENDAR_MAX_SPAN_DAYS = 62
+
+#: إعدادُ أيام الموعد الداخلي بحسب الدورية — «كل شهرين» تأخذ حصّةَ الشهريّ.
+INTERNAL_LEAD_SETTING_BY_CADENCE: dict[str, str] = {
+    FREQUENCY_MONTHLY: "internal_lead_days_monthly",
+    FREQUENCY_BIMONTHLY: "internal_lead_days_monthly",
+    FREQUENCY_QUARTERLY: "internal_lead_days_quarterly",
+    FREQUENCY_ANNUAL: "internal_lead_days_annual",
+}
+
+#: الإعداداتُ التي تُقرأ **جماعياً** لزبائن التقويم: كلُّها تقبل التخصيص لكل زبون،
+#: فتُحلّ مرّةً لكل مفتاح في الطلب (`resolve_setting_for_clients`) لا مرّتين لكل
+#: زبون. وأيامُ عطلة المكتب تُقرأ بلا زبونٍ مرّةً واحدة.
+CONTEXT_SETTING_KEYS: tuple[str, ...] = (
+    TAX_SYSTEM_KEY,
+    "rest_days",
+    "filing_method",
+    *INTERNAL_LEAD_SETTING_BY_CADENCE.values(),
+)
+
+
+@dataclass
+class ThresholdContext:
+    """سياقُ قراءة السقوف لسطرٍ في سنةٍ ما — بمُذكِّرة، فلا يُقرأ السقفُ مرّتين.
+
+    `cache` يُشارَك مع سياق التقويم كلِّه (`CalendarContext.thresholds`)، فسقفُ
+    (نظام، نوع، سنة) يُقرأ **مرّةً في الطلب** لا مرّةً لكل فترةٍ لكل زبون.
+    """
+
+    tax_system: str
+    day: date
+    cache: dict = field(default_factory=dict, repr=False)
+
+    def get(self, kind: str):
+        """`(صفُّ السقف | None, تقديريّ؟)` — بقاعدة `_threshold_for` وحدها."""
+        key = (self.tax_system, kind, self.day.year)
+        if key not in self.cache:
+            self.cache[key] = _threshold_for(self.tax_system, kind, self.day)
+        return self.cache[key]
+
+
+def schedule_for(tax_system, year) -> tuple[DeadlineSchedule | None, bool]:
+    """النسخةُ السارية لسنةٍ — أو آخر سنةٍ سابقة معها، وتُعلَن **تقديرية**.
+
+    «السارية» = أكبر `version` لتلك السنة، فلا تُعدَّل نسخةٌ منشورة. وسنةٌ بلا
+    نسخةٍ (2028 اليوم) تأخذ نسخةَ 2027 وتُعلَن تقديرية، فتتجاهل تعديلاتها
+    المنشورة لأنها لسنةٍ أخرى. ولا نسخةَ أصلاً ⇒ `(None, False)`.
+    """
+    current = (
+        DeadlineSchedule.objects
+        .filter(tax_system=tax_system, year=year)
+        .order_by("-version")
+        .first()
+    )
+    if current is not None:
+        return current, False
+    previous = (
+        DeadlineSchedule.objects
+        .filter(tax_system=tax_system, year__lt=year)
+        .order_by("-year", "-version")
+        .first()
+    )
+    if previous is None:
+        return None, False
+    return previous, True
+
+
+def rule_applies(rule, card, thresholds_ctx: ThresholdContext) -> bool:
+    """هل يُولّد هذا السطرُ التزاماً لهذه البطاقة؟ — **الشروطُ من اللائحة**.
+
+    `is_generated=False` («لا يُولَّد») يسقط أوّلاً. ثم كلُّ شرطٍ في
+    `rule.conditions`: التصنيفُ ونوعُ الكيان يُشترطان في قائمتهما، والموظفون
+    والتعاملُ الذاتيّ تطابقاً، والسقفُ تجاوزاً (`annual_sales > السقف المنشور`).
+    وسقفٌ غير منشورٍ لسنةٍ ولا لسابقةٍ لها ⇒ لا يُثبت التجاوز ⇒ لا يُولَّد.
+    """
+    if not rule.is_generated:
+        return False
+    conditions = rule.conditions or {}
+
+    for key, field_name in (
+        (CONDITION_VAT_CLASSIFICATION_IN, "vat_classification"),
+        (CONDITION_ENTITY_TYPE_IN, "entity_type"),
+    ):
+        allowed = conditions.get(key)
+        if allowed is None:
+            continue
+        if (getattr(card, field_name, "") or "") not in allowed:
+            return False
+
+    for key, field_name in (
+        (CONDITION_HAS_EMPLOYEES, "has_employees"),
+        (CONDITION_IS_SELF_EMPLOYED, "is_self_employed"),
+    ):
+        expected = conditions.get(key)
+        if expected is None:
+            continue
+        if bool(getattr(card, field_name, False)) != bool(expected):
+            return False
+
+    kind = conditions.get(CONDITION_ANNUAL_SALES_ABOVE)
+    if kind:
+        threshold, _estimated = thresholds_ctx.get(kind)
+        if threshold is None or card is None:
+            return False
+        return card.annual_sales > threshold.amount
+    return True
+
+
+def _service_periods(client_service, *, start, end, frequencies):
+    """فتراتُ خدمةٍ دوريتُها مؤرَّخة — `(البداية, النهاية, الدورية)`.
+
+    الحسابُ في `deadlines.service_periods` (حزمٌ محاذاةٌ للتقويم، والشهرُ تحكمه
+    دوريتُه في آخره)، وهذا الربطُ وحده هنا: خدمةُ الزبون ودورياتُها المؤرَّخة.
+
+    والدوريةُ في الثلاثية هي التي **قرأها** المحرّكُ للفترة، لا المستنتَجةُ من
+    طولها: فترةٌ قُطعت بتغيير الدورية (نيسان–كانون الأول بعد التحوّل إلى سنوية)
+    تبقى بدوريتها.
+
+    والمؤشّرُ الأول أولُ شهرٍ في `max(بداية الطلب − سنتين, starts_on,
+    responsible_from)` — والحزمُ محاذاة، فلا تتغيّر النتيجة ببداية الطلب.
+    """
+    def frequency_of_month(month):
+        return _frequency_at_month_end(client_service, month, frequencies)
+
+    floor = max(
+        deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS),
+        client_service.starts_on,
+        client_service.responsible_from,
+    )
+    return deadlines.service_periods(frequency_of_month, floor, end)
+
+
+def _frequency_at_month_end(client_service, month, frequencies):
+    """الدوريةُ السارية في **آخر** يومٍ من الشهر — بدايةٌ في 15/2 تُدرك شباط.
+
+    `frequency_on` تقارن `effective_from` باليوم، و`effective_from` يساوي
+    `starts_on` بلا تطبيعٍ لأول الشهر؛ فقراءةُ أول الشهر تُسقط شهراً بدأ في منتصفه
+    (أولُ صفّ دوريةٍ سريانُه 15/2 لا يطابق 1/2). وقراءةُ آخره تُدركه.
+    """
+    month_end = deadlines.month_start_after(month, 1) - timedelta(days=1)
+    current = frequency_on(client_service, month_end, rows=frequencies)
+    return current.frequency if current else None
+
+
+def _period_is_ours(client_service, period_end) -> bool:
+    """الفترةُ تخصّ المكتب: انتهت بعد بدئه وبعد مسؤوليته، وقبل إيقاف الخدمة."""
+    if period_end < client_service.starts_on:
+        return False
+    if period_end < client_service.responsible_from:
+        return False
+    if client_service.ends_on is not None and period_end > client_service.ends_on:
+        return False
+    return True
+
+
+def _rules_by_service(schedule) -> dict[str, list]:
+    """أسطرُ النسخة مجمَّعةً بكود الخدمة — دورةٌ واحدة لكل نسخة، لا سطرٍ بسطر."""
+    grouped: dict[str, list] = {}
+    for rule in schedule.rules.all():
+        grouped.setdefault(rule.service_code, []).append(rule)
+    return grouped
+
+
+@dataclass
+class CalendarContext:
+    """سياقُ طلبٍ واحدٍ للتقويم — يمنع N+1 ويُبقي `client_deadlines` صالحةً وحدها.
+
+    يُبنى مرّةً قبل حلقة الزبائن: مُذكِّرةُ النسخ والأسطر، وأيامُ عطلة المكتب،
+    والإعداداتُ القابلة للتخصيص مُحلَّلةً **جماعياً** لزبائن الطلب
+    (`resolve_setting_for_clients` مفتاحاً مفتاحاً). وخدماتُ الزبائن تُجلب بـ
+    `prefetch_related` على استعلام الزبائن الأب.
+
+    و`client_deadlines(client, …)` بلا سياقٍ تبني سياقَها لزبونٍ واحد، فتبقى
+    صالحةً منفردةً (اختبارٌ أو نداءٌ داخليّ) بلا كلفةٍ إضافية.
+    """
+
+    tenant: Any
+    settings: dict[str, dict[int, Any]] = field(default_factory=dict, repr=False)
+    office_rest_days: list = field(default_factory=list)
+    #: بمفتاح `(النظام, السنة)`: مكتبٌ يضمّ نظامين لا يقرأ نسخةَ أحدِهما للآخر.
+    schedules: dict[tuple[str, int], tuple] = field(default_factory=dict, repr=False)
+    #: سقوفُ (نظام، نوع، سنة) — مشتركةٌ بين كل فترات الطلب.
+    thresholds: dict[tuple[str, str, int], tuple] = field(
+        default_factory=dict, repr=False,
+    )
+
+    def setting(self, client, key):
+        """قيمةُ إعدادٍ لزبون — من المجموعة إن حُلّت، وإلا بالمحلّل."""
+        resolved = self.settings.get(key)
+        if resolved is None or client.pk not in resolved:
+            return resolve_setting(self.tenant, key, client=client)
+        return resolved[client.pk]
+
+    def lead_days(self, client, setting_key) -> int:
+        if not setting_key:
+            return 0
+        return self.setting(client, setting_key) or 0
+
+    def schedule(self, tax_system, year) -> tuple:
+        return _schedule_bundle(self.schedules, tax_system, year)
+
+
+def calendar_context(tenant, clients) -> CalendarContext:
+    """سياقُ الطلب: الإعداداتُ القابلة للتخصيص جماعياً + عطلةُ المكتب مرّةً."""
+    clients = list(clients)
+    resolved: dict[str, dict[int, Any]] = {}
+    if clients:
+        for key in dict.fromkeys(CONTEXT_SETTING_KEYS):
+            resolved[key] = resolve_setting_for_clients(tenant, key, clients)
+    return CalendarContext(
+        tenant=tenant,
+        settings=resolved,
+        office_rest_days=resolve_setting(tenant, "rest_days") or [],
+    )
+
+
+def client_deadlines(client, *, start, end, context=None) -> list[dict]:
+    """مواعيدُ زبونٍ في مدى — محسوبةٌ عند القراءة ولا محفوظة.
+
+    لكل خدمةٍ عند الزبون، ولكل سطرٍ في **نسخة نظامه** يخصّ خدمتها: فتراتٌ فقاعدتها:
+
+    - **`cadence == "service"`**: الفتراتُ من دورية الخدمة المؤرَّخة
+      (`deadlines.service_periods`) — حزمٌ محاذاةٌ للتقويم تتبع تغييرَها.
+    - **دوريةٌ ثابتة** (`monthly`/`quarterly`/`annual`): الفتراتُ من
+      `deadlines.periods_for` على `rule.cadence`، **مستقلّةً عن دورية الخدمة** —
+      وإلا وُلّد التقريرُ السنوي اثنتَي عشرة مرّةً لخدمةٍ شهرية، والرُّبعيُّ شهرياً.
+
+    ثم تُصفّى بالفترة التي تخصّ المكتب (`_period_is_ours`) وبأن يقع
+    `actual_deadline` في `[start, end]`.
+
+    وكلُّ إعدادٍ يُقرأ **بالمحلّل** وبالزبون: النظامُ ويومُ راحته وطريقةُ تقديمه
+    وأيامُ إعداده بحسب دورية الفترة، وأيامُ عطلة المكتب بلا زبون. و`context` سياقُ
+    طلبٍ يجمعها لزبائن التقويم مرّةً واحدة.
+    """
+    context = context or calendar_context(client.tenant, [client])
+    system = context.setting(client, TAX_SYSTEM_KEY)
+    if not system:
+        return []
+
+    client_rest_days = context.setting(client, "rest_days") or []
+    filing_method = context.setting(client, "filing_method")
+    # بطاقةٌ غائبةٌ (صفٌّ شُطب يدوياً) لا تُسقِط تقويمَ المكتب: الشروطُ المشروطة
+    # بالبطاقة لا تنطبق عليها، فيبقى ما لا شرطَ له (دفترٌ بلا بطاقةٍ لا مواعيدَ له).
+    card = getattr(client, "tax_card", None)
+
+    rows: list[dict] = []
+    service_rows = client_services_of(client, context)
+    for client_service in service_rows:
+        frequencies = list(client_service.frequencies.all())
+        service_code = client_service.service.code
+        for period_start, period_end, source, cadence in _periods_for_service(
+            client_service, service_code, frequencies,
+            system=system, start=start, end=end, context=context,
+        ):
+            if not _period_is_ours(client_service, period_end):
+                continue
+            schedule, estimated, grouped = context.schedule(system, period_end.year)
+            if schedule is None:
+                continue
+            thresholds = ThresholdContext(
+                tax_system=system, day=period_end, cache=context.thresholds,
+            )
+            setting_key = INTERNAL_LEAD_SETTING_BY_CADENCE.get(cadence)
+            for rule in grouped.get(service_code, []):
+                # السطرُ يولّد فتراتِ مصدره وحده: سطرٌ سنويّ لا يُولَّد لكل شهر،
+                # وسطرُ «service» يولّد فترات دورية الخدمة وحدها.
+                if rule.cadence != source:
+                    continue
+                if not rule_applies(rule, card, thresholds):
+                    continue
+                result = deadlines.compute_deadline(
+                    rule,
+                    period_start=period_start,
+                    period_end=period_end,
+                    estimated=estimated,
+                    client_rest_days=client_rest_days,
+                    office_rest_days=context.office_rest_days,
+                    filing_method=filing_method,
+                    internal_lead_days=context.lead_days(client, setting_key),
+                    schedule_policy=schedule.rest_day_policy,
+                    authority_closed_days=schedule.authority_closed_days or [],
+                )
+                if not start <= result.actual_deadline <= end:
+                    continue
+                result = _with_estimated_threshold_warning(result, rule, thresholds)
+                rows.append({
+                    "client": client,
+                    "service": client_service.service,
+                    "rule": rule,
+                    "result": result,
+                })
+    return rows
+
+
+def _with_estimated_threshold_warning(result, rule, thresholds_ctx):
+    """يُلحق «تقديري: سقف …» حين يُقرأ سقفُ شرط السطر من سنةٍ سابقة.
+
+    `rule_applies` تبقى منطقيةً والمحرّكُ نقيّاً: العلامةُ تُقرأ من مُذكِّرة
+    `ThresholdContext` نفسها (لا استعلامَ ثانياً)، وصيغتُها صيغةُ #273
+    (`suggest_frequency`).
+    """
+    kind = (rule.conditions or {}).get(CONDITION_ANNUAL_SALES_ABOVE)
+    if not kind:
+        return result
+    threshold, estimated = thresholds_ctx.get(kind)
+    if threshold is None or not estimated:
+        return result
+    return replace(
+        result, warnings=[*result.warnings, f"تقديري: سقف {threshold.year}"],
+    )
+
+
+def client_services_of(client, context=None):
+    """خدماتُ الزبون — من ذاكرة `prefetch_related` حين يكون السياق محمَّلاً.
+
+    ولا `order_by` بعدها: طلبُ ترتيبٍ على مديرٍ مُحمَّلٍ مسبقاً يستعلم من جديد،
+    و`ClientService.Meta.ordering` هو الترتيبُ أصلاً.
+    """
+    if context is not None:
+        return list(client.services.all())
+    return list(
+        client.services.select_related("service").prefetch_related("frequencies"),
+    )
+
+
+def _periods_for_service(
+    client_service, service_code, frequencies, *, system, start, end, context,
+) -> list[tuple]:
+    """فتراتُ الخدمة كلُّها — `(البداية, النهاية, مصدرُ الفترة, دوريةُ الإعداد)`.
+
+    - **دوريةُ السطر الثابتة**: `deadlines.periods_for` محاذاةً للتقويم، **مستقلّةً
+      عن دورية الخدمة** (وإلا صار السنويُّ شهرياً لخدمةٍ شهرية). والمصدرُ هو
+      الدوريةُ نفسها.
+    - **`cadence == "service"`**: `deadlines.service_periods` على دورية الخدمة
+      المؤرَّخة؛ والمصدرُ `service` ودوريةُ الإعداد **الدوريةُ التي قرأها المحرّك
+      للفترة** (كل شهرين تتبع إعدادَ الشهريّ، والفترةُ المقطوعةُ بالتغيير تبقى
+      بدوريتها لا بطولها).
+
+    والدورياتُ المرشَّحة تُقرأ من أسطر نسخ المدى، فلا تُحسب دوريةٌ لا سطرَ لها.
+    """
+    cadences = _cadences_for_service(context, system, service_code, start, end)
+    periods: list[tuple] = []
+    if CADENCE_SERVICE in cadences:
+        periods.extend(
+            (period_start, period_end, CADENCE_SERVICE, cadence)
+            for period_start, period_end, cadence in _service_periods(
+                client_service, start=start, end=end, frequencies=frequencies,
+            )
+        )
+    floor = deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS)
+    for cadence in cadences - {CADENCE_SERVICE}:
+        periods.extend(
+            (period_start, period_end, cadence, cadence)
+            for period_start, period_end in deadlines.periods_for(cadence, floor, end)
+        )
+    return periods
+
+
+def _cadences_for_service(context, tax_system, service_code, start, end) -> set:
+    """دورياتُ أسطر خدمةٍ في نسخ السنوات التي يمسّها المدى."""
+    cadences: set[str] = set()
+    for schedule, _estimated, grouped in _schedules_for_range(
+        context, tax_system, start, end,
+    ):
+        if schedule is None:
+            continue
+        cadences.update(
+            rule.cadence for rule in grouped.get(service_code, []) if rule.is_generated
+        )
+    return cadences
+
+
+def _schedules_for_range(context, tax_system, start, end) -> list[tuple]:
+    """نسخُ سنوات المدى من مُذكِّرة السياق — لا استعلامَ جديداً بعد أوّل سنة."""
+    first_year = deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS).year
+    return [
+        context.schedule(tax_system, year)
+        for year in range(first_year, end.year + 1)
+    ]
+
+
+def _schedule_bundle(cache, tax_system, year) -> tuple:
+    """`(النسخة, تقديريّ؟, الأسطرُ مجمَّعةً)` — بمُذكِّرةٍ داخل النداء الواحد.
+
+    والمفتاحُ `(النظام, السنة)` لا السنةَ وحدها: مكتبٌ فيه زبونٌ فلسطينيّ وآخرُ
+    إسرائيليّ كان يقرأ نسخةَ أحدِهما للآخر، فتُسقَط سطورُ الخدمة كلُّها.
+    """
+    key = (tax_system, year)
+    if key not in cache:
+        schedule, estimated = schedule_for(tax_system, year)
+        cache[key] = (
+            schedule,
+            estimated,
+            _rules_by_service(schedule) if schedule is not None else {},
+        )
+    return cache[key]
+
+
+def calendar_row(item) -> dict:
+    """سطرُ التقويم كما يُعرض — **بلا أيّ مبلغ** فلا حارسَ مبالغ يتأثّر.
+
+    `expected` صحيحٌ دائماً في هذه التذكرة: كلُّ سطرٍ محسوبٌ لا محفوظ (#275 تضيف
+    المحفوظ فتختلف القيمة).
+    """
+    result = item["result"]
+    return {
+        "client": {"id": item["client"].pk, "name": item["client"].name},
+        "service": {
+            "code": item["service"].code,
+            "name": item["service"].name,
+        },
+        "rule": {
+            "code": item["rule"].code,
+            "name": item["rule"].name,
+            "needs_review": item["rule"].needs_review,
+        },
+        "period_start": result.period_start.isoformat(),
+        "period_end": result.period_end.isoformat(),
+        "period_label": deadlines.period_label(result.period_start, result.period_end),
+        "legal_date": result.legal_date.isoformat(),
+        "official_date": result.official_date.isoformat(),
+        "actual_deadline": result.actual_deadline.isoformat(),
+        "internal_deadline": result.internal_deadline.isoformat(),
+        "estimated": result.estimated,
+        "postponed": result.postponed,
+        "warnings": list(result.warnings),
+        "expected": True,
+    }
+
+
+def calendar_payload(
+    tenant, *, user, start, end, client=None, member=None, rule_code="", today=None,
+) -> dict:
+    """تقويمُ المدة — **قراءةٌ خالصة** على ما يراه هذا العضو من زبائن.
+
+    الزبائنُ من `visible_clients` وحدها (فزبونُ غيرك لا يظهر)، و`member` يفلتر
+    على المسؤول. والفلترةُ على المدى في `client_deadlines` قبل أيّ تشكيل، فلا
+    يُبنى صفٌّ ليُرمى.
+
+    **وسياقٌ واحدٌ قبل الحلقة** (`calendar_context`): الإعداداتُ القابلة للتخصيص
+    تُحلّ جماعياً، والنسخُ والأسطرُ بمُذكِّرة، وخدماتُ الزبائن بـ
+    `prefetch_related` على هذا الاستعلام — فكلفةُ الطلب لا تكبر بعدد الزبائن.
+    """
+    today = today or timezone.localdate()
+    visible = visible_clients(tenant, user)
+    # الفلترةُ في الاستعلام قبل أن يُقيَّم: `prefetch_related` يجلب خدماتِ ما تبقّى
+    # وحده، لا خدماتِ كلِّ زبائن المكتب ثم يُرمى أغلبُها.
+    if client is not None:
+        visible = visible.filter(pk=client)
+    if member is not None:
+        visible = visible.filter(responsible_id=member)
+    clients = list(
+        visible
+        .select_related("tax_card")
+        .prefetch_related("services__service", "services__frequencies")
+        .order_by("name", "id"),
+    )
+
+    context = calendar_context(tenant, clients)
+    rows = []
+    for office_client in clients:
+        for item in client_deadlines(
+            office_client, start=start, end=end, context=context,
+        ):
+            if rule_code and item["rule"].code != rule_code:
+                continue
+            rows.append(calendar_row(item))
+    rows.sort(key=lambda row: (
+        row["actual_deadline"], row["client"]["name"], row["rule"]["code"],
+    ))
+    return {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "today": today.isoformat(),
+        "rows": rows,
+    }
+
+
+def deadline_rules_payload(tax_system) -> dict:
+    """أسطرُ النسخة السارية لكل سنةٍ متاحةٍ في نظام — للفلتر ولعرض اللائحة.
+
+    **استعلامان لا استعلامان لكل سنة**: النسخُ كلُّها بـ`prefetch_related("rules")`
+    مرّةً، والأخذُ من أوّلها لكل سنة (المرتَّبةُ `-version` ⇒ السارية = أكبر نسخة).
+    """
+    schedules = (
+        DeadlineSchedule.objects
+        .filter(tax_system=tax_system)
+        .prefetch_related("rules")
+        .order_by("year", "-version")
+    )
+    rows = []
+    seen_years: set[int] = set()
+    for schedule in schedules:
+        if schedule.year in seen_years:
+            continue
+        seen_years.add(schedule.year)
+        for rule in schedule.rules.all():
+            rows.append({
+                "code": rule.code,
+                "name": rule.name,
+                "service_code": rule.service_code,
+                "is_generated": rule.is_generated,
+                "needs_review": rule.needs_review,
+                "year": schedule.year,
+                "version": schedule.version,
+                "source_url": rule.source_url,
+            })
+    return {"system": tax_system, "rules": rows}

@@ -15,6 +15,7 @@
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
@@ -26,8 +27,9 @@ from rest_framework.exceptions import (
 )
 from rest_framework.response import Response
 
-from accounting_office import services
+from accounting_office import deadlines, services
 from accounting_office.models import (
+    TAX_SYSTEM_CHOICES,
     ClientContact,
     ClientService,
     Contact,
@@ -61,6 +63,25 @@ from core.api_defaults import ApiAuthAndUser
 from core.modules import require_module
 
 MODULE_KEY = "accounting_office"
+
+
+def parse_iso_date(raw, field):
+    """تاريخٌ مطلوبٌ بصيغة ISO — غيابُه أو فسادُه **400 بالحقل**.
+
+    المساعدُ الوحيد لتاريخ الطلب في الموديول. و`parse_date("2026-02-30")` صحيحُ
+    الشكل فاسدُ اليوم: يرمي `ValueError` بدل أن يُعيد `None`، وكان ذلك يصل 500
+    على التقويم وعلى اقتراح الخدمة معاً — فيُلتقط هنا ويُحوَّل 400.
+    """
+    value = (raw or "").strip()
+    if not value:
+        raise ValidationError({field: "تاريخٌ مطلوبٌ بالصيغة YYYY-MM-DD."})
+    try:
+        day = parse_date(value)
+    except ValueError:
+        day = None
+    if day is None:
+        raise ValidationError({field: "تاريخٌ غير صالح — الصيغة YYYY-MM-DD."})
+    return day
 
 
 class OfficeModuleViewSet(viewsets.GenericViewSet):
@@ -395,11 +416,7 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         if not code:
             raise ValidationError({"service": "كود الخدمة مطلوب."})
         raw_date = (request.query_params.get("on") or "").strip()
-        on_date = None
-        if raw_date:
-            on_date = parse_date(raw_date)
-            if on_date is None:
-                raise ValidationError({"on": "تاريخٌ غير صالح."})
+        on_date = parse_iso_date(raw_date, "on") if raw_date else None
         service = services.service_by_code(self.tenant, code)
         return Response(
             services.suggestion_payload(client, service, on_date=on_date),
@@ -660,3 +677,72 @@ class OfficePackageViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         self.require_settings_manage()
         services.delete_service_package(self.get_object())
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+# ── التقويم ولائحة المواعيد (#274) ───────────────────────────────────────────
+class OfficeCalendarViewSet(OfficeModuleViewSet):
+    """تقويمُ المواعيد — **قراءةٌ خالصة، ولا سطرَ يُحفظ**.
+
+    المواعيدُ محسوبةٌ من لائحة المنصّة عند كل طلب (`services.client_deadlines`)،
+    فلا شيءَ يُولَّد ولا وظيفةٌ خلفية: تعديلُ سطرٍ في اللائحة يغيّر التقويمَ في
+    الطلب التالي فوراً. ولا استدعاءَ لـ`ensure_default_services` هنا — تلك تكتب.
+
+    والزبائنُ من `visible_clients` وحدها، فلا يظهر زبونُ غيرك. والمدى محدودٌ:
+    ≤ 62 يوماً، ولا يتجاوز `today + calendar_months_ahead` شهراً — طلبٌ يخرج عنهما
+    **400** لا تقويمَ مقتطعاً بلا أن يقول.
+    """
+
+    http_method_names = ["get", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        params = request.query_params
+        start = parse_iso_date(params.get("from"), "from")
+        end = parse_iso_date(params.get("to"), "to")
+        if end < start:
+            raise ValidationError({"to": "نهاية المدى قبل بدايته."})
+        if (end - start).days > services.CALENDAR_MAX_SPAN_DAYS:
+            raise ValidationError({
+                "to": (
+                    f"أقصى مدىً للتقويم {services.CALENDAR_MAX_SPAN_DAYS} يوماً — "
+                    "اقصر المدى أو قسّمه."
+                ),
+            })
+
+        today = timezone.localdate()
+        months_ahead = services.resolve_setting(self.tenant, "calendar_months_ahead") or 0
+        if end > deadlines.add_months(today, months_ahead):
+            raise ValidationError({
+                "to": "المدى يتجاوز أفق التقويم المضبوط في إعدادات المكتب.",
+            })
+
+        return Response(services.calendar_payload(
+            self.tenant,
+            user=request.user,
+            start=start,
+            end=end,
+            client=self._id(params.get("client"), "client"),
+            member=self._id(params.get("member"), "member"),
+            rule_code=(params.get("rule") or "").strip(),
+            today=today,
+        ))
+
+    def _id(self, raw, field):
+        value = (raw or "").strip()
+        if not value:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            raise ValidationError({field: "معرّفٌ غير صالح."}) from None
+
+
+class OfficeDeadlineRuleViewSet(OfficeModuleViewSet):
+    """أسطرُ اللائحة السارية لكل سنة — لفلتر «النوع» ولعرض اللائحة، بلا كتابة."""
+
+    http_method_names = ["get", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        system = (request.query_params.get("system") or "").strip()
+        if system not in {value for value, _label in TAX_SYSTEM_CHOICES}:
+            raise ValidationError({"system": "النظام الضريبي مطلوب: PS أو IL."})
+        return Response(services.deadline_rules_payload(system))

@@ -18,6 +18,7 @@
 - مستلِمٌ واحد لكل (زبون، نوع تذكير).
 """
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from accounting_office import settings_registry
@@ -541,9 +542,13 @@ CLIENT_SERVICE_STATUS_LABELS: dict[str, str] = {
 #: ولا قيمةُ إعدادٍ لمكتب. سنةٌ بلا صفٍّ تأخذ آخر سقفٍ سابق وتقول «تقديري».
 THRESHOLD_KIND_VAT_MONTHLY_REPORTING = "vat_monthly_reporting"
 THRESHOLD_KIND_VAT_EXEMPT_DEALER = "vat_exempt_dealer"
+#: #274: سقفُ التقرير المفصّل 874 — تجاوزُه يُلزم التقرير المفصّل، والرقمُ منشورٌ
+#: في إشعار רשות המסים لا في الكود.
+THRESHOLD_KIND_VAT_DETAILED_REPORTING = "vat_detailed_reporting"
 THRESHOLD_KIND_CHOICES: list[tuple[str, str]] = [
     (THRESHOLD_KIND_VAT_MONTHLY_REPORTING, "سقف التقرير الدوري لق.م"),
     (THRESHOLD_KIND_VAT_EXEMPT_DEALER, "سقف עוסק פטור"),
+    (THRESHOLD_KIND_VAT_DETAILED_REPORTING, "سقف التقرير المفصّل 874"),
 ]
 
 
@@ -793,6 +798,7 @@ class TaxThreshold(models.Model):
 
     KIND_VAT_MONTHLY_REPORTING = THRESHOLD_KIND_VAT_MONTHLY_REPORTING
     KIND_VAT_EXEMPT_DEALER = THRESHOLD_KIND_VAT_EXEMPT_DEALER
+    KIND_VAT_DETAILED_REPORTING = THRESHOLD_KIND_VAT_DETAILED_REPORTING
 
     tax_system = models.CharField(
         max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
@@ -820,3 +826,201 @@ class TaxThreshold(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tax_system}/{self.kind}/{self.year}"
+
+
+# ── لائحة المواعيد (#274) ────────────────────────────────────────────────────
+#
+# **اللائحةُ بياناتُ منصّةٍ بلا `tenant`** — كـ`TaxThreshold`: الموعدُ واحدٌ لكل
+# المكاتب، ونسخةٌ لكل شركة تعني موعدين مختلفين لنفس القانون في منصّةٍ واحدة.
+#
+# **والنسخُ مؤرَّخة**: سنةٌ تُنشر لها لائحةٌ جديدة تُضاف بـ`version` أعلى ولا
+# تُعدَّل النسخةُ القائمة — والنسخةُ السارية هي أكبر `version`، والسنةُ بلا نسخةٍ
+# تأخذ آخر سنةٍ سابقة وتُعلَن «تقديرية» (انظر `services.schedule_for`).
+#
+# **ولا تاريخَ قانونيّاً في الكود**: كلُّ يومٍ وكلُّ شهرٍ يُقرأ من صفٍّ هنا. يحرسه
+# `accounting_office/tests/test_deadlines.py` بمسح `ast` على `deadlines.py`.
+REST_DAY_POLICY_WARN = "warn"
+REST_DAY_POLICY_POSTPONE_CLIENT = "postpone_client"
+REST_DAY_POLICY_CHOICES: list[tuple[str, str]] = [
+    (REST_DAY_POLICY_WARN, "تنبيه بلا زحزحة"),
+    (REST_DAY_POLICY_POSTPONE_CLIENT, "تأجيل بعد يوم راحة الزبون"),
+]
+
+#: دورياتُ السطر — **أسماءٌ لعائلةٍ واحدة**: `monthly`/`quarterly`/`annual` هي قيمُ
+#: `FREQUENCY_*` نفسها، فلا عائلتان لثوابتِ القيمة الواحدة تفترقان عند أول تعديل.
+#: و`service` وحدها زيادةٌ هنا: «يتبع دورية خدمة الزبون».
+CADENCE_SERVICE = "service"
+CADENCE_MONTHLY = FREQUENCY_MONTHLY
+CADENCE_QUARTERLY = FREQUENCY_QUARTERLY
+CADENCE_ANNUAL = FREQUENCY_ANNUAL
+DEADLINE_CADENCE_CHOICES: list[tuple[str, str]] = [
+    (CADENCE_SERVICE, "يتبع دورية خدمة الزبون"),
+    (CADENCE_MONTHLY, "شهري"),
+    (CADENCE_QUARTERLY, "ربع سنوي"),
+    (CADENCE_ANNUAL, "سنوي"),
+]
+
+RULE_KIND_DAY_OF_NEXT_MONTH = "day_of_next_month"
+RULE_KIND_END_OF_PERIOD = "end_of_period"
+RULE_KIND_MONTH_DAY_NEXT_YEAR = "month_day_next_year"
+RULE_KIND_CHOICES: list[tuple[str, str]] = [
+    (RULE_KIND_DAY_OF_NEXT_MONTH, "يوم في الشهر التالي لنهاية الفترة"),
+    (RULE_KIND_END_OF_PERIOD, "آخر يوم في الفترة"),
+    (RULE_KIND_MONTH_DAY_NEXT_YEAR, "يوم في السنة التالية لنهاية الفترة"),
+]
+
+#: مفاتيح شروط السطر المسموحة — **وحدها**: مفتاحٌ آخر يرفعه `clean()`، فالشروطُ
+#: تُقرأ من اللائحة ولا تُخترَع في الكود. و`annual_sales_above` قيمتُه اسمُ
+#: `kind` في `TaxThreshold` (لا رقماً)، فيُقرأ السقفُ المنشور لا يُحفَر.
+CONDITION_VAT_CLASSIFICATION_IN = "vat_classification_in"
+CONDITION_ENTITY_TYPE_IN = "entity_type_in"
+CONDITION_HAS_EMPLOYEES = "has_employees"
+CONDITION_IS_SELF_EMPLOYED = "is_self_employed"
+CONDITION_ANNUAL_SALES_ABOVE = "annual_sales_above"
+CONDITION_KEYS: frozenset[str] = frozenset({
+    CONDITION_VAT_CLASSIFICATION_IN,
+    CONDITION_ENTITY_TYPE_IN,
+    CONDITION_HAS_EMPLOYEES,
+    CONDITION_IS_SELF_EMPLOYED,
+    CONDITION_ANNUAL_SALES_ABOVE,
+})
+
+#: عددُ أشهر كلِّ دورية في التقويم — محاذاةُ الفترات تقرؤه
+#: (`deadlines.periods_for` و`deadlines.service_periods`). **ليس هنا تاريخاً
+#: قانونياً**: القانونُ في اللائحة، وعددُ الأشهر في الدورية نفسها. و`service`
+#: صفرٌ لأنها تُقرأ من دورية خدمة الزبون المؤرَّخة. و`on_demand` صفرٌ لأنها لا
+#: تولّد فترة.
+#:
+#: والمفاتيحُ من عائلة `FREQUENCY_*` وحدها (و`CADENCE_*` أسماءٌ لها) كي لا تحمل
+#: القيمةَ الواحدة عائلتان.
+CADENCE_SPAN_MONTHS: dict[str, int] = {
+    CADENCE_SERVICE: 0,
+    FREQUENCY_MONTHLY: 1,
+    FREQUENCY_BIMONTHLY: 2,
+    FREQUENCY_QUARTERLY: 3,
+    FREQUENCY_ANNUAL: 12,
+    FREQUENCY_ON_DEMAND: 0,
+}
+
+
+class DeadlineSchedule(models.Model):
+    """نسخةُ لائحة المواعيد لسنةٍ ونظام — بمصدرها وتاريخ نشرها.
+
+    **النسخةُ لا تُعدَّل**: تصحيحُ لائحةٍ منشورة يُضاف بـ`version` أعلى، فيبقى
+    ما حُسب على القديمة قابلاً للتفسير.
+    """
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    version = models.PositiveSmallIntegerField(default=1, verbose_name="النسخة")
+    #: الرابطُ الرسميّ المنشور — بلا مصدرٍ يصير الموعدُ رأياً.
+    source_url = models.URLField(max_length=300, verbose_name="المصدر")
+    published_on = models.DateField(verbose_name="تاريخ النشر")
+    rest_day_policy = models.CharField(
+        max_length=20,
+        choices=REST_DAY_POLICY_CHOICES,
+        default=REST_DAY_POLICY_WARN,
+        verbose_name="سياسة يوم الراحة",
+    )
+    #: أيامُ إغلاق السلطة في هذا النظام — مفاتيحُ من
+    #: `settings_registry.WEEKDAY_KEYS`. تُستعمل مع أيام راحة الزبون.
+    authority_closed_days = models.JSONField(
+        default=list, blank=True, verbose_name="أيام إغلاق السلطة",
+    )
+    note = models.TextField(blank=True, default="", verbose_name="ملاحظة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "نسخة لائحة مواعيد"
+        verbose_name_plural = "نسخ لائحة المواعيد"
+        ordering = ["tax_system", "-year", "-version"]
+        constraints = [
+            # فرادةٌ **غير مشروطة**: الشرطُ في `UniqueConstraint` تتجاهله MySQL
+            # بصمت فتمرّ الهجرة ويغيب القيد في الإنتاج.
+            models.UniqueConstraint(
+                fields=["tax_system", "year", "version"],
+                name="uniq_deadline_schedule_version",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.year}/v{self.version}"
+
+
+class DeadlineRule(models.Model):
+    """سطرُ التزامٍ في نسخة لائحة: قاعدتُه، والخدمةُ التي تولّده، وشروطُه.
+
+    **القاعدةُ بيانات**: `rule_kind` و`rule_day`/`rule_month` تُقرأ ولا تُحفَر،
+    و`period_overrides` تحمل تواريخَ النشرة المنشورة (تأجيلاتُ الأعياد) بمفتاح
+    شهر **نهاية** الفترة — و`rest_day_only` تعني أنّ سببَ التأجيل يومُ الراحة
+    الأسبوعيّ وحده، فتُعاد الحسبة لزبونٍ راحتُه غيرها.
+    """
+
+    schedule = models.ForeignKey(
+        DeadlineSchedule,
+        on_delete=models.CASCADE,
+        related_name="rules",
+        verbose_name="نسخة اللائحة",
+    )
+    code = models.SlugField(max_length=60, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    #: كودُ الخدمة التي يولّدها هذا السطر — من `DEFAULT_SERVICES` وحدها، فالخدمةُ
+    #: عقدٌ ثابت لا تسميةُ شاشة.
+    service_code = models.CharField(
+        max_length=60, choices=DEFAULT_SERVICES, verbose_name="الخدمة المولِّدة",
+    )
+    cadence = models.CharField(
+        max_length=20,
+        choices=DEADLINE_CADENCE_CHOICES,
+        default=CADENCE_SERVICE,
+        verbose_name="الدورية",
+    )
+    rule_kind = models.CharField(
+        max_length=30, choices=RULE_KIND_CHOICES, verbose_name="نوع القاعدة",
+    )
+    rule_day = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="يوم القاعدة",
+    )
+    rule_month = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="شهر القاعدة",
+    )
+    #: شروطُ التوليد على البطاقة — مفاتيحها في `CONDITION_KEYS` وحدها.
+    conditions = models.JSONField(default=dict, blank=True, verbose_name="الشروط")
+    #: False = «لا يُولَّد» (مثل الضمان الاجتماعي الفلسطيني الموقوف بقرار 4/2019).
+    is_generated = models.BooleanField(default=True, verbose_name="يُولَّد")
+    #: أيامُ التقديم الإلكترونيّ فوق الموعد الرسميّ: **أربعةٌ في إسرائيل** (حتى
+    #: 19 بدل 15 لتقرير الـמע"מ والسلفيات)، وصفرٌ حيث لا تمديدَ منشوراً.
+    electronic_extension_days = models.PositiveSmallIntegerField(
+        default=0, verbose_name="تمديد التقديم الإلكتروني",
+    )
+    #: تواريخُ النشرة المنشورة: `{"YYYY-MM": {"date": "YYYY-MM-DD", "rest_day_only": bool}}`.
+    period_overrides = models.JSONField(
+        default=dict, blank=True, verbose_name="تعديلات الفترات المنشورة",
+    )
+    #: قيمةٌ غير مؤكَّدة في البحث — تُعرض «راجع» ولا تُملأ بصمت.
+    needs_review = models.BooleanField(default=False, verbose_name="راجع")
+    source_url = models.URLField(max_length=300, verbose_name="المصدر")
+    position = models.PositiveSmallIntegerField(default=0, verbose_name="الترتيب")
+
+    class Meta:
+        verbose_name = "سطر لائحة مواعيد"
+        verbose_name_plural = "أسطر لائحة المواعيد"
+        ordering = ["position", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["schedule", "code"], name="uniq_deadline_rule_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code}@{self.schedule_id}"
+
+    def clean(self):
+        """مفتاحُ شرطٍ غير معروف يُرفض — الشروطُ تُقرأ من اللائحة لا تُخترَع."""
+        unknown = sorted(set(self.conditions or {}) - CONDITION_KEYS)
+        if unknown:
+            raise ValidationError({
+                "conditions": f"شروط غير معروفة: {unknown}",
+            })

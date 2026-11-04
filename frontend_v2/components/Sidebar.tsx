@@ -369,6 +369,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // ISSUE #271 — شاشتان لا تظهران في أيّ مصفوفةٍ يدوية أعلاه (بيانهما وحده
     // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
     "office-clients": { label: "الزبائن", icon: <Users className="h-4 w-4" /> },
+    "office-calendar": { label: "التقويم", icon: <CalendarDays className="h-4 w-4" /> },
     "office-settings": { label: "إعدادات المكتب", icon: <SettingsIcon className="h-4 w-4" /> },
   };
   ([

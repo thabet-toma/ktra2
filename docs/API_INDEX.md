@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1011**
+عدد النقاط: **1013**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -65,6 +65,7 @@
 | `/api/accountant/tax/periods/prepare/` | `TaxPeriodPrepareView` | `accountant_portal/views.py` |
 | `/api/accountant/verify-email/` | `VerifyEmailView` | `accountant_portal/views.py` |
 | `/api/accountant/workspace/companies/` | `WorkspaceCompaniesView` | `accountant_portal/views.py` |
+| `/api/accounting-office/calendar/` | `OfficeCalendarViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/apply-package/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -84,6 +85,7 @@
 | `/api/accounting-office/clients/{pk}/tax-card/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/deadline-rules/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/` | `OfficePackageViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/{pk}/` | `OfficePackageViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/` | `OfficeServiceViewSet` | `accounting_office/views.py` |

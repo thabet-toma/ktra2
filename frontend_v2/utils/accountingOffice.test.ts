@@ -14,12 +14,24 @@ import {
   firstOfNextMonth,
   formatOfficeAmount,
   frequencyLabelFrom,
+  groupDeadlinesByDay,
+  isExpectedDeadline,
   missingFirstRunLabels,
+  monthGrid,
+  nextMonthKey,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
+  periodLabel,
+  previousMonthKey,
+  shiftWeek,
   showsOfficeAssignment,
+  uniqueDeadlineRules,
   visibleClientSettings,
+  weekDays,
+  weekRange,
+  type CalendarDeadlineRow,
+  type DeadlineRuleRow,
   type OfficeServiceRow,
   type SettingRow,
 } from './accountingOffice.ts';
@@ -295,4 +307,127 @@ test('ملخّص تطبيق الباقة يُسمّي ما أُضيف وما ت�
   assert.match(summary, /استشارات ومعاملات \(معطَّلة في كتالوج المكتب\)/);
   // باقةٌ فارغة لا تقول «أُضيفت 0» بلا سبب — تقول إنها لم تُضف شيئاً.
   assert.match(applyPackageSummary({ added: [], skipped: [] }), /لم تُضف شيئاً/);
+});
+
+// ── #274: التقويم ────────────────────────────────────────────────────────
+const CALENDAR_ROW = (
+  overrides: Partial<CalendarDeadlineRow> &
+    Pick<CalendarDeadlineRow, 'actual_deadline'>,
+): CalendarDeadlineRow => ({
+  client: { id: 1, name: 'زبون' },
+  service: { code: 'vat', name: 'قيمة مضافة' },
+  rule: { code: 'ps_vat_periodic', name: 'التقرير الدوري', needs_review: false },
+  period_start: '2026-01-01',
+  period_end: '2026-01-31',
+  period_label: 'كانون الثاني 2026',
+  legal_date: overrides.actual_deadline,
+  official_date: overrides.actual_deadline,
+  internal_deadline: overrides.actual_deadline,
+  estimated: false,
+  postponed: false,
+  warnings: [],
+  expected: true,
+  ...overrides,
+});
+
+test('شبكة الشهر تبدأ بالأحد وتغطي أيامه كلها', () => {
+  // كانون الثاني 2026: أوّلُه خميس، وفيه 31 يوماً ⇒ الأحد الأول 28/12/2025.
+  const weeks = monthGrid('2026-01');
+  assert.equal(weeks.length, 5);
+  weeks.forEach((week) => assert.equal(week.length, 7));
+  assert.equal(weeks[0][0].date, '2025-12-28');
+  assert.equal(weeks[0][0].inMonth, false);
+  assert.equal(weeks[0][4].date, '2026-01-01');
+  assert.equal(weeks[0][4].inMonth, true);
+  assert.equal(weeks[4][6].date, '2026-01-31');
+  assert.equal(weeks[4][6].inMonth, true);
+  const inMonth = weeks.flat().filter((day) => day.inMonth);
+  assert.equal(inMonth.length, 31);
+});
+
+test('شبكة الشهر لا تنكسر على مفتاحٍ فاسد', () => {
+  assert.deepEqual(monthGrid(''), []);
+  assert.deepEqual(monthGrid('2026-13'), []);
+  assert.deepEqual(monthGrid('غير شهر'), []);
+});
+
+test('مدى الأسبوع أحدٌ ← سبت', () => {
+  assert.deepEqual(weekRange('2026-02-15'), {
+    start: '2026-02-15',
+    end: '2026-02-21',
+  });
+  // الجمعة داخل الأسبوع نفسه الذي بدأ بالأحد.
+  assert.deepEqual(weekRange('2026-02-20'), {
+    start: '2026-02-15',
+    end: '2026-02-21',
+  });
+  assert.deepEqual(weekRange('غير تاريخ'), { start: '', end: '' });
+});
+
+test('التنقّل بين الشهور يعبر السنة', () => {
+  assert.equal(nextMonthKey('2026-12'), '2027-01');
+  assert.equal(previousMonthKey('2026-01'), '2025-12');
+  assert.equal(nextMonthKey('2026-05'), '2026-06');
+  assert.equal(nextMonthKey(''), '');
+});
+
+test('العناصر تُجمع على يوم موعدها الفعلي', () => {
+  const grouped = groupDeadlinesByDay([
+    CALENDAR_ROW({ actual_deadline: '2026-02-16' }),
+    CALENDAR_ROW({ actual_deadline: '2026-02-16' }),
+    CALENDAR_ROW({ actual_deadline: '2026-02-19' }),
+  ]);
+  assert.deepEqual(Object.keys(grouped).sort(), ['2026-02-16', '2026-02-19']);
+  assert.equal(grouped['2026-02-16'].length, 2);
+  assert.equal(grouped['2026-02-19'].length, 1);
+});
+
+test('تسمية الفترة احتياطاً تُطابق شكل الخادم', () => {
+  assert.equal(periodLabel('2026-01-01', '2026-01-31'), 'كانون الثاني 2026');
+  assert.equal(periodLabel('2026-01-01', '2026-03-31'), 'كانون الثاني–آذار 2026');
+  assert.equal(periodLabel('2026-01-01', '2026-12-31'), '2026');
+  assert.equal(
+    periodLabel('2027-12-01', '2028-01-31'),
+    'كانون الأول 2027–كانون الثاني 2028',
+  );
+  assert.equal(periodLabel('', ''), '');
+});
+
+test('السطر المحسوب «متوقَّع» ما لم يقل الخادم غير ذلك', () => {
+  assert.equal(isExpectedDeadline(CALENDAR_ROW({ actual_deadline: '2026-02-16' })), true);
+  assert.equal(
+    isExpectedDeadline(CALENDAR_ROW({ actual_deadline: '2026-02-16', expected: false })),
+    false,
+  );
+});
+
+test('أيام الأسبوع سبعةٌ من الأحد، وتُزاح أسبوعاً بضغطة', () => {
+  assert.deepEqual(weekDays('2026-02-18'), [
+    '2026-02-15', '2026-02-16', '2026-02-17', '2026-02-18',
+    '2026-02-19', '2026-02-20', '2026-02-21',
+  ]);
+  // الأحد نفسُه يبقى أوّلَ الأسبوع.
+  assert.equal(weekDays('2026-02-15')[0], '2026-02-15');
+  assert.deepEqual(weekDays('غير تاريخ'), []);
+
+  assert.equal(shiftWeek('2026-02-18', 1), '2026-02-25');
+  assert.equal(shiftWeek('2026-02-18', -1), '2026-02-11');
+  // عبورُ السنة في الاتجاهين.
+  assert.equal(shiftWeek('2026-12-30', 1), '2027-01-06');
+  assert.equal(shiftWeek('2027-01-01', -1), '2026-12-25');
+  assert.equal(shiftWeek('غير تاريخ', 1), '');
+});
+
+test('فلتر النوع بلا تكرارٍ بالكود — الأحدثُ سنةً يغلب، والترتيبُ بالاسم لا بالكود', () => {
+  const rules = [
+    { code: 'ps_vat_periodic', name: 'أ قديم', service_code: 'vat', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '' },
+    { code: 'ps_vat_periodic', name: 'أ ضريبة', service_code: 'vat', is_generated: true, needs_review: false, year: 2027, version: 1, source_url: '' },
+    { code: 'ps_annual_return', name: 'سنوي', service_code: 'annual_accounts', is_generated: true, needs_review: false, year: 2026, version: 1, source_url: '' },
+  ];
+  const unique = uniqueDeadlineRules(rules);
+
+  // «أ ضريبة» قبل «سنوي» بالاسم، وكودُها بعد `ps_annual_return` — الترتيبان مختلفان.
+  assert.deepEqual(unique.map((rule) => rule.code), ['ps_vat_periodic', 'ps_annual_return']);
+  assert.equal(unique.find((rule) => rule.code === 'ps_vat_periodic')!.name, 'أ ضريبة');
+  assert.deepEqual(uniqueDeadlineRules([]), []);
 });

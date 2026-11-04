@@ -13,6 +13,7 @@
  * وقناعُ المبلغ المخفيّ. صرفةٌ بلا React كي تُختبر بـ`node --test` في بوّابة
  * `npm test`.
  */
+import { monthKeyLabel, monthKeyOf, shiftMonthKey } from './monthKey.ts';
 import { userRoleLabel } from './userRoleLabel.ts';
 
 /** مسار شاشة الزبائن — مصدرٌ واحدٌ للرابط وقراءته. */
@@ -20,6 +21,9 @@ export const OFFICE_CLIENTS_PATH = '/accounting-office/clients';
 
 /** مسار شاشة إعدادات المكتب — بجانب مسار الزبائن، مصدرٌ واحدٌ لجدول المسارات. */
 export const OFFICE_SETTINGS_PATH = '/accounting-office/settings';
+
+/** مسار شاشة التقويم (#274) — بجانبهما، ومصدرٌ واحدٌ للموجّه والقائمة. */
+export const OFFICE_CALENDAR_PATH = '/accounting-office/calendar';
 
 /** اسم معامل العنوان الذي يحمل معرّف الزبون المفتوح. */
 export const CLIENT_QUERY_PARAM = 'client';
@@ -369,4 +373,212 @@ export function officeAssignableRoles(
     });
   }
   return options;
+}
+
+// ── التقويم (#274) ──────────────────────────────────────────────────────
+//
+// **ولا تسميةَ قانونية هنا**: اسمُ السطر والتنبيهات وتسميةُ الفترة تأتي من
+// الخادم (`name` · `warnings` · `period_label`) — الشاشة ترسمها كما وصلت.
+// والباقي **حسابُ تقويمٍ** لا قانون: شبكةُ الشهر، ومدى الأسبوع، وتجميعُ العناصر
+// على أيامها. والتواريخُ نصوصٌ ISO بلا كائن `Date` منطقةً زمنية (`firstOfMonth`
+// نفسه): `2026-04-30T23:00-05:00` يبقى نيسان.
+
+const MS_PER_DAY = 86_400_000;
+const DAYS_PER_WEEK = 7;
+
+/** صفُّ تقويم كما يعيده الخادم — بلا أيّ مبلغ. */
+export interface CalendarDeadlineRow {
+  client: { id: number; name: string };
+  service: { code: string; name: string };
+  rule: { code: string; name: string; needs_review: boolean };
+  period_start: string;
+  period_end: string;
+  period_label: string;
+  legal_date: string;
+  official_date: string;
+  actual_deadline: string;
+  internal_deadline: string;
+  estimated: boolean;
+  postponed: boolean;
+  warnings: string[];
+  expected: boolean;
+}
+
+export interface CalendarPayload {
+  from: string;
+  to: string;
+  today: string;
+  rows: CalendarDeadlineRow[];
+}
+
+/** خليّةُ يومٍ في شبكة الشهر — الأيامُ من الشهرين المجاورين تُعرض باهتةً لا تُحذف. */
+export interface CalendarDay {
+  date: string;
+  inMonth: boolean;
+}
+
+/** سطرُ لائحة المواعيد — لفلتر «النوع» ولعرض اللائحة. */
+export interface DeadlineRuleRow {
+  code: string;
+  name: string;
+  service_code: string;
+  is_generated: boolean;
+  needs_review: boolean;
+  year: number;
+  version: number;
+  source_url: string;
+}
+
+const pad2 = (value: number) => String(value).padStart(2, '0');
+
+const isoFromMs = (ms: number): string => {
+  const day = new Date(ms);
+  return `${day.getUTCFullYear()}-${pad2(day.getUTCMonth() + 1)}-${pad2(day.getUTCDate())}`;
+};
+
+const msFromIso = (iso: string): number | null => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+  if (!match) return null;
+  const [, year, month, day] = match;
+  return Date.UTC(Number(year), Number(month) - 1, Number(day));
+};
+
+/**
+ * شبكةُ الشهر: أسابيعٌ تبدأ **بالأحد**، كلٌّ سبعةُ أيام، والأطرافُ من الشهرين
+ * المجاورين بعلامة `inMonth: false`.
+ *
+ * `monthKey` نصٌّ `YYYY-MM` (كما في `utils/monthKey.ts`)؛ ومفتاحٌ فاسدٌ يعيد `[]`
+ * — الشاشة تعرض «لا شيء» ولا تنكسر على رابطٍ معدَّل.
+ */
+export function monthGrid(monthKey: string): CalendarDay[][] {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey ?? '');
+  if (!match) return [];
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  if (month < 1 || month > 12) return [];
+
+  const firstMs = Date.UTC(year, month - 1, 1);
+  // 0 = الأحد في `getUTCDay()` — أولُ أسبوعٍ الشاشة.
+  const lead = new Date(firstMs).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const gridStartMs = firstMs - lead * MS_PER_DAY;
+  const cells = Math.ceil((lead + daysInMonth) / DAYS_PER_WEEK) * DAYS_PER_WEEK;
+
+  const days: CalendarDay[] = [];
+  for (let index = 0; index < cells; index += 1) {
+    days.push({
+      date: isoFromMs(gridStartMs + index * MS_PER_DAY),
+      inMonth: index >= lead && index < lead + daysInMonth,
+    });
+  }
+  const weeks: CalendarDay[][] = [];
+  for (let index = 0; index < days.length; index += DAYS_PER_WEEK) {
+    weeks.push(days.slice(index, index + DAYS_PER_WEEK));
+  }
+  return weeks;
+}
+
+/** مدى الأسبوع (أحدٌ ← سبت) الذي يقع فيه تاريخٌ — للعرض الأسبوعيّ والطلب. */
+export function weekRange(day: string): { start: string; end: string } {
+  const ms = msFromIso(day);
+  if (ms === null) return { start: '', end: '' };
+  const startMs = ms - new Date(ms).getUTCDay() * MS_PER_DAY;
+  return {
+    start: isoFromMs(startMs),
+    end: isoFromMs(startMs + (DAYS_PER_WEEK - 1) * MS_PER_DAY),
+  };
+}
+
+/** أيامُ الأسبوع السبعة (ISO) التي يقع فيها تاريخ — من الأحد إلى السبت. */
+export function weekDays(anchor: string): string[] {
+  const { start } = weekRange(anchor);
+  const startMs = msFromIso(start);
+  if (startMs === null) return [];
+  return Array.from(
+    { length: DAYS_PER_WEEK },
+    (_, index) => isoFromMs(startMs + index * MS_PER_DAY),
+  );
+}
+
+/** اليومُ نفسه من الأسبوع بعد `delta` أسبوعاً — نافذةُ العرض الأسبوعيّ. */
+export function shiftWeek(anchor: string, delta: number): string {
+  const ms = msFromIso(anchor);
+  if (ms === null) return '';
+  return isoFromMs(ms + delta * DAYS_PER_WEEK * MS_PER_DAY);
+}
+
+/** مفتاحُ شهرٍ صالح `YYYY-MM` — والحسابُ في `utils/monthKey.ts` وحده. */
+const isMonthKey = (value: string): boolean => /^\d{4}-(0[1-9]|1[0-2])$/.test(value ?? '');
+
+/** الشهرُ التالي لمفتاح `YYYY-MM` — ومفتاحٌ فاسدٌ يعيد `''` لا `NaN-NaN`. */
+export function nextMonthKey(monthKey: string): string {
+  return isMonthKey(monthKey) ? shiftMonthKey(monthKey, 1) : '';
+}
+
+/** الشهرُ السابق لمفتاح `YYYY-MM`. */
+export function previousMonthKey(monthKey: string): string {
+  return isMonthKey(monthKey) ? shiftMonthKey(monthKey, -1) : '';
+}
+
+/**
+ * أسطرُ اللائحة **بلا تكرارٍ بالكود**: فلترُ «النوع» يعرض نوعاً واحداً لكل كود،
+ * وأحدثُ سنةٍ تغلب (لائحةُ 2027 أحدثُ من 2026)، والترتيبُ أبجديّ باسم السطر.
+ *
+ * ولا يُحذف سطرٌ من الخادم: التصفيةُ للعرض، ونفسُ الكود بسنةٍ أخرى يعمل في
+ * تقويمها لأن الخادم يقرأ نسخةَ سنة الفترة.
+ */
+export function uniqueDeadlineRules(
+  rows: readonly DeadlineRuleRow[],
+): DeadlineRuleRow[] {
+  const byCode = new Map<string, DeadlineRuleRow>();
+  rows.forEach((rule) => {
+    const current = byCode.get(rule.code);
+    if (!current || rule.year > current.year) byCode.set(rule.code, rule);
+  });
+  return [...byCode.values()].sort((left, right) => left.name.localeCompare(right.name, 'ar'));
+}
+
+/** العناصرُ مجموعةً بمفتاح يومها — الشهرُ يُرسم بقراءة قاموسٍ لا بمسحٍ لكل يوم. */
+export function groupDeadlinesByDay(
+  rows: readonly CalendarDeadlineRow[],
+): Record<string, CalendarDeadlineRow[]> {
+  const byDay: Record<string, CalendarDeadlineRow[]> = {};
+  rows.forEach((row) => {
+    const key = String(row.actual_deadline).slice(0, 10);
+    (byDay[key] ??= []).push(row);
+  });
+  return byDay;
+}
+
+/** اسمُ الشهر وحده من `utils/monthKey.ts` — لا جدولَ شهورٍ ثانٍ هنا. */
+function monthNameOf(iso: string): string {
+  const key = monthKeyOf(iso);
+  const label = monthKeyLabel(key);
+  const year = key.slice(0, 4);
+  return label.endsWith(` ${year}`) ? label.slice(0, -(year.length + 1)) : label;
+}
+
+/**
+ * تسميةُ الفترة — **احتياطٌ حين لا يرسل الخادم `period_label`** وحدها.
+ *
+ * الشكلُ نفسُه الذي يبنيه الخادم: «كانون الثاني 2026»، و«كانون الثاني–آذار 2026»،
+ * و«2026» للسنة الكاملة، ومدىً يعبر السنة يُذكر فيه الطرفان.
+ */
+export function periodLabel(start: string, end: string): string {
+  const startKey = monthKeyOf(start);
+  const endKey = monthKeyOf(end);
+  if (!startKey || !endKey) return '';
+  if (startKey === endKey) return monthKeyLabel(startKey);
+  const startYear = startKey.slice(0, 4);
+  const endYear = endKey.slice(0, 4);
+  if (startYear === endYear) {
+    if (startKey.slice(5) === '01' && endKey.slice(5) === '12') return startYear;
+    return `${monthNameOf(start)}–${monthNameOf(end)} ${startYear}`;
+  }
+  return `${monthNameOf(start)} ${startYear}–${monthNameOf(end)} ${endYear}`;
+}
+
+/** «متوقَّع» على كل سطرٍ محسوبٍ لم يُحفظ — و#275 تجعل المحفوظ كاملَ اللون. */
+export function isExpectedDeadline(row: CalendarDeadlineRow): boolean {
+  return row.expected !== false;
 }

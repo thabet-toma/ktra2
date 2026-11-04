@@ -36,6 +36,7 @@ import {
   officeRoleLabel,
   officeSizeOf,
   showsOfficeAssignment,
+  type SettingRow,
 } from '../../utils/accountingOffice';
 import { userRoleLabel } from '../../utils/userRoleLabel';
 import { humanizeThrown } from '../../utils/drfError';
@@ -394,9 +395,67 @@ export const OfficeSettingsScreen: React.FC = () => {
   if (error) return <OfficeError message={error} onRetry={load} />;
   if (!payload) return null;
 
-  const officeGroup = payload.settings.filter((setting) => setting.group === 'office');
-  // التسمية من `payload.groups` وحدها — لا نصٌّ احتياطيّ يفترق عن السجلّ.
-  const groupLabel = payload.groups.find((group) => group.id === 'office')?.label ?? '';
+  // المجموعاتُ من السجلّ وحده (`payload.groups`) — لا اسمٌ ولا ترتيبٌ محليّان
+  // يفترقان عنه عند أوّل مجموعةٍ تُضاف. وكلُّ إعدادٍ يظهر تحت مجموعته (#274:
+  // «الضريبة ولائحة المواعيد» بجانب «المكتب»).
+  const groupedSettings = payload.groups
+    .map((group) => ({
+      group,
+      rows: payload.settings.filter((setting) => setting.group === group.id),
+    }))
+    .filter((entry) => entry.rows.length > 0);
+
+  const renderSetting = (setting: SettingRow) => {
+    const clients = expanded[setting.key];
+    const count = setting.client_customization_count ?? 0;
+    return (
+      <div key={setting.key}>
+        <SettingControl
+          setting={setting}
+          value={setting.value}
+          canReset={setting.can_reset === true}
+          disabled={!canManageSettings}
+          onReset={() => reset(setting.key)}
+          onSave={(value) => save(setting.key, value)}
+        />
+        {/* إعدادٌ مكتبيٌّ فقط (`office_size`) لا يُخصَّص لزبون — «مخصَّص عند 0» كذبٌ عنه. */}
+        {setting.levels.includes('client') ? (
+          <div className="pb-3">
+            <button
+              type="button"
+              onClick={() => toggleClients(setting.key)}
+              disabled={count === 0}
+              className="text-[11px] font-medium text-teal-700 disabled:text-slate-400 dark:text-teal-400 dark:disabled:text-slate-600"
+            >
+              مخصَّص عند {count} زبون
+              {count > 0 ? (clients ? ' — أخفِ القائمة' : ' — اعرضهم') : ''}
+            </button>
+            {clients ? (
+              clients.length === 0 ? (
+                <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                  لا زبونَ خصّص هذا الإعداد.
+                </p>
+              ) : (
+                <ul className="mt-1.5 flex flex-wrap gap-1.5">
+                  {clients.map((client) => (
+                    <li key={client.id}>
+                      <button
+                        type="button"
+                        onClick={() => navigate(clientFilePath(client.id))}
+                        className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 hover:border-teal-300 hover:text-teal-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-teal-300"
+                      >
+                        {client.name} · {client.status_label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -419,59 +478,11 @@ export const OfficeSettingsScreen: React.FC = () => {
         ) : null}
       </header>
 
-      <OfficeCard title={groupLabel}>
-        {officeGroup.map((setting) => {
-          const clients = expanded[setting.key];
-          const count = setting.client_customization_count ?? 0;
-          return (
-            <div key={setting.key}>
-              <SettingControl
-                setting={setting}
-                value={setting.value}
-                canReset={setting.can_reset === true}
-                disabled={!canManageSettings}
-                onReset={() => reset(setting.key)}
-                onSave={(value) => save(setting.key, value)}
-              />
-              {/* إعدادٌ مكتبيٌّ فقط (`office_size`) لا يُخصَّص لزبون — «مخصَّص عند 0» كذبٌ عنه. */}
-              {setting.levels.includes('client') ? (
-                <div className="pb-3">
-                  <button
-                    type="button"
-                    onClick={() => toggleClients(setting.key)}
-                    disabled={count === 0}
-                    className="text-[11px] font-medium text-teal-700 disabled:text-slate-400 dark:text-teal-400 dark:disabled:text-slate-600"
-                  >
-                    مخصَّص عند {count} زبون
-                    {count > 0 ? (clients ? ' — أخفِ القائمة' : ' — اعرضهم') : ''}
-                  </button>
-                  {clients ? (
-                    clients.length === 0 ? (
-                      <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
-                        لا زبونَ خصّص هذا الإعداد.
-                      </p>
-                    ) : (
-                      <ul className="mt-1.5 flex flex-wrap gap-1.5">
-                        {clients.map((client) => (
-                          <li key={client.id}>
-                            <button
-                              type="button"
-                              onClick={() => navigate(clientFilePath(client.id))}
-                              className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] text-slate-600 hover:border-teal-300 hover:text-teal-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:text-teal-300"
-                            >
-                              {client.name} · {client.status_label}
-                            </button>
-                          </li>
-                        ))}
-                      </ul>
-                    )
-                  ) : null}
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </OfficeCard>
+      {groupedSettings.map(({ group, rows }) => (
+        <OfficeCard key={group.id} title={group.label}>
+          {rows.map(renderSetting)}
+        </OfficeCard>
+      ))}
 
       <OfficeCard title="الخدمات والباقات">
         {servicesError ? (

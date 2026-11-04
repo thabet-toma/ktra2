@@ -74,7 +74,7 @@ export function formatDateTimeValue(
 }
 
 /** أسماء الأيام ثابتة — لا تعتمد على بيانات ICU في المتصفّح. */
-const WEEKDAYS_AR = [
+export const WEEKDAYS_AR = [
   "الأحد", "الاثنين", "الثلاثاء", "الأربعاء", "الخميس", "الجمعة", "السبت",
 ];
 

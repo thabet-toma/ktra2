@@ -73,10 +73,15 @@ class SettingTestCase(APITestCase):
 
 
 class RegistryShapeTest(SettingTestCase):
-    def test_exactly_the_four_agreed_settings_exist(self):
+    def test_the_agreed_settings_and_no_others_exist(self):
+        """أربعةُ #271 ثم أربعةُ «الضريبة ولائحة المواعيد» (#274) — ولا غيرها."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
-            {"tax_system", "office_size", "rest_days", "filing_method"},
+            {
+                "tax_system", "office_size", "rest_days", "filing_method",
+                "internal_lead_days_monthly", "internal_lead_days_quarterly",
+                "internal_lead_days_annual", "calendar_months_ahead",
+            },
         )
 
     def test_each_setting_declares_its_levels_and_its_default(self):
@@ -110,10 +115,24 @@ class RegistryShapeTest(SettingTestCase):
             settings_registry.GROUP_OFFICE,
         )
 
-    def test_no_setting_allows_an_item_level_yet(self):
-        """مستوى الشغلة مدعومٌ في المحرّك، ولا إعدادٌ يشحنه اليوم."""
-        for definition in settings_registry.SETTINGS_REGISTRY.values():
-            self.assertNotIn("item", definition.levels, definition.key)
+    def test_only_the_lead_days_carry_an_item_level(self):
+        """مستوى الشغلة مدعومٌ في المحرّك، وتشحنه أيامُ الموعد الداخلي وحدها.
+
+        `item` في #274 للشغلة في #275: المستوى مسموحٌ ولا يقرؤه شيء اليوم، فحين
+        تصل إعداداتُ الشغلة لا يتغيّر المحرّك. وأيُّ مفتاحٍ آخر لا يحمله.
+        """
+        carrying = {
+            key for key, definition in settings_registry.SETTINGS_REGISTRY.items()
+            if "item" in definition.levels
+        }
+        self.assertEqual(
+            carrying,
+            {
+                "internal_lead_days_monthly",
+                "internal_lead_days_quarterly",
+                "internal_lead_days_annual",
+            },
+        )
 
 
 class ValidatorTest(SettingTestCase):
@@ -384,9 +403,23 @@ class SettingsApiTest(SettingTestCase):
         res = self.client.get(SETTINGS, **self.headers())
         self.assertEqual(res.status_code, 200, res.content)
         rows = {row["key"]: row for row in res.data["settings"]}
-        self.assertEqual(set(rows), {"tax_system", "office_size", "rest_days", "filing_method"})
+        # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274.
+        self.assertEqual(
+            set(rows),
+            {
+                "tax_system", "office_size", "rest_days", "filing_method",
+                "internal_lead_days_monthly", "internal_lead_days_quarterly",
+                "internal_lead_days_annual", "calendar_months_ahead",
+            },
+        )
 
-        self.assertEqual(res.data["groups"], [{"id": "office", "label": "المكتب"}])
+        self.assertEqual(
+            res.data["groups"],
+            [
+                {"id": "office", "label": "المكتب"},
+                {"id": "schedule", "label": "الضريبة ولائحة المواعيد"},
+            ],
+        )
         self.assertEqual(rows["tax_system"]["value"], "PS")
         self.assertTrue(rows["tax_system"]["differs_from_default"])
         self.assertFalse(rows["tax_system"]["can_reset"])

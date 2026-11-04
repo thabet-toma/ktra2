@@ -17,8 +17,10 @@ import {
 import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
+  CalendarPayload,
   ClientServiceRow,
   ClientServicesPayload,
+  DeadlineRuleRow,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
@@ -27,9 +29,12 @@ import type {
 
 export type {
   ApplyPackageResult,
+  CalendarDeadlineRow,
+  CalendarPayload,
   ClientServiceFrequencyRow,
   ClientServiceRow,
   ClientServicesPayload,
+  DeadlineRuleRow,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
@@ -42,6 +47,8 @@ const CONTACTS = `${BASE}contacts/`;
 const SERVICES = `${BASE}services/`;
 const PACKAGES = `${BASE}packages/`;
 const SETTINGS = `${BASE}settings/`;
+const CALENDAR = `${BASE}calendar/`;
+const DEADLINE_RULES = `${BASE}deadline-rules/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -368,3 +375,31 @@ export const applyServicePackage = (
   apiPostObject<ApplyPackageResult>(
     `${CLIENTS}${clientId}/apply-package/`, { package: packageId }, tenantOpts(),
   );
+
+// ── التقويم ولائحة المواعيد (#274) ──────────────────────────────────────
+//
+// **قراءتان لا كتابة**: التقويمُ محسوبٌ عند كل طلب ولا يُحفظ منه شيء، ولذلك لا
+// نقطةَ حفظٍ هنا. والمدى يُطلب بعرض الشاشة وحده لا بسنةٍ كاملة.
+export const getOfficeCalendar = (filters: {
+  from: string;
+  to: string;
+  client?: number | null;
+  member?: number | null;
+  rule?: string | null;
+}): Promise<CalendarPayload> =>
+  apiGetObject<CalendarPayload>(CALENDAR, {
+    ...tenantOpts(),
+    query: {
+      from: filters.from,
+      to: filters.to,
+      client: filters.client ?? undefined,
+      member: filters.member ?? undefined,
+      rule: filters.rule?.trim() || undefined,
+    },
+  });
+
+/** أسطرُ لائحة المواعيد السارية — لفلتر «النوع» ولعرض اللائحة نفسها. */
+export const listDeadlineRules = (
+  system: 'PS' | 'IL',
+): Promise<{ system: string; rules: DeadlineRuleRow[] }> =>
+  apiGetObject(`${DEADLINE_RULES}`, { ...tenantOpts(), query: { system } });
