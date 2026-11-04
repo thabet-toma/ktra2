@@ -33,8 +33,10 @@ from accounting_office.models import (
     ClientContact,
     ClientService,
     Contact,
+    Obligation,
     OfficeClient,
     OfficeService,
+    PeriodTask,
     ServicePackage,
 )
 from accounting_office.serializers import (
@@ -44,13 +46,18 @@ from accounting_office.serializers import (
     ClientServiceFrequencyWriteSerializer,
     ClientServiceStopSerializer,
     ClientServiceWriteSerializer,
+    ClosePriorSerializer,
     ContactSerializer,
+    ObligationAmountSerializer,
+    ObligationClientPaidSerializer,
+    ObligationSubmitSerializer,
     OfficeClientListSerializer,
     OfficeClientSerializer,
     OfficeServiceSerializer,
     ReminderRecipientSerializer,
     ServicePackageWriteSerializer,
     SettingValueSerializer,
+    TaskAssignSerializer,
     TaxCardWriteSerializer,
 )
 from core.access import (
@@ -451,9 +458,36 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         serializer = ClientServiceStopSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         services.stop_client_service(
-            row, ends_on=serializer.validated_data["ends_on"],
+            row,
+            ends_on=serializer.validated_data["ends_on"],
+            last_period_ours=serializer.validated_data["last_period_ours"],
         )
         return Response(services.client_services_payload(client, user=request.user))
+
+    # ── الالتزامات والشغلات (#275) ───────────────────────────────────────
+    @action(detail=True, methods=["get"], url_path="obligations")
+    def client_obligations(self, request, pk=None):
+        """شغلاتُ الزبون والتزاماتُها — **كلُّ الحالات**، والمبلغُ بالقناع."""
+        client = self.get_object()
+        return Response(services.client_obligations_payload(
+            client, user=request.user, day=timezone.localdate(),
+        ))
+
+    @action(
+        detail=True, methods=["post"], url_path="obligations/close-prior",
+    )
+    def close_prior(self, request, pk=None):
+        """«هدول انقدّموا قبل ما يجي علينا» — تُرجع عددَ ما أُغلق."""
+        client = self.get_object()
+        self.require_write()
+        serializer = ClosePriorSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        closed = services.close_prior_obligations(
+            client,
+            before=serializer.validated_data.get("before") or timezone.localdate(),
+            actor=request.user,
+        )
+        return Response({"closed": closed})
 
     @action(detail=True, methods=["post"], url_path="apply-package")
     def apply_package(self, request, pk=None):
@@ -746,3 +780,167 @@ class OfficeDeadlineRuleViewSet(OfficeModuleViewSet):
         if system not in {value for value, _label in TAX_SYSTEM_CHOICES}:
             raise ValidationError({"system": "النظام الضريبي مطلوب: PS أو IL."})
         return Response(services.deadline_rules_payload(system))
+
+
+# ── «اليوم» والالتزامات والشغلات (#275) ──────────────────────────────────────
+class OfficeTodayViewSet(OfficeModuleViewSet):
+    """شاشةُ «اليوم» — **تشغيلٌ يوميٌّ ثم قراءة**.
+
+    أوّلُ فتحٍ في اليوم يشغّل `ensure_office_refreshed(day=localdate)`: مكتبٌ لم
+    يعمل عليه cron الخادم بعد يرى ما حان وقتُه عند أول فتح، والفتحُ الثاني في
+    اليوم نفسه لا يعمل شيئاً (سجلُّ `OfficeRefreshRun`). والفلاترُ تُتحقَّق في
+    `today_payload` — غيرُ المعروف **400** لا كلُّ الصفوف.
+    """
+
+    http_method_names = ["get", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        today = timezone.localdate()
+        services.ensure_office_refreshed(self.tenant, day=today)
+        return Response(services.today_payload(
+            self.tenant,
+            user=request.user,
+            day=today,
+            filter=(request.query_params.get("filter") or "").strip(),
+        ))
+
+
+class OfficeObligationViewSet(OfficeModuleViewSet):
+    """أفعالُ الالتزام — **كلُّ كائنٍ عبر `visible_clients`**، وكلُّ كتابةٍ بمفتاحها.
+
+    الترتيبُ في كلّ فعل: `get_object` أوّلاً (فالتزامُ غيرك **404** لا 403)، ثم المفتاح:
+    الحالةُ و«الزبون دفع» بـ`office.clients.write`، **والمبلغُ معه
+    `office.amounts.view`** (403 بلا المفتاحين — كسعر الباقة المقترح).
+    """
+
+    http_method_names = ["post", "head", "options"]
+    # `get_serializer_class` يحتاجه `OPTIONS` (SimpleMetadata) وإلا سقط 500.
+    serializer_class = ObligationSubmitSerializer
+
+    def get_queryset(self):
+        return (
+            Obligation.objects
+            .filter(client__in=services.visible_clients(
+                self.tenant, self.request.user,
+            ).values("pk"))
+            .select_related("client__responsible", "task", "task__assignee")
+        )
+
+    def get_object(self):
+        obligation = self.get_queryset().filter(pk=self.kwargs.get("pk")).first()
+        if obligation is None:
+            raise NotFound("الالتزام غير موجود.")
+        return obligation
+
+    def _row(self, obligation):
+        return Response(services.obligation_row(
+            obligation,
+            day=timezone.localdate(),
+            masked=not services.can_see_amounts(self.tenant, self.request.user),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit(self, request, pk=None):
+        obligation = self.get_object()
+        self.require_write()
+        serializer = ObligationSubmitSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.submit_obligation(
+            obligation,
+            actor=request.user,
+            submitted_on=serializer.validated_data.get("submitted_on"),
+            number=serializer.validated_data.get("number", ""),
+        )
+        return self._row(obligation)
+
+    @action(detail=True, methods=["post"], url_path="not-required")
+    def not_required(self, request, pk=None):
+        obligation = self.get_object()
+        self.require_write()
+        services.mark_obligation_not_required(obligation, actor=request.user)
+        return self._row(obligation)
+
+    @action(detail=True, methods=["post"], url_path="reopen")
+    def reopen(self, request, pk=None):
+        obligation = self.get_object()
+        self.require_write()
+        services.reopen_obligation(obligation, actor=request.user)
+        return self._row(obligation)
+
+    @action(detail=True, methods=["post"], url_path="amount")
+    def amount(self, request, pk=None):
+        """المبلغُ يحتاج مفتاحي الكتابة **ورؤية المبالغ** — وإلا 403.
+
+        والترتيب: الرؤيةُ (404 لغيرك)، ثم مفتاحُ الكتابة، ثم قرارُ القناع على
+        الجسم نفسه — فلا يُقاس مبلغٌ لعضوٍ لا يملك كتابةً أصلاً.
+        """
+        obligation = self.get_object()
+        self.require_write()
+        # `reject_amount_writes` يقارن `AMOUNT_KEYS`: من لا يرى المبلغ لا يكتبه.
+        self.reject_amount_writes(request.data)
+        serializer = ObligationAmountSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.set_obligation_amount(
+            obligation,
+            amount=serializer.validated_data.get("amount"),
+            direction=serializer.validated_data.get("direction", ""),
+        )
+        return self._row(obligation)
+
+    @action(detail=True, methods=["post"], url_path="client-paid")
+    def client_paid(self, request, pk=None):
+        obligation = self.get_object()
+        self.require_write()
+        serializer = ObligationClientPaidSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.set_obligation_client_paid(
+            obligation, paid=serializer.validated_data["paid"],
+        )
+        return self._row(obligation)
+
+
+class OfficeTaskViewSet(OfficeModuleViewSet):
+    """تحويلُ شغلةِ فترةٍ لعضو — بمفتاح `office.clients.assign` وحده.
+
+    الشغلةُ تُحلّ عبر `visible_clients` (شغلةُ زبونٍ لا تراه **404**)، ثم
+    المفتاح: من يكتب بيانات زبونٍ لا يسلب شغلتَه بضغطة.
+    """
+
+    http_method_names = ["post", "head", "options"]
+    serializer_class = TaskAssignSerializer
+
+    def get_queryset(self):
+        return (
+            PeriodTask.objects
+            .filter(client__in=services.visible_clients(
+                self.tenant, self.request.user,
+            ).values("pk"))
+            .select_related(
+                "assignee", "client__responsible", "client_service__service",
+            )
+        )
+
+    def get_object(self):
+        task = self.get_queryset().filter(pk=self.kwargs.get("pk")).first()
+        if task is None:
+            raise NotFound("شغلة الفترة غير موجودة.")
+        return task
+
+    @action(detail=True, methods=["post"], url_path="assign")
+    def assign(self, request, pk=None):
+        # الرؤيةُ أوّلاً (`get_object` عبر `visible_clients`) فيأخذ من لا يرى
+        # الشغلة **404**، ثم المفتاحُ فيأخذ من يراها ولا يملكه 403.
+        task = self.get_object()
+        require_perm(request, OFFICE_CLIENTS_ASSIGN_KEY, tenant=self.tenant)
+        serializer = TaskAssignSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user_id = serializer.validated_data.get("assignee")
+        target = None
+        if user_id is not None:
+            target = get_user_model().objects.filter(
+                pk=user_id, is_active=True,
+            ).first()
+            if target is None:
+                raise ValidationError({"assignee": "لا يوجد مستخدم مفعَّل بهذا المعرّف."})
+        services.assign_task(task, assignee=target)
+        return Response(services.task_row(task))

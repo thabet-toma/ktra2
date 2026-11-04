@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1013**
+عدد النقاط: **1022**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -74,6 +74,8 @@
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/primary/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/end/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/obligations/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/obligations/close-prior/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reactivate/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reminders/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/services/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -86,6 +88,11 @@
 | `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/amount/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/client-paid/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/not-required/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/reopen/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/submit/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/` | `OfficePackageViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/{pk}/` | `OfficePackageViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
@@ -93,6 +100,8 @@
 | `/api/accounting-office/settings/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/{key}/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/{key}/clients/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/tasks/{pk}/assign/` | `OfficeTaskViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/today/` | `OfficeTodayViewSet` | `accounting_office/views.py` |
 | `/api/accounting/` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/accounting/<drf_format_suffix:format>` | `APIRootView` | `rest_framework/routers.py` |
 | `/api/accounting/accounts/` | `AccountViewSet` | `accounting/views.py` |

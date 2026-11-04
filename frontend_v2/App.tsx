@@ -58,7 +58,7 @@ import { clientLogger } from "./services/logger";
 import { useToast } from "./contexts/ToastContext";
 import { humanizeThrown } from "./utils/drfError";
 // ISSUE #271 — مسارا شاشتَي المكتب: مصدرٌ واحدٌ يقرؤه الجدولُ والشاشاتُ معاً.
-import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_SETTINGS_PATH } from "./utils/accountingOffice";
+import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -132,6 +132,8 @@ const ClientBooksPanel = lazyPage(() => import("./components/office/ClientBooksP
 const OfficeClientsScreen = lazyPage(() => import("./components/accounting-office/OfficeClientsScreen").then((m) => ({ default: m.OfficeClientsScreen })));
 // ISSUE #274 — التقويم: مواعيدٌ محسوبةٌ من لائحة المنصّة ولا يُحفظ منها شيء.
 const OfficeCalendarScreen = lazyPage(() => import("./components/accounting-office/OfficeCalendarScreen").then((m) => ({ default: m.OfficeCalendarScreen })));
+// ISSUE #275 — «اليوم»: ما حان وقتُه من التزاماتٍ وشغلات (تُشغّل التحديث اليوميّ أوّلاً).
+const OfficeTodayScreen = lazyPage(() => import("./components/accounting-office/OfficeTodayScreen").then((m) => ({ default: m.OfficeTodayScreen })));
 const OfficeSettingsScreen = lazyPage(() => import("./components/accounting-office/OfficeSettingsScreen").then((m) => ({ default: m.OfficeSettingsScreen })));
 // الترخيصُ يُمنَح من إدارة المنصّة لا من داخل الشركة — نصٌّ واحدٌ لحالتَي الشاشة.
 const OFFICE_MODULE_UNLICENSED = "وحدة مكتب المحاسبة غير مفعّلة لهذه الشركة — تُفعَّل من إدارة المنصّة.";
@@ -365,6 +367,7 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   // `App.tsx` يعترض كل ما يبدأ بها ويعرض «هذا الحساب ليس مكتب محاسبة قانونية»،
   // و`utils/officeShell.ts` يقرؤها علماً لقشرة المنصّة. مسارٌ مستقلّ يمنع التقاطع.
   // والمساران كلاهما يُقرآن من `utils/accountingOffice.ts` — نسخةٌ ثانية هنا تفترق عنهما.
+  "office-today": OFFICE_TODAY_PATH,
   "office-clients": OFFICE_CLIENTS_PATH,
   "office-calendar": OFFICE_CALENDAR_PATH,
   "office-settings": OFFICE_SETTINGS_PATH,
@@ -2374,6 +2377,13 @@ const App: React.FC = () => {
       // ISSUE #271 — موديول مكتب المحاسبة. الحارس يقول السبب عند غياب الترخيص
       // بدل شاشةٍ بيضاء من 404 خام. الوحدةُ تُرخَّص من إدارة المنصّة لا من داخل
       // الشركة؛ والنصُّ ثابتٌ واحدٌ أعلاه لا نسختان تفترقان.
+      case "office-today":
+        return (
+          <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
+            <OfficeTodayScreen />
+          </ModuleLicenseGuard>
+        );
+
       case "office-clients":
         return (
           <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>

@@ -47,6 +47,8 @@ def _default_terms() -> dict[str, str]:
     # #274: مجموعةُ التقويم ومفتاحُ شاشته («تسميةُ الشاشة» في `Sidebar.tsx`
     # محليّةٌ كأخواتها، والمصطلحُ هنا لمجموعة البيان).
     terms["nav.office_calendar"] = "التقويم"
+    # #275: مجموعةُ «اليوم» — أوّلُ مجموعات البيان، وشاشتُها الافتتاحية لاحقاً.
+    terms["nav.office_today"] = "اليوم"
     terms["action.add_office_client"] = "أضف زبون"
     terms["empty.office_shell"] = "لا زبائن بعد — أضف أول زبون ليبدأ ملفّه."
     terms["action.document_coding"] = "ترميز مستندات"

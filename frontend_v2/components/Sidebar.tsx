@@ -368,6 +368,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     settings: { label: "الإعدادات", icon: <SettingsIcon className="h-4 w-4" /> },
     // ISSUE #271 — شاشتان لا تظهران في أيّ مصفوفةٍ يدوية أعلاه (بيانهما وحده
     // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
+    // ISSUE #275 — «اليوم» أوّلُ شاشات المكتب: ما حان وقتُه من التزاماتٍ وشغلات.
+    "office-today": { label: "اليوم", icon: <CalendarCheck className="h-4 w-4" /> },
     "office-clients": { label: "الزبائن", icon: <Users className="h-4 w-4" /> },
     "office-calendar": { label: "التقويم", icon: <CalendarDays className="h-4 w-4" /> },
     "office-settings": { label: "إعدادات المكتب", icon: <SettingsIcon className="h-4 w-4" /> },

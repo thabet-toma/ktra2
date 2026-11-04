@@ -216,6 +216,7 @@ export interface ClientServiceRow {
   starts_on: string;
   ends_on: string | null;
   responsible_from: string;
+  last_period_ours: boolean;
   is_active: boolean;
   status: string;
   status_label: string;
@@ -578,7 +579,200 @@ export function periodLabel(start: string, end: string): string {
   return `${monthNameOf(start)} ${startYear}–${monthNameOf(end)} ${endYear}`;
 }
 
-/** «متوقَّع» على كل سطرٍ محسوبٍ لم يُحفظ — و#275 تجعل المحفوظ كاملَ اللون. */
+/** «متوقَّع» على كل سطر تقويمٍ اليوم (كلُّه محسوب)؛ وتمييزُ المحفوظ تذكرةٌ لاحقة. */
 export function isExpectedDeadline(row: CalendarDeadlineRow): boolean {
   return row.expected !== false;
+}
+
+// ── «اليوم» والالتزامات والشغلات (#275) ─────────────────────────────────
+//
+// **ولا جدولَ تسمياتٍ هنا**: حالةُ الالتزام واتجاهُ المبلغ وشارةُ «قريب/متأخّر»
+// تصل نصوصاً من الخادم (`status_label` · `direction_label` · `badges[].label`).
+// ودالّةُ `serverLabel` تعيد نصَّ الخادم كما هو، و`value` الخام احتياطاً حين
+// يغيب — فلا مصطلحان لشيءٍ واحد يفترقان عند أول تعديل في الخادم.
+//
+// الباقي حسابُ عرض: نصُّ المبلغ بالقناع، وقراءةُ الفلتر من العنوان، وتقصيرُ
+// التاريخ إلى `dd/MM` — كلها نصوصُ ISO بلا كائن `Date` منطقةً زمنية.
+
+/** مسار شاشة «اليوم» — مصدرٌ واحدٌ للموجّه والقائمة. */
+export const OFFICE_TODAY_PATH = '/accounting-office/today';
+
+/** فلترُ شاشة «اليوم»: الفارغ «الكل»، والثلاثةُ الباقية رقائقُها وعدّاداتُها. */
+export type TodayFilter = '' | 'mine' | 'week' | 'late';
+
+/** الفلاترُ الأربعة المحسومة — الفارغ «الكل»، وغيرُها لا يُقرأ من العنوان. */
+export const TODAY_FILTERS: readonly TodayFilter[] = ['', 'mine', 'week', 'late'];
+
+/** اسم معامل العنوان الذي يحمل الفلتر — يُقرأ ويُكتب في مكانٍ واحد. */
+export const TODAY_FILTER_PARAM = 'filter';
+
+export interface ObligationBadge {
+  key: string;
+  label: string;
+}
+
+export interface ObligationAssignee {
+  id: number;
+  name: string;
+}
+
+/** الشغلةُ كما تدخل في سطر الالتزام: موعدُها الداخليُّ ومسؤولُها **الفعليّ**. */
+export interface ObligationTaskRef {
+  id: number;
+  internal_deadline: string;
+  assignee: ObligationAssignee | null;
+}
+
+/**
+ * سطرُ التزامٍ كما يعيده الخادم.
+ *
+ * `amount` نصٌّ عشريّ أو `null`؛ **و`null` تعني «لا ترى المبالغ»** فيُعرض «—».
+ * و`badges` تُحسب على يوم الطلب: الصفُّ نفسه قد يكون «قريباً» اليوم وغيرَه غداً.
+ */
+export interface ObligationRow {
+  id: number;
+  client: { id: number; name: string };
+  task: ObligationTaskRef;
+  name: string;
+  rule_code: string;
+  origin: string;
+  origin_label: string;
+  period_label: string;
+  official_date: string;
+  actual_deadline: string;
+  internal_deadline: string;
+  estimated: boolean;
+  warnings: string[];
+  badges: ObligationBadge[];
+  amount: string | null;
+  direction: string;
+  direction_label: string;
+  client_paid: boolean;
+  status: string;
+  status_label: string;
+}
+
+export interface TodayCounters {
+  week: number;
+  late: number;
+  all: number;
+}
+
+export interface TodayPayload {
+  day: string;
+  filter: string;
+  counters: TodayCounters;
+  rows: ObligationRow[];
+  /** تسمياتُ اتجاه المبلغ — من الخادم، فلا نسخةً في الشاشة. */
+  direction_choices: SettingChoice[];
+}
+
+/** شغلةُ فترةٍ في ملفّ الزبون — بكلِّ التزاماتها في كلّ الحالات. */
+export interface ClientTaskRow {
+  id: number;
+  /** خدمةُ الشغلة: شغلتا «كانون الثاني» لق.م وللرواتب لا تُميَّزان بغيره. */
+  service: { id: number; name: string };
+  period_start: string;
+  period_end: string;
+  period_label: string;
+  internal_deadline: string;
+  assignee: ObligationAssignee | null;
+  obligations: ObligationRow[];
+}
+
+export interface ClientObligationsPayload {
+  client: { id: number; name: string };
+  day: string;
+  tasks: ClientTaskRow[];
+  direction_choices: SettingChoice[];
+}
+
+/** نصُّ الخادم إن وصل، وإلا القيمةُ الخام — لا تسميةَ محليّةً تُنافسه. */
+function serverLabel(label: string | null | undefined, value: string): string {
+  const clean = (label ?? '').trim();
+  return clean || (value ?? '');
+}
+
+/** تسميةُ حالة الالتزام — من `status_label` الذي يرسله الخادم. */
+export function statusLabelOf(row: Pick<ObligationRow, 'status' | 'status_label'>): string {
+  return serverLabel(row.status_label, row.status);
+}
+
+/** تسميةُ اتجاه المبلغ («عليه»/«إله») — من `direction_label`. */
+export function directionLabelOf(
+  row: Pick<ObligationRow, 'direction' | 'direction_label'>,
+): string {
+  return serverLabel(row.direction_label, row.direction);
+}
+
+/** تسميةُ الشارة — من `badges[].label`، والمفتاحُ احتياطاً. */
+export function badgeLabelOf(badge: ObligationBadge): string {
+  return serverLabel(badge.label, badge.key);
+}
+
+/**
+ * نصُّ المبلغ كما يُعرض: «عليه ₪ 620.00» أو «إله ₪ …»، والمخفيُّ «—» وحدها.
+ *
+ * المبلغُ يصل نصّاً عشرياً من الخادم، فلا تحويلَ إلى `float` ولا تقريب. وحين
+ * يغيب (`null` = لا رؤية مبالغ) لا يُعرض اتجاهٌ ولا صفر.
+ */
+export function obligationAmountText(
+  row: Pick<ObligationRow, 'amount' | 'direction_label'>,
+): string {
+  const amount = formatOfficeAmount(row.amount);
+  if (amount === AMOUNT_MASK) return AMOUNT_MASK;
+  const direction = (row.direction_label ?? '').trim();
+  return direction ? `${direction} ₪ ${amount}` : `₪ ${amount}`;
+}
+
+/** أصنافُ شارة الحالة المشتقّة — اللونُ عرضٌ، والنصُّ من الخادم. */
+export function obligationBadgeClass(key: string): string {
+  if (key === 'near') {
+    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
+  }
+  if (key === 'late') {
+    return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
+/** أصنافُ شارة الحالة المخزّنة («انقدّم»/«مش لازم هالفترة»). */
+export function obligationStatusClass(status: string): string {
+  if (status === 'submitted') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'not_required') {
+    return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  }
+  return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
+}
+
+/**
+ * الفلترُ المقروء من العنوان — `mine`/`week`/`late`، وأيُّ نصٍّ آخر «الكل».
+ *
+ * الفسادُ (رابطٌ قديمٌ أو معدَّلٌ يدوياً) لا يُرمى به: الشاشةُ تعرض الكلّ بدل أن
+ * تنكسر، والخادمُ يرفض المجهول 400 فلو أُرسل كما هو لسقط الطلب.
+ */
+export function readTodayFilter(search: string): TodayFilter {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const raw = params.get(TODAY_FILTER_PARAM) ?? '';
+  return (TODAY_FILTERS as readonly string[]).includes(raw)
+    ? (raw as TodayFilter)
+    : '';
+}
+
+/** معاملاتُ العنوان لفلترٍ مختار — «الكل» بلا معامل، فيبقى العنوانُ نظيفاً. */
+export function todayFilterParams(filter: TodayFilter): Record<string, string> {
+  return filter ? { [TODAY_FILTER_PARAM]: filter } : {};
+}
+
+/**
+ * تاريخٌ قصيرٌ `dd/MM` من نصّ ISO — بلا كائن `Date` ولا منطقةٍ زمنية.
+ *
+ * `2026-04-30T23:00-05:00` يبقى 30/04، والنصُّ الفاسد يعيد `''` (لا «NaN/NaN»).
+ */
+export function shortIsoDate(iso: string | null | undefined): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
+  if (!match) return '';
+  return `${match[3]}/${match[2]}`;
 }

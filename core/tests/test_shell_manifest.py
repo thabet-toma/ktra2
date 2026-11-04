@@ -57,16 +57,21 @@ class ShellManifestFunctionTest(SimpleTestCase):
         )
 
     def test_accounting_office_manifest_shape(self):
-        """ISSUE #271 — بيانُ الموديول الجديد: شاشتُه أولاً، وبلا أتعاب ولا مكتبٍ قديم."""
+        """ISSUE #271 — بيانُ الموديول الجديد: بلا أتعاب ولا مكتبٍ قديم."""
         manifest = shell_manifest("accounting_office")
         self.assertIsNotNone(manifest)
         self.assertEqual(manifest["start_view"], "office-clients")
         self.assertEqual(manifest["first_action"]["view"], "office-clients")
         self.assertEqual(manifest["first_action"]["label_term"], "action.add_office_client")
         self.assertEqual(manifest["empty_state_term"], "empty.office_shell")
+        # #275: «اليوم» أوّلُ المجموعات — الشاشةُ التي يفتحها الموظف صباحاً.
+        self.assertEqual(
+            [group["id"] for group in manifest["groups"]][0], "today",
+        )
         self.assertEqual(
             {group["id"]: group["views"] for group in manifest["groups"]},
             {
+                "today": ["office-today"],
                 "clients": ["office-clients"],
                 # #274: التقويم شاشةٌ مستقلّة، فمجموعتُه مستقلّة كإعدادات المكتب.
                 "calendar": ["office-calendar"],

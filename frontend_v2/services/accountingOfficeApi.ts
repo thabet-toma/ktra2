@@ -18,27 +18,39 @@ import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
   CalendarPayload,
+  ClientObligationsPayload,
+  ClientTaskRow,
   ClientServiceRow,
   ClientServicesPayload,
   DeadlineRuleRow,
   OfficeServiceRow,
+  ObligationRow,
   ServicePackageRow,
   ServiceSuggestion,
   SettingRow,
+  TodayFilter,
+  TodayPayload,
 } from '../utils/accountingOffice';
 
 export type {
   ApplyPackageResult,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientObligationsPayload,
   ClientServiceFrequencyRow,
   ClientServiceRow,
   ClientServicesPayload,
+  ClientTaskRow,
   DeadlineRuleRow,
+  ObligationBadge,
+  ObligationRow,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
   SettingRow,
+  TodayCounters,
+  TodayFilter,
+  TodayPayload,
 } from '../utils/accountingOffice';
 
 const BASE = 'accounting-office/';
@@ -49,6 +61,9 @@ const PACKAGES = `${BASE}packages/`;
 const SETTINGS = `${BASE}settings/`;
 const CALENDAR = `${BASE}calendar/`;
 const DEADLINE_RULES = `${BASE}deadline-rules/`;
+const TODAY = `${BASE}today/`;
+const OBLIGATIONS = `${BASE}obligations/`;
+const TASKS = `${BASE}tasks/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -363,9 +378,12 @@ export const stopClientService = (
   clientId: number,
   serviceRowId: number,
   endsOn: string,
+  lastPeriodOurs = true,
 ): Promise<ClientServicesPayload> =>
   apiPostObject<ClientServicesPayload>(
-    `${CLIENTS}${clientId}/services/${serviceRowId}/stop/`, { ends_on: endsOn }, tenantOpts(),
+    `${CLIENTS}${clientId}/services/${serviceRowId}/stop/`,
+    { ends_on: endsOn, last_period_ours: lastPeriodOurs },
+    tenantOpts(),
   );
 
 export const applyServicePackage = (
@@ -403,3 +421,66 @@ export const listDeadlineRules = (
   system: 'PS' | 'IL',
 ): Promise<{ system: string; rules: DeadlineRuleRow[] }> =>
   apiGetObject(`${DEADLINE_RULES}`, { ...tenantOpts(), query: { system } });
+
+// ── «اليوم» والالتزامات والشغلات (#275) ─────────────────────────────────
+//
+// **الخادم هو الحكم**: كلُّ فعلٍ يعيد السطرَ المحدَّث بالشكل نفسه، فتُحدَّث
+// الشاشةُ من ردّه بدل تخمين الحالة، والعدّاداتُ تُعاد قراءتها من `today/`.
+// والمبلغُ لا يُرسَل من عضوٍ لا يراه: الخادم يردّ 403، والشاشةُ تُخفيه أوّلاً.
+export const getOfficeToday = (filter: TodayFilter = ''): Promise<TodayPayload> =>
+  apiGetObject<TodayPayload>(TODAY, {
+    ...tenantOpts(),
+    query: { filter: filter || undefined },
+  });
+
+export const submitObligation = (
+  id: number,
+  payload: { submitted_on?: string; number?: string } = {},
+): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/submit/`, payload, tenantOpts());
+
+export const markObligationNotRequired = (id: number): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/not-required/`, {}, tenantOpts());
+
+export const reopenObligation = (id: number): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/reopen/`, {}, tenantOpts());
+
+/** `amount: null` يمسح المبلغَ والاتجاه — و`direction` مطلوبٌ مع المبلغ. */
+export const setObligationAmount = (
+  id: number,
+  payload: { amount: string | null; direction: string },
+): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/amount/`, payload, tenantOpts());
+
+export const setObligationClientPaid = (
+  id: number,
+  paid: boolean,
+): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(
+    `${OBLIGATIONS}${id}/client-paid/`, { paid }, tenantOpts(),
+  );
+
+/** تحويلُ شغلةٍ — `null` يُعيدها إلى وراثة مسؤول الزبون. الردُّ سطرُ الشغلة. */
+export const assignTask = (
+  id: number,
+  assignee: number | null,
+): Promise<Omit<ClientTaskRow, 'obligations'>> =>
+  apiPostObject<Omit<ClientTaskRow, 'obligations'>>(
+    `${TASKS}${id}/assign/`, { assignee }, tenantOpts(),
+  );
+
+export const getClientObligations = (clientId: number): Promise<ClientObligationsPayload> =>
+  apiGetObject<ClientObligationsPayload>(
+    `${CLIENTS}${clientId}/obligations/`, tenantOpts(),
+  );
+
+/** «هدول انقدّموا قبل ما يجي علينا» — يعيد عددَ ما أُغلق. */
+export const closePriorObligations = (
+  clientId: number,
+  before?: string,
+): Promise<{ closed: number }> =>
+  apiPostObject<{ closed: number }>(
+    `${CLIENTS}${clientId}/obligations/close-prior/`,
+    before ? { before } : {},
+    tenantOpts(),
+  );

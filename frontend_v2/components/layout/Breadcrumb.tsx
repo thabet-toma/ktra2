@@ -87,6 +87,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'accounting-revenue-vouchers': 'سندات الإيراد',
   'document-coding': 'ترميز مستندات',
   'client-books': 'دفاتر عملائي',
+  'office-today': 'اليوم',
   'office-clients': 'الزبائن',
   'office-calendar': 'التقويم',
   'office-settings': 'إعدادات المكتب',

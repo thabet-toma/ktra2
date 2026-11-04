@@ -11,9 +11,12 @@ from accounting_office.views import (
     OfficeClientViewSet,
     OfficeContactViewSet,
     OfficeDeadlineRuleViewSet,
+    OfficeObligationViewSet,
     OfficePackageViewSet,
     OfficeServiceViewSet,
     OfficeSettingsViewSet,
+    OfficeTaskViewSet,
+    OfficeTodayViewSet,
 )
 
 router = SimpleRouter()
@@ -27,6 +30,12 @@ router.register("calendar", OfficeCalendarViewSet, basename="accounting-office-c
 router.register(
     "deadline-rules", OfficeDeadlineRuleViewSet, basename="accounting-office-deadline-rules",
 )
+# #275: شاشةُ «اليوم» (تُشغّل التحديث اليوميّ أوّلاً) وأفعالُ الالتزامات والشغلات.
+router.register("today", OfficeTodayViewSet, basename="accounting-office-today")
+router.register(
+    "obligations", OfficeObligationViewSet, basename="accounting-office-obligations",
+)
+router.register("tasks", OfficeTaskViewSet, basename="accounting-office-tasks")
 
 urlpatterns = [
     path("", include(router.urls)),

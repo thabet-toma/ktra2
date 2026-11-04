@@ -15,6 +15,7 @@ from accounting_office.models import (
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     ClientReminderRecipient,
     Contact,
+    OBLIGATION_DIRECTION_CHOICES,
     OfficeClient,
     OfficeService,
 )
@@ -231,10 +232,56 @@ class ClientServiceFrequencyWriteSerializer(serializers.Serializer):
 
 
 class ClientServiceStopSerializer(serializers.Serializer):
-    """إيقافُ خدمةٍ بتاريخ — الصفُّ يبقى، و`ends_on` يُكتب."""
+    """إيقافُ خدمةٍ بتاريخ — الصفُّ يبقى، و`ends_on` يُكتب.
+
+    **و`last_period_ours`**: «آخرُ فترةٍ علينا» — رفعُها تُسقط آخرَ فترةٍ في كل
+    سلسلةٍ (لا تُولَّد، ويُسكَت المنتظِرُ منها)، والافتراضُ «علينا».
+    """
 
     ends_on = serializers.DateField()
+    last_period_ours = serializers.BooleanField(required=False, default=True)
 
 
 class ApplyPackageSerializer(serializers.Serializer):
     package = serializers.IntegerField(min_value=1)
+
+
+# ── الالتزامات والشغلات (#275) ───────────────────────────────────────────────
+class ObligationSubmitSerializer(serializers.Serializer):
+    """«انقدّم»: تاريخٌ اختياريّ (افتراضُه اليوم) ورقمُ تقديمٍ اختياريّ."""
+
+    submitted_on = serializers.DateField(required=False)
+    number = serializers.CharField(required=False, allow_blank=True, max_length=60)
+
+
+class ObligationAmountSerializer(serializers.Serializer):
+    """مبلغُ الالتزام واتجاهه — **مبلغٌ مسجَّلٌ في `AMOUNT_KEYS`**، والـview يقنّعه.
+
+    `amount` **مطلوب**: المسحُ بـ`null` صريحاً، وجسمٌ لا مفتاحَ فيه (`{}`) 400 —
+    وإلا مرّ طلبٌ لا يقول شيئاً فحُسب «نجاحاً» بلا أثر.
+    """
+
+    amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=True, allow_null=True, min_value=0,
+    )
+    direction = serializers.ChoiceField(
+        choices=OBLIGATION_DIRECTION_CHOICES, required=False, allow_blank=True,
+    )
+
+
+class ObligationClientPaidSerializer(serializers.Serializer):
+    """«الزبون دفع» — خبرٌ عن الزبون، يُكتب في كلّ الحالات."""
+
+    paid = serializers.BooleanField()
+
+
+class TaskAssignSerializer(serializers.Serializer):
+    """تحويلُ شغلةٍ لعضوٍ آخر — `null` يُعيدها إلى وراثة مسؤول الزبون."""
+
+    assignee = serializers.IntegerField(required=True, allow_null=True, min_value=1)
+
+
+class ClosePriorSerializer(serializers.Serializer):
+    """«هدول انقدّموا قبل ما يجي علينا» — التاريخُ افتراضُه اليوم."""
+
+    before = serializers.DateField(required=False)

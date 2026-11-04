@@ -1141,6 +1141,26 @@ class ServicesApiFlowTest(ServicesApiTest):
         entry = stopped.data["services"][0]
         self.assertEqual(entry["ends_on"], ended.isoformat())
         self.assertEqual(entry["status_label"], "موقوفة")
+        # الافتراضُ «علينا» — بلا الحقل لا تسقط آخرُ فترة.
+        self.assertTrue(entry["last_period_ours"])
+        self.assertTrue(ClientService.objects.get(pk=service_id).last_period_ours)
+
+    def test_stopping_with_last_period_not_ours_is_written_and_returned(self):
+        self.as_user(self.owner)
+        today = timezone.localdate()
+        started = today - datetime.timedelta(days=120)
+        ended = today - datetime.timedelta(days=30)
+        created = self.add_service(self.mine, starts_on=started.isoformat())
+        service_id = created.data["services"][0]["id"]
+
+        stopped = self.post(
+            f"{CLIENTS}{self.mine.pk}/services/{service_id}/stop/",
+            {"ends_on": ended.isoformat(), "last_period_ours": False},
+        )
+
+        self.assertEqual(stopped.status_code, 200)
+        self.assertIs(stopped.data["services"][0]["last_period_ours"], False)
+        self.assertFalse(ClientService.objects.get(pk=service_id).last_period_ours)
 
     def test_applying_a_package_returns_what_was_added_and_what_was_skipped(self):
         self.as_user(self.owner)

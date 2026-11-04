@@ -134,7 +134,7 @@ class AmountKeysGuardTest(SimpleTestCase):
         """أي تغييرٍ في الثابت يجب أن يُرى هنا — وإلا كان المسح زينة."""
         self.assertEqual(
             declared_amount_fields((APP_DIR / "serializers.py").read_text(encoding="utf-8")),
-            ["annual_sales", "suggested_price"],
+            ["annual_sales", "suggested_price", "amount"],
         )
         self.assertEqual(
             unregistered_amount_fields(
@@ -171,6 +171,8 @@ class ModelAmountGuardTest(SimpleTestCase):
         self.assertEqual(
             model_amount_fields(apps.get_app_config("accounting_office").get_models()),
             [
+                # #275: مبلغُ الالتزام — مبلغٌ مسجَّلٌ لا مُعفى.
+                "Obligation.amount",
                 "ServicePackage.suggested_price",
                 "TaxCard.annual_sales",
                 "TaxThreshold.amount",
@@ -189,11 +191,12 @@ class ModelAmountGuardTest(SimpleTestCase):
         with mock.patch("django.apps.apps.get_app_config") as get_config:
             get_config.return_value.get_models.return_value = [fake_amount_model("annual_sales")]
             self.assertEqual(unregistered_model_amount_fields(services.AMOUNT_KEYS), [])
-        # وإعفاءٌ مؤهَّلٌ لا يُعفى به حقلٌ آخر بالاسم نفسه في نموذجٍ آخر.
+        # وإعفاءٌ مؤهَّلٌ لا يُعفى به حقلٌ آخر بالاسم نفسه في نموذجٍ آخر:
+        # الإعفاءُ `TaxThreshold.amount` وحده، فمبلغُ نموذجٍ آخر يبقى مخالفاً.
         with mock.patch("django.apps.apps.get_app_config") as get_config:
             get_config.return_value.get_models.return_value = [fake_amount_model("amount")]
             self.assertEqual(
-                unregistered_model_amount_fields(services.AMOUNT_KEYS),
+                unregistered_model_amount_fields(frozenset(), {"TaxThreshold.amount"}),
                 ["FakeModel.amount"],
             )
 

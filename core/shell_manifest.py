@@ -77,6 +77,9 @@ SHELL_MANIFESTS: dict[str, dict] = {
         "first_action": {"view": "office-clients", "label_term": "action.add_office_client"},
         "empty_state_term": "empty.office_shell",
         "groups": [
+            # #275: «اليوم» **أوّلُ** مجموعات البيان — شاشةُ العمل الصباحيّة:
+            # ما حان وقتُه من التزامات وشغلات. وقبلها كانت البدايةُ الزبائن.
+            {"id": "today", "label_term": "nav.office_today", "views": ["office-today"]},
             {"id": "clients", "label_term": "nav.office_clients", "views": ["office-clients"]},
             # #274: التقويم شاشةٌ مستقلّة عن قائمة الزبائن (تُقرأ من لائحة المواعيد
             # المحسوبة)، فمجموعتُها مستقلّة كما استقلّت «إعدادات المكتب» في #271.

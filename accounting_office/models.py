@@ -695,6 +695,11 @@ class ClientService(models.Model):
     starts_on = models.DateField(verbose_name="تبدأ في")
     ends_on = models.DateField(null=True, blank=True, verbose_name="تنتهي في")
     responsible_from = models.DateField(verbose_name="المكتب مسؤول من فترة")
+    #: «آخرُ فترةٍ علينا؟» (#275) — رفعُها عند الإيقاف تُسقط آخرَ فترةٍ في كلِّ
+    #: سلسلةٍ من الالتزامات، وتمنع توليدَها في «حدّث المكتب». الافتراضُ «علينا».
+    last_period_ours = models.BooleanField(
+        default=True, verbose_name="آخر فترة علينا",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
 
     class Meta:
@@ -1024,3 +1029,278 @@ class DeadlineRule(models.Model):
             raise ValidationError({
                 "conditions": f"شروط غير معروفة: {unknown}",
             })
+
+
+# ── الالتزامات والشغلات (#275) ───────────────────────────────────────────────
+#
+# **الالتزامُ سطرٌ محفوظ، وحالتُه المشتقّة تُحسب عند القراءة**: «قريب هالأسبوع»
+# و«متأخّر» تُقرأ من `actual_deadline` واليوم المُمرَّر، فلا عمودَ لهما يتعفّن
+# بين تشغيلين. **والمخزّنُ ثلاثُ حالاتٍ لا غير**: لسا ما انقدّم · انقدّم (نهائيٌّ
+# لا يُتراجَع عنه) · مش لازم هالفترة.
+#
+# **والأصلُ «رسمي»** — «من المكتب» (#277) أصلٌ ثانٍ يُضاف صفّاً لا فرعاً في الكود.
+OBLIGATION_ORIGIN_OFFICIAL = "official"
+OBLIGATION_ORIGIN_OFFICE = "office"
+OBLIGATION_ORIGIN_CHOICES: list[tuple[str, str]] = [
+    (OBLIGATION_ORIGIN_OFFICIAL, "رسمي"),
+    (OBLIGATION_ORIGIN_OFFICE, "من المكتب"),
+]
+OBLIGATION_ORIGIN_LABELS: dict[str, str] = dict(OBLIGATION_ORIGIN_CHOICES)
+
+OBLIGATION_STATUS_PENDING = "pending"
+OBLIGATION_STATUS_SUBMITTED = "submitted"
+OBLIGATION_STATUS_NOT_REQUIRED = "not_required"
+OBLIGATION_STATUS_CHOICES: list[tuple[str, str]] = [
+    (OBLIGATION_STATUS_PENDING, "لسا ما انقدّم"),
+    (OBLIGATION_STATUS_SUBMITTED, "انقدّم"),
+    (OBLIGATION_STATUS_NOT_REQUIRED, "مش لازم هالفترة"),
+]
+OBLIGATION_STATUS_LABELS: dict[str, str] = dict(OBLIGATION_STATUS_CHOICES)
+
+OBLIGATION_DIRECTION_DUE = "due"
+OBLIGATION_DIRECTION_REFUND = "refund"
+OBLIGATION_DIRECTION_CHOICES: list[tuple[str, str]] = [
+    (OBLIGATION_DIRECTION_DUE, "عليه"),
+    (OBLIGATION_DIRECTION_REFUND, "إله"),
+]
+OBLIGATION_DIRECTION_LABELS: dict[str, str] = dict(OBLIGATION_DIRECTION_CHOICES)
+
+#: شرطا الحالة المشتقّة — يُقرآن في `services` وحدهما (`obligation_badges`).
+OBLIGATION_BADGE_NEAR = "near"
+OBLIGATION_BADGE_LATE = "late"
+OBLIGATION_BADGE_LABELS: dict[str, str] = {
+    OBLIGATION_BADGE_NEAR: "قريب هالأسبوع",
+    OBLIGATION_BADGE_LATE: "متأخّر",
+}
+
+
+class PeriodTask(models.Model):
+    """شغلةُ فترة: **خدمةُ زبون × فترة** — بموعدها الداخليّ ومسؤولها.
+
+    `client_service` على `PROTECT` لا `CASCADE`: حذفُ خدمةِ زبونٍ كان يمحو تاريخ
+    شغلاتها ومواعيدها، والخدمةُ لا تُحذف أصلاً (الإيقافُ يكتب `ends_on`).
+
+    **و`assignee` فارغةٌ تعني الوراثة** لا «بلا مسؤول»: الشغلةُ ترث مسؤولَ الزبون
+    (`effective_assignee`)، وتحويلُها لعضوٍ آخر فعلٌ مستقلٌّ بمفتاحه
+    (`office.clients.assign`) — فالوراثةُ لا تحتاج كتابة، والتحويلُ يحتاج مفتاحاً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_period_tasks",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="tasks",
+        verbose_name="الزبون",
+    )
+    client_service = models.ForeignKey(
+        ClientService,
+        on_delete=models.PROTECT,
+        related_name="tasks",
+        verbose_name="خدمة الزبون",
+    )
+    period_start = models.DateField(verbose_name="بداية الفترة")
+    period_end = models.DateField(verbose_name="نهاية الفترة")
+    #: **أبكرُ** موعدٍ داخليٍّ بين التزامات الشغلة: يُضبط عند الإنشاء ثم يُخفَّض
+    #: إن انضمّ التزامٌ أبكر — فالموعدُ لا يتأخّر أبداً بعد أن رآه الموظف.
+    internal_deadline = models.DateField(verbose_name="الموعد الداخلي الأبكر")
+    assignee = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_period_tasks",
+        verbose_name="المحوَّلة له",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "شغلة فترة"
+        verbose_name_plural = "شغلات الفترات"
+        # الأحدثُ أوّلاً: ملفُّ الزبون يعرض الشغلات من أحدثِ فترةٍ لآخرها.
+        ordering = ["-period_end", "-id"]
+        constraints = [
+            # فرادةٌ **غير مشروطة** — الشرطُ في `UniqueConstraint` تتجاهله MySQL
+            # بصمت فتمرّ الهجرة ويغيب القيد في الإنتاج.
+            models.UniqueConstraint(
+                fields=["client_service", "period_start", "period_end"],
+                name="uniq_period_task_span",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "assignee"], name="office_task_tenant_assignee",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_service_id}@{self.period_start}"
+
+    @property
+    def effective_assignee(self):
+        """المسؤولُ الفعليّ: المحوَّلُ إليه، وإلا مسؤولُ الزبون — قاعدةُ الوراثة."""
+        return self.assignee or self.client.responsible
+
+
+class Obligation(models.Model):
+    """التزامٌ محفوظ: سطرُ لائحة × فترة، بتاريخه وحالته ومبلغه.
+
+    **التواريخُ لقطةٌ وقت الحفظ** (`DeadlineResult` كما حُسب): تصحيحُ لائحةٍ لا
+    يعيد كتابة ما رآه الموظف وأرسله — وإعادةُ حساب الصفوف تذكرةٌ أخرى (#277).
+    **والمبلغُ مبلغ**: مُسجَّلٌ في `AMOUNT_KEYS` ويمرّ بالقناع، ويُقفل عند «انقدّم».
+    """
+
+    ORIGIN_OFFICIAL = OBLIGATION_ORIGIN_OFFICIAL
+    ORIGIN_OFFICE = OBLIGATION_ORIGIN_OFFICE
+    STATUS_PENDING = OBLIGATION_STATUS_PENDING
+    STATUS_SUBMITTED = OBLIGATION_STATUS_SUBMITTED
+    STATUS_NOT_REQUIRED = OBLIGATION_STATUS_NOT_REQUIRED
+    DIRECTION_DUE = OBLIGATION_DIRECTION_DUE
+    DIRECTION_REFUND = OBLIGATION_DIRECTION_REFUND
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_obligations",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        verbose_name="الزبون",
+    )
+    client_service = models.ForeignKey(
+        ClientService,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        verbose_name="خدمة الزبون",
+    )
+    task = models.ForeignKey(
+        PeriodTask,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        verbose_name="شغلة الفترة",
+    )
+    #: سطرُ اللائحة الأصليّ — `PROTECT`: الالتزامُ يُفسَّر بسنده ولا يبقى يتيماً.
+    rule = models.ForeignKey(
+        DeadlineRule,
+        on_delete=models.PROTECT,
+        related_name="obligations",
+        verbose_name="سطر اللائحة",
+    )
+    #: لقطةُ السطر وقت الحفظ: اللائحةُ المنشورة لا تُعدَّل، والاسمُ يبقى مقروءاً
+    #: حتى لو صار كودُ السطر في نسخةٍ لاحقةٍ غيره.
+    rule_code = models.SlugField(max_length=60, verbose_name="كود السطر")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    origin = models.CharField(
+        max_length=20,
+        choices=OBLIGATION_ORIGIN_CHOICES,
+        default=OBLIGATION_ORIGIN_OFFICIAL,
+        verbose_name="الأصل",
+    )
+    period_start = models.DateField(verbose_name="بداية الفترة")
+    period_end = models.DateField(verbose_name="نهاية الفترة")
+    legal_date = models.DateField(verbose_name="التاريخ بالقاعدة")
+    official_date = models.DateField(verbose_name="الموعد الرسمي")
+    actual_deadline = models.DateField(verbose_name="آخر موعد فعلي")
+    internal_deadline = models.DateField(verbose_name="الموعد الداخلي")
+    estimated = models.BooleanField(default=False, verbose_name="تقديري")
+    postponed = models.BooleanField(default=False, verbose_name="مؤجَّل")
+    warnings = models.JSONField(default=list, blank=True, verbose_name="تنبيهات")
+    status = models.CharField(
+        max_length=20,
+        choices=OBLIGATION_STATUS_CHOICES,
+        default=OBLIGATION_STATUS_PENDING,
+        verbose_name="الحالة",
+    )
+    submitted_on = models.DateField(null=True, blank=True, verbose_name="تاريخ التقديم")
+    submitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_submitted_obligations",
+        verbose_name="قدّمها",
+    )
+    submission_number = models.CharField(
+        max_length=60, blank=True, default="", verbose_name="رقم التقديم",
+    )
+    #: «هدول انقدّموا قبل ما يجي علينا» — أُغلقت بلا تاريخ تقديمٍ ولا موظفٍ قدّمها.
+    prior_to_office = models.BooleanField(
+        default=False, verbose_name="انقدّم قبل المكتب",
+    )
+    amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="المبلغ",
+    )
+    direction = models.CharField(
+        max_length=10,
+        choices=OBLIGATION_DIRECTION_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="الاتجاه",
+    )
+    client_paid = models.BooleanField(default=False, verbose_name="الزبون دفع")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "التزام"
+        verbose_name_plural = "الالتزامات"
+        ordering = ["actual_deadline", "internal_deadline", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client_service", "rule_code", "period_end"],
+                name="uniq_obligation_period_rule",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "status"], name="office_oblig_tenant_status",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.rule_code}@{self.period_end}"
+
+
+class OfficeRefreshRun(models.Model):
+    """سجلُّ «حدّث المكتب ليوم X» — صفٌّ واحدٌ لكل (مكتب، يوم).
+
+    الفرادةُ هي الضمانة: تشغيلُ اليوم نفسه مرّتين لا يكتب سطراً ثانياً، ولا تعيد
+    `ensure_office_refreshed` العملَ على يومٍ رآه أحد. والعدّادُ المحفوظ هو ما
+    أنشأه أوّلُ تشغيلٍ لذلك اليوم.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_refresh_runs",
+        verbose_name="المكتب",
+    )
+    day = models.DateField(verbose_name="اليوم")
+    ran_at = models.DateTimeField(auto_now_add=True, verbose_name="وقت التشغيل")
+    created_obligations = models.PositiveIntegerField(
+        default=0, verbose_name="التزامات أُنشئت",
+    )
+
+    class Meta:
+        verbose_name = "تشغيل تحديث مكتب"
+        verbose_name_plural = "تشغيلات تحديث المكاتب"
+        ordering = ["-day", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "day"], name="uniq_office_refresh_run_day",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tenant_id}@{self.day}"

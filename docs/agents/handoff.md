@@ -4,9 +4,86 @@
 **وبطلب المالك (2026-10-22): يُحدَّث بعد كل تذكرة، وبعد كل جولة تصليح، وقبل أي ضغطٍ للسياق** — هو ذاكرة
 المنسّق بعد الـcompact. الإكمال حتى آخر تذكرة بلا توقّف.
 
-**آخر تحديث:** 2026-11-04 09:50 (استئنافٌ بعد انقطاع الجلسة الثالث)
+**آخر تحديث:** 2026-11-04 12:25
 
-## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-04 09:50)
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-04 12:25)
+
+**الحالة الآن:**
+- **#274 منشورة ومغلقة** (CI أخضر `41796745266`، نسخة احتياطية `/root/backups/ktra-before-274-20261104-090409.sql`، `0004` طُبّقت، كل الفحوص 200). القسم أدناه عنها تاريخيّ.
+- **#275 في جولة تصليح 3 عند Opus 5.5** (relay بالخلفية، `--out-dir %TEMP%\wf-acct\relay\275-r3`، الموجز `%TEMP%\wf-acct\briefs\275-round3-opus.md`، 3 بنود O1–O3). جولة Sonnet (S1–S6) استُلمت: قرأتُ فرقها وبوّاباتها كلها خضراء (391 · كاملة 4 بيئية/7001 · migrate · lint · tsc/1411/build · sync_docs). بعد Opus: تحقّق `effort=high`، اقرأ الفرق، البوّابات، ثم الاستلام (لا جولة رابعة في القاعدة — ما يبقى يُبلَّغ المالك). شجرة العمل تحمل كل #275 **غير ملتزَمة**:
+  - التنفيذ (DeepSeek) ← قراءة الفرق كاملاً + Standards/Spec ← تصليح 1 (DeepSeek، 18 بنداً) ← بوّابات المنسّق كلها خضراء (389 · كاملة 4 بيئية/6999 · migrate من صفر `0005` · lint · tsc/1411/build · sync_docs) ← مراجعة نهائية وجدت 6 ⇒ Sonnet.
+  - **بعد عودة Sonnet:** تحقّق `effort=high` في `result.json`، اقرأ الفرق الجديد، شغّل البوّابات كلها، ثم مراجعة نهائية للقراءة. مشكلةٌ ثالثة ⇒ Opus 5.5 `--effort high`.
+  - **ثم الاستلام:** commit بملفات #275 وحدها (لا `docs/agents` المحرّمة على المنفّذ — هذه للمنسّق تُلتزم معها كالعادة، ولا الملفات المحرّمة غير المتتبَّعة) ← push ← CI ← نشر (`deploy-275.sh` من `deploy-274.sh`، و`0005` فيها `AddField`/`CreateModel`/`AddIndex`/`AddConstraint` فقط) ← **cron يومي** على الخادم: `python manage.py refresh_accounting_offices` صباحاً ← إغلاق #275.
+  - مفتوح للمالك: لم تُرَ الشاشة بالعين (لا بيئة متصفّح)؛ محدِّد الإسناد في التبويب يُظهر المسؤول الفعليّ فلا يميّز «موروث» من «محوَّل صراحةً» (طفيف، لـ#277).
+
+**الأسطول:** خطّا DeepSeek V4.1 Flash كلاهما بجهد **max**:
+- التنفيذ: `lane-7587384e-b0bf-4913-8361-67a1a1b59325`.
+- القراءة: `lane-da7d75a7-91f6-4032-ae4a-be40c4285cc8`.
+
+**قاعدة التصعيد:**
+- الجولة 1: DeepSeek max.
+- الجولة 2: Sonnet 5.5، `--effort high`.
+- الجولة 3: Opus 5.5، `--effort high`.
+- Sonnet وOpus عبر `claude-delegate` (relay بالخلفية، وتحقّق `effort=high` في `result.json`).
+
+### #274 — مُلتزَمة `1b9e51a3` ومدفوعة
+- **البوّابات عند المنسّق كلها خضراء:**
+  - الموديول + البيان: 330.
+  - migrate من صفر: OK (`0004`).
+  - الكاملة: 4 failed (البيئية، `.agents`=2696 سطراً، و`accounting_office`=0) / 6940 passed.
+  - lint: 3 kept.
+  - tsc، و`npm test` 1407، وbuild، وsync_docs.
+- **CI:** run `41796745266` كان `in_progress` (بدأ 08:04Z).
+- **الخطوة التالية:**
+  1. `gh run list --branch newktra --limit 1` ⇒ أخضر.
+  2. النشر:
+     - انسخ `%TEMP%\wf-acct\deploy-273.sh` إلى `deploy-274.sh`، وغيّر `before-273` إلى `before-274`.
+     - على الخادم: fetch، ثم merge، ثم `git diff origin/newktra --stat` فارغ، ثم pip، ثم check، ثم `makemigrations --check`. المعلّق يجب أن يكون `accounting_office.0004` وحده، و0004 فيها `AlterField` و`CreateModel` و`RunPython` فقط. ثم `npm install` و`npm run build`.
+     - ثم شغّل السكربت.
+  3. أغلق #274 بتعليق.
+  4. حدّث `acct-office-build.md`.
+
+### #275 — الالتزامات و«اليوم»: موقوفة مؤقتاً بطلب المالك
+- **المحاولة:** `attempt-7b4941d0-5bb9-40e8-a3d2-b196d14558c5`، concluded `correction-required` (إيقاف).
+  - كان يقرأ ولم يعدّل أي ملف.
+- **الاستئناف:**
+  - إمّا `delegation_correct` على المحاولة نفسها: «كمّل من حيث وقفت بنفس الموجز».
+  - وإمّا dispatch جديد على خط التنفيذ بنفس الموجز كاملاً. ابحث في الجلسة عن «تذكرة #275 — مكتب المحاسبة ٥».
+- **القرارات المحسومة في الموجز:**
+  - **النماذج** (هجرة `0005`):
+    - `PeriodTask`: خدمة × فترة، مع `assignee` nullable يرث `responsible`.
+    - `Obligation`: 3 حالات، مبلغ `Decimal`، واتجاه `due`/`refund`، و`client_paid`، و`prior_to_office`، وفرادة (`client_service`, `rule_code`, `period_end`).
+    - `ClientService.last_period_ours`.
+    - `OfficeRefreshRun(tenant, day)`.
+  - **دالة التحديث:** `refresh_office(tenant, *, day)` idempotent.
+    - تحفظ ما `period_end < day`، أي ق.م كانون الثاني تظهر في 1/2.
+    - الحدّ الأدنى `max(starts_on, responsible_from)` بلا سقف 24 شهراً.
+    - **محرّكٌ واحد مع `client_deadlines`**.
+    - لا تُحدِّث صفاً موجوداً.
+  - **التشغيل:**
+    - `ensure_office_refreshed` تُنادى من `GET today/`.
+    - أمر إدارة `refresh_accounting_offices [--day]`.
+    - **الـcron على الخادم خطوة نشرٍ للمنسّق.**
+  - **الانتقالات:**
+    - «انقدّم» لا يُتراجع عنه، ويقفل المبلغ.
+    - «مش لازم» يُعاد.
+    - `close_prior_obligations`.
+    - `assign_task` بـ`office.clients.assign`.
+    - `visible_clients` يتّسع لمن حُوّلت له شغلة.
+  - **المشتقّ عند القراءة:** `near` (0..6 أيام) و`late` (`actual_deadline < day`)، وصفرٌ تخزين. الأصفر/الأحمر والجرس لـ#276.
+  - **الـAPI:**
+    - `today/?filter=mine|week|late`.
+    - `obligations/<id>/{submit,not-required,reopen,amount,client-paid}/`.
+    - `tasks/<id>/assign/`.
+    - `clients/<pk>/obligations/` و`…/close-prior/`.
+  - **الواجهة:**
+    - `OfficeTodayScreen` على `/accounting-office/today`، الجوال أولاً، على نموذج `prototypes/acct-office-screens/01-today.html` (فرع `prototype/acct-office-screens`).
+    - تبويب «الالتزامات والشغلات» في ملف الزبون.
+- **عند الاستلام:**
+  - راجِع الشاشة على قياس الجوال بعينك.
+  - أضِف الـcron على الخادم عند النشر (أمرٌ يومي صباحاً).
+
+### (السابق) 09:50
 
 - **#273:** ✅ منشورة 2026-10-31 (نسخة `/root/backups/ktra-before-273-20261031-131345.sql`، هجرة `0003` OK، فحوص 200) ومغلقة.
 - **#274 — جولة التصليح 2 عند Sonnet** (job `pwsh-952ea4abb5b643cf`، relay `%TEMP%\wf-acct\relay\274-r2`،

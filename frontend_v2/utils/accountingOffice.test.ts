@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   AMOUNT_MASK,
   applyPackageSummary,
+  badgeLabelOf,
+  directionLabelOf,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientFilePath,
@@ -19,19 +21,25 @@ import {
   missingFirstRunLabels,
   monthGrid,
   nextMonthKey,
+  obligationAmountText,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
   periodLabel,
   previousMonthKey,
+  readTodayFilter,
   shiftWeek,
+  shortIsoDate,
   showsOfficeAssignment,
+  statusLabelOf,
+  todayFilterParams,
   uniqueDeadlineRules,
   visibleClientSettings,
   weekDays,
   weekRange,
   type CalendarDeadlineRow,
   type DeadlineRuleRow,
+  type ObligationRow,
   type OfficeServiceRow,
   type SettingRow,
 } from './accountingOffice.ts';
@@ -430,4 +438,89 @@ test('فلتر النوع بلا تكرارٍ بالكود — الأحدثُ س
   assert.deepEqual(unique.map((rule) => rule.code), ['ps_vat_periodic', 'ps_annual_return']);
   assert.equal(unique.find((rule) => rule.code === 'ps_vat_periodic')!.name, 'أ ضريبة');
   assert.deepEqual(uniqueDeadlineRules([]), []);
+});
+
+// ── «اليوم» والالتزامات (#275) ─────────────────────────────────────────
+function OBLIGATION(overrides: Partial<ObligationRow> = {}): ObligationRow {
+  return {
+    id: 1,
+    client: { id: 7, name: 'أبو أحمد' },
+    task: {
+      id: 3,
+      internal_deadline: '2026-02-10',
+      assignee: { id: 5, name: 'سالم' },
+    },
+    name: 'דוח תקופתי למע"מ',
+    rule_code: 'il_vat_periodic',
+    origin: 'official',
+    origin_label: 'رسمي',
+    period_label: 'كانون الثاني 2026',
+    official_date: '2026-02-15',
+    actual_deadline: '2026-02-19',
+    internal_deadline: '2026-02-10',
+    estimated: false,
+    warnings: [],
+    badges: [],
+    amount: null,
+    direction: '',
+    direction_label: '',
+    client_paid: false,
+    status: 'pending',
+    status_label: 'لسا ما انقدّم',
+    ...overrides,
+  };
+}
+
+test('تسميات الحالة والاتجاه والشارة من الخادم — ولا نسخةً محليّة تنافسها', () => {
+  const row = OBLIGATION({
+    status: 'submitted',
+    status_label: 'انقدّم',
+    direction: 'due',
+    direction_label: 'عليه',
+    badges: [{ key: 'late', label: 'متأخّر' }],
+  });
+
+  assert.equal(statusLabelOf(row), 'انقدّم');
+  assert.equal(directionLabelOf(row), 'عليه');
+  assert.equal(badgeLabelOf(row.badges[0]), 'متأخّر');
+
+  // نصٌّ غائبٌ من الخادم ⇒ القيمةُ الخام، لا تسميةٌ مخترعةٌ هنا.
+  assert.equal(statusLabelOf({ status: 'unknown', status_label: '' }), 'unknown');
+  assert.equal(directionLabelOf({ direction: 'due', direction_label: '   ' }), 'due');
+  assert.equal(badgeLabelOf({ key: 'near', label: '' }), 'near');
+});
+
+test('نصّ المبلغ: الاتجاه والشيكل، والمخفيُّ «—» وحدها', () => {
+  assert.equal(
+    obligationAmountText({ amount: '620.00', direction_label: 'عليه' }),
+    'عليه ₪ 620.00',
+  );
+  assert.equal(
+    obligationAmountText({ amount: '50.00', direction_label: 'إله' }),
+    'إله ₪ 50.00',
+  );
+  assert.equal(obligationAmountText({ amount: '620.00', direction_label: '' }), '₪ 620.00');
+  // `null` = لا رؤية مبالغ: لا «0» ولا «عليه ₪ null».
+  assert.equal(obligationAmountText({ amount: null, direction_label: 'عليه' }), AMOUNT_MASK);
+  assert.equal(obligationAmountText({ amount: '', direction_label: '' }), AMOUNT_MASK);
+});
+
+test('فلتر اليوم يُقرأ من العنوان: المعروف يبقى والمجهول «الكل»', () => {
+  assert.equal(readTodayFilter('?filter=mine'), 'mine');
+  assert.equal(readTodayFilter('filter=week'), 'week');
+  assert.equal(readTodayFilter('?filter=late&x=1'), 'late');
+  assert.equal(readTodayFilter('?filter=someday'), '');
+  assert.equal(readTodayFilter('?filter='), '');
+  assert.equal(readTodayFilter(''), '');
+  // الكتابةُ في العنوان: «الكل» بلا معامل.
+  assert.deepEqual(todayFilterParams('mine'), { filter: 'mine' });
+  assert.deepEqual(todayFilterParams(''), {});
+});
+
+test('التاريخ القصير dd/MM من ISO بلا كائن Date', () => {
+  assert.equal(shortIsoDate('2026-02-19'), '19/02');
+  assert.equal(shortIsoDate('2026-04-30T23:00-05:00'), '30/04');
+  assert.equal(shortIsoDate(''), '');
+  assert.equal(shortIsoDate(null), '');
+  assert.equal(shortIsoDate('غير تاريخ'), '');
 });

@@ -4,10 +4,13 @@ import {
   addClientService,
   applyServicePackage,
   assignOfficeClient,
+  assignTask,
   changeClientServiceFrequency,
+  closePriorObligations,
   createContact,
   deleteContact,
   endOfficeClient,
+  getClientObligations,
   getClientSettings,
   getOfficeClient,
   linkClientContact,
@@ -30,6 +33,7 @@ import {
   updateOfficeClient,
   updateTaxCard,
   type ClientContactRow,
+  type ClientObligationsPayload,
   type ClientServicesPayload,
   type ContactRow,
   type OfficeClientRow,
@@ -53,6 +57,7 @@ import {
   firstOfNextMonth,
   formatOfficeAmount,
   frequencyLabelFrom,
+  shortIsoDate,
   showsOfficeAssignment,
   visibleClientSettings,
 } from '../../utils/accountingOffice';
@@ -61,6 +66,7 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeObligationRow } from './OfficeObligationRow';
 import { SettingControl } from './SettingControl';
 import {
   OfficeCard,
@@ -72,14 +78,19 @@ import {
   officeSecondaryButtonClass,
 } from './OfficeUi';
 
-type TabKey = 'tax-card' | 'services' | 'contacts' | 'notes';
+type TabKey = 'tax-card' | 'obligations' | 'services' | 'contacts' | 'notes';
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'tax-card', label: 'البطاقة الضريبية' },
+  // #275: ما تولّد من التزاماتٍ وشغلاتٍ لهذا الزبون — بالحالة والأفعال.
+  { key: 'obligations', label: 'الالتزامات والشغلات' },
   { key: 'services', label: 'الخدمات' },
   { key: 'contacts', label: 'جهات الاتصال' },
   { key: 'notes', label: 'ملاحظات' },
 ];
+
+/** أثرُ «آخر فترة مش علينا» — جملةٌ واحدة في التأكيد وتحت خانة نموذج الإيقاف. */
+const LAST_PERIOD_NOT_OURS_EFFECT = 'ما بتتولّد، واللي منتظر منها بيصير «مش لازم هالفترة».';
 
 /** مسوّدةُ «أضف خدمة» — التواريخُ افتراضاتٌ يراها الموظف قبل الحفظ.
  *
@@ -181,9 +192,17 @@ export const OfficeClientFile: React.FC<{
   const [frequencyDraft, setFrequencyDraft] = useState({ frequency: '', effective_from: '' });
   const [stopping, setStopping] = useState<number | null>(null);
   const [stopDate, setStopDate] = useState('');
+  const [stopLastPeriodOurs, setStopLastPeriodOurs] = useState(true);
   const [packageChoice, setPackageChoice] = useState('');
   // عدّادُ طلبات الاقتراح: يمنع ردَّ اختيارٍ قديم أن يكتب فوق أحدث منه.
   const suggestionSeq = useRef(0);
+  // ── تبويب «الالتزامات والشغلات» (#275) ─────────────────────────────────
+  const [obligations, setObligations] = useState<ClientObligationsPayload | null>(null);
+  const [obligationsLoading, setObligationsLoading] = useState(false);
+  const [obligationsError, setObligationsError] = useState('');
+  const [obligationsToken, setObligationsToken] = useState(0);
+  const [closingPrior, setClosingPrior] = useState(false);
+  const [assigningTask, setAssigningTask] = useState<number | null>(null);
 
   // `onMissing` تصل دالّةً جديدة مع كل رسمٍ للأب. لو دخلت في تبعيّات `load`
   // لأُعيد التحميل مع كل رسم، فتُمسح تعديلاتُ البطاقة والملاحظات غير المحفوظة.
@@ -371,6 +390,51 @@ export const OfficeClientFile: React.FC<{
       toast('حُفظت الملاحظات', 'success');
     } catch (failure) {
       toast(humanizeThrown(failure, 'تعذّر حفظ الملاحظات.'), 'error');
+    }
+  };
+
+  // ── أفعالُ تبويب «الالتزامات والشغلات» (#275) ─────────────────────────
+  /** الخادمُ هو الحكم: كلُّ فعلٍ ناجحٍ يُعيد قراءة الشغلات والالتزامات. */
+  const reloadObligations = useCallback(() => {
+    setObligationsToken((token) => token + 1);
+  }, []);
+
+  /** «هدول انقدّموا قبل ما يجي علينا» — بتأكيدٍ صريح، ويقال كم أُغلق. */
+  const closePrior = async () => {
+    const ok = await confirm({
+      title: 'هدول انقدّموا قبل ما يجي علينا',
+      message:
+        'تُسكَّت كلُّ الالتزامات المنتظِرة التي انتهت فترتُها قبل اليوم، بلا تاريخ تقديمٍ ولا رقم: لم نقدّمها نحن، بل وجدناها مقدَّمة. تُراجَع واحدةً واحدةً بعدها.',
+      confirmText: 'أغلقها',
+    });
+    if (!ok) return;
+    setClosingPrior(true);
+    try {
+      const result = await closePriorObligations(clientId);
+      toast(
+        result.closed
+          ? `أُغلق ${result.closed} التزاماً سابقاً`
+          : 'لا التزامات منتظِرة قبل اليوم',
+        'success',
+      );
+      reloadObligations();
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر إغلاق الالتزامات السابقة.'), 'error');
+    } finally {
+      setClosingPrior(false);
+    }
+  };
+
+  /** تحويلُ شغلةٍ — بمفتاح `office.clients.assign`، و`null` يعيد الوراثة. */
+  const changeTaskAssignee = async (taskId: number, raw: string) => {
+    setAssigningTask(taskId);
+    try {
+      await assignTask(taskId, raw ? Number(raw) : null);
+      reloadObligations();
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تحويل الشغلة.'), 'error');
+    } finally {
+      setAssigningTask(null);
     }
   };
 
@@ -586,6 +650,30 @@ export const OfficeClientFile: React.FC<{
     }
   }, [clientId]);
 
+  // تبويبُ «الالتزامات والشغلات» يُطلب عند فتحه وحده — لا مع كل فتحِ ملفّ.
+  useEffect(() => {
+    if (tab !== 'obligations') return;
+    let cancelled = false;
+    setObligationsLoading(true);
+    setObligationsError('');
+    getClientObligations(clientId)
+      .then((payload) => {
+        if (!cancelled) setObligations(payload);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          setObligations(null);
+          setObligationsError(humanizeThrown(failure, 'تعذّر تحميل التزامات الزبون.'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setObligationsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, clientId, obligationsToken]);
+
   useEffect(() => {
     if (tab !== 'services') return;
     let cancelled = false;
@@ -695,6 +783,7 @@ export const OfficeClientFile: React.FC<{
     setStopping(rowId);
     setEditingFrequency(null);
     setStopDate(todayIso());
+    setStopLastPeriodOurs(true);
   };
 
   const submitStop = async (row: { id: number; service: { name: string } }) => {
@@ -702,13 +791,18 @@ export const OfficeClientFile: React.FC<{
     const ok = await confirm({
       title: 'إيقاف الخدمة',
       message:
-        `تتوقّف «${row.service.name}» بتاريخ ${formatDateValue(stopDate)}، ويبقى تاريخها كاملاً — لا يُحذف شيء.`,
+        `تتوقّف «${row.service.name}» بتاريخ ${formatDateValue(stopDate)}، ويبقى تاريخها كاملاً — لا يُحذف شيء.`
+        + (stopLastPeriodOurs
+          ? ''
+          : ` وآخر فترة مش علينا: ${LAST_PERIOD_NOT_OURS_EFFECT}`),
       confirmText: 'أوقف الخدمة',
       danger: true,
     });
     if (!ok) return;
     try {
-      setClientServices(await stopClientService(clientId, row.id, stopDate));
+      setClientServices(
+        await stopClientService(clientId, row.id, stopDate, stopLastPeriodOurs),
+      );
       setStopping(null);
       toast('أُوقفت الخدمة وبقي تاريخها', 'success');
     } catch (failure) {
@@ -1008,6 +1102,102 @@ export const OfficeClientFile: React.FC<{
         </div>
       ) : null}
 
+      {tab === 'obligations' ? (
+        <div className="space-y-4">
+          {obligationsError ? (
+            <OfficeError
+              message={obligationsError}
+              onRetry={reloadObligations}
+            />
+          ) : obligationsLoading ? (
+            <OfficeSkeleton rows={4} />
+          ) : !obligations || obligations.tasks.length === 0 ? (
+            <OfficeEmpty
+              title="لا شغلات بعد"
+              hint="تُولَّد الشغلات من خدمات الزبون ولائحة المواعيد حين تنتهي فترتُها — تُحدَّث صباح كل يوم."
+            />
+          ) : (
+            <>
+              {canWrite ? (
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-[11.5px] text-slate-500 dark:text-slate-400">
+                    الشغلاتُ من الأحدث فترةً، وكلُّ التزاماتها في كلّ الحالات.
+                  </p>
+                  <button
+                    type="button"
+                    disabled={closingPrior}
+                    onClick={closePrior}
+                    className={officeSecondaryButtonClass}
+                  >
+                    هدول انقدّموا قبل ما يجي علينا
+                  </button>
+                </div>
+              ) : null}
+
+              {obligations.tasks.map((task) => (
+                <OfficeCard key={task.id}>
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[12.5px] font-bold text-slate-900 dark:text-slate-100">
+                        {task.period_label}
+                      </span>
+                      <span className="text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                        {task.service.name}
+                      </span>
+                      <span className="text-[10.5px] tabular-nums text-slate-500 dark:text-slate-400">
+                        داخلي {shortIsoDate(task.internal_deadline)}
+                      </span>
+                    </div>
+                    {canAssign && showsResponsible ? (
+                      <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                        المسؤول
+                        <select
+                          value={task.assignee ? String(task.assignee.id) : ''}
+                          disabled={assigningTask === task.id}
+                          onChange={(event) =>
+                            changeTaskAssignee(task.id, event.target.value)
+                          }
+                          className={`${officeInputClass} h-8`}
+                        >
+                          <option value="">مسؤول الزبون</option>
+                          {members.map((member) => (
+                            <option key={member.user_id} value={member.user_id}>
+                              {member.full_name || member.username}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : task.assignee ? (
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {task.assignee.name}
+                      </span>
+                    ) : null}
+                  </div>
+
+                  <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+                    {task.obligations.map((obligation) => (
+                      <li key={obligation.id} className="py-2">
+                        <OfficeObligationRow
+                          obligation={obligation}
+                          day={obligations.day}
+                          directionChoices={obligations.direction_choices}
+                          canWrite={canWrite}
+                          canSeeAmounts={canSeeAmounts}
+                          onChanged={reloadObligations}
+                          onError={(message) => toast(message, 'error')}
+                          showStatus
+                          dates="official-actual"
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                </OfficeCard>
+              ))}
+            </>
+          )}
+        </div>
+      ) : null}
+
       {tab === 'services' ? (
         <div className="space-y-4">
           <OfficeCard
@@ -1092,6 +1282,11 @@ export const OfficeClientFile: React.FC<{
                           ? ` إلى ${formatDateValue(row.ends_on)}`
                           : ' — حتى الآن'}
                       </span>
+                      {row.ends_on && !row.last_period_ours ? (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          آخر فترة مش علينا
+                        </span>
+                      ) : null}
                       <span className="text-[11px] text-slate-500 dark:text-slate-400">
                         المكتب مسؤول من {formatDateValue(row.responsible_from)}
                       </span>
@@ -1212,6 +1407,15 @@ export const OfficeClientFile: React.FC<{
                             className={`${officeInputClass} mt-1 block tabular-nums`}
                           />
                         </label>
+                        <label className="inline-flex items-center gap-2 pb-2 text-[11.5px] text-slate-700 dark:text-slate-200">
+                          <input
+                            type="checkbox"
+                            checked={stopLastPeriodOurs}
+                            onChange={(event) => setStopLastPeriodOurs(event.target.checked)}
+                            className="size-4 rounded border-slate-300"
+                          />
+                          آخر فترة علينا
+                        </label>
                         <button
                           type="button"
                           onClick={() => submitStop(row)}
@@ -1226,6 +1430,9 @@ export const OfficeClientFile: React.FC<{
                         >
                           إلغاء
                         </button>
+                        <p className="w-full text-[10.5px] text-slate-500 dark:text-slate-400">
+                          شيل العلامة إذا آخر فترة قبل الإيقاف مش على المكتب — {LAST_PERIOD_NOT_OURS_EFFECT}
+                        </p>
                       </div>
                     ) : null}
                   </li>

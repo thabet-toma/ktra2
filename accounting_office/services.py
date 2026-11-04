@@ -39,6 +39,16 @@ from accounting_office.models import (
     FREQUENCY_MONTHLY,
     FREQUENCY_ON_DEMAND,
     FREQUENCY_QUARTERLY,
+    OBLIGATION_BADGE_LABELS,
+    OBLIGATION_BADGE_LATE,
+    OBLIGATION_BADGE_NEAR,
+    OBLIGATION_DIRECTION_CHOICES,
+    OBLIGATION_DIRECTION_LABELS,
+    OBLIGATION_ORIGIN_LABELS,
+    OBLIGATION_STATUS_LABELS,
+    OBLIGATION_STATUS_NOT_REQUIRED,
+    OBLIGATION_STATUS_PENDING,
+    OBLIGATION_STATUS_SUBMITTED,
     SERVICE_CODE_ANNUAL_ACCOUNTS,
     SERVICE_CODE_BOOKKEEPING,
     SERVICE_CODE_CONSULTING,
@@ -53,9 +63,12 @@ from accounting_office.models import (
     ClientSettingOverride,
     Contact,
     DeadlineSchedule,
+    Obligation,
     OfficeClient,
+    OfficeRefreshRun,
     OfficeService,
     OfficeSettingValue,
+    PeriodTask,
     ServicePackage,
     TaxCard,
     TaxThreshold,
@@ -111,29 +124,39 @@ TAX_CARD_AMOUNT_KEYS: tuple[str, ...] = ("annual_sales",)
 #: زبون، لكنه يُعرض لعضوٍ قد لا يملك رؤية المبالغ فيمرّ بالقناع كغيره.
 PACKAGE_AMOUNT_KEYS: tuple[str, ...] = ("suggested_price",)
 
+#: مبلغُ الالتزام (#275): ما على الزبون أو له في فترةٍ — **يُقفل عند «انقدّم»**.
+OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount",)
+
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
 #: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
 #: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
-AMOUNT_KEYS: frozenset[str] = frozenset(TAX_CARD_AMOUNT_KEYS + PACKAGE_AMOUNT_KEYS)
+AMOUNT_KEYS: frozenset[str] = frozenset(
+    TAX_CARD_AMOUNT_KEYS + PACKAGE_AMOUNT_KEYS + OBLIGATION_AMOUNT_KEYS,
+)
 
 
 def visible_clients(tenant, user):
     """**مصدر الرؤية الوحيد**: كلُّ قائمةٍ أو نقطةٍ تُرجع زبوناً تمرّ من هنا.
 
     بلا `office.clients.all` («يرى زبائن غيره») لا تُرجع إلا زبائنَ هذا العضو
-    (`responsible=user`)، ومعها كلُّ زبائن المكتب. والتفصيلُ المحجوب يُترجم في
+    (`responsible=user`) **والزبائن الذين حُوِّلت له شغلةٌ منهم** (`PeriodTask`
+    بـ`assignee=user`)، ومعها كلُّ زبائن المكتب. والتفصيلُ المحجوب يُترجم في
     الـview إلى **404 لا 403**: 403 يثبت وجودَ الزبون، و404 لا يثبت شيئاً.
 
-    **تذكرةُ الشغلات ستوسّع هذه الدالة وحدها** بـ«المحوَّلة له شغلاتهم»: الشغلةُ
-    التي تُحوَّل إلى موظّفٍ تُريهِ زبونها ولو لم يكن مسؤولَه. موضعُ التوسيع هذا —
-    لا شرطٌ جديدٌ في نقطةٍ ثانية يفترق عنه.
+    **التوسيعُ (#275) في هذا الموضع وحده** — هو الموضعُ الذي وصفته النسخةُ
+    السابقة: شغلةٌ تُحوَّل إلى موظّفٍ تُريهِ زبونَها ولو لم يكن مسؤولَه. شرطٌ
+    جديدٌ في نقطةٍ ثانية كان يفترق عن هذا بصمت. و`.distinct()` لأن الزبون قد
+    يطابق الشرطين معاً (مسؤولٌ عنه وله عنده شغلات) فيأتي مرّتين.
     """
     queryset = OfficeClient.objects.filter(tenant=tenant)
     if user_has_perm(user, tenant, OFFICE_CLIENTS_ALL_KEY):
         return queryset
     if user is None or not getattr(user, "is_authenticated", False):
         return queryset.none()
-    return queryset.filter(responsible=user)
+    assigned = PeriodTask.objects.filter(
+        tenant=tenant, assignee=user,
+    ).values("client_id")
+    return queryset.filter(Q(responsible=user) | Q(pk__in=assigned)).distinct()
 
 
 def visible_contacts(tenant, user):
@@ -1315,6 +1338,7 @@ def client_service_row(row, *, today, frequencies) -> dict:
         "starts_on": row.starts_on.isoformat(),
         "ends_on": None if row.ends_on is None else row.ends_on.isoformat(),
         "responsible_from": row.responsible_from.isoformat(),
+        "last_period_ours": row.last_period_ours,
         "is_active": status == CLIENT_SERVICE_STATUS_ACTIVE,
         "status": status,
         "status_label": CLIENT_SERVICE_STATUS_LABELS[status],
@@ -1492,13 +1516,18 @@ def change_client_service_frequency(
         )
 
 
-def stop_client_service(client_service, *, ends_on) -> ClientService:
+def stop_client_service(client_service, *, ends_on, last_period_ours=True) -> ClientService:
     """الإيقافُ يكتب `ends_on` ويُبقي الصفّ — **ولا حذف**: التاريخُ سؤالٌ له جواب.
 
     وثلاثةُ رفوضٍ قبله: تاريخٌ مطلوب، وصفٌّ موقوفٌ سابقاً (الإيقافُ مرّةٌ واحدة —
     كتابةُ تاريخٍ ثانٍ كانت تمحو الأول بلا أثر)، و`ends_on` يسبق تاريخَ سريان
     دوريةٍ مسجَّلة (فلا دوريةَ تُسجَّل بعد انتهاء الخدمة). والتحقّقُ والكتابةُ في
     معاملةٍ واحدة كالإضافة وتغيير الدورية.
+
+    **و«آخرُ فترةٍ علينا؟» (#275)**: `last_period_ours=False` تعني أن المكتب لا
+    يتحمّل آخر فترةٍ في كل سلسلةٍ — فتُكتب على الصفّ (فلا يولّدها «حدّث المكتب»
+    أبداً)، **وكلُّ التزامٍ منتظرٍ لها يُعلَّم «مش لازم هالفترة»** بدل أن يبقى
+    في الشاشة أبداً. والمنقضي قبلها يبقى: تقريرُ آذار المستحقُّ في نيسان له صفّ.
     """
     if ends_on is None:
         raise ValidationError({"ends_on": "تاريخ الإيقاف مطلوب."})
@@ -1521,7 +1550,10 @@ def stop_client_service(client_service, *, ends_on) -> ClientService:
         })
     with transaction.atomic():
         client_service.ends_on = ends_on
-        client_service.save(update_fields=["ends_on"])
+        client_service.last_period_ours = bool(last_period_ours)
+        client_service.save(update_fields=["ends_on", "last_period_ours"])
+        if not client_service.last_period_ours:
+            _close_pending_last_periods(client_service)
     return client_service
 
 
@@ -1832,7 +1864,7 @@ def rule_applies(rule, card, thresholds_ctx: ThresholdContext) -> bool:
     return True
 
 
-def _service_periods(client_service, *, start, end, frequencies):
+def _service_periods(client_service, *, floor, end, frequencies):
     """فتراتُ خدمةٍ دوريتُها مؤرَّخة — `(البداية, النهاية, الدورية)`.
 
     الحسابُ في `deadlines.service_periods` (حزمٌ محاذاةٌ للتقويم، والشهرُ تحكمه
@@ -1842,17 +1874,14 @@ def _service_periods(client_service, *, start, end, frequencies):
     طولها: فترةٌ قُطعت بتغيير الدورية (نيسان–كانون الأول بعد التحوّل إلى سنوية)
     تبقى بدوريتها.
 
-    والمؤشّرُ الأول أولُ شهرٍ في `max(بداية الطلب − سنتين, starts_on,
-    responsible_from)` — والحزمُ محاذاة، فلا تتغيّر النتيجة ببداية الطلب.
+    والمؤشّرُ الأول أولُ شهرٍ في `max(floor, starts_on, responsible_from)` — أرضيةُ
+    المدى يأتي بها المنادي (التقويمُ بسقف 24 شهراً، والتحديثُ بلا سقف)، والحزمُ
+    محاذاة، فلا تتغيّر النتيجة ببداية الطلب.
     """
     def frequency_of_month(month):
         return _frequency_at_month_end(client_service, month, frequencies)
 
-    floor = max(
-        deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS),
-        client_service.starts_on,
-        client_service.responsible_from,
-    )
+    floor = max(floor, client_service.starts_on, client_service.responsible_from)
     return deadlines.service_periods(frequency_of_month, floor, end)
 
 
@@ -1940,10 +1969,10 @@ def calendar_context(tenant, clients) -> CalendarContext:
     )
 
 
-def client_deadlines(client, *, start, end, context=None) -> list[dict]:
-    """مواعيدُ زبونٍ في مدى — محسوبةٌ عند القراءة ولا محفوظة.
+def _deadline_items(client, *, floor, end, context):
+    """**المولّدُ الوحيد**: `(الزبون, خدمةُ الزبون, السطر, النتيجة)` لمدىً.
 
-    لكل خدمةٍ عند الزبون، ولكل سطرٍ في **نسخة نظامه** يخصّ خدمتها: فتراتٌ فقاعدتها:
+    لكل خدمةٍ عند الزبون، ولكل سطرٍ في **نسخة نظامه** يخصّ خدمتها، فتراتٌ فقاعدته:
 
     - **`cadence == "service"`**: الفتراتُ من دورية الخدمة المؤرَّخة
       (`deadlines.service_periods`) — حزمٌ محاذاةٌ للتقويم تتبع تغييرَها.
@@ -1951,17 +1980,18 @@ def client_deadlines(client, *, start, end, context=None) -> list[dict]:
       `deadlines.periods_for` على `rule.cadence`، **مستقلّةً عن دورية الخدمة** —
       وإلا وُلّد التقريرُ السنوي اثنتَي عشرة مرّةً لخدمةٍ شهرية، والرُّبعيُّ شهرياً.
 
-    ثم تُصفّى بالفترة التي تخصّ المكتب (`_period_is_ours`) وبأن يقع
-    `actual_deadline` في `[start, end]`.
+    ثم تُصفّى بالفترة التي تخصّ المكتب (`_period_is_ours`) — بلا شرطٍ على
+    `actual_deadline`: **التقويمُ** يقصّ على المدى، و**التحديثُ** يقصّ على
+    `period_end < يومه`. ونسختان من توليد الفترات والقواعد كانتا تفترقان عند
+    أول تصحيحٍ في اللائحة: التقويمُ يرى الجديد والتحديثُ يحفظ القديم.
 
     وكلُّ إعدادٍ يُقرأ **بالمحلّل** وبالزبون: النظامُ ويومُ راحته وطريقةُ تقديمه
     وأيامُ إعداده بحسب دورية الفترة، وأيامُ عطلة المكتب بلا زبون. و`context` سياقُ
-    طلبٍ يجمعها لزبائن التقويم مرّةً واحدة.
+    طلبٍ يجمعها لزبائن الطلب مرّةً واحدة (لا N+1).
     """
-    context = context or calendar_context(client.tenant, [client])
     system = context.setting(client, TAX_SYSTEM_KEY)
     if not system:
-        return []
+        return
 
     client_rest_days = context.setting(client, "rest_days") or []
     filing_method = context.setting(client, "filing_method")
@@ -1969,14 +1999,12 @@ def client_deadlines(client, *, start, end, context=None) -> list[dict]:
     # بالبطاقة لا تنطبق عليها، فيبقى ما لا شرطَ له (دفترٌ بلا بطاقةٍ لا مواعيدَ له).
     card = getattr(client, "tax_card", None)
 
-    rows: list[dict] = []
-    service_rows = client_services_of(client, context)
-    for client_service in service_rows:
+    for client_service in client_services_of(client, context):
         frequencies = list(client_service.frequencies.all())
         service_code = client_service.service.code
         for period_start, period_end, source, cadence in _periods_for_service(
             client_service, service_code, frequencies,
-            system=system, start=start, end=end, context=context,
+            system=system, floor=floor, end=end, context=context,
         ):
             if not _period_is_ours(client_service, period_end):
                 continue
@@ -2006,15 +2034,40 @@ def client_deadlines(client, *, start, end, context=None) -> list[dict]:
                     schedule_policy=schedule.rest_day_policy,
                     authority_closed_days=schedule.authority_closed_days or [],
                 )
-                if not start <= result.actual_deadline <= end:
-                    continue
-                result = _with_estimated_threshold_warning(result, rule, thresholds)
-                rows.append({
-                    "client": client,
-                    "service": client_service.service,
-                    "rule": rule,
-                    "result": result,
-                })
+                yield (
+                    client,
+                    client_service,
+                    rule,
+                    _with_estimated_threshold_warning(result, rule, thresholds),
+                )
+
+
+def client_deadlines(client, *, start, end, context=None) -> list[dict]:
+    """مواعيدُ زبونٍ في مدى — محسوبةٌ عند القراءة ولا محفوظة.
+
+    تُبنى من المولّد الوحيد (`_deadline_items`) بأرضية **سنتين قبل المدى**:
+    قاعدتان تُلقيهما في السنة التالية (`month_day_next_year`)، ففترةٌ انتهت في
+    2025 قد يكون موعدُها داخل المدى. ثم تُقصّ على `actual_deadline ∈ [start, end]`.
+
+    **والتحديثُ اليوميّ يقرأ المولّد نفسه** بأرضية خدمة الزبون بلا سقف وبقصٍّ على
+    `period_end` — فلا نسختان تفترقان.
+    """
+    context = context or calendar_context(client.tenant, [client])
+    rows: list[dict] = []
+    for _client, client_service, rule, result in _deadline_items(
+        client,
+        floor=deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS),
+        end=end,
+        context=context,
+    ):
+        if not start <= result.actual_deadline <= end:
+            continue
+        rows.append({
+            "client": client,
+            "service": client_service.service,
+            "rule": rule,
+            "result": result,
+        })
     return rows
 
 
@@ -2049,44 +2102,58 @@ def client_services_of(client, context=None):
     )
 
 
+def _streams_for_service(
+    client_service, service_code, frequencies, *, system, floor, end, context,
+) -> dict[str, list[tuple]]:
+    """فتراتُ الخدمة **مسقوفةً بمصدرها**: سلسلةٌ لكلِّ سطرٍ ثابتٍ + سلسلةُ الخدمة.
+
+    المفتاحُ هو `source` نفسه (قيمةُ `rule.cadence`)، والقيمةُ ثلاثياتُ
+    `(البداية, النهاية, دوريةُ الإعداد)`. وتُستعمل مرّتين بلا نسختين من الحساب:
+    يُسطَّحها `_periods_for_service` للمولّد، ويقرأ منها `_last_periods_of_service`
+    «آخرَ فترةٍ في كل سلسلة» عند الإيقاف.
+    """
+    cadences = _cadences_for_service(context, system, service_code, floor, end)
+    streams: dict[str, list[tuple]] = {}
+    if CADENCE_SERVICE in cadences:
+        streams[CADENCE_SERVICE] = [
+            (period_start, period_end, cadence)
+            for period_start, period_end, cadence in _service_periods(
+                client_service, floor=floor, end=end, frequencies=frequencies,
+            )
+        ]
+    for cadence in cadences - {CADENCE_SERVICE}:
+        streams[cadence] = [
+            (period_start, period_end, cadence)
+            for period_start, period_end in deadlines.periods_for(cadence, floor, end)
+        ]
+    return streams
+
+
 def _periods_for_service(
-    client_service, service_code, frequencies, *, system, start, end, context,
+    client_service, service_code, frequencies, *, system, floor, end, context,
 ) -> list[tuple]:
     """فتراتُ الخدمة كلُّها — `(البداية, النهاية, مصدرُ الفترة, دوريةُ الإعداد)`.
 
-    - **دوريةُ السطر الثابتة**: `deadlines.periods_for` محاذاةً للتقويم، **مستقلّةً
-      عن دورية الخدمة** (وإلا صار السنويُّ شهرياً لخدمةٍ شهرية). والمصدرُ هو
-      الدوريةُ نفسها.
-    - **`cadence == "service"`**: `deadlines.service_periods` على دورية الخدمة
-      المؤرَّخة؛ والمصدرُ `service` ودوريةُ الإعداد **الدوريةُ التي قرأها المحرّك
-      للفترة** (كل شهرين تتبع إعدادَ الشهريّ، والفترةُ المقطوعةُ بالتغيير تبقى
-      بدوريتها لا بطولها).
-
-    والدورياتُ المرشَّحة تُقرأ من أسطر نسخ المدى، فلا تُحسب دوريةٌ لا سطرَ لها.
+    تُسطَّح من `_streams_for_service`: سطرٌ ثابتُ الدورية يولّد فتراتِ قاعدته
+    وحدها (`deadlines.periods_for`) مستقلّةً عن دورية الخدمة، وسطرُ `service`
+    يولّد فترات دورية الخدمة المؤرَّخة، ودوريةُ الإعداد للفترة المقطوعة هي
+    الدوريةُ التي قرأها المحرّكُ لها لا المستنتَجةُ من طولها.
     """
-    cadences = _cadences_for_service(context, system, service_code, start, end)
-    periods: list[tuple] = []
-    if CADENCE_SERVICE in cadences:
-        periods.extend(
-            (period_start, period_end, CADENCE_SERVICE, cadence)
-            for period_start, period_end, cadence in _service_periods(
-                client_service, start=start, end=end, frequencies=frequencies,
-            )
-        )
-    floor = deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS)
-    for cadence in cadences - {CADENCE_SERVICE}:
-        periods.extend(
-            (period_start, period_end, cadence, cadence)
-            for period_start, period_end in deadlines.periods_for(cadence, floor, end)
-        )
-    return periods
+    return [
+        (period_start, period_end, source, cadence)
+        for source, periods in _streams_for_service(
+            client_service, service_code, frequencies,
+            system=system, floor=floor, end=end, context=context,
+        ).items()
+        for period_start, period_end, cadence in periods
+    ]
 
 
-def _cadences_for_service(context, tax_system, service_code, start, end) -> set:
+def _cadences_for_service(context, tax_system, service_code, floor, end) -> set:
     """دورياتُ أسطر خدمةٍ في نسخ السنوات التي يمسّها المدى."""
     cadences: set[str] = set()
     for schedule, _estimated, grouped in _schedules_for_range(
-        context, tax_system, start, end,
+        context, tax_system, floor, end,
     ):
         if schedule is None:
             continue
@@ -2096,12 +2163,11 @@ def _cadences_for_service(context, tax_system, service_code, start, end) -> set:
     return cadences
 
 
-def _schedules_for_range(context, tax_system, start, end) -> list[tuple]:
+def _schedules_for_range(context, tax_system, floor, end) -> list[tuple]:
     """نسخُ سنوات المدى من مُذكِّرة السياق — لا استعلامَ جديداً بعد أوّل سنة."""
-    first_year = deadlines.add_months(start, -DEADLINE_LOOKBACK_MONTHS).year
     return [
         context.schedule(tax_system, year)
-        for year in range(first_year, end.year + 1)
+        for year in range(floor.year, end.year + 1)
     ]
 
 
@@ -2125,8 +2191,8 @@ def _schedule_bundle(cache, tax_system, year) -> tuple:
 def calendar_row(item) -> dict:
     """سطرُ التقويم كما يُعرض — **بلا أيّ مبلغ** فلا حارسَ مبالغ يتأثّر.
 
-    `expected` صحيحٌ دائماً في هذه التذكرة: كلُّ سطرٍ محسوبٌ لا محفوظ (#275 تضيف
-    المحفوظ فتختلف القيمة).
+    `expected` صحيحٌ دائماً: كلُّ سطرٍ في التقويم محسوبٌ لا محفوظ، والتقويمُ لا
+    يحفظ شيئاً ولا يميّز المحفوظ — تمييزُه تذكرةٌ لاحقة.
     """
     result = item["result"]
     return {
@@ -2232,3 +2298,638 @@ def deadline_rules_payload(tax_system) -> dict:
                 "source_url": rule.source_url,
             })
     return {"system": tax_system, "rules": rows}
+
+
+# ── الالتزامات والشغلات ومحرّك «حدّث المكتب ليوم X» (#275) ──────────────────
+#
+# **المحرّكُ واحد**: `_deadline_items` هو المولّدُ الوحيد للفترات والقواعد
+# والنتائج. التقويمُ يقصّه على `actual_deadline`، والتحديثُ يقصّه على
+# `period_end < today` — فلا نسختان تفترقان عند أول تصحيحٍ في اللائحة.
+#
+# **والمشتقُّ لا يُخزَّن**: «قريب هالأسبوع» و«متأخّر» يُحسبان من اليوم المعطى عند
+# القراءة. عمودٌ لهما كان ينام بين تشغيلين ويقول «متأخّر» عن يومٍ مضى.
+
+#: نافذةُ «قريب هالأسبوع»: من اليوم إلى ستة أيامٍ بعده (اليومُ السابع يومُ عملٍ آخر).
+NEAR_WINDOW_DAYS = 6
+
+#: فلاترُ شاشة «اليوم» — الفارغ «الكل»، والبقيةُ تُقصّ الصفوفَ بعد العدّ.
+TODAY_FILTERS: tuple[str, ...] = ("", "mine", "week", "late")
+
+#: نصُّ رفض التراجع عن «انقدّم» — واحدٌ في الخدمة والاختبار.
+SUBMITTED_LOCKED = "انقدّم لا يُتراجَع عنه"
+
+
+def last_period_of_stream(periods, *, ends_on):
+    """**آخرُ فترةٍ في سلسلة**: `(البداية, النهاية)` أو `None` — دالّةٌ نقيّة.
+
+    التعريف: الفترةُ التي `period_end <= ends_on` **وتنتهي التي تليها بعد**
+    `ends_on`. فالسلسلةُ الشهرية المقطوعة في 31 آذار آخرُها آذار، والمقطوعة في
+    15 شباط آخرُها كانون الثاني — الفترةُ التي تحتوي تاريخَ الإيقاف ليست
+    «منتهية» فلا تُحسب. والسلسلةُ متّصلةٌ ومحاذاة (`deadlines.periods_for`
+    و`service_periods`)، فغيابُ التالي في قائمةٍ مقطوعةٍ يعني أنها الأخيرة.
+    """
+    last = None
+    for index, (start, end) in enumerate(periods):
+        if end > ends_on:
+            break
+        following = periods[index + 1] if index + 1 < len(periods) else None
+        if following is None or following[1] > ends_on:
+            last = (start, end)
+    return last
+
+
+def _last_periods_of_service(client_service, *, client=None, context=None) -> set[tuple]:
+    """آخرُ فترةٍ في **كل سلسلة** (دورية الخدمة، ولكلِّ سطرٍ ثابت) للخدمة.
+
+    تُقرأ من `_streams_for_service` نفسها التي يقرؤها المحرّك — فلا نسخةً ثانية
+    من توليد الفترات. وتُرجع مجموعةً من `(البداية, النهاية)` لأن المقارنةَ
+    بالفترة لا بمصدرها: سطران بدوريةٍ واحدةٍ فترتُهما واحدة.
+    """
+    ends_on = client_service.ends_on
+    if ends_on is None:
+        return set()
+    client = client_service.client if client is None else client
+    # سياقُ الطلب يُمرَّر من `refresh_office` (زبائنُه كلُّهم) وإلا بُني لزبونٍ واحد.
+    context = context or calendar_context(client.tenant, [client])
+    system = context.setting(client, TAX_SYSTEM_KEY)
+    if not system:
+        return set()
+    streams = _streams_for_service(
+        client_service,
+        client_service.service.code,
+        list(client_service.frequencies.all()),
+        system=system,
+        floor=max(client_service.starts_on, client_service.responsible_from),
+        end=ends_on,
+        context=context,
+    )
+    lasts: set[tuple] = set()
+    for periods in streams.values():
+        last = last_period_of_stream(
+            [(start, end) for start, end, _cadence in periods], ends_on=ends_on,
+        )
+        if last is not None:
+            lasts.add(last)
+    return lasts
+
+
+def _close_pending_last_periods(client_service) -> int:
+    """كلُّ التزامٍ منتظرٍ لآخر فترةٍ ⇒ «مش لازم هالفترة» — **لا حذف**.
+
+    الصفُّ يبقى بتاريخه ومن حُوِّل إليه، والحالةُ وحدها تتغيّر — فسؤالُ «لماذا لم
+    نقدّم آذار؟» له جوابٌ في الشاشة بدل أن يختفي الصفُّ بصمت.
+    """
+    periods = _last_periods_of_service(client_service)
+    if not periods:
+        return 0
+    condition = Q()
+    for period_start, period_end in periods:
+        condition |= Q(period_start=period_start, period_end=period_end)
+    return client_service.obligations.filter(
+        condition, status=OBLIGATION_STATUS_PENDING,
+    ).update(
+        status=OBLIGATION_STATUS_NOT_REQUIRED, updated_at=timezone.now(),
+    )
+
+
+def _refresh_client(client, *, tenant, day, end, context, skip):
+    """زبونٌ واحد: يحفظ شغلاته والتزاماتِه المستحقّة — `(شغلات, التزامات)` جديدتان.
+
+    **القائمُ يُقرأ استعلامين لا بنداً بنداً**: شغلاتُ خدمات الزبون في قاموسٍ
+    بمفتاح `(client_service, period_start, period_end)`، والتزاماتُها في مجموعة
+    مفاتيح `(client_service, rule_code, period_end)`. فالكلفةُ لا تكبر بتاريخ
+    الزبون: مكتبٌ بسنتين تاريخ لا يدفع آلافَ الاستعلامات في خيط الطلب. والبندُ
+    الغائب وحده يُنشأ بـ`get_or_create` (حمايةً من تشغيلين متزامنين) ثم يُضاف إلى
+    القاموس/المجموعة فوراً فلا يُقرأ مرّتين في المسحة نفسها.
+
+    معاملةُ النداء في `refresh_office` (واحدةٌ لكل زبون). و`skip` فتراتُ
+    الخدمات التي رُفع عنها «آخر فترة علينا».
+    """
+    service_rows = client_services_of(client, context)
+    if not service_rows:
+        return 0, 0
+    floor = min(
+        min(row.starts_on for row in service_rows),
+        min(row.responsible_from for row in service_rows),
+    )
+    service_ids = [row.pk for row in service_rows]
+    known_tasks = {
+        (row.client_service_id, row.period_start, row.period_end): row
+        for row in PeriodTask.objects.filter(client_service_id__in=service_ids)
+    }
+    known_obligations = set(
+        Obligation.objects
+        .filter(client_service_id__in=service_ids)
+        .values_list("client_service_id", "rule_code", "period_end"),
+    )
+    created_tasks = 0
+    created_obligations = 0
+    for _client, client_service, rule, result in _deadline_items(
+        client, floor=floor, end=end, context=context,
+    ):
+        # **ما حان وقتُه = فترةٌ انتهت قبل اليوم**: تقريرُ كانون الثاني يظهر في
+        # 1 شباط لا في 31 كانون الثاني، والفترةُ التي تحتوي اليوم لم تنتهِ بعد.
+        if result.period_end >= day:
+            continue
+        # زبونٌ منتهٍ: لا فترةَ تنتهي بعد تاريخ إنهائه — ما انقضى قبلها يبقى.
+        if client.ended_on is not None and result.period_end > client.ended_on:
+            continue
+        if (result.period_start, result.period_end) in skip.get(client_service.pk, ()):
+            continue
+        task_key = (client_service.pk, result.period_start, result.period_end)
+        task = known_tasks.get(task_key)
+        if task is None:
+            task, task_created = PeriodTask.objects.get_or_create(
+                client_service=client_service,
+                period_start=result.period_start,
+                period_end=result.period_end,
+                defaults={
+                    "tenant": tenant,
+                    "client": client,
+                    "internal_deadline": result.internal_deadline,
+                },
+            )
+            known_tasks[task_key] = task
+            if task_created:
+                created_tasks += 1
+        obligation_key = (client_service.pk, rule.code, result.period_end)
+        if obligation_key in known_obligations:
+            # **صفٌّ قائمٌ لا يُحدَّث**: تواريخُه ما رآه الموظف، وتصحيحُها تذكرة.
+            continue
+        _obligation, obligation_created = Obligation.objects.get_or_create(
+            client_service=client_service,
+            rule_code=rule.code,
+            period_end=result.period_end,
+            defaults={
+                "tenant": tenant,
+                "client": client,
+                "task": task,
+                # الالتزامُ يشير إلى **نسخة اللائحة الفعلية** التي حُسب عليها،
+                # فلا يصير يتيماً حين تُنشر نسخةُ سنةٍ أعلى.
+                "rule": rule,
+                "name": rule.name,
+                "period_start": result.period_start,
+                "legal_date": result.legal_date,
+                "official_date": result.official_date,
+                "actual_deadline": result.actual_deadline,
+                "internal_deadline": result.internal_deadline,
+                "estimated": result.estimated,
+                "postponed": result.postponed,
+                "warnings": list(result.warnings),
+            },
+        )
+        known_obligations.add(obligation_key)
+        if not obligation_created:
+            continue
+        created_obligations += 1
+        # الموعدُ الداخليُّ للشغلة **أبكرُ** التزاماتها: ينخفض إن انضمّ أبكر،
+        # ولا يتأخّر أبداً بعد أن رآه الموظف.
+        if result.internal_deadline < task.internal_deadline:
+            task.internal_deadline = result.internal_deadline
+            task.save(update_fields=["internal_deadline"])
+    return created_tasks, created_obligations
+
+
+def refresh_office(tenant, *, day) -> dict:
+    """«حدّث المكتب ليوم X» — يحفظ ما حان وقته، **idempotent وبلا ساعة**.
+
+    **ما حان وقتُه**: كلُّ التزامٍ انتهت فترتُه قبل `day` (`period_end < day`) —
+    فق.م كانون الثاني تظهر في 1 شباط ولا تظهر في 31 كانون الثاني.
+
+    **والأرضيةُ `max(starts_on, responsible_from)` بلا سقف 24 شهراً**: تشغيلٌ
+    متأخّرٌ يلحق كلَّ ما فات، وزبونٌ جديدٌ بفترةٍ ماضيةٍ تُولَّد كلُّ فتراتها.
+    والتقويمُ يقرأ المولّدَ نفسه بسقفه — **محرّكٌ واحد**.
+
+    **والصفُّ القائم لا يُحدَّث**: `get_or_create` للشغلة بـ`(client_service,
+    period_start, period_end)` وللالتزام بـ`(client_service, rule_code,
+    period_end)`. فتشغيلُ اليوم نفسه مرّتين لا يكتب صفّاً، وتشغيلُ يومٍ لاحقٍ
+    يضيف الجديد فقط. **ومعاملةٌ لكل زبون**: مكتبٌ بألف زبون لا يُحبَس في واحدة.
+
+    ويُسجَّل `OfficeRefreshRun` لليوم (`get_or_create`)، فالسجلُّ صفٌّ واحدٌ لكل
+    (مكتب، يوم) وعدّادُه ما أنشأه أوّلُ تشغيل. ويُرجع ما أنشأه **هذا** النداء:
+    صفراً في اليوم نفسه، والجديدَ في يومٍ لاحق.
+    """
+    clients = list(
+        OfficeClient.objects
+        .filter(tenant=tenant)
+        .select_related("tax_card", "responsible")
+        .prefetch_related("services__service", "services__frequencies")
+        .order_by("id"),
+    )
+    context = calendar_context(tenant, clients)
+    end = day - timedelta(days=1)
+    created_tasks = 0
+    created_obligations = 0
+    for client in clients:
+        skip = {
+            row.pk: _last_periods_of_service(row, client=client, context=context)
+            for row in client_services_of(client, context)
+            if not row.last_period_ours and row.ends_on is not None
+        }
+        with transaction.atomic():
+            tasks, obligations = _refresh_client(
+                client, tenant=tenant, day=day, end=end, context=context, skip=skip,
+            )
+        created_tasks += tasks
+        created_obligations += obligations
+
+    OfficeRefreshRun.objects.get_or_create(
+        tenant=tenant, day=day, defaults={"created_obligations": created_obligations},
+    )
+    return {
+        "day": day.isoformat(),
+        "created_tasks": created_tasks,
+        "created_obligations": created_obligations,
+    }
+
+
+def ensure_office_refreshed(tenant, *, day):
+    """مرّةٌ في اليوم: ليومٍ له سجلٌّ **لا عمل** (تُرجع `None`)، وإلا `refresh_office`.
+
+    تُرجع `None` ليومٍ مسجَّلٍ سابقاً (لا تشغيلَ ولا عدّادات)، وعدّاداتِ
+    `refresh_office` (`created_tasks`/`created_obligations`) ليومٍ جديد — فالمُنادي
+    إن أراد الأرقام فليقرأها من قيمتها المُعادة لا من `None`.
+
+    تُنادى عند أول فتحٍ لشاشة «اليوم»، فيصير فتحُ الشاشة تشغيلاً يومياً بلا
+    مُجدوِلٍ في المستودع (الـcron على الخادم خطوةُ نشر).
+    """
+    if OfficeRefreshRun.objects.filter(tenant=tenant, day=day).exists():
+        return None
+    return refresh_office(tenant, day=day)
+
+
+def _clean_obligation_amount(value):
+    """مبلغُ الالتزام: فارغٌ ⇒ `None` (مسح)، وسالبٌ أو أكثر من خانتين ⇒ رفض."""
+    if value is None or value == "":
+        return None
+    try:
+        amount = value if isinstance(value, Decimal) else Decimal(str(value))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({"amount": "مبلغٌ غير صالح."}) from None
+    if not amount.is_finite() or amount < 0:
+        raise ValidationError({"amount": "المبلغ لا يكون سالباً."})
+    if amount != amount.quantize(Decimal("0.01")):
+        raise ValidationError({"amount": "المبلغ بخانتين عشريتين على الأكثر."})
+    return amount
+
+
+def _assert_not_submitted(obligation, field="status"):
+    """«انقدّم» نهائيٌّ: أيُّ انتقالٍ منه مرفوض — والمبلغُ معه."""
+    if obligation.status == OBLIGATION_STATUS_SUBMITTED:
+        raise ValidationError({field: SUBMITTED_LOCKED})
+
+
+def _assert_transition(obligation, allowed, message) -> None:
+    """الانتقالُ من حالةٍ واحدةٍ مسموحة: الخروجُ من «انقدّم» برسالته، وغيرُه برسالةٍ تقول الطريق."""
+    if obligation.status == OBLIGATION_STATUS_SUBMITTED:
+        raise ValidationError({"status": SUBMITTED_LOCKED})
+    if obligation.status not in allowed:
+        raise ValidationError({"status": message})
+
+
+def submit_obligation(obligation, *, actor, submitted_on=None, number="") -> Obligation:
+    """«انقدّم»: من المنتظِر إلى المُقدَّم، بتاريخ التقديم ومَن قدّمه ورقمه.
+
+    `submitted_on` افتراضُه اليوم، **ولا يكون في المستقبل** — تقديمٌ بتاريخٍ لم
+    يأتِ بعد يكذب على السجلّ. والانتقالُ من **المنتظِر وحده**: «مش لازم هالفترة»
+    تُرجَّع أوّلاً، و«انقدّم» نهائيٌّ (`SUBMITTED_LOCKED`).
+    """
+    _assert_transition(
+        obligation,
+        {OBLIGATION_STATUS_PENDING},
+        "«مش لازم هالفترة» — رجّعها أوّلاً ثم قدّم.",
+    )
+    today = timezone.localdate()
+    day = submitted_on or today
+    if day > today:
+        raise ValidationError({"submitted_on": "تاريخ التقديم لا يكون في المستقبل."})
+    obligation.status = OBLIGATION_STATUS_SUBMITTED
+    obligation.submitted_on = day
+    obligation.submitted_by = actor if getattr(actor, "pk", None) else None
+    obligation.submission_number = (number or "").strip()
+    obligation.save(update_fields=[
+        "status", "submitted_on", "submitted_by", "submission_number", "updated_at",
+    ])
+    return obligation
+
+
+def mark_obligation_not_required(obligation, *, actor) -> Obligation:
+    """«مش لازم هالفترة» — من المنتظِر وحده، وتُفتح بـ`reopen_obligation`.
+
+    `actor` في التوقيع توحيداً مع `submit_obligation`: هذان الانتقالان لا يكتبان
+    عموداً لمن فعلهما في هذه الشريحة (الحالةُ والتاريخُ يكفيان). والانتقالُ من
+    **المنتظِر وحده**: ما عُلِّم سابقاً لا يُعلَّم ثانيةً، و«انقدّم» مرفوض.
+    """
+    _assert_transition(
+        obligation,
+        {OBLIGATION_STATUS_PENDING},
+        "الالتزامُ معلَّمٌ «مش لازم هالفترة» — «رجّعها» تُعيده منتظراً.",
+    )
+    obligation.status = OBLIGATION_STATUS_NOT_REQUIRED
+    obligation.submitted_on = None
+    obligation.submitted_by = None
+    obligation.submission_number = ""
+    obligation.save(update_fields=[
+        "status", "submitted_on", "submitted_by", "submission_number", "updated_at",
+    ])
+    return obligation
+
+
+def reopen_obligation(obligation, *, actor) -> Obligation:
+    """«رجّعها»: من «مش لازم هالفترة» وحدها إلى المنتظِر — **لا من «انقدّم»**."""
+    _assert_transition(
+        obligation,
+        {OBLIGATION_STATUS_NOT_REQUIRED},
+        "«رجّعها» لـ«مش لازم هالفترة» وحدها — والالتزام منتظرٌ أصلاً.",
+    )
+    obligation.status = OBLIGATION_STATUS_PENDING
+    obligation.save(update_fields=["status", "updated_at"])
+    return obligation
+
+
+def set_obligation_amount(obligation, *, amount, direction) -> Obligation:
+    """مبلغُ الالتزام واتجاهه — **يُقفل عند «انقدّم»**: ما قُدّم لا يُعاد تسعيره.
+
+    `amount=None` (أو سلسلةٌ فارغة) يمسح المبلغَ والاتجاه معاً، وإلا فالاتجاه
+    **مطلوب**: «عليه» أم «إله» — رقمٌ بلا اتجاهٍ لا يُقرأ في كشف.
+    """
+    _assert_not_submitted(obligation, field="amount")
+    clean = _clean_obligation_amount(amount)
+    if clean is None:
+        obligation.amount = None
+        obligation.direction = ""
+    else:
+        if direction not in dict(OBLIGATION_DIRECTION_CHOICES):
+            raise ValidationError({
+                "direction": "اتجاه المبلغ مطلوب: «عليه» أو «إله».",
+            })
+        obligation.amount = clean
+        obligation.direction = direction
+    obligation.save(update_fields=["amount", "direction", "updated_at"])
+    return obligation
+
+
+def set_obligation_client_paid(obligation, *, paid) -> Obligation:
+    """«الزبون دفع» — **في كلّ الحالات**: الدفعُ خبرٌ عن الزبون لا عن التقديم."""
+    obligation.client_paid = bool(paid)
+    obligation.save(update_fields=["client_paid", "updated_at"])
+    return obligation
+
+
+def close_prior_obligations(client, *, before, actor) -> int:
+    """«هدول انقدّموا قبل ما يجي علينا» — تُسكِت المنتظِرَ الذي سبق تاريخاً.
+
+    كلُّ التزامٍ **منتظر** فترتُه تنتهي قبل `before` يصير مُقدَّماً مع
+    `prior_to_office=True`، **بلا تاريخ تقديمٍ ولا رقم**: لم يُقدَّم من المكتب
+    بل وجدناه مقدَّماً. وما ليس منتظراً (أُرسل أو «مش لازم») لا يُمسّ.
+    """
+    if before is None:
+        raise ValidationError({"before": "تاريخ الحدّ مطلوب."})
+    # قاعدةُ `submit_obligation` نفسها: تاريخٌ لم يأتِ بعد لا يُغلق شيئاً.
+    if before > timezone.localdate():
+        raise ValidationError({"before": "تاريخ «قبل» لا يكون في المستقبل."})
+    return client.obligations.filter(
+        status=OBLIGATION_STATUS_PENDING, period_end__lt=before,
+    ).update(
+        status=OBLIGATION_STATUS_SUBMITTED,
+        prior_to_office=True,
+        submitted_on=None,
+        submitted_by=actor if getattr(actor, "pk", None) else None,
+        updated_at=timezone.now(),
+    )
+
+
+def assign_task(task, *, assignee) -> PeriodTask:
+    """تحويلُ شغلةٍ لعضوٍ آخر — أو `None` للعودة إلى وراثة مسؤول الزبون.
+
+    `assignee` عضوٌ في **نفس المكتب** (`is_tenant_member`)، وإلا كانت الشغلةُ
+    تُحال إلى موظّفٍ لا يراه أحد. والوراثةُ لا تحتاج كتابةً، فالـ`None` يمسح
+    التحويل ويُعيد القاعدة.
+    """
+    if assignee is not None and not is_tenant_member(
+        task.tenant_id, getattr(assignee, "pk", None),
+    ):
+        raise ValidationError({
+            "assignee": "الموظف المحوَّل إليه الشغلة ليس عضواً في هذا المكتب.",
+        })
+    task.assignee = assignee
+    task.save(update_fields=["assignee"])
+    return task
+
+
+def obligation_direction_choices() -> list[dict]:
+    """اتجاهُ المبلغ — **تسمياتُه من الخادم وحده**، فلا جدولَ في الشاشة."""
+    return [
+        {"value": value, "label": label}
+        for value, label in OBLIGATION_DIRECTION_CHOICES
+    ]
+
+
+def _badge_keys(obligation, day) -> list[str]:
+    """مفاتيحُ الشارات المشتقّة — **من الحالة واليوم، ولا عمودَ لها**.
+
+    «قريب هالأسبوع»: منتظرٌ وموعدُه الفعليّ من اليوم إلى ستة أيامٍ بعده.
+    «متأخّر»: منتظرٌ وموعدُه الفعليّ قبل اليوم. والمُقدَّمُ والمُستثنى بلا شارة:
+    ما انتهى أمرُه لا يُنبَّه عليه.
+    """
+    if obligation.status != OBLIGATION_STATUS_PENDING:
+        return []
+    remaining = (obligation.actual_deadline - day).days
+    keys = []
+    if 0 <= remaining <= NEAR_WINDOW_DAYS:
+        keys.append(OBLIGATION_BADGE_NEAR)
+    if obligation.actual_deadline < day:
+        keys.append(OBLIGATION_BADGE_LATE)
+    return keys
+
+
+def _badge_payloads(obligation, day, *, keys=None) -> list[dict]:
+    """شاراتُ السطر — و`keys` يُمرَّر حين حُسبت مرّةً في الحمولة (لا تُعاد)."""
+    return [
+        {"key": key, "label": OBLIGATION_BADGE_LABELS[key]}
+        for key in (_badge_keys(obligation, day) if keys is None else keys)
+    ]
+
+
+def _assignee_payload(assignee):
+    if assignee is None:
+        return None
+    return {"id": assignee.pk, "name": user_display_name(assignee)}
+
+
+def _obligation_row(obligation, *, day, client, task, masked, badge_keys=None) -> dict:
+    """سطرُ التزامٍ — **الزبونُ والشغلةُ يُمرَّران محمَّلين** (لا استعلامَ لكل صفّ)."""
+    amount = None if obligation.amount is None else f"{obligation.amount:.2f}"
+    row = {
+        "id": obligation.pk,
+        "client": {"id": client.pk, "name": client.name},
+        "task": {
+            "id": task.pk,
+            "internal_deadline": task.internal_deadline.isoformat(),
+            "assignee": _assignee_payload(task.effective_assignee),
+        },
+        "name": obligation.name,
+        "rule_code": obligation.rule_code,
+        "origin": obligation.origin,
+        "origin_label": OBLIGATION_ORIGIN_LABELS.get(obligation.origin, ""),
+        "period_label": deadlines.period_label(
+            obligation.period_start, obligation.period_end,
+        ),
+        "official_date": obligation.official_date.isoformat(),
+        "actual_deadline": obligation.actual_deadline.isoformat(),
+        "internal_deadline": obligation.internal_deadline.isoformat(),
+        "estimated": obligation.estimated,
+        "warnings": list(obligation.warnings or []),
+        "badges": _badge_payloads(obligation, day, keys=badge_keys),
+        "amount": amount,
+        "direction": obligation.direction,
+        "direction_label": OBLIGATION_DIRECTION_LABELS.get(obligation.direction, ""),
+        "client_paid": obligation.client_paid,
+        "status": obligation.status,
+        "status_label": OBLIGATION_STATUS_LABELS.get(obligation.status, ""),
+    }
+    return mask_amounts(row, OBLIGATION_AMOUNT_KEYS) if masked else row
+
+
+def obligation_row(obligation, *, day, masked=False) -> dict:
+    """سطرُ التزامٍ واحد — بردٍّ من فعلٍ بعد حفظه، أو لنداءٍ داخليّ.
+
+    **والمبلغُ يمرّ بالقناع**: `amount` مفتاحُ مبلغٍ مسجَّل، ومن لا يملك رؤية
+    المبالغ يصله `None` وتعرض الشاشة «—».
+    """
+    return _obligation_row(
+        obligation,
+        day=day,
+        client=obligation.client,
+        task=obligation.task,
+        masked=masked,
+    )
+
+
+def task_row(task, *, obligations=None) -> dict:
+    """سطرُ شغلةٍ — باسِم خدمتها (شغلتا «كانون الثاني» لق.م وللرواتب لا تُميَّزان
+    بغيره) وموعدها الداخليّ ومسؤولها الفعليّ. والعلاقةُ تُحمَّل في الاستعلام."""
+    row = {
+        "id": task.pk,
+        "service": {
+            "id": task.client_service.service_id,
+            "name": task.client_service.service.name,
+        },
+        "period_start": task.period_start.isoformat(),
+        "period_end": task.period_end.isoformat(),
+        "period_label": deadlines.period_label(task.period_start, task.period_end),
+        "internal_deadline": task.internal_deadline.isoformat(),
+        "assignee": _assignee_payload(task.effective_assignee),
+    }
+    if obligations is not None:
+        row["obligations"] = obligations
+    return row
+
+
+def _visible_pending_obligations(tenant, user):
+    """الميلُ المنتظِرُ الذي يراه العضو — **قراءةٌ واحدة لا تكبر بعدد الصفوف**.
+
+    الزبائنُ من `visible_clients` وحدها، والعلاقاتُ المطلوبة للصفّ كلِّه
+    select_related: الزبونُ ومسؤولُه (للمسؤول الفعليّ)، والشغلةُ ومن حُوِّلت له.
+    """
+    return (
+        Obligation.objects
+        .filter(
+            client__in=visible_clients(tenant, user).values("pk"),
+            status=OBLIGATION_STATUS_PENDING,
+        )
+        .select_related(
+            "client__responsible",
+            "task",
+            "task__assignee",
+            "task__client__responsible",
+        )
+        .order_by("actual_deadline", "internal_deadline", "client__name")
+    )
+
+
+def today_payload(tenant, *, user, day, filter="") -> dict:
+    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُها قبل الفلتر.
+
+    **العدّاداتُ على كل الميل المحفوظ** («قريب هالأسبوع» و«متأخّر» و«الكل») ثم
+    يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر» لا تُصفّر عدّادَ «قريب».
+    والفلاترُ: `mine` (المسؤولُ الفعليُّ هو العضو) · `week` (قريب) · `late`
+    (متأخّر)، وغيرُها **400**.
+
+    و`day` يُمرَّر صريحاً ولا يُقرأ من الساعة: الشاراتُ تُحسب عنه، فالصفُّ نفسه
+    «قريب» في يومٍ وليس في آخر بلا أن يتغيّر في القاعدة.
+    """
+    if filter not in TODAY_FILTERS:
+        raise ValidationError({
+            "filter": "فلترٌ غير معروف — mine أو week أو late.",
+        })
+    masked = user is not None and not can_see_amounts(tenant, user)
+    tagged = [
+        (obligation, _badge_keys(obligation, day))
+        for obligation in _visible_pending_obligations(tenant, user)
+    ]
+    counters = {
+        "week": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_NEAR in keys),
+        "late": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_LATE in keys),
+        "all": len(tagged),
+    }
+    user_id = getattr(user, "pk", None)
+    rows = []
+    for obligation, keys in tagged:
+        if filter == "mine" and _effective_assignee_id(obligation) != user_id:
+            continue
+        if filter == "week" and OBLIGATION_BADGE_NEAR not in keys:
+            continue
+        if filter == "late" and OBLIGATION_BADGE_LATE not in keys:
+            continue
+        rows.append(_obligation_row(
+            obligation,
+            day=day,
+            client=obligation.client,
+            task=obligation.task,
+            masked=masked,
+            # المفاتيحُ حُسبت في المسحة أعلاه (عدّاداتاً وفلترةً) فلا تُعاد للصفّ.
+            badge_keys=keys,
+        ))
+    return {
+        "day": day.isoformat(),
+        "filter": filter,
+        "counters": counters,
+        "rows": rows,
+        "direction_choices": obligation_direction_choices(),
+    }
+
+
+def _effective_assignee_id(obligation):
+    """معرّفُ المسؤول الفعليّ للصفّ — بلا استعلامٍ إضافيّ (المسؤولُ محمَّل)."""
+    assignee = obligation.task.assignee or obligation.client.responsible
+    return getattr(assignee, "pk", None)
+
+
+def client_obligations_payload(client, *, user, day) -> dict:
+    """تبويبُ «الالتزامات والشغلات»: شغلاتُ الزبون **الأحدثَ فترةً أولاً**.
+
+    كلُّ شغلةٍ بموعدها الداخليّ ومسؤولها الفعليّ وبكلِّ التزاماتها **في كلّ
+    الحالات** (لا المنتظِرة وحدها: الملفُّ يعرض ما انقدّم وما استُثني أيضاً).
+    والمبلغُ يمرّ بالقناع مرّةً واحدةً للحمولة.
+    """
+    masked = user is not None and not can_see_amounts(client.tenant, user)
+    tasks = list(
+        client.tasks
+        .select_related("assignee", "client__responsible", "client_service__service")
+        .prefetch_related("obligations"),
+    )
+    return {
+        "client": {"id": client.pk, "name": client.name},
+        "day": day.isoformat(),
+        "tasks": [
+            task_row(task, obligations=[
+                _obligation_row(
+                    obligation, day=day, client=client, task=task, masked=masked,
+                )
+                for obligation in task.obligations.all()
+            ])
+            for task in tasks
+        ],
+        "direction_choices": obligation_direction_choices(),
+    }

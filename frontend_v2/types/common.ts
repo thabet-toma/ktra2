@@ -100,6 +100,7 @@ export type AppView =
     | "accounting-revenue-vouchers"
     | "document-coding"
     | "client-books"
+    | "office-today"
     | "office-clients"
     | "office-calendar"
     | "office-settings"
