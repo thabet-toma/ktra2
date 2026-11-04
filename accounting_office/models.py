@@ -1065,12 +1065,16 @@ OBLIGATION_DIRECTION_CHOICES: list[tuple[str, str]] = [
 ]
 OBLIGATION_DIRECTION_LABELS: dict[str, str] = dict(OBLIGATION_DIRECTION_CHOICES)
 
-#: شرطا الحالة المشتقّة — يُقرآن في `services` وحدهما (`obligation_badges`).
+#: الشارةُ المشتقّة — واحدةٌ بالأولوية `late` ثم `late_internal` ثم `near` (`services._badge_keys`).
 OBLIGATION_BADGE_NEAR = "near"
 OBLIGATION_BADGE_LATE = "late"
+#: #276: الدرجةُ الداخليّة — شغلةُ الالتزام تجاوزت `internal_deadline` ولم يبلغ
+#: الرسميُّ بعد. ومفتاحٌ ثالثٌ لمفتاحين قائمين لا عمودَ ولا حالة.
+OBLIGATION_BADGE_LATE_INTERNAL = "late_internal"
 OBLIGATION_BADGE_LABELS: dict[str, str] = {
     OBLIGATION_BADGE_NEAR: "قريب هالأسبوع",
-    OBLIGATION_BADGE_LATE: "متأخّر",
+    OBLIGATION_BADGE_LATE: "متأخّر رسمي",
+    OBLIGATION_BADGE_LATE_INTERNAL: "متأخّر داخلي",
 }
 
 
@@ -1304,3 +1308,115 @@ class OfficeRefreshRun(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tenant_id}@{self.day}"
+
+
+# ── التنبيهات الداخلية (#276) ───────────────────────────────────────────────
+#
+# **التنبيهُ لقطةٌ لا مرآة**: يُولَّد مرّةً واحدةً لكل (مستلِم، نوع، مرجع) داخل
+# «حدّث المكتب»، ويُقرأ من الجرس بعد استبعاد المحسوم. فما انقدّم لا يختفي صفُّه
+# (يبقى أثراً لِما نُبِّه عليه) لكنه لا يُعرض ولا يُعدّ.
+#
+# **والمفتاحُ يُصلح للتذاكر اللاحقة**: تصعيدُ التذكير وتغيّرُ اللائحة والمسودّةُ
+# غير المعتمدة تُضاف **صفّاً في `OFFICE_ALERT_KIND_CHOICES`** لا فرعاً في الكود،
+# و`ref_key` يُميّز الصفوف داخل النوع الواحد.
+OFFICE_ALERT_KIND_TASK_LATE_INTERNAL = "task_late_internal"
+OFFICE_ALERT_KIND_OBLIGATION_LATE = "obligation_late"
+OFFICE_ALERT_KIND_CHOICES: list[tuple[str, str]] = [
+    (OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, "شغلة تجاوزت موعدها الداخلي"),
+    (OFFICE_ALERT_KIND_OBLIGATION_LATE, "التزام تجاوز موعده الرسمي ولم يُقدَّم"),
+]
+OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
+#: شارةُ كل نوعٍ في الواجهة — **مفتاحُ صنفٍ لا لون**، يُرسَل في `alert_row` فيُلوَّن
+#: الجرسُ بلا معرفة أنواعٍ فيه. نوعٌ لاحقٌ يُضاف صفّاً هنا ويأخذ محايداً حتى يُضاف.
+OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
+    OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OBLIGATION_BADGE_LATE_INTERNAL,
+    OFFICE_ALERT_KIND_OBLIGATION_LATE: OBLIGATION_BADGE_LATE,
+}
+
+
+class OfficeAlert(models.Model):
+    """تنبيهٌ داخليٌّ لمستلِمٍ واحد: شغلةٌ تجاوزت موعدها الداخلي أو التزامٌ رسميّ.
+
+    **الفرادةُ غير المشروطة** `(tenant, recipient, kind, ref_key)` هي «مرّةً واحدةً
+    لكل مرجع»: تشغيلُ اليوم نفسه مرّتين لا يضيف صفّاً، ويومٌ لاحقٌ لا يُكرّر
+    التنبيهَ نفسه — الشارةُ تبقى تقول الحال. والمرجعُ `"task:<id>"` أو
+    `"obligation:<id>"` نصّاً، ليجمع الصفَّ الواحد مستلِمٌ ونوعٌ ومرجع.
+
+    **ولا مبلغَ فيه**: `message` لقطةُ اسم الزبون واسم الالتزام/الفترة وقت التوليد،
+    بلا أيّ رقم مال — فلا يمرّ بحارس المبالغ أصلاً.
+
+    و`client`/`task`/`obligation` على `CASCADE` لأنها **مكانُ الفتح** لا سندُ
+    التنبيه: ما حُذف منها لا تنبيهَ له، فلا معنى لبقاء صفٍّ يشير إلى العدم.
+    """
+
+    KIND_TASK_LATE_INTERNAL = OFFICE_ALERT_KIND_TASK_LATE_INTERNAL
+    KIND_OBLIGATION_LATE = OFFICE_ALERT_KIND_OBLIGATION_LATE
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_alerts",
+        verbose_name="المكتب",
+    )
+    recipient = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="office_alerts",
+        verbose_name="المستلِم",
+    )
+    kind = models.CharField(
+        max_length=40,
+        choices=OFFICE_ALERT_KIND_CHOICES,
+        verbose_name="النوع",
+    )
+    #: مفتاحُ عدم التكرار: `"task:<id>"` أو `"obligation:<id>"`.
+    ref_key = models.CharField(max_length=80, verbose_name="المفتاح")
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alerts",
+        verbose_name="الزبون",
+    )
+    task = models.ForeignKey(
+        PeriodTask,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alerts",
+        verbose_name="شغلة الفترة",
+    )
+    obligation = models.ForeignKey(
+        Obligation,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="alerts",
+        verbose_name="الالتزام",
+    )
+    #: لقطةُ النصّ وقت التوليد — اسمُ الزبون والالتزام/الفترة، **بلا مبلغ**.
+    message = models.TextField(verbose_name="النص")
+    day = models.DateField(verbose_name="يوم التوليد")
+    seen_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت الشوفة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "تنبيه داخلي"
+        verbose_name_plural = "التنبيهات الداخلية"
+        ordering = ["-created_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "recipient", "kind", "ref_key"],
+                name="uniq_office_alert_ref",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "recipient", "seen_at"],
+                name="office_alert_recipient_seen",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.ref_key}→{self.recipient_id}"

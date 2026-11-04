@@ -17,7 +17,7 @@ from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.dateparse import parse_date
-from rest_framework import status, viewsets
+from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.exceptions import (
     MethodNotAllowed,
@@ -34,6 +34,7 @@ from accounting_office.models import (
     ClientService,
     Contact,
     Obligation,
+    OfficeAlert,
     OfficeClient,
     OfficeService,
     PeriodTask,
@@ -944,3 +945,53 @@ class OfficeTaskViewSet(OfficeModuleViewSet):
                 raise ValidationError({"assignee": "لا يوجد مستخدم مفعَّل بهذا المعرّف."})
         services.assign_task(task, assignee=target)
         return Response(services.task_row(task))
+
+
+# ── الجرس (#276) ─────────────────────────────────────────────────────────────
+class OfficeAlertsViewSet(OfficeModuleViewSet):
+    """جرسُ التنبيهات — **كلُّ عضوٍ يرى تنبيهاته هو فقط**: لا مفتاحَ إضافياً.
+
+    الكائنُ يُحلّ بمستلِمِه هو (`recipient=request.user`) داخل شركة الطلب، فتنبيهُ
+    غيرك — أو تنبيهُ مكتبٍ آخر — **404** لا 403. والقراءةُ تُسقط المحسوم
+    (`alerts_payload`) ولا تحذف صفّاً؛ و«شفته» يُنقص العدّاد.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    # الأفعالُ هنا بلا جسمٍ يُسلسَل؛ الصنفُ الفارغُ يلزم `SimpleMetadata` في OPTIONS
+    # (وإلا سقط `get_serializer` على `serializer_class` الغائب).
+    serializer_class = serializers.Serializer
+
+    def list(self, request, *args, **kwargs):
+        # الجرسُ لا ينتظر أن يفتح أحدٌ «اليوم»: cron فاتَه يومٌ ⇒ يلحقه أولُ فتحٍ هنا.
+        # وفي اليوم المسجَّل استعلامُ وجودٍ واحد (`OfficeRefreshRun`).
+        services.ensure_office_refreshed(self.tenant, day=timezone.localdate())
+        return Response(services.alerts_payload(self.tenant, user=request.user))
+
+    def get_object(self):
+        alert = (
+            OfficeAlert.objects
+            .filter(
+                tenant=self.tenant,
+                recipient=self.request.user,
+                pk=self.kwargs.get("pk"),
+            )
+            .select_related("client")
+            .first()
+        )
+        if alert is None:
+            raise NotFound("التنبيه غير موجود.")
+        return alert
+
+    @action(detail=True, methods=["post"], url_path="seen")
+    def seen(self, request, pk=None):
+        """«شفته» — يُرجع السطرَ المحدَّث (`seen: true`) لا عدّاداً فقط."""
+        alert = self.get_object()
+        services.mark_alert_seen(alert, user=request.user)
+        return Response(services.alert_row(alert))
+
+    @action(detail=False, methods=["post"], url_path="seen-all")
+    def seen_all(self, request):
+        """«شفتهم كلهم» — `{"seen": n}` عددُ ما كُتب له وقتُ الشوفة."""
+        return Response({
+            "seen": services.mark_all_alerts_seen(self.tenant, user=request.user),
+        })

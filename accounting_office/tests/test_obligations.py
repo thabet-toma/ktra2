@@ -291,25 +291,32 @@ class OneEngineTest(OfficeTestCase):
 
 
 class DerivedStatusTest(OfficeTestCase):
-    """«قريب» و«متأخّر» يُحسبان من اليوم المعطى — ولا عمودَ لهما."""
+    """«قريب» و«متأخّر» و«متأخّر داخلي» تُحسب من اليوم المعطى — ولا عمودَ لها."""
 
-    def test_near_is_computed_at_read_time_without_touching_the_database(self):
+    def test_the_badges_are_computed_at_read_time_without_touching_the_database(self):
         client = self.make_client("زبون ق.م", vat_classification="authorized")
         self.add_service(client, "vat")
         self.refresh(FEB_FIRST)
         row = Obligation.objects.get(rule_code="il_vat_periodic")
         actual = row.actual_deadline
+        internal = row.internal_deadline
         snapshot = list(
             Obligation.objects.values(
                 "status", "official_date", "actual_deadline", "internal_deadline",
             ),
         )
 
+        # #276: يومُ الموعد الداخليّ نفسِه — لم يتجاوزه بعدُ فهو «قريب» لا أصفر.
+        self.assertEqual(
+            [badge["key"] for badge in self.rows(internal)["rows"][0]["badges"]],
+            ["near"],
+        )
+        # وبعدَه بيوم: الشغلةُ تجاوزت داخليَّها ⇒ أصفرُ، و«قريب» لا تُعرض معه.
         self.assertEqual(
             [badge["key"] for badge in self.rows(
-                actual - datetime.timedelta(days=3),
+                internal + datetime.timedelta(days=1),
             )["rows"][0]["badges"]],
-            ["near"],
+            ["late_internal"],
         )
         self.assertEqual(
             [badge["key"] for badge in self.rows(
@@ -739,23 +746,41 @@ class CountersAndFiltersTest(OfficeTestCase):
         self.add_service(self.client_row, "vat")
         self.refresh(APR_FIRST)
         january = Obligation.objects.get(rule_code="il_vat_periodic", period_end=JAN_END)
-        self.near_day = january.actual_deadline - datetime.timedelta(days=2)
+        # #276: النافذةُ مستقلّةٌ عن الشارة — يومُ #275 نفسُه (`actual − 3`): الشارةُ
+        # صفراءُ لأن الموعدَ الداخليَّ مضى، والعدّادُ `week` يعدّه لأن الفعليَّ داخل
+        # النافذة. والشرطُ على `actual_deadline` وحده.
+        self.near_day = january.actual_deadline - datetime.timedelta(days=3)
         last = max(row.actual_deadline for row in Obligation.objects.all())
         self.late_day = last + datetime.timedelta(days=1)
 
     def test_counters_are_computed_before_the_filter(self):
-        near = self.rows(self.near_day)
+        window = self.rows(self.near_day)
         late = self.rows(self.late_day)
 
-        self.assertEqual(near["counters"], {"week": 1, "late": 0, "all": 3})
-        self.assertEqual(late["counters"], {"week": 0, "late": 3, "all": 3})
+        self.assertEqual(
+            window["counters"],
+            {"late": 0, "late_internal": 1, "week": 1, "all": 3},
+        )
+        self.assertEqual(
+            late["counters"],
+            {"late": 3, "late_internal": 0, "week": 0, "all": 3},
+        )
         self.assertEqual(len(late["rows"]), 3)
 
-    def test_the_week_and_late_filters_narrow_the_rows(self):
+    def test_the_week_window_and_the_two_late_filters_narrow_the_rows(self):
         week = self.rows(self.near_day, filter="week")
+        yellow = self.rows(self.near_day, filter="late_internal")
         late = self.rows(self.late_day, filter="late")
 
         self.assertEqual(len(week["rows"]), 1)
+        self.assertEqual(
+            len(yellow["rows"]), 1,
+            "الصفُّ نفسُه يظهر تحت النافذة وتحت الأصفر — وهذه هي المسألة",
+        )
+        self.assertEqual(
+            week["rows"][0]["id"], yellow["rows"][0]["id"],
+            "نافذةُ `week` لا تُسقط الصفَّ الأصفرَ الواقعَ داخلها",
+        )
         self.assertEqual(len(late["rows"]), 3)
         self.assertEqual(week["counters"], self.rows(self.near_day)["counters"])
 

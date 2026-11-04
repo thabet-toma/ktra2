@@ -2,8 +2,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   AMOUNT_MASK,
+  alertTargetPath,
   applyPackageSummary,
   badgeLabelOf,
+  clientTabFromSearch,
   directionLabelOf,
   frequencyAfterSuggestion,
   availableServicesForClient,
@@ -22,9 +24,11 @@ import {
   monthGrid,
   nextMonthKey,
   obligationAmountText,
+  obligationBadgeClass,
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
+  officeTaskAnchorId,
   periodLabel,
   previousMonthKey,
   readTodayFilter,
@@ -32,6 +36,7 @@ import {
   shortIsoDate,
   showsOfficeAssignment,
   statusLabelOf,
+  taskIdFromSearch,
   todayFilterParams,
   uniqueDeadlineRules,
   visibleClientSettings,
@@ -477,12 +482,12 @@ test('تسميات الحالة والاتجاه والشارة من الخاد�
     status_label: 'انقدّم',
     direction: 'due',
     direction_label: 'عليه',
-    badges: [{ key: 'late', label: 'متأخّر' }],
+    badges: [{ key: 'late', label: 'متأخّر رسمي' }],
   });
 
   assert.equal(statusLabelOf(row), 'انقدّم');
   assert.equal(directionLabelOf(row), 'عليه');
-  assert.equal(badgeLabelOf(row.badges[0]), 'متأخّر');
+  assert.equal(badgeLabelOf(row.badges[0]), 'متأخّر رسمي');
 
   // نصٌّ غائبٌ من الخادم ⇒ القيمةُ الخام، لا تسميةٌ مخترعةٌ هنا.
   assert.equal(statusLabelOf({ status: 'unknown', status_label: '' }), 'unknown');
@@ -512,9 +517,69 @@ test('فلتر اليوم يُقرأ من العنوان: المعروف يبق�
   assert.equal(readTodayFilter('?filter=someday'), '');
   assert.equal(readTodayFilter('?filter='), '');
   assert.equal(readTodayFilter(''), '');
+  // #276: الدرجةُ الداخليّة فلترٌ رابعٌ معروف.
+  assert.equal(readTodayFilter('?filter=late_internal'), 'late_internal');
+  assert.equal(readTodayFilter('filter=late_internal&filter=late'), 'late_internal');
+  assert.equal(readTodayFilter('?filter=Late'), '', 'المفتاحُ حسّاسٌ لحالة الأحرف');
   // الكتابةُ في العنوان: «الكل» بلا معامل.
   assert.deepEqual(todayFilterParams('mine'), { filter: 'mine' });
+  assert.deepEqual(todayFilterParams('late_internal'), { filter: 'late_internal' });
   assert.deepEqual(todayFilterParams(''), {});
+});
+
+test('أصناف الشارة الثلاث: أحمرُ وأصفرُ ومحايد', () => {
+  const late = obligationBadgeClass('late');
+  const internal = obligationBadgeClass('late_internal');
+  const near = obligationBadgeClass('near');
+
+  assert.match(late, /border-rose-200 bg-rose-50 text-rose-700/);
+  assert.match(late, /dark:/);
+  assert.match(internal, /border-amber-200 bg-amber-50 text-amber-700/);
+  assert.match(internal, /dark:/);
+  // «قريب» لم يعد أصفر: لونُه محايدٌ لئلا يلتبس بالمتأخّر الداخلي.
+  assert.match(near, /border-slate-200 bg-slate-50 text-slate-700/);
+  assert.match(near, /dark:/);
+  assert.doesNotMatch(near, /amber-/);
+  assert.doesNotMatch(internal, /rose-/);
+  // مفتاحٌ غير معروف يأخذ المحايد لا انفجاراً.
+  assert.match(obligationBadgeClass('someday'), /border-slate-200/);
+});
+
+test('وجهةُ التنبيه: ملفّ الزبون على تبويب «الالتزامات والشغلات»', () => {
+  assert.equal(
+    alertTargetPath({ client: { id: 7 } }),
+    '/accounting-office/clients?client=7&tab=obligations',
+  );
+  // وتنبيهُ شغلةٍ يضيف معرّفها فيُمرَّر إليها ويُبرز.
+  assert.equal(
+    alertTargetPath({ client: { id: 7 }, task_id: 12 }),
+    '/accounting-office/clients?client=7&tab=obligations&task=12',
+  );
+  assert.equal(
+    alertTargetPath({ client: { id: 7 }, task_id: null }),
+    '/accounting-office/clients?client=7&tab=obligations',
+  );
+  // تنبيهٌ بلا زبون لا وجهةَ له — لا رابطَ يفتح العدم.
+  assert.equal(alertTargetPath({ client: null }), '');
+
+  // والتبويبُ يُقرأ من العنوان بالمعروف وحده.
+  assert.equal(clientTabFromSearch('?client=7&tab=obligations'), 'obligations');
+  assert.equal(clientTabFromSearch('tab=services'), 'services');
+  assert.equal(clientTabFromSearch('?tab=someday'), null);
+  assert.equal(clientTabFromSearch('?tab='), null);
+  assert.equal(clientTabFromSearch(''), null);
+});
+
+test('شغلةُ التنبيه: تُقرأ من العنوان وتُمرَّر إلى عنصرها', () => {
+  assert.equal(taskIdFromSearch('?client=7&tab=obligations&task=12'), 12);
+  assert.equal(taskIdFromSearch('task=3'), 3);
+  assert.equal(taskIdFromSearch('?task=0'), null);
+  assert.equal(taskIdFromSearch('?task=-4'), null);
+  assert.equal(taskIdFromSearch('?task=abc'), null);
+  assert.equal(taskIdFromSearch('?tab=obligations'), null);
+  assert.equal(taskIdFromSearch(''), null);
+  // وعنصرُ الشغلة معرّفٌ واحدٌ يبنيه الرابط ويقرؤه التمرير.
+  assert.equal(officeTaskAnchorId(12), 'office-task-12');
 });
 
 test('التاريخ القصير dd/MM من ISO بلا كائن Date', () => {

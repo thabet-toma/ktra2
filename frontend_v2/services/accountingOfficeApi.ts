@@ -23,6 +23,8 @@ import type {
   ClientServiceRow,
   ClientServicesPayload,
   DeadlineRuleRow,
+  OfficeAlertRow,
+  OfficeAlertsPayload,
   OfficeServiceRow,
   ObligationRow,
   ServicePackageRow,
@@ -44,6 +46,8 @@ export type {
   DeadlineRuleRow,
   ObligationBadge,
   ObligationRow,
+  OfficeAlertRow,
+  OfficeAlertsPayload,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
@@ -64,6 +68,7 @@ const DEADLINE_RULES = `${BASE}deadline-rules/`;
 const TODAY = `${BASE}today/`;
 const OBLIGATIONS = `${BASE}obligations/`;
 const TASKS = `${BASE}tasks/`;
+const ALERTS = `${BASE}alerts/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -484,3 +489,18 @@ export const closePriorObligations = (
     before ? { before } : {},
     tenantOpts(),
   );
+
+// ── الجرس (#276) ────────────────────────────────────────────────────────
+//
+// **كلُّ عضوٍ يرى تنبيهاته هو فقط** خادمياً — لا معاملَ `user` هنا ولا مفتاحَ
+// إضافياً. والقراءةُ تُسقط المحسوم، فما يصل جاهزٌ للعرض والعدّادُ `unseen` معه.
+export const getOfficeAlerts = (): Promise<OfficeAlertsPayload> =>
+  apiGetObject<OfficeAlertsPayload>(ALERTS, tenantOpts());
+
+/** «شفته» — يُرجع السطرَ المحدَّث (`seen: true`)، والقراءةُ التالية تُنقص العدّاد. */
+export const markOfficeAlertSeen = (id: number): Promise<OfficeAlertRow> =>
+  apiPostObject<OfficeAlertRow>(`${ALERTS}${id}/seen/`, {}, tenantOpts());
+
+/** «شفتهم كلهم» — `{"seen": n}` عددُ ما كُتب له وقتُ الشوفة. */
+export const markAllOfficeAlertsSeen = (): Promise<{ seen: number }> =>
+  apiPostObject<{ seen: number }>(`${ALERTS}seen-all/`, {}, tenantOpts());

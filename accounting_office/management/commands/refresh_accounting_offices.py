@@ -1,8 +1,8 @@
 """`refresh_accounting_offices` — «حدّث المكتب ليوم X» لكلّ مكتبٍ مرخَّص.
 
 **الـcron على الخادم خطوةُ نشرٍ لا كود**: الأمرُ يُشغَّل صباح كل يوم،
-و`GET today/` يُشغّله أيضاً عند أوّل فتحٍ في اليوم — فالمكتبُ يعمل حتّى قبل أن
-يُضاف الـcron. **ولا مُجدوِل في المستودع.**
+و`GET today/` و`GET alerts/` (الجرس) يُشغّلانه أيضاً عند أوّل فتحٍ في اليوم — فالمكتبُ
+يعمل حتّى قبل أن يُضاف الـcron. **ولا مُجدوِل في المستودع.**
 
 **المكاتبُ المرخَّصة وحدها** (`core.modules.module_enabled`): شركةٌ بقالبٍ آخر لا
 زبائنَ مكتبٍ لها، وتشغيلُ تحديثها صفُّ سجلٍّ في غير محلّه.
@@ -47,7 +47,8 @@ class Command(BaseCommand):
             self.stdout.write(
                 f"{tenant.pk} · {tenant.CompanyName} — "
                 f"{day.isoformat()}: شغلات {counts['created_tasks']} · "
-                f"التزامات {counts['created_obligations']}"
+                f"التزامات {counts['created_obligations']} · "
+                f"تنبيهات {counts['created_alerts']}"
             )
         if not offices:
             self.stdout.write("لا مكاتب محاسبة مرخَّصة — لا شيء يُحدَّث.")

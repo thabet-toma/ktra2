@@ -74,14 +74,37 @@ class SettingTestCase(APITestCase):
 
 class RegistryShapeTest(SettingTestCase):
     def test_the_agreed_settings_and_no_others_exist(self):
-        """أربعةُ #271 ثم أربعةُ «الضريبة ولائحة المواعيد» (#274) — ولا غيرها."""
+        """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
+                "late_internal_alert_to", "late_official_alert_to",
             },
+        )
+
+    def test_the_two_alert_recipient_settings_are_office_only_with_their_defaults(self):
+        """#276: إعدادان لا واحد، ومستوى المكتب وحده، وافتراضُ الأحمر أوسعُ من الأصفر."""
+        registry = settings_registry.SETTINGS_REGISTRY
+        internal = registry["late_internal_alert_to"]
+        official = registry["late_official_alert_to"]
+
+        self.assertEqual(internal.levels, ("office",))
+        self.assertEqual(official.levels, ("office",))
+        self.assertEqual(internal.default, "assignee")
+        self.assertEqual(official.default, "assignee_owner")
+        self.assertEqual(internal.group, settings_registry.GROUP_ALERTS)
+        self.assertEqual(official.group, settings_registry.GROUP_ALERTS)
+        self.assertEqual(internal.choices, official.choices)
+        self.assertEqual(
+            internal.choice_options(),
+            [
+                {"value": "assignee", "label": "المسؤول"},
+                {"value": "assignee_owner", "label": "المسؤول وصاحب المكتب"},
+                {"value": "owner", "label": "صاحب المكتب"},
+            ],
         )
 
     def test_each_setting_declares_its_levels_and_its_default(self):
@@ -403,13 +426,14 @@ class SettingsApiTest(SettingTestCase):
         res = self.client.get(SETTINGS, **self.headers())
         self.assertEqual(res.status_code, 200, res.content)
         rows = {row["key"]: row for row in res.data["settings"]}
-        # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274.
+        # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276.
         self.assertEqual(
             set(rows),
             {
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
+                "late_internal_alert_to", "late_official_alert_to",
             },
         )
 
@@ -418,6 +442,7 @@ class SettingsApiTest(SettingTestCase):
             [
                 {"id": "office", "label": "المكتب"},
                 {"id": "schedule", "label": "الضريبة ولائحة المواعيد"},
+                {"id": "alerts", "label": "التأخير والتنبيهات"},
             ],
         )
         self.assertEqual(rows["tax_system"]["value"], "PS")

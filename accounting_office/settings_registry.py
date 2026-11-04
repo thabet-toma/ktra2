@@ -36,10 +36,30 @@ SETTING_LEVELS: tuple[str, ...] = (LEVEL_OFFICE, LEVEL_CLIENT, LEVEL_ITEM)
 GROUP_OFFICE = "office"
 #: #274: مجموعةُ الضريبة ولائحة المواعيد — الموعدُ الداخليّ ومدى التقويم.
 GROUP_SCHEDULE = "schedule"
+#: #276: مجموعةُ «التأخير والتنبيهات» — درجتا التأخير ومستلِمُ كلٍّ منهما.
+GROUP_ALERTS = "alerts"
 SETTING_GROUPS: tuple[tuple[str, str], ...] = (
     (GROUP_OFFICE, "المكتب"),
     (GROUP_SCHEDULE, "الضريبة ولائحة المواعيد"),
+    (GROUP_ALERTS, "التأخير والتنبيهات"),
 )
+
+#: مستلِمو التنبيه (#276) — مفاتيحُ الاختيار يقرؤها `services._alert_recipient_ids`.
+#: «المسؤول» = `PeriodTask.effective_assignee`، و«صاحب المكتب» = عضوٌ نشطٌ بدور
+#: `manager` في هذا المكتب (التعريفُ القائم، لا تعريفٌ ثانٍ).
+ALERT_TO_ASSIGNEE = "assignee"
+ALERT_TO_ASSIGNEE_OWNER = "assignee_owner"
+ALERT_TO_OWNER = "owner"
+ALERT_TO_CHOICES: tuple[str, ...] = (
+    ALERT_TO_ASSIGNEE,
+    ALERT_TO_ASSIGNEE_OWNER,
+    ALERT_TO_OWNER,
+)
+ALERT_TO_LABELS: dict[str, str] = {
+    ALERT_TO_ASSIGNEE: "المسؤول",
+    ALERT_TO_ASSIGNEE_OWNER: "المسؤول وصاحب المكتب",
+    ALERT_TO_OWNER: "صاحب المكتب",
+}
 
 #: نصّ القيمة الغائبة — ثابتٌ واحدٌ في الخادم، لا نسخةٌ في كل شاشة.
 NOT_CHOSEN_LABEL = "غير مختار"
@@ -271,6 +291,33 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         min_value=0,
         group=GROUP_SCHEDULE,
         note="إلى أيّ مدىً يُحسب التقويم قدّاماً.",
+    ),
+    # ── التأخير والتنبيهات (#276) ──
+    #
+    # إعدادان لا واحد: الأصفرُ («متأخّر داخلي») شأنُ الموظف المسؤول وحده افتراضاً،
+    # والأحمرُ («متأخّر رسمي») يبلغ المسؤولَ **وصاحبَ المكتب** لأن الموعدَ الرسميَّ
+    # مسؤوليّةُ المكتب كلّه. ومستوى المكتب وحده: المستلِمُ قرارُ المكتب لا قرارُ زبون.
+    "late_internal_alert_to": SettingDefinition(
+        key="late_internal_alert_to",
+        label="مستلِمو تنبيه «متأخّر داخلي»",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE,),
+        choices=ALERT_TO_CHOICES,
+        labels=ALERT_TO_LABELS,
+        default=ALERT_TO_ASSIGNEE,
+        group=GROUP_ALERTS,
+        note="شغلةٌ تجاوزت موعدها الداخلي — الافتراضُ المسؤول وحده.",
+    ),
+    "late_official_alert_to": SettingDefinition(
+        key="late_official_alert_to",
+        label="مستلِمو تنبيه «متأخّر رسمي»",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE,),
+        choices=ALERT_TO_CHOICES,
+        labels=ALERT_TO_LABELS,
+        default=ALERT_TO_ASSIGNEE_OWNER,
+        group=GROUP_ALERTS,
+        note="التزامٌ تجاوز موعده الرسمي ولم يُقدَّم — الافتراضُ المسؤول وصاحب المكتب.",
     ),
 }
 

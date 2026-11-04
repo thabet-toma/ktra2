@@ -17,7 +17,7 @@ from uuid import uuid4
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
-from django.db.models import Count, Max, Q
+from django.db.models import Count, Exists, Max, OuterRef, Q
 from django.utils import timezone
 
 from accounting_office import deadlines, settings_registry
@@ -41,6 +41,7 @@ from accounting_office.models import (
     FREQUENCY_QUARTERLY,
     OBLIGATION_BADGE_LABELS,
     OBLIGATION_BADGE_LATE,
+    OBLIGATION_BADGE_LATE_INTERNAL,
     OBLIGATION_BADGE_NEAR,
     OBLIGATION_DIRECTION_CHOICES,
     OBLIGATION_DIRECTION_LABELS,
@@ -49,6 +50,10 @@ from accounting_office.models import (
     OBLIGATION_STATUS_NOT_REQUIRED,
     OBLIGATION_STATUS_PENDING,
     OBLIGATION_STATUS_SUBMITTED,
+    OFFICE_ALERT_KIND_BADGES,
+    OFFICE_ALERT_KIND_LABELS,
+    OFFICE_ALERT_KIND_OBLIGATION_LATE,
+    OFFICE_ALERT_KIND_TASK_LATE_INTERNAL,
     SERVICE_CODE_ANNUAL_ACCOUNTS,
     SERVICE_CODE_BOOKKEEPING,
     SERVICE_CODE_CONSULTING,
@@ -64,6 +69,7 @@ from accounting_office.models import (
     Contact,
     DeadlineSchedule,
     Obligation,
+    OfficeAlert,
     OfficeClient,
     OfficeRefreshRun,
     OfficeService,
@@ -76,11 +82,13 @@ from accounting_office.models import (
     tax_card_choices,
 )
 from core.access import (
+    MANAGER_ROLE,
     OFFICE_AMOUNTS_VIEW_KEY,
     OFFICE_CLIENTS_ALL_KEY,
     user_has_perm,
 )
 from core.activity import log_activity
+from tenants.models import UserCompanyMembership
 
 MODULE_KEY = "accounting_office"
 
@@ -2306,14 +2314,15 @@ def deadline_rules_payload(tax_system) -> dict:
 # والنتائج. التقويمُ يقصّه على `actual_deadline`، والتحديثُ يقصّه على
 # `period_end < today` — فلا نسختان تفترقان عند أول تصحيحٍ في اللائحة.
 #
-# **والمشتقُّ لا يُخزَّن**: «قريب هالأسبوع» و«متأخّر» يُحسبان من اليوم المعطى عند
-# القراءة. عمودٌ لهما كان ينام بين تشغيلين ويقول «متأخّر» عن يومٍ مضى.
+# **والمشتقُّ لا يُخزَّن**: شارةٌ واحدةٌ لكل صفّ — أحمرُ `late` (`actual_deadline < day`) ثم أصفرُ
+# `late_internal` (`task.internal_deadline < day`) ثم `near`؛ و`week` نافذةُ `actual_deadline` مستقلّة (`_in_near_window`).
 
 #: نافذةُ «قريب هالأسبوع»: من اليوم إلى ستة أيامٍ بعده (اليومُ السابع يومُ عملٍ آخر).
 NEAR_WINDOW_DAYS = 6
 
 #: فلاترُ شاشة «اليوم» — الفارغ «الكل»، والبقيةُ تُقصّ الصفوفَ بعد العدّ.
-TODAY_FILTERS: tuple[str, ...] = ("", "mine", "week", "late")
+#: `late` الأحمرُ وحده، و`late_internal` الأصفرُ وحده (#276).
+TODAY_FILTERS: tuple[str, ...] = ("", "mine", "week", "late", "late_internal")
 
 #: نصُّ رفض التراجع عن «انقدّم» — واحدٌ في الخدمة والاختبار.
 SUBMITTED_LOCKED = "انقدّم لا يُتراجَع عنه"
@@ -2490,6 +2499,174 @@ def _refresh_client(client, *, tenant, day, end, context, skip):
     return created_tasks, created_obligations
 
 
+# ── التنبيهات الداخلية (#276) ───────────────────────────────────────────────
+#
+# **التنبيهُ يُولَّد داخل «حدّث المكتب» لا بساعة**: `ensure_office_refreshed` تعمل
+# مرّةً في اليوم، فالمستحقُّ الجديد يأخذ تنبيهَه مرّةً، والمرجعُ الذي نُبِّه عليه
+# سابقاً لا يتكرّر — الفرادةُ في القاعدة تحرس ذلك ولو نُودِي التوليد مرّتين.
+
+#: إعدادا المستلِمين — مستوى المكتب وحده، ويُقرآن مرّةً لكل توليد.
+LATE_INTERNAL_ALERT_KEY = "late_internal_alert_to"
+LATE_OFFICIAL_ALERT_KEY = "late_official_alert_to"
+
+
+def _office_owner_ids(tenant) -> set[int]:
+    """أعضاءُ المكتب النشطون بدور «صاحب المكتب» — التعريفُ القائم نفسه."""
+    return set(
+        UserCompanyMembership.objects
+        .filter(tenant=tenant, role=MANAGER_ROLE, user__is_active=True)
+        .values_list("user_id", flat=True),
+    )
+
+
+def _alert_recipient_ids(choice, *, assignee_id, owners) -> set[int]:
+    """مستلِمو تنبيهٍ واحد من قيمة الإعداد — **مجموعةٌ فلا تكرار**.
+
+    «المسؤول» = `effective_assignee`، وإن غاب (زبونٌ بلا مسؤول) ذهب لصاحب المكتب
+    بدلاً منه: تنبيهٌ لا يبلغ أحداً أسوأ من تنبيهٍ يبلغ رئيسَ المكتب. ومستلِمٌ هو
+    المسؤولُ وصاحبُ المكتب معاً يأخذ تنبيهاً واحداً.
+    """
+    owner_ids = set(owners)
+    responsible = {assignee_id} if assignee_id else set(owner_ids)
+    if choice == settings_registry.ALERT_TO_OWNER:
+        return owner_ids
+    if choice == settings_registry.ALERT_TO_ASSIGNEE_OWNER:
+        return responsible | owner_ids
+    return responsible
+
+
+def _new_alert_rows(
+    *, tenant, kind, ref_key, recipients, message, day,
+    client, task, obligation, existing,
+) -> list[OfficeAlert]:
+    """صفوفُ التنبيه غير الموجودة — والمفاتيحُ القائمة تُمرَّر مجموعةً واحدةً.
+
+    `existing` مجموعةُ `(recipient_id, kind, ref_key)` المقروءة باستعلامٍ واحد
+    لمراجع المرشّحين وحدها (`ref_key__in`) لا لتنبيهات المكتب كلّها، ويُضاف إليها
+    المرشّحُ فور قبوله فلا يُكرَّر داخل النداء نفسه.
+    """
+    rows = []
+    for recipient_id in sorted(recipients):
+        key = (recipient_id, kind, ref_key)
+        if key in existing:
+            continue
+        existing.add(key)
+        rows.append(OfficeAlert(
+            tenant=tenant,
+            recipient_id=recipient_id,
+            kind=kind,
+            ref_key=ref_key,
+            client=client,
+            task=task,
+            obligation=obligation,
+            message=message,
+            day=day,
+        ))
+    return rows
+
+
+def _generate_late_alerts(tenant, *, day) -> int:
+    """يولّد تنبيهات التأخير ليومٍ صريح ويُرجع **ما أنشأه هذا النداء**.
+
+    - كلُّ التزامٍ `pending` و`actual_deadline < day` ⇒ «التزام تجاوز موعده
+      الرسمي ولم يُقدَّم» لمستلِمي `late_official_alert_to`.
+    - كلُّ شغلةٍ فيها التزامٌ منتظرٌ و`internal_deadline < day` ⇒ «شغلة تجاوزت
+      موعدها الداخلي» لمستلِمي `late_internal_alert_to` — وشغلةٌ صار التزامُها
+      أحمرَ تأخذ الأحمرَ أيضاً (مرجعان مختلفان، والفرادةُ تمنع التكرار).
+
+    **والكلفةُ ثابتة**: الإعدادُ يُقرأ مرّةً للمكتب، والمستلِمون استعلامٌ واحد،
+    والمفاتيحُ القائمة استعلامٌ واحدٌ محصورٌ بمراجع المرشّحين (`ref_key__in`) لا
+    بتاريخ المكتب كلِّه، ثم `bulk_create(ignore_conflicts=True)` دفعةً — فلا
+    استعلامَ لكل التزام. والإعداداتُ تُقرأ **بلا زبونٍ ولا شغلة** (مستوى المكتب
+    وحده)، والمسؤولُ من `effective_assignee` وحدها.
+    """
+    internal_to = resolve_setting(tenant, LATE_INTERNAL_ALERT_KEY)
+    official_to = resolve_setting(tenant, LATE_OFFICIAL_ALERT_KEY)
+    owners = _office_owner_ids(tenant)
+    candidates = list(
+        Obligation.objects
+        .filter(tenant=tenant, status=OBLIGATION_STATUS_PENDING)
+        # المتأخّرُ وحده يُحمَّل: الرسميُّ أو شغلتُه الداخليّ — والقصُّ في SQL لا في
+        # بايثون، فمكتبٌ بآلاف الالتزامات المنتظِرة لا يُحمَّل كلُّها كلَّ يوم.
+        .filter(Q(actual_deadline__lt=day) | Q(task__internal_deadline__lt=day))
+        .select_related(
+            "client",
+            "client__responsible",
+            "task",
+            "task__assignee",
+            "task__client__responsible",
+            "task__client_service__service",
+        )
+    )
+    # المفاتيحُ القائمة لهذه المراجع وحدها — لا تاريخُ المكتب كلِّه: المراجعُ
+    # التي سيُحاول النداءُ كتابتها (المنتظِرةُ المتأخّرة وشغلاتُها المتأخّرة داخلياً)،
+    # والقراءةُ استعلامٌ واحد.
+    ref_keys = {
+        f"obligation:{obligation.pk}"
+        for obligation in candidates
+        if obligation.actual_deadline < day
+    }
+    ref_keys |= {
+        f"task:{obligation.task_id}"
+        for obligation in candidates
+        if obligation.task.internal_deadline < day
+    }
+    existing = set(
+        OfficeAlert.objects
+        .filter(tenant=tenant, ref_key__in=ref_keys)
+        .values_list("recipient_id", "kind", "ref_key"),
+    ) if ref_keys else set()
+    rows: list[OfficeAlert] = []
+    counted_tasks: set[int] = set()
+    for obligation in candidates:
+        task = obligation.task
+        client = obligation.client
+        assignee = task.effective_assignee
+        assignee_id = getattr(assignee, "pk", None)
+        if obligation.actual_deadline < day:
+            rows.extend(_new_alert_rows(
+                tenant=tenant,
+                kind=OFFICE_ALERT_KIND_OBLIGATION_LATE,
+                ref_key=f"obligation:{obligation.pk}",
+                recipients=_alert_recipient_ids(
+                    official_to, assignee_id=assignee_id, owners=owners,
+                ),
+                message=(
+                    f"{client.name} — {obligation.name} "
+                    f"({deadlines.period_label(obligation.period_start, obligation.period_end)})"
+                ),
+                day=day,
+                client=client,
+                task=task,
+                obligation=obligation,
+                existing=existing,
+            ))
+        if task.internal_deadline >= day or task.pk in counted_tasks:
+            continue
+        counted_tasks.add(task.pk)
+        rows.extend(_new_alert_rows(
+            tenant=tenant,
+            kind=OFFICE_ALERT_KIND_TASK_LATE_INTERNAL,
+            ref_key=f"task:{task.pk}",
+            recipients=_alert_recipient_ids(
+                internal_to, assignee_id=assignee_id, owners=owners,
+            ),
+            message=(
+                f"{client.name} — {task.client_service.service.name} "
+                f"({deadlines.period_label(task.period_start, task.period_end)})"
+            ),
+            day=day,
+            client=client,
+            task=task,
+            obligation=None,
+            existing=existing,
+        ))
+    if not rows:
+        return 0
+    OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
+    return len(rows)
+
+
 def refresh_office(tenant, *, day) -> dict:
     """«حدّث المكتب ليوم X» — يحفظ ما حان وقته، **idempotent وبلا ساعة**.
 
@@ -2536,10 +2713,13 @@ def refresh_office(tenant, *, day) -> dict:
     OfficeRefreshRun.objects.get_or_create(
         tenant=tenant, day=day, defaults={"created_obligations": created_obligations},
     )
+    # التنبيهاتُ بعد حفظ الالتزامات: تقرأ ما صار محفوظاً في هذا النداء أيضاً.
+    created_alerts = _generate_late_alerts(tenant, day=day)
     return {
         "day": day.isoformat(),
         "created_tasks": created_tasks,
         "created_obligations": created_obligations,
+        "created_alerts": created_alerts,
     }
 
 
@@ -2547,11 +2727,12 @@ def ensure_office_refreshed(tenant, *, day):
     """مرّةٌ في اليوم: ليومٍ له سجلٌّ **لا عمل** (تُرجع `None`)، وإلا `refresh_office`.
 
     تُرجع `None` ليومٍ مسجَّلٍ سابقاً (لا تشغيلَ ولا عدّادات)، وعدّاداتِ
-    `refresh_office` (`created_tasks`/`created_obligations`) ليومٍ جديد — فالمُنادي
-    إن أراد الأرقام فليقرأها من قيمتها المُعادة لا من `None`.
+    `refresh_office` (`created_tasks`/`created_obligations`/`created_alerts`)
+    ليومٍ جديد — فالمُنادي إن أراد الأرقام فليقرأها من قيمتها المُعادة لا من `None`.
 
-    تُنادى عند أول فتحٍ لشاشة «اليوم»، فيصير فتحُ الشاشة تشغيلاً يومياً بلا
-    مُجدوِلٍ في المستودع (الـcron على الخادم خطوةُ نشر).
+    تُنادى عند أول فتحٍ لشاشة «اليوم» **ولجرس التنبيهات** (`GET alerts/`)، فيصير
+    أولُ فتحٍ لأيٍّ منهما تشغيلاً يومياً بلا مُجدوِلٍ في المستودع (الـcron على
+    الخادم خطوةُ نشر) — والجرسُ لا يعتمد على أن يفتح أحدٌ «اليوم».
     """
     if OfficeRefreshRun.objects.filter(tenant=tenant, day=day).exists():
         return None
@@ -2725,29 +2906,38 @@ def obligation_direction_choices() -> list[dict]:
     ]
 
 
-def _badge_keys(obligation, day) -> list[str]:
-    """مفاتيحُ الشارات المشتقّة — **من الحالة واليوم، ولا عمودَ لها**.
+def _badge_keys(obligation, day, *, task=None) -> list[str]:
+    """مفتاحُ الشارة الواحدة المشتقّة — **من الحالة واليوم، ولا عمودَ لها**.
 
-    «قريب هالأسبوع»: منتظرٌ وموعدُه الفعليّ من اليوم إلى ستة أيامٍ بعده.
-    «متأخّر»: منتظرٌ وموعدُه الفعليّ قبل اليوم. والمُقدَّمُ والمُستثنى بلا شارة:
-    ما انتهى أمرُه لا يُنبَّه عليه.
+    **درجتان لا واحدة (#276)، والأولوية محسومة:**
+
+    - **أحمر `late`**: منتظرٌ و`actual_deadline < day` — الموعدُ الرسميُّ (مع
+      التمديد الإلكترونيّ) تجاوز ولم يُقدَّم.
+    - **أصفر `late_internal`**: منتظرٌ و`internal_deadline` لشغلتِه قبل اليوم،
+      وليس أحمر — الموعدُ الداخليُّ هو ما يراه الموظف قبل الرسميّ.
+    - **`near`**: منتظرٌ وموعدُه الفعليّ من اليوم إلى ستة أيامٍ بعده، ودونهما.
+
+    وشارةٌ **واحدةٌ على الأكثر** لكل صفّ: الأحمرُ يسبق الأصفر، والأصفرُ يسبق
+    «قريب» — فصفٌّ تجاوز داخليُّه لا يقول «قريب هالأسبوع» أيضاً. والمُقدَّمُ
+    والمُستثنى بلا شارة: ما انتهى أمرُه لا يُنبَّه عليه.
     """
     if obligation.status != OBLIGATION_STATUS_PENDING:
         return []
-    remaining = (obligation.actual_deadline - day).days
-    keys = []
-    if 0 <= remaining <= NEAR_WINDOW_DAYS:
-        keys.append(OBLIGATION_BADGE_NEAR)
     if obligation.actual_deadline < day:
-        keys.append(OBLIGATION_BADGE_LATE)
-    return keys
+        return [OBLIGATION_BADGE_LATE]
+    task = obligation.task if task is None else task
+    if task.internal_deadline < day:
+        return [OBLIGATION_BADGE_LATE_INTERNAL]
+    if 0 <= (obligation.actual_deadline - day).days <= NEAR_WINDOW_DAYS:
+        return [OBLIGATION_BADGE_NEAR]
+    return []
 
 
-def _badge_payloads(obligation, day, *, keys=None) -> list[dict]:
+def _badge_payloads(obligation, day, *, keys=None, task=None) -> list[dict]:
     """شاراتُ السطر — و`keys` يُمرَّر حين حُسبت مرّةً في الحمولة (لا تُعاد)."""
     return [
         {"key": key, "label": OBLIGATION_BADGE_LABELS[key]}
-        for key in (_badge_keys(obligation, day) if keys is None else keys)
+        for key in (_badge_keys(obligation, day, task=task) if keys is None else keys)
     ]
 
 
@@ -2780,7 +2970,7 @@ def _obligation_row(obligation, *, day, client, task, masked, badge_keys=None) -
         "internal_deadline": obligation.internal_deadline.isoformat(),
         "estimated": obligation.estimated,
         "warnings": list(obligation.warnings or []),
-        "badges": _badge_payloads(obligation, day, keys=badge_keys),
+        "badges": _badge_payloads(obligation, day, keys=badge_keys, task=task),
         "amount": amount,
         "direction": obligation.direction,
         "direction_label": OBLIGATION_DIRECTION_LABELS.get(obligation.direction, ""),
@@ -2848,29 +3038,44 @@ def _visible_pending_obligations(tenant, user):
     )
 
 
+def _in_near_window(obligation, day) -> bool:
+    """هل يقع `actual_deadline` في نافذة «قريب هالأسبوع»؟ — **مستقلٌّ عن الشارة**.
+
+    عدّادُ `week` وفلترُه يُحسبان بهذا الشرط وحده: صفٌّ صفرتُه «متأخّر داخليّ»
+    وموعدُه الفعليُّ داخل النافذة يُعدّ ويظهر تحت `week` — فالشارةُ واحدةٌ
+    بالأولوية، والنافذةُ سؤالٌ آخر («ماذا يستحقّ هذا الأسبوع؟»). ولولا ذلك لصار
+    «قريب» مستحيلاً للربعيّ (7 أيامٍ داخليّة) والسنويّ (30).
+    """
+    return 0 <= (obligation.actual_deadline - day).days <= NEAR_WINDOW_DAYS
+
+
 def today_payload(tenant, *, user, day, filter="") -> dict:
-    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُها قبل الفلتر.
+    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُه الأربعة قبل الفلتر.
 
-    **العدّاداتُ على كل الميل المحفوظ** («قريب هالأسبوع» و«متأخّر» و«الكل») ثم
-    يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر» لا تُصفّر عدّادَ «قريب».
-    والفلاترُ: `mine` (المسؤولُ الفعليُّ هو العضو) · `week` (قريب) · `late`
-    (متأخّر)، وغيرُها **400**.
+    **العدّاداتُ (`late` · `late_internal` · `week` · `all`) على كل الميل المحفوظ**
+    ثم يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر رسمي» لا تُصفّر «متأخّر داخليّ».
+    والفلاترُ خمسةٌ: `mine` (المسؤولُ الفعليُّ هو العضو) · `week` (نافذةُ
+    `actual_deadline` مستقلّةً عن الشارة) · `late` (الأحمرُ وحده) · `late_internal`
+    (الأصفرُ وحده)، والفارغُ «الكل»؛ وغيرُها **400**.
 
-    و`day` يُمرَّر صريحاً ولا يُقرأ من الساعة: الشاراتُ تُحسب عنه، فالصفُّ نفسه
+    و`day` يُمرَّر صريحاً ولا يُقرأ من الساعة: الشاراتُ تُحسب عنه، فالصفُّ نفسُه
     «قريب» في يومٍ وليس في آخر بلا أن يتغيّر في القاعدة.
     """
     if filter not in TODAY_FILTERS:
         raise ValidationError({
-            "filter": "فلترٌ غير معروف — mine أو week أو late.",
+            "filter": "فلترٌ غير معروف — mine أو week أو late أو late_internal.",
         })
     masked = user is not None and not can_see_amounts(tenant, user)
     tagged = [
-        (obligation, _badge_keys(obligation, day))
+        (obligation, _badge_keys(obligation, day, task=obligation.task))
         for obligation in _visible_pending_obligations(tenant, user)
     ]
     counters = {
-        "week": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_NEAR in keys),
         "late": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_LATE in keys),
+        "late_internal": sum(
+            1 for _row, keys in tagged if OBLIGATION_BADGE_LATE_INTERNAL in keys
+        ),
+        "week": sum(1 for row, _keys in tagged if _in_near_window(row, day)),
         "all": len(tagged),
     }
     user_id = getattr(user, "pk", None)
@@ -2878,9 +3083,11 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
     for obligation, keys in tagged:
         if filter == "mine" and _effective_assignee_id(obligation) != user_id:
             continue
-        if filter == "week" and OBLIGATION_BADGE_NEAR not in keys:
+        if filter == "week" and not _in_near_window(obligation, day):
             continue
         if filter == "late" and OBLIGATION_BADGE_LATE not in keys:
+            continue
+        if filter == "late_internal" and OBLIGATION_BADGE_LATE_INTERNAL not in keys:
             continue
         rows.append(_obligation_row(
             obligation,
@@ -2904,6 +3111,124 @@ def _effective_assignee_id(obligation):
     """معرّفُ المسؤول الفعليّ للصفّ — بلا استعلامٍ إضافيّ (المسؤولُ محمَّل)."""
     assignee = obligation.task.assignee or obligation.client.responsible
     return getattr(assignee, "pk", None)
+
+
+#: أنواعُ التنبيه التي **تُسقطها القراءةُ** إذا انحلّ سببُها. نوعٌ جديد لا يُضاف
+#: هنا: يُضاف صفّاً في `OFFICE_ALERT_KIND_CHOICES` ويُعرض كما هو (`~Q(kind__in=…)`).
+RESOLVED_ALERT_KINDS: tuple[str, ...] = (
+    OFFICE_ALERT_KIND_OBLIGATION_LATE,
+    OFFICE_ALERT_KIND_TASK_LATE_INTERNAL,
+)
+
+
+def _visible_alerts(tenant, user):
+    """تنبيهاتُ هذا المستخدم وحدها، **المعروضُ له وحده وبلا المحسوم**.
+
+    **والرؤيةُ تتبع الزبون**: تنبيهُ زبونٍ لا يراه العضو لا يُعرض — وإلا بقي
+    تنبيهُ زبونٍ حُوِّل لغيره في جرسه بعد أن حُرِم زبونَه. والشرطُ استعلامٌ
+    فرعيٌّ واحد على `visible_clients` (مصدرُ الرؤية الوحيد)، فلا N+1؛ وتنبيهٌ بلا
+    زبون (لا يولّده شيء اليوم) يبقى ظاهراً لمستلِمه.
+
+    وتنبيهُ التزامٍ لا يُعرض إن لم يبقَ الالتزامُ منتظراً، وتنبيهُ شغلةٍ لا يُعرض
+    إن لم يبقَ فيها التزامٌ منتظرٌ — بـ`Exists` كذلك.
+    """
+    pending_obligation = Obligation.objects.filter(
+        pk=OuterRef("obligation_id"), status=OBLIGATION_STATUS_PENDING,
+    )
+    pending_task = Obligation.objects.filter(
+        task_id=OuterRef("task_id"), status=OBLIGATION_STATUS_PENDING,
+    )
+    return (
+        OfficeAlert.objects
+        .filter(tenant=tenant, recipient=user)
+        .filter(
+            Q(client__isnull=True)
+            | Q(client__in=visible_clients(tenant, user).values("pk")),
+        )
+        .annotate(
+            obligation_pending=Exists(pending_obligation),
+            task_pending=Exists(pending_task),
+        )
+        .filter(
+            Q(kind=OFFICE_ALERT_KIND_OBLIGATION_LATE, obligation_pending=True)
+            | Q(kind=OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, task_pending=True)
+            | ~Q(kind__in=RESOLVED_ALERT_KINDS)
+        )
+    )
+
+
+def alert_row(alert) -> dict:
+    """سطرُ الجرس — **بلا مبلغ**، و`client` مكانُ الفتح لا سندُ التنبيه.
+
+    و`badge` **مفتاحُ شارة النوع من الخادم** (`OFFICE_ALERT_KIND_BADGES`)، فتُلوَّن
+    الشارةُ في الواجهة بلا معرفة أنواعٍ فيها: نوعٌ لاحقٌ يُضاف صفّاً في الخريطة
+    ويأخذ محايداً (`""`) حتى يُلوَّن.
+    """
+    return {
+        "id": alert.pk,
+        "kind": alert.kind,
+        "kind_label": OFFICE_ALERT_KIND_LABELS.get(alert.kind, ""),
+        "badge": OFFICE_ALERT_KIND_BADGES.get(alert.kind, ""),
+        "message": alert.message,
+        "client": (
+            None if alert.client is None
+            else {"id": alert.client_id, "name": alert.client.name}
+        ),
+        "task_id": alert.task_id,
+        "obligation_id": alert.obligation_id,
+        "day": alert.day.isoformat(),
+        "seen": alert.seen_at is not None,
+        "created_at": alert.created_at.isoformat(),
+    }
+
+
+def alerts_payload(tenant, *, user, limit=50) -> dict:
+    """حمولةُ الجرس: `{"unseen": عددُ غير المرئيّ وغير المحسوم, "rows": [...]}`.
+
+    **تنبيهاتُ هذا المستخدم وحده** (`recipient=user`) الأحدثُ أوّلاً، والمحسومُ
+    مستبعَدٌ عند القراءة (`_visible_alerts`). و`unseen` يُعدّ على المجموعة كلّها
+    لا على الصفحة المعروضة، فالسقفُ لا يكذب على العدّاد.
+    """
+    queryset = _visible_alerts(tenant, user)
+    unseen = queryset.filter(seen_at__isnull=True).count()
+    rows = [
+        alert_row(alert)
+        for alert in queryset.select_related("client")[:limit]
+    ]
+    return {"unseen": unseen, "rows": rows}
+
+
+def mark_alert_seen(alert, *, user):
+    """«شفته» — يُكتب `seen_at` مرّةً، والقراءةُ التالية تُنقص العدّاد.
+
+    تنبيهُ غيرك يُرفض هنا احتياطاً؛ والـAPI يُحلّ الكائن بمستلِمِه فيردّ **404**
+    قبل أن يبلغ هذه الدالّة.
+    """
+    if alert.recipient_id != getattr(user, "pk", None):
+        raise ValidationError({"alert": "التنبيهُ ليس لهذا المستخدم."})
+    if alert.seen_at is None:
+        alert.seen_at = timezone.now()
+        alert.save(update_fields=["seen_at"])
+    return alert
+
+
+def mark_all_alerts_seen(tenant, *, user) -> int:
+    """«شفتهم كلهم» — **المعروضُ وحده**: عددُ ما كُتب له `seen_at`.
+
+    يمرّ بـ`_visible_alerts` نفسها، فلا يُكتب على تنبيهٍ محسوم: «رجّعها» بعدها
+    تُعيد تنبيهاً **غيرَ مقروء** ويُعدّه العدّاد. ولو كُتب على المحسوم لضحك
+    العدّادُ على الحال: صفٌّ رجع إلى الجرس وهو «مقروء» بلا أن يراه أحد.
+    """
+    # المعرّفاتُ تُقرأ أولاً ثم تُكتب: `UPDATE … WHERE id IN (SELECT … FROM` الجدولِ
+    # نفسِه يرفضه MySQL (خطأ 1093) ويقبله SQLite — فيمرّ الاختبارُ ويسقط الإنتاج.
+    ids = list(
+        _visible_alerts(tenant, user)
+        .filter(seen_at__isnull=True)
+        .values_list("pk", flat=True),
+    )
+    if not ids:
+        return 0
+    return OfficeAlert.objects.filter(pk__in=ids).update(seen_at=timezone.now())
 
 
 def client_obligations_payload(client, *, user, day) -> dict:

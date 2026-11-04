@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1022**
+عدد النقاط: **1025**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -65,6 +65,9 @@
 | `/api/accountant/tax/periods/prepare/` | `TaxPeriodPrepareView` | `accountant_portal/views.py` |
 | `/api/accountant/verify-email/` | `VerifyEmailView` | `accountant_portal/views.py` |
 | `/api/accountant/workspace/companies/` | `WorkspaceCompaniesView` | `accountant_portal/views.py` |
+| `/api/accounting-office/alerts/` | `OfficeAlertsViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/alerts/seen-all/` | `OfficeAlertsViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/alerts/{pk}/seen/` | `OfficeAlertsViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/calendar/` | `OfficeCalendarViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |

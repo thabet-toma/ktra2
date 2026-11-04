@@ -24,6 +24,8 @@ import { ActionBarRail } from './ActionBarRail';
 import { QuickAccessBar } from './QuickAccessBar';
 import { GlobalContextMenu } from './GlobalContextMenu';
 import { NotificationCenter } from '../notifications/NotificationCenter';
+// #276: جرسُ تنبيهات مكتب المحاسبة — يخفي نفسه خارج الوحدة المرخّصة.
+import { OfficeAlertsBell } from '../accounting-office/OfficeAlertsBell';
 import { WhatsNewButton } from './WhatsNewButton';
 import { CustomerNotesTab } from '../partners/CustomerNotesTab';
 import { useConfirm } from '../../contexts/ConfirmContext';
@@ -278,6 +280,8 @@ export const AppLayout: React.FC<AppLayoutProps> = ({
           </button>
           {/* إشعارات الموقع (الجرس) — تذكيرات الزبائن/الشحنات */}
           <NotificationCenter currentUserId={user.id} onNavigate={onNavigate} />
+          {/* #276: تنبيهات المكتب — بجواره لا بديلاً عنه، ويظهر لمكتبٍ مرخَّص وحده */}
+          <OfficeAlertsBell />
           {/* ثوابت المجموعة — زر مرئي بديل للمفتاح F11 */}
           {onOpenGroupConstants && (
             <button

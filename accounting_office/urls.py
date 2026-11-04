@@ -7,6 +7,7 @@ from django.urls import include, path
 from rest_framework.routers import SimpleRouter
 
 from accounting_office.views import (
+    OfficeAlertsViewSet,
     OfficeCalendarViewSet,
     OfficeClientViewSet,
     OfficeContactViewSet,
@@ -36,6 +37,8 @@ router.register(
     "obligations", OfficeObligationViewSet, basename="accounting-office-obligations",
 )
 router.register("tasks", OfficeTaskViewSet, basename="accounting-office-tasks")
+# #276: الجرس — تنبيهاتُ العضو نفسه، و«شفته»، و«شفتهم كلهم».
+router.register("alerts", OfficeAlertsViewSet, basename="accounting-office-alerts")
 
 urlpatterns = [
     path("", include(router.urls)),

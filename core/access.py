@@ -408,8 +408,12 @@ _OFFICE_MANAGER = _VIEW_ONLY | set(OFFICE_PERMISSION_KEYS)
 # و`user_permissions` تمنح الجلسة صلاحياتها صراحةً (مدير ناقص `SUPPORT_FORBIDDEN_PERMS`).
 SUPPORT_ROLE = "support"
 
+#: دورُ صاحب الشركة/المكتب في الكتالوج — **الاسمُ الواحد** لكل من يقرؤه خارج
+#: هذا الملفّ (مكتب المحاسبة يقرأه ليعرف «صاحب المكتب» في تنبيهات التأخير #276).
+MANAGER_ROLE = "manager"
+
 ROLE_DEFAULTS: dict[str, object] = {
-    "manager": "*",
+    MANAGER_ROLE: "*",
     "office_manager": _OFFICE_MANAGER,
     "accountant": _ACCOUNTANT,
     "legal_accountant": _LEGAL_ACCOUNTANT,
@@ -423,7 +427,7 @@ ROLE_DEFAULTS: dict[str, object] = {
 
 # الأدوار المعروضة في شاشة الصلاحيات (المدير أولاً) وتسمياتها العربية.
 ROLE_LABELS = (
-    ("manager", "مدير"),
+    (MANAGER_ROLE, "مدير"),
     # #272: دورُ مكتب المحاسبة الثاني — يظهر فقط لشركةٍ مرخّصةٍ لوحدتها.
     ("office_manager", "مدير مكتب"),
     ("accountant", "محاسب"),

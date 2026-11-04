@@ -128,6 +128,59 @@ export function clientIdFromSearch(search: string): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** اسم معامل تبويب ملفّ الزبون — مصدرٌ واحدٌ لبناء الرابط وقراءته (#276). */
+export const CLIENT_TAB_PARAM = 'tab';
+
+/** تبويبُ «الالتزامات والشغلات» — مكانُ فتح التنبيه من الجرس. */
+export const CLIENT_OBLIGATIONS_TAB = 'obligations';
+
+/** اسم معامل الشغلة المطلوب فتحها — واحدٌ في بناء الرابط وقراءته (#276). */
+export const TASK_QUERY_PARAM = 'task';
+
+/** تبويباتُ ملفّ الزبون المعروفة — `?tab=` خارجها يُتجاهَل فلا تبيضّ الشاشة. */
+export const CLIENT_TAB_KEYS = [
+  'tax-card', 'obligations', 'services', 'contacts', 'notes',
+] as const;
+export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
+
+/**
+ * وجهةُ التنبيه: **ملفّ الزبون على تبويب «الالتزامات والشغلات»** (#276).
+ *
+ * التنبيهُ يحمل مكانَه لا محتواه: `client` هو ما يفتحه، و`task_id` هو **السطرُ
+ * المقصود** فيُبرز ويُمرَّر إليه (`officeTaskAnchorId`)، والتبويبُ يُقرأ من
+ * العنوان. وتنبيهٌ بلا زبون (لا يولّده شيء اليوم) يعيد `''` فلا زرَّ يفتح العدم.
+ */
+export function alertTargetPath(
+  alert: { client: { id: number } | null; task_id?: number | null },
+): string {
+  if (!alert.client) return '';
+  const base = `${clientFilePath(alert.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_OBLIGATIONS_TAB}`;
+  return alert.task_id ? `${base}&${TASK_QUERY_PARAM}=${alert.task_id}` : base;
+}
+
+/** التبويبُ المطلوب من العنوان — المعروفُ وحده، وإلا `null` (الافتراضُ للشاشة). */
+export function clientTabFromSearch(search: string): ClientTabKey | null {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const raw = params.get(CLIENT_TAB_PARAM) ?? '';
+  return (CLIENT_TAB_KEYS as readonly string[]).includes(raw)
+    ? (raw as ClientTabKey)
+    : null;
+}
+
+/** معرّفُ الشغلة المطلوب فتحها من العنوان — `null` إن غاب أو كان فاسداً. */
+export function taskIdFromSearch(search: string): number | null {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  const raw = params.get(TASK_QUERY_PARAM);
+  if (raw === null) return null;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+/** معرّفُ عنصر شغلةٍ في الصفحة — يُمرَّر إليه (`scrollIntoView`) ويُبرز. */
+export function officeTaskAnchorId(taskId: number): string {
+  return `office-task-${taskId}`;
+}
+
 /** رابطُ شاشة الزبائن، بملفّ زبونٍ مفتوحٍ أو بلا. */
 export function clientFilePath(clientId?: number | null): string {
   if (clientId === null || clientId === undefined) return OFFICE_CLIENTS_PATH;
@@ -597,11 +650,13 @@ export function isExpectedDeadline(row: CalendarDeadlineRow): boolean {
 /** مسار شاشة «اليوم» — مصدرٌ واحدٌ للموجّه والقائمة. */
 export const OFFICE_TODAY_PATH = '/accounting-office/today';
 
-/** فلترُ شاشة «اليوم»: الفارغ «الكل»، والثلاثةُ الباقية رقائقُها وعدّاداتُها. */
-export type TodayFilter = '' | 'mine' | 'week' | 'late';
+/** فلترُ شاشة «اليوم»: الفارغ «الكل»، والباقي رقائقُه وعدّاداتُه. */
+export type TodayFilter = '' | 'mine' | 'week' | 'late' | 'late_internal';
 
-/** الفلاترُ الأربعة المحسومة — الفارغ «الكل»، وغيرُها لا يُقرأ من العنوان. */
-export const TODAY_FILTERS: readonly TodayFilter[] = ['', 'mine', 'week', 'late'];
+/** الفلاترُ الخمسة المحسومة — الفارغ «الكل»، وغيرُها لا يُقرأ من العنوان. */
+export const TODAY_FILTERS: readonly TodayFilter[] = [
+  '', 'mine', 'week', 'late', 'late_internal',
+];
 
 /** اسم معامل العنوان الذي يحمل الفلتر — يُقرأ ويُكتب في مكانٍ واحد. */
 export const TODAY_FILTER_PARAM = 'filter';
@@ -653,8 +708,11 @@ export interface ObligationRow {
 }
 
 export interface TodayCounters {
-  week: number;
+  /** «متأخّر رسمي» — أحمر. */
   late: number;
+  /** «متأخّر داخلي» — أصفر. */
+  late_internal: number;
+  week: number;
   all: number;
 }
 
@@ -727,11 +785,15 @@ export function obligationAmountText(
 
 /** أصنافُ شارة الحالة المشتقّة — اللونُ عرضٌ، والنصُّ من الخادم. */
 export function obligationBadgeClass(key: string): string {
-  if (key === 'near') {
-    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
-  }
+  // #276: أحمرُ للرسميّ، وأصفرُ للداخليّ، و«قريب» محايدٌ فلا يلتبس بالأصفر.
   if (key === 'late') {
     return 'border-rose-200 bg-rose-50 text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200';
+  }
+  if (key === 'late_internal') {
+    return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
+  }
+  if (key === 'near') {
+    return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
   }
   return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
 }
@@ -775,4 +837,33 @@ export function shortIsoDate(iso: string | null | undefined): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso ?? '');
   if (!match) return '';
   return `${match[3]}/${match[2]}`;
+}
+
+// ── التنبيهات والجرس (#276) ──────────────────────────────────────────────
+//
+// **ولا تسميةَ نوعٍ هنا ولا خريطةُ نوعٍ ← شارة**: `kind_label` و`badge` يصلان من
+// الخادم (`OFFICE_ALERT_KIND_LABELS`/`OFFICE_ALERT_KIND_BADGES`)، والواجهة تُلوّن
+// بـ`obligationBadgeClass(alert.badge)` بلا معرفة أنواع. والرسالةُ نصُّه كما وُلد.
+
+/** تنبيهٌ كما يعيده `GET alerts/` — **بلا مبلغ**. */
+export interface OfficeAlertRow {
+  id: number;
+  kind: string;
+  /** تسميةُ النوع من الخادم — لا نسخةً محليّة تنافسها. */
+  kind_label: string;
+  /** مفتاحُ شارة النوع (`late`/`late_internal`) أو `''` لنوعٍ لم تُعرَّف شارته. */
+  badge: string;
+  message: string;
+  client: { id: number; name: string } | null;
+  task_id: number | null;
+  obligation_id: number | null;
+  day: string;
+  seen: boolean;
+  created_at: string;
+}
+
+export interface OfficeAlertsPayload {
+  /** عددُ غير المرئيّ **وغير المحسوم** — يُنقصه «شفته». */
+  unseen: number;
+  rows: OfficeAlertRow[];
 }

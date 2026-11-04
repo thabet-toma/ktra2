@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 import {
   addClientService,
@@ -60,6 +61,11 @@ import {
   shortIsoDate,
   showsOfficeAssignment,
   visibleClientSettings,
+  clientTabFromSearch,
+  taskIdFromSearch,
+  officeTaskAnchorId,
+  CLIENT_TAB_PARAM,
+  type ClientTabKey,
 } from '../../utils/accountingOffice';
 import { formatDateValue, todayIso } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
@@ -78,7 +84,7 @@ import {
   officeSecondaryButtonClass,
 } from './OfficeUi';
 
-type TabKey = 'tax-card' | 'obligations' | 'services' | 'contacts' | 'notes';
+type TabKey = ClientTabKey;
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: 'tax-card', label: 'البطاقة الضريبية' },
@@ -166,7 +172,24 @@ export const OfficeClientFile: React.FC<{
   const [recipients, setRecipients] = useState<ReminderRecipientRow[]>([]);
   const [pickerContacts, setPickerContacts] = useState<ContactRow[]>([]);
   const [pickerQuery, setPickerQuery] = useState('');
-  const [tab, setTab] = useState<TabKey>('tax-card');
+  const [searchParams, setSearchParams] = useSearchParams();
+  // #276: جرسُ التنبيهات يفتح الملفَّ على تبويبه (`?tab=obligations`) — قراءةٌ
+  // عند التركيب وتتبّعٌ بعدها (قد يكون الملفُّ مفتوحاً على تبويبٍ آخر)، وكتابةٌ
+  // عند كل اختيار فيبقى العنوانُ صادقاً بعد التحديث.
+  const tabFromUrl = clientTabFromSearch(`?${searchParams.toString()}`);
+  // #276: التنبيهُ يحمل شغلتَه (`?task=`) فيُمرَّر إليها ويُبرز — وإلا فتح الملفُّ
+  // على أوّل السطر وحده.
+  const targetTaskId = taskIdFromSearch(`?${searchParams.toString()}`);
+  const [tab, setTab] = useState<TabKey>(tabFromUrl ?? 'tax-card');
+  useEffect(() => {
+    if (tabFromUrl) setTab(tabFromUrl);
+  }, [tabFromUrl]);
+  const selectTab = useCallback((next: TabKey) => {
+    setTab(next);
+    const params = new URLSearchParams(searchParams);
+    params.set(CLIENT_TAB_PARAM, next);
+    setSearchParams(params, { replace: true });
+  }, [searchParams, setSearchParams]);
   const [card, setCard] = useState<TaxCard>(EMPTY_CARD);
   const [savedCard, setSavedCard] = useState<TaxCard>(EMPTY_CARD);
   const [notes, setNotes] = useState('');
@@ -695,6 +718,23 @@ export const OfficeClientFile: React.FC<{
     };
   }, [tab, refreshClientServices, toast]);
 
+  // #276: وصلنا من تنبيهٍ يحمل شغلةً بعينها ⇒ يُمرَّر إليها بعد وصول التزاماتها —
+  // **مرّةً لكل هدف**: `obligations` يُستبدل بعد كل فعلٍ على أي شغلة، ولولا السجلّ
+  // لعادت الصفحةُ إلى الهدف مع كل حفظٍ أو تبديل تبويب ما دام `?task=` في العنوان.
+  const scrolledTaskId = useRef<number | null>(null);
+  useEffect(() => {
+    if (targetTaskId === null) {
+      scrolledTaskId.current = null;
+      return;
+    }
+    if (tab !== 'obligations' || obligations === null) return;
+    if (scrolledTaskId.current === targetTaskId) return;
+    const element = document.getElementById(officeTaskAnchorId(targetTaskId));
+    if (!element) return;
+    element.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    scrolledTaskId.current = targetTaskId;
+  }, [tab, targetTaskId, obligations]);
+
   /** الاقتراحُ يُطلب عند اختيار الخدمة أو تغيير تاريخ البدء — ثم يؤكّده الموظف. */
   const loadSuggestion = useCallback(
     async (serviceId: string, startsOn: string) => {
@@ -967,7 +1007,7 @@ export const OfficeClientFile: React.FC<{
             <button
               key={entry.key}
               type="button"
-              onClick={() => setTab(entry.key)}
+              onClick={() => selectTab(entry.key)}
               aria-current={tab === entry.key ? 'page' : undefined}
               className={
                 tab === entry.key
@@ -1135,63 +1175,73 @@ export const OfficeClientFile: React.FC<{
               ) : null}
 
               {obligations.tasks.map((task) => (
-                <OfficeCard key={task.id}>
-                  <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-[12.5px] font-bold text-slate-900 dark:text-slate-100">
-                        {task.period_label}
-                      </span>
-                      <span className="text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
-                        {task.service.name}
-                      </span>
-                      <span className="text-[10.5px] tabular-nums text-slate-500 dark:text-slate-400">
-                        داخلي {shortIsoDate(task.internal_deadline)}
-                      </span>
+                <div
+                  key={task.id}
+                  id={officeTaskAnchorId(task.id)}
+                  className={
+                    targetTaskId === task.id
+                      ? 'rounded-xl ring-2 ring-amber-400 dark:ring-amber-500'
+                      : undefined
+                  }
+                >
+                  <OfficeCard>
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-2 dark:border-slate-800">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-[12.5px] font-bold text-slate-900 dark:text-slate-100">
+                          {task.period_label}
+                        </span>
+                        <span className="text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                          {task.service.name}
+                        </span>
+                        <span className="text-[10.5px] tabular-nums text-slate-500 dark:text-slate-400">
+                          داخلي {shortIsoDate(task.internal_deadline)}
+                        </span>
+                      </div>
+                      {canAssign && showsResponsible ? (
+                        <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          المسؤول
+                          <select
+                            value={task.assignee ? String(task.assignee.id) : ''}
+                            disabled={assigningTask === task.id}
+                            onChange={(event) =>
+                              changeTaskAssignee(task.id, event.target.value)
+                            }
+                            className={`${officeInputClass} h-8`}
+                          >
+                            <option value="">مسؤول الزبون</option>
+                            {members.map((member) => (
+                              <option key={member.user_id} value={member.user_id}>
+                                {member.full_name || member.username}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : task.assignee ? (
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {task.assignee.name}
+                        </span>
+                      ) : null}
                     </div>
-                    {canAssign && showsResponsible ? (
-                      <label className="flex items-center gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                        المسؤول
-                        <select
-                          value={task.assignee ? String(task.assignee.id) : ''}
-                          disabled={assigningTask === task.id}
-                          onChange={(event) =>
-                            changeTaskAssignee(task.id, event.target.value)
-                          }
-                          className={`${officeInputClass} h-8`}
-                        >
-                          <option value="">مسؤول الزبون</option>
-                          {members.map((member) => (
-                            <option key={member.user_id} value={member.user_id}>
-                              {member.full_name || member.username}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
-                    ) : task.assignee ? (
-                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
-                        {task.assignee.name}
-                      </span>
-                    ) : null}
-                  </div>
 
-                  <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
-                    {task.obligations.map((obligation) => (
-                      <li key={obligation.id} className="py-2">
-                        <OfficeObligationRow
-                          obligation={obligation}
-                          day={obligations.day}
-                          directionChoices={obligations.direction_choices}
-                          canWrite={canWrite}
-                          canSeeAmounts={canSeeAmounts}
-                          onChanged={reloadObligations}
-                          onError={(message) => toast(message, 'error')}
-                          showStatus
-                          dates="official-actual"
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                </OfficeCard>
+                    <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+                      {task.obligations.map((obligation) => (
+                        <li key={obligation.id} className="py-2">
+                          <OfficeObligationRow
+                            obligation={obligation}
+                            day={obligations.day}
+                            directionChoices={obligations.direction_choices}
+                            canWrite={canWrite}
+                            canSeeAmounts={canSeeAmounts}
+                            onChanged={reloadObligations}
+                            onError={(message) => toast(message, 'error')}
+                            showStatus
+                            dates="official-actual"
+                          />
+                        </li>
+                      ))}
+                    </ul>
+                  </OfficeCard>
+                </div>
               ))}
             </>
           )}

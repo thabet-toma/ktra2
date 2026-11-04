@@ -4,13 +4,93 @@
 **وبطلب المالك (2026-10-22): يُحدَّث بعد كل تذكرة، وبعد كل جولة تصليح، وقبل أي ضغطٍ للسياق** — هو ذاكرة
 المنسّق بعد الـcompact. الإكمال حتى آخر تذكرة بلا توقّف.
 
-**آخر تحديث:** 2026-11-04 12:25
+**آخر تحديث:** 2026-11-04 ~14:30 (قبل compact ثانٍ بطلب المالك؛ لا عامل حيّ)
 
-## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-04 12:25)
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-04 14:30)
 
-**الحالة الآن:**
+**لا job حيّ ولا محاولة جارية.**
+**Goal:** `goal-0636beb0-0b93-478a-ba89-e889254ad804` (rev 4). إن ظهر disarmed بعد الاستئناف: `update_goal action=resume`.
+**طلب المالك القائم:** كل تذكرة تُنشر تُغلق على GitHub بتعليق النشر. و#271–#274 مغلقة. وفي #275 و#270 تعليقا حالة (13:20).
+**وقرار المالك لـ#275:** «استنى CI وبعدين ديبلوي وسكّر»، **و CI صار أخضر**.
+
+**تحديث 16:00:** #276 التصليح 2 (Sonnet، `effort=high`، 1.08$) استُلم، وبوّاباته كلها خضراء عندي: 437 · الكاملة 4 بيئية / 7047 · migrate `0006` · lint · tsc/1415/build · sync_docs · diff --check. والمراجعة النهائية وجدت 4 صغيرة (تسمية وتعليقات) ⇒ **جولة 3 عند Opus 5.5 high**: job `pwsh-1430444454924cbf`، relay `%TEMP%\wf-acct\relay\276-r3`، والموجز `briefs\276-round3-opus.md`. بعدها لا جولة رابعة في القاعدة: تحقّق `effort`، واقرأ الفرق، ثم البوّابات (الكاملة أيضاً)، ثم commit ← push ← CI ← نشر `0006` (`deploy-276.sh` من 275) ← `gh issue close 276` ← #277.
+
+**تحديث 15:25:** #276 التصليح 1 (DeepSeek) استُلم، والموديول عندي 435 ✓. والمراجعة النهائية وجدت مشكلة ثانية، أخطرها MySQL 1093 في `mark_all_alerts_seen` ⇒ **جولة 2 عند Sonnet 5.5 high**: job `pwsh-9b91501b257042e4`، relay `%TEMP%\wf-acct\relay\276-r2`، والموجز `%TEMP%\wf-acct\briefs\276-round2-sonnet.md` (7 بنود). عند عودتها: تحقّق `effort: high` في `result.json` ← اقرأ الفرق ← البوّابات كلها ← مراجعة نهائية؛ ومشكلةٌ ثالثة ⇒ Opus 5.5 high.
+
+**تحديث 14:40:**
+- ✅ **#275 منشورة ومغلقة**: نسخة `ktra-before-275-20261104-123543.sql`، و`0005` طُبّقت، والفحوص كلها 200، والـcron اليومي مضاف. البند 1 أدناه منتهٍ.
+- 🔧 **#276 جولة تصليح 1 أُرسلت** إلى DeepSeek: `attempt-e781fb7b-da42-429d-ae63-5242f6f57935` (البنود A–L كما في الملف). عند عودتها: `delegation_review`، ثم قراءة الفرق، ثم مراجعة نهائية… كما في البند 2.
+
+**بالترتيب عند الاستئناف:**
+1. ~~**نشر #275**~~ (تمّ) (run `41818234949` على `8caccb16` = `completed success`).
+   - السكربت جاهز: `%TEMP%\wf-acct\deploy-275.sh` (من 274، و`before-275`).
+   - قبله على الخادم: `git fetch` ← `git merge --no-edit origin/newktra` ← `git diff origin/newktra --stat` فارغ ← pip ← `manage.py check` ← `makemigrations --check` ← المعلّق `accounting_office.0005` وحده ← `cd frontend_v2 && npm install && npm run build`.
+   - ثم السكربت: `($s -replace "`r","") | ssh -i ~/.ssh/hostenger2/id_ed25519 root@187.124.164.58 'bash -s'`.
+   - ثم **cron يومي**، وشغّله يدوياً مرّةً للتحقّق: `30 5 * * * cd /root/ktra && venv/bin/python manage.py refresh_accounting_offices >> logs/refresh_accounting_offices.log 2>&1`.
+   - ثم `gh issue close 275 --comment "<النشر: النسخة الاحتياطية، الهجرة 0005، الفحوص 200، cron>"`، وحدّث صفّ 275 ✅ في `acct-office-build.md` و`runs.md`.
+   - **شجرة العمل تحمل #276 غير ملتزَمة، فلا تلمسها**: النشر من `origin/newktra` على الخادم وحده.
+2. **#276 — جولة تصليح 1 (DeepSeek):**
+   - أرسل: `delegation_correct` على `attempt-7aee1230-16dd-4cc6-82a4-b328eeae7bad` (مسجَّلة `correction-required`). الـfeedback = **نصّ الملف `%TEMP%\wf-acct\briefs\276-round1-deepseek.md` حرفياً**: البنود A–L بقراراتها، وأوامر الفحص.
+   - إن رُفض الإرسال (`already-corrected`/`no-worker`): `delegate` جديد على خط التنفيذ `lane-7587384e…`، وأوّل الموجز «حالة الشجرة: #276 منفَّذة وغير ملتزَمة، وهذه جولة تصليح عليها» ثم نصّ الملف.
+   - **أخطر بند (A):** `week` عدّاداً وفلتراً = نافذة `0 <= actual_deadline - day <= 6`، مستقلّة عن الشارة الواحدة (الشارة تبقى بالأولوية أحمر ← أصفر ← قريب). البقية:
+     - (B) `visible_clients` في `_visible_alerts`.
+     - (C) `seen-all` على المعروض وحده.
+     - (D) `effective_assignee`.
+     - (E) `existing` بـ`ref_key__in`.
+     - (F) اختبارا العزل بنفس المستخدم في المكتبين.
+     - (G) اختبار المحسوم بلا شارة على `client_obligations_payload`.
+     - (H) التمديد.
+     - (I) `badge` من الخادم في `alert_row`، وحذف `alertBadgeKey`.
+     - (J) `&task=` وإبراز الشغلة.
+     - (K) `MANAGER_ROLE` في `core/access.py` و`CLIENT_TAB_KEYS as const`.
+     - (L) docstrings/وثائق، والسطر الفارغ، وتسمية اختبارين.
+   - بعدها الحلقة: قراءة الفرق ← مراجعة نهائية (Standards+Spec على خط القراءة `lane-da7d75a7…`) ← مشكلة ثانية ⇒ Sonnet 5.5 high (`claude-delegate`) ← ثالثة ⇒ Opus 5.5 high. **ولا جولة إن كانت نظيفة.**
+   - ثم البوّابات كلها بنفسي: الموديول+البيان · `core/tests` · الكاملة · migrate من صفر (`0006`) · makemigrations · lint · tsc/npm test/build · sync_docs · `git diff HEAD --check`.
+   - ثم commit (ملفات #276 + `docs/agents/*`) ← push ← CI أخضر ← نشر (`deploy-276.sh` من 275، و`before-276`، والهجرة `0006` فيها `CreateModel` فقط) ← `gh issue close 276` ← التحديث.
+3. **#277–#291** بترتيب جدول `acct-office-build.md`، وكلٌّ يُغلق على GitHub بعد نشره، ويُحدَّث تعليق التقدّم في #270 من حين لآخر.
+
+**ما يعرفه المنسّق عن #276 (قرأ الفرق كاملاً):**
+- النموذج `OfficeAlert` وهجرة `0006_officealert.py` (`CreateModel` فقط، وفرادة غير مشروطة).
+- الإعدادان في مجموعة `alerts`.
+- `_generate_late_alerts` داخل `refresh_office`، و`alerts_payload`/`mark_alert_seen`/`mark_all_alerts_seen`، و`OfficeAlertsViewSet`.
+- `OfficeAlertsBell.tsx` في `AppLayout`، و`?tab=` في `OfficeClientFile`.
+- محاولتا المراجعة (`attempt-a637687d…` Standards، و`attempt-5cd4b7c3…` Spec) مسجَّلتان `reviewed-completion`.
+
+### (السابق) نقطة الاستئناف 13:20 — تاريخيّ
+
+**لا job حيّ.** الشجرة: #275 ملتزَمة ومدفوعة؛ لا تعديل كود غير ملتزَم (فقط `docs/agents/*` بيد المنسّق، والملفات المحرّمة غير المتتبَّعة).
+**Goal:** `goal-0636beb0-0b93-478a-ba89-e889254ad804` (rev 3) — بعد الاستئناف: `update_goal action=resume` إن ظهر disarmed. الهدف ينصّ: جولة التصليح **فقط إن وُجدت مشكلة** (1 DeepSeek ← 2 Sonnet ← 3 Opus).
+
+**بالترتيب عند «كمّل»:**
+1. **#275 — النشر:** `gh run list --branch newktra --limit 1` (run `41818234949` على `8caccb16`، كان `in_progress`). أخضر ⇒
+   - `%TEMP%\wf-acct\deploy-274.sh` ⇒ `deploy-275.sh` (`before-274`⇒`before-275`). الإرسال: `($s -replace "`r","") | ssh -i ~/.ssh/hostenger2/id_ed25519 root@187.124.164.58 'bash -s'` (استبدل `\r` كلياً، لا `\r\n` فقط؛ و`tail -n N` لا `tail -N` على الخادم).
+   - قبله على الخادم: `git fetch` ← `git merge --no-edit origin/newktra` ← `git diff origin/newktra --stat` فارغ ← pip ← `manage.py check` ← `makemigrations --check` ← المعلّق `accounting_office.0005` وحده (فيها `AddField`/`CreateModel`/`AddIndex`/`AddConstraint` فقط — لا `RemoveField`/`DeleteModel`/`RunSQL`) ← `cd frontend_v2 && npm install && npm run build`.
+   - ثم السكربت (نسخة احتياطية ← migrate ← static ← dist ← restart ← فحوص 200).
+   - **cron يومي جديد** على الخادم (crontab root)، مثلاً `30 5 * * * cd /root/ktra && venv/bin/python manage.py refresh_accounting_offices >> logs/refresh_accounting_offices.log 2>&1`، وتشغيلٌ يدوي مرّةً للتحقّق.
+   - `gh issue close 275` بتعليق النشر، وحدّث `acct-office-build.md` (صفّ 275 ✅) و`runs.md`.
+2. **#276 — استئناف:** `delegation_correct` على `attempt-0fa33ba5-bac9-4316-9bbf-483fee7facb4` بـ«كمّل #276 من البداية بنفس الموجز حرفياً». (أو dispatch جديد على خط التنفيذ؛ الموجز كاملاً في الجلسة: ابحث «تذكرة #276 — مكتب المحاسبة ٦».) القرارات المحسومة فيه:
+   - **درجتان مشتقّتان بلا تخزين، شارةٌ واحدة بالأولوية:** أحمر `late` (`pending` و`actual_deadline < day`) ← أصفر `late_internal` (`pending` و`task.internal_deadline < day`) ← `near` ← لا شيء. `near` يصير محايداً (slate) لئلا يلتبس بالأصفر.
+   - **«اليوم»:** counters `{late, late_internal, week, all}` قبل الفلتر؛ فلتر `late_internal` جديد؛ عدّادات «متأخّر رسمي» (rose) · «متأخّر داخلي» (amber) · «قريب هالأسبوع» · «الكل».
+   - **`OfficeAlert`** (هجرة `0006`): `tenant`, `recipient`, `kind` (`task_late_internal` / `obligation_late`، قابلة للإضافة)، `ref_key` (`task:<id>`/`obligation:<id>`)، `client`/`task`/`obligation` nullable، `message` بلا مبلغ، `day`, `seen_at`, `created_at`؛ فرادة غير مشروطة `(tenant, recipient, kind, ref_key)` ⇒ **مرّة لكل (مستلِم، نوع، مرجع)**.
+   - **إعدادان بمستوى المكتب** `late_internal_alert_to` (افتراض `assignee`) و`late_official_alert_to` (افتراض `assignee_owner`)، اختيارات `assignee`/`assignee_owner`/`owner`؛ مسؤولٌ `None` ⇒ صاحب المكتب؛ بلا تكرار مستلِم.
+   - **التوليد** داخل `refresh_office` بـ`bulk_create(ignore_conflicts=True)` بلا N+1، و`created_alerts` في المردود والأمر.
+   - **الجرس:** `alerts_payload(tenant, *, user)` يستبعد المحسوم عند القراءة (التزامٌ لم يعد pending / شغلةٌ بلا pending) بـ`Exists`؛ `GET alerts/` · `POST alerts/<id>/seen/` (غيرك 404) · `POST alerts/seen-all/`. `OfficeAlertsBell.tsx` في `AppLayout.tsx` بجوار `NotificationCenter` (لا تمسّه) ويظهر لمكتب المحاسبة المرخّص وحده؛ النقر «شفته» ثم ملفّ الزبون `?tab=obligations` (`alertTargetPath`)؛ جلبٌ عند التركيب وكل 5 دقائق وعند التركيز.
+   - **ثم الحلقة كاملة:** قراءة الفرق ← Standards+Spec ← تصليح (إن لزم) ← بوّابات ← مراجعة نهائية ← commit ← push ← CI ← نشر (`0006`) ← إغلاق.
+3. **#277–#291** بترتيب جدول `acct-office-build.md`.
+
+**ملاحظات تشغيلية من هذه الجلسة:**
+- `delegation_verify` يُسقط أمراً مركّباً بـ`if (...) { exit 1 }` — شغّل `tsc`/`npm test`/`build` أوامرَ منفصلة.
+- الكاملة تُشغَّل في `pwsh` بالخلفية (~6–7 د)؛ والأربعة البيئية تُثبَت بتشغيلها وحدها (`.agents`=2696، `accounting_office`=0).
+- Sonnet/Opus: `node "C:\Users\asus\.agents\skills\claude-delegate\scripts\relay.mjs" --brief <ملف> --cd "D:\Users\asus\Desktop\ktra" --model sonnet|opus --effort high --timeout 1h30m --out-dir "%TEMP%\wf-acct\relay\<id>"` بالخلفية، وتحقّق `effort: high` في `result.json`.
+
+**مفتوح للمالك:** لم تُرَ شاشتا «اليوم» وتبويب الالتزامات بالعين (لا بيئة متصفّح)؛ محدِّد الإسناد في التبويب لا يميّز «موروث» من «محوَّل صراحةً» (طفيف، لـ#277)؛ #209 مصباح الحضور؛ هل تُعلَّم الحرّاس الأربعة لتتخطّى `.agents`.
+
+### السجلّ السابق لهذه الجلسة (تاريخيّ)
+
+**الحالة عند 12:25:**
 - **#274 منشورة ومغلقة** (CI أخضر `41796745266`، نسخة احتياطية `/root/backups/ktra-before-274-20261104-090409.sql`، `0004` طُبّقت، كل الفحوص 200). القسم أدناه عنها تاريخيّ.
-- **#275 في جولة تصليح 3 عند Opus 5.5** (relay بالخلفية، `--out-dir %TEMP%\wf-acct\relay\275-r3`، الموجز `%TEMP%\wf-acct\briefs\275-round3-opus.md`، 3 بنود O1–O3). جولة Sonnet (S1–S6) استُلمت: قرأتُ فرقها وبوّاباتها كلها خضراء (391 · كاملة 4 بيئية/7001 · migrate · lint · tsc/1411/build · sync_docs). بعد Opus: تحقّق `effort=high`، اقرأ الفرق، البوّابات، ثم الاستلام (لا جولة رابعة في القاعدة — ما يبقى يُبلَّغ المالك). شجرة العمل تحمل كل #275 **غير ملتزَمة**:
+- **#275 مُلتزَمة `8caccb16` ومدفوعة (2026-11-04 ~13:05)** — الخطوة التالية: `gh run list --branch newktra --limit 1` أخضر ← نشر بـ`deploy-275.sh` (من `deploy-274.sh`) ← cron يومي `refresh_accounting_offices` ← إغلاق #275 ← ثم #276. (ما يلي تاريخ الجولات.)
+- **#275 كانت في جولة تصليح 3 عند Opus 5.5** (relay بالخلفية، `--out-dir %TEMP%\wf-acct\relay\275-r3`، الموجز `%TEMP%\wf-acct\briefs\275-round3-opus.md`، 3 بنود O1–O3). جولة Sonnet (S1–S6) استُلمت: قرأتُ فرقها وبوّاباتها كلها خضراء (391 · كاملة 4 بيئية/7001 · migrate · lint · tsc/1411/build · sync_docs). بعد Opus: تحقّق `effort=high`، اقرأ الفرق، البوّابات، ثم الاستلام (لا جولة رابعة في القاعدة — ما يبقى يُبلَّغ المالك). شجرة العمل تحمل كل #275 **غير ملتزَمة**:
   - التنفيذ (DeepSeek) ← قراءة الفرق كاملاً + Standards/Spec ← تصليح 1 (DeepSeek، 18 بنداً) ← بوّابات المنسّق كلها خضراء (389 · كاملة 4 بيئية/6999 · migrate من صفر `0005` · lint · tsc/1411/build · sync_docs) ← مراجعة نهائية وجدت 6 ⇒ Sonnet.
   - **بعد عودة Sonnet:** تحقّق `effort=high` في `result.json`، اقرأ الفرق الجديد، شغّل البوّابات كلها، ثم مراجعة نهائية للقراءة. مشكلةٌ ثالثة ⇒ Opus 5.5 `--effort high`.
   - **ثم الاستلام:** commit بملفات #275 وحدها (لا `docs/agents` المحرّمة على المنفّذ — هذه للمنسّق تُلتزم معها كالعادة، ولا الملفات المحرّمة غير المتتبَّعة) ← push ← CI ← نشر (`deploy-275.sh` من `deploy-274.sh`، و`0005` فيها `AddField`/`CreateModel`/`AddIndex`/`AddConstraint` فقط) ← **cron يومي** على الخادم: `python manage.py refresh_accounting_offices` صباحاً ← إغلاق #275.

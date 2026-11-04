@@ -30,10 +30,11 @@ import {
 
 type CounterKey = keyof TodayCounters;
 
-/** العدّاداتُ الثلاثة — كبسةٌ تُفلتر، والعددُ من الخادم **قبل** الفلتر. */
+/** العدّاداتُ الأربعة (#276) — كبسةٌ تُفلتر، والعددُ من الخادم **قبل** الفلتر. */
 const COUNTERS: { filter: TodayFilter; label: string; counter: CounterKey }[] = [
+  { filter: 'late', label: 'متأخّر رسمي', counter: 'late' },
+  { filter: 'late_internal', label: 'متأخّر داخلي', counter: 'late_internal' },
   { filter: 'week', label: 'قريب هالأسبوع', counter: 'week' },
-  { filter: 'late', label: 'متأخّر', counter: 'late' },
   { filter: '', label: 'الكل', counter: 'all' },
 ];
 
@@ -41,7 +42,7 @@ const COUNTERS: { filter: TodayFilter; label: string; counter: CounterKey }[] = 
 const CHIPS: { filter: TodayFilter; label: string }[] = [
   { filter: 'mine', label: 'شغلي' },
   { filter: 'week', label: 'هالأسبوع' },
-  { filter: 'late', label: 'متأخّر' },
+  { filter: 'late', label: 'متأخّر رسمي' },
 ];
 
 /**
@@ -52,7 +53,7 @@ const CHIPS: { filter: TodayFilter; label: string }[] = [
  *
  * **والفلترُ في العنوان** (`?filter=`) عبر `useSearchParams`: يبقى بعد التحديث
  * وبعد العودة من ملفّ الزبون. والعدّاداتُ تُحسب على كلّ الميل قبل الفلتر — فلا
- * تُصفّر كبسةُ «متأخّر» عدّادَ «قريب».
+ * تُصفّر كبسةُ «متأخّر رسمي» عدّادَ «قريب».
  *
  * **والمشتقُّ من الخادم**: الشاراتُ تُحسب على يوم الطلب ولا تُخزَّن، وتسمياتُ
  * الحالة والاتجاه والشارة تصل نصوصاً — لا جدولَ تسمياتٍ هنا. وردُّ الطلب القديم
@@ -75,7 +76,7 @@ export const OfficeTodayScreen: React.FC = () => {
 
   const officeSize = settings ? officeSizeOf(settings.settings) : null;
   const showsAssignment = showsOfficeAssignment(officeSize);
-  const counters = payload?.counters ?? { week: 0, late: 0, all: 0 };
+  const counters = payload?.counters ?? { late: 0, late_internal: 0, week: 0, all: 0 };
   const rows = payload?.rows ?? [];
   const day = payload?.day ?? '';
   const directionChoices = payload?.direction_choices ?? [];
@@ -158,7 +159,9 @@ export const OfficeTodayScreen: React.FC = () => {
                 className={`block text-[17px] font-bold leading-6 tabular-nums ${
                   entry.counter === 'late'
                     ? 'text-rose-600 dark:text-rose-400'
-                    : 'text-slate-900 dark:text-slate-100'
+                    : entry.counter === 'late_internal'
+                      ? 'text-amber-600 dark:text-amber-400'
+                      : 'text-slate-900 dark:text-slate-100'
                 }`}
               >
                 {counters[entry.counter]}

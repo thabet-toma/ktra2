@@ -349,7 +349,10 @@ class TodayApiTest(ObligationApiTestCase):
         late = self.today(filter="late")
         owner_mine = self.today(filter="mine")
 
-        self.assertEqual(everything.data["counters"], {"week": 1, "late": 1, "all": 2})
+        self.assertEqual(
+            everything.data["counters"],
+            {"late": 1, "late_internal": 0, "week": 1, "all": 2},
+        )
         self.assertEqual(len(everything.data["rows"]), 2)
         self.assertEqual(len(week.data["rows"]), 1)
         self.assertEqual(len(late.data["rows"]), 1)
