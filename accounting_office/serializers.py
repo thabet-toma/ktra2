@@ -358,3 +358,76 @@ class ClientEventSerializer(serializers.Serializer):
     kind = serializers.CharField(max_length=40)
     occurred_on = serializers.DateField()
     note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+# ── قائمة الأوراق (#278) ─────────────────────────────────────────────────────
+#
+# **الحدودُ هنا شكلُ الطلب لا قيمتُه**: أسماءُ الحالات والقنوات وقيمُها تُقرأ في
+# الخدمة وحدها، فنداءٌ برمجيّ لا يمرّ بالمسلسِل يأخذ الرفضَ نفسه.
+class DocumentStatusSerializer(serializers.Serializer):
+    """`{status, channel?}` — والقناةُ تُلزم لمن وصلت في الخدمة لا هنا."""
+
+    status = serializers.CharField(max_length=20)
+    channel = serializers.CharField(required=False, allow_blank=True, max_length=20)
+
+
+class DefaultTrueBooleanField(serializers.BooleanField):
+    """مربّعُ اختيارٍ **غائبٌ** في multipart يعني «نعم» — كـ`is_copy`.
+
+    DRF يقرأ غيابَ المفتاح في نموذج HTML كـ`False` (`default_empty_html`)، وهذا
+    الصفُّ يقلبه إلى `True`: الملفُّ المرفوعُ صورةُ عملٍ إلا أن يقول الموظف غيرَ
+    ذلك صريحاً. و`false` المرسَلة تُقرأ `False` كالمعتاد.
+    """
+
+    default_empty_html = True
+
+
+class DocumentFileUploadSerializer(serializers.Serializer):
+    """ملفُّ ورقةٍ **مع حقول נספח ז الوصفية** — والرفعُ multipart.
+
+    `file` وحده إلزاميّ: نوعُ المستند افتراضُه اسمُ الورقة، ورقمُ المُصدر وتاريخُ
+    المستند ورقمُه وصفٌ يكتبه الموظف إن عرفه. و`is_copy` افتراضُه «صورة».
+    """
+
+    file = serializers.FileField()
+    document_type = serializers.CharField(
+        required=False, allow_blank=True, max_length=200,
+    )
+    issuer_registration = serializers.CharField(
+        required=False, allow_blank=True, max_length=60,
+    )
+    document_date = serializers.DateField(required=False, allow_null=True)
+    document_number = serializers.CharField(
+        required=False, allow_blank=True, max_length=60,
+    )
+    is_copy = DefaultTrueBooleanField(required=False)
+
+
+class DocumentItemChoiceSerializer(serializers.Serializer):
+    """خيارُ بند: «ضمن القائمة» أو لا — كودُ البند يُتحقَّق في الخدمة."""
+
+    item_code = serializers.SlugField(max_length=60)
+    included = serializers.BooleanField()
+
+
+class OfficeDocumentItemWriteSerializer(serializers.Serializer):
+    """بندٌ يضيفه المكتب: اسمٌ ودوريةٌ وخدماتٌ — وشروطُ البطاقة تبقى فارغة."""
+
+    system = serializers.CharField(max_length=2)
+    name = serializers.CharField(max_length=200)
+    cadence = serializers.CharField(max_length=20)
+    service_codes = serializers.ListField(
+        child=serializers.CharField(max_length=60), required=False,
+    )
+    is_active = serializers.BooleanField(required=False)
+
+
+class OfficeDocumentItemUpdateSerializer(serializers.Serializer):
+    """تعديلُ بند مكتبٍ بحقولٍ كلُّها اختيارية — والغيابُ لا يمسّ."""
+
+    name = serializers.CharField(required=False, max_length=200)
+    cadence = serializers.CharField(required=False, max_length=20)
+    service_codes = serializers.ListField(
+        child=serializers.CharField(max_length=60), required=False,
+    )
+    is_active = serializers.BooleanField(required=False)

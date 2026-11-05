@@ -72,6 +72,7 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeClientDocuments } from './OfficeClientDocuments';
 import { OfficeClientEvents } from './OfficeClientEvents';
 import { OfficeObligationRow } from './OfficeObligationRow';
 import { SettingControl } from './SettingControl';
@@ -93,6 +94,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'obligations', label: 'الالتزامات والشغلات' },
   { key: 'services', label: 'الخدمات' },
   { key: 'contacts', label: 'جهات الاتصال' },
+  // #278: شبكةُ الأشهر × البنود والقائمةُ السنوية — بعد «جهات الاتصال» كالنموذج.
+  { key: 'documents', label: 'الأوراق' },
   { key: 'notes', label: 'ملاحظات' },
 ];
 
@@ -1852,6 +1855,15 @@ export const OfficeClientFile: React.FC<{
             </table>
           </OfficeCard>
         </div>
+      ) : null}
+
+      {tab === 'documents' ? (
+        // #278: كلُّ شيءٍ في المكوّن — الشبكةُ والملفات والتخصيص، والملفُّ يرسمه.
+        <OfficeClientDocuments
+          clientId={clientId}
+          canWrite={canWrite}
+          taxSystem={client.tax_system}
+        />
       ) : null}
 
       {tab === 'notes' ? (

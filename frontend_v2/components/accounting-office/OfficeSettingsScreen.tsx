@@ -48,6 +48,7 @@ import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { OfficeCustomRulesSection } from './OfficeCustomRulesSection';
 import { OfficeDeadlineRulesSection } from './OfficeDeadlineRulesSection';
+import { OfficeDocumentItemsSection } from './OfficeDocumentItemsSection';
 import { SettingControl } from './SettingControl';
 import {
   OfficeCard,
@@ -526,6 +527,15 @@ export const OfficeSettingsScreen: React.FC = () => {
             <>
               <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
               <OfficeCustomRulesSection />
+              {/* #278: قالبُ بنود الأوراق — بنداتُ المنصّة و«ضمن القائمة» وبندُ المكتب. */}
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              {officeSystem === 'PS' || officeSystem === 'IL' ? (
+                <OfficeDocumentItemsSection system={officeSystem} />
+              ) : (
+                <p className="text-[11.5px] font-medium text-amber-800 dark:text-amber-300">
+                  اختر النظام الضريبي أولاً — بنودُ الأوراق لكل نظامٍ على حِدة.
+                </p>
+              )}
             </>
           ) : null}
         </OfficeCard>

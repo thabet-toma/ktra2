@@ -238,7 +238,8 @@ class TwoTierBadgeTest(AlertsTestCase):
         self.assertEqual(payload["rows"], [])
         self.assertEqual(
             payload["counters"],
-            {"late": 0, "late_internal": 0, "week": 0, "all": 0},
+            # #278: `missing_docs` خامسةُ العدّادات — صفرٌ حيث لا صفوفَ أوراق.
+            {"late": 0, "late_internal": 0, "week": 0, "missing_docs": 0, "all": 0},
         )
         self.assertEqual(
             sorted(Obligation.objects.values_list("status", flat=True)),
@@ -647,12 +648,13 @@ class CountersAndFiltersTest(AlertsTestCase):
             self.tenant, user=self.owner, day=DAY, filter=filter,
         )
 
-    def test_the_four_counters_are_computed_before_the_filter(self):
+    def test_the_five_counters_are_computed_before_the_filter(self):
         payload = self.rows()
 
         self.assertEqual(
             payload["counters"],
-            {"late": 1, "late_internal": 2, "week": 2, "all": 4},
+            # #278: خامسةُ العدّادات — ولا صفوفَ أوراقٍ في هذه المكتبة.
+            {"late": 1, "late_internal": 2, "week": 2, "missing_docs": 0, "all": 4},
         )
         self.assertEqual(len(payload["rows"]), 4)
 

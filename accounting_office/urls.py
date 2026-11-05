@@ -13,6 +13,9 @@ from accounting_office.views import (
     OfficeContactViewSet,
     OfficeCustomRuleViewSet,
     OfficeDeadlineRuleViewSet,
+    OfficeDocumentFileViewSet,
+    OfficeDocumentItemViewSet,
+    OfficeDocumentViewSet,
     OfficeObligationViewSet,
     OfficePackageViewSet,
     OfficeServiceViewSet,
@@ -43,6 +46,21 @@ router.register("alerts", OfficeAlertsViewSet, basename="accounting-office-alert
 # #277: التزاماتُ المكتب الخاصة — بلا حذف (التعطيلُ هو الفعل).
 router.register(
     "custom-rules", OfficeCustomRuleViewSet, basename="accounting-office-custom-rules",
+)
+# #278: صفوفُ الأوراق وحالتُها وملفاتُها، وقالبُ بنود الأوراق (وقراءةُ بنوده لكل
+# عضوٍ لملفّ الزبون، وكتابتُها بمفتاح الإعدادات).
+router.register(
+    "documents", OfficeDocumentViewSet, basename="accounting-office-documents",
+)
+router.register(
+    "document-files",
+    OfficeDocumentFileViewSet,
+    basename="accounting-office-document-files",
+)
+router.register(
+    "document-items",
+    OfficeDocumentItemViewSet,
+    basename="accounting-office-document-items",
 )
 
 urlpatterns = [

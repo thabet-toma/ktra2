@@ -151,7 +151,7 @@ export const TASK_QUERY_PARAM = 'task';
 
 /** تبويباتُ ملفّ الزبون المعروفة — `?tab=` خارجها يُتجاهَل فلا تبيضّ الشاشة. */
 export const CLIENT_TAB_KEYS = [
-  'tax-card', 'obligations', 'services', 'contacts', 'notes',
+  'tax-card', 'obligations', 'services', 'contacts', 'documents', 'notes',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
 
@@ -766,11 +766,12 @@ export function isExpectedDeadline(row: CalendarDeadlineRow): boolean {
 export const OFFICE_TODAY_PATH = '/accounting-office/today';
 
 /** فلترُ شاشة «اليوم»: الفارغ «الكل»، والباقي رقائقُه وعدّاداتُه. */
-export type TodayFilter = '' | 'mine' | 'week' | 'late' | 'late_internal';
+export type TodayFilter =
+  | '' | 'mine' | 'week' | 'late' | 'late_internal' | 'missing_docs';
 
-/** الفلاترُ الخمسة المحسومة — الفارغ «الكل»، وغيرُها لا يُقرأ من العنوان. */
+/** الفلاترُ الستّة المحسومة — الفارغ «الكل»، وغيرُها لا يُقرأ من العنوان. */
 export const TODAY_FILTERS: readonly TodayFilter[] = [
-  '', 'mine', 'week', 'late', 'late_internal',
+  '', 'mine', 'week', 'late', 'late_internal', 'missing_docs',
 ];
 
 /** اسم معامل العنوان الذي يحمل الفلتر — يُقرأ ويُكتب في مكانٍ واحد. */
@@ -828,6 +829,19 @@ export interface ObligationRow {
   client_paid: boolean;
   status: string;
   status_label: string;
+  /**
+   * #278: تقدّمُ أوراق الالتزام — `{received, required}` أو `null`.
+   *
+   * `null` تعني «لا صفَّ ورقةٍ محسوباً لهذا الالتزام»، لا «صفر»: الشاشةُ تُظهر
+   * العدّادَ حين يوجد وحدَه ولا تكتب «وصل 0/0».
+   */
+  docs: DocumentProgress | null;
+}
+
+/** تقدّمُ الأوراق: كم وصل من كم — من الخادم، بلا حسابٍ في الواجهة. */
+export interface DocumentProgress {
+  received: number;
+  required: number;
 }
 
 export interface TodayCounters {
@@ -836,6 +850,8 @@ export interface TodayCounters {
   /** «متأخّر داخلي» — أصفر. */
   late_internal: number;
   week: number;
+  /** #278: «ناقصه أوراق» — عدّادٌ إضافيّ فوق شارات التأخير. */
+  missing_docs: number;
   all: number;
 }
 
@@ -914,6 +930,10 @@ export function obligationBadgeClass(key: string): string {
   }
   if (key === 'late_internal') {
     return 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
+  }
+  // #278: «ناقصه أوراق» كهرمانيّ — نقصُ ورقةٍ ليس تأخيراً رسمياً (أحمر).
+  if (key === 'missing_docs') {
+    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
   }
   if (key === 'near') {
     return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
@@ -1104,4 +1124,309 @@ export function defaultExtensionDate(dueDate: string): string {
   const ms = msFromIso(dueDate);
   if (ms === null) return '';
   return isoFromMs(ms + EXTENSION_DEFAULT_DAYS * MS_PER_DAY);
+}
+
+// ── قائمة الأوراق وشبكة الأشهر (#278) ───────────────────────────────────────
+//
+// **الخادمُ يعرف الحالة والاسم والفترة**، وهنا حسابُ عرضٍ لا قرار: شكلُ الشبكة
+// (خانةٌ لكل شهرٍ دائماً)، ولونُ الخانة ورمزُها، وعدّادُ «وصل n/م»، وسطرُ
+// «ناقصٌ لشهر…». ولا نُسمّي حالةً من عندنا: `status_label` يُقرأ من الخادم،
+// وتسميةُ «مش لازمة هالسنة» السنوية تأتي `annual_label` معه.
+
+/** حقلُ ملفّ الورقة كما يعيده الخادم — **بلا `file_url`** أبداً. */
+export interface DocumentFileRow {
+  id: number;
+  uid: string;
+  document_type: string;
+  issuer_registration: string;
+  document_date: string | null;
+  document_number: string;
+  captured_at: string | null;
+  file_name: string;
+  is_copy: boolean;
+  /** وسمُ النسخة: «صورة — الأصل عند الزبون» حين تكون نسخة. */
+  copy_label: string;
+  created_by_name: string;
+}
+
+/** خانةُ شهرٍ — `row_id === null` تعني «لا صفَّ لهذا البند في هذا الشهر». */
+export interface DocumentCell {
+  month: string;
+  row_id: number | null;
+  status: string | null;
+  status_label: string;
+  received_on: string | null;
+  received_by_name: string;
+  channel: string;
+  channel_label: string;
+  files_count: number;
+}
+
+export interface DocumentItemRow {
+  item_code: string;
+  name: string;
+  cells: DocumentCell[];
+}
+
+/** سطرُ ورقةٍ كاملاً — من فعل الحالة ومن القائمة السنوية. */
+export interface DocumentRowPayload {
+  row_id: number;
+  client_id: number;
+  item_code: string;
+  name: string;
+  service_codes: string[];
+  cadence: string;
+  period_start: string;
+  period_end: string;
+  period_label: string;
+  status: string;
+  status_label: string;
+  received_on: string | null;
+  received_by_name: string;
+  channel: string;
+  channel_label: string;
+  files_count: number;
+  /** القائمةُ السنوية وحدها تحمل الملفات كاملةً. */
+  files?: DocumentFileRow[];
+}
+
+/** مدةُ حفظٍ قانونية — النصُّ يصوغه الخادم (`text`) والواجهةُ ترسمه. */
+export interface DocumentRetentionRow {
+  code: string;
+  name: string;
+  years: number;
+  alt_years: number | null;
+  basis: string;
+  basis_label: string;
+  source_url: string;
+  text: string;
+}
+
+/** اختيارٌ من الخادم: قيمةٌ وتسمية — والحالةُ السنوية لها `annual_label`. */
+export interface DocumentChoice {
+  value: string;
+  label: string;
+  annual_label?: string;
+}
+
+export interface ClientDocumentsPayload {
+  client: { id: number; name: string };
+  year: number;
+  months: string[];
+  items: DocumentItemRow[];
+  annual: DocumentRowPayload[];
+  retention: DocumentRetentionRow[];
+  status_choices: DocumentChoice[];
+  channel_choices: DocumentChoice[];
+  cadence_choices: DocumentChoice[];
+  available_years: number[];
+}
+
+/** سطرُ بندٍ في قالب المكتب — المنصّةُ والمكتبُ في شكلٍ واحد. */
+export interface OfficeDocumentItemRow {
+  /** معرّفُ بند المكتب وحده؛ بندُ المنصّة `null` (لا صفَّ له في `OfficeDocumentItem`). */
+  id: number | null;
+  item_code: string;
+  name: string;
+  cadence: string;
+  cadence_label: string;
+  service_codes: string[];
+  card_conditions: Record<string, string[]>;
+  included: boolean;
+  is_custom: boolean;
+  is_active: boolean;
+  sort_order: number | null;
+  /** خيارُ الزبون على هذا البند — `null` إن لا خيار (لوحُ التخصيص وحده). */
+  client_included?: boolean | null;
+}
+
+export interface OfficeDocumentItemsPayload {
+  system: string;
+  items: OfficeDocumentItemRow[];
+  services: { code: string; name: string }[];
+  cadence_choices: DocumentChoice[];
+  condition_fields: string[];
+}
+
+/** عنوانُ عمود شهرٍ — اسمُ الشهر من `utils/monthKey.ts` وحده، بلا جدولٍ ثانٍ. */
+export function documentMonthLabel(iso: string): string {
+  return monthNameOf(iso);
+}
+
+/** أعمدةُ الشبكة: الشهرُ وتسميتُه، بترتيب الخادم (تصاعداً). */
+export function documentMonthColumns(
+  months: readonly string[],
+): { iso: string; label: string }[] {
+  return months.map((iso) => ({ iso, label: documentMonthLabel(iso) }));
+}
+
+/** خانةٌ فارغةٌ لشهرٍ بلا صفّ — **الشكلُ نفسه** فلا تفريعَ في الرسم. */
+export function emptyDocumentCell(month: string): DocumentCell {
+  return {
+    month,
+    row_id: null,
+    status: null,
+    status_label: '',
+    received_on: null,
+    received_by_name: '',
+    channel: '',
+    channel_label: '',
+    files_count: 0,
+  };
+}
+
+/**
+ * صفوفُ الشبكة كما تُرسم: **خانةٌ لكل شهرٍ في كل صفّ** (معيار القبول ٥).
+ *
+ * الخادمُ يُرسل الخانات بعدد الأشهر، وهذه الدالّةُ تُعيد بناءها بالمفتاح على
+ * الشهر لا بالترتيب: صفٌّ ناقصُ خانةٍ (أو مربوطٌ بشهرٍ آخر) لا يُزيح صفوفَه،
+ * والفارغُ يُملأ بخانةٍ محايدةٍ فيبقى الجدولُ مستقيماً.
+ */
+export function documentGridRows(
+  payload: Pick<ClientDocumentsPayload, 'months' | 'items'>,
+): { item_code: string; name: string; cells: DocumentCell[] }[] {
+  return payload.items.map((item) => {
+    const byMonth = new Map<string, DocumentCell>();
+    for (const cell of item.cells) byMonth.set(cell.month, cell);
+    return {
+      item_code: item.item_code,
+      name: item.name,
+      cells: payload.months.map(
+        (month) => byMonth.get(month) ?? emptyDocumentCell(month),
+      ),
+    };
+  });
+}
+
+/** ألوانُ الحالات الأربع كما في النموذج المرئي — والفراغُ محايد. */
+export type DocumentCellTone =
+  | 'received' | 'partial' | 'required' | 'skipped' | 'empty';
+
+/** لونُ الخانة من حالتها وحدها (والفراغُ حالةُ `row_id === null`). */
+export function documentCellTone(cell: DocumentCell): DocumentCellTone {
+  if (cell.row_id === null || !cell.status) return 'empty';
+  if (cell.status === 'received') return 'received';
+  if (cell.status === 'partial') return 'partial';
+  if (cell.status === 'not_needed') return 'skipped';
+  return 'required';
+}
+
+/** أصنافُ خانة الشبكة — Tailwind وحده، والوضعُ الداكن معها. */
+export function documentCellClass(cell: DocumentCell): string {
+  switch (documentCellTone(cell)) {
+    case 'received':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-600 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+    case 'partial':
+      return 'border-amber-200 bg-amber-50 text-amber-600 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
+    case 'required':
+      return 'border-2 border-rose-200 bg-white text-rose-500 dark:border-rose-900 dark:bg-slate-900 dark:text-rose-300';
+    case 'skipped':
+      return 'border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-500';
+    default:
+      return 'border-slate-100 bg-transparent text-transparent dark:border-slate-800';
+  }
+}
+
+/** رمزُ الخانة: ✓ وصلت، ! ناقصة، نقطةٌ للمطلوبة، – لمش لازمة، وفراغ. */
+export function documentCellGlyph(cell: DocumentCell): string {
+  switch (documentCellTone(cell)) {
+    case 'received':
+      return '✓';
+    case 'partial':
+      return '!';
+    case 'required':
+      return '•';
+    case 'skipped':
+      return '–';
+    default:
+      return '';
+  }
+}
+
+/** تسميةُ الخانة لغير البصر: تُقرأ بالشاشة القارئة من `status_label` الخادم. */
+export function documentCellTitle(cell: DocumentCell): string {
+  if (cell.row_id === null) return '';
+  const label = serverLabel(cell.status_label, cell.status ?? '');
+  return cell.files_count
+    ? `${label} — ${cell.files_count} ملف`
+    : label;
+}
+
+/** الحالاتُ الأربع للاختيار — والسنويةُ تأخذ تسميةَ «مش لازمة هالسنة». */
+export function documentStatusChoicesFor(
+  choices: readonly DocumentChoice[],
+  annual: boolean,
+): { value: string; label: string }[] {
+  return choices.map((choice) => ({
+    value: choice.value,
+    label: annual
+      ? (choice.annual_label ?? choice.label)
+      : choice.label,
+  }));
+}
+
+/** نصُّ «وصل 3/5» — `''` حين لا صفوفَ محسوبة (لا «0/0»). */
+export function documentDocsText(
+  docs: DocumentProgress | null | undefined,
+): string {
+  if (!docs || !docs.required) return '';
+  return `وصل ${docs.received}/${docs.required}`;
+}
+
+/**
+ * سطرُ «ناقصٌ لشهر…» فوق الشبكة: آخرُ شهرٍ فيه خانةٌ مطلوبةٌ أو ناقصة.
+ *
+ * يعيد `null` إن لم ينقص شيء — فلا شريطَ كهرمانيٌّ بلا سبب. والاسمُ من لقطة
+ * الصفّ (`name`) لا من الكتالوج: ما رُسم هو ما يُقال.
+ */
+export function documentMissingBar(
+  payload: Pick<ClientDocumentsPayload, 'months' | 'items'>,
+): { monthLabel: string; names: string[]; counts: string } | null {
+  if (!payload.months.length) return null;
+  const month = payload.months[payload.months.length - 1];
+  const names: string[] = [];
+  let required = 0;
+  let partial = 0;
+  for (const item of payload.items) {
+    const cell = item.cells.find((entry) => entry.month === month);
+    if (!cell) continue;
+    if (cell.status === 'partial') partial += 1;
+    else if (cell.status === 'required') required += 1;
+    else continue;
+    names.push(item.name);
+  }
+  if (!names.length) return null;
+  const counts = [
+    required ? `${required} مطلوبة` : '',
+    partial ? `${partial} ناقصة` : '',
+  ].filter(Boolean).join(' · ');
+  return { monthLabel: documentMonthLabel(month), names, counts };
+}
+
+/** وسمُ الملف: نسخةُ عملٍ أم أصلٌ موثَّق — النصُّ من الخادم. */
+export function documentFileTag(file: Pick<DocumentFileRow, 'copy_label'>): string {
+  return (file.copy_label ?? '').trim();
+}
+
+/** سنةٌ معروضةٌ في المنتقي — من `available_years` وحدها (الأحدثُ أوّلاً). */
+export function documentYearOptions(
+  payload: Pick<ClientDocumentsPayload, 'available_years'>,
+): number[] {
+  return [...payload.available_years];
+}
+
+
+/** صنفُ رقاقة الحالة في دليل الألوان — نفس ألوان الخانة بلا موضعٍ خاصّ. */
+export function documentStatusChipClass(status: string): string {
+  return documentCellClass({
+    month: '',
+    row_id: 1,
+    status,
+    status_label: '',
+    received_on: null,
+    received_by_name: '',
+    channel: '',
+    channel_label: '',
+    files_count: 0,
+  });
 }

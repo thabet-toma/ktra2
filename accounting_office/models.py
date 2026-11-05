@@ -17,6 +17,8 @@
   `is_primary` و`NULL` حين لا، وMySQL تسمح بتكرار `NULL`.
 - مستلِمٌ واحد لكل (زبون، نوع تذكير).
 """
+from uuid import uuid4
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -1292,10 +1294,14 @@ OBLIGATION_BADGE_LATE = "late"
 #: #276: الدرجةُ الداخليّة — شغلةُ الالتزام تجاوزت `internal_deadline` ولم يبلغ
 #: الرسميُّ بعد. ومفتاحٌ ثالثٌ لمفتاحين قائمين لا عمودَ ولا حالة.
 OBLIGATION_BADGE_LATE_INTERNAL = "late_internal"
+#: #278: «ناقصه أوراق» — **شارةٌ إضافية** تُضاف فوق واحدة التأخير ولا تُزاحمها:
+#: التأخيرُ سؤالٌ عن الموعد، وهذه عن الورق، وصفٌّ قد يستحقّ الاثنين معاً.
+OBLIGATION_BADGE_MISSING_DOCS = "missing_docs"
 OBLIGATION_BADGE_LABELS: dict[str, str] = {
     OBLIGATION_BADGE_NEAR: "قريب هالأسبوع",
     OBLIGATION_BADGE_LATE: "متأخّر رسمي",
     OBLIGATION_BADGE_LATE_INTERNAL: "متأخّر داخلي",
+    OBLIGATION_BADGE_MISSING_DOCS: "ناقصه أوراق",
 }
 
 
@@ -1786,3 +1792,476 @@ class OfficeAlert(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.ref_key}→{self.recipient_id}"
+
+
+# ── قائمة الأوراق: الكتالوج والصفوف والملفات ومدد الحفظ (#278) ────────────────
+#
+# **ثلاثُ طبقاتٍ لا طبقة**: بنداتُ المنصّة (`PlatformDocumentItem`، بياناتُ منصّةٍ
+# بلا `tenant` كـ`DeadlineSchedule`)، ثم قائمةُ المكتب (`OfficeDocumentItem`
+# المضاف و`OfficeDocumentItemChoice` المُخرِج)، ثم **خيارُ الزبون**
+# (`ClientDocumentItemChoice`) **الذي يغلب الجميع**: إدخالاً يفرض بنداً لا تنطبق
+# شروطه، وإخراجاً يمحو بنداً انطبقت.
+#
+# **والبندُ يعرف خدماته**: `service_codes` أكوادٌ من `SERVICE_CODE_*`، وقائمةٌ
+# فارغةٌ تعني «لكل زبون». وبندٌ واحدٌ بخدمتين («فواتير المشتريات» لمسك الدفاتر
+# والقيمة المضافة) يُولَّد **مرّةً واحدة** — لا بندان لخدمةٍ واحدة.
+#
+# **والصفُّ لقطة**: `item_code` و`name` و`service_codes` تُنسخ عند التوليد، فتصحيحُ
+# الكتالوج أو خياراتِه لا يعيد كتابة ما رآه الموظف.
+DOCUMENT_STATUS_REQUIRED = "required"
+DOCUMENT_STATUS_PARTIAL = "partial"
+DOCUMENT_STATUS_RECEIVED = "received"
+DOCUMENT_STATUS_NOT_NEEDED = "not_needed"
+DOCUMENT_STATUS_CHOICES: list[tuple[str, str]] = [
+    (DOCUMENT_STATUS_REQUIRED, "مطلوبة"),
+    (DOCUMENT_STATUS_PARTIAL, "وصلت ناقصة"),
+    (DOCUMENT_STATUS_RECEIVED, "وصلت"),
+    (DOCUMENT_STATUS_NOT_NEEDED, "مش لازمة هالشهر"),
+]
+DOCUMENT_STATUS_LABELS: dict[str, str] = dict(DOCUMENT_STATUS_CHOICES)
+#: تسميةُ الاستثناء تتبع دورية الصفّ: الشهرُ شهرُه والسنةُ سنتُها.
+DOCUMENT_STATUS_NOT_NEEDED_ANNUAL_LABEL = "مش لازمة هالسنة"
+
+DOCUMENT_CHANNEL_WHATSAPP = "whatsapp"
+DOCUMENT_CHANNEL_PAPER = "paper"
+DOCUMENT_CHANNEL_EMAIL = "email"
+DOCUMENT_CHANNEL_CHOICES: list[tuple[str, str]] = [
+    (DOCUMENT_CHANNEL_WHATSAPP, "واتساب"),
+    (DOCUMENT_CHANNEL_PAPER, "ورق"),
+    (DOCUMENT_CHANNEL_EMAIL, "إيميل"),
+]
+DOCUMENT_CHANNEL_LABELS: dict[str, str] = dict(DOCUMENT_CHANNEL_CHOICES)
+
+#: دوريتان لا أكثر: الشهرُ والسنة. **أسماءٌ لعائلة `FREQUENCY_*`** نفسها، فلا
+#: تحمل القيمةَ الواحدة عائلتان تفترقان عند أول تعديل.
+DOCUMENT_CADENCE_MONTHLY = FREQUENCY_MONTHLY
+DOCUMENT_CADENCE_ANNUAL = FREQUENCY_ANNUAL
+DOCUMENT_CADENCE_CHOICES: list[tuple[str, str]] = [
+    (DOCUMENT_CADENCE_MONTHLY, "شهري"),
+    (DOCUMENT_CADENCE_ANNUAL, "سنوي"),
+]
+DOCUMENT_CADENCE_LABELS: dict[str, str] = dict(DOCUMENT_CADENCE_CHOICES)
+
+#: أساسُ حساب مدة الحفظ — **بياناتُ منصّةٍ لكل نظام** (قرار #278/D5): فلسطين
+#: خمسُ سنواتٍ من نهاية السنة (م79/1)، وإسرائيل سبعٌ من نهايتها أو ستٌّ من
+#: التقديم **الأبعدُ منهما** (§25(ג))، وثلاثٌ من التقديم للمستندات غير الإلزامية
+#: (§25(ד)). ولا حسابَ تاريخٍ آخر في v1 ولا حذفَ آليّ.
+RETENTION_BASIS_YEAR_END = "year_end"
+RETENTION_BASIS_LATER_OF_YEAR_END_OR_FILING = "later_of_year_end_or_filing"
+RETENTION_BASIS_FILING = "filing"
+RETENTION_BASIS_CHOICES: list[tuple[str, str]] = [
+    (RETENTION_BASIS_YEAR_END, "من نهاية السنة"),
+    (RETENTION_BASIS_LATER_OF_YEAR_END_OR_FILING, "الأبعد بين نهاية السنة والتقديم"),
+    (RETENTION_BASIS_FILING, "من تاريخ التقديم"),
+]
+RETENTION_BASIS_LABELS: dict[str, str] = dict(RETENTION_BASIS_CHOICES)
+#: حقولُ البطاقة التي يجوز أن تكون شرطاً على بند — وهي **وحدها**: مفتاحٌ آخر
+#: لا معنى له في `card_conditions` فيُرفض في الخدمة.
+DOCUMENT_CARD_CONDITION_FIELDS: frozenset[str] = frozenset({
+    "entity_type", "vat_classification",
+})
+
+#: «صورة — الأصل عند الزبون»: وسمُ نسخة العمل التي يرفعها المكتب. الأصلُ يبقى
+#: عند الزبون في النظامين، فلا ندّعي أرشيفاً قانونياً (بحث #260 §5.4).
+DOCUMENT_FILE_COPY_TAG = "صورة — الأصل عند الزبون"
+
+
+class PlatformDocumentItem(models.Model):
+    """بندُ ورقةٍ في **لائحة المنصّة** — بياناتُ منصّةٍ لا بياناتُ مكتب.
+
+    **بلا `tenant` عمداً** كـ`TaxThreshold` و`DeadlineSchedule`: القائمةُ المطلوبة
+    في قانونٍ واحد، ونسخةٌ لكل مكتب تعني قوائمَ مختلفة لنفس الخدمة. وخياراتُ
+    المكاتب والزبائن فوقها صفوفٌ في جداولهم، لا تعديلٌ على صفّ المنصّة.
+    """
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    code = models.SlugField(max_length=60, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    cadence = models.CharField(
+        max_length=20, choices=DOCUMENT_CADENCE_CHOICES, verbose_name="الدورية",
+    )
+    #: أكوادُ الخدمات التي يلزمها البند — فارغةٌ = لكل زبون.
+    service_codes = models.JSONField(
+        default=list, blank=True, verbose_name="الخدمات",
+    )
+    #: شروطُ البطاقة: `{"entity_type": ["company"]}` — و`{}` لا شرط.
+    card_conditions = models.JSONField(
+        default=dict, blank=True, verbose_name="شروط البطاقة",
+    )
+    sort_order = models.PositiveSmallIntegerField(default=0, verbose_name="الترتيب")
+
+    class Meta:
+        verbose_name = "بند ورقة (منصة)"
+        verbose_name_plural = "بنود الأوراق (منصة)"
+        ordering = ["sort_order", "name", "id"]
+        constraints = [
+            # فرادةٌ **غير مشروطة** — الشرطُ في `UniqueConstraint` تتجاهله MySQL
+            # بصمت فتمرّ الهجرة ويغيب القيد في الإنتاج.
+            models.UniqueConstraint(
+                fields=["tax_system", "code"], name="uniq_platform_doc_item_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.code}"
+
+
+class OfficeDocumentItem(models.Model):
+    """بندٌ أضافه المكتب للائحته — يُعطَّل ولا يُحذف بعد استعماله.
+
+    كودُه المشتقّ `office_doc_<pk>` **مستقرٌّ** ويُخزَّن في الصفوف لقطةً، فيسري
+    عليه كلُّ ما يسري على كودِ المنصّة: الفرادةُ والبحثُ والفلترة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_document_items",
+        verbose_name="المكتب",
+    )
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    cadence = models.CharField(
+        max_length=20, choices=DOCUMENT_CADENCE_CHOICES, verbose_name="الدورية",
+    )
+    service_codes = models.JSONField(
+        default=list, blank=True, verbose_name="الخدمات",
+    )
+    card_conditions = models.JSONField(
+        default=dict, blank=True, verbose_name="شروط البطاقة",
+    )
+    is_active = models.BooleanField(default=True, verbose_name="مفعَّل")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_document_items",
+        verbose_name="أنشأه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "بند ورقة (مكتب)"
+        verbose_name_plural = "بنود الأوراق (مكتب)"
+        ordering = ["name", "id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "tax_system", "is_active"],
+                name="office_doc_item_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.code} — {self.name}"
+
+    @property
+    def code(self) -> str:
+        """كودُ البند المشتقّ — بادئتُه تميّزه عن أكواد المنصّة (`ps_`/`il_`)."""
+        return f"office_doc_{self.pk}"
+
+
+class OfficeDocumentItemChoice(models.Model):
+    """خيارُ المكتب على بندِ المنصّة: **`included=False` يخرجه** من القالب.
+
+    والغيابُ يعني «ضمن القائمة»: لا صفَّ لكل عضوٍ لكل بند، والخيارُ لا يُحذف
+    بل يُقلب — فتاريخُ من أخرجه يبقى.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_document_item_choices",
+        verbose_name="المكتب",
+    )
+    item_code = models.SlugField(max_length=60, verbose_name="كود البند")
+    included = models.BooleanField(default=True, verbose_name="ضمن القائمة")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_document_item_choices",
+        verbose_name="عدّله",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "خيار المكتب على بند ورقة"
+        verbose_name_plural = "خيارات المكتب على بنود الأوراق"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "item_code"], name="uniq_office_doc_item_choice",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item_code}:{self.included}"
+
+
+class ClientDocumentItemChoice(models.Model):
+    """خيارُ الزبون على بند: **يغلب كلَّ ما فوقه** إدخالاً وإخراجاً.
+
+    قائمةُ المنصّة تعرف ما يطلبه القانون، وقالبُ المكتب يعرف ما يشتغل عليه هذا
+    المكتب — والزبونُ وحدَه يعرف أن هذه الورقة عنده ليست ورقاً (ساقيةٌ في درجِه،
+    أو بنكٌ لا يُصدر كشفاً). فقرارُه فوق الاثنين بلا شرطٍ ثانٍ.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_document_choices",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="document_item_choices",
+        verbose_name="الزبون",
+    )
+    item_code = models.SlugField(max_length=60, verbose_name="كود البند")
+    included = models.BooleanField(default=True, verbose_name="ضمن القائمة")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_client_document_choices",
+        verbose_name="عدّله",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "خيار بندٍ لزبون"
+        verbose_name_plural = "خيارات بنود الزبائن"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "item_code"], name="uniq_client_doc_item_choice",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}/{self.item_code}:{self.included}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class DocumentChecklistItem(models.Model):
+    """صفُّ ورقةٍ محفوظ: بندٌ × فترة، بحالته ومَن وكيف — **ولقطةُ اسمِه**.
+
+    **التوليدُ لا يُعيد الكتابة**: `get_or_create` على
+    `(client, item_code, period_start)`، فتشغيلُ اليوم نفسه مرّتين لا يكتب صفاً،
+    والقائمُ يبقى بما رآه الموظف ولو تغيّر الكتالوج.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_document_rows",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="document_rows",
+        verbose_name="الزبون",
+    )
+    item_code = models.SlugField(max_length=60, verbose_name="كود البند")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    #: لقطةُ خدمات البند — تُقرأ بها شارةُ «ناقصه أوراق» بلا ربطٍ بالكتالوج.
+    service_codes = models.JSONField(
+        default=list, blank=True, verbose_name="الخدمات",
+    )
+    cadence = models.CharField(
+        max_length=20, choices=DOCUMENT_CADENCE_CHOICES, verbose_name="الدورية",
+    )
+    period_start = models.DateField(verbose_name="بداية الفترة")
+    period_end = models.DateField(verbose_name="نهاية الفترة")
+    status = models.CharField(
+        max_length=20,
+        choices=DOCUMENT_STATUS_CHOICES,
+        default=DOCUMENT_STATUS_REQUIRED,
+        verbose_name="الحالة",
+    )
+    received_on = models.DateField(null=True, blank=True, verbose_name="وصلت في")
+    received_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_received_documents",
+        verbose_name="استلمها",
+    )
+    channel = models.CharField(
+        max_length=20,
+        choices=DOCUMENT_CHANNEL_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="كيف وصلت",
+    )
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_updated_documents",
+        verbose_name="عدّلها",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "ورقة زبون"
+        verbose_name_plural = "أوراق الزبائن"
+        ordering = ["period_start", "item_code", "id"]
+        constraints = [
+            # فرادةٌ **غير مشروطة**: صفٌّ واحد لكل بندٍ في فترة.
+            models.UniqueConstraint(
+                fields=["client", "item_code", "period_start"],
+                name="uniq_document_row_period",
+            ),
+        ]
+        indexes = [
+            # شبكةُ الأشهر وشارةُ الالتزام تقرآن بثلاثة أعمدة: المكتب والزبون والفترة.
+            models.Index(
+                fields=["tenant", "client", "period_start"],
+                name="office_docs_tenant_client",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.item_code}@{self.period_start}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class DocumentFile(models.Model):
+    """ملفُّ ورقةٍ **اختياريّ** بحقول נספח ז السبعة — كيانٌ منفصلٌ عن الحالة.
+
+    **الحالةُ والملفُّ لا يُستنتج أحدُهما من الآخر** (بحث #260 §5.4): ورقةٌ في درج
+    المكتب «وصلت» بلا ملف، وملفٌّ واحدٌ قد يغطّي بندين. فرفعُ الملف أو حذفُه لا
+    يمسّ `DocumentChecklistItem.status` أبداً.
+
+    **و`file_url` لا يخرج في أيّ ردّ**: يُقدَّم بايتاتٍ من `stream_stored_asset`
+    وحده، فيبقى رابطُ التخزين على الخادم.
+
+    والحقولُ السبعة: مُعرِّفٌ فريد (`uid`)، ومَن أنشأ السجلّ (`created_by`)، ونوعُ
+    المستند (`document_type`)، ورقمُ تسجيل المُصدر (`issuer_registration`)،
+    وتاريخُ المستند (`document_date`)، ورقمُ المستند (`document_number`)، وتاريخُ
+    الالتقاط (`captured_at`) — أوّلُ ثلاثةٍ تلقائية والباقي وصفٌ يكتبه الموظف.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_document_files",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="document_files",
+        verbose_name="الزبون",
+    )
+    checklist_item = models.ForeignKey(
+        DocumentChecklistItem,
+        on_delete=models.CASCADE,
+        related_name="files",
+        verbose_name="الورقة",
+    )
+    #: 「נספח ז」١: مُعرِّفٌ فريدٌ آليّ — يُقرأ في الأرشيف لا يُكتب.
+    uid = models.UUIDField(
+        default=uuid4, unique=True, editable=False, verbose_name="المعرّف الفريد",
+    )
+    #: 「נספח ז」٢: هويّةُ مَن أنشأ السجلّ.
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_document_files",
+        verbose_name="أنشأه",
+    )
+    #: 「נספח ז」٣: نوعُ المستند — افتراضُه اسمُ الورقة.
+    document_type = models.CharField(max_length=200, verbose_name="نوع المستند")
+    #: 「נספח ז」٤: رقمُ تسجيل المُصدر (עוסק).
+    issuer_registration = models.CharField(
+        max_length=60, blank=True, default="", verbose_name="رقم تسجيل المُصدر",
+    )
+    #: 「נספח ז」٥: تاريخُ المستند نفسه (لا تاريخُ رفعه).
+    document_date = models.DateField(null=True, blank=True, verbose_name="تاريخ المستند")
+    #: 「נספח ז」٦: رقمُ المستند.
+    document_number = models.CharField(
+        max_length=60, blank=True, default="", verbose_name="رقم المستند",
+    )
+    #: 「נספח ז」٧: تاريخُ الالتقاط — تلقائيٌّ عند الرفع.
+    captured_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الالتقاط")
+    #: **لا يخرج في أيّ ردّ** — التقديمُ بايتاتٍ من `stream_stored_asset`.
+    file_url = models.URLField(max_length=500, verbose_name="رابط التخزين")
+    file_name = models.CharField(max_length=255, blank=True, default="", verbose_name="اسم الملف")
+    #: نسخةُ عملٍ لا أصلٌ موثَّق: تُوسم «صورة — الأصل عند الزبون».
+    is_copy = models.BooleanField(default=True, verbose_name="صورة")
+
+    class Meta:
+        verbose_name = "ملف ورقة"
+        verbose_name_plural = "ملفات الأوراق"
+        ordering = ["-captured_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client"], name="office_doc_file_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.uid}:{self.file_name}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class DocumentRetentionRule(models.Model):
+    """مدةُ حفظٍ قانونية لنظامٍ ضريبيّ — **بياناتُ منصّةٍ لا ثابتاً في الكود**.
+
+    الحفظُ إلزامُ الزبون لا المكتب، والمددُ مختلفة: خمسُ سنواتٍ فلسطينياً من
+    نهاية السنة (م79/1)، وسبعٌ إسرائيلياً من النهاية أو ستٌّ من التقديم
+    **الأبعدُ منهما** (§25(ג))، وثلاثٌ من التقديم للمستندات غير الإلزامية
+    (§25(ד)). المصدرُ منشورٌ في `source_url`، وv1 يعرضها ولا يحسب تاريخاً.
+    """
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    code = models.SlugField(max_length=60, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    years = models.PositiveSmallIntegerField(verbose_name="السنوات")
+    #: بديلٌ يُقارَن بالأساس الأبعد (إسرائيل: ٦ من التقديم مع ٧ من النهاية).
+    alt_years = models.PositiveSmallIntegerField(
+        null=True, blank=True, verbose_name="سنوات بديلة",
+    )
+    basis = models.CharField(
+        max_length=40, choices=RETENTION_BASIS_CHOICES, verbose_name="أساس الحساب",
+    )
+    source_url = models.URLField(max_length=300, verbose_name="المصدر")
+
+    class Meta:
+        verbose_name = "مدة حفظ مستندات"
+        verbose_name_plural = "مدد حفظ المستندات"
+        ordering = ["tax_system", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tax_system", "code"], name="uniq_retention_rule_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.code}:{self.years}"

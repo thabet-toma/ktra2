@@ -30,19 +30,22 @@ import {
 
 type CounterKey = keyof TodayCounters;
 
-/** العدّاداتُ الأربعة (#276) — كبسةٌ تُفلتر، والعددُ من الخادم **قبل** الفلتر. */
+/** العدّاداتُ الخمسة (#276 و#278) — كبسةٌ تُفلتر، والعددُ من الخادم **قبل** الفلتر. */
 const COUNTERS: { filter: TodayFilter; label: string; counter: CounterKey }[] = [
   { filter: 'late', label: 'متأخّر رسمي', counter: 'late' },
   { filter: 'late_internal', label: 'متأخّر داخلي', counter: 'late_internal' },
   { filter: 'week', label: 'قريب هالأسبوع', counter: 'week' },
+  // #278: «ناقصه أوراق» — شارةٌ إضافية لا تُزاحم التأخير.
+  { filter: 'missing_docs', label: 'ناقصه أوراق', counter: 'missing_docs' },
   { filter: '', label: 'الكل', counter: 'all' },
 ];
 
-/** الرقائقُ الثلاث — و«شغلي» تُخفى في مكتب «شخص واحد» (لا موظفَ غيره). */
+/** الرقائقُ الأربع — و«شغلي» تُخفى في مكتب «شخص واحد» (لا موظفَ غيره). */
 const CHIPS: { filter: TodayFilter; label: string }[] = [
   { filter: 'mine', label: 'شغلي' },
   { filter: 'week', label: 'هالأسبوع' },
   { filter: 'late', label: 'متأخّر رسمي' },
+  { filter: 'missing_docs', label: 'ناقصه أوراق' },
 ];
 
 /**
@@ -76,7 +79,8 @@ export const OfficeTodayScreen: React.FC = () => {
 
   const officeSize = settings ? officeSizeOf(settings.settings) : null;
   const showsAssignment = showsOfficeAssignment(officeSize);
-  const counters = payload?.counters ?? { late: 0, late_internal: 0, week: 0, all: 0 };
+  const counters = payload?.counters
+    ?? { late: 0, late_internal: 0, week: 0, missing_docs: 0, all: 0 };
   const rows = payload?.rows ?? [];
   const day = payload?.day ?? '';
   const directionChoices = payload?.direction_choices ?? [];
@@ -160,6 +164,7 @@ export const OfficeTodayScreen: React.FC = () => {
                   entry.counter === 'late'
                     ? 'text-rose-600 dark:text-rose-400'
                     : entry.counter === 'late_internal'
+                      || entry.counter === 'missing_docs'
                       ? 'text-amber-600 dark:text-amber-400'
                       : 'text-slate-900 dark:text-slate-100'
                 }`}

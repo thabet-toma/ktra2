@@ -3,6 +3,7 @@ import React from 'react';
 import type { ObligationRow, SettingChoice } from '../../utils/accountingOffice';
 import {
   badgeLabelOf,
+  documentDocsText,
   obligationAmountText,
   obligationBadgeClass,
   obligationExtensionText,
@@ -108,6 +109,12 @@ export const OfficeObligationRow: React.FC<{
               className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-900 dark:bg-amber-950/50 dark:text-amber-200"
             >
               تقديري
+            </span>
+          ) : null}
+          {/* #278: عدّادُ الأوراق «وصل 3/5» — نصوصُ الخادم وحده، ويغيب بلا صفوف. */}
+          {documentDocsText(obligation.docs) ? (
+            <span className="text-[10px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">
+              {documentDocsText(obligation.docs)}
             </span>
           ) : null}
         </div>

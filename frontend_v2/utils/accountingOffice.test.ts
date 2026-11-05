@@ -7,6 +7,18 @@ import {
   badgeLabelOf,
   clientTabFromSearch,
   directionLabelOf,
+  documentCellClass,
+  documentCellGlyph,
+  documentCellTone,
+  documentDocsText,
+  documentFileTag,
+  documentGridRows,
+  documentMissingBar,
+  documentMonthColumns,
+  documentMonthLabel,
+  documentStatusChoicesFor,
+  documentYearOptions,
+  emptyDocumentCell,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientFilePath,
@@ -51,6 +63,7 @@ import {
   weekRange,
   type CalendarDeadlineRow,
   type DeadlineRuleRow,
+  type DocumentCell,
   type ObligationRow,
   type OfficeServiceRow,
   type SettingRow,
@@ -493,6 +506,8 @@ function OBLIGATION(overrides: Partial<ObligationRow> = {}): ObligationRow {
     client_paid: false,
     status: 'pending',
     status_label: 'لسا ما انقدّم',
+    // #278: لا صفوفَ أوراقٍ في هذا المُصنِّع — والاختبارُ يُمرّر `docs` عند الحاجة.
+    docs: null,
     ...overrides,
   };
 }
@@ -719,4 +734,173 @@ test('تاريخُ التمديد المقترح بعد الموعد السار�
   assert.equal(defaultExtensionDate('2026-12-20'), '2027-01-19');
   assert.equal(defaultExtensionDate('2026-01-31'), '2026-03-02');
   assert.equal(defaultExtensionDate('غير تاريخ'), '');
+});
+
+// ── قائمة الأوراق وشبكة الأشهر (#278) ───────────────────────────────────────
+
+function cellOf(overrides: Partial<DocumentCell> & Pick<DocumentCell, 'month'>): DocumentCell {
+  return {
+    row_id: 1,
+    status: 'required',
+    status_label: 'مطلوبة',
+    received_on: null,
+    received_by_name: '',
+    channel: '',
+    channel_label: '',
+    files_count: 0,
+    ...overrides,
+  };
+}
+
+test('كلُّ صفٍّ في شبكة الأوراق بعدد الأشهر نفسه — والفارغُ خانةٌ محايدة', () => {
+  const payload = {
+    months: ['2026-01-01', '2026-02-01'],
+    items: [
+      {
+        item_code: 'a',
+        name: 'فواتير المبيعات',
+        cells: [cellOf({ month: '2026-01-01' }), cellOf({ month: '2026-02-01' })],
+      },
+      {
+        // الخادمُ أرسل خانةً واحدة: الشبكةُ تُكمل الثانية ولا تُزيح الصفوف.
+        item_code: 'b',
+        name: 'كشف البنك',
+        cells: [cellOf({ month: '2026-01-01' })],
+      },
+    ],
+  };
+
+  const rows = documentGridRows(payload);
+
+  assert.deepEqual(rows.map((row) => row.cells.length), [2, 2]);
+  assert.equal(rows[1].cells[1].month, '2026-02-01');
+  assert.equal(rows[1].cells[1].row_id, null);
+  assert.equal(documentCellTone(rows[1].cells[1]), 'empty');
+});
+
+test('الخاناتُ بأشهرها لا بترتيبها — ترتيبٌ مبدَّلٌ لا يخلط الأعمدة', () => {
+  const payload = {
+    months: ['2026-01-01', '2026-02-01'],
+    items: [
+      {
+        item_code: 'a',
+        name: 'بند',
+        cells: [cellOf({ month: '2026-02-01', row_id: 9 }), cellOf({ month: '2026-01-01', row_id: 8 })],
+      },
+    ],
+  };
+
+  const [row] = documentGridRows(payload);
+
+  assert.deepEqual(row.cells.map((cell) => cell.row_id), [8, 9]);
+});
+
+test('أسماءُ الأشهر في رأس الشبكة بلا سنة — من جدول monthKey وحده', () => {
+  assert.equal(documentMonthLabel('2026-01-01'), 'كانون الثاني');
+  assert.deepEqual(documentMonthColumns(['2026-10-01']), [
+    { iso: '2026-10-01', label: 'تشرين الأول' },
+  ]);
+});
+
+test('ألوانُ الحالات الخمس ورمزُها كما في النموذج المرئي', () => {
+  assert.equal(documentCellTone(cellOf({ month: '2026-01-01', status: 'received' })), 'received');
+  assert.equal(documentCellTone(cellOf({ month: '2026-01-01', status: 'partial' })), 'partial');
+  assert.equal(documentCellTone(cellOf({ month: '2026-01-01', status: 'not_needed' })), 'skipped');
+  assert.equal(documentCellTone(cellOf({ month: '2026-01-01', status: 'required' })), 'required');
+  assert.equal(documentCellTone(emptyDocumentCell('2026-01-01')), 'empty');
+
+  assert.equal(documentCellGlyph(cellOf({ month: '2026-01-01', status: 'received' })), '✓');
+  assert.equal(documentCellGlyph(cellOf({ month: '2026-01-01', status: 'partial' })), '!');
+  assert.equal(documentCellGlyph(cellOf({ month: '2026-01-01', status: 'not_needed' })), '–');
+  assert.equal(documentCellGlyph(emptyDocumentCell('2026-01-01')), '');
+
+  // «وصلت» خضراء و«ناقصة» كهرمانية و«مطلوبة» حمراء الإطار — لا نصَّ هنا.
+  assert.match(documentCellClass(cellOf({ month: '2026-01-01', status: 'received' })), /emerald/);
+  assert.match(documentCellClass(cellOf({ month: '2026-01-01', status: 'partial' })), /amber/);
+  assert.match(documentCellClass(cellOf({ month: '2026-01-01', status: 'required' })), /rose/);
+});
+
+test('عدّادُ «وصل 3/5» يقف حيث لا صفوفَ محسوبة', () => {
+  assert.equal(documentDocsText(null), '');
+  assert.equal(documentDocsText({ received: 0, required: 0 }), '');
+  assert.equal(documentDocsText({ received: 3, required: 5 }), 'وصل 3/5');
+  assert.equal(documentDocsText({ received: 5, required: 5 }), 'وصل 5/5');
+});
+
+test('شريطُ «ناقص لشهر…» يعدّ آخر شهرٍ ويسمّي بنودَه', () => {
+  const payload = {
+    months: ['2026-01-01', '2026-02-01'],
+    items: [
+      {
+        item_code: 'a',
+        name: 'كشف البنك',
+        cells: [
+          cellOf({ month: '2026-01-01', status: 'received' }),
+          cellOf({ month: '2026-02-01', status: 'required' }),
+        ],
+      },
+      {
+        item_code: 'b',
+        name: 'فواتير المشتريات',
+        cells: [
+          cellOf({ month: '2026-01-01', status: 'received' }),
+          cellOf({ month: '2026-02-01', status: 'partial' }),
+        ],
+      },
+    ],
+  };
+
+  const bar = documentMissingBar(payload);
+
+  assert.equal(bar?.monthLabel, 'شباط');
+  assert.deepEqual(bar?.names, ['كشف البنك', 'فواتير المشتريات']);
+  assert.equal(bar?.counts, '1 مطلوبة · 1 ناقصة');
+});
+
+test('شريطُ الناقص يغيب حين لا ينقص شيء', () => {
+  const payload = {
+    months: ['2026-02-01'],
+    items: [
+      {
+        item_code: 'a',
+        name: 'كشف البنك',
+        cells: [cellOf({ month: '2026-02-01', status: 'received' })],
+      },
+      {
+        item_code: 'b',
+        name: 'ورقة',
+        cells: [cellOf({ month: '2026-02-01', status: 'not_needed' })],
+      },
+    ],
+  };
+
+  assert.equal(documentMissingBar(payload), null);
+  assert.equal(documentMissingBar({ months: [], items: [] }), null);
+});
+
+test('تسميةُ «مش لازمة» في القائمة السنوية سنةٌ لا شهر', () => {
+  const choices = [
+    { value: 'required', label: 'مطلوبة' },
+    { value: 'not_needed', label: 'مش لازمة هالشهر', annual_label: 'مش لازمة هالسنة' },
+  ];
+
+  assert.deepEqual(documentStatusChoicesFor(choices, true).map((entry) => entry.label), [
+    'مطلوبة',
+    'مش لازمة هالسنة',
+  ]);
+  assert.deepEqual(documentStatusChoicesFor(choices, false).map((entry) => entry.label), [
+    'مطلوبة',
+    'مش لازمة هالشهر',
+  ]);
+});
+
+test('وسمُ الملف والسنوات المتاحة من الخادم', () => {
+  assert.equal(documentFileTag({ copy_label: '  صورة — الأصل عند الزبون ' }), 'صورة — الأصل عند الزبون');
+  assert.equal(documentFileTag({ copy_label: '' }), '');
+  assert.deepEqual(documentYearOptions({ available_years: [2026, 2025] }), [2026, 2025]);
+});
+
+test('فلترُ «ناقصه أوراق» يُقرأ ويُكتب في العنوان', () => {
+  assert.equal(readTodayFilter('?filter=missing_docs'), 'missing_docs');
+  assert.deepEqual(todayFilterParams('missing_docs'), { filter: 'missing_docs' });
 });

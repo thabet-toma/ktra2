@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1033**
+عدد النقاط: **1042**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -76,6 +76,8 @@
 | `/api/accounting-office/clients/{pk}/contacts/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/contacts/{contact_id}/primary/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/document-choice/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/documents/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/end/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/events/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/obligations/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -97,6 +99,13 @@
 | `/api/accounting-office/deadline-rules/clear-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/keep-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/document-files/{pk}/` | `OfficeDocumentFileViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/document-files/{pk}/download/` | `OfficeDocumentFileViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/document-items/` | `OfficeDocumentItemViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/document-items/choice/` | `OfficeDocumentItemViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/document-items/{pk}/` | `OfficeDocumentItemViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/documents/{pk}/files/` | `OfficeDocumentViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/documents/{pk}/status/` | `OfficeDocumentViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/amount/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/clear-extension/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/client-paid/` | `OfficeObligationViewSet` | `accounting_office/views.py` |

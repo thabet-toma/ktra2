@@ -25,7 +25,7 @@ MODULE_KEY = "accounting_office"
 
 
 class Command(BaseCommand):
-    help = "يحفظ ما حان وقته من التزامات وشغلات مكاتب المحاسبة المرخَّصة ليوم."
+    help = "يحفظ ما حان وقته من التزامات وشغلات وأوراق مكاتب المحاسبة المرخَّصة ليوم."
 
     def add_arguments(self, parser):
         parser.add_argument(
@@ -48,6 +48,7 @@ class Command(BaseCommand):
                 f"{tenant.pk} · {tenant.CompanyName} — "
                 f"{day.isoformat()}: شغلات {counts['created_tasks']} · "
                 f"التزامات {counts['created_obligations']} · "
+                f"أوراق {counts['created_documents']} · "
                 f"تنبيهات {counts['created_alerts']}"
             )
         if not offices:

@@ -8,9 +8,11 @@
  */
 import {
   apiDelete,
+  apiGetForBlob,
   apiGetList,
   apiGetObject,
   apiPatchObject,
+  apiPostFormData,
   apiPostObject,
   apiPutObject,
 } from './restApi';
@@ -18,6 +20,7 @@ import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
   CalendarPayload,
+  ClientDocumentsPayload,
   ClientEventsPayload,
   ClientEventRow,
   ClientObligationsPayload,
@@ -26,9 +29,13 @@ import type {
   ClientServicesPayload,
   DeadlineRuleOverrideRow,
   DeadlineRuleRow,
+  DocumentFileRow,
+  DocumentRowPayload,
   OfficeAlertRow,
   OfficeAlertsPayload,
   OfficeCustomRulesPayload,
+  OfficeDocumentItemsPayload,
+  OfficeDocumentItemRow,
   OfficeServiceRow,
   ObligationRow,
   ServicePackageRow,
@@ -42,6 +49,7 @@ export type {
   ApplyPackageResult,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientDocumentsPayload,
   ClientEventRow,
   ClientEventsPayload,
   ClientObligationsPayload,
@@ -51,6 +59,13 @@ export type {
   ClientTaskRow,
   DeadlineRuleOverrideRow,
   DeadlineRuleRow,
+  DocumentCell,
+  DocumentChoice,
+  DocumentFileRow,
+  DocumentItemRow,
+  DocumentProgress,
+  DocumentRetentionRow,
+  DocumentRowPayload,
   EventKindChoice,
   ObligationBadge,
   ObligationRow,
@@ -58,6 +73,8 @@ export type {
   OfficeAlertsPayload,
   OfficeCustomRuleRow,
   OfficeCustomRulesPayload,
+  OfficeDocumentItemRow,
+  OfficeDocumentItemsPayload,
   OfficeServiceRow,
   ServicePackageRow,
   ServiceSuggestion,
@@ -80,6 +97,9 @@ const TODAY = `${BASE}today/`;
 const OBLIGATIONS = `${BASE}obligations/`;
 const TASKS = `${BASE}tasks/`;
 const ALERTS = `${BASE}alerts/`;
+const DOCUMENTS = `${BASE}documents/`;
+const DOCUMENT_FILES = `${BASE}document-files/`;
+const DOCUMENT_ITEMS = `${BASE}document-items/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -598,3 +618,116 @@ export const clearObligationExtension = (id: number): Promise<ObligationRow> =>
   apiPostObject<ObligationRow>(
     `${OBLIGATIONS}${id}/clear-extension/`, {}, tenantOpts(),
   );
+
+// ── قائمة الأوراق (#278) ────────────────────────────────────────────────────
+
+/** شبكةُ سنةٍ لزبون — `year` تُهمَل إن غابت فيختار الخادمُ سنةَ اليوم. */
+export const getClientDocuments = (
+  clientId: number,
+  year?: number,
+): Promise<ClientDocumentsPayload> =>
+  apiGetObject<ClientDocumentsPayload>(`${CLIENTS}${clientId}/documents/`, {
+    ...tenantOpts(),
+    query: { year: year ?? undefined },
+  });
+
+/** تسجيلُ حالة ورقة — «وصلت» تحتاج `channel` وإلا 400 من الخادم. */
+export const setDocumentStatus = (
+  rowId: number,
+  payload: { status: string; channel?: string },
+): Promise<DocumentRowPayload> =>
+  apiPostObject<DocumentRowPayload>(
+    `${DOCUMENTS}${rowId}/status/`, payload, tenantOpts(),
+  );
+
+/** ملفاتُ ورقةٍ — **بلا رابط تخزين**: التقديمُ من نقطة التنزيل وحدها. */
+export const listDocumentFiles = (rowId: number): Promise<DocumentFileRow[]> =>
+  apiGetList<DocumentFileRow>(`${DOCUMENTS}${rowId}/files/`, tenantOpts());
+
+/**
+ * رفعُ ملف ورقةٍ multipart بحقول נספח ז.
+ *
+ * `FormData` لأن الملفَّ يُرسَل ككائن، والـ`Content-Type` لا يُضبط يدوياً —
+ * المتصفحُ يضيف الـboundary.
+ */
+export const uploadDocumentFile = (
+  rowId: number,
+  input: {
+    file: File;
+    document_type?: string;
+    issuer_registration?: string;
+    document_date?: string;
+    document_number?: string;
+    is_copy?: boolean;
+  },
+): Promise<DocumentFileRow> => {
+  const form = new FormData();
+  form.append('file', input.file);
+  if (input.document_type) form.append('document_type', input.document_type);
+  if (input.issuer_registration) {
+    form.append('issuer_registration', input.issuer_registration);
+  }
+  if (input.document_date) form.append('document_date', input.document_date);
+  if (input.document_number) form.append('document_number', input.document_number);
+  if (input.is_copy === false) form.append('is_copy', 'false');
+  return apiPostFormData<DocumentFileRow>(
+    `${DOCUMENTS}${rowId}/files/`, form, tenantOpts(),
+  );
+};
+
+export const deleteDocumentFile = (id: number): Promise<void> =>
+  apiDelete(`${DOCUMENT_FILES}${id}/`, tenantOpts());
+
+/** تنزيلُ الملف بايتاتٍ — الرابط لا يصل الواجهة أصلاً. */
+export const downloadDocumentFile = (id: number): Promise<Blob> =>
+  apiGetForBlob(`${DOCUMENT_FILES}${id}/download/`, tenantOpts());
+
+/** قالبُ البنود لِنظام — ومع `clientId` يُضاف خيارُ الزبون على كل بند. */
+export const getDocumentItems = (
+  system: string,
+  clientId?: number,
+): Promise<OfficeDocumentItemsPayload> =>
+  apiGetObject<OfficeDocumentItemsPayload>(DOCUMENT_ITEMS, {
+    ...tenantOpts(),
+    query: { system, client: clientId ?? undefined },
+  });
+
+/** «ضمن القائمة» على بندٍ في قالب المكتب — بمفتاح `office.settings.manage`. */
+export const setOfficeDocumentChoice = (payload: {
+  item_code: string;
+  included: boolean;
+}): Promise<OfficeDocumentItemsPayload & { item_code: string; included: boolean }> =>
+  apiPostObject(`${DOCUMENT_ITEMS}choice/`, payload, tenantOpts());
+
+export const createOfficeDocumentItem = (payload: {
+  system: string;
+  name: string;
+  cadence: string;
+  service_codes?: string[];
+  is_active?: boolean;
+}): Promise<OfficeDocumentItemsPayload> =>
+  apiPostObject<OfficeDocumentItemsPayload>(DOCUMENT_ITEMS, payload, tenantOpts());
+
+export const updateOfficeDocumentItem = (
+  id: number,
+  payload: {
+    name?: string;
+    cadence?: string;
+    service_codes?: string[];
+    is_active?: boolean;
+  },
+): Promise<OfficeDocumentItemsPayload> =>
+  apiPatchObject<OfficeDocumentItemsPayload>(
+    `${DOCUMENT_ITEMS}${id}/`, payload, tenantOpts(),
+  );
+
+/** خيارُ الزبون على بند — يغلب قالبَ المكتب، والردُّ قائمةُ بنوده. */
+export const setClientDocumentChoice = (
+  clientId: number,
+  payload: { item_code: string; included: boolean },
+): Promise<{
+  item_code: string;
+  included: boolean;
+  items: OfficeDocumentItemRow[];
+}> =>
+  apiPostObject(`${CLIENTS}${clientId}/document-choice/`, payload, tenantOpts());

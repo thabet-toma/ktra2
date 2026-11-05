@@ -706,6 +706,8 @@ class RowShapeTest(OfficeTestCase):
                 "estimated", "warnings", "badges", "amount", "direction",
                 "direction_label", "client_paid", "status", "status_label",
                 "due_date", "extended_to", "extension_note", "platform_official_date",
+                # #278: `docs` = `{received, required}` أو `null`.
+                "docs",
             },
         )
         self.assertEqual(set(row["client"]), {"id", "name"})
@@ -760,11 +762,12 @@ class CountersAndFiltersTest(OfficeTestCase):
 
         self.assertEqual(
             window["counters"],
-            {"late": 0, "late_internal": 1, "week": 1, "all": 3},
+            # #278: `missing_docs` خامسةُ العدّادات — صفرٌ هنا: لا صفوفَ أوراق.
+            {"late": 0, "late_internal": 1, "week": 1, "missing_docs": 0, "all": 3},
         )
         self.assertEqual(
             late["counters"],
-            {"late": 3, "late_internal": 0, "week": 0, "all": 3},
+            {"late": 3, "late_internal": 0, "week": 0, "missing_docs": 0, "all": 3},
         )
         self.assertEqual(len(late["rows"]), 3)
 

@@ -18,7 +18,7 @@ from uuid import uuid4
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, Max, OuterRef, Q
-from django.db.models.functions import Coalesce
+from django.db.models.functions import Coalesce, ExtractYear
 from django.utils import timezone
 
 from accounting_office import deadlines, settings_registry
@@ -35,6 +35,21 @@ from accounting_office.models import (
     CONDITION_VAT_CLASSIFICATION_IN,
     DEADLINE_CADENCE_CHOICES,
     DEFAULT_SERVICES,
+    DOCUMENT_CADENCE_ANNUAL,
+    DOCUMENT_CADENCE_CHOICES,
+    DOCUMENT_CADENCE_LABELS,
+    DOCUMENT_CADENCE_MONTHLY,
+    DOCUMENT_CARD_CONDITION_FIELDS,
+    DOCUMENT_CHANNEL_CHOICES,
+    DOCUMENT_CHANNEL_LABELS,
+    DOCUMENT_FILE_COPY_TAG,
+    DOCUMENT_STATUS_CHOICES,
+    DOCUMENT_STATUS_LABELS,
+    DOCUMENT_STATUS_NOT_NEEDED,
+    DOCUMENT_STATUS_NOT_NEEDED_ANNUAL_LABEL,
+    DOCUMENT_STATUS_PARTIAL,
+    DOCUMENT_STATUS_RECEIVED,
+    DOCUMENT_STATUS_REQUIRED,
     EVENT_KIND_CHOICES,
     EVENT_KIND_LABELS,
     FREQUENCY_ANNUAL,
@@ -47,6 +62,7 @@ from accounting_office.models import (
     OBLIGATION_BADGE_LABELS,
     OBLIGATION_BADGE_LATE,
     OBLIGATION_BADGE_LATE_INTERNAL,
+    OBLIGATION_BADGE_MISSING_DOCS,
     OBLIGATION_BADGE_NEAR,
     OBLIGATION_CHANGE_EXTENSION,
     OBLIGATION_CHANGE_EXTENSION_CLEARED,
@@ -73,6 +89,8 @@ from accounting_office.models import (
     OFFICE_CUSTOM_RULE_CADENCE_CHOICES,
     OFFICE_CUSTOM_RULE_KIND_CHOICES,
     OFFICE_RULE_OVERRIDE_FIELDS,
+    RETENTION_BASIS_LABELS,
+    RETENTION_BASIS_LATER_OF_YEAR_END_OR_FILING,
     RULE_KIND_CHOICES,
     RULE_KIND_DAYS_AFTER_EVENT,
     RULE_KIND_DAY_OF_NEXT_MONTH,
@@ -87,6 +105,7 @@ from accounting_office.models import (
     THRESHOLD_KIND_VAT_EXEMPT_DEALER,
     THRESHOLD_KIND_VAT_MONTHLY_REPORTING,
     ClientContact,
+    ClientDocumentItemChoice,
     ClientEvent,
     ClientReminderRecipient,
     ClientService,
@@ -95,16 +114,22 @@ from accounting_office.models import (
     Contact,
     DeadlineRule,
     DeadlineSchedule,
+    DocumentChecklistItem,
+    DocumentFile,
+    DocumentRetentionRule,
     Obligation,
     ObligationDateChange,
     OfficeAlert,
     OfficeClient,
     OfficeCustomRule,
+    OfficeDocumentItem,
+    OfficeDocumentItemChoice,
     OfficeRefreshRun,
     OfficeRuleOverride,
     OfficeService,
     OfficeSettingValue,
     PeriodTask,
+    PlatformDocumentItem,
     ServicePackage,
     TaxCard,
     TaxThreshold,
@@ -1988,6 +2013,15 @@ class CalendarContext:
     overrides: dict[tuple[str, str], Any] = field(default_factory=dict, repr=False)
     #: #277: قواعدُ المكتب المفعّلة، مجمَّعةً بكود خدمة الزبون.
     custom_rules: dict[str, list] = field(default_factory=dict, repr=False)
+    #: #278: بنداتُ الأوراق لكل `(النظام, الدورية)` — قراءةٌ واحدة لكل نظامٍ في الطلب.
+    document_items: dict[tuple[str, str], list] = field(
+        default_factory=dict, repr=False,
+    )
+    #: #278: خيارُ المكتب على البنود، وخيارُ كل زبونٍ — تُقرأ عند أول حاجةٍ مرّة.
+    document_choices: dict[str, bool] | None = field(default=None, repr=False)
+    document_client_choices: dict[int, dict[str, bool]] = field(
+        default_factory=dict, repr=False,
+    )
 
     def setting(self, client, key):
         """قيمةُ إعدادٍ لزبون — من المجموعة إن حُلّت، وإلا بالمحلّل."""
@@ -2639,8 +2673,14 @@ def deadline_rules_payload(tax_system, *, tenant=None) -> dict:
 NEAR_WINDOW_DAYS = 6
 
 #: فلاترُ شاشة «اليوم» — الفارغ «الكل»، والبقيةُ تُقصّ الصفوفَ بعد العدّ.
-#: `late` الأحمرُ وحده، و`late_internal` الأصفرُ وحده (#276).
-TODAY_FILTERS: tuple[str, ...] = ("", "mine", "week", "late", "late_internal")
+#: `late` الأحمرُ وحده، و`late_internal` الأصفرُ وحده (#276)، و`missing_docs`
+#: «ناقصه أوراق» (#278).
+TODAY_FILTERS: tuple[str, ...] = (
+    "", "mine", "week", "late", "late_internal", "missing_docs",
+)
+TODAY_FILTER_HINT = (
+    "فلترٌ غير معروف — mine أو week أو late أو late_internal أو missing_docs."
+)
 
 #: نصُّ رفض التراجع عن «انقدّم» — واحدٌ في الخدمة والاختبار.
 SUBMITTED_LOCKED = "انقدّم لا يُتراجَع عنه"
@@ -2751,7 +2791,7 @@ def _obligation_defaults(
 
 
 def _refresh_client(client, *, tenant, day, end, context, skip):
-    """زبونٌ واحد: يحفظ شغلاته والتزاماتِه المستحقّة — `(شغلات, التزامات)` جديدتان.
+    """زبونٌ واحد: يحفظ شغلاته والتزاماتِه وقائمةَ أوراقه — الثلاثةَ جديدةً.
 
     **القائمُ يُقرأ استعلامين لا بنداً بنداً**: شغلاتُ خدمات الزبون في قاموسٍ
     بمفتاح `(client_service, period_start, period_end)`، والتزاماتُها في مجموعة
@@ -2760,12 +2800,15 @@ def _refresh_client(client, *, tenant, day, end, context, skip):
     الغائب وحده يُنشأ بـ`get_or_create` (حمايةً من تشغيلين متزامنين) ثم يُضاف إلى
     القاموس/المجموعة فوراً فلا يُقرأ مرّتين في المسحة نفسها.
 
+    **وأوراقُ الفترة (#278) تُولَّد في المعاملة نفسها** بعد الالتزامات
+    (`_generate_document_rows`): القائمةُ نتيجةُ الحفظ نفسِه، فلا مسارَ ثانٍ لها.
+
     معاملةُ النداء في `refresh_office` (واحدةٌ لكل زبون). و`skip` فتراتُ
     الخدمات التي رُفع عنها «آخر فترة علينا».
     """
     service_rows = client_services_of(client, context)
     if not service_rows:
-        return 0, 0
+        return 0, 0, 0
     floor = min(
         min(row.starts_on for row in service_rows),
         min(row.responsible_from for row in service_rows),
@@ -2840,7 +2883,11 @@ def _refresh_client(client, *, tenant, day, end, context, skip):
         if result.internal_deadline < task.internal_deadline:
             task.internal_deadline = result.internal_deadline
             task.save(update_fields=["internal_deadline"])
-    return created_tasks, created_obligations
+    created_documents = _generate_document_rows(
+        client, tenant=tenant, service_rows=service_rows, end=end,
+        context=context, skip=skip,
+    )
+    return created_tasks, created_obligations, created_documents
 
 
 # ── التنبيهات الداخلية (#276) ───────────────────────────────────────────────
@@ -3017,8 +3064,8 @@ def _generate_late_alerts(tenant, *, day) -> int:
     return len(rows)
 
 
-def _save_due_for_clients(tenant, clients, *, day, context) -> tuple[int, int]:
-    """يحفظ المستحقَّ لكل زبونٍ في معاملته — `(شغلات, التزامات)` جديدتان.
+def _save_due_for_clients(tenant, clients, *, day, context) -> tuple[int, int, int]:
+    """يحفظ المستحقَّ لكل زبونٍ في معاملته — `(شغلات, التزامات, أوراق)` جديدة.
 
     **موضعُ الحفظ الوحيد**: يقرؤه `refresh_office` لكل زبائن المكتب، ويقرؤه
     إنشاءُ قاعدة المكتب لزبائن خدمتها وحدهم (#277) — فلا مسارَ ثانٍ للتوليد.
@@ -3026,6 +3073,7 @@ def _save_due_for_clients(tenant, clients, *, day, context) -> tuple[int, int]:
     end = day - timedelta(days=1)
     created_tasks = 0
     created_obligations = 0
+    created_documents = 0
     for client in clients:
         skip = {
             row.pk: _last_periods_of_service(row, client=client, context=context)
@@ -3033,12 +3081,13 @@ def _save_due_for_clients(tenant, clients, *, day, context) -> tuple[int, int]:
             if not row.last_period_ours and row.ends_on is not None
         }
         with transaction.atomic():
-            tasks, obligations = _refresh_client(
+            tasks, obligations, documents = _refresh_client(
                 client, tenant=tenant, day=day, end=end, context=context, skip=skip,
             )
         created_tasks += tasks
         created_obligations += obligations
-    return created_tasks, created_obligations
+        created_documents += documents
+    return created_tasks, created_obligations, created_documents
 
 
 def refresh_office(tenant, *, day) -> dict:
@@ -3078,7 +3127,7 @@ def refresh_office(tenant, *, day) -> dict:
     # «تغيّر موعد N التزامات».
     with transaction.atomic():
         schedule_changes = _apply_platform_updates(tenant, day=day, context=context)
-    created_tasks, created_obligations = _save_due_for_clients(
+    created_tasks, created_obligations, created_documents = _save_due_for_clients(
         tenant, clients, day=day, context=context,
     )
 
@@ -3094,6 +3143,8 @@ def refresh_office(tenant, *, day) -> dict:
         "day": day.isoformat(),
         "created_tasks": created_tasks,
         "created_obligations": created_obligations,
+        # #278: أوراقُ الفترات التي صارت مستحقّة — عدّادٌ بجانب عدّاداتها.
+        "created_documents": created_documents,
         "created_alerts": created_alerts,
     }
 
@@ -3102,8 +3153,9 @@ def ensure_office_refreshed(tenant, *, day):
     """مرّةٌ في اليوم: ليومٍ له سجلٌّ **لا عمل** (تُرجع `None`)، وإلا `refresh_office`.
 
     تُرجع `None` ليومٍ مسجَّلٍ سابقاً (لا تشغيلَ ولا عدّادات)، وعدّاداتِ
-    `refresh_office` (`created_tasks`/`created_obligations`/`created_alerts`)
-    ليومٍ جديد — فالمُنادي إن أراد الأرقام فليقرأها من قيمتها المُعادة لا من `None`.
+    `refresh_office` (`created_tasks`/`created_obligations`/`created_documents`/
+    `created_alerts`) ليومٍ جديد — فالمُنادي إن أراد الأرقام فليقرأها من قيمتها
+    المُعادة لا من `None`.
 
     تُنادى عند أول فتحٍ لشاشة «اليوم» **ولجرس التنبيهات** (`GET alerts/`)، فيصير
     أولُ فتحٍ لأيٍّ منهما تشغيلاً يومياً بلا مُجدوِلٍ في المستودع (الـcron على
@@ -3323,9 +3375,30 @@ def _assignee_payload(assignee):
     return {"id": assignee.pk, "name": user_display_name(assignee)}
 
 
-def _obligation_row(obligation, *, day, client, task, masked, badge_keys=None) -> dict:
-    """سطرُ التزامٍ — **الزبونُ والشغلةُ يُمرَّران محمَّلين** (لا استعلامَ لكل صفّ)."""
+def _obligation_row(
+    obligation, *, day, client, task, masked, badge_keys=None, docs=None,
+) -> dict:
+    """سطرُ التزامٍ — **الزبونُ والشغلةُ يُمرَّران محمَّلين** (لا استعلامَ لكل صفّ).
+
+    **و«ناقصه أوراق» (#278) شارةٌ إضافية**: تُضاف إلى مفاتيح التأخير المحسوبة ولا
+    تُزاحمها — `docs` يمرّرها المنادي محسوبةً لصفوف الطلب كلها (استعلامان)،
+    ونداءُ الصفّ الواحد يحسبها لنفسه (`obligation_row`).
+    """
     amount = None if obligation.amount is None else f"{obligation.amount:.2f}"
+    keys = list(
+        _badge_keys(obligation, day, task=task) if badge_keys is None else badge_keys,
+    )
+    if (docs or {}).get("missing") and OBLIGATION_BADGE_MISSING_DOCS not in keys:
+        keys.append(OBLIGATION_BADGE_MISSING_DOCS)
+    # الشكلُ المنشور `{"received", "required"}` وحده — و`missing` قرارُ شارةٍ
+    # داخليّ لا يُرسَل، فالواجهةُ تقرأ العدّاد ولا تعيد الحكم.
+    docs_payload = (
+        None if docs is None
+        else {
+            "received": docs.get("received", 0),
+            "required": docs.get("required", 0),
+        }
+    )
     row = {
         "id": obligation.pk,
         "client": {"id": client.pk, "name": client.name},
@@ -3357,7 +3430,9 @@ def _obligation_row(obligation, *, day, client, task, masked, badge_keys=None) -
         ),
         "estimated": obligation.estimated,
         "warnings": list(obligation.warnings or []),
-        "badges": _badge_payloads(obligation, day, keys=badge_keys, task=task),
+        "badges": _badge_payloads(obligation, day, keys=keys, task=task),
+        # #278: `وصل n / م` — `null` حين لا صفَّ ورقةٍ محسوباً لهذا الالتزام.
+        "docs": docs_payload,
         "amount": amount,
         "direction": obligation.direction,
         "direction_label": OBLIGATION_DIRECTION_LABELS.get(obligation.direction, ""),
@@ -3372,7 +3447,7 @@ def obligation_row(obligation, *, day, masked=False) -> dict:
     """سطرُ التزامٍ واحد — بردٍّ من فعلٍ بعد حفظه، أو لنداءٍ داخليّ.
 
     **والمبلغُ يمرّ بالقناع**: `amount` مفتاحُ مبلغٍ مسجَّل، ومن لا يملك رؤية
-    المبالغ يصله `None` وتعرض الشاشة «—».
+    المبالغ يصله `None` وتعرض الشاشة «—». وتقدّمُ الأوراق يُحسب لهذا الصفّ وحده.
     """
     return _obligation_row(
         obligation,
@@ -3380,6 +3455,7 @@ def obligation_row(obligation, *, day, masked=False) -> dict:
         client=obligation.client,
         task=obligation.task,
         masked=masked,
+        docs=document_progress(obligation.tenant, [obligation]).get(obligation.pk),
     )
 
 
@@ -3446,37 +3522,46 @@ def _in_near_window(obligation, day) -> bool:
 
 
 def today_payload(tenant, *, user, day, filter="") -> dict:
-    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُه الأربعة قبل الفلتر.
+    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُه الخمسة قبل الفلتر.
 
-    **العدّاداتُ (`late` · `late_internal` · `week` · `all`) على كل الميل المحفوظ**
-    ثم يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر رسمي» لا تُصفّر «متأخّر داخليّ».
-    والفلاترُ خمسةٌ: `mine` (المسؤولُ الفعليُّ هو العضو) · `week` (نافذةُ
-    `due_date` = `extended_to or actual_deadline` مستقلّةً عن الشارة) · `late` (الأحمرُ وحده) · `late_internal`
-    (الأصفرُ وحده)، والفارغُ «الكل»؛ وغيرُها **400**.
+    **العدّاداتُ (`late` · `late_internal` · `week` · `missing_docs` · `all`) على
+    كل الميل المحفوظ** ثم يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر رسمي» لا
+    تُصفّر «متأخّر داخليّ». والفلاترُ ستةٌ: `mine` (المسؤولُ الفعليُّ هو العضو) ·
+    `week` (نافذةُ `due_date` = `extended_to or actual_deadline` مستقلّةً عن
+    الشارة) · `late` (الأحمرُ وحده) · `late_internal` (الأصفرُ وحده) ·
+    `missing_docs` («ناقصه أوراق» #278)، والفارغُ «الكل»؛ وغيرُها **400**.
+
+    **و`docs` لكل صفّ** (`{"received": n, "required": m}` أو `null`) يُحسب
+    لالتزامات الطلب كلّها باستعلامين ثابتين (`document_progress`) — لا صفّاً صفّاً.
 
     و`day` يُمرَّر صريحاً ولا يُقرأ من الساعة: الشاراتُ تُحسب عنه، فالصفُّ نفسُه
     «قريب» في يومٍ وليس في آخر بلا أن يتغيّر في القاعدة.
     """
     if filter not in TODAY_FILTERS:
-        raise ValidationError({
-            "filter": "فلترٌ غير معروف — mine أو week أو late أو late_internal.",
-        })
+        raise ValidationError({"filter": TODAY_FILTER_HINT})
     masked = user is not None and not can_see_amounts(tenant, user)
     tagged = [
         (obligation, _badge_keys(obligation, day, task=obligation.task))
         for obligation in _visible_pending_obligations(tenant, user)
     ]
+    # #278: «ناقصه أوراق» — استعلامان لكل الصفحة، تمرّ بهما عدّاداتُها وصفوفُها.
+    progress = document_progress(tenant, [row for row, _keys in tagged])
     counters = {
         "late": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_LATE in keys),
         "late_internal": sum(
             1 for _row, keys in tagged if OBLIGATION_BADGE_LATE_INTERNAL in keys
         ),
         "week": sum(1 for row, _keys in tagged if _in_near_window(row, day)),
+        "missing_docs": sum(
+            1 for row, _keys in tagged
+            if progress.get(row.pk, {}).get("missing")
+        ),
         "all": len(tagged),
     }
     user_id = getattr(user, "pk", None)
     rows = []
     for obligation, keys in tagged:
+        docs = progress.get(obligation.pk)
         if filter == "mine" and _effective_assignee_id(obligation) != user_id:
             continue
         if filter == "week" and not _in_near_window(obligation, day):
@@ -3484,6 +3569,8 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
         if filter == "late" and OBLIGATION_BADGE_LATE not in keys:
             continue
         if filter == "late_internal" and OBLIGATION_BADGE_LATE_INTERNAL not in keys:
+            continue
+        if filter == "missing_docs" and not (docs or {}).get("missing"):
             continue
         rows.append(_obligation_row(
             obligation,
@@ -3493,6 +3580,7 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
             masked=masked,
             # المفاتيحُ حُسبت في المسحة أعلاه (عدّاداتاً وفلترةً) فلا تُعاد للصفّ.
             badge_keys=keys,
+            docs=docs,
         ))
     return {
         "day": day.isoformat(),
@@ -3661,7 +3749,8 @@ def client_obligations_payload(client, *, user, day) -> dict:
 
     كلُّ شغلةٍ بموعدها الداخليّ ومسؤولها الفعليّ وبكلِّ التزاماتها **في كلّ
     الحالات** (لا المنتظِرة وحدها: الملفُّ يعرض ما انقدّم وما استُثني أيضاً).
-    والمبلغُ يمرّ بالقناع مرّةً واحدةً للحمولة.
+    والمبلغُ يمرّ بالقناع مرّةً واحدةً للحمولة، وتقدّمُ الأوراق يُحسب للزبون
+    باستعلامين (#278).
     """
     masked = user is not None and not can_see_amounts(client.tenant, user)
     tasks = list(
@@ -3669,6 +3758,8 @@ def client_obligations_payload(client, *, user, day) -> dict:
         .select_related("assignee", "client__responsible", "client_service__service")
         .prefetch_related("obligations"),
     )
+    obligations = [row for task in tasks for row in task.obligations.all()]
+    progress = document_progress(client.tenant, obligations)
     return {
         "client": {"id": client.pk, "name": client.name},
         "day": day.isoformat(),
@@ -3676,6 +3767,7 @@ def client_obligations_payload(client, *, user, day) -> dict:
             task_row(task, obligations=[
                 _obligation_row(
                     obligation, day=day, client=client, task=task, masked=masked,
+                    docs=progress.get(obligation.pk),
                 )
                 for obligation in task.obligations.all()
             ])
@@ -4913,3 +5005,995 @@ def client_events_payload(client, *, user, day=None) -> dict:
             for event in events
         ],
     }
+
+# ── قائمة الأوراق وشبكة الأشهر (#278) ───────────────────────────────────────
+#
+# **البندُ من الكتالوج، والصفُّ لقطة**: `_document_items_for` هي **الدالّة الوحيدة**
+# التي تجيب «ما بنودُ هذا الزبون في هذه الفترة؟» — يقرؤها التوليد وحده، ولا نسخة
+# ثانية منها في الواجهة ولا في الـpayload (الحمولةُ تقرأ الصفوف المحفوظة).
+#
+# **والتوليدُ داخل «حدّث المكتب»**: فترةٌ انتهت (`period_end <= day - 1`) صارت
+# مستحقّة، وتُحفظ بـ`get_or_create` على `(زبون، بند، بداية الفترة)` — فتشغيلُ
+# اليوم نفسه مرّتين لا يكتب صفاً، والقائمُ لا يُعاد كتابته أبداً.
+#
+# **و«ناقصه أوراق» تُحسب عند القراءة**: صفوفُ خدمة الالتزام داخل فترته، منها
+# المطلوبُ أو الناقص. لا عمودَ لها، ولا تُخزَّن — وإلا تعفّنت بين تشغيلين.
+DOCUMENT_STATUS_KEYS: tuple[str, ...] = tuple(
+    value for value, _label in DOCUMENT_STATUS_CHOICES
+)
+DOCUMENT_CHANNEL_KEYS: tuple[str, ...] = tuple(
+    value for value, _label in DOCUMENT_CHANNEL_CHOICES
+)
+DOCUMENT_CADENCE_KEYS: tuple[str, ...] = tuple(
+    value for value, _label in DOCUMENT_CADENCE_CHOICES
+)
+#: الحالتان اللتان تعنيان «وصلت الورقة»: الكاملةُ والناقصة.
+DOCUMENT_RECEIVED_STATUSES: frozenset[str] = frozenset({
+    DOCUMENT_STATUS_RECEIVED, DOCUMENT_STATUS_PARTIAL,
+})
+
+#: الملفُّ المسموح: PDF أو صورة — حدُّه ١٠ ميجابايت (صندوقُ عملٍ لا أرشيفٌ قانونيّ).
+MAX_DOCUMENT_BYTES = 10 * 1024 * 1024
+DOCUMENT_ALLOWED_EXTENSIONS: dict[str, frozenset[str]] = {
+    ".pdf": frozenset({"application/pdf"}),
+    ".jpg": frozenset({"image/jpeg"}),
+    ".jpeg": frozenset({"image/jpeg"}),
+    ".png": frozenset({"image/png"}),
+    ".webp": frozenset({"image/webp"}),
+}
+DOCUMENT_ALLOWED_CONTENT_TYPES: frozenset[str] = frozenset(
+    content_type
+    for allowed in DOCUMENT_ALLOWED_EXTENSIONS.values()
+    for content_type in allowed
+)
+#: أولُ بايتاتٍ تُقرأ للتعرّف على المحتوى — البايتاتُ هي الحَكَم لا الامتداد.
+DOCUMENT_MAGIC_BYTES = 16
+#: مجلّدُ التخزين في مزوّد الوسائط.
+DOCUMENT_UPLOAD_FOLDER = "accounting_office_documents"
+
+
+def document_status_label(status, cadence) -> str:
+    """تسميةُ الحالة — والاستثناءُ يقول شهرَه أو سنتَه بحسب دورية الصفّ."""
+    if status == DOCUMENT_STATUS_NOT_NEEDED and cadence == DOCUMENT_CADENCE_ANNUAL:
+        return DOCUMENT_STATUS_NOT_NEEDED_ANNUAL_LABEL
+    return DOCUMENT_STATUS_LABELS.get(status, "")
+
+
+def document_status_choices() -> list[dict]:
+    """الحالاتُ الأربع للواجهة — بتسميةٍ شهريةٍ وأخرى سنويةٍ للاستثناء."""
+    return [
+        {
+            "value": value,
+            "label": label,
+            "annual_label": document_status_label(value, DOCUMENT_CADENCE_ANNUAL),
+        }
+        for value, label in DOCUMENT_STATUS_CHOICES
+    ]
+
+
+def document_channel_choices() -> list[dict]:
+    """قنواتُ الوصول الثلاث — «كيف وصلت؟»."""
+    return [
+        {"value": value, "label": label}
+        for value, label in DOCUMENT_CHANNEL_CHOICES
+    ]
+
+
+def document_cadence_choices() -> list[dict]:
+    """دوريتا الصفّ — شهريٌّ وسنويّ."""
+    return [
+        {"value": value, "label": label}
+        for value, label in DOCUMENT_CADENCE_CHOICES
+    ]
+
+
+# ── الكتالوج: أين تُقرأ البنود ولا تُخترَع ──────────────────────────────────
+def _document_catalog(context, tax_system, cadence) -> list[dict]:
+    """بنداتُ نظامٍ ودورية — المنصّة ثم المكتب، **مرّةً لكل طلب**.
+
+    المنصّةُ بترتيب `sort_order` (ترتيبُ البحث)، وقائمةُ المكتب بعدها بالاسم:
+    ما أضافه المكتب يبقى أسفل القائمة، فلا يُزيح بنداً قانونياً عن مكانه.
+    """
+    key = (tax_system, cadence)
+    cached = context.document_items.get(key)
+    if cached is not None:
+        return cached
+    rows = [
+        {
+            "item_code": item.code,
+            "name": item.name,
+            "service_codes": list(item.service_codes or []),
+            "card_conditions": dict(item.card_conditions or {}),
+        }
+        for item in (
+            PlatformDocumentItem.objects
+            .filter(tax_system=tax_system, cadence=cadence)
+            .order_by("sort_order", "name", "id")
+        )
+    ]
+    rows.extend(
+        {
+            "item_code": item.code,
+            "name": item.name,
+            "service_codes": list(item.service_codes or []),
+            "card_conditions": dict(item.card_conditions or {}),
+        }
+        for item in (
+            OfficeDocumentItem.objects
+            .filter(
+                tenant=context.tenant, tax_system=tax_system,
+                cadence=cadence, is_active=True,
+            )
+            .order_by("name", "id")
+        )
+    )
+    context.document_items[key] = rows
+    return rows
+
+
+def _document_office_choices(context) -> dict[str, bool]:
+    """خيارُ المكتب على البنود — والغيابُ «ضمن القائمة»."""
+    if context.document_choices is None:
+        context.document_choices = dict(
+            OfficeDocumentItemChoice.objects
+            .filter(tenant=context.tenant)
+            .values_list("item_code", "included"),
+        )
+    return context.document_choices
+
+
+def _document_client_choices(context, client) -> dict[str, bool]:
+    """خيارُ الزبون — يُقرأ مرّةً لكل زبونٍ في الطلب."""
+    cached = context.document_client_choices.get(client.pk)
+    if cached is None:
+        cached = dict(
+            ClientDocumentItemChoice.objects
+            .filter(client=client)
+            .values_list("item_code", "included"),
+        )
+        context.document_client_choices[client.pk] = cached
+    return cached
+
+
+def _document_item_applies(item, *, service_codes, card) -> bool:
+    """هل تنطبق شروطُ البند على هذا الزبون في هذه الفترة؟
+
+    الخدماتُ: قائمةٌ فارغةٌ تعني «لكل زبون»، وإلا فتقاطعٌ غيرُ فارغ. والبطاقةُ:
+    **كلُّ** شرطٍ يجب أن يطابق، وقيمةٌ فارغةٌ في البطاقة **لا تطابق** شرطاً
+    أبداً — «غير مسجّل» ليس «مسجّل» ولا «معفى».
+    """
+    required = item.get("service_codes") or []
+    if required and not set(required) & service_codes:
+        return False
+    for field, allowed in (item.get("card_conditions") or {}).items():
+        # مفتاحُ شرطٍ خارج حقول البطاقة لا يُطابِق: القائمةُ تُقرأ ولا تُخترَع.
+        if field not in DOCUMENT_CARD_CONDITION_FIELDS:
+            return False
+        value = getattr(card, field, "") if card is not None else ""
+        if not value or value not in (allowed or []):
+            return False
+    return True
+
+
+def _document_period_disclaimed(period_start, period_end, skipped) -> bool:
+    """هل تقع فترةُ المستندات **داخل** فترة خدمةٍ رُفع عنها «آخر فترة علينا»؟
+
+    المرفوعُ فترةُ **الخدمة** (رُبعيةً أو سنويةً)، وقائمةُ المستندات شهرية؛ فالمقارنةُ
+    احتواءٌ لا تساوٍ: شباط داخل كانون الثاني–آذار مرفوعٌ ولو لم يساوِه.
+    """
+    return any(
+        skipped_start <= period_start and period_end <= skipped_end
+        for skipped_start, skipped_end in skipped
+    )
+
+
+def _document_service_codes(
+    client, period_start, period_end, *, context, skip=None,
+) -> set[str]:
+    """أكوادُ الخدمات التي يقدّمها المكتب لهذا الزبون **في هذه الفترة**.
+
+    القاعدةُ هي `_period_is_ours` نفسها التي يحكم بها المحرّك على فترات
+    الالتزامات: نشطةٌ، والمكتبُ مسؤولٌ عنها، ولم تُوقف قبل نهاية الفترة.
+    **و`skip`**: خدمةٌ رُفع عنها «آخر فترة علينا» تسقط فترتُها من الحساب — فلا
+    تُولد بنودُها لشهرٍ يقع داخل تلك الفترة.
+    """
+    codes: set[str] = set()
+    for row in client_services_of(client, context):
+        if not _period_is_ours(row, period_end):
+            continue
+        if _document_period_disclaimed(
+            period_start, period_end, (skip or {}).get(row.pk, ()),
+        ):
+            continue
+        codes.add(row.service.code)
+    return codes
+
+
+def _document_items_for(
+    client, *, cadence, period_start, period_end, context=None, skip=None,
+) -> list[dict]:
+    """**الدالّةُ الواحدة**: بنودُ الزبون الفعّالة في فترةٍ — يقرؤها التوليدُ وحده.
+
+    الترتيبُ: خيارُ الزبون إن وُجد (وغلب)، وإلا (خيارُ المكتب أو «ضمن») **و**
+    انطباقُ الشروط. فالإخراجُ من المكتب يُسقط البند، والإدخالُ من الزبون يفرضه
+    ولو لم تنطبق شروطه — قرارُه فوق قرار المكتب وقاعدةِ القانون.
+    **و`skip`** فتراتُ الخدمات المرفوعة («آخر فترة ليست علينا») — تمرّ إلى
+    `_document_service_codes` فتُسقط خدمةَ الفترة المرفوعة، والفتراتُ الأخرى تبقى.
+    """
+    context = context or calendar_context(client.tenant, [client])
+    system = context.setting(client, TAX_SYSTEM_KEY)
+    if not system:
+        # نظامٌ غير مختار: لا لائحةَ تُقرأ، فلا بنودَ تُخترَع.
+        return []
+    service_codes = _document_service_codes(
+        client, period_start, period_end, context=context, skip=skip,
+    )
+    # `getattr(..., None)` يلتقط `RelatedObjectDoesNotExist` لأنها AttributeError:
+    # زبونٌ بلا بطاقةٍ لا يطابق شرطاً.
+    card = getattr(client, "tax_card", None)
+    office_choices = _document_office_choices(context)
+    client_choices = _document_client_choices(context, client)
+    items: list[dict] = []
+    for item in _document_catalog(context, system, cadence):
+        code = item["item_code"]
+        if code in client_choices:
+            included = client_choices[code]
+        else:
+            included = office_choices.get(code, True) and _document_item_applies(
+                item, service_codes=service_codes, card=card,
+            )
+        if included:
+            items.append(item)
+    return items
+
+
+def _document_item_order(tenant, tax_system, cadence) -> dict[str, int]:
+    """ترتيبُ العرض: بنداتُ المنصّة بترتيبها ثم بنداتُ المكتب بالاسم."""
+    order: dict[str, int] = {}
+    position = 0
+    if tax_system:
+        for row in (
+            PlatformDocumentItem.objects
+            .filter(tax_system=tax_system, cadence=cadence)
+            .order_by("sort_order", "name", "id")
+        ):
+            order[row.code] = position
+            position += 1
+    for row in (
+        OfficeDocumentItem.objects
+        .filter(tenant=tenant, tax_system=tax_system, cadence=cadence)
+        .order_by("name", "id")
+    ):
+        order[row.code] = position
+        position += 1
+    return order
+
+
+# ── التوليد ────────────────────────────────────────────────────────────────
+def _document_period_due(client, period_start, period_end, *, service_rows, end, skip):
+    """هل صارت قائمةُ هذه الفترة مستحقّةً؟ — القواعدُ التي يحكم بها المحرّك.
+
+    مستحقّةٌ فقط إذا انتهت الفترةُ قبل اليوم (`period_end <= end`، و`end = day - 1`)،
+    **ولم** تنقضِ بعد `ended_on` الزبون، **و**للمكتب فيها خدمةٌ مسؤولٌ عنها لم
+    تُرفع فترتُها (`skip`، باحتواء `_document_period_disclaimed`).
+    """
+    if period_end > end:
+        return False
+    if client.ended_on is not None and period_end > client.ended_on:
+        return False
+    for row in service_rows:
+        if not _period_is_ours(row, period_end):
+            continue
+        if _document_period_disclaimed(period_start, period_end, skip.get(row.pk, ())):
+            continue
+        return True
+    return False
+
+
+def _document_periods(client, service_rows, *, end, skip) -> list[tuple]:
+    """الفتراتُ المستحقّة لهذا الزبون: شهريةٌ لكل شهرٍ وسنويةٌ لكل سنة.
+
+    الأرضيةُ `min(starts_on, responsible_from)` كالمحرّك — بلا سقف: مكتبٌ بدأ
+    سنة 2015 يلحق كلَّ ما فات عند أول تشغيل، والسقفُ في التقويم وحده.
+    """
+    floor = min(
+        min(row.starts_on for row in service_rows),
+        min(row.responsible_from for row in service_rows),
+    )
+    periods: list[tuple] = []
+    cursor = _first_of_month(floor)
+    while cursor <= end:
+        period_end = deadlines.month_start_after(cursor, 1) - timedelta(days=1)
+        if _document_period_due(
+            client, cursor, period_end, service_rows=service_rows, end=end, skip=skip,
+        ):
+            periods.append((DOCUMENT_CADENCE_MONTHLY, cursor, period_end))
+        cursor = deadlines.month_start_after(cursor, 1)
+    for year in range(floor.year, end.year + 1):
+        period_start = date(year, 1, 1)
+        period_end = date(year, 12, 31)
+        if _document_period_due(
+            client, period_start, period_end,
+            service_rows=service_rows, end=end, skip=skip,
+        ):
+            periods.append((DOCUMENT_CADENCE_ANNUAL, period_start, period_end))
+    return periods
+
+
+def _generate_document_rows(client, *, tenant, service_rows, end, context, skip) -> int:
+    """يحفظ قوائم الفترات المستحقّة — **idempotent ولا يعيد كتابة صفّ**.
+
+    الصفوفُ القائمة تُقرأ استعلاماً واحداً لكل زبون (المفاتيح `(كود، بداية)`)،
+    والغائبُ وحده يُنشأ بـ`get_or_create` داخل معاملة الزبون في `_refresh_client`.
+    """
+    known = set(
+        DocumentChecklistItem.objects
+        .filter(client=client)
+        .values_list("item_code", "period_start"),
+    )
+    created = 0
+    for cadence, period_start, period_end in _document_periods(
+        client, service_rows, end=end, skip=skip,
+    ):
+        for item in _document_items_for(
+            client, cadence=cadence, period_start=period_start,
+            period_end=period_end, context=context, skip=skip,
+        ):
+            key = (item["item_code"], period_start)
+            if key in known:
+                continue
+            _row, was_created = DocumentChecklistItem.objects.get_or_create(
+                client=client,
+                item_code=item["item_code"],
+                period_start=period_start,
+                defaults={
+                    "tenant": tenant,
+                    "name": item["name"],
+                    "service_codes": list(item["service_codes"]),
+                    "cadence": cadence,
+                    "period_end": period_end,
+                    "status": DOCUMENT_STATUS_REQUIRED,
+                },
+            )
+            known.add(key)
+            if was_created:
+                created += 1
+    return created
+
+
+# ── الحالات: مَن ومتى وكيف ──────────────────────────────────────────────────
+def set_document_status(
+    row, *, status, channel="", actor, day=None,
+) -> DocumentChecklistItem:
+    """تسجيلُ حالة ورقة — «وصلت» و«وصلت ناقصة» تسألان عن القناة وتكتبان التاريخ.
+
+    **القناةُ إلزاميةٌ لمن وصلت**: «وصلت» بلا «كيف» خبرٌ ناقص، والمكتبُ يسأل عنه
+    بعد أسبوعين فلا يجد جواباً. والرجوعُ إلى «مطلوبة» أو «مش لازمة» **يمحو** أثرَ
+    الوصول (تاريخاً وفاعلاً وقناة) — صفٌّ ينتظر ورقةً لا يكون مستلَماً.
+    """
+    if status not in DOCUMENT_STATUS_KEYS:
+        raise ValidationError({
+            "status": (
+                "حالةٌ غير معروفة — مطلوبة أو وصلت ناقصة أو وصلت أو مش لازمة."
+            ),
+        })
+    day = day or timezone.localdate()
+    row.status = status
+    row.updated_by = actor
+    if status in DOCUMENT_RECEIVED_STATUSES:
+        clean_channel = (channel or "").strip()
+        if clean_channel not in DOCUMENT_CHANNEL_KEYS:
+            raise ValidationError({"channel": "كيف وصلت؟ واتساب أو ورق أو إيميل."})
+        row.channel = clean_channel
+        row.received_on = day
+        row.received_by = actor
+    else:
+        row.channel = ""
+        row.received_on = None
+        row.received_by = None
+    row.save(update_fields=[
+        "status", "updated_by", "updated_at",
+        "channel", "received_on", "received_by",
+    ])
+    return row
+
+
+# ── الملفُّ الاختياريّ: كيانٌ منفصلٌ لا يمسّ الحالة ─────────────────────────
+def sniff_document_type(head: bytes):
+    """نوعُ المحتوى من بايتاته الأولى — أو `None` لما لا نعرفه."""
+    if not head:
+        return None
+    if head[:4] == b"%PDF":
+        return "application/pdf"
+    if head[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if head[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if head[:4] == b"RIFF" and head[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def validate_document_size(*, size) -> None:
+    """حجمُ الملفّ وحده — يُقرأ من `upload.size` **قبل** أي قراءةٍ لبايتاته.
+
+    الفارغُ والمتجاوزُ للسقف يُرفضان هنا، فلا يدخل ملفُّ ١٠ ميجابايت الذاكرةَ لِيُرفض.
+    """
+    if not size or size <= 0:
+        raise ValidationError({"file": "الملف فارغ."})
+    if size > MAX_DOCUMENT_BYTES:
+        raise ValidationError({
+            "file": "حجم الملف يتجاوز الحد المسموح (١٠ ميجابايت).",
+        })
+
+
+def validate_document_upload(*, size, filename, content_type, head) -> None:
+    """التحقّقُ الذي يرفض قبل الكتابة — والحقلُ المرفوض `file`.
+
+    المسموحُ PDF وJPEG وPNG وWEBP بسقف ١٠ ميجابايت، **والامتدادُ يجب أن يطابق
+    نوعَ المحتوى المعلَن ثم بايتاتِه الأولى** — فملفٌّ يتسمّى `.pdf` وهو غيرُه
+    يُرفض بدل أن يُخزَّن لبساً على من يقرؤه. والبايتاتُ تصل رأساً قصيراً لا ملفاً
+    كاملاً (`DOCUMENT_MAGIC_BYTES`) — والحجمُ فُحص قبلها بـ`validate_document_size`.
+    """
+    validate_document_size(size=size)
+    name = (filename or "").strip().lower()
+    dot = name.rfind(".")
+    extension = name[dot:] if dot > 0 else ""
+    allowed = DOCUMENT_ALLOWED_EXTENSIONS.get(extension)
+    if allowed is None:
+        raise ValidationError({
+            "file": "نوع الملف غير مسموح. المسموح: PDF أو صورة (JPG/PNG/WEBP).",
+        })
+    declared = (content_type or "").split(";")[0].strip().lower()
+    if declared not in DOCUMENT_ALLOWED_CONTENT_TYPES:
+        raise ValidationError({
+            "file": "نوع محتوى الملف غير مسموح. المسموح: PDF أو صورة.",
+        })
+    if declared not in allowed:
+        raise ValidationError({"file": "امتداد الملف لا يطابق نوع محتواه."})
+    actual = sniff_document_type(head)
+    if actual is None or actual not in allowed:
+        raise ValidationError({"file": "محتوى الملف لا يطابق امتداده."})
+
+
+def document_file_payload(file) -> dict:
+    """سطرُ ملفٍّ للعرض — **بلا `file_url`**: الرابطُ لا يخرج في أيّ ردّ."""
+    return {
+        "id": file.pk,
+        "uid": str(file.uid),
+        "document_type": file.document_type,
+        "issuer_registration": file.issuer_registration,
+        "document_date": (
+            None if file.document_date is None else file.document_date.isoformat()
+        ),
+        "document_number": file.document_number,
+        "captured_at": file.captured_at.isoformat() if file.captured_at else None,
+        "file_name": file.file_name,
+        "is_copy": file.is_copy,
+        "copy_label": DOCUMENT_FILE_COPY_TAG if file.is_copy else "",
+        "created_by_name": user_display_name(file.created_by),
+    }
+
+
+def create_document_file(
+    row, *, file_url, file_name="", data=None, actor,
+) -> DocumentFile:
+    """يحفظ صفَّ الملفَّ بعد أن رُفع — **ولا يمسّ حالة الورقة** (قرار #278/D4).
+
+    الرفعُ نفسه في الـview (فعلٌ يعتمد على مزوّد التخزين)، وهذه الدالّةُ تكتب
+    السجلّ وحده: وصفُ נספח ז يأتي من الطلب، ونوعُ المستند افتراضُه اسمُ الورقة.
+    """
+    data = data or {}
+    document_type = (data.get("document_type") or "").strip() or row.name
+    file_row = DocumentFile(
+        tenant=row.tenant,
+        client=row.client,
+        checklist_item=row,
+        created_by=actor,
+        document_type=document_type,
+        issuer_registration=(data.get("issuer_registration") or "").strip(),
+        document_date=data.get("document_date"),
+        document_number=(data.get("document_number") or "").strip(),
+        file_url=file_url,
+        file_name=(file_name or "")[:255],
+        is_copy=bool(data.get("is_copy", True)),
+    )
+    file_row.save()
+    return file_row
+
+
+def delete_document_file(file) -> str:
+    """يحذف السجلَّ **أوّلاً** ويُرجع رابطه — والحذفُ من التخزين بعده بجهدٍ بذل.
+
+    الترتيبُ مقصود: الصفُّ في القاعدة هو المصدرُ الموثوق، وفشلُ مزوّد التخزين لا
+    يجوز أن يُبقي صفّاً يشير إلى ملفٍّ لم يعد يُقدَّم. **وحالةُ الورقة لا تتغيّر.**
+    """
+    url = file.file_url
+    file.delete()
+    return url
+
+
+def document_retention_payload(client) -> list[dict]:
+    """مددُ حفظ نظام الزبون — بياناتٌ معروضةٌ بنصّها، بلا حساب تاريخٍ في v1."""
+    system = resolve_setting(client.tenant, TAX_SYSTEM_KEY, client=client)
+    if not system:
+        return []
+    return [
+        {
+            "code": row.code,
+            "name": row.name,
+            "years": row.years,
+            "alt_years": row.alt_years,
+            "basis": row.basis,
+            "basis_label": RETENTION_BASIS_LABELS.get(row.basis, ""),
+            "source_url": row.source_url,
+            "text": _retention_text(row),
+        }
+        for row in DocumentRetentionRule.objects
+        .filter(tax_system=system)
+        .order_by("code")
+    ]
+
+
+def _retention_text(row) -> str:
+    """جملةُ المدة كما تُعرض — الصياغةُ هنا وحدها، والواجهةُ ترسم النصّ.
+
+    «الأبعدُ منهما» قاعدةُ §25(ג) الإسرائيلية، فتُقال صريحةً حين يوجد `alt_years`؛
+    وغيرُها جملةٌ واحدة: الاسمُ والسنواتُ وأساسُ الحساب.
+    """
+    if (
+        row.alt_years is not None
+        and row.basis == RETENTION_BASIS_LATER_OF_YEAR_END_OR_FILING
+    ):
+        return (
+            f"{row.name} — {row.years} سنوات من نهاية السنة أو "
+            f"{row.alt_years} من تاريخ التقديم، الأبعد منهما"
+        )
+    basis = RETENTION_BASIS_LABELS.get(row.basis, "")
+    return f"{row.name} — {row.years} سنوات {basis}"
+
+
+# ── «ناقصه أوراق» وعدّادُ وصل/مطلوب ─────────────────────────────────────────
+def document_progress(tenant, obligations) -> dict[int, dict]:
+    """تقدّمُ أوراق الالتزامات المنتظِرة — **استعلامان ثابتان** مهما كثرت الصفوف.
+
+    صفوفُ الالتزام O: نفسُ الزبون، وكودُ خدمته داخل `row.service_codes`، والفترةُ
+    محتواةٌ في فترته (`period_start >= O.period_start` و`period_end <= O.period_end`).
+    و`required` = المحسوبُ بلا «مش لازمة»، و`received` = منه ما وصل، و`missing`
+    = فيه صفٌّ «مطلوبة» أو «وصلت ناقصة». **والصفوفُ بلا خدمةٍ لا تُحسب** — لا
+    نعرف من يطلبها فلا نُشعل بها شارة.
+
+    **والقراءةُ مقيَّدةٌ بمدى الالتزامات المنتظِرة** (أدنى بدايةٍ وأقصى نهاية)، ثم
+    مفهرَسةٌ في الذاكرة على `(الزبون, كود الخدمة)`: كلُّ التزامٍ يمسح دلوه وحده ولا
+    يمسح صفوفَ خدمةٍ أخرى، فلا يُقرأ تاريخُ المكتب كلُّه لعدّ شهرٍ واحد.
+    """
+    pending = [
+        row for row in obligations if row.status == OBLIGATION_STATUS_PENDING
+    ]
+    if not pending:
+        return {}
+    client_ids = {row.client_id for row in pending}
+    index: dict[tuple[int, str], list[tuple]] = {}
+    for client_id, period_start, period_end, codes, status in (
+        DocumentChecklistItem.objects
+        .filter(
+            tenant=tenant,
+            client_id__in=client_ids,
+            period_start__gte=min(row.period_start for row in pending),
+            period_end__lte=max(row.period_end for row in pending),
+        )
+        .values_list(
+            "client_id", "period_start", "period_end", "service_codes", "status",
+        )
+    ):
+        for code in set(codes or ()):
+            index.setdefault((client_id, code), []).append(
+                (period_start, period_end, status),
+            )
+    service_codes = dict(
+        ClientService.objects
+        .filter(pk__in={row.client_service_id for row in pending})
+        .values_list("pk", "service__code"),
+    )
+    progress: dict[int, dict] = {}
+    for obligation in pending:
+        code = service_codes.get(obligation.client_service_id)
+        if not code:
+            continue
+        received = 0
+        required = 0
+        missing = False
+        for period_start, period_end, status in index.get(
+            (obligation.client_id, code), (),
+        ):
+            if period_start < obligation.period_start:
+                continue
+            if period_end > obligation.period_end:
+                continue
+            if status == DOCUMENT_STATUS_NOT_NEEDED:
+                continue
+            required += 1
+            if status == DOCUMENT_STATUS_RECEIVED:
+                received += 1
+            else:
+                missing = True
+        if not required:
+            continue
+        progress[obligation.pk] = {
+            "received": received,
+            "required": required,
+            "missing": missing,
+        }
+    return progress
+
+
+# ── الحمولات: الشبكة والقائمة السنوية والقالب ──────────────────────────────
+def _document_cell_payload(row, *, month) -> dict:
+    """خانةُ شهرٍ في الشبكة — `row_id=None` تعني «لا صفَّ لهذا البند في الشهر»."""
+    if row is None:
+        return {
+            "month": month.isoformat(),
+            "row_id": None,
+            "status": None,
+            "status_label": "",
+            "received_on": None,
+            "received_by_name": "",
+            "channel": "",
+            "channel_label": "",
+            "files_count": 0,
+        }
+    return {
+        "month": month.isoformat(),
+        "row_id": row.pk,
+        "status": row.status,
+        "status_label": document_status_label(row.status, row.cadence),
+        "received_on": (
+            None if row.received_on is None else row.received_on.isoformat()
+        ),
+        "received_by_name": user_display_name(row.received_by),
+        "channel": row.channel,
+        "channel_label": DOCUMENT_CHANNEL_LABELS.get(row.channel, ""),
+        "files_count": len(list(row.files.all())),
+    }
+
+
+def document_row_payload(row, *, files=None) -> dict:
+    """سطرُ ورقةٍ كاملاً — يُرجع من فعل الحالة، ومن القائمة السنوية."""
+    payload = {
+        "row_id": row.pk,
+        "client_id": row.client_id,
+        "item_code": row.item_code,
+        "name": row.name,
+        "service_codes": list(row.service_codes or []),
+        "cadence": row.cadence,
+        "period_start": row.period_start.isoformat(),
+        "period_end": row.period_end.isoformat(),
+        "period_label": deadlines.period_label(row.period_start, row.period_end),
+        "status": row.status,
+        "status_label": document_status_label(row.status, row.cadence),
+        "received_on": (
+            None if row.received_on is None else row.received_on.isoformat()
+        ),
+        "received_by_name": user_display_name(row.received_by),
+        "channel": row.channel,
+        "channel_label": DOCUMENT_CHANNEL_LABELS.get(row.channel, ""),
+        "files_count": len(files) if files is not None else row.files.count(),
+    }
+    if files is not None:
+        payload["files"] = files
+    return payload
+
+
+def client_documents_payload(client, *, year) -> dict:
+    """شبكةُ الأشهر × البنود والقائمةُ السنوية — **كلُّ صفٍّ بعدد الأشهر نفسه**.
+
+    `months` = الأشهرُ التي لها صفٌّ واحدٌ على الأقلّ لهذا الزبون في السنة
+    (تصاعداً)، وكلُّ بندٍ خانةٌ لكل شهرٍ فيها — `row_id=None` حيث لا صفّ
+    (معيار القبول ٥). والبنودُ مرتّبةٌ بترتيب الكتالوج ثم الاسم، والقائمةُ السنوية
+    صفوفُ السنة نفسها بدوريتها السنوية وبملفاتها.
+    """
+    tenant = client.tenant
+    rows = list(
+        DocumentChecklistItem.objects
+        .filter(
+            tenant=tenant, client=client,
+            period_start__gte=date(year, 1, 1),
+            period_start__lte=date(year, 12, 31),
+        )
+        .select_related("received_by")
+        .prefetch_related("files__created_by")
+        .order_by("period_start", "item_code", "id"),
+    )
+    monthly = [row for row in rows if row.cadence == DOCUMENT_CADENCE_MONTHLY]
+    annual = [row for row in rows if row.cadence == DOCUMENT_CADENCE_ANNUAL]
+    months = sorted({row.period_start for row in monthly})
+    by_key = {(row.item_code, row.period_start): row for row in monthly}
+    names: dict[str, str] = {}
+    # الأحدثُ يفوز: الصفُّ الأحدثُ يحمل لقطةَ الاسم السارية.
+    for row in monthly:
+        names[row.item_code] = row.name
+    system = resolve_setting(tenant, TAX_SYSTEM_KEY, client=client)
+    order = _document_item_order(tenant, system, DOCUMENT_CADENCE_MONTHLY)
+    item_codes = sorted(
+        names, key=lambda code: (order.get(code, len(order)), names[code]),
+    )
+    years = sorted(
+        {
+            value
+            for value in (
+                DocumentChecklistItem.objects
+                .filter(tenant=tenant, client=client)
+                .annotate(year=ExtractYear("period_start"))
+                .values_list("year", flat=True)
+            )
+        }
+        | {year},
+        reverse=True,
+    )
+    return {
+        "client": {"id": client.pk, "name": client.name},
+        "year": year,
+        "months": [month.isoformat() for month in months],
+        "items": [
+            {
+                "item_code": code,
+                "name": names[code],
+                "cells": [
+                    _document_cell_payload(by_key.get((code, month)), month=month)
+                    for month in months
+                ],
+            }
+            for code in item_codes
+        ],
+        "annual": [
+            document_row_payload(
+                row,
+                files=[document_file_payload(file) for file in row.files.all()],
+            )
+            for row in annual
+        ],
+        "retention": document_retention_payload(client),
+        "status_choices": document_status_choices(),
+        "channel_choices": document_channel_choices(),
+        "cadence_choices": document_cadence_choices(),
+        "available_years": years,
+    }
+
+
+def document_items_payload(tenant, *, tax_system, client=None) -> dict:
+    """قالبُ المكتب: بنداتُ المنصّة وقائمةُ المكتب بحالة «ضمن القائمة».
+
+    و`client` (اختياري) يُضيف `client_included` لكل بندٍ — يستعمله لوحُ
+    «تخصيص القائمة» في ملفّ الزبون، فلا تُقرأ الخياراتُ من نسخةٍ ثانية في الواجهة.
+    ومعه يُسرد من بنود المكتب **الفعّالُ وحده**: التوليدُ (`_document_catalog`) لا
+    يقرأ المعطَّل، فخيارُ الزبون عليه مفتاحٌ لا يغيّر شيئاً. وبلا `client` (قسمُ
+    الإعدادات) تُسرد كلُّها ليُعاد تفعيلُ المعطَّل.
+    """
+    _assert_tax_system(tax_system)
+    office_qs = OfficeDocumentItem.objects.filter(
+        tenant=tenant, tax_system=tax_system,
+    )
+    if client is not None:
+        office_qs = office_qs.filter(is_active=True)
+    office_rows = list(office_qs.order_by("name", "id"))
+    choices = dict(
+        OfficeDocumentItemChoice.objects
+        .filter(tenant=tenant)
+        .values_list("item_code", "included"),
+    )
+    client_choices = (
+        {}
+        if client is None
+        else dict(
+            ClientDocumentItemChoice.objects
+            .filter(client=client)
+            .values_list("item_code", "included"),
+        )
+    )
+    items: list[dict] = []
+    for row in (
+        PlatformDocumentItem.objects
+        .filter(tax_system=tax_system)
+        .order_by("sort_order", "name", "id")
+    ):
+        items.append(_document_item_row_payload(
+            row, included=choices.get(row.code, True), is_custom=False,
+            client_choices=client_choices, client=client,
+        ))
+    for row in office_rows:
+        items.append(_document_item_row_payload(
+            row, included=row.is_active, is_custom=True,
+            client_choices=client_choices, client=client,
+        ))
+    return {
+        "system": tax_system,
+        "items": items,
+        "services": [
+            {"code": row.code, "name": row.name}
+            for row in (
+                OfficeService.objects
+                .filter(tenant=tenant, is_active=True)
+                .order_by("position", "name", "id")
+            )
+        ],
+        "cadence_choices": document_cadence_choices(),
+        "condition_fields": sorted(DOCUMENT_CARD_CONDITION_FIELDS),
+    }
+
+
+def _document_item_row_payload(
+    row, *, included, is_custom, client_choices, client,
+) -> dict:
+    """سطرُ بندٍ في القالب — واحدٌ لبند المنصّة وبند المكتب.
+
+    **`id` فضاءُ بنود المكتب وحدها**: `OfficeDocumentItemViewSet` يحلّ المعرّف في
+    `OfficeDocumentItem`، فبندُ المنصّة يعطي `id=None` بدل معرّفٍ يُحلّ إلى صفٍّ آخر.
+    """
+    payload = {
+        "id": row.pk if is_custom else None,
+        "item_code": row.code,
+        "name": row.name,
+        "cadence": row.cadence,
+        "cadence_label": DOCUMENT_CADENCE_LABELS.get(row.cadence, ""),
+        "service_codes": list(row.service_codes or []),
+        "card_conditions": dict(row.card_conditions or {}),
+        "included": included,
+        "is_custom": is_custom,
+        "is_active": getattr(row, "is_active", True),
+        "sort_order": getattr(row, "sort_order", None),
+    }
+    if client is not None:
+        payload["client_included"] = client_choices.get(row.code)
+    return payload
+
+
+def _office_document_item_from_code(tenant, code):
+    """بندُ مكتبٍ من كوده المشتقّ `office_doc_<pk>` — أو `None`."""
+    prefix = "office_doc_"
+    if not code.startswith(prefix):
+        return None
+    try:
+        pk = int(code[len(prefix):])
+    except (TypeError, ValueError):
+        return None
+    return OfficeDocumentItem.objects.filter(tenant=tenant, pk=pk).first()
+
+
+def document_item_system(tenant, code) -> str:
+    """نظامُ بندٍ من كوده — من المنصّة أو من بنود المكتب، أو `""` لما لا يُعرف.
+
+    يقرؤه فعلُ اختيار المكتب ليُرجع قائمةَ النظام المحدَّثة، فلا تُمرَّر النسخةُ
+    الثانية من «أيّ نظامٍ هذا البند» في الـview.
+    """
+    system = (
+        PlatformDocumentItem.objects.filter(code=code)
+        .values_list("tax_system", flat=True)
+        .first()
+    )
+    if system:
+        return system
+    row = _office_document_item_from_code(tenant, code)
+    return row.tax_system if row is not None else ""
+
+
+def _assert_document_item_code(tenant, tax_system, code) -> None:
+    """الكودُ بندٌ معروفٌ لهذا المكتب — من المنصّة أو من قائمته."""
+    if PlatformDocumentItem.objects.filter(
+        tax_system=tax_system, code=code,
+    ).exists():
+        return
+    if _office_document_item_from_code(tenant, code) is not None:
+        return
+    raise ValidationError({"item_code": "بندٌ غير معروف في قائمة الأوراق."})
+
+
+def _clean_document_service_codes(tenant, service_codes) -> list[str]:
+    """أكوادُ خدماتٍ معروفةٌ لكتالوج المكتب — لا كودَ مخترَع."""
+    if service_codes is None:
+        return []
+    if not isinstance(service_codes, (list, tuple)):
+        raise ValidationError({"service_codes": "الخدمات قائمةُ أكواد."})
+    codes = [str(code).strip() for code in service_codes if str(code).strip()]
+    known = set(
+        OfficeService.objects.filter(tenant=tenant).values_list("code", flat=True),
+    )
+    unknown = sorted(set(codes) - known)
+    if unknown:
+        raise ValidationError({
+            "service_codes": f"خدمات غير معروفة في الكتالوج: {unknown}",
+        })
+    return list(dict.fromkeys(codes))
+
+
+def set_office_document_choice(tenant, *, item_code, included, actor):
+    """«ضمن القائمة» على بندٍ في قالب المكتب — صفٌّ يُقلب ولا يُحذف.
+
+    **بندُ المكتب لا يُقلَب من هنا**: «مفعَّل/معطَّل» له مصدرٌ واحد (`is_active` في
+    `update_office_document_item`)، ولو قُبل هنا لصار له مصدران يقولان شيئين.
+    """
+    code = (item_code or "").strip()
+    if not code:
+        raise ValidationError({"item_code": "كود البند مطلوب."})
+    if code.startswith("office_doc_"):
+        raise ValidationError({"item_code": "بندُ المكتب يُفعَّل ويُعطَّل من قائمته"})
+    if not PlatformDocumentItem.objects.filter(code=code).exists():
+        raise ValidationError({"item_code": "بندٌ غير معروف في قائمة الأوراق."})
+    row, _created = OfficeDocumentItemChoice.objects.update_or_create(
+        tenant=tenant,
+        item_code=code,
+        defaults={"included": bool(included), "updated_by": actor},
+    )
+    return row
+
+
+def set_client_document_choice(client, *, item_code, included, actor):
+    """خيارُ الزبون على بندٍ — **يغلب قالب المكتب وشروطَ القانون**."""
+    code = (item_code or "").strip()
+    if not code:
+        raise ValidationError({"item_code": "كود البند مطلوب."})
+    system = resolve_setting(client.tenant, TAX_SYSTEM_KEY, client=client)
+    if system:
+        _assert_document_item_code(client.tenant, system, code)
+    elif _office_document_item_from_code(client.tenant, code) is None:
+        raise ValidationError({"item_code": "بندٌ غير معروف في قائمة الأوراق."})
+    row, _created = ClientDocumentItemChoice.objects.update_or_create(
+        client=client,
+        item_code=code,
+        defaults={
+            "tenant": client.tenant,
+            "included": bool(included),
+            "updated_by": actor,
+        },
+    )
+    return row
+
+
+def create_office_document_item(
+    tenant, *, tax_system, name, cadence, service_codes=None,
+    is_active=True, actor,
+) -> OfficeDocumentItem:
+    """بندٌ يضيفه المكتب — بشروطه الفارغة افتراضاً، ويُعطَّل ولا يُحذف."""
+    _assert_tax_system(tax_system)
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValidationError({"name": "اسم البند مطلوب."})
+    if cadence not in DOCUMENT_CADENCE_KEYS:
+        raise ValidationError({"cadence": "الدورية شهري أو سنوي."})
+    return OfficeDocumentItem.objects.create(
+        tenant=tenant,
+        tax_system=tax_system,
+        name=clean_name,
+        cadence=cadence,
+        service_codes=_clean_document_service_codes(tenant, service_codes),
+        card_conditions={},
+        is_active=bool(is_active),
+        created_by=actor,
+    )
+
+
+def update_office_document_item(
+    row, *, name=None, cadence=None, service_codes=None, is_active=None,
+) -> OfficeDocumentItem:
+    """تعديلُ بند مكتب — والغيابُ لا يمسّ شيئاً."""
+    fields: list[str] = []
+    if name is not None:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValidationError({"name": "اسم البند مطلوب."})
+        row.name = clean_name
+        fields.append("name")
+    if cadence is not None:
+        if cadence not in DOCUMENT_CADENCE_KEYS:
+            raise ValidationError({"cadence": "الدورية شهري أو سنوي."})
+        row.cadence = cadence
+        fields.append("cadence")
+    if service_codes is not None:
+        row.service_codes = _clean_document_service_codes(row.tenant, service_codes)
+        fields.append("service_codes")
+    if is_active is not None:
+        row.is_active = bool(is_active)
+        fields.append("is_active")
+    if fields:
+        fields.append("updated_at")
+        row.save(update_fields=fields)
+    return row

@@ -12,6 +12,9 @@
 `http_method_names` — لأن فكَّ ربط الجهة فعلُ حذفٍ يسكن هذا الـViewSet نفسه.
 «منتهٍ» حالةٌ تُكتب بقيمتها الحقيقية، لا صفٌّ يُطوى.
 """
+import logging
+import mimetypes
+
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
@@ -25,6 +28,7 @@ from rest_framework.exceptions import (
     PermissionDenied,
     ValidationError,
 )
+from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
 from accounting_office import deadlines, services
@@ -33,10 +37,13 @@ from accounting_office.models import (
     ClientContact,
     ClientService,
     Contact,
+    DocumentChecklistItem,
+    DocumentFile,
     Obligation,
     OfficeAlert,
     OfficeClient,
     OfficeCustomRule,
+    OfficeDocumentItem,
     OfficeService,
     PeriodTask,
     ServicePackage,
@@ -53,12 +60,17 @@ from accounting_office.serializers import (
     ContactSerializer,
     CustomRuleUpdateSerializer,
     CustomRuleWriteSerializer,
+    DocumentFileUploadSerializer,
+    DocumentItemChoiceSerializer,
+    DocumentStatusSerializer,
     ObligationAmountSerializer,
     ObligationClientPaidSerializer,
     ObligationExtensionSerializer,
     ObligationSubmitSerializer,
     OfficeClientListSerializer,
     OfficeClientSerializer,
+    OfficeDocumentItemUpdateSerializer,
+    OfficeDocumentItemWriteSerializer,
     OfficeServiceSerializer,
     ReminderRecipientSerializer,
     RuleCodeSerializer,
@@ -75,9 +87,20 @@ from core.access import (
     require_perm,
 )
 from core.api_defaults import ApiAuthAndUser
+from core.media_views import (
+    MediaUploadError,
+    destroy_cloudinary_asset,
+    stream_stored_asset,
+    upload_media_file,
+)
 from core.modules import require_module
 
+logger = logging.getLogger(__name__)
+
 MODULE_KEY = "accounting_office"
+#: أقصى سنةٍ تُطلب في شبكة الأوراق — حمايةٌ من مسحٍ بلا حدّ لا قاعدةَ بيانات.
+DOCUMENT_YEAR_MIN = 2000
+DOCUMENT_YEAR_MAX = 2100
 
 
 def parse_iso_date(raw, field):
@@ -480,6 +503,70 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         return Response(services.client_obligations_payload(
             client, user=request.user, day=timezone.localdate(),
         ))
+
+    # ── الأوراق: الشبكة والقائمة السنوية وخيار الزبون (#278) ──────────────
+    @action(detail=True, methods=["get"], url_path="documents")
+    def client_documents(self, request, pk=None):
+        """`?year=YYYY` — شبكةُ الأشهر × البنود والقائمةُ السنوية. **قراءةٌ خالصة**.
+
+        الصفوفُ تُولَّد في «حدّث المكتب» لا هنا: طلبُ الشبكة لا يكتب صفّاً، فسنةٌ
+        لم يحن وقتُها تعود فارغةً بلا أن تخترع ورقةً لم تُطلب بعد.
+        """
+        client = self.get_object()
+        return Response(services.client_documents_payload(
+            client, year=self._document_year(request),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="document-choice")
+    def document_choice(self, request, pk=None):
+        """خيارُ الزبون على بند — **يغلب قالبَ المكتب وشروطَ القانون**.
+
+        الرؤيةُ أوّلاً (`get_object` عبر `visible_clients`) فيأخذ من لا يرى الزبون
+        **404**، ثم مفتاحُ الكتابة فيأخذ القارئُ 403. ويُرجع خيارَه وحده مع
+        بنود نظامه المحدَّثة، فلا تُعاد الشبكةُ كلُّها بعد كبسةٍ واحدة.
+        """
+        client = self.get_object()
+        self.require_write()
+        serializer = DocumentItemChoiceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.set_client_document_choice(
+            client,
+            item_code=data["item_code"],
+            included=data["included"],
+            actor=request.user,
+        )
+        payload = {
+            "item_code": data["item_code"],
+            "included": data["included"],
+            "items": [],
+        }
+        system = services.resolve_setting(
+            self.tenant, services.TAX_SYSTEM_KEY, client=client,
+        )
+        if system:
+            payload["items"] = services.document_items_payload(
+                self.tenant, tax_system=system, client=client,
+            )["items"]
+        return Response(payload)
+
+    def _document_year(self, request):
+        """السنةُ المطلوبة — الغيابُ سنةُ اليوم، وغيرُ الرقم 400 لا 500."""
+        raw = (request.query_params.get("year") or "").strip()
+        if not raw:
+            return timezone.localdate().year
+        try:
+            year = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({"year": "السنة بصيغة YYYY."}) from None
+        if not DOCUMENT_YEAR_MIN <= year <= DOCUMENT_YEAR_MAX:
+            raise ValidationError({
+                "year": (
+                    f"سنةٌ خارج المدى — بين {DOCUMENT_YEAR_MIN} و"
+                    f"{DOCUMENT_YEAR_MAX}."
+                ),
+            })
+        return year
 
     # ── الأحداث (#277) ──────────────────────────────────────────────────
     @action(detail=True, methods=["get", "post"], url_path="events")
@@ -1199,3 +1286,289 @@ class OfficeAlertsViewSet(OfficeModuleViewSet):
                 self.tenant, user=request.user, day=timezone.localdate(),
             ),
         })
+
+
+# ── قائمة الأوراق وشبكة الأشهر (#278) ───────────────────────────────────────
+#
+# **كلُّ صفٍّ يُحلّ عبر `visible_clients`**: صفُّ ورقةِ زميلٍ أو مكتبٍ آخر **404**
+# لا 403 — ثم مفتاحُ `office.clients.write` للكتابة. **ورفعُ الملف أو حذفُه لا
+# يمسّ الحالة**: الحالةُ تصريحُ موظّف، والملفُّ كيانٌ آخر (بحث #260 §5.4).
+class OfficeDocumentViewSet(OfficeModuleViewSet):
+    """صفوفُ الأوراق: تسجيلُ الحالة، وملفاتُ الورقة (قراءةً ورفعاً)."""
+
+    http_method_names = ["get", "post", "head", "options"]
+    # `get_serializer_class` يحتاجه `OPTIONS` (SimpleMetadata) وإلا سقط 500.
+    serializer_class = DocumentStatusSerializer
+    # الحالةُ JSON والملفُّ multipart — القائمةُ تضمّ الاثنين لأن الفعلين في
+    # الـViewSet نفسه، ولكلٍّ جسمُه.
+    parser_classes = [JSONParser, MultiPartParser, FormParser]
+
+    def get_queryset(self):
+        return (
+            DocumentChecklistItem.objects
+            .filter(
+                tenant=self.tenant,
+                client__in=services.visible_clients(
+                    self.tenant, self.request.user,
+                ).values("pk"),
+            )
+            .select_related("client", "received_by", "updated_by")
+        )
+
+    def get_object(self):
+        row = self.get_queryset().filter(pk=self.kwargs.get("pk")).first()
+        if row is None:
+            raise NotFound("الورقة غير موجودة.")
+        return row
+
+    @action(detail=True, methods=["post"], url_path="status")
+    def document_status(self, request, pk=None):
+        """`{status, channel?}` — «وصلت» و«وصلت ناقصة» بلا قناةٍ **400**.
+
+        الرؤيةُ أوّلاً (`get_object`) ثم المفتاح: ورقةُ غيرك 404، وقراءةُ عضوٍ
+        بلا `office.clients.write` على ورقةٍ يراها 403.
+        """
+        row = self.get_object()
+        self.require_write()
+        serializer = DocumentStatusSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        services.set_document_status(
+            row,
+            status=serializer.validated_data["status"],
+            channel=serializer.validated_data.get("channel", ""),
+            actor=request.user,
+            day=timezone.localdate(),
+        )
+        row.refresh_from_db()
+        return Response(services.document_row_payload(row))
+
+    @action(detail=True, methods=["get", "post"], url_path="files")
+    def files(self, request, pk=None):
+        """`GET` ملفاتُ الورقة، و`POST` رفعٌ multipart بحقول נספח ז.
+
+        **الرابطُ لا يخرج**: الحمولةُ تُبنى بـ`document_file_payload` وحدها.
+        """
+        row = self.get_object()
+        if request.method == "GET":
+            return Response([
+                services.document_file_payload(file)
+                for file in row.files.select_related("created_by").order_by(
+                    "-captured_at", "-id",
+                )
+            ])
+        self.require_write()
+        serializer = DocumentFileUploadSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = dict(serializer.validated_data)
+        upload = data.pop("file")
+        # الحجمُ يُفحص **قبل** أي قراءة: ملفٌّ فوق السقف لا يدخل الذاكرة أصلاً.
+        size = getattr(upload, "size", 0)
+        services.validate_document_size(size=size)
+        # ثم رأسٌ بطول البايتات المميّزة للتحقّق من المحتوى، ويُعاد المؤشّر للرفع.
+        head = upload.read(services.DOCUMENT_MAGIC_BYTES)
+        upload.seek(0)
+        services.validate_document_upload(
+            size=size,
+            filename=getattr(upload, "name", "") or "",
+            content_type=getattr(upload, "content_type", "") or "",
+            head=head,
+        )
+        try:
+            file_url = upload_media_file(
+                upload,
+                folder=services.DOCUMENT_UPLOAD_FOLDER,
+                tenant=self.tenant,
+                uploaded_by=request.user,
+            )
+        except MediaUploadError as exc:
+            # 400 (حجمٌ أو سقفُ تخزين الخطّة) نصُّه مكتوبٌ لمستخدم الشركة فيُردّ كما هو؛
+            # وغيرُه (502 مزوّد، 503 غير مهيّأ) قد يحمل نصَّ المورّد — للسجلّ لا للردّ.
+            logger.warning(
+                "accounting_office document upload failed row=%s err=%s",
+                row.pk, exc.detail,
+            )
+            return Response(
+                {
+                    "file": exc.detail
+                    if exc.status_code == status.HTTP_400_BAD_REQUEST
+                    else "تعذّر رفع الملف. حاول مرة أخرى.",
+                },
+                status=exc.status_code,
+            )
+        try:
+            file_row = services.create_document_file(
+                row,
+                file_url=file_url,
+                file_name=getattr(upload, "name", "") or "",
+                data=data,
+                actor=request.user,
+            )
+        except Exception:
+            # الصفُّ لم يُحفظ: الأصلُ المرفوع صار يتيماً في التخزين — يُمحى ثم يُرفع الخطأ.
+            destroy_cloudinary_asset(file_url)
+            raise
+        return Response(
+            services.document_file_payload(file_row),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class OfficeDocumentFileViewSet(OfficeModuleViewSet):
+    """ملفاتُ الأوراق: التقديمُ بايتاتٍ والحذف — **ولا رابطَ تخزينٍ في أيّ ردّ**.
+
+    `download` قراءةٌ لكل من يرى الزبون، و`destroy` بمفتاح الكتابة. والحذفُ يمحو
+    الصفَّ **أوّلاً** ثم الأصلَ من التخزين بجهدٍ بذل (`destroy_cloudinary_asset`)
+    — والحالةُ لا تتغيّر.
+    """
+
+    http_method_names = ["get", "delete", "head", "options"]
+    serializer_class = DocumentFileUploadSerializer
+
+    def get_queryset(self):
+        return DocumentFile.objects.filter(
+            tenant=self.tenant,
+            client__in=services.visible_clients(
+                self.tenant, self.request.user,
+            ).values("pk"),
+        )
+
+    def get_object(self):
+        row = self.get_queryset().select_related("client").filter(
+            pk=self.kwargs.get("pk"),
+        ).first()
+        if row is None:
+            raise NotFound("الملف غير موجود.")
+        return row
+
+    @action(detail=True, methods=["get"], url_path="download")
+    def download(self, request, pk=None):
+        """بايتاتٌ لا تحويل: رابطُ التخزين يبقى على الخادم."""
+        file_row = self.get_object()
+        safe_name = (file_row.file_name or "file").replace('"', "").replace("\\", "")
+        return stream_stored_asset(
+            file_row.file_url,
+            filename=safe_name,
+            content_type_fallback=(
+                mimetypes.guess_type(file_row.file_name)[0]
+                or "application/octet-stream"
+            ),
+            owner="office_document_file",
+            owner_pk=file_row.pk,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        file_row = self.get_object()
+        self.require_write()
+        url = services.delete_document_file(file_row)
+        destroy_cloudinary_asset(url)
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OfficeDocumentItemViewSet(OfficeModuleViewSet):
+    """قالبُ الأوراق: بنداتُ المنصّة وقائمةُ المكتب وخيارُ «ضمن القائمة».
+
+    **القراءةُ لكل عضو** (ملفُّ الزبون يعرض اللوحة لمن يكتب)، و**الكتابةُ
+    بمفتاح `office.settings.manage`** كـ`OfficeCustomRuleViewSet`: من يكتب
+    بياناتِ زبونٍ لا يغيّر قائمةَ أوراق المكتب كلّه. ولا حذف: التعطيلُ
+    (`PATCH is_active=false`) يوقف التوليدَ ويُبقي ما وُلد.
+    """
+
+    http_method_names = ["get", "post", "patch", "head", "options"]
+    serializer_class = OfficeDocumentItemWriteSerializer
+
+    def list(self, request, *args, **kwargs):
+        system = (request.query_params.get("system") or "").strip()
+        if system not in {value for value, _label in TAX_SYSTEM_CHOICES}:
+            raise ValidationError({"system": "النظام الضريبي مطلوب: PS أو IL."})
+        return Response(services.document_items_payload(
+            self.tenant,
+            tax_system=system,
+            client=self._client(request.query_params.get("client")),
+        ))
+
+    def get_object(self):
+        row = OfficeDocumentItem.objects.filter(
+            tenant=self.tenant, pk=self.kwargs.get("pk"),
+        ).first()
+        if row is None:
+            raise NotFound("بند الأوراق غير موجود.")
+        return row
+
+    def create(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        serializer = OfficeDocumentItemWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.create_office_document_item(
+            self.tenant,
+            tax_system=data["system"],
+            name=data["name"],
+            cadence=data["cadence"],
+            service_codes=data.get("service_codes"),
+            is_active=data.get("is_active", True),
+            actor=request.user,
+        )
+        return Response(
+            services.document_items_payload(
+                self.tenant, tax_system=data["system"],
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+    def partial_update(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        row = self.get_object()
+        serializer = OfficeDocumentItemUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.update_office_document_item(
+            row,
+            name=data.get("name"),
+            cadence=data.get("cadence"),
+            service_codes=data.get("service_codes"),
+            is_active=data.get("is_active"),
+        )
+        return Response(
+            services.document_items_payload(
+                self.tenant, tax_system=row.tax_system,
+            ),
+        )
+
+    @action(detail=False, methods=["post"], url_path="choice")
+    def choice(self, request):
+        """`{item_code, included}` — «ضمن القائمة» على بندٍ في قالب المكتب."""
+        self.require_settings_manage()
+        serializer = DocumentItemChoiceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        services.set_office_document_choice(
+            self.tenant,
+            item_code=data["item_code"],
+            included=data["included"],
+            actor=request.user,
+        )
+        # الردُّ قائمةَ النظام المحدَّثة: الشاشةُ تستبدل حالتها بردّ الخادم، فلا
+        # تُعيد قراءةً ثانية بعد كل قلبة.
+        payload = {"item_code": data["item_code"], "included": data["included"]}
+        system = services.document_item_system(self.tenant, data["item_code"])
+        if system:
+            payload.update(
+                services.document_items_payload(self.tenant, tax_system=system),
+            )
+        return Response(payload)
+
+    def _client(self, raw):
+        """زبونُ لوح «تخصيص القائمة» — من `visible_clients` وحدها، وغيابُه `None`."""
+        value = (raw or "").strip()
+        if not value:
+            return None
+        try:
+            pk = int(value)
+        except (TypeError, ValueError):
+            raise ValidationError({"client": "معرّفُ زبونٍ غير صالح."}) from None
+        client = services.visible_clients(
+            self.tenant, self.request.user,
+        ).filter(pk=pk).first()
+        if client is None:
+            raise NotFound("الزبون غير موجود.")
+        return client
