@@ -44,6 +44,8 @@ import {
   officeAssignableRoles,
   officeRoleLabel,
   officeSizeOf,
+  officeWhatsappLink,
+  officeWhatsappNumber,
   officeTaskAnchorId,
   overriddenRuleInput,
   periodLabel,
@@ -903,4 +905,55 @@ test('وسمُ الملف والسنوات المتاحة من الخادم', ()
 test('فلترُ «ناقصه أوراق» يُقرأ ويُكتب في العنوان', () => {
   assert.equal(readTodayFilter('?filter=missing_docs'), 'missing_docs');
   assert.deepEqual(todayFilterParams('missing_docs'), { filter: 'missing_docs' });
+});
+
+test('رقمُ واتساب المكتب من رقمٍ محلّي فلسطيني', () => {
+  // 059/056 جوالٌ فلسطينيّ — مفتاحُ الدولة 970 والباقي بعد الصفر.
+  assert.equal(officeWhatsappNumber('0599123456', 'PS'), '970599123456');
+  assert.equal(officeWhatsappNumber('0569123456', 'PS'), '970569123456');
+  // بلا نظامٍ ضريبي: البادئة نفسها تحكم، فلا حاجةَ إلى مفتاح الدولة.
+  assert.equal(officeWhatsappNumber('0599123456', null), '970599123456');
+});
+
+test('جوالٌ إسرائيليّ (05 بغير 059/056) يأخذ 972', () => {
+  assert.equal(officeWhatsappNumber('0501234567', 'IL'), '972501234567');
+  assert.equal(officeWhatsappNumber('0521234567', 'PS'), '972521234567');
+});
+
+test('أرضيٌّ محلّي بأيّ نظامٍ ضريبيّ يأخذ مفتاح دولته', () => {
+  assert.equal(officeWhatsappNumber('022345678', 'PS'), '97022345678');
+  assert.equal(officeWhatsappNumber('022345678', 'IL'), '97222345678');
+  assert.equal(officeWhatsappNumber('042345678', 'IL'), '97242345678');
+  // نظامٌ مجهول: أرضيٌّ بلا مفتاحِ دولةٍ معلوم ⇒ لا رابط، لا تخمين.
+  assert.equal(officeWhatsappNumber('022345678', null), null);
+  assert.equal(officeWhatsappNumber('022345678', 'JO'), null);
+});
+
+test('الرقمُ الدوليّ يمرّ كما هو بلا إعادة بناء', () => {
+  assert.equal(officeWhatsappNumber('+970599123456', 'PS'), '970599123456');
+  assert.equal(officeWhatsappNumber('+972 50-123-4567', 'IL'), '972501234567');
+  assert.equal(officeWhatsappNumber('00972599123456', 'PS'), '972599123456');
+  assert.equal(officeWhatsappNumber('00970 59 912 3456', null), '970599123456');
+});
+
+test('رقمٌ غير صالح أو قصيرٌ جداً يعطي null لا رابطاً يبدو صالحاً', () => {
+  assert.equal(officeWhatsappNumber('', 'PS'), null);
+  assert.equal(officeWhatsappNumber(null, 'PS'), null);
+  assert.equal(officeWhatsappNumber(undefined, 'PS'), null);
+  assert.equal(officeWhatsappNumber('abc', 'PS'), null);
+  assert.equal(officeWhatsappNumber('12', 'PS'), null);
+  assert.equal(officeWhatsappNumber('0599', 'PS'), null);
+  assert.equal(officeWhatsappNumber('+0599123456', 'PS'), null);
+  assert.equal(officeWhatsappNumber('1234567890123456', 'PS'), null);
+});
+
+test('رابطُ المحادثة يرمّز النصَّ ويعطي null مع رقمٍ غير صالح', () => {
+  const text = 'أهلاً أبو أحمد، ناقصنا فاتورة مشتريات.';
+  assert.equal(
+    officeWhatsappLink('0599123456', 'PS', text),
+    `https://wa.me/970599123456?text=${encodeURIComponent(text)}`,
+  );
+  assert.equal(officeWhatsappLink('12', 'PS', text), null);
+  assert.equal(officeWhatsappLink('abc', 'PS', text), null);
+  assert.equal(officeWhatsappLink('', 'IL', text), null);
 });

@@ -100,6 +100,11 @@ const ALERTS = `${BASE}alerts/`;
 const DOCUMENTS = `${BASE}documents/`;
 const DOCUMENT_FILES = `${BASE}document-files/`;
 const DOCUMENT_ITEMS = `${BASE}document-items/`;
+// #280: «جاهز للإرسال» وأفعالها، وسجلُّ التذكيرات (إلحاقيّ)، ونصوصُ المكتب، وعطلُه.
+const READY_TO_SEND = `${BASE}ready-to-send/`;
+const REMINDER_LOG = `${BASE}reminder-log/`;
+const REMINDER_TEMPLATES = `${BASE}reminder-templates/`;
+const OFFICE_HOLIDAYS = `${BASE}office-holidays/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -178,6 +183,146 @@ export interface ReminderRecipientRow {
     phone: string;
     language: string;
   } | null;
+}
+
+// ── التذكيرات والرسائل (#280) ────────────────────────────────────────────────
+/** اختيارٌ من الخادم: قيمةٌ وتسمية — لا جدولَ تسمياتٍ ثانٍ في الواجهة. */
+export interface ReminderChoice {
+  value: string;
+  label: string;
+}
+
+/** إذنُ التذكير كما يُقرأ ويُعدَّل: مَن ومتى وكيف، ومن سحبه. */
+export interface ContactConsentPayload {
+  contact_id: number;
+  name: string;
+  reminders_consent: boolean;
+  consent_types: string[];
+  consent_types_labels: string[];
+  consent_on: string | null;
+  consent_channel: string;
+  consent_channel_label: string;
+  consent_withdrawn_on: string | null;
+  consent_withdrawn_by: { id: number; name: string } | null;
+  type_choices: ReminderChoice[];
+  channel_choices: ReminderChoice[];
+}
+
+/** سطرُ نصِّ تذكيرٍ: الفعليُّ والافتراضيُّ وعلمُ التخصيص. */
+export interface ReminderTemplateRow {
+  reminder_type: string;
+  reminder_type_label: string;
+  language: 'ar' | 'he';
+  language_label: string;
+  body: string;
+  default_body: string;
+  is_custom: boolean;
+  updated_at: string | null;
+  updated_by: string | null;
+}
+
+export interface ReminderTemplatesPayload {
+  placeholders: string[];
+  rows: ReminderTemplateRow[];
+}
+
+/** بندٌ في رسالةِ «جاهز للإرسال» — بمفاتيح الأفعال كما يسمّيها الخادم. */
+export interface ReadyToSendItem {
+  client_id: number;
+  client_name: string;
+  reminder_type: string;
+  reminder_type_label: string;
+  badge: string;
+  period_start: string;
+  period_end: string;
+  period_label: string;
+  missing_list: string[];
+  missing_codes: string[];
+  step: number;
+  max: number;
+  due_date: string;
+  subject: { document_item_codes: string[] };
+}
+
+export interface ReadyToSendRecipient {
+  contact_id: number;
+  name: string;
+  phone: string;
+  /** `false` ⇒ الشاشةُ تُخفي زرَّ الواتساب وتُبقي «كلّمناه». */
+  has_phone: boolean;
+  language: 'ar' | 'he';
+  language_label: string;
+}
+
+export interface ReadyToSendMessage {
+  recipient: ReadyToSendRecipient;
+  items: ReadyToSendItem[];
+  body: string;
+}
+
+export interface ReadyToSendPayload {
+  day: string;
+  merge_daily: boolean;
+  reminder_type: string | null;
+  messages: ReadyToSendMessage[];
+  placeholders: string[];
+}
+
+/** الصفُّ الذي يُرسَل في الأفعال — **بطرفَي الفترة**: المفتاحُ تاريخان لا تاريخ. */
+export interface ReadyToSendItemKey {
+  client_id: number;
+  reminder_type: string;
+  period_start: string;
+  period_end: string;
+}
+
+/** سطرُ سجلّ التذكيرات — **لا يُعدَّل ولا يُحذف**: التصحيحُ صفٌّ جديد. */
+export interface ReminderLogRow {
+  id: number;
+  client: { id: number; name: string };
+  contact_id: number | null;
+  recipient_name: string;
+  recipient_phone: string;
+  reminder_type: string;
+  reminder_type_label: string;
+  kind: string;
+  kind_label: string;
+  channel: string;
+  channel_label: string;
+  body: string;
+  period_start: string | null;
+  period_end: string | null;
+  period_label: string;
+  subject: { document_item_codes?: string[]; document_item_names?: string[] };
+  reason: string;
+  reverts_id: number | null;
+  created_by: { id: number; name: string } | null;
+  created_at: string;
+}
+
+export interface ReminderLogPayload {
+  rows: ReminderLogRow[];
+  limit: number;
+}
+
+export interface ClientReminderLogPayload extends ReminderLogPayload {
+  client: { id: number; name: string };
+}
+
+export interface ReminderPostponeRow {
+  id: number;
+  client_id: number;
+  reminder_type: string;
+  reminder_type_label: string;
+  until: string | null;
+  reason: string;
+  created_at: string;
+}
+
+export interface OfficeHolidayRow {
+  id: number;
+  date: string;
+  name: string;
 }
 
 export interface OfficeSettingsPayload {
@@ -731,3 +876,117 @@ export const setClientDocumentChoice = (
   items: OfficeDocumentItemRow[];
 }> =>
   apiPostObject(`${CLIENTS}${clientId}/document-choice/`, payload, tenantOpts());
+
+
+// ── التذكيرات والرسائل (#280) ────────────────────────────────────────────────
+
+/** إذنُ الجهة على التذكير — مفتاحُ الكتابة نفسه (`office.clients.write`). */
+export const getContactConsent = (contactId: number): Promise<ContactConsentPayload> =>
+  apiGetObject<ContactConsentPayload>(
+    `${CONTACTS}${contactId}/consent/`, tenantOpts(),
+  );
+
+export const setContactConsent = (
+  contactId: number,
+  payload: { consent: boolean; types?: string[]; channel?: string },
+): Promise<ContactConsentPayload> =>
+  apiPostObject<ContactConsentPayload>(
+    `${CONTACTS}${contactId}/consent/`, payload, tenantOpts(),
+  );
+
+/** نصوصُ التذكير: قراءةٌ لكل عضو — ومن يرسل يقرأ ما سيرسل. */
+export const getReminderTemplates = (): Promise<ReminderTemplatesPayload> =>
+  apiGetObject<ReminderTemplatesPayload>(REMINDER_TEMPLATES, tenantOpts());
+
+/** بديلُ المكتب عن نصّ المنصّة — بمفتاح `office.settings.manage`. */
+export const setReminderTemplate = (
+  reminderType: string,
+  language: string,
+  body: string,
+): Promise<ReminderTemplatesPayload> =>
+  apiPutObject<ReminderTemplatesPayload>(
+    `${REMINDER_TEMPLATES}${reminderType}/${language}/`, { body }, tenantOpts(),
+  );
+
+/** «ارجع للافتراضي» = حذفُ البديل — لا كتابةُ الافتراضيِّ مكانه. */
+export const resetReminderTemplate = (
+  reminderType: string,
+  language: string,
+): Promise<void> =>
+  apiDelete(`${REMINDER_TEMPLATES}${reminderType}/${language}/`, tenantOpts());
+
+/** «جاهز للإرسال» — رسالةٌ لكل شخصٍ في اليوم (أو لكل بندٍ بلا تجميع). */
+export const getReadyToSend = (
+  params: { day?: string; reminder_type?: string; assignee?: number } = {},
+): Promise<ReadyToSendPayload> =>
+  apiGetObject<ReadyToSendPayload>(READY_TO_SEND, {
+    ...tenantOpts(),
+    query: {
+      day: params.day,
+      reminder_type: params.reminder_type,
+      assignee: params.assignee,
+    },
+  });
+
+/** «انبعثت»: صفٌّ لكل بندٍ بالنصّ نفسه — والسجلُّ لا يُعدَّل بعدها. */
+export const markRemindersSent = (payload: {
+  contact_id: number;
+  body: string;
+  channel?: string;
+  items: ReadyToSendItemKey[];
+}): Promise<{ rows: ReminderLogRow[] }> =>
+  apiPostObject(`${READY_TO_SEND}sent/`, payload, tenantOpts());
+
+/** «كلّمناه» — `phone` أو `in_person` وحدهما. */
+export const markRemindersManual = (payload: {
+  contact_id: number;
+  body?: string;
+  channel: 'phone' | 'in_person';
+  items: ReadyToSendItemKey[];
+}): Promise<{ rows: ReminderLogRow[] }> =>
+  apiPostObject(`${READY_TO_SEND}manual/`, payload, tenantOpts());
+
+/** «شيل لهذه المرة» — يُعيد المؤقّت ولا يُعدّ في الحدّ الأقصى. */
+export const dismissReminders = (payload: {
+  items: ReadyToSendItemKey[];
+  reason?: string;
+}): Promise<{ rows: ReminderLogRow[] }> =>
+  apiPostObject(`${READY_TO_SEND}dismiss/`, payload, tenantOpts());
+
+/** «أجّل التذكير لتاريخ…» — و`until=null` يمسح التأجيل. */
+export const postponeReminder = (payload: {
+  client_id: number;
+  reminder_type: string;
+  until: string | null;
+  reason?: string;
+}): Promise<ReminderPostponeRow> =>
+  apiPostObject<ReminderPostponeRow>(`${READY_TO_SEND}postpone/`, payload, tenantOpts());
+
+/** سجلُّ المكتب — الأحدثُ أوّلاً. */
+export const getReminderLog = (): Promise<ReminderLogPayload> =>
+  apiGetObject<ReminderLogPayload>(REMINDER_LOG, tenantOpts());
+
+/** سجلُّ زبونٍ واحدٍ لتبويب ملفّه. */
+export const getClientReminderLog = (
+  clientId: number,
+): Promise<ClientReminderLogPayload> =>
+  apiGetObject<ClientReminderLogPayload>(
+    `${CLIENTS}${clientId}/reminder-log/`, tenantOpts(),
+  );
+
+/** «ما انبعتت» — صفُّ `undo` جديدٌ يشير إلى ما يُبطله، والأصلُ يبقى. */
+export const undoReminderLog = (id: number): Promise<{ row: ReminderLogRow }> =>
+  apiPostObject(`${REMINDER_LOG}${id}/undo/`, {}, tenantOpts());
+
+/** عطلُ المكتب — تُقرأ لكل عضو وتُكتب بمفتاح الإعدادات. */
+export const getOfficeHolidays = (): Promise<OfficeHolidayRow[]> =>
+  apiGetObject<OfficeHolidayRow[]>(OFFICE_HOLIDAYS, tenantOpts());
+
+export const createOfficeHoliday = (payload: {
+  date: string;
+  name?: string;
+}): Promise<OfficeHolidayRow> =>
+  apiPostObject<OfficeHolidayRow>(OFFICE_HOLIDAYS, payload, tenantOpts());
+
+export const deleteOfficeHoliday = (id: number): Promise<void> =>
+  apiDelete(`${OFFICE_HOLIDAYS}${id}/`, tenantOpts());

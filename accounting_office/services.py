@@ -9,6 +9,7 @@
 (نوعُ الإعداد ومُتحقِّقه)، فيستحيل أن يدخل الجدولَ ما لا يعرفه السجلّ.
 """
 import copy
+import re
 from dataclasses import dataclass, field, replace
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
@@ -34,6 +35,7 @@ from accounting_office.models import (
     CONDITION_HAS_EMPLOYEES,
     CONDITION_IS_SELF_EMPLOYED,
     CONDITION_VAT_CLASSIFICATION_IN,
+    CONSENT_CHANNEL_LABELS,
     DEADLINE_CADENCE_CHOICES,
     DEFAULT_SERVICES,
     DOCUMENT_CADENCE_ANNUAL,
@@ -85,11 +87,32 @@ from accounting_office.models import (
     OFFICE_ALERT_KIND_OBLIGATION_LATE,
     OFFICE_ALERT_KIND_OPENS,
     OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER,
     OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED,
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL,
     OFFICE_CUSTOM_RULE_CADENCE_CHOICES,
     OFFICE_CUSTOM_RULE_KIND_CHOICES,
     OFFICE_RULE_OVERRIDE_FIELDS,
+    REMINDER_ALERT_KINDS,
+    REMINDER_CHANNEL_LABELS,
+    REMINDER_CHANNEL_WHATSAPP,
+    REMINDER_COUNTED_KINDS,
+    REMINDER_DEFAULT_TEXTS,
+    REMINDER_DOCUMENTS,
+    REMINDER_KIND_DISMISSED,
+    REMINDER_KIND_LABELS,
+    REMINDER_KIND_MANUAL,
+    REMINDER_KIND_SENT,
+    REMINDER_KIND_UNDO,
+    REMINDER_LANGUAGE_CHOICES,
+    REMINDER_LANGUAGES,
+    REMINDER_MANUAL_CHANNELS,
+    REMINDER_PLACEHOLDERS,
+    REMINDER_TIMER_KINDS,
+    REMINDER_TYPE_CHOICES,
+    REMINDER_TYPE_LABELS,
+    REMINDER_TYPES,
     RETENTION_BASIS_LABELS,
     RETENTION_BASIS_LATER_OF_YEAR_END_OR_FILING,
     RULE_KIND_CHOICES,
@@ -125,12 +148,16 @@ from accounting_office.models import (
     OfficeCustomRule,
     OfficeDocumentItem,
     OfficeDocumentItemChoice,
+    OfficeHoliday,
     OfficeRefreshRun,
     OfficeRuleOverride,
     OfficeService,
     OfficeSettingValue,
     PeriodTask,
     PlatformDocumentItem,
+    ReminderLog,
+    ReminderPostpone,
+    ReminderTemplate,
     ServicePackage,
     TaxCard,
     TaxThreshold,
@@ -318,43 +345,75 @@ def resolve_setting(tenant, key, client=None, item=None):
     return resolve_setting_with_source(tenant, key, client=client, item=item)[0]
 
 
-def resolve_setting_for_clients(tenant, key, clients) -> dict[int, object]:
-    """القيمة الفعلية لمجموعة زبائن في **استعلامين** — لا استعلامين لكل زبون.
+def resolve_settings_for_clients(tenant, keys, clients) -> dict[int, dict]:
+    """قيمُ مجموعة مفاتيح لمجموعة زبائن في **استعلامين** — لا استعلامين لكل مفتاح.
 
-    نفس ترتيب المحلّل (تخصيص الزبون ← قيمة المكتب ← الافتراضي)، بلا مستوى الشغلة
-    (الشغلة كائنٌ واحد يُمرَّر، لا مجموعة). تُستعمل في القوائم: صفُّ القائمة يقرأ
-    من هنا بدل نداء `resolve_setting` مرّتين أو ثلاثاً لكل زبون.
+    نفسُ ترتيب المحلّل (تخصيصُ الزبون ← قيمةُ المكتب ← الافتراضي) **وبحارسين
+    نفسيهما**: `validate_level` لكل مفتاح قبل أيّ قراءة (فتمريرُ إعدادٍ مكتبيٍّ
+    لمجموعة زبائن خطأُ مناداةٍ لا قيمةٌ تُقرأ)، و`_assert_client_of_tenant` لكل
+    زبون (فمجموعةٌ فيها زبونُ مكتبٍ آخر تقرأ إعداداً عابراً). ولا مستوى الشغلة:
+    الشغلةُ كائنٌ واحد يُمرَّر، لا مجموعة.
+
+    **والقيمُ تُنسخ لكل زبون**: قائمةُ أيام العطلة الافتراضية مشتركةٌ في السجلّ،
+    وقيمُ المكتب تُخزَّن JSON — فقراءةٌ بلا نسخةٍ تُعدَّل عرضاً فتفسد غيرها.
     """
-    definition = settings_registry.get_definition(key)
-    settings_registry.validate_level(definition, settings_registry.LEVEL_CLIENT)
+    keys = list(dict.fromkeys(keys))
+    definitions = {}
+    for key in keys:
+        definition = settings_registry.get_definition(key)
+        settings_registry.validate_level(definition, settings_registry.LEVEL_CLIENT)
+        definitions[key] = definition
 
     clients = list(clients)
     for client in clients:
-        # كلُّ زبونٍ يمرّ بالحارس: مجموعةٌ فيها زبونُ مكتبٍ آخر تُقرأ إعداداً عابراً.
         _assert_client_of_tenant(tenant, client)
 
     client_ids = [client.pk for client in clients]
-    overrides = dict(
-        ClientSettingOverride.objects
-        .filter(tenant=tenant, key=key, client_id__in=client_ids)
-        .values_list("client_id", "value")
+    overrides = {
+        (client_id, key): copy.deepcopy(value)
+        for client_id, key, value in (
+            ClientSettingOverride.objects
+            .filter(tenant=tenant, key__in=keys, client_id__in=client_ids)
+            .values_list("client_id", "key", "value")
+        )
+    }
+    office_values = dict(
+        OfficeSettingValue.objects
+        .filter(tenant=tenant, key__in=keys)
+        .values_list("key", "value"),
     )
-    office_row = OfficeSettingValue.objects.filter(tenant=tenant, key=key).first()
-    if office_row is not None:
-        fallback = office_row.value
-    elif definition.has_no_default:
-        fallback = None
-    else:
-        fallback = definition.default
-
-    resolved = {}
+    resolved: dict[int, dict] = {}
     for client_id in client_ids:
-        if client_id in overrides:
-            resolved[client_id] = copy.deepcopy(overrides[client_id])
-        else:
-            # نسخةٌ لكل زبون: قائمةُ الأيام الافتراضية مشتركةٌ وإلا عدّلها صفٌّ فأفسد غيره.
-            resolved[client_id] = copy.deepcopy(fallback)
+        row = {}
+        for key in keys:
+            if (client_id, key) in overrides:
+                row[key] = overrides[(client_id, key)]
+                continue
+            definition = definitions[key]
+            if key in office_values:
+                row[key] = copy.deepcopy(office_values[key])
+            elif definition.has_no_default:
+                row[key] = None
+            else:
+                row[key] = copy.deepcopy(definition.default)
+        resolved[client_id] = row
     return resolved
+
+
+def resolve_setting_for_clients(tenant, key, clients) -> dict[int, object]:
+    """القيمة الفعلية لمجموعة زبائن في **استعلامين** — لا استعلامين لكل زبون.
+
+    تُستعمل في القوائم: صفُّ القائمة يقرأ من هنا بدل نداء `resolve_setting`
+    مرّتين أو ثلاثاً لكل زبون. والحارسُ والمستوياتُ في
+    `resolve_settings_for_clients` التي تُقرأ لها هذه — نسخةٌ واحدة من القاعدة
+    لا نسختان تفترقان عند أوّل تعديل.
+    """
+    return {
+        client_id: row[key]
+        for client_id, row in resolve_settings_for_clients(
+            tenant, [key], clients,
+        ).items()
+    }
 
 
 # ── الكتابة: تُتحقَّق بالنوع والمستوى قبل أن تلمس الجدول ────────────────────
@@ -362,6 +421,9 @@ def set_office_setting(tenant, key, value):
     definition = settings_registry.get_definition(key)
     settings_registry.validate_level(definition, settings_registry.LEVEL_OFFICE)
     clean = settings_registry.validate_value(definition, value)
+    # حارسا القرار لا النوع: إعدادٌ مقفلٌ مطفأ، ونافذةُ إرسالٍ زوجٌ مرتَّب.
+    _assert_locked_setting(key, clean)
+    _assert_send_window(tenant, key, clean)
     with transaction.atomic():
         row, _created = OfficeSettingValue.objects.update_or_create(
             tenant=tenant, key=key, defaults={"value": clean},
@@ -378,6 +440,9 @@ def reset_office_setting(tenant, key) -> None:
 
     **إعدادٌ بلا افتراضيٍّ لا يُرجَع إلى شيء**: حذفُ `tax_system` يُعيد المكتب إلى
     أول تشغيلٍ ويُبطل اختيارات كل بطاقة — فيُرفض، ويُختار غيره بدلاً منه.
+
+    **وطرفا نافذة الإرسال** يرجع أحدهما إلى افتراضيّه فتنقلب النافذة (نهاية 23
+    وبداية 20، ثم مسحُ النهاية ⇒ 20→19): يُرفض بحارس الكتابة نفسه.
     """
     definition = settings_registry.get_definition(key)
     settings_registry.validate_level(definition, settings_registry.LEVEL_OFFICE)
@@ -388,6 +453,8 @@ def reset_office_setting(tenant, key) -> None:
                 "اختر له قيمةً بدلاً من مسحها."
             ),
         })
+    # الحذفُ يحرّك الطرف إلى افتراضيّه، فالنافذةُ الناتجة تُفحص كما تُفحص الكتابة.
+    _assert_send_window(tenant, key, definition.default)
     with transaction.atomic():
         OfficeSettingValue.objects.filter(tenant=tenant, key=key).delete()
         _propagate_tax_system(tenant, key, _clients_without_override(tenant, key))
@@ -3191,6 +3258,8 @@ def refresh_office(tenant, *, day) -> dict:
     created_alerts += _generate_schedule_alerts(
         tenant, day=day, context=context, schedule_changes=schedule_changes,
     )
+    # #280: تصعيدُ التذكير بعد الحدّ — يُقرأ من السجلّ المحفوظ، فيأتي بعد التنبيهات.
+    created_alerts += _generate_reminder_alerts(tenant, day=day)
     return {
         "day": day.isoformat(),
         "created_tasks": created_tasks,
@@ -3687,6 +3756,10 @@ def _visible_alerts(tenant, user, day=None):
     وتنبيهُ التزامٍ لا يُعرض إن لم يبقَ الالتزامُ منتظراً **أو صار موعدُه الساريّ
     بعد اليوم** (مُدَّد)، وتنبيهُ شغلةٍ لا يُعرض إن لم يبقَ فيها التزامٌ منتظرٌ —
     بـ`Exists` كذلك. و`day` يُمرَّر صريحاً من الـview (لا ساعةً في الخدمة).
+
+    **وتنبيهُ التذكير (#280)** يُسقطه اكتمالُ أوراق الفترة عند القراءة: يُقرأ
+    مراجعُ ما لم يكتمل مجموعةً واحدة، فيسقط الصفُّ بلا كتابةٍ ولا حذف —
+    كتنبيه الالتزام الذي يُسقطه التقديم.
     """
     day = day or timezone.localdate()
     pending_obligation = Obligation.objects.filter(
@@ -3695,6 +3768,7 @@ def _visible_alerts(tenant, user, day=None):
     pending_task = Obligation.objects.filter(
         task_id=OuterRef("task_id"), status=OBLIGATION_STATUS_PENDING,
     )
+    live_reminders = _live_reminder_alert_refs(tenant)
     return (
         OfficeAlert.objects
         .filter(tenant=tenant, recipient=user)
@@ -3711,9 +3785,12 @@ def _visible_alerts(tenant, user, day=None):
             | Q(kind=OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, task_pending=True)
             # نوعُ اللائحة المعدَّلة يُحكم بشرطه وحده — لا بشرط «كل ما لم يُحسَم».
             | _live_override_alerts_q(tenant)
+            # ونوعا التذكير ببقاء الأوراق ناقصةٍ في فترتها وحدها.
+            | Q(kind__in=REMINDER_ALERT_KINDS, ref_key__in=live_reminders)
             | (
                 ~Q(kind__in=RESOLVED_ALERT_KINDS)
                 & ~Q(kind=OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED)
+                & ~Q(kind__in=REMINDER_ALERT_KINDS)
             )
         )
     )
@@ -3725,7 +3802,7 @@ def alert_row(alert) -> dict:
     و`badge` **مفتاحُ شارة النوع من الخادم** (`OFFICE_ALERT_KIND_BADGES`)، فتُلوَّن
     الشارةُ في الواجهة بلا معرفة أنواعٍ فيها: نوعٌ لاحقٌ يُضاف صفّاً في الخريطة
     ويأخذ محايداً (`""`) حتى يُلوَّن. و`opens` (#277) خريطةُ الوجهة من الخادم
-    كذلك: `"client"` أو `"deadline_rules"`.
+    كذلك: `"client"` أو `"deadline_rules"` أو `"client_documents"` (#280).
     """
     return {
         "id": alert.pk,
@@ -6061,3 +6138,1218 @@ def update_office_document_item(
         fields.append("updated_at")
         row.save(update_fields=fields)
     return row
+
+
+# ── التذكيرات والرسائل (#280) ───────────────────────────────────────────────
+#
+# **قاعدةُ الموديول نفسها**: ما يختلف من مكتبٍ لمكتب = إعداد، وما يختلف من زبونٍ
+# لزبون = تخصيصٌ فوقه. إيقاعُ التذكير (أوّلُ يومٍ، والمسافةُ بين تذكيرين، والحدُّ
+# الأقصى) ثلاثةُ إعداداتٍ تُقرأ من المحلّل — لا أرقامَ في الكود تلزم من لم يطلبها.
+#
+# **ولا يُخزَّن «متى التذكير القادم»**: يُحسب من السجلّ والإعداد عند كل قراءة
+# (`_reminder_candidates`). تخزينُه كان يحتاج مهمةً تُحدّثه كلَّ يوم، وتصحيحُ
+# إعدادٍ كان يترك المواعيد القديمة على حالها. الحسابُ عند القراءة يعني أن
+# إطفاءَ بندٍ أو تغييرَ الإيقاع يسري فوراً، وأن يومَ العطلة يُزحزح الظهورَ لا
+# يُلغي التذكير.
+#
+# **والتاريخُ يُمرَّر صريحاً** (`day`) من الـview في كل دالّةٍ عامة، فلا ساعةَ في
+# الخدمة تُفاجئ الاختبار.
+
+REMINDER_TYPES_ENABLED_KEY = "reminder_types_enabled"
+REMINDER_AUTO_SEND_KEY = "reminder_auto_send"
+REMINDER_MERGE_DAILY_KEY = "reminder_merge_daily"
+DOCUMENTS_REMINDER_START_DAYS_KEY = "documents_reminder_start_days"
+DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY = "documents_reminder_interval_days"
+DOCUMENTS_REMINDER_MAX_KEY = "documents_reminder_max"
+REMINDER_SEND_HOUR_START_KEY = "reminder_send_hour_start"
+REMINDER_SEND_HOUR_END_KEY = "reminder_send_hour_end"
+REMINDER_ESCALATION_OWNER_DAYS_KEY = "reminder_escalation_owner_days"
+REMINDER_DEFAULT_CONSENT_TYPES_KEY = "reminder_default_consent_types"
+
+#: رسالةُ القفل — ثابتٌ واحدٌ يقارنه الاختبار وتقرؤه الواجهة كما هو.
+REMINDER_AUTO_SEND_LOCKED = "الإرسال التلقائي غير متاح قبل المرحلة الثانية"
+
+#: إعداداتٌ **مطفأةٌ بقرار**: قيمتُها تُخزَّن `False` وحده، وأيُّ قيمةٍ أخرى
+#: تُرفَض برسالتها. بابٌ واحدٌ للفتح لاحقاً: حذفُ المفتاح من هنا في تذكرة المرحلة
+#: الثانية — لا مسارٌ ثانٍ في الـview.
+LOCKED_SETTING_MESSAGES: dict[str, str] = {
+    REMINDER_AUTO_SEND_KEY: REMINDER_AUTO_SEND_LOCKED,
+}
+
+#: زوجُ النافذة (`setting.key` ← نظيرُه): بدايةٌ لا تلحق نهايتَها. **والطرفان في
+#: الخريطة**: كتابةُ أحدهما تُقارَن بالآخر، وإلا قُبلت بدايةُ 20 على نهاية 19.
+_SEND_WINDOW_PREVIOUS: dict[str, str] = {
+    REMINDER_SEND_HOUR_END_KEY: REMINDER_SEND_HOUR_START_KEY,
+    REMINDER_SEND_HOUR_START_KEY: REMINDER_SEND_HOUR_END_KEY,
+}
+
+
+def _assert_locked_setting(key, value) -> None:
+    """إعدادٌ مطفأٌ بقرار يرفض أيّ قيمةٍ غير المطفأة — برسالةٍ واحدةٍ معلَنة."""
+    message = LOCKED_SETTING_MESSAGES.get(key)
+    if message is None or value is False:
+        return
+    raise ValidationError({"value": message})
+
+
+def _assert_send_window(tenant, key, value) -> None:
+    """النافذةُ زوجٌ مرتَّب: طرفٌ يلحق الآخرَ همٌّ يُقصّ بصمت — يُرفَض صراحةً.
+
+    **والفحصُ متساوٍ على الطرفين**: فحصُ النهاية وحدها يقبل بدايةَ 20 على نهاية
+    19، فتُكتب نافذةٌ لا وجودَ لها. والرسالةُ واحدةٌ للحالتين وتدلّ على الاتجاهين.
+    """
+    other_key = _SEND_WINDOW_PREVIOUS.get(key)
+    if other_key is None:
+        return
+    other = resolve_setting(tenant, other_key)
+    if not isinstance(other, int):
+        return
+    if key == REMINDER_SEND_HOUR_START_KEY:
+        start, end = value, other
+    else:
+        start, end = other, value
+    if start >= end:
+        raise ValidationError({
+            "value": (
+                "بداية نافذة الإرسال قبل نهايتها — اختر ساعةً «أبكر» للنهاية "
+                "أو «أبعد» للبداية."
+            ),
+        })
+
+
+# ── الموافقة على التذكير (#280/D2) ──────────────────────────────────────────
+def _clean_consent_types(types) -> list[str]:
+    if types is None:
+        return []
+    if not isinstance(types, (list, tuple)):
+        raise ValidationError({"types": "الأنواع تُرسَل قائمةً."})
+    clean = list(types)
+    for reminder_type in clean:
+        if reminder_type not in REMINDER_TYPES:
+            raise ValidationError({
+                "types": f"نوع تذكير غير معروف: {reminder_type}.",
+            })
+    return [key for key in REMINDER_TYPES if key in set(clean)]
+
+
+def _clean_consent_channel(channel) -> str:
+    value = (channel or "").strip()
+    if value and value not in CONSENT_CHANNEL_LABELS:
+        raise ValidationError({
+            "channel": f"قناةُ إذنٍ غير معروفة: {value}.",
+        })
+    return value
+
+
+def set_contact_consent(
+    contact, *, consent, types=None, channel="", actor, day=None,
+) -> Contact:
+    """يُسجَّل الإذنُ بالتاريخ والطريق — والسحبُ لا يمحو الإذن.
+
+    الإذن: `consent_on` و`consent_channel` ويُمسح أثرُ السحب. والسحبُ:
+    `consent_withdrawn_on` و`consent_withdrawn_by` ويبقى تاريخُ الإذن قارئاً.
+    و`types=None` في الإذن يعني «أبقِ الأنواع الحالية» — تعديلُ القناة وحدها
+    لا يُعيد كتابة ما وافق عليه.
+    """
+    day = day or timezone.localdate()
+    clean_types = _clean_consent_types(types)
+    clean_channel = _clean_consent_channel(channel)
+    fields = ["reminders_consent", "updated_at"]
+    if consent:
+        contact.reminders_consent = True
+        if types is not None:
+            contact.consent_types = clean_types
+        elif not contact.consent_types:
+            contact.consent_types = resolve_setting(
+                contact.tenant, REMINDER_DEFAULT_CONSENT_TYPES_KEY,
+            ) or []
+        contact.consent_on = day
+        contact.consent_channel = clean_channel
+        contact.consent_withdrawn_on = None
+        contact.consent_withdrawn_by = None
+        fields += [
+            "consent_types", "consent_on", "consent_channel",
+            "consent_withdrawn_on", "consent_withdrawn_by",
+        ]
+    else:
+        contact.reminders_consent = False
+        contact.consent_withdrawn_on = day
+        contact.consent_withdrawn_by = actor
+        fields += ["consent_withdrawn_on", "consent_withdrawn_by"]
+    contact.save(update_fields=fields)
+    return contact
+
+
+def contact_consent_payload(contact) -> dict:
+    """جوابُ «بتحب نذكّرك؟» كما يُعرض ويُعدَّل — مسمّىً لا أرقاماً."""
+    return {
+        "contact_id": contact.pk,
+        "name": contact.name,
+        "reminders_consent": contact.reminders_consent,
+        "consent_types": list(contact.consent_types or []),
+        "consent_types_labels": [
+            REMINDER_TYPE_LABELS[key]
+            for key in (contact.consent_types or [])
+            if key in REMINDER_TYPE_LABELS
+        ],
+        "consent_on": None if contact.consent_on is None else contact.consent_on.isoformat(),
+        "consent_channel": contact.consent_channel,
+        "consent_channel_label": CONSENT_CHANNEL_LABELS.get(contact.consent_channel, ""),
+        "consent_withdrawn_on": (
+            None if contact.consent_withdrawn_on is None
+            else contact.consent_withdrawn_on.isoformat()
+        ),
+        "consent_withdrawn_by": (
+            None if contact.consent_withdrawn_by_id is None
+            else {
+                "id": contact.consent_withdrawn_by_id,
+                "name": user_display_name(contact.consent_withdrawn_by),
+            }
+        ),
+        "type_choices": [
+            {"value": key, "label": label} for key, label in REMINDER_TYPE_CHOICES
+        ],
+        "channel_choices": [
+            {"value": key, "label": label}
+            for key, label in sorted(CONSENT_CHANNEL_LABELS.items())
+        ],
+    }
+
+
+def create_contact(tenant, *, name, phone="", language="ar") -> Contact:
+    """جهةٌ جديدة **بأنواع الإذن الافتراضية للمكتب** — لا بقائمةٍ في الكود.
+
+    تُقرأ مرّةً هنا عند الإنشاء وتُنسَخ على الصفّ؛ تغييرُ الإعداد بعدها لا يعيد
+    كتابة مَن أذن قبله (الإذنُ فعلُ شخصٍ بتاريخه لا قيمةَ إعدادٍ تتبدّل).
+    """
+    if language not in dict(Contact.LANGUAGE_CHOICES):
+        raise ValidationError({"language": "لغة غير معروفة."})
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValidationError({"name": "الاسم مطلوب."})
+    return Contact.objects.create(
+        tenant=tenant,
+        name=clean_name,
+        phone=(phone or "").strip(),
+        language=language,
+        consent_types=resolve_setting(tenant, REMINDER_DEFAULT_CONSENT_TYPES_KEY) or [],
+    )
+
+
+# ── النصوص: الافتراضي في الكود وبديلُ المكتب (#280/D3) ───────────────────────
+def render_reminder_body(body, values) -> str:
+    """يستبدل الرموزَ المعروفة ويترك ما سواها كما هو (بلا `str.format`).
+
+    **`str.format` ممنوع على نصٍّ يكتبه المستخدم**: قوسٌ واحدٌ زائد يُسقط الطلب
+    500، و`{0}` أو `{office_name!r}` بابٌ لقراءة ما لا يُقصد. فالاستبدالُ هنا
+    `str.replace` على الستّة المعتمدة وحدها، وما ليس منها يبقى نصّاً حرفياً.
+    """
+    rendered = body or ""
+    for placeholder in REMINDER_PLACEHOLDERS:
+        rendered = rendered.replace(
+            "{" + placeholder + "}", str(values.get(placeholder, "") or ""),
+        )
+    return rendered
+
+
+def validate_reminder_body(body) -> str:
+    """نصُّ قالبٍ صالح: غيرُ فارغٍ، وكلُّ `{…}` فيه من الستّة المعتمدة.
+
+    والرفضُ يسمّي الرمزَ المجهول — «نصٌّ غير صالح» لا تدلّ كاتبَه على خطئه.
+    """
+    text = (body or "").strip()
+    if not text:
+        raise ValidationError({"body": "نصُّ التذكير مطلوب."})
+    for match in re.finditer(r"\{([^{}]*)\}", text):
+        if match.group(1) not in REMINDER_PLACEHOLDERS:
+            raise ValidationError({
+                "body": f"رمزٌ غير معروف في النص: {{{match.group(1)}}}.",
+            })
+    return text
+
+
+def _assert_reminder_type(reminder_type) -> str:
+    if reminder_type not in REMINDER_TYPES:
+        raise ValidationError({"reminder_type": "نوع تذكير غير معروف."})
+    return reminder_type
+
+
+def _assert_reminder_language(language) -> str:
+    if language not in REMINDER_LANGUAGES:
+        raise ValidationError({"language": "لغة تذكير غير معروفة."})
+    return language
+
+
+def reminder_templates_payload(tenant) -> dict:
+    """كلُّ نوعٍ في كل لغة: النصَّ الفعليَّ والافتراضيَّ وعلمَ التخصيص.
+
+    صفٌّ واحدٌ لكل زوج (نوع × لغة) — والواجهةُ تعرضها شبكةً بلا حسابٍ فيها.
+    والقائمةُ تُقرأ لكل عضوٍ: معرفةُ ما سيُرسَل ليست صلاحيةَ إعدادات.
+    """
+    overrides = {
+        (row.reminder_type, row.language): row
+        for row in ReminderTemplate.objects.filter(tenant=tenant)
+    }
+    rows = []
+    for reminder_type, type_label in REMINDER_TYPE_CHOICES:
+        for language, language_label in REMINDER_LANGUAGE_CHOICES:
+            override = overrides.get((reminder_type, language))
+            default_body = REMINDER_DEFAULT_TEXTS.get(reminder_type, {}).get(language, "")
+            rows.append({
+                "reminder_type": reminder_type,
+                "reminder_type_label": type_label,
+                "language": language,
+                "language_label": language_label,
+                "body": override.body if override is not None else default_body,
+                "default_body": default_body,
+                "is_custom": override is not None,
+                "updated_at": (
+                    None if override is None else override.updated_at.isoformat()
+                ),
+                "updated_by": (
+                    None if override is None or override.updated_by_id is None
+                    else user_display_name(override.updated_by)
+                ),
+            })
+    return {"placeholders": list(REMINDER_PLACEHOLDERS), "rows": rows}
+
+
+def set_reminder_template(
+    tenant, *, reminder_type, language, body, actor,
+) -> ReminderTemplate:
+    """بديلُ المكتب — يُتحقَّق نصُّه ثم يُكتب صفّاً واحداً لكل (نوع، لغة)."""
+    _assert_reminder_type(reminder_type)
+    _assert_reminder_language(language)
+    clean_body = validate_reminder_body(body)
+    row, _created = ReminderTemplate.objects.update_or_create(
+        tenant=tenant,
+        reminder_type=reminder_type,
+        language=language,
+        defaults={"body": clean_body, "updated_by": actor},
+    )
+    return row
+
+
+def reset_reminder_template(tenant, *, reminder_type, language) -> None:
+    """«ارجع للافتراضي» = **حذفُ البديل** لا كتابةُ الافتراضيِّ مكانه."""
+    _assert_reminder_type(reminder_type)
+    _assert_reminder_language(language)
+    ReminderTemplate.objects.filter(
+        tenant=tenant, reminder_type=reminder_type, language=language,
+    ).delete()
+
+
+# ── الحساب عند القراءة (#280/D5–D9) ──────────────────────────────────────────
+@dataclass(frozen=True)
+class ReminderCandidate:
+    """تذكيرٌ **مستحقٌّ الآن** لزبونٍ في فترة — نتيجةُ حسابٍ لا صفٌّ محفوظ."""
+
+    client: Any
+    reminder_type: str
+    period_start: Any
+    period_end: Any
+    missing: tuple[str, ...]
+    missing_codes: tuple[str, ...]
+    count: int
+    maximum: int
+    interval_days: int
+    next_due: Any
+    contact: Any
+    due: bool
+    exhausted: bool
+    postponed: bool
+
+
+#: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
+#: لا استعلامان لكل مفتاح، ولا محلّلٌ موازٍ يُعيد ترتيبَ القراءة بلا حارسيها.
+_REMINDER_CLIENT_KEYS: tuple[str, ...] = (
+    REMINDER_TYPES_ENABLED_KEY,
+    DOCUMENTS_REMINDER_START_DAYS_KEY,
+    DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY,
+    DOCUMENTS_REMINDER_MAX_KEY,
+    "rest_days",
+)
+
+
+def _reminder_contacts(tenant, clients, reminder_types) -> dict[tuple[int, str], Any]:
+    """المستلِمُ الفعليُّ لكل (زبون، نوع) — **استعلامان** لا استعلامان لكل زوج.
+
+    نفسُ قاعدة `resolve_reminder_recipient`: التعيينُ إن وُجد، وإلا الرئيسية.
+    """
+    client_ids = [client.pk for client in clients]
+    assigned = {
+        (row.client_id, row.reminder_type): row.client_contact
+        for row in (
+            ClientReminderRecipient.objects
+            .filter(
+                tenant=tenant,
+                client_id__in=client_ids,
+                reminder_type__in=list(reminder_types),
+            )
+            .select_related("client_contact__contact")
+        )
+    }
+    primary = {
+        row.client_id: row
+        for row in (
+            ClientContact.objects
+            .filter(tenant=tenant, client_id__in=client_ids, is_primary=True)
+            .select_related("contact")
+        )
+    }
+    contacts = {}
+    for client_id in client_ids:
+        for reminder_type in reminder_types:
+            link = assigned.get((client_id, reminder_type)) or primary.get(client_id)
+            contacts[(client_id, reminder_type)] = None if link is None else link.contact
+    return contacts
+
+
+def _reminder_log_day(row):
+    """يومُ الصفّ — من لحظته المحلّية، فالإيقاعُ يُقاس بأيام العين لا بـUTC.
+
+    والصفوفُ تصل قواميسَ من `.values()` لا كائنات (استعلامُ المسحة الواحد).
+    """
+    return timezone.localdate(row["created_at"])
+
+
+def reminder_template_bodies(tenant, reminder_type) -> dict[str, str]:
+    """نصوصُ مكتبٍ لنوعٍ في لغاته — **استعلامٌ واحد** يُمرَّر لبناء الرسائل."""
+    overrides = {
+        row.language: row.body
+        for row in ReminderTemplate.objects.filter(
+            tenant=tenant, reminder_type=reminder_type,
+        )
+    }
+    return {
+        language: overrides.get(
+            language, REMINDER_DEFAULT_TEXTS.get(reminder_type, {}).get(language, ""),
+        )
+        for language, _label in REMINDER_LANGUAGE_CHOICES
+    }
+
+
+def _reminder_candidates(
+    tenant, clients, *, day, settings_by_client, reminder_type=None,
+) -> list:
+    """المستحقُّ لكل (زبون، نوع، فترة) — **كلفةٌ ثابتة** لا تكبر بعدد الزبائن.
+
+    ما يُحسب هنا هو **تذكير الأوراق** وحده (#280/D1: الأنواعُ الأربعة لها قوالبُها
+    وإعدادُها، ومولّدُ الأوراق هو المطلوب الآن). والباقي يُضاف دالّةً بجانبها
+    حين تصل تذكرته، بلا مساسٍ بهذه.
+
+    **والإعداداتُ تُمرَّر محلولةً** (`resolve_settings_for_clients`) لا تُقرأ هنا:
+    «جاهز للإرسال» يحتاجها قبل الحساب لحجب يوم الراحة، فقراءتُها مرّتين كانت
+    تضاعف الاستعلامات وإن اختلفت النتيجةُ بينهما وقع الحسابُ على غير ما حُجب به.
+
+    والإيقاع: أوّلُ يومٍ = `period_end + start_days`، واليومُ التالي = **آخرُ
+    صفٍّ صادر** (إرسالٌ أو تنحية) + `interval_days`، ولا تذكيرَ بعد `max` صفٍّ
+    عدّاً صافياً. والصفوفُ المُبطَلة بـ`undo` لا تُعدّ (`reverted` في الاستعلام).
+    """
+    types = (REMINDER_DOCUMENTS,)
+    if reminder_type is not None and _assert_reminder_type(reminder_type) not in types:
+        # #280/D1: الأنواعُ الثلاثة الأخرى لها قوالبُها وإعدادُها ولا مولّدَ لها
+        # بعد — فطلبُ قائمتها يُعيد فراغاً لا بنوداً بنصٍّ لا يخصّها.
+        return []
+    clients = [client for client in clients if client.pk is not None]
+    if not clients:
+        return []
+    contacts = _reminder_contacts(tenant, clients, types)
+
+    #: الأوراقُ الناقصة وحدها: «وصلت» و«مش لازمة» خارجُ التذكير بطبيعتهما.
+    rows = list(
+        DocumentChecklistItem.objects
+        .filter(
+            client_id__in=[client.pk for client in clients],
+            status__in=(DOCUMENT_STATUS_REQUIRED, DOCUMENT_STATUS_PARTIAL),
+        )
+        .values("client_id", "item_code", "name", "period_start", "period_end")
+        .order_by("client_id", "period_start", "item_code"),
+    )
+    grouped: dict[tuple[int, Any, Any], dict] = {}
+    for row in rows:
+        key = (row["client_id"], row["period_start"], row["period_end"])
+        bucket = grouped.setdefault(key, {"names": [], "codes": []})
+        bucket["names"].append(row["name"])
+        bucket["codes"].append(row["item_code"])
+    if not grouped:
+        return []
+
+    #: التصحيحُ (`undo`) يشير إلى ما يُبطله — و`Exists` تُنقص المُبطَل من العدّ
+    #: داخل الاستعلام نفسه فلا استعلامَ لكل صفّ.
+    logs = list(
+        ReminderLog.objects
+        .filter(
+            tenant=tenant,
+            client_id__in=[client.pk for client in clients],
+            reminder_type__in=types,
+            kind__in=REMINDER_TIMER_KINDS,
+        )
+        .annotate(reverted=Exists(
+            ReminderLog.objects.filter(reverts=OuterRef("pk")),
+        ))
+        .values("client_id", "reminder_type", "kind", "period_start", "period_end",
+                "created_at", "reverted"),
+    )
+    by_pair: dict[tuple[int, str, Any, Any], list] = {}
+    for row in logs:
+        if row["reverted"]:
+            continue
+        key = (row["client_id"], row["reminder_type"], row["period_start"], row["period_end"])
+        by_pair.setdefault(key, []).append(row)
+
+    postponed = _reminder_postponed_pairs(tenant, clients, types, day)
+    #: الفتراتُ مفهرسةٌ بزبونها: الحلقةُ لكل زبونٍ تقرأ فتراتِه وحدها، فلا
+    #: مسحٌ كاملٌ لكل زبون (مكتبٌ بألف زبون لا يمرّ على جدول الأوراق مليون مرّة).
+    periods_by_client: dict[int, list] = {}
+    for (client_id, period_start, period_end), bucket in grouped.items():
+        periods_by_client.setdefault(client_id, []).append(
+            (period_start, period_end, bucket),
+        )
+    candidates = []
+    for client in clients:
+        resolved = settings_by_client[client.pk]
+        enabled = resolved.get(REMINDER_TYPES_ENABLED_KEY) or []
+        periods = periods_by_client.get(client.pk, ())
+        for current_type in types:
+            if current_type not in enabled:
+                continue
+            contact = contacts.get((client.pk, current_type))
+            start_days = resolved.get(DOCUMENTS_REMINDER_START_DAYS_KEY) or 0
+            interval_days = resolved.get(DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY) or 1
+            maximum = resolved.get(DOCUMENTS_REMINDER_MAX_KEY) or 1
+            for period_start, period_end, bucket in periods:
+                pairs = by_pair.get(
+                    (client.pk, current_type, period_start, period_end), [],
+                )
+                count = sum(
+                    1 for row in pairs if row["kind"] in REMINDER_COUNTED_KINDS
+                )
+                last_day = max((_reminder_log_day(row) for row in pairs), default=None)
+                next_due = (
+                    period_end + timedelta(days=start_days) if last_day is None
+                    else last_day + timedelta(days=interval_days)
+                )
+                candidates.append(ReminderCandidate(
+                    client=client,
+                    reminder_type=current_type,
+                    period_start=period_start,
+                    period_end=period_end,
+                    missing=tuple(bucket["names"]),
+                    missing_codes=tuple(bucket["codes"]),
+                    count=count,
+                    maximum=maximum,
+                    interval_days=interval_days,
+                    next_due=next_due,
+                    contact=contact,
+                    due=day >= next_due,
+                    exhausted=count >= maximum,
+                    postponed=(client.pk, current_type) in postponed,
+                ))
+    return candidates
+
+
+def day_key_blocked(day, rest_days) -> bool:
+    """هل اليومُ عطلةٌ لهذا الزبون؟ — من `rest_days` المحلولة وحدها."""
+    return deadlines.weekday_key(day) in set(rest_days or ())
+
+
+def _reminder_postponed_pairs(tenant, clients, reminder_types, day) -> set[tuple[int, str]]:
+    """أزواجٌ مؤجَّلةٌ **يومَ القراءة** — أحدثُ صفٍّ لكل (زبون، نوع) هو الساري."""
+    latest: dict[tuple[int, str], Any] = {}
+    for row in (
+        ReminderPostpone.objects
+        .filter(
+            tenant=tenant,
+            client_id__in=[client.pk for client in clients],
+            reminder_type__in=list(reminder_types),
+        )
+        .order_by("created_at", "id")
+        .values("client_id", "reminder_type", "until")
+    ):
+        latest[(row["client_id"], row["reminder_type"])] = row["until"]
+    return {
+        key for key, until in latest.items()
+        if until is not None and day < until
+    }
+
+
+def office_is_on_holiday(tenant, day) -> bool:
+    """عطلةُ مكتبٍ في يومٍ بعينه — **قائمةٌ يكتبها المكتب** لا تقويمٌ مخترَع."""
+    return OfficeHoliday.objects.filter(tenant=tenant, date=day).exists()
+
+
+def _reminder_item_payload(candidate) -> dict:
+    """بندٌ واحدٌ في رسالةٍ — بكلّ مفتاحٍ يحتاجه فعلُ الإرسال بعده."""
+    return {
+        "client_id": candidate.client.pk,
+        "client_name": candidate.client.name,
+        "reminder_type": candidate.reminder_type,
+        "reminder_type_label": REMINDER_TYPE_LABELS.get(candidate.reminder_type, ""),
+        "badge": OBLIGATION_BADGE_MISSING_DOCS,
+        "period_start": candidate.period_start.isoformat(),
+        "period_end": candidate.period_end.isoformat(),
+        "period_label": deadlines.period_label(
+            candidate.period_start, candidate.period_end,
+        ),
+        "missing_list": list(candidate.missing),
+        "missing_codes": list(candidate.missing_codes),
+        "step": candidate.count + 1,
+        "max": candidate.maximum,
+        "due_date": candidate.next_due.isoformat(),
+        "subject": {"document_item_codes": list(candidate.missing_codes)},
+    }
+
+
+def _reminder_render_values(tenant, candidate, *, day) -> dict:
+    """قيمُ الرموز الستّة لبند — **و`{due_date}` يومٌ قادمٌ لا يومُ الاستحقاق**.
+
+    `candidate.next_due` هو يومُ الاستحقاق المحسوب، وهو اليومُ أو قبله بحكم شرط
+    الظهور (`day >= next_due`) — وبعد يوم راحةٍ أو عطلةٍ أو تأجيلٍ يصير ماضياً
+    بيقين. فالنصُّ يطبَع يومَ التذكير **القادم** (`day + interval_days`) بصيغة
+    `dd/MM/yyyy`، ويبقى `due_date` في بند الشاشة `ISO` بيوم الاستحقاق نفسه.
+    و`amount` فارغٌ لأن مولّدَ الحساب ليس هنا (#285).
+    """
+    upcoming = day + timedelta(days=candidate.interval_days)
+    return {
+        "client_name": candidate.client.name,
+        "period": deadlines.period_label(candidate.period_start, candidate.period_end),
+        "due_date": upcoming.strftime("%d/%m/%Y"),
+        "amount": "",
+        "missing_list": "، ".join(candidate.missing),
+        "office_name": tenant.CompanyName,
+    }
+
+
+def _reminder_message(tenant, contact, candidates, *, template_bodies, day) -> dict:
+    """رسالةٌ واحدةٌ لشخص: بنودُها ونصُّها بلغته هو."""
+    body = "\n\n".join(
+        render_reminder_body(
+            template_bodies.get(contact.language, ""),
+            _reminder_render_values(tenant, candidate, day=day),
+        )
+        for candidate in candidates
+    )
+    return {
+        "recipient": {
+            "contact_id": contact.pk,
+            "name": contact.name,
+            "phone": contact.phone,
+            "has_phone": bool(contact.phone),
+            "language": contact.language,
+            "language_label": dict(Contact.LANGUAGE_CHOICES).get(contact.language, ""),
+        },
+        "items": [_reminder_item_payload(candidate) for candidate in candidates],
+        "body": body,
+    }
+
+
+def ready_to_send_payload(
+    tenant, *, user, day, reminder_type=None, assignee=None,
+) -> dict:
+    """«جاهز للإرسال»: رسالةٌ واحدةٌ لكل شخصٍ في اليوم — لا لكل زبون.
+
+    **التجميعُ على المستلِم** لا على الزبون: شخصٌ مستلِمٌ لزبونين يأخذ رسالةً
+    واحدةً فيهما (وكانت رسالتان تُقرأان إلحاحاً وتُرسَلان مرّتين). ومفتاحُ
+    `reminder_merge_daily` يقلبها إلى رسالةٍ لكل بند لمن يريد فصلَها.
+
+    **وكلُّ حاجبٍ يُطبَّق هنا** لا في الحساب: يومُ راحة الزبون، وعطلةُ المكتب،
+    وتأجيلُ الزوج، ورفضُ الإذن. فالتذكيرُ لا يُلغى بحاجز — يظهر في أوّل يومٍ
+    مسموح، لأن الحسابَ من السجلّ لا من صفٍّ محفوظ.
+    """
+    queryset = (
+        visible_clients(tenant, user)
+        .filter(status=OfficeClient.STATUS_ACTIVE)
+        .select_related("responsible")
+        .order_by("id")
+    )
+    if assignee is not None:
+        queryset = queryset.filter(responsible_id=assignee)
+    clients = list(queryset)
+    merge_daily = resolve_setting(tenant, REMINDER_MERGE_DAILY_KEY)
+    payload = {
+        "day": day.isoformat(),
+        "merge_daily": bool(merge_daily),
+        "reminder_type": reminder_type,
+        "messages": [],
+        "placeholders": list(REMINDER_PLACEHOLDERS),
+    }
+    if not clients or office_is_on_holiday(tenant, day):
+        return payload
+    # مرّةٌ واحدةٌ للحمولة كلِّها: الحسابُ يحتاجها ليحجب يومَ الراحة، وبناءُ
+    # الرسائل يحتاجها لتاريخ الـ`{due_date}` — فتُقرأ هنا وتُمرَّر.
+    settings_by_client = resolve_settings_for_clients(
+        tenant, _REMINDER_CLIENT_KEYS, clients,
+    )
+    candidates = [
+        candidate for candidate in _reminder_candidates(
+            tenant, clients, day=day,
+            settings_by_client=settings_by_client,
+            reminder_type=reminder_type,
+        )
+        if candidate.due
+        and not candidate.exhausted
+        and not candidate.postponed
+        and candidate.contact is not None
+        and candidate.contact.allows_reminder(candidate.reminder_type)
+        and not day_key_blocked(day, settings_by_client[candidate.client.pk].get("rest_days"))
+    ]
+    if not candidates:
+        return payload
+    # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف
+    # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم.
+    template_bodies = reminder_template_bodies(tenant, REMINDER_DOCUMENTS)
+    grouped: dict[int, list] = {}
+    for candidate in candidates:
+        grouped.setdefault(candidate.contact.pk, []).append(candidate)
+    messages = []
+    for contact_id in sorted(grouped):
+        group = grouped[contact_id]
+        if merge_daily:
+            messages.append(_reminder_message(
+                tenant, group[0].contact, group,
+                template_bodies=template_bodies, day=day,
+            ))
+        else:
+            messages.extend(
+                _reminder_message(
+                    tenant, candidate.contact, [candidate],
+                    template_bodies=template_bodies, day=day,
+                )
+                for candidate in group
+            )
+    payload["messages"] = messages
+    return payload
+
+
+# ── الأفعال: الإرسال والتنحية والتأجيل والتصحيح (#280/D4، D5، D9) ────────────
+class ReminderClientNotVisible(ValidationError):
+    """زبونٌ لا يراه هذا العضو — والـview يترجمها **404** لا 400.
+
+    القاعدةُ القائمة منذ #272: 403 يثبت وجودَ الزبون، و404 لا يثبت شيئاً. وهذا
+    الصنفُ يُميّز «غير موجودٍ لك» عن «حمولةٌ فاسدة» (400) داخل الخدمة نفسها،
+    فتبقى الصلاحيةُ والرؤيةُ قرارَ طبقةٍ واحدة.
+    """
+
+
+def _visible_client_or_raise(tenant, user, client_id):
+    """زبونٌ يراه هذا العضو — وإلا `ReminderClientNotVisible` (404 في الـview)."""
+    try:
+        pk = int(client_id)
+    except (TypeError, ValueError):
+        raise ValidationError({"client_id": "معرّفُ زبونٍ غير صالح."}) from None
+    client = (
+        visible_clients(tenant, user)
+        .filter(pk=pk)
+        .select_related("responsible")
+        .first()
+    )
+    if client is None:
+        raise ReminderClientNotVisible({"client_id": "الزبون غير موجود."})
+    return client
+
+
+def _clean_reminder_items(tenant, user, items) -> list[dict]:
+    """بنودُ فعلٍ واحد: زبونٌ مرئيٌّ، ونوعٌ معروفٌ، وفترةٌ **كاملةُ الطرفين**.
+
+    و`period_end` **مطلوبةٌ لا مستنتَجة**: مفتاحُ العدّ `(period_start, period_end)`
+    لأن القائمةَ السنوية تبدأ في 1 يناير كالشهرية، واستنتاجُ النهاية عند غيابها
+    يخلط أوراقَ السنة بأوراق كانون الثاني ويكتب في السجلّ فترةً غيرَ التي أُرسلت.
+    ورسالةُ «جاهز للإرسال» تحمل المفتاحين، فالشاشةُ لا تحتاج تخميناً.
+    """
+    if not isinstance(items, (list, tuple)) or not items:
+        raise ValidationError({"items": "اختر بنداً واحداً على الأقل."})
+    clean = []
+    for raw in items:
+        if not isinstance(raw, dict):
+            raise ValidationError({"items": "كلُّ بندٍ قاموس."})
+        reminder_type = _assert_reminder_type(raw.get("reminder_type"))
+        client = _visible_client_or_raise(tenant, user, raw.get("client_id"))
+        if not raw.get("period_end"):
+            raise ValidationError({
+                "period_end": "نهايةُ الفترة مطلوبةٌ مع بدايتها — التاريخان معاً مفتاحُ التذكير.",
+            })
+        clean.append({
+            "client": client,
+            "reminder_type": reminder_type,
+            "period_start": _reminder_period_date(raw.get("period_start"), "period_start"),
+            "period_end": _reminder_period_date(raw.get("period_end"), "period_end"),
+        })
+    return clean
+
+
+def _reminder_period_date(raw, field):
+    if isinstance(raw, date):
+        return raw
+    try:
+        return date.fromisoformat(str(raw))
+    except (TypeError, ValueError):
+        raise ValidationError({field: "تاريخٌ مطلوبٌ بالصيغة YYYY-MM-DD."}) from None
+
+
+def _reminder_contact_of_tenant(tenant, contact_id) -> Contact:
+    contact = Contact.objects.filter(tenant=tenant, pk=contact_id).first()
+    if contact is None:
+        raise ValidationError({"contact_id": "هذه الجهة ليست من جهات هذا المكتب."})
+    return contact
+
+
+def _reminder_missing_metadata(items) -> dict[tuple[int, Any, Any], dict]:
+    """أكوادُ الأوراق الناقصة وأسماؤها وقت الإرسال — **استعلامٌ واحد** لكل البنود.
+
+    لقطةٌ لا حساباً لاحقاً: ما كان ناقصاً حين أُرسل يُقرأ بعد سنة كما كان، ولو
+    وصلت الورقةُ غداً.
+    """
+    wanted = {(item["client"].pk, item["period_start"], item["period_end"]) for item in items}
+    rows = (
+        DocumentChecklistItem.objects
+        .filter(
+            client_id__in={client_id for client_id, _start, _end in wanted},
+            status__in=(DOCUMENT_STATUS_REQUIRED, DOCUMENT_STATUS_PARTIAL),
+        )
+        .order_by("item_code")
+        .values_list("client_id", "period_start", "period_end", "item_code", "name")
+    )
+    meta: dict[tuple[int, Any, Any], dict] = {
+        key: {"codes": [], "names": []} for key in wanted
+    }
+    for client_id, period_start, period_end, code, name in rows:
+        bucket = meta.get((client_id, period_start, period_end))
+        if bucket is None:
+            continue
+        bucket["codes"].append(code)
+        bucket["names"].append(name)
+    return meta
+
+
+def _write_reminder_logs(
+    *, tenant, actor, items, kind, channel, body, reason="",
+):
+    """صفوفُ السجلّ دفعةً واحدة — **المسارُ الوحيد** لكتابة `ReminderLog`.
+
+    **والعائدُ استعلامٌ يُعاد قراءتُه بمعرّف الدفعة** (`batch`) لا ما أرجعه
+    `bulk_create`: MySQL لا يُسنِد المفاتيحَ بعده، فالجوابُ كان يخرج بـ`id: null`
+    فلا تستطيع الشاشةُ التراجعَ — وSQLite يُسنِدها فيُخفي العيب. قراءةٌ واحدة.
+
+    **وكلُّ بندٍ يحمل `contact` مستلِمَه**: الإرسالُ يعطي جهةً واحدة للرسالة كلّها،
+    والتنحيةُ تُحلّ لكل بندٍ مستلِمَه قبل النداء — فالمسارُ واحدٌ لا نسختان،
+    والدفعةُ واحدةٌ مهما بلغ عددُ البنود.
+
+    ولا `update` ولا `delete` هنا ولا في الـAPI: الصفُّ يُكتب مرّةً ويبقى،
+    والتصحيحُ صفٌّ جديد يشير إليه.
+    """
+    meta_by_key = _reminder_missing_metadata(items)
+    batch = uuid4()
+    rows = []
+    for item in items:
+        contact = item.get("contact")
+        meta = meta_by_key.get(
+            (item["client"].pk, item["period_start"], item["period_end"]),
+            {"codes": [], "names": []},
+        )
+        rows.append(ReminderLog(
+            tenant=tenant,
+            client=item["client"],
+            contact=contact,
+            recipient_name="" if contact is None else contact.name,
+            recipient_phone="" if contact is None else contact.phone,
+            reminder_type=item["reminder_type"],
+            kind=kind,
+            channel=channel,
+            body=body,
+            period_start=item["period_start"],
+            period_end=item["period_end"],
+            subject={
+                "document_item_codes": meta["codes"],
+                "document_item_names": meta["names"],
+            },
+            reason=reason,
+            created_by=actor,
+            batch=batch,
+        ))
+    ReminderLog.objects.bulk_create(rows)
+    return (
+        ReminderLog.objects
+        .filter(tenant=tenant, batch=batch)
+        .select_related("client", "created_by")
+        .order_by("id")
+    )
+
+
+def _assert_contact_serves_items(contact, items) -> None:
+    """الجهةُ المستلِمة مربوطةٌ بكلّ زبونٍ في الرسالة — وإلا فهي رسالةٌ لغير أهلها.
+
+    **واستعلامٌ واحد**: زبائنُ الرسالة تُقرأ مرّةً ثم تُقارَن، فلا استعلامَ لكل
+    بندٍ في رسالةٍ مجمَّعة.
+    """
+    client_ids = [item["client"].pk for item in items]
+    linked = set(
+        ClientContact.objects
+        .filter(contact=contact, client_id__in=client_ids)
+        .values_list("client_id", flat=True),
+    )
+    for item in items:
+        if item["client"].pk not in linked:
+            raise ValidationError({
+                "contact_id": (
+                    f"الجهة {contact.name} غير مربوطةٍ بالزبون "
+                    f"{item['client'].name}."
+                ),
+            })
+
+
+def mark_reminders_sent(tenant, *, user, contact_id, body, items, channel=""):
+    """«انبعثت»: صفُّ `sent` لكل بندٍ بالنصّ نفسه — والواتسابُ قناتُه الوحيدة."""
+    clean_channel = (channel or "").strip() or REMINDER_CHANNEL_WHATSAPP
+    if clean_channel != REMINDER_CHANNEL_WHATSAPP:
+        raise ValidationError({
+            "channel": "«انبعثت» إرسالٌ بالواتساب وحده — وما عداه «كلّمناه».",
+        })
+    clean_items = _clean_reminder_items(tenant, user, items)
+    contact = _reminder_contact_of_tenant(tenant, contact_id)
+    _assert_contact_serves_items(contact, clean_items)
+    return _write_reminder_logs(
+        tenant=tenant,
+        actor=user,
+        items=[dict(item, contact=contact) for item in clean_items],
+        kind=REMINDER_KIND_SENT,
+        channel=clean_channel,
+        body=(body or "").strip(),
+    )
+
+
+def mark_reminders_manual(tenant, *, user, contact_id, body, channel, items):
+    """«كلّمناه»: هاتفٌ أو زيارة — والواتسابُ ليس «كلّمناه»."""
+    if channel not in REMINDER_MANUAL_CHANNELS:
+        raise ValidationError({
+            "channel": "قناةُ التواصل اليدويّ: تلفون أو بالزيارة.",
+        })
+    clean_items = _clean_reminder_items(tenant, user, items)
+    contact = _reminder_contact_of_tenant(tenant, contact_id)
+    _assert_contact_serves_items(contact, clean_items)
+    return _write_reminder_logs(
+        tenant=tenant,
+        actor=user,
+        items=[dict(item, contact=contact) for item in clean_items],
+        kind=REMINDER_KIND_MANUAL,
+        channel=channel,
+        body=(body or "").strip(),
+    )
+
+
+def dismiss_reminders(tenant, *, user, items, reason=""):
+    """«شيل لهذه المرة»: يُعيد المؤقّت ولا يُعدّ في الحدّ الأقصى.
+
+    والمستلِمُ يُحلّ هنا بالقاعدة نفسها التي تحلّه في القائمة (`_reminder_contacts`):
+    التنحيةُ قرارُ مكتبٍ لا رسالة، فلا يُطلب معرّفُ جهةٍ من الشاشة. **والكتابةُ
+    دفعةٌ واحدة**: كلُّ بندٍ يحمل مستلِمَه، فيبقى استعلامُ البيانات الوصفية و
+    `bulk_create` واحدين مهما بلغ عددُ البنود.
+    """
+    clean_items = _clean_reminder_items(tenant, user, items)
+    clients = [item["client"] for item in clean_items]
+    contacts = _reminder_contacts(
+        tenant, clients, {item["reminder_type"] for item in clean_items},
+    )
+    return _write_reminder_logs(
+        tenant=tenant,
+        actor=user,
+        items=[
+            dict(item, contact=contacts.get((item["client"].pk, item["reminder_type"])))
+            for item in clean_items
+        ],
+        kind=REMINDER_KIND_DISMISSED,
+        channel="",
+        body="",
+        reason=(reason or "").strip(),
+    )
+
+
+def postpone_reminder(
+    tenant, *, user, day, client_id, reminder_type, until=None, reason="",
+):
+    """«أجّل التذكير لتاريخ…» — صفٌّ جديد، و`until=None` يمسح التأجيل."""
+    _assert_reminder_type(reminder_type)
+    client = _visible_client_or_raise(tenant, user, client_id)
+    if until is not None:
+        until = _reminder_period_date(until, "until")
+        if until <= day:
+            raise ValidationError({
+                "until": "تاريخُ التأجيل يجب أن يكون بعد اليوم.",
+            })
+    return ReminderPostpone.objects.create(
+        tenant=tenant,
+        client=client,
+        reminder_type=reminder_type,
+        until=until,
+        reason=(reason or "").strip(),
+        created_by=user,
+    )
+
+
+def undo_reminder_log(row, *, actor):
+    """«ما انبعتت» — صفُّ `undo` جديدٌ يشير إلى ما يُبطله، ولا يُبطل تصحيحاً.
+
+    والصفُّ الأصلِيُّ يبقى: العدُّ يستثني المُبطَل، والسطرُ يبقى أثراً. وإبطالُ
+    `undo` بمثابة إبطالٍ لإبطال — يُرفَض صراحةً حتى لا يدور السجلُّ في حلقة.
+    """
+    if row.kind not in REMINDER_COUNTED_KINDS:
+        raise ValidationError({
+            "row": "لا يُبطَل إلا تذكيرٌ أُرسل أو كلّمناه — هذا الصفُّ ليس إرسالاً.",
+        })
+    if ReminderLog.objects.filter(reverts=row).exists():
+        raise ValidationError({"row": "هذا الصفُّ أُبطل مرّةً — لا يُبطل مرّتين."})
+    return ReminderLog.objects.create(
+        tenant=row.tenant,
+        client=row.client,
+        contact=row.contact,
+        recipient_name=row.recipient_name,
+        recipient_phone=row.recipient_phone,
+        reminder_type=row.reminder_type,
+        kind=REMINDER_KIND_UNDO,
+        channel="",
+        body="",
+        period_start=row.period_start,
+        period_end=row.period_end,
+        subject=dict(row.subject or {}),
+        reverts=row,
+        created_by=actor,
+    )
+
+
+def reminder_log_row(row) -> dict:
+    """سطرُ السجلّ كما تعرضه شاشةُ الزبون — بالمسمّيات لا بالمفاتيح."""
+    return {
+        "id": row.pk,
+        "client": {"id": row.client_id, "name": row.client.name},
+        "contact_id": row.contact_id,
+        "recipient_name": row.recipient_name,
+        "recipient_phone": row.recipient_phone,
+        "reminder_type": row.reminder_type,
+        "reminder_type_label": REMINDER_TYPE_LABELS.get(row.reminder_type, ""),
+        "kind": row.kind,
+        "kind_label": REMINDER_KIND_LABELS.get(row.kind, ""),
+        "channel": row.channel,
+        "channel_label": REMINDER_CHANNEL_LABELS.get(row.channel, ""),
+        "body": row.body,
+        "period_start": None if row.period_start is None else row.period_start.isoformat(),
+        "period_end": None if row.period_end is None else row.period_end.isoformat(),
+        "period_label": (
+            "" if row.period_start is None or row.period_end is None
+            else deadlines.period_label(row.period_start, row.period_end)
+        ),
+        "subject": dict(row.subject or {}),
+        "reason": row.reason,
+        "reverts_id": row.reverts_id,
+        "created_by": (
+            None if row.created_by_id is None
+            else {"id": row.created_by_id, "name": user_display_name(row.created_by)}
+        ),
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def visible_reminder_logs(tenant, user):
+    """**مصدر رؤية السجلّ الوحيد**: صفوفُ زبائن يراهم هذا العضو.
+
+    ولا فلترةَ بغيره في أيّ نقطة: سطرُ سجلٍّ لزبونٍ لا يراه العضو **404**،
+    وسطرٌ لا يمرّ من هنا لا يُقرأ ولا يُبطَل.
+    """
+    return (
+        ReminderLog.objects
+        .filter(
+            tenant=tenant,
+            client__in=visible_clients(tenant, user).values("pk"),
+        )
+        .select_related("client", "created_by")
+    )
+
+
+def reminder_log_payload(tenant, *, user, limit=100) -> dict:
+    """سجلُّ المكتب كما يراه هذا العضو — الأحدثُ أوّلاً وبسقفٍ معلَن."""
+    rows = visible_reminder_logs(tenant, user)[:limit]
+    return {"rows": [reminder_log_row(row) for row in rows], "limit": limit}
+
+
+def client_reminder_log_payload(client, *, limit=100) -> dict:
+    """سجلُّ زبونٍ واحدٍ لتبويب ملفّه — الأحدثُ أوّلاً.
+
+    الرؤيةُ مسؤوليةُ الـview (`get_object` عبر `visible_clients`)، والقائمةُ
+    مقيَّدةٌ بالزبون نفسه لا بكلّ ما يراه العضو.
+    """
+    rows = (
+        ReminderLog.objects
+        .filter(tenant=client.tenant, client=client)
+        .select_related("client", "created_by")
+        .order_by("-created_at", "-id")[:limit]
+    )
+    return {
+        "client": {"id": client.pk, "name": client.name},
+        "rows": [reminder_log_row(row) for row in rows],
+        "limit": limit,
+    }
+
+
+def reminder_postpone_row(row) -> dict:
+    """تأجيلٌ كما يُعاد لصاحبه بعد كتابته — الشاشةُ تستبدل حالتها به."""
+    return {
+        "id": row.pk,
+        "client_id": row.client_id,
+        "reminder_type": row.reminder_type,
+        "reminder_type_label": REMINDER_TYPE_LABELS.get(row.reminder_type, ""),
+        "until": None if row.until is None else row.until.isoformat(),
+        "reason": row.reason,
+        "created_at": row.created_at.isoformat(),
+    }
+
+
+def office_holiday_row(row) -> dict:
+    return {
+        "id": row.pk,
+        "date": row.date.isoformat(),
+        "name": row.name,
+    }
+
+
+# ── التصعيد بعد الحدّ (#280/D11) ────────────────────────────────────────────
+def _reminder_alert_ref(client_id, reminder_type, period_start, period_end) -> str:
+    """مفتاحُ التنبيه — يحمل الفترةَ بطرفيها نصّاً فيُبحَث عنه بلا عمودٍ جديد.
+
+    **والنهايةُ في المفتاح ليست زينة**: الفترةُ السنوية تبدأ في 1 يناير كما تبدأ
+    كانون الثاني، فمفتاحٌ بالبداية وحدها يجعل تنبيهَ السنة وتنبيهَ الشهر صفّاً
+    واحداً — فيُسقط أحدهما الآخرَ من الجرس بلا أن يُقرأ.
+    """
+    return (
+        f"reminder:{client_id}:{reminder_type}:"
+        f"{period_start.isoformat()}:{period_end.isoformat()}"
+    )
+
+
+def _live_reminder_alert_refs(tenant) -> set[str]:
+    """مراجعُ التذكير التي ما زالت أوراقُها ناقصة — يُستبعَد ما اكتمل عند القراءة.
+
+    **ونطاقُ المسح مقيَّدٌ بمن له تنبيهُ تذكيرٍ قائم**: فتحُ الجرس لا يمسح جدولَ
+    الأوراق كلَّه، بل فتراتِ الزبائن الذين تنبيهُهم معروضٌ فعلاً. والشرطُ استعلامٌ
+    فرعيٌّ واحد (`client_id__in`) لا مسحٌ في بايثون، فعددُ الاستعلامات ثابتٌ ولا
+    يكبر بعدد الزبائن. والتنبيهُ «قائمٌ» ما دام صفُّه في القاعدة: إسقاطُه عند
+    القراءة لا يمحو الصفّ، فالمفتاحُ يُحسب هنا بقاعدة الأوراق نفسِها.
+    """
+    return {
+        _reminder_alert_ref(client_id, REMINDER_DOCUMENTS, period_start, period_end)
+        for client_id, period_start, period_end in (
+            DocumentChecklistItem.objects
+            .filter(
+                tenant=tenant,
+                client_id__in=(
+                    OfficeAlert.objects
+                    .filter(tenant=tenant, kind__in=REMINDER_ALERT_KINDS)
+                    .values("client_id")
+                ),
+                status__in=(DOCUMENT_STATUS_REQUIRED, DOCUMENT_STATUS_PARTIAL),
+            )
+            .values_list("client_id", "period_start", "period_end")
+            .distinct()
+        )
+    }
+
+
+def _generate_reminder_alerts(tenant, *, day) -> int:
+    """يولّد تصعيدَ التذكير ليومٍ صريح ويُرجع **ما أنشأه هذا النداء**.
+
+    - زبونٌ × أوراق × فترةٌ وصل عدُّها `max` وما زالت ناقصة، وحان يومُ التذكير
+      التالي ⇒ تنبيهٌ للمسؤول برسالةٍ تسمّي الزبون والفترة والعدد **بلا مبلغ**.
+    - وبعد `reminder_escalation_owner_days` (يومان افتراضاً) وما زالت ناقصة ⇒
+      تنبيهٌ لصاحب المكتب — التعريفُ القائم نفسه (`_office_owner_ids`).
+
+    **والكلفةُ ثابتة**: الحسابُ كلُّه مسحةٌ واحدة (`_reminder_candidates`)، ثم
+    المفاتيحُ القائمة استعلامٌ واحدٌ محصورٌ بمراجع المرشّحين، ثم `bulk_create`
+    دفعةً. والفرادةُ في القاعدة تحرس التكرارَ لو نُودِي النداءُ مرّتين في يوم.
+    """
+    clients = list(
+        OfficeClient.objects
+        .filter(tenant=tenant, status=OfficeClient.STATUS_ACTIVE)
+        .select_related("responsible")
+        .order_by("id"),
+    )
+    if not clients:
+        return 0
+    settings_by_client = resolve_settings_for_clients(
+        tenant, _REMINDER_CLIENT_KEYS, clients,
+    )
+    candidates = [
+        candidate for candidate in _reminder_candidates(
+            tenant, clients, day=day,
+            settings_by_client=settings_by_client,
+            reminder_type=REMINDER_DOCUMENTS,
+        )
+        if candidate.exhausted and candidate.due
+    ]
+    if not candidates:
+        return 0
+    owner_days = resolve_setting(tenant, REMINDER_ESCALATION_OWNER_DAYS_KEY) or 0
+    owners = _office_owner_ids(tenant)
+    refs = {
+        _reminder_alert_ref(
+            candidate.client.pk, candidate.reminder_type,
+            candidate.period_start, candidate.period_end,
+        )
+        for candidate in candidates
+    }
+    existing = set(
+        OfficeAlert.objects
+        .filter(tenant=tenant, ref_key__in=refs)
+        .values_list("recipient_id", "kind", "ref_key"),
+    )
+    rows: list[OfficeAlert] = []
+    for candidate in candidates:
+        client = candidate.client
+        responsible = client.responsible
+        responsible_id = getattr(responsible, "pk", None)
+        period = deadlines.period_label(candidate.period_start, candidate.period_end)
+        ref = _reminder_alert_ref(
+            client.pk, candidate.reminder_type,
+            candidate.period_start, candidate.period_end,
+        )
+        rows.extend(_new_alert_rows(
+            tenant=tenant,
+            kind=OFFICE_ALERT_KIND_REMINDER_LIMIT,
+            ref_key=ref,
+            recipients=_alert_recipient_ids(
+                settings_registry.ALERT_TO_ASSIGNEE,
+                assignee_id=responsible_id,
+                owners=owners,
+            ),
+            message=(
+                f"{client.name} — أوراق ناقصة ({period}) — "
+                f"{candidate.count} تذكيرات وما زالت ناقصة."
+            ),
+            day=day,
+            client=client,
+            task=None,
+            obligation=None,
+            existing=existing,
+        ))
+        if day < candidate.next_due + timedelta(days=owner_days):
+            continue
+        rows.extend(_new_alert_rows(
+            tenant=tenant,
+            kind=OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER,
+            ref_key=ref,
+            recipients=_alert_recipient_ids(
+                settings_registry.ALERT_TO_OWNER,
+                assignee_id=responsible_id,
+                owners=owners,
+            ),
+            message=(
+                f"{client.name} — أوراق ناقصة ({period}) — "
+                f"{candidate.count} تذكيرات بلا نتيجة، والتذكيرُ توقّف."
+            ),
+            day=day,
+            client=client,
+            task=None,
+            obligation=None,
+            existing=existing,
+        ))
+    if not rows:
+        return 0
+    OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
+    return len(rows)

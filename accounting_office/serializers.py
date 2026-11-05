@@ -13,11 +13,16 @@ from rest_framework import serializers
 from accounting_office import services
 from accounting_office.models import (
     CLIENT_SERVICE_FREQUENCY_CHOICES,
+    CONSENT_CHANNEL_LABELS,
     ClientReminderRecipient,
     Contact,
     OBLIGATION_DIRECTION_CHOICES,
     OfficeClient,
     OfficeService,
+    REMINDER_CHANNEL_CHOICES,
+    REMINDER_CHANNEL_WHATSAPP,
+    REMINDER_MANUAL_CHANNELS,
+    REMINDER_TYPE_CHOICES,
 )
 
 
@@ -153,14 +158,36 @@ class OfficeClientSerializer(
 
 class ContactSerializer(serializers.ModelSerializer):
     language_label = serializers.CharField(source="get_language_display", read_only=True)
+    consent_channel_label = serializers.SerializerMethodField()
 
     class Meta:
         model = Contact
         fields = [
             "id", "name", "phone", "language", "language_label",
+            # #280/D2: الإذنُ يُقرأ مع الجهة، ويُكتب بفعله وحده (`consent/`)
+            # فيمرّ بحارس الخدمة — كتابتُه هنا كانت تُسقط `consent_on`.
+            "reminders_consent", "consent_types",
+            "consent_on", "consent_channel", "consent_channel_label",
+            "consent_withdrawn_on", "consent_withdrawn_by",
             "created_at", "updated_at",
         ]
-        read_only_fields = ["created_at", "updated_at"]
+        read_only_fields = [
+            "reminders_consent", "consent_types", "consent_on", "consent_channel",
+            "consent_withdrawn_on", "consent_withdrawn_by", "created_at", "updated_at",
+        ]
+
+    def get_consent_channel_label(self, contact) -> str:
+        return CONSENT_CHANNEL_LABELS.get(contact.consent_channel, "")
+
+
+class ContactConsentSerializer(serializers.Serializer):
+    """`{consent, types?, channel?}` — الأنواعُ والقناةُ يُتحقَّقان في الخدمة."""
+
+    consent = serializers.BooleanField()
+    types = serializers.ListField(
+        child=serializers.CharField(), required=False, allow_empty=True,
+    )
+    channel = serializers.CharField(required=False, allow_blank=True, max_length=20)
 
 
 class ClientContactRowSerializer(serializers.Serializer):
@@ -431,3 +458,129 @@ class OfficeDocumentItemUpdateSerializer(serializers.Serializer):
         child=serializers.CharField(max_length=60), required=False,
     )
     is_active = serializers.BooleanField(required=False)
+
+
+# ── التذكيرات والرسائل (#280) ────────────────────────────────────────────────
+class ReminderTemplateWriteSerializer(serializers.Serializer):
+    """نصُّ بديلٍ لمكتب — الرموزُ يُتحقَّق منها في الخدمة (وهي التي تعرف المعتمد)."""
+
+    body = serializers.CharField()
+
+
+#: قنواتُ الأفعال كما تُعلَن في الـAPI — `sent` واتسابٍ وحدها، و`manual` تلفونٌ أو
+#: زيارة. قناةٌ تُقبل في الشكل ثم تُرفض في الخدمة عيبُ إعلانٍ لا تحقّق.
+_SENT_CHANNEL_CHOICES = [
+    (channel, label)
+    for channel, label in REMINDER_CHANNEL_CHOICES
+    if channel == REMINDER_CHANNEL_WHATSAPP
+]
+_MANUAL_CHANNEL_CHOICES = [
+    (channel, label)
+    for channel, label in REMINDER_CHANNEL_CHOICES
+    if channel in REMINDER_MANUAL_CHANNELS
+]
+
+
+class ReadyToSendItemSerializer(serializers.Serializer):
+    """بندٌ في رسالةٍ: مَن، وأيّ نوع، وأيّ فترة — **بطرفَيها**.
+
+    و`period_end` مطلوبةٌ لأن مفتاحَ العدّ `(period_start, period_end)`: القائمةُ
+    السنوية تبدأ في 1 يناير كالشهرية، وبدون النهاية تُخلط أوراقُ السنة بالشهر.
+    ورسالةُ «جاهز للإرسال» تحمل المفتاحين، فلا تخمينَ في الشاشة.
+    """
+
+    client_id = serializers.IntegerField(min_value=1)
+    reminder_type = serializers.ChoiceField(choices=REMINDER_TYPE_CHOICES)
+    period_start = serializers.DateField()
+    period_end = serializers.DateField()
+
+
+class ReadyToSendPayloadSerializer(serializers.Serializer):
+    """قائمةُ «جاهز للإرسال» كما يخرجها `ready_to_send_payload` — **قراءةٌ وحدها**.
+
+    شكلُ المورد المعلَن لجمعِه (GET وحده): فلا يُعلن الـ`OPTIONS` حمولةَ كتابةٍ
+    لا تقبلها النقطة، وللأفعال الأربعة سيريالايزراتُها.
+    """
+
+    day = serializers.DateField(read_only=True)
+    merge_daily = serializers.BooleanField(read_only=True)
+    reminder_type = serializers.CharField(read_only=True, allow_null=True)
+    messages = serializers.ListField(child=serializers.DictField(), read_only=True)
+    placeholders = serializers.ListField(child=serializers.CharField(), read_only=True)
+
+
+class ReadyToSendSentSerializer(serializers.Serializer):
+    """«انبعثت»: جهةٌ ونصٌّ وبنودٌ — وصفٌّ لكل بندٍ بالنصّ نفسه.
+
+    و`channel` قناةٌ واحدةٌ (`whatsapp`)، وفراغُه يعنيها: «انبعثت» إرسالٌ
+    بالتطبيق، والتلفونُ والزيارة «كلّمناه» لا «انبعثت».
+    """
+
+    contact_id = serializers.IntegerField(min_value=1)
+    body = serializers.CharField(allow_blank=True, required=False)
+    channel = serializers.ChoiceField(
+        choices=_SENT_CHANNEL_CHOICES, required=False, allow_blank=True,
+    )
+    items = ReadyToSendItemSerializer(many=True)
+
+
+class ReadyToSendManualSerializer(serializers.Serializer):
+    """«كلّمناه»: نفسُ البنود بقناةٍ يدوية — تلفونٌ أو زيارة."""
+
+    contact_id = serializers.IntegerField(min_value=1)
+    body = serializers.CharField(allow_blank=True, required=False)
+    channel = serializers.ChoiceField(choices=_MANUAL_CHANNEL_CHOICES)
+    items = ReadyToSendItemSerializer(many=True)
+
+
+class ReadyToSendDismissSerializer(serializers.Serializer):
+    """«شيل لهذه المرة»: بلا جهةٍ ولا نصّ — المستلِمُ يُحلّ في الخدمة."""
+
+    items = ReadyToSendItemSerializer(many=True)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class ReminderPostponeWriteSerializer(serializers.Serializer):
+    """«أجّل التذكير لتاريخ…» — و`until=null` صفٌّ يمسح التأجيل."""
+
+    client_id = serializers.IntegerField(min_value=1)
+    reminder_type = serializers.ChoiceField(choices=REMINDER_TYPE_CHOICES)
+    until = serializers.DateField(required=False, allow_null=True)
+    reason = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class ReminderLogSerializer(serializers.Serializer):
+    """سطرُ السجلّ كما يخرجه `reminder_log_row` — **قراءةٌ وحدها**.
+
+    هذا شكلُ نقطة السجلّ المعلَن، فلا يُعلن الـ`OPTIONS` حمولةَ كتابةٍ لا تقبلها
+    النقطة: الصفُّ لا يُنشأ ولا يُعدَّل ولا يُحذف من الـAPI، والتصحيحُ فعلُ
+    `undo` وحده. وكلُّ حقلٍ هنا `read_only` — بطاقةُ السجلّ لا تُكتب.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    client = serializers.DictField(read_only=True)
+    contact_id = serializers.IntegerField(read_only=True, allow_null=True)
+    recipient_name = serializers.CharField(read_only=True)
+    recipient_phone = serializers.CharField(read_only=True)
+    reminder_type = serializers.CharField(read_only=True)
+    reminder_type_label = serializers.CharField(read_only=True)
+    kind = serializers.CharField(read_only=True)
+    kind_label = serializers.CharField(read_only=True)
+    channel = serializers.CharField(read_only=True)
+    channel_label = serializers.CharField(read_only=True)
+    body = serializers.CharField(read_only=True)
+    period_start = serializers.CharField(read_only=True, allow_null=True)
+    period_end = serializers.CharField(read_only=True, allow_null=True)
+    period_label = serializers.CharField(read_only=True)
+    subject = serializers.DictField(read_only=True)
+    reason = serializers.CharField(read_only=True)
+    reverts_id = serializers.IntegerField(read_only=True, allow_null=True)
+    created_by = serializers.DictField(read_only=True, allow_null=True)
+    created_at = serializers.CharField(read_only=True)
+
+
+class OfficeHolidayWriteSerializer(serializers.Serializer):
+    """عطلةُ مكتبٍ بيومها واسمها — والتكرارُ يرفضه القيدُ في القاعدة."""
+
+    date = serializers.DateField()
+    name = serializers.CharField(required=False, allow_blank=True, max_length=200)

@@ -32,6 +32,15 @@ from accounting_office.settings_registry import (
     EVENT_KIND_CHOICES,
     EVENT_KIND_LABELS as EVENT_KIND_LABELS,
     EVENT_KIND_WITHHOLDING as EVENT_KIND_WITHHOLDING,
+    #: #280: أنواعُ التذكير الأربعة — في السجلّ للسبب نفسه: إعدادا
+    #: `reminder_types_enabled` و`reminder_default_consent_types` يقرآنها.
+    REMINDER_APPOINTMENT as REMINDER_APPOINTMENT,
+    REMINDER_BALANCE as REMINDER_BALANCE,
+    REMINDER_DEADLINE as REMINDER_DEADLINE,
+    REMINDER_DOCUMENTS as REMINDER_DOCUMENTS,
+    REMINDER_TYPE_CHOICES as REMINDER_TYPE_CHOICES,
+    REMINDER_TYPE_LABELS as REMINDER_TYPE_LABELS,
+    REMINDER_TYPES as REMINDER_TYPES,
 )
 from tenants.models import Tenant, UserCompanyMembership
 
@@ -270,8 +279,38 @@ class TaxCard(models.Model):
         super().save(*args, **kwargs)
 
 
+# ── الموافقة على التذكير (#280/D2) ──────────────────────────────────────────
+#
+# **الإذنُ يُسجَّل بكيفه لا بمفتاحٍ مفتوح**: المكتب يسأل «بتحب نذكّرك؟» فيُكتب
+# الجوابُ وتاريخُه وطريقُه (حكيٌّ أو ورقٌ أو واتساب) — فحين يقول الزبون «أنا ما
+# وافقت» يوجد سطرٌ يقول متى وكيف. وهذه قناةُ **الإذن** لا قناةُ الإرسال:
+# `ReminderLog.channel` يقول كيف ذهبت الرسالة فعلاً.
+CONSENT_CHANNEL_TALK = "talk"
+CONSENT_CHANNEL_PAPER = "paper"
+CONSENT_CHANNEL_WHATSAPP = "whatsapp"
+CONSENT_CHANNEL_CHOICES: list[tuple[str, str]] = [
+    (CONSENT_CHANNEL_TALK, "حكي"),
+    (CONSENT_CHANNEL_PAPER, "ورق"),
+    (CONSENT_CHANNEL_WHATSAPP, "واتساب"),
+]
+CONSENT_CHANNEL_LABELS: dict[str, str] = dict(CONSENT_CHANNEL_CHOICES)
+
+
+def _default_consent_types() -> list[str]:
+    """أنواعُ التذكير كلُّها افتراضاً — **نسخةٌ جديدة** لا قائمةً مشتركة تُعدَّل."""
+    return list(REMINDER_TYPES)
+
+
 class Contact(models.Model):
-    """شخصٌ يحكي معه المكتب — يملكه المكتب، ويُربط بأكثر من زبون."""
+    """شخصٌ يحكي معه المكتب — يملكه المكتب، ويُربط بأكثر من زبون.
+
+    **والتذكيرُ بإذنه (#280/D2)**: `reminders_consent` ما يقوله هو، و`consent_types`
+    ما وافق عليه من الأنواع، و`consent_on` و`consent_channel` كيف ومتى أذن،
+    و`consent_withdrawn_on`/`consent_withdrawn_by` متى ومَن سحب. **والسحبُ لا
+    يمحو الإذن**: يبقى تاريخُ الإذن قارئاً بجانب تاريخ السحب، فالمكتب يعرف كم
+    تذكيراً أُرسل قبل أن يتغيّر رأيُه. وجهةٌ بلا إذنٍ (أو نوعُها ليس في
+    `consent_types`) لا تدخل قائمة «جاهز للإرسال» أبداً.
+    """
 
     LANGUAGE_ARABIC = "ar"
     LANGUAGE_HEBREW = "he"
@@ -291,6 +330,33 @@ class Contact(models.Model):
     language = models.CharField(
         max_length=2, choices=LANGUAGE_CHOICES, default=LANGUAGE_ARABIC, verbose_name="اللغة",
     )
+    #: #280/D2: الموافقةُ على التذكير — الافتراضُ «نعم» لأن الجهةَ تُسجَّل في
+    #: المكتب لهذا الغرض، والرفضُ فعلٌ صريح يُسجَّل بتاريخه.
+    reminders_consent = models.BooleanField(
+        default=True, verbose_name="موافق على التذكير",
+    )
+    consent_types = models.JSONField(
+        default=_default_consent_types, verbose_name="الأنواع الموافق عليها",
+    )
+    consent_on = models.DateField(null=True, blank=True, verbose_name="تاريخ الموافقة")
+    consent_channel = models.CharField(
+        max_length=20,
+        choices=CONSENT_CHANNEL_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="كيف أذن",
+    )
+    consent_withdrawn_on = models.DateField(
+        null=True, blank=True, verbose_name="تاريخ سحب الموافقة",
+    )
+    consent_withdrawn_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_consent_withdrawals",
+        verbose_name="سحبها",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
 
@@ -301,6 +367,10 @@ class Contact(models.Model):
 
     def __str__(self) -> str:
         return self.name
+
+    def allows_reminder(self, reminder_type: str) -> bool:
+        """هل يوافق هذا الشخص على هذا النوع؟ — السؤالُ الوحيد الذي تسأله القائمة."""
+        return self.reminders_consent and reminder_type in (self.consent_types or ())
 
 
 class ClientContact(models.Model):
@@ -368,19 +438,19 @@ class ClientContact(models.Model):
 
 
 class ClientReminderRecipient(models.Model):
-    """مستلِمُ نوع تذكير لزبون — وغياب الصفّ يعني **الجهة الرئيسية**."""
+    """مستلِمُ نوع تذكير لزبون — وغياب الصفّ يعني **الجهة الرئيسية**.
 
-    REMINDER_DOCUMENTS = "documents"
-    REMINDER_DEADLINE = "deadline"
-    REMINDER_BALANCE = "balance"
-    REMINDER_APPOINTMENT = "appointment"
-    REMINDER_TYPE_CHOICES = [
-        (REMINDER_DOCUMENTS, "أوراق ناقصة"),
-        (REMINDER_DEADLINE, "موعد رسمي قريب"),
-        (REMINDER_BALANCE, "اللي عليه"),
-        (REMINDER_APPOINTMENT, "تذكير موعد"),
-    ]
-    REMINDER_TYPES: tuple[str, ...] = tuple(key for key, _label in REMINDER_TYPE_CHOICES)
+    والأنواعُ الأربعة **معرَّفةٌ أعلى الملفّ** (من `settings_registry`) لأن
+    `Contact.consent_types` يقرأ قائمتَها قبل هذا النموذج؛ وهذه أسماءٌ مصدَّرةٌ
+    هنا فلا يفترق تعريفا نوعٍ واحد.
+    """
+
+    REMINDER_DOCUMENTS = REMINDER_DOCUMENTS
+    REMINDER_DEADLINE = REMINDER_DEADLINE
+    REMINDER_BALANCE = REMINDER_BALANCE
+    REMINDER_APPOINTMENT = REMINDER_APPOINTMENT
+    REMINDER_TYPE_CHOICES = REMINDER_TYPE_CHOICES
+    REMINDER_TYPES: tuple[str, ...] = REMINDER_TYPES
 
     tenant = models.ForeignKey(
         Tenant,
@@ -426,6 +496,377 @@ class ClientReminderRecipient(models.Model):
                     "المستلِمُ جهةٌ غير مربوطةٍ بهذا الزبون — لا يُعيَّن رابطُ زبونٍ آخر.",
                 )
         super().save(*args, **kwargs)
+
+
+# ── التذكيرات والرسائل (#280) ────────────────────────────────────────────────
+#
+# **نصٌّ واحدٌ يُرسَل، ومصدرُه اثنان**: افتراضيُّ المنصّة في الكود
+# (`REMINDER_DEFAULT_TEXTS`) يُشحَن مع النظام، وبديلُ المكتب في
+# `ReminderTemplate` يغلبه. والرمزُ الوحيد المعتمد ستة:
+# `{client_name}` `{period}` `{due_date}` `{amount}` `{missing_list}` `{office_name}`
+# — ونصٌّ يحمل غيرها يُرفَض عند الحفظ باسمه، لا يُقبل ثم يفشل عند الإرسال.
+REMINDER_PLACEHOLDERS: tuple[str, ...] = (
+    "client_name", "period", "due_date", "amount", "missing_list", "office_name",
+)
+
+#: النصوصُ المشحونة — لكل نوعٍ عربيٌّ وعبريٌّ (بحث #256 §5). **عربيٌّ وعبريٌّ
+#: قالبان لا واحد**: النبرةُ الشاميّة البسيطة في الأول والعبريةُ القصيرة في الثاني.
+REMINDER_DEFAULT_TEXTS: dict[str, dict[str, str]] = {
+    REMINDER_DOCUMENTS: {
+        "ar": (
+            "أهلاً {client_name}،\n"
+            "لما نجهّز {period} ناقصنا منك: {missing_list}.\n"
+            "لو بتقدر تبعتلنا إياهم قبل {due_date} بنكون خلّصنا بأسرع وقت،\n"
+            "وإذا في شي مش واضح خبرنا.\n"
+            "شكراً — {office_name}"
+        ),
+        "he": (
+            "שלום {client_name},\n"
+            "כדי שנוכל להכין את {period} חסרים לנו: {missing_list}.\n"
+            "נשמח לקבל אותם עד {due_date},\n"
+            "ואם משהו לא ברור — דברו איתנו.\n"
+            "תודה, {office_name}"
+        ),
+    },
+    #: (ب) في البحث ينادي الموعدَ باسمه (`{deadline_name}`) — وهذا الرمزُ خارج
+    #: الستّة المعتمدة، فالنصُّ المشحون يقول «موعد التقديم» ويبقى النوعُ بلا مولّد
+    #: حتى تذكرته (#281).
+    REMINDER_DEADLINE: {
+        "ar": (
+            "أهلاً {client_name}،\n"
+            "بذكّرك إنّ موعد التقديم عن {period} هو {due_date}،\n"
+            "ولسا بدنا نستلم منك {missing_list} قبل ما نقدّم.\n"
+            "إذا في عائق خبرنا من اليوم لنلحق.\n"
+            "{office_name}"
+        ),
+        "he": (
+            "שלום {client_name},\n"
+            "תזכורת: המועד להגשה של {period} הוא {due_date},\n"
+            "ועדיין חסרים לנו {missing_list} לפני ההגשה.\n"
+            "אם יש משהו תקוע — דברו איתנו היום כדי שנספיק.\n"
+            "{office_name}"
+        ),
+    },
+    REMINDER_BALANCE: {
+        "ar": (
+            "أهلاً {client_name}،\n"
+            "على حساب {period} عندك {amount} مستحقة،\n"
+            "آخر موعد للسداد {due_date}.\n"
+            "بنستلم كاش أو تحويل أو شيك، وإذا في استفسار خبرنا.\n"
+            "شكراً — {office_name}"
+        ),
+        "he": (
+            "שלום {client_name},\n"
+            "יתרת החובה שלך עבור {period} היא {amount},\n"
+            "המועד האחרון לתשלום: {due_date}.\n"
+            "אפשר לשלם במזומן, בהעברה או בצ'ק. לכל שאלה — אנחנו כאן.\n"
+            "תודה, {office_name}"
+        ),
+    },
+    #: (د) تذكيرُ موعد: نصٌّ قصيرٌ محايدٌ بالنبرة نفسها — لا مولّدَ له بعد (#283).
+    REMINDER_APPOINTMENT: {
+        "ar": (
+            "أهلاً {client_name}،\n"
+            "بذكّرك بموعدك مع المكتب يوم {due_date}.\n"
+            "إذا الموعد مش مناسب خبرنا من اليوم نغيّره.\n"
+            "{office_name}"
+        ),
+        "he": (
+            "שלום {client_name},\n"
+            "תזכורת לפגישה במשרד ביום {due_date}.\n"
+            "אם המועד לא מתאים — דברו איתנו ונשנה אותו.\n"
+            "{office_name}"
+        ),
+    },
+}
+
+REMINDER_LANGUAGE_CHOICES: list[tuple[str, str]] = list(Contact.LANGUAGE_CHOICES)
+REMINDER_LANGUAGES: tuple[str, ...] = tuple(key for key, _label in REMINDER_LANGUAGE_CHOICES)
+
+
+#: **ما يُسجَّل في السجلّ** (#280/D4): أربعةُ أنواعٍ لا تُعدَّل ولا تُحذف.
+#: `sent` و`manual` يعدّان في الإيقاع، و`dismissed` يُعيد المؤقّت ولا يُعدّ،
+#: و`undo` صفٌّ جديدٌ يشير إلى ما يُبطله — فالتصحيحُ إضافةٌ لا محو.
+REMINDER_KIND_SENT = "sent"
+REMINDER_KIND_MANUAL = "manual"
+REMINDER_KIND_DISMISSED = "dismissed"
+REMINDER_KIND_UNDO = "undo"
+REMINDER_KIND_CHOICES: list[tuple[str, str]] = [
+    (REMINDER_KIND_SENT, "انبعتت"),
+    (REMINDER_KIND_MANUAL, "كلّمناه"),
+    (REMINDER_KIND_DISMISSED, "شيل لهذه المرة"),
+    (REMINDER_KIND_UNDO, "ما انبعتت"),
+]
+REMINDER_KIND_LABELS: dict[str, str] = dict(REMINDER_KIND_CHOICES)
+#: ما **يُعدّ** في الإيقاع — و`dismissed` و`undo` خارجَه عمداً.
+REMINDER_COUNTED_KINDS: tuple[str, ...] = (REMINDER_KIND_SENT, REMINDER_KIND_MANUAL)
+#: ما **يُعيد المؤقّت**: كلُّ صفٍّ صدر فعلاً (إرسالاً أو تنحيةً).
+REMINDER_TIMER_KINDS: tuple[str, ...] = (
+    REMINDER_KIND_SENT, REMINDER_KIND_MANUAL, REMINDER_KIND_DISMISSED,
+)
+
+REMINDER_CHANNEL_WHATSAPP = "whatsapp"
+REMINDER_CHANNEL_PHONE = "phone"
+REMINDER_CHANNEL_IN_PERSON = "in_person"
+REMINDER_CHANNEL_CHOICES: list[tuple[str, str]] = [
+    (REMINDER_CHANNEL_WHATSAPP, "واتساب"),
+    (REMINDER_CHANNEL_PHONE, "تلفون"),
+    (REMINDER_CHANNEL_IN_PERSON, "بالزيارة"),
+]
+REMINDER_CHANNEL_LABELS: dict[str, str] = dict(REMINDER_CHANNEL_CHOICES)
+#: قناتا «كلّمناه» — الإرسالُ بالتطبيق ليس يدوياً، والواتسابُ ليس «كلّمناه».
+REMINDER_MANUAL_CHANNELS: tuple[str, ...] = (
+    REMINDER_CHANNEL_PHONE, REMINDER_CHANNEL_IN_PERSON,
+)
+
+
+class ReminderTemplate(models.Model):
+    """بديلُ المكتب عن نصّ المنصّة — صفٌّ لكل (نوع، لغة)، وغيابُه يعني الافتراضي.
+
+    **والحذفُ هو «ارجع للافتراضي»**: لا يُكتب الافتراضيُّ في الجدول مكان البديل،
+    فتصحيحُ نصٍّ في الكود لا يصل مكتباً جمّده صفٌّه. وهذا منعُ النمط نفسه الذي
+    تمنعه `reset_office_setting`.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_reminder_templates",
+        verbose_name="المكتب",
+    )
+    reminder_type = models.CharField(
+        max_length=20, choices=REMINDER_TYPE_CHOICES, verbose_name="نوع التذكير",
+    )
+    language = models.CharField(
+        max_length=2, choices=REMINDER_LANGUAGE_CHOICES, verbose_name="اللغة",
+    )
+    body = models.TextField(verbose_name="النص")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_reminder_templates",
+        verbose_name="عدّله",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "نص تذكير"
+        verbose_name_plural = "نصوص التذكيرات"
+        ordering = ["reminder_type", "language"]
+        constraints = [
+            # فرادةٌ **غير مشروطة**: بديلٌ واحد لكل نوعٍ ولغة في المكتب.
+            models.UniqueConstraint(
+                fields=["tenant", "reminder_type", "language"],
+                name="uniq_reminder_template",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.reminder_type}/{self.language}"
+
+
+class ReminderLog(models.Model):
+    """سجلُّ تذكيرٍ أُرسل أو نُحّي أو صُحِّح — **إلحاقيّ لا يُعدَّل ولا يُحذف**.
+
+    **واللقطةُ فيه**: `recipient_name` و`recipient_phone` نسخةُ ما كان وقت
+    الإرسال، فتغييرُ الهاتف بعدها لا يعيد كتابة التاريخ. و`body` نصُّ ما ذهب
+    فعلاً — فما أُرسل يُقرأ بعد سنة كما أُرسل.
+
+    **والتصحيحُ صفٌّ جديد** (`undo` يشير بـ`reverts` إلى ما يُبطله) لا محوٌ
+    للصفّ: «ما انبعتت» خبرٌ يُضاف، والصفُّ الأصلِيُّ يبقى أثراً. والعدّ في
+    الإيقاع يستثني المُبطَل — فالتصحيحُ يُنقص العدّاد ولا يشطب السطر.
+
+    و`client` على `PROTECT` كسائر ما لا يُمحى تاريخُه: زبونٌ له سجلُّ تذكير لا
+    يُحذف. و`contact` على `SET_NULL` لأن حذف الجهة لا يمحو ما أُرسل إليها —
+    اللقطةُ تحفظ الاسم والهاتف.
+    """
+
+    KIND_SENT = REMINDER_KIND_SENT
+    KIND_MANUAL = REMINDER_KIND_MANUAL
+    KIND_DISMISSED = REMINDER_KIND_DISMISSED
+    KIND_UNDO = REMINDER_KIND_UNDO
+    CHANNEL_WHATSAPP = REMINDER_CHANNEL_WHATSAPP
+    CHANNEL_PHONE = REMINDER_CHANNEL_PHONE
+    CHANNEL_IN_PERSON = REMINDER_CHANNEL_IN_PERSON
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_reminder_logs",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="reminder_logs",
+        verbose_name="الزبون",
+    )
+    contact = models.ForeignKey(
+        Contact,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reminder_logs",
+        verbose_name="الجهة",
+    )
+    recipient_name = models.CharField(
+        max_length=200, blank=True, default="", verbose_name="اسم المستلِم",
+    )
+    recipient_phone = models.CharField(
+        max_length=40, blank=True, default="", verbose_name="هاتف المستلِم",
+    )
+    reminder_type = models.CharField(
+        max_length=20, choices=REMINDER_TYPE_CHOICES, verbose_name="نوع التذكير",
+    )
+    kind = models.CharField(
+        max_length=20, choices=REMINDER_KIND_CHOICES, verbose_name="نوع الصفّ",
+    )
+    channel = models.CharField(
+        max_length=20,
+        choices=REMINDER_CHANNEL_CHOICES,
+        blank=True,
+        default="",
+        verbose_name="القناة",
+    )
+    #: نصُّ ما أُرسل — فارغٌ في التنحية والتصحيح.
+    body = models.TextField(blank=True, default="", verbose_name="النص المرسل")
+    #: بدايةُ الفترة ونهايتُها — فارغتان في نوعٍ لا فترةَ له (موعد، حساب).
+    period_start = models.DateField(null=True, blank=True, verbose_name="بداية الفترة")
+    period_end = models.DateField(null=True, blank=True, verbose_name="نهاية الفترة")
+    #: تفصيلُ المرجع: أكوادُ بنود الأوراق التي كانت ناقصة وقت الإرسال.
+    subject = models.JSONField(default=dict, blank=True, verbose_name="التفصيل")
+    reason = models.TextField(blank=True, default="", verbose_name="السبب")
+    reverts = models.ForeignKey(
+        "self",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reverted_by",
+        verbose_name="يبطل",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_reminder_logs",
+        verbose_name="سجّله",
+    )
+    #: معرّفُ الدفعة: كلُّ صفوف نداءٍ واحدٍ تحمل القيمة نفسها، فيُعاد قراءتها بعد
+    #: `bulk_create` — MySQL لا يُرجع المفاتيح منه (SQLite يُرجعها فيُخفي ذلك).
+    batch = models.UUIDField(
+        default=uuid4, editable=False, db_index=True, verbose_name="الدفعة",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "سجل تذكير"
+        verbose_name_plural = "سجلات التذكيرات"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            # القائمةُ والعدّ يقرآن بـ(الزبون، النوع، بداية الفترة) دائماً.
+            models.Index(
+                fields=["tenant", "client", "reminder_type", "period_start"],
+                name="office_reminder_log_key",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.kind}:{self.client_id}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class ReminderPostpone(models.Model):
+    """«أجّل التذكير لتاريخ…» — والساري **أحدثُ صفٍّ** لكل (زبون، نوع).
+
+    سجلٌّ لا حقل: التأجيلُ يُكتب صفّاً بتاريخه وسببه، و`until=None` صفٌّ يمسح
+    التأجيل. فيُقرأ «إلى متى تؤجَّل هذه الزوجة؟» من آخر صفٍّ وحده، ويبقى تاريخُ
+    التأجيلات كلِّها مكتوباً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_reminder_postpones",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="reminder_postpones",
+        verbose_name="الزبون",
+    )
+    reminder_type = models.CharField(
+        max_length=20, choices=REMINDER_TYPE_CHOICES, verbose_name="نوع التذكير",
+    )
+    until = models.DateField(null=True, blank=True, verbose_name="حتى تاريخ")
+    reason = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="السبب",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_reminder_postpones",
+        verbose_name="أجّله",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "تأجيل تذكير"
+        verbose_name_plural = "تأجيلات التذكيرات"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client", "reminder_type"],
+                name="office_reminder_postpone_key",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}:{self.reminder_type}→{self.until}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class OfficeHoliday(models.Model):
+    """عطلةٌ في يومٍ بعينه — **لا تقويمَ عطلٍ وطنيّ يُخترَع** (#280/D8).
+
+    المكتبُ يعطّل يومَه بنفسه (عيدٌ وطنيّ أو عطلةُ المكتب)، والمحرّكُ لا يعرف
+    مناسباتٍ في الكود. والتذكيرُ لا يُلغى بيوم العطلة: يُحسَب عند القراءة فيظهر
+    في أوّل يومٍ مسموح بعده.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_holidays",
+        verbose_name="المكتب",
+    )
+    date = models.DateField(verbose_name="اليوم")
+    name = models.CharField(max_length=200, blank=True, default="", verbose_name="العطلة")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "عطلة مكتب"
+        verbose_name_plural = "عطل المكتب"
+        ordering = ["-date", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "date"], name="uniq_office_holiday_day",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.date}:{self.name}"
 
 
 class OfficeSettingValue(models.Model):
@@ -1686,11 +2127,25 @@ OFFICE_ALERT_KIND_OBLIGATION_LATE = "obligation_late"
 OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED = "schedule_dates_changed"
 #: #277: المنصة غيّرت موعداً عدّله المكتب — «تُبقي تاريخك أم تأخذ الجديد؟».
 OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED = "override_platform_changed"
+#: #280: وصل التذكيرُ حدَّه وما زالت الأوراق ناقصة — للمسؤول أوّلاً.
+OFFICE_ALERT_KIND_REMINDER_LIMIT = "reminder_limit_reached"
+#: #280: ومضت أيامُ المهلة وما زالت ناقصة — يُصعَّد لصاحب المكتب.
+OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER = "reminder_limit_reached_owner"
+#: نوعا التذكير — يُحكمان بشرطهما في القراءة (اكتمالُ الأوراق) لا بالحالة.
+REMINDER_ALERT_KINDS: tuple[str, ...] = (
+    OFFICE_ALERT_KIND_REMINDER_LIMIT,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER,
+)
 OFFICE_ALERT_KIND_CHOICES: list[tuple[str, str]] = [
     (OFFICE_ALERT_KIND_TASK_LATE_INTERNAL, "شغلة تجاوزت موعدها الداخلي"),
     (OFFICE_ALERT_KIND_OBLIGATION_LATE, "التزام تجاوز موعده الرسمي ولم يُقدَّم"),
     (OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED, "تغيّر موعد التزامات بنسخة لائحة جديدة"),
     (OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED, "المنصة غيّرت موعداً معدَّلاً من المكتب"),
+    (OFFICE_ALERT_KIND_REMINDER_LIMIT, "وصل التذكير حدّه والأوراق ناقصة"),
+    (
+        OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER,
+        "الأوراق ناقصة بعد حدّ التذكير — صار لصاحب المكتب",
+    ),
 ]
 OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
 #: شارةُ كل نوعٍ في الواجهة — **مفتاحُ صنفٍ لا لون**، يُرسَل في `alert_row` فيُلوَّن
@@ -1701,17 +2156,23 @@ OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
     # نوعا اللائحة قرارُ مكتبٍ لا تأخيرُ موعد — أصفر محايدٌ بلا ادّعاء تأخير.
     OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED: OBLIGATION_BADGE_LATE_INTERNAL,
     OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED: OBLIGATION_BADGE_LATE_INTERNAL,
+    # نوعا التذكير شأنُ أوراقٍ ناقصة — شارةُ «ناقصه أوراق» نفسها لا شارتان.
+    OFFICE_ALERT_KIND_REMINDER_LIMIT: OBLIGATION_BADGE_MISSING_DOCS,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OBLIGATION_BADGE_MISSING_DOCS,
 }
 #: **أين يُفتح التنبيه** — مفتاحٌ خادميّ يقرؤه `alert_row` فتبني الواجهةُ الوجهةَ
 #: بلا معرفة أنواع. الافتراضُ ملفُّ الزبون، ونوعا اللائحة يفتحان شاشة الإعدادات
-#: على مجموعة «الضريبة ولائحة المواعيد».
+#: على مجموعة «الضريبة ولائحة المواعيد»، ونوعا التذكير تبويبَ «الأوراق» في الملفّ.
 OFFICE_ALERT_OPENS_CLIENT = "client"
 OFFICE_ALERT_OPENS_DEADLINE_RULES = "deadline_rules"
+OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS = "client_documents"
 OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OFFICE_ALERT_OPENS_CLIENT,
     OFFICE_ALERT_KIND_OBLIGATION_LATE: OFFICE_ALERT_OPENS_CLIENT,
     OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED: OFFICE_ALERT_OPENS_DEADLINE_RULES,
     OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED: OFFICE_ALERT_OPENS_DEADLINE_RULES,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
+    OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
 }
 OFFICE_ALERT_DEFAULT_OPENS = OFFICE_ALERT_OPENS_CLIENT
 

@@ -44,6 +44,7 @@ from accounting_office.models import (
     OfficeClient,
     OfficeCustomRule,
     OfficeDocumentItem,
+    OfficeHoliday,
     OfficeService,
     PeriodTask,
     ServicePackage,
@@ -57,6 +58,7 @@ from accounting_office.serializers import (
     ClientServiceStopSerializer,
     ClientServiceWriteSerializer,
     ClosePriorSerializer,
+    ContactConsentSerializer,
     ContactSerializer,
     CustomRuleUpdateSerializer,
     CustomRuleWriteSerializer,
@@ -71,8 +73,16 @@ from accounting_office.serializers import (
     OfficeClientSerializer,
     OfficeDocumentItemUpdateSerializer,
     OfficeDocumentItemWriteSerializer,
+    OfficeHolidayWriteSerializer,
     OfficeServiceSerializer,
+    ReadyToSendDismissSerializer,
+    ReadyToSendManualSerializer,
+    ReadyToSendPayloadSerializer,
+    ReadyToSendSentSerializer,
+    ReminderLogSerializer,
+    ReminderPostponeWriteSerializer,
     ReminderRecipientSerializer,
+    ReminderTemplateWriteSerializer,
     RuleCodeSerializer,
     RuleOverrideSerializer,
     ServicePackageWriteSerializer,
@@ -135,7 +145,16 @@ class OfficeModuleViewSet(viewsets.GenericViewSet):
         self.tenant = require_module(request, MODULE_KEY)
 
     def handle_exception(self, exc):
-        """`ValidationError` من طبقة الخدمات خطأُ مدخلاتٍ (400) لا عطلُ خادم."""
+        """`ValidationError` من طبقة الخدمات خطأُ مدخلاتٍ (400) لا عطلُ خادم.
+
+        **إلا زبونَ غيرك**: زبونٌ لا يراه العضو **404** لا 400 — 400 كان يقول
+        «حمولتُك فاسدة» عن كائنٍ موجود، و404 لا يقول شيئاً (#272).
+        """
+        if isinstance(exc, services.ReminderClientNotVisible):
+            return Response(
+                {"detail": "الزبون غير موجود."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
         if isinstance(exc, DjangoValidationError):
             detail = exc.message_dict if hasattr(exc, "error_dict") else list(exc.messages)
             exc = ValidationError(detail)
@@ -395,6 +414,15 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
                 contact=None if contact_id is None else self._contact(contact_id),
             )
         return Response(services.reminder_recipients_payload(client))
+
+    @action(detail=True, methods=["get"], url_path="reminder-log")
+    def reminder_log(self, request, pk=None):
+        """سجلُّ التذكيرات لتبويب ملفّ الزبون (#280/D9).
+
+        **`reminders/` مسارٌ آخر ومحجوز**: هو مستلِمو الأنواع الأربعة منذ #271،
+        وسجلُّ التذكيرات جرحٌ مختلف — فلا يُكسَر مسارٌ قائمٌ ليحمل معنًى ثانياً.
+        """
+        return Response(services.client_reminder_log_payload(self.get_object()))
 
     # ── إعدادات الزبون ──────────────────────────────────────────────────
     #
@@ -671,11 +699,36 @@ class OfficeContactViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         self.require_write()
-        serializer.save(tenant=self.tenant)
+        # #280/D2: الجهةُ الجديدة تأخذ أنواعَ الإذن الافتراضية للمكتب — من الخدمة
+        # لا من مُسلسِلٍ يقرأ إعداداً (حراسةُ `test_settings_guard.py`).
+        contact = services.create_contact(
+            self.tenant,
+            name=serializer.validated_data.get("name", ""),
+            phone=serializer.validated_data.get("phone", ""),
+            language=serializer.validated_data.get("language") or Contact.LANGUAGE_ARABIC,
+        )
+        serializer.instance = contact
 
     def perform_update(self, serializer):
         self.require_write()
         serializer.save()
+
+    @action(detail=True, methods=["get", "post"], url_path="consent")
+    def consent(self, request, pk=None):
+        """`GET` جوابُ الإذن، و`POST` يُسجّله بتاريخه — بمفتاح الكتابة نفسه."""
+        contact = self.get_object()
+        if request.method == "POST":
+            self.require_write()
+            serializer = ContactConsentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            services.set_contact_consent(
+                contact,
+                consent=serializer.validated_data["consent"],
+                types=serializer.validated_data.get("types"),
+                channel=serializer.validated_data.get("channel", ""),
+                actor=request.user,
+            )
+        return Response(services.contact_consent_payload(contact))
 
     def destroy(self, request, *args, **kwargs):
         """الحذفُ من دفتر المكتب مشروطٌ بلا ربط — والقاعدة في الخدمة لا هنا."""
@@ -1572,3 +1625,233 @@ class OfficeDocumentItemViewSet(OfficeModuleViewSet):
         if client is None:
             raise NotFound("الزبون غير موجود.")
         return client
+
+
+# ── التذكيرات والرسائل (#280) ────────────────────────────────────────────────
+class OfficeReminderTemplateViewSet(OfficeModuleViewSet):
+    """نصوصُ التذكير: **قراءةٌ لكل عضو، وكتابةٌ بمفتاح الإعدادات**.
+
+    والقراءةُ ليست ترفاً: من يرسل يقرأ ما سيرسل. والكتابةُ قرارُ مكتبٍ لا قرارُ
+    موظّف — ومن يكتب بيانات الزبائن لا يغيّر نصّاً يخرج باسم المكتب.
+    """
+
+    # لا `POST` ولا `PATCH`: البديلُ يُكتب بـ`PUT` على (النوع، اللغة) ويُحذف.
+    http_method_names = ["get", "put", "delete", "head", "options"]
+    serializer_class = ReminderTemplateWriteSerializer
+
+    def list(self, request, *args, **kwargs):
+        return Response(services.reminder_templates_payload(self.tenant))
+
+    @action(
+        detail=False, methods=["put", "delete"],
+        url_path=r"(?P<reminder_type>[a-z_]+)/(?P<language>[a-z]{2})",
+    )
+    def template(self, request, reminder_type=None, language=None):
+        self.require_settings_manage()
+        if request.method == "DELETE":
+            services.reset_reminder_template(
+                self.tenant, reminder_type=reminder_type, language=language,
+            )
+        else:
+            serializer = ReminderTemplateWriteSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            services.set_reminder_template(
+                self.tenant,
+                reminder_type=reminder_type,
+                language=language,
+                body=serializer.validated_data["body"],
+                actor=request.user,
+            )
+        return Response(services.reminder_templates_payload(self.tenant))
+
+
+class OfficeReadyToSendViewSet(OfficeModuleViewSet):
+    """«جاهز للإرسال»: القائمةُ المحسوبة وأفعالُها الأربعة.
+
+    **الترتيبُ في كل فعل:** مفتاحُ الكتابة أوّلاً (403)، ثم البنودُ عبر
+    `visible_clients` في الخدمة (زبونُ غيرك 404)، ثم الحمولة. فالبنودُ تُحلّ
+    داخل الخدمة لا هنا، ومفتاحُ الكتابة لا ينتظر حلَّها — وهذا خلافُ `undo` في
+    السجلّ الذي يُحلّ كائنَه أوّلاً (404) ثم يسأل عن المفتاح، لأن السطرَ كائنٌ
+    واحدٌ يُقرأ قبل الفعل.
+    و`day` يُقرأ من الاستعلام للقائمة وحدها (فالاختبار لا ينتظر ساعة)، ولا
+    يُمرَّر في الأفعال — ساعتُها اليوم، ويومُ الصفّ المحفوظ `created_at`.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    # `get_serializer_class` يحتاجه `OPTIONS` (SimpleMetadata) وإلا سقط 500.
+    serializer_class = ReadyToSendPayloadSerializer
+
+    def list(self, request, *args, **kwargs):
+        raw_day = (request.query_params.get("day") or "").strip()
+        day = parse_iso_date(raw_day, "day") if raw_day else timezone.localdate()
+        reminder_type = (request.query_params.get("reminder_type") or "").strip() or None
+        raw_assignee = (request.query_params.get("assignee") or "").strip()
+        assignee = None
+        if raw_assignee:
+            try:
+                assignee = int(raw_assignee)
+            except ValueError:
+                raise ValidationError({"assignee": "معرّفُ موظّفٍ غير صالح."}) from None
+        return Response(services.ready_to_send_payload(
+            self.tenant,
+            user=request.user,
+            day=day,
+            reminder_type=reminder_type,
+            assignee=assignee,
+        ))
+
+    def _rows_response(self, rows):
+        return Response(
+            {"rows": [services.reminder_log_row(row) for row in rows]},
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["post"], url_path="sent")
+    def sent(self, request):
+        """«انبعثت»: صفُّ `sent` لكل بندٍ بالنصّ نفسه."""
+        self.require_write()
+        serializer = ReadyToSendSentSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        return self._rows_response(services.mark_reminders_sent(
+            self.tenant,
+            user=request.user,
+            contact_id=data["contact_id"],
+            body=data.get("body", ""),
+            channel=data.get("channel", ""),
+            items=[dict(item) for item in data["items"]],
+        ))
+
+    @action(detail=False, methods=["post"], url_path="manual")
+    def manual(self, request):
+        """«كلّمناه»: تلفون أو زيارة — والعدُّ في الحدّ الأقصى واحد."""
+        self.require_write()
+        serializer = ReadyToSendManualSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        return self._rows_response(services.mark_reminders_manual(
+            self.tenant,
+            user=request.user,
+            contact_id=data["contact_id"],
+            body=data.get("body", ""),
+            channel=data["channel"],
+            items=[dict(item) for item in data["items"]],
+        ))
+
+    @action(detail=False, methods=["post"], url_path="dismiss")
+    def dismiss(self, request):
+        """«شيل لهذه المرة»: يُعيد المؤقّت ولا يُعدّ — والسببُ اختياري."""
+        self.require_write()
+        serializer = ReadyToSendDismissSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        return self._rows_response(services.dismiss_reminders(
+            self.tenant,
+            user=request.user,
+            items=[dict(item) for item in data["items"]],
+            reason=data.get("reason", ""),
+        ))
+
+    @action(detail=False, methods=["post"], url_path="postpone")
+    def postpone(self, request):
+        """«أجّل التذكير لتاريخ…» — صفٌّ جديد، و`until=null` يمسح التأجيل."""
+        self.require_write()
+        serializer = ReminderPostponeWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        row = services.postpone_reminder(
+            self.tenant,
+            user=request.user,
+            day=timezone.localdate(),
+            client_id=data["client_id"],
+            reminder_type=data["reminder_type"],
+            until=data.get("until"),
+            reason=data.get("reason", ""),
+        )
+        return Response(services.reminder_postpone_row(row))
+
+
+class OfficeReminderLogViewSet(OfficeModuleViewSet):
+    """سجلُّ التذكيرات: **قراءةٌ وتصحيحٌ، ولا تعديلَ ولا حذف**.
+
+    `POST` على الجمعِ مرفوضٌ (405) لأن الصفَّ لا يُنشأ من الـAPI: يُكتب بفعلِ
+    إرسالٍ (`ready-to-send/*`) أو بتصحيحٍ (`undo`). فالـ`http_method_names` هنا
+    تسمح بالقراءة وبالفعل وحدهما، و`PUT`/`PATCH`/`DELETE` 405 بحكم القائمة.
+    """
+
+    http_method_names = ["get", "post", "head", "options"]
+    # شكلُ المورد المُعلَن هو السطرُ الذي يخرج (قراءةً) لا حمولةُ تأجيلٍ للكتابة.
+    serializer_class = ReminderLogSerializer
+
+    def get_object(self):
+        row = (
+            services.visible_reminder_logs(self.tenant, self.request.user)
+            .filter(pk=self.kwargs.get("pk"))
+            .first()
+        )
+        if row is None:
+            raise NotFound("سطر السجل غير موجود.")
+        return row
+
+    def list(self, request, *args, **kwargs):
+        return Response(
+            services.reminder_log_payload(self.tenant, user=request.user),
+        )
+
+    def retrieve(self, request, *args, **kwargs):
+        """قراءةُ سطرٍ واحد — **بها وحدها يوجد مسارُ التفصيل**.
+
+        وغيابُها كان يجعل `PUT`/`PATCH`/`DELETE` على المسار **404** لا 405: بلا
+        أفعالِ تفصيلٍ لا يولّد الراوترُ المسارَ أصلاً، فيسبق 404ُ التوجيه حكمَ
+        الطريقة. و405 هو الجوابُ الصادق: المسارُ موجودٌ والطريقةُ ممنوعة.
+        """
+        return Response(services.reminder_log_row(self.get_object()))
+
+    @action(detail=True, methods=["post"], url_path="undo")
+    def undo(self, request, pk=None):
+        """«ما انبعتت» — صفٌّ جديدٌ يشير إلى ما يُبطله، والأصلُ يبقى."""
+        row = self.get_object()
+        self.require_write()
+        undo = services.undo_reminder_log(row, actor=request.user)
+        return Response(
+            {"row": services.reminder_log_row(undo)},
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class OfficeHolidayViewSet(OfficeModuleViewSet):
+    """عطلُ المكتب: **تُقرأ لكل عضو وتُكتب بمفتاح الإعدادات** — ولا تقويمَ مخترَع."""
+
+    serializer_class = OfficeHolidayWriteSerializer
+    http_method_names = ["get", "post", "delete", "head", "options"]
+
+    def get_queryset(self):
+        return OfficeHoliday.objects.filter(tenant=self.tenant)
+
+    def list(self, request, *args, **kwargs):
+        return Response([
+            services.office_holiday_row(row)
+            for row in self.get_queryset().order_by("date", "id")
+        ])
+
+    def create(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        serializer = OfficeHolidayWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        # `get_or_create`: القيدُ في القاعدة هو الحكم، والتكرارُ 400 لا 500.
+        row, was_created = OfficeHoliday.objects.get_or_create(
+            tenant=self.tenant,
+            date=data["date"],
+            defaults={"name": data.get("name", "").strip()},
+        )
+        if not was_created:
+            raise ValidationError({"date": "هذا اليوم عطلةٌ مسجَّلةٌ أصلاً."})
+        return Response(
+            services.office_holiday_row(row), status=status.HTTP_201_CREATED,
+        )
+
+    def destroy(self, request, *args, **kwargs):
+        self.require_settings_manage()
+        self.get_object().delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)

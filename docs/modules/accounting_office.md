@@ -34,15 +34,15 @@
 
 | الملف | الغرض |
 |---|---|
-| `accounting_office/models.py` | النماذج التسعة والعشرون، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()`، و**لائحةُ المواعيد** (`DeadlineSchedule`/`DeadlineRule`) وحارسُ مفاتيح شروطها، و**`OfficeAlert`** وأنواعُه القابلة للإضافة صفّاً (#276)، و**بنودُ الأوراق وصفوفُها وملفاتُها ومددُ الحفظ** (#278)، و**`CADENCE_SEMIANNUAL`** ودوريةُ نصف السنة و**`PlatformDocumentItem.default_status`** (#279) |
-| `accounting_office/settings_registry.py` | سجلّ الإعدادات: المفتاح والنوع والمستويات والافتراضيِّ ومُتحقِّقُ القيمة وحدُّها الأدنى، ومجموعاتُ العرض (`GROUP_ALERTS` لـ#276)، و**قائمتا `EVENT_KIND_CHOICES` و`PAYROLL_OBLIGATION_CHOICES`** (#277 و#279 — تُوسَّعان صفّاً ولا تستوردان النماذج) |
-| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`**، وكتالوجُ الخدمات وباقاتُها، وخدماتُ الزبون ودورياتُها المؤرَّخة، و**`suggest_frequency`** (#273)، و**ربطُ اللائحة بالقاعدة: `schedule_for`/`rule_applies`/`client_deadlines`/`calendar_payload`** (#274)، و**الالتزاماتُ والشغلات: `_deadline_items` (المولّدُ الواحد) و`refresh_office`/`ensure_office_refreshed`/`obligation_row`/`today_payload`/`client_obligations_payload` وأفعالُ الحالة والمبلغ والإسناد** (#275)، و**`_generate_late_alerts`/`alerts_payload`/`mark_alert_seen`/`mark_all_alerts_seen` ومستلِمو التنبيه** (#276)، و**قائمةُ الأوراق: `_document_items_for` (الدالّةُ الواحدة) و`_generate_document_rows` (داخل `_refresh_client`) و`set_document_status`/`validate_document_upload`/`client_documents_payload`/`document_progress`** (#278)، و**`_assert_payroll_frequency` وإعدادُ `PAYROLL_OBLIGATIONS_KEY` في `rule_applies`** (#279) |
+| `accounting_office/models.py` | النماذج الثلاثة والثلاثون، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()`، و**لائحةُ المواعيد** (`DeadlineSchedule`/`DeadlineRule`) وحارسُ مفاتيح شروطها، و**`OfficeAlert`** وأنواعُه القابلة للإضافة صفّاً (#276)، و**بنودُ الأوراق وصفوفُها وملفاتُها ومددُ الحفظ** (#278)، و**`CADENCE_SEMIANNUAL`** ودوريةُ نصف السنة و**`PlatformDocumentItem.default_status`** (#279)، و**`ReminderTemplate`/`ReminderLog`/`ReminderPostpone`/`OfficeHoliday` و`REMINDER_DEFAULT_TEXTS` وحقولُ إذن التذكير في `Contact`** (#280) |
+| `accounting_office/settings_registry.py` | سجلّ الإعدادات: المفتاح والنوع والمستويات والافتراضيِّ ومُتحقِّقُ القيمة وحدُّها الأدنى والأعلى، ومجموعاتُ العرض (`GROUP_ALERTS` لـ#276 و`GROUP_REMINDERS` لـ#280)، و**قوائم `EVENT_KIND_CHOICES` و`PAYROLL_OBLIGATION_CHOICES` و`REMINDER_TYPE_CHOICES`** (#277 · #279 · #280 — تُوسَّعان صفّاً ولا تستوردان النماذج) |
+| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`**، وكتالوجُ الخدمات وباقاتُها، وخدماتُ الزبون ودورياتُها المؤرَّخة، و**`suggest_frequency`** (#273)، و**ربطُ اللائحة بالقاعدة: `schedule_for`/`rule_applies`/`client_deadlines`/`calendar_payload`** (#274)، و**الالتزاماتُ والشغلات: `_deadline_items` (المولّدُ الواحد) و`refresh_office`/`ensure_office_refreshed`/`obligation_row`/`today_payload`/`client_obligations_payload` وأفعالُ الحالة والمبلغ والإسناد** (#275)، و**`_generate_late_alerts`/`alerts_payload`/`mark_alert_seen`/`mark_all_alerts_seen` ومستلِمو التنبيه** (#276)، و**قائمةُ الأوراق: `_document_items_for` (الدالّةُ الواحدة) و`_generate_document_rows` (داخل `_refresh_client`) و`set_document_status`/`validate_document_upload`/`client_documents_payload`/`document_progress`** (#278)، و**`_assert_payroll_frequency` وإعدادُ `PAYROLL_OBLIGATIONS_KEY` في `rule_applies`** (#279)، و**التذكيرات: `set_contact_consent`/`render_reminder_body`/`validate_reminder_body`/`reminder_templates_payload`/`_reminder_candidates`/`ready_to_send_payload`/`mark_reminders_sent`/`dismiss_reminders`/`postpone_reminder`/`undo_reminder_log`/`_generate_reminder_alerts`** (#280) |
 | `accounting_office/deadlines.py` | **المحرّكُ النقيّ** (#274): `compute_deadline` (أربعةُ تواريخَ وثلاثُ علامات) و`periods_for` و`service_periods` و`period_label` و`add_months`/`month_start_after` — بلا استعلامٍ وبلا تاريخٍ قانونيّ في الكود |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
-| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278) |
+| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280) |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
 | `accounting_office/urls.py` | `SimpleRouter` (لا `DefaultRouter`: جذرُه فهرسٌ غير محروس) |
-| `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` |
+| `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` — وفيه أنواعُ التذكيرات: `ReadyToSendPayload`/`ReminderLogRow`/`ReminderTemplateRow`/`ContactConsentPayload`/`OfficeHolidayRow` (#280) |
 | `frontend_v2/utils/accountingOffice.ts` | الدوالّ الخالصة: تخصيصُ بطاقة الزبون، وحالةُ المخصَّص، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وما يخفيه حجم «شخص واحد»، وقناعُ المبلغ المخفيّ («—»)، وأدوارُ قسم المكتب (بلا جدول تسميات). والشاشة تحفظ الحالة في العنوان عبر `useSearchParams` من react-router — لا `pushState`/`popstate` يدوياً، وأولُ الشهر ومنتقي الخدمات المتاحة وتسميةُ الدورية من اختيارات الخادم وملخّصُ الباقة (#273)، و**حسابُ التقويم** (#274): شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع وأيامُه وإزاحتُه، وتجميعُ المواعيد على أيامها، وفلترُ الأنواع بلا تكرار، وتسميةُ الفترة احتياطاً — كلُّها نصوصُ ISO بلا `Date` منطقةٍ زمنية، والتاريخُ وأسماءُ الأيام من `utils/formatDate.ts` والتنقّلُ بين الشهور من `utils/monthKey.ts`، و**فلترُ «اليوم» وستُّ حالاتِه (بالفارغ «الكل»، والسادسةُ `missing_docs` #278) وأصنافُ الشارات الثلاث** (#276)، و**`alertTargetPath`** (ملفّ الزبون على `?tab=obligations&task=<id>`) و`clientTabFromSearch`/`taskIdFromSearch`/`officeTaskAnchorId` |
 | `frontend_v2/components/accounting-office/` | شاشات: **«اليوم»** (`OfficeTodayScreen.tsx`، #275) والقائمة (وتركّب ملفّ الزبون)، والإعدادات (وفيه قسم «الموظفون والأدوار»، ومجموعتُها كلُّها من السجلّ)، وخطوة أول تشغيل، **والتقويم** (`OfficeCalendarScreen.tsx`، #274)، و`OfficeUi.tsx` عناصرُ عرضٍ محليّةٌ على الوضع الداكن، وتبويبُ «الخدمات» ومجموعةُ «الخدمات والباقات» (#273)، و**`OfficeAlertsBell.tsx`** جرسُ التنبيهات (#276)، و**`OfficeClientDocuments.tsx`** تبويبُ «الأوراق» و**`OfficeDocumentItemsSection.tsx`** قالبُ بنوده (#278) |
 
@@ -52,7 +52,7 @@
 |---|---|---|
 | `OfficeClient` | `name`, `tax_file_number` (اختياري), `status` (`active`/`ended`), `ended_on`, `notes`, `responsible` (#272) | `tenant` FK. `responsible` FK إلى `auth.User` — `null=True`، `on_delete=SET_NULL`، `related_name="office_clients_responsible"`، ويجب أن يكون عضواً في شركة الزبون (حارسٌ في الخدمة والنموذج). **لا `Partner` ولا شركة على المنصّة.** قيدُ `CheckConstraint` يربط الحالة بتاريخها |
 | `TaxCard` | `entity_type` (فرد/تضامن/مساهمة/غير ربحية), `vat_classification` (مشتغل مرخّص/معفى/غير مسجّل فلسطينيّاً · עוסק מורשה/עוסק פטור/מלכ"ר إسرائيلياً), `annual_sales` (Decimal، تُتحقَّق في الخدمة), `has_employees`, `employees_count` (تسميتُه المعروضة «عدد العاملين» #279), `is_self_employed` | `OneToOne` مع `OfficeClient`، تُنشأ معه. **يوم الراحة وطريقة التقديم ليسا هنا** — إعدادان |
-| `Contact` | `name`, `phone`, `language` (`ar`/`he`) | `tenant` FK. الشخص يملكه المكتب لا الزبون |
+| `Contact` | `name`, `phone`, `language` (`ar`/`he`), **`reminders_consent`, `consent_types`, `consent_on`, `consent_channel` (`talk`/`paper`/`whatsapp`), `consent_withdrawn_on`, `consent_withdrawn_by`** (#280) | `tenant` FK. الشخص يملكه المكتب لا الزبون. **والسحبُ لا يمحو الإذن** (تاريخُ الإذن يبقى بجانب تاريخ السحب)، و`allows_reminder(type)` هي السؤالُ الوحيد الذي تسأله القائمة |
 | `ClientContact` | `is_primary`, `primary_client_key` (عمود مُولَّد) | `(client, contact)` فريد. عمودٌ مُولَّد + فرادةٌ غير مشروطة = **جهة رئيسية واحدة على الأكثر** فعلياً في MySQL |
 | `ClientReminderRecipient` | `reminder_type` (`documents`/`deadline`/`balance`/`appointment`) | `(client, reminder_type)` فريد ← `ClientContact`. غيابُ الصفّ = الرئيسية |
 | `OfficeSettingValue` | `key`, `value` (JSON) | `(tenant, key)` فريد — قيمةُ المكتب |
@@ -72,7 +72,11 @@
 | `ClientEvent` (#277) | `kind` (من `EVENT_KIND_CHOICES`)، `occurred_on`, `note`, `created_by`, `created_at` | `tenant` FK، و`client` على `PROTECT`. **لا تعديلَ ولا حذف** («التاريخ لا يُمحى»)، ولكل حدثٍ التزاماتُه من أسطر `cadence="event"` |
 | `ObligationDateChange` (#277) | `reason` (`office_override`/`platform_update`/`extension`/`extension_cleared`), `before` (JSON), `after` (JSON), `changed_by` (null للتلقائي), `created_at` | `tenant` FK، و`obligation` على `CASCADE`. **سجلٌّ إلحاقيّ**: كلُّ تغيّرِ تاريخٍ بسببه ومَن غيّره — والصفُّ لا يُعدَّل |
 | `OfficeRefreshRun` | `day`, `ran_at`, `created_obligations` | `tenant` FK، **فرادةٌ غير مشروطة** على `(tenant, day)` — صفٌّ واحدٌ لكل (مكتب، يوم)، وهو ما يجعل `ensure_office_refreshed` لا تعمل مرّتين |
-| `OfficeAlert` | `kind` (`task_late_internal`/`obligation_late`/`schedule_dates_changed`/`override_platform_changed`)، `ref_key`، `message`، `day`، `seen_at`، `created_at` | `tenant` FK، و`recipient` FK إلى `auth.User` على `CASCADE` (المستلِمُ الوحيد)، و`client`/`task`/`obligation` **nullable على `CASCADE`** (مكانُ الفتح لا سندُ التنبيه). **فرادةٌ غير مشروطة** على `(tenant, recipient, kind, ref_key)` = «مرّةٌ واحدةٌ لكل مرجع»، وفهرسٌ `(tenant, recipient, seen_at)`. `ref_key` نصٌّ `"task:<id>"` أو `"obligation:<id>"` أو `"schedule:<id>"` أو `"override:<id>:schedule:<id>"` (#277)، و`message` لقطةٌ **بلا أيّ مبلغ**. ونوعا اللائحة **بلا `client`**: وجهتُهما `OFFICE_ALERT_KIND_OPENS` ⇒ `deadline_rules` |
+| `OfficeAlert` | `kind` (`task_late_internal`/`obligation_late`/`schedule_dates_changed`/`override_platform_changed`/`reminder_limit_reached`/`reminder_limit_reached_owner`)، `ref_key`، `message`، `day`، `seen_at`، `created_at` | `tenant` FK، و`recipient` FK إلى `auth.User` على `CASCADE` (المستلِمُ الوحيد)، و`client`/`task`/`obligation` **nullable على `CASCADE`** (مكانُ الفتح لا سندُ التنبيه). **فرادةٌ غير مشروطة** على `(tenant, recipient, kind, ref_key)` = «مرّةٌ واحدةٌ لكل مرجع»، وفهرسٌ `(tenant, recipient, seen_at)`. `ref_key` نصٌّ `"task:<id>"` أو `"obligation:<id>"` أو `"schedule:<id>"` أو `"override:<id>:schedule:<id>"` (#277) أو `"reminder:<زبون>:<نوع>:<بداية الفترة>:<نهايتها>"` (#280)، و`message` لقطةٌ **بلا أيّ مبلغ**. ونوعا اللائحة **بلا `client`**: وجهتُهما `OFFICE_ALERT_KIND_OPENS` ⇒ `deadline_rules`، ونوعا التذكير يفتحان `client_documents` |
+| `ReminderTemplate` (#280) | `reminder_type`, `language` (`ar`/`he`), `body`, `updated_by`, `updated_at` | `tenant` FK، **فرادةٌ غير مشروطة** على `(tenant, reminder_type, language)`. **غيابُ الصفّ = نصُّ المنصّة** (`REMINDER_DEFAULT_TEXTS` في الكود)، و«ارجع للافتراضي» **حذفٌ** لا كتابةُ الافتراضيِّ مكانه — فتصحيحُ نصٍّ في الكود يصل مكتباً لم يخصّص |
+| `ReminderLog` (#280) | `recipient_name`/`recipient_phone` (لقطة), `reminder_type`, `kind` (`sent`/`manual`/`dismissed`/`undo`), `channel` (`whatsapp`/`phone`/`in_person`/فارغ), `body`, `period_start`/`period_end` (nullable), `subject` (JSON: `document_item_codes`/`document_item_names`), `reason`, `reverts` (FK self), `created_by`, `batch` (UUID مفهرس: يُختم به كلُّ صفوف نداءٍ واحد), `created_at` | `tenant` FK، و`client` على **`PROTECT`** (تاريخٌ لا يُمحى)، و`contact` على `SET_NULL` (اللقطةُ تحفظ الاسم والهاتف). **إلحاقيٌّ لا يُعدَّل ولا يُحذف**: لا نقطةَ `PUT`/`PATCH`/`DELETE`، والتصحيحُ صفُّ `undo` يشير بـ`reverts` إلى ما يُبطله. وفهرسٌ `(tenant, client, reminder_type, period_start)` |
+| `ReminderPostpone` (#280) | `reminder_type`, `until` (nullable = «امسح التأجيل»), `reason`, `created_by`, `created_at` | `tenant` FK، و`client` FK. **الساري = أحدثُ صفٍّ لكل (زبون، نوع)** بترتيب `-created_at, -id`: سجلٌّ لا حقل، فيبقى تاريخُ التأجيلات مكتوباً |
+| `OfficeHoliday` (#280) | `date`, `name`, `created_at` | `tenant` FK، **فرادةٌ غير مشروطة** على `(tenant, date)`. **لا تقويمَ عطلٍ وطنيّ يُخترَع**: المكتبُ يعطّل يومَه، والتذكيرُ لا يُلغى بل يُحسَب في أوّل يومٍ مسموح بعده |
 | `PlatformDocumentItem` (#278) | `tax_system`, `code`, `name`, `cadence` (`monthly`/`annual`), `service_codes` (JSON), `card_conditions` (JSON), `default_status` (#279), `sort_order` | **بلا `tenant`**: لائحةُ المنصّة واحدةٌ لكل المكاتب كاللائحة والسقوف. فرادةٌ **غير مشروطة** على `(tax_system, code)`. `service_codes` فارغةٌ = لكل زبون، و`card_conditions` مفاتيحُها حقولُ البطاقة وحدها (`entity_type`/`vat_classification`). **و`default_status` الحالةُ التي يبدأ بها الصفُّ المولَّد** — بندُ المنصّة وحده يحملها، وبندُ المكتب يبدأ «مطلوبة» دائماً. تُزرع بهجرة `0008`: **37 بنداً** (18 فلسطينيٌّ و19 إسرائيليّاً)، و**41** بعد `0009` بأربعة بنود رواتب (20 فلسطينيٌّ و21 إسرائيليّاً)، وعكسُ كلٍّ يحذف أكوادَه وحدها |
 | `OfficeDocumentItem` (#278) | `tax_system`, `name`, `cadence`, `service_codes`, `card_conditions`, `is_active`, `created_by`, `created_at`/`updated_at` | `tenant` FK. كودُه المشتقّ `office_doc_<pk>` **مستقرٌّ** ويُخزَّن في الصفوف لقطةً. **يُعطَّل ولا يُحذف**: التعطيلُ يوقف التوليدَ وما وُلد يبقى |
 | `OfficeDocumentItemChoice` (#278) | `item_code`, `included`, `updated_by`, `updated_at` | `tenant` FK، فرادةٌ على `(tenant, item_code)`. `included=False` يُخرج بندَ المنصّة من قالب المكتب، والغيابُ «ضمن القائمة» — صفٌّ يُقلب لا يُحذف. **ولبند المكتب مصدرٌ واحد**: `is_active`، فلا يُقلب من هنا |
@@ -96,8 +100,9 @@ is_tenant_member(tenant_id, user_id)                          # في `models.py`
 resolve_setting(tenant, key, client=None, item=None)          # القيمة الفعلية وحدها
 resolve_setting_with_source(tenant, key, client=None, item=None)  # (القيمة, المصدر)
 resolve_setting_for_clients(tenant, key, clients)             # القائمة: استعلامان لا استعلامان لكل زبون
+resolve_settings_for_clients(tenant, keys, clients)           # مفاتيحُ مجموعةٍ لزبائنَ في استعلامين — بحارسي المحلّل
 set_office_setting(tenant, key, value)                        # يتحقّق ثم يكتب
-reset_office_setting(tenant, key)                             # «ارجع للافتراضي» = حذف (ويُرفض لمن لا افتراضي له)
+reset_office_setting(tenant, key)                             # «ارجع للافتراضي» = حذف (ويُرفض لمن لا افتراضي له، ولمسحٍ يقلب نافذة الإرسال)
 set_client_setting(client, key, value)                        # تخصيصُ زبون
 reset_client_setting(client, key)                             # «ارجع لإعداد المكتب»
 clients_customized_for(tenant, key, *, user)                  # `user` مطلوب؛ تمرّ بـ`visible_clients`، و`user=None` صراحةً = داخليّ بلا طلب
@@ -206,6 +211,22 @@ create_office_document_item(...) / update_office_document_item(row, *, name=, ca
 # ── الرواتب — متابعةُ الاستحقاق (#279) ──
 PAYROLL_OBLIGATIONS_KEY / PAYROLL_FREQUENCY_ERROR / PAYROLL_FREQUENCIES   # مفتاحُ الإعداد، ورسالةُ الرفض، والمقبولتان
 _assert_payroll_frequency(service_code, frequency)            # «شهرية أو كل شهرين» — النقطةُ الواحدة لمسارَي الكتابة
+# ── التذكيرات والرسائل (#280) ──
+REMINDER_DEFAULT_TEXTS / REMINDER_PLACEHOLDERS                # نصوصُ المنصّة (عربيٌّ وعبريٌّ لكل نوع) ورموزُها الستّة
+REMINDER_TYPE_* / REMINDER_KIND_* / REMINDER_CHANNEL_*        # ثوابتُ الأنواع والأربعة الصادرة والقنوات (و`*_LABELS` من الخادم)
+set_contact_consent(contact, *, consent, types=None, channel="", actor, day=None)   # الإذنُ والسحبُ بتاريخيهما
+contact_consent_payload(contact) / create_contact(tenant, *, name, phone="", language="ar")
+render_reminder_body(body, values)                           # استبدالٌ بـ`str.replace` لا `str.format` — نصُّ المستخدم لا يُسقِط الطلب
+validate_reminder_body(body)                                  # رمزٌ مجهول ⇒ 400 يسمّيه
+reminder_template_bodies(tenant, reminder_type)
+reminder_templates_payload(tenant) / set_reminder_template(...) / reset_reminder_template(...)
+_reminder_candidates(tenant, clients, *, day, settings_by_client, reminder_type=None)   # **الحسابُ الواحد**: المستحقُّ لكل (زبون، نوع، فترة)
+ready_to_send_payload(tenant, *, user, day, reminder_type=None, assignee=None)   # رسالةٌ لكل شخصٍ في اليوم
+mark_reminders_sent(...) / mark_reminders_manual(...) / dismiss_reminders(...)   # صفوفُ السجلّ الثلاثة
+postpone_reminder(...) / undo_reminder_log(row, *, actor) / office_is_on_holiday(tenant, day)
+visible_reminder_logs(tenant, user) / reminder_log_payload(...) / client_reminder_log_payload(client) / reminder_log_row(row)
+reminder_postpone_row(row) / office_holiday_row(row) / day_key_blocked(day, rest_days)
+_generate_reminder_alerts(tenant, *, day)                    # داخل `refresh_office`؛ التصعيدُ بعد الحدّ
 ```
 
 `deadlines.py` وحدها تقرأ حسابَ الأشهر: `add_months(day, months)` (مقيَّدةٌ بآخر
@@ -277,6 +298,17 @@ _assert_payroll_frequency(service_code, frequency)            # «شهرية أ�
 | `POST` | `document-items/choice/` | `OfficeDocumentItemViewSet` (`choice`) — «ضمن القائمة» لبندِ منصّةٍ بمفتاح `office.settings.manage`؛ وبندُ المكتب `office_doc_*` **مرفوض** (يُفعَّل ويُعطَّل من قائمته) |
 | `POST` | `document-items/` | `OfficeDocumentItemViewSet` (`create`) — بندٌ يضيفه المكتب (اسم، دورية، خدمات، تفعيل) |
 | `PATCH` | `document-items/<id>/` | `OfficeDocumentItemViewSet` (`partial_update`) — **لا `DELETE`**: التعطيلُ (`is_active=false`) هو الفعل |
+| `GET/POST` | `contacts/<id>/consent/` | `OfficeContactViewSet` (`consent`) — `{consent, types?, channel?}` بمفتاح `office.clients.write`؛ الرموزُ والقنواتُ تُتحقَّق في الخدمة (#280) |
+| `GET` | `ready-to-send/?day=&reminder_type=&assignee=` | `OfficeReadyToSendViewSet` (`list`) — **قراءةٌ خالصة**: رسالةٌ لكل شخصٍ في اليوم، بنصٍّ بلغته (#280) |
+| `POST` | `ready-to-send/sent/` · `manual/` · `dismiss/` · `postpone/` | `OfficeReadyToSendViewSet` — `{contact_id, body, channel?, items:[{client_id, reminder_type, period_start, period_end}]}` (**الطرفان معاً**: مفتاحُ الفترة تاريخان)؛ «كلّمناه» `phone`/`in_person` وحدهما، و«أجّل» `until` بعد اليوم |
+| `GET` | `reminder-log/` | `OfficeReminderLogViewSet` (`list`) — الأحدثُ أوّلاً، **لا تعديلَ ولا حذف** (405) |
+| `GET` | `reminder-log/<id>/` | `OfficeReminderLogViewSet` (`retrieve`) — **به يوجد مسارُ التفصيل**، وبه يأخذ `PUT`/`PATCH`/`DELETE` حكمَ 405 لا 404 |
+| `POST` | `reminder-log/<id>/undo/` | `OfficeReminderLogViewSet` (`undo`) — صفُّ `undo` يشير إلى ما يُبطله؛ وإبطالُ `undo` 400 |
+| `GET` | `clients/<pk>/reminder-log/` | `OfficeClientViewSet` (`reminder_log`) — سجلُّ الزبون لتبويب ملفّه (#280). **`clients/<pk>/reminders/` مسارٌ آخر**: مستلِمو الأنواع منذ #271 |
+| `GET` | `reminder-templates/` | `OfficeReminderTemplateViewSet` (`list`) — كلُّ نوعٍ في لغتيه: الفعليُّ والافتراضيُّ وعلمُ التخصيص |
+| `PUT/DELETE` | `reminder-templates/<type>/<lang>/` | `OfficeReminderTemplateViewSet` (`template`) — **`office.settings.manage`**؛ `DELETE` = «ارجع للافتراضي» |
+| `GET/POST` | `office-holidays/` | `OfficeHolidayViewSet` (`list`, `create`) — القراءةُ لكل عضو والكتابةُ بمفتاح الإعدادات |
+| `DELETE` | `office-holidays/<id>/` | `OfficeHolidayViewSet` (`destroy`) — بمفتاح الإعدادات |
 
 **لا `DELETE` للزبون**: `destroy` ترفع `MethodNotAllowed` (405)، و«منتهٍ» حالةٌ
 تُكتب بقيمتها الحقيقية لا صفٌّ يُطوى.
@@ -1036,6 +1068,108 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 وإعدادُ الـ`payroll_obligations` في مجموعة «الضريبة ولائحة المواعيد» لمكتبه
 ولزبونه، والأيامُ النصف سنوية على «18» تُعرض في شاشة اللائحة من أرقامها.
 
+## التذكيرات والرسائل — «جاهز للإرسال» (#280، الجزء الأول)
+
+**الفكرةُ سطرٌ واحد**: لا يُخزَّن «متى التذكير القادم» في أيّ عمود. `_reminder_candidates`
+تحسب المستحقَّ **عند كل قراءة** من (أوراقٍ ناقصة × سجلِّ ما أُرسل × إعدادات الإيقاع)،
+فسرعةُ إرسالٍ أو تغييرُ إعدادٍ أو عطلةٌ تُغيّر النتيجةَ فوراً بلا مهمةٍ تُحدّث صفوفاً.
+
+**الإيقاع (D6)**: لكل (زبون × أوراق × فترة) — أوّلُ يومٍ = `period_end + start_days`
+(افتراضُه 1)، واليومُ التالي = **آخرُ صفٍّ صادر** (إرسالٌ أو تنحية) + `interval_days`
+(افتراضُه 3)، ولا تذكيرَ بعد `max` صفٍّ **عدّاً صافياً** (افتراضُه 3). والصفوفُ
+**المُبطَلة بـ`undo` لا تُعدّ** (`Exists` داخل الاستعلام نفسه فلا استعلامَ لكل صفّ)،
+و`dismissed` **يُعيد المؤقّت ولا يُعدّ**، و`manual` يُعدّ كالإرسال. والفواصلُ
+**قابلةٌ للتخصيص لكل زبون**: مكتبٌ يلاحق زبوناً كبيراً بإيقاعٍ أسرع يخصّصه.
+
+**الفترةُ بمفتاحٍ مركّب**: العدُّ والبنودُ مفتاحُها `(period_start, period_end)` لا
+بدايةَ الفترة وحدها — القائمةُ السنوية تبدأ في 1 يناير كالشهرية، وبدايةٌ واحدةٌ
+كانت تخلط أوراقَ السنة بأوراق كانون الثاني فتخطئ تاريخَ الاستحقاق. لذلك **يطلب
+رمزُ الفعل الطرفين معاً**: `period_end` غائبةٌ ⇒ 400، ولا تُستنتَج من البداية.
+ورسالةُ «جاهز للإرسال» تحمل المفتاحين في بندها، فالشاشةُ لا تخمّن.
+
+**القائمةُ رسالةٌ لكل شخصٍ لا لكل زبون (D9)**: التجميعُ على جهة الاتصال المستلِمة
+(تعيينُ النوع إن وُجد، وإلا الرئيسية — قاعدةُ `resolve_reminder_recipient` نفسها
+مثبَّتةً في استعلامين). شخصٌ مستلِمٌ لزبونين يأخذ **رسالةً واحدة** فيهما، وبنودُها
+مفصولةٌ بسطرٍ فارغ. و`reminder_merge_daily=False` يقلبها رسالةً لكل بند. والنصُّ
+يُبنى بلغةِ **المستلِم** لا لغةِ المكتب. وجهةٌ بلا هاتفٍ تظهر أيضاً (`has_phone`)،
+والشاشةُ تُخفي زرَّ الواتساب وحدها.
+
+**الحواجزُ تُطبَّق عند القراءة لا تُلغي التذكير (D5، D8)**: يومُ راحة الزبون
+(`rest_days` المحلولة له)، وعطلةُ المكتب (`OfficeHoliday`)، وتأجيلُ الزوج
+(`ReminderPostpone` — أحدثُ صفٍّ، و`until=None` يمسح)، ورفضُ الإذن
+(`Contact.allows_reminder`) — كلُّها تُسقط البندَ **اليوم** فيظهر أوّلَ يومٍ مسموح
+بعده من الحساب نفسه. **ولا تقويمَ عطلٍ وطنيّ يُخترَع**: المكتبُ يكتب عطلَه.
+
+**الإذنُ على الجهة (D2)**: `reminders_consent` و`consent_types` و`consent_on`
+و`consent_channel` — والسحبُ يكتب تاريخَه ومَن سحبه **ولا يمحو الإذن**: المكتبُ
+يعرف كم أُرسل قبل أن يتغيّر الرأي. والجهةُ الجديدة تأخذ أنواعَ المكتب الافتراضية
+(`reminder_default_consent_types`) **نسخةً** عند الإنشاء، فتغييرُ الإعداد بعدها لا
+يعيد كتابة مَن أذن قبله. والكتابةُ بفعل `consent/` وحده فتسلك حارسَ الخدمة.
+
+**النصوصُ (D3)**: `REMINDER_DEFAULT_TEXTS` في الكود — **عربيٌّ وعبريٌّ لكلٍّ من
+الأنواع الأربعة** من بحث #256 §5، ومكتبٌ يغلبه بصفٍّ في `ReminderTemplate`.
+والرموزُ ستةٌ بالضبط: `{client_name}` `{period}` `{due_date}` `{amount}`
+`{missing_list}` `{office_name}` — ونصٌّ يحمل غيرها **يُرفَض عند الحفظ باسمه**،
+و`render_reminder_body` يستبدل بـ`str.replace` وحده: `str.format` على نصٍّ يكتبه
+المستخدم قوسٌ زائدٌ فيه يُسقِط الطلبَ 500. **ونصُّ (ب) في البحث ينادي
+`{deadline_name}` وهو خارج الستّة**، فالمشحونُ يقول «موعد التقديم» — والنوعُ بلا
+مولّدٍ أصلاً حتى تذكرته (#281).
+**و`{due_date}` يومٌ قادمٌ لا يومُ الاستحقاق المحسوب**: يُطبَع في النصّ
+`day + interval_days` بصيغة `dd/MM/yyyy` — يومُ التذكير التالي — لأن `next_due`
+هو اليومُ أو قبله بحكم شرط الظهور، وبعد عطلةٍ أو تأجيلٍ يصير ماضياً فيطلب النصُّ
+ورقةً بتاريخٍ مضى. ويبقى `due_date` في بند الشاشة `ISO` بيومه المحسوب، فهو مفتاحُ
+العدّ لا نصُّ رسالة.
+
+**السجلُّ إلحاقيّ (D4)**: `ReminderLog` لا يعرف `PUT` ولا `PATCH` ولا `DELETE`
+(405)، ولا يُكتب صفُّه إلا من `mark_reminders_sent`/`mark_reminders_manual`/
+`dismiss_reminders` و`undo_reminder_log` — نقطةُ الكتابة واحدةٌ في الخدمة
+(`_write_reminder_logs`)، وكلُّ بندٍ يحمل مستلِمَه فيها فتُنحّى بنودٌ كثيرةٌ
+باستعلامِ بياناتٍ واحدٍ و`bulk_create` واحد. **وما تُرجعه الدالةُ يُعاد قراءتُه
+بالحقل `batch`** (استعلامٌ واحد) لا ما أرجعه `bulk_create`: MySQL لا يُسنِد
+المفاتيحَ بعده، فكان الجوابُ يخرج بـ`id: null` ولا تتراجع الشاشة. والقنواتُ معلَنةٌ في الشكل كذلك:
+`sent` واتسابٌ وحدها (والفراغُ يعنيها) وأيُّ غيرها 400، و`manual` تلفونٌ أو
+زيارة. و`recipient_name`/`recipient_phone` **لقطة**: تغييرُ
+الهاتف بعدها لا يعيد كتابة التاريخ. و«ما انبعتت» صفٌّ جديدٌ يشير إلى ما يُبطله،
+وإبطالُ `undo` يُرفَض 400 فلا يدور السجلُّ في حلقة. و`serializer_class` النقطةِ
+سطرٌ للقراءة (`ReminderLogSerializer`) لا حمولةُ تأجيلٍ للكتابة.
+
+**التصعيدُ بعد الحدّ (D11)**: داخل `refresh_office` كتنبيهات التأخير، و`ref_key`
+هو `"reminder:<زبون>:<نوع>:<بداية الفترة>:<نهايتها>"` — **بطرفَي الفترة لا
+ببدايتها وحدها**: الفترةُ السنوية تبدأ في 1 يناير كما يبدأ كانون الثاني، فمفتاحٌ
+بالبداية يجعل تنبيهَ السنة وتنبيهَ الشهر صفّاً واحداً فيُسقط أحدهما الآخر من
+الجرس بلا أن يُقرأ. وصلَ العدُّ `max` وحان يومُ التذكير
+التالي ⇒ `reminder_limit_reached` للمسؤول (وإن غاب فصاحبُ المكتب، بقاعدة
+`_alert_recipient_ids` نفسها)، وبعد `reminder_escalation_owner_days` (افتراضُه 2)
+⇒ `reminder_limit_reached_owner` لأصحاب المكتب. الرسالةُ تسمّي الزبون والفترة
+والعدد **بلا مبلغ**. **ويُسقطهما اكتمالُ الأوراق عند القراءة** كما يُسقط التقديمُ
+تنبيهَ التأخير: `_live_reminder_alert_refs` تقرأ مراجعَ ما لم يكتمل **للزبائن
+الذين لهم تنبيهُ تذكيرٍ قائمٌ وحدهم** — استعلامٌ فرعيٌّ واحد بـ`client_id__in`،
+ففتحُ الجرس لا يمسح جدولَ الأوراق كلَّه — وتُطبَّق في
+`_visible_alerts`، والصفُّ يبقى في القاعدة. والفرادةُ في القاعدة تحرس تكرارَ
+اليوم نفسه.
+
+**الكلفةُ ثابتة**: `_reminder_candidates` عددٌ ثابتٌ لا يكبر بعدد الزبائن
+(الرؤية · إعداداتُ الزبائن · مستلِمو الأنواع · الرئيسية ·
+صفوفُ الأوراق · السجلُّ · التأجيلات · العطلة · التنبيهاتُ القائمة)، ونصوصُ المكتب
+تُقرأ مرّةً للنوع. **وإعداداتُ الزبائن تُقرأ مرّةً واحدةً للحمولة**:
+`resolve_settings_for_clients` تجمع مفاتيحها في استعلامين — تخصيصاتُ الزبائن
+وقيمُ المكتب — بالحارسين نفسيهما (`validate_level` و`_assert_client_of_tenant`)،
+وتُمرَّر محلولةً إلى حساب الإيقاع وحجبِ يوم الراحة وبناءِ النصّ: لا محلّلٌ موازٍ
+يُعيد ترتيبَ القراءة بلا حارسيها، ولا قراءةٌ ثانيةٌ تفترق عن الأولى. اختبارٌ يقارن
+العدَّ لزبونٍ واحدٍ بخمسة، وآخرٌ يثبت أن النداءَ مرّة.
+**وعدّادُ «جاهز للإرسال» في «اليوم» لم
+يُضَف**: حسابُه يجرّ هذه الاستعلاماتِ إلى شاشةٍ تقرأ جدولَ الالتزامات وحده،
+فلا يصحّ فيه شرطُ «بنفس الاستعلامات الثابتة» (قرارُ #280/D9 — يُذكر هنا ليُعرف أنه
+مُتعمَّد لا منسيّ).
+
+**والأنواعُ الأربعة في الإعدادات والقوالب فقط (D1)**: المُولَّدُ اليوم **أوراق ناقصة**
+وحده. `deadline`/`balance`/`appointment` لها نصوصُها وإعدادُها ومستلِموها، وطلبُ
+قائمتها يُعيد فراغاً حتى تصل تذكرةُ كلٍّ منها (#281 · #283 · #285).
+
+**وهجرة `0010_reminders_and_consent` إضافيّةٌ محضة**: ستةُ `AddField` على
+`Contact`، وأربعةُ `CreateModel`، و`AlterField` على اختيارات `OfficeAlert.kind`
+(لا تبديلَ عمود). بلا `RemoveField` ولا `DeleteModel` ولا `RunSQL`.
+
 ## الاعتماديات
 
 **يعتمد على:**
@@ -1154,9 +1288,14 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 - **إعدادٌ بلا افتراضيٍّ لا يُمسح.** `reset_office_setting` يرفض `tax_system`
   و`office_size` كليهما (يعيدان المكتب إلى أول تشغيل)، والعلم `can_reset` هو ما
   تُخفيه الواجهة به. و`reset_client_setting` يفحص المستوى كما يفحصه
-  `set_client_setting` — لا «حذف» لتخصيصٍ على مستوى لا يملكه المفتاح.
-- **القراءةُ الجماعية محروسة**: `resolve_setting_for_clients` تمرّ بكل زبونٍ على
-  `_assert_client_of_tenant`، ولا تقرأ إعداداً لزبونٍ من مكتبٍ آخر.
+  `set_client_setting` — لا «حذف» لتخصيصٍ على مستوى لا يملكه المفتاح. وطرفا
+  نافذة الإرسال يحرسهما `_assert_send_window` في الكتابة **وفي المسح** (يرجع
+  المسحُ بالطرف إلى افتراضيّه، فنهاية 23 وبداية 20 ثم مسحُ النهاية ⇒ 400).
+- **القراءةُ الجماعية محروسة**: `resolve_settings_for_clients` (ومعها
+  `resolve_setting_for_clients` التي تُفوّضها) تمرّ بكل زبونٍ على
+  `_assert_client_of_tenant`، وتفحص `validate_level` لكل مفتاحٍ قبل أيّ قراءة —
+  فلا يُقرأ إعدادٌ لزبونٍ من مكتبٍ آخر ولا إعدادٌ مكتبيٌّ لمجموعة زبائن. ونسخةٌ
+  ثانية من الترتيب تفترق عن الأولى عند أول تعديل، فيحرسها مسحُ المصدر أعلاه.
 - **تعديلُ الزبون وبطاقته في معاملةٍ واحدة** (`update_office_client(..., tax_card=…)`):
   بطاقةٌ مرفوضة لا تُبقي الاسمَ الجديد محفوظاً خلف ردّ 400.
 - **تعديلُ النظام الضريبي قراءةٌ ثابتة لا تكبر بالزبائن، ثم `UPDATE` لكل بطاقةٍ
@@ -1319,6 +1458,33 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
   القانونُ يقول أيُّ ورقةٍ لا تُطلب شهرياً؛ ورقةٌ أضافها المكتب لا تُولَد ملغاةً
   بلا قراره. وصفٌّ «مش لازمة» **لا يُعدّ مطلوباً** في `document_progress` فلا
   يُشعل «ناقصه أوراق» — ولو كان موجوداً في الفترة.
+- **التذكيرُ يُحسب عند القراءة ولا يُخزَّن** (#280). لا عمودَ «متى القادم» ولا
+  مهمةَ تُحدّثه: `_reminder_candidates` وحدها تجيب المستحقَّ من (الأوراق الناقصة ×
+  السجلّ × الإعداد)، فتغييرُ إعدادٍ أو عطلةٌ أو إرسالٌ يسري فوراً. تخزينُ الموعد
+  كان يحتاج تحديثاً يومياً ويترك المواعيدَ القديمة على حالها بعد تصحيح إعداد.
+- **`ReminderLog` إلحاقيٌّ لا يُعدَّل ولا يُحذف** (#280). لا نقطةَ `PUT`/`PATCH`/
+  `DELETE` (405)، والصفُّ لا يُكتب إلا من `_write_reminder_logs`، والتصحيحُ صفُّ
+  `undo` يشير بـ`reverts` إلى ما يُبطله، وإبطالُ `undo` 400 فلا حلقة. والعدُّ
+  الصافي يستثني المُبطَل (`Exists` في الاستعلام نفسه)، و`dismissed` يُعيد المؤقّت
+  ولا يُعدّ، و`manual` يُعدّ كالإرسال. واللقطة (`recipient_name`/`recipient_phone`)
+  لا تُعاد كتابتها بتغيير الجهة بعدها.
+- **الإذنُ شرطُ الظهور، والسحبُ لا يمحو الإذن** (#280). `Contact.allows_reminder`
+  هي السؤالُ الوحيد، وتاريخُ السحب يُكتب مع مَن سحب بجانب تاريخ الإذن. وجهةٌ بلا
+  إذنٍ (أو نوعُها ليس في `consent_types`) لا تدخل «جاهز للإرسال» أبداً. والجهةُ
+  الجديدة تأخذ `reminder_default_consent_types` **نسخةً** عند الإنشاء.
+- **نصُّ التذكير لا يمرّ بـ`str.format`** (#280). `render_reminder_body` يستبدل
+  الستّةَ المعتمدة بـ`str.replace` ويترك ما سواها حرفياً، و`validate_reminder_body`
+  يرفض الرمزَ المجهول باسمه عند الحفظ. `str.format` على نصٍّ يكتبه المكتب يُسقِط
+  الطلب 500 على قوسٍ واحدٍ زائد.
+- **الإرسالُ التلقائيُّ مقفلٌ مطفأً** (#280). `reminder_auto_send` قيمةُ `False`
+  وحدها، وأيُّ `True` ⇒ 400 برسالته (`LOCKED_SETTING_MESSAGES` في الخدمة). فتحُه
+  حذفُ المفتاح من الخريطة في تذكرة المرحلة الثانية — لا مسارٌ ثانٍ في الـview.
+- **التذكيرُ لا يُلغى بحاجز** (#280). يومُ راحة الزبون وعطلةُ المكتب وتأجيلُ الزوج
+  تُسقط البندَ **اليوم** فقط، ويظهر أوّلَ يومٍ مسموح بعده — لأن الحسابَ من السجلّ.
+  ولا تقويمَ عطلٍ وطنيّ في الكود: المكتبُ يكتب عطلَه في `OfficeHoliday`.
+- **القائمةُ لكل شخصٍ لا لكل زبون** (#280). التجميعُ على جهة الاتصال المستلِمة،
+  فشخصٌ مستلِمٌ لزبونين يأخذ رسالةً واحدة؛ والنصُّ بلغة المستلِم. والكلفةُ ثابتة:
+  عدُّ الاستعلامات لا يكبر بعدد الزبائن (اختبارٌ يقارن زبوناً بخمسة).
 
 ## الاختبارات المهمة
 
@@ -1333,7 +1499,7 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 | `accounting_office/tests/test_settings_guard.py` | لا ذِكرَ لنموذجَي التخزين خارج وحدة المحلّل |
 | `accounting_office/tests/test_alerts.py` | **التأخيرُ بدرجتين والتنبيهاتُ #276**: الأصفرُ بعد الموعد الداخليّ ولا شيءَ معه، والأحمرُ يغلب ويأتي وحده، والأصفرُ يغلب «قريب»، و«قريب» لا يبقى بعد الداخليّ، **والمحسومُ بلا شارة في `client_obligations_payload`** (كلُّ الحالات؛ يسقط لو حُذف شرطُ الحالة)، **والتمديدُ الإلكترونيّ ليس تأخيراً** (`official_date < day ≤ actual_deadline` ⇒ لا أحمرَ ولا تنبيه، و`day == actual` كذلك)؛ والتنبيهُ الداخليُّ للمسؤول وحده افتراضاً والرسميُّ له ولصاحبَي المكتب، وإعدادا المستلِمين (`owner` يُبعد الأحمرَ عن المسؤول و`assignee` يُبعده عن المالك)، وزبونٌ بلا مسؤول ⇒ صاحبُ المكتب، ومستلِمٌ جامعٌ للدورين ⇒ صفٌّ واحد، والرسالةُ بلا مبلغ، و`badge` يُرسله الخادم من خريطة الأنواع (ونوعٌ مجهول ⇒ `""`)؛ ولا تكرارَ في اليوم نفسه ولا في يومٍ لاحق مع `created_alerts`، والجديدُ يأخذ تنبيهَه؛ والمحسومُ («انقدّم»/«مش لازم»/«رجّعها») يُسقط عند القراءة ولا يُحذف، وشغلةٌ فيها التزامٌ منتظرٌ يبقى تنبيهُها؛ **والتنبيهُ يتبع رؤية الزبون** (زبونٌ حُوِّل لغيره ⇒ لا يظهر)، **و«شفتهم كلهم» لا يكتب على محسوم** (رجيعُه يعود غيرَ مقروء ويُعدّ)؛ و«شفته» يُنقص العدّاد و«شفتهم كلهم» يُصفّره لكل مستلِمٍ على حِدة؛ **والعدّاداتُ الخمسة (ومعها `missing_docs` #278) قبل الفلتر و`week` نافذةٌ مستقلّةٌ عن الشارة** (صفٌّ أصفرُ داخل النافذة يُعدّ ويظهر تحتها) وفلترا الأحمر والأصفر منفصلان والمجهولُ مرفوض؛ وكلفةُ التوليد ثابتةٌ بين التزامٍ وخمسة (`CaptureQueriesContext`)؛ والأمرُ يطبع «تنبيهات n»؛ **وعزلُ المكتبين بمستلِمٍ واحدٍ فيهما** (تنبيهٌ بلا زبون لا يفصله إلا `tenant` — يسقط لو حُذف)؛ ولا `DecimalField` ولا مفتاحَ مبلغ |
 | `accounting_office/tests/test_alerts_api.py` | **نقاطُ الجرس #276**: شكلُ `{"unseen", "rows"}` ومفاتيحُ السطر (ومنها `badge`)، وكلُّ عضوٍ تنبيهاتُه وحدها، وطلبٌ مجهولٌ 401 ووحدةٌ غير مرخَّصة 404، وعددُ استعلامات `GET alerts/` لا يكبر بعدد الصفوف، و`seen/` يُنقص العدّاد (ومرّتان لا تغيّران)، و`seen-all/` يُرجِع العددَ ويُصفّر، **وتنبيهُ غيرك 404** (ولا يُكتب فيه)، **وتنبيهُ مكتبٍ آخر 404 ولا يظهر** (للمستخدم نفسِه وبلا زبون، فلا يفصله إلا `tenant`)، وتنبيهُ التزامٍ انقدّم يخرج من الجرس مع بقاء صفّه |
-| `frontend_v2/utils/accountingOffice.test.ts` | إخفاءُ `filing_method` لغير الإسرائيليّ، واشتقاقُ «مخصَّص»، وشارةُ الحالة، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وإخفاءُ الإسناد في «شخص واحد»، وعرضُ «—» للمبلغ المخفيّ، وأدوارُ المكتب الأربعة، و**تقويمُ #274**: شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع، وتنقّلُ الشهور عبر السنة، والتجميعُ على يوم الموعد، وتسميةُ الفترة، ووسمُ «متوقَّع»، و**«اليوم» (#275)**: تسمياتُ الحالة/الاتجاه/الشارة من الخادم وحدها (والقيمةُ الخام احتياطاً)، ونصُّ المبلغ بالاتجاه والقناع («—»)، وقراءةُ الفلتر من العنوان وكتابتُه، والتاريخُ القصير `dd/MM` بلا `Date`، و**#276**: `late_internal` فلترٌ مقروءٌ ومكتوب، وأصنافُ الشارات الثلاث (أحمر/أصفر/محايد)، وشارةُ التنبيه من `badge` وحده (ونوعٌ مجهولٌ محايد)، و`alertTargetPath` بـ`task=`، و`clientTabFromSearch`، و`taskIdFromSearch`/`officeTaskAnchorId`، و**#277**: وصفُ قاعدة السطر من أرقامها (والنوعُ المجهول يعيد تسميةَ الخادم)، و`settingsGroupFromSearch`، و`alertTargetPath` بـ`opens=deadline_rules`، ونصُّ التمديد وشارةُ الأصل و«المنصة: …»، وتاريخُ التمديد المقترح بعد ثلاثين يوماً، و**#278**: صفوفُ الشبكة خانةٌ لكل شهرٍ (والفارغُ محايدة)، وألوانُ الحالات الخمس ورموزُها، و`documentDocsText` («وصل 3/5» و«0/0» فارغ)، و`documentMissingBar` (آخرُ شهرٍ وأسماءُ النواقص وغيابُه)، وتسميةُ «مش لازمة هالسنة»، ووسمُ الملف، والسنواتُ المتاحة، وفلترُ `missing_docs` قراءةً وكتابةً |
+| `frontend_v2/utils/accountingOffice.test.ts` | إخفاءُ `filing_method` لغير الإسرائيليّ، واشتقاقُ «مخصَّص»، وشارةُ الحالة، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وإخفاءُ الإسناد في «شخص واحد»، وعرضُ «—» للمبلغ المخفيّ، وأدوارُ المكتب الأربعة، و**تقويمُ #274**: شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع، وتنقّلُ الشهور عبر السنة، والتجميعُ على يوم الموعد، وتسميةُ الفترة، ووسمُ «متوقَّع»، و**«اليوم» (#275)**: تسمياتُ الحالة/الاتجاه/الشارة من الخادم وحدها (والقيمةُ الخام احتياطاً)، ونصُّ المبلغ بالاتجاه والقناع («—»)، وقراءةُ الفلتر من العنوان وكتابتُه، والتاريخُ القصير `dd/MM` بلا `Date`، و**#276**: `late_internal` فلترٌ مقروءٌ ومكتوب، وأصنافُ الشارات الثلاث (أحمر/أصفر/محايد)، وشارةُ التنبيه من `badge` وحده (ونوعٌ مجهولٌ محايد)، و`alertTargetPath` بـ`task=`، و`clientTabFromSearch`، و`taskIdFromSearch`/`officeTaskAnchorId`، و**#277**: وصفُ قاعدة السطر من أرقامها (والنوعُ المجهول يعيد تسميةَ الخادم)، و`settingsGroupFromSearch`، و`alertTargetPath` بـ`opens=deadline_rules`، ونصُّ التمديد وشارةُ الأصل و«المنصة: …»، وتاريخُ التمديد المقترح بعد ثلاثين يوماً، و**#278**: صفوفُ الشبكة خانةٌ لكل شهرٍ (والفارغُ محايدة)، وألوانُ الحالات الخمس ورموزُها، و`documentDocsText` («وصل 3/5» و«0/0» فارغ)، و`documentMissingBar` (آخرُ شهرٍ وأسماءُ النواقص وغيابُه)، وتسميةُ «مش لازمة هالسنة»، ووسمُ الملف، والسنواتُ المتاحة، وفلترُ `missing_docs` قراءةً وكتابةً، و**#280**: رقمُ واتساب المكتب من جوالٍ فلسطينيّ (059/056 ⇒ 970) وإسرائيليّ (05 غيرُهما ⇒ 972) وأرضيٍّ بمفتاح نظامه، والدوليُّ `+`/`00` يمرّ بلا إعادة بناء، والقمامةُ والقصيرُ يُعيدان `null`، ورابطُ `wa.me` يرمّز النصّ |
 | `accounting_office/tests/test_services.py` | الخمسةُ الافتراضية و`ensure_default_services` idempotent والكودُ المولَّد يتخطّى المأخوذ، وبياناتُ السقوف من هجرة `0003` نفسها (أرقامُها وروابطها حرفاً)، وتغييرُ الدورية من تاريخٍ لا يمسّ ما قبله، والإيقافُ يُبقي الصفَّ ويمنع تعديلَ الدورية بعده ويقع مرّةً واحدة ولا يسبق سريانَ دورية، والحالةُ نسبةً لليوم (إيقافٌ مستقبليّ = نشطة)، ومنعُ التداخل (قبل `ends_on` أو فيه ⇒ رفض، وبعده ⇒ قبول)، وتطبيعُ `responsible_from` أولَ الشهر، والباقةُ نسخٌ لا ربط (وإعادةُ إضافةِ الموقوفة، وتخطّي المعطَّلةِ والمتداخلةِ بسببهما، وفرعُ «لا اقتراح» فعلاً)، والاقتراحُ لنظامين ولسقفين في سنتين وبلا سقف («تقديري») وقبل أقدم سقف (`None` + 400)، وتحذيرُ تجاوز سقف עוסק פטור وصفرُ المبيعات، والسببُ بلا أرقام، وحارسا المفتاحين (محاسبٌ بلا `office.settings.manage`، وعضوٌ يرى الزبونَ بلا مفتاح الكتابة)، و404 لزبونٍ غيرك على كل نقطة، وقناعُ `suggested_price` ورفضُ كتابته بعضوٍ يملك مفتاحَ الإعدادات ولا يرى المبالغ، وعددُ استعلاماتِ قائمة الباقات لا يكبر بعددها |
 | `accounting_office/tests/test_deadlines.py` | **محرّكُ #274**: ق.م فلسطينيُّ كانون الثاني = 15 شباط، والجمعةُ تبقى مع التنبيه؛ والتأجيلُ الإسرائيليُّ بعد يوم راحة مسلم/يهودي/مسيحي؛ و`rest_day_only` يُعاد حسابه وغيره يُؤخذ؛ والتمديدُ الإلكترونيّ والموعدُ الداخليّ (والرجوعُ من الجمعة) وأيامُه 5/7/30 بتخصيص الزبون؛ و`periods_for`/`service_periods` محاذاةً بلا فجوة (والتقصيرُ يقطع الحزمة قبل التغيير، ودوريةُ الفترة المقطوعة تحدّد أيامَ إعدادها)؛ وسياقُ الطلب لا يُسقط زبوناً خارج مجموعته، وتنبيهُ «تقديري: سقف» على سطر السقف، وزبونٌ بلا بطاقة بلا 500، والفلترةُ بالزبون/الموظف تجلب خدماتِ المفلتَرين وحدهم؛ وسطرُ الدورية الثابتة يُولَّد مرّةً في السنة (و`on_demand` لا تُسقطه)؛ وشهرٌ بدأ في منتصفه يُدرَك؛ والربعُ نفسُه في مديين مختلفين؛ وبياناتُ هجرة `0004` حرفاً (عدُّ الأسطر لكل نسخة، وآذار 2026 = 27.4 وشباط 2026 = 26.3 وأيلول 2027 = 28.10)؛ و«עוסק פטור» لا يولّد الدوري؛ والسقفُ المفصّل؛ وسنةٌ بلا لائحة «تقديري» (بتعديلٍ يُزرع على شهرها فيُثبت تجاهلَه)؛ والخدمةُ الموقوفة؛ وحارسُ «لا تاريخَ قانونيّاً» بمسح `ast` وإسقاطِه على `15` و`-15`؛ والتقويمُ لا يحفظ سطراً ولا يكبر عددُ استعلاماته بعدد الزبائن؛ وتغييرُ السطر يظهر فوراً؛ والفلترةُ والمدى والأفقُ وتاريخٌ فاسدُ اليوم ⇒ 400 |
 | `accounting_office/tests/test_obligations.py` | **التزاماتُ وشغلاتُ #275**: التشغيلُ مرّتين ليومٍ واحدٍ = مرّة (لا صفَّ مكرّرٌ ولا سجلَّان)، و`ensure` لا تعمل ليومٍ مسجَّل، وق.م كانون الثاني غائبةٌ في 31/1 وحاضرةٌ في 1/2، والتشغيلُ المتأخّرُ يلحق الفترات كلَّها، ورواتبُ إسرائيل الشهرية بموظّفين ⇒ شغلةٌ واحدةٌ والتزامان (`il_withholding_102` + `il_bl_employees`) وموعدُها الداخليُّ أبكرُهما، والتقريرُ السنويُّ 126/856 (شغلةٌ لعام 2026 تُحفظ من 1/1/2027)، وسنةٌ تقديرية (2028) تُحفظ بعلامتها، والصفُّ القائمُ لا تتغيّر تواريخُه بتعديل اللائحة، والتقويمُ ما زال يحسب ولا يحفظ، والشاراتُ تُحسب من اليوم بلا كتابةٍ في القاعدة، والمبلغُ يُقفل عند «انقدّم» و«انقدّم» لا يُتراجَع عنه و«مش لازم» تُفتح، وتاريخُ تقديمٍ مستقبليٌّ يُرفض، والاتجاهُ مطلوبٌ مع المبلغ، و«هدول انقدّموا قبل…» تُغلق المنتظِرَ قبل تاريخها وحده، وإيقافُ 31/3 يُبقي آذار ويُسقط نيسان، و`last_period_ours=False` لا تُولَّد وتُسكِتُ المنتظِر، والزبونُ المنتهي لا فترةَ بعد `ended_on`، ودالّةُ «آخر فترةٍ في سلسلة» نقيّةً، وتحويلُ الشغلة (عضوُ مكتبٍ آخر يُرفض، والمحوَّلُ إليه يرى الزبونَ بلا `office.clients.all`، و`None` يعيد الوراثة)، والأمرُ (المرخَّص وحده، و`--day` كما ورد، وتاريخٌ فاسدٌ `CommandError`)، وشكلُ السطر المحسوم، والقناعُ على المبلغ، والعدّاداتُ قبل الفلتر **ونافذةُ `week` على `actual_deadline` مستقلةً عن الشارة** (صفٌّ أصفرُ داخل النافذة يظهر تحت `week` و`late_internal` معاً) والفلاترُ الخمسة (والسادسُ `missing_docs` في `test_documents_api.py`) والمجهولُ 400 |
@@ -1343,3 +1509,5 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 | `accounting_office/tests/test_documents.py` | **قائمةُ الأوراق #278 (خدمياً)**: «فواتير المشتريات» بندٌ **واحد** لزبونٍ عنده مسك دفاتر وقيمة مضافة (معيار القبول ١)، والشهرُ يُحفظ في أوّل التالي والسنةُ في 1 يناير، والتشغيلُ مرّتين لا يكتب صفّاً، وخدمةٌ تبدأ في آذار لا تُطلب في كانون الثاني؛ وطبقاتُ القائمة: إخراجُ المكتب يُسقط، وخيارُ الزبون يفرض بنداً رفضته شروطه ويُسقط بنداً انطبق، و«تقرير مدقق» غائبٌ عن الفرد وحاضرٌ للشركة، وبطاقةٌ ناقصةُ التصنيف لا تطابق شرطاً؛ والحالات: «وصلت» تحفظ الفاعل والتاريخ والقناة، والقناةُ الغائبةُ 400، والحالةُ المجهولةُ 400، والتراجعُ يمحو الثلاثة، وتسميةُ السنوي «مش لازمة هالسنة»؛ و«ناقصه أوراق»: مطلوبةٌ تُشعلها وناقصةٌ تُبقيها ووصلت/مش لازمة تُسقطانها، وصفٌّ خارج الفترة أو بلا خدمةٍ لا يُشعلها، والمقدَّمُ لا يُقاس؛ وعدّادُ `وصل/مطلوب`؛ والبذرةُ (**٤١ بنداً: 12+8 فلسطين و13+8 إسرائيل** — ومنها بندا الرواتب الأربعة بكودهما وخدمتهما وحالتِهما الابتدائية #279) وعكسُها يحذف أكوادَها وحدها؛ ومددُ الحفظ الثلاث بمصادرها ونصُّها؛ وبندُ مكتبٍ بكوده المشتقّ؛ وجولةُ الإصلاح الأولى: خدمةٌ رُفع عنها «آخر فترة علينا» تسقط بنودَها في الشهر الذي **تحويه** فترتُها وتبقى بنودُ الخدمة الأخرى، واستعلامُ التقدّم مقيَّدٌ بمدى الالتزامات المنتظِرة |
 | `accounting_office/tests/test_documents_api.py` | **نقاطُ #278**: كلُّ صفٍّ في الشبكة بعدد الأشهر وخانةٌ `null` لبندٍ بلا صفّ (معيار القبول ٥)، وحمولةُ التسميات ومددِ الحفظ والسنوات، والقائمةُ السنوية؛ وتسجيلُ الحالة (والمالك يُحفظ فاعلاً)، والقناةُ الغائبة 400 والمجهولةُ 400، وزبونُ الزميل 404 وصفُّ مكتبٍ آخر 404؛ والملفُّ: رفعٌ يُرجع 201 بلا `file_url` ولا رابطِ تخزينٍ في أيّ ردّ، والحالةُ لا تتغيّر، وتنزيلٌ بايتاتٍ من `stream_stored_asset`، وحذفٌ يمحو الصفَّ ويستدعي `destroy_cloudinary_asset` بالرابط، وملفٌّ فارغٌ أو نوعٌ ممنوعٌ 400؛ وقالبُ البنود: قراءةٌ لكل عضو و`system` خاطئٌ 400، و«ضمن القائمة» بلا `office.settings.manage` ⇒ 403، وإنشاءُ بندٍ وتعديلُه بالمفتاح و`DELETE` غيرُ مسموح، وخيارُ الزبون يغلب القالبَ ويظهر في التوليد؛ و«اليوم»: عدّادُ `missing_docs` وفلترُه و`docs` لكل صفّ، والمحسومُ يُسقطه، وعددُ الاستعلامات لا يكبر باثنَي عشرَ صفّاً إضافياً؛ وجولةُ الإصلاح الأولى: رفعٌ فوق السقف 400 بلا قراءةٍ كاملة، وفشلُ حفظ صفّ الملف يمحو الأصلَ المرفوع، وبندُ المنصّة بلا `id`، وبندُ المكتب لا يُقلب من `choice/`؛ وجولةُ الإصلاح الثانية: فشلُ الرفع يُبقي حالتَه (سقفُ الخطّة 400 بنصّه للمستخدم، وخطأُ المزوّد 502 بجملةٍ عامّةٍ ونصُّه في السجلّ لا في الردّ)، ولوحةُ الزبون تعرض بنودَ المكتب **المفعَّلة** وحدها وقائمةُ الإعدادات تعرض المعطَّلَ معها |
 | `accounting_office/tests/test_payroll.py` | **الرواتب — متابعةُ الاستحقاق #279**: نصفُ سنويّ فترتاه يناير–يونيو ويوليو–ديسمبر ودوريةُ سطرٍ لا خدمة وأيامُه من مفتاح الربعيّ؛ **102 والـביטוח يتبعان دوريةَ الخدمة** (شهريةٌ ⇒ التزامٌ لكل شهر، وكلُّ شهرين ⇒ التزامٌ لشهرين) من **v2**؛ و`טופס 126 חציוני` **التاريخُ القانونيّ 18 تموز 2026 و18 كانون الثاني 2027 قبل الزحزحة**؛ وفلسطين: الاقتطاعُ في 15 من التالي، و**الكشفُ السنوي 30 نيسان 2027 بـ`needs_review`**، والضمانُ الاجتماعي لا يُولَّد؛ **وإعدادُ الالتزامات**: بندٌ أُخرج لزبونٍ يسقط له وحده ويبقى لغيره، **والتقويمُ يقرأ القرار نفسه**؛ و**دوريةُ الرواتب**: «رُبعية» مرفوضةٌ برسالتها في **المسارَين** (الإضافة وتغيير الدورية) وشهريةٌ وكلُّ شهرين مقبولتان وخدمةٌ أخرى تحفظ ربعيتها؛ **وأوراقُ الرواتب**: الكشفُ لزبون الخدمة وحده وحالتُه «مطلوبة»، و«تغييرات الموظفين» «مش لازمة» ولا تُشعل «ناقصه أوراق» (المطلوبُ واحدٌ ويصل ⇒ لا شارة)، وبندُ المكتب يبدأ «مطلوبة»؛ **والهجرة**: إسرائيل v2 (كلُّ حقلٍ منسوخٌ حرفاً + سطرُ 126 النصف سنوي) وفلسطين v3 (سبعةُ أسطر + الكشفُ السنوي) وبنداتُها الأربعة، وعكسُها يحذف ما أنشأته وحدها ولا يمسّ v1/v2 ويُعاد بالزرع ثانيةً؛ **وحارسُ انحراف** اختياراتِ السجلّ مقابل أكواد الرواتب غير الحدثية في النسخ السارية وتسمياتِها |
+| `accounting_office/tests/test_reminders.py` | **التذكيرات — «جاهز للإرسال» #280 (خدمياً)**: الإذنُ يُمنح ويُسحب بتاريخيهما ومَن سحبه، ونوعٌ أو قناةٌ مجهولة 400، ورافضُ الإذن أو نوعُه ليس في `consent_types` لا يظهر، والجهةُ الجديدة تأخذ افتراضيَّ المكتب؛ **والقوالب**: نصٌّ عربيٌّ وعبريٌّ لكلٍّ من الأنواع الأربعة، والبديلُ يغلب والافتراضيُّ لا يُكتب مكانه، والرمزُ المجهول 400 يسمّيه، ونصٌّ فارغٌ 400، و`render_reminder_body` يترك ما ليس من الستّة ولا يسقط على قوس؛ **والإيقاع**: أوّلُ تذكيرٍ بعد انتهاء الفترة بيوم، والثاني بعد ثلاثةٍ من الإرسال، ولا رابعَ بعد الثالث، و«وصلت» تخرج و«وصلت ناقصة» تبقى، والتنحيةُ تُعيد المؤقّت ولا تُعدّ، و«كلّمناه» يُعدّ، والـ`undo` يُنقص عدّاً ولا يُبطَل مرّتين؛ **والقائمة**: شخصٌ لزبونين = رسالةٌ واحدة، وتعيينُ النوع يغلب الرئيسية، ونصُّ المستلِم بلغته، وبديلُ المكتب يظهر في الرسالة، وبلا هاتفٍ تظهر (`has_phone=false`)، وبلا تجميعٍ رسالةٌ لكل بند، والمنتهي لا يُعرض، وفلترُ المسؤول، وزبونُ مكتبٍ آخر لا يُعرض، والنوعُ بلا مولّدٍ يُعيد فراغاً؛ **والحواجز**: يومُ راحة الزبون وعطلةُ المكتب يؤجّلان الظهور لا يُلغيانه، والتأجيلُ يحجب حتى تاريخه و`until=None` يمسحه وتاريخُ اليوم مرفوض؛ **والتصعيد**: تنبيهُ المسؤول يومَ الاستحقاق التالي بلا مبلغ، وصاحبُ المكتب بعد يومين، ولا شيءَ قبل الفاصل، مرّةً واحدةً في اليوم، ويُسقطه اكتمالُ الأوراق عند القراءة، ويفتح تبويبَ الأوراق؛ **والكلفة**: عددُ الاستعلامات نفسُه لزبونٍ وخمسة؛ وشكلُ اللقطة في السجلّ، والسجلُّ الأحدثَ أوّلاً، وجهةٌ أو زبونٌ خارج الرؤية يُرفض. **وجولةُ الإصلاح الأولى**: شهرٌ وسنةٌ يبدآن في اليوم نفسه ⇒ تنبيهان لا واحد، و`{due_date}` في النصّ يومُ التذكير القادم بـ`dd/MM/yyyy` بعد يوم راحة، و`sent` واتسابٌ وحدها والفراغُ يعنيها، وتنحيةُ ثلاثة بنودٍ استعلامُ بياناتٍ واحد و`bulk_create` واحد، ولا مسحَ لأوراق زبونٍ بلا تنبيهٍ قائم، وحارسا `resolve_settings_for_clients` وقراءتُه مرّةً للحمولة، وتنبيهُ التذكير مُثبَتٌ قبل اكتمال الأوراق |
+| `accounting_office/tests/test_reminders_api.py` | **نقاطُ #280**: حقولُ الإذن على الجهة، و`contacts/<id>/consent/` يُمنح ويُسحب ويعيد مَن سحب، ونوعٌ/قناةٌ/قيمةٌ غير منطقية 400، والكتابةُ بلا مفتاحها 403؛ و`reminder-templates/` تُقرأ لكل عضوٍ (ثمانيةُ أسطر)، والبديلُ `PUT` و«ارجع للافتراضي» `DELETE`، والرمزُ المجهول 400 يسمّيه، وبلا `office.settings.manage` 403، ونوعٌ أو لغةٌ مجهولة 400؛ و`ready-to-send/` تجمع اليومَ رسائلَ، و`sent/` صفٌّ لكل بندٍ بلقطة الهاتف، و`manual/` تلفونٌ أو زيارة فقط، و`dismiss/` بسببٍ وبلا نصّ، و`postpone/` بتاريخٍ بعد اليوم (واليوم 400)، وزبونُ غيرك لا يظهر ولا يُرسَل له، والأفعالُ الأربعة بلا مفتاح الكتابة 403، ونوعٌ مجهول 400، والفلترُ بنوعٍ بلا مولّدٍ فراغ؛ و`reminder-log/` تُقرأ و`PUT`/`PATCH`/`DELETE` 405 والصفُّ باقٍ، والـ`undo` يشير إلى ما يُبطله وإبطالُه 400، وسجلُّ الزبون على `clients/<pk>/reminder-log/`، وزبونُ الزميل 404 على السجلّ وعلى الإبطال؛ و`office-holidays/` تُقرأ لكل عضوٍ وتُكتب بالمفتاح، والتكرار 400 والحذف 204؛ و`reminder_auto_send` مقفلٌ برسالته، والنافذةُ تُرفض خارج 0–23 وبترتيبٍ مقلوب، ومجموعةُ «التذكيرات والنصوص» تُخدَم بقيمها الافتراضية. **وجولةُ الإصلاح الأولى**: النافذةُ تُرفض ببدايةٍ متأخّرةٍ عن النهاية كذلك، و`sent/` قناةٌ غيرُ الواتساب 400، و`serializer_class` السجلّ سطرُ قراءةٍ لا حمولةُ تأجيل (وحقولُه هي حقولُ الردّ)، ويومُ النقاط أربعاءُ ثابتةٌ فلا قائمةَ فارغةً كلَّ جمعة |

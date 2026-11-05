@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1042**
+عدد النقاط: **1056**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -83,6 +83,7 @@
 | `/api/accounting-office/clients/{pk}/obligations/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/obligations/close-prior/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reactivate/` | `OfficeClientViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/clients/{pk}/reminder-log/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/reminders/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/services/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/services/suggest/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -93,6 +94,7 @@
 | `/api/accounting-office/clients/{pk}/tax-card/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/contacts/{pk}/` | `OfficeContactViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/contacts/{pk}/consent/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/custom-rules/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/custom-rules/{pk}/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
@@ -113,8 +115,20 @@
 | `/api/accounting-office/obligations/{pk}/not-required/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/reopen/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/submit/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/office-holidays/` | `OfficeHolidayViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/office-holidays/{pk}/` | `OfficeHolidayViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/` | `OfficePackageViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/packages/{pk}/` | `OfficePackageViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/ready-to-send/` | `OfficeReadyToSendViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/ready-to-send/dismiss/` | `OfficeReadyToSendViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/ready-to-send/manual/` | `OfficeReadyToSendViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/ready-to-send/postpone/` | `OfficeReadyToSendViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/ready-to-send/sent/` | `OfficeReadyToSendViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/reminder-log/` | `OfficeReminderLogViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/reminder-log/{pk}/` | `OfficeReminderLogViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/reminder-log/{pk}/undo/` | `OfficeReminderLogViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/reminder-templates/` | `OfficeReminderTemplateViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/reminder-templates/{reminder_type}/{language}/` | `OfficeReminderTemplateViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/{pk}/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |

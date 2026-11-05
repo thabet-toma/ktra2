@@ -75,7 +75,8 @@ class SettingTestCase(APITestCase):
 class RegistryShapeTest(SettingTestCase):
     def test_the_agreed_settings_and_no_others_exist(self):
         """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276،
-        و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279."""
+        و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
+        (#280)."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -84,6 +85,12 @@ class RegistryShapeTest(SettingTestCase):
                 "internal_lead_days_annual", "calendar_months_ahead",
                 "enabled_event_kinds", "payroll_obligations",
                 "late_internal_alert_to", "late_official_alert_to",
+                "reminder_types_enabled", "reminder_auto_send",
+                "reminder_merge_daily", "documents_reminder_start_days",
+                "documents_reminder_interval_days", "documents_reminder_max",
+                "reminder_send_hour_start", "reminder_send_hour_end",
+                "reminder_escalation_owner_days",
+                "reminder_default_consent_types",
             },
         )
 
@@ -429,7 +436,7 @@ class SettingsApiTest(SettingTestCase):
         self.assertEqual(res.status_code, 200, res.content)
         rows = {row["key"]: row for row in res.data["settings"]}
         # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276،
-        # و«بنودُ الرواتب» لـ#279.
+        # و«بنودُ الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص» (#280).
         self.assertEqual(
             set(rows),
             {
@@ -438,6 +445,11 @@ class SettingsApiTest(SettingTestCase):
                 "internal_lead_days_annual", "calendar_months_ahead",
                 "enabled_event_kinds", "payroll_obligations",
                 "late_internal_alert_to", "late_official_alert_to",
+                "reminder_types_enabled", "reminder_auto_send",
+                "reminder_merge_daily", "documents_reminder_start_days",
+                "documents_reminder_interval_days", "documents_reminder_max",
+                "reminder_send_hour_start", "reminder_send_hour_end",
+                "reminder_escalation_owner_days", "reminder_default_consent_types",
             },
         )
 
@@ -447,6 +459,7 @@ class SettingsApiTest(SettingTestCase):
                 {"id": "office", "label": "المكتب"},
                 {"id": "schedule", "label": "الضريبة ولائحة المواعيد"},
                 {"id": "alerts", "label": "التأخير والتنبيهات"},
+                {"id": "reminders", "label": "التذكيرات والنصوص"},
             ],
         )
         self.assertEqual(rows["tax_system"]["value"], "PS")

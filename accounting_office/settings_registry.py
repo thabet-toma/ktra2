@@ -40,10 +40,13 @@ GROUP_OFFICE = "office"
 GROUP_SCHEDULE = "schedule"
 #: #276: مجموعةُ «التأخير والتنبيهات» — درجتا التأخير ومستلِمُ كلٍّ منهما.
 GROUP_ALERTS = "alerts"
+#: #280: مجموعةُ «التذكيرات والنصوص» — عددُ التذكيرات وإيقاعُها ونافذةُ الإرسال.
+GROUP_REMINDERS = "reminders"
 SETTING_GROUPS: tuple[tuple[str, str], ...] = (
     (GROUP_OFFICE, "المكتب"),
     (GROUP_SCHEDULE, "الضريبة ولائحة المواعيد"),
     (GROUP_ALERTS, "التأخير والتنبيهات"),
+    (GROUP_REMINDERS, "التذكيرات والنصوص"),
 )
 
 #: مستلِمو التنبيه (#276) — مفاتيحُ الاختيار يقرؤها `services._alert_recipient_ids`.
@@ -96,6 +99,29 @@ PAYROLL_OBLIGATION_CHOICES: tuple[tuple[str, str], ...] = (
 )
 PAYROLL_OBLIGATION_LABELS: dict[str, str] = dict(PAYROLL_OBLIGATION_CHOICES)
 
+#: #280: أنواعُ التذكير الأربعة — **تُعرَّف هنا لا في النماذج** لأن إعدادَي
+#: `reminder_types_enabled` و`reminder_default_consent_types` يقرآن مفاتيحها،
+#: والسجلَّ لا يستورد النماذج (دَّورةُ استيراد). والنماذجُ تعيد تصديرها كما في
+#: أنواع الأحداث (#277) — فلا نسختان تفترقان عند أوّل نوعٍ يُضاف.
+REMINDER_DOCUMENTS = "documents"
+REMINDER_DEADLINE = "deadline"
+REMINDER_BALANCE = "balance"
+REMINDER_APPOINTMENT = "appointment"
+REMINDER_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
+    (REMINDER_DOCUMENTS, "أوراق ناقصة"),
+    (REMINDER_DEADLINE, "موعد رسمي قريب"),
+    (REMINDER_BALANCE, "اللي عليه"),
+    (REMINDER_APPOINTMENT, "تذكير موعد"),
+)
+REMINDER_TYPES: tuple[str, ...] = tuple(key for key, _label in REMINDER_TYPE_CHOICES)
+REMINDER_TYPE_LABELS: dict[str, str] = dict(REMINDER_TYPE_CHOICES)
+
+#: نافذةُ الإرسال (§#280/D7): ساعةُ بدايةٍ وساعةُ نهايةٍ تُخزَّنان للمرحلة الثانية
+#: ولا تقرؤهما هذه المرحلة. والحدُّ 23 لأن الساعةَ 24 تعني «المنتصف» في لغاتٍ
+#: وتُلبس على من يقرأ، فالوضوحُ أولى.
+SEND_HOUR_MIN = 0
+SEND_HOUR_MAX = 23
+
 
 class _NoDefault:
     """غيابُ افتراضي: «يُختار» — لا قيمةَ تخمينيةً يحملها البرنامج عن المكتب."""
@@ -146,6 +172,8 @@ class SettingDefinition:
     #: حدٌّ أدنى للأنواع العددية — والسالبُ لا معنى له في «أيامٍ قبل الموعد» ولا
     #: في «مدىً بالأشهر». `None` تعني «لا حدَّ زائداً على النوع».
     min_value: int | None = None
+    #: حدٌّ أعلى للأنواع العددية — «ساعةُ الإرسال» تنتهي عند 23 ولا تعرف `None`.
+    max_value: int | None = None
     #: تسميةُ الإعداد من منظور الزبون حين تختلف عن تسمية المكتب — «أيام عطلة
     #: المكتب» للمكتب، و«يوم راحة الزبون» تخصيصاً فوقه. القيمةُ والتسميةُ من
     #: السجلّ نفسه، فلا تصنع الواجهة اسماً ثانياً يفترق عنه.
@@ -226,6 +254,12 @@ def validate_value(definition: SettingDefinition, value):
             raise ValidationError({
                 "value": (
                     f"«{definition.label}» لا يقلّ عن {definition.min_value}."
+                ),
+            })
+        if definition.max_value is not None and value > definition.max_value:
+            raise ValidationError({
+                "value": (
+                    f"«{definition.label}» لا يزيد على {definition.max_value}."
                 ),
             })
         return value
@@ -397,6 +431,122 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=ALERT_TO_ASSIGNEE_OWNER,
         group=GROUP_ALERTS,
         note="التزامٌ تجاوز موعده الرسمي ولم يُقدَّم — الافتراضُ المسؤول وصاحب المكتب.",
+    ),
+    # ── التذكيرات والنصوص (#280) ──
+    #
+    # **ما يُرسَل ومتى وبكم**: الأنواعُ المفعّلة، وإيقاعُ «الأوراق الناقصة»
+    # (أوّلُ تذكيرٍ بعد انتهاء الفترة بيوم، ثم كلَّ ثلاثةٍ، وبثلاثةٍ كحدٍّ أقصى).
+    # والأرقامُ الثلاثة **قابلةٌ للتخصيص لكل زبون**: مكتبٌ يلاحق زبوناً كبيراً
+    # بإيقاعٍ أسرع يخصّصه، والافتراضُ يبقى واحداً للباقين.
+    #
+    # **والإرسالُ التلقائيُّ مقفلٌ مطفأً**: الحقلُ `False` افتراضاً، وأيُّ `True`
+    # يُرفَض 400 برسالته (الحارسُ في `services.set_office_setting`) — فالمرحلةُ
+    # الأولى **مراجعةُ موظّفٍ قبل كل إرسال**، وإعدادٌ يفتح البابَ قبل أوانه
+    # يكسر هذا القرار بصمت.
+    "reminder_types_enabled": SettingDefinition(
+        key="reminder_types_enabled",
+        label="أنواع التذكيرات المفعّلة",
+        kind=KIND_MULTI_CHOICE,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        choices=REMINDER_TYPES,
+        labels=REMINDER_TYPE_LABELS,
+        default=list(REMINDER_TYPES),
+        group=GROUP_REMINDERS,
+        note="نوعٌ يُطفأ هنا لا يظهر في «جاهز للإرسال» ولا يستهلك تذكيراتٍ.",
+    ),
+    "reminder_auto_send": SettingDefinition(
+        key="reminder_auto_send",
+        label="الإرسال التلقائي",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=False,
+        group=GROUP_REMINDERS,
+        note="مقفلٌ مطفأً في المرحلة الأولى — كلُّ رسالةٍ يراها موظّفٌ قبل إرسالها.",
+    ),
+    "reminder_merge_daily": SettingDefinition(
+        key="reminder_merge_daily",
+        label="رسالةٌ واحدة لكل شخصٍ في اليوم",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=True,
+        group=GROUP_REMINDERS,
+        note="مفعّلةً تُجمَع بنودُ الشخص الواحد في رسالة؛ مطفأةً تُرسَل رسالةٌ لكل بند.",
+    ),
+    "documents_reminder_start_days": SettingDefinition(
+        key="documents_reminder_start_days",
+        label="أوّل تذكيرٍ للأوراق بعد انتهاء الفترة (أيام)",
+        client_label="أوّل تذكيرٍ لأوراقي بعد انتهاء الفترة (أيام)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=1,
+        min_value=0,
+        group=GROUP_REMINDERS,
+        note="يومٌ واحدٌ افتراضاً: التذكيرُ يبدأ في أوّل يومٍ بعد انتهاء الشهر.",
+    ),
+    "documents_reminder_interval_days": SettingDefinition(
+        key="documents_reminder_interval_days",
+        label="بين التذكير والتذكير (أيام)",
+        client_label="بين تذكيري وتذكيري (أيام)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=3,
+        min_value=1,
+        group=GROUP_REMINDERS,
+        note="صفرٌ مرفوض: تذكيرٌ كلَّ يومٍ إلحاحٌ لا متابعة.",
+    ),
+    "documents_reminder_max": SettingDefinition(
+        key="documents_reminder_max",
+        label="أقصى عددِ تذكيراتٍ للأوراق",
+        client_label="أقصى عددِ تذكيراتٍ لأوراقي",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=3,
+        min_value=1,
+        group=GROUP_REMINDERS,
+        note="بعد الحدّ يتوقّف التذكيرُ ويصعد تنبيهٌ داخليّ للمسؤول ثم لصاحب المكتب.",
+    ),
+    "reminder_send_hour_start": SettingDefinition(
+        key="reminder_send_hour_start",
+        label="بداية نافذة الإرسال (ساعة)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE,),
+        default=9,
+        min_value=SEND_HOUR_MIN,
+        max_value=SEND_HOUR_MAX,
+        group=GROUP_REMINDERS,
+        note="تُخزَّن للمرحلة الثانية؛ المرحلةُ الأولى تُرسِل بيد الموظف في أيّ ساعة.",
+    ),
+    "reminder_send_hour_end": SettingDefinition(
+        key="reminder_send_hour_end",
+        label="نهاية نافذة الإرسال (ساعة)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE,),
+        default=19,
+        min_value=SEND_HOUR_MIN,
+        max_value=SEND_HOUR_MAX,
+        group=GROUP_REMINDERS,
+        note="لا تكون قبل بدايتها — الحارسُ في `services.set_office_setting`.",
+    ),
+    "reminder_escalation_owner_days": SettingDefinition(
+        key="reminder_escalation_owner_days",
+        label="بعد كم يومٍ يُصعَّد لصاحب المكتب",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE,),
+        default=2,
+        min_value=0,
+        group=GROUP_REMINDERS,
+        note="تنبيهُ المسؤول يسبقه؛ ويبقى صاحبُ المكتب آخرَ من يعلم.",
+    ),
+    "reminder_default_consent_types": SettingDefinition(
+        key="reminder_default_consent_types",
+        label="أنواع التذكير التي يوافق عليها الشخص الجديد",
+        kind=KIND_MULTI_CHOICE,
+        levels=(LEVEL_OFFICE,),
+        choices=REMINDER_TYPES,
+        labels=REMINDER_TYPE_LABELS,
+        default=list(REMINDER_TYPES),
+        group=GROUP_REMINDERS,
+        note="تُنسَخ على جهة الاتصال عند إنشائها، وتُعدَّل بعدها لكل شخصٍ وحده.",
     ),
 }
 

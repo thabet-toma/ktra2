@@ -16,8 +16,12 @@ from accounting_office.views import (
     OfficeDocumentFileViewSet,
     OfficeDocumentItemViewSet,
     OfficeDocumentViewSet,
+    OfficeHolidayViewSet,
     OfficeObligationViewSet,
     OfficePackageViewSet,
+    OfficeReadyToSendViewSet,
+    OfficeReminderLogViewSet,
+    OfficeReminderTemplateViewSet,
     OfficeServiceViewSet,
     OfficeSettingsViewSet,
     OfficeTaskViewSet,
@@ -61,6 +65,22 @@ router.register(
     "document-items",
     OfficeDocumentItemViewSet,
     basename="accounting-office-document-items",
+)
+# #280: «جاهز للإرسال» وأفعالها، وسجلُّ التذكيرات (إلحاقيّ)، ونصوصُ المكتب،
+# وعطلُه. والسجلُّ على `reminder-log` لا `reminders`: هذا مستلِمو الأنواع منذ #271.
+router.register(
+    "ready-to-send", OfficeReadyToSendViewSet, basename="accounting-office-ready-to-send",
+)
+router.register(
+    "reminder-log", OfficeReminderLogViewSet, basename="accounting-office-reminder-log",
+)
+router.register(
+    "reminder-templates",
+    OfficeReminderTemplateViewSet,
+    basename="accounting-office-reminder-templates",
+)
+router.register(
+    "office-holidays", OfficeHolidayViewSet, basename="accounting-office-holidays",
 )
 
 urlpatterns = [

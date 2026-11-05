@@ -32,7 +32,7 @@ export const SETTINGS_GROUP_PARAM = 'group';
 export const SETTINGS_GROUP_SCHEDULE = 'schedule';
 
 /** مجموعاتُ شاشة الإعدادات المعروفة — `?group=` خارجها يُتجاهَل. */
-export const OFFICE_SETTING_GROUPS = ['office', 'schedule', 'alerts'] as const;
+export const OFFICE_SETTING_GROUPS = ['office', 'schedule', 'alerts', 'reminders'] as const;
 
 /** مفتاحُ وجهة التنبيه الذي يفتح شاشة اللائحة (#277) — من الخادم في `opens`. */
 export const ALERT_OPENS_DEADLINE_RULES = 'deadline_rules';
@@ -1429,4 +1429,91 @@ export function documentStatusChipClass(status: string): string {
     channel_label: '',
     files_count: 0,
   });
+}
+
+
+// ── رقم واتساب المكتب (#280/D10) ─────────────────────────────────────────────
+//
+// **الرقمُ يُبنى هنا لأن الرابط لا يُبنى في الخادم**: الخادم يرسل هاتفاً كما
+// أدخله المكتب («0599123456»)، و`wa.me` لا يقبل إلا رقماً دولياً بأرقامٍ فقط.
+// وبناءُ الرقم في الخادم كان يعني رابطاً محفوظاً في ردٍّ يُخزَّن أو يُنسخ؛
+// والدالّةُ الخالصة تُختبر وحدها وتُقرأ من الشاشة كلّها.
+//
+// **مفتاحُ الدولة من نظام الزبون الضريبي** حين لا يكون الرقم جوالاً فلسطينياً
+// معروفاً: 059/056 جوالٌ فلسطينيّ، و05 غيرُهما جوالٌ إسرائيليّ، وأيُّ صفرٍ آخر
+// (أرضيّ) يأخذ دولة النظام. ونظامٌ مجهول مع أرضيّ ⇒ `null` لا تخمين: رقمٌ
+// يُبنى بمفتاح بلدٍ خطأ يفتح محادثةً مع شخصٍ آخر.
+
+/** مفاتيحُ الدولة المعروفة — من النظام الضريبي للزبون، لا من جدولٍ ثالث. */
+const OFFICE_DIAL_CODES: Record<string, string> = {
+  PS: '970',
+  IL: '972',
+};
+
+/** أقصر رقم دوليّ فعليّ ثمانية أرقام، وأطولُه خمسةَ عشر (E.164). */
+const MIN_INTERNATIONAL_DIGITS = 8;
+const MAX_INTERNATIONAL_DIGITS = 15;
+
+/**
+ * رقمُ واتساب دوليٌّ من هاتفٍ محلّيٍّ أو دوليّ — أو `null` صراحةً.
+ *
+ * `taxSystem` نظامُ الزبون الضريبيّ (`PS`/`IL`) ويُقرأ للحاجة إليه وحده: رقمٌ
+ * محلّيٌّ يبدأ بـ`0` غيرِ `05` (أرضيّ) لا يُعرف مفتاحُ دولته إلا منه.
+ */
+export function officeWhatsappNumber(
+  phone?: string | null,
+  taxSystem?: string | null,
+): string | null {
+  const raw = (phone ?? '').trim();
+  if (!raw) return null;
+  const hadPlus = raw.startsWith('+');
+  const digits = raw.replace(/\D/g, '');
+  if (!digits) return null;
+
+  // «دوليٌّ أصلاً»: `+` أو `00` — يُقصّ الصفران ويبقى مفتاحُ الدولة.
+  if (hadPlus || digits.startsWith('00')) {
+    const international = digits.startsWith('00') ? digits.slice(2) : digits;
+    // رقمٌ دوليّ لا يبدأ بصفر: `+0599…` إدخالٌ فاسد لا رقم.
+    if (!international || international.startsWith('0')) return null;
+    return withinDialLength(international) ? international : null;
+  }
+
+  if (!digits.startsWith('0')) return null;
+
+  // جوالٌ فلسطينيّ: 059/056 ⇒ 970، وغيرُهما من 05 جوالٌ إسرائيليّ ⇒ 972.
+  if (digits.startsWith('059') || digits.startsWith('056')) {
+    return withinDialLength('970' + digits.slice(1)) ? '970' + digits.slice(1) : null;
+  }
+  if (digits.startsWith('05')) {
+    return withinDialLength('972' + digits.slice(1)) ? '972' + digits.slice(1) : null;
+  }
+
+  // أرضيٌّ أو أيُّ صفرٍ آخر: مفتاحُ الدولة من نظام الزبون وحده.
+  const country = OFFICE_DIAL_CODES[(taxSystem ?? '').trim().toUpperCase()];
+  if (!country) return null;
+  const international = country + digits.slice(1);
+  return withinDialLength(international) ? international : null;
+}
+
+function withinDialLength(digits: string): boolean {
+  return (
+    digits.length >= MIN_INTERNATIONAL_DIGITS
+    && digits.length <= MAX_INTERNATIONAL_DIGITS
+  );
+}
+
+/**
+ * رابطُ محادثة واتساب مع نصٍّ جاهز — أو `null` إن كان الرقم غير قابلٍ للبناء.
+ *
+ * `null` مقصودٌ لا خطأ: الشاشةُ تعرض «بلا واتساب» بدل زرٍّ يفتح محادثةً مع
+ * شخصٍ آخر. والنصُّ يُرمَّز دائماً — عربيٌّ وأسطرٌ جديدة في `?text=`.
+ */
+export function officeWhatsappLink(
+  phone?: string | null,
+  taxSystem?: string | null,
+  text = '',
+): string | null {
+  const number = officeWhatsappNumber(phone, taxSystem);
+  if (!number) return null;
+  return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
 }
