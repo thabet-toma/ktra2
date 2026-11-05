@@ -74,14 +74,15 @@ class SettingTestCase(APITestCase):
 
 class RegistryShapeTest(SettingTestCase):
     def test_the_agreed_settings_and_no_others_exist(self):
-        """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276."""
+        """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276،
+        و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
-                "enabled_event_kinds",
+                "enabled_event_kinds", "payroll_obligations",
                 "late_internal_alert_to", "late_official_alert_to",
             },
         )
@@ -427,14 +428,15 @@ class SettingsApiTest(SettingTestCase):
         res = self.client.get(SETTINGS, **self.headers())
         self.assertEqual(res.status_code, 200, res.content)
         rows = {row["key"]: row for row in res.data["settings"]}
-        # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276.
+        # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276،
+        # و«بنودُ الرواتب» لـ#279.
         self.assertEqual(
             set(rows),
             {
                 "tax_system", "office_size", "rest_days", "filing_method",
                 "internal_lead_days_monthly", "internal_lead_days_quarterly",
                 "internal_lead_days_annual", "calendar_months_ahead",
-                "enabled_event_kinds",
+                "enabled_event_kinds", "payroll_obligations",
                 "late_internal_alert_to", "late_official_alert_to",
             },
         )

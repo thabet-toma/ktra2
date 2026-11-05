@@ -58,6 +58,10 @@ from tenants.services import create_company
 
 #: هجرةُ بيانات الكتالوج — تُستدعى بدالّتها كما هي (نمط `test_obligations.py`).
 DOCUMENTS_MIGRATION = "accounting_office.migrations.0008_document_checklist"
+#: بنداتُ الرواتب (#279) — هجرةٌ تالية، تُزرع يدوياً في الاختبارين اللذين
+#: يقيسانها ولا تُضاف إلى `seed_document_catalog`، فتبقى بقيّةُ هذا الملفّ تقيس
+#: `0008` وحده.
+PAYROLL_DOCUMENTS_MIGRATION = "accounting_office.migrations.0009_payroll_due_dates"
 
 JAN_START = datetime.date(2026, 1, 1)
 JAN_END = datetime.date(2026, 1, 31)
@@ -75,6 +79,12 @@ def seed_document_catalog():
     """بنداتُ المنصّة ومددُ الحفظ **من هجرة البيانات نفسها**."""
     migration = importlib.import_module(DOCUMENTS_MIGRATION)
     migration.seed_document_catalog(django_apps, None)
+
+
+def seed_payroll_document_items():
+    """بنداتُ الرواتب الأربعة من هجرة `0009` — تُزرع في اختبارها وحدها."""
+    migration = importlib.import_module(PAYROLL_DOCUMENTS_MIGRATION)
+    migration.seed_payroll_document_items(django_apps, None)
 
 
 class DocumentsTestCase(TestCase):
@@ -611,27 +621,46 @@ class CatalogTest(DocumentsTestCase):
         self.assertEqual(len(codes), len(set(codes)))
 
     def test_seed_counts_per_system_and_cadence(self):
+        # بنداتُ الرواتب (#279) تُضاف إلى الشهريّ وحده: بندان لكل نظام.
+        seed_payroll_document_items()
+
         def count(system, cadence):
             return PlatformDocumentItem.objects.filter(
                 tax_system=system, cadence=cadence,
             ).count()
 
-        self.assertEqual(count("PS", "monthly"), 10)
+        self.assertEqual(count("PS", "monthly"), 12)
         self.assertEqual(count("PS", "annual"), 8)
-        self.assertEqual(count("IL", "monthly"), 11)
+        self.assertEqual(count("IL", "monthly"), 13)
         self.assertEqual(count("IL", "annual"), 8)
 
-    def test_no_payroll_item_is_seeded(self):
-        """بنودُ الرواتب تذكرةٌ أخرى (#279) — ولا بندَ باسمها هنا."""
-        self.assertFalse(
-            PlatformDocumentItem.objects.filter(
-                code__icontains="payroll",
-            ).exists(),
+    def test_the_payroll_items_are_seeded_with_their_services_and_defaults(self):
+        """#279: بندان لكل نظام — كشفٌ مطلوب، وتغييراتُ موظفين «مش لازمة»."""
+        seed_payroll_document_items()
+
+        expected = {
+            ("PS", "ps_payroll_sheet"): "required",
+            ("PS", "ps_employee_changes"): "not_needed",
+            ("IL", "il_payroll_sheet"): "required",
+            ("IL", "il_employee_changes"): "not_needed",
+        }
+        for (system, code), status in expected.items():
+            row = PlatformDocumentItem.objects.get(tax_system=system, code=code)
+            self.assertEqual(row.cadence, "monthly")
+            self.assertEqual(row.service_codes, ["payroll"])
+            self.assertEqual(row.card_conditions, {})
+            self.assertEqual(row.default_status, status)
+        self.assertEqual(
+            PlatformDocumentItem.objects.get(
+                tax_system="IL", code="il_payroll_sheet",
+            ).name,
+            "كشف رواتب الشهر",
         )
-        self.assertFalse(
-            PlatformDocumentItem.objects.filter(
-                name__icontains="رواتب",
-            ).exists(),
+        self.assertEqual(
+            PlatformDocumentItem.objects.get(
+                tax_system="IL", code="il_employee_changes",
+            ).name,
+            "تغييرات الموظفين (تعيين، ترك، تغيير راتب)",
         )
 
     def test_one_item_carries_two_services(self):

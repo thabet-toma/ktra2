@@ -421,6 +421,29 @@ class CustomRulesApiTest(OverridesApiTestCase):
     def test_an_unknown_rule_kind_is_refused(self):
         self.assertEqual(self.create(rule_kind="every_now_and_then").status_code, 400)
 
+    def test_a_semiannual_cadence_is_refused_for_an_office_rule(self):
+        """#279/D1: «نصف سنوي» دوريةُ سطرٍ منشورٍ لا دوريةَ التزامِ مكتب."""
+        refused = self.create(cadence="semiannual")
+
+        self.assertEqual(refused.status_code, 400, refused.content)
+        self.assertEqual(
+            [str(item) for item in refused.data["cadence"]], ["دورية غير معروفة."],
+        )
+        self.assertFalse(
+            OfficeCustomRule.objects.exists(),
+            "قاعدةُ مكتبٍ بدوريةٍ خارج `OFFICE_CUSTOM_RULE_CADENCE_CHOICES` حُفظت",
+        )
+
+    def test_the_event_cadence_keeps_its_tailored_message(self):
+        refused = self.create(cadence="event")
+
+        self.assertEqual(refused.status_code, 400, refused.content)
+        self.assertEqual(
+            [str(item) for item in refused.data["cadence"]],
+            ["التزامُ المكتب دوريٌّ — والحدثُ يُسجَّل من ملفّ الزبون."],
+        )
+        self.assertFalse(OfficeCustomRule.objects.exists())
+
 
 class ClientEventsApiTest(OverridesApiTestCase):
     @classmethod

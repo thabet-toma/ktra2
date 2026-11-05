@@ -78,6 +78,24 @@ EVENT_KIND_CHOICES: tuple[tuple[str, str], ...] = (
 )
 EVENT_KIND_LABELS: dict[str, str] = dict(EVENT_KIND_CHOICES)
 
+#: #279: بنودُ خدمة الرواتب في **أحدث نسخ اللائحة** — أكوادٌ وتسمياتُ أسطرها
+#: (أسماءُ الأسطر في اللائحة نفسها، فلا اسمَ ثانٍ يفترق عنها). وهي هنا لا في
+#: النماذج: إعدادُ `payroll_obligations` يقرأ مفاتيحها، والسجلَّ لا يستورد النماذج.
+#: **وسطرُ الحدث خارجها**: سطرُ الاقتطاع يحكمه «أنواع الأحداث المفعّلة»
+#: (`enabled_event_kinds`) وحده، لا هذا الإعداد — فإدراجُه هنا يُوهم أنه يُتحكَّم به.
+#: **وحارسُ الانحراف** اختبارٌ يقارن هذه القائمة بأكواد `service_code="payroll"`
+#: **غير الحدثية** في النسخ السارية — بندٌ يُضاف إلى اللائحة بلا اختيارٍ هنا يسقطه الاختبار.
+PAYROLL_OBLIGATION_CHOICES: tuple[tuple[str, str], ...] = (
+    ("ps_payroll_withholding", "اقتطاع ضريبة الرواتب"),
+    ("ps_social_security", "اشتراكات الضمان الاجتماعي"),
+    ("ps_payroll_annual_statement", "الكشف السنوي للرواتب"),
+    ("il_withholding_102", "ניכויים — טופס 102"),
+    ("il_bl_employees", "ביטוח לאומי לעובדים — 102"),
+    ("il_bl_126_semiannual", "טופס 126 חציוני לביטוח לאומי"),
+    ("il_annual_126_856", "דוח שנתי 126/856"),
+)
+PAYROLL_OBLIGATION_LABELS: dict[str, str] = dict(PAYROLL_OBLIGATION_CHOICES)
+
 
 class _NoDefault:
     """غيابُ افتراضي: «يُختار» — لا قيمةَ تخمينيةً يحملها البرنامج عن المكتب."""
@@ -336,6 +354,22 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=[key for key, _label in EVENT_KIND_CHOICES],
         group=GROUP_SCHEDULE,
         note="«صار حدث» في ملفّ الزبون يولّد التزامه لِما يُفعَّل هنا وحده.",
+    ),
+    #: #279: «أيّ التزاماتٍ تولّدها خدمة الرواتب؟» — قرارُ المكتب يُخصَّص لزبون
+    #: (مكتبٌ لا يتولّى الـביטוח לאומי لزبونٍ بعينه يُخرجه له وحده). الافتراضُ
+    #: **كلُّ البنود**: المكتب يقلّص لا يبدأ بقائمةٍ فارغة. ويُطبَّق في
+    #: `services.rule_applies` وحدها، فيقرأ التوليدُ والتقويمُ قراراً واحداً —
+    #: وأما «اليوم» فيقرأ الصفوف المحفوظة، وما وُلد قبل التقليص يبقى حتى يُحسم.
+    "payroll_obligations": SettingDefinition(
+        key="payroll_obligations",
+        label="الالتزامات التي تولّدها خدمة الرواتب",
+        kind=KIND_MULTI_CHOICE,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        choices=tuple(key for key, _label in PAYROLL_OBLIGATION_CHOICES),
+        labels=PAYROLL_OBLIGATION_LABELS,
+        default=[key for key, _label in PAYROLL_OBLIGATION_CHOICES],
+        group=GROUP_SCHEDULE,
+        note="بندٌ يُخرَج هنا لا يُولَّد بعد الآن ولا يظهر في التقويم؛ وما وُلد قبلُ يبقى حتى يُحسم.",
     ),
     # ── التأخير والتنبيهات (#276) ──
     #

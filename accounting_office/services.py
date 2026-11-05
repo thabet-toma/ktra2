@@ -24,6 +24,7 @@ from django.utils import timezone
 from accounting_office import deadlines, settings_registry
 from accounting_office.models import (
     CADENCE_EVENT,
+    CADENCE_SEMIANNUAL,
     CADENCE_SERVICE,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CLIENT_SERVICE_STATUS_ACTIVE,
@@ -940,7 +941,9 @@ def _clean_tax_card_fields(tenant, client, payload) -> dict:
             or count < 0 or count > MAX_EMPLOYEES_COUNT
         ):
             raise ValidationError({
-                "employees_count": f"عدد الموظفين عددٌ صحيح بين 0 و{MAX_EMPLOYEES_COUNT}.",
+                "employees_count": (
+                    f"عدد العاملين عددٌ صحيح بين 0 و{MAX_EMPLOYEES_COUNT}."
+                ),
             })
         clean["employees_count"] = count
     if "is_self_employed" in payload:
@@ -1346,6 +1349,23 @@ def delete_service_package(package) -> None:
 
 
 # ── خدمات الزبون: الإضافة والدورية والإيقاف (#273) ─────────────────────────
+#: #279/D4: دوريةُ خدمة الرواتب **شهريةٌ أو كل شهرين** — «دورية 102 حسب ملفه»
+#: (#264): ملفٌّ شهريٌّ يُقدّم شهرياً، وملفٌّ كلَّ شهرين يُقدّمهما معاً.
+PAYROLL_FREQUENCY_ERROR = "دوريةُ الرواتب شهريةٌ أو كل شهرين."
+PAYROLL_FREQUENCIES: frozenset[str] = frozenset({FREQUENCY_MONTHLY, FREQUENCY_BIMONTHLY})
+
+
+def _assert_payroll_frequency(service_code, frequency) -> None:
+    """**النقطةُ الوحيدة** التي تحكم دوريةَ الرواتب — يقرؤها مسارا الكتابة.
+
+    الإضافةُ (`_insert_client_service`) وتغييرُ الدورية المؤرَّخة
+    (`change_client_service_frequency`) يكتبان صفوفَ الدورية، فلو كُتب الشرطُ في
+    أحدهما وحده لمرّت «رُبعيةٌ» من الباب الآخر. ولا حدَّ على خدمةٍ غير الرواتب.
+    """
+    if service_code == SERVICE_CODE_PAYROLL and frequency not in PAYROLL_FREQUENCIES:
+        raise ValidationError({"frequency": PAYROLL_FREQUENCY_ERROR})
+
+
 def frequency_on(client_service, day, *, rows=None):
     """**القاعدةُ الوحيدة**: الدوريةُ في يومٍ ما = الصفُّ ذو أكبر `effective_from <= day`.
 
@@ -1473,6 +1493,8 @@ def _insert_client_service(
     آخر لا تُنسخ إلى هذا الزبون.
     """
     _assert_service_of_tenant(client.tenant, service)
+    # #279: قبل أيّ كتابةٍ — لا صفَّ خدمةٍ يُنشأ ثم يُرفض.
+    _assert_payroll_frequency(service.code, frequency)
     with transaction.atomic():
         row = ClientService.objects.create(
             tenant=client.tenant,
@@ -1544,6 +1566,8 @@ def change_client_service_frequency(
     today = today or timezone.localdate()
     if frequency not in FREQUENCY_KEYS:
         raise ValidationError({"frequency": "دورية غير معروفة."})
+    # #279: البابُ الثاني لكتابة الدورية — الدوريةُ المؤرَّخة تحكمها القاعدةُ نفسها.
+    _assert_payroll_frequency(client_service.service.code, frequency)
     if effective_from is None:
         raise ValidationError({"effective_from": "تاريخ السريان مطلوب."})
     if effective_from < client_service.starts_on:
@@ -1825,13 +1849,19 @@ DEADLINE_LOOKBACK_MONTHS = 12 * 2
 #: يُرفض. ولا يصير الطلبُ مسحاً لسنوات.
 CALENDAR_MAX_SPAN_DAYS = 62
 
-#: إعدادُ أيام الموعد الداخلي بحسب الدورية — «كل شهرين» تأخذ حصّةَ الشهريّ.
+#: إعدادُ أيام الموعد الداخلي بحسب الدورية — «كل شهرين» تأخذ حصّةَ الشهريّ،
+#: و«نصف سنوي» (#279) حصّةَ الربعيّ: قاعدتُها أقربُ إلى الربعيّ في المدى ولا
+#: إعدادَ سابعاً لها (#279/D1).
 INTERNAL_LEAD_SETTING_BY_CADENCE: dict[str, str] = {
     FREQUENCY_MONTHLY: "internal_lead_days_monthly",
     FREQUENCY_BIMONTHLY: "internal_lead_days_monthly",
     FREQUENCY_QUARTERLY: "internal_lead_days_quarterly",
+    CADENCE_SEMIANNUAL: "internal_lead_days_quarterly",
     FREQUENCY_ANNUAL: "internal_lead_days_annual",
 }
+
+#: إعدادُ «الالتزامات التي تولّدها خدمة الرواتب» (#279) — يقرؤه `rule_applies`.
+PAYROLL_OBLIGATIONS_KEY = "payroll_obligations"
 
 #: الإعداداتُ التي تُقرأ **جماعياً** لزبائن التقويم: كلُّها تقبل التخصيص لكل زبون،
 #: فتُحلّ مرّةً لكل مفتاح في الطلب (`resolve_setting_for_clients`) لا مرّتين لكل
@@ -1840,6 +1870,7 @@ CONTEXT_SETTING_KEYS: tuple[str, ...] = (
     TAX_SYSTEM_KEY,
     "rest_days",
     "filing_method",
+    PAYROLL_OBLIGATIONS_KEY,
     *INTERNAL_LEAD_SETTING_BY_CADENCE.values(),
 )
 
@@ -1890,15 +1921,31 @@ def schedule_for(tax_system, year) -> tuple[DeadlineSchedule | None, bool]:
     return previous, True
 
 
-def rule_applies(rule, card, thresholds_ctx: ThresholdContext) -> bool:
+def rule_applies(
+    rule, card, thresholds_ctx: ThresholdContext, *, payroll_obligations=None,
+) -> bool:
     """هل يُولّد هذا السطرُ التزاماً لهذه البطاقة؟ — **الشروطُ من اللائحة**.
 
     `is_generated=False` («لا يُولَّد») يسقط أوّلاً. ثم كلُّ شرطٍ في
     `rule.conditions`: التصنيفُ ونوعُ الكيان يُشترطان في قائمتهما، والموظفون
     والتعاملُ الذاتيّ تطابقاً، والسقفُ تجاوزاً (`annual_sales > السقف المنشور`).
     وسقفٌ غير منشورٍ لسنةٍ ولا لسابقةٍ لها ⇒ لا يُثبت التجاوز ⇒ لا يُولَّد.
+
+    **وإعدادُ «الالتزامات التي تولّدها خدمة الرواتب» (#279) يُطبَّق هنا وحده**:
+    سطرُ خدمة الرواتب الذي أُخرِج من الإعداد لا يُولَّد لصاحبه — فالتوليدُ والتقويمُ
+    يقرآن قراراً واحداً من هذه الدالّة. **وأما «اليوم» فيقرأ الصفوف المحفوظة**:
+    تقليصُ الإعداد لا يحذف التزاماً وُلد قبلُ ولا يعيد كتابة تاريخه (#275)، فيبقى
+    ظاهراً حتى يحسمه المكتب («مش لازم»). و`None` (نداءٌ بلا سياق) تعني «كلُّ
+    البنود مفعّلة» — وهي **الافتراضُ في السجلّ**، فلا يفترق المنادي القديم عن
+    القرار.
     """
     if not rule.is_generated:
+        return False
+    if (
+        rule.service_code == SERVICE_CODE_PAYROLL
+        and payroll_obligations is not None
+        and rule.code not in payroll_obligations
+    ):
         return False
     conditions = rule.conditions or {}
 
@@ -2265,6 +2312,9 @@ def _deadline_items(client, *, floor, end, context):
     # بطاقةٌ غائبةٌ (صفٌّ شُطب يدوياً) لا تُسقِط تقويمَ المكتب: الشروطُ المشروطة
     # بالبطاقة لا تنطبق عليها، فيبقى ما لا شرطَ له (دفترٌ بلا بطاقةٍ لا مواعيدَ له).
     card = getattr(client, "tax_card", None)
+    # #279: إعدادُ بنود الرواتب يُقرأ مرّةً للزبون من سياق الطلب (لا استعلامَ لكل
+    # سطر)، ويُمرَّر إلى `rule_applies` وحدها — فقرارٌ واحدٌ للتوليد والتقويم.
+    payroll_obligations = context.setting(client, PAYROLL_OBLIGATIONS_KEY)
 
     for client_service in client_services_of(client, context):
         frequencies = list(client_service.frequencies.all())
@@ -2288,7 +2338,9 @@ def _deadline_items(client, *, floor, end, context):
                 # يُولَّد دورياً بحال.
                 if rule.cadence == CADENCE_EVENT or rule.cadence != source:
                     continue
-                if not rule_applies(rule, card, thresholds):
+                if not rule_applies(
+                    rule, card, thresholds, payroll_obligations=payroll_obligations,
+                ):
                     continue
                 result = _deadline_result(
                     client,
@@ -4650,13 +4702,18 @@ def custom_rules_payload(tenant) -> dict:
 
 
 def _clean_custom_rule_payload(*, cadence, rule_kind, rule_day, rule_month):
-    """حدودُ قاعدة المكتب: دوريةٌ تُولّد، ونوعُ قاعدةٍ دوريّ، ويومٌ/شهرٌ في حدّيهما."""
-    if cadence not in {value for value, _label in DEADLINE_CADENCE_CHOICES}:
-        raise ValidationError({"cadence": "دورية غير معروفة."})
+    """حدودُ قاعدة المكتب: دوريةٌ تُولّد، ونوعُ قاعدةٍ دوريّ، ويومٌ/شهرٌ في حدّيهما.
+
+    والحدثُ يُرفض برسالته أوّلاً — **قبل فحص العضوية** — لأن دوريات التزام المكتب
+    (`OFFICE_CUSTOM_RULE_CADENCE_CHOICES`) خارجها `event` أصلاً، فيأخذ المنادي
+    رسالةَ «الحدث يُسجَّل من ملفّ الزبون» لا «دورية غير معروفة».
+    """
     if cadence == CADENCE_EVENT:
         raise ValidationError({
             "cadence": "التزامُ المكتب دوريٌّ — والحدثُ يُسجَّل من ملفّ الزبون.",
         })
+    if cadence not in {value for value, _label in OFFICE_CUSTOM_RULE_CADENCE_CHOICES}:
+        raise ValidationError({"cadence": "دورية غير معروفة."})
     if rule_kind not in {value for value, _label in OFFICE_CUSTOM_RULE_KIND_CHOICES}:
         raise ValidationError({"rule_kind": "نوعُ قاعدة غير معروف لالتزام المكتب."})
     clean_day = _clean_override_number(rule_day, "rule_day", minimum=1, maximum=31)
@@ -5093,6 +5150,10 @@ def _document_catalog(context, tax_system, cadence) -> list[dict]:
 
     المنصّةُ بترتيب `sort_order` (ترتيبُ البحث)، وقائمةُ المكتب بعدها بالاسم:
     ما أضافه المكتب يبقى أسفل القائمة، فلا يُزيح بنداً قانونياً عن مكانه.
+
+    **والحالةُ الابتدائيةُ لبند المنصّة وحدها** (#279): بندٌ اشتقّه القانونُ يبدأ
+    «مش لازمة» حيث لا لزومَ له («تغييرات الموظفين»)، وبندُ المكتب يبدأ
+    «مطلوبة» دائماً — ورقةٌ أضافها المكتب لا تُولَد ملغاةً بلا قراره.
     """
     key = (tax_system, cadence)
     cached = context.document_items.get(key)
@@ -5104,6 +5165,7 @@ def _document_catalog(context, tax_system, cadence) -> list[dict]:
             "name": item.name,
             "service_codes": list(item.service_codes or []),
             "card_conditions": dict(item.card_conditions or {}),
+            "default_status": item.default_status,
         }
         for item in (
             PlatformDocumentItem.objects
@@ -5117,6 +5179,7 @@ def _document_catalog(context, tax_system, cadence) -> list[dict]:
             "name": item.name,
             "service_codes": list(item.service_codes or []),
             "card_conditions": dict(item.card_conditions or {}),
+            "default_status": DOCUMENT_STATUS_REQUIRED,
         }
         for item in (
             OfficeDocumentItem.objects
@@ -5352,7 +5415,8 @@ def _generate_document_rows(client, *, tenant, service_rows, end, context, skip)
                     "service_codes": list(item["service_codes"]),
                     "cadence": cadence,
                     "period_end": period_end,
-                    "status": DOCUMENT_STATUS_REQUIRED,
+                    # #279: الحالةُ الابتدائيةُ من البند (بندُ المنصّة وحدها تحملها).
+                    "status": item.get("default_status") or DOCUMENT_STATUS_REQUIRED,
                 },
             )
             known.add(key)

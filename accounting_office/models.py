@@ -248,8 +248,9 @@ class TaxCard(models.Model):
         max_digits=14, decimal_places=2, default=0, verbose_name="المبيعات السنوية",
     )
     has_employees = models.BooleanField(default=False, verbose_name="له موظفون")
+    #: #279/D7: التسميةُ المعروضة «عدد العاملين» — الحقلُ يبقى `employees_count`.
     employees_count = models.PositiveSmallIntegerField(
-        default=0, verbose_name="عدد الموظفين",
+        default=0, verbose_name="عدد العاملين",
     )
     is_self_employed = models.BooleanField(
         default=False, verbose_name="עצמאי يدفع ביטוח לאומי",
@@ -873,11 +874,16 @@ CADENCE_ANNUAL = FREQUENCY_ANNUAL
 #: المكتب يختارها. و`event` ليست دوريةَ توليدٍ: سطرُ الحدث يُولَّد من الحدث وحده.
 CADENCE_BIMONTHLY = FREQUENCY_BIMONTHLY
 CADENCE_EVENT = "event"
+#: #279: «نصف سنوي» — **دوريةُ سطرٍ في اللائحة لا دوريةَ خدمة**: `טופס 126
+#: חציוני` يستحق مرّتين في السنة (يناير–يونيو ثم السنة كلها) ولا يُنتظر من
+#: الزبون أن يشترك في خدمةٍ نصف سنوية. فلا تُضاف إلى `FREQUENCY_*`.
+CADENCE_SEMIANNUAL = "semiannual"
 DEADLINE_CADENCE_CHOICES: list[tuple[str, str]] = [
     (CADENCE_SERVICE, "يتبع دورية خدمة الزبون"),
     (CADENCE_MONTHLY, "شهري"),
     (CADENCE_BIMONTHLY, "كل شهرين"),
     (CADENCE_QUARTERLY, "ربع سنوي"),
+    (CADENCE_SEMIANNUAL, "نصف سنوي"),
     (CADENCE_ANNUAL, "سنوي"),
     (CADENCE_EVENT, "حدث — يُولَّد عند تسجيله لا دورياً"),
 ]
@@ -902,9 +908,11 @@ OFFICE_CUSTOM_RULE_KIND_CHOICES: list[tuple[str, str]] = [
     if key != RULE_KIND_DAYS_AFTER_EVENT
 ]
 #: دورياتُ التزام المكتب (#277) — بلا `event`: التزامُ المكتب دوريٌّ يُولَّد،
-#: والحدثُ يُسجَّل من ملفّ الزبون فيأخذ سطرَ اللائحة لا قاعدةَ مكتب.
+#: والحدثُ يُسجَّل من ملفّ الزبون فيأخذ سطرَ اللائحة لا قاعدةَ مكتب. و«نصف سنوي»
+#: (#279) دوريةُ **سطرٍ منشورٍ في المنصة** لا دوريةَ مكتبٍ يختارها — خارج القائمة.
 OFFICE_CUSTOM_RULE_CADENCE_CHOICES: list[tuple[str, str]] = [
-    (key, label) for key, label in DEADLINE_CADENCE_CHOICES if key != CADENCE_EVENT
+    (key, label) for key, label in DEADLINE_CADENCE_CHOICES
+    if key not in (CADENCE_EVENT, CADENCE_SEMIANNUAL)
 ]
 
 #: مفاتيح شروط السطر المسموحة — **وحدها**: مفتاحٌ آخر يرفعه `clean()`، فالشروطُ
@@ -937,6 +945,8 @@ CADENCE_SPAN_MONTHS: dict[str, int] = {
     FREQUENCY_MONTHLY: 1,
     FREQUENCY_BIMONTHLY: 2,
     FREQUENCY_QUARTERLY: 3,
+    # #279: نصفُ السنة — يناير–يونيو ثم يوليو–ديسمبر (حزمةٌ محاذاةٌ للتقويم).
+    CADENCE_SEMIANNUAL: 6,
     FREQUENCY_ANNUAL: 12,
     FREQUENCY_ON_DEMAND: 0,
 }
@@ -1889,6 +1899,15 @@ class PlatformDocumentItem(models.Model):
     #: شروطُ البطاقة: `{"entity_type": ["company"]}` — و`{}` لا شرط.
     card_conditions = models.JSONField(
         default=dict, blank=True, verbose_name="شروط البطاقة",
+    )
+    #: #279: الحالةُ التي يبدأ بها صفُّ الورقة المولَّد من هذا البند. بندُ المنصّة
+    #: وحده يحملها — **وبندُ المكتب يبدأ «مطلوبة» دائماً**: ورقةٌ أضافها المكتب
+    #: لقائمته لا تُولَد «مش لازمة» بلا قراره.
+    default_status = models.CharField(
+        max_length=20,
+        choices=DOCUMENT_STATUS_CHOICES,
+        default=DOCUMENT_STATUS_REQUIRED,
+        verbose_name="الحالة الابتدائية",
     )
     sort_order = models.PositiveSmallIntegerField(default=0, verbose_name="الترتيب")
 

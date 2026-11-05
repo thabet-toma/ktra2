@@ -1635,14 +1635,21 @@ class FixedCadencePeriodsTest(ScheduleTestCase):
         self.assertEqual(rows[0]["result"].legal_date, datetime.date(2027, 1, 31))
 
     def test_a_fixed_cadence_is_generated_even_for_an_on_demand_service(self):
-        """`on_demand` لا تولّد فتراتِ خدمة — ولا تُسقط سطراً قاعدتُه سنوية."""
-        client = self.make_client("خدمة عند الطلب", has_employees=True)
+        """`on_demand` لا تولّد فتراتِ خدمة — ولا تُسقط سطراً قاعدتُه سنوية.
+
+        **والخدمةُ هنا `vat` لا `payroll` (#279/D4)**: دوريةُ الرواتب صارت شهريةً
+        أو كلَّ شهرين وحدها، فلا يوجد زبونُ رواتبٍ «عند الطلب» يُختبر به. والسطرُ
+        السنويُّ (إقرارُ المعفى) يحمل العبءَ نفسه: فترتُه من قاعدته لا من الخدمة.
+        """
+        client = self.make_client(
+            "خدمة عند الطلب", vat_classification="exempt",
+        )
         self.add_service(
-            client, "payroll", frequency="on_demand",
+            client, "vat", frequency="on_demand",
             starts_on=datetime.date(2026, 1, 1),
         )
         rows = self.rows_of(
-            client, "il_annual_126_856",
+            client, "il_vat_exempt_declaration",
             start=datetime.date(2027, 1, 1), end=datetime.date(2027, 12, 31),
         )
 

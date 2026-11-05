@@ -1083,7 +1083,7 @@ export const OfficeClientFile: React.FC<{
               </label>
 
               <label className="text-[11.5px] font-medium text-slate-600 dark:text-slate-300">
-                عدد الموظفين
+                عدد العاملين
                 <input
                   type="number"
                   min={0}
