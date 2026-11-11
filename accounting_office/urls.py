@@ -18,6 +18,10 @@ from accounting_office.views import (
     OfficeDocumentFileViewSet,
     OfficeDocumentItemViewSet,
     OfficeDocumentViewSet,
+    OfficeFeeDraftViewSet,
+    OfficeFeeExtraServiceViewSet,
+    OfficeFeeServicePriceViewSet,
+    OfficeFeeSubscriptionViewSet,
     OfficeHolidayViewSet,
     OfficeObligationViewSet,
     OfficePackageViewSet,
@@ -98,6 +102,32 @@ router.register(
 )
 router.register(
     "office-holidays", OfficeHolidayViewSet, basename="accounting-office-holidays",
+)
+# #282: الأتعاب — الاشتراكُ وأسعارُ الخدمات والإضافاتُ والمسودّاتُ والاعتماد
+# (الجزءُ أ١، الخادمُ وحده). ولا حذفَ في الأربعة: `http_method_names` في
+# الـviewsets تُغلق الطريقة، ولا `PUT`/`PATCH` كذلك.
+# ومسارُ `fees/drafts/approve-all/` مسارُ جمعٍ لأنها فعلٌ على كل المنتظر، لا واحدة.
+router.register(
+    "fees/subscriptions",
+    OfficeFeeSubscriptionViewSet,
+    basename="accounting-office-fee-subscriptions",
+)
+router.register(
+    "fees/drafts",
+    OfficeFeeDraftViewSet,
+    basename="accounting-office-fee-drafts",
+)
+router.register(
+    "fees/extras",
+    OfficeFeeExtraServiceViewSet,
+    basename="accounting-office-fee-extras",
+)
+# أسعارُ خدمات الزبائن: بها تُكتمل طريقةُ «سعرٌ لكل خدمة» — تُقرأ وتُسعَّر ولا
+# تُحذف ولا تُعدَّل (إعادةُ التسعير `POST` ثانٍ يحدّث صفَّ الخدمة الواحد).
+router.register(
+    "fees/service-prices",
+    OfficeFeeServicePriceViewSet,
+    basename="accounting-office-fee-service-prices",
 )
 
 urlpatterns = [

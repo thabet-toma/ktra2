@@ -31,15 +31,18 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounting_office import appointments, client_books, deadlines, services
+from accounting_office import appointments, client_books, deadlines, fees, services
 from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     ClientBook,
     ClientContact,
     ClientService,
+    ClientServicePrice,
     Contact,
     DocumentChecklistItem,
     DocumentFile,
+    FeeExtraService,
+    FeeSubscription,
     Obligation,
     OfficeAlert,
     OfficeClient,
@@ -74,6 +77,11 @@ from accounting_office.serializers import (
     DocumentFileUploadSerializer,
     DocumentItemChoiceSerializer,
     DocumentStatusSerializer,
+    FeeDraftApproveSerializer,
+    FeeDraftRowSerializer,
+    FeeExtraServiceWriteSerializer,
+    FeeServicePriceWriteSerializer,
+    FeeSubscriptionWriteSerializer,
     ObligationAmountSerializer,
     ObligationClientPaidSerializer,
     ObligationExtensionSerializer,
@@ -2189,3 +2197,222 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         serializer.is_valid(raise_exception=True)
         book = client_books.change_kind(book, serializer.validated_data["kind"])
         return Response(self._book_row(book))
+
+
+# ── الأتعاب: الاشتراك والمسودّات والاعتماد (#282) ───────────────────────────
+#
+# **ولا حذفَ في أيّ نقطةٍ منها**: كلُّ `http_method_names` هنا بلا `delete`، فحكمُ
+# الـ405 من القائمة لا من نسيان فعل. والاشتراكُ لا يُعدَّل: تغييرُ السعر صفٌّ
+# جديدٌ بتاريخ سريانه (`fees.create_subscription`)، فتاريخُ الشهر الماضي يبقى.
+def _visible_client(tenant, user, client_id):
+    """زبونٌ يراه العضو — وإلا **404 لا 403**: الثاني يُثبت وجودَ الزبون."""
+    client = services.visible_clients(tenant, user).filter(pk=client_id).first()
+    if client is None:
+        raise NotFound("الزبون غير موجود.")
+    return client
+
+
+def _visible_client_service(tenant, user, data):
+    """خدمةُ زبونٍ يراه العضو — وإلا **404**: زبونُ غيرك لا وجودَ له.
+
+    تُقبل بمعرّف الخدمة (`client_service`) أو بالخدمة والزبون معاً (أحدثُ صفٍّ
+    للخدمة عند الزبون إن تعدّد بتوقّفٍ وإعادة). والبحثُ من `visible_clients`
+    وحدها، فلا تُسعَّر خدمةُ زبونِ زميلٍ ولا زبونِ مكتبٍ آخر.
+    """
+    visible = services.visible_clients(tenant, user)
+    if data.get("client_service") is not None:
+        client_service = (
+            ClientService.objects
+            .filter(pk=data["client_service"], client__in=visible.values("pk"))
+            .first()
+        )
+    else:
+        client = visible.filter(pk=data["client"]).first()
+        if client is None:
+            raise NotFound("الزبون غير موجود.")
+        client_service = (
+            ClientService.objects
+            .filter(client=client, service_id=data["service"])
+            .order_by("-starts_on", "-id")
+            .first()
+        )
+    if client_service is None:
+        raise NotFound("خدمة الزبون غير موجودة.")
+    return client_service
+
+
+class OfficeFeeSubscriptionViewSet(OfficeModuleViewSet):
+    """اشتراكاتُ الأتعاب — **قراءةٌ وإضافة، ولا تعديلَ ولا حذف**.
+
+    القراءةُ بمصدر الرؤية الواحد (`visible_clients`)، والقناعُ في الخدمة، وكتابةُ
+    مبلغٍ بلا «يرى المبالغ» **403** كما في مبلغ الالتزام وسعر الباقة.
+    """
+
+    serializer_class = FeeSubscriptionWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        return Response(fees.subscriptions_payload(self.tenant, user=request.user))
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = FeeSubscriptionWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client = _visible_client(self.tenant, request.user, data["client"])
+        self.reject_amount_writes(data)
+        row = fees.create_subscription(
+            self.tenant,
+            client,
+            amount=data["amount"],
+            starts_on=data["starts_on"],
+            cadence=data.get("cadence"),
+            currency=data.get("currency"),
+            paused_from=data.get("paused_from"),
+            paused_to=data.get("paused_to"),
+            ended_on=data.get("ended_on"),
+        )
+        row = FeeSubscription.objects.select_related("client", "currency").get(pk=row.pk)
+        return Response(
+            fees.subscription_row(
+                row, masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class OfficeFeeDraftViewSet(OfficeModuleViewSet):
+    """مسودّاتُ الأتعاب — قراءةٌ، واعتمادٌ وإلغاءٌ بدور صاحب المكتب ومدير المكتب.
+
+    **ولا إنشاءَ من الـAPI**: المولّدُ في «حدّث المكتب» بفرادة `(زبون، سنة، شهر)`
+    في القاعدة، فـ`POST` على الجمع **405**. والمسودّةُ لا تُعدَّل ولا تُحذف:
+    الاعتمادُ والإلغاءُ فعلان وحدهما، والمعتمدةُ سندُ فاتورةٍ في أ٢.
+    """
+
+    serializer_class = FeeDraftRowSerializer
+    http_method_names = ["get", "post", "head", "options"]
+    # مسارُ التفصيل رقميّ: `approve-all` مسارُ جمعٍ لا معرّفَ مسودّة، والرقمُ يمنع
+    # التباسَ الاثنين ولو غيّر الراوترُ ترتيبَه.
+    lookup_value_regex = r"[0-9]+"
+
+    def get_queryset(self):
+        return fees.visible_drafts(self.tenant, self.request.user)
+
+    def get_object(self):
+        draft = self.get_queryset().filter(pk=self.kwargs.get("pk")).first()
+        if draft is None:
+            raise NotFound("المسودّة غير موجودة.")
+        return draft
+
+    def list(self, request, *args, **kwargs):
+        return Response(fees.drafts_payload(self.tenant, user=request.user))
+
+    def _row(self, draft):
+        return Response(fees.draft_row(
+            draft, masked=fees.amounts_masked(self.tenant, self.request.user),
+        ))
+
+    @action(detail=True, methods=["post"], url_path="approve")
+    def approve(self, request, pk=None):
+        """`draft → approved` — والانتقالُ من الحالة الآنية يقرؤه `fees` بقفلٍ."""
+        draft = self.get_object()
+        serializer = FeeDraftApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        approved = fees.approve_fee_draft(
+            draft,
+            actor=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+        return self._row(approved)
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        """«أَلغِها» — من المسودّة وحدها، وقبل الاعتماد."""
+        draft = self.get_object()
+        cancelled = fees.cancel_fee_draft(draft, actor=request.user)
+        return self._row(cancelled)
+
+    @action(detail=False, methods=["post"], url_path="approve-all")
+    def approve_all(self, request):
+        """«اعتمد الكل» — كلُّ منتظرةٍ في المكتب، والردُّ يقول كم بقي منها."""
+        serializer = FeeDraftApproveSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        approved = fees.approve_all_fee_drafts(
+            self.tenant,
+            actor=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+        masked = fees.amounts_masked(self.tenant, request.user)
+        return Response({
+            "approved": len(approved),
+            "remaining": fees.pending_drafts(self.tenant).count(),
+            "drafts": [fees.draft_row(draft, masked=masked) for draft in approved],
+        })
+
+
+class OfficeFeeExtraServiceViewSet(OfficeModuleViewSet):
+    """الخدماتُ الإضافية — **قراءةٌ وإضافة، ولا حذف**: قيدُ عملٍ نُفِّذ فعلاً."""
+
+    serializer_class = FeeExtraServiceWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        return Response(fees.extras_payload(self.tenant, user=request.user))
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = FeeExtraServiceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client = _visible_client(self.tenant, request.user, data["client"])
+        self.reject_amount_writes(data)
+        row = fees.create_extra_service(
+            self.tenant,
+            client,
+            service_name=data["service_name"],
+            amount=data["amount"],
+            performed_on=data["performed_on"],
+            draft=data.get("draft"),
+        )
+        row = FeeExtraService.objects.select_related("client").get(pk=row.pk)
+        return Response(
+            fees.extra_row(row, masked=fees.amounts_masked(self.tenant, request.user)),
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class OfficeFeeServicePriceViewSet(OfficeModuleViewSet):
+    """أسعارُ خدمات الزبائن — **قراءةٌ وتسعير، ولا تعديلَ ولا حذف**.
+
+    **بها تُكتمل طريقةُ «سعرٌ لكل خدمة»**: كانت الطريقةُ تُختار ولا مدخلَ لسعر
+    الخدمة، فتُولَّد المسودّاتُ بلا سطورٍ ويتوقّف المكتب بصمت. والرؤيةُ عبر
+    `client_service.client` و`visible_clients`، والمبلغُ يمرّ بالقناع وبحارس
+    الكتابة، وإعادةُ التسعير `POST` ثانٍ يحدّث الصفَّ الواحد (`OneToOne`) — فلا
+    `PUT`/`PATCH` ولا `DELETE`.
+    """
+
+    serializer_class = FeeServicePriceWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        return Response(fees.service_prices_payload(self.tenant, user=request.user))
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = FeeServicePriceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client_service = _visible_client_service(self.tenant, request.user, data)
+        self.reject_amount_writes(data)
+        row, created = fees.set_client_service_price(
+            client_service, amount=data["amount"],
+        )
+        row = ClientServicePrice.objects.select_related(
+            "client", "client_service__service",
+        ).get(pk=row.pk)
+        return Response(
+            fees.service_price_row(
+                row, masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
