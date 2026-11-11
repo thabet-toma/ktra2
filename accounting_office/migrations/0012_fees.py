@@ -112,6 +112,14 @@ class Migration(migrations.Migration):
                 'constraints': [models.CheckConstraint(condition=models.Q(('amount__gte', 0)), name='client_service_price_not_negative')],
             },
         ),
+        # #282 (جولة التصليح الأولى): ربطُ الإضافة بمسودّتها التي فوترتها. الهجرةُ
+        # لم تُشحن بعد، فالحقلُ يُضاف هنا **`AddField` إضافيّاً** لا هجرةً ثانية —
+        # وبلا الربط كانت إضافةٌ تُسجَّل بعد توليد مسودّة شهرها تضيع بصمت.
+        migrations.AddField(
+            model_name='feeextraservice',
+            name='billed_draft',
+            field=models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='billed_extras', to='accounting_office.feedraft', verbose_name='المسودّة المفوتر فيها'),
+        ),
         migrations.AddIndex(
             model_name='feedraft',
             index=models.Index(fields=['tenant', 'status'], name='office_fee_draft_tenant_status'),

@@ -37,6 +37,7 @@ from accounting_office.models import (
     ClientBook,
     ClientContact,
     ClientService,
+    ClientServicePrice,
     Contact,
     DocumentChecklistItem,
     DocumentFile,
@@ -76,6 +77,7 @@ from accounting_office.serializers import (
     FeeDraftApproveSerializer,
     FeeDraftRowSerializer,
     FeeExtraServiceWriteSerializer,
+    FeeServicePriceWriteSerializer,
     FeeSubscriptionWriteSerializer,
     ObligationAmountSerializer,
     ObligationClientPaidSerializer,
@@ -2075,6 +2077,35 @@ def _visible_client(tenant, user, client_id):
     return client
 
 
+def _visible_client_service(tenant, user, data):
+    """خدمةُ زبونٍ يراه العضو — وإلا **404**: زبونُ غيرك لا وجودَ له.
+
+    تُقبل بمعرّف الخدمة (`client_service`) أو بالخدمة والزبون معاً (أحدثُ صفٍّ
+    للخدمة عند الزبون إن تعدّد بتوقّفٍ وإعادة). والبحثُ من `visible_clients`
+    وحدها، فلا تُسعَّر خدمةُ زبونِ زميلٍ ولا زبونِ مكتبٍ آخر.
+    """
+    visible = services.visible_clients(tenant, user)
+    if data.get("client_service") is not None:
+        client_service = (
+            ClientService.objects
+            .filter(pk=data["client_service"], client__in=visible.values("pk"))
+            .first()
+        )
+    else:
+        client = visible.filter(pk=data["client"]).first()
+        if client is None:
+            raise NotFound("الزبون غير موجود.")
+        client_service = (
+            ClientService.objects
+            .filter(client=client, service_id=data["service"])
+            .order_by("-starts_on", "-id")
+            .first()
+        )
+    if client_service is None:
+        raise NotFound("خدمة الزبون غير موجودة.")
+    return client_service
+
+
 class OfficeFeeSubscriptionViewSet(OfficeModuleViewSet):
     """اشتراكاتُ الأتعاب — **قراءةٌ وإضافة، ولا تعديلَ ولا حذف**.
 
@@ -2212,4 +2243,41 @@ class OfficeFeeExtraServiceViewSet(OfficeModuleViewSet):
         return Response(
             fees.extra_row(row, masked=fees.amounts_masked(self.tenant, request.user)),
             status=status.HTTP_201_CREATED,
+        )
+
+
+class OfficeFeeServicePriceViewSet(OfficeModuleViewSet):
+    """أسعارُ خدمات الزبائن — **قراءةٌ وتسعير، ولا تعديلَ ولا حذف**.
+
+    **بها تُكتمل طريقةُ «سعرٌ لكل خدمة»**: كانت الطريقةُ تُختار ولا مدخلَ لسعر
+    الخدمة، فتُولَّد المسودّاتُ بلا سطورٍ ويتوقّف المكتب بصمت. والرؤيةُ عبر
+    `client_service.client` و`visible_clients`، والمبلغُ يمرّ بالقناع وبحارس
+    الكتابة، وإعادةُ التسعير `POST` ثانٍ يحدّث الصفَّ الواحد (`OneToOne`) — فلا
+    `PUT`/`PATCH` ولا `DELETE`.
+    """
+
+    serializer_class = FeeServicePriceWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        return Response(fees.service_prices_payload(self.tenant, user=request.user))
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = FeeServicePriceWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client_service = _visible_client_service(self.tenant, request.user, data)
+        self.reject_amount_writes(data)
+        row, created = fees.set_client_service_price(
+            client_service, amount=data["amount"],
+        )
+        row = ClientServicePrice.objects.select_related(
+            "client", "client_service__service",
+        ).get(pk=row.pk)
+        return Response(
+            fees.service_price_row(
+                row, masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
         )

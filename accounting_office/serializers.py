@@ -715,6 +715,30 @@ class FeeExtraServiceWriteSerializer(serializers.Serializer):
     )
 
 
+class FeeServicePriceWriteSerializer(serializers.Serializer):
+    """سعرُ خدمةِ زبونٍ: الخدمةُ بمعرّفها أو بالخدمة والزبون، والمبلغُ مبلَغ.
+
+    **بديلان لا ثلاثة حقولٍ مطلوبة**: `client_service` معرّفُ صفّ خدمة الزبون
+    (وهو ما تعرضه شاشةُ أ٢ بعد اختيار الزبون)، و`service` + `client` يُغنيان عنه
+    في نداءٍ واحد. وأحدُ البديلين مطلوبٌ وإلا فالعنوان ناقص.
+    """
+
+    client_service = serializers.IntegerField(required=False, min_value=1)
+    service = serializers.IntegerField(required=False, min_value=1)
+    client = serializers.IntegerField(required=False, min_value=1)
+    #: المبلغُ مبلغ: في `AMOUNT_KEYS`، والقناعُ والكتابةُ كسائر أسعار الموديول.
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+
+    def validate(self, attrs):
+        if attrs.get("client_service") is not None:
+            return attrs
+        if attrs.get("service") is not None and attrs.get("client") is not None:
+            return attrs
+        raise serializers.ValidationError({
+            "client_service": "حدّد خدمةَ الزبون: بمعرّفها أو بالخدمة والزبون معاً.",
+        })
+
+
 class FeeDraftApproveSerializer(serializers.Serializer):
     """ملاحظةُ الاعتماد اختيارية — والمَن اعتمد ومتى يكتبهما الخادم."""
 

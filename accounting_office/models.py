@@ -3469,8 +3469,12 @@ class FeeExtraService(models.Model):
 
     وتسير إلى **مسودّة الشهر القادم** (نُفِّذت في آذار ⇒ مسودّةُ نيسان)، أو إلى
     «فاتورة لحالها»: عملٌ كبيرٌ لا يُجمَع مع اشتراكٍ شهريّ (تأسيسُ شركةٍ مثلاً).
-    وحقلُ `draft` **اختيارٌ لا مفتاحُ ربط**: المسودّةُ تُبنى لقطةً منه، وإضافةُ
-    إضافٍ بعد توليد مسودّته لا تعيد كتابتها.
+
+    **وحقلان مختلفان لا حقلٌ واحد**: `draft` **اختيارُ وجهة** (إلى مسودّةٍ أو
+    فاتورةٍ لحالها)، و`billed_draft` **مفتاحُ الربط** بالمسودّة التي فوترتها.
+    وبلا الربط كانت إضافةٌ تُسجَّل بعد توليد مسودّة شهرها تضيع بصمت: الشهرُ لقطةٌ
+    لا تُعاد، والتوليدُ التالي يقرأ شهرَه وحده. فيُربط في المعاملة نفسها،
+    والإلغاءُ يُعيده `None` فتلحق أوّلَ مسودّةٍ تالية.
     """
 
     DESTINATION_NEXT_MONTH = FEE_EXTRA_DESTINATION_NEXT_MONTH
@@ -3496,6 +3500,17 @@ class FeeExtraService(models.Model):
         choices=FEE_EXTRA_DESTINATION_CHOICES,
         default=FEE_EXTRA_DESTINATION_NEXT_MONTH,
         verbose_name="إلى",
+    )
+    #: المسودّةُ التي فوترت هذه الإضافة — `PROTECT` لأن المسودّةَ سندٌ لا يُمحى،
+    #: و`None` = لم تُفوتر بعد (فتلتقطها أوّلُ مسودّةٍ تالية).
+    billed_draft = models.ForeignKey(
+        # نصّاً لا صنفاً: `FeeDraft` مُعرَّفٌ بعد هذا النموذج في الملفّ نفسه.
+        "FeeDraft",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="billed_extras",
+        verbose_name="المسودّة المفوتر فيها",
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
 

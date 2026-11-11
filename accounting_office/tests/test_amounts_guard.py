@@ -135,11 +135,11 @@ class AmountKeysGuardTest(SimpleTestCase):
         self.assertEqual(
             declared_amount_fields((APP_DIR / "serializers.py").read_text(encoding="utf-8")),
             # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
-            # #282: `amount` مرّتين (الاشتراكُ والإضافة)، و`subtotal`/`total`
-            # لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
+            # #282: `amount` ثلاث مرّات (الاشتراكُ والإضافةُ وسعرُ الخدمة)،
+            # و`subtotal`/`total` لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
             [
                 "annual_sales", "suggested_price", "amount", "debit", "credit",
-                "amount", "amount", "subtotal", "total",
+                "amount", "amount", "amount", "subtotal", "total",
             ],
         )
         self.assertEqual(
