@@ -12,6 +12,8 @@ from rest_framework import serializers
 
 from accounting_office import services
 from accounting_office.models import (
+    BOOK_ENTRY_KIND_CHOICES,
+    BOOK_KIND_CHOICES,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CONSENT_CHANNEL_LABELS,
     ClientReminderRecipient,
@@ -584,3 +586,69 @@ class OfficeHolidayWriteSerializer(serializers.Serializer):
 
     date = serializers.DateField()
     name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+class ClientBookWriteSerializer(serializers.Serializer):
+    """إنشاءُ دفترِ زبون: الزبونُ ونوعُه — وتاريخُ الفتح اختياريٌّ (اليوم افتراضاً).
+
+    **ولا حقلَ لطريقة الإدخال هنا**: تلك إعدادٌ يقرؤه المحلّل ويُخصَّص لكل زبون
+    (`book_entry_method`)، لا عموداً في الدفتر يفترق عنه.
+    """
+
+    client_id = serializers.IntegerField()
+    kind = serializers.ChoiceField(choices=[value for value, _label in BOOK_KIND_CHOICES])
+    opened_on = serializers.DateField(required=False, allow_null=True)
+
+
+class ClientBookKindWriteSerializer(serializers.Serializer):
+    """تغييرُ نوع الدفتر — والقاعدةُ (د7) في الخدمة لا هنا."""
+
+    kind = serializers.ChoiceField(choices=[value for value, _label in BOOK_KIND_CHOICES])
+
+
+class BookAccountWriteSerializer(serializers.Serializer):
+    """حسابٌ يضيفه المكتب لشجرة زبون — `is_system` يبقى `False` لكل ما يُضاف."""
+
+    code = serializers.CharField(max_length=20)
+    name = serializers.CharField(max_length=200)
+    parent_code = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=20,
+    )
+    account_type = serializers.CharField(max_length=12)
+
+
+class BookEntryLineWriteSerializer(serializers.Serializer):
+    """بندٌ في حركة: الحسابُ بكوده، ومدينٌ أو دائن — لا الاثنان (الخدمةُ تفحص)."""
+
+    account_code = serializers.CharField(max_length=20)
+    debit = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True,
+    )
+    credit = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True,
+    )
+    side_party = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=200,
+    )
+
+
+class BookEntryWriteSerializer(serializers.Serializer):
+    """حركةُ دفترٍ جديدة: تاريخُها ونوعُها وبنودُها، وورقةٌ واردة تُربط بها."""
+
+    entry_date = serializers.DateField()
+    kind = serializers.ChoiceField(
+        choices=[value for value, _label in BOOK_ENTRY_KIND_CHOICES],
+    )
+    memo = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
+    document_row = serializers.IntegerField(required=False, allow_null=True)
+    lines = BookEntryLineWriteSerializer(many=True)
+
+
+class BookEntryReverseSerializer(serializers.Serializer):
+    """حركةٌ عكسية: بيانٌ اختياريّ، وتاريخٌ يعود للأصل إن غاب."""
+
+    memo = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
+    entry_date = serializers.DateField(required=False, allow_null=True)

@@ -9,6 +9,7 @@ from rest_framework.routers import SimpleRouter
 from accounting_office.views import (
     OfficeAlertsViewSet,
     OfficeCalendarViewSet,
+    OfficeClientBookViewSet,
     OfficeClientViewSet,
     OfficeContactViewSet,
     OfficeCustomRuleViewSet,
@@ -30,6 +31,14 @@ from accounting_office.views import (
 
 router = SimpleRouter()
 router.register("clients", OfficeClientViewSet, basename="accounting-office-clients")
+# #286: دفترُ الزبون — قراءةٌ وكتابةٌ، **ولا حذف**. مسارُه مفتاحُه الزبون لأن
+# الدفتر واحدٌ له (`client-books/<client_id>/…`)، و«للإدخال» فعلٌ على الجمع
+# (`client-books/pending-entry/`) فلا يلتبس بمسارِ تفصيل.
+router.register(
+    "client-books",
+    OfficeClientBookViewSet,
+    basename="accounting-office-client-books",
+)
 router.register("contacts", OfficeContactViewSet, basename="accounting-office-contacts")
 router.register("services", OfficeServiceViewSet, basename="accounting-office-services")
 router.register("packages", OfficePackageViewSet, basename="accounting-office-packages")

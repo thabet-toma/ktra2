@@ -76,7 +76,7 @@ class RegistryShapeTest(SettingTestCase):
     def test_the_agreed_settings_and_no_others_exist(self):
         """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276،
         و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
-        (#280)."""
+        (#280)، و«طريقةُ إدخال دفتر الزبون» لـ#286."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -91,6 +91,8 @@ class RegistryShapeTest(SettingTestCase):
                 "reminder_send_hour_start", "reminder_send_hour_end",
                 "reminder_escalation_owner_days",
                 "reminder_default_consent_types",
+                # #286: طريقةُ الإدخال — «ورقة ورقة» أو «إدخال الشهر»، ولكل زبون.
+                "book_entry_method",
             },
         )
 
@@ -436,7 +438,8 @@ class SettingsApiTest(SettingTestCase):
         self.assertEqual(res.status_code, 200, res.content)
         rows = {row["key"]: row for row in res.data["settings"]}
         # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276،
-        # و«بنودُ الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص» (#280).
+        # و«بنودُ الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص» (#280)،
+        # و«طريقةُ إدخال دفتر الزبون» لـ#286.
         self.assertEqual(
             set(rows),
             {
@@ -450,6 +453,7 @@ class SettingsApiTest(SettingTestCase):
                 "documents_reminder_interval_days", "documents_reminder_max",
                 "reminder_send_hour_start", "reminder_send_hour_end",
                 "reminder_escalation_owner_days", "reminder_default_consent_types",
+                "book_entry_method",
             },
         )
 

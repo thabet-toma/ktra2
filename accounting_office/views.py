@@ -31,9 +31,10 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounting_office import deadlines, services
+from accounting_office import client_books, deadlines, services
 from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
+    ClientBook,
     ClientContact,
     ClientService,
     Contact,
@@ -51,6 +52,11 @@ from accounting_office.models import (
 )
 from accounting_office.serializers import (
     ApplyPackageSerializer,
+    BookAccountWriteSerializer,
+    BookEntryReverseSerializer,
+    BookEntryWriteSerializer,
+    ClientBookKindWriteSerializer,
+    ClientBookWriteSerializer,
     ClientContactLinkSerializer,
     ClientContactRowSerializer,
     ClientEventSerializer,
@@ -1855,3 +1861,182 @@ class OfficeHolidayViewSet(OfficeModuleViewSet):
         self.require_settings_manage()
         self.get_object().delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OfficeClientBookViewSet(OfficeModuleViewSet):
+    """دفاترُ الزبائن — قراءةٌ لكل عضوٍ يرى الزبون، وكتابةٌ بمفتاح الزبائن (#286).
+
+    **ولا حذفَ البتة**: `http_method_names` بلا `delete` ولا `put`/`patch`، فحكمُ
+    الـ405 يأتي من القائمة لا من نسيان فعل. القاعدةُ نفسها في الـmodels (د4):
+    التصحيحُ حركةٌ عكسية والأصلُ يبقى.
+
+    والمسارُ مفتاحُه الزبون لا الدفتر: `client-books/<client_id>/…`، لأن الدفتر
+    واحدٌ لكل زبون (`OneToOne`) فمعرّفُه الثاني يخترع مسارين للشيء نفسه.
+    """
+
+    serializer_class = ClientBookWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        # العزلُ من مصدره الواحد (`visible_clients`): دفترُ زبونٍ لا يراه العضو
+        # **404** لا 403 — الثاني يُثبت وجوده.
+        return ClientBook.objects.filter(
+            tenant=self.tenant,
+            client__in=services.visible_clients(self.tenant, self.request.user),
+        )
+
+    def _book(self, client_id):
+        book = (
+            self.get_queryset()
+            .filter(client_id=client_id)
+            .select_related("client")
+            .first()
+        )
+        if book is None:
+            raise NotFound("لا دفترَ لهذا الزبون.")
+        return book
+
+    def _client(self, client_id):
+        client = (
+            services.visible_clients(self.tenant, self.request.user)
+            .filter(pk=client_id)
+            .first()
+        )
+        if client is None:
+            raise NotFound("الزبون غير موجود.")
+        return client
+
+    def _book_row(self, book):
+        return client_books.book_row(
+            book,
+            writable=client_books.book_is_writable(book),
+            entry_method=services.resolve_setting(
+                self.tenant, client_books.ENTRY_METHOD_KEY, client=book.client,
+            ),
+        )
+
+    def list(self, request, *args, **kwargs):
+        return Response(client_books.books_payload(self.tenant, request.user))
+
+    def retrieve(self, request, *args, **kwargs):
+        """دفترُ زبونٍ واحد — **بمعرّف الزبون** كسائر المسارات تحته.
+
+        ووجودُ هذا المسار شرطٌ لحكمِ د4: `DELETE`/`PATCH` على دفترٍ موجود يجب أن
+        يردّا **405** لا 404 — والـ404 يقول «لا مسارَ هنا»، وهو غيرُ ما تقوله
+        القاعدة («الحذفُ ممنوع»).
+        """
+        return Response(self._book_row(self._book(kwargs.get("pk"))))
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = ClientBookWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client = self._client(data["client_id"])
+        book = client_books.create_book(
+            self.tenant,
+            client,
+            kind=data["kind"],
+            opened_on=data.get("opened_on"),
+            actor=request.user,
+        )
+        return Response(self._book_row(book), status=status.HTTP_201_CREATED)
+
+    @action(detail=True, methods=["get", "post"], url_path="accounts")
+    def accounts(self, request, pk=None):
+        """شجرةُ حساب الزبون: تُقرأ لكلّ من يرى الزبون، ويُضاف إليها بمفتاح الكتابة."""
+        book = self._book(pk)
+        if request.method == "POST":
+            self.require_write()
+            # الكتابةُ على دفتر زبونٍ خدمتُه موقوفة 400 (د5) — والقراءةُ تبقى.
+            client_books.assert_book_writable(book)
+            serializer = BookAccountWriteSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            row = client_books.add_account(book.client, **serializer.validated_data)
+            return Response(
+                client_books.account_row(row), status=status.HTTP_201_CREATED,
+            )
+        return Response(client_books.accounts_payload(book.client))
+
+    @action(detail=True, methods=["get", "post"], url_path="entries")
+    def entries(self, request, pk=None):
+        """حركاتُ الدفتر: قراءةٌ (بسنةٍ اختيارية)، وإدخالٌ جديد بمفتاح الكتابة."""
+        book = self._book(pk)
+        if request.method == "POST":
+            self.require_write()
+            serializer = BookEntryWriteSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+            entry = client_books.create_entry(
+                book, actor=request.user, **serializer.validated_data,
+            )
+            return Response(
+                client_books.entry_row(entry, user=request.user),
+                status=status.HTTP_201_CREATED,
+            )
+        return Response(
+            client_books.entries_payload(
+                book, year=self._entry_year(request), user=request.user,
+            ),
+        )
+
+    def _entry_year(self, request):
+        """السنةُ المطلوبة — الغيابُ «كلُّ السنوات»، وغيرُ الرقم 400 لا 500."""
+        raw = (request.query_params.get("year") or "").strip()
+        if not raw:
+            return None
+        try:
+            return int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({"year": "السنة بصيغة YYYY."}) from None
+
+    @action(
+        detail=True, methods=["get"],
+        url_path=r"entries/(?P<entry_id>[0-9]+)",
+    )
+    def entry(self, request, pk=None, entry_id=None):
+        """حركةٌ واحدة — **قراءةٌ فقط**: `PUT`/`PATCH`/`DELETE` عليها 405 (د4)."""
+        book = self._book(pk)
+        entry = book.entries.prefetch_related(
+            "lines__account", "reversed_by",
+        ).filter(pk=entry_id).first()
+        if entry is None:
+            raise NotFound("الحركة غير موجودة.")
+        return Response(client_books.entry_row(entry, user=request.user))
+
+    @action(
+        detail=True, methods=["post"],
+        url_path=r"entries/(?P<entry_id>[0-9]+)/reverse",
+    )
+    def reverse(self, request, pk=None, entry_id=None):
+        """حركةٌ عكسية على حركةٍ في **هذا** الدفتر — وحركةُ غيره 404."""
+        book = self._book(pk)
+        self.require_write()
+        entry = book.entries.filter(pk=entry_id).select_related("client_book").first()
+        if entry is None:
+            raise NotFound("الحركة غير موجودة.")
+        serializer = BookEntryReverseSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        reversal = client_books.reverse_entry(
+            entry, actor=request.user, **serializer.validated_data,
+        )
+        return Response(
+            client_books.entry_row(reversal, user=request.user),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=False, methods=["get"], url_path="pending-entry")
+    def pending_entry(self, request):
+        """«للإدخال»: ورقٌ واصلةٌ بلا حركة — مشتقٌّ لا مخزّن (د8/د9)."""
+        return Response(
+            client_books.pending_entry_payload(self.tenant, request.user),
+        )
+
+    @action(detail=True, methods=["post"], url_path="kind")
+    def kind(self, request, pk=None):
+        """تغييرُ نوع الدفتر — الشروطُ الثلاثة في الخدمة (د7) لا في الـview."""
+        book = self._book(pk)
+        self.require_write()
+        serializer = ClientBookKindWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        book = client_books.change_kind(book, serializer.validated_data["kind"])
+        return Response(self._book_row(book))

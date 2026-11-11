@@ -134,7 +134,8 @@ class AmountKeysGuardTest(SimpleTestCase):
         """أي تغييرٍ في الثابت يجب أن يُرى هنا — وإلا كان المسح زينة."""
         self.assertEqual(
             declared_amount_fields((APP_DIR / "serializers.py").read_text(encoding="utf-8")),
-            ["annual_sales", "suggested_price", "amount"],
+            # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
+            ["annual_sales", "suggested_price", "amount", "debit", "credit"],
         )
         self.assertEqual(
             unregistered_amount_fields(
@@ -171,6 +172,9 @@ class ModelAmountGuardTest(SimpleTestCase):
         self.assertEqual(
             model_amount_fields(apps.get_app_config("accounting_office").get_models()),
             [
+                # #286: مدينُ بند دفتر الزبون ودائنه — مسجَّلان لا مُعفَيان.
+                "BookEntryLine.credit",
+                "BookEntryLine.debit",
                 # #275: مبلغُ الالتزام — مبلغٌ مسجَّلٌ لا مُعفى.
                 "Obligation.amount",
                 "ServicePackage.suggested_price",
