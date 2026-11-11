@@ -55,6 +55,10 @@ from accounting_office.models import (
     DOCUMENT_STATUS_REQUIRED,
     EVENT_KIND_CHOICES,
     EVENT_KIND_LABELS,
+    FEE_DRAFT_STATUS_APPROVED,
+    FEE_DRAFT_STATUS_CANCELLED,
+    FEE_DRAFT_STATUS_DRAFT,
+    FEE_DRAFT_STATUS_LABELS,
     FREQUENCY_ANNUAL,
     FREQUENCY_BIMONTHLY,
     FREQUENCY_KEYS,
@@ -83,6 +87,7 @@ from accounting_office.models import (
     OBLIGATION_STATUS_SUBMITTED,
     OFFICE_ALERT_DEFAULT_OPENS,
     OFFICE_ALERT_KIND_BADGES,
+    OFFICE_ALERT_KIND_FEE_DRAFT_PENDING,
     OFFICE_ALERT_KIND_LABELS,
     OFFICE_ALERT_KIND_OBLIGATION_LATE,
     OFFICE_ALERT_KIND_OPENS,
@@ -136,6 +141,7 @@ from accounting_office.models import (
     ClientReminderRecipient,
     ClientService,
     ClientServiceFrequency,
+    ClientServicePrice,
     ClientSettingOverride,
     Contact,
     DeadlineRule,
@@ -143,6 +149,10 @@ from accounting_office.models import (
     DocumentChecklistItem,
     DocumentFile,
     DocumentRetentionRule,
+    FeeDraft,
+    FeeDraftLine,
+    FeeExtraService,
+    FeeSubscription,
     Obligation,
     ObligationDateChange,
     OfficeAlert,
@@ -163,6 +173,7 @@ from accounting_office.models import (
     ServicePackage,
     TaxCard,
     TaxThreshold,
+    fee_draft_alert_ref,
     is_tenant_member,
     tax_card_choices,
 )
@@ -170,6 +181,7 @@ from core.access import (
     MANAGER_ROLE,
     OFFICE_AMOUNTS_VIEW_KEY,
     OFFICE_CLIENTS_ALL_KEY,
+    OFFICE_MANAGER_ROLE,
     user_has_perm,
 )
 from core.activity import log_activity
@@ -232,6 +244,12 @@ OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount",)
 #: نفسُها في القراءة (`client_books.entry_row`) والكتابة (`create_entry`).
 BOOK_ENTRY_AMOUNT_KEYS: tuple[str, ...] = ("debit", "credit")
 
+#: مبالغُ الأتعاب (#282): مبلغُ الاشتراك وسعرُ خدمة الزبون وسطرُ الإضافة وسطرُ
+#: المسودّة ومجموعاها. **`total` و`subtotal` مفتاحان لا واحد**: المسودّةُ تحمل
+#: مجموعهما ظاهراً في القائمة، ومن لا يرى المبالغ يقرأ `null` فيهما وفي كل سطرٍ
+#: تحته.
+FEE_AMOUNT_KEYS: tuple[str, ...] = ("amount", "subtotal", "total")
+
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
 #: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
 #: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
@@ -239,8 +257,41 @@ AMOUNT_KEYS: frozenset[str] = frozenset(
     TAX_CARD_AMOUNT_KEYS
     + PACKAGE_AMOUNT_KEYS
     + OBLIGATION_AMOUNT_KEYS
-    + BOOK_ENTRY_AMOUNT_KEYS,
+    + BOOK_ENTRY_AMOUNT_KEYS
+    + FEE_AMOUNT_KEYS,
 )
+
+
+# ── الأتعاب: مفاتيحُ الإعداد وحارسا الاختيار (#282) ──────────────────────────
+#
+# **الطريقةُ إعدادٌ والاعتمادُ إعدادٌ مقفل** — والمفاتيحُ هنا قبل قسم التذكيرات
+# لأن `LOCKED_SETTING_MESSAGES` يُبنى عند الاستيراد، فيحتاج مفتاحَه معرَّفاً.
+FEE_METHOD_KEY = "fee_method"
+FEE_AUTO_APPROVE_KEY = "fee_auto_approve"
+
+#: «بالساعة» معروضةٌ في الاختيار ومرفوضةٌ برسالتها: يراها المكتب فيعرف أنها
+#: ليست متاحةً بعد، ولا يظنّ الطريقةَ الوحيدةَ هي الاشتراك.
+FEE_HOURLY_LOCKED = "الأتعاب بالساعة غير متاحة قبل المرحلة الثانية"
+FEE_AUTO_APPROVE_LOCKED = (
+    "الاعتماد التلقائي لمسودّات الأتعاب غير متاح قبل المرحلة الثانية"
+)
+
+#: قيمُ اختيارٍ معروضةٌ مرفوضةٌ بقرار — مفتاحُ الإعداد ← (القيمة, رسالتُها).
+#: البابُ الواحدُ لفتحها في المرحلة الثانية هو حذفُ الصفّ من هنا؛ لا فرعٌ في
+#: الـview ولا استثناءٌ لمستوى الزبون.
+FORBIDDEN_SETTING_VALUES: dict[str, tuple[str, str]] = {
+    FEE_METHOD_KEY: (settings_registry.FEE_METHOD_HOURLY, FEE_HOURLY_LOCKED),
+}
+
+
+def _assert_choice_available(key, value) -> None:
+    """قيمةُ اختيارٍ مرفوضةٌ بقرار (لا بنوعها) — تُرفض برسالتها المعلَنة."""
+    forbidden = FORBIDDEN_SETTING_VALUES.get(key)
+    if forbidden is None:
+        return
+    locked_value, message = forbidden
+    if value == locked_value:
+        raise ValidationError({"value": message})
 
 
 def visible_clients(tenant, user):
@@ -313,7 +364,7 @@ def user_display_name(user) -> str:
 
 
 # ── المحلّل: القراءة الوحيدة للإعدادات ─────────────────────────────────────
-def _assert_client_of_tenant(tenant, client) -> None:
+def assert_client_of_tenant(tenant, client) -> None:
     """زبونٌ من شركةٍ أخرى لا يُمرَّر للمحلّل — وإلا قرأ إعداداً عابراً للشركات."""
     if tenant is None or client is None:
         raise ValidationError({"client": "الزبون والمكتب مطلوبان معاً."})
@@ -332,7 +383,7 @@ def resolve_setting_with_source(tenant, key, client=None, item=None):
     if item is not None:
         settings_registry.validate_level(definition, settings_registry.LEVEL_ITEM)
     if client is not None:
-        _assert_client_of_tenant(tenant, client)
+        assert_client_of_tenant(tenant, client)
         settings_registry.validate_level(definition, settings_registry.LEVEL_CLIENT)
 
     if item is not None:
@@ -367,7 +418,7 @@ def resolve_settings_for_clients(tenant, keys, clients) -> dict[int, dict]:
 
     نفسُ ترتيب المحلّل (تخصيصُ الزبون ← قيمةُ المكتب ← الافتراضي) **وبحارسين
     نفسيهما**: `validate_level` لكل مفتاح قبل أيّ قراءة (فتمريرُ إعدادٍ مكتبيٍّ
-    لمجموعة زبائن خطأُ مناداةٍ لا قيمةٌ تُقرأ)، و`_assert_client_of_tenant` لكل
+    لمجموعة زبائن خطأُ مناداةٍ لا قيمةٌ تُقرأ)، و`assert_client_of_tenant` لكل
     زبون (فمجموعةٌ فيها زبونُ مكتبٍ آخر تقرأ إعداداً عابراً). ولا مستوى الشغلة:
     الشغلةُ كائنٌ واحد يُمرَّر، لا مجموعة.
 
@@ -383,7 +434,7 @@ def resolve_settings_for_clients(tenant, keys, clients) -> dict[int, dict]:
 
     clients = list(clients)
     for client in clients:
-        _assert_client_of_tenant(tenant, client)
+        assert_client_of_tenant(tenant, client)
 
     client_ids = [client.pk for client in clients]
     overrides = {
@@ -440,6 +491,7 @@ def set_office_setting(tenant, key, value):
     clean = settings_registry.validate_value(definition, value)
     # حارسا القرار لا النوع: إعدادٌ مقفلٌ مطفأ، ونافذةُ إرسالٍ زوجٌ مرتَّب.
     _assert_locked_setting(key, clean)
+    _assert_choice_available(key, clean)
     _assert_send_window(tenant, key, clean)
     with transaction.atomic():
         row, _created = OfficeSettingValue.objects.update_or_create(
@@ -479,10 +531,12 @@ def reset_office_setting(tenant, key) -> None:
 
 def set_client_setting(client, key, value, *, tenant=None):
     tenant = tenant if tenant is not None else client.tenant
-    _assert_client_of_tenant(tenant, client)
+    assert_client_of_tenant(tenant, client)
     definition = settings_registry.get_definition(key)
     settings_registry.validate_level(definition, settings_registry.LEVEL_CLIENT)
     clean = settings_registry.validate_value(definition, value)
+    # و«بالساعة» مرفوضةٌ على المستويين: تخصيصُ زبونٍ لا يفتح طريقةً مقفلة.
+    _assert_choice_available(key, clean)
     with transaction.atomic():
         row, _created = ClientSettingOverride.objects.update_or_create(
             tenant=tenant, client=client, key=key, defaults={"value": clean},
@@ -494,7 +548,7 @@ def set_client_setting(client, key, value, *, tenant=None):
 def reset_client_setting(client, key, *, tenant=None) -> None:
     """«ارجع لإعداد المكتب» — حذفُ التخصيص فيرتفع الترتيب إلى قيمة المكتب."""
     tenant = tenant if tenant is not None else client.tenant
-    _assert_client_of_tenant(tenant, client)
+    assert_client_of_tenant(tenant, client)
     definition = settings_registry.get_definition(key)
     # المستوى يُفحص هنا كما في `set_client_setting`: حذفُ تخصيصٍ مكتبيٍّ كذبٌ —
     # لا تخصيصَ له أصلاً، والردُّ 400 أنفع من «نجاح» لا أثر له.
@@ -2083,6 +2137,21 @@ def _service_periods(client_service, *, floor, end, frequencies):
     return deadlines.service_periods(frequency_of_month, floor, end)
 
 
+def client_service_periods(client_service, *, floor, end, frequencies=None):
+    """**الواجهةُ العامة** لفترات خدمةٍ مؤرَّخة — يقرؤها جرّافُ الأتعاب (#282).
+
+    الربطُ بين خدمة الزبون ودورياتها المؤرَّخة في `_service_periods` وحدها؛ نسخةٌ
+    ثانية منه في `accounting_office/fees.py` تفترق عن قاعدة «الدورية في آخر
+    الشهر» عند أول تعديلٍ بصمت. و`frequencies` تُمرَّر محمَّلةً سلفاً حين تكون
+    القائمةُ تُبنى لزبائن كثيرين، فلا استعلامُ دورياتٍ لكل خدمة.
+    """
+    if frequencies is None:
+        frequencies = list(client_service.frequencies.all())
+    return _service_periods(
+        client_service, floor=floor, end=end, frequencies=frequencies,
+    )
+
+
 def _frequency_at_month_end(client_service, month, frequencies):
     """الدوريةُ السارية في **آخر** يومٍ من الشهر — بدايةٌ في 15/2 تُدرك شباط.
 
@@ -3286,6 +3355,11 @@ def refresh_office(tenant, *, day) -> dict:
     )
     # #280: تصعيدُ التذكير بعد الحدّ — يُقرأ من السجلّ المحفوظ، فيأتي بعد التنبيهات.
     created_alerts += _generate_reminder_alerts(tenant, day=day)
+    # #282: مسودّاتُ الأتعاب لدورة الشهر نفسه — فرادةُ `(زبون، سنة، شهر)` تجعلها
+    # مسودّةً واحدةً مهما تكرّر التشغيل، وتنبيهُ «مرّ عليها ثلاثة أيام» يُولَّد
+    # هنا لأن لا ساعةَ في الموديول.
+    fee_drafts = _generate_fee_drafts(tenant, day=day)
+    created_alerts += fee_drafts["created_alerts"]
     return {
         "day": day.isoformat(),
         "created_tasks": created_tasks,
@@ -3293,6 +3367,8 @@ def refresh_office(tenant, *, day) -> dict:
         # #278: أوراقُ الفترات التي صارت مستحقّة — عدّادٌ بجانب عدّاداتها.
         "created_documents": created_documents,
         "created_alerts": created_alerts,
+        # #282: عددُ المسودّات التي أنشأها هذا النداء (لا تحديثَ لمعتمدةٍ ولا ملغاة).
+        "created_fee_drafts": fee_drafts["created_drafts"],
     }
 
 
@@ -3301,8 +3377,8 @@ def ensure_office_refreshed(tenant, *, day):
 
     تُرجع `None` ليومٍ مسجَّلٍ سابقاً (لا تشغيلَ ولا عدّادات)، وعدّاداتِ
     `refresh_office` (`created_tasks`/`created_obligations`/`created_documents`/
-    `created_alerts`) ليومٍ جديد — فالمُنادي إن أراد الأرقام فليقرأها من قيمتها
-    المُعادة لا من `None`.
+    `created_alerts`/`created_fee_drafts`) ليومٍ جديد — فالمُنادي إن أراد الأرقام
+    فليقرأها من قيمتها المُعادة لا من `None`.
 
     تُنادى عند أول فتحٍ لشاشة «اليوم» **ولجرس التنبيهات** (`GET alerts/`)، فيصير
     أولُ فتحٍ لأيٍّ منهما تشغيلاً يومياً بلا مُجدوِلٍ في المستودع (الـcron على
@@ -3793,6 +3869,9 @@ def _visible_alerts(tenant, user, day=None):
     **وتنبيهُ التذكير (#280)** يُسقطه اكتمالُ أوراق الفترة عند القراءة: يُقرأ
     مراجعُ ما لم يكتمل مجموعةً واحدة، فيسقط الصفُّ بلا كتابةٍ ولا حذف —
     كتنبيه الالتزام الذي يُسقطه التقديم.
+
+    **وتنبيهُ مسودّة الأتعاب (#282)** يُسقطه اعتمادُها أو إلغاؤها بالقراءة نفسها:
+    مسودّةٌ اعتُمدت لا تنبيهَ لها، والصفُّ يبقى أثراً لا يُمحى.
     """
     day = day or timezone.localdate()
     pending_obligation = Obligation.objects.filter(
@@ -3802,6 +3881,7 @@ def _visible_alerts(tenant, user, day=None):
         task_id=OuterRef("task_id"), status=OBLIGATION_STATUS_PENDING,
     )
     live_reminders = _live_reminder_alert_refs(tenant)
+    live_fee_drafts = _live_fee_draft_refs(tenant)
     return (
         OfficeAlert.objects
         .filter(tenant=tenant, recipient=user)
@@ -3820,10 +3900,16 @@ def _visible_alerts(tenant, user, day=None):
             | _live_override_alerts_q(tenant)
             # ونوعا التذكير ببقاء الأوراق ناقصةٍ في فترتها وحدها.
             | Q(kind__in=REMINDER_ALERT_KINDS, ref_key__in=live_reminders)
+            # ومسودّةُ الأتعاب ببقائها غيرَ معتمدةٍ وحدها.
+            | Q(
+                kind=OFFICE_ALERT_KIND_FEE_DRAFT_PENDING,
+                ref_key__in=live_fee_drafts,
+            )
             | (
                 ~Q(kind__in=RESOLVED_ALERT_KINDS)
                 & ~Q(kind=OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED)
                 & ~Q(kind__in=REMINDER_ALERT_KINDS)
+                & ~Q(kind=OFFICE_ALERT_KIND_FEE_DRAFT_PENDING)
             )
         )
     )
@@ -6210,6 +6296,9 @@ REMINDER_AUTO_SEND_LOCKED = "الإرسال التلقائي غير متاح ق�
 #: الثانية — لا مسارٌ ثانٍ في الـview.
 LOCKED_SETTING_MESSAGES: dict[str, str] = {
     REMINDER_AUTO_SEND_KEY: REMINDER_AUTO_SEND_LOCKED,
+    # #282: الاعتمادُ التلقائيُّ لمسودّات الأتعاب مقفلٌ مطفأً — المسودّةُ يراها
+    # صاحبُ المكتب أو مديرُ المكتب قبل اعتمادها.
+    FEE_AUTO_APPROVE_KEY: FEE_AUTO_APPROVE_LOCKED,
 }
 
 #: زوجُ النافذة (`setting.key` ← نظيرُه): بدايةٌ لا تلحق نهايتَها. **والطرفان في
@@ -7498,3 +7587,45 @@ def _generate_reminder_alerts(tenant, *, day) -> int:
         return 0
     OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
     return len(rows)
+
+
+# ── الأتعاب: التوليدُ وقراءةُ الجرس (#282) ────────────────────────────────────
+#
+# الأتعابُ دومينُها في `accounting_office/fees.py` (كـ`client_books.py`): السعرُ
+# المؤرَّخ والتناسبُ ومن يذهب إليه السطر. وما هنا جسران صغيران: نداءُ المولّد من
+# «حدّث المكتب»، وقراءةُ بقاء تنبيه المسودّة في الجرس.
+def _generate_fee_drafts(tenant, *, day) -> dict:
+    """مسودّاتُ الأتعاب لدورة شهر `day` — `{"created_drafts", "created_alerts"}`.
+
+    الاستيرادُ داخل الدالّة لا أعلى الملفّ: `fees` يقرأ `services` (المحلّل
+    والقناع والرؤية)، فاستيرادٌ في الأعلى دورةُ استيراد. والجسمُ هناك لأن قواعد
+    الأتعاب — السعرُ المؤرَّخ والتناسبُ والخياراتُ الثلاثة — تُقرأ وتُختبَر في
+    موضعٍ واحد، لا نصفُها في خدمات الموديول ونصفُها في ملفّه.
+    """
+    from accounting_office import fees
+
+    return fees.generate_fee_drafts(tenant, day=day)
+
+
+def _live_fee_draft_refs(tenant) -> set[str]:
+    """مراجعُ المسودّات غير المعتمدة — يُسقط ما اعتُمد أو أُلغي عند القراءة.
+
+    **ونطاقُ المسح مقيَّدٌ بمن له تنبيهُ مسودّةٍ قائم**: فتحُ الجرس لا يقرأ
+    مسودّات المكتب كلَّها، بل مسودّاتِ الزبائن الذين لهم صفُّ تنبيهٍ فعلاً. والشرطُ
+    استعلامٌ فرعيٌّ واحد، فعددُ الاستعلامات ثابتٌ ولا يكبر بعدد المسودّات.
+    """
+    clients_with_alerts = OfficeAlert.objects.filter(
+        tenant=tenant, kind=OFFICE_ALERT_KIND_FEE_DRAFT_PENDING,
+    ).values("client_id")
+    return {
+        fee_draft_alert_ref(pk)
+        for pk in (
+            FeeDraft.objects
+            .filter(
+                tenant=tenant,
+                status=FEE_DRAFT_STATUS_DRAFT,
+                client_id__in=clients_with_alerts,
+            )
+            .values_list("pk", flat=True)
+        )
+    }
