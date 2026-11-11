@@ -1,0 +1,104 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+ورقةُ «إشعار الدفع» (#285) — صفحةٌ خادمية بلا JavaScript كسائر صفحات `docshare`.
+
+**واللونُ قرارُ منتجٍ لا إعداد:** «عليك» أحمر و«إلك» أخضر والقريبُ من الصفر رماديّ.
+والقالبُ لا يحسب شيئاً: اسمُ الصنف (`pn-owed`/`pn-refund`/`pn-neutral`) يصل
+محسوباً من `appointments.payment_notice_tone`، فيبقى للقاعدة موضعٌ واحد يُختبر
+(`node --test` في الواجهة، و`SimpleTestCase` في الخادم).
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  .pn-head{border-bottom:2px solid var(--ink); padding-bottom:16px; margin-bottom:18px}
+  .pn-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .pn-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .pn-title{font-size:21px; font-weight:800; margin:16px 0 4px}
+  .pn-sub{font-size:12.5px; color:var(--muted); margin:0}
+  .pn-party{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px}
+  .pn-card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px;
+           padding:12px 15px}
+  .pn-card h3{margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:700}
+  .pn-row{display:flex; justify-content:space-between; gap:12px; font-size:13px;
+          padding:3px 0}
+  .pn-row span:first-child{color:var(--muted)}
+  .pn-lines{width:100%; border-collapse:collapse; margin:6px 0 0; font-size:14px}
+  .pn-lines th,.pn-lines td{border:1px solid var(--line); padding:10px 12px;
+                            text-align:right}
+  .pn-lines thead th{background:#f8fafc; font-size:12px; color:var(--muted);
+                     font-weight:700}
+  .pn-lines td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+  .pn-total{margin:16px 0 0; border-top:2px solid var(--ink); padding-top:12px;
+            font-size:18px; font-weight:800; display:flex; justify-content:space-between}
+  .pn-owed{color:var(--danger)}
+  .pn-refund{color:var(--ok)}
+  .pn-neutral{color:var(--muted)}
+  .pn-empty{border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+            color:var(--muted); font-size:13px}
+  .pn-foot{margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
+           font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="pn-head">
+    <p class="pn-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="pn-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="pn-org-line">{{ company.address }}</p>{% endif %}
+  </div>
+
+  <p class="pn-title">{{ title }}</p>
+
+  <div class="pn-party">
+    <div class="pn-card">
+      <h3>الزبون</h3>
+      <div class="pn-row"><span>الاسم</span><span><strong>{{ client_name }}</strong></span></div>
+    </div>
+    <div class="pn-card">
+      <h3>بيانات الإشعار</h3>
+      <div class="pn-row"><span>تاريخ الاستحقاق</span><span>{{ date|gdate }}</span></div>
+    </div>
+  </div>
+
+  {% if rows %}
+  <table class="pn-lines">
+    <thead>
+      <tr>
+        <th>البند</th>
+        <th style="width:150px">المبلغ</th>
+        <th style="width:110px">الاتجاه</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>{{ row.label }}</td>
+        <td class="num pn-{{ row.tone }}">{{ row.amount|money }}</td>
+        <td class="pn-{{ row.tone }}">{{ row.direction_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="pn-total">
+    <span>المجموع</span>
+    <span class="pn-{{ total_tone }}">{{ total|money }} {{ total_direction }}</span>
+  </div>
+  {% else %}
+  <p class="pn-empty">لا مبلغَ مستحقّاً على هذا الزبون في هذا التاريخ.</p>
+  {% endif %}
+
+  <div class="pn-foot">
+    {{ company.company_name_primary }}
+    <br>{{ title }}
+  </div>
+</div>
+{% endblock %}

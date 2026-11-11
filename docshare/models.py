@@ -55,6 +55,10 @@ DOC_PURCHASE_RFQ = "purchase_rfq"
 #: مسودّة جرد، لا قراراً ولا سعراً. انظر `documents.inventory_docs`
 #: (`STOCKTAKE_COUNT_SPEC`) و`inventory.models.StocktakeCountLink`.
 DOC_STOCKTAKE_COUNT = "stocktake_count"
+#: #285: إشعارُ الدفع — ورقةٌ يجمع فيها المكتبُ ما على الزبون في تاريخ استحقاقٍ
+#: واحد («عليك» أحمر / «إلك» أخضر / الرماديُّ قريبٌ من الصفر). انظر
+#: `documents.accounting_docs`.
+DOC_PAYMENT_NOTICE = "payment_notice"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -73,6 +77,7 @@ DOC_TYPE_CHOICES = [
     (DOC_PURCHASE_RFQ, "طلب عرض سعر"),
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
     (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
+    (DOC_PAYMENT_NOTICE, "إشعار دفع"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

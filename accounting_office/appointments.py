@@ -38,9 +38,10 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
+from django.db.models import Q
 from django.utils import timezone
 
-from accounting_office import services
+from accounting_office import services, settings_registry
 from accounting_office.models import (
     APPOINTMENT_KIND_CHOICES,
     APPOINTMENT_KIND_LABELS,
@@ -56,6 +57,7 @@ from accounting_office.models import (
     REMINDER_DEADLINE,
     ClientAppointment,
     Obligation,
+    OfficeClient,
 )
 
 #: مفتاحُ «تذكير الموعد قبل كم يوم» — إعدادُ مكتبٍ يُخصَّص للزبون (د2).
@@ -663,3 +665,232 @@ def deadline_reminder_candidates(
             amount=_period_unpaid_total(period_rows),
         ))
     return candidates
+
+
+# ── إشعار الدفع (#285) — مركَّبٌ على بند «موعد رسمي قريب» ─────────────────────
+#
+# **لا نوعَ تذكيرٍ خامس** (د1): الإشعارُ لا يفتح بنداً بنفسه ولا موعداً ثانياً، بل
+# يُركَّب على البند القائم بعد أن يجتاز حواجزه. ولا رمزاً جديداً في
+# `REMINDER_PLACEHOLDERS`: نصُّه يُبنى هنا ويُلحَق بـ`body`، لا يكتبه المكتب في
+# قالب. وما يُضاف إلى السطح **عرضٌ ورسالة** — لا قيدٌ محاسبيّ، ولا شيء يمرّ من
+# `post_journal` (د7).
+
+#: العنوانُ الثابت — يقرؤه النصُّ والورقة معاً، فلا نسختان تفترقان.
+PAYMENT_NOTICE_TITLE = "إشعار دفع — للعلم، ليس إشعاراً رسمياً من الضريبة"
+
+#: ألوانُ الإشعار — **ثلاثة لا تُضبَط**: «عليك» أحمر، و«إلك» أخضر، والقريبُ من
+#: الصفر رماديّ. والقيمةُ رمزٌ يستهلكه القالبُ والواجهة، ونصُّه في
+#: `PAYMENT_NOTICE_DIRECTION_LABELS` — والتسميتان هما مفردتا الاتجاه القائمتان
+#: (`OBLIGATION_DIRECTION_*`)، و`refund` لا `due` عمداً: `due` في هذا الموديول
+#: تعني «عليه» لا «إله»، فاسمٌ ثانٍ لها كان سيُقلَب في أوّل قراءة.
+PAYMENT_NOTICE_TONE_OWED = "owed"
+PAYMENT_NOTICE_TONE_REFUND = "refund"
+PAYMENT_NOTICE_TONE_NEUTRAL = "neutral"
+PAYMENT_NOTICE_DIRECTION_LABELS: dict[str, str] = {
+    PAYMENT_NOTICE_TONE_OWED: "عليك",
+    PAYMENT_NOTICE_TONE_REFUND: "إلك",
+}
+
+
+def payment_notice_tone(amount, threshold) -> str:
+    """لونُ سطرٍ أو مجموعٍ في الإشعار — **دالّةٌ نقيّة** بلا قاعدةٍ ولا إعدادٍ مقروء.
+
+    القاعدةُ من الإشارة لا من العرض: موجب ⇒ أحمر («عليك»)، سالب ⇒ أخضر
+    («إلك»)، و`|المبلغ| ≤ الحدّ` رماديّ — **والرماديُّ يغلب على الاثنين** فيُقرأ
+    «قريبٌ من الصفر» لا دَيناً بلونٍ يصرخ. والحدُّ شاملٌ (`<=`) بنصّ القرار:
+    مبلغُ 10 بحدِّ 10 رماديّ.
+    """
+    amount = Decimal(amount or 0)
+    threshold = abs(Decimal(threshold or 0))
+    if abs(amount) <= threshold:
+        return PAYMENT_NOTICE_TONE_NEUTRAL
+    return PAYMENT_NOTICE_TONE_OWED if amount > 0 else PAYMENT_NOTICE_TONE_REFUND
+
+
+def _payment_notice_direction(amount) -> str:
+    """اتجاهُ مبلغٍ **بإشارته**: موجبٌ «عليك» وسالبٌ «إلك» — والصفرُ بلا اتجاه."""
+    if amount > 0:
+        return PAYMENT_NOTICE_TONE_OWED
+    if amount < 0:
+        return PAYMENT_NOTICE_TONE_REFUND
+    return ""
+
+
+def payment_notice(tenant, *, client_id, due, gray_threshold=None) -> dict:
+    """إشعارُ الدفع لزبونٍ في **تاريخ استحقاقٍ واحد**: أسطرٌ ومجموعٌ واتجاه.
+
+    **والتجميعُ على `due_date` لا على الفترة** (د3): «كلُّ ضرائبه المستحقّة في ذلك
+    التاريخ» قد تخصّ فتراتٍ مختلفة (ربعيّ يوافق شهرياً في اليوم نفسه)، فالمفتاحُ
+    (زبون، تاريخ) كما نصّت التذكرة، لا (زبون، فترة).
+
+    والمصدرُ `Obligation` وحدها: `status=pending` ومبلغُه غيرُ صفرٍ — ولا محرّكٌ
+    موازٍ ولا جدولٌ ثانٍ. والمدفوعُ («الزبون دفع») خارجَ الأسطر: الإشعارُ يقول
+    «مستحقّ»، وما دفعه الزبونُ ليس مستحقّاً — وهو نفسُ ما تفعله
+    `_period_unpaid_total` و`client_owes`، وهما المرجعُ الذي أحالت إليه د3.
+
+    `anchor_id` أدنى معرّفٍ في المجموعة: مفتاحُ رابط `docshare` الثابت، فتاريخٌ
+    واحدٌ لا يفتح ورقتين بين نداءين.
+
+    **ولا `visible_clients` هنا**: مسارُ التذكير يُرشِّح الزبائن قبل النداء
+    (`ready_to_send_payload`)، والصفحةُ العامة يعرّفها توكنُها لا مستخدمُها — فالفلترُ
+    في الطبقة التي تملك المستخدم، والشركةُ وحدها تُفلتر هنا.
+    """
+    if gray_threshold is None:
+        gray_threshold = services.resolve_setting_for_clients(
+            tenant,
+            services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
+            list(OfficeClient.objects.filter(tenant=tenant, pk=client_id)),
+        ).get(client_id, 0)
+    rows = list(
+        Obligation.objects
+        .filter(
+            tenant=tenant,
+            client_id=client_id,
+            status=OBLIGATION_STATUS_PENDING,
+        )
+        # الممدَّدُ يغلب: `due_date` تقرأ `extended_to or actual_deadline`، والشرطُ
+        # هنا مرآتها في SQL — وإلا ظهر الالتزامُ الممدَّد في تاريخه القديم.
+        .filter(Q(extended_to=due) | Q(extended_to__isnull=True, actual_deadline=due))
+        .values("id", "name", "amount", "direction", "client_paid")
+        .order_by("id")
+    )
+    lines = []
+    for row in rows:
+        amount = row["amount"]
+        if row["client_paid"] or not amount:
+            continue
+        signed = -amount if row["direction"] == OBLIGATION_DIRECTION_REFUND else amount
+        lines.append({
+            "label": row["name"],
+            "amount": signed,
+            "tone": payment_notice_tone(signed, gray_threshold),
+            "direction_label": PAYMENT_NOTICE_DIRECTION_LABELS.get(
+                _payment_notice_direction(signed), "",
+            ),
+        })
+    total = sum((line["amount"] for line in lines), Decimal("0"))
+    return {
+        "date": due,
+        "lines": lines,
+        "total": total,
+        "tone": payment_notice_tone(total, gray_threshold),
+        "direction_label": PAYMENT_NOTICE_DIRECTION_LABELS.get(
+            _payment_notice_direction(total), "",
+        ),
+        "anchor_id": rows[0]["id"] if rows else None,
+    }
+
+
+def payment_notice_item(notice) -> dict | None:
+    """الإشعارُ كما يخرج في بند الرسالة — **نصوصٌ مصيغةً** لا `Decimal`.
+
+    `Decimal` في قاموسٍ خام يمرّ مع `DRF` مائعاً (`float`)، وهذا مبلغُ زبون لا
+    يُقرَب. والمبالغُ هنا مكشوفةٌ كما هي في نصّ الرسالة نفسه: الإشعارُ **نصُّه
+    للزبون**، فقناعُ البند وحده يُخفي عن الموظف ما يقرؤه من يُرسِل إليه — والقناعُ
+    يبقى حيث كان: صفوفُ الجداول والحمولات المشتقّة، لا هذا الإشعار.
+    """
+    if notice is None:
+        return None
+    return {
+        "title": PAYMENT_NOTICE_TITLE,
+        "date": notice["date"].isoformat(),
+        "tone": notice["tone"],
+        "direction_label": notice["direction_label"],
+        "total": f"{notice['total']:.2f}",
+        "url": notice.get("url", ""),
+        "lines": [
+            {
+                "label": line["label"],
+                "amount": f"{line['amount']:.2f}",
+                "tone": line["tone"],
+                "direction_label": line["direction_label"],
+            }
+            for line in notice["lines"]
+        ],
+    }
+
+
+def payment_notice_text(notice) -> str:
+    """نصُّ الإشعار كما يدخل `body` الرسالة — **بلا رمزٍ جديدٍ في القوالب**.
+
+    المبلغُ يُطبَع بقيمته المطلقة ومعه كلمتُه («800.00 إلك») لا بسالبٍ يُقرأ
+    خطأً على جوّال: الإشارةُ في الكلمة لا في الشرطة. والصيغةُ تحكم ما يخرج:
+    «نصّاً» سطورٌ بلا رابط، و«رابط PDF» رابطٌ بلا سطور، والاثنان معاً.
+    """
+    parts = [PAYMENT_NOTICE_TITLE]
+    if notice.get("format") != services.PAYMENT_NOTICE_FORMAT_PDF:
+        for line in notice["lines"]:
+            parts.append(
+                f"{line['label']} — {abs(line['amount']):.2f} {line['direction_label']}"
+            )
+        total = f"المجموع: {abs(notice['total']):.2f} {notice['direction_label']}"
+        parts.append(total.rstrip())
+    if notice.get("url"):
+        parts.append(f"الرابط: {notice['url']}")
+    return "\n".join(parts)
+
+
+def payment_notice_link(tenant, notice, *, user=None) -> str:
+    """رابطُ ورقة الإشعار — بآلية `docshare` القائمة وحدها، بنوع مستندٍ جديد.
+
+    **الاستيرادُ كسولٌ في الدالّة**: `docshare.services` يستورد `documents`، ووحدةُ
+    نوع الإشعار هناك تستورد هذا الملفّ — واستيرادٌ في الأعلى يدير دورةً حقيقيّة
+    عند أوّل تحميل. والنداءُ وقتَ الحاجة فقط، فلا ترتيبُ تحميلٍ يفترق.
+
+    **والرابطُ يُنشَأ في مسار القراءة** («جاهز للإرسال») أوّلَ مرّةٍ عن قصد: نصُّ
+    الرسالة يجب أن يكون نهائياً **قبل** الإرسال، ورابطٌ يُخلَق بعده لا يكون في
+    الورقة التي بيد الزبون. والتكرارُ آمن — الرابطُ الحيّ نفسه يُعاد (`dedupe` في
+    `create_share`)، فنداءٌ ثانٍ لا يصنع ورقةً ثانية.
+    """
+    from docshare import services as docshare_services
+    from docshare.models import DOC_PAYMENT_NOTICE
+
+    try:
+        share = docshare_services.create_share(
+            tenant, DOC_PAYMENT_NOTICE, notice["anchor_id"], user=user,
+        )
+    except docshare_services.ShareNotFound:
+        # الالتزامُ تغيّر بين القراءتين: النصُّ يمضي بلا رابطٍ، ولا يسقط الطلب.
+        return ""
+    return docshare_services.public_url(share)
+
+
+def payment_notice_attachment(tenant, *, client_id, due, settings, user=None):
+    """الإشعارُ المرفقُ ببند «موعد رسمي قريب» — أو `None` حين لا إشعار.
+
+    `settings` إعداداتُ **صاحب البند** محلولةً في مسحة الحساب نفسها (د6): إطفاءُ
+    `payment_notice_attach` لزبونٍ يُخرج إشعارَه وحده ويُبقي بندَ الموعد كما هو.
+    وإشعارٌ بلا أسطرٍ لا يُرفَق: ورقةٌ تقول «المجموع 0» إزعاجٌ لا معلومة.
+
+    **والرابطُ لِمن يملك مشاركته وحده** (`can_share_payment_notice`): يُنشَأ في
+    مسار قراءة، فلا يجوز أن يمنح عضوَ قراءةٍ صفَّ مشاركةٍ حيّاً. ومَن لا يملكها
+    تبقى صيغتُه نصّاً فلا تخرج رسالةٌ بعنوانٍ بلا مضمون.
+    """
+    if not settings.get(services.PAYMENT_NOTICE_ATTACH_KEY, True):
+        return None
+    notice = payment_notice(
+        tenant,
+        client_id=client_id,
+        due=due,
+        gray_threshold=settings.get(services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY),
+    )
+    if not notice["lines"]:
+        return None
+    wanted = (
+        settings.get(services.PAYMENT_NOTICE_FORMAT_KEY)
+        or settings_registry.PAYMENT_NOTICE_FORMAT_BOTH
+    )
+    url = ""
+    if wanted in (
+        services.PAYMENT_NOTICE_FORMAT_PDF, services.PAYMENT_NOTICE_FORMAT_BOTH,
+    ) and services.can_share_payment_notice(tenant, user):
+        url = payment_notice_link(tenant, notice, user=user)
+    notice["format"] = (
+        wanted
+        if url or wanted == settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
+        # صيغةٌ تطلب رابطاً لا يملكه قارئُ الشاشة ⇒ النصُّ، لا رسالةٌ بعنوانٍ بلا
+        # مضمون: من لا يملك المشاركة يقرأ إشعارَه كاملاً بلا إنشاءِ رابط.
+        else settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
+    )
+    notice["url"] = url
+    return notice

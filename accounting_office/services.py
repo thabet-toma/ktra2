@@ -170,6 +170,7 @@ from core.access import (
     MANAGER_ROLE,
     OFFICE_AMOUNTS_VIEW_KEY,
     OFFICE_CLIENTS_ALL_KEY,
+    OFFICE_CLIENTS_WRITE_KEY,
     user_has_perm,
 )
 from core.activity import log_activity
@@ -6201,6 +6202,15 @@ REMINDER_DEFAULT_CONSENT_TYPES_KEY = "reminder_default_consent_types"
 #: #281: قبل كم يومٍ يُذكَّر الموعد — يُقرأ في المسحة نفسها (`_REMINDER_CLIENT_KEYS`)
 #: ويُشتقّ منه اسمُه في `appointments`، فلا مفتاحان لنفس الإعداد.
 APPOINTMENT_REMINDER_DAYS_KEY = "appointment_reminder_days"
+#: #285: إعداداتُ «إشعار الدفع» الثلاثة — تُقرأ **لكل زبون** في مسحة الحساب نفسها
+#: (`_REMINDER_CLIENT_KEYS`): إطفاءُ الإرفاق لزبونٍ واحد لا يمرّ بقراءةٍ ثانية،
+#: والحدُّ الرماديُّ يخصّ زبونَه وحده.
+PAYMENT_NOTICE_ATTACH_KEY = "payment_notice_attach"
+PAYMENT_NOTICE_FORMAT_KEY = "payment_notice_format"
+PAYMENT_NOTICE_GRAY_THRESHOLD_KEY = "payment_notice_gray_threshold"
+#: والصيغتان مُشتقّتان من السجلّ — لا نسختان تفترقان عند إضافة صيغةٍ ثالثة.
+PAYMENT_NOTICE_FORMAT_PDF = settings_registry.PAYMENT_NOTICE_FORMAT_PDF
+PAYMENT_NOTICE_FORMAT_BOTH = settings_registry.PAYMENT_NOTICE_FORMAT_BOTH
 
 #: رسالةُ القفل — ثابتٌ واحدٌ يقارنه الاختبار وتقرؤه الواجهة كما هو.
 REMINDER_AUTO_SEND_LOCKED = "الإرسال التلقائي غير متاح قبل المرحلة الثانية"
@@ -6528,6 +6538,11 @@ class ReminderCandidate:
     #: المستحقُّ على الزبون في هذه الفترة — `None` حيث لا مبلغَ (أوراقٌ وموعد).
     #: مجموعُ التزامات الفترة في مولّد «موعد رسمي قريب» وحده (#281).
     amount: Decimal | None = None
+    #: #285: إشعارُ الدفع المركَّبُ على بند «موعد رسمي قريب» — أسطرٌ ومجموعٌ واتجاه
+    #: ورابط. `None` لبندٍ لا إشعارَ له: نوعُ تذكيرٍ آخر، أو زبونٌ أُطفئ إرفاقُه.
+    #: ويُركَّب في `ready_to_send_payload` بعد الحواجز كلّها، فلا إشعارَ — ولا
+    #: رابطَ يُنشَأ — لبندٍ لن يُرسَل.
+    notice: Any = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -6538,6 +6553,12 @@ _REMINDER_CLIENT_KEYS: tuple[str, ...] = (
     DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY,
     DOCUMENTS_REMINDER_MAX_KEY,
     APPOINTMENT_REMINDER_DAYS_KEY,
+    # #285: إعداداتُ إشعار الدفع الثلاثة في المسحة نفسها — الإرفاقُ يُقرأ لكل
+    # زبون (د6) والحدُّ الرماديُّ يخصّه، فقراءةٌ ثانية لكل مفتاح كانت تضاعف
+    # الاستعلامات وتُخالف ترتيب الحلّ الذي حُجب به الحساب.
+    PAYMENT_NOTICE_ATTACH_KEY,
+    PAYMENT_NOTICE_FORMAT_KEY,
+    PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
     "rest_days",
     # #280/ب: نظامُ الزبون لبند رسالته — يُقرأ في المسحة نفسها، فإضافةُ حقلٍ إلى
     # البند لا تكلّف استعلاماً لكل بند. **ولا يُخمَّن نظامٌ واحدٌ للمستلِم**:
@@ -6826,6 +6847,11 @@ def _reminder_item_payload(candidate) -> dict:
         "step": candidate.count + 1,
         "max": candidate.maximum,
         "due_date": candidate.next_due.isoformat(),
+        # #285: الإشعارُ المركَّبُ على البند. مبالغُه **نصوصٌ مصيغة** لا `Decimal`
+        # (قاموسٌ خام يمرّ مع DRF مائعاً)، وهي مكشوفةٌ كما في نصّ الرسالة نفسها:
+        # الإشعارُ نصُّه للزبون، فقناعُ البند وحده يُخفي عن الموظف ما يقرؤه من
+        # يُرسِل إليه — والقناعُ يبقى حيث كان على صفوف الجداول والحمولات.
+        "notice": _appointments_module().payment_notice_item(candidate.notice),
         "subject": {"document_item_codes": list(candidate.missing_codes)},
     }
 
@@ -6860,14 +6886,22 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
 
     رسالةٌ قد تجمع بندَي نوعين (أوراقٌ ناقصة وموعدٌ قريب) لشخصٍ واحد، فيُقرأ لكل
     بندٍ نصُّ نوعه من مكتبه — لا نصُّ النوع الأول على الجميع.
+
+    **وإشعارُ الدفع نصٌّ ملحَقٌ ببند «موعد رسمي قريب»** (#285): يُركَّب معه في
+    `body` بعد نصّ نوعه، ولا نوعَ تذكيرٍ خامس ولا رمزاً من `REMINDER_PLACEHOLDERS`
+    جديد — الإشعارُ يبنيه الخادم من بيانات الزبون، لا يكتبه المكتب في قالب.
+    وبندٌ بلا إشعار (`notice is None`) يخرج بنصّه وحده كما كان.
     """
-    body = "\n\n".join(
-        render_reminder_body(
+    appointments = _appointments_module()
+    parts = []
+    for candidate in candidates:
+        parts.append(render_reminder_body(
             bodies_by_type.get(candidate.reminder_type, {}).get(contact.language, ""),
             _reminder_render_values(tenant, candidate, language=contact.language),
-        )
-        for candidate in candidates
-    )
+        ))
+        if candidate.notice is not None:
+            parts.append(appointments.payment_notice_text(candidate.notice))
+    body = "\n\n".join(parts)
     return {
         "recipient": {
             "contact_id": contact.pk,
@@ -6880,6 +6914,39 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
         "items": [_reminder_item_payload(candidate) for candidate in candidates],
         "body": body,
     }
+
+
+def _with_payment_notice(tenant, candidate, settings_by_client, *, user=None):
+    """يُركّب «إشعار الدفع» على بند «موعد رسمي قريب»، ويترك كلَّ نوعٍ آخر كما هو.
+
+    **بعد الحواجز كلّها** لا قبلها: الإرفاقُ يقرأ إعدادَ **صاحب البند** (د6)،
+    ورابطُ الورقة لا يُنشَأ لبندٍ لن يُرسَل (يومُ راحةٍ أو إذنٌ مسحوب). وكلُّ
+    الظهور التالي يقرأ النسخةَ المجمَّدة نفسها، فلا حسابَ ثانٍ في العرض.
+    """
+    if candidate.reminder_type != REMINDER_DEADLINE:
+        return candidate
+    notice = _appointments_module().payment_notice_attachment(
+        tenant,
+        client_id=candidate.client.pk,
+        due=candidate.render_due,
+        settings=settings_by_client[candidate.client.pk],
+        user=user,
+    )
+    return candidate if notice is None else replace(candidate, notice=notice)
+
+
+def can_share_payment_notice(tenant, user) -> bool:
+    """هل يملك هذا العضو إنشاءَ رابطٍ عامٍّ للإشعار؟ — صلاحيةُ نوع المستند نفسها.
+
+    الرابطُ يُنشَأ في **مسار قراءة** («جاهز للإرسال»)، ومسارُ القراءة يفتحه من لا
+    يملك المشاركة أيضاً. بلا هذا الحارس كان عضوٌ للقراءة يُنشئ — بفتح الشاشة —
+    صفَّ `DocumentShare` حيّاً وأثراً في `ActivityLog` بمبالغ زبون، وهو فعلٌ
+    تمنعه الصلاحية في مسار الكتابة. فمن لا يملكها يقرأ الإشعار **نصّاً** ولا
+    يُنشَأ له رابط (انظر `payment_notice_attachment`).
+    """
+    if user is None:
+        return False
+    return user_has_perm(user, tenant, OFFICE_CLIENTS_WRITE_KEY)
 
 
 def ready_to_send_payload(
@@ -6934,6 +7001,12 @@ def ready_to_send_payload(
     ]
     if not candidates:
         return payload
+    # #285: الإشعارُ يُركَّب هنا — بين الحاجز الأخير وبناء الرسالة — فلا رابطَ
+    # يُنشَأ (ولا حسابَ سطرٍ) لبندٍ خارج «جاهز للإرسال».
+    candidates = [
+        _with_payment_notice(tenant, candidate, settings_by_client, user=user)
+        for candidate in candidates
+    ]
     # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف
     # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم. والأنواعُ من البنود المحسوبة وحدها — فلا
     # استعلامَ لنوعٍ لم يظهر، والرسالةُ المجمَّعةُ تأخذ نصَّ كلّ بندٍ بنوعه.

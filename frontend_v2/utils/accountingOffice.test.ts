@@ -68,6 +68,7 @@ import {
   officeWhatsappNumber,
   officeTaskAnchorId,
   overriddenRuleInput,
+  paymentNoticeTone,
   pendingEntryClientCount,
   pendingEntryRowKey,
   pendingMonthDocuments,
@@ -1441,4 +1442,23 @@ test('صفُّ «للإدخال» يُعرَّف بالزبون والشهر —
   assert.equal(pendingEntryClientCount([march, april, otherClient]), 2);
   assert.equal(pendingEntryClientCount([march, april]), 1);
   assert.equal(pendingEntryClientCount([]), 0);
+});
+
+test('لونُ إشعار الدفع: موجبٌ أحمر، سالبٌ أخضر، والقريبُ من الصفر رماديّ', () => {
+  // الحالاتُ الأربع المحسومة في #285/د4.
+  assert.equal(paymentNoticeTone(1500, 10), 'owed');
+  assert.equal(paymentNoticeTone(-300, 10), 'refund');
+  assert.equal(paymentNoticeTone(7, 10), 'neutral');
+  // الحدُّ شامل (`<=`): 10 بحدِّ 10 رماديّ لا أحمر.
+  assert.equal(paymentNoticeTone(10, 10), 'neutral');
+  // والرماديُّ يغلب على الإشارتين — لا سالبَ أخضر داخل النطاق.
+  assert.equal(paymentNoticeTone(-10, 10), 'neutral');
+  // المبالغُ تصل نصوصاً عشريّةً من الخادم، والنصُّ يُقرأ كما هو.
+  assert.equal(paymentNoticeTone('1500.00', '10'), 'owed');
+  assert.equal(paymentNoticeTone('-300.00', '10'), 'refund');
+  // والفاسدُ والغائبُ صفرٌ لا `NaN`: لا لونَ يصرخ لخطأٍ في البيان.
+  assert.equal(paymentNoticeTone(null, 10), 'neutral');
+  assert.equal(paymentNoticeTone('غير رقم', 10), 'neutral');
+  // والحدُّ السالبُ يُقرأ كموجبه بدل أن يُرمى كلُّ مبلغٍ في الرمادي.
+  assert.equal(paymentNoticeTone(1500, -10), 'owed');
 });

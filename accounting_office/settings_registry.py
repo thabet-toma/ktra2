@@ -130,6 +130,22 @@ BOOK_ENTRY_METHODS: tuple[str, ...] = tuple(
 )
 BOOK_ENTRY_METHOD_LABELS: dict[str, str] = dict(BOOK_ENTRY_METHOD_CHOICES)
 
+#: #285: كيف يُرفَق «إشعار الدفع» برسالة «موعد رسمي قريب» — **نصّاً أو رابطاً أو
+#: الاثنين**. تُعرَّف هنا لا في النماذج: إعدادُ `payment_notice_format` يقرأ
+#: مفاتيحها، والسجلَّ لا يستورد النماذج (دَّورةُ استيراد).
+PAYMENT_NOTICE_FORMAT_TEXT = "text"
+PAYMENT_NOTICE_FORMAT_PDF = "pdf"
+PAYMENT_NOTICE_FORMAT_BOTH = "both"
+PAYMENT_NOTICE_FORMAT_CHOICES: tuple[tuple[str, str], ...] = (
+    (PAYMENT_NOTICE_FORMAT_TEXT, "نصّاً"),
+    (PAYMENT_NOTICE_FORMAT_PDF, "رابط PDF"),
+    (PAYMENT_NOTICE_FORMAT_BOTH, "نصّاً ورابطاً"),
+)
+PAYMENT_NOTICE_FORMATS: tuple[str, ...] = tuple(
+    key for key, _label in PAYMENT_NOTICE_FORMAT_CHOICES
+)
+PAYMENT_NOTICE_FORMAT_LABELS: dict[str, str] = dict(PAYMENT_NOTICE_FORMAT_CHOICES)
+
 #: نافذةُ الإرسال (§#280/D7): ساعةُ بدايةٍ وساعةُ نهايةٍ تُخزَّنان للمرحلة الثانية
 #: ولا تقرؤهما هذه المرحلة. والحدُّ 23 لأن الساعةَ 24 تعني «المنتصف» في لغاتٍ
 #: وتُلبس على من يقرأ، فالوضوحُ أولى.
@@ -574,6 +590,45 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=list(REMINDER_TYPES),
         group=GROUP_REMINDERS,
         note="تُنسَخ على جهة الاتصال عند إنشائها، وتُعدَّل بعدها لكل شخصٍ وحده.",
+    ),
+    # ── إشعار الدفع (#285) ──
+    #
+    # **لا إعدادَ للألوان**: «عليك» أحمر و«إلك» أخضر ثابتان لا يُضبطان، والقريبُ
+    # من الصفر رماديٌّ بحدٍّ **واحد** هو هذا — فالألوانُ قرارُ منتجٍ لا ذوقُ مكتب.
+    # والحدُّ يُخصَّص لكل زبون: مبلغُ 7 شيكل حدٌّ محسوبٌ في منشأةٍ صغيرة، وصفرٌ
+    # فعليّ في منشأةٍ كبيرة يريد كلَّ قرشٍ أحمر.
+    "payment_notice_attach": SettingDefinition(
+        key="payment_notice_attach",
+        label="إرفاق إشعار الدفع بتذكير الموعد",
+        client_label="إرفاق إشعار الدفع بتذكير موعدي",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=True,
+        group=GROUP_REMINDERS,
+        note="إطفاؤه لزبونٍ يُخرج الإشعارَ من رسالته وحدها، ويبقى بندُ الموعد كما هو.",
+    ),
+    "payment_notice_format": SettingDefinition(
+        key="payment_notice_format",
+        label="صيغة إشعار الدفع",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        choices=PAYMENT_NOTICE_FORMATS,
+        labels=PAYMENT_NOTICE_FORMAT_LABELS,
+        default=PAYMENT_NOTICE_FORMAT_BOTH,
+        group=GROUP_REMINDERS,
+        note="النصُّ سطورٌ في الرسالة، والرابطُ ورقةٌ تُفتح — والمرسل يختار.",
+    ),
+    #: «مبلغ» بلا منازل: الرماديُّ قرارُ عرضٍ («قريبٌ من الصفر»)، والدرهمُ الواحد
+    #: لا يغيّر القرار. والسالبُ مرفوض — «حدٌّ سالب» يجعل كلَّ مبلغٍ رماديّاً.
+    "payment_notice_gray_threshold": SettingDefinition(
+        key="payment_notice_gray_threshold",
+        label="حدّ الرمادي في إشعار الدفع (المبلغ)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=10,
+        min_value=0,
+        group=GROUP_REMINDERS,
+        note="مبلغٌ قيمتُه المطلقة تساويه أو تقلّ يُعرَض رماديّاً لا أحمر ولا أخضر.",
     ),
     # ── دفتر الزبون (#286) ──
     #

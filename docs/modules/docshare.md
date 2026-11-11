@@ -15,7 +15,7 @@
 `docshare/models.py` (`DocumentShare`) — جدول `document_shares`. «حيّ» تعريفه في مكان واحد: `DocumentShare.is_live` = لا مُبطَل (`revoked_at`) ولا منتهٍ (`expires_at`).
 
 **المستند مربوط بـ`(doc_type, doc_id)` نصّاً وعدداً، لا بمفتاح أجنبي ولا بـ`GenericForeignKey`.**
-الأنواع اليوم **سبعة عشر** في `sales` و`logistics` و`after_sales` و`inventory`: مفتاحٌ أجنبيّ اختياريّ لكل نوع كان يعني عموداً جديداً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents/` (`DOC_TYPES`) ودالّتين**.
+الأنواع اليوم **ثمانية عشر** في `sales` و`logistics` و`after_sales` و`inventory` و`accounting_office`: مفتاحٌ أجنبيّ اختياريّ لكل نوع كان يعني عموداً جديداً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents/` (`DOC_TYPES`) ودالّتين**.
 
 **وتصحيحٌ لوعدٍ كان هنا: التوسيع ليس «بلا هجرة».** العمود كان `varchar(20)` يوم كان النوعان مبيعاتٍ فقط، و`local_purchase_invoice` اثنان وعشرون محرفاً. مفتاحٌ أطول من العمود **لا يرمي على MySQL بل يُلغي القيد بصمت**، وSQLite في مجموعة الاختبارات لا يكشفه أبداً — فتمرّ خضراءَ على ميزةٍ لا تحفظ شيئاً (نفس عطل `ActivityLog.action`). العمود الآن أربعون، والسقف يحرسه `docshare/tests/test_registry.py` (`test_doc_type_keys_fit_the_column`) بقياس أطول مفتاح في السجلّ مقابل `max_length` الفعلي. فالقاعدة الصحيحة: **التوسيع بلا هجرة ما دام المفتاح يسع العمود، والاختبار هو من يقول ذلك لا الذاكرة.**
 
@@ -25,7 +25,7 @@
 
 **لا قيد فرادة على `(tenant, doc_type, doc_id)`:** الروابط المُبطَلة تبقى صفوفاً، لأن «من شارك هذا المستند ومتى؟» سؤالٌ يُسأل بعد الإبطال لا قبله. الفرادة على التوكن وحده.
 
-## الأنواع السبعة عشر — والجمهور هو ما يحكم ما يخرج
+## الأنواع الثمانية عشر — والجمهور هو ما يحكم ما يخرج
 `docshare/documents/` **حزمة لا ملف** (نمط `logistics/views/` و`core/reports/`): العقد في `_contract.py` بلا استيراد نموذجٍ واحد (وترويسة الشركة `COMPANY_FIELDS`/`company_card` صارت في `tenants/letterhead.py` منذ #238 — يعيد `_contract.py` تصديرهما فلا يتغيّر مستورد)، والأنواع في وحدةٍ لكل جمهور. الفائدة ليست الحجم بل أن **حدود الجمهور صارت حدود ملف**: من يراجع «ماذا يرى المورّد؟» يقرأ `purchase_docs.py` كاملاً في جلسة.
 
 | `doc_type` | النموذج | الطرف | الجمهور | ملاحظة |
@@ -47,6 +47,7 @@
 | `service_order` | `after_sales.ServiceOrder` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة**؛ التقدير بعد اعتماده |
 | `purchase_rfq` | `logistics.PurchaseRFQ` | — (لا طرف واحد؛ الرابط إمّا خاصٌّ **بمستقبِل** عبر `PurchaseRFQRecipient.share`، وإمّا **عامٌّ** بـ`DocumentShare.is_public` — مواصفة #147) | مورّد | **لا يقبل قراراً — يقبل تسعيراً** (`quote` لا `decision`)؛ انظر §«تسعير المورّد» أدناه |
 | `stocktake_count` | `inventory.Stocktake` | `inventory.StocktakeCountLink` (اسم العادّ ونطاقه) | موظف مستودع (`warehouse` — جمهورٌ ثالث) | **K3**: يقبل **عدّاً** (`count` لا `decision`/`quote`)؛ لا يرى مالاً؛ صفحته JSON في المسار `count/` لا القالب العامّ — ورمزُه يردّ 404 على `/s/<token>` قبل تسجيل مشاهدة. تفصيل العقد في `modules/inventory.md` |
+| `payment_notice` | `accounting_office.Obligation` (الالتزامُ مرجعَ الإشعار) | `OfficeClient` (اسمُه ورقمُ ملفّه الضريبيّ) | زبون | **#285**: `doc_id` **التزامٌ** لا زبون — (الزبون، تاريخُ الاستحقاق) يُشتقّان منه فلا حقلَ إضافيّ في `DocumentShare`؛ `page` = ورقةٌ بأسطرٍ ملوّنة (أحمر «عليك» · أخضر «إلك» · رماديّ قريبٌ من الصفر) لأن قائمةَ `line_row` البيضاء بلا حقل نبرة؛ صلاحيتُه `office.clients.write` |
 
 **ثلاث قواعد عرضٍ تعمّمت من هذه الأنواع، وكلٌّ منها منعٌ مقصود:**
 - **`show_lines=False`** للسندات والإشعارات والكفالة: جدولٌ بعناوين «الصنف/الوحدة/الكمية/ض.%» فوق إيصال قبضٍ ضجيجٌ يُربك من يقرؤه. وتوزيعاتُ السند تنزل **صفوفَ بيانات** (فاتورةً فاتورةً بمبلغها)، و«على الحساب» **يُشتقّ طرحاً** لا يُقرأ من عمودٍ ثانٍ قد يخالفه.
@@ -240,7 +241,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 - **القرار لمرة واحدة**: `select_for_update` داخل معاملة — ضغطتان على «موافق» من جوالٍ بطيء طلبان، والثاني يرتدّ بـ409 لا يُعيد الكتابة.
 - **`valid_until` المنقضي يُخفي الأزرار بلا تغيير الحالة في القاعدة** — إسقاط العرض إلى «منتهي» قرارُ النظام لا قرارُ زائرٍ فتح صفحة.
 - **نوعٌ يعرف انتهاءه أفضل من مقارنة تاريخ يُصرِّح بمفتاح `DOC_TYPES[…]["expired"]`** (اختياري، #222): `docshare/views.py` (`_page_context`) يستدعيه إن وُجد بدل `valid_until < today` الافتراضية. `warranty_card` وحده يُصرِّح به الآن (`docshare/documents/aftersales_docs.py` — `warranty_card_expired`) لأن انتهاءها واقعةٌ (مرجع/إلغاء ترحيل) لا انقضاء مدّة — بطاقةُ جهازٍ أُرجع تبقى نهايتها في المستقبل ومع ذلك «غير سارية».
-- **نوعٌ يُصيِّر صفحته بنفسه يُصرِّح بمفتاح `DOC_TYPES[…]["page"]`** (اختياري، #239): دالةٌ `page(document, share) -> html | None`. `docshare/views.py` (`DocSharePublicView`) يستدعيها **بعد** كل حرّاس الرابط (التوكن، الانتهاء/الإبطال، ترخيص الوحدة، الخانق) وبعد `record_view`، فيعيد HTML بـ`_harden` نفسها (`X-Robots-Tag`، `no-store`)؛ وإن أعادت `None` أو لم يصرّح النوع بها سقط الطلب إلى القالب العام كما كان بايتاً ببايت. يستعملها `warranty_card` و`warranty_certificate` (`docshare/documents/aftersales_docs.py` — `page_warranty_card`، `page_warranty_certificate`) لصفحة الشهادة المطبوعة من `after_sales/certificates.py`. **والصفحة لا تمرّ بحمولة `payload`**: الحمولة تبقى تحرس القائمة البيضاء لواجهة JSON (`/api/share/<token>/`)، والقائمة البيضاء للشهادة في `certificate_context`.
+- **نوعٌ يُصيِّر صفحته بنفسه يُصرِّح بمفتاح `DOC_TYPES[…]["page"]`** (اختياري، #239): دالةٌ `page(document, share) -> html | None`. `docshare/views.py` (`DocSharePublicView`) يستدعيها **بعد** كل حرّاس الرابط (التوكن، الانتهاء/الإبطال، ترخيص الوحدة، الخانق) وبعد `record_view`، فيعيد HTML بـ`_harden` نفسها (`X-Robots-Tag`، `no-store`)؛ وإن أعادت `None` أو لم يصرّح النوع بها سقط الطلب إلى القالب العام كما كان بايتاً ببايت. يستعملها `warranty_card` و`warranty_certificate` (`docshare/documents/aftersales_docs.py` — `page_warranty_card`، `page_warranty_certificate`) لصفحة الشهادة المطبوعة من `after_sales/certificates.py`، و`payment_notice` (#285) لورقتها الملوّنة — وسببُ الثاني عقديٌّ لا جمالي: قائمةُ مفاتيح السطر في `line_row` عشرةٌ **بلا حقل نبرة**، وتلوينُها في القالب العامّ كان يوسّع عقداً يخدم ثمانيةَ عشرَ نوعاً لقاعدةٍ تخصّ واحداً. **والصفحة لا تمرّ بحمولة `payload`**: الحمولة تبقى تحرس القائمة البيضاء لواجهة JSON (`/api/share/<token>/`)، والقائمة البيضاء للشهادة في `certificate_context`.
 - **خطّاف `on_share(document, user=None)`** (اختياري): يُستدعى عند إنشاء رابطٍ **جديد** فقط (لا عند إعادة رابطٍ حيٍّ قائم — `dedupe`)، ويستقبل المستخدم المنشئ. عرض السعر يرسل المسودة (`_send_draft_quotation`)، و`warranty_certificate` يكتب `issued` بقناة `share` لكل بطاقة غير منتهية (`after_sales/services.py` (`mark_card_issued`) مرةً واحدة للبطاقة مهما تكرّرت المشاركة أو سبقتها طباعة).
 - **يُسجَّل**: الاسم المُدخَل (إلزامي)، والتوقيت، وIP — وفي `ActivityLog` عبر `core/activity.py` (`log_activity`). قيمة `action` من `choices` النموذج (`"update"`) والتفصيل في `metadata`: قيمة أطول من عمود `action` تُلغي القيد **بصمت** على MySQL وSQLite لا تكشفه.
 - **المخاطرة المعلومة:** من يملك الرابط يستطيع أن يقرّر — لازمُ قرار «رابط عام بلا تحقّق هوية»، وهو سلوك Odoo نفسه.
@@ -256,6 +257,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 |---|---|---|
 | `sales.document.share` | `sales_invoice` · `sales_quotation` · `sales_order` · `delivery_order` · `customer_payment` · `credit_debit_note` · `warranty_card` · `warranty_certificate` · `service_order` | موظف المبيعات · `manager` بـ`"*"` |
 | `purchase.document.share` | `purchase_invoice` · `purchase_order` · `logistics_deal` · `supplier_quotation` · `local_purchase_invoice` · `supplier_payment` | موظف المشتريات · `manager` بـ`"*"` |
+| `office.clients.write` | `payment_notice` (#285) | مكتب المحاسبة: `manager` و`office_manager` · والقارئ لا يأخذه |
 
 `viewer` لا يأخذ أياً منهما. ولا مال في الرابط على الجانبين: يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل».
 

@@ -88,6 +88,12 @@ from docshare.documents.inventory_docs import (  # noqa: F401
     read_stocktake_count,
     write_stocktake_count,
 )
+from docshare.documents.accounting_docs import (  # noqa: F401
+    ACCOUNTING_DOC_TYPES,
+    build_payment_notice,
+    load_payment_notice,
+    page_payment_notice,
+)
 from docshare.documents.sales_docs import (  # noqa: F401
     DECISION_QUOTATION,
     SALES_DOC_TYPES,
@@ -110,5 +116,5 @@ def _merge(*registries) -> dict[str, dict]:
 
 DOC_TYPES: dict[str, dict] = _merge(
     SALES_DOC_TYPES, PURCHASE_DOC_TYPES, VOUCHER_DOC_TYPES, AFTERSALES_DOC_TYPES,
-    STOCKTAKE_DOC_TYPES,
+    STOCKTAKE_DOC_TYPES, ACCOUNTING_DOC_TYPES,
 )

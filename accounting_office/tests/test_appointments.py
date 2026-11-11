@@ -837,7 +837,9 @@ class DeadlineReminderTest(OfficeFixture):
 
         نصُّ الرسالة موجَّهٌ إلى **الزبون نفسه** (مبلغُه عليه)، وقنعُه عن موظّفٍ بلا
         `office.amounts.view` يُرسل «—» إلى الزبون بدل مبلغه. أما الحمولةُ المهيكلة
-        (`items`) فلا تحمل مبلغاً أصلاً: الاستثناءُ في نصّ الرسالة وصفِّ سجلّها وحدهما.
+        (`items`) فلا تحمل مفتاحَ مبلغٍ في جذرها: الاستثناءُ في نصّ الرسالة وصفِّ
+        سجلّها وحدهما — **و«إشعار الدفع» (#285) استثناءٌ ثانٍ صريح**: أسطرُه ومجموعُه
+        في `items[].notice` لأن الإشعارَ نفسَه هو المخرَجُ الموجَّه للزبون (د3).
         """
         member = self.make_member("ap_no_amounts", role="accountant")
         self.assertFalse(services.can_see_amounts(self.tenant, member))
@@ -852,7 +854,10 @@ class DeadlineReminderTest(OfficeFixture):
         self.assertEqual(len(payload["messages"]), 1, payload["messages"])
         message = payload["messages"][0]
         self.assertIn("مبلغ مستحقّ: 620.00", message["body"])
-        self.assertNotIn("—", message["body"])
+        # الحارسُ على **سطر المبلغ** لا على الشرطة في كلّ النصّ: عنوانُ إشعار الدفع
+        # الثابت (#285) يحمل شرطةً طويلةً من نصّه، فالحرفُ وحده لم يبقَ دليلاً على
+        # قناعٍ تسلّل — والسطرُ هو ما يُقاس.
+        self.assertNotIn("مبلغ مستحقّ: —", message["body"])
         for item in message["items"]:
             self.assertFalse(
                 {"amount", "amount_label"} & set(item), f"مبلغٌ في بند الحمولة: {item}",

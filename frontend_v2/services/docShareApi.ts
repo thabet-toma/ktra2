@@ -36,7 +36,10 @@ export type ShareDocType =
   | "supplier_payment"
   // ISSUE #115: رابط المورّد الخاص على طلب عرض السعر — لا يقبل قراراً (accept/reject)
   // بل تسعيراً (`quote`)، انظر `docs/modules/docshare.md` §«تسعير المورّد».
-  | "purchase_rfq";
+  | "purchase_rfq"
+  // #285: ورقة «إشعار الدفع» التي يُنشئها مكتب المحاسبة على بند «موعد رسمي قريب»
+  // — جمهورها الزبون، وصلاحيتها `office.clients.write`.
+  | "payment_notice";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

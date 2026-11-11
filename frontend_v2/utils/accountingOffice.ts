@@ -1004,6 +1004,44 @@ export function shortIsoDate(iso: string | null | undefined): string {
   return `${match[3]}/${match[2]}`;
 }
 
+// ── إشعار الدفع (#285) ──────────────────────────────────────────────────
+//
+// **اللونُ من الإشارة لا من العرض**: موجبٌ أحمر («عليك»)، وسالبٌ أخضر («إلك»)،
+// و`|المبلغ| ≤ الحدّ` رماديّ يغلب على الاثنين. والقاعدةُ نفسُها في الخادم
+// (`appointments.payment_notice_tone`) لأن الورقةَ المصيَّرة تُلوَّن هناك؛ وهذه
+// مرآتُها المختبرة بـ`node --test`، فلا تنحرف صورُ الصفحة عمّا يعرفه العميل.
+// والنصوصُ («عليك»/«إلك») لا تُكتب هنا — تصل من الخادم كسائر نصوص الموديول.
+
+/** ألوانُ سطر الإشعار أو مجموعه — مفاتيحُ عرضٍ، لا نصوصَ تُعرَض. */
+export type PaymentNoticeTone = 'owed' | 'refund' | 'neutral';
+
+/** مبلغٌ نصٌّ عشريّ من الخادم ← عدد؛ الفاسدُ والغائبُ صفرٌ لا `NaN`. */
+function noticeAmount(value: number | string | null | undefined): number {
+  const parsed = typeof value === 'number'
+    ? value
+    : Number.parseFloat(String(value ?? '').trim());
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/**
+ * لونُ مبلغٍ في إشعار الدفع عند حدٍّ رماديٍّ — دالّةٌ نقيّة.
+ *
+ * القاعدةُ من قيمتين لا من ثلاث حالات: `|المبلغ| ≤ الحدّ` رماديّ (**شاملٌ**:
+ * مبلغُ 10 بحدِّ 10 رماديّ)، وما فوقه أحمرُ للإيجابيّ وأخضرُ للسالب. والحدُّ
+ * المطلقُ هو المستعمل: حدٌّ سالبٌ يُقرأ كموجبه بدل أن يقلب كلَّ مبلغٍ رماديّاً.
+ *
+ * **ومقارنةُ نطاقٍ لا حسابُ مال**: المبالغُ تُصلَح في الخادم بـ`Decimal`، وهذه
+ * تلوّن ما وصل منه — فـ`Number` هنا لا يُقارَب به قرش.
+ */
+export function paymentNoticeTone(
+  amount: number | string | null | undefined,
+  threshold: number | string | null | undefined,
+): PaymentNoticeTone {
+  const value = noticeAmount(amount);
+  if (Math.abs(value) <= Math.abs(noticeAmount(threshold))) return 'neutral';
+  return value > 0 ? 'owed' : 'refund';
+}
+
 // ── التنبيهات والجرس (#276) ──────────────────────────────────────────────
 //
 // **ولا تسميةَ نوعٍ هنا ولا خريطةُ نوعٍ ← شارة**: `kind_label` و`badge` يصلان من

@@ -95,6 +95,9 @@ class RegistryShapeTest(SettingTestCase):
                 "book_entry_method",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
+                # #285: إشعارُ الدفع — الإرفاقُ وصيغتُه وحدُّ الرمادي، وللزبون تخصيصُها.
+                "payment_notice_attach", "payment_notice_format",
+                "payment_notice_gray_threshold",
             },
         )
 
@@ -458,6 +461,9 @@ class SettingsApiTest(SettingTestCase):
                 "book_entry_method",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
+                # #285: إشعارُ الدفع — ثلاثةُ مفاتيحَ في مجموعة «التذكيرات».
+                "payment_notice_attach", "payment_notice_format",
+                "payment_notice_gray_threshold",
             },
         )
 
