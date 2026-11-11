@@ -162,6 +162,18 @@ export interface ContactRow {
   phone: string;
   language: 'ar' | 'he';
   language_label: string;
+  /**
+   * إذنُ التذكير على الجهة نفسها (#280) — تقرؤه من `ContactSerializer` في
+   * `clients/<pk>/contacts/` مباشرةً، فلا طلبَ لكل جهةٍ لعرض حالتها. والكتابةُ
+   * بفعلها وحده (`contacts/<id>/consent/`) لأنها تمرّ بحارس الخدمة.
+   */
+  reminders_consent: boolean;
+  consent_types: string[];
+  consent_on: string | null;
+  consent_channel: string;
+  consent_channel_label: string;
+  consent_withdrawn_on: string | null;
+  consent_withdrawn_by: { id: number; name: string } | null;
   created_at: string;
   updated_at: string;
 }
@@ -230,6 +242,12 @@ export interface ReminderTemplatesPayload {
 export interface ReadyToSendItem {
   client_id: number;
   client_name: string;
+  /**
+   * نظامُ **الزبون صاحب البند** الضريبيّ (`PS`/`IL`) أو `null` — #280/ب.
+   * يُقرأ منه مفتاحُ دولة الأرضيّ في `officeWhatsappLink`، ولا يُخمَّن نظامٌ
+   * واحدٌ للمستلِم: رسالةُ شخصٍ قد تجمع بندَي زبونين بنظامين مختلفين.
+   */
+  tax_system: string | null;
   reminder_type: string;
   reminder_type_label: string;
   badge: string;

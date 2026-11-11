@@ -19,6 +19,7 @@ import {
   Gauge, Radar, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
   PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
   Briefcase as BriefcaseIcon, LifeBuoy, BadgeCheck, ScrollText, UserCog, HeartPulse,
+  Send,
 } from 'lucide-react';
 import { useLocation, useNavigate } from "react-router-dom";
 import { openInNewTab } from "../utils/openInNewTab";
@@ -370,6 +371,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
     // ISSUE #275 — «اليوم» أوّلُ شاشات المكتب: ما حان وقتُه من التزاماتٍ وشغلات.
     "office-today": { label: "اليوم", icon: <CalendarCheck className="h-4 w-4" /> },
+    // #280/ب — «جاهز للإرسال»: ما حان إرسالُه اليوم لزبائن المكتب.
+    "office-ready-to-send": { label: "جاهز للإرسال", icon: <Send className="h-4 w-4" /> },
     "office-clients": { label: "الزبائن", icon: <Users className="h-4 w-4" /> },
     "office-calendar": { label: "التقويم", icon: <CalendarDays className="h-4 w-4" /> },
     "office-settings": { label: "إعدادات المكتب", icon: <SettingsIcon className="h-4 w-4" /> },

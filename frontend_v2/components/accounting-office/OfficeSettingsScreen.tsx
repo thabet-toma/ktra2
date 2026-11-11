@@ -30,9 +30,11 @@ import {
 import {
   OFFICE_OWNER_ROLE,
   OFFICE_SETTINGS_PATH,
+  SETTINGS_GROUP_REMINDERS,
   SETTINGS_GROUP_SCHEDULE,
   clientFilePath,
   formatOfficeAmount,
+  isLockedOfficeSetting,
   missingFirstRunLabels,
   officeAssignableRoles,
   officeRoleLabel,
@@ -49,6 +51,8 @@ import { useToast } from '../../contexts/ToastContext';
 import { OfficeCustomRulesSection } from './OfficeCustomRulesSection';
 import { OfficeDeadlineRulesSection } from './OfficeDeadlineRulesSection';
 import { OfficeDocumentItemsSection } from './OfficeDocumentItemsSection';
+import { OfficeHolidaysSection } from './OfficeHolidaysSection';
+import { OfficeReminderTemplatesSection } from './OfficeReminderTemplatesSection';
 import { SettingControl } from './SettingControl';
 import {
   OfficeCard,
@@ -429,7 +433,9 @@ export const OfficeSettingsScreen: React.FC = () => {
           setting={setting}
           value={setting.value}
           canReset={setting.can_reset === true}
-          disabled={!canManageSettings}
+          // #280/ب: الإرسالُ التلقائي مقفلٌ مطفأً — الخادمُ يردّ 400 على فتحه،
+          // والضابطُ يُقفل كي لا يجرّب الموظفُ حفظاً مصيرُه الرفض (ملاحظتُه تشرح).
+          disabled={!canManageSettings || isLockedOfficeSetting(setting.key)}
           onReset={() => reset(setting.key)}
           onSave={(value) => save(setting.key, value)}
         />
@@ -523,6 +529,16 @@ export const OfficeSettingsScreen: React.FC = () => {
             </>
           ) : null}
           {rows.map(renderSetting)}
+          {/* #280/ب: نصوصُ التذكير وعطلُ المكتب داخل مجموعتهما — تُقرأ لكل عضو،
+              وتُكتب بمفتاح الإعدادات وحده (كلُّ قسمٍ يقرّر ذلك بنفسه). */}
+          {group.id === SETTINGS_GROUP_REMINDERS ? (
+            <>
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              <OfficeReminderTemplatesSection />
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              <OfficeHolidaysSection />
+            </>
+          ) : null}
           {group.id === SETTINGS_GROUP_SCHEDULE && canManageSettings ? (
             <>
               <div className="my-3 border-t border-slate-100 dark:border-slate-800" />

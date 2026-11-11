@@ -12,7 +12,9 @@ import {
   deleteContact,
   endOfficeClient,
   getClientObligations,
+  getClientReminderLog,
   getClientSettings,
+  getContactConsent,
   getOfficeClient,
   linkClientContact,
   listClientContacts,
@@ -26,20 +28,25 @@ import {
   reactivateOfficeClient,
   resetClientSetting,
   setClientSetting,
+  setContactConsent,
   setReminderRecipient,
   stopClientService,
   suggestClientService,
+  undoReminderLog,
   unlinkClientContact,
   updateContact,
   updateOfficeClient,
   updateTaxCard,
   type ClientContactRow,
   type ClientObligationsPayload,
+  type ClientReminderLogPayload,
   type ClientServicesPayload,
+  type ContactConsentPayload,
   type ContactRow,
   type OfficeClientRow,
   type OfficeMemberRow,
   type OfficeServiceRow,
+  type ReminderLogRow,
   type ReminderRecipientRow,
   type ServicePackageRow,
   type ServiceSuggestion,
@@ -49,6 +56,7 @@ import {
 import {
   AMOUNT_MASK,
   applyPackageSummary,
+  canUndoReminderRow,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientServiceStatusClass,
@@ -58,6 +66,8 @@ import {
   firstOfNextMonth,
   formatOfficeAmount,
   frequencyLabelFrom,
+  reminderLogKindClass,
+  revertedReminderLogIds,
   shortIsoDate,
   showsOfficeAssignment,
   visibleClientSettings,
@@ -67,7 +77,7 @@ import {
   CLIENT_TAB_PARAM,
   type ClientTabKey,
 } from '../../utils/accountingOffice';
-import { formatDateValue, todayIso } from '../../utils/formatDate';
+import { formatDateValue, formatDateTimeValue, todayIso } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
@@ -96,6 +106,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'contacts', label: 'جهات الاتصال' },
   // #278: شبكةُ الأشهر × البنود والقائمةُ السنوية — بعد «جهات الاتصال» كالنموذج.
   { key: 'documents', label: 'الأوراق' },
+  // #280/ب: سجلُّ كل تذكيرٍ أُرسل أو كلّمناه — قراءةٌ وتصحيحٌ، بلا تعديلٍ ولا حذف.
+  { key: 'reminder-log', label: 'سجلّ التذكيرات' },
   { key: 'notes', label: 'ملاحظات' },
 ];
 
@@ -230,6 +242,29 @@ export const OfficeClientFile: React.FC<{
   const [obligationsToken, setObligationsToken] = useState(0);
   const [closingPrior, setClosingPrior] = useState(false);
   const [assigningTask, setAssigningTask] = useState<number | null>(null);
+  // ── سجلّ التذكيرات وموافقة الجهات (#280/ب) ──────────────────────────────
+  const [reminderLog, setReminderLog] = useState<ClientReminderLogPayload | null>(null);
+  const [reminderLogLoading, setReminderLogLoading] = useState(false);
+  const [reminderLogError, setReminderLogError] = useState('');
+  const [reminderLogToken, setReminderLogToken] = useState(0);
+  /** إذنُ كل جهةٍ **فُتح محرّرُها** — يُقرأ عند الفتح أوّلاً، ثم يُحدَّث برسالة الردّ. */
+  const [consents, setConsents] = useState<Record<number, ContactConsentPayload>>({});
+  const [consentEdit, setConsentEdit] = useState<number | null>(null);
+  /** جهةٌ يجري جلبُ إذنها الآن — لتعطيل زرّها وحدها. */
+  const [consentBusy, setConsentBusy] = useState<number | null>(null);
+  const [consentDraft, setConsentDraft] = useState<{ types: string[]; channel: string }>({
+    types: [],
+    channel: '',
+  });
+  /** معرّفاتُ الصفوف التي أبطلها صفُّ `undo` — تُحسب مرّةً لا في كل سطر. */
+  const revertedLogIds = useMemo(
+    () => revertedReminderLogIds(reminderLog?.rows ?? []),
+    [reminderLog],
+  );
+  /** إعادةُ قراءة السجلّ بعد كل تصحيح — الصفُّ لا يُعدَّل، فيُقرأ ما كُتب. */
+  const reloadReminderLog = useCallback(() => {
+    setReminderLogToken((token) => token + 1);
+  }, []);
 
   // `onMissing` تصل دالّةً جديدة مع كل رسمٍ للأب. لو دخلت في تبعيّات `load`
   // لأُعيد التحميل مع كل رسم، فتُمسح تعديلاتُ البطاقة والملاحظات غير المحفوظة.
@@ -660,6 +695,115 @@ export const OfficeClientFile: React.FC<{
     }
   };
 
+  // ── أفعالُ الإذن والسجلّ (#280/ب) ──────────────────────────────────────
+  /**
+   * تطبيقُ ردّ الإذن على **القائمة والذاكرة معاً**: حقلُ الجهة في `links` هو ما
+   * يعرضه السطر، فبلا تحديثه يبقى العرض على حالةٍ قديمةٍ بعد الحفظ أو السحب.
+   * (وليس طلبَ قراءةٍ ثانٍ: الردُّ نفسه يحمل الحقولَ كلَّها.)
+   */
+  const applyConsent = (payload: ContactConsentPayload) => {
+    setConsents((prev) => ({ ...prev, [payload.contact_id]: payload }));
+    setLinks((prev) => prev.map((link) => (
+      link.contact.id === payload.contact_id
+        ? {
+            ...link,
+            contact: {
+              ...link.contact,
+              reminders_consent: payload.reminders_consent,
+              consent_types: payload.consent_types,
+              consent_on: payload.consent_on,
+              consent_channel: payload.consent_channel,
+              consent_channel_label: payload.consent_channel_label,
+              consent_withdrawn_on: payload.consent_withdrawn_on,
+              consent_withdrawn_by: payload.consent_withdrawn_by,
+            },
+          }
+        : link
+    )));
+  };
+
+  /**
+   * فتحُ محرّر الموافقة لجهةٍ **بعينها**: `contacts/<id>/consent/` تُطلب هنا
+   * وحدها لأنها وحدها ترسل اختيارات الأنواع والقناة وتسمياتها، وتُخزَّن بمفتاح
+   * المعرّف فلا تُقرأ مرّةً ثانية. وأنواعُ المسوّدة هي الحالية — **لا افتراضَ
+   * محليّ**، والفراغُ يمنع الحفظ (الخادم يقبله، لكنه «أذن بلا نوعٍ فيُهمَل»).
+   */
+  const openConsent = async (contactId: number) => {
+    if (consentEdit === contactId) {
+      setConsentEdit(null);
+      return;
+    }
+    const cached = consents[contactId];
+    if (cached) {
+      setConsentDraft({ types: [...cached.consent_types], channel: cached.consent_channel });
+      setConsentEdit(contactId);
+      return;
+    }
+    setConsentBusy(contactId);
+    try {
+      const payload = await getContactConsent(contactId);
+      setConsents((prev) => ({ ...prev, [payload.contact_id]: payload }));
+      setConsentDraft({ types: [...payload.consent_types], channel: payload.consent_channel });
+      setConsentEdit(contactId);
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تحميل إذن الجهة.'), 'error');
+    } finally {
+      setConsentBusy(null);
+    }
+  };
+
+  const saveConsent = async (contactId: number) => {
+    if (consentDraft.types.length === 0) return;
+    try {
+      applyConsent(await setContactConsent(contactId, {
+        consent: true,
+        types: consentDraft.types,
+        channel: consentDraft.channel,
+      }));
+      setConsentEdit(null);
+      toast('سُجّلت الموافقة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تسجيل الموافقة.'), 'error');
+    }
+  };
+
+  /** السحبُ لا يمحو الإذن: يبقى تاريخُه ومَن سحبه في السطر نفسه. */
+  const withdrawConsent = async (contactId: number) => {
+    const ok = await confirm({
+      title: 'سحب الموافقة',
+      message:
+        'ما بينبعت له تذكيرٌ بعد اليوم، ويبقى تاريخُ إذنه ومَن سحبه مسجَّلين. تقدر تسجّل موافقةً جديدة في أيّ وقت.',
+      confirmText: 'اسحب الموافقة',
+      danger: true,
+    });
+    if (!ok) return;
+    try {
+      applyConsent(await setContactConsent(contactId, { consent: false }));
+      toast('سُحبت الموافقة', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر سحب الموافقة.'), 'error');
+    }
+  };
+
+  /** «ما انبعتت» على صفٍّ في السجلّ — صفُّ `undo` جديدٌ والأصلُ يبقى. */
+  const undoLogRow = async (row: ReminderLogRow) => {
+    const ok = await confirm({
+      title: 'ما انبعتت؟',
+      message:
+        `يُسجَّل صفٌّ جديدٌ بأن تذكير «${row.recipient_name || 'بلا اسم'}» ما انبعتت، فيخرج من العدّاد ولا يُحسب من الحدّ. الأصلُ يبقى في السجلّ.`,
+      confirmText: 'نعم، ما انبعتت',
+      cancelText: 'لا',
+    });
+    if (!ok) return;
+    try {
+      await undoReminderLog(row.id);
+      reloadReminderLog();
+      toast('سُجّل «ما انبعتت»', 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر تسجيل «ما انبعتت».'), 'error');
+    }
+  };
+
   // ── الخدمات والباقات (#273) ────────────────────────────────────────────
   //
   // التبويبُ يجلب حالته عند فتحه: الكتالوج والباقات لا لازمة لهما في البطاقة
@@ -721,6 +865,34 @@ export const OfficeClientFile: React.FC<{
       cancelled = true;
     };
   }, [tab, refreshClientServices, toast]);
+
+  /**
+   * سجلُّ التذكيرات (#280/ب): يُطلب عند فتح تبويبه وحده كأخيه «الالتزامات».
+   * الأحدثُ أوّلاً من الخادم، وكلُّ صفٍّ **لا يُعدَّل ولا يُحذف** — التصحيحُ صفٌّ
+   * جديدٌ يشير إلى ما يُبطله، فيُعاد قراءةُ السجلّ بعد كلِّ تصحيح.
+   */
+  useEffect(() => {
+    if (tab !== 'reminder-log') return;
+    let cancelled = false;
+    setReminderLogLoading(true);
+    setReminderLogError('');
+    getClientReminderLog(clientId)
+      .then((payload) => {
+        if (!cancelled) setReminderLog(payload);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          setReminderLog(null);
+          setReminderLogError(humanizeThrown(failure, 'تعذّر تحميل سجلّ التذكيرات.'));
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReminderLogLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tab, clientId, reminderLogToken]);
 
   // #276: وصلنا من تنبيهٍ يحمل شغلةً بعينها ⇒ يُمرَّر إليها بعد وصول التزاماتها —
   // **مرّةً لكل هدف**: `obligations` يُستبدل بعد كل فعلٍ على أي شغلة، ولولا السجلّ
@@ -865,6 +1037,158 @@ export const OfficeClientFile: React.FC<{
     } catch (failure) {
       toast(humanizeThrown(failure, 'تعذّر تطبيق الباقة.'), 'error');
     }
+  };
+
+  /**
+   * سطرُ إذن التذكير لجهةٍ واحدة (#280/ب): الحالةُ والأنواعُ وتاريخُها وطريقُها
+   * **من حقول الجهة في القائمة نفسها** (`ContactRow` مع `links`) — بلا طلبِ
+   * شبكةٍ لكل جهة. وتسمياتُ الأنواع من مستلِمي التذكير المحمَّلين (نصُّ الخادم)،
+   * والقيمةُ الخام احتياطاً، فلا جدولَ تسمياتٍ محليّاً.
+   *
+   * و`contacts/<id>/consent/` تُطلب عند **فتح المحرّر لجهةٍ بعينها** وحدها لأنها
+   * وحدها ترسل اختيارات الأنواع والقناة، فالمحرّرُ لا يُرسم بلا وصولها.
+   * والقراءةُ لكل عضو (من يرسل يقرأ ما سيرسل)، والكتابةُ بمفتاح الكتابة وحده.
+   */
+  const renderConsent = (contact: ContactRow) => {
+    const consent = consents[contact.id];
+    const opening = consentBusy === contact.id;
+    const withdrawn = !contact.reminders_consent && contact.consent_withdrawn_on !== null;
+    const typeLabels = contact.consent_types.map((value) => (
+      recipients.find((row) => row.reminder_type === value)?.label ?? value
+    ));
+    return (
+      <div className="mt-1.5 rounded-lg border border-slate-100 bg-slate-50 px-2 py-1.5 dark:border-slate-800 dark:bg-slate-800/40">
+        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px]">
+          <span
+            className={
+              contact.reminders_consent
+                ? 'rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 font-semibold text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300'
+                : 'rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 font-semibold text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+            }
+          >
+            {contact.reminders_consent
+              ? 'موافق يستلم تذكيرات'
+              : 'ما وافق يستلم تذكيرات'}
+          </span>
+          {typeLabels.length > 0 ? (
+            <span className="text-slate-600 dark:text-slate-300">
+              {typeLabels.join(' · ')}
+            </span>
+          ) : null}
+          {contact.consent_on ? (
+            <span className="text-slate-500 dark:text-slate-400">
+              من {formatDateValue(contact.consent_on)}
+            </span>
+          ) : null}
+          {contact.consent_channel_label ? (
+            <span className="text-slate-500 dark:text-slate-400">
+              — {contact.consent_channel_label}
+            </span>
+          ) : null}
+          {withdrawn ? (
+            <span className="text-rose-600 dark:text-rose-400">
+              سُحبت {formatDateValue(contact.consent_withdrawn_on)}
+              {contact.consent_withdrawn_by ? ` — ${contact.consent_withdrawn_by.name}` : ''}
+            </span>
+          ) : null}
+          {canWrite ? (
+            <span className="ms-auto flex items-center gap-2">
+              <button
+                type="button"
+                disabled={opening}
+                onClick={() => openConsent(contact.id)}
+                aria-expanded={consentEdit === contact.id}
+                className="font-medium text-teal-700 hover:underline disabled:opacity-50 dark:text-teal-400"
+              >
+                {opening ? 'جاري الفتح…' : 'سجّل الموافقة'}
+              </button>
+              {contact.reminders_consent ? (
+                <button
+                  type="button"
+                  onClick={() => withdrawConsent(contact.id)}
+                  className="font-medium text-rose-600 hover:underline dark:text-rose-400"
+                >
+                  سحب الموافقة
+                </button>
+              ) : null}
+            </span>
+          ) : null}
+        </div>
+
+        {canWrite && consent && consentEdit === contact.id ? (
+          <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+            <fieldset>
+              <legend className="text-[10.5px] font-semibold text-slate-600 dark:text-slate-300">
+                أنواع التذكير
+              </legend>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                {consent.type_choices.map((choice) => {
+                  const checked = consentDraft.types.includes(choice.value);
+                  return (
+                    <label
+                      key={choice.value}
+                      className="flex items-center gap-1 text-[10.5px] text-slate-600 dark:text-slate-300"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setConsentDraft((prev) => ({
+                          ...prev,
+                          types: checked
+                            ? prev.types.filter((value) => value !== choice.value)
+                            : [...prev.types, choice.value],
+                        }))}
+                        className="size-3.5 rounded border-slate-300"
+                      />
+                      {choice.label}
+                    </label>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <div className="mt-2 flex flex-wrap items-end gap-2">
+              <label className="text-[10.5px] font-semibold text-slate-600 dark:text-slate-300">
+                طريقة الإذن
+                <select
+                  value={consentDraft.channel}
+                  onChange={(event) =>
+                    setConsentDraft((prev) => ({ ...prev, channel: event.target.value }))
+                  }
+                  className={`${officeInputClass} mt-1 block h-8`}
+                >
+                  <option value="">— بلا تحديد —</option>
+                  {consent.channel_choices.map((choice) => (
+                    <option key={choice.value} value={choice.value}>
+                      {choice.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={consentDraft.types.length === 0}
+                onClick={() => saveConsent(contact.id)}
+                className={officePrimaryButtonClass}
+              >
+                احفظ الموافقة
+              </button>
+              <button
+                type="button"
+                onClick={() => setConsentEdit(null)}
+                className={officeSecondaryButtonClass}
+              >
+                إلغاء
+              </button>
+            </div>
+            {consentDraft.types.length === 0 ? (
+              <p className="mt-1 text-[10px] font-medium text-amber-700 dark:text-amber-400">
+                اختر نوعاً واحداً على الأقل — إذنٌ بلا نوعٍ لا يُرسَل له شيء.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
+    );
   };
 
   if (loading && !client) return <OfficeSkeleton />;
@@ -1709,6 +2033,8 @@ export const OfficeClientFile: React.FC<{
                         ) : null}
                       </div>
                     )}
+                    {/* #280/ب: موافقةُ التذكير على الجهة — تحت بياناتها مباشرةً. */}
+                    {renderConsent(link.contact)}
                   </li>
                 ))}
               </ul>
@@ -1864,6 +2190,102 @@ export const OfficeClientFile: React.FC<{
           canWrite={canWrite}
           taxSystem={client.tax_system}
         />
+      ) : null}
+
+      {tab === 'reminder-log' ? (
+        <div className="space-y-4">
+          {reminderLogError ? (
+            <OfficeError message={reminderLogError} onRetry={reloadReminderLog} />
+          ) : reminderLogLoading ? (
+            <OfficeSkeleton rows={4} />
+          ) : !reminderLog || reminderLog.rows.length === 0 ? (
+            <OfficeEmpty
+              title="ما في تذكيرات مسجّلة لهذا الزبون."
+              hint="كلُّ إرسالٍ أو مكالمةٍ تُسجَّل هنا — ولا تُمحى: التصحيحُ صفٌّ جديد."
+            />
+          ) : (
+            <OfficeCard title="سجلّ التذكيرات">
+              <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                الأحدثُ أوّلاً. السجلُّ لا يُمحى: «ما انبعتت» يكتب صفاً جديداً ويُخرج
+                الأصلَ من العدّ.
+              </p>
+              <ul className="mt-2 divide-y divide-slate-100 dark:divide-slate-800">
+                {reminderLog.rows.map((row) => {
+                  const reverted = revertedLogIds.has(row.id);
+                  return (
+                    <li key={row.id} className="py-2.5">
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                        <span className="text-[10.5px] tabular-nums text-slate-500 dark:text-slate-400">
+                          {formatDateTimeValue(row.created_at)}
+                        </span>
+                        <span
+                          className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${reminderLogKindClass(row.kind)}`}
+                        >
+                          {row.kind_label}
+                        </span>
+                        {reverted ? (
+                          <span className="rounded-full border border-slate-200 bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-500 line-through dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400">
+                            أُلغي
+                          </span>
+                        ) : null}
+                        <span className="text-[12px] font-semibold text-slate-800 dark:text-slate-100">
+                          {row.reminder_type_label}
+                        </span>
+                        {row.channel_label ? (
+                          <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            {row.channel_label}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        <span>
+                          {row.recipient_name || '— بلا مستلِم —'}
+                          {row.recipient_phone ? ` · ${row.recipient_phone}` : ''}
+                        </span>
+                        {row.period_label ? <span>{row.period_label}</span> : null}
+                        {/* #280/ب: «وما يخصّه» — لقطةُ أسماء بنود الأوراق وقت
+                            الإرسال كما حفظها الخادم. صفّا «شيل» و«ما انبعتت»
+                            بلا نصّ، فهما المرجعُ الوحيد لبنود الزبون حينها. */}
+                        {row.subject.document_item_names?.length ? (
+                          <span>{row.subject.document_item_names.join('، ')}</span>
+                        ) : null}
+                        {row.created_by ? <span>{row.created_by.name}</span> : null}
+                      </div>
+
+                      {row.reason ? (
+                        <p className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">
+                          السبب: {row.reason}
+                        </p>
+                      ) : null}
+
+                      {row.body ? (
+                        <details className="mt-1">
+                          <summary className="cursor-pointer text-[10.5px] text-slate-500 dark:text-slate-400">
+                            النصّ كما أُرسل
+                          </summary>
+                          <p className="mt-1 whitespace-pre-line rounded-lg border border-slate-100 bg-slate-50 p-2 text-[11.5px] leading-6 text-slate-700 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-200">
+                            {row.body}
+                          </p>
+                        </details>
+                      ) : null}
+
+                      {canWrite && canUndoReminderRow(row, revertedLogIds) ? (
+                        <button
+                          type="button"
+                          onClick={() => undoLogRow(row)}
+                          className="mt-1 text-[10.5px] font-medium text-rose-600 hover:underline dark:text-rose-400"
+                        >
+                          ما انبعتت
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            </OfficeCard>
+          )}
+        </div>
       ) : null}
 
       {tab === 'notes' ? (

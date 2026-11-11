@@ -72,6 +72,8 @@ class ShellManifestFunctionTest(SimpleTestCase):
             {group["id"]: group["views"] for group in manifest["groups"]},
             {
                 "today": ["office-today"],
+                # #280/ب: «جاهز للإرسال» مجموعةٌ ثانيةٌ بعد «اليوم» مباشرةً.
+                "ready-to-send": ["office-ready-to-send"],
                 "clients": ["office-clients"],
                 # #274: التقويم شاشةٌ مستقلّة، فمجموعتُه مستقلّة كإعدادات المكتب.
                 "calendar": ["office-calendar"],

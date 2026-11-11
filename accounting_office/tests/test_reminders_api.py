@@ -15,6 +15,7 @@ from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -171,6 +172,92 @@ class ConsentApiTest(RemindersApiTestCase):
             withdrawn.data["consent_withdrawn_by"]["id"], self.manager.pk,
         )
 
+    def withdraw(self, contact):
+        res = self.client.post(
+            f"{CONTACTS}{contact.pk}/consent/", {"consent": False},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_who_withdrew_is_an_object_with_a_name_on_the_client_contacts_list(self):
+        # الواجهةُ تقرأ `consent_withdrawn_by.name` بعد كل `refreshLinks` — فحقلُ FK
+        # تلقائيّ يخرج رقماً و«سُحبت … — undefined». الشكلُ نفسُه شكلُ
+        # `contact_consent_payload`: `{id, name}` بالاسم الكامل وإلا اسمُ المستخدم.
+        self.manager.first_name, self.manager.last_name = "منى", "الحسن"
+        self.manager.save()
+        client = self.make_client()
+        withdrawn = self.make_contact("أبو سحب")
+        kept = self.make_contact("أم بقاء", phone="0599000111")
+        self.attach_primary(client, withdrawn)
+        self.attach_primary(client, kept)
+        self.withdraw(withdrawn)
+
+        res = self.client.get(f"{CLIENTS}{client.pk}/contacts/", **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        by_name = {row["contact"]["name"]: row["contact"] for row in res.data}
+        self.assertEqual(
+            by_name["أبو سحب"]["consent_withdrawn_by"],
+            {"id": self.manager.pk, "name": "منى الحسن"},
+        )
+        self.assertIsNone(by_name["أم بقاء"]["consent_withdrawn_by"])
+
+    def test_who_withdrew_has_the_same_shape_on_the_contact_endpoints(self):
+        contact = self.make_contact()
+        self.withdraw(contact)
+        expected = {"id": self.manager.pk, "name": "rem_api_mgr"}
+
+        detail = self.client.get(f"{CONTACTS}{contact.pk}/", **self.headers())
+        listing = self.client.get(CONTACTS, **self.headers())
+
+        self.assertEqual(detail.data["consent_withdrawn_by"], expected)
+        self.assertEqual(
+            [row["consent_withdrawn_by"] for row in listing.data], [expected],
+        )
+
+    def test_promoting_a_contact_returns_who_withdrew_as_an_object(self):
+        client = self.make_client()
+        contact = self.make_contact()
+        self.attach_primary(client, contact)
+        self.withdraw(contact)
+
+        res = self.client.post(
+            f"{CLIENTS}{client.pk}/contacts/{contact.pk}/primary/",
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            res.data["contact"]["consent_withdrawn_by"],
+            {"id": self.manager.pk, "name": "rem_api_mgr"},
+        )
+
+    def test_the_withdrawer_costs_no_query_per_contact(self):
+        # `select_related` على الجهات الثلاثة: عدّادُ الاستعلامات لا يتبع عددَ
+        # الجهات التي سُحب إذنُها.
+        client = self.make_client()
+
+        def queries_for_list():
+            with CaptureQueriesContext(connection) as captured:
+                res = self.client.get(
+                    f"{CLIENTS}{client.pk}/contacts/", **self.headers(),
+                )
+            self.assertEqual(res.status_code, 200, res.content)
+            return len(captured), len(res.data)
+
+        first = self.make_contact("جهة ١", phone="0599000001")
+        self.attach_primary(client, first)
+        self.withdraw(first)
+        one_query_count, one_row = queries_for_list()
+        for index in (2, 3, 4):
+            extra = self.make_contact(f"جهة {index}", phone=f"059900000{index}")
+            self.attach_primary(client, extra)
+            self.withdraw(extra)
+        many_query_count, many_rows = queries_for_list()
+
+        self.assertEqual((one_row, many_rows), (1, 4))
+        self.assertEqual(many_query_count, one_query_count)
+
     def test_an_unknown_type_or_channel_is_a_400(self):
         contact = self.make_contact()
         for payload in (
@@ -306,6 +393,25 @@ class ReadyToSendApiTest(RemindersApiTestCase):
                 self.assertEqual(
                     [row["id"] for row in res.data["rows"]], [stored.pk], res.data,
                 )
+
+    def test_a_sent_call_without_a_body_is_a_400_and_writes_nothing(self):
+        client, contact = self.ready_pair()
+        for body in ("", "   "):
+            with self.subTest(body=body):
+                res = self.client.post(
+                    f"{READY}sent/",
+                    {"contact_id": contact.pk, "body": body, "items": [self.item(client)]},
+                    format="json", **self.headers(),
+                )
+                self.assertEqual(res.status_code, 400, res.content)
+                self.assertIn("body", res.data)
+        missing = self.client.post(
+            f"{READY}sent/",
+            {"contact_id": contact.pk, "items": [self.item(client)]},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(missing.status_code, 400, missing.content)
+        self.assertFalse(ReminderLog.objects.exists())
 
     def test_a_sent_message_takes_whatsapp_only(self):
         client, contact = self.ready_pair()

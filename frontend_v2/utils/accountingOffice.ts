@@ -31,6 +31,9 @@ export const SETTINGS_GROUP_PARAM = 'group';
 /** مجموعة «الضريبة ولائحة المواعيد» — وجهةُ تنبيهَي اللائحة. */
 export const SETTINGS_GROUP_SCHEDULE = 'schedule';
 
+/** مجموعة «التذكيرات والنصوص» (#280/ب) — موضعُ النصوص وقائمةِ العطل. */
+export const SETTINGS_GROUP_REMINDERS = 'reminders';
+
 /** مجموعاتُ شاشة الإعدادات المعروفة — `?group=` خارجها يُتجاهَل. */
 export const OFFICE_SETTING_GROUPS = ['office', 'schedule', 'alerts', 'reminders'] as const;
 
@@ -151,7 +154,8 @@ export const TASK_QUERY_PARAM = 'task';
 
 /** تبويباتُ ملفّ الزبون المعروفة — `?tab=` خارجها يُتجاهَل فلا تبيضّ الشاشة. */
 export const CLIENT_TAB_KEYS = [
-  'tax-card', 'obligations', 'services', 'contacts', 'documents', 'notes',
+  'tax-card', 'obligations', 'services', 'contacts', 'documents',
+  'reminder-log', 'notes',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
 
@@ -1516,4 +1520,193 @@ export function officeWhatsappLink(
   const number = officeWhatsappNumber(phone, taxSystem);
   if (!number) return null;
   return `https://wa.me/${number}?text=${encodeURIComponent(text)}`;
+}
+
+
+// ── «جاهز للإرسال» وسجلّ التذكيرات (#280/ب) ─────────────────────────────────
+//
+// **ولا تسميةَ نوعٍ ولا تسميةَ صفٍّ هنا**: `reminder_type_label` و`kind_label`
+// و`channel_label` تصل نصوصاً من الخادم، فلا نسخةً محليّةً تنافسها. والباقي
+// حسابُ عرضٍ حقيقيّ: رقائقُ الأنواع من رسائل اليوم وحدها، والرسالةُ تُرشَّح
+// **كاملةً** لأنها وحدةُ الإرسال، و«أُلغي» يُشتقّ من `reverts_id` لا من علمٍ
+// ثانٍ يحتمل أن يفترق عنه.
+
+/** مسار شاشة «جاهز للإرسال» — مصدرٌ واحدٌ للموجّه والقائمة. */
+export const OFFICE_READY_TO_SEND_PATH = '/accounting-office/ready-to-send';
+
+/**
+ * مفاتيحُ إعداداتٍ **مقفلةٌ مطفأةً** في المرحلة الأولى (‏`LOCKED_SETTING_MESSAGES`
+ * خادمياً): الخادمُ يردّ 400 على أيّ قيمةٍ أخرى، والشاشةُ تُقفل ضابطها كي لا
+ * يجرّب الموظفُ حفظاً مصيرُه الرفض. القفلُ **عرضٌ لا إنفاذ** — الحكمُ للخادم.
+ */
+export const OFFICE_LOCKED_SETTING_KEYS: readonly string[] = ['reminder_auto_send'];
+
+/** هل هذا الإعدادُ مقفلٌ مطفأً؟ (‏`reminder_auto_send` وحده اليوم.) */
+export function isLockedOfficeSetting(key: string): boolean {
+  return OFFICE_LOCKED_SETTING_KEYS.includes(key);
+}
+
+/** قيمةُ رقاقة «الكل» — فارغةٌ كما في فلتر «اليوم»، فيبقى العنوانُ نظيفاً. */
+export const READY_TO_SEND_TYPE_ALL = '';
+
+/** أقلُّ ما تحتاجه رقاقةُ النوع من الرسالة — ويُلبّيه حمولُ الخادم كما هو. */
+interface ReadyToSendTypeSource {
+  items: readonly { reminder_type: string; reminder_type_label: string }[];
+}
+
+/**
+ * رقائقُ أنواع اليوم: **«الكل» أوّلاً، ثم ما له رسائلُ فعلاً** بتسمية الخادم،
+ * وعدُّ كل رقاقةٍ عددُ الرسائل التي تحمل بنداً من نوعها (لا عددُ البنود: الكبسةُ
+ * تُرشِّح رسائل). يومٌ بلا رسائلَ لا رقاقةَ فيه — ولا «الكل» وحدها.
+ */
+export function readyToSendTypeChips(
+  messages: readonly ReadyToSendTypeSource[],
+): { value: string; label: string; count: number }[] {
+  if (!messages.length) return [];
+  const labels = new Map<string, string>();
+  messages.forEach((message) => {
+    message.items.forEach((item) => {
+      if (!labels.has(item.reminder_type)) {
+        labels.set(item.reminder_type, item.reminder_type_label);
+      }
+    });
+  });
+  return [
+    { value: READY_TO_SEND_TYPE_ALL, label: 'الكل', count: messages.length },
+    ...[...labels].map(([value, label]) => ({
+      value,
+      label,
+      count: filterReadyToSendMessages(messages, value).length,
+    })),
+  ];
+}
+
+/**
+ * رسائلُ نوعٍ مختار — **الرسالةُ كاملةً** إذا حملت بنداً من نوعه: النصُّ المرسَل
+ * نصُّ الرسالة كلِّها، فقصُّ بنودها يعرض نصّاً غيرَ الذي سيخرج. والفراغُ «الكل».
+ */
+export function filterReadyToSendMessages<T extends ReadyToSendTypeSource>(
+  messages: readonly T[],
+  reminderType: string,
+): T[] {
+  if (!reminderType) return [...messages];
+  return messages.filter((message) =>
+    message.items.some((item) => item.reminder_type === reminderType),
+  );
+}
+
+/** أقلُّ ما يحتاجه مفتاحُ الرسالة وبندُ فعلها — نفسُ حمول الخادم بلا زيادة. */
+interface ReadyToSendKeySource {
+  recipient: { contact_id: number };
+  items: readonly {
+    client_id: number;
+    reminder_type: string;
+    period_start: string;
+    period_end: string;
+  }[];
+}
+
+/**
+ * مفتاحُ مسوّدةِ النصّ لكل رسالة — **مشتقٌّ من محتواها** لا من فهرسها: بعد كل
+ * فعلٍ تُقرأ القائمةُ من جديد، ففهرسٌ متحرّكٌ كان ينسخ مسوّدةَ رسالةٍ إلى أخرى.
+ * والبنودُ مرتَّبةٌ قبل البناء فلا يتغيّر المفتاحُ بتبديل ترتيبها.
+ */
+export function readyToSendMessageKey(message: ReadyToSendKeySource): string {
+  const parts = message.items
+    .map((item) => (
+      `${item.client_id}:${item.reminder_type}:${item.period_start}:${item.period_end}`
+    ))
+    .sort();
+  return `${message.recipient.contact_id}|${parts.join('؛')}`;
+}
+
+/**
+ * بندُ الفعل: **المفتاحُ الحقيقيُّ للتذكير** — الزبون والنوع وطرفا الفترة.
+ * لا تسميةَ ولا نصَّ فيه، والخادمُ يعيد حلَّ كلٍّ منها على زبائن العضو.
+ */
+export function readyToSendItemKeys(message: ReadyToSendKeySource): {
+  client_id: number;
+  reminder_type: string;
+  period_start: string;
+  period_end: string;
+}[] {
+  return message.items.map((item) => ({
+    client_id: item.client_id,
+    reminder_type: item.reminder_type,
+    period_start: item.period_start,
+    period_end: item.period_end,
+  }));
+}
+
+/**
+ * أنواعُ الصفوف القابلة للإبطال — `sent` و`manual` (`REMINDER_COUNTED_KINDS`
+ * خادمياً). مفتاحان لا تسميتان، والخادمُ يرفض ما عداهما 400 على أيّ حال.
+ */
+const REMINDER_UNDOABLE_KINDS: readonly string[] = ['sent', 'manual'];
+
+/** معرّفاتُ الصفوف التي أبطلها صفُّ `undo` لاحق — «أُلغي» في السجلّ. */
+export function revertedReminderLogIds(
+  rows: readonly { id: number; reverts_id: number | null }[],
+): Set<number> {
+  const reverted = new Set<number>();
+  rows.forEach((row) => {
+    if (row.reverts_id !== null && row.reverts_id !== undefined) {
+      reverted.add(row.reverts_id);
+    }
+  });
+  return reverted;
+}
+
+/**
+ * هل يُعرض «ما انبعتت» على هذا الصف؟ إرسالٌ أو مكالمةٌ **لم يُبطَل أحدُهما**
+ * (والـ`undo` لا يُبطَل، فلا حلقةَ في السجلّ).
+ */
+export function canUndoReminderRow(
+  row: { id: number; kind: string },
+  revertedIds: ReadonlySet<number>,
+): boolean {
+  return REMINDER_UNDOABLE_KINDS.includes(row.kind) && !revertedIds.has(row.id);
+}
+
+/** أصنافُ شارة نوع الصفّ — اللونُ عرضٌ، والنصُّ من `kind_label` كما وصل. */
+export function reminderLogKindClass(kind: string): string {
+  if (kind === 'sent') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (kind === 'manual') {
+    return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300';
+  }
+  if (kind === 'dismissed') {
+    return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200';
+  }
+  return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+}
+
+/**
+ * الغدُ من تاريخ ISO — أدنى تاريخٍ يقبله «أجّل» (الخادم يرفض اليوم 400).
+ * حسابٌ بـUTC كنظائره في هذا الملفّ، والنصُّ الفاسدُ يعيد `''` فلا يُملأ الحقل.
+ */
+export function nextDayIso(iso: string): string {
+  const ms = msFromIso(iso);
+  if (ms === null) return '';
+  return isoFromMs(ms + MS_PER_DAY);
+}
+
+/**
+ * نظامُ الزبون الضريبيّ **المشترك** بين بنود رسالة — أو `null`.
+ *
+ * **`null` تعني «لا نظامَ واحداً لهذه الرسالة»**: بنودُ مستلِمٍ واحدٍ قد تعود
+ * لزبونين بنظامين مختلفين، أو لبندٍ غاب نظامُ زبونه. والنظامُ يُقرأ في
+ * `officeWhatsappLink` **للأرضيّ وحده** (‏`059/056` و`05` والدوليُّ يُصاغون بلا
+ * مفتاح دولة) — فتمريرُ نظامٍ مخترَعٍ لرسالةٍ مختلطةٍ كان يفتح محادثةً بمفتاح
+ * بلدٍ خطأ. والخادمُ يرسل النظامَ في كل بندٍ من زبونه (#280/ب).
+ */
+export function commonTaxSystem(
+  items: readonly { tax_system?: string | null }[],
+): string | null {
+  if (!items.length) return null;
+  const systems = items.map((item) => (item.tax_system ?? '').trim());
+  const first = systems[0];
+  if (!first) return null;
+  return systems.every((system) => system === first) ? first : null;
 }

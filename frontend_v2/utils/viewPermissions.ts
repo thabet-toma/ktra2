@@ -170,6 +170,7 @@ export const VIEW_MODULES: Record<string, string> = {
   // ISSUE #271 — مكتب المحاسبة: نفس عقد employee_ops (404 خادمياً من
   // `require_module`)، وبلا ترخيص لا يُطلب chunk الشاشة.
   "office-today": "accounting_office",
+  "office-ready-to-send": "accounting_office",
   "office-clients": "accounting_office",
   "office-calendar": "accounting_office",
   "office-settings": "accounting_office",

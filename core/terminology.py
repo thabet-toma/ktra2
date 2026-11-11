@@ -49,6 +49,8 @@ def _default_terms() -> dict[str, str]:
     terms["nav.office_calendar"] = "التقويم"
     # #275: مجموعةُ «اليوم» — أوّلُ مجموعات البيان، وشاشتُها الافتتاحية لاحقاً.
     terms["nav.office_today"] = "اليوم"
+    # #280/ب: مجموعةُ «جاهز للإرسال» — الشاشةُ الثانية بعد «اليوم» في البيان.
+    terms["nav.office_ready_to_send"] = "جاهز للإرسال"
     terms["action.add_office_client"] = "أضف زبون"
     terms["empty.office_shell"] = "لا زبائن بعد — أضف أول زبون ليبدأ ملفّه."
     terms["action.document_coding"] = "ترميز مستندات"

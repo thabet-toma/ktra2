@@ -161,6 +161,9 @@ class OfficeClientSerializer(
 class ContactSerializer(serializers.ModelSerializer):
     language_label = serializers.CharField(source="get_language_display", read_only=True)
     consent_channel_label = serializers.SerializerMethodField()
+    # `{id, name}` لا رقمُ المفتاح — الشكلُ نفسُه في `services.contact_consent_payload`
+    # وتقرؤه الواجهةُ (`consent_withdrawn_by.name`). والـviews تُحمِّله بـ`select_related`.
+    consent_withdrawn_by = serializers.SerializerMethodField()
 
     class Meta:
         model = Contact
@@ -175,11 +178,19 @@ class ContactSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = [
             "reminders_consent", "consent_types", "consent_on", "consent_channel",
-            "consent_withdrawn_on", "consent_withdrawn_by", "created_at", "updated_at",
+            "consent_withdrawn_on", "created_at", "updated_at",
         ]
 
     def get_consent_channel_label(self, contact) -> str:
         return CONSENT_CHANNEL_LABELS.get(contact.consent_channel, "")
+
+    def get_consent_withdrawn_by(self, contact):
+        if contact.consent_withdrawn_by_id is None:
+            return None
+        return {
+            "id": contact.consent_withdrawn_by_id,
+            "name": services.user_display_name(contact.consent_withdrawn_by),
+        }
 
 
 class ContactConsentSerializer(serializers.Serializer):

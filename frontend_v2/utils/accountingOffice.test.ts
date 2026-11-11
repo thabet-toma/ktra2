@@ -5,7 +5,9 @@ import {
   alertTargetPath,
   applyPackageSummary,
   badgeLabelOf,
+  canUndoReminderRow,
   clientTabFromSearch,
+  commonTaxSystem,
   directionLabelOf,
   documentCellClass,
   documentCellGlyph,
@@ -19,6 +21,7 @@ import {
   documentStatusChoicesFor,
   documentYearOptions,
   emptyDocumentCell,
+  filterReadyToSendMessages,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientFilePath,
@@ -34,8 +37,10 @@ import {
   frequencyLabelFrom,
   groupDeadlinesByDay,
   isExpectedDeadline,
+  isLockedOfficeSetting,
   missingFirstRunLabels,
   monthGrid,
+  nextDayIso,
   nextMonthKey,
   obligationAmountText,
   obligationBadgeClass,
@@ -52,6 +57,11 @@ import {
   platformOfficialText,
   previousMonthKey,
   readTodayFilter,
+  readyToSendItemKeys,
+  readyToSendMessageKey,
+  readyToSendTypeChips,
+  reminderLogKindClass,
+  revertedReminderLogIds,
   shiftWeek,
   shortIsoDate,
   showsOfficeAssignment,
@@ -956,4 +966,147 @@ test('رابطُ المحادثة يرمّز النصَّ ويعطي null مع �
   assert.equal(officeWhatsappLink('12', 'PS', text), null);
   assert.equal(officeWhatsappLink('abc', 'PS', text), null);
   assert.equal(officeWhatsappLink('', 'IL', text), null);
+});
+
+// ── #280/ب: «جاهز للإرسال» وسجلّ التذكيرات ───────────────────────────────────
+//
+// الرسالةُ وحدةُ العرض: بندٌ لكل (زبون، نوع، فترة)، وشخصٌ واحدٌ يأخذ رسالةً
+// واحدةً فيها بنودُه. والبنودُ هنا مختصرةٌ بالحقول التي تقرؤها الدوالّ وحدها —
+// والباقي (النصُّ والشارة والهاتف) يعرضه المكوّنُ كما وصل من الخادم.
+
+const DOCUMENT_ITEM = {
+  client_id: 3,
+  reminder_type: 'documents',
+  reminder_type_label: 'أوراق ناقصة',
+  period_start: '2026-10-01',
+  period_end: '2026-10-31',
+};
+
+const DEADLINE_ITEM = {
+  client_id: 3,
+  reminder_type: 'deadline',
+  reminder_type_label: 'موعد رسمي قريب',
+  period_start: '2026-11-01',
+  period_end: '2026-11-30',
+};
+
+const MESSAGE_ONE = { recipient: { contact_id: 11 }, items: [DOCUMENT_ITEM] };
+const MESSAGE_TWO = { recipient: { contact_id: 11 }, items: [DEADLINE_ITEM] };
+const MESSAGE_MERGED = {
+  recipient: { contact_id: 11 },
+  items: [DOCUMENT_ITEM, DEADLINE_ITEM],
+};
+
+test('مفاتيحُ الفعل أربعةٌ فقط: الزبون والنوع وطرفا الفترة', () => {
+  const keys = readyToSendItemKeys(MESSAGE_MERGED);
+  assert.deepEqual(keys, [
+    {
+      client_id: 3,
+      reminder_type: 'documents',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+    },
+    {
+      client_id: 3,
+      reminder_type: 'deadline',
+      period_start: '2026-11-01',
+      period_end: '2026-11-30',
+    },
+  ]);
+  // لا تُرسَل تسميةٌ ولا نصُّ بند: الخادم يعرف بندَه من الأربعة وحدها.
+  assert.deepEqual(
+    Object.keys(keys[0]),
+    ['client_id', 'reminder_type', 'period_start', 'period_end'],
+  );
+});
+
+test('رقائقُ النوع: «الكل» أوّلاً ثم ما له رسائلُ اليوم بتسمية الخادم', () => {
+  assert.deepEqual(
+    readyToSendTypeChips([MESSAGE_ONE, MESSAGE_TWO, MESSAGE_MERGED]),
+    [
+      { value: '', label: 'الكل', count: 3 },
+      { value: 'documents', label: 'أوراق ناقصة', count: 2 },
+      { value: 'deadline', label: 'موعد رسمي قريب', count: 2 },
+    ],
+  );
+  // يومٌ بلا رسائلَ لا رقاقةَ فيه — ولا رقاقةَ «الكل» وحدها.
+  assert.deepEqual(readyToSendTypeChips([]), []);
+});
+
+test('ترشيحُ النوع يُبقي الرسالة كاملةً إذا حملت بنداً من نوعه', () => {
+  const messages = [MESSAGE_ONE, MESSAGE_MERGED];
+  assert.equal(filterReadyToSendMessages(messages, '').length, 2);
+  assert.equal(filterReadyToSendMessages(messages, 'deadline').length, 1);
+  // النوعُ المختار يبقى رسالةً واحدةً كاملةً — لا تُقصّ بنودُها الأخرى.
+  assert.equal(filterReadyToSendMessages(messages, 'deadline')[0].items.length, 2);
+  assert.deepEqual(filterReadyToSendMessages(messages, 'appointment'), []);
+});
+
+test('مفتاحُ الرسالة يميّز رسالتَي شخصٍ واحدٍ ولا يتغيّر بترتيب البنود', () => {
+  assert.notEqual(readyToSendMessageKey(MESSAGE_ONE), readyToSendMessageKey(MESSAGE_TWO));
+  assert.equal(
+    readyToSendMessageKey({ recipient: { contact_id: 11 }, items: [DOCUMENT_ITEM, DEADLINE_ITEM] }),
+    readyToSendMessageKey({ recipient: { contact_id: 11 }, items: [DEADLINE_ITEM, DOCUMENT_ITEM] }),
+  );
+});
+
+test('صفوفُ undo تُعلَّم مُبطَلةً بمعرّف ما تُبطله', () => {
+  const rows = [
+    { id: 9, kind: 'undo', reverts_id: 4 },
+    { id: 4, kind: 'sent', reverts_id: null },
+  ];
+  assert.deepEqual([...revertedReminderLogIds(rows)], [4]);
+  assert.deepEqual([...revertedReminderLogIds([])], []);
+});
+
+test('«ما انبعتت» على إرسالٍ أو مكالمةٍ لم يُبطَل أحدُهما', () => {
+  const rows = [
+    { id: 4, kind: 'sent', reverts_id: null },
+    { id: 9, kind: 'undo', reverts_id: 4 },
+  ];
+  const reverted = revertedReminderLogIds(rows);
+  assert.equal(canUndoReminderRow({ id: 4, kind: 'sent' }, reverted), false);
+  assert.equal(canUndoReminderRow({ id: 5, kind: 'sent' }, reverted), true);
+  assert.equal(canUndoReminderRow({ id: 6, kind: 'manual' }, reverted), true);
+  // التنحيةُ وصفُّ التصحيح ليسا إرسالاً فلا يُبطلان.
+  assert.equal(canUndoReminderRow({ id: 7, kind: 'dismissed' }, reverted), false);
+  assert.equal(canUndoReminderRow({ id: 9, kind: 'undo' }, reverted), false);
+});
+test('شارةُ نوع الصفّ: أربعةُ ألوانٍ ونوعٌ مجهولٌ محايد', () => {
+  assert.match(reminderLogKindClass('sent'), /emerald/);
+  assert.match(reminderLogKindClass('manual'), /teal/);
+  assert.match(reminderLogKindClass('dismissed'), /amber/);
+  assert.match(reminderLogKindClass('undo'), /slate/);
+  assert.match(reminderLogKindClass('anything_else'), /slate/);
+});
+
+test('الغدُ من تاريخ ISO بلا كائن Date — ويعبر الشهر والسنة', () => {
+  assert.equal(nextDayIso('2026-11-05'), '2026-11-06');
+  assert.equal(nextDayIso('2026-11-30'), '2026-12-01');
+  assert.equal(nextDayIso('2026-12-31'), '2027-01-01');
+  assert.equal(nextDayIso('2028-02-28'), '2028-02-29');
+  // الفاسدُ لا يصير تاريخاً مخترعاً: أدنى تاريخٍ للتأجيل يبقى فارغاً فيُرفض الحفظ.
+  assert.equal(nextDayIso(''), '');
+  assert.equal(nextDayIso('غير تاريخ'), '');
+});
+
+test('الإرسالُ التلقائي مقفلٌ للعرض — والخادم يردّ 400 على فتحه', () => {
+  assert.equal(isLockedOfficeSetting('reminder_auto_send'), true);
+  assert.equal(isLockedOfficeSetting('reminder_merge_daily'), false);
+  assert.equal(isLockedOfficeSetting('documents_reminder_max'), false);
+});
+test('نظامُ الرسالة المشترك: يُعاد حين تتفق بنودها، وnull حين تختلف أو تغيب', () => {
+  assert.equal(commonTaxSystem([{ tax_system: 'PS' }, { tax_system: 'PS' }]), 'PS');
+  assert.equal(commonTaxSystem([{ tax_system: ' PS ' }]), 'PS');
+  // رسالةُ مستلِمٍ لزبونين بنظامين مختلفين: لا نظامَ واحدٌ لها.
+  assert.equal(commonTaxSystem([{ tax_system: 'PS' }, { tax_system: 'IL' }]), null);
+  // بندٌ غاب نظامُ زبونه (أو لم يصل بعد) يُسقط النظامَ كلَّه — لا تخمين.
+  assert.equal(commonTaxSystem([{ tax_system: 'PS' }, { tax_system: null }]), null);
+  assert.equal(commonTaxSystem([{ tax_system: 'PS' }, {}]), null);
+  assert.equal(commonTaxSystem([{ tax_system: '' }]), null);
+  assert.equal(commonTaxSystem([]), null);
+});
+
+test('تبويبُ سجلّ التذكيرات يُقرأ من العنوان كأخواته', () => {
+  assert.equal(clientTabFromSearch('?client=7&tab=reminder-log'), 'reminder-log');
 });

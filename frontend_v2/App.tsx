@@ -58,7 +58,8 @@ import { clientLogger } from "./services/logger";
 import { useToast } from "./contexts/ToastContext";
 import { humanizeThrown } from "./utils/drfError";
 // ISSUE #271 — مسارا شاشتَي المكتب: مصدرٌ واحدٌ يقرؤه الجدولُ والشاشاتُ معاً.
-import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
+// #280/ب — «جاهز للإرسال» مسارُه الرابع، من الملفّ نفسه.
+import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_READY_TO_SEND_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -134,6 +135,8 @@ const OfficeClientsScreen = lazyPage(() => import("./components/accounting-offic
 const OfficeCalendarScreen = lazyPage(() => import("./components/accounting-office/OfficeCalendarScreen").then((m) => ({ default: m.OfficeCalendarScreen })));
 // ISSUE #275 — «اليوم»: ما حان وقتُه من التزاماتٍ وشغلات (تُشغّل التحديث اليوميّ أوّلاً).
 const OfficeTodayScreen = lazyPage(() => import("./components/accounting-office/OfficeTodayScreen").then((m) => ({ default: m.OfficeTodayScreen })));
+// ISSUE #280/ب — «جاهز للإرسال»: رسالةٌ لكل شخصٍ بلغته، وأفعالُها الأربعة.
+const OfficeReadyToSendScreen = lazyPage(() => import("./components/accounting-office/OfficeReadyToSendScreen").then((m) => ({ default: m.OfficeReadyToSendScreen })));
 const OfficeSettingsScreen = lazyPage(() => import("./components/accounting-office/OfficeSettingsScreen").then((m) => ({ default: m.OfficeSettingsScreen })));
 // الترخيصُ يُمنَح من إدارة المنصّة لا من داخل الشركة — نصٌّ واحدٌ لحالتَي الشاشة.
 const OFFICE_MODULE_UNLICENSED = "وحدة مكتب المحاسبة غير مفعّلة لهذه الشركة — تُفعَّل من إدارة المنصّة.";
@@ -368,6 +371,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   // و`utils/officeShell.ts` يقرؤها علماً لقشرة المنصّة. مسارٌ مستقلّ يمنع التقاطع.
   // والمساران كلاهما يُقرآن من `utils/accountingOffice.ts` — نسخةٌ ثانية هنا تفترق عنهما.
   "office-today": OFFICE_TODAY_PATH,
+  // #280/ب: «جاهز للإرسال» — شاشةُ العمل الثانية بعد «اليوم».
+  "office-ready-to-send": OFFICE_READY_TO_SEND_PATH,
   "office-clients": OFFICE_CLIENTS_PATH,
   "office-calendar": OFFICE_CALENDAR_PATH,
   "office-settings": OFFICE_SETTINGS_PATH,
@@ -2381,6 +2386,14 @@ const App: React.FC = () => {
         return (
           <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
             <OfficeTodayScreen />
+          </ModuleLicenseGuard>
+        );
+
+      // #280/ب — «جاهز للإرسال»: القائمةُ المحسوبةُ عند القراءة وأفعالُها الأربعة.
+      case "office-ready-to-send":
+        return (
+          <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
+            <OfficeReadyToSendScreen />
           </ModuleLicenseGuard>
         );
 
