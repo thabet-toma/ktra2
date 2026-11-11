@@ -12,6 +12,7 @@ from rest_framework import serializers
 
 from accounting_office import services
 from accounting_office.models import (
+    BOOK_ACCOUNT_TYPE_CHOICES,
     BOOK_ENTRY_KIND_CHOICES,
     BOOK_KIND_CHOICES,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
@@ -617,14 +618,20 @@ class ClientBookKindWriteSerializer(serializers.Serializer):
 
 
 class BookAccountWriteSerializer(serializers.Serializer):
-    """حسابٌ يضيفه المكتب لشجرة زبون — `is_system` يبقى `False` لكل ما يُضاف."""
+    """حسابٌ يضيفه المكتب لشجرة زبون — `is_system` يبقى `False` لكل ما يُضاف.
+
+    و`account_type` اختيارٌ هنا لا نصٌّ حرّ: نوعٌ مخترَع يُردّ 400 بالشكل قبل أن
+    يصل الخدمة، والقائمةُ من النماذج لا نسخةً ثانية.
+    """
 
     code = serializers.CharField(max_length=20)
     name = serializers.CharField(max_length=200)
     parent_code = serializers.CharField(
         required=False, allow_blank=True, default="", max_length=20,
     )
-    account_type = serializers.CharField(max_length=12)
+    account_type = serializers.ChoiceField(
+        choices=[value for value, _label in BOOK_ACCOUNT_TYPE_CHOICES],
+    )
 
 
 class BookEntryLineWriteSerializer(serializers.Serializer):
@@ -643,7 +650,11 @@ class BookEntryLineWriteSerializer(serializers.Serializer):
 
 
 class BookEntryWriteSerializer(serializers.Serializer):
-    """حركةُ دفترٍ جديدة: تاريخُها ونوعُها وبنودُها، وورقةٌ واردة تُربط بها."""
+    """حركةُ دفترٍ جديدة: تاريخُها ونوعُها وبنودُها، **وأوراقُها الواردة**.
+
+    `documents` قائمةُ أوراقٍ لا ورقةً واحدة: طريقةُ «إدخال الشهر» تُدخل أوراقَ
+    الشهر في حركةٍ واحدة، والربطُ يُقرأ لينتقل العكسُ بها إلى «للإدخال».
+    """
 
     entry_date = serializers.DateField()
     kind = serializers.ChoiceField(
@@ -652,7 +663,12 @@ class BookEntryWriteSerializer(serializers.Serializer):
     memo = serializers.CharField(
         required=False, allow_blank=True, default="", max_length=300,
     )
-    document_row = serializers.IntegerField(required=False, allow_null=True)
+    # الحدُّ يحرس `IN (…)` المقفول في الخدمة لا الاستعمال: أوراقُ شهرِ زبونٍ واحد
+    # عشراتٌ لا مئات، وطلبٌ بآلاف المعرّفات يُرفض هنا 400 قبل أن يقفل صفّاً.
+    documents = serializers.ListField(
+        child=serializers.IntegerField(), required=False, default=list,
+        max_length=100,
+    )
     lines = BookEntryLineWriteSerializer(many=True)
 
 

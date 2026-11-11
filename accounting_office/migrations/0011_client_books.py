@@ -144,8 +144,7 @@ class Migration(migrations.Migration):
                 ('created_at', models.DateTimeField(auto_now_add=True, verbose_name='تاريخ الإنشاء')),
                 ('client', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='book_entries', to='accounting_office.officeclient', verbose_name='الزبون')),
                 ('created_by', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.SET_NULL, related_name='office_book_entries', to=settings.AUTH_USER_MODEL, verbose_name='أنشأها')),
-                ('document_row', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='book_entry', to='accounting_office.documentchecklistitem', verbose_name='الورقة')),
-                ('reverses', models.ForeignKey(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='reversed_by', to='accounting_office.bookentry', verbose_name='تُبطل الحركة')),
+                ('reverses', models.OneToOneField(blank=True, null=True, on_delete=django.db.models.deletion.PROTECT, related_name='reversed_by', to='accounting_office.bookentry', verbose_name='تُبطل الحركة')),
                 ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='office_book_entries', to='tenants.tenant', verbose_name='المكتب')),
                 ('client_book', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='entries', to='accounting_office.clientbook', verbose_name='الدفتر')),
             ],
@@ -226,6 +225,20 @@ class Migration(migrations.Migration):
                 'ordering': ['tax_system', 'book_kind', 'code'],
             },
         ),
+        migrations.CreateModel(
+            name='BookEntryDocument',
+            fields=[
+                ('id', models.BigAutoField(auto_created=True, primary_key=True, serialize=False, verbose_name='ID')),
+                ('document', models.ForeignKey(on_delete=django.db.models.deletion.PROTECT, related_name='book_entry_links', to='accounting_office.documentchecklistitem', verbose_name='الورقة')),
+                ('entry', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='documents', to='accounting_office.bookentry', verbose_name='الحركة')),
+                ('tenant', models.ForeignKey(on_delete=django.db.models.deletion.CASCADE, related_name='office_book_entry_documents', to='tenants.tenant', verbose_name='المكتب')),
+            ],
+            options={
+                'verbose_name': 'ورقة حركة دفتر',
+                'verbose_name_plural': 'أوراق حركات الدفاتر',
+                'ordering': ['entry_id', 'id'],
+            },
+        ),
         migrations.AddIndex(
             model_name='bookentry',
             index=models.Index(fields=['tenant', 'client', 'year'], name='client_book_entry_year'),
@@ -249,6 +262,14 @@ class Migration(migrations.Migration):
         migrations.AddConstraint(
             model_name='officebookaccount',
             constraint=models.UniqueConstraint(fields=('tenant', 'tax_system', 'book_kind', 'code'), name='uniq_office_book_account_code'),
+        ),
+        migrations.AddIndex(
+            model_name='bookentrydocument',
+            index=models.Index(fields=['tenant', 'document'], name='client_book_entry_doc'),
+        ),
+        migrations.AddConstraint(
+            model_name='bookentrydocument',
+            constraint=models.UniqueConstraint(fields=('entry', 'document'), name='uniq_entry_document'),
         ),
         # بياناتُ أولية لا تغييرَ مخطط: شجرةُ المنصّة التي تُنسخ عنها دفاترُ الزبائن.
         migrations.RunPython(

@@ -3050,9 +3050,12 @@ class BookEntry(models.Model):
 
     `reverses` يقول «هذه الحركة تُبطل تلك»، و`reversed_by` (عكسيّ الروابط) يقول
     العكس. والتصحيحُ حركةٌ جديدة ببنودٍ معكوسة، فالأصلُ يبقى في التاريخ.
+    و`reverses` **`OneToOneField`** لا `ForeignKey`: عكسٌ واحد على الأكثر لكل حركة
+    فرادةً في القاعدة — طبقةٌ ثانية تُساند قفلَ الأصل في `reverse_entry`.
 
-    و`document_row` يربط الحركة بالورقة التي وردت — **وفريدٌ حين يُملأ**: ورقةٌ
-    واحدةٌ لا تُدخَل مرّتين، وهي بهذا الفحص «انأدخلت» بلا عمودِ حالةٍ ثانٍ.
+    **وأوراقُها في `BookEntryDocument` لا في عمود**: حركةُ الشهر تُدخل أوراقَه
+    كلَّها، وعكسُها يجب أن يُعيدها إلى «للإدخال» — وربطٌ يُقرأ أصدقُ من عمودٍ
+    يُكتب. والقاعدةُ «حركةٌ حيّةٌ واحدة على الأكثر لكل ورقة» في الخدمة تحت قفل.
     """
 
     tenant = models.ForeignKey(
@@ -3084,17 +3087,7 @@ class BookEntry(models.Model):
     memo = models.CharField(
         max_length=300, blank=True, default="", verbose_name="البيان",
     )
-    #: `OneToOneField` لا `ForeignKey(unique=True)`: ورقةٌ واحدةٌ ⇐ حركةٌ واحدة،
-    #: وهو معنى العلاقة حرفاً — والفرادةُ نفسها في القاعدة (NULL متعدّدٌ مسموح).
-    document_row = models.OneToOneField(
-        DocumentChecklistItem,
-        on_delete=models.PROTECT,
-        null=True,
-        blank=True,
-        related_name="book_entry",
-        verbose_name="الورقة",
-    )
-    reverses = models.ForeignKey(
+    reverses = models.OneToOneField(
         "self",
         on_delete=models.PROTECT,
         null=True,
@@ -3179,6 +3172,62 @@ class BookEntryLine(models.Model):
 
     def __str__(self) -> str:
         return f"{self.entry_id}/{self.account_id}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_entry(self)
+        super().save(*args, **kwargs)
+
+
+class BookEntryDocument(models.Model):
+    """ورقةٌ أُدخلت في حركة — **ربطٌ لا عمود** (#286).
+
+    الحركةُ الواحدة قد تُدخل أوراقَ الشهر كاملة (طريقةُ «إدخال الشهر»)، فعمودٌ
+    واحدٌ على الحركة يترك بقيةَ الشهر في «للإدخال» إلى الأبد. والربطُ **يُقرأ**:
+    عكسُ الحركة يُعيد أوراقَها إلى «للإدخال» بلا كتابة حالةٍ واحدة (د9).
+
+    وقاعدةُ «حركةٌ حيّةٌ واحدة على الأكثر لكل ورقة» ليست هنا — القاعدةُ في
+    `client_books.create_entry` داخل `transaction.atomic()` وبقفلٍ على صفوف
+    الأوراق، لأن الحارسَ الذي يقرأ ثم يكتب بلا قفلٍ يمرّ تحت التزامن.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_entry_documents",
+        verbose_name="المكتب",
+    )
+    entry = models.ForeignKey(
+        BookEntry,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        verbose_name="الحركة",
+    )
+    document = models.ForeignKey(
+        # `PROTECT`: ورقةٌ دخلت في حركةٍ لا تُمحى من تحت رابطها.
+        DocumentChecklistItem,
+        on_delete=models.PROTECT,
+        related_name="book_entry_links",
+        verbose_name="الورقة",
+    )
+
+    class Meta:
+        verbose_name = "ورقة حركة دفتر"
+        verbose_name_plural = "أوراق حركات الدفاتر"
+        ordering = ["entry_id", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["entry", "document"], name="uniq_entry_document",
+            ),
+        ]
+        indexes = [
+            # «هل هذه الورقة مُدخلة؟» سؤالُ «للإدخال» — بمفتاح المكتب والورقة.
+            models.Index(
+                fields=["tenant", "document"], name="client_book_entry_doc",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.entry_id}/{self.document_id}"
 
     def save(self, *args, **kwargs):
         _fill_tenant_from_entry(self)

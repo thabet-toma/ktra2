@@ -16,7 +16,7 @@
 import datetime
 from decimal import Decimal
 
-from django.core.exceptions import ValidationError
+from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.db.models import Count, Exists, OuterRef
 from django.db.models.functions import TruncMonth
@@ -36,6 +36,7 @@ from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     BookAccountTemplate,
     BookEntry,
+    BookEntryDocument,
     BookEntryLine,
     ClientBook,
     ClientBookAccount,
@@ -50,7 +51,7 @@ from accounting_office.settings_registry import BOOK_ENTRY_METHOD_LABELS
 #: مفتاحُ إعداد طريقة الإدخال (د10) — يُقرأ بالمحلّل، والافتراضُ «ورقة ورقة».
 ENTRY_METHOD_KEY = "book_entry_method"
 
-#: تسميةُ الحساب المقابلة لطرفٍ ليس حساباً في الشجرة — لا تُصطنع حسابات.
+#: مفتاحُ كود الحساب في بند الحركة الوارد من الـAPI — البديلُ هو تمرير الكائن.
 ACCOUNT_CODE_KEY = "account_code"
 
 #: مفاتيحُ المبالغ في سطر الحركة: الحقلان المسجَّلان في `services.AMOUNT_KEYS`
@@ -156,6 +157,17 @@ def account_row(row) -> dict:
     }
 
 
+def amounts_masked(tenant, user) -> bool:
+    """قرارُ القناع **مرّةً واحدة** — تُمرَّر النتيجةُ إلى `entry_row` ولا تُسأل فيها.
+
+    `can_see_amounts` تنادي `user_has_perm` التي تقرأ العضوية ثم تجاوزَ الدور ثم
+    تجاوزَ العضو: أربعةُ استعلاماتٍ إلى خمسة. سؤالُها **لكل حركة** يجعل قائمةَ ألف
+    حركةٍ خمسةَ آلاف استعلام (الخطأ نفسه الذي أُصلح في `packages_payload`).
+    و`user=None` الصريح وحده نداءٌ داخليٌّ بلا قناع — كـ`services.tax_card_payload`.
+    """
+    return user is not None and not services.can_see_amounts(tenant, user)
+
+
 def _mask_entry_row(row: dict) -> dict:
     """قناعُ المبالغ على سطر حركةٍ وبنودِه — الشكلُ يبقى، القيمةُ تصير `None`."""
     masked = services.mask_amounts(row, ENTRY_ROW_AMOUNT_KEYS)
@@ -166,15 +178,17 @@ def _mask_entry_row(row: dict) -> dict:
     return masked
 
 
-def entry_row(entry, *, user) -> dict:
-    """سطرُ حركةٍ — **بتمرير قناع المبالغ** كـ`services.tax_card_payload`.
+def entry_row(entry, *, masked) -> dict:
+    """سطرُ حركةٍ — **والقناعُ قرارٌ جاهزٌ يُمرَّر** (`amounts_masked`) لا سؤالٌ هنا.
 
-    `user=None` **الصريح** وحده نداءٌ داخليٌّ بلا قناع؛ ومن نسي المستخدمَ يسقط
-    لا يأخذ حمولةً كاملة. والقناعُ يطال المدينَ والدائنَ **والمجموعين
-    المشتقّين**: قنعُ الحقلين وحدَهما يترك الرقمَ في `total_debit`.
+    والقناعُ يطال المدينَ والدائنَ **والمجموعين المشتقّين**: قنعُ الحقلين وحدَهما
+    يترك الرقمَ في `total_debit`. و`documents` روابطُ الأوراق التي أُدخلت بها
+    الحركة — تُقرأ لا تُشتقّ من عمود.
     """
     lines = list(entry.lines.all())
-    reversals = list(entry.reversed_by.all())
+    # عكسيُّ `OneToOneField` كائنٌ لا مدير، وغيابُه يرمي `RelatedObjectDoesNotExist`
+    # (وهي `AttributeError` أيضاً) — فـ`getattr` بافتراضٍ هو «لم تُعكس».
+    reversal = getattr(entry, "reversed_by", None)
     row = {
         "id": entry.pk,
         "number": entry.number,
@@ -183,9 +197,9 @@ def entry_row(entry, *, user) -> dict:
         "kind": entry.kind,
         "kind_label": BOOK_ENTRY_KIND_LABELS.get(entry.kind, entry.kind),
         "memo": entry.memo,
-        "document_row": entry.document_row_id,
+        "documents": [link.document_id for link in entry.documents.all()],
         "reverses": entry.reverses_id,
-        "reversed_by": reversals[0].pk if reversals else None,
+        "reversed_by": reversal.pk if reversal is not None else None,
         "total_debit": _amount(sum(line.debit for line in lines)),
         "total_credit": _amount(sum(line.credit for line in lines)),
         "lines": [
@@ -199,9 +213,7 @@ def entry_row(entry, *, user) -> dict:
             for line in lines
         ],
     }
-    if user is not None and not services.can_see_amounts(entry.tenant, user):
-        return _mask_entry_row(row)
-    return row
+    return _mask_entry_row(row) if masked else row
 
 
 # ── قراءةُ الدفاتر ─────────────────────────────────────────────────────────
@@ -243,14 +255,19 @@ def accounts_payload(client) -> list[dict]:
 
 
 def entries_payload(book, *, year=None, user) -> list[dict]:
+    """حركاتُ الدفتر — والقناعُ يُحسب **مرّةً** لهذه القائمة لا لكل صفّ."""
     rows = (
         book.entries
         .select_related("client")
-        .prefetch_related("lines__account", "reversed_by")
+        .prefetch_related("lines__account", "reversed_by", "documents")
     )
     if year is not None:
         rows = rows.filter(year=year)
-    return [entry_row(row, user=user) for row in rows.order_by("year", "number", "id")]
+    masked = amounts_masked(book.tenant, user)
+    return [
+        entry_row(row, masked=masked)
+        for row in rows.order_by("year", "number", "id")
+    ]
 
 
 # ── إنشاءُ الدفتر ونسخُ الشجرة (د6) ────────────────────────────────────────
@@ -286,36 +303,60 @@ def _tree_source(client, kind) -> list[tuple[str, str, str, str, bool]]:
     ]
 
 
-def ensure_client_tree(client, kind) -> list[ClientBookAccount]:
-    """نسخةُ شجرةٍ واحدة عند إنشاء الدفتر — **بلا مرجعٍ حيّ** إلى القالب.
+def _create_tree_rows(client, rows, known=None) -> dict[str, ClientBookAccount]:
+    """إنشاءُ صفوفِ شجرةٍ ثم ربطُ آبائها — **تمريرتان** لا تمريرة.
 
-    تمريرتان: تُنشأ الصفوفُ كلُّها بلا أبٍ، ثم تُربط آباؤها. تمريرةٌ واحدة
-    تفترض ترتيبَ الأكواد وتُنتج يتيماً صامتاً لو جاء ابنٌ قبل أبيه.
+    الأبُ قد يأتي بعد ابنه في المصدر، فتمريرةٌ واحدة تُنتج يتيماً صامتاً. و`known`
+    صفوفٌ موجودةٌ سابقاً: أبو الحساب المضاف قد يكون في الشجرة القائمة لا في
+    الصفوف الجديدة (انتقالُ النوع يضيف ما نقص ولا ينسخ ما وُجد).
     """
+    created: dict[str, ClientBookAccount] = {
+        code: ClientBookAccount.objects.create(
+            client=client,
+            code=code,
+            name=name,
+            account_type=account_type,
+            is_system=is_system,
+        )
+        for code, name, _parent_code, account_type, is_system in rows
+    }
+    lookup = {**(known or {}), **created}
+    for code, _name, parent_code, _account_type, _is_system in rows:
+        parent = lookup.get(parent_code) if parent_code else None
+        if parent is not None:
+            created[code].parent = parent
+            created[code].save(update_fields=["parent"])
+    return created
+
+
+def ensure_client_tree(client, kind) -> list[ClientBookAccount]:
+    """نسخةُ شجرةٍ واحدة عند إنشاء الدفتر — **بلا مرجعٍ حيّ** إلى القالب."""
     existing = list(ClientBookAccount.objects.filter(client=client))
     if existing:
         return existing
-    rows = _tree_source(client, kind)
     with transaction.atomic():
-        created: dict[str, ClientBookAccount] = {
-            code: ClientBookAccount.objects.create(
-                client=client,
-                code=code,
-                name=name,
-                account_type=account_type,
-                is_system=is_system,
-            )
-            for code, name, _parent_code, account_type, is_system in rows
-        }
-        for code, _name, parent_code, _account_type, _is_system in rows:
-            parent = created.get(parent_code) if parent_code else None
-            if parent is not None:
-                created[code].parent = parent
-                created[code].save(update_fields=["parent"])
-    return list(created.values())
+        _create_tree_rows(client, _tree_source(client, kind))
+    return list(ClientBookAccount.objects.filter(client=client))
 
 
-def create_book(tenant, client, *, kind, opened_on=None, actor=None, day=None):
+def sync_client_tree(client, kind) -> int:
+    """يضيف **الأكوادَ الناقصة** من شجرة النوع المطلوب ولا يمسّ القائم.
+
+    انتقالُ الدفتر إلى المزدوج بلا هذا يتركه بلا `2000`/`2100`/`2200`/`3000`/
+    `5300`: فأوّلُ بندِ ضريبةٍ أو شراءٍ بالآجل يُرفض 400 «لا حسابَ بهذا الكود»
+    حتى تُبنى ستةُ حساباتٍ يدوياً وبترتيب آبائها. يعيد عددَ ما أُضيف.
+    """
+    existing = {
+        row.code: row for row in ClientBookAccount.objects.filter(client=client)
+    }
+    missing = [row for row in _tree_source(client, kind) if row[0] not in existing]
+    if not missing:
+        return 0
+    _create_tree_rows(client, missing, known=existing)
+    return len(missing)
+
+
+def create_book(tenant, client, *, kind, opened_on=None, day=None):
     """دفترُ زبونٍ بمسك دفاتر نشط — والنسخةُ من الشجرة في المعاملة نفسها."""
     day = day or _today()
     if kind not in BOOK_KIND_LABELS:
@@ -324,9 +365,11 @@ def create_book(tenant, client, *, kind, opened_on=None, actor=None, day=None):
         raise ValidationError({
             "client": "لا دفترَ لزبونٍ بلا خدمة مسك دفاتر نشطة.",
         })
-    if ClientBook.objects.filter(client=client).exists():
-        raise ValidationError({"client": "لهذا الزبون دفترٌ قائم."})
     with transaction.atomic():
+        # الفحصُ مصدرُ الرسالة العربية لا الحارس: طلبان متزامنان يمرّان به معاً،
+        # والحارسُ قيدُ `OneToOne` على `client` — فخاسرُ السباق يلقى `IntegrityError`.
+        if ClientBook.objects.filter(client=client).exists():
+            raise ValidationError({"client": "لهذا الزبون دفترٌ قائم."})
         book = ClientBook.objects.create(
             tenant=tenant,
             client=client,
@@ -369,18 +412,37 @@ def add_account(client, *, code, name, parent_code="", account_type):
 
 # ── الحركات: الترقيمُ المقفول (د3) والتصحيحُ العكسيّ (د4) ──────────────────
 def _assert_can_write_amounts(book, actor) -> None:
-    """من لا يرى المبالغ لا يكتبها — القاعدةُ نفسها في `reject_amount_writes`.
+    """من لا يرى المبالغ لا يكتبها — **403 لا 400**، كعقد الموديول.
 
     الحركةُ مبلغٌ بيد من يكتبها: عضوٌ بلا `office.amounts.view` لا يكتب رقماً لا
     يراه، ولا يصحّح بحركةٍ عكسية رقماً لا يقرؤه. و`actor=None` نداءٌ داخليّ.
+    و`PermissionDenied` تحوّلها DRF إلى 403 كما يفعل `reject_amount_writes` في
+    الـviews — 400 كان يقول «حمولتُك فاسدة» عن صلاحيةٍ ناقصة.
     """
     if actor is None or services.can_see_amounts(book.tenant, actor):
         return
-    raise ValidationError({
-        "lines": (
-            "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تكتب مبلغاً لا تراه."
-        ),
-    })
+    raise PermissionDenied(
+        "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تكتب مبلغاً لا تراه.",
+    )
+
+
+def kind_on(book, day) -> str:
+    """نوعُ الدفتر **في تاريخٍ ما** — الحركةُ تُقاس بنوع عهدها لا بنوع اليوم.
+
+    بعد انتقالٍ مشروعٍ إلى المزدوج، حركاتُ ما قبل الانتقال بقيت بسيطة (طرفٌ واحد
+    لكل بند). ولو قيست بالنوع الحالي لصار عكسُها 400 «غير متوازنة»، ولبقيت ورقةٌ
+    متأخّرةٌ لسنةٍ كانت بسيطة مُجبَرةً على قيدٍ مزدوج متوازن. `kind_changed_on`
+    يُقرأ هنا — لا يُكتب ويُترك بلا قارئ.
+    """
+    changed = book.kind_changed_on
+    if changed is not None and day.year < changed.year:
+        return BOOK_KIND_SIMPLE
+    return book.kind
+
+
+def _live_entries():
+    """حركةٌ **حيّة**: ليست عكساً ولم تُعكس — وحدها تُعدّ الورقةَ «مُدخلة» (د9)."""
+    return BookEntry.objects.filter(reverses__isnull=True, reversed_by__isnull=True)
 
 
 def _next_number(client, year) -> int:
@@ -441,9 +503,13 @@ def _prepare_lines(client, lines) -> list[dict]:
     return prepared
 
 
-def _assert_balanced(book, prepared) -> None:
-    """المزدوجُ يتوازن والبسيطُ لا يُسأل — تعريفُ النوعين لا قاعدةً زائدة عليهما."""
-    if book.kind != BOOK_KIND_DOUBLE:
+def _assert_balanced(book, prepared, *, entry_date) -> None:
+    """التوازنُ بحسب نوع الدفتر **في تاريخ الحركة** لا في تاريخ اليوم.
+
+    المزدوجُ يتوازن والبسيطُ لا يُسأل — تعريفُ النوعين لا قاعدةً زائدة. وحركةٌ
+    بتاريخٍ يسبق الانتقال تُقاس بالبسيط، وإلا رُفضت ورقٌ صحيحة.
+    """
+    if kind_on(book, entry_date) != BOOK_KIND_DOUBLE:
         return
     debit = sum(line["debit"] for line in prepared)
     credit = sum(line["credit"] for line in prepared)
@@ -453,31 +519,48 @@ def _assert_balanced(book, prepared) -> None:
         })
 
 
-def _document_for(book, document_row):
-    """ورقةٌ واحدةٌ تُدخل مرّةً واحدة — والفرادةُ في القاعدة تُساند هذا الفحص."""
-    if document_row in (None, ""):
-        return None
-    try:
-        pk = int(document_row)
-    except (TypeError, ValueError):
-        raise ValidationError({"document_row": "ورقة غير معروفة."}) from None
-    row = DocumentChecklistItem.objects.filter(pk=pk, client=book.client).first()
-    if row is None:
+def _documents_for(book, documents) -> list:
+    """أوراقُ الحركة — تُقرأ **مقفولةً** و«حركةٌ حيّة واحدة» تُفرض هنا.
+
+    `select_for_update` على صفوف الأوراق يُسلسل مُدخِلي الورقة نفسها: فحصٌ يقرأ
+    ثم يكتب بلا قفلٍ يمرّ مرّتين تحت التزامن فتُدخل الورقةُ في حركتين. وتُستثنى
+    الحركاتُ المعكوسة: عكسُ حركةٍ يُعيد أوراقها إلى «للإدخال» (د9).
+    """
+    wanted: list[int] = []
+    for raw in documents or ():
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({"documents": "ورقة غير معروفة."}) from None
+        if pk in wanted:
+            raise ValidationError({"documents": "الورقة مكرَّرة في الطلب."})
+        wanted.append(pk)
+    if not wanted:
+        return []
+    rows = list(
+        DocumentChecklistItem.objects
+        .select_for_update()
+        .filter(pk__in=wanted, client=book.client)
+        .order_by("pk"),
+    )
+    if len(rows) != len(wanted):
         raise ValidationError({
-            "document_row": "لا ورقةَ بهذا المعرّف لهذا الزبون.",
+            "documents": "لا ورقةَ بهذا المعرّف لهذا الزبون.",
         })
-    if BookEntry.objects.filter(document_row=row).exists():
+    if BookEntryDocument.objects.filter(
+        document__in=rows, entry__in=_live_entries(),
+    ).exists():
         raise ValidationError({
-            "document_row": "هذه الورقة أُدخلت في حركةٍ أخرى — التصحيحُ حركةٌ عكسية.",
+            "documents": "ورقةٌ مُدخلةٌ في حركةٍ حيّة — التصحيحُ حركةٌ عكسية.",
         })
-    return row
+    return rows
 
 
 def create_entry(
-    book, *, entry_date, kind, lines, memo="", document_row=None,
+    book, *, entry_date, kind, lines, memo="", documents=None,
     reverses=None, actor=None, day=None,
 ):
-    """حركةٌ جديدة: رقمٌ مقفول، بنودٌ متوازنة، وورقةٌ لا تُدخل مرّتين."""
+    """حركةٌ جديدة: رقمٌ مقفول، بنودٌ متوازنة، وأوراقٌ لا تُدخل مرّتين."""
     assert_book_writable(book, day)
     _assert_can_write_amounts(book, actor)
     if kind not in BOOK_ENTRY_KIND_LABELS:
@@ -485,9 +568,12 @@ def create_entry(
     if not isinstance(entry_date, datetime.date):
         raise ValidationError({"entry_date": "تاريخ الحركة مطلوب بصيغة YYYY-MM-DD."})
     prepared = _prepare_lines(book.client, lines)
-    _assert_balanced(book, prepared)
-    document = _document_for(book, document_row)
+    # والعكسُ **غيرُ معفى**: يُقاس بنوع تاريخه كأيّ حركة. بتاريخ الأصل (الافتراض)
+    # يُقاس بنوع عهد الأصل فيمرّ؛ ومؤرَّخاً في سنة المزدوج يُفحص بتوازنها، وإلا
+    # كتب بنداً بطرفٍ واحد في سنةٍ مزدوجة فاختلّ ميزانُها.
+    _assert_balanced(book, prepared, entry_date=entry_date)
     with transaction.atomic():
+        attached = _documents_for(book, documents)
         number = _next_number(book.client, entry_date.year)
         entry = BookEntry.objects.create(
             client_book=book,
@@ -497,7 +583,6 @@ def create_entry(
             entry_date=entry_date,
             kind=kind,
             memo=(memo or "").strip()[:300],
-            document_row=document,
             reverses=reverses,
             created_by=actor if getattr(actor, "pk", None) else None,
         )
@@ -513,6 +598,13 @@ def create_entry(
             )
             for line in prepared
         ])
+        if attached:
+            BookEntryDocument.objects.bulk_create([
+                BookEntryDocument(
+                    tenant=entry.tenant, entry=entry, document=row,
+                )
+                for row in attached
+            ])
     return entry
 
 
@@ -520,35 +612,47 @@ def reverse_entry(entry, *, memo="", entry_date=None, actor=None, day=None):
     """**التصحيحُ حركةٌ عكسية**: بنودٌ مدينُها دائنُ الأصل والعكس، والأصلُ يبقى.
 
     وتاريخُها تاريخُ الأصل افتراضاً: الزوجُ يتقاصّ في الفترة نفسها فلا يبقى أثرٌ
-    في سنةٍ لم تقع فيها الحركة. والموظفُ يستطيع تأريخها غيره صراحةً.
+    في سنةٍ لم تقع فيها الحركة. والموظفُ يستطيع تأريخها غيره صراحةً، فتُقاس
+    بنوع ذلك التاريخ: عكسُ حركةِ طرفٍ واحد مؤرَّخاً في سنة المزدوج 400.
+
+    **ولا ترث أوراقَ الأصل**: الأصلُ يخرج من «حيّ» فتعود أوراقُه إلى «للإدخال»،
+    وهي الحالةُ الصحيحة — قد يُعاد إدخالها بالحركة الصحيحة.
+
+    **والأصلُ يُقفل قبل فحص «لها عكسٌ بالفعل»**: فحصٌ يقرأ ثم يكتب بلا قفلٍ يمرّ
+    لطلبين متقاربين معاً فتُكتب حركتان عكسيّتان، ولا حذفَ يُصلحهما. صفُّ الأصل
+    المقفول يُسلسل عاكسيه: الثاني ينتظر التزامَ الأوّل ثم يرى عكسَه فيردّ 400.
+    والقفلُ أوّلُ قراءةٍ في المعاملة كي لا يُقرأ الفحصُ من لقطةٍ أقدم منه. وفرادةُ
+    `reverses` (`OneToOneField`) طبقةٌ ثانية تُساند القفل لا تُبدله.
     """
     book = entry.client_book
     assert_book_writable(book, day)
-    if entry.reverses_id is not None:
-        raise ValidationError({
-            "entry": "حركةٌ عكسية لا تُعكس — التصحيحُ حركةٌ جديدة على الأصل.",
-        })
-    if BookEntry.objects.filter(reverses=entry).exists():
-        raise ValidationError({"entry": "لهذه الحركة حركةٌ عكسية بالفعل."})
-    lines = [
-        {
-            "account": line.account,
-            "debit": line.credit,
-            "credit": line.debit,
-            "side_party": line.side_party,
-        }
-        for line in entry.lines.select_related("account")
-    ]
-    return create_entry(
-        book,
-        entry_date=entry_date or entry.entry_date,
-        kind=entry.kind,
-        lines=lines,
-        memo=memo or f"عكس الحركة رقم {entry.number}",
-        reverses=entry,
-        actor=actor,
-        day=day,
-    )
+    with transaction.atomic():
+        entry = BookEntry.objects.select_for_update().get(pk=entry.pk)
+        if entry.reverses_id is not None:
+            raise ValidationError({
+                "entry": "حركةٌ عكسية لا تُعكس — التصحيحُ حركةٌ جديدة على الأصل.",
+            })
+        if BookEntry.objects.filter(reverses=entry).exists():
+            raise ValidationError({"entry": "لهذه الحركة حركةٌ عكسية بالفعل."})
+        lines = [
+            {
+                "account": line.account,
+                "debit": line.credit,
+                "credit": line.debit,
+                "side_party": line.side_party,
+            }
+            for line in entry.lines.select_related("account")
+        ]
+        return create_entry(
+            book,
+            entry_date=entry_date or entry.entry_date,
+            kind=entry.kind,
+            lines=lines,
+            memo=memo or f"عكس الحركة رقم {entry.number}",
+            reverses=entry,
+            actor=actor,
+            day=day,
+        )
 
 
 # ── نوعُ الدفتر وانتقالُه (د7) ─────────────────────────────────────────────
@@ -575,34 +679,48 @@ def change_kind(book, kind, *, day=None):
         raise ValidationError({
             "kind": "في السنة الجارية حركات — يُغيَّر النوع من بداية سنةٍ نظيفة.",
         })
-    book.kind = kind
-    book.kind_changed_on = day
-    book.save(update_fields=["kind", "kind_changed_on"])
+    with transaction.atomic():
+        book.kind = kind
+        book.kind_changed_on = day
+        book.save(update_fields=["kind", "kind_changed_on"])
+        # **وتُضاف شجرةُ النوع الجديد في المعاملة نفسها**: بلا هذا يبقى الدفتر
+        # المحوَّل بلا 2000/2100/2200/3000/5300، فأوّلُ بندِ ضريبةٍ أو آجل يُرفض.
+        sync_client_tree(book.client, kind)
     return book
 
 
 # ── «للإدخال»: مشتقٌّ لا مخزَّن (د8/د9) ─────────────────────────────────────
 def pending_entry_payload(tenant, user, *, day=None) -> dict:
-    """أوراقٌ واصلةٌ **بلا حركةٍ تشير إليها**، مجمَّعةً بالزبون والشهر.
+    """أوراقٌ واصلةٌ **بلا حركةٍ حيّة**، مجمَّعةً بالزبون والشهر.
 
-    **عدٌّ باستعلامٍ واحد**: `Exists` على `BookEntry.document_row` في `WHERE`،
+    **عدٌّ باستعلامٍ واحد**: `Exists` على رابط `BookEntryDocument` في `WHERE`،
     والتجميعُ `TruncMonth` على بداية الفترة. ولا عمودَ «انأدخلت» — الورقةُ تخرج
-    من القائمة لأن الشرطَ نفسه صار كاذباً، لا لأن أحداً كتب حالة (د9).
+    من القائمة لأن الشرطَ نفسه صار كاذباً، لا لأن أحداً كتب حالة (د9). وتُستثنى
+    الحركاتُ المعكوسة: عكسُ حركةٍ يُعيد أوراقها إلى «للإدخال».
+
+    **ودفاترُ الخدمة الموقوفة لا تظهر**: كلُّ إدخالٍ لها 400، فبقاؤها في القائمة
+    يعني قائمةً لا تُصفَّر أبداً. و`writable_client_ids` استعلامٌ واحد ثابت لا
+    يكبر بعدد الصفوف.
 
     ولسانُ الحال: الزبائنُ يزدادون والاستعلاماتُ لا — الأسماءُ وطريقةُ الإدخال
     تُقرأ بنداءين ثابتين لا بنداءٍ لكل صفّ.
     """
-    clients = services.visible_clients(tenant, user)
+    day = day or _today()
+    active = writable_client_ids(tenant, services.visible_clients(tenant, user), day)
+    if not active:
+        return {"rows": [], "total": 0}
     booked = ClientBook.objects.filter(tenant=tenant).values("client_id")
-    entered = BookEntry.objects.filter(document_row=OuterRef("pk"))
+    entered = BookEntryDocument.objects.filter(
+        document=OuterRef("pk"), entry__in=_live_entries(),
+    )
     grouped = list(
         DocumentChecklistItem.objects
         .filter(
             tenant=tenant,
-            client__in=clients,
-            client_id__in=booked,
+            client_id__in=active,
             status=DOCUMENT_STATUS_RECEIVED,
         )
+        .filter(client_id__in=booked)
         .annotate(month=TruncMonth("period_start"))
         .filter(~Exists(entered))
         .values("client_id", "month")

@@ -28,6 +28,7 @@ from django.db import IntegrityError, connection, connections, transaction
 from django.db.models.query import QuerySet
 from django.test import TransactionTestCase, skipUnlessDBFeature
 from django.test.utils import CaptureQueriesContext
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
 from accounting_office import services
@@ -42,6 +43,7 @@ from accounting_office.models import (
     DOCUMENT_STATUS_REQUIRED,
     BookAccountTemplate,
     BookEntry,
+    BookEntryDocument,
     BookEntryLine,
     DocumentChecklistItem,
     OfficeBookAccount,
@@ -67,8 +69,10 @@ PENDING = f"{BOOKS}pending-entry/"
 #: `seed_deadline_schedules` في `test_obligations.py`).
 BOOKS_MIGRATION = "accounting_office.migrations.0011_client_books"
 
-#: السنةُ الجارية في الاختبارات — تُقرأ من `timezone.localdate().year` عند الحاجة.
-THIS_YEAR = datetime.date.today().year
+#: السنةُ الجارية — **من `timezone.localdate()`** لا `date.today()`: الخادم يعمل
+#: بتوقيت المكتب، و`date.today()` تاريخُ نظامه (UTC في CI) فيسقط اختبارُ نوع
+#: الدفتر كلَّ يومٍ بين 21:00 ومنتصف الليل.
+THIS_YEAR = timezone.localdate().year
 #: حركةُ سنةٍ سابقة: نوعُ الدفتر يُغيَّر من بداية سنةٍ لا هذه.
 LAST_YEAR_DAY = datetime.date(THIS_YEAR - 1, 3, 5)
 #: بدايةُ خدمةٍ قديمةٍ في كل الاختبارات: التاريخ لا يغيّر حكماً هنا.
@@ -191,7 +195,7 @@ class ClientBookTestCase(APITestCase):
 
     def add_entry(
         self, client, *, lines, entry_date=LAST_YEAR_DAY, kind="sales_invoice",
-        memo="", document_row=None, expect=201,
+        memo="", documents=None, expect=201,
     ):
         res = self.client.post(
             f"{BOOKS}{client.pk}/entries/",
@@ -199,7 +203,7 @@ class ClientBookTestCase(APITestCase):
                 "entry_date": entry_date.isoformat(),
                 "kind": kind,
                 "memo": memo,
-                "document_row": document_row,
+                "documents": documents or [],
                 "lines": lines,
             },
             format="json",
@@ -513,14 +517,17 @@ class EntryNumberingTest(ClientBookTestCase):
 
 @skipUnlessDBFeature("has_select_for_update")
 class ConcurrentNumberingTest(TransactionTestCase):
-    """إدخالان متزامنان على اتصالين — الرقمُ لا يتكرّر. يُتخطّى على SQLite.
+    """إدخالان متزامنان على اتصالين — الرقمُ لا يتكرّر، والعكسُ لا يُكتب مرّتين.
+    يُتخطّى على SQLite.
 
     `select_for_update` لا وجودَ له في SQLite (صفريّ)، فالاختبارُ هنا **يُعلن
     تخطّيه** بدل أن يوهم بمرور. ويُثبَت الحملُ نفسُه بلا تزامنٍ في
-    `EntryNumberingTest` (ترتيبُ الأحداث وطلبُ القفل وفرادةُ القاعدة).
+    `EntryNumberingTest` و`EntryApiTest` (ترتيبُ الأحداث وطلبُ القفل وفرادةُ
+    القاعدة).
     """
 
-    def test_two_concurrent_writers_never_take_the_same_number(self):
+    def _book(self):
+        """مكتبٌ وزبونٌ بدفترٍ بسيطٍ وشجرته — `(user, book, account)`."""
         from django.contrib.auth.models import User as AuthUser
 
         from accounting_office import client_books
@@ -529,6 +536,9 @@ class ConcurrentNumberingTest(TransactionTestCase):
         tenant = create_company("مكتب التزامن", user, template="accounting_office")
         invalidate_module_cache(tenant.pk)
         ready_office(tenant)
+        # `TransactionTestCase` لا يرث `setUpTestData`، و`--nomigrations` لا تزرع
+        # بيانات الهجرة: بلا هذا النداء لا شجرةَ في القاعدة و`get(code=…)` يرمي.
+        seed_book_account_templates()
         client = make_client(
             tenant=tenant, catalog=catalog(tenant),
             name="زبون التزامن", responsible=user,
@@ -538,6 +548,13 @@ class ConcurrentNumberingTest(TransactionTestCase):
         )
         client_books.ensure_client_tree(client, BOOK_KIND_SIMPLE)
         account = ClientBookAccount.objects.get(client=client, code="1100")
+        return user, book, account
+
+    def test_two_concurrent_writers_never_take_the_same_number(self):
+        from accounting_office import client_books
+
+        user, book, account = self._book()
+        client = book.client
 
         numbers, errors = [], []
         barrier = threading.Barrier(2)
@@ -569,6 +586,45 @@ class ConcurrentNumberingTest(TransactionTestCase):
         self.assertEqual(
             len({row.number for row in BookEntry.objects.filter(client=client)}), 2,
         )
+
+    def test_two_concurrent_reversals_of_the_same_entry_write_one(self):
+        """طلبا عكسٍ متقاربان: واحدٌ يُكتب والآخرُ `ValidationError` (400) لا حركةٌ ثانية."""
+        from django.core.exceptions import ValidationError
+
+        from accounting_office import client_books
+
+        user, book, account = self._book()
+        original = client_books.create_entry(
+            book, entry_date=LAST_YEAR_DAY, kind="expense",
+            lines=[{"account": account, "debit": Decimal("5.00"), "credit": None}],
+            actor=user,
+        )
+
+        reversals, refused, unexpected = [], [], []
+        barrier = threading.Barrier(2)
+
+        def reverser():
+            try:
+                entry = BookEntry.objects.select_related("client_book").get(pk=original.pk)
+                barrier.wait(timeout=10)
+                reversals.append(client_books.reverse_entry(entry, actor=user).pk)
+            except ValidationError as exc:
+                refused.append(exc)
+            except Exception as exc:  # noqa: BLE001 — التقريرُ يريد السبب لا النوع
+                unexpected.append(exc)
+            finally:
+                connections.close_all()
+
+        threads = [threading.Thread(target=reverser) for _ in range(2)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join(timeout=30)
+
+        self.assertEqual(unexpected, [])
+        self.assertEqual(len(reversals), 1)
+        self.assertEqual(len(refused), 1)
+        self.assertEqual(BookEntry.objects.filter(reverses=original).count(), 1)
 
 
 class EntryApiTest(ClientBookTestCase):
@@ -649,6 +705,34 @@ class EntryApiTest(ClientBookTestCase):
 
         self.assertEqual(res.status_code, 400, res.content)
 
+    def test_more_than_a_hundred_documents_is_400_before_the_service(self):
+        """الحدُّ في الـserializer: الخدمةُ لا تُنادى فلا تقفل صفّاً واحداً.
+
+        معرّفاتٌ لا وجود لها تردّ 400 من الخدمة أيضاً، فالـ400 وحده لا يُثبت الحدّ —
+        المِسبارُ أن `create_entry` لم تُنادَ.
+        """
+        from accounting_office import client_books
+
+        with mock.patch.object(
+            client_books, "create_entry",
+            side_effect=AssertionError("الخدمةُ نوديت — الحدُّ لم يُفحص في الـserializer"),
+        ) as service:
+            res = self.client.post(
+                f"{BOOKS}{self.mine.pk}/entries/",
+                {
+                    "entry_date": LAST_YEAR_DAY.isoformat(),
+                    "kind": "expense",
+                    "lines": self.balanced(),
+                    "documents": list(range(1, 102)),
+                },
+                format="json",
+                **self.headers(),
+            )
+
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("documents", res.data)
+        service.assert_not_called()
+
     def test_a_reversal_mirrors_the_lines_and_keeps_the_original(self):
         original = self.add_entry(self.mine, lines=self.balanced("100.00"))
 
@@ -698,6 +782,66 @@ class EntryApiTest(ClientBookTestCase):
         self.assertEqual(res.status_code, 400, res.content)
         self.assertEqual(BookEntry.objects.filter(reverses_id=original["id"]).count(), 1)
 
+    def test_a_reversal_locks_the_original_before_looking_for_a_reversal(self):
+        """**ترتيبُ الأحداث**: قفلُ صفّ الأصل يسبق فحصَ «لها عكسٌ بالفعل».
+
+        فحصٌ قبل القفل يمرّ لطلبين متقاربين معاً فتُكتب حركتان عكسيّتان. وSQLite
+        تُسقط `FOR UPDATE` من الـSQL، فالمِسبارُ على الشجرة: من ينزع القفلَ أو
+        يؤخّره بعد الفحص يسقط هذا الاختبار.
+        """
+        original = self.add_entry(self.mine, lines=self.balanced())
+        events = []
+        real_lock, real_exists = QuerySet.select_for_update, QuerySet.exists
+
+        def lock(queryset, *args, **kwargs):
+            events.append(("lock", queryset.model))
+            return real_lock(queryset, *args, **kwargs)
+
+        def exists(queryset):
+            events.append(("exists", queryset.model))
+            return real_exists(queryset)
+
+        with (
+            mock.patch.object(QuerySet, "select_for_update", autospec=True, side_effect=lock),
+            mock.patch.object(QuerySet, "exists", autospec=True, side_effect=exists),
+        ):
+            res = self.client.post(
+                f"{BOOKS}{self.mine.pk}/entries/{original['id']}/reverse/",
+                {}, format="json", **self.headers(),
+            )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertIn(("lock", BookEntry), events, "لا قفلَ على الأصل — العكسُ المزدوج بلا حارس")
+        self.assertIn(("exists", BookEntry), events)
+        self.assertLess(
+            events.index(("lock", BookEntry)), events.index(("exists", BookEntry)),
+        )
+
+    def test_the_database_refuses_a_second_reversal_of_the_same_entry(self):
+        """الطبقةُ الثانية: `reverses` فريدٌ في القاعدة (`OneToOneField`).
+
+        يُكتب العكسُ الثاني مباشرةً متجاوزاً الخدمة — ما كان يكتبه طلبٌ فحصَ بلا
+        قفل — فلا يقف أمامه إلا القيد. `IntegrityError` لا نصَّ رسالة: النصُّ
+        يختلف بين SQLite وMySQL.
+        """
+        original = self.add_entry(self.mine, lines=self.balanced())
+        first = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{original['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+        self.assertEqual(first.status_code, 201, first.content)
+        entry = BookEntry.objects.get(pk=original["id"])
+
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                BookEntry.objects.create(
+                    client_book=entry.client_book, client=self.mine, year=entry.year,
+                    number=99, entry_date=entry.entry_date, kind=entry.kind,
+                    reverses=entry,
+                )
+
+        self.assertEqual(BookEntry.objects.filter(reverses_id=original["id"]).count(), 1)
+
     def test_deleting_an_entry_is_405(self):
         row = self.add_entry(self.mine, lines=self.balanced())
 
@@ -720,19 +864,81 @@ class EntryApiTest(ClientBookTestCase):
 
         self.assertEqual(res.status_code, 405, res.content)
 
-    def test_a_document_row_is_linked_once_and_the_second_link_is_400(self):
+    def test_the_same_document_is_entered_once_and_the_second_link_is_400(self):
         document = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
-        row = self.add_entry(self.mine, lines=self.balanced(), document_row=document.pk)
-
-        self.assertEqual(BookEntry.objects.get(pk=row["id"]).document_row_id, document.pk)
-        self.add_entry(
-            self.mine, lines=self.balanced(), document_row=document.pk, expect=400,
+        row = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk],
         )
 
-    def test_a_document_row_of_another_client_is_400(self):
+        self.assertEqual(row["documents"], [document.pk])
+        self.assertTrue(
+            BookEntryDocument.objects.filter(
+                entry_id=row["id"], document=document,
+            ).exists(),
+        )
+        error = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk], expect=400,
+        )
+
+        self.assertIn("documents", error)
+        self.assertEqual(BookEntryDocument.objects.filter(document=document).count(), 1)
+
+    def test_the_same_document_twice_in_one_request_is_400(self):
+        document = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
+
+        error = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk, document.pk],
+            expect=400,
+        )
+
+        self.assertIn("documents", error)
+        self.assertFalse(BookEntry.objects.filter(client=self.mine).exists())
+
+    def test_a_document_is_entered_again_after_its_entry_is_reversed(self):
+        """عكسُ الحركة يُعيد الورقةَ **قابلةً للإدخال** — لا إلى «للإدخال» وحدها.
+
+        `_documents_for` تستثني الحركاتِ المعكوسة؛ لو عدّت كلَّ رابطٍ لظهرت الورقةُ
+        في «للإدخال» وردّ كلُّ إدخالٍ لها 400 — قائمةٌ لا تُصفَّر أبداً.
+        """
+        document = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
+        first = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk],
+        )
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{first['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
+        again = self.add_entry(
+            self.mine, lines=self.balanced("120.00"), documents=[document.pk],
+        )
+
+        self.assertEqual(again["documents"], [document.pk])
+        self.assertEqual(BookEntryDocument.objects.filter(document=document).count(), 2)
+
+    def test_a_document_of_another_client_is_400(self):
         document = make_document(self.outside, year=LAST_YEAR_DAY.year, month=3)
 
-        self.add_entry(self.mine, lines=self.balanced(), document_row=document.pk, expect=400)
+        self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk], expect=400,
+        )
+
+    def test_one_entry_can_carry_a_whole_month_of_documents(self):
+        """طريقةُ «إدخال الشهر»: أوراقُ الشهر في حركةٍ واحدة — والربطُ قائمة."""
+        first = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3, code="vat")
+        second = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3, code="income")
+
+        row = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[first.pk, second.pk],
+        )
+
+        self.assertEqual(sorted(row["documents"]), sorted([first.pk, second.pk]))
+        self.assertEqual(
+            BookEntryDocument.objects.filter(entry_id=row["id"]).count(), 2,
+        )
+        pending = self.client.get(PENDING, **self.headers())
+        self.assertEqual(pending.data["total"], 0)
 
     def test_writing_an_entry_on_a_stopped_service_is_400(self):
         self.stop_bookkeeping(self.mine)
@@ -772,11 +978,40 @@ class EntryApiTest(ClientBookTestCase):
             self.assertIsNone(line["credit"])
             self.assertTrue(line["account_code"], "الشكلُ يبقى: الحسابُ لا يُقنَّع")
 
+    def test_the_amounts_decision_is_taken_once_for_the_whole_list(self):
+        """قرارُ القناع مرّةٌ للقائمة لا لكل حركة: خمسُ حركاتٍ لا تكلّف أكثر من واحدة.
+
+        `can_see_amounts` تقرأ العضوية ثم تجاوزَ الدور ثم تجاوزَ العضو؛ سؤالُها
+        داخل `entry_row` كان يجعل ألفَ حركةٍ خمسةَ آلاف استعلام. يحرسه عددُ
+        الاستعلامات نفسه لا السلوك (السلوكُ كان سليماً والحملُ خاطئ).
+        """
+        self.add_entry(self.mine, lines=self.balanced())
+        # محاسبٌ لا مدير: `user_permissions` له تقرأ تجاوزَ الدور والعضو فعلاً،
+        # فسؤالُها لكل صفّ يظهر في العدّ (المدير يخرج من الفحص مبكراً).
+        self.as_user(self.accountant)
+        with CaptureQueriesContext(connection) as one:
+            self.client.get(f"{BOOKS}{self.mine.pk}/entries/", **self.headers())
+
+        # الإدخالُ بمفتاح الكتابة — للمالك؛ والقراءةُ التي تُقاس للمحاسب.
+        self.as_user(self.owner)
+        for _ in range(4):
+            self.add_entry(self.mine, lines=self.balanced())
+        self.as_user(self.accountant)
+        with CaptureQueriesContext(connection) as five:
+            listing = self.client.get(f"{BOOKS}{self.mine.pk}/entries/", **self.headers())
+
+        self.assertEqual(len(listing.data), 5)
+        self.assertEqual(
+            len(five), len(one),
+            f"{len(one)} استعلاماً لحركةٍ و{len(five)} لخمس — القناعُ يُسأل لكل صفّ",
+        )
+
     def test_writing_an_entry_needs_the_amounts_key(self):
-        """ومن لا يرى المبالغ لا يكتبها — الحركةُ مبلغٌ بيد من يكتبها.
+        """ومن لا يرى المبالغ لا يكتبها — الحركةُ مبلغٌ بيد من يكتبها، والردُّ 403.
 
         يُمنح المحاسبُ مفتاحَ الكتابة وحده (تجاوزُ عضو): يمرّ من `require_write`
-        ويسقط في حارس المبلغ — فالاختبارُ يقيس القناعَ لا المفتاح.
+        ويسقط في حارس المبلغ — فالاختبارُ يقيس القناعَ لا المفتاح. و403 عقدُ
+        الموديول (`reject_amount_writes`)، لا 400.
         """
         membership = UserCompanyMembership.objects.get(
             user=self.accountant, tenant=self.tenant,
@@ -799,7 +1034,7 @@ class EntryApiTest(ClientBookTestCase):
             **self.headers(),
         )
 
-        self.assertEqual(res.status_code, 400, res.content)
+        self.assertEqual(res.status_code, 403, res.content)
         self.assertFalse(BookEntry.objects.filter(client=self.mine).exists())
 
     def test_another_office_entries_are_404(self):
@@ -845,6 +1080,99 @@ class KindChangeTest(ClientBookTestCase):
         self.assertEqual(res.status_code, expect, res.content)
         return res.data
 
+    def book_with_history(self):
+        """دفترٌ فُتح السنة الماضية **بسيطاً** بحركةِ طرفٍ واحد، ثم انتقل للمزدوج.
+
+        هذا هو التاريخ الذي كان يُكسر: التوازنُ يُفحص بالنوع الحالي فيرفض عكسَ
+        حركةٍ قُبلت، ويُجبِر ورقةً متأخّرةً على قيدٍ مزدوج.
+        """
+        self.create_book(self.mine, kind=BOOK_KIND_SIMPLE, opened_on=LAST_YEAR_DAY)
+        original = self.add_entry(
+            self.mine,
+            lines=[{"account_code": "1100", "debit": "100.00"}],
+            entry_date=LAST_YEAR_DAY,
+        )
+        self.change(self.mine, BOOK_KIND_DOUBLE)
+        return original
+
+    def test_switching_to_double_adds_the_missing_accounts_with_their_parents(self):
+        """الانتقالُ يُكمل الشجرة: بلا ذاك يُرفض أوّل بندِ ضريبةٍ أو آجل."""
+        self.create_book(self.mine, kind=BOOK_KIND_SIMPLE, opened_on=LAST_YEAR_DAY)
+        self.assertFalse(
+            ClientBookAccount.objects.filter(client=self.mine, code="2200").exists(),
+        )
+
+        self.change(self.mine, BOOK_KIND_DOUBLE)
+
+        vat = ClientBookAccount.objects.get(client=self.mine, code="2200")
+        self.assertEqual(vat.parent.code, "2000")
+        # أبو `1300` **قائمٌ** من شجرة البسيط (`known`) لا مضافٌ معه.
+        receivable = ClientBookAccount.objects.get(client=self.mine, code="1300")
+        self.assertEqual(receivable.parent.code, "1000")
+
+    def test_switching_to_double_keeps_the_accounts_already_there(self):
+        """الإكمالُ **يضيف** ولا ينسخ: الحسابُ القائم يبقى صفّاً واحداً."""
+        self.create_book(self.mine, kind=BOOK_KIND_SIMPLE, opened_on=LAST_YEAR_DAY)
+
+        self.change(self.mine, BOOK_KIND_DOUBLE)
+
+        self.assertEqual(
+            ClientBookAccount.objects.filter(client=self.mine, code="1100").count(), 1,
+        )
+
+    def test_a_single_sided_entry_in_a_simple_year_is_still_accepted(self):
+        """نوعُ الحركة نوعُ عهدها: سنةُ البسيط تبقى تُدخَل بطرفٍ واحد."""
+        self.book_with_history()
+
+        row = self.add_entry(
+            self.mine,
+            lines=[{"account_code": "1100", "debit": "30.00"}],
+            entry_date=LAST_YEAR_DAY,
+        )
+
+        self.assertEqual(row["total_debit"], "30.00")
+        self.assertEqual(row["total_credit"], "0.00")
+
+    def test_a_single_sided_entry_in_the_double_year_is_400(self):
+        self.book_with_history()
+
+        self.add_entry(
+            self.mine,
+            lines=[{"account_code": "1100", "debit": "30.00"}],
+            entry_date=datetime.date(THIS_YEAR, 1, 5),
+            expect=400,
+        )
+
+    def test_a_simple_year_entry_is_still_reversible_after_the_change(self):
+        """العكسُ بتاريخ الأصل يُقاس بنوع عهده — يُقبل ولو صار الدفتر مزدوجاً."""
+        original = self.book_with_history()
+
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{original['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.data["reverses"], original["id"])
+
+    def test_a_simple_year_entry_reversed_into_the_double_year_is_400(self):
+        """العكسُ يُقاس **بنوع تاريخه**: مؤرَّخاً في سنة المزدوج يُفحص بتوازنها.
+
+        إعفاءُ العكس كان يكتب هنا بنداً دائناً وحيداً في سنةٍ مزدوجة فيختلّ ميزانُها.
+        """
+        original = self.book_with_history()
+
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{original['id']}/reverse/",
+            {"entry_date": datetime.date(THIS_YEAR, 1, 5).isoformat()},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("lines", res.data)
+        self.assertFalse(BookEntry.objects.filter(reverses_id=original["id"]).exists())
+        self.assertEqual(BookEntryLine.objects.filter(entry__client=self.mine).count(), 1)
+
     def test_switching_to_double_is_400_when_the_book_opened_this_year(self):
         self.create_book(self.mine, kind=BOOK_KIND_SIMPLE, opened_on=datetime.date(THIS_YEAR, 1, 2))
 
@@ -873,7 +1201,7 @@ class KindChangeTest(ClientBookTestCase):
         row = self.change(self.mine, BOOK_KIND_DOUBLE)
 
         self.assertEqual(row["kind"], BOOK_KIND_DOUBLE)
-        self.assertEqual(row["kind_changed_on"], datetime.date.today().isoformat())
+        self.assertEqual(row["kind_changed_on"], timezone.localdate().isoformat())
 
     def test_switching_back_to_simple_is_always_400(self):
         self.create_book(self.mine, kind=BOOK_KIND_DOUBLE, opened_on=LAST_YEAR_DAY)
@@ -929,7 +1257,35 @@ class PendingEntryTest(ClientBookTestCase):
         document = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
         self.assertEqual(self.rows()["total"], 1)
 
-        self.add_entry(self.mine, lines=self.balanced(), document_row=document.pk)
+        self.add_entry(self.mine, lines=self.balanced(), documents=[document.pk])
+
+        self.assertEqual(self.rows()["total"], 0)
+
+    def test_reversing_an_entry_returns_its_documents_to_pending(self):
+        """الورقةُ تعود لأن الربطَ **يُقرأ**: حركةٌ معكوسةٌ ليست «مُدخلة» (د9).
+
+        بالعمود الفريد كانت الورقةُ تبقى «انأدخلت» أبداً بعد العكس، فلا يمكن
+        ربطُها بالحركة الصحيحة — شهرٌ يبدو منجزاً وصافيه صفر.
+        """
+        document = make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
+        row = self.add_entry(
+            self.mine, lines=self.balanced(), documents=[document.pk],
+        )
+        self.assertEqual(self.rows()["total"], 0)
+
+        self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{row['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(self.rows()["total"], 1)
+
+    def test_a_stopped_client_does_not_stay_in_the_pending_list(self):
+        """دفترٌ صار للقراءة لا يُطلب إدخالُه: كلُّ إدخالٍ له 400، فلا يُصفَّر أبداً."""
+        make_document(self.mine, year=LAST_YEAR_DAY.year, month=3)
+        self.assertEqual(self.rows()["total"], 1)
+
+        self.stop_bookkeeping(self.mine)
 
         self.assertEqual(self.rows()["total"], 0)
 

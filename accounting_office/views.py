@@ -1882,6 +1882,13 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
 
     serializer_class = ClientBookWriteSerializer
     http_method_names = ["get", "post", "head", "options"]
+    #: مسارُ التفصيل مفتاحُه **معرّفُ الزبون** لا معرّفُ الدفتر: `[^/.]+` كان
+    #: يمرّر نصّاً إلى `filter(client_id="abc")` فيردّ 500، والصحيحُ 404.
+    lookup_value_regex = r"[0-9]+"
+
+    def _masked(self):
+        """قرارُ القناع مرّةً للطلب — لا سؤالٌ لكل حركة في القائمة."""
+        return client_books.amounts_masked(self.tenant, self.request.user)
 
     def get_queryset(self):
         # العزلُ من مصدره الواحد (`visible_clients`): دفترُ زبونٍ لا يراه العضو
@@ -1944,7 +1951,6 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
             client,
             kind=data["kind"],
             opened_on=data.get("opened_on"),
-            actor=request.user,
         )
         return Response(self._book_row(book), status=status.HTTP_201_CREATED)
 
@@ -1976,7 +1982,7 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
                 book, actor=request.user, **serializer.validated_data,
             )
             return Response(
-                client_books.entry_row(entry, user=request.user),
+                client_books.entry_row(entry, masked=self._masked()),
                 status=status.HTTP_201_CREATED,
             )
         return Response(
@@ -2003,11 +2009,11 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         """حركةٌ واحدة — **قراءةٌ فقط**: `PUT`/`PATCH`/`DELETE` عليها 405 (د4)."""
         book = self._book(pk)
         entry = book.entries.prefetch_related(
-            "lines__account", "reversed_by",
+            "lines__account", "reversed_by", "documents",
         ).filter(pk=entry_id).first()
         if entry is None:
             raise NotFound("الحركة غير موجودة.")
-        return Response(client_books.entry_row(entry, user=request.user))
+        return Response(client_books.entry_row(entry, masked=self._masked()))
 
     @action(
         detail=True, methods=["post"],
@@ -2017,7 +2023,9 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         """حركةٌ عكسية على حركةٍ في **هذا** الدفتر — وحركةُ غيره 404."""
         book = self._book(pk)
         self.require_write()
-        entry = book.entries.filter(pk=entry_id).select_related("client_book").first()
+        entry = book.entries.filter(pk=entry_id).select_related(
+            "client_book", "client",
+        ).first()
         if entry is None:
             raise NotFound("الحركة غير موجودة.")
         serializer = BookEntryReverseSerializer(data=request.data)
@@ -2026,13 +2034,13 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
             entry, actor=request.user, **serializer.validated_data,
         )
         return Response(
-            client_books.entry_row(reversal, user=request.user),
+            client_books.entry_row(reversal, masked=self._masked()),
             status=status.HTTP_201_CREATED,
         )
 
     @action(detail=False, methods=["get"], url_path="pending-entry")
     def pending_entry(self, request):
-        """«للإدخال»: ورقٌ واصلةٌ بلا حركة — مشتقٌّ لا مخزّن (د8/د9)."""
+        """«للإدخال»: ورقٌ واصلةٌ بلا حركةٍ حيّة — مشتقٌّ لا مخزّن (د8/د9)."""
         return Response(
             client_books.pending_entry_payload(self.tenant, request.user),
         )
