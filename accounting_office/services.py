@@ -6366,6 +6366,12 @@ def create_contact(tenant, *, name, phone="", language="ar") -> Contact:
 
 
 # ── النصوص: الافتراضي في الكود وبديلُ المكتب (#280/D3) ───────────────────────
+#: كلمةُ «لا شيء» بلغة المستلِم — تُوضع مكان قيمةٍ غائبة (`{amount}` بلا مبلغ،
+#: `{missing_list}` بلا أوراقٍ ناقصة) في نصٍّ مسطَّحٍ لا يحذف عنوانه: بدونها يبقى
+#: العنوانُ معلَّقاً («أوراق ناقصة: ») أو يظهر فراغٌ مزدوج.
+REMINDER_ABSENT_TEXT: dict[str, str] = {"ar": "ولا شي", "he": "אין"}
+
+
 def render_reminder_body(body, values) -> str:
     """يستبدل الرموزَ المعروفة ويترك ما سواها كما هو (بلا `str.format`).
 
@@ -6479,6 +6485,9 @@ class ReminderCandidate:
     period_end: Any
     missing: tuple[str, ...]
     missing_codes: tuple[str, ...]
+    #: `count`/`maximum` = خانةُ «س من ن» في البند، ومعناها بحسب الإيقاع: للأوراق
+    #: عدُّ الصفوف الصادرة من حدِّها، وللموعد صفوفُ نافذته السارية من سقفها (١)،
+    #: وللموعد الرسميّ موضعُ نافذته من موضعَي (7، 2) — والسقفُ هنا بنيويّ.
     count: int
     maximum: int
     interval_days: int
@@ -6500,6 +6509,9 @@ class ReminderCandidate:
     #: تسميةُ الفترة حين لا تكون فترةً شهرية — «04/05/2026 10:30» لموعدٍ بيومه
     #: ووقته، وغيابُها يعني تسميةَ الفترة المحسوبة (`deadlines.period_label`).
     period_text: str | None = None
+    #: المستحقُّ على الزبون في هذه الفترة — `None` حيث لا مبلغَ (أوراقٌ وموعد).
+    #: مجموعُ التزامات الفترة في مولّد «موعد رسمي قريب» وحده (#281).
+    amount: Decimal | None = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -6661,9 +6673,11 @@ def _reminder_candidates(
         if row["reverted"]:
             continue
         key = (row["client_id"], row["reminder_type"], row["period_start"], row["period_end"])
-        by_pair.setdefault(key, []).append(row)
-    #: العدُّ الصافي لكل بندٍ **مرّةً واحدة**: مولّدا #281 لا يحتاجان أوقاتَ
-    #: الصفوف بل عددَها، فتُقرأ العدّةُ هنا ولا تُعاد في كلّ مولّد.
+        #: ويومُ الصفّ معه محسوباً: مولّدا #281 يقيسان **نافذةً** بأيّام الصفوف،
+        #: و`localdate` مرّةً لكل صفٍّ أرخصُ من إعادتها في كل مولّد.
+        by_pair.setdefault(key, []).append({**row, "day": _reminder_log_day(row)})
+    #: العدُّ الصافي لكل بند — لمولّد الأوراق وحده: الإيقاعُ فيه عدُّ صفوفٍ لا
+    #: نافذةُ أيام، ومولّدا #281 يقرآن `by_pair` بأيّامه.
     counted_by_pair = {
         key: sum(1 for row in pair if row["kind"] in REMINDER_COUNTED_KINDS)
         for key, pair in by_pair.items()
@@ -6684,7 +6698,8 @@ def _reminder_candidates(
         periods = periods_by_client.get(client.pk, ())
         # الأوراقُ وحدها في هذه الحلقة؛ والموعدُ والموعدُ الرسميُّ في
         # `appointments` — ودخولُهما هنا بنداً ثانياً يخنق هذا المسح.
-        if REMINDER_DOCUMENTS in enabled:
+        # وفلترُ الطلب يخصّها أيضاً: طلبُ نوعٍ آخر لا يعرض بندَ أوراق.
+        if REMINDER_DOCUMENTS in enabled and reminder_type in (None, REMINDER_DOCUMENTS):
             for period_start, period_end, bucket in periods:
                 pairs = by_pair.get(
                     (client.pk, REMINDER_DOCUMENTS, period_start, period_end), [],
@@ -6695,7 +6710,7 @@ def _reminder_candidates(
                 interval_days = resolved.get(DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY) or 1
                 start_days = resolved.get(DOCUMENTS_REMINDER_START_DAYS_KEY) or 0
                 maximum = resolved.get(DOCUMENTS_REMINDER_MAX_KEY) or 1
-                last_day = max((_reminder_log_day(row) for row in pairs), default=None)
+                last_day = max((row["day"] for row in pairs), default=None)
                 next_due = (
                     period_end + timedelta(days=start_days) if last_day is None
                     else last_day + timedelta(days=interval_days)
@@ -6724,17 +6739,19 @@ def _reminder_candidates(
         day=day,
         settings_by_client=settings_by_client,
         contacts=contacts,
-        counted_by_pair=counted_by_pair,
+        by_pair=by_pair,
         postponed_pairs=postponed,
+        reminder_type=reminder_type,
     ))
     candidates.extend(appointments.deadline_reminder_candidates(
         tenant, clients,
         day=day,
         settings_by_client=settings_by_client,
         contacts=contacts,
-        counted_by_pair=counted_by_pair,
+        by_pair=by_pair,
         missing_by_period=grouped,
         postponed_pairs=postponed,
+        reminder_type=reminder_type,
     ))
     return candidates
 
@@ -6797,21 +6814,29 @@ def _reminder_item_payload(candidate) -> dict:
     }
 
 
-def _reminder_render_values(tenant, candidate) -> dict:
+def _reminder_render_values(tenant, candidate, *, language="") -> dict:
     """قيمُ الرموز الستّة لبند — **و`{due_date}` يخصّ نوعَه**.
 
     للأوراق هو يومُ التذكير **القادم** (وكان يُحسب `day + interval_days` هنا
     لأن `next_due` ماضٍ بيقين بعد يوم راحةٍ أو عطلة)، ولموعد التقديم هو تاريخُ
     تقديمه، ولموعد الزبون تاريخُ موعده. واليومُ المحسوبُ في المولّد
     (`render_due`) لا يُعاد بناؤه هنا.
-    `amount` فارغٌ لأن مولّدَ الحساب ليس هنا (#285).
+
+    **و`{amount}` مبلغُ الفترة المنسَّق** من `candidate.amount` (بخانتين كسائر
+    مبالغ الموديول) لا فراغاً دائماً كما كان، و`{missing_list}` أسماءُ الناقص.
+    والقيمةُ الغائبةُ تُنطق `REMINDER_ABSENT_TEXT` بلغة المستلِم: نصٌّ مسطَّحٌ بلا
+    شرطٍ لا يستطيع حذف عنوانٍ من سطره، فكلمةُ «لا شيء» تُغلق الجملةَ في الحالات
+    الثلاث (أوراقٌ وحدها · مبلغٌ وحده · الاثنان) ولا تُبقي كلمةً معلَّقة.
     """
+    # العربيةُ احتياطاً: لغةٌ خارج الاثنتين كانت تُعيد عنواناً بلا قيمةٍ (وكانت
+    # العناوينُ المعلَّقة هي العلّةَ التي أُعيدت الصياغةُ من أجلها).
+    absent = REMINDER_ABSENT_TEXT.get(language) or REMINDER_ABSENT_TEXT["ar"]
     return {
         "client_name": candidate.client.name,
         "period": deadlines.period_label(candidate.period_start, candidate.period_end),
         "due_date": (candidate.render_due or candidate.next_due).strftime("%d/%m/%Y"),
-        "amount": "",
-        "missing_list": "، ".join(candidate.missing),
+        "amount": absent if candidate.amount is None else f"{candidate.amount:.2f}",
+        "missing_list": "، ".join(candidate.missing) or absent,
         "office_name": tenant.CompanyName,
     }
 
@@ -6825,7 +6850,7 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
     body = "\n\n".join(
         render_reminder_body(
             bodies_by_type.get(candidate.reminder_type, {}).get(contact.language, ""),
-            _reminder_render_values(tenant, candidate),
+            _reminder_render_values(tenant, candidate, language=contact.language),
         )
         for candidate in candidates
     )

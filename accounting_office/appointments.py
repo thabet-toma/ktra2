@@ -10,15 +10,28 @@
 والعطلة والتأجيل والحدّ الأقصى. والفرقُ الوحيدُ أنّ مؤقّتاتِهما تُقاس بـ
 `Obligation.due_date` و`ClientAppointment.scheduled_at` لا بفترة أوراق.
 
+**والنافذةُ لا العدّاد** (جولة التصليح الأولى): كلُّ مولّدٍ يفتح نافذةً من اليوم —
+للموعد `slot_day - lead`، وللموعد الرسميّ موضعا `(7، 2)` — والبندُ مستحقٌّ إن لم
+يكن في السجلّ **صفٌّ مؤقّتٌ يومُه داخل النافذة السارية**، والداخلُ بحدّيه: من بداية
+النافذة إلى اليوم المحسوب (فصفٌّ بعد ذلك اليوم لم يكن قد وُجد حينها، و`ready-to-send`
+يقبل يوماً صريحاً لعرض يومٍ مضى). والعدُّ وحده كان يُسقط
+«شيل» (لا يُعدّ) فتعود التنحيةُ كلَّ يوم، ويُكرِّر الرسالةَ في اليوم نفسه (إزاحةٌ
+أضيق بعد أوّل صفّ)، ويستهلك تأكيدُ الموعد نافذةَ تذكيره فيمنع «قبله بيوم».
+
 **وموعدُ التقديم لا يُحسب من جديد**: «آخر موعد فعلي» هو
 `extended_to or actual_deadline` — نفسُ `Obligation.due_date` التي يقرؤها التأخيرُ
 الأحمرُ ونافذةُ «قريب هالأسبوع»؛ نسخةٌ ثانية هنا كانت ستختلف عنه عند أوّل تمديد.
+**وبندٌ واحدٌ لكل (زبون، فترة)**: التزامان في الفترة الواحدة بندان بمفتاحٍ واحد
+(تحذيرُ مفاتيحَ مكرَّرة في React، وعدّادٌ مشتركٌ يسقط «قبل ٢»)، فتُجمَّع التزاماتُ
+الفترة في بندٍ واحد: أقربُ موعدٍ يفتح نافذته، وناقصُها اتّحادٌ، ومبلغُها مجموعُ
+المستحقّ عليها.
 
 **والشرطُ الحاسم**: لا تذكيرَ بموعدٍ رسميٍّ إلّا إذا **على الزبون شيء** —
 أوراقٌ ناقصةٌ أو مبلغٌ غيرُ مدفوع. ودالّةُ `client_owes` نقيّةٌ ومفردة، فيُثبت
 اختبارُها الحالاتِ الأربع بلا قاعدة بيانات.
 """
 import datetime
+from decimal import Decimal
 
 from django.core.exceptions import ValidationError
 from django.db import transaction
@@ -48,8 +61,8 @@ from accounting_office.models import (
 APPOINTMENT_REMINDER_DAYS_KEY = services.APPOINTMENT_REMINDER_DAYS_KEY
 
 #: موضعا تذكير «موعد رسمي قريب»: **سبعةُ أيامٍ ويومان** قبل آخر موعدٍ فعليّ.
-#: الحسابُ عند القراءة من العدّاد: أوّلُ تذكيرٍ عند الموضع الأوّل، وثانيه عند
-#: الثاني، ولا ثالثَ بعدهما (`maximum` عددهما).
+#: كلُّ موضعٍ **نافذةٌ** تُفتح مرّةً: تُحسب من اليوم (`due - offset`) لا من عدّ
+#: الصفوف، والبندُ يسكت متى وقع في السجلّ صفٌّ داخل نافذته السارية.
 DEADLINE_REMINDER_OFFSETS: tuple[int, ...] = (7, 2)
 
 #: أقصى عددِ تذكيراتٍ لموعدٍ واحد — تذكيرٌ واحدٌ يكفي، وما بعده إلحاح.
@@ -127,6 +140,15 @@ def _stamp(appointment, **fields):
     ClientAppointment.objects.filter(pk=appointment.pk).update(**fields)
     appointment.refresh_from_db()
     return appointment
+
+
+def _within_window(rows, *, window_start, day):
+    """الصفوفُ المؤقّتة الواقعة في النافذة السارية — **قاعدةٌ واحدة للمولّدَين**.
+
+    الصفُّ بعد اليوم المحسوب لا يُحسب: `ready-to-send` يقبل يوماً صريحاً (لعرض
+    يومٍ مضى)، وصفٌّ كُتب بعده لم يكن قد وُجد «حينها».
+    """
+    return [row for row in rows if window_start <= row["day"] <= day]
 
 
 # ── السطر كما يُعرض ─────────────────────────────────────────────────────────
@@ -393,15 +415,18 @@ def send_appointment_confirmation(
 
 # ── مولّدُ «تذكير موعد» ──────────────────────────────────────────────────────
 def appointment_reminder_candidates(
-    tenant, clients, *, day, settings_by_client, contacts, counted_by_pair,
-    postponed_pairs,
+    tenant, clients, *, day, settings_by_client, contacts, by_pair,
+    postponed_pairs, reminder_type=None,
 ) -> list:
     """بنودُ موعدٍ اقترب — **مولّدٌ ثانٍ** يمرّ في المحرّك القائم نفسه.
 
-    الميعادُ = `scheduled_at - appointment_reminder_days`؛ ومن حلّ الميعادَ إلى
-    يومِ الموعد يظلّ ظاهراً (لا يُلغى بيوم راحةٍ بل يُزحزَح، كسائر الأنواع).
-    وتذكيرٌ واحدٌ لكل موعد (`maximum`)، والعدُّ من السجلّ عند كل قراءة.
+    الميعادُ = `scheduled_at - appointment_reminder_days`، ونافذتُه منه إلى يوم
+    الموعد؛ والبندُ مستحقٌّ إن لم يكن في السجلّ صفٌّ مؤقّتٌ **داخل النافذة** —
+    فيُسكت «شيل» و«تأكيد» و«انبعثت» حتّى اليوم نفسه، ولا يستهلك تأكيدٌ سابقٌ
+    للنافذة تذكيرَ «قبله بيوم».
     """
+    if reminder_type is not None and reminder_type != REMINDER_APPOINTMENT:
+        return []
     live = [
         client for client in clients
         if REMINDER_APPOINTMENT in (
@@ -438,15 +463,19 @@ def appointment_reminder_candidates(
         for slot in slots:
             scheduled = timezone.localtime(slot["scheduled_at"])
             slot_day = scheduled.date()
-            next_due = slot_day - datetime.timedelta(days=leads[client_id])
-            count = counted_by_pair.get(
-                (client_id, REMINDER_APPOINTMENT, slot_day, slot_day), 0,
-            )
+            window_start = slot_day - datetime.timedelta(days=leads[client_id])
+            count = len(_within_window(
+                by_pair.get(
+                    (client_id, REMINDER_APPOINTMENT, slot_day, slot_day), (),
+                ),
+                window_start=window_start,
+                day=day,
+            ))
             candidates.append(services.ReminderCandidate(
                 client=client,
                 reminder_type=REMINDER_APPOINTMENT,
                 # المفتاحُ يومُ الموعد بطرفيه: تذكيران في يومٍ واحد لموعدين لا
-                # يدخلان في عدّادٍ واحد.
+                # يدخلان في نافذةٍ واحدة.
                 period_start=slot_day,
                 period_end=slot_day,
                 missing=(),
@@ -454,10 +483,14 @@ def appointment_reminder_candidates(
                 count=count,
                 maximum=APPOINTMENT_REMINDER_MAX,
                 interval_days=leads[client_id],
-                next_due=next_due,
+                next_due=window_start,
                 contact=contact,
                 tax_system=settings_by_client[client_id].get(services.TAX_SYSTEM_KEY),
-                due=next_due <= day <= slot_day,
+                # من فتح النافذة إلى يوم الموعد نفسه، ولا إرسالَ بعد أن مضى.
+                due=(
+                    window_start <= day <= slot_day
+                    and count < APPOINTMENT_REMINDER_MAX
+                ),
                 exhausted=count >= APPOINTMENT_REMINDER_MAX,
                 postponed=(client_id, REMINDER_APPOINTMENT) in postponed_pairs,
                 badge=OBLIGATION_BADGE_NEAR,
@@ -468,16 +501,52 @@ def appointment_reminder_candidates(
 
 
 # ── مولّدُ «موعد رسمي قريب» (د3) ────────────────────────────────────────────
-def deadline_reminder_candidates(
-    tenant, clients, *, day, settings_by_client, contacts, counted_by_pair,
-    missing_by_period, postponed_pairs,
-) -> list:
-    """بنودُ «موعد رسمي قريب» — قبل **7 أيام** وقبل **يومين** من آخر موعدٍ فعليّ.
+def _deadline_window(day, due):
+    """النافذةُ السارية اليوم من موضعَي `(7، 2)`: (موضعُها، بدايتها).
 
-    والمصدرُ `Obligation.due_date` وحدها (الممدَّدُ أو الفعليّ) — ولذلك يعبر
-    التمديدُ الميعادَين معه بلا حسابٍ ثانٍ. والالتزامُ الذي لا شيءَ على الزبون فيه
-    لا بندَ له، و«انقدّم»/«مش لازم» يُسقطانه قبل السؤال أصلاً.
+    والموضعُ يُقرأ من اليوم لا من عدد الصفوف: `(7)` ساريةٌ من `due - 7`، و`(2)`
+    تفتح فوقها من `due - 2` فتلغيها (الأضيقُ هو الساري). وقبل أن تُفتح الأولى
+    يُرجَع موضعُها هي — وبدايتُها بعد اليوم، فلا يستحقّ البند.
     """
+    for index in range(len(DEADLINE_REMINDER_OFFSETS), 0, -1):
+        start = due - datetime.timedelta(days=DEADLINE_REMINDER_OFFSETS[index - 1])
+        if day >= start:
+            return index, start
+    return 1, due - datetime.timedelta(days=DEADLINE_REMINDER_OFFSETS[0])
+
+
+def _period_unpaid_total(rows):
+    """مجموعُ المستحقّ **على الزبون** في التزامات فترةٍ — `Decimal` أو `None`.
+
+    المدفوعُ («الزبون دفع») والمرتجعُ («إلنا» لا «علينا») لا يدخلان المجموع،
+    ومجموعُ صفرٍ يعني «لا مبلغَ في النصّ» لا «مبلغٌ صفر».
+    """
+    total = sum(
+        (
+            row["amount"] for row in rows
+            if row["amount"] is not None
+            and not row["client_paid"]
+            and row["direction"] != OBLIGATION_DIRECTION_REFUND
+        ),
+        Decimal("0"),
+    )
+    return total if total > 0 else None
+
+
+def deadline_reminder_candidates(
+    tenant, clients, *, day, settings_by_client, contacts, by_pair,
+    missing_by_period, postponed_pairs, reminder_type=None,
+) -> list:
+    """بنودُ «موعد رسمي قريب» — **بندٌ واحدٌ لكل (زبون، فترة)**.
+
+    المصدرُ `Obligation.due_date` وحدها (الممدَّدُ أو الفعليّ) — ولذلك يعبر
+    التمديدُ الموضعَين معه بلا حسابٍ ثانٍ. والالتزامُ الذي لا شيءَ على الزبون فيه
+    لا يفتح بنداً، و«انقدّم»/«مش لازم» يُسقطانه قبل السؤال أصلاً. والتزاماتُ
+    الفترة الواحدة تُجمع: **أقربُ** موعدٍ فيها هو ما يفتح نافذتها، وأسماءُ
+    الناقص اتّحادُها، والمبلغُ مجموعُ المستحقّ عليها.
+    """
+    if reminder_type is not None and reminder_type != REMINDER_DEADLINE:
+        return []
     live = [
         client for client in clients
         if REMINDER_DEADLINE in (
@@ -499,51 +568,69 @@ def deadline_reminder_candidates(
             "extended_to", "amount", "client_paid", "direction",
         )
     )
+    periods: dict[tuple[int, object, object], list] = {}
+    for row in rows:
+        periods.setdefault(
+            (row["client_id"], row["period_start"], row["period_end"]), [],
+        ).append(row)
     clients_by_id = {client.pk: client for client in live}
     maximum = len(DEADLINE_REMINDER_OFFSETS)
     candidates = []
-    for row in rows:
-        due = row["extended_to"] or row["actual_deadline"]
-        if (due - day).days > widest:
-            continue
-        bucket = missing_by_period.get(
-            (row["client_id"], row["period_start"], row["period_end"]),
-        ) or {}
+    for (client_id, period_start, period_end), period_rows in periods.items():
+        bucket = missing_by_period.get((client_id, period_start, period_end)) or {}
         missing = tuple(bucket.get("names") or ())
-        if not client_owes(
-            status=OBLIGATION_STATUS_PENDING,
-            missing=missing,
-            amount=row["amount"],
-            client_paid=row["client_paid"],
-            direction=row["direction"],
-        ):
+        owing = [
+            row for row in period_rows
+            if client_owes(
+                status=OBLIGATION_STATUS_PENDING,
+                missing=missing,
+                amount=row["amount"],
+                client_paid=row["client_paid"],
+                direction=row["direction"],
+            )
+        ]
+        if not owing:
             continue
-        count = counted_by_pair.get(
-            (row["client_id"], REMINDER_DEADLINE, row["period_start"], row["period_end"]),
-            0,
+        #: أقربُ موعدٍ فعليّ **في الفترة** (لا في الالتزام الذي عليه شيء): الفترةُ
+        #: وحدةُ التذكير، وموعدُها الأبكرُ هو الذي يفتح نافذتها.
+        due = min((row["extended_to"] or row["actual_deadline"]) for row in period_rows)
+        if (due - day).days > widest:
+            # أبعدُ من أوسع النوافذ — لا بندَ له اليومَ أصلاً (كلفةٌ لا نتيجة).
+            continue
+        window_index, window_start = _deadline_window(day, due)
+        #: الصفوفُ المؤقّتة **داخل النافذة السارية** — وجودُ واحدٍ يُسكتها.
+        observed = _within_window(
+            by_pair.get(
+                (client_id, REMINDER_DEADLINE, period_start, period_end), (),
+            ),
+            window_start=window_start,
+            day=day,
         )
-        offset = DEADLINE_REMINDER_OFFSETS[min(count, maximum - 1)]
-        next_due = due - datetime.timedelta(days=offset)
-        client_id = row["client_id"]
         candidates.append(services.ReminderCandidate(
             client=clients_by_id[client_id],
             reminder_type=REMINDER_DEADLINE,
-            period_start=row["period_start"],
-            period_end=row["period_end"],
+            period_start=period_start,
+            period_end=period_end,
             missing=missing,
             missing_codes=tuple(bucket.get("codes") or ()),
-            count=count,
+            # `step`/`max` من موضع النافذة لا من الصفوف: النافذةُ الثانية «٢ من ٢»
+            # ولو لم يُرسل شيءٌ في الأولى.
+            count=window_index - 1,
             maximum=maximum,
             interval_days=DEADLINE_REMINDER_OFFSETS[-1],
-            next_due=next_due,
+            next_due=window_start,
             contact=contacts.get((client_id, REMINDER_DEADLINE)),
             tax_system=settings_by_client[client_id].get(services.TAX_SYSTEM_KEY),
             # قبل الميعاد و**إلى يوم الموعد نفسه**: بعده يصير متأخّراً، والتنبيهُ
             # الأحمرُ يخصّه (`obligation_late`) فلا ينبّه النصُّ تذكيراً بموعدٍ فات.
-            due=next_due <= day <= due,
-            exhausted=count >= maximum,
+            # وصفٌّ في السجلّ داخل النافذة السارية يُسكتها حتّى تُفتح التالية.
+            due=window_start <= day <= due and not observed,
+            # والسقفُ بنيويٌّ لا عدّاد: نافذتان لا ثالثَ بعدهما، وما بعد يوم
+            # الموعد يُسقطه `due` — فلا `exhausted` لهذا النوع أبداً.
+            exhausted=False,
             postponed=(client_id, REMINDER_DEADLINE) in postponed_pairs,
             badge=OBLIGATION_BADGE_NEAR,
             render_due=due,
+            amount=_period_unpaid_total(period_rows),
         ))
     return candidates

@@ -7,11 +7,11 @@ import {
   rescheduleAppointment,
 } from '../../services/accountingOfficeApi';
 import {
+  appointmentConfirmationView,
   appointmentSlotValue,
   appointmentStatusClass,
   isOpenAppointment,
   officeAppointmentAnchorId,
-  officeWhatsappLink,
   type OfficeAppointmentRow,
 } from '../../utils/accountingOffice';
 import { humanizeThrown } from '../../utils/drfError';
@@ -50,7 +50,6 @@ export const OfficeAppointmentCard: React.FC<{
     null,
   );
   const open = isOpenAppointment(appointment);
-  const system = (appointment.tax_system ?? taxSystem ?? null) as string | null;
 
   const act = useCallback(
     async (run: () => Promise<void>, done: string, failed: string) => {
@@ -72,10 +71,7 @@ export const OfficeAppointmentCard: React.FC<{
     act(
       async () => {
         const result = await confirmAppointment(appointment.id);
-        setConfirmation({
-          body: result.body,
-          link: officeWhatsappLink(result.phone, system, result.body),
-        });
+        setConfirmation(appointmentConfirmationView(result, taxSystem));
       },
       'تسجّل التأكيد — الرسالةُ جاهزة.',
       'تعذّر تسجيل التأكيد.',

@@ -1826,3 +1826,24 @@ export interface AppointmentConfirmation {
   body: string;
   phone: string;
 }
+
+/**
+ * نتيجةُ التأكيد بشكلها المعروض: النصُّ كما بناه الخادم، ورابطُ واتساب جاهزاً.
+ *
+ * **دالّةٌ واحدة لسطحَين** — بطاقةُ الموعد في ملفّ الزبون وشريحةُ التقويم: الرابطُ
+ * يُبنى في `officeWhatsappLink` وحدها، ونظامُ الزبون من السطر العائد (ونظامُ
+ * البطاقة احتياطاً لسطرٍ غاب نظامُ زبونه)، فلا نسخةَ ثانية تفترق عند أوّل تعديل.
+ */
+export function appointmentConfirmationView(
+  result: AppointmentConfirmation,
+  taxSystem?: string | null,
+): { body: string; link: string | null } {
+  return {
+    body: result.body,
+    link: officeWhatsappLink(
+      result.phone,
+      result.appointment.tax_system ?? taxSystem ?? null,
+      result.body,
+    ),
+  };
+}

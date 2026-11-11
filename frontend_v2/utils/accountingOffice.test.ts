@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   AMOUNT_MASK,
   alertTargetPath,
+  appointmentConfirmationView,
   appointmentSlotValue,
   appointmentStatusClass,
   applyPackageSummary,
@@ -1148,4 +1149,32 @@ test('المواعيدُ مجموعةً بأيامها، والمحجوزُ وح
   assert.notEqual(appointmentStatusClass('scheduled'), appointmentStatusClass('cancelled'));
   assert.notEqual(appointmentStatusClass('done'), appointmentStatusClass('cancelled'));
   assert.equal(officeAppointmentAnchorId(7), 'office-appointment-7');
+});
+
+test('تأكيدُ الموعد: النصُّ كما بناه الخادم، والرابطُ من نظام زبونه', () => {
+  const result = {
+    appointment: { tax_system: 'IL' },
+    log: { id: 3 },
+    body: 'بذكّرك بموعدك يوم 04/02/2026.',
+    phone: '0599123456',
+  };
+  const view = appointmentConfirmationView(result as never);
+
+  assert.equal(view.body, result.body);
+  assert.ok(view.link?.startsWith('https://wa.me/'));
+  assert.ok(view.link?.includes(encodeURIComponent(result.body)));
+
+  // نظامُ السطر العائد يغلب الاحتياط، والغيابُ في الاثنين لا يخترع مفتاحَ دولة:
+  // رقمٌ أرضيٌّ بلا نظامٍ لا يُبنى له رابط، فيبقى النصُّ بلا زرّ محادثة.
+  assert.equal(
+    appointmentConfirmationView({ ...result, appointment: { tax_system: null } } as never, 'IL')
+      .link,
+    view.link,
+  );
+  assert.equal(
+    appointmentConfirmationView(
+      { ...result, appointment: { tax_system: null }, phone: '022345678' } as never,
+    ).link,
+    null,
+  );
 });

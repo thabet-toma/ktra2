@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import {
+  confirmAppointment,
   createAppointment,
   getOfficeCalendar,
   getOfficeSettings,
@@ -19,10 +20,12 @@ import { useToast } from '../../contexts/ToastContext';
 import {
   CLIENT_APPOINTMENTS_TAB,
   CLIENT_TAB_PARAM,
+  appointmentConfirmationView,
   clientFilePath,
   groupAppointmentsByDay,
   groupDeadlinesByDay,
   isExpectedDeadline,
+  isOpenAppointment,
   monthGrid,
   nextMonthKey,
   obligationOriginLabel,
@@ -89,6 +92,12 @@ export const OfficeCalendarScreen: React.FC = () => {
   const [bookSlot, setBookSlot] = useState('');
   const [bookNote, setBookNote] = useState('');
   const [bookBusy, setBookBusy] = useState(false);
+  // #281: «ابعت تأكيد» من التقويم — الموعدُ المحجوز هنا يُؤكَّد من هنا، لا من
+  // ملفّ الزبون وحده. والسطرُ العائد من الخادم يُستبدل في الحالة بلا إعادة تحميل.
+  const [confirmingId, setConfirmingId] = useState<number | null>(null);
+  const [confirmation, setConfirmation] = useState<{ body: string; link: string | null } | null>(
+    null,
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
@@ -202,6 +211,38 @@ export const OfficeCalendarScreen: React.FC = () => {
     setBookingOpen((open) => !open);
   }, [anchor, bookingOpen]);
 
+  /**
+   * «ابعت تأكيد» للتقويم (#281) — **الدالّةُ نفسها** التي يناديها ملفّ الزبون
+   * (`confirmAppointment`)، فالمنطقُ في الخادم ونسخةٌ واحدة في الواجهة.
+   *
+   * والسطرُ العائد يحمل `confirmed_at` الجديد، فيُستبدل في الحالة فوراً: لا طلبَ
+   * إعادة تحميلٍ للشبكة كلها. ورفضُ الخادم (زبونٌ بلا جهةٍ بهاتف) يصل نصُّه من
+   * `humanizeThrown` فيُقرأ سببه لا «تعذّر» مبهمة.
+   */
+  const confirmSlot = useCallback(
+    async (slot: OfficeAppointmentRow) => {
+      setConfirmingId(slot.id);
+      try {
+        const result = await confirmAppointment(slot.id);
+        setAppointmentRows((rows) =>
+          rows.map((row) =>
+            row.id === result.appointment.id ? result.appointment : row,
+          ),
+        );
+        setConfirmation(appointmentConfirmationView(result));
+        toast('تسجّل التأكيد — الرسالةُ جاهزة.', 'success');
+      } catch (failure) {
+        toast(
+          humanizeThrown(failure, 'تعذّر تسجيل التأكيد — تحقّق من جهة الزبون ورقمها.'),
+          'error',
+        );
+      } finally {
+        setConfirmingId(null);
+      }
+    },
+    [toast],
+  );
+
   const goToday = useCallback(() => setAnchor(todayIso()), []);
   const shift = useCallback(
     (direction: -1 | 1) => {
@@ -314,24 +355,41 @@ export const OfficeCalendarScreen: React.FC = () => {
           ) : null}
         </div>
         {slots.map((slot) => (
-          <button
-            key={`appointment-${slot.id}`}
-            type="button"
-            onClick={() => navigate(`${clientFilePath(slot.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_APPOINTMENTS_TAB}`)}
-            className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-start text-[11px] transition hover:border-teal-400 dark:border-teal-800 dark:bg-slate-900"
-          >
-            <span className="block truncate font-semibold text-slate-800 dark:text-slate-100">
-              {slot.client.name}
-            </span>
-            <span className="mt-0.5 flex flex-wrap items-center gap-1">
-              <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-teal-800 dark:bg-teal-950/40 dark:text-teal-200">
-                {slot.time}
+          <div key={`appointment-${slot.id}`} className="space-y-1">
+            <button
+              type="button"
+              onClick={() => navigate(`${clientFilePath(slot.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_APPOINTMENTS_TAB}`)}
+              className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-start text-[11px] transition hover:border-teal-400 dark:border-teal-800 dark:bg-slate-900"
+            >
+              <span className="block truncate font-semibold text-slate-800 dark:text-slate-100">
+                {slot.client.name}
               </span>
-              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
-                {slot.kind_label}
+              <span className="mt-0.5 flex flex-wrap items-center gap-1">
+                <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-teal-800 dark:bg-teal-950/40 dark:text-teal-200">
+                  {slot.time}
+                </span>
+                <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  {slot.kind_label}
+                </span>
+                {slot.confirmed_at ? (
+                  <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold text-teal-700 dark:bg-teal-950/40 dark:text-teal-300">
+                    تأكيد مسجَّل
+                  </span>
+                ) : null}
               </span>
-            </span>
-          </button>
+            </button>
+            {/* الحجزُ من التقويم كان يترك التأكيدَ في ملفّ الزبون وحده. */}
+            {canBook && isOpenAppointment(slot) && !slot.confirmed_at ? (
+              <button
+                type="button"
+                onClick={() => confirmSlot(slot)}
+                disabled={confirmingId === slot.id}
+                className="w-full rounded-md border border-teal-200 px-1.5 py-1 text-[10px] font-semibold text-teal-800 transition hover:border-teal-400 disabled:opacity-60 dark:border-teal-900 dark:text-teal-200"
+              >
+                {confirmingId === slot.id ? 'يسجّل…' : 'ابعت تأكيد'}
+              </button>
+            ) : null}
+          </div>
         ))}
         {items.map(renderItem)}
       </div>
@@ -507,6 +565,38 @@ export const OfficeCalendarScreen: React.FC = () => {
                 </button>
               </div>
             ) : null}
+          </div>
+        ) : null}
+
+        {/* نصُّ التأكيد كما بناه الخادم — والرابطُ من `appointmentConfirmationView`. */}
+        {confirmation ? (
+          <div className="mt-3 rounded-lg border border-teal-200 bg-teal-50 p-2.5 dark:border-teal-900 dark:bg-teal-950/40">
+            <div className="flex items-start justify-between gap-2">
+              <p className="whitespace-pre-line text-[11.5px] text-teal-900 dark:text-teal-100">
+                {confirmation.body}
+              </p>
+              <button
+                type="button"
+                onClick={() => setConfirmation(null)}
+                className="shrink-0 text-[11px] font-semibold text-teal-800 hover:underline dark:text-teal-200"
+              >
+                إخفاء
+              </button>
+            </div>
+            {confirmation.link ? (
+              <a
+                href={confirmation.link}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 inline-block rounded-lg bg-teal-700 px-3 py-1.5 text-[11.5px] font-semibold text-white hover:bg-teal-800"
+              >
+                افتح واتساب
+              </a>
+            ) : (
+              <p className="mt-1 text-[10.5px] text-teal-800 dark:text-teal-200">
+                لا رابطَ واتساب — رقمُ الجهة أرضيٌّ ونظامُ الزبون غير معروف.
+              </p>
+            )}
           </div>
         ) : null}
       </header>
