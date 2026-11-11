@@ -292,9 +292,19 @@ class ReportsIndexTest(BookReportsTestCase):
 
         ولم يُطلب من شركةٍ أخرى عمداً: 404 هناك تأتي من العزل في `_book` ولو حُذف
         `require_module`، فيمرّ الاختبار بلا أن يقيس ما في اسمه.
+
+        **والزبونُ مسؤولُه المالكُ نفسُه** لا المحاسب: `office.clients.all` مقيَّدٌ
+        بالموديول، فإطفاءُ الترخيص يُسقطه من صلاحيات المالك، وزبونُ المحاسب كان
+        يردّ 404 من `visible_clients` في `_book` ولو غاب `require_module` —
+        فالاختبارُ كان يمرّ بلا حارس. مسؤولُه المالكُ يبقى مرئياً للمالك
+        بالمسؤولية وحدها، فلا يُسقطه إلا البوّابةُ.
         """
-        self.create_book(self.mine, kind=BOOK_KIND_SIMPLE)
-        paths = (reports_url(self.mine), reports_url(self.mine, "cash"))
+        owned = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبون المالك", responsible=self.owner,
+        )
+        self.create_book(owned, kind=BOOK_KIND_SIMPLE)
+        paths = (reports_url(owned), reports_url(owned, "cash"))
         for path in paths:
             with self.subTest(path=path, licensed=True):
                 self.assertEqual(
@@ -586,6 +596,104 @@ class DoubleEraTest(BookReportsTestCase):
         self.get_report(self.mine, "trial_balance", expect=409)
 
 
+class UnconvertedDoubleBookTest(BookReportsTestCase):
+    """دفترٌ مفتوحٌ مزدوجاً **لا عهدَ له**: `opened_on` ليست حدَّ عهد.
+
+    افتراضُها يومُ إنشاء الدفتر، وقيودُ ما قبلها هي **المسارُ العادي** لاستقبال
+    زبون (دفترٌ يُفتح في منتصف السنة ثم تُدخل حركاتُ يناير). ومصدرُ العهد الوحيد
+    `kind_changed_on`: فالدفترُ الذي لم يتحوّل لا يُقصّ ولا يُحجب منه شيء.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.opened = datetime.date(THIS_YEAR, 3, 1)
+        self.capital_day = datetime.date(THIS_YEAR, 1, 15)
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE, opened_on=self.opened)
+        self.add_entry(
+            self.mine, entry_date=self.capital_day, kind="daily_report",
+            lines=self.balanced("1000.00", debit_code="1100", credit_code="3000"),
+        )
+
+    def test_a_capital_entry_before_opened_on_is_in_the_balance_sheet(self):
+        payload = self.get_report(self.mine, "balance_sheet")
+
+        totals = payload["totals"]
+        self.assertEqual(totals["assets"], "1000.00")
+        self.assertEqual(totals["equity"], "1000.00")
+        self.assertEqual(totals["difference"], "0.00")
+        self.assertFalse(payload["clipped"])
+        # `from` الصادقة: بدايةُ الدفتر = أقدمُ ما فيه (قيدُ يناير لا `opened_on`).
+        self.assertEqual(payload["from"], self.capital_day.isoformat())
+
+    def test_the_default_trial_balance_is_not_clipped(self):
+        payload = self.get_report(self.mine, "trial_balance")
+
+        self.assertFalse(payload["clipped"])
+        self.assertIsNone(payload["period_note"])
+        self.assertEqual(payload["from"], datetime.date(THIS_YEAR, 1, 1).isoformat())
+        self.assertEqual(payload["totals"]["debit"], "1000.00")
+        self.assertEqual(payload["totals"]["credit"], "1000.00")
+
+    def test_a_period_before_opened_on_is_200_not_400(self):
+        """يناير–فبراير تسبق `opened_on`: الطلبُ سليمٌ والبياناتُ موجودة."""
+        params = {
+            "from": datetime.date(THIS_YEAR, 1, 1).isoformat(),
+            "to": datetime.date(THIS_YEAR, 2, 28).isoformat(),
+        }
+        for kind in ("trial_balance", "profit_loss"):
+            with self.subTest(kind=kind):
+                payload = self.get_report(self.mine, kind, params=params)
+                self.assertFalse(payload["clipped"])
+                self.assertEqual(payload["from"], params["from"])
+        trial = self.get_report(self.mine, "trial_balance", params=params)
+        self.assertEqual(trial["totals"]["debit"], "1000.00")
+
+    def test_a_balance_sheet_ending_before_the_first_entry_is_empty_not_400(self):
+        payload = self.get_report(
+            self.mine, "balance_sheet",
+            params={"to": datetime.date(THIS_YEAR - 1, 12, 31).isoformat()},
+        )
+
+        self.assertEqual(payload["totals"]["assets"], "0.00")
+        self.assertEqual(payload["rows"], [])
+        # الملاحظةُ تصف الفراغ لا تدّعي بدايةً لم تحدث.
+        self.assertIn("تسبق بداية الدفتر", payload["period_note"])
+
+
+class ConvertedBookOpenedAfterTheEraTest(BookReportsTestCase):
+    """دفترٌ محوَّلٌ `opened_on` فيه **بعد** سنة التحويل: القيودُ بينهما لا تسقط.
+
+    `change_kind` لا يمنع إلا سنةَ الفتح نفسَها، فدفترٌ فُتح بتاريخ سنةٍ قادمة
+    ثم تحوّل اليوم عهدُه المزدوجُ من 1 يناير من هذه السنة — لا من `opened_on`.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(
+            self.mine, kind=BOOK_KIND_SIMPLE,
+            opened_on=datetime.date(THIS_YEAR + 1, 1, 5),
+        )
+        self.change_kind(self.mine, BOOK_KIND_DOUBLE)
+        self.entry_day = datetime.date(THIS_YEAR, 2, 10)
+        self.add_entry(
+            self.mine, entry_date=self.entry_day, lines=self.balanced("100.00"),
+        )
+
+    def test_a_double_entry_between_the_conversion_year_and_opened_on_stays(self):
+        trial = self.get_report(self.mine, "trial_balance")
+
+        self.assertEqual(trial["from"], datetime.date(THIS_YEAR, 1, 1).isoformat())
+        self.assertEqual(trial["totals"]["debit"], "100.00")
+        self.assertEqual(trial["totals"]["credit"], "100.00")
+
+    def test_the_balance_sheet_keeps_it_too(self):
+        sheet = self.get_report(self.mine, "balance_sheet")
+
+        self.assertEqual(sheet["from"], datetime.date(THIS_YEAR, 1, 1).isoformat())
+        self.assertEqual(sheet["totals"]["assets"], "100.00")
+        self.assertEqual(sheet["totals"]["difference"], "0.00")
+
+
 class ReversalTest(DoubleBookTestCase):
     """الحركةُ المعكوسةُ وعكسُها لا يدخلان مجموعاً — القاعدةُ في `_live_entries`."""
 
@@ -828,25 +936,74 @@ class SimpleReportsTest(BookReportsTestCase):
         self.assertEqual(payload["totals"]["expense"], "60.00")
         self.assertEqual(payload["totals"]["profit"], "340.00")
 
-    def test_receivables_are_the_party_balances_up_to_the_end(self):
-        """الذممُ من **الطرف** لا من الحساب: الشجرةُ البسيطة بلا 1300/2100.
+    def test_an_unpaid_sales_invoice_is_a_positive_balance_for_us(self):
+        """فاتورةُ بيعٍ غيرُ مدفوعة: 4100 دائن 300 والطرفُ X ⇒ **+300** لنا عليه.
 
-        ورصيدُ الطرف تراكميٌّ حتى `to`، فحركةُ سنةٍ سابقة تبقى في رصيده.
+        `side_party` هو الطرفُ **المقابل** للبند، فالحسابُ من منظور الطرف: مدينُه
+        Σ`credit` للبند ودائنُه Σ`debit` — بحساب `debit − credit` الخام كانت
+        الفاتورةُ غيرُ المدفوعة تظهر **−300** والـdocstring يقول «الموجبُ لنا».
         """
         self.add_entry(
             self.mine, entry_date=self.day, kind="sales_invoice",
             lines=[
-                {"account_code": "1100", "debit": "300.00", "side_party": "زبون الأثاث"},
-            ],
-        )
-        self.add_entry(
-            self.mine, entry_date=LAST_YEAR_DAY, kind="daily_report",
-            lines=[
-                {"account_code": "1100", "credit": "75.00", "side_party": "زبون الأثاث"},
+                {"account_code": "4100", "credit": "300.00", "side_party": "الطرف X"},
             ],
         )
 
         payload = self.get_report(self.mine, "receivables")
+
+        rows = {row["side_party"]: row for row in payload["rows"]}
+        self.assertEqual(rows["الطرف X"]["balance"], "300.00")
+        self.assertEqual(rows["الطرف X"]["debit"], "300.00")
+        self.assertEqual(rows["الطرف X"]["credit"], "0.00")
+
+    def test_a_collection_from_the_party_clears_the_balance(self):
+        """ثم قبضٌ 1100 مدين 300 من X ⇒ الرصيدُ **0**: دفع X لنا ما عليه."""
+        self.add_entry(
+            self.mine, entry_date=self.day, kind="sales_invoice",
+            lines=[
+                {"account_code": "4100", "credit": "300.00", "side_party": "الطرف X"},
+            ],
+        )
+        self.add_entry(
+            self.mine, entry_date=self.day, kind="daily_report",
+            lines=[
+                {"account_code": "1100", "debit": "300.00", "side_party": "الطرف X"},
+            ],
+        )
+
+        payload = self.get_report(self.mine, "receivables")
+
+        row = {row["side_party"]: row for row in payload["rows"]}["الطرف X"]
+        self.assertEqual(row["debit"], "300.00")
+        self.assertEqual(row["credit"], "300.00")
+        self.assertEqual(row["balance"], "0.00")
+
+    def test_receivables_are_the_party_balances_up_to_the_end(self):
+        """الذممُ من **الطرف** لا من الحساب: الشجرةُ البسيطة بلا 1300/2100.
+
+        ورصيدُ الطرف تراكميٌّ حتى `to`، فحركةُ سنةٍ سابقة تبقى في رصيده — و`from`
+        المعروضةُ **بدايةُ الدفتر** لا `from` المطلوبة، كي لا يحمل الرأسُ تاريخاً لا
+        يصف البيانات.
+        """
+        self.add_entry(
+            self.mine, entry_date=self.day, kind="sales_invoice",
+            lines=[
+                {"account_code": "4100", "credit": "300.00", "side_party": "زبون الأثاث"},
+            ],
+        )
+        # قبضٌ جزئيٌّ من سنةٍ سابقة (75 مدين على الصندوق من الطرف).
+        self.add_entry(
+            self.mine, entry_date=LAST_YEAR_DAY, kind="daily_report",
+            lines=[
+                {"account_code": "1100", "debit": "75.00", "side_party": "زبون الأثاث"},
+            ],
+        )
+
+        payload = self.get_report(
+            self.mine, "receivables",
+            params={"from": datetime.date(THIS_YEAR, 5, 1).isoformat()},
+        )
 
         self.assertEqual(payload["title"], "ذمم")
         rows = {row["side_party"]: row for row in payload["rows"]}
@@ -859,6 +1016,31 @@ class SimpleReportsTest(BookReportsTestCase):
         self.assertNotIn("assets", payload["totals"])
         self.assertNotIn("liabilities", payload["totals"])
         self.assertTrue(payload["period_note"])
+        # بدايةُ الدفتر (`opened_on` هنا أقدمُ من كل حركة) لا `from` المطلوبة.
+        self.assertEqual(
+            payload["from"], datetime.date(THIS_YEAR - 1, 1, 5).isoformat(),
+        )
+        self.assertFalse(payload["clipped"])
+
+    def test_receivables_start_at_the_first_entry_when_it_precedes_opened_on(self):
+        """`from` المعروضةُ `min(opened_on, أوّل حركةٍ حيّة)` لا `opened_on` وحدها."""
+        late = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="دفترٌ فُتح متأخراً", responsible=self.accountant,
+        )
+        first = datetime.date(THIS_YEAR, 1, 15)
+        self.create_book(
+            late, kind=BOOK_KIND_SIMPLE, opened_on=datetime.date(THIS_YEAR, 3, 1),
+        )
+        self.add_entry(
+            late, entry_date=first, kind="sales_invoice",
+            lines=[{"account_code": "4100", "credit": "50.00", "side_party": "الطرف Y"}],
+        )
+
+        payload = self.get_report(late, "receivables")
+
+        self.assertEqual(payload["from"], first.isoformat())
+        self.assertEqual(payload["rows"][0]["balance"], "50.00")
 
     def test_a_line_without_a_party_is_not_a_receivable(self):
         """بنودُ الصندوق والبنك بلا طرفٍ ليست ذمماً — ولا صفَّ فارغاً في القائمة."""
@@ -1014,14 +1196,19 @@ class ReportShapeTest(DoubleBookTestCase):
                 self.assertIsInstance(payload["totals"], dict)
                 self.assertIsInstance(payload["clipped"], bool)
 
-    def test_the_balance_sheet_declares_the_double_era_start(self):
-        """الميزانيةُ تعلن بدايتُها من العهد المزدوج — ولا تُسمّى ذلك «قصّاً»."""
+    def test_the_balance_sheet_declares_the_book_start(self):
+        """دفترٌ لم يتحوّل لا عهدَ له: الميزانيةُ تعلن بدايتَها **من بداية الدفتر**.
+
+        ولا تُسمّى ذلك «قصّاً» ولا تنسبه إلى «العهد المزدوج» — ذاك للمحوَّل وحده
+        (`DoubleEraTest`).
+        """
         payload = self.get_report(self.mine, "balance_sheet")
 
         self.assertEqual(payload["from"], LAST_YEAR_DAY.isoformat())
         self.assertFalse(payload["clipped"])
         self.assertIn(str(LAST_YEAR_DAY.year), payload["period_note"])
-        self.assertIn("العهد المزدوج", payload["period_note"])
+        self.assertIn("بداية الدفتر", payload["period_note"])
+        self.assertNotIn("العهد المزدوج", payload["period_note"])
 
     def test_a_period_inside_the_double_era_is_not_clipped(self):
         payload = self.get_report(self.mine, "trial_balance")
