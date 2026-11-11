@@ -174,17 +174,23 @@ def _paused_month(rows, month_start, month_end) -> bool:
 def _covered_before(rows, subscription) -> bool:
     """هل يغطّي صفٌّ آخر اليومَ السابق لبداية هذا الصف؟
 
-    **يُسأل عنه قبل التناسب من البداية**: أوّلُ اشتراكٍ (أو عودةٌ بعد `ended_on`)
+    **يُسأل عنه قبل التناسب من البداية**: أوّلُ اشتراكٍ (أو عودةٌ بعد إنهاء)
     لا صفَّ قبله يغطّي ما قبله فيُتناسب من `starts_on`، وأمّا تغييرُ سعرٍ في
     منتصف الشهر فالصفُّ السابق يغطّي أيامَه الأولى — فيُحسب الشهرُ كلُّه بسعر
     الصفّ الساري، ولا تضيع أيامٌ بين الصفّين ولا تُحسب بغير سعرها.
+
+    **والتغطيةُ يحكم بها الصفُّ الساري في اليوم السابق وحده** (قاعدةُ
+    `_subscription_by_start` نفسُها) لا أيُّ صفٍّ يغطّيه بحدّه: الصفوفُ إلحاقيّةٌ لا
+    تُعدَّل، فالإنهاءُ **صفٌّ** `starts_on = ended_on` ويبقى الصفُّ الأصليُّ
+    `ended_on = None` إلى الأبد — فلو عُدّ كلُّ صفٍّ بحدّه لبقيت كلُّ عودةٍ
+    بعد إنهاءٍ «مغطّاةً» بصفّه الأوّل وفُوتر شهرُها كاملاً.
     """
     day = subscription.starts_on - timedelta(days=1)
-    return any(
-        row.pk != subscription.pk
-        and row.starts_on <= day
-        and (row.ended_on is None or row.ended_on >= day)
-        for row in rows
+    previous = _subscription_by_start(
+        [row for row in rows if row.pk != subscription.pk], day,
+    )
+    return previous is not None and (
+        previous.ended_on is None or previous.ended_on >= day
     )
 
 
@@ -292,7 +298,9 @@ def generate_fee_drafts(tenant, *, day) -> dict:
     - **مسودّةٌ لكل زبونٍ نشط**، بطريقةِ أتعابه: اشتراكُه الساري (منسوباً على
       حدود الاشتراك لا حدود الصفّ)، أو خدماتُه التي استحقّت فتراتُها، **زائدَ**
       إضافاتِ ما قبل الشهر التي لم تُفوتر بعد.
-    - **ولا مسودّة** لزبونٍ منتهٍ، ولا لشهرٍ داخل إيقاف الفوترة، ولا لاشتراكٍ
+    - **ولا مسودّة** لزبونٍ منتهٍ، ولا لشهرٍ داخل إيقاف الفوترة (**في طريقة
+      «اشتراك» وحدها**: الإيقافُ حقلٌ على صفّ الاشتراك، فزبونُ `per_service`
+      الموقوفُ قد تُولَّد له مسودّةُ إضافاتٍ وحدها — سلوكٌ مقصود)، ولا لاشتراكٍ
       انتهى قبل الشهر، ولا لزبونٍ بلا سطرٍ واحد.
     - **والتوليدُ مرّةً في الشهر**: مسودّاتُ الشهر تُقرأ `client_id` مرّةً واحدةً
       ويُتخطّى أصحابُها قبل حساب السطور — فلا `savepoint` ولا استعلامَ لمن له
@@ -391,10 +399,18 @@ def generate_fee_drafts(tenant, *, day) -> dict:
             ])
             if client_extras:
                 # **في المعاملة نفسها**: مسودّةٌ بلا ربطِ إضافاتها كانت تُفوتر
-                # الإضافةَ مرّتين في التوليد التالي.
-                FeeExtraService.objects.filter(
+                # الإضافةَ مرّتين في التوليد التالي. **و`billed_draft__isnull=True`
+                # هو الحارس**: الإضافاتُ قُرئت حرّةً قبل الحلقة، فتشغيلٌ متزامنٌ
+                # لشهرٍ آخر قد يربطها قبلنا — فلا نُعيد ربطَ ما رُبط، وإن لم
+                # يُربط كلُّها فمسودّتُنا تحسب ما صار لغيرها فتُتراجع كلُّها
+                # (تلتقطها الدورةُ التالية بما بقي حرّاً).
+                bound = FeeExtraService.objects.filter(
                     pk__in=[extra.pk for extra in client_extras],
+                    billed_draft__isnull=True,
                 ).update(billed_draft=draft)
+                if bound != len(client_extras):
+                    transaction.set_rollback(True)
+                    continue
         created += 1
     return {
         "created_drafts": created,

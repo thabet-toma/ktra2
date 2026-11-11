@@ -18,6 +18,7 @@
 """
 import datetime
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, connection, transaction
@@ -708,6 +709,38 @@ class ProrationTest(FeesTestCase):
             [fees.SUBSCRIPTION_LINE_LABEL + fees.PRORATED_SUFFIX],
         )
 
+    def test_a_return_after_a_terminating_row_is_prorated_from_its_start(self):
+        """A مفتوحٌ ثم C ينهيه بصفٍّ جديد ثم D عودةٌ — الأصلُ يبقى `ended_on=None`.
+
+        الصفوفُ إلحاقيّةٌ: الإنهاءُ **صفٌّ** `starts_on = ended_on` لا تعديلٌ على A،
+        فيبقى A مفتوحاً إلى الأبد. والتغطيةُ تُحكم بالصفّ **الساري في اليوم
+        السابق** (C، وقد انتهى) لا بأيّ صفٍّ يشبه أنّه مفتوح (A)، وإلا فُوتر تموزُ
+        كاملاً (310) لعودةٍ في 10/7.
+        """
+        client = self.make_client()
+        self.subscribe(client, "300", datetime.date(2026, 1, 1))
+        self.subscribe(
+            client, "300", datetime.date(2026, 5, 20),
+            ended_on=datetime.date(2026, 5, 20),
+        )
+        self.subscribe(client, "310", datetime.date(2026, 7, 10))
+
+        self.refresh(datetime.date(2026, 6, 1))
+        self.assertFalse(
+            FeeDraft.objects.filter(client=client, year=2026, month=6).exists(),
+            "حزيران بين الإنهاء والعودة — لا مسودّة",
+        )
+
+        self.refresh(datetime.date(2026, 7, 1))
+        draft = self.draft_of(client, month=7)
+        self.assertEqual(
+            decimal_of(draft.total), Decimal("220.00"), "310 × 22/31 لا 310 كاملة",
+        )
+        self.assertEqual(
+            list(draft.lines.values_list("label", flat=True)),
+            [fees.SUBSCRIPTION_LINE_LABEL + fees.PRORATED_SUFFIX],
+        )
+
 
 class PauseTest(FeesTestCase):
     """الإيقافُ يمنع المسودّةَ **كلَّها**، وإضافاتُه تنتظر أوّلَ مسودّةٍ بعده."""
@@ -792,6 +825,42 @@ class ExtraBillingTest(FeesTestCase):
         self.assertEqual(decimal_of(may.total), Decimal("350.00"))
         extra.refresh_from_db()
         self.assertEqual(extra.billed_draft_id, may.pk)
+
+    def test_an_extra_billed_by_a_concurrent_run_is_not_billed_again(self):
+        """تشغيلان متزامنان لشهرين: الثاني يقرأ الإضافةَ حرّةً ثم يسبقه الأوّل.
+
+        الحارسُ `billed_draft__isnull=True` على التحديث: ما ربطه غيرُنا لا نُعيد
+        ربطه — ومسودّتُنا فيها سطرُه فتُتراجع كلُّها (تلتقطها دورةٌ تالية بلا
+        الإضافة) بدل أن تُحسب الإضافةُ في مسودّتين.
+        """
+        client = self.make_client()
+        self.subscribe(client, "300", datetime.date(2026, 1, 1))
+        extra = FeeExtraService.objects.create(
+            tenant=self.tenant, client=client, service_name="تصديق شهادة",
+            amount=Decimal("50"), performed_on=datetime.date(2026, 2, 20),
+            draft=FeeExtraService.DESTINATION_NEXT_MONTH,
+        )
+        rival = FeeDraft.objects.create(
+            tenant=self.tenant, client=client, year=2026, month=3,
+            subtotal=Decimal("0"), total=Decimal("0"),
+            generated_at=fees._generated_at(MAR_FIRST),
+        )
+        original = fees._extra_lines
+
+        def rival_run_wins(extras):
+            # بعد قراءتنا للإضافة حرّةً وقبل ربطها: تشغيلٌ آخر يربطها بمسودّته.
+            FeeExtraService.objects.filter(pk=extra.pk).update(billed_draft=rival)
+            return original(extras)
+
+        with mock.patch.object(fees, "_extra_lines", side_effect=rival_run_wins):
+            self.refresh(APRIL_FIRST)
+
+        extra.refresh_from_db()
+        self.assertEqual(extra.billed_draft_id, rival.pk, "أُعيد ربطُ إضافةٍ مربوطة")
+        self.assertFalse(
+            FeeDraft.objects.filter(client=client, year=2026, month=4).exists(),
+            "مسودّةٌ تحسب إضافةً رُبطت بغيرها",
+        )
 
 
 class FeeDraftMonthConstraintTest(FeesTestCase):
