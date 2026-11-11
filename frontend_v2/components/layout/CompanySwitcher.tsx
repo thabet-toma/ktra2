@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useCompany, Tenant } from "../../contexts/CompanyContext";
 import { useTenantSettings } from "../../hooks/useTenantSettings";
-import { Building, Building2, Calculator, Plus, ChevronDown, Check, Loader2, LogOut, Settings2, Star } from "lucide-react";
+import { Building, Building2, Calculator, Landmark, Plus, ChevronDown, Check, Loader2, LogOut, Settings2, Star } from "lucide-react";
 import { CompanyManagementModal, ROLE_LABELS } from "./CompanyManagementModal";
 import { SELF_SERVE_COMPANY_TEMPLATES, DEFAULT_COMPANY_TEMPLATE, type CompanyTemplateKey } from "../../utils/companyTemplates";
 import {
@@ -16,6 +16,7 @@ import {
 const TEMPLATE_ICONS: Record<string, React.FC<{ className?: string }>> = {
   Building2,
   Calculator,
+  Landmark,
 };
 
 const companyLabel = (tenant: Tenant) =>
