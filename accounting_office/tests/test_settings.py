@@ -93,6 +93,8 @@ class RegistryShapeTest(SettingTestCase):
                 "reminder_default_consent_types",
                 # #286: طريقةُ الإدخال — «ورقة ورقة» أو «إدخال الشهر»، ولكل زبون.
                 "book_entry_method",
+                # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
+                "appointment_reminder_days",
             },
         )
 
@@ -454,6 +456,8 @@ class SettingsApiTest(SettingTestCase):
                 "reminder_send_hour_start", "reminder_send_hour_end",
                 "reminder_escalation_owner_days", "reminder_default_consent_types",
                 "book_entry_method",
+                # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
+                "appointment_reminder_days",
             },
         )
 

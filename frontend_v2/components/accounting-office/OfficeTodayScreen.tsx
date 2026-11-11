@@ -21,7 +21,9 @@ import { humanizeThrown } from '../../utils/drfError';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { OfficeObligationRow } from './OfficeObligationRow';
+import { OfficeAppointmentCard } from './OfficeAppointmentCard';
 import {
+  OfficeCard,
   OfficeEmpty,
   OfficeError,
   OfficeSkeleton,
@@ -80,8 +82,9 @@ export const OfficeTodayScreen: React.FC = () => {
   const officeSize = settings ? officeSizeOf(settings.settings) : null;
   const showsAssignment = showsOfficeAssignment(officeSize);
   const counters = payload?.counters
-    ?? { late: 0, late_internal: 0, week: 0, missing_docs: 0, all: 0 };
+    ?? { late: 0, late_internal: 0, week: 0, missing_docs: 0, appointments: 0, all: 0 };
   const rows = payload?.rows ?? [];
+  const appointments = payload?.appointments ?? [];
   const day = payload?.day ?? '';
   const directionChoices = payload?.direction_choices ?? [];
 
@@ -176,6 +179,19 @@ export const OfficeTodayScreen: React.FC = () => {
               </span>
             </button>
           ))}
+          {/* #281: عدّادُ مواعيد اليوم — **عرضٌ لا فلتر**: الفلترُ للالتزامات
+              وحدها، وكبسةُ عدّادٍ لا تُصفّي شيئاً كانت تُفرغ الشاشة بلا سبب. */}
+          <div
+            className="shrink-0 rounded-xl border border-teal-200 bg-teal-50 px-3 py-2 text-center dark:border-teal-800 dark:bg-teal-950/40"
+            aria-label="مواعيد اليوم"
+          >
+            <span className="block text-[17px] font-bold leading-6 tabular-nums text-teal-700 dark:text-teal-300">
+              {counters.appointments}
+            </span>
+            <span className="mt-0.5 block whitespace-nowrap text-[10px] font-medium text-slate-500 dark:text-slate-400">
+              مواعيد اليوم
+            </span>
+          </div>
         </div>
 
         <div className="mt-3 flex flex-wrap gap-1.5">
@@ -198,6 +214,24 @@ export const OfficeTodayScreen: React.FC = () => {
       </header>
 
       {error ? <OfficeError message={error} onRetry={reload} /> : null}
+
+      {/* #281: «مواعيد اليوم» قسمٌ مستقلٌّ فوق الالتزامات — الموعدُ عملُ يومٍ
+          بعينه ووقته، لا صفُّ التزامٍ له فترةٌ وشارةُ تأخير. */}
+      {appointments.length ? (
+        <OfficeCard title={`مواعيد اليوم — ${appointments.length}`}>
+          <div className="space-y-2">
+            {appointments.map((appointment) => (
+              <OfficeAppointmentCard
+                key={appointment.id}
+                appointment={appointment}
+                canWrite={canWrite}
+                showClient
+                onChanged={reload}
+              />
+            ))}
+          </div>
+        </OfficeCard>
+      ) : null}
 
       {loading ? (
         <OfficeSkeleton rows={5} />

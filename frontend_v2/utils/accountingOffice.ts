@@ -149,6 +149,9 @@ export const CLIENT_TAB_PARAM = 'tab';
 /** تبويبُ «الالتزامات والشغلات» — مكانُ فتح التنبيه من الجرس. */
 export const CLIENT_OBLIGATIONS_TAB = 'obligations';
 
+/** تبويبُ «المواعيد» (#281) — وجهةُ موعدٍ من التقويم إلى ملفّ زبونه. */
+export const CLIENT_APPOINTMENTS_TAB = 'appointments';
+
 /** اسم معامل الشغلة المطلوب فتحها — واحدٌ في بناء الرابط وقراءته (#276). */
 export const TASK_QUERY_PARAM = 'task';
 
@@ -156,6 +159,9 @@ export const TASK_QUERY_PARAM = 'task';
 export const CLIENT_TAB_KEYS = [
   'tax-card', 'obligations', 'services', 'contacts', 'documents',
   'reminder-log', 'notes',
+  // #281: المواعيد — مفتاحٌ **في آخر القائمة** لأنه أُضيف من فرعٍ آخر يعمل على
+  // الملفّ نفسه (`OfficeClientFile.tsx`)، فإضافتُه أولاً كانت تزحزح فهارس غيره.
+  'appointments',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
 
@@ -504,6 +510,10 @@ export interface CalendarPayload {
   to: string;
   today: string;
   rows: CalendarDeadlineRow[];
+  /** #281: مواعيدُ المدى — تُعرض في اليوم نفسه مع التزاماته لا في شاشةٍ ثانية. */
+  appointments: OfficeAppointmentRow[];
+  /** #281: أنواعُ المواعيد — التقويمُ يحجز أيضاً، فلا جدولَ تسمياتٍ في الواجهة. */
+  kind_choices: SettingChoice[];
 }
 
 /** خليّةُ يومٍ في شبكة الشهر — الأيامُ من الشهرين المجاورين تُعرض باهتةً لا تُحذف. */
@@ -856,6 +866,8 @@ export interface TodayCounters {
   week: number;
   /** #278: «ناقصه أوراق» — عدّادٌ إضافيّ فوق شارات التأخير. */
   missing_docs: number;
+  /** #281: مواعيدُ اليوم المحجوزة — قسمٌ مستقلٌّ لا صفوفَ التزامات. */
+  appointments: number;
   all: number;
 }
 
@@ -864,6 +876,8 @@ export interface TodayPayload {
   filter: string;
   counters: TodayCounters;
   rows: ObligationRow[];
+  /** #281: مواعيدُ اليوم — لا يقصّها `filter`: الفلترُ للالتزامات وحدها. */
+  appointments: OfficeAppointmentRow[];
   /** تسمياتُ اتجاه المبلغ — من الخادم، فلا نسخةً في الشاشة. */
   direction_choices: SettingChoice[];
 }
@@ -1709,4 +1723,106 @@ export function commonTaxSystem(
   const first = systems[0];
   if (!first) return null;
   return systems.every((system) => system === first) ? first : null;
+}
+
+// ── المواعيد (#281) ─────────────────────────────────────────────────────
+//
+// **ولا تسميةَ نوعٍ ولا حالةٍ هنا**: `kind_label` و`status_label` وتسمياتُ
+// `kind_choices` تصل من الخادم، فلا جدولَ تسمياتٍ ثانٍ يفترق عنه. والباقي
+// حسابُ عرض: تجميعُ المواعيد على أيامها للتقويم، وقيمةُ حقل الوقت، وشكلُ إدخالٍ
+// من نصّ ISO بلا كائن `Date` منطقةً زمنية (كسائر تواريخ هذا الملف).
+
+/** موعدُ زبون كما يعيده الخادم — بتاريخه ووقته وحالته. */
+export interface OfficeAppointmentRow {
+  id: number;
+  client: { id: number; name: string };
+  /** نظامُ زبونه الضريبيّ (`PS`/`IL`) أو `null` — مفتاحُ دولة `wa.me` وحده. */
+  tax_system: string | null;
+  kind: string;
+  kind_label: string;
+  /** ISO واعٍ بتوقيت الخادم — و`day`/`time` منه محلولَين. */
+  scheduled_at: string;
+  /** يومُ الموعد `YYYY-MM-DD` — مفتاحُ التقويم وفلتر «اليوم». */
+  day: string;
+  /** الوقتُ `HH:MM` — لا يبنيه المتصفّح من `scheduled_at`. */
+  time: string;
+  note: string;
+  status: string;
+  status_label: string;
+  confirmed_at: string | null;
+  cancelled_at: string | null;
+  created_by: { id: number; name: string } | null;
+  created_at: string;
+}
+
+/** تبويبُ المواعيد في ملفّ الزبون — بكلّ مواعيده ومنتقي أنواعها. */
+export interface ClientAppointmentsPayload {
+  client: { id: number; name: string };
+  day: string;
+  rows: OfficeAppointmentRow[];
+  kind_choices: SettingChoice[];
+}
+
+/** قائمةُ مواعيد اليوم أو المكاتب كلِّها — بلا زبونٍ واحد. */
+export interface AppointmentsListPayload {
+  day: string;
+  client: null;
+  rows: OfficeAppointmentRow[];
+  kind_choices: SettingChoice[];
+}
+
+/** عناصرُ التقويم مجموعةً بمفتاح يومها — المواعيدُ تُرسم بقراءة قاموسٍ لا بمسح. */
+export function groupAppointmentsByDay(
+  rows: readonly OfficeAppointmentRow[],
+): Record<string, OfficeAppointmentRow[]> {
+  const byDay: Record<string, OfficeAppointmentRow[]> = {};
+  rows.forEach((row) => {
+    (byDay[row.day] ??= []).push(row);
+  });
+  return byDay;
+}
+
+/** معرّفُ موعدٍ في الصفحة — يُمرَّر إليه ويُبرز عند القدوم من تنبيهٍ أو تقويم. */
+export function officeAppointmentAnchorId(appointmentId: number): string {
+  return `office-appointment-${appointmentId}`;
+}
+
+/**
+ * قيمةُ `input[type=datetime-local]` من نصّ ISO — «YYYY-MM-DDTHH:MM».
+ *
+ * قصٌّ لا تحويل: الوقتُ المعروضُ هو وقتُ المكتب كما حلّه الخادم، فلا `Date` ولا
+ * انزياحَ منطقةٍ يكسر الموعد ساعتين. والنصُّ الفاسدُ يعيد `''` فلا يُملأ الحقل.
+ */
+export function appointmentSlotValue(scheduledAt: string | null | undefined): string {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(scheduledAt ?? '');
+  return match ? `${match[1]}T${match[2]}` : '';
+}
+
+/** أصنافُ شارة حالة الموعد — اللونُ عرضٌ، والنصُّ من `status_label`. */
+export function appointmentStatusClass(status: string): string {
+  if (status === 'done') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'cancelled') {
+    return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  }
+  return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300';
+}
+
+/** هل يبقى على الموعد فعلٌ؟ المحجوزُ وحده يُؤكَّد ويُؤجَّل ويُلغى. */
+export function isOpenAppointment(row: Pick<OfficeAppointmentRow, 'status'>): boolean {
+  return row.status === 'scheduled';
+}
+
+/**
+ * نتيجةُ «ابعت تأكيد»: السطرُ المحدَّث والنصُّ المرسَل ورقمُ المستلِم.
+ *
+ * الخادمُ يبني النصَّ ويكتب صفَّ السجلّ، والواجهةُ تفتح به واتساب إن عرف نظامَ
+ * الزبون — والرابطُ يُبنى في `officeWhatsappLink` وحدها.
+ */
+export interface AppointmentConfirmation {
+  appointment: OfficeAppointmentRow;
+  log: { id: number };
+  body: string;
+  phone: string;
 }

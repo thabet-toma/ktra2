@@ -31,7 +31,7 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounting_office import client_books, deadlines, services
+from accounting_office import appointments, client_books, deadlines, services
 from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     ClientBook,
@@ -57,6 +57,9 @@ from accounting_office.serializers import (
     BookEntryWriteSerializer,
     ClientBookKindWriteSerializer,
     ClientBookWriteSerializer,
+    ClientAppointmentConfirmSerializer,
+    ClientAppointmentRescheduleSerializer,
+    ClientAppointmentWriteSerializer,
     ClientContactLinkSerializer,
     ClientContactRowSerializer,
     ClientEventSerializer,
@@ -1867,6 +1870,122 @@ class OfficeHolidayViewSet(OfficeModuleViewSet):
         self.require_settings_manage()
         self.get_object().delete()
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class OfficeAppointmentViewSet(OfficeModuleViewSet):
+    """مواعيدُ الزبائن (#281): حجزٌ وقراءة، وتأكيدٌ وتأجيلٌ وإلغاء — **بلا حذف**.
+
+    **الرؤيةُ من `visible_clients` وحدها**: موعدُ زبونٍ لا يراه العضو **404 لا
+    403** كسائر الموديول، والكتابةُ بمفتاح `office.clients.write`. والقائمةُ
+    ثلاثةُ أشكال: بزبونٍ (تبويبُ ملفّه، مع `kind_choices`)، أو بيومٍ (شاشةُ اليوم
+    والتقويم)، أو بالجميع حين لا يُسأل عن مدى.
+    """
+
+    # `post` وحدها للكتابة: لا تعديلَ جزئيٌّ لصفِّ موعد (لكلّ تغييرٍ فعلُه)، ولا
+    # حذف — الإلغاءُ يكتب حالة، فـ`DELETE` 405.
+    http_method_names = ["get", "post", "head", "options"]
+    serializer_class = ClientAppointmentWriteSerializer
+
+    def get_queryset(self):
+        """المحجوزُ وما صار وما أُلغي — فالبطاقةُ تُقرأ بحالتها لا تُخفى."""
+        return appointments.appointment_queryset(
+            self.tenant, self.request.user, open_only=False,
+        )
+
+    def _client(self, raw):
+        """زبونُ القائمة — من رؤية العضو وحدها، وغيابُه **404**."""
+        try:
+            pk = int(raw)
+        except (TypeError, ValueError):
+            raise ValidationError({"client": "معرّفُ زبونٍ غير صالح."}) from None
+        client = (
+            services.visible_clients(self.tenant, self.request.user)
+            .filter(pk=pk)
+            .first()
+        )
+        if client is None:
+            raise NotFound("الزبون غير موجود.")
+        return client
+
+    def list(self, request, *args, **kwargs):
+        params = request.query_params
+        raw_day = (params.get("day") or "").strip()
+        raw_client = (params.get("client") or "").strip()
+        day = parse_iso_date(raw_day, "day") if raw_day else timezone.localdate()
+        if raw_client:
+            return Response(appointments.client_appointments_payload(
+                self._client(raw_client), day=day,
+            ))
+        rows = (
+            appointments.appointments_for_day(self.tenant, request.user, day)
+            if raw_day
+            else appointments.appointments_list(self.tenant, request.user)
+        )
+        return Response({
+            "day": day.isoformat(),
+            "client": None,
+            "rows": rows,
+            "kind_choices": appointments.kind_choices(),
+        })
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = ClientAppointmentWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        return Response(
+            appointments.create_appointment(
+                self.tenant,
+                user=request.user,
+                client_id=data["client_id"],
+                kind=data["kind"],
+                scheduled_at=data["scheduled_at"],
+                note=data.get("note", ""),
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="confirm")
+    def confirm(self, request, pk=None):
+        """«ابعت تأكيد»: صفُّ تذكيرٍ بنوع `appointment` وختمُ وقت التأكيد (د4)."""
+        self.require_write()
+        serializer = ClientAppointmentConfirmSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(appointments.send_appointment_confirmation(
+            self.tenant,
+            self.get_object(),
+            actor=request.user,
+            body=serializer.validated_data.get("body") or None,
+        ))
+
+    @action(detail=True, methods=["post"], url_path="reschedule")
+    def reschedule(self, request, pk=None):
+        """«أجّل»: وقتٌ جديد على الصفّ نفسه — لا إلغاءَ وحجزٌ ثانٍ."""
+        self.require_write()
+        serializer = ClientAppointmentRescheduleSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response({"appointment": appointments.reschedule_appointment(
+            self.get_object(),
+            scheduled_at=serializer.validated_data["scheduled_at"],
+            actor=request.user,
+            note=serializer.validated_data.get("note"),
+        )})
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        """«ألغِ»: حالةٌ تُكتب — والصفُّ يبقى بتاريخه."""
+        self.require_write()
+        return Response({"appointment": appointments.cancel_appointment(
+            self.get_object(), actor=request.user,
+        )})
+
+    @action(detail=True, methods=["post"], url_path="done")
+    def done(self, request, pk=None):
+        """«صار»: الزيارةُ وقعت — الحالةُ تتحرّك ووقتُ الموعد يبقى."""
+        self.require_write()
+        return Response({"appointment": appointments.complete_appointment(
+            self.get_object(), actor=request.user,
+        )})
 
 
 class OfficeClientBookViewSet(OfficeModuleViewSet):

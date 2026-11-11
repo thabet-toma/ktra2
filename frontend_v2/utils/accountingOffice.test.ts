@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {
   AMOUNT_MASK,
   alertTargetPath,
+  appointmentSlotValue,
+  appointmentStatusClass,
   applyPackageSummary,
   badgeLabelOf,
   canUndoReminderRow,
@@ -35,9 +37,12 @@ import {
   firstOfNextMonth,
   formatOfficeAmount,
   frequencyLabelFrom,
+  groupAppointmentsByDay,
   groupDeadlinesByDay,
   isExpectedDeadline,
   isLockedOfficeSetting,
+  isOpenAppointment,
+  officeAppointmentAnchorId,
   missingFirstRunLabels,
   monthGrid,
   nextDayIso,
@@ -1109,4 +1114,38 @@ test('نظامُ الرسالة المشترك: يُعاد حين تتفق بن�
 
 test('تبويبُ سجلّ التذكيرات يُقرأ من العنوان كأخواته', () => {
   assert.equal(clientTabFromSearch('?client=7&tab=reminder-log'), 'reminder-log');
+});
+
+test('وقتُ الموعد يُقصّ من نصّه ISO — لا كائن Date ولا انزياحَ منطقةٍ زمنية', () => {
+  // ما يقبله `input[type=datetime-local]` وحده: تاريخٌ ووقتٌ بلا ثوانٍ ولا منطقة.
+  assert.equal(
+    appointmentSlotValue('2026-02-01T10:30:00+02:00'),
+    '2026-02-01T10:30',
+  );
+  assert.equal(appointmentSlotValue('2026-02-01 10:30:00'), '2026-02-01T10:30');
+  // الفاسدُ يعيد فراغاً فلا يُملأ حقلُ الوقت بقيمةٍ مخترعة.
+  assert.equal(appointmentSlotValue(''), '');
+  assert.equal(appointmentSlotValue(null), '');
+  assert.equal(appointmentSlotValue('غداً'), '');
+});
+
+
+test('المواعيدُ مجموعةً بأيامها، والمحجوزُ وحده ذو أفعال', () => {
+  const rows = [
+    { id: 1, day: '2026-02-01', status: 'scheduled' },
+    { id: 2, day: '2026-02-01', status: 'cancelled' },
+    { id: 3, day: '2026-02-02', status: 'scheduled' },
+  ];
+  const byDay = groupAppointmentsByDay(rows as never);
+  assert.deepEqual(Object.keys(byDay).sort(), ['2026-02-01', '2026-02-02']);
+  assert.equal(byDay['2026-02-01'].length, 2);
+
+  assert.equal(isOpenAppointment({ status: 'scheduled' }), true);
+  assert.equal(isOpenAppointment({ status: 'cancelled' }), false);
+  assert.equal(isOpenAppointment({ status: 'done' }), false);
+
+  // اللونُ عرضٌ لا نصّ: المحجوزُ والمنتهي والملغى ثلاثُ طبقاتٍ مختلفة.
+  assert.notEqual(appointmentStatusClass('scheduled'), appointmentStatusClass('cancelled'));
+  assert.notEqual(appointmentStatusClass('done'), appointmentStatusClass('cancelled'));
+  assert.equal(officeAppointmentAnchorId(7), 'office-appointment-7');
 });

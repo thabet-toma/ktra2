@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import {
+  createAppointment,
   getOfficeCalendar,
   getOfficeSettings,
   listDeadlineRules,
@@ -13,8 +14,13 @@ import {
   type OfficeMemberRow,
   type OfficeSettingsPayload,
 } from '../../services/accountingOfficeApi';
+import { usePermissions } from '../../contexts/PermissionsContext';
+import { useToast } from '../../contexts/ToastContext';
 import {
+  CLIENT_APPOINTMENTS_TAB,
+  CLIENT_TAB_PARAM,
   clientFilePath,
+  groupAppointmentsByDay,
   groupDeadlinesByDay,
   isExpectedDeadline,
   monthGrid,
@@ -29,11 +35,13 @@ import {
   weekDays,
   weekRange,
   type CalendarDay,
+  type OfficeAppointmentRow,
+  type SettingChoice,
 } from '../../utils/accountingOffice';
 import { monthKeyLabel, monthKeyOf } from '../../utils/monthKey';
 import { formatDateLocalized, todayIso, WEEKDAYS_AR } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
-import { OfficeCard, OfficeEmpty, OfficeError, OfficeSkeleton, officeInputClass, officeSecondaryButtonClass } from './OfficeUi';
+import { OfficeCard, OfficeEmpty, OfficeError, OfficeSkeleton, officeInputClass, officePrimaryButtonClass, officeSecondaryButtonClass } from './OfficeUi';
 
 type CalendarMode = 'month' | 'week';
 
@@ -57,6 +65,10 @@ const loadRules = (system: 'PS' | 'IL'): Promise<DeadlineRuleRow[]> =>
  */
 export const OfficeCalendarScreen: React.FC = () => {
   const navigate = useNavigate();
+  const toast = useToast();
+  // الخادمُ هو الحكم: هذا العلم يُخفي زرَّ الحجز ولا يحمي — الكتابةُ 403 بلا مفتاحها.
+  const { can } = usePermissions();
+  const canBook = can('office.clients.write');
   const [mode, setMode] = useState<CalendarMode>('month');
   const [anchor, setAnchor] = useState<string>(todayIso);
   const [settings, setSettings] = useState<OfficeSettingsPayload | null>(null);
@@ -67,6 +79,16 @@ export const OfficeCalendarScreen: React.FC = () => {
   const [memberFilter, setMemberFilter] = useState('');
   const [ruleFilter, setRuleFilter] = useState('');
   const [rows, setRows] = useState<CalendarDeadlineRow[]>([]);
+  // #281: مواعيدُ المدى — تُرسم في اليوم نفسه مع التزاماته.
+  const [appointmentRows, setAppointmentRows] = useState<OfficeAppointmentRow[]>([]);
+  // #281: الحجزُ من التقويم — الزبونُ يختاره الموظّف، والصفحةُ تحمل أنواع المواعيد.
+  const [kindChoices, setKindChoices] = useState<SettingChoice[]>([]);
+  const [bookingOpen, setBookingOpen] = useState(false);
+  const [bookClient, setBookClient] = useState('');
+  const [bookKind, setBookKind] = useState('');
+  const [bookSlot, setBookSlot] = useState('');
+  const [bookNote, setBookNote] = useState('');
+  const [bookBusy, setBookBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
@@ -122,7 +144,12 @@ export const OfficeCalendarScreen: React.FC = () => {
       rule: ruleFilter || null,
     })
       .then((payload) => {
-        if (!cancelled) setRows(payload.rows);
+        if (!cancelled) {
+          setRows(payload.rows);
+          setAppointmentRows(payload.appointments ?? []);
+          setKindChoices(payload.kind_choices ?? []);
+          setBookKind((current) => current || payload.kind_choices?.[0]?.value || '');
+        }
       })
       .catch((failure) => {
         if (!cancelled) {
@@ -141,6 +168,40 @@ export const OfficeCalendarScreen: React.FC = () => {
   }, [range.start, range.end, clientFilter, memberFilter, ruleFilter, refreshToken]);
 
   const retry = useCallback(() => setRefreshToken((token) => token + 1), []);
+
+  /** حجزٌ من التقويم (#281): الزبونُ يختاره الموظّف — لا يحجز بنفسه. */
+  const book = useCallback(async () => {
+    if (!bookClient || !bookSlot) {
+      toast('اختر الزبون ووقت الموعد.', 'error');
+      return;
+    }
+    setBookBusy(true);
+    try {
+      await createAppointment({
+        client_id: Number(bookClient),
+        kind: bookKind,
+        scheduled_at: bookSlot,
+        note: bookNote.trim(),
+      });
+      setBookNote('');
+      setBookingOpen(false);
+      toast('انحجز الموعد.', 'success');
+      retry();
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر حجز الموعد.'), 'error');
+    } finally {
+      setBookBusy(false);
+    }
+  }, [bookClient, bookKind, bookNote, bookSlot, retry, toast]);
+
+  const toggleBooking = useCallback(() => {
+    if (!bookingOpen) {
+      // اليومُ المعروض أوّلاً في الحقل — لا حجزٌ في يومٍ لا يراه الموظف.
+      setBookSlot(`${anchor}T09:00`);
+    }
+    setBookingOpen((open) => !open);
+  }, [anchor, bookingOpen]);
+
   const goToday = useCallback(() => setAnchor(todayIso()), []);
   const shift = useCallback(
     (direction: -1 | 1) => {
@@ -158,6 +219,9 @@ export const OfficeCalendarScreen: React.FC = () => {
   );
 
   const byDay = useMemo(() => groupDeadlinesByDay(rows), [rows]);
+  const appointmentsByDay = useMemo(
+    () => groupAppointmentsByDay(appointmentRows), [appointmentRows],
+  );
   // «النوع» بلا تكرارٍ بالكود: نفسُ السطر منشورٌ في 2026 و2027، فيُعرض مرّةً.
   const ruleOptions = useMemo(() => uniqueDeadlineRules(rules), [rules]);
   // يومُ الطلب يُقرأ مرّةً — لا قراءةَ ساعةٍ في كل خليّة.
@@ -229,6 +293,8 @@ export const OfficeCalendarScreen: React.FC = () => {
 
   const renderDay = (day: CalendarDay, compact: boolean) => {
     const items = byDay[day.date] ?? [];
+    // #281: مواعيدُ اليوم نفسه — قبل الالتزامات لأنه ما حُجز بوقته لا ما يجب عمله.
+    const slots = appointmentsByDay[day.date] ?? [];
     const isToday = day.date === today;
     return (
       <div
@@ -241,10 +307,32 @@ export const OfficeCalendarScreen: React.FC = () => {
           <span className="text-[10.5px] font-semibold tabular-nums text-slate-500 dark:text-slate-400">
             {day.date.slice(8)}
           </span>
-          {!compact && items.length ? (
-            <span className="text-[10px] text-slate-400 dark:text-slate-500">{items.length}</span>
+          {!compact && items.length + slots.length ? (
+            <span className="text-[10px] text-slate-400 dark:text-slate-500">
+              {items.length + slots.length}
+            </span>
           ) : null}
         </div>
+        {slots.map((slot) => (
+          <button
+            key={`appointment-${slot.id}`}
+            type="button"
+            onClick={() => navigate(`${clientFilePath(slot.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_APPOINTMENTS_TAB}`)}
+            className="w-full rounded-lg border border-teal-300 bg-white px-2 py-1.5 text-start text-[11px] transition hover:border-teal-400 dark:border-teal-800 dark:bg-slate-900"
+          >
+            <span className="block truncate font-semibold text-slate-800 dark:text-slate-100">
+              {slot.client.name}
+            </span>
+            <span className="mt-0.5 flex flex-wrap items-center gap-1">
+              <span className="rounded-full bg-teal-50 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-teal-800 dark:bg-teal-950/40 dark:text-teal-200">
+                {slot.time}
+              </span>
+              <span className="rounded-full bg-white px-1.5 py-0.5 text-[10px] text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                {slot.kind_label}
+              </span>
+            </span>
+          </button>
+        ))}
         {items.map(renderItem)}
       </div>
     );
@@ -348,6 +436,79 @@ export const OfficeCalendarScreen: React.FC = () => {
             {heading}
           </span>
         </div>
+
+        {/* #281: الحجزُ من التقويم — الموعدُ يُسجَّل من هنا كما يُسجَّل من الملف. */}
+        {canBook ? (
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={toggleBooking}
+              className={bookingOpen ? officePrimaryButtonClass : officeSecondaryButtonClass}
+            >
+              {bookingOpen ? 'إغلاق الحجز' : 'احجز موعداً'}
+            </button>
+            {bookingOpen ? (
+              <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 p-2.5 dark:border-slate-700">
+                <label className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  الزبون
+                  <select
+                    value={bookClient}
+                    onChange={(event) => setBookClient(event.target.value)}
+                    className={officeInputClass}
+                  >
+                    <option value="">اختر زبوناً</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  النوع
+                  <select
+                    value={bookKind}
+                    onChange={(event) => setBookKind(event.target.value)}
+                    className={officeInputClass}
+                  >
+                    {kindChoices.map((choice) => (
+                      <option key={choice.value} value={choice.value}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="flex flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  الوقت
+                  <input
+                    type="datetime-local"
+                    value={bookSlot}
+                    onChange={(event) => setBookSlot(event.target.value)}
+                    className={officeInputClass}
+                  />
+                </label>
+                <label className="flex min-w-[160px] flex-1 flex-col gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                  ملاحظة
+                  <input
+                    type="text"
+                    value={bookNote}
+                    maxLength={300}
+                    onChange={(event) => setBookNote(event.target.value)}
+                    className={officeInputClass}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={book}
+                  disabled={bookBusy || !bookClient || !bookSlot}
+                  className={officePrimaryButtonClass}
+                >
+                  احجز
+                </button>
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </header>
 
       {error ? <OfficeError message={error} onRetry={retry} /> : null}

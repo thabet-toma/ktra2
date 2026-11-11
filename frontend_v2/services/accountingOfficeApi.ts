@@ -19,7 +19,10 @@ import {
 import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
+  AppointmentConfirmation,
+  AppointmentsListPayload,
   CalendarPayload,
+  ClientAppointmentsPayload,
   ClientDocumentsPayload,
   ClientEventsPayload,
   ClientEventRow,
@@ -33,6 +36,7 @@ import type {
   DocumentRowPayload,
   OfficeAlertRow,
   OfficeAlertsPayload,
+  OfficeAppointmentRow,
   OfficeCustomRulesPayload,
   OfficeDocumentItemsPayload,
   OfficeDocumentItemRow,
@@ -47,8 +51,11 @@ import type {
 
 export type {
   ApplyPackageResult,
+  AppointmentConfirmation,
+  AppointmentsListPayload,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientAppointmentsPayload,
   ClientDocumentsPayload,
   ClientEventRow,
   ClientEventsPayload,
@@ -71,6 +78,7 @@ export type {
   ObligationRow,
   OfficeAlertRow,
   OfficeAlertsPayload,
+  OfficeAppointmentRow,
   OfficeCustomRuleRow,
   OfficeCustomRulesPayload,
   OfficeDocumentItemRow,
@@ -105,6 +113,8 @@ const READY_TO_SEND = `${BASE}ready-to-send/`;
 const REMINDER_LOG = `${BASE}reminder-log/`;
 const REMINDER_TEMPLATES = `${BASE}reminder-templates/`;
 const OFFICE_HOLIDAYS = `${BASE}office-holidays/`;
+// #281: المواعيد — حجزٌ وأفعالُه. `client` على الجمع يُعيد تبويبَ ملفّ الزبون.
+const APPOINTMENTS = `${BASE}appointments/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -1008,3 +1018,61 @@ export const createOfficeHoliday = (payload: {
 
 export const deleteOfficeHoliday = (id: number): Promise<void> =>
   apiDelete(`${OFFICE_HOLIDAYS}${id}/`, tenantOpts());
+
+// ── المواعيد (#281) ─────────────────────────────────────────────────────
+//
+// **كلُّ فعلٍ يعيد السطرَ المحدَّث** بالشكل نفسه، فتُقرأ الحالةُ من ردّ الخادم لا
+// من تخمين الواجهة. و`client` وحدها تُعيد تبويبَ ملفّ الزبون (بمنتقي الأنواع)،
+// و`day` وحدها تُعيد مواعيدَ يومٍ، وغيابُهما كلَّ ما يراه العضو.
+export const listClientAppointments = (
+  clientId: number,
+  day?: string,
+): Promise<ClientAppointmentsPayload> =>
+  apiGetObject<ClientAppointmentsPayload>(APPOINTMENTS, {
+    ...tenantOpts(),
+    query: { client: clientId, day: day || undefined },
+  });
+
+export const listDayAppointments = (day?: string): Promise<AppointmentsListPayload> =>
+  apiGetObject<AppointmentsListPayload>(APPOINTMENTS, {
+    ...tenantOpts(),
+    query: { day: day || undefined },
+  });
+
+export const createAppointment = (payload: {
+  client_id: number;
+  kind: string;
+  scheduled_at: string;
+  note?: string;
+}): Promise<OfficeAppointmentRow> =>
+  apiPostObject<OfficeAppointmentRow>(APPOINTMENTS, payload, tenantOpts());
+
+/** «ابعت تأكيد»: يكتب صفَّ السجلّ ويُعيد النصَّ والرقم لفتح واتساب به. */
+export const confirmAppointment = (
+  id: number,
+  body?: string,
+): Promise<AppointmentConfirmation> =>
+  apiPostObject<AppointmentConfirmation>(
+    `${APPOINTMENTS}${id}/confirm/`, body ? { body } : {}, tenantOpts(),
+  );
+
+export const rescheduleAppointment = (
+  id: number,
+  scheduledAt: string,
+  note?: string,
+): Promise<{ appointment: OfficeAppointmentRow }> =>
+  apiPostObject(
+    `${APPOINTMENTS}${id}/reschedule/`,
+    { scheduled_at: scheduledAt, note },
+    tenantOpts(),
+  );
+
+export const cancelAppointment = (
+  id: number,
+): Promise<{ appointment: OfficeAppointmentRow }> =>
+  apiPostObject(`${APPOINTMENTS}${id}/cancel/`, {}, tenantOpts());
+
+export const completeAppointment = (
+  id: number,
+): Promise<{ appointment: OfficeAppointmentRow }> =>
+  apiPostObject(`${APPOINTMENTS}${id}/done/`, {}, tenantOpts());

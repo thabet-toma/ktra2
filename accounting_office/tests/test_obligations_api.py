@@ -351,8 +351,12 @@ class TodayApiTest(ObligationApiTestCase):
 
         self.assertEqual(
             everything.data["counters"],
-            # #278: `missing_docs` خامسةُ العدّادات — صفرٌ بلا صفوف أوراق.
-            {"late": 1, "late_internal": 0, "week": 1, "missing_docs": 0, "all": 2},
+            # #278: `missing_docs` خامسةُ العدّادات، و#281: `appointments` سادستُها
+            # — صفرٌ بلا صفوف أوراقٍ ولا مواعيد.
+            {
+                "late": 1, "late_internal": 0, "week": 1, "missing_docs": 0,
+                "appointments": 0, "all": 2,
+            },
         )
         self.assertEqual(len(everything.data["rows"]), 2)
         self.assertEqual(len(week.data["rows"]), 1)

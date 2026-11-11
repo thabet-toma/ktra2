@@ -8,6 +8,7 @@ from rest_framework.routers import SimpleRouter
 
 from accounting_office.views import (
     OfficeAlertsViewSet,
+    OfficeAppointmentViewSet,
     OfficeCalendarViewSet,
     OfficeClientBookViewSet,
     OfficeClientViewSet,
@@ -50,6 +51,13 @@ router.register(
 )
 # #275: شاشةُ «اليوم» (تُشغّل التحديث اليوميّ أوّلاً) وأفعالُ الالتزامات والشغلات.
 router.register("today", OfficeTodayViewSet, basename="accounting-office-today")
+# #281: المواعيد — حجزٌ وأفعالُه (تأكيد/تأجيل/إلغاء/«صار»)، بلا حذف ولا تعديلٍ
+# جزئيّ. مسارُها جمعُها لأن الفعل يقع على الموعد نفسه (`appointments/<pk>/confirm/`).
+router.register(
+    "appointments",
+    OfficeAppointmentViewSet,
+    basename="accounting-office-appointments",
+)
 router.register(
     "obligations", OfficeObligationViewSet, basename="accounting-office-obligations",
 )
