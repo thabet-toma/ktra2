@@ -13,9 +13,11 @@
 والصلاحيات والموظف المسؤول، والخدمات والباقات وخدمات الزبون، ولائحةَ المواعيد
 والتقويم، والالتزاماتِ والشغلات، والتنبيهاتِ الداخلية وجرسَها، **وتعديلَ المكتب
 على اللائحة والتمديدَ والتزاماتِ المكتب والأحداث** (#277)، **وقائمةَ الأوراق
-ووليدَها وشبكتَها** (#278)، **واستحقاقَ الرواتب ومواعيدَه** (#279). الأتعابُ
-والتذكيراتُ وتصعيدُ التذكير والمسودّةُ غير المعتمدة و«جاهز للإرسال» وإشعارُ
-الدفع وتصنيفُ الدفاتر (#280 و#285) تأتي في تذاكرها، والملفّ يُحدَّث معها.
+ووليدَها وشبكتَها** (#278)، **واستحقاقَ الرواتب ومواعيدَه** (#279)، **وأتعابَ
+المكتب: الاشتراكَ والمسودّاتِ واعتمادَها** (#282، الجزء أ١). التذكيراتُ
+وتصعيدُ التذكير و«جاهز للإرسال» (#280)، **وفاتورةُ الأتعاب الورقية وحقولُها
+القانونية والترقيمُ والإشعارُ الدائن وشاشةُ «المسودّات»** (أ٢ من #282)، وإشعارُ
+الدفع وتصنيفُ الدفاتر (#285) تأتي في تذاكرها، والملفّ يُحدَّث معها.
 
 **ودفترُ الزبون (#286، الجزء أ — الخادم):** ثمانيةُ نماذجَ تبدأ من
 `ClientBook`، وخدماتُها في `accounting_office/client_books.py`، ونقاطُها في
@@ -41,13 +43,14 @@
 
 | الملف | الغرض |
 |---|---|
-| `accounting_office/models.py` | النماذجُ الواحدُ والأربعون، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()`، و**لائحةُ المواعيد** (`DeadlineSchedule`/`DeadlineRule`) وحارسُ مفاتيح شروطها، و**`OfficeAlert`** وأنواعُه القابلة للإضافة صفّاً (#276)، و**بنودُ الأوراق وصفوفُها وملفاتُها ومددُ الحفظ** (#278)، و**`CADENCE_SEMIANNUAL`** ودوريةُ نصف السنة و**`PlatformDocumentItem.default_status`** (#279)، و**`ReminderTemplate`/`ReminderLog`/`ReminderPostpone`/`OfficeHoliday` و`REMINDER_DEFAULT_TEXTS` وحقولُ إذن التذكير في `Contact`** (#280)، و**ثمانيةُ نماذج دفتر الزبون وشجرتاه** (#286) |
-| `accounting_office/settings_registry.py` | سجلّ الإعدادات: المفتاح والنوع والمستويات والافتراضيِّ ومُتحقِّقُ القيمة وحدُّها الأدنى والأعلى، ومجموعاتُ العرض (`GROUP_ALERTS` لـ#276 و`GROUP_REMINDERS` لـ#280)، و**قوائم `EVENT_KIND_CHOICES` و`PAYROLL_OBLIGATION_CHOICES` و`REMINDER_TYPE_CHOICES`** (#277 · #279 · #280 — تُوسَّعان صفّاً ولا تستوردان النماذج)، و**`book_entry_method` وقائمتا طريقتَي الإدخال** (#286 — طريقتان لا حقلٌ في الدفتر) |
-| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`**، وكتالوجُ الخدمات وباقاتُها، وخدماتُ الزبون ودورياتُها المؤرَّخة، و**`suggest_frequency`** (#273)، و**ربطُ اللائحة بالقاعدة: `schedule_for`/`rule_applies`/`client_deadlines`/`calendar_payload`** (#274)، و**الالتزاماتُ والشغلات: `_deadline_items` (المولّدُ الواحد) و`refresh_office`/`ensure_office_refreshed`/`obligation_row`/`today_payload`/`client_obligations_payload` وأفعالُ الحالة والمبلغ والإسناد** (#275)، و**`_generate_late_alerts`/`alerts_payload`/`mark_alert_seen`/`mark_all_alerts_seen` ومستلِمو التنبيه** (#276)، و**قائمةُ الأوراق: `_document_items_for` (الدالّةُ الواحدة) و`_generate_document_rows` (داخل `_refresh_client`) و`set_document_status`/`validate_document_upload`/`client_documents_payload`/`document_progress`** (#278)، و**`_assert_payroll_frequency` وإعدادُ `PAYROLL_OBLIGATIONS_KEY` في `rule_applies`** (#279)، و**التذكيرات: `set_contact_consent`/`render_reminder_body`/`validate_reminder_body`/`reminder_templates_payload`/`_reminder_candidates`/`ready_to_send_payload`/`mark_reminders_sent`/`dismiss_reminders`/`postpone_reminder`/`undo_reminder_log`/`_generate_reminder_alerts`** (#280) |
+| `accounting_office/models.py` | النماذجُ الستّةُ والأربعون، واختياراتُ البطاقة لكل نظامٍ ضريبيّ، و`is_tenant_member` (قاعدةُ العضويّة الواحدة)، وحارسُ عضويّة الموظف المسؤول في `save()`، و**لائحةُ المواعيد** (`DeadlineSchedule`/`DeadlineRule`) وحارسُ مفاتيح شروطها، و**`OfficeAlert`** وأنواعُه القابلة للإضافة صفّاً (#276)، و**بنودُ الأوراق وصفوفُها وملفاتُها ومددُ الحفظ** (#278)، و**`CADENCE_SEMIANNUAL`** ودوريةُ نصف السنة و**`PlatformDocumentItem.default_status`** (#279)، و**`ReminderTemplate`/`ReminderLog`/`ReminderPostpone`/`OfficeHoliday` و`REMINDER_DEFAULT_TEXTS` وحقولُ إذن التذكير في `Contact`** (#280)، و**ثمانيةُ نماذج دفتر الزبون وشجرتاه** (#286)، و**نماذجُ الأتعاب الخمسة** (#282 — `FeeSubscription` و`ClientServicePrice` و`FeeExtraService` و`FeeDraft` و`FeeDraftLine`، ونوعُ التنبيه `fee_draft_pending`) |
+| `accounting_office/settings_registry.py` | سجلّ الإعدادات: المفتاح والنوع والمستويات والافتراضيِّ ومُتحقِّقُ القيمة وحدُّها الأدنى والأعلى، ومجموعاتُ العرض (`GROUP_ALERTS` لـ#276 و`GROUP_REMINDERS` لـ#280)، و**قوائم `EVENT_KIND_CHOICES` و`PAYROLL_OBLIGATION_CHOICES` و`REMINDER_TYPE_CHOICES`** (#277 · #279 · #280 — تُوسَّعان صفّاً ولا تستوردان النماذج)، و**`book_entry_method` وقائمتا طريقتَي الإدخال** (#286 — طريقتان لا حقلٌ في الدفتر)، و**`fee_method` وقائمةُ طرق الأتعاب (وساعة `hourly` معروضةٌ مرفوضة) و`fee_auto_approve` المقفل** (#282) |
+| `accounting_office/services.py` | **المحلّل** ودوالّ الكتابة، ودورةُ حياة الزبون، والبطاقة، والجهات، ومستلِمو التذكيرات، و**`visible_clients`/`visible_contacts`/`can_see_amounts`/`mask_amounts`**، وكتالوجُ الخدمات وباقاتُها، وخدماتُ الزبون ودورياتُها المؤرَّخة، و**`suggest_frequency`** (#273)، و**ربطُ اللائحة بالقاعدة: `schedule_for`/`rule_applies`/`client_deadlines`/`calendar_payload`** (#274)، و**الالتزاماتُ والشغلات: `_deadline_items` (المولّدُ الواحد) و`refresh_office`/`ensure_office_refreshed`/`obligation_row`/`today_payload`/`client_obligations_payload` وأفعالُ الحالة والمبلغ والإسناد** (#275)، و**`_generate_late_alerts`/`alerts_payload`/`mark_alert_seen`/`mark_all_alerts_seen` ومستلِمو التنبيه** (#276)، و**قائمةُ الأوراق: `_document_items_for` (الدالّةُ الواحدة) و`_generate_document_rows` (داخل `_refresh_client`) و`set_document_status`/`validate_document_upload`/`client_documents_payload`/`document_progress`** (#278)، و**`_assert_payroll_frequency` وإعدادُ `PAYROLL_OBLIGATIONS_KEY` في `rule_applies`** (#279)، و**التذكيرات: `set_contact_consent`/`render_reminder_body`/`validate_reminder_body`/`reminder_templates_payload`/`_reminder_candidates`/`ready_to_send_payload`/`mark_reminders_sent`/`dismiss_reminders`/`postpone_reminder`/`undo_reminder_log`/`_generate_reminder_alerts`** (#280)، و**جسرا الأتعاب: `_generate_fee_drafts` (الجسمُ في `fees.py`) و`_live_fee_draft_refs` (سقوطُ تنبيه المسودّة بالاعتماد)، و`client_service_periods` الواجهةُ العامةُ لفترات خدمة الزبون** (#282) |
 | `accounting_office/deadlines.py` | **المحرّكُ النقيّ** (#274): `compute_deadline` (أربعةُ تواريخَ وثلاثُ علامات) و`periods_for` و`service_periods` و`period_label` و`add_months`/`month_start_after` — بلا استعلامٍ وبلا تاريخٍ قانونيّ في الكود |
 | `accounting_office/client_books.py` | **خدماتُ دفتر الزبون** (#286): `bookkeeping_service_on`/`book_is_writable`/`assert_book_writable` (وجودُ الدفتر من `status_on` القائمة)، و`create_book`/`ensure_client_tree` (نسخُ الشجرة نسخةً واحدة)، و`add_account`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `ClientBookSequence`)، و`create_entry`/`reverse_entry` (**يقفل الأصلَ** `select_for_update` قبل فحص «لها عكسٌ بالفعل»)، و`change_kind` (د7)، و`pending_entry_payload` («للإدخال» باستعلامٍ واحد). **لا استيرادَ من `accounting`** — يحرسه مسحُ `ast` في `accounting_office/tests/test_client_books.py` |
+| `accounting_office/fees.py` | **خدماتُ الأتعاب** (#282، أ١): `subscription_on` (**السعرُ المؤرَّخ** — أكبر `starts_on` لا يتجاوز الشهر)، و`generate_fee_drafts` (**التوليدُ الشهريّ** ممّا يقرؤه `services.refresh_office` عبر `_generate_fee_drafts`)، و`_subscription_lines`/`_service_lines`/`_extra_lines` (المصادرُ الثلاثة)، و`_raise_pending_alerts` (**تنبيهُ الثلاثة أيام**)، و`can_approve_fee_drafts`/`approve_fee_draft`/`approve_all_fee_drafts`/`cancel_fee_draft` (**الدورُ لا المفتاح**، والصفوفُ تُقفل `select_for_update`)، و`create_subscription`/`create_extra_service`/`set_client_service_price`، و`amounts_masked` و`subscription_row`/`draft_row`/`extra_row` (القناعُ قرارٌ يُحسب مرّةً). **لا يكتب قيداً ولا فاتورة** — تلك #284 وأ٢ |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
-| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن) |
+| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف) |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
 | `accounting_office/urls.py` | `SimpleRouter` (لا `DefaultRouter`: جذرُه فهرسٌ غير محروس) |
 | `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` — وفيه أنواعُ التذكيرات: `ReadyToSendPayload`/`ReminderLogRow`/`ReminderTemplateRow`/`ContactConsentPayload`/`OfficeHolidayRow` (#280)، ومنها `ReadyToSendItemKey` (الزبون والنوع **وطرفا الفترة** معاً — الخادم يطلب النهايةَ صريحة). **وحقولُ إذن التذكير على `ContactRow`** (#280/ب) مرآةُ `ContactSerializer`، فتقرؤها قائمةُ جهات الزبون بلا طلبٍ لكل جهة |
@@ -99,6 +102,11 @@
 | `ClientBookSequence` (#286) | `year`, `last_number` | `client` FK، فرادةٌ على `(client, year)`. **أداةُ القفل والترقيم**: `select_for_update` ثم زيادةُ `last_number` داخل `transaction.atomic`، والرقمُ يُنسخ إلى `BookEntry.number`. **لا `MAX(number)+1` ولا `count()+1`** |
 | `BookEntry` (#286) | `year`, `number`, `entry_date`, `kind` (`sales_invoice`/`purchase_invoice`/`expense`/`bank_movement`/`daily_report`), `memo`, `reverses`, `created_by`, `created_at` | `client_book` على **`PROTECT`** (دفترٌ فيه تاريخٌ لا يُطوى من تحت حركاته)، و`client` على `PROTECT`. فرادةٌ **غير مشروطة** على `(client, year, number)` — طبقةٌ ثانية تُساند القفل. **ولا عمودَ ورقةٍ فيه**: أوراقُه في `BookEntryDocument` لأن الحركةَ قد تُدخل أوراقَ شهرٍ كاملاً. و`reverses` يشير إلى الأصل، و`reversed_by` العكس — و`reverses` **`OneToOneField`**: عكسٌ واحد على الأكثر لكل حركة فرادةً في القاعدة، طبقةٌ ثانية تُساند قفلَ الأصل في `reverse_entry` |
 | `BookEntryDocument` (#286) | — (رابط) | `entry` على `CASCADE` و`document` على `PROTECT`، فرادةٌ على `(entry, document)`، وفهرسٌ `(tenant, document)`. **ربطٌ يُقرأ لا عمودٌ يُكتب**: عكسُ الحركة يُعيد أوراقها إلى «للإدخال» وحدها. وقاعدةُ «حركةٌ حيّةٌ واحدة على الأكثر لكل ورقة» في `create_entry` داخل `atomic` وبقفل `select_for_update` على صفوف الأوراق |
+| `FeeSubscription` (#282) | `amount` (Decimal، `AMOUNT_KEYS`), `currency` (FK `Currency` **nullable**، الافتراضُ عملةُ المنصّة), `cadence` (`monthly` وحدها اليوم), `starts_on`, `paused_from`/`paused_to` (إيقافُ فوترةٍ مؤقّت), `ended_on`, `created_at` | `tenant` FK و`client` FK. **السعرُ بتاريخ سريان**: فرادةٌ غير مشروطة على `(client, starts_on)` — تغييرُ السعر يضيف صفّاً ولا يعدّل ما قبله، وسعرُ شهرٍ = أكبرُ `starts_on` لا يتجاوز آخره (`fees.subscription_on`). وقيودُ `CheckConstraint` للمبلغ غير السالب ولترتيب طرفَي الإيقاف والإنهاء. **والشهرُ الذي يبدأ داخل الإيقاف لا مسودّةَ له** |
+| `ClientServicePrice` (#282) | `amount` (Decimal، `AMOUNT_KEYS`) | `tenant`/`client` FK، و**`OneToOne` مع `ClientService`** (`related_name="price"`). سعرُ اتفاقِ هذا الزبون على هذه الخدمة لا سعرُ الكتالوج؛ والمسودّةُ السابقة لقطةٌ فلا يُعيد تغييرُه حسابَها |
+| `FeeExtraService` (#282) | `service_name`, `amount` (Decimal، `AMOUNT_KEYS`), `performed_on`, `draft` (`next_month`/`standalone`), `created_at` | `tenant` FK و`client` FK، وفهرسٌ `(tenant, client, performed_on)`. **تُسجَّل عند التنفيذ**: `next_month` تدخل مسودّةَ الشهر التالي له، و`standalone` «فاتورة لحالها» لا تدخل مسودّةً. وحقلُ `draft` **اختيارٌ لا مفتاحُ ربط** — المسودّةُ تُبنى لقطةً، وإضافةٌ بعد توليدها لا تعيد كتابتها |
+| `FeeDraft` (#282) | `year`, `month`, `subtotal`/`total` (Decimal، `AMOUNT_KEYS`؛ متساويان في أ١ — لا ضريبةَ بعد), `status` (`draft`/`approved`/`cancelled`), `generated_at`, `approved_by`/`approved_at`/`approved_note` | `tenant` FK و`client` FK. **فرادةٌ غير مشروطة على `(client, year, month)`** = «مرّتان في اليوم نفسه مسودّةٌ واحدة»، و`CheckConstraint` للشهر (1..12) وللمبلغين غير السالبين. `generated_at` يُكتب من **يوم التوليد الصريح** (`fees._generated_at`) لا ساعةَ النظام، فتنبيهُ الثلاثة أيام يُقاس على تاريخه. **ولا حذف**: الحالتان فعلان وحدهما |
+| `FeeDraftLine` (#282) | `label` (بلا مبلغٍ في نصّه), `amount` (Decimal، `AMOUNT_KEYS`), `source` (`subscription`/`service`/`extra`) | `tenant` FK، و`draft` على `CASCADE` (`related_name="lines"`). **المصدرُ مكتوبٌ لا مستنتَج** لتشرحه الواجهة، والمبلغُ لقطةُ وقت التوليد |
 | `BookEntryLine` (#286) | `debit`, `credit`, `side_party` | `entry` على `CASCADE` و`account` على `PROTECT`، و`tenant` يُملأ من الحركة (`_fill_tenant_from_entry` — النموذجُ لا زبونَ له مباشرةً). `debit`/`credit` مسجَّلان في `AMOUNT_KEYS` (`BOOK_ENTRY_AMOUNT_KEYS`) ويُقنَّعان كسائر مبالغ الموديول |
 
 ## دوال الـservices العامة
@@ -263,6 +271,24 @@ change_kind(book, kind, *, day=None)                          # بسيط ← م�
 pending_entry_payload(tenant, user, *, day=None)              # «للإدخال»: `Exists` + `TruncMonth` باستعلامٍ واحد
 ```
 
+**والأتعابُ في `fees.py`** (#282): المصدرُ الواحدُ لسعر الشهر وتناسبه واعتماده:
+
+```python
+# ── الأتعاب (#282، الجزء أ١ — في `accounting_office/fees.py`) ──
+subscription_on(tenant, client, *, day)                       # أكبرُ `starts_on` لا يتجاوز آخرَ الشهر
+generate_fee_drafts(tenant, *, day)                           # `{"created_drafts", "created_alerts"}` — يُنادَى من `refresh_office`
+amounts_masked(tenant, user)                                  # قرارُ القناع مرّةً للطلب
+subscription_row(row, *, masked) / draft_row(draft, *, masked) / extra_row(row, *, masked)   # القناعُ يطال البنود
+subscriptions_payload(tenant, *, user) / drafts_payload(tenant, *, user) / extras_payload(tenant, *, user)
+visible_subscriptions(tenant, user) / visible_extras(tenant, user) / visible_drafts(tenant, user)   # العزلُ من `visible_clients`
+create_subscription(tenant, client, *, amount, starts_on, cadence=None, currency=None, paused_from=None, paused_to=None, ended_on=None)
+create_extra_service(tenant, client, *, service_name, amount, performed_on, draft=None)
+set_client_service_price(client_service, *, amount)           # «سعرٌ لكل خدمة» — مدخلُه الوحيد (نقطتُه في أ٢)
+can_approve_fee_drafts(tenant, user)                          # `manager` و`office_manager` وحدهما
+approve_fee_draft(draft, *, actor, note="") / approve_all_fee_drafts(tenant, *, actor, note="") / cancel_fee_draft(draft, *, actor)   # `select_for_update`
+pending_drafts(tenant)                                        # «كم بقي» بعد «اعتمد الكل»
+```
+
 `deadlines.py` وحدها تقرأ حسابَ الأشهر: `add_months(day, months)` (مقيَّدةٌ بآخر
 الشهر لأفق التقويم) و`month_start_after(day, months)` (أولُ الشهر)، و
 `service_periods(frequency_of_month, start, end)` (ثلاثيات `(بداية, نهاية, دورية)`).
@@ -351,6 +377,15 @@ pending_entry_payload(tenant, user, *, day=None)              # «للإدخال
 | `POST` | `client-books/<client_id>/entries/<id>/reverse/` | `OfficeClientBookViewSet` (`reverse`) — حركةٌ عكسية؛ عكسُ العكس وثاني عكسٍ 400 |
 | `GET` | `client-books/pending-entry/` | `OfficeClientBookViewSet` (`pending_entry`) — «للإدخال»: أوراقٌ واصلةٌ بلا حركةٍ حيّة، بالزبون والشهر، **وللدفاتر القابلة للكتابة وحدها** |
 | `POST` | `client-books/<client_id>/kind/` | `OfficeClientBookViewSet` (`kind`) — تغييرُ النوع (بسيط ← مزدوج من بداية سنة، د7) **ويُكمل الشجرة** |
+| `GET/POST` | `fees/subscriptions/` | `OfficeFeeSubscriptionViewSet` (`list`, `create`) — الاشتراكاتُ التي يراها العضو؛ والإضافةُ سعرٌ **بتاريخ سريانه** (`office.clients.write` + `office.amounts.view`)، والتاريخُ المكرَّر 400 |
+| `GET` | `fees/drafts/` | `OfficeFeeDraftViewSet` (`list`) — المسودّاتُ ببنودها ومصادرها، ومبالغُها `null` بلا `office.amounts.view`؛ **ولا `POST`** (التوليدُ في «حدّث المكتب») |
+| `POST` | `fees/drafts/<id>/approve/` | `OfficeFeeDraftViewSet` (`approve`) — `manager`/`office_manager` وحدهما (403 لغيرهما)، وملاحظةٌ اختيارية؛ ومن حالةٍ غير «مسودّة» 400 |
+| `POST` | `fees/drafts/approve-all/` | `OfficeFeeDraftViewSet` (`approve_all`) — كلُّ منتظرةٍ في المكتب، والردُّ `{approved, remaining, drafts}` |
+| `POST` | `fees/drafts/<id>/cancel/` | `OfficeFeeDraftViewSet` (`cancel`) — قبل الاعتماد وحده؛ وبعده 400 (إبطالُ المعتمدة إجراءُ أ٢) |
+| `GET/POST` | `fees/extras/` | `OfficeFeeExtraServiceViewSet` (`list`, `create`) — الخدماتُ الإضافيةُ ووجهتُها `next_month`/`standalone`، بسعرها وتاريخ تنفيذها |
+
+**ولا `DELETE` في أيّ نقطةٍ من `fees/`** — `http_method_names` تُغلق الطريقة (405)،
+كما لا `PUT`/`PATCH`: تغييرُ السعر صفٌّ جديد، وتغييرُ المسودّة اعتمادٌ أو إلغاء.
 
 **لا `DELETE` للزبون**: `destroy` ترفع `MethodNotAllowed` (405)، و«منتهٍ» حالةٌ
 تُكتب بقيمتها الحقيقية لا صفٌّ يُطوى.
@@ -1319,6 +1354,71 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 فهارس وستةُ قيود، ثم `RunPython` لزرع شجرة المنصّة بعكسٍ يحذف أكوادَه وحدها. بلا
 `RemoveField` ولا `DeleteModel` ولا `RunSQL`.
 
+## الأتعاب — الاشتراك والمسودّات والاعتماد (#282، الجزء أ١: الخادم)
+
+**الجزءُ أ١ يبني الحسابَ لا المستند**: مسودّةُ الشهر تُولَّد وتُعتمد هنا، وفاتورةُ
+الأتعاب الورقية — الترقيمُ والحقولُ القانونية والإشعارُ الدائن ورابطُ PDF في
+`docshare` وشاشةُ «المسودّات» — هي **أ٢**، والمعتمدةُ تُنتجها هناك. فلا
+`FeeInvoice` في هذه الهجرة، ولا ترقيمَ، ولا قيدَ محاسبيّ (القيودُ #284)، ولا واجهة.
+
+**طريقةُ الأتعاب إعدادٌ** (`fee_method`، مكتب ← زبون، الافتراضُ «اشتراك»):
+`subscription` = الاشتراكُ الساري + إضافاتُ الشهر السابق، و`per_service` = مجموعُ
+أسعار الخدمات التي استحقّت فتراتُها + الإضافات، و`hourly` **معروضةٌ مرفوضة**
+(`services.FORBIDDEN_SETTING_VALUES` ⇒ 400 برسالتها على المستويين). و
+`fee_auto_approve` مفتاحٌ **مقفلٌ مطفأٌ** مثل `reminder_auto_send` (400 على فتحه).
+
+**ثلاثُ قواعدَ تحكم المسودّة:**
+1. **السعرُ بتاريخ سريان** — `FeeSubscription` صفٌّ لكل تغيير، و`fees.subscription_on`
+   تُعيد الصفَّ ذا أكبر `starts_on` لا يتجاوز **آخرَ الشهر**؛ فلا تعديلَ لصفٍّ سابق،
+   ومسودّةُ شهرٍ مضى تبقى بسعرها.
+2. **التناسبُ بعدد أيام الشهر الفعليّ — لا بثلاثين**: بدايةٌ في 16/نيسان (ثلاثون
+   يوماً) = نصفُ الشهر تماماً، وفي 16/آذار (31) = 16/31. والانتهاءُ في منتصف الشهر
+   يُنسب بعدد أيامه كذلك.
+3. **التوليدُ مرّةً في الشهر** — `_generate_fee_drafts` داخل `refresh_office`:
+   مسودّةٌ لكلّ زبونٍ **نشط**، تُولَّد لأوّل تشغيلٍ في الشهر (عمليّاً يوم 1)،
+   وفرادةُ `(client, year, month)` تجعل التشغيلَ الثاني بلا أثر. **ولا مسودّة**
+   لزبونٍ منتهٍ، ولا لشهرٍ يبدأ داخل إيقاف الفوترة، ولا لاشتراكٍ انتهى قبل الشهر،
+   ولا لزبونٍ بلا سطرٍ واحد.
+
+**والإضافاتُ (`FeeExtraService`)** تُسجَّل عند التنفيذ (`fees/extras/`): وجهتُها
+«مسودّة الشهر القادم» (نُفِّذت في آذار ⇒ مسودّةُ نيسان) أو «فاتورة لحالها» فلا تدخل
+مسودّةً. **والمسودّةُ لقطة**: ما يُضاف بعد توليدها لا يُعيد كتابتها — شاشةُ أ٢ هي
+التي تعيد الحساب أو التصحيح.
+
+**والاعتمادُ دورٌ لا مفتاح**: `manager` و`office_manager` وحدهما
+(`fees.FEE_APPROVER_ROLES`، والاسمُ من `core.access.OFFICE_MANAGER_ROLE`) —
+`draft → approved` أو `draft → cancelled` قبل الاعتماد، **ولا حذف**. فاعتمادُ
+محاسبٍ **403**، ومسودّةُ زبونٍ لا يراه العضو **404** (كالعزل في كل نقطة). والصفوفُ
+تُقفل `select_for_update` قبل القراءة، فاعتمادان متزامنان لا يمرّان على المسودّة
+نفسها. و«اعتمد الكل» (`fees/drafts/approve-all/`) يعتمد كلَّ منتظرةٍ **في المكتب**
+ويعيد `{approved, remaining, drafts}`.
+
+**وتنبيهُ الثلاثة أيام**: مسودّةٌ منتظرةٌ مرّ عليها ثلاثةُ أيامٍ من **تاريخ
+توليدها** ⇒ `OfficeAlert` بنوعٍ جديد `fee_draft_pending` ومرجعٍ واحد
+`"fee_draft:<id>"` (`models.fee_draft_alert_ref`) لكل واحدٍ من المعتمِدين، ونصُّه
+**بلا مبلغ**. ويسقط من الجرس باعتماد المسودّة **عند القراءة** (كأخبار الالتزامات):
+الصفُّ يبقى أثراً، و`services._live_fee_draft_refs` تمنع عرضَه. و`generated_at`
+يُكتب من **يوم التوليد الصريح** لا من ساعة النظام — وإلا كذب التنبيه على تشغيلٍ
+ليومٍ ماضٍ.
+
+**والقناعُ والمال**: مبالغُ الأتعاب في `FEE_AMOUNT_KEYS` (`amount` · `subtotal` ·
+`total`) و`AMOUNT_KEYS`؛ والقراءةُ تحسب `fees.amounts_masked` **مرّةً للطلب**،
+و`draft_row` تقنّع **البنودَ مع المجموع** (قنعُ الأعلى وحده يترك الرقمَ في السطر)،
+وكتابةُ مبلغٍ بلا `office.amounts.view` **403** (`reject_amount_writes`).
+
+**وهجرة `0012_fees`** إضافيّةٌ محضة: خمسةُ `CreateModel` (`FeeSubscription`،
+`ClientServicePrice`، `FeeExtraService`، `FeeDraft`، `FeeDraftLine`)، وفهارسُها
+وقيودُها (فرادةُ شهر المسودّة، وفرادةُ `(client, starts_on)`، والمبالغُ غيرُ
+السالبة، وترتيبُ طرفَي الإيقاف والإنهاء)، و`AlterField` لاختيارات
+`OfficeAlert.kind` وحدها. **بلا `RunSQL` ولا `RemoveField` ولا `DeleteModel` ولا
+`RunPython`** — لا بياناتَ أولية جديدة: القيمُ الافتراضية في السجلّ لا في صفوف.
+
+**ولأ٢ صريحاً**: فاتورةُ الأتعاب بمستندها وحقولها القانونية، والترقيم، والإشعارُ
+الدائن، ورابطُ PDF، وشاشةُ «المسودّات» (تعديلُ المسودّة/إعادةُ حسابها)، ونقطةُ
+تسعير الخدمات (`set_client_service_price` موجودةٌ بلا نقطةٍ في أ١). و`FeeDraft`
+المعتمدة تُنتج `FeeInvoice` في أ٢ — **مفهومان لا يُدمجان** (مسودّةٌ تُحسب ومستندٌ
+يُرقَّم ويُطبع).
+
 ## الشاشات — «جاهز للإرسال» وسجلُّ التذكيرات (#280، الجزء الثاني)
 
 **الشاشةُ شاشةٌ كاملةٌ لا تبويبٌ في «اليوم»**: المعرّف `office-ready-to-send`
@@ -1498,6 +1598,16 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
   بعدد الصفوف (يحرسه اختبارُ `CaptureQueriesContext` في «اليوم»).
 - **مددُ الحفظ بياناتُ منصّةٍ لا ثوابتُ كود** (#278). سنةُ الحفظ وأساسُها في
   `DocumentRetentionRule` بمصدرها المنشور، وv1 لا يحسب تاريخاً ولا يحذف.
+- **اعتمادُ مسودّات الأتعاب دورٌ لا مفتاح** (#282): `manager` و`office_manager`
+  وحدهما (`fees.can_approve_fee_drafts` عبر `user_tenant_role`)، والصفوفُ تُقفل
+  `select_for_update` قبل القراءة فقرارُ الاعتماد يُبنى على الحال الآنية.
+  و`draft → approved`/`cancelled` فعلان لا غير: **لا حذفَ ولا تعديلَ لمسودّة**،
+  والمعتمدةُ سندُ فاتورةٍ في أ٢. ومسودّةُ زبونٍ لا يراه العضو **404** قبل سؤال الدور
+  (403 يُثبت وجودها).
+- **السعرُ المؤرَّخ والمبلغُ لقطة** (#282): تغييرُ سعر الاشتراك **يضيف صفّاً**
+  (`FeeSubscription`، فرادةُ `(client, starts_on)`) ولا يعدّل ما قبله، وسطورُ
+  المسودّة ومجموعاها لقطاتُ وقت التوليد — فما وُلد لا يتغيّر بسعرٍ أو خدمةٍ تُضاف
+  بعدها. والتناسبُ بعدد أيام الشهر الفعليّ لا بثلاثين.
 - **الكتابةُ بمفاتيحها لا بالدور.** كلُّ نقطة كتابةٍ في `views.py` (زبائن، بطاقة،
   جهات، ربط، مستلِمون، تخصيص زبون) تتطلّب `office.clients.write`، وكتابةُ
   `settings/<key>/` تتطلّب `office.settings.manage` (ومعها الكتالوجُ والباقات، #273)، والتحويل
@@ -1742,3 +1852,4 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 | `accounting_office/tests/test_payroll.py` | **الرواتب — متابعةُ الاستحقاق #279**: نصفُ سنويّ فترتاه يناير–يونيو ويوليو–ديسمبر ودوريةُ سطرٍ لا خدمة وأيامُه من مفتاح الربعيّ؛ **102 والـביטוח يتبعان دوريةَ الخدمة** (شهريةٌ ⇒ التزامٌ لكل شهر، وكلُّ شهرين ⇒ التزامٌ لشهرين) من **v2**؛ و`טופס 126 חציוני` **التاريخُ القانونيّ 18 تموز 2026 و18 كانون الثاني 2027 قبل الزحزحة**؛ وفلسطين: الاقتطاعُ في 15 من التالي، و**الكشفُ السنوي 30 نيسان 2027 بـ`needs_review`**، والضمانُ الاجتماعي لا يُولَّد؛ **وإعدادُ الالتزامات**: بندٌ أُخرج لزبونٍ يسقط له وحده ويبقى لغيره، **والتقويمُ يقرأ القرار نفسه**؛ و**دوريةُ الرواتب**: «رُبعية» مرفوضةٌ برسالتها في **المسارَين** (الإضافة وتغيير الدورية) وشهريةٌ وكلُّ شهرين مقبولتان وخدمةٌ أخرى تحفظ ربعيتها؛ **وأوراقُ الرواتب**: الكشفُ لزبون الخدمة وحده وحالتُه «مطلوبة»، و«تغييرات الموظفين» «مش لازمة» ولا تُشعل «ناقصه أوراق» (المطلوبُ واحدٌ ويصل ⇒ لا شارة)، وبندُ المكتب يبدأ «مطلوبة»؛ **والهجرة**: إسرائيل v2 (كلُّ حقلٍ منسوخٌ حرفاً + سطرُ 126 النصف سنوي) وفلسطين v3 (سبعةُ أسطر + الكشفُ السنوي) وبنداتُها الأربعة، وعكسُها يحذف ما أنشأته وحدها ولا يمسّ v1/v2 ويُعاد بالزرع ثانيةً؛ **وحارسُ انحراف** اختياراتِ السجلّ مقابل أكواد الرواتب غير الحدثية في النسخ السارية وتسمياتِها |
 | `accounting_office/tests/test_reminders.py` | **التذكيرات — «جاهز للإرسال» #280 (خدمياً)**: الإذنُ يُمنح ويُسحب بتاريخيهما ومَن سحبه، ونوعٌ أو قناةٌ مجهولة 400، ورافضُ الإذن أو نوعُه ليس في `consent_types` لا يظهر، والجهةُ الجديدة تأخذ افتراضيَّ المكتب؛ **والقوالب**: نصٌّ عربيٌّ وعبريٌّ لكلٍّ من الأنواع الأربعة، والبديلُ يغلب والافتراضيُّ لا يُكتب مكانه، والرمزُ المجهول 400 يسمّيه، ونصٌّ فارغٌ 400، و`render_reminder_body` يترك ما ليس من الستّة ولا يسقط على قوس؛ **والإيقاع**: أوّلُ تذكيرٍ بعد انتهاء الفترة بيوم، والثاني بعد ثلاثةٍ من الإرسال، ولا رابعَ بعد الثالث، و«وصلت» تخرج و«وصلت ناقصة» تبقى، والتنحيةُ تُعيد المؤقّت ولا تُعدّ، و«كلّمناه» يُعدّ، والـ`undo` يُنقص عدّاً ولا يُبطَل مرّتين؛ **والقائمة**: شخصٌ لزبونين = رسالةٌ واحدة، وتعيينُ النوع يغلب الرئيسية، ونصُّ المستلِم بلغته، وبديلُ المكتب يظهر في الرسالة، وبلا هاتفٍ تظهر (`has_phone=false`)، وبلا تجميعٍ رسالةٌ لكل بند، والمنتهي لا يُعرض، وفلترُ المسؤول، وزبونُ مكتبٍ آخر لا يُعرض، والنوعُ بلا مولّدٍ يُعيد فراغاً؛ **والحواجز**: يومُ راحة الزبون وعطلةُ المكتب يؤجّلان الظهور لا يُلغيانه، والتأجيلُ يحجب حتى تاريخه و`until=None` يمسحه وتاريخُ اليوم مرفوض؛ **والتصعيد**: تنبيهُ المسؤول يومَ الاستحقاق التالي بلا مبلغ، وصاحبُ المكتب بعد يومين، ولا شيءَ قبل الفاصل، مرّةً واحدةً في اليوم، ويُسقطه اكتمالُ الأوراق عند القراءة، ويفتح تبويبَ الأوراق؛ **والكلفة**: عددُ الاستعلامات نفسُه لزبونٍ وخمسة؛ وشكلُ اللقطة في السجلّ، والسجلُّ الأحدثَ أوّلاً، وجهةٌ أو زبونٌ خارج الرؤية يُرفض. **وجولةُ الإصلاح الأولى**: شهرٌ وسنةٌ يبدآن في اليوم نفسه ⇒ تنبيهان لا واحد، و`{due_date}` في النصّ يومُ التذكير القادم بـ`dd/MM/yyyy` بعد يوم راحة، و`sent` واتسابٌ وحدها والفراغُ يعنيها، وتنحيةُ ثلاثة بنودٍ استعلامُ بياناتٍ واحد و`bulk_create` واحد، ولا مسحَ لأوراق زبونٍ بلا تنبيهٍ قائم، وحارسا `resolve_settings_for_clients` وقراءتُه مرّةً للحمولة، وتنبيهُ التذكير مُثبَتٌ قبل اكتمال الأوراق |
 | `accounting_office/tests/test_reminders_api.py` | **نقاطُ #280**: حقولُ الإذن على الجهة، و`contacts/<id>/consent/` يُمنح ويُسحب ويعيد مَن سحب، ونوعٌ/قناةٌ/قيمةٌ غير منطقية 400، والكتابةُ بلا مفتاحها 403؛ و`reminder-templates/` تُقرأ لكل عضوٍ (ثمانيةُ أسطر)، والبديلُ `PUT` و«ارجع للافتراضي» `DELETE`، والرمزُ المجهول 400 يسمّيه، وبلا `office.settings.manage` 403، ونوعٌ أو لغةٌ مجهولة 400؛ و`ready-to-send/` تجمع اليومَ رسائلَ، و`sent/` صفٌّ لكل بندٍ بلقطة الهاتف، و`manual/` تلفونٌ أو زيارة فقط، و`dismiss/` بسببٍ وبلا نصّ، و`postpone/` بتاريخٍ بعد اليوم (واليوم 400)، وزبونُ غيرك لا يظهر ولا يُرسَل له، والأفعالُ الأربعة بلا مفتاح الكتابة 403، ونوعٌ مجهول 400، والفلترُ بنوعٍ بلا مولّدٍ فراغ؛ و`reminder-log/` تُقرأ و`PUT`/`PATCH`/`DELETE` 405 والصفُّ باقٍ، والـ`undo` يشير إلى ما يُبطله وإبطالُه 400، وسجلُّ الزبون على `clients/<pk>/reminder-log/`، وزبونُ الزميل 404 على السجلّ وعلى الإبطال؛ و`office-holidays/` تُقرأ لكل عضوٍ وتُكتب بالمفتاح، والتكرار 400 والحذف 204؛ و`reminder_auto_send` مقفلٌ برسالته، والنافذةُ تُرفض خارج 0–23 وبترتيبٍ مقلوب، ومجموعةُ «التذكيرات والنصوص» تُخدَم بقيمها الافتراضية. **وجولةُ الإصلاح الأولى**: النافذةُ تُرفض ببدايةٍ متأخّرةٍ عن النهاية كذلك، و`sent/` قناةٌ غيرُ الواتساب 400، و`serializer_class` السجلّ سطرُ قراءةٍ لا حمولةُ تأجيل (وحقولُه هي حقولُ الردّ)، ويومُ النقاط أربعاءُ ثابتةٌ فلا قائمةَ فارغةً كلَّ جمعة. **وجولةُ التصحيح الثانية**: `consent_withdrawn_by` كائنٌ `{id, name}` على قائمة جهات الزبون وتفصيلها وردّ `promote` (و`None` لجهةٍ لم يُسحب إذنها)، وعددُ الاستعلامات ثابت مهما بلغ عدد الجهات المسحوبة، و`sent/` بنصٍّ فارغٍ أو مسافات 400 ولا صفَّ يُكتب |
+| `accounting_office/tests/test_fees.py` | **الأتعاب ١ #282**: طريقةُ الأتعاب إعدادٌ مكتب ← زبون وافتراضُها «اشتراك»، و`hourly` مرفوضةٌ برسالتها على المستويين، و`fee_auto_approve` مقفلٌ (400 على `true`)؛ **والتوليدُ**: أوّلُ تشغيلٍ في الشهر مسودّةٌ واحدة ومرّتان لا تضيفان، ويومٌ لاحقٌ في الشهر لا يولّد ثانية، والتغييرُ يضيف صفَّ سعرٍ ومسودّةُ نيسان تأخذ الجديد، والتناسبُ نصفٌ تماماً في شهرٍ من ثلاثين و16/31 في شهرٍ من أحدٍ وثلاثين، ولا مسودّةَ لزبونٍ منتهٍ ولا لاشتراكٍ انتهى قبل الشهر ولا لشهرٍ داخل إيقاف الفوترة؛ **و«سعرٌ لكل خدمة»**: مجموعُ الخدمات المستحقّة في الشهر + إضافاتِ الشهر السابق، و«فاتورة لحالها» لا تدخل مسودّة؛ **والاعتماد**: صاحبُ المكتب ومديرُ المكتب يعتمدان والمحاسبُ 403 (والمسودّةُ باقية)، و«اعتمد الكل» يعتمد كلَّ منتظرة، والإلغاءُ قبل الاعتماد وحده، والمعتمدةُ لا يُعاد توليدها ولا تتغيّر، و`can_approve_fee_drafts` ترفض المحاسب؛ **والتنبيه**: لا شيء قبل ثلاثة أيام، ثم صفٌّ لكل معتمِدٍ بمرجعٍ واحد ونصٍّ بلا مبلغ، ولا تكرارَ في اليوم الرابع، ويسقط من الجرس باعتماد المسودّة؛ **والـAPI**: الإضافةُ والقراءةُ للاشتراك والإضافة، والتاريخُ المكرَّر 400، والقناعُ `null` للمحاسب في المسودّة وبنودها والاشتراكات، وكتابةُ مبلغٍ بلا المفتاح 403، و`DELETE` على الجموع 405، وزبونُ مكتبٍ آخر 404 ومسودّةُ مكتبٍ آخر لا تُقرأ ولا تُعتمد |

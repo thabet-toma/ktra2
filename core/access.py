@@ -412,9 +412,13 @@ SUPPORT_ROLE = "support"
 #: هذا الملفّ (مكتب المحاسبة يقرأه ليعرف «صاحب المكتب» في تنبيهات التأخير #276).
 MANAGER_ROLE = "manager"
 
+#: دورُ «مدير المكتب» (#272) — يُقرأ خارج هذا الملفّ ليعرف من يعتمد مسودّات
+#: الأتعاب (#282): صاحبُ المكتب ومديرُ المكتب وحدهما، والصلاحيةُ دورٌ لا مفتاح.
+OFFICE_MANAGER_ROLE = "office_manager"
+
 ROLE_DEFAULTS: dict[str, object] = {
     MANAGER_ROLE: "*",
-    "office_manager": _OFFICE_MANAGER,
+    OFFICE_MANAGER_ROLE: _OFFICE_MANAGER,
     "accountant": _ACCOUNTANT,
     "legal_accountant": _LEGAL_ACCOUNTANT,
     "sales": _SALES_EMPLOYEE,
@@ -429,7 +433,7 @@ ROLE_DEFAULTS: dict[str, object] = {
 ROLE_LABELS = (
     (MANAGER_ROLE, "مدير"),
     # #272: دورُ مكتب المحاسبة الثاني — يظهر فقط لشركةٍ مرخّصةٍ لوحدتها.
-    ("office_manager", "مدير مكتب"),
+    (OFFICE_MANAGER_ROLE, "مدير مكتب"),
     ("accountant", "محاسب"),
     ("legal_accountant", "محاسب قانوني خارجي"),
     ("sales", "موظف مبيعات"),
@@ -443,7 +447,7 @@ ROLE_ORDER = tuple(r for r, _ in ROLE_LABELS)
 ROLE_MODULES = {
     "legal_accountant": "accountant_portal",
     # دور مكتب المحاسبة بلا معنى بلا وحدته — يختفي معها.
-    "office_manager": "accounting_office",
+    OFFICE_MANAGER_ROLE: "accounting_office",
     # دور الخدمة الذاتية بلا معنى بلا وحدة الموارد البشرية — يختفي معها.
     "ess": "hr_suite",
     # دور الموظف الميداني بلا معنى بلا وحدة متابعة الموظفين — يختفي معها.

@@ -17,12 +17,14 @@
   `is_primary` و`NULL` حين لا، وMySQL تسمح بتكرار `NULL`.
 - مستلِمٌ واحد لكل (زبون، نوع تذكير).
 """
+from decimal import Decimal, InvalidOperation
 from uuid import uuid4
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import Q
+from django.utils import timezone
 
 from accounting_office import settings_registry
 #: أنواعُ الأحداث (#277) — تُعرَّف في السجلّ لأن إعداد `enabled_event_kinds` يقرأ
@@ -42,7 +44,7 @@ from accounting_office.settings_registry import (
     REMINDER_TYPE_LABELS as REMINDER_TYPE_LABELS,
     REMINDER_TYPES as REMINDER_TYPES,
 )
-from tenants.models import Tenant, UserCompanyMembership
+from tenants.models import Currency, Tenant, UserCompanyMembership
 
 
 def is_tenant_member(tenant_id, user_id) -> bool:
@@ -2131,6 +2133,8 @@ OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED = "override_platform_changed"
 OFFICE_ALERT_KIND_REMINDER_LIMIT = "reminder_limit_reached"
 #: #280: ومضت أيامُ المهلة وما زالت ناقصة — يُصعَّد لصاحب المكتب.
 OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER = "reminder_limit_reached_owner"
+#: #282: مسودّةُ أتعابٍ مرّ عليها ثلاثةُ أيامٍ وما اعتُمدت — التنبيهُ لمن يعتمدها.
+OFFICE_ALERT_KIND_FEE_DRAFT_PENDING = "fee_draft_pending"
 #: نوعا التذكير — يُحكمان بشرطهما في القراءة (اكتمالُ الأوراق) لا بالحالة.
 REMINDER_ALERT_KINDS: tuple[str, ...] = (
     OFFICE_ALERT_KIND_REMINDER_LIMIT,
@@ -2146,6 +2150,7 @@ OFFICE_ALERT_KIND_CHOICES: list[tuple[str, str]] = [
         OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER,
         "الأوراق ناقصة بعد حدّ التذكير — صار لصاحب المكتب",
     ),
+    (OFFICE_ALERT_KIND_FEE_DRAFT_PENDING, "مسودّة أتعاب تنتظر الاعتماد"),
 ]
 OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
 #: شارةُ كل نوعٍ في الواجهة — **مفتاحُ صنفٍ لا لون**، يُرسَل في `alert_row` فيُلوَّن
@@ -2159,6 +2164,8 @@ OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
     # نوعا التذكير شأنُ أوراقٍ ناقصة — شارةُ «ناقصه أوراق» نفسها لا شارتان.
     OFFICE_ALERT_KIND_REMINDER_LIMIT: OBLIGATION_BADGE_MISSING_DOCS,
     OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OBLIGATION_BADGE_MISSING_DOCS,
+    # ومسودّةُ الأتعاب شأنُ اعتمادٍ ليس تأخيراً رسمياً — الأصفرُ المحايد نفسه.
+    OFFICE_ALERT_KIND_FEE_DRAFT_PENDING: OBLIGATION_BADGE_LATE_INTERNAL,
 }
 #: **أين يُفتح التنبيه** — مفتاحٌ خادميّ يقرؤه `alert_row` فتبني الواجهةُ الوجهةَ
 #: بلا معرفة أنواع. الافتراضُ ملفُّ الزبون، ونوعا اللائحة يفتحان شاشة الإعدادات
@@ -2166,6 +2173,8 @@ OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
 OFFICE_ALERT_OPENS_CLIENT = "client"
 OFFICE_ALERT_OPENS_DEADLINE_RULES = "deadline_rules"
 OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS = "client_documents"
+#: #282: تبويبُ «الأتعاب» في ملفّ الزبون — مسودّةُ الشهر التي تنتظر الاعتماد.
+OFFICE_ALERT_OPENS_CLIENT_FEES = "client_fees"
 OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OFFICE_ALERT_OPENS_CLIENT,
     OFFICE_ALERT_KIND_OBLIGATION_LATE: OFFICE_ALERT_OPENS_CLIENT,
@@ -2173,6 +2182,7 @@ OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
     OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED: OFFICE_ALERT_OPENS_DEADLINE_RULES,
     OFFICE_ALERT_KIND_REMINDER_LIMIT: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
     OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
+    OFFICE_ALERT_KIND_FEE_DRAFT_PENDING: OFFICE_ALERT_OPENS_CLIENT_FEES,
 }
 OFFICE_ALERT_DEFAULT_OPENS = OFFICE_ALERT_OPENS_CLIENT
 
@@ -3231,4 +3241,427 @@ class BookEntryDocument(models.Model):
 
     def save(self, *args, **kwargs):
         _fill_tenant_from_entry(self)
+        super().save(*args, **kwargs)
+
+
+# ── الأتعاب: الاشتراك والمسودّات والاعتماد (#282، الجزء أ١) ────────────────────
+#
+# **ثلاثةُ مصادرَ لسطر المسودّة لا واحد**: اشتراكٌ بسعرٍ مؤرَّخ، أو سعرُ خدمةٍ
+# استحقّت فترتُها في الشهر، أو خدمةٌ إضافيةٌ نُفِّذت. والسطرُ يحمل مصدرَه صريحاً
+# (`source`) لتشرحه الواجهةُ بلا تخمينٍ من الاسم.
+#
+# **ولا تُمحى مسودّة**: `draft → approved` أو `draft → cancelled` قبل الاعتماد،
+# والمعتمدةُ سندُ فاتورةِ الأتعاب في أ٢. والحذفُ ليس فعلاً في النماذج كلّها.
+#
+# **والاشتراك بتاريخ سريانٍ لا بعمودِ سعرٍ واحد**: تغييرُ السعر **يضيف صفّاً** ولا
+# يعدّل ما قبله، فتبقى مسودّةُ الشهر الماضي تقرأ سعرَها. وهي القاعدةُ نفسُها في
+# `ClientServiceFrequency`، ولها الدالّةُ الواحدةُ في `accounting_office/fees.py`
+# (`subscription_on`) — لا نسخةً ثانية من «أكبر `starts_on` لا يتجاوز الشهر».
+#
+# **وفاتورةُ الأتعاب ليست هنا**: `FeeDraft` مسودّةُ حسابٍ تُحسب وتُعتمد، والفاتورةُ
+# مستندٌ يُرقَّم ويُطبع (أ٢) — لا يُدمجان في صفٍّ واحدٍ لأن أحدهما حسابٌ والآخر
+# مستند.
+FEE_CADENCE_MONTHLY = "monthly"
+#: الدوريّةُ الوحيدةُ اليوم — الحقلُ موجودٌ لأن الاشتراك قد يكون ربعياً لاحقاً،
+#: ودوريّةٌ تُخزَّن ولا يولّدها المولّدُ وعدٌ لا يُوفى. تُضاف صفّاً مع دعمها في
+#: `fees._subscription_lines` لا قبله.
+FEE_CADENCE_CHOICES: list[tuple[str, str]] = [
+    (FEE_CADENCE_MONTHLY, "شهري"),
+]
+FEE_CADENCE_LABELS: dict[str, str] = dict(FEE_CADENCE_CHOICES)
+
+FEE_DRAFT_STATUS_DRAFT = "draft"
+FEE_DRAFT_STATUS_APPROVED = "approved"
+FEE_DRAFT_STATUS_CANCELLED = "cancelled"
+FEE_DRAFT_STATUS_CHOICES: list[tuple[str, str]] = [
+    (FEE_DRAFT_STATUS_DRAFT, "مسودّة"),
+    (FEE_DRAFT_STATUS_APPROVED, "معتمدة"),
+    (FEE_DRAFT_STATUS_CANCELLED, "ملغاة"),
+]
+FEE_DRAFT_STATUS_LABELS: dict[str, str] = dict(FEE_DRAFT_STATUS_CHOICES)
+
+FEE_LINE_SOURCE_SUBSCRIPTION = "subscription"
+FEE_LINE_SOURCE_SERVICE = "service"
+FEE_LINE_SOURCE_EXTRA = "extra"
+FEE_LINE_SOURCE_CHOICES: list[tuple[str, str]] = [
+    (FEE_LINE_SOURCE_SUBSCRIPTION, "اشتراك"),
+    (FEE_LINE_SOURCE_SERVICE, "خدمة"),
+    (FEE_LINE_SOURCE_EXTRA, "خدمة إضافية"),
+]
+FEE_LINE_SOURCE_LABELS: dict[str, str] = dict(FEE_LINE_SOURCE_CHOICES)
+
+FEE_EXTRA_DESTINATION_NEXT_MONTH = "next_month"
+FEE_EXTRA_DESTINATION_STANDALONE = "standalone"
+FEE_EXTRA_DESTINATION_CHOICES: list[tuple[str, str]] = [
+    (FEE_EXTRA_DESTINATION_NEXT_MONTH, "مسودّة الشهر القادم"),
+    (FEE_EXTRA_DESTINATION_STANDALONE, "فاتورة لحالها"),
+]
+FEE_EXTRA_DESTINATION_LABELS: dict[str, str] = dict(FEE_EXTRA_DESTINATION_CHOICES)
+
+
+def fee_draft_alert_ref(draft_id) -> str:
+    """مفتاحُ تنبيه المسودّة الواحد — يقرؤه التوليدُ وقراءةُ الجرس معاً.
+
+    نسخةٌ ثانية من الصيغة (`"fee_draft:<id>"`) في موضعٍ آخر تفترق عن الأولى عند
+    أوّل تعديلٍ بصمت، فيتكرّر التنبيه أو لا يسقط باعتماد مسودّته.
+    """
+    return f"fee_draft:{draft_id}"
+
+
+def assert_fee_amount(amount, *, field="amount") -> None:
+    """مبلغُ الأتعاب: غيرُ سالبٍ وبخانتين عشريتين على الأكثر — والرسالةُ بالحقل.
+
+    يُطبَّع قبل الفحص لأن `Decimal("300")` و`300` يصلان من مسارين (المسلسِل
+    يمرّر `Decimal`، والنداءُ البرمجيّ قد يمرّر رقماً)، وقاعدةُ المال واحدة.
+    """
+    try:
+        value = amount if isinstance(amount, Decimal) else Decimal(str(amount))
+    except (InvalidOperation, TypeError, ValueError):
+        raise ValidationError({field: "مبلغٌ غير صالح."}) from None
+    if not value.is_finite() or value < 0:
+        raise ValidationError({field: "المبلغ لا يكون سالباً."})
+    if value != value.quantize(Decimal("0.01")):
+        raise ValidationError({field: "المبلغ بخانتين عشريتين على الأكثر."})
+
+
+class FeeSubscription(models.Model):
+    """اشتراكُ زبونٍ **بتاريخ سريانٍ**: صفٌّ لكل تغييرِ سعر، ولا تعديلَ لما قبله.
+
+    «سعرُ شهرٍ ما» = الصفُّ ذو أكبر `starts_on` لا يتجاوز آخرَ الشهر (انظر
+    `fees.subscription_on`). والفرادةُ على `(client, starts_on)` تجعل كتابةَ
+    السعر نفسه بتاريخه مرّةً واحدة: الطلبُ المكرَّر **يُرفض 400** لا يضاعف الصفّ.
+
+    **و`paused_from`/`paused_to` إيقافُ فوترةٍ مؤقّت**: الشهرُ الذي يبدأ داخل
+    المدى لا مسودّةَ له. و`ended_on` إنهاءٌ نهائيّ — صفٌّ انتهى قبل الشهر لا
+    يولّد شيئاً، وانتهاؤه في منتصفه يُنسب بعدد أيامه.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_subscriptions",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="fee_subscriptions",
+        verbose_name="الزبون",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+    currency = models.ForeignKey(
+        Currency,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="office_fee_subscriptions",
+        verbose_name="العملة",
+    )
+    cadence = models.CharField(
+        max_length=20,
+        choices=FEE_CADENCE_CHOICES,
+        default=FEE_CADENCE_MONTHLY,
+        verbose_name="الدورية",
+    )
+    starts_on = models.DateField(verbose_name="سارية من")
+    paused_from = models.DateField(null=True, blank=True, verbose_name="إيقاف الفوترة من")
+    paused_to = models.DateField(null=True, blank=True, verbose_name="إيقاف الفوترة إلى")
+    ended_on = models.DateField(null=True, blank=True, verbose_name="تنتهي في")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "اشتراك أتعاب"
+        verbose_name_plural = "اشتراكات الأتعاب"
+        ordering = ["starts_on", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "starts_on"],
+                name="uniq_fee_subscription_start",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="fee_subscription_amount_not_negative",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(ended_on__isnull=True)
+                    | models.Q(ended_on__gte=models.F("starts_on"))
+                ),
+                name="fee_subscription_ends_after_start",
+            ),
+            models.CheckConstraint(
+                condition=(
+                    models.Q(paused_from__isnull=True)
+                    | models.Q(paused_to__isnull=True)
+                    | models.Q(paused_to__gte=models.F("paused_from"))
+                ),
+                name="fee_subscription_pause_ordered",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client"], name="office_fee_subs_tenant_client",
+            ),
+        ]
+    def __str__(self) -> str:
+        return f"{self.client_id}@{self.starts_on}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        assert_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class ClientServicePrice(models.Model):
+    """سعرُ خدمةِ زبونٍ في طريقة «سعرٌ لكل خدمة» — صفٌّ لكل خدمةِ زبون.
+
+    **مربوطٌ بـ`ClientService`** لا بالكتالوج: السعرُ يخصّ اتفاقَ هذا الزبون على
+    هذه الخدمة، وكتالوجُ المكتب لا يعرف أسعارَ زبائنه. وفرادةُ `client_service`
+    تجعل «سعرُ الخدمة» سؤالاً واحداً له جوابٌ واحد.
+
+    **ولا تاريخَ سريانٍ هنا**: تغييرُ السعر يُحدَّث في هذا الصفّ، والمسودّاتُ
+    السابقة لا تتغيّر لأن سطورها لقطةٌ محفوظة (والمدفوعُ لا يُعاد حسابه).
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_service_prices",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="service_prices",
+        verbose_name="الزبون",
+    )
+    client_service = models.OneToOneField(
+        ClientService,
+        on_delete=models.CASCADE,
+        related_name="price",
+        verbose_name="خدمة الزبون",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="السعر")
+
+    class Meta:
+        verbose_name = "سعر خدمة زبون"
+        verbose_name_plural = "أسعار خدمات الزبائن"
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="client_service_price_not_negative",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_service_id}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        if self.client_service_id:
+            self.client_id = self.client_service.client_id
+        _fill_tenant_from_client(self)
+        assert_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class FeeExtraService(models.Model):
+    """خدمةٌ إضافيةٌ نُفِّذت للزبون بسعرها — **تُسجَّل عند التنفيذ لا عند الفوترة**.
+
+    وتسير إلى **مسودّة الشهر القادم** (نُفِّذت في آذار ⇒ مسودّةُ نيسان)، أو إلى
+    «فاتورة لحالها»: عملٌ كبيرٌ لا يُجمَع مع اشتراكٍ شهريّ (تأسيسُ شركةٍ مثلاً).
+    وحقلُ `draft` **اختيارٌ لا مفتاحُ ربط**: المسودّةُ تُبنى لقطةً منه، وإضافةُ
+    إضافٍ بعد توليد مسودّته لا تعيد كتابتها.
+    """
+
+    DESTINATION_NEXT_MONTH = FEE_EXTRA_DESTINATION_NEXT_MONTH
+    DESTINATION_STANDALONE = FEE_EXTRA_DESTINATION_STANDALONE
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_extras",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="fee_extras",
+        verbose_name="الزبون",
+    )
+    service_name = models.CharField(max_length=200, verbose_name="الخدمة")
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+    performed_on = models.DateField(verbose_name="نُفِّذت في")
+    draft = models.CharField(
+        max_length=20,
+        choices=FEE_EXTRA_DESTINATION_CHOICES,
+        default=FEE_EXTRA_DESTINATION_NEXT_MONTH,
+        verbose_name="إلى",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "خدمة إضافية"
+        verbose_name_plural = "الخدمات الإضافية"
+        ordering = ["performed_on", "id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="fee_extra_amount_not_negative",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client", "performed_on"],
+                name="office_fee_extra_client_month",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.service_name}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        assert_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class FeeDraft(models.Model):
+    """مسودّةُ أتعاب شهرٍ لزبون — **واحدةٌ لا أكثر** بفرادة `(client, year, month)`.
+
+    الفرادةُ هي «مرّتان في اليوم نفسه = مسودّةٌ واحدة»: المولّدُ يعتمد على القاعدة
+    لا على ذاكرةٍ في العملية. والمسودّةُ **لقطة**: سطورُها ومجموعُها يُحفظان عند
+    التوليد، فلا يتغيّر مبلغُ شهرٍ مضى بتغيّر سعرٍ أو إضافةٍ لاحقة.
+
+    **`total` = `subtotal` في الجزء أ١**: لا ضريبةَ على الأتعاب بعد (مستندُ أ٢ هو
+    الذي يحمل حقولَه القانونية) — والحقلان موجودان ليقرأ المستندُ مصدرَهما الواحد
+    ولا يُعاد حسابُ مجموعٍ في موضعٍ ثانٍ.
+
+    و`approved_by`/`approved_at`/`approved_note` تُكتب عند الاعتماد مرّةً واحدة،
+    و`draft → approved` تُقصي أيّ تغييرٍ لاحقٍ على السطور (`fees` لا تمسّه).
+    """
+
+    STATUS_DRAFT = FEE_DRAFT_STATUS_DRAFT
+    STATUS_APPROVED = FEE_DRAFT_STATUS_APPROVED
+    STATUS_CANCELLED = FEE_DRAFT_STATUS_CANCELLED
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_drafts",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="fee_drafts",
+        verbose_name="الزبون",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    month = models.PositiveSmallIntegerField(verbose_name="الشهر")
+    subtotal = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="المجموع قبل الضريبة",
+    )
+    total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="الإجمالي",
+    )
+    status = models.CharField(
+        max_length=10,
+        choices=FEE_DRAFT_STATUS_CHOICES,
+        default=FEE_DRAFT_STATUS_DRAFT,
+        verbose_name="الحالة",
+    )
+    generated_at = models.DateTimeField(
+        default=timezone.now, verbose_name="وقت التوليد",
+    )
+    approved_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_drafts_approved",
+        verbose_name="اعتمدها",
+    )
+    approved_at = models.DateTimeField(null=True, blank=True, verbose_name="وقت الاعتماد")
+    approved_note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="ملاحظة الاعتماد",
+    )
+
+    class Meta:
+        verbose_name = "مسودّة أتعاب"
+        verbose_name_plural = "مسودّات الأتعاب"
+        ordering = ["-year", "-month", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "year", "month"], name="uniq_fee_draft_month",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(month__gte=1, month__lte=12),
+                name="fee_draft_month_in_range",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(subtotal__gte=0) & models.Q(total__gte=0),
+                name="fee_draft_amounts_not_negative",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "status"], name="office_fee_draft_tenant_status",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}@{self.year}-{self.month:02d}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class FeeDraftLine(models.Model):
+    """سطرُ مسودّة: **مصدرُه مكتوبٌ لا مستنتَج**، ومبلغُه لقطةٌ لا حسابٌ مؤجَّل.
+
+    المصادرُ ثلاثة: الاشتراك (`subscription`)، وسعرُ خدمةٍ استحقّت (`service`)،
+    وخدمةٌ إضافية (`extra`). والنصُّ (`label`) اسمُ الخدمة أو وصفُ الاشتراك — بلا
+    مبلغٍ فيه، فيُعرض لمن لا يرى المبالغ بلا تسريب.
+    """
+
+    SOURCE_SUBSCRIPTION = FEE_LINE_SOURCE_SUBSCRIPTION
+    SOURCE_SERVICE = FEE_LINE_SOURCE_SERVICE
+    SOURCE_EXTRA = FEE_LINE_SOURCE_EXTRA
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_draft_lines",
+        verbose_name="المكتب",
+    )
+    draft = models.ForeignKey(
+        FeeDraft,
+        on_delete=models.CASCADE,
+        related_name="lines",
+        verbose_name="المسودّة",
+    )
+    label = models.CharField(max_length=200, verbose_name="البيان")
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+    source = models.CharField(
+        max_length=20, choices=FEE_LINE_SOURCE_CHOICES, verbose_name="المصدر",
+    )
+
+    class Meta:
+        verbose_name = "بند مسودّة أتعاب"
+        verbose_name_plural = "بنود مسودّات الأتعاب"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gte=0),
+                name="fee_draft_line_amount_not_negative",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.draft_id}:{self.source}"
+
+    def save(self, *args, **kwargs):
+        if self.draft_id:
+            self.tenant_id = self.draft.tenant_id
         super().save(*args, **kwargs)

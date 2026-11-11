@@ -135,7 +135,12 @@ class AmountKeysGuardTest(SimpleTestCase):
         self.assertEqual(
             declared_amount_fields((APP_DIR / "serializers.py").read_text(encoding="utf-8")),
             # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
-            ["annual_sales", "suggested_price", "amount", "debit", "credit"],
+            # #282: `amount` مرّتين (الاشتراكُ والإضافة)، و`subtotal`/`total`
+            # لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
+            [
+                "annual_sales", "suggested_price", "amount", "debit", "credit",
+                "amount", "amount", "subtotal", "total",
+            ],
         )
         self.assertEqual(
             unregistered_amount_fields(
@@ -175,6 +180,14 @@ class ModelAmountGuardTest(SimpleTestCase):
                 # #286: مدينُ بند دفتر الزبون ودائنه — مسجَّلان لا مُعفَيان.
                 "BookEntryLine.credit",
                 "BookEntryLine.debit",
+                # #282: مبالغُ الأتعاب — الاشتراكُ وسعرُ الخدمة والإضافةُ والبندُ
+                # ومجموعا المسودّة، كلُّها مسجَّلةٌ لا مُعفاة.
+                "ClientServicePrice.amount",
+                "FeeDraft.subtotal",
+                "FeeDraft.total",
+                "FeeDraftLine.amount",
+                "FeeExtraService.amount",
+                "FeeSubscription.amount",
                 # #275: مبلغُ الالتزام — مبلغٌ مسجَّلٌ لا مُعفى.
                 "Obligation.amount",
                 "ServicePackage.suggested_price",

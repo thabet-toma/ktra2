@@ -130,6 +130,22 @@ BOOK_ENTRY_METHODS: tuple[str, ...] = tuple(
 )
 BOOK_ENTRY_METHOD_LABELS: dict[str, str] = dict(BOOK_ENTRY_METHOD_CHOICES)
 
+#: #282: طرقُ الأتعاب — تُعرَّف هنا لا في النماذج: إعداد `fee_method` يقرأ
+#: مفاتيحها، والسجلَّ لا يستورد النماذج (دَّورةُ استيراد). و«بالساعة» **معروضةٌ
+#: ومرفوضة**: قيمتُها محسومة لدى المكتب ويجب أن يراها فيرى أنّها ليست متاحةً
+#: بعد، لا أن يظنّ الطريقةَ الوحيدةَ هي الاشتراك. والحارسُ في
+#: `accounting_office/services.py` (`_assert_choice_available`) يردّ 400 برسالتها.
+FEE_METHOD_SUBSCRIPTION = "subscription"
+FEE_METHOD_PER_SERVICE = "per_service"
+FEE_METHOD_HOURLY = "hourly"
+FEE_METHOD_CHOICES: tuple[tuple[str, str], ...] = (
+    (FEE_METHOD_SUBSCRIPTION, "اشتراك شهري + إضافات"),
+    (FEE_METHOD_PER_SERVICE, "سعرٌ لكل خدمة"),
+    (FEE_METHOD_HOURLY, "بالساعة"),
+)
+FEE_METHODS: tuple[str, ...] = tuple(key for key, _label in FEE_METHOD_CHOICES)
+FEE_METHOD_LABELS: dict[str, str] = dict(FEE_METHOD_CHOICES)
+
 #: نافذةُ الإرسال (§#280/D7): ساعةُ بدايةٍ وساعةُ نهايةٍ تُخزَّنان للمرحلة الثانية
 #: ولا تقرؤهما هذه المرحلة. والحدُّ 23 لأن الساعةَ 24 تعني «المنتصف» في لغاتٍ
 #: وتُلبس على من يقرأ، فالوضوحُ أولى.
@@ -581,6 +597,38 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         note=(
             "«ورقة ورقة» حركةٌ لكل ورقةٍ واردة، و«إدخال الشهر» أوراقُ الشهر في حركة."
         ),
+    ),
+    # ── الأتعاب (#282) ──
+    #
+    # **الطريقةُ إعدادٌ مكتب ← زبون** لا عمودٌ في الاشتراك: مكتبٌ يفوتر منشأةً
+    # صغيرةً بالاشتراك وأخرى بالخدمات، والافتراضُ الاشتراكُ لأنه أبسطُ شكلٍ
+    # يتّفق عليه الطرفان. و«بالساعة» قيمةٌ معروضةٌ مرفوضةٌ حتى تُحسم صيغتُها.
+    #
+    # **والاعتمادُ التلقائي مقفلٌ مطفأً** كـ`reminder_auto_send`: المسودّةُ يراها
+    # صاحبُ المكتب قبل اعتمادها، وإعدادٌ يفتح البابَ قبل أوانه يكسر القرار بصمت.
+    "fee_method": SettingDefinition(
+        key="fee_method",
+        label="طريقة الأتعاب",
+        client_label="طريقة أتعابي",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        choices=FEE_METHODS,
+        labels=FEE_METHOD_LABELS,
+        default=FEE_METHOD_SUBSCRIPTION,
+        group=GROUP_OFFICE,
+        note=(
+            "«الاشتراك» مسودّةٌ شهرية من الاشتراك والإضافات، و«سعرٌ لكل خدمة» "
+            "مجموعُ الخدمات المستحقّة في الشهر؛ و«بالساعة» غير متاحةٍ بعد."
+        ),
+    ),
+    "fee_auto_approve": SettingDefinition(
+        key="fee_auto_approve",
+        label="الاعتماد التلقائي لمسودّات الأتعاب",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=False,
+        group=GROUP_OFFICE,
+        note="مقفلٌ مطفأً في هذه المرحلة — المسودّةُ يُراها صاحبُ المكتب قبل اعتمادها.",
     ),
 }
 

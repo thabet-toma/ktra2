@@ -17,6 +17,8 @@ from accounting_office.models import (
     BOOK_KIND_CHOICES,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CONSENT_CHANNEL_LABELS,
+    FEE_CADENCE_CHOICES,
+    FEE_EXTRA_DESTINATION_CHOICES,
     ClientReminderRecipient,
     Contact,
     OBLIGATION_DIRECTION_CHOICES,
@@ -679,3 +681,68 @@ class BookEntryReverseSerializer(serializers.Serializer):
         required=False, allow_blank=True, default="", max_length=300,
     )
     entry_date = serializers.DateField(required=False, allow_null=True)
+
+
+# ── الأتعاب: الاشتراك والمسودّات والاعتماد (#282) ────────────────────────────
+#
+# **المالُ هنا شكلُ الطلب لا حسابُه**: الحدودُ المعروضة (غيرُ سالبٍ، خانتان
+# عشريتان) يُعيد `accounting_office/fees.py` فحصَها فتصِل الرفضُ نفسُه لنداءٍ
+# برمجيٍّ لا يمرّ بالمسلسِل. و`amount` مسجَّلٌ في `AMOUNT_KEYS` كسائر مبالغ
+# الموديول، فالقناعُ وحارسُ الكتابة يقرآن الثابتَ نفسه.
+class FeeSubscriptionWriteSerializer(serializers.Serializer):
+    """اشتراكٌ جديد **بتاريخ سريانه** — والتاريخُ المكرَّر يُرفض في الخدمة."""
+
+    client = serializers.IntegerField(min_value=1)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    starts_on = serializers.DateField()
+    cadence = serializers.ChoiceField(choices=FEE_CADENCE_CHOICES, required=False)
+    currency = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    #: الإيقافُ يُكتب مستقبلاً أو يُترك فارغاً؛ والخدمةُ تفحص ترتيبَ طرفيه.
+    paused_from = serializers.DateField(required=False, allow_null=True)
+    paused_to = serializers.DateField(required=False, allow_null=True)
+    ended_on = serializers.DateField(required=False, allow_null=True)
+
+
+class FeeExtraServiceWriteSerializer(serializers.Serializer):
+    """خدمةٌ إضافيةٌ نُفِّذت — ووجهتُها «مسودّة الشهر القادم» افتراضاً."""
+
+    client = serializers.IntegerField(min_value=1)
+    service_name = serializers.CharField(max_length=200)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    performed_on = serializers.DateField()
+    draft = serializers.ChoiceField(
+        choices=FEE_EXTRA_DESTINATION_CHOICES, required=False,
+    )
+
+
+class FeeDraftApproveSerializer(serializers.Serializer):
+    """ملاحظةُ الاعتماد اختيارية — والمَن اعتمد ومتى يكتبهما الخادم."""
+
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class FeeDraftRowSerializer(serializers.Serializer):
+    """شكلُ مسودّةٍ كما تخرج — **قراءةٌ وحدها**، ومبالغُها تُقنَّع في الخدمة.
+
+    يُعلَن لتقرأ `OPTIONS` شكلَ المورد بدل حمولةِ كتابةٍ لا تقبلها النقطة: لا
+    `POST` على الجمع (التوليدُ في «حدّث المكتب») ولا تعديلَ ولا حذف.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    client = serializers.DictField(read_only=True)
+    year = serializers.IntegerField(read_only=True)
+    month = serializers.IntegerField(read_only=True)
+    period_label = serializers.CharField(read_only=True)
+    subtotal = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    total = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    status = serializers.CharField(read_only=True)
+    status_label = serializers.CharField(read_only=True)
+    generated_at = serializers.CharField(read_only=True)
+    approved_by = serializers.DictField(read_only=True, allow_null=True)
+    approved_at = serializers.CharField(read_only=True, allow_null=True)
+    approved_note = serializers.CharField(read_only=True)
+    lines = serializers.ListField(child=serializers.DictField(), read_only=True)

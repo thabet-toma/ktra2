@@ -17,6 +17,9 @@ from accounting_office.views import (
     OfficeDocumentFileViewSet,
     OfficeDocumentItemViewSet,
     OfficeDocumentViewSet,
+    OfficeFeeDraftViewSet,
+    OfficeFeeExtraServiceViewSet,
+    OfficeFeeSubscriptionViewSet,
     OfficeHolidayViewSet,
     OfficeObligationViewSet,
     OfficePackageViewSet,
@@ -90,6 +93,24 @@ router.register(
 )
 router.register(
     "office-holidays", OfficeHolidayViewSet, basename="accounting-office-holidays",
+)
+# #282: الأتعاب — الاشتراكُ والمسودّاتُ والاعتماد (الجزءُ أ١، الخادمُ وحده).
+# ولا حذفَ في الثلاثة: `http_method_names` في الـviewsets تُغلق الطريقة.
+# ومسارُ `fees/drafts/approve-all/` مسارُ جمعٍ لأنها فعلٌ على كل المنتظر، لا واحدة.
+router.register(
+    "fees/subscriptions",
+    OfficeFeeSubscriptionViewSet,
+    basename="accounting-office-fee-subscriptions",
+)
+router.register(
+    "fees/drafts",
+    OfficeFeeDraftViewSet,
+    basename="accounting-office-fee-drafts",
+)
+router.register(
+    "fees/extras",
+    OfficeFeeExtraServiceViewSet,
+    basename="accounting-office-fee-extras",
 )
 
 urlpatterns = [
