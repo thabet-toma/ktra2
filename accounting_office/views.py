@@ -37,6 +37,7 @@ from accounting_office import (
     client_books,
     deadlines,
     fees,
+    payments,
     services,
 )
 from accounting_office.models import (
@@ -50,6 +51,7 @@ from accounting_office.models import (
     DocumentFile,
     FeeExtraService,
     FeeSubscription,
+    FeeWriteOff,
     Obligation,
     OfficeAlert,
     OfficeClient,
@@ -87,8 +89,11 @@ from accounting_office.serializers import (
     FeeDraftApproveSerializer,
     FeeDraftRowSerializer,
     FeeExtraServiceWriteSerializer,
+    FeeLedgerQuerySerializer,
+    FeePaymentWriteSerializer,
     FeeServicePriceWriteSerializer,
     FeeSubscriptionWriteSerializer,
+    FeeWriteOffWriteSerializer,
     ObligationAmountSerializer,
     ObligationClientPaidSerializer,
     ObligationExtensionSerializer,
@@ -252,18 +257,30 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         clients = list(page) if page is not None else list(queryset)
-        # نظامُ كل صفٍّ يُبنى استعلامين لكل الصفحة، ويُمرَّر في `context` صراحةً —
-        # لا سمةً على الصنف تبقى بين الطلبات.
+        # نظامُ كل صفٍّ و«اللي عليه» يُبنيان بضعةَ استعلاماتٍ ثابتةٍ للصفحة
+        # (لا استعلامين لكل زبون)، ويُمرَّران في `context` صراحةً — لا سمةً على
+        # الصنف تبقى بين الطلبات.
         context = {
             **self.get_serializer_context(),
             "tax_systems": services.resolve_setting_for_clients(
                 self.tenant, services.TAX_SYSTEM_KEY, clients,
+            ),
+            # #283: مصدرُ «اللي عليه» الواحد (`payments.client_due`) مجمَّعاً.
+            "client_dues": payments.client_dues_payload(
+                self.tenant, clients, user=request.user,
             ),
         }
         serializer = self.get_serializer(clients, many=True, context=context)
         if page is not None:
             return self.get_paginated_response(serializer.data)
         return Response(serializer.data)
+
+    def get_serializer_context(self):
+        # `tenant` للحمولات التي تُحسب في المُسلسِل (حقلُ `due` وحده) — الشركةُ
+        # من الطلب لا من صفٍّ يُقرأ استعلاماً لكل زبون.
+        context = super().get_serializer_context()
+        context["tenant"] = self.tenant
+        return context
 
     def _filtered(self, queryset):
         params = self.request.query_params
@@ -2388,11 +2405,44 @@ class OfficeFeeDraftViewSet(OfficeModuleViewSet):
             note=serializer.validated_data.get("note", ""),
         )
         masked = fees.amounts_masked(self.tenant, request.user)
+        summaries = payments.invoice_summaries(approved)
         return Response({
             "approved": len(approved),
             "remaining": fees.pending_drafts(self.tenant).count(),
-            "drafts": [fees.draft_row(draft, masked=masked) for draft in approved],
+            "drafts": [
+                fees.draft_row(draft, masked=masked, summaries=summaries)
+                for draft in approved
+            ],
         })
+
+    # #283: الشطبُ فعلٌ على المسودّة لا نموذجٌ جديد يُحذف: سطرٌ إلحاقيٌّ يخفّض
+    # `remaining` في القراءة، والدفعةُ والمسودّةُ لا تتغيّران.
+    @action(detail=True, methods=["post"], url_path="write-off")
+    def write_off(self, request, pk=None):
+        """«اشطُب المتبقّي» — **دورُ صاحب المكتب وحده**، بسببٍ مكتوبٍ إلزاميّ.
+
+        ولا مفتاحَ كتابةٍ فوقه: البوابةُ الوحيدةُ هي `payments.write_off_fee_draft`
+        (`user_tenant_role == MANAGER_ROLE`) كما في المواصفة — مديرُ المكتب يملك
+        مفتاحَ الكتابة ولا يشطب.
+        """
+        draft = self.get_object()
+        serializer = FeeWriteOffWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        self.reject_amount_writes({"amount": data["amount"]})
+        row = payments.write_off_fee_draft(
+            draft,
+            amount=data["amount"],
+            reason=data["reason"],
+            actor=request.user,
+        )
+        row = FeeWriteOff.objects.select_related("draft", "created_by").get(pk=row.pk)
+        return Response(
+            payments.write_off_row(
+                row, masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED,
+        )
 
 
 class OfficeFeeExtraServiceViewSet(OfficeModuleViewSet):
@@ -2460,4 +2510,77 @@ class OfficeFeeServicePriceViewSet(OfficeModuleViewSet):
                 row, masked=fees.amounts_masked(self.tenant, request.user),
             ),
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+# ── الدفعات و«اللي عليه» وكشف الحساب (#283) ─────────────────────────────────
+#
+# **الدفعةُ تُنشأ ولا تُعدَّل ولا تُحذف**: `http_method_names` بلا `put`/`patch`/
+# `delete`، فحكمُ 405 من القائمة لا من نسيان فعل. والتصحيحُ دفعةٌ جديدة أو
+# شطبٌ على المسودّة — لا كتابةٌ فوق سندِ قبضٍ صدر.
+class OfficeFeePaymentViewSet(OfficeModuleViewSet):
+    """دفعاتُ الأتعاب — قراءةٌ بفلترة، وإنشاءٌ بتخصيصٍ تلقائيّ أو صريح.
+
+    القراءةُ بمصدر الرؤية الواحد (`visible_clients`)، والقناعُ في الخدمة
+    (`payments.payments_payload`)، وكتابةُ مبلغٍ بلا «يرى المبالغ» **403**
+    كسائر مبالغ الموديول.
+    """
+
+    serializer_class = FeePaymentWriteSerializer
+    http_method_names = ["get", "post", "head", "options"]
+
+    def get_queryset(self):
+        return payments.visible_payments(self.tenant, self.request.user)
+
+    def list(self, request, *args, **kwargs):
+        """قائمةٌ بفلاتر `client`/`method`/`date_from`/`date_to` — في الاستعلام."""
+        queryset = payments.filter_payments(
+            self.get_queryset(), request.query_params,
+        )
+        return Response(
+            payments.payments_payload(
+                self.tenant, user=request.user, queryset=queryset,
+            ),
+        )
+
+    def create(self, request, *args, **kwargs):
+        self.require_write()
+        serializer = FeePaymentWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        client = _visible_client(self.tenant, request.user, data["client"])
+        self.reject_amount_writes(data)
+        payment = payments.create_payment(
+            self.tenant,
+            client,
+            amount=data["amount"],
+            method=data["method"],
+            paid_at=data["paid_at"],
+            note=data.get("note", ""),
+            actor=request.user,
+            # `None` = «الأقدم أولاً»، و`[]` = لا تخصيصَ (دفعةٌ مقدَّمة) — لا
+            # يجمعهما `or None` فتُلغى القائمةُ الفارغة.
+            allocations=data.get("allocations"),
+        )
+        row = payments.created_payment_row(
+            self.tenant, payment, user=request.user,
+        )
+        return Response(row, status=status.HTTP_201_CREATED)
+
+
+class OfficeFeeLedgerViewSet(OfficeModuleViewSet):
+    """كشفُ الحساب — الفواتيرُ المعتمدةُ والدفعات في حمولةٍ واحدة.
+
+    الفلاترُ (`client` · `state` · `q`) والترقيمُ (`page` · `page_size`) على
+    الاستعلام لا في بايثون؛ والبناءُ كلُّه في `payments.ledger_payload`.
+    """
+
+    serializer_class = FeeLedgerQuerySerializer
+    http_method_names = ["get", "head", "options"]
+
+    def list(self, request, *args, **kwargs):
+        return Response(
+            payments.ledger_payload(
+                self.tenant, user=request.user, params=request.query_params,
+            ),
         )

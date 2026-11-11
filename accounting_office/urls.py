@@ -20,6 +20,8 @@ from accounting_office.views import (
     OfficeDocumentViewSet,
     OfficeFeeDraftViewSet,
     OfficeFeeExtraServiceViewSet,
+    OfficeFeeLedgerViewSet,
+    OfficeFeePaymentViewSet,
     OfficeFeeServicePriceViewSet,
     OfficeFeeSubscriptionViewSet,
     OfficeHolidayViewSet,
@@ -128,6 +130,19 @@ router.register(
     "fees/service-prices",
     OfficeFeeServicePriceViewSet,
     basename="accounting-office-fee-service-prices",
+)
+# #283: الدفعات — قراءةٌ بفلترة وإنشاءٌ بتخصيص، **ولا حذفَ ولا تعديل**. والشطبُ
+# فعلٌ على المسودّة (`fees/drafts/<pk>/write-off/`) لأن السطرَ يخصّها لا الدفعة.
+router.register(
+    "fees/payments",
+    OfficeFeePaymentViewSet,
+    basename="accounting-office-fee-payments",
+)
+# كشفُ الحساب: الفواتيرُ المعتمدةُ والدفعات، بفلترةٍ وترقيمٍ في الاستعلام.
+router.register(
+    "fees/ledger",
+    OfficeFeeLedgerViewSet,
+    basename="accounting-office-fee-ledger",
 )
 
 urlpatterns = [

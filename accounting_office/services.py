@@ -251,6 +251,22 @@ BOOK_ENTRY_AMOUNT_KEYS: tuple[str, ...] = ("debit", "credit")
 #: تحته.
 FEE_AMOUNT_KEYS: tuple[str, ...] = ("amount", "subtotal", "total")
 
+#: مبالغُ الدفعات و«اللي عليه» (#283): مبلغُ الدفعة وتخصيصُها، والمتبقّي على
+#: المسودّة، والمدفوعُ عليها والمشطوبُ منها، و`due`/`credit`، ومجموعا الكشف،
+#: وسطرُ العلم الضريبيّ. **كلُّها مشتقّةٌ لا مخزَّنة** ومع ذلك مبالغ: تُقنَّع في
+#: الحمولات كسائر مبالغ الموديول، ومفتاحٌ جديدٌ فيها يُضاف هنا **أولاً**.
+PAYMENT_AMOUNT_KEYS: tuple[str, ...] = (
+    "amount",
+    "paid_amount",
+    "written_amount",
+    "remaining",
+    "due",
+    "credit",
+    "invoices_total",
+    "paid_total",
+    "tax_note",
+)
+
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
 #: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
 #: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
@@ -259,7 +275,8 @@ AMOUNT_KEYS: frozenset[str] = frozenset(
     + PACKAGE_AMOUNT_KEYS
     + OBLIGATION_AMOUNT_KEYS
     + BOOK_ENTRY_AMOUNT_KEYS
-    + FEE_AMOUNT_KEYS,
+    + FEE_AMOUNT_KEYS
+    + PAYMENT_AMOUNT_KEYS,
 )
 
 

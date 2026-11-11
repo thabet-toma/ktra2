@@ -10,7 +10,7 @@
 """
 from rest_framework import serializers
 
-from accounting_office import services
+from accounting_office import payments, services
 from accounting_office.models import (
     APPOINTMENT_KIND_CHOICES,
     BOOK_ACCOUNT_TYPE_CHOICES,
@@ -20,6 +20,7 @@ from accounting_office.models import (
     CONSENT_CHANNEL_LABELS,
     FEE_CADENCE_CHOICES,
     FEE_EXTRA_DESTINATION_CHOICES,
+    FEE_PAYMENT_METHOD_CHOICES,
     ClientReminderRecipient,
     Contact,
     OBLIGATION_DIRECTION_CHOICES,
@@ -30,6 +31,7 @@ from accounting_office.models import (
     REMINDER_MANUAL_CHANNELS,
     REMINDER_TYPE_CHOICES,
 )
+from accounting_office.payments import INVOICE_STATE_CHOICES
 
 
 class TaxCardWriteSerializer(serializers.Serializer):
@@ -122,10 +124,45 @@ class ResponsibleFieldsMixin(serializers.Serializer):
         return services.user_display_name(obj.responsible)
 
 
+class ClientDueFieldsMixin(serializers.Serializer):
+    """«اللي عليه» وسطرُ العلم الضريبيّ على صفّ الزبون — من `payments` وحدها (#283).
+
+    الحمولةُ المجمَّعة (`client_dues`) تُمرَّر في `context` من القائمة فتُقرأ
+    الصفحةُ كلُّها باستعلامين لا استعلامين لكل صفّ؛ وحين تغيب (التفصيل وإنشاء
+    زبونٍ واحد) تُحسب للصفّ المفرد. والقناعُ داخل `client_due_payload` نفسه.
+    **وسطرُ العلم تحت `due` لا داخله**: يقرؤه من يعرض «عليه 500 [ضريبة 200]».
+    """
+
+    due = serializers.SerializerMethodField()
+    tax_note = serializers.SerializerMethodField()
+
+    def _payload(self, obj):
+        dues = self.context.get("client_dues")
+        if dues is not None:
+            return dues.get(obj.pk, {})
+        # ذاكرةُ الحمولة لكائنٍ واحد: الحقلان يقرآنها معاً فلا تُحسب مرّتين.
+        cache = getattr(self, "_client_due_cache", None)
+        if cache is None:
+            cache = self._client_due_cache = {}
+        if obj.pk not in cache:
+            tenant = self.context.get("tenant") or obj.tenant
+            request = self.context.get("request")
+            user = getattr(request, "user", None)
+            cache[obj.pk] = payments.client_due_payload(tenant, obj, user=user)
+        return cache[obj.pk]
+
+    def get_due(self, obj):
+        return self._payload(obj).get("due")
+
+    def get_tax_note(self, obj):
+        return self._payload(obj).get("tax_note")
+
+
 class OfficeClientListSerializer(
+    ClientDueFieldsMixin,
     ResponsibleFieldsMixin, TaxSystemFieldsMixin, serializers.ModelSerializer,
 ):
-    """صفُّ القائمة: بلا بطاقة، ونظامُه من الحساب الجماعيّ."""
+    """صفُّ القائمة: بلا بطاقة، ونظامُه من الحساب الجماعيّ، و`due`/`tax_note` من الدالّة الواحدة."""
 
     status_label = serializers.CharField(source="get_status_display", read_only=True)
 
@@ -134,13 +171,14 @@ class OfficeClientListSerializer(
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
-            "responsible_id", "responsible_name",
+            "responsible_id", "responsible_name", "due", "tax_note",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
 
 
 class OfficeClientSerializer(
+    ClientDueFieldsMixin,
     ResponsibleFieldsMixin, TaxSystemFieldsMixin, serializers.ModelSerializer,
 ):
     """زبون المكتب — والنظامُ الضريبيّ الفعليّ يُقرأ من المحلّل لا من حقلٍ هنا."""
@@ -153,7 +191,7 @@ class OfficeClientSerializer(
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
-            "tax_card", "responsible_id", "responsible_name",
+            "tax_card", "responsible_id", "responsible_name", "due", "tax_note",
             "created_at", "updated_at",
         ]
         read_only_fields = [
@@ -795,6 +833,15 @@ class FeeDraftRowSerializer(serializers.Serializer):
     total = serializers.DecimalField(
         max_digits=14, decimal_places=2, read_only=True, allow_null=True,
     )
+    #: #283: ما دُفع على المسودّة وما بقي منها — يُقنَّعان كسائر مبالغ الموديول.
+    paid_amount = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    remaining = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    state = serializers.CharField(read_only=True)
+    state_label = serializers.CharField(read_only=True)
     status = serializers.CharField(read_only=True)
     status_label = serializers.CharField(read_only=True)
     generated_at = serializers.CharField(read_only=True)
@@ -802,3 +849,49 @@ class FeeDraftRowSerializer(serializers.Serializer):
     approved_at = serializers.CharField(read_only=True, allow_null=True)
     approved_note = serializers.CharField(read_only=True)
     lines = serializers.ListField(child=serializers.DictField(), read_only=True)
+
+
+# ── الدفعات و«اللي عليه» وكشف الحساب (#283) ──────────────────────────────────
+#
+# **الدفعةُ تُنشأ ولا تُعدَّل**: لا `PUT`/`PATCH`/`DELETE` في الـviewset، والشطبُ
+# فعلٌ على المسودّة لا على الدفعة. والحدودُ المعروضة (أكبرُ من صفر) يُعيد
+# `accounting_office/payments.py` فحصَها فيصل الرفضُ نفسُه لنداءٍ برمجيّ.
+class FeePaymentAllocationWriteSerializer(serializers.Serializer):
+    """تخصيصُ جزءٍ من الدفعة على مسودّةٍ معتمدة — الصريحُ يُلغي «الأقدم أولاً»."""
+
+    draft = serializers.IntegerField(min_value=1)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+
+
+class FeePaymentWriteSerializer(serializers.Serializer):
+    """دفعةٌ جديدة — غيابُ `allocations` أو `null` ⇒ «الأقدم أولاً»، و`[]` ⇒ لا تخصيص.
+
+    **والفرقُ مقصود**: `[]` تُسجّل دفعةً مقدَّمةً تبقى رصيداً دائناً خالصاً ولو
+    كانت للزبون فواتيرُ مفتوحة، و`null` تكليفٌ للخادم بترتيب التخصيص.
+    """
+
+    client = serializers.IntegerField(min_value=1)
+    method = serializers.ChoiceField(choices=FEE_PAYMENT_METHOD_CHOICES)
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    paid_at = serializers.DateField()
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+    allocations = FeePaymentAllocationWriteSerializer(
+        many=True, required=False, allow_null=True,
+    )
+
+
+class FeeWriteOffWriteSerializer(serializers.Serializer):
+    """شطبُ متبقّي مسودّةٍ — **بسببٍ مكتوبٍ إلزاميّ**، ومبالغُه تُقنَّع في الخدمة."""
+
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    reason = serializers.CharField(max_length=300)
+
+
+class FeeLedgerQuerySerializer(serializers.Serializer):
+    """فلاترُ كشف الحساب — تُعلَن لـ`OPTIONS`؛ والقراءةُ تُصفّي في الاستعلام."""
+
+    client = serializers.IntegerField(required=False, min_value=1)
+    state = serializers.ChoiceField(choices=INVOICE_STATE_CHOICES, required=False)
+    q = serializers.CharField(required=False, allow_blank=True)
+    page = serializers.IntegerField(required=False, min_value=1)
+    page_size = serializers.IntegerField(required=False, min_value=1)
