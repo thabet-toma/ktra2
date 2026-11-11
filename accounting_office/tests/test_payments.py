@@ -23,6 +23,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
+from accounting.models import Account
+from accounting.services import create_fiscal_year
 from accounting_office import payments, services
 from accounting_office.models import (
     ClientService,
@@ -589,6 +591,9 @@ class WriteOffTest(PaymentsTestCase):
 
 class ReceiptNumberTest(PaymentsTestCase):
     def test_receipt_numbers_are_sequential_and_unique_per_tenant_and_year(self):
+        # #284: الدفعةُ تُرحّل قيداً، والقيدُ يحتاج فترةً ماليةً مفتوحةً تغطي
+        # تاريخه — وفتراتُ 2027 لا تُنشأ مع الشركة (سنةُ إنشائها وحدها).
+        create_fiscal_year(self.tenant, year=2027)
         client = self.make_client()
         first = self.payment_of(client, "10.00", paid_at="2026-05-01")
         second = self.payment_of(client, "10.00", paid_at="2026-05-02")

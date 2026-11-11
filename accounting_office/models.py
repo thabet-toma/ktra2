@@ -167,6 +167,18 @@ class OfficeClient(models.Model):
         related_name="office_clients_responsible",
         verbose_name="الموظف المسؤول",
     )
+    # #284: طرفُ الزبون في دفاتر المكتب — **المفتاحُ الوحيد** لطرفٍ موجود، ولا
+    # مطابقةَ بالاسم: لا فرادةَ على `Partner.name`، ومطابقةُ الاسم تخلط زبونين
+    # متشابهين فيصير رصيدُ أحدهما على الآخر. `SET_NULL` لأن حذفَ الطرف لا يحذف
+    # زبوناً (تاريخُ المكتب أطول من شجرة حسابات) — ويُنشأ طرفٌ جديد عند الحاجة.
+    partner = models.ForeignKey(
+        "partners.Partner",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_clients",
+        verbose_name="الطرف في الدفاتر",
+    )
     tax_file_number = models.CharField(
         max_length=60, blank=True, default="", verbose_name="رقم الملف الضريبي",
     )

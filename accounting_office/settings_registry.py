@@ -26,6 +26,10 @@ KIND_INTEGER = "integer"
 KIND_WEEKDAYS = "weekdays"
 #: #277: قائمةُ مفاتيحَ من `choices` بلا تكرار — «أنواع الأحداث المفعّلة».
 KIND_MULTI_CHOICE = "multi_choice"
+#: #284: نصٌّ حرّ — أكوادُ حسابات الدفاتر اليوم، ولا يُقفل على قائمةٍ مخزَّنة هنا:
+#: الحسابُ يُحلّ عند الترحيل من شجرة الشركة نفسها، وكودٌ يُكتب غلطاً يردّ 400
+#: باسم مفتاحه بدل أن يُقبل ثم يسقط القيد.
+KIND_TEXT = "text"
 
 LEVEL_OFFICE = "office"
 LEVEL_CLIENT = "client"
@@ -312,6 +316,10 @@ def validate_value(definition: SettingDefinition, value):
         return _canonical_weekdays(value)
     if definition.kind == KIND_MULTI_CHOICE:
         return _canonical_multi_choice(definition, value)
+    if definition.kind == KIND_TEXT:
+        if not isinstance(value, str):
+            raise ValidationError({"value": f"«{definition.label}» نصّ."})
+        return value.strip()
     raise ValidationError({"value": f"نوع إعداد غير معروف: {definition.kind}."})
 
 
@@ -330,6 +338,19 @@ def get_definition(key: str) -> SettingDefinition:
         raise ValidationError({"key": f"إعداد غير معروف: {key}."})
     return definition
 
+
+#: #284: كودُ «شيكات برسم التحصيل» — من الحسابات التشغيلية المبذورة
+#: (`tenants/services.py`، `OPERATIONAL_ACCOUNT_CODES` وسطرُه في `COA_DATA`).
+#: ثابتٌ هنا لا باستيراد `tenants.services`: السجلَّ لا يستورد نماذجَ ولا خدمات
+#: (دَّورةُ استيراد)، والرقمَ يحرسه اختبارٌ يقارنه بالمصدر.
+CHEQUE_UNDER_COLLECTION_CODE = "1107"
+
+#: #284: كودُ حساب مصروف الديون المعدومة — **لا وجودَ له في بذرة الشجرة** (لا في
+#: `COA_DATA` ولا في `ACCOUNTING_FIRM_COA`)، فالافتراضُ يشير إلى حسابٍ يُنشئه
+#: `accounting_office/office_journal.py` (`ensure_writeoff_account`) تحت «52»
+#: عند أوّل شطب. واختيارُ كودٍ خارج سلسلة البذرة (5201–5206 · 53xx) عمداً: لا
+#: يصطدم بحسابٍ قائمٍ في شجرةٍ قديمة. واسمُه وأبوه عند الإنشاء لا هنا.
+WRITEOFF_ACCOUNT_CODE = "5290"
 
 #: أول إعدادات الموديول — أربعةٌ لا غير في #271. الباقي يأتي مع تذاكره.
 SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
@@ -696,6 +717,97 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=False,
         group=GROUP_OFFICE,
         note="مقفلٌ مطفأً في هذه المرحلة — المسودّةُ يُراها صاحبُ المكتب قبل اعتمادها.",
+    ),
+    # ── القيدُ التلقائيُّ في دفاتر المكتب (#284) ──
+    #
+    # **لا آليةَ «حدث ← حساب» في المستودع**، فأقربُ مكافئٍ هو ما تعرفه المنتجاتُ
+    # المهنية: حسابٌ افتراضيٌّ لكل مسارِ مالٍ في إعدادات الشركة (Odoo: حسابٌ لكل
+    # طريقة دفعٍ في اليومية؛ QuickBooks: حسابُ الصندوق/البنك في الإعدادات). فلا
+    # يُنشئ المكتبُ حساباً ولا يخترع كوداً: يقرأ ما في شجرته ويكتب كودَه هنا.
+    #
+    # **والأكوادُ نصٌّ لا قائمةُ اختياراتٍ مخزَّنة**: الشجرةُ ملكُ الشركة وتتغيّر
+    # بحفظها، وقائمةٌ في السجلّ تتجمّد عند لحظة كتابتها. الحلُّ عند الترحيل
+    # (`accounting_office/office_journal.py`) بـ`get_account_by_code`، وكودٌ
+    # غائبٌ أو معطَّل ⇒ 400 يُسمّي المفتاحَ والكود.
+    #
+    # **والإطفاءُ يمنع القيدَ والشيكَ معاً**: مكتبٌ يُمسك دفاتره خارج المنصّة
+    # يُسجّل ما دُفع عليه بلا أن تُكتب له دفاترُ لا يقرؤها أحد.
+    "office_journal_enabled": SettingDefinition(
+        key="office_journal_enabled",
+        label="ترحيل الدفعات والشطب إلى دفاتر المكتب",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=True,
+        group=GROUP_OFFICE,
+        note=(
+            "مطفأً: لا يُرحَّل قيدٌ ولا يُسجَّل شيك — والدفعةُ والشطبُ يُسجَّلان عاديًّا."
+        ),
+    ),
+    "office_journal_cash_account": SettingDefinition(
+        key="office_journal_cash_account",
+        label="حساب النقد للدفعات النقدية",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default="1101",
+        group=GROUP_OFFICE,
+        note="يُدين به قيدُ دفعةٍ نقدية — كودُ الحساب في شجرة المكتب.",
+    ),
+    "office_journal_bank_account": SettingDefinition(
+        key="office_journal_bank_account",
+        label="حساب البنك للتحويلات والبطاقات",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default="1102",
+        group=GROUP_OFFICE,
+        note="يُدين به قيدُ دفعةِ تحويلٍ أو بطاقة — كودُ الحساب في شجرة المكتب.",
+    ),
+    "office_journal_cheque_account": SettingDefinition(
+        key="office_journal_cheque_account",
+        label="حساب الشيكات تحت التحصيل",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default=CHEQUE_UNDER_COLLECTION_CODE,
+        group=GROUP_OFFICE,
+        note=(
+            "يُدين به قيدُ دفعةٍ بشيك — «شيكات برسم التحصيل» من الشجرة التشغيلية."
+        ),
+    ),
+    "office_journal_receivable_account": SettingDefinition(
+        key="office_journal_receivable_account",
+        label="حساب ذمم زبائن المكتب",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default="1103",
+        group=GROUP_OFFICE,
+        note="يُدائن به قيدُ الدفعة والشطب، وعليه وسمُ الطرف وحده.",
+    ),
+    "office_journal_revenue_account": SettingDefinition(
+        key="office_journal_revenue_account",
+        label="حساب إيراد الأتعاب",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default="4102",
+        group=GROUP_OFFICE,
+        # **للجزء أ٢، لا يقرؤه شيءٌ اليوم**: قيدُ الفاتورة الورقية هو من يقرؤه،
+        # والقيمةُ مسجَّلةٌ من الآن كي لا يصل اعتمادُها بسؤالٍ عن كودٍ لم يُقرأ.
+        note=(
+            "يُدائن به قيدُ فاتورة الأتعاب — للجزء أ٢، لا يقرؤه شيءٌ اليوم."
+        ),
+    ),
+    "office_journal_writeoff_account": SettingDefinition(
+        key="office_journal_writeoff_account",
+        label="حساب مصروف الديون المعدومة",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        # **الحسابُ يُنشأ عند الحاجة**: لا بذرةَ تحمله، فافتراضُ كودٍ غيرِ موجودٍ
+        # كان يجعل الشطبَ يردّ 400 في كل مكتب — وهو بندٌ من التذكرة نفسها.
+        # `office_journal.ensure_writeoff_account` ينشئه تحت «52» قبل أوّل قيد،
+        # ولا يُنشئ حساباً لكودٍ صريحٍ كتبه المكتب (الكودُ الغريب 400 كما هو).
+        default=WRITEOFF_ACCOUNT_CODE,
+        group=GROUP_OFFICE,
+        note=(
+            "يُدين به قيدُ الشطب — يُنشأ تلقائياً تحت «52» إن غاب من الشجرة."
+        ),
     ),
 }
 
