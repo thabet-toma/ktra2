@@ -11,7 +11,11 @@ on:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 مثبَّتة لا `ubuntu-latest`: صورةُ GitHub الافتراضية صارت
+    # ubuntu-26.04، وPlaywright لا يدعم chromium عليها بعد وتفشل بـ
+    # `Playwright does not support chromium on ubuntu26.04-x64`. تُرقّى إلى
+    # `latest` يومَ يُعلن Playwright دعم 26.04.
+    runs-on: ubuntu-24.04
     # Tests run against SQLite in-memory via core.test_settings (see pytest.ini),
     # so no MySQL service is required.
     steps:
@@ -52,7 +56,9 @@ jobs:
         run: coverage report
 
   frontend:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 لا `ubuntu-latest` — السبب مشروحٌ في وظيفة backend أعلاه
+    # (Playwright بلا دعم chromium على 26.04).
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend_v2
@@ -102,7 +108,9 @@ jobs:
           retention-days: 7
 
   pwa-audit:
-    runs-on: ubuntu-latest
+    # ubuntu-24.04 لا `ubuntu-latest` — نفس السبب، ولتبقى الوظائف الثلاث على
+    # صورةٍ واحدة.
+    runs-on: ubuntu-24.04
     defaults:
       run:
         working-directory: frontend_v2

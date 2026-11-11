@@ -216,7 +216,7 @@
 
 ## §6 — الحاجز الآلي: import-linter
 
-- **الأداة:** `import-linter>=2.0` — أُضيفت لـ`requirements.txt`
+- **الأداة:** `import-linter==2.16` — مثبَّتةٌ في `requirements.txt` بلا مدى: نسخة 2.16 ترفض وحداتٍ غيرَ موجودةٍ مذكورةً في عقود `.importlinter` (2.13 كان يتجاهلها بصمت)، فالتثبيتُ يمنع انقلابَ `lint-imports` بلا تغييرِ كودٍ حين يسحب الـCI نسخةً أحدث.
   (لا يوجد `requirements.local.txt` في المستودع — متجاهَل في git حسب ترويسة requirements.txt).
 - **الإعداد:** `.importlinter` في جذر المشروع — 3 عقود، كلها على الاستيراد
   **المباشر** فقط (`allow_indirect_imports = True`):

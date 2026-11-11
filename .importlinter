@@ -69,47 +69,52 @@ allow_indirect_imports = True
 forbidden_modules =
     accounting.serializers
     accounting.views
-    accounting.signals
     accounting.admin
     accounting.urls
     sales.serializers
     sales.views
-    sales.signals
     sales.admin
     sales.urls
     logistics.serializers
     logistics.views
     logistics.signals
-    logistics.admin
     logistics.urls
     inventory.serializers
     inventory.views
-    inventory.signals
-    inventory.admin
     inventory.urls
     partners.serializers
     partners.views
     partners.signals
-    partners.admin
     partners.urls
     tenants.serializers
     tenants.views
-    tenants.signals
     tenants.admin
     tenants.urls
     hr.serializers
     hr.views
-    hr.signals
-    hr.admin
     hr.urls
-    accountant_portal.serializers
     accountant_portal.views
-    accountant_portal.signals
-    accountant_portal.admin
     accountant_portal.urls
     store.serializers
     store.views
     store.urls
+    # ── صيانة: 12 وحدةً حُذفت من هذه القائمة لأنّها غير موجودة اليوم ──────────
+    # `accountant_portal` يحوي `views.py` و`urls.py` (وهم مذكورون أعلاه)، ولا
+    # يحوي `serializers.py` ولا `signals.py` ولا `admin.py`. والمحذوف الكامل:
+    #   accounting.signals · sales.signals · logistics.admin
+    #   inventory.signals · inventory.admin · partners.admin
+    #   tenants.signals · hr.signals · hr.admin
+    #   accountant_portal.serializers · accountant_portal.signals
+    #   accountant_portal.admin
+    # السبب: `import-linter` 2.16 يرفض ذكرَ وحدةٍ غير موجودة ويُفشِل
+    # `lint-imports` كلَّه بـ`Module '...' does not exist` (2.13 كان يتجاهلها
+    # بصمت، فلم يظهر النقص إلا لمّا سحب الـCI 2.16). ولا يُفقد بذلك حارس:
+    # وحدةٌ غير موجودة لا داخليّات لها تُحمى.
+    # شرط صيانة مكتوب: يُعاد سطرُ كلِّ وحدةٍ إلى القائمة أعلاه **يومَ يُنشأ
+    # ملفُّها** (`<app>/signals.py` · `<app>/admin.py` · `accountant_portal/
+    # serializers.py`) — وإلا دخلت داخليّاتُها الجسمَ الخارجي بلا حارس، وهو
+    # عينُ ما بُني هذا العقد لمنعه. وخفضُ `import-linter` ليس بديلاً: يُفقد
+    # الحارسَ كلَّه.
 # baseline 2026-08-11 — كانت 6 انتهاكات؛ المرحلة 2-د فكّت الأربعة الخاصة
 # بـpartners.signals (المستوردون تحولوا إلى accounting.api)، و2026-09-17 فكّ
 # الاثنين الباقيين (`logistics.serializers.*` → partners/sales.serializers:
