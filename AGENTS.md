@@ -181,7 +181,7 @@
 | ماذا | الأمر |
 |---|---|
 | backend | `python -m pytest -q -n auto 2>&1 \| tail -25` |
-| الهجرات | `python manage.py makemigrations --check --dry-run --settings=core.test_settings` |
+| الهجرات | `$env:KTRA_MIGRATIONS_DB="<مسار>.sqlite3" ; python manage.py makemigrations --check --dry-run --settings=core.test_settings` — **بلا المتغيّر البوّابة اسميّة**: `core/test_settings.py` يُطفئ الهجرات (`MIGRATION_MODULES = _DisableMigrations()`)، فـ«No changes detected» تصدر بلا مقارنة. بالمتغيّر تُعاد الهجرات وتُوجَّه القاعدة إلى الملف فيقارن فعلاً (وهكذا يشغّلها CI) |
 | frontend | `cd frontend_v2 && npx tsc --noEmit && npm test && npm run build` |
 | e2e المعنيّ | `cd frontend_v2 && npx playwright test e2e/<spec>.spec.ts --reporter=line` |
 | الوثائق | `python manage.py sync_docs` (محلياً بلا MySQL: `--settings=core.test_settings`) |
