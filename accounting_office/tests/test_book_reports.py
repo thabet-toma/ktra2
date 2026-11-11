@@ -19,6 +19,7 @@
 """
 import datetime
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import connection
@@ -54,6 +55,9 @@ from tenants.services import create_company
 BASE = "/api/accounting-office/"
 BOOKS = f"{BASE}client-books/"
 THIS_YEAR = timezone.localdate().year
+#: «اليوم» الذي تحسب منه التقاريرُ فترتَها الافتراضية — آخرُ السنة، فحركاتُ
+#: `setUp` (مارس/مايو/يونيو) داخلها أيّاً كان يومُ التشغيل.
+REPORT_TODAY = datetime.date(THIS_YEAR, 12, 31)
 WATERMARK = "نسخة عمل"
 
 SIMPLE_KINDS = ["cash", "income", "receivables"]
@@ -130,6 +134,11 @@ class BookReportsTestCase(APITestCase):
         cls.catalog_b = catalog(cls.tenant_b)
 
     def setUp(self):
+        patched = mock.patch(
+            "accounting_office.book_reports._today", return_value=REPORT_TODAY,
+        )
+        patched.start()
+        self.addCleanup(patched.stop)
         self.client.force_authenticate(user=self.owner)
         self.mine = make_client(
             tenant=self.tenant, catalog=self.catalog,
@@ -485,7 +494,7 @@ class BalanceSheetTest(DoubleBookTestCase):
         self.assertEqual(totals["difference"], "0.00")
         self.assertIn("3000", rows_by_code(payload["rows"]))
         self.assertEqual(payload["from"], LAST_YEAR_DAY.isoformat())
-        # لم يُقصّ شيء: الميزانيةُ تبدأ من العهد بطبيعتها، والملاحظةُ تقول ذلك.
+        # لم يُقصّ شيء: الميزانيةُ تبدأ من بداية الدفتر بطبيعتها، والملاحظةُ تقول ذلك.
         self.assertFalse(payload["clipped"])
         self.assertIn(str(LAST_YEAR_DAY.year), payload["period_note"])
         self.assertIn("رصيد", payload["period_note"])
@@ -534,7 +543,7 @@ class DoubleEraTest(BookReportsTestCase):
             self.mine, "trial_balance",
             params={
                 "from": datetime.date(LAST_YEAR_DAY.year, 1, 1).isoformat(),
-                "to": timezone.localdate().isoformat(),
+                "to": REPORT_TODAY.isoformat(),
             },
         )
 
@@ -563,6 +572,9 @@ class DoubleEraTest(BookReportsTestCase):
         self.assertEqual(payload["from"], self.era_start.isoformat())
         self.assertEqual(payload["totals"]["assets"], "100.00")
         self.assertEqual(payload["totals"]["difference"], "0.00")
+        # الافتراضُ (1 يناير) لا يسبق العهدَ: لا قصّ، والملاحظةُ تعلن البداية.
+        self.assertFalse(payload["clipped"])
+        self.assertIn("يبدأ من بداية العهد المزدوج", payload["period_note"])
 
     def test_the_balance_sheet_clips_when_asked_before_the_era(self):
         """`from` أقدمَ من العهد ⇒ قصٌّ معلَن (`clipped`) وليس 409."""
@@ -685,6 +697,9 @@ class ConvertedBookOpenedAfterTheEraTest(BookReportsTestCase):
         self.assertEqual(trial["from"], datetime.date(THIS_YEAR, 1, 1).isoformat())
         self.assertEqual(trial["totals"]["debit"], "100.00")
         self.assertEqual(trial["totals"]["credit"], "100.00")
+        # فترةٌ داخل العهد: ميزانُ المراجعة لا يُقصّ ولا يحمل ملاحظة.
+        self.assertFalse(trial["clipped"])
+        self.assertIsNone(trial["period_note"])
 
     def test_the_balance_sheet_keeps_it_too(self):
         sheet = self.get_report(self.mine, "balance_sheet")
@@ -784,7 +799,7 @@ class PeriodTest(DoubleBookTestCase):
             self.mine, "trial_balance",
             params={
                 "from": datetime.date(LAST_YEAR_DAY.year, 1, 1).isoformat(),
-                "to": timezone.localdate().isoformat(),
+                "to": REPORT_TODAY.isoformat(),
             },
         )
 
@@ -1169,7 +1184,7 @@ class ReportShapeTest(DoubleBookTestCase):
 
     def test_every_report_carries_its_header(self):
         # ميزانُ المراجعة وأرباحُ وخسائر يبدآن من السنة الجارية، والميزانيةُ من
-        # بداية العهد المزدوج (تاريخ فتح الدفتر هنا) لأنها رصيدٌ لا حركةَ فترة.
+        # بداية الدفتر (`book_start` = تاريخ الفتح هنا) لأنها رصيدٌ لا حركةَ فترة.
         starts = {
             "trial_balance": datetime.date(THIS_YEAR, 1, 1),
             "profit_loss": datetime.date(THIS_YEAR, 1, 1),
@@ -1191,7 +1206,7 @@ class ReportShapeTest(DoubleBookTestCase):
                 self.assertEqual(payload["book_kind_label"], "مزدوج")
                 self.assertEqual(payload["watermark"], WATERMARK)
                 self.assertEqual(payload["from"], starts[kind].isoformat())
-                self.assertEqual(payload["to"], timezone.localdate().isoformat())
+                self.assertEqual(payload["to"], REPORT_TODAY.isoformat())
                 self.assertIsInstance(payload["rows"], list)
                 self.assertIsInstance(payload["totals"], dict)
                 self.assertIsInstance(payload["clipped"], bool)
