@@ -11,6 +11,7 @@
 import logging
 import re
 
+from django.db.models import Q
 from django.http import HttpResponse, HttpResponseRedirect
 from django.urls import reverse
 from django.utils import timezone
@@ -31,8 +32,8 @@ from core.throttles import ClientIpScopedThrottle
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
-    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PURCHASE_RFQ, DOC_STOCKTAKE_COUNT,
-    DocumentShare,
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
+    DOC_STOCKTAKE_COUNT, DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
 
@@ -607,6 +608,28 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             and (not spec.get("module") or module_enabled(tenant, spec["module"]))
         }
 
+    def _scoped_queryset(self, queryset):
+        """يقصّر الأنواعَ التي تعلن `scope` على ما يراه المستخدم (#285/م٣).
+
+        **موضعٌ واحدٌ يحكم ثلاثة**: `get_object` في DRF يمرّ من `get_queryset`،
+        فالقائمةُ والقراءةُ والإبطالُ تُقصَر معاً — ورابطُ زميلٍ يردّ **404 لا 403**
+        (403 يُثبت وجودَه، وهو ما يُلتقط منه المعرّف). والأنواعُ التي لا تعلن
+        المفتاحَ تبقى كما هي: لا فلترةَ على سجلٍّ لم يطلبها.
+        """
+        tenant = get_tenant(self.request, raise_on_missing=False)
+        scoped = {
+            doc_type: spec["scope"]
+            for doc_type, spec in DOC_TYPES.items() if spec.get("scope")
+        }
+        if tenant is None or not scoped:
+            return queryset
+        condition = ~Q(doc_type__in=list(scoped))
+        for doc_type, scope in scoped.items():
+            condition |= Q(
+                doc_type=doc_type, doc_id__in=scope(tenant, self.request.user),
+            )
+        return queryset.filter(condition)
+
     def get_queryset(self):
         queryset = super().get_queryset()
         doc_type = self.request.query_params.get("doc_type")
@@ -621,7 +644,7 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             queryset = queryset.filter(
                 doc_type__in=self._allowed_doc_types(self.request)
             )
-        return queryset
+        return self._scoped_queryset(queryset)
 
     def list(self, request, *args, **kwargs):
         allowed = self._allowed_doc_types(request)
@@ -635,6 +658,11 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     def retrieve(self, request, *args, **kwargs):
         share = self.get_object()
         spec = DOC_TYPES.get(share.doc_type)
+        if spec and spec.get("module"):
+            # **الترخيصُ قبل الصلاحية** كما في `create`: وحدةٌ أُطفئت تختفي
+            # كمسارٍ غير موجود (404) بدل أن تُعلن عن نفسها بـ403. وهو هنا بعد
+            # `get_object` قصْداً — فالمعرّفُ لا يُثبته السطحُ قبل الفحصين.
+            require_module(request, spec["module"])
         require_perm(request, spec["permission"] if spec else "sales.document.share")
         return super().retrieve(request, *args, **kwargs)
 
@@ -671,6 +699,19 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        if doc_type == DOC_PAYMENT_NOTICE:
+            # #285: الإشعارُ يُنشأ من «جاهز للإرسال» وحده
+            # (`accounting_office.appointments`)، وهو يختار الالتزامَ من زبائن
+            # العضو المرئيّين. وهذا الباب يأخذ **أيّ** معرّف `Obligation`
+            # (متسلسلٌ يُخمَّن) ويمنح جمهورَه الخاصّ: محاسبٌ يملك
+            # `office.clients.write` بلا `office.clients.all` كان يتّخذ رابطاً
+            # عامّاً بأسماء زملائه ومبالغهم — تجاوزاً لعزل `visible_clients`.
+            return Response(
+                {"detail": (
+                    "إشعار الدفع يُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
         spec = DOC_TYPES[doc_type]
         # الترخيص **قبل** الصلاحية، و`require_module` يردّ **404 لا 403**
         # (`core/modules.py`) — قرارٌ قائم في المستودع: الوحدة غير المرخّصة
@@ -704,6 +745,9 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
     def revoke(self, request, pk=None):
         share = self.get_object()
         spec = DOC_TYPES.get(share.doc_type)
+        if spec and spec.get("module"):
+            # كـ`retrieve`: وحدةٌ أُطفئت لا تُبطل رابطاً ولا تُقِرّ بوجوده.
+            require_module(request, spec["module"])
         require_perm(request, spec["permission"] if spec else "sales.document.share")
         services.revoke_share(share, user=request.user, request=request)
         return Response(self.get_serializer(share).data)

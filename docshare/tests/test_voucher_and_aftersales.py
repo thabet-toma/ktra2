@@ -191,6 +191,32 @@ def test_turning_the_module_off_kills_a_live_link_with_410(
     assert client.get(f"/s/{share.token}").status_code == 410
 
 
+def test_turning_the_module_off_kills_a_payment_notice_link_with_410(
+    client, env, office_tenant, payment_notice
+):
+    """م٢ (#285): رابطُ إشعار الدفع حيٌّ يعرض أسماءَ الزبائن ومبالغهم — فوحدةٌ
+    أُطفئت تُسقطه بـ**410** كشقيقته في ما بعد البيع، لا تبقيه عاملاً.
+
+    والنوعُ قبل هذا الإصلاح كان بلا `"module"`، فشركةٌ أُطفئ ترخيصُها ظلّت
+    روابطُها تُصيَّر. الاختبارُ يقيس الصفحةَ بعد الإطفاء لا السجلَّ وحده: الحارسُ
+    قد يُعلَن ولا يُوصَّل.
+    """
+    from core.models import TenantModule
+    from core.modules import invalidate_module_cache
+
+    share = services.create_share(
+        env["tenant"], "payment_notice", payment_notice.pk,
+    )
+    assert client.get(f"/s/{share.token}").status_code == 200
+
+    TenantModule.objects.filter(
+        tenant=env["tenant"], module_key="accounting_office"
+    ).update(enabled=False)
+    invalidate_module_cache(env["tenant"].pk)
+
+    assert client.get(f"/s/{share.token}").status_code == 410
+
+
 def test_unlicensed_company_gets_404_not_403(env, warranty_card):
     """وحدةٌ غير مرخّصة تختفي كمسارٍ غير موجود — قرارٌ قائم في `core/modules.py`.
 
@@ -228,5 +254,13 @@ def test_unlicensed_company_gets_404_not_403(env, warranty_card):
 
 def test_licensed_types_declare_their_module():
     """النوع الذي يعيش في وحدة مرخّصة يقولها في سجلّه لا في نيّة كاتبه."""
-    for doc_type in ("warranty_card", "service_order"):
-        assert DOC_TYPES[doc_type].get("module") == "after_sales", doc_type
+    licensed = {
+        "warranty_card": "after_sales",
+        "service_order": "after_sales",
+        # #285: نوعُ إشعار الدفع يعيش في مكتب المحاسبة، وغيابُ إعلانه كان يعني
+        # رابطاً يُصيَّر بعد إطفاء الترخيص (وحارسُ الصلاحية يمنع الإنشاءَ بـ400
+        # على أيّ حال، فلا يُقاس عليه).
+        "payment_notice": "accounting_office",
+    }
+    for doc_type, module_key in licensed.items():
+        assert DOC_TYPES[doc_type].get("module") == module_key, doc_type

@@ -115,6 +115,100 @@ def test_listing_hides_types_the_user_cannot_share(env, invoice, monkeypatch):
     assert {row["doc_type"] for row in rows} == {DOC_SALES_INVOICE}
 
 
+def test_generic_create_refuses_a_payment_notice_and_creates_nothing(
+    env, office_tenant, payment_notice,
+):
+    """م٣ (#285): إشعارُ الدفع لا يُنشَأ من الباب العامّ — 400 كما رابطُ العدّ.
+
+    بابُه الوحيد «جاهز للإرسال» (`accounting_office.appointments`)، وهو يختار
+    الالتزامَ من زبائن العضو المرئيّين. وهذا السطحَ يأخذ **أيّ** معرّف `Obligation`
+    (متسلسلٌ يُخمَّن)، فصلاحيةُ النوع وحدها كانت تكفي محاسباً ليتّخذ رابطاً عامّاً
+    بأسماء زملائه ومبالغهم: صلاحيتُه `office.clients.write` بلا `office.clients.all`.
+    """
+    from docshare.models import DOC_PAYMENT_NOTICE, DocumentShare
+
+    accountant = _member(env["tenant"], "share-accountant-create", "accountant")
+    before = DocumentShare.objects.count()
+
+    response = _client(accountant, env["tenant"]).post(
+        SHARES_URL, {"doc_type": DOC_PAYMENT_NOTICE, "doc_id": payment_notice.pk},
+        format="json",
+    )
+
+    assert response.status_code == 400, response.data
+    assert "جاهز للإرسال" in response.data["detail"], response.data
+    assert "token" not in response.data
+    assert DocumentShare.objects.count() == before
+
+
+def test_an_accountant_lists_reads_and_revokes_only_their_own_clients_notice(
+    env, office_tenant, make_payment_notice_obligation,
+):
+    """م٣ (#285): القائمةُ والقراءةُ والإبطالُ على `visible_clients` لا على الشركة.
+
+    دورُ `accountant` يكتب زبائن المكتب ولا يرى زبائن غيره: بلا هذا النطاق كان
+    `GET ?doc_type=payment_notice` يُعيد `token` و`public_url` لكل إشعارات الشركة،
+    ويُبطل المحاسبُ أيَّ رابطٍ منها.
+    """
+    from docshare.models import DOC_PAYMENT_NOTICE
+
+    accountant = _member(env["tenant"], "share-accountant-scope", "accountant")
+    mine = make_payment_notice_obligation(
+        name="زبون المحاسب", responsible=accountant,
+    )
+    theirs = make_payment_notice_obligation(name="زبون الزميل")
+    my_share = services.create_share(env["tenant"], DOC_PAYMENT_NOTICE, mine.pk)
+    their_share = services.create_share(env["tenant"], DOC_PAYMENT_NOTICE, theirs.pk)
+
+    api = _client(accountant, env["tenant"])
+
+    rows = _rows(api.get(SHARES_URL, {"doc_type": DOC_PAYMENT_NOTICE}))
+    assert [row["doc_id"] for row in rows] == [mine.pk], rows
+
+    assert api.get(f"{SHARES_URL}{their_share.pk}/").status_code == 404
+    refused = api.post(f"{SHARES_URL}{their_share.pk}/revoke/", {}, format="json")
+    assert refused.status_code == 404
+    their_share.refresh_from_db()
+    assert their_share.revoked_at is None
+
+    # والحارسُ لا يمنع المحاسب من رابطه هو — وإلا صار النطاقُ حجباً لا تقييداً.
+    allowed = api.post(f"{SHARES_URL}{my_share.pk}/revoke/", {}, format="json")
+    assert allowed.status_code == 200, allowed.data
+    my_share.refresh_from_db()
+    assert my_share.revoked_at is not None
+
+
+def test_an_unlicensed_company_cannot_read_or_revoke_a_payment_notice_share(
+    env, office_tenant, payment_notice,
+):
+    """م٢ (#285): الترخيصُ قبل الصلاحية في القراءة والإبطال أيضاً — 404 لا 403.
+
+    الصفُّ يبقى (الروابطُ لا تُحذَف)، لكن سطحَ الإدارة لا يُقِرّ بوجوده لشركةٍ أُطفئ
+    ترخيصُها: 403 يُثبت لمن يخمّن المعرّفات أنّ الرابط موجود. والقراءةُ قبل الإطفاء
+    تُثبت أنّ المعرّف **مرئيٌّ** أصلاً، فلا يمرّ الاختبار لأن الكائن لم يُوجَد.
+    """
+    from core.models import TenantModule
+    from core.modules import invalidate_module_cache
+    from docshare.models import DOC_PAYMENT_NOTICE
+
+    share = services.create_share(
+        env["tenant"], DOC_PAYMENT_NOTICE, payment_notice.pk,
+    )
+    api = _client(env["owner"], env["tenant"])
+    assert api.get(f"{SHARES_URL}{share.pk}/").status_code == 200
+
+    TenantModule.objects.filter(
+        tenant=env["tenant"], module_key="accounting_office"
+    ).update(enabled=False)
+    invalidate_module_cache(env["tenant"].pk)
+
+    assert api.get(f"{SHARES_URL}{share.pk}/").status_code == 404
+    refused = api.post(f"{SHARES_URL}{share.pk}/revoke/", {}, format="json")
+    assert refused.status_code == 404
+    share.refresh_from_db()
+    assert share.revoked_at is None
+
+
 def test_unknown_document_is_404_not_403(env):
     """404 لا 403: 403 يُثبت لمن يخمّن المعرّفات أن المستند موجود."""
     api = _client(env["owner"], env["tenant"])

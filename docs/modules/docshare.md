@@ -47,7 +47,7 @@
 | `service_order` | `after_sales.ServiceOrder` | `partner` أو `customer_name` | زبون | **وحدة مرخّصة**؛ التقدير بعد اعتماده |
 | `purchase_rfq` | `logistics.PurchaseRFQ` | — (لا طرف واحد؛ الرابط إمّا خاصٌّ **بمستقبِل** عبر `PurchaseRFQRecipient.share`، وإمّا **عامٌّ** بـ`DocumentShare.is_public` — مواصفة #147) | مورّد | **لا يقبل قراراً — يقبل تسعيراً** (`quote` لا `decision`)؛ انظر §«تسعير المورّد» أدناه |
 | `stocktake_count` | `inventory.Stocktake` | `inventory.StocktakeCountLink` (اسم العادّ ونطاقه) | موظف مستودع (`warehouse` — جمهورٌ ثالث) | **K3**: يقبل **عدّاً** (`count` لا `decision`/`quote`)؛ لا يرى مالاً؛ صفحته JSON في المسار `count/` لا القالب العامّ — ورمزُه يردّ 404 على `/s/<token>` قبل تسجيل مشاهدة. تفصيل العقد في `modules/inventory.md` |
-| `payment_notice` | `accounting_office.Obligation` (الالتزامُ مرجعَ الإشعار) | `OfficeClient` (اسمُه ورقمُ ملفّه الضريبيّ) | زبون | **#285**: `doc_id` **التزامٌ** لا زبون — (الزبون، تاريخُ الاستحقاق) يُشتقّان منه فلا حقلَ إضافيّ في `DocumentShare`؛ `page` = ورقةٌ بأسطرٍ ملوّنة (أحمر «عليك» · أخضر «إلك» · رماديّ قريبٌ من الصفر) لأن قائمةَ `line_row` البيضاء بلا حقل نبرة؛ صلاحيتُه `office.clients.write` |
+| `payment_notice` | `accounting_office.Obligation` (الالتزامُ مرجعَ الإشعار) | `OfficeClient` (اسمُه ورقمُ ملفّه الضريبيّ) | زبون | **#285**: `doc_id` **التزامٌ** لا زبون — (الزبون، تاريخُ الاستحقاق) يُشتقّان منه فلا حقلَ إضافيّ في `DocumentShare`؛ `page` = ورقةٌ بأسطرٍ ملوّنة (أحمر «عليك» · أخضر «إلك» · رماديّ قريبٌ من الصفر) لأن قائمةَ `line_row` البيضاء بلا حقل نبرة؛ صلاحيتُه `office.clients.write`، **ووحدةٌ مرخّصة** (`"module": "accounting_office"`) و**نطاقُ `visible_clients` في سطح الإدارة** (`"scope"`) و**لا يُنشَأ من الباب العامّ** (§«الجمهور والصلاحية») |
 
 **ثلاث قواعد عرضٍ تعمّمت من هذه الأنواع، وكلٌّ منها منعٌ مقصود:**
 - **`show_lines=False`** للسندات والإشعارات والكفالة: جدولٌ بعناوين «الصنف/الوحدة/الكمية/ض.%» فوق إيصال قبضٍ ضجيجٌ يُربك من يقرؤه. وتوزيعاتُ السند تنزل **صفوفَ بيانات** (فاتورةً فاتورةً بمبلغها)، و«على الحساب» **يُشتقّ طرحاً** لا يُقرأ من عمودٍ ثانٍ قد يخالفه.
@@ -257,9 +257,15 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 |---|---|---|
 | `sales.document.share` | `sales_invoice` · `sales_quotation` · `sales_order` · `delivery_order` · `customer_payment` · `credit_debit_note` · `warranty_card` · `warranty_certificate` · `service_order` | موظف المبيعات · `manager` بـ`"*"` |
 | `purchase.document.share` | `purchase_invoice` · `purchase_order` · `logistics_deal` · `supplier_quotation` · `local_purchase_invoice` · `supplier_payment` | موظف المشتريات · `manager` بـ`"*"` |
-| `office.clients.write` | `payment_notice` (#285) | مكتب المحاسبة: `manager` و`office_manager` · والقارئ لا يأخذه |
+| `office.clients.write` | `payment_notice` (#285) | مكتب المحاسبة: `accountant` و`office_manager` و`manager` بـ`"*"` · و`viewer` لا يأخذه |
 
 `viewer` لا يأخذ أياً منهما. ولا مال في الرابط على الجانبين: يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل».
+
+**و`payment_notice` استثناءٌ في ثلاثة أوجه، وكلُّها حرّاسُ تسريبٍ لا تفاصيل** (#285):
+
+- **وحدةٌ مرخّصة**: النوعُ يعلن `"module": "accounting_office"`، فشركةٌ أُطفئ ترخيصُها لا تُصيَّر لها ورقةٌ تحمل أسماءَ زبائنها ومبالغهم: رابطٌ حيٌّ يردّ **410** (`resolve_share`) كشهادة ما بعد البيع، والنوعُ يخرج من `_allowed_doc_types` ومن القراءة والإبطال (`require_module` فيهما، **404**). وأمّا `POST` فيردّ **400** أصلاً (البند التالي) — قبل الترخيص، فلا يُقاس عليه.
+- **ولا يُنشَأ من الباب العامّ**: `POST /api/document-shares/` يردّ **400** لهذا النوع كما لرابط عدّ الجرد. بابُه الوحيد «جاهز للإرسال» في مكتب المحاسبة (`accounting_office.appointments`)، وهو يختار الالتزامَ من `visible_clients`. وهذا السطح يأخذ **أيّ** `doc_id` (متسلسلٌ يُخمَّن)، فصلاحيةُ النوع وحدها — `office.clients.write` — كانت تكفي محاسباً ليتّخذ رابطاً عامّاً بأسماء زملائه ومبالغهم: صلاحيتُه لا تحمل `office.clients.all` ولا `office.amounts.view`.
+- **ونطاقٌ في سطح الإدارة**: `"scope": payment_notice_doc_ids` يقصُر القائمةَ والقراءةَ والإبطالَ على `doc_id` المنتمي إلى التزامات `visible_clients(tenant, user)` — في `DocumentShareViewSet` (`_scoped_queryset`، وداخله `get_object` فتشمل الثلاثة). ورابطُ زميلٍ يردّ **404 لا 403**. والنوعُ الوحيد الذي يعلن هذا المفتاح اليوم، والأنواعُ التي لا تعلنه لا تُفلتَر.
 
 **والصلاحية تُقرأ من النوع، ولم تكن.** كانت `DOC_TYPES[…]["permission"]` معلَنةً في السجلّ و**مهملةً** في `docshare/views.py`: الصلاحية المبيعاتية مثبَّتةً حرفياً في `list`/`retrieve`/`create`/`revoke`. لم يكن ذلك نزيفاً يوم كُتب (النوعان مبيعات)، لكنه كان يعني أن أول نوع شراء يجعل **موظف المبيعات يشارك فواتير المورّدين** وموظف المشتريات لا يقدر أن يشارك مستنده. الآن تُقرأ من السجلّ، والقائمة **مفلترةٌ** بما يملكه المستخدم لا محجوبةً كلَّها. يحرسه `docshare/tests/test_admin_api.py` (`test_permission_is_taken_from_the_type_not_hardcoded`) — وقد أُثبت أنه يُخفق على الكود القديم قبل أن يُعتمد.
 

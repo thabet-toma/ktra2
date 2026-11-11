@@ -19,7 +19,9 @@
 import datetime
 from decimal import Decimal
 
+from django.db import connection
 from django.test import SimpleTestCase
+from django.test.utils import CaptureQueriesContext
 
 from accounting_office import appointments, services, settings_registry
 from accounting_office.models import (
@@ -31,11 +33,18 @@ from accounting_office.models import (
 )
 from accounting_office.tests.test_appointments import (
     DUE,
+    JAN_END,
+    JAN_START,
     SEVEN_DAYS_BEFORE,
     OfficeFixture,
 )
 from docshare import services as docshare_services
 from docshare.models import DOC_PAYMENT_NOTICE, DocumentShare
+
+#: الفترةُ الثانية — الالتزامُ مفتاحُه (زبون، فترة) والإشعارُ (زبون، تاريخ)، فتاريخٌ
+#: واحدٌ يفتح بندين حين تختلف الفترتان (م١).
+FEB_START = datetime.date(2026, 2, 1)
+FEB_END = datetime.date(2026, 2, 28)
 
 
 class PaymentNoticeToneTest(SimpleTestCase):
@@ -104,13 +113,15 @@ class PaymentNoticeFixture(OfficeFixture):
         self, client, *, name, amount, service_code="vat",
         direction=OBLIGATION_DIRECTION_DUE, actual=DUE,
         status=None, client_paid=False,
+        period_start=JAN_START, period_end=JAN_END,
     ):
         kwargs = {}
         if status is not None:
             kwargs["status"] = status
         obligation = self.add_obligation(
             client, actual=actual, amount=amount, direction=direction,
-            service_code=service_code, client_paid=client_paid, **kwargs,
+            service_code=service_code, client_paid=client_paid,
+            period_start=period_start, period_end=period_end, **kwargs,
         )
         Obligation.objects.filter(pk=obligation.pk).update(name=name)
         obligation.name = name
@@ -213,6 +224,34 @@ class PaymentNoticeGroupingTest(PaymentNoticeFixture):
             [line["label"] for line in second["lines"]], ["اقتطاع الرواتب"],
         )
 
+    def test_two_periods_owing_on_one_date_carry_one_notice_not_two(self):
+        """م١: بندان لفترتين بتاريخٍ واحد ⇒ **إشعارٌ واحد** لا إشعاران متطابقان.
+
+        البندُ يُفتح لكل (زبون، **فترة**) والإشعارُ يُجمع لكل (زبون، **تاريخ**)،
+        فربعيّةٌ وشهريّةٌ تستحقّان في اليوم نفسه تعطيان بندين بمفتاحٍ واحد: كان
+        الإشعارُ يُركَّب على كلٍّ منهما، فيخرج العنوانُ والمجموعُ مرّتين في الرسالة
+        المدمجة وإشعاران في `items[]`. الحارسُ مفتاحُ (زبون، تاريخ): أوّلُ بندٍ
+        يحمله والباقي `None`.
+        """
+        client = self.ready_client()
+        self.add_line(client, name="ض.ق.م", amount=Decimal("1200.00"))
+        self.add_line(
+            client, name="اقتطاع الرواتب", amount=Decimal("300.00"),
+            service_code="payroll", period_start=FEB_START, period_end=FEB_END,
+        )
+
+        items = self.deadline_items()
+        body = self.ready(SEVEN_DAYS_BEFORE)["messages"][0]["body"]
+
+        self.assertEqual(len(items), 2, items)
+        self.assertEqual(body.count(appointments.PAYMENT_NOTICE_TITLE), 1)
+        self.assertEqual(
+            len([item for item in items if item["notice"] is not None]), 1, items,
+        )
+        # والأوّلُ هو من يحمله — لا آخرُ بندٍ في الترتيب.
+        self.assertIsNotNone(items[0]["notice"], items)
+        self.assertEqual(items[0]["notice"]["total"], "1500.00")
+
 
 # ── المعيار ٢: «إلك» ────────────────────────────────────────────────────────
 class PaymentNoticeCreditTest(PaymentNoticeFixture):
@@ -308,8 +347,11 @@ class PaymentNoticePageTest(PaymentNoticeFixture):
         html = self.page_of(anchor)
 
         self.assertIn(appointments.PAYMENT_NOTICE_TITLE, html)
-        self.assertIn("1,500", html)
-        self.assertIn("pn-owed", html)
+        # م٤: الصنفُ على **العنصر** لا في الورقة. `<style>` في القالب يحمل
+        # `.pn-owed` في كل صفحة، ف`assertIn("pn-owed", html)` كان ينجح ولو قلبنا
+        # اللون — هذه الأسطر تسقط يوم يخالف المجموعُ القاعدة، وهو معيار القبول ٤.
+        self.assertIn('<span class="pn-owed">1,500 عليك</span>', html)
+        self.assertIn('<td class="num pn-owed">1,200</td>', html)
         self.assertIn("عليك", html)
 
     def test_the_page_paints_a_credit_green(self):
@@ -325,7 +367,8 @@ class PaymentNoticePageTest(PaymentNoticeFixture):
 
         html = self.page_of(anchor)
 
-        self.assertIn("pn-refund", html)
+        self.assertIn('class="num pn-refund"', html)
+        self.assertIn('<span class="pn-refund">500 إلك</span>', html)
         self.assertIn("إلك", html)
 
     def test_the_page_paints_a_near_zero_total_gray(self):
@@ -334,7 +377,9 @@ class PaymentNoticePageTest(PaymentNoticeFixture):
 
         html = self.page_of(anchor)
 
-        self.assertIn("pn-neutral", html)
+        # `<span class="pn-neutral">` لا يوجد إلا على المجموع: خليّةُ السطر `<td>`.
+        # والاتجاهُ «عليك» لأن اللون قرارُ حدٍّ والإشارةُ قرارُ مبلغ.
+        self.assertIn('<span class="pn-neutral">7 عليك</span>', html)
 
 
 # ── المعيار ٥: الإرفاق ──────────────────────────────────────────────────────
@@ -398,6 +443,35 @@ class PaymentNoticeAttachmentTest(PaymentNoticeFixture):
         self.assertIn(notice["url"], body)
         self.assertNotIn("1200.00 عليك", body)
 
+    def test_the_format_is_read_per_client_and_not_once_for_the_batch(self):
+        """الصيغةُ تُقرأ لصاحب كلّ بندٍ: زبونٌ «نصّاً» لا رابطَ له وزبونٌ بالافتراض يأخذه.
+
+        قراءةٌ واحدة للدفعة (صيغةُ أوّل زبون) كانت تُعطي الاثنين قرارَ واحد:
+        رابطاً لِمن طلب نصّاً، أو نصّاً لِمن طلب رابطاً.
+        """
+        textual = self.contacted_client("زبونٌ نصّاً", "أمّ سامي")
+        self.add_line(textual, name="ض.ق.م", amount=Decimal("1200.00"))
+        services.set_client_setting(textual, "payment_notice_format", "text")
+
+        linked = self.contacted_client("زبونٌ برابط", "أبو سامي")
+        self.add_line(linked, name="ض.ق.م", amount=Decimal("640.00"))
+
+        messages = {
+            message["recipient"]["name"]: message
+            for message in self.ready(SEVEN_DAYS_BEFORE)["messages"]
+        }
+
+        self.assertEqual(messages["أمّ سامي"]["items"][0]["notice"]["url"], "")
+        self.assertEqual(
+            messages["أمّ سامي"]["items"][0]["notice"]["lines"][0]["amount"], "1200.00",
+        )
+        link = messages["أبو سامي"]["items"][0]["notice"]["url"]
+        self.assertIn("/s/", link)
+        # ورابطٌ واحدٌ لا اثنان: صاحبُ «نصّاً» لم يُنشَأ له صفُّ مشاركة.
+        self.assertEqual(
+            DocumentShare.objects.filter(doc_type=DOC_PAYMENT_NOTICE).count(), 1,
+        )
+
     def test_a_member_without_the_share_permission_reads_text_and_mints_no_link(self):
         """الرابطُ يُنشَأ في مسار قراءة — فلا يُمنَح لِمن لا يملك المشاركة.
 
@@ -418,4 +492,74 @@ class PaymentNoticeAttachmentTest(PaymentNoticeFixture):
         self.assertIn("1200.00 عليك", payload["messages"][0]["body"])
         self.assertFalse(
             DocumentShare.objects.filter(doc_type=DOC_PAYMENT_NOTICE).exists(),
+        )
+
+    def test_a_member_without_the_amounts_permission_still_reads_the_notice_amounts(self):
+        """م٦: `items[].notice` **استثناءٌ مقصود** من قناع المبالغ — ومكتوبٌ باختبار.
+
+        الإشعارُ نصُّه للزبون، فقناؤه يُخفي عن الموظف ما يقرؤه من يُرسِل إليه.
+        والقناعُ يبقى حيث كان: صفوفُ الجداول والحمولات المشتقّة. ودورُ `accountant`
+        لا يملك `office.amounts.view` افتراضاً، فهو الحالةُ الواقعيّة هنا لا دورٌ
+        مُلفَّق — ولولا هذا الاختبار كان الاستثناءُ موثَّقاً بلا حارس، والوثيقةُ
+        تحيل إلى شقيقةٍ تفحص `body`/`url` وحدهما.
+        """
+        member = self.make_member("ap_without_amounts", role="accountant")
+        client = self.make_client("زبون بلا مبالغ", responsible=member)
+        self.link(client, self.make_contact(name="جهة بلا مبالغ"))
+        self.add_line(client, name="ض.ق.م", amount=Decimal("620.00"))
+
+        payload = services.ready_to_send_payload(
+            self.tenant, user=member, day=SEVEN_DAYS_BEFORE,
+        )
+        notice = payload["messages"][0]["items"][0]["notice"]
+
+        self.assertFalse(
+            services.can_see_amounts(self.tenant, member),
+            "الاختبار يفترض عضواً بلا `office.amounts.view` — والدورُ منحه.",
+        )
+        self.assertEqual(notice["total"], "620.00")
+        self.assertEqual(notice["lines"][0]["amount"], "620.00")
+        self.assertIn("620.00 عليك", payload["messages"][0]["body"])
+
+
+# ── م٥: الكلفة ──────────────────────────────────────────────────────────────
+class PaymentNoticeCostTest(PaymentNoticeFixture):
+    """بندُ «موعد رسمي قريب» بمبلغٍ لا يكلّف استعلاماً لكل زبون.
+
+    ثابتُ `test_reminders.CostTest` يحرس القائمةَ بزبائنَ بلا التزامٍ بمبلغ، فلا
+    يمرّ على الإشعار أصلاً. والإشعارُ يضيف فوقه ثلاثةَ مصادرِ كلفة: استعلامَ
+    التزاماتٍ لكل بند، واستعلامَي الرابط الحيّ (`create_share`)، و`INSERT`ين عند
+    أوّل فتح. المواعيدُ الضريبيةُ تتجمّع في يومٍ واحد (15)، فمكتبٌ بـ300 زبون كان
+    يدفع ≈900 استعلامٍ في كل فتح.
+
+    **والقياسُ بعد وجود الروابط**: أوّلُ فتحٍ يُنشئها بحكم التصميم، والنقصُ
+    المتبقّي `INSERT` لكل رابطٍ جديد. الحالةُ الدائمة — الشاشةُ تُفتح كلَّ يوم —
+    يجب أن تكون ثابتةً.
+    """
+
+    def test_one_deadline_item_costs_what_five_cost_once_the_links_exist(self):
+        first = self.ready_client("زبون أول")
+        self.add_line(first, name="ض.ق.م", amount=Decimal("1200.00"))
+        self.ready(SEVEN_DAYS_BEFORE)  # الرابطُ يُنشَأ في مسار القراءة أوّلَ مرّة.
+
+        with CaptureQueriesContext(connection) as one:
+            self.ready(SEVEN_DAYS_BEFORE)
+
+        for index in range(4):
+            client = self.ready_client(f"زبون {index}")
+            self.add_line(client, name="ض.ق.م", amount=Decimal("700.00"))
+        self.ready(SEVEN_DAYS_BEFORE)
+
+        with CaptureQueriesContext(connection) as five:
+            payload = self.ready(SEVEN_DAYS_BEFORE)
+
+        notices = [
+            item["notice"]
+            for message in payload["messages"] for item in message["items"]
+            if item["notice"] is not None
+        ]
+        self.assertEqual(len(notices), 5, notices)
+        self.assertEqual(
+            len(one.captured_queries), len(five.captured_queries),
+            [query["sql"] for query in five.captured_queries],
         )

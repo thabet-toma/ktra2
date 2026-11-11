@@ -453,13 +453,31 @@ def stocktake_count(env):
 
 
 @pytest.fixture
-def payment_notice(env):
-    """#285: عيّنة نوع `payment_notice` — التزامٌ مستحقٌّ بتاريخه الصريح.
+def office_tenant(env):
+    """`accounting_office` وحدة مرخّصة — ونوعُ `payment_notice` يعيش فيها (#285)."""
+    from core.models import TenantModule
+    from core.modules import invalidate_module_cache
+
+    TenantModule.objects.update_or_create(
+        tenant=env["tenant"], module_key="accounting_office",
+        defaults={"enabled": True},
+    )
+    invalidate_module_cache(env["tenant"].pk)
+    return env["tenant"]
+
+
+@pytest.fixture
+def make_payment_notice_obligation(env, office_tenant):
+    """#285: التزامٌ مستحقٌّ بتاريخه الصريح — عيّنةُ النوع ومادّةُ اختبار نطاقه.
 
     `doc_id` هذا النوع **التزامٌ** لا مستنداً مالياً (انظر
     `documents/accounting_docs.py`): من الالتزام يُشتقّ (الزبون، تاريخُ الاستحقاق)
     فيُبنى الإشعارُ منهما بلا حقلٍ إضافيّ. فالعيّنةُ عميلُ مكتبٍ وخدمةٌ والتزام —
     ولا ساعةَ فيها: التواريخُ مكتوبة.
+
+    **مصنعٌ لا عيّنةٌ واحدة** لأن حارسَ الرؤية في `docshare` يُقاس باثنين: التزامُ
+    زبونٍ يراه العضو وآخرُ لزميلٍ لا يراه. ونسخةٌ ثانية من البناء كانت ستُشغِّل
+    اختبارَي نطاقٍ مختلفين على التزامين مختلفَي الشكل.
     """
     from accounting_office import services as office_services
     from accounting_office.models import (
@@ -471,52 +489,61 @@ def payment_notice(env):
     )
 
     tenant = env["tenant"]
-    client = OfficeClient.objects.create(
-        tenant=tenant, name="زبون الإشعار", responsible=env["owner"],
-    )
-    TaxCard.objects.create(
-        client=client, annual_sales=0, vat_classification="authorized",
-    )
-    service = office_services.ensure_default_services(tenant)[0]
-    client_service = office_services.add_client_service(
-        client=client,
-        service=service,
-        starts_on=datetime.date(2026, 1, 1),
-        responsible_from=datetime.date(2026, 1, 1),
-        frequency="monthly",
-    )
-    #: قيدُ `obligation_one_source`: الالتزامُ سطرُ لائحةٍ أو قاعدةُ مكتبٍ — لا
-    #: كلاهما ولا لا شيء. وقاعدةُ المكتب أبسطُ صفٍّ يكفيه (بلا لائحةٍ منزرعة).
-    custom_rule = OfficeCustomRule.objects.create(
-        tenant=tenant,
-        name="ض.ق.م شهري",
-        service=service,
-        cadence="monthly",
-        rule_kind="end_of_period",
-    )
-    task = PeriodTask.objects.create(
-        tenant=tenant,
-        client=client,
-        client_service=client_service,
-        period_start=datetime.date(2026, 1, 1),
-        period_end=datetime.date(2026, 1, 31),
-        internal_deadline=datetime.date(2026, 2, 10),
-    )
-    return Obligation.objects.create(
-        tenant=tenant,
-        client=client,
-        client_service=client_service,
-        task=task,
-        custom_rule=custom_rule,
-        origin="office",
-        rule_code=custom_rule.code,
-        name="דוח תקופתי",
-        period_start=datetime.date(2026, 1, 1),
-        period_end=datetime.date(2026, 1, 31),
-        legal_date=datetime.date(2026, 2, 10),
-        official_date=datetime.date(2026, 2, 10),
-        actual_deadline=datetime.date(2026, 2, 10),
-        internal_deadline=datetime.date(2026, 2, 10),
-        amount=Decimal("1160.00"),
-        direction="due",
-    )
+
+    def _make(*, name="زبون الإشعار", responsible=None, amount=Decimal("1160.00")):
+        client = OfficeClient.objects.create(
+            tenant=tenant, name=name, responsible=responsible or env["owner"],
+        )
+        TaxCard.objects.create(
+            client=client, annual_sales=0, vat_classification="authorized",
+        )
+        service = office_services.ensure_default_services(tenant)[0]
+        client_service = office_services.add_client_service(
+            client=client,
+            service=service,
+            starts_on=datetime.date(2026, 1, 1),
+            responsible_from=datetime.date(2026, 1, 1),
+            frequency="monthly",
+        )
+        #: قيدُ `obligation_one_source`: الالتزامُ سطرُ لائحةٍ أو قاعدةُ مكتبٍ — لا
+        #: كلاهما ولا لا شيء. وقاعدةُ المكتب أبسطُ صفٍّ يكفيه (بلا لائحةٍ منزرعة).
+        custom_rule = OfficeCustomRule.objects.create(
+            tenant=tenant,
+            name=f"ض.ق.م شهري — {name}",
+            service=service,
+            cadence="monthly",
+            rule_kind="end_of_period",
+        )
+        task = PeriodTask.objects.create(
+            tenant=tenant,
+            client=client,
+            client_service=client_service,
+            period_start=datetime.date(2026, 1, 1),
+            period_end=datetime.date(2026, 1, 31),
+            internal_deadline=datetime.date(2026, 2, 10),
+        )
+        return Obligation.objects.create(
+            tenant=tenant,
+            client=client,
+            client_service=client_service,
+            task=task,
+            custom_rule=custom_rule,
+            origin="office",
+            rule_code=custom_rule.code,
+            name="דוח תקופתי",
+            period_start=datetime.date(2026, 1, 1),
+            period_end=datetime.date(2026, 1, 31),
+            legal_date=datetime.date(2026, 2, 10),
+            official_date=datetime.date(2026, 2, 10),
+            actual_deadline=datetime.date(2026, 2, 10),
+            internal_deadline=datetime.date(2026, 2, 10),
+            amount=amount,
+            direction="due",
+        )
+
+    return _make
+
+
+@pytest.fixture
+def payment_notice(make_payment_notice_obligation):
+    return make_payment_notice_obligation()

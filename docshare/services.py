@@ -73,17 +73,26 @@ def is_crawler(request) -> bool:
 
 
 def public_url(share: DocumentShare) -> str:
-    """الرابط المنسوخ — من إعدادٍ صريح لا من ترويسة الطلب الوارد.
+    """الرابط المنسوخ لصفّ مشاركة — غلافُ `public_url_for_token`."""
+    return public_url_for_token(share.token)
+
+
+def public_url_for_token(token: str) -> str:
+    """الرابط من توكنه — من إعدادٍ صريح لا من ترويسة الطلب الوارد.
 
     `request.build_absolute_uri` يبني من `Host`، وهي ترويسة يرسلها العميل.
     الرابط هنا يُلصق في واتساب ويعيش شهراً، فأساسه يُثبَّت في الإعدادات.
 
     والوجهة كذلك (`DOCSHARE_PUBLIC_PATH`): القصير `/s` يلزمه سطر في nginx،
     و`/api/share` يعمل بلا لمس الخادم — فالاختيار متغيّر بيئة لا نشرُ كود.
+
+    والقاعدةُ هنا وحدها: `accounting_office.appointments` يقرأ روابطَ إشعاراتِ
+    اليوم كلِّها بنداءٍ واحدٍ على `doc_id__in` ثم يبني العناوين من التوكنات
+    (`payment_notice_urls`، #285/م٥)، فلا يكلّف كائنَ مشاركةٍ لكلّ بند.
     """
     base = str(getattr(settings, "DOCSHARE_PUBLIC_BASE_URL", "")).rstrip("/")
     path = str(getattr(settings, "DOCSHARE_PUBLIC_PATH", "/s")).rstrip("/")
-    return f"{base}{path}/{share.token}"
+    return f"{base}{path}/{token}"
 
 
 def active_share(tenant, doc_type: str, doc_id: int, *, is_public: bool = False):

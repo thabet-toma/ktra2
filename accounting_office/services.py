@@ -6916,23 +6916,41 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
     }
 
 
-def _with_payment_notice(tenant, candidate, settings_by_client, *, user=None):
-    """يُركّب «إشعار الدفع» على بند «موعد رسمي قريب»، ويترك كلَّ نوعٍ آخر كما هو.
+def _with_payment_notices(tenant, candidates, settings_by_client, *, user=None):
+    """يُركّب «إشعار الدفع» على بنود «موعد رسمي قريب»، ويترك كلَّ نوعٍ آخر كما هو.
 
     **بعد الحواجز كلّها** لا قبلها: الإرفاقُ يقرأ إعدادَ **صاحب البند** (د6)،
     ورابطُ الورقة لا يُنشَأ لبندٍ لن يُرسَل (يومُ راحةٍ أو إذنٌ مسحوب). وكلُّ
     الظهور التالي يقرأ النسخةَ المجمَّدة نفسها، فلا حسابَ ثانٍ في العرض.
+
+    **ومفتاحُ الإشعار (زبون، تاريخُ الاستحقاق) لا (زبون، بند)**: بندان لفترتين
+    يستحقّان في يومٍ واحد — ربعيّةٌ وشهريّةٌ في 15 — كان الإشعارُ يُركَّب على كلٍّ
+    منهما. والرسالةُ تُجمع للمستلِم، فتخرج بعنوانه ومجموعه **مرّتين**، و`items[]`
+    بإشعارين متطابقين. فيُركَّب على **أوّل** بندٍ لكلّ مفتاحٍ وحده، والباقي
+    `notice=None` — والبندُ نفسُه باقٍ بنصّه.
+
+    **والمجموعةُ تُبنى دفعةً**: استعلامُ التزاماتٍ واحدٌ لكل الأزواج، واستعلامٌ
+    واحدٌ للروابط الحيّة — لا ثلاثةُ استعلاماتٍ لكلّ بند.
     """
-    if candidate.reminder_type != REMINDER_DEADLINE:
-        return candidate
-    notice = _appointments_module().payment_notice_attachment(
+    first_of_key: dict[tuple[int, object], int] = {}
+    for index, candidate in enumerate(candidates):
+        if candidate.reminder_type != REMINDER_DEADLINE:
+            continue
+        first_of_key.setdefault((candidate.client.pk, candidate.render_due), index)
+    if not first_of_key:
+        return candidates
+    notices = _appointments_module().payment_notice_attachments(
         tenant,
-        client_id=candidate.client.pk,
-        due=candidate.render_due,
-        settings=settings_by_client[candidate.client.pk],
+        list(first_of_key),
+        settings_by_client=settings_by_client,
         user=user,
     )
-    return candidate if notice is None else replace(candidate, notice=notice)
+    attached = list(candidates)
+    for key, index in first_of_key.items():
+        notice = notices.get(key)
+        if notice is not None:
+            attached[index] = replace(attached[index], notice=notice)
+    return attached
 
 
 def can_share_payment_notice(tenant, user) -> bool:
@@ -6942,7 +6960,7 @@ def can_share_payment_notice(tenant, user) -> bool:
     يملك المشاركة أيضاً. بلا هذا الحارس كان عضوٌ للقراءة يُنشئ — بفتح الشاشة —
     صفَّ `DocumentShare` حيّاً وأثراً في `ActivityLog` بمبالغ زبون، وهو فعلٌ
     تمنعه الصلاحية في مسار الكتابة. فمن لا يملكها يقرأ الإشعار **نصّاً** ولا
-    يُنشَأ له رابط (انظر `payment_notice_attachment`).
+    يُنشَأ له رابط (انظر `payment_notice_attachments`).
     """
     if user is None:
         return False
@@ -7002,11 +7020,11 @@ def ready_to_send_payload(
     if not candidates:
         return payload
     # #285: الإشعارُ يُركَّب هنا — بين الحاجز الأخير وبناء الرسالة — فلا رابطَ
-    # يُنشَأ (ولا حسابَ سطرٍ) لبندٍ خارج «جاهز للإرسال».
-    candidates = [
-        _with_payment_notice(tenant, candidate, settings_by_client, user=user)
-        for candidate in candidates
-    ]
+    # يُنشَأ (ولا حسابَ سطرٍ) لبندٍ خارج «جاهز للإرسال». ودفعةً واحدة بمفتاح
+    # (زبون، تاريخ) لا بنداً بنداً، فلا عملَ مكرَّرٌ ولا استعلامَ لكلّ زبون.
+    candidates = _with_payment_notices(
+        tenant, candidates, settings_by_client, user=user,
+    )
     # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف
     # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم. والأنواعُ من البنود المحسوبة وحدها — فلا
     # استعلامَ لنوعٍ لم يظهر، والرسالةُ المجمَّعةُ تأخذ نصَّ كلّ بندٍ بنوعه.

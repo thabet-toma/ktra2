@@ -716,44 +716,13 @@ def _payment_notice_direction(amount) -> str:
     return ""
 
 
-def payment_notice(tenant, *, client_id, due, gray_threshold=None) -> dict:
-    """إشعارُ الدفع لزبونٍ في **تاريخ استحقاقٍ واحد**: أسطرٌ ومجموعٌ واتجاه.
+def _notice_from_rows(rows, due, gray_threshold) -> dict:
+    """الإشعارُ من صفوف التزاماتِ (زبون، تاريخ) — **بناءٌ واحدٌ للمفرد والمجموعة**.
 
-    **والتجميعُ على `due_date` لا على الفترة** (د3): «كلُّ ضرائبه المستحقّة في ذلك
-    التاريخ» قد تخصّ فتراتٍ مختلفة (ربعيّ يوافق شهرياً في اليوم نفسه)، فالمفتاحُ
-    (زبون، تاريخ) كما نصّت التذكرة، لا (زبون، فترة).
-
-    والمصدرُ `Obligation` وحدها: `status=pending` ومبلغُه غيرُ صفرٍ — ولا محرّكٌ
-    موازٍ ولا جدولٌ ثانٍ. والمدفوعُ («الزبون دفع») خارجَ الأسطر: الإشعارُ يقول
-    «مستحقّ»، وما دفعه الزبونُ ليس مستحقّاً — وهو نفسُ ما تفعله
-    `_period_unpaid_total` و`client_owes`، وهما المرجعُ الذي أحالت إليه د3.
-
-    `anchor_id` أدنى معرّفٍ في المجموعة: مفتاحُ رابط `docshare` الثابت، فتاريخٌ
-    واحدٌ لا يفتح ورقتين بين نداءين.
-
-    **ولا `visible_clients` هنا**: مسارُ التذكير يُرشِّح الزبائن قبل النداء
-    (`ready_to_send_payload`)، والصفحةُ العامة يعرّفها توكنُها لا مستخدمُها — فالفلترُ
-    في الطبقة التي تملك المستخدم، والشركةُ وحدها تُفلتر هنا.
+    المدفوعُ («الزبون دفع») والمبلغُ الصفرُ سطراً لا يفتحان، والمرتجعُ يُكتب
+    بإشارته سالباً. و`anchor_id` **أوّلُ صفٍّ في المجموعة** ولو لم يصِر سطراً:
+    مفتاحُ الرابط ثابتٌ لا يتغيّر بتسديد سطرٍ واحدٍ من الإشعار.
     """
-    if gray_threshold is None:
-        gray_threshold = services.resolve_setting_for_clients(
-            tenant,
-            services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
-            list(OfficeClient.objects.filter(tenant=tenant, pk=client_id)),
-        ).get(client_id, 0)
-    rows = list(
-        Obligation.objects
-        .filter(
-            tenant=tenant,
-            client_id=client_id,
-            status=OBLIGATION_STATUS_PENDING,
-        )
-        # الممدَّدُ يغلب: `due_date` تقرأ `extended_to or actual_deadline`، والشرطُ
-        # هنا مرآتها في SQL — وإلا ظهر الالتزامُ الممدَّد في تاريخه القديم.
-        .filter(Q(extended_to=due) | Q(extended_to__isnull=True, actual_deadline=due))
-        .values("id", "name", "amount", "direction", "client_paid")
-        .order_by("id")
-    )
     lines = []
     for row in rows:
         amount = row["amount"]
@@ -779,6 +748,93 @@ def payment_notice(tenant, *, client_id, due, gray_threshold=None) -> dict:
         ),
         "anchor_id": rows[0]["id"] if rows else None,
     }
+
+
+def payment_notices(tenant, pairs, *, gray_thresholds) -> dict:
+    """إشعاراتُ أزواج (زبون، تاريخ) — **استعلامٌ واحدٌ للأزواج كلِّها** (#285/م٥).
+
+    `pairs` مفاتيحُها (معرّف الزبون، تاريخُ الاستحقاق) بلا تكرار، و`gray_thresholds`
+    حدُّ كلّ زبونٍ محلولاً سلفاً في مسحة الحساب (`_REMINDER_CLIENT_KEYS`).
+
+    **والفلترةُ مرآةُ `due_date` في SQL**: `extended_to` يغلب، وإلا
+    `actual_deadline` — وإلا ظهر الالتزامُ الممدَّد في تاريخه القديم.
+
+    **وشرطُ `IN` أعرضُ من الأزواج المطلوبة**: زبونٌ بتاريخ زميلٍ يقع في المدى، و
+    `extended_to__in` لا يعرف لمن التاريخ. فالتجميعُ على المفتاح الدقيق في
+    بايثون — ولا يُبنى إلا ما طُلب.
+
+    الاستعلامُ الواحدُ هو الإصلاحُ نفسه: نسخةٌ لكل بندٍ كانت تُكلّف استعلاماً
+    لكلّ زبونٍ في كلّ فتح، ومواعيدُ الضرائب تتجمّع في يومٍ واحد (15).
+    """
+    wanted = set(pairs)
+    if not wanted:
+        return {}
+    dues = {due for _, due in wanted}
+    rows = list(
+        Obligation.objects
+        .filter(
+            tenant=tenant,
+            client_id__in={client_id for client_id, _ in wanted},
+            status=OBLIGATION_STATUS_PENDING,
+        )
+        .filter(
+            Q(extended_to__in=dues)
+            | Q(extended_to__isnull=True, actual_deadline__in=dues)
+        )
+        .values(
+            "id", "client_id", "name", "amount", "direction", "client_paid",
+            "actual_deadline", "extended_to",
+        )
+        .order_by("id")
+    )
+    grouped: dict[tuple[int, object], list] = {}
+    for row in rows:
+        key = (row["client_id"], row["extended_to"] or row["actual_deadline"])
+        if key in wanted:
+            grouped.setdefault(key, []).append(row)
+    return {
+        pair: _notice_from_rows(
+            grouped.get(pair, []), pair[1], gray_thresholds.get(pair[0]),
+        )
+        for pair in wanted
+    }
+
+
+def payment_notice(tenant, *, client_id, due, gray_threshold=None) -> dict:
+    """إشعارُ الدفع لزبونٍ في **تاريخ استحقاقٍ واحد**: أسطرٌ ومجموعٌ واتجاه.
+
+    **والتجميعُ على `due_date` لا على الفترة** (د3): «كلُّ ضرائبه المستحقّة في ذلك
+    التاريخ» قد تخصّ فتراتٍ مختلفة (ربعيّ يوافق شهرياً في اليوم نفسه)، فالمفتاحُ
+    (زبون، تاريخ) كما نصّت التذكرة، لا (زبون، فترة).
+
+    والمصدرُ `Obligation` وحدها، **بثلاثة شروطٍ نصّاً**: `status=pending`،
+    و`client_paid=False`، ومبلغٌ غيرُ صفر — ولا محرّكٌ موازٍ ولا جدولٌ ثانٍ.
+    والمدفوعُ («الزبون دفع») خارجَ الأسطر: الإشعارُ يقول «مستحقّ»، وما دفعه
+    الزبونُ ليس مستحقّاً — وهو نفسُ ما تفعله `_period_unpaid_total` و`client_owes`،
+    وهما المرجعُ الذي أحالت إليه د3. (نصُّ د3 في الموجز كان «`status=pending`
+    والمبلغ غير الصفر»، والمدفوعُ شرطٌ ثالثٌ **صحيحٌ** يُكتب هنا لا في الكود
+    وحده.)
+
+    `anchor_id` أدنى معرّفٍ في المجموعة: مفتاحُ رابط `docshare` الثابت، فتاريخٌ
+    واحدٌ لا يفتح ورقتين بين نداءين.
+
+    **ولا `visible_clients` هنا**: مسارُ التذكير يُرشِّح الزبائن قبل النداء
+    (`ready_to_send_payload`)، والصفحةُ العامة يعرّفها توكنُها لا مستخدمُها — فالفلترُ
+    في الطبقة التي تملك المستخدم، والشركةُ وحدها تُفلتر هنا.
+
+    **وهذا غلافُ المفرد**: الصفحةُ العامة (`accounting_docs.load_payment_notice`)
+    تناديه بزوجٍ واحد، ومسارُ «جاهز للإرسال» ينادي `payment_notices` بأزواجه
+    كلّها. والبناءُ واحدٌ (`_notice_from_rows`) فلا نسختان تفترقان.
+    """
+    if gray_threshold is None:
+        gray_threshold = services.resolve_setting_for_clients(
+            tenant,
+            services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
+            list(OfficeClient.objects.filter(tenant=tenant, pk=client_id)),
+        ).get(client_id, 0)
+    return payment_notices(
+        tenant, [(client_id, due)], gray_thresholds={client_id: gray_threshold},
+    )[(client_id, due)]
 
 
 def payment_notice_item(notice) -> dict | None:
@@ -830,67 +886,129 @@ def payment_notice_text(notice) -> str:
     return "\n".join(parts)
 
 
-def payment_notice_link(tenant, notice, *, user=None) -> str:
-    """رابطُ ورقة الإشعار — بآلية `docshare` القائمة وحدها، بنوع مستندٍ جديد.
+def payment_notice_urls(tenant, anchors, *, user=None) -> dict[int, str]:
+    """رابطُ ورقة الإشعار لكلّ محورٍ في المجموعة — **استعلامٌ واحدٌ للحيّ القائم**.
 
-    **الاستيرادُ كسولٌ في الدالّة**: `docshare.services` يستورد `documents`، ووحدةُ
+    بآلية `docshare` القائمة وحدها، بنوع مستندٍ جديد. **والرابطُ يُنشَأ في مسار
+    القراءة** («جاهز للإرسال») أوّلَ مرّةٍ عن قصد: نصُّ الرسالة يجب أن يكون
+    نهائياً **قبل** الإرسال، ورابطٌ يُخلَق بعده لا يكون في الورقة التي بيد الزبون.
+    والتكرارُ آمن — الحيّ نفسه يُعاد (`dedupe` في `create_share`).
+
+    **ولا نداءَ `create_share` لكلّ بند** (#285/م٥): هي تكلّف استعلامَ تحميلٍ
+    واستعلامَ بحثٍ عن الحيّ ثم `INSERT` — ثلاثةٌ لكلّ زبونٍ في مسار قراءة. هنا
+    يُقرأ الحيّ كلُّه بنداءٍ واحدٍ على `doc_id__in` (والأحدثُ أوّلاً كما في
+    `active_share`)، ولا تُكلَّف `create_share` إلا بما **لا رابطَ له**.
+
+    **والاستيرادُ كسولٌ في الدالّة**: `docshare.services` يستورد `documents`، ووحدةُ
     نوع الإشعار هناك تستورد هذا الملفّ — واستيرادٌ في الأعلى يدير دورةً حقيقيّة
     عند أوّل تحميل. والنداءُ وقتَ الحاجة فقط، فلا ترتيبُ تحميلٍ يفترق.
-
-    **والرابطُ يُنشَأ في مسار القراءة** («جاهز للإرسال») أوّلَ مرّةٍ عن قصد: نصُّ
-    الرسالة يجب أن يكون نهائياً **قبل** الإرسال، ورابطٌ يُخلَق بعده لا يكون في
-    الورقة التي بيد الزبون. والتكرارُ آمن — الرابطُ الحيّ نفسه يُعاد (`dedupe` في
-    `create_share`)، فنداءٌ ثانٍ لا يصنع ورقةً ثانية.
     """
     from docshare import services as docshare_services
-    from docshare.models import DOC_PAYMENT_NOTICE
+    from docshare.models import DOC_PAYMENT_NOTICE, DocumentShare
 
-    try:
-        share = docshare_services.create_share(
-            tenant, DOC_PAYMENT_NOTICE, notice["anchor_id"], user=user,
+    wanted = {anchor for anchor in anchors if anchor is not None}
+    if not wanted:
+        return {}
+    live = (
+        DocumentShare.objects
+        .filter(
+            tenant=tenant,
+            doc_type=DOC_PAYMENT_NOTICE,
+            doc_id__in=list(wanted),
+            is_public=False,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
         )
-    except docshare_services.ShareNotFound:
-        # الالتزامُ تغيّر بين القراءتين: النصُّ يمضي بلا رابطٍ، ولا يسقط الطلب.
-        return ""
-    return docshare_services.public_url(share)
+        .order_by("-created_at", "-id")
+        .values_list("doc_id", "token")
+    )
+    urls: dict[int, str] = {}
+    for doc_id, token in live:
+        # `setdefault` لأن القائمة قد تحمل رابطين حيّين لمستندٍ واحد (سباقُ
+        # فتحَين قبل أن يُكتب الأوّل)، والأحدثُ أوّلٌ بترتيب الاستعلام.
+        urls.setdefault(doc_id, docshare_services.public_url_for_token(token))
+    for anchor in sorted(wanted - set(urls)):
+        try:
+            share = docshare_services.create_share(
+                tenant, DOC_PAYMENT_NOTICE, anchor, user=user,
+            )
+        except docshare_services.ShareNotFound:
+            # الالتزامُ تغيّر بين القراءتين: النصُّ يمضي بلا رابطٍ، ولا يسقط الطلب.
+            continue
+        urls[anchor] = docshare_services.public_url(share)
+    return urls
 
 
-def payment_notice_attachment(tenant, *, client_id, due, settings, user=None):
-    """الإشعارُ المرفقُ ببند «موعد رسمي قريب» — أو `None` حين لا إشعار.
+def _notice_format(settings) -> str:
+    """صيغةُ الإشعار المطلوبة لصاحب البند — والافتراضُ «الاثنان» من السجلّ.
 
-    `settings` إعداداتُ **صاحب البند** محلولةً في مسحة الحساب نفسها (د6): إطفاءُ
+    والمفتاحُ الغائبُ (`None`) يأخذ الافتراض: `.get()` وحده كان يجعل صيغةً غير
+    مضبوطةٍ تُسقط الرابط وتُخرج النصَّ، وهي عكسُ افتراض السجلّ.
+    """
+    return (
+        settings.get(services.PAYMENT_NOTICE_FORMAT_KEY)
+        or settings_registry.PAYMENT_NOTICE_FORMAT_BOTH
+    )
+
+
+def payment_notice_attachments(tenant, pairs, *, settings_by_client, user=None) -> dict:
+    """إشعاراتُ بنود «موعد رسمي قريب» **دفعةً واحدة** — أو خريطةٌ فارغة.
+
+    `pairs` أزواجُ (معرّف الزبون، تاريخ الاستحقاق) بلا تكرار، و`settings_by_client`
+    إعداداتُ **صاحب البند** محلولةً في مسحة الحساب نفسها (د6): إطفاءُ
     `payment_notice_attach` لزبونٍ يُخرج إشعارَه وحده ويُبقي بندَ الموعد كما هو.
     وإشعارٌ بلا أسطرٍ لا يُرفَق: ورقةٌ تقول «المجموع 0» إزعاجٌ لا معلومة.
 
     **والرابطُ لِمن يملك مشاركته وحده** (`can_share_payment_notice`): يُنشَأ في
     مسار قراءة، فلا يجوز أن يمنح عضوَ قراءةٍ صفَّ مشاركةٍ حيّاً. ومَن لا يملكها
     تبقى صيغتُه نصّاً فلا تخرج رسالةٌ بعنوانٍ بلا مضمون.
+
+    والكلفةُ **ثابتة**: استعلامُ التزاماتٍ واحدٌ، واستعلامُ روابطَ حيّةٍ واحد،
+    ولا `INSERT` إلا لرابطٍ يُفتح أوّلَ مرّة. نسخةُ البند الواحد كانت تدفع
+    الثلاثةَ لكلّ زبونٍ في كلّ فتح.
     """
-    if not settings.get(services.PAYMENT_NOTICE_ATTACH_KEY, True):
-        return None
-    notice = payment_notice(
-        tenant,
-        client_id=client_id,
-        due=due,
-        gray_threshold=settings.get(services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY),
+    attached = [
+        pair for pair in pairs
+        if settings_by_client[pair[0]].get(services.PAYMENT_NOTICE_ATTACH_KEY, True)
+    ]
+    notices = {
+        pair: notice
+        for pair, notice in payment_notices(
+            tenant,
+            attached,
+            gray_thresholds={
+                client_id: settings_by_client[client_id].get(
+                    services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
+                )
+                for client_id, _ in attached
+            },
+        ).items()
+        if notice["lines"]
+    }
+    if not notices:
+        return {}
+    # الصلاحيةُ **مرّةً واحدة**: `can_share_payment_notice` تمرّ بالوحدة والصلاحيات،
+    # ونداءُها لكلّ زوجٍ كان يحوّل حارساً واحداً إلى كلفةٍ لكلّ زبون.
+    shareable = services.can_share_payment_notice(tenant, user)
+    wanted_link = [
+        pair for pair in notices
+        if shareable
+        and _notice_format(settings_by_client[pair[0]]) in (
+            services.PAYMENT_NOTICE_FORMAT_PDF, services.PAYMENT_NOTICE_FORMAT_BOTH,
+        )
+    ]
+    urls = payment_notice_urls(
+        tenant, [notices[pair]["anchor_id"] for pair in wanted_link], user=user,
     )
-    if not notice["lines"]:
-        return None
-    wanted = (
-        settings.get(services.PAYMENT_NOTICE_FORMAT_KEY)
-        or settings_registry.PAYMENT_NOTICE_FORMAT_BOTH
-    )
-    url = ""
-    if wanted in (
-        services.PAYMENT_NOTICE_FORMAT_PDF, services.PAYMENT_NOTICE_FORMAT_BOTH,
-    ) and services.can_share_payment_notice(tenant, user):
-        url = payment_notice_link(tenant, notice, user=user)
-    notice["format"] = (
-        wanted
-        if url or wanted == settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
-        # صيغةٌ تطلب رابطاً لا يملكه قارئُ الشاشة ⇒ النصُّ، لا رسالةٌ بعنوانٍ بلا
-        # مضمون: من لا يملك المشاركة يقرأ إشعارَه كاملاً بلا إنشاءِ رابط.
-        else settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
-    )
-    notice["url"] = url
-    return notice
+    for pair, notice in notices.items():
+        url = urls.get(notice["anchor_id"], "")
+        wanted = _notice_format(settings_by_client[pair[0]])
+        notice["format"] = (
+            wanted
+            if url or wanted == settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
+            # صيغةٌ تطلب رابطاً لا يملكه قارئُ الشاشة ⇒ النصُّ، لا رسالةٌ بعنوانٍ
+            # بلا مضمون: من لا يملك المشاركة يقرأ إشعارَه كاملاً بلا إنشاءِ رابط.
+            else settings_registry.PAYMENT_NOTICE_FORMAT_TEXT
+        )
+        notice["url"] = url
+    return notices
