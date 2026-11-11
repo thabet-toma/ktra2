@@ -40,6 +40,7 @@ __all__ = [
     "get_account_by_code",
     "get_accounts_by_codes",
     "ensure_account",
+    "ensure_incoming_cheque",
     "ensure_partner_account",
     "sync_partner_accounting",
     "create_partner_opening_balance",
@@ -313,6 +314,56 @@ def ensure_account(
             tenant_id, code, account_type, parent_code,
         )
     return account
+
+
+# ─────────────────────────────────────────────────────────
+#  الشيكات
+# ─────────────────────────────────────────────────────────
+
+def ensure_incoming_cheque(
+    *, tenant, cheque_number: str, amount, partner=None, user=None,
+):
+    """شيكٌ واردٌ بحالة «مسودّة» — يُعاد القائمُ إن وُجد بمفتاح (الشركة، الرقم).
+
+    المسارُ الوحيد لإنشاء شيكٍ من خارج `accounting`: `accounting.models` ليس
+    واجهةً عامة (عقد `importlinter`)، ودوالُّ الشيكات في `services` تبدأ من
+    شيكٍ قائم (حركةُ ورقةٍ موجودة). البحثُ قبل الإنشاء هو الـidempotency: نداءٌ
+    ثانٍ لنفس المستند يُعيد الورقةَ نفسَها بدل ورقةٍ ثانيةٍ برقمها.
+
+    **ولا فرادةَ في القاعدة على (الشركة، رقم الشيك)** — `cheque` جدولُ أوراقٍ
+    حقيقيّةٍ قد يتكرّر رقمُها بين بنوكٍ أو تواريخ، فلا يُضاف قيدٌ يكسر بياناتٍ
+    قائمة. فالضمانُ هنا **تعاقُديّ**: مستدعٍ واحدٌ يُمرّر الرقمَ نفسَه لمستندٍ
+    واحدٍ؛ ونداءان متزامنان لنفس الرقم قبل أوّل إدراجٍ يبقيان ممكنين نظرياً.
+
+    `currency` **العملةُ الأساسية** لا الافتراضُ الخامّ للنموذج (`default=1`):
+    ورقةٌ بعملةٍ غير عملةِ دفاترها مبلغٌ خاطئ صامت. وغيابُ عملةٍ أساسيةٍ (قاعدةٌ
+    لم تُزرع بعد) يترك افتراضَ النموذج — لا نُخترع عملة.
+    """
+    from tenants.models import Currency
+
+    from .models import Cheque
+
+    # القصُّ قبل البحث **وقبل الإدراج** — وإلا بحث ثانٍ برقمٍ أطول عن صفٍّ
+    # مخزَّنٍ مقصوصٍ فأنشأ ورقةً ثانيةً بالرقم نفسه.
+    cheque_number = str(cheque_number)[:50]
+    existing = Cheque.objects.filter(
+        tenant=tenant, cheque_number=cheque_number,
+    ).first()
+    if existing is not None:
+        return existing
+    currency = Currency.objects.filter(IsBaseCurrency=True).first()
+    extra = {"currency": currency} if currency is not None else {}
+    return Cheque.objects.create(
+        tenant=tenant,
+        cheque_number=cheque_number,
+        amount=amount,
+        direction="Incoming",
+        status="Draft",
+        partner=partner,
+        due_date=None,
+        created_by=user if getattr(user, "pk", None) else None,
+        **extra,
+    )
 
 
 # ─────────────────────────────────────────────────────────

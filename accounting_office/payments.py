@@ -52,7 +52,7 @@ from django.db.models import (
 from django.db.models.functions import Coalesce, Greatest
 from django.http import Http404
 
-from accounting_office import fees, services
+from accounting_office import fees, office_journal, services
 from accounting_office.models import (
     FEE_DRAFT_STATUS_APPROVED,
     FEE_PAYMENT_METHOD_CHOICES,
@@ -626,6 +626,10 @@ def create_payment(
             _allocate_oldest(payment)
         elif allocations:
             _apply_explicit_allocations(payment, allocations)
+        # #284: القيدُ في الدفاتر **داخل المعاملة نفسها** — فشلُه (فترةٌ مقفلة،
+        # حسابٌ معطَّل، توازن) يُرجع الدفعةَ والتخصيصَ والرقمَ كلَّه. لا صفَّ مالٍ
+        # بلا قيد: «دفعةٌ سُجّلت ولم تُرحَّل» عطلٌ لا يظهر في أيّ شاشة.
+        office_journal.post_payment_journal(payment, actor=actor)
     return payment
 
 
@@ -697,13 +701,16 @@ def write_off_fee_draft(draft, *, amount, reason, actor):
             raise ValidationError({
                 "amount": "المبلغُ يتجاوز المتبقّي على المسودّة.",
             })
-        return FeeWriteOff.objects.create(
+        write_off = FeeWriteOff.objects.create(
             tenant_id=locked.tenant_id,
             draft=locked,
             amount=amount,
             reason=reason,
             created_by=actor,
         )
+        # #284: قيدُ الشطب في المعاملة نفسها — لا شطبَ بلا قيد (والعكس).
+        office_journal.post_writeoff_journal(write_off, actor=actor)
+        return write_off
 
 
 # ── القراءة: الرؤية والقناع ─────────────────────────────────────────────────
@@ -756,11 +763,15 @@ def allocation_row(allocation, *, masked) -> dict:
     return _mask(data) if masked else data
 
 
-def payment_row(payment, *, masked, client_due=None) -> dict:
+def payment_row(payment, *, masked, client_due=None, journal_entry=None) -> dict:
     """سطرُ دفعة — ومعه **رصيدُ الزبون الدائنُ وما عليه** من `client_due` وحدها.
 
     `client_due` هو **حمولةُ الزبون** (`client_dues_payload`) لا مبلغُ `due`: تُمرَّر
     مجمَّعةً حين تُقرأ قائمةٌ فلا استعلامان لكل صفّ، وتُحسب للصفّ المفرد حين تغيب.
+
+    و`journal_entry` معرّفُ قيد الدفعة في الدفاتر (#284) — يُمرَّر مجمَّعاً
+    (`office_journal.journal_entry_ids`) فلا استعلامَ لكل صفّ، و`None` تعني «بلا
+    قيد» صراحةً: الترحيلُ مطفأ أو دفعةٌ سابقةٌ لهذا الحقل.
     """
     data = {
         "id": payment.pk,
@@ -779,6 +790,7 @@ def payment_row(payment, *, masked, client_due=None) -> dict:
         ],
         "due": None if client_due is None else client_due.get("due"),
         "credit": None if client_due is None else client_due.get("credit"),
+        "journal_entry": journal_entry,
     }
     return _mask(data) if masked else data
 
@@ -810,14 +822,20 @@ def _int_or_error(value, field) -> int:
 
 
 def payments_payload(tenant, *, user, queryset=None) -> list[dict]:
-    """قائمةُ دفعاتٍ بحمولةٍ واحدة: القناعُ والأرصدةُ تُحسب مرّةً لا لكل صفّ."""
+    """قائمةُ دفعاتٍ بحمولةٍ واحدة: القناعُ والأرصدةُ والقيودُ تُحسب مرّةً لا لكل صفّ."""
     masked = amounts_masked(tenant, user)
     rows = list(queryset if queryset is not None else visible_payments(tenant, user))
     dues = client_dues_payload(
         tenant, [row.client for row in rows], user=user, masked=masked,
     )
+    entries = office_journal.journal_entry_ids(tenant, rows)
     return [
-        payment_row(row, masked=masked, client_due=dues.get(row.client_id))
+        payment_row(
+            row,
+            masked=masked,
+            client_due=dues.get(row.client_id),
+            journal_entry=entries.get(row.pk),
+        )
         for row in rows
     ]
 
@@ -974,9 +992,15 @@ def ledger_payload(tenant, *, user, params) -> dict:
         user=user,
         masked=masked,
     )
+    payment_entries = office_journal.journal_entry_ids(
+        tenant, payment_page["results"],
+    )
     payment_page["results"] = [
         payment_row(
-            row, masked=masked, client_due=payment_dues.get(row.client_id),
+            row,
+            masked=masked,
+            client_due=payment_dues.get(row.client_id),
+            journal_entry=payment_entries.get(row.pk),
         )
         for row in payment_page["results"]
     ]

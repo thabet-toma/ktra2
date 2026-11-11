@@ -77,7 +77,8 @@ class RegistryShapeTest(SettingTestCase):
         """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276،
         و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
         (#280)، و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب وإعدادُ
-        اعتمادها التلقائيّ لـ#282، وتذكيرُ الموعد لـ#281."""
+        اعتمادها التلقائيّ لـ#282، وتذكيرُ الموعد لـ#281، و**سبعةُ القيد التلقائي
+        في الدفاتر** لـ#284."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -101,6 +102,11 @@ class RegistryShapeTest(SettingTestCase):
                 # #285: إشعارُ الدفع — الإرفاقُ وصيغتُه وحدُّ الرمادي، وللزبون تخصيصُها.
                 "payment_notice_attach", "payment_notice_format",
                 "payment_notice_gray_threshold",
+                # #284: مفتاحُ الترحيل وحساباتُه الستّة — كودُ حسابٍ لكل مسارِ مال.
+                "office_journal_enabled", "office_journal_cash_account",
+                "office_journal_bank_account", "office_journal_cheque_account",
+                "office_journal_receivable_account", "office_journal_revenue_account",
+                "office_journal_writeoff_account",
             },
         )
 
@@ -469,6 +475,11 @@ class SettingsApiTest(SettingTestCase):
                 # #285: إشعارُ الدفع — ثلاثةُ مفاتيحَ في مجموعة «التذكيرات».
                 "payment_notice_attach", "payment_notice_format",
                 "payment_notice_gray_threshold",
+                # #284: القيدُ التلقائي — المفتاحُ وحساباتُه الستّة.
+                "office_journal_enabled", "office_journal_cash_account",
+                "office_journal_bank_account", "office_journal_cheque_account",
+                "office_journal_receivable_account", "office_journal_revenue_account",
+                "office_journal_writeoff_account",
             },
         )
 

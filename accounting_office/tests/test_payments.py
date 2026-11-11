@@ -23,6 +23,8 @@ from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
+from accounting.models import Account
+from accounting.services import create_fiscal_year
 from accounting_office import payments, services
 from accounting_office.models import (
     ClientService,
@@ -68,6 +70,17 @@ class PaymentsTestCase(APITestCase):
         invalidate_module_cache(cls.tenant.pk)
         services.set_office_setting(cls.tenant, "tax_system", "PS")
         services.set_office_setting(cls.tenant, "office_size", "small")
+        # #284: الشطبُ صار يُرحّل قيداً، وحسابُ الديون المعدومة **لا تحمله بذرةُ
+        # الشجرة** (افتراضُ الإعداد فارغٌ بقرار — انظر `test_office_journal.py`).
+        # فتُفتح هنا لأن اختبارات الشطب تختبر الشطبَ لا القرارَ المفتوح.
+        cls.writeoff_account = Account.objects.create(
+            tenant=cls.tenant, code="5405", name="ديون معدومة", account_type="Expense",
+        )
+        services.set_office_setting(
+            cls.tenant,
+            "office_journal_writeoff_account",
+            cls.writeoff_account.code,
+        )
 
         cls.office_manager_user = User.objects.create_user(
             username="pay_office_manager", password="x",
@@ -589,6 +602,9 @@ class WriteOffTest(PaymentsTestCase):
 
 class ReceiptNumberTest(PaymentsTestCase):
     def test_receipt_numbers_are_sequential_and_unique_per_tenant_and_year(self):
+        # #284: الدفعةُ تُرحّل قيداً، والقيدُ يحتاج فترةً ماليةً مفتوحةً تغطي
+        # تاريخه — وفتراتُ 2027 لا تُنشأ مع الشركة (سنةُ إنشائها وحدها).
+        create_fiscal_year(self.tenant, year=2027)
         client = self.make_client()
         first = self.payment_of(client, "10.00", paid_at="2026-05-01")
         second = self.payment_of(client, "10.00", paid_at="2026-05-02")
