@@ -137,12 +137,12 @@ class AmountKeysGuardTest(SimpleTestCase):
             # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
             # #282: `amount` ثلاث مرّات (الاشتراكُ والإضافةُ وسعرُ الخدمة)،
             # و`subtotal`/`total` لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
-            # #283: `amount` ثلاث مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في
-            # `PAYMENT_AMOUNT_KEYS`، فلا مبلغَ يمرّ بلا قناع.
+            # #283: `paid_amount`/`remaining` على سطر المسودّة، و`amount` ثلاث
+            # مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في `PAYMENT_AMOUNT_KEYS`.
             [
                 "annual_sales", "suggested_price", "amount", "debit", "credit",
                 "amount", "amount", "amount", "subtotal", "total",
-                "amount", "amount", "amount",
+                "paid_amount", "remaining", "amount", "amount", "amount",
             ],
         )
         self.assertEqual(

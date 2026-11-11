@@ -38,7 +38,7 @@ from datetime import date
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.db.models import (
     DecimalField,
     ExpressionWrapper,
@@ -57,12 +57,15 @@ from accounting_office.models import (
     FEE_DRAFT_STATUS_APPROVED,
     FEE_PAYMENT_METHOD_CHOICES,
     FEE_PAYMENT_METHOD_LABELS,
+    OBLIGATION_DIRECTION_REFUND,
+    OBLIGATION_STATUS_NOT_REQUIRED,
     FeeDraft,
     FeePayment,
     FeePaymentAllocation,
     FeeReceiptSequence,
     FeeWriteOff,
     Obligation,
+    assert_positive_fee_amount,
 )
 from core.access import MANAGER_ROLE, user_tenant_role
 
@@ -104,25 +107,24 @@ def _mask(data: dict, keys=None) -> dict:
 
 
 # ── المبالغ: تنظيفٌ وتقريب ──────────────────────────────────────────────────
-def _money(value) -> Decimal:
-    try:
-        amount = value if isinstance(value, Decimal) else Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        raise ValidationError({"amount": "مبلغٌ غير صالح."}) from None
-    return amount.quantize(AMOUNT_QUANTUM)
-
-
-def _clean_positive_amount(value, *, field="amount") -> Decimal:
-    """مبلغُ دفعةٍ/تخصيصٍ/شطب: **أكبرُ من صفر** بخانتين — أو 400 برسالته."""
+def _money(value, *, field="amount") -> Decimal:
     try:
         amount = value if isinstance(value, Decimal) else Decimal(str(value))
     except (InvalidOperation, TypeError, ValueError):
         raise ValidationError({field: "مبلغٌ غير صالح."}) from None
-    if not amount.is_finite() or amount <= 0:
-        raise ValidationError({field: "المبلغ يجب أن يكون أكبر من صفر."})
-    if amount != amount.quantize(AMOUNT_QUANTUM):
-        raise ValidationError({field: "المبلغ بخانتين عشريتين على الأكثر."})
     return amount.quantize(AMOUNT_QUANTUM)
+
+
+def _clean_positive_amount(value, *, field="amount") -> Decimal:
+    """مبلغُ دفعةٍ/تخصيصٍ/شطب: **أكبرُ من صفر** بخانتين — أو 400 برسالته.
+
+    وقراءةُ القيمة وتقريبُها في `_money`، والحدُّ الموجب في
+    `models.assert_positive_fee_amount` (حارسُ الحفظ) — فلا نسخةَ ثالثة من
+    «مبلغٌ موجبٌ بخانتين» تفترق بين الـAPI والـORM.
+    """
+    amount = _money(value, field=field)
+    assert_positive_fee_amount(amount, field=field)
+    return amount
 
 
 def _iso_date(raw, field):
@@ -218,19 +220,34 @@ class InvoiceSummary:
     state_label: str
 
 
-def _summary_from_row(row) -> InvoiceSummary:
-    state = invoice_state(row.total, row.remaining)
+def _summary(*, paid_amount, written_amount, total, remaining) -> InvoiceSummary:
+    """الملخّصُ من أربعة أرقام — **موضعٌ واحد** للحالة وتسميتها، ووسائطُ مُسمّاةٌ فلا يُبدَّل ترتيبها."""
+    state = invoice_state(total, remaining)
     return InvoiceSummary(
-        paid_amount=_money(row.paid_amount),
-        written_amount=_money(row.written_amount),
-        remaining=_money(row.remaining),
+        paid_amount=_money(paid_amount),
+        written_amount=_money(written_amount),
+        remaining=_money(remaining),
         state=state,
         state_label=INVOICE_STATE_LABELS.get(state, ""),
     )
 
 
+def _summary_from_row(row) -> InvoiceSummary:
+    return _summary(
+        paid_amount=row.paid_amount,
+        written_amount=row.written_amount,
+        total=row.total,
+        remaining=row.remaining,
+    )
+
+
 def invoice_summaries(drafts) -> dict[int, InvoiceSummary]:
-    """ملخّصاتُ مجموعة مسودّاتٍ باستعلامٍ واحد — لا استعلامان لكل مسودّة."""
+    """ملخّصاتُ مجموعة مسودّاتٍ باستعلامٍ واحد — لا استعلامان لكل مسودّة.
+
+    والقراءةُ بالمعرّفات وحدها (`pk__in`): المنادي يمرّر صفوفاً خرجت من استعلامٍ
+    مُقيَّدٍ بالمكتب والرؤية (`visible_drafts`/`visible_payments` أو مسودّةٍ
+    مقفولة)، فليس هنا مصدرٌ ثانٍ للعزل.
+    """
     drafts = list(drafts)
     if not drafts:
         return {}
@@ -238,17 +255,16 @@ def invoice_summaries(drafts) -> dict[int, InvoiceSummary]:
         FeeDraft.objects.filter(pk__in=[draft.pk for draft in drafts if draft.pk]),
     )
     found = {row.pk: _summary_from_row(row) for row in rows}
+    zero = Decimal("0.00")
     return {
+        # مسودّةٌ لم تُقرأ (غيرُ محفوظة) لا تخصيصَ عليها ولا شطب: متبقّيها مبلغُها.
         draft.pk: found.get(
             draft.pk,
-            InvoiceSummary(
-                paid_amount=Decimal("0.00"),
-                written_amount=Decimal("0.00"),
-                remaining=_money(draft.total),
-                state=invoice_state(draft.total, draft.total),
-                state_label=INVOICE_STATE_LABELS.get(
-                    invoice_state(draft.total, draft.total), "",
-                ),
+            _summary(
+                paid_amount=zero,
+                written_amount=zero,
+                total=draft.total,
+                remaining=draft.total,
             ),
         )
         for draft in drafts
@@ -295,38 +311,51 @@ def _credits_map(tenant, client_ids) -> dict[int, Decimal]:
     return credits
 
 
-def client_due_map(tenant, clients) -> dict[int, ClientDue]:
-    """«اللي عليه» لكل زبونٍ في المجموعة — استعلامان لا استعلامان لكل زبون."""
-    by_id = {}
+def _client_ids(clients) -> list[int]:
+    """معرّفاتُ زبائنَ بلا تكرار — كائنٌ أو معرّفٌ يُقبلان، والترتيبُ محفوظٌ."""
+    seen: dict[int, None] = {}
     for client in clients:
-        by_id[getattr(client, "pk", client)] = client
-    if not by_id:
+        seen.setdefault(getattr(client, "pk", client), None)
+    return list(seen)
+
+
+def client_due_map(tenant, clients) -> dict[int, ClientDue]:
+    """«اللي عليه» لكل زبونٍ في المجموعة — استعلامان لا استعلامان لكل زبون.
+
+    والدالّةُ تُجمع **`Σ remaining` نصّاً** لا `invoices_total − المغطّى`: هما
+    متساويان اليوم لأن `remaining` مقصوصةٌ عند الصفر بأمرٍ مؤجَّلٍ مسجَّل، أيُّ
+    تعديلٍ عليه يفتَرق عن الصيغة المكتوبة. و`paid_total` هو **المدفوع فعلاً**
+    (تخصيصاتُ دفعاتٍ لا شطوبِ مكتب)، و`due` لا يُعاد بناؤه منه بعد شطب.
+    """
+    ids = _client_ids(clients)
+    if not ids:
         return {}
-    totals = {pk: [Decimal("0.00"), Decimal("0.00"), 0] for pk in by_id}
-    claimed = {pk: Decimal("0.00") for pk in by_id}
+    totals = {pk: [Decimal("0.00"), Decimal("0.00"), Decimal("0.00"), 0] for pk in ids}
     rows = (
         with_invoice_totals(
             FeeDraft.objects.filter(
                 tenant=tenant,
-                client_id__in=list(by_id),
+                client_id__in=ids,
                 status=FEE_DRAFT_STATUS_APPROVED,
             ),
         )
         .values("client_id", "total", "paid_amount", "remaining")
+        .order_by()
     )
     for row in rows:
         bucket = totals[row["client_id"]]
+        remaining = _money(row["remaining"])
         bucket[0] += _money(row["total"])
         bucket[1] += _money(row["paid_amount"])
-        claimed[row["client_id"]] += _money(row["total"]) - _money(row["remaining"])
-        if _money(row["remaining"]) > 0:
-            bucket[2] += 1
-    credits = _credits_map(tenant, list(by_id))
+        bucket[2] += remaining
+        if remaining > 0:
+            bucket[3] += 1
+    credits = _credits_map(tenant, ids)
     result: dict[int, ClientDue] = {}
-    for client_id, (invoices_total, paid_total, unpaid_count) in totals.items():
+    for client_id, (invoices_total, paid_total, remaining_total, unpaid_count) in totals.items():
         credit = credits.get(client_id, Decimal("0.00"))
         result[client_id] = ClientDue(
-            due=_money(_money(invoices_total) - claimed[client_id] - credit),
+            due=_money(_money(remaining_total) - credit),
             invoices_total=_money(invoices_total),
             paid_total=_money(paid_total),
             credit=_money(credit),
@@ -341,18 +370,24 @@ def client_due(tenant, client) -> ClientDue:
 
 
 def client_tax_notes_map(tenant, clients) -> dict[int, Decimal]:
-    """سطرُ العلم الضريبيّ لكل زبون: مجموعُ الالتزامات غير المعلَّمة `client_paid`.
+    """سطرُ العلم الضريبيّ لكل زبون: مجموعُ الالتزامات **التي على الزبون**.
+
+    الشرطُ ثلاثةٌ لا واحد — `client_paid=False`، و`direction != refund` (المرتجعُ
+    «إلنا» لا «علينا»، وجمعُه يجعل زبوناً عليه 1,000 وله 5,000 يظهر 6,000)،
+    و`status != not_required` («مش لازم» ليست مستحقّة). وهي القاعدةُ نفسُها في
+    `appointments._period_unpaid_total` و`client_owes` — بثوابت النموذج لا بنصٍّ.
 
     **`Obligation` لا يحمل حقلاً خاصّاً بمبلغ ضريبة** — الموجودُ `amount` بقيمةٍ
-    قد تكون فارغة. فالسطرُ مجموعُ ما وُجد منها، ولا حقلَ جديدٌ يُخترَع له
-    (والبديلُ إضافةُ حقلٍ يقيس شيئاً ثانياً او يُترك فارغاً في كل صفّ).
+    قد تكون فارغة. فالسطرُ مجموعُ ما وُجد منها، ولا حقلَ جديدٌ يُخترَع له.
     """
-    ids = [getattr(client, "pk", client) for client in clients]
+    ids = _client_ids(clients)
     if not ids:
         return {}
     rows = (
         Obligation.objects
         .filter(tenant=tenant, client_id__in=ids, client_paid=False)
+        .exclude(direction=OBLIGATION_DIRECTION_REFUND)
+        .exclude(status=OBLIGATION_STATUS_NOT_REQUIRED)
         .values("client_id")
         .annotate(total=Sum("amount"))
         # ترتيبُ النموذج الافتراضي يكسر `GROUP BY` في MySQL (`ONLY_FULL_GROUP_BY`).
@@ -366,10 +401,14 @@ def client_due_tax_note(tenant, client) -> Decimal:
     return client_tax_notes_map(tenant, [client]).get(client.pk, Decimal("0.00"))
 
 
-def client_dues_payload(tenant, clients, *, user) -> dict[int, dict]:
-    """حمولةُ «اللي عليه» لمجموعةٍ — القناعُ فيها واحدٌ يُحسب مرّة."""
+def client_dues_payload(tenant, clients, *, user, masked=None) -> dict[int, dict]:
+    """حمولةُ «اللي عليه» لمجموعةٍ — القناعُ فيها واحدٌ يُحسب مرّة.
+
+    و`masked` يُمرَّر من قائمةٍ حسبته أصلاً (`payments_payload`/`ledger_payload`)
+    فلا يُسأل `can_see_amounts` مرّتين في الطلب نفسه.
+    """
     clients = list(clients)
-    masked = amounts_masked(tenant, user)
+    masked = amounts_masked(tenant, user) if masked is None else masked
     dues = client_due_map(tenant, clients)
     notes = client_tax_notes_map(tenant, clients)
     payload: dict[int, dict] = {}
@@ -394,6 +433,34 @@ def client_due_payload(tenant, client, *, user) -> dict:
 
 
 # ── رقمُ الإشعار: عدّادٌ مقفول ───────────────────────────────────────────────
+def _locked_sequence(tenant, year) -> FeeReceiptSequence:
+    """صفُّ العدّاد مقفولاً — **وإن لم يكن موجوداً يُنشأ بلا سباق إدراج**.
+
+    `get_or_create` تحت `select_for_update` لا يقفل صفّاً غير موجود: أوّلُ
+    دفعتين متزامنتين في السنة يحاول كلٌّ منهما الإدراج، فيفوز أحدُهما ويأخذ
+    الآخرُ `IntegrityError` (500) بدل أن يتبع الأوّل. فيُلتقط العطلُ في معاملةٍ
+    داخليةٍ ويُعاد القفلُ على الصفّ الذي أنشأه الآخر.
+    """
+    sequence = (
+        FeeReceiptSequence.objects
+        .select_for_update()
+        .filter(tenant=tenant, year=year)
+        .first()
+    )
+    if sequence is not None:
+        return sequence
+    try:
+        with transaction.atomic():
+            return FeeReceiptSequence.objects.create(
+                tenant=tenant, year=year, last_number=0,
+            )
+    except IntegrityError:
+        # الصفُّ أُنشئ بين القراءة والإدراج — يُقفل الآن ويُقرأ رقمُه.
+        return FeeReceiptSequence.objects.select_for_update().get(
+            tenant=tenant, year=year,
+        )
+
+
 def next_receipt_number(tenant, *, year) -> str:
     """الرقمُ التالي `{year}-{n:05d}` من **عدّادٍ مقفول** لا من `MAX+1`.
 
@@ -401,20 +468,28 @@ def next_receipt_number(tenant, *, year) -> str:
     والزيادةُ تُكتب فيها؛ والبديلان (`MAX`/`count`) يقرآن لقطةً قديمة تحت
     التزامن فيكرّران رقماً أو يُحدثان فجوة. ولا يُعاد رقمُ إشعارٍ قائم أبداً.
     """
-    sequence, _created = FeeReceiptSequence.objects.select_for_update().get_or_create(
-        tenant=tenant,
-        year=year,
-        defaults={"last_number": 0},
-    )
+    sequence = _locked_sequence(tenant, year)
     sequence.last_number += 1
     sequence.save(update_fields=["last_number"])
     return f"{year}-{sequence.last_number:05d}"
 
 
 # ── التخصيص ─────────────────────────────────────────────────────────────────
-def _open_drafts(tenant, client_id, *, lock=True):
-    """مسودّاتُ الزبون المعتمدة التي بقي عليها شيء — **الأقدمُ أوّلَاً**."""
-    queryset = (
+def _open_drafts(tenant, client_id):
+    """مسودّاتُ الزبون المعتمدة التي بقي عليها شيء — **الأقدمُ أوّلَاً**.
+
+    **والقفلُ بترتيب المعرّف** ثم القراءةُ بترتيب التقادُم: القفلُ يخصّ الصفوف لا
+    ترتيبَ التخصيص، وكلُّ مسارٍ يقفل مسودّات الزبون بالـ`pk` (وهذا ومسارُ
+    `_apply_explicit_allocations` معاً) فلا يقفل أحدُهما صفًّا ينتظره الآخر.
+    """
+    list(
+        FeeDraft.objects.select_for_update().filter(
+            tenant=tenant,
+            client_id=client_id,
+            status=FEE_DRAFT_STATUS_APPROVED,
+        ).order_by("pk"),
+    )  # قفلُ صفوف الزبون — بالـ`pk` لا بترتيب التقادُم
+    return list(
         with_invoice_totals(
             FeeDraft.objects.filter(
                 tenant=tenant,
@@ -425,9 +500,6 @@ def _open_drafts(tenant, client_id, *, lock=True):
         .filter(remaining__gt=0)
         .order_by(*DRAFT_AGING_ORDER)
     )
-    if lock:
-        queryset = queryset.select_for_update()
-    return list(queryset)
 
 
 def _allocate(payment, draft, amount) -> FeePaymentAllocation:
@@ -448,31 +520,42 @@ def _payment_free_amount(payment) -> Decimal:
 
 
 def _allocate_oldest(payment) -> int:
-    """يخصّص المتاح من الدفعة على أقدم المسودّات — ويُرجع عددَ الصفوف المكتوبة."""
-    free = _payment_free_amount(payment)
-    if free <= 0:
-        return 0
-    written = 0
-    for draft in _open_drafts(payment.tenant_id, payment.client_id):
+    """يخصّص المتاح من الدفعة على أقدم المسودّات — ويُرجع عددَ الصفوف المكتوبة.
+
+    **يقفل صفَّ الدفعة أوّلاً**: اعتمادان متزامنان لزبونٍ له رصيدٌ كانا يقرآن
+    المتاح نفسَه فيخصّصانه مرّتين، فيتجاوز مجموعُ التخصيصات مبلغَ الدفعة. والقفلُ
+    قبل القراءة يجعل الثاني يرى ما كتبه الأوّل.
+    """
+    with transaction.atomic():
+        locked = FeePayment.objects.select_for_update().get(pk=payment.pk)
+        free = _payment_free_amount(locked)
         if free <= 0:
-            break
-        amount = _money(min(draft.remaining, free))
-        if amount <= 0:
-            continue
-        _allocate(payment, draft, amount)
-        free = _money(free - amount)
-        written += 1
-    return written
+            return 0
+        written = 0
+        for draft in _open_drafts(locked.tenant_id, locked.client_id):
+            if free <= 0:
+                break
+            amount = _money(min(draft.remaining, free))
+            if amount <= 0:
+                continue
+            _allocate(locked, draft, amount)
+            free = _money(free - amount)
+            written += 1
+        return written
 
 
 def _apply_explicit_allocations(payment, allocations) -> int:
     """تخصيصُ الموظف الصريح — يُتحقَّق كاملاً قبل كتابة أول صفّ.
 
     الشروطُ: مبلغٌ موجب، والمسودّةُ **معتمدةٌ وله وللمكتب نفسه**، والتخصيصُ لا
-    يتجاوز متبقّيها، والمجموعُ لا يتجاوز مبلغَ الدفعة. والمسودّةُ تُقرأ بقفلٍ
-    (`select_for_update`) فلا يمرّ تخصيصان متزامنان على المتبقّي نفسه.
+    يتجاوز متبقّيها، والمجموعُ لا يتجاوز مبلغَ الدفعة.
+
+    **والأقفالُ بترتيب المعرّف لا بترتيب الحمولة**: `apply_open_credit` يقفل
+    مسودّات الزبون في مسارٍ آخر؛ ترتيبٌ مختلفٌ هنا يفتح بابَ جمودٍ (كلٌّ يقفل
+    صفًّا ينتظره الآخر). فتُجمع المعرّفاتُ وتُقفل مرّةً واحدةً مرتَّبةً، ثم
+    تُطبَّق المبالغ بترتيب الحمولة.
     """
-    prepared: list[tuple[object, Decimal]] = []
+    requested: list[tuple[int, Decimal]] = []
     seen: set[int] = set()
     intended = Decimal("0.00")
     for raw in allocations:
@@ -480,33 +563,39 @@ def _apply_explicit_allocations(payment, allocations) -> int:
         amount = _clean_positive_amount(raw.get("amount"), field="allocations")
         if draft_id in seen:
             raise ValidationError({"allocations": "مسودّةٌ مكرَّرةٌ في التخصيصات."})
-        draft = (
-            FeeDraft.objects
-            .select_for_update()
-            .filter(
-                pk=draft_id,
-                tenant=payment.tenant_id,
-                client_id=payment.client_id,
-                status=FEE_DRAFT_STATUS_APPROVED,
-            )
-            .first()
-        )
-        if draft is None:
-            # 400 لا 404: الرسالةُ واحدةٌ للمسودّة الغائبة ولمسودّةِ غيرِك، فلا
-            # يقول الردُّ إنّ مسودّةً بهذا المعرّف موجودةٌ عند مكتبٍ آخر.
-            raise ValidationError({"allocations": "مسودّةٌ غير موجودة أو غير معتمدة."})
-        remaining = invoice_summary(draft).remaining
-        if amount > remaining:
-            raise ValidationError({
-                "allocations": "المبلغُ يتجاوز المتبقّي على المسودّة.",
-            })
         seen.add(draft_id)
         intended += amount
-        prepared.append((draft, amount))
+        requested.append((draft_id, amount))
     if intended > _money(payment.amount):
         raise ValidationError({
             "allocations": "مجموعُ التخصيصات يتجاوز مبلغَ الدفعة.",
         })
+    drafts = {
+        draft.pk: draft
+        for draft in (
+            with_invoice_totals(
+                FeeDraft.objects.select_for_update().filter(
+                    pk__in=sorted(seen),
+                    tenant=payment.tenant_id,
+                    client_id=payment.client_id,
+                    status=FEE_DRAFT_STATUS_APPROVED,
+                ),
+            )
+            .order_by("pk")
+        )
+    }
+    if len(drafts) != len(seen):
+        # 400 لا 404: الرسالةُ واحدةٌ للمسودّة الغائبة ولمسودّةِ غيرِك، فلا
+        # يقول الردُّ إنّ مسودّةً بهذا المعرّف موجودةٌ عند مكتبٍ آخر.
+        raise ValidationError({"allocations": "مسودّةٌ غير موجودة أو غير معتمدة."})
+    prepared: list[tuple[object, Decimal]] = []
+    for draft_id, amount in requested:
+        draft = drafts[draft_id]
+        if amount > _money(draft.remaining):
+            raise ValidationError({
+                "allocations": "المبلغُ يتجاوز المتبقّي على المسودّة.",
+            })
+        prepared.append((draft, amount))
     for draft, amount in prepared:
         _allocate(payment, draft, amount)
     return len(prepared)
@@ -519,9 +608,12 @@ def create_payment(
 ):
     """دفعةٌ جديدة: رقمُ إشعارٍ مقفول، ثم تخصيصُ الموظف أو الأقدمُ أوّلَاً.
 
-    - بلا `allocations` ⇒ يُخصَّص على أقدم المسودّات المعتمدة حتى ينفد المبلغ،
-      وما بقي **رصيدٌ دائن** (لا صفَّ له — مشتقٌّ من `credit`).
-    - ومعها ⇒ هي المرجعُ وحدها، وما لم يُخصَّص منها رصيدٌ دائنٌ كذلك.
+    - **`allocations=None` (الحقلُ غائب أو `null`)** ⇒ يُخصَّص على أقدم المسودّات
+      المعتمدة حتى ينفد المبلغ، وما بقي رصيدٌ دائن.
+    - **`allocations=[]` (قائمةٌ فارغة)** ⇒ **لا تخصيصَ إطلاقاً**: دفعةٌ مقدَّمةٌ
+      صريحةٌ تبقى رصيداً دائناً خالصاً ولو كانت للزبون فواتيرُ مفتوحة. ولو عادت
+      إلى «الأقدم أولاً» لما أمكن تسجيلُ دفعةٍ مقدَّمةٍ أصلاً.
+    - **ومع قائمةٍ غير فارغة** ⇒ هي المرجعُ وحدها، وما لم يُخصَّص منها رصيدٌ دائن.
     - **`paid_at` تاريخُ الرقم وسنته**: الإشعارُ يتبع سنةَ الدفع لا سنةَ الإدخال.
     """
     services.assert_client_of_tenant(tenant, client)
@@ -546,10 +638,10 @@ def create_payment(
             receipt_number=next_receipt_number(tenant, year=paid_at.year),
             created_by=actor,
         )
-        if allocations:
-            _apply_explicit_allocations(payment, allocations)
-        else:
+        if allocations is None:
             _allocate_oldest(payment)
+        elif allocations:
+            _apply_explicit_allocations(payment, allocations)
     return payment
 
 
@@ -560,7 +652,7 @@ def apply_open_credit(tenant, clients) -> int:
     لا يُخصَّص يبقى «له عندنا» إلى الأبد، وتخصيصُه الآن يجعل الكشفَ صفوفاً
     تُقرأ. والقراءةُ تسبق الحلقة فحسابُ الأرصدة استعلامٌ واحدٌ ثابتُ الكلفة.
     """
-    client_ids = [getattr(client, "pk", client) for client in clients]
+    client_ids = _client_ids(clients)
     if not client_ids:
         return 0
     owed = list(
@@ -674,11 +766,11 @@ def allocation_row(allocation, *, masked) -> dict:
     return _mask(data) if masked else data
 
 
-def payment_row(payment, *, masked, due=None) -> dict:
+def payment_row(payment, *, masked, client_due=None) -> dict:
     """سطرُ دفعة — ومعه **رصيدُ الزبون الدائنُ وما عليه** من `client_due` وحدها.
 
-    `due` يُمرَّر من حمولةٍ مجمَّعة (`client_dues_payload`) حين تُقرأ قائمةٌ، فلا
-    استعلامان لكل صفّ؛ ويُحسب هنا للصفّ المفرد.
+    `client_due` هو **حمولةُ الزبون** (`client_dues_payload`) لا مبلغُ `due`: تُمرَّر
+    مجمَّعةً حين تُقرأ قائمةٌ فلا استعلامان لكل صفّ، وتُحسب للصفّ المفرد حين تغيب.
     """
     data = {
         "id": payment.pk,
@@ -695,8 +787,8 @@ def payment_row(payment, *, masked, due=None) -> dict:
             allocation_row(allocation, masked=masked)
             for allocation in payment.allocations.all()
         ],
-        "due": None if due is None else due.get("due"),
-        "credit": None if due is None else due.get("credit"),
+        "due": None if client_due is None else client_due.get("due"),
+        "credit": None if client_due is None else client_due.get("credit"),
     }
     return _mask(data) if masked else data
 
@@ -731,15 +823,17 @@ def payments_payload(tenant, *, user, queryset=None) -> list[dict]:
     """قائمةُ دفعاتٍ بحمولةٍ واحدة: القناعُ والأرصدةُ تُحسب مرّةً لا لكل صفّ."""
     masked = amounts_masked(tenant, user)
     rows = list(queryset if queryset is not None else visible_payments(tenant, user))
-    dues = client_dues_payload(tenant, [row.client for row in rows], user=user)
+    dues = client_dues_payload(
+        tenant, [row.client for row in rows], user=user, masked=masked,
+    )
     return [
-        payment_row(row, masked=masked, due=dues.get(row.client_id))
+        payment_row(row, masked=masked, client_due=dues.get(row.client_id))
         for row in rows
     ]
 
 
-def paid_payment_row(tenant, payment, *, user) -> dict:
-    """سطرُ دفعةٍ واحدة بعد إنشائها — والمعرَّفُ يُقرأ من مصدر الرؤية نفسه."""
+def created_payment_row(tenant, payment, *, user) -> dict:
+    """سطرُ دفعةٍ أُنشئت للتوّ — يُقرأ من مصدر الرؤية نفسه قبل الردّ."""
     row = visible_payments(tenant, user).get(pk=payment.pk)
     return payments_payload(tenant, user=user, queryset=[row])[0]
 
@@ -778,12 +872,14 @@ def _state_filter(state):
     """شرطُ الحالة **في SQL** على التعليق المشتقّ — لا تصفيةً في بايثون.
 
     `paid` = لا متبقّي، و`unpaid` = لم يُخصَّص منه شيء، و`partial` بينهما.
+    **و`unpaid` يشترط متبقّياً موجباً**: مسودّةٌ إجماليُها صفر `0 = 0` فتُطابق
+    «لم يُخصَّص منها شيء» و`paid` معاً، وهي مسدَّدةٌ بالمعنى (`remaining = 0`).
     """
     if state == INVOICE_STATE_PAID:
         return Q(remaining__lte=0)
     if state == INVOICE_STATE_PARTIAL:
         return Q(remaining__gt=0) & Q(remaining__lt=F("total"))
-    return Q(remaining=F("total"))
+    return Q(remaining=F("total")) & Q(remaining__gt=0)
 
 
 def _page(queryset, params) -> dict:
@@ -861,11 +957,14 @@ def ledger_payload(tenant, *, user, params) -> dict:
         for row in invoice_page["results"]
     ]
     payment_dues = client_dues_payload(
-        tenant, [row.client for row in payment_page["results"]], user=user,
+        tenant,
+        [row.client for row in payment_page["results"]],
+        user=user,
+        masked=masked,
     )
     payment_page["results"] = [
         payment_row(
-            row, masked=masked, due=payment_dues.get(row.client_id),
+            row, masked=masked, client_due=payment_dues.get(row.client_id),
         )
         for row in payment_page["results"]
     ]
@@ -875,6 +974,8 @@ def ledger_payload(tenant, *, user, params) -> dict:
         # «اللي عليه» للزبون المفلتر — من الدالّة الواحدة، ومقيّدةً بالرؤية.
         "client_due": (
             None if client is None
-            else client_dues_payload(tenant, [client], user=user)[client.pk]
+            else client_dues_payload(
+                tenant, [client], user=user, masked=masked,
+            )[client.pk]
         ),
     }

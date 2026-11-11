@@ -256,8 +256,9 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         queryset = self.filter_queryset(self.get_queryset())
         page = self.paginate_queryset(queryset)
         clients = list(page) if page is not None else list(queryset)
-        # نظامُ كل صفٍّ و«اللي عليه» يُبنيان استعلامين لكل الصفحة، ويُمرَّران في
-        # `context` صراحةً — لا سمةً على الصنف تبقى بين الطلبات.
+        # نظامُ كل صفٍّ و«اللي عليه» يُبنيان بضعةَ استعلاماتٍ ثابتةٍ للصفحة
+        # (لا استعلامين لكل زبون)، ويُمرَّران في `context` صراحةً — لا سمةً على
+        # الصنف تبقى بين الطلبات.
         context = {
             **self.get_serializer_context(),
             "tax_systems": services.resolve_setting_for_clients(
@@ -2379,9 +2380,13 @@ class OfficeFeeDraftViewSet(OfficeModuleViewSet):
     # `remaining` في القراءة، والدفعةُ والمسودّةُ لا تتغيّران.
     @action(detail=True, methods=["post"], url_path="write-off")
     def write_off(self, request, pk=None):
-        """«اشطُب المتبقّي» — لصاحب المكتب وحده، بسببٍ مكتوبٍ إلزاميّ."""
+        """«اشطُب المتبقّي» — **دورُ صاحب المكتب وحده**، بسببٍ مكتوبٍ إلزاميّ.
+
+        ولا مفتاحَ كتابةٍ فوقه: البوابةُ الوحيدةُ هي `payments.write_off_fee_draft`
+        (`user_tenant_role == MANAGER_ROLE`) كما في المواصفة — مديرُ المكتب يملك
+        مفتاحَ الكتابة ولا يشطب.
+        """
         draft = self.get_object()
-        self.require_write()
         serializer = FeeWriteOffWriteSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
         data = serializer.validated_data
@@ -2514,9 +2519,11 @@ class OfficeFeePaymentViewSet(OfficeModuleViewSet):
             paid_at=data["paid_at"],
             note=data.get("note", ""),
             actor=request.user,
-            allocations=data.get("allocations") or None,
+            # `None` = «الأقدم أولاً»، و`[]` = لا تخصيصَ (دفعةٌ مقدَّمة) — لا
+            # يجمعهما `or None` فتُلغى القائمةُ الفارغة.
+            allocations=data.get("allocations"),
         )
-        row = payments.paid_payment_row(
+        row = payments.created_payment_row(
             self.tenant, payment, user=request.user,
         )
         return Response(row, status=status.HTTP_201_CREATED)

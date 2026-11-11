@@ -17,6 +17,7 @@ credit`) — لا يُقصّ إلى صفر. فالدفعةُ الزائدة 700 
 """
 import datetime
 from decimal import Decimal
+from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import IntegrityError, transaction
@@ -199,6 +200,29 @@ class CreditIsDerivedTest(PaymentsTestCase):
             payments.invoice_summary(later).state, "partial",
         )
 
+    def test_approve_all_consumes_the_credit_of_the_invoices_it_approves(self):
+        """حذفُ نداء `apply_open_credit` من «اعتمد الكل» يُسقط هذا الاختبار."""
+        client = self.make_client()
+        first = self.make_draft(client, "650", month=3)
+        payment = self.payment_of(client, "700.00")
+        later = self.make_draft(client, "300", month=4, status=FeeDraft.STATUS_DRAFT)
+
+        res = self.client.post(
+            f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+        payment.refresh_from_db()
+        self.assertEqual(
+            self.allocations_of(payment),
+            {first.pk: Decimal("650.00"), later.pk: Decimal("50.00")},
+            "«اعتمد الكل» لم يستهلك الرصيدَ الدائن على المسودّة المعتمدة",
+        )
+        self.assertEqual(
+            payments.client_due(self.tenant, client).credit, Decimal("0.00"),
+        )
+        self.assertEqual(payments.invoice_summary(later).state, "partial")
+
 
 class DueExcludesUnapprovedTest(PaymentsTestCase):
     def test_draft_and_cancelled_invoices_do_not_enter_the_due(self):
@@ -218,6 +242,31 @@ class DueExcludesUnapprovedTest(PaymentsTestCase):
             [row["month"] for row in listed.data["invoices"]["results"]], [3],
             "كشفُ الحساب عرض مسودّةً أو ملغاة",
         )
+
+    def test_automatic_allocation_skips_draft_and_cancelled_invoices(self):
+        """«الأقدمُ أوّلَاً» على المعتمدة وحدها — لا يخصّص على مسودّةٍ لم تُعتمد."""
+        client = self.make_client()
+        pending = self.make_draft(client, "300", month=3, status=FeeDraft.STATUS_DRAFT)
+        cancelled = self.make_draft(
+            client, "400", month=4, status=FeeDraft.STATUS_CANCELLED,
+        )
+        approved = self.make_draft(client, "500", month=5)
+
+        payment = self.payment_of(client, "600.00")
+
+        self.assertEqual(
+            self.allocations_of(payment), {approved.pk: Decimal("500.00")},
+            "الأقدمُ أوّلَاً يجب أن يتخطّى غير المعتمدة",
+        )
+        self.assertEqual(
+            payments.invoice_summary(pending).remaining, Decimal("300.00"),
+        )
+        self.assertEqual(
+            payments.invoice_summary(cancelled).remaining, Decimal("400.00"),
+        )
+        due = payments.client_due(self.tenant, client)
+        self.assertEqual(due.due, Decimal("-100.00"))
+        self.assertEqual(due.credit, Decimal("100.00"))
 
     def test_an_allocation_on_a_draft_invoice_is_refused(self):
         client = self.make_client()
@@ -254,6 +303,47 @@ class ExplicitAllocationTest(PaymentsTestCase):
         self.assertEqual(due.credit, Decimal("50.00"))
         self.assertEqual(due.due, Decimal("250.00"))
         self.assertEqual(payments.invoice_summary(march).remaining, Decimal("300.00"))
+
+    def test_an_empty_list_is_a_pure_credit_advance_and_null_falls_back_to_oldest(self):
+        """«الحقلُ غائب/`null`» ≠ «قائمةٌ فارغة» — الثانيةُ دفعةٌ مقدَّمةٌ صريحة."""
+        client = self.make_client()
+        draft = self.make_draft(client, "300")
+
+        advance = self.post_payment({
+            "client": client.pk, "amount": "100.00", "method": "cash",
+            "paid_at": "2026-05-01", "allocations": [],
+        })
+        self.assertEqual(advance.status_code, 201, advance.content)
+        self.assertEqual(FeePaymentAllocation.objects.count(), 0, "[] خصّصت رغم منعه")
+        due = payments.client_due(self.tenant, client)
+        self.assertEqual(due.credit, Decimal("100.00"))
+        self.assertEqual(due.due, Decimal("200.00"))
+        self.assertEqual(
+            payments.invoice_summary(draft).remaining, Decimal("300.00"),
+            "الفاتورةُ المفتوحة لم تُمسّ بدفعةٍ مقدَّمة",
+        )
+
+        explicit_null = self.post_payment({
+            "client": client.pk, "amount": "50.00", "method": "cash",
+            "paid_at": "2026-05-02", "allocations": None,
+        })
+        self.assertEqual(explicit_null.status_code, 201, explicit_null.content)
+        self.assertEqual(FeePaymentAllocation.objects.count(), 1, "`null` لم يخصّص")
+        self.assertEqual(
+            self.allocations_of(FeePayment.objects.get(pk=explicit_null.data["id"])),
+            {draft.pk: Decimal("50.00")},
+        )
+
+        absent = self.post_payment({
+            "client": client.pk, "amount": "25.00", "method": "cash",
+            "paid_at": "2026-05-03",
+        })
+        self.assertEqual(absent.status_code, 201, absent.content)
+        self.assertEqual(
+            self.allocations_of(FeePayment.objects.get(pk=absent.data["id"])),
+            {draft.pk: Decimal("25.00")},
+            "غيابُ الحقل يجب أن يعود إلى «الأقدم أولاً»",
+        )
 
     def test_allocations_above_the_payment_or_the_remaining_are_refused(self):
         client = self.make_client()
@@ -314,6 +404,24 @@ class WriteOffTest(PaymentsTestCase):
         self.assertEqual(decimal_of(payment.amount), Decimal("100.00"))
         self.assertEqual(decimal_of(draft.total), Decimal("300.00"))
         self.assertEqual(draft.status, FeeDraft.STATUS_APPROVED)
+
+    def test_the_write_off_lowers_due_but_not_the_paid_total(self):
+        """`paid_total` هو **المدفوع فعلاً** لا المشطوب: الشطبُ يخفض `due` وحده."""
+        client = self.make_client()
+        draft = self.make_draft(client, "300")
+        self.payment_of(client, "100.00")
+        res = self.client.post(
+            f"{DRAFTS}{draft.pk}/{WRITE_OFF}",
+            {"amount": "50.00", "reason": "تنازلٌ جزئيّ"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
+        due = payments.client_due(self.tenant, client)
+        self.assertEqual(due.invoices_total, Decimal("300.00"))
+        self.assertEqual(due.paid_total, Decimal("100.00"), "الشطبُ صار مدفوعاً")
+        self.assertEqual(due.credit, Decimal("0.00"))
+        self.assertEqual(due.due, Decimal("150.00"), "300 − 100 − 50")
 
     def test_a_write_off_needs_a_reason_and_a_positive_amount(self):
         client = self.make_client()
@@ -393,10 +501,14 @@ class ReceiptNumberTest(PaymentsTestCase):
             )
 
     def test_the_counter_does_not_read_the_maximum_stored_receipt(self):
-        """لو صار الرقم `MAX+1` لأعطى 09778 — العدّادُ المقفول وحده يعطي 00002."""
+        """`MAX+1` يعطي 09778 و`count+1` يعطي 00002 — العدّادُ وحده يعطي 00006.
+
+        و`last_number=5` **والدفعةُ المزروعةُ واحدة**: لو صار الرقمُ `count+1`
+        لطابق 00002 فتسقط القائمةُ، و`MAX+1` يعطي 09778.
+        """
         client = self.make_client()
         FeeReceiptSequence.objects.create(
-            tenant=self.tenant, year=2026, last_number=1,
+            tenant=self.tenant, year=2026, last_number=5,
         )
         FeePayment.objects.create(
             tenant=self.tenant,
@@ -413,9 +525,47 @@ class ReceiptNumberTest(PaymentsTestCase):
             actor=self.owner,
         )
 
-        self.assertEqual(payment.receipt_number, "2026-00002")
+        self.assertEqual(payment.receipt_number, "2026-00006")
         sequence = FeeReceiptSequence.objects.get(tenant=self.tenant, year=2026)
-        self.assertEqual(sequence.last_number, 2)
+        self.assertEqual(sequence.last_number, 6)
+
+
+    def test_the_first_creation_race_recovers_instead_of_raising(self):
+        """أوّلُ دفعتين متزامنتين في سنة: القراءةُ لا ترى الصفَّ فيُنشأ ويُصطدم.
+
+        `get_or_create` تحت `select_for_update` لا يقفل صفاً غير موجود؛ فالمسارُ
+        الصحيحُ: `IntegrityError` على الإدراج ⇒ إعادةُ قفلٍ على صفّ الآخر. يُحاكى
+        السبق بجعل القراءة الأولى لا ترى الصفَّ الموجود فعلاً.
+        """
+        client = self.make_client()
+        FeeReceiptSequence.objects.create(
+            tenant=self.tenant, year=2026, last_number=4,
+        )
+        real_select = FeeReceiptSequence.objects.select_for_update
+        calls = {"count": 0}
+
+        def blind_first_read(*args, **kwargs):
+            queryset = real_select(*args, **kwargs)
+            if calls["count"] == 0:
+                calls["count"] += 1
+                return queryset.none()  # الصفُّ «لم يُنشأ بعد» في نظرنا
+            return queryset
+
+        with mock.patch.object(
+            FeeReceiptSequence.objects, "select_for_update", blind_first_read,
+        ):
+            payment = payments.create_payment(
+                self.tenant, client,
+                amount="10.00", method="cash", paid_at=datetime.date(2026, 5, 1),
+                actor=self.owner,
+            )
+
+        self.assertEqual(payment.receipt_number, "2026-00005", "لم يُستأنف العدّ")
+        self.assertEqual(calls["count"], 1, "الفرعُ المحاكى لم يُنفَّذ أصلاً")
+        self.assertEqual(
+            FeeReceiptSequence.objects.filter(tenant=self.tenant, year=2026).count(), 1,
+            "الصفُّ تكرّر بدل استئنافه",
+        )
 
 
 class PaymentListTest(PaymentsTestCase):
@@ -491,6 +641,7 @@ class MaskTest(PaymentsTestCase):
         clients = self.client.get(CLIENTS, **self.headers())
         self.assertEqual(clients.status_code, 200, clients.content)
         self.assertIsNone(clients.data[0]["due"])
+        self.assertIsNone(clients.data[0]["tax_note"])
 
         ledger = self.client.get(LEDGER, {"client": client.pk}, **self.headers())
         self.assertEqual(ledger.status_code, 200, ledger.content)
@@ -639,6 +790,22 @@ class LedgerTest(PaymentsTestCase):
             404,
         )
 
+    def test_a_zero_total_invoice_is_paid_and_never_unpaid(self):
+        """`0 = 0` كان يجعلها «غير مدفوعة» و«مدفوعة» معاً — والحالةُ من المتبقّي."""
+        client = self.make_client()
+        zero = self.make_draft(client, "0", month=6)
+
+        paid_res = self.client.get(LEDGER, {"state": "paid"}, **self.headers())
+        self.assertEqual(paid_res.status_code, 200, paid_res.content)
+        self.assertIn(
+            zero.pk, [row["id"] for row in paid_res.data["invoices"]["results"]],
+        )
+        unpaid_res = self.client.get(LEDGER, {"state": "unpaid"}, **self.headers())
+        self.assertNotIn(
+            zero.pk, [row["id"] for row in unpaid_res.data["invoices"]["results"]],
+            "مسودّةٌ إجماليُها صفر ظهرت «غير مدفوعة»",
+        )
+
     def test_pagination_slices_the_queryset(self):
         client = self.make_client()
         for index in range(3):
@@ -658,10 +825,12 @@ class LedgerTest(PaymentsTestCase):
 
 
 class TaxNoteTest(PaymentsTestCase):
-    """سطرُ العلم الضريبيّ: مجموعُ الالتزامات غير المدفوعة — **خارجَ «اللي عليه»**.
+    """سطرُ العلم الضريبيّ: مجموعُ الالتزامات **التي على الزبون** — خارجَ `due`.
 
     `Obligation` لا يحمل حقلاً خاصّاً بمبلغ ضريبة؛ فالسطرُ مجموعُ `amount` في
-    الالتزامات غير المعلَّمة `client_paid` — ولا حقلَ جديدٌ يُخترَع له.
+    الالتزامات التي على الزبون: غيرُ مدفوعةٍ، **وليست مرتجعاً** («إلنا» لا
+    «علينا»)، **وليست «مش لازم»** — بثوابت النموذج كما في
+    `appointments._period_unpaid_total`.
     """
 
     def test_the_tax_note_sums_unpaid_obligations_and_stays_out_of_the_due(self):
@@ -671,6 +840,16 @@ class TaxNoteTest(PaymentsTestCase):
         self._obligation(client, client_service, task, "120", client_paid=False)
         self._obligation(client, client_service, task, "80", client_paid=False)
         self._obligation(client, client_service, task, "50", client_paid=True)
+        # مرتجعٌ 5,000: «إلنا» لا «علينا» — جمعُه كان يجعل العلم 6,000 كذباً.
+        self._obligation(
+            client, client_service, task, "5000", client_paid=False,
+            direction=Obligation.DIRECTION_REFUND,
+        )
+        # «مش لازم»: ليست مستحقّةً أصلاً.
+        self._obligation(
+            client, client_service, task, "700", client_paid=False,
+            status=Obligation.STATUS_NOT_REQUIRED,
+        )
 
         self.assertEqual(
             payments.client_due_tax_note(self.tenant, client), Decimal("200.00"),
@@ -682,6 +861,13 @@ class TaxNoteTest(PaymentsTestCase):
 
         preview = payments.client_due_payload(self.tenant, client, user=self.owner)
         self.assertEqual(decimal_of(preview["tax_note"]), Decimal("200.00"))
+
+        # والسطرُ يُعرض **تحت** «اللي عليه» على صفّ الزبون نفسه لا في الكشف وحده.
+        listed = self.client.get(CLIENTS, **self.headers())
+        self.assertEqual(listed.status_code, 200, listed.content)
+        row = next(item for item in listed.data if item["id"] == client.pk)
+        self.assertEqual(decimal_of(row["due"]), Decimal("300.00"))
+        self.assertEqual(decimal_of(row["tax_note"]), Decimal("200.00"))
 
     def _scaffold(self, client):
         """خدمةُ زبونٍ وشغلةٌ للفترة — سندُ الالتزام الإلزاميّ."""
@@ -703,7 +889,8 @@ class TaxNoteTest(PaymentsTestCase):
         )
         return client_service, task
 
-    def _obligation(self, client, client_service, task, amount, *, client_paid):
+    def _obligation(self, client, client_service, task, amount, *, client_paid,
+                    direction="", status=None):
         rule = OfficeCustomRule.objects.create(
             tenant=self.tenant, name=f"قاعدة {amount}", service=client_service.service,
             cadence="monthly", rule_kind="end_of_period",
@@ -724,5 +911,7 @@ class TaxNoteTest(PaymentsTestCase):
             actual_deadline=datetime.date(2026, 4, 15),
             internal_deadline=datetime.date(2026, 4, 10),
             amount=Decimal(amount),
+            direction=direction,
+            status=status or Obligation.STATUS_PENDING,
             client_paid=client_paid,
         )
