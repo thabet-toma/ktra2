@@ -412,6 +412,11 @@ def generate_fee_drafts(tenant, *, day) -> dict:
                     transaction.set_rollback(True)
                     continue
         created += 1
+    if created:
+        # عدّادُ ترقيم السنة يُهيَّأ **مع أوّل توليدٍ** لا مع أوّل اعتماد: رقمُ
+        # الفاتورة يبقى من `00001` بلا فجوة، وأوّلُ اعتمادٍ لا يدفع كلفةَ إنشاء
+        # صفٍّ في مسارٍ آخر (وكلفةُ التوليد تبقى ثابتةً كما يقيسها اختبارها).
+        _fee_invoices_module().ensure_sequence(tenant, year=month_start.year)
     return {
         "created_drafts": created,
         "created_alerts": _raise_pending_alerts(tenant, day=day),
@@ -515,8 +520,24 @@ def _locked_draft(draft):
     )
 
 
+def _fee_invoices_module():
+    """وحدةُ فاتورة الأتعاب (#282/أ٢) — **استيرادٌ مؤجَّل** يفكّ دورةً حقيقيّة.
+
+    `fee_invoices` يستورد `fees` في أعلاه (القناعُ وحسابُ المبلغ)، فاستيرادُه هنا
+    في الأعلى يدير الدورةَ عند أوّل تحميل. والنداءُ وقتَ التوليد والاعتماد فقط.
+    """
+    from accounting_office import fee_invoices
+
+    return fee_invoices
+
+
 def approve_fee_draft(draft, *, actor, note=""):
-    """`draft → approved` مع مَن اعتمدها ومتى وملاحظتَه — والانتقالُ من المسودّة وحدها."""
+    """`draft → approved` مع مَن اعتمدها ومتى وملاحظتَه — والانتقالُ من المسودّة وحدها.
+
+    **وهنا المكانُ الوحيد الذي تصير فيه المسودّةُ فاتورةً مرقَّمة** (أ٢): تُصدر
+    الورقةُ بعد الاعتماد في المعاملة نفسها (`get_or_create` على المسودّة)، فلا
+    مسودّةَ معتمدةً بلا مستندِ مطالبةٍ ولا اعتمادٌ يعود فيجد ورقةً ناقصة.
+    """
     _assert_approver(draft.tenant, actor)
     with transaction.atomic():
         draft = _locked_draft(draft)
@@ -531,6 +552,7 @@ def approve_fee_draft(draft, *, actor, note=""):
         draft.save(update_fields=[
             "status", "approved_by", "approved_at", "approved_note",
         ])
+        _fee_invoices_module().issue_for_draft(draft, actor=actor)
     return draft
 
 
@@ -562,6 +584,12 @@ def approve_all_fee_drafts(tenant, *, actor, note="") -> list:
             FeeDraft.objects.bulk_update(
                 drafts, ["status", "approved_by", "approved_at", "approved_note"],
             )
+        # **والصفوفُ كلُّها تُصدِر فاتورتَها هنا أيضاً — في المعاملة نفسها**:
+        # «اعتمد الكل» يختم بالقاعدة دفعةً واحدة، فلو لم يُمرّر كلَّ مسودّةٍ على
+        # الإصدار لبقيت مسودّاتٌ معتمدةٌ بلا مستندِ مطالبة — وهو نصفُ العمل.
+        # والنداءُ **دفعةً** لا واحدةً واحدة: كلفةٌ ثابتةٌ لا تكبر بعدد
+        # المسودّات (`issue_for_drafts`)، وفشلُ الإصدار يُسقط الاعتمادَ معه.
+        _fee_invoices_module().issue_for_drafts(drafts, actor=actor)
     return drafts
 
 

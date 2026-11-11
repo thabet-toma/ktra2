@@ -104,6 +104,7 @@ SAMPLE_FIXTURES = {
     "purchase_rfq": "purchase_rfq",
     "stocktake_count": "stocktake_count",
     "payment_notice": "payment_notice",
+    "fee_invoice": "fee_invoice",
 }
 
 
@@ -547,3 +548,42 @@ def make_payment_notice_obligation(env, office_tenant):
 @pytest.fixture
 def payment_notice(make_payment_notice_obligation):
     return make_payment_notice_obligation()
+
+
+@pytest.fixture
+def fee_invoice(office_tenant):
+    """#282/أ٢: فاتورةُ أتعابٍ مرقَّمةٌ لزبون مكتب — عيّنةُ النوع ومادّةُ نطاقه.
+
+    تُبنى من النماذج مباشرةً لا من مسار الاعتماد: هذا الاختبار يقيس **الرابط**
+    (الحمولةُ والورقةُ والنطاق)، ومسارُ الاعتماد مقيسٌ حيث ينتمي
+    (`accounting_office/tests/test_fee_invoices.py`). والمسودّةُ لقطةٌ معتمدةٌ
+    بسطرٍ واحد، والفاتورةُ صادرةٌ رقمها من سلسلتها.
+    """
+    from accounting_office.fee_invoices import issue_for_draft
+    from accounting_office.models import (
+        FeeDraft,
+        FeeDraftLine,
+        OfficeClient,
+        TaxCard,
+    )
+
+    tenant = office_tenant
+    client = OfficeClient.objects.create(
+        tenant=tenant, name="زبون الفاتورة", tax_file_number="44556677",
+    )
+    TaxCard.objects.create(client=client)
+    draft = FeeDraft.objects.create(
+        tenant=tenant,
+        client=client,
+        year=2026,
+        month=3,
+        subtotal=Decimal("1000.00"),
+        total=Decimal("1000.00"),
+        status=FeeDraft.STATUS_APPROVED,
+        approved_at=datetime.datetime(2026, 3, 5, 12, 0, tzinfo=datetime.timezone.utc),
+    )
+    FeeDraftLine.objects.create(
+        tenant=tenant, draft=draft, label="الاشتراك الشهري",
+        amount=Decimal("1000.00"), source="subscription",
+    )
+    return issue_for_draft(draft, day=datetime.date(2026, 3, 5))

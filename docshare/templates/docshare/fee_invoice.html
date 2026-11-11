@@ -1,0 +1,151 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+ورقةُ «فاتورة الأتعاب» (#282/أ٢/١) — صفحةٌ خادمية بلا JavaScript كسائر صفحات
+`docshare`، وقابلةٌ للطباعة من المتصفح (`@media print` في `base.html`).
+
+**وسطرُ النفي ثابتٌ لا إعداد**: «ليست فاتورة ضريبية» / «אינו חשבונית מס» في
+تذييل كل صفحةٍ مرّتين — عنصرٌ مكرِّرٌ بـ`position:fixed` (يعمل في طباعة
+Chrome/Firefox على كل صفحة)، وكتلةُ `@page` بهامشها السفليّ (تعمل في محرّكات
+الطباعة التي تدعم صناديق الهامش). ولا فرعَ هنا يحذفه ولا متغيّرَ يطفئه: القيمةُ
+تصل من `FEE_INVOICE_NOT_TAX_LINES` في النموذج، والقالبُ يضعها ويرسمها.
+
+**والقالبُ لا يحسب مالاً**: المجموعُ ونصيبُ الضريبة والنسبةُ تصل محسوبةً موسومةً
+على الصفّ (`FeeInvoice.total` / `tax_total` / `tax_percent`) — ورقةٌ تُقرأ
+بعملية حسابٍ تُقرأ خطأً بعد تغيير نسبة.
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  /* سطرُ النفي في هامش كل صفحةٍ مطبوعة — وثانيًا في العنصر المكرِّر أدناه. */
+  @page {
+    size: A4;
+    margin: 14mm 12mm 20mm;
+    @bottom-center { content: "{{ not_tax_line }}"; font-size: 9.5pt; color: #64748b; }
+  }
+  .fi-sheet{page-break-after:always}
+  .fi-sheet:last-of-type{page-break-after:auto}
+  .fi-head{border-bottom:2px solid var(--ink); padding-bottom:14px; margin-bottom:16px}
+  .fi-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .fi-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .fi-title{font-size:21px; font-weight:800; margin:14px 0 2px}
+  .fi-copy{display:inline-block; font-size:11.5px; font-weight:800; letter-spacing:.06em;
+           border:1px solid var(--ink); border-radius:6px; padding:1px 10px;
+           margin-bottom:8px}
+  .fi-kind{font-size:12px; color:var(--muted); margin:0}
+  .fi-grid{display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 16px}
+  .fi-card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px; padding:10px 14px}
+  .fi-card h3{margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:700}
+  .fi-row{display:flex; justify-content:space-between; gap:12px; font-size:13px; padding:2px 0}
+  .fi-row span:first-child{color:var(--muted)}
+  .fi-lines{width:100%; border-collapse:collapse; margin:4px 0 0; font-size:13.5px}
+  .fi-lines th,.fi-lines td{border:1px solid var(--line); padding:9px 11px; text-align:right}
+  .fi-lines thead th{background:#f8fafc; font-size:12px; color:var(--muted); font-weight:700}
+  .fi-lines td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+  .fi-totals{margin:14px 0 0; margin-inline-start:auto; width:100%; max-width:360px}
+  .fi-total-row{display:flex; justify-content:space-between; gap:14px;
+                font-size:13.5px; padding:4px 0}
+  .fi-total-row span:first-child{color:var(--muted)}
+  .fi-totals-head{margin:0 0 2px; font-size:12px; color:var(--muted); font-weight:700}
+  .fi-grand{border-top:2px solid var(--ink); margin-top:6px; padding-top:8px;
+            font-size:17px; font-weight:800}
+  .fi-grand span:first-child{color:var(--ink)}
+  .fi-sign{margin-top:26px; display:flex; justify-content:space-between; gap:16px;
+           font-size:12.5px; color:var(--muted)}
+  .fi-sign-box{min-width:180px; border-top:1px solid var(--line); padding-top:6px;
+               text-align:center}
+  .fi-cancel{border:1px solid #fecaca; background:#fef2f2; color:var(--danger);
+             border-radius:10px; padding:8px 14px; font-size:13px; font-weight:700;
+             margin:0 0 14px}
+  /* التذييلُ المكرِّر: يطبع أسفل كل صفحةٍ في المتصفحات التي لا تدعم @page */
+  .fi-foot{position:fixed; bottom:0; left:0; right:0; text-align:center;
+           font-size:10.5px; color:var(--muted); border-top:1px solid var(--line);
+           padding-top:4px; background:var(--paper)}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+{% for copy in copies %}
+<div class="sheet fi-sheet">
+  {% if copy %}<span class="fi-copy">{{ copy }}</span>{% endif %}
+  {% if cancelled %}<p class="fi-cancel">{{ labels.cancelled }}{% if cancel_reason %} — {{ cancel_reason }}{% endif %}</p>{% endif %}
+
+  <div class="fi-head">
+    <p class="fi-org">{{ company.company_name_primary }}</p>
+    {% if company.licensed_dealer_no %}<p class="fi-org-line">{{ labels.registration }}: {{ company.licensed_dealer_no }}</p>{% endif %}
+    {% if company.company_name_sub %}<p class="fi-org-line">{{ labels.trade_name }}: {{ company.company_name_sub }}</p>{% endif %}
+    {% if company.address %}<p class="fi-org-line">{{ labels.address }}: {{ company.address }}</p>{% endif %}
+    {% if company.phone %}<p class="fi-org-line">{{ labels.phone }}: {{ company.phone }}</p>{% endif %}
+  </div>
+
+  <p class="fi-title">{{ title }}</p>
+  {% if kind_label and kind_label != title %}<p class="fi-kind">{{ kind_label }}{% if related_number %} — {{ labels.related }}: {{ related_number }}{% endif %}</p>{% endif %}
+
+  <div class="fi-grid">
+    <div class="fi-card">
+      <h3>{{ labels.number }}</h3>
+      <div class="fi-row"><span>{{ labels.number }}</span><span><strong>{{ number }}</strong></span></div>
+      {% if external_number %}
+      <div class="fi-row"><span>{{ labels.external_number }}</span><span>{{ external_number }}</span></div>
+      {% endif %}
+      <div class="fi-row"><span>{{ labels.issued_on }}</span><span>{{ date|gdate }}</span></div>
+    </div>
+    <div class="fi-card">
+      <h3>{{ labels.client }}</h3>
+      <div class="fi-row"><span>{{ labels.client }}</span><span><strong>{{ client_name }}</strong></span></div>
+      {% if client_tax_file %}
+      <div class="fi-row"><span>{{ labels.client_file }}</span><span>{{ client_tax_file }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+
+  <table class="fi-lines">
+    <thead>
+      <tr>
+        <th>{{ labels.lines_head }}</th>
+        <th style="width:64px">{{ labels.quantity }}</th>
+        <th style="width:74px">{{ labels.unit }}</th>
+        <th style="width:104px">{{ labels.unit_price }}</th>
+        <th style="width:74px">{{ labels.tax_percent }}</th>
+        <th style="width:110px">{{ labels.line_total }}</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for line in lines %}
+      <tr>
+        <td>{{ line.label }}</td>
+        <td class="num">{{ line.quantity|qty }}</td>
+        <td>{{ line.unit }}</td>
+        <td class="num">{{ line.unit_price|money }}</td>
+        <td class="num">{{ line.tax_percent|percent }}</td>
+        <td class="num">{{ line.line_total|money }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="fi-totals">
+    {% if labels.consideration %}<h3 class="fi-totals-head">{{ labels.consideration }}</h3>{% endif %}
+    {% if show_tax %}
+    <div class="fi-total-row"><span>{{ labels.net }}</span><span class="num">{{ net|money }}</span></div>
+    <div class="fi-total-row"><span>{{ labels.tax }} ({{ tax_percent|percent }}%)</span><span class="num">{{ tax_total|money }}</span></div>
+    {% endif %}
+    <div class="fi-total-row fi-grand"><span>{{ labels.gross }}</span><span class="num">{{ total|money }}</span></div>
+  </div>
+
+  <div class="fi-sign">
+    <div class="fi-sign-box">{{ labels.signature }}</div>
+    <div class="fi-sign-box">{{ company.company_name_primary }}</div>
+  </div>
+</div>
+{% endfor %}
+
+{# التذييلُ الثابت: **لا يُطفأ ولا يُحذف** — ورقةٌ بلا نفيٍ تدّعي الرسمية. #}
+<p class="fi-foot">{{ not_tax_line }}</p>
+{% endblock %}

@@ -802,3 +802,69 @@ class FeeDraftRowSerializer(serializers.Serializer):
     approved_at = serializers.CharField(read_only=True, allow_null=True)
     approved_note = serializers.CharField(read_only=True)
     lines = serializers.ListField(child=serializers.DictField(), read_only=True)
+
+
+# ── فاتورة الأتعاب (#282، أ٢/١) ──────────────────────────────────────────────
+#
+# **الحقولُ الكتابيةُ ثلاثةٌ لا أكثر**: سببُ الإلغاء، ومبلغُ التصحيح وسببُه،
+# ومبلغُ التكميلية وسببُها. ولا مُسلسِلَ إنشاءٍ: الفاتورةُ تُصدَر بالاعتماد وحده
+# (`fees.approve_fee_draft`)، و`POST` على الجمع 405.
+class FeeInvoiceCancelSerializer(serializers.Serializer):
+    """سببُ الإلغاء اختياريّ — والتاريخُ ومَن ألغى يكتبهما الخادم."""
+
+    reason = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
+
+
+class FeeInvoiceCreditNoteSerializer(serializers.Serializer):
+    """إشعارٌ دائن: مبلغٌ موجبٌ ≤ إجمالي الفاتورة، وسببٌ **إلزاميّ**.
+
+    و«إشعارٌ بلا سبب» ورقةٌ لا تقول شيئاً: النقصُ يُفسَّر أو يُرفض، والنفيُ
+    وحده ليس بياناً محاسبياً (م.12 من تعليمات 25/2025).
+    """
+
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    reason = serializers.CharField(allow_blank=False, max_length=300)
+
+
+class FeeInvoiceSupplementarySerializer(serializers.Serializer):
+    """فاتورةٌ تكميليةٌ للنقص: مبلغٌ موجبٌ وسببٌ اختياريّ."""
+
+    amount = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+    reason = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
+
+
+class FeeInvoiceRowSerializer(serializers.Serializer):
+    """شكلُ فاتورةٍ كما تخرج — **قراءةٌ وحدها**، ومبالغُها تُقنَّع في الخدمة.
+
+    `tax_total` مسجَّلٌ في `FEE_AMOUNT_KEYS` كـ`total`: من لا يرى المبالغ يقرأ
+    `null` في الاثنين وفي كل سطرٍ تحتهما.
+    """
+
+    id = serializers.IntegerField(read_only=True)
+    number = serializers.CharField(read_only=True)
+    kind = serializers.CharField(read_only=True)
+    kind_label = serializers.CharField(read_only=True)
+    title = serializers.CharField(read_only=True)
+    client = serializers.DictField(read_only=True)
+    draft = serializers.IntegerField(read_only=True, allow_null=True)
+    related_invoice = serializers.IntegerField(read_only=True, allow_null=True)
+    total = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    tax_total = serializers.DecimalField(
+        max_digits=14, decimal_places=2, read_only=True, allow_null=True,
+    )
+    external_number = serializers.CharField(read_only=True)
+    issued_at = serializers.CharField(read_only=True)
+    issued_by = serializers.DictField(read_only=True, allow_null=True)
+    state = serializers.CharField(read_only=True)
+    is_tax_invoice = serializers.BooleanField(read_only=True)
+    cancelled_at = serializers.CharField(read_only=True, allow_null=True)
+    cancelled_by = serializers.DictField(read_only=True, allow_null=True)
+    cancel_reason = serializers.CharField(read_only=True)
+    has_link = serializers.BooleanField(read_only=True)
+    lines = serializers.ListField(child=serializers.DictField(), read_only=True)
