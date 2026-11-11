@@ -23,8 +23,11 @@
 الأحمرُ ونافذةُ «قريب هالأسبوع»؛ نسخةٌ ثانية هنا كانت ستختلف عنه عند أوّل تمديد.
 **وبندٌ واحدٌ لكل (زبون، فترة)**: التزامان في الفترة الواحدة بندان بمفتاحٍ واحد
 (تحذيرُ مفاتيحَ مكرَّرة في React، وعدّادٌ مشتركٌ يسقط «قبل ٢»)، فتُجمَّع التزاماتُ
-الفترة في بندٍ واحد: أقربُ موعدٍ يفتح نافذته، وناقصُها اتّحادٌ، ومبلغُها مجموعُ
-المستحقّ عليها.
+الفترة في بندٍ واحد: أقربُ موعدٍ **لم يمضِ** بين التزاماتها **التي عليها شيء**
+يفتح نافذته (فالمدفوعُ لا يُذكَّر بموعده، والماضي متأخّرٌ يخصّه الأحمرُ، ولا بندَ
+لفترةٍ لم يبقَ فيها موعدٌ قادمٌ عليه شيء)، وناقصُها اتّحادٌ، ومبلغُها مجموعُ
+المستحقّ عليها. **وبندٌ واحدٌ لكل (زبون، يوم)** في تذكير الموعد للسبب نفسه:
+موعدان في اليوم نفسه يتشاركان المفتاح، فيُجمعان في بندٍ بوقتَيهما.
 
 **والشرطُ الحاسم**: لا تذكيرَ بموعدٍ رسميٍّ إلّا إذا **على الزبون شيء** —
 أوراقٌ ناقصةٌ أو مبلغٌ غيرُ مدفوع. ودالّةُ `client_owes` نقيّةٌ ومفردة، فيُثبت
@@ -317,7 +320,9 @@ def create_appointment(
 def reschedule_appointment(appointment, *, scheduled_at, actor, note=None) -> dict:
     """«أجّل» — الوقتُ يتحرّك والصفُّ يبقى: لا إلغاءَ وحجزٌ جديد بإثراءٍ مزدوج."""
     _assert_open(appointment)
-    fields = {"scheduled_at": _clean_scheduled_at(scheduled_at)}
+    # `confirmed_at` يُمسح: الموعدُ صار وقتاً آخر فتأكيدُه القديمُ لم يعد تأكيداً
+    # له، والتقويمُ يخفي زرَّ «ابعت تأكيد» متى وُجد — فبلا المسح لا يُعاد التأكيد.
+    fields = {"scheduled_at": _clean_scheduled_at(scheduled_at), "confirmed_at": None}
     if note is not None:
         fields["note"] = (note or "").strip()
     return _row_with_system(appointment.tenant, _stamp(appointment, **fields))
@@ -344,19 +349,23 @@ def complete_appointment(appointment, *, actor) -> dict:
     )
 
 
-def _appointment_render_values(tenant, appointment, client) -> dict:
+def _appointment_render_values(tenant, appointment, client, *, language="") -> dict:
     """قيمُ رموز النصّ لموعد — `{due_date}` يومُ الموعد لا يومُ الحساب.
 
-    و`{period}` فارغةٌ هنا: الموعدُ ليس فترةً، و`{missing_list}` كذلك — نصُّ
-    الموعد المشحون لا يقرؤهما، وملؤهما بقيمةٍ مخترعةٍ يكذب على من يخصّص النصّ.
+    و`{period}` و`{amount}` و`{missing_list}` **غائبةٌ** هنا: الموعدُ ليس فترةً ولا
+    مبلغاً ولا ناقصاً — نصُّ الموعد المشحون لا يقرؤها، وملؤها بقيمةٍ مخترعةٍ يكذب
+    على من يخصّص النصّ. وتُنطق **`REMINDER_ABSENT_TEXT` بلغة المستلِم** كما في
+    `services._reminder_render_values`: عُرفٌ واحدٌ للغياب لا «فراغٌ هنا و«لا
+    شيء» هناك».
     """
     scheduled = timezone.localtime(appointment.scheduled_at)
+    absent = services.reminder_absent_text(language)
     return {
         "client_name": client.name,
-        "period": "",
+        "period": absent,
         "due_date": scheduled.strftime("%d/%m/%Y"),
-        "amount": "",
-        "missing_list": "",
+        "amount": absent,
+        "missing_list": absent,
         "office_name": tenant.CompanyName,
     }
 
@@ -388,7 +397,9 @@ def send_appointment_confirmation(
         bodies = services.reminder_template_bodies(tenant, REMINDER_APPOINTMENT)
         body = services.render_reminder_body(
             bodies.get(contact.language, ""),
-            _appointment_render_values(tenant, appointment, client),
+            _appointment_render_values(
+                tenant, appointment, client, language=contact.language,
+            ),
         )
     scheduled = timezone.localtime(appointment.scheduled_at)
     slot = scheduled.date()
@@ -460,9 +471,14 @@ def appointment_reminder_candidates(
     for client_id, slots in by_client.items():
         client = clients_by_id[client_id]
         contact = contacts.get((client_id, REMINDER_APPOINTMENT))
+        #: بندٌ واحدٌ لكل (زبون، يوم): مفتاحُ البند يومُ الموعد بطرفيه، فموعدان في
+        #: يومٍ واحدٍ بندان بمفتاحٍ واحد (مفتاحُ React مكرَّر، وإرسالُ أحدهما يُسكت
+        #: الآخر). فيُجمعان في بندٍ بوقتَيهما — وهو ما تُسكته رسالةٌ واحدة أصلاً.
+        times_by_day: dict[datetime.date, list[str]] = {}
         for slot in slots:
             scheduled = timezone.localtime(slot["scheduled_at"])
-            slot_day = scheduled.date()
+            times_by_day.setdefault(scheduled.date(), []).append(f"{scheduled:%H:%M}")
+        for slot_day, times in times_by_day.items():
             window_start = slot_day - datetime.timedelta(days=leads[client_id])
             count = len(_within_window(
                 by_pair.get(
@@ -474,8 +490,8 @@ def appointment_reminder_candidates(
             candidates.append(services.ReminderCandidate(
                 client=client,
                 reminder_type=REMINDER_APPOINTMENT,
-                # المفتاحُ يومُ الموعد بطرفيه: تذكيران في يومٍ واحد لموعدين لا
-                # يدخلان في نافذةٍ واحدة.
+                # المفتاحُ يومُ الموعد بطرفيه، وبندُ اليوم واحدٌ يحمل مواعيده كلَّها
+                # (`times_by_day`) — فلا يتكرّر المفتاحُ بين بنود الحمولة.
                 period_start=slot_day,
                 period_end=slot_day,
                 missing=(),
@@ -495,7 +511,7 @@ def appointment_reminder_candidates(
                 postponed=(client_id, REMINDER_APPOINTMENT) in postponed_pairs,
                 badge=OBLIGATION_BADGE_NEAR,
                 render_due=slot_day,
-                period_text=f"{slot_day:%d/%m/%Y} {scheduled:%H:%M}",
+                period_text=f"{slot_day:%d/%m/%Y} {'، '.join(times)}",
             ))
     return candidates
 
@@ -542,7 +558,9 @@ def deadline_reminder_candidates(
     المصدرُ `Obligation.due_date` وحدها (الممدَّدُ أو الفعليّ) — ولذلك يعبر
     التمديدُ الموضعَين معه بلا حسابٍ ثانٍ. والالتزامُ الذي لا شيءَ على الزبون فيه
     لا يفتح بنداً، و«انقدّم»/«مش لازم» يُسقطانه قبل السؤال أصلاً. والتزاماتُ
-    الفترة الواحدة تُجمع: **أقربُ** موعدٍ فيها هو ما يفتح نافذتها، وأسماءُ
+    الفترة الواحدة تُجمع: **أقربُ** موعدٍ لم يمضِ بين التزاماتها **التي عليها
+    شيء** هو ما يفتح نافذتها (لا أبكرُ التزامٍ في الفترة: المدفوعُ والماضي لا
+    يُسقطان تذكيرَ الموعد الحقيقيّ)، وإن لم يبقَ منها موعدٌ قادمٌ فلا بند. وأسماءُ
     الناقص اتّحادُها، والمبلغُ مجموعُ المستحقّ عليها.
     """
     if reminder_type is not None and reminder_type != REMINDER_DEADLINE:
@@ -591,9 +609,19 @@ def deadline_reminder_candidates(
         ]
         if not owing:
             continue
-        #: أقربُ موعدٍ فعليّ **في الفترة** (لا في الالتزام الذي عليه شيء): الفترةُ
-        #: وحدةُ التذكير، وموعدُها الأبكرُ هو الذي يفتح نافذتها.
-        due = min((row["extended_to"] or row["actual_deadline"]) for row in period_rows)
+        #: أقربُ موعدٍ **لم يمضِ بعدُ** بين التزامات الفترة **التي عليها شيء** وحدها:
+        #: ما لا شيءَ عليه (مدفوعٌ أو مرتجعٌ) ليس موعداً يُذكَّر به، وما مضى موعدُه
+        #: متأخّرٌ يخصّه التنبيهُ الأحمر. والأبكرُ منهما كان يجعل `day <= due` خطأً
+        #: للفترة كلّها فيسقط «قبل ٧» و«قبل ٢» عن موعدها الحقيقيّ.
+        upcoming = [
+            moment for moment in (
+                row["extended_to"] or row["actual_deadline"] for row in owing
+            )
+            if moment >= day
+        ]
+        if not upcoming:
+            continue
+        due = min(upcoming)
         if (due - day).days > widest:
             # أبعدُ من أوسع النوافذ — لا بندَ له اليومَ أصلاً (كلفةٌ لا نتيجة).
             continue
@@ -621,12 +649,13 @@ def deadline_reminder_candidates(
             next_due=window_start,
             contact=contacts.get((client_id, REMINDER_DEADLINE)),
             tax_system=settings_by_client[client_id].get(services.TAX_SYSTEM_KEY),
-            # قبل الميعاد و**إلى يوم الموعد نفسه**: بعده يصير متأخّراً، والتنبيهُ
-            # الأحمرُ يخصّه (`obligation_late`) فلا ينبّه النصُّ تذكيراً بموعدٍ فات.
+            # من فتح النافذة، و**إلى يوم الموعد نفسه** بنيةً: `due` من `upcoming` فلا
+            # يكون إلّا `>= day` — بعده يصير متأخّراً، والتنبيهُ الأحمرُ يخصّه
+            # (`obligation_late`) فلا ينبّه النصُّ تذكيراً بموعدٍ فات.
             # وصفٌّ في السجلّ داخل النافذة السارية يُسكتها حتّى تُفتح التالية.
-            due=window_start <= day <= due and not observed,
+            due=window_start <= day and not observed,
             # والسقفُ بنيويٌّ لا عدّاد: نافذتان لا ثالثَ بعدهما، وما بعد يوم
-            # الموعد يُسقطه `due` — فلا `exhausted` لهذا النوع أبداً.
+            # الموعد لا موعدَ قادمَ له فيسقط البندُ — فلا `exhausted` لهذا النوع أبداً.
             exhausted=False,
             postponed=(client_id, REMINDER_DEADLINE) in postponed_pairs,
             badge=OBLIGATION_BADGE_NEAR,

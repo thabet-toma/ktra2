@@ -387,6 +387,55 @@ class AppointmentLifecycleTest(OfficeFixture):
         self.assertEqual(moved["time"], "13:45")
         self.assertEqual(moved["id"], row["id"])
 
+    def test_rescheduling_clears_the_confirmation_so_it_can_be_confirmed_again(self):
+        client = self.ready_client()
+        row = appointments.create_appointment(
+            self.tenant, user=self.owner, client_id=client.pk,
+            kind=APPOINTMENT_KIND_VISIT, scheduled_at=at(DAY, 10, 0),
+        )
+        stored = ClientAppointment.objects.get(pk=row["id"])
+        confirmed = appointments.send_appointment_confirmation(
+            self.tenant, stored, actor=self.owner,
+        )
+        self.assertIsNotNone(confirmed["appointment"]["confirmed_at"])
+        stored.refresh_from_db()
+
+        moved = appointments.reschedule_appointment(
+            stored, scheduled_at=at(DAY + datetime.timedelta(days=1), 9, 0),
+            actor=self.owner,
+        )
+
+        # الموعدُ صار وقتاً آخر: تأكيدُه القديمُ لم يعد تأكيداً له، والتقويمُ يخفي
+        # زرَّ «ابعت تأكيد» متى وُجد `confirmed_at`.
+        self.assertIsNone(moved["confirmed_at"])
+        self.assertIsNone(ClientAppointment.objects.get(pk=row["id"]).confirmed_at)
+
+    def test_the_confirmation_body_names_absent_values_in_the_recipients_language(self):
+        absent = {"ar": "ولا شي", "he": "אין"}
+        for language in ("ar", "he"):
+            with self.subTest(language=language):
+                client = self.make_client(f"زبون {language}")
+                self.link(client, self.make_contact(
+                    name=f"جهة {language}", language=language,
+                ))
+                # قالبُ مكتبٍ يقرأ الرموزَ التي لا يحملها الموعد.
+                services.set_reminder_template(
+                    self.tenant, reminder_type=REMINDER_APPOINTMENT, language=language,
+                    body="{period}|{amount}|{missing_list}", actor=self.owner,
+                )
+                row = appointments.create_appointment(
+                    self.tenant, user=self.owner, client_id=client.pk,
+                    kind=APPOINTMENT_KIND_VISIT, scheduled_at=at(DAY),
+                )
+
+                sent = appointments.send_appointment_confirmation(
+                    self.tenant, ClientAppointment.objects.get(pk=row["id"]),
+                    actor=self.owner,
+                )
+
+                # عُرفٌ واحدٌ لقيمة الغياب مع تذكير الموعد الرسميّ — لا فراغ هنا و«لا شيء» هناك.
+                self.assertEqual(sent["body"], "|".join([absent[language]] * 3))
+
     def test_marking_it_done_keeps_the_time_and_moves_only_the_status(self):
         client = self.ready_client()
         row = appointments.create_appointment(
@@ -617,22 +666,75 @@ class DeadlineReminderTest(OfficeFixture):
         # والمبلغُ مجموعُ المستحقّ على الفترة: 300 + 200.
         self.assertIn("500.00", self.ready(SEVEN_DAYS_BEFORE)["messages"][0]["body"])
 
-    def test_the_nearest_deadline_of_the_period_opens_the_window(self):
+    def test_an_earlier_deadline_with_nothing_owed_does_not_open_the_window(self):
         client = self.ready_client()
-        # التزامٌ أبكر لا شيءَ عليه، وآخرُ أبعدُ عليه المبلغ: الفترةُ وحدةُ
-        # التذكير، فموعدُها الأبكرُ (3 شباط) هو الذي يفتح النافذة لا 10 منه.
-        earliest = DAY + datetime.timedelta(days=2)
+        # التزامٌ أبكر لا شيءَ عليه (4 شباط)، وآخرُ أبعدُ عليه المبلغ (10 شباط):
+        # الموعدُ الذي يفتح النافذةَ موعدُ ما **عليه شيء** لا أبكرُ التزامٍ في الفترة.
+        earliest = DAY + datetime.timedelta(days=3)
         self.add_obligation(
             client, actual=earliest, amount=None, service_code="payroll",
         )
         self.add_obligation(client, actual=DUE, amount=Decimal("620.00"))
-        first_window = earliest - datetime.timedelta(days=7)
+        earlier_window = earliest - datetime.timedelta(days=7)
 
-        self.assertEqual(self.deadline_items(first_window - datetime.timedelta(days=1)), [])
-        items = self.deadline_items(first_window)
+        self.assertEqual(self.deadline_items(earlier_window), [])
+        items = self.deadline_items(SEVEN_DAYS_BEFORE)
 
         self.assertEqual(len(items), 1, items)
-        self.assertEqual(items[0]["due_date"], first_window.isoformat())
+        self.assertEqual(items[0]["due_date"], SEVEN_DAYS_BEFORE.isoformat())
+        self.assertIn(
+            DUE.strftime("%d/%m/%Y"), self.ready(SEVEN_DAYS_BEFORE)["messages"][0]["body"],
+        )
+
+    def test_a_paid_earlier_deadline_does_not_drop_the_reminder_of_the_real_one(self):
+        client = self.ready_client()
+        # مدفوعٌ موعدُه 3 شباط وعليه 620 موعدُه 10 شباط: من 4 شباط كان `day <= due`
+        # خطأً للفترة كلّها فلا «قبل ٧» ولا «قبل ٢» عن 10 شباط أبداً.
+        paid_day = SEVEN_DAYS_BEFORE
+        self.add_obligation(
+            client, actual=paid_day, amount=Decimal("100.00"),
+            client_paid=True, service_code="payroll",
+        )
+        self.add_obligation(client, actual=DUE, amount=Decimal("620.00"))
+
+        after_paid_deadline = paid_day + datetime.timedelta(days=1)
+        items = self.deadline_items(after_paid_deadline)
+        self.assertEqual(len(items), 1, items)
+        body = self.ready(after_paid_deadline)["messages"][0]["body"]
+        self.assertIn(DUE.strftime("%d/%m/%Y"), body)
+        self.assertNotIn(paid_day.strftime("%d/%m/%Y"), body)
+        # و«قبل ٢» تصل عن 10 شباط نفسه.
+        items = self.deadline_items(TWO_DAYS_BEFORE)
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual(items[0]["step"], 2)
+
+    def test_an_owing_deadline_already_passed_does_not_hide_the_later_extended_one(self):
+        client = self.ready_client()
+        # عليه شيءٌ وموعدُه مضى (2 شباط ⇒ متأخّرٌ يخصّه الأحمر)، وآخرُ ممدَّدٌ إلى
+        # 10 شباط: البندُ يُحسب من موعد الممدَّد لا من الذي مضى.
+        self.add_obligation(
+            client, actual=DAY + datetime.timedelta(days=1), amount=Decimal("100.00"),
+            service_code="payroll",
+        )
+        extended = self.add_obligation(
+            client, actual=DAY, amount=Decimal("620.00"),
+        )
+        Obligation.objects.filter(pk=extended.pk).update(extended_to=DUE)
+        inside = SEVEN_DAYS_BEFORE + datetime.timedelta(days=2)
+
+        items = self.deadline_items(inside)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertIn(
+            DUE.strftime("%d/%m/%Y"), self.ready(inside)["messages"][0]["body"],
+        )
+
+    def test_a_period_whose_owing_deadlines_all_passed_has_no_item(self):
+        client = self.ready_client()
+        self.add_obligation(client, actual=DAY, amount=Decimal("620.00"))
+
+        # المتأخّرُ يخصّه التنبيهُ الأحمر (`obligation_late`) لا نصُّ «قريب».
+        self.assertEqual(self.deadline_items(DAY + datetime.timedelta(days=1)), [])
 
     # ── نافذةٌ لا عدّاد ──────────────────────────────────────────────────────
     def test_a_dismissal_silences_the_window_until_the_next_one(self):
@@ -730,6 +832,48 @@ class DeadlineReminderTest(OfficeFixture):
         self.assertIn("620.00", body)
         self._assert_no_dangling_line(body)
 
+    def test_the_message_text_carries_the_amount_to_a_member_without_amounts_view(self):
+        """**استثناءٌ مقصودٌ من قاعدة القناع** — يُثبَّت قراراً لا يُمحى بصمت.
+
+        نصُّ الرسالة موجَّهٌ إلى **الزبون نفسه** (مبلغُه عليه)، وقنعُه عن موظّفٍ بلا
+        `office.amounts.view` يُرسل «—» إلى الزبون بدل مبلغه. أما الحمولةُ المهيكلة
+        (`items`) فلا تحمل مبلغاً أصلاً: الاستثناءُ في نصّ الرسالة وصفِّ سجلّها وحدهما.
+        """
+        member = self.make_member("ap_no_amounts", role="accountant")
+        self.assertFalse(services.can_see_amounts(self.tenant, member))
+        client = self.make_client("زبون المحاسب", responsible=member)
+        self.link(client, self.make_contact(name="جهة المحاسب"))
+        self.add_obligation(client, actual=DUE, amount=Decimal("620.00"))
+
+        payload = services.ready_to_send_payload(
+            self.tenant, user=member, day=SEVEN_DAYS_BEFORE,
+        )
+
+        self.assertEqual(len(payload["messages"]), 1, payload["messages"])
+        message = payload["messages"][0]
+        self.assertIn("مبلغ مستحقّ: 620.00", message["body"])
+        self.assertNotIn("—", message["body"])
+        for item in message["items"]:
+            self.assertFalse(
+                {"amount", "amount_label"} & set(item), f"مبلغٌ في بند الحمولة: {item}",
+            )
+        # وصفُّ السجلّ المحفوظ يحمل ما أُرسل: النصُّ نفسه بمبلغه.
+        contact = message["recipient"]["contact_id"]
+        rows = services.mark_reminders_sent(
+            self.tenant,
+            user=member,
+            contact_id=contact,
+            body=message["body"],
+            items=[{
+                "client_id": client.pk,
+                "reminder_type": REMINDER_DEADLINE,
+                "period_start": JAN_START.isoformat(),
+                "period_end": JAN_END.isoformat(),
+            }],
+        )
+        log = services.reminder_log_row(rows[0])
+        self.assertIn("620.00", log["body"])
+
 
 # ── مولّد «تذكير موعد» (بند ٢) ──────────────────────────────────────────────
 class AppointmentReminderTest(OfficeFixture):
@@ -758,6 +902,28 @@ class AppointmentReminderTest(OfficeFixture):
             items[0]["period_label"],
             f"{(DAY + datetime.timedelta(days=1)):%d/%m/%Y} 10:00",
         )
+
+    def test_two_appointments_of_one_client_on_one_day_are_one_item(self):
+        client = self.ready_client()
+        day_after = DAY + datetime.timedelta(days=1)
+        self.make_appointment(client, scheduled_at=at(day_after, 14, 0))
+        self.make_appointment(client, scheduled_at=at(day_after, 10, 0))
+
+        payload = self.ready(DAY)
+        items = [item for message in payload["messages"] for item in message["items"]]
+
+        # المفتاحُ `(زبون، موعد، يوم، يوم)` واحدٌ للموعدين: بندان به = مفتاحُ React
+        # مكرَّر، وإرسالُ أحدهما يُسكت الآخر. فبندٌ واحدٌ للزبون واليوم يحمل الوقتين.
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual(len(payload["messages"]), 1, payload["messages"])
+        self.assertEqual(
+            items[0]["period_label"], f"{day_after:%d/%m/%Y} 10:00، 14:00",
+        )
+        keys = [
+            (item["client_id"], item["reminder_type"], item["period_start"], item["period_end"])
+            for item in items
+        ]
+        self.assertEqual(len(keys), len(set(keys)))
 
     def test_it_does_not_appear_two_days_before_with_the_default_one_day(self):
         client = self.ready_client()

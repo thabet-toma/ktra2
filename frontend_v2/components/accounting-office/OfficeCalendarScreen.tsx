@@ -163,8 +163,10 @@ export const OfficeCalendarScreen: React.FC = () => {
       .catch((failure) => {
         if (!cancelled) {
           // لا تُعرَض صفوفُ طلبٍ سابق مع رسالة الفشل: الشاشةُ تقول «تعذّر» وتُخلي
-          // الشبكة، فلا يُقرأ تقويمٌ قديم كأنه نتيجةُ الطلب الجديد.
+          // الشبكة، فلا يُقرأ تقويمٌ قديم كأنه نتيجةُ الطلب الجديد. **والمواعيدُ
+          // مثلُ الالتزامات**: مواعيدُ المدى السابق لا تبقى تحت رسالة الخطأ.
           setRows([]);
+          setAppointmentRows([]);
           setError(humanizeThrown(failure, 'تعذّر تحميل التقويم.'));
         }
       })
@@ -605,7 +607,8 @@ export const OfficeCalendarScreen: React.FC = () => {
 
       {loading ? (
         <OfficeSkeleton rows={6} />
-      ) : rows.length === 0 && !error ? (
+      ) : rows.length === 0 && appointmentRows.length === 0 && !error ? (
+        // «لا مواعيد» لا تُقال ولو في المدى موعدُ حجزٍ: الشبكةُ تحمله وزرُّ تأكيده.
         <OfficeEmpty
           title="لا مواعيد في هذا المدى"
           hint="جرّب شهراً آخر، أو أوسع الفلاتر — المواعيد تُحسب من خدمات الزبون ولائحة المنصّة."

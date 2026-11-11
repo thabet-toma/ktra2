@@ -208,6 +208,13 @@ NO_REST_DAYS_LABEL = "بلا أيام عطلة"
 # زبوناً تمرّ بـ`visible_clients`، وكلُّ مبلغٍ يمرّ بـ`can_see_amounts` و
 # `mask_amounts`. نسخةٌ ثانيةٌ من الشرط تفترق عن الأولى عند أوّل تعديلٍ بصمت —
 # وهي بعينها الطريقة التي تُسرَّب بها بيانات مكتبٍ إلى غيره.
+#
+# **استثناءٌ واحدٌ مقصود (#281): نصُّ الرسالة.** `{amount}` في نصّ «جاهز للإرسال»
+# (`ready_to_send_payload` ← `messages[].body`) وفي وصفِّ سجلّ التذكير المحفوظ
+# (`reminder_log_row` ← `body`) يحمل مبلغَ الفترة **ولو لعضوٍ بلا `office.amounts.view`**:
+# النصُّ رسالةٌ إلى **الزبون نفسه** عن مبلغٍ عليه، وقنعُه عن الموظّف كان يُرسل «—»
+# إلى الزبون بدل مبلغه. وما سوى النصّ يبقى مقنَّعاً: بنودُ `items` المهيكلة بلا
+# مبلغٍ أصلاً. مبلغٌ جديدٌ في نصّ رسالةٍ يُقرَّر هنا قراراً لا يمرّ بالصمت.
 
 #: مفاتيح المبالغ في حمولة البطاقة الضريبية. مبلغٌ جديدٌ يُضاف هنا **أولاً**،
 #: وإلا سقط حارسُ `accounting_office/tests/test_amounts_guard.py`.
@@ -6372,6 +6379,15 @@ def create_contact(tenant, *, name, phone="", language="ar") -> Contact:
 REMINDER_ABSENT_TEXT: dict[str, str] = {"ar": "ولا شي", "he": "אין"}
 
 
+def reminder_absent_text(language) -> str:
+    """«لا شيء» بلغة المستلِم — **عُرفٌ واحدٌ لكل نوع** (أوراقٌ وموعدٌ ورسميّ).
+
+    العربيةُ احتياطاً: لغةٌ خارج الاثنتين كانت تُعيد عنواناً بلا قيمةٍ (وكانت
+    العناوينُ المعلَّقة هي العلّةَ التي أُعيدت الصياغةُ من أجلها).
+    """
+    return REMINDER_ABSENT_TEXT.get(language) or REMINDER_ABSENT_TEXT["ar"]
+
+
 def render_reminder_body(body, values) -> str:
     """يستبدل الرموزَ المعروفة ويترك ما سواها كما هو (بلا `str.format`).
 
@@ -6828,9 +6844,7 @@ def _reminder_render_values(tenant, candidate, *, language="") -> dict:
     شرطٍ لا يستطيع حذف عنوانٍ من سطره، فكلمةُ «لا شيء» تُغلق الجملةَ في الحالات
     الثلاث (أوراقٌ وحدها · مبلغٌ وحده · الاثنان) ولا تُبقي كلمةً معلَّقة.
     """
-    # العربيةُ احتياطاً: لغةٌ خارج الاثنتين كانت تُعيد عنواناً بلا قيمةٍ (وكانت
-    # العناوينُ المعلَّقة هي العلّةَ التي أُعيدت الصياغةُ من أجلها).
-    absent = REMINDER_ABSENT_TEXT.get(language) or REMINDER_ABSENT_TEXT["ar"]
+    absent = reminder_absent_text(language)
     return {
         "client_name": candidate.client.name,
         "period": deadlines.period_label(candidate.period_start, candidate.period_end),

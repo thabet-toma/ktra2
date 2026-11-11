@@ -569,7 +569,8 @@ REMINDER_DEFAULT_TEXTS: dict[str, dict[str, str]] = {
             "תודה, {office_name}"
         ),
     },
-    #: (د) تذكيرُ موعد: نصٌّ قصيرٌ محايدٌ بالنبرة نفسها — لا مولّدَ له بعد (#283).
+    #: (د) تذكيرُ موعد: نصٌّ قصيرٌ محايدٌ بالنبرة نفسها — ومولّدُه
+    #: `appointment_reminder_candidates` في `accounting_office/appointments.py` (#281).
     REMINDER_APPOINTMENT: {
         "ar": (
             "أهلاً {client_name}،\n"
