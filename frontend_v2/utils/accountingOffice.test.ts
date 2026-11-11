@@ -8,6 +8,10 @@ import {
   appointmentStatusClass,
   applyPackageSummary,
   badgeLabelOf,
+  bookDraftProblem,
+  bookKindOn,
+  bookMonthFromSearch,
+  bookedDocumentIds,
   canUndoReminderRow,
   clientTabFromSearch,
   commonTaxSystem,
@@ -24,9 +28,11 @@ import {
   documentStatusChoicesFor,
   documentYearOptions,
   emptyDocumentCell,
+  entryDateForMonth,
   filterReadyToSendMessages,
   frequencyAfterSuggestion,
   availableServicesForClient,
+  clientBookPath,
   clientFilePath,
   clientIdFromSearch,
   clientServiceStatusClass,
@@ -41,11 +47,14 @@ import {
   groupAppointmentsByDay,
   groupDeadlinesByDay,
   isExpectedDeadline,
+  isLiveBookEntry,
   isLockedOfficeSetting,
   isOpenAppointment,
   officeAppointmentAnchorId,
   missingFirstRunLabels,
   monthGrid,
+  multipleDocumentsAllowed,
+  nextBookKind,
   nextDayIso,
   nextMonthKey,
   obligationAmountText,
@@ -59,6 +68,9 @@ import {
   officeWhatsappNumber,
   officeTaskAnchorId,
   overriddenRuleInput,
+  pendingEntryClientCount,
+  pendingEntryRowKey,
+  pendingMonthDocuments,
   periodLabel,
   platformOfficialText,
   previousMonthKey,
@@ -79,10 +91,16 @@ import {
   visibleClientSettings,
   weekDays,
   weekRange,
+  CLIENT_TAB_KEYS,
+  type BookEntryRow,
+  type BookLineDraft,
   type CalendarDeadlineRow,
+  type ClientBookRow,
   type DeadlineRuleRow,
   type DocumentCell,
+  type DocumentRowPayload,
   type ObligationRow,
+  type PendingEntryRow,
   type OfficeServiceRow,
   type SettingRow,
 } from './accountingOffice.ts';
@@ -1177,4 +1195,250 @@ test('تأكيدُ الموعد: النصُّ كما بناه الخادم، و�
     ).link,
     null,
   );
+});
+
+// ── دفترُ الزبون (#286/ب) ───────────────────────────────────────────────────
+//
+// دوالُّ تبويب «الدفتر» وقائمةِ «للإدخال»: نوعُ الدفتر في تاريخ الحركة (قاعدةُ
+// `kind_on` نفسها في الخادم)، والانتقالُ الذي يسمح به، وتاريخُ حركةِ شهرٍ سابق،
+// وأوراقُ الشهر التي لم تدخل حركةً حيّة — مشتقّةً من حمولتَي الأوراق والحركات
+// بلا نقطةٍ جديدة ولا جدولَ تسمياتٍ محليّ.
+
+const BOOK: ClientBookRow = {
+  client_id: 7,
+  client_name: 'منشأة النور',
+  kind: 'simple',
+  kind_label: 'بسيط',
+  opened_on: '2024-01-01',
+  kind_changed_on: null,
+  entry_method: 'document',
+  entry_method_label: 'ورقة ورقة',
+  writable: true,
+};
+
+const LIVE_ENTRY: BookEntryRow = {
+  id: 1,
+  number: 1,
+  year: 2026,
+  entry_date: '2026-03-31',
+  kind: 'sales_invoice',
+  kind_label: 'فاتورة بيع',
+  memo: '',
+  documents: [11, 12],
+  reverses: null,
+  reversed_by: null,
+  total_debit: '150.00',
+  total_credit: null,
+  lines: [],
+};
+
+/** عكسُ `LIVE_ENTRY` — والحركةُ المعكوسةُ ليست حيّة. */
+const REVERSAL: BookEntryRow = {
+  ...LIVE_ENTRY, id: 3, number: 3, documents: [], reverses: 1,
+};
+
+const REVERSED: BookEntryRow = { ...LIVE_ENTRY, reversed_by: 3 };
+
+function bookCell(
+  month: string,
+  overrides: Partial<DocumentCell>,
+): DocumentCell {
+  return { ...emptyDocumentCell(month), ...overrides };
+}
+
+test('تبويبُ «الدفتر» آخرُ المفاتيح — وإضافتُه لا تُعيد ترتيبَ القائمة', () => {
+  // #281 تضيف مفتاحاً في فرعٍ آخر: مفتاحُنا يُلحَق بالنهاية كما التزم الموجز.
+  assert.equal(CLIENT_TAB_KEYS[CLIENT_TAB_KEYS.length - 1], 'book');
+  assert.equal(CLIENT_TAB_KEYS[0], 'tax-card');
+  assert.equal(clientTabFromSearch('?client=7&tab=book'), 'book');
+  assert.equal(clientTabFromSearch('?client=7&tab=ledger'), null);
+});
+
+test('نوعُ الدفتر يُقرأ في تاريخ الحركة — البسيطُ قبل الانتقال كما في الخادم', () => {
+  const moved: ClientBookRow = {
+    ...BOOK, kind: 'double', kind_label: 'مزدوج', kind_changed_on: '2025-01-01',
+  };
+  // حركةٌ بتاريخٍ يسبق الانتقال تُقاس بالبسيط، وإلا رُفضت ورقٌ صحيحة.
+  assert.equal(bookKindOn(moved, '2024-12-31'), 'simple');
+  assert.equal(bookKindOn(moved, '2025-01-01'), 'double');
+  assert.equal(bookKindOn(moved, '2026-06-15'), 'double');
+  // دفترٌ لم ينتقل: نوعُه اليوم هو نوعُ كلّ تاريخ.
+  assert.equal(bookKindOn(BOOK, '2019-05-05'), 'simple');
+});
+
+test('انتقالُ النوع إلى المزدوج وحده — والرجوعُ يرفضه الخادم دائماً', () => {
+  assert.equal(nextBookKind(BOOK), 'double');
+  assert.equal(nextBookKind({ kind: 'double' }), null);
+});
+
+test('تاريخُ حركةِ شهر: شهرُ اليوم ⇒ اليوم، وغيرُه ⇒ آخرُ يومٍ فيه', () => {
+  assert.equal(entryDateForMonth('2026-11', '2026-11-14'), '2026-11-14');
+  assert.equal(entryDateForMonth('2026-03', '2026-11-14'), '2026-03-31');
+  assert.equal(entryDateForMonth('2028-02', '2026-11-14'), '2028-02-29');
+  assert.equal(entryDateForMonth('2026-02', '2026-11-14'), '2026-02-28');
+  // بلا «اليوم» يُحفظ الشهرُ نفسه ولا يُملأ الحقلُ بتاريخٍ مخترع.
+  assert.equal(entryDateForMonth('2026-11', ''), '2026-11-30');
+  assert.equal(entryDateForMonth('2026-13', '2026-11-14'), '');
+});
+
+test('رابطُ الدفتر يحمل الشهرَ الصالح وحده ويُقرأ منه', () => {
+  assert.equal(clientBookPath(7), '/accounting-office/clients?client=7&tab=book');
+  assert.equal(
+    clientBookPath(7, '2026-03'),
+    '/accounting-office/clients?client=7&tab=book&month=2026-03',
+  );
+  // شهرٌ فاسد لا يصل إلى العنوان: التبويبُ يُفتح ولا إدخالَ على شهرٍ لا وجود له.
+  assert.equal(
+    clientBookPath(7, '2026-13'),
+    '/accounting-office/clients?client=7&tab=book',
+  );
+  assert.equal(bookMonthFromSearch('?client=7&tab=book&month=2026-03'), '2026-03');
+  assert.equal(bookMonthFromSearch('?month=2026-3'), null);
+  assert.equal(bookMonthFromSearch('?client=7'), null);
+});
+
+test('«حيّة» = ليست عكساً ولم تُعكس — ووحدها تُعدّ أوراقُها مُدخلة', () => {
+  assert.equal(isLiveBookEntry(LIVE_ENTRY), true);
+  assert.equal(isLiveBookEntry(REVERSAL), false);
+  assert.equal(isLiveBookEntry(REVERSED), false);
+  assert.equal(isLiveBookEntry({ reverses: 1, reversed_by: 3 }), false);
+});
+
+test('أوراقُ الحركات الحيّة وحدها تُحسب مُدخلة', () => {
+  assert.deepEqual([...bookedDocumentIds([LIVE_ENTRY, REVERSAL])].sort((a, b) => a - b), [11, 12]);
+  // عكسُ حركةٍ يُعيد أوراقَ الأصل إلى «للإدخال» وحدها.
+  assert.deepEqual([...bookedDocumentIds([REVERSED])], []);
+  assert.deepEqual([...bookedDocumentIds([])], []);
+});
+
+test('أوراقُ الشهر للاختيار: الواصلةُ التي لم تدخل حركةً حيّة فقط', () => {
+  const payload = {
+    annual: [],
+    items: [
+      {
+        item_code: 'ps_vat_declaration',
+        name: 'إقرار ضريبة القيمة المضافة',
+        cells: [
+          bookCell('2026-03-01', { row_id: 11, status: 'received' }),
+          bookCell('2026-03-01', { row_id: 14, status: 'received' }),
+          bookCell('2026-03-01', { row_id: 15, status: 'required' }),
+          bookCell('2026-03-01', { row_id: null, status: null }),
+          bookCell('2026-04-01', { row_id: 16, status: 'received' }),
+        ],
+      },
+      {
+        item_code: 'ps_bank_report',
+        name: 'تقرير البنك',
+        cells: [bookCell('2026-03-01', { row_id: 17, status: 'received' })],
+      },
+    ],
+  };
+  const booked = bookedDocumentIds([LIVE_ENTRY]);
+  const pending = pendingMonthDocuments(payload, booked, '2026-03');
+  // الواصلةُ والمُدخلة (11) والمنتظرة (15) وعديمةُ الصفّ (row_id=null) وشهرُ نيسان لا.
+  assert.deepEqual(pending.map((row) => row.row_id), [14, 17]);
+  assert.equal(pending[1].name, 'تقرير البنك');
+  // شهرٌ فاسد أو بلا أوراقَ ⇒ فارغة، لا كلُّ الأوراق.
+  assert.deepEqual(pendingMonthDocuments(payload, booked, ''), []);
+  assert.deepEqual(pendingMonthDocuments(payload, booked, '2025-03'), []);
+});
+
+test('الورقةُ السنوية تُعرض في شهر بدء فترتها — وإن كان كانون الثاني', () => {
+  // `period_start` للسنوية أوّلُ السنة، فيعدّها الخادمُ في صفّ كانون الثاني؛
+  // بلا مسار `annual` كان الصفُّ يُفتح على «ما في أوراق» ولا يُصفَّر أبداً.
+  const annualRow = (over: Partial<DocumentRowPayload>): DocumentRowPayload => ({
+    row_id: 21,
+    client_id: 7,
+    item_code: 'annual_tax_return',
+    name: 'إقرار ضريبة الدخل السنوي',
+    service_codes: [],
+    cadence: 'annual',
+    period_start: '2026-01-01',
+    period_end: '2026-12-31',
+    period_label: '2026',
+    status: 'received',
+    status_label: 'وصلت',
+    received_on: '2026-02-10',
+    received_by_name: '',
+    channel: '',
+    channel_label: '',
+    files_count: 0,
+    ...over,
+  });
+  const payload = {
+    items: [],
+    annual: [
+      annualRow({ row_id: 21 }),
+      // واصلةٌ لكنها مُدخلةٌ في حركةٍ حيّة — لا تعود إلى القائمة.
+      annualRow({ row_id: 22 }),
+      // لم تصل بعد — لا تُعرض.
+      annualRow({ row_id: 23, status: 'required' }),
+    ],
+  };
+  const pending = pendingMonthDocuments(payload, new Set([22]), '2026-01');
+  assert.deepEqual(pending.map((row) => row.row_id), [21]);
+  assert.equal(pending[0].name, 'إقرار ضريبة الدخل السنوي');
+  assert.equal(pending[0].received_on, '2026-02-10');
+  // وشباط ليس شهرَ بدء الفترة: السنويةُ لا تتكرّر في كل شهر.
+  assert.deepEqual(pendingMonthDocuments(payload, new Set([22]), '2026-02'), []);
+});
+
+test('تعدّدُ الأوراق في «إدخال الشهر» وحده', () => {
+  assert.equal(multipleDocumentsAllowed('monthly'), true);
+  assert.equal(multipleDocumentsAllowed('document'), false);
+  assert.equal(multipleDocumentsAllowed(null), false);
+  assert.equal(multipleDocumentsAllowed(''), false);
+});
+
+test('مسوّدةُ الحركة تُمسك أخطاءَ الخادم قبل الإرسال', () => {
+  const draft = (over: Partial<BookLineDraft>): BookLineDraft => ({
+    account_code: '1100', debit: '', credit: '', side_party: '', ...over,
+  });
+  const double = { doubleEntry: true };
+  const single = { doubleEntry: false };
+
+  assert.equal(bookDraftProblem([], double), 'no-lines');
+  // سطرٌ فارغٌ تماماً ليس بنداً — فلا يُطالب بحسابٍ لسطرٍ لم يُكتب.
+  assert.equal(
+    bookDraftProblem([draft({ account_code: '', debit: '', credit: '' })], double),
+    'no-lines',
+  );
+  // سطرٌ فيه مبلغٌ بلا حساب: يُكتب ولم يُنسَ الحساب.
+  assert.equal(bookDraftProblem([draft({ account_code: '', debit: '100' })], double), 'no-account');
+  assert.equal(bookDraftProblem([draft({})], double), 'no-side');
+  assert.equal(bookDraftProblem([draft({ debit: '10', credit: '10' })], double), 'two-sides');
+  // مبلغٌ غيرُ رقميّ لا يُخمَّن ولا يُرسَل: «1,5» فاصلةٌ عشريّةٌ في مكانٍ لا يُقرأ.
+  assert.equal(bookDraftProblem([draft({ debit: '1,5' })], double), 'invalid');
+  assert.equal(
+    bookDraftProblem([draft({ debit: '100' }), draft({ account_code: '2100', credit: '90' })], double),
+    'unbalanced',
+  );
+  // المزدوجُ المتوازن يمرّ، والبسيطُ لا يُسأل عن التوازن (تعريفُ النوعين).
+  assert.equal(
+    bookDraftProblem([draft({ debit: '100' }), draft({ account_code: '2100', credit: '100' })], double),
+    '',
+  );
+  assert.equal(bookDraftProblem([draft({ debit: '100.00' })], single), '');
+});
+
+test('صفُّ «للإدخال» يُعرَّف بالزبون والشهر — والشهران لا يلتبسان', () => {
+  const march: PendingEntryRow = {
+    client_id: 7,
+    client_name: 'منشأة النور',
+    month: '2026-03',
+    month_label: 'آذار',
+    count: 2,
+    entry_method: 'monthly',
+    entry_method_label: 'إدخال الشهر',
+  };
+  const april: PendingEntryRow = { ...march, month: '2026-04', count: 1 };
+  const otherClient: PendingEntryRow = { ...march, client_id: 8 };
+  // ما بعد إدخال ورقة: العدُّ نقص والمفتاحُ لم يتغيّر — الصفُّ هو هو.
+  const marchAfterOne: PendingEntryRow = { ...march, count: 1 };
+  assert.notEqual(pendingEntryRowKey(march), pendingEntryRowKey(april));
+  assert.notEqual(pendingEntryRowKey(march), pendingEntryRowKey(otherClient));
+  assert.equal(pendingEntryRowKey(march), pendingEntryRowKey(marchAfterOne));
+  assert.equal(pendingEntryClientCount([march, april, otherClient]), 2);
+  assert.equal(pendingEntryClientCount([march, april]), 1);
+  assert.equal(pendingEntryClientCount([]), 0);
 });

@@ -4,14 +4,19 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   getOfficeSettings,
   getOfficeToday,
+  getPendingEntry,
   type OfficeSettingsPayload,
+  type PendingEntryPayload,
   type TodayCounters,
   type TodayFilter,
   type TodayPayload,
 } from '../../services/accountingOfficeApi';
 import {
+  clientBookPath,
   clientFilePath,
   officeSizeOf,
+  pendingEntryClientCount,
+  pendingEntryRowKey,
   readTodayFilter,
   showsOfficeAssignment,
   todayFilterParams,
@@ -78,6 +83,10 @@ export const OfficeTodayScreen: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
+  // #286/ب: «للإدخال» — أوراقٌ واصلةٌ بلا حركةٍ حيّة. تُقرأ مع اليوم وتُحدَّث معه،
+  // وفشلُها لا يُسقط الالتزامات: قائمةٌ مستقلّةٌ في حالتها.
+  const [pending, setPending] = useState<PendingEntryPayload | null>(null);
+  const [pendingError, setPendingError] = useState('');
 
   const officeSize = settings ? officeSizeOf(settings.settings) : null;
   const showsAssignment = showsOfficeAssignment(officeSize);
@@ -123,6 +132,26 @@ export const OfficeTodayScreen: React.FC = () => {
       cancelled = true;
     };
   }, [filter, refreshToken]);
+
+  // «للإدخال» لا يُرشَّح بفلتر «اليوم»: كمُّه لا يتغيّر بتأخيرٍ هنا أو هناك، فيُعاد
+  // قراءته مع «حدّث» وحده. وفشلُه لا يُسقط قائمةَ الالتزامات: حالتُه مستقلة.
+  useEffect(() => {
+    let cancelled = false;
+    setPendingError('');
+    getPendingEntry()
+      .then((data) => {
+        if (!cancelled) setPending(data);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          setPending(null);
+          setPendingError(humanizeThrown(failure, 'تعذّر تحميل الأوراق المنتظرة.'));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [refreshToken]);
 
   const reload = useCallback(() => setRefreshToken((token) => token + 1), []);
   const setFilter = useCallback(
@@ -212,6 +241,58 @@ export const OfficeTodayScreen: React.FC = () => {
           ))}
         </div>
       </header>
+
+      {/* #286/ب: «للإدخال» — عدّادُه `total` من الخادم (لا جمعٌ في الواجهة)،
+          وصفوفُه مجمَّعةٌ بالزبون والشهر كما يجمّعها الخادم. كبسةُ الصفّ تفتح
+          تبويبَ «الدفتر» على شهره، فيُختار من أوراقه ويُدخل. */}
+      {pendingError ? (
+        <p role="alert" className="text-[11.5px] font-medium text-rose-600 dark:text-rose-400">
+          {pendingError}
+        </p>
+      ) : pending && pending.total > 0 ? (
+        <OfficeCard
+          title="للإدخال"
+          actions={
+            <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300">
+              {pending.total} ورقة · {pendingEntryClientCount(pending.rows)} زبون
+            </span>
+          }
+        >
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            أوراقٌ واصلةٌ بلا حركةٍ حيّة — كبسةُ الصفّ تفتح إدخالَ شهره في دفتر الزبون.
+          </p>
+          <ul className="mt-2 max-h-64 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
+            {pending.rows.map((row) => (
+              <li key={pendingEntryRowKey(row)}>
+                <button
+                  type="button"
+                  onClick={() => navigate(clientBookPath(row.client_id, row.month))}
+                  className="flex w-full flex-wrap items-center justify-between gap-2 py-2 text-right"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12.5px] font-semibold text-slate-800 dark:text-slate-100">
+                      {row.client_name}
+                    </span>
+                    <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[10.5px] font-medium text-slate-500 dark:text-slate-400">
+                      <span className="tabular-nums">
+                        {row.month_label} {row.month.slice(0, 4)}
+                      </span>
+                      {row.entry_method_label ? (
+                        <span className="rounded-full border border-teal-200 bg-teal-50 px-1.5 py-0.5 text-teal-800 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300">
+                          {row.entry_method_label}
+                        </span>
+                      ) : null}
+                    </span>
+                  </span>
+                  <span className="shrink-0 text-[11.5px] font-semibold tabular-nums text-amber-700 dark:text-amber-400">
+                    {row.count} ورقة ←
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </OfficeCard>
+      ) : null}
 
       {error ? <OfficeError message={error} onRetry={reload} /> : null}
 

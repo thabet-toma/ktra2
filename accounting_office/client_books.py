@@ -26,7 +26,10 @@ from accounting_office import services
 from accounting_office.deadlines import MONTH_LABELS
 from accounting_office.models import (
     BOOK_ACCOUNT_TYPE_LABELS,
+    BOOK_ACCOUNT_TYPE_CHOICES,
+    BOOK_ENTRY_KIND_CHOICES,
     BOOK_ENTRY_KIND_LABELS,
+    BOOK_KIND_CHOICES,
     BOOK_KIND_DOUBLE,
     BOOK_KIND_LABELS,
     BOOK_KIND_SIMPLE,
@@ -154,6 +157,42 @@ def account_row(row) -> dict:
         ),
         "is_system": row.is_system,
         "is_active": row.is_active,
+    }
+
+
+# ── تسمياتُ الأنواع كما تخرج: من النموذج لا من جدولٍ ثانٍ ─────────────────────
+def _choice_rows(choices) -> list[dict]:
+    """ثنائيّاتُ النموذج (`value`, `label`) بالشكل الذي تستهلكه الواجهة."""
+    return [{"value": value, "label": label} for value, label in choices]
+
+
+def book_kind_choices() -> list[dict]:
+    """نوعا الدفتر — `kind` في سطر الدفتر، لا نوعُ الحركة."""
+    return _choice_rows(BOOK_KIND_CHOICES)
+
+
+def entry_kind_choices() -> list[dict]:
+    """أنواعُ الحركة — `entry_kinds` في نقطة `choices/` و`entry_kind_choices` في السطر."""
+    return _choice_rows(BOOK_ENTRY_KIND_CHOICES)
+
+
+def account_type_choices() -> list[dict]:
+    return _choice_rows(BOOK_ACCOUNT_TYPE_CHOICES)
+
+
+def choices_payload() -> dict:
+    """`GET client-books/choices/` — تسمياتُ الأنواع الثلاثة كما في النموذج.
+
+    **وتسمياتُ نوع الدفتر لا يحملها أيّ ردٍّ آخر**: `kind_label` يسمّي النوع
+    الحاليَّ وحده، فمنتقي النوع عند إنشاء الدفتر وزرُّ الانتقال («حوّل إلى مزدوج»)
+    يحتاجان القائمة كاملة. واسمُ `entry_kinds` لا `kind_choices`: `kind` في هذا
+    الموديول نوعُ **الدفتر**، وخلطُهما هو الخطأُ نفسه الذي جعل زرَّ الانتقال يبحث
+    عن `double` في أنواع الحركة.
+    """
+    return {
+        "book_kinds": book_kind_choices(),
+        "entry_kinds": entry_kind_choices(),
+        "account_types": account_type_choices(),
     }
 
 

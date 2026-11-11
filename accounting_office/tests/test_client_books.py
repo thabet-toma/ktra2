@@ -33,6 +33,9 @@ from rest_framework.test import APITestCase
 
 from accounting_office import services
 from accounting_office.models import (
+    BOOK_ACCOUNT_TYPE_CHOICES,
+    BOOK_ENTRY_KIND_CHOICES,
+    BOOK_KIND_CHOICES,
     BOOK_KIND_DOUBLE,
     BOOK_KIND_SIMPLE,
     ClientBook,
@@ -318,6 +321,64 @@ class BookCreationTest(ClientBookTestCase):
         rows = {row["client_id"]: row for row in res.data}
         self.assertEqual(rows[self.mine.pk]["entry_method"], "document")
         self.assertEqual(rows[self.mine.pk]["entry_method_label"], "ورقة ورقة")
+
+
+class BookRowChoicesTest(ClientBookTestCase):
+    """تسمياتُ الأنواع في سطر الدفتر من النموذج لا من جدولٍ ثانٍ.
+
+    سقوطُ `_book_row` صامتاً (نسيانُ حقلٍ أو إعادةُ تسميته) لا يراه `tsc` ولا
+    `pytest`: الحقلُ اختياريٌّ في الواجهة (`?? []`)، فيصير منتقي نوع الحركة
+    فارغاً وزرُّ «أدخل الحركة» مقفلاً أبداً. فالاختبارُ يقارن القائمتين بنموذجيهما
+    حرفاً بحرف — لا بعددٍ ولا بوجودِ مفتاح.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE)
+
+    def test_the_single_book_row_carries_the_lists_with_their_model_labels(self):
+        res = self.client.get(f"{BOOKS}{self.mine.pk}/", **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            res.data["entry_kind_choices"],
+            [{"value": value, "label": label} for value, label in BOOK_ENTRY_KIND_CHOICES],
+        )
+        self.assertEqual(
+            res.data["account_type_choices"],
+            [{"value": value, "label": label} for value, label in BOOK_ACCOUNT_TYPE_CHOICES],
+        )
+        # `kind` في السطر نوعُ الدفتر لا الحركة: الاسمُ القديم كان مضلّلاً.
+        self.assertNotIn("kind_choices", res.data)
+
+    def test_the_choices_endpoint_returns_the_three_lists_from_the_models(self):
+        res = self.client.get(f"{BOOKS}choices/", **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            res.data,
+            {
+                "book_kinds": [
+                    {"value": value, "label": label} for value, label in BOOK_KIND_CHOICES
+                ],
+                "entry_kinds": [
+                    {"value": value, "label": label} for value, label in BOOK_ENTRY_KIND_CHOICES
+                ],
+                "account_types": [
+                    {"value": value, "label": label}
+                    for value, label in BOOK_ACCOUNT_TYPE_CHOICES
+                ],
+            },
+        )
+
+    def test_the_choices_endpoint_needs_no_write_key(self):
+        """من يفتح تبويب «الدفتر» يقرأ التسميات — وإن لم يملك إنشاءَ دفتر."""
+        self.as_user(self.viewer)
+
+        res = self.client.get(f"{BOOKS}choices/", **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertIn("book_kinds", res.data)
 
 
 class TreeCopyTest(ClientBookTestCase):
