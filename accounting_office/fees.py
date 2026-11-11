@@ -419,7 +419,8 @@ def generate_fee_drafts(tenant, *, day) -> dict:
 
 
 # ── التنبيه: ثلاثةُ أيامٍ ثم مسودّةٌ تنتظر الاعتماد ──────────────────────────
-def _draft_period_label(draft) -> str:
+def draft_period_label(draft) -> str:
+    """تسميةُ فترة المسودّة (شهرها) — عامّةٌ لأن كشفَ الحساب يقرأها (#283)."""
     start = date(draft.year, draft.month, 1)
     return deadlines.period_label(
         start, deadlines.month_start_after(start, 1) - timedelta(days=1),
@@ -469,7 +470,7 @@ def _raise_pending_alerts(tenant, *, day) -> int:
     for draft in due:
         ref = fee_draft_alert_ref(draft.pk)
         message = (
-            f"{draft.client.name} — مسودّة أتعاب {_draft_period_label(draft)} "
+            f"{draft.client.name} — مسودّة أتعاب {draft_period_label(draft)} "
             f"غير معتمدة بعد {PENDING_ALERT_AFTER_DAYS} أيامٍ من توليدها."
         )
         for recipient_id in sorted(recipients):
@@ -531,6 +532,9 @@ def approve_fee_draft(draft, *, actor, note=""):
         draft.save(update_fields=[
             "status", "approved_by", "approved_at", "approved_note",
         ])
+        # #283: الفاتورةُ صارت مستحقّةً — يُستَهلك رصيدُ الزبون الدائنُ عليها
+        # بتخصيصٍ جديد، وإلا بقي «له عندنا» لا يُخصَّص أبداً.
+        _payments_module().apply_open_credit(draft.tenant, [draft.client])
     return draft
 
 
@@ -561,6 +565,11 @@ def approve_all_fee_drafts(tenant, *, actor, note="") -> list:
         if drafts:
             FeeDraft.objects.bulk_update(
                 drafts, ["status", "approved_by", "approved_at", "approved_note"],
+            )
+            # #283: أرصدةُ الزبائن الدائنة تُخصَّص على المعتمدة الآن — بمجموعةٍ
+            # واحدة، فكلفةُ النداء لا تكبر بعدد المسودّات المعتمدة.
+            _payments_module().apply_open_credit(
+                tenant, [draft.client for draft in drafts],
             )
     return drafts
 
@@ -656,6 +665,16 @@ def _currency_payload(currency):
     return {"id": currency.pk, "code": currency.Code, "name": currency.Name or ""}
 
 
+def _payments_module():
+    """استيرادٌ مؤجَّل: `payments` يستورد `fees` — والدورةُ تُفَكّ وقتَ النداء.
+
+    النمطُ نفسُه في `services._appointments_module`: الوحدةُ التي تُبنى فوق هذه
+    الطبقة تستوردها هي، ولو استوردت هي الوحدةَ لدارت الدورةُ عند التحميل.
+    """
+    from accounting_office import payments
+    return payments
+
+
 def subscription_row(row, *, masked) -> dict:
     """سطرُ اشتراك — المبلغُ `None` لمن لا يراه، والشكلُ ثابتٌ في الحالين."""
     data = {
@@ -674,12 +693,19 @@ def subscription_row(row, *, masked) -> dict:
     return services.mask_amounts(data) if masked else data
 
 
-def draft_row(draft, *, masked) -> dict:
+def draft_row(draft, *, masked, summaries=None) -> dict:
     """مسودّةٌ ببنودها — **والقناعُ يطال البنودَ أيضاً** لا المبلغَ الأعلى وحده.
 
     ومصدرُ كل سطرٍ (`source`) وتسميتُه يُرسَلان صريحين: الواجهةُ تشرح «اشتراك /
     خدمة / إضافة» بلا تخمينٍ من نصّ البيان.
+
+    **و`paid_amount`/`remaining`/`state` (#283) من المصدر الواحد**
+    (`payments.invoice_summaries`): «اللي عليه» على هذه الفاتورة، وحالتُها
+    مشتقّةٌ لا عمودٌ في المسودّة. و`summaries` يُمرَّر من قائمةٍ مجمَّعة
+    باستعلامٍ واحد — لا استعلامان لكل سطر.
     """
+    payments = _payments_module()
+    summary = (summaries or {}).get(draft.pk) or payments.invoice_summary(draft)
     lines = [
         {
             "id": line.pk,
@@ -695,9 +721,13 @@ def draft_row(draft, *, masked) -> dict:
         "client": _client_payload(draft.client),
         "year": draft.year,
         "month": draft.month,
-        "period_label": _draft_period_label(draft),
+        "period_label": draft_period_label(draft),
         "subtotal": draft.subtotal,
         "total": draft.total,
+        "paid_amount": summary.paid_amount,
+        "remaining": summary.remaining,
+        "state": summary.state,
+        "state_label": summary.state_label,
         "status": draft.status,
         "status_label": FEE_DRAFT_STATUS_LABELS.get(draft.status, ""),
         "generated_at": draft.generated_at.isoformat(),
@@ -767,9 +797,11 @@ def subscriptions_payload(tenant, *, user) -> list[dict]:
 
 def drafts_payload(tenant, *, user) -> list[dict]:
     masked = amounts_masked(tenant, user)
+    drafts = list(visible_drafts(tenant, user))
+    summaries = _payments_module().invoice_summaries(drafts)
     return [
-        draft_row(draft, masked=masked)
-        for draft in visible_drafts(tenant, user)
+        draft_row(draft, masked=masked, summaries=summaries)
+        for draft in drafts
     ]
 
 

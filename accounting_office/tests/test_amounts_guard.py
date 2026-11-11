@@ -137,9 +137,12 @@ class AmountKeysGuardTest(SimpleTestCase):
             # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
             # #282: `amount` ثلاث مرّات (الاشتراكُ والإضافةُ وسعرُ الخدمة)،
             # و`subtotal`/`total` لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
+            # #283: `amount` ثلاث مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في
+            # `PAYMENT_AMOUNT_KEYS`، فلا مبلغَ يمرّ بلا قناع.
             [
                 "annual_sales", "suggested_price", "amount", "debit", "credit",
                 "amount", "amount", "amount", "subtotal", "total",
+                "amount", "amount", "amount",
             ],
         )
         self.assertEqual(
@@ -187,7 +190,11 @@ class ModelAmountGuardTest(SimpleTestCase):
                 "FeeDraft.total",
                 "FeeDraftLine.amount",
                 "FeeExtraService.amount",
+                # #283: مبلغُ الدفعة وتخصيصُها والشطب — مسجَّلةٌ لا مُعفاة.
+                "FeePayment.amount",
+                "FeePaymentAllocation.amount",
                 "FeeSubscription.amount",
+                "FeeWriteOff.amount",
                 # #275: مبلغُ الالتزام — مبلغٌ مسجَّلٌ لا مُعفى.
                 "Obligation.amount",
                 "ServicePackage.suggested_price",

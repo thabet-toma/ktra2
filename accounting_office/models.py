@@ -3798,3 +3798,252 @@ class FeeDraftLine(models.Model):
         if self.draft_id:
             self.tenant_id = self.draft.tenant_id
         super().save(*args, **kwargs)
+
+
+# ── الدفعات و«اللي عليه» وكشف الحساب (#283، الجزء أ) ─────────────────────────
+#
+# **الدفعةُ سندُ قبضٍ رقيق، والقيمةُ الكاملةُ مشتقّة**: التخصيصُ (`FeePaymentAllocation`)
+# والشطبُ (`FeeWriteOff`) صفوفٌ إلحاقيّةٌ تُقرأ، و«المتبقّي» و«الرصيدُ الدائن» لا
+# عمودَ لهما — تُحسبان في `accounting_office/payments.py` (`client_due`) مرّةً واحدة.
+# عمودٌ مخزَّنٌ ثانٍ كان سيختلف عن الصفوف عند أوّل شطبٍ أو تخصيص، ويُصلَح بالكذب.
+#
+# **ولا حذفَ ولا تعديل**: `FeePayment`/`FeePaymentAllocation`/`FeeWriteOff` تُنشأ
+# ولا تُلمَس بعدها (لا `PUT` ولا `PATCH` ولا `DELETE`)، والقيدُ في القاعدة للشطب
+# `> 0` وللتخصيص `> 0`، ورقمُ الإشعار فريدٌ لكل مكتب.
+FEE_PAYMENT_METHOD_CASH = "cash"
+FEE_PAYMENT_METHOD_CHEQUE = "cheque"
+FEE_PAYMENT_METHOD_TRANSFER = "transfer"
+FEE_PAYMENT_METHOD_CARD = "card"
+FEE_PAYMENT_METHOD_CHOICES: list[tuple[str, str]] = [
+    (FEE_PAYMENT_METHOD_CASH, "نقد"),
+    (FEE_PAYMENT_METHOD_CHEQUE, "شيك"),
+    (FEE_PAYMENT_METHOD_TRANSFER, "تحويل"),
+    (FEE_PAYMENT_METHOD_CARD, "بطاقة"),
+]
+FEE_PAYMENT_METHOD_LABELS: dict[str, str] = dict(FEE_PAYMENT_METHOD_CHOICES)
+
+
+def assert_positive_fee_amount(amount, *, field="amount") -> None:
+    """مبلغُ دفعةٍ أو تخصيصٍ أو شطب: **أكبرُ من صفر** وبخانتين كسائر الموديول.
+
+    و`assert_fee_amount` وحدها لا تكفي: هي تسمح بالصفر لأن مبلغَ مسودّةٍ قد
+    يكون صفراً، والدفعةُ الصفريّةُ سطرٌ لا معنى له في الحساب.
+    """
+    assert_fee_amount(amount, field=field)
+    if (amount if isinstance(amount, Decimal) else Decimal(str(amount))) <= 0:
+        raise ValidationError({field: "المبلغ يجب أن يكون أكبر من صفر."})
+
+
+class FeePayment(models.Model):
+    """دفعةٌ من الزبون — سندُ قبضٍ لا يُعدَّل ولا يُحذف بعد إنشائه.
+
+    **ولا حقلَ عملة**: كـ`FeeDraft` — الأتعابُ بعملة المكتب الواحدة، وإدخالُ
+    دفعةٍ بعملةٍ أخرى تحويلٌ لا دفعة.
+
+    **و`amount` مبلغُ السند، لا مبلغُ تخصيصه**: الجزءُ غيرُ المخصَّص **رصيدٌ
+    دائن** يُحسب من الصفوف (`credit` في `payments.py`) ولا يُخزَّن هنا هدراً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_payments",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="fee_payments",
+        verbose_name="الزبون",
+    )
+    method = models.CharField(
+        max_length=20, choices=FEE_PAYMENT_METHOD_CHOICES, verbose_name="طريقة الدفع",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+    paid_at = models.DateField(verbose_name="تاريخ الدفع")
+    note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="ملاحظة",
+    )
+    #: `{year}-{n:05d}` من العدّاد المقفول (`FeeReceiptSequence`) — فريدٌ للمكتب.
+    receipt_number = models.CharField(max_length=30, verbose_name="رقم الإشعار")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_payments_created",
+        verbose_name="سجّلها",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "دفعة أتعاب"
+        verbose_name_plural = "دفعات الأتعاب"
+        ordering = ["-paid_at", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "receipt_number"], name="uniq_fee_payment_receipt",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="fee_payment_amount_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client", "paid_at"],
+                name="office_fee_payment_client",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.receipt_number}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        assert_positive_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class FeeReceiptSequence(models.Model):
+    """عدّادُ أرقام الإشعارات — **القفلُ والترقيم** كـ`ClientBookSequence`.
+
+    `select_for_update` على الصفّ يُسلسل الكُتّاب داخل `transaction.atomic`،
+    والرقمُ يُنسخ إلى `FeePayment.receipt_number`. **لا `MAX+1` ولا `count+1`**:
+    كلاهما يقرأ لقطةً قديمة تحت التزامن فيكرّر رقماً أو يُحدث فجوة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_receipt_sequences",
+        verbose_name="المكتب",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    last_number = models.PositiveIntegerField(default=0, verbose_name="آخر رقم")
+
+    class Meta:
+        verbose_name = "عدّاد إشعارات الأتعاب"
+        verbose_name_plural = "عدّادات إشعارات الأتعاب"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "year"], name="uniq_fee_receipt_sequence",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.year}={self.last_number}"
+
+
+class FeePaymentAllocation(models.Model):
+    """تخصيصُ جزءٍ من دفعةٍ على مسودّةٍ معتمدة — **صفٌّ لكل (دفعة، مسودّة)**.
+
+    والفرادةُ على `(payment, draft)` تجعل تخصيصَين لنفس المسودّة من الدفعة نفسها
+    مستحيلاً في القاعدة: التصحيحُ تخصيصٌ من دفعةٍ أخرى أو شطبٌ، لا صفٌّ ثانٍ في
+    الدفعة نفسها يُقرأ معه مجموعاً مضاعفاً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_payment_allocations",
+        verbose_name="المكتب",
+    )
+    payment = models.ForeignKey(
+        FeePayment,
+        on_delete=models.CASCADE,
+        related_name="allocations",
+        verbose_name="الدفعة",
+    )
+    #: `PROTECT`: مسودّةٌ عليها دفعاتٌ لا تُمحى من تحت تخصيصاتها.
+    draft = models.ForeignKey(
+        FeeDraft,
+        on_delete=models.PROTECT,
+        related_name="allocations",
+        verbose_name="المسودّة",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+
+    class Meta:
+        verbose_name = "تخصيص دفعة"
+        verbose_name_plural = "تخصيصات الدفعات"
+        ordering = ["id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["payment", "draft"], name="uniq_fee_payment_allocation",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0),
+                name="fee_payment_allocation_amount_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "draft"], name="office_fee_allocation_draft",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.payment_id}->{self.draft_id}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        if self.payment_id:
+            self.tenant_id = self.payment.tenant_id
+        assert_positive_fee_amount(self.amount)
+        super().save(*args, **kwargs)
+
+
+class FeeWriteOff(models.Model):
+    """شطبُ جزءٍ من مسودّةٍ معتمدة — **سطرٌ إلحاقيّ** بسببٍ مكتوبٍ ومَن كتبه.
+
+    الشطبُ يخفّض `remaining` ولا يمحو الفاتورةَ ولا الدفعة: «تنازلنا عن المتبقّي»
+    قرارٌ يُقرأ في الكشف، لا تصحيحُ مجموعةٍ يُخفي أثرَه.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_write_offs",
+        verbose_name="المكتب",
+    )
+    draft = models.ForeignKey(
+        FeeDraft,
+        on_delete=models.PROTECT,
+        related_name="write_offs",
+        verbose_name="المسودّة",
+    )
+    amount = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="المبلغ")
+    #: إلزاميٌّ غيرُ فارغ — يفرضه `payments.write_off_fee_draft` لا القاعدة.
+    reason = models.CharField(max_length=300, verbose_name="السبب")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_write_offs",
+        verbose_name="شطبه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الشطب")
+
+    class Meta:
+        verbose_name = "شطب مسودّة أتعاب"
+        verbose_name_plural = "شطوب مسودّات الأتعاب"
+        ordering = ["id"]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(amount__gt=0), name="fee_write_off_amount_positive",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "draft"], name="office_fee_writeoff_draft",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.draft_id}={self.amount}"
+
+    def save(self, *args, **kwargs):
+        if self.draft_id:
+            self.tenant_id = self.draft.tenant_id
+        assert_positive_fee_amount(self.amount)
+        super().save(*args, **kwargs)
