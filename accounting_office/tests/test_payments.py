@@ -37,6 +37,7 @@ from accounting_office.models import (
     OfficeService,
     PeriodTask,
     TaxCard,
+    assert_positive_fee_amount,
 )
 from core.modules import invalidate_module_cache
 from tenants.models import Currency, UserCompanyMembership
@@ -453,21 +454,36 @@ class ServiceAmountValidationTest(PaymentsTestCase):
         self.assertEqual(FeePayment.objects.count(), 0)
         self.assertEqual(FeeReceiptSequence.objects.count(), 0)
 
+    def assert_refused_by_the_amount_guard(self, ctx, amount, *, field):
+        """الخطأُ خطأُ الصيغة نفسُه لا أيُّ `ValidationError` — «يتجاوز» لا يُقبل بدلاً منه."""
+        with self.assertRaises(ValidationError) as guard:
+            assert_positive_fee_amount(amount, field=field)
+        self.assertEqual(ctx.exception.message_dict, guard.exception.message_dict)
+
     def test_explicit_allocations_and_write_offs_refuse_them_too(self):
-        client = self.make_client()
-        draft = self.make_draft(client, "300")
+        # زبونٌ ومسودّةٌ جديدان لكل حالة، والدفعةُ (250) والمتبقّي (300) أكبرُ من
+        # أيّ تقريب (`100.015 → 100.02`): فلا يُرفض المبلغُ بذريعة «يتجاوز» بدل
+        # عدد الخانات، ولا يغيّر سقوطُ حالةٍ شرطَ التي بعدها.
         for amount in self.BAD_AMOUNTS:
-            with self.subTest(allocation=amount), self.assertRaises(ValidationError):
-                payments.create_payment(
-                    self.tenant, client,
-                    amount="100.00", method="cash",
-                    paid_at=datetime.date(2026, 5, 1), actor=self.owner,
-                    allocations=[{"draft": draft.pk, "amount": amount}],
-                )
-            with self.subTest(write_off=amount), self.assertRaises(ValidationError):
-                payments.write_off_fee_draft(
-                    draft, amount=amount, reason="سبب", actor=self.owner,
-                )
+            with self.subTest(allocation=amount):
+                client = self.make_client(f"زبون التخصيص {amount}")
+                draft = self.make_draft(client, "300")
+                with self.assertRaises(ValidationError) as ctx:
+                    payments.create_payment(
+                        self.tenant, client,
+                        amount="250.00", method="cash",
+                        paid_at=datetime.date(2026, 5, 1), actor=self.owner,
+                        allocations=[{"draft": draft.pk, "amount": amount}],
+                    )
+                self.assert_refused_by_the_amount_guard(ctx, amount, field="allocations")
+            with self.subTest(write_off=amount):
+                client = self.make_client(f"زبون الشطب {amount}")
+                draft = self.make_draft(client, "300")
+                with self.assertRaises(ValidationError) as ctx:
+                    payments.write_off_fee_draft(
+                        draft, amount=amount, reason="سبب", actor=self.owner,
+                    )
+                self.assert_refused_by_the_amount_guard(ctx, amount, field="amount")
         self.assertEqual(FeePayment.objects.count(), 0)
         self.assertEqual(FeePaymentAllocation.objects.count(), 0)
         self.assertEqual(FeeWriteOff.objects.count(), 0)
