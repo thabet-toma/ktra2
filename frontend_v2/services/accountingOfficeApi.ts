@@ -19,7 +19,10 @@ import {
 import { resolveTenantId } from '../utils/tenantContext';
 import type {
   ApplyPackageResult,
+  BookAccountRow,
+  BookEntryRow,
   CalendarPayload,
+  ClientBookRow,
   ClientDocumentsPayload,
   ClientEventsPayload,
   ClientEventRow,
@@ -38,6 +41,8 @@ import type {
   OfficeDocumentItemRow,
   OfficeServiceRow,
   ObligationRow,
+  PendingEntryPayload,
+  PendingEntryRow,
   ServicePackageRow,
   ServiceSuggestion,
   SettingRow,
@@ -47,8 +52,13 @@ import type {
 
 export type {
   ApplyPackageResult,
+  BookAccountRow,
+  BookChoice,
+  BookEntryLineRow,
+  BookEntryRow,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientBookRow,
   ClientDocumentsPayload,
   ClientEventRow,
   ClientEventsPayload,
@@ -76,6 +86,9 @@ export type {
   OfficeDocumentItemRow,
   OfficeDocumentItemsPayload,
   OfficeServiceRow,
+  PendingDocument,
+  PendingEntryPayload,
+  PendingEntryRow,
   ServicePackageRow,
   ServiceSuggestion,
   SettingRow,
@@ -105,6 +118,8 @@ const READY_TO_SEND = `${BASE}ready-to-send/`;
 const REMINDER_LOG = `${BASE}reminder-log/`;
 const REMINDER_TEMPLATES = `${BASE}reminder-templates/`;
 const OFFICE_HOLIDAYS = `${BASE}office-holidays/`;
+// #286: دفترُ الزبون — الدفاترُ وشجرتُها وحركاتُها و«للإدخال» (الجزء أ، خادمياً).
+const CLIENT_BOOKS = `${BASE}client-books/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -1008,3 +1023,99 @@ export const createOfficeHoliday = (payload: {
 
 export const deleteOfficeHoliday = (id: number): Promise<void> =>
   apiDelete(`${OFFICE_HOLIDAYS}${id}/`, tenantOpts());
+
+
+// ── دفترُ الزبون (#286/ب) ────────────────────────────────────────────────────
+//
+// مرآةُ `OfficeClientBookViewSet`: مسارُه مفتاحُه **معرّفُ الزبون** لا معرّفُ
+// الدفتر (دفترٌ واحد لكل زبون)، ولا سنةَ إلا في قائمة الحركات — الغيابُ «كلُّ
+// السنوات»، وهو ما يحتاجه اشتقاقُ «للإدخال» (ورقةٌ قد تُدخل بحركةٍ في سنة أخرى).
+// والقوائمُ تُقرأ بـ`apiGetObject` لا `apiGetList`: كاشُ الأوفلاين على حركاتٍ
+// ودفترٍ يُظهر تاريخاً قديماً في شاشةٍ تُكتب فيها — والقراءةُ يجب أن تكون حيّة.
+
+/** بندٌ في طلب إنشاء الحركة — **`null` للمبلغ الفارغ**: الخادم يرفض `''` 400. */
+export interface BookEntryLineWrite {
+  account_code: string;
+  debit: string | null;
+  credit: string | null;
+  side_party: string;
+}
+
+export interface BookEntryWrite {
+  entry_date: string;
+  kind: string;
+  memo?: string;
+  documents?: number[];
+  lines: BookEntryLineWrite[];
+}
+
+/** كلُّ دفترٍ يراه العضو — بلا قوائم الأنواع (المسارُ المفرد وحده يحملها). */
+export const listClientBooks = (): Promise<ClientBookRow[]> =>
+  apiGetObject<ClientBookRow[]>(CLIENT_BOOKS, tenantOpts());
+
+/** دفترُ زبونٍ واحد — و404 حين لا دفترَ له (خدمةُ مسك الدفاتر ليست نشطة). */
+export const getClientBook = (clientId: number): Promise<ClientBookRow> =>
+  apiGetObject<ClientBookRow>(`${CLIENT_BOOKS}${clientId}/`, tenantOpts());
+
+/** شجرةُ حساب الزبون — تُقرأ لكل من يرى الزبون. */
+export const listBookAccounts = (clientId: number): Promise<BookAccountRow[]> =>
+  apiGetObject<BookAccountRow[]>(`${CLIENT_BOOKS}${clientId}/accounts/`, tenantOpts());
+
+/** حسابٌ يضيفه المكتب لشجرة زبون — بمفتاح `office.clients.write`. */
+export const addBookAccount = (
+  clientId: number,
+  payload: {
+    code: string;
+    name: string;
+    parent_code?: string;
+    account_type: string;
+  },
+): Promise<BookAccountRow> =>
+  apiPostObject<BookAccountRow>(
+    `${CLIENT_BOOKS}${clientId}/accounts/`, payload, tenantOpts(),
+  );
+
+/** حركاتُ الدفتر — بلا `year` تُعاد كلُّ السنوات. */
+export const listBookEntries = (
+  clientId: number,
+  year?: number,
+): Promise<BookEntryRow[]> =>
+  apiGetObject<BookEntryRow[]>(`${CLIENT_BOOKS}${clientId}/entries/`, {
+    ...tenantOpts(),
+    query: { year: year ?? undefined },
+  });
+
+/** إدخالُ حركة — الرقمُ والتوازنُ والترقيمُ أحكامُ خادمٍ لا واجهة. */
+export const createBookEntry = (
+  clientId: number,
+  payload: BookEntryWrite,
+): Promise<BookEntryRow> =>
+  apiPostObject<BookEntryRow>(
+    `${CLIENT_BOOKS}${clientId}/entries/`, payload, tenantOpts(),
+  );
+
+/** التصحيحُ بحركةٍ عكسية — الأصلُ يبقى، وأوراقُه تعود إلى «للإدخال». */
+export const reverseBookEntry = (
+  clientId: number,
+  entryId: number,
+  payload: { memo?: string; entry_date?: string | null } = {},
+): Promise<BookEntryRow> =>
+  apiPostObject<BookEntryRow>(
+    `${CLIENT_BOOKS}${clientId}/entries/${entryId}/reverse/`, payload, tenantOpts(),
+  );
+
+/** انتقالُ نوع الدفتر — الشروطُ الثلاثةُ في الخدمة، والرسالةُ تصل من الخادم. */
+export const changeClientBookKind = (
+  clientId: number,
+  kind: string,
+): Promise<ClientBookRow> =>
+  apiPostObject<ClientBookRow>(
+    `${CLIENT_BOOKS}${clientId}/kind/`, { kind }, tenantOpts(),
+  );
+
+/**
+ * «للإدخال»: أوراقٌ واصلةٌ بلا حركةٍ حيّة، مجمَّعةً بالزبون والشهر — مشتقّةً في
+ * الخادم. تُقرأ في شاشة «اليوم» بـ`total`، وفي تبويب الدفتر للأوراق المختارة.
+ */
+export const getPendingEntry = (): Promise<PendingEntryPayload> =>
+  apiGetObject<PendingEntryPayload>(`${CLIENT_BOOKS}pending-entry/`, tenantOpts());

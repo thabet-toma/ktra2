@@ -30,6 +30,7 @@ import {
 import {
   OFFICE_OWNER_ROLE,
   OFFICE_SETTINGS_PATH,
+  SETTINGS_GROUP_OFFICE,
   SETTINGS_GROUP_REMINDERS,
   SETTINGS_GROUP_SCHEDULE,
   clientFilePath,
@@ -48,6 +49,7 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeClientBooksTree } from './OfficeClientBooksTree';
 import { OfficeCustomRulesSection } from './OfficeCustomRulesSection';
 import { OfficeDeadlineRulesSection } from './OfficeDeadlineRulesSection';
 import { OfficeDocumentItemsSection } from './OfficeDocumentItemsSection';
@@ -529,6 +531,15 @@ export const OfficeSettingsScreen: React.FC = () => {
             </>
           ) : null}
           {rows.map(renderSetting)}
+          {/* #286/ب: شجرةُ حساب الزبون بجانب إعداد طريقة الإدخال. قراءتُها لكل
+              عضو، وإضافتُها بـ`office.clients.write` لا بمفتاح الإعدادات — فالقسمُ
+              يقرّر ذلك بنفسه ولا يُقيَّد بـ`canManageSettings`. */}
+          {group.id === SETTINGS_GROUP_OFFICE ? (
+            <>
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              <OfficeClientBooksTree />
+            </>
+          ) : null}
           {/* #280/ب: نصوصُ التذكير وعطلُ المكتب داخل مجموعتهما — تُقرأ لكل عضو،
               وتُكتب بمفتاح الإعدادات وحده (كلُّ قسمٍ يقرّر ذلك بنفسه). */}
           {group.id === SETTINGS_GROUP_REMINDERS ? (

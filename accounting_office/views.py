@@ -33,6 +33,8 @@ from rest_framework.response import Response
 
 from accounting_office import client_books, deadlines, services
 from accounting_office.models import (
+    BOOK_ACCOUNT_TYPE_CHOICES,
+    BOOK_ENTRY_KIND_CHOICES,
     TAX_SYSTEM_CHOICES,
     ClientBook,
     ClientContact,
@@ -1920,13 +1922,26 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         return client
 
     def _book_row(self, book):
-        return client_books.book_row(
+        row = client_books.book_row(
             book,
             writable=client_books.book_is_writable(book),
             entry_method=services.resolve_setting(
                 self.tenant, client_books.ENTRY_METHOD_KEY, client=book.client,
             ),
         )
+        # #286/ب: قائمتا الأنواع وتسمياتهما تُقرأان من الخادم كما تُقرأ
+        # `frequency_choices` و`direction_choices` في بقية الموديول — الواجهةُ لا
+        # تحمل جدولَ تسمياتٍ محليّاً يفترق عن `BOOK_*_CHOICES` عند أول تعديل.
+        # (الشكلُ هنا لا في `client_books.book_row`: قائمتان ثابتتان لا خدمة.)
+        row["kind_choices"] = [
+            {"value": value, "label": label}
+            for value, label in BOOK_ENTRY_KIND_CHOICES
+        ]
+        row["account_type_choices"] = [
+            {"value": value, "label": label}
+            for value, label in BOOK_ACCOUNT_TYPE_CHOICES
+        ]
+        return row
 
     def list(self, request, *args, **kwargs):
         return Response(client_books.books_payload(self.tenant, request.user))
