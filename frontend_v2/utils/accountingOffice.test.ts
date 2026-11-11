@@ -92,6 +92,7 @@ import {
   type ClientBookRow,
   type DeadlineRuleRow,
   type DocumentCell,
+  type DocumentRowPayload,
   type ObligationRow,
   type PendingEntryRow,
   type OfficeServiceRow,
@@ -1244,6 +1245,7 @@ test('أوراقُ الحركات الحيّة وحدها تُحسب مُدخل�
 
 test('أوراقُ الشهر للاختيار: الواصلةُ التي لم تدخل حركةً حيّة فقط', () => {
   const payload = {
+    annual: [],
     items: [
       {
         item_code: 'ps_vat_declaration',
@@ -1271,6 +1273,46 @@ test('أوراقُ الشهر للاختيار: الواصلةُ التي لم �
   // شهرٌ فاسد أو بلا أوراقَ ⇒ فارغة، لا كلُّ الأوراق.
   assert.deepEqual(pendingMonthDocuments(payload, booked, ''), []);
   assert.deepEqual(pendingMonthDocuments(payload, booked, '2025-03'), []);
+});
+
+test('الورقةُ السنوية تُعرض في شهر بدء فترتها — وإن كان كانون الثاني', () => {
+  // `period_start` للسنوية أوّلُ السنة، فيعدّها الخادمُ في صفّ كانون الثاني؛
+  // بلا مسار `annual` كان الصفُّ يُفتح على «ما في أوراق» ولا يُصفَّر أبداً.
+  const annualRow = (over: Partial<DocumentRowPayload>): DocumentRowPayload => ({
+    row_id: 21,
+    client_id: 7,
+    item_code: 'annual_tax_return',
+    name: 'إقرار ضريبة الدخل السنوي',
+    service_codes: [],
+    cadence: 'annual',
+    period_start: '2026-01-01',
+    period_end: '2026-12-31',
+    period_label: '2026',
+    status: 'received',
+    status_label: 'وصلت',
+    received_on: '2026-02-10',
+    received_by_name: '',
+    channel: '',
+    channel_label: '',
+    files_count: 0,
+    ...over,
+  });
+  const payload = {
+    items: [],
+    annual: [
+      annualRow({ row_id: 21 }),
+      // واصلةٌ لكنها مُدخلةٌ في حركةٍ حيّة — لا تعود إلى القائمة.
+      annualRow({ row_id: 22 }),
+      // لم تصل بعد — لا تُعرض.
+      annualRow({ row_id: 23, status: 'required' }),
+    ],
+  };
+  const pending = pendingMonthDocuments(payload, new Set([22]), '2026-01');
+  assert.deepEqual(pending.map((row) => row.row_id), [21]);
+  assert.equal(pending[0].name, 'إقرار ضريبة الدخل السنوي');
+  assert.equal(pending[0].received_on, '2026-02-10');
+  // وشباط ليس شهرَ بدء الفترة: السنويةُ لا تتكرّر في كل شهر.
+  assert.deepEqual(pendingMonthDocuments(payload, new Set([22]), '2026-02'), []);
 });
 
 test('تعدّدُ الأوراق في «إدخال الشهر» وحده', () => {

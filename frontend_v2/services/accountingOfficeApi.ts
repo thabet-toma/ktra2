@@ -22,6 +22,7 @@ import type {
   BookAccountRow,
   BookEntryRow,
   CalendarPayload,
+  ClientBookChoicesPayload,
   ClientBookRow,
   ClientDocumentsPayload,
   ClientEventsPayload,
@@ -58,6 +59,7 @@ export type {
   BookEntryRow,
   CalendarDeadlineRow,
   CalendarPayload,
+  ClientBookChoicesPayload,
   ClientBookRow,
   ClientDocumentsPayload,
   ClientEventRow,
@@ -1057,6 +1059,23 @@ export const listClientBooks = (): Promise<ClientBookRow[]> =>
 export const getClientBook = (clientId: number): Promise<ClientBookRow> =>
   apiGetObject<ClientBookRow>(`${CLIENT_BOOKS}${clientId}/`, tenantOpts());
 
+/**
+ * تسمياتُ الأنواع الثلاثة من النموذج: نوعا الدفتر، وأنواعُ الحركة، وأنواعُ الحساب.
+ *
+ * `book_kinds` **لا يحملها أيّ ردٍّ آخر**: `kind_label` في سطر الدفتر يسمّي النوعَ
+ * الحاليَّ وحده، وهذه تحتاجها شاشةُ الفتح ومنتقي الانتقال معاً.
+ */
+export const getClientBookChoices = (): Promise<ClientBookChoicesPayload> =>
+  apiGetObject<ClientBookChoicesPayload>(`${CLIENT_BOOKS}choices/`, tenantOpts());
+
+/** دفترٌ جديد لزبونٍ بلا دفتر — بمفتاح `office.clients.write`، والشروطُ تحكمها الخدمة. */
+export const createClientBook = (payload: {
+  client_id: number;
+  kind: string;
+  opened_on?: string;
+}): Promise<ClientBookRow> =>
+  apiPostObject<ClientBookRow>(CLIENT_BOOKS, payload, tenantOpts());
+
 /** شجرةُ حساب الزبون — تُقرأ لكل من يرى الزبون. */
 export const listBookAccounts = (clientId: number): Promise<BookAccountRow[]> =>
   apiGetObject<BookAccountRow[]>(`${CLIENT_BOOKS}${clientId}/accounts/`, tenantOpts());
@@ -1115,7 +1134,8 @@ export const changeClientBookKind = (
 
 /**
  * «للإدخال»: أوراقٌ واصلةٌ بلا حركةٍ حيّة، مجمَّعةً بالزبون والشهر — مشتقّةً في
- * الخادم. تُقرأ في شاشة «اليوم» بـ`total`، وفي تبويب الدفتر للأوراق المختارة.
+ * الخادم. **تُقرأ في شاشة «اليوم» وحدها** (`total` للعدّاد، والصفوفُ لكبستها)؛
+ * وأوراقُ شهرٍ داخل تبويب الدفتر تُشتقّ من شبكة الأوراق لا من هنا.
  */
 export const getPendingEntry = (): Promise<PendingEntryPayload> =>
   apiGetObject<PendingEntryPayload>(`${CLIENT_BOOKS}pending-entry/`, tenantOpts());

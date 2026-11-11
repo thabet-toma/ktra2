@@ -17,10 +17,9 @@ import {
   addBookAccount,
   getClientBook,
   listBookAccounts,
-  listOfficeClients,
+  listClientBooks,
   type BookAccountRow,
   type ClientBookRow,
-  type OfficeClientRow,
 } from '../../services/accountingOfficeApi';
 import { humanizeThrown } from '../../utils/drfError';
 import { usePermissions } from '../../contexts/PermissionsContext';
@@ -37,7 +36,7 @@ export const OfficeClientBooksTree: React.FC = () => {
   const { can } = usePermissions();
   const canWrite = can('office.clients.write');
 
-  const [clients, setClients] = useState<OfficeClientRow[] | null>(null);
+  const [clients, setClients] = useState<ClientBookRow[] | null>(null);
   const [clientsError, setClientsError] = useState('');
   const [clientId, setClientId] = useState<number | null>(null);
   const [book, setBook] = useState<ClientBookRow | null>(null);
@@ -52,14 +51,16 @@ export const OfficeClientBooksTree: React.FC = () => {
   useEffect(() => {
     let cancelled = false;
     setClientsError('');
-    listOfficeClients()
+    // **ذوو الدفاتر وحدهم**: زبونٌ بلا دفترٍ لا شجرةَ له، فالمنتقي كان يُغرِق
+    // القائمةَ بزبائن لا يملكون شيئاً يُعرض — والدفترُ يُفتح من تبويب «الدفتر».
+    listClientBooks()
       .then((rows) => {
         if (!cancelled) setClients(rows);
       })
       .catch((failure) => {
         if (!cancelled) {
           setClients([]);
-          setClientsError(humanizeThrown(failure, 'تعذّر تحميل زبائن المكتب.'));
+          setClientsError(humanizeThrown(failure, 'تعذّر تحميل دفاتر الزبائن.'));
         }
       });
     return () => {
@@ -106,6 +107,11 @@ export const OfficeClientBooksTree: React.FC = () => {
 
   const typeChoices = useMemo(() => book?.account_type_choices ?? [], [book]);
   const rows = accounts ?? [];
+  // الحسابُ المعطَّل يبقى في الشجرة للقراءة، ولا يُختار أباً لحسابٍ جديد.
+  const parentChoices = useMemo(
+    () => rows.filter((account) => account.is_active),
+    [rows],
+  );
   const writable = Boolean(book?.writable);
   const canAdd = canWrite && writable;
 
@@ -138,8 +144,8 @@ export const OfficeClientBooksTree: React.FC = () => {
         شجرةُ حساب الزبون
       </h3>
       <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-        لكل زبونٍ شجرتُه المنسوخة عند فتح دفتره — إضافةُ حسابٍ هنا تخصّه وحده ولا تمسّ
-        شجرةَ غيره. والحسابُ المضافةُ لا تُحذف، تُعطَّل.
+        لكل زبونٍ شجرتُه المنسوخة عند فتح دفتره — إضافةُ حسابٍ هنا تخصّه وحده ولا
+        تمسّ شجرةَ غيره، والحسابُ المضافُ لا يُحذف.
       </p>
 
       {clientsError ? (
@@ -150,7 +156,7 @@ export const OfficeClientBooksTree: React.FC = () => {
         <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">جاري التحميل…</p>
       ) : clients.length === 0 ? (
         <p className="mt-2 text-[11.5px] text-slate-500 dark:text-slate-400">
-          ما في زبائن في المكتب بعد.
+          ما في دفاتر زبائن بعد — يُفتح الدفترُ من تبويب «الدفتر» في ملفّ الزبون.
         </p>
       ) : (
         <>
@@ -167,7 +173,9 @@ export const OfficeClientBooksTree: React.FC = () => {
             >
               <option value="">— اختر زبوناً —</option>
               {clients.map((client) => (
-                <option key={client.id} value={client.id}>{client.name}</option>
+                <option key={client.client_id} value={client.client_id}>
+                  {client.client_name}
+                </option>
               ))}
             </select>
           </label>
@@ -203,7 +211,7 @@ export const OfficeClientBooksTree: React.FC = () => {
                 </p>
               ) : null}
               <div className="mt-2 max-h-72 overflow-auto">
-                <table className="w-full min-w-[420px] text-right">
+                <table className="w-full min-w-[420px] text-start">
                   <thead>
                     <tr className="border-b border-slate-200 text-[10.5px] font-medium text-slate-400 dark:border-slate-700 dark:text-slate-500">
                       <th className="px-1 py-2 font-medium">الكود</th>
@@ -283,7 +291,7 @@ export const OfficeClientBooksTree: React.FC = () => {
                       className={`${officeInputClass} mt-1 block w-56`}
                     >
                       <option value="">— بلا أب —</option>
-                      {rows.map((account) => (
+                      {parentChoices.map((account) => (
                         <option key={account.code} value={account.code}>
                           {account.code} — {account.name}
                         </option>

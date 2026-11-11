@@ -1759,9 +1759,22 @@ export interface ClientBookRow {
   entry_method_label: string;
   writable: boolean;
   /** أنواعُ الحركة وتسمياتها — تصل من الخادم، فلا جدولَ تسمياتٍ في الواجهة. */
-  kind_choices?: BookChoice[];
+  entry_kind_choices?: BookChoice[];
   /** أنواعُ الحساب وتسمياتها — في المسار المفرد وحده (#286/ب). */
   account_type_choices?: BookChoice[];
+}
+
+/**
+ * حمولةُ `client-books/choices/`: تسمياتُ الأنواع الثلاثة من النموذج.
+ *
+ * **`book_kinds` لا `kind_choices`**: `kind` في هذا الموديول نوعُ **الدفتر**،
+ * وأنواعُ الحركة `entry_kinds`. والتسميةُ المضلّلة هي التي جعلت زرَّ الانتقال
+ * يبحث عن `double` في أنواع الحركة فيظهر دائماً «غيّر نوع الدفتر».
+ */
+export interface ClientBookChoicesPayload {
+  book_kinds: BookChoice[];
+  entry_kinds: BookChoice[];
+  account_types: BookChoice[];
 }
 
 /** بندُ حركةٍ — والمبلغُ `null` حين لا يرى العضو المبالغ فيُعرض «—». */
@@ -1941,9 +1954,15 @@ export function bookedDocumentIds(
  * المشروعُ لا يخزّن «انأدخلت» (د9): الورقةُ تخرج من القائمة لأن شرطَها صار
  * كاذباً. والاشتقاقُ هنا يستعمل الحمولتين القائمتين — شبكةَ الأوراق (بمعرّفات
  * صفوفها) وحركاتِ الدفتر (بأوراق كل حركة) — فلا نقطةَ جديدة تُخترع.
+ *
+ * **والقائمتان تُقرآن معاً**: `items` فيها الشهريّ وحده، و`annual` فيها السنويّ
+ * و`period_start` لها أوّلُ السنة. الخادمُ يعدّ الواصلةَ السنوية في صفّ **كانون
+ * الثاني** (`pending_entry_payload`)، فقراءةُ `items` وحدها كانت تفتح الصفَّ على
+ * «ما في أوراق بانتظار الإدخال» فلا تُصفَّر أبداً. والورقةُ السنوية تُعرض في شهر
+ * بدء فترتها وحدها — لا في كل شهر.
  */
 export function pendingMonthDocuments(
-  payload: Pick<ClientDocumentsPayload, 'items'>,
+  payload: Pick<ClientDocumentsPayload, 'items' | 'annual'>,
   booked: ReadonlySet<number>,
   month: string,
 ): PendingDocument[] {
@@ -1957,6 +1976,12 @@ export function pendingMonthDocuments(
       if (monthKeyOf(cell.month) !== key) return;
       rows.push({ row_id: cell.row_id, name: item.name, received_on: cell.received_on });
     });
+  });
+  payload.annual.forEach((row) => {
+    if (booked.has(row.row_id)) return;
+    if (row.status !== 'received') return;
+    if (monthKeyOf(row.period_start) !== key) return;
+    rows.push({ row_id: row.row_id, name: row.name, received_on: row.received_on });
   });
   return rows;
 }

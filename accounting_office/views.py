@@ -33,8 +33,6 @@ from rest_framework.response import Response
 
 from accounting_office import client_books, deadlines, services
 from accounting_office.models import (
-    BOOK_ACCOUNT_TYPE_CHOICES,
-    BOOK_ENTRY_KIND_CHOICES,
     TAX_SYSTEM_CHOICES,
     ClientBook,
     ClientContact,
@@ -1929,22 +1927,25 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
                 self.tenant, client_books.ENTRY_METHOD_KEY, client=book.client,
             ),
         )
-        # #286/ب: قائمتا الأنواع وتسمياتهما تُقرأان من الخادم كما تُقرأ
-        # `frequency_choices` و`direction_choices` في بقية الموديول — الواجهةُ لا
-        # تحمل جدولَ تسمياتٍ محليّاً يفترق عن `BOOK_*_CHOICES` عند أول تعديل.
-        # (الشكلُ هنا لا في `client_books.book_row`: قائمتان ثابتتان لا خدمة.)
-        row["kind_choices"] = [
-            {"value": value, "label": label}
-            for value, label in BOOK_ENTRY_KIND_CHOICES
-        ]
-        row["account_type_choices"] = [
-            {"value": value, "label": label}
-            for value, label in BOOK_ACCOUNT_TYPE_CHOICES
-        ]
+        # #286/ب: قائمتا التسميات تُبنيان في `client_books` كما تُبنى
+        # `frequency_choices`/`direction_choices` في الخدمات — لا جدولَ محليّاً
+        # هنا يفترق عن `BOOK_*_CHOICES` عند أول تعديل. والاسمُ `entry_kind_choices`
+        # لأن `kind` في هذا السطر نوعُ الدفتر لا نوعُ الحركة.
+        row["entry_kind_choices"] = client_books.entry_kind_choices()
+        row["account_type_choices"] = client_books.account_type_choices()
         return row
 
     def list(self, request, *args, **kwargs):
         return Response(client_books.books_payload(self.tenant, request.user))
+
+    @action(detail=False, methods=["get"], url_path="choices")
+    def choices(self, request):
+        """تسمياتُ الأنواع الثلاثة — **قراءةٌ لكل عضوٍ يراه الموديول**.
+
+        بلا مفتاح كتابة: من يفتح تبويب «الدفتر» يقرأ القوائمَ ليُدخل حركةً أو
+        يعرض زرَّ الانتقال، وإن لم يملك إنشاءَ دفترٍ جديد.
+        """
+        return Response(client_books.choices_payload())
 
     def retrieve(self, request, *args, **kwargs):
         """دفترُ زبونٍ واحد — **بمعرّف الزبون** كسائر المسارات تحته.
