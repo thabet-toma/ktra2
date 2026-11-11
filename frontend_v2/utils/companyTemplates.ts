@@ -7,7 +7,8 @@
  * الافتراضي — بلا قناع وبلا تغيير سلوك (قرار 16).
  */
 
-export type CompanyTemplateKey = 'general' | 'accounting_firm' | 'client_book' | 'tyres';
+export type CompanyTemplateKey =
+  | 'general' | 'accounting_firm' | 'client_book' | 'tyres' | 'accounting_office';
 
 export type CompanyTemplate = {
   key: CompanyTemplateKey;
@@ -48,6 +49,15 @@ export const COMPANY_TEMPLATES: readonly CompanyTemplate[] = [
     name: 'إطارات',
     icon: 'Disc',
     description: 'مطابقٌ اليوم لقالب «عام / تجاري» حرفياً — مفتاحٌ مستقل تُعلَّق عليه تخصيصات قطاع الإطارات لاحقاً.',
+  },
+  // ISSUE #271 — قالبُ موديول مكتب المحاسبة الجديد. كان في الخادم
+  // (`COMPANY_TEMPLATES` ومفتاحُ الترخيص `accounting_office`) وبلا بطاقةٍ هنا،
+  // فلا يقدر أحدٌ على إنشاء شركةٍ به من الشاشة. الوصفُ منقولٌ عن الخادم.
+  {
+    key: 'accounting_office',
+    name: 'مكتب محاسبة (الجديد)',
+    icon: 'Landmark',
+    description: 'مكتب محاسبة بموديول المكتب الجديد — زبون المكتب وبطاقته الضريبية وجهاته وإعداداته، بلا مخزون ولا استيراد.',
   },
 ];
 
