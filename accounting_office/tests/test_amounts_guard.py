@@ -31,7 +31,6 @@ from django.contrib.auth.models import User
 from django.db import models as django_models
 from django.test import SimpleTestCase, TestCase
 
-from accounting.models import Account
 from accounting_office import payments, services
 from accounting_office.models import FeeDraft, OfficeClient, TaxCard
 from accounting_office.services import set_office_setting
@@ -241,14 +240,6 @@ class AmountPayloadGuardTest(TestCase):
         )
         set_office_setting(cls.tenant, "tax_system", "PS")
         set_office_setting(cls.tenant, "office_size", "small")
-        # #284: الشطبُ صار يُرحّل قيداً، وحسابُ الديون المعدومة لا تحمله بذرةُ
-        # الشجرة (افتراضُ الإعداد فارغٌ بقرار — انظر `test_office_journal.py`).
-        cls.writeoff_account = Account.objects.create(
-            tenant=cls.tenant, code="5405", name="ديون معدومة", account_type="Expense",
-        )
-        set_office_setting(
-            cls.tenant, "office_journal_writeoff_account", cls.writeoff_account.code,
-        )
         cls.client_row = OfficeClient.objects.create(
             tenant=cls.tenant, name="زبون الحارس", responsible=cls.owner,
         )

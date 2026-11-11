@@ -54,9 +54,10 @@ REFERENCE_WRITEOFF = "office_fee_writeoff"
 
 #: حسابُ المدين لكل طريقة دفع — «بطاقة» تُقبض في البنك لا في الصندوق، والشيكُ
 #: الورقةُ في اليد لا نقداً (نفسُ تفريق `accounting/api.py` — `money_account_kind`).
+#: **والطرقُ الأربعُ المعلَنة وحدها** (`cash`/`cheque`/`transfer`/`card`): مفتاحٌ
+#: لطريقةٍ لا يمكن اختيارها يَعِد بما لا يقع، والمجهولةُ يردّها `_method_account_key`.
 METHOD_ACCOUNT_KEYS: dict[str, str] = {
     "cash": CASH_ACCOUNT_KEY,
-    "bank": BANK_ACCOUNT_KEY,
     "transfer": BANK_ACCOUNT_KEY,
     "card": BANK_ACCOUNT_KEY,
     "cheque": CHEQUE_ACCOUNT_KEY,
@@ -64,8 +65,20 @@ METHOD_ACCOUNT_KEYS: dict[str, str] = {
 
 QUANTUM = Decimal("0.01")
 
+#: اسمُ حساب الديون المعدومة وأبوه — يُنشأ عند أوّل شطب (انظر
+#: `ensure_writeoff_account`). والكودُ في السجلّ (`WRITEOFF_ACCOUNT_CODE`) لأنه
+#: افتراضُ إعدادٍ يُعرَض للمكتب.
+WRITEOFF_ACCOUNT_NAME = "ديون معدومة (Bad Debts)"
+WRITEOFF_ACCOUNT_PARENT_CODE = "52"
+
 
 def _money(value) -> Decimal:
+    """تقريبٌ إلى خانتين — **نسخةٌ من `payments._money` لا استيرادٌ لها**.
+
+    الوحدةُ يستوردها `payments` (نداءُ القيد)، فاستيرادُها منه دورةُ استيراد. ونسخةُ
+    سطرٍ واحدٍ لا تُكرّر قاعدة: لو صار التقريبُ سياسةً (خاناتٌ أو عملة) انتقلت إلى
+    `payments` أو إلى `core`.
+    """
     return Decimal(str(value)).quantize(QUANTUM)
 
 
@@ -221,6 +234,41 @@ def _method_account_key(method) -> str:
     return key
 
 
+# ── حسابُ الديون المعدومة: يُقرأ أو يُنشأ ────────────────────────────────────
+def ensure_writeoff_account(tenant):
+    """حسابُ مصروف الديون المعدومة — القائمَ أو يُنشأ تحت «52»، **مرّةً واحدة**.
+
+    **لا بذرةَ تحمله**: لا `COA_DATA` ولا `ACCOUNTING_FIRM_COA` فيه حسابُ ديونٍ
+    معدومة (تحقّقٌ مكتوب في `accounting_office/tests/test_office_journal.py`)،
+    فافتراضُ كودٍ غيرِ موجودٍ كان يجعل الشطبَ يردّ 400 في **كل** مكتب — وهو بندٌ
+    من التذكرة لا اختيارٌ للمكتب. فالحسابُ يُنشأ عند الحاجة بـ
+    `accounting.api.ensure_account` (نمط «الحسابُ يُنشأ من الكود ويُثبَّت في
+    الإعدادات»، نفسه في حسابات الشيكات).
+
+    **ولا يُنشأ لكودٍ صريحٍ كتبه المكتب**: كودٌ مغايرٌ للافتراضيّ ولا حسابَ له
+    يبقى خطأً يُرفَض 400 باسم المفتاح — إنشاءُ حسابٍ باسم «ديون معدومة» بكودٍ
+    مكتوبٍ غلطاً يُخفي الغلطةَ بدل أن يقولها.
+
+    و`ensure_account` بـ`get_or_create` على (الشركة، الكود)، فنداءٌ ثانٍ — أو
+    شطبٌ ثانٍ — لا يُنشئ حساباً ثانياً.
+    """
+    code = str(services.resolve_setting(tenant, WRITEOFF_ACCOUNT_KEY) or "").strip()
+    if not code:
+        return None
+    existing = accounting_api.get_account_by_code(tenant, code)
+    if existing is not None:
+        return existing
+    if code != settings_registry.WRITEOFF_ACCOUNT_CODE:
+        return None  # كودُ المكتب الغائب — يرفضه `_account` برسالته
+    return accounting_api.ensure_account(
+        tenant_id=_tenant_id(tenant),
+        code=code,
+        name=WRITEOFF_ACCOUNT_NAME,
+        account_type="Expense",
+        parent_code=WRITEOFF_ACCOUNT_PARENT_CODE,
+    )
+
+
 # ── الشطب ───────────────────────────────────────────────────────────────────
 def post_writeoff_journal(write_off, *, actor):
     """قيدُ الشطب: مدينٌ حسابُ الديون المعدومة، دائنٌ الذمّمُ المدينة بوسم الطرف.
@@ -240,6 +288,9 @@ def post_writeoff_journal(write_off, *, actor):
     client = draft.client
     partner = partner_for(client)
     amount = _money(write_off.amount)
+    # الحسابُ يُنشأ إن غاب **قبل** القيد: الشجرةُ المبذورة لا تحمل ديوناً معدومة،
+    # وافتراضُ التسجيل يشير إلى كودٍ لا وجود له في شجرةٍ قياسية.
+    ensure_writeoff_account(tenant)
     writeoff_account = _account(tenant, WRITEOFF_ACCOUNT_KEY)
     receivable_account = _account(tenant, RECEIVABLE_ACCOUNT_KEY)
     period = f"{draft.year}-{draft.month:02d}"

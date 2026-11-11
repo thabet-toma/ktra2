@@ -70,17 +70,6 @@ class PaymentsTestCase(APITestCase):
         invalidate_module_cache(cls.tenant.pk)
         services.set_office_setting(cls.tenant, "tax_system", "PS")
         services.set_office_setting(cls.tenant, "office_size", "small")
-        # #284: الشطبُ صار يُرحّل قيداً، وحسابُ الديون المعدومة **لا تحمله بذرةُ
-        # الشجرة** (افتراضُ الإعداد فارغٌ بقرار — انظر `test_office_journal.py`).
-        # فتُفتح هنا لأن اختبارات الشطب تختبر الشطبَ لا القرارَ المفتوح.
-        cls.writeoff_account = Account.objects.create(
-            tenant=cls.tenant, code="5405", name="ديون معدومة", account_type="Expense",
-        )
-        services.set_office_setting(
-            cls.tenant,
-            "office_journal_writeoff_account",
-            cls.writeoff_account.code,
-        )
 
         cls.office_manager_user = User.objects.create_user(
             username="pay_office_manager", password="x",

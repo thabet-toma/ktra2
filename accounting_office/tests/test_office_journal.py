@@ -77,12 +77,12 @@ class OfficeJournalTestCase(APITestCase):
         TaxCard.objects.create(client=client)
         return client
 
-    def make_draft(self, client, total):
+    def make_draft(self, client, total, *, year=2026, month=3):
         return FeeDraft.objects.create(
             tenant=self.tenant,
             client=client,
-            year=2026,
-            month=3,
+            year=year,
+            month=month,
             subtotal=Decimal(str(total)),
             total=Decimal(str(total)),
             status=FeeDraft.STATUS_APPROVED,
@@ -110,15 +110,6 @@ class OfficeJournalTestCase(APITestCase):
             reference_type=reference_type,
             reference_id=reference_id,
         )
-
-    def config_write_off_account(self, code="5405"):
-        """حسابُ ديونٍ معدومةٍ يصنعه المكتب — الشجرةُ المبذورة لا تحمله."""
-        Account.objects.get_or_create(
-            tenant=self.tenant,
-            code=code,
-            defaults={"name": "ديون معدومة", "account_type": "Expense"},
-        )
-        services.set_office_setting(self.tenant, "office_journal_writeoff_account", code)
 
 
 class PaymentJournalTest(OfficeJournalTestCase):
@@ -188,15 +179,21 @@ class PaymentJournalTest(OfficeJournalTestCase):
                 ]
                 self.assertEqual(credit_accounts, [self.receivable.pk])
 
-    def test_the_method_map_knows_a_bank_method_and_refuses_an_unknown_one(self):
-        """`bank` في الخريطة بقرار التذكرة (طريقةُ مصرفٍ مستقبلية) — وليست اليوم
-        قيمةً في `FEE_PAYMENT_METHOD_CHOICES`؛ والمجهولةُ تُرفض ولا تُخمَّن."""
+    def test_the_method_map_covers_the_declared_methods_and_refuses_others(self):
+        """الخريطةُ تحمل الطرقَ الأربعَ المعلَنة وحدها؛ والمجهولةُ — ومنها `bank`
+        التي لا وجودَ لها في `FEE_PAYMENT_METHOD_CHOICES` — تُرفض ولا تُخمَّن."""
         self.assertEqual(
-            office_journal._method_account_key("bank"),
+            set(office_journal.METHOD_ACCOUNT_KEYS),
+            {"cash", "transfer", "card", "cheque"},
+        )
+        self.assertEqual(
+            office_journal._method_account_key("transfer"),
             office_journal.BANK_ACCOUNT_KEY,
         )
-        with self.assertRaises(ValidationError):
-            office_journal._method_account_key("crypto")
+        for unknown in ("bank", "crypto"):
+            with self.subTest(method=unknown):
+                with self.assertRaises(ValidationError):
+                    office_journal._method_account_key(unknown)
 
 
 class ChequeJournalTest(OfficeJournalTestCase):
@@ -249,8 +246,12 @@ class ChequeJournalTest(OfficeJournalTestCase):
 
 
 class WriteOffJournalTest(OfficeJournalTestCase):
-    def test_a_write_off_posts_a_balanced_journal_against_the_writeoff_account(self):
-        self.config_write_off_account()
+    def test_a_write_off_creates_the_bad_debt_account_and_posts_a_balanced_journal(self):
+        """شجرةٌ قياسيةٌ **بلا** حساب ديونٍ معدومة: الشطبُ ينجح ويُنشئ `5290`."""
+        self.assertFalse(
+            Account.objects.filter(tenant=self.tenant, code="5290").exists(),
+            "البذرةُ القياسية صارت تحمل الحساب — يُراجَع قرارُ الإنشاء",
+        )
         client = self.make_client()
         draft = self.make_draft(client, "300")
         self.payment_of(client, "100.00")
@@ -258,6 +259,12 @@ class WriteOffJournalTest(OfficeJournalTestCase):
         write_off = payments.write_off_fee_draft(
             draft, amount="80.00", reason="تنازلٌ عن المتبقّي", actor=self.owner,
         )
+
+        account = Account.objects.get(tenant=self.tenant, code="5290")
+        self.assertEqual(account.name, "ديون معدومة (Bad Debts)")
+        self.assertEqual(account.account_type, "Expense")
+        self.assertEqual(account.parent.code, "52")
+        self.assertTrue(account.is_active)
 
         journal = self.journal_of(
             reference_type="office_fee_writeoff", reference_id=write_off.pk,
@@ -268,9 +275,7 @@ class WriteOffJournalTest(OfficeJournalTestCase):
             journal.transaction_date, timezone.localdate(write_off.created_at),
         )
         lines = list(journal.lines.all())
-        writeoff_line = next(
-            line for line in lines if line.account.code == "5405"
-        )
+        writeoff_line = next(line for line in lines if line.account_id == account.pk)
         receivable_line = next(
             line for line in lines if line.account_id == self.receivable.pk
         )
@@ -284,15 +289,39 @@ class WriteOffJournalTest(OfficeJournalTestCase):
         totals = journal.lines.aggregate(debit=Sum("debit"), credit=Sum("credit"))
         self.assertEqual(totals["debit"], totals["credit"])
 
-    def test_the_writeoff_account_has_no_default_so_the_write_off_is_refused(self):
-        """الشجرةُ المبذورة لا تحمل حسابَ ديونٍ معدومة — القرارُ للمالك.
+    def test_a_second_write_off_does_not_create_a_second_bad_debt_account(self):
+        client = self.make_client()
+        first = self.make_draft(client, "300")
+        second = self.make_draft(
+            client, "200", year=2026, month=4,
+        )
+        payments.write_off_fee_draft(
+            first, amount="10.00", reason="تنازل", actor=self.owner,
+        )
 
-        والرفضُ عند **إنشاء الصفّ** لا بعد قراءة الكشف: `ValidationError` باسم
-        المفتاح من `office_journal._account`، فالشطبُ لا يُكتب بلا قيده.
-        """
+        payments.write_off_fee_draft(
+            second, amount="20.00", reason="تنازلٌ ثانٍ", actor=self.owner,
+        )
+
         self.assertEqual(
-            services.resolve_setting(self.tenant, "office_journal_writeoff_account"),
-            "",
+            Account.objects.filter(tenant=self.tenant, code="5290").count(), 1,
+        )
+
+    def test_the_seed_really_carries_no_bad_debt_account(self):
+        """دليلُ قرار الإنشاء: لا `COA_DATA` ولا `ACCOUNTING_FIRM_COA` يحمله."""
+        from tenants.company_templates import ACCOUNTING_FIRM_COA
+        from tenants.services import COA_DATA
+
+        for seed in (COA_DATA, ACCOUNTING_FIRM_COA):
+            codes = {row[0] for row in seed}
+            names = " ".join(row[1] for row in seed)
+            self.assertNotIn("5290", codes)
+            self.assertNotIn("ديون معدومة", names)
+
+    def test_an_explicit_writeoff_code_without_an_account_is_still_a_400(self):
+        """الإنشاءُ للافتراضيّ وحده: كودٌ كتبه المكتب ولا حسابَ له يُرفَض بلا صفّ."""
+        services.set_office_setting(
+            self.tenant, "office_journal_writeoff_account", "5499",
         )
         client = self.make_client()
         draft = self.make_draft(client, "300")
@@ -303,7 +332,12 @@ class WriteOffJournalTest(OfficeJournalTestCase):
             )
 
         self.assertIn("office_journal_writeoff_account", ctx.exception.message_dict)
+        self.assertIn("5499", str(ctx.exception.message_dict))
+        self.assertFalse(Account.objects.filter(tenant=self.tenant, code="5499").exists())
         self.assertEqual(FeeWriteOff.objects.count(), 0)
+        self.assertFalse(
+            JournalHeader.objects.filter(tenant=self.tenant).exists(),
+        )
 
 
 class SettingGateTest(OfficeJournalTestCase):
