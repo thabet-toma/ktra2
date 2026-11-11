@@ -13,7 +13,7 @@
  * وقناعُ المبلغ المخفيّ. صرفةٌ بلا React كي تُختبر بـ`node --test` في بوّابة
  * `npm test`.
  */
-import { monthKeyLabel, monthKeyOf, shiftMonthKey } from './monthKey.ts';
+import { monthKeyLabel, monthKeyOf, monthKeyRange, shiftMonthKey } from './monthKey.ts';
 import { userRoleLabel } from './userRoleLabel.ts';
 
 /** مسار شاشة الزبائن — مصدرٌ واحدٌ للرابط وقراءته. */
@@ -30,6 +30,9 @@ export const SETTINGS_GROUP_PARAM = 'group';
 
 /** مجموعة «الضريبة ولائحة المواعيد» — وجهةُ تنبيهَي اللائحة. */
 export const SETTINGS_GROUP_SCHEDULE = 'schedule';
+
+/** مجموعة «المكتب» — فيها إعدادُ مكتب الدفاتر (طريقةِ إدخاله) وشجرتُه (#286/ب). */
+export const SETTINGS_GROUP_OFFICE = 'office';
 
 /** مجموعة «التذكيرات والنصوص» (#280/ب) — موضعُ النصوص وقائمةِ العطل. */
 export const SETTINGS_GROUP_REMINDERS = 'reminders';
@@ -149,6 +152,11 @@ export const CLIENT_TAB_PARAM = 'tab';
 /** تبويبُ «الالتزامات والشغلات» — مكانُ فتح التنبيه من الجرس. */
 export const CLIENT_OBLIGATIONS_TAB = 'obligations';
 
+/** تبويبُ «المواعيد» (#281) — وجهةُ موعدٍ من التقويم إلى ملفّ زبونه. */
+export const CLIENT_APPOINTMENTS_TAB = 'appointments';
+/** تبويبُ «الدفتر» (#286/ب) — حركاتُ دفتر الزبون وإدخالُها. */
+export const CLIENT_BOOK_TAB = 'book';
+
 /** اسم معامل الشغلة المطلوب فتحها — واحدٌ في بناء الرابط وقراءته (#276). */
 export const TASK_QUERY_PARAM = 'task';
 
@@ -156,6 +164,8 @@ export const TASK_QUERY_PARAM = 'task';
 export const CLIENT_TAB_KEYS = [
   'tax-card', 'obligations', 'services', 'contacts', 'documents',
   'reminder-log', 'notes',
+  // #281: المواعيد — قبل «الدفتر»، فمفتاحُ #286/ب يبقى آخرَ القائمة (اختبارُه يثبته).
+  'appointments', 'book',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
 
@@ -504,6 +514,10 @@ export interface CalendarPayload {
   to: string;
   today: string;
   rows: CalendarDeadlineRow[];
+  /** #281: مواعيدُ المدى — تُعرض في اليوم نفسه مع التزاماته لا في شاشةٍ ثانية. */
+  appointments: OfficeAppointmentRow[];
+  /** #281: أنواعُ المواعيد — التقويمُ يحجز أيضاً، فلا جدولَ تسمياتٍ في الواجهة. */
+  kind_choices: SettingChoice[];
 }
 
 /** خليّةُ يومٍ في شبكة الشهر — الأيامُ من الشهرين المجاورين تُعرض باهتةً لا تُحذف. */
@@ -856,6 +870,8 @@ export interface TodayCounters {
   week: number;
   /** #278: «ناقصه أوراق» — عدّادٌ إضافيّ فوق شارات التأخير. */
   missing_docs: number;
+  /** #281: مواعيدُ اليوم المحجوزة — قسمٌ مستقلٌّ لا صفوفَ التزامات. */
+  appointments: number;
   all: number;
 }
 
@@ -864,6 +880,8 @@ export interface TodayPayload {
   filter: string;
   counters: TodayCounters;
   rows: ObligationRow[];
+  /** #281: مواعيدُ اليوم — لا يقصّها `filter`: الفلترُ للالتزامات وحدها. */
+  appointments: OfficeAppointmentRow[];
   /** تسمياتُ اتجاه المبلغ — من الخادم، فلا نسخةً في الشاشة. */
   direction_choices: SettingChoice[];
 }
@@ -1709,4 +1727,448 @@ export function commonTaxSystem(
   const first = systems[0];
   if (!first) return null;
   return systems.every((system) => system === first) ? first : null;
+}
+
+// ── المواعيد (#281) ─────────────────────────────────────────────────────
+//
+// **ولا تسميةَ نوعٍ ولا حالةٍ هنا**: `kind_label` و`status_label` وتسمياتُ
+// `kind_choices` تصل من الخادم، فلا جدولَ تسمياتٍ ثانٍ يفترق عنه. والباقي
+// حسابُ عرض: تجميعُ المواعيد على أيامها للتقويم، وقيمةُ حقل الوقت، وشكلُ إدخالٍ
+// من نصّ ISO بلا كائن `Date` منطقةً زمنية (كسائر تواريخ هذا الملف).
+
+/** موعدُ زبون كما يعيده الخادم — بتاريخه ووقته وحالته. */
+export interface OfficeAppointmentRow {
+  id: number;
+  client: { id: number; name: string };
+  /** نظامُ زبونه الضريبيّ (`PS`/`IL`) أو `null` — مفتاحُ دولة `wa.me` وحده. */
+  tax_system: string | null;
+  kind: string;
+  kind_label: string;
+  /** ISO واعٍ بتوقيت الخادم — و`day`/`time` منه محلولَين. */
+  scheduled_at: string;
+  /** يومُ الموعد `YYYY-MM-DD` — مفتاحُ التقويم وفلتر «اليوم». */
+  day: string;
+  /** الوقتُ `HH:MM` — لا يبنيه المتصفّح من `scheduled_at`. */
+  time: string;
+  note: string;
+  status: string;
+  status_label: string;
+  confirmed_at: string | null;
+  cancelled_at: string | null;
+  created_by: { id: number; name: string } | null;
+  created_at: string;
+}
+
+/** تبويبُ المواعيد في ملفّ الزبون — بكلّ مواعيده ومنتقي أنواعها. */
+export interface ClientAppointmentsPayload {
+  client: { id: number; name: string };
+  day: string;
+  rows: OfficeAppointmentRow[];
+  kind_choices: SettingChoice[];
+}
+
+/** قائمةُ مواعيد اليوم أو المكاتب كلِّها — بلا زبونٍ واحد. */
+export interface AppointmentsListPayload {
+  day: string;
+  client: null;
+  rows: OfficeAppointmentRow[];
+  kind_choices: SettingChoice[];
+}
+
+/** عناصرُ التقويم مجموعةً بمفتاح يومها — المواعيدُ تُرسم بقراءة قاموسٍ لا بمسح. */
+export function groupAppointmentsByDay(
+  rows: readonly OfficeAppointmentRow[],
+): Record<string, OfficeAppointmentRow[]> {
+  const byDay: Record<string, OfficeAppointmentRow[]> = {};
+  rows.forEach((row) => {
+    (byDay[row.day] ??= []).push(row);
+  });
+  return byDay;
+}
+
+/** معرّفُ موعدٍ في الصفحة — يُمرَّر إليه ويُبرز عند القدوم من تنبيهٍ أو تقويم. */
+export function officeAppointmentAnchorId(appointmentId: number): string {
+  return `office-appointment-${appointmentId}`;
+}
+
+/**
+ * قيمةُ `input[type=datetime-local]` من نصّ ISO — «YYYY-MM-DDTHH:MM».
+ *
+ * قصٌّ لا تحويل: الوقتُ المعروضُ هو وقتُ المكتب كما حلّه الخادم، فلا `Date` ولا
+ * انزياحَ منطقةٍ يكسر الموعد ساعتين. والنصُّ الفاسدُ يعيد `''` فلا يُملأ الحقل.
+ */
+export function appointmentSlotValue(scheduledAt: string | null | undefined): string {
+  const match = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}:\d{2})/.exec(scheduledAt ?? '');
+  return match ? `${match[1]}T${match[2]}` : '';
+}
+
+/** أصنافُ شارة حالة الموعد — اللونُ عرضٌ، والنصُّ من `status_label`. */
+export function appointmentStatusClass(status: string): string {
+  if (status === 'done') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'cancelled') {
+    return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  }
+  return 'border-teal-200 bg-teal-50 text-teal-700 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300';
+}
+
+/** هل يبقى على الموعد فعلٌ؟ المحجوزُ وحده يُؤكَّد ويُؤجَّل ويُلغى. */
+export function isOpenAppointment(row: Pick<OfficeAppointmentRow, 'status'>): boolean {
+  return row.status === 'scheduled';
+}
+
+/**
+ * نتيجةُ «ابعت تأكيد»: السطرُ المحدَّث والنصُّ المرسَل ورقمُ المستلِم.
+ *
+ * الخادمُ يبني النصَّ ويكتب صفَّ السجلّ، والواجهةُ تفتح به واتساب إن عرف نظامَ
+ * الزبون — والرابطُ يُبنى في `officeWhatsappLink` وحدها.
+ */
+export interface AppointmentConfirmation {
+  appointment: OfficeAppointmentRow;
+  log: { id: number };
+  body: string;
+  phone: string;
+}
+
+/**
+ * نتيجةُ التأكيد بشكلها المعروض: النصُّ كما بناه الخادم، ورابطُ واتساب جاهزاً.
+ *
+ * **دالّةٌ واحدة لسطحَين** — بطاقةُ الموعد في ملفّ الزبون وشريحةُ التقويم: الرابطُ
+ * يُبنى في `officeWhatsappLink` وحدها، ونظامُ الزبون من السطر العائد (ونظامُ
+ * البطاقة احتياطاً لسطرٍ غاب نظامُ زبونه)، فلا نسخةَ ثانية تفترق عند أوّل تعديل.
+ */
+export function appointmentConfirmationView(
+  result: AppointmentConfirmation,
+  taxSystem?: string | null,
+): { body: string; link: string | null } {
+  return {
+    body: result.body,
+    link: officeWhatsappLink(
+      result.phone,
+      result.appointment.tax_system ?? taxSystem ?? null,
+      result.body,
+    ),
+  };
+}
+
+// ── دفترُ الزبون (#286/ب) ────────────────────────────────────────────────────
+//
+// **ولا تسميةَ هنا**: نوعُ الدفتر (`kind_label`) ونوعُ الحركة (`kind_label`) ونوعُ
+// الحساب (`account_type_label`) وطريقةُ الإدخال (`entry_method_label`) وقائمتُها
+// كلّها تصل نصوصاً من الخادم. والباقي منطقُ عرضٍ حقيقيّ: نوعُ الدفتر **في تاريخ
+// الحركة** (قاعدةُ `kind_on` نفسها في الخادم، بها تُقاس متوازنةُ المزدوج)،
+// والانتقالُ الذي يسمح به الخادم، وتاريخُ حركةِ شهرٍ مضى، وأوراقُ «للإدخال»
+// **مشتقّةً** من حمولتَي الأوراق والحركات: المشروعُ لا يخزّن «انأدخلت»، فورقةٌ
+// مسجَّلةٌ «واصلة» **ولها رابطٌ في حركةٍ حيّة** هي المُدخلة وحدها.
+
+/** اسم معامل شهر الإدخال — يفتح الدفتر على شهر ورقةٍ من «للإدخال». */
+export const CLIENT_BOOK_MONTH_PARAM = 'month';
+
+/** نوعا الدفتر — **قيمتان لا تسميتان**: «بسيط» و«مزدوج» يصلان في `kind_label`. */
+export const BOOK_KIND_SIMPLE = 'simple';
+export const BOOK_KIND_DOUBLE = 'double';
+
+/** اختيارٌ من الخادم: قيمةٌ وتسمية (نوعُ الحركة ونوعُ الحساب). */
+export interface BookChoice {
+  value: string;
+  label: string;
+}
+
+/**
+ * سطرُ دفتر زبون كما يعيده الخادم.
+ *
+ * `writable` تعني «خدمةُ مسك الدفاتر نشطة» لا «الموظفُ يملك مفتاح الكتابة»:
+ * الإيقافُ يُبقي الدفترَ للقراءة ويمنع الكتابة عليه (400 من الخادم)، والمفتاحُ
+ * يحكم من يكتب. والشرطان مختلفان فلا يُدمجان.
+ */
+export interface ClientBookRow {
+  client_id: number;
+  client_name: string;
+  kind: string;
+  kind_label: string;
+  opened_on: string;
+  kind_changed_on: string | null;
+  entry_method: string | null;
+  entry_method_label: string;
+  writable: boolean;
+  /** أنواعُ الحركة وتسمياتها — تصل من الخادم، فلا جدولَ تسمياتٍ في الواجهة. */
+  entry_kind_choices?: BookChoice[];
+  /** أنواعُ الحساب وتسمياتها — في المسار المفرد وحده (#286/ب). */
+  account_type_choices?: BookChoice[];
+}
+
+/**
+ * حمولةُ `client-books/choices/`: تسمياتُ الأنواع الثلاثة من النموذج.
+ *
+ * **`book_kinds` لا `kind_choices`**: `kind` في هذا الموديول نوعُ **الدفتر**،
+ * وأنواعُ الحركة `entry_kinds`. والتسميةُ المضلّلة هي التي جعلت زرَّ الانتقال
+ * يبحث عن `double` في أنواع الحركة فيظهر دائماً «غيّر نوع الدفتر».
+ */
+export interface ClientBookChoicesPayload {
+  book_kinds: BookChoice[];
+  entry_kinds: BookChoice[];
+  account_types: BookChoice[];
+}
+
+/** بندُ حركةٍ — والمبلغُ `null` حين لا يرى العضو المبالغ فيُعرض «—». */
+export interface BookEntryLineRow {
+  account_code: string;
+  account_name: string;
+  debit: string | null;
+  credit: string | null;
+  side_party: string;
+}
+
+/**
+ * حركةُ دفترٍ كما يعيدها الخادم.
+ *
+ * `reverses` معرّفُ الأصل (هذه حركةٌ عكسية)، و`reversed_by` معرّفُ عكسها (هذه
+ * حركةٌ عُكست). و**الحركةُ الحيّةُ ما كانت الاثنين `null`** — وحدها تُعدّ أوراقَها
+ * مُدخلة، وعليها وحدها يُعرض «اعكس» (الخادم يردّ عكسَ العكس 400).
+ */
+export interface BookEntryRow {
+  id: number;
+  number: number;
+  year: number;
+  entry_date: string;
+  kind: string;
+  kind_label: string;
+  memo: string;
+  documents: number[];
+  reverses: number | null;
+  reversed_by: number | null;
+  total_debit: string | null;
+  total_credit: string | null;
+  lines: BookEntryLineRow[];
+}
+
+/** حسابٌ في شجرة الزبون — نسختُه عن قالب المكتب/المنصّة، تُقرأ كوداً في الواجهة. */
+export interface BookAccountRow {
+  code: string;
+  name: string;
+  parent_code: string | null;
+  account_type: string;
+  account_type_label: string;
+  is_system: boolean;
+  is_active: boolean;
+}
+
+/** صفُّ «للإدخال»: زبونٌ وشهرٌ وعددُ أوراقه — تجميعُ الخادم لا الواجهة. */
+export interface PendingEntryRow {
+  client_id: number;
+  client_name: string;
+  month: string;
+  month_label: string;
+  count: number;
+  entry_method: string | null;
+  entry_method_label: string;
+}
+
+export interface PendingEntryPayload {
+  rows: PendingEntryRow[];
+  /** مجموعُ الأوراق المنتظرة (لا عددُ الصفوف) — عدّادُ «اليوم» من الخادم. */
+  total: number;
+}
+
+/** ورقةٌ واصلةٌ بلا إدخال — تُختار في نموذج الحركة. */
+export interface PendingDocument {
+  row_id: number;
+  name: string;
+  received_on: string | null;
+}
+
+/** مسوّدةُ بندٍ في نموذج الإدخال — نصوصُ الحقول كما كتبها الموظف. */
+export interface BookLineDraft {
+  account_code: string;
+  debit: string;
+  credit: string;
+  side_party: string;
+}
+
+/**
+ * عِلَلُ المسوّدة — رموزٌ لا نصوص: نصُّ الرسالة في الشاشة، والمنطقُ هنا يُختبر.
+ * والثلاثةُ الأولى والأخيرةُ هي رسائلُ الخادم نفسها (‏`_prepare_lines`)، فلا
+ * نرسل ما نعلم أنه سيُردّ.
+ */
+export type BookDraftProblem =
+  | ''
+  | 'no-lines'
+  | 'no-account'
+  | 'no-side'
+  | 'two-sides'
+  | 'invalid'
+  | 'unbalanced';
+
+/** مفتاحُ شهرٍ صالح (`YYYY-MM`) أو `''` — الفاسدُ لا يبلغ العنوانَ ولا الحقل. */
+function validMonthKey(value: string | null | undefined): string {
+  const raw = (value ?? '').trim();
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(raw) ? raw : '';
+}
+
+/** مبلغٌ بالسنتات من نصّ الحقل — `null` لغير رقم. **ولا تخمينَ لفاصلة**: «1,5» مرفوضة. */
+function amountCents(raw: string | null | undefined): number | null {
+  const clean = (raw ?? '').trim();
+  if (clean === '') return 0;
+  if (!/^\d+(\.\d{1,2})?$/.test(clean)) return null;
+  const [whole, fraction = ''] = clean.split('.');
+  return Number(whole) * 100 + Number(fraction.padEnd(2, '0'));
+}
+
+/** نوعُ الدفتر **في تاريخ الحركة** — القاعدةُ نفسها في `kind_on` الخادمية. */
+export function bookKindOn(
+  book: Pick<ClientBookRow, 'kind' | 'kind_changed_on'>,
+  day: string,
+): string {
+  const changed = book.kind_changed_on;
+  if (changed && day.slice(0, 4) < changed.slice(0, 4)) return BOOK_KIND_SIMPLE;
+  return book.kind;
+}
+
+/**
+ * النوعُ التالي في الانتقال — أو `null` حيث يرفضه الخادمُ دائماً.
+ *
+ * الرجوعُ من المزدوج إلى البسيط مرفوضٌ أبداً («طرفٌ من كل حركةٍ لا يُمحى»)،
+ * فلا يُعرض زرُّ انتقالٍ مصيرُه الرفض. وبقيّةُ الشروط (سنةُ الفتح، وحركاتُ
+ * السنة الجارية) تُكتشف في الخادم وحده فتُعرض رسالتُه كما هي.
+ */
+export function nextBookKind(book: Pick<ClientBookRow, 'kind'>): string | null {
+  return book.kind === BOOK_KIND_DOUBLE ? null : BOOK_KIND_DOUBLE;
+}
+
+/**
+ * تاريخُ حركةِ شهر: شهرُ اليوم ⇒ اليوم، وغيرُه ⇒ آخرُ يومٍ فيه.
+ *
+ * الرقمُ السنويّ للحركة يُشتقّ من تاريخها لا من تاريخ اليوم: ورقةُ آذار 2025
+ * المُرحَّلة اليوم كانت تُكتب في تسلسل 2026 بلا هذا الحساب. والشهرُ الفاسدُ يعيد
+ * `''` فيبقى الحقلُ فارغاً ولا يُحفظ تاريخٌ لم يره الموظف.
+ */
+export function entryDateForMonth(month: string, today: string): string {
+  const key = validMonthKey(month);
+  if (!key) return '';
+  if (monthKeyOf(today) === key) return today.slice(0, 10);
+  return monthKeyRange(key).end;
+}
+
+/** رابطُ تبويب «الدفتر» — وبشهرٍ يُفتح الإدخال على شهر ورقةٍ بعينها. */
+export function clientBookPath(clientId: number, month?: string | null): string {
+  const base = `${clientFilePath(clientId)}&${CLIENT_TAB_PARAM}=${CLIENT_BOOK_TAB}`;
+  const key = validMonthKey(month);
+  return key ? `${base}&${CLIENT_BOOK_MONTH_PARAM}=${key}` : base;
+}
+
+/** الشهرُ المطلوب من العنوان — `YYYY-MM` وحدها، وإلا `null`. */
+export function bookMonthFromSearch(search: string): string | null {
+  const params = new URLSearchParams(search.startsWith('?') ? search : `?${search}`);
+  return validMonthKey(params.get(CLIENT_BOOK_MONTH_PARAM)) || null;
+}
+
+/** حركةٌ **حيّة**: ليست عكساً ولم تُعكس — تقيسها القاعدةُ نفسها في `_live_entries`. */
+export function isLiveBookEntry(
+  entry: Pick<BookEntryRow, 'reverses' | 'reversed_by'>,
+): boolean {
+  return entry.reverses === null && entry.reversed_by === null;
+}
+
+/** أوراقُ الحركات الحيّة — ما صار مُدخلاً، فلا يعود إلى «للإدخال». */
+export function bookedDocumentIds(
+  entries: readonly Pick<BookEntryRow, 'documents' | 'reverses' | 'reversed_by'>[],
+): Set<number> {
+  const booked = new Set<number>();
+  entries.forEach((entry) => {
+    if (!isLiveBookEntry(entry)) return;
+    entry.documents.forEach((id) => booked.add(id));
+  });
+  return booked;
+}
+
+/**
+ * أوراقُ شهرٍ في «للإدخال»: واصلةٌ (`received`) ولا رابطَ حيّ لها.
+ *
+ * المشروعُ لا يخزّن «انأدخلت» (د9): الورقةُ تخرج من القائمة لأن شرطَها صار
+ * كاذباً. والاشتقاقُ هنا يستعمل الحمولتين القائمتين — شبكةَ الأوراق (بمعرّفات
+ * صفوفها) وحركاتِ الدفتر (بأوراق كل حركة) — فلا نقطةَ جديدة تُخترع.
+ *
+ * **والقائمتان تُقرآن معاً**: `items` فيها الشهريّ وحده، و`annual` فيها السنويّ
+ * و`period_start` لها أوّلُ السنة. الخادمُ يعدّ الواصلةَ السنوية في صفّ **كانون
+ * الثاني** (`pending_entry_payload`)، فقراءةُ `items` وحدها كانت تفتح الصفَّ على
+ * «ما في أوراق بانتظار الإدخال» فلا تُصفَّر أبداً. والورقةُ السنوية تُعرض في شهر
+ * بدء فترتها وحدها — لا في كل شهر.
+ */
+export function pendingMonthDocuments(
+  payload: Pick<ClientDocumentsPayload, 'items' | 'annual'>,
+  booked: ReadonlySet<number>,
+  month: string,
+): PendingDocument[] {
+  const key = validMonthKey(month);
+  if (!key) return [];
+  const rows: PendingDocument[] = [];
+  payload.items.forEach((item) => {
+    item.cells.forEach((cell) => {
+      if (cell.row_id === null || booked.has(cell.row_id)) return;
+      if (cell.status !== 'received') return;
+      if (monthKeyOf(cell.month) !== key) return;
+      rows.push({ row_id: cell.row_id, name: item.name, received_on: cell.received_on });
+    });
+  });
+  payload.annual.forEach((row) => {
+    if (booked.has(row.row_id)) return;
+    if (row.status !== 'received') return;
+    if (monthKeyOf(row.period_start) !== key) return;
+    rows.push({ row_id: row.row_id, name: row.name, received_on: row.received_on });
+  });
+  return rows;
+}
+
+/** هل تُختار أوراقُ الحركة متعدّدةً؟ وضعُ «إدخال الشهر» وحده يسمح بذلك. */
+export function multipleDocumentsAllowed(
+  entryMethod: string | null | undefined,
+): boolean {
+  return entryMethod === 'monthly';
+}
+
+/**
+ * عِلّةُ المسوّدة إن وُجدت — بالسنتات لا بالعشرية، مقارنةُ مجموعين تحتاج رقماً واحداً.
+ *
+ * والمزدوجُ وحده يُسأل عن التوازن: البسيطُ طرفٌ واحد لكل بند بالتعريف، فمطالبتُه
+ * بالتوازن ترفض ورقاً صحيحة (القاعدةُ في `_assert_balanced`).
+ */
+export function bookDraftProblem(
+  lines: readonly BookLineDraft[],
+  options: { doubleEntry: boolean },
+): BookDraftProblem {
+  const written = lines.filter((line) => (
+    line.account_code.trim() !== ''
+    || line.debit.trim() !== ''
+    || line.credit.trim() !== ''
+  ));
+  if (!written.length) return 'no-lines';
+  let debitTotal = 0;
+  let creditTotal = 0;
+  for (const line of written) {
+    if (!line.account_code.trim()) return 'no-account';
+    const debit = amountCents(line.debit);
+    const credit = amountCents(line.credit);
+    if (debit === null || credit === null) return 'invalid';
+    if (debit > 0 && credit > 0) return 'two-sides';
+    if (debit === 0 && credit === 0) return 'no-side';
+    debitTotal += debit;
+    creditTotal += credit;
+  }
+  if (options.doubleEntry && debitTotal !== creditTotal) return 'unbalanced';
+  return '';
+}
+
+/** مفتاحُ صفّ «للإدخال» — الزبونُ والشهر، لا العدُّ: الصفُّ هو هو بعد كل إدخال. */
+export function pendingEntryRowKey(
+  row: Pick<PendingEntryRow, 'client_id' | 'month'>,
+): string {
+  return `${row.client_id}|${row.month}`;
+}
+
+/** عددُ الزبائن الذين لهم ورقٌ بانتظار الإدخال — عدٌّ لا تكرار. */
+export function pendingEntryClientCount(
+  rows: readonly Pick<PendingEntryRow, 'client_id'>[],
+): number {
+  return new Set(rows.map((row) => row.client_id)).size;
 }

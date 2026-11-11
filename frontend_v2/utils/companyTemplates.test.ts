@@ -62,7 +62,7 @@ test('لا مفاتيح مكررة في السِجلّ', () => {
 test('بابُ إنشاء شركة لا يعرض «دفتر عميل»', () => {
   const keys = SELF_SERVE_COMPANY_TEMPLATES.map((t) => t.key);
   assert.equal(keys.includes('client_book'), false);
-  assert.deepEqual(keys, ['general', 'accounting_firm', 'tyres']);
+  assert.deepEqual(keys, ['general', 'accounting_firm', 'tyres', 'accounting_office']);
 });
 
 test('قالب «إطارات» يظهر في باب إنشاء شركة (self-serve)', () => {

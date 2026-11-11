@@ -100,9 +100,11 @@ from accounting_office.models import (
     OFFICE_CUSTOM_RULE_KIND_CHOICES,
     OFFICE_RULE_OVERRIDE_FIELDS,
     REMINDER_ALERT_KINDS,
+    REMINDER_APPOINTMENT,
     REMINDER_CHANNEL_LABELS,
     REMINDER_CHANNEL_WHATSAPP,
     REMINDER_COUNTED_KINDS,
+    REMINDER_DEADLINE,
     REMINDER_DEFAULT_TEXTS,
     REMINDER_DOCUMENTS,
     REMINDER_KIND_DISMISSED,
@@ -218,6 +220,13 @@ NO_REST_DAYS_LABEL = "بلا أيام عطلة"
 # زبوناً تمرّ بـ`visible_clients`، وكلُّ مبلغٍ يمرّ بـ`can_see_amounts` و
 # `mask_amounts`. نسخةٌ ثانيةٌ من الشرط تفترق عن الأولى عند أوّل تعديلٍ بصمت —
 # وهي بعينها الطريقة التي تُسرَّب بها بيانات مكتبٍ إلى غيره.
+#
+# **استثناءٌ واحدٌ مقصود (#281): نصُّ الرسالة.** `{amount}` في نصّ «جاهز للإرسال»
+# (`ready_to_send_payload` ← `messages[].body`) وفي وصفِّ سجلّ التذكير المحفوظ
+# (`reminder_log_row` ← `body`) يحمل مبلغَ الفترة **ولو لعضوٍ بلا `office.amounts.view`**:
+# النصُّ رسالةٌ إلى **الزبون نفسه** عن مبلغٍ عليه، وقنعُه عن الموظّف كان يُرسل «—»
+# إلى الزبون بدل مبلغه. وما سوى النصّ يبقى مقنَّعاً: بنودُ `items` المهيكلة بلا
+# مبلغٍ أصلاً. مبلغٌ جديدٌ في نصّ رسالةٍ يُقرَّر هنا قراراً لا يمرّ بالصمت.
 
 #: مفاتيح المبالغ في حمولة البطاقة الضريبية. مبلغٌ جديدٌ يُضاف هنا **أولاً**،
 #: وإلا سقط حارسُ `accounting_office/tests/test_amounts_guard.py`.
@@ -2771,6 +2780,15 @@ def calendar_payload(
         "to": end.isoformat(),
         "today": today.isoformat(),
         "rows": rows,
+        # #281: مواعيدُ المدى مع التزاماته — التقويمُ يقرأ يومَه كاملاً: ما يجب
+        # عمله وما حُجز فيه، ولا شاشةَ مواعيدَ ثانيةً تنافسه. **وبفلترَي التقويم
+        # نفسيهما** (الزبون والموظّف) وإلا عرض تقويمٌ مُرشَّحٌ صفوفَ غيره.
+        # و`kind_choices`: التقويمُ يحجز أيضاً (الموظّفُ يسجّل الموعد من هنا)،
+        # فلا يبني جدولَ أنواعٍ ثانياً في الواجهة.
+        "appointments": _appointments_module().calendar_appointments(
+            tenant, user, start=start, end=end, client=client, member=member,
+        ),
+        "kind_choices": _appointments_module().kind_choices(),
     }
 
 
@@ -3727,13 +3745,15 @@ def _in_near_window(obligation, day) -> bool:
 
 
 def today_payload(tenant, *, user, day, filter="") -> dict:
-    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُه الخمسة قبل الفلتر.
+    """شاشةُ «اليوم»: صفوفُ المنتظِر مرتَّبةً بالميل، وعدّاداتُه الستّة قبل الفلتر.
 
-    **العدّاداتُ (`late` · `late_internal` · `week` · `missing_docs` · `all`) على
-    كل الميل المحفوظ** ثم يقصّ الفلترُ الصفوفَ وحدها — فكبسةُ «متأخّر رسمي» لا
-    تُصفّر «متأخّر داخليّ». والفلاترُ ستةٌ: `mine` (المسؤولُ الفعليُّ هو العضو) ·
-    `week` (نافذةُ `due_date` = `extended_to or actual_deadline` مستقلّةً عن
-    الشارة) · `late` (الأحمرُ وحده) · `late_internal` (الأصفرُ وحده) ·
+    **العدّاداتُ (`late` · `late_internal` · `week` · `missing_docs` ·
+    `appointments` · `all`) على كل الميل المحفوظ** ثم يقصّ الفلترُ الصفوفَ وحدها —
+    فكبسةُ «متأخّر رسمي» لا تُصفّر «متأخّر داخليّ». و`appointments` (#281) عدّةُ
+    مواعيدِ اليوم المحجوزة، وقائمتُها في `appointments` **لا يقصّها الفلتر**: الفلترُ
+    للالتزامات، والموعدُ ليس التزاماً. والفلاترُ ستةٌ: `mine` (المسؤولُ الفعليُّ هو
+    العضو) · `week` (نافذةُ `due_date` = `extended_to or actual_deadline` مستقلّةً
+    عن الشارة) · `late` (الأحمرُ وحده) · `late_internal` (الأصفرُ وحده) ·
     `missing_docs` («ناقصه أوراق» #278)، والفارغُ «الكل»؛ وغيرُها **400**.
 
     **و`docs` لكل صفّ** (`{"received": n, "required": m}` أو `null`) يُحسب
@@ -3751,6 +3771,9 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
     ]
     # #278: «ناقصه أوراق» — استعلامان لكل الصفحة، تمرّ بهما عدّاداتُها وصفوفُها.
     progress = document_progress(tenant, [row for row, _keys in tagged])
+    # #281: «مواعيد اليوم» قرارُ المكتب لا قرارُ فلتر الالتزامات — تُقرأ كاملةً
+    # قبل الفلتر كسائر العدّادات، ولا يقصّها `filter` الذي يخصّ صفوفَ الالتزامات.
+    appointments_today = _appointments_module().appointments_for_day(tenant, user, day)
     counters = {
         "late": sum(1 for _row, keys in tagged if OBLIGATION_BADGE_LATE in keys),
         "late_internal": sum(
@@ -3761,6 +3784,7 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
             1 for row, _keys in tagged
             if progress.get(row.pk, {}).get("missing")
         ),
+        "appointments": len(appointments_today),
         "all": len(tagged),
     }
     user_id = getattr(user, "pk", None)
@@ -3792,6 +3816,7 @@ def today_payload(tenant, *, user, day, filter="") -> dict:
         "filter": filter,
         "counters": counters,
         "rows": rows,
+        "appointments": appointments_today,
         "direction_choices": obligation_direction_choices(),
     }
 
@@ -6259,6 +6284,9 @@ REMINDER_SEND_HOUR_START_KEY = "reminder_send_hour_start"
 REMINDER_SEND_HOUR_END_KEY = "reminder_send_hour_end"
 REMINDER_ESCALATION_OWNER_DAYS_KEY = "reminder_escalation_owner_days"
 REMINDER_DEFAULT_CONSENT_TYPES_KEY = "reminder_default_consent_types"
+#: #281: قبل كم يومٍ يُذكَّر الموعد — يُقرأ في المسحة نفسها (`_REMINDER_CLIENT_KEYS`)
+#: ويُشتقّ منه اسمُه في `appointments`، فلا مفتاحان لنفس الإعداد.
+APPOINTMENT_REMINDER_DAYS_KEY = "appointment_reminder_days"
 
 #: رسالةُ القفل — ثابتٌ واحدٌ يقارنه الاختبار وتقرؤه الواجهة كما هو.
 REMINDER_AUTO_SEND_LOCKED = "الإرسال التلقائي غير متاح قبل المرحلة الثانية"
@@ -6434,6 +6462,21 @@ def create_contact(tenant, *, name, phone="", language="ar") -> Contact:
 
 
 # ── النصوص: الافتراضي في الكود وبديلُ المكتب (#280/D3) ───────────────────────
+#: كلمةُ «لا شيء» بلغة المستلِم — تُوضع مكان قيمةٍ غائبة (`{amount}` بلا مبلغ،
+#: `{missing_list}` بلا أوراقٍ ناقصة) في نصٍّ مسطَّحٍ لا يحذف عنوانه: بدونها يبقى
+#: العنوانُ معلَّقاً («أوراق ناقصة: ») أو يظهر فراغٌ مزدوج.
+REMINDER_ABSENT_TEXT: dict[str, str] = {"ar": "ولا شي", "he": "אין"}
+
+
+def reminder_absent_text(language) -> str:
+    """«لا شيء» بلغة المستلِم — **عُرفٌ واحدٌ لكل نوع** (أوراقٌ وموعدٌ ورسميّ).
+
+    العربيةُ احتياطاً: لغةٌ خارج الاثنتين كانت تُعيد عنواناً بلا قيمةٍ (وكانت
+    العناوينُ المعلَّقة هي العلّةَ التي أُعيدت الصياغةُ من أجلها).
+    """
+    return REMINDER_ABSENT_TEXT.get(language) or REMINDER_ABSENT_TEXT["ar"]
+
+
 def render_reminder_body(body, values) -> str:
     """يستبدل الرموزَ المعروفة ويترك ما سواها كما هو (بلا `str.format`).
 
@@ -6547,6 +6590,9 @@ class ReminderCandidate:
     period_end: Any
     missing: tuple[str, ...]
     missing_codes: tuple[str, ...]
+    #: `count`/`maximum` = خانةُ «س من ن» في البند، ومعناها بحسب الإيقاع: للأوراق
+    #: عدُّ الصفوف الصادرة من حدِّها، وللموعد صفوفُ نافذته السارية من سقفها (١)،
+    #: وللموعد الرسميّ موضعُ نافذته من موضعَي (7، 2) — والسقفُ هنا بنيويّ.
     count: int
     maximum: int
     interval_days: int
@@ -6559,6 +6605,18 @@ class ReminderCandidate:
     due: bool
     exhausted: bool
     postponed: bool
+    #: مفتاحُ شارة البند كما تلوّنه «جاهز للإرسال»: لكل مولّدٍ شارته — نقصُ
+    #: الأوراق لنوع الأوراق، و«قريب» لموعدٍ اقترب (موعدُ الزبون أو موعدُ التقديم).
+    badge: str = OBLIGATION_BADGE_MISSING_DOCS
+    #: اليومُ الذي يُطبع في `{due_date}`: لموعد التقديم تاريخُ تقديمه، وللموعد
+    #: تاريخُه، وللأوراق تذكيرُها القادم — وكان هذا الأخير يُحسب في العرض وحده.
+    render_due: Any = None
+    #: تسميةُ الفترة حين لا تكون فترةً شهرية — «04/05/2026 10:30» لموعدٍ بيومه
+    #: ووقته، وغيابُها يعني تسميةَ الفترة المحسوبة (`deadlines.period_label`).
+    period_text: str | None = None
+    #: المستحقُّ على الزبون في هذه الفترة — `None` حيث لا مبلغَ (أوراقٌ وموعد).
+    #: مجموعُ التزامات الفترة في مولّد «موعد رسمي قريب» وحده (#281).
+    amount: Decimal | None = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -6568,6 +6626,7 @@ _REMINDER_CLIENT_KEYS: tuple[str, ...] = (
     DOCUMENTS_REMINDER_START_DAYS_KEY,
     DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY,
     DOCUMENTS_REMINDER_MAX_KEY,
+    APPOINTMENT_REMINDER_DAYS_KEY,
     "rest_days",
     # #280/ب: نظامُ الزبون لبند رسالته — يُقرأ في المسحة نفسها، فإضافةُ حقلٍ إلى
     # البند لا تكلّف استعلاماً لكل بند. **ولا يُخمَّن نظامٌ واحدٌ للمستلِم**:
@@ -6634,14 +6693,36 @@ def reminder_template_bodies(tenant, reminder_type) -> dict[str, str]:
     }
 
 
+#: الأنواعُ التي لها **مولّدٌ** اليوم: الأوراق (#280)، وتذكيرُ الموعد، و«موعد
+#: رسمي قريب» (#281). والرابعُ (`balance`) بقالبٍ وإعدادٍ بلا مولّدٍ بعد (#285) —
+#: فطلبُ قائمته يُعيد فراغاً لا بنوداً بنصٍّ لا يخصّها.
+_GENERATED_REMINDER_TYPES: tuple[str, ...] = (
+    REMINDER_DOCUMENTS, REMINDER_APPOINTMENT, REMINDER_DEADLINE,
+)
+
+
+def _appointments_module():
+    """الوحدةُ الجارة (#281) — **استيرادٌ مؤجَّل** يفكّ دورةً حقيقيّة.
+
+    `appointments` يستورد `services` في أعلاه (المحلّلُ والرؤيةُ والسجلّ)، فلو
+    استوردها هذا الملفُّ في أعلاه لدارت الدورةُ عند أوّل تحميل. والنداءُ هنا وقتَ
+    الحاجة فقط، فلا ترتيبُ تحميلٍ يفترق.
+    """
+    from accounting_office import appointments
+
+    return appointments
+
+
 def _reminder_candidates(
     tenant, clients, *, day, settings_by_client, reminder_type=None,
 ) -> list:
     """المستحقُّ لكل (زبون، نوع، فترة) — **كلفةٌ ثابتة** لا تكبر بعدد الزبائن.
 
-    ما يُحسب هنا هو **تذكير الأوراق** وحده (#280/D1: الأنواعُ الأربعة لها قوالبُها
-    وإعدادُها، ومولّدُ الأوراق هو المطلوب الآن). والباقي يُضاف دالّةً بجانبها
-    حين تصل تذكرته، بلا مساسٍ بهذه.
+    **ثلاثةُ مولّداتٍ في مسحةٍ واحدة** (#281): الأوراقُ الناقصة (هنا)، وتذكيرُ
+    الموعد، و«موعد رسمي قريب» (في `appointments`) — كلُّها تُرجع
+    `ReminderCandidate` فيمرّ الجميعُ في `ready_to_send_payload` بحواجزه نفسها:
+    الموافقةُ ويومُ الراحة والعطلةُ والتأجيلُ والحدُّ الأقصى. فلا محرّكٌ موازٍ
+    يفترق عن هذا عند أوّل تعديل.
 
     **والإعداداتُ تُمرَّر محلولةً** (`resolve_settings_for_clients`) لا تُقرأ هنا:
     «جاهز للإرسال» يحتاجها قبل الحساب لحجب يوم الراحة، فقراءتُها مرّتين كانت
@@ -6651,10 +6732,8 @@ def _reminder_candidates(
     صفٍّ صادر** (إرسالٌ أو تنحية) + `interval_days`، ولا تذكيرَ بعد `max` صفٍّ
     عدّاً صافياً. والصفوفُ المُبطَلة بـ`undo` لا تُعدّ (`reverted` في الاستعلام).
     """
-    types = (REMINDER_DOCUMENTS,)
+    types = _GENERATED_REMINDER_TYPES
     if reminder_type is not None and _assert_reminder_type(reminder_type) not in types:
-        # #280/D1: الأنواعُ الثلاثة الأخرى لها قوالبُها وإعدادُها ولا مولّدَ لها
-        # بعد — فطلبُ قائمتها يُعيد فراغاً لا بنوداً بنصٍّ لا يخصّها.
         return []
     clients = [client for client in clients if client.pk is not None]
     if not clients:
@@ -6677,8 +6756,6 @@ def _reminder_candidates(
         bucket = grouped.setdefault(key, {"names": [], "codes": []})
         bucket["names"].append(row["name"])
         bucket["codes"].append(row["item_code"])
-    if not grouped:
-        return []
 
     #: التصحيحُ (`undo`) يشير إلى ما يُبطله — و`Exists` تُنقص المُبطَل من العدّ
     #: داخل الاستعلام نفسه فلا استعلامَ لكل صفّ.
@@ -6701,7 +6778,15 @@ def _reminder_candidates(
         if row["reverted"]:
             continue
         key = (row["client_id"], row["reminder_type"], row["period_start"], row["period_end"])
-        by_pair.setdefault(key, []).append(row)
+        #: ويومُ الصفّ معه محسوباً: مولّدا #281 يقيسان **نافذةً** بأيّام الصفوف،
+        #: و`localdate` مرّةً لكل صفٍّ أرخصُ من إعادتها في كل مولّد.
+        by_pair.setdefault(key, []).append({**row, "day": _reminder_log_day(row)})
+    #: العدُّ الصافي لكل بند — لمولّد الأوراق وحده: الإيقاعُ فيه عدُّ صفوفٍ لا
+    #: نافذةُ أيام، ومولّدا #281 يقرآن `by_pair` بأيّامه.
+    counted_by_pair = {
+        key: sum(1 for row in pair if row["kind"] in REMINDER_COUNTED_KINDS)
+        for key, pair in by_pair.items()
+    }
 
     postponed = _reminder_postponed_pairs(tenant, clients, types, day)
     #: الفتراتُ مفهرسةٌ بزبونها: الحلقةُ لكل زبونٍ تقرأ فتراتِه وحدها، فلا
@@ -6716,28 +6801,28 @@ def _reminder_candidates(
         resolved = settings_by_client[client.pk]
         enabled = resolved.get(REMINDER_TYPES_ENABLED_KEY) or []
         periods = periods_by_client.get(client.pk, ())
-        for current_type in types:
-            if current_type not in enabled:
-                continue
-            contact = contacts.get((client.pk, current_type))
-            start_days = resolved.get(DOCUMENTS_REMINDER_START_DAYS_KEY) or 0
-            interval_days = resolved.get(DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY) or 1
-            maximum = resolved.get(DOCUMENTS_REMINDER_MAX_KEY) or 1
+        # الأوراقُ وحدها في هذه الحلقة؛ والموعدُ والموعدُ الرسميُّ في
+        # `appointments` — ودخولُهما هنا بنداً ثانياً يخنق هذا المسح.
+        # وفلترُ الطلب يخصّها أيضاً: طلبُ نوعٍ آخر لا يعرض بندَ أوراق.
+        if REMINDER_DOCUMENTS in enabled and reminder_type in (None, REMINDER_DOCUMENTS):
             for period_start, period_end, bucket in periods:
                 pairs = by_pair.get(
-                    (client.pk, current_type, period_start, period_end), [],
+                    (client.pk, REMINDER_DOCUMENTS, period_start, period_end), [],
                 )
-                count = sum(
-                    1 for row in pairs if row["kind"] in REMINDER_COUNTED_KINDS
+                count = counted_by_pair.get(
+                    (client.pk, REMINDER_DOCUMENTS, period_start, period_end), 0,
                 )
-                last_day = max((_reminder_log_day(row) for row in pairs), default=None)
+                interval_days = resolved.get(DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY) or 1
+                start_days = resolved.get(DOCUMENTS_REMINDER_START_DAYS_KEY) or 0
+                maximum = resolved.get(DOCUMENTS_REMINDER_MAX_KEY) or 1
+                last_day = max((row["day"] for row in pairs), default=None)
                 next_due = (
                     period_end + timedelta(days=start_days) if last_day is None
                     else last_day + timedelta(days=interval_days)
                 )
                 candidates.append(ReminderCandidate(
                     client=client,
-                    reminder_type=current_type,
+                    reminder_type=REMINDER_DOCUMENTS,
                     period_start=period_start,
                     period_end=period_end,
                     missing=tuple(bucket["names"]),
@@ -6746,12 +6831,33 @@ def _reminder_candidates(
                     maximum=maximum,
                     interval_days=interval_days,
                     next_due=next_due,
-                    contact=contact,
+                    contact=contacts.get((client.pk, REMINDER_DOCUMENTS)),
                     tax_system=resolved.get(TAX_SYSTEM_KEY),
                     due=day >= next_due,
                     exhausted=count >= maximum,
-                    postponed=(client.pk, current_type) in postponed,
+                    postponed=(client.pk, REMINDER_DOCUMENTS) in postponed,
+                    render_due=day + timedelta(days=interval_days),
                 ))
+    appointments = _appointments_module()
+    candidates.extend(appointments.appointment_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
+    candidates.extend(appointments.deadline_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        missing_by_period=grouped,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
     return candidates
 
 
@@ -6798,10 +6904,10 @@ def _reminder_item_payload(candidate) -> dict:
         "tax_system": candidate.tax_system,
         "reminder_type": candidate.reminder_type,
         "reminder_type_label": REMINDER_TYPE_LABELS.get(candidate.reminder_type, ""),
-        "badge": OBLIGATION_BADGE_MISSING_DOCS,
+        "badge": candidate.badge,
         "period_start": candidate.period_start.isoformat(),
         "period_end": candidate.period_end.isoformat(),
-        "period_label": deadlines.period_label(
+        "period_label": candidate.period_text or deadlines.period_label(
             candidate.period_start, candidate.period_end,
         ),
         "missing_list": list(candidate.missing),
@@ -6813,32 +6919,41 @@ def _reminder_item_payload(candidate) -> dict:
     }
 
 
-def _reminder_render_values(tenant, candidate, *, day) -> dict:
-    """قيمُ الرموز الستّة لبند — **و`{due_date}` يومٌ قادمٌ لا يومُ الاستحقاق**.
+def _reminder_render_values(tenant, candidate, *, language="") -> dict:
+    """قيمُ الرموز الستّة لبند — **و`{due_date}` يخصّ نوعَه**.
 
-    `candidate.next_due` هو يومُ الاستحقاق المحسوب، وهو اليومُ أو قبله بحكم شرط
-    الظهور (`day >= next_due`) — وبعد يوم راحةٍ أو عطلةٍ أو تأجيلٍ يصير ماضياً
-    بيقين. فالنصُّ يطبَع يومَ التذكير **القادم** (`day + interval_days`) بصيغة
-    `dd/MM/yyyy`، ويبقى `due_date` في بند الشاشة `ISO` بيوم الاستحقاق نفسه.
-    و`amount` فارغٌ لأن مولّدَ الحساب ليس هنا (#285).
+    للأوراق هو يومُ التذكير **القادم** (وكان يُحسب `day + interval_days` هنا
+    لأن `next_due` ماضٍ بيقين بعد يوم راحةٍ أو عطلة)، ولموعد التقديم هو تاريخُ
+    تقديمه، ولموعد الزبون تاريخُ موعده. واليومُ المحسوبُ في المولّد
+    (`render_due`) لا يُعاد بناؤه هنا.
+
+    **و`{amount}` مبلغُ الفترة المنسَّق** من `candidate.amount` (بخانتين كسائر
+    مبالغ الموديول) لا فراغاً دائماً كما كان، و`{missing_list}` أسماءُ الناقص.
+    والقيمةُ الغائبةُ تُنطق `REMINDER_ABSENT_TEXT` بلغة المستلِم: نصٌّ مسطَّحٌ بلا
+    شرطٍ لا يستطيع حذف عنوانٍ من سطره، فكلمةُ «لا شيء» تُغلق الجملةَ في الحالات
+    الثلاث (أوراقٌ وحدها · مبلغٌ وحده · الاثنان) ولا تُبقي كلمةً معلَّقة.
     """
-    upcoming = day + timedelta(days=candidate.interval_days)
+    absent = reminder_absent_text(language)
     return {
         "client_name": candidate.client.name,
         "period": deadlines.period_label(candidate.period_start, candidate.period_end),
-        "due_date": upcoming.strftime("%d/%m/%Y"),
-        "amount": "",
-        "missing_list": "، ".join(candidate.missing),
+        "due_date": (candidate.render_due or candidate.next_due).strftime("%d/%m/%Y"),
+        "amount": absent if candidate.amount is None else f"{candidate.amount:.2f}",
+        "missing_list": "، ".join(candidate.missing) or absent,
         "office_name": tenant.CompanyName,
     }
 
 
-def _reminder_message(tenant, contact, candidates, *, template_bodies, day) -> dict:
-    """رسالةٌ واحدةٌ لشخص: بنودُها ونصُّها بلغته هو."""
+def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
+    """رسالةٌ واحدةٌ لشخص: بنودُها ونصُّها بلغته هو — **ولكلّ بندٍ نصُّ نوعه**.
+
+    رسالةٌ قد تجمع بندَي نوعين (أوراقٌ ناقصة وموعدٌ قريب) لشخصٍ واحد، فيُقرأ لكل
+    بندٍ نصُّ نوعه من مكتبه — لا نصُّ النوع الأول على الجميع.
+    """
     body = "\n\n".join(
         render_reminder_body(
-            template_bodies.get(contact.language, ""),
-            _reminder_render_values(tenant, candidate, day=day),
+            bodies_by_type.get(candidate.reminder_type, {}).get(contact.language, ""),
+            _reminder_render_values(tenant, candidate, language=contact.language),
         )
         for candidate in candidates
     )
@@ -6909,8 +7024,12 @@ def ready_to_send_payload(
     if not candidates:
         return payload
     # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف
-    # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم.
-    template_bodies = reminder_template_bodies(tenant, REMINDER_DOCUMENTS)
+    # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم. والأنواعُ من البنود المحسوبة وحدها — فلا
+    # استعلامَ لنوعٍ لم يظهر، والرسالةُ المجمَّعةُ تأخذ نصَّ كلّ بندٍ بنوعه.
+    bodies_by_type = {
+        current_type: reminder_template_bodies(tenant, current_type)
+        for current_type in sorted({candidate.reminder_type for candidate in candidates})
+    }
     grouped: dict[int, list] = {}
     for candidate in candidates:
         grouped.setdefault(candidate.contact.pk, []).append(candidate)
@@ -6919,14 +7038,13 @@ def ready_to_send_payload(
         group = grouped[contact_id]
         if merge_daily:
             messages.append(_reminder_message(
-                tenant, group[0].contact, group,
-                template_bodies=template_bodies, day=day,
+                tenant, group[0].contact, group, bodies_by_type=bodies_by_type,
             ))
         else:
             messages.extend(
                 _reminder_message(
                     tenant, candidate.contact, [candidate],
-                    template_bodies=template_bodies, day=day,
+                    bodies_by_type=bodies_by_type,
                 )
                 for candidate in group
             )

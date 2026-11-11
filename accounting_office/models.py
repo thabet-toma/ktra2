@@ -531,20 +531,26 @@ REMINDER_DEFAULT_TEXTS: dict[str, dict[str, str]] = {
         ),
     },
     #: (ب) في البحث ينادي الموعدَ باسمه (`{deadline_name}`) — وهذا الرمزُ خارج
-    #: الستّة المعتمدة، فالنصُّ المشحون يقول «موعد التقديم» ويبقى النوعُ بلا مولّد
-    #: حتى تذكرته (#281).
+    #: الستّة المعتمدة، فالنصُّ المشحون يقول «موعد التقديم» — ومولّدُ النوع في
+    #: `accounting_office/appointments.py` (#281).
     REMINDER_DEADLINE: {
+        # **سطرٌ لكل قيمةٍ لا جملةٌ تبتلعها**: البندُ يظهر بمبلغٍ بلا أوراقٍ ناقصة
+        # وبأوراقٍ بلا مبلغ، وجملةُ «بدنا نستلم منك {missing_list} قبل…» تُقرأ
+        # «منك  قبل» بفراغٍ مزدوجٍ وكلمةٍ معلَّقة. والقيمةُ الغائبةُ تُنطق «ولا شي»
+        # في `services._reminder_render_values` بلغة المستلِم.
         "ar": (
             "أهلاً {client_name}،\n"
-            "بذكّرك إنّ موعد التقديم عن {period} هو {due_date}،\n"
-            "ولسا بدنا نستلم منك {missing_list} قبل ما نقدّم.\n"
+            "بذكّرك إنّ موعد التقديم عن {period} هو {due_date}.\n"
+            "أوراق ناقصة: {missing_list}\n"
+            "مبلغ مستحقّ: {amount}\n"
             "إذا في عائق خبرنا من اليوم لنلحق.\n"
             "{office_name}"
         ),
         "he": (
             "שלום {client_name},\n"
-            "תזכורת: המועד להגשה של {period} הוא {due_date},\n"
-            "ועדיין חסרים לנו {missing_list} לפני ההגשה.\n"
+            "תזכורת: המועד להגשה של {period} הוא {due_date}.\n"
+            "מסמכים חסרים: {missing_list}\n"
+            "יתרה לתשלום: {amount}\n"
             "אם יש משהו תקוע — דברו איתנו היום כדי שנספיק.\n"
             "{office_name}"
         ),
@@ -565,7 +571,8 @@ REMINDER_DEFAULT_TEXTS: dict[str, dict[str, str]] = {
             "תודה, {office_name}"
         ),
     },
-    #: (د) تذكيرُ موعد: نصٌّ قصيرٌ محايدٌ بالنبرة نفسها — لا مولّدَ له بعد (#283).
+    #: (د) تذكيرُ موعد: نصٌّ قصيرٌ محايدٌ بالنبرة نفسها — ومولّدُه
+    #: `appointment_reminder_candidates` في `accounting_office/appointments.py` (#281).
     REMINDER_APPOINTMENT: {
         "ar": (
             "أهلاً {client_name}،\n"
@@ -869,6 +876,117 @@ class OfficeHoliday(models.Model):
 
     def __str__(self) -> str:
         return f"{self.date}:{self.name}"
+
+
+# ── المواعيد مع الزبون (#281) ────────────────────────────────────────────────
+#
+# **الموعدُ حجزُ موظّفٍ لا حجزُ زبون**: يُسجَّل من ملفّ الزبون ومن التقويم،
+# ويُحمل بتاريخه **ووقته** — «زيارة الثلاثاء 10:30» لا «الثلاثاء»؛ فقياسُ
+# «حلّ الموعد» بالساعة يفرّق موعدَي العاشرة والثانية في اليوم نفسه.
+APPOINTMENT_KIND_VISIT = "visit"
+APPOINTMENT_KIND_CALL = "call"
+APPOINTMENT_KIND_SIGNATURE = "signature"
+APPOINTMENT_KIND_PAPERS = "papers"
+APPOINTMENT_KIND_CHOICES: list[tuple[str, str]] = [
+    (APPOINTMENT_KIND_VISIT, "زيارة"),
+    (APPOINTMENT_KIND_CALL, "مكالمة"),
+    (APPOINTMENT_KIND_SIGNATURE, "توقيع"),
+    (APPOINTMENT_KIND_PAPERS, "استلام أوراق"),
+]
+APPOINTMENT_KIND_LABELS: dict[str, str] = dict(APPOINTMENT_KIND_CHOICES)
+
+#: **ولا حذف**: الإلغاءُ يكتب حالةً، والصفُّ يبقى أثراً — كسائر ما لا يُمحى هنا.
+APPOINTMENT_STATUS_SCHEDULED = "scheduled"
+APPOINTMENT_STATUS_DONE = "done"
+APPOINTMENT_STATUS_CANCELLED = "cancelled"
+APPOINTMENT_STATUS_CHOICES: list[tuple[str, str]] = [
+    (APPOINTMENT_STATUS_SCHEDULED, "محجوز"),
+    (APPOINTMENT_STATUS_DONE, "صار"),
+    (APPOINTMENT_STATUS_CANCELLED, "ملغى"),
+]
+APPOINTMENT_STATUS_LABELS: dict[str, str] = dict(APPOINTMENT_STATUS_CHOICES)
+
+#: الحالةُ الوحيدة التي تُذكَّر وتُؤكَّد: ما صار لا يُذكَّر، وما أُلغي لا يعود.
+APPOINTMENT_OPEN_STATUSES: tuple[str, ...] = (APPOINTMENT_STATUS_SCHEDULED,)
+
+
+class ClientAppointment(models.Model):
+    """موعدٌ بين المكتب وزبونه: نوعُه ووقتُه وحالتُه — **بهوية المكتب والزبون**.
+
+    **و`confirmed_at` وقتُ تسجيل التأكيد لا وقتُ إرسالٍ في الشبكة**: التأكيدُ
+    يخرج رسالةَ تذكيرٍ بالسجلّ القائم (`ReminderLog` بنوع `appointment`، د4)،
+    وهذا الحقلُ ختمُ الفعل عليه — فبُقّ «ابعت تأكيد» يعود صفراً بعد أن يُسجَّل.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_appointments",
+        verbose_name="المكتب",
+    )
+    #: `PROTECT` لا `CASCADE`: تاريخُ موعدِ زبونٍ لا يُحذف بحذفِه — والحذفُ أصلاً
+    #: ممنوعٌ هنا، والإلغاءُ يكتب حالة.
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="appointments",
+        verbose_name="الزبون",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=APPOINTMENT_KIND_CHOICES,
+        default=APPOINTMENT_KIND_VISIT,
+        verbose_name="نوع الموعد",
+    )
+    scheduled_at = models.DateTimeField(verbose_name="وقت الموعد")
+    note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="ملاحظة",
+    )
+    status = models.CharField(
+        max_length=20,
+        choices=APPOINTMENT_STATUS_CHOICES,
+        default=APPOINTMENT_STATUS_SCHEDULED,
+        verbose_name="الحالة",
+    )
+    confirmed_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="وقت التأكيد",
+    )
+    cancelled_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="وقت الإلغاء",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_appointments",
+        verbose_name="سجّله",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "موعد زبون"
+        verbose_name_plural = "مواعيد الزبائن"
+        ordering = ["scheduled_at", "id"]
+        indexes = [
+            # ملفُّ الزبون يقرأ مواعيده مرتَّبةً بوقتها دائماً.
+            models.Index(
+                fields=["tenant", "client", "scheduled_at"],
+                name="office_appt_client_time",
+            ),
+            # «مواعيد اليوم» والتقويم يقرآن المكتب كلَّه بمدىً — لا زبوناً زبوناً.
+            models.Index(
+                fields=["tenant", "scheduled_at"], name="office_appt_tenant_time",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}@{self.scheduled_at:%Y-%m-%d %H:%M}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
 
 
 class OfficeSettingValue(models.Model):

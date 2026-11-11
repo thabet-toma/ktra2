@@ -762,12 +762,19 @@ class CountersAndFiltersTest(OfficeTestCase):
 
         self.assertEqual(
             window["counters"],
-            # #278: `missing_docs` خامسةُ العدّادات — صفرٌ هنا: لا صفوفَ أوراق.
-            {"late": 0, "late_internal": 1, "week": 1, "missing_docs": 0, "all": 3},
+            # #278: `missing_docs` خامسةُ العدّادات — صفرٌ هنا: لا صفوفَ أوراق،
+            # و#281: `appointments` سادستُها — صفرٌ: لا مواعيد.
+            {
+                "late": 0, "late_internal": 1, "week": 1, "missing_docs": 0,
+                "appointments": 0, "all": 3,
+            },
         )
         self.assertEqual(
             late["counters"],
-            {"late": 3, "late_internal": 0, "week": 0, "missing_docs": 0, "all": 3},
+            {
+                "late": 3, "late_internal": 0, "week": 0, "missing_docs": 0,
+                "appointments": 0, "all": 3,
+            },
         )
         self.assertEqual(len(late["rows"]), 3)
 

@@ -77,7 +77,7 @@ class RegistryShapeTest(SettingTestCase):
         """أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» (#274)، واثنانِ لـ#276،
         و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
         (#280)، و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب وإعدادُ
-        اعتمادها التلقائيّ لـ#282."""
+        اعتمادها التلقائيّ لـ#282، وتذكيرُ الموعد لـ#281."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -96,6 +96,8 @@ class RegistryShapeTest(SettingTestCase):
                 "book_entry_method",
                 # #282: طريقةُ الأتعاب (مكتب ← زبون) واعتمادُها التلقائيّ المقفل.
                 "fee_method", "fee_auto_approve",
+                # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
+                "appointment_reminder_days",
             },
         )
 
@@ -442,7 +444,8 @@ class SettingsApiTest(SettingTestCase):
         rows = {row["key"]: row for row in res.data["settings"]}
         # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276،
         # و«بنودُ الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص» (#280)،
-        # و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب واعتمادُها لـ#282.
+        # و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب واعتمادُها لـ#282،
+        # وتذكيرُ الموعد لـ#281.
         self.assertEqual(
             set(rows),
             {
@@ -458,6 +461,8 @@ class SettingsApiTest(SettingTestCase):
                 "reminder_escalation_owner_days", "reminder_default_consent_types",
                 "book_entry_method",
                 "fee_method", "fee_auto_approve",
+                # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
+                "appointment_reminder_days",
             },
         )
 

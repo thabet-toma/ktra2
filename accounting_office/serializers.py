@@ -12,6 +12,7 @@ from rest_framework import serializers
 
 from accounting_office import services
 from accounting_office.models import (
+    APPOINTMENT_KIND_CHOICES,
     BOOK_ACCOUNT_TYPE_CHOICES,
     BOOK_ENTRY_KIND_CHOICES,
     BOOK_KIND_CHOICES,
@@ -600,6 +601,37 @@ class OfficeHolidayWriteSerializer(serializers.Serializer):
 
     date = serializers.DateField()
     name = serializers.CharField(required=False, allow_blank=True, max_length=200)
+
+class ClientAppointmentWriteSerializer(serializers.Serializer):
+    """حجزُ موعدٍ من ملفّ الزبون أو من التقويم (#281) — **بتاريخه ووقته**.
+
+    و`kind` اختيارٌ من الأربعة كما يعرّفها النموذج لا نصٌّ حرّ، و`note` اختياريّة.
+    ولا يُمرَّر `status`: الموعدُ يُحجز، والحالةُ تُكتب بأفعالها وحدها.
+    """
+
+    client_id = serializers.IntegerField(min_value=1)
+    kind = serializers.ChoiceField(
+        choices=[value for value, _label in APPOINTMENT_KIND_CHOICES],
+    )
+    scheduled_at = serializers.DateTimeField()
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class ClientAppointmentRescheduleSerializer(serializers.Serializer):
+    """«أجّل»: وقتٌ جديد وملاحظةٌ اختياريّة — والصفُّ يبقى برقمه."""
+
+    scheduled_at = serializers.DateTimeField()
+    note = serializers.CharField(required=False, allow_blank=True, max_length=300)
+
+
+class ClientAppointmentConfirmSerializer(serializers.Serializer):
+    """«ابعت تأكيد»: نصٌّ اختياريّ يغلِب نصَّ القالب — وما عداه يُبنى في الخدمة.
+
+    والقناةُ ثابتةٌ هنا (واتساب) كسائر «انبعثت»، فلا حقلَ لها.
+    """
+
+    body = serializers.CharField(required=False, allow_blank=True)
+
 
 class ClientBookWriteSerializer(serializers.Serializer):
     """إنشاءُ دفترِ زبون: الزبونُ ونوعُه — وتاريخُ الفتح اختياريٌّ (اليوم افتراضاً).

@@ -71,6 +71,7 @@ import {
   shortIsoDate,
   showsOfficeAssignment,
   visibleClientSettings,
+  bookMonthFromSearch,
   clientTabFromSearch,
   taskIdFromSearch,
   officeTaskAnchorId,
@@ -82,6 +83,8 @@ import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
+import { OfficeClientAppointments } from './OfficeClientAppointments';
+import { OfficeClientBook } from './OfficeClientBook';
 import { OfficeClientDocuments } from './OfficeClientDocuments';
 import { OfficeClientEvents } from './OfficeClientEvents';
 import { OfficeObligationRow } from './OfficeObligationRow';
@@ -109,6 +112,10 @@ const TABS: { key: TabKey; label: string }[] = [
   // #280/ب: سجلُّ كل تذكيرٍ أُرسل أو كلّمناه — قراءةٌ وتصحيحٌ، بلا تعديلٍ ولا حذف.
   { key: 'reminder-log', label: 'سجلّ التذكيرات' },
   { key: 'notes', label: 'ملاحظات' },
+  // #281: المواعيدُ — قبل «الدفتر»، كترتيبها في `CLIENT_TAB_KEYS`.
+  { key: 'appointments', label: 'المواعيد' },
+  // #286/ب: حركاتُ دفتر الزبون وإدخالُها — آخراً كموضعه في `CLIENT_TAB_KEYS`.
+  { key: 'book', label: 'الدفتر' },
 ];
 
 /** أثرُ «آخر فترة مش علينا» — جملةٌ واحدة في التأكيد وتحت خانة نموذج الإيقاف. */
@@ -2310,6 +2317,27 @@ export const OfficeClientFile: React.FC<{
             </div>
           ) : null}
         </OfficeCard>
+      ) : null}
+
+      {/* #281: المواعيدُ — حجزٌ وتأكيدٌ وتأجيلٌ وإلغاء (قبل «الدفتر» في
+          `CLIENT_TAB_KEYS`، وتبويبُها بالترتيب نفسه في `TABS`). */}
+      {tab === 'appointments' ? (
+        <OfficeClientAppointments
+          clientId={clientId}
+          canWrite={canWrite}
+          taxSystem={client.tax_system}
+        />
+      ) : null}
+
+      {tab === 'book' ? (
+        // #286/ب: الحركاتُ والإدخال والعكس. الكتابةُ بشرطين لا يُدمجان: مفتاحُ
+        // الزبائن، ونشاطُ خدمة مسك الدفاتر (`writable` — والخادم يردّ 400).
+        <OfficeClientBook
+          clientId={clientId}
+          canWrite={canWrite}
+          canSeeAmounts={canSeeAmounts}
+          month={bookMonthFromSearch(`?${searchParams.toString()}`)}
+        />
       ) : null}
     </div>
   );

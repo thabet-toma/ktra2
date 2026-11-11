@@ -567,6 +567,19 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         group=GROUP_REMINDERS,
         note="تنبيهُ المسؤول يسبقه؛ ويبقى صاحبُ المكتب آخرَ من يعلم.",
     ),
+    #: #281: تذكيرُ الموعد قبل كم يوم — القيمةُ بالمستوى نفسه لكل نوعٍ آخر
+    #: (إعدادُ المكتب، ويُخصَّص للزبون): مكتبٌ يذكّر قبل يومٍ وآخر قبل ثلاثة.
+    "appointment_reminder_days": SettingDefinition(
+        key="appointment_reminder_days",
+        label="تذكير الموعد قبل (أيام)",
+        client_label="تذكير موعدي قبل (أيام)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=1,
+        min_value=0,
+        group=GROUP_REMINDERS,
+        note="قبل الموعد بهذا العدد من الأيام يظهر «تذكير موعد» في «جاهز للإرسال».",
+    ),
     "reminder_default_consent_types": SettingDefinition(
         key="reminder_default_consent_types",
         label="أنواع التذكير التي يوافق عليها الشخص الجديد",
