@@ -218,11 +218,19 @@ PACKAGE_AMOUNT_KEYS: tuple[str, ...] = ("suggested_price",)
 #: مبلغُ الالتزام (#275): ما على الزبون أو له في فترةٍ — **يُقفل عند «انقدّم»**.
 OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount",)
 
+#: مبالغُ بنود دفتر الزبون (#286): مدينُ البند ودائنه. تُقنَّع كسائر مبالغ
+#: الموديول — من لا يملك «يرى المبالغ» لا يقرأ أرقامَ دفترٍ ولا يكتبها، والقاعدةُ
+#: نفسُها في القراءة (`client_books.entry_row`) والكتابة (`create_entry`).
+BOOK_ENTRY_AMOUNT_KEYS: tuple[str, ...] = ("debit", "credit")
+
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
 #: المعلَنة في مُسلسِلات الموديول وبمفاتيح حمولاته العشرية، فتضطرّ كلُّ تذكرةٍ
 #: لاحقة فيها مبلغٌ أن تمرّ بالقناع.
 AMOUNT_KEYS: frozenset[str] = frozenset(
-    TAX_CARD_AMOUNT_KEYS + PACKAGE_AMOUNT_KEYS + OBLIGATION_AMOUNT_KEYS,
+    TAX_CARD_AMOUNT_KEYS
+    + PACKAGE_AMOUNT_KEYS
+    + OBLIGATION_AMOUNT_KEYS
+    + BOOK_ENTRY_AMOUNT_KEYS,
 )
 
 

@@ -116,6 +116,20 @@ REMINDER_TYPE_CHOICES: tuple[tuple[str, str], ...] = (
 REMINDER_TYPES: tuple[str, ...] = tuple(key for key, _label in REMINDER_TYPE_CHOICES)
 REMINDER_TYPE_LABELS: dict[str, str] = dict(REMINDER_TYPE_CHOICES)
 
+#: #286: طريقتا إدخال دفتر الزبون — تُعرَّفان هنا لا في النماذج: إعداد
+#: `book_entry_method` يقرأ مفاتيحهما، والسجلَّ لا يستورد النماذج (دَّورةُ استيراد).
+#: والتسميةُ عربيةٌ في الطرفين لأن الإعدادَ يُعرَض في اختيارٍ واحد لا في شاشتين.
+BOOK_ENTRY_METHOD_DOCUMENT = "document"
+BOOK_ENTRY_METHOD_MONTHLY = "monthly"
+BOOK_ENTRY_METHOD_CHOICES: tuple[tuple[str, str], ...] = (
+    (BOOK_ENTRY_METHOD_DOCUMENT, "ورقة ورقة"),
+    (BOOK_ENTRY_METHOD_MONTHLY, "إدخال الشهر"),
+)
+BOOK_ENTRY_METHODS: tuple[str, ...] = tuple(
+    key for key, _label in BOOK_ENTRY_METHOD_CHOICES
+)
+BOOK_ENTRY_METHOD_LABELS: dict[str, str] = dict(BOOK_ENTRY_METHOD_CHOICES)
+
 #: نافذةُ الإرسال (§#280/D7): ساعةُ بدايةٍ وساعةُ نهايةٍ تُخزَّنان للمرحلة الثانية
 #: ولا تقرؤهما هذه المرحلة. والحدُّ 23 لأن الساعةَ 24 تعني «المنتصف» في لغاتٍ
 #: وتُلبس على من يقرأ، فالوضوحُ أولى.
@@ -547,6 +561,26 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=list(REMINDER_TYPES),
         group=GROUP_REMINDERS,
         note="تُنسَخ على جهة الاتصال عند إنشائها، وتُعدَّل بعدها لكل شخصٍ وحده.",
+    ),
+    # ── دفتر الزبون (#286) ──
+    #
+    # **طريقةُ الإدخال إعدادٌ لا حقل** (د10): مكتبٌ يُدخل ورقةً ورقةً وآخر يُدخل
+    # الشهر كاملاً. والافتراضُ «ورقة ورقة» لأنه الأضيق: لا تُجمَع أوراقٌ في حركةٍ
+    # واحدة قبل أن يُطلب ذلك. ويُخصَّص لكل زبون، فمنشأةٌ كبيرةٌ تُدخل شهرياً
+    # تخصيصُها وحدها ولا يجرّ معها بقية الزبائن.
+    "book_entry_method": SettingDefinition(
+        key="book_entry_method",
+        label="طريقة إدخال دفتر الزبون",
+        client_label="طريقة إدخال دفتري",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        choices=BOOK_ENTRY_METHODS,
+        labels=BOOK_ENTRY_METHOD_LABELS,
+        default=BOOK_ENTRY_METHOD_DOCUMENT,
+        group=GROUP_OFFICE,
+        note=(
+            "«ورقة ورقة» حركةٌ لكل ورقةٍ واردة، و«إدخال الشهر» أوراقُ الشهر في حركة."
+        ),
     ),
 }
 

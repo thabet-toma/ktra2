@@ -2745,3 +2745,490 @@ class DocumentRetentionRule(models.Model):
 
     def __str__(self) -> str:
         return f"{self.tax_system}/{self.code}:{self.years}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# دفترُ الزبون (#286) — دفترُ عملٍ يملكه المكتب عن زبونه، **لا دفترَ الشركة**.
+#
+# القرارُ وسببه في `docs/decisions/client_books.md`: لا `post_journal` ولا
+# `JournalHeader`/`JournalLine` في هذا القسم ولا في `client_books.py`، لأن
+# `accounting` هو دفترُ الشركة المالكة للمستأجر (المكتبُ نفسه) — ودفترُ الزبون
+# دفترُ منشأةٍ أخرى. ويحرس الاستثناءَ مسحُ `ast` في
+# `accounting_office/tests/test_client_books.py` (لا تعليقٌ يُنسى).
+#
+# **ولا حذف**: التصحيحُ حركةٌ عكسية (`BookEntry.reverses`) والأصلُ يبقى. ولذلك
+# `BookEntry.client_book` على `PROTECT`: دفترٌ فيه تاريخٌ لا يُطوى من تحت حركاته.
+# ─────────────────────────────────────────────────────────────────────────────
+
+BOOK_KIND_SIMPLE = "simple"
+BOOK_KIND_DOUBLE = "double"
+BOOK_KIND_CHOICES: list[tuple[str, str]] = [
+    (BOOK_KIND_SIMPLE, "بسيط"),
+    (BOOK_KIND_DOUBLE, "مزدوج"),
+]
+BOOK_KIND_LABELS: dict[str, str] = dict(BOOK_KIND_CHOICES)
+
+#: أنواعُ الحساب — خمسةٌ على تصنيف القوائم المالية، لا شجرةَ أكوادٍ مخترَعة.
+BOOK_ACCOUNT_TYPE_ASSET = "asset"
+BOOK_ACCOUNT_TYPE_LIABILITY = "liability"
+BOOK_ACCOUNT_TYPE_EQUITY = "equity"
+BOOK_ACCOUNT_TYPE_REVENUE = "revenue"
+BOOK_ACCOUNT_TYPE_EXPENSE = "expense"
+BOOK_ACCOUNT_TYPE_CHOICES: list[tuple[str, str]] = [
+    (BOOK_ACCOUNT_TYPE_ASSET, "أصول"),
+    (BOOK_ACCOUNT_TYPE_LIABILITY, "خصوم"),
+    (BOOK_ACCOUNT_TYPE_EQUITY, "حقوق ملكية"),
+    (BOOK_ACCOUNT_TYPE_REVENUE, "إيرادات"),
+    (BOOK_ACCOUNT_TYPE_EXPENSE, "مصاريف"),
+]
+BOOK_ACCOUNT_TYPE_LABELS: dict[str, str] = dict(BOOK_ACCOUNT_TYPE_CHOICES)
+
+#: أنواعُ الحركة — الورقةُ التي جاءت منها، لا نوعُ الحساب. و`daily_report` هو
+#: الإدخالُ اليوميّ/الشهريّ المباشر حين تكون طريقةُ الإدخال «إدخال الشهر».
+BOOK_ENTRY_KIND_SALES_INVOICE = "sales_invoice"
+BOOK_ENTRY_KIND_PURCHASE_INVOICE = "purchase_invoice"
+BOOK_ENTRY_KIND_EXPENSE = "expense"
+BOOK_ENTRY_KIND_BANK_MOVEMENT = "bank_movement"
+BOOK_ENTRY_KIND_DAILY_REPORT = "daily_report"
+BOOK_ENTRY_KIND_CHOICES: list[tuple[str, str]] = [
+    (BOOK_ENTRY_KIND_SALES_INVOICE, "فاتورة بيع"),
+    (BOOK_ENTRY_KIND_PURCHASE_INVOICE, "فاتورة شراء"),
+    (BOOK_ENTRY_KIND_EXPENSE, "مصروف"),
+    (BOOK_ENTRY_KIND_BANK_MOVEMENT, "حركة بنك"),
+    (BOOK_ENTRY_KIND_DAILY_REPORT, "تقرير يومي"),
+]
+BOOK_ENTRY_KIND_LABELS: dict[str, str] = dict(BOOK_ENTRY_KIND_CHOICES)
+
+
+def _fill_tenant_from_entry(instance) -> None:
+    """شركةُ بند الحركة تتبع حركتها — والحركةُ تتبع زبونها.
+
+    كـ`_fill_tenant_from_client_service`: النموذجُ الابنُ لا زبونَ له مباشرةً،
+    فقاعدتُه كقاعدة بقية النماذج الابنة — تمتلئ من أبيها ولا تُكتب لشركةٍ مخالفة.
+    """
+    if not instance.entry_id:
+        return
+    expected = instance.entry.tenant_id
+    if instance.tenant_id is None:
+        instance.tenant_id = expected
+    elif instance.tenant_id != expected:
+        raise ValueError(
+            "شركةُ بند الحركة تخالف شركة حركتها — لا يُكتب سجلٌّ عابرٌ للمكاتب.",
+        )
+
+
+class BookAccountTemplate(models.Model):
+    """شجرةُ الحساب الافتراضية للمنصّة — **بلا `tenant` عمداً** كـ`TaxThreshold`.
+
+    الأكوادُ واحدةٌ لكل المكاتب (والنسخةُ لكل شركة تعني كودين مختلفين للحساب
+    نفسه). والمكتبُ يعدّل نسختَه في `OfficeBookAccount`، والزبونُ يأخذ نسخةً
+    عند إنشاء دفتره — لا مرجعَ حيّ إلى هذا الصفّ.
+    """
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    book_kind = models.CharField(
+        max_length=10, choices=BOOK_KIND_CHOICES, verbose_name="نوع الدفتر",
+    )
+    code = models.CharField(max_length=20, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    #: كودُ الأب لا مفتاحُه: الشجرةُ تُكتب نصّاً في اللائحة وتُقرأ كوداً في الواجهة.
+    parent_code = models.CharField(
+        max_length=20, blank=True, default="", verbose_name="كود الأب",
+    )
+    account_type = models.CharField(
+        max_length=12, choices=BOOK_ACCOUNT_TYPE_CHOICES, verbose_name="نوع الحساب",
+    )
+    is_system = models.BooleanField(default=True, verbose_name="حساب نظام")
+
+    class Meta:
+        verbose_name = "قالب حساب دفتر"
+        verbose_name_plural = "قوالب حسابات الدفاتر"
+        ordering = ["tax_system", "book_kind", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tax_system", "book_kind", "code"],
+                name="uniq_book_template_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.book_kind}/{self.code}"
+
+
+class OfficeBookAccount(models.Model):
+    """نسخةُ المكتب من الشجرة — تُنشأ حين يعدّل قالباً، وتُنسخ عنها دفاترُ زبائنه.
+
+    **`is_edited`** تقول «هذا صفٌّ عدّله المكتب» لا «هذا صفٌّ من المنصّة» — فلا
+    يُظنّ التعديلُ ضياعاً عند أول قراءة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_accounts",
+        verbose_name="المكتب",
+    )
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    book_kind = models.CharField(
+        max_length=10, choices=BOOK_KIND_CHOICES, verbose_name="نوع الدفتر",
+    )
+    code = models.CharField(max_length=20, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    parent_code = models.CharField(
+        max_length=20, blank=True, default="", verbose_name="كود الأب",
+    )
+    account_type = models.CharField(
+        max_length=12, choices=BOOK_ACCOUNT_TYPE_CHOICES, verbose_name="نوع الحساب",
+    )
+    is_system = models.BooleanField(default=True, verbose_name="حساب نظام")
+    is_edited = models.BooleanField(default=False, verbose_name="عدّله المكتب")
+
+    class Meta:
+        verbose_name = "حساب دفتر مكتب"
+        verbose_name_plural = "حسابات دفاتر المكتب"
+        ordering = ["tax_system", "book_kind", "code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "tax_system", "book_kind", "code"],
+                name="uniq_office_book_account_code",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tenant_id}/{self.tax_system}/{self.code}"
+
+
+class ClientBook(models.Model):
+    """دفترُ زبونٍ واحد: نوعُه وتاريخُ فتحه — **ولا يُحذف**.
+
+    وجودُه مشتقٌّ من خدمة مسك الدفاتر لا من حقلٍ هنا، وإيقافُ الخدمة يجعله
+    للقراءة وحدها. و`kind_changed_on` يسجّل تاريخَ الانتقال من البسيط إلى
+    المزدوج — فحين يتغيّر النوع يبقى معروفاً **من أيّ يوم** صار مزدوجاً.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_books",
+        verbose_name="المكتب",
+    )
+    client = models.OneToOneField(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="book",
+        verbose_name="الزبون",
+    )
+    kind = models.CharField(
+        max_length=10, choices=BOOK_KIND_CHOICES, verbose_name="نوع الدفتر",
+    )
+    opened_on = models.DateField(verbose_name="يبدأ في")
+    kind_changed_on = models.DateField(
+        null=True, blank=True, verbose_name="تغيّر نوعه في",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "دفتر زبون"
+        verbose_name_plural = "دفاتر الزبائن"
+        ordering = ["client_id"]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}:{self.kind}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class ClientBookAccount(models.Model):
+    """شجرةُ حساب الزبون — **نسخةٌ واحدة عند إنشاء الدفتر**، لا مرجعٌ حيّ.
+
+    `parent` مفتاحٌ حقيقيّ هنا (لا `parent_code` كالقالب): الشجرةُ صارت ملك
+    الزبون، والدورانُ فيها استعلامٌ لا مطابقةَ نصوص.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_book_accounts",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="book_accounts",
+        verbose_name="الزبون",
+    )
+    code = models.CharField(max_length=20, verbose_name="الكود")
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    parent = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="children",
+        verbose_name="الحساب الأب",
+    )
+    account_type = models.CharField(
+        max_length=12, choices=BOOK_ACCOUNT_TYPE_CHOICES, verbose_name="نوع الحساب",
+    )
+    is_system = models.BooleanField(default=True, verbose_name="حساب نظام")
+    #: التعطيلُ بدل الحذف: حسابٌ استُعمل في حركةٍ لا يُمحى، ويُخفى إن لم يعد.
+    is_active = models.BooleanField(default=True, verbose_name="مفعّل")
+
+    class Meta:
+        verbose_name = "حساب دفتر زبون"
+        verbose_name_plural = "حسابات دفاتر الزبائن"
+        ordering = ["code"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "code"], name="uniq_client_book_account_code",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client"], name="office_book_tree_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}/{self.code}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class ClientBookSequence(models.Model):
+    """عدّادُ ترقيم حركات الدفتر — **أداةُ القفل والترقيم** (#286/د3).
+
+    `(client, year) → last_number`، والزيادةُ داخل `transaction.atomic()` بعد
+    `select_for_update` على هذا الصفّ. **لا `MAX(number)+1` ولا `count()+1`**:
+    كلاهما يقرأ لقطةً قديمة تحت التزامن فيُكرّر رقماً أو يُحدث فجوة. والقيدُ
+    `(client, year, number)` على `BookEntry` طبقةٌ ثانية تُساند القفل لا تُبدله.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_book_sequences",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.CASCADE,
+        related_name="book_sequences",
+        verbose_name="الزبون",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    last_number = models.PositiveIntegerField(default=0, verbose_name="آخر رقم")
+
+    class Meta:
+        verbose_name = "عدّاد دفتر زبون"
+        verbose_name_plural = "عدّادات دفاتر الزبائن"
+        ordering = ["client_id", "year"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client", "year"], name="uniq_client_book_sequence_year",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}/{self.year}:{self.last_number}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class BookEntry(models.Model):
+    """حركةٌ في دفتر زبون: مرقَّمةٌ بلا فجوات، **ولا تُحذف ولا تُعدَّل**.
+
+    `reverses` يقول «هذه الحركة تُبطل تلك»، و`reversed_by` (عكسيّ الروابط) يقول
+    العكس. والتصحيحُ حركةٌ جديدة ببنودٍ معكوسة، فالأصلُ يبقى في التاريخ.
+    و`reverses` **`OneToOneField`** لا `ForeignKey`: عكسٌ واحد على الأكثر لكل حركة
+    فرادةً في القاعدة — طبقةٌ ثانية تُساند قفلَ الأصل في `reverse_entry`.
+
+    **وأوراقُها في `BookEntryDocument` لا في عمود**: حركةُ الشهر تُدخل أوراقَه
+    كلَّها، وعكسُها يجب أن يُعيدها إلى «للإدخال» — وربطٌ يُقرأ أصدقُ من عمودٍ
+    يُكتب. والقاعدةُ «حركةٌ حيّةٌ واحدة على الأكثر لكل ورقة» في الخدمة تحت قفل.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_entries",
+        verbose_name="المكتب",
+    )
+    client_book = models.ForeignKey(
+        # `PROTECT` لا `CASCADE`: دفترٌ فيه تاريخٌ لا يُطوى من تحت حركاته (#286/د4).
+        ClientBook,
+        on_delete=models.PROTECT,
+        related_name="entries",
+        verbose_name="الدفتر",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        on_delete=models.PROTECT,
+        related_name="book_entries",
+        verbose_name="الزبون",
+    )
+    #: سنةُ الترقيم — سنةُ `entry_date`، مخزَّنةٌ لأن الترقيم يبدأ من أول كل سنة.
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    number = models.PositiveIntegerField(verbose_name="الرقم")
+    entry_date = models.DateField(verbose_name="تاريخ الحركة")
+    kind = models.CharField(
+        max_length=20, choices=BOOK_ENTRY_KIND_CHOICES, verbose_name="نوع الحركة",
+    )
+    memo = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="البيان",
+    )
+    reverses = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="reversed_by",
+        verbose_name="تُبطل الحركة",
+    )
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_book_entries",
+        verbose_name="أنشأها",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "حركة دفتر زبون"
+        verbose_name_plural = "حركات دفاتر الزبائن"
+        ordering = ["year", "number"]
+        constraints = [
+            # فرادةٌ **غير مشروطة**: الشرطُ في `UniqueConstraint` تتجاهله MySQL
+            # بصمت فتمرّ الهجرة ويغيب القيد في الإنتاج.
+            models.UniqueConstraint(
+                fields=["client", "year", "number"], name="uniq_book_entry_number",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client", "year"], name="client_book_entry_year",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_id}/{self.year}-{self.number}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
+        super().save(*args, **kwargs)
+
+
+class BookEntryLine(models.Model):
+    """بندُ حركة: حسابٌ ومدينٌ أو دائن — وطرفٌ مقابلٌ نصّاً حين لا يكون حساباً.
+
+    `side_party` اسمُ الطرف الآخر كما ورد في الورقة («شركة كذا») — لا يُصطنع له
+    حسابٌ في شجرة الزبون، ولا يُترك المبلغ بلا قول مَن قابلَه.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_entry_lines",
+        verbose_name="المكتب",
+    )
+    entry = models.ForeignKey(
+        BookEntry,
+        on_delete=models.CASCADE,
+        related_name="lines",
+        verbose_name="الحركة",
+    )
+    account = models.ForeignKey(
+        ClientBookAccount,
+        on_delete=models.PROTECT,
+        related_name="lines",
+        verbose_name="الحساب",
+    )
+    debit = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="مدين",
+    )
+    credit = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="دائن",
+    )
+    side_party = models.CharField(
+        max_length=200, blank=True, default="", verbose_name="الطرف المقابل",
+    )
+
+    class Meta:
+        verbose_name = "بند حركة دفتر"
+        verbose_name_plural = "بنود حركات الدفاتر"
+        ordering = ["entry_id", "id"]
+
+    def __str__(self) -> str:
+        return f"{self.entry_id}/{self.account_id}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_entry(self)
+        super().save(*args, **kwargs)
+
+
+class BookEntryDocument(models.Model):
+    """ورقةٌ أُدخلت في حركة — **ربطٌ لا عمود** (#286).
+
+    الحركةُ الواحدة قد تُدخل أوراقَ الشهر كاملة (طريقةُ «إدخال الشهر»)، فعمودٌ
+    واحدٌ على الحركة يترك بقيةَ الشهر في «للإدخال» إلى الأبد. والربطُ **يُقرأ**:
+    عكسُ الحركة يُعيد أوراقَها إلى «للإدخال» بلا كتابة حالةٍ واحدة (د9).
+
+    وقاعدةُ «حركةٌ حيّةٌ واحدة على الأكثر لكل ورقة» ليست هنا — القاعدةُ في
+    `client_books.create_entry` داخل `transaction.atomic()` وبقفلٍ على صفوف
+    الأوراق، لأن الحارسَ الذي يقرأ ثم يكتب بلا قفلٍ يمرّ تحت التزامن.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_entry_documents",
+        verbose_name="المكتب",
+    )
+    entry = models.ForeignKey(
+        BookEntry,
+        on_delete=models.CASCADE,
+        related_name="documents",
+        verbose_name="الحركة",
+    )
+    document = models.ForeignKey(
+        # `PROTECT`: ورقةٌ دخلت في حركةٍ لا تُمحى من تحت رابطها.
+        DocumentChecklistItem,
+        on_delete=models.PROTECT,
+        related_name="book_entry_links",
+        verbose_name="الورقة",
+    )
+
+    class Meta:
+        verbose_name = "ورقة حركة دفتر"
+        verbose_name_plural = "أوراق حركات الدفاتر"
+        ordering = ["entry_id", "id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["entry", "document"], name="uniq_entry_document",
+            ),
+        ]
+        indexes = [
+            # «هل هذه الورقة مُدخلة؟» سؤالُ «للإدخال» — بمفتاح المكتب والورقة.
+            models.Index(
+                fields=["tenant", "document"], name="client_book_entry_doc",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.entry_id}/{self.document_id}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_entry(self)
+        super().save(*args, **kwargs)
