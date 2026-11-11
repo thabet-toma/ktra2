@@ -2319,9 +2319,8 @@ export const OfficeClientFile: React.FC<{
         </OfficeCard>
       ) : null}
 
-      {/* #281: المواعيدُ — حجزٌ وتأكيدٌ وتأجيلٌ وإلغاء. مفتاحُها في آخر
-          `CLIENT_TAB_KEYS` وتبويبُها بعده في `TABS` لأن #286/ب يعدّل هذا الملفّ
-          نفسه: الإضافةُ في الطرف تترك فهارسَ غيره مستقرةً عند الدمج. */}
+      {/* #281: المواعيدُ — حجزٌ وتأكيدٌ وتأجيلٌ وإلغاء (قبل «الدفتر» في
+          `CLIENT_TAB_KEYS`، وتبويبُها بالترتيب نفسه في `TABS`). */}
       {tab === 'appointments' ? (
         <OfficeClientAppointments
           clientId={clientId}
