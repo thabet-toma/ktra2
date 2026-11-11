@@ -44,7 +44,13 @@ APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 #: `TaxThreshold.amount` (#273): سقفٌ ضريبيّ **منشور** في `source_url` — بياناتُ
 #: منصّةٍ واحدةٌ لكل المكاتب (بلا `tenant`)، وليس مبلغَ زبونٍ فيمرّ بالقناع. ولو
 #: قُنِّع لاختفى أساسُ الاقتراح من كل شاشة، وهو رقمٌ عامٌّ في التشريع لا سرّ عميل.
-MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({"TaxThreshold.amount"})
+#:
+#: `FeeInvoice.tax_percent` (#282/أ٢): **نسبةٌ لا مبلغ** — لقطةُ نسبة الإصدار
+#: (16.00)، وقنعُها لا يخفي شيئاً؛ ومبلغُها `tax_total` مقنَّعٌ كسائر المبالغ.
+MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({
+    "TaxThreshold.amount",
+    "FeeInvoice.tax_percent",
+})
 
 
 def declared_amount_fields(source: str) -> list[str]:
@@ -191,7 +197,10 @@ class ModelAmountGuardTest(SimpleTestCase):
                 "FeeDraft.total",
                 "FeeDraftLine.amount",
                 "FeeExtraService.amount",
-                # #282/أ٢: مجموعُ الفاتورة وضريبتُها — مسجَّلان لا مُعفَيان.
+                # #282/أ٢: مجموعُ الفاتورة وضريبتُها — مسجَّلان لا مُعفَيان؛
+                # ونسبتُها `tax_percent` مُعفاةٌ (`FeeInvoice.tax_percent`) لأنها
+                # **نسبةٌ لا مبلغ**، ولذلك تُسرد هنا ولا تدخل جردَ المسجَّل.
+                "FeeInvoice.tax_percent",
                 "FeeInvoice.tax_total",
                 "FeeInvoice.total",
                 "FeeSubscription.amount",

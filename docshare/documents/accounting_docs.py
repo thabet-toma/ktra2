@@ -31,6 +31,7 @@
 from django.template.loader import render_to_string
 
 from accounting_office.models import Obligation
+from core.terminology import OFFICE_FEE_INVOICE_LABEL
 from docshare.documents._contract import (
     AUDIENCE_CUSTOMER,
     TONE_DANGER,
@@ -213,7 +214,7 @@ def load_fee_invoice(tenant_id: int, doc_id: int):
 
     return (
         FeeInvoice.objects
-        .select_related("client", "tenant", "draft", "related_invoice")
+        .select_related("client", "tenant", "source_draft", "related_invoice")
         .filter(pk=doc_id, tenant_id=tenant_id)
         .first()
     )
@@ -225,7 +226,7 @@ def build_fee_invoice(invoice) -> dict:
 
 
 def page_fee_invoice(invoice, share) -> str:
-    """ورقةُ الفاتورة المصيَّرة — حقولُها التسعة أو السبعة وسطرُ النفي.
+    """ورقةُ الفاتورة المصيَّرة — حقولُها الثمانيةُ المبنيّةُ من التسعة أو السبعة، وسطرُ النفي.
 
     الصفحةُ **لا تمرّ بحمولة `payload`** (كالإشعار وشهادة الكفالة): الحمولةُ
     تحرس القائمةَ البيضاء لواجهة JSON، والورقةُ لها سياقُها المحسوب في
@@ -273,7 +274,7 @@ ACCOUNTING_DOC_TYPES = {
         "scope": payment_notice_doc_ids,
     },
     "fee_invoice": {
-        "label": "فاتورة أتعاب",
+        "label": OFFICE_FEE_INVOICE_LABEL,
         "loader": load_fee_invoice,
         "builder": build_fee_invoice,
         #: صلاحيةُ نوع الإشعار نفسها: ورقةُ زبونٍ يفتحها الزبونُ نفسه، ومن يملك

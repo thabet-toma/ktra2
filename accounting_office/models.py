@@ -27,6 +27,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounting_office import settings_registry
+from core.terminology import OFFICE_FEE_INVOICE_LABEL
 #: أنواعُ الأحداث (#277) — تُعرَّف في السجلّ لأن إعداد `enabled_event_kinds` يقرأ
 #: مفاتيحها، والسجلَّ لا يستورد النماذج (دَّورة). وتُعاد تصديراً هنا فتُقرأ من
 #: النماذج كسائر ثوابت الموديول (`as` نفسَه = تصديرٌ مقصود لا استيرادٌ عابر).
@@ -3814,19 +3815,28 @@ FEE_INVOICE_KIND_INVOICE = "invoice"
 FEE_INVOICE_KIND_CREDIT_NOTE = "credit_note"
 FEE_INVOICE_KIND_SUPPLEMENTARY = "supplementary"
 FEE_INVOICE_KIND_CHOICES: list[tuple[str, str]] = [
-    (FEE_INVOICE_KIND_INVOICE, "فاتورة أتعاب"),
+    (FEE_INVOICE_KIND_INVOICE, OFFICE_FEE_INVOICE_LABEL),
     (FEE_INVOICE_KIND_CREDIT_NOTE, "إشعار دائن"),
     (FEE_INVOICE_KIND_SUPPLEMENTARY, "فاتورة تكميلية"),
 ]
 FEE_INVOICE_KIND_LABELS: dict[str, str] = dict(FEE_INVOICE_KIND_CHOICES)
 
-#: عنوانُ الورقة الافتراضيّ **بحسب نظام الجهة الضريبي** — يُخزَّن لحظةَ الإصدار
-#: فلا يغيّر تعديلُ العنوان ورقةً خرجت. ولا «فاتورة ضريبية» ولا «חשבונית מס» فيه.
-FEE_INVOICE_TITLE_PS = "فاتورة أتعاب"
+#: عنوانُ الورقة الافتراضيّ **بحسب نظام المُصدِر الضريبي** — يُخزَّن لحظةَ
+#: الإصدار (أو يُقرأ من إعداد `fee_invoice_title`) فلا يغيّر تعديلُ العنوان
+#: ورقةً خرجت. ولا «فاتورة ضريبية» ولا «חשבונית מס» فيه.
+FEE_INVOICE_TITLE_PS = OFFICE_FEE_INVOICE_LABEL
 FEE_INVOICE_TITLE_IL = "חשבון עסקה"
 FEE_INVOICE_TITLES: dict[str, str] = {
     "PS": FEE_INVOICE_TITLE_PS,
     "IL": FEE_INVOICE_TITLE_IL,
+}
+#: عنوانُ ورقة الإشعار الدائن — **ليس عنوان الفاتورة** (#282/أ٢): ورقةٌ تحمل
+#: عنوانَ الفاتورة على مبلغٍ دائنٍ تُقرأ مطالبةً، والعنوانُ يقول نوعَ المستند.
+FEE_INVOICE_CREDIT_TITLE_PS = "إشعار دائن أتعاب"
+FEE_INVOICE_CREDIT_TITLE_IL = "הודעת זיכוי"
+FEE_INVOICE_CREDIT_TITLES: dict[str, str] = {
+    "PS": FEE_INVOICE_CREDIT_TITLE_PS,
+    "IL": FEE_INVOICE_CREDIT_TITLE_IL,
 }
 
 #: سطرُ النفي الثابت — **في كل صفحة، لا يُطفأ ولا يُحذف بإعداد**. ورقةٌ بلا نفيٍ
@@ -3928,16 +3938,22 @@ class FeeInvoice(models.Model):
         related_name="fee_invoices",
         verbose_name="الزبون",
     )
-    draft = models.OneToOneField(
+    #: **`source_draft` لا `draft`، وFK لا `OneToOne`** (#282/أ٢): الإلغاءُ
+    #: يعيد المسودّةَ `approved → draft` فتُعتمد ثانيةً وتُصدر ورقةً جديدةً
+    #: برقمٍ جديد — فمسودّةٌ واحدة قد تُنتج ورقتين في التاريخ (الملغاة والسارية).
+    #: **ولا فرادة:** المفتاحُ أثرٌ تاريخيّ لا قيدُ «ورقةٌ واحدة لكل مسودّة»؛
+    #: والقيدُ الحقيقيّ «لا فاتورتان حيّتان لمسودّةٍ واحدة» يُفرض في الخدمة
+    #: تحت قفل صفّ المسودّة (`select_for_update` في الاعتماد)، لأن فرادةً
+    #: مشروطةً (`cancelled_at IS NULL`) لا تدعمها MySQL وتُلغى بصمت.
+    source_draft = models.ForeignKey(
         FeeDraft,
         on_delete=models.PROTECT,
-        #: **فارغةٌ في التصحيح وحده**: الإشعارُ الدائن والفاتورةُ التكميلية مستندان
-        #: على فاتورةٍ (`related_invoice`) لا فاتورةُ شهرٍ ثانية، ومسودّةُ الشهر
-        #: واحدة. والفرادةُ `OneToOne` تبقى على الأصل فلا مسودّةَ تنتج ورقتين.
+        #: **فارغةٌ في التصحيح**: الإشعارُ الدائن والفاتورةُ التكميلية مستندان
+        #: على فاتورةٍ (`related_invoice`) لا فاتورةُ شهرٍ ثانية.
         null=True,
         blank=True,
-        related_name="invoice",
-        verbose_name="المسودّة",
+        related_name="invoices",
+        verbose_name="المسودّة المصدر",
     )
     kind = models.CharField(
         max_length=20,
@@ -3957,11 +3973,25 @@ class FeeInvoice(models.Model):
     number = models.CharField(max_length=40, verbose_name="الرقم")
     #: عنوانُ الورقة كما طُبعت — نصُّ الإعداد افتراضُه، وهو لقطةٌ لا مرجعٌ حيّ.
     title = models.CharField(max_length=60, verbose_name="عنوان الورقة")
+    #: **نظامُ الورقة لقطةً** (#282/أ٢): يُقرأ منه عند كل عرض، ولا يُقرأ نظامُ
+    #: الزبون الحيّ — تغييرُ نظام المكتب بعد الإصدار لا يقلب ورقةً عربيةً عبرية.
+    tax_system = models.CharField(
+        max_length=2,
+        choices=[("PS", "فلسطيني"), ("IL", "إسرائيلي")],
+        default="PS",
+        verbose_name="النظام الضريبي",
+    )
     #: **شاملٌ للضريبة**: الإجماليُ الذي يدفعه الزبون.
     total = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="الإجمالي")
     #: نصيبُ الضريبة من `total` — صفرٌ حين المكتبُ ليس مشتغلاً مرخّصاً.
     tax_total = models.DecimalField(
         max_digits=14, decimal_places=2, default=0, verbose_name="قيمة الضريبة",
+    )
+    #: **نسبةُ الضريبة لقطةً** (#282/أ٢): تُخزَّن عند الإصدار ولا تُشتقّ عند
+    #: العرض، فتغييرُ نسبة الشركة لا يعيد كتابة ورقةٍ خرجت. **وهي ليست مبلغاً**
+    #: فلا تدخل `AMOUNT_KEYS`؛ ومبلغُها `tax_total` مقنَّعٌ كسائر المبالغ.
+    tax_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0, verbose_name="نسبة الضريبة",
     )
     #: رقمُ الفاتورة الرسمية الخارجية (فاتورةٌ ضريبية أصدرها المكتب) — اختياريّ،
     #: وغيابُه هو الحالُ الغالب: ورقتُنا ليست فاتورةً ضريبية.
@@ -3993,7 +4023,7 @@ class FeeInvoice(models.Model):
     )
 
     class Meta:
-        verbose_name = "فاتورة أتعاب"
+        verbose_name = OFFICE_FEE_INVOICE_LABEL
         verbose_name_plural = "فواتير الأتعاب"
         ordering = ["-issued_at", "-id"]
         constraints = [
@@ -4041,18 +4071,6 @@ class FeeInvoice(models.Model):
     def net_total(self) -> Decimal:
         """ما قبل الضريبة — `total - tax_total`، ولا عمودَ ثالثاً يفترق عنهما."""
         return self.total - self.tax_total
-
-    @property
-    def tax_percent(self) -> Decimal:
-        """نسبةُ الضريبة **المؤرَّخة على الصفّ** — تُشتقّ من مبلغيه لا تُقرأ حيّاً.
-
-        تغييرُ نسبة النظام بعد الإصدار لا يعيد كتابة ورقةٍ خرجت؛ ولذلك لا حقلَ
-        نسبةٍ ثالثاً هنا: مبلغان صحيحان يقولان النسبةَ بلا انحراف.
-        """
-        net = self.net_total
-        if not self.tax_total or net <= 0:
-            return Decimal("0")
-        return (self.tax_total * 100 / net).quantize(Decimal("0.01"))
 
     def save(self, *args, **kwargs):
         _fill_tenant_from_client(self)

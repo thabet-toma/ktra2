@@ -850,8 +850,11 @@ class FeeInvoiceRowSerializer(serializers.Serializer):
     kind_label = serializers.CharField(read_only=True)
     title = serializers.CharField(read_only=True)
     client = serializers.DictField(read_only=True)
-    draft = serializers.IntegerField(read_only=True, allow_null=True)
+    #: **`source_draft` لا `draft`** (#282/أ٢): المفتاحُ أثرٌ تاريخيّ لا قيدُ
+    #: «ورقةٌ واحدة لكل مسودّة» — الإلغاءُ يعيد المسودّةَ فتُصدر ورقةً جديدة.
+    source_draft = serializers.IntegerField(read_only=True, allow_null=True)
     related_invoice = serializers.IntegerField(read_only=True, allow_null=True)
+    tax_system = serializers.CharField(read_only=True)
     total = serializers.DecimalField(
         max_digits=14, decimal_places=2, read_only=True, allow_null=True,
     )

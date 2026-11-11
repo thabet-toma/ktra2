@@ -2472,7 +2472,7 @@ class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
 
     def _detail(self, invoice):
         return Response(fee_invoices.invoice_detail(
-            invoice, masked=fee_invoices.amounts_masked(self.tenant, self.request.user),
+            invoice, masked=fees.amounts_masked(self.tenant, self.request.user),
         ))
 
     def retrieve(self, request, *args, **kwargs):
@@ -2512,7 +2512,7 @@ class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
                 FeeInvoice.objects.select_related(
                     "client", "issued_by", "related_invoice",
                 ).get(pk=note.pk),
-                masked=fee_invoices.amounts_masked(self.tenant, request.user),
+                masked=fees.amounts_masked(self.tenant, request.user),
             ),
             status=status.HTTP_201_CREATED,
         )
@@ -2537,7 +2537,7 @@ class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
                 FeeInvoice.objects.select_related(
                     "client", "issued_by", "related_invoice",
                 ).get(pk=extra.pk),
-                masked=fee_invoices.amounts_masked(self.tenant, request.user),
+                masked=fees.amounts_masked(self.tenant, request.user),
             ),
             status=status.HTTP_201_CREATED,
         )

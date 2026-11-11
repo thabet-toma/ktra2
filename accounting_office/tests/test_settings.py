@@ -96,6 +96,9 @@ class RegistryShapeTest(SettingTestCase):
                 "book_entry_method",
                 # #282: طريقةُ الأتعاب (مكتب ← زبون) واعتمادُها التلقائيّ المقفل.
                 "fee_method", "fee_auto_approve",
+                # #282/أ٢: «المكتب مشتغل مرخّص» (يُظهر سطر الضريبة) وعنوانُ
+                # ورقة فاتورة الأتعاب — **إعدادان لا استنتاج** (#266).
+                "office_licensed_dealer", "fee_invoice_title",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
                 # #285: إشعارُ الدفع — الإرفاقُ وصيغتُه وحدُّ الرمادي، وللزبون تخصيصُها.
@@ -146,6 +149,31 @@ class RegistryShapeTest(SettingTestCase):
 
         self.assertEqual(registry["filing_method"].levels, ("office", "client"))
         self.assertEqual(registry["filing_method"].default, "electronic")
+
+    def test_the_fee_invoice_settings_are_office_level_with_their_defaults(self):
+        """#282/أ٢: «مشتغل مرخّص» افتراضُه مفعّل، وعنوانُ الورقة نصٌّ افتراضُه فارغ.
+
+        والفارغُ **ليس فراغاً على الورقة**: معناه «الافتراضيّ بحسب نظام المُصدِر»
+        («فاتورة أتعاب» / «חשבון עסקה») — فلا يُثبَّت نظامٌ في نصّ الإعداد.
+        """
+        registry = settings_registry.SETTINGS_REGISTRY
+        licensed = registry["office_licensed_dealer"]
+        title = registry["fee_invoice_title"]
+
+        self.assertEqual(licensed.kind, settings_registry.KIND_BOOL)
+        self.assertEqual(licensed.levels, ("office",))
+        self.assertEqual(licensed.default, True)
+        self.assertEqual(licensed.group, settings_registry.GROUP_OFFICE)
+        self.assertEqual(title.kind, settings_registry.KIND_TEXT)
+        self.assertEqual(title.levels, ("office",))
+        self.assertEqual(title.default, "")
+        self.assertEqual(title.max_length, 60)
+        self.assertEqual(
+            settings_registry.validate_value(title, "  فاتورة أتعاب  "),
+            "فاتورة أتعاب",
+        )
+        with self.assertRaises(DjangoValidationError):
+            settings_registry.validate_value(title, "ن" * 61)
 
     def test_the_group_has_its_own_constant_not_the_level(self):
         self.assertEqual(settings_registry.GROUP_OFFICE, "office")
@@ -464,6 +492,8 @@ class SettingsApiTest(SettingTestCase):
                 "reminder_escalation_owner_days", "reminder_default_consent_types",
                 "book_entry_method",
                 "fee_method", "fee_auto_approve",
+                # #282/أ٢: «المكتب مشتغل مرخّص» وعنوانُ ورقة الفاتورة.
+                "office_licensed_dealer", "fee_invoice_title",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
                 # #285: إشعارُ الدفع — ثلاثةُ مفاتيحَ في مجموعة «التذكيرات».
