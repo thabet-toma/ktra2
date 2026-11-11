@@ -31,7 +31,14 @@ from rest_framework.exceptions import (
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.response import Response
 
-from accounting_office import appointments, client_books, deadlines, fees, services
+from accounting_office import (
+    appointments,
+    book_reports,
+    client_books,
+    deadlines,
+    fees,
+    services,
+)
 from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     ClientBook,
@@ -2197,6 +2204,44 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         serializer.is_valid(raise_exception=True)
         book = client_books.change_kind(book, serializer.validated_data["kind"])
         return Response(self._book_row(book))
+
+    # ── التقارير (#288/أ): قراءةٌ محسوبةٌ على الخادم ─────────────────────────
+    #
+    # **ولا حسابَ هنا**: `book_reports` هي الوحدةُ التي تُرشِّح وتجمع وتقنّع،
+    # والـview يمرّر الطلبَ ويردّ ما بُني. والعزلُ من `_book` نفسِه
+    # (`visible_clients`): تقريرُ زبونٍ لا يراه العضو **404**، وزبونٌ بلا دفتر
+    # كذلك — لا تقريرَ على لا شيء.
+    @action(detail=True, methods=["get"], url_path="reports")
+    def reports(self, request, pk=None):
+        """الأنواعُ المتاحةُ لنوع دفتر هذا الزبون — والعلامةُ المائية معها."""
+        return Response(book_reports.reports_index_payload(self._book(pk)))
+
+    @action(detail=True, methods=["get"], url_path=r"reports/(?P<kind>[a-z_]+)")
+    def report(self, request, pk=None, kind=None):
+        """تقريرٌ واحد بفترة `from`/`to` — وميزانٌ لا يتوازن **409 صريح**.
+
+        و409 لا 400: الطلبُ سليمٌ والبياناتُ هي المكسورة، فيقول الرقمُ للمحاسب
+        أين ينظر بدل «حمولتُك فاسدة» عن فترةٍ صحيحة.
+        """
+        book = self._book(pk)
+        if not book_reports.is_report_available(book, kind):
+            raise NotFound("لا تقريرَ بهذا النوع لهذا الدفتر.")
+        try:
+            payload = book_reports.report_payload(
+                book,
+                kind,
+                raw_from=request.query_params.get("from"),
+                raw_to=request.query_params.get("to"),
+                user=request.user,
+                account=request.query_params.get("account") or "",
+                party=request.query_params.get("party") or "",
+            )
+        except book_reports.ReportImbalance as exc:
+            return Response(
+                {"detail": str(exc), "totals": exc.totals},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return Response(payload)
 
 
 # ── الأتعاب: الاشتراك والمسودّات والاعتماد (#282) ───────────────────────────
