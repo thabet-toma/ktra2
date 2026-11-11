@@ -94,6 +94,11 @@ jobs:
         # Advisory: the offline e2e suite exercises sync flows that need a live
         # Django backend, which this isolated frontend job does not provision.
         # Keep it reporting without gating the pipeline.
+        #
+        # مهلةٌ صريحة (2026-11-11): بلا `timeout-minutes` علِقت الخطوةُ 30+ دقيقة
+        # على `ubuntu-24.04` وأمسكت الوظيفةَ كلَّها، فلا ينتهي الـCI أبداً. المهلةُ
+        # تُحوّل التعليقَ إلى فشلٍ تتجاهله `continue-on-error` كما تتجاهل الفشل.
+        timeout-minutes: 15
         continue-on-error: true
         run: npx playwright test
         env:
