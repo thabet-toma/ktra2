@@ -6455,6 +6455,10 @@ class ReminderCandidate:
     interval_days: int
     next_due: Any
     contact: Any
+    #: نظامُ **الزبون صاحب البند** الضريبيّ — يُقرأ مع إعداداته في المسحة نفسها،
+    #: ويرافق البندَ إلى الواجهة لأنها تبني منه رابطَ الواتساب (`wa.me` يريد
+    #: مفتاحَ دولة، والأرضيُّ لا يُعرف مفتاحُه إلا من النظام) — #280/ب.
+    tax_system: Any
     due: bool
     exhausted: bool
     postponed: bool
@@ -6468,6 +6472,10 @@ _REMINDER_CLIENT_KEYS: tuple[str, ...] = (
     DOCUMENTS_REMINDER_INTERVAL_DAYS_KEY,
     DOCUMENTS_REMINDER_MAX_KEY,
     "rest_days",
+    # #280/ب: نظامُ الزبون لبند رسالته — يُقرأ في المسحة نفسها، فإضافةُ حقلٍ إلى
+    # البند لا تكلّف استعلاماً لكل بند. **ولا يُخمَّن نظامٌ واحدٌ للمستلِم**:
+    # رسالةُ شخصٍ قد تجمع بندَي زبونين بنظامين مختلفين.
+    TAX_SYSTEM_KEY,
 )
 
 
@@ -6642,6 +6650,7 @@ def _reminder_candidates(
                     interval_days=interval_days,
                     next_due=next_due,
                     contact=contact,
+                    tax_system=resolved.get(TAX_SYSTEM_KEY),
                     due=day >= next_due,
                     exhausted=count >= maximum,
                     postponed=(client.pk, current_type) in postponed,
@@ -6680,10 +6689,16 @@ def office_is_on_holiday(tenant, day) -> bool:
 
 
 def _reminder_item_payload(candidate) -> dict:
-    """بندٌ واحدٌ في رسالةٍ — بكلّ مفتاحٍ يحتاجه فعلُ الإرسال بعده."""
+    """بندٌ واحدٌ في رسالةٍ — بكلّ مفتاحٍ يحتاجه فعلُ الإرسال بعده.
+
+    **ونظامُ الزبون الضريبيُّ في البند لا في المستلِم** (#280/ب): شخصٌ واحدٌ قد
+    يكون مستلِماً لزبونين بنظامين مختلفين، فالرابطُ يُبنى من نظام صاحب البند —
+    وواجهةُ «جاهز للإرسال» تُمرّره حين تتفق البنودُ عليه وحده.
+    """
     return {
         "client_id": candidate.client.pk,
         "client_name": candidate.client.name,
+        "tax_system": candidate.tax_system,
         "reminder_type": candidate.reminder_type,
         "reminder_type_label": REMINDER_TYPE_LABELS.get(candidate.reminder_type, ""),
         "badge": OBLIGATION_BADGE_MISSING_DOCS,
@@ -7005,6 +7020,10 @@ def mark_reminders_sent(tenant, *, user, contact_id, body, items, channel=""):
         raise ValidationError({
             "channel": "«انبعثت» إرسالٌ بالواتساب وحده — وما عداه «كلّمناه».",
         })
+    clean_body = (body or "").strip()
+    if not clean_body:
+        # السجلُّ إلحاقيٌّ لا يُمحى: صفُّ `sent` بلا نصٍّ لا يُصحَّح إلا بصفٍّ آخر.
+        raise ValidationError({"body": "نصُّ الرسالة المُرسَلة مطلوب."})
     clean_items = _clean_reminder_items(tenant, user, items)
     contact = _reminder_contact_of_tenant(tenant, contact_id)
     _assert_contact_serves_items(contact, clean_items)
@@ -7014,7 +7033,7 @@ def mark_reminders_sent(tenant, *, user, contact_id, body, items, channel=""):
         items=[dict(item, contact=contact) for item in clean_items],
         kind=REMINDER_KIND_SENT,
         channel=clean_channel,
-        body=(body or "").strip(),
+        body=clean_body,
     )
 
 

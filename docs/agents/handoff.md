@@ -4,9 +4,42 @@
 **وبطلب المالك (2026-10-22): يُحدَّث بعد كل تذكرة، وبعد كل جولة تصليح، وقبل أي ضغطٍ للسياق** — هو ذاكرة
 المنسّق بعد الـcompact. الإكمال حتى آخر تذكرة بلا توقّف.
 
-**آخر تحديث:** 2026-11-05 ~00:50 (قبل compact رابع بطلب المالك؛ **لا عامل حيّ ولا job حيّ**)
+**آخر تحديث:** 2026-11-11 ~09:50 (بعد انقطاع الجلسة؛ **لا عامل حيّ ولا job حيّ ولا محاولة جارية**)
 
-## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-05 00:50)
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-11 09:50)
+
+الـGoal `goal-0636beb0-0b93-478a-ba89-e889254ad804`: إن ظهر disarmed فـ`update_goal action=resume`.
+
+**الحالة:**
+
+- ✅ **#271–#279 منشورة ومغلقة على GitHub وعلى الإنتاج.** آخرها: #278 (`a438e4f9`، CI `41943538928`، هجرة `0008`)، و#279 (`b29dc25e`، CI `41956587105`، هجرة `0009`، نسخة `ktra-before-279-20261105-033359.sql`).
+- 🚀 **#280 الجزء A (الخادم) مُلتزَم ومدفوع `aff3a4bc`، CI أخضر `41975920977` — ولم يُنشَر، و#280 ما زالت مفتوحة** (النشر يكون مرّةً واحدة بعد الجزء B).
+- 🔧 **#280 الجزء B (الشاشات) منفَّذ وغير ملتزَم في الشجرة** — المحاولة `attempt-bfabf0fd-8fab-4078-8354-4a880f0f1fc9` (settled، **لم تُراجَع ولم تُختَم بـ`delegation_conclude`**):
+  - جديد: `frontend_v2/components/accounting-office/OfficeReadyToSendScreen.tsx` · `OfficeReminderTemplatesSection.tsx` · `OfficeHolidaysSection.tsx`.
+  - معدَّل (16): `App.tsx` · `Sidebar.tsx` · `layout/Breadcrumb.tsx` · `types/common.ts` · `utils/viewPermissions.ts` · `OfficeClientFile.tsx` · `OfficeSettingsScreen.tsx` · `services/accountingOfficeApi.ts` · `utils/accountingOffice.ts` + `.test.ts` · `core/shell_manifest.py` · `core/terminology.py` · `core/tests/test_shell_manifest.py` · `docs/modules/accounting_office.md` · `docs/CHANGELOG.md`.
+  - **تحقّقتُ بنفسي:** `npx tsc --noEmit` ✓ · `npm test` **1446/0** ✓ · `npm run build` ✓ · `test_shell_manifest` **12 ✓** · `makemigrations --check` ✓ · `git diff HEAD --check` ✓.
+  - **لم أشغّل بنفسي:** مجموعة الموديول كاملة والكاملة و`test_terminology_guard`. تقرير العامل: `695 passed` + فشلٌ بيئيّ واحد (`test_no_hardcoded_compound_terms_outside_allowlist`، 252 مخالفاً كلُّهم تحت `.agents/`، **ولا واحد من ملفاته**).
+  - ⚠️ **نقصُ API أبلغ عنه العامل (لجولة التصليح):** `GET ready-to-send/` لا يحمل `tax_system` للزبون، فالشاشة تنادي `officeWhatsappLink(phone, null, …)`. الجوال (059/056/باقي 05) والدوليُّ يعملان، و**الأرضيُّ وحده** يُقفل زرَّه بـ«رقم غير صالح للواتساب». الحلّ: حقل `tax_system` في بند الرسالة أو في المستلِم داخل `_reminder_message`.
+  - ⚠️ **الشاشات لم تُرَ بالعين** (لا متصفح في هذه البيئة) — تُراجَع بالقراءة الآن، وتُجرَّب في Playwright يدوياً.
+
+**تغيّرت خطوط التفويض (fleet revision 2) — استعمل هذه، فالقديمة لم تعد موجودة:**
+
+- تنفيذ وجولة تصحيح **1**: `lane-7587384e-b0bf-4913-8361-67a1a1b59325` (الخط الافتراضي).
+- **المراجع** وجولة تصحيح **3**: `lane-efdd3b26-0a1d-40e1-bd8d-66235e21438a` (Opus 5.5 high).
+- جولة تصحيح **2**: `lane-1a4fac83-55c5-49ee-8bf7-7c14aa880489` (Sonnet 5.5 high).
+
+**بالترتيب عند الاستئناف:**
+
+1. `delegation_review` للمحاولة `attempt-bfabf0fd…` ← اقرأ فرق الجزء B سطراً سطراً بنفسك ← `delegation_conclude`.
+2. اكتب `%TEMP%\wf-acct\briefs\280b-review.md` (الموجز الأصلي `280b.md`) وأرسله **مراجعةً واحدة** إلى `lane-efdd3b26` (المراجع: `git diff` + مهارة `code-review`)، ويُذكر فيه نقص `tax_system` بنداً معلوماً.
+3. **سير العمل الجديد (طلب المالك 2026-11-11 ~10:00، في `progress.md`)** — كل جولة تصليح فقط عند خلل حقيقي من المراجع: خلل 1 ⇒ الفواعلي `lane-7587384e` (يصلح + `code-review` ذاتياً) ← مراجعة 2 ← خلل 2 ⇒ المصحح 2 `lane-1a4fac83` (يصلح + `code-review` ذاتياً) ← مراجعة 3 ← خلل 3 ⇒ المراجع نفسه `lane-efdd3b26` يصلح ← مراجعة 4 في جلسة مستقلة. PASS ⇒ البوّابات مباشرة. يُضاف بندُ `tax_system` إلى أوّل موجز تصليح.
+4. البوّابات كلها بنفسك (الموديول+البيان، makemigrations، migrate من الصفر حتى `0010`، lint، tsc/npm/build، sync_docs، diff --check، **والكاملة بالخلفية**).
+5. الاستلام: commit للجزء B (+ `docs/agents/*`) ← `git push origin newktra` ← CI أخضر (`aff3a4bc` أخضر أصلاً؛ يلزم أخضرُ على الـcommit الجديد) ← نشرٌ **واحد** يغطّي A+B: على الخادم fetch/merge/`git diff origin/newktra` فارغ/`check`/`makemigrations`/مراجعة `0010` (لا `RemoveField`/`DeleteModel`/`RunSQL`)/build ثم `%TEMP%\wf-acct\deploy-280.sh` (انسخ `deploy-279.sh` واستبدل `before-279`→`before-280`) ← `gh issue close 280` بتعليق النشر ← تحديث `acct-office-build.md`/`runs.md`/`handoff.md`/`progress.md`.
+6. **بالتوازي حتى 3 تذاكر** حسب «خطة التوازي» في `progress.md`: **#286 تبدأ الآن** في worktree مع 280؛ وبعد 280: 281 ∥ 282؛ وهكذا. الدمج للمنسّق تذكرةً تذكرة.
+
+**ملاحظات ثابتة:** إرسال سكربتات الخادم: `$s | ssh … 'bash -s'` ينهي السطر الأخير بـ`\r` — اختم الأمر بـ` ;`. و`frontend_v2` بلا `@types/react` ⇒ `tsc` لا يمسك أسماء حقول حالة الـhooks (قديم، خارج التذاكر). و`pytest` لا `manage.py test`. وملفّاتٌ في الجذر لا تُمسّ: `.agy-design-refs/` · `marketing/` · `str` · `package-lock.json` · الملفّ ذو الاسم المشوَّه.
+
+## (قديم) نقطة الاستئناف 2026-11-05 00:50
 
 الـGoal `goal-0636beb0-0b93-478a-ba89-e889254ad804`: إن ظهر disarmed فـ`update_goal action=resume`.
 

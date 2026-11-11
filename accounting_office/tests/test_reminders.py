@@ -17,6 +17,8 @@
 7. **التصعيدُ بعد الحدّ**: تنبيهٌ للمسؤول في يوم الاستحقاق التالي، ولصاحب
    المكتب بعد يومين، ويُسقطهما اكتمالُ الأوراق عند القراءة.
 8. **الكلفةُ ثابتة**: قائمةُ «جاهز للإرسال» لا تكلّف استعلاماً لكل زبون.
+9. **البندُ يحمل نظامَ زبونه الضريبيّ** (#280/ب) ليُبنى رابطُ الواتساب منه، ولا
+   نظامَ مستلِمٍ واحداً يُفرَض على بنودِ زبونين مختلفَي النظام.
 """
 import datetime
 from unittest import mock
@@ -50,6 +52,7 @@ from accounting_office.models import (
     OfficeAlert,
     OfficeClient,
     OfficeHoliday,
+    OfficeSettingValue,
     ReminderLog,
     ReminderPostpone,
     ReminderTemplate,
@@ -540,6 +543,40 @@ class ReadyListTest(RemindersTestCase):
         self.assertIn("محل أول", messages[0]["body"])
         self.assertIn("محل ثانٍ", messages[0]["body"])
 
+    def test_each_item_carries_the_tax_system_of_its_own_client(self):
+        """#280/ب: النظامُ في بند الرسالة لا في مستلِمها — فلا نظامٌ واحدٌ يُفرَض.
+
+        رسالةُ شخصٍ واحدٍ قد تجمع بندَي زبونين بنظامين مختلفين، والواجهةُ تبني
+        رابطَ الواتساب من نظام **صاحب البند** (والأرضيُّ لا يُعرف مفتاحُ دولته
+        إلا منه). فيُقرأ نظامُ كل بندٍ من زبونه، أو يبقى `None` إن غاب.
+        """
+        shared = self.make_contact(name="أبو أحمد")
+        first, _contact = self.ready_client("محل أول", contact=shared)
+        second, _contact = self.ready_client("محل ثانٍ", contact=shared)
+        # المكتب كلُّه على IL، وهذا الزبون وحده على PS — تخصيصُ زبونٍ لا مكتب.
+        services.set_client_setting(first, "tax_system", "PS")
+
+        items = {item["client_id"]: item for item in self.messages()[0]["items"]}
+
+        self.assertEqual(items[first.pk]["tax_system"], "PS")
+        self.assertEqual(items[second.pk]["tax_system"], "IL")
+
+    def test_an_item_whose_client_has_no_tax_system_carries_none(self):
+        """وإن غاب النظامُ (مكتبٌ لم يختر بعدُ) بقي `None` — لا افتراضيَّ يُخترَع.
+
+        `tax_system` بلا افتراضيٍّ في السجلّ، والخدمةُ ترفض حذفَه؛ فيُحذف الصفُّ
+        مباشرةً هنا ليُحاكى مكتبٌ في أول تشغيله.
+        """
+        client, _contact = self.ready_client()
+        OfficeSettingValue.objects.filter(
+            tenant=self.tenant, key="tax_system",
+        ).delete()
+
+        items = self.messages()[0]["items"]
+
+        self.assertEqual([item["client_id"] for item in items], [client.pk])
+        self.assertIsNone(items[0]["tax_system"])
+
     def test_the_assigned_recipient_for_the_type_beats_the_primary_contact(self):
         client, primary = self.ready_client()
         accountant = self.make_contact(name="المحاسب", phone="0569000000", language="he")
@@ -985,6 +1022,26 @@ class LogShapeTest(RemindersTestCase):
 
         rows = services.mark_reminders_sent(self.tenant, user=self.owner, **payload)
         self.assertEqual(rows[0].channel, REMINDER_CHANNEL_WHATSAPP)
+
+    def test_a_sent_row_without_a_body_is_refused(self):
+        """السجلُّ لا يُمحى: «انبعثت» بلا نصٍّ تسجّل رسالةً لم تُكتب أصلاً."""
+        client, contact = self.ready_client()
+        for body in ("", "   ", None):
+            with self.subTest(body=body):
+                with self.assertRaises(DjangoValidationError) as caught:
+                    services.mark_reminders_sent(
+                        self.tenant, user=self.owner, contact_id=contact.pk,
+                        body=body,
+                        items=[{
+                            "client_id": client.pk,
+                            "reminder_type": REMINDER_DOCUMENTS,
+                            "period_start": JAN_START.isoformat(),
+                            "period_end": JAN_END.isoformat(),
+                        }],
+                    )
+                self.assertIn("body", caught.exception.message_dict)
+
+        self.assertFalse(ReminderLog.objects.exists())
 
     def test_the_log_row_carries_the_snapshots_of_the_person_at_send_time(self):
         client, contact = self.ready_client()

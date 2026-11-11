@@ -360,7 +360,9 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
                 ClientContactRowSerializer(link).data, status=status.HTTP_201_CREATED,
             )
         return Response(ClientContactRowSerializer(
-            client.contact_links.select_related("contact").order_by("-is_primary", "id"),
+            client.contact_links
+            .select_related("contact__consent_withdrawn_by")
+            .order_by("-is_primary", "id"),
             many=True,
         ).data)
 
@@ -385,7 +387,9 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         link = self._link(client, contact_id)
         services.set_primary_client_contact(client=client, contact=link.contact)
         return Response(ClientContactRowSerializer(
-            ClientContact.objects.select_related("contact").get(pk=link.pk),
+            ClientContact.objects
+            .select_related("contact__consent_withdrawn_by")
+            .get(pk=link.pk),
         ).data)
 
     def _link(self, client, contact_id):
@@ -688,7 +692,9 @@ class OfficeContactViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         # **مصدر رؤية الجهات** (`services.visible_contacts`): بلا
         # `office.clients.all` لا تُقرأ جهةُ زبونٍ لا يراه العضو (ولا تُعدَّل ولا
         # تُحذف) — وغيرُ المربوطة تبقى ليجدها المنتقي.
-        queryset = services.visible_contacts(self.tenant, self.request.user)
+        queryset = services.visible_contacts(
+            self.tenant, self.request.user,
+        ).select_related("consent_withdrawn_by")
         if self.action == "list":
             term = (self.request.query_params.get("q") or "").strip()
             if term:
