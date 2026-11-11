@@ -28,6 +28,13 @@
 حين لا دفترَ للزبون — و«للإدخال» بطاقةً في شاشة «اليوم» وعدّادُها منها، ومحرّرُ
 شجرة الزبون في إعدادات المكتب (`OfficeClientBooksTree`).
 
+**وتقاريرُ الدفتر (#288، الجزء أ — الخادم):** سبعةُ أنواعٍ محسوبةٍ من القائم في
+`accounting_office/book_reports.py` — ثلاثةٌ للدفتر البسيط (قبضٌ ودفع، إيراداتٌ
+ومصاريف، ذمم) وأربعةٌ للمزدوج (ميزانُ مراجعة، أرباحٌ وخسائر، ميزانية، كشفُ حساب) —
+ونقطتان على `OfficeClientBookViewSet` نفسِه. **لا هجرةَ ولا حقلَ جديد**: التقريرُ
+قراءةٌ محضة، والمجاميعُ تُجمَع في القاعدة. **ولا `vat`**: نسبتُه تحتاج قراراً (لا
+نوعَ حسابٍ ضريبيٍّ في النماذج اليوم) وتُترك لتذكرةٍ تُقرّر مصدرَها.
+
 **مفتاح الترخيص:** `accounting_office` في `core/modules.py` (`MODULES`) — تسميتُه
 «مكتب المحاسبة»، خططُه `Pro` و`Enterprise`، و`legacy_flag: None` (لا عَلَم قديم
 يُيسِّره). كلُّ نقطةٍ تحت `/api/accounting-office/` تمرّ بـ`require_module` فتردّ
@@ -51,9 +58,10 @@
 | `accounting_office/deadlines.py` | **المحرّكُ النقيّ** (#274): `compute_deadline` (أربعةُ تواريخَ وثلاثُ علامات) و`periods_for` و`service_periods` و`period_label` و`add_months`/`month_start_after` — بلا استعلامٍ وبلا تاريخٍ قانونيّ في الكود |
 | `accounting_office/appointments.py` | **المواعيدُ وتذكيرا الموعد والموعد الرسميّ** (#281): `create_appointment`/`reschedule_appointment`/`cancel_appointment`/`complete_appointment` (حالةٌ لا حذف)، و`send_appointment_confirmation` («ابعت تأكيد» صفُّ سجلٍّ + `confirmed_at`)، وقراءاتُ اليوم والتقويم وملفّ الزبون (`appointments_for_day`/`calendar_appointments`/`client_appointments_payload`)، و`client_owes` (نقيّة: هل على الزبون شيء؟)، و**المولّدان** `appointment_reminder_candidates` و`deadline_reminder_candidates` — نوافذُ من اليوم لا عدّادات، وبندٌ واحدٌ لكل (زبون، فترة) في الموعد الرسميّ بأقرب موعدٍ **قادمٍ عليه شيء** (وبندٌ لكل (زبون، يوم) في تذكير الموعد). يستورد `services` (و`services` يستورده **مؤجَّلاً** في `_appointments_module` فتُفكّ الدورة) |
 | `accounting_office/client_books.py` | **خدماتُ دفتر الزبون** (#286): `bookkeeping_service_on`/`book_is_writable`/`assert_book_writable` (وجودُ الدفتر من `status_on` القائمة)، و`create_book`/`ensure_client_tree` (نسخُ الشجرة نسخةً واحدة)، و`add_account`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `ClientBookSequence`)، و`create_entry`/`reverse_entry` (**يقفل الأصلَ** `select_for_update` قبل فحص «لها عكسٌ بالفعل»)، و`change_kind` (د7)، و`pending_entry_payload` («للإدخال» باستعلامٍ واحد)، و`choices_payload`/`entry_kind_choices`/`account_type_choices` (تسمياتُ الأنواع الثلاثة من النموذج — نقطةُ `client-books/choices/`). **لا استيرادَ من `accounting`** — يحرسه مسحُ `ast` في `accounting_office/tests/test_client_books.py` |
+| `accounting_office/book_reports.py` | **تقاريرُ دفتر الزبون** (#288/أ): `period_for` (**الفترةُ الواحدة**: الافتراضُ من بداية السنة إلى اليوم، والمعكوسُ 400)، و`_live_lines`/`_period_lines` (الحيّةُ وحدها من `_live_entries`، والفترةُ في `WHERE`)، و`_account_sums` (**التجميعُ في القاعدة**: `values`/`Sum` — صفٌّ لكل حساب)، و`_cash`/`_profit_rows`/`_receivables` (البسيط)، و`_trial_balance`/`_balance_sheet`/`_statement` (المزدوج)، و`REPORT_LABELS`/`REPORTS_BY_BOOK_KIND`/`WATERMARK`، و`available_reports`/`is_report_available`/`reports_index_payload`/`report_payload`، و`ReportImbalance` (**خطأٌ صريح 409** لا صفرٌ مصطنع)، و`_mask_payload` (قناعٌ متداخلٌ فوق `services.mask_amounts`) |
 | `accounting_office/fees.py` | **خدماتُ الأتعاب** (#282، أ١): `subscription_on` (**السعرُ المؤرَّخ** — أكبر `starts_on` لا يتجاوز الشهر)، و`generate_fee_drafts` (**التوليدُ الشهريّ** ممّا يقرؤه `services.refresh_office` عبر `_generate_fee_drafts`)، و`_subscription_lines`/`_service_lines`/`_extra_lines` (المصادرُ الثلاثة)، و`_raise_pending_alerts` (**تنبيهُ الثلاثة أيام**)، و`can_approve_fee_drafts`/`approve_fee_draft`/`approve_all_fee_drafts`/`cancel_fee_draft` (**الدورُ لا المفتاح**، والصفوفُ تُقفل `select_for_update`)، و`create_subscription`/`create_extra_service`/`set_client_service_price`، و`_paused_month`/`_covered_before` (**حدودُ الفوترة**: الإيقافُ يمنع المسودّةَ كلَّها، والتناسبُ على حدود الاشتراك)، و`amounts_masked` و`subscription_row`/`draft_row`/`extra_row`/`service_price_row` (القناعُ قرارٌ يُحسب مرّةً). **لا يكتب قيداً ولا فاتورة** — تلك #284 وأ٢ |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
-| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن، **وسطرُ الدفتر يحمل `entry_kind_choices` و`account_type_choices`**: قائمتا تسمياتٍ تُبنيان في `client_books` كما في `frequency_choices`/`direction_choices`، و**`GET client-books/choices/`** تردّ `{book_kinds, entry_kinds, account_types}` لأن تسميات نوع الدفتر لا يحملها أيُّ ردٍّ آخر)، ونقاطُ المواعيد: قراءةٌ وثلاثةُ أشكالٍ للقائمة، وحجزٌ، وأفعالُ `confirm`/`reschedule`/`cancel`/`done` بلا حذفٍ ولا تعديلٍ جزئيّ (#281)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف) |
+| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن، **وسطرُ الدفتر يحمل `entry_kind_choices` و`account_type_choices`**: قائمتا تسمياتٍ تُبنيان في `client_books` كما في `frequency_choices`/`direction_choices`، و**`GET client-books/choices/`** تردّ `{book_kinds, entry_kinds, account_types}` لأن تسميات نوع الدفتر لا يحملها أيُّ ردٍّ آخر)، ونقاطُ المواعيد: قراءةٌ وثلاثةُ أشكالٍ للقائمة، وحجزٌ، وأفعالُ `confirm`/`reschedule`/`cancel`/`done` بلا حذفٍ ولا تعديلٍ جزئيّ (#281)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف)، **ونقاطُ تقارير دفتر الزبون (#288/أ: فهرسُ الأنواع المتاحة لنوع الدفتر، والتقريرُ الواحد بفترةٍ وحسابٍ أو طرف — ولا حسابَ في الـview: `book_reports` تبني وتقنّع، والـview يردّ، وميزانٌ لا يتوازن 409)** |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
 | `accounting_office/urls.py` | `SimpleRouter` (لا `DefaultRouter`: جذرُه فهرسٌ غير محروس) |
 | `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` — وفيه أنواعُ التذكيرات: `ReadyToSendPayload`/`ReminderLogRow`/`ReminderTemplateRow`/`ContactConsentPayload`/`OfficeHolidayRow` (#280)، ومنها `ReadyToSendItemKey` (الزبون والنوع **وطرفا الفترة** معاً — الخادم يطلب النهايةَ صريحة). **وحقولُ إذن التذكير على `ContactRow`** (#280/ب) مرآةُ `ContactSerializer`، فتقرؤها قائمةُ جهات الزبون بلا طلبٍ لكل جهة. **ودفترُ الزبون** (#286/ب): `listClientBooks`/`getClientBook` و`createClientBook` (فتحُ دفترٍ من التبويب) و`getClientBookChoices` (تسمياتُ الأنواع من `client-books/choices/`) و`listBookAccounts`/`addBookAccount` و`listBookEntries`/`createBookEntry` و`reverseBookEntry` و`changeClientBookKind` و`getPendingEntry`، بمفتاحٍ `CLIENT_BOOKS` ومسارُه معرّفُ الزبون لا الدفتر. **والقوائمُ تُقرأ بـ`apiGetObject` لا `apiGetList`**: كاشُ الأوفلاين على حركاتٍ تُكتب فيها يُظهر تاريخاً قديماً |
@@ -273,6 +281,15 @@ create_entry(book, *, entry_date, kind, lines, memo="", documents=None, reverses
 reverse_entry(entry, *, memo="", entry_date=None, actor=None, day=None)  # بنودٌ معكوسة، والأصلُ يبقى؛ يقفل الأصلَ قبل فحص «لها عكس»
 change_kind(book, kind, *, day=None)                          # بسيط ← مزدوج من بداية سنة؛ والرجوعُ مرفوض
 pending_entry_payload(tenant, user, *, day=None)              # «للإدخال»: `Exists` + `TruncMonth` باستعلامٍ واحد
+# ── تقاريرُ دفتر الزبون (#288/أ — في `accounting_office/book_reports.py`) ──
+period_for(raw_from=None, raw_to=None, *, today=None)          # `(from, to)`: الافتراضُ بدايةُ السنة ← اليوم
+available_reports(book) / is_report_available(book, kind)      # الأنواعُ المتاحةُ تتبع نوعَ الدفتر
+reports_index_payload(book) / report_payload(book, kind, *, raw_from, raw_to, user, account, party)   # حمولةٌ واحدة، وقناعٌ متداخل
+WATERMARK / REPORT_LABELS / REPORTS_BY_BOOK_KIND / REPORT_AMOUNT_KEYS   # «نسخة عمل» والتسمياتُ والمفاتيحُ الماليّة
+ReportImbalance(message, *, totals)                            # ميزانٌ لا يتوازن ⇒ 409 بمجموعَي الطرفين
+_cash / _profit_rows / _receivables                             # البسيط: قبضٌ ودفع، إيراداتٌ ومصاريف، ذمم
+_trial_balance / _balance_sheet / _statement                    # المزدوج: ميزانٌ، ميزانيةٌ (بربح الفترة)، كشفُ حساب
+_account_sums(book, span, *, account_types=None)                # `values` + `Sum` — صفٌّ لكل حسابٍ لا لكل حركة
 ```
 
 **والأتعابُ في `fees.py`** (#282): المصدرُ الواحدُ لسعر الشهر وتناسبه واعتماده:
@@ -382,6 +399,8 @@ pending_drafts(tenant)                                        # «كم بقي» 
 | `POST` | `client-books/<client_id>/entries/<id>/reverse/` | `OfficeClientBookViewSet` (`reverse`) — حركةٌ عكسية؛ عكسُ العكس وثاني عكسٍ 400 |
 | `GET` | `client-books/pending-entry/` | `OfficeClientBookViewSet` (`pending_entry`) — «للإدخال»: أوراقٌ واصلةٌ بلا حركةٍ حيّة، بالزبون والشهر، **وللدفاتر القابلة للكتابة وحدها** |
 | `POST` | `client-books/<client_id>/kind/` | `OfficeClientBookViewSet` (`kind`) — تغييرُ النوع (بسيط ← مزدوج من بداية سنة، د7) **ويُكمل الشجرة** |
+| `GET` | `client-books/<client_id>/reports/` | `OfficeClientBookViewSet` (`reports`) — الأنواعُ المتاحةُ لنوع دفتر الزبون بتسمياتها ومعاملاتها، ومعها `watermark` (#288/أ) |
+| `GET` | `client-books/<client_id>/reports/<kind>/?from=&to=[&account=&party=]` | `OfficeClientBookViewSet` (`report`) — تقريرٌ واحد: الفترةُ افتراضاً من بداية السنة إلى اليوم، وكشفُ الحساب بحسابٍ أو طرف، **وميزانٌ لا يتوازن 409** |
 | `GET/POST` | `fees/subscriptions/` | `OfficeFeeSubscriptionViewSet` (`list`, `create`) — الاشتراكاتُ التي يراها العضو؛ والإضافةُ سعرٌ **بتاريخ سريانه** (`office.clients.write` + `office.amounts.view`)، والتاريخُ المكرَّر 400 |
 | `GET` | `fees/drafts/` | `OfficeFeeDraftViewSet` (`list`) — المسودّاتُ ببنودها ومصادرها، ومبالغُها `null` بلا `office.amounts.view`؛ **ولا `POST`** (التوليدُ في «حدّث المكتب») |
 | `POST` | `fees/drafts/<id>/approve/` | `OfficeFeeDraftViewSet` (`approve`) — `manager`/`office_manager` وحدهما (403 لغيرهما)، وملاحظةٌ اختيارية؛ ومن حالةٍ غير «مسودّة» 400 |
@@ -1565,6 +1584,72 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 **وهجرة `0011_client_books` إضافيّةٌ محضة (د14):** ثمانيةُ `CreateModel` وثلاثةُ
 فهارس وستةُ قيود، ثم `RunPython` لزرع شجرة المنصّة بعكسٍ يحذف أكوادَه وحدها. بلا
 `RemoveField` ولا `DeleteModel` ولا `RunSQL`.
+
+## تقارير دفتر الزبون (#288 — الجزء أ: الخادم)
+
+**التقريرُ قراءةٌ محضة على ما في الدفتر — لا هجرةَ ولا حقلَ جديد.** سبعةُ أنواعٍ
+في `accounting_office/book_reports.py`، لكلٍّ ثابتٌ (`REPORT_*`) وتسميةٌ عربيةٌ في
+`REPORT_LABELS`، والأنواعُ المتاحةُ لكل نوع دفترٍ في `REPORTS_BY_BOOK_KIND`:
+البسيطُ ثلاثة (قبضٌ ودفع، إيراداتٌ ومصاريف، ذمم) والمزدوجُ أربعة (ميزانُ مراجعة،
+أرباحٌ وخسائر، ميزانية، كشفُ حساب). **ولا يقرأ نوعُ دفترٍ تقاريرَ النوع الآخر**:
+تقريرُ البسيط على مزدوج **404**، والعكسُ كذلك — والفهرسُ يقول المتاحَ قبل الطلب.
+
+**ولا `vat` في هذا الجزء.** نسبتُه تحتاج قراراً: **لا نوعَ حسابٍ ضريبيٍّ في
+النماذج اليوم**، واستنتاجُه من اسم حسابٍ في شجرة الزبون مخترَعٌ لا قاعدة. فأنواعُ
+هذا الجزء سبعةٌ لا ثمانية، ويُبنى `vat` في تذكرةٍ تُقرّر مصدرَ النسبة أوّلاً (حقلٌ
+في الشجرة، أم إعدادُ مكتب، أم نوعُ حسابٍ سادس).
+
+**والحركةُ الحيّةُ وحدها تدخل المجاميع.** كلُّ استعلامٍ يبدأ من
+`client_books._live_entries()` — الحركةُ المعكوسةُ **وعكسُها** خارجَ كل مجموع.
+وهذا ليس تفصيلاً: قيدٌ بمئةٍ ثم عكسُه يُبقي Σمدين وΣدائن مئتين في ميزانٍ يقرأ
+الحركات كلَّها، فلا يتوازن أبداً. ونسخةٌ ثانية من الشرط هنا كانت ستُبقي الزوجَ في
+الحساب بصمت، فالقاعدةُ تُستعار من موضعها الواحد.
+
+**والحسابُ في قاعدة البيانات.** `_account_sums` يجمّع بـ
+`values("account__code", …).annotate(Sum("debit"), Sum("credit"))`، والفترةُ
+ترشيحٌ في `WHERE` (`entry__entry_date__gte/lte`). بايثون لا يرى إلا **صفاً لكل
+حساب** (أو لكل نوع حركة في `_cash`)، ويجمع ذلك العددَ القليل. اختبارٌ يثبت أن
+خمسَ حركاتٍ تكلّف عددَ استعلاماتِ حركةٍ واحدة. الاستثناءُ الوحيدُ الرصيدُ الجارُّ في
+كشف الحساب: تراكمٌ تسلسليٌّ على الصفوف المعروضة نفسِها، ومجموعاه والأرضيةُ في القاعدة.
+
+**والمبالغُ `Decimal` نصّاً بخانتين** — `_money` هي `client_books._amount` نفسُها
+(يُستعار الرمزُ لا يُنسخ): `"330.00"` لا `330.0`. و`float` هنا يخسر هللةً على كشفٍ
+بآلاف الحركات ولا أحدَ يراها.
+
+**والفترةُ واحدةٌ في كل الأنواع**: `from`/`to` تاريخان ISO، والافتراضُ **من بداية
+سنة نهاية الفترة إلى اليوم** — أي السنةُ الجارية. ولا يُقصد بها تاريخُ فتح الدفتر
+كلُّه: الدفترُ المحوَّلُ إلى المزدوج يحمل في سنواته البسيطة قيوداً بطرفٍ واحدٍ لا
+يتوازن ميزانُها، فالافتراضُ سنةٌ واحدةٌ لا تاريخُ العمر. وبدايةٌ بعد النهاية 400،
+وتاريخٌ فاسدُ اليوم (`2026-02-30`) 400 لا 500.
+
+**وكلُّ حمولةٍ تحمل رأسها المشترك:** `kind` و`title` و`client` و`from`/`to` و
+`book_kind` و`book_kind_label` و`rows` و`totals`، **و`watermark = "نسخة عمل"`
+حقلٌ صريحٌ في كل استجابة** — هو ما سيُطبع على المستخرج في الجزء (ب)، وليس نصّاً
+تضيفه الواجهة.
+
+**والتوازنُ يُفحص ويُصرَّح.** ميزانُ المراجعة يرفض أن يمرّ: `Σمدين != Σدائن` ⇒
+`ReportImbalance` ⇒ **409** بمجموعَي الطرفين. والميزانيةُ تُقابل الأصولَ بـ
+**الخصوم + الحقوق + ربح الفترة** — لا قيودَ إقفالٍ في هذا الدفتر، فميزانيةٌ بلا
+الربح لا تتوازن في شركةٍ رابحة — و`difference` يجب أن يكون صفراً وإلا 409 كذلك.
+409 لا 400: الطلبُ سليمٌ والبياناتُ هي المكسورة.
+
+**والذممُ والميزانيةُ بالرصيد الطبيعيّ**: الأصولُ والمصاريفُ مدينيّةُ الطبع
+(`debit − credit`)، والخصومُ والحقوقُ والإيراداتُ دائنيّة (`credit − debit`) —
+قاعدةٌ واحدةٌ في `_natural`. وأما ميزانُ المراجعة فرصيدُه `debit − credit` خامّاً
+كما يُطبع في دفاتر المراجعة. وكشفُ الحساب يُقرأ بحسابٍ (`account`) أو بطرفٍ
+(`party`، مطابقةُ نصّ `side_party`)، وبأحدهما فقط: لا الاثنان (400) ولا دونهما (400)،
+وحسابٌ خارج شجرة الزبون 400. ورصيدُه الجارُّ يبدأ من أرضية ما قبل الفترة، فآخرُ
+صفٍّ يطابق `closing_balance`.
+
+**والقناعُ يطال الصفوفَ والمجاميعَ وحتى رسالةَ 409.** `_mask_payload` يمشي الحمولةَ
+متداخلةً فوق `services.mask_amounts` الضحلة، فيصير كلُّ مفتاحٍ في
+`REPORT_AMOUNT_KEYS` `None` ويبقى الشكلُ والأسماءُ والتواريخُ وأرقامُ الحركات.
+وهذا يشمل `totals` في استجابة الـ409: الرقمُ نفسُه مبلغٌ لا يُرى.
+
+**والعزلُ من `_book` نفسِه**: كلُّ نقطةٍ تمرّ بـ`visible_clients` عبر
+`get_queryset` القائم، فزبونُ مكتبٍ آخر — أو زبونُ زميلٍ لا يراه العضو — **404**،
+وزبونٌ بلا دفتر 404. والقراءةُ مباحةٌ لكل من يرى الزبون بلا مفتاح كتابة: التقريرُ
+لا يكتب شيئاً.
 
 ## الأتعاب — الاشتراك والمسودّات والاعتماد (#282، الجزء أ١: الخادم)
 
