@@ -9,6 +9,13 @@
 مجموعاً مضاعفاً. نسخةٌ ثانية من هذا الشرط هنا كانت ستُبقي الزوجَ في الميزان
 فيختلّ بلا سببٍ ظاهر.
 
+**وللكتاب عهدان: بسيطٌ ثم مزدوج.** الدفترُ المحوَّلُ حمل في سنواته البسيطة قيوداً
+بطرفٍ واحدٍ — مشروعةٌ يومَها ولا تُقابل. فالتقاريرُ المزدوجة (ميزانُ مراجعة، أرباحٌ
+وخسائر، ميزانية) لا تبدأ قبل `double_entry_start(book)`، والميزانيةُ تبدأ منه
+دائماً لأنها رصيدٌ لا حركةَ فترة. والقصُّ **يُعلَن** في الحمولة (`clipped` و
+`period_note`) ولا يُفعل صامتاً؛ و**409 يبقى لخللٍ حقيقيّ** في البيانات لا لفترةٍ
+تشمل سنواتِ البسيط.
+
 **والحسابُ في قاعدة البيانات.** التجميعُ `values(…).annotate(Sum(…))` على
 `BookEntryLine`، والترشيحُ بالفترة في `WHERE`. بايثون لا يرى إلا صفاً لكل **حساب**
 (أو لكل نوع حركة)، ويُجمع ذلك العددُ القليلُ بعدئذٍ. الاستثناءُ الوحيدُ الرصيدُ
@@ -90,9 +97,15 @@ REPORTS_BY_BOOK_KIND: dict[str, tuple[str, ...]] = {
 #: العلامةُ المائيةُ على كل استجابة — وهي ما يُطبع على المستخرج في الجزء (ب).
 WATERMARK = "نسخة عمل"
 
+#: ملاحظةُ `receivables`: رصيدٌ تراكميّ حتى `to`، فـ`from` ليست ترشيحاً له.
+RECEIVABLES_PERIOD_NOTE = (
+    "التقريرُ رصيدٌ تراكميٌّ حتى نهاية الفترة — لا يبدأ من بدايتها."
+)
+
 #: مفاتيحُ المبالغ في حمولات التقارير — تُقنَّع كلُّها في الصفوف والمجاميع.
 REPORT_AMOUNT_KEYS: tuple[str, ...] = (
     "debit", "credit", "balance", "amount", "net",
+    "debit_total", "credit_total",
     "opening_balance", "closing_balance",
     "revenue", "expense", "profit", "assets", "liabilities", "equity",
     "liabilities_and_equity", "difference",
@@ -101,10 +114,27 @@ REPORT_AMOUNT_KEYS: tuple[str, ...] = (
 #: أنواعُ الحساب المديّنةُ الطبع — والباقي دائنيّة. القاعدةُ واحدةٌ هنا.
 _DEBIT_NATURED = frozenset({BOOK_ACCOUNT_TYPE_ASSET, BOOK_ACCOUNT_TYPE_EXPENSE})
 _PROFIT_TYPES = (BOOK_ACCOUNT_TYPE_REVENUE, BOOK_ACCOUNT_TYPE_EXPENSE)
-_RECEIVABLE_TYPES = (BOOK_ACCOUNT_TYPE_ASSET, BOOK_ACCOUNT_TYPE_LIABILITY)
 _SHEET_TYPES = (
     BOOK_ACCOUNT_TYPE_ASSET, BOOK_ACCOUNT_TYPE_LIABILITY, BOOK_ACCOUNT_TYPE_EQUITY,
 )
+
+#: تقاريرُ العهد المزدوج وكيف تُقرأ بدايتُها — جدولٌ واحدٌ لا ثوابتُ متفرّقة.
+#: `clip` تُقصّ إلى العهد المزدوج إن سبقته `from`، و`always` تبدأ منه دائماً (رصيدٌ
+#: حتى `to` لا حركةُ فترة). وغيابُ التقرير من الجدول = **لا حدَّ عهدٍ لبدايته**:
+#: كشفُ الحساب قائمةُ حركاتٍ على حسابٍ أو طرف، وحركةُ عهدٍ بسيطٍ من تاريخه فلا
+#: تُحجب — والتقاريرُ البسيطة لا عهدَ مزدوجَ فيها أصلاً.
+_ERA_CLIP = "clip"
+_ERA_ALWAYS = "always"
+_ERA_STARTS: dict[str, str] = {
+    REPORT_TRIAL_BALANCE: _ERA_CLIP,
+    REPORT_PROFIT_LOSS: _ERA_CLIP,
+    REPORT_BALANCE_SHEET: _ERA_ALWAYS,
+}
+
+#: ملاحظةُ فترةٍ لكل نوعٍ لا يبدأ من `from` لسببٍ آخر — جدولٌ لا فرعٌ في الباني.
+_PERIOD_NOTES: dict[str, str] = {
+    REPORT_RECEIVABLES: RECEIVABLES_PERIOD_NOTE,
+}
 
 _ZERO = Decimal("0")
 
@@ -142,9 +172,10 @@ def _parse_day(raw, field):
 def period_for(raw_from=None, raw_to=None, *, today=None):
     """`(from, to)` من معاملَي الطلب — والافتراضُ من بداية السنة إلى اليوم.
 
-    «بدايةُ سنة الدفتر» هي بدايةُ سنةِ نهاية الفترة (السنةُ الجارية افتراضاً):
-    الفترةُ الافتراضيةُ سنةٌ واحدةٌ لا تاريخُ الفتح كلُّه، فالدفترُ المحوَّلُ إلى
-    المزدوج يحمل في سنواته البسيطةِ قيوداً بطرفٍ واحدٍ لا يتوازن ميزانُها.
+    الفترةُ الافتراضيةُ **سنةٌ واحدة** (سنةُ نهاية الفترة، أي الجارية) لا تاريخُ
+    الدفتر كلُّه: عرضٌ افتراضيٌّ مضبوطٌ لا مسحُ عمر. وحدُّ العهد المزدوج **ليس
+    هنا**: تفرضه `_report_span` على تقارير المزدوج وحدها (والميزانيةُ تبدأ منه
+    دائماً)، فلا يُحمَّل هذا المساعدُ قاعدةً ليست له.
     """
     today = today or _today()
     end = _parse_day(raw_to, "to") or today
@@ -154,21 +185,52 @@ def period_for(raw_from=None, raw_to=None, *, today=None):
     return start, end
 
 
+def double_entry_start(book) -> datetime.date:
+    """أوّلُ يومٍ يُقبل فيه قيدٌ مزدوجٌ متوازن في هذا الدفتر — **بدايةُ العهد المزدوج**.
+
+    الدفترُ المفتوح مزدوجاً عهدُه من `opened_on`. والمحوَّلُ من البسيط صار مزدوجاً
+    من **بداية سنة `kind_changed_on`** (`client_books.change_kind` يمنع التغيير في
+    سنة الفتح ويشترط سنةً نظيفة)، وما قبلها حركاتُ طرفٍ واحدٍ مشروعة بالتصميم —
+    `_assert_balanced` لا تُسأل عنها. فالتقريرُ المزدوج لا يبدأ قبل هذا اليوم:
+    وإلا جمع في الميزان قيوداً لا تتوازن فأعلن 409 على بياناتٍ سليمة.
+
+    **والأخذُ بـ`max` لا `min`**: لو أُخذ الأقدم لعادت سنواتُ البسيط إلى الميزانية،
+    وهو عينُ الخلل الذي يمنعه هذا الحدّ.
+    """
+    changed = book.kind_changed_on
+    if changed is None:
+        return book.opened_on
+    return max(book.opened_on, datetime.date(changed.year, 1, 1))
+
+
 # ── خطوطُ الحساب: الحيّةُ وحدها، والتجميعُ في القاعدة ───────────────────────
 def _live_lines(book):
     """بنودُ الحركات الحيّة في هذا الدفتر — القاعدةُ في `_live_entries`."""
-    return BookEntryLine.objects.filter(
-        entry__in=_live_entries(),
-        entry__client_book=book,
+    live_entries = _live_entries().filter(client_book=book)
+    return BookEntryLine.objects.filter(entry__in=live_entries)
+
+
+def _in_span(lines, span):
+    start, end = span
+    return lines.filter(
+        entry__entry_date__gte=start,
+        entry__entry_date__lte=end,
     )
 
 
 def _period_lines(book, span):
-    start, end = span
-    return _live_lines(book).filter(
-        entry__entry_date__gte=start,
-        entry__entry_date__lte=end,
-    )
+    return _in_span(_live_lines(book), span)
+
+
+def _cash_lines(book, span=None):
+    """بنودُ **الأصول** وحدها — النقدُ والبنك في شجرة البسيط — وفي الفترة إن حُدّدت.
+
+    فرعُ الأصول في الشجرة البسيطة هو الصندوق والبنك وحدهما
+    (`accounting_office/migrations/0011_client_books.py`)، فحصرُ المجموع فيه هو
+    ما يجعل «القبض/الدفع» رصيداً مصرفياً لا مجموعَ بنود الدفتر كلِّه.
+    """
+    lines = _live_lines(book).filter(account__account_type=BOOK_ACCOUNT_TYPE_ASSET)
+    return lines if span is None else _in_span(lines, span)
 
 
 def _account_sums(book, span, *, account_types=None):
@@ -214,8 +276,8 @@ def _account_head(row) -> dict:
 
 
 def _net_before(book, day) -> Decimal:
-    """أرضيةُ الرصيد: صافي ما قبل الفترة من الحركة الحيّة وحدها."""
-    aggregated = _live_lines(book).filter(entry__entry_date__lt=day).aggregate(
+    """أرضيةُ القبض/الدفع: صافي **الأصول** قبل الفترة — نقدٌ وبنك فقط."""
+    aggregated = _cash_lines(book).filter(entry__entry_date__lt=day).aggregate(
         debit=Sum("debit"), credit=Sum("credit"),
     )
     return _zero(aggregated["debit"]) - _zero(aggregated["credit"])
@@ -223,17 +285,21 @@ def _net_before(book, day) -> Decimal:
 
 # ── البسيط ─────────────────────────────────────────────────────────────────
 def _cash(book, span, **_):
-    """قبضٌ ودفع: لكل نوع حركةٍ مجموعُ المدين ومجموعُ الدائن والعدّ.
+    """قبضٌ ودفع على **حسابات النقد والبنك وحدها** (أصولُ شجرة البسيط).
 
-    والصفوفُ **خمسةٌ دائماً بترتيب النموذج** وإن خلا نوعٌ من حركة: جدولٌ يتقلّص
-    بتقلّص الشهر يُخفي «لا حركة بنكٍ هذا الشهر» ويُوهم بغياب البند.
-    والأرضيةُ (`opening_balance`) صافي ما قبل الفترة، والختامُ أرضيةٌ + صافيها —
-    فالسطرُ الأخير في التقرير يطابق رصيدَ الصندوق والبنك فعلياً.
+    مدينُ الأصول قبضٌ ودائنُها دفع. وجمعُ كل الأنواع كان يُدخل الإيرادَ الدائنَ
+    في جهة الدفع والمصروفَ المدينَ في جهة القبض، فيخرج «رصيدٌ» لا يطابق صندوقاً
+    ولا بنكاً — والاختبارُ نفسه كان يثبّت −160 وصندوقُ البيانات 180.
+
+    والصفوفُ **خمسةٌ دائماً بترتيب النموذج** وإن خلا نوعٌ من حركة نقدية: جدولٌ
+    يتقلّص يُخفي «لا حركة بنكٍ هذا الشهر» ويُوهم بغياب البند. والعدُّ عدُّ حركاتٍ
+    **لها بندٌ نقديّ** لا عدُّ حركات. والأرضيةُ (`opening_balance`) صافي الأصول
+    قبل الفترة، والختامُ أرضيةٌ + صافيها: السطرُ الأخير يطابق رصيد الصندوق والبنك.
     """
     start, _end = span
     found = {
         row["entry__kind"]: row
-        for row in _period_lines(book, span).values("entry__kind")
+        for row in _cash_lines(book, span).values("entry__kind")
         .annotate(
             count=Count("entry_id", distinct=True),
             debit=Sum("debit"),
@@ -290,25 +356,42 @@ def _profit_rows(book, span, **_):
 
 
 def _receivables(book, span, **_):
-    """ذمم: أرصدةُ حسابات الأصول والخصوم — مدينون مقابل دائنين."""
-    grouped = _account_sums(book, span, account_types=_RECEIVABLE_TYPES)
-    rows = [
-        {
-            **_account_head(row),
-            "debit": _money(_zero(row["debit"])),
-            "credit": _money(_zero(row["credit"])),
-            "balance": _money(_natural(
-                row["account__account_type"], _zero(row["debit"]), _zero(row["credit"]),
-            )),
-        }
-        for row in grouped
-    ]
-    assets = _sum_natural(grouped, BOOK_ACCOUNT_TYPE_ASSET)
-    liabilities = _sum_natural(grouped, BOOK_ACCOUNT_TYPE_LIABILITY)
+    """ذمم: رصيدُ كل **طرف** (`side_party`) تراكميّاً **حتى نهاية الفترة**.
+
+    الشجرةُ البسيطة **بلا ذممٍ بالتصميم** — لا `1300` مدينون ولا `2100` دائنون
+    (`0011_client_books.py`) — فالصندوقُ والبنك ليسا ذمّة، وعرضُهما هنا كان يعطي
+    «مدينين» رصيدَه 180 وهو نقد. والطرفُ المقابل هو ما يحمل الذمّة: اسمٌ مسجَّلٌ
+    على البند، لكلٍّ مدينُه ودائنُه ورصيدُه (`debit − credit`، الموجبُ لنا عليه).
+
+    **وهو رصيدٌ لا حركةُ فترة**: يُجمع من بداية الدفتر إلى `to`، و`from` لا يقصّه —
+    ذمّةُ سنةٍ سابقة لا تختفي لأنها خارج الشهر المطلوب. ولهذا يُرسَل معه
+    `period_note` صريحاً كي لا تُقرأ `from` ترشيحاً.
+    """
+    _start, end = span
+    grouped = list(
+        _live_lines(book)
+        .filter(entry__entry_date__lte=end)
+        .exclude(side_party="")
+        .values("side_party")
+        .annotate(debit=Sum("debit"), credit=Sum("credit"))
+        .order_by("side_party"),
+    )
+    rows = []
+    debit_total = credit_total = _ZERO
+    for row in grouped:
+        debit = _zero(row["debit"])
+        credit = _zero(row["credit"])
+        debit_total += debit
+        credit_total += credit
+        rows.append({
+            "side_party": row["side_party"],
+            "debit": _money(debit),
+            "credit": _money(credit),
+            "balance": _money(debit - credit),
+        })
     return rows, {
-        "assets": _money(assets),
-        "liabilities": _money(liabilities),
-        "balance": _money(assets - liabilities),
+        "debit_total": _money(debit_total),
+        "credit_total": _money(credit_total),
     }
 
 
@@ -347,12 +430,17 @@ def _trial_balance(book, span, **_):
 
 
 def _balance_sheet(book, span, **_):
-    """ميزانية: أصولٌ مقابل خصومٍ وحقوقِ ملكية — وربحُ الفترة يُقفل في الطرف الثاني.
+    """ميزانية: أصولٌ مقابل خصومٍ وحقوقِ ملكية — وربحُ العهد يُقفل في الطرف الثاني.
 
-    لا قيودَ إقفالٍ في هذا الدفتر، فالإيراداتُ والمصاريفُ ما زالت في حساباتها؛
+    **والنطاقُ من بداية العهد المزدوج إلى `to`** لا حركةَ الفترة: ميزانيةُ اليوم
+    ترصيدٌ تراكميّ، وحركةُ سنةٍ واحدة تُسقط رأسَ المال وكلَّ نقدٍ سابق وتبقى
+    «متوازنة» بأرقامٍ خاطئة. الـ`report_payload` يمرّر هذا النطاق (انظر
+    `double_entry_start`).
+
+    ولا قيودَ إقفالٍ في هذا الدفتر، فالإيراداتُ والمصاريفُ ما زالت في حساباتها؛
     وميزانيةٌ تُقابل الأصولَ بالخصوم والحقوق وحدَهما لا تتوازن في أيّ شركةٍ رابحة.
-    فالربحُ (`profit`) يُجمع إلى الخصوم والحقوق، و`difference` يجب أن يكون صفراً —
-    وإلا 409 كالميزان.
+    فالربحُ (`profit`) تراكميٌّ على النطاق نفسِه ويُجمع إلى الخصوم والحقوق،
+    و`difference` يجب أن يكون صفراً — وإلا 409 كالميزان.
     """
     grouped = _account_sums(book, span)
     rows = [
@@ -487,6 +575,45 @@ def _mask_payload(payload, keys=REPORT_AMOUNT_KEYS):
 
 
 # ── القراءةُ العامة: ما يراه الـview ────────────────────────────────────────
+def _report_span(book, kind, span):
+    """النطاقُ الفعليُّ للتقرير — والتقاريرُ المزدوجة تبدأ من العهد المزدوج.
+
+    القصُّ ليس تسامحاً: حركاتُ سنوات الدفتر البسيطة مشروعةٌ **بطرفٍ واحد**، فجمعُها
+    في ميزانٍ أو ميزانيةٍ يُنتج خللاً يبدو خللَ بيانات. والقصُّ يُعلَن في الحمولة
+    (`clipped` و`period_note`) لا يُفعل صامتاً، ويبقى 409 لخللٍ حقيقيّ.
+
+    و`clipped` **قصٌّ وحده**: الميزانيةُ حين تكون بدايتُها **قبل** `from` لم تُقصَّ
+    شيئاً — هي رصيدٌ يبدأ من العهد بطبيعته، ويقول `period_note` ذلك بدل أن يُسمّى
+    قصّاً. ونهايةٌ قبل العهد 400: ميزانيةٌ بلا مدى تُعيد صفحةً فارغةً متوازنةً كذباً.
+    """
+    start, end = span
+    rule = _ERA_STARTS.get(kind)
+    if rule is None:
+        return span, False, None
+    floor = double_entry_start(book)
+    if rule == _ERA_CLIP and start >= floor:
+        return span, False, None
+    if floor > end:
+        raise ValidationError({
+            "to": (
+                f"نهايةُ الفترة تسبق بداية العهد المزدوج في سنة {floor.year} — "
+                "لا بياناتَ مزدوجة قبلها."
+            ),
+        })
+    clipped = floor > start
+    if clipped:
+        note = (
+            f"قُصّت بدايةُ الفترة إلى بداية العهد المزدوج في سنة {floor.year} — "
+            "سنواتُ الدفتر البسيطة لا تدخل تقاريرَ المزدوج."
+        )
+    else:
+        note = (
+            f"التقريرُ يبدأ من بداية العهد المزدوج في سنة {floor.year} — "
+            "رصيدٌ حتى نهاية الفترة لا حركةُ فترة."
+        )
+    return (floor, end), clipped, note
+
+
 def available_reports(book) -> list[dict]:
     """الأنواعُ المتاحةُ لنوع دفترٍ ما — بتسمياتها ومعاملاتها."""
     return [
@@ -525,7 +652,8 @@ def report_payload(
     label = REPORT_LABELS.get(kind)
     if label is None:
         raise ValidationError({"kind": "نوع تقرير غير معروف."})
-    span = period_for(raw_from, raw_to)
+    span, clipped, note = _report_span(book, kind, period_for(raw_from, raw_to))
+    note = note or _PERIOD_NOTES.get(kind)
     masked = client_books.amounts_masked(book.tenant, user)
     try:
         rows, totals = _BUILDERS[kind](book, span, account=account, party=party)
@@ -541,6 +669,8 @@ def report_payload(
         "client": book.client.name,
         "from": span[0].isoformat(),
         "to": span[1].isoformat(),
+        "clipped": clipped,
+        "period_note": note,
         "book_kind": book.kind,
         "book_kind_label": BOOK_KIND_LABELS.get(book.kind, book.kind),
         "watermark": WATERMARK,
