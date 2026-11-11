@@ -1,4 +1,32 @@
 # ملف التسليم
+
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-11 19:00 — توقّفٌ للكومباكت بطلب المالك)
+
+**الهدف:** `goal-e8d8b3d1-9118-43c6-93e3-5f0c07502bee` — إن ظهر disarmed فـ`update_goal action=resume`.
+
+**لا عاملَ حيّ ولا محاولةَ جارية ولا مهمةَ خلفية.** الشجرةُ الرئيسية نظيفةٌ إلا العناصرَ الخمسةَ المعروفة غيرَ المتتبَّعة.
+
+**الحالة الدقيقة:**
+- `newktra` = **`1db4cbd5`** = `origin/newktra` (مدفوع).
+- **الإنتاج ما زال على `944b8921`** (#282/أ١). **`#285` مدموجٌ في `newktra` ولم يُنشَر بعد.**
+- CI على `1db4cbd5` لم يُراقَب (لم أبدأ مراقبتَه).
+
+**أوّلُ عملٍ: نشرُ #285.** التسلسل على الخادم:
+1. `gh run watch <run-id>` على `1db4cbd5` حتى الأخضر (‏`gh run list --branch newktra --limit 1`).
+2. `git fetch` ← `git merge origin/newktra` ← `git diff origin/newktra` يجب أن يكون **فارغًا**.
+3. `venv/bin/python manage.py showmigrations docshare` ⇒ المتوقَّع `[ ] 0007_payment_notice_doc_type`، ومراجعةُ الملف: **`AlterField` وحده**.
+4. **نسخةٌ احتياطية:** `set -a ; . .env ; set +a ; mysqldump -h "$MYSQL_HOST" -P "$MYSQL_PORT" -u "$MYSQL_USER" -p"$MYSQL_PASSWORD" "$MYSQL_DATABASE" > /root/backups/ktra-before-285-$(date +%Y%m%d-%H%M%S).sql`.
+5. `venv/bin/python manage.py migrate`.
+6. `cd frontend_v2 ; npm run build` ثم `rsync -a --delete --exclude "/s/" --exclude "/media/" dist/ /var/www/ktra-pro.tech/` (تغيّر `docShareApi.ts` و`accountingOffice.ts`).
+7. `systemctl restart ktra.service` ← `is-active` و`NRestarts=0` ← ثلاثُ `curl` 200 ← `tail` سجلّ gunicorn.
+8. `gh issue close 285` بتعليق النشر، ثم تحديثُ `acct-office-build.md`/`runs.md`/`handoff.md`.
+**ملاحظة:** `python` غيرُ موجودٍ على الخادم — استعمل **`venv/bin/python`**. ولا `push` من الخادم.
+
+**بعده:** **#283 الدفعات** (جاهزة: #282/أ١ منشور) ∥ **#286/ج** (توليدُ بنود الحركة من الورقة — قرار مالك) ∥ **#282/أ٢** — ثم #284 · #288 · #287 · #289 · #290 · **#291 وحدها آخراً**.
+
+**ملاحظاتٌ مفتوحة من #285 (مسجّلة في `docs/modules/accounting_office.md` §قيود معروفة):** الإشعارُ عربيٌّ دائمًا ولو كانت لغةُ الجهة عبريّة (تذكرةٌ لاحقة) · رقمٌ مختلفان في رسالةٍ واحدة («مبلغ مستحقّ» #281 و«المجموع» #285) · لا كلمةَ عند `total == 0` · قيمةٌ احتياطية `.get(client_id, 0)` تخالف افتراضَ السجلّ (10) · `tax_file_number` في الحمولة ولا يظهر على الورقة · ثمنُ التمديد: رابطُ تاريخ 15/3 يعرض إشعار 15/4 بعد التمديد.
+
+**أخطاءُ المنسّق في هذه الجولة (مسجّلة):** (أ) دمجُ `ARCHITECTURE.md` بحذف نطاقِ سطورٍ أخذ صفَّ `accounting` معه، و`sync_docs` أنشأ صفًّا فارغًا (`—`) بلا أن تكشفه بوّابة — أُصلح `1db4cbd5`. (ب) أمرُ فرقٍ بنقطتين بدل ثلاث في موجز مراجعة #285 — نبّه عليه المراجع.
 ## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-11 17:30 — توقّفٌ بطلب المالك للكومباكت)
 
 **الهدف:** `goal-e8d8b3d1-9118-43c6-93e3-5f0c07502bee` — إن ظهر disarmed فـ`update_goal action=resume`.
