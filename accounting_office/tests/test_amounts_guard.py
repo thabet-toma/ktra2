@@ -22,6 +22,7 @@
 """
 import pathlib
 import re
+from datetime import date
 from decimal import Decimal
 from unittest import mock
 
@@ -30,8 +31,8 @@ from django.contrib.auth.models import User
 from django.db import models as django_models
 from django.test import SimpleTestCase, TestCase
 
-from accounting_office import services
-from accounting_office.models import OfficeClient, TaxCard
+from accounting_office import payments, services
+from accounting_office.models import FeeDraft, OfficeClient, TaxCard
 from accounting_office.services import set_office_setting
 from tenants.models import Currency, UserCompanyMembership
 from tenants.services import create_company
@@ -255,6 +256,32 @@ class AmountPayloadGuardTest(TestCase):
             f"مبلغٌ في حمولة البطاقة بلا تسجيل في `AMOUNT_KEYS`: {keys}",
         )
         self.assertIn("annual_sales", keys)
+
+    def test_the_ledger_payload_carries_no_unregistered_decimal(self):
+        """كشفُ الحساب (#283): كلُّ مفتاحٍ عشريٍّ فيه — بما فيه الشطبُ — مسجَّل."""
+        draft = FeeDraft.objects.create(
+            tenant=self.tenant, client=self.client_row, year=2026, month=3,
+            subtotal=Decimal("300"), total=Decimal("300"),
+            status=FeeDraft.STATUS_APPROVED, approved_by=self.owner,
+        )
+        payments.create_payment(
+            self.tenant, self.client_row,
+            amount="100.00", method="cash", paid_at=date(2026, 5, 1),
+            actor=self.owner,
+        )
+        payments.write_off_fee_draft(
+            draft, amount="50.00", reason="تنازل", actor=self.owner,
+        )
+        ledger = payments.ledger_payload(self.tenant, user=self.owner, params={})
+        keys = decimal_payload_keys(ledger)
+        leaves = {re.sub(r"\[\d+\]", "", key).split(".")[-1] for key in keys}
+        self.assertEqual(
+            sorted(leaf for leaf in leaves if leaf not in services.AMOUNT_KEYS), [],
+            f"مبلغٌ في كشف الحساب بلا تسجيل في `AMOUNT_KEYS`: {keys}",
+        )
+        # الشطبُ يخرج في الكشف مرّتين: على الفاتورة وصفّاً مستقلاً — كلاهما مسجَّل.
+        self.assertIn("invoices.results[0].written_amount", keys)
+        self.assertIn("write_offs.results[0].amount", keys)
 
     def test_every_card_amount_key_is_masked_for_a_member_without_the_key(self):
         """سلوكٌ لا مطابقةُ ثوابت: كلُّ مفتاحٍ مسجَّلٍ يُقنَّع عن العضو ويصل المالك."""

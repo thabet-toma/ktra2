@@ -533,8 +533,15 @@ def approve_fee_draft(draft, *, actor, note=""):
             "status", "approved_by", "approved_at", "approved_note",
         ])
         # #283: الفاتورةُ صارت مستحقّةً — يُستَهلك رصيدُ الزبون الدائنُ عليها
-        # بتخصيصٍ جديد، وإلا بقي «له عندنا» لا يُخصَّص أبداً.
-        _payments_module().apply_open_credit(draft.tenant, [draft.client])
+        # بتخصيصٍ جديد، وإلا بقي «له عندنا» لا يُخصَّص أبداً. **بعد الالتزام**:
+        # المسودّةُ مقفولةٌ هنا، وقفلُ دفعةِ الزبون ومسودّاتِه تحتها يعاكس ترتيبَ
+        # `create_payment` (مسودّاتٌ ثم هذه) فيجمد. والفشلُ بعد الالتزام يُسجَّل
+        # ولا يقلب اعتماداً نجح (`robust`)؛ ويلحق الرصيدُ باعتمادٍ لاحق.
+        tenant, client = draft.tenant, draft.client
+        transaction.on_commit(
+            lambda: _payments_module().apply_open_credit(tenant, [client]),
+            robust=True,
+        )
     return draft
 
 
@@ -566,10 +573,13 @@ def approve_all_fee_drafts(tenant, *, actor, note="") -> list:
             FeeDraft.objects.bulk_update(
                 drafts, ["status", "approved_by", "approved_at", "approved_note"],
             )
-            # #283: أرصدةُ الزبائن الدائنة تُخصَّص على المعتمدة الآن — بمجموعةٍ
-            # واحدة، فكلفةُ النداء لا تكبر بعدد المسودّات المعتمدة.
-            _payments_module().apply_open_credit(
-                tenant, [draft.client for draft in drafts],
+            # #283: أرصدةُ الزبائن الدائنة تُخصَّص على المعتمدة — بمجموعةٍ
+            # واحدة، فكلفةُ النداء لا تكبر بعدد المسودّات المعتمدة. **بعد
+            # الالتزام** لا داخل معاملةٍ تقفل المسودّات (انظر `approve_fee_draft`).
+            clients = [draft.client for draft in drafts]
+            transaction.on_commit(
+                lambda: _payments_module().apply_open_credit(tenant, clients),
+                robust=True,
             )
     return drafts
 

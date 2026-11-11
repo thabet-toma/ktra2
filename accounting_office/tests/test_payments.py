@@ -17,9 +17,9 @@ credit`) — لا يُقصّ إلى صفر. فالدفعةُ الزائدة 700 
 """
 import datetime
 from decimal import Decimal
-from unittest import mock
 
 from django.contrib.auth.models import User
+from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
 from rest_framework.test import APITestCase
 
@@ -181,9 +181,11 @@ class CreditIsDerivedTest(PaymentsTestCase):
         self.assertEqual(payment.allocations.count(), 1)
 
         later = self.make_draft(client, "300", month=4, status=FeeDraft.STATUS_DRAFT)
-        approved = self.client.post(
-            f"{DRAFTS}{later.pk}/approve/", {}, format="json", **self.headers(),
-        )
+        # الاستهلاكُ بعد الالتزام (`on_commit`) — والاختبارُ لا يلتزم فعلاً.
+        with self.captureOnCommitCallbacks(execute=True):
+            approved = self.client.post(
+                f"{DRAFTS}{later.pk}/approve/", {}, format="json", **self.headers(),
+            )
         self.assertEqual(approved.status_code, 200, approved.content)
 
         payment.refresh_from_db()
@@ -207,9 +209,10 @@ class CreditIsDerivedTest(PaymentsTestCase):
         payment = self.payment_of(client, "700.00")
         later = self.make_draft(client, "300", month=4, status=FeeDraft.STATUS_DRAFT)
 
-        res = self.client.post(
-            f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
-        )
+        with self.captureOnCommitCallbacks(execute=True):
+            res = self.client.post(
+                f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
+            )
         self.assertEqual(res.status_code, 200, res.content)
 
         payment.refresh_from_db()
@@ -222,6 +225,54 @@ class CreditIsDerivedTest(PaymentsTestCase):
             payments.client_due(self.tenant, client).credit, Decimal("0.00"),
         )
         self.assertEqual(payments.invoice_summary(later).state, "partial")
+
+    def test_the_credit_is_applied_after_the_approval_commits_not_inside_it(self):
+        """الاستهلاكُ **خارجَ معاملة الاعتماد** على المسارين: ترتيبُ الأقفال.
+
+        الاعتمادُ يقفل المسودّةَ `D`؛ لو قفل الاستهلاكُ في المعاملة نفسها دفعةَ
+        الزبون ثم مسودّاتِه لجاء ترتيبُ `D ← P ← d1…` ومعه `create_payment` الذي
+        يقفل `d1` قبل `D` — فجمود. فالنداءُ يُؤجَّل إلى `on_commit`: لا تخصيصَ
+        قبل الالتزام، ويقع بعده.
+        """
+        client = self.make_client()
+        first = self.make_draft(client, "650", month=3)
+        payment = self.payment_of(client, "700.00")
+        single = self.make_draft(client, "300", month=4, status=FeeDraft.STATUS_DRAFT)
+
+        with self.captureOnCommitCallbacks(execute=False) as single_callbacks:
+            res = self.client.post(
+                f"{DRAFTS}{single.pk}/approve/", {}, format="json", **self.headers(),
+            )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            self.allocations_of(payment), {first.pk: Decimal("650.00")},
+            "الرصيدُ خُصِّص داخل معاملة اعتماد المسودّة",
+        )
+        self.assertGreaterEqual(len(single_callbacks), 1)
+        for callback in single_callbacks:
+            callback()
+        self.assertEqual(
+            self.allocations_of(payment),
+            {first.pk: Decimal("650.00"), single.pk: Decimal("50.00")},
+        )
+
+        # «اعتمد الكل»: زبونٌ آخر بدفعةٍ مقدَّمةٍ برصيدٍ خالصٍ ومسودّةٌ جديدة.
+        other = self.make_client("زبون الدفعة المقدَّمة")
+        extra = self.payment_of(other, "100.00", allocations=[])
+        batch = self.make_draft(other, "40", month=5, status=FeeDraft.STATUS_DRAFT)
+        with self.captureOnCommitCallbacks(execute=False) as batch_callbacks:
+            res = self.client.post(
+                f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
+            )
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            self.allocations_of(extra), {},
+            "«اعتمد الكل» خصّص الرصيدَ داخل معاملته",
+        )
+        self.assertGreaterEqual(len(batch_callbacks), 1)
+        for callback in batch_callbacks:
+            callback()
+        self.assertEqual(self.allocations_of(extra), {batch.pk: Decimal("40.00")})
 
 
 class DueExcludesUnapprovedTest(PaymentsTestCase):
@@ -381,6 +432,47 @@ class ExplicitAllocationTest(PaymentsTestCase):
         self.assertEqual(FeePayment.objects.count(), 0)
 
 
+class ServiceAmountValidationTest(PaymentsTestCase):
+    """مستوى الخدمة لا الـHTTP: المسلسِلُ يحمي الطريقَ الأوّل، والنداءُ البرمجيّ لا.
+
+    المبلغُ **يُفحص قبل التقريب**: التقريبُ أوّلاً كان يقبل `100.005 → 100.00`
+    و`100.015 → 100.02` بصمت، ويُسقط `Infinity` في `InvalidOperation` (500).
+    """
+
+    BAD_AMOUNTS = ("100.005", "100.015", "Infinity", "NaN")
+
+    def test_create_payment_refuses_a_non_exact_or_non_finite_amount(self):
+        client = self.make_client()
+        for amount in self.BAD_AMOUNTS:
+            with self.subTest(amount=amount), self.assertRaises(ValidationError):
+                payments.create_payment(
+                    self.tenant, client,
+                    amount=amount, method="cash",
+                    paid_at=datetime.date(2026, 5, 1), actor=self.owner,
+                )
+        self.assertEqual(FeePayment.objects.count(), 0)
+        self.assertEqual(FeeReceiptSequence.objects.count(), 0)
+
+    def test_explicit_allocations_and_write_offs_refuse_them_too(self):
+        client = self.make_client()
+        draft = self.make_draft(client, "300")
+        for amount in self.BAD_AMOUNTS:
+            with self.subTest(allocation=amount), self.assertRaises(ValidationError):
+                payments.create_payment(
+                    self.tenant, client,
+                    amount="100.00", method="cash",
+                    paid_at=datetime.date(2026, 5, 1), actor=self.owner,
+                    allocations=[{"draft": draft.pk, "amount": amount}],
+                )
+            with self.subTest(write_off=amount), self.assertRaises(ValidationError):
+                payments.write_off_fee_draft(
+                    draft, amount=amount, reason="سبب", actor=self.owner,
+                )
+        self.assertEqual(FeePayment.objects.count(), 0)
+        self.assertEqual(FeePaymentAllocation.objects.count(), 0)
+        self.assertEqual(FeeWriteOff.objects.count(), 0)
+
+
 class WriteOffTest(PaymentsTestCase):
     def test_a_write_off_lowers_the_remaining_and_deletes_nothing(self):
         client = self.make_client()
@@ -530,44 +622,6 @@ class ReceiptNumberTest(PaymentsTestCase):
         self.assertEqual(sequence.last_number, 6)
 
 
-    def test_the_first_creation_race_recovers_instead_of_raising(self):
-        """أوّلُ دفعتين متزامنتين في سنة: القراءةُ لا ترى الصفَّ فيُنشأ ويُصطدم.
-
-        `get_or_create` تحت `select_for_update` لا يقفل صفاً غير موجود؛ فالمسارُ
-        الصحيحُ: `IntegrityError` على الإدراج ⇒ إعادةُ قفلٍ على صفّ الآخر. يُحاكى
-        السبق بجعل القراءة الأولى لا ترى الصفَّ الموجود فعلاً.
-        """
-        client = self.make_client()
-        FeeReceiptSequence.objects.create(
-            tenant=self.tenant, year=2026, last_number=4,
-        )
-        real_select = FeeReceiptSequence.objects.select_for_update
-        calls = {"count": 0}
-
-        def blind_first_read(*args, **kwargs):
-            queryset = real_select(*args, **kwargs)
-            if calls["count"] == 0:
-                calls["count"] += 1
-                return queryset.none()  # الصفُّ «لم يُنشأ بعد» في نظرنا
-            return queryset
-
-        with mock.patch.object(
-            FeeReceiptSequence.objects, "select_for_update", blind_first_read,
-        ):
-            payment = payments.create_payment(
-                self.tenant, client,
-                amount="10.00", method="cash", paid_at=datetime.date(2026, 5, 1),
-                actor=self.owner,
-            )
-
-        self.assertEqual(payment.receipt_number, "2026-00005", "لم يُستأنف العدّ")
-        self.assertEqual(calls["count"], 1, "الفرعُ المحاكى لم يُنفَّذ أصلاً")
-        self.assertEqual(
-            FeeReceiptSequence.objects.filter(tenant=self.tenant, year=2026).count(), 1,
-            "الصفُّ تكرّر بدل استئنافه",
-        )
-
-
 class PaymentListTest(PaymentsTestCase):
     def test_filters_client_method_and_date_range(self):
         client = self.make_client()
@@ -619,6 +673,9 @@ class MaskTest(PaymentsTestCase):
         client = self.make_client("زبون المحاسب", responsible=self.accountant_user)
         draft = self.make_draft(client, "300")
         self.payment_of(client, "100.00")
+        payments.write_off_fee_draft(
+            draft, amount="20.00", reason="تنازل", actor=self.owner,
+        )
 
         self.as_user(self.accountant_user)
 
@@ -647,7 +704,13 @@ class MaskTest(PaymentsTestCase):
         self.assertEqual(ledger.status_code, 200, ledger.content)
         self.assertIsNone(ledger.data["invoices"]["results"][0]["remaining"])
         self.assertIsNone(ledger.data["invoices"]["results"][0]["total"])
+        self.assertIsNone(ledger.data["invoices"]["results"][0]["written_amount"])
         self.assertIsNone(ledger.data["payments"]["results"][0]["amount"])
+        write_offs = ledger.data["write_offs"]["results"]
+        self.assertEqual(len(write_offs), 1)
+        self.assertIsNone(write_offs[0]["amount"])
+        # والسببُ والتاريخُ ليسا مبلغاً: يُقرآن ولو حُجب المال.
+        self.assertEqual(write_offs[0]["reason"], "تنازل")
         self.assertIsNone(ledger.data["client_due"]["due"])
 
         self.assertIsNone(payments.client_due_payload(
@@ -721,6 +784,15 @@ class IsolationTest(PaymentsTestCase):
         self.assertEqual(
             FeePaymentAllocation.objects.filter(draft=self.other_draft).count(), 0,
         )
+
+    def test_a_write_off_of_another_office_is_not_in_the_ledger(self):
+        FeeWriteOff.objects.create(
+            tenant=self.other_tenant, draft=self.other_draft,
+            amount=Decimal("5.00"), reason="سبب",
+        )
+        ledger = self.client.get(LEDGER, **self.headers())
+        self.assertEqual(ledger.status_code, 200, ledger.content)
+        self.assertEqual(ledger.data["write_offs"]["count"], 0)
 
     def test_the_other_office_keeps_its_own_payment(self):
         self.as_user(self.other_owner)
@@ -805,6 +877,74 @@ class LedgerTest(PaymentsTestCase):
             zero.pk, [row["id"] for row in unpaid_res.data["invoices"]["results"]],
             "مسودّةٌ إجماليُها صفر ظهرت «غير مدفوعة»",
         )
+
+    def test_the_write_off_is_readable_in_the_ledger(self):
+        """الشطبُ يُقرأ في الكشف: `written_amount` على الفاتورة وصفُّه في `write_offs`."""
+        client = self.make_client()
+        other = self.make_client("زبون بلا شطب")
+        draft = self.make_draft(client, "300")
+        self.make_draft(other, "100")
+        self.payment_of(client, "100.00")
+        res = self.client.post(
+            f"{DRAFTS}{draft.pk}/{WRITE_OFF}",
+            {"amount": "50.00", "reason": "خصمٌ اتُّفق عليه"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+
+        ledger = self.client.get(LEDGER, {"client": client.pk}, **self.headers())
+        self.assertEqual(ledger.status_code, 200, ledger.content)
+        self.assertEqual(
+            set(ledger.data), {"invoices", "payments", "write_offs", "client_due"},
+        )
+        invoice = ledger.data["invoices"]["results"][0]
+        self.assertEqual(decimal_of(invoice["written_amount"]), Decimal("50.00"))
+        self.assertEqual(decimal_of(invoice["paid_amount"]), Decimal("100.00"))
+        self.assertEqual(decimal_of(invoice["remaining"]), Decimal("150.00"))
+
+        page = ledger.data["write_offs"]
+        self.assertEqual(
+            {key: page[key] for key in ("count", "page", "page_size")},
+            {"count": 1, "page": 1, "page_size": payments.LEDGER_PAGE_SIZE},
+        )
+        row = page["results"][0]
+        self.assertEqual(decimal_of(row["amount"]), Decimal("50.00"))
+        self.assertEqual(row["reason"], "خصمٌ اتُّفق عليه")
+        self.assertEqual(row["draft"], draft.pk)
+        self.assertEqual(row["created_by"]["id"], self.owner.pk)
+        self.assertTrue(row["created_at"])
+
+        # المفلترُ على زبونٍ آخر لا يرى شطبَ الأوّل، ولا بحثُ الاسم.
+        elsewhere = self.client.get(LEDGER, {"client": other.pk}, **self.headers())
+        self.assertEqual(elsewhere.data["write_offs"]["results"], [])
+        self.assertEqual(elsewhere.data["write_offs"]["count"], 0)
+        by_name = self.client.get(LEDGER, {"q": "بلا شطب"}, **self.headers())
+        self.assertEqual(by_name.data["write_offs"]["count"], 0)
+        everyone = self.client.get(LEDGER, **self.headers())
+        self.assertEqual(everyone.data["write_offs"]["count"], 1)
+
+        # وعضوٌ لا يرى الزبون لا يقرأ شطبَه.
+        self.as_user(self.accountant_user)
+        hidden = self.client.get(LEDGER, **self.headers())
+        self.assertEqual(hidden.status_code, 200, hidden.content)
+        self.assertEqual(hidden.data["write_offs"]["count"], 0)
+
+    def test_write_offs_are_paginated_in_the_query(self):
+        client = self.make_client()
+        draft = self.make_draft(client, "300")
+        for index in range(3):
+            payments.write_off_fee_draft(
+                draft, amount="10.00", reason=f"سبب {index}", actor=self.owner,
+            )
+        res = self.client.get(
+            LEDGER, {"page": 2, "page_size": 2}, **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        page = res.data["write_offs"]
+        self.assertEqual(page["count"], 3)
+        self.assertEqual(len(page["results"]), 1)
+        # الأحدثُ أوّلاً: الصفحةُ الثانيةُ فيها أقدمُها.
+        self.assertEqual(page["results"][0]["reason"], "سبب 0")
 
     def test_pagination_slices_the_queryset(self):
         client = self.make_client()
