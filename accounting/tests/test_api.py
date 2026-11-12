@@ -269,6 +269,56 @@ def test_get_account_by_code(env):
     assert api.get_account_by_code(tenant, "9999-F", active_only=True) is None
 
 
+# ── cheque_snapshot ──────────────────────────────────────────────────────────
+
+def test_cheque_snapshot_is_a_dict_of_the_stored_incoming_cheque(env):
+    tenant, owner, ils, usd, ar, rev = env
+    cheque = api.ensure_incoming_cheque(
+        tenant=tenant, cheque_number="778812", amount=D("150.00"), user=owner)
+    cheque.bank_name = "بنك القدس"
+    cheque.due_date = datetime.date(2026, 7, 1)
+    cheque.save(update_fields=["bank_name", "due_date"])
+
+    snapshot = api.cheque_snapshot(tenant, number="778812")
+
+    assert isinstance(snapshot, dict), "اللقطةُ قواميسُ لا كائنُ النموذج"
+    assert snapshot == {
+        "number": "778812",
+        "bank_name": "بنك القدس",
+        "due_date": "2026-07-01",
+    }
+
+
+def test_cheque_snapshot_reads_a_missing_bank_name_as_an_empty_string(env):
+    """`None` من القاعدة يصير `""`: الورقةُ تطبع الحقل ولا تطبع كلمة `None`."""
+    tenant, owner, ils, usd, ar, rev = env
+    api.ensure_incoming_cheque(tenant=tenant, cheque_number="911", amount=D("5"))
+
+    assert api.cheque_snapshot(tenant, number="911") == {
+        "number": "911",
+        "bank_name": "",
+        "due_date": None,
+    }
+
+
+def test_cheque_snapshot_returns_none_for_a_number_that_is_not_there(env):
+    tenant, owner, ils, usd, ar, rev = env
+
+    assert api.cheque_snapshot(tenant, number="000000") is None
+
+
+def test_cheque_snapshot_never_reads_another_company_s_cheque(env):
+    tenant, owner, ils, usd, ar, rev = env
+    other = create_company(
+        "شركة الشيك الآخر",
+        User.objects.create_user(username="cheque_other", password="x"),
+    )
+    api.ensure_incoming_cheque(tenant=other, cheque_number="556677", amount=D("40"))
+
+    assert api.cheque_snapshot(other, number="556677") is not None
+    assert api.cheque_snapshot(tenant, number="556677") is None
+
+
 # ── حسابات الشركاء والقيد الافتتاحي ─────────────────────────────────────────
 
 def test_sync_partner_accounting_links_account_under_canonical_parent(env):

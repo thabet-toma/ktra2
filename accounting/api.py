@@ -21,7 +21,7 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 
 from .account_classification import sub_type_for_partner
-from .models import Account, JournalHeader, JournalLine
+from .models import Account, Cheque, JournalHeader, JournalLine
 from .services import (
     assert_no_final_vat_statement,
     post_journal,
@@ -41,6 +41,7 @@ __all__ = [
     "get_accounts_by_codes",
     "ensure_account",
     "ensure_incoming_cheque",
+    "cheque_snapshot",
     "ensure_partner_account",
     "sync_partner_accounting",
     "create_partner_opening_balance",
@@ -364,6 +365,38 @@ def ensure_incoming_cheque(
         created_by=user if getattr(user, "pk", None) else None,
         **extra,
     )
+
+
+def cheque_snapshot(tenant, *, number: str, direction: str = "Incoming") -> dict | None:
+    """لقطةٌ من الشيك برقمه — `{"number", "bank_name", "due_date"}` أو None.
+
+    **قواميسُ لا كائنُ النموذج**: من يُمنع عليه استيرادُ `accounting.models`
+    (عقد `importlinter`) لا يجوز أن يستلم كائنَ `Cheque` من هنا — تسليمُه
+    يُعيد النموذجَ إلى يده من الباب الخلفيّ. والقراءةُ بـ`.values()` فلا صفٌّ
+    كاملٌ يُحمَّل ولا حقلٌ آخر يُلمَس.
+
+    `tenant` يقبل كائن Tenant أو معرّفه، و`direction` افتراضُه «وارد» لأن
+    الشيكَ في ورقة إشعار القبض واردٌ دائماً. ولا قصَّ للرقم هنا: القصُّ عند
+    الكتابة (`ensure_incoming_cheque`) حتى لا يبحث قارئٌ برقمٍ لم يُخزَّن.
+
+    `bank_name` الغائبُ `""` لا `None` (الورقةُ تطبع الحقل نصّاً)، و`due_date`
+    نصُّ ISO أو None — لا `date` خامٌّ يمرّ في حمولةٍ تصل الودجات.
+    """
+    row = (
+        Cheque.objects
+        .filter(tenant=tenant, cheque_number=number, direction=direction)
+        .values("cheque_number", "bank_name", "due_date")
+        .order_by("id")
+        .first()
+    )
+    if row is None:
+        return None
+    due_date = row["due_date"]
+    return {
+        "number": row["cheque_number"],
+        "bank_name": row["bank_name"] or "",
+        "due_date": None if due_date is None else due_date.isoformat(),
+    }
 
 
 # ─────────────────────────────────────────────────────────

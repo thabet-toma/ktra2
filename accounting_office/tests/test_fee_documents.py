@@ -14,8 +14,10 @@
 """
 import datetime
 from decimal import Decimal
+from pathlib import Path
 
 from django.contrib.auth.models import User
+from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -248,6 +250,56 @@ class ReceiptPayloadTest(FeeDocumentsTestCase):
 
         self.assertEqual(print_res.status_code, 403, print_res.content[:300])
         self.assertEqual(share_res.status_code, 403, share_res.content[:300])
+
+
+class PaymentsReadsAccountingThroughTheFacadeTest(SimpleTestCase):
+    """`no-direct-accounting-models`: مصدرُ الوحدة لا يذكر `accounting.models`.
+
+    الشيكُ في الاختبارات يُبنى بـ`accounting.api`، فيبقى السلوكُ أخضرَ حتى لو
+    استورد الإنتاجُ النموذجَ مباشرةً — و`import-linter` وحده يراها. فيُحرَس
+    **نصُّ الوحدة** هنا كي يسقط الاختبار للسبب نفسه الذي يسقط به العقد.
+    """
+
+    def test_the_payments_module_never_imports_accounting_models(self):
+        source = Path(payments.__file__).read_text(encoding="utf-8")
+
+        self.assertNotIn("from accounting.models", source)
+        self.assertNotIn("accounting.models", source)
+
+
+class ChequeSnapshotTest(FeeDocumentsTestCase):
+    """`_cheque_of` تقرأ الشيكَ عبر `accounting.api.cheque_snapshot` وحدها."""
+
+    def test_a_payment_that_is_not_a_cheque_has_no_snapshot(self):
+        client = self.make_client()
+        cash = self.pay(client, "10.00", method="cash")
+
+        self.assertIsNone(payments._cheque_of(self.tenant, cash))
+
+    def test_a_cheque_payment_reads_its_snapshot_from_the_books(self):
+        from accounting.api import ensure_incoming_cheque
+
+        client = self.make_client()
+        self.make_draft(client, "300.00", year=2026, month=3)
+        payment = self.pay(client, "120.00", method="cheque")
+        cheque = ensure_incoming_cheque(
+            tenant=self.tenant,
+            cheque_number=payment.receipt_number,
+            amount=payment.amount,
+            user=self.owner,
+        )
+        cheque.bank_name = "بنك القدس"
+        cheque.due_date = datetime.date(2026, 9, 30)
+        cheque.save(update_fields=["bank_name", "due_date"])
+
+        self.assertEqual(
+            payments._cheque_of(self.tenant, payment),
+            {
+                "number": payment.receipt_number,
+                "bank_name": "بنك القدس",
+                "due_date": "2026-09-30",
+            },
+        )
 
 
 class ReceiptShareTest(FeeDocumentsTestCase):
