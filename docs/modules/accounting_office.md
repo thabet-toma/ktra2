@@ -37,7 +37,7 @@
 `accounting_office/book_reports.py` — ثلاثةٌ للدفتر البسيط (قبضٌ ودفع، إيراداتٌ
 ومصاريف، ذمم) وأربعةٌ للمزدوج (ميزانُ مراجعة، أرباحٌ وخسائر، ميزانية، كشفُ حساب)،
 **وثامنٌ للاثنين: ض.ق.م للفترة** (#288/ب-٢ — يجمع الضريبةَ **المسجَّلة** على بنود
-الحركات لا نسبةً حيّة، **مخرجاتٍ ومدخلاتٍ منفصلتين** والمستحقُّ فرقُهما). ونقطتان
+الحركات لا نسبةً حيّة، **مخرجاتٍ ومدخلاتٍ منفصلتين** والمستحقُّ المخرجاتُ ناقصَ المدخلات المعترف بها). ونقطتان
 على `OfficeClientBookViewSet` نفسِه. **لا هجرةَ ولا حقلَ جديد للتقرير**: التقريرُ
 قراءةٌ محضة، والمجاميعُ تُجمَع في القاعدة (وحقلا الضريبة عمودان على البند لا على
 التقرير).
@@ -100,7 +100,7 @@
 | `accounting_office/deadlines.py` | **المحرّكُ النقيّ** (#274): `compute_deadline` (أربعةُ تواريخَ وثلاثُ علامات) و`periods_for` و`service_periods` و`period_label` و`add_months`/`month_start_after` — بلا استعلامٍ وبلا تاريخٍ قانونيّ في الكود |
 | `accounting_office/appointments.py` | **المواعيدُ وتذكيرا الموعد والموعد الرسميّ** (#281): `create_appointment`/`reschedule_appointment`/`cancel_appointment`/`complete_appointment` (حالةٌ لا حذف)، و`send_appointment_confirmation` («ابعت تأكيد» صفُّ سجلٍّ + `confirmed_at`)، وقراءاتُ اليوم والتقويم وملفّ الزبون (`appointments_for_day`/`calendar_appointments`/`client_appointments_payload`)، و`client_owes` (نقيّة: هل على الزبون شيء؟)، و**المولّدان** `appointment_reminder_candidates` و`deadline_reminder_candidates` — نوافذُ من اليوم لا عدّادات، وبندٌ واحدٌ لكل (زبون، فترة) في الموعد الرسميّ بأقرب موعدٍ **قادمٍ عليه شيء** (وبندٌ لكل (زبون، يوم) في تذكير الموعد). يستورد `services` (و`services` يستورده **مؤجَّلاً** في `_appointments_module` فتُفكّ الدورة) |
 | `accounting_office/client_books.py` | **خدماتُ دفتر الزبون** (#286): `bookkeeping_service_on`/`book_is_writable`/`assert_book_writable` (وجودُ الدفتر من `status_on` القائمة)، و`create_book`/`ensure_client_tree` (نسخُ الشجرة نسخةً واحدة)، و`add_account`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `ClientBookSequence`)، و`create_entry`/`reverse_entry` (**يقفل الأصلَ** `select_for_update` قبل فحص «لها عكسٌ بالفعل»)، و`change_kind` (د7)، و`pending_entry_payload` («للإدخال» باستعلامٍ واحد)، و`choices_payload`/`entry_kind_choices`/`account_type_choices` (تسمياتُ الأنواع الثلاثة من النموذج — نقطةُ `client-books/choices/`). **وللجزء ب-٢ (#288):** `ENTRY_APPROVER_ROLES`/`ENTRY_APPROVER_KINDS`/`_assert_entry_writer` (**اليدويُّ والافتتاحيُّ بدور المدير/صاحب المكتب — 403**)، و`opening_is_locked`/`live_opening_entry` (الافتتاحيُّ الواحدُ يُقفل بأوّل حركةٍ لاحقة)، و`fiscal_year_start_parts`/`normalize_fiscal_year_start`/`normalize_currency`/`update_settings` (السنةُ المالية والعملة على الدفتر)، والمبالغُ الضريبيةُ على البنود (`tax_base`/`tax_amount`). **لا استيرادَ من `accounting`** — يحرسه مسحُ `ast` في `accounting_office/tests/test_client_books.py` |
-| `accounting_office/book_reports.py` | **تقاريرُ دفتر الزبون** (#288/أ): `period_for` (**الفترةُ الواحدة**: الافتراضُ من بداية **السنة المالية للدفتر** — `fiscal_year_start`، #288/ب-٢ — إلى اليوم، والمعكوسُ 400)، و`fiscal_year_start(book, end)` (بدايةُ السنة المالية التي تنتهي عند `end` أو تسبقه)، و`double_entry_start` (**بدايةُ العهد المزدوج للمحوَّل وحده** من `kind_changed_on`، و`None` لما لم يتحوّل — لا `opened_on`) و`book_start` (**بدايةُ الدفتر** `min(opened_on, أوّل حركةٍ حيّة)`)، و`_report_span` (**القصُّ المعلَن**: `clipped`/`period_note`)، و`_live_lines`/`_period_lines` (الحيّةُ وحدها من `_live_entries`، والفترةُ في `WHERE`)، و`_cash_lines` (**النقدُ والبنك**: أصولُ الشجرة البسيطة)، و`_account_sums` (**التجميعُ في القاعدة**: `values`/`Sum` — صفٌّ لكل حساب)، و`_cash`/`_profit_rows`/`_receivables` (البسيط — والذممُ من `side_party` **من منظور الطرف** تراكميّاً من بداية الدفتر حتى `to`)، و`_trial_balance`/`_balance_sheet`/`_statement` (المزدوج)، و`_vat` (**ض.ق.م للفترة**: `Sum(tax_base)`/`Sum(tax_amount)` على البنود الحيّة، **مخرجاتٍ ومدخلاتٍ منفصلتين** بـ`_tax_bucket` — الإيرادُ مخرجاتٌ ومديّنةُ الطبع مدخلات، والمستحقُّ فرقُهما — لا نسبةَ حيّة، ومتاحٌ للنوعين)، و`accounts_with_movement` (**الحساباتُ ذاتُ الحركة** لبناء كشفٍ لكلٍّ منها في الدفتر كاملاً)، و`vat_from_book` (#287/٤ — يقرأ القاعدةَ نفسَها فلا تفترق قراءتان)، و`REPORT_LABELS`/`REPORTS_BY_BOOK_KIND`/`WATERMARK`، و`available_reports`/`is_report_available`/`reports_index_payload`/`report_payload`، و`ReportImbalance` (**خطأٌ صريح 409** لخللٍ حقيقيّ)، و`_mask_payload` (قناعٌ متداخلٌ فوق `services.mask_amounts`) |
+| `accounting_office/book_reports.py` | **تقاريرُ دفتر الزبون** (#288/أ): `period_for` (**الفترةُ الواحدة**: الافتراضُ من بداية **السنة المالية للدفتر** — `fiscal_year_start`، #288/ب-٢ — إلى اليوم، والمعكوسُ 400)، و`fiscal_year_start(book, end)` (بدايةُ السنة المالية التي تنتهي عند `end` أو تسبقه)، و`double_entry_start` (**بدايةُ العهد المزدوج للمحوَّل وحده** من `kind_changed_on`، و`None` لما لم يتحوّل — لا `opened_on`) و`book_start` (**بدايةُ الدفتر** `min(opened_on, أوّل حركةٍ حيّة)`)، و`_report_span` (**القصُّ المعلَن**: `clipped`/`period_note`)، و`_live_lines`/`_period_lines` (الحيّةُ وحدها من `_live_entries`، والفترةُ في `WHERE`)، و`_cash_lines` (**النقدُ والبنك**: أصولُ الشجرة البسيطة)، و`_account_sums` (**التجميعُ في القاعدة**: `values`/`Sum` — صفٌّ لكل حساب)، و`_cash`/`_profit_rows`/`_receivables` (البسيط — والذممُ من `side_party` **من منظور الطرف** تراكميّاً من بداية الدفتر حتى `to`)، و`_trial_balance`/`_balance_sheet`/`_statement` (المزدوج)، و`_vat` (**ض.ق.م للفترة**: `Sum(tax_base)`/`Sum(tax_amount)` على البنود الحيّة، **مخرجاتٍ ومدخلاتٍ منفصلتين** بـ`_tax_bucket` — الإيرادُ مخرجاتٌ ومديّنةُ الطبع مدخلات، والمستحقُّ المخرجاتُ ناقصَ **المدخلات المعترف بها** (`_recognised_input` — القاعدةُ التي يقرؤها `vat_from_book` أيضاً) — لا نسبةَ حيّةً للشركة، ومتاحٌ للنوعين)، و`accounts_with_movement` (**الحساباتُ ذاتُ الحركة** لبناء كشفٍ لكلٍّ منها في الدفتر كاملاً)، و`vat_from_book` (#287/٤ — يقرأ القاعدةَ نفسَها فلا تفترق قراءتان)، و`REPORT_LABELS`/`REPORTS_BY_BOOK_KIND`/`WATERMARK`، و`available_reports`/`is_report_available`/`reports_index_payload`/`report_payload`، و`ReportImbalance` (**خطأٌ صريح 409** لخللٍ حقيقيّ)، و`_mask_payload` (قناعٌ متداخلٌ فوق `services.mask_amounts`) |
 | `accounting_office/book_imports.py` | **استيرادُ شجرة الدفتر وأرصدته من Excel** (#288/ب-٢): `HEADERS` (الكود · الاسم · النوع · الأب · الرصيد) و`template_bytes` (القالبُ الفارغ بالترويسة الصحيحة، من اليمين لليسار)، و`parse_rows` (**كلُّ رفضٍ قبل أوّل كتابة**: ترويسةٌ ناقصة، كودٌ مكرَّر، نوعٌ مخترَع، رصيدٌ غيرُ رقميّ)، و`_assert_parents`/`_assert_acyclic`/`assert_balanced` (**الفرقُ مسمّىً في الرسالة**)، و`_apply_tree` (يضيف الناقص ويُحدِّث القائم — **ولا يُغيَّر نوعُ حسابٍ له بنود**)، و`import_tree_and_balances` (**معاملةٌ واحدة**: الشجرةُ ثم حركةُ `opening` عبر `client_books.create_entry` — لا ترقيمَ ولا توازنَ هنا) |
 | `accounting_office/fees.py` | **خدماتُ الأتعاب** (#282، أ١): `subscription_on` (**السعرُ المؤرَّخ** — أكبر `starts_on` لا يتجاوز الشهر)، و`generate_fee_drafts` (**التوليدُ الشهريّ** ممّا يقرؤه `services.refresh_office` عبر `_generate_fee_drafts`)، و`_subscription_lines`/`_service_lines`/`_extra_lines` (المصادرُ الثلاثة)، و`_raise_pending_alerts` (**تنبيهُ الثلاثة أيام**)، و`can_approve_fee_drafts`/`approve_fee_draft`/`approve_all_fee_drafts`/`cancel_fee_draft` (**الدورُ لا المفتاح**، والصفوفُ تُقفل `select_for_update`)، و`create_subscription`/`create_extra_service`/`set_client_service_price`، و`_paused_month`/`_covered_before` (**حدودُ الفوترة**: الإيقافُ يمنع المسودّةَ كلَّها، والتناسبُ على حدود الاشتراك)، و`amounts_masked` و`subscription_row`/`draft_row`/`extra_row`/`service_price_row` (القناعُ قرارٌ يُحسب مرّةً). **لا يكتب قيداً ولا فاتورة** — تلك #284 وأ٢ |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه. و`ClientDueFieldsMixin` تحذف مفتاحَ `delivery` من الردّ حين لا حجب (#283/ج) فلا يتغيّر شكلُ ردّ الزبون على مكتبٍ أطفأ الإعداد |
@@ -1421,16 +1421,23 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 `ClientBookReport` التي أُنشئت — بندٌ لكل صفٍّ **بنوع `documents`** (مستندٌ يُسلَّم
 لا مطالبةٌ بمبلغ: رسالةٌ تُطالب بمبلغٍ على رابط تقريرٍ تكذب على الزبون)،
 `period_text` يحمل اسمَ التقرير وفترتَه، و`maximum = 1` فيختفي بعد إرساله (العدُّ
-من `ReminderLog` بمفتاح فترة التقرير المخزَّنة). **ونصُّ البند سطرُه وحده** — لا
+من `ReminderLog` بمفتاح فترة التقرير المخزَّنة **ورقمِ التقرير**). **ولا بندَ لرابطٍ
+ميّت**: لا يظهر إلا تقريرٌ له مشاركةٌ حيّةٌ (`Exists` بشروط `_live_report_shares`
+نفسِها التي يقرؤها مركِّبُ الروابط: لم تُبطَل ولم تنتهِ ولا عامّة). **ونصُّ البند سطرُه وحده** — لا
 يُقدَّم عليه نصُّ نوع «الأوراق» لأنّه يتحدّث عن أوراقٍ ناقصةٍ ننتظرها من الزبون
 (`_reminder_message`). والبندُ **ظاهرٌ من يوم إنشاء الرابط** لا يوم نهاية فترته
 (وقد تكون في المستقبل). **والرابطُ يُركَّب بعد الحواجز** في
 `attach_client_book_report_links` ولمن يرى المبالغَ ويكتب: الصفحةُ العامة تُبنى
 بلا قناع، فمن لا يرى رقماً يصله البندُ بلا عنوان. **ولا تُنشَأ مشاركةٌ من مسار
 القراءة** — يُقرأ الحيّ القائم بنداءٍ واحدٍ على `doc_id__in` (نمطُ
-`payment_notice_urls`). **وقيدٌ معلوم**: تقريران على الفترة نفسها — أو بندُ
-«أوراق» لفترةٍ تطابقها تماماً — يتقاسمان مفتاحَ العدّ، إرسالُ أحدهما يُنهي
-الآخر.
+`payment_notice_urls`). **وعدّادُه عدّادُه**: مفتاحُ (زبون، `documents`، من، إلى)
+هو مفتاحُ «الأوراق الناقصة» نفسُه، فيحمل بندُ الرابط `client_book_report_id`
+(`ReadyToSendItemSerializer` ← `_clean_reminder_items`، ويُتحقَّق أنه تقريرُ هذا
+المكتب والزبون والفترة) إلى `ReminderLog.subject`، ويُقرأ `subject` في `by_pair`:
+مولّدُ الرابط يعدّ صفوفَه برقمها وحدها (`reminder_row_report_id`) ومولّدُ الأوراق
+يستثنيها — إرسالُ أحدهما لا يستهلك سقفَ الآخر في الاتجاهين. وصفُّ الرابط لا يدّعي
+أوراقاً ناقصة (`document_item_codes` فارغ). **ولا يُحجب إلا بما أُرسل برقمه**: سجلٌّ
+قديمٌ بلا رقمٍ يُحسب للأوراق.
 
 **وهجرة `0010_reminders_and_consent` إضافيّةٌ محضة**: ستةُ `AddField` على
 `Contact`، وأربعةُ `CreateModel`، و`AlterField` على اختيارات `OfficeAlert.kind`
@@ -1775,10 +1782,16 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 `_vat` يجمع `Sum(tax_base)` و`Sum(tax_amount)` على بنود الحركات الحيّة في الفترة،
 بصفٍّ لكل نوع حركة، ومتاحٌ لنوعَي الدفتر. **وليس مجموعاً واحداً** (إصلاحُ #288):
 `_tax_bucket` يحكم على سطر الضريبة بحسابه لا بنوع حركته — **الإيرادُ مخرجات**
-(`output_tax`) و**مديّنةُ الطبع مدخلات** (`input_tax`)، والمستحقُّ (`tax_due`) فرقُهما
-لا مجموعهما؛ فبياناتٌ ضريبتُها 160 مخرجاتٍ و80 مدخلاتٍ تعطي **80.00** لا 240.00،
-وهو صافي رصيد `2200` في ميزان المراجعة نفسِه. **والقاعدةُ واحدةٌ** يقرؤها التقريرُ
-و`vat_from_book` (#287/٤) فلا تفترق قراءتان لدفترٍ واحد. **ولا نسبةَ حيّة**: العمودان
+(`output_tax`) و**مديّنةُ الطبع مدخلات** (`input_tax`)، والمستحقُّ (`tax_due`)
+**المخرجاتُ ناقصَ المدخلات المعترف بها** (`recognised_input`) لا مجموعَهما ولا
+المدخلاتِ كاملةً؛ ويُعرض الباقي `non_deductible` (غيرُ المخصوم) بجانبهما — عمودان
+في الصفوف والمجاميع و`REPORT_AMOUNT_KEYS` (فيمرّ عليهما القناع). فبياناتٌ ضريبتُها
+160 مخرجاتٍ و80 مدخلاتٍ بنسبة 100٪ تعطي **80.00** لا 240.00، وهو صافي رصيد `2200`
+في ميزان المراجعة نفسِه؛ وبيعٌ ضريبتُه 170 وأثاثٌ ضريبتُه 170 بنسبة 66.6667٪ يعطي
+**56.67** لا 0.00. **والقاعدةُ واحدةٌ** يقرؤها التقريرُ و`vat_from_book` (#287/٤) —
+`_recognised_input` تُحسب بها نسبةُ كل سطرٍ مقرَّبةً لهللةٍ على السطر نفسِه — فتخرج
+`totals["tax_due"]` و`vat_from_book(...)["vat_due"]` رقماً واحداً لدفترٍ واحد (والاختبارُ
+يقارنهما حرفياً). **ولا نسبةَ حيّةً للشركة**: العمودان
 يُكتبان مع الحركة في `BookEntryLine` (هجرةُ `0020_book_entry_tax`)، فتغييرُ نسبة
 الشركة اليوم لا يُعيد كتابةَ إقرار شهرٍ مضى.
 

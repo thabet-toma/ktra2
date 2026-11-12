@@ -30,6 +30,7 @@ from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
+from accounting_office import book_reports, client_books
 from accounting_office.book_reports import REPORT_AMOUNT_KEYS
 from accounting_office.models import (
     BOOK_KIND_DOUBLE,
@@ -919,6 +920,103 @@ class VatReportTest(BookReportsTestCase):
         self.assertEqual(res.data["title"], "ض.ق.م للفترة")
         self.assertEqual(res.data["totals"]["output_tax"], "0.00")
         self.assertEqual(res.data["totals"]["tax_due"], "0.00")
+
+
+class VatRecognisedInputTest(BookReportsTestCase):
+    """التقريرُ والالتزامُ **رقمٌ واحد** (جولةُ #288 الثانية/١).
+
+    بيعٌ ضريبتُه 170 وأثاثٌ ضريبتُه 170 بنسبة 66.6667٪ (رقمُ `test_book_tax.py`):
+    التقريرُ كان يطرح المدخلاتِ **كاملةً** فيقول «المستحقّ 0.00» بينما الالتزامُ
+    (`vat_from_book`) يطرح المعترفَ بها فيقول 56.67 — محاسبٌ يقرأ الورقةَ ثم يفتح
+    الالتزامَ فيجد رقمين لدفترٍ واحد.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(
+            self.mine, kind=BOOK_KIND_DOUBLE,
+            opened_on=datetime.date(THIS_YEAR - 1, 1, 5),
+        )
+        self.day = datetime.date(THIS_YEAR, 5, 12)
+        self.add_entry(
+            self.mine, entry_date=self.day,
+            lines=[
+                {"account_code": "1100", "debit": "1170.00"},
+                {
+                    "account_code": "4100", "credit": "1170.00",
+                    "tax_base": "1000.00", "tax_amount": "170.00",
+                },
+            ],
+        )
+        self.add_entry(
+            self.mine, entry_date=self.day, kind="purchase_invoice",
+            lines=[
+                {
+                    "account_code": "1200", "debit": "1170.00",
+                    "tax_base": "1000.00", "tax_amount": "170.00",
+                },
+                {"account_code": "1100", "credit": "1170.00"},
+            ],
+        )
+        client_books.set_account_rates(
+            ClientBookAccount.objects.get(client=self.mine, code="1200"),
+            tenant=self.tenant, vat_rate="66.6667",
+        )
+
+    def test_the_due_is_the_output_minus_the_recognised_input_not_the_full_input(self):
+        payload = self.get_report(self.mine, "vat")
+
+        totals = payload["totals"]
+        self.assertEqual(totals["tax_due"], "56.67")
+        self.assertEqual(totals["output_tax"], "170.00")
+        self.assertEqual(totals["input_tax"], "170.00")
+        self.assertEqual(totals["recognised_input"], "113.33")
+        self.assertEqual(totals["non_deductible"], "56.67")
+
+    def test_the_report_due_is_the_commitment_amount_literally(self):
+        """الاثنان يقرآن قاعدةً واحدة: `totals["tax_due"] == vat_from_book(...)["vat_due"]`."""
+        payload = self.get_report(self.mine, "vat")
+
+        commitment = book_reports.vat_from_book(
+            ClientBook.objects.get(client=self.mine),
+            period_start=datetime.date.fromisoformat(payload["from"]),
+            period_end=datetime.date.fromisoformat(payload["to"]),
+        )
+
+        self.assertEqual(payload["totals"]["tax_due"], commitment["vat_due"])
+        self.assertEqual(payload["totals"]["recognised_input"], commitment["recognised_input"])
+        self.assertEqual(payload["totals"]["non_deductible"], commitment["non_deductible"])
+
+    def test_the_rows_carry_the_recognised_and_the_non_deductible_input(self):
+        payload = self.get_report(self.mine, "vat")
+
+        rows = {row["kind"]: row for row in payload["rows"]}
+        self.assertEqual(rows["purchase_invoice"]["input_tax"], "170.00")
+        self.assertEqual(rows["purchase_invoice"]["recognised_input"], "113.33")
+        self.assertEqual(rows["purchase_invoice"]["non_deductible"], "56.67")
+        self.assertEqual(rows["purchase_invoice"]["tax_due"], "-113.33")
+        self.assertEqual(rows["sales_invoice"]["recognised_input"], "0.00")
+        self.assertEqual(rows["sales_invoice"]["tax_due"], "170.00")
+
+    def test_the_two_new_columns_are_in_the_table_and_in_the_totals(self):
+        labels = [label for _key, label, _kind in book_reports.REPORT_COLUMNS["vat"]]
+        total_keys = [key for key, _label in book_reports.REPORT_TOTALS["vat"]]
+
+        self.assertIn("المدخلات المعترف بها", labels)
+        self.assertIn("غير المخصوم", labels)
+        self.assertIn("recognised_input", total_keys)
+        self.assertIn("non_deductible", total_keys)
+
+    def test_the_new_amounts_are_masked_for_a_member_without_the_amounts_key(self):
+        self.as_user(self.accountant)
+
+        payload = self.get_report(self.mine, "vat")
+
+        for key in ("recognised_input", "non_deductible"):
+            with self.subTest(key=key):
+                self.assertIn(key, payload["totals"])
+                self.assertIsNone(payload["totals"][key])
+                self.assertIsNone(payload["rows"][0][key])
 
 
 class FiscalYearTest(BookReportsTestCase):

@@ -142,6 +142,7 @@ from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     THRESHOLD_KIND_VAT_EXEMPT_DEALER,
     THRESHOLD_KIND_VAT_MONTHLY_REPORTING,
+    ClientBookReport,
     ClientContact,
     ClientDocumentItemChoice,
     ClientEvent,
@@ -7014,6 +7015,17 @@ def _reminder_log_day(row):
     return timezone.localdate(row["created_at"])
 
 
+def reminder_row_report_id(row):
+    """رقمُ تقرير الدفتر الذي كُتب صفُّ السجلّ بشأنه — `None` لصفٍّ ليس بند رابط.
+
+    بندُ رابط التقرير (#288/هـ) نوعُه `documents` ومفتاحُ عدّه (زبون، نوع، من، إلى)
+    هو مفتاحُ «الأوراق الناقصة» نفسُه، فرقمُ التقرير في `subject` هو الفاصلُ بين
+    العدّادين: مولّدُ الرابط يعدّ صفوفَه وحدها، ومولّدُ الأوراق يستثنيها.
+    والصفوفُ تصل قواميسَ من `.values()` (انظر `_reminder_candidates`).
+    """
+    return (row.get("subject") or {}).get("client_book_report_id")
+
+
 def reminder_template_bodies(tenant, reminder_type) -> dict[str, str]:
     """نصوصُ مكتبٍ لنوعٍ في لغاته — **استعلامٌ واحد** يُمرَّر لبناء الرسائل."""
     overrides = {
@@ -7144,7 +7156,7 @@ def _reminder_candidates(
             ReminderLog.objects.filter(reverts=OuterRef("pk")),
         ))
         .values("client_id", "reminder_type", "kind", "period_start", "period_end",
-                "created_at", "reverted"),
+                "created_at", "reverted", "subject"),
     )
     by_pair: dict[tuple[int, str, Any, Any], list] = {}
     for row in logs:
@@ -7155,9 +7167,14 @@ def _reminder_candidates(
         #: و`localdate` مرّةً لكل صفٍّ أرخصُ من إعادتها في كل مولّد.
         by_pair.setdefault(key, []).append({**row, "day": _reminder_log_day(row)})
     #: العدُّ الصافي لكل بند — لمولّد الأوراق وحده: الإيقاعُ فيه عدُّ صفوفٍ لا
-    #: نافذةُ أيام، ومولّدا #281 يقرآن `by_pair` بأيّامه.
+    #: نافذةُ أيام، ومولّدا #281 يقرآن `by_pair` بأيّامه. **وبلا صفوف بند رابط
+    #: التقرير** (#288): مفتاحُها مفتاحُ الأوراق نفسُه، وعدّادُها في مولّده.
     counted_by_pair = {
-        key: sum(1 for row in pair if row["kind"] in REMINDER_COUNTED_KINDS)
+        key: sum(
+            1 for row in pair
+            if row["kind"] in REMINDER_COUNTED_KINDS
+            and reminder_row_report_id(row) is None
+        )
         for key, pair in by_pair.items()
     }
 
@@ -7179,9 +7196,12 @@ def _reminder_candidates(
         # وفلترُ الطلب يخصّها أيضاً: طلبُ نوعٍ آخر لا يعرض بندَ أوراق.
         if REMINDER_DOCUMENTS in enabled and reminder_type in (None, REMINDER_DOCUMENTS):
             for period_start, period_end, bucket in periods:
-                pairs = by_pair.get(
-                    (client.pk, REMINDER_DOCUMENTS, period_start, period_end), [],
-                )
+                pairs = [
+                    row for row in by_pair.get(
+                        (client.pk, REMINDER_DOCUMENTS, period_start, period_end), [],
+                    )
+                    if reminder_row_report_id(row) is None
+                ]
                 count = counted_by_pair.get(
                     (client.pk, REMINDER_DOCUMENTS, period_start, period_end), 0,
                 )
@@ -7706,13 +7726,51 @@ def _clean_reminder_items(tenant, user, items) -> list[dict]:
             raise ValidationError({
                 "period_end": "نهايةُ الفترة مطلوبةٌ مع بدايتها — التاريخان معاً مفتاحُ التذكير.",
             })
+        period_start = _reminder_period_date(raw.get("period_start"), "period_start")
+        period_end = _reminder_period_date(raw.get("period_end"), "period_end")
         clean.append({
             "client": client,
             "reminder_type": reminder_type,
-            "period_start": _reminder_period_date(raw.get("period_start"), "period_start"),
-            "period_end": _reminder_period_date(raw.get("period_end"), "period_end"),
+            "period_start": period_start,
+            "period_end": period_end,
+            "client_book_report_id": _reminder_book_report_id(
+                tenant, client, reminder_type, period_start, period_end,
+                raw.get("client_book_report_id"),
+            ),
         })
     return clean
+
+
+def _reminder_book_report_id(
+    tenant, client, reminder_type, period_start, period_end, raw,
+):
+    """رقمُ تقرير الدفتر على **بند رابطٍ** (#288/هـ) — `None` لما ليس برابط.
+
+    الرقمُ هو ما يفصل عدّادَ الرابط عن عدّاد «الأوراق الناقصة» على المفتاح
+    نفسِه (`reminder_row_report_id`)، فلا يُقبل **ثقةً بالطلب**: يجب أن يكون
+    تقريراً من **هذا المكتب** لـ**هذا الزبون** على **هذه الفترة**، وبند نوعِه
+    `documents`. وإلا رقمٌ لتقريرٍ غريب يُخفي بنداً لا يخصّه أو يُظهر آخر.
+    """
+    if raw is None or raw == "":
+        return None
+    invalid = ValidationError({
+        "client_book_report_id": "ليس هذا تقريراً لهذا الزبون على هذه الفترة.",
+    })
+    if isinstance(raw, bool):
+        raise invalid
+    try:
+        report_id = int(raw)
+    except (TypeError, ValueError):
+        raise invalid from None
+    if reminder_type != REMINDER_DOCUMENTS or not ClientBookReport.objects.filter(
+        tenant=tenant,
+        pk=report_id,
+        client_book__client=client,
+        period_from=period_start,
+        period_to=period_end,
+    ).exists():
+        raise invalid
+    return report_id
 
 
 def _reminder_period_date(raw, field):
@@ -7784,6 +7842,15 @@ def _write_reminder_logs(
             (item["client"].pk, item["period_start"], item["period_end"]),
             {"codes": [], "names": []},
         )
+        # بندُ رابط التقرير يحمل رقمَه ولا يدّعي أوراقاً ناقصةً: صفُّه يخصّ ورقةً
+        # تُسلَّم لا أوراقاً تُنتظر، ورقمُه هو ما يعدّه مولّدُه (`reminder_row_report_id`).
+        report_id = item.get("client_book_report_id")
+        subject = {
+            "document_item_codes": [] if report_id else meta["codes"],
+            "document_item_names": [] if report_id else meta["names"],
+        }
+        if report_id:
+            subject["client_book_report_id"] = report_id
         rows.append(ReminderLog(
             tenant=tenant,
             client=item["client"],
@@ -7796,10 +7863,7 @@ def _write_reminder_logs(
             body=body,
             period_start=item["period_start"],
             period_end=item["period_end"],
-            subject={
-                "document_item_codes": meta["codes"],
-                "document_item_names": meta["names"],
-            },
+            subject=subject,
             reason=reason,
             created_by=actor,
             batch=batch,
