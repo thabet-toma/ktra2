@@ -57,8 +57,13 @@ from accounting_office.models import (
     BOOK_KIND_DOUBLE,
     BOOK_KIND_LABELS,
     BOOK_KIND_SIMPLE,
+    THRESHOLD_KIND_CHOICES,
+    THRESHOLD_KIND_GIFTS_CAP,
+    THRESHOLD_KIND_HOSPITALITY_CAP,
+    THRESHOLD_KIND_PHONE_CAP,
     BookEntryLine,
     ClientBookAccount,
+    TaxThreshold,
 )
 
 # ── أنواعُ التقارير: ثوابت لا نصوصٌ مبعثرة ────────────────────────────────
@@ -271,6 +276,8 @@ _PERIOD_NOTES: dict[str, str] = {
 _FROM_BOOK_START = frozenset({REPORT_RECEIVABLES})
 
 _ZERO = Decimal("0")
+#: هللةُ تقريبِ الضريبة المعترف بها — إهلاكُ أصلٍ وخصمُ مدخلاتٍ بخانتين كالمبالغ.
+_CENT = Decimal("0.01")
 
 
 class ReportImbalance(Exception):
@@ -980,3 +987,287 @@ def report_payload(
         "totals": totals,
     }
     return _mask_payload(payload) if masked else payload
+
+
+# ── نتيجةُ الفترة والإهلاك والسقوف (#287/٣ و٦ و٧) ───────────────────────────
+#
+# **ثلاثةُ قراءاتٍ لا تقارير**: «نتيجةُ الفترة» سطرٌ يظهر في ملفّ الزبون وفي إشعار
+# الدفع، والإهلاكُ مجموعُ كلفةٍ × نسبةِ أصل، والسقوفُ السنويةُ مبالغُ بنودٍ موسومة
+# مقابلَ أرقامٍ منشورة. ولا واحدٌ منها نوعُ تقريرٍ جديد: التقريرُ يُصدَّر ويُطبع،
+# وهذه تُقرأ في مواضعها — وإضافةُ نوعٍ ثامنٍ كانت تُثقل الفهرس بلا فائدة.
+RESULT_TONE_PROFIT = "profit"
+RESULT_TONE_LOSS = "loss"
+RESULT_TONE_NEUTRAL = "neutral"
+RESULT_TONE_LABELS: dict[str, str] = {
+    RESULT_TONE_PROFIT: "ربح",
+    RESULT_TONE_LOSS: "خسارة",
+    RESULT_TONE_NEUTRAL: "قريب من الصفر",
+}
+
+#: مفاتيحُ مبالغ نتيجة الفترة — تُقنَّع في الحمولات كسائر مبالغ الموديول.
+RESULT_AMOUNT_KEYS: tuple[str, ...] = ("revenue", "expense", "profit")
+
+#: سقوفُ الإقرار السنوي: تصنيفُ الحساب ← نوعُ السقف المنشور (#287/٧).
+#: **جدولٌ واحد** يقرؤه النداءُ ولا يُكرَّر في الـview ولا في الواجهة.
+CAP_TAGS: dict[str, str] = {
+    "hospitality": THRESHOLD_KIND_HOSPITALITY_CAP,
+    "gifts": THRESHOLD_KIND_GIFTS_CAP,
+    "phone": THRESHOLD_KIND_PHONE_CAP,
+}
+CAP_LABELS: dict[str, str] = {
+    "hospitality": "الضيافة",
+    "gifts": "الهدايا",
+    "phone": "الهاتف",
+}
+
+
+def period_result_tone(profit, threshold=0) -> str:
+    """لونُ نتيجة الفترة — **ربحٌ أخضر وخسارةٌ حمراء وحدُّ الإشعارات رماديّ**.
+
+    القاعدةُ نفسُها في `appointments.payment_notice_tone`: `|المبلغ| ≤ الحدّ`
+    رماديّ (لا «ربحٌ صفريٌّ» يصرخ بالأخضر)، وما فوقه بإشارته. والقاعدتان
+    تُقرآن معاً في الشاشة الواحدة، فاختلافُ إحداهما عن الأخرى كان يُنتج لونين
+    لرقمٍ واحد.
+    """
+    profit = Decimal(profit or 0)
+    threshold = abs(Decimal(threshold or 0))
+    if abs(profit) <= threshold:
+        return RESULT_TONE_NEUTRAL
+    return RESULT_TONE_PROFIT if profit > 0 else RESULT_TONE_LOSS
+
+
+def period_result(
+    book, *, raw_from=None, raw_to=None, threshold=0, masked=False,
+) -> dict:
+    """**نتيجةُ الفترة** (إيرادات − مصاريف) بلونها — لملفّ الزبون وإشعار الدفع.
+
+    والمصدرُ هو باني «أرباح وخسائر» نفسُه (`_profit_rows`) لا حسابٌ ثانٍ هنا:
+    رقمان لنتيجةٍ واحدةٍ في شاشتين يفترقان عند أوّل تعديلٍ لقاعدةٍ من قواعد
+    الحساب. والفترةُ الافتراضيةُ سنةُ الدفتر المالية (`period_for`) كما التقارير.
+
+    **وحدُّ الإشعارات** (رماديّ) هو إعدادُ `payment_notice_gray_threshold`
+    نفسُه للزبون — ليس إعداداً ثانياً لنفس السؤال.
+    """
+    span = period_for(raw_from, raw_to, book=book)
+    _rows, totals = _profit_rows(book, span)
+    tone = period_result_tone(totals["profit"], threshold)
+    result = {
+        "from": span[0].isoformat(),
+        "to": span[1].isoformat(),
+        "revenue": totals["revenue"],
+        "expense": totals["expense"],
+        "profit": totals["profit"],
+        "tone": tone,
+        "tone_label": RESULT_TONE_LABELS[tone],
+        "threshold": _money(threshold or 0),
+        "book_kind": book.kind,
+        "book_kind_label": BOOK_KIND_LABELS.get(book.kind, book.kind),
+        "watermark": WATERMARK,
+    }
+    return services.mask_amounts(result, RESULT_AMOUNT_KEYS) if masked else result
+
+
+def depreciation_payload(book, *, raw_to=None, masked=False) -> dict:
+    """**الإهلاكُ السنويُّ بالقسط الثابت**: كلفةُ الأصل × نسبته (#287/٣).
+
+    الكلفةُ من **بداية الدفتر إلى نهاية السنة المالية** لا حركةُ الفترة: نسبةُ
+    الإهلاك تُطبَّق على كلفة الأصل الأصليّة (ממחיר הקרן / «من كلفة الشراء» في
+    لائحة 2005)، وأصلٌ اشتُري سنة 2024 يُهلَك بنسبته سنة 2026 كما كانت.
+
+    والنسبةُ تُقرأ من الحساب ثم من لائحة المنصّة/المكتب بتصنيفه
+    (`book_rates.account_rate`). **و«راجع» لا يُهلَّك**: صفٌّ كهذا يخرج
+    `depreciation: null` و`needs_review: true`، والمجموعُ يعلن أنه ناقصٌ — ولا
+    يُخترَع للصنف صناعةٍ نسبةٌ وسطاً بين 5% و12%.
+    """
+    from accounting_office import book_rates
+
+    end = _parse_day(raw_to, "to") or _today()
+    start = book_start(book)
+    system = services.resolve_setting(
+        book.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+    )
+    overrides = book_rates.office_override_map(book.tenant, system)
+    grouped = list(
+        _live_lines(book)
+        .filter(
+            entry__entry_date__lte=end,
+            account__account_type=BOOK_ACCOUNT_TYPE_ASSET,
+        )
+        .values("account__code", "account__name", "account__rate_category")
+        .annotate(debit=Sum("debit"), credit=Sum("credit"))
+        .order_by("account__code"),
+    )
+    accounts = {
+        row.code: row
+        for row in ClientBookAccount.objects.filter(
+            client=book.client, account_type=BOOK_ACCOUNT_TYPE_ASSET,
+        ).exclude(rate_category="", depreciation_rate__isnull=True)
+    }
+    rows = []
+    cost_total = depreciation_total = _ZERO
+    review_count = 0
+    for row in grouped:
+        # **ولا يُهلَّك إلا ما أُعلِن أصلاً**: حسابُ صندوقٍ أو بنكٍ من نوع «أصول»
+        # وليس أصلاً ثابتاً — إدراجُه هنا كان يُخرج صفَّ نقدٍ «راجعَ الإهلاك»
+        # ويعدّ نقصاً ليس بنقص.
+        account = accounts.get(row["account__code"])
+        if account is None:
+            continue
+        cost = _zero(row["debit"]) - _zero(row["credit"])
+        rates = book_rates.account_rows(
+            account, tenant=book.tenant, tax_system=system, overrides=overrides,
+        )
+        rate = rates.get(book_rates.RATE_KIND_DEPRECIATION) or {}
+        usable = bool(rate.get("usable"))
+        annual = (cost * Decimal(rate["rate"]) / Decimal("100")).quantize(_CENT) if (
+            usable and cost > 0
+        ) else None
+        if not usable:
+            review_count += 1
+        cost_total += cost
+        if annual is not None:
+            depreciation_total += annual
+        rows.append({
+            "account_code": row["account__code"],
+            "account_name": row["account__name"],
+            "rate_category": row["account__rate_category"],
+            "rate": rate.get("rate"),
+            "rate_source": rate.get("source", ""),
+            "rate_source_label": rate.get("source_label", ""),
+            "needs_review": not usable,
+            "cost": _money(cost),
+            "depreciation": _money(annual) if annual is not None else None,
+        })
+    payload = {
+        "from": start.isoformat(),
+        "to": end.isoformat(),
+        "tax_system": system,
+        "rows": rows,
+        "totals": {
+            "cost": _money(cost_total),
+            "depreciation": _money(depreciation_total),
+        },
+        "review_count": review_count,
+        "watermark": WATERMARK,
+    }
+    return (
+        _mask_payload(payload, ("cost", "depreciation")) if masked else payload
+    )
+
+
+def annual_alerts_payload(book, *, year=None, masked=False) -> dict:
+    """**سقوفُ الإقرار السنوي** — تنبيهٌ من مجموع البنود الموسومة (#287/٧).
+
+    كلُّ تصنيفٍ في `CAP_TAGS` (ضيافةٌ وهدايا وهاتف) يُجمع من بنود حركاتٍ حيّةٍ في
+    السنة على الحسابات التي تحمل تصنيفَه — **والوسمُ على الحساب لا على السطر**:
+    سطرٌ لا يحمل حساباً فما باله تصنيف؟ والوسمُ يُكتب مرّةً واحدةً على الحساب
+    فيسري على حركاته كلها بلا إعادة وسمٍ في كل قيد.
+
+    **وتنبيهٌ لا رفض**: الإقرارُ السنويُّ لم يُبنَ في هذه الشريحة، وهذه قراءةٌ
+    تُعرض على المحاسب قبل التقديم — تُنبّه ولا تمنع. والسقفُ من
+    `TaxThreshold` (بياناتٌ سنوية: سنةٌ بلا صفٍّ تأخذ آخرَ سقفٍ سابق) و`«راجع»`
+    فيه يخرج مع التنبيه لا يُسكِت عنه.
+    """
+    year = year or _today().year
+    system = services.resolve_setting(
+        book.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+    )
+    start = datetime.date(year, 1, 1)
+    end = datetime.date(year, 12, 31)
+    rows = []
+    any_exceeded = False
+    review_count = 0
+    for code, kind in CAP_TAGS.items():
+        threshold = (
+            TaxThreshold.objects
+            .filter(tax_system=system, kind=kind, year__lte=year)
+            .order_by("-year")
+            .first()
+        )
+        totals = _live_lines(book).filter(
+            entry__entry_date__gte=start,
+            entry__entry_date__lte=end,
+            account__rate_category=code,
+        ).aggregate(debit=Sum("debit"), credit=Sum("credit"))
+        total = _zero(totals["debit"]) - _zero(totals["credit"])
+        cap = None if threshold is None else threshold.amount
+        needs_review = True if threshold is None else threshold.needs_review
+        exceeded = cap is not None and total > cap
+        any_exceeded = any_exceeded or exceeded
+        review_count += 1 if needs_review else 0
+        rows.append({
+            "code": code,
+            "label": CAP_LABELS[code],
+            "cap_kind": kind,
+            "cap_label": dict(THRESHOLD_KIND_CHOICES)[kind],
+            "total": _money(total),
+            "cap": None if cap is None else _money(cap),
+            "cap_year": None if threshold is None else threshold.year,
+            "cap_note": "" if threshold is None else threshold.note,
+            "source_url": "" if threshold is None else threshold.source_url,
+            "exceeded": exceeded,
+            "needs_review": needs_review,
+        })
+    payload = {
+        "year": year,
+        "tax_system": system,
+        "rows": rows,
+        "any_exceeded": any_exceeded,
+        "review_count": review_count,
+        "watermark": WATERMARK,
+    }
+    return _mask_payload(payload, ("total", "cap")) if masked else payload
+
+
+def vat_from_book(book, *, period_start, period_end) -> dict:
+    """**ض.ق.م المستحقّةُ من الدفتر** — مبيعاتٌ ناقصَ المدخلات المعترف بها (#287/٤).
+
+    `ضريبةُ المبيعات` مجموعُ `tax_amount` المسجَّلة على بنود حسابات الإيرادات،
+    و`المدخلاتُ المعترف بها` مجموعُ ضريبة كل بندِ مصروفٍ/أصلٍ **× نسبته**: نسبةُ
+    السطر إن كُتبت، وإلا نسبةُ حسابه من لائحة المنصّة/المكتب، وإلا 100%. والباقي
+    **كلفةٌ لا تُخصم** (`non_deductible`) — وهو الرقمُ الذي يبحث عنه المحاسب حين
+    يسأل «ليش ما انخصمت كلها؟».
+
+    ولا رقمَ حيٌّ من نسبةٍ ضريبيةٍ للشركة: العمودان `tax_base`/`tax_amount` كُتبا
+    مع الحركة، والنسبةُ المعترف بها تقرأ **تصنيفَ الحساب** لا نسبةً عامّة — فتكرارُ
+    حسابٍ صفريّ (بنودُ 100% وبنودُ 2/3 في الدفتر نفسه) يخرج صحيحاً.
+    """
+    from accounting_office import book_rates
+
+    system = services.resolve_setting(
+        book.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+    )
+    overrides = book_rates.office_override_map(book.tenant, system)
+    lines = _live_lines(book).filter(
+        entry__entry_date__gte=period_start,
+        entry__entry_date__lte=period_end,
+    ).select_related("account")
+    sales_tax = _ZERO
+    input_tax = _ZERO
+    recognised = _ZERO
+    review_lines = 0
+    for line in lines:
+        tax = line.tax_amount or _ZERO
+        if not tax:
+            continue
+        if line.account.account_type == BOOK_ACCOUNT_TYPE_REVENUE:
+            sales_tax += tax
+            continue
+        if line.account.account_type not in _DEBIT_NATURED:
+            continue
+        rate, review = book_rates.recognised_vat_rate(
+            line, tenant=book.tenant, tax_system=system, overrides=overrides,
+        )
+        input_tax += tax
+        review_lines += 1 if review else 0
+        recognised += (tax * rate / Decimal("100")).quantize(_CENT)
+    return {
+        "from": period_start.isoformat(),
+        "to": period_end.isoformat(),
+        "sales_tax": _money(sales_tax),
+        "input_tax": _money(input_tax),
+        "recognised_input": _money(recognised),
+        "non_deductible": _money(input_tax - recognised),
+        "vat_due": _money(sales_tax - recognised),
+        "review_lines": review_lines,
+    }

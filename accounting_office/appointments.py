@@ -832,9 +832,36 @@ def payment_notice(tenant, *, client_id, due, gray_threshold=None) -> dict:
             services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY,
             list(OfficeClient.objects.filter(tenant=tenant, pk=client_id)),
         ).get(client_id, 0)
-    return payment_notices(
+    notice = payment_notices(
         tenant, [(client_id, due)], gray_thresholds={client_id: gray_threshold},
     )[(client_id, due)]
+    # #287/٦: **نتيجةُ الفترة** لمن عنده دفتر — تُقرأ هنا لا في القالب: الورقةُ
+    # ترسم اللونَ والرقمَ كما وصلا، و`None` (زبونٌ بلا دفتر) يعني «لا سطر».
+    notice["result"] = book_period_result(
+        tenant, client_id, gray_threshold=gray_threshold,
+    )
+    return notice
+
+
+def book_period_result(tenant, client_id, *, gray_threshold=None):
+    """نتيجةُ فترة دفتر الزبون لسنة الدفتر المالية — أو `None` بلا دفتر.
+
+    **ولماذا في إشعار الدفع؟** لأن الزبون يسأل «شو طلع لي هالسنة؟» حين يصل
+    إشعارُ ضريبته: النتيجةُ سطرٌ واحدٌ في الورقة يوفّر مكالمةً، ولونُها بقاعدة
+    الإشعار نفسها (`|المبلغ| ≤ الحدّ` رماديّ).
+    """
+    from accounting_office import book_reports
+    from accounting_office.models import ClientBook
+
+    book = (
+        ClientBook.objects
+        .filter(tenant=tenant, client_id=client_id)
+        .select_related("client")
+        .first()
+    )
+    if book is None:
+        return None
+    return book_reports.period_result(book, threshold=gray_threshold or 0)
 
 
 def payment_notice_item(notice) -> dict | None:
@@ -863,6 +890,24 @@ def payment_notice_item(notice) -> dict | None:
             }
             for line in notice["lines"]
         ],
+        # #287/٦: نتيجةُ الفترة لمن عنده دفتر — `None` تعني «لا سطر» لا «صفر».
+        "result": _notice_result(notice),
+    }
+
+
+def _notice_result(notice) -> dict | None:
+    """نتيجةُ الفترة كما تخرج في البند — المبالغُ نصوصُ `_money` أصلاً."""
+    result = notice.get("result")
+    if not result:
+        return None
+    return {
+        "from": result["from"],
+        "to": result["to"],
+        "revenue": result["revenue"],
+        "expense": result["expense"],
+        "profit": result["profit"],
+        "tone": result["tone"],
+        "tone_label": result["tone_label"],
     }
 
 

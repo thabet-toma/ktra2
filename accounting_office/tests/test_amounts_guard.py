@@ -48,9 +48,30 @@ APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 #:
 #: `FeeInvoice.tax_percent` (#282/أ٢): **نسبةٌ لا مبلغ** — لقطةُ نسبة الإصدار
 #: (16.00)، وقنعُها لا يخفي شيئاً؛ ومبلغُها `tax_total` مقنَّعٌ كسائر المبالغ.
+#:
+#: #287: نسبُ المصاريف والإهلاك — **نسبةٌ لا مبلغ** كـ`tax_percent` نفسِه:
+#: نسبةُ ض.ق.م على الحساب/السطر، ونسبةُ ضريبة الدخل، ونسبةُ الإهلاك، ونسبتا
+#: لائحة المنصّة وتجاوز المكتب. قنعُها لا يخفي مالاً، وقيمةُ المبلغ المحسوب
+#: منها (`Obligation.computed_amount`) مسجَّلةٌ في `OBLIGATION_AMOUNT_KEYS`.
 MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({
     "TaxThreshold.amount",
     "FeeInvoice.tax_percent",
+    "BookExpenseRate.rate",
+    "OfficeBookExpenseRate.rate",
+    "BookEntryLine.vat_rate",
+    "ClientBookAccount.vat_rate",
+    "ClientBookAccount.income_tax_rate",
+    "ClientBookAccount.depreciation_rate",
+})
+
+#: حقولُ نسبةٍ في **مُسلسِلات** الموديول — تُعفى من مسح المبالغ بالسبب نفسه
+#: (نسبةٌ لا مبلغ). وحقلُ مبلغٍ يُسمَّى بأحد هذه الأسماء لا يُعفى: المسحُ يقارن
+#: الاسمَ وحدَه هنا كما في `AMOUNT_KEYS`، والتمييزُ نوعُ الحقلِ في النموذج.
+SERIALIZER_RATE_EXEMPTIONS: frozenset[str] = frozenset({
+    "vat_rate",
+    "income_tax_rate",
+    "depreciation_rate",
+    "rate",
 })
 
 
@@ -59,9 +80,12 @@ def declared_amount_fields(source: str) -> list[str]:
     return re.findall(r"^\s*(\w+)\s*=\s*serializers\.DecimalField\(", source, re.MULTILINE)
 
 
-def unregistered_amount_fields(source: str, registered) -> list[str]:
+def unregistered_amount_fields(source: str, registered, exemptions=frozenset()) -> list[str]:
     """حقولُ مبلغٍ في نصٍّ ما ليست في ثابت المبالغ — أيُّها يُسقِط الحارس."""
-    return [name for name in declared_amount_fields(source) if name not in registered]
+    return [
+        name for name in declared_amount_fields(source)
+        if name not in registered and name not in exemptions
+    ]
 
 
 def model_amount_fields(models) -> list[str]:
@@ -129,6 +153,7 @@ class AmountKeysGuardTest(SimpleTestCase):
         offenders = unregistered_amount_fields(
             (APP_DIR / "serializers.py").read_text(encoding="utf-8"),
             services.AMOUNT_KEYS,
+            SERIALIZER_RATE_EXEMPTIONS,
         )
         self.assertEqual(
             offenders, [],
@@ -154,6 +179,10 @@ class AmountKeysGuardTest(SimpleTestCase):
                 # #288/ب-٢: الأساسُ الخاضعُ وقيمةُ الضريبة على بند الحركة — مبلغان
                 # مسجَّلان في `BOOK_ENTRY_AMOUNT_KEYS` كالمدين والدائن.
                 "tax_base", "tax_amount",
+                # #287: نسبةُ ض.ق.م على السطر ونسبُ الحساب الثلاث ونسبةُ لائحة
+                # المكتب — **نسبٌ لا مبالغ**، مُعفاةٌ في `SERIALIZER_RATE_EXEMPTIONS`.
+                "vat_rate",
+                "vat_rate", "income_tax_rate", "depreciation_rate", "rate",
                 "amount", "amount", "amount", "subtotal", "total",
                 "paid_amount", "remaining", "amount", "amount",
                 "total", "tax_total",
@@ -202,6 +231,15 @@ class ModelAmountGuardTest(SimpleTestCase):
                 # مُعفَيان: مبلغُ زبونٍ يُقنَّع كسائر مبالغ بند الحركة.
                 "BookEntryLine.tax_amount",
                 "BookEntryLine.tax_base",
+                # #287: **نسبٌ لا مبالغ** — نسبةُ ض.ق.م على البند ونسبُ الحساب
+                # الثلاث ونسبتا لائحة المنصّة وتجاوز المكتب. مُعفاةٌ بسببٍ مكتوب
+                # في `MODEL_AMOUNT_EXEMPTIONS`، وتُسرد هنا كي لا يُعفى حقلٌ جديد
+                # بالاسم نفسه بصمت.
+                "BookEntryLine.vat_rate",
+                "BookExpenseRate.rate",
+                "ClientBookAccount.depreciation_rate",
+                "ClientBookAccount.income_tax_rate",
+                "ClientBookAccount.vat_rate",
                 # #282: مبالغُ الأتعاب — الاشتراكُ وسعرُ الخدمة والإضافةُ والبندُ
                 # ومجموعا المسودّة، كلُّها مسجَّلةٌ لا مُعفاة.
                 "ClientServicePrice.amount",
@@ -222,6 +260,10 @@ class ModelAmountGuardTest(SimpleTestCase):
                 "FeeWriteOff.amount",
                 # #275: مبلغُ الالتزام — مبلغٌ مسجَّلٌ لا مُعفى.
                 "Obligation.amount",
+                # #287/٤: المبلغُ المحسوبُ من الدفتر — مبلغٌ مسجَّلٌ في
+                # `OBLIGATION_AMOUNT_KEYS` كالمعدَّل، فيمرّ بالقناع.
+                "Obligation.computed_amount",
+                "OfficeBookExpenseRate.rate",
                 "ServicePackage.suggested_price",
                 "TaxCard.annual_sales",
                 "TaxThreshold.amount",

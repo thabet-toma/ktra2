@@ -1149,10 +1149,19 @@ THRESHOLD_KIND_VAT_EXEMPT_DEALER = "vat_exempt_dealer"
 #: #274: سقفُ التقرير المفصّل 874 — تجاوزُه يُلزم التقرير المفصّل، والرقمُ منشورٌ
 #: في إشعار רשות המסים لا في الكود.
 THRESHOLD_KIND_VAT_DETAILED_REPORTING = "vat_detailed_reporting"
+#: #287/٧: سقوفُ الإقرار السنوي — **مبالغُ صفوفٍ مؤشَّرةٍ سنوياً** لا نسبَ في الكود.
+#: تُقاس بها بنودُ المصاريف الموسومة بتصنيفها (`ClientBookAccount.rate_category`)،
+#: والتجاوزُ **تنبيهٌ لا رفض**: الإقرارُ لم يُبنَ بعد، والبياناتُ تُقرأ وتُنذَر.
+THRESHOLD_KIND_HOSPITALITY_CAP = "hospitality_cap"
+THRESHOLD_KIND_GIFTS_CAP = "gifts_cap"
+THRESHOLD_KIND_PHONE_CAP = "phone_cap"
 THRESHOLD_KIND_CHOICES: list[tuple[str, str]] = [
     (THRESHOLD_KIND_VAT_MONTHLY_REPORTING, "سقف التقرير الدوري لق.م"),
     (THRESHOLD_KIND_VAT_EXEMPT_DEALER, "سقف עוסק פטור"),
     (THRESHOLD_KIND_VAT_DETAILED_REPORTING, "سقف التقرير المفصّل 874"),
+    (THRESHOLD_KIND_HOSPITALITY_CAP, "سقف الضيافة السنوي"),
+    (THRESHOLD_KIND_GIFTS_CAP, "سقف الهدايا السنوي"),
+    (THRESHOLD_KIND_PHONE_CAP, "سقف الهاتف السنوي"),
 ]
 
 
@@ -1421,6 +1430,15 @@ class TaxThreshold(models.Model):
     )
     #: المصدرُ الرسميّ المنشور — بلا رابطٍ يصير الرقم رأياً.
     source_url = models.URLField(max_length=300, verbose_name="المصدر")
+    #: #287/٧: «راجع» — الرقمُ المنشورُ في النصّ لا يُقرأ منه سقفُ هذه السنة، أو
+    #: الرقمُ مؤشَّرٌ سنوياً ولم يُقرأ جدولُ السنة. **يُعرَض ولا يُخفى**: التنبيهُ
+    #: يبقى ويُعلَن أنه على رقمٍ غير مؤكَّدٍ بدل أن يُسكَت عنه.
+    needs_review = models.BooleanField(default=False, verbose_name="راجع")
+    #: شرحُ شرط السقف كما في النصّ («لكل شخص» · «أو ما زاد على…») — نصُّ النصّ
+    #: لا قاعدةٌ ثانية هنا، والقارئُ يعرف على أيّ أساسٍ يُقاس المجموع.
+    note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="شرط السقف",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
 
     class Meta:
@@ -2119,6 +2137,16 @@ class Obligation(models.Model):
         null=True,
         blank=True,
         verbose_name="المبلغ",
+    )
+    #: #287/٤: المبلغُ **المحسوبُ من الدفتر** — محفوظاً إلى جانب `amount` لا مكانه.
+    #: الموظفُ يؤكّد المحسوبَ فيصير `amount` المعدَّلاً، وكلاهما يبقى: الفرقُ بين
+    #: ما أعطاه الدفترُ وما قُدِّم فعلاً هو ما يُراجَع، ومحوُ أحدهما يمحو السؤال.
+    computed_amount = models.DecimalField(
+        max_digits=14,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="المبلغ المحسوب من الدفتر",
     )
     direction = models.CharField(
         max_length=10,
@@ -2973,6 +3001,39 @@ BOOK_ENTRY_KIND_LABELS: dict[str, str] = dict(BOOK_ENTRY_KIND_CHOICES)
 #: بدايةُ السنة المالية الافتراضية للدفتر — «شهر-يوم» نصّاً لا تاريخاً بسنةٍ وهمية.
 FISCAL_YEAR_START_DEFAULT = "01-01"
 
+# ── لائحة نسب المنصّة (#287) ─────────────────────────────────────────────────
+#
+# **اللائحةُ بياناتٌ مؤرَّخة لا ثوابت**: كلُّ رقمٍ في `BookExpenseRate` صفٌّ يحمل
+# مصدرَه ومستوى دليلِه وتاريخَ سريانه وعلامةَ «راجع». والبحثُ الذي جاءت منه
+# (`docs/research/accounting-office-expense-rates.md` في شجرة بحث #269) نصّ على
+# أن التشريعين يُعدَّلان سنوياً، وأن ما لم يُقرأ من النصّ **يُترك فارغاً وتُرفع
+# عليه علامةُ «راجع»** — ولا يُخترَع رقمٌ ليملأ فراغاً.
+#
+# **والقيمةُ الفارغةُ ليست صفراً**: `rate=None` تعني «لا نسبةَ موثَّقة» — لا تُستعمل
+# في أيّ حساب، ولا تُقرأ 0% فيُخصم بندٌ بلا سند. والصفرُ نسبةٌ مُثبتة (ضيافةٌ 0%).
+RATE_KIND_VAT = "vat"
+RATE_KIND_INCOME = "income"
+RATE_KIND_DEPRECIATION = "depreciation"
+RATE_KIND_CHOICES: list[tuple[str, str]] = [
+    (RATE_KIND_VAT, "نسبة استرداد ض.ق.م على المدخلات"),
+    (RATE_KIND_INCOME, "نسبة قبول المصروف لضريبة الدخل"),
+    (RATE_KIND_DEPRECIATION, "نسبة الإهلاك السنوي"),
+]
+RATE_KIND_LABELS: dict[str, str] = dict(RATE_KIND_CHOICES)
+
+#: مستوياتُ الدليل الثلاثة كما عرّفها البحث — «رسمي» نصُّ التشريع أو منشورُ
+#: جهةٍ رسمية، و«ثانوي» موقعٌ مهنيّ ينقله، و«استنتاج» استنتاجٌ من غياب النصّ.
+#: **والاستنتاجُ لا يصلح أساساً وحده**، فصفٌّه إمّا «راجع» أو لا يُدرَج.
+RATE_EVIDENCE_OFFICIAL = "official"
+RATE_EVIDENCE_SECONDARY = "secondary"
+RATE_EVIDENCE_INFERRED = "inferred"
+RATE_EVIDENCE_CHOICES: list[tuple[str, str]] = [
+    (RATE_EVIDENCE_OFFICIAL, "رسمي"),
+    (RATE_EVIDENCE_SECONDARY, "ثانوي"),
+    (RATE_EVIDENCE_INFERRED, "استنتاج"),
+]
+RATE_EVIDENCE_LABELS: dict[str, str] = dict(RATE_EVIDENCE_CHOICES)
+
 
 def _fill_tenant_from_entry(instance) -> None:
     """شركةُ بند الحركة تتبع حركتها — والحركةُ تتبع زبونها.
@@ -3184,6 +3245,30 @@ class ClientBookAccount(models.Model):
     is_system = models.BooleanField(default=True, verbose_name="حساب نظام")
     #: التعطيلُ بدل الحذف: حسابٌ استُعمل في حركةٍ لا يُمحى، ويُخفى إن لم يعد.
     is_active = models.BooleanField(default=True, verbose_name="مفعّل")
+    #: ── نسبُ الحساب (#287/٢ و٣) ────────────────────────────────────────────
+    #:
+    #: `rate_category` كودُ تصنيفٍ في لائحة المنصّة (`BookExpenseRate.code`): يربط
+    #: الحسابَ بنسبه الموثَّقة (ومنها الإهلاكُ لفئات الأصول)، و**يوسم بنودَه**
+    #: لسقوف الإقرار السنوي (ضيافة/هدايا/هاتف). وفراغُه يعني «حسابٌ بلا تصنيف» —
+    #: لا نسبةَ من اللائحة، والافتراضُ 100% للنسبتين كما نصّت التذكرة.
+    #:
+    #: والنسبُ الثلاث صريحةٌ على الحساب إن كتبها المكتب، وإلا قرأها من اللائحة
+    #: (بعد تجاوز المكتب) — و«راجع» فيها لا تُستعمل: تُعلَن وتُترك.
+    rate_category = models.CharField(
+        max_length=60, blank=True, default="", verbose_name="تصنيف النسبة",
+    )
+    vat_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="نسبة ض.ق.م ٪",
+    )
+    income_tax_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="نسبة ضريبة الدخل ٪",
+    )
+    depreciation_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="نسبة الإهلاك السنوي ٪",
+    )
 
     class Meta:
         verbose_name = "حساب دفتر زبون"
@@ -3382,6 +3467,17 @@ class BookEntryLine(models.Model):
     side_party = models.CharField(
         max_length=200, blank=True, default="", verbose_name="الطرف المقابل",
     )
+    #: #287/٢: نسبةُ ض.ق.م على **سطر المستند** حين تختلف عن نسبة الحساب — «أثاثٌ
+    #: استُعمل جزءٌ منه في البيت». تُكتب بسببٍ ملزمٍ (`vat_rate_reason`) وبإعداد
+    #: `book_line_rate_override` مفعّل، والحركةُ لا تُعدَّل بعد حفظها فالسطرُ نفسُه
+    #: هو السجلّ: من غيّر النسبةَ ولماذا يُقرأان مع الرقم.
+    vat_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="نسبة ض.ق.م على السطر ٪",
+    )
+    vat_rate_reason = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="سبب نسبة السطر",
+    )
 
     class Meta:
         verbose_name = "بند حركة دفتر"
@@ -3512,6 +3608,244 @@ class ClientBookReport(models.Model):
 
     def __str__(self) -> str:
         return f"{self.client_book_id}/{self.kind}:{self.period_from}…{self.period_to}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_book(self)
+        super().save(*args, **kwargs)
+
+
+class BookExpenseRate(models.Model):
+    """صفٌّ واحدٌ من لائحة نسب المنصّة — **قيمةٌ واحدةٌ بمصدرها** (#287/١).
+
+    **بلا `tenant` عمداً** كـ`TaxThreshold`: النسبةُ واحدةٌ لكل المكاتب، ونسخةٌ
+    لكل شركة تعني نسبتين لنفس القانون في منصّةٍ واحدة. والمكتبُ يعدّلها في
+    `OfficeBookExpenseRate` بسجلّ (`BookExpenseRateChange`) لا بحذفِ صفٍّ هنا.
+
+    **والصفُّ قيمةٌ لا تصنيف**: تصنيفُ «الأثاث» ثلاثةُ صفوف — نسبةُ ض.ق.م ونسبةُ
+    ضريبة الدخل ونسبةُ الإهلاك — لأن لكلٍّ منها مصدرَه ومستوى دليلِه وتاريخَ
+    سريانه. صفٌّ يجمع الثلاثة كان يفترض أن مصدرَها واحدٌ ودليلَها واحدٌ، وهو ما
+    كذّبه البحث: نسبةُ الإهلاك في لائحة الاستهلاك، ونسبةُ الاسترداد في قانون
+    ض.ق.م.
+
+    `rate=None` مع `needs_review=True` هي «راجع»: لا قيمةَ موثَّقة، **ولا تُستعمل
+    في حسابٍ** حتى يؤكّدها المكتب. و`rate` **نسبةٌ لا مبلغ** فلا تمرّ بالقناع.
+    """
+
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    #: كودُ التصنيف — عقدٌ ثابتٌ تقرؤه شجرةُ الزبون (`ClientBookAccount.rate_category`)
+    #: وسقوفُ الإقرار السنوي، فلا يتغيّر بتسميةٍ في الشاشة (والتسميةُ `label`).
+    code = models.SlugField(max_length=60, verbose_name="كود التصنيف")
+    rate_kind = models.CharField(
+        max_length=20, choices=RATE_KIND_CHOICES, verbose_name="نوع النسبة",
+    )
+    label = models.CharField(max_length=200, verbose_name="التصنيف")
+    rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="النسبة ٪",
+    )
+    evidence = models.CharField(
+        max_length=20, choices=RATE_EVIDENCE_CHOICES, verbose_name="مستوى الدليل",
+    )
+    #: النصُّ الحاكم أو رقمُ المادة — بلا مصدرٍ يصير الرقم رأياً.
+    source = models.CharField(max_length=300, verbose_name="المصدر")
+    #: تاريخُ سريان النصّ الذي جاءت منه القيمة (يومُ النشر في الجريدة الرسمية حيث
+    #: ثبت، وأولُ سنةِ التشريع حيث لم يُثبت اليومُ في البحث).
+    effective_from = models.DateField(verbose_name="ساري من")
+    needs_review = models.BooleanField(default=False, verbose_name="راجع")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإدخال")
+
+    class Meta:
+        verbose_name = "نسبة مصروف في لائحة المنصّة"
+        verbose_name_plural = "لائحة نسب المصاريف"
+        ordering = ["tax_system", "code", "rate_kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tax_system", "code", "rate_kind"],
+                name="uniq_book_expense_rate",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.code}/{self.rate_kind}"
+
+
+class OfficeBookExpenseRate(models.Model):
+    """تعديلُ المكتب على لائحة المنصّة — **طبقةُ تجاوزٍ لا نسخةً من اللائحة**.
+
+    الصفُّ يقول «هذا المكتب يقرأ هذه القيمة كذا» ولا يحمل `label` ولا `source`:
+    المصدرُ والدليلُ من المنصّة، والقيمةُ وحدها تُتجاوز. وحين يزول التجاوزُ
+    (حذفُ الصفّ) تعود اللائحةُ مرجعاً — بخلاف نسخةٍ كاملةٍ تفترق بصمت.
+
+    **ولا كتابةَ بلا سجلّ**: `client_books.set_office_rate` تُنشئ/تحدّث الصفَّ
+    وتُضيف `BookExpenseRateChange` في المعاملة نفسها، وسببٌ فارغٌ يُرفض 400.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_expense_rates",
+        verbose_name="المكتب",
+    )
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    code = models.SlugField(max_length=60, verbose_name="كود التصنيف")
+    rate_kind = models.CharField(
+        max_length=20, choices=RATE_KIND_CHOICES, verbose_name="نوع النسبة",
+    )
+    rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="النسبة ٪",
+    )
+    needs_review = models.BooleanField(default=False, verbose_name="راجع")
+    updated_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_book_expense_rates",
+        verbose_name="عدّله",
+    )
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التعديل")
+
+    class Meta:
+        verbose_name = "تجاوز مكتب على نسبة"
+        verbose_name_plural = "تجاوزات المكاتب على النسب"
+        ordering = ["tax_system", "code", "rate_kind"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "tax_system", "code", "rate_kind"],
+                name="uniq_office_book_expense_rate",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.tenant_id}/{self.tax_system}/{self.code}/{self.rate_kind}"
+
+
+class BookExpenseRateChange(models.Model):
+    """سجلُّ تعديلات المكتب على النسب — **إلحاقيٌّ لا يُعدَّل ولا يُحذف** (#287/١).
+
+    قبلُ وبعدُ لقطتان (`{"rate": "100.0000", "needs_review": false}`) — فالصفُّ
+    يُقرأ وحده بلا الرجوع إلى حالةٍ ضاعت، والسببُ نصٌّ حرٌّ مطلوبٌ عند الكتابة.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_expense_rate_changes",
+        verbose_name="المكتب",
+    )
+    tax_system = models.CharField(
+        max_length=2, choices=TAX_SYSTEM_CHOICES, verbose_name="النظام الضريبي",
+    )
+    code = models.SlugField(max_length=60, verbose_name="كود التصنيف")
+    rate_kind = models.CharField(
+        max_length=20, choices=RATE_KIND_CHOICES, verbose_name="نوع النسبة",
+    )
+    before = models.JSONField(default=dict, blank=True, verbose_name="قبل")
+    after = models.JSONField(default=dict, blank=True, verbose_name="بعد")
+    reason = models.CharField(max_length=300, verbose_name="السبب")
+    changed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_book_expense_rate_changes",
+        verbose_name="غيّره",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ التغيير")
+
+    class Meta:
+        verbose_name = "تغيير نسبة في لائحة المكتب"
+        verbose_name_plural = "تغييرات لائحة نسب المكتب"
+        ordering = ["-created_at", "-id"]
+
+    def __str__(self) -> str:
+        return f"{self.tax_system}/{self.code}/{self.rate_kind}"
+
+
+class BookPeriodLock(models.Model):
+    """فترةُ دفترٍ مقفلةٌ بتقديم التزام — **قفلٌ يُفتح بيد المدير وبسبب** (#287/٥).
+
+    القفلُ لا يمنع القراءة: الحركةُ المؤرَّخة داخل الفترة تُرفض 400 برسالةٍ
+    مسمّاة، وتصحيحُ ما قبل القفل يبقى ممكناً. والفتحُ لا يمحو الصفَّ: يكتب
+    `unlocked_on`/`unlocked_by`/`unlock_reason` فيبقى أثرُ من فتح ومتى ولماذا.
+
+    **والفرادةُ على الفترة نفسها**: تقديمُ التزامين بفترتين متساويتين (ق.م ورواتب)
+    لا يُنشئ قفلين — القفلُ عن الفترة لا عن المستند.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_book_period_locks",
+        verbose_name="المكتب",
+    )
+    client_book = models.ForeignKey(
+        ClientBook,
+        on_delete=models.CASCADE,
+        related_name="period_locks",
+        verbose_name="الدفتر",
+    )
+    period_start = models.DateField(verbose_name="من")
+    period_end = models.DateField(verbose_name="إلى")
+    locked_on = models.DateField(verbose_name="تاريخ الإقفال")
+    locked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_book_period_locks",
+        verbose_name="أقفلها",
+    )
+    #: الالتزامُ الذي أقفلها — أثرٌ للقراءة، و`SET_NULL` كي لا يمنع حذفَ التزامٍ
+    #: (لا يُحذف التزامٌ في هذا الموديول، لكن القفلَ يستمرّ بلا سنده).
+    obligation = models.ForeignKey(
+        Obligation,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="book_period_locks",
+        verbose_name="الالتزام",
+    )
+    unlocked_on = models.DateField(null=True, blank=True, verbose_name="تاريخ الفتح")
+    unlocked_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_unlocked_book_periods",
+        verbose_name="فتحها",
+    )
+    unlock_reason = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="سبب الفتح",
+    )
+
+    class Meta:
+        verbose_name = "قفل فترة دفتر"
+        verbose_name_plural = "أقفال فترات الدفاتر"
+        ordering = ["-period_end", "-id"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["client_book", "period_start", "period_end"],
+                name="uniq_book_period_lock",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client_book"], name="office_book_lock_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_book_id}:{self.period_start}…{self.period_end}"
+
+    @property
+    def is_open(self) -> bool:
+        return self.unlocked_on is not None
 
     def save(self, *args, **kwargs):
         _fill_tenant_from_book(self)

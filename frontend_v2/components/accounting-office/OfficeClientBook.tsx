@@ -26,6 +26,7 @@ import {
   multipleDocumentsAllowed,
   nextBookKind,
   pendingMonthDocuments,
+  periodResultClass,
   type BookAccountRow,
   type BookDraftProblem,
   type BookLineDraft,
@@ -473,6 +474,9 @@ export const OfficeClientBook: React.FC<{
     );
   }
   if (!book) return null;
+  // #287: نتيجةُ الفترة وتنبيهُ السقوف تصلان محسوبتين من الخادم — الواجهةُ ترسم.
+  const result = book.period_result ?? null;
+  const alerts = book.annual_alerts ?? null;
 
   return (
     <div className="space-y-4">
@@ -517,7 +521,30 @@ export const OfficeClientBook: React.FC<{
               للقراءة — مسك الدفاتر موقوف
             </span>
           )}
+          {result ? (
+            <span
+              className={`rounded-full border px-2 py-0.5 font-semibold ${periodResultClass(result.tone)}`}
+            >
+              نتيجة {formatDateValue(result.from)} ← {formatDateValue(result.to)}:{' '}
+              {formatOfficeAmount(result.profit)} — {result.tone_label}
+            </span>
+          ) : null}
         </div>
+        {alerts && (alerts.any_exceeded || alerts.review_count > 0) ? (
+          <p className="mt-2 text-[11px] font-medium text-amber-800 dark:text-amber-300">
+            {alerts.any_exceeded
+              ? `تجاوز السقف السنوي (${alerts.year}): `
+              : `تسقيفُ الإقرار السنوي (${alerts.year}) غير مؤكَّد: `}
+            {alerts.rows
+              .filter((row) => row.exceeded || row.needs_review)
+              .map(
+                (row) =>
+                  `${row.label} ${formatOfficeAmount(row.total)} من ${formatOfficeAmount(row.cap)}`,
+              )
+              .join(' · ')}
+            {' — تنبيهٌ لا يمنع التقديم.'}
+          </p>
+        ) : null}
         {!writable ? (
           <p className="mt-2 text-[11px] font-medium text-amber-800 dark:text-amber-300">
             خدمة مسك الدفاتر موقوفة لهذا الزبون: الحركات تُقرأ ولا تُكتب، والخادم يردّ كل

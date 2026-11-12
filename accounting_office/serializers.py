@@ -30,6 +30,7 @@ from accounting_office.models import (
     REMINDER_CHANNEL_WHATSAPP,
     REMINDER_MANUAL_CHANNELS,
     REMINDER_TYPE_CHOICES,
+    TAX_SYSTEM_CHOICES,
 )
 from accounting_office.payments import INVOICE_STATE_CHOICES
 
@@ -735,6 +736,11 @@ class BookEntryLineWriteSerializer(serializers.Serializer):
 
     و`tax_base`/`tax_amount` (#288/ب-٢) ضريبةُ البند **المسجَّلة** وقت الإدخال:
     تقريرُ ض.ق.م للفترة يجمعها كما هي، فلا نسبةَ حيّةً تُضرب عند القراءة.
+
+    و`vat_rate`/`rate_reason` (#287/٢) نسبةُ السطر المخالفةُ لنسبة الحساب وسببُها:
+    النسبةُ **ليست مبلغاً** (تصل بالقناع؟ لا — لا تُقنَّع كالمبالغ، لكنها مفتاحُ
+    رفضٍ في `book_line_rate_override`)، والسببُ يشترطه `client_books._line_rate`
+    حين توجد النسبة، والمراجَعُ لا يمرّ من هنا أصلاً.
     """
 
     account_code = serializers.CharField(max_length=20)
@@ -750,9 +756,65 @@ class BookEntryLineWriteSerializer(serializers.Serializer):
     tax_amount = serializers.DecimalField(
         max_digits=14, decimal_places=2, required=False, allow_null=True,
     )
+    vat_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    rate_reason = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
     side_party = serializers.CharField(
         required=False, allow_blank=True, default="", max_length=200,
     )
+
+
+class BookAccountRatesWriteSerializer(serializers.Serializer):
+    """تصنيفُ حساب المصروف ونسبُه — `None` يُفرّغ الصريحَ ويعود إلى اللائحة.
+
+    **و`rate_category` نصٌّ لا اختيار**: الأكوادُ في `BookExpenseRate` (بياناتٌ
+    تُنشر صفّاً)، وقائمةٌ مكتوبةٌ هنا تفترق عنها عند أول تصنيفٍ يُضاف. والخدمةُ
+    ترفض كوداً لا صفَّ له (`book_rates.update_account_rates`).
+    """
+
+    rate_category = serializers.CharField(
+        required=False, allow_blank=True, max_length=60,
+    )
+    vat_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    income_tax_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    depreciation_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+
+
+class OfficeBookRateWriteSerializer(serializers.Serializer):
+    """تعديلُ المكتب على لائحة المنصّة — **سببٌ ملزم** (#287/١).
+
+    و`needs_review` مفتاحٌ يرفعه المكتب حين يقرأ النصَّ بنفسه ويؤكّد الرقم:
+    القيمةُ تُستعمل في الحساب حينها فقط.
+    """
+
+    tax_system = serializers.ChoiceField(
+        choices=[value for value, _label in TAX_SYSTEM_CHOICES],
+    )
+    rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    needs_review = serializers.BooleanField(required=False, default=False)
+    reason = serializers.CharField(max_length=300)
+
+
+class BookPeriodReopenSerializer(serializers.Serializer):
+    """فتحُ فترةٍ مقفلة: **سببٌ مكتوب** يُسجَّل مع مَن فتحها (#287/٥)."""
+
+    reason = serializers.CharField(max_length=300)
+
+    def validate_reason(self, value):
+        if not (value or "").strip():
+            raise serializers.ValidationError("سببُ فتح الفترة مطلوب.")
+        return value.strip()
 
 
 class BookEntryWriteSerializer(serializers.Serializer):

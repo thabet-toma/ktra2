@@ -36,6 +36,7 @@ from accounting_office import (
     appointments,
     book_exports,
     book_imports,
+    book_rates,
     book_reports,
     client_books,
     dashboard,
@@ -48,6 +49,7 @@ from accounting_office import (
 from accounting_office.models import (
     TAX_SYSTEM_CHOICES,
     ClientBook,
+    ClientBookAccount,
     ClientContact,
     ClientService,
     ClientServicePrice,
@@ -70,10 +72,12 @@ from accounting_office.models import (
 )
 from accounting_office.serializers import (
     ApplyPackageSerializer,
+    BookAccountRatesWriteSerializer,
     BookAccountWriteSerializer,
     BookEntryReverseSerializer,
     BookEntryWriteSerializer,
     BookImportWriteSerializer,
+    BookPeriodReopenSerializer,
     ClientBookKindWriteSerializer,
     ClientBookSettingsWriteSerializer,
     ClientBookWriteSerializer,
@@ -116,6 +120,7 @@ from accounting_office.serializers import (
     OfficeClientSerializer,
     OfficeDocumentItemUpdateSerializer,
     OfficeDocumentItemWriteSerializer,
+    OfficeBookRateWriteSerializer,
     OfficeHolidayWriteSerializer,
     OfficeServiceSerializer,
     ReadyToSendDismissSerializer,
@@ -1342,6 +1347,39 @@ class OfficeObligationViewSet(OfficeModuleViewSet):
         )
         return self._row(obligation)
 
+    # ── المبلغُ من الدفتر (#287/٤) ────────────────────────────────────────
+    #
+    # **فعلان لا فعل**: «احسب» يقرأ الدفترَ ويحفظ `computed_amount` ولا يمسّ
+    # `amount`، و«أكّد» يجعل المحسوبَ هو المعدَّل. والفصلُ مقصود: الموظفُ يرى
+    # التفصيلَ (مبيعاتٌ ومدخلاتٌ غيرُ معترفٍ بها) قبل أن يصير الرقمُ التزاماً.
+    @action(detail=True, methods=["post"], url_path="amount/from-book")
+    def amount_from_book(self, request, pk=None):
+        """`POST …/amount/from-book/` — حسابُ ض.ق.م من الدفتر وتفصيلُه."""
+        obligation = self.get_object()
+        self.require_write()
+        obligation, details = services.compute_obligation_amount(
+            obligation, actor=request.user,
+        )
+        row = services.obligation_row(
+            obligation,
+            day=timezone.localdate(),
+            masked=not services.can_see_amounts(self.tenant, request.user),
+        )
+        return Response({**row, "computed_details": details})
+
+    @action(detail=True, methods=["post"], url_path="amount/confirm")
+    def confirm_amount(self, request, pk=None):
+        """`POST …/amount/confirm/` — تأكيدُ الموظف: المحسوبُ يصير المعدَّل."""
+        obligation = self.get_object()
+        self.require_write()
+        # التأكيدُ كتابةُ مبلغٍ: من لا يراه لا يؤكّده — كـ`amount` اليدويّ.
+        if not services.can_see_amounts(self.tenant, request.user):
+            raise PermissionDenied(
+                "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تؤكّد مبلغاً لا تراه.",
+            )
+        services.confirm_obligation_amount(obligation, actor=request.user)
+        return self._row(obligation)
+
     # ── التمديد (#277) ──────────────────────────────────────────────────
     @action(detail=True, methods=["post"], url_path="extend")
     def extend(self, request, pk=None):
@@ -2165,6 +2203,26 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         # لأن `kind` في هذا السطر نوعُ الدفتر لا نوعُ الحركة.
         row["entry_kind_choices"] = client_books.entry_kind_choices()
         row["account_type_choices"] = client_books.account_type_choices()
+        # #287/٦: **نتيجةُ الفترة** بلونها — وحدُّ الرماديّ إعدادُ الإشعار نفسه.
+        # و`user` للقناع: من لا يرى المبالغ يرى اللونَ بلا رقم.
+        threshold = services.resolve_setting(
+            self.tenant, services.PAYMENT_NOTICE_GRAY_THRESHOLD_KEY, client=book.client,
+        )
+        row["period_result"] = book_reports.period_result(
+            book,
+            threshold=threshold or 0,
+            masked=self._masked(),
+        )
+        # #287/٧: تنبيهاتُ السقوف السنوية — تُقرأ مع الدفتر لأنها سؤالُ إقراره.
+        row["annual_alerts"] = book_reports.annual_alerts_payload(
+            book, masked=self._masked(),
+        )
+        row["locked_periods"] = [
+            client_books.period_row(lock)
+            for lock in book.period_locks.filter(unlocked_on__isnull=True).order_by(
+                "-period_end", "-id",
+            )
+        ]
         return row
 
     def list(self, request, *args, **kwargs):
@@ -2214,9 +2272,119 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
             serializer.is_valid(raise_exception=True)
             row = client_books.add_account(book.client, **serializer.validated_data)
             return Response(
-                client_books.account_row(row), status=status.HTTP_201_CREATED,
+                client_books.account_row(row, tenant=self.tenant),
+                status=status.HTTP_201_CREATED,
             )
-        return Response(client_books.accounts_payload(book.client))
+        return Response(client_books.accounts_payload(book.client, tenant=self.tenant))
+
+    @action(
+        detail=True, methods=["post"],
+        url_path=r"accounts/(?P<code>[^/.]+)/rates",
+    )
+    def account_rates(self, request, pk=None, code=None):
+        """`POST …/accounts/<code>/rates/` — تصنيفُ الحساب ونسبُه الثلاث (#287).
+
+        **ولا حسابَ هنا**: `book_rates.update_account_rates` تتحقّق من التصنيف
+        ومن نوع النسبة، والـview يمرّر الطلبَ ويردّ السطرَ كما يقرؤه المحرّر.
+        """
+        book = self._book(pk)
+        self.require_write()
+        client_books.assert_book_writable(book)
+        account = ClientBookAccount.objects.filter(
+            client=book.client, code=code,
+        ).first()
+        if account is None:
+            raise NotFound("لا حسابَ بهذا الكود في شجرة الزبون.")
+        serializer = BookAccountRatesWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        client_books.set_account_rates(
+            account, tenant=self.tenant, **serializer.validated_data,
+        )
+        tax_system = services.resolve_setting(
+            self.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+        ) or ""
+        return Response({
+            "code": account.code,
+            "rates": book_rates.account_rows(
+                account,
+                tenant=self.tenant,
+                tax_system=tax_system,
+                overrides=book_rates.office_override_map(self.tenant, tax_system),
+            ),
+            "rate_category": account.rate_category,
+        })
+
+    @action(detail=True, methods=["get"], url_path="periods")
+    def periods(self, request, pk=None):
+        """أقفالُ فترات الدفتر — والمفتوحُ يبقى في السجلّ بأثره (#287/٥)."""
+        return Response(client_books.periods_payload(self._book(pk)))
+
+    @action(
+        detail=True, methods=["post"],
+        url_path=r"periods/(?P<period_id>[0-9]+)/reopen",
+    )
+    def reopen_period(self, request, pk=None, period_id=None):
+        """فتحُ فترةٍ مقفلة — **بدور المدير/صاحب المكتب وبسببٍ مسجَّل**.
+
+        والدورُ يُفحص في الخدمة (`client_books.reopen_period`) لا هنا: نداءٌ
+        برمجيّ يمرّ بالحارس نفسه.
+        """
+        book = self._book(pk)
+        self.require_write()
+        lock = book.period_locks.filter(pk=period_id).first()
+        if lock is None:
+            raise NotFound("لا قفلَ فترةٍ بهذا المعرّف لهذا الدفتر.")
+        serializer = BookPeriodReopenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        lock = client_books.reopen_period(
+            lock, reason=serializer.validated_data["reason"], actor=request.user,
+        )
+        return Response(client_books.period_row(lock))
+
+    # ── لائحة نسب المنصّة (#287/١) ──────────────────────────────────────────
+    #
+    # **على مستوى المكتب لا الزبون**: اللائحةُ واحدةٌ لكل مكاتب المنصّة، وتجاوزُ
+    # المكتب عليها يخصّه وحده — فالمسارُ `client-books/rates/` لا
+    # `client-books/<client>/rates/`. ونظامُ الضريبة معاملٌ صريحٌ هنا لأنه لا
+    # زبونَ في المسار يُقرأ منه.
+    @action(detail=False, methods=["get"], url_path="rates")
+    def rates(self, request):
+        """`GET …/rates/?tax_system=PS` — اللائحةُ كاملةً بمصادرها و«راجع» فيها."""
+        system = (request.query_params.get("tax_system") or "").strip().upper()
+        known = {value for value, _label in TAX_SYSTEM_CHOICES}
+        if system not in known:
+            raise ValidationError({
+                "tax_system": "النظام الضريبي مطلوبٌ: PS أو IL.",
+            })
+        return Response(book_rates.rates_payload(self.tenant, system))
+
+    @action(
+        detail=False, methods=["post"],
+        url_path=r"rates/(?P<code>[^/.]+)/(?P<rate_kind>[a-z_]+)",
+    )
+    def set_rate(self, request, code=None, rate_kind=None):
+        """تعديلُ المكتب على لائحة المنصّة — **بسجلٍّ إلحاقيّ وسببٍ مكتوب**.
+
+        والسببُ شرطٌ لا تحسين: تغييرُ نسبةٍ على دفتر زبونٍ بلا تفسيرٍ أثرٌ لا
+        يُشرح لاحقاً، والسجلُّ (`BookExpenseRateChange`) يحمل قبلَه وبعدَه.
+        """
+        self.require_write()
+        serializer = OfficeBookRateWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        book_rates.set_office_rate(
+            self.tenant,
+            tax_system=data["tax_system"],
+            code=code,
+            rate_kind=rate_kind,
+            rate=data.get("rate"),
+            needs_review=data.get("needs_review", False),
+            reason=data["reason"],
+            actor=request.user,
+        )
+        return Response(
+            book_rates.rates_payload(self.tenant, data["tax_system"]),
+        )
 
     @action(detail=True, methods=["get", "post"], url_path="entries")
     def entries(self, request, pk=None):

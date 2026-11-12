@@ -59,6 +59,7 @@ import {
   nextMonthKey,
   obligationAmountText,
   obligationBadgeClass,
+  periodResultClass,
   obligationExtensionText,
   obligationOriginLabel,
   officeAssignableRoles,
@@ -617,6 +618,19 @@ test('أصناف الشارة الثلاث: أحمرُ وأصفرُ ومحايد
   assert.doesNotMatch(internal, /rose-/);
   // مفتاحٌ غير معروف يأخذ المحايد لا انفجاراً.
   assert.match(obligationBadgeClass('someday'), /border-slate-200/);
+});
+
+test('أصناف نتيجة الفترة (#287/٦): ربحٌ أخضر وخسارةٌ حمراء وحدٌّ رمادي', () => {
+  // الربحُ يأخذ لونَ «قبضٌ وصل» والخسارةُ لونَ «متأخّر» — لا لوحةً ثانية.
+  assert.equal(periodResultClass('profit'), obligationBadgeClass('payment_received'));
+  assert.equal(periodResultClass('loss'), obligationBadgeClass('late'));
+  // والحدُّ الرماديُّ هو المحايد نفسه، فلا لونَ ثالثاً لـ«قريبٍ من الصفر».
+  assert.equal(periodResultClass('neutral'), obligationBadgeClass(''));
+  assert.match(periodResultClass('profit'), /emerald-/);
+  assert.match(periodResultClass('loss'), /rose-/);
+  assert.doesNotMatch(periodResultClass('neutral'), /emerald-|rose-/);
+  // رمزٌ مجهولٌ (خادمٌ أحدث) يأخذ المحايد لا انفجاراً — كسائر تسميات الموديول.
+  assert.equal(periodResultClass('whatever'), obligationBadgeClass(''));
 });
 
 test('وجهةُ التنبيه: ملفّ الزبون على تبويب «الالتزامات والشغلات»', () => {

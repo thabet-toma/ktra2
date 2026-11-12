@@ -35,6 +35,10 @@
   .pn-owed{color:var(--danger)}
   .pn-refund{color:var(--ok)}
   .pn-neutral{color:var(--muted)}
+  /* #287/٦: لونا نتيجة الفترة — **ألوانُ الإشعار نفسها** لا لوحةٌ ثانية:
+     الربحُ أخضرُ «إلك» والخسارةُ حمراءُ «عليك»، والحدُّ الرماديُّ كما هو. */
+  .pn-profit{color:var(--ok)}
+  .pn-loss{color:var(--danger)}
   .pn-empty{border:1px solid var(--line); border-radius:10px; padding:14px 16px;
             color:var(--muted); font-size:13px}
   .pn-foot{margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
@@ -94,6 +98,13 @@
   </div>
   {% else %}
   <p class="pn-empty">لا مبلغَ مستحقّاً على هذا الزبون في هذا التاريخ.</p>
+  {% endif %}
+
+  {% if result %}
+  <div class="pn-total">
+    <span>نتيجة الفترة {{ result.from|gdate }} ← {{ result.to|gdate }}</span>
+    <span class="pn-{{ result.tone }}">{{ result.profit|money }} — {{ result.tone_label }}</span>
+  </div>
   {% endif %}
 
   <div class="pn-foot">

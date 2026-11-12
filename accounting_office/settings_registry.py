@@ -749,6 +749,51 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
             "«ورقة ورقة» حركةٌ لكل ورقةٍ واردة، و«إدخال الشهر» أوراقُ الشهر في حركة."
         ),
     ),
+    # ── النسب والإهلاك والإقفال (#287) ──
+    #
+    # **ثلاثةُ مفاتيحَ لثلاثة قراراتٍ لا يُفرَض أحدُها**: القفلُ عند التقديم، وسماحُ
+    # نسبةِ سطرٍ مخالفة، وحسابُ مبلغ الالتزام من الدفتر. الافتراضُ في الثلاثة
+    # **مطفأ**: سلوكُ دفترٍ قائمٍ لا يتغيّر بمجرّد ترقية، والمكتبُ يُفعّلها حين
+    # يريد. والثلاثةُ بمستوى الزبون أيضاً: منشأةٌ تُقفل فتراتها وأخرى لا.
+    "book_close_on_submit": SettingDefinition(
+        key="book_close_on_submit",
+        label="«انقدّم» يقفل فترة الدفتر",
+        client_label="«انقدّم» يقفل فترة دفتري",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=False,
+        group=GROUP_OFFICE,
+        note=(
+            "مفعّلاً: تقديمُ التزامٍ يقفل فترة دفتر الزبون المدنية نفسها — والإدخالُ "
+            "داخلها يُرفض حتى يفتحها المديرُ بسببٍ مسجَّل."
+        ),
+    ),
+    "book_line_rate_override": SettingDefinition(
+        key="book_line_rate_override",
+        label="السماح بتعديل نسبة ض.ق.م على سطر المستند",
+        client_label="السماح بتعديل النسبة على سطر مستندي",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=False,
+        group=GROUP_OFFICE,
+        note=(
+            "مفعّلاً: يجوز لسطرٍ في حركة أن يحمل نسبةً تخالف نسبة حسابه — بسببٍ "
+            "مكتوب يُحفظ معه."
+        ),
+    ),
+    "obligation_amount_from_book": SettingDefinition(
+        key="obligation_amount_from_book",
+        label="حساب مبلغ الالتزام من الدفتر",
+        client_label="احسب مبلغي من دفتري",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE, LEVEL_CLIENT),
+        default=False,
+        group=GROUP_OFFICE,
+        note=(
+            "مفعّلاً: مبلغ ض.ق.م المستحقّ يُحسب من دفتر الزبون (ضريبةُ المبيعات − "
+            "المدخلات المعترف بها) ويبقى للموظف تأكيده أو تعديله."
+        ),
+    ),
     # ── مستخرجاتُ دفتر الزبون (#288/ب-١) ──
     #
     # **رابطُ التقرير إعدادٌ لا حقل**: بعضُ المكاتب تُسلّم مستخرجها ورقةً مطبوعةً
