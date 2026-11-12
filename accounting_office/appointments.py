@@ -41,7 +41,7 @@ from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
 
-from accounting_office import services, settings_registry
+from accounting_office import fees, services, settings_registry
 from accounting_office.models import (
     APPOINTMENT_KIND_CHOICES,
     APPOINTMENT_KIND_LABELS,
@@ -420,7 +420,9 @@ def send_appointment_confirmation(
     stamped = _stamp(appointment, confirmed_at=timezone.now())
     return {
         "appointment": _row_with_system(tenant, stamped),
-        "log": services.reminder_log_row(logs[0]),
+        "log": services.reminder_log_row(
+            logs[0], masked=fees.amounts_masked(tenant, actor),
+        ),
         "body": body,
         "phone": contact.phone,
     }

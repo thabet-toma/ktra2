@@ -237,6 +237,8 @@ NO_REST_DAYS_LABEL = "بلا أيام عطلة"
 # النصُّ رسالةٌ إلى **الزبون نفسه** عن مبلغٍ عليه، وقنعُه عن الموظّف كان يُرسل «—»
 # إلى الزبون بدل مبلغه. وما سوى النصّ يبقى مقنَّعاً: بنودُ `items` المهيكلة بلا
 # مبلغٍ أصلاً. مبلغٌ جديدٌ في نصّ رسالةٍ يُقرَّر هنا قراراً لا يمرّ بالصمت.
+# **والرابطُ العامّ في النصّ ليس مبلغاً بل مفتاحُ ورقةٍ بكل مبالغها** (#282fix2/١):
+# `reminder_log_row(row, masked=...)` يحذفه من `body` لمن لا يملك المبالغ.
 
 #: مفاتيح المبالغ في حمولة البطاقة الضريبية. مبلغٌ جديدٌ يُضاف هنا **أولاً**،
 #: وإلا سقط حارسُ `accounting_office/tests/test_amounts_guard.py`.
@@ -7955,8 +7957,15 @@ def undo_reminder_log(row, *, actor):
     )
 
 
-def reminder_log_row(row) -> dict:
-    """سطرُ السجلّ كما تعرضه شاشةُ الزبون — بالمسمّيات لا بالمفاتيح."""
+def reminder_log_row(row, *, masked) -> dict:
+    """سطرُ السجلّ كما تعرضه شاشةُ الزبون — بالمسمّيات لا بالمفاتيح.
+
+    **و`masked` مطلوبةٌ بلا قيمةٍ افتراضية** (#282fix2/١): `body` يحفظ نصَّ الرسالة
+    كما أُرسل، وفيه رابطُ الورقة العامّ (`/s/<token>`) الذي يفتحها بكل مبالغها بلا
+    دخول — فمن لا يملك `office.amounts.view` لا يقرؤه. نداءٌ جديدٌ ينسى القناعَ
+    يسقط عند الاستدعاء لا يُسرِّب بصمت. والمبلغُ في نصّ الرسالة نفسه يبقى
+    (الاستثناءُ المقصود في أعلى الملف)؛ الرابطُ وحده يُحذف.
+    """
     return {
         "id": row.pk,
         "client": {"id": row.client_id, "name": row.client.name},
@@ -7969,7 +7978,7 @@ def reminder_log_row(row) -> dict:
         "kind_label": REMINDER_KIND_LABELS.get(row.kind, ""),
         "channel": row.channel,
         "channel_label": REMINDER_CHANNEL_LABELS.get(row.channel, ""),
-        "body": row.body,
+        "body": _fee_invoices_module().strip_public_links(row.body) if masked else row.body,
         "period_start": None if row.period_start is None else row.period_start.isoformat(),
         "period_end": None if row.period_end is None else row.period_end.isoformat(),
         "period_label": (
@@ -8005,16 +8014,26 @@ def visible_reminder_logs(tenant, user):
 
 def reminder_log_payload(tenant, *, user, limit=100) -> dict:
     """سجلُّ المكتب كما يراه هذا العضو — الأحدثُ أوّلاً وبسقفٍ معلَن."""
+    from accounting_office import fees
+
+    masked = fees.amounts_masked(tenant, user)
     rows = visible_reminder_logs(tenant, user)[:limit]
-    return {"rows": [reminder_log_row(row) for row in rows], "limit": limit}
+    return {
+        "rows": [reminder_log_row(row, masked=masked) for row in rows],
+        "limit": limit,
+    }
 
 
-def client_reminder_log_payload(client, *, limit=100) -> dict:
+def client_reminder_log_payload(client, *, user, limit=100) -> dict:
     """سجلُّ زبونٍ واحدٍ لتبويب ملفّه — الأحدثُ أوّلاً.
 
     الرؤيةُ مسؤوليةُ الـview (`get_object` عبر `visible_clients`)، والقائمةُ
-    مقيَّدةٌ بالزبون نفسه لا بكلّ ما يراه العضو.
+    مقيَّدةٌ بالزبون نفسه لا بكلّ ما يراه العضو. **و`user` مطلوبٌ** ليُحسب القناعُ
+    مرّةً (`fees.amounts_masked`) ويُمرَّر إلى كلّ سطر (#282fix2/١).
     """
+    from accounting_office import fees
+
+    masked = fees.amounts_masked(client.tenant, user)
     rows = (
         ReminderLog.objects
         .filter(tenant=client.tenant, client=client)
@@ -8023,7 +8042,7 @@ def client_reminder_log_payload(client, *, limit=100) -> dict:
     )
     return {
         "client": {"id": client.pk, "name": client.name},
-        "rows": [reminder_log_row(row) for row in rows],
+        "rows": [reminder_log_row(row, masked=masked) for row in rows],
         "limit": limit,
     }
 

@@ -553,7 +553,9 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         **`reminders/` مسارٌ آخر ومحجوز**: هو مستلِمو الأنواع الأربعة منذ #271،
         وسجلُّ التذكيرات جرحٌ مختلف — فلا يُكسَر مسارٌ قائمٌ ليحمل معنًى ثانياً.
         """
-        return Response(services.client_reminder_log_payload(self.get_object()))
+        return Response(services.client_reminder_log_payload(
+            self.get_object(), user=request.user,
+        ))
 
     # ── إعدادات الزبون ──────────────────────────────────────────────────
     #
@@ -1934,8 +1936,9 @@ class OfficeReadyToSendViewSet(OfficeModuleViewSet):
         ))
 
     def _rows_response(self, rows):
+        masked = fees.amounts_masked(self.tenant, self.request.user)
         return Response(
-            {"rows": [services.reminder_log_row(row) for row in rows]},
+            {"rows": [services.reminder_log_row(row, masked=masked) for row in rows]},
             status=status.HTTP_201_CREATED,
         )
 
@@ -2038,7 +2041,10 @@ class OfficeReminderLogViewSet(OfficeModuleViewSet):
         أفعالِ تفصيلٍ لا يولّد الراوترُ المسارَ أصلاً، فيسبق 404ُ التوجيه حكمَ
         الطريقة. و405 هو الجوابُ الصادق: المسارُ موجودٌ والطريقةُ ممنوعة.
         """
-        return Response(services.reminder_log_row(self.get_object()))
+        return Response(services.reminder_log_row(
+            self.get_object(),
+            masked=fees.amounts_masked(self.tenant, request.user),
+        ))
 
     @action(detail=True, methods=["post"], url_path="undo")
     def undo(self, request, pk=None):
@@ -2046,8 +2052,9 @@ class OfficeReminderLogViewSet(OfficeModuleViewSet):
         row = self.get_object()
         self.require_write()
         undo = services.undo_reminder_log(row, actor=request.user)
+        masked = fees.amounts_masked(self.tenant, request.user)
         return Response(
-            {"row": services.reminder_log_row(undo)},
+            {"row": services.reminder_log_row(undo, masked=masked)},
             status=status.HTTP_201_CREATED,
         )
 
