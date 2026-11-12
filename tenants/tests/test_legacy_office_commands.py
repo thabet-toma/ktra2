@@ -29,6 +29,40 @@ SWITCH_COMMAND = "switch_office_to_new_module"
 PURGE_COMMAND = "purge_legacy_offices"
 
 
+def legacy_office(name, creator):
+    """شركةٌ كما هي **في القاعدة** اليوم: عمودُ `template` يحمل `accounting_firm` نصّاً.
+
+    القالبُ القديم لم يبقَ في `COMPANY_TEMPLATES` بعد #291 (لم يبقَ إلا `general`
+    و`accounting_office` و`tyres`)، فـ`create_company(..., template="accounting_firm")`
+    يرفع `ValidationError` — **وصفوفُ الإنتاج ما زالت تحمله نصّاً في العمود**.
+    فالمصنّعُ يحاكي القاعدة لا السِّجل: يُنشئ بقالبٍ حيّ (`general`)، ثم يكتب العمود
+    بما تحمله صفوفُ الإنتاج فعلاً. والأمرُ المقصود سليمٌ مع ذلك: يقرأ القالبَ من
+    العمود ولا يمرّ بالسِّجل إلا للقالب الهدف `accounting_office`.
+    """
+    tenant = create_company(name, creator, template="general")
+    Tenant.objects.filter(pk=tenant.pk).update(template="accounting_firm")
+    tenant.refresh_from_db()
+    return tenant
+
+
+def legacy_book(name, creator, owner):
+    """دفترٌ مُدار كما هو **في القاعدة**: عمودُ `template` يحمل `client_book` نصّاً.
+
+    `client_book` حُذف من `COMPANY_TEMPLATES` مع طبقة المكتب القديمة في الموجة
+    نفسها، فالمصنّعُ يحاكي صفَّ الإنتاج لا السِّجل: يُنشئ بقالبٍ حيّ، ثم يكتب
+    العمود، ثم يُعيد ترخيص `accountant_portal` الذي كان #87 يزرعه لدفتر الزبون
+    عند الإنشاء — وغيابُه يُبقي الحمولة بلا وحدة.
+    """
+    book = create_company(name, creator, managed_by=owner)
+    Tenant.objects.filter(pk=book.pk).update(template="client_book")
+    TenantModule.objects.create(
+        tenant=book, module_key="accountant_portal", enabled=True,
+        plan_note="زرعه #87 عند الإنشاء بقالب client_book — المصنّع يحاكي صفَّ الإنتاج",
+    )
+    book.refresh_from_db()
+    return book
+
+
 @pytest.fixture
 def creator():
     return User.objects.create_user(username="legacy-office-founder", password="x")
@@ -37,9 +71,7 @@ def creator():
 @pytest.fixture
 def office(creator):
     """صورة المكتب 22: قالب `accounting_firm` وبلا أيّ صفّ `TenantModule`."""
-    return create_company(
-        "مكتب الساعة للمحاسبة والاستشارات الضريبية", creator, template="accounting_firm",
-    )
+    return legacy_office("مكتب الساعة للمحاسبة والاستشارات الضريبية", creator)
 
 
 @pytest.fixture
@@ -163,7 +195,7 @@ def test_switch_apply_converts_and_licenses_exactly_once(creator, office, capsys
 # ── ٣) حرّاس التحويل ────────────────────────────────────────────────────────
 
 def test_switch_refuses_a_managed_book(creator, office):
-    book = create_company("دفتر زبون", creator, template="client_book", managed_by=office)
+    book = legacy_book("دفتر زبون", creator, office)
 
     with pytest.raises(CommandError) as error:
         call_command(SWITCH_COMMAND, "--tenant-id", str(book.TenantID), "--apply")
@@ -226,8 +258,8 @@ def test_both_commands_refuse_apply_and_dry_run_together(office):
 def test_purge_deletes_a_managed_book_before_its_owner_despite_reversed_arguments(
     creator, backup_file, capsys,
 ):
-    owner = create_company("مكتب محاسبة قديم", creator, template="accounting_firm")
-    book = create_company("دفتر زبون قديم", creator, template="client_book", managed_by=owner)
+    owner = legacy_office("مكتب محاسبة قديم", creator)
+    book = legacy_book("دفتر زبون قديم", creator, owner)
 
     call_command(
         PURGE_COMMAND,
@@ -315,8 +347,8 @@ def test_purge_refuses_a_company_whose_template_is_accounting_office(creator, ba
 def test_purge_refuses_an_owner_whose_managed_book_is_outside_the_list(
     creator, backup_file,
 ):
-    owner = create_company("مكتبٌ يملك دفتراً", creator, template="accounting_firm")
-    book = create_company("دفتر خارج القائمة", creator, template="client_book", managed_by=owner)
+    owner = legacy_office("مكتبٌ يملك دفتراً", creator)
+    book = legacy_book("دفتر خارج القائمة", creator, owner)
 
     with pytest.raises(CommandError) as error:
         call_command(
@@ -333,7 +365,7 @@ def test_purge_refuses_an_owner_whose_managed_book_is_outside_the_list(
 # ── معاينة الحذف: تُرى الخطة، ولا يُحذف شيء ─────────────────────────────────
 
 def test_purge_dry_run_deletes_nothing_and_prints_the_plan(creator, office, capsys):
-    book = create_company("دفترٌ سيُحذف", creator, template="client_book", managed_by=office)
+    book = legacy_book("دفترٌ سيُحذف", creator, office)
     before_tenant_count = Tenant.objects.count()
 
     call_command(
