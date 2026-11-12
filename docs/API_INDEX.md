@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1099**
+عدد النقاط: **1100**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -77,6 +77,7 @@
 | `/api/accounting-office/client-books/{pk}/kind/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/periods/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/periods/{period_id}/reopen/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/print/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |

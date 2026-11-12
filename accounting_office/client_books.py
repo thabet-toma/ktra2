@@ -136,31 +136,52 @@ def bookkeeping_service_on(client, day):
     return None
 
 
+def _writable_refusal(book, day=None) -> str:
+    """سببُ منع الكتابة **برسالته** — أو نصٌّ فارغ إن كان الدفترُ قابلاً للكتابة.
+
+    **والسببان مفصولان لأن الرسالةَ واحدة**: خدمةٌ موقوفةُ تُصلَح من شاشة الخدمات،
+    وزبونٌ منتهٍ يُصلَح بـ«أعِد نشطاً» — ورسالةٌ تسمّي الأوّل عن الثاني ترسل
+    المحاسبَ إلى الشاشة الخطأ. والقاعدةُ في موضعٍ واحدٍ يقرؤه البوليانُ والحارس.
+    """
+    if book.client.status != OfficeClient.STATUS_ACTIVE:
+        return "الزبون منتهٍ — دفتره للقراءة فقط. أعِدْه نشطاً للكتابة فيه."
+    if bookkeeping_service_on(book.client, day or _today()) is None:
+        return "خدمة مسك الدفاتر موقوفة لهذا الزبون — الدفتر للقراءة فقط."
+    return ""
+
+
 def book_is_writable(book, day=None) -> bool:
-    return bookkeeping_service_on(book.client, day or _today()) is not None
+    """هل يُكتب في هذا الدفتر؟ — **حالتُه وحالةُ خدمته معاً**.
+
+    **والزبونُ المنتهي دفترُه للقراءة** (إصلاحُ #288): «أنهِ الزبون»
+    (`services.end_office_client`) يغيّر `status` على `OfficeClient` ولا يمسّ صفَّ
+    الخدمة (وهو ما يجب: تاريخُ الخدمة يبقى). فسؤالُ الخدمة وحدها كان يترك دفتر
+    زبونٍ صُفّي حسابُه قابلاً للكتابة إلى الأبد — يُدخل فيه المحاسبُ بعد أن سُلّم
+    الزبون نسختَه.
+    """
+    return not _writable_refusal(book, day)
 
 
 def assert_book_writable(book, day=None) -> None:
-    """الكتابةُ على دفتر زبونٍ خدمتُه موقوفة 400 — والدفترُ يبقى للقراءة."""
-    if not book_is_writable(book, day):
-        raise ValidationError({
-            "client": (
-                "خدمة مسك الدفاتر موقوفة لهذا الزبون — الدفتر للقراءة فقط."
-            ),
-        })
+    """الكتابةُ على دفتر زبونٍ خدمتُه موقوفةٍ أو منتهٍ 400 — والدفترُ يبقى للقراءة."""
+    reason = _writable_refusal(book, day)
+    if reason:
+        raise ValidationError({"client": reason})
 
 
 def writable_client_ids(tenant, clients, day) -> set[int]:
-    """الزبائن الذين خدمتُهم نشطة — **استعلامٌ واحد** لقائمةٍ كاملة.
+    """الزبائن الحيّون ذوو خدمةٍ نشطة — **استعلامٌ واحد** لقائمةٍ كاملة.
 
     بدل `book_is_writable` لكل دفتر: القائمةُ تقرأ من هنا، والمفردُ يسأل الدالة
-    المفردة. والقاعدةُ واحدةٌ في الاثنين (`status_on`).
+    المفردة. والقاعدةُ واحدةٌ في الاثنين (`status_on` + حالةُ الزبون)، والترشيحُ
+    على الحالة في `WHERE` لا فلترةً بعد القراءة.
     """
     active: set[int] = set()
     for row in ClientService.objects.filter(
         tenant=tenant,
         service__code=SERVICE_CODE_BOOKKEEPING,
         client__in=clients,
+        client__status=OfficeClient.STATUS_ACTIVE,
     ):
         if row.status_on(day) == CLIENT_SERVICE_STATUS_ACTIVE:
             active.add(row.client_id)

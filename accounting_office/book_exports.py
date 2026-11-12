@@ -23,12 +23,14 @@ import datetime
 from decimal import Decimal
 from io import BytesIO
 
+from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
 from accounting_office import book_reports, services
-from accounting_office.models import ClientBookReport
+from accounting_office.models import ClientBookReport, REMINDER_DOCUMENTS
+from core.access import user_has_perm
 
 #: سقفُ عنوان الورقة في Excel، والأحرفُ التي يرفضها (`[]:*?/\`).
 SHEET_TITLE_MAX = 31
@@ -46,6 +48,12 @@ REPORT_LINK_KEY = "office_report_pdf_link"
 REPORT_LINK_DISABLED_MESSAGE = (
     "روابطُ التقارير مُطفأة في إعدادات المكتب — فعّل «رابط PDF للتقارير» "
     "لإنشاء رابطِ مشاركة. والتصديرُ المباشر (Excel والطباعة) يعمل."
+)
+
+#: ورقةُ الكشف في مصنَّف الدفتر لما لا حركةَ لأيّ حساب في الفترة: تقول **لماذا**
+#: خرجت بلا صفوف، ولا تُخترَع لها أرقام.
+STATEMENT_NO_MOVEMENT_NOTE = (
+    "لا حركةَ لحسابٍ واحدٍ في هذه الفترة — لا كشفَ حسابٍ للدفتر."
 )
 
 
@@ -75,15 +83,56 @@ def whole_book_bytes(book, period, *, user) -> bytes:
     الفترة هنا. و`user` إلزاميٌّ صريحاً كـ`report_payload`: القناعُ قرارٌ يُتَّخذ
     لا يُنسى.
     """
-    raw_from, raw_to = (day.isoformat() for day in period)
     workbook = Workbook()
     workbook.remove(workbook.active)
-    for report in book_reports.available_reports(book):
-        _write_sheet(
-            workbook,
-            _whole_book_table(book, report, raw_from, raw_to, user=user),
-        )
+    for table in whole_book_tables(book, period, user=user):
+        _write_sheet(workbook, table)
     return _as_bytes(workbook)
+
+
+def whole_book_tables(book, period, *, user) -> list[dict]:
+    """جداولُ الدفتر كاملاً — **مصدرٌ واحدٌ** لملفّ Excel وورقة الطباعة (#288/هـ).
+
+    لكل تقريرٍ متاحٍ جدولُه، و**لكل حسابٍ له حركةٌ كشفُه** (`statement`): كان
+    المصنَّفُ يخرج بورقةِ ملاحظةٍ مكان الكشف («يحتاج تحديدَ حساب») — فمن صدّر
+    دفترَه كاملاً لم يرَ حركةَ حسابٍ واحد. والقائمةُ من `book_reports` لا من حلقةٍ
+    هنا، فالمستندان يقرآن جدولاً واحداً (`table_payload`) لا نسختين تفترقان.
+    """
+    raw_from, raw_to = (day.isoformat() for day in period)
+    tables = []
+    for report in book_reports.available_reports(book):
+        if report["params"]:
+            tables.extend(
+                _statement_tables(book, report, period, raw_from, raw_to, user=user),
+            )
+        else:
+            tables.append(
+                _whole_book_table(book, report, raw_from, raw_to, user=user),
+            )
+    return tables
+
+
+def _statement_tables(book, report, period, raw_from, raw_to, *, user) -> list[dict]:
+    """كشفُ حسابٍ لكل حسابٍ له حركة — والملاحظةُ لمن لا حركةَ لأيّ حساب.
+
+    **والعنوانُ بالكود لا بالاسم** كي يبقى اسمُ الورقة في Excel فريداً وقصيراً
+    (31 محرفاً)، والاسمُ في `note` تحته فلا يُفقد.
+    """
+    accounts = book_reports.accounts_with_movement(book, period)
+    if not accounts:
+        return [
+            _note_table(book, report, raw_from, raw_to, STATEMENT_NO_MOVEMENT_NOTE),
+        ]
+    tables = []
+    for account in accounts:
+        table = book_reports.table_payload(book_reports.report_payload(
+            book, report["kind"], raw_from=raw_from, raw_to=raw_to,
+            user=user, account=account["code"],
+        ))
+        table["title"] = f"{report['title']} {account['code']}"
+        table["note"] = account["name"]
+        tables.append(table)
+    return tables
 
 
 def _whole_book_table(book, report, raw_from, raw_to, *, user) -> dict:
@@ -92,15 +141,7 @@ def _whole_book_table(book, report, raw_from, raw_to, *, user) -> dict:
     **ولا يُسقِط تقريرٌ مكسورٌ الملفَّ كلّه**: ميزانٌ لا يتوازن يُصدَّر ورقةً تحمل
     رسالتَه ومجموعَي طرفيه، بدل 409 يُفقد المستخدمَ بقيةَ دفاتره. والصفحةُ على
     الورق لا تُغلق الباب: المصدرُ يُصحَّح ثم يُعاد التصدير.
-
-    و`statement` **يحتاج حساباً أو طرفاً** (`REPORT_PARAMS`) فلا معنى لورقةٍ له
-    في مصنَّفٍ بلا مُدخَل: تُكتَب ملاحظتُه ولا تُخترَع له أرقام.
     """
-    if report["params"]:
-        return _note_table(
-            book, report, raw_from, raw_to,
-            "كشفُ الحساب يحتاج تحديدَ حسابٍ أو طرف — يُصدَّر من شاشة التقارير.",
-        )
     try:
         payload = book_reports.report_payload(
             book, report["kind"], raw_from=raw_from, raw_to=raw_to, user=user,
@@ -261,3 +302,210 @@ def create_report_link(book, kind, *, user, raw_from=None, raw_to=None, request=
         "url": docshare_services.public_url(share),
         "expires_at": share.expires_at.isoformat(),
     }
+
+
+# ── بندُ «جاهز للإرسال» (#288/هـ) ────────────────────────────────────────────
+#
+# **الشاشةُ تقول «انسخه وأرسله للزبون» ولا سجلَّ يُذكّر به**: الرابطُ يُنشأ بضغطةٍ
+# ويبقى صفّاً في `ClientBookReport`، ثم لا يذكّر به أحد — فيُنسى بعد أسبوع.
+# المولّدُ يقرأ الصفوفَ القائمة ويُخرجها بنوداً بنوع `documents`، فتمرّ في حواجز
+# `ready_to_send_payload` نفسِها (الإذنُ ويومُ الراحة والعطلةُ والتأجيلُ والسقف)
+# بلا محرّكٍ موازٍ — وهو نمطُ `invoice_reminder_candidates` في `fee_invoices`.
+
+#: سقفُ بند رابط التقرير: **رابطٌ أُرسل مرّةً** لا يُعاد إرسالُه من نفسه.
+CLIENT_BOOK_REPORT_REMINDER_MAX = 1
+#: إيقاعُه — لا يلزم بعد السقف، وقيمةُ 1 تقول «لا تكرارَ يوميّاً» صراحةً.
+CLIENT_BOOK_REPORT_REMINDER_INTERVAL_DAYS = 1
+
+
+def client_book_report_reminder_candidates(
+    tenant, clients, *, day, settings_by_client, contacts, by_pair,
+    postponed_pairs, reminder_type=None,
+) -> list:
+    """بندُ كلّ رابطِ تقريرٍ أُنشئ ولم يُرسل — بنوع `documents` (#288/هـ).
+
+    **نوعُه `documents`** لا `balance`: مستندٌ يُسلَّم لا مطالبةٌ بمبلغ (كإشعارٍ
+    دائنٍ للأتعاب) — رسالةٌ تُطالب بمبلغٍ على رابط تقريرٍ تكذب على الزبون.
+    و`period_text` و`client_book_report` يحملان **اسمَ التقرير وفترتَه**، ونصُّ
+    نوعه لا يُقدَّم عليه في `_reminder_message` لأن نصَّ «الأوراق» يتحدّث عن
+    أوراقٍ ناقصةٍ ننتظرها من الزبون وهذه ورقةٌ تُسلَّم له.
+
+    **و«أُرسل؟» بطريقة النظام نفسِه**: `by_pair` يعدّ صفوفَ السجلّ الصادرة للمفتاح
+    (زبون، نوع، من، إلى)، والسقفُ واحد — فبندٌ أُرسل يختفي من نفسه. والمفتاحُ
+    **فترةُ التقرير المخزَّنة** (المحلولةُ في `create_report_link`)، فتقاريرُ
+    الدفتر الواحد على فتراتٍ مختلفة بنودٌ مستقلة.
+
+    **وقيدٌ معلوم**: تقريران على الفترة نفسها يتقاسمان المفتاح، وبندُ «الأوراق»
+    لفترةٍ تطابق فترةَ التقرير تماماً (شهرٌ كاملٌ مثلاً) يستهلك السقفَ نفسَه —
+    وهو ثمنُ نوعٍ مشتركٍ لا نوعٍ سادس.
+
+    **والرابطُ لا يُركَّب هنا** بل في `attach_client_book_report_links` بعد الحواجز
+    ولمن يرى المبالغ — انظرها.
+
+    و`reminder_type` طلبٌ لغير `documents` يعطي `[]`: لا بندَ لرابط تقريرٍ في
+    تصفية «اللي عليه».
+    """
+    if reminder_type is not None:
+        if services._assert_reminder_type(reminder_type) != REMINDER_DOCUMENTS:
+            return []
+    client_ids = [client.pk for client in clients]
+    if not client_ids:
+        return []
+    reports = (
+        ClientBookReport.objects
+        .filter(tenant=tenant, client_book__client_id__in=client_ids)
+        .select_related("client_book__client")
+        .order_by("created_at", "id")
+    )
+    candidates = []
+    for report in reports:
+        client = report.client_book.client
+        resolved = settings_by_client.get(client.pk, {})
+        enabled = resolved.get(services.REMINDER_TYPES_ENABLED_KEY) or []
+        if REMINDER_DOCUMENTS not in enabled:
+            continue
+        pairs = by_pair.get(
+            (client.pk, REMINDER_DOCUMENTS, report.period_from, report.period_to), (),
+        )
+        count = sum(
+            1 for row in pairs if row["kind"] in services.REMINDER_COUNTED_KINDS
+        )
+        #: البندُ ظاهرٌ من **يوم إنشاء الرابط**: من أنشأه أنشأه ليُرسَل الآن، لا
+        #: يومَ نهاية الفترة التي يغطّيها (وقد تكون في المستقبل).
+        created_on = timezone.localdate(report.created_at)
+        candidates.append(services.ReminderCandidate(
+            client=client,
+            reminder_type=REMINDER_DOCUMENTS,
+            period_start=report.period_from,
+            period_end=report.period_to,
+            missing=(),
+            missing_codes=(),
+            count=count,
+            maximum=CLIENT_BOOK_REPORT_REMINDER_MAX,
+            interval_days=CLIENT_BOOK_REPORT_REMINDER_INTERVAL_DAYS,
+            next_due=created_on,
+            contact=contacts.get((client.pk, REMINDER_DOCUMENTS)),
+            tax_system=resolved.get(services.TAX_SYSTEM_KEY),
+            due=day >= created_on,
+            exhausted=count >= CLIENT_BOOK_REPORT_REMINDER_MAX,
+            postponed=(client.pk, REMINDER_DOCUMENTS) in postponed_pairs,
+            render_due=created_on,
+            period_text=client_book_report_period_text(report),
+            client_book_report=_report_candidate_item(report),
+        ))
+    return candidates
+
+
+def client_book_report_period_text(report) -> str:
+    """تسميةُ بند الرابط في الرسالة: **اسمُ التقرير ثم فترتُه** — لا «شهر»."""
+    return " — ".join([
+        book_reports.REPORT_LABELS.get(report.kind, report.kind),
+        f"من {report.period_from.isoformat()} إلى {report.period_to.isoformat()}",
+    ])
+
+
+def client_book_report_item(item) -> dict | None:
+    """بندُ الرابط في «جاهز للإرسال» — `None` لبندٍ ليس رابطَ تقرير.
+
+    نسخةٌ من القاموس لا هو: `_reminder_item_payload` يبني بنداً لكل رسالة،
+    وربطُ الاثنين بالقاموس نفسه يجعل تعديلَ رسالةٍ يغيّر بندَ أخرى.
+    """
+    return None if item is None else dict(item)
+
+
+def _report_candidate_item(report) -> dict:
+    """بندُ صفِّ `ClientBookReport` كما يُحمَل على المرشّح قبل الحواجز.
+
+    `url` فارغٌ حتى تُركَّبه `attach_client_book_report_links` بعدها، فيبقى شكلُ
+    البند ثابتاً لكل قارئ (والقناعُ يقرّر الرابطَ لا وجودَ البند).
+    """
+    return {
+        "id": report.pk,
+        "kind": report.kind,
+        "title": book_reports.REPORT_LABELS.get(report.kind, report.kind),
+        "period_from": report.period_from.isoformat(),
+        "period_to": report.period_to.isoformat(),
+        "url": "",
+    }
+
+
+def client_book_report_text(report) -> str:
+    """سطرُ الرابط في نصّ الرسالة — بعد نصّ نوعه، بلا رمزٍ جديدٍ في القوالب.
+
+    والسطرُ يُكتب بمبلغٍ محذوف: الرابطُ ورقةٌ تُفتح، وذكرُ رقمٍ في الرسالة كان
+    يتجاوز القناعَ الذي يحرس الصفحة.
+    """
+    if report is None:
+        return ""
+    parts = [report["title"], f"من {report['period_from']} إلى {report['period_to']}"]
+    if report.get("url"):
+        parts.append(f"الرابط: {report['url']}")
+    return "\n".join(parts)
+
+
+def _live_report_urls(tenant, report_ids) -> dict[int, str]:
+    """رابطُ التقرير الحيّ لكل صفٍّ في المجموعة — **قراءةٌ لا إنشاء** (#288/هـ).
+
+    بنداءٍ واحدٍ على `doc_id__in` كـ`appointments.payment_notice_urls`، والأحدثُ
+    أوّلاً كما في `active_share`. **ولا تُنشَأ مشاركةٌ هنا**: مسارُ قراءةٍ لا
+    يُنشئ روابطَ عامّة — إنشاءُ الرابط فعلٌ صريحٌ محروسٌ بمفتاحَي الكتابة والمبالغ.
+    """
+    from docshare import services as docshare_services
+    from docshare.models import DOC_CLIENT_BOOK_REPORT, DocumentShare
+
+    wanted = {report_id for report_id in report_ids if report_id is not None}
+    if not wanted:
+        return {}
+    live = (
+        DocumentShare.objects
+        .filter(
+            tenant=tenant,
+            doc_type=DOC_CLIENT_BOOK_REPORT,
+            doc_id__in=list(wanted),
+            is_public=False,
+            revoked_at__isnull=True,
+            expires_at__gt=timezone.now(),
+        )
+        .order_by("-created_at", "-id")
+        .values_list("doc_id", "token")
+    )
+    urls: dict[int, str] = {}
+    for doc_id, token in live:
+        urls.setdefault(doc_id, docshare_services.public_url_for_token(token))
+    return urls
+
+
+def attach_client_book_report_links(tenant, candidates, *, user=None):
+    """يُركّب رابطَ التقرير على بنوده — **بعد الحواجز كلّها**.
+
+    **ولمن يرى المبالغَ ويكتب**: الصفحةُ العامة تُبنى بـ`user=None` (ورقةُ الزبون
+    بلا قناع)، فمن لا يملك `office.amounts.view` لا يُعطى عنواناً يفتح كلَّ رقمٍ
+    حُجِب عنه — وهو الشرطُ نفسُه الذي يحرس إنشاءَ الرابط في الـview. والبندُ يبقى
+    بلا رابط: عنوانُ التقرير وفترتُه ليسا مبلغاً، ونصُّ نوعه يمضي.
+    """
+    from dataclasses import replace
+
+    if user is None or not services.can_see_amounts(tenant, user):
+        return candidates
+    if not user_has_perm(user, tenant, services.OFFICE_CLIENTS_WRITE_KEY):
+        return candidates
+    urls = _live_report_urls(tenant, [
+        candidate.client_book_report["id"]
+        for candidate in candidates
+        if candidate.client_book_report is not None
+        and not candidate.client_book_report.get("url")
+    ])
+    if not urls:
+        return candidates
+    attached = list(candidates)
+    for index, candidate in enumerate(attached):
+        if candidate.client_book_report is None:
+            continue
+        url = urls.get(candidate.client_book_report["id"])
+        if not url:
+            continue
+        attached[index] = replace(
+            candidate,
+            client_book_report={**candidate.client_book_report, "url": url},
+        )
+    return attached

@@ -208,8 +208,11 @@ def payment_notice_doc_ids(tenant, user):
 #
 # **و`user=None` في `report_payload`**: هذه ورقةُ الزبون صاحبِ الدفتر لا شاشةُ
 # موظف. والقناعُ (`office.amounts.view`) قاعدةُ دورٍ داخليّ لا قاعدةُ نشرٍ: مَن
-# أنشأ الرابطَ من عضوٍ مقنَّعٍ يفتحه الزبونُ كاملاً. وأمّا **من يملك الإنشاء**
-# فمحروسٌ بمفتاح الكتابة في نقطة الـAPI (نمط `can_share_payment_notice`).
+# يفتح الرابطَ يرى تقريرَ دفتره كاملاً.
+# **ولذلك حارسا الإنشاء** (إصلاحُ #288): مفتاحُ الكتابة **ومفتاحُ المبالغ** في نقطة
+# الـAPI (نمط `can_share_payment_notice`)، ونطاقُ النوع هنا `none()` للمقنَّع — فلا
+# يُنشئ رابطاً من لا يرى أرقامه، ولا يقرأ رابطَ غيره (انظر
+# `client_book_report_doc_ids`).
 
 
 def load_client_book_report(tenant_id: int, doc_id: int):
@@ -282,6 +285,26 @@ def page_client_book_report(report, share) -> str:
     )
 
 
+def render_client_book_reports(tables, *, company, auto_print=False) -> str:
+    """ورقةُ **الدفتر كاملاً** للطباعة (#288/هـ) — صفيحةٌ لكل جدولٍ بفاصل صفحات.
+
+    الجداولُ تصل من `accounting_office.book_exports.whole_book_tables` — المصدرِ
+    الذي يُبنى منه ملفُّ Excel نفسُه، فلا يفترق الورقُ عن الملفّ. والقالبُ يتكرّر
+    على الصفيحة ذاتها التي يصيِّرها التقريرُ المفرد
+    (`docshare/_client_book_report_sheet.html`).
+    """
+    book_reports = _book_reports()
+    return render_to_string(
+        "docshare/client_book_report_all.html",
+        {
+            "company": company,
+            "tables": tables,
+            "watermark": book_reports.WATERMARK,
+            "auto_print": auto_print,
+        },
+    )
+
+
 def build_client_book_report(report) -> dict:
     """حمولةُ العقد العامّ لهذا النوع — عقدٌ كاملٌ وإن كان القالبُ لا يصيّرها.
 
@@ -321,14 +344,22 @@ def build_client_book_report(report) -> dict:
 
 
 def client_book_report_doc_ids(tenant, user):
-    """الصفوفُ التي يراها هذا العضو — **نطاقُ النوع في سطح الإدارة**.
+    """الصفوفُ التي يراها هذا العضو — **ونطاقُ القناع**: ‏`none()` لمن لا يرى المبالغ.
 
     حارسُ الرؤية في مكتب المحاسبة واحدٌ (`visible_clients`) كما في الإشعار:
     صلاحيةُ `office.clients.write` تمنح كتابةَ زبائن المكتب لا رؤيةَ زبائن
     الزملاء. وبلا هذا النطاق يقرأ عضوٌ روابطَ زملائه ويُبطلها بمعرّفاتٍ متسلسلة.
+
+    **والمقنَّعُ لا صفَّ له** (إصلاحُ #288): هذه الصفحةُ تُبنى بـ`user=None`
+    (ورقةُ الزبون بلا قناع)، فمن لا يملك `office.amounts.view` ويقرأ هذا النطاق
+    يقرأ من الرابط ما مُنع عنه في الشاشة — والإنشاءُ محروسٌ 403 في الـview،
+    والحارسُ الثاني هنا لأن القائمةَ والقراءةَ والإبطالَ تمرّ من هذا النطاق.
     """
     from accounting_office import services as office_services
     from accounting_office.models import ClientBookReport
+
+    if not office_services.can_see_amounts(tenant, user):
+        return ClientBookReport.objects.none().values("pk")
 
     return ClientBookReport.objects.filter(
         tenant=tenant,
