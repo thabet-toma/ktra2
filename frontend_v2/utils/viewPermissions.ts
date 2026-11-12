@@ -184,14 +184,16 @@ export const VIEW_MODULES: Record<string, string> = {
  * ISSUE #51 — القناع الحيّ: شاشات يخفيها قالب الشركة كاملاً (طرحي — بلا زرّ
  * «أظهر المتقدّم»). سِجلٌّ **مستقل** عن `core/modules.py` (`MODULES`): ذاك
  * إضافي (وحدة تُشترى فتظهر)، وهذا طرحي (شاشة جوهرية تختفي). لا تكتب
- * `template === 'accounting_firm'` في أي شاشة — أضِف مفتاحاً هنا فقط.
+ * `template === 'accounting_office'` في أي شاشة — أضِف مفتاحاً هنا فقط.
  *
  * موضعا الاستهلاك الوحيدان: `App.tsx` (الدخول المباشر بالرابط) و`Sidebar.tsx`
  * (الروابط). الخادم هو الحارس الفعلي (`core.permissions.TemplateSurfacePermission`
  * يردّ 404 على مسارات API الموازية) — هذا تجميلٌ يمنع نداءً سيُرفض أصلاً.
  */
-// مشترَكة بين `accounting_firm` و`client_book` (ISSUE #81) — أيّ قالبٍ بلا
-// مخزون فعلي لا يحتاج شاشات حركة البضاعة هذه.
+// #291: مفتاحا `accounting_firm` و`client_book` حُذفا من الواجهة مع طبقة المكتب
+// القديمة — ويبقيان في `tenants/company_templates.py` و`core/shell_manifest.py`
+// لهذه الموجة (تذكرةٌ منفصلة تحذفهما بعد تحويل آخر مكتب). أيّ قالبٍ بلا مخزون
+// فعلي لا يحتاج شاشات حركة البضاعة هذه.
 const GOODS_MOVEMENT_HIDDEN_VIEWS = [
   // المخزون والمستودعات والجرد وحركاته
   'stock-levels', 'items-management', 'items-categories', 'stock-movements',
@@ -219,14 +221,9 @@ const GOODS_MOVEMENT_HIDDEN_VIEWS = [
 ] as const;
 
 export const TEMPLATE_HIDDEN_VIEWS: Record<string, readonly string[]> = {
-  accounting_firm: GOODS_MOVEMENT_HIDDEN_VIEWS,
-  // ISSUE #271 — القالب الجديد للمكتب: قناعُ `accounting_firm` حرفياً، مرآةً
-  // لـ`tenants/company_templates.py` (`_GOODS_MOVEMENT_HIDDEN_PATHS`).
+  // ISSUE #271 — موديول مكتب المحاسبة: مرآةُ
+  // `tenants/company_templates.py` (`_GOODS_MOVEMENT_HIDDEN_PATHS`).
   accounting_office: GOODS_MOVEMENT_HIDDEN_VIEWS,
-  // ISSUE #81: «دفتر عميل» يُمسَك بالسندات وحدها — فوق قناع `accounting_firm`
-  // يسقط البيع نفسه: لا فاتورة بيع ولا أمر بيع ولا عرض سعر. سند القبض
-  // (`sales-customer-payments`) يبقى — أحد الدفاتر الخمسة المزروعة.
-  client_book: [...GOODS_MOVEMENT_HIDDEN_VIEWS, 'sales-invoices', 'sales-quotations', 'sales-orders'],
 };
 
 /** أيخفي قالب هذه الشركة هذه الشاشة؟ غياب القالب أو مفتاحه = general (بلا إخفاء). */

@@ -43,7 +43,6 @@ import { useAuth } from "./contexts/AuthContext";
 import { useCompany } from "./contexts/CompanyContext";
 import { usePermissions } from "./contexts/PermissionsContext";
 import { moduleAllowsView, permForView, templateHidesView } from "./utils/viewPermissions";
-import { resolveHomeScreen } from "./utils/homeScreen";
 import { companyWorkspaceDeepLink, enterPlatformShell, platformShellActive } from "./utils/officeShell";
 import { resolvePublicAuthView } from "./utils/publicAuthRoutes";
 import { isUnknownAnonymousPath, pathRoot } from "./utils/seoHead";
@@ -128,7 +127,6 @@ const ExpenseVouchersPage = lazyPage(() => import("./components/accounting/Expen
 const RevenueVouchersPage = lazyPage(() => import("./components/accounting/RevenueVouchersPage").then((m) => ({ default: m.RevenueVouchersPage })));
 // ISSUE #85: شاشة الترميز الدفعي — القسم ٧ من #77، فوق نقطة الحفظ التي بنتها #84.
 const DocumentCodingPage = lazyPage(() => import("./components/accounting/DocumentCodingPage").then((m) => ({ default: m.DocumentCodingPage })));
-const ClientBooksPanel = lazyPage(() => import("./components/office/ClientBooksPanel").then((m) => ({ default: m.ClientBooksPanel })));
 // ISSUE #271 — موديول مكتب المحاسبة: قائمة الزبائن (وتركّب ملفّ الزبون) والإعدادات.
 const OfficeClientsScreen = lazyPage(() => import("./components/accounting-office/OfficeClientsScreen").then((m) => ({ default: m.OfficeClientsScreen })));
 // ISSUE #274 — التقويم: مواعيدٌ محسوبةٌ من لائحة المنصّة ولا يُحفظ منها شيء.
@@ -144,9 +142,6 @@ const OfficeFeeDraftsScreen = lazyPage(() => import("./components/accounting-off
 const OfficeSettingsScreen = lazyPage(() => import("./components/accounting-office/OfficeSettingsScreen").then((m) => ({ default: m.OfficeSettingsScreen })));
 // الترخيصُ يُمنَح من إدارة المنصّة لا من داخل الشركة — نصٌّ واحدٌ لحالتَي الشاشة.
 const OFFICE_MODULE_UNLICENSED = "وحدة مكتب المحاسبة غير مفعّلة لهذه الشركة — تُفعَّل من إدارة المنصّة.";
-// ISSUE #87: شاشتا بداية القالبين — لوحة المكتب (accounting_firm) والوضع المالي (client_book).
-const OfficeHomeDashboard = lazyPage(() => import("./components/office/OfficeHomeDashboard").then((m) => ({ default: m.OfficeHomeDashboard })));
-const ClientBookFinancialPosition = lazyPage(() => import("./components/office/ClientBookFinancialPosition").then((m) => ({ default: m.ClientBookFinancialPosition })));
 const BanksPage = lazyPage(() => import("./components/accounting/BanksPage").then((m) => ({ default: m.BanksPage })));
 const BankReconciliationPage = lazyPage(() => import("./components/accounting/BankReconciliationPage").then((m) => ({ default: m.BankReconciliationPage })));
 const AccountingGeneralLedgerPage = lazyPage(() => import("./components/accounting/AccountingGeneralLedgerPage").then((m) => ({ default: m.AccountingGeneralLedgerPage })));
@@ -368,7 +363,6 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "accounting-expense-vouchers": "/accounting/expense-vouchers",
   "accounting-revenue-vouchers": "/accounting/revenue-vouchers",
   "document-coding": "/accounting/document-coding",
-  "client-books": "/client-books",
   // ISSUE #271 — موديول مكتب المحاسبة. مساران صريحان كي يعمل التحديث والرجوع.
   // **ليس `/office/…`**: تلك البادئة محجوزةٌ لقشرة المحاسب القانوني القديمة —
   // `App.tsx` يعترض كل ما يبدأ بها ويعرض «هذا الحساب ليس مكتب محاسبة قانونية»،
@@ -1808,16 +1802,6 @@ const App: React.FC = () => {
         return <PlatformEmployeeWorkspace />;
 
       case "dashboard": {
-        // ISSUE #87: شاشتا بداية القالبين — تسبقان فرع isManager فكلا القالبين
-        // يفتحان على شاشتهما بصرف النظر عن الدور (نفس منطق `templateHidesView`
-        // أعلاه: القالب يحسم قبل أي تفريعٍ آخر).
-        const homeScreen = resolveHomeScreen(companyTemplate);
-        if (homeScreen === "office-dashboard") {
-          return <OfficeHomeDashboard />;
-        }
-        if (homeScreen === "financial-position") {
-          return <ClientBookFinancialPosition />;
-        }
         // T-DASHPERIOD: مؤشرات الشركة المالية للمدير فقط، وإلا اللوحة الشخصية.
         if (isManager) {
           return <TradeDashboard userName={currentUser!.name} onNavigate={setViewAndSyncPath} />;
@@ -2378,14 +2362,6 @@ const App: React.FC = () => {
           return noPermission();
         }
         return <DocumentCodingPage />;
-
-      // ISSUE #65: باب دفاتر العملاء داخل قشرة الشركة — لمن يدير مكتب محاسبة.
-      // اللوحة نفسها تردّ سببَ غيابها حين لا مكتب، فلا حاجة لحارسٍ ثانٍ هنا.
-      case "client-books":
-        if (currentUser!.role !== "manager") {
-          return <Dashboard tasks={tasks} users={users} onNavigate={setViewAndSyncPath} currentUser={currentUser!} />;
-        }
-        return <ClientBooksPanel />;
 
       // ISSUE #271 — موديول مكتب المحاسبة. الحارس يقول السبب عند غياب الترخيص
       // بدل شاشةٍ بيضاء من 404 خام. الوحدةُ تُرخَّص من إدارة المنصّة لا من داخل

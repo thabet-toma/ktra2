@@ -1,71 +1,53 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { BookOpenCheck, Briefcase, CalendarClock, LayoutDashboard, LogOut, Scale, Settings, ShieldCheck, Users } from 'lucide-react';
+import { Briefcase, LogOut, Scale, ShieldCheck, Users } from 'lucide-react';
 
 import type { User } from '../../../types';
-import { ClientBooksPanel } from '../../office/ClientBooksPanel';
 import { AccountantProfilePage } from '../AccountantProfilePage';
 import { EngagementRevokedGuard } from '../EngagementRevokedGuard';
-import { PlanLimitReachedGuard } from '../../PlanLimitReachedGuard';
-import { OfficeAgendaPage } from './OfficeAgendaPage';
 import { OfficeClientFilePage } from './OfficeClientFilePage';
 import { OfficeClientsPage } from './OfficeClientsPage';
-import { OfficeDashboardPage } from './OfficeDashboardPage';
-import { OfficeExternalClientPage } from './OfficeExternalClientPage';
-import { OfficeSettingsPage } from './OfficeSettingsPage';
 
-type OfficeView = 'dashboard' | 'clients' | 'client' | 'practice' | 'books' | 'agenda' | 'settings' | 'profile';
+type OfficeView = 'companies' | 'client' | 'profile';
 
 const NAV: { key: OfficeView; label: string; icon: React.ReactNode }[] = [
-  { key: 'dashboard', label: 'لوحة المكتب', icon: <LayoutDashboard className="h-5 w-5" /> },
-  { key: 'clients', label: 'زبائني', icon: <Users className="h-5 w-5" /> },
-  // ISSUE #65: دفاتر العملاء — القسم الذي كان محرّكه جاهزاً بلا بابٍ يفتحه.
-  { key: 'books', label: 'دفاتر عملائي', icon: <BookOpenCheck className="h-5 w-5" /> },
-  { key: 'agenda', label: 'المواعيد والمهام', icon: <CalendarClock className="h-5 w-5" /> },
-  { key: 'settings', label: 'إعدادات المكتب', icon: <Settings className="h-5 w-5" /> },
+  { key: 'companies', label: 'شركاتي المرتبطة', icon: <Users className="h-5 w-5" /> },
   { key: 'profile', label: 'ملفي المهني', icon: <ShieldCheck className="h-5 w-5" /> },
 ];
 
 const TITLES: Record<OfficeView, string> = {
-  dashboard: 'لوحة المكتب',
-  clients: 'زبائن المكتب',
-  client: 'ملف زبون',
-  practice: 'ملف زبون المكتب',
-  books: 'دفاتر عملائي',
-  agenda: 'المواعيد والمهام',
-  settings: 'إعدادات المكتب',
+  companies: 'شركاتي المرتبطة',
+  client: 'ملف الزبون',
   profile: 'ملفي المهني',
 };
 
 /** القسم الذي يُضاء في القائمة حين تكون الشاشة صفحةً فرعية منه. */
 const NAV_PARENT: Partial<Record<OfficeView, OfficeView>> = {
-  client: 'clients',
-  practice: 'clients',
+  client: 'companies',
 };
 
 const CLIENT_PATH = /^\/office\/clients\/(\d+)/;
-const PRACTICE_PATH = /^\/office\/practice\/(\d+)/;
 
 /**
- * قشرة مكتب المحاسبة القانونية — **واجهة مستقلة تماماً** عن النظام التجاري:
- * قائمتها وهيدرها وصفحاتها خاصة بها، ولا يظهر فيها أي عنصر تشغيلي (مخزون،
- * فواتير جديدة، نقاط بيع…). المكتب يقرأ دفاتر زبائنه ويحلّلها، ويكتب سجلّه هو
- * (زبائنه وبرامجه ومواعيده) — وهذان بابان لا باب واحد.
+ * قشرة بوابة المحاسب — **واجهة مستقلة تماماً** عن النظام التجاري: قائمتها
+ * وهيدرها وصفحاتها خاصة بها، ولا يظهر فيها أي عنصر تشغيلي (مخزون، فواتير جديدة،
+ * نقاط بيع…).
+ *
+ * #291: قُلّمت على بابين وشاشةٍ فرعية — «شركاتي المرتبطة» و«ملفي المهني» وملفّ
+ * الزبون المالي الذي يُفتح من القائمة. لوحةُ المكتب والأجندة والبرامج والمهام
+ * وإعدادات المكتب وسجلّ الزبائن الخارجي كلها حُذفت مع الطبقة القديمة.
  */
 export const AccountantOfficeApp: React.FC<{
   user: User;
   onLogout: () => void;
   onExitToPlatform?: () => void;
 }> = ({ user, onLogout, onExitToPlatform }) => {
-  const [view, setView] = useState<OfficeView>('dashboard');
+  const [view, setView] = useState<OfficeView>('companies');
   const [client, setClient] = useState<{ tenantId: number; name: string } | null>(null);
-  const [practiceClientId, setPracticeClientId] = useState<number | null>(null);
 
-  const syncPath = useCallback((next: OfficeView, opened?: { tenantId?: number; practiceId?: number }) => {
+  const syncPath = useCallback((next: OfficeView, opened?: { tenantId?: number }) => {
     const path = next === 'client' && opened?.tenantId
       ? `/office/clients/${opened.tenantId}`
-      : next === 'practice' && opened?.practiceId
-        ? `/office/practice/${opened.practiceId}`
-        : next === 'dashboard' ? '/office' : `/office/${next}`;
+      : next === 'companies' ? '/office' : `/office/${next}`;
     if (window.location.pathname !== path) window.history.pushState({}, '', path);
   }, []);
 
@@ -79,26 +61,14 @@ export const AccountantOfficeApp: React.FC<{
         setView('client');
         return;
       }
-      const practiceMatch = PRACTICE_PATH.exec(path);
-      if (practiceMatch) {
-        setPracticeClientId(Number(practiceMatch[1]));
-        setView('practice');
-        return;
-      }
-      setView(
-        path.startsWith('/office/books') ? 'books'
-          : path.startsWith('/office/profile') ? 'profile'
-          : path.startsWith('/office/agenda') ? 'agenda'
-            : path.startsWith('/office/settings') ? 'settings'
-              : path.startsWith('/office/clients') ? 'clients' : 'dashboard',
-      );
+      setView(path.startsWith('/office/profile') ? 'profile' : 'companies');
     };
     restore();
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
   }, []);
 
-  /** فتح دفاتر شركة على المنصة — الشركة المختارة تُثبَّت لنداءات ملف الزبون. */
+  /** فتح ملف زبون — الشركة المختارة تُثبَّت لنداءات ملف الزبون. */
   const openClient = (row: { tenant_id: number; company_name: string }) => {
     const opened = { tenantId: row.tenant_id, name: row.company_name };
     localStorage.setItem('tenantId', String(row.tenant_id));
@@ -108,19 +78,13 @@ export const AccountantOfficeApp: React.FC<{
     syncPath('client', { tenantId: row.tenant_id });
   };
 
-  /** فتح ملف زبون المكتب — سجلٌّ هوياتي لا شركة، فلا يُلمَس `tenantId` هنا. */
-  const openPracticeClient = (clientId: number) => {
-    setPracticeClientId(clientId);
-    setView('practice');
-    syncPath('practice', { practiceId: clientId });
-  };
-
   const go = (next: OfficeView) => {
+    setClient(null);
     setView(next);
     syncPath(next);
   };
 
-  const backToClients = () => { setClient(null); setPracticeClientId(null); go('clients'); };
+  const backToClients = () => { setClient(null); go('companies'); };
 
   const activeNav = (key: OfficeView) => view === key || NAV_PARENT[view] === key;
 
@@ -190,17 +154,7 @@ export const AccountantOfficeApp: React.FC<{
           </header>
 
           <main className="min-w-0 flex-1 p-4 sm:p-6">
-            {view === 'dashboard' && (
-              <OfficeDashboardPage
-                onOpenClient={openClient}
-                onGoToClients={() => go('clients')}
-                onGoToAgenda={() => go('agenda')}
-                onOpenPracticeClient={openPracticeClient}
-              />
-            )}
-            {view === 'clients' && (
-              <OfficeClientsPage onOpenClient={openClient} onOpenPracticeClient={openPracticeClient} />
-            )}
+            {view === 'companies' && <OfficeClientsPage onOpenClient={openClient} />}
             {view === 'client' && client && (
               <OfficeClientFilePage
                 tenantId={client.tenantId}
@@ -208,28 +162,11 @@ export const AccountantOfficeApp: React.FC<{
                 onBack={backToClients}
               />
             )}
-            {view === 'practice' && practiceClientId !== null && (
-              <OfficeExternalClientPage
-                clientId={practiceClientId}
-                onBack={backToClients}
-                onOpenPlatformFile={openClient}
-              />
-            )}
-            {view === 'agenda' && (
-              <OfficeAgendaPage
-                onOpenPlatformClient={openClient}
-                onOpenPracticeClient={openPracticeClient}
-              />
-            )}
-            {view === 'books' && <ClientBooksPanel />}
-            {view === 'settings' && <OfficeSettingsPage />}
             {view === 'profile' && <AccountantProfilePage />}
           </main>
 
-          {/* إلغاء الشركة لارتباطنا أثناء العمل ⇒ حوار مانع وعودة لقائمة الزبائن */}
-          <EngagementRevokedGuard onReturn={() => { setClient(null); go('dashboard'); }} />
-          {/* 211-P: بلغ دفترُ العميل حدَّ خطّته ⇒ حوارٌ يقود إلى «خطّتي» */}
-          <PlanLimitReachedGuard onViewPlan={() => go('settings')} />
+          {/* إلغاء الشركة لارتباطنا أثناء العمل ⇒ حوار مانع وعودة لقائمة الشركات */}
+          <EngagementRevokedGuard onReturn={() => { setClient(null); go('companies'); }} />
         </div>
       </div>
     </div>

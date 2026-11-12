@@ -155,33 +155,6 @@ export const getClientTrend = (tenantId: number, months = 6) =>
     `accountant/client/trend/?months=${months}`, { tenantId },
   );
 
-export interface PracticeClientRow {
-  tenant_id: number;
-  company_name: string;
-  revenue: string;
-  expenses: string;
-  profit: string;
-  vat_due: string;
-  draft_documents: number;
-  filing_due_date: string;
-  days_to_filing: number;
-  needs_attention: boolean;
-}
-
-export const getPracticeOverview = () =>
-  apiGetObject<{
-    period_from: string;
-    period_to: string;
-    clients: PracticeClientRow[];
-    totals: {
-      clients: number;
-      vat_due: string;
-      profit: string;
-      draft_documents: number;
-      needs_attention: number;
-    };
-  }>('accountant/practice/overview/');
-
 export const downloadReviewPackageCsv = (
   tenantId: number,
   body: { period_from: string; period_to: string },
