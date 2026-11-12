@@ -70,7 +70,7 @@ JAN_END = datetime.date(THIS_YEAR, 1, 31)
 #: هجرةُ البيانات التي تُزرع اللائحة — تُنادى كما ينادي `seed_book_account_templates`
 #: هجرةَ الشجرة: قاعدةُ الاختبار تُنشئ الجداول من النماذج ولا تُشغّل الهجرات،
 #: فبلا هذا النداء تكون اللائحةُ فارغةً ويمرّ الاختبارُ على لا شيء.
-RATES_MIGRATION = "accounting_office.migrations.0021_book_rates_and_period_lock"
+RATES_MIGRATION = "accounting_office.migrations.0022_book_rates_and_period_lock"
 
 
 def seed_platform_rates():
