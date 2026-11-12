@@ -3,12 +3,19 @@
 **ما يثبّته هذا الملفّ:**
 - **المبلغُ والضريبةُ والطرفُ من الورقة**: الموظّفُ لا يكتب حساباً ولا رقماً،
   والحركةُ تُولَّد من `amount + tax_amount` وحدهما.
-- **التوازنُ رياضيّاً** في المزدوج: مدينُ السطور = دائنُها في كل حالة، والضريبةُ
-  على حسابها (`2200`) في الطرف المقابل للاتجاه — دائنةٌ للبيع والتقرير اليومي،
-  مدينةٌ للمشتريات والمصروف.
-- **الضريبةُ مرّةً واحدة**: مجموعُ `tax_amount` على السطور = ضريبةُ الورقة، وهو
-  ما تقرؤه تقاريرُ #287 — تكرارُها على سطرين يضاعف الإقرار.
-- **الدفترُ البسيط سطرٌ واحد** بمبلغه الإجمالي وضريبتِه عليه.
+- **التوازنُ رياضيّاً** في المزدوج: مدينُ السطور = دائنُها في كل حالة، وسطرُ
+  الضريبة (`2200`) في الطرف المقابل للاتجاه — دائنٌ للبيع والتقرير اليومي،
+  مدينٌ للمشتريات والمصروف — **يحمل طرفَه وحده بلا `tax_base` ولا `tax_amount`**.
+- **الضريبةُ مرّةً واحدة، وعلى سطر الوعاء**: `tax_base`/`tax_amount` على سطر
+  الإيراد (`4100`) أو المشتريات (`5200`) أو المصروف (`5100`)، ومجموعُ `tax_amount`
+  على السطور = ضريبةُ الورقة مرّةً واحدة — وهو **الموضعُ الذي يقرؤه**
+  `book_reports.vat_from_book` (مبيعاتٌ من سطور الإيراد ومدخلاتٌ من الأصول
+  والمصاريف)، وتكرارُها على سطرين يضاعف الإقرار.
+- **ونسبةُ الورقة لا تُنسخ إلى السطر**: حقلُ السطر نسبةُ الخصم المعترف بها
+  (`book_rates.recognised_vat_rate`) لا وصفَ الفاتورة — نسخُ 17٪ يخصم 17٪ وحدها.
+- **الدفترُ البسيط سطرٌ واحدٌ على حساب طبيعته** لا على الصندوق: إيرادٌ دائنٌ
+  للبيع والتقرير اليومي، ومشترياتٌ/مصروفٌ مدينان بالصافي — وسطرُ الصندوق يمحو
+  الإيرادَ ويقلب الذمّة في تقارير #288. وحركةُ البنك وحدها على البنك.
 - **الرفضُ برسالته**: ورقةٌ بلا مبلغ، وأوراقٌ من شهرين، وحركةُ بنكٍ بضريبة،
   وشجرةٌ بلا حساب ضريبة، وورقةٌ أُدخلت سابقاً أو لزبونٍ آخر.
 - **القناعُ والحارس**: بلا `office.amounts.view` لا توليدَ ولا كتابةَ مبلغِ ورقة
@@ -23,7 +30,7 @@ from decimal import Decimal
 
 from django.core.exceptions import ValidationError as DjangoValidationError
 
-from accounting_office import client_books, services
+from accounting_office import book_reports, client_books, services
 from accounting_office.models import (
     BOOK_ENTRY_KIND_BANK_MOVEMENT,
     BOOK_ENTRY_KIND_DAILY_REPORT,
@@ -131,8 +138,14 @@ class BookEntryGenerationTestCase(ClientBookTestCase):
 class DoubleBookGenerationTest(BookEntryGenerationTestCase):
     """النوعُ المزدوج: سطرا الحسابين وسطرُ الضريبة، بالطرف المقابل للاتجاه."""
 
-    def test_a_sales_invoice_is_three_balanced_lines_with_the_party_on_receivables(self):
-        """فاتورةُ بيعٍ (100 صافي + 17 ضريبة): الذممُ مدينةٌ بالإجمالي والإيرادُ دائنٌ بالصافي."""
+    def test_a_sales_invoice_puts_the_tax_on_the_revenue_line_not_on_the_vat_line(self):
+        """فاتورةُ بيعٍ (100 صافي + 17 ضريبة): الذممُ مدينةٌ بالإجمالي، والوعاءُ
+        وضريبتُه على سطر الإيراد — وسطرُ `2200` طرفُه وحده.
+
+        **والموضعُ هو القاعدةُ لا الذوق**: `book_reports.vat_from_book` يجمع
+        `tax_amount` من سطور الإيراد (مبيعات) ومن سطور الأصول والمصاريف (مدخلات)،
+        فسطرُ ضريبةٍ على `2200` (خصوم) يُتخطّى فيخرج الإقرارُ صفراً.
+        """
         row = self.paper(
             amount="100", tax="17", party="شركة الأمل",
             name="فاتورة بيع يناير",
@@ -149,19 +162,22 @@ class DoubleBookGenerationTest(BookEntryGenerationTestCase):
         self.assertEqual(lines["1300"]["side_party"], "شركة الأمل")
         self.assertEqual(money(lines["4100"], "credit"), Decimal("100.00"))
         self.assertEqual(money(lines["4100"], "tax_base"), Decimal("100.00"))
+        self.assertEqual(money(lines["4100"], "tax_amount"), Decimal("17.00"))
         self.assertEqual(money(lines["2200"], "credit"), Decimal("17.00"))
-        self.assertEqual(money(lines["2200"], "tax_amount"), Decimal("17.00"))
+        self.assertEqual(money(lines["2200"], "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(lines["2200"], "tax_amount"), Decimal("0.00"))
         debit, credit, tax = self.totals(entry)
         self.assertEqual(debit, credit)
         self.assertEqual(debit, Decimal("117.00"))
         self.assertEqual(tax, Decimal("17.00"), "الضريبةُ مرّةً واحدة لا على سطرين")
 
-    def test_an_expense_debits_the_expense_and_the_tax_and_credits_the_cash_in_full(self):
-        """مصروفٌ (200 + 34): 5100 مدينٌ بالصافي و2200 مدينٌ بالضريبة و1100 دائنٌ بالإجمالي.
+    def test_an_expense_carries_the_tax_on_the_expense_and_only_the_side_on_vat(self):
+        """مصروفٌ (200 + 34): 5100 مدينٌ بصافيه وضريبتِه، و2200 مدينٌ بالضريبة وحدها.
 
         والبديهيّ «5100 مدينٌ بالإجمالي و2200 مدينٌ بالضريبة» غيرُ متوازن:
         234 + 34 = 268 مقابل 268؟ لا — دائنُ الصندوق 234 وحده. فالتوازنُ يفرض
-        أن يحمل سطرُ المصروف صافيه وأن يجمع الدائنُ الصافيَ والضريبة.
+        أن يحمل سطرُ المصروف صافيه، و`tax_amount` عليه ليكون مدخلاتٍ يقرؤها
+        `vat_from_book` من حساب مصروفٍ لا من حساب خصوم.
         """
         row = self.paper(amount="200", tax="34", party="مورّد الكهرباء")
 
@@ -171,8 +187,10 @@ class DoubleBookGenerationTest(BookEntryGenerationTestCase):
         self.assertEqual(len(entry["lines"]), 3)
         self.assertEqual(money(lines["5100"], "debit"), Decimal("200.00"))
         self.assertEqual(money(lines["5100"], "tax_base"), Decimal("200.00"))
+        self.assertEqual(money(lines["5100"], "tax_amount"), Decimal("34.00"))
         self.assertEqual(money(lines["2200"], "debit"), Decimal("34.00"))
-        self.assertEqual(money(lines["2200"], "tax_amount"), Decimal("34.00"))
+        self.assertEqual(money(lines["2200"], "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(lines["2200"], "tax_amount"), Decimal("0.00"))
         self.assertEqual(money(lines["1100"], "credit"), Decimal("234.00"))
         self.assertEqual(lines["5100"]["side_party"], "مورّد الكهرباء")
         debit, credit, tax = self.totals(entry)
@@ -222,7 +240,7 @@ class DoubleBookGenerationTest(BookEntryGenerationTestCase):
 
 
 class SimpleBookGenerationTest(BookEntryGenerationTestCase):
-    """الدفترُ البسيط: طرفٌ واحد — سطرٌ واحدٌ بالإجمالي والضريبةُ عليه."""
+    """الدفترُ البسيط: طرفٌ واحدٌ على حساب طبيعته — لا على الصندوق."""
 
     def setUp(self):
         super().setUp()
@@ -232,7 +250,9 @@ class SimpleBookGenerationTest(BookEntryGenerationTestCase):
         )
         self.create_book(self.simple_client, kind=BOOK_KIND_SIMPLE)
 
-    def test_a_sale_is_one_debit_line_carrying_the_total_and_the_tax(self):
+    def test_a_sale_is_one_credit_line_on_revenue_with_the_tax_on_it(self):
+        """البيعُ دائنٌ على `4100` لا على الصندوق: `_profit_rows` يقرأ الإيرادَ
+        منها، وسطرُ الصندوق يمحوه ويقلب ذمّةَ الزبون في `_receivables`."""
         row = self.paper(
             amount="100", tax="17", party="زبون نقدي", client=self.simple_client,
         )
@@ -243,14 +263,15 @@ class SimpleBookGenerationTest(BookEntryGenerationTestCase):
 
         self.assertEqual(len(entry["lines"]), 1)
         line = entry["lines"][0]
-        self.assertEqual(line["account_code"], "1100")
-        self.assertEqual(money(line, "debit"), Decimal("117.00"))
-        self.assertEqual(money(line, "credit"), Decimal("0.00"))
+        self.assertEqual(line["account_code"], "4100")
+        self.assertEqual(money(line, "credit"), Decimal("100.00"))
+        self.assertEqual(money(line, "debit"), Decimal("0.00"))
         self.assertEqual(money(line, "tax_base"), Decimal("100.00"))
         self.assertEqual(money(line, "tax_amount"), Decimal("17.00"))
-        self.assertEqual(line["side_party"], "زبون نقدي")
+        # ولا طرفَ على سطر البسيط: لا حسابَ ذمّي في شجرته، والبيعُ نقداً لا دَين.
+        self.assertEqual(line["side_party"], "")
 
-    def test_an_expense_is_one_credit_line_carrying_the_total(self):
+    def test_an_expense_is_one_debit_line_on_the_expense_with_the_tax_on_it(self):
         row = self.paper(amount="200", tax="34", client=self.simple_client)
 
         entry = self.generate(
@@ -259,10 +280,29 @@ class SimpleBookGenerationTest(BookEntryGenerationTestCase):
 
         self.assertEqual(len(entry["lines"]), 1)
         line = entry["lines"][0]
-        self.assertEqual(line["account_code"], "1100")
-        self.assertEqual(money(line, "credit"), Decimal("234.00"))
+        self.assertEqual(line["account_code"], "5100")
+        self.assertEqual(money(line, "debit"), Decimal("200.00"))
+        self.assertEqual(money(line, "credit"), Decimal("0.00"))
         self.assertEqual(money(line, "tax_base"), Decimal("200.00"))
         self.assertEqual(money(line, "tax_amount"), Decimal("34.00"))
+
+    def test_a_bank_movement_stays_one_line_on_the_bank_without_tax(self):
+        """حركةُ البنك وحدها على البنك: لا إيرادَ ولا مصروفَ فيها، والضريبةُ عليها
+        مرفوضةٌ أصلاً — فلا أساسَ خاضعٌ يُدخلها تقريرَ ض.ق.م بلا ضريبة."""
+        row = self.paper(
+            amount="500", party="تحويل داخلي", client=self.simple_client,
+        )
+
+        entry = self.generate(
+            [row], kind=BOOK_ENTRY_KIND_BANK_MOVEMENT, client=self.simple_client,
+        )
+
+        self.assertEqual(len(entry["lines"]), 1)
+        line = entry["lines"][0]
+        self.assertEqual(line["account_code"], "1200")
+        self.assertEqual(money(line, "debit"), Decimal("500.00"))
+        self.assertEqual(money(line, "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(line, "tax_amount"), Decimal("0.00"))
 
 
 class PaperValidationTest(BookEntryGenerationTestCase):
@@ -353,7 +393,9 @@ class MonthBatchTest(BookEntryGenerationTestCase):
         self.assertEqual(debits["1300"], Decimal("351.00"))
         self.assertEqual(credits["4100"], Decimal("300.00"))
         self.assertEqual(credits["2200"], Decimal("51.00"))
-        self.assertEqual(taxes["2200"], Decimal("51.00"))
+        # الضريبةُ على سطور الوعاء (الإيراد) لا على سطر `2200`.
+        self.assertEqual(taxes["4100"], Decimal("51.00"))
+        self.assertEqual(taxes["2200"], Decimal("0.00"))
         debit, credit, tax = self.totals(entry)
         self.assertEqual(debit, credit)
         self.assertEqual(tax, Decimal("17.00") + Decimal("34.00"))
@@ -478,28 +520,160 @@ class GenerationPermissionTest(BookEntryGenerationTestCase):
         self.assertFalse(BookEntry.objects.filter(client=self.mine).exists())
 
 
-class LineRateFromPaperTest(BookEntryGenerationTestCase):
-    """نسبةُ الورقة على سطرها — **بإعدادٍ وسبب**، ومطفأً تبقى فارغةً لا رفضاً."""
+class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
+    """الضريبةُ المولَّدة تصل تقاريرَ #287: `vat_from_book` و`_profit_rows` و`_receivables`.
 
-    def test_the_paper_rate_is_written_with_its_reason_only_when_the_setting_is_on(self):
-        off = self.paper(amount="100", tax="17", rate="17", month=1)
+    **الموضعُ لا المبلغ**: `vat_from_book` يقرأ `tax_amount` من **سطور الإيراد**
+    (مبيعات) ومن **سطور الأصول والمصاريف** (مدخلات)، و`_profit_rows` يقرأ الإيرادَ
+    والمصروف من حسابيهما. فسطرُ ضريبةٍ على `2200` (خصوم) أو على الصندوق يُخرج
+    الإقرارَ صفراً أو سالباً — والموظّفُ يؤكّد ذلك الرقمَ التزاماً على الزبون.
+    """
 
-        without = self.generate([off])
+    SPAN_START = datetime.date(THIS_YEAR, 1, 1)
+    SPAN_END = datetime.date(THIS_YEAR, 12, 31)
 
-        line = self.lines_by_code(without)["2200"]
-        self.assertIsNone(line["vat_rate"])
-        self.assertEqual(line["vat_rate_reason"], "")
+    def setUp(self):
+        super().setUp()
+        self.simple_client = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبونُ تقارير التوليد", responsible=self.accountant,
+        )
+        self.create_book(self.simple_client, kind=BOOK_KIND_SIMPLE)
 
-        services.set_office_setting(self.tenant, client_books.LINE_RATE_KEY, True)
-        on = self.paper(
-            amount="100", tax="17", rate="17", month=2, code="income_tax",
+    def vat(self, client):
+        return book_reports.vat_from_book(
+            client.book,
+            period_start=self.SPAN_START, period_end=self.SPAN_END,
         )
 
-        with_rate = self.generate([on])
+    def report(self, client, kind):
+        res = self.client.get(
+            f"{BOOKS}{client.pk}/reports/{kind}/",
+            {"from": self.SPAN_START.isoformat(), "to": self.SPAN_END.isoformat()},
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
 
-        line = self.lines_by_code(with_rate)["2200"]
-        self.assertEqual(Decimal(line["vat_rate"]), Decimal("17.0000"))
-        self.assertEqual(line["vat_rate_reason"], "من الورقة")
+    def simple_sale(self, *, party="زبون نقدي"):
+        paper = self.paper(
+            amount="100", tax="17", party=party, client=self.simple_client,
+        )
+        return self.generate(
+            [paper], kind=BOOK_ENTRY_KIND_SALES_INVOICE, client=self.simple_client,
+        )
+
+    # ── المزدوج ──────────────────────────────────────────────────────────
+    def test_a_double_sale_reads_as_sales_tax_in_the_vat_report(self):
+        self.generate(
+            [self.paper(amount="100", tax="17", party="شركة الأمل")],
+            kind=BOOK_ENTRY_KIND_SALES_INVOICE,
+        )
+
+        payload = self.vat(self.mine)
+
+        self.assertEqual(payload["sales_tax"], "17.00")
+        self.assertEqual(payload["input_tax"], "0.00")
+        self.assertEqual(payload["vat_due"], "17.00")
+
+    def test_a_double_sale_and_purchase_of_one_hundred_net_out_to_zero(self):
+        self.generate(
+            [self.paper(amount="100", tax="17", party="شركة الأمل")],
+            kind=BOOK_ENTRY_KIND_SALES_INVOICE,
+        )
+        self.generate(
+            [self.paper(
+                amount="100", tax="17", party="مورد الأثاث", code="income_tax",
+            )],
+            kind=BOOK_ENTRY_KIND_PURCHASE_INVOICE,
+        )
+
+        payload = self.vat(self.mine)
+
+        self.assertEqual(payload["sales_tax"], "17.00")
+        self.assertEqual(payload["input_tax"], "17.00")
+        self.assertEqual(payload["vat_due"], "0.00")
+
+    def test_the_paper_rate_is_not_the_recognised_rate(self):
+        """نسبةُ الفاتورة (17٪) وصفٌ لا خصم: 34 تُخصم كاملةً بنسبة الحساب (100%)."""
+        services.set_office_setting(self.tenant, client_books.LINE_RATE_KEY, True)
+        self.generate(
+            [self.paper(amount="200", tax="34", rate="17", party="مورد الكهرباء")],
+            kind=BOOK_ENTRY_KIND_EXPENSE,
+        )
+
+        payload = self.vat(self.mine)
+
+        self.assertEqual(payload["input_tax"], "34.00")
+        self.assertEqual(payload["recognised_input"], "34.00")
+        self.assertEqual(payload["non_deductible"], "0.00")
+
+    # ── البسيط ───────────────────────────────────────────────────────────
+    def test_a_simple_sale_reads_as_sales_tax_in_the_vat_report(self):
+        self.simple_sale()
+
+        payload = self.vat(self.simple_client)
+
+        self.assertEqual(payload["sales_tax"], "17.00")
+        self.assertEqual(payload["input_tax"], "0.00")
+        self.assertEqual(payload["vat_due"], "17.00")
+
+    def test_a_simple_sale_reads_as_revenue_in_the_income_report(self):
+        self.simple_sale()
+
+        payload = self.report(self.simple_client, "income")
+
+        self.assertEqual(payload["totals"]["revenue"], "100.00")
+        self.assertEqual(payload["totals"]["expense"], "0.00")
+        self.assertEqual(payload["totals"]["profit"], "100.00")
+
+    def test_a_simple_purchase_reads_as_input_tax_and_as_an_expense(self):
+        self.generate(
+            [self.paper(amount="200", tax="34", client=self.simple_client)],
+            kind=BOOK_ENTRY_KIND_PURCHASE_INVOICE, client=self.simple_client,
+        )
+
+        payload = self.vat(self.simple_client)
+
+        self.assertEqual(payload["sales_tax"], "0.00")
+        self.assertEqual(payload["input_tax"], "34.00")
+        self.assertEqual(payload["recognised_input"], "34.00")
+        self.assertEqual(
+            self.report(self.simple_client, "income")["totals"]["expense"], "200.00",
+        )
+
+    def test_a_simple_cash_sale_leaves_the_customer_no_debt(self):
+        """البسيطُ لا حسابَ ذمّي فيه: بيعٌ نقديٌّ لا يُنشئ ذمّةً على الزبون."""
+        self.simple_sale()
+
+        payload = self.report(self.simple_client, "receivables")
+
+        self.assertNotIn(
+            "زبون نقدي", {row["side_party"] for row in payload["rows"]},
+        )
+        self.assertEqual(payload["totals"]["debit_total"], "0.00")
+        self.assertEqual(payload["totals"]["credit_total"], "0.00")
+
+
+class PaperRateIsDisplayOnlyTest(BookEntryGenerationTestCase):
+    """نسبةُ الورقة **وصفٌ للعرض لا نسبةُ السطر**: لا تُنسخ ولو فُعّل الإعداد."""
+
+    def test_the_paper_rate_is_never_written_on_a_line(self):
+        """حقلُ السطر نسبةُ الخصم المعترف بها (`recognised_vat_rate`) لا نسبةُ
+        الفاتورة: نسخُ 17٪ يخصم 17٪ من ضريبة المدخلات وحدها — إقرارٌ ناقص."""
+        off = self.paper(amount="100", tax="17", rate="17", month=1)
+
+        without_setting = self.generate([off])
+
+        services.set_office_setting(self.tenant, client_books.LINE_RATE_KEY, True)
+        on = self.paper(amount="100", tax="17", rate="17", month=2, code="income_tax")
+
+        with_setting = self.generate([on])
+
+        for entry in (without_setting, with_setting):
+            for line in entry["lines"]:
+                self.assertIsNone(line["vat_rate"])
+                self.assertEqual(line["vat_rate_reason"], "")
 
 
 class ManualEntryRegressionTest(BookEntryGenerationTestCase):
