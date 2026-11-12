@@ -379,6 +379,25 @@ class MonthlyReminderTest(OfficeExportsTestCase):
         self.assertFalse(any(row.client_id for row in rows))
         self.assertIsNone(rows[0].seen_at)
 
+    def test_a_second_refresh_in_the_same_day_reports_no_reminder(self):
+        # الإعدادُ على افتراضيّه `monthly` — لا يُطفأ هنا، فالمولّدُ نفسُه هو المقيس.
+        recipients = services._approver_ids(self.tenant)
+        self.assertTrue(recipients)
+        expected = len(recipients)
+
+        first = self.refresh()
+
+        self.assertGreater(first["created_alerts"], 0)
+        self.assertEqual(self.export_alerts().count(), expected)
+
+        second = self.refresh()
+
+        self.assertEqual(
+            second["created_alerts"], 0,
+            "التشغيلُ الثاني يعدّ تنبيهاتٍ لم تُنشأ: الصفوفُ قائمةٌ سابقاً",
+        )
+        self.assertEqual(self.export_alerts().count(), expected)
+
     def test_a_new_month_raises_a_new_reminder(self):
         self.refresh()
         next_month = datetime.date(THIS_YEAR, 7, 2)
