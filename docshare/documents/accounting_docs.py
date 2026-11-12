@@ -602,9 +602,17 @@ def fee_invoice_doc_ids(tenant, user):
     نفسُ حارس إشعار الدفع: صلاحيةُ النوع تمنح كتابةَ زبائن المكتب لا رؤيةَ
     زبائن الزملاء، فمحاسبٌ بلا `office.clients.all` كان يأخذ توكنَ فاتورةِ
     زميلٍ ورابطَها، ويُبطل أيَّها شاء بمعرّفاتٍ متسلسلة.
+
+    **ومن لا يرى المبالغ لا نوعَ له هنا** (#282fix/١): ورقةُ `/s/` تُعرض بلا
+    دخول وبالصافي والضريبة والإجمالي، فسطرُ مشاركةٍ في القائمة يُعطيه — للقراءة
+    أو الإبطال — مستنداً بكل مبالغه. فالقائمةُ والقراءةُ تُقصران على من يملك
+    `office.amounts.view`، كما تُقصَر عليها إنشاءاتُ الرابط.
     """
     from accounting_office.models import FeeInvoice
     from accounting_office import services as office_services
+
+    if not office_services.can_see_amounts(tenant, user):
+        return FeeInvoice.objects.none().values("pk")
 
     return FeeInvoice.objects.filter(
         tenant=tenant,

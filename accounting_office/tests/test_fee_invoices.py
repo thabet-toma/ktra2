@@ -55,7 +55,7 @@ from accounting_office.models import (
     fee_invoice_series,
 )
 from core.modules import invalidate_module_cache
-from tenants.models import Currency, UserCompanyMembership
+from tenants.models import Currency, TenantBook, UserCompanyMembership
 from tenants.services import create_company
 
 BASE = "/api/accounting-office/"
@@ -323,6 +323,155 @@ class NumberingTest(FeeInvoiceTestCase):
             fee_invoice_number(fee_invoice_series(invoice.issued_at.year), 2),
         )
 
+    def test_the_counter_is_the_tenant_book_not_the_retired_sequence(self):
+        """#282fix/٤: الترقيمُ على دفتر الترقيم القائم — والعدّادُ القديمُ لا يُكتب.
+
+        دفترٌ واحدٌ لكل نوع ((الشركة، النوع، دفتر 0)) يقبل ضبط بداية السلسلة من
+        شاشة الدفاتر، والزيادةُ عبر `TenantBook.get_next_number` وحدها.
+        """
+        first = self.make_invoice(name="زبون أول")
+        second = self.make_invoice(name="زبون ثانٍ")
+        year = local_day(first.issued_at).year
+        book = TenantBook.objects.get(
+            tenant=self.tenant,
+            branch=None,
+            document_type="fee_invoice",
+            book_number=0,
+        )
+
+        self.assertEqual(book.last_used_number, 2)
+        self.assertEqual(
+            sorted([first.number, second.number]),
+            [
+                fee_invoice_number(fee_invoice_series(year), 1),
+                fee_invoice_number(fee_invoice_series(year), 2),
+            ],
+        )
+        self.assertFalse(
+            FeeInvoiceSequence.objects.filter(tenant=self.tenant).exists(),
+            "العدّادُ القديمُ ما زال يُكتب — الترقيمُ لم ينتقل إلى الدفتر",
+        )
+
+    def test_the_credit_note_consumes_its_own_book_type(self):
+        invoice = self.make_invoice()
+        res = self.client.post(
+            f"{INVOICES}{invoice.pk}/credit-note/",
+            {"amount": "116.00", "reason": "خصم"},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        credit_book = TenantBook.objects.get(
+            tenant=self.tenant,
+            branch=None,
+            document_type="fee_credit_note",
+            book_number=0,
+        )
+        invoice_book = TenantBook.objects.get(
+            tenant=self.tenant,
+            branch=None,
+            document_type="fee_invoice",
+            book_number=0,
+        )
+        self.assertEqual(credit_book.last_used_number, 1)
+        self.assertEqual(invoice_book.last_used_number, 1)
+
+    def test_the_data_migration_carries_the_old_counter_into_the_book(self):
+        """الإنتاجُ فيه فواتيرُ مرقَّمةٌ بالعدّاد القديم — الهجرةُ لا تُفقِد رقماً."""
+        from importlib import import_module
+
+        from django.apps import apps as django_apps
+
+        migration = import_module(
+            "accounting_office.migrations.0025_fee_invoice_numbering_to_books",
+        )
+
+        year = local_day(timezone.now()).year
+        FeeInvoiceSequence.objects.create(
+            tenant=self.tenant, year=year,
+            series=fee_invoice_series(year), last_number=7,
+        )
+        FeeInvoiceSequence.objects.create(
+            tenant=self.tenant, year=year - 1,
+            series=fee_invoice_series(year - 1), last_number=4,
+        )
+        FeeInvoiceSequence.objects.create(
+            tenant=self.tenant, year=year,
+            series=fee_invoice_credit_series(year), last_number=3,
+        )
+
+        migration._carry_sequence_numbers(django_apps)
+
+        invoice_book = TenantBook.objects.get(
+            tenant=self.tenant, branch=None,
+            document_type="fee_invoice", book_number=0,
+        )
+        credit_book = TenantBook.objects.get(
+            tenant=self.tenant, branch=None,
+            document_type="fee_credit_note", book_number=0,
+        )
+        # الأكبرُ عبر السنوات: رقمُ السنة الماضية لا يُعاد استعماله أبداً.
+        self.assertEqual(invoice_book.last_used_number, 7)
+        self.assertEqual(credit_book.last_used_number, 3)
+
+        # والترقيمُ يكمل من حيث انتهى القديم — بلا تكرارٍ ولا فجوة.
+        invoice = self.make_invoice()
+        self.assertEqual(
+            invoice.number, fee_invoice_number(fee_invoice_series(year), 8),
+        )
+        invoice_book.refresh_from_db()
+        self.assertEqual(invoice_book.last_used_number, 8)
+
+    def test_the_migration_is_registered_as_a_run_python_operation(self):
+        """الهجرةُ عمليةٌ في سجلّ الهجرات لا دالّةً لا يناديها أحد."""
+        from importlib import import_module
+
+        from django.db import migrations as django_migrations
+
+        migration = import_module(
+            "accounting_office.migrations.0025_fee_invoice_numbering_to_books",
+        )
+
+        self.assertTrue(
+            any(
+                isinstance(operation, django_migrations.RunPython)
+                for operation in migration.Migration.operations
+            ),
+            "الهجرةُ بلا RunPython — لا بياناتَ تُنقل في النشر",
+        )
+        dependencies = dict(migration.Migration.dependencies).keys()
+        self.assertIn("tenants", dependencies)
+        self.assertIn("accounting_office", dependencies)
+
+    def test_the_migration_never_lowers_a_book_that_is_already_ahead(self):
+        """دفترٌ سبق العدّادَ (نُشر الكودُ الجديد قبله) لا يُنقصه النقل."""
+        from importlib import import_module
+
+        from django.apps import apps as django_apps
+
+        year = local_day(timezone.now()).year
+        FeeInvoiceSequence.objects.create(
+            tenant=self.tenant, year=year,
+            series=fee_invoice_series(year), last_number=3,
+        )
+        TenantBook.objects.create(
+            tenant=self.tenant, branch=None,
+            document_type="fee_invoice", book_number=0,
+            name="دفتر أتعاب", last_used_number=9,
+        )
+
+        import_module(
+            "accounting_office.migrations.0025_fee_invoice_numbering_to_books",
+        )._carry_sequence_numbers(django_apps)
+
+        self.assertEqual(
+            TenantBook.objects.get(
+                tenant=self.tenant, branch=None,
+                document_type="fee_invoice", book_number=0,
+            ).last_used_number,
+            9,
+        )
+
 
 class TaxLineTest(FeeInvoiceTestCase):
     """سطرُ الضريبة يتبع إعداد «المكتب مشتغل مرخّص» — ويغيب كاملاً حين يُطفأ."""
@@ -406,6 +555,19 @@ class TitleTest(FeeInvoiceTestCase):
         self.assertEqual(invoice.title, "فاتورة خدمات محاسبية")
         self.assertIn("فاتورة خدمات محاسبية", self.page_of(invoice))
 
+    def test_a_sheet_issued_with_a_forbidden_title_prints_the_default(self):
+        """ورقةٌ صدرت قبل الحارس — العنوانُ المخزَّن لا يُطبع كما هو (#282fix/٣)."""
+        invoice = self.make_invoice()
+        FeeInvoice.objects.filter(pk=invoice.pk).update(title="فاتورة ضريبية 2026")
+        invoice = self.card_of(invoice)
+
+        html = self.page_of(invoice)
+
+        self.assertNotIn("فاتورة ضريبية 2026", html)
+        self.assertIn("فاتورة أتعاب", html)
+        detail = self.client.get(f"{INVOICES}{invoice.pk}/", **self.headers())
+        self.assertEqual(detail.data["title"], "فاتورة أتعاب")
+
     def test_the_credit_note_has_its_own_title_not_the_invoice_title(self):
         invoice = self.make_invoice()
         res = self.client.post(
@@ -418,6 +580,21 @@ class TitleTest(FeeInvoiceTestCase):
         self.assertEqual(res.data["title"], "إشعار دائن أتعاب")
         note = FeeInvoice.objects.get(pk=res.data["id"])
         self.assertIn("إشعار دائن أتعاب", self.page_of(note))
+
+    def test_a_stored_title_that_claims_a_tax_invoice_falls_back_to_the_default(self):
+        """قيمةٌ كُتبت قبل الحارس — القراءةُ تُسقطها ولا تُطبع على الورقة (#282fix/٣)."""
+        from accounting_office.models import OfficeSettingValue
+
+        OfficeSettingValue.objects.create(
+            tenant=self.tenant, key="fee_invoice_title", value="فاتورة ضريبية 2026",
+        )
+
+        invoice = self.make_invoice()
+
+        self.assertEqual(invoice.title, "فاتورة أتعاب")
+        self.assertNotIn(
+            "فاتورة ضريبية", self.page_of(invoice).replace(NOT_TAX_PS, ""),
+        )
 
 
 class ShapeTest(FeeInvoiceTestCase):
@@ -646,12 +823,11 @@ class CancelTest(FeeInvoiceTestCase):
             format="json", **self.headers(),
         )
         self.assertEqual(created.status_code, 201, created.content)
-        year = local_day(invoice.issued_at).year
-        sequence = FeeInvoiceSequence.objects.get(
-            tenant=self.tenant, year=year,
-            series=fee_invoice_series(year),
+        book = TenantBook.objects.get(
+            tenant=self.tenant, branch=None,
+            document_type="fee_invoice", book_number=0,
         )
-        counter_before = sequence.last_number
+        counter_before = book.last_used_number
 
         res = self.client.post(
             f"{INVOICES}{invoice.pk}/cancel/", {}, format="json", **self.headers(),
@@ -668,8 +844,8 @@ class CancelTest(FeeInvoiceTestCase):
         )
         draft = FeeDraft.objects.get(pk=invoice.source_draft_id)
         self.assertEqual(draft.status, FeeDraft.STATUS_APPROVED)
-        sequence.refresh_from_db()
-        self.assertEqual(sequence.last_number, counter_before)
+        book.refresh_from_db()
+        self.assertEqual(book.last_used_number, counter_before)
 
     def test_the_invoice_is_cancellable_after_its_credit_note_is_cancelled(self):
         """الطريقُ ليس مسدوداً: إلغاءُ الإشعار الدائن يفتح إلغاء الأصل بعده."""
@@ -912,6 +1088,83 @@ class VisibilityTest(FeeInvoiceTestCase):
 
         by_kind = self.client.get(f"{INVOICES}?kind=credit_note", **self.headers())
         self.assertEqual(by_kind.data, [])
+
+
+class MaskedAmountsLinkTest(FeeInvoiceTestCase):
+    """القناعُ يحجب الرابطَ أيضاً لا المبلغَ وحده (#282fix/١).
+
+    ورقةُ `/s/` تُعرض بلا دخول وبكل مبالغها، فرابطٌ يُسلَّم لعضوٍ لا يملك
+    «يرى المبالغ» يعني قراءةَ الصافي والضريبة والإجمالي بمجرّد فتحه — والقناعُ
+    على الحمولة وحدها لا يحجب الورقة.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.client.force_authenticate(user=self.accountant_user)
+
+    def masked_invoice(self):
+        """فاتورةُ زبونٍ يراه المحاسب — فالرؤيةُ ليست هي المشكلة، المبالغُ هي."""
+        return self.make_invoice(
+            name="زبون المحاسب", responsible=self.accountant_user,
+        )
+
+    def test_the_draft_row_hands_no_link_to_a_masked_member(self):
+        invoice = self.masked_invoice()
+        share = create_share(self.tenant, invoice)
+
+        listed = self.client.get(DRAFTS, **self.headers())
+
+        self.assertEqual(listed.status_code, 200, listed.content)
+        row = next(
+            item for item in listed.data if item["id"] == invoice.source_draft_id
+        )
+        self.assertEqual(row["invoice"]["url"], "")
+        self.assertNotIn(share.token, str(listed.content))
+
+    def test_the_invoice_detail_hands_no_link_to_a_masked_member(self):
+        invoice = self.masked_invoice()
+        share = create_share(self.tenant, invoice)
+
+        detail = self.client.get(f"{INVOICES}{invoice.pk}/", **self.headers())
+
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(detail.data["url"], "")
+        self.assertNotIn(share.token, str(detail.content))
+
+    def test_the_share_list_shows_no_fee_invoice_to_a_masked_member(self):
+        invoice = self.masked_invoice()
+        share = create_share(self.tenant, invoice)
+
+        listed = self.client.get(
+            f"{SHARES}?doc_type=fee_invoice", **self.headers(),
+        )
+        self.assertEqual(listed.status_code, 200, listed.content)
+        rows = listed.data["results"] if isinstance(listed.data, dict) else listed.data
+        self.assertEqual(rows, [])
+
+        detail = self.client.get(f"{SHARES}{share.pk}/", **self.headers())
+        self.assertEqual(detail.status_code, 404, detail.content)
+
+    def test_no_share_is_created_on_behalf_of_a_masked_member(self):
+        from docshare.models import DocumentShare
+
+        invoice = self.masked_invoice()
+        before = DocumentShare.objects.filter(
+            tenant=self.tenant, doc_type="fee_invoice",
+        ).count()
+
+        urls = fee_invoices.invoice_urls(
+            self.tenant, [invoice.pk], user=self.accountant_user,
+        )
+
+        self.assertEqual(urls, {})
+        self.assertEqual(
+            DocumentShare.objects.filter(
+                tenant=self.tenant, doc_type="fee_invoice",
+            ).count(),
+            before,
+            "أُنشئت مشاركةٌ لعضوٍ لا يرى المبالغ — الرابطُ يفتح الورقة كاملةً",
+        )
 
 
 class PublicLinkTest(FeeInvoiceTestCase):
@@ -1195,3 +1448,81 @@ class DraftRowInvoiceCardTest(FeeInvoiceTestCase):
         draft.refresh_from_db()
 
         self.assertIsNone(self.row_of(draft)["invoice"])
+
+
+class ExternalNumberTest(FeeInvoiceTestCase):
+    """«رقم الفاتورة الرسمية الخارجية» يُكتب من فعله الوحيد (#282fix/٥).
+
+    الحقلُ اختياريٌّ وغيابُه هو الحالُ الغالب (ورقتُنا ليست فاتورةً ضريبية)، لكن
+    مكتباً أصدر فاتورته الرسمية يقيّد رقمَها على ورقتنا — وبلا فعلٍ للكتابة كان
+    الحقلُ يُقرأ ولا يُكتب أبداً.
+    """
+
+    def url_of(self, invoice):
+        return f"{INVOICES}{invoice.pk}/external-number/"
+
+    def test_the_owner_writes_it_through_its_own_action(self):
+        invoice = self.make_invoice()
+        self.assertEqual(invoice.external_number, "")
+
+        res = self.client.post(
+            self.url_of(invoice), {"external_number": "  EXT-778812  "},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data["external_number"], "EXT-778812")
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.external_number, "EXT-778812")
+
+    def test_a_number_longer_than_the_column_is_refused(self):
+        invoice = self.make_invoice()
+
+        res = self.client.post(
+            self.url_of(invoice), {"external_number": "1" * 61},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("60", str(res.content))
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.external_number, "")
+
+    def test_the_service_itself_refuses_a_number_past_the_column(self):
+        """حدُّ العمود محروسٌ في الخدمة أيضاً لا في المُسلسِل وحده."""
+        from django.core.exceptions import ValidationError
+
+        invoice = self.make_invoice()
+
+        with self.assertRaises(ValidationError):
+            fee_invoices.set_external_number(invoice, number="1" * 61)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.external_number, "")
+
+    def test_every_other_verb_on_the_action_is_closed(self):
+        invoice = self.make_invoice()
+
+        for name, method in (
+            ("get", self.client.get), ("put", self.client.put),
+            ("patch", self.client.patch), ("delete", self.client.delete),
+        ):
+            with self.subTest(verb=name):
+                res = method(self.url_of(invoice), {}, format="json", **self.headers())
+                self.assertEqual(res.status_code, 405, res.content)
+
+    def test_a_member_without_the_write_key_is_refused(self):
+        viewer = User.objects.create_user(username="inv_viewer", password="x")
+        UserCompanyMembership.objects.create(
+            user=viewer, tenant=self.tenant, role="viewer",
+        )
+        invoice = self.make_invoice(name="زبون المستعرض", responsible=viewer)
+        self.client.force_authenticate(user=viewer)
+
+        res = self.client.post(
+            self.url_of(invoice), {"external_number": "X-1"},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 403, res.content)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.external_number, "")

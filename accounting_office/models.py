@@ -4485,13 +4485,17 @@ def fee_invoice_number(series: str, number: int) -> str:
 
 
 class FeeInvoiceSequence(models.Model):
-    """عدّادُ ترقيم فواتير المكتب — **أداةُ القفل والترقيم** لا عموداً محسوباً.
+    """**عدّادٌ متقاعد** — ترقيمُ الأتعاب صار على دفاتر الترقيم القائمة (#282fix/٤).
 
-    `(tenant, year, series) → last_number`، والزيادةُ داخل `transaction.atomic()`
-    بعد `select_for_update` على هذا الصفّ. **لا `MAX(number)+1` ولا `count()+1`**:
-    كلاهما يقرأ لقطةً قديمة تحت التزامن فيُكرّر رقماً أو يُحدث فجوة — ورقمُ
-    فاتورةٍ مكرَّر عطبٌ محاسبيّ لا خطأُ عرض. والقيدُ `(tenant, number)` على
-    `FeeInvoice` طبقةٌ ثانية تُساند القفل لا تُبدله.
+    كان `(tenant, year, series) → last_number` هو مولّدَ الأرقام، وكان عيبُه أنّه
+    عدّادٌ خاصٌّ بالموديول: لا شاشةَ دفاترَ تضبط بدايةَ سلسلته، وخلافاً لقاعدة
+    `ARCHITECTURE.md` التي تجعل `TenantBook.get_next_number` مصدرَ كلّ رقمِ
+    مستند. فانتقل الترقيمُ إلى `TenantBook` (نوعا `fee_invoice` و`fee_credit_note`)،
+    ونُقلت أرقامُه القائمة بهجرة بيانات.
+
+    **والنموذجُ يبقى في مكانه بلا حذف**: حذفُه هجرةٌ حاذفة ممنوعةٌ في هذه الدفعة،
+    وقيمتُه اليوم أثرٌ تاريخيّ يُقارَن به ما صار عليه الدفتر. **ولا كودَ يقرؤه أو
+    يكتبه** — الحارسُ على ذلك اختبارُ الترقيم في `test_fee_invoices`.
     """
 
     tenant = models.ForeignKey(
@@ -4686,6 +4690,11 @@ class FeeInvoice(models.Model):
     def save(self, *args, **kwargs):
         _fill_tenant_from_client(self)
         super().save(*args, **kwargs)
+
+
+#: حدُّ «رقم الفاتورة الرسمية الخارجية» — **من عمود النموذج نفسه** لا رقماً ثانياً
+#: يُكتب في الخدمة أو في المُسلسِل فيفترق عنه عند أوّل توسيعٍ للعمود (#282fix/٥).
+EXTERNAL_NUMBER_MAX_LENGTH = FeeInvoice._meta.get_field("external_number").max_length
 
 
 # ── الدفعات و«اللي عليه» وكشف الحساب (#283، الجزء أ) ─────────────────────────

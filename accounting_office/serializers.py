@@ -18,6 +18,7 @@ from accounting_office.models import (
     BOOK_KIND_CHOICES,
     CLIENT_SERVICE_FREQUENCY_CHOICES,
     CONSENT_CHANNEL_LABELS,
+    EXTERNAL_NUMBER_MAX_LENGTH,
     FEE_CADENCE_CHOICES,
     FEE_EXTRA_DESTINATION_CHOICES,
     FEE_PAYMENT_METHOD_CHOICES,
@@ -1024,14 +1025,28 @@ class FeeDraftRowSerializer(serializers.Serializer):
 
 # ── فاتورة الأتعاب (#282، أ٢/١) ──────────────────────────────────────────────
 #
-# **الحقولُ الكتابيةُ ثلاثةٌ لا أكثر**: سببُ الإلغاء، ومبلغُ التصحيح وسببُه،
-# ومبلغُ التكميلية وسببُها. ولا مُسلسِلَ إنشاءٍ: الفاتورةُ تُصدَر بالاعتماد وحده
-# (`fees.approve_fee_draft`)، و`POST` على الجمع 405.
+# **الحقولُ الكتابيةُ أربعةٌ لا أكثر**: سببُ الإلغاء، ومبلغُ التصحيح وسببُه،
+# ومبلغُ التكميلية وسببُها، والرقمُ الخارجيُّ لورقتها الرسمية. ولا مُسلسِلَ
+# إنشاءٍ: الفاتورةُ تُصدَر بالاعتماد وحده (`fees.approve_fee_draft`)، و`POST`
+# على الجمع 405.
 class FeeInvoiceCancelSerializer(serializers.Serializer):
     """سببُ الإلغاء اختياريّ — والتاريخُ ومَن ألغى يكتبهما الخادم."""
 
     reason = serializers.CharField(
         required=False, allow_blank=True, default="", max_length=300,
+    )
+
+
+class FeeInvoiceExternalNumberSerializer(serializers.Serializer):
+    """رقمُ الفاتورة الرسمية الخارجية — **حدُّه حدُّ العمود** (60 حرفاً).
+
+    الحقلُ اختياريّ على الصفّ، وغيابُه هو الحالُ الغالب (ورقتُنا ليست فاتورةً
+    ضريبية). و`allow_blank` مقصود: رقمٌ أُدخل خطأً يُصحَّح أو يُمسح، لا يُترك
+    مكتوباً لأن الفعل لا يعرف المحوَ.
+    """
+
+    external_number = serializers.CharField(
+        max_length=EXTERNAL_NUMBER_MAX_LENGTH, allow_blank=True,
     )
 
 

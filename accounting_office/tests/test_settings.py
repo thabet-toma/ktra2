@@ -602,6 +602,42 @@ class SettingsApiTest(SettingTestCase):
         self.assertEqual(title.data["value"], "فاتورة خدمات")
         self.assertEqual(title.data["max_length"], 60)
 
+    def test_a_title_that_claims_a_tax_invoice_is_a_400(self):
+        """ملاحظةُ السجلّ تعِد بالنفي — والحارسُ يفرضه عند الكتابة (#282fix/٣).
+
+        «فاتورة ضريبية» و«חשבונית מס» ادّعاءُ رسميةٍ ضريبيةٍ في عنوان ورقةٍ ليست
+        فاتورةً ضريبية: يُرفض نصّاً مهما كان موضعه في القيمة، ويبقى الإعداد فارغاً
+        (الافتراضيّ).
+        """
+        for value in ("فاتورة ضريبية 2026", "כתב חשבונית מס 2026"):
+            res = self.client.put(
+                f"{SETTINGS}fee_invoice_title/", {"value": value},
+                format="json", **self.headers(),
+            )
+            self.assertEqual(res.status_code, 400, (value, res.content))
+
+        self.assertEqual(resolve_setting(self.tenant, "fee_invoice_title"), "")
+
+    def test_a_stored_title_that_claims_a_tax_invoice_reads_as_the_default(self):
+        """قيمةٌ دُسَّت قبل الحارس تُقرأ افتراضيًّا في الشاشة أيضاً (#282fix/٣).
+
+        الحارسُ يمنع الكتابة، لكن صفّاً قديماً في القاعدة كان يُعرض على الشاشة
+        نصَّ ادّعاءٍ لا تُصدره الورقة أصلاً — فالسطرُ يقرأ «فارغ» (أي الافتراضيّ)
+        ويبقى الصفُّ قابلاً للمسح.
+        """
+        OfficeSettingValue.objects.create(
+            tenant=self.tenant, key="fee_invoice_title", value="חשבונית מס 2026",
+        )
+
+        res = self.client.get(SETTINGS, **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        row = {item["key"]: item for item in res.data["settings"]}["fee_invoice_title"]
+        self.assertEqual(row["value"], "")
+        self.assertEqual(row["office_value"], "")
+        self.assertTrue(row["can_reset"])
+        self.assertFalse(row["differs_from_default"])
+
     def test_an_invalid_value_is_a_400(self):
         res = self.client.put(
             f"{SETTINGS}tax_system/", {"value": "JO"}, format="json", **self.headers(),

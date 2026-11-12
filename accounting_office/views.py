@@ -110,6 +110,7 @@ from accounting_office.serializers import (
     FeeExtraServiceWriteSerializer,
     FeeInvoiceCancelSerializer,
     FeeInvoiceCreditNoteSerializer,
+    FeeInvoiceExternalNumberSerializer,
     FeeInvoiceRowSerializer,
     FeeInvoiceSupplementarySerializer,
     FeeLedgerQuerySerializer,
@@ -2959,7 +2960,9 @@ class OfficeFeeDraftViewSet(OfficeModuleViewSet):
         summaries = payments.invoice_summaries(approved)
         # #282/أ٢/٢: بطاقاتُ الأوراق **مجمَّعةً** كالملخّصات — السطرُ يقرأ
         # بطاقتَه من الخريطة، فلا تكبر كلفةُ «اعتمد الكل» بعدد المسودّات.
-        invoices = fee_invoices.draft_invoice_cards(self.tenant, approved)
+        invoices = fee_invoices.draft_invoice_cards(
+            self.tenant, approved, masked=masked,
+        )
         return Response({
             "approved": len(approved),
             "remaining": fees.pending_drafts(self.tenant).count(),
@@ -3190,6 +3193,22 @@ class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
             ),
             status=status.HTTP_201_CREATED,
         )
+
+    @action(detail=True, methods=["post"], url_path="external-number")
+    def external_number(self, request, pk=None):
+        """«رقم الفاتورة الرسمية الخارجية» — مرجعٌ يُقيَّد بعد الإصدار.
+
+        `PUT`/`PATCH` على الفاتورة مغلقان (المستندُ لا يُعدَّل)، فالفعلُ هذا هو
+        البابُ الوحيد لذلك الحقل — بمفتاح الكتابة وحدَه: رقمٌ ليس مبلغاً فلا قناع.
+        """
+        invoice = self.get_object()
+        self.require_write()
+        serializer = FeeInvoiceExternalNumberSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        invoice = fee_invoices.set_external_number(
+            invoice, number=serializer.validated_data["external_number"],
+        )
+        return self._detail(invoice)
 
 
 # ── الدفعات و«اللي عليه» وكشف الحساب (#283) ─────────────────────────────────
