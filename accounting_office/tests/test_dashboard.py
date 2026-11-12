@@ -19,7 +19,7 @@ from decimal import Decimal
 from django.contrib.auth.models import User
 from rest_framework.test import APITestCase
 
-from accounting_office import dashboard, fees, payments, services
+from accounting_office import dashboard, fee_invoices, fees, payments, services
 from accounting_office.models import (
     OFFICE_ALERT_KIND_SCHEDULE_DATES_CHANGED,
     DeadlineRule,
@@ -61,7 +61,7 @@ LATE_FOR_SECOND = 1
 
 
 class OfficeDashboardTestCase(APITestCase):
-    """مكتبٌ مرخَّص: صاحبُ المكتب، ومحاسبان بعشرة زبائنَ لكلٍّ، وقارئ."""
+    """مكتبٌ بزبائن: صاحبُ المكتب، ومحاسبان بعشرة زبائنَ لكلٍّ، وقارئ."""
 
     @classmethod
     def setUpTestData(cls):
@@ -76,6 +76,10 @@ class OfficeDashboardTestCase(APITestCase):
         )
         invalidate_module_cache(cls.tenant.pk)
         ready_office(cls.tenant, "IL")
+        # #292: قياسُ مجموع «اللي عليه» لا حسابَ ضريبة الورقة — بلا ضريبةٍ تبقى
+        # أرقامُ الاختبار (100/250/400) كما هي، ونظيرُ المسار بالضريبة في
+        # `test_fee_due_vat.py`.
+        services.set_office_setting(cls.tenant, "office_licensed_dealer", False)
         catalog(cls.tenant)
         cls.currency = Currency.objects.get(Code="ILS")
 
@@ -143,7 +147,7 @@ class OfficeDashboardTestCase(APITestCase):
         )
 
     def approved_draft(self, client, total, *, year=2026, month=1):
-        return FeeDraft.objects.create(
+        draft = FeeDraft.objects.create(
             tenant=self.tenant,
             client=client,
             year=year,
@@ -153,6 +157,10 @@ class OfficeDashboardTestCase(APITestCase):
             status=FeeDraft.STATUS_APPROVED,
             approved_by=self.owner,
         )
+        # #292: «اللي عليه» يُقرأ من الورقة الصادرة، والاعتمادُ في الإنتاج يُصدرها
+        # في المعاملة نفسها — والترخيصُ مطفأً هنا فإجماليُها = مجموعُ المسودّة.
+        fee_invoices.issue_for_draft(draft, actor=self.owner)
+        return draft
 
 
 class DueTotalTest(OfficeDashboardTestCase):

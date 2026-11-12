@@ -273,6 +273,9 @@ PAYMENT_AMOUNT_KEYS: tuple[str, ...] = (
     "amount",
     "paid_amount",
     "written_amount",
+    # #292: ما خُصم على الفاتورة بإشعارٍ دائنٍ — يُخصَم من متبقّيها، فمفتاحُ مبلغٍ
+    # في صفّ الكشف يُقنَّع كسائرها.
+    "credited_amount",
     "remaining",
     "due",
     "credit",

@@ -21,7 +21,7 @@ from django.test import SimpleTestCase
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounting_office import payments, services
+from accounting_office import fee_invoices, payments, services
 from accounting_office.models import (
     FeeDraft,
     FeePayment,
@@ -62,6 +62,10 @@ class FeeDocumentsTestCase(APITestCase):
         invalidate_module_cache(cls.tenant.pk)
         services.set_office_setting(cls.tenant, "tax_system", "PS")
         services.set_office_setting(cls.tenant, "office_size", "small")
+        # #292: بلا ضريبة — هذه الوحدةُ تقيس المستندَ (الإشعارُ والكشف) لا حسابَ
+        # ضريبة الورقة، وأرقامُها (300، 120، 50) صافيةٌ عن قصد. ونظيرُ المسار
+        # بالضريبة مفعّلةً في `test_fee_due_vat.py`.
+        services.set_office_setting(cls.tenant, "office_licensed_dealer", False)
         # يومُ راحةٍ لا يحجب اقتراح اليوم — الاختبارُ يُشتقّ من يوم القراءة.
         services.set_office_setting(cls.tenant, "rest_days", [])
 
@@ -98,7 +102,7 @@ class FeeDocumentsTestCase(APITestCase):
         return client
 
     def make_draft(self, client, total, *, year=2026, month=3, status="approved"):
-        return FeeDraft.objects.create(
+        draft = FeeDraft.objects.create(
             tenant=client.tenant,
             client=client,
             year=year,
@@ -108,6 +112,12 @@ class FeeDocumentsTestCase(APITestCase):
             status=status,
             approved_by=self.owner if status == "approved" else None,
         )
+        if status == "approved":
+            # #292: «اللي عليه» والإشعارُ والكشفُ يقرؤون **الورقة الصادرة**،
+            # والاعتمادُ يُصدرها في المعاملة نفسها — والترخيصُ مطفأً هنا فإجماليُها
+            # = مجموعُ المسودّة (300/120/50 كما هي في الاختبار).
+            fee_invoices.issue_for_draft(draft, actor=self.owner)
+        return draft
 
     def pay(self, client, amount, *, paid_at=None, method="cash", tenant=None):
         res = self.client.post(

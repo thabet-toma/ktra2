@@ -197,7 +197,9 @@ class OfficeClientListAndSearchTest(OfficeClientTestCase):
             f"{len(small.captured_queries)} ⇒ {len(big.captured_queries)}",
         )
         # سقفٌ مطلقٌ أيضاً: نموٌّ ثابتٌ لكن كبير (استعلامان لكل صف) يمرّ من المقارنة.
-        self.assertLessEqual(len(small.captured_queries), 12)
+        # (‏14 بعد #292: استعلامان ثابتان جديدان — تخصيصاتُ الدفعات وشطوبُ المكتب
+        # مجموعين لكل مسودّة — لا لكل زبون؛ والثباتُ هو ما يثبته تساوي العددين أعلاه.)
+        self.assertLessEqual(len(small.captured_queries), 14)
 
 
 class OfficeClientLifecycleTest(OfficeClientTestCase):

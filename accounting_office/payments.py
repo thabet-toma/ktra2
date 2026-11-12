@@ -2,9 +2,17 @@
 
 **المالُ هنا مشتقٌّ لا مخزَّن، والاتّجاهُ واحد:**
 
-    remaining(مسودّة) = total − Σ allocations − Σ write_offs   (لا تسقط تحت الصفر)
+    charges(زبون)     = Σ إجماليِّ الفواتير والتكميليات الحيّة − Σ الإشعارات الدائنة
+    remaining(ورقة)   = إجماليها − Σ allocations(مسودّتها) − Σ write_offs(مسودّتها)
+                        − الإشعارات الدائنة عليها
     credit(زبون)      = Σ(payment.amount − Σ allocations(payment))
-    due(زبون)         = Σ remaining(المعتمدة) − credit            (قد يكون سالباً)
+    due(زبون)         = charges − Σ allocations − Σ write_offs − credit   (قد يكون سالباً)
+
+**والمبلغُ إجماليُ الورقة لا مجموعُ المسودّة** (#292): `FeeDraft.total` قبل الضريبة،
+و`FeeInvoice.total = net + tax_total`، والدفاترُ تُدين الذمّةَ بالإجمالي
+(`office_journal.post_invoice_journal`). فقراءةُ المسودّة كانت تُطالب الزبونَ بـ300
+وذمّتُه 348، ودفعُ 348 يُنتج رصيداً دائناً وهميّاً 48. والمسودّةُ التي لم تُصدر
+ليست مستحقّاً أصلاً، والملغاةُ لم تكن يوماً (`cancelled_at`).
 
 `client_due` هي **الصيغةُ الوحيدة**: كلُّ سطحٍ يعرض «اللي عليه» — حمولةُ الزبون،
 وحمولةُ المسودّة (بمعناها الخاصّ: `remaining` على تلك الفاتورة)، ونقطةُ الدفعات،
@@ -56,6 +64,7 @@ from django.utils import timezone
 from accounting_office import deadlines, fees, office_journal, services, settings_registry
 from accounting_office.models import (
     FEE_DRAFT_STATUS_APPROVED,
+    FEE_INVOICE_KIND_CREDIT_NOTE,
     FEE_INVOICE_KIND_INVOICE,
     FEE_INVOICE_KIND_SUPPLEMENTARY,
     FEE_PAYMENT_METHOD_CHEQUE,
@@ -200,15 +209,72 @@ def _relation_sum(model, relation: str):
     )
 
 
+def _live_invoice_total():
+    """إجماليُّ الورقة **الحيّة** لمسودّةٍ كاستعلامٍ فرعيٍّ — `NULL` إن لم تصدر.
+
+    ولا يُقرأ `FeeDraft.total` مكانه: ذاك مجموعُ المسودّة **قبل الضريبة**، والورقةُ
+    تُصدَر بالإجمالي (`net + tax_total`) والدفاترُ تُدين الذمّةَ به. فالفرقُ بينهما
+    هو عيبُ «اللي عليه» نفسُه (#292).
+    """
+    return Subquery(
+        FeeInvoice.objects
+        .filter(source_draft=OuterRef("pk"), cancelled_at__isnull=True)
+        .order_by("pk")
+        .values("total")[:1],
+        output_field=MONEY_EXPRESSION,
+    )
+
+
+def _credit_note_sum():
+    """مجموعُ الإشعارات الدائنة **الحيّة** على مسودّة — استعلامٌ فرعيٌّ واحد.
+
+    الإشعارُ يشير إلى فاتورته (`related_invoice`) لا إلى المسودّة، فيُقرأ عبرها.
+    ويُخصَم من متبقّي الورقة كما يخصم من «اللي عليه»: بدونه يُطالَب الزبون بورقةٍ
+    خُصم نصفُها بإشعار، ويُقبل شطبٌ بأكثر من الباقي فيصير المستحقُّ سالباً — وهو
+    عيبُ #292 نفسُه في موضعٍ ثانٍ. والملغى لا يخصم (`cancelled_at`).
+    """
+    return Coalesce(
+        Subquery(
+            FeeInvoice.objects
+            .filter(
+                related_invoice__source_draft=OuterRef("pk"),
+                kind=FEE_INVOICE_KIND_CREDIT_NOTE,
+                cancelled_at__isnull=True,
+            )
+            .order_by()
+            .values("related_invoice__source_draft")
+            .annotate(total=Sum("total"))
+            .values("total")[:1],
+            output_field=MONEY_EXPRESSION,
+        ),
+        Value(Decimal("0.00")),
+        output_field=MONEY_EXPRESSION,
+    )
+
+
 def with_invoice_totals(queryset):
-    """يُلحق بكل مسودّة: `paid_amount` و`written_amount` و`remaining` (≥ 0)."""
+    """يُلحق بكل مسودّة: `billed_total` و`paid_amount` و`written_amount` و`remaining` (≥ 0).
+
+    **والمتبقّي من `billed_total`** — إجماليُّ ورقتها الصادرة الحيّة (شاملاً
+    الضريبة)، أو مجموعُ المسودّة حين لم تصدر بعد (مسودّةٌ منتظرةٌ لم تصر دَيناً).
+    فسقفُ التخصيص والشطب يقرأ ما على **الورقة**: سقفٌ صافٍ (300) على ورقةٍ
+    بإجمالي 348 كان يترك 48 رصيداً دائناً وهميّاً عند دفع الإجمالي. وتُخصَم منه
+    الإشعاراتُ الدائنة الحيّة على الورقة (`_credit_note_sum`) لأنها خُصمت من ذمّتها.
+    """
     return queryset.annotate(
+        billed_total=Coalesce(
+            _live_invoice_total(), F("total"), output_field=MONEY_EXPRESSION,
+        ),
         paid_amount=_relation_sum(FeePaymentAllocation, "draft"),
         written_amount=_relation_sum(FeeWriteOff, "draft"),
+        credited_amount=_credit_note_sum(),
     ).annotate(
         remaining=Greatest(
             ExpressionWrapper(
-                F("total") - F("paid_amount") - F("written_amount"),
+                F("billed_total")
+                - F("paid_amount")
+                - F("written_amount")
+                - F("credited_amount"),
                 output_field=MONEY_EXPRESSION,
             ),
             Value(Decimal("0.00")),
@@ -246,21 +312,23 @@ def invoice_state(total, remaining) -> str:
 
 @dataclass(frozen=True)
 class InvoiceSummary:
-    """ملخّصُ فاتورةٍ واحد: ما دُفع عليها وما شُطب وما بقي وحالتُه."""
+    """ملخّصُ فاتورةٍ واحد: ما دُفع عليها وما شُطب وما خُصم بإشعارٍ وبقي وحالتُه."""
 
     paid_amount: Decimal
     written_amount: Decimal
+    credited_amount: Decimal
     remaining: Decimal
     state: str
     state_label: str
 
 
-def _summary(*, paid_amount, written_amount, total, remaining) -> InvoiceSummary:
-    """الملخّصُ من أربعة أرقام — **موضعٌ واحد** للحالة وتسميتها، ووسائطُ مُسمّاةٌ فلا يُبدَّل ترتيبها."""
+def _summary(*, paid_amount, written_amount, credited_amount, total, remaining) -> InvoiceSummary:
+    """الملخّصُ من أرقامه — **موضعٌ واحد** للحالة وتسميتها، ووسائطُ مُسمّاةٌ فلا تُبدَّل."""
     state = invoice_state(total, remaining)
     return InvoiceSummary(
         paid_amount=_money(paid_amount),
         written_amount=_money(written_amount),
+        credited_amount=_money(credited_amount),
         remaining=_money(remaining),
         state=state,
         state_label=INVOICE_STATE_LABELS.get(state, ""),
@@ -271,7 +339,8 @@ def _summary_from_row(row) -> InvoiceSummary:
     return _summary(
         paid_amount=row.paid_amount,
         written_amount=row.written_amount,
-        total=row.total,
+        credited_amount=row.credited_amount,
+        total=row.billed_total,
         remaining=row.remaining,
     )
 
@@ -298,6 +367,7 @@ def invoice_summaries(drafts) -> dict[int, InvoiceSummary]:
             _summary(
                 paid_amount=zero,
                 written_amount=zero,
+                credited_amount=zero,
                 total=draft.total,
                 remaining=draft.total,
             ),
@@ -354,47 +424,99 @@ def _client_ids(clients) -> list[int]:
     return list(seen)
 
 
-def client_due_map(tenant, clients) -> dict[int, ClientDue]:
-    """«اللي عليه» لكل زبونٍ في المجموعة — استعلامان لا استعلامان لكل زبون.
+def _settled_amounts(model, tenant, client_ids):
+    """مجموعُ صفوفٍ ماليّةٍ على المسودّات — **استعلامٌ واحد** يُعيد خريطتين.
 
-    والدالّةُ تُجمع **`Σ remaining` نصّاً** لا `invoices_total − المغطّى`: هما
-    متساويان اليوم لأن `remaining` مقصوصةٌ عند الصفر بأمرٍ مؤجَّلٍ مسجَّل، أيُّ
-    تعديلٍ عليه يفتَرق عن الصيغة المكتوبة. و`paid_total` هو **المدفوع فعلاً**
-    (تخصيصاتُ دفعاتٍ لا شطوبِ مكتب)، و`due` لا يُعاد بناؤه منه بعد شطب.
+    `{مسودّة: مجموعها}` لسقف الورقة الواحدة، و`{زبون: مجموعُ مسودّاته}` للصيغة
+    الكلّية. والتجميعُ على العمودين في `GROUP BY` واحد (لا استعلامان: واحدٌ لكل
+    مسودّةٍ وآخرُ لكل زبون). و`order_by()` يُفرّغ ترتيبَ النموذج لأن MySQL مع
+    `ONLY_FULL_GROUP_BY` ترفض العمودَ غيرَ المجموع، وSQLite تمرّ فلا تكشفه.
+    """
+    rows = (
+        model.objects
+        .filter(tenant=tenant, draft__client_id__in=client_ids)
+        .values("draft_id", "draft__client_id")
+        .annotate(total=Sum("amount"))
+        .order_by()
+    )
+    by_draft: dict[int, Decimal] = {}
+    by_client: dict[int, Decimal] = {}
+    for row in rows:
+        amount = _money(row["total"] or 0)
+        by_draft[row["draft_id"]] = by_draft.get(row["draft_id"], Decimal("0.00")) + amount
+        client_id = row["draft__client_id"]
+        by_client[client_id] = by_client.get(client_id, Decimal("0.00")) + amount
+    return by_draft, by_client
+
+
+def client_due_map(tenant, clients) -> dict[int, ClientDue]:
+    """«اللي عليه» لكل زبونٍ في المجموعة — أربعةُ استعلاماتٍ لا استعلاماتٍ لكل زبون.
+
+    **المستحقُّ من الورقة الصادرة لا من مسودّتها** (#292): مجموعُ إجماليِّ
+    الفواتير والتكميليات **الحيّة** ناقصَ الإشعارات الدائنة الحيّة (بإجماليها
+    شاملاً الضريبة، كما قُيِّدت). والملغاةُ (`cancelled_at`) والمسودّةُ التي لم
+    تُصدر لا تدخلان الحساب: لا مطالبةَ بورقةٍ لم تصدر.
+
+    ثم يُخصَم ما غطّى الذمّةَ فعلاً — تخصيصاتُ الدفعات وشطوبُ المكتب — ويُخصَم
+    الرصيدُ الدائن (المالُ المقبوض غيرُ المخصَّص). فالمعادلةُ هي معادلةُ الدفاتر:
+    مدينُ الورقة ناقصَ دائنِ الدفع والعكسِ والشطب.
+
+    و`unpaid_count` تعدّ الأوراقَ التي **بقي عليها شيء** من متبقّيها هي:
+    إجماليُها − ما على مسودّتها من تخصيصٍ وشطب − ما خُصم منها بإشعارٍ دائن.
     """
     ids = _client_ids(clients)
     if not ids:
         return {}
-    totals = {pk: [Decimal("0.00"), Decimal("0.00"), Decimal("0.00"), 0] for pk in ids}
-    rows = (
-        with_invoice_totals(
-            FeeDraft.objects.filter(
-                tenant=tenant,
-                client_id__in=ids,
-                status=FEE_DRAFT_STATUS_APPROVED,
-            ),
-        )
-        .values("client_id", "total", "paid_amount", "remaining")
-        .order_by()
+    invoices = list(
+        FeeInvoice.objects
+        .filter(tenant=tenant, client_id__in=ids, cancelled_at__isnull=True)
+        .values("id", "client_id", "kind", "total", "source_draft_id", "related_invoice_id")
+        .order_by("id"),
     )
-    for row in rows:
-        bucket = totals[row["client_id"]]
-        remaining = _money(row["remaining"])
-        bucket[0] += _money(row["total"])
-        bucket[1] += _money(row["paid_amount"])
-        bucket[2] += remaining
-        if remaining > 0:
-            bucket[3] += 1
+    paid_by_draft, paid_by_client = _settled_amounts(FeePaymentAllocation, tenant, ids)
+    written_by_draft, written_by_client = _settled_amounts(FeeWriteOff, tenant, ids)
     credits = _credits_map(tenant, ids)
+
+    # الإشعارُ الدائنُ يخصم من فاتورته (لسقفها التراكميّ ومن متبقّيها) — مرّتان:
+    # الأولى تجمع الإشعارات على فواتيرها، والثانية تحسب المتبقّيَ لكل ورقة.
+    notes_by_invoice: dict[int, Decimal] = {}
+    for row in invoices:
+        if row["kind"] != FEE_INVOICE_KIND_CREDIT_NOTE:
+            continue
+        key = row["related_invoice_id"]
+        notes_by_invoice[key] = notes_by_invoice.get(key, Decimal("0.00")) + _money(row["total"])
+
+    charges = {pk: Decimal("0.00") for pk in ids}
+    unpaid = {pk: 0 for pk in ids}
+    for row in invoices:
+        client_id = row["client_id"]
+        total = _money(row["total"])
+        if row["kind"] == FEE_INVOICE_KIND_CREDIT_NOTE:
+            charges[client_id] -= total
+            continue
+        charges[client_id] += total
+        covered = (
+            paid_by_draft.get(row["source_draft_id"], Decimal("0.00"))
+            + written_by_draft.get(row["source_draft_id"], Decimal("0.00"))
+            + notes_by_invoice.get(row["id"], Decimal("0.00"))
+        )
+        if total - covered > 0:
+            unpaid[client_id] += 1
+
     result: dict[int, ClientDue] = {}
-    for client_id, (invoices_total, paid_total, remaining_total, unpaid_count) in totals.items():
+    for client_id in ids:
         credit = credits.get(client_id, Decimal("0.00"))
         result[client_id] = ClientDue(
-            due=_money(_money(remaining_total) - credit),
-            invoices_total=_money(invoices_total),
-            paid_total=_money(paid_total),
+            due=_money(
+                charges[client_id]
+                - paid_by_client.get(client_id, Decimal("0.00"))
+                - written_by_client.get(client_id, Decimal("0.00"))
+                - credit,
+            ),
+            invoices_total=_money(charges[client_id]),
+            paid_total=_money(paid_by_client.get(client_id, Decimal("0.00"))),
             credit=_money(credit),
-            unpaid_count=unpaid_count,
+            unpaid_count=unpaid[client_id],
         )
     return result
 
@@ -913,11 +1035,16 @@ def invoice_row(draft, *, summary, masked) -> dict:
         "year": draft.year,
         "month": draft.month,
         "period_label": fees.draft_period_label(draft),
-        "total": draft.total,
+        # إجماليُّ الورقة الصادرة (بضريبتها) — لا مجموعُ المسودّة الصافي؛ وإلا
+        # قرأ الصفُّ 300 ومتبقّيه 348 (#292).
+        "total": draft.billed_total,
         "paid_amount": summary.paid_amount,
         # ما شُطب منها — يظهر هنا وفي صفوف `write_offs` معاً (#283): `remaining`
         # وحدها لا تقول لِمَ نقصت.
         "written_amount": summary.written_amount,
+        # وما خُصم منها بإشعارٍ دائنٍ (#292): بدونه لا يُقرأ `remaining` من
+        # `total − paid − written`.
+        "credited_amount": summary.credited_amount,
         "remaining": summary.remaining,
         "state": summary.state,
         "state_label": summary.state_label,
@@ -935,8 +1062,8 @@ def _state_filter(state):
     if state == INVOICE_STATE_PAID:
         return Q(remaining__lte=0)
     if state == INVOICE_STATE_PARTIAL:
-        return Q(remaining__gt=0) & Q(remaining__lt=F("total"))
-    return Q(remaining=F("total")) & Q(remaining__gt=0)
+        return Q(remaining__gt=0) & Q(remaining__lt=F("billed_total"))
+    return Q(remaining=F("billed_total")) & Q(remaining__gt=0)
 
 
 def _page(queryset, params) -> dict:
@@ -1187,7 +1314,7 @@ def _statement_movements(tenant, client, *, masked: bool) -> list[dict]:
                 f"{tenant_term(tenant, 'doc.sales_invoice')} "
                 f"{fees.draft_period_label(draft)}"
             ),
-            "signed": _money(draft.total),
+            "signed": _money(draft.billed_total),
             "group": invoice_row(
                 draft, summary=_summary_from_row(draft), masked=masked,
             ),

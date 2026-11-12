@@ -4,8 +4,9 @@
 1. التخصيصُ **الأقدمُ أوّلَاً** (`year, month, id`) على المعتمدة وحدها.
 2. الجزئيُّ يظهر «مدفوعة جزئياً» **مشتقّاً** لا بتغيير `FeeDraft.status`.
 3. الزيادةُ رصيدٌ دائنٌ مشتقٌّ لا مخزَّن، يُستهلك بتخصيصٍ جديدٍ على الفاتورة القادمة.
-4. `client_due` الصيغةُ الوحيدة: `due = Σ remaining − credit`، و`draft`/`cancelled`
-   لا تدخلان الحساب.
+4. `client_due` الصيغةُ الوحيدة: `due = charges − Σ allocations − Σ write_offs −
+   credit`، و`charges` إجماليُّ الأوراق الصادرة الحيّة (#292: بالضريبة) ناقصَ
+   الإشعارات الدائنة، و`draft`/`cancelled` لا تدخلان الحساب.
 5. الشطبُ سطرٌ إلحاقيٌّ يخفّض `remaining`، وبيد صاحب المكتب وحده، وبسببٍ مكتوب.
 6. رقمُ الإشعار من عدّادٍ مقفولٍ متسلسل — **لا `MAX+1`**.
 7. القناعُ: من لا يرى المبالغ لا يقرأ `amount`/`due`/`remaining`/`credit`.
@@ -25,7 +26,7 @@ from rest_framework.test import APITestCase
 
 from accounting.models import Account
 from accounting.services import create_fiscal_year
-from accounting_office import payments, services
+from accounting_office import fee_invoices, payments, services
 from accounting_office.models import (
     ClientService,
     FeeDraft,
@@ -59,6 +60,16 @@ def decimal_of(value) -> Decimal:
     return Decimal(str(value))
 
 
+def _issue_invoice(draft, actor):
+    """يُصدر ورقةَ المسودّة المعتمدة — **المسارُ نفسُه** الذي يسلُكه الاعتماد.
+
+    #292: بذرةُ مسودّةٍ معتمدةٍ بلا ورقتها حالةٌ لا يُنتجها الإنتاج
+    (`fees.approve_fee_draft` يُصدر في المعاملة نفسها)، و«اللي عليه» صار يُقرأ
+    من الورقة — فالبذرةُ تُصدرها وإلا صار المستحقُّ صفراً في كل اختبار.
+    """
+    return fee_invoices.issue_for_draft(draft, actor=actor)
+
+
 class PaymentsTestCase(APITestCase):
     @classmethod
     def setUpTestData(cls):
@@ -70,6 +81,10 @@ class PaymentsTestCase(APITestCase):
         invalidate_module_cache(cls.tenant.pk)
         services.set_office_setting(cls.tenant, "tax_system", "PS")
         services.set_office_setting(cls.tenant, "office_size", "small")
+        # #292: **بلا ضريبة** — هذه الوحدةُ تقيس التخصيصَ والرصيدَ وكشفَ الحساب،
+        # وأرقامُها (300، 650…) صافيةٌ عن قصد. ونظيرُ المسار بالضريبة مفعّلةً في
+        # `test_fee_due_vat.py`؛ فإطفاءُ الترخيص هنا لا يُخفي شيئاً بل يعزل القياس.
+        services.set_office_setting(cls.tenant, "office_licensed_dealer", False)
 
         cls.office_manager_user = User.objects.create_user(
             username="pay_office_manager", password="x",
@@ -102,7 +117,7 @@ class PaymentsTestCase(APITestCase):
 
     def make_draft(self, client, total, *, year=2026, month=3,
                    status=FeeDraft.STATUS_APPROVED):
-        return FeeDraft.objects.create(
+        draft = FeeDraft.objects.create(
             tenant=client.tenant,
             client=client,
             year=year,
@@ -112,6 +127,13 @@ class PaymentsTestCase(APITestCase):
             status=status,
             approved_by=self.owner if status == FeeDraft.STATUS_APPROVED else None,
         )
+        if status == FeeDraft.STATUS_APPROVED:
+            # #292: «اللي عليه» يُقرأ من **الورقة الصادرة** لا من مجموع المسودّة،
+            # والاعتمادُ في الإنتاج يُصدرها في المعاملة نفسها. فالبذرةُ المباشرة
+            # تُصدر ورقتها كي يقيس الاختبارُ ما يقيسه الإنتاج (والترخيصُ مطفأ في
+            # `setUpTestData` فإجماليُ الورقة = مجموعُ المسودّة، والأرقامُ كما هي).
+            _issue_invoice(draft, self.owner)
+        return draft
 
     def post_payment(self, payload):
         return self.client.post(PAYMENTS, payload, format="json", **self.headers())
