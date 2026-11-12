@@ -97,6 +97,9 @@ class RegistryShapeTest(SettingTestCase):
                 "book_entry_method",
                 # #282: طريقةُ الأتعاب (مكتب ← زبون) واعتمادُها التلقائيّ المقفل.
                 "fee_method", "fee_auto_approve",
+                # #282/أ٢: «المكتب مشتغل مرخّص» (يُظهر سطر الضريبة) وعنوانُ
+                # ورقة فاتورة الأتعاب — **إعدادان لا استنتاج** (#266).
+                "office_licensed_dealer", "fee_invoice_title",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
                 # #285: إشعارُ الدفع — الإرفاقُ وصيغتُه وحدُّ الرمادي، وللزبون تخصيصُها.
@@ -152,6 +155,31 @@ class RegistryShapeTest(SettingTestCase):
 
         self.assertEqual(registry["filing_method"].levels, ("office", "client"))
         self.assertEqual(registry["filing_method"].default, "electronic")
+
+    def test_the_fee_invoice_settings_are_office_level_with_their_defaults(self):
+        """#282/أ٢: «مشتغل مرخّص» افتراضُه مفعّل، وعنوانُ الورقة نصٌّ افتراضُه فارغ.
+
+        والفارغُ **ليس فراغاً على الورقة**: معناه «الافتراضيّ بحسب نظام المُصدِر»
+        («فاتورة أتعاب» / «חשבון עסקה») — فلا يُثبَّت نظامٌ في نصّ الإعداد.
+        """
+        registry = settings_registry.SETTINGS_REGISTRY
+        licensed = registry["office_licensed_dealer"]
+        title = registry["fee_invoice_title"]
+
+        self.assertEqual(licensed.kind, settings_registry.KIND_BOOL)
+        self.assertEqual(licensed.levels, ("office",))
+        self.assertEqual(licensed.default, True)
+        self.assertEqual(licensed.group, settings_registry.GROUP_OFFICE)
+        self.assertEqual(title.kind, settings_registry.KIND_TEXT)
+        self.assertEqual(title.levels, ("office",))
+        self.assertEqual(title.default, "")
+        self.assertEqual(title.max_length, 60)
+        self.assertEqual(
+            settings_registry.validate_value(title, "  فاتورة أتعاب  "),
+            "فاتورة أتعاب",
+        )
+        with self.assertRaises(DjangoValidationError):
+            settings_registry.validate_value(title, "ن" * 61)
 
     def test_the_group_has_its_own_constant_not_the_level(self):
         self.assertEqual(settings_registry.GROUP_OFFICE, "office")
@@ -470,6 +498,8 @@ class SettingsApiTest(SettingTestCase):
                 "reminder_escalation_owner_days", "reminder_default_consent_types",
                 "book_entry_method",
                 "fee_method", "fee_auto_approve",
+                # #282/أ٢: «المكتب مشتغل مرخّص» وعنوانُ ورقة الفاتورة.
+                "office_licensed_dealer", "fee_invoice_title",
                 # #281: تذكيرُ الموعد قبل كم يوم — إعدادُ المكتب ويُخصَّص للزبون.
                 "appointment_reminder_days",
                 # #285: إشعارُ الدفع — ثلاثةُ مفاتيحَ في مجموعة «التذكيرات».
@@ -506,6 +536,10 @@ class SettingsApiTest(SettingTestCase):
         self.assertEqual(rows["tax_system"]["value_label"], "فلسطيني")
         self.assertEqual(rows["office_size"]["value_label"], "غير مختار")
         self.assertEqual(rows["filing_method"]["client_customization_count"], 1)
+        # #282/أ٢: حدُّ طول العنوان يُرسَل مع سطره — حقلُ الشاشة يمنع تجاوزه
+        # قبل الطلب، والعمودُ يحكم خلفه.
+        self.assertEqual(rows["fee_invoice_title"]["max_length"], 60)
+        self.assertEqual(rows["office_licensed_dealer"]["kind"], "bool")
         self.assertTrue(res.data["first_run_required"])
 
     def test_the_office_value_is_set_and_reset_through_the_api(self):
@@ -519,6 +553,27 @@ class SettingsApiTest(SettingTestCase):
         reset = self.client.delete(f"{SETTINGS}filing_method/", **self.headers())
         self.assertEqual(reset.status_code, 200, reset.content)
         self.assertEqual(reset.data["value"], "electronic")
+
+    def test_the_fee_invoice_settings_are_saved_from_the_office_surface(self):
+        """المفتاحان يُحفظان من `settings/<key>/` — وهو ما تحفظه الشاشة.
+
+        (`office_licensed_dealer` منطقيٌّ يُرسَل من مربّعه، و`fee_invoice_title`
+        نصٌّ يُطبَّع؛ والحدُّ يُرسَل مع السطر ليقيّده حقلُ الإدخال.)
+        """
+        licensed = self.client.put(
+            f"{SETTINGS}office_licensed_dealer/", {"value": False}, format="json",
+            **self.headers(),
+        )
+        self.assertEqual(licensed.status_code, 200, licensed.content)
+        self.assertIs(licensed.data["value"], False)
+
+        title = self.client.put(
+            f"{SETTINGS}fee_invoice_title/", {"value": "  فاتورة خدمات  "},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(title.status_code, 200, title.content)
+        self.assertEqual(title.data["value"], "فاتورة خدمات")
+        self.assertEqual(title.data["max_length"], 60)
 
     def test_an_invalid_value_is_a_400(self):
         res = self.client.put(

@@ -36,6 +36,7 @@ from accounting_office import (
     book_reports,
     client_books,
     deadlines,
+    fee_invoices,
     fees,
     payments,
     services,
@@ -50,6 +51,7 @@ from accounting_office.models import (
     DocumentChecklistItem,
     DocumentFile,
     FeeExtraService,
+    FeeInvoice,
     FeeSubscription,
     FeeWriteOff,
     Obligation,
@@ -89,6 +91,10 @@ from accounting_office.serializers import (
     FeeDraftApproveSerializer,
     FeeDraftRowSerializer,
     FeeExtraServiceWriteSerializer,
+    FeeInvoiceCancelSerializer,
+    FeeInvoiceCreditNoteSerializer,
+    FeeInvoiceRowSerializer,
+    FeeInvoiceSupplementarySerializer,
     FeeLedgerQuerySerializer,
     FeePaymentWriteSerializer,
     FeeServicePriceWriteSerializer,
@@ -2510,6 +2516,129 @@ class OfficeFeeServicePriceViewSet(OfficeModuleViewSet):
                 row, masked=fees.amounts_masked(self.tenant, request.user),
             ),
             status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )
+
+
+class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
+    """فواتيرُ الأتعاب — قراءةٌ وأفعالُ إلغاءٍ وتصحيح، **ولا حذفَ ولا تعديل**.
+
+    **`http_method_names` تُغلق `delete`/`put`/`patch`**: الفاتورةُ مستندٌ
+    مرقَّمٌ خرج أو سيخرج، والتصحيحُ إشعارٌ دائن أو تكميلية لا محوُ صفّ. و`POST`
+    على الجمع 405 كذلك — الإصدارُ بالاعتماد وحده (`fees.approve_fee_draft`).
+
+    **والقراءةُ بمصدر الرؤية الواحد** (`fee_invoices.visible_invoices`)،
+    ففاتورةُ زبونٍ لا يراه العضو **404** لا 403؛ والقناعُ قرارٌ يُحسب مرّةً في
+    الخدمة كما في المسودّات، وكتابةُ مبلغِ تصحيحٍ بلا `office.amounts.view` 403.
+    """
+
+    serializer_class = FeeInvoiceRowSerializer
+    http_method_names = ["get", "post", "head", "options"]
+    # مسارُ التفصيل رقميّ: أفعالُه مساراتُ جمعٍ نسبيّة، والرقمُ يمنع الالتباس.
+    lookup_value_regex = r"[0-9]+"
+
+    def get_queryset(self):
+        return fee_invoices.visible_invoices(self.tenant, self.request.user)
+
+    def get_object(self):
+        invoice = self.get_queryset().filter(pk=self.kwargs.get("pk")).first()
+        if invoice is None:
+            raise NotFound("الفاتورة غير موجودة.")
+        return invoice
+
+    def list(self, request, *args, **kwargs):
+        client = (request.query_params.get("client") or "").strip()
+        kind = (request.query_params.get("kind") or "").strip() or None
+        state = (request.query_params.get("state") or "").strip() or None
+        if client and not client.isdigit():
+            raise ValidationError({"client": "معرّفُ زبونٍ غير صالح."})
+        return Response(fee_invoices.invoices_payload(
+            self.tenant,
+            user=request.user,
+            client=int(client) if client else None,
+            kind=kind,
+            state=state,
+        ))
+
+    def _detail(self, invoice):
+        return Response(fee_invoices.invoice_detail(
+            invoice, masked=fees.amounts_masked(self.tenant, self.request.user),
+        ))
+
+    def retrieve(self, request, *args, **kwargs):
+        return self._detail(self.get_object())
+
+    @action(detail=True, methods=["post"], url_path="cancel")
+    def cancel(self, request, pk=None):
+        """«أَلغِها» — قبل إنشاء الرابط وحده، والصفُّ يبقى في التاريخ.
+
+        وإشعارٌ دائنٌ حيٌّ على الفاتورة **409** لا 400: الطلبُ صحيحٌ والحالةُ
+        القائمةُ تمنعه — وإلا بقي تصحيحٌ دائنٌ على أصلٍ ملغى.
+        """
+        invoice = self.get_object()
+        self.require_write()
+        serializer = FeeInvoiceCancelSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            cancelled = fee_invoices.cancel_invoice(
+                invoice,
+                actor=request.user,
+                reason=serializer.validated_data.get("reason", ""),
+            )
+        except fee_invoices.LiveCreditNoteConflict as conflict:
+            return Response(
+                {"invoice": [str(conflict)]},
+                status=status.HTTP_409_CONFLICT,
+            )
+        return self._detail(cancelled)
+
+    @action(detail=True, methods=["post"], url_path="credit-note")
+    def credit_note(self, request, pk=None):
+        """إشعارٌ دائنٌ على سلسلةٍ منفصلة — بمبلغٍ وسببٍ إلزاميّ."""
+        invoice = self.get_object()
+        self.require_write()
+        serializer = FeeInvoiceCreditNoteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        self.reject_amount_writes(data)
+        note = fee_invoices.issue_credit_note(
+            invoice,
+            actor=request.user,
+            amount=data["amount"],
+            reason=data["reason"],
+        )
+        return Response(
+            fee_invoices.invoice_detail(
+                FeeInvoice.objects.select_related(
+                    "client", "issued_by", "related_invoice",
+                ).get(pk=note.pk),
+                masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+    @action(detail=True, methods=["post"], url_path="supplementary")
+    def supplementary(self, request, pk=None):
+        """فاتورةٌ تكميليةٌ للنقص — على السلسلة الرئيسية."""
+        invoice = self.get_object()
+        self.require_write()
+        serializer = FeeInvoiceSupplementarySerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        self.reject_amount_writes(data)
+        extra = fee_invoices.issue_supplementary(
+            invoice,
+            actor=request.user,
+            amount=data["amount"],
+            reason=data.get("reason", ""),
+        )
+        return Response(
+            fee_invoices.invoice_detail(
+                FeeInvoice.objects.select_related(
+                    "client", "issued_by", "related_invoice",
+                ).get(pk=extra.pk),
+                masked=fees.amounts_masked(self.tenant, request.user),
+            ),
+            status=status.HTTP_201_CREATED,
         )
 
 

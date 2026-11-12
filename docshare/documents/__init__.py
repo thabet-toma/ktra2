@@ -90,8 +90,11 @@ from docshare.documents.inventory_docs import (  # noqa: F401
 )
 from docshare.documents.accounting_docs import (  # noqa: F401
     ACCOUNTING_DOC_TYPES,
+    build_fee_invoice,
     build_payment_notice,
+    load_fee_invoice,
     load_payment_notice,
+    page_fee_invoice,
     page_payment_notice,
 )
 from docshare.documents.sales_docs import (  # noqa: F401

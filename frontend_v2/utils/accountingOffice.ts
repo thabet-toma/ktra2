@@ -88,6 +88,8 @@ export interface SettingRow {
   choices: readonly SettingChoice[];
   has_default: boolean;
   default: unknown;
+  /** حدُّ طول النص (`kind === 'text'`) — من السجلّ لا من ثابتٍ في الواجهة. */
+  max_length?: number | null;
   value: unknown;
   /** نصُّ القيمة كما يُعرض — يبنيه الخادم من السجلّ. */
   value_label?: string;
@@ -1692,6 +1694,27 @@ export function readyToSendItemKeys(message: ReadyToSendKeySource): {
     period_start: item.period_start,
     period_end: item.period_end,
   }));
+}
+
+/** أقلُّ ما يحتاجه مفتاحُ صفّ البند — الورقةُ إن كان البندُ فاتورةً. */
+interface ReadyToSendRowKeySource {
+  client_id: number;
+  reminder_type: string;
+  period_start: string;
+  period_end: string;
+  invoice?: { id: number } | null;
+}
+
+/**
+ * مفتاحُ صفّ البند في «جاهز للإرسال» — **معرّفُ الورقة** لبنود الفواتير.
+ *
+ * ورقتان لزبونٍ واحدٍ صادرتان في اليوم نفسه تتشاركان (الزبون، النوع، الفترة):
+ * مفتاحٌ من الأربعة يسلّم React مفتاحين متطابقين فيرسو على الصفّ الخطأ. والورقةُ
+ * نفسُها هي المفتاح حين تكون البندَ، وما ليس فاتورةً يبقى على الأربعة.
+ */
+export function readyToSendItemRowKey(item: ReadyToSendRowKeySource): string {
+  if (item.invoice) return `invoice:${item.invoice.id}`;
+  return `${item.client_id}|${item.reminder_type}|${item.period_start}|${item.period_end}`;
 }
 
 /**

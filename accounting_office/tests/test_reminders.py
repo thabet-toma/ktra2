@@ -21,6 +21,7 @@
    نظامَ مستلِمٍ واحداً يُفرَض على بنودِ زبونين مختلفَي النظام.
 """
 import datetime
+from decimal import Decimal
 from unittest import mock
 
 from django.contrib.auth.models import User
@@ -30,7 +31,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from accounting_office import services
+from accounting_office import fee_invoices, services
 from accounting_office.models import (
     CONSENT_CHANNEL_PAPER,
     CONSENT_CHANNEL_TALK,
@@ -49,6 +50,8 @@ from accounting_office.models import (
     REMINDER_TYPE_CHOICES,
     Contact,
     DocumentChecklistItem,
+    FeeDraft,
+    FeeDraftLine,
     OfficeAlert,
     OfficeClient,
     OfficeHoliday,
@@ -676,11 +679,50 @@ class ReadyListTest(RemindersTestCase):
         }
         self.assertNotIn(foreign.pk, listed)
 
-    def test_the_reminder_type_filter_has_nothing_to_offer_before_its_generator(self):
-        """D1: الأنواعُ الأخرى قوالبُها وإعدادُها موجودان، ولا مولّدَ لها بعد."""
+    def test_the_type_filter_offers_nothing_for_a_client_without_that_item(self):
+        """الفلترُ لا يبتكر بنوداً: زبونٌ بأوراقٍ ناقصةٍ فقط لا بندَ «اللي عليه» له.
+
+        (كان اسمُ هذا الاختبار «قبل أن يصير للنوع مولّد» — وقد صار له مولّدُ
+        فواتير الأتعاب؛ وبقاءُ الاسم يوصف به سلوكٌ استُبدل.)
+        """
         self.ready_client()
         self.assertEqual(self.messages(reminder_type=REMINDER_BALANCE), [])
         self.assertEqual(self.messages(reminder_type=REMINDER_DOCUMENTS), self.messages())
+
+    def test_the_balance_filter_shows_the_fee_invoice_item(self):
+        """نوعُ «اللي عليه» له مولّدٌ: فاتورةُ أتعابٍ صادرةٌ تظهر ببندها ومبلغها."""
+        client, _contact = self.ready_client()
+        draft = FeeDraft.objects.create(
+            tenant=self.tenant,
+            client=client,
+            year=2026,
+            month=1,
+            subtotal=Decimal("300.00"),
+            total=Decimal("300.00"),
+            status=FeeDraft.STATUS_APPROVED,
+            generated_at=timezone.make_aware(
+                datetime.datetime(2026, 1, 31, 12, 0),
+            ),
+        )
+        FeeDraftLine.objects.create(
+            tenant=self.tenant, draft=draft, label="الاشتراك الشهري",
+            amount=Decimal("300.00"), source="subscription",
+        )
+        invoice = fee_invoices.issue_for_draft(draft, actor=self.owner, day=JAN_END)
+
+        items = [
+            item
+            for message in self.messages(reminder_type=REMINDER_BALANCE)
+            for item in message["items"]
+        ]
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual(items[0]["client_id"], client.pk)
+        self.assertEqual(items[0]["reminder_type"], REMINDER_BALANCE)
+        self.assertEqual(items[0]["invoice"]["number"], invoice.number)
+        self.assertEqual(
+            Decimal(items[0]["invoice"]["total"]), Decimal(invoice.total),
+        )
 
 
 # ── الحجب (#280/D5، D8) ──────────────────────────────────────────────────────

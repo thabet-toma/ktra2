@@ -101,6 +101,7 @@ from accounting_office.models import (
     OFFICE_RULE_OVERRIDE_FIELDS,
     REMINDER_ALERT_KINDS,
     REMINDER_APPOINTMENT,
+    REMINDER_BALANCE,
     REMINDER_CHANNEL_LABELS,
     REMINDER_CHANNEL_WHATSAPP,
     REMINDER_COUNTED_KINDS,
@@ -246,10 +247,10 @@ OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount",)
 BOOK_ENTRY_AMOUNT_KEYS: tuple[str, ...] = ("debit", "credit")
 
 #: مبالغُ الأتعاب (#282): مبلغُ الاشتراك وسعرُ خدمة الزبون وسطرُ الإضافة وسطرُ
-#: المسودّة ومجموعاها. **`total` و`subtotal` مفتاحان لا واحد**: المسودّةُ تحمل
-#: مجموعهما ظاهراً في القائمة، ومن لا يرى المبالغ يقرأ `null` فيهما وفي كل سطرٍ
-#: تحته.
-FEE_AMOUNT_KEYS: tuple[str, ...] = ("amount", "subtotal", "total")
+#: المسودّة ومجموعاها، **وقيمةُ ضريبة فاتورة الأتعاب** (أ٢). `total` و`subtotal`
+#: مفتاحان لا واحد: المسودّةُ تحمل مجموعهما ظاهراً في القائمة، ومن لا يرى المبالغ
+#: يقرأ `null` فيهما وفي كل سطرٍ تحته — والفاتورةُ كذلك في `total` و`tax_total`.
+FEE_AMOUNT_KEYS: tuple[str, ...] = ("amount", "subtotal", "total", "tax_total")
 
 #: مبالغُ الدفعات و«اللي عليه» (#283): مبلغُ الدفعة وتخصيصُها، والمتبقّي على
 #: المسودّة، والمدفوعُ عليها والمشطوبُ منها، و`due`/`credit`، ومجموعا الكشف،
@@ -723,6 +724,9 @@ def _setting_row(definition, *, level=settings_registry.LEVEL_OFFICE) -> dict:
         "choices": definition.choice_options(),
         "has_default": not definition.has_no_default,
         "default": None if definition.has_no_default else copy.deepcopy(definition.default),
+        # حدُّ الطول للنصوص (`KIND_TEXT`) — العمودُ يحكم، والضابطُ يمنع التجاوز
+        # قبل الطلب، فلا يقتطع MySQL النصَّ بصمتٍ ولا يردّ الخادمُ 400 بعد كتابة.
+        "max_length": definition.max_length,
     }
 
 
@@ -6649,6 +6653,10 @@ class ReminderCandidate:
     #: ويُركَّب في `ready_to_send_payload` بعد الحواجز كلّها، فلا إشعارَ — ولا
     #: رابطَ يُنشَأ — لبندٍ لن يُرسَل.
     notice: Any = None
+    #: #282/أ٢: فاتورةُ الأتعاب المركَّبةُ على بند «اللي عليه» — رقمُها ومبلغُها
+    #: واستحقاقُها ورابطُ ورقتها. `None` لبندٍ ليس فاتورة (أوراقٌ ومواعيد).
+    #: ويُركَّب الرابطُ في `attach_invoice_links` بعد الحواجز كالإشعار.
+    invoice: Any = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -6732,10 +6740,10 @@ def reminder_template_bodies(tenant, reminder_type) -> dict[str, str]:
 
 
 #: الأنواعُ التي لها **مولّدٌ** اليوم: الأوراق (#280)، وتذكيرُ الموعد، و«موعد
-#: رسمي قريب» (#281). والرابعُ (`balance`) بقالبٍ وإعدادٍ بلا مولّدٍ بعد (#285) —
-#: فطلبُ قائمته يُعيد فراغاً لا بنوداً بنصٍّ لا يخصّها.
+#: رسمي قريب» (#281)، و«اللي عليه» من فواتير الأتعاب (#282/أ٢). والرابعُ كان
+#: بقالبٍ وإعدادٍ بلا مولّدٍ حتى صار له أوّله — فاتورةٌ صادرةٌ تُطالب بمبلغها.
 _GENERATED_REMINDER_TYPES: tuple[str, ...] = (
-    REMINDER_DOCUMENTS, REMINDER_APPOINTMENT, REMINDER_DEADLINE,
+    REMINDER_DOCUMENTS, REMINDER_APPOINTMENT, REMINDER_DEADLINE, REMINDER_BALANCE,
 )
 
 
@@ -6749,6 +6757,17 @@ def _appointments_module():
     from accounting_office import appointments
 
     return appointments
+
+
+def _fee_invoices_module():
+    """وحدةُ فاتورة الأتعاب (#282/أ٢) — **استيرادٌ مؤجَّل** للسبب نفسه.
+
+    `fee_invoices` يستورد `services` (الرؤيةُ والقناعُ و`ReminderCandidate`)،
+    فالنداءُ وقتَ الحاجة فقط.
+    """
+    from accounting_office import fee_invoices
+
+    return fee_invoices
 
 
 def _reminder_candidates(
@@ -6896,6 +6915,18 @@ def _reminder_candidates(
         postponed_pairs=postponed,
         reminder_type=reminder_type,
     ))
+    # #282/أ٢: «اللي عليه» من فاتورةٍ صادرةٍ لم تُلغَ — مقدارُها واستحقاقُها بعد
+    # سبعة أيام. مولّدٌ ثالثٌ يُرجع `ReminderCandidate` نفسه، فيمرّ في الحواجز
+    # كلّها أدناه (الإذنُ ويومُ الراحة والعطلةُ والتأجيلُ والسقف) بلا استثناء.
+    candidates.extend(_fee_invoices_module().invoice_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
     return candidates
 
 
@@ -6958,6 +6989,9 @@ def _reminder_item_payload(candidate) -> dict:
         # الإشعارُ نصُّه للزبون، فقناعُ البند وحده يُخفي عن الموظف ما يقرؤه من
         # يُرسِل إليه — والقناعُ يبقى حيث كان على صفوف الجداول والحمولات.
         "notice": _appointments_module().payment_notice_item(candidate.notice),
+        # #282/أ٢: بندُ الفاتورة — نصوصٌ مصيغةٌ ورابطُ ورقتها (يُركَّب بعد
+        # الحواجز كالإشعار)، وبلا فاتورةٍ يخرج `None` فيبقى شكلُ البند ثابتاً.
+        "invoice": _fee_invoices_module().invoice_item(candidate.invoice),
         "subject": {"document_item_codes": list(candidate.missing_codes)},
     }
 
@@ -6979,7 +7013,9 @@ def _reminder_render_values(tenant, candidate, *, language="") -> dict:
     absent = reminder_absent_text(language)
     return {
         "client_name": candidate.client.name,
-        "period": deadlines.period_label(candidate.period_start, candidate.period_end),
+        "period": candidate.period_text or deadlines.period_label(
+            candidate.period_start, candidate.period_end,
+        ),
         "due_date": (candidate.render_due or candidate.next_due).strftime("%d/%m/%Y"),
         "amount": absent if candidate.amount is None else f"{candidate.amount:.2f}",
         "missing_list": "، ".join(candidate.missing) or absent,
@@ -7007,6 +7043,10 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
         ))
         if candidate.notice is not None:
             parts.append(appointments.payment_notice_text(candidate.notice))
+        # #282/أ٢: سطرُ الفاتورة بعد نصّ نوعه كالإشعار — رقمٌ ومبلغٌ واستحقاقٌ
+        # ورابط، ولا رمزَ جديداً في قوالب المكتب.
+        if candidate.invoice is not None:
+            parts.append(_fee_invoices_module().invoice_text(candidate.invoice))
     body = "\n\n".join(parts)
     return {
         "recipient": {
@@ -7130,6 +7170,11 @@ def ready_to_send_payload(
     # (زبون، تاريخ) لا بنداً بنداً، فلا عملَ مكرَّرٌ ولا استعلامَ لكلّ زبون.
     candidates = _with_payment_notices(
         tenant, candidates, settings_by_client, user=user,
+    )
+    # #282/أ٢: رابطُ ورقة الفاتورة — بعد الحواجز كلّها كالإشعار، ولمن يملك
+    # مشاركةَ النوع وحده (لا صفَّ مشاركةٍ من مسار قراءةٍ لعضوٍ للقراءة).
+    candidates = _fee_invoices_module().attach_invoice_links(
+        tenant, candidates, user=user,
     )
     # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف
     # خمسَ قراءاتٍ لمكتبٍ واحدٍ في يوم. والأنواعُ من البنود المحسوبة وحدها — فلا

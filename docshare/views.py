@@ -32,8 +32,8 @@ from core.throttles import ClientIpScopedThrottle
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
-    DECISION_ACCEPTED, DECISION_REJECTED, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
-    DOC_STOCKTAKE_COUNT, DocumentShare,
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_FEE_INVOICE, DOC_PAYMENT_NOTICE,
+    DOC_PURCHASE_RFQ, DOC_STOCKTAKE_COUNT, DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
 
@@ -709,6 +709,17 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": (
                     "إشعار الدفع يُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type == DOC_FEE_INVOICE:
+            # #282/أ٢: الفاتورةُ تُنشأ من «جاهز للإرسال» وحده، وللسبب نفسه:
+            # هذا السطح يأخذ أيَّ `doc_id` متسلسلٍ يُخمَّن ويمنح رابطاً عامّاً،
+            # فصلاحيةُ النوع وحدها كانت تكفي محاسباً ليتّخذ رابطَ فاتورة زميلٍ
+            # بمبلغه واسم زبونه — تجاوزاً لعزل `visible_clients`.
+            return Response(
+                {"detail": (
+                    "فاتورة الأتعاب تُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

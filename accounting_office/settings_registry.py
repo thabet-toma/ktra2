@@ -26,6 +26,9 @@ KIND_INTEGER = "integer"
 KIND_WEEKDAYS = "weekdays"
 #: #277: قائمةُ مفاتيحَ من `choices` بلا تكرار — «أنواع الأحداث المفعّلة».
 KIND_MULTI_CHOICE = "multi_choice"
+#: #282/أ٢: نصٌّ حرّ قصير — «نصّ عنوان ورقة فاتورة الأتعاب». يُخزَّن كما كُتب
+#: (مُطبَّعاً) وبحدّ طولٍ في التعريف، كي لا يتجاوز عمودَ النموذج على MySQL بصمت.
+KIND_TEXT = "text"
 #: #284: نصٌّ حرّ — أكوادُ حسابات الدفاتر اليوم، ولا يُقفل على قائمةٍ مخزَّنة هنا:
 #: الحسابُ يُحلّ عند الترحيل من شجرة الشركة نفسها، وكودٌ يُكتب غلطاً يردّ 400
 #: باسم مفتاحه بدل أن يُقبل ثم يسقط القيد.
@@ -223,6 +226,9 @@ class SettingDefinition:
     min_value: int | None = None
     #: حدٌّ أعلى للأنواع العددية — «ساعةُ الإرسال» تنتهي عند 23 ولا تعرف `None`.
     max_value: int | None = None
+    #: حدُّ الطول للنصوص (`KIND_TEXT`) — العمودُ في القاعدة يحكم، والفحصُ هنا
+    #: كي لا يُقتطع النصُّ بصمتٍ على MySQL.
+    max_length: int | None = None
     #: تسميةُ الإعداد من منظور الزبون حين تختلف عن تسمية المكتب — «أيام عطلة
     #: المكتب» للمكتب، و«يوم راحة الزبون» تخصيصاً فوقه. القيمةُ والتسميةُ من
     #: السجلّ نفسه، فلا تصنع الواجهة اسماً ثانياً يفترق عنه.
@@ -316,6 +322,18 @@ def validate_value(definition: SettingDefinition, value):
         return _canonical_weekdays(value)
     if definition.kind == KIND_MULTI_CHOICE:
         return _canonical_multi_choice(definition, value)
+    if definition.kind == KIND_TEXT:
+        if not isinstance(value, str):
+            raise ValidationError({"value": f"«{definition.label}» نصّ."})
+        text = value.strip()
+        if definition.max_length is not None and len(text) > definition.max_length:
+            raise ValidationError({
+                "value": (
+                    f"«{definition.label}» أطول من "
+                    f"{definition.max_length} حرفاً."
+                ),
+            })
+        return text
     if definition.kind == KIND_TEXT:
         if not isinstance(value, str):
             raise ValidationError({"value": f"«{definition.label}» نصّ."})
@@ -717,6 +735,39 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default=False,
         group=GROUP_OFFICE,
         note="مقفلٌ مطفأً في هذه المرحلة — المسودّةُ يُراها صاحبُ المكتب قبل اعتمادها.",
+    ),
+    #: #282/أ٢: «المكتب مشتغل مرخّص» — **إعدادٌ لا استنتاج** (#266). سطرُ
+    #: الضريبة على فاتورة الأتعاب يظهر حين يُفعَّل ويغيب كاملاً حين يُطفأ،
+    #: وافتراضُه مفعّل. **ولا يُشتقّ من وجود رقم تسجيل**: عوسيك بطور قد يحمل
+    #: رقماً وهو غير مشتغل مرخّص، فيُطبع سطرُ מע"מ ويُحصَّل ما لا يجب تحصيله.
+    "office_licensed_dealer": SettingDefinition(
+        key="office_licensed_dealer",
+        label="المكتب مشتغل مرخّص (يُظهر سطر الضريبة)",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=True,
+        group=GROUP_OFFICE,
+        note=(
+            "مفعّلاً يظهر سطرُ الضريبة على فاتورة الأتعاب بنسبة الشركة؛ "
+            "ومطفأً تصير الورقةَ أتعاباً صافيةً بلا سطر ضريبة."
+        ),
+    ),
+    #: #282/أ٢: نصُّ عنوان الورقة — إعدادٌ كما نصّ #266، وافتراضُه **حسب نظام
+    #: المُصدِر** (`FEE_INVOICE_TITLES`) لا نصاً واحداً: «فاتورة الأتعاب» /
+    #: «חשבון עסקה». والقيمةُ الفارغة تعني «الافتراضيّ» فلا يُثبَّت نظامٌ في
+    #: نصّ الإعداد.
+    "fee_invoice_title": SettingDefinition(
+        key="fee_invoice_title",
+        label="عنوان ورقة فاتورة الأتعاب",
+        kind=KIND_TEXT,
+        levels=(LEVEL_OFFICE,),
+        default="",
+        max_length=60,
+        group=GROUP_OFFICE,
+        note=(
+            "فارغٌ = الافتراضيّ بحسب نظام المكتب («فاتورة الأتعاب» / «חשבון עסקה»). "
+            "وليس فيه «فاتورة ضريبية» ولا «חשבונית מס» — سطرُ النفي ثابتٌ في الورقة."
+        ),
     ),
     # ── القيدُ التلقائيُّ في دفاتر المكتب (#284) ──
     #

@@ -45,7 +45,13 @@ APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 #: `TaxThreshold.amount` (#273): سقفٌ ضريبيّ **منشور** في `source_url` — بياناتُ
 #: منصّةٍ واحدةٌ لكل المكاتب (بلا `tenant`)، وليس مبلغَ زبونٍ فيمرّ بالقناع. ولو
 #: قُنِّع لاختفى أساسُ الاقتراح من كل شاشة، وهو رقمٌ عامٌّ في التشريع لا سرّ عميل.
-MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({"TaxThreshold.amount"})
+#:
+#: `FeeInvoice.tax_percent` (#282/أ٢): **نسبةٌ لا مبلغ** — لقطةُ نسبة الإصدار
+#: (16.00)، وقنعُها لا يخفي شيئاً؛ ومبلغُها `tax_total` مقنَّعٌ كسائر المبالغ.
+MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({
+    "TaxThreshold.amount",
+    "FeeInvoice.tax_percent",
+})
 
 
 def declared_amount_fields(source: str) -> list[str]:
@@ -138,12 +144,17 @@ class AmountKeysGuardTest(SimpleTestCase):
             # #286: `debit`/`credit` — حقلا بند الحركة، مسجَّلان في `AMOUNT_KEYS`.
             # #282: `amount` ثلاث مرّات (الاشتراكُ والإضافةُ وسعرُ الخدمة)،
             # و`subtotal`/`total` لمجموعَي المسودّة — كلُّها في `FEE_AMOUNT_KEYS`.
+            # #282/أ٢: `amount` مرّتين في مُسلسِلَي الإشعار الدائن والتكميلية
+            # (مبلغُ التصحيح مبلغٌ يُقنَّع ويُمنَع على من لا يراه)، و`total`
+            # و`tax_total` لصفّ الفاتورة — كلُّها في `FEE_AMOUNT_KEYS`.
             # #283: `paid_amount`/`remaining` على سطر المسودّة، و`amount` ثلاث
             # مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في `PAYMENT_AMOUNT_KEYS`.
             [
                 "annual_sales", "suggested_price", "amount", "debit", "credit",
                 "amount", "amount", "amount", "subtotal", "total",
-                "paid_amount", "remaining", "amount", "amount", "amount",
+                "paid_amount", "remaining", "amount", "amount",
+                "total", "tax_total",
+                "amount", "amount", "amount",
             ],
         )
         self.assertEqual(
@@ -191,6 +202,12 @@ class ModelAmountGuardTest(SimpleTestCase):
                 "FeeDraft.total",
                 "FeeDraftLine.amount",
                 "FeeExtraService.amount",
+                # #282/أ٢: مجموعُ الفاتورة وضريبتُها — مسجَّلان لا مُعفَيان؛
+                # ونسبتُها `tax_percent` مُعفاةٌ (`FeeInvoice.tax_percent`) لأنها
+                # **نسبةٌ لا مبلغ**، ولذلك تُسرد هنا ولا تدخل جردَ المسجَّل.
+                "FeeInvoice.tax_percent",
+                "FeeInvoice.tax_total",
+                "FeeInvoice.total",
                 # #283: مبلغُ الدفعة وتخصيصُها والشطب — مسجَّلةٌ لا مُعفاة.
                 "FeePayment.amount",
                 "FeePaymentAllocation.amount",

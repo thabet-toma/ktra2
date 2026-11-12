@@ -20,6 +20,7 @@ from accounting_office.views import (
     OfficeDocumentViewSet,
     OfficeFeeDraftViewSet,
     OfficeFeeExtraServiceViewSet,
+    OfficeFeeInvoiceViewSet,
     OfficeFeeLedgerViewSet,
     OfficeFeePaymentViewSet,
     OfficeFeeServicePriceViewSet,
@@ -130,6 +131,14 @@ router.register(
     "fees/service-prices",
     OfficeFeeServicePriceViewSet,
     basename="accounting-office-fee-service-prices",
+)
+# #282/أ٢: فاتورةُ الأتعاب الورقية — قراءةٌ وأفعالُ إلغاءٍ وإشعارٍ دائنٍ وتكميلية.
+# **لا حذفَ ولا تعديل**: `http_method_names` في الـViewSet تُغلق `delete`/`put`/
+# `patch`، والإصدارُ بالاعتماد وحده (`POST fees/drafts/<pk>/approve/`).
+router.register(
+    "fees/invoices",
+    OfficeFeeInvoiceViewSet,
+    basename="accounting-office-fee-invoices",
 )
 # #283: الدفعات — قراءةٌ بفلترة وإنشاءٌ بتخصيص، **ولا حذفَ ولا تعديل**. والشطبُ
 # فعلٌ على المسودّة (`fees/drafts/<pk>/write-off/`) لأن السطرَ يخصّها لا الدفعة.

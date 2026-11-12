@@ -77,6 +77,7 @@ import {
   previousMonthKey,
   readTodayFilter,
   readyToSendItemKeys,
+  readyToSendItemRowKey,
   readyToSendMessageKey,
   readyToSendTypeChips,
   reminderLogKindClass,
@@ -1065,6 +1066,20 @@ test('ترشيحُ النوع يُبقي الرسالة كاملةً إذا حم
   // النوعُ المختار يبقى رسالةً واحدةً كاملةً — لا تُقصّ بنودُها الأخرى.
   assert.equal(filterReadyToSendMessages(messages, 'deadline')[0].items.length, 2);
   assert.deepEqual(filterReadyToSendMessages(messages, 'appointment'), []);
+});
+
+test('مفتاحُ صفّ البند من **معرّف الورقة**: ورقتان في يومٍ واحدٍ لا تتشاركان مفتاحاً', () => {
+  const first = { ...DOCUMENT_ITEM, invoice: { id: 41 } };
+  const second = { ...DOCUMENT_ITEM, invoice: { id: 42 } };
+
+  // الورقتان متطابقتان في (الزبون، النوع، الفترة) — والورقةُ وحدها تفصل.
+  assert.equal(readyToSendItemRowKey(first), 'invoice:41');
+  assert.notEqual(readyToSendItemRowKey(first), readyToSendItemRowKey(second));
+  // وما ليس فاتورةً يبقى على مفتاحه الرباعيّ كما كان.
+  assert.equal(
+    readyToSendItemRowKey(DOCUMENT_ITEM),
+    '3|documents|2026-10-01|2026-10-31',
+  );
 });
 
 test('مفتاحُ الرسالة يميّز رسالتَي شخصٍ واحدٍ ولا يتغيّر بترتيب البنود', () => {

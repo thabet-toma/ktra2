@@ -24,6 +24,7 @@ from django.conf import settings
 from django.db import models
 from django.utils import timezone
 
+from core.terminology import OFFICE_FEE_INVOICE_LABEL
 from tenants.models import Tenant
 
 #: أنواع المستندات المشمولة. التوسيع = سطر هنا وسطر في `documents.DOC_TYPES`.
@@ -59,6 +60,9 @@ DOC_STOCKTAKE_COUNT = "stocktake_count"
 #: واحد («عليك» أحمر / «إلك» أخضر / الرماديُّ قريبٌ من الصفر). انظر
 #: `documents.accounting_docs`.
 DOC_PAYMENT_NOTICE = "payment_notice"
+#: #282/أ٢: فاتورةُ الأتعاب الورقية — مستندٌ مرقَّمٌ يُصدره المكتبُ لزبونه، وليس
+#: فاتورةً ضريبية (سطرُ النفي ثابتٌ في كل صفحة). انظر `documents.accounting_docs`.
+DOC_FEE_INVOICE = "fee_invoice"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -78,6 +82,7 @@ DOC_TYPE_CHOICES = [
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
     (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
     (DOC_PAYMENT_NOTICE, "إشعار دفع"),
+    (DOC_FEE_INVOICE, OFFICE_FEE_INVOICE_LABEL),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

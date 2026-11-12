@@ -27,6 +27,7 @@ from django.db.models import Q
 from django.utils import timezone
 
 from accounting_office import settings_registry
+from core.terminology import OFFICE_FEE_INVOICE_LABEL
 #: أنواعُ الأحداث (#277) — تُعرَّف في السجلّ لأن إعداد `enabled_event_kinds` يقرأ
 #: مفاتيحها، والسجلَّ لا يستورد النماذج (دَّورة). وتُعاد تصديراً هنا فتُقرأ من
 #: النماذج كسائر ثوابت الموديول (`as` نفسَه = تصديرٌ مقصود لا استيرادٌ عابر).
@@ -3809,6 +3810,282 @@ class FeeDraftLine(models.Model):
     def save(self, *args, **kwargs):
         if self.draft_id:
             self.tenant_id = self.draft.tenant_id
+        super().save(*args, **kwargs)
+
+
+# ── فاتورةُ الأتعاب الورقية (#282، أ٢/١) ───────────────────────────────────────
+#
+# **المسودّةُ حسابٌ والفاتورةُ مستند**، فلا يُدمجان: `FeeDraft` تُحسب وتُعتمد
+# (أ١)، و`FeeInvoice` تُرقَّم وتُطبع بعد الاعتماد، وتحمل حقولَها القانونية لقطةً.
+# ولذلك `total` هنا **شاملٌ للضريبة** و`tax_total` نصيبُها منه — مصدران لا واحد،
+# فالورقةُ تطبع «قبل الضريبة» و«الضريبة» و«شاملاً الضريبة» من عمودين لا من حسابٍ
+# وقتَ العرض (فاتورةٌ تُقرأ بعملية حسابٍ تُقرأ خطأً بعد تغيير نسبة).
+#
+# **و`is_tax_invoice` ليس حقلاً**: «الفوترة الرسمية» مطفأةٌ ومقفلة، وخاصيّةٌ لا
+# حقلُ إعداد — فلا مفتاحَ يفتحها ولا صفٌّ يحملها.
+FEE_INVOICE_KIND_INVOICE = "invoice"
+FEE_INVOICE_KIND_CREDIT_NOTE = "credit_note"
+FEE_INVOICE_KIND_SUPPLEMENTARY = "supplementary"
+FEE_INVOICE_KIND_CHOICES: list[tuple[str, str]] = [
+    (FEE_INVOICE_KIND_INVOICE, OFFICE_FEE_INVOICE_LABEL),
+    (FEE_INVOICE_KIND_CREDIT_NOTE, "إشعار دائن"),
+    (FEE_INVOICE_KIND_SUPPLEMENTARY, "فاتورة تكميلية"),
+]
+FEE_INVOICE_KIND_LABELS: dict[str, str] = dict(FEE_INVOICE_KIND_CHOICES)
+
+#: عنوانُ الورقة الافتراضيّ **بحسب نظام المُصدِر الضريبي** — يُخزَّن لحظةَ
+#: الإصدار (أو يُقرأ من إعداد `fee_invoice_title`) فلا يغيّر تعديلُ العنوان
+#: ورقةً خرجت. ولا «فاتورة ضريبية» ولا «חשבונית מס» فيه.
+FEE_INVOICE_TITLE_PS = OFFICE_FEE_INVOICE_LABEL
+FEE_INVOICE_TITLE_IL = "חשבון עסקה"
+FEE_INVOICE_TITLES: dict[str, str] = {
+    "PS": FEE_INVOICE_TITLE_PS,
+    "IL": FEE_INVOICE_TITLE_IL,
+}
+#: عنوانُ ورقة الإشعار الدائن — **ليس عنوان الفاتورة** (#282/أ٢): ورقةٌ تحمل
+#: عنوانَ الفاتورة على مبلغٍ دائنٍ تُقرأ مطالبةً، والعنوانُ يقول نوعَ المستند.
+FEE_INVOICE_CREDIT_TITLE_PS = "إشعار دائن أتعاب"
+FEE_INVOICE_CREDIT_TITLE_IL = "הודעת זיכוי"
+FEE_INVOICE_CREDIT_TITLES: dict[str, str] = {
+    "PS": FEE_INVOICE_CREDIT_TITLE_PS,
+    "IL": FEE_INVOICE_CREDIT_TITLE_IL,
+}
+
+#: سطرُ النفي الثابت — **في كل صفحة، لا يُطفأ ولا يُحذف بإعداد**. ورقةٌ بلا نفيٍ
+#: تدّعي الرسمية، والعقوبةُ عليها في القانون نفسه (م55/1 فلسطينياً: ضعفُ الضريبة).
+FEE_INVOICE_NOT_TAX_LINE_PS = "ليست فاتورة ضريبية"
+FEE_INVOICE_NOT_TAX_LINE_IL = "אינו חשבונית מס"
+FEE_INVOICE_NOT_TAX_LINES: dict[str, str] = {
+    "PS": FEE_INVOICE_NOT_TAX_LINE_PS,
+    "IL": FEE_INVOICE_NOT_TAX_LINE_IL,
+}
+
+#: سلسلتان لا واحدة: الفاتورةُ (والتكميلية) على `أتعاب-{السنة}`، والإشعارُ الدائن
+#: على `إشعار-أتعاب-{السنة}` — فإشعارٌ دائنٌ برقمٍ من سلسلة الفواتير يقرأ
+#: فاتورةً ثانية في كشف الزبون.
+FEE_INVOICE_SERIES_PREFIX = "أتعاب"
+FEE_INVOICE_CREDIT_SERIES_PREFIX = "إشعار-أتعاب"
+FEE_INVOICE_SERIES_MAX_LENGTH = 20
+#: عرضُ العدّاد: خمسةُ أرقامٍ — `أتعاب-2026-00007`.
+FEE_INVOICE_SEQUENCE_WIDTH = 5
+
+
+def fee_invoice_series(year) -> str:
+    """سلسلةُ الفاتورة والتكميلية لسنةٍ — البادئةُ تحمل السنة لا عموداً ثانياً."""
+    return f"{FEE_INVOICE_SERIES_PREFIX}-{int(year)}"
+
+
+def fee_invoice_credit_series(year) -> str:
+    """سلسلةُ الإشعار الدائن لسنةٍ — منفصلةٌ عن سلسلة الفواتير عمداً."""
+    return f"{FEE_INVOICE_CREDIT_SERIES_PREFIX}-{int(year)}"
+
+
+def fee_invoice_number(series: str, number: int) -> str:
+    """الصيغةُ النهائية `"{series}-{n:05d}"` — في موضعٍ واحد يقرؤه الحارسُ والاختبار."""
+    return f"{series}-{int(number):0{FEE_INVOICE_SEQUENCE_WIDTH}d}"
+
+
+class FeeInvoiceSequence(models.Model):
+    """عدّادُ ترقيم فواتير المكتب — **أداةُ القفل والترقيم** لا عموداً محسوباً.
+
+    `(tenant, year, series) → last_number`، والزيادةُ داخل `transaction.atomic()`
+    بعد `select_for_update` على هذا الصفّ. **لا `MAX(number)+1` ولا `count()+1`**:
+    كلاهما يقرأ لقطةً قديمة تحت التزامن فيُكرّر رقماً أو يُحدث فجوة — ورقمُ
+    فاتورةٍ مكرَّر عطبٌ محاسبيّ لا خطأُ عرض. والقيدُ `(tenant, number)` على
+    `FeeInvoice` طبقةٌ ثانية تُساند القفل لا تُبدله.
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_invoice_sequences",
+        verbose_name="المكتب",
+    )
+    year = models.PositiveSmallIntegerField(verbose_name="السنة")
+    series = models.CharField(
+        max_length=FEE_INVOICE_SERIES_MAX_LENGTH, verbose_name="السلسلة",
+    )
+    last_number = models.PositiveIntegerField(default=0, verbose_name="آخر رقم")
+
+    class Meta:
+        verbose_name = "عدّاد فواتير الأتعاب"
+        verbose_name_plural = "عدّادات فواتير الأتعاب"
+        ordering = ["tenant_id", "year", "series"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["tenant", "year", "series"],
+                name="uniq_fee_invoice_sequence",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.series}:{self.last_number}"
+
+
+class FeeInvoice(models.Model):
+    """فاتورةُ أتعابٍ **مرقَّمةٌ لا تُمحى** — والتصحيحُ إشعارٌ دائن أو تكميلية.
+
+    **وثلاثةُ أنواعٍ في صفٍّ واحد** (`kind`) لأن الحقولَ واحدة والحقولَ القانونيةَ
+    واحدة: إشعارٌ دائنٌ يحمل كلَّ حقول الفاتورة مع قيمته وسببه (م.4–م.12 من
+    تعليمات 25/2025)، والنسختان تختلفان في السلسلة والعلاقة لا في الشكل.
+
+    **ولا حذف ولا تعديل**: `cancelled_at` وحدها تُكتب — وقبل إنشاء الرابط فقط،
+    لأن ورقةً بيد الزبون لا يُقال لها «أُلغيت» بضغطةٍ في الخادم.
+    """
+
+    KIND_INVOICE = FEE_INVOICE_KIND_INVOICE
+    KIND_CREDIT_NOTE = FEE_INVOICE_KIND_CREDIT_NOTE
+    KIND_SUPPLEMENTARY = FEE_INVOICE_KIND_SUPPLEMENTARY
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_fee_invoices",
+        verbose_name="المكتب",
+    )
+    client = models.ForeignKey(
+        OfficeClient,
+        #: تاريخٌ لا يُمحى: فاتورةُ زبونٍ تبقى بعد إنهائه وبعد أيّ تصفيةِ سجلّ.
+        on_delete=models.PROTECT,
+        related_name="fee_invoices",
+        verbose_name="الزبون",
+    )
+    #: **`source_draft` لا `draft`، وFK لا `OneToOne`** (#282/أ٢): الإلغاءُ
+    #: يعيد المسودّةَ `approved → draft` فتُعتمد ثانيةً وتُصدر ورقةً جديدةً
+    #: برقمٍ جديد — فمسودّةٌ واحدة قد تُنتج ورقتين في التاريخ (الملغاة والسارية).
+    #: **ولا فرادة:** المفتاحُ أثرٌ تاريخيّ لا قيدُ «ورقةٌ واحدة لكل مسودّة»؛
+    #: والقيدُ الحقيقيّ «لا فاتورتان حيّتان لمسودّةٍ واحدة» يُفرض في الخدمة
+    #: تحت قفل صفّ المسودّة (`select_for_update` في الاعتماد)، لأن فرادةً
+    #: مشروطةً (`cancelled_at IS NULL`) لا تدعمها MySQL وتُلغى بصمت.
+    source_draft = models.ForeignKey(
+        FeeDraft,
+        on_delete=models.PROTECT,
+        #: **فارغةٌ في التصحيح**: الإشعارُ الدائن والفاتورةُ التكميلية مستندان
+        #: على فاتورةٍ (`related_invoice`) لا فاتورةُ شهرٍ ثانية.
+        null=True,
+        blank=True,
+        related_name="invoices",
+        verbose_name="المسودّة المصدر",
+    )
+    kind = models.CharField(
+        max_length=20,
+        choices=FEE_INVOICE_KIND_CHOICES,
+        default=FEE_INVOICE_KIND_INVOICE,
+        verbose_name="النوع",
+    )
+    #: الإشعارُ الدائن والفاتورةُ التكميلية يشيران إلى فاتورتهما — والأصلُ يبقى.
+    related_invoice = models.ForeignKey(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="corrections",
+        verbose_name="الفاتورة الأصل",
+    )
+    number = models.CharField(max_length=40, verbose_name="الرقم")
+    #: عنوانُ الورقة كما طُبعت — نصُّ الإعداد افتراضُه، وهو لقطةٌ لا مرجعٌ حيّ.
+    title = models.CharField(max_length=60, verbose_name="عنوان الورقة")
+    #: **نظامُ الورقة لقطةً** (#282/أ٢): يُقرأ منه عند كل عرض، ولا يُقرأ نظامُ
+    #: الزبون الحيّ — تغييرُ نظام المكتب بعد الإصدار لا يقلب ورقةً عربيةً عبرية.
+    tax_system = models.CharField(
+        max_length=2,
+        choices=[("PS", "فلسطيني"), ("IL", "إسرائيلي")],
+        default="PS",
+        verbose_name="النظام الضريبي",
+    )
+    #: **شاملٌ للضريبة**: الإجماليُ الذي يدفعه الزبون.
+    total = models.DecimalField(max_digits=14, decimal_places=2, verbose_name="الإجمالي")
+    #: نصيبُ الضريبة من `total` — صفرٌ حين المكتبُ ليس مشتغلاً مرخّصاً.
+    tax_total = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="قيمة الضريبة",
+    )
+    #: **نسبةُ الضريبة لقطةً** (#282/أ٢): تُخزَّن عند الإصدار ولا تُشتقّ عند
+    #: العرض، فتغييرُ نسبة الشركة لا يعيد كتابة ورقةٍ خرجت. **وهي ليست مبلغاً**
+    #: فلا تدخل `AMOUNT_KEYS`؛ ومبلغُها `tax_total` مقنَّعٌ كسائر المبالغ.
+    tax_percent = models.DecimalField(
+        max_digits=5, decimal_places=2, default=0, verbose_name="نسبة الضريبة",
+    )
+    #: رقمُ الفاتورة الرسمية الخارجية (فاتورةٌ ضريبية أصدرها المكتب) — اختياريّ،
+    #: وغيابُه هو الحالُ الغالب: ورقتُنا ليست فاتورةً ضريبية.
+    external_number = models.CharField(
+        max_length=60, blank=True, default="", verbose_name="رقم الفاتورة الخارجية",
+    )
+    issued_at = models.DateTimeField(default=timezone.now, verbose_name="تاريخ الإصدار")
+    issued_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_invoices_issued",
+        verbose_name="أصدرها",
+    )
+    cancelled_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="وقت الإلغاء",
+    )
+    cancelled_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_fee_invoices_cancelled",
+        verbose_name="ألغاها",
+    )
+    cancel_reason = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="سبب الإلغاء",
+    )
+
+    class Meta:
+        verbose_name = OFFICE_FEE_INVOICE_LABEL
+        verbose_name_plural = "فواتير الأتعاب"
+        ordering = ["-issued_at", "-id"]
+        constraints = [
+            #: رقمٌ واحدٌ لفاتورةٍ واحدة في المكتب — طبقةٌ ثانية تُساند القفل.
+            models.UniqueConstraint(
+                fields=["tenant", "number"], name="uniq_fee_invoice_number",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(tax_total__gte=0) & models.Q(total__gte=0),
+                name="fee_invoice_amounts_not_negative",
+            ),
+        ]
+        indexes = [
+            models.Index(
+                fields=["tenant", "client"], name="office_fee_inv_tenant_client",
+            ),
+            models.Index(
+                fields=["tenant", "kind"], name="office_fee_inv_tenant_kind",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.number} ({self.kind})"
+
+    @property
+    def is_tax_invoice(self) -> bool:
+        """**ثابتٌ `False` غيرُ قابلٍ للضبط** — خاصيّةٌ لا حقلُ إعداد.
+
+        «الفوترة الرسمية» مطفأةٌ ومقفلةٌ في هذه المرحلة: ورقةٌ تدّعي أنها فاتورة
+        ضريبية وهي ليست كذلك تورّط المكتبَ والزبون (م55/1 فلسطينياً: ضعفُ
+        الضريبة، وفي إسرائيل: خصمُ مدخلاتٍ بلا رقم تخصيص). ولا مفتاحَ إعدادٍ
+        يفتحها — الفتحُ قرارُ منتجٍ يمرّ بتذكرة، لا قيمةٌ في صفّ.
+        """
+        return False
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.cancelled_at is not None
+
+    @property
+    def state(self) -> str:
+        return "cancelled" if self.is_cancelled else "issued"
+
+    @property
+    def net_total(self) -> Decimal:
+        """ما قبل الضريبة — `total - tax_total`، ولا عمودَ ثالثاً يفترق عنهما."""
+        return self.total - self.tax_total
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_client(self)
         super().save(*args, **kwargs)
 
 

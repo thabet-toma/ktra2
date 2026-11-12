@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1082**
+عدد النقاط: **1087**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -130,6 +130,11 @@
 | `/api/accounting-office/fees/drafts/{pk}/cancel/` | `OfficeFeeDraftViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/drafts/{pk}/write-off/` | `OfficeFeeDraftViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/extras/` | `OfficeFeeExtraServiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/{pk}/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/{pk}/cancel/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/{pk}/credit-note/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/{pk}/supplementary/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/ledger/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/payments/` | `OfficeFeePaymentViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/service-prices/` | `OfficeFeeServicePriceViewSet` | `accounting_office/views.py` |

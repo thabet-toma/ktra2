@@ -21,6 +21,7 @@ import {
   officeSizeOf,
   officeWhatsappLink,
   readyToSendItemKeys,
+  readyToSendItemRowKey,
   readyToSendMessageKey,
   readyToSendTypeChips,
   showsOfficeAssignment,
@@ -319,7 +320,7 @@ export const OfficeReadyToSendScreen: React.FC = () => {
         <div className="mt-2 flex flex-wrap gap-1.5">
           {message.items.map((item) => (
             <span
-              key={`${item.client_id}|${item.reminder_type}|${item.period_start}|${item.period_end}`}
+              key={readyToSendItemRowKey(item)}
               className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold ${obligationBadgeClass(item.badge)}`}
             >
               {item.reminder_type_label}
