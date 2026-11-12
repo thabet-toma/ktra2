@@ -84,6 +84,7 @@ import { useConfirm } from '../../contexts/ConfirmContext';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import { OfficeClientAppointments } from './OfficeClientAppointments';
+import { OfficeClientAccount } from './OfficeClientAccount';
 import { OfficeClientBook } from './OfficeClientBook';
 import { OfficeClientDocuments } from './OfficeClientDocuments';
 import { OfficeClientEvents } from './OfficeClientEvents';
@@ -120,6 +121,8 @@ const TABS: { key: TabKey; label: string }[] = [
   { key: 'appointments', label: 'المواعيد' },
   // #283/ب: الأتعابُ — الدفعاتُ بإشعارِ قبضٍ لكلٍّ (والكشفُ من رأس الملفّ).
   { key: 'fees', label: 'الأتعاب' },
+  // #282/أ٢/٢: «الحساب» — «اللي عليه» وفواتيره ورصيده ورقمُ ملفّه الضريبيّ.
+  { key: 'account', label: 'الحساب' },
   // #286/ب: حركاتُ دفتر الزبون وإدخالُها — آخراً كموضعه في `CLIENT_TAB_KEYS`.
   { key: 'book', label: 'الدفتر' },
 ];
@@ -2341,6 +2344,12 @@ export const OfficeClientFile: React.FC<{
       {tab === 'fees' ? (
         // #283/ب: دفعاتُ الزبون بإشعارِ قبضٍ لكلٍّ — والطباعةُ والرابطُ من الخادم.
         <OfficeClientFees clientId={clientId} canWrite={canWrite} />
+      ) : null}
+
+      {tab === 'account' ? (
+        // #282/أ٢/٢: «الحساب» — نداءٌ واحدٌ يُعيد «اللي عليه» وفواتيره من
+        // `payments.client_due`، ورقمُ الملفّ من رأس الملفّ المحمَّل أصلاً.
+        <OfficeClientAccount clientId={clientId} taxFileNumber={client.tax_file_number} />
       ) : null}
 
       {tab === 'book' ? (

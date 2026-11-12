@@ -373,6 +373,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     "office-today": { label: "اليوم", icon: <CalendarCheck className="h-4 w-4" /> },
     // #280/ب — «جاهز للإرسال»: ما حان إرسالُه اليوم لزبائن المكتب.
     "office-ready-to-send": { label: "جاهز للإرسال", icon: <Send className="h-4 w-4" /> },
+    // #282/أ٢/٢ — «المسودّات»: مسودّاتُ الأتعاب تُعتمد فتُصدر ورقةً مرقَّمةً وقيدَها.
+    "office-fee-drafts": { label: "المسودّات", icon: <FileSignature className="h-4 w-4" /> },
     "office-clients": { label: "الزبائن", icon: <Users className="h-4 w-4" /> },
     "office-calendar": { label: "التقويم", icon: <CalendarDays className="h-4 w-4" /> },
     "office-settings": { label: "إعدادات المكتب", icon: <SettingsIcon className="h-4 w-4" /> },
@@ -531,6 +533,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
       settings: <SettingsIcon className="h-5 w-5 flex-shrink-0" />,
       // ISSUE #271 — مجموعة «إعدادات المكتب» في بيان مكتب المحاسبة.
       "office-settings": <SettingsIcon className="h-5 w-5 flex-shrink-0" />,
+      // #282/أ٢/٢ — مجموعة «المسودّات»: مستنداتُ أتعابٍ في طريقها للاعتماد.
+      "fee-drafts": <Receipt className="h-5 w-5 flex-shrink-0" />,
     };
     const manifestSections = shellSections.map((g) => {
       const links: NavLink[] = g.views.map((v) => {

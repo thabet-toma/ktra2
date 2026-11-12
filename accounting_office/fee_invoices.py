@@ -45,7 +45,7 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Sum
 from django.utils import timezone
 
-from accounting_office import deadlines, fees, services
+from accounting_office import deadlines, fees, office_journal, services
 from accounting_office.models import (
     FEE_INVOICE_CREDIT_TITLES,
     FEE_INVOICE_KIND_CREDIT_NOTE,
@@ -255,7 +255,7 @@ def issue_for_draft(draft, *, actor=None, day=None) -> FeeInvoice:
         tax_total = _tax_of(net, rate=rate)
         issued_at = _issued_at(day)
         year = _local_day(issued_at).year
-        return FeeInvoice.objects.create(
+        invoice = FeeInvoice.objects.create(
             tenant=tenant,
             client=draft.client,
             source_draft=draft,
@@ -269,15 +269,49 @@ def issue_for_draft(draft, *, actor=None, day=None) -> FeeInvoice:
             issued_at=issued_at,
             issued_by=actor if getattr(actor, "pk", None) else None,
         )
+        # #284/ب: القيدُ في المعاملة نفسها **بعد حفظ الصفّ** — فشلُه (فترةٌ
+        # مقفلة، حسابٌ معطَّل، توازن) يُرجع الفاتورةَ والرقمَ والاعتمادَ معها:
+        # لا ورقةَ مرقَّمةً بلا قيدها. والقولُ نفسه في `payments.create_payment`.
+        office_journal.post_invoice_journal(invoice, actor=actor)
+        return invoice
+
+
+def _stamp_invoice_ids(tenant, invoices) -> None:
+    """يُثبت معرّفات صفوفٍ أُنشئت بـ`bulk_create` حين لا تُعيدها القاعدة.
+
+    **MySQL لا تُعيد صفوفَ الإدراج الجماعيّ** (`can_return_rows_from_bulk_insert`
+    مطفأةٌ عندها، بخلاف SQLite التي تُشغّلها الاختبارات)، فالفواتيرُ تخرج بلا
+    `pk`. وقيدٌ بمرجعٍ `None` لا يمنع التكرار ولا يُقرأ لاحقاً بفاتورته. فالقراءةُ
+    بالرقم الفريد `(tenant, number)` — استعلامٌ واحدٌ لا يكبر بعدد الصفوف — تعيد
+    المعرّفات، والصفوفُ في الذاكرة تبقى هي هي بمبالغها وعميلها. ولا تُقرأ بنودُ
+    أيّ مسودّةٍ هنا.
+    """
+    missing = [invoice for invoice in invoices if invoice.pk is None]
+    if not missing:
+        return
+    ids = dict(
+        FeeInvoice.objects
+        .filter(tenant=tenant, number__in=[invoice.number for invoice in missing])
+        .values_list("number", "pk"),
+    )
+    for invoice in missing:
+        invoice.pk = ids[invoice.number]
 
 
 def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
     """يُصدر فواتيرَ مجموعةِ مسودّاتٍ **دفعةً واحدة** — مسارُ «اعتمد الكل».
 
-    الكلفةُ **ثابتةٌ لا تكبر بعدد المسودّات**: قراءةُ الحيّ منها استعلامٌ واحد،
-    ثم قفلُ العدّاد مرّةً واحدة، و`bulk_create` واحد، وتحديثُ العدّاد مرّةً —
-    لا ثلاثُ استعلاماتٍ لكل مسودّة. وهذا شرطُ `test_fees` القائم: «اعتمد الكل»
-    لا يقرأ ولا يكتب صفّاً صفّاً.
+    **قراءةُ المسودّات ثابتةٌ لا تكبر بعددها**: الحيّ منها استعلامٌ واحد،
+    والبنودُ تُقرأ بـ`prefetch_related` في الاعتماد لا هنا، وقفلُ العدّاد مرّةً
+    واحدة، و`bulk_create` واحد، وتحديثُ العدّاد مرّةً. وهذا ما يقيسه
+    `test_fees.test_approve_all_does_not_read_the_lines_of_each_draft_separately`
+    بـ**قراءات البنود** لا بمجموع الاستعلامات.
+
+    **وأمّا القيودُ فنداءٌ لكل فاتورة** (#284/ب): `post_invoice_journal` يُرحّل
+    قيدَ الصفّ نفسه — صافيَه وضريبتَه من `total`/`tax_total` على الصفّ، بلا قراءة
+    بنودِ مسودّةٍ واحدة. فهو النموُّ الوحيدُ في الكلفة، وثمنُ «لا فاتورةَ
+    مرقَّمةً بلا قيدها»: القيدُ صفٌّ ماليٌّ لكل مستند، ولا `post_journal` جماعيّاً
+    في المستودع. وفشلُ قيدٍ واحدٍ يُرجع الدفعةَ كلَّها لأن النداءَ داخل المعاملة.
 
     والمسودّاتُ التي لها فاتورةٌ حيّةٌ تُتخطّى، فالنداءُ متكرِّرُ الأمان كذلك.
     """
@@ -326,6 +360,12 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
         FeeInvoice.objects.bulk_create(rows)
         sequence.last_number += len(rows)
         sequence.save(update_fields=["last_number"])
+        # #284/ب: **قيدٌ لكل فاتورةٍ في المسار الجماعيّ أيضاً** — وإلا خرج زرُّ
+        # «اعتمد الكل» بفواتيرَ بلا قيودها فتُدائن دفعاتٌ ذمّاً لم تُدَن. والمعرّفاتُ
+        # تُثبَّت قبل النداء لأن MySQL لا تُعيدها من الإدراج الجماعيّ.
+        _stamp_invoice_ids(tenant, rows)
+        for invoice in rows:
+            office_journal.post_invoice_journal(invoice, actor=actor)
     return rows
 
 
@@ -566,7 +606,7 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
             if kind == FEE_INVOICE_KIND_CREDIT_NOTE
             else fee_invoice_series(year)
         )
-        return FeeInvoice.objects.create(
+        note = FeeInvoice.objects.create(
             tenant=invoice.tenant,
             client=invoice.client,
             #: **لا مسودّةَ لتصحيح**: مسودّةُ الشهر واحدة، والتصحيحُ مستندٌ على
@@ -584,6 +624,12 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
             issued_by=actor if getattr(actor, "pk", None) else None,
             cancel_reason=(reason or "").strip()[:300],
         )
+        # #284/ب: **الإشعارُ الدائنُ وحدَه يُرحَّل**، عكساً لقيد فاتورته. والتكميليةُ
+        # لا — وهي مطالبةٌ إضافية لم يدخلها مالٌ بعد، وترحيلُها هنا يجعل ذمّةَ
+        # الدفاتر تسبق «اللي عليه» في المكتب بلا مصدرٍ يخصمها.
+        if kind == FEE_INVOICE_KIND_CREDIT_NOTE:
+            office_journal.post_credit_note_journal(note, actor=actor)
+        return note
 
 
 def issue_credit_note(invoice, *, actor, amount, reason, day=None) -> FeeInvoice:
@@ -754,35 +800,13 @@ def invoice_has_link(invoice) -> bool:
     return live_invoice_url(invoice) is not None
 
 
-def live_invoice_url(invoice) -> str | None:
-    """الرابطُ الحيّ القائم إن وُجد — **قراءةٌ فقط، لا إنشاءَ من مسار قراءة**."""
-    from docshare import services as docshare_services
-    from docshare.models import DOC_FEE_INVOICE, DocumentShare
+def live_invoice_urls(tenant, invoice_ids) -> dict[int, str]:
+    """روابطُ الأوراق **الحيّة القائمة** — قراءةٌ محضة، بلا إنشاء ولا كتابة.
 
-    share = (
-        DocumentShare.objects
-        .filter(
-            tenant_id=invoice.tenant_id,
-            doc_type=DOC_FEE_INVOICE,
-            doc_id=invoice.pk,
-            is_public=False,
-            revoked_at__isnull=True,
-            expires_at__gt=timezone.now(),
-        )
-        .order_by("-created_at", "-id")
-        .first()
-    )
-    return None if share is None else docshare_services.public_url(share)
-
-
-def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
-    """رابطُ ورقة الفاتورة لكلّ فاتورةٍ في المجموعة — نمطُ `payment_notice_urls`.
-
-    الرابطُ يُنشَأ أوّلَ مرّةٍ **في مسار القراءة** («جاهز للإرسال») عن قصد: نصُّ
-    الرسالة يجب أن يكون نهائياً قبل الإرسال، ورابطٌ يُخلَق بعده لا يكون في
-    الورقة التي بيد الزبون. والتكرارُ آمن — الحيّ نفسه يُعاد (`dedupe`).
-    ولا يُعدّ إنشاءُ الرابط إرسالاً: `invoice_was_sent` يقيس التذكيرَ الصادرَ
-    أو المشاهدة، لا وجودَ الصفّ.
+    شرطُ «الحيّ» في موضعٍ واحد: غيرُ عامّ، وغيرُ مُبطَل، وغيرُ منتهٍ. يقرؤه
+    `live_invoice_url` للورقة الواحدة، و`invoice_urls` قبل أن يُنشئ الناقص،
+    وبطاقاتُ المسودّات في شاشة «المسودّات» — فنسخةٌ ثانية منه تفترق عن الأولى
+    بأوّل تغييرٍ في سياسة انتهاء الرابط.
     """
     from docshare import services as docshare_services
     from docshare.models import DOC_FEE_INVOICE, DocumentShare
@@ -790,7 +814,7 @@ def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
     wanted = {invoice_id for invoice_id in invoice_ids if invoice_id is not None}
     if not wanted:
         return {}
-    live = (
+    shares = (
         DocumentShare.objects
         .filter(
             tenant=tenant,
@@ -804,8 +828,32 @@ def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
         .values_list("doc_id", "token")
     )
     urls: dict[int, str] = {}
-    for doc_id, token in live:
+    for doc_id, token in shares:
         urls.setdefault(doc_id, docshare_services.public_url_for_token(token))
+    return urls
+
+
+def live_invoice_url(invoice) -> str | None:
+    """الرابطُ الحيّ القائم إن وُجد — **قراءةٌ فقط، لا إنشاءَ من مسار قراءة**."""
+    return live_invoice_urls(invoice.tenant_id, [invoice.pk]).get(invoice.pk)
+
+
+def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
+    """رابطُ ورقة الفاتورة لكلّ فاتورةٍ في المجموعة — نمطُ `payment_notice_urls`.
+
+    الرابطُ يُنشَأ أوّلَ مرّةٍ **في مسار القراءة** («جاهز للإرسال») عن قصد: نصُّ
+    الرسالة يجب أن يكون نهائياً قبل الإرسال، ورابطٌ يُخلَق بعده لا يكون في
+    الورقة التي بيد الزبون. والتكرارُ آمن — الحيّ نفسه يُعاد (`dedupe`).
+    ولا يُعدّ إنشاءُ الرابط إرسالاً: `invoice_was_sent` يقيس التذكيرَ الصادرَ
+    أو المشاهدة، لا وجودَ الصفّ.
+    """
+    from docshare import services as docshare_services
+    from docshare.models import DOC_FEE_INVOICE
+
+    wanted = {invoice_id for invoice_id in invoice_ids if invoice_id is not None}
+    if not wanted:
+        return {}
+    urls = live_invoice_urls(tenant, wanted)
     for invoice_id in sorted(wanted - set(urls)):
         try:
             share = docshare_services.create_share(
@@ -816,6 +864,44 @@ def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
             continue
         urls[invoice_id] = docshare_services.public_url(share)
     return urls
+
+
+# ── بطاقةُ الورقة على صفّ المسودّة (شاشةُ «المسودّات») ───────────────────────
+def draft_invoice_cards(tenant, drafts) -> dict[int, dict]:
+    """بطاقةُ الورقة **الحيّة** لكل مسودّة: رقمُها وتاريخُها ورابطُها — استعلامان.
+
+    شاشةُ «المسودّات» تقرأ `fees/drafts/` وحدها، فالبطاقةُ هنا تمنعها من جلب
+    قائمة الفواتير كلَّها لتصل إلى ثلاثة حقول. والقراءةُ **بلا إنشاء رابط**:
+    شاشةُ قائمةٍ لا تُنشئ روابطَ مشاركةٍ لكل صفٍّ مرّت عليه.
+    """
+    draft_ids = [draft.pk for draft in drafts if getattr(draft, "pk", None)]
+    if not draft_ids:
+        return {}
+    live = list(
+        FeeInvoice.objects
+        .filter(
+            tenant=tenant,
+            source_draft_id__in=draft_ids,
+            cancelled_at__isnull=True,
+        )
+        .only("id", "source_draft_id", "number", "issued_at")
+        .order_by("id"),
+    )
+    urls = live_invoice_urls(tenant, [invoice.pk for invoice in live])
+    return {
+        invoice.source_draft_id: {
+            "id": invoice.pk,
+            "number": invoice.number,
+            "issued_at": invoice.issued_at.isoformat(),
+            "url": urls.get(invoice.pk, ""),
+        }
+        for invoice in live
+    }
+
+
+def draft_invoice_card(tenant, draft) -> dict | None:
+    """بطاقةُ ورقةِ مسودّةٍ واحدة — للصفّ المفرد (ردُّ الاعتماد مثلاً)."""
+    return draft_invoice_cards(tenant, [draft]).get(draft.pk)
 
 
 # ── الورقة: حقولُها بترتيبها ──────────────────────────────────────────────────

@@ -158,6 +158,8 @@ export const CLIENT_OBLIGATIONS_TAB = 'obligations';
 export const CLIENT_APPOINTMENTS_TAB = 'appointments';
 /** تبويبُ «الدفتر» (#286/ب) — حركاتُ دفتر الزبون وإدخالُها. */
 export const CLIENT_BOOK_TAB = 'book';
+/** تبويبُ «الحساب» (#282/أ٢/٢) — «اللي عليه» وفواتيره ورصيده ورقمُ ملفّه. */
+export const CLIENT_ACCOUNT_TAB = 'account';
 
 /** اسم معامل الشغلة المطلوب فتحها — واحدٌ في بناء الرابط وقراءته (#276). */
 export const TASK_QUERY_PARAM = 'task';
@@ -170,6 +172,8 @@ export const CLIENT_TAB_KEYS = [
   'appointments',
   // #283/ب: الأتعابُ — دفعاتُ الزبون بإشعارِ قبضٍ لكلٍّ، وقبل «الدفتر» كذلك.
   'fees',
+  // #282/أ٢/٢: «الحساب» — «اللي عليه» وفواتيره ورصيده ورقمُ ملفّه الضريبيّ.
+  'account',
   'book',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
@@ -1599,6 +1603,9 @@ export function officeWhatsappLink(
 /** مسار شاشة «جاهز للإرسال» — مصدرٌ واحدٌ للموجّه والقائمة. */
 export const OFFICE_READY_TO_SEND_PATH = '/accounting-office/ready-to-send';
 
+/** مسارُ شاشة «المسودّات» (#282/أ٢/٢) — مصدرٌ واحدٌ للموجّه والقائمة. */
+export const OFFICE_FEE_DRAFTS_PATH = '/accounting-office/fee-drafts';
+
 /**
  * مفاتيحُ إعداداتٍ **مقفلةٌ مطفأةً** في المرحلة الأولى (‏`LOCKED_SETTING_MESSAGES`
  * خادمياً): الخادمُ يردّ 400 على أيّ قيمةٍ أخرى، والشاشةُ تُقفل ضابطها كي لا
@@ -2273,4 +2280,92 @@ export function pendingEntryClientCount(
   rows: readonly Pick<PendingEntryRow, 'client_id'>[],
 ): number {
   return new Set(rows.map((row) => row.client_id)).size;
+}
+
+
+// ── المسودّات وتبويبُ «الحساب» (#282/أ٢/٢) ─────────────────────────────────
+//
+// **النصوصُ من الخادم لا هنا**: `status_label` و`state_label` و`period_label`
+// تصل جاهزةً من `models.py`/`payments.py`، ولا جدولَ تسمياتٍ محليّاً. ما في هذا
+// القسم **حكمٌ لا نصّ**: أيُّ زرٍّ يظهر لأيّ حالة، وأيُّ صفٍّ يمرّ من الفلتر.
+
+/** مفاتيحُ حالة المسودّة — أسماءُ الخادم (`FeeDraft.STATUS_*`) لا تسمياتِه. */
+export const FEE_DRAFT_STATUS_DRAFT = 'draft';
+export const FEE_DRAFT_STATUS_APPROVED = 'approved';
+export const FEE_DRAFT_STATUS_CANCELLED = 'cancelled';
+
+/** فلترُ شاشة «المسودّات»: الفارغ «الكل»، والباقي حالةٌ واحدة. */
+export type FeeDraftFilter = '' | 'draft' | 'approved' | 'cancelled';
+
+/**
+ * الفلاترُ الأربعة بترتيبها في الشاشة — **المنتظرةُ أوّلاً**: هي ما يعمل عليه
+ * المكتب اليوم، والمعتمدةُ والملغاةُ تاريخٌ يُراجَع.
+ */
+export const FEE_DRAFT_FILTERS: readonly { key: FeeDraftFilter; label: string }[] = [
+  { key: FEE_DRAFT_STATUS_DRAFT, label: 'منتظرة' },
+  { key: FEE_DRAFT_STATUS_APPROVED, label: 'معتمدة' },
+  { key: FEE_DRAFT_STATUS_CANCELLED, label: 'ملغاة' },
+  { key: '', label: 'الكل' },
+];
+
+/** صفوفُ المسودّات المطابقةُ للفلتر — تصفيةُ عرضٍ على قائمةٍ مقروءةٍ كاملة. */
+export function filterFeeDrafts<T extends { status: string }>(
+  rows: readonly T[],
+  filter: FeeDraftFilter,
+): T[] {
+  if (!filter) return [...rows];
+  return rows.filter((row) => row.status === filter);
+}
+
+/** عددُ المنتظرةِ في القائمة — «اعتمد الكل» يُطفأ على صفر. */
+export function pendingFeeDraftCount(rows: readonly { status: string }[]): number {
+  return rows.filter((row) => row.status === FEE_DRAFT_STATUS_DRAFT).length;
+}
+
+/**
+ * أفعالُ صفّ المسودّة: الاعتمادُ والإلغاءُ **من حالة «مسودّة» وحدها**.
+ *
+ * المعتمدةُ لا تُعتمد ثانيةً (الخادم يردّ 400)، ولا تُلغى من هنا — إلغاءُ ورقتها
+ * إجراءٌ على الفاتورة (`fees/invoices/<id>/cancel/`). وزرٌّ مصيرُه الرفض لا يظهر.
+ */
+export function feeDraftActions(status: string): { approve: boolean; cancel: boolean } {
+  const pending = status === FEE_DRAFT_STATUS_DRAFT;
+  return { approve: pending, cancel: pending };
+}
+
+/** أصنافُ Tailwind لشارة الحالة — **عرضٌ لا نصّ**: النصُّ من `status_label`. */
+export function feeDraftStatusClass(status: string): string {
+  if (status === FEE_DRAFT_STATUS_APPROVED) {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === FEE_DRAFT_STATUS_CANCELLED) {
+    return 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400';
+  }
+  return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
+}
+
+/**
+ * نبرةُ رصيد الحساب: موجبٌ «عليه»، سالبٌ «له عندنا»، وصفرٌ مسدَّد.
+ *
+ * **والرابعُ للقناع**: `null` تعني «لا رؤيةَ للمبالغ» (#272) — لا صفراً. عرضُها
+ * «مسدَّداً» يقول لصاحب المكتب إنّ الزبون سدّد وهو لم يرَ رقماً قطّ.
+ */
+export type AccountBalanceTone = 'owed' | 'refund' | 'settled' | 'masked';
+
+export function accountBalanceTone(
+  value: number | string | null | undefined,
+): AccountBalanceTone {
+  if (value === null || value === undefined || value === '') return 'masked';
+  const amount = noticeAmount(value);
+  if (amount > 0) return 'owed';
+  if (amount < 0) return 'refund';
+  return 'settled';
+}
+
+/** أصنافُ اللون لنبرة الرصيد — النصُّ لا يُبنى هنا. */
+export function accountBalanceClass(tone: AccountBalanceTone): string {
+  if (tone === 'owed') return 'text-rose-700 dark:text-rose-300';
+  if (tone === 'refund') return 'text-emerald-700 dark:text-emerald-300';
+  if (tone === 'masked') return 'text-slate-500 dark:text-slate-400';
+  return 'text-slate-700 dark:text-slate-200';
 }

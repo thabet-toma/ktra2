@@ -89,6 +89,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'client-books': 'دفاتر عملائي',
   'office-today': 'اليوم',
   'office-ready-to-send': 'جاهز للإرسال',
+  'office-fee-drafts': 'المسودّات',
   'office-clients': 'الزبائن',
   'office-calendar': 'التقويم',
   'office-settings': 'إعدادات المكتب',

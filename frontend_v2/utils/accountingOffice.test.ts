@@ -29,7 +29,12 @@ import {
   documentYearOptions,
   emptyDocumentCell,
   entryDateForMonth,
+  filterFeeDrafts,
   filterReadyToSendMessages,
+  feeDraftActions,
+  feeDraftStatusClass,
+  pendingFeeDraftCount,
+  accountBalanceTone,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientBookPath,
@@ -1476,4 +1481,57 @@ test('لونُ إشعار الدفع: موجبٌ أحمر، سالبٌ أخضر�
   assert.equal(paymentNoticeTone('غير رقم', 10), 'neutral');
   // والحدُّ السالبُ يُقرأ كموجبه بدل أن يُرمى كلُّ مبلغٍ في الرمادي.
   assert.equal(paymentNoticeTone(1500, -10), 'owed');
+});
+
+// ── «المسودّات» وتبويبُ «الحساب» (#282/أ٢/٢) ────────────────────────────────
+test('فلترُ المسودّات: الحالةُ المرغوبة وحدها، والكلُّ نسخةٌ لا القائمةُ نفسها', () => {
+  const rows = [
+    { id: 1, status: 'draft' },
+    { id: 2, status: 'approved' },
+    { id: 3, status: 'draft' },
+    { id: 4, status: 'cancelled' },
+  ];
+  assert.deepEqual(filterFeeDrafts(rows, 'draft').map((row) => row.id), [1, 3]);
+  assert.deepEqual(filterFeeDrafts(rows, 'approved').map((row) => row.id), [2]);
+  assert.deepEqual(filterFeeDrafts(rows, 'cancelled').map((row) => row.id), [4]);
+  // «الكل» لا يُرجع المرجعَ نفسه: تحويلُ الناتج لا يمسّ حالةَ الشاشة.
+  const all = filterFeeDrafts(rows, '');
+  assert.deepEqual(all.map((row) => row.id), [1, 2, 3, 4]);
+  assert.notEqual(all, rows);
+  // حالةٌ لا صفَّ لها قائمةٌ فارغة، لا «الكل».
+  assert.deepEqual(filterFeeDrafts(rows, 'draft').filter((row) => row.id === 9), []);
+});
+
+test('عددُ المنتظرة يحكم زرَّ «اعتمد الكل»، وأفعالُ الصفّ من «مسودّة» وحدها', () => {
+  assert.equal(pendingFeeDraftCount([{ status: 'draft' }, { status: 'approved' }]), 1);
+  assert.equal(pendingFeeDraftCount([]), 0);
+  // المعتمدةُ والملغاةُ لا زرَّ اعتمادٍ ولا إلغاءَ لهما — الطلبُ مصيرُه 400.
+  assert.deepEqual(feeDraftActions('draft'), { approve: true, cancel: true });
+  assert.deepEqual(feeDraftActions('approved'), { approve: false, cancel: false });
+  assert.deepEqual(feeDraftActions('cancelled'), { approve: false, cancel: false });
+  // وحالةٌ لا يعرفها هذا الإصدار لا تفتح زرّاً.
+  assert.deepEqual(feeDraftActions('archived'), { approve: false, cancel: false });
+});
+
+test('شارةُ حالة المسودّة: ثلاثُ حالاتٍ بثلاثة ألوان — لا صنفٌ واحدٌ للجميع', () => {
+  const pending = feeDraftStatusClass('draft');
+  const approved = feeDraftStatusClass('approved');
+  const cancelled = feeDraftStatusClass('cancelled');
+  assert.ok(pending.length > 0 && approved.length > 0 && cancelled.length > 0);
+  assert.notEqual(pending, approved);
+  assert.notEqual(approved, cancelled);
+  assert.notEqual(pending, cancelled);
+});
+
+test('نبرةُ رصيد الحساب: موجبٌ عليه، سالبٌ له، صفرٌ مسدَّد، والقناعُ ليس صفراً', () => {
+  assert.equal(accountBalanceTone('1160.00'), 'owed');
+  assert.equal(accountBalanceTone(-160), 'refund');
+  assert.equal(accountBalanceTone('-160.00'), 'refund');
+  assert.equal(accountBalanceTone('0.00'), 'settled');
+  // **القناعُ رابعٌ لا صفر**: null تعني «لا رؤيةَ للمبالغ» فلا تُقرأ «مسدَّداً».
+  assert.equal(accountBalanceTone(null), 'masked');
+  assert.equal(accountBalanceTone(undefined), 'masked');
+  assert.equal(accountBalanceTone(''), 'masked');
+  // والنصُّ الفاسدُ صفرٌ لا NaN — لا لونَ يصرخ لخطأٍ في البيان.
+  assert.equal(accountBalanceTone('غير رقم'), 'settled');
 });

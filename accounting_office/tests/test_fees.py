@@ -1147,6 +1147,28 @@ class GenerationCostTest(FeesTestCase):
         )
 
     def test_approve_all_does_not_read_the_lines_of_each_draft_separately(self):
+        """**العنوانُ هو القياس**: «اعتمد الكل» لا يقرأ بنودَ المسودّات واحدةً واحدة.
+
+        كان القياسُ مجموعَ الاستعلامات كلِّها (١ مقابل ٣ مسودّات)، فسقط — كما
+        يجب — يوم أُضيف ترحيلُ قيدِ دفاترٍ **لكل فاتورة** (#284/ب): نموٌّ مقصودٌ
+        بعدد الفواتير لا بعدد المسودّات، وثمنُ «لا فاتورةَ مرقَّمةً بلا قيدها».
+        فيقيس الاختبارُ اليومَ ما يسمّيه: قراءاتُ جدول بنود المسودّات وحدها —
+        تُعدّ استعلاماتٍ تذكر `FeeDraftLine`، ويُشترط ألّا يتغيّر عددُها بعدد
+        المسودّات. سقوطُ `prefetch_related` يجعلها استعلاماً لكل مسودّة فيسقط.
+        """
+        line_table = FeeDraftLine._meta.db_table
+
+        def approve_all_and_count_line_reads():
+            with CaptureQueriesContext(connection) as captured:
+                res = self.client.post(
+                    f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
+                )
+            self.assertEqual(res.status_code, 200, res.content)
+            return res, [
+                query["sql"] for query in captured.captured_queries
+                if line_table in query["sql"]
+            ]
+
         def pending(name):
             client = self.make_client(name)
             self.subscribe(client, "300", datetime.date(2026, 1, 1))
@@ -1154,26 +1176,17 @@ class GenerationCostTest(FeesTestCase):
             return client
 
         pending("زبون أول")
-        with CaptureQueriesContext(connection) as one:
-            self.assertEqual(
-                self.client.post(
-                    f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
-                ).status_code,
-                200,
-            )
+        one_res, one_reads = approve_all_and_count_line_reads()
+        self.assertEqual(one_res.data["approved"], 1)
 
         for index in range(3):
             pending(f"زبون {index}")
-        with CaptureQueriesContext(connection) as four:
-            res = self.client.post(
-                f"{DRAFTS}approve-all/", {}, format="json", **self.headers(),
-            )
-        self.assertEqual(res.status_code, 200, res.content)
-        self.assertEqual(res.data["approved"], 3)
-        self.assertTrue(all(row["lines"] for row in res.data["drafts"]))
+        four_res, four_reads = approve_all_and_count_line_reads()
+        self.assertEqual(four_res.data["approved"], 3)
+        self.assertTrue(all(row["lines"] for row in four_res.data["drafts"]))
 
         self.assertEqual(
-            len(four.captured_queries), len(one.captured_queries),
+            len(four_reads), len(one_reads),
             "«اعتمد الكل» يقرأ بنودَ المسودّات واحدةً واحدة — بلا `prefetch_related`",
         )
 

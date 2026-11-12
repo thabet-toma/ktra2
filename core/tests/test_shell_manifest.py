@@ -74,6 +74,8 @@ class ShellManifestFunctionTest(SimpleTestCase):
                 "today": ["office-today"],
                 # #280/ب: «جاهز للإرسال» مجموعةٌ ثانيةٌ بعد «اليوم» مباشرةً.
                 "ready-to-send": ["office-ready-to-send"],
+                # #282/أ٢/٢: «المسودّات» — مسودّاتُ الأتعاب وأفعالُ اعتمادها.
+                "fee-drafts": ["office-fee-drafts"],
                 "clients": ["office-clients"],
                 # #274: التقويم شاشةٌ مستقلّة، فمجموعتُه مستقلّة كإعدادات المكتب.
                 "calendar": ["office-calendar"],

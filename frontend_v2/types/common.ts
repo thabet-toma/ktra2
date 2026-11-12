@@ -102,6 +102,7 @@ export type AppView =
     | "client-books"
     | "office-today"
     | "office-ready-to-send"
+    | "office-fee-drafts"
     | "office-clients"
     | "office-calendar"
     | "office-settings"

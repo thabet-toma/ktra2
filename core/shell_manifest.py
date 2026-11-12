@@ -88,6 +88,14 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "label_term": "nav.office_ready_to_send",
                 "views": ["office-ready-to-send"],
             },
+            # #282/أ٢/٢: «المسودّات» — قائمةُ مسودّات الأتعاب وأفعالُها (اعتمادٌ
+            # واعتمادُ الكلّ وإلغاء)، وبطاقةُ الورقة الصادرة لكلٍّ. ومجموعتُها
+            # مستقلّةٌ كاستقلال «جاهز للإرسال»: عملٌ يُنجَز ثم يخرج من القائمة.
+            {
+                "id": "fee-drafts",
+                "label_term": "nav.office_fee_drafts",
+                "views": ["office-fee-drafts"],
+            },
             {"id": "clients", "label_term": "nav.office_clients", "views": ["office-clients"]},
             # #274: التقويم شاشةٌ مستقلّة عن قائمة الزبائن (تُقرأ من لائحة المواعيد
             # المحسوبة)، فمجموعتُها مستقلّة كما استقلّت «إعدادات المكتب» في #271.

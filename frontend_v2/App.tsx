@@ -59,7 +59,7 @@ import { useToast } from "./contexts/ToastContext";
 import { humanizeThrown } from "./utils/drfError";
 // ISSUE #271 — مسارا شاشتَي المكتب: مصدرٌ واحدٌ يقرؤه الجدولُ والشاشاتُ معاً.
 // #280/ب — «جاهز للإرسال» مسارُه الرابع، من الملفّ نفسه.
-import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_READY_TO_SEND_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
+import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_FEE_DRAFTS_PATH, OFFICE_READY_TO_SEND_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول
@@ -137,6 +137,8 @@ const OfficeCalendarScreen = lazyPage(() => import("./components/accounting-offi
 const OfficeTodayScreen = lazyPage(() => import("./components/accounting-office/OfficeTodayScreen").then((m) => ({ default: m.OfficeTodayScreen })));
 // ISSUE #280/ب — «جاهز للإرسال»: رسالةٌ لكل شخصٍ بلغته، وأفعالُها الأربعة.
 const OfficeReadyToSendScreen = lazyPage(() => import("./components/accounting-office/OfficeReadyToSendScreen").then((m) => ({ default: m.OfficeReadyToSendScreen })));
+// ISSUE #282/أ٢/٢ — «المسودّات»: مسودّاتُ الأتعاب وأفعالُ اعتمادها وبطاقةُ ورقتها.
+const OfficeFeeDraftsScreen = lazyPage(() => import("./components/accounting-office/OfficeFeeDraftsScreen").then((m) => ({ default: m.OfficeFeeDraftsScreen })));
 const OfficeSettingsScreen = lazyPage(() => import("./components/accounting-office/OfficeSettingsScreen").then((m) => ({ default: m.OfficeSettingsScreen })));
 // الترخيصُ يُمنَح من إدارة المنصّة لا من داخل الشركة — نصٌّ واحدٌ لحالتَي الشاشة.
 const OFFICE_MODULE_UNLICENSED = "وحدة مكتب المحاسبة غير مفعّلة لهذه الشركة — تُفعَّل من إدارة المنصّة.";
@@ -373,6 +375,8 @@ const VIEW_PATHS: Partial<Record<AppView, string>> = {
   "office-today": OFFICE_TODAY_PATH,
   // #280/ب: «جاهز للإرسال» — شاشةُ العمل الثانية بعد «اليوم».
   "office-ready-to-send": OFFICE_READY_TO_SEND_PATH,
+  // #282/أ٢/٢: «المسودّات» — مسودّاتُ الأتعاب وأفعالُ اعتمادها.
+  "office-fee-drafts": OFFICE_FEE_DRAFTS_PATH,
   "office-clients": OFFICE_CLIENTS_PATH,
   "office-calendar": OFFICE_CALENDAR_PATH,
   "office-settings": OFFICE_SETTINGS_PATH,
@@ -2394,6 +2398,14 @@ const App: React.FC = () => {
         return (
           <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
             <OfficeReadyToSendScreen />
+          </ModuleLicenseGuard>
+        );
+
+      // #282/أ٢/٢ — «المسودّات»: الاعتمادُ يُصدر الورقةَ المرقَّمة وقيدَها.
+      case "office-fee-drafts":
+        return (
+          <ModuleLicenseGuard view={appView} message={OFFICE_MODULE_UNLICENSED} upgrade>
+            <OfficeFeeDraftsScreen />
           </ModuleLicenseGuard>
         );
 

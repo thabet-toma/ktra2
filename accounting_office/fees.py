@@ -606,8 +606,10 @@ def approve_all_fee_drafts(tenant, *, actor, note="") -> list:
         # **والصفوفُ كلُّها تُصدِر فاتورتَها هنا أيضاً — في المعاملة نفسها**:
         # «اعتمد الكل» يختم بالقاعدة دفعةً واحدة، فلو لم يُمرّر كلَّ مسودّةٍ على
         # الإصدار لبقيت مسودّاتٌ معتمدةٌ بلا مستندِ مطالبة — وهو نصفُ العمل.
-        # والنداءُ **دفعةً** لا واحدةً واحدة: كلفةٌ ثابتةٌ لا تكبر بعدد
-        # المسودّات (`issue_for_drafts`)، وفشلُ الإصدار يُسقط الاعتمادَ معه.
+        # والنداءُ **دفعةً** لا واحدةً واحدة: أرقامُ الفواتير وقفلُ العدّاد مرّةً
+        # واحدة، وبنودُ المسودّات تُقرأ بـ`prefetch_related` في الأعلى — وأمّا
+        # **قيودُ الدفاتر فنداءٌ لكل فاتورة** (#284/ب) لأن لكل مستندٍ قيدَه،
+        # وفشلُ أحدِها يُسقط الاعتمادَ معه.
         _fee_invoices_module().issue_for_drafts(drafts, actor=actor)
     return drafts
 
@@ -731,7 +733,19 @@ def subscription_row(row, *, masked) -> dict:
     return services.mask_amounts(data) if masked else data
 
 
-def draft_row(draft, *, masked, summaries=None) -> dict:
+def _draft_invoice(invoices, draft):
+    """بطاقةُ ورقة المسودّة الصادرة — من الخريطة المجمَّعة أو باستعلام الصفّ وحده.
+
+    `invoices` يُمرَّر من قائمةٍ جمعتها `drafts_payload` باستعلامين ثابتين، فكلفةُ
+    القائمة لا تكبر بعدد صفوفها. والصفُّ المفرد (ردُّ الاعتماد/الإلغاء) يقرأ
+    بطاقته وحدها.
+    """
+    if invoices is not None:
+        return invoices.get(draft.pk)
+    return _fee_invoices_module().draft_invoice_card(draft.tenant, draft)
+
+
+def draft_row(draft, *, masked, summaries=None, invoices=None) -> dict:
     """مسودّةٌ ببنودها — **والقناعُ يطال البنودَ أيضاً** لا المبلغَ الأعلى وحده.
 
     ومصدرُ كل سطرٍ (`source`) وتسميتُه يُرسَلان صريحين: الواجهةُ تشرح «اشتراك /
@@ -741,6 +755,9 @@ def draft_row(draft, *, masked, summaries=None) -> dict:
     (`payments.invoice_summaries`): «اللي عليه» على هذه الفاتورة، وحالتُها
     مشتقّةٌ لا عمودٌ في المسودّة. و`summaries` يُمرَّر من قائمةٍ مجمَّعة
     باستعلامٍ واحد — لا استعلامان لكل سطر.
+
+    **و`invoice` (#282/أ٢/٢) بطاقةُ ورقتها الصادرة**: رقمُها وتاريخُها ورابطُها
+    إن صدرت، و`None` إن لم تصدر أو أُلغيت. وهي **بلا مبالغ** فلا يطالها القناع.
     """
     payments = _payments_module()
     summary = (summaries or {}).get(draft.pk) or payments.invoice_summary(draft)
@@ -778,6 +795,7 @@ def draft_row(draft, *, masked, summaries=None) -> dict:
         ),
         "approved_at": None if draft.approved_at is None else draft.approved_at.isoformat(),
         "approved_note": draft.approved_note,
+        "invoice": _draft_invoice(invoices, draft),
         "lines": lines,
     }
     if not masked:
@@ -834,11 +852,17 @@ def subscriptions_payload(tenant, *, user) -> list[dict]:
 
 
 def drafts_payload(tenant, *, user) -> list[dict]:
+    """قائمةُ المسودّات — والملخّصاتُ وبطاقاتُ الأوراق تُجمَع استعلاماتٍ ثابتة.
+
+    «اعتمد الكل» تُبنى بنداءٍ واحد، فسطرٌ يقرأ فاتورتَه أو ملخّصَه في كلّ صفّ
+    يجعل كلفةَ القراءة تكبر بعدد المسودّات.
+    """
     masked = amounts_masked(tenant, user)
     drafts = list(visible_drafts(tenant, user))
     summaries = _payments_module().invoice_summaries(drafts)
+    invoices = _fee_invoices_module().draft_invoice_cards(tenant, drafts)
     return [
-        draft_row(draft, masked=masked, summaries=summaries)
+        draft_row(draft, masked=masked, summaries=summaries, invoices=invoices)
         for draft in drafts
     ]
 

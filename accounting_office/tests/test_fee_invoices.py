@@ -31,6 +31,8 @@ import datetime
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
 
@@ -1103,3 +1105,93 @@ class ReadyToSendTest(FeeInvoiceTestCase):
         services.set_office_setting(self.tenant, "reminder_types_enabled", ["documents"])
 
         self.assertEqual(self.items_of(local_day(invoice.issued_at)), [])
+
+
+class BatchInvoiceIdsTest(FeeInvoiceTestCase):
+    """ثمنُ المعرّفات في «اعتمد الكل» — **الفرعُ الذي يخدم الإنتاج لا يُطرَق في غيره**.
+
+    SQLite (الاختبارات) تُعيد صفوفَ `bulk_create` بمعرّفاتها، وMySQL (الإنتاج)
+    **لا تُعيدها** (`can_return_rows_from_bulk_insert` مطفأةٌ عندها). فصفٌّ في
+    الذاكرة بلا `pk` هنا يحاكي تلك الحال، ويُثبت أن `_stamp_invoice_ids` يقرأ
+    معرّفَه من صفّه المحفوظ — وإلا رُحّل قيدُ الفاتورة بمرجعٍ `None` فلا يمنع
+    التكرار ولا يُقرأ لاحقاً بفاتورته.
+    """
+
+    def test_a_row_without_an_id_gets_its_saved_row_id(self):
+        invoice = self.make_invoice()
+        fresh = FeeInvoice(
+            tenant=self.tenant,
+            client=invoice.client,
+            number=invoice.number,
+            total=invoice.total,
+            issued_at=invoice.issued_at,
+        )
+        self.assertIsNone(fresh.pk)
+
+        fee_invoices._stamp_invoice_ids(self.tenant, [fresh])
+
+        self.assertEqual(fresh.pk, invoice.pk)
+
+    def test_rows_that_already_carry_ids_are_not_read_again(self):
+        invoice = self.make_invoice()
+
+        with CaptureQueriesContext(connection) as captured:
+            fee_invoices._stamp_invoice_ids(self.tenant, [invoice])
+
+        self.assertEqual(
+            captured.captured_queries, [],
+            "قراءةٌ زائدةٌ لمعرّفاتٍ معروفة في القاعدة التي تُعيدها",
+        )
+
+
+class DraftRowInvoiceCardTest(FeeInvoiceTestCase):
+    """صفُّ المسودّة يحمل بطاقةَ ورقتها الصادرة (#282/أ٢/٢ — شاشةُ «المسودّات»).
+
+    الشاشةُ تقرأ `fees/drafts/` وحدها، فبلا هذه البطاقة لا تعرف أن المسودّة صدرت
+    ولا رقمَ ورقتها ولا رابطَها — وكانت ستطلب قائمةَ الفواتير كلَّها لتعرف.
+    """
+
+    def row_of(self, draft):
+        res = self.client.get(DRAFTS, **self.headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        return next(item for item in res.data if item["id"] == draft.pk)
+
+    def test_an_issued_draft_carries_its_invoice_number_date_and_live_url(self):
+        invoice = self.make_invoice(amount="1000.00")
+        draft = invoice.source_draft
+
+        row = self.row_of(draft)
+
+        self.assertEqual(row["invoice"]["id"], invoice.pk)
+        self.assertEqual(row["invoice"]["number"], invoice.number)
+        self.assertEqual(row["invoice"]["issued_at"], invoice.issued_at.isoformat())
+        # بلا رابطٍ بعد: القراءةُ لا تُنشئ صفَّ مشاركة.
+        self.assertEqual(row["invoice"]["url"], "")
+        self.assertEqual(
+            self.row_of(draft)["invoice"]["url"], "",
+            "مسارُ قراءةٍ أنشأ رابطَ مشاركةٍ حيّاً",
+        )
+
+        share = create_share(self.tenant, invoice)
+        row = self.row_of(draft)
+        self.assertIn(share.token, row["invoice"]["url"])
+
+    def test_a_pending_draft_has_no_invoice_card(self):
+        client = self.make_client("زبونٌ منتظر")
+        FeeSubscription.objects.create(
+            tenant=self.tenant, client=client, amount=Decimal("500.00"),
+            currency=self.currency, starts_on=datetime.date(2026, 1, 1),
+        )
+        services.refresh_office(self.tenant, day=MARCH)
+        draft = FeeDraft.objects.get(client=client, year=MARCH.year, month=MARCH.month)
+
+        self.assertIsNone(self.row_of(draft)["invoice"])
+
+    def test_a_cancelled_invoice_leaves_no_card(self):
+        """الملغاةُ أثرٌ تاريخيّ — والبطاقةُ للحيّة وحدها."""
+        invoice = self.make_invoice()
+        draft = invoice.source_draft
+        fee_invoices.cancel_invoice(invoice, actor=self.owner, reason="خطأ إصدار")
+        draft.refresh_from_db()
+
+        self.assertIsNone(self.row_of(draft)["invoice"])
