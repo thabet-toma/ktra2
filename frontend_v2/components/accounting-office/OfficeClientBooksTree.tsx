@@ -10,17 +10,30 @@
  * والقراءةُ لكل من يرى الزبون، والإضافةُ بـ`office.clients.write` وحده (والخادمُ
  * يحكم على أيّ حال). والحسابُ المضافُ `is_system=false` دائماً — حسابُ المكتب لا
  * حسابُ المنصّة.
+ *
+ * **ونسبةُ الحساب تُقرأ وتُكتب من هنا (#287/١ و٢)**: `rates` على كل سطر من
+ * `accounts/` تُعرض مع شارة «راجع» التي يحكمها الخادم، وتصنيفُ الحساب يُختار من
+ * لائحة نظامه (`client-books/rates/`) — والفراغُ يُرجعه إلى الافتراض. وتغييرُ
+ * التصنيف يمرّ بـ`accounts/<code>/rates/` وحدها، فيعود السطرُ من ردّها لا من
+ * تخمينِ الواجهة.
  */
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   addBookAccount,
+  getBookRates,
   getClientBook,
   listBookAccounts,
   listClientBooks,
+  setBookAccountRates,
   type BookAccountRow,
+  type BookRatesPayload,
   type ClientBookRow,
 } from '../../services/accountingOfficeApi';
+import {
+  accountVatNeedsReview,
+  accountVatRateText,
+} from '../../utils/accountingOffice';
 import { humanizeThrown } from '../../utils/drfError';
 import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
@@ -47,6 +60,10 @@ export const OfficeClientBooksTree: React.FC = () => {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [busy, setBusy] = useState(false);
   const [reloadToken, setReloadToken] = useState(0);
+  // #287/١ و٢: لائحةُ النسب (تصنيفاتُ النظام) وحالةُ حفظ تصنيفٍ لحسابٍ واحد.
+  const [rates, setRates] = useState<BookRatesPayload | null>(null);
+  const [ratesError, setRatesError] = useState('');
+  const [rateBusy, setRateBusy] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -114,6 +131,67 @@ export const OfficeClientBooksTree: React.FC = () => {
   );
   const writable = Boolean(book?.writable);
   const canAdd = canWrite && writable;
+  // تصنيفاتُ لائحة نظام الزبون — الأولُ لكل كود (الصفوفُ ثلاثةٌ لكل تصنيف).
+  const categoryChoices = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const row of rates?.rows ?? []) {
+      if (row.code && !seen.has(row.code)) seen.set(row.code, row.label);
+    }
+    return [...seen.entries()].map(([value, label]) => ({ value, label }));
+  }, [rates]);
+
+  /** #287/٢: تصنيفُ الحساب في اللائحة — الفراغُ يُرْجعه إلى الافتراض. */
+  const changeCategory = useCallback(async (code: string, category: string) => {
+    if (clientId === null) return;
+    setRateBusy(code);
+    try {
+      const saved = await setBookAccountRates(clientId, code, {
+        rate_category: category,
+      });
+      setAccounts((current) => (current ?? []).map((row) => (
+        row.code === code
+          ? {
+            ...row,
+            rate_category: saved.rate_category,
+            rate_category_label: saved.rates.vat.label,
+            rates: saved.rates,
+          }
+          : row
+      )));
+      toast(`تحدّث تصنيف الحساب ${code}`, 'success');
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر حفظ تصنيف الحساب.'), 'error');
+    } finally {
+      setRateBusy('');
+    }
+  }, [clientId, toast]);
+
+  // لائحةُ النسب بنظام الزبون — تُقرأ بعد معرفة نظامه من سطر الدفتر.
+  useEffect(() => {
+    // **وتُفرَّغ قبل القراءة**: تبديلُ الزبون من نظامٍ إلى آخر كان يُبقي لائحةَ
+    // الأوّل (ورقمَ «راجع» الخاصّ بها) حتى يصل الجديد، فيُعرض تصنيفٌ لا يخصّ
+    // الشجرةَ المعروضة.
+    setRates(null);
+    setRatesError('');
+    const system = book?.tax_system;
+    if (!system) {
+      return;
+    }
+    let cancelled = false;
+    getBookRates(system)
+      .then((payload) => {
+        if (!cancelled) setRates(payload);
+      })
+      .catch((failure) => {
+        if (!cancelled) {
+          setRates(null);
+          setRatesError(humanizeThrown(failure, 'تعذّر تحميل لائحة النسب.'));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [book?.tax_system, reloadToken]);
 
   const add = useCallback(async (event: React.FormEvent) => {
     event.preventDefault();
@@ -211,13 +289,38 @@ export const OfficeClientBooksTree: React.FC = () => {
                 </p>
               ) : null}
               <div className="mt-2 max-h-72 overflow-auto">
-                <table className="w-full min-w-[420px] text-start">
+                {ratesError ? (
+                  <div className="mb-1 flex flex-wrap items-center gap-2">
+                    <p
+                      role="alert"
+                      className="text-[11px] font-medium text-rose-600 dark:text-rose-400"
+                    >
+                      {ratesError}
+                    </p>
+                    <button
+                      type="button"
+                      onClick={() => setReloadToken((token) => token + 1)}
+                      className="text-[11px] font-medium text-teal-700 hover:underline dark:text-teal-400"
+                    >
+                      أعد المحاولة
+                    </button>
+                  </div>
+                ) : null}
+                {rates && rates.review_count > 0 ? (
+                  <p className="mb-1 text-[11px] font-medium text-amber-800 dark:text-amber-300">
+                    {rates.review_count} نسبة في لائحة النسب غيرُ مؤكَّدة («راجع») — لا
+                    تُستعمل في حساب حتى يؤكّدها المكتب.
+                  </p>
+                ) : null}
+                <table className="w-full min-w-[560px] text-start">
                   <thead>
                     <tr className="border-b border-slate-200 text-[10.5px] font-medium text-slate-400 dark:border-slate-700 dark:text-slate-500">
                       <th className="px-1 py-2 font-medium">الكود</th>
                       <th className="px-1 py-2 font-medium">الاسم</th>
                       <th className="px-1 py-2 font-medium">النوع</th>
                       <th className="px-1 py-2 font-medium">الحساب الأب</th>
+                      <th className="px-1 py-2 font-medium">الفئة</th>
+                      <th className="px-1 py-2 font-medium">ض.ق.م</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -237,6 +340,46 @@ export const OfficeClientBooksTree: React.FC = () => {
                         </td>
                         <td className="px-1 py-1.5 text-[11.5px] tabular-nums text-slate-500 dark:text-slate-400">
                           {account.parent_code || '—'}
+                        </td>
+                        <td className="px-1 py-1.5 text-[11.5px] text-slate-500 dark:text-slate-400">
+                          {canAdd && rates ? (
+                            <select
+                              value={account.rate_category}
+                              aria-label={`تصنيف الحساب ${account.code} في لائحة النسب`}
+                              disabled={rateBusy === account.code}
+                              onChange={(event) => {
+                                void changeCategory(account.code, event.target.value);
+                              }}
+                              className={`${officeInputClass} block w-40`}
+                            >
+                              <option value="">— الافتراض —</option>
+                              {categoryChoices.map((choice) => (
+                                <option key={choice.value} value={choice.value}>
+                                  {choice.label}
+                                </option>
+                              ))}
+                            </select>
+                          ) : (
+                            account.rate_category_label || '—'
+                          )}
+                        </td>
+                        <td className="px-1 py-1.5 text-[11.5px] text-slate-600 dark:text-slate-300">
+                          <span className="inline-flex items-center gap-1">
+                            <span className="tabular-nums">
+                              {accountVatRateText(account) || '—'}
+                            </span>
+                            {/* #287/١: «راجع» من نسب الحساب نفسها — لا حسابَ هنا. */}
+                            {accountVatNeedsReview(account) ? (
+                              <span
+                                title={`نسبة ض.ق.م غير مؤكَّدة — المصدر: ${
+                                  account.rates?.vat?.source_label || '—'
+                                }`}
+                                className="rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+                              >
+                                راجع
+                              </span>
+                            ) : null}
+                          </span>
                         </td>
                       </tr>
                     ))}

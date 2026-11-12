@@ -151,6 +151,7 @@ from core.access import (
     OFFICE_CLIENTS_WRITE_KEY,
     OFFICE_SETTINGS_MANAGE_KEY,
     require_perm,
+    user_tenant_role,
 )
 from core.api_defaults import ApiAuthAndUser
 from core.media_views import (
@@ -1383,13 +1384,20 @@ class OfficeObligationViewSet(OfficeModuleViewSet):
         """`POST …/amount/from-book/` — حسابُ ض.ق.م من الدفتر وتفصيلُه."""
         obligation = self.get_object()
         self.require_write()
+        # الحسابُ **قراءةُ مبلغ**: من لا يرى المبالغ لا يحصل على تفصيلها أيضاً —
+        # `computed_details` حمولةُ مبالغ، وقنعُ السطر وحده يتركها مكشوفة.
+        if not services.can_see_amounts(self.tenant, request.user):
+            raise PermissionDenied(
+                "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تحسب مبلغاً لا تراه.",
+            )
         obligation, details = services.compute_obligation_amount(
             obligation, actor=request.user,
         )
         row = services.obligation_row(
             obligation,
             day=timezone.localdate(),
-            masked=not services.can_see_amounts(self.tenant, request.user),
+            # الحارسُ أعلاه يضمن رؤية المبالغ — فلا قنعَ بعدها.
+            masked=False,
         )
         return Response({**row, "computed_details": details})
 
@@ -2291,12 +2299,26 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         row["annual_alerts"] = book_reports.annual_alerts_payload(
             book, masked=self._masked(),
         )
+        # #287/٣: الإهلاكُ السنويُّ — أصلٌ فئتُه ونسبتُه وإهلاكُ سنته، كما التنبيهات.
+        row["depreciation"] = book_reports.depreciation_payload(
+            book, masked=self._masked(),
+        )
         row["locked_periods"] = [
             client_books.period_row(lock)
             for lock in book.period_locks.filter(unlocked_on__isnull=True).order_by(
                 "-period_end", "-id",
             )
         ]
+        # #287/٥: من يفتح فترةً مقفلةً بدورٍ لا بمفتاح — والقرارُ من `core.access`
+        # نفسِه الذي يحكمه في `client_books.reopen_period`، فلا نسخةَ ثانية هنا.
+        row["can_reopen_periods"] = (
+            user_tenant_role(self.request.user, self.tenant)
+            in client_books.ENTRY_APPROVER_ROLES
+        )
+        # #287/٢: نظامُ الزبون الضريبيّ — لائحةُ النسب تُقرأ به (`rates/?tax_system=`).
+        row["tax_system"] = services.resolve_setting(
+            self.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+        ) or ""
         return row
 
     def list(self, request, *args, **kwargs):

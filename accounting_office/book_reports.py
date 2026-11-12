@@ -810,6 +810,46 @@ def _recognised_input(line, *, tenant, system, overrides) -> tuple[Decimal, Deci
     return tax, (tax * rate / Decimal("100")).quantize(_CENT), review
 
 
+class _LineTax:
+    """شكلُ السطر الذي تقرؤه `_recognised_input` **قبل أن يُحفظ السطر**.
+
+    `paper_input_tax` تبنيها من الحساب والضريبة وحدهما: بنودُ الورقة تُولَّد
+    كقواميس ثم تمرّ بـ`_prepare_lines`، فلا كائنَ `BookEntryLine` بعد. ونسبةُ
+    السطر المولَّد غائبةٌ دائماً (`client_books._entry_line` لا يكتبها) فالنسبةُ
+    من الحساب — كالسطر المحفوظ نفسه.
+    """
+
+    __slots__ = ("tax_amount", "vat_rate", "account")
+
+    def __init__(self, *, tax_amount, vat_rate, account):
+        self.tax_amount = tax_amount
+        self.vat_rate = vat_rate
+        self.account = account
+
+
+def paper_input_tax(book, *, account, tax_amount, context=None) -> tuple[Decimal, Decimal]:
+    """`(المعترف به، غير المخصوم)` من ضريبة ورقةٍ على حساب مدين — بالقاعدة الواحدة.
+
+    `client_books` يكتب على `2200` المعترفَ به وحده ويزيد سطرَ المصروف/الأصل
+    بالباقي (وبالتقرير البسيط يزيد مصروفَ الفترة). وبلا ذلك كان `non_deductible`
+    رقماً في تقرير ض.ق.م **لا يصل كلفةَ أيّ حساب**: تقول الورقةُ «1170» ويقول
+    الدفترُ «1000 + 170 التزاماً» ولا أحدَ يدفع الـ56.67 كلفةً.
+
+    **ولا نسبةَ ثانية هنا**: `_recognised_input` وحدها تقرأ نسبةَ الاعتراف
+    (بسببٍ `_vat_rate_context`)، فبنودُ الحركة وتقريرُ ض.ق.م ومبلغُ الالتزام
+    يقولون الرقمَ نفسه.
+
+    و`context` هو `_vat_rate_context(book)` جاهزاً — يُمرَّر لمن يولّد حركةً من
+    عدة أوراق (النظامُ واللائحة لا يتغيّران بين أوراق الحركة الواحدة).
+    """
+    system, overrides = context if context is not None else _vat_rate_context(book)
+    _tax, recognised, _review = _recognised_input(
+        _LineTax(tax_amount=_zero(tax_amount), vat_rate=None, account=account),
+        tenant=book.tenant, system=system, overrides=overrides,
+    )
+    return recognised, _zero(tax_amount) - recognised
+
+
 def _vat(book, span, **_):
     """ض.ق.م للفترة: **مخرجاتٌ ومدخلاتٌ منفصلتان، والمستحقُّ = المخرجات − المدخلات المعترف بها**.
 
@@ -1269,6 +1309,7 @@ def depreciation_payload(book, *, raw_to=None, masked=False) -> dict:
             "account_code": row["account__code"],
             "account_name": row["account__name"],
             "rate_category": row["account__rate_category"],
+            "rate_category_label": rate.get("label", ""),
             "rate": rate.get("rate"),
             "rate_source": rate.get("source", ""),
             "rate_source_label": rate.get("source_label", ""),
