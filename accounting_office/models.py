@@ -3896,8 +3896,13 @@ class BookPeriodLock(models.Model):
     مسمّاة، وتصحيحُ ما قبل القفل يبقى ممكناً. والفتحُ لا يمحو الصفَّ: يكتب
     `unlocked_on`/`unlocked_by`/`unlock_reason` فيبقى أثرُ من فتح ومتى ولماذا.
 
-    **والفرادةُ على الفترة نفسها**: تقديمُ التزامين بفترتين متساويتين (ق.م ورواتب)
-    لا يُنشئ قفلين — القفلُ عن الفترة لا عن المستند.
+    **وقفلٌ نشطٌ واحدٌ للفترة، والفرادةُ في الخدمة لا في القيد**: تقديمُ التزامين
+    بالفترة نفسها (ق.م ورواتب) لا يُنشئ قفلين، والصفُّ المفتوح (`unlocked_on` غيرُ
+    فارغ) **سجلُّ أثرٍ لا قفل** — يُقرأ ولا يمنع صفّاً نشطاً جديداً بعد فتحٍ ثم
+    تقديمٍ ثانٍ. و`UniqueConstraint(condition=…)` كان الحلَّ الظاهر وهو غيرُ
+    مدعومٍ في MySQL 8.4 (الإنتاج: يتجاهل الشرط)، والقيدُ على الثلاثة يمنع الصفَّ
+    الجديد أصلاً فيبقى الدفترُ مفتوحاً بعد الفتح. فحُذف القيدُ وبقيت الفرادةُ في
+    `client_books.lock_period` تحت `select_for_update` على الدفتر.
     """
 
     tenant = models.ForeignKey(
@@ -3950,12 +3955,6 @@ class BookPeriodLock(models.Model):
         verbose_name = "قفل فترة دفتر"
         verbose_name_plural = "أقفال فترات الدفاتر"
         ordering = ["-period_end", "-id"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["client_book", "period_start", "period_end"],
-                name="uniq_book_period_lock",
-            ),
-        ]
         indexes = [
             models.Index(
                 fields=["tenant", "client_book"], name="office_book_lock_tenant",

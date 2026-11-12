@@ -29,6 +29,7 @@ import type {
   BookEntryRow,
   BookReportPeriod,
   ClientBookChoicesPayload,
+  ClientBookPeriod,
   ClientBookReportKind,
   ClientBookReportShare,
   ClientBookReportsPayload,
@@ -55,7 +56,11 @@ import type {
   OfficeSelfObligationRow,
   OfficeSelfObligationsPayload,
   OfficeServiceRow,
+  ObligationComputedRow,
   ObligationRow,
+  BookAccountRatesPayload,
+  BookAccountRatesWrite,
+  BookRatesPayload,
   PendingEntryPayload,
   PendingEntryRow,
   ServicePackageRow,
@@ -72,12 +77,20 @@ export type {
   CalendarDeadlineRow,
   CalendarPayload,
   ClientAppointmentsPayload,
+  BookAccountRates,
+  BookAccountRatesPayload,
+  BookAccountRatesWrite,
   BookAccountRow,
   BookChoice,
+  BookDepreciationPayload,
+  BookDepreciationRow,
   BookEntryLineRow,
   BookEntryRow,
+  BookRateRow,
+  BookRatesPayload,
   BookReportPeriod,
   ClientBookChoicesPayload,
+  ClientBookPeriod,
   ClientBookReportKind,
   ClientBookReportShare,
   ClientBookReportsPayload,
@@ -106,6 +119,8 @@ export type {
   DashboardWaitingGroup,
   EventKindChoice,
   ObligationBadge,
+  ObligationComputedDetails,
+  ObligationComputedRow,
   ObligationRow,
   OfficeAlertRow,
   OfficeAlertsPayload,
@@ -772,6 +787,27 @@ export const setObligationAmount = (
 ): Promise<ObligationRow> =>
   apiPostObject<ObligationRow>(`${OBLIGATIONS}${id}/amount/`, payload, tenantOpts());
 
+/**
+ * #287/٤: «احسب من الدفتر» — يحفظ `computed_amount` **ولا يمسّ `amount`**.
+ *
+ * والردُّ سطرُ الالتزام ومعه `computed_details` (مبيعاتٌ ومدخلاتٌ معترفٌ بها
+ * وغيرُ مخصومة) وعدُّ `review_lines`: أسطرٌ نسبتُها غيرُ مؤكَّدة فضريبتُها لم
+ * تُخصم، فالتفصيلُ يُعلن نقصَه قبل التأكيد لا بعده. والخادمُ يردّ 400 برسالته
+ * إن كان إعدادُ «حساب مبلغ الالتزام من الدفتر» مطفأً — لا شرطَ مكرَّراً هنا.
+ */
+export const computeObligationAmount = (
+  id: number,
+): Promise<ObligationComputedRow> =>
+  apiPostObject<ObligationComputedRow>(
+    `${OBLIGATIONS}${id}/amount/from-book/`, {}, tenantOpts(),
+  );
+
+/** «أكّد» — المحسوبُ يصير المعدَّل، والاثنان يبقيان مقروءين في السطر. */
+export const confirmObligationAmount = (id: number): Promise<ObligationRow> =>
+  apiPostObject<ObligationRow>(
+    `${OBLIGATIONS}${id}/amount/confirm/`, {}, tenantOpts(),
+  );
+
 export const setObligationClientPaid = (
   id: number,
   paid: boolean,
@@ -1280,6 +1316,61 @@ export const addBookAccount = (
 ): Promise<BookAccountRow> =>
   apiPostObject<BookAccountRow>(
     `${CLIENT_BOOKS}${clientId}/accounts/`, payload, tenantOpts(),
+  );
+
+/**
+ * #287/٢: تصنيفُ الحساب في لائحة النسب ونسبُه — `null` صريحٌ يُفرّغ الصريحَ
+ * فيعود الحسابُ إلى اللائحة/الافتراض (وهو ما يعد به المُسلسِل).
+ */
+export const setBookAccountRates = (
+  clientId: number,
+  code: string,
+  payload: BookAccountRatesWrite,
+): Promise<BookAccountRatesPayload> =>
+  apiPostObject<BookAccountRatesPayload>(
+    `${CLIENT_BOOKS}${clientId}/accounts/${encodeURIComponent(code)}/rates/`,
+    payload,
+    tenantOpts(),
+  );
+
+/**
+ * #287/١: لائحةُ النسب كاملةً لنظامٍ ضريبيّ — تصنيفاتٌ بمصادرها و«راجع» فيها.
+ *
+ * على مستوى المكتب لا الزبون (اللائحةُ واحدة)، والنظامُ معاملٌ صريح: لا زبونَ
+ * في المسار يُقرأ منه.
+ */
+export const getBookRates = (taxSystem: string): Promise<BookRatesPayload> =>
+  apiGetObject<BookRatesPayload>(`${CLIENT_BOOKS}rates/`, {
+    ...tenantOpts(),
+    query: { tax_system: taxSystem },
+  });
+
+/**
+ * #287/٥: سجلُّ أقفال الدفتر كاملاً — المفتوحُ يبقى شاهداً بسببه ومَن فتحه.
+ *
+ * وسطرُ الدفتر يحمل **النشطةَ** وحدها (`locked_periods`)؛ هذا المسارُ يجلب
+ * التاريخ كلَّه. والفرزُ من الخادم (`-period_end`).
+ */
+export const listBookPeriods = (clientId: number): Promise<ClientBookPeriod[]> =>
+  apiGetObject<ClientBookPeriod[]>(
+    `${CLIENT_BOOKS}${clientId}/periods/`, tenantOpts(),
+  );
+
+/**
+ * فتحُ فترةٍ مقفلة — **بسببٍ إلزاميّ** يُسجَّل مع مَن فتحها.
+ *
+ * والدورُ (المديرُ وصاحبُ المكتب) في الخدمة لا هنا: الواجهةُ تُخفي الزرَّ
+ * بـ`can_reopen_periods` من الخادم، والخادمُ يردّ 403 لمن ليس منهم.
+ */
+export const reopenBookPeriod = (
+  clientId: number,
+  periodId: number,
+  reason: string,
+): Promise<ClientBookPeriod> =>
+  apiPostObject<ClientBookPeriod>(
+    `${CLIENT_BOOKS}${clientId}/periods/${periodId}/reopen/`,
+    { reason },
+    tenantOpts(),
   );
 
 /** حركاتُ الدفتر — بلا `year` تُعاد كلُّ السنوات. */

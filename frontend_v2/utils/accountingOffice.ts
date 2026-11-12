@@ -15,6 +15,7 @@
  */
 import { formatNumber } from './formatNumber.ts';
 import { monthKeyLabel, monthKeyOf, monthKeyRange, shiftMonthKey } from './monthKey.ts';
+import { formatTaxPercentLabel } from './sqlMoneyRound.ts';
 import { userRoleLabel } from './userRoleLabel.ts';
 
 /** مسار شاشة الزبائن — مصدرٌ واحدٌ للرابط وقراءته. */
@@ -870,6 +871,13 @@ export interface ObligationRow {
   warnings: string[];
   badges: ObligationBadge[];
   amount: string | null;
+  /**
+   * #287/٤: المبلغُ **المحسوبُ من الدفتر** — محفوظٌ إلى جانب `amount` لا مكانه.
+   *
+   * `null` تعني «لم يُحسب بعد» (أو «لا ترى المبالغ»)، وصفرُه `"0.00"` خبرٌ آخر:
+   * حُسب فكان صفراً. و«أكّد» لا يُفتح قبل تفصيلٍ مقروءٍ في الجلسة.
+   */
+  computed_amount?: string | null;
   direction: string;
   direction_label: string;
   client_paid: boolean;
@@ -888,6 +896,30 @@ export interface ObligationRow {
 export interface DocumentProgress {
   received: number;
   required: number;
+}
+
+/**
+ * تفصيلُ حساب مبلغ الالتزام من الدفتر (#287/٤) — يُعرض **قبل** التأكيد.
+ *
+ * `recognised_input` هو المعترفُ به من ضريبة المدخلات، و`non_deductible` باقيها
+ * (كلفةٌ لا تُخصم)، و`vat_due` المبيعاتُ ناقصَ المعترف به. و`review_lines` عددُ
+ * أسطرٍ نسبتُها غيرُ مؤكَّدة: ضريبتُها **لم تُخصم**، فالرقمُ ناقصٌ حتى يؤكّدها
+ * المكتب — وهذا ما يُعلَن قبل التأكيد لا بعده.
+ */
+export interface ObligationComputedDetails {
+  from: string;
+  to: string;
+  sales_tax: string | null;
+  input_tax: string | null;
+  recognised_input: string | null;
+  non_deductible: string | null;
+  vat_due: string | null;
+  review_lines: number;
+}
+
+/** ردُّ `amount/from-book/`: سطرُ الالتزام ومعه تفصيلُ حسابه. */
+export interface ObligationComputedRow extends ObligationRow {
+  computed_details: ObligationComputedDetails;
 }
 
 export interface TodayCounters {
@@ -2143,8 +2175,14 @@ export interface ClientBookRow {
   period_result?: PeriodResult | null;
   /** تنبيهاتُ السقوف السنوية (#287/٧) — تنبيهٌ لا رفض. */
   annual_alerts?: AnnualAlerts | null;
+  /** الإهلاكُ السنويُّ (#287/٣) — أصلٌ فئتُه ونسبتُه وإهلاكُ سنته. */
+  depreciation?: BookDepreciationPayload | null;
   /** الفتراتُ المقفلة السارية (#287/٥) — تُعاد بـ`periods/` كاملةً. */
   locked_periods?: ClientBookPeriod[];
+  /** من يفتح فترةً مقفلةً (المديرُ وصاحبُ المكتب) — قرارُ الخادم لا تخمينُ الواجهة. */
+  can_reopen_periods?: boolean;
+  /** نظامُ الزبون الضريبيّ — به تُقرأ لائحةُ النسب (`rates/?tax_system=`). */
+  tax_system?: string;
 }
 
 /** نتيجةُ فترةِ دفتر: إيراداتٌ ناقصَ مصاريف، ورمزُ لونها من الخادم. */
@@ -2194,6 +2232,85 @@ export interface ClientBookPeriod {
   unlock_reason: string;
   is_open: boolean;
   obligation: number | null;
+}
+
+/**
+ * صفُّ نسبةٍ في اللائحة (#287/١) — للائحة المنصّة أو لتجاوز المكتب.
+ *
+ * `rate: null` تعني «لا نعلم بعد» لا صفراً، و`usable: false` تعني «لا تُستعمل في
+ * حساب» — والحكمُ في الخادم، فلا تقارن الواجهةُ نسبةً بنفسها.
+ */
+export interface BookRateRow {
+  code: string;
+  rate_kind: string;
+  rate_kind_label: string;
+  label: string;
+  rate: string | null;
+  needs_review: boolean;
+  usable: boolean;
+  source: string;
+  source_label: string;
+  evidence: string;
+  evidence_label: string;
+  source_note: string;
+  effective_from: string | null;
+}
+
+/** نسبُ حسابٍ واحدة: ض.ق.م والضريبة والإهلاك — مفتاحُ كلٍّ نوعُه. */
+export interface BookAccountRates {
+  vat: BookRateRow;
+  income: BookRateRow;
+  depreciation: BookRateRow;
+}
+
+/** ردُّ `accounts/<code>/rates/`: الحسابُ ونسبُه كما تُقرأ بعد الكتابة. */
+export interface BookAccountRatesPayload {
+  code: string;
+  rates: BookAccountRates;
+  rate_category: string;
+}
+
+/** لائحةُ النسب كاملةً (`client-books/rates/`) — تصنيفاتٌ و«راجع» فيها. */
+export interface BookRatesPayload {
+  tax_system: string;
+  rate_kinds: BookChoice[];
+  rows: BookRateRow[];
+  review_count: number;
+}
+
+/** كتابةُ تصنيفِ حسابٍ ونسبه — `null` صريحٌ يُفرّغ الصريحَ ويعود إلى اللائحة. */
+export interface BookAccountRatesWrite {
+  rate_category?: string;
+  vat_rate?: string | null;
+  income_tax_rate?: string | null;
+  depreciation_rate?: string | null;
+}
+
+/** سطرُ أصلٍ في الإهلاك السنوي (#287/٣). */
+export interface BookDepreciationRow {
+  account_code: string;
+  account_name: string;
+  rate_category: string;
+  /** تسميةُ الفئة كما في لائحة النسب — تصل من الخادم لا من كود `.rate_category`. */
+  rate_category_label: string;
+  /** النسبةُ من الحساب أو اللائحة؛ `null` حين لا نسبةَ مؤكَّدة. */
+  rate: string | null;
+  rate_source: string;
+  rate_source_label: string;
+  needs_review: boolean;
+  cost: string | null;
+  /** إهلاكُ السنة — `null` معناها «راجع»، ولا يُخترَع رقمٌ مكانها. */
+  depreciation: string | null;
+}
+
+/** الإهلاكُ السنويُّ بالقسط الثابت — أصلٌ بكلفته ونسبته وإهلاك سنته. */
+export interface BookDepreciationPayload {
+  from: string;
+  to: string;
+  tax_system: string;
+  rows: BookDepreciationRow[];
+  totals: { cost: string | null; depreciation: string | null };
+  review_count: number;
 }
 
 /**
@@ -2250,6 +2367,77 @@ export interface BookAccountRow {
   account_type_label: string;
   is_system: boolean;
   is_active: boolean;
+  /** تصنيفُ الحساب في لائحة النسب (#287/٢) — كودٌ في اللائحة أو فراغ. */
+  rate_category: string;
+  /** تسميةُ التصنيف كما في اللائحة — يحسبها الخادم من السطر نفسه. */
+  rate_category_label?: string;
+  /** نسبُه الثلاث — `null` حين تُقرأ الشجرةُ بلا مكتب (شكلٌ قديم). */
+  rates: BookAccountRates | null;
+}
+
+/**
+ * نسبةٌ مئويةٌ للعرض من نصّ الخادم — «10%» أو فراغٌ حين لا نسبة.
+ *
+ * مصدرُ تنسيقها الواحد: سطرُ الحساب والإهلاك السنويّ يعرضان النسبةَ نفسَها،
+ * وصيغتان لنسبةٍ واحدة تفترقان عند أوّل تعديل (و«100» بلا علامة تُقرأ عدداً).
+ */
+export function ratePercentText(rate: string | null | undefined): string {
+  if (rate === null || rate === undefined || rate === '') return '';
+  return `${formatTaxPercentLabel(rate)}%`;
+}
+
+/**
+ * نسبةُ ض.ق.م على الحساب نصّاً للعرض (#287/١) — «100%» أو فراغٌ حين لا نسبة.
+ *
+ * **ونسبةُ الإهلاك لا تُعرض هنا**: حسابُ صندوقٍ أو بنكٍ أصلٌ بلا فئةِ إهلاك،
+ * فـ«راجع» على كل سطر نقدٍ ضجيجٌ لا سؤال. السؤالُ المحاسبيُّ هو خصمُ ضريبة
+ * المدخلات، وحكمُ «راجع» فيه من الخادم (`needs_review`) لا من مقارنةٍ هنا.
+ */
+export function accountVatRateText(
+  account: Pick<BookAccountRow, 'rates'>,
+): string {
+  return ratePercentText(account.rates?.vat?.rate ?? null);
+}
+
+/** «راجع»: نسبةُ ض.ق.م على الحساب غيرُ مؤكَّدة — لا تُخصم في الحساب. */
+export function accountVatNeedsReview(
+  account: Pick<BookAccountRow, 'rates'>,
+): boolean {
+  return Boolean(account.rates?.vat?.needs_review);
+}
+
+/**
+ * الأقفالُ النشطةُ وحدها من سجلّ الفترات (#287/٥).
+ *
+ * الصفُّ المفتوح (`unlocked_on`) **سجلُّ أثرٍ لا قفل**: يبقى ليُقرأ من فتح ومتى
+ * ولماذا، ولا يمنع إدخالاً. وترتيبُ الخادم (`-period_end`) يبقى كما هو.
+ */
+export function activeBookPeriods(
+  periods: readonly ClientBookPeriod[],
+): ClientBookPeriod[] {
+  return periods.filter((period) => period.unlocked_on === null);
+}
+
+/**
+ * «المحسوبُ من الدفتر صار هو المبلغَ المعدَّل» (#287/٤).
+ *
+ * لا علمَ «مؤكَّد» في الخادم: التأكيدُ يكتب `amount`/`direction` ويُبقي
+ * `computed_amount` مقروءاً إلى جانبه. فالسؤالُ يُجاب بالمقارنة: المبلغُ يساوي
+ * مطلقه، والاتجاهُ من إشارته — موجبٌ «عليه» وسالبٌ «إله» والصفرُ بلا اتجاه
+ * (وهو ما يفعله `services.confirm_obligation_amount` نفسه).
+ */
+export function computedAmountConfirmed(
+  row: Pick<ObligationRow, 'amount' | 'computed_amount'> & { direction: string },
+): boolean {
+  const computed = row.computed_amount;
+  if (computed === null || computed === undefined || row.amount === null) {
+    return false;
+  }
+  const value = Number(computed);
+  const amount = Number(row.amount);
+  if (!Number.isFinite(value) || !Number.isFinite(amount)) return false;
+  const direction = value > 0 ? 'due' : value < 0 ? 'refund' : '';
+  return amount === Math.abs(value) && row.direction === direction;
 }
 
 /**

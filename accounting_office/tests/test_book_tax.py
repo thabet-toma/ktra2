@@ -287,6 +287,33 @@ class BookRatesTestCase(APITestCase):
         self.assertEqual(res.data["rates"][RATE_KIND_VAT]["source"], "platform")
         self.assertEqual(res.data["rates"][RATE_KIND_DEPRECIATION]["rate"], "6.0000")
 
+    def test_an_explicit_null_returns_the_account_to_the_list(self):
+        """`null` صريحٌ يُفرّغ النسبةَ فيعود الحسابُ إلى اللائحة — 200 والقراءةُ تُثبته.
+
+        `set_account_rates` كان يقرأ «الحقلُ مُرسَل» بـ`if value is not None`،
+        فـ`null` يمرّ صامتاً ويبقى الحسابُ على نسبته الصريحة — **لا طريقَ لإرجاعه**.
+        """
+        set_ok = self.client.post(
+            f"{BOOKS}{self.mine.pk}/accounts/5200/rates/",
+            {"vat_rate": "66.6667"}, format="json", **self.headers(),
+        )
+        self.assertEqual(set_ok.status_code, 200, set_ok.content)
+        self.assertEqual(set_ok.data["rates"][RATE_KIND_VAT]["source"], "account")
+
+        cleared = self.client.post(
+            f"{BOOKS}{self.mine.pk}/accounts/5200/rates/",
+            {"vat_rate": None}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(cleared.status_code, 200, cleared.content)
+        self.assertIsNone(self.account("5200").vat_rate)
+        # وقراءةُ الشجرة تقول الشيء نفسه: مصدرُ النسبة صار الافتراضَ لا الحساب.
+        tree = self.client.get(f"{BOOKS}{self.mine.pk}/accounts/", **self.headers())
+        self.assertEqual(tree.status_code, 200, tree.content)
+        row = next(row for row in tree.data if row["code"] == "5200")
+        self.assertEqual(row["rates"][RATE_KIND_VAT]["source"], book_rates.SOURCE_DEFAULT)
+        self.assertEqual(row["rates"][RATE_KIND_VAT]["rate"], "100.0000")
+
     def test_an_unknown_category_is_rejected(self):
         res = self.client.post(
             f"{BOOKS}{self.mine.pk}/accounts/5200/rates/",
@@ -443,6 +470,29 @@ class DepreciationTestCase(APITestCase):
         self.assertEqual(payload["rows"][0]["depreciation"], "1000.00")
         self.assertEqual(payload["totals"]["depreciation"], "1000.00")
         self.assertEqual(payload["review_count"], 0)
+
+    def test_the_book_row_carries_the_annual_depreciation_to_the_api(self):
+        """الإهلاكُ يصل الواجهةَ في سطر الدفتر — كما يصل `annual_alerts` (بند ٣).
+
+        كان `depreciation_payload` لا مستدعيَ له إلا الاختبار: رقمٌ محسوبٌ في
+        الخادم لا يراه المحاسبُ في أيّ شاشة.
+        """
+        self.assertEqual(self.buy_furniture(self.ps).status_code, 201)
+        self.set_category(self.ps)
+
+        res = self.client.get(f"{BOOKS}{self.ps.pk}/", **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        payload = res.data["depreciation"]
+        self.assertEqual(payload["tax_system"], "PS")
+        row = payload["rows"][0]
+        self.assertEqual(row["account_code"], "1400")
+        self.assertEqual(row["rate_category"], "furniture")
+        self.assertEqual(row["rate_category_label"], "أثاث ومفروشات")
+        self.assertEqual(row["rate"], "10.0000")
+        self.assertEqual(row["cost"], "10000.00")
+        self.assertEqual(row["depreciation"], "1000.00")
+        self.assertEqual(payload["totals"]["depreciation"], "1000.00")
 
     def test_the_same_asset_depreciates_six_percent_in_israel(self):
         self.assertEqual(self.buy_furniture(self.il).status_code, 201)
@@ -682,6 +732,23 @@ class AmountFromBookTestCase(APITestCase):
         self.assertEqual(res.data["computed_amount"], "-113.33")
         self.assertEqual(res.data["direction"], "refund")
 
+    def test_a_member_without_the_amounts_key_cannot_read_the_details(self):
+        """`computed_details` حمولةُ مبالغ: قنعُ السطر وحده كان يتركها مكشوفة."""
+        self.add_purchase(tax="170")
+        services.set_office_setting(
+            self.tenant, services.OBLIGATION_FROM_BOOK_KEY, True,
+        )
+        self.client.force_authenticate(user=self.accountant)
+
+        res = self.client.post(
+            f"{OBLIGATIONS}{self.obligation.pk}/amount/from-book/",
+            {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 403, res.content)
+        self.assertIn("المبالغ", str(res.data))
+        self.assertIsNone(Obligation.objects.get(pk=self.obligation.pk).computed_amount)
+
     def test_the_setting_gates_the_calculation(self):
         self.add_purchase()
         data = self.compute(expect=400)
@@ -818,10 +885,98 @@ class PeriodLockTestCase(APITestCase):
         self.assertEqual(res.status_code, expect, res.content)
         return res.data
 
-    def test_submitting_closes_the_book_period_when_enabled(self):
-        # الإعدادُ مطفأ افتراضاً: التقديمُ لا يقفل شيئاً.
+    def add_second_obligation(self):
+        """التزامٌ ثانٍ بالفترة نفسها — ق.م ورواتبُ يناير في الشهر الواحد."""
+        return Obligation.objects.create(
+            tenant=self.tenant,
+            client=self.mine,
+            client_service_id=self.obligation.client_service_id,
+            task=self.obligation.task,
+            rule=self.rule,
+            rule_code="jan_payroll",
+            name="رواتب يناير",
+            period_start=JAN_START,
+            period_end=JAN_END,
+            legal_date=JAN_END,
+            official_date=JAN_END,
+            actual_deadline=JAN_END,
+            internal_deadline=JAN_END,
+        )
+
+    def test_submitting_closes_the_book_period_by_default(self):
+        # الافتراضُ «مفعّل» (قرار المالك): التقديمُ يقفل بلا ضبطٍ سابق.
         self.submit()
+
+        lock = BookPeriodLock.objects.get(client_book=self.book)
+        self.assertEqual(lock.period_start, JAN_START)
+        self.assertEqual(lock.period_end, JAN_END)
+        self.assertIsNone(lock.unlocked_on)
+
+    def test_an_explicit_off_keeps_the_book_period_open(self):
+        # والإطفاءُ الصريح هو ما يمنع القفل — لا الصمت.
+        services.set_client_setting(
+            self.mine, client_books.CLOSE_ON_SUBMIT_KEY, False,
+        )
+
+        self.submit()
+
         self.assertEqual(BookPeriodLock.objects.count(), 0)
+
+    def test_two_submissions_of_one_period_share_a_single_active_lock(self):
+        """ق.م ورواتبُ يناير → قفلٌ نشطٌ واحد — والفحصُ في الخدمة لا في قيدٍ قاعدةٍ.
+
+        القيدُ على (الدفتر، البداية، النهاية) حُذف ليفتح الطريق لصفٍّ جديد بعد
+        الفتح، فصار هذا الفحصُ هو الحارسَ الوحيد — وهو لا يسقط بأيّ اختبارٍ آخر.
+        """
+        self.submit()
+        second = self.add_second_obligation()
+
+        res = self.client.post(
+            f"{OBLIGATIONS}{second.pk}/submit/",
+            {"submitted_on": datetime.date(THIS_YEAR, 2, 1).isoformat()},
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(
+            BookPeriodLock.objects.filter(
+                client_book=self.book, unlocked_on__isnull=True,
+            ).count(),
+            1,
+        )
+        self.assertEqual(BookPeriodLock.objects.filter(client_book=self.book).count(), 1)
+
+    def test_a_second_submission_after_reopening_locks_a_new_row_and_keeps_the_log(self):
+        """الفتحُ لا يُعيد القفلَ على الصفّ القديم: صفٌّ جديدٌ نشطٌ والأوّلُ شاهد."
+
+        القيدُ القديم على (الدفتر، البداية، النهاية) كان يُعيد الصفَّ المفتوح من
+        `get_or_create` فيبقى الدفترُ مفتوحاً بعد فتحٍ ثم تقديمٍ ثانٍ للفترة نفسها.
+        """
+        self.submit()
+        first = BookPeriodLock.objects.get(client_book=self.book)
+        client_books.reopen_period(
+            first, reason="قيدُ يناير وصل متأخّراً", actor=self.owner,
+        )
+
+        second = self.add_second_obligation()
+        res = self.client.post(
+            f"{OBLIGATIONS}{second.pk}/submit/",
+            {"submitted_on": datetime.date(THIS_YEAR, 2, 1).isoformat()},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+
+        locks = BookPeriodLock.objects.filter(client_book=self.book).order_by("pk")
+        self.assertEqual(locks.count(), 2)
+        # الأوّلُ باقٍ في السجلّ بفتحه، والثاني نشطٌ هو ما يقفل الفترة.
+        self.assertEqual(locks[0].pk, first.pk)
+        self.assertIsNotNone(locks[0].unlocked_on)
+        self.assertEqual(locks[0].unlock_reason, "قيدُ يناير وصل متأخّراً")
+        self.assertIsNone(locks[1].unlocked_on)
+        self.assertEqual(locks[1].period_start, JAN_START)
+        self.assertEqual(locks[1].period_end, JAN_END)
+        refused = self.add_entry(day=datetime.date(THIS_YEAR, 1, 15), expect=400)
+        self.assertIn("مقفلة", str(refused))
 
     def test_an_enabled_setting_locks_the_period_and_blocks_entries_inside_it(self):
         services.set_office_setting(self.tenant, client_books.CLOSE_ON_SUBMIT_KEY, True)

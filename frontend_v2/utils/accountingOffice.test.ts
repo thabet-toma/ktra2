@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import type { BookAccountRates, ClientBookPeriod } from './accountingOffice.ts';
 import {
   AMOUNT_MASK,
   alertTargetPath,
@@ -40,6 +41,11 @@ import {
   feeDraftStatusClass,
   pendingFeeDraftCount,
   accountBalanceTone,
+  accountVatNeedsReview,
+  accountVatRateText,
+  activeBookPeriods,
+  computedAmountConfirmed,
+  ratePercentText,
   frequencyAfterSuggestion,
   availableServicesForClient,
   clientBookPath,
@@ -1708,4 +1714,140 @@ test('نبرةُ رصيد الحساب: موجبٌ عليه، سالبٌ له، 
   assert.equal(accountBalanceTone(''), 'masked');
   // والنصُّ الفاسدُ صفرٌ لا NaN — لا لونَ يصرخ لخطأٍ في البيان.
   assert.equal(accountBalanceTone('غير رقم'), 'settled');
+});
+
+/** صفُّ نسبةٍ كاملُ الحقول — الاختبارُ يسأل عن الحكم لا عن الشكل. */
+function rateRow(
+  rate: string | null,
+  { needsReview = false, sourceLabel = 'لائحة المنصّة' }: {
+    needsReview?: boolean;
+    sourceLabel?: string;
+  } = {},
+): BookAccountRates['vat'] {
+  return {
+    code: 'furniture',
+    rate_kind: 'vat',
+    rate_kind_label: 'ض.ق.م',
+    label: 'أثاث',
+    rate,
+    needs_review: needsReview,
+    usable: rate !== null && !needsReview,
+    source: 'platform',
+    source_label: sourceLabel,
+    evidence: '',
+    evidence_label: '',
+    source_note: '',
+    effective_from: null,
+  };
+}
+
+function accountRates(vat: BookAccountRates['vat']): BookAccountRates {
+  return { vat, income: rateRow(null), depreciation: rateRow(null) };
+}
+
+test('نسبةُ ض.ق.م على سطر الحساب: نسبةٌ مئوية بلا أصفارٍ زائدة، وفراغٌ حين لا نسبة', () => {
+  assert.equal(accountVatRateText({ rates: accountRates(rateRow('100.0000')) }), '100%');
+  assert.equal(accountVatRateText({ rates: accountRates(rateRow('66.6667')) }), '66.6667%');
+  // `null` تعني «لا نعلم بعد» لا صفراً: تُترك الخانةُ فارغةً لا «0».
+  assert.equal(accountVatRateText({ rates: accountRates(rateRow(null)) }), '');
+  // وشجرةٌ تُقرأ بلا مكتبٍ لا نسبَ فيها — لا انفجار.
+  assert.equal(accountVatRateText({ rates: null }), '');
+  // والمُنسِّقُ نفسُه يخدم الإهلاكَ السنويّ: صيغةٌ واحدةٌ لنسبةٍ واحدة.
+  assert.equal(ratePercentText('6.0000'), '6%');
+  assert.equal(ratePercentText('12.5000'), '12.5%');
+  assert.equal(ratePercentText(null), '');
+  assert.equal(ratePercentText(''), '');
+});
+
+test('«راجع» على سطر الحساب حكمُ الخادم لا شكلُ النسبة', () => {
+  assert.equal(accountVatNeedsReview({ rates: accountRates(rateRow(null, { needsReview: true })) }), true);
+  // نسبةٌ موجودةٌ لكنها «راجع»: لا تُستعمل في الحساب فتُعلَن.
+  assert.equal(
+    accountVatNeedsReview({ rates: accountRates(rateRow('100.0000', { needsReview: true })) }),
+    true,
+  );
+  assert.equal(accountVatNeedsReview({ rates: accountRates(rateRow('100.0000')) }), false);
+  assert.equal(accountVatNeedsReview({ rates: null }), false);
+});
+
+test('الأقفالُ النشطةُ وحدها تُعرض — والمفتوحُ سجلُّ أثرٍ لا قفل', () => {
+  const locked: ClientBookPeriod = {
+    id: 1,
+    period_start: '2026-01-01',
+    period_end: '2026-01-31',
+    locked_on: '2026-02-01',
+    locked_by: 'المدير',
+    unlocked_on: null,
+    unlocked_by: '',
+    unlock_reason: '',
+    is_open: false,
+    obligation: 7,
+  };
+  const opened: ClientBookPeriod = {
+    ...locked,
+    id: 2,
+    period_start: '2026-02-01',
+    period_end: '2026-02-28',
+    unlocked_on: '2026-03-02',
+    unlocked_by: 'المدير',
+    unlock_reason: 'قيدٌ متأخّر',
+    is_open: true,
+  };
+
+  // **الفيصلُ `unlocked_on` لا `is_open`**: الصفُّ يُقرأ من حقل الختم نفسه الذي
+  // تفلتر عليه الخدمة (`unlocked_on__isnull=True`)، و`is_open` مشتقٌّ منه.
+  const contradictory: ClientBookPeriod = {
+    ...locked,
+    id: 3,
+    is_open: true, // ادّعاءٌ مخالفٌ للختم — الحكمُ للختم
+  };
+  const openedButFlaggedLocked: ClientBookPeriod = { ...opened, id: 4, is_open: false };
+
+  assert.deepEqual(activeBookPeriods([locked, opened]).map((row) => row.id), [1]);
+  assert.deepEqual(activeBookPeriods([contradictory]).map((row) => row.id), [3]);
+  assert.deepEqual(activeBookPeriods([openedButFlaggedLocked]), []);
+  assert.deepEqual(activeBookPeriods([opened]), []);
+  assert.deepEqual(activeBookPeriods([]), []);
+});
+
+test('«المحسوبُ صار هو المبلغَ»: يُقرأ بالمبلغ والاتجاه لا بعلمٍ لا وجودَ له', () => {
+  // لم يُحسب بعد.
+  assert.equal(
+    computedAmountConfirmed({ amount: null, computed_amount: null, direction: '' }),
+    false,
+  );
+  // محسوبٌ ولم يُؤكّد: المبلغُ المعدَّل ما زال يدويّاً.
+  assert.equal(
+    computedAmountConfirmed({ amount: '120.00', computed_amount: '113.33', direction: 'due' }),
+    false,
+  );
+  // مؤكَّد: 113.33 «عليه».
+  assert.equal(
+    computedAmountConfirmed({ amount: '113.33', computed_amount: '113.33', direction: 'due' }),
+    true,
+  );
+  // المبلغُ نفسه باتجاهٍ مخالف ليس تأكيداً.
+  assert.equal(
+    computedAmountConfirmed({ amount: '113.33', computed_amount: '113.33', direction: 'refund' }),
+    false,
+  );
+  // السالبُ «إله»: المبلغُ مطلقُه والاتجاهُ refund.
+  assert.equal(
+    computedAmountConfirmed({ amount: '56.67', computed_amount: '-56.67', direction: 'refund' }),
+    true,
+  );
+  // الصفرُ مبلغٌ صفريٌّ بلا اتجاه — تأكيدٌ صحيحٌ لا فراغ.
+  assert.equal(
+    computedAmountConfirmed({ amount: '0.00', computed_amount: '0.00', direction: '' }),
+    true,
+  );
+  assert.equal(
+    computedAmountConfirmed({ amount: '0.00', computed_amount: '0.00', direction: 'due' }),
+    false,
+  );
+  // والقناعُ (`null`) ليس تأكيداً.
+  assert.equal(
+    computedAmountConfirmed({ amount: null, computed_amount: '113.33', direction: 'due' }),
+    false,
+  );
 });

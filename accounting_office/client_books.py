@@ -1130,7 +1130,32 @@ def _assert_vat_account(book) -> None:
     })
 
 
-def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
+def _paper_tax_split(book, kind, tax, *, context=None) -> tuple[Decimal, Decimal]:
+    """`(المعترف به، غير المخصوم)` من ضريبة ورقةٍ — أو صفران لما ليس مدخلات.
+
+    مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) لا تُخصم أصلاً: تُدفع كاملةً، فلا قسمةَ
+    لها. ومدخلاتُها (شراءٌ ومصروف) تُخصم بنسبة الحساب — والقاعدةُ في
+    `book_reports.paper_input_tax` وحدها، وليست نسخةً ثانية هنا.
+    """
+    none = (Decimal("0"), Decimal("0"))
+    if not tax or kind in VAT_OUTPUT_KINDS:
+        return none
+    from accounting_office import book_reports
+
+    debit_code, _credit_code = ENTRY_KIND_ACCOUNTS[kind]
+    account = ClientBookAccount.objects.filter(
+        tenant=book.tenant, client=book.client, code=debit_code,
+    ).first()
+    if account is None:
+        # لا حسابَ للسطر أصلاً — `_prepare_lines` يردّ 400 قبل أن يُكتب شيء،
+        # فلا معنى لقسمةٍ هنا؛ ولا نزيد كلفةً على حسابٍ لا وجودَ له.
+        return tax, Decimal("0")
+    return book_reports.paper_input_tax(
+        book, account=account, tax_amount=tax, context=context,
+    )
+
+
+def _double_paper_lines(paper, kind, *, amount, tax, recognised) -> list[dict]:
     """بنودُ ورقةٍ في الدفتر المزدوج — **والضريبةُ على سطر الوعاء لا على سطرها**.
 
     مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) دائنةٌ كالإيراد، فسطرُ الذمم/الصندوق
@@ -1138,6 +1163,13 @@ def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
     الذمم/الصندوق الإجمالي دائناً. **و`tax_base`/`tax_amount` على سطر الوعاء** —
     الإيراد للبيع والتقرير اليومي، والمشتريات/المصروف لغيرهما — **وسطرُ `2200`
     يحمل طرفَه وحده**.
+
+    **والمعترفُ به وحده هو ما يُقيَّد على `2200`**: الضريبةُ المدخلةُ تُخصم بنسبة
+    الحساب (`book_reports.paper_input_tax`)، والباقي **كلفةُ** الورقة فيزيد سطرُ
+    المصروف/الأصل به — وإلا قُرئ «غيرُ مخصومٍ 56.67» في تقرير ض.ق.م ولم يظهر في
+    حسابٍ واحد. والقيدُ يبقى متوازناً: مدينُ السطر زاد والدائنُ لم يتغيّر، والضريبةُ
+    على `2200` نقصت بالمقدار نفسه. وحين لا يُعترف بشيءٍ لا سطرَ `2200` أصلاً
+    (سطرٌ بصفرٍ يردّه `_prepare_lines`).
 
     والموضعُ هو القاعدةُ لا الذوق: `book_reports.vat_from_book` يجمع `tax_amount`
     من سطور الإيراد (مبيعات) ومن سطور الأصول والمصاريف (مدخلات) **ويتخطّى
@@ -1158,11 +1190,16 @@ def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
         )
         vat_line = _entry_line(VAT_ACCOUNT_CODE, credit=tax)
     else:
+        non_deductible = tax - recognised
         debit_line = _entry_line(
-            debit_code, debit=amount, tax_base=amount, tax_amount=tax,
+            debit_code,
+            debit=amount + non_deductible,
+            tax_base=amount,
+            tax_amount=tax,
         )
         credit_line = _entry_line(credit_code, credit=total)
-        vat_line = _entry_line(VAT_ACCOUNT_CODE, debit=tax)
+        if recognised:
+            vat_line = _entry_line(VAT_ACCOUNT_CODE, debit=recognised)
     # الطرفُ على سطر الذمم إن كان أحد الطرفين ذمّياً، وإلا على سطر الإيراد/
     # المصروف. **ولا يُكتب على سطر الضريبة**: «ضريبةٌ على شركة كذا» قولٌ لا معنى له.
     side_line = credit_line if credit_code in PARTY_ACCOUNT_CODES else debit_line
@@ -1174,7 +1211,7 @@ def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
     return lines
 
 
-def _simple_paper_lines(kind, *, amount, tax) -> list[dict]:
+def _simple_paper_lines(kind, *, amount, tax, non_deductible=Decimal("0")) -> list[dict]:
     """الدفترُ البسيط: سطرٌ على **حساب طبيعته** وسطرُ نقدٍ لما قُبض أو دُفع.
 
     البيعُ والتقريرُ اليومي دائنان على الإيراد (`4100`)، والشراءُ والمصروفُ مدينان
@@ -1192,12 +1229,18 @@ def _simple_paper_lines(kind, *, amount, tax) -> list[dict]:
     ولا `tax_amount`** (ضريبةُ السطر صفر فيتخطّاه `vat_from_book`) **وبلا طرفٍ**
     (فلا يدخل `_receivables`).
 
-    **ويبقى طرفُه المقابل ناقصاً بمقدار الضريبة — عن قصد**: الضريبةُ هنا بياناتٌ
-    على سطر الطبيعة لا سطرَ `2200` (وشجرةُ البسيط بلا `2200` أصلاً)، فالتقريرُ
-    اليومي مدينُه 117 ودائنُه 100، والمصروفُ مدينُه 200 ودائنُه 234. وسجلُّ
-    البسيط أحاديٌّ لا مزدوج، فلا يُسأل عن التوازن — `_assert_balanced` تعود فوراً
-    على غير المزدوج. والفرقُ هو الضريبةُ نفسُها لا خطأُ جمع، ولا يُصلَح بسطر
-    ضريبةٍ هنا: ذاك يجعل البسيط مزدوجاً باسمٍ آخر.
+    **ويبقى طرفُه المقابل ناقصاً بمقدار الضريبة المعترف بها — عن قصد**: الضريبةُ
+    هنا بياناتٌ على سطر الطبيعة لا سطرَ `2200` (وشجرةُ البسيط بلا `2200` أصلاً)،
+    فبلا نسبةِ خصمٍ (100%) التقريرُ اليومي مدينُه 117 ودائنُه 100، والمصروفُ مدينُه
+    200 ودائنُه 234؛ وبنسبة 2/3 يصير المصروفُ 1056.67 مقابل 1170 — والفرقُ في
+    الحالين هو **المعترف به** من الضريبة لا خطأَ جمع.
+    وسجلُّ البسيط أحاديٌّ لا مزدوج، فلا يُسأل عن التوازن — `_assert_balanced` تعود
+    فوراً على غير المزدوج. ولا يُصلَح بسطر ضريبةٍ هنا: ذاك يجعل البسيط مزدوجاً
+    باسمٍ آخر.
+
+    **وغيرُ المخصوم من الضريبة يزيد المصروفَ/الأصلَ** (`non_deductible`): لا حسابَ
+    التزامٍ في هذه الشجرة يُقيَّد عليه، وتركُه على سطر الطبيعة بلا مبلغه كان يجعل
+    نتيجةَ الفترة أعلى من الكلفة الحقيقيّة بالضريبة غير المعترف بها.
 
     **والفاتورتان بلا سطر نقد**: قد لا تكونان مدفوعتين، فنقدُهما حركةٌ مستقلّة.
 
@@ -1216,7 +1259,10 @@ def _simple_paper_lines(kind, *, amount, tax) -> list[dict]:
         )
     else:
         natural = _entry_line(
-            debit_code, debit=amount, tax_base=amount, tax_amount=tax,
+            debit_code,
+            debit=amount + non_deductible,
+            tax_base=amount,
+            tax_amount=tax,
         )
     total = amount + tax
     if kind == BOOK_ENTRY_KIND_DAILY_REPORT:
@@ -1238,6 +1284,10 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
     **ونسبةُ الورقة (`paper.vat_rate`) لا تصل السطر**: حقلُ السطر نسبةُ الخصم
     المعترف بها، ونسبةُ الفاتورة وصفٌ للعرض — نسخُها كان يخصم 17٪ من ضريبة
     المدخلات وحدها فتنقص المستحقّةُ بلا أن يُعلَن ذلك.
+
+    **وضريبةُ المدخلات تُقسم قسمين** (`_paper_tax_split`): المعترفُ به وحده على
+    `2200` وغيرُ المخصوم كلفةً على سطر الطبيعة — فما يقوله تقريرُ ض.ق.م «غيرُ
+    مخصوم» يظهر في حسابِه، لا رقماً معروضاً بلا أثر.
     """
     if kind not in ENTRY_KIND_ACCOUNTS:
         raise ValidationError({
@@ -1251,6 +1301,9 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
         raise ValidationError({"documents": "اختر ورقةً واحدة على الأقل."})
     double = kind_on(book, entry_date) == BOOK_KIND_DOUBLE
     vat_checked = False
+    #: نظامُ الزبون الضريبيُّ ولائحةُ مكتبه — تُقرآن **مرّةً** للحركة ولو جاءت
+    #: ثلاثين ورقة: لا يتغيّران بين أوراق الحركة الواحدة.
+    split_context = None
     lines: list[dict] = []
     for paper in papers:
         amount, tax = _paper_totals(paper)
@@ -1258,16 +1311,30 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
             raise ValidationError({
                 "documents": "حركةُ بنكٍ بلا ضريبة — الضريبة على فاتورةٍ أو مصروف.",
             })
+        if tax and split_context is None and kind not in VAT_OUTPUT_KINDS:
+            from accounting_office import book_reports
+
+            split_context = book_reports._vat_rate_context(book)
         if double:
             if tax and not vat_checked:
                 _assert_vat_account(book)
                 vat_checked = True
+            recognised, _non_deductible = _paper_tax_split(
+                book, kind, tax, context=split_context,
+            )
             lines.extend(
-                _double_paper_lines(paper, kind, amount=amount, tax=tax),
+                _double_paper_lines(
+                    paper, kind, amount=amount, tax=tax, recognised=recognised,
+                ),
             )
         else:
+            _recognised, non_deductible = _paper_tax_split(
+                book, kind, tax, context=split_context,
+            )
             lines.extend(
-                _simple_paper_lines(kind, amount=amount, tax=tax),
+                _simple_paper_lines(
+                    kind, amount=amount, tax=tax, non_deductible=non_deductible,
+                ),
             )
     return lines
 
@@ -1551,26 +1618,45 @@ def assert_period_open(book, entry_date) -> None:
 
 def lock_period(book, *, period_start, period_end, actor=None, obligation=None,
                 day=None):
-    """قفلُ فترةٍ — **يُعاد الصفُّ القائم** إن كانت مقفلةً من قبل (لا تكرار).
+    """قفلُ فترةٍ — **قفلٌ نشطٌ واحدٌ للفترة، يُعاد القائمُ منه (لا تكرار)**.
 
-    `get_or_create` على (الدفتر، البداية، النهاية) لا على الالتزام: تقديمُ التزامين
-    في الشهر نفسه لا يُنشئ قفلين، والقفلُ الثاني كان يترك الفتحَ يُفتح مرّتين.
+    الفحصُ والكتابةُ في معاملةٍ واحدةٍ تحت `select_for_update` على **الدفتر**:
+    تقديمُ التزامين في الشهر نفسه (ق.م ورواتب) يُسلسَل، فلا يُنشأ قفلان نشطان.
+    و`unlocked_on__isnull=True` في الفحص: الصفُّ المفتوحُ **سجلُّ أثرٍ لا قفل**،
+    وهو الفرقُ الذي جعل `get_or_create` على (الدفتر، البداية، النهاية) يُعيد
+    الصفَّ المفتوحَ بعد فتحٍ فلا يعود القفلُ أبداً. والقيدُ الشرطيُّ
+    (`UniqueConstraint(condition=…)`) بديلٌ غيرُ مدعومٍ في MySQL 8.4 — الإنتاج —
+    فحُذف القيدُ على الثلاثة وبقي الحكمُ هنا (انظر `models.BookPeriodLock`).
     """
     day = day or _today()
     if period_start > period_end:
         raise ValidationError({"period_start": "بدايةُ الفترة بعد نهايتها."})
-    lock, _created = BookPeriodLock.objects.get_or_create(
-        client_book=book,
-        period_start=period_start,
-        period_end=period_end,
-        defaults={
-            "tenant": book.tenant,
-            "locked_on": day,
-            "locked_by": actor if getattr(actor, "pk", None) else None,
-            "obligation": obligation,
-        },
-    )
-    return lock
+    with transaction.atomic():
+        # أوّلُ قراءةٍ في المعاملة: من سبقنا كتب قبلها، لا لقطةً أقدم منها.
+        book = ClientBook.objects.select_for_update().get(
+            pk=book.pk, tenant=book.tenant,
+        )
+        active = (
+            book.period_locks
+            .filter(
+                period_start=period_start,
+                period_end=period_end,
+                unlocked_on__isnull=True,
+            )
+            .order_by("pk")
+            .first()
+        )
+        if active is not None:
+            return active
+        return BookPeriodLock.objects.create(
+            client_book=book,
+            tenant=book.tenant,
+            period_start=period_start,
+            period_end=period_end,
+            locked_on=day,
+            locked_by=actor if getattr(actor, "pk", None) else None,
+            obligation=obligation,
+        )
 
 
 def close_period_on_submit(obligation, *, actor=None, day=None):
@@ -1655,13 +1741,21 @@ def periods_payload(book) -> list[dict]:
 
 
 # ── نسبُ حساب الزبون (#287/٢ و٣) ────────────────────────────────────────────
-def set_account_rates(account, *, tenant, rate_category=None, vat_rate=None,
-                      income_tax_rate=None, depreciation_rate=None):
-    """كتابةُ تصنيفِ حسابٍ ونسبه — الحقولُ المُرسَلة وحدها (كـ`update_settings`).
+#: علامةُ «الحقلُ لم يُرسَل» في `set_account_rates`: الوجودُ يُقرأ **بحضور المفتاح**
+#: لا بأنّ قيمته ليست `None` — والـ`None` الصريحُ يُفرّغ النسبة.
+_NOT_GIVEN = object()
+
+
+def set_account_rates(account, *, tenant, rate_category=_NOT_GIVEN,
+                      vat_rate=_NOT_GIVEN, income_tax_rate=_NOT_GIVEN,
+                      depreciation_rate=_NOT_GIVEN):
+    """كتابةُ تصنيفِ حسابٍ ونسبه — الحقولُ **المُرسَلة** وحدها (كـ`update_settings`).
 
     والقيمةُ `None` تُفرّغ النسبةَ الصريحة فيعود الحسابُ إلى اللائحة/الافتراض.
+    والشرطُ حضورُ المفتاح لا `if value is not None`: ذاك كان يجعل `{"vat_rate":
+    null}` صامتاً فلا طريقَ لإرجاع حسابٍ إلى اللائحة، وهو ما يعد به المُسلسِل.
     """
-    fields = []
+    touched = []
     kwargs = {}
     for name, value in (
         ("rate_category", rate_category),
@@ -1669,11 +1763,12 @@ def set_account_rates(account, *, tenant, rate_category=None, vat_rate=None,
         ("income_tax_rate", income_tax_rate),
         ("depreciation_rate", depreciation_rate),
     ):
-        if value is not None:
-            fields.append(name)
-            kwargs[name] = value
-    if not fields:
+        if value is _NOT_GIVEN:
+            continue
+        touched.append(name)
+        kwargs[name] = value
+    if not touched:
         return account
     return book_rates.update_account_rates(
-        account, tenant=tenant, fields=fields, **kwargs,
+        account, tenant=tenant, fields=touched, **kwargs,
     )

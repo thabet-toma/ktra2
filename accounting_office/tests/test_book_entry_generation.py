@@ -14,7 +14,8 @@
 - **ونسبةُ الورقة لا تُنسخ إلى السطر**: حقلُ السطر نسبةُ الخصم المعترف بها
   (`book_rates.recognised_vat_rate`) لا وصفَ الفاتورة — نسخُ 17٪ يخصم 17٪ وحدها.
 - **الدفترُ البسيط: سطرٌ على حساب طبيعته** — إيرادٌ دائنٌ للبيع والتقرير اليومي،
-  ومشترياتٌ/مصروفٌ مدينان بالصافي — لأن `_profit_rows` و`vat_from_book` يقرآن
+  ومشترياتٌ/مصروفٌ مدينان بالصافي **زائدَ الضريبةِ غيرِ المخصومة** (وهي صفرٌ بنسبة
+  100%) — لأن `_profit_rows` و`vat_from_book` يقرآن
   منها. **وسطرُ نقدٍ على `1100` بالإجمالي** للتقرير اليومي مديناً وللمصروف
   دائناً: `cash` يقرأ الأصولَ وحدها، فسطرُ الحساب وحده يُخرجه صفراً. والفاتورتان
   بلا سطر نقد (قد لا تكونان مدفوعتين)، وحركةُ البنك وحدها على البنك.
@@ -177,11 +178,12 @@ class DoubleBookGenerationTest(BookEntryGenerationTestCase):
         self.assertEqual(tax, Decimal("17.00"), "الضريبةُ مرّةً واحدة لا على سطرين")
 
     def test_an_expense_carries_the_tax_on_the_expense_and_only_the_side_on_vat(self):
-        """مصروفٌ (200 + 34): 5100 مدينٌ بصافيه وضريبتِه، و2200 مدينٌ بالضريبة وحدها.
+        """مصروفٌ (200 + 34): 5100 مدينٌ بصافيه زائدَ غيرِ المخصوم وضريبتِه عليه، و2200 مدينٌ بالمعترف به.
 
         والبديهيّ «5100 مدينٌ بالإجمالي و2200 مدينٌ بالضريبة» غيرُ متوازن:
         234 + 34 = 268 مقابل 268؟ لا — دائنُ الصندوق 234 وحده. فالتوازنُ يفرض
-        أن يحمل سطرُ المصروف صافيه، و`tax_amount` عليه ليكون مدخلاتٍ يقرؤها
+        أن يحمل سطرُ المصروف صافيه **زائدَ غيرِ المخصوم من ضريبته** (وهو صفرٌ
+        بنسبة 100%)، و`tax_amount` عليه ليكون مدخلاتٍ يقرؤها
         `vat_from_book` من حساب مصروفٍ لا من حساب خصوم.
         """
         row = self.paper(amount="200", tax="34", party="مورّد الكهرباء")
@@ -603,6 +605,67 @@ class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
         self.assertEqual(payload["sales_tax"], "17.00")
         self.assertEqual(payload["input_tax"], "0.00")
         self.assertEqual(payload["vat_due"], "17.00")
+
+    def test_two_thirds_of_the_input_tax_is_deducted_and_the_rest_increases_the_expense(self):
+        """فاتورةُ شراءٍ 1000 + 170 ونسبةُ حسابها 2/3: ضريبتُها **كلفةٌ لا تُخصم** (بند ٢).
+
+        المزدوجُ كان يكتب الضريبةَ كاملةً على `2200` ويترك سطرَ المصروف/الأصل
+        بصافيه، فيقول تقريرُ ض.ق.م «غيرُ مخصومٍ 56.67» ولا يظهر ذلك في أيّ حساب:
+        رقمٌ معروضٌ لا يصل الكلفة. الآن `2200` يحمل المعترفَ به وحده (113.33)،
+        والباقي (56.67) يزيد سطرَ المصروف — فيبقى القيدُ متوازناً وتنقص نتيجةُ
+        الفترة بمقدار غير المخصوم.
+        """
+        client_books.set_account_rates(
+            ClientBookAccount.objects.get(client=self.mine, code="5200"),
+            tenant=self.tenant, vat_rate="66.6667",
+        )
+        row = self.paper(amount="1000", tax="170", party="مورد الأثاث")
+
+        entry = self.generate([row], kind=BOOK_ENTRY_KIND_PURCHASE_INVOICE)
+
+        lines = self.lines_by_code(entry)
+        self.assertEqual(money(lines["2200"], "debit"), Decimal("113.33"))
+        self.assertEqual(money(lines["5200"], "debit"), Decimal("1056.67"))
+        self.assertEqual(money(lines["5200"], "tax_amount"), Decimal("170.00"))
+        self.assertEqual(money(lines["2100"], "credit"), Decimal("1170.00"))
+        debit, credit, tax = self.totals(entry)
+        self.assertEqual(debit, credit, "المزدوجُ يبقى متوازناً بعد نقل غير المخصوم")
+        self.assertEqual(tax, Decimal("170.00"), "الضريبةُ مرّةً واحدة على سطر الوعاء")
+
+        payload = self.vat(self.mine)
+        self.assertEqual(payload["input_tax"], "170.00")
+        self.assertEqual(payload["recognised_input"], "113.33")
+        self.assertEqual(payload["non_deductible"], "56.67")
+
+        # ونتيجةُ الفترة تنقص بـ56.67 لا بالضريبة كلها: مصروفُها 1056.67 لا 1000.00.
+        self.assertEqual(
+            self.report(self.mine, "profit_loss")["totals"]["expense"], "1056.67",
+        )
+
+    def test_a_simple_purchase_puts_the_non_deductible_tax_in_the_expense(self):
+        """البسيطُ: غيرُ المخصوم يُضاف إلى مصروف الفترة — والقيدُ يبقى ناقصَ المعترف به.
+
+        لا `2200` في شجرة البسيط، فالضريبةُ كلُّها بياناتٌ على سطر الطبيعة لا
+        سطرَ التزام؛ وقرارُ «طرفٌ ناقصٌ بمقدار الضريبة المعترف بها» يبقى كما هو
+        موثَّقاً — الزيادةُ هنا على **غير** المخصوم وحده.
+        """
+        client_books.set_account_rates(
+            ClientBookAccount.objects.get(client=self.simple_client, code="5200"),
+            tenant=self.tenant, vat_rate="66.6667",
+        )
+        row = self.paper(amount="1000", tax="170", client=self.simple_client)
+
+        entry = self.generate(
+            [row], kind=BOOK_ENTRY_KIND_PURCHASE_INVOICE, client=self.simple_client,
+        )
+
+        lines = self.lines_by_code(entry)
+        self.assertEqual(money(lines["5200"], "debit"), Decimal("1056.67"))
+        self.assertEqual(money(lines["5200"], "tax_base"), Decimal("1000.00"))
+        self.assertEqual(money(lines["5200"], "tax_amount"), Decimal("170.00"))
+        self.assertEqual(
+            self.report(self.simple_client, "income")["totals"]["expense"], "1056.67",
+        )
 
     def test_a_double_sale_and_purchase_of_one_hundred_net_out_to_zero(self):
         self.generate(

@@ -10,14 +10,18 @@ import {
   getClientDocuments,
   listBookAccounts,
   listBookEntries,
+  listBookPeriods,
+  reopenBookPeriod,
   reverseBookEntry,
   type BookEntryRow,
   type BookEntryWrite,
   type ClientBookChoicesPayload,
+  type ClientBookPeriod,
   type ClientBookRow,
   type ClientDocumentsPayload,
 } from '../../services/accountingOfficeApi';
 import {
+  activeBookPeriods,
   bookDraftProblem,
   bookEntryAmount,
   bookKindOn,
@@ -31,6 +35,7 @@ import {
   paperGenerationBlocker,
   pendingMonthDocuments,
   periodResultClass,
+  ratePercentText,
   type BookAccountRow,
   type BookDraftProblem,
   type BookLineDraft,
@@ -109,6 +114,11 @@ function entryStateLabel(entry: BookEntryRow): string {
  * **و«للإدخال» مشتقٌّ لا مخزَّن** (د9): أوراقُ الشهر الواصلةُ التي لا رابطَ حيّاً
  * لها، تُشتقّ من شبكة الأوراق (#278) وحركاتِ الدفتر معاً — الشهريّةُ والسنويةُ
  * معاً، فالأخيرةُ `period_start` لها أوّلُ السنة ومكانُها صفُّ كانون الثاني.
+ *
+ * **والفتراتُ المقفلةُ تُعرض وتُفتح من هنا** (#287/٥): السجلُّ يُقرأ بـ`periods/`
+ * كاملاً ويُعرض كلُّه — المقفلُ بزرِّ فتحٍ لمن يملكه (`can_reopen_periods` من
+ * الخادم، وهو المديرُ وصاحبُ المكتب)، والمفتوحُ سطرُ تاريخٍ بسببه ومَن فتحه.
+ * والإهلاكُ السنويُّ يُعرض في البطاقة نفسها (#287/٣) كما التنبيهات.
  */
 export const OfficeClientBook: React.FC<{
   clientId: number;
@@ -166,6 +176,12 @@ export const OfficeClientBook: React.FC<{
   const [documentsYear, setDocumentsYear] = useState<number | null>(null);
   const [documentsError, setDocumentsError] = useState('');
 
+  // #287/٥: سجلُّ الأقفال وفتحُ فترةٍ بسبب — السببُ إلزاميّ والزرُّ للمدير وحده.
+  const [periods, setPeriods] = useState<ClientBookPeriod[]>([]);
+  const [reopenTarget, setReopenTarget] = useState<ClientBookPeriod | null>(null);
+  const [reopenReason, setReopenReason] = useState('');
+  const [reopening, setReopening] = useState(false);
+
   const reload = useCallback(() => setReloadToken((token) => token + 1), []);
 
   useEffect(() => {
@@ -177,12 +193,16 @@ export const OfficeClientBook: React.FC<{
       getClientBook(clientId),
       listBookEntries(clientId),
       listBookAccounts(clientId),
+      // `periods/` عرضٌ مساند: فشلُه يُسقط قسمَ الأقفال وحده ولا يُسقط الدفترَ
+      // كلَّه (بياناتُه وحركاتُه وحساباتُه وصلت).
+      listBookPeriods(clientId).catch(() => []),
     ])
-      .then(([bookRow, entryRows, accountRows]) => {
+      .then(([bookRow, entryRows, accountRows, periodRows]) => {
         if (cancelled) return;
         setBook(bookRow);
         setEntries(entryRows);
         setAccounts(accountRows);
+        setPeriods(periodRows);
       })
       .catch((failure) => {
         if (cancelled) return;
@@ -190,6 +210,7 @@ export const OfficeClientBook: React.FC<{
         setBook(null);
         setEntries([]);
         setAccounts([]);
+        setPeriods([]);
         setNoBook(statusOf(failure) === 404);
         setError(statusOf(failure) === 404
           ? ''
@@ -417,6 +438,28 @@ export const OfficeClientBook: React.FC<{
     }
   }, [clientId, confirm, reload, toast]);
 
+  /** #287/٥: فتحُ فترةٍ مقفلة — **بسببٍ إلزاميّ** يُسجَّل مع مَن فتحها. */
+  const reopen = useCallback(async () => {
+    if (!reopenTarget) return;
+    const reason = reopenReason.trim();
+    if (!reason) return;
+    setReopening(true);
+    try {
+      await reopenBookPeriod(clientId, reopenTarget.id, reason);
+      toast(
+        `انفتحت فترة ${formatDateValue(reopenTarget.period_start)} ← ${formatDateValue(reopenTarget.period_end)}`,
+        'success',
+      );
+      setReopenTarget(null);
+      setReopenReason('');
+      reload();
+    } catch (failure) {
+      toast(humanizeThrown(failure, 'تعذّر فتح الفترة المقفلة.'), 'error');
+    } finally {
+      setReopening(false);
+    }
+  }, [clientId, reload, reopenReason, reopenTarget, toast]);
+
   const changeKind = useCallback(async () => {
     if (!book || !targetKind) return;
     const approved = await confirm({
@@ -441,6 +484,10 @@ export const OfficeClientBook: React.FC<{
   const writable = Boolean(book?.writable);
   const canEdit = canWrite && writable;
   const canEnter = canEdit && canSeeAmounts;
+  // #287/٥: الفتحُ قرارُ دورٍ (المدير/صاحب المكتب) يحكمه الخادمُ في
+  // `can_reopen_periods` — والواجهةُ تُخفي وحدها وكتبةُ الكتابة وحدها.
+  const canReopen = canEdit && Boolean(book?.can_reopen_periods);
+  const lockedPeriods = activeBookPeriods(periods);
 
   if (loading && !book) return <OfficeSkeleton />;
   if (error) return <OfficeError message={error} onRetry={reload} />;
@@ -532,9 +579,10 @@ export const OfficeClientBook: React.FC<{
     );
   }
   if (!book) return null;
-  // #287: نتيجةُ الفترة وتنبيهُ السقوف تصلان محسوبتين من الخادم — الواجهةُ ترسم.
+  // #287: نتيجةُ الفترة وتنبيهُ السقوف والإهلاكُ تصل محسوبةً من الخادم — الواجهةُ ترسم.
   const result = book.period_result ?? null;
   const alerts = book.annual_alerts ?? null;
+  const depreciation = book.depreciation ?? null;
 
   return (
     <div className="space-y-4">
@@ -608,6 +656,128 @@ export const OfficeClientBook: React.FC<{
             خدمة مسك الدفاتر موقوفة لهذا الزبون: الحركات تُقرأ ولا تُكتب، والخادم يردّ كل
             إدخالٍ أو عكسٍ 400.
           </p>
+        ) : null}
+
+        {/* #287/٣: الإهلاكُ السنويّ — أصلٌ بفئته ونسبته وإهلاك سنته، من الخادم. */}
+        {depreciation && depreciation.rows.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-slate-200 p-2 text-[11px] dark:border-slate-700">
+            <p className="font-medium text-slate-700 dark:text-slate-200">
+              الإهلاكُ السنويّ ({formatDateValue(depreciation.from)} ←{' '}
+              {formatDateValue(depreciation.to)})
+            </p>
+            <ul className="mt-1 space-y-0.5 text-slate-600 dark:text-slate-300">
+              {depreciation.rows.map((row) => (
+                <li
+                  key={row.account_code}
+                  className="flex flex-wrap items-center gap-x-2 gap-y-0.5"
+                >
+                  <span className="font-semibold tabular-nums">{row.account_code}</span>
+                  <span>{row.account_name}</span>
+                  <span className="text-slate-500 dark:text-slate-400">
+                    {row.rate_category_label || 'بلا فئة'}
+                  </span>
+                  <span className="text-slate-500 dark:text-slate-400">
+                    {row.rate === null ? 'بلا نسبة' : ratePercentText(row.rate)}
+                  </span>
+                  <span className="font-semibold tabular-nums">
+                    {row.depreciation === null
+                      ? 'راجع — لا يُهلَّك'
+                      : formatOfficeAmount(row.depreciation)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <p className="mt-1 text-slate-500 dark:text-slate-400">
+              إجمالي إهلاك السنة: {formatOfficeAmount(depreciation.totals.depreciation)}{' '}
+              من كلفةٍ {formatOfficeAmount(depreciation.totals.cost)}
+              {depreciation.review_count > 0
+                ? ` — ${depreciation.review_count} أصل بلا نسبةٍ مؤكَّدة، والرقمُ ناقص.`
+                : ''}
+            </p>
+          </div>
+        ) : null}
+
+        {/* #287/٥: الأقفالُ وفتحُها بسببٍ إلزاميّ — والسجلُّ يحفظ المفتوحَ شاهداً. */}
+        {periods.length > 0 ? (
+          <div className="mt-3 rounded-lg border border-slate-200 p-2 text-[11px] dark:border-slate-700">
+            <p className="font-medium text-slate-700 dark:text-slate-200">
+              أقفالُ الفترات — {lockedPeriods.length} مقفلة، والمفتوحُ يبقى في السجلّ
+            </p>
+            <ul className="mt-1 space-y-1 text-slate-600 dark:text-slate-300">
+              {periods.map((period) => {
+                const locked = period.unlocked_on === null;
+                return (
+                  <li key={period.id} className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                    <span className="tabular-nums font-semibold">
+                      {formatDateValue(period.period_start)} ←{' '}
+                      {formatDateValue(period.period_end)}
+                    </span>
+                    {locked ? (
+                      <>
+                        <span className="text-slate-500 dark:text-slate-400">
+                          مقفلة — أقفلها {period.locked_by || 'النظام'} في{' '}
+                          {formatDateValue(period.locked_on)}
+                        </span>
+                        {canReopen ? (
+                          <button
+                            type="button"
+                            disabled={reopening}
+                            onClick={() => {
+                              setReopenTarget(period);
+                              setReopenReason('');
+                            }}
+                            className="font-medium text-teal-700 hover:underline disabled:opacity-50 dark:text-teal-400"
+                          >
+                            افتحها
+                          </button>
+                        ) : null}
+                      </>
+                    ) : (
+                      <span className="text-slate-400 dark:text-slate-500">
+                        فُتحت في {formatDateValue(period.unlocked_on)}
+                        {period.unlocked_by ? ` بواسطة ${period.unlocked_by}` : ''}
+                        {period.unlock_reason ? ` — ${period.unlock_reason}` : ''}
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+            {/* السببُ إلزاميّ: زرُّ الفتح لا يُفعَّل بلا نصّ، والخادمُ يردّ الرفض. */}
+            {reopenTarget ? (
+              <div className="mt-2 flex flex-wrap items-end gap-2 rounded-lg border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-900">
+                <label className="text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                  سببُ فتح فترة {formatDateValue(reopenTarget.period_start)} ←{' '}
+                  {formatDateValue(reopenTarget.period_end)} (مطلوب)
+                  <input
+                    value={reopenReason}
+                    onChange={(event) => setReopenReason(event.target.value)}
+                    maxLength={300}
+                    className={`${officeInputClass} mt-1 block w-72`}
+                  />
+                </label>
+                <button
+                  type="button"
+                  disabled={reopening || !reopenReason.trim()}
+                  onClick={() => { void reopen(); }}
+                  className={`${officePrimaryButtonClass} disabled:opacity-50`}
+                >
+                  {reopening ? '…' : 'افتح الفترة'}
+                </button>
+                <button
+                  type="button"
+                  disabled={reopening}
+                  onClick={() => {
+                    setReopenTarget(null);
+                    setReopenReason('');
+                  }}
+                  className={officeSecondaryButtonClass}
+                >
+                  إلغاء
+                </button>
+              </div>
+            ) : null}
+          </div>
         ) : null}
       </OfficeCard>
 
