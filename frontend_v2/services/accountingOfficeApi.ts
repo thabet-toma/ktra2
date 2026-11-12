@@ -13,6 +13,7 @@ import {
   apiGetList,
   apiGetObject,
   apiPatchObject,
+  apiPostForBlob,
   apiPostFormData,
   apiPostObject,
   apiPutObject,
@@ -50,6 +51,8 @@ import type {
   OfficeCustomRulesPayload,
   OfficeDocumentItemsPayload,
   OfficeDocumentItemRow,
+  OfficeSelfObligationRow,
+  OfficeSelfObligationsPayload,
   OfficeServiceRow,
   ObligationRow,
   PendingEntryPayload,
@@ -110,6 +113,8 @@ export type {
   OfficeCustomRulesPayload,
   OfficeDocumentItemRow,
   OfficeDocumentItemsPayload,
+  OfficeSelfObligationRow,
+  OfficeSelfObligationsPayload,
   OfficeServiceRow,
   PendingDocument,
   PendingEntryPayload,
@@ -152,6 +157,10 @@ const FEE_PAYMENTS = `${BASE}fees/payments/`;
 const FEE_LEDGER = `${BASE}fees/ledger/`;
 // #282/أ٢/٢: المسودّاتُ وأفعالُها (اعتماد/اعتماد الكل/إلغاء) — بلا إنشاءٍ ولا حذف.
 const FEE_DRAFTS = `${BASE}fees/drafts/`;
+// #290: «التشغيل والنسخ» — تصديرُ بيانات المكتب (Excelُ ورابطُ PDF) وبيانُ
+// الأسماء (م111)، والتزامُ المكتب نفسه (سجلٌّ مستقلّ عن التزامات الزبائن).
+const EXPORTS = `${BASE}exports/`;
+const SELF_OBLIGATIONS = `${BASE}self-obligations/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -1608,3 +1617,57 @@ export const listFeeLedger = (
     ...tenantOpts(),
     query: { client: clientId, page_size: params.pageSize ?? 200 },
   });
+
+
+// ── التشغيل والنسخ (#290) ────────────────────────────────────────────────────
+//
+// **الثلاثةُ `POST`**: كلٌّ منها فعلُ إخراجٍ لا قراءةُ قائمة (ملفٌّ يُنزَّل أو
+// رابطٌ يُنشأ). والخادم يردّ **403** لغير المالك برسالةٍ تسمّي الناقص، و**400**
+// لرابطٍ مُطفأٍ في الإعداد أو لبيانِ أسماءٍ على مكتبٍ غير فلسطينيّ — والرسالتان
+// تصلان كما كُتبتا (`humanizeThrown`).
+
+/** رابطُ مشاركةٍ منشأ — `{url, expires_at}` من `docshare`. */
+export interface OfficeShareLink {
+  url: string;
+  expires_at: string;
+}
+
+/** مصنَّفُ xlsx للنسخة الكاملة — بايتاتٌ تُنزَّل مباشرةً. */
+export const downloadFullOfficeExport = (): Promise<Blob> =>
+  apiPostForBlob(`${EXPORTS}full/`, {}, tenantOpts());
+
+/** رابطُ PDF للنسخة الكاملة — بنفس إعداد `office_report_pdf_link` للتقارير. */
+export const createFullOfficeExportLink = (): Promise<OfficeShareLink> =>
+  apiPostObject<OfficeShareLink>(`${EXPORTS}full-link/`, {}, tenantOpts());
+
+/** رابطُ «بيان أسماء الزبائن» (م111) — لمكتبٍ فلسطينيّ وحده (وإلا 400). */
+export const createOfficeClientNamesReport = (): Promise<OfficeShareLink> =>
+  apiPostObject<OfficeShareLink>(`${EXPORTS}client-names/`, {}, tenantOpts());
+
+/** التزامُ المكتب نفسه — قراءةٌ لكل عضو، و`can_write` قرارُ الخادم. */
+export const listSelfObligations = (): Promise<OfficeSelfObligationsPayload> =>
+  apiGetObject<OfficeSelfObligationsPayload>(SELF_OBLIGATIONS, tenantOpts());
+
+/** جسمُ فعلِ «قُدِّم»/«غير مطلوب» — كلاهما اختياريّ. */
+export interface SelfObligationActionBody {
+  submitted_on?: string | null;
+  note?: string;
+}
+
+/** «قُدِّم» — التاريخُ والملاحظةُ اختياريّان، والثاني على البند نفسه 400. */
+export const submitSelfObligation = (
+  id: number,
+  body: SelfObligationActionBody = {},
+): Promise<OfficeSelfObligationRow> =>
+  apiPostObject<OfficeSelfObligationRow>(
+    `${SELF_OBLIGATIONS}${id}/submit/`, { ...body }, tenantOpts(),
+  );
+
+/** «غير مطلوب» — إسقاطُ بندٍ لا يُقدَّم، بلا تاريخِ تقديم. */
+export const dismissSelfObligation = (
+  id: number,
+  body: SelfObligationActionBody = {},
+): Promise<OfficeSelfObligationRow> =>
+  apiPostObject<OfficeSelfObligationRow>(
+    `${SELF_OBLIGATIONS}${id}/dismiss/`, { ...body }, tenantOpts(),
+  );

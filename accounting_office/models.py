@@ -2322,6 +2322,8 @@ OFFICE_ALERT_KIND_REMINDER_LIMIT = "reminder_limit_reached"
 OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER = "reminder_limit_reached_owner"
 #: #282: مسودّةُ أتعابٍ مرّ عليها ثلاثةُ أيامٍ وما اعتُمدت — التنبيهُ لمن يعتمدها.
 OFFICE_ALERT_KIND_FEE_DRAFT_PENDING = "fee_draft_pending"
+#: #290: نسخةُ بيانات المكتب الشهرية — تذكيرٌ لصاحب المكتب ومن يديره.
+OFFICE_ALERT_KIND_DATA_EXPORT_DUE = "data_export_due"
 #: نوعا التذكير — يُحكمان بشرطهما في القراءة (اكتمالُ الأوراق) لا بالحالة.
 REMINDER_ALERT_KINDS: tuple[str, ...] = (
     OFFICE_ALERT_KIND_REMINDER_LIMIT,
@@ -2338,6 +2340,8 @@ OFFICE_ALERT_KIND_CHOICES: list[tuple[str, str]] = [
         "الأوراق ناقصة بعد حدّ التذكير — صار لصاحب المكتب",
     ),
     (OFFICE_ALERT_KIND_FEE_DRAFT_PENDING, "مسودّة أتعاب تنتظر الاعتماد"),
+    # #290: تذكيرُ النسخة الشهرية — يُسكِته أخذُ النسخة نفسُه (مسار `seen`).
+    (OFFICE_ALERT_KIND_DATA_EXPORT_DUE, "نسخة بيانات المكتب لشهرٍ جديد"),
 ]
 OFFICE_ALERT_KIND_LABELS: dict[str, str] = dict(OFFICE_ALERT_KIND_CHOICES)
 #: شارةُ كل نوعٍ في الواجهة — **مفتاحُ صنفٍ لا لون**، يُرسَل في `alert_row` فيُلوَّن
@@ -2353,6 +2357,8 @@ OFFICE_ALERT_KIND_BADGES: dict[str, str] = {
     OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OBLIGATION_BADGE_MISSING_DOCS,
     # ومسودّةُ الأتعاب شأنُ اعتمادٍ ليس تأخيراً رسمياً — الأصفرُ المحايد نفسه.
     OFFICE_ALERT_KIND_FEE_DRAFT_PENDING: OBLIGATION_BADGE_LATE_INTERNAL,
+    # #290: تذكيرُ نسخةٍ لا تأخيرُ موعد — الأصفرُ المحايد نفسه.
+    OFFICE_ALERT_KIND_DATA_EXPORT_DUE: OBLIGATION_BADGE_LATE_INTERNAL,
 }
 #: **أين يُفتح التنبيه** — مفتاحٌ خادميّ يقرؤه `alert_row` فتبني الواجهةُ الوجهةَ
 #: بلا معرفة أنواع. الافتراضُ ملفُّ الزبون، ونوعا اللائحة يفتحان شاشة الإعدادات
@@ -2362,6 +2368,8 @@ OFFICE_ALERT_OPENS_DEADLINE_RULES = "deadline_rules"
 OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS = "client_documents"
 #: #282: تبويبُ «الأتعاب» في ملفّ الزبون — مسودّةُ الشهر التي تنتظر الاعتماد.
 OFFICE_ALERT_OPENS_CLIENT_FEES = "client_fees"
+#: #290: مجموعةُ «التشغيل والنسخ» في شاشة الإعدادات — تذكيرُ النسخة الشهرية.
+OFFICE_ALERT_OPENS_OPERATIONS = "operations"
 OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
     OFFICE_ALERT_KIND_TASK_LATE_INTERNAL: OFFICE_ALERT_OPENS_CLIENT,
     OFFICE_ALERT_KIND_OBLIGATION_LATE: OFFICE_ALERT_OPENS_CLIENT,
@@ -2370,6 +2378,7 @@ OFFICE_ALERT_KIND_OPENS: dict[str, str] = {
     OFFICE_ALERT_KIND_REMINDER_LIMIT: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
     OFFICE_ALERT_KIND_REMINDER_LIMIT_OWNER: OFFICE_ALERT_OPENS_CLIENT_DOCUMENTS,
     OFFICE_ALERT_KIND_FEE_DRAFT_PENDING: OFFICE_ALERT_OPENS_CLIENT_FEES,
+    OFFICE_ALERT_KIND_DATA_EXPORT_DUE: OFFICE_ALERT_OPENS_OPERATIONS,
 }
 OFFICE_ALERT_DEFAULT_OPENS = OFFICE_ALERT_OPENS_CLIENT
 
@@ -2460,6 +2469,88 @@ class OfficeAlert(models.Model):
 
     def __str__(self) -> str:
         return f"{self.kind}:{self.ref_key}→{self.recipient_id}"
+
+
+# ── التزامُ المكتب نفسه «من المنصة» (#290) ───────────────────────────────────
+#
+# **سجلٌّ مستقلّ بقرار المالك**، لا زبوناً للمكتب عند نفسه: التزامُ المكتب
+# الضريبيُّ (بيانُ أسماء زبائنه للدائرة، م111) ليس التزامَ زبونٍ فلا يدخل
+# `Obligation` ولا قوائمَ الزبائن والأوراق والأتعاب — مزجُه بها كان يجعل كل
+# عدّادٍ في الموديول يكذب بأثرٍ لا علاقة له بالزبائن. والثمنُ المعلوم: لا فترةَ
+# شغلةٍ ولا مبلغاً ولا تمديداً لهذا السجلّ، ولا يظهر في «اليوم» بل في مجموعة
+# «التشغيل والنسخ» من الإعدادات.
+#
+# **ومصدرُ اللائحة في الكود** (`accounting_office/deadlines.py`
+# `OFFICE_SELF_DEADLINES`) لا صفوفَ منصّةٍ جديدة ولا هجرةَ بيانات: بندٌ واحدٌ
+# اليوم، و`rule_code` مفتاحُه الطبيعيّ مع `period_start` — فتشغيلُ اليوم نفسه
+# مرّتين لا يضيف صفّاً.
+OFFICE_SELF_STATUS_PENDING = "pending"
+OFFICE_SELF_STATUS_SUBMITTED = "submitted"
+OFFICE_SELF_STATUS_NOT_REQUIRED = "not_required"
+OFFICE_SELF_STATUS_CHOICES: list[tuple[str, str]] = [
+    (OFFICE_SELF_STATUS_PENDING, "بالانتظار"),
+    (OFFICE_SELF_STATUS_SUBMITTED, "قُدِّم"),
+    (OFFICE_SELF_STATUS_NOT_REQUIRED, "غير مطلوب"),
+]
+OFFICE_SELF_STATUS_LABELS: dict[str, str] = dict(OFFICE_SELF_STATUS_CHOICES)
+
+
+class OfficeSelfObligation(models.Model):
+    """التزامٌ على المكتب نفسه يفرضه نظامُه الضريبيّ — مستقلٌّ عن التزامات الزبائن.
+
+    **ولا `days_left` ولا `is_late` هنا**: كلاهما يُحسب من `due_on` واليوم عند
+    القراءة، فلا يصير عموداً يصدأ بين تحديثين. و`submitted_on` تاريخُ الفعل،
+    و`status` حالته — والصفُّ يبقى بعد التقديم أثراً لا يُمحى.
+    """
+
+    STATUS_PENDING = OFFICE_SELF_STATUS_PENDING
+    STATUS_SUBMITTED = OFFICE_SELF_STATUS_SUBMITTED
+    STATUS_NOT_REQUIRED = OFFICE_SELF_STATUS_NOT_REQUIRED
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_self_obligations",
+        verbose_name="المكتب",
+    )
+    #: كودُ بند اللائحة الثابتة في الكود (`client-names-report`).
+    rule_code = models.SlugField(max_length=60, verbose_name="كود القاعدة")
+    #: اسمُ البند كما في لائحته — لقطةٌ تُقرأ في الشاشة والحمولة.
+    name = models.CharField(max_length=200, verbose_name="الاسم")
+    #: الفترةُ سنةٌ ميلادية كاملة: أولُ كانون الثاني إلى آخرِه.
+    period_start = models.DateField(verbose_name="بداية الفترة")
+    period_end = models.DateField(verbose_name="نهاية الفترة")
+    due_on = models.DateField(verbose_name="الموعد")
+    status = models.CharField(
+        max_length=20,
+        choices=OFFICE_SELF_STATUS_CHOICES,
+        default=OFFICE_SELF_STATUS_PENDING,
+        verbose_name="الحالة",
+    )
+    submitted_on = models.DateField(
+        null=True, blank=True, verbose_name="تاريخ التقديم",
+    )
+    note = models.CharField(
+        max_length=300, blank=True, default="", verbose_name="ملاحظة",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
+
+    class Meta:
+        verbose_name = "التزام المكتب نفسه"
+        verbose_name_plural = "التزامات المكتب نفسه"
+        ordering = ["due_on", "id"]
+        constraints = [
+            #: المفتاحُ الطبيعيّ: بندٌ واحد لكل (مكتب، قاعدة، فترة) — تشغيلُ
+            #: اليوم مرّتين لا يكتب صفّاً، وسنةٌ جديدة صفٌّ جديد.
+            models.UniqueConstraint(
+                fields=["tenant", "rule_code", "period_start"],
+                name="uniq_office_self_obligation",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.rule_code}@{self.period_start} ({self.status})"
 
 
 # ── قائمة الأوراق: الكتالوج والصفوف والملفات ومدد الحفظ (#278) ────────────────

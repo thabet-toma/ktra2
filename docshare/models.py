@@ -73,6 +73,12 @@ DOC_FEE_STATEMENT = "fee_statement"
 #: #282/أ٢: فاتورةُ الأتعاب الورقية — مستندٌ مرقَّمٌ يُصدره المكتبُ لزبونه، وليس
 #: فاتورةً ضريبية (سطرُ النفي ثابتٌ في كل صفحة). انظر `documents.accounting_docs`.
 DOC_FEE_INVOICE = "fee_invoice"
+#: #290: نسخةُ بيانات المكتب الكاملة — ورقةٌ تجمع أوراقَه التسع. `doc_id` معرّفُ
+#: المكتب نفسه (لا صفّ موديلٍ ثانٍ)، والجمهورُ داخليّ. انظر
+#: `documents.accounting_docs`.
+DOC_OFFICE_DATA_EXPORT = "office_data_export"
+#: #290: بيانُ أسماء زبائن المكتب وعناوينهم (م111) — للمكتب الفلسطينيّ وحده.
+DOC_OFFICE_CLIENT_NAMES = "office_client_names"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -96,6 +102,8 @@ DOC_TYPE_CHOICES = [
     (DOC_FEE_RECEIPT, "إشعار قبض"),
     (DOC_FEE_STATEMENT, "كشف حساب"),
     (DOC_FEE_INVOICE, OFFICE_FEE_INVOICE_LABEL),
+    (DOC_OFFICE_DATA_EXPORT, "نسخة بيانات المكتب"),
+    (DOC_OFFICE_CLIENT_NAMES, "بيان أسماء زبائن المكتب"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

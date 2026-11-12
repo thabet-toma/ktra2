@@ -109,7 +109,31 @@ SAMPLE_FIXTURES = {
     "fee_receipt": "fee_receipt",
     "fee_statement": "fee_statement",
     "fee_invoice": "fee_invoice",
+    # #290: نوعان موضوعُهما المكتبُ نفسُه (`doc_id` معرّفُه) — عيّنةٌ واحدة تكفيهما.
+    "office_data_export": "office_document",
+    "office_client_names": "office_document",
 }
+
+
+# ── مستندٌ موضوعُه المكتب (#290) ─────────────────────────────────────────────
+class OfficeDocument:
+    """عيّنةُ نوعٍ لا صفَّ موديلٍ له: `doc_id` **معرّفُ المكتب** نفسِه.
+
+    السجلُّ يُقاس بـ`document.tenant_id, document.pk` في
+    `test_public_leakage.test_every_type_payload_matches_the_whitelist_exactly`،
+    والمكتبُ هو موضوعُ الوثيقتين (`office_data_export` و`office_client_names`):
+    المُحمِّلُ يرفض `doc_id != tenant_id` فيصير مكتبٌ آخر **404**. فهذا الغلافُ
+    يحمل الخاصّيتين نفسيهما فوق مكتبٍ حقيقيّ، بلا صفٍّ ثانٍ ولا عمودٍ جديد.
+    """
+
+    def __init__(self, tenant):
+        self.tenant_id = tenant.pk
+        self.pk = tenant.pk
+
+
+@pytest.fixture
+def office_document(office_tenant):
+    return OfficeDocument(office_tenant)
 
 
 @pytest.fixture

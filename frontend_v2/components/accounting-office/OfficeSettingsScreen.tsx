@@ -31,6 +31,7 @@ import {
   OFFICE_OWNER_ROLE,
   OFFICE_SETTINGS_PATH,
   SETTINGS_GROUP_OFFICE,
+  SETTINGS_GROUP_OPERATIONS,
   SETTINGS_GROUP_REMINDERS,
   SETTINGS_GROUP_SCHEDULE,
   clientFilePath,
@@ -54,6 +55,7 @@ import { OfficeCustomRulesSection } from './OfficeCustomRulesSection';
 import { OfficeDeadlineRulesSection } from './OfficeDeadlineRulesSection';
 import { OfficeDocumentItemsSection } from './OfficeDocumentItemsSection';
 import { OfficeHolidaysSection } from './OfficeHolidaysSection';
+import { OfficeOperationsSection } from './OfficeOperationsSection';
 import { OfficeReminderTemplatesSection } from './OfficeReminderTemplatesSection';
 import { SettingControl } from './SettingControl';
 import {
@@ -437,7 +439,8 @@ export const OfficeSettingsScreen: React.FC = () => {
           canReset={setting.can_reset === true}
           // #280/ب: الإرسالُ التلقائي مقفلٌ مطفأً — الخادمُ يردّ 400 على فتحه،
           // والضابطُ يُقفل كي لا يجرّب الموظفُ حفظاً مصيرُه الرفض (ملاحظتُه تشرح).
-          disabled={!canManageSettings || isLockedOfficeSetting(setting.key)}
+          // #290: القفلُ من حقل `locked` الذي يرسله السجلّ نفسه — لا قائمةٌ محلية.
+          disabled={!canManageSettings || isLockedOfficeSetting(setting)}
           onReset={() => reset(setting.key)}
           onSave={(value) => save(setting.key, value)}
         />
@@ -548,6 +551,15 @@ export const OfficeSettingsScreen: React.FC = () => {
               <OfficeReminderTemplatesSection />
               <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
               <OfficeHolidaysSection />
+            </>
+          ) : null}
+          {/* #290: قسمُ «التشغيل والنسخ» — النسخةُ الكاملة وبيانُ الأسماء والتزاماتُ
+              المكتب نفسه. يُعرض لكل عضوٍ لأنه يُعلن سببَ الحجب بنفسه بدل زرٍّ
+              يردّ 403، والتزاماتُ المكتب تُقرأ لكل عضوٍ (§ج). */}
+          {group.id === SETTINGS_GROUP_OPERATIONS ? (
+            <>
+              <div className="my-3 border-t border-slate-100 dark:border-slate-800" />
+              <OfficeOperationsSection taxSystem={officeSystem} />
             </>
           ) : null}
           {group.id === SETTINGS_GROUP_SCHEDULE && canManageSettings ? (

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1108**
+عدد النقاط: **1114**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -139,6 +139,9 @@
 | `/api/accounting-office/document-items/{pk}/` | `OfficeDocumentItemViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/documents/{pk}/files/` | `OfficeDocumentViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/documents/{pk}/status/` | `OfficeDocumentViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/exports/client-names/` | `OfficeExportViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/exports/full-link/` | `OfficeExportViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/exports/full/` | `OfficeExportViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/drafts/` | `OfficeFeeDraftViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/drafts/approve-all/` | `OfficeFeeDraftViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/drafts/{pk}/approve/` | `OfficeFeeDraftViewSet` | `accounting_office/views.py` |
@@ -181,6 +184,9 @@
 | `/api/accounting-office/reminder-log/{pk}/undo/` | `OfficeReminderLogViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/reminder-templates/` | `OfficeReminderTemplateViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/reminder-templates/{reminder_type}/{language}/` | `OfficeReminderTemplateViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/self-obligations/` | `OfficeSelfObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/self-obligations/{pk}/dismiss/` | `OfficeSelfObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/self-obligations/{pk}/submit/` | `OfficeSelfObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/services/{pk}/` | `OfficeServiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/settings/` | `OfficeSettingsViewSet` | `accounting_office/views.py` |

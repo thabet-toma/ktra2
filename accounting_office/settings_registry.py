@@ -53,11 +53,15 @@ GROUP_SCHEDULE = "schedule"
 GROUP_ALERTS = "alerts"
 #: #280: مجموعةُ «التذكيرات والنصوص» — عددُ التذكيرات وإيقاعُها ونافذةُ الإرسال.
 GROUP_REMINDERS = "reminders"
+#: #290: مجموعةُ «التشغيل والنسخ» — الفوترةُ الرسمية والإرسالُ التلقائي (مقفلان)
+#: وتذكيرُ نسخة البيانات. مجموعةٌ لا مستوى: مكانُ عرضها غيرُ مكان ضبط قيمتها.
+GROUP_OPERATIONS = "operations"
 SETTING_GROUPS: tuple[tuple[str, str], ...] = (
     (GROUP_OFFICE, "المكتب"),
     (GROUP_SCHEDULE, "الضريبة ولائحة المواعيد"),
     (GROUP_ALERTS, "التأخير والتنبيهات"),
     (GROUP_REMINDERS, "التذكيرات والنصوص"),
+    (GROUP_OPERATIONS, "التشغيل والنسخ"),
 )
 
 #: مستلِمو التنبيه (#276) — مفاتيحُ الاختيار يقرؤها `services._alert_recipient_ids`.
@@ -176,6 +180,25 @@ FEE_METHOD_CHOICES: tuple[tuple[str, str], ...] = (
 FEE_METHODS: tuple[str, ...] = tuple(key for key, _label in FEE_METHOD_CHOICES)
 FEE_METHOD_LABELS: dict[str, str] = dict(FEE_METHOD_CHOICES)
 
+#: #290: إيقاعُ تذكير نسخة البيانات — **شهريٌّ افتراضاً** لأن النسخة الاحتياطية
+#: التي لا موعدَ لها لا تُؤخذ، و«مطفأ» لمن يُخرج نسخته بأداةٍ خارج المنصّة.
+#: تُعرَّف هنا لا في النماذج: إعدادُ `data_export_reminder` يقرأ مفاتيحها.
+DATA_EXPORT_REMINDER_MONTHLY = "monthly"
+DATA_EXPORT_REMINDER_OFF = "off"
+DATA_EXPORT_REMINDER_CHOICES: tuple[tuple[str, str], ...] = (
+    (DATA_EXPORT_REMINDER_MONTHLY, "كلَّ شهر"),
+    (DATA_EXPORT_REMINDER_OFF, "مطفأ"),
+)
+DATA_EXPORT_REMINDER_VALUES: tuple[str, ...] = tuple(
+    key for key, _label in DATA_EXPORT_REMINDER_CHOICES
+)
+DATA_EXPORT_REMINDER_LABELS: dict[str, str] = dict(DATA_EXPORT_REMINDER_CHOICES)
+
+#: #290: رسالةُ الإعداد المقفل — **نصٌّ واحدٌ** يقرؤه الخادمُ فيردّ 400، ويُعرض
+#: تحت السطر في الشاشة. والمرحلةُ هي التي تفتحه: حذفُ المفتاح من
+#: `services.LOCKED_SETTING_MESSAGES` هو البابُ الوحيد، لا فرعٌ في الواجهة.
+LOCKED_SETTING_NOTE = "مقفلٌ في هذه المرحلة — يُفتح بقرارٍ من المنصة"
+
 #: نافذةُ الإرسال (§#280/D7): ساعةُ بدايةٍ وساعةُ نهايةٍ تُخزَّنان للمرحلة الثانية
 #: ولا تقرؤهما هذه المرحلة. والحدُّ 23 لأن الساعةَ 24 تعني «المنتصف» في لغاتٍ
 #: وتُلبس على من يقرأ، فالوضوحُ أولى.
@@ -242,6 +265,11 @@ class SettingDefinition:
     #: المكتب» للمكتب، و«يوم راحة الزبون» تخصيصاً فوقه. القيمةُ والتسميةُ من
     #: السجلّ نفسه، فلا تصنع الواجهة اسماً ثانياً يفترق عنه.
     client_label: str = ""
+    #: #290: **قفلُ الإعداد قرارُ السجلّ لا قائمةٌ في الواجهة**. صحيحٌ يعني
+    #: «يُعرض ويُرفَض» — يُرسَل في الحمولة فيُطفئ عنصرَ التحكّم، ويقرؤه حارسُ
+    #: الكتابة القائم (`services._assert_locked_setting`) فيردّ 400 برسالته.
+    #: نسخةٌ في الواجهة كانت تفترق عن السجلّ عند أوّل إعدادٍ يُقفَل أو يُفتَح.
+    locked: bool = False
 
     def label_for(self, level: str = LEVEL_OFFICE) -> str:
         if level == LEVEL_CLIENT and self.client_label:
@@ -590,6 +618,8 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         levels=(LEVEL_OFFICE,),
         default=False,
         group=GROUP_REMINDERS,
+        #: #290: القفلُ صار حقلَ السجلّ (`locked`) بدل قائمةٍ محليّةٍ في الواجهة.
+        locked=True,
         note="مقفلٌ مطفأً في المرحلة الأولى — كلُّ رسالةٍ يراها موظّفٌ قبل إرسالها.",
     ),
     "reminder_merge_daily": SettingDefinition(
@@ -897,6 +927,8 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         levels=(LEVEL_OFFICE,),
         default=False,
         group=GROUP_OFFICE,
+        #: #290: حقلُ السجلّ نفسه الذي يُطفئ ضابطَ الشاشة.
+        locked=True,
         note="مقفلٌ مطفأً في هذه المرحلة — المسودّةُ يُراها صاحبُ المكتب قبل اعتمادها.",
     ),
     #: #282/أ٢: «المكتب مشتغل مرخّص» — **إعدادٌ لا استنتاج** (#266). سطرُ
@@ -1022,6 +1054,49 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         group=GROUP_OFFICE,
         note=(
             "يُدين به قيدُ الشطب — يُنشأ تلقائياً تحت «52» إن غاب من الشجرة."
+        ),
+    ),
+    # ── التشغيل والنسخ (#290) ──
+    #
+    # **الفوترةُ الرسمية والإرسالُ التلقائي ظاهران مطفآن ومقفلان**: قرارُ المرحلة
+    # لا قرارُ مكتب — يُعرضان فيرى صاحبُ المكتب أنّ البابَ قائمٌ وأنّه لم يُفتح
+    # بعد، ولا يظنّ الميزةَ غائبة. و`LOCKED_SETTING_NOTE` رسالةُ الرفض نفسها،
+    # والكتابةُ مرفوضةٌ من الـAPI **ومن الشاشة** (الضابطُ يُطفأ بـ`locked`).
+    "official_invoicing": SettingDefinition(
+        key="official_invoicing",
+        label="الفوترة الرسمية",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=False,
+        group=GROUP_OPERATIONS,
+        locked=True,
+        note=f"{LOCKED_SETTING_NOTE} — إصدارُ فواتيرَ ضريبية رسمية من المنصّة.",
+    ),
+    "auto_send": SettingDefinition(
+        key="auto_send",
+        label="الإرسال التلقائي",
+        kind=KIND_BOOL,
+        levels=(LEVEL_OFFICE,),
+        default=False,
+        group=GROUP_OPERATIONS,
+        locked=True,
+        note=f"{LOCKED_SETTING_NOTE} — إرسالُ رسائل الزبائن بلا مراجعةِ موظّف.",
+    ),
+    #: **تذكيرُ النسخة إعدادٌ لا حقل**: المكتبُ الذي يُخرج نسخته بأداةٍ خارج
+    #: المنصّة يُطفئه، والافتراضُ شهريٌّ لأن نسخةً بلا موعدٍ لا تُؤخذ. ويُولِّد
+    #: تنبيهَ شهرٍ واحدٍ لكل مستلِمٍ في `services.refresh_office` وحدها.
+    "data_export_reminder": SettingDefinition(
+        key="data_export_reminder",
+        label="تذكير أخذ نسخة البيانات",
+        kind=KIND_CHOICE,
+        levels=(LEVEL_OFFICE,),
+        choices=DATA_EXPORT_REMINDER_VALUES,
+        labels=DATA_EXPORT_REMINDER_LABELS,
+        default=DATA_EXPORT_REMINDER_MONTHLY,
+        group=GROUP_OPERATIONS,
+        note=(
+            "مفعّلاً: تنبيهٌ واحدٌ في الشهر لأصحاب المكتب — يُسكِته أخذُ النسخة "
+            "من «التشغيل والنسخ»."
         ),
     ),
 }

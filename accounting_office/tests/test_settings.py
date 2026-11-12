@@ -121,6 +121,9 @@ class RegistryShapeTest(SettingTestCase):
                 "obligation_amount_from_book",
                 # #283/ج: حجبُ التسليم حتى الدفع — مفتاحُ مكتبٍ مطفأٌ افتراضاً.
                 "delivery_hold_unpaid",
+                # #290: مجموعةُ «التشغيل والنسخ» — الفوترةُ الرسمية والإرسالُ
+                # التلقائي (مقفلان مطفأين) وتذكيرُ نسخة البيانات.
+                "official_invoicing", "auto_send", "data_export_reminder",
             },
         )
 
@@ -530,6 +533,9 @@ class SettingsApiTest(SettingTestCase):
                 "obligation_amount_from_book",
                 # #283/ج: مفتاحُ حجب التسليم حتى الدفع.
                 "delivery_hold_unpaid",
+                # #290: مجموعةُ «التشغيل والنسخ» — الفوترةُ الرسمية والإرسالُ
+                # التلقائي (مقفلان) وتذكيرُ نسخة البيانات.
+                "official_invoicing", "auto_send", "data_export_reminder",
             },
         )
 
@@ -540,6 +546,7 @@ class SettingsApiTest(SettingTestCase):
                 {"id": "schedule", "label": "الضريبة ولائحة المواعيد"},
                 {"id": "alerts", "label": "التأخير والتنبيهات"},
                 {"id": "reminders", "label": "التذكيرات والنصوص"},
+                {"id": "operations", "label": "التشغيل والنسخ"},
             ],
         )
         self.assertEqual(rows["tax_system"]["value"], "PS")

@@ -89,6 +89,8 @@ from accounting_office.models import (
     OBLIGATION_STATUS_SUBMITTED,
     OFFICE_ALERT_DEFAULT_OPENS,
     OFFICE_ALERT_KIND_BADGES,
+    #: #290: تذكيرُ نسخة البيانات الشهرية — نوعُ التنبيه ومفتاحُ شهره.
+    OFFICE_ALERT_KIND_DATA_EXPORT_DUE,
     OFFICE_ALERT_KIND_FEE_DRAFT_PENDING,
     OFFICE_ALERT_KIND_LABELS,
     OFFICE_ALERT_KIND_OBLIGATION_LATE,
@@ -308,6 +310,15 @@ AMOUNT_KEYS: frozenset[str] = frozenset(
 # لأن `LOCKED_SETTING_MESSAGES` يُبنى عند الاستيراد، فيحتاج مفتاحَه معرَّفاً.
 FEE_METHOD_KEY = "fee_method"
 FEE_AUTO_APPROVE_KEY = "fee_auto_approve"
+
+# ── التشغيل والنسخ (#290): مفاتيحُ مجموعةٍ ثابتةٍ هنا لا نصوصاً في الكود ──────
+#
+# المفتاحان الأوّلان **مقفلان مطفأين** (`settings_registry.LOCKED_SETTING_NOTE`)
+# وتذكيرُ النسخة مفتوحٌ شهريٌّ افتراضاً. وثوابتُها هنا لا في `office_exports`:
+# حارسُ القفل يُبنى عند الاستيراد فيحتاج مفاتيحَه معرَّفةً قبله (كـ`fee_method`).
+OPERATIONS_OFFICIAL_INVOICING_KEY = "official_invoicing"
+OPERATIONS_AUTO_SEND_KEY = "auto_send"
+DATA_EXPORT_REMINDER_KEY = "data_export_reminder"
 
 #: «بالساعة» معروضةٌ في الاختيار ومرفوضةٌ برسالتها: يراها المكتب فيعرف أنها
 #: ليست متاحةً بعد، ولا يظنّ الطريقةَ الوحيدةَ هي الاشتراك.
@@ -748,6 +759,9 @@ def _setting_row(definition, *, level=settings_registry.LEVEL_OFFICE) -> dict:
         # حدُّ الطول للنصوص (`KIND_TEXT`) — العمودُ يحكم، والضابطُ يمنع التجاوز
         # قبل الطلب، فلا يقتطع MySQL النصَّ بصمتٍ ولا يردّ الخادمُ 400 بعد كتابة.
         "max_length": definition.max_length,
+        # #290: القفلُ من السجلّ لا قائمةً في الواجهة — الضابطُ يُطفأ به،
+        # والحكمُ في `set_office_setting` وحده.
+        "locked": definition.locked,
     }
 
 
@@ -3421,6 +3435,11 @@ def refresh_office(tenant, *, day) -> dict:
     ويُسجَّل `OfficeRefreshRun` لليوم (`get_or_create`)، فالسجلُّ صفٌّ واحدٌ لكل
     (مكتب، يوم) وعدّادُه ما أنشأه أوّلُ تشغيل. ويُرجع ما أنشأه **هذا** النداء:
     صفراً في اليوم نفسه، والجديدَ في يومٍ لاحق.
+
+    **ومعه — لا في مسارٍ ثانٍ (#290)** — يُزامَن التزامُ المكتب نفسه من لائحته
+    الثابتة (`self_obligations.sync_self_obligations`)، ويُولَّد تذكيرُ نسخة
+    البيانات الشهريُّ إن كان إعدادُه مفعّلاً. كلاهما مفتاحُه الطبيعيُّ يمنع
+    التكرار، فلا يخرج هذا النداء عن كونه idempotent.
     """
     clients = list(
         OfficeClient.objects
@@ -3454,6 +3473,12 @@ def refresh_office(tenant, *, day) -> dict:
     # هنا لأن لا ساعةَ في الموديول.
     fee_drafts = _generate_fee_drafts(tenant, day=day)
     created_alerts += fee_drafts["created_alerts"]
+    # #290: **التزامُ المكتب نفسه** — لائحتُه في الكود، والتوليدُ `get_or_create`
+    # على (مكتب، قاعدة، فترة). ولا يمسّ التزامات الزبائن ولا عدّاداتها بشيء.
+    created_self_obligations = _sync_self_obligations(tenant, day=day)
+    # #290: تذكيرُ نسخة البيانات — تنبيهٌ واحدٌ في الشهر لأصحاب المكتب، تقرؤه
+    # الشاشةُ من هذا النوع وتُسكِته نقطةُ التصدير الكامل.
+    created_alerts += _generate_data_export_reminders(tenant, day=day)
     return {
         "day": day.isoformat(),
         "created_tasks": created_tasks,
@@ -3463,6 +3488,8 @@ def refresh_office(tenant, *, day) -> dict:
         "created_alerts": created_alerts,
         # #282: عددُ المسودّات التي أنشأها هذا النداء (لا تحديثَ لمعتمدةٍ ولا ملغاة).
         "created_fee_drafts": fee_drafts["created_drafts"],
+        # #290: بنودُ التزام المكتب نفسِه التي أُنشئت الآن (واحدٌ في السنة عادةً).
+        "created_self_obligations": created_self_obligations,
     }
 
 
@@ -6501,6 +6528,11 @@ LOCKED_SETTING_MESSAGES: dict[str, str] = {
     # #282: الاعتمادُ التلقائيُّ لمسودّات الأتعاب مقفلٌ مطفأً — المسودّةُ يراها
     # صاحبُ المكتب أو مديرُ المكتب قبل اعتمادها.
     FEE_AUTO_APPROVE_KEY: FEE_AUTO_APPROVE_LOCKED,
+    # #290: مجموعتُه «التشغيل والنسخ» — الفوترةُ الرسمية والإرسالُ التلقائي
+    # يُعرضان مطفأين ويُرفضان: قرارُ مرحلةٍ لا قرارُ مكتب، والرسالةُ واحدةٌ
+    # تقول «يُفتح بقرارٍ من المنصة» بدل «غير متاحٍ بعد» المبهمة.
+    OPERATIONS_OFFICIAL_INVOICING_KEY: settings_registry.LOCKED_SETTING_NOTE,
+    OPERATIONS_AUTO_SEND_KEY: settings_registry.LOCKED_SETTING_NOTE,
 }
 
 #: زوجُ النافذة (`setting.key` ← نظيرُه): بدايةٌ لا تلحق نهايتَها. **والطرفان في
@@ -8058,6 +8090,96 @@ def _generate_fee_drafts(tenant, *, day) -> dict:
     from accounting_office import fees
 
     return fees.generate_fee_drafts(tenant, day=day)
+
+
+# ── تذكيرُ نسخة البيانات (#290) ──────────────────────────────────────────────
+#
+# **تنبيهٌ لا بريدٌ ولا مُجدوِل**: المكتبُ لا يعرف أن نسخته لم تُؤخذ إلا إن قيل
+# له، والقولُ في الجرس القائم — بنوعٍ جديدٍ (`data_export_due`) ومفتاحِ شهرٍ
+# (`export:YYYY-MM`) تُكفل به فرادةُ `OfficeAlert` «مرّةً في الشهر» مهما تشغّل
+# التحديث. وإسكاتُه **بمساره القائم** (`seen_at`): أخذُ النسخة يعلّم صفوفَ الشهر
+# مقروءة — لا عمودَ حالةٍ ثانٍ يفترق عنه.
+DATA_EXPORT_REMINDER_MESSAGE = (
+    "نسخة بيانات المكتب لهذا الشهر — خُذها من الإعدادات ← التشغيل والنسخ"
+)
+
+
+def _sync_self_obligations(tenant, *, day) -> int:
+    """جسرُ «حدّث المكتب» إلى `self_obligations` — استيرادٌ كسول كـ`_generate_fee_drafts`.
+
+    `self_obligations` يقرأ `services.resolve_setting` و`client_books`، فاستيرادُه
+    أعلى الملفّ دورةُ استيراد. والجسمُ هناك لأن قواعدَ السجلّ المستقلّ — المفتاحُ
+    الطبيعيّ و«قُدِّم» النهائيّ — تُقرأ وتُختبَر في موضعٍ واحد.
+    """
+    from accounting_office import self_obligations
+
+    return self_obligations.sync_self_obligations(tenant, day=day)
+
+
+def data_export_ref_key(day) -> str:
+    """مفتاحُ الشهر للتنبيه — `export:YYYY-MM`، مصدرُه الوحيدُ هنا."""
+    return f"export:{day.year:04d}-{day.month:02d}"
+
+
+def _approver_ids(tenant) -> set[int]:
+    """مستلِمو التذكير: أعضاءُ المكتب النشطون بأدوار المستلِم المعتمِد.
+
+    الأدوارُ من `client_books.ENTRY_APPROVER_ROLES` نفسِها — لا قائمةٌ ثانية
+    تفترق عن أدوار من يعتمد القيود والمسودّات. والاستيرادُ كسول (دورةُ استيراد).
+    """
+    from accounting_office.client_books import ENTRY_APPROVER_ROLES
+
+    return set(
+        UserCompanyMembership.objects
+        .filter(
+            tenant=tenant, role__in=ENTRY_APPROVER_ROLES, user__is_active=True,
+        )
+        .values_list("user_id", flat=True),
+    )
+
+
+def _generate_data_export_reminders(tenant, *, day) -> int:
+    """تذكيرُ الشهر — صفٌّ لكل مستلِمٍ إن كان الإعدادُ مفعّلاً، وإلا صفر.
+
+    `bulk_create(ignore_conflicts=True)` كسائر المولّدات: الفرادةُ في القاعدة تحرس
+    «مرّةً في الشهر» ولو نُودِي النداءُ مرّتين في اللحظة نفسها.
+    """
+    if (
+        resolve_setting(tenant, DATA_EXPORT_REMINDER_KEY)
+        != settings_registry.DATA_EXPORT_REMINDER_MONTHLY
+    ):
+        return 0
+    recipients = _approver_ids(tenant)
+    if not recipients:
+        return 0
+    ref_key = data_export_ref_key(day)
+    rows = [
+        OfficeAlert(
+            tenant=tenant,
+            recipient_id=recipient_id,
+            kind=OFFICE_ALERT_KIND_DATA_EXPORT_DUE,
+            ref_key=ref_key,
+            message=DATA_EXPORT_REMINDER_MESSAGE,
+            day=day,
+        )
+        for recipient_id in sorted(recipients)
+    ]
+    OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
+    return len(rows)
+
+
+def mark_data_export_alerts_seen(tenant, *, day) -> int:
+    """أخذُ النسخة يُسكِت تنبيهَ شهره — **كلَّ مستلِمي المكتب** لا مُنشئَه وحده.
+
+    النسخةُ نسخةُ المكتب: صفٌّ يبقى غيرَ مقروءٍ على جرس زميلٍ بعد أن أُخذت
+    يُلزمه بالبحث عن نسخةٍ موجودة. والصفوفُ لا تُحذف — «شوهد» كما في الجرس.
+    """
+    return OfficeAlert.objects.filter(
+        tenant=tenant,
+        kind=OFFICE_ALERT_KIND_DATA_EXPORT_DUE,
+        ref_key=data_export_ref_key(day),
+        seen_at__isnull=True,
+    ).update(seen_at=timezone.now())
 
 
 def _live_fee_draft_refs(tenant) -> set[str]:

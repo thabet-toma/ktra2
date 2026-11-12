@@ -19,6 +19,7 @@ from accounting_office.views import (
     OfficeDocumentFileViewSet,
     OfficeDocumentItemViewSet,
     OfficeDocumentViewSet,
+    OfficeExportViewSet,
     OfficeFeeDraftViewSet,
     OfficeFeeExtraServiceViewSet,
     OfficeFeeInvoiceViewSet,
@@ -33,6 +34,7 @@ from accounting_office.views import (
     OfficeReminderLogViewSet,
     OfficeReminderTemplateViewSet,
     OfficeServiceViewSet,
+    OfficeSelfObligationViewSet,
     OfficeSettingsViewSet,
     OfficeTaskViewSet,
     OfficeTodayViewSet,
@@ -157,6 +159,19 @@ router.register(
     "fees/ledger",
     OfficeFeeLedgerViewSet,
     basename="accounting-office-fee-ledger",
+)
+# #290: التشغيل والنسخ — تصديرُ نسخة المكتب (Excelُ ورابطُ PDF) وبيانُ الأسماء
+# (م111)، **والأفعالُ `POST`**: كلُّها إخراجُ ملفٍّ لا قراءةُ قائمة. والتزامُ
+# المكتب نفسه سجلٌّ مستقلّ: قراءةٌ لكل عضوٍ وكتابةٌ بالدور.
+router.register(
+    "exports",
+    OfficeExportViewSet,
+    basename="accounting-office-exports",
+)
+router.register(
+    "self-obligations",
+    OfficeSelfObligationViewSet,
+    basename="accounting-office-self-obligations",
 )
 
 urlpatterns = [

@@ -1,0 +1,102 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+بيانُ أسماء زبائن المكتب وعناوينهم (#290/ج) — نموذجُ م111 للدائرة الفلسطينية.
+
+**جدولٌ واحدٌ لا جداول**: البيانُ يُقدَّم لجهةٍ تطلب أسماءً وعناوين وأرقامَ ملفات،
+فلا مكانَ فيه لمبلغٍ ولا لحركة. والعنوانُ يأتي من طرف الزبون في الدفاتر
+(`OfficeClient.partner`) — سجلُّ المكتب نفسُه بلا حقلِ عنوان، ومن لم يُربط طرفُه
+يخرج سطرُه «—» ولا يُخترع له عنوان.
+
+**والطباعةُ من المتصفح** كما في بقية أوراق المكتب: الورقةُ تُصيَّر كاملةً هنا،
+و«PDF» نتيجةُ حوار الطباعة لا مكتبةَ تصيير على الخادم.
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  .cn-head{border-bottom:2px solid var(--ink); padding-bottom:16px; margin-bottom:18px}
+  .cn-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .cn-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .cn-title{font-size:21px; font-weight:800; margin:16px 0 4px}
+  .cn-meta{display:flex; gap:14px; flex-wrap:wrap; margin:14px 0 16px}
+  .cn-card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px;
+           padding:12px 15px}
+  .cn-card h3{margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:700}
+  .cn-row{display:flex; justify-content:space-between; gap:12px; font-size:13px;
+          padding:3px 0}
+  .cn-row span:first-child{color:var(--muted)}
+  .cn-note{font-size:12.5px; color:var(--muted); margin:0 0 12px}
+  .cn-table{width:100%; border-collapse:collapse; font-size:13.5px}
+  .cn-table th,.cn-table td{border:1px solid var(--line); padding:9px 11px;
+                            text-align:right}
+  .cn-table thead th{background:#f8fafc; font-size:12px; color:var(--muted);
+                     font-weight:700}
+  .cn-table td.idx{width:42px; color:var(--muted); font-variant-numeric:tabular-nums}
+  .cn-empty{border:1px solid var(--line); border-radius:10px; padding:14px 16px;
+            color:var(--muted); font-size:13px; text-align:center}
+  .cn-foot{margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
+           font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="cn-head">
+    <p class="cn-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="cn-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="cn-org-line">{{ company.address }}</p>{% endif %}
+    <p class="cn-title">{{ title }}</p>
+  </div>
+
+  <div class="cn-meta">
+    <div class="cn-card">
+      <h3>الجهة</h3>
+      <div class="cn-row"><span>الدائرة</span><span><strong>ضريبة القيمة المضافة</strong></span></div>
+      <div class="cn-row"><span>النموذج</span><span>م111</span></div>
+    </div>
+    <div class="cn-card">
+      <h3>البيان</h3>
+      <div class="cn-row"><span>تاريخ التصدير</span><span>{{ generated_on|gdate }}</span></div>
+      <div class="cn-row"><span>عدد الزبائن</span><span>{{ rows|length }}</span></div>
+    </div>
+  </div>
+
+  <p class="cn-note">{{ note }}</p>
+
+  {% if rows %}
+  <table class="cn-table">
+    <thead>
+      <tr>
+        <th class="idx">#</th>
+        <th>اسم الزبون</th>
+        <th>رقم الملف الضريبي</th>
+        <th>العنوان</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td class="idx">{{ forloop.counter }}</td>
+        <td><strong>{{ row.name }}</strong></td>
+        <td>{{ row.tax_file_number|default:"—" }}</td>
+        <td>{{ row.address|default:"—" }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="cn-empty">لا زبونَ نشطاً في هذا المكتب بعد.</p>
+  {% endif %}
+
+  <div class="cn-foot">
+    {{ company.company_name_primary }}
+    <br>{{ note }}
+  </div>
+</div>
+{% endblock %}
