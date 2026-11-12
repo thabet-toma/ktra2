@@ -1075,25 +1075,13 @@ def _cheque_of(tenant, payment):
     """
     if payment.method != FEE_PAYMENT_METHOD_CHEQUE:
         return None
-    from accounting.models import Cheque
+    from accounting import api as accounting_api
 
-    cheque = (
-        Cheque.objects
-        .filter(
-            tenant=tenant,
-            cheque_number=payment.receipt_number,
-            direction="Incoming",
-        )
-        .order_by("id")
-        .first()
+    return accounting_api.cheque_snapshot(
+        tenant,
+        number=payment.receipt_number,
+        direction="Incoming",
     )
-    if cheque is None:
-        return None
-    return {
-        "number": cheque.cheque_number,
-        "bank_name": cheque.bank_name or "",
-        "due_date": None if cheque.due_date is None else cheque.due_date.isoformat(),
-    }
 
 
 def receipt_payload(tenant, payment, *, masked: bool) -> dict:
