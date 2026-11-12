@@ -53,6 +53,26 @@
 وضريبةُ البند المسجَّلة (هجرةُ `0020_book_entry_tax`)، و«صدّر الدفتر كامل» بعد ترك
 الزبون (قراءةٌ لا كتابة).
 
+**والجزء ٢ (#287 — النسبُ والإهلاكُ والإقفال):** **لائحةُ نسب المنصّة**
+(`BookExpenseRate`) في `accounting_office/book_rates.py` — صفٌّ لكل **قيمة** (ض.ق.م
+وضريبةُ الدخل والإهلاك) بمصدره ومستوى دليله وتاريخ سريانه وعلامة «راجع»، تُزرع
+بهجرة `0021_book_rates_and_period_lock` من بحث #269، **و«راجع» يبقى بلا قيمةٍ ولا
+يُستعمل في حساب**. وتعديلُ المكتب عليها تجاوزٌ (`OfficeBookExpenseRate`) يُكتب معه
+**سجلٌّ إلحاقيٌّ** (`BookExpenseRateChange`: قبلُ وبعدُ وسببٌ ملزم) — لا تعديلَ
+صامت. ونسبتا المصروف على `ClientBookAccount` (تصنيفٌ ونسبةُ ض.ق.م وضريبةِ الدخل
+والإهلاك — افتراضُهما 100% بلا تصنيف)، ونسبةُ ض.ق.م على **سطر المستند** بسببٍ
+وبإعداد `book_line_rate_override`. و**الإهلاكُ بالقسط الثابت**
+(`book_reports.depreciation_payload`) و**ض.ق.م المستحقّةُ من الدفتر**
+(`book_reports.vat_from_book`: مبيعاتٌ − مدخلاتٌ بنسبتها المعترف بها) تُملأ بها
+`Obligation.computed_amount` ويؤكّدها الموظف في `amount` بإعداد
+`obligation_amount_from_book` — والمحسوبُ والمعدَّلُ يبقيان معاً. و**الإقفال**: قفلُ
+فترة الدفتر عند «انقدّم» (`book_close_on_submit` على `BookPeriodLock`)، والإدخالُ
+داخلها 400 برسالةٍ مسمّاة، والفتحُ بدور المدير/صاحب المكتب بسببٍ يُسجَّل. و**نتيجةُ
+الفترة** بلونها (`book_reports.period_result`) في سطر الدفتر وفي إشعار الدفع،
+و**تنبيهُ السقوف السنوية** (`book_reports.annual_alerts_payload`) من `TaxThreshold`
+بأنواعٍ سنويةٍ جديدة (ضيافةٌ وهدايا وهاتف) — **تنبيهٌ لا رفض**. ونقاطُها على
+`OfficeClientBookViewSet` (`rates`/`periods`/`reopen_period`/`account_rates`).
+
 **مفتاح الترخيص:** `accounting_office` في `core/modules.py` (`MODULES`) — تسميتُه
 «مكتب المحاسبة»، خططُه `Pro` و`Enterprise`، و`legacy_flag: None` (لا عَلَم قديم
 يُيسِّره). كلُّ نقطةٍ تحت `/api/accounting-office/` تمرّ بـ`require_module` فتردّ

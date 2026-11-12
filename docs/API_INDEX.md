@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1100**
+عدد النقاط: **1107**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -77,8 +77,11 @@
 | `/api/accounting-office/client-books/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/choices/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/pending-entry/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/rates/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/rates/{code}/{rate_kind}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/accounts/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/accounts/{code}/rates/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/reverse/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
@@ -86,6 +89,8 @@
 | `/api/accounting-office/client-books/{pk}/import/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/import/template.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/kind/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/periods/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/periods/{period_id}/reopen/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
@@ -153,6 +158,8 @@
 | `/api/accounting-office/fees/service-prices/` | `OfficeFeeServicePriceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/subscriptions/` | `OfficeFeeSubscriptionViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/amount/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/amount/confirm/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/obligations/{pk}/amount/from-book/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/clear-extension/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/client-paid/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/extend/` | `OfficeObligationViewSet` | `accounting_office/views.py` |

@@ -169,6 +169,9 @@ def page_payment_notice(obligation, share) -> str:
             "total": abs(notice["total"]),
             "total_tone": notice["tone"],
             "total_direction": notice["direction_label"],
+            # #287/٦: نتيجةُ فترة الدفتر لمن عنده دفتر — اللونُ يصل رمزاً
+            # (`profit`/`loss`/`neutral`) والقالبُ يضع اسمَ الصنف `pn-<الرمز>`.
+            "result": notice.get("result"),
         },
     )
 

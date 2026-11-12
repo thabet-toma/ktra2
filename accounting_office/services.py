@@ -76,7 +76,9 @@ from accounting_office.models import (
     OBLIGATION_CHANGE_OFFICE_OVERRIDE,
     OBLIGATION_CHANGE_PLATFORM_UPDATE,
     OBLIGATION_DIRECTION_CHOICES,
+    OBLIGATION_DIRECTION_DUE,
     OBLIGATION_DIRECTION_LABELS,
+    OBLIGATION_DIRECTION_REFUND,
     OBLIGATION_ORIGIN_EVENT,
     OBLIGATION_ORIGIN_LABELS,
     OBLIGATION_ORIGIN_OFFICE,
@@ -243,7 +245,9 @@ TAX_CARD_AMOUNT_KEYS: tuple[str, ...] = ("annual_sales",)
 PACKAGE_AMOUNT_KEYS: tuple[str, ...] = ("suggested_price",)
 
 #: مبلغُ الالتزام (#275): ما على الزبون أو له في فترةٍ — **يُقفل عند «انقدّم»**.
-OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount",)
+#: و`computed_amount` (#287/٤) المبلغُ المحسوبُ من الدفتر: محفوظٌ إلى جانب
+#: المعدَّل لا مكانه، فالسؤال «كم قال الدفتر وكم قُدّم؟» يبقى مقروءاً.
+OBLIGATION_AMOUNT_KEYS: tuple[str, ...] = ("amount", "computed_amount")
 
 #: مبالغُ بنود دفتر الزبون (#286): مدينُ البند ودائنه، **والأساسُ الخاضعُ للضريبة
 #: وقيمتُها** (#288/ب-٢). تُقنَّع كسائر مبالغ الموديول — من لا يملك «يرى المبالغ»
@@ -3531,6 +3535,11 @@ def submit_obligation(obligation, *, actor, submitted_on=None, number="") -> Obl
     obligation.save(update_fields=[
         "status", "submitted_on", "submitted_by", "submission_number", "updated_at",
     ])
+    # #287/٥: «انقدّم» يقفل فترةَ الدفتر — إن كان الإعدادُ مفعّلاً وثمّة دفتر.
+    # استيرادٌ كسول: `client_books` يستورد هذه الوحدة، فالاستيرادُ أعلى الملفّ دورة.
+    from accounting_office import client_books
+
+    client_books.close_period_on_submit(obligation, actor=actor, day=day)
     return obligation
 
 
@@ -3594,6 +3603,82 @@ def set_obligation_client_paid(obligation, *, paid) -> Obligation:
     """«الزبون دفع» — **في كلّ الحالات**: الدفعُ خبرٌ عن الزبون لا عن التقديم."""
     obligation.client_paid = bool(paid)
     obligation.save(update_fields=["client_paid", "updated_at"])
+    return obligation
+
+
+#: #287/٤: إعدادُ «حساب المبلغ من الدفتر» — فعّالاً يُتاح الحساب، وكلُّ حسابٍ يُخزَّن.
+OBLIGATION_FROM_BOOK_KEY = "obligation_amount_from_book"
+
+
+def _client_book_for(obligation):
+    """دفترُ زبون الالتزام — أو 400 برسالته: لا دفترَ فلا حسابَ من لا شيء."""
+    from accounting_office.models import ClientBook
+
+    book = ClientBook.objects.filter(client=obligation.client).first()
+    if book is None:
+        raise ValidationError({
+            "client": "لا دفترَ لهذا الزبون — لا مبلغَ يُحسب من دفترٍ غير موجود.",
+        })
+    return book
+
+
+def compute_obligation_amount(obligation, *, actor=None, day=None):
+    """**المبلغُ المحسوبُ من الدفتر**: ض.ق.م = مبيعات − مدخلاتٍ معترفاً بها.
+
+    ثلاثةُ شروطٍ قبله: الإعدادُ مفعّلٌ للزبون، وله دفتر، والالتزام لم يُقدَّم
+    («انقدّم» نهائيٌّ كما في المبلغ اليدويّ). والنتيجةُ تُحفظ في `computed_amount`
+    **ولا تلمس `amount`**: التأكيدُ فعلٌ ثانٍ صريح (`confirm_obligation_amount`)،
+    فالفرقُ بين ما قاله الدفترُ وما قُدِّم فعلاً يبقى مقروءاً.
+
+    وتُعيد `(الالتزام، تفصيلَ الحساب)` — التفصيلُ يراه الموظف فيؤكّد أو يعدّل:
+    تأكيدُ رقمٍ لم يُقرأ تفصيلُه ليس تأكيداً.
+
+    و`المدخلاتُ المعترف بها` تُقرأ من `book_reports.vat_from_book` — لا حسابٌ
+    ثانٍ هنا: تقريرُ ض.ق.م ومبلغُ الالتزام يجب أن يقولا الرقمَ نفسه.
+    """
+    from accounting_office import book_reports
+
+    if not resolve_setting(
+        obligation.tenant, OBLIGATION_FROM_BOOK_KEY, client=obligation.client,
+    ):
+        raise ValidationError({
+            "amount": (
+                "«حساب مبلغ الالتزام من الدفتر» غير مفعّل لهذا الزبون — "
+                "فعّله من إعدادات المكتب، أو اكتب المبلغ يدوياً."
+            ),
+        })
+    _assert_not_submitted(obligation, field="amount")
+    book = _client_book_for(obligation)
+    computed = book_reports.vat_from_book(
+        book,
+        period_start=obligation.period_start,
+        period_end=obligation.period_end,
+    )
+    obligation.computed_amount = Decimal(computed["vat_due"])
+    obligation.save(update_fields=["computed_amount", "updated_at"])
+    return obligation, computed
+
+
+def confirm_obligation_amount(obligation, *, actor=None) -> Obligation:
+    """**تأكيدُ الموظف**: المحسوبُ يصير المبلغَ المعدَّل — والاثنان يبقيان.
+
+    الاتجاهُ من إشارة المحسوب: موجبٌ «عليه» وسالبٌ «إله» (كإشعار الدفع)، والصفرُ
+    يُقبل مبلغاً صفرياً بلا اتجاه — التزامٌ صفريٌّ نتيجةٌ صحيحة، لا فراغ.
+    """
+    _assert_not_submitted(obligation, field="amount")
+    if obligation.computed_amount is None:
+        raise ValidationError({
+            "amount": "لا مبلغَ محسوباً بعد — احسبه من الدفتر أوّلاً.",
+        })
+    amount = obligation.computed_amount
+    obligation.amount = abs(amount)
+    if amount > 0:
+        obligation.direction = OBLIGATION_DIRECTION_DUE
+    elif amount < 0:
+        obligation.direction = OBLIGATION_DIRECTION_REFUND
+    else:
+        obligation.direction = ""
+    obligation.save(update_fields=["amount", "direction", "updated_at"])
     return obligation
 
 
@@ -3699,6 +3784,13 @@ def _obligation_row(
     التأخير التي حسبها المنادي مرّةً في مسحته فلا تُعاد للصفّ.
     """
     amount = None if obligation.amount is None else f"{obligation.amount:.2f}"
+    # #287/٤: المحسوبُ من الدفتر يُعرض إلى جانب المعدَّل — مفتاحُ مبلغٍ مسجَّل
+    # فيمرّ بالقناع، وصفرُه `"0.00"` لا `None`: «حُسب فكان صفراً» خبرٌ آخر عن
+    # «لم يُحسب بعد».
+    computed = (
+        None if obligation.computed_amount is None
+        else f"{obligation.computed_amount:.2f}"
+    )
     keys = list(
         _badge_keys(obligation, day, task=task) if badge_keys is None else badge_keys,
     )
@@ -3748,6 +3840,7 @@ def _obligation_row(
         # #278: `وصل n / م` — `null` حين لا صفَّ ورقةٍ محسوباً لهذا الالتزام.
         "docs": docs_payload,
         "amount": amount,
+        "computed_amount": computed,
         "direction": obligation.direction,
         "direction_label": OBLIGATION_DIRECTION_LABELS.get(obligation.direction, ""),
         "client_paid": obligation.client_paid,

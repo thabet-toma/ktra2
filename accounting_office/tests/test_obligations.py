@@ -708,6 +708,8 @@ class RowShapeTest(OfficeTestCase):
                 "due_date", "extended_to", "extension_note", "platform_official_date",
                 # #278: `docs` = `{received, required}` أو `null`.
                 "docs",
+                # #287/٤: المبلغُ المحسوبُ من الدفتر — يظهر إلى جانب المعدَّل.
+                "computed_amount",
             },
         )
         self.assertEqual(set(row["client"]), {"id", "name"})

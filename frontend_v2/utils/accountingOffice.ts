@@ -976,6 +976,24 @@ export function obligationBadgeClass(key: string): string {
   return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
 }
 
+/** ألوانُ نتيجة الفترة — رمزٌ من الخادم، وصنفٌ من لوحة الموديول. */
+export type PeriodResultTone = 'profit' | 'loss' | 'neutral';
+
+/**
+ * أصنافُ نتيجة فترة الدفتر (#287/٦) — **مشتقّةٌ من شارات الموديول** لا لوحةً
+ * ثانية: الربحُ أخضرُ «قبضٌ وصل»، والخسارةُ حمراءُ «متأخّر»، والحدُّ الرماديّ
+ * كسائر المحايد. وتعديلُ الشارة يصل هنا معها بدل أن يفترق لونان لمعنًى واحد.
+ */
+export function periodResultClass(tone: string): string {
+  if (tone === 'profit') {
+    return obligationBadgeClass('payment_received');
+  }
+  if (tone === 'loss') {
+    return obligationBadgeClass('late');
+  }
+  return obligationBadgeClass('');
+}
+
 /** أصنافُ شارة الحالة المخزّنة («انقدّم»/«مش لازم هالفترة»). */
 export function obligationStatusClass(status: string): string {
   if (status === 'submitted') {
@@ -1971,6 +1989,61 @@ export interface ClientBookRow {
   entry_kind_choices?: BookChoice[];
   /** أنواعُ الحساب وتسمياتها — في المسار المفرد وحده (#286/ب). */
   account_type_choices?: BookChoice[];
+  /** نتيجةُ فترة الدفتر بلونها (#287/٦) — تصل محسوبةً من الخادم. */
+  period_result?: PeriodResult | null;
+  /** تنبيهاتُ السقوف السنوية (#287/٧) — تنبيهٌ لا رفض. */
+  annual_alerts?: AnnualAlerts | null;
+  /** الفتراتُ المقفلة السارية (#287/٥) — تُعاد بـ`periods/` كاملةً. */
+  locked_periods?: ClientBookPeriod[];
+}
+
+/** نتيجةُ فترةِ دفتر: إيراداتٌ ناقصَ مصاريف، ورمزُ لونها من الخادم. */
+export interface PeriodResult {
+  from: string;
+  to: string;
+  revenue: string | null;
+  expense: string | null;
+  profit: string | null;
+  tone: PeriodResultTone;
+  tone_label: string;
+  threshold: string;
+  book_kind_label: string;
+}
+
+/** سطرُ سقفٍ سنوي: مجموعُ الرمز ومقارنتَه بسقفه المنشور. */
+export interface AnnualCapRow {
+  code: string;
+  label: string;
+  cap_label: string;
+  total: string | null;
+  cap: string | null;
+  cap_year: number | null;
+  cap_note: string;
+  source_url: string;
+  exceeded: boolean;
+  needs_review: boolean;
+}
+
+export interface AnnualAlerts {
+  year: number;
+  tax_system: string;
+  rows: AnnualCapRow[];
+  any_exceeded: boolean;
+  review_count: number;
+}
+
+/** قفلُ فترةٍ على دفتر الزبون (#287/٥). */
+export interface ClientBookPeriod {
+  id: number;
+  period_start: string;
+  period_end: string;
+  locked_on: string;
+  locked_by: string;
+  unlocked_on: string | null;
+  unlocked_by: string;
+  unlock_reason: string;
+  is_open: boolean;
+  obligation: number | null;
 }
 
 /**

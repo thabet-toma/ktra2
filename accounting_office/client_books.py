@@ -30,7 +30,7 @@ from django.db.models import Count, Exists, OuterRef
 from django.db.models.functions import TruncMonth
 from django.utils import timezone
 
-from accounting_office import services
+from accounting_office import book_rates, services
 from accounting_office.deadlines import MONTH_LABELS
 from accounting_office.models import (
     BOOK_ACCOUNT_TYPE_LABELS,
@@ -51,6 +51,7 @@ from accounting_office.models import (
     BookEntry,
     BookEntryDocument,
     BookEntryLine,
+    BookPeriodLock,
     ClientBook,
     ClientBookAccount,
     ClientBookSequence,
@@ -65,6 +66,11 @@ from tenants.models import Currency
 
 #: مفتاحُ إعداد طريقة الإدخال (د10) — يُقرأ بالمحلّل، والافتراضُ «ورقة ورقة».
 ENTRY_METHOD_KEY = "book_entry_method"
+
+#: #287/٥: إعدادُ ««انقدّم» يقفل فترة الدفتر» — المفتاحُ الذي يُقرأ عند التقديم.
+CLOSE_ON_SUBMIT_KEY = "book_close_on_submit"
+#: #287/٢: إعدادُ السماح بنسبةٍ مخالفةٍ على سطر المستند.
+LINE_RATE_KEY = "book_line_rate_override"
 
 #: أدوارُ من يكتب **بيده** قيداً يدوياً أو رصيداً افتتاحياً — دورٌ لا مفتاح، كنمط
 #: `fees.FEE_APPROVER_ROLES`: مديرُ المكتب يملك مفاتيحَ المكتب كلَّها، والمحاسبُ
@@ -175,8 +181,14 @@ def book_row(book, *, writable, entry_method) -> dict:
     }
 
 
-def account_row(row) -> dict:
-    return {
+def account_row(row, *, tenant=None, tax_system="", overrides=None) -> dict:
+    """سطرُ حسابٍ — **ونسبُه الثلاث** (#287/٢ و٣) حين يُعرَف مكتبُه.
+
+    النسبُ تُحسب لشجرةٍ كاملةٍ بنداءٍ واحدٍ للمكتب (`overrides`)، لا استعلامين لكل
+    حساب: شجرةُ زبونٍ ثلاثون حساباً كانت تُنتج تسعين استعلاماً في فتحةٍ واحدة.
+    ونداءٌ بلا `tenant` يعطي السطرَ بلا نسبٍ — للشكل القديم وحده.
+    """
+    payload = {
         "code": row.code,
         "name": row.name,
         "parent_code": row.parent.code if row.parent_id else None,
@@ -186,7 +198,16 @@ def account_row(row) -> dict:
         ),
         "is_system": row.is_system,
         "is_active": row.is_active,
+        "rate_category": row.rate_category,
+        "rates": None,
     }
+    if tenant is not None:
+        rates = book_rates.account_rows(
+            row, tenant=tenant, tax_system=tax_system, overrides=overrides,
+        )
+        payload["rates"] = rates
+        payload["rate_category_label"] = rates[book_rates.RATE_KIND_VAT].get("label", "")
+    return payload
 
 
 # ── تسمياتُ الأنواع كما تخرج: من النموذج لا من جدولٍ ثانٍ ─────────────────────
@@ -279,6 +300,13 @@ def entry_row(entry, *, masked) -> dict:
                 "tax_base": _amount(line.tax_base),
                 "tax_amount": _amount(line.tax_amount),
                 "side_party": line.side_party,
+                # #287/٢: نسبةُ السطر إن كُتبت — بلا سببٍ لا تُكتب (الخدمةُ تفحص)،
+                # وهي هنا حدُّ التسوية على نسبة الحساب.
+                "vat_rate": (
+                    None if line.vat_rate is None
+                    else str(Decimal(line.vat_rate).quantize(book_rates.RATE_QUANTUM))
+                ),
+                "vat_rate_reason": line.vat_rate_reason,
             }
             for line in lines
         ],
@@ -314,14 +342,32 @@ def books_payload(tenant, user, *, day=None) -> list[dict]:
     ]
 
 
-def accounts_payload(client) -> list[dict]:
+def accounts_payload(client, *, tenant=None) -> list[dict]:
+    """شجرةُ الحساب — ونسبُها حين يُمرَّر المكتب (خريطةُ التجاوزات تُقرأ مرّةً).
+
+    ونظامُ الزبون يُقرأ مرّةً واحدةً هنا لا لكل حساب: `resolve_setting` استعلامان
+    أو ثلاثة، فقراءتُه ثلاثين مرّةً تجعل الشجرةَ مئةَ استعلام.
+    """
     rows = (
         ClientBookAccount.objects
         .filter(client=client)
         .select_related("parent")
         .order_by("code", "id")
     )
-    return [account_row(row) for row in rows]
+    if tenant is None:
+        return [account_row(row) for row in rows]
+    tax_system = services.resolve_setting(
+        tenant, services.TAX_SYSTEM_KEY, client=client,
+    ) or ""
+    overrides = (
+        book_rates.office_override_map(tenant, tax_system) if tax_system else {}
+    )
+    return [
+        account_row(
+            row, tenant=tenant, tax_system=tax_system, overrides=overrides,
+        )
+        for row in rows
+    ]
 
 
 def entries_payload(book, *, year=None, user) -> list[dict]:
@@ -682,7 +728,13 @@ def _account_for(client, raw):
     return ClientBookAccount.objects.filter(client=client, code=code).first()
 
 
-def _prepare_lines(client, lines) -> list[dict]:
+def _prepare_lines(client, lines, *, allow_rate_override=False) -> list[dict]:
+    """بنودُ الحركة: حسابٌ ومدينٌ أو دائن، **ونسبةُ ضريبةٍ على السطر بسببها**.
+
+    نسبةُ السطر (#287/٢) لا تُكتب صامتة: `allow_rate_override` يقرأ إعدادَ
+    `book_line_rate_override`، ومعه **سببٌ ملزم** — سطرٌ بنسبةٍ تخالف نسبة حسابه
+    بلا تفسيرٍ رقمٌ لا يدافع عن نفسه في مراجعة. والرفضُ 400 برسالةٍ تسمّي البند.
+    """
     if not lines:
         raise ValidationError({"lines": "الحركة تحتاج بنداً واحداً على الأقل."})
     prepared = []
@@ -705,15 +757,49 @@ def _prepare_lines(client, lines) -> list[dict]:
             raise ValidationError({
                 "lines": f"{where}: طرفٌ واحد لكل بند — مدينٌ أو دائن لا الاثنان.",
             })
+        vat_rate, reason = _line_rate(raw, where=where, allowed=allow_rate_override)
         prepared.append({
             "account": account,
             "debit": debit,
             "credit": credit,
             "tax_base": tax_base,
             "tax_amount": tax_amount,
+            "vat_rate": vat_rate,
+            "vat_rate_reason": reason,
             "side_party": (raw.get("side_party") or "").strip()[:200],
         })
     return prepared
+
+
+def _line_rate(raw, *, where, allowed) -> tuple[Decimal | None, str]:
+    """نسبةُ السطر إن أُرسلت — بإعدادٍ مفعّلٍ وسببٍ مكتوب، وإلا `(None, "")`."""
+    raw_rate = raw.get("vat_rate")
+    reason = (raw.get("rate_reason") or raw.get("vat_rate_reason") or "").strip()
+    if raw_rate in (None, ""):
+        if reason:
+            raise ValidationError({
+                "lines": f"{where}: سببُ النسبة بلا نسبة.",
+            })
+        return None, ""
+    if not allowed:
+        raise ValidationError({
+            "lines": (
+                f"{where}: تعديلُ نسبة ض.ق.م على سطر المستند غير مفعّل — "
+                "فعّل «السماح بتعديل نسبة ض.ق.م على سطر المستند» أو اكتب النسبة "
+                "على الحساب."
+            ),
+        })
+    if not reason:
+        raise ValidationError({
+            "lines": f"{where}: نسبةُ السطر تحتاج سبباً مكتوباً يُحفظ معها.",
+        })
+    try:
+        rate = Decimal(str(raw_rate))
+    except (ArithmeticError, TypeError, ValueError):
+        raise ValidationError({"lines": f"{where}: نسبةٌ غير رقميّة."}) from None
+    if not rate.is_finite() or rate < 0 or rate > 100:
+        raise ValidationError({"lines": f"{where}: النسبة بين 0 و100."})
+    return rate.quantize(book_rates.RATE_QUANTUM), reason[:300]
 
 
 def _assert_balanced(book, prepared, *, entry_date) -> None:
@@ -797,7 +883,18 @@ def create_entry(
         _assert_opening_unlocked(book)
         if reverses is None:
             _assert_no_live_opening(book)
-    prepared = _prepare_lines(book.client, lines)
+    assert_period_open(book, entry_date)
+    prepared = _prepare_lines(
+        book.client,
+        lines,
+        # **والعكسُ مستثنى**: بنودُه منسوخةٌ عن الأصل بنسبها وسببها، فإطفاءُ
+        # الإعداد بعد الحركة لا يجوز أن يمنع تصحيحَها — وإلا بقي القيدُ الفاسد
+        # بلا طريقٍ يُردّ.
+        allow_rate_override=bool(
+            reverses is not None
+            or services.resolve_setting(book.tenant, LINE_RATE_KEY, client=book.client)
+        ),
+    )
     # والعكسُ **غيرُ معفى**: يُقاس بنوع تاريخه كأيّ حركة. بتاريخ الأصل (الافتراض)
     # يُقاس بنوع عهد الأصل فيمرّ؛ ومؤرَّخاً في سنة المزدوج يُفحص بتوازنها، وإلا
     # كتب بنداً بطرفٍ واحد في سنةٍ مزدوجة فاختلّ ميزانُها.
@@ -826,6 +923,8 @@ def create_entry(
                 credit=line["credit"],
                 tax_base=line["tax_base"],
                 tax_amount=line["tax_amount"],
+                vat_rate=line["vat_rate"],
+                vat_rate_reason=line["vat_rate_reason"],
                 side_party=line["side_party"],
             )
             for line in prepared
@@ -877,6 +976,10 @@ def reverse_entry(entry, *, memo="", entry_date=None, actor=None, day=None):
                 "credit": line.debit,
                 "tax_base": line.tax_base,
                 "tax_amount": line.tax_amount,
+                # #287/٢: العكسُ يحمل نسبةَ الأصل وسببها — وإلا انقلب أثرُ الضريبة
+                # على نسبة حسابٍ قد تكون تغيّرت، فلم يتقاصّ الزوجان.
+                "vat_rate": line.vat_rate,
+                "vat_rate_reason": line.vat_rate_reason,
                 "side_party": line.side_party,
             }
             for line in entry.lines.select_related("account")
@@ -986,3 +1089,178 @@ def pending_entry_payload(tenant, user, *, day=None) -> dict:
         for row in grouped
     ]
     return {"rows": rows, "total": sum(row["count"] for row in rows)}
+
+
+# ── أقفالُ الفترات (#287/٥) ─────────────────────────────────────────────────
+#
+# **القفلُ عن الفترة لا عن المستند**: التزامُ ق.م وتزامُنُ التزامٍ آخر في الشهر
+# نفسه يُقفلان الفترةَ مرّةً واحدة (`UniqueConstraint` على الدفتر والفترة)، فسؤالُ
+# «هل هذا اليوم مقفل؟» استعلامٌ واحدٌ على مدى الفترة.
+#
+# **ولا يمنع القفلُ القراءةَ**: الحركةُ بتاريخٍ داخل الفترة المفتوحة تُرفض 400
+# برسالةٍ مسمّاة، والتقاريرُ والميزانياتُ تقرأ كلَّ شيء. والفتحُ لا يمحو الصفّ:
+# يكتب من فتح ومتى ولماذا، فيبقى أثرُ الاستثناء.
+def _closed_lock(book, entry_date):
+    """قفلٌ سارٍ يغطّي التاريخ — أو `None`.
+
+    الشرطُ `unlocked_on__isnull=True` في `WHERE`: صفٌّ مفتوحٌ لا يمنع شيئاً، ويبقى
+    للقراءة في سجلّ الفترات.
+    """
+    return (
+        BookPeriodLock.objects
+        .filter(
+            client_book=book,
+            unlocked_on__isnull=True,
+            period_start__lte=entry_date,
+            period_end__gte=entry_date,
+        )
+        .order_by("period_start")
+        .first()
+    )
+
+
+def assert_period_open(book, entry_date) -> None:
+    """إدخالٌ داخل فترةٍ مقفلة **400 برسالةٍ تسمّي الفترة وطريقَ الفتح**.
+
+    والرسالةُ تقول من يفتح بالسبب: `ENTRY_APPROVER_ROLES` وحدهم — كالقيد اليدويّ.
+    """
+    lock = _closed_lock(book, entry_date)
+    if lock is None:
+        return
+    raise ValidationError({
+        "entry_date": (
+            f"فترة الدفتر {lock.period_start.isoformat()} ← "
+            f"{lock.period_end.isoformat()} مقفلة — لا يُدخل فيها قيد. "
+            "يفتحها المديرُ أو صاحب المكتب بسببٍ مسجَّل."
+        ),
+    })
+
+
+def lock_period(book, *, period_start, period_end, actor=None, obligation=None,
+                day=None):
+    """قفلُ فترةٍ — **يُعاد الصفُّ القائم** إن كانت مقفلةً من قبل (لا تكرار).
+
+    `get_or_create` على (الدفتر، البداية، النهاية) لا على الالتزام: تقديمُ التزامين
+    في الشهر نفسه لا يُنشئ قفلين، والقفلُ الثاني كان يترك الفتحَ يُفتح مرّتين.
+    """
+    day = day or _today()
+    if period_start > period_end:
+        raise ValidationError({"period_start": "بدايةُ الفترة بعد نهايتها."})
+    lock, _created = BookPeriodLock.objects.get_or_create(
+        client_book=book,
+        period_start=period_start,
+        period_end=period_end,
+        defaults={
+            "tenant": book.tenant,
+            "locked_on": day,
+            "locked_by": actor if getattr(actor, "pk", None) else None,
+            "obligation": obligation,
+        },
+    )
+    return lock
+
+
+def close_period_on_submit(obligation, *, actor=None, day=None):
+    """«انقدّم» يقفل فترةَ الدفتر — **حين يكون الإعدادُ مفعّلاً وثمّة دفتر**.
+
+    وغيابُ الدفتر أو إطفاءُ الإعداد لا يُسقط التقديم: القفلُ أثرٌ جانبيّ للقرار لا
+    شرطٌ له، وإلا صار تقديمُ التزامٍ يُرفض لأن دفتراً غيرُ مسكوك.
+    """
+    from accounting_office import services as office_services
+
+    client = obligation.client
+    if not office_services.resolve_setting(
+        client.tenant, CLOSE_ON_SUBMIT_KEY, client=client,
+    ):
+        return None
+    book = ClientBook.objects.filter(client=client).first()
+    if book is None:
+        return None
+    return lock_period(
+        book,
+        period_start=obligation.period_start,
+        period_end=obligation.period_end,
+        actor=actor,
+        obligation=obligation,
+        day=day,
+    )
+
+
+def reopen_period(lock, *, reason, actor, day=None) -> BookPeriodLock:
+    """فتحُ فترةٍ مقفلة — **بدورِ المدير/صاحب المكتب وبسببٍ مكتوب**.
+
+    والفتحُ المتكرّر 400: صفٌّ مفتوحٌ لا معنى لفتحه، والثاني كان يكتب سبباً فوق
+    سببٍ محا أثرَ الأوّل.
+    """
+    if lock.unlocked_on is not None:
+        raise ValidationError({"period": "الفترةُ مفتوحةٌ بالفعل."})
+    reason = (reason or "").strip()
+    if not reason:
+        raise ValidationError({
+            "reason": "سببُ فتح الفترة مطلوب — يُسجَّل مع من فتحها.",
+        })
+    if actor is not None and user_tenant_role(actor, lock.tenant) not in ENTRY_APPROVER_ROLES:
+        raise PermissionDenied(
+            "لا يفتح فترةً مقفلةً إلا المديرُ وصاحبُ المكتب — بسببٍ مسجَّل.",
+        )
+    lock.unlocked_on = day or _today()
+    lock.unlocked_by = actor if getattr(actor, "pk", None) else None
+    lock.unlock_reason = reason[:300]
+    lock.save(update_fields=["unlocked_on", "unlocked_by", "unlock_reason"])
+    return lock
+
+
+def period_row(lock) -> dict:
+    return {
+        "id": lock.pk,
+        "period_start": lock.period_start.isoformat(),
+        "period_end": lock.period_end.isoformat(),
+        "locked_on": lock.locked_on.isoformat(),
+        "locked_by": (
+            services.user_display_name(lock.locked_by) if lock.locked_by_id else ""
+        ),
+        "unlocked_on": (
+            None if lock.unlocked_on is None else lock.unlocked_on.isoformat()
+        ),
+        "unlocked_by": (
+            services.user_display_name(lock.unlocked_by) if lock.unlocked_by_id else ""
+        ),
+        "unlock_reason": lock.unlock_reason,
+        "is_open": lock.is_open,
+        "obligation": lock.obligation_id,
+    }
+
+
+def periods_payload(book) -> list[dict]:
+    """أقفالُ الدفتر — الأحدثُ أوّلاً، والمفتوحُ يبقى في السجلّ بأثره."""
+    return [
+        period_row(lock)
+        for lock in book.period_locks.select_related(
+            "locked_by", "unlocked_by",
+        ).order_by("-period_end", "-id")
+    ]
+
+
+# ── نسبُ حساب الزبون (#287/٢ و٣) ────────────────────────────────────────────
+def set_account_rates(account, *, tenant, rate_category=None, vat_rate=None,
+                      income_tax_rate=None, depreciation_rate=None):
+    """كتابةُ تصنيفِ حسابٍ ونسبه — الحقولُ المُرسَلة وحدها (كـ`update_settings`).
+
+    والقيمةُ `None` تُفرّغ النسبةَ الصريحة فيعود الحسابُ إلى اللائحة/الافتراض.
+    """
+    fields = []
+    kwargs = {}
+    for name, value in (
+        ("rate_category", rate_category),
+        ("vat_rate", vat_rate),
+        ("income_tax_rate", income_tax_rate),
+        ("depreciation_rate", depreciation_rate),
+    ):
+        if value is not None:
+            fields.append(name)
+            kwargs[name] = value
+    if not fields:
+        return account
+    return book_rates.update_account_rates(
+        account, tenant=tenant, fields=fields, **kwargs,
+    )

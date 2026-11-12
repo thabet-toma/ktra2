@@ -115,6 +115,10 @@ class RegistryShapeTest(SettingTestCase):
                 "office_report_pdf_link",
                 # #289: عتبتا احمرار صفّ الموظف في لوحة صاحب المكتب.
                 "dashboard_late_share_percent", "dashboard_late_ratio",
+                # #287: «انقدّم» يقفل الفترة، وسماحُ نسبةٍ على سطر المستند،
+                # وحسابُ مبلغ الالتزام من الدفتر — ثلاثةٌ افتراضُها مطفأ.
+                "book_close_on_submit", "book_line_rate_override",
+                "obligation_amount_from_book",
                 # #283/ج: حجبُ التسليم حتى الدفع — مفتاحُ مكتبٍ مطفأٌ افتراضاً.
                 "delivery_hold_unpaid",
             },
@@ -521,6 +525,9 @@ class SettingsApiTest(SettingTestCase):
                 "office_report_pdf_link",
                 # #289: عتبتا احمرار صفّ الموظف في اللوحة.
                 "dashboard_late_share_percent", "dashboard_late_ratio",
+                # #287: قفلُ الفترة عند التقديم، ونسبةُ السطر، والمبلغُ من الدفتر.
+                "book_close_on_submit", "book_line_rate_override",
+                "obligation_amount_from_book",
                 # #283/ج: مفتاحُ حجب التسليم حتى الدفع.
                 "delivery_hold_unpaid",
             },
