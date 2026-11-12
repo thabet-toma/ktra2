@@ -4,16 +4,19 @@
 موضعٍ واحد يُقرأ ويُختبر، لا في نقطة API تُنسخ قاعدتُها عند أول استعمالٍ ثانٍ.
 
 **وهذه الوحدةُ لا تحسب أتعاباً**: مصدرُ المبالغ `FeeDraft` المعتمدة (أ١)، والقناعُ
-`fees.amounts_masked`. ما تضيفه هنا **المستند**: رقمٌ من عدّادٍ مقفول، وتاريخ،
+`fees.amounts_masked`. ما تضيفه هنا **المستند**: رقمٌ من دفتر ترقيمٍ مقفول، وتاريخ،
 وعنوانٌ لقطة، وضريبةٌ مؤرَّخة على الصفّ، وسلسلةٌ ثانيةٌ للإشعار الدائن.
 
 **أربعُ قواعدَ لا خامسة:**
 
-1. **الترقيمُ عدّادٌ لا `MAX+1`** (`_next_number`): `select_for_update` على
-   `FeeInvoiceSequence` داخل `transaction.atomic`، والفرادةُ `(tenant, number)`
-   طبقةٌ ثانية تُساند القفل. وسلسلتان: `أتعاب-{السنة}` للفاتورة والتكميلية،
-   و`إشعار-أتعاب-{السنة}` للإشعار الدائن — فإشعارٌ برقمٍ من سلسلة الفواتير يقرأ
-   فاتورةً ثانية في كشف الزبون.
+1. **الترقيمُ على دفتر الترقيم القائم** (`TenantBook.get_next_number`): القفلُ
+   `select_for_update` على صفّ الدفتر داخل `transaction.atomic`، والزيادةُ تُكتب
+   في المعاملة نفسها فلا فجوةَ ولا تكرار، والفرادةُ `(tenant, number)` طبقةٌ
+   ثانية تُساند القفل. **وشاشةُ الدفاتر تضبط بدايةَ السلسلة** — لا عدّادَ خاصّاً
+   بالموديول (`FeeInvoiceSequence` بقي أثراً تاريخياً لا يُقرأ: حذفُه هجرةٌ
+   حاذفة). ودفتران: `fee_invoice` للفاتورة والتكميلية ببادئة `أتعاب-{السنة}`،
+   و`fee_credit_note` للإشعار الدائن ببادئة `إشعار-أتعاب-{السنة}` — فإشعارٌ
+   برقمٍ من سلسلة الفواتير يقرأ فاتورةً ثانية في كشف الزبون.
 2. **لا حذفَ ولا تعديل**: `DELETE`/`PUT`/`PATCH` مُغلقةٌ في الـ`http_method_names`،
    والإلغاءُ `POST` يكتب `cancelled_at` **قبل الإرسال** فقط — و«أُرسلت» يقيسها
    `invoice_was_sent` (تذكيرٌ صادرٌ غيرُ مُبطَل، أو مشاهدةٌ على الرابط)، **لا
@@ -27,7 +30,14 @@
    الإلغاء — فالقيدُ لا يُحذف ولا يُعدَّل، والذمّةُ تعود كما كانت (#292).
 4. **«ليست فاتورة ضريبية» ثابتة**: `is_tax_invoice` خاصيّةٌ `False` في النموذج لا
    حقلاً، وسطرُ النفي يُصيَّر من `FEE_INVOICE_NOT_TAX_LINES` في كل ورقة — لا
-   إعدادَ يُطفئه ولا فرعَ قالبٍ يحذفه.
+   إعدادَ يُطفئه ولا فرعَ قالبٍ يحذفه. **وعنوانُ الورقة لا يدّعيها**: عبارتا
+   الرسمية الضريبية في `core.terminology` تُرفض عند الكتابة وتُقرأ افتراضيًّا
+   عند العرض (#282fix/٣).
+
+**والقناعُ يحجب الرابطَ لا المبلغَ وحده** (#282fix/١): ورقةُ `/s/` تُفتح بلا
+دخول وبكل مبالغها، فمن لا يملك `office.amounts.view` لا يُسلَّم رابطاً ولا
+تُنشأ له مشاركة، وبطاقاتُ المسودّات وتفصيلُ الفاتورة وقائمةُ المشاركات تُرجع
+فراغاً بدل توكن.
 
 **واللقطاتُ لا القراءةُ الحيّة:** `tax_system` و`tax_percent` و`title` تُخزَّن على
 الصفّ عند الإصدار، وكلُّ عرضٍ يقرأ منها — فتغييرُ نظام المكتب أو نسبته أو عنوانه
@@ -48,8 +58,9 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Sum
 from django.utils import timezone
 
-from accounting_office import deadlines, fees, office_journal, services
+from accounting_office import deadlines, fees, office_journal, services, settings_registry
 from accounting_office.models import (
+    EXTERNAL_NUMBER_MAX_LENGTH,
     FEE_INVOICE_CREDIT_TITLES,
     FEE_INVOICE_KIND_CREDIT_NOTE,
     FEE_INVOICE_KIND_INVOICE,
@@ -65,7 +76,6 @@ from accounting_office.models import (
     REMINDER_KIND_SENT,
     FeeDraft,
     FeeInvoice,
-    FeeInvoiceSequence,
     FeePaymentAllocation,
     FeeWriteOff,
     fee_invoice_credit_series,
@@ -74,6 +84,7 @@ from accounting_office.models import (
 )
 from core.access import user_has_perm
 from tenants.letterhead import company_card
+from tenants.models import TenantBook
 
 AMOUNT_QUANTUM = Decimal("0.01")
 
@@ -155,15 +166,41 @@ def invoice_title(tenant, tax_system: str, *, kind=FEE_INVOICE_KIND_INVOICE) -> 
     **وللإشعار الدائن عنوانُه**: «إشعار دائن أتعاب» / «הודעת זיכוי» — ورقةٌ تحمل
     عنوانَ الفاتورة على مبلغٍ دائنٍ تُقرأ مطالبةً. ولا يُبدَّل هذا بإعداد:
     الإعدادُ عنوانُ الفاتورة وحدها.
+
+    **وعنوانٌ يدّعي الرسميةَ الضريبية يُسقط إلى الافتراضيّ** (#282fix/٣): الحارسُ
+    يردّه عند الكتابة، وهذه تحرس قيمةً مخزَّنةً قديمةً — فورقةٌ تحمل ادّعاءَ
+    رسميةٍ ضريبية تُقرأ ورقةً رسميةً وهي ليست كذلك.
     """
     if kind == FEE_INVOICE_KIND_CREDIT_NOTE:
         return FEE_INVOICE_CREDIT_TITLES.get(
             tax_system, FEE_INVOICE_CREDIT_TITLES[TAX_SYSTEM_PS],
         )
-    configured = (services.resolve_setting(tenant, FEE_INVOICE_TITLE_KEY) or "").strip()
+    configured = settings_registry.readable_text(
+        FEE_INVOICE_TITLE_KEY, services.resolve_setting(tenant, FEE_INVOICE_TITLE_KEY),
+    )
     if configured:
         return configured
     return FEE_INVOICE_TITLES.get(tax_system, FEE_INVOICE_TITLES[TAX_SYSTEM_PS])
+
+
+def printed_title(invoice) -> str:
+    """عنوانُ الورقة كما يُعرض ويُطبع — **ولقطةٌ محرّمة تسقط إلى الافتراضيّ**.
+
+    `title` على الصفّ لقطةٌ لا تتغيّر، وهو المطلوب لورقةٍ خرجت. لكن صفّاً صدر قبل
+    حارس العنوان (#282fix/٣) قد يحمل ادّعاءَ الرسمية الضريبية نصّاً — وعرضُه كما
+    هو يعني ورقةً تطبعه. فالقراءةُ تمرّ بالقاعدة نفسها التي تحكم الإعداد
+    (`settings_registry.readable_text`)، والصفُّ لا يُعدَّل.
+    """
+    title = settings_registry.readable_text(FEE_INVOICE_TITLE_KEY, invoice.title)
+    if title:
+        return title
+    if invoice.kind == FEE_INVOICE_KIND_CREDIT_NOTE:
+        return FEE_INVOICE_CREDIT_TITLES.get(
+            invoice.tax_system, FEE_INVOICE_CREDIT_TITLES[TAX_SYSTEM_PS],
+        )
+    return FEE_INVOICE_TITLES.get(
+        invoice.tax_system, FEE_INVOICE_TITLES[TAX_SYSTEM_PS],
+    )
 
 
 def _tax_of(net, *, rate: Decimal) -> Decimal:
@@ -197,32 +234,40 @@ def _issued_at(day=None) -> datetime:
     return timezone.make_aware(datetime.combine(day, time(hour=12)))
 
 
-# ── الترقيم: عدّادٌ مقفول ─────────────────────────────────────────────────────
-def _lock_sequence(tenant, *, year, series):
-    """**القفلُ الواحد** للعدّاد — يقرؤه الإصدارُ المفرد والدفعة معاً.
+# ── الترقيم: دفترُ الترقيم القائم لا عدّاداً خاصاً بالموديول ───────────────────
+#: دفترُ الأتعاب في `TenantBook` — الدفتر 0 على مستوى الشركة كما في بقية أنواع
+#: المستندات: سلسلةٌ واحدةٌ لكل نوع، وبادئتُها تحمل السنة (`أتعاب-{السنة}`).
+FEE_BOOK_NUMBER = 0
+FEE_BOOK_INVOICE = "fee_invoice"
+FEE_BOOK_CREDIT_NOTE = "fee_credit_note"
 
-    نسخةٌ ثانية من `select_for_update().get_or_create` في المسارين كانت تفترق
-    عند أوّل تعديل (`update_fields` أو ترتيب القفل) فتُكرّر رقماً في أحدهما دون
-    الآخر. والقفلُ بلا معاملةٍ لا معنى له، فلا تُنادَ خارج `transaction.atomic()`.
-    """
-    sequence, _created = FeeInvoiceSequence.objects.select_for_update().get_or_create(
-        tenant=tenant,
-        year=year,
-        series=series,
+
+def _book_document_type(*, kind) -> str:
+    """دفترُ المستند: الإشعارُ الدائنُ على سلسلته، والفاتورةُ والتكميليةُ على الرئيسية."""
+    return (
+        FEE_BOOK_CREDIT_NOTE
+        if kind == FEE_INVOICE_KIND_CREDIT_NOTE
+        else FEE_BOOK_INVOICE
     )
-    return sequence
 
 
-def _next_number(tenant, *, year, series) -> str:
-    """**الرقمُ من العدّاد المقفول** — لا `MAX(number)+1` ولا `count()+1`.
+def _next_number(tenant, *, kind, year) -> str:
+    """**الرقمُ من دفتر الترقيم المقفول** — لا `MAX(number)+1` ولا عدّادَ موديول.
 
-    `select_for_update` على صفّ العدّاد يُسلسل الكُتّاب، والزيادةُ تُكتب في
-    المعاملة نفسها؛ فمن دخل بعد أوّله قرأ القيمةَ الجديدة لا القديمة.
+    `TenantBook.get_next_number` يقفل صفَّ الدفتر (`select_for_update`) داخل
+    معاملة، فالزيادةُ تُكتب في المعاملة نفسها: إصدارٌ يتعطّل (فترةٌ مقفلة، قيدٌ
+    غيرُ متوازن، حسابٌ معطَّل) يُرجع رقمَه معه فلا فجوةَ في السلسلة. والبادئةُ
+    `أتعاب-{السنة}` كما كانت — والسنةُ في **النصّ** لا في عدّادٍ منفصل.
     """
-    sequence = _lock_sequence(tenant, year=year, series=series)
-    sequence.last_number += 1
-    sequence.save(update_fields=["last_number"])
-    return fee_invoice_number(series, sequence.last_number)
+    series = (
+        fee_invoice_credit_series(year)
+        if kind == FEE_INVOICE_KIND_CREDIT_NOTE
+        else fee_invoice_series(year)
+    )
+    counter = TenantBook.get_next_number(
+        tenant.pk, _book_document_type(kind=kind), FEE_BOOK_NUMBER,
+    )
+    return fee_invoice_number(series, counter)
 
 
 # ── الإصدار: بعد الاعتماد، ومرّةً واحدة لكل مسودّةٍ حيّة ──────────────────────
@@ -265,7 +310,9 @@ def issue_for_draft(draft, *, actor=None, day=None) -> FeeInvoice:
             client=draft.client,
             source_draft=draft,
             kind=FEE_INVOICE_KIND_INVOICE,
-            number=_next_number(tenant, year=year, series=fee_invoice_series(year)),
+            number=_next_number(
+                tenant, kind=FEE_INVOICE_KIND_INVOICE, year=year,
+            ),
             title=invoice_title(tenant, tax_system),
             tax_system=tax_system,
             total=net + tax_total,
@@ -307,8 +354,9 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
     """يُصدر فواتيرَ مجموعةِ مسودّاتٍ **دفعةً واحدة** — مسارُ «اعتمد الكل».
 
     **قراءةُ المسودّات ثابتةٌ لا تكبر بعددها**: الحيّ منها استعلامٌ واحد،
-    والبنودُ تُقرأ بـ`prefetch_related` في الاعتماد لا هنا، وقفلُ العدّاد مرّةً
-    واحدة، و`bulk_create` واحد، وتحديثُ العدّاد مرّةً. وهذا ما يقيسه
+    والبنودُ تُقرأ بـ`prefetch_related` في الاعتماد لا هنا، و`bulk_create` واحد.
+    والأرقامُ من دفتر الترقيم صفّاً صفّاً (زيادةٌ وقفلٌ على صفّ الدفتر نفسه) —
+    وهذا ما يقيسه
     `test_fees.test_approve_all_does_not_read_the_lines_of_each_draft_separately`
     بـ**قراءات البنود** لا بمجموع الاستعلامات.
 
@@ -337,15 +385,13 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
         return []
     issued_at = _issued_at(day)
     year = _local_day(issued_at).year
-    series = fee_invoice_series(year)
     tax_system = office_tax_system(tenant)
     rate = archived_rate(tenant) if office_is_licensed(tenant) else Decimal("0")
     title = invoice_title(tenant, tax_system)
     issued_by = actor if getattr(actor, "pk", None) else None
     with transaction.atomic():
-        sequence = _lock_sequence(tenant, year=year, series=series)
         rows = []
-        for offset, draft in enumerate(pending, start=1):
+        for draft in pending:
             net = Decimal(draft.total)
             tax_total = _tax_of(net, rate=rate)
             rows.append(FeeInvoice(
@@ -353,7 +399,13 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
                 client=draft.client,
                 source_draft=draft,
                 kind=FEE_INVOICE_KIND_INVOICE,
-                number=fee_invoice_number(series, sequence.last_number + offset),
+                # رقمٌ لكل صفّ من دفتر الترقيم نفسه: أوّلُ نداءٍ ينشئ الدفتر ويقفله،
+                # وكلُّ نداءٍ بعده يقرأ الزيادةَ داخل المعاملة نفسها — فتخرج
+                # الأرقامُ متسلسلةً بلا فجوة. والتخصيصُ المسبق بالأرقام
+                # (`last_number + offset`) كان على عدّاد الموديول لا على الدفتر.
+                number=_next_number(
+                    tenant, kind=FEE_INVOICE_KIND_INVOICE, year=year,
+                ),
                 title=title,
                 tax_system=tax_system,
                 total=net + tax_total,
@@ -363,8 +415,6 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
                 issued_by=issued_by,
             ))
         FeeInvoice.objects.bulk_create(rows)
-        sequence.last_number += len(rows)
-        sequence.save(update_fields=["last_number"])
         # #284/ب: **قيدٌ لكل فاتورةٍ في المسار الجماعيّ أيضاً** — وإلا خرج زرُّ
         # «اعتمد الكل» بفواتيرَ بلا قيودها فتُدائن دفعاتٌ ذمّاً لم تُدَن. والمعرّفاتُ
         # تُثبَّت قبل النداء لأن MySQL لا تُعيدها من الإدراج الجماعيّ.
@@ -372,18 +422,6 @@ def issue_for_drafts(drafts, *, actor=None, day=None) -> list[FeeInvoice]:
         for invoice in rows:
             office_journal.post_invoice_journal(invoice, actor=actor)
     return rows
-
-
-def ensure_sequence(tenant, *, year) -> FeeInvoiceSequence:
-    """يُهيِّئ عدّادَ السنة إن لم يكن — بلا زيادةٍ وبلا فاتورة.
-
-    يُندى من توليد المسودّات: أوّلُ اعتمادٍ في السنة يجد صفَّ العدّاد قائماً فلا
-    يدفع كلفةَ إنشاءٍ مفاجئة، والرقمُ يبدأ من `00001` بلا فجوة.
-    """
-    sequence, _created = FeeInvoiceSequence.objects.get_or_create(
-        tenant=tenant, year=int(year), series=fee_invoice_series(year),
-    )
-    return sequence
 
 
 # ── الإلغاء: قبل الإرسال وحده، ويعيد المسودّةَ مسودّةً ────────────────────────
@@ -681,11 +719,6 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
         tax_total = amount - _net_of(amount, rate=rate)
         issued_at = _issued_at(day)
         year = _local_day(issued_at).year
-        series = (
-            fee_invoice_credit_series(year)
-            if kind == FEE_INVOICE_KIND_CREDIT_NOTE
-            else fee_invoice_series(year)
-        )
         note = FeeInvoice.objects.create(
             tenant=invoice.tenant,
             client=invoice.client,
@@ -694,7 +727,7 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
             source_draft=None,
             kind=kind,
             related_invoice=invoice,
-            number=_next_number(invoice.tenant, year=year, series=series),
+            number=_next_number(invoice.tenant, kind=kind, year=year),
             title=invoice_title(invoice.tenant, invoice.tax_system, kind=kind),
             tax_system=invoice.tax_system,
             total=amount,
@@ -713,7 +746,13 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
         if kind == FEE_INVOICE_KIND_CREDIT_NOTE:
             office_journal.post_credit_note_journal(note, actor=actor)
         else:
-            office_journal.post_invoice_journal(note, actor=actor)
+            # #282fix/٢: **الضريبةُ لقطةُ الأصل لا مفتاحُ اليوم** — نسبةُ
+            # التكميلية وضريبتُها من `tax_percent`/`tax_total` على الأصل، فإطفاءُ
+            # «مشتغل مرخّص» بعد الإصدار لا يُسقِط سطرَ الضريبة فيخرج القيدُ غيرَ
+            # متوازنٍ ويُرفَض المستندُ كلُّه.
+            office_journal.post_invoice_journal(
+                note, actor=actor, enforce_licence=False,
+            )
         return note
 
 
@@ -746,6 +785,32 @@ def issue_supplementary(invoice, *, actor, amount, reason="", day=None) -> FeeIn
 def credit_note_remaining(invoice) -> Decimal:
     """ما بقي قابلاً للإشعار الدائن — للعرض في الشاشة (قراءةٌ بلا قفل)."""
     return max(invoice.total - _issued_credit_total(invoice), Decimal("0"))
+
+
+#: حدُّ «رقم الفاتورة الرسمية الخارجية» — من عمود النموذج (`EXTERNAL_NUMBER_MAX_LENGTH`)
+#: ويقرؤه المُسلسِلُ من الموضع نفسه، فلا رقمان يفترقان.
+def set_external_number(invoice, *, number) -> FeeInvoice:
+    """يقيّد رقمَ الفاتورة الرسمية الخارجية على ورقتها (#282fix/٥).
+
+    **حقلٌ واحدٌ يُكتب ولا تُمسّ ورقة**: الفاتورةُ لا تُعدَّل ولا تُمحى، والرقمُ
+    مرجعٌ يُضاف بعد الإصدار لأن المكتبَ يُصدر ورقتَه الرسمية في نظامٍ آخر. والفارغُ
+    يمحو رقماً أُدخل خطأً — الحقلُ اختياريّ على الصفّ أصلاً.
+
+    والحدُّ يُفحص هنا أيضاً لا في المُسلسِل وحده: نداءٌ برمجيّ يمرّ من الخدمة
+    (كحدود `payments` المعروضة)، فحدُّ العمود يبقى محروساً في الطرفين.
+    """
+    number = (number or "").strip()
+    if len(number) > EXTERNAL_NUMBER_MAX_LENGTH:
+        raise ValidationError({
+            "external_number": (
+                f"الرقم الخارجي أطول من {EXTERNAL_NUMBER_MAX_LENGTH} حرفاً."
+            ),
+        })
+    with transaction.atomic():
+        invoice = _locked(invoice)
+        invoice.external_number = number
+        invoice.save(update_fields=["external_number"])
+    return invoice
 
 
 # ── القراءة: الرؤيةُ والقناع ───────────────────────────────────────────────────
@@ -814,7 +879,7 @@ def invoice_row(invoice, *, masked) -> dict:
         "number": invoice.number,
         "kind": invoice.kind,
         "kind_label": FEE_INVOICE_KIND_LABELS.get(invoice.kind, ""),
-        "title": invoice.title,
+        "title": printed_title(invoice),
         "client": _client_payload(invoice.client),
         "source_draft": invoice.source_draft_id,
         "related_invoice": invoice.related_invoice_id,
@@ -838,14 +903,18 @@ def invoice_row(invoice, *, masked) -> dict:
 
 
 def invoice_detail(invoice, *, masked) -> dict:
-    """تفصيلُ فاتورة: صفُّها وبحورُها ورابطُها الحيّ إن وُجد."""
+    """تفصيلُ فاتورة: صفُّها وبحورُها ورابطُها الحيّ إن وُجد.
+
+    **والرابطُ يسقط مع القناع** (#282fix/١): ورقةُ `/s/` تُفتح بلا دخول وبكل
+    مبالغها، فرابطٌ يُسلَّم لعضوٍ لا يملك «يرى المبالغ» يقرأ ما مُنع عنه.
+    """
     data = invoice_row(invoice, masked=masked)
     lines = _lines_payload(invoice)
     data["lines"] = (
         [_masked_line(line) for line in lines] if masked else lines
     )
     data["net_total"] = None if masked else invoice.net_total
-    data["url"] = live_invoice_url(invoice) or ""
+    data["url"] = "" if masked else (live_invoice_url(invoice) or "")
     data["credit_note_remaining"] = (
         None if masked else credit_note_remaining(invoice)
     )
@@ -931,10 +1000,16 @@ def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
     الورقة التي بيد الزبون. والتكرارُ آمن — الحيّ نفسه يُعاد (`dedupe`).
     ولا يُعدّ إنشاءُ الرابط إرسالاً: `invoice_was_sent` يقيس التذكيرَ الصادرَ
     أو المشاهدة، لا وجودَ الصفّ.
+
+    **ومن لا يرى المبالغ لا رابطَ له ولا مشاركة** (#282fix/١): الورقةُ تُعرض على
+    `/s/` بلا دخول وبالصافي والضريبة والإجمالي، فمشاركةٌ تُنشأ لعضوٍ مقنَّعٍ
+    تُسلّمه ما مُنع عنه في الحمولات.
     """
     from docshare import services as docshare_services
     from docshare.models import DOC_FEE_INVOICE
 
+    if fees.amounts_masked(tenant, user):
+        return {}
     wanted = {invoice_id for invoice_id in invoice_ids if invoice_id is not None}
     if not wanted:
         return {}
@@ -952,12 +1027,17 @@ def invoice_urls(tenant, invoice_ids, *, user=None) -> dict[int, str]:
 
 
 # ── بطاقةُ الورقة على صفّ المسودّة (شاشةُ «المسودّات») ───────────────────────
-def draft_invoice_cards(tenant, drafts) -> dict[int, dict]:
+def draft_invoice_cards(tenant, drafts, *, masked) -> dict[int, dict]:
     """بطاقةُ الورقة **الحيّة** لكل مسودّة: رقمُها وتاريخُها ورابطُها — استعلامان.
 
     شاشةُ «المسودّات» تقرأ `fees/drafts/` وحدها، فالبطاقةُ هنا تمنعها من جلب
     قائمة الفواتير كلَّها لتصل إلى ثلاثة حقول. والقراءةُ **بلا إنشاء رابط**:
     شاشةُ قائمةٍ لا تُنشئ روابطَ مشاركةٍ لكل صفٍّ مرّت عليه.
+
+    **و`masked` تُسقط الرابطَ لا البطاقة** (#282fix/١): رقمُ الورقة وتاريخُها بلا
+    مبالغ، والرابطُ يفتح ورقةً كاملةَ المبالغ — فمن لا يرى المبالغ يقرأ بطاقةً
+    بلا رابط (ولا تُقرأ روابطه أصلاً). **ولا افتراضَ لها**: قرارُ القناع يُمرَّر
+    صريحاً (كما في `invoice_detail`)، فلا يُفتح بابٌ يُنسى فيه.
     """
     draft_ids = [draft.pk for draft in drafts if getattr(draft, "pk", None)]
     if not draft_ids:
@@ -972,7 +1052,9 @@ def draft_invoice_cards(tenant, drafts) -> dict[int, dict]:
         .only("id", "source_draft_id", "number", "issued_at")
         .order_by("id"),
     )
-    urls = live_invoice_urls(tenant, [invoice.pk for invoice in live])
+    urls = {} if masked else live_invoice_urls(
+        tenant, [invoice.pk for invoice in live],
+    )
     return {
         invoice.source_draft_id: {
             "id": invoice.pk,
@@ -984,9 +1066,9 @@ def draft_invoice_cards(tenant, drafts) -> dict[int, dict]:
     }
 
 
-def draft_invoice_card(tenant, draft) -> dict | None:
+def draft_invoice_card(tenant, draft, *, masked) -> dict | None:
     """بطاقةُ ورقةِ مسودّةٍ واحدة — للصفّ المفرد (ردُّ الاعتماد مثلاً)."""
-    return draft_invoice_cards(tenant, [draft]).get(draft.pk)
+    return draft_invoice_cards(tenant, [draft], masked=masked).get(draft.pk)
 
 
 # ── الورقة: حقولُها بترتيبها ──────────────────────────────────────────────────
@@ -1226,7 +1308,7 @@ def sheet_context(invoice) -> dict:
         if tax_system == TAX_SYSTEM_PS else [""]
     )
     return {
-        "title": invoice.title,
+        "title": printed_title(invoice),
         "tax_system": tax_system,
         "not_tax_line": not_tax_line(tax_system),
         "labels": labels,
@@ -1241,7 +1323,7 @@ def sheet_context(invoice) -> dict:
             if invoice.kind == FEE_INVOICE_KIND_CREDIT_NOTE
             else labels["kind_supplementary"]
             if invoice.kind == FEE_INVOICE_KIND_SUPPLEMENTARY
-            else invoice.title
+            else printed_title(invoice)
         ),
         "related_number": (
             None if invoice.related_invoice_id is None
@@ -1297,7 +1379,7 @@ def share_payload(invoice) -> dict:
     totals.append(total_row(labels["gross"], invoice.total, strong=True))
     return payload(
         kind="fee_invoice",
-        title=invoice.title,
+        title=printed_title(invoice),
         number=invoice.number,
         date=_local_day(invoice.issued_at),
         status_label=(
@@ -1435,9 +1517,10 @@ def invoice_reminder_candidates(
 def attach_invoice_links(tenant, candidates, *, user=None):
     """يُركّب رابطَ الورقة على بنود الفواتير — **بعد الحواجز كلّها**.
 
-    والرابطُ لمن يملك مشاركةَ النوع وحده (`office.clients.write`): يُنشَأ في مسار
-    قراءة، فلا يجوز أن يمنح عضوَ قراءةٍ صفَّ مشاركةٍ حيّاً. ومن لا يملكها يقرأ
-    الفاتورةَ بلا رابط (والنصُّ يمضي بالمبلغ والاستحقاق).
+    والرابطُ لمن يملك مشاركةَ النوع **والمبالغَ معاً**: يُنشَأ في مسار قراءة، فلا
+    يجوز أن يمنح عضوَ قراءةٍ صفَّ مشاركةٍ حيّاً؛ ومن لا يرى المبالغ لا رابطَ له
+    ولو ملك مفتاح الكتابة (#282fix/١) — ورقةُ `/s/` تُعرض بكل مبالغها. والحكمُ في
+    `invoice_urls` وحدها (فلا نسختان تفترقان)، وهذه تعود بلا رابطٍ إن لم يصلها.
     """
     from dataclasses import replace
 

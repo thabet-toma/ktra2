@@ -326,6 +326,13 @@ class TenantBook(models.Model):
         # S1: ترقيم الجرد (JRD-nnnn) على الدفتر 0 وحده، يزرعه `inventory.services._next_stocktake_number`
         # كسولاً عند أوّل ترحيل؛ والدفاتر 1..10 التي يزرعها إنشاء الشركة لكل نوعٍ لا يستعملها الترقيم.
         ('stocktake', 'جرد المخزون'),
+        # #282fix/٤: مستندا الأتعاب الورقيان (`accounting_office.fee_invoices`) على
+        # دفاتر الترقيم القائمة لا على عدّادٍ خاصّ بالموديول — فبدايةُ السلسلة
+        # تُضبط من شاشة الدفاتر، والزيادةُ عبر `TenantBook.get_next_number`.
+        # والسلسلتان منفصلتان قصْداً: إشعارٌ دائنٌ برقمٍ من سلسلة الفواتير يُقرأ
+        # فاتورةً ثانيةً في كشف الزبون.
+        ('fee_invoice', 'فاتورة أتعاب'),
+        ('fee_credit_note', 'إشعار دائن أتعاب'),
     ]
 
     tenant = models.ForeignKey(Tenant, on_delete=models.CASCADE, db_column='TenantID')

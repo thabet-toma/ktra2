@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1099**
+عدد النقاط: **1100**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -138,6 +138,7 @@
 | `/api/accounting-office/fees/invoices/{pk}/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/invoices/{pk}/cancel/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/invoices/{pk}/credit-note/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/invoices/{pk}/external-number/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/invoices/{pk}/supplementary/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/ledger/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/ledger/print/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |

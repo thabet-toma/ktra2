@@ -412,11 +412,6 @@ def generate_fee_drafts(tenant, *, day) -> dict:
                     transaction.set_rollback(True)
                     continue
         created += 1
-    if created:
-        # عدّادُ ترقيم السنة يُهيَّأ **مع أوّل توليدٍ** لا مع أوّل اعتماد: رقمُ
-        # الفاتورة يبقى من `00001` بلا فجوة، وأوّلُ اعتمادٍ لا يدفع كلفةَ إنشاء
-        # صفٍّ في مسارٍ آخر (وكلفةُ التوليد تبقى ثابتةً كما يقيسها اختبارها).
-        _fee_invoices_module().ensure_sequence(tenant, year=month_start.year)
     return {
         "created_drafts": created,
         "created_alerts": _raise_pending_alerts(tenant, day=day),
@@ -606,10 +601,11 @@ def approve_all_fee_drafts(tenant, *, actor, note="") -> list:
         # **والصفوفُ كلُّها تُصدِر فاتورتَها هنا أيضاً — في المعاملة نفسها**:
         # «اعتمد الكل» يختم بالقاعدة دفعةً واحدة، فلو لم يُمرّر كلَّ مسودّةٍ على
         # الإصدار لبقيت مسودّاتٌ معتمدةٌ بلا مستندِ مطالبة — وهو نصفُ العمل.
-        # والنداءُ **دفعةً** لا واحدةً واحدة: أرقامُ الفواتير وقفلُ العدّاد مرّةً
-        # واحدة، وبنودُ المسودّات تُقرأ بـ`prefetch_related` في الأعلى — وأمّا
-        # **قيودُ الدفاتر فنداءٌ لكل فاتورة** (#284/ب) لأن لكل مستندٍ قيدَه،
-        # وفشلُ أحدِها يُسقط الاعتمادَ معه.
+        # والنداءُ **دفعةً** لا واحدةً واحدة: `bulk_create` واحد لصفوف الفواتير،
+        # وبنودُ المسودّات تُقرأ بـ`prefetch_related` في الأعلى — وأمّا **الأرقامُ
+        # فمن دفتر الترقيم** (قفلٌ وزيادةٌ لكل صفّ داخل المعاملة، وقد لُفَّت مرّةً
+        # بسطر الدفتر نفسه)، و**قيودُ الدفاتر فنداءٌ لكل فاتورة** (#284/ب) لأن لكل
+        # مستندٍ قيدَه، وفشلُ أحدِها يُسقط الاعتمادَ معه.
         _fee_invoices_module().issue_for_drafts(drafts, actor=actor)
     return drafts
 
@@ -733,16 +729,19 @@ def subscription_row(row, *, masked) -> dict:
     return services.mask_amounts(data) if masked else data
 
 
-def _draft_invoice(invoices, draft):
+def _draft_invoice(invoices, draft, *, masked):
     """بطاقةُ ورقة المسودّة الصادرة — من الخريطة المجمَّعة أو باستعلام الصفّ وحده.
 
     `invoices` يُمرَّر من قائمةٍ جمعتها `drafts_payload` باستعلامين ثابتين، فكلفةُ
     القائمة لا تكبر بعدد صفوفها. والصفُّ المفرد (ردُّ الاعتماد/الإلغاء) يقرأ
-    بطاقته وحدها.
+    بطاقته وحدها. و`masked` تُسقط رابطَ الورقة لمن لا يرى المبالغ (#282fix/١) —
+    فالبطاقةُ تُبنى بالقناع نفسِه في المسارين.
     """
     if invoices is not None:
         return invoices.get(draft.pk)
-    return _fee_invoices_module().draft_invoice_card(draft.tenant, draft)
+    return _fee_invoices_module().draft_invoice_card(
+        draft.tenant, draft, masked=masked,
+    )
 
 
 def draft_row(draft, *, masked, summaries=None, invoices=None) -> dict:
@@ -757,7 +756,8 @@ def draft_row(draft, *, masked, summaries=None, invoices=None) -> dict:
     باستعلامٍ واحد — لا استعلامان لكل سطر.
 
     **و`invoice` (#282/أ٢/٢) بطاقةُ ورقتها الصادرة**: رقمُها وتاريخُها ورابطُها
-    إن صدرت، و`None` إن لم تصدر أو أُلغيت. وهي **بلا مبالغ** فلا يطالها القناع.
+    إن صدرت، و`None` إن لم تصدر أو أُلغيت. وهي **بلا مبالغ** — و`masked` تُسقط
+    رابطَها *(#282fix/١)* لأن الورقةَ خلفه تُعرض بكل مبالغها.
     """
     payments = _payments_module()
     summary = (summaries or {}).get(draft.pk) or payments.invoice_summary(draft)
@@ -795,7 +795,7 @@ def draft_row(draft, *, masked, summaries=None, invoices=None) -> dict:
         ),
         "approved_at": None if draft.approved_at is None else draft.approved_at.isoformat(),
         "approved_note": draft.approved_note,
-        "invoice": _draft_invoice(invoices, draft),
+        "invoice": _draft_invoice(invoices, draft, masked=masked),
         "lines": lines,
     }
     if not masked:
@@ -860,7 +860,9 @@ def drafts_payload(tenant, *, user) -> list[dict]:
     masked = amounts_masked(tenant, user)
     drafts = list(visible_drafts(tenant, user))
     summaries = _payments_module().invoice_summaries(drafts)
-    invoices = _fee_invoices_module().draft_invoice_cards(tenant, drafts)
+    invoices = _fee_invoices_module().draft_invoice_cards(
+        tenant, drafts, masked=masked,
+    )
     return [
         draft_row(draft, masked=masked, summaries=summaries, invoices=invoices)
         for draft in drafts

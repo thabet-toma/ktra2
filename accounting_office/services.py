@@ -801,12 +801,27 @@ def office_settings_payload(tenant, *, user) -> dict:
 
 
 def office_setting_row(tenant, key, *, counts=None, user) -> dict:
-    """سطرُ إعدادٍ واحدٍ على مستوى المكتب — يستعمله العرض وردُّ الضبط والمسح."""
+    """سطرُ إعدادٍ واحدٍ على مستوى المكتب — يستعمله العرض وردُّ الضبط والمسح.
+
+    **والقيمةُ المخزَّنة تُقرأ بقاعدة قراءتها** (#282fix/٣): نصٌّ يحمل عبارةً
+    ممنوعة لا يُعرض على الشاشة كأنه مقبول، بل يُقرأ فراغاً (أي «الافتراضيّ») —
+    وهو ما تُصدره الورقةُ فعلاً (`fee_invoices.invoice_title`). والصفُّ يبقى في
+    القاعدة حتى يُمحى أو يُستبدل.
+    """
     definition = settings_registry.get_definition(key)
     stored = OfficeSettingValue.objects.filter(tenant=tenant, key=key).first()
     has_office_value = stored is not None
+    stored_value = None
+    if has_office_value:
+        # النصوصُ وحدها تمرّ بقاعدة القراءة؛ الأنواعُ الأخرى (بوليان/عدد/قائمة)
+        # تُقرأ كما هي — `readable_text` قاعدةُ `KIND_TEXT` لا قاعدةَ كلّ إعداد.
+        stored_value = (
+            settings_registry.readable_text(key, stored.value)
+            if isinstance(stored.value, str)
+            else copy.deepcopy(stored.value)
+        )
     value = (
-        copy.deepcopy(stored.value) if has_office_value
+        stored_value if has_office_value
         else (None if definition.has_no_default else copy.deepcopy(definition.default))
     )
     default = None if definition.has_no_default else copy.deepcopy(definition.default)
@@ -815,7 +830,7 @@ def office_setting_row(tenant, key, *, counts=None, user) -> dict:
         **_setting_row(definition),
         "value": value,
         "value_label": setting_value_label(definition, value),
-        "office_value": copy.deepcopy(stored.value) if has_office_value else None,
+        "office_value": stored_value,
         "has_office_value": has_office_value,
         "differs_from_default": has_office_value and value != default,
         # «ارجع للافتراضي» لمن له افتراضيٌّ فعلاً — وإلا كان الزرُّ يُعيد المكتب

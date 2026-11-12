@@ -21,6 +21,8 @@ from typing import Any
 
 from django.core.exceptions import ValidationError
 
+from core.terminology import FEE_INVOICE_FORBIDDEN_TITLE_TERMS
+
 KIND_CHOICE = "choice"
 KIND_BOOL = "bool"
 KIND_INTEGER = "integer"
@@ -270,6 +272,10 @@ class SettingDefinition:
     #: الكتابة القائم (`services._assert_locked_setting`) فيردّ 400 برسالته.
     #: نسخةٌ في الواجهة كانت تفترق عن السجلّ عند أوّل إعدادٍ يُقفَل أو يُفتَح.
     locked: bool = False
+    #: #282fix/٣: عباراتٌ ممنوعةٌ في النصّ الحرّ — تُفحص **بالاحتواء** لا بالمطابقة
+    #: (عنوانٌ يحملها في أيّ موضعٍ يظلّ ادّعاءَ رسميةٍ ضريبية). تُقرَّأ مرّةً هنا
+    #: فيُفرَض الرفضُ على الكتابة، ويُسقطها القارئُ من قيمةٍ مخزَّنةٍ قديمة.
+    forbidden_terms: tuple[str, ...] = ()
 
     def label_for(self, level: str = LEVEL_OFFICE) -> str:
         if level == LEVEL_CLIENT and self.client_label:
@@ -296,6 +302,30 @@ class SettingDefinition:
             {"value": value, "label": self.labels.get(value, value)}
             for value in self.choices
         ]
+
+
+def contains_forbidden_terms(value, terms: tuple[str, ...] = ()) -> bool:
+    """هل يحمل النصُّ عبارةً ممنوعة؟ — **قاعدةٌ واحدةٌ للكتابة والقراءة**.
+
+    الاحتواءُ لا المطابقة: «فاتورة ضريبية 2026» ادّعاءُ رسميةٍ كاملٌ كالفظين
+    وحدَهما، فالحارسُ يفحص أين وقعت العبارةُ في القيمة.
+    """
+    text = value if isinstance(value, str) else ""
+    return any(term in text for term in terms)
+
+
+def readable_text(key: str, value) -> str:
+    """قيمةُ إعدادٍ نصّيّ كما تُقرأ: مُطبَّعةً، والفراغُ لما يحمل عبارةً ممنوعة.
+
+    حارسُ الكتابة يمنع الجديد، وهذه تحرس القديم: قيمةٌ كُتبت قبل الحارس — أو
+    دُسَّت من خارج مسار الإعدادات — لا تُطبع على ورقة، بل يسقط القارئُ إلى
+    الافتراضيّ. والفراغُ لغةُ السجلّ نفسُه: «فارغٌ = الافتراضيّ».
+    """
+    definition = get_definition(key)
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    return "" if contains_forbidden_terms(text, definition.forbidden_terms) else text
 
 
 def _canonical_weekdays(value) -> list[str]:
@@ -404,6 +434,16 @@ def validate_value(definition: SettingDefinition, value):
                 "value": (
                     f"«{definition.label}» أطول من "
                     f"{definition.max_length} حرفاً."
+                ),
+            })
+        if contains_forbidden_terms(text, definition.forbidden_terms):
+            raise ValidationError({
+                "value": (
+                    f"«{definition.label}» لا يقبل العبارة "
+                    + "، ".join(
+                        term for term in definition.forbidden_terms if term in text
+                    )
+                    + "."
                 ),
             })
         return text
@@ -959,9 +999,16 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         default="",
         max_length=60,
         group=GROUP_OFFICE,
+        #: #282fix/٣: الملاحظةُ كانت تعِد بالنفي ولا شيء يفرضه. العبارتان تُرفضان
+        #: عند الكتابة (400) وتُسقَطان عند القراءة، ومصدرُهما المعجم لا نصٌّ هنا.
+        forbidden_terms=FEE_INVOICE_FORBIDDEN_TITLE_TERMS,
         note=(
+            #: «فاتورة الأتعاب» بتعريفٍ لا بلفظ الافتراضيّ حرفياً: اللفظُ المحروق
+            #: في `core/tests/test_terminology_guard.py` يُمنع نصّاً في كود الإنتاج
+            #: (مصدرُه `core.terminology`)، والقيمةُ الفعليةُ في `FEE_INVOICE_TITLES`.
             "فارغٌ = الافتراضيّ بحسب نظام المكتب («فاتورة الأتعاب» / «חשבון עסקה»). "
-            "وليس فيه «فاتورة ضريبية» ولا «חשבונית מס» — سطرُ النفي ثابتٌ في الورقة."
+            "وما يحمل «فاتورة ضريبية» أو «חשבונית מס» يُرفض عند الحفظ ويُقرأ "
+            "افتراضيًّا — سطرُ النفي ثابتٌ في الورقة."
         ),
     ),
     # ── القيدُ التلقائيُّ في دفاتر المكتب (#284) ──

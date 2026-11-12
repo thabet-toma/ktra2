@@ -29,14 +29,13 @@ from accounting_office import fee_invoices, fees, office_journal, payments, serv
 from accounting_office.models import (
     FeeDraft,
     FeeInvoice,
-    FeeInvoiceSequence,
     FeePayment,
     OfficeClient,
     TaxCard,
 )
 from core.modules import invalidate_module_cache
 from partners.models import Partner
-from tenants.models import Currency
+from tenants.models import Currency, TenantBook
 from tenants.services import create_company
 
 BASE = "/api/accounting-office/"
@@ -424,6 +423,79 @@ class CreditNoteJournalTest(InvoiceJournalTestCase):
         self.assertEqual(decimal_of(lines[self.receivable.pk].credit), Decimal("200.00"))
 
 
+class CorrectionAfterLicenceOffTest(InvoiceJournalTestCase):
+    """الضريبةُ لقطةُ المستند لا قراءةُ مفتاحٍ حيّ (#282fix/٢).
+
+    ورقةٌ صدرت وسطرُ ضريبتها مُثبتٌ عليها، ثم أُطفئ «المكتب مشتغل مرخّص»: نسبةُ
+    التصحيح من لقطة الأصل، وسطرُ ضريبته يعكس ما أثبته الأصل — وإلا خرج القيدُ
+    غيرَ متوازن (مدينُ الإيراد وحدَه في مقابل دائن الذمّة بالإجمالي) وردّه
+    `post_journal` فسقط الإشعارُ والتكميليةُ معه.
+    """
+
+    def tax_off(self):
+        services.set_office_setting(self.tenant, "office_licensed_dealer", False)
+
+    def test_the_credit_note_keeps_the_tax_line_of_its_original(self):
+        client = self.make_client("زبون إشعارٍ بعد الإطفاء")
+        draft = self.make_draft(client)
+        self.approve(draft)
+        invoice = self.live_invoice_of(draft)
+        self.assertEqual(decimal_of(invoice.tax_total), TAX)
+        self.tax_off()
+
+        note = fee_invoices.issue_credit_note(
+            invoice, actor=self.owner, amount="580.00", reason="خصم اتفاق",
+        )
+
+        journal = self.journal_of(
+            reference_type="office_fee_credit_note", reference_id=note.pk,
+        )
+        lines = self.lines_of(journal)
+        self.assertEqual(len(lines), 3, "سطرُ الضريبة سقط بعد إطفاء الترخيص")
+        self.assertEqual(decimal_of(lines[self.revenue.pk].debit), Decimal("500.00"))
+        self.assertEqual(decimal_of(lines[self.tax_output.pk].debit), Decimal("80.00"))
+        self.assertEqual(decimal_of(lines[self.receivable.pk].credit), Decimal("580.00"))
+        totals = journal.lines.aggregate(debit=Sum("debit"), credit=Sum("credit"))
+        self.assertEqual(totals["debit"], totals["credit"], "إشعارٌ غيرُ متوازن")
+
+    def test_the_supplementary_keeps_the_tax_line_of_its_original(self):
+        client = self.make_client("زبون تكميليةٍ بعد الإطفاء")
+        draft = self.make_draft(client)
+        self.approve(draft)
+        invoice = self.live_invoice_of(draft)
+        self.tax_off()
+
+        extra = fee_invoices.issue_supplementary(
+            invoice, actor=self.owner, amount="116.00", reason="خدمةٌ نُسيت",
+        )
+
+        journal = self.journal_of(
+            reference_type="office_fee_invoice", reference_id=extra.pk,
+        )
+        lines = self.lines_of(journal)
+        self.assertEqual(len(lines), 3, "سطرُ الضريبة سقط بعد إطفاء الترخيص")
+        self.assertEqual(decimal_of(lines[self.receivable.pk].debit), Decimal("116.00"))
+        self.assertEqual(decimal_of(lines[self.revenue.pk].credit), Decimal("100.00"))
+        self.assertEqual(decimal_of(lines[self.tax_output.pk].credit), Decimal("16.00"))
+        totals = journal.lines.aggregate(debit=Sum("debit"), credit=Sum("credit"))
+        self.assertEqual(totals["debit"], totals["credit"], "تكميليةٌ غيرُ متوازنة")
+
+    def test_the_new_issue_still_carries_no_tax_when_the_licence_is_off(self):
+        """**الإصدارُ كما هو**: غيرُ المرخّص لا ضريبةَ على فاتورته الجديدة."""
+        self.tax_off()
+        client = self.make_client("زبون مكتبٍ غير مرخّص")
+        draft = self.make_draft(client)
+
+        self.approve(draft)
+
+        invoice = self.live_invoice_of(draft)
+        self.assertEqual(decimal_of(invoice.tax_total), Decimal("0.00"))
+        lines = self.lines_of(self.journal_of(
+            reference_type="office_fee_invoice", reference_id=invoice.pk,
+        ))
+        self.assertEqual(len(lines), 2)
+
+
 class ClosedPeriodRollbackTest(InvoiceJournalTestCase):
     def test_a_closed_period_is_a_400_that_leaves_no_invoice_and_no_burnt_number(self):
         client = self.make_client()
@@ -444,12 +516,37 @@ class ClosedPeriodRollbackTest(InvoiceJournalTestCase):
         self.assertFalse(FeeInvoice.objects.filter(tenant=self.tenant).exists())
         draft.refresh_from_db()
         self.assertEqual(draft.status, FeeDraft.STATUS_DRAFT)
-        sequence = FeeInvoiceSequence.objects.filter(tenant=self.tenant).first()
-        # الصفُّ يرجع مع المعاملة: إمّا لا عدّادَ أصلاً، وإمّا عدّادٌ لم يزد.
+        book = TenantBook.objects.filter(
+            tenant=self.tenant,
+            branch=None,
+            document_type="fee_invoice",
+            book_number=0,
+        ).first()
+        # الصفُّ يرجع مع المعاملة: إمّا لا دفترَ أصلاً، وإمّا دفترٌ لم يزد.
         self.assertTrue(
-            sequence is None or sequence.last_number == 0,
+            book is None or book.last_used_number == 0,
             "رُقّم رقمُ فاتورةٍ لورقةٍ لم تصدر",
         )
+
+        # **والفترةُ المقفلة لا تحرق رقماً**: بعد فتحها يُصدر الاعتمادُ الرقمَ 1.
+        FiscalPeriod.objects.filter(
+            tenant=self.tenant, start_date__lte=day, end_date__gte=day,
+        ).update(status="Open", is_closed=False)
+
+        approved = self.client.post(
+            f"{DRAFTS}{draft.pk}/approve/", {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(approved.status_code, 200, approved.content)
+        invoice = self.live_invoice_of(draft)
+        self.assertEqual(decimal_of(invoice.total), GROSS)
+        book = TenantBook.objects.get(
+            tenant=self.tenant,
+            branch=None,
+            document_type="fee_invoice",
+            book_number=0,
+        )
+        self.assertEqual(book.last_used_number, 1, "رقمٌ استُهلك لورقةٍ لم تصدر")
 
 
 class ReceivableReconciliationTest(InvoiceJournalTestCase):
