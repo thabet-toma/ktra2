@@ -92,7 +92,6 @@ ALLOWLIST: dict[str, str] = {
     "frontend_v2/components/sales/CustomerQuickAddModal.tsx": "تعليق JSDoc فقط.",
     "frontend_v2/components/sales/SalesInvoicesPage.tsx": "تعليقٌ يشير لقرار #53 فقط.",
     "frontend_v2/components/partners/StatementDetailsModal.tsx": "تعليق JSX فقط.",
-    "frontend_v2/components/office/ClientBooksPanel.tsx": "تعليق فقط.",
     "frontend_v2/components/sales/SalesInvoiceEditor.tsx":
         "تعليقان فقط (قرار #53 سابق، وتوثيق شرط حساب) — كل نصّ مُنفَّذ في هذا "
         "الملف مُرحَّل فعلاً لـterm() (يحرسه WATCHED_TERM_CALLS أدناه).",
