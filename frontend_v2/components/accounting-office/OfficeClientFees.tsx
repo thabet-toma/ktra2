@@ -67,6 +67,7 @@ export const OfficeClientFees: React.FC<{
   const [error, setError] = useState('');
   const [busyId, setBusyId] = useState<number | null>(null);
   const [share, setShare] = useState<FeeDocumentShare | null>(null);
+  const [statementBusy, setStatementBusy] = useState(false);
 
   const load = useCallback(() => {
     setLoading(true);
@@ -139,11 +140,51 @@ export const OfficeClientFees: React.FC<{
     }
   };
 
+  /**
+   * «أرسِل الكشف الشهريّ» (#283/ج): كشفُ الشهر الجاري ورابطُه — **بنقطةٍ قائمة**
+   * (`fees/ledger/share/`، التي تُصدر صفّ `FeeStatement` ورابط `docshare` في
+   * معاملةٍ واحدة) لا بنقطةٍ جديدة. ويُنسخ الرابطُ كما في «مشاركة» الدفعة.
+   */
+  const sendMonthlyStatement = async () => {
+    setStatementBusy(true);
+    const today = todayIso();
+    try {
+      const created = await shareFeeStatement(clientId, {
+        periodFrom: `${today.slice(0, 8)}01`,
+        periodTo: today,
+      });
+      setShare(created);
+      try {
+        await navigator.clipboard.writeText(created.url);
+        toast('نُسخ رابط الكشف الشهري', 'success');
+      } catch {
+        toast('انسخ الرابط يدوياً من الحقل', 'info');
+      }
+    } catch (thrown) {
+      toast(humanizeThrown(thrown, 'تعذّر إنشاء رابط الكشف الشهري.'), 'error');
+    } finally {
+      setStatementBusy(false);
+    }
+  };
+
   if (loading) return <OfficeSkeleton rows={4} />;
   if (error) return <OfficeError message={error} onRetry={load} />;
 
   return (
-    <OfficeCard title="دفعات الأتعاب">
+    <OfficeCard
+      title="دفعات الأتعاب"
+      actions={canWrite ? (
+        <button
+          type="button"
+          disabled={statementBusy}
+          onClick={() => void sendMonthlyStatement()}
+          data-testid="send-monthly-statement"
+          className={officeSecondaryButtonClass}
+        >
+          أرسِل الكشف الشهريّ
+        </button>
+      ) : undefined}
+    >
       {rows.length === 0 ? (
         <OfficeEmpty title="لا دفعاتٍ مسجَّلةً لهذا الزبون بعد." />
       ) : (

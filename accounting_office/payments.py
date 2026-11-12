@@ -34,7 +34,7 @@
 `tax_note` — بالمفاتيح نفسها لا بمفاتيح محذوفة، على نمط `services.mask_amounts`.
 """
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -53,9 +53,11 @@ from django.db.models.functions import Coalesce, Greatest
 from django.http import Http404
 from django.utils import timezone
 
-from accounting_office import fees, office_journal, services, settings_registry
+from accounting_office import deadlines, fees, office_journal, services, settings_registry
 from accounting_office.models import (
     FEE_DRAFT_STATUS_APPROVED,
+    FEE_INVOICE_KIND_INVOICE,
+    FEE_INVOICE_KIND_SUPPLEMENTARY,
     FEE_PAYMENT_METHOD_CHEQUE,
     FEE_PAYMENT_METHOD_CHOICES,
     FEE_PAYMENT_METHOD_LABELS,
@@ -64,6 +66,7 @@ from accounting_office.models import (
     OBLIGATION_STATUS_NOT_REQUIRED,
     REMINDER_COUNTED_KINDS,
     FeeDraft,
+    FeeInvoice,
     FeePayment,
     FeePaymentAllocation,
     FeeReceiptSequence,
@@ -438,22 +441,35 @@ def client_dues_payload(tenant, clients, *, user, masked=None) -> dict[int, dict
 
     و`masked` يُمرَّر من قائمةٍ حسبته أصلاً (`payments_payload`/`ledger_payload`)
     فلا يُسأل `can_see_amounts` مرّتين في الطلب نفسه.
+
+    **وعلامةُ حجب التسليم (#283/ج) تُضاف مفتاحاً واحداً `delivery` ولا تُضاف حين
+    يكون الإعدادُ مطفأً**: مطفأً هو سلوكُ اليوم حرفاً، فمفتاحٌ مخزَّنٌ بقيمةٍ فارغة
+    كان يغيّر شكلَ الحمولة على كل مكتبٍ لم يُفعّله. والعلامةُ للزبون الذي **عليه
+    رصيد** (وإلا فلا شيءَ يُحجب)، ومصدرُ الرقم `client_due` وحدها.
     """
     clients = list(clients)
     masked = amounts_masked(tenant, user) if masked is None else masked
     dues = client_due_map(tenant, clients)
     notes = client_tax_notes_map(tenant, clients)
+    hold = bool(clients) and bool(
+        services.resolve_setting(tenant, services.DELIVERY_HOLD_UNPAID_KEY),
+    )
     payload: dict[int, dict] = {}
-    for client_id, due in dues.items():
+    for client in clients:
+        due = dues.get(client.pk)
+        if due is None:
+            continue
         data = {
             "due": due.due,
             "invoices_total": due.invoices_total,
             "paid_total": due.paid_total,
             "credit": due.credit,
             "unpaid_count": due.unpaid_count,
-            "tax_note": notes.get(client_id, Decimal("0.00")),
+            "tax_note": notes.get(client.pk, Decimal("0.00")),
         }
-        payload[client_id] = (
+        if hold and due.due > 0:
+            data["delivery"] = {"label": services.DELIVERY_HELD_LABEL}
+        payload[client.pk] = (
             _mask(data, services.PAYMENT_AMOUNT_KEYS) if masked else data
         )
     return payload
@@ -1494,3 +1510,302 @@ def fee_receipt_reminder_candidates(
             },
         ))
     return candidates
+
+
+# ── تذكيرُ «اللي عليه» بعد الاستحقاق (#283/ج) ────────────────────────────────
+#
+# **درجتان لا إيقاع**: بعد الاستحقاق ثلاثةَ أيامٍ ثم سبعة، وسقفُهما اثنتان.
+# والاستحقاقُ **المخزَّن** لا يومُ فتح الشاشة: تاريخُ إصدار آخر فاتورةٍ صادرةٍ حيّةٍ
+# (`issued_at`) + المهلة المعتمدة في الموديول (`fee_invoices.INVOICE_DUE_DAYS`).
+# فالمفتاحُ `(الاستحقاق، الاستحقاق)` لا `(الإصدار، الاستحقاق)` الذي يحمله بندُ
+# «فاتورةُ اليوم» (#282/أ٢) — خيطان لا يصطدم عدُّهما، ورسالتان في يومين مختلفين.
+#
+# **والمبلغُ من `client_due` وحدها**: `due` للباقي و`invoices_total` لـ«من» — لا
+# صيغةَ ثانيةً تُحسب هنا. و`due <= 0` لا يولّد بنداً أصلاً، فالدفعُ الكاملُ يُسكِت
+# الخيطَ بلا صفٍّ يُكتب، والجزئيُّ يُبقيه لأن الرصيدَ ما زال قائماً.
+BALANCE_REMINDER_STEPS: tuple[int, ...] = (3, 7)
+#: مهلةُ «شيل لهذه المرة»: تُعيد المؤقّتَ ولا تستهلك السقف — بفاصل الدرجتين
+#: نفسه (نمطُ الأوراق: آخرُ صفٍّ مؤقّتٍ + الفاصل)، وإلا عاد البندُ غداً بلا سبب.
+BALANCE_REMINDER_RESET_DAYS = BALANCE_REMINDER_STEPS[-1] - BALANCE_REMINDER_STEPS[0]
+
+#: #283/ج: يومُ الكشف الشهريّ — أوّلُ كل شهر، ويُقاس بيومٍ يُمرَّر للدالّة.
+MONTHLY_STATEMENT_DAY = 1
+
+#: سطرُ «الباقي من الأصل» الملحَق بنصّ النوع — رقمُ الخادم لا قالبُ المكتب، فلا
+#: رمزَ جديداً في `REMINDER_PLACEHOLDERS` (نمطُ `FEE_RECEIPT_DETAIL_TEXTS`).
+FEE_BALANCE_DETAIL_TEXTS: dict[str, str] = {
+    "ar": "عليك {due} من {total}",
+    "he": "עליך {due} מתוך {total}",
+}
+
+
+def fee_balance_detail(*, due, total, language="ar") -> str:
+    """«عليك 250.00 من 400.00» — الباقي والأصل كلاهما من `ClientDue` وحدها."""
+    template = FEE_BALANCE_DETAIL_TEXTS.get(
+        language, FEE_BALANCE_DETAIL_TEXTS["ar"],
+    )
+    return template.format(due=_text(due), total=_text(total))
+
+
+def _month_bounds(day: date) -> tuple[date, date]:
+    """أوّلُ شهر اليوم وآخرُه — بعبور السنة عبر `deadlines.month_start_after`."""
+    start = date(day.year, day.month, 1)
+    return start, deadlines.month_start_after(start, 1) - timedelta(days=1)
+
+
+def _balance_due_anchor(tenant, client_ids) -> dict[int, tuple]:
+    """آخرُ فاتورةٍ صادرةٍ حيّةٍ لكل زبون — كائنُها ويومُ استحقاقها المخزَّن.
+
+    **ولا يحتاج «غيرُ مسدَّدة»**: الخيطُ واحدٌ للزبون، وآخرُ ورقةٍ خرجت هي التي
+    يبدأ استحقاقُها عدَّه؛ وحسابُ المتبقّي لكل ورقةٍ صيغةٌ ثانية للرصيد ممنوعة.
+
+    والإشعارُ الدائنُ خارجُ العدّ: ليس مطالبةً كالفاتورة والتكميلية، واستحقاقُه
+    ليس استحقاقَ دَين. والملغاةُ مستبعدةٌ بـ`cancelled_at`.
+    """
+    from accounting_office import fee_invoices
+
+    anchors: dict[int, tuple] = {}
+    rows = (
+        FeeInvoice.objects
+        .filter(
+            tenant=tenant,
+            client_id__in=client_ids,
+            cancelled_at__isnull=True,
+            kind__in=(FEE_INVOICE_KIND_INVOICE, FEE_INVOICE_KIND_SUPPLEMENTARY),
+        )
+        .select_related("client", "source_draft", "related_invoice")
+        .order_by("issued_at", "id")
+    )
+    for invoice in rows:
+        due_on = timezone.localdate(invoice.issued_at) + timedelta(
+            days=fee_invoices.INVOICE_DUE_DAYS,
+        )
+        # الأخيرةُ في الترتيب تغلب: `order_by` تصاعديّ فيُكتب كلٌّ فوق ما قبله.
+        anchors[invoice.client_id] = (invoice, due_on)
+    return anchors
+
+
+def _enabled_balance_clients(clients, settings_by_client) -> list:
+    """زبائنُ نوع «اللي عليه» المفعّل لهم — وإلا فلا بندَ ولا استعلامَ رصيد."""
+    enabled = []
+    for client in clients:
+        resolved = settings_by_client.get(client.pk) or {}
+        if settings_registry.REMINDER_BALANCE in (
+            resolved.get(services.REMINDER_TYPES_ENABLED_KEY) or []
+        ):
+            enabled.append(client)
+    return enabled
+
+
+def balance_reminder_candidates(
+    tenant, clients, *, day, settings_by_client, contacts, by_pair,
+    postponed_pairs, reminder_type=None,
+) -> list:
+    """بندُ «اللي عليه» بعد الاستحقاق — **ميلادُه من السجلّ** لا من عدّادٍ مخزَّن.
+
+    - أوّلُه بعد 3 أيام من الاستحقاق، وثانيه بعد 7، ولا ثالث.
+    - والعدُّ من صفوف `by_pair` بـ`kind` في `REMINDER_COUNTED_KINDS`: إرسالٌ أو
+      «كلّمناه» يرفع الدرجة، والتنحيةُ لا تُعدّ، والإبطالُ يُنقص عدَّه.
+    - و«شيل لهذه المرة» تُعيد المؤقّتَ بفاصل الدرجتين ولا تستهلك السقف (نمطُ
+      الأوراق) — فلا يعود البندُ غداً بلا سبب.
+    - `render_due` تاريخُ الاستحقاق المخزَّن نفسه، فلا يُقرأ في الرسالة يومُ فتحها.
+    - **وبلا فاتورةٍ صادرةٍ لا استحقاق**: لا تاريخَ مخزَّناً يُقاس عليه، ولم يُطالَب
+      الزبون بورقةٍ بعد. فزبونٌ برصيدٍ بلا ورقة (مسودّةٌ معتمدةٌ لم تُصدر) لا بندَ له.
+    """
+    if reminder_type is not None and reminder_type != settings_registry.REMINDER_BALANCE:
+        return []
+    enabled = _enabled_balance_clients(clients, settings_by_client)
+    if not enabled:
+        return []
+    due_map = client_due_map(tenant, enabled)
+    anchors = _balance_due_anchor(tenant, [client.pk for client in enabled])
+    maximum = len(BALANCE_REMINDER_STEPS)
+    candidates = []
+    for client in enabled:
+        due = due_map.get(client.pk)
+        if due is None or due.due <= 0:
+            continue
+        anchor = anchors.get(client.pk)
+        if anchor is None:
+            continue
+        invoice, due_on = anchor
+        pairs = by_pair.get(
+            (client.pk, settings_registry.REMINDER_BALANCE, due_on, due_on), [],
+        )
+        count = sum(
+            1 for row in pairs if row["kind"] in REMINDER_COUNTED_KINDS
+        )
+        step_days = BALANCE_REMINDER_STEPS[min(count, maximum - 1)]
+        next_due = due_on + timedelta(days=step_days)
+        last_day = max((row["day"] for row in pairs), default=None)
+        if last_day is not None:
+            # التنحيةُ تُعيد المؤقّتَ لا تُستهلك: آخرُ صفٍّ مؤقّتٍ + الفاصل،
+            # والإرسالُ يزيد العدَّ فيُقدّم الدرجةَ كذلك (`max` يجمعهما).
+            next_due = max(
+                next_due, last_day + timedelta(days=BALANCE_REMINDER_RESET_DAYS),
+            )
+        contact = contacts.get((client.pk, settings_registry.REMINDER_BALANCE))
+        candidates.append(services.ReminderCandidate(
+            client=client,
+            reminder_type=settings_registry.REMINDER_BALANCE,
+            period_start=due_on,
+            period_end=due_on,
+            missing=(),
+            missing_codes=(),
+            count=count,
+            maximum=maximum,
+            interval_days=step_days,
+            next_due=next_due,
+            contact=contact,
+            tax_system=(settings_by_client.get(client.pk) or {}).get(
+                services.TAX_SYSTEM_KEY,
+            ),
+            due=day >= next_due,
+            exhausted=count >= maximum,
+            postponed=(
+                (client.pk, settings_registry.REMINDER_BALANCE) in postponed_pairs
+            ),
+            render_due=due_on,
+            period_text=_balance_period_text(invoice),
+            amount=due.due,
+            detail=fee_balance_detail(
+                due=due.due,
+                total=due.invoices_total,
+                language=getattr(contact, "language", "") or "ar",
+            ),
+        ))
+    return candidates
+
+
+def _balance_period_text(invoice) -> str | None:
+    """فترةُ الورقة التي يخصّها الاستحقاق — شهرُ مسودّتها لا شهرُ إصدارها."""
+    from accounting_office import fee_invoices
+
+    return fee_invoices.document_period_text(invoice)
+
+
+# ── الكشفُ الشهريّ يوم 1 (#283/ج) ────────────────────────────────────────────
+MONTHLY_STATEMENT_TEXTS: dict[str, str] = {
+    "ar": (
+        "كشفُ حسابك عن {period}: عليك {due} من {total}.\n"
+        "فواتيرُ الشهر {invoices}، ودفعاتُه {payments}، والرصيدُ الختاميّ {closing}."
+    ),
+    "he": (
+        "דוח החשבון שלך עבור {period}: עליך {due} מתוך {total}.\n"
+        "חשבוניות החודש {invoices}, תשלומים {payments}, "
+        "יתרת סוף החודש {closing}."
+    ),
+}
+
+
+def statement_reminder_candidates(
+    tenant, clients, *, day=None, settings_by_client, contacts, by_pair,
+    postponed_pairs, reminder_type=None,
+) -> list:
+    """كشفُ الشهر لهذا الزبون — **بندٌ واحدٌ لكل زبونٍ عليه رصيد، يوم 1 وحده**.
+
+    واليومُ يُمرَّر (`day=None` افتراضُه اليوم) فتُقاس الحالةُ بتاريخٍ مُعطى.
+
+    **والشكلُ كشفٌ موجودٌ لا نسخة**: الأرقامُ من `statement_payload` نفسها عند
+    بناء الرسالة (`statement_reminder_payload`)، فيُقرأ ما تقرؤه الورقةُ المطبوعة.
+
+    **ولا يتكرّر بعد الإرسال**: مفتاحُه (أوّلُ الشهر، آخرُه)، و`maximum = 1`،
+    والعدُّ من السجلّ. وزبونٌ أُرسل له **أيُّ تذكيرٍ** في اليوم نفسه لا يأخذ كشفاً
+    ثانياً — فالبندُ الواحدُ لكل زبونٍ في اليوم هو القاعدة (الدَّمجُ في
+    `services._with_monthly_statements`، ومن دون قيدٍ هنا يخرج بندان أو يعود
+    الكشفُ بنداً مستقلاً بعد إرسال البند الذي دُمج فيه).
+    """
+    day = day or timezone.localdate()
+    if day.day != MONTHLY_STATEMENT_DAY:
+        return []
+    if reminder_type is not None and reminder_type != settings_registry.REMINDER_BALANCE:
+        return []
+    enabled = _enabled_balance_clients(clients, settings_by_client)
+    if not enabled:
+        return []
+    due_map = client_due_map(tenant, enabled)
+    period_start, period_end = _month_bounds(day)
+    reminded_today = {
+        key[0]
+        for key, rows in by_pair.items()
+        if any(
+            row["day"] == day and row["kind"] in REMINDER_COUNTED_KINDS
+            for row in rows
+        )
+    }
+    candidates = []
+    for client in enabled:
+        due = due_map.get(client.pk)
+        if due is None or due.due <= 0:
+            continue
+        if client.pk in reminded_today:
+            continue
+        pair = (client.pk, settings_registry.REMINDER_BALANCE, period_start, period_end)
+        count = sum(
+            1 for row in by_pair.get(pair, []) if row["kind"] in REMINDER_COUNTED_KINDS
+        )
+        candidates.append(services.ReminderCandidate(
+            client=client,
+            reminder_type=settings_registry.REMINDER_BALANCE,
+            period_start=period_start,
+            period_end=period_end,
+            missing=(),
+            missing_codes=(),
+            count=count,
+            maximum=1,
+            interval_days=1,
+            next_due=day,
+            contact=contacts.get((client.pk, settings_registry.REMINDER_BALANCE)),
+            tax_system=(settings_by_client.get(client.pk) or {}).get(
+                services.TAX_SYSTEM_KEY,
+            ),
+            due=True,
+            exhausted=count >= 1,
+            postponed=(
+                (client.pk, settings_registry.REMINDER_BALANCE) in postponed_pairs
+            ),
+            render_due=day,
+            amount=due.due,
+            # لقطةُ النافذة وحدها: الأرقامُ تُقرأ عند بناء الرسالة، فلا كلفةَ
+            # كشفٍ لكل زبونٍ في مسحٍ لن يُرسَل منه شيء (الحواجزُ بعد الحساب).
+            statement={
+                "from": period_start.isoformat(),
+                "to": period_end.isoformat(),
+            },
+        ))
+    return candidates
+
+
+def statement_reminder_payload(tenant, client, *, day) -> dict:
+    """أرقامُ الكشف للرسالة — **من `statement_payload` وحدها** لا صيغةً ثانية.
+
+    والنافذةُ شهرُ اليوم حتى اليوم: ما تحرّك هذا الشهر، والرصيدُ الختاميّ كما
+    تقرؤه الورقة، و`due` هو «اللي عليه» الآن من الدالّة الواحدة.
+    """
+    period_from = date(day.year, day.month, 1)
+    sheet = statement_payload(tenant, client, period_from=period_from, period_to=day)
+    due = client_due(tenant, client)
+    return {
+        "from": period_from.isoformat(),
+        "to": day.isoformat(),
+        "period": deadlines.period_label(period_from, day),
+        "due": sheet["due"],
+        "total": _text(due.invoices_total),
+        "invoices": sheet["totals"]["invoices"],
+        "payments": sheet["totals"]["payments"],
+        "closing": sheet["closing_balance"],
+    }
+
+
+def statement_reminder_text(statement, language="ar") -> str:
+    """نصُّ سطر الكشف — القيمُ الغائبةُ تُنطق شرطةً لا فراغاً يُقرأ خطأً."""
+    template = MONTHLY_STATEMENT_TEXTS.get(language, MONTHLY_STATEMENT_TEXTS["ar"])
+    absent = "—"
+    return template.format(
+        period=statement.get("period") or absent,
+        due=statement.get("due") or absent,
+        total=statement.get("total") or absent,
+        invoices=statement.get("invoices") or absent,
+        payments=statement.get("payments") or absent,
+        closing=statement.get("closing") or absent,
+    )

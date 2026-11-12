@@ -192,6 +192,12 @@ class OfficeClient(models.Model):
         null=True, blank=True, verbose_name="تاريخ الإنهاء",
     )
     notes = models.TextField(blank=True, default="", verbose_name="ملاحظات")
+    #: #283/ج: «تم التسليم» — تاريخٌ يكتبه المكتبُ بفعلٍ صريح، وحارسُه `services.mark_client_delivered`:
+    #: إعدادُ «حجب التسليم حتى الدفع» يمنع كتابتَه ما دام على الزبون رصيد. ولا حقلَ
+    #: «حجب» هنا — الحجبُ إعدادُ مكتبٍ يُقرأ، والتاريخُ أثره وحده.
+    delivered_on = models.DateField(
+        null=True, blank=True, verbose_name="تاريخ التسليم",
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="تاريخ التحديث")
 

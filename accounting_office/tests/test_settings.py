@@ -78,7 +78,8 @@ class RegistryShapeTest(SettingTestCase):
         و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
         (#280)، و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب وإعدادُ
         اعتمادها التلقائيّ لـ#282، وتذكيرُ الموعد لـ#281، و**سبعةُ القيد التلقائي
-        في الدفاتر** لـ#284، و«رابط PDF للتقارير» لـ#288/ب-١."""
+        في الدفاتر** لـ#284، و«رابط PDF للتقارير» لـ#288/ب-١، ومفتاحُ «حجب
+        التسليم حتى الدفع» لـ#283/ج."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -114,6 +115,8 @@ class RegistryShapeTest(SettingTestCase):
                 "office_report_pdf_link",
                 # #289: عتبتا احمرار صفّ الموظف في لوحة صاحب المكتب.
                 "dashboard_late_share_percent", "dashboard_late_ratio",
+                # #283/ج: حجبُ التسليم حتى الدفع — مفتاحُ مكتبٍ مطفأٌ افتراضاً.
+                "delivery_hold_unpaid",
             },
         )
 
@@ -518,6 +521,8 @@ class SettingsApiTest(SettingTestCase):
                 "office_report_pdf_link",
                 # #289: عتبتا احمرار صفّ الموظف في اللوحة.
                 "dashboard_late_share_percent", "dashboard_late_ratio",
+                # #283/ج: مفتاحُ حجب التسليم حتى الدفع.
+                "delivery_hold_unpaid",
             },
         )
 
