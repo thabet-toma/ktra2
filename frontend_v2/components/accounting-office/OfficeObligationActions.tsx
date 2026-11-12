@@ -10,7 +10,7 @@ import {
   setObligationAmount,
   setObligationClientPaid,
   submitObligation,
-  type ObligationComputedDetails,
+  type ObligationComputedRow,
   type ObligationRow,
 } from '../../services/accountingOfficeApi';
 import type { SettingChoice } from '../../utils/accountingOffice';
@@ -75,9 +75,12 @@ export const OfficeObligationActions: React.FC<{
   // #277: «مدّد» — تاريخٌ وملاحظة، وافتراضُ التاريخ يومٌ بعد الموعد الساري.
   const [extendOpen, setExtendOpen] = useState(false);
   const [extendDraft, setExtendDraft] = useState({ until: '', note: '' });
-  // #287/٤: تفصيلُ «احسب من الدفتر» — يُعرض قبل «أكّد» لا بعده.
+  // #287/٤: ردُّ «احسب من الدفتر» — يُعرض تفصيلُه قبل «أكّد» لا بعده. **الصفُّ
+  // كاملاً لا التفصيلُ وحده**: القائمةُ الأبويةُ لا تُعاد قراءتُها بعد الحساب
+  // (إعادتُها تُبدّل الصفَّ بهيكلٍ فيُفكّ هذا المكوّنُ وتضيع الحالة)، فرقمُ
+  // `computed_amount` الطازجُ لا يوجد إلا في هذا الردّ.
   const [computing, setComputing] = useState(false);
-  const [computed, setComputed] = useState<ObligationComputedDetails | null>(null);
+  const [computedRow, setComputedRow] = useState<ObligationComputedRow | null>(null);
 
   const submitted = obligation.status === 'submitted';
   const notRequired = obligation.status === 'not_required';
@@ -91,7 +94,7 @@ export const OfficeObligationActions: React.FC<{
       setExtendOpen(false);
       // التفصيلُ المحسوبُ يخصّ مبلغاً قد لا يكون هو المبلغَ الآن: فعلٌ نجح
       // يمسحه فلا يبقى ملخّصٌ ولا إعلانُ أسطرٍ «راجع» على رقمٍ غيره.
-      setComputed(null);
+      setComputedRow(null);
       onChanged();
     } catch (failure) {
       onError(humanizeThrown(failure, failureMessage));
@@ -122,14 +125,16 @@ export const OfficeObligationActions: React.FC<{
    * ولا يستعمل `run` لأنه يحتاج الردَّ نفسه؛ ويأخذ `pending` معه كي لا يرسل
    * الموظفُ «انقدّم» في نافذةِ الحساب (الخادمُ يرفض حسابَ ما قُدّم، والحسابُ
    * يُحفظ في السطر — فالفعلان يتزاحمان على صفٍّ واحد).
+   *
+   * **ولا يُنادي `onChanged`**: الأبوان يُعيدان تحميلَ القائمة فيستبدلان الصفَّ
+   * بالهيكل، فيُفكّ المكوّنُ وتضيع حالةُ «أكّد» قبل أن تُقرأ. وحدَه `confirmComputed`
+   * (عبر `run`) يُعيد التحميلَ، بعد التأكيد.
    */
   const compute = async () => {
     setComputing(true);
     setPending(true);
     try {
-      const row = await computeObligationAmount(obligation.id);
-      setComputed(row.computed_details);
-      onChanged();
+      setComputedRow(await computeObligationAmount(obligation.id));
     } catch (failure) {
       onError(humanizeThrown(failure, 'تعذّر حساب المبلغ من الدفتر.'));
     } finally {
@@ -140,8 +145,11 @@ export const OfficeObligationActions: React.FC<{
 
   // «أكّد» لا يُفتح إلا بتفصيلٍ مقروءٍ في هذه الجلسة: رقمُ ضريبةٍ يُؤكَّد بلا
   // رؤية `review_lines` ليس تأكيداً — ولذلك أُعيد الحسابُ بعد كل تحميلٍ للصفحة.
-  const canConfirmComputed =
-    computed !== null && !computedAmountConfirmed(obligation);
+  // وقيمتُه من **ردّ الحساب** (`computedRow`) لا من الصفّ الأبويّ: الأبُ لم يُعَد
+  // تحميلُه فـ`computed_amount` عنده قديمٌ أو فارغ. و`amount` لم يُمسّ بالحساب.
+  const shown = computedRow ?? obligation;
+  const computed = computedRow?.computed_details ?? null;
+  const canConfirmComputed = computed !== null && !computedAmountConfirmed(shown);
 
   const confirmComputed = () =>
     run(() => confirmObligationAmount(obligation.id), 'تعذّر تأكيد المبلغ المحسوب.');
@@ -259,10 +267,10 @@ export const OfficeObligationActions: React.FC<{
         ) : null}
       </div>
 
-      {obligation.computed_amount && !submitted ? (
+      {shown.computed_amount && !submitted ? (
         <p className="text-[11px] text-slate-500 dark:text-slate-400">
-          المحسوبُ من الدفتر: {formatOfficeAmount(obligation.computed_amount)}
-          {computedAmountConfirmed(obligation)
+          المحسوبُ من الدفتر: {formatOfficeAmount(shown.computed_amount)}
+          {computedAmountConfirmed(shown)
             ? ' — وهو المبلغُ المعدَّل حالياً.'
             : ' — «احسب من الدفتر» يعرض تفصيله، ثم «أكّد المحسوب» يجعله المبلغَ.'}
         </p>
