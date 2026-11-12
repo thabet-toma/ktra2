@@ -876,7 +876,7 @@ class DeadlineReminderTest(OfficeFixture):
                 "period_end": JAN_END.isoformat(),
             }],
         )
-        log = services.reminder_log_row(rows[0])
+        log = services.reminder_log_row(rows[0], masked=True)
         self.assertIn("620.00", log["body"])
 
 

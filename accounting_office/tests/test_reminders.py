@@ -1112,7 +1112,7 @@ class LogShapeTest(RemindersTestCase):
         self.send(client, day=FEB_FIRST, contact=contact)
         self.send(client, day=FEB_FOURTH, contact=contact)
 
-        payload = services.client_reminder_log_payload(client)
+        payload = services.client_reminder_log_payload(client, user=self.owner)
         rows = payload["rows"]
 
         self.assertEqual([row["kind"] for row in rows], ["sent", "sent"])

@@ -50,6 +50,7 @@
 **ولا يُشتقّ الترخيصُ من وجود رقم تسجيل**: عوسيك بطور قد يحمل رقماً وهو غير مشتغلٍ
 مرخّص، فيُطبع سطرُ מע"מ ويُحصَّل ما لا يجب تحصيله.
 """
+import re
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
@@ -851,7 +852,7 @@ def _lines_payload(invoice) -> list[dict]:
     if invoice.source_draft_id is None:
         return [{
             "id": None,
-            "label": invoice.cancel_reason or invoice.title,
+            "label": invoice.cancel_reason or printed_title(invoice),
             "quantity": LINE_QUANTITY,
             "unit": unit_for(invoice.tax_system),
             "amount": invoice.net_total,
@@ -1409,11 +1410,13 @@ def _reminder_invoice(invoice, *, due) -> dict:
     والمبلغُ مكشوفٌ كما في نصّ الرسالة نفسه: الرسالةُ إلى الزبون عن مبلغٍ عليه،
     وقنعُه عن الموظّف كان يُرسل «—» إلى الزبون بدل مبلغه (قاعدةُ #281).
     **و`original_number` للأصل**: نصُّ الإشعار الدائن يسمّي الفاتورةَ التي يخصمها.
+    **والعنوانُ بـ`printed_title`** (#282fix2/٢): هذا البندُ يدخل نصَّ رسالةٍ تصل
+    الزبونَ، فعنوانٌ مخزَّنٌ محرَّمٌ لا يخرج منه كما خُزِّن.
     """
     return {
         "id": invoice.pk,
         "number": invoice.number,
-        "title": invoice.title,
+        "title": printed_title(invoice),
         "kind": invoice.kind,
         "total": f"{invoice.total:.2f}",
         "tax_total": f"{invoice.tax_total:.2f}",
@@ -1554,6 +1557,31 @@ def attach_invoice_links(tenant, candidates, *, user=None):
 def invoice_item(invoice) -> dict | None:
     """بندُ الفاتورة في الصفحة — `None` لبندٍ ليس فاتورة (كأيّ نوعٍ آخر)."""
     return None if invoice is None else dict(invoice)
+
+
+def strip_public_links(text: str) -> str:
+    """يحذف من نصٍّ **كلَّ رابطٍ عامٍّ لـ`docshare`** — وسطرَ «الرابط:» الذي يحمله.
+
+    لسجلّ التذكيرات (#282fix2/١): `ReminderLog.body` يحفظ نصَّ الرسالة كما أُرسل
+    بروابطه، وورقةُ `/s/` تُفتح بلا دخولٍ وبكل المبالغ. فمن لا يملك
+    `office.amounts.view` يقرأ النصَّ بلا توكِنٍ. والنمطُ الأساسُ العامُّ الحاليُّ
+    (`public_url_for_token`) مع المَركبَين المعروفَين (`/s/` و`/api/share/`) على أيّ
+    نطاق — فتغييرُ `DOCSHARE_PUBLIC_PATH` بعد الإرسال لا يُعيد روابطَ السجلّ القديم.
+    والمبلغُ في النصّ لا يُمسّ (قاعدةُ #281: الرسالةُ إلى الزبون نفسه).
+
+    وبناةُ الرسالة الثلاثةُ (الفاتورةُ هنا، وتقريرُ الدفتر، وإشعارُ الدفع) يكتبون
+    الرابطَ سطراً مستقلّاً بالوسم `الرابط:` — فيُحذف السطرُ كلُّه، وما سواه يُحذف
+    عنوانُه من موضعه.
+    """
+    from docshare import services as docshare_services
+
+    url = (
+        r"(?:https?://[^\s/]+)?"
+        rf"(?:{re.escape(docshare_services.public_url_for_token(''))}|/s/|/api/share/)"
+        r"[A-Za-z0-9_-]+/?"
+    )
+    line = rf"(?:\n|\A)[ \t]*(?:الرابط:[ \t]*)?{url}[ \t]*(?=\n|\Z)"
+    return re.sub(url, "", re.sub(line, "", text))
 
 
 def invoice_text(invoice) -> str:

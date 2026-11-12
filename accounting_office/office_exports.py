@@ -27,7 +27,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
-from accounting_office import book_exports, services
+from accounting_office import book_exports, fee_invoices, services
 from accounting_office.models import (
     BOOK_ENTRY_KIND_LABELS,
     BOOK_KIND_LABELS,
@@ -412,7 +412,9 @@ def _invoices_table(tenant) -> dict:
     rows = [
         [
             _text(row.number),
-            _text(row.title),
+            # `printed_title` لا `row.title`: العنوانُ المخزَّن المحرَّم يسقط إلى
+            # الافتراضيّ، والجدولُ يُعرض أيضاً على رابط «نسخة البيانات» العامّ.
+            _text(fee_invoices.printed_title(row)),
             _label(FEE_INVOICE_KIND_LABELS, row.kind),
             _text(row.client.name),
             _text(row.tax_system),

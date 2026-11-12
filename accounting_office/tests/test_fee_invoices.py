@@ -29,11 +29,14 @@
 """
 import datetime
 from decimal import Decimal
+from io import BytesIO
 
 from django.contrib.auth.models import User
 from django.db import connection
+from django.test import SimpleTestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
+from openpyxl import load_workbook
 from rest_framework.test import APITestCase
 
 from accounting_office import deadlines, fee_invoices, fees, services
@@ -62,8 +65,18 @@ BASE = "/api/accounting-office/"
 INVOICES = f"{BASE}fees/invoices/"
 DRAFTS = f"{BASE}fees/drafts/"
 SHARES = "/api/document-shares/"
+READY = f"{BASE}ready-to-send/"
+LOG = f"{BASE}reminder-log/"
+CLIENTS = f"{BASE}clients/"
+EXPORT_FULL = f"{BASE}exports/full/"
+EXPORT_FULL_LINK = f"{BASE}exports/full-link/"
 
 MARCH = datetime.date(2026, 3, 1)
+
+#: عنوانٌ مخزَّنٌ محرَّم (يدّعي الرسميةَ الضريبية) — يُكتب بـ`update()` تجاوزاً
+#: للحارس، كصفٍّ صدر قبل الحارس. والمعروضُ منه يجب أن يكون الافتراضيَّ.
+FORBIDDEN_TITLE = "فاتورة ضريبية 2026"
+DEFAULT_TITLE = "فاتورة أتعاب"
 
 #: شارةُ النسخة كما تُصيَّر — **العنصرُ لا الكلمة**: كلمة «نسخة» ترد في تعليقات
 #: CSS المشحونة مع الصفحة، والعدُّ بالكلمة يقيس التعليقَ لا الورقة.
@@ -595,6 +608,85 @@ class TitleTest(FeeInvoiceTestCase):
         self.assertNotIn(
             "فاتورة ضريبية", self.page_of(invoice).replace(NOT_TAX_PS, ""),
         )
+
+
+class StoredTitleReadersTest(FeeInvoiceTestCase):
+    """كلُّ قارئٍ للعنوان المخزَّن يمرّ بـ`printed_title` (#282fix2/٢).
+
+    `printed_title` تُسقط العنوانَ المحرَّم إلى الافتراضيّ، لكنّ ثلاثةَ قرّاءٍ كانوا
+    يقرؤون `invoice.title` خامّاً: رسالةُ «جاهز للإرسال» وبندُ شاشتها، وسطرُ
+    الورقة لتكميليةٍ بلا سبب، وتصديرُ المكتب (ومعه رابطُ «نسخة البيانات» العامّ).
+    والصفُّ هنا يُكتب عنوانُه عبر `update()` — بلا مسار الـAPI الذي يحرسه.
+    """
+
+    def forbid_title(self, invoice):
+        FeeInvoice.objects.filter(pk=invoice.pk).update(title=FORBIDDEN_TITLE)
+        return self.card_of(invoice)
+
+    def test_the_ready_to_send_message_and_item_carry_the_default_title(self):
+        invoice = self.make_invoice()
+        ReadyToSendTest.ready_contact(self, invoice.client)
+        self.forbid_title(invoice)
+
+        res = self.client.get(
+            f"{READY}?day={local_day(invoice.issued_at).isoformat()}",
+            **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        messages = res.data["messages"]
+        self.assertEqual(len(messages), 1, messages)
+        for message in messages:
+            self.assertNotIn(FORBIDDEN_TITLE, message["body"])
+            self.assertIn(f"{DEFAULT_TITLE} {invoice.number}", message["body"])
+            for item in message["items"]:
+                self.assertEqual(item["invoice"]["title"], DEFAULT_TITLE)
+
+    def test_a_supplementary_without_a_reason_prints_the_default_title_as_its_line(self):
+        invoice = self.make_invoice()
+        note = fee_invoices.issue_supplementary(
+            invoice, actor=self.owner, amount=Decimal("100.00"),
+        )
+        self.assertEqual(note.cancel_reason, "")
+        note = self.forbid_title(note)
+
+        detail = self.client.get(f"{INVOICES}{note.pk}/", **self.headers())
+        html = self.page_of(note)
+
+        self.assertEqual(detail.status_code, 200, detail.content)
+        self.assertEqual(detail.data["lines"][0]["label"], DEFAULT_TITLE)
+        self.assertNotIn(FORBIDDEN_TITLE, html)
+        self.assertIn(DEFAULT_TITLE, html)
+
+    def test_the_office_export_and_its_public_copy_show_the_default_title(self):
+        from docshare.models import DOC_OFFICE_DATA_EXPORT, DocumentShare
+
+        self.forbid_title(self.make_invoice())
+
+        exported = self.client.post(EXPORT_FULL, {}, format="json", **self.headers())
+        self.assertEqual(exported.status_code, 200, exported.content)
+        sheet = load_workbook(BytesIO(exported.content))["الفواتير"]
+        texts = [
+            cell.value
+            for row in sheet.iter_rows()
+            for cell in row
+            if isinstance(cell.value, str)
+        ]
+        self.assertIn(DEFAULT_TITLE, texts)
+        self.assertFalse([text for text in texts if FORBIDDEN_TITLE in text], texts)
+
+        linked = self.client.post(
+            EXPORT_FULL_LINK, {}, format="json", **self.headers(),
+        )
+        self.assertEqual(linked.status_code, 201, linked.content)
+        share = DocumentShare.objects.get(
+            tenant=self.tenant, doc_type=DOC_OFFICE_DATA_EXPORT,
+        )
+        page = self.client.get(f"/api/share/{share.token}/")
+        self.assertEqual(page.status_code, 200)
+        body = page.content.decode("utf-8")
+        self.assertNotIn(FORBIDDEN_TITLE, body)
+        self.assertIn(DEFAULT_TITLE, body)
 
 
 class ShapeTest(FeeInvoiceTestCase):
@@ -1165,6 +1257,117 @@ class MaskedAmountsLinkTest(FeeInvoiceTestCase):
             before,
             "أُنشئت مشاركةٌ لعضوٍ لا يرى المبالغ — الرابطُ يفتح الورقة كاملةً",
         )
+
+
+class ReminderLogLinkMaskTest(FeeInvoiceTestCase):
+    """سجلُّ التذكيرات لا يسلّم رابطَ الورقة لعضوٍ بلا «المبالغ» (#282fix2/١).
+
+    المالكُ يسجّل إرسالَ رسالةِ فاتورةٍ فيها `الرابط: …/s/<token>`، فيُخزَّن النصُّ
+    في `ReminderLog.body` كما هو. وورقةُ `/s/` تُفتح بلا دخولٍ وبالصافي والضريبة
+    والبنود، فمن يقرأ السجلَّ ولا يرى المبالغ يجد توكِناً يفتحها. والمبلغُ في **نصّ**
+    الرسالة يبقى (قاعدةُ #281: رسالةٌ إلى الزبون نفسه) — الرابطُ وحده يسقط.
+    """
+
+    def sent_message_with_link(self):
+        """يُرسل المالكُ رسالةَ فاتورةِ زبونٍ يراه المحاسب — ويعود بالزبون والتوكن."""
+        from docshare.models import DOC_FEE_INVOICE, DocumentShare
+
+        invoice = self.make_invoice(
+            name="زبون المحاسب", responsible=self.accountant_user,
+        )
+        ReadyToSendTest.ready_contact(self, invoice.client)
+        ready = self.client.get(
+            f"{READY}?day={local_day(invoice.issued_at).isoformat()}",
+            **self.headers(),
+        )
+        self.assertEqual(ready.status_code, 200, ready.content)
+        message = ready.data["messages"][0]
+        token = DocumentShare.objects.get(
+            tenant=self.tenant, doc_type=DOC_FEE_INVOICE, doc_id=invoice.pk,
+        ).token
+        # حارسُ القدرة: بلا الرابط في النصّ المرسَل لا يقيس الاختبارُ شيئاً.
+        self.assertIn(token, message["body"])
+        item = message["items"][0]
+        sent = self.client.post(
+            f"{READY}sent/",
+            {
+                "contact_id": message["recipient"]["contact_id"],
+                "body": message["body"],
+                "items": [{
+                    key: item[key] for key in (
+                        "client_id", "reminder_type", "period_start", "period_end",
+                    )
+                }],
+            },
+            format="json", **self.headers(),
+        )
+        self.assertEqual(sent.status_code, 201, sent.content)
+        row = ReminderLog.objects.get(tenant=self.tenant)
+        self.assertIn(token, row.body)
+        return invoice.client, row, token
+
+    def reads(self, client, row):
+        """المسارات الثلاثة التي تُرجع سطرَ السجلّ — كلٌّ يعود بقائمة نصوص `body`."""
+        listed = self.client.get(LOG, **self.headers())
+        detail = self.client.get(f"{LOG}{row.pk}/", **self.headers())
+        tab = self.client.get(f"{CLIENTS}{client.pk}/reminder-log/", **self.headers())
+        for res in (listed, detail, tab):
+            self.assertEqual(res.status_code, 200, res.content)
+        return {
+            "list": [item["body"] for item in listed.data["rows"]],
+            "detail": [detail.data["body"]],
+            "client_tab": [item["body"] for item in tab.data["rows"]],
+        }
+
+    def test_a_masked_member_reads_no_link_on_the_three_log_paths(self):
+        client, row, token = self.sent_message_with_link()
+        self.client.force_authenticate(user=self.accountant_user)
+
+        for path, bodies in self.reads(client, row).items():
+            with self.subTest(path=path):
+                self.assertTrue(bodies, "لا سطرَ في السجلّ — الاختبارُ لا يقيس")
+                for body in bodies:
+                    self.assertNotIn(token, body)
+                    self.assertNotIn("/s/", body)
+                    self.assertNotIn("الرابط:", body)
+                    # المبلغُ في نصّ الرسالة يبقى — الرابطُ وحده يُحذف.
+                    self.assertIn("1160.00", body)
+
+    def test_the_owner_still_reads_the_link_on_the_three_log_paths(self):
+        client, row, token = self.sent_message_with_link()
+
+        for path, bodies in self.reads(client, row).items():
+            with self.subTest(path=path):
+                self.assertTrue(bodies)
+                for body in bodies:
+                    self.assertIn(token, body)
+
+
+class StripPublicLinksTest(SimpleTestCase):
+    """`strip_public_links` تحذف الرابطَ العامَّ بكل صوره — والنصُّ بدونه يبقى كما هو."""
+
+    def test_a_link_line_in_the_middle_goes_with_its_label(self):
+        text = "أتعاب 1\nالمبلغ: 10.00\nالرابط: https://ktra-pro.tech/s/aB_c-1\n\nأتعاب 2"
+
+        self.assertEqual(
+            fee_invoices.strip_public_links(text), "أتعاب 1\nالمبلغ: 10.00\n\nأتعاب 2",
+        )
+
+    def test_the_other_mount_and_a_foreign_host_are_stripped_too(self):
+        for url in (
+            "https://ktra-pro.tech/api/share/aB_c-1/",
+            "https://old.example.test/s/aB_c-1",
+            "/s/aB_c-1",
+        ):
+            with self.subTest(url=url):
+                self.assertEqual(
+                    fee_invoices.strip_public_links(f"افتح {url} الآن"), "افتح  الآن",
+                )
+
+    def test_a_text_without_a_link_is_untouched(self):
+        text = "المبلغ: 1160.00 — الاستحقاق: 2026-11-19\nhttps://example.test/page"
+
+        self.assertEqual(fee_invoices.strip_public_links(text), text)
 
 
 class PublicLinkTest(FeeInvoiceTestCase):

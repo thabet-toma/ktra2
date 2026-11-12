@@ -314,7 +314,7 @@ _reminder_candidates(tenant, clients, *, day, settings_by_client, reminder_type=
 ready_to_send_payload(tenant, *, user, day, reminder_type=None, assignee=None)   # رسالةٌ لكل شخصٍ في اليوم
 mark_reminders_sent(...) / mark_reminders_manual(...) / dismiss_reminders(...)   # صفوفُ السجلّ الثلاثة
 postpone_reminder(...) / undo_reminder_log(row, *, actor) / office_is_on_holiday(tenant, day)
-visible_reminder_logs(tenant, user) / reminder_log_payload(...) / client_reminder_log_payload(client) / reminder_log_row(row)
+visible_reminder_logs(tenant, user) / reminder_log_payload(...) / client_reminder_log_payload(client, *, user) / reminder_log_row(row, *, masked)   # `masked` مطلوبةٌ بلا افتراضيّ
 reminder_postpone_row(row) / office_holiday_row(row) / day_key_blocked(day, rest_days)
 _generate_reminder_alerts(tenant, *, day)                    # داخل `refresh_office`؛ التصعيدُ بعد الحدّ
 # ── دفتر الزبون (#286) ──
@@ -2609,7 +2609,10 @@ amount, method, method_label, cheque, note, allocations, due, credit, office}`.
   إعدادُ الإصدار (`invoice_title`)، وسطرُ الإعداد في الشاشة (`office_setting_row`)،
   وورقةٌ صدرت قبل الحارس (`fee_invoices.printed_title` تُسقط اللقطةَ المحرّمة في
   العرض والطباعة ولا تعدّل الصفّ) — ومصدرُ العبارتين المعجم (`core/terminology.py`)
-  لا نصٌّ في الموديول.
+  لا نصٌّ في الموديول. **وكلُّ قارئٍ للعنوان يمرّ بـ`printed_title` لا `invoice.title`
+  خامّاً** (#282fix2/٢): الورقةُ وبنودُها (`_lines_payload`)، وبندُ الرسالة
+  (`_reminder_invoice`)، وتصديرُ المكتب (`office_exports.py` ← ورقةُ الفواتير ومعها
+  رابطُ «نسخة البيانات» العامّ). قارئٌ جديدٌ للعنوان يمرّ بها كذلك.
 - **الضريبةُ في التصحيح لقطةُ المستند لا مفتاحُ اليوم** (#282fix/٢). الإشعارُ
   الدائنُ والفاتورةُ التكميليةُ يُرحَّلان بـ`enforce_licence=False`: مبلغُهما
   ونسبتُهما من لقطة الأصل، فإطفاءُ `office_licensed_dealer` بعد الإصدار لا يُسقط
@@ -2621,7 +2624,14 @@ amount, method, method_label, cheque, note, allocations, due, credit, office}`.
   (`invoice_detail`، وبطاقةُ المسودّة `draft_invoice_cards`) ولا تُنشأ له مشاركة
   (`invoice_urls` تُرجع `{}` فيسقط الرابطُ من `attach_invoice_links`)، ولا يعود
   نوعُ `fee_invoice` في سطح مشاركات الإدارة أصلاً (`fee_invoice_doc_ids` تُرجع
-  فراغاً) فلا يقرأ توكنَ زميلٍ ولا يُبطله.
+  فراغاً) فلا يقرأ توكنَ زميلٍ ولا يُبطله. **وسجلُّ التذكيرات لا يسلّم الرابطَ
+  كذلك** (#282fix2/١): `ReminderLog.body` يحفظ النصَّ المرسَل بسطر «الرابط:»،
+  فـ`reminder_log_row(row, *, masked)` — `masked` مطلوبةٌ بلا افتراضيّ، تُحسب
+  مرّةً بـ`fees.amounts_masked` وتُمرَّر في المسارات الثلاثة (`reminder_log_payload`
+  و`client_reminder_log_payload` و`retrieve`) وفي ردود `sent`/`manual`/`dismiss`/`undo`
+  وتأكيدِ الموعد — تحذف من `body` كلَّ رابطٍ عامٍّ لـ`docshare`
+  (`fee_invoices.strip_public_links`) لمن لا يملك المبالغ. والمبلغُ في النصّ يبقى
+  (استثناءُ #281)؛ الرابطُ مفتاحُ ورقةٍ بكل مبالغها لا مبلغ.
 - **الترقيمُ على دفاتر الترقيم القائمة** (#282fix/٤). `TenantBook.DOCUMENT_TYPES`
   فيه `fee_invoice` و`fee_credit_note`، والرقمُ من `TenantBook.get_next_number`
   (دفتر 0) بالبادئة `أتعاب-{السنة}` للفاتورة والتكميلية و`إشعار-أتعاب-{السنة}`
