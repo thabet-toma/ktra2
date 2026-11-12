@@ -39,7 +39,12 @@ export type ShareDocType =
   | "purchase_rfq"
   // #285: ورقة «إشعار الدفع» التي يُنشئها مكتب المحاسبة على بند «موعد رسمي قريب»
   // — جمهورها الزبون، وصلاحيتها `office.clients.write`.
-  | "payment_notice";
+  | "payment_notice"
+  // #288/ب-١: تقريرُ دفتر الزبون — ورقةُ جدولٍ يفتحها الزبونُ صاحبُ الدفتر ويطبعها
+  // PDF من متصفحه. **لا يُنشَأ من نافذة المشاركة** (الخادم يردّ 400): بابُه نقطةُ
+  // `client-books/<id>/reports/<kind>/share/` في مكتب المحاسبة، والقيمةُ هنا
+  // للحفاظ على تكافؤ الاتحاد مع `DOC_TYPES` (يحرسه `shareDocTypes.test.ts`).
+  | "client_book_report";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

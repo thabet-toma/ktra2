@@ -1992,6 +1992,40 @@ export interface BookAccountRow {
   is_active: boolean;
 }
 
+/**
+ * نوعُ تقريرٍ متاحٌ لنوع الدفتر (#288/ب-١) — **يأتي من الخادم لا من قائمةٍ هنا**.
+ * القاعدةُ في `book_reports.REPORTS_BY_BOOK_KIND` (البسيطُ لا يعطي ميزانَ
+ * مراجعة، والمزدوجُ لا يعطي قبضاً ودفعاً)، وقائمةٌ في الواجهة تفترق عنها عند
+ * أوّل تعديل فتعرض نوعاً يردّه الخادم 400.
+ */
+export interface ClientBookReportKind {
+  kind: string;
+  title: string;
+  /** معاملاتٌ لا يقوم التقريرُ بغيرها — `statement` يحتاج حساباً أو طرفاً. */
+  params: string[];
+}
+
+/** فهرسُ `client-books/<id>/reports/`: الأنواعُ المتاحة والعلامةُ المائية. */
+export interface ClientBookReportsPayload {
+  client: string;
+  book_kind: string;
+  book_kind_label: string;
+  watermark: string;
+  reports: ClientBookReportKind[];
+}
+
+/** فترةُ المستخرج — `YYYY-MM-DD`، ومنها تُبنى `from`/`to` في الطلب. */
+export interface BookReportPeriod {
+  from: string;
+  to: string;
+}
+
+/** رابطُ مشاركةِ تقرير — `POST …/reports/<kind>/share/`، والانتهاءُ من الخادم. */
+export interface ClientBookReportShare {
+  url: string;
+  expires_at: string;
+}
+
 /** صفُّ «للإدخال»: زبونٌ وشهرٌ وعددُ أوراقه — تجميعُ الخادم لا الواجهة. */
 export interface PendingEntryRow {
   client_id: number;

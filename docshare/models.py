@@ -59,6 +59,9 @@ DOC_STOCKTAKE_COUNT = "stocktake_count"
 #: واحد («عليك» أحمر / «إلك» أخضر / الرماديُّ قريبٌ من الصفر). انظر
 #: `documents.accounting_docs`.
 DOC_PAYMENT_NOTICE = "payment_notice"
+#: #288/ب-١: تقريرُ دفترِ زبونٍ — ورقةٌ من جدول التقرير المحسوب، يفتحها الزبونُ
+#: صاحبُ الدفتر ويطبعها من متصفحه PDF. انظر `documents.accounting_docs`.
+DOC_CLIENT_BOOK_REPORT = "client_book_report"
 DOC_TYPE_CHOICES = [
     (DOC_SALES_INVOICE, "فاتورة بيع"),
     (DOC_SALES_QUOTATION, "عرض سعر"),
@@ -78,6 +81,7 @@ DOC_TYPE_CHOICES = [
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
     (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
     (DOC_PAYMENT_NOTICE, "إشعار دفع"),
+    (DOC_CLIENT_BOOK_REPORT, "تقرير دفتر زبون"),
 ]
 
 #: سقف طول المفتاح. العمود كان **٢٠** حين كان النوعان مبيعاتٍ فقط، وأقصر اسم

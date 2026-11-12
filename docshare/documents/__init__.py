@@ -90,9 +90,14 @@ from docshare.documents.inventory_docs import (  # noqa: F401
 )
 from docshare.documents.accounting_docs import (  # noqa: F401
     ACCOUNTING_DOC_TYPES,
+    build_client_book_report,
     build_payment_notice,
+    client_book_report_doc_ids,
+    load_client_book_report,
     load_payment_notice,
+    page_client_book_report,
     page_payment_notice,
+    render_client_book_report,
 )
 from docshare.documents.sales_docs import (  # noqa: F401
     DECISION_QUOTATION,

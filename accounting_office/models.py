@@ -2957,6 +2957,23 @@ def _fill_tenant_from_entry(instance) -> None:
         )
 
 
+def _fill_tenant_from_book(instance) -> None:
+    """شركةُ صفٍّ تابعٍ للدفتر تتبع دفترَه — كـ`_fill_tenant_from_entry`.
+
+    النموذجُ الابنُ هنا لا زبونَ له مباشرةً (دفترُ الزبون وسيطُه)، فقاعدتُه
+    كقاعدة بقية النماذج الابنة: تمتلئ من أبيها ولا تُكتب لشركةٍ مخالفة.
+    """
+    if not instance.client_book_id:
+        return
+    expected = instance.client_book.tenant_id
+    if instance.tenant_id is None:
+        instance.tenant_id = expected
+    elif instance.tenant_id != expected:
+        raise ValueError(
+            "شركةُ صفّ الدفتر تخالف شركة دفتره — لا يُكتب سجلٌّ عابرٌ للمكاتب.",
+        )
+
+
 class BookAccountTemplate(models.Model):
     """شجرةُ الحساب الافتراضية للمنصّة — **بلا `tenant` عمداً** كـ`TaxThreshold`.
 
@@ -3371,6 +3388,72 @@ class BookEntryDocument(models.Model):
 
     def save(self, *args, **kwargs):
         _fill_tenant_from_entry(self)
+        super().save(*args, **kwargs)
+
+
+class ClientBookReport(models.Model):
+    """رابطُ مشاركةٍ لتقريرِ دفترِ زبونٍ على فترةٍ بعينها (#288/ب-١).
+
+    **ولا يُخزَّن التقريرُ نفسُه** — قياساً على مبدأ `book_reports` («التقاريرُ
+    قراءةٌ محضة»): هذا الصفُّ يقول فقط **أيُّ تقريرٍ على أيّ فترة** طُلب له رابط،
+    والأرقامُ تُعاد من `book_reports.report_payload` على الفترة المخزَّنة عند كل
+    فتح. البديلُ (تجميدُ الحمولة) كان يُثبّت أرقاماً تموت حين يُصحَّح الدفتر —
+    وهو القرارُ نفسُه الذي اتُّخذ في إشعار الدفع (#285).
+
+    **والفترةُ المخزَّنةُ هي المحلولةُ لا المطلوبة**: `report_payload` يقصّ بدايةَ
+    تقارير المزدوج إلى العهد المزدوج، فلو خُزّنت المطلوبةُ لعرض الرابطُ فترةً
+    لا تطابق ما فيه.
+
+    **و`kind` بلا `choices`**: مصدرُ الأنواع الوحيد `book_reports.REPORT_LABELS`،
+    و`book_reports` يستورد هذا الملفّ — فقائمةٌ ثانية هنا دورةُ استيرادٍ أو
+    نسخةٌ تفترق عند أوّل نوعٍ يُضاف. والتحقّقُ عند الإنشاء
+    (`book_reports.is_report_available`).
+    """
+
+    tenant = models.ForeignKey(
+        Tenant,
+        on_delete=models.CASCADE,
+        related_name="office_client_book_reports",
+        verbose_name="المكتب",
+    )
+    client_book = models.ForeignKey(
+        # `CASCADE` بخلاف `BookEntry.client_book` (`PROTECT`): الصفُّ **مؤشّرُ
+        # رابطٍ** لا حقيقةٌ محاسبية، وذبولُ الرابط بانتهاء دفتره أسلمُ من رابطٍ
+        # يشير إلى لا شيء. (والدفترُ نفسُه لا يُحذف في أيّ مسار.)
+        ClientBook,
+        on_delete=models.CASCADE,
+        related_name="shared_reports",
+        verbose_name="الدفتر",
+    )
+    kind = models.CharField(max_length=32, verbose_name="نوع التقرير")
+    period_from = models.DateField(verbose_name="من")
+    period_to = models.DateField(verbose_name="إلى")
+    created_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="office_client_book_reports",
+        verbose_name="أنشأه",
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
+
+    class Meta:
+        verbose_name = "رابط تقرير دفتر زبون"
+        verbose_name_plural = "روابط تقارير دفاتر الزبائن"
+        ordering = ["-created_at", "-id"]
+        indexes = [
+            # «أيُّ صفٍّ لهذا الدفتر؟» — إعادةُ الاستعمال في `book_exports`.
+            models.Index(
+                fields=["tenant", "client_book"], name="office_book_report_tenant",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return f"{self.client_book_id}/{self.kind}:{self.period_from}…{self.period_to}"
+
+    def save(self, *args, **kwargs):
+        _fill_tenant_from_book(self)
         super().save(*args, **kwargs)
 
 

@@ -517,6 +517,26 @@ export async function apiPostForBlob(
   return await res.blob();
 }
 
+/** GET يُعيد نصاً (HTML جاهز للطباعة مثلاً) بدل JSON — نفس ترويسات المصادقة والشركة. */
+export async function apiGetForText(
+  path: string,
+  opts?: { tenantId?: number }
+): Promise<string> {
+  const url = `${API_BASE}/${path.replace(/^\/+/, "")}`;
+  const res = await apiFetch(url, {
+    headers: getHeaders(
+      opts?.tenantId ? { "X-Tenant-Id": String(opts.tenantId) } : undefined,
+      false
+    ),
+  });
+
+  if (!res.ok) {
+    await handleResponseError(res, path);
+  }
+
+  return await res.text();
+}
+
 /** POST يُعيد نصاً (HTML جاهز للطباعة مثلاً) بدل JSON — نفس ترويسات المصادقة والشركة. */
 export async function apiPostForText(
   path: string,
