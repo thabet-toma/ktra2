@@ -8195,8 +8195,10 @@ def _approver_ids(tenant) -> set[int]:
 def _generate_data_export_reminders(tenant, *, day) -> int:
     """تذكيرُ الشهر — صفٌّ لكل مستلِمٍ إن كان الإعدادُ مفعّلاً، وإلا صفر.
 
-    `bulk_create(ignore_conflicts=True)` كسائر المولّدات: الفرادةُ في القاعدة تحرس
-    «مرّةً في الشهر» ولو نُودِي النداءُ مرّتين في اللحظة نفسها.
+    **ويُرجع ما أنشأه هذا النداء** لا عددَ المستلِمين: المفاتيحُ القائمة
+    (`tenant` + النوع + مفتاحُ الشهر) تُقرأ استعلاماً واحداً وتُستبعَد قبل
+    `bulk_create` كسائر المولّدات، فتشغيلُ اليوم نفسه مرّتين يعيد صفراً.
+    والفرادةُ في القاعدة تبقى الحارسَ لو نُودِي النداءُ مرّتين في اللحظة نفسها.
     """
     if (
         resolve_setting(tenant, DATA_EXPORT_REMINDER_KEY)
@@ -8207,17 +8209,29 @@ def _generate_data_export_reminders(tenant, *, day) -> int:
     if not recipients:
         return 0
     ref_key = data_export_ref_key(day)
-    rows = [
-        OfficeAlert(
+    existing = set(
+        OfficeAlert.objects
+        .filter(
             tenant=tenant,
-            recipient_id=recipient_id,
             kind=OFFICE_ALERT_KIND_DATA_EXPORT_DUE,
             ref_key=ref_key,
-            message=DATA_EXPORT_REMINDER_MESSAGE,
-            day=day,
         )
-        for recipient_id in sorted(recipients)
-    ]
+        .values_list("recipient_id", "kind", "ref_key"),
+    )
+    rows = _new_alert_rows(
+        tenant=tenant,
+        kind=OFFICE_ALERT_KIND_DATA_EXPORT_DUE,
+        ref_key=ref_key,
+        recipients=recipients,
+        message=DATA_EXPORT_REMINDER_MESSAGE,
+        day=day,
+        client=None,
+        task=None,
+        obligation=None,
+        existing=existing,
+    )
+    if not rows:
+        return 0
     OfficeAlert.objects.bulk_create(rows, ignore_conflicts=True)
     return len(rows)
 
