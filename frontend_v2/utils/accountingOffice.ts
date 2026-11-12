@@ -2407,6 +2407,26 @@ export function bookedDocumentIds(
 }
 
 /**
+ * مبلغُ الحركة كما يُقرأ للعرض — **الأكبرُ من مجموعَي المدين والدائن**.
+ *
+ * الدفترُ البسيط يكتب طرفاً واحداً: مصروفُه وفاتورةُ شرائه على الدائن وحده،
+ * وصفرُ المدين ليس «مبلغ الحركة صفراً». ورسالةُ نجاح التوليد كانت تقرأ
+ * `total_debit` وحدَه فتقول «بمبلغ 0.00» عن حركةٍ كُتبت فعلاً (#286/ج-٢).
+ * والحركةُ المزدوجة متوازنةٌ فطرفاها متساويان، والأكبرُ هو الرقمُ نفسه.
+ * و`null` (المبلغُ محجوبٌ عن العضو) يبقى `null` فلا صفرَ مخترعاً — والعرضُ
+ * يمرّ بـ`formatOfficeAmount` التي تُظهر «—».
+ */
+export function bookEntryAmount(
+  entry: Pick<BookEntryRow, 'total_debit' | 'total_credit'>,
+): string | null {
+  if (entry.total_debit === null) return entry.total_credit;
+  if (entry.total_credit === null) return entry.total_debit;
+  return Number(entry.total_credit) > Number(entry.total_debit)
+    ? entry.total_credit
+    : entry.total_debit;
+}
+
+/**
  * أوراقُ شهرٍ في «للإدخال»: واصلةٌ (`received`) ولا رابطَ حيّ لها.
  *
  * المشروعُ لا يخزّن «انأدخلت» (د9): الورقةُ تخرج من القائمة لأن شرطَها صار

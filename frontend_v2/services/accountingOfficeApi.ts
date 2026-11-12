@@ -43,6 +43,7 @@ import type {
   DashboardPayload,
   DeadlineRuleOverrideRow,
   DeadlineRuleRow,
+  DocumentAmountWrite,
   DocumentFileRow,
   DocumentRowPayload,
   OfficeAlertRow,
@@ -926,6 +927,21 @@ export const setDocumentStatus = (
 ): Promise<DocumentRowPayload> =>
   apiPostObject<DocumentRowPayload>(
     `${DOCUMENTS}${rowId}/status/`, payload, tenantOpts(),
+  );
+
+/**
+ * حفظُ مبلغ الورقة وحدَه (#286/ج-٢) — **لا يمسّ سجلَّ الوصول**.
+ *
+ * الحالةُ لها فعلُها: من كتب مبلغاً لا يقول إن الورقة وصلت اليوم. والمرسَلُ
+ * الحقولُ التي لمسها الموظف وحدها (`documentAmountsWrite`) — الغيابُ لا يمحو،
+ * وبلا `office.amounts.view` يردّ المبلغين 403.
+ */
+export const setDocumentAmounts = (
+  rowId: number,
+  payload: DocumentAmountWrite,
+): Promise<DocumentRowPayload> =>
+  apiPostObject<DocumentRowPayload>(
+    `${DOCUMENTS}${rowId}/amounts/`, payload, tenantOpts(),
   );
 
 /** ملفاتُ ورقةٍ — **بلا رابط تخزين**: التقديمُ من نقطة التنزيل وحدها. */

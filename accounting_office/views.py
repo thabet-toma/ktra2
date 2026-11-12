@@ -100,6 +100,7 @@ from accounting_office.serializers import (
     ContactSerializer,
     CustomRuleUpdateSerializer,
     CustomRuleWriteSerializer,
+    DocumentAmountsSerializer,
     DocumentFileUploadSerializer,
     DocumentItemChoiceSerializer,
     DocumentStatusSerializer,
@@ -1589,6 +1590,27 @@ class OfficeDocumentViewSet(OfficeModuleViewSet):
                 channel=channel,
                 actor=request.user,
                 day=timezone.localdate(),
+            )
+        row.refresh_from_db()
+        return Response(self._document_payload(row))
+
+    @action(detail=True, methods=["post"], url_path="amounts")
+    def document_amounts(self, request, pk=None):
+        """مبلغُ الورقة وحدَه — **لا يمسّ `received_on`/`received_by`/`channel`**.
+
+        الحالةُ لها فعلُها (`status`): من كتب مبلغاً لا يقول إن الورقة وصلت
+        اليوم، والطريقُ الذي يمرّ بالحالة يكتب تاريخَ الوصول وفاعلَه في كلّ
+        مبلغٍ يُكتب لاحقاً فيزوّرهما (#286/ج-٢). الرؤيةُ أوّلاً (`get_object`)
+        ثمّ مفتاحُ الكتابة، والحارسُ (المبلغُ مقابل `office.amounts.view`، والحركةُ
+        الحيّةُ ترفض) في الخدمة وحدها.
+        """
+        row = self.get_object()
+        self.require_write()
+        serializer = DocumentAmountsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        with transaction.atomic():
+            client_books.set_document_amounts(
+                row, dict(serializer.validated_data), actor=request.user,
             )
         row.refresh_from_db()
         return Response(self._document_payload(row))

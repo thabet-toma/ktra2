@@ -9,6 +9,7 @@ import {
   applyPackageSummary,
   badgeLabelOf,
   bookDraftProblem,
+  bookEntryAmount,
   bookKindOn,
   bookMonthFromSearch,
   bookedDocumentIds,
@@ -1352,6 +1353,22 @@ test('أوراقُ الحركات الحيّة وحدها تُحسب مُدخل�
   // عكسُ حركةٍ يُعيد أوراقَ الأصل إلى «للإدخال» وحدها.
   assert.deepEqual([...bookedDocumentIds([REVERSED])], []);
   assert.deepEqual([...bookedDocumentIds([])], []);
+});
+
+test('مبلغُ الحركة للعرض أكبرُ المدين والدائن — البسيطُ يكتب طرفاً واحداً', () => {
+  // مصروفٌ في دفترٍ بسيط: الدائنُ وحدَه يحمل الرقمَ والمدينُ صفر، و`total_debit`
+  // وحدَه كان يعرض «0.00» في رسالة نجاح التوليد لحظةَ كتابة الحركة.
+  assert.equal(
+    bookEntryAmount({ total_debit: '0.00', total_credit: '234.00' }),
+    '234.00',
+  );
+  // حركةٌ عادية: الطرفان متساويان فالمبلغُ هو الرقمُ نفسه لا صفراً.
+  assert.equal(
+    bookEntryAmount({ total_debit: '117.00', total_credit: '117.00' }),
+    '117.00',
+  );
+  // محجوبٌ عن العضو (المبلغان `null`) ⇒ لا رقمَ مخترعاً.
+  assert.equal(bookEntryAmount({ total_debit: null, total_credit: null }), null);
 });
 
 test('أوراقُ الشهر للاختيار: الواصلةُ التي لم تدخل حركةً حيّة فقط', () => {

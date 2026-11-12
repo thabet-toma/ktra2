@@ -19,6 +19,7 @@ import {
 } from '../../services/accountingOfficeApi';
 import {
   bookDraftProblem,
+  bookEntryAmount,
   bookKindOn,
   bookedDocumentIds,
   entryDateForMonth,
@@ -913,7 +914,7 @@ export const OfficeClientBook: React.FC<{
               <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-[11px] font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300">
                 انكتبت الحركةُ رقم {generated.number} (سنة {generated.year}):{' '}
                 {generated.documents.length} ورقة بمبلغ{' '}
-                {formatOfficeAmount(generated.total_debit)} — {generated.kind_label}.
+                {formatOfficeAmount(bookEntryAmount(generated))} — {generated.kind_label}.
               </div>
             ) : null}
 
