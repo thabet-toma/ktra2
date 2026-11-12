@@ -151,6 +151,9 @@ class AmountKeysGuardTest(SimpleTestCase):
             # مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في `PAYMENT_AMOUNT_KEYS`.
             [
                 "annual_sales", "suggested_price", "amount", "debit", "credit",
+                # #288/ب-٢: الأساسُ الخاضعُ وقيمةُ الضريبة على بند الحركة — مبلغان
+                # مسجَّلان في `BOOK_ENTRY_AMOUNT_KEYS` كالمدين والدائن.
+                "tax_base", "tax_amount",
                 "amount", "amount", "amount", "subtotal", "total",
                 "paid_amount", "remaining", "amount", "amount",
                 "total", "tax_total",
@@ -195,6 +198,10 @@ class ModelAmountGuardTest(SimpleTestCase):
                 # #286: مدينُ بند دفتر الزبون ودائنه — مسجَّلان لا مُعفَيان.
                 "BookEntryLine.credit",
                 "BookEntryLine.debit",
+                # #288/ب-٢: الأساسُ الخاضعُ وقيمةُ الضريبة المسجَّلة — مسجَّلان لا
+                # مُعفَيان: مبلغُ زبونٍ يُقنَّع كسائر مبالغ بند الحركة.
+                "BookEntryLine.tax_amount",
+                "BookEntryLine.tax_base",
                 # #282: مبالغُ الأتعاب — الاشتراكُ وسعرُ الخدمة والإضافةُ والبندُ
                 # ومجموعا المسودّة، كلُّها مسجَّلةٌ لا مُعفاة.
                 "ClientServicePrice.amount",

@@ -12,8 +12,16 @@
 1. **الرقمُ من عدّادٍ مقفول** (`ClientBookSequence`) لا من `MAX+1` ولا `count+1`.
 2. **لا حذف**: التصحيحُ حركةٌ عكسية والأصلُ يبقى.
 3. **الكتابةُ على دفتر زبونٍ خدمتُه موقوفة 400**، والقراءةُ تبقى.
+
+**ونوعان يُكتبان بيد إنسانٍ لا بورقة، بدورٍ لا بمفتاح (#288/ب-٢):**
+`manual` (قيدٌ يدويّ) و`opening` (رصيدٌ افتتاحيّ) — يُقيَّدان بـ`ENTRY_APPROVER_ROLES`
+(صاحب المكتب ومديرُ المكتب) كاعتماد مسودّات الأتعاب؛ والمحاسبُ يكتب الحركات
+المبنية على الأوراق بمفتاح الكتابة كما كان. والرصيدُ الافتتاحيُّ **واحدٌ لكل دفتر
+ولا يُمسّ بعد أوّل حركةٍ لاحقة**: لا إعادةَ كتابةٍ ولا عكساً — لا «إقفالَ» في هذا
+الدفتر أصلاً، فأوّلُ حركةٍ هي حدُّه العمليّ.
 """
 import datetime
+import re
 from decimal import Decimal
 
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -29,6 +37,8 @@ from accounting_office.models import (
     BOOK_ACCOUNT_TYPE_CHOICES,
     BOOK_ENTRY_KIND_CHOICES,
     BOOK_ENTRY_KIND_LABELS,
+    BOOK_ENTRY_KIND_MANUAL,
+    BOOK_ENTRY_KIND_OPENING,
     BOOK_KIND_CHOICES,
     BOOK_KIND_DOUBLE,
     BOOK_KIND_LABELS,
@@ -50,9 +60,26 @@ from accounting_office.models import (
     OfficeClient,
 )
 from accounting_office.settings_registry import BOOK_ENTRY_METHOD_LABELS
+from core.access import MANAGER_ROLE, OFFICE_MANAGER_ROLE, user_tenant_role
+from tenants.models import Currency
 
 #: مفتاحُ إعداد طريقة الإدخال (د10) — يُقرأ بالمحلّل، والافتراضُ «ورقة ورقة».
 ENTRY_METHOD_KEY = "book_entry_method"
+
+#: أدوارُ من يكتب **بيده** قيداً يدوياً أو رصيداً افتتاحياً — دورٌ لا مفتاح، كنمط
+#: `fees.FEE_APPROVER_ROLES`: مديرُ المكتب يملك مفاتيحَ المكتب كلَّها، والمحاسبُ
+#: يكتب الزبون ولا يكتب رصيدَ استلامٍ يقرؤه المدير.
+ENTRY_APPROVER_ROLES: tuple[str, ...] = (MANAGER_ROLE, OFFICE_MANAGER_ROLE)
+
+#: الأنواعُ التي تحتاج ذلك الدور — القائمةُ الواحدةُ التي يقرؤها الحارس.
+ENTRY_APPROVER_KINDS: tuple[str, ...] = (
+    BOOK_ENTRY_KIND_MANUAL, BOOK_ENTRY_KIND_OPENING,
+)
+
+#: شكلُ «شهر-يوم» في `ClientBook.fiscal_year_start` — مزدوجٌ بخانتين.
+FISCAL_START_PATTERN = re.compile(r"^(\d{2})-(\d{2})$")
+#: شكلُ رمز العملة (ISO 4217): ثلاثةُ أحرفٍ لاتينية كبيرة.
+CURRENCY_PATTERN = re.compile(r"^[A-Z]{3}$")
 
 #: مفتاحُ كود الحساب في بند الحركة الوارد من الـAPI — البديلُ هو تمرير الكائن.
 ACCOUNT_CODE_KEY = "account_code"
@@ -140,6 +167,8 @@ def book_row(book, *, writable, entry_method) -> dict:
         "kind_changed_on": (
             book.kind_changed_on.isoformat() if book.kind_changed_on else None
         ),
+        "fiscal_year_start": book.fiscal_year_start,
+        "currency": book.currency,
         "entry_method": entry_method,
         "entry_method_label": BOOK_ENTRY_METHOD_LABELS.get(entry_method, ""),
         "writable": writable,
@@ -247,6 +276,8 @@ def entry_row(entry, *, masked) -> dict:
                 "account_name": line.account.name,
                 "debit": _amount(line.debit),
                 "credit": _amount(line.credit),
+                "tax_base": _amount(line.tax_base),
+                "tax_amount": _amount(line.tax_amount),
                 "side_party": line.side_party,
             }
             for line in lines
@@ -395,6 +426,17 @@ def sync_client_tree(client, kind) -> int:
     return len(missing)
 
 
+def _base_currency_code() -> str:
+    """عملةُ الشركة الافتراضية: رمزُ العملة الأساسية في المنصّة، وإلا فراغ.
+
+    المصدرُ جدولُ `Currency` نفسُه (كـ`fees._resolve_currency`) لا ثابتٌ في الكود:
+    المنصّةُ تبدّل عملتها الأساسية، ودفترٌ جديدٌ يتبعها. والفراغُ لا يكسر شيئاً —
+    يُعرَض فارغاً حتى يُضبط من شاشة الدفتر.
+    """
+    base = Currency.objects.filter(IsBaseCurrency=True).order_by("CurrencyID").first()
+    return ((base.Code or "").strip().upper()) if base is not None else ""
+
+
 def create_book(tenant, client, *, kind, opened_on=None, day=None):
     """دفترُ زبونٍ بمسك دفاتر نشط — والنسخةُ من الشجرة في المعاملة نفسها."""
     day = day or _today()
@@ -414,8 +456,75 @@ def create_book(tenant, client, *, kind, opened_on=None, day=None):
             client=client,
             kind=kind,
             opened_on=opened_on or day,
+            currency=_base_currency_code(),
         )
         ensure_client_tree(client, kind)
+    return book
+
+
+# ── السنةُ المالية والعملة (#288/ب-٢) ──────────────────────────────────────
+def fiscal_year_start_parts(value) -> tuple[int, int]:
+    """`(شهر، يوم)` من نصّ «شهر-يوم» — و1/1 لنصٍّ فارغٍ أو فاسد.
+
+    **القراءةُ لا ترفض**: تقريرُ دفترٍ قائمٍ لا يسقط لأن حقلَ إعدادٍ قديمٍ فسد؛
+    والرفضُ عند الكتابة (`normalize_fiscal_year_start`).
+    """
+    match = FISCAL_START_PATTERN.match((value or "").strip())
+    if match is None:
+        return 1, 1
+    month, day = int(match.group(1)), int(match.group(2))
+    try:
+        datetime.date(2001, month, day)
+    except ValueError:
+        return 1, 1
+    return month, day
+
+
+def normalize_fiscal_year_start(raw) -> str:
+    """«شهر-يوم» مُطبَّعاً أو 400 — و29 شباط مرفوض: لا يتكرّر في كل عام."""
+    match = FISCAL_START_PATTERN.match((raw or "").strip())
+    if match is None:
+        raise ValidationError({
+            "fiscal_year_start": "بدايةُ السنة المالية بصيغة «شهر-يوم» — مثال 07-01.",
+        })
+    month, day = int(match.group(1)), int(match.group(2))
+    try:
+        # سنةٌ غير كبيسةٍ عمداً: الحقلُ يتكرّر كلَّ عام، فتاريخٌ لا يوجد في بعضها
+        # يُسقِط حسابَ الفترة في تلك السنين.
+        datetime.date(2001, month, day)
+    except ValueError:
+        raise ValidationError({
+            "fiscal_year_start": "تاريخٌ لا وجودَ له في التقويم — راجع الشهر واليوم.",
+        }) from None
+    return f"{month:02d}-{day:02d}"
+
+
+def normalize_currency(raw) -> str:
+    """رمزُ ISO 4217 من ثلاثة أحرف — موجوداً في عملات المنصّة، وإلا 400."""
+    code = (raw or "").strip().upper()
+    if not CURRENCY_PATTERN.match(code):
+        raise ValidationError({"currency": "رمزُ العملة ثلاثةُ أحرف — مثال ILS."})
+    if not Currency.objects.filter(Code=code).exists():
+        raise ValidationError({"currency": "عملةٌ غير معروفة في المنصّة."})
+    return code
+
+
+def update_settings(book, *, fiscal_year_start=None, currency=None, day=None):
+    """سنةُ الدفتر المالية وعملتُه — **كتابةً على دفترٍ حيّ** لا على منتهٍ.
+
+    والغيابُ لا يُفرّغ الحقل: ما لم يُرسَل يبقى كما هو، فلا حاجةَ لإرسال الاثنين
+    معاً في كل تعديل.
+    """
+    assert_book_writable(book, day)
+    fields = []
+    if fiscal_year_start is not None:
+        book.fiscal_year_start = normalize_fiscal_year_start(fiscal_year_start)
+        fields.append("fiscal_year_start")
+    if currency is not None:
+        book.currency = normalize_currency(currency)
+        fields.append("currency")
+    if fields:
+        book.save(update_fields=fields)
     return book
 
 
@@ -484,6 +593,65 @@ def _live_entries():
     return BookEntry.objects.filter(reverses__isnull=True, reversed_by__isnull=True)
 
 
+def opening_is_locked(book) -> bool:
+    """هل بدأت حركةُ الدفتر؟ الافتتاحيُّ يُقفل بأوّل حركةٍ **غيرِ افتتاحيةٍ حيّة**.
+
+    **ولا «إقفالَ» في هذا الدفتر** (لا قيودَ إقفالٍ ولا فترةً مقفولة): الحدُّ العمليُّ
+    الذي يحفظ المعنى هو أوّلُ حركةٍ لاحقة، لأن رصيدَ بدايةٍ يُكتب بعدها يصير رقماً
+    في وسط التاريخ لا بدايةً له. وعكسُ الحركة اللاحقة يرفع القفل — التاريخُ عاد
+    إلى ما كان عليه، فلا لزومَ لقفلٍ لا يُرفع.
+    """
+    return (
+        _live_entries()
+        .filter(client_book=book)
+        .exclude(kind=BOOK_ENTRY_KIND_OPENING)
+        .exists()
+    )
+
+
+def live_opening_entry(book):
+    """الحركةُ الافتتاحيةُ الحيّةُ للدفتر إن وُجدت — **واحدةٌ على الأكثر**."""
+    return _live_entries().filter(
+        client_book=book, kind=BOOK_ENTRY_KIND_OPENING,
+    ).first()
+
+
+def _assert_opening_unlocked(book) -> None:
+    """لا يُكتب افتتاحيٌّ ولا يُعكس بعد أوّل حركةٍ لاحقة — 400 برسالته."""
+    if opening_is_locked(book):
+        raise ValidationError({
+            "kind": (
+                "الرصيدُ الافتتاحيُّ مُقفل: في الدفتر حركةٌ لاحقة. يُدخل الافتتاحيُّ "
+                "قبل أوّل حركة، وتُصحَّح الحركةُ اللاحقة (أو عكسُها) لا الافتتاحُ."
+            ),
+        })
+
+
+def _assert_no_live_opening(book) -> None:
+    """افتتاحيٌّ واحدٌ حيٌّ لكل دفتر — الثاني 400 لأنه تكرارُ بدايةٍ لا تصحيحُها."""
+    if live_opening_entry(book) is not None:
+        raise ValidationError({
+            "kind": "للدفتر رصيدٌ افتتاحيٌّ بالفعل — التصحيحُ حركةٌ عكسية عليه.",
+        })
+
+
+def _assert_entry_writer(book, kind, actor) -> None:
+    """القيدُ اليدويُّ والرصيدُ الافتتاحيُّ **بدور** المدير/صاحب المكتب — 403.
+
+    والمفتاحُ لا يكفي: المحاسبُ يملك `office.clients.write` و`office.amounts.view`
+    فيمرّ من الحارسين، والمنعُ دورٌ لا صلاحية (نمط `fees._assert_approver`).
+    و`actor=None` نداءٌ داخليٌّ كـ`_assert_can_write_amounts`، والـviews تمرّر
+    المستخدمَ دائماً.
+    """
+    if kind not in ENTRY_APPROVER_KINDS or actor is None:
+        return
+    if user_tenant_role(actor, book.tenant) not in ENTRY_APPROVER_ROLES:
+        raise PermissionDenied(
+            "لا يكتب القيدَ اليدويَّ ولا الرصيدَ الافتتاحيَّ إلا المديرُ وصاحبُ "
+            "المكتب — لا بمفتاح الكتابة.",
+        )
+
+
 def _next_number(client, year) -> int:
     """**الرقمُ من العدّاد المقفول** — لا `MAX(number)+1` ولا `count()+1`.
 
@@ -525,8 +693,12 @@ def _prepare_lines(client, lines) -> list[dict]:
             raise ValidationError({"lines": f"{where}: لا حسابَ بهذا الكود."})
         debit = _decimal(raw.get("debit"))
         credit = _decimal(raw.get("credit"))
+        tax_base = _decimal(raw.get("tax_base"))
+        tax_amount = _decimal(raw.get("tax_amount"))
         if debit < 0 or credit < 0:
             raise ValidationError({"lines": f"{where}: مبلغٌ سالب — اعكس الطرف."})
+        if tax_base < 0 or tax_amount < 0:
+            raise ValidationError({"lines": f"{where}: ضريبةٌ سالبة — تصحيحُها بحركة."})
         if debit == 0 and credit == 0:
             raise ValidationError({"lines": f"{where}: لا مدينَ ولا دائن."})
         if debit and credit:
@@ -537,6 +709,8 @@ def _prepare_lines(client, lines) -> list[dict]:
             "account": account,
             "debit": debit,
             "credit": credit,
+            "tax_base": tax_base,
+            "tax_amount": tax_amount,
             "side_party": (raw.get("side_party") or "").strip()[:200],
         })
     return prepared
@@ -547,6 +721,9 @@ def _assert_balanced(book, prepared, *, entry_date) -> None:
 
     المزدوجُ يتوازن والبسيطُ لا يُسأل — تعريفُ النوعين لا قاعدةً زائدة. وحركةٌ
     بتاريخٍ يسبق الانتقال تُقاس بالبسيط، وإلا رُفضت ورقٌ صحيحة.
+
+    **والرسالةُ تسمّي الفرق** لا الطرفين وحدهما: «مدين 100 ودائن 90» يجعل
+    المحاسبَ يطرح بنفسه، والفرقُ هو ما يبحث عنه.
     """
     if kind_on(book, entry_date) != BOOK_KIND_DOUBLE:
         return
@@ -554,7 +731,10 @@ def _assert_balanced(book, prepared, *, entry_date) -> None:
     credit = sum(line["credit"] for line in prepared)
     if debit != credit:
         raise ValidationError({
-            "lines": f"الحركة غير متوازنة: مدين {_amount(debit)} ودائن {_amount(credit)}.",
+            "lines": (
+                f"الحركة غير متوازنة: مدين {_amount(debit)} ودائن {_amount(credit)} — "
+                f"الفرق {_amount(abs(debit - credit))}."
+            ),
         })
 
 
@@ -599,13 +779,24 @@ def create_entry(
     book, *, entry_date, kind, lines, memo="", documents=None,
     reverses=None, actor=None, day=None,
 ):
-    """حركةٌ جديدة: رقمٌ مقفول، بنودٌ متوازنة، وأوراقٌ لا تُدخل مرّتين."""
+    """حركةٌ جديدة: رقمٌ مقفول، بنودٌ متوازنة، وأوراقٌ لا تُدخل مرّتين.
+
+    **والافتتاحيُّ قيدٌ استثنائيّ بنوعِه لا بمسارٍ ثانٍ**: يُكتب من هنا نفسِه
+    (ومنه يكتبه الاستيرادُ)، فيمرّ بالترقيم والقفل والتوازن كأيّ حركة، وتُضاف
+    قاعدتاه وحدهما: لا ثانيَ له، ولا يُعاد بعد أوّل حركةٍ لاحقة. وعكسُ الافتتاحيّ
+    يمرّ بالمسار نفسِه (`reverses` غير `None`) فلا يراه فحصُ «له افتتاحيٌّ بالفعل».
+    """
     assert_book_writable(book, day)
     _assert_can_write_amounts(book, actor)
     if kind not in BOOK_ENTRY_KIND_LABELS:
         raise ValidationError({"kind": "نوع حركة غير معروف."})
     if not isinstance(entry_date, datetime.date):
         raise ValidationError({"entry_date": "تاريخ الحركة مطلوب بصيغة YYYY-MM-DD."})
+    _assert_entry_writer(book, kind, actor)
+    if kind == BOOK_ENTRY_KIND_OPENING:
+        _assert_opening_unlocked(book)
+        if reverses is None:
+            _assert_no_live_opening(book)
     prepared = _prepare_lines(book.client, lines)
     # والعكسُ **غيرُ معفى**: يُقاس بنوع تاريخه كأيّ حركة. بتاريخ الأصل (الافتراض)
     # يُقاس بنوع عهد الأصل فيمرّ؛ ومؤرَّخاً في سنة المزدوج يُفحص بتوازنها، وإلا
@@ -633,6 +824,8 @@ def create_entry(
                 account=line["account"],
                 debit=line["debit"],
                 credit=line["credit"],
+                tax_base=line["tax_base"],
+                tax_amount=line["tax_amount"],
                 side_party=line["side_party"],
             )
             for line in prepared
@@ -673,11 +866,17 @@ def reverse_entry(entry, *, memo="", entry_date=None, actor=None, day=None):
             })
         if BookEntry.objects.filter(reverses=entry).exists():
             raise ValidationError({"entry": "لهذه الحركة حركةٌ عكسية بالفعل."})
+        # الافتتاحيُّ يُقفل بأوّل حركةٍ لاحقة، فلا يُعكس بعدها: عكسُه إعادةُ كتابةِ
+        # رصيدِ البداية بعد أن بُني عليه تاريخ — والقفلُ مرفوعٌ بعكس الحركة نفسِها.
+        if entry.kind == BOOK_ENTRY_KIND_OPENING:
+            _assert_opening_unlocked(book)
         lines = [
             {
                 "account": line.account,
                 "debit": line.credit,
                 "credit": line.debit,
+                "tax_base": line.tax_base,
+                "tax_amount": line.tax_amount,
                 "side_party": line.side_party,
             }
             for line in entry.lines.select_related("account")

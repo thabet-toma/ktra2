@@ -160,6 +160,8 @@ class ClientBookTestCase(APITestCase):
         cls.colleague = member("cb_colleague", "accountant")
         #: دورٌ قراءةٌ فقط: يرى زبونَه ولا يملك `office.clients.write`.
         cls.viewer = member("cb_viewer", "viewer")
+        #: مديرُ المكتب (#288/ب-٢): يُقيَّد به القيدُ اليدويُّ والافتتاحيُّ معاً.
+        cls.office_manager = member("cb_office_manager", "office_manager")
 
         cls.manager_b = User.objects.create_user(username="cb_manager_b", password="x")
         cls.tenant_b = create_company(
@@ -1398,6 +1400,305 @@ class PendingEntryTest(ClientBookTestCase):
 
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data["total"], 0)
+
+
+class BookSettingsTest(ClientBookTestCase):
+    """السنةُ المالية والعملة لكل زبون (#288/ب-٢) — على الدفتر لا على الشركة."""
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE)
+
+    def set_settings(self, body, *, expect=200, client=None, tenant=None):
+        res = self.client.post(
+            f"{BOOKS}{(client or self.mine).pk}/settings/", body, format="json",
+            **self.headers(tenant=tenant),
+        )
+        self.assertEqual(res.status_code, expect, res.content)
+        return res.data
+
+    def book_row(self, client=None):
+        res = self.client.get(f"{BOOKS}{(client or self.mine).pk}/", **self.headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
+
+    def test_a_new_book_takes_the_company_currency_and_a_january_first_year(self):
+        row = self.book_row()
+
+        self.assertEqual(row["fiscal_year_start"], "01-01")
+        self.assertEqual(row["currency"], "ILS")
+
+    def test_the_settings_endpoint_updates_the_year_and_the_currency(self):
+        Currency.objects.create(Code="USD", Name="دولار")
+
+        row = self.set_settings({"fiscal_year_start": "07-01", "currency": "USD"})
+
+        self.assertEqual(row["fiscal_year_start"], "07-01")
+        self.assertEqual(row["currency"], "USD")
+        book = ClientBook.objects.get(client=self.mine)
+        self.assertEqual(book.fiscal_year_start, "07-01")
+        self.assertEqual(book.currency, "USD")
+
+    def test_a_partial_update_keeps_the_other_field(self):
+        self.set_settings({"fiscal_year_start": "07-01"})
+
+        row = self.set_settings({"currency": "ILS"})
+
+        self.assertEqual(row["fiscal_year_start"], "07-01")
+        self.assertEqual(row["currency"], "ILS")
+
+    def test_a_month_outside_the_calendar_is_400(self):
+        payload = self.set_settings({"fiscal_year_start": "13-01"}, expect=400)
+
+        self.assertIn("fiscal_year_start", payload)
+        self.assertEqual(
+            ClientBook.objects.get(client=self.mine).fiscal_year_start, "01-01",
+        )
+
+    def test_february_twenty_ninth_is_400(self):
+        """يومٌ لا وجودَ له في كل سنة: حسابُ الفترة يرمي بعدها كلَّ سنةٍ غير كبيسة."""
+        self.set_settings({"fiscal_year_start": "02-29"}, expect=400)
+
+    def test_an_unknown_currency_is_400(self):
+        payload = self.set_settings({"currency": "ZZZ"}, expect=400)
+
+        self.assertIn("currency", payload)
+        self.assertEqual(ClientBook.objects.get(client=self.mine).currency, "ILS")
+
+    def test_a_short_currency_code_is_400(self):
+        self.set_settings({"currency": "US"}, expect=400)
+
+    def test_another_office_cannot_change_the_settings(self):
+        self.as_user(self.manager_b)
+
+        self.set_settings(
+            {"fiscal_year_start": "07-01"}, expect=404, tenant=self.tenant_b,
+        )
+
+        self.assertEqual(
+            ClientBook.objects.get(client=self.mine).fiscal_year_start, "01-01",
+        )
+
+    def test_the_write_key_is_needed(self):
+        mine = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبون المستعرض", responsible=self.viewer,
+        )
+        self.create_book(mine, kind=BOOK_KIND_SIMPLE)
+        self.as_user(self.viewer)
+
+        self.set_settings({"fiscal_year_start": "07-01"}, expect=403, client=mine)
+
+
+class ManualEntryRoleTest(ClientBookTestCase):
+    """القيدُ اليدوي بصلاحية دور (#288/ب-٢): صاحبُ المكتب ومديرُ المكتب وحدهما.
+
+    والمحاسبُ يمرّ من مفتاح الكتابة ومن حارس المبلغ، فيُمنَح المفتاحين صراحةً في
+    الاختبار: سقوطُه **403 الدور** لا 403 الصلاحية — والقيدُ العاديُّ يُقبل منه في
+    الاختبار نفسه، فلا يمرّ الرفضُ بسببٍ آخر.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE)
+
+    def grant(self, user, *keys):
+        membership = UserCompanyMembership.objects.get(user=user, tenant=self.tenant)
+        for key in keys:
+            MemberPermission.objects.get_or_create(
+                membership=membership, permission_key=key,
+                defaults={"allowed": True},
+            )
+
+    def manual(self, *, lines=None, expect=201):
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/",
+            {
+                "entry_date": LAST_YEAR_DAY.isoformat(),
+                "kind": "manual",
+                "memo": "قيدٌ يدوي",
+                "lines": lines or self.balanced("250.00"),
+            },
+            format="json",
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, expect, res.content)
+        return res.data
+
+    def trial_balance(self):
+        res = self.client.get(
+            f"{BOOKS}{self.mine.pk}/reports/trial_balance/",
+            {
+                "from": datetime.date(THIS_YEAR - 1, 1, 1).isoformat(),
+                "to": datetime.date(THIS_YEAR, 12, 31).isoformat(),
+            },
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
+
+    def test_an_accountant_with_both_keys_is_refused_the_manual_entry(self):
+        self.grant(self.accountant, "office.clients.write", "office.amounts.view")
+        self.as_user(self.accountant)
+        # القيدُ العاديُّ يُقبل منه: المفتاحُ والمبلغُ سالكان، والرفضُ للدور وحده.
+        self.add_entry(self.mine, lines=self.balanced("10.00"), kind="expense")
+
+        error = self.manual(expect=403)
+
+        self.assertIn("المدير", str(error))
+        self.assertFalse(
+            BookEntry.objects.filter(client=self.mine, kind="manual").exists(),
+        )
+
+    def test_the_owner_writes_a_balanced_manual_entry_and_it_shows_in_the_balance(self):
+        row = self.manual()
+
+        self.assertEqual(row["kind"], "manual")
+        self.assertEqual(row["kind_label"], "يدوي")
+        rows = {line["account_code"]: line for line in self.trial_balance()["rows"]}
+        self.assertEqual(rows["1100"]["debit"], "250.00")
+        self.assertEqual(rows["4100"]["credit"], "250.00")
+
+    def test_the_office_manager_writes_a_manual_entry_too(self):
+        self.as_user(self.office_manager)
+
+        self.manual()
+
+    def test_an_unbalanced_manual_entry_names_the_difference(self):
+        error = self.manual(
+            lines=[
+                {"account_code": "1100", "debit": "100.00"},
+                {"account_code": "4100", "credit": "90.00"},
+            ],
+            expect=400,
+        )
+
+        self.assertIn("غير متوازنة", str(error))
+        self.assertIn("10.00", str(error))
+        self.assertFalse(BookEntry.objects.filter(client=self.mine).exists())
+
+
+class OpeningBalanceTest(ClientBookTestCase):
+    """الأرصدةُ الافتتاحية (#288/ب-٢): حركةُ `opening` واحدة، ولا تُمسّ بعد أوّل حركة."""
+
+    OPENED = datetime.date(THIS_YEAR - 1, 1, 1)
+    MOVED = datetime.date(THIS_YEAR - 1, 3, 5)
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE, opened_on=self.OPENED)
+
+    def opening(self, *, lines=None, expect=201):
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/",
+            {
+                "entry_date": self.OPENED.isoformat(),
+                "kind": "opening",
+                "memo": "أرصدةٌ افتتاحية",
+                "lines": lines or [
+                    {"account_code": "1100", "debit": "500.00"},
+                    {"account_code": "3000", "credit": "500.00"},
+                ],
+            },
+            format="json",
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, expect, res.content)
+        return res.data
+
+    def period(self):
+        return {
+            "from": self.OPENED.isoformat(),
+            "to": datetime.date(THIS_YEAR, 12, 31).isoformat(),
+        }
+
+    def report(self, kind, **params):
+        res = self.client.get(
+            f"{BOOKS}{self.mine.pk}/reports/{kind}/", {**self.period(), **params},
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
+
+    def test_the_opening_balance_shows_in_the_balance_sheet(self):
+        self.opening()
+
+        payload = self.report("balance_sheet")
+
+        rows = {row["account_code"]: row for row in payload["rows"]}
+        self.assertEqual(rows["1100"]["balance"], "500.00")
+        self.assertEqual(rows["3000"]["balance"], "500.00")
+        self.assertEqual(payload["totals"]["difference"], "0.00")
+
+    def test_the_opening_balance_shows_in_the_statement(self):
+        self.opening()
+
+        payload = self.report("statement", account="1100")
+
+        self.assertEqual(payload["totals"]["closing_balance"], "500.00")
+        self.assertEqual([row["debit"] for row in payload["rows"]], ["500.00"])
+
+    def test_a_second_opening_entry_is_400(self):
+        self.opening()
+
+        self.opening(expect=400)
+
+        self.assertEqual(BookEntry.objects.filter(kind="opening").count(), 1)
+
+    def test_the_opening_is_locked_once_a_later_entry_exists(self):
+        self.opening()
+        self.add_entry(self.mine, lines=self.balanced("10.00"), entry_date=self.MOVED)
+
+        error = self.opening(expect=400)
+
+        self.assertIn("الافتتاحي", str(error))
+        self.assertEqual(BookEntry.objects.filter(kind="opening").count(), 1)
+
+    def test_reversing_the_opening_is_400_after_a_later_entry(self):
+        opening = self.opening()
+        self.add_entry(self.mine, lines=self.balanced("10.00"), entry_date=self.MOVED)
+
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{opening['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("الافتتاحي", str(res.data))
+        self.assertFalse(BookEntry.objects.filter(reverses_id=opening["id"]).exists())
+
+    def test_the_opening_can_be_reversed_before_any_movement(self):
+        opening = self.opening()
+
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/{opening['id']}/reverse/",
+            {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        # ثم يُكتب الافتتاحيُّ من جديد بعد العكس: العكسُ يُخرجه من الحيّ.
+        self.opening()
+
+    def test_a_simple_book_takes_a_one_sided_opening_balance(self):
+        other = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبونٌ بسيط", responsible=self.accountant,
+        )
+        self.create_book(other, kind=BOOK_KIND_SIMPLE, opened_on=self.OPENED)
+
+        res = self.client.post(
+            f"{BOOKS}{other.pk}/entries/",
+            {
+                "entry_date": self.OPENED.isoformat(),
+                "kind": "opening",
+                "lines": [{"account_code": "1100", "debit": "700.00"}],
+            },
+            format="json",
+            **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(res.data["kind"], "opening")
 
 
 #: أسماءُ ما لا يُستورد في كود دفتر الزبون — القاعدةُ في

@@ -169,5 +169,13 @@ urlpatterns = [
         OfficeClientBookViewSet.as_view({"get": "export_book_xlsx"}),
         name="accounting-office-client-book-xlsx",
     ),
+    # #288/ب-٢: قالبُ الاستيراد — fileٌ باسم «template.xlsx» فيُسجَّل هنا بالسبب
+    # نفسه: الراوترُ يضيف شرطةً أخيرةً فتُقرأ النقطةُ مساراً. والقراءةُ بلا مفتاح
+    # كتابة، والترخيصُ والعزلُ في الـviewset نفسِه كالمستخرجات.
+    re_path(
+        r"^client-books/(?P<pk>[0-9]+)/import/template\.xlsx$",
+        OfficeClientBookViewSet.as_view({"get": "import_template"}),
+        name="accounting-office-client-book-import-template",
+    ),
     path("", include(router.urls)),
 ]

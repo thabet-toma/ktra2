@@ -35,6 +35,7 @@ from rest_framework.response import Response
 from accounting_office import (
     appointments,
     book_exports,
+    book_imports,
     book_reports,
     client_books,
     deadlines,
@@ -71,7 +72,9 @@ from accounting_office.serializers import (
     BookAccountWriteSerializer,
     BookEntryReverseSerializer,
     BookEntryWriteSerializer,
+    BookImportWriteSerializer,
     ClientBookKindWriteSerializer,
+    ClientBookSettingsWriteSerializer,
     ClientBookWriteSerializer,
     ClientAppointmentConfirmSerializer,
     ClientAppointmentRescheduleSerializer,
@@ -2260,6 +2263,70 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         book = client_books.change_kind(book, serializer.validated_data["kind"])
         return Response(self._book_row(book))
 
+    # ── إعدادُ الدفتر واستيراده (#288/ب-٢) ──────────────────────────────────
+    #
+    # **ولا حسابَ هنا**: `client_books.update_settings` تفحص التقويم والعملة،
+    # و`book_imports` تقرأ الملفَّ وتتحقّق منه وتكتب في معاملةٍ واحدة. والـview
+    # يمرّر الطلبَ ويردّ ما بُني، والعزلُ من `_book` والبابُ من `require_write`.
+    #
+    # **والاسمُ `update_settings` لا `settings`**: `APIView.settings` خاصيّةٌ
+    # تُقرأ في `initial` و`get_exception_handler`، ودالّةٌ بالاسم نفسه تُحوّلها
+    # إلى `function` فيسقط كلُّ طلبٍ بـ500. والمسارُ يبقى `…/settings/`.
+    @action(detail=True, methods=["post"], url_path="settings")
+    def update_settings(self, request, pk=None):
+        """`POST …/settings/` — السنةُ المالية والعملة لكل زبون.
+
+        والفترةُ الافتراضيةُ للتقارير تقرأ `fiscal_year_start` من الدفتر نفسه في
+        `book_reports.period_for` — **مصدرُ الفترة يبقى واحداً**.
+        """
+        book = self._book(pk)
+        self.require_write()
+        serializer = ClientBookSettingsWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        book = client_books.update_settings(book, **serializer.validated_data)
+        return Response(self._book_row(book))
+
+    @action(
+        detail=True, methods=["post"], url_path="import",
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def import_file(self, request, pk=None):
+        """`POST …/import/` — شجرةُ الحساب والأرصدة من ملفّ Excel.
+
+        **والقراءةُ والتحقّقُ قبل أوّل كتابة** (`book_imports.parse_rows`)، والكتابةُ
+        في معاملةٍ واحدة: صفٌّ فاسدٌ واحدٌ لا يترك كوداً ولا حركة. والدفترُ المنتهي
+        يردّ 400 من `assert_book_writable` قبل أن يُفتح الملفُّ أصلاً.
+        """
+        book = self._book(pk)
+        self.require_write()
+        upload = request.FILES.get("file")
+        if upload is None:
+            raise ValidationError({"file": "أرفق ملفّ Excel (.xlsx) في الحقل file."})
+        serializer = BookImportWriteSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(
+            book_imports.import_tree_and_balances(
+                book,
+                content=upload.read(),
+                entry_date=serializer.validated_data.get("entry_date"),
+                actor=request.user,
+            ),
+            status=status.HTTP_201_CREATED,
+        )
+
+    def import_template(self, request, pk=None):
+        """`GET …/import/template.xlsx` — القالبُ الفارغ بالترويسة الصحيحة.
+
+        ويُسجَّل في `urls.py` بـ`re_path` كالمستخرجات: الراوترُ يُلحق شرطةً أخيرةً
+        بكل فعل، و`template.xlsx` اسمُ ملفٍّ تفصله شرطةٌ عن الاسم فيُقرأ مساراً.
+        والقراءةُ بلا مفتاح كتابة: تحميلُ ورقةٍ فارغةٍ ليس فعلاً على الدفتر.
+        """
+        book = self._book(pk)
+        return _xlsx_response(
+            book_imports.template_bytes(),
+            f"client-book-{book.client_id}-import-template",
+        )
+
     # ── التقارير (#288/أ): قراءةٌ محسوبةٌ على الخادم ─────────────────────────
     #
     # **ولا حسابَ هنا**: `book_reports` هي الوحدةُ التي تُرشِّح وتجمع وتقنّع،
@@ -2347,6 +2414,7 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         book = self._book(pk)
         period = book_reports.period_for(
             request.query_params.get("from"), request.query_params.get("to"),
+            book=book,
         )
         return _xlsx_response(
             book_exports.whole_book_bytes(book, period, user=request.user),
