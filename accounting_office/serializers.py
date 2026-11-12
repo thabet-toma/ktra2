@@ -964,3 +964,22 @@ class FeeLedgerQuerySerializer(serializers.Serializer):
     q = serializers.CharField(required=False, allow_blank=True)
     page = serializers.IntegerField(required=False, min_value=1)
     page_size = serializers.IntegerField(required=False, min_value=1)
+
+
+# ── المستندان (#283/ب): رابطُ إشعار القبض ورابطُ كشف الحساب ──────────────────
+class FeeDocumentShareSerializer(serializers.Serializer):
+    """مشاركةُ إشعار قبض — المدةُ اختياريّة، والغائبُ يأخذ الافتراض في `docshare`.
+
+    **والرقمُ لا يُرسَل في الجسم**: الرابطُ لعنوان المستند لا لمحتواه، ومدّةٌ
+    خارج المدد المعروضة يضبطها `docshare.create_share` إلى الافتراضية.
+    """
+
+    days = serializers.IntegerField(required=False, min_value=1, max_value=90)
+
+
+class FeeStatementShareSerializer(serializers.Serializer):
+    """مشاركةُ كشف حساب: الزبونُ إلزاميٌّ، والفترةُ اختياريّة (سنةُ اليوم افتراضاً)."""
+
+    client = serializers.IntegerField(min_value=1)
+    period_from = serializers.DateField(required=False)
+    period_to = serializers.DateField(required=False)

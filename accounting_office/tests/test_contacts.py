@@ -14,6 +14,7 @@ from accounting_office.models import (
     ClientReminderRecipient,
     Contact,
     OfficeClient,
+    REMINDER_TYPES,
 )
 from accounting_office.services import (
     link_client_contact,
@@ -243,7 +244,9 @@ class ReminderRecipientTest(ContactTestCase):
         payload = self.client.get(f"{CLIENTS}{shop['id']}/reminders/", **self.headers())
         self.assertEqual(payload.status_code, 200)
         by_type = {row["reminder_type"]: row for row in payload.data}
-        self.assertEqual(set(by_type), {"documents", "deadline", "balance", "appointment"})
+        # كلُّ الأنواع من قائمتها لا من تعدادٍ حرفيّ: نوعٌ خامسٌ جديد يحقّ له
+        # صفٌّ هنا بالارتداد إلى الرئيسية، وغيابه كان يسقط هذا التعداد.
+        self.assertEqual(set(by_type), set(REMINDER_TYPES))
         for row in by_type.values():
             self.assertEqual(row["recipient"]["contact_id"], primary["id"])
             self.assertTrue(row["is_fallback"])

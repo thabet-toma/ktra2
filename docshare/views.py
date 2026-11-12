@@ -32,8 +32,9 @@ from core.throttles import ClientIpScopedThrottle
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
-    DECISION_ACCEPTED, DECISION_REJECTED, DOC_FEE_INVOICE, DOC_PAYMENT_NOTICE,
-    DOC_PURCHASE_RFQ, DOC_STOCKTAKE_COUNT, DocumentShare,
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_FEE_INVOICE, DOC_FEE_RECEIPT,
+    DOC_FEE_STATEMENT, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
+    DOC_STOCKTAKE_COUNT, DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
 
@@ -709,6 +710,21 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": (
                     "إشعار الدفع يُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type in (DOC_FEE_RECEIPT, DOC_FEE_STATEMENT):
+            # #283/ب: مستندا الأتعاب يُنشآن من مكتب المحاسبة وحده
+            # (`fees/payments/<pk>/share/` و`fees/ledger/share/`)، وهما يمرّان
+            # بـ`visible_clients`/`visible_payments` ويسجّلان الكشفَ صفّاً.
+            # وهذا الباب يأخذ **أيّ** معرّفٍ متسلسلٍ يُخمَّن ويمنح رابطاً عامّاً:
+            # محاسبٌ يملك `office.clients.write` بلا `office.clients.all` كان
+            # يتّخذ إشعارَ دفعةٍ لزبون زميله — تجاوزاً لعزل الرؤية نفسه الذي
+            # حُرست به `payment_notice` (#285).
+            return Response(
+                {"detail": (
+                    "إشعار القبض وكشف الحساب يُنشآن من مكتب المحاسبة: "
+                    "fees/payments/<id>/share/ وfees/ledger/share/."
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

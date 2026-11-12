@@ -71,12 +71,12 @@
 | `accounting_office/payments.py` | **الدفعاتُ و«اللي عليه» وكشف الحساب** (#283): `client_due` (**الصيغةُ الوحيدة**: `due = Σ remaining(المعتمدة) − credit`) و`client_due_map`/`client_dues_payload`، و`client_due_tax_note` (سطرُ العلم، خارجَ `due`)، و`invoice_summary`/`invoice_summaries` و`invoice_state` (`paid`/`partial`/`unpaid` مشتقّة)، و`with_invoice_totals`/`with_payment_credit` (**استعلامٌ فرعيٌّ لكل علاقة** — لا `SUM` على JOIN مزدوج يُضاعف الصفوف)، و`next_receipt_number` (**عدّادٌ مقفول** بـ`select_for_update().get_or_create`)، و`create_payment` (تخصيصٌ صريح أو أقدمُ أوّلَاً، والمبلغُ **يُفحص قبل التقريب**)، و`apply_open_credit` (الرصيدُ الدائن يُستهلك بتخصيصٍ جديدٍ **بعد التزام** معاملة الاعتماد)، و`write_off_fee_draft`/`can_write_off` (**صاحبُ المكتب وحده**)، و`visible_payments`/`filter_payments`/`payments_payload`/`payment_row`، و`ledger_payload` (**فلترةٌ وترقيمٌ في الاستعلام**، ومعه `write_off_row` والشطوبُ في الكشف). **لا يكتب قيداً بنفسه**: ينادي `office_journal` **نداءً واحداً** داخل معاملته (`create_payment` و`write_off_fee_draft`)، و`payment_row` تحمل `journal_entry` (#284) |
 | `accounting_office/office_journal.py` | **القيدُ التلقائيُّ في دفاتر المكتب** (#284/أ): `journaling_enabled` (مفتاحُ المكتب: مطفأً لا قيدَ ولا شيك)، و`partner_for` (**الطرفُ من `partner_id` وحده**، يُنشأ ويُربط مرّةً بقفل صفّ الزبون — لا مطابقةَ بالاسم)، و`post_payment_journal` (مدينٌ حسابُ طريقة الدفع ÷ دائنٌ الذمّمُ المدينة بوسم الطرف، والشيكُ يُنشَأ **قبل** القيد)، و`post_writeoff_journal` (مدينٌ حسابُ الشطب ÷ دائنٌ الذمّم)، و`ensure_writeoff_account` (**حسابُ الديون المعدومة `5290` يُنشأ تحت «52» عند أوّل شطب — البذرةُ لا تحمله**)، و`journal_entry_ids` (قراءةُ القيود لصفوف القائمة باستعلامٍ واحد)، و`_account` (**كودُ الإعداد يُحلّ من شجرة الشركة** وإلا 400 يسمّي المفتاحَ والكود)، و`METHOD_ACCOUNT_KEYS` (الطرقُ الأربعُ المعلَنة وحدها). **لا استيرادَ من `accounting.models`** — `accounting/api.py` و`accounting/services.py` وحدهما |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
-| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن، **وسطرُ الدفتر يحمل `entry_kind_choices` و`account_type_choices`**: قائمتا تسمياتٍ تُبنيان في `client_books` كما في `frequency_choices`/`direction_choices`، و**`GET client-books/choices/`** تردّ `{book_kinds, entry_kinds, account_types}` لأن تسميات نوع الدفتر لا يحملها أيُّ ردٍّ آخر)، ونقاطُ المواعيد: قراءةٌ وثلاثةُ أشكالٍ للقائمة، وحجزٌ، وأفعالُ `confirm`/`reschedule`/`cancel`/`done` بلا حذفٍ ولا تعديلٍ جزئيّ (#281)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف)، و**نقاطُ الدفعات وكشفِ الحساب** (#283 — `fees/payments/` قراءةً بفلاتر وإنشاءً بتخصيص، `fees/drafts/<pk>/write-off/` فعلٌ على المسودّة **بُوّابته الدورُ وحده** (`MANAGER_ROLE`) لا مفتاحُ كتابة، `fees/ledger/` كشفٌ بفلترةٍ وترقيمٍ في الاستعلام، و`due`/`tax_note` على صفّ الزبون) |
+| `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن، **وسطرُ الدفتر يحمل `entry_kind_choices` و`account_type_choices`**: قائمتا تسمياتٍ تُبنيان في `client_books` كما في `frequency_choices`/`direction_choices`، و**`GET client-books/choices/`** تردّ `{book_kinds, entry_kinds, account_types}` لأن تسميات نوع الدفتر لا يحملها أيُّ ردٍّ آخر)، ونقاطُ المواعيد: قراءةٌ وثلاثةُ أشكالٍ للقائمة، وحجزٌ، وأفعالُ `confirm`/`reschedule`/`cancel`/`done` بلا حذفٍ ولا تعديلٍ جزئيّ (#281)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف)، و**نقاطُ الدفعات وكشفِ الحساب** (#283 — `fees/payments/` قراءةً بفلاتر وإنشاءً بتخصيص، `fees/drafts/<pk>/write-off/` فعلٌ على المسودّة **بُوّابته الدورُ وحده** (`MANAGER_ROLE`) لا مفتاحُ كتابة، `fees/ledger/` كشفٌ بفلترةٍ وترقيمٍ في الاستعلام، و`due`/`tax_note` على صفّ الزبون، **ومستنداه (#283/ب)**: `fees/payments/<pk>/print|share/` و`fees/ledger/print|share/` — طباعةٌ بياناتٌ ومشاركةٌ رابطٌ، بمفتاح الكتابة وحرسِ الرؤية (404 لمكتبٍ آخر)) |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
 | `accounting_office/urls.py` | `SimpleRouter` (لا `DefaultRouter`: جذرُه فهرسٌ غير محروس) |
-| `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` — وفيه أنواعُ التذكيرات: `ReadyToSendPayload`/`ReminderLogRow`/`ReminderTemplateRow`/`ContactConsentPayload`/`OfficeHolidayRow` (#280)، ومنها `ReadyToSendItemKey` (الزبون والنوع **وطرفا الفترة** معاً — الخادم يطلب النهايةَ صريحة). **وحقولُ إذن التذكير على `ContactRow`** (#280/ب) مرآةُ `ContactSerializer`، فتقرؤها قائمةُ جهات الزبون بلا طلبٍ لكل جهة. **ودفترُ الزبون** (#286/ب): `listClientBooks`/`getClientBook` و`createClientBook` (فتحُ دفترٍ من التبويب) و`getClientBookChoices` (تسمياتُ الأنواع من `client-books/choices/`) و`listBookAccounts`/`addBookAccount` و`listBookEntries`/`createBookEntry` و`reverseBookEntry` و`changeClientBookKind` و`getPendingEntry`، بمفتاحٍ `CLIENT_BOOKS` ومسارُه معرّفُ الزبون لا الدفتر. **والقوائمُ تُقرأ بـ`apiGetObject` لا `apiGetList`**: كاشُ الأوفلاين على حركاتٍ تُكتب فيها يُظهر تاريخاً قديماً |
+| `frontend_v2/services/accountingOfficeApi.ts` | عميل الواجهة فوق `restApi.ts` — وفيه أنواعُ التذكيرات: `ReadyToSendPayload`/`ReminderLogRow`/`ReminderTemplateRow`/`ContactConsentPayload`/`OfficeHolidayRow` (#280)، ومنها `ReadyToSendItemKey` (الزبون والنوع **وطرفا الفترة** معاً — الخادم يطلب النهايةَ صريحة). **وحقولُ إذن التذكير على `ContactRow`** (#280/ب) مرآةُ `ContactSerializer`، فتقرؤها قائمةُ جهات الزبون بلا طلبٍ لكل جهة. **ودفترُ الزبون** (#286/ب): `listClientBooks`/`getClientBook` و`createClientBook` (فتحُ دفترٍ من التبويب) و`getClientBookChoices` (تسمياتُ الأنواع من `client-books/choices/`) و`listBookAccounts`/`addBookAccount` و`listBookEntries`/`createBookEntry` و`reverseBookEntry` و`changeClientBookKind` و`getPendingEntry`، بمفتاحٍ `CLIENT_BOOKS` ومسارُه معرّفُ الزبون لا الدفتر. **والقوائمُ تُقرأ بـ`apiGetObject` لا `apiGetList`**: كاشُ الأوفلاين على حركاتٍ تُكتب فيها يُظهر تاريخاً قديماً. **ومستندا الأتعاب (#283/ب)**: `listFeePayments` و`printFeePayment` و`shareFeePayment` و`printFeeStatement`/`shareFeeStatement` بنوعَي `FeeReceiptPayload` و`FeeStatementPayload` — **الطباعةُ بياناتٌ** تُصيَّر بـ`utils/printReport.ts`، لأن تبويباً جديداً على مسار خادمٍ بلا ترويسة مصادقة يردّ 401 |
 | `frontend_v2/utils/accountingOffice.ts` | الدوالّ الخالصة: تخصيصُ بطاقة الزبون، وحالةُ المخصَّص، وقراءةُ معرّف الزبون من العنوان وبناءُ رابطه، وما يخفيه حجم «شخص واحد»، وقناعُ المبلغ المخفيّ («—»)، وأدوارُ قسم المكتب (بلا جدول تسميات). والشاشة تحفظ الحالة في العنوان عبر `useSearchParams` من react-router — لا `pushState`/`popstate` يدوياً، وأولُ الشهر ومنتقي الخدمات المتاحة وتسميةُ الدورية من اختيارات الخادم وملخّصُ الباقة (#273)، و**حسابُ التقويم** (#274): شبكةُ الشهر بالأحد أولاً، ومدى الأسبوع وأيامُه وإزاحتُه، وتجميعُ المواعيد على أيامها، وفلترُ الأنواع بلا تكرار، وتسميةُ الفترة احتياطاً — كلُّها نصوصُ ISO بلا `Date` منطقةٍ زمنية، والتاريخُ وأسماءُ الأيام من `utils/formatDate.ts` والتنقّلُ بين الشهور من `utils/monthKey.ts`، و**فلترُ «اليوم» وستُّ حالاتِه (بالفارغ «الكل»، والسادسةُ `missing_docs` #278) وأصنافُ الشارات الثلاث** (#276)، و**`alertTargetPath`** (ملفّ الزبون على `?tab=obligations&task=<id>`) و`clientTabFromSearch`/`taskIdFromSearch`/`officeTaskAnchorId`، و**رقمُ واتساب المكتب ورابطُه** (#280)؛ **و«جاهز للإرسال» وسجلُّ التذكيرات** (#280/ب): `readyToSendTypeChips` (الأنواعُ التي لها رسائلُ اليوم وحدها، بتسمية الخادم وعدِّ **رسائل** لا بنود)، و`filterReadyToSendMessages` (الرسالةُ كاملةً لأنها وحدةُ الإرسال)، و`readyToSendMessageKey` (مسوّدةُ النصّ بمفتاحٍ مشتقٍّ من محتوى الرسالة لا من فهرسها)، و`readyToSendItemKeys`، و`revertedReminderLogIds`/`canUndoReminderRow` («أُلغي» من `reverts_id`، والإبطالُ لـ`sent`/`manual` غيرِ المُبطَلين)، و`reminderLogKindClass`، و`nextDayIso` (أدنى تاريخٍ للتأجيل، بلا كائن `Date`)، و`isLockedOfficeSetting` (‏`reminder_auto_send` مقفلٌ عرضاً والخادمُ يردّ 400)، و`commonTaxSystem` (نظامُ الرسالة المشترك من بنودها، و`null` عند الاختلاف أو الغياب فلا مفتاحُ دولةٍ مخترَع)؛ **ودفترُ الزبون** (#286/ب): `bookKindOn` (نوعُ الدفتر **في تاريخ الحركة** — قاعدةُ `kind_on` نفسها، بها يُقرَّر وجوبُ التوازن) و`nextBookKind` (الانتقالُ الذي يسمح به الخادم؛ المزدوجُ ⇒ `null`) و`entryDateForMonth` (شهرُ اليوم ⇒ اليوم، وغيرُه ⇒ آخرُ يومٍ فيه، فلا تُكتب ورقةُ سنةٍ مضت في تسلسل السنة الجارية) و`clientBookPath`/`bookMonthFromSearch` (شهرُ الإدخال في العنوان) و`isLiveBookEntry`/`bookedDocumentIds` (الحيّةُ ما لم تُعكس ولم تكن عكساً) و`pendingMonthDocuments` («للإدخال» = خاناتُ `received` **وقائمةُ `annual`** ناقصَ روابط الحركات الحيّة — **اشتقاقٌ بلا نقطةٍ جديدة**) و`multipleDocumentsAllowed` (التعدّدُ في وضع «إدخال الشهر» وحده) و`bookDraftProblem` (بالسنتات: لا بندَ بلا حساب، ولا طرفين، ولا مبلغَ غيرَ رقميّ، والمزدوجُ وحدَه يُسأل عن التوازن) و`pendingEntryRowKey`/`pendingEntryClientCount`؛ و`'book'` **آخرَ** `CLIENT_TAB_KEYS` |
-| `frontend_v2/components/accounting-office/` | شاشات: **«اليوم»** (`OfficeTodayScreen.tsx`، #275) والقائمة (وتركّب ملفّ الزبون)، والإعدادات (وفيه قسم «الموظفون والأدوار»، ومجموعتُها كلُّها من السجلّ)، وخطوة أول تشغيل، **والتقويم** (`OfficeCalendarScreen.tsx`، #274) — وفيه حجزُ الموعد #281 و**تأكيدُه من شريحته**، و`OfficeUi.tsx` عناصرُ عرضٍ محليّةٌ على الوضع الداكن، وتبويبُ «الخدمات» ومجموعةُ «الخدمات والباقات» (#273)، و**`OfficeAlertsBell.tsx`** جرسُ التنبيهات (#276)، و**`OfficeClientDocuments.tsx`** تبويبُ «الأوراق» و**`OfficeDocumentItemsSection.tsx`** قالبُ بنوده (#278)، و**«جاهز للإرسال»** (`OfficeReadyToSendScreen.tsx`، #280/ب) بأفعالها الأربعة، وتبويبُ «سجلّ التذكيرات» وموافقةُ الجهات (في `OfficeClientFile.tsx`)، و**`OfficeReminderTemplatesSection.tsx`** نصوصُ التذكير و**`OfficeHolidaysSection.tsx`** عطلُ المكتب (#280/ب)، و**`OfficeClientBook.tsx`** تبويبُ «الدفتر» في ملفّ الزبون (#286/ب — **فتحُ الدفتر** لمن يملك `office.clients.write` حين لا دفتر، ورأسٌ بالحالة وطريقةِ الإدخال، وجدولُ حركاتٍ بصفٍّ يُفتح على بنوده، ونموذجُ الإدخال بأوراق الشهر و«اختر الكل» في «إدخال الشهر»، و«اعكس» بتأكيدٍ على الحركة الحيّة وحدها)، وبطاقةُ «للإدخال» في **`OfficeTodayScreen.tsx`** (عدّادُها `total` من الخادم، وكبسةُ صفّها تفتح الدفتر على شهره)، و**`OfficeClientBooksTree.tsx`** محرّرُ شجرة الزبون في مجموعة «المكتب» بالإعدادات (يسرد ذوي الدفاتر، وإضافةٌ بـ`office.clients.write`)، و**`OfficeClientAppointments.tsx`** تبويبُ المواعيد و**`OfficeAppointmentCard.tsx`** بطاقةُ الموعد وأفعالُها الأربعة (#281) |
+| `frontend_v2/components/accounting-office/` | شاشات: **«اليوم»** (`OfficeTodayScreen.tsx`، #275) والقائمة (وتركّب ملفّ الزبون)، والإعدادات (وفيه قسم «الموظفون والأدوار»، ومجموعتُها كلُّها من السجلّ)، وخطوة أول تشغيل، **والتقويم** (`OfficeCalendarScreen.tsx`، #274) — وفيه حجزُ الموعد #281 و**تأكيدُه من شريحته**، و`OfficeUi.tsx` عناصرُ عرضٍ محليّةٌ على الوضع الداكن، وتبويبُ «الخدمات» ومجموعةُ «الخدمات والباقات» (#273)، و**`OfficeAlertsBell.tsx`** جرسُ التنبيهات (#276)، و**`OfficeClientDocuments.tsx`** تبويبُ «الأوراق» و**`OfficeDocumentItemsSection.tsx`** قالبُ بنوده (#278)، و**«جاهز للإرسال»** (`OfficeReadyToSendScreen.tsx`، #280/ب) بأفعالها الأربعة، وتبويبُ «سجلّ التذكيرات» وموافقةُ الجهات (في `OfficeClientFile.tsx`)، و**`OfficeReminderTemplatesSection.tsx`** نصوصُ التذكير و**`OfficeHolidaysSection.tsx`** عطلُ المكتب (#280/ب)، و**`OfficeClientBook.tsx`** تبويبُ «الدفتر» في ملفّ الزبون (#286/ب — **فتحُ الدفتر** لمن يملك `office.clients.write` حين لا دفتر، ورأسٌ بالحالة وطريقةِ الإدخال، وجدولُ حركاتٍ بصفٍّ يُفتح على بنوده، ونموذجُ الإدخال بأوراق الشهر و«اختر الكل» في «إدخال الشهر»، و«اعكس» بتأكيدٍ على الحركة الحيّة وحدها)، وبطاقةُ «للإدخال» في **`OfficeTodayScreen.tsx`** (عدّادُها `total` من الخادم، وكبسةُ صفّها تفتح الدفتر على شهره)، و**`OfficeClientBooksTree.tsx`** محرّرُ شجرة الزبون في مجموعة «المكتب» بالإعدادات (يسرد ذوي الدفاتر، وإضافةٌ بـ`office.clients.write`)، و**`OfficeClientAppointments.tsx`** تبويبُ المواعيد و**`OfficeAppointmentCard.tsx`** بطاقةُ الموعد وأفعالُها الأربعة (#281)، و**`OfficeClientFees.tsx`** (#283/ب): تبويبُ «الأتعاب» — صفُّ الدفعة بكبسةِ «إشعار قبض» (طباعةٌ بـ`printReport`) وكبسةِ «مشاركة» — و**كبسةُ «كشف حساب» في رأس ملفّ الزبون** بمنتقي فترةٍ ثم طباعةٍ أو مشاركة |
 
 ## الـModels
 
@@ -86,7 +86,7 @@
 | `TaxCard` | `entity_type` (فرد/تضامن/مساهمة/غير ربحية), `vat_classification` (مشتغل مرخّص/معفى/غير مسجّل فلسطينيّاً · עוסק מורשה/עוסק פטור/מלכ"ר إسرائيلياً), `annual_sales` (Decimal، تُتحقَّق في الخدمة), `has_employees`, `employees_count` (تسميتُه المعروضة «عدد العاملين» #279), `is_self_employed` | `OneToOne` مع `OfficeClient`، تُنشأ معه. **يوم الراحة وطريقة التقديم ليسا هنا** — إعدادان |
 | `Contact` | `name`, `phone`, `language` (`ar`/`he`), **`reminders_consent`, `consent_types`, `consent_on`, `consent_channel` (`talk`/`paper`/`whatsapp`), `consent_withdrawn_on`, `consent_withdrawn_by`** (#280) | `tenant` FK. الشخص يملكه المكتب لا الزبون. **والسحبُ لا يمحو الإذن** (تاريخُ الإذن يبقى بجانب تاريخ السحب)، و`allows_reminder(type)` هي السؤالُ الوحيد الذي تسأله القائمة |
 | `ClientContact` | `is_primary`, `primary_client_key` (عمود مُولَّد) | `(client, contact)` فريد. عمودٌ مُولَّد + فرادةٌ غير مشروطة = **جهة رئيسية واحدة على الأكثر** فعلياً في MySQL |
-| `ClientReminderRecipient` | `reminder_type` (`documents`/`deadline`/`balance`/`appointment`) | `(client, reminder_type)` فريد ← `ClientContact`. غيابُ الصفّ = الرئيسية |
+| `ClientReminderRecipient` | `reminder_type` (`documents`/`deadline`/`balance`/`appointment`/`fee_receipt`) | `(client, reminder_type)` فريد ← `ClientContact`. غيابُ الصفّ = الرئيسية |
 | `OfficeSettingValue` | `key`, `value` (JSON) | `(tenant, key)` فريد — قيمةُ المكتب |
 | `ClientSettingOverride` | `key`, `value` (JSON) | `(tenant, client, key)` فريد — تخصيصُ الزبون |
 | `OfficeService` | `code` (`SlugField`), `name`, `is_active`, `is_builtin`, `position` | `tenant` FK. **كتالوجُ المكتب**: فرادةٌ غير مشروطة على `(tenant, code)`، والخمسةُ الافتراضية أكوادُها ثابتة (`DEFAULT_SERVICES`) لأنّ الاقتراحَ يقرؤها، وتُزرع بـ`ensure_default_services` لا بهجرة بيانات. **لا حذفَ لخدمةٍ استُعملت** — `ClientService.service` على `PROTECT` والتعطيلُ هو الطريق |
@@ -134,6 +134,7 @@
 | `FeeReceiptSequence` (#283) | `year`, `last_number` (default 0) | `tenant` FK، فرادةٌ على `(tenant, year)`. **أداةُ القفل والترقيم**: `select_for_update` ثم زيادةُ `last_number` داخل `transaction.atomic`، والرقمُ يُنسخ إلى `FeePayment.receipt_number` بصيغة `{year}-{n:05d}`. **لا `MAX+1` ولا `count+1`** |
 | `FeePaymentAllocation` (#283) | `amount` (Decimal، `AMOUNT_KEYS`) | `tenant` FK، و`payment` على `CASCADE` (`related_name="allocations"`)، و`draft` على **`PROTECT`** (`related_name="allocations"`). فرادةٌ على `(payment, draft)` وقيدُ `amount > 0`. **وعليه تُبنى `remaining`** — لا عمودَ لها في المسودّة |
 | `FeeWriteOff` (#283) | `amount` (Decimal، `AMOUNT_KEYS`)، `reason` (300، **إلزاميٌّ غيرُ فارغ** يفرضه `payments.write_off_fee_draft`)، `created_by`، `created_at` | `tenant` FK و`draft` على `PROTECT` (`related_name="write_offs"`)، وقيدُ `amount > 0`. **سطرٌ إلحاقيٌّ**: يخفّض `remaining` ولا يمحو دفعةً ولا مسودّة، وصلاحيتُه لصاحب المكتب وحده |
+| `FeeStatement` (#283/ب) | `period_from`, `period_to` (تاريخان، بلا null), `created_by`, `created_at` | `tenant` FK و`client` FK، وفهرسٌ `(tenant, client, created_at)`. **هويّةُ مستند `fee_statement` في `docshare`**: `DocumentShare` يعنون بـ`(doc_type, doc_id)` وحدهما، فالصفُّ يجمّد **الفترة** (لا الأرقام: تُقرأ من `payments.statement_payload` عند كل عرض). **ولا حقلَ مبلغٍ** — نسخةٌ مخزَّنةٌ ثانية تفترق عن الحركات بأوّل دفعة |
 | `BookEntryLine` (#286) | `debit`, `credit`, `side_party` | `entry` على `CASCADE` و`account` على `PROTECT`، و`tenant` يُملأ من الحركة (`_fill_tenant_from_entry` — النموذجُ لا زبونَ له مباشرةً). `debit`/`credit` مسجَّلان في `AMOUNT_KEYS` (`BOOK_ENTRY_AMOUNT_KEYS`) ويُقنَّعان كسائر مبالغ الموديول |
 
 ## دوال الـservices العامة
@@ -480,6 +481,10 @@ tax_system_for(tenant, client) / office_is_licensed(tenant) / archived_rate(tena
 | `GET/POST` | `fees/payments/?client=&method=&date_from=&date_to=` | `OfficeFeePaymentViewSet` (`list`, `create`) — الدفعاتُ بفلاترها في الاستعلام، والإنشاءُ يُخصّص **الأقدمَ أوّلَاً** أو بتخصيصٍ صريح `allocations: [{draft, amount}]`؛ ولا تعديلَ ولا حذف (405)، ولا مسارَ تفصيل (404) (#283). **وكلُّ سطرٍ يحمل `journal_entry`** (#284) — معرّفُ قيده في الدفاتر أو `null`، باستعلامٍ واحدٍ للقائمة |
 | `POST` | `fees/drafts/<id>/write-off/` | `OfficeFeeDraftViewSet` (`write_off`) — `{amount, reason}`؛ **صاحبُ المكتب وحده** (403 لمدير المكتب والمحاسب)، وسببٌ فارغٌ أو مبلغٌ فوق المتبقّي 400 (#283)؛ #284: يُرحَّل قيدُه في المعاملة نفسها، وفشلُه يُرجع الشطبَ كلَّه |
 | `GET` | `fees/ledger/?client=&state=&q=&page=&page_size=` | `OfficeFeeLedgerViewSet` (`list`) — كشفُ الحساب: `{invoices, payments, write_offs, client_due}`، كلُّ مجموعةٍ `{count, page, page_size, results}`؛ الفواتيرُ المعتمدةُ بـ`paid_amount`/`written_amount`/`remaining`/`state` (`paid\|partial\|unpaid`)، والشطوبُ صفوفاً (تاريخٌ ومبلغٌ وسببٌ ومَن شطب والمسودّة)، والفلترةُ والترقيمُ في الاستعلام (#283) |
+| `GET` | `fees/payments/<id>/print/` | `OfficeFeePaymentViewSet` (`print_receipt`) — **بياناتُ إشعار القبض** لا HTML: الرقمُ المخزَّن وطريقةُ الدفع والشيكُ والتخصيصاتُ و«اللي عليه». الطباعةُ تُصيَّر في الواجهة بـ`utils/printReport.ts` (تبويبٌ جديد على مسار الخادم لا يحمل ترويسةَ المصادقة). مفتاحُ الكتابة، ودفعةُ غيره **404** (#283/ب) |
+| `POST` | `fees/payments/<id>/share/` | `OfficeFeePaymentViewSet` (`share_receipt`) — `{url, expires_at}` من `docshare` بنوع `fee_receipt`؛ الرابطُ الحيّ يُعاد لا يُكرَّر. مفتاحُ الكتابة، والعزلُ نفسه |
+| `GET` | `fees/ledger/print/?client=&period_from=&period_to=` | `OfficeFeeLedgerViewSet` (`print_statement`) — **كشفُ الحساب للطباعة**: `{rows, groups, opening_balance, closing_balance, totals, due, credit}`؛ الزبونُ من `visible_clients` (404 لغيره)، والفترةُ اختياريّة (بلاها كلُّ الحركات)، والقناعُ يطال الأرصدةَ كما يطال الصفوف. القراءةُ بلا مفتاح كتابة كالقائمة (#283/ب) |
+| `POST` | `fees/ledger/share/` | `OfficeFeeLedgerViewSet` (`share_statement`) — `{client, period_from?, period_to?}`: يكتب صفَّ `FeeStatement` (فترةٌ صريحة، وافتراضاً سنةُ اليوم حتى اليوم) ويعيد `{url, expires_at}` بنوع `fee_statement` في معاملةٍ واحدة. مفتاحُ الكتابة (#283/ب) |
 
 **ولا `DELETE` في أيّ نقطةٍ من `fees/`** — `http_method_names` تُغلق الطريقة (405)،
 كما لا `PUT`/`PATCH`: تغييرُ السعر صفٌّ جديد، وتغييرُ المسودّة اعتمادٌ أو إلغاء.
@@ -1281,7 +1286,7 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 يعيد كتابة مَن أذن قبله. والكتابةُ بفعل `consent/` وحده فتسلك حارسَ الخدمة.
 
 **النصوصُ (D3)**: `REMINDER_DEFAULT_TEXTS` في الكود — **عربيٌّ وعبريٌّ لكلٍّ من
-الأنواع الأربعة** من بحث #256 §5، ومكتبٌ يغلبه بصفٍّ في `ReminderTemplate`.
+الأنواع الخمسة** من بحث #256 §5، ومكتبٌ يغلبه بصفٍّ في `ReminderTemplate`.
 والرموزُ ستةٌ بالضبط: `{client_name}` `{period}` `{due_date}` `{amount}`
 `{missing_list}` `{office_name}` — ونصٌّ يحمل غيرها **يُرفَض عند الحفظ باسمه**،
 و`render_reminder_body` يستبدل بـ`str.replace` وحده: `str.format` على نصٍّ يكتبه
@@ -1340,6 +1345,17 @@ v2/v3 بلا سطرٍ جديد: والالتزاماتُ القائمة **غير
 و**موعدٌ قريب** و**موعدٌ رسميٌّ قريب** (#281)، ويبقى **`balance`** بنصّه وإعداده
 ومستلِميه وبلا مولّد حتى تذكرته (#285) — فطلبُ قائمته يُعيد فراغاً لا بنوداً بنصٍّ
 لا يخصّها.
+
+**والنوعُ الخامس `fee_receipt` (#283/ب) له مولّدٌ في `payments`**: دفعاتُ اليوم غيرُ
+المُعلَّم إشعارُها — بندٌ لكل زبونٍ في اليوم (`period_start = period_end = paid_at`)،
+و`maximum = 1` فيُقترح مرّةً واحدة ويحجبه `ReminderLog` بعد التعليم بحواجز
+`ready_to_send_payload` نفسها. والمفتاحُ تاريخيٌّ كما في كل نوع: **دفعتان لزبونٍ في
+يومٍ واحد بندٌ واحد** يذكر رقمَي الإشعار — ومفتاحٌ لكل دفعةٍ كان يعني مفتاحين
+متطابقين يُعلَّم أحدهما فيُعلَّم الآخر، وهو «المفتاحُ المشترك» الذي منعته التذكرة.
+وسطرُ التفصيل (رقمُ الإشعار والمبلغ والباقي) يُلحَق بنصّ البند من
+`payments.fee_receipt_detail` — لا رمزَ جديداً في `REMINDER_PLACEHOLDERS` ولا نصَّ
+قالبٍ يحمل أرقاماً ليست له. وشارتُه `payment_received` خضراءُ: خبرُ مالٍ دخل لا
+موعدٌ يقترب.
 
 **وهجرة `0010_reminders_and_consent` إضافيّةٌ محضة**: ستةُ `AddField` على
 `Contact`، وأربعةُ `CreateModel`، و`AlterField` على اختيارات `OfficeAlert.kind`
@@ -1962,7 +1978,7 @@ page_size, results}`. **والشطبُ يُقرأ في الكشف مرّتين**
 بحثاً في اسم الزبون، و`page`/`page_size` قصّاً في القاعدة، والاثنان في المجموعات
 الثلاث) — **لا تصفيةً في بايثون**. والمجموعاتُ مفصولةٌ لأن دمجَها في قائمةٍ
 واحدة يتطلّب `UNION` على أنواع تواريخَ مختلفة أو تصفيةً في بايثون؛ والشاشةُ
-تصفّها كما تشاء (#283/ب لاحقاً).
+وقالبُ الطباعة يقرآن الثلاث ويُرتّبانها زمنياً عند الحاجة (الجزء ب أدناه).
 
 **و`due` وسطرُ العلم على صفّ الزبون**: `OfficeClientListSerializer`/`OfficeClientSerializer`
 تحملان `due` و`tax_note` من `client_due_payload` وحدها — والسطرُ **تحت** `due` لا
@@ -1990,6 +2006,51 @@ page_size, results}`. **والشطبُ يُقرأ في الكشف مرّتين**
 `DeleteModel` ولا `RunPython`**. وتابعةٌ لـ`0012_fees` — وهو **ورقةُ الهجرات** في
 الشجرة بعد دمج #281/#282 (`0012_fees` يعتمد `0013_appointments`، فالرقمُ 0013
 محجوزٌ و`0012` هو الورقة)، فلا سلسلةَ تُعاد ترقيمها.
+
+## إشعارُ القبض وكشفُ الحساب — المستندان ورابطاهما (#283، الجزء ب)
+
+**البناءُ في `payments` والورقةُ في `docshare`**: `receipt_payload` و`statement_payload`
+هما المصدرُ الوحيد لأرقام الورقتين، والنوعان في `docshare` يقرآن منهما
+(`fee_receipt` و`fee_statement`) كما يقرأ `payment_notice` من `appointments`.
+نسخةٌ ثانية من الرقم أو من الرصيد في `docshare` تفترق عن الأولى بأوّل تخصيص.
+
+**إشعارُ القبض** (`fees/payments/<id>/print/`): `{title, number, date, client,
+amount, method, method_label, cheque, note, allocations, due, credit, office}`.
+**والرقمُ يُقرأ ولا يُولَّد**: `receipt_payload` تقرأ `FeePayment.receipt_number`
+المخزَّن، ولا شيءَ في المسار — ولا في القالب — ينادي `next_receipt_number`؛ فتكرارُ
+العرض لا يزيد `FeeReceiptSequence` (يحرسه
+`test_repeating_the_print_returns_the_same_stored_number` و
+`test_two_years_run_in_sequence_without_a_gap_and_without_a_second_number`).
+**و«اللي عليه»** يُقرأ من `client_due` وحدها (`due` و`credit`)، ومعها رصيدٌ دائنٌ غيرُ
+مخصَّص إن وُجد.
+
+**والشيكُ يُقرأ من دفاتره لا من حقلٍ جديد**: `FeePayment` لا يحمل حقولَ شيك (طريقةٌ
+ومبلغٌ وتاريخٌ وملاحظة فقط)، وورقةُ الشيك تُنشَأ عند الترحيل
+(`office_journal.post_payment_journal` ← `accounting.api.ensure_incoming_cheque`)
+برقم الإشعار نفسِه مفتاحاً `(tenant, cheque_number)` — فيقرؤها `_cheque_of` وحدها،
+ودفعةٌ في مكتبٍ أطفأ الترحيل لا شيكَ لها فلا سطرَ لها.
+
+**كشفُ الحساب** (`fees/ledger/print/` و`fees/ledger/share/`): الحركاتُ الثلاثُ من
+مصدر كشف الحساب نفسه (`with_invoice_totals` و`invoice_row`/`payment_row`/
+`write_off_row`) **مرتَّبةً زمنياً** (تاريخ، نوع، معرّف)، والرصيدُ الجاري =
+الافتتاحيُّ + مجموع الحركات المعروضة، والافتتاحيُّ صافي ما قبل `period_from`.
+و`due` حقلٌ ثالثٌ مستقلّ: **«اللي عليه الآن» من `client_due`** لا من الصفوف. وحين
+تغطّي الفترةُ كلَّ الحركات حتى اليوم تتساوى الأرقامُ الثلاثة — وهذا برهانُ اتّساقٍ
+لا صدفةَ تركيب، ويثبته
+`test_the_running_balance_is_the_sum_of_movements_and_the_closing_is_the_due`.
+**والفترةُ تُرشِّح الصفوفَ لا تُزخرف الرأس**: قرارٌ عمديّ (لا `fees/ledger/` القائمة
+تصفّي على كلّ الحركات بلا حدودِ زمن)، والانحرافُ معلَن: `state`/`q` فلاترُ قائمةٍ
+لا معنى لها في ورقةٍ كاملةٍ لأنها تكسر الرصيد الجاري، فلا تُقبل هنا.
+
+**وصفُّ `FeeStatement` هو الهوية**: يُكتب في `share/` وحده (وداخله معاملةٌ واحدة
+مع الرابط)، ويجمّد **الفترة** لا الأرقام — ورقةُ آذار تبقى ورقةَ آذار ولو قُرئت في
+أيلول، والانحرافُ أن الأرقامَ تُعاد قراءتُها فورقةٌ عُدِّلت بعد الإصدار تُقرأ
+جديدةً (كما في #285، وهو ثمنُ رفض تجميد المبالغ في صفّ).
+
+**وهجرة `0016_fee_statement`** إضافيّةٌ محضة: `CreateModel` واحد
+و`AlterField` على `choices` لنوع التذكير الخامس في أربعة حقول — بلا `RunSQL` ولا
+`RemoveField` ولا `DeleteModel`. وهجرةُ `docshare/0008_fee_receipt_doc_type`
+`AlterField` على `choices` العمود وحده (40 محرفاً يتّسع للرمزين).
 
 ## القيدُ التلقائيُّ للدفعات والشطب (#284 — الجزء أ: الخادم)
 

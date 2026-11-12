@@ -132,6 +132,9 @@ const OFFICE_HOLIDAYS = `${BASE}office-holidays/`;
 const APPOINTMENTS = `${BASE}appointments/`;
 // #286: دفترُ الزبون — الدفاترُ وشجرتُها وحركاتُها و«للإدخال» (الجزء أ، خادمياً).
 const CLIENT_BOOKS = `${BASE}client-books/`;
+// #283/ب: الدفعاتُ ومستنداها — إشعارُ قبضٍ لكل دفعة، وكشفُ حسابٍ لفترة.
+const FEE_PAYMENTS = `${BASE}fees/payments/`;
+const FEE_LEDGER = `${BASE}fees/ledger/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -1227,3 +1230,142 @@ export const changeClientBookKind = (
  */
 export const getPendingEntry = (): Promise<PendingEntryPayload> =>
   apiGetObject<PendingEntryPayload>(`${CLIENT_BOOKS}pending-entry/`, tenantOpts());
+
+
+// ── المستندان (#283/ب): إشعارُ القبض وكشفُ الحساب ───────────────────────────
+//
+// **الطباعةُ بياناتٌ لا صفحة**: `.../print/` يعيد الحمولة، والواجهةُ تُصيِّرها
+// بـ`utils/printReport.ts` كسائر شاشات الطباعة — لأن تبويباً جديداً على مسار
+// خادمٍ لا يحمل ترويسةَ المصادقة فيردّ 401. والرابطُ العامّ (`share`) للمشاركة.
+//
+// وكلُّ مبلغٍ `string | null`: `DecimalField` يُسلسَل نصّاً، و`null` تعني «لا
+// رؤيةَ للمبالغ» (#272) فتعرض الشاشة «—» ولا تحوّله إلى صفر.
+
+/** سطرُ دفعةٍ من `fees/payments/` — شكلُ `payments.payment_row` كما هو. */
+export interface FeePaymentRow {
+  id: number;
+  client: { id: number; name: string };
+  method: string;
+  method_label: string;
+  amount: string | null;
+  paid_at: string;
+  note: string;
+  /** الرقمُ المخزَّن من `FeeReceiptSequence` — يُقرأ ولا يُولَّد عند العرض. */
+  receipt_number: string;
+  created_by: { id: number; name: string } | null;
+  created_at: string;
+  allocations: {
+    id: number;
+    draft: { id: number; year: number; month: number };
+    amount: string | null;
+  }[];
+  due: string | null;
+  credit: string | null;
+  journal_entry: number | null;
+}
+
+/** حمولةُ الإشعار المطبوعة — `receipt_payload` في الخادم. */
+export interface FeeReceiptPayload {
+  title: string;
+  number: string;
+  date: string;
+  client: { id: number; name: string };
+  amount: string | null;
+  method: string;
+  method_label: string;
+  /** ورقةُ الشيك في الدفاتر إن وُجدت — `null` لغير الشيك أو دفعةٍ بلا ترحيل. */
+  cheque: { number: string; bank_name: string; due_date: string | null } | null;
+  note: string;
+  allocations: { draft: number; period_label: string; amount: string | null }[];
+  due: string | null;
+  credit: string | null;
+  office: { name: string };
+}
+
+/** حركةٌ في كشف الحساب: فاتورةٌ (+) أو دفعةٌ/شطبٌ (−) ورصيدُها الجاري. */
+export interface FeeStatementMovement {
+  kind: string;
+  kind_label: string;
+  id: number;
+  date: string;
+  label: string;
+  amount: string | null;
+  balance: string | null;
+}
+
+/** حمولةُ كشف الحساب المطبوعة — `statement_payload` في الخادم. */
+export interface FeeStatementPayload {
+  title: string;
+  client: { id: number; name: string };
+  from: string | null;
+  to: string | null;
+  opening_balance: string | null;
+  closing_balance: string | null;
+  due: string | null;
+  credit: string | null;
+  totals: {
+    invoices: string | null;
+    payments: string | null;
+    write_offs: string | null;
+    movements: string | null;
+  };
+  rows: FeeStatementMovement[];
+  groups: {
+    invoices: Record<string, unknown>[];
+    payments: Record<string, unknown>[];
+    write_offs: Record<string, unknown>[];
+  };
+  office: { name: string };
+}
+
+/** رابطٌ عامٌّ حيٌّ لمستند أتعاب — `{url, expires_at}` من `docshare`. */
+export interface FeeDocumentShare {
+  url: string;
+  expires_at: string;
+}
+
+/** دفعاتُ الزبون — تُقرأ بفلتر `client` وحده (والترقيمُ في الاستعلام). */
+export const listFeePayments = (clientId?: number): Promise<FeePaymentRow[]> =>
+  apiGetObject<FeePaymentRow[]>(FEE_PAYMENTS, {
+    ...tenantOpts(),
+    query: { client: clientId },
+  });
+
+/** بياناتُ إشعار القبض للطباعة — **لا تُستهلك رقمٌ** عندها. */
+export const printFeePayment = (paymentId: number): Promise<FeeReceiptPayload> =>
+  apiGetObject<FeeReceiptPayload>(`${FEE_PAYMENTS}${paymentId}/print/`, tenantOpts());
+
+/** رابطُ الإشعار العامّ — يُعاد الحيّ القائم إن وُجد. */
+export const shareFeePayment = (paymentId: number): Promise<FeeDocumentShare> =>
+  apiPostObject<FeeDocumentShare>(
+    `${FEE_PAYMENTS}${paymentId}/share/`, {}, tenantOpts(),
+  );
+
+/** كشفُ حساب الزبون لفترة — `period_from`/`period_to` اختياريان (كلُّ الحركات). */
+export const printFeeStatement = (
+  clientId: number,
+  period?: { periodFrom?: string; periodTo?: string },
+): Promise<FeeStatementPayload> =>
+  apiGetObject<FeeStatementPayload>(`${FEE_LEDGER}print/`, {
+    ...tenantOpts(),
+    query: {
+      client: clientId,
+      period_from: period?.periodFrom,
+      period_to: period?.periodTo,
+    },
+  });
+
+/** إصدارُ كشف حسابٍ ورابطِه العامّ — الصفُّ يُكتب في الخادم مع الرابط. */
+export const shareFeeStatement = (
+  clientId: number,
+  period?: { periodFrom?: string; periodTo?: string },
+): Promise<FeeDocumentShare> =>
+  apiPostObject<FeeDocumentShare>(
+    `${FEE_LEDGER}share/`,
+    {
+      client: clientId,
+      period_from: period?.periodFrom,
+      period_to: period?.periodTo,
+    },
+    tenantOpts(),
+  );

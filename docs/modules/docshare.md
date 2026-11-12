@@ -15,7 +15,7 @@
 `docshare/models.py` (`DocumentShare`) — جدول `document_shares`. «حيّ» تعريفه في مكان واحد: `DocumentShare.is_live` = لا مُبطَل (`revoked_at`) ولا منتهٍ (`expires_at`).
 
 **المستند مربوط بـ`(doc_type, doc_id)` نصّاً وعدداً، لا بمفتاح أجنبي ولا بـ`GenericForeignKey`.**
-الأنواع اليوم **تسعة عشر** في `sales` و`logistics` و`after_sales` و`inventory` و`accounting_office`: مفتاحٌ أجنبيّ اختياريّ لكل نوع كان يعني عموداً جديداً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents/` (`DOC_TYPES`) ودالّتين**.
+الأنواع اليوم **الحادية والعشرون** في `sales` و`logistics` و`after_sales` و`inventory` و`accounting_office`: مفتاحٌ أجنبيّ اختياريّ لكل نوع كان يعني عموداً جديداً مع كل توسيع، بينما النصّ + العدد يجعلان التوسيع **سطراً في `docshare/documents/` (`DOC_TYPES`) ودالّتين**.
 
 **وتصحيحٌ لوعدٍ كان هنا: التوسيع ليس «بلا هجرة».** العمود كان `varchar(20)` يوم كان النوعان مبيعاتٍ فقط، و`local_purchase_invoice` اثنان وعشرون محرفاً. مفتاحٌ أطول من العمود **لا يرمي على MySQL بل يُلغي القيد بصمت**، وSQLite في مجموعة الاختبارات لا يكشفه أبداً — فتمرّ خضراءَ على ميزةٍ لا تحفظ شيئاً (نفس عطل `ActivityLog.action`). العمود الآن أربعون، والسقف يحرسه `docshare/tests/test_registry.py` (`test_doc_type_keys_fit_the_column`) بقياس أطول مفتاح في السجلّ مقابل `max_length` الفعلي. فالقاعدة الصحيحة: **التوسيع بلا هجرة ما دام المفتاح يسع العمود، والاختبار هو من يقول ذلك لا الذاكرة.**
 
@@ -25,7 +25,7 @@
 
 **لا قيد فرادة على `(tenant, doc_type, doc_id)`:** الروابط المُبطَلة تبقى صفوفاً، لأن «من شارك هذا المستند ومتى؟» سؤالٌ يُسأل بعد الإبطال لا قبله. الفرادة على التوكن وحده.
 
-## الأنواع التسعة عشر — والجمهور هو ما يحكم ما يخرج
+## الأنواع الحادية والعشرون — والجمهور هو ما يحكم ما يخرج
 `docshare/documents/` **حزمة لا ملف** (نمط `logistics/views/` و`core/reports/`): العقد في `_contract.py` بلا استيراد نموذجٍ واحد (وترويسة الشركة `COMPANY_FIELDS`/`company_card` صارت في `tenants/letterhead.py` منذ #238 — يعيد `_contract.py` تصديرهما فلا يتغيّر مستورد)، والأنواع في وحدةٍ لكل جمهور. الفائدة ليست الحجم بل أن **حدود الجمهور صارت حدود ملف**: من يراجع «ماذا يرى المورّد؟» يقرأ `purchase_docs.py` كاملاً في جلسة.
 
 | `doc_type` | النموذج | الطرف | الجمهور | ملاحظة |
@@ -48,6 +48,8 @@
 | `purchase_rfq` | `logistics.PurchaseRFQ` | — (لا طرف واحد؛ الرابط إمّا خاصٌّ **بمستقبِل** عبر `PurchaseRFQRecipient.share`، وإمّا **عامٌّ** بـ`DocumentShare.is_public` — مواصفة #147) | مورّد | **لا يقبل قراراً — يقبل تسعيراً** (`quote` لا `decision`)؛ انظر §«تسعير المورّد» أدناه |
 | `stocktake_count` | `inventory.Stocktake` | `inventory.StocktakeCountLink` (اسم العادّ ونطاقه) | موظف مستودع (`warehouse` — جمهورٌ ثالث) | **K3**: يقبل **عدّاً** (`count` لا `decision`/`quote`)؛ لا يرى مالاً؛ صفحته JSON في المسار `count/` لا القالب العامّ — ورمزُه يردّ 404 على `/s/<token>` قبل تسجيل مشاهدة. تفصيل العقد في `modules/inventory.md` |
 | `payment_notice` | `accounting_office.Obligation` (الالتزامُ مرجعَ الإشعار) | `OfficeClient` (اسمُه ورقمُ ملفّه الضريبيّ) | زبون | **#285**: `doc_id` **التزامٌ** لا زبون — (الزبون، تاريخُ الاستحقاق) يُشتقّان منه فلا حقلَ إضافيّ في `DocumentShare`؛ `page` = ورقةٌ بأسطرٍ ملوّنة (أحمر «عليك» · أخضر «إلك» · رماديّ قريبٌ من الصفر) لأن قائمةَ `line_row` البيضاء بلا حقل نبرة؛ صلاحيتُه `office.clients.write`، **ووحدةٌ مرخّصة** (`"module": "accounting_office"`) و**نطاقُ `visible_clients` في سطح الإدارة** (`"scope"`) و**لا يُنشَأ من الباب العامّ** (§«الجمهور والصلاحية») |
+| `fee_receipt` | `accounting_office.FeePayment` | `OfficeClient` | زبون | **#283/ب**: `page` = ورقةُ إشعار قبضٍ بأسطر تخصيصاتها؛ الرقمُ من `FeePayment.receipt_number` المخزَّن — **لا يُولَّد ولا يُستهلك رقمٌ عند العرض**؛ والمبالغُ من `payments.receipt_payload` وحده؛ صلاحيةُ النوع نفسها، ووحدةٌ مرخّصة، ونطاقُ `visible_payments`، ولا إنشاءَ من الباب العامّ |
+| `fee_statement` | `accounting_office.FeeStatement` (زبونٌ + فترة) | `OfficeClient` | زبون | **#283/ب**: `page` = ورقةُ كشف حسابٍ بثلاث مجموعات (فواتير · دفعات · شطوب) ورصيدٍ جارٍ وختاميّ من `payments.statement_payload`؛ `doc_id` صفُّ الكشف لأن الفترة تُجمَّد (والأرقامُ تُحسب عند القراءة)؛ نفسُ الصلاحية والوحدة والنطاق (`fee_statement_doc_ids`) |
 | `fee_invoice` | `accounting_office.FeeInvoice` (الفاتورةُ نفسُها مستنداً) | `OfficeClient` (اسمُه ورقمُ ملفّه الضريبيّ) | زبون | **#282/أ٢/١**: `doc_id` **فاتورةٌ** لا زبون — الورقةُ تُبنى من الصفّ المرقَّم (مبلغٌ وضريبةٌ مؤرَّخة وسطورٌ من مسودّتها)؛ `page` = ورقةُ `fee_invoice.html` بحقول م4/1 الثمانية المبنيّة من التسعة (فلسطين، نسختان؛ وسعرُ الصرف مؤجَّل لغياب العملة) أو `§9א` السبعة (إسرائيل) وسطرِ «ليست فاتورة ضريبية» الثابت تحت العنوان؛ الصلاحيةُ والوحدة والنطاقُ كإشعار الدفع، **ولا يُنشَأ من الباب العامّ**، **ولا يكشف الرابطُ إلا فاتورته** |
 
 **ثلاث قواعد عرضٍ تعمّمت من هذه الأنواع، وكلٌّ منها منعٌ مقصود:**
@@ -258,7 +260,7 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 |---|---|---|
 | `sales.document.share` | `sales_invoice` · `sales_quotation` · `sales_order` · `delivery_order` · `customer_payment` · `credit_debit_note` · `warranty_card` · `warranty_certificate` · `service_order` | موظف المبيعات · `manager` بـ`"*"` |
 | `purchase.document.share` | `purchase_invoice` · `purchase_order` · `logistics_deal` · `supplier_quotation` · `local_purchase_invoice` · `supplier_payment` | موظف المشتريات · `manager` بـ`"*"` |
-| `office.clients.write` | `payment_notice` (#285) · `fee_invoice` (#282/أ٢) | مكتب المحاسبة: `accountant` و`office_manager` و`manager` بـ`"*"` · و`viewer` لا يأخذه |
+| `office.clients.write` | `payment_notice` (#285) · `fee_invoice` (#282/أ٢) · `fee_receipt` و`fee_statement` (#283/ب) | مكتب المحاسبة: `accountant` و`office_manager` و`manager` بـ`"*"` · و`viewer` لا يأخذه |
 
 `viewer` لا يأخذ أياً منهما. ولا مال في الرابط على الجانبين: يعرض ولا يكتب، وأقصى أثره نقلُ عرضٍ من «مسودة» إلى «أُرسل».
 
@@ -267,6 +269,8 @@ doc_id)` أصلاً — عدّة روابط لمستندٍ واحد مسموحٌ
 - **وحدةٌ مرخّصة**: النوعُ يعلن `"module": "accounting_office"`، فشركةٌ أُطفئ ترخيصُها لا تُصيَّر لها ورقةٌ تحمل أسماءَ زبائنها ومبالغهم: رابطٌ حيٌّ يردّ **410** (`resolve_share`) كشهادة ما بعد البيع، والنوعُ يخرج من `_allowed_doc_types` ومن القراءة والإبطال (`require_module` فيهما، **404**). وأمّا `POST` فيردّ **400** أصلاً (البند التالي) — قبل الترخيص، فلا يُقاس عليه.
 - **ولا يُنشَأ من الباب العامّ**: `POST /api/document-shares/` يردّ **400** لهذا النوع كما لرابط عدّ الجرد. بابُه الوحيد «جاهز للإرسال» في مكتب المحاسبة (`accounting_office.appointments`)، وهو يختار الالتزامَ من `visible_clients`. وهذا السطح يأخذ **أيّ** `doc_id` (متسلسلٌ يُخمَّن)، فصلاحيةُ النوع وحدها — `office.clients.write` — كانت تكفي محاسباً ليتّخذ رابطاً عامّاً بأسماء زملائه ومبالغهم: صلاحيتُه لا تحمل `office.clients.all` ولا `office.amounts.view`.
 - **ونطاقٌ في سطح الإدارة**: `"scope": payment_notice_doc_ids` يقصُر القائمةَ والقراءةَ والإبطالَ على `doc_id` المنتمي إلى التزامات `visible_clients(tenant, user)` — في `DocumentShareViewSet` (`_scoped_queryset`، وداخله `get_object` فتشمل الثلاثة). ورابطُ زميلٍ يردّ **404 لا 403**. والنوعان الوحيدان اللذان يعلنان هذا المفتاح اليوم (`payment_notice` و`fee_invoice` بنطاق `fee_invoice_doc_ids` على فواتير الزبائن المرئيّين)، والأنواعُ التي لا تعلنه لا تُفلتَر.
+
+**و`fee_receipt` و`fee_statement` على الاستثناء نفسه بحرفه** (#283/ب): وحدةٌ مرخّصة (`accounting_office`) و`400` من الباب العامّ و`"scope"` (`fee_receipt_doc_ids` على `visible_payments`، و`fee_statement_doc_ids` على `visible_clients`). وبابُهما الوحيد مكتبُ المحاسبة: `POST fees/payments/<id>/share/` و`POST fees/ledger/share/` — وكلاهما يمرّ بـ`visible_payments`/`visible_clients` ويسجّل صفَّ `FeeStatement` قبل الرابط. والفرقُ الوحيد عن `payment_notice` أن **إنشاءهما ليس في مسار قراءة**: الإشعارُ يُنشَأ من كبسةٍ صريحةٍ في ملفّ الزبون، لا من فتح شاشة.
 
 **والصلاحية تُقرأ من النوع، ولم تكن.** كانت `DOC_TYPES[…]["permission"]` معلَنةً في السجلّ و**مهملةً** في `docshare/views.py`: الصلاحية المبيعاتية مثبَّتةً حرفياً في `list`/`retrieve`/`create`/`revoke`. لم يكن ذلك نزيفاً يوم كُتب (النوعان مبيعات)، لكنه كان يعني أن أول نوع شراء يجعل **موظف المبيعات يشارك فواتير المورّدين** وموظف المشتريات لا يقدر أن يشارك مستنده. الآن تُقرأ من السجلّ، والقائمة **مفلترةٌ** بما يملكه المستخدم لا محجوبةً كلَّها. يحرسه `docshare/tests/test_admin_api.py` (`test_permission_is_taken_from_the_type_not_hardcoded`) — وقد أُثبت أنه يُخفق على الكود القديم قبل أن يُعتمد.
 

@@ -167,7 +167,10 @@ export const CLIENT_TAB_KEYS = [
   'tax-card', 'obligations', 'services', 'contacts', 'documents',
   'reminder-log', 'notes',
   // #281: المواعيد — قبل «الدفتر»، فمفتاحُ #286/ب يبقى آخرَ القائمة (اختبارُه يثبته).
-  'appointments', 'book',
+  'appointments',
+  // #283/ب: الأتعابُ — دفعاتُ الزبون بإشعارِ قبضٍ لكلٍّ، وقبل «الدفتر» كذلك.
+  'fees',
+  'book',
 ] as const;
 export type ClientTabKey = typeof CLIENT_TAB_KEYS[number];
 
@@ -961,6 +964,10 @@ export function obligationBadgeClass(key: string): string {
   }
   if (key === 'near') {
     return 'border-slate-200 bg-slate-50 text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  }
+  // #283/ب: «قبضٌ وصل» أخضر — خبرُ مالٍ دخل المكتب لا موعدٌ يقترب ولا ورقةٌ نقصت.
+  if (key === 'payment_received') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200';
   }
   return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
 }

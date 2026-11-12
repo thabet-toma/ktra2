@@ -108,6 +108,8 @@ from accounting_office.models import (
     REMINDER_DEADLINE,
     REMINDER_DEFAULT_TEXTS,
     REMINDER_DOCUMENTS,
+    #: #283/ب: نوعُ إشعار القبض — مولّدُه في `payments` ويُنادى من هنا.
+    REMINDER_FEE_RECEIPT,
     REMINDER_KIND_DISMISSED,
     REMINDER_KIND_LABELS,
     REMINDER_KIND_MANUAL,
@@ -266,6 +268,13 @@ PAYMENT_AMOUNT_KEYS: tuple[str, ...] = (
     "invoices_total",
     "paid_total",
     "tax_note",
+    # #283/ب: كشفُ الحساب — الرصيدُ الافتتاحيُّ والختاميُّ والجارِي، ومجموعُ
+    # الحركة الصافية. أربعةُ مفاتيحِ مبلغٍ تُقنَّع كما تُقنَّع بقيّةُ المبالغ:
+    # كشفٌ يقنّع صفوفَه ويُظهر رصيدَه الختامي لا يقنّع شيئاً.
+    "opening_balance",
+    "closing_balance",
+    "balance",
+    "movements",
 )
 
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
@@ -6653,6 +6662,13 @@ class ReminderCandidate:
     #: ويُركَّب في `ready_to_send_payload` بعد الحواجز كلّها، فلا إشعارَ — ولا
     #: رابطَ يُنشَأ — لبندٍ لن يُرسَل.
     notice: Any = None
+    #: #283/ب: سطرُ تفصيلٍ يكتبه الخادم ويُلحَق بنصّ البند بعد نصّ نوعه — إشعارُ
+    #: القبض يحمل فيه رقمَه ومبلغَه وباقي الزبون. لا رمزَ جديداً في
+    #: `REMINDER_PLACEHOLDERS` ولا قالبَ مكتبٍ يكتب أرقاماً ليست له.
+    detail: str = ""
+    #: #283/ب: تفصيلُ الإشعار المنظَّم كما يقرؤه البند في «جاهز للإرسال»
+    #: (معرّفاتُ الدفعات وأرقامُها ومبلغُها وباقيها) — `None` لغير هذا النوع.
+    receipt: Any = None
     #: #282/أ٢: فاتورةُ الأتعاب المركَّبةُ على بند «اللي عليه» — رقمُها ومبلغُها
     #: واستحقاقُها ورابطُ ورقتها. `None` لبندٍ ليس فاتورة (أوراقٌ ومواعيد).
     #: ويُركَّب الرابطُ في `attach_invoice_links` بعد الحواجز كالإشعار.
@@ -6740,10 +6756,12 @@ def reminder_template_bodies(tenant, reminder_type) -> dict[str, str]:
 
 
 #: الأنواعُ التي لها **مولّدٌ** اليوم: الأوراق (#280)، وتذكيرُ الموعد، و«موعد
-#: رسمي قريب» (#281)، و«اللي عليه» من فواتير الأتعاب (#282/أ٢). والرابعُ كان
-#: بقالبٍ وإعدادٍ بلا مولّدٍ حتى صار له أوّله — فاتورةٌ صادرةٌ تُطالب بمبلغها.
+#: رسمي قريب» (#281)، و«اللي عليه» من فواتير الأتعاب (#282/أ٢)، وإشعارُ القبض
+#: (#283/ب). والرابعُ كان بقالبٍ وإعدادٍ بلا مولّدٍ حتى صار له أوّله — فاتورةٌ
+#: صادرةٌ تُطالب بمبلغها.
 _GENERATED_REMINDER_TYPES: tuple[str, ...] = (
     REMINDER_DOCUMENTS, REMINDER_APPOINTMENT, REMINDER_DEADLINE, REMINDER_BALANCE,
+    REMINDER_FEE_RECEIPT,
 )
 
 
@@ -6757,6 +6775,17 @@ def _appointments_module():
     from accounting_office import appointments
 
     return appointments
+
+
+def _payments_module():
+    """وحدةُ الدفعات (#283/ب) — استيرادٌ مؤجَّلٌ لدورةٍ حقيقيّة كذلك.
+
+    `payments` يستورد `services` في أعلاه (المحلّلُ والقناعُ)، فاستيرادُه هنا في
+    الأعلى يُدير الدورةَ عند أوّل تحميل. والنداءُ في `_reminder_candidates` وحده.
+    """
+    from accounting_office import payments
+
+    return payments
 
 
 def _fee_invoices_module():
@@ -6915,6 +6944,17 @@ def _reminder_candidates(
         postponed_pairs=postponed,
         reminder_type=reminder_type,
     ))
+    # #283/ب: إشعارُ القبض — مولّدُه في `payments` (مالُ الدفعات هناك)، ويمرّ
+    # هنا فيدخل بحواجز `ready_to_send_payload` نفسها بلا محرّكٍ موازٍ.
+    candidates.extend(_payments_module().fee_receipt_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
     # #282/أ٢: «اللي عليه» من فاتورةٍ صادرةٍ لم تُلغَ — مقدارُها واستحقاقُها بعد
     # سبعة أيام. مولّدٌ ثالثٌ يُرجع `ReminderCandidate` نفسه، فيمرّ في الحواجز
     # كلّها أدناه (الإذنُ ويومُ الراحة والعطلةُ والتأجيلُ والسقف) بلا استثناء.
@@ -6989,6 +7029,9 @@ def _reminder_item_payload(candidate) -> dict:
         # الإشعارُ نصُّه للزبون، فقناعُ البند وحده يُخفي عن الموظف ما يقرؤه من
         # يُرسِل إليه — والقناعُ يبقى حيث كان على صفوف الجداول والحمولات.
         "notice": _appointments_module().payment_notice_item(candidate.notice),
+        # #283/ب: تفصيلُ إشعار القبض — أرقامٌ مصيغةٌ كما في `notice` (قاموسٌ خام
+        # يمرّ مع DRF مائعاً). ويبقى المفتاحُ موجوداً بقيمة `None` لغير النوع.
+        "receipt": candidate.receipt,
         # #282/أ٢: بندُ الفاتورة — نصوصٌ مصيغةٌ ورابطُ ورقتها (يُركَّب بعد
         # الحواجز كالإشعار)، وبلا فاتورةٍ يخرج `None` فيبقى شكلُ البند ثابتاً.
         "invoice": _fee_invoices_module().invoice_item(candidate.invoice),
@@ -7043,6 +7086,9 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
         ))
         if candidate.notice is not None:
             parts.append(appointments.payment_notice_text(candidate.notice))
+        # #283/ب: سطرُ إشعار القبض بعد نصّه — رقمُ الإشعار والمبلغ والباقي.
+        if candidate.detail:
+            parts.append(candidate.detail)
         # #282/أ٢: سطرُ الفاتورة بعد نصّ نوعه كالإشعار — رقمٌ ومبلغٌ واستحقاقٌ
         # ورابط، ولا رمزَ جديداً في قوالب المكتب.
         if candidate.invoice is not None:

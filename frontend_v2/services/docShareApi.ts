@@ -42,7 +42,12 @@ export type ShareDocType =
   | "payment_notice"
   // #282/أ٢: ورقة «فاتورة الأتعاب» التي يُصدرها المكتب على مسودّةٍ معتمدة —
   // جمهورها الزبون، وصلاحيتها `office.clients.write` أيضاً.
-  | "fee_invoice";
+  | "fee_invoice"
+  // #283/ب: مستندا الأتعاب — إشعارُ قبضِ دفعةٍ وكشفُ حسابٍ لفترة. يُنشآن من
+  // مكتب المحاسبة وحده (`fees/payments/<id>/share/` و`fees/ledger/share/`)،
+  // والبابُ العامّ يرفض نوعهما (`docshare/views.py`) فلا يُشارَكان بمعرّفٍ مخمَّن.
+  | "fee_receipt"
+  | "fee_statement";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

@@ -1,0 +1,231 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+ورقةُ «كشف الحساب» (#283/ب) — ثلاثُ مجموعاتٍ ورصيدٌ جارٍ ورصيدٌ ختاميّ.
+
+**كلُّ رقمٍ يصل من `accounting_office.payments.statement_payload`** — الرصيدُ
+الجاريُّ من الحركات المرتَّبة، والرصيدُ الختاميُّ آخِرُ صفٍّ، و«اللي عليه اليوم»
+من `client_due` وحدها. والقالبُ لا يجمع ولا يطرح: نسخةٌ ثانية من المعادلة في
+قالبٍ هو أوّل من يفترق عن الخادم عند أوّل شطب.
+
+**والمجموعاتُ الثلاثُ** (الفواتيرُ والدفعاتُ والشطوب) صفوفُ `fees/ledger/`
+نفسها مقصورةً على فترة الكشف — لا صفوفَ ثانية تُبنى هنا.
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  .fs-head{border-bottom:2px solid var(--ink); padding-bottom:16px; margin-bottom:18px}
+  .fs-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .fs-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .fs-title{font-size:21px; font-weight:800; margin:16px 0 4px}
+  .fs-sub{font-size:12.5px; color:var(--muted); margin:0}
+  .fs-party{display:flex; gap:14px; flex-wrap:wrap; margin-bottom:18px}
+  .fs-card{flex:1 1 240px; border:1px solid var(--line); border-radius:10px;
+           padding:12px 15px}
+  .fs-card h3{margin:0 0 6px; font-size:12px; color:var(--muted); font-weight:700}
+  .fs-row{display:flex; justify-content:space-between; gap:12px; font-size:13px;
+          padding:3px 0}
+  .fs-row span:first-child{color:var(--muted)}
+  .fs-section{margin:22px 0 0}
+  .fs-section h2{font-size:14px; font-weight:800; margin:0 0 8px}
+  .fs-table{width:100%; border-collapse:collapse; font-size:13px}
+  .fs-table th,.fs-table td{border:1px solid var(--line); padding:8px 10px;
+                            text-align:right}
+  .fs-table thead th{background:#f8fafc; font-size:11.5px; color:var(--muted);
+                     font-weight:700}
+  .fs-table td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+  .fs-table tfoot td{background:#f8fafc; font-weight:700}
+  .fs-empty{border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+            color:var(--muted); font-size:12.5px}
+  .fs-total{margin:20px 0 0; border-top:2px solid var(--ink); padding-top:12px;
+            font-size:16px; font-weight:800}
+  .fs-foot{margin-top:24px; padding-top:12px; border-top:1px solid var(--line);
+           font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="fs-head">
+    <p class="fs-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="fs-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="fs-org-line">{{ company.address }}</p>{% endif %}
+  </div>
+
+  <p class="fs-title">{{ title }}</p>
+  <p class="fs-sub">
+    الفترة:
+    {% if sheet.from %}{{ sheet.from|gdate }}{% else %}من البداية{% endif %}
+    —
+    {% if sheet.to %}{{ sheet.to|gdate }}{% else %}حتى اليوم{% endif %}
+  </p>
+
+  <div class="fs-party">
+    <div class="fs-card">
+      <h3>الزبون</h3>
+      <div class="fs-row"><span>الاسم</span><span><strong>{{ sheet.client.name }}</strong></span></div>
+    </div>
+    <div class="fs-card">
+      <h3>الأرصدة</h3>
+      <div class="fs-row"><span>رصيد أول المدة</span><span>{{ sheet.opening_balance|money }}</span></div>
+      <div class="fs-row"><span>الرصيد الختامي</span><span><strong>{{ sheet.closing_balance|money }}</strong></span></div>
+      <div class="fs-row"><span>المطلوب اليوم</span><span>{{ sheet.due|money }}</span></div>
+    </div>
+  </div>
+
+  <div class="fs-section">
+    <h2>الحركات والرصيد الجاري</h2>
+    {% if sheet.rows %}
+    <table class="fs-table">
+      <thead>
+        <tr>
+          <th>التاريخ</th>
+          <th>النوع</th>
+          <th>البيان</th>
+          <th>المبلغ</th>
+          <th>الرصيد الجاري</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in sheet.rows %}
+        <tr>
+          <td>{{ row.date|gdate }}</td>
+          <td>{{ row.kind_label }}</td>
+          <td>{{ row.label }}</td>
+          <td class="num">{{ row.amount|money }}</td>
+          <td class="num">{{ row.balance|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="fs-empty">لا حركاتٍ على هذا الزبون في هذه الفترة.</p>
+    {% endif %}
+  </div>
+
+  <div class="fs-section">
+    <h2>الفواتير</h2>
+    {% if sheet.groups.invoices %}
+    <table class="fs-table">
+      <thead>
+        <tr>
+          <th>الفترة</th>
+          <th>الإجمالي</th>
+          <th>المدفوع</th>
+          <th>المشطوب</th>
+          <th>المتبقّي</th>
+          <th>الحالة</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in sheet.groups.invoices %}
+        <tr>
+          <td>{{ row.period_label }}</td>
+          <td class="num">{{ row.total|money }}</td>
+          <td class="num">{{ row.paid_amount|money }}</td>
+          <td class="num">{{ row.written_amount|money }}</td>
+          <td class="num">{{ row.remaining|money }}</td>
+          <td>{{ row.state_label }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td>مجموع الفواتير</td>
+          <td class="num">{{ sheet.totals.invoices|money }}</td>
+          <td colspan="4"></td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p class="fs-empty">لا فواتيرَ في هذه الفترة.</p>
+    {% endif %}
+  </div>
+
+  <div class="fs-section">
+    <h2>الدفعات</h2>
+    {% if sheet.groups.payments %}
+    <table class="fs-table">
+      <thead>
+        <tr>
+          <th>رقم الإشعار</th>
+          <th>التاريخ</th>
+          <th>الطريقة</th>
+          <th>المبلغ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in sheet.groups.payments %}
+        <tr>
+          <td>{{ row.receipt_number }}</td>
+          <td>{{ row.paid_at|gdate }}</td>
+          <td>{{ row.method_label }}</td>
+          <td class="num">{{ row.amount|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3">مجموع الدفعات</td>
+          <td class="num">{{ sheet.totals.payments|money }}</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p class="fs-empty">لا دفعاتٍ في هذه الفترة.</p>
+    {% endif %}
+  </div>
+
+  <div class="fs-section">
+    <h2>الشطوب</h2>
+    {% if sheet.groups.write_offs %}
+    <table class="fs-table">
+      <thead>
+        <tr>
+          <th>التاريخ</th>
+          <th>السبب</th>
+          <th>شطبه</th>
+          <th>المبلغ</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in sheet.groups.write_offs %}
+        <tr>
+          <td>{{ row.created_at|slice:":10" }}</td>
+          <td>{{ row.reason }}</td>
+          <td>{{ row.created_by.name }}</td>
+          <td class="num">{{ row.amount|money }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <td colspan="3">مجموع الشطوب</td>
+          <td class="num">{{ sheet.totals.write_offs|money }}</td>
+        </tr>
+      </tfoot>
+    </table>
+    {% else %}
+    <p class="fs-empty">لا شطوبَ في هذه الفترة.</p>
+    {% endif %}
+  </div>
+
+  <div class="fs-total">
+    <div class="fs-row">
+      <span>الرصيد الختامي لهذه الفترة</span>
+      <span>{{ sheet.closing_balance|money }}</span>
+    </div>
+  </div>
+
+  <div class="fs-foot">
+    {{ company.company_name_primary }}
+    <br>{{ title }} — {% if sheet.to %}{{ sheet.to|gdate }}{% else %}حتى اليوم{% endif %}
+  </div>
+</div>
+{% endblock %}

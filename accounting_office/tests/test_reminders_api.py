@@ -23,6 +23,8 @@ from accounting_office.models import (
     DOCUMENT_STATUS_REQUIRED,
     REMINDER_BALANCE,
     REMINDER_DOCUMENTS,
+    REMINDER_TYPE_CHOICES,
+    REMINDER_TYPES,
     Contact,
     DocumentChecklistItem,
     OfficeAlert,
@@ -145,7 +147,10 @@ class ConsentApiTest(RemindersApiTestCase):
         self.assertTrue(res.data["reminders_consent"])
         self.assertEqual(
             res.data["consent_types"],
-            [REMINDER_DOCUMENTS, "deadline", "balance", "appointment"],
+            # الأنواعُ من قائمتها لا نصّاً: نوعٌ جديد يصل بالإذن الافتراضيّ
+            # (`reminder_default_consent_types` افتراضُه كلُّ الأنواع) — والتعدادُ
+            # الحرفيُّ هنا كان يسقط عند إضافة نوع، بلا سلوكٍ خاطئ.
+            list(REMINDER_TYPES),
         )
 
     def test_consent_is_granted_and_withdrawn_through_the_contact_api(self):
@@ -287,7 +292,7 @@ class TemplateApiTest(RemindersApiTestCase):
         self.client.force_authenticate(user=self.viewer)
         res = self.client.get(TEMPLATES, **self.headers())
         self.assertEqual(res.status_code, 200, res.content)
-        self.assertEqual(len(res.data["rows"]), 8)
+        self.assertEqual(len(res.data["rows"]), len(REMINDER_TYPE_CHOICES) * 2)
         self.assertIn("client_name", res.data["placeholders"])
 
     def test_the_office_overrides_one_body_and_returns_to_the_default(self):
@@ -768,7 +773,7 @@ class ReminderSettingsApiTest(RemindersApiTestCase):
             row["key"]: row for row in res.data["settings"]
         }
         for key, default in (
-            ("reminder_types_enabled", [REMINDER_DOCUMENTS, "deadline", "balance", "appointment"]),
+            ("reminder_types_enabled", list(REMINDER_TYPES)),
             ("reminder_auto_send", False),
             ("reminder_merge_daily", True),
             ("documents_reminder_start_days", 1),
