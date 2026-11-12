@@ -286,7 +286,28 @@ export interface ReadyToSendItem {
   step: number;
   max: number;
   due_date: string;
+  /**
+   * #282/أ٢: بندُ فاتورة الأتعاب المركَّب على التذكير — رقمُها ومبلغُها
+   * واستحقاقُها ورابطُ ورقتها. `null` لبندٍ ليس فاتورة (أوراقٌ ومواعيد).
+   * **`id` هو مفتاحُ صفّ البند**: ورقتان في يومٍ واحدٍ تتشاركان الفترة.
+   */
+  invoice: ReadyToSendInvoice | null;
   subject: { document_item_codes: string[] };
+}
+
+export interface ReadyToSendInvoice {
+  id: number;
+  number: string;
+  title: string;
+  kind: string;
+  total: string;
+  tax_total: string;
+  issued_on: string;
+  due_on: string;
+  reason: string;
+  /** رقمُ الفاتورة الأصل التي يخصمها الإشعارُ الدائن — فارغٌ لغيره. */
+  original_number: string;
+  url: string;
 }
 
 export interface ReadyToSendRecipient {

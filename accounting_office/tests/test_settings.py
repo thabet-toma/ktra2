@@ -525,6 +525,10 @@ class SettingsApiTest(SettingTestCase):
         self.assertEqual(rows["tax_system"]["value_label"], "فلسطيني")
         self.assertEqual(rows["office_size"]["value_label"], "غير مختار")
         self.assertEqual(rows["filing_method"]["client_customization_count"], 1)
+        # #282/أ٢: حدُّ طول العنوان يُرسَل مع سطره — حقلُ الشاشة يمنع تجاوزه
+        # قبل الطلب، والعمودُ يحكم خلفه.
+        self.assertEqual(rows["fee_invoice_title"]["max_length"], 60)
+        self.assertEqual(rows["office_licensed_dealer"]["kind"], "bool")
         self.assertTrue(res.data["first_run_required"])
 
     def test_the_office_value_is_set_and_reset_through_the_api(self):
@@ -538,6 +542,27 @@ class SettingsApiTest(SettingTestCase):
         reset = self.client.delete(f"{SETTINGS}filing_method/", **self.headers())
         self.assertEqual(reset.status_code, 200, reset.content)
         self.assertEqual(reset.data["value"], "electronic")
+
+    def test_the_fee_invoice_settings_are_saved_from_the_office_surface(self):
+        """المفتاحان يُحفظان من `settings/<key>/` — وهو ما تحفظه الشاشة.
+
+        (`office_licensed_dealer` منطقيٌّ يُرسَل من مربّعه، و`fee_invoice_title`
+        نصٌّ يُطبَّع؛ والحدُّ يُرسَل مع السطر ليقيّده حقلُ الإدخال.)
+        """
+        licensed = self.client.put(
+            f"{SETTINGS}office_licensed_dealer/", {"value": False}, format="json",
+            **self.headers(),
+        )
+        self.assertEqual(licensed.status_code, 200, licensed.content)
+        self.assertIs(licensed.data["value"], False)
+
+        title = self.client.put(
+            f"{SETTINGS}fee_invoice_title/", {"value": "  فاتورة خدمات  "},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(title.status_code, 200, title.content)
+        self.assertEqual(title.data["value"], "فاتورة خدمات")
+        self.assertEqual(title.data["max_length"], 60)
 
     def test_an_invalid_value_is_a_400(self):
         res = self.client.put(

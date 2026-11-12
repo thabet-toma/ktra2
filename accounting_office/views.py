@@ -2480,16 +2480,26 @@ class OfficeFeeInvoiceViewSet(OfficeModuleViewSet):
 
     @action(detail=True, methods=["post"], url_path="cancel")
     def cancel(self, request, pk=None):
-        """«أَلغِها» — قبل إنشاء الرابط وحده، والصفُّ يبقى في التاريخ."""
+        """«أَلغِها» — قبل إنشاء الرابط وحده، والصفُّ يبقى في التاريخ.
+
+        وإشعارٌ دائنٌ حيٌّ على الفاتورة **409** لا 400: الطلبُ صحيحٌ والحالةُ
+        القائمةُ تمنعه — وإلا بقي تصحيحٌ دائنٌ على أصلٍ ملغى.
+        """
         invoice = self.get_object()
         self.require_write()
         serializer = FeeInvoiceCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        cancelled = fee_invoices.cancel_invoice(
-            invoice,
-            actor=request.user,
-            reason=serializer.validated_data.get("reason", ""),
-        )
+        try:
+            cancelled = fee_invoices.cancel_invoice(
+                invoice,
+                actor=request.user,
+                reason=serializer.validated_data.get("reason", ""),
+            )
+        except fee_invoices.LiveCreditNoteConflict as conflict:
+            return Response(
+                {"invoice": [str(conflict)]},
+                status=status.HTTP_409_CONFLICT,
+            )
         return self._detail(cancelled)
 
     @action(detail=True, methods=["post"], url_path="credit-note")

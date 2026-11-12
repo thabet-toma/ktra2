@@ -45,7 +45,7 @@ from django.db import transaction
 from django.db.models import Exists, OuterRef, Sum
 from django.utils import timezone
 
-from accounting_office import fees, services
+from accounting_office import deadlines, fees, services
 from accounting_office.models import (
     FEE_INVOICE_CREDIT_TITLES,
     FEE_INVOICE_KIND_CREDIT_NOTE,
@@ -342,6 +342,23 @@ def ensure_sequence(tenant, *, year) -> FeeInvoiceSequence:
 
 
 # ── الإلغاء: قبل الإرسال وحده، ويعيد المسودّةَ مسودّةً ────────────────────────
+class LiveCreditNoteConflict(Exception):
+    """إلغاءُ فاتورةٍ لها إشعارٌ دائنٌ حيّ — **تعارضٌ مع حالةٍ قائمة**.
+
+    ليس خطأَ مدخلات: الطلبُ صحيحٌ وحقولُه صحيحة، لكنّ صفّاً آخر قائماً يمنع —
+    فيُترجم **409** لا 400. وإلغاءُ الأصل يترك إشعاراً دائناً حيّاً يخصم ورقةً
+    لم تصدر، وهو ما لا يُقرأ في كشف الزبون.
+    """
+
+    def __init__(self, numbers):
+        self.numbers = list(numbers)
+        super().__init__(
+            "للفاتورة إشعارٌ دائنٌ حيّ ("
+            + "، ".join(self.numbers)
+            + "). ألغِ الإشعارَ الدائن أوّلًا ثم ألغِ الفاتورة."
+        )
+
+
 def _locked(invoice) -> FeeInvoice:
     """إعادةُ قراءة الصفّ بقفلٍ — قرارُ الإلغاء يُبنى على حالته الآنية لا لقطة."""
     return (
@@ -423,6 +440,10 @@ def cancel_invoice(invoice, *, actor, reason="") -> FeeInvoice:
 
     **والصلاحيةُ صلاحيةُ الاعتماد** (`manager`/`office_manager`): الإلغاءُ فعلٌ
     على قرارِ اعتمادٍ سابق، لا كتابةُ زبونٍ — محاسبٌ لا يعتمد لا يُلغي.
+
+    **وقبل أيّ كتابة**: ورقةٌ خرجت لا تُلغى، وورقةٌ صدر لها إشعارٌ دائنٌ حيّ لا
+    تُلغى إمّا (`LiveCreditNoteConflict` ⇒ 409) — فلا يبقى تصحيحٌ دائنٌ على
+    أصلٍ ملغى.
     """
     fees._assert_approver(invoice.tenant, actor)
     with transaction.atomic():
@@ -436,6 +457,18 @@ def cancel_invoice(invoice, *, actor, reason="") -> FeeInvoice:
                     "أصدِر إشعاراً دائناً بدلاً من الإلغاء."
                 ),
             })
+        live_notes = list(
+            FeeInvoice.objects
+            .filter(
+                related_invoice=invoice,
+                kind=FEE_INVOICE_KIND_CREDIT_NOTE,
+                cancelled_at__isnull=True,
+            )
+            .order_by("number")
+            .values_list("number", flat=True)
+        )
+        if live_notes:
+            raise LiveCreditNoteConflict(live_notes)
         invoice.cancelled_at = timezone.now()
         invoice.cancelled_by = actor if getattr(actor, "pk", None) else None
         invoice.cancel_reason = (reason or "").strip()[:300]
@@ -898,6 +931,28 @@ def reminder_period(invoice) -> tuple[date, date]:
     return issued_on, issued_on + timedelta(days=INVOICE_DUE_DAYS)
 
 
+def document_period_text(invoice) -> str | None:
+    """شهرُ مسودّة الورقة كما يُنطق في الرسالة — **لا شهرُ يوم الإصدار**.
+
+    نصُّ النوع يقول «على حساب {period}»، والورقةُ تخصّ شهرَ مسودّتها: مسودّةُ
+    آذار قد تُصدر في تشرين الثاني، وقراءةُ الفترة من `issued_at` تذكر شهراً لا
+    تخصّه الورقة. والتصحيحُ يورث شهرَ أصله (`related_invoice`) لا شهرَ يومه،
+    وورقةٌ بلا مسودّةٍ ولا أصل — لا لقطةَ شهرٍ لها — تبقى على تسمية فترة إصدارها.
+
+    **ولا يمسّ المفتاح**: `reminder_period` يبقى (الإصدار، الاستحقاق) لكل ورقة.
+    """
+    draft = invoice.source_draft
+    if draft is None and invoice.related_invoice_id is not None:
+        related = invoice.related_invoice
+        draft = None if related is None else related.source_draft
+    if draft is None:
+        return None
+    start = date(draft.year, draft.month, 1)
+    return deadlines.period_label(
+        start, deadlines.month_start_after(start, 1) - timedelta(days=1),
+    )
+
+
 def sheet_lines(invoice) -> list[dict]:
     """سطورُ الورقة بأعمدة م4/1: النوعُ والكميةُ والوحدةُ والسعرُ ونسبةُ الضريبة."""
     unit = unit_for(invoice.tax_system)
@@ -1100,6 +1155,7 @@ def _reminder_invoice(invoice, *, due) -> dict:
 
     والمبلغُ مكشوفٌ كما في نصّ الرسالة نفسه: الرسالةُ إلى الزبون عن مبلغٍ عليه،
     وقنعُه عن الموظّف كان يُرسل «—» إلى الزبون بدل مبلغه (قاعدةُ #281).
+    **و`original_number` للأصل**: نصُّ الإشعار الدائن يسمّي الفاتورةَ التي يخصمها.
     """
     return {
         "id": invoice.pk,
@@ -1111,6 +1167,9 @@ def _reminder_invoice(invoice, *, due) -> dict:
         "issued_on": _local_day(invoice.issued_at).isoformat(),
         "due_on": due.isoformat(),
         "reason": invoice.cancel_reason,
+        "original_number": (
+            "" if invoice.related_invoice_id is None else invoice.related_invoice.number
+        ),
         "url": "",
     }
 
@@ -1159,7 +1218,7 @@ def invoice_reminder_candidates(
             kind__in=tuple(_INVOICE_REMINDER_TYPES),
             cancelled_at__isnull=True,
         )
-        .select_related("client")
+        .select_related("client", "source_draft", "related_invoice")
         .order_by("issued_at", "id")
     )
     candidates = []
@@ -1195,6 +1254,7 @@ def invoice_reminder_candidates(
             exhausted=count >= INVOICE_REMINDER_MAX,
             postponed=(invoice.client_id, item_type) in postponed_pairs,
             render_due=due_on,
+            period_text=document_period_text(invoice),
             amount=invoice.total,
             invoice=_reminder_invoice(invoice, due=due_on),
         ))
@@ -1243,12 +1303,22 @@ def invoice_item(invoice) -> dict | None:
 
 
 def invoice_text(invoice) -> str:
-    """نصُّ الفاتورة كما يدخل `body` الرسالة — بلا رمزٍ جديدٍ في القوالب."""
+    """نصُّ الورقة كما يدخل `body` الرسالة — بلا رمزٍ جديدٍ في القوالب.
+
+    **ونصُّ الإشعار الدائن ليس نصَّ فاتورة** (#282/أ٢/١): «المبلغ … — الاستحقاق»
+    مطالبةٌ، والإشعارُ يقول «لصالحك» ويسمّي **الفاتورةَ الأصل** التي يخصمها —
+    نصٌّ بلا أصله يقرأ خصماً بلا مرجع.
+    """
     if invoice is None:
         return ""
     if invoice["kind"] == FEE_INVOICE_KIND_CREDIT_NOTE:
-        parts = [f"{invoice['title']} {invoice['number']}"]
+        headline = f"{invoice['title']} {invoice['number']}"
+        if invoice.get("original_number"):
+            headline = f"{headline} — عن الفاتورة {invoice['original_number']}"
+        parts = [headline]
         parts.append(f"المبلغ: {invoice['total']} — لصالحك")
+        if invoice.get("reason"):
+            parts.append(f"السبب: {invoice['reason']}")
     else:
         parts = [f"{invoice['title']} {invoice['number']}"]
         parts.append(

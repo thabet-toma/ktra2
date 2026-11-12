@@ -216,6 +216,19 @@ export const SettingControl: React.FC<SettingControlProps> = ({
             className={`${officeInputClass} w-28 tabular-nums`}
           />
         ) : null}
+
+        {/* #282/أ٢: نصٌّ حرّ قصير (`fee_invoice_title`). `maxLength` من السجلّ
+            نفسه، فالعمودُ وحدُّه يحكمان — وتركُه فارغاً يعني «الافتراضيّ». */}
+        {setting.kind === 'text' ? (
+          <input
+            type="text"
+            value={asString(draft)}
+            disabled={disabled}
+            maxLength={setting.max_length ?? undefined}
+            onChange={(event) => setDraft(event.target.value)}
+            className={`${officeInputClass} w-full max-w-[420px]`}
+          />
+        ) : null}
       </div>
 
       <p className="mt-1.5 text-[10.5px] text-slate-400 dark:text-slate-500">

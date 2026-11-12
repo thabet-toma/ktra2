@@ -9,7 +9,8 @@
    عدّادٌ مقفولٌ متسلسلٌ لا يتكرّر.
 2. **الإلغاءُ يعيد المسودّةَ مسودّةً** فتُعتمد ثانيةً وتُصدر ورقةً جديدةً برقمٍ
    جديد — فلا شهرٌ لا يُفاتر أبداً، **وقبل الإرسال وحده** (تذكيرٌ صادرٌ أو
-   مشاهدةٌ على الرابط — لا مجرّدُ فتح «جاهز للإرسال»).
+   مشاهدةٌ على الرابط — لا مجرّدُ فتح «جاهز للإرسال»)، و**لا يُلغى أصلٌ لإشعارٍ
+   دائنٍ حيّ** (409 قبل أي كتابة).
 3. **الإشعارُ الدائنُ على سلسلةٍ منفصلة** بسقفٍ **تراكميّ**، والتكميليةُ على
    السلسلة الرئيسية **بلا سقفِ الأصل**.
 4. **«ليست فاتورة ضريبية» ثابتةٌ تحت العنوان وفي التذييل**، ولا «فاتورة ضريبية»
@@ -22,15 +23,18 @@
 8. **الرابطُ العامّ لا يكشف إلا فاتورته** (فاتورتان، توكنان).
 9. **القناع**: محاسبٌ بلا `office.amounts.view` يقرأ `null` في المبالغ — والكتابة 403.
 10. **«جاهز للإرسال»**: الفاتورةُ مطالبةٌ (`balance`) من **يوم إصدارها** واستحقاقُها
-    بعد سبعة أيام، والإشعارُ الدائنُ مستندٌ **غيرُ مطالِب** (`documents`).
+    بعد سبعة أيام، والإشعارُ الدائنُ مستندٌ **غيرُ مطالِب** (`documents`) ونصُّه
+    يسمّي أصله، وشهرُ نصوصه من **المسودّة** لا من يوم الإصدار.
+11. **تعليقُ القالب لا يصل إلى ورقة الزبون** — `{# … #}` يُقلَّم على سطرٍ واحد.
 """
 import datetime
 from decimal import Decimal
 
 from django.contrib.auth.models import User
+from django.utils import timezone
 from rest_framework.test import APITestCase
 
-from accounting_office import fee_invoices, fees, services
+from accounting_office import deadlines, fee_invoices, fees, services
 from accounting_office.models import (
     FEE_INVOICE_KIND_CREDIT_NOTE,
     FEE_INVOICE_KIND_INVOICE,
@@ -39,6 +43,7 @@ from accounting_office.models import (
     Contact,
     FeeDraft,
     FeeInvoice,
+    FeeInvoiceSequence,
     FeeSubscription,
     OfficeClient,
     ReminderLog,
@@ -190,6 +195,15 @@ def create_share(tenant, invoice):
     return docshare_services.create_share(tenant, DOC_FEE_INVOICE, invoice.pk)
 
 
+def local_day(moment):
+    """تاريخُ اللحظة **بتوقيت الخادم** لا UTC.
+
+    `moment.date()` على لحظةٍ مقروءةٍ من القاعدة يعطي تاريخَ UTC (القاعدةُ تُخزّن
+    UTC)، فهو يسبق تاريخَ المكتب بين 21:00 و24:00 UTC فيسقط الاختبارُ ليلاً.
+    """
+    return timezone.localtime(moment).date()
+
+
 class IssueOnApprovalTest(FeeInvoiceTestCase):
     """الاعتمادُ هو المكانُ الوحيد الذي تصير فيه المسودّةُ فاتورةً مرقَّمة."""
 
@@ -234,7 +248,10 @@ class IssueOnApprovalTest(FeeInvoiceTestCase):
         res = self.client.post(f"{DRAFTS}approve-all/", {}, format="json", **self.headers())
 
         self.assertEqual(res.status_code, 200, res.content)
-        series = fee_invoice_series(datetime.date.today().year)
+        # سنةُ السلسلة من **تاريخ اليوم المحلّيّ** لا من ساعة الحائط: الفاتورةُ
+        # صدرت الآن، و`date.today()` في عمليّةٍ بتوقيتٍ آخر تنقلب على الحدّ.
+        year = timezone.localdate().year
+        series = fee_invoice_series(year)
         self.assertEqual(
             sorted(FeeInvoice.objects.values_list("number", flat=True)),
             [fee_invoice_number(series, 1), fee_invoice_number(series, 2)],
@@ -256,6 +273,12 @@ class NumberingTest(FeeInvoiceTestCase):
         )
 
     def test_the_credit_note_numbers_on_a_separate_series(self):
+        """**سلسلتان مختلفتان فعلاً** — لا مقارنةُ دالّةٍ بدالّتها.
+
+        كان المتوقَّعُ يُبنى بـ`fee_invoice_credit_series` نفسِها التي يقرؤها
+        الخادم، فلو صارت السلسلتان واحدة لمرّ الاختبارُ وهو يقيس نفسَه. الصيغةُ
+        الآن من **النصّ الحرفيّ** لبادئة كل سلسلة.
+        """
         invoice = self.make_invoice()
         res = self.client.post(
             f"{INVOICES}{invoice.pk}/credit-note/",
@@ -265,17 +288,23 @@ class NumberingTest(FeeInvoiceTestCase):
 
         self.assertEqual(res.status_code, 201, res.content)
         self.assertEqual(res.data["kind"], FEE_INVOICE_KIND_CREDIT_NOTE)
+        year = local_day(invoice.issued_at).year
+        self.assertNotEqual(fee_invoice_credit_series(year), fee_invoice_series(year))
+        self.assertTrue(
+            res.data["number"].startswith(f"إشعار-أتعاب-{year}-"), res.data["number"],
+        )
         self.assertEqual(
             res.data["number"],
-            fee_invoice_number(fee_invoice_credit_series(invoice.issued_at.year), 1),
+            fee_invoice_number(fee_invoice_credit_series(year), 1),
         )
         self.assertEqual(res.data["related_invoice"], invoice.pk)
         # والسلسلةُ الرئيسية لم تُستهلك بإشعارٍ دائن.
         fee_invoices_row = FeeInvoice.objects.get(pk=invoice.pk)
-        self.assertEqual(
+        self.assertTrue(
+            fee_invoices_row.number.startswith(f"أتعاب-{year}-"),
             fee_invoices_row.number,
-            fee_invoice_number(fee_invoice_series(invoice.issued_at.year), 1),
         )
+        self.assertFalse(fee_invoices_row.number.startswith("إشعار-"))
 
     def test_the_supplementary_stays_on_the_main_series(self):
         invoice = self.make_invoice()
@@ -297,12 +326,18 @@ class TaxLineTest(FeeInvoiceTestCase):
     """سطرُ الضريبة يتبع إعداد «المكتب مشتغل مرخّص» — ويغيب كاملاً حين يُطفأ."""
 
     def test_the_line_shows_when_the_office_is_a_licensed_dealer(self):
+        """السطرُ **بمبلغه ونسبته** لا بوجود كلمةٍ ما.
+
+        **وكان لا يستطيع السقوط**: `"160"` توجد في الإجمالي `1,160`، و`"16"`
+        في `16px` من CSS، فتمرّ التأكيداتُ ولو كان مبلغُ سطر الضريبة نفسِه خطأً.
+        الفحصُ الآن على صفّ السطر كما يُصيَّر.
+        """
         html = self.page_of(self.make_invoice(amount="1000.00"))
 
-        self.assertIn("قيمة الضريبة", html)
-        self.assertIn("160", html.replace("\u200f", ""))
-        self.assertIn("مئة وستون", html)
-        self.assertIn("16", html)
+        self.assertIn(
+            '<span>قيمة الضريبة (16%)</span><span class="num">160</span>', html,
+        )
+        self.assertIn("قيمة الضريبة بالحروف: مئة وستون", html)
 
     def test_the_line_disappears_entirely_when_the_office_is_not_licensed(self):
         self.set_setting("office_licensed_dealer", False)
@@ -402,6 +437,19 @@ class ShapeTest(FeeInvoiceTestCase):
         self.assertEqual(html.count(COPY_ORIGINAL), 1)
         self.assertEqual(html.count(COPY_DUPLICATE), 1)
         self.assertLess(html.index(COPY_ORIGINAL), html.index(COPY_DUPLICATE))
+
+    def test_no_template_comment_prints_on_the_customer_sheet(self):
+        """تعليقُ القالب لا يُطبع حرفاً — و`{# … #}` متعدّدُ الأسطر يُخرج نصَّه.
+
+        تعليقُ Django ذو السطر الواحد وحده يُقلَّم؛ فتعليقٌ على سطرين يمرّ نصّاً
+        على الورقة التي يقرؤها الزبون.
+        """
+        html = self.page_of(self.make_invoice())
+
+        self.assertNotIn("{#", html)
+        self.assertNotIn("#}", html)
+        self.assertNotIn("المجموعَ ولا التوقيع", html)
+        self.assertNotIn("تدّعي الرسمية", html)
 
     def test_the_negation_sits_under_the_title_in_every_copy(self):
         html = self.page_of(self.make_invoice())
@@ -530,22 +578,111 @@ class CancelTest(FeeInvoiceTestCase):
     def test_a_sibling_item_with_the_same_key_is_not_the_invoice_sent(self):
         """المفتاحُ (issued_on, due_on) مشتركٌ بين ورقتَي اليوم — **النوعُ يفصل**.
 
-        إشعارُ أتعابٍ دائنٌ صدر في يوم الفاتورة نفسِه يشاركها المفتاح، فلو قِيس
-        الإرسالُ بكلّ الأنواع المحسوبة لصار إرسالُ الإشعار مسوّغاً لرفض إلغاء
-        الفاتورة — والعكس. يُقاس بنوع بند الورقة نفسه (`invoice_reminder_type`).
+        إشعارٌ دائنٌ صدر في يوم الفاتورة نفسِه يشاركها المفتاح، فلو قِيس الإرسالُ
+        بكلّ الأنواع المحسوبة لصار إرسالُ الإشعار مسوّغاً لرفض إلغاء الفاتورة —
+        والعكس. يُقاس بنوع بند الورقة نفسه (`invoice_reminder_type`).
+
+        ** وكان لا يستطيع السقوط**: يسجّل صفَّ *نوع الفاتورة نفسِه* بحالة تنحية،
+        فيمرّ حتى لو حُذف فصلُ الأنواع من `invoice_was_sent`. أُعيد ليصنع الشقيقَ
+        فعلاً — إشعارٌ دائنٌ صادرٌ (`sent`) بمفتاح الفاتورة نفسِه.
         """
         invoice = self.make_invoice()
-        issued_on, due_on = fee_invoices.reminder_period(invoice)
+        created = self.client.post(
+            f"{INVOICES}{invoice.pk}/credit-note/",
+            {"amount": "160.00", "reason": "خصم"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        note = FeeInvoice.objects.get(pk=created.data["id"])
+        # الشقيقُ بمفتاح الفاتورة نفسه: تاريخُ الإصدار وحدَه يفصل الورقتين.
+        self.assertEqual(
+            fee_invoices.reminder_period(note),
+            fee_invoices.reminder_period(invoice),
+        )
+        self.assertNotEqual(
+            fee_invoices.invoice_reminder_type(note),
+            fee_invoices.invoice_reminder_type(invoice),
+        )
+        # الشقيقُ الحيّ يمنع الإلغاء بسببٍ آخر (409، اختبارُه فوق) — يُلغى أوّلًا،
+        # ثم تُسجَّل رسالتُه **صادرة**: إرسالُ بند الإشعار لا يُوقف إلغاء الفاتورة.
+        with_note_cancelled = self.client.post(
+            f"{INVOICES}{note.pk}/cancel/", {}, format="json", **self.headers(),
+        )
+        self.assertEqual(
+            with_note_cancelled.status_code, 200, with_note_cancelled.content,
+        )
+        issued_on, due_on = fee_invoices.reminder_period(note)
         ReminderLog.objects.create(
             tenant=self.tenant,
-            client=invoice.client,
-            reminder_type=fee_invoices.invoice_reminder_type(invoice),
-            kind="dismissed",  # تنحيةٌ لا إرسال
+            client=note.client,
+            reminder_type=fee_invoices.invoice_reminder_type(note),
+            kind="sent",
             body="نصّ",
             period_start=issued_on,
             period_end=due_on,
             created_by=self.owner,
         )
+
+        self.assertIs(fee_invoices.invoice_was_sent(invoice), False)
+        res = self.client.post(
+            f"{INVOICES}{invoice.pk}/cancel/", {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+
+    def test_a_live_credit_note_blocks_the_cancellation(self):
+        """إلغاءُ فاتورةٍ صدر لها إشعارٌ دائنٌ حيّ **409 قبل أيّ كتابة**.
+
+        تعارضٌ مع حالةٍ قائمة لا خطأُ مدخلات (400): الصفُّ والمسودّةُ وسطرُ
+        الترقيم لا تُمَسّ، والإشعارُ يبقى حيّاً — وإلا صار الشهرُ ملغىً وإشعارُه
+        الدائنُ حيّاً على ورقةٍ لم تصدر.
+        """
+        invoice = self.make_invoice()
+        created = self.client.post(
+            f"{INVOICES}{invoice.pk}/credit-note/",
+            {"amount": "160.00", "reason": "خصم"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        year = local_day(invoice.issued_at).year
+        sequence = FeeInvoiceSequence.objects.get(
+            tenant=self.tenant, year=year,
+            series=fee_invoice_series(year),
+        )
+        counter_before = sequence.last_number
+
+        res = self.client.post(
+            f"{INVOICES}{invoice.pk}/cancel/", {}, format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 409, res.content)
+        body = res.content.decode("utf-8")
+        self.assertIn(created.data["number"], body)
+        self.assertIn("إشعار", body)
+        invoice.refresh_from_db()
+        self.assertIsNone(invoice.cancelled_at)
+        self.assertIsNone(
+            FeeInvoice.objects.get(pk=created.data["id"]).cancelled_at,
+        )
+        draft = FeeDraft.objects.get(pk=invoice.source_draft_id)
+        self.assertEqual(draft.status, FeeDraft.STATUS_APPROVED)
+        sequence.refresh_from_db()
+        self.assertEqual(sequence.last_number, counter_before)
+
+    def test_the_invoice_is_cancellable_after_its_credit_note_is_cancelled(self):
+        """الطريقُ ليس مسدوداً: إلغاءُ الإشعار الدائن يفتح إلغاء الأصل بعده."""
+        invoice = self.make_invoice()
+        created = self.client.post(
+            f"{INVOICES}{invoice.pk}/credit-note/",
+            {"amount": "160.00", "reason": "خصم"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        note = FeeInvoice.objects.get(pk=created.data["id"])
+        cancelled_note = self.client.post(
+            f"{INVOICES}{note.pk}/cancel/", {}, format="json", **self.headers(),
+        )
+        self.assertEqual(cancelled_note.status_code, 200, cancelled_note.content)
 
         res = self.client.post(
             f"{INVOICES}{invoice.pk}/cancel/", {}, format="json", **self.headers(),
@@ -578,7 +715,7 @@ class CancelTest(FeeInvoiceTestCase):
         services.set_client_setting(invoice.client, "rest_days", [])
 
         payload = services.ready_to_send_payload(
-            self.tenant, user=self.owner, day=invoice.issued_at.date(),
+            self.tenant, user=self.owner, day=local_day(invoice.issued_at),
         )
         self.assertTrue(payload["messages"])
         self.assertTrue(invoice_urls_created(self.tenant, invoice))
@@ -845,7 +982,7 @@ class ReadyToSendTest(FeeInvoiceTestCase):
     def test_the_invoice_is_offered_from_its_issue_day_with_a_seven_day_due(self):
         invoice = self.make_invoice(amount="1000.00")
         self.ready_contact(invoice.client)
-        issued_on = invoice.issued_at.date()
+        issued_on = local_day(invoice.issued_at)
         due_on = issued_on + datetime.timedelta(days=7)
 
         items = self.items_of(issued_on)
@@ -872,7 +1009,7 @@ class ReadyToSendTest(FeeInvoiceTestCase):
         self.assertEqual(created.status_code, 201, created.content)
         note = FeeInvoice.objects.get(pk=created.data["id"])
 
-        items = self.items_of(note.issued_at.date())
+        items = self.items_of(local_day(note.issued_at))
 
         credit_items = [
             item for item in items
@@ -889,16 +1026,80 @@ class ReadyToSendTest(FeeInvoiceTestCase):
             "إشعار دائن أتعاب", credit_items[0]["invoice"]["title"],
         )
 
+    def test_the_message_names_the_draft_month_not_the_issue_month(self):
+        """شهرُ الرسالة من **المسودّة** لا من يوم الإصدار (#282/أ٢/١).
+
+        نصُّ النوع يقول «على حساب {period}»، والورقةُ تخصّ شهرَ مسودّتها. أخذُ
+        الفترة من يوم الإصدار يذكر شهراً لا تخصّه الورقة: مسودّةٌ لشهرٍ قادم
+        تُصدر الآن فتُقرأ «شهر اليوم».
+        """
+        # شهرٌ **غيرُ الشهر الجاري** بيقين: أوّلُ الشهر بعد شهرين.
+        draft_day = (
+            timezone.localdate().replace(day=1) + datetime.timedelta(days=62)
+        ).replace(day=1)
+        invoice = self.make_invoice(day=draft_day)
+        self.ready_contact(invoice.client)
+
+        payload = services.ready_to_send_payload(
+            self.tenant, user=self.owner, day=timezone.localdate(),
+        )
+        body = "\n\n".join(message["body"] for message in payload["messages"])
+        draft_label = deadlines.period_label(
+            draft_day,
+            deadlines.month_start_after(draft_day, 1) - datetime.timedelta(days=1),
+        )
+        issued_on, due_on = fee_invoices.reminder_period(invoice)
+
+        self.assertIn(draft_label, body)
+        self.assertNotIn(deadlines.period_label(issued_on, due_on), body)
+        self.assertEqual(
+            [
+                item["period_label"]
+                for message in payload["messages"]
+                for item in message["items"]
+            ],
+            [draft_label],
+        )
+
+    def test_the_credit_note_message_text_describes_a_credit_note_of_its_original(self):
+        """نصُّ الإشعار يصف **دائناً** ويسمّي الأصل — لا فاتورةً مطلوبة.
+
+        نصُّ الفاتورة يقول «المبلغ: … — الاستحقاق: …»، وهو على إشعارٍ دائنٍ
+        يقرأ مطالبةً. الإشعارُ يقول «لصالحك» و«عن الفاتورة <رقم الأصل>».
+        """
+        invoice = self.make_invoice(amount="1000.00")
+        self.ready_contact(invoice.client)
+        created = self.client.post(
+            f"{INVOICES}{invoice.pk}/credit-note/",
+            {"amount": "160.00", "reason": "خصم اتفاق"},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(created.status_code, 201, created.content)
+        note = FeeInvoice.objects.get(pk=created.data["id"])
+
+        payload = services.ready_to_send_payload(
+            self.tenant, user=self.owner, day=local_day(note.issued_at),
+        )
+        body = "\n\n".join(message["body"] for message in payload["messages"])
+
+        self.assertIn(f"{note.title} {note.number}", body)
+        self.assertIn(f"عن الفاتورة {invoice.number}", body)
+        self.assertIn(f"المبلغ: {note.total:.2f} — لصالحك", body)
+        self.assertNotIn(
+            f"{note.title} {note.number}\nالمبلغ: {note.total:.2f} — الاستحقاق:",
+            body,
+        )
+
     def test_the_cancelled_invoice_is_not_offered(self):
         invoice = self.make_invoice()
         self.ready_contact(invoice.client)
         self.client.post(f"{INVOICES}{invoice.pk}/cancel/", {}, format="json", **self.headers())
 
-        self.assertEqual(self.items_of(invoice.issued_at.date()), [])
+        self.assertEqual(self.items_of(local_day(invoice.issued_at)), [])
 
     def test_the_office_may_turn_the_invoice_item_type_off(self):
         invoice = self.make_invoice()
         self.ready_contact(invoice.client)
         services.set_office_setting(self.tenant, "reminder_types_enabled", ["documents"])
 
-        self.assertEqual(self.items_of(invoice.issued_at.date()), [])
+        self.assertEqual(self.items_of(local_day(invoice.issued_at)), [])

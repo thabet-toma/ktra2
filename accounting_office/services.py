@@ -707,6 +707,9 @@ def _setting_row(definition, *, level=settings_registry.LEVEL_OFFICE) -> dict:
         "choices": definition.choice_options(),
         "has_default": not definition.has_no_default,
         "default": None if definition.has_no_default else copy.deepcopy(definition.default),
+        # حدُّ الطول للنصوص (`KIND_TEXT`) — العمودُ يحكم، والضابطُ يمنع التجاوز
+        # قبل الطلب، فلا يقتطع MySQL النصَّ بصمتٍ ولا يردّ الخادمُ 400 بعد كتابة.
+        "max_length": definition.max_length,
     }
 
 
@@ -6993,7 +6996,9 @@ def _reminder_render_values(tenant, candidate, *, language="") -> dict:
     absent = reminder_absent_text(language)
     return {
         "client_name": candidate.client.name,
-        "period": deadlines.period_label(candidate.period_start, candidate.period_end),
+        "period": candidate.period_text or deadlines.period_label(
+            candidate.period_start, candidate.period_end,
+        ),
         "due_date": (candidate.render_due or candidate.next_due).strftime("%d/%m/%Y"),
         "amount": absent if candidate.amount is None else f"{candidate.amount:.2f}",
         "missing_list": "، ".join(candidate.missing) or absent,

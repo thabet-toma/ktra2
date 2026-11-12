@@ -22,8 +22,16 @@ import tempfile
 
 from django.test import SimpleTestCase
 
+from accounting_office import settings_registry
+
 APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 REPO_ROOT = APP_DIR.parent
+
+#: ضابطُ الإعداد في شاشة الواجهة — كلُّ نوعٍ في السجلّ يجب أن يرسم له حقلاً،
+#: وإلا سجل المكتبُ إعداداً لا يستطيع صاحبُ المكتب رؤيتَه ولا ضبطَه (#282/أ٢).
+SETTING_CONTROL = (
+    REPO_ROOT / "frontend_v2" / "components" / "accounting-office" / "SettingControl.tsx"
+)
 
 #: نموذجا التخزين. ذِكرُهما مسموحٌ في مكانين فقط: تعريفُهما، ومن يقرؤهما.
 SETTINGS_MODELS = ("OfficeSettingValue", "ClientSettingOverride")
@@ -127,3 +135,44 @@ class RawSettingsReadGuardTest(SimpleTestCase):
         for path in ALLOWED_FILES:
             self.assertTrue(path.exists(), path)
             self.assertTrue(mentions_settings_model(path.read_text(encoding="utf-8")), path)
+
+
+def shipped_setting_kinds() -> set[str]:
+    """أنواعُ الإعدادات المشحونة — من السجلّ وحده، لا قائمةً ثانيةً تفترق عنه."""
+    return {
+        definition.kind for definition in settings_registry.SETTINGS_REGISTRY.values()
+    }
+
+
+def control_kinds(source: str) -> set[str]:
+    """الأنواعُ التي يرسم لها ضابطُ الشاشة حقلَ إدخال — من مصدره لا من ظنّنا."""
+    return set(re.findall(r"setting\.kind === '([a-z_]+)'", source))
+
+
+class SettingControlCoverageTest(SimpleTestCase):
+    """حارسُ «كلُّ إعدادٍ في السجلّ له حقلٌ في الشاشة».
+
+    **القاعدة:** مفتاحٌ مسجَّلٌ بلا حقلٍ في `SettingControl` إعدادٌ لا يستطيع
+    المكتب ضبطه — يظهر في الـAPI ولا يظهر في الشاشة. الحارسُ يقارن أنواعَ
+    السجلّ بفروع الضابط، فيسقط **يوم** يُسجَّل نوعٌ جديد (`text` في #282/أ٢ كان
+    كذلك: مسجَّلٌ بلا فرع، فلا حقلَ لعنوان الورقة).
+    """
+
+    def test_every_shipped_kind_has_an_input_in_the_screen_control(self):
+        missing = shipped_setting_kinds() - control_kinds(
+            SETTING_CONTROL.read_text(encoding="utf-8"),
+        )
+        self.assertEqual(
+            missing, set(),
+            "أنواعُ إعدادٍ مسجَّلةٌ بلا حقلٍ في شاشة الإعدادات "
+            "(`frontend_v2/components/accounting-office/SettingControl.tsx`): "
+            + "، ".join(sorted(missing)),
+        )
+
+    def test_the_guard_falls_when_a_kind_has_no_control(self):
+        """لو صار النمط أعمى — أو أُسقط فرعٌ — يسقط الحارس."""
+        source = "setting.kind === 'choice' ? ( ... ) : null"
+        self.assertEqual(control_kinds(source), {"choice"})
+        self.assertIn(
+            settings_registry.KIND_TEXT, shipped_setting_kinds() - control_kinds(source),
+        )

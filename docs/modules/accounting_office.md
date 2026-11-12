@@ -53,7 +53,7 @@
 | `accounting_office/appointments.py` | **المواعيدُ وتذكيرا الموعد والموعد الرسميّ** (#281): `create_appointment`/`reschedule_appointment`/`cancel_appointment`/`complete_appointment` (حالةٌ لا حذف)، و`send_appointment_confirmation` («ابعت تأكيد» صفُّ سجلٍّ + `confirmed_at`)، وقراءاتُ اليوم والتقويم وملفّ الزبون (`appointments_for_day`/`calendar_appointments`/`client_appointments_payload`)، و`client_owes` (نقيّة: هل على الزبون شيء؟)، و**المولّدان** `appointment_reminder_candidates` و`deadline_reminder_candidates` — نوافذُ من اليوم لا عدّادات، وبندٌ واحدٌ لكل (زبون، فترة) في الموعد الرسميّ بأقرب موعدٍ **قادمٍ عليه شيء** (وبندٌ لكل (زبون، يوم) في تذكير الموعد). يستورد `services` (و`services` يستورده **مؤجَّلاً** في `_appointments_module` فتُفكّ الدورة) |
 | `accounting_office/client_books.py` | **خدماتُ دفتر الزبون** (#286): `bookkeeping_service_on`/`book_is_writable`/`assert_book_writable` (وجودُ الدفتر من `status_on` القائمة)، و`create_book`/`ensure_client_tree` (نسخُ الشجرة نسخةً واحدة)، و`add_account`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `ClientBookSequence`)، و`create_entry`/`reverse_entry` (**يقفل الأصلَ** `select_for_update` قبل فحص «لها عكسٌ بالفعل»)، و`change_kind` (د7)، و`pending_entry_payload` («للإدخال» باستعلامٍ واحد)، و`choices_payload`/`entry_kind_choices`/`account_type_choices` (تسمياتُ الأنواع الثلاثة من النموذج — نقطةُ `client-books/choices/`). **لا استيرادَ من `accounting`** — يحرسه مسحُ `ast` في `accounting_office/tests/test_client_books.py` |
 | `accounting_office/fees.py` | **خدماتُ الأتعاب** (#282، أ١): `subscription_on` (**السعرُ المؤرَّخ** — أكبر `starts_on` لا يتجاوز الشهر)، و`generate_fee_drafts` (**التوليدُ الشهريّ** ممّا يقرؤه `services.refresh_office` عبر `_generate_fee_drafts`، ثم `ensure_sequence` لعدّاد السنة)، و`_subscription_lines`/`_service_lines`/`_extra_lines` (المصادرُ الثلاثة)، و`_raise_pending_alerts` (**تنبيهُ الثلاثة أيام**)، و`can_approve_fee_drafts`/`approve_fee_draft` (**يُصدر فاتورتَها**) /`approve_all_fee_drafts` (**يُصدرها دفعةً**) /`cancel_fee_draft` (**الدورُ لا المفتاح**، والصفوفُ تُقفل `select_for_update`)، و`create_subscription`/`create_extra_service`/`set_client_service_price`، و`_paused_month`/`_covered_before` (**حدودُ الفوترة**: الإيقافُ يمنع المسودّةَ كلَّها، والتناسبُ على حدود الاشتراك)، و`amounts_masked` و`subscription_row`/`draft_row`/`extra_row`/`service_price_row` (القناعُ قرارٌ يُحسب مرّةً). **لا يكتب قيداً ولا فاتورة بيده** — الإصدارُ من `fee_invoices`، والقيودُ #284 |
-| `accounting_office/fee_invoices.py` | **فاتورةُ الأتعاب الورقية** (#282، أ٢/١): `issue_for_draft` (**متكرِّرةُ الأمان** على الورقة الحيّة للمسودّة) و`issue_for_drafts` (**دفعةً** بكلفةٍ ثابتةٍ لـ«اعتمد الكل») و`ensure_sequence`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `FeeInvoiceSequence`)، و`office_tax_system`/`office_is_licensed`/`archived_rate`/`invoice_title` (**إعداداتُ الإصدار ولقطاتُه لا تُستنتَج**)، و`cancel_invoice` (**قبل الإرسال وحده، ويعيد المسودّةَ مسودّةً**) و`invoice_was_sent` (`_reopen_draft`)، و`issue_credit_note`/`issue_supplementary` (**سقفٌ تراكميّ للإشعار وبلا سقفٍ للتكميلية**)، و`visible_invoices`/`invoice_row`/`invoice_detail`/`invoices_payload` (القناعُ في `INVOICE_AMOUNT_KEYS`)، و`sheet_context`/`render_sheet`/`sheet_lines`/`labels_for` (**حقولا الورقة والنسختان**) و`amount_in_words` (**تفقيطُ الضريبة**)، و`share_payload` (حمولةُ `docshare`)، و`invoice_urls`/`live_invoice_url`/`invoice_has_link` (**الرابطُ العامّ**)، و`invoice_reminder_candidates`/`invoice_reminder_type`/`attach_invoice_links`/`invoice_text`/`reminder_period` (**رسالةُ «جاهز للإرسال»**) |
+| `accounting_office/fee_invoices.py` | **فاتورةُ الأتعاب الورقية** (#282، أ٢/١): `issue_for_draft` (**متكرِّرةُ الأمان** على الورقة الحيّة للمسودّة) و`issue_for_drafts` (**دفعةً** بكلفةٍ ثابتةٍ لـ«اعتمد الكل») و`ensure_sequence`، و`_next_number` (**القفلُ والترقيم** — `select_for_update` على `FeeInvoiceSequence`)، و`office_tax_system`/`office_is_licensed`/`archived_rate`/`invoice_title` (**إعداداتُ الإصدار ولقطاتُه لا تُستنتَج**)، و`cancel_invoice` (**قبل الإرسال وحده 400، وإشعارٌ دائنٌ حيٌّ 409 عبر `LiveCreditNoteConflict`، ويعيد المسودّةَ مسودّةً**) و`invoice_was_sent` (`_reopen_draft`)، و`issue_credit_note`/`issue_supplementary` (**سقفٌ تراكميّ للإشعار وبلا سقفٍ للتكميلية**)، و`visible_invoices`/`invoice_row`/`invoice_detail`/`invoices_payload` (القناعُ في `INVOICE_AMOUNT_KEYS`)، و`sheet_context`/`render_sheet`/`sheet_lines`/`labels_for` (**حقولا الورقة والنسختان**) و`amount_in_words` (**تفقيطُ الضريبة**)، و`share_payload` (حمولةُ `docshare`)، و`invoice_urls`/`live_invoice_url`/`invoice_has_link` (**الرابطُ العامّ**)، و`invoice_reminder_candidates`/`invoice_reminder_type`/`attach_invoice_links`/`invoice_text`/`reminder_period`/`document_period_text` (**رسالةُ «جاهز للإرسال»: المفتاحُ لكل ورقة، وشهرُ النصّ من المسودّة، ونصُّ الإشعار يسمّي أصله**) |
 | `accounting_office/serializers.py` | شكل الـAPI وحده — لا قراءة إعداداتٍ فيه |
 | `accounting_office/views.py` | كلُّ نقطةٍ خلف بوابة الترخيص، والعزل في كل استعلام، وحراسةُ كل كتابةٍ بمفتاحها، ونقاطُ الخدمات والباقات وخدمات الزبون (#273)، ونقاطُ الجرس (#276 — كلُّ عضوٍ تنبيهاتُه هو)، ونقاطُ الأوراق: الحالةُ والملفاتُ وتنزيلُها وقوالبُ البنود (#278)، ونقاطُ التذكيرات: «جاهز للإرسال» وأفعالُها وسجلُّها ونصوصُها وأفعالُ مكتبه (#280)، ونقاطُ دفتر الزبون (#286 — قراءةً لكل من يرى الزبون وكتابةً بمفتاح الزبائن، **وسطرُ الدفتر يحمل `entry_kind_choices` و`account_type_choices`**: قائمتا تسمياتٍ تُبنيان في `client_books` كما في `frequency_choices`/`direction_choices`، و**`GET client-books/choices/`** تردّ `{book_kinds, entry_kinds, account_types}` لأن تسميات نوع الدفتر لا يحملها أيُّ ردٍّ آخر)، ونقاطُ المواعيد: قراءةٌ وثلاثةُ أشكالٍ للقائمة، وحجزٌ، وأفعالُ `confirm`/`reschedule`/`cancel`/`done` بلا حذفٍ ولا تعديلٍ جزئيّ (#281)، ونقاطُ الأتعاب (#282 — الاشتراكُ والإضافاتُ قراءةً وإضافة، والمسودّاتُ قراءةً واعتماداً وإلغاءً بلا حذف) |
 | `accounting_office/apps.py` | `ready` تُسجّل حارسَ سجلّ نشاط «زبون المكتب» في `core.activity` (`register_document_history_guard`) — فتاريخُ زبونٍ لا تراه محجوبٌ 404 |
@@ -299,19 +299,20 @@ pending_drafts(tenant)                                        # «كم بقي» 
 
 ```python
 # ── فاتورةُ الأتعاب الورقية (#282، الجزء أ٢/١ — في `accounting_office/fee_invoices.py`) ──
-issue_for_draft(draft, *, actor=None)                          # متكرِّرةُ الأمان (`get_or_create` على المسودّة) — تُنادَى من `approve_fee_draft`
+issue_for_draft(draft, *, actor=None)                          # متكرِّرةُ الأمان على **الورقة الحيّة** للمسودّة (`_live_invoice_for`) — تُنادَى من `approve_fee_draft`
 issue_for_drafts(drafts, *, actor=None)                        # دفعةً بكلفةٍ ثابتة — «اعتمد الكل»
 ensure_sequence(tenant, *, year)                               # يُهيِّئ عدّاد السنة بلا زيادة (من التوليد)
-cancel_invoice(invoice, *, actor, reason="")                    # قبل إنشاء الرابط وحده، وما بعده 400
-issue_credit_note(invoice, *, actor, amount, reason)            # سلسلةٌ منفصلة، ومبلغٌ ≤ الإجمالي، وسببٌ إلزاميّ
-issue_supplementary(invoice, *, actor, amount, reason="")       # السلسلةُ الرئيسية، للنقص
+cancel_invoice(invoice, *, actor, reason="")                    # قبل الإرسال وحده (400)، ولا إشعارَ دائنًا حيّاً (409 `LiveCreditNoteConflict`)
+issue_credit_note(invoice, *, actor, amount, reason)            # سلسلةٌ منفصلة، وسقفٌ تراكميّ، وسببٌ إلزاميّ
+issue_supplementary(invoice, *, actor, amount, reason="")       # السلسلةُ الرئيسية، للنقص، بلا سقفِ الأصل
 visible_invoices(tenant, user) / invoice_row(invoice, *, masked) / invoice_detail(...) / invoices_payload(...)
 unit_for(tax_system)                                          # وحدةُ الكمية بلغة الورقة — أوّلُ بانٍ للسطر
 sheet_context(invoice) / render_sheet(invoice)                 # حقولُ م4/1 الثمانية المبنيّة (سعرُ الصرف مؤجَّل) أو `§9א` السبعة، والنسختان، وسطرُ النفي
 amount_in_words(amount)                                       # تفقيطٌ عربيٌّ خالص — «قيمة الضريبة بالحروف»
 invoice_title(tenant, tax_system, *, kind)                    # إعدادُ `fee_invoice_title`، وإلا الافتراضيّ؛ وللإشعار عنوانُه
-invoice_was_sent(invoice)                                     # حاجزُ الإلغاء: تذكيرٌ صادرٌ غيرُ مُبطَل أو مشاهدةٌ على الرابط
+invoice_was_sent(invoice)                                     # حاجزُ الإلغاء: تذكيرٌ صادرٌ **بنوع الورقة** غيرُ مُبطَل أو مشاهدةٌ على الرابط
 credit_note_remaining(invoice)                                # الباقي القابلُ للإشعار الدائن (قراءةً بلا قفل)
+document_period_text(invoice)                                  # شهرُ المسودّة كما يُنطق في الرسالة — لا شهرُ يوم الإصدار
 share_payload(invoice)                                         # حمولةُ نوع `fee_invoice` في `docshare`
 invoice_urls(tenant, invoice_ids, *, user=None) / live_invoice_url(invoice)   # الرابطُ العامّ
 invoice_reminder_candidates(...) / attach_invoice_links(tenant, candidates, *, user=None) / invoice_text(...)   # «جاهز للإرسال»
@@ -416,7 +417,7 @@ tax_system_for(tenant, client) / office_is_licensed(tenant) / archived_rate(tena
 | `GET/POST` | `fees/service-prices/` | `OfficeFeeServicePriceViewSet` (`list`, `create`) — أسعارُ خدمات الزبائن لطريقة «سعرٌ لكل خدمة»: `POST` بمعرّف `client_service` أو بالخدمة والزبون، والمبلغُ بمفتاح `office.amounts.view` (403 لغيره)، والقناعُ على القراءة، وإعادةُ `POST` تُحدِّث الصفَّ الواحد |
 | `GET` | `fees/invoices/` | `OfficeFeeInvoiceViewSet` (`list`) — فواتيرُ ما يراه العضو، بفلاتر `client` · `kind` · `state=issued\|cancelled`، ومبالغُها `null` بلا `office.amounts.view`؛ **ولا `POST`** (الإصدارُ بالاعتماد) |
 | `GET` | `fees/invoices/<id>/` | `OfficeFeeInvoiceViewSet` (`retrieve`) — صفُّ الفاتورة ببنودها ونسبتها المؤرَّخة ورابطها الحيّ إن وُجد؛ وفاتورةُ زبونٍ لا يراه العضو **404** |
-| `POST` | `fees/invoices/<id>/cancel/` | `OfficeFeeInvoiceViewSet` (`cancel`) — `cancelled_at` بسببٍ اختياريّ **قبل إنشاء الرابط وحده**؛ وبعده 400 يُرشد إلى الإشعار الدائن، ولا صفَّ يُحذف |
+| `POST` | `fees/invoices/<id>/cancel/` | `OfficeFeeInvoiceViewSet` (`cancel`) — `cancelled_at` بسببٍ اختياريّ **قبل إنشاء الرابط وحده**؛ وبعده 400 يُرشد إلى الإشعار الدائن، وإشعارٌ دائنٌ حيٌّ عليها **409** (`LiveCreditNoteConflict`) قبل أيّ كتابة، ولا صفَّ يُحذف |
 | `POST` | `fees/invoices/<id>/credit-note/` | `OfficeFeeInvoiceViewSet` (`credit_note`) — إشعارٌ دائنٌ بسلسلةٍ منفصلة: مبلغٌ موجبٌ ≤ الإجمالي وسببٌ إلزاميّ؛ والمبلغُ بمفتاح `office.amounts.view` (403 لغيره) |
 | `POST` | `fees/invoices/<id>/supplementary/` | `OfficeFeeInvoiceViewSet` (`supplementary`) — فاتورةٌ تكميليةٌ للنقص على السلسلة الرئيسية، بمبلغٍ موجبٍ ≤ الإجمالي وسببٍ اختياريّ |
 
@@ -1721,15 +1722,23 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 **و«أُرسلت» يقيسها `invoice_was_sent` لا وجودُ الرابط**: صفُّ المشاركة يُنشأ من
 مجرّد قراءة «جاهز للإرسال» (`attach_invoice_links`)، فلو كان وجودُه هو المقياس
 لصار الإلغاء مستحيلاً بمجرّد فتح الشاشة. يُعدّ مُرسَلاً إذا وُجد (أ) صفُّ
-`ReminderLog` **غيرُ مُبطَل** من الأنواع المحسوبة بمفتاح هذه الورقة
-(`issued_on .. due_on`) وبنوعٍ `sent`/`manual`، أو (ب) رابطُها سُجّلت له
+`ReminderLog` **غيرُ مُبطَل** **بنوع بند هذه الورقة** (`invoice_reminder_type`)
+بمفتاحها (`issued_on .. due_on`) وبنوعٍ `sent`/`manual`، أو (ب) رابطُها سُجّلت له
 **مشاهدةٌ بشرية** (`view_count > 0`). وحينها **400** برسالةٍ تُرشد إلى الإشعار
 الدائن. والصفُّ يبقى في التاريخ دائماً، والتكرارُ 400.
+
+**وإشعارٌ دائنٌ حيٌّ يمنع الإلغاء قبل أيّ كتابة — 409 لا 400**
+(`LiveCreditNoteConflict`): إلغاءُ الأصل يترك تصحيحاً دائناً حيّاً يخصم ورقةً لم
+تصدر، فالصفُّ والمسودّةُ وسطرُ الترقيم لا تُمَسّ. والفرقُ عن 400 فوقه أن هذا
+**تعارضٌ مع حالةٍ قائمة** لا خطأُ مدخلات: الطلبُ صحيحٌ وصفٌّ آخر يمنعه. والرسالةُ
+تسمّي الإشعارَ ورقمَه وتُرشد إلى إلغائه أوّلًا (وطريقُ الخروج مقيس: بعد إلغاء
+الإشعار يُلغى الأصل). ولا يُلامَس سطرُ العدّاد: الطلبُ المرفوضُ لا يستهلك رقماً.
+وطلبٌ على فاتورةٍ أُرسلت يبقى **400** — الحاجزُ الأقوى يُقدَّم.
 
 **والإلغاءُ يعيد المسودّةَ مسودّةً** (`_reopen_draft`): `approved → draft` ويُمسح
 `approved_by/at/note`، فتُعتمد من جديد وتأخذ رقمَها التالي — وإلا بقي الشهرُ لا
 يُفاتر أبداً (مسودّةٌ معتمدةٌ بلا ورقة، والاعتمادُ يرفض غير «مسودّة»، ولا فاتورةَ
-ثانيةً لمسودّةٍ واحدة).
+ثانيةً لمسودّةٍ واحدة). ولا يُنادَى `_reopen_draft` في الطلب المرفوض أصلاً.
 
 **4. الإشعارُ الدائنُ والتكميلية** (`issue_credit_note` / `issue_supplementary`):
 - **سقفُ الإشعار الدائن تراكميّ** تحت القفل: `cap = total − Σ(الإشعارات الدائنة
@@ -1758,6 +1767,14 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 - **عنوانُ الورقة إعداد** (`fee_invoice_title`، نصّ، افتراضُه فارغ = الافتراضيّ
   بحسب النظام: «فاتورة أتعاب» / «חשבון עסקה»)، ولا «فاتورة ضريبية» فيه ولا
   «חשבונית מס» — سطرُ النفي ثابتٌ لا إعداد.
+- **والمفتاحان يُضبطان من الشاشة** لا من الـAPI وحده: `OfficeSettingsScreen`
+  يرسم كلَّ سطرٍ يرسله السجلّ تحت مجموعته، و`office_licensed_dealer` منطقيٌّ
+  (مربّعُ نعم/لا القائم) و`fee_invoice_title` نوعُ إعدادٍ جديد `KIND_TEXT` له
+  فرعُ إدخالٍ نصّي في `SettingControl` (الحدُّ `max_length` يصل مع السطر ويُقيَّد
+  في `maxLength`)، فالمكتبُ يضبط العنوانَ والترخيص من «المكتب» في الإعدادات
+  ويُحفظان بـ`settings/<key>/` كسائر المفاتيح. ويحرس ذلك حارسٌ في
+  `test_settings_guard` يقارن أنواعَ السجلّ بفروع الضابط: **كلُّ نوعٍ مسجَّلٍ له
+  حقل** — ونوعٌ بلا حقلٍ إعدادٌ لا يستطيع المكتب ضبطه.
 - **قيدٌ معروفٌ — «نسبةُ الضريبة غير مؤرَّخة»**: لا جدولَ نسبِ ضريبةٍ مؤرَّخةٍ
   لكل نظامٍ في المستودع، فالنسبةُ تُقرأ من `TenantSettings.default_vat_rate`
   لحظةَ الإصدار وتُخزَّن على الصفّ. إصدارُ فاتورةٍ بتاريخٍ رجعيّ بنسبة فترةٍ
@@ -1789,6 +1806,11 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 - **حقلٌ بلا مصدرٍ في النماذج يُترك فارغاً ولا يُخترَع**: رقمُ الفاتورة الرسمية
   الخارجية (`external_number` حقلٌ موجودٌ بلا مُدخلٍ في هذه المرحلة)، والاسمُ
   التجاري (من ترويسة الشركة إن وُجد).
+- **وتعليقاتُ القالب لا تُطبع على ورقة الزبون**: `{# … #}` في Django يُقلَّم على
+  **سطرٍ واحد** وحده، فتعليقٌ على سطرين يخرج نصُّ `{#` على الورقة — التعليقاتُ
+  الطويلةُ في `fee_invoice.html` بـ`{% comment %}…{% endcomment %}`، والقواعدُ
+  `{# … #}` سطراً واحداً. يحرسه `test_fee_invoices` ببحثٍ عن `{#`/`#}` ونصَّ
+  التعليق في الـHTML الناتج.
 
 **7. الرابطُ العامّ** (`docshare` نوع `fee_invoice`): `doc_id` **فاتورةٌ** لا زبون،
 والحمولةُ من `share_payload` (عبر `payload()`/`line_row()`)، والورقةُ من
@@ -1813,6 +1835,18 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 - ويُركَّب رابطُ الورقة **بعد الحواجز كلّها** (`attach_invoice_links`، ولمن يملك
   `office.clients.write` وحده) كإشعار الدفع، ويُنشأ أوّلَ مرّةٍ في مسار القراءة
   عمداً — **ولا يُعدّ ذلك إرسالاً** (`invoice_was_sent`).
+- **ونصُّ الرسالة يسمّي شهرَ المسودّة** (`document_period_text`): رمزُ `{period}`
+  في نصّ النوع كان يُبنى من `issued_at`، فمسودّةٌ لشهرٍ قادمٍ تُصدر الآن تُقرأ
+  بشهر اليوم — والبندُ يحمل `period_text` بشهر مسودّته (والتصحيحُ يورث شهرَ
+  أصله)، فيقرؤه `_reminder_render_values` و`period_label` معاً. **ولا يمسّ
+  المفتاح**: `(issued_on, due_on)` يبقى لكل ورقة.
+- **ونصُّ الإشعار الدائن ليس نصَّ فاتورة** (`invoice_text`): يقول «لصالحك»
+  ويسمّي **الفاتورةَ الأصل** («عن الفاتورة `<رقم الأصل>`»، من `original_number`)
+  وسببه؛ ولا صيغةَ «المبلغ … — الاستحقاق …» إلا للفاتورة والتكميلية.
+- **ومفتاحُ صفّ البند في الواجهة من معرّف الورقة** (`readyToSendItemRowKey` في
+  `utils/accountingOffice.ts`): ورقتان لزبونٍ واحدٍ في يومٍ واحدٍ تتشاركان
+  (الزبون، النوع، الفترة)، فمفتاحٌ من الأربعة يعطي React صفّين بمفتاحٍ واحد —
+  والورقةُ نفسُها مفتاحُها، وما ليس فاتورةً يبقى على مفتاحه الرباعيّ.
 
 **9. القناعُ والرؤية**: `invoices_payload` يقرأ `visible_invoices` (عبر
 `visible_clients`)، و`invoice_row`/`invoice_detail` تقنّعان `total` و`tax_total`
@@ -1955,7 +1989,8 @@ FK و`tax_system`/`tax_percent` لقطتين، و`FeeInvoiceSequence`)، وهج�
   صراحةً (405). والحدثان يُكتبان في سجلّ النشاط (`log_activity`) بالفاعل.
 - **لا حذف ولا تعديل لفاتورة الأتعاب.** `http_method_names` تُغلق
   `delete`/`put`/`patch` (405)، وتغييرُ الحالةِ فعلٌ واحدٌ هو الإلغاء
-  (`cancelled_at`) **وقبل إنشاء الرابط وحده**؛ والتصحيحُ إشعارٌ دائنٌ أو فاتورةٌ
+  (`cancelled_at`) **وقبل إنشاء الرابط وحده**؛ وبعده **400**، ولإشعارٍ دائنٍ حيٍّ
+  عليها **409** — كلاهما قبل أيّ كتابة؛ والتصحيحُ إشعارٌ دائنٌ أو فاتورةٌ
   تكميلية، والرقمُ من عدّادٍ مقفولٍ لا يُعاد. و**`is_tax_invoice` `False` ثابتة**
   — لا حقلَ إعدادٍ يفتح «الفوترة الرسمية»، وسطرُ «ليست فاتورة ضريبية» يُصيَّر في
   كل صفحةٍ من `FEE_INVOICE_NOT_TAX_LINES` ولا فرعَ قالبٍ يحذفه.
