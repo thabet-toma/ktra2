@@ -1040,24 +1040,24 @@ VAT_OUTPUT_KINDS: frozenset[str] = frozenset({
     BOOK_ENTRY_KIND_SALES_INVOICE, BOOK_ENTRY_KIND_DAILY_REPORT,
 })
 
-#: سببُ نسبة السطر حين تأتي من الورقة — بلا سببٍ يرفضها `_line_rate`.
-LINE_RATE_SOURCE_PAPER = "من الورقة"
-
 #: حقولُ مبلغ الورقة الأربعة (#286/ج) — ما يُكتب على الورقة قبل توليد بنودها.
+#: و**`vat_rate` عليها وصفُ عرضٍ لا نسبةُ سطر**: نسبةُ السطر نسبةُ الخصم المعترف
+#: بها (`book_rates.recognised_vat_rate`) وتأتي من الحساب — انظر `generate_entry_lines`.
 DOCUMENT_VALUE_FIELDS: tuple[str, ...] = (
     "amount", "tax_amount", "vat_rate", "side_party",
 )
 
 
 def _entry_line(
-    account_code, *, debit=0, credit=0, tax_base=0, tax_amount=0, rate=None,
+    account_code, *, debit=0, credit=0, tax_base=0, tax_amount=0,
 ) -> dict:
     """بندُ حركةٍ بالشكل الذي يقرؤه `_prepare_lines` — **كوداً لا كائناً**.
 
     الحسابُ يبقى كوداً كي تمرّ الحركةُ كلُّها من `_prepare_lines`: حارسُ «لا
     حسابَ بهذا الكود» ومعه قناعُ المبالغ في موضعٍ واحدٍ، كما في القيد اليدوي.
+    ولا نسبةَ على السطر هنا: مولّدُ الورق لا يكتب نسبةً أصلاً.
     """
-    line = {
+    return {
         ACCOUNT_CODE_KEY: account_code,
         "debit": debit,
         "credit": credit,
@@ -1065,10 +1065,6 @@ def _entry_line(
         "tax_amount": tax_amount,
         "side_party": "",
     }
-    if rate is not None:
-        line["vat_rate"] = rate
-        line["rate_reason"] = LINE_RATE_SOURCE_PAPER
-    return line
 
 
 def _paper_totals(paper) -> tuple[Decimal, Decimal]:
@@ -1109,14 +1105,20 @@ def _assert_vat_account(book) -> None:
     })
 
 
-def _double_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
-    """بنودُ ورقةٍ في الدفتر المزدوج — **والضريبةُ على طرفها المقابل**.
+def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
+    """بنودُ ورقةٍ في الدفتر المزدوج — **والضريبةُ على سطر الوعاء لا على سطرها**.
 
     مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) دائنةٌ كالإيراد، فسطرُ الذمم/الصندوق
     يحمل الإجمالي مديناً؛ ومدخلاتُها (شراءٌ ومصروف) مدينةٌ كالمصروف، فيحمل سطرُ
-    الذمم/الصندوق الإجمالي دائناً. والضريبةُ **مرّةً واحدة**: سطرُها وحده يحمل
-    `tax_amount`، وسطرُ الوعاء يحمل `tax_base` — ومجموعُ ما على السطور هو ما
-    تقرؤه تقاريرُ #287، فتكرارُها على سطرين يُضاعف الإقرار.
+    الذمم/الصندوق الإجمالي دائناً. **و`tax_base`/`tax_amount` على سطر الوعاء** —
+    الإيراد للبيع والتقرير اليومي، والمشتريات/المصروف لغيرهما — **وسطرُ `2200`
+    يحمل طرفَه وحده**.
+
+    والموضعُ هو القاعدةُ لا الذوق: `book_reports.vat_from_book` يجمع `tax_amount`
+    من سطور الإيراد (مبيعات) ومن سطور الأصول والمصاريف (مدخلات) **ويتخطّى
+    الخصوم**، فسطرُ ضريبةٍ على `2200` يجعل الإقرارَ صفراً أو سالباً. والضريبةُ
+    **مرّةً واحدة**: مجموعُ `tax_amount` على السطور هو ضريبةُ الورقة، وتكرارُها
+    على سطرين يُضاعف الإقرار.
     """
     debit_code, credit_code = ENTRY_KIND_ACCOUNTS[kind]
     total = amount + tax
@@ -1126,16 +1128,16 @@ def _double_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
         credit_line = _entry_line(credit_code, credit=amount)
     elif kind in VAT_OUTPUT_KINDS:
         debit_line = _entry_line(debit_code, debit=total)
-        credit_line = _entry_line(credit_code, credit=amount, tax_base=amount)
-        vat_line = _entry_line(
-            VAT_ACCOUNT_CODE, credit=tax, tax_amount=tax, rate=rate,
+        credit_line = _entry_line(
+            credit_code, credit=amount, tax_base=amount, tax_amount=tax,
         )
+        vat_line = _entry_line(VAT_ACCOUNT_CODE, credit=tax)
     else:
-        debit_line = _entry_line(debit_code, debit=amount, tax_base=amount)
-        credit_line = _entry_line(credit_code, credit=total)
-        vat_line = _entry_line(
-            VAT_ACCOUNT_CODE, debit=tax, tax_amount=tax, rate=rate,
+        debit_line = _entry_line(
+            debit_code, debit=amount, tax_base=amount, tax_amount=tax,
         )
+        credit_line = _entry_line(credit_code, credit=total)
+        vat_line = _entry_line(VAT_ACCOUNT_CODE, debit=tax)
     # الطرفُ على سطر الذمم إن كان أحد الطرفين ذمّياً، وإلا على سطر الإيراد/
     # المصروف. **ولا يُكتب على سطر الضريبة**: «ضريبةٌ على شركة كذا» قولٌ لا معنى له.
     side_line = credit_line if credit_code in PARTY_ACCOUNT_CODES else debit_line
@@ -1147,21 +1149,34 @@ def _double_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
     return lines
 
 
-def _simple_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
-    """الدفترُ البسيط سطرٌ واحدٌ **بإجماليه وضريبتُه عليه**.
+def _simple_paper_lines(kind, *, amount, tax) -> list[dict]:
+    """الدفترُ البسيط سطرٌ واحدٌ على **حساب طبيعته** لا على الصندوق.
 
-    ولا سطرَ ضريبةٍ هنا: لا أطرافَ في البسيط، وتفريقُ الإجمالي على حسابين يجعله
-    مزدوجاً باسمٍ آخر. وحسابُه الصندوق، والبنكُ لحركة البنك وحدها.
+    البيعُ والتقريرُ اليومي دائنان على الإيراد (`4100`)، والشراءُ والمصروفُ مدينان
+    على مصروفهما (`5200`/`5100`) بصافيهما، والضريبةُ عليهما — لأن
+    `book_reports._profit_rows` و`vat_from_book` يقرآن الدفترَ البسيط من حسابات
+    الإيراد والمصروف. وسطرٌ على الصندوق كان **يمحو الإيرادَ** من الأرباح والخسائر
+    ويقلب ذمّةَ الزبون في `_receivables` (مديناً `−117` لبيعٍ نُقد).
+
+    **ولا طرفَ على السطر**: شجرةُ البسيط بلا حسابٍ ذمّي، فاسمُ طرفٍ على سطرٍ واحدٍ
+    لا يعني ديناً — يُنشئ في `_receivables` ذمّةً وهمية على من دفع نقداً.
+
+    وحركةُ البنك وحدها على البنك (`1200`) بإجماليها **بلا `tax_base`/`tax_amount`**:
+    الضريبةُ عليها مرفوضةٌ أصلاً، فأساسٌ خاضعٌ عليها يُدخلها تقريرَ ض.ق.م بلا ضريبة.
+
+    ولا سطرَ ضريبةٍ هنا: لا أطرافَ في البسيط، وتفريقُ المبلغ على حسابين يجعله
+    مزدوجاً باسمٍ آخر.
     """
-    account_code = "1200" if kind == BOOK_ENTRY_KIND_BANK_MOVEMENT else "1100"
-    credit_kinds = (BOOK_ENTRY_KIND_EXPENSE, BOOK_ENTRY_KIND_PURCHASE_INVOICE)
-    total = amount + tax
-    direction = {"credit": total} if kind in credit_kinds else {"debit": total}
-    line = _entry_line(
-        account_code, tax_base=amount, tax_amount=tax, rate=rate, **direction,
-    )
-    line["side_party"] = (paper.side_party or "").strip()[:200]
-    return [line]
+    debit_code, credit_code = ENTRY_KIND_ACCOUNTS[kind]
+    if kind == BOOK_ENTRY_KIND_BANK_MOVEMENT:
+        return [_entry_line(debit_code, debit=amount + tax)]
+    if kind in VAT_OUTPUT_KINDS:
+        return [_entry_line(
+            credit_code, credit=amount, tax_base=amount, tax_amount=tax,
+        )]
+    return [_entry_line(
+        debit_code, debit=amount, tax_base=amount, tax_amount=tax,
+    )]
 
 
 def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
@@ -1172,6 +1187,10 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
 
     والنوعُ يقود: `manual` و`opening` ليسا من أنواع الورق — يُكتبان بيد إنسانٍ
     بدورٍ لا بمفتاح، فيُرفضان هنا بدل أن يُولَّد لهما حكمٌ لم يُقصد.
+
+    **ونسبةُ الورقة (`paper.vat_rate`) لا تصل السطر**: حقلُ السطر نسبةُ الخصم
+    المعترف بها، ونسبةُ الفاتورة وصفٌ للعرض — نسخُها كان يخصم 17٪ من ضريبة
+    المدخلات وحدها فتنقص المستحقّةُ بلا أن يُعلَن ذلك.
     """
     if kind not in ENTRY_KIND_ACCOUNTS:
         raise ValidationError({
@@ -1183,9 +1202,6 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
     papers = list(papers)
     if not papers:
         raise ValidationError({"documents": "اختر ورقةً واحدة على الأقل."})
-    allow_rate = bool(
-        services.resolve_setting(book.tenant, LINE_RATE_KEY, client=book.client),
-    )
     double = kind_on(book, entry_date) == BOOK_KIND_DOUBLE
     vat_checked = False
     lines: list[dict] = []
@@ -1195,19 +1211,16 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
             raise ValidationError({
                 "documents": "حركةُ بنكٍ بلا ضريبة — الضريبة على فاتورةٍ أو مصروف.",
             })
-        # النسبةُ تصل السطر **إن كان الإعدادُ مفعّلاً وحدها**: الحسابُ هو مصدرُ
-        # النسبة في هذا الدفتر، ونسبةُ الورقة وصفٌ يُقرأ ما لم يُسمَح بخلافه.
-        rate = paper.vat_rate if (allow_rate and paper.vat_rate is not None) else None
         if double:
             if tax and not vat_checked:
                 _assert_vat_account(book)
                 vat_checked = True
             lines.extend(
-                _double_paper_lines(paper, kind, amount=amount, tax=tax, rate=rate),
+                _double_paper_lines(paper, kind, amount=amount, tax=tax),
             )
         else:
             lines.extend(
-                _simple_paper_lines(paper, kind, amount=amount, tax=tax, rate=rate),
+                _simple_paper_lines(kind, amount=amount, tax=tax),
             )
     return lines
 
