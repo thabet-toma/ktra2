@@ -2738,6 +2738,35 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         )
         return HttpResponse(html, content_type="text/html; charset=utf-8")
 
+    @action(detail=True, methods=["get"], url_path="print")
+    def print_book(self, request, pk=None):
+        """`GET …/print/` — **الدفترُ كاملاً** ورقةً واحدةً للطباعة (#288/هـ).
+
+        كلُّ تقريرٍ متاحٍ لنوع الدفتر صفيحةٌ مستقلةٌ يفصلها فاصلُ صفحات، ومعها —
+        في **المزدوج** — كشفُ حسابٍ لكل حسابٍ له حركة؛ فيخرج «PDF» الدفتر من
+        حوار الطباعة في المتصفح كما يخرج التقريرُ المفرد (`print_report`)، بلا
+        مكتبة PDF على الخادم.
+
+        **والجداولُ من `book_exports` لا تُبنى هنا**، وهي نفسُها التي يُبنى منها
+        ملفُّ `export.xlsx`: مستندان لنفس الدفتر لا يفترقان. و`user` يمرّ إلى
+        كل تقريرٍ فيمرّ القناعُ على الورق كما مرّ على الملفّ.
+        """
+        book = self._book(pk)
+        period = book_reports.period_for(
+            request.query_params.get("from"), request.query_params.get("to"),
+            book=book,
+        )
+        # استيرادٌ كسول كـ`print_report`: `docshare` يستورد نماذجَ المكتب.
+        from docshare.documents.accounting_docs import render_client_book_reports
+        from tenants.letterhead import company_card
+
+        html = render_client_book_reports(
+            book_exports.whole_book_tables(book, period, user=request.user),
+            company=company_card(self.tenant),
+            auto_print=True,
+        )
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
     @action(detail=True, methods=["post"], url_path=r"reports/(?P<kind>[a-z_]+)/share")
     def share_report(self, request, pk=None, kind=None):
         """`POST …/reports/<kind>/share/` — `{url, expires_at}` لرابطٍ عامّ.
@@ -2745,9 +2774,19 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
         **والكتابةُ مفتاحُ هذا الفعل**: إنشاءُ رابطٍ عامٍّ توزيعُ مستندٍ لا قراءتُه
         (نمط `can_share_payment_notice`)، فمن يقرأ التقارير ولا يكتب لا يمنح
         زبوناً عنواناً يُفتح من العالم.
+
+        **ومفتاحُ المبالغ شرطٌ ثالث** (إصلاحُ #288): صفحةُ الرابط تُبنى بـ
+        `user=None` — ورقةُ الزبون لا شاشةُ موظف — فمن أنشأها وهو مقنَّعٌ يفتح من
+        العنوان ما حُجِب عنه في الملفّ والطباعة. و403 لا 400: الدورُ ناقصٌ
+        والطلبُ سليم.
         """
         book = self._book(pk)
         self.require_write()
+        if self._masked():
+            raise PermissionDenied(
+                "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تُنشئ رابطاً يعرض "
+                "مبالغَ لا تراها.",
+            )
         if not book_reports.is_report_available(book, kind):
             raise ValidationError({
                 "kind": "هذا النوع من التقارير غير متاح لهذا الدفتر.",

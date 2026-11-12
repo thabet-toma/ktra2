@@ -32,7 +32,8 @@
 
 **ولا `vat` حيّاً في هذا الجدول.** نوعُه (#288/ب-٢) يجمع **الضريبةَ المسجَّلةَ على
 بنود الحركات** (`BookEntryLine.tax_base`/`tax_amount`) لا نسبةً تُضرب عند القراءة:
-النسبةُ تتغيّر، وإقرارُ شهرٍ مضى لا يتغيّر.
+النسبةُ تتغيّر، وإقرارُ شهرٍ مضى لا يتغيّر. **وضريبتان لا ضريبة**: سطرُ الإيراد
+مخرجاتٌ وسطرُ مديّنة الطبع مدخلات، والمستحقُّ فرقُهما لا مجموعهما.
 """
 import datetime
 from decimal import Decimal
@@ -168,7 +169,9 @@ REPORT_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("kind_label", "نوع الحركة", CELL_TEXT),
         ("count", "عدد الحركات", CELL_COUNT),
         ("taxable", "الأساس الخاضع", CELL_MONEY),
-        ("tax", "الضريبة", CELL_MONEY),
+        ("output_tax", "ضريبة المخرجات", CELL_MONEY),
+        ("input_tax", "ضريبة المدخلات", CELL_MONEY),
+        ("tax_due", "المستحقّ", CELL_MONEY),
     ),
 }
 
@@ -218,7 +221,9 @@ REPORT_TOTALS: dict[str, tuple[tuple[str, str], ...]] = {
     ),
     REPORT_VAT: (
         ("taxable", "مجموع الأساس الخاضع"),
-        ("tax", "مجموع الضريبة"),
+        ("output_tax", "ضريبة المخرجات"),
+        ("input_tax", "ضريبة المدخلات"),
+        ("tax_due", "المستحقّ"),
     ),
 }
 
@@ -234,13 +239,15 @@ RECEIVABLES_PERIOD_NOTE = (
 )
 
 #: مفاتيحُ المبالغ في حمولات التقارير — تُقنَّع كلُّها في الصفوف والمجاميع.
-#: و`taxable`/`tax` (#288/ب-٢) مبلغا تقرير ض.ق.م: أساسٌ خاضعٌ وقيمةُ ضريبة.
+#: و`taxable`/`output_tax`/`input_tax`/`tax_due` (#288/ب-٢) مبالغُ تقرير ض.ق.م:
+#: أساسٌ خاضع، وضريبةُ المخرجات، وضريبةُ المدخلات، والمستحقُّ فرقُهما.
 REPORT_AMOUNT_KEYS: tuple[str, ...] = (
     "debit", "credit", "balance", "amount", "net",
     "debit_total", "credit_total",
     "opening_balance", "closing_balance",
     "revenue", "expense", "profit", "assets", "liabilities", "equity",
-    "liabilities_and_equity", "difference", "taxable", "tax",
+    "liabilities_and_equity", "difference", "taxable",
+    "output_tax", "input_tax", "tax_due",
 )
 
 #: أنواعُ الحساب المديّنةُ الطبع — والباقي دائنيّة. القاعدةُ واحدةٌ هنا.
@@ -732,48 +739,97 @@ def _statement(book, span, *, account="", party="", **_):
     }
 
 
-#: باني كل نوعٍ: `(book, span, **params) -> (rows, totals)`.
+#: ضريبتان لا ضريبةٌ واحدة (إصلاحُ #288): سطرُ الإيراد مخرجاتٌ يُدفع، وسطرُ
+#: المصروف/الأصل مدخلاتٌ يُخصم — وجمعُهما كان يقول للمحاسب «تدفع 240» وفي الدفتر
+#: 80. والمفتاحان يُقرآن في الصفوف والمجاميع معاً.
+VAT_OUTPUT = "output"
+VAT_INPUT = "input"
+
+#: الحساباتُ التي لضريبتها حكمٌ — الإيرادُ مخرجاتٌ ومديّنةُ الطبع مدخلات.
+_VAT_ACCOUNT_TYPES: tuple[str, ...] = (
+    BOOK_ACCOUNT_TYPE_REVENUE, *sorted(_DEBIT_NATURED),
+)
+
+
+def _tax_bucket(account_type) -> str | None:
+    """حكمُ سطرِ الضريبة: **مخرجاتٌ** على الإيراد و**مدخلاتٌ** على مديّنة الطبع.
+
+    و`None` لما ليس منهما (خصومٌ وحقوقُ ملكية): ضريبةٌ على حسابِ التزامٍ ليست
+    مخرجاتٍ ولا مدخلات، فتُترك خارج المجموعين لا تُوزَّع على أحدهما.
+
+    **والقاعدةُ واحدةٌ هنا** يقرؤها تقريرُ ض.ق.م (`_vat`) و`vat_from_book` (#287/٤):
+    نسخةٌ ثانية منها كانت ستُخرج تقريراً وإقراراً بقاعدتين لدفترٍ واحد.
+    """
+    if account_type == BOOK_ACCOUNT_TYPE_REVENUE:
+        return VAT_OUTPUT
+    if account_type in _DEBIT_NATURED:
+        return VAT_INPUT
+    return None
+
+
 def _vat(book, span, **_):
-    """ض.ق.م للفترة: **الضريبةُ المسجَّلةُ على بنود الحركات** مجموعاً بنوع الحركة.
+    """ض.ق.م للفترة: **مخرجاتٌ ومدخلاتٌ منفصلتان، والمستحقُّ فرقُهما**.
 
     **ولا نسبةَ حيّة**: العمودان `tax_base`/`tax_amount` كُتبا مع الحركة وقتَ
     إدخالها وهما ما يُجمع هنا. ضربُ الأساس في نسبة الشركة اليوم كان يُعيد حسابَ
     إقرار شهرٍ مضى بنسبةٍ لم تكن فيه.
 
-    والصفوفُ **لكل أنواع الحركة** كتقرير القبض/الدفع: صفٌّ يتقلّص يُخفي «لا حركةَ
-    بيعٍ هذا الشهر» ويُوهم بغياب البند. والعدُّ عدُّ حركاتٍ **لها ضريبةٌ مسجَّلة**
-    (أساسٌ أو قيمة) لا عددُ بنود.
+    **والفصلُ حكمُ الحساب لا نوعِ الحركة** (`_tax_bucket`): فاتورةُ بيعٍ ضريبتُها
+    على الإيراد مخرجات، ومرتجعُها (دائنٌ على الإيراد) يقلّها؛ وسطرُ مصروفٍ ضريبتُه
+    مدخلاتٌ تُخصم. وصفٌّ لكل نوع حركة كما في القبض/الدفع — صفٌّ يتقلّص يُخفي «لا
+    حركةَ بيعٍ هذا الشهر». والعدُّ عدُّ حركاتٍ **لها ضريبةٌ على سطرٍ ذي حكم**.
 
     **والحيّةُ وحدها**: حركةٌ عُكست وضرائبُها خارجَ المجموع (`_live_entries`)، فزوجٌ
     مُلغى يعطي أصفاراً لا ضريبةً مضاعفة.
     """
-    logged = _period_lines(book, span).exclude(tax_base=0, tax_amount=0)
-    found = {
-        row["entry__kind"]: row
-        for row in logged.values("entry__kind").annotate(
+    classified = _period_lines(book, span).exclude(
+        tax_base=0, tax_amount=0,
+    ).filter(account__account_type__in=_VAT_ACCOUNT_TYPES)
+    #: العدُّ استعلامٌ ثانٍ لمفتاح الحركة وحده: حركةٌ فيها سطرُ إيرادٍ وسطرُ مصروف
+    #: تقع في **مجموعتَي مبلغٍ**، وجمعُ عدَّيهما كان يحسبها مرّتين.
+    counts = {
+        row["entry__kind"]: row["count"]
+        for row in classified.values("entry__kind").annotate(
             count=Count("entry_id", distinct=True),
-            taxable=Sum("tax_base"),
-            tax=Sum("tax_amount"),
         ).order_by()
     }
+    found: dict[str, dict] = {}
+    for row in classified.values("entry__kind", "account__account_type").annotate(
+        taxable=Sum("tax_base"), tax=Sum("tax_amount"),
+    ).order_by():
+        current = found.setdefault(row["entry__kind"], {
+            "taxable": _ZERO, VAT_OUTPUT: _ZERO, VAT_INPUT: _ZERO,
+        })
+        current["taxable"] += _zero(row["taxable"])
+        current[_tax_bucket(row["account__account_type"])] += _zero(row["tax"])
     rows = []
-    taxable_total = tax_total = _ZERO
+    taxable_total = output_total = input_total = _ZERO
     for kind, label in BOOK_ENTRY_KIND_CHOICES:
         row = found.get(kind, {})
         taxable = _zero(row.get("taxable"))
-        tax = _zero(row.get("tax"))
+        output = _zero(row.get(VAT_OUTPUT))
+        input_tax = _zero(row.get(VAT_INPUT))
         taxable_total += taxable
-        tax_total += tax
+        output_total += output
+        input_total += input_tax
         rows.append({
             "kind": kind,
             "kind_label": label,
-            "count": row.get("count", 0),
+            "count": counts.get(kind, 0),
             "taxable": _money(taxable),
-            "tax": _money(tax),
+            "output_tax": _money(output),
+            "input_tax": _money(input_tax),
+            "tax_due": _money(output - input_tax),
         })
-    return rows, {"taxable": _money(taxable_total), "tax": _money(tax_total)}
+    return rows, {
+        "taxable": _money(taxable_total),
+        "output_tax": _money(output_total),
+        "input_tax": _money(input_total),
+        "tax_due": _money(output_total - input_total),
+    }
 
 
+#: باني كل نوعٍ: `(book, span, **params) -> (rows, totals)`.
 _BUILDERS = {
     REPORT_CASH: _cash,
     REPORT_INCOME: _profit_rows,
@@ -879,6 +935,20 @@ def available_reports(book) -> list[dict]:
 
 def is_report_available(book, kind) -> bool:
     return kind in REPORTS_BY_BOOK_KIND.get(book.kind, ())
+
+
+def accounts_with_movement(book, span) -> list[dict]:
+    """الحساباتُ التي لها **حركةٌ حيّة** في النطاق — `[{"code", "name"}]` بالترتيب.
+
+    مصدرُ «أيّ حسابٍ يستحقّ كشفاً» في مستخرج الدفتر كاملاً (#288/هـ): الكشفُ
+    يُبنى لكل حسابٍ ظهر في `_account_sums` (أي له بندٌ حيٌّ في الفترة) ولا يُبنى
+    لساكن (ورقةٌ بلا صفوف تُقرأ «لا بيانات» فتُوهم بخلل). والتجميعُ في القاعدة
+    كسائر التقارير، لا حلقةَ بنودٍ في بايثون.
+    """
+    return [
+        {"code": row["account__code"], "name": row["account__name"]}
+        for row in _account_sums(book, span)
+    ]
 
 
 def reports_index_payload(book) -> dict:
@@ -1250,10 +1320,11 @@ def vat_from_book(book, *, period_start, period_end) -> dict:
         tax = line.tax_amount or _ZERO
         if not tax:
             continue
-        if line.account.account_type == BOOK_ACCOUNT_TYPE_REVENUE:
+        bucket = _tax_bucket(line.account.account_type)
+        if bucket == VAT_OUTPUT:
             sales_tax += tax
             continue
-        if line.account.account_type not in _DEBIT_NATURED:
+        if bucket != VAT_INPUT:
             continue
         rate, review = book_rates.recognised_vat_rate(
             line, tenant=book.tenant, tax_system=system, overrides=overrides,

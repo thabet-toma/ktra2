@@ -1,0 +1,85 @@
+{% load docshare_fmt %}
+{% comment %}
+صفيحةُ تقريرِ دفترِ زبونٍ **بلا غلافها** (#288/هـ) — يشترك فيها ورقتان:
+
+- `client_book_report.html`: تقريرٌ واحد، داخل `.sheet` وحده (الرابطُ العامّ
+  ونقطةُ الطباعة المفردة).
+- `client_book_report_all.html`: الدفترُ كاملاً، صفيحةٌ لكل تقريرٍ يفصلها فاصلُ
+  صفحات.
+
+**وأنماطُها في `_client_book_report_style.html`** — ملفٌّ ثالثٌ يشترك فيه القالبان:
+نصُّ الصفيحة هنا وقواعدُ تنسيقها هناك، فلا يُكتب شكلُ تقريرٍ واحدٍ مرّتين.
+
+**والقالبُ لا يعرف نوعَ التقرير**: الأعمدةُ والصفوفُ والمجاميعُ تصل جاهزةً من
+`book_reports.table_payload` — وهو المصدرُ الذي يقرأ منه ملفُّ Excel نفسُه، فلا
+يخرج مستندان لنفس التقرير بعمودين مختلفين.
+
+**والقيمةُ المقنَّعةُ «—» لا صفر**: الصفرُ رقمٌ يقول شيئاً، والمقنَّعُ لا يقول.
+{% endcomment %}
+
+  <div class="cb-head">
+    <p class="cb-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="cb-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="cb-org-line">{{ company.address }}</p>{% endif %}
+  </div>
+
+  <p class="cb-title">{% if table %}{{ table.title }}{% else %}تقرير دفتر{% endif %}</p>
+  <span class="cb-mark">{{ watermark }}</span>
+
+  {% if problem %}
+  <p class="cb-empty cb-alert">{{ problem }}</p>
+  {% else %}
+  <div class="cb-meta">
+    <div class="cb-card">
+      <h3>الزبون</h3>
+      <div class="cb-row"><span>الاسم</span><span><strong>{{ table.client }}</strong></span></div>
+    </div>
+    <div class="cb-card">
+      <h3>الفترة</h3>
+      <div class="cb-row"><span>من</span><span>{{ table.from }}</span></div>
+      <div class="cb-row"><span>إلى</span><span>{{ table.to }}</span></div>
+    </div>
+  </div>
+
+  {% if table.note %}<p class="cb-note">{{ table.note }}</p>{% endif %}
+  {% if table.period_note %}<p class="cb-note">{{ table.period_note }}</p>{% endif %}
+
+  {% if table.rows %}
+  <table class="cb-table">
+    <thead>
+      <tr>
+        {% for column in table.columns %}
+        <th{% if column.kind != 'text' %} class="num"{% endif %}>{{ column.label }}</th>
+        {% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in table.rows %}
+      <tr>
+        {% for cell in row %}
+        <td{% if cell.kind != 'text' %} class="num"{% endif %}>{% if cell.masked %}—{% elif cell.kind == 'money' %}{{ cell.value|money }}{% else %}{{ cell.value }}{% endif %}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="cb-empty">لا بياناتَ في هذه الفترة.</p>
+  {% endif %}
+
+  {% if table.totals %}
+  <dl class="cb-totals">
+    {% for total in table.totals %}
+    <div class="cb-total">
+      <dt>{{ total.label }}</dt>
+      <dd>{% if total.masked %}—{% elif total.kind == 'money' %}{{ total.value|money }}{% else %}{{ total.value }}{% endif %}</dd>
+    </div>
+    {% endfor %}
+  </dl>
+  {% endif %}
+  {% endif %}
+
+  <div class="cb-foot">
+    {{ company.company_name_primary }}
+    <br>{{ watermark }} — ليست مستنداً نهائياً ولا صالحاً للإقرار الضريبي.
+  </div>

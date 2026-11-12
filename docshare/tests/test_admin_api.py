@@ -209,6 +209,35 @@ def test_an_unlicensed_company_cannot_read_or_revoke_a_payment_notice_share(
     assert share.revoked_at is None
 
 
+def test_a_masked_member_has_no_client_book_report_scope(
+    env, office_tenant, client_book_report,
+):
+    """#288: صفحةُ التقرير تُبنى بلا قناع، فالنطاقُ `none()` لمن لا يرى المبالغ.
+
+    صلاحيةُ النوع (`office.clients.write`) يملكها المحاسبُ، والزبونُ زبونُه — ولو
+    مرّ النطاقُ لقرأ من رابط الزميل كلَّ رقمٍ حُجِب عنه في الشاشة (الملفُّ
+    والطباعةُ يمرّان بالقناع، والرابطُ البابُ الثالث). والمالكُ يرى الصفَّ: الحارسُ
+    قناعٌ لا حجبٌ عامّ.
+    """
+    from docshare.models import DOC_CLIENT_BOOK_REPORT
+
+    accountant = _member(env["tenant"], "share-accountant-book-report", "accountant")
+    book = client_book_report.client_book
+    book.client.responsible = accountant
+    book.client.save(update_fields=["responsible"])
+    services.create_share(env["tenant"], DOC_CLIENT_BOOK_REPORT, client_book_report.pk)
+
+    mine = _rows(_client(accountant, env["tenant"]).get(
+        SHARES_URL, {"doc_type": DOC_CLIENT_BOOK_REPORT},
+    ))
+    owner = _rows(_client(env["owner"], env["tenant"]).get(
+        SHARES_URL, {"doc_type": DOC_CLIENT_BOOK_REPORT},
+    ))
+
+    assert mine == []
+    assert [row["doc_id"] for row in owner] == [client_book_report.pk]
+
+
 def test_unknown_document_is_404_not_403(env):
     """404 لا 403: 403 يُثبت لمن يخمّن المعرّفات أن المستند موجود."""
     api = _client(env["owner"], env["tenant"])

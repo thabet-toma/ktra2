@@ -1,0 +1,38 @@
+{% extends "docshare/base.html" %}
+{% comment %}
+ورقةُ الدفتر كاملاً للطباعة (#288/هـ) — صفيحةٌ لكل تقريرٍ متاحٍ، ومعها كشفُ حسابٍ
+لكل حسابٍ له حركة، **بفاصل صفحاتٍ** بينها في الطباعة.
+
+**والصفيحةُ نفسُها في `_client_book_report_sheet.html` وأنماطُها في
+`_client_book_report_style.html`**: هذا القالبُ لا يعرف نوعَ تقريرٍ ولا عموداً —
+يضع الغلافَ والفاصلَ ويتكرّر. فورقةُ الدفتر كاملاً وورقةُ التقرير المفرد تُخرجان
+جدولاً واحداً من `book_reports.table_payload`.
+
+**و«PDF» من حوار الطباعة** كما في التقارير المفردة: لا مكتبة PDF على الخادم،
+والمتصفحُ هو المُصيِّر. كلُّ صفيحةٍ تبدأ في ورقةٍ جديدة، والعلامةُ المائيةُ
+والشعارُ يتكرّران عليها كما يتكرّر رأسُ الشركة في مستندٍ من صفحات.
+{% endcomment %}
+
+{% block page_title %}الدفتر كاملاً{% endblock %}
+
+{% block extra_style %}{% include "docshare/_client_book_report_style.html" %}
+  /* فاصلُ الصفحات: صفيحةٌ لكل تقرير — والأخيرةُ بلا فاصلٍ فلا صفحةَ بيضاء. */
+  .cb-sheet{page-break-after:always}
+  .cb-sheet:last-of-type{page-break-after:auto}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+{% for table in tables %}
+<div class="sheet cb-sheet">
+{% include "docshare/_client_book_report_sheet.html" %}
+</div>
+{% endfor %}
+
+{% if auto_print %}<script>window.onload = function () { window.print(); };</script>{% endif %}
+{% endblock %}

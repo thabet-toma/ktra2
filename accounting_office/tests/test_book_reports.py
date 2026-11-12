@@ -12,8 +12,8 @@
 - **`watermark`** في كل استجابة، والأنواعُ المتاحةُ تتبع نوعَ الدفتر (البسيطُ لا
   يعطي ميزانَ مراجعة، والمزدوجُ لا يعطي قبضاً ودفعاً).
 - **`vat` للفترة (#288/ب-٢)**: من **الضريبة المسجَّلة على الحركات** لا من نسبةٍ
-  حيّة — مجموعُ التقرير يساوي مجموعَ `tax_amount` في حركات الفترة، ومتاحٌ لنوعَي
-  الدفتر، وعكسُ الحركة يُخرج ضرائبها.
+  حيّة، **مخرجاتٍ ومدخلاتٍ منفصلتين** والمستحقُّ فرقُهما — لا مجموعاً واحداً — ومتاحٌ
+  لنوعَي الدفتر، وعكسُ الحركة يُخرج ضرائبها.
 - **السنةُ المالية للزبون تُقرأ في الفترة الافتراضية** (#288/ب-٢): بدايةُ الفترة
   الافتراضية من `fiscal_year_start` على الدفتر لا من «1 كانون الثاني» المثبَّت.
 - كشفُ الحساب: بحسابٍ أو بطرف، وبرصيدٍ جارٍ يبدأ من أرضية ما قبل الفترة.
@@ -26,7 +26,6 @@ from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import connection
-from django.db.models import Sum
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -769,10 +768,14 @@ class ReversalTest(DoubleBookTestCase):
 
 
 class VatReportTest(BookReportsTestCase):
-    """ض.ق.م للفترة (#288/ب-٢): مجموعُ التقرير = مجموعُ حقول الضريبة في الحركات.
+    """ض.ق.م للفترة (#288/ب-٢): مخرجاتٌ ومدخلاتٌ **منفصلتان** والمستحقُّ فرقُهما.
 
     والضريبةُ **مسجَّلةٌ على البنود** (`tax_base`/`tax_amount`) لا محسوبةً بنسبةٍ
     حيّةٍ وقتَ القراءة: تغييرُ النسبة اليوم لا يعيد كتابة تقرير شهرٍ مضى.
+
+    **ولا مجموعَ واحداً للضريبة** (إصلاحُ #288): جمعُ المخرجات والمدخلات في رقمٍ
+    واحد كان يُخرج 240 على بياناتٍ مستحقُّها 80 — وهو الرقمُ الذي يجب أن يطابق
+    صافي رصيد `2200` في ميزان المراجعة نفسِه.
     """
 
     def setUp(self):
@@ -805,22 +808,36 @@ class VatReportTest(BookReportsTestCase):
             ],
         )
 
-    def recorded(self, payload):
-        """ما في القاعدة للفترة نفسها التي أعادها التقرير — لا أرقامَ مكتوبة."""
-        return BookEntryLine.objects.filter(
-            entry__client_book__client=self.mine,
-            entry__entry_date__gte=datetime.date.fromisoformat(payload["from"]),
-            entry__entry_date__lte=datetime.date.fromisoformat(payload["to"]),
-        ).aggregate(base=Sum("tax_base"), tax=Sum("tax_amount"))
+    def test_the_output_and_input_tax_are_separate_and_the_due_is_their_difference(self):
+        """مخرجاتٌ من الإيراد ومدخلاتٌ من مديّنة الطبع — والمستحقُّ 80.00 لا 240.00.
 
-    def test_the_tax_total_is_the_sum_of_the_recorded_tax_fields(self):
+        الضريبةُ المسجَّلةُ على سطر الإيراد (4100) ضريبةُ **مخرجات**، وعلى سطر
+        المصروف/الأصل (5200 هنا) ضريبةُ **مدخلات**. جمعُهما كان يقول للمحاسب
+        إنّه يدفع 240 وفي الدفتر 80.
+        """
         payload = self.get_report(self.mine, "vat")
 
-        recorded = self.recorded(payload)
-        self.assertEqual(payload["totals"]["tax"], "240.00")
+        self.assertEqual(payload["totals"]["output_tax"], "160.00")
+        self.assertEqual(payload["totals"]["input_tax"], "80.00")
+        self.assertEqual(payload["totals"]["tax_due"], "80.00")
         self.assertEqual(payload["totals"]["taxable"], "1500.00")
-        self.assertEqual(Decimal(payload["totals"]["tax"]), recorded["tax"])
-        self.assertEqual(Decimal(payload["totals"]["taxable"]), recorded["base"])
+
+    def test_the_due_matches_the_2200_balance_in_the_trial_balance(self):
+        """المستحقُّ = صافي رصيد `2200` — الرقمُ نفسُه لا رقمٌ ثانٍ عنه.
+
+        ورصيدُ الميزان **مدينٌ موجباً** (`_trial_balance`): حسابٌ دائنُ الطبع
+        يخرج سالباً، فالمستحقُّ الموجبُ هو سالبُه.
+        """
+        vat = self.get_report(self.mine, "vat")
+        trial = self.get_report(self.mine, "trial_balance")
+
+        payable = rows_by_code(trial["rows"])["2200"]
+
+        self.assertEqual(payable["credit"], "160.00")
+        self.assertEqual(payable["debit"], "80.00")
+        self.assertEqual(
+            Decimal(vat["totals"]["tax_due"]), -Decimal(payable["balance"]),
+        )
 
     def test_the_rows_split_the_tax_by_entry_kind(self):
         payload = self.get_report(self.mine, "vat")
@@ -828,16 +845,23 @@ class VatReportTest(BookReportsTestCase):
         rows = {row["kind"]: row for row in payload["rows"]}
         self.assertEqual(sorted(rows), sorted(ENTRY_KINDS))
         self.assertEqual(rows["sales_invoice"]["taxable"], "1000.00")
-        self.assertEqual(rows["sales_invoice"]["tax"], "160.00")
-        self.assertEqual(rows["purchase_invoice"]["tax"], "80.00")
-        self.assertEqual(rows["expense"]["tax"], "0.00")
+        self.assertEqual(rows["sales_invoice"]["output_tax"], "160.00")
+        self.assertEqual(rows["sales_invoice"]["input_tax"], "0.00")
+        self.assertEqual(rows["sales_invoice"]["tax_due"], "160.00")
+        self.assertEqual(rows["purchase_invoice"]["output_tax"], "0.00")
+        self.assertEqual(rows["purchase_invoice"]["input_tax"], "80.00")
+        self.assertEqual(rows["purchase_invoice"]["tax_due"], "-80.00")
+        self.assertEqual(rows["expense"]["input_tax"], "0.00")
 
     def test_the_live_entries_only_are_summed(self):
         self.reverse_entry(self.mine, self.sale["id"])
 
         payload = self.get_report(self.mine, "vat")
 
-        self.assertEqual(payload["totals"]["tax"], "80.00")
+        # عكسُ البيع يُخرج مخرجاتِه وحدها: المدخلاتُ تبقى مستحقّةً لنا.
+        self.assertEqual(payload["totals"]["output_tax"], "0.00")
+        self.assertEqual(payload["totals"]["input_tax"], "80.00")
+        self.assertEqual(payload["totals"]["tax_due"], "-80.00")
         self.assertEqual(payload["totals"]["taxable"], "500.00")
 
     def test_an_entry_outside_the_period_is_excluded(self):
@@ -862,19 +886,22 @@ class VatReportTest(BookReportsTestCase):
             },
         )
 
-        self.assertEqual(default["totals"]["tax"], "240.00")
-        self.assertEqual(explicit["totals"]["tax"], "256.00")
+        self.assertEqual(default["totals"]["tax_due"], "80.00")
+        self.assertEqual(explicit["totals"]["output_tax"], "176.00")
+        self.assertEqual(explicit["totals"]["tax_due"], "96.00")
 
     def test_the_tax_is_masked_for_a_member_without_the_amounts_key(self):
         self.as_user(self.accountant)
 
         payload = self.get_report(self.mine, "vat")
 
-        self.assertIsNone(payload["totals"]["tax"])
-        self.assertIsNone(payload["totals"]["taxable"])
+        for key in ("taxable", "output_tax", "input_tax", "tax_due"):
+            with self.subTest(key=key):
+                self.assertIsNone(payload["totals"][key])
         # والصفوفُ تبقى: مفتاحُ المبلغ مقنَّعٌ لا محذوف.
         self.assertTrue(payload["rows"])
-        self.assertIsNone(payload["rows"][0]["tax"])
+        self.assertIsNone(payload["rows"][0]["tax_due"])
+        self.assertIsNone(payload["rows"][0]["output_tax"])
 
     def test_a_simple_book_offers_the_vat_report_too(self):
         other = make_client(
@@ -890,7 +917,8 @@ class VatReportTest(BookReportsTestCase):
 
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(res.data["title"], "ض.ق.م للفترة")
-        self.assertEqual(res.data["totals"]["tax"], "0.00")
+        self.assertEqual(res.data["totals"]["output_tax"], "0.00")
+        self.assertEqual(res.data["totals"]["tax_due"], "0.00")
 
 
 class FiscalYearTest(BookReportsTestCase):

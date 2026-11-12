@@ -6928,6 +6928,9 @@ class ReminderCandidate:
     #: `payments.statement_payload` عند بناء الرسالة (لا قبل الحواجز). وبندٌ لا
     #: كشفَ له يبقى `None`، ومفتاحُه في البند كسائر المفاتيح كي يقرأه القالبُ دائماً.
     statement: Any = None
+    #: #288/هـ: رابطُ تقريرِ دفترِ الزبون على بند «الأوراق» — عنوانُه وفترتُه
+    #: ورابطُه (يُركَّب بعد الحواجز ولمن يرى المبالغ). `None` لبندٍ ليس رابطَ تقرير.
+    client_book_report: Any = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -7052,6 +7055,18 @@ def _fee_invoices_module():
     from accounting_office import fee_invoices
 
     return fee_invoices
+
+
+def _book_exports_module():
+    """وحدةُ مستخرجات الدفتر (#288/هـ) — **استيرادٌ مؤجَّل** كأخواتها.
+
+    `book_exports` يستورد `services` في أعلاه (الإعدادُ والقناعُ والمبلغ)، فنداؤها
+    هنا وقتَ الحاجة يفكّ دورةً حقيقيّة. ومولّدُ بند رابط التقرير يعيش مع الصفّ
+    الذي يقرؤه (`ClientBookReport`) كما يعيش مولّدُ الفاتورة في `fee_invoices`.
+    """
+    from accounting_office import book_exports
+
+    return book_exports
 
 
 def _reminder_candidates(
@@ -7246,6 +7261,18 @@ def _reminder_candidates(
         postponed_pairs=postponed,
         reminder_type=reminder_type,
     ))
+    # #288/هـ: رابطُ تقريرِ دفتر الزبون — صفٌّ أُنشئ في `ClientBookReport` ولم
+    # يُرسل. بندٌ خامسٌ يُرجع `ReminderCandidate` نفسَه فيمرّ في الحواجز كلّها
+    # بلا استثناء، فتقول الشاشةُ «أرسِله» لرابطٍ تعرف أنّ له صفّاً.
+    candidates.extend(_book_exports_module().client_book_report_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
     return candidates
 
 
@@ -7317,6 +7344,11 @@ def _reminder_item_payload(candidate) -> dict:
         # #283/ج: كشفُ الشهر — أرقامُه من `statement_payload` بعد الحواجز، و`None`
         # لبندٍ ليس كشفاً فيبقى شكلُ البند ثابتاً على كلّ نوع.
         "statement": candidate.statement,
+        # #288/هـ: رابطُ تقرير الدفتر — عنوانُه وفترتُه ورابطُه (يُركَّب بعد
+        # الحواجز). و`None` لبندٍ ليس رابطَ تقرير فيبقى شكلُ البند ثابتاً.
+        "client_book_report": _book_exports_module().client_book_report_item(
+            candidate.client_book_report,
+        ),
         "subject": {"document_item_codes": list(candidate.missing_codes)},
     }
 
@@ -7362,10 +7394,14 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
     appointments = _appointments_module()
     parts = []
     for candidate in candidates:
-        parts.append(render_reminder_body(
-            bodies_by_type.get(candidate.reminder_type, {}).get(contact.language, ""),
-            _reminder_render_values(tenant, candidate, language=contact.language),
-        ))
+        # #288/هـ: بندُ رابط التقرير **نصُّه سطرُه وحده**. ونصُّ نوع «الأوراق»
+        # يتحدّث عن أوراقٍ ناقصةٍ ننتظرها من الزبون، ورابطُ تقريرٍ ورقةٌ تُسلَّم
+        # له — فتقديمُه كان يقول «ناقصنا منك: ولا شي» ثم يعطي رابطاً.
+        if candidate.client_book_report is None:
+            parts.append(render_reminder_body(
+                bodies_by_type.get(candidate.reminder_type, {}).get(contact.language, ""),
+                _reminder_render_values(tenant, candidate, language=contact.language),
+            ))
         if candidate.notice is not None:
             parts.append(appointments.payment_notice_text(candidate.notice))
         # #283/ب: سطرُ إشعار القبض بعد نصّه — رقمُ الإشعار والمبلغ والباقي.
@@ -7379,6 +7415,12 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
         if candidate.statement is not None:
             parts.append(_payments_module().statement_reminder_text(
                 candidate.statement, language=contact.language,
+            ))
+        # #288/هـ: سطرُ رابط التقرير بعد نصّ نوعه — عنوانٌ وفترةٌ ورابط. ولا
+        # مبلغَ فيه: الرابطُ يُفتح، والقناعُ يحرس ما فيه لا ما يُقال عنه.
+        if candidate.client_book_report is not None:
+            parts.append(_book_exports_module().client_book_report_text(
+                candidate.client_book_report,
             ))
     body = "\n\n".join(parts)
     return {
@@ -7563,6 +7605,12 @@ def ready_to_send_payload(
     # #282/أ٢: رابطُ ورقة الفاتورة — بعد الحواجز كلّها كالإشعار، ولمن يملك
     # مشاركةَ النوع وحده (لا صفَّ مشاركةٍ من مسار قراءةٍ لعضوٍ للقراءة).
     candidates = _fee_invoices_module().attach_invoice_links(
+        tenant, candidates, user=user,
+    )
+    # #288/هـ: رابطُ تقرير الدفتر — بعد الحواجز كلّها كالإشعار والفاتورة، ولمن
+    # يرى المبالغ ويكتب: الصفحةُ العامة تُبنى بلا قناع، فمن لا يرى رقماً لا
+    # يُعطى عنواناً يفتحه. والبندُ يبقى — عنوانُ التقرير ليس مبلغاً.
+    candidates = _book_exports_module().attach_client_book_report_links(
         tenant, candidates, user=user,
     )
     # النصوصُ تُقرأ **مرّةً للنوع** لا مرّةً لكل رسالة: خمسةُ زبائن لا تكلّف

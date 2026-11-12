@@ -4,16 +4,22 @@
 - **xlsx حقيقيٌّ لا نصٌّ بامتداد**: يُفتح بـ`openpyxl`، والأرقامُ فيه **أرقامٌ**
   بخانتين عشريتين (لا `"300.00"` نصّاً)، والعلامةُ المائيةُ واسمُ الزبون والفترة
   على صفوفه العليا.
-- **الدفترُ كاملاً**: مصنَّفٌ فيه ورقةٌ لكل تقريرٍ متاحٍ لنوع الدفتر.
+- **الدفترُ كاملاً**: مصنَّفٌ فيه ورقةٌ لكل تقريرٍ متاحٍ لنوع الدفتر، **وكشفُ
+  حسابٍ لكل حسابٍ له حركة** — وورقةُ طباعةٍ واحدةٌ صفيحةٌ لكل تقريرٍ بفاصل صفحات.
 - **ورقةُ الطباعة**: HTMLٌ مصيَّرٌ من الخادم يحمل «نسخة عمل» واسمَ الزبون والفترة
   وقيمَ التقرير — يُقاس **نصُّ المُخرَج** لا وجودُ وسمِ قالب.
 - **رابط المشاركة**: يُنشأ صفُّ `ClientBookReport` ونوعُ مستندٍ `client_book_report`،
-  ويُفتح الرابطُ العامُّ فيحمل الحمولة نفسها.
+  ويُفتح الرابطُ العامُّ فيحمّل الحمولة نفسها — **ولا يُنشئه عضوٌ لا يرى المبالغ**
+  (403، والصفحةُ العامة بلا قناع) ولا يقرؤه من سطح الإدارة.
 - **إعدادُ «رابط PDF للتقارير»**: مطفأً يردّ `share` 400 برسالةٍ واضحة، ويبقى
   التصديرُ المباشر (Excel والطباعة) عاملاً.
 - **العزل**: دفترُ مكتبٍ آخر **404** في كل نقطة.
 - **نوعٌ غيرُ متاحٍ لنوع الدفتر 400**، و**ميزانٌ لا يتوازن يبقى 409**.
-- **القناعُ يسري على الملفّ**: عضوٌ بلا `office.amounts.view` لا يجد رقماً في xlsx.
+- **القناعُ يسري على الملفّ والورق**: عضوٌ بلا `office.amounts.view` لا يجد رقماً
+  في xlsx ولا في ورقة الطباعة.
+- **الدفترُ بعد إنهاء الزبون**: لا كتابةَ فيه (400) والقراءةُ والتصديرُ يعملان.
+- **بندُ رابط التقرير في «جاهز للإرسال»** (#288/هـ): يظهر بعد إنشاء الرابط
+  ويغيب قبله، ولا يُعاد بعد إرساله، ولا رابطَ فيه لمن لا يرى المبالغ.
 
 كلُّ نقطةٍ تُقرأ بالـAPI كما تقرؤها الواجهة: `client-books/<client_id>/…`.
 """
@@ -21,21 +27,30 @@ import datetime
 from io import BytesIO
 
 from django.core.files.uploadedfile import SimpleUploadedFile
+from django.utils import timezone
 from openpyxl import load_workbook
 
+from accounting_office import services
 from accounting_office.book_reports import WATERMARK
 from accounting_office.models import (
     BOOK_KIND_DOUBLE,
     BOOK_KIND_SIMPLE,
     ClientBookReport,
+    ClientContact,
+    Contact,
+    ReminderLog,
 )
-from accounting_office.services import set_office_setting
-from accounting_office.tests.test_book_reports import BookReportsTestCase, THIS_YEAR
+from accounting_office.tests.test_book_reports import (
+    BookReportsTestCase,
+    THIS_YEAR,
+    reports_url,
+)
 from accounting_office.tests.test_client_books import make_client
 from docshare.models import DOC_CLIENT_BOOK_REPORT, DocumentShare
 
 BASE = "/api/accounting-office/"
 BOOKS = f"{BASE}client-books/"
+CLIENTS = f"{BASE}clients/"
 
 #: الفترةُ المطلوبة في الاختبارات — داخل السنة الجارية، فحركاتُ `setUp` داخلها.
 PERIOD_FROM = datetime.date(THIS_YEAR, 1, 1)
@@ -51,6 +66,11 @@ def export_url(client, kind=None):
 
 def print_url(client, kind):
     return f"{BOOKS}{client.pk}/reports/{kind}/print/"
+
+
+def whole_print_url(client):
+    """ورقةُ الدفتر كاملاً للطباعة (#288/هـ) — كلُّ تقريرٍ صفيحةٌ بفاصل صفحات."""
+    return f"{BOOKS}{client.pk}/print/"
 
 
 def share_url(client, kind):
@@ -193,6 +213,20 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         # والطباعةُ من المتصفح لا مكتبة PDF: زرُّ الطباعة على الصفحة.
         self.assertIn("window.print()", html)
 
+    def test_the_single_report_print_shares_the_sheet_but_not_the_page_break(self):
+        """صفحةُ تقريرٍ واحد تقرأ القالبَ والأنماطَ المشتركة — وبلا فاصلِ صفحات.
+
+        فاصلُ الصفحات يخصّ الدفترَ كاملاً: ورقةُ تقريرٍ واحد بفاصلٍ تُخرج صفحةً
+        بيضاءَ في الطباعة. والأنماطُ المشتركة (`_client_book_report_style.html`)
+        يجب أن تصل هنا أيضاً — وإلا خرجت الصفحةُ بلا تنسيق.
+        """
+        html = self.client.get(
+            print_url(self.mine, "cash"), period_params(), **self.headers(),
+        ).content.decode("utf-8")
+
+        self.assertIn(".cb-table{width:100%", html)
+        self.assertNotIn(".cb-sheet{", html)
+
     # ── رابط المشاركة ─────────────────────────────────────────────────────
     def share(self, kind="cash", *, expect=201, user=None, data=None):
         if user is not None:
@@ -242,7 +276,7 @@ class SimpleBookOutputsTest(BookReportsTestCase):
 
     def test_the_share_endpoint_is_refused_when_the_setting_is_off(self):
         """الإعدادُ المطفأ يمنع الرابط وحدَه — التصديرُ المباشر يبقى عاملاً."""
-        set_office_setting(self.tenant, "office_report_pdf_link", False)
+        services.set_office_setting(self.tenant, "office_report_pdf_link", False)
 
         res = self.share(expect=400)
 
@@ -277,8 +311,68 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         self.assertEqual(res.status_code, 403, res.content)
         self.assertFalse(ClientBookReport.objects.exists())
 
+    def test_a_masked_member_cannot_create_a_public_link(self):
+        """عضوٌ بلا `office.amounts.view` لا يُنشئ رابطاً — **الورقةُ بلا قناع**.
+
+        الصفحةُ العامة تُبنى بـ`user=None` (ورقةُ زبونٍ لا شاشةُ موظف)، فمن أنشأ
+        الرابطَ يقرأ كلَّ رقمٍ حُجِب عنه: الملفُّ والطباعةُ يمرّان بالقناع، والرابطُ
+        كان البابَ الثالث. والمنعُ **403** لا 400 (صلاحيةٌ ناقصة لا حمولةٌ فاسدة)،
+        ولا يُنشَأ صفُّ تقريرٍ ولا صفُّ مشاركة — لا رابطَ يُبطل بعدها.
+        """
+        res = self.share(user=self.accountant, expect=403)
+
+        self.assertIn("المبالغ", res.content.decode("utf-8"))
+        self.assertFalse(ClientBookReport.objects.exists())
+        self.assertFalse(
+            DocumentShare.objects.filter(
+                doc_type=DOC_CLIENT_BOOK_REPORT,
+            ).exists(),
+        )
+
+    # ── الدفترُ كاملاً للطباعة ────────────────────────────────────────────
+    def test_the_whole_book_prints_one_paged_sheet_per_available_report(self):
+        """ورقةُ «كل التقارير»: صفيحةٌ لكل تقريرٍ بفاصل صفحات، والعلامةُ والشعارُ.
+
+        و«PDF» من حوار الطباعة في المتصفح (نمط `utils/printReport.ts`)، فلا
+        مكتبةَ PDF على الخادم: الصفحةُ تُقاس بنصِّها وبتخطيطها لا بوجود وسم.
+        """
+        res = self.client.get(
+            whole_print_url(self.mine), period_params(), **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertIn("text/html", res["Content-Type"])
+        html = res.content.decode("utf-8")
+        self.assertIn(WATERMARK, html)
+        self.assertIn("زبوني", html)
+        # الشعارُ ترويسةُ المنشأة على الورقة (بطاقةُ الشركة لا اسمٌ مخترَع).
+        self.assertIn(self.tenant.CompanyName, html)
+        for title in ("قبض ودفع", "إيرادات ومصاريف", "ذمم", "ض.ق.م للفترة"):
+            with self.subTest(title=title):
+                self.assertIn(title, html)
+        # صفيحةٌ لكل تقريرٍ وبينها فاصلُ صفحاتٍ في الطباعة.
+        self.assertEqual(html.count('class="sheet cb-sheet"'), 4)
+        self.assertIn(".cb-sheet{page-break-after:always}", html)
+        # والأرقامُ هي أرقامُ التقرير نفسِه.
+        self.assertIn(">300<", html)
+        self.assertNotIn("{%", html)
+
+    def test_the_whole_book_print_respects_the_amounts_mask(self):
+        """القناعُ يسري على ورقة الطباعة كالملفّ: لا رقمَ لعضوٍ لا يراه."""
+        self.as_user(self.accountant)
+
+        res = self.client.get(
+            whole_print_url(self.mine), period_params(), **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        html = res.content.decode("utf-8")
+        self.assertIn(WATERMARK, html)
+        self.assertNotIn(">300<", html)
+        self.assertNotIn(">120<", html)
+
     # ── شروطٌ عامّة ───────────────────────────────────────────────────────
-    def test_a_finished_book_refuses_writes_and_keeps_exporting(self):
+    def test_a_stopped_service_refuses_writes_and_keeps_exporting(self):
         """«صدّر الدفتر كامل» بعد ترك الزبون (#288/ب-٢): قراءةٌ لا كتابة.
 
         الخدمةُ الموقوفة تُخرج الدفتر من «الحيّ» فلا إدخالَ ولا استيراد — والملفُّ
@@ -316,6 +410,60 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         book = load_workbook(BytesIO(res.content))
         self.assertEqual(book.sheetnames[-1], "ض.ق.م للفترة")
         self.assertIn(WATERMARK, sheet_texts(book.active))
+
+    def test_ending_the_client_stops_the_writes_and_keeps_the_book_readable(self):
+        """«أنهِ الزبون» يمنع الكتابة — **وخدمةُ مسك الدفاتر تبقى نشطة**.
+
+        الحالةُ على `OfficeClient` وحدها هي ما يتغيّر (`services.end_office_client`)
+        ولا يمسّ صفَّ الخدمة؛ فسؤالُ الخدمة وحدها كان يترك دفترَ زبونٍ منتهٍ
+        قابلاً للكتابة إلى الأبد — يكتب فيه المحاسبُ بعد أن صُفّي الحساب وسُلّم
+        للزبون نسختُه. والقراءةُ تبقى كاملةً: التقاريرُ والمستخرج.
+        """
+        ended = self.client.post(
+            f"{CLIENTS}{self.mine.pk}/end/", {}, format="json", **self.headers(),
+        )
+        self.assertEqual(ended.status_code, 200, ended.content)
+        self.assertTrue(
+            self.mine.services.filter(service__code="bookkeeping").exists(),
+            "أنهِ الزبون يجب ألّا يمسّ صفَّ خدمة مسك الدفاتر",
+        )
+
+        entry = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/",
+            {
+                "entry_date": DAY.isoformat(),
+                "kind": "expense",
+                "lines": [{"account_code": "1100", "credit": "5.00"}],
+            },
+            format="json",
+            **self.headers(),
+        )
+
+        self.assertEqual(entry.status_code, 400, entry.content)
+        self.assertIn("للقراءة فقط", str(entry.data))
+        # والرسالةُ تسمّي السببَ الحقّ: الزبونُ منتهٍ — لا «خدمةٌ موقوفة» تُرسل
+        # المحاسبَ إلى شاشة الخدمات.
+        self.assertIn("منتهٍ", str(entry.data))
+        listing = self.client.get(BOOKS, **self.headers())
+        row = next(
+            item for item in listing.data if item["client_id"] == self.mine.pk
+        )
+        self.assertFalse(row["writable"])
+
+        # والدفترُ يبقى مقروءاً: تقريرٌ ومصنَّفٌ وطباعة.
+        self.assertEqual(
+            self.client.get(
+                reports_url(self.mine, "cash"), {}, **self.headers(),
+            ).status_code,
+            200,
+        )
+        self.assertEqual(self.export("cash").status_code, 200)
+        self.assertEqual(
+            self.client.get(
+                print_url(self.mine, "cash"), period_params(), **self.headers(),
+            ).status_code,
+            200,
+        )
 
     def test_another_tenants_book_is_404_on_every_output(self):
         paths = (
@@ -363,6 +511,84 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         self.assertEqual(res.status_code, 404, res.content)
 
 
+class DoubleBookOutputsTest(BookReportsTestCase):
+    """دفترٌ مزدوجٌ متوازن — **كشفُ حسابٍ لكل حسابٍ له حركة** في الدفتر كاملاً.
+
+    ورقةُ الملاحظة وحدها («كشفُ الحساب يحتاج تحديدَ حساب») كانت تُخرج المصنَّفَ
+    ناقصاً: من صدّر دفترَه كاملاً لم يرَ حركاتِ حسابٍ واحداً فيه. والكشفُ الآن
+    يُبنى **لكل حسابٍ له حركةٌ حيّة في الفترة**، ومن لا حركةَ له لا ورقةَ له
+    (ورقةٌ بلا صفوف تُقرأ «لا بيانات» فتُوهم بخلل).
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(self.mine, kind=BOOK_KIND_DOUBLE)
+        self.add_entry(
+            self.mine, entry_date=DAY,
+            lines=[
+                {"account_code": "1100", "debit": "200.00"},
+                {"account_code": "4100", "credit": "200.00"},
+            ],
+        )
+
+    def whole_book(self):
+        res = self.client.get(export_url(self.mine), period_params(), **self.headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        return load_workbook(BytesIO(res.content))
+
+    def test_the_whole_book_has_a_statement_sheet_per_account_with_movement(self):
+        book = self.whole_book()
+
+        self.assertIn("كشف حساب 1100", book.sheetnames)
+        self.assertIn("كشف حساب 4100", book.sheetnames)
+        self.assertNotIn("كشف حساب 1300", book.sheetnames)
+
+        sheet = book["كشف حساب 1100"]
+        self.assertIn(WATERMARK, sheet_texts(sheet))
+        self.assertIn("زبوني", sheet_texts(sheet))
+        self.assertTrue(any(cell.value == 200 for cell in sheet_numbers(sheet)))
+
+    def test_the_whole_book_print_carries_the_statement_pages_too(self):
+        res = self.client.get(
+            whole_print_url(self.mine), period_params(), **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 200, res.content)
+        html = res.content.decode("utf-8")
+
+        self.assertIn("كشف حساب 1100", html)
+        self.assertIn("كشف حساب 4100", html)
+        self.assertNotIn("كشف حساب 1300", html)
+
+    def test_the_statements_themselves_respect_the_amounts_mask(self):
+        """كشوفُ الدفتر كاملاً تمرّ بالقناع — في الورق والملفّ معاً.
+
+        **والتقريرُ على الكشف وحده**: الصفحةُ تحمل تقاريرَ أخرى مقنَّعةً كذلك،
+        فاختبارٌ يقرأ الصفحة كلَّها يمرّ ولو أُسقط `user` من بناء الكشوف وحدها —
+        وهذه هي الحالةُ التي يطلبها المنع (كشفُ حسابٍ لكل حساب).
+        """
+        self.as_user(self.accountant)
+
+        res = self.client.get(
+            whole_print_url(self.mine), period_params(), **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        html = res.content.decode("utf-8")
+        self.assertIn("كشف حساب 1100", html)
+        self.assertNotIn(">200<", html)
+
+        file = self.client.get(
+            export_url(self.mine), period_params(), **self.headers(),
+        )
+        self.assertEqual(file.status_code, 200, file.content)
+        sheet = load_workbook(BytesIO(file.content))["كشف حساب 1100"]
+        self.assertFalse(
+            [cell for cell in sheet_numbers(sheet) if cell.value == 200],
+            "مبلغُ حركةٍ خرج في كشف حسابٍ لعضوٍ لا يرى المبالغ",
+        )
+        self.assertIn(WATERMARK, sheet_texts(sheet))
+
+
 class UnbalancedBookOutputsTest(BookReportsTestCase):
     """دفترٌ مزدوجٌ متوازن ثم مكسورٌ بقيدٍ مدسوس — 409 يبقى 409 في كل مستخرج."""
 
@@ -398,3 +624,141 @@ class UnbalancedBookOutputsTest(BookReportsTestCase):
         )
         self.assertEqual(res.status_code, 409, res.content)
         self.assertFalse(ClientBookReport.objects.exists())
+
+
+class BookReportReminderTest(BookReportsTestCase):
+    """رابطُ التقرير يظهر في «جاهز للإرسال» — **بعد إنشائه لا قبله** (#288/هـ).
+
+    الشاشةُ تقول «انسخه وأرسله للزبون» ولا سجلَّ يُذكّر به: رابطٌ يُنشأ اليوم
+    ويُنسى بعد أسبوع. المولّدُ يقرأ صفوفَ `ClientBookReport` القائمة بنوع
+    `documents`، فتمرّ في حواجز «جاهز للإرسال» نفسِها بلا محرّكٍ موازٍ.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(
+            self.mine, kind=BOOK_KIND_SIMPLE,
+            opened_on=datetime.date(THIS_YEAR - 1, 1, 5),
+        )
+
+    def share(self):
+        res = self.client.post(
+            share_url(self.mine, "cash"), period_params(),
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, 201, res.content)
+        return res.data
+
+    def ready_contact(self):
+        """جهةٌ رئيسيةٌ للزبون بكل الأنواع والإذن، وبلا يوم راحةٍ يُحجب به الحساب."""
+        contact = Contact.objects.create(
+            tenant=self.tenant, name="مدير الزبون", phone="0599000000", language="ar",
+        )
+        ClientContact.objects.create(
+            tenant=self.tenant, client=self.mine, contact=contact, is_primary=True,
+        )
+        services.set_client_setting(self.mine, "rest_days", [])
+        return contact
+
+    def items_of(self, day, *, user=None):
+        payload = services.ready_to_send_payload(
+            self.tenant, user=user or self.owner, day=day,
+        )
+        return [item for message in payload["messages"] for item in message["items"]]
+
+    def report_items(self, day, *, user=None):
+        return [
+            item for item in self.items_of(day, user=user)
+            if item.get("client_book_report") is not None
+        ]
+
+    def test_the_report_link_is_offered_only_after_it_exists(self):
+        self.ready_contact()
+        day = timezone.localdate()
+
+        self.assertEqual(self.report_items(day), [])
+        self.share()
+        item = self.report_items(day)
+
+        self.assertEqual(len(item), 1, item)
+        self.assertEqual(item[0]["reminder_type"], "documents")
+        self.assertEqual(item[0]["client_id"], self.mine.pk)
+        self.assertIn("قبض ودفع", item[0]["period_label"])
+        self.assertEqual(item[0]["client_book_report"]["kind"], "cash")
+        self.assertIn("/s/", item[0]["client_book_report"]["url"])
+
+    def test_the_report_item_is_not_a_demand_for_money(self):
+        """نوعُه `documents` لا `balance` — ورقةٌ تُسلَّم لا مطالبةٌ بمبلغ."""
+        self.ready_contact()
+        self.share()
+
+        item = self.report_items(timezone.localdate())[0]
+
+        self.assertEqual(item["reminder_type"], "documents")
+        # ولا مركَّبَ ماليٌّ على البند: لا فاتورةً ولا إشعاراً ولا قبضاً يُنطق رقماً.
+        self.assertIsNone(item["invoice"])
+        self.assertIsNone(item["notice"])
+        self.assertIsNone(item["receipt"])
+
+    def test_the_message_text_is_the_report_not_a_missing_papers_note(self):
+        """نصُّ البند سطرُ الرابط وحده — لا نصُّ «أوراقٌ ناقصةٌ ننتظرها منك».
+
+        نوعُه `documents` لِتُسلَّم الورقةُ لا لِتُطالَب، ونصُّ نوع الأوراق في
+        القوالب يتحدّث عن **ما ننتظره من الزبون**؛ تقديمُه على رابط تقريرٍ كان
+        يقول له «ناقصنا منك: ولا شي» ثم يعطيه رابطاً.
+        """
+        self.ready_contact()
+        self.share()
+        self.as_user(self.owner)
+
+        payload = services.ready_to_send_payload(
+            self.tenant, user=self.owner, day=timezone.localdate(),
+        )
+        body = "\n\n".join(message["body"] for message in payload["messages"])
+
+        self.assertTrue(body.startswith("قبض ودفع"), body)
+        self.assertIn("الرابط: ", body)
+        # ونصُّ نوع الأوراق لا يُقدَّم على السطر: رمزُه `{missing_list}` لا يظهر
+        # منطوقاً بقيمةٍ، ولا كلمةُ «ناقصنا» التي تصف مطالبةً من الزبون.
+        self.assertNotIn("ناقصنا", body)
+        self.assertNotIn("{", body)
+
+    def test_a_masked_reader_sees_the_item_without_the_link(self):
+        """من لا يرى المبالغ يصله البندُ بلا رابط: الصفحةُ العامة بلا قناع."""
+        self.ready_contact()
+        self.share()
+        day = timezone.localdate()
+
+        item = self.report_items(day, user=self.accountant)[0]
+
+        self.assertEqual(item["client_book_report"]["kind"], "cash")
+        self.assertEqual(item["client_book_report"]["url"], "")
+        payload = services.ready_to_send_payload(
+            self.tenant, user=self.accountant, day=day,
+        )
+        self.assertNotIn(
+            "/s/", "\n\n".join(message["body"] for message in payload["messages"]),
+        )
+
+    def test_a_sent_link_stops_being_offered(self):
+        """بندٌ أُرسل مرّةً لا يُعاد إرسالُه من نفسه — السقفُ واحدٌ كالإشعار الدائن."""
+        self.ready_contact()
+        self.share()
+        day = timezone.localdate()
+        report = ClientBookReport.objects.get()
+        # البندُ ظاهرٌ ما دام لم يُرسل — وإلا مرّ الاختبار على مولّدٍ غائب.
+        self.assertEqual(len(self.report_items(day)), 1)
+
+        ReminderLog.objects.create(
+            tenant=self.tenant,
+            client=self.mine,
+            reminder_type="documents",
+            kind="sent",
+            body="نصّ",
+            period_start=report.period_from,
+            period_end=report.period_to,
+            created_by=self.owner,
+        )
+
+        self.assertEqual(self.report_items(day), [])
+
