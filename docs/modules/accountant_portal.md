@@ -41,9 +41,9 @@
 **ISSUE #57:** مسارات `tax/periods/...` (تحت) لا تفترض دفتر المكتب — تعمل على أي
 دفترٍ يصله المستخدم بـ`X-Tenant-Id`، فيصلح لدفتر عميلٍ مُدار أو مربوطٍ بالضبط
 كما يصلح لدفتر شركة عادية؛ لا تغيير في `guards.py`/`readiness.py`/`services.py`.
-الواجهة تستدعيها من **بطاقة العميل** نفسها (`frontend_v2/components/accountant/office/OfficeClientTaxPeriods.tsx`،
-مُضافة كتبويب في `OfficeExternalClientPage.tsx`) لا من بوابةٍ منفصلة — أيّ دفترٍ
-يُستعمل يحسمه `frontend_v2/utils/clientBookAccess.ts` (المُدار يفوز عند التعارض).
+**وشاشاتُها في الواجهة أُزيلت في `#291`** مع قشرة المكتب القديمة (تبويبُ فترات
+الضريبة داخل بطاقة العميل ومُحدِّدُ الدفتر) — النقاطُ باقيةٌ وخادمُها مختبَر،
+وواجهتُها تُعاد في تذكرةٍ لاحقة.
 
 **ISSUE #86 — «مكانٌ واحد»:** `PracticeClient` **مجمَّدٌ للكتابة**. زبون المكتب صار
 `partners.Partner` نفسه داخل شركة مكتب المحاسب (`office_tenant_id`) — لا سجلّ
@@ -62,6 +62,12 @@ ISSUE #52 (القرار 9 في #46). `PracticeProgram`/`PracticeTask`/`PracticeD
 ويكتبه `practice.py` كأي زبونٍ عادي). موعد حذف `PracticeClient` نفسه موثَّقٌ في
 `docs/decisions/practice_client_retirement.md` — لا حذف قبل دورة ضريبية كاملة
 من نجاح الأمر على الإنتاج.
+
+> **وبعد `#291` (2026-11-12) أُزيل هذا كلُّه:** النماذجُ الستّة حُذفت بهجرة
+> `0007_delete_legacy_office_models`، وحُذف الملفّان `practice.py`/`practice_views.py`
+> ومسارات `practice/*` وأمرَا الترحيل. **ما تحتَه تاريخُ القرار لا سلوكٌ قائم** —
+> الوحدةُ الباقية هي بوابةُ المحاسب الخارجي وحدها، ومكتبُ المحاسبة يعمل على
+> موديول `accounting_office`.
 
 **مراجعة 2 (نفس اليوم) — قراءةٌ انتقالية بلا فقد شاشة:** المراجعة الأولى جعلت
 محاسباً لم يُرحَّل بعد (أو تعثّر ترحيله، أو أضاف له `migrate_accountant_offices`
@@ -99,16 +105,13 @@ ISSUE #52 (القرار 9 في #46). `PracticeProgram`/`PracticeTask`/`PracticeD
 |---|---|---|
 | `accountant_portal/services.py` | منطق الأعمال كله: الارتباطات، النطاق، المراجعة، الفترات، ملفات الزبون | 1368 |
 | `accountant_portal/views.py` | كل الـviews (APIView يدوية لا ViewSets)، الحصص والحراسة | 1148 |
-| `accountant_portal/practice.py` | خدمات طبقة المكتب: الزبائن والبرامج والمواعيد والمستندات والإعدادات و`practice_deadlines` | 661 |
-| `accountant_portal/models.py` | الملف المهني، الارتباط، الإعدادات، مراجعة الفترة، طلب التوضيح، وجداول المكتب الخمسة | 523 |
-| `accountant_portal/practice_views.py` | views طبقة المكتب — الحرّاس الثلاثة في `initial` واحدة، وكل فشل 404 | 273 |
+| `accountant_portal/models.py` | الملف المهني، الارتباط، الإعدادات، مراجعة الفترة، طلب التوضيح — **وأُزيلت منه جداولُ طبقة المكتب الستّة في `#291`** | 523 |
 | `accountant_portal/readiness.py` | 12 فحص جاهزية **مشتقّاً** للفترة الضريبية | 267 |
 | `accountant_portal/permissions.py` | الصلاحيات المحرّمة + حجب المسارات التشغيلية | 82 |
 | `accountant_portal/identity.py` | رموز تحقق البريد ورسائل الدعوة | 78 |
 | `accountant_portal/guards.py` | حارس قفل الفترة المسجَّل في `core.hooks` | 52 |
 | `accountant_portal/audit.py` | أكواد التدقيق المسموحة وكتابتها | 36 |
-| `accountant_portal/management/commands/migrate_accountant_offices.py` | ISSUE #55 — ترحيل idempotent: مكتب `accounting_firm` لكل محاسبٍ بلا مكتب، وربط كل `AccountantEngagement` نشط بزبون `PracticeClient` («مربوطٌ بإذنه») | 158 |
-| `accountant_portal/management/commands/migrate_practice_clients_to_partners.py` | ISSUE #86 — ترحيل idempotent ثانٍ (بعد #55): كل `PracticeClient` تابعٍ لمحاسبٍ له مكتب ينتقل إلى `partners.Partner` داخل شركته، وتُربط برامجه/مواعيده/مستنداته بالطرف الجديد؛ لا حذف، لا كتابة على `PracticeClient` | 190 |
+| — | **أوامرُ ترحيل طبقة المكتب أُزيلت في `#291`** (`migrate_accountant_offices` ISSUE #55 و`migrate_practice_clients_to_partners` ISSUE #86) — لم تبقَ طبقةٌ تُرحَّل | — |
 
 ## الـModels
 
@@ -168,7 +171,7 @@ def update_portal_settings(*, tenant, actor, data)  # لمدير الشركة و
 # إلى {"code","detail"} بحالته عبر `_conflict_response` في views.py.
 ```
 
-وطبقة المكتب في `accountant_portal/practice.py` — كلها منطاقة بـ`accountant=` لا `tenant=`:
+**وطبقةُ المكتب القديمة أُزيلت في `#291`** — كانت كلُّها مناطقة بـ`accountant=` لا `tenant=`، وهذه توقيعاتُها للتاريخ:
 
 ```python
 # التوقيعات فقط — منسوخة حرفياً من accountant_portal/practice.py

@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1115**
+عدد النقاط: **1099**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -34,21 +34,6 @@
 | `/api/accountant/engagements/request/` | `RequestEngagementView` | `accountant_portal/views.py` |
 | `/api/accountant/me/` | `AccountantMeView` | `accountant_portal/views.py` |
 | `/api/accountant/me/submit-verification/` | `SubmitProfileVerificationView` | `accountant_portal/views.py` |
-| `/api/accountant/practice/clients/` | `PracticeClientListView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/clients/<str:client_id>/` | `PracticeClientDetailView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/clients/<str:client_id>/link/` | `PracticeClientLinkView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/clients/<str:client_id>/restore/` | `PracticeClientRestoreView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/dashboard/` | `PracticeDashboardView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/deadlines/` | `PracticeDeadlinesView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/documents/` | `PracticeDocumentListView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/documents/<int:document_id>/` | `PracticeDocumentDetailView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/documents/upload/` | `PracticeDocumentUploadView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/overview/` | `PracticeOverviewView` | `accountant_portal/views.py` |
-| `/api/accountant/practice/programs/` | `PracticeProgramListView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/programs/<int:program_id>/` | `PracticeProgramDetailView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/settings/` | `PracticeSettingsView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/tasks/` | `PracticeTaskListView` | `accountant_portal/practice_views.py` |
-| `/api/accountant/practice/tasks/<int:task_id>/` | `PracticeTaskDetailView` | `accountant_portal/practice_views.py` |
 | `/api/accountant/resend-verification/` | `ResendVerificationView` | `accountant_portal/views.py` |
 | `/api/accountant/review/export/` | `ReviewPackageExportView` | `accountant_portal/views.py` |
 | `/api/accountant/review/queries/` | `ReviewQueryListCreateView` | `accountant_portal/views.py` |
@@ -1099,7 +1084,6 @@
 | `/api/tenants/companies/set-default/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/set-ui-mode/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/` | `TenantViewSet` | `tenants/views.py` |
-| `/api/tenants/companies/{pk}/managed-books/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/change-role/` | `TenantViewSet` | `tenants/views.py` |
 | `/api/tenants/companies/{pk}/members/remove/` | `TenantViewSet` | `tenants/views.py` |

@@ -75,8 +75,8 @@ def find_partner_with_similar_bank_account(tenant_id, account_number, *, exclude
 - `core` — **services**: `partners/views.py:12-14` (`ApiAuthAndUser`، `enforce_limits`، `get_tenant`) والحدّ `partners.records` عند الإنشاء (`views.py`)، و`core.payments.document_payment_summary` (`views.py`).
 - `sales` / `logistics` — **models كسولة داخل الإجراءات فقط**: `views.py:74-75` و`views.py:141-144` (`SalesInvoice`، `PurchaseInvoice`) — استيراد داخل الدالة عمداً لكسر الدوران.
 
-**يعتمد عليه:** `accounting` (`accounting/models.py`)، `sales` (`sales/models.py`)، `inventory` (`inventory/models.py`)، `logistics` (`logistics/models.py`)، `core` (`core/plans.py`)، `bridge` (`bridge/views.py`)، `accountant_portal` (**models** — `accountant_portal/practice.py` يستورد `partners.models.Partner`/`CustomerNote` مباشرةً، ISSUE #86: زبون مكتب المحاسبة صار طرفاً). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
-`Partner.engagement`/`Partner.managed_tenant` مراجعُ نصّية إلى `accountant_portal.AccountantEngagement`/`tenants.Tenant` — الاتجاه يبقى وحيداً: `partners` لا يستورد `accountant_portal` بكود حقيقي أبداً.
+**يعتمد عليه:** `accounting` (`accounting/models.py`)، `sales` (`sales/models.py`)، `inventory` (`inventory/models.py`)، `logistics` (`logistics/models.py`)، `core` (`core/plans.py`)، `bridge` (`bridge/views.py`)، `accountant_portal` (**models** — طبقةُ المكتب القديمة التي كانت تستورد `partners.models.Partner`/`CustomerNote` مباشرةً أُزيلت في `#291`، ISSUE #86: زبون مكتب المحاسبة صار طرفاً). عملياً كل موديل فاتورة أو حركة في المشروع يحمل FK إلى `Partner`.
+`Partner.engagement`/`Partner.managed_tenant` **أُزيلا في `#291`** (كانا مرجعَين نصّيين) إلى `accountant_portal.AccountantEngagement`/`tenants.Tenant` — الاتجاه يبقى وحيداً: `partners` لا يستورد `accountant_portal` بكود حقيقي أبداً.
 
 ## قواعد لا يجوز كسرها
 - **`partners/apps.py:7-8` يستورد `partners.signals` داخل `ready()`** — إزالته تُعطّل إنشاء حسابات الأطراف والأرصدة الافتتاحية بصمت.
