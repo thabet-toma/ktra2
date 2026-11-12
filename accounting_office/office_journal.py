@@ -1,24 +1,38 @@
-"""القيدُ التلقائيُّ في دفاتر المكتب — الدفعاتُ والشطب (#284، الجزء أ).
+"""القيدُ التلقائيُّ في دفاتر المكتب — الفواتيرُ والدفعاتُ والإشعارُ الدائن (#284).
 
 **لماذا وحدةٌ مستقلّة:** `payments.py` يملك مالَ المكتب («اللي عليه» والتخصيصَ
-والشطب)، والدفاترُ ملكُ `accounting`. الجسرُ بينهما هنا وحده: `payments` ينادي
-دالّةً واحدةً بعد إنشاء الصفّ، والـview لا يعرف شيئاً عن القيود، والحسابُ
-يُحلّ من شجرة الشركة لا من قائمةٍ في الكود.
+والشطب)، و`fee_invoices.py` يملك المستندَ المرقَّم، والدفاترُ ملكُ `accounting`.
+الجسرُ بينهما هنا وحده: كلُّ وحدةٍ تنادي دالّةً واحدةً بعد حفظ الصفّ، والـview لا
+يعرف شيئاً عن القيود، والحسابُ يُحلّ من شجرة الشركة لا من قائمةٍ في الكود.
 
-**والقيدان اثنان، لكلٍّ مرجعُه الخاصّ (idempotent على `(النوع، المعرّف)`):**
+**وأربعةُ قيودٍ، لكلٍّ مرجعُه الخاصّ (idempotent على `(النوع، المعرّف)`):**
 
-    دفعةٌ:  مدينٌ حسابُ طريقة الدفع  ÷  دائنٌ الذمّمُ المدينة  [وسمُ الطرف]
-    شطبٌ:   مدينٌ حسابُ الشطب        ÷  دائنٌ الذمّمُ المدينة  [وسمُ الطرف]
+    فاتورةٌ:  مدينٌ الذمّمُ المدينة        ÷ دائنٌ الإيراد + دائنٌ ض.ق.م المخرجات
+    إشعارٌ:   مدينٌ الإيراد + مدينٌ الضريبة ÷ دائنٌ الذمّمُ المدينة
+    دفعةٌ:    مدينٌ حسابُ طريقة الدفع      ÷ دائنٌ الذمّمُ المدينة
+    شطبٌ:     مدينٌ حسابُ الشطب            ÷ دائنٌ الذمّمُ المدينة
 
 **ووسمُ الطرف على سطر الذمّم وحده** — `accounting/services.py` (`post_journal`)
-يرفض وسمَ طرفٍ على حسابٍ ليس ذمّته، لأن سطرَ صندوقٍ موسومٍ بالطرف يُلغي سطرَ
-ذمّته في كشف حسابه (رصيدٌ يقرأ صفراً وقيدٌ متوازن).
+يرفض وسمَ طرفٍ على حسابٍ ليس ذمّته، لأن سطرَ صندوقٍ أو إيرادٍ موسومٍ بالطرف يُلغي
+سطرَ ذمّته في كشف حسابه (رصيدٌ يقرأ صفراً وقيدٌ متوازن).
 
-**والذرّيةُ فوق هذا كله:** الدالّتان تُناديان داخل `transaction.atomic` الذي
-فتحه `payments` حول إنشاء الصفّ، فـ`ValidationError` من `post_journal` (فترةٌ
-مقفلة، حسابٌ معطَّل، توازن) تُرجع الدفعةَ أو الشطبَ كلَّه — لا صفَّ مالٍ بلا
-قيد. ولا `try/except` هنا: الرسالةُ العربية تصل المستخدم كما هي (هي تُترجم إلى
-400 في `core/exception_handler.py`).
+**والقيدُ الضريبيُّ شرطان لا واحد**: أن يكون المكتبُ «مشتغلاً مرخّصاً»
+(`office_licensed_dealer`) وأن تكون ضريبةُ الورقة أكبرَ من صفر. والقيدان يتّفقان
+لحظةَ الإصدار بطبيعتهما — `issue_for_draft` يُصفّر النسبةَ لمكتبٍ غير مرخّص
+فتصير `tax_total` صفراً — والفحصُ الثاني حارسٌ على صفٍّ كُتب بغير هذا المسار.
+
+**والذرّيةُ فوق هذا كله:** الدوالُّ تُنادَى داخل `transaction.atomic` الذي فتحه
+`payments` (الدفعة/الشطب) أو `fee_invoices` (الإصدار/الإشعار)، فـ`ValidationError`
+من `post_journal` (فترةٌ مقفلة، حسابٌ معطَّل، توازن) تُرجع الصفَّ كلَّه — لا صفَّ
+مالٍ ولا مستندَ مرقَّمٍ بلا قيده. ولا `try/except` هنا: الرسالةُ العربية تصل
+المستخدم كما هي (هي تُترجم إلى 400 في `core/exception_handler.py`).
+
+**و«اعتمد الكل» يُرحّل قيودَه أيضاً**: `issue_for_drafts` يُنشئ صفوفَ الفواتير
+بـ`bulk_create` (قراءةُ المسودّات وبنودها ثابتةٌ لا تكبر بعددها)، ثم يُنادي
+`post_invoice_journal` **مرّةً لكل صفّ** داخل المعاملة نفسها — الصافي والضريبةُ
+من `total`/`tax_total` على الصفّ لا من بنود مسودّته. فهو نموُّ الكلفة الوحيدُ في
+ذلك المسار، وثمنُ «لا فاتورةَ مرقَّمةً بلا قيدها»: القيدُ صفٌّ ماليٌّ لكل مستند،
+ولا `post_journal` جماعيٌّ في المستودع.
 
 **ولا استيرادَ من `accounting.models`** (عقد `importlinter`
 `no-direct-accounting-models`): القراءةُ بالكود عبر `accounting.api.py`
@@ -37,20 +51,32 @@ from accounting import services as accounting_services
 from accounting_office import services
 from accounting_office import settings_registry
 from accounting_office.models import OfficeClient
+from core.terminology import term as tenant_term
 
 #: مفاتيحُ الإعدادات — **السجلّ هو مصدرها**، وهذه أسماءُ القراءة منها.
-#: ومفتاحُ الإيراد (`office_journal_revenue_account`) ليس هنا: يُسجَّل في السجلّ
-#: للجزء الثاني، ولا يقرؤه شيءٌ في هذا الجزء فلا يُدَّعى أنّه يُقرأ.
 JOURNAL_ENABLED_KEY = "office_journal_enabled"
 CASH_ACCOUNT_KEY = "office_journal_cash_account"
 BANK_ACCOUNT_KEY = "office_journal_bank_account"
 CHEQUE_ACCOUNT_KEY = "office_journal_cheque_account"
 RECEIVABLE_ACCOUNT_KEY = "office_journal_receivable_account"
+#: أوّلُ قارئٍ لحساب الإيراد: كان مسجَّلاً في السجلّ بلا مستهلك حتى #284/ب.
+REVENUE_ACCOUNT_KEY = "office_journal_revenue_account"
 WRITEOFF_ACCOUNT_KEY = "office_journal_writeoff_account"
 
-#: مرجعا القيد — بهما يُقرأ القيدُ المرحَّل وبهما يمنع `post_journal` التكرار.
+#: حسابُ ض.ق.م المخرجات — **ثابتُ `accounting.services` القائم** لا نصٌّ جديد:
+#: `REVENUE_VOUCHER_VAT_OUTPUT_CODE` هو ما يكتب عليه سندُ الإيراد وتقرؤه تقاريرُ
+#: الضريبة، فنسخةٌ ثانية من «2104» تفترق عنه بأوّل تغيير. **ولا إعدادَ له**:
+#: ليس مالاً يملكه المكتب مثل الصندوق والبنك، بل الالتزامُ الضريبيُّ الوحيد في
+#: الشجرة، وكودٌ يكتبه المكتب غلطاً يُسقِط القيدَ في صمت.
+TAX_OUTPUT_ACCOUNT_CODE = accounting_services.REVENUE_VOUCHER_VAT_OUTPUT_CODE
+TAX_OUTPUT_ACCOUNT_LABEL = "ضريبة القيمة المضافة - مخرجات"
+
+#: مراجعُ القيود — بها يُقرأ القيدُ المرحَّل وبهما يمنع `post_journal` التكرار.
+REFERENCE_INVOICE = "office_fee_invoice"
+REFERENCE_CREDIT_NOTE = "office_fee_credit_note"
 REFERENCE_PAYMENT = "office_fee_payment"
 REFERENCE_WRITEOFF = "office_fee_writeoff"
+
 
 #: حسابُ المدين لكل طريقة دفع — «بطاقة» تُقبض في البنك لا في الصندوق، والشيكُ
 #: الورقةُ في اليد لا نقداً (نفسُ تفريق `accounting/api.py` — `money_account_kind`).
@@ -64,6 +90,7 @@ METHOD_ACCOUNT_KEYS: dict[str, str] = {
 }
 
 QUANTUM = Decimal("0.01")
+ZERO = Decimal("0.00")
 
 #: اسمُ حساب الديون المعدومة وأبوه — يُنشأ عند أوّل شطب (انظر
 #: `ensure_writeoff_account`). والكودُ في السجلّ (`WRITEOFF_ACCOUNT_CODE`) لأنه
@@ -134,12 +161,36 @@ def _create_partner(client):
 
 
 # ── الحسابات: من شجرة الشركة بالكود، أو 400 يُسمّي المفتاح ────────────────────
-def _account(tenant, key):
-    """حسابُ الإعداد — كودُه في شجرة الشركة وفعّال، وإلا 400 باسم المفتاح.
+def _account_by_code(tenant, code, *, key, label):
+    """حسابٌ بكودٍ صريح — وفعّال، وإلا 400 بمفتاحه وكوده.
 
     الكودُ لا يُقبل على الثقة: كودٌ غائبٌ أو معطَّلٌ كان يُسقِط القيدَ عند
     `post_journal` برسالةٍ لا تقول أيَّ إعدادٍ يُصلَح، أو — أسوأ — يُرحّل إلى
     حسابٍ آخر مطابقٍ بالاسم. فالفحصُ هنا، والرسالةُ تسمّي المفتاحَ والكود.
+    """
+    account = accounting_api.get_account_by_code(tenant, str(code).strip())
+    if account is None:
+        raise ValidationError({
+            key: (
+                f"«{label}»: لا حسابَ بالكود «{code}» في شجرة حسابات "
+                "المكتب."
+            ),
+        })
+    if not account.is_active:
+        raise ValidationError({
+            key: (
+                f"«{label}»: الحساب «{code} {account.name}» معطَّل — "
+                "فعّله أو اختر كوداً آخر."
+            ),
+        })
+    return account
+
+
+def _account(tenant, key):
+    """حسابُ الإعداد — كودُه في السجلّ، ويُحلّ بـ`_account_by_code`.
+
+    والرسائلُ واحدةٌ للاثنين: مفتاحُ الإعداد وكودٌ ثابت (حسابُ الضريبة) يردّان
+    بالشكل نفسه، فلا رسالتان تفترقان عند أوّل تعديل.
     """
     definition = settings_registry.get_definition(key)
     code = str(services.resolve_setting(tenant, key) or "").strip()
@@ -150,22 +201,165 @@ def _account(tenant, key):
                 "المكتب قبل ترحيل القيد."
             ),
         })
-    account = accounting_api.get_account_by_code(tenant, code)
-    if account is None:
-        raise ValidationError({
-            key: (
-                f"«{definition.label}»: لا حسابَ بالكود «{code}» في شجرة حسابات "
-                "المكتب."
-            ),
+    return _account_by_code(tenant, code, key=key, label=definition.label)
+
+
+# ── الفاتورةُ الورقية: أوّلُ قارئٍ لحساب الإيراد ──────────────────────────────
+def _licensed_dealer(tenant) -> bool:
+    """«المكتب مشتغل مرخّص» — **قاعدةٌ واحدة** في `fee_invoices` لا نسخةً هنا.
+
+    والاستيرادُ داخل الدالّة يفكّ دورةً حقيقيّة: `fee_invoices` يستورد هذه الوحدة
+    في أعلاه (نداءُ القيد عند الإصدار)، فاستيرادُها في الأعلى يدير الدورةَ عند
+    أوّل تحميل. والنداءُ يقع عند الترحيل وحده.
+    """
+    from accounting_office import fee_invoices
+
+    return fee_invoices.office_is_licensed(tenant)
+
+
+def _tax_account(tenant, tax_total):
+    """حسابُ ض.ق.م المخرجات أو `None` — **سطرٌ يُزاد أو يُغفل**.
+
+    `None` في حالتين لا ثالثة: مكتبٌ غيرُ مشتغلٍ مرخّص، أو ضريبةٌ صفر. فالقيدُ
+    يبقى متوازناً في الحالين، وورقةٌ بلا سطر ضريبةٍ لا يُخترع لها سطرٌ في الدفاتر.
+    """
+    if _money(tax_total) <= ZERO or not _licensed_dealer(tenant):
+        return None
+    return _account_by_code(
+        tenant,
+        TAX_OUTPUT_ACCOUNT_CODE,
+        key=TAX_OUTPUT_ACCOUNT_CODE,
+        label=TAX_OUTPUT_ACCOUNT_LABEL,
+    )
+
+
+def post_invoice_journal(invoice, *, actor):
+    """قيدُ الفاتورة: مدينٌ الذمّمُ المدينة بإجماليها، دائنٌ الإيرادُ والضريبة.
+
+    **الإجماليُّ مدينٌ مرّةً واحدة**: الصافيُّ إلى `4102` والضريبةُ إلى `2104`،
+    ومجموعُهما إجماليُ الورقة — فسطرُ الذمّة يقرأ ما يطلبه المكتبُ من الزبون
+    بالضبط، وتقريرُ الضريبة يقرأ نصيبَه من القيد نفسه لا من حسابٍ موازٍ.
+
+    والتاريخُ يومُ الإصدار لا يومُ الترحيل — وهما واحدٌ هنا لأن النداء داخل
+    معاملة الإصدار، ولو تأخّر لغيره صار للورقة تاريخان يفترقان في الفترة.
+
+    تُعيد القيدَ (قائماً إن كان `idempotent`)، أو `None` حين يكون الترحيل مطفأً
+    **أو إجماليُ الورقة صفراً**: `post_journal` يرفض قيداً صفريّاً
+    («cannot be empty»)، وورقةُ صفرٍ لا أثرَ لها في الدفاتر — فلا تُسقِط الإصدارَ
+    برسالةٍ لا يفهمها الموظّف ولا تخصّ ورقتَه.
+    """
+    tenant = invoice.tenant
+    if not journaling_enabled(tenant):
+        return None
+    client = invoice.client
+    total = _money(invoice.total)
+    if total <= ZERO:
+        return None
+    partner = partner_for(client)
+    receivable_account = _account(tenant, RECEIVABLE_ACCOUNT_KEY)
+    revenue_account = _account(tenant, REVENUE_ACCOUNT_KEY)
+    net = _money(invoice.net_total)
+    tax_total = _money(invoice.tax_total)
+    lines_data = [
+        {
+            "account": receivable_account.pk,
+            "debit": total,
+            "credit": ZERO,
+            "partner": partner.pk,
+            "description": f"ذمّة {client.name} — فاتورة {invoice.number}",
+        },
+        {
+            "account": revenue_account.pk,
+            "debit": ZERO,
+            "credit": net,
+            "partner": None,
+            "description": f"إيراد أتعاب — فاتورة {invoice.number}",
+        },
+    ]
+    tax_account = _tax_account(tenant, tax_total)
+    if tax_account is not None:
+        lines_data.append({
+            "account": tax_account.pk,
+            "debit": ZERO,
+            "credit": tax_total,
+            "partner": None,
+            "description": f"ضريبة مخرجات — فاتورة {invoice.number}",
         })
-    if not account.is_active:
-        raise ValidationError({
-            key: (
-                f"«{definition.label}»: الحساب «{code} {account.name}» معطَّل — "
-                "فعّله أو اختر كوداً آخر."
-            ),
+    return accounting_services.post_journal(
+        tenant_id=_tenant_id(tenant),
+        transaction_date=timezone.localdate(invoice.issued_at),
+        reference_type=REFERENCE_INVOICE,
+        reference_id=invoice.pk,
+        # اسمُ المستند من معجم الشركة لا حرفياً (حارس `test_terminology_guard`):
+        # قالبُ مكتب المحاسبة يسمّيها «أتعاب»، وغيره باسمه العامّ.
+        description=(
+            f"{tenant_term(tenant, 'doc.sales_invoice')} {invoice.number} — "
+            f"{client.name}"
+        ),
+        lines_data=lines_data,
+        user=actor,
+        idempotent=True,
+    )
+
+
+def post_credit_note_journal(note, *, actor):
+    """قيدُ الإشعار الدائن — **عكسُ قيد الفاتورة** بالأسطر نفسها معكوسةً.
+
+    مدينٌ الإيرادُ بصافيه وض.ق.م المخرجات بنصيبها، دائنٌ الذمّمُ المدينة
+    بإجمالي الإشعار بوسم الطرف: الإشعارُ يخصم من `4102` ومن `2104` بقدر ما
+    أثبته الأصل، ويسقط عن الزبون ما لم يعد عليه.
+
+    **والوسمُ على الذمّة وحدها**: سطرُ إيرادٍ موسومٌ بالطرف يُلغي سطرَ ذمّته في
+    كشف حسابه، وهو ما يرفضه `post_journal` أصلاً.
+
+    وتُندى عند إنشاء الإشعار داخل معاملة `fee_invoices._issue_correction`،
+    فإشعارٌ لا يُرحّل لا يُنشأ.
+    """
+    tenant = note.tenant
+    if not journaling_enabled(tenant):
+        return None
+    client = note.client
+    partner = partner_for(client)
+    receivable_account = _account(tenant, RECEIVABLE_ACCOUNT_KEY)
+    revenue_account = _account(tenant, REVENUE_ACCOUNT_KEY)
+    total = _money(note.total)
+    net = _money(note.net_total)
+    tax_total = _money(note.tax_total)
+    lines_data = [
+        {
+            "account": revenue_account.pk,
+            "debit": net,
+            "credit": ZERO,
+            "partner": None,
+            "description": f"خصم إيراد — إشعار {note.number}",
+        },
+    ]
+    tax_account = _tax_account(tenant, tax_total)
+    if tax_account is not None:
+        lines_data.append({
+            "account": tax_account.pk,
+            "debit": tax_total,
+            "credit": ZERO,
+            "partner": None,
+            "description": f"خصم ضريبة مخرجات — إشعار {note.number}",
         })
-    return account
+    lines_data.append({
+        "account": receivable_account.pk,
+        "debit": ZERO,
+        "credit": total,
+        "partner": partner.pk,
+        "description": f"ذمّة {client.name} — إشعار دائن {note.number}",
+    })
+    return accounting_services.post_journal(
+        tenant_id=_tenant_id(tenant),
+        transaction_date=timezone.localdate(note.issued_at),
+        reference_type=REFERENCE_CREDIT_NOTE,
+        reference_id=note.pk,
+        description=f"إشعار دائن {note.number} — {client.name}",
+        lines_data=lines_data,
+        user=actor,
+        idempotent=True,
+    )
 
 
 # ── الدفعة ───────────────────────────────────────────────────────────────────

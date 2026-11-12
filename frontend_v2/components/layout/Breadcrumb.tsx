@@ -90,6 +90,7 @@ export const VIEW_LABELS: Record<AppView, string> = {
   'office-dashboard': 'لوحة المكتب',
   'office-today': 'اليوم',
   'office-ready-to-send': 'جاهز للإرسال',
+  'office-fee-drafts': 'المسودّات',
   'office-clients': 'الزبائن',
   'office-calendar': 'التقويم',
   'office-settings': 'إعدادات المكتب',

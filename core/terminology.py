@@ -51,6 +51,8 @@ def _default_terms() -> dict[str, str]:
     terms["nav.office_today"] = "اليوم"
     # #280/ب: مجموعةُ «جاهز للإرسال» — الشاشةُ الثانية بعد «اليوم» في البيان.
     terms["nav.office_ready_to_send"] = "جاهز للإرسال"
+    # #282/أ٢/٢: مجموعةُ «المسودّات» — مسودّاتُ الأتعاب وأفعالُ اعتمادها.
+    terms["nav.office_fee_drafts"] = "المسودّات"
     # #289: مجموعةُ «لوحة المكتب» — شاشةُ صاحب المكتب وحدَه.
     terms["nav.office_dashboard"] = "لوحة المكتب"
     terms["action.add_office_client"] = "أضف زبون"

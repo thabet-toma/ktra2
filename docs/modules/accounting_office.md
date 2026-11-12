@@ -15,8 +15,8 @@
 على اللائحة والتمديدَ والتزاماتِ المكتب والأحداث** (#277)، **وقائمةَ الأوراق
 ووليدَها وشبكتَها** (#278)، **واستحقاقَ الرواتب ومواعيدَه** (#279)، **وأتعابَ
 المكتب: الاشتراكَ والمسودّاتِ واعتمادَها** (#282، الجزء أ١)، **والدفعاتِ و«اللي
-عليه» وكشفَ الحساب** (#283، الجزء أ — الخادم؛ وشاشاتُه ب)، **وقيدَ الدفعات
-والشطب في دفاتر المكتب** (#284، الجزء أ — الخادم). التذكيراتُ
+عليه» وكشفَ الحساب** (#283، الجزء أ — الخادم؛ وشاشاتُه ب)، **وقيودَ الدفاتر
+الأربعة: الفاتورةَ والإشعارَ الدائن والدفعةَ والشطب** (#284، الجزءان أ و ب — الخادم). التذكيراتُ
 وتصعيدُ التذكير و«جاهز للإرسال» (#280)، **وفاتورةُ الأتعاب الورقية وحقولُها
 القانونية والترقيمُ والإشعارُ الدائن وشاشةُ «المسودّات»** (أ٢ من #282)، وإشعارُ
 الدفع وتصنيفُ الدفاتر (#285) تأتي في تذاكرها، والملفّ يُحدَّث معها.**وقيدُ فاتورة الأتعاب** (ذممٌ مدينة / إيرادُ أتعاب / ضريبةُ مخرجات) وقيدُ
@@ -370,7 +370,7 @@ amounts_masked(tenant, user)                                  # نفسُ `fees.a
 ```python
 # ── فاتورةُ الأتعاب الورقية (#282، الجزء أ٢/١ — في `accounting_office/fee_invoices.py`) ──
 issue_for_draft(draft, *, actor=None)                          # متكرِّرةُ الأمان على **الورقة الحيّة** للمسودّة (`_live_invoice_for`) — تُنادَى من `approve_fee_draft`
-issue_for_drafts(drafts, *, actor=None)                        # دفعةً بكلفةٍ ثابتة — «اعتمد الكل»
+issue_for_drafts(drafts, *, actor=None)                        # دفعةً: أرقامٌ وقفلُ عدّادٍ مرّةً، **وقيدٌ لكل فاتورة** — «اعتمد الكل»
 ensure_sequence(tenant, *, year)                               # يُهيِّئ عدّاد السنة بلا زيادة (من التوليد)
 cancel_invoice(invoice, *, actor, reason="")                    # قبل الإرسال وحده (400)، ولا إشعارَ دائنًا حيّاً (409 `LiveCreditNoteConflict`)
 issue_credit_note(invoice, *, actor, amount, reason)            # سلسلةٌ منفصلة، وسقفٌ تراكميّ، وسببٌ إلزاميّ
@@ -488,7 +488,7 @@ tax_system_for(tenant, client) / office_is_licensed(tenant) / archived_rate(tena
 | `GET` | `client-books/<client_id>/reports/<kind>/print/?from=&to=` | `OfficeClientBookViewSet` (`print_report`) — ورقةُ التقرير HTML من قالب `docshare` نفسه، تطبع نفسها (`auto_print`) وبلا صفِّ مشاركة (#288/ب-١) |
 | `POST` | `client-books/<client_id>/reports/<kind>/share/` | `OfficeClientBookViewSet` (`share_report`) — `{url, expires_at}`: صفُّ `ClientBookReport` + مشاركةُ `docshare` بنوع `client_book_report`؛ **بمفتاح الكتابة**، و**400** إن أُطفئ إعدادُ «رابط PDF للتقارير»، و**409** للميزان المكسور (#288/ب-١) |
 | `GET/POST` | `fees/subscriptions/` | `OfficeFeeSubscriptionViewSet` (`list`, `create`) — الاشتراكاتُ التي يراها العضو؛ والإضافةُ سعرٌ **بتاريخ سريانه** (`office.clients.write` + `office.amounts.view`)، والتاريخُ المكرَّر 400 |
-| `GET` | `fees/drafts/` | `OfficeFeeDraftViewSet` (`list`) — المسودّاتُ ببنودها ومصادرها، ومبالغُها `null` بلا `office.amounts.view`؛ **ولا `POST`** (التوليدُ في «حدّث المكتب») |
+| `GET` | `fees/drafts/` | `OfficeFeeDraftViewSet` (`list`) — المسودّاتُ ببنودها ومصادرها، ومبالغُها `null` بلا `office.amounts.view`، **وبطاقةُ ورقتها الصادرة `invoice`** (`{id, number, issued_at, url}`)؛ **ولا `POST`** (التوليدُ في «حدّث المكتب») |
 | `POST` | `fees/drafts/<id>/approve/` | `OfficeFeeDraftViewSet` (`approve`) — `manager`/`office_manager` وحدهما (403 لغيرهما)، وملاحظةٌ اختيارية؛ ومن حالةٍ غير «مسودّة» 400 |
 | `POST` | `fees/drafts/approve-all/` | `OfficeFeeDraftViewSet` (`approve_all`) — كلُّ منتظرةٍ في المكتب، والردُّ `{approved, remaining, drafts}` |
 | `POST` | `fees/drafts/<id>/cancel/` | `OfficeFeeDraftViewSet` (`cancel`) — قبل الاعتماد وحده؛ وبعده 400 (إبطالُ المعتمدة إجراءُ أ٢) |

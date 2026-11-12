@@ -2663,11 +2663,16 @@ class OfficeFeeDraftViewSet(OfficeModuleViewSet):
         )
         masked = fees.amounts_masked(self.tenant, request.user)
         summaries = payments.invoice_summaries(approved)
+        # #282/أ٢/٢: بطاقاتُ الأوراق **مجمَّعةً** كالملخّصات — السطرُ يقرأ
+        # بطاقتَه من الخريطة، فلا تكبر كلفةُ «اعتمد الكل» بعدد المسودّات.
+        invoices = fee_invoices.draft_invoice_cards(self.tenant, approved)
         return Response({
             "approved": len(approved),
             "remaining": fees.pending_drafts(self.tenant).count(),
             "drafts": [
-                fees.draft_row(draft, masked=masked, summaries=summaries)
+                fees.draft_row(
+                    draft, masked=masked, summaries=summaries, invoices=invoices,
+                )
                 for draft in approved
             ],
         })

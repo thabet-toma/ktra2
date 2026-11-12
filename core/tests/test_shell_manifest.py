@@ -74,6 +74,8 @@ class ShellManifestFunctionTest(SimpleTestCase):
                 "today": ["office-today"],
                 # #280/ب: «جاهز للإرسال» مجموعةٌ ثانيةٌ بعد «اليوم» مباشرةً.
                 "ready-to-send": ["office-ready-to-send"],
+                # #282/أ٢/٢: «المسودّات» — مسودّاتُ الأتعاب وأفعالُ اعتمادها.
+                "fee-drafts": ["office-fee-drafts"],
                 # #289: لوحةُ صاحب المكتب — مجموعةٌ مستقلّةٌ بعد شاشتَي العمل،
                 # والموجّه يحرسها بالدور (مالك) والخادمُ يردّ غيرَه 403.
                 "dashboard": ["office-dashboard"],

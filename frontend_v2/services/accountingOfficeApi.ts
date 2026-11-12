@@ -150,6 +150,8 @@ const CLIENT_BOOKS = `${BASE}client-books/`;
 // #283/ب: الدفعاتُ ومستنداها — إشعارُ قبضٍ لكل دفعة، وكشفُ حسابٍ لفترة.
 const FEE_PAYMENTS = `${BASE}fees/payments/`;
 const FEE_LEDGER = `${BASE}fees/ledger/`;
+// #282/أ٢/٢: المسودّاتُ وأفعالُها (اعتماد/اعتماد الكل/إلغاء) — بلا إنشاءٍ ولا حذف.
+const FEE_DRAFTS = `${BASE}fees/drafts/`;
 
 const tenantOpts = () => ({ tenantId: resolveTenantId() });
 
@@ -1490,3 +1492,117 @@ export const shareFeeStatement = (
     },
     tenantOpts(),
   );
+
+
+// ── المسودّات (#282/أ٢/٢) — شاشةُ «المسودّات» ────────────────────────────────
+//
+// **التبويبُ من الخادم**: `status_label` و`state_label` و`period_label` تصل
+// جاهزةً، فلا جدولَ تسمياتٍ هنا (`FEE_DRAFT_STATUS_LABELS` في `models.py` مصدرُها).
+
+/** بطاقةُ الورقة الصادرة على صفّ المسودّة — `None` إن لم تصدر أو أُلغيت. */
+export interface FeeDraftInvoiceCard {
+  id: number;
+  number: string;
+  issued_at: string;
+  /** رابطُ الورقة العامّ الحيّ، و`''` قبل إنشائه (`docshare`). */
+  url: string;
+}
+
+/** سطرُ مسودّةٍ من `fees/drafts/` — شكلُ `fees.draft_row` كما هو. */
+export interface FeeDraftRow {
+  id: number;
+  client: { id: number; name: string };
+  year: number;
+  month: number;
+  period_label: string;
+  subtotal: string | null;
+  total: string | null;
+  paid_amount: string | null;
+  remaining: string | null;
+  state: string;
+  state_label: string;
+  status: string;
+  status_label: string;
+  generated_at: string;
+  approved_by: { id: number; name: string } | null;
+  approved_at: string | null;
+  approved_note: string;
+  invoice: FeeDraftInvoiceCard | null;
+  lines: {
+    id: number;
+    label: string;
+    amount: string | null;
+    source: string | null;
+    source_label: string;
+  }[];
+}
+
+/** مسودّاتُ المكتب كلُّها كما يراها العضو — والفلترةُ في الشاشة على حالتها. */
+export const listFeeDrafts = (): Promise<FeeDraftRow[]> =>
+  apiGetObject<FeeDraftRow[]>(FEE_DRAFTS, tenantOpts());
+
+/** «اعتمد» — يُصدر ورقةً مرقَّمةً وقيدَها، ويعيد صفَّ المسودّة ببطاقتها. */
+export const approveFeeDraft = (draftId: number): Promise<FeeDraftRow> =>
+  apiPostObject<FeeDraftRow>(`${FEE_DRAFTS}${draftId}/approve/`, {}, tenantOpts());
+
+/** «اعتمد الكل» — كلُّ منتظرةٍ في المكتب، والردُّ يقول كم بقي منها. */
+export interface FeeDraftApproveAllPayload {
+  approved: number;
+  remaining: number;
+  drafts: FeeDraftRow[];
+}
+
+export const approveAllFeeDrafts = (): Promise<FeeDraftApproveAllPayload> =>
+  apiPostObject<FeeDraftApproveAllPayload>(
+    `${FEE_DRAFTS}approve-all/`, {}, tenantOpts(),
+  );
+
+/** «أَلغِها» — الإلغاءُ قبل الاعتماد، فيعود الصفُّ ملغى في التاريخ. */
+export const cancelFeeDraft = (draftId: number): Promise<FeeDraftRow> =>
+  apiPostObject<FeeDraftRow>(`${FEE_DRAFTS}${draftId}/cancel/`, {}, tenantOpts());
+
+
+// ── كشفُ الحساب: قراءةُ «اللي عليه» وفواتيره (#282/أ٢/٢ — تبويبُ «الحساب») ───
+//
+// **مصدرٌ واحدٌ لا حسابٌ في الواجهة**: `client_due` في هذه الحمولة يخرج من
+// `payments.client_due` نفسِها، وحالةُ كلّ فاتورةٍ (`state_label`) من الخادم.
+
+/** حمولةُ `fees/ledger/?client=` المقصوصةُ إلى ما يعرضه تبويبُ «الحساب». */
+export interface FeeLedgerPayload {
+  invoices: {
+    count: number;
+    page: number;
+    page_size: number;
+    results: {
+      id: number;
+      period_label: string;
+      total: string | null;
+      paid_amount: string | null;
+      remaining: string | null;
+      state: string;
+      state_label: string;
+    }[];
+  };
+  client_due: {
+    due: string | null;
+    invoices_total: string | null;
+    paid_total: string | null;
+    credit: string | null;
+    unpaid_count: number;
+    tax_note: string | null;
+  } | null;
+}
+
+/** زبونٌ واحدٌ في الكشف — الفواتيرُ المعتمدة و«اللي عليه» في نداءٍ واحد.
+ *
+ * `page_size` على أقصى ما يقبله الخادم (`LEDGER_MAX_PAGE_SIZE`): تبويبُ
+ * «الحساب» يعرض تاريخَ الزبون كلَّه، والصفحةُ الافتراضية (50) تقصّه بصمت.
+ */
+export const listFeeLedger = (
+  clientId: number,
+  params: { pageSize?: number } = {},
+): Promise<FeeLedgerPayload> =>
+  apiGetObject<FeeLedgerPayload>(FEE_LEDGER, {
+    ...tenantOpts(),
+    query: { client: clientId, page_size: params.pageSize ?? 200 },
+  });
