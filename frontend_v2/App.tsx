@@ -59,7 +59,7 @@ import { useToast } from "./contexts/ToastContext";
 import { humanizeThrown } from "./utils/drfError";
 // ISSUE #271 — مسارا شاشتَي المكتب: مصدرٌ واحدٌ يقرؤه الجدولُ والشاشاتُ معاً.
 // #280/ب — «جاهز للإرسال» مسارُه الرابع، من الملفّ نفسه.
-import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_DASHBOARD_PATH, OFFICE_READY_TO_SEND_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
+import { OFFICE_CALENDAR_PATH, OFFICE_CLIENTS_PATH, OFFICE_DASHBOARD_PATH, OFFICE_FEE_DRAFTS_PATH, OFFICE_READY_TO_SEND_PATH, OFFICE_SETTINGS_PATH, OFFICE_TODAY_PATH } from "./utils/accountingOffice";
 
 // ── تقسيم الحزمة حسب الشاشة (صيانة الأداء 2026-07) ─────────────────────────
 // كانت كل الصفحات (~85 مكوّناً) مستورَدة ثابتاً ⇒ حزمة واحدة 3.2MB تحجب أول

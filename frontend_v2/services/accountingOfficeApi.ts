@@ -726,14 +726,6 @@ export interface ApproveAllFeeDraftsResult {
   drafts: unknown[];
 }
 
-/** «اعتمد الكل» على المسودّات المنتظرة — **النقطةُ القائمة** نفسُها لا نسخةً. */
-export const approveAllFeeDrafts = (note = ''): Promise<ApproveAllFeeDraftsResult> =>
-  apiPostObject<ApproveAllFeeDraftsResult>(
-    `${BASE}fees/drafts/approve-all/`,
-    note ? { note } : {},
-    tenantOpts(),
-  );
-
 export const submitObligation = (
   id: number,
   payload: { submitted_on?: string; number?: string } = {},
