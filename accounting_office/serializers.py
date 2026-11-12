@@ -689,6 +689,30 @@ class ClientBookKindWriteSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(choices=[value for value, _label in BOOK_KIND_CHOICES])
 
 
+class ClientBookSettingsWriteSerializer(serializers.Serializer):
+    """سنةُ الدفتر المالية وعملتُه (#288/ب-٢) — كلٌّ اختياريٌّ، والغيابُ لا يُفرّغ.
+
+    **ولا تحقّقَ تقويميّ هنا**: «شهر-يوم» ورمزُ العملة يُفحصان في الخدمة
+    (`client_books.normalize_fiscal_year_start`/`normalize_currency`) كي يصل رفضُ
+    النداء الداخليّ نفسُه — والمُسلسِلُ يحرس الشكلَ وحده.
+    """
+
+    fiscal_year_start = serializers.CharField(
+        required=False, allow_blank=True, max_length=5,
+    )
+    currency = serializers.CharField(required=False, allow_blank=True, max_length=3)
+
+
+class BookImportWriteSerializer(serializers.Serializer):
+    """استيرادُ شجرةٍ وأرصدة (#288/ب-٢): تاريخُ الأرصدة اختياريّ، والملفُّ في `FILES`.
+
+    والملفُّ لا يُعلَن هنا: `request.FILES` يحملُه، وهذا المُسلسِلُ يقرأ الحقلَ
+    النصّيّ الذي حوله فقط. والغيابُ يُعيد الافتراضَ في الخدمة: تاريخُ فتح الدفتر.
+    """
+
+    entry_date = serializers.DateField(required=False, allow_null=True)
+
+
 class BookAccountWriteSerializer(serializers.Serializer):
     """حسابٌ يضيفه المكتب لشجرة زبون — `is_system` يبقى `False` لكل ما يُضاف.
 
@@ -707,13 +731,23 @@ class BookAccountWriteSerializer(serializers.Serializer):
 
 
 class BookEntryLineWriteSerializer(serializers.Serializer):
-    """بندٌ في حركة: الحسابُ بكوده، ومدينٌ أو دائن — لا الاثنان (الخدمةُ تفحص)."""
+    """بندٌ في حركة: الحسابُ بكوده، ومدينٌ أو دائن — لا الاثنان (الخدمةُ تفحص).
+
+    و`tax_base`/`tax_amount` (#288/ب-٢) ضريبةُ البند **المسجَّلة** وقت الإدخال:
+    تقريرُ ض.ق.م للفترة يجمعها كما هي، فلا نسبةَ حيّةً تُضرب عند القراءة.
+    """
 
     account_code = serializers.CharField(max_length=20)
     debit = serializers.DecimalField(
         max_digits=14, decimal_places=2, required=False, allow_null=True,
     )
     credit = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True,
+    )
+    tax_base = serializers.DecimalField(
+        max_digits=14, decimal_places=2, required=False, allow_null=True,
+    )
+    tax_amount = serializers.DecimalField(
         max_digits=14, decimal_places=2, required=False, allow_null=True,
     )
     side_party = serializers.CharField(

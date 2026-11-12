@@ -11,8 +11,11 @@
 - **الفترة**: حركةٌ خارج `from`/`to` لا تدخل، والافتراضُ من بداية السنة إلى اليوم.
 - **`watermark`** في كل استجابة، والأنواعُ المتاحةُ تتبع نوعَ الدفتر (البسيطُ لا
   يعطي ميزانَ مراجعة، والمزدوجُ لا يعطي قبضاً ودفعاً).
-- **`vat` غيرُ مبنيٍّ في هذا الجزء** — نسبتُه تحتاج قراراً (لا نوعَ حسابٍ ضريبيٍّ
-  في النماذج اليوم)، والاختبارُ يثبّت غيابَه صراحةً كي لا يُظنّ سقوطاً.
+- **`vat` للفترة (#288/ب-٢)**: من **الضريبة المسجَّلة على الحركات** لا من نسبةٍ
+  حيّة — مجموعُ التقرير يساوي مجموعَ `tax_amount` في حركات الفترة، ومتاحٌ لنوعَي
+  الدفتر، وعكسُ الحركة يُخرج ضرائبها.
+- **السنةُ المالية للزبون تُقرأ في الفترة الافتراضية** (#288/ب-٢): بدايةُ الفترة
+  الافتراضية من `fiscal_year_start` على الدفتر لا من «1 كانون الثاني» المثبَّت.
 - كشفُ الحساب: بحسابٍ أو بطرف، وبرصيدٍ جارٍ يبدأ من أرضية ما قبل الفترة.
 
 كلُّ تقريرٍ يُقرأ بالـAPI كما تقرؤه الواجهة: `client-books/<client_id>/reports/…`.
@@ -23,6 +26,7 @@ from unittest import mock
 
 from django.contrib.auth.models import User
 from django.db import connection
+from django.db.models import Sum
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -60,10 +64,13 @@ THIS_YEAR = timezone.localdate().year
 REPORT_TODAY = datetime.date(THIS_YEAR, 12, 31)
 WATERMARK = "نسخة عمل"
 
-SIMPLE_KINDS = ["cash", "income", "receivables"]
-DOUBLE_KINDS = ["trial_balance", "profit_loss", "balance_sheet", "statement"]
+SIMPLE_KINDS = ["cash", "income", "receivables", "vat"]
+DOUBLE_KINDS = ["trial_balance", "profit_loss", "balance_sheet", "statement", "vat"]
+#: `vat` مشتركٌ بين النوعين (#288/ب-٢) فلا يصلح لاختبار «تقريرُ النوع الآخر 404».
+DOUBLE_ONLY = [kind for kind in DOUBLE_KINDS if kind != "vat"]
 ENTRY_KINDS = [
     "sales_invoice", "purchase_invoice", "expense", "bank_movement", "daily_report",
+    "manual", "opening",
 ]
 
 
@@ -266,7 +273,7 @@ class ReportsIndexTest(BookReportsTestCase):
         self.assertEqual(res.data["book_kind"], BOOK_KIND_DOUBLE)
         self.assertEqual(
             [row["title"] for row in res.data["reports"]],
-            ["ميزان مراجعة", "أرباح وخسائر", "ميزانية", "كشف حساب"],
+            ["ميزان مراجعة", "أرباح وخسائر", "ميزانية", "كشف حساب", "ض.ق.م للفترة"],
         )
 
     def test_the_index_needs_no_write_key(self):
@@ -275,12 +282,12 @@ class ReportsIndexTest(BookReportsTestCase):
 
         self.assertEqual(self.kinds_of(self.mine), DOUBLE_KINDS)
 
-    def test_vat_is_not_offered_in_this_part(self):
-        """نسبةُ الضريبة تحتاج قراراً (لا نوعَ حسابٍ ضريبيٍّ في النماذج) — لا بناءَ الآن."""
+    def test_vat_is_offered_for_a_double_book(self):
+        """ض.ق.م للفترة (#288/ب-٢) — يُحسب من المسجَّل، فلا نوعُ دفترٍ يحرمها."""
         self.create_book(self.mine, kind=BOOK_KIND_DOUBLE)
 
-        self.assertNotIn("vat", self.kinds_of(self.mine))
-        self.get_report(self.mine, "vat", expect=404)
+        self.assertIn("vat", self.kinds_of(self.mine))
+        self.assertEqual(self.get_report(self.mine, "vat")["title"], "ض.ق.م للفترة")
 
     def test_a_report_of_a_client_without_a_book_is_404(self):
         self.get_report(self.mine, "cash", expect=404)
@@ -761,6 +768,180 @@ class ReversalTest(DoubleBookTestCase):
         self.assertEqual(payload["totals"]["closing_balance"], "0.00")
 
 
+class VatReportTest(BookReportsTestCase):
+    """ض.ق.م للفترة (#288/ب-٢): مجموعُ التقرير = مجموعُ حقول الضريبة في الحركات.
+
+    والضريبةُ **مسجَّلةٌ على البنود** (`tax_base`/`tax_amount`) لا محسوبةً بنسبةٍ
+    حيّةٍ وقتَ القراءة: تغييرُ النسبة اليوم لا يعيد كتابة تقرير شهرٍ مضى.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(
+            self.mine, kind=BOOK_KIND_DOUBLE,
+            opened_on=datetime.date(THIS_YEAR - 1, 1, 5),
+        )
+        self.day = datetime.date(THIS_YEAR, 5, 12)
+        self.sale = self.add_entry(
+            self.mine, entry_date=self.day,
+            lines=[
+                {"account_code": "1300", "debit": "1160.00"},
+                {
+                    "account_code": "4100", "credit": "1000.00",
+                    "tax_base": "1000.00", "tax_amount": "160.00",
+                },
+                {"account_code": "2200", "credit": "160.00"},
+            ],
+        )
+        self.add_entry(
+            self.mine, entry_date=self.day, kind="purchase_invoice",
+            lines=[
+                {
+                    "account_code": "5200", "debit": "500.00",
+                    "tax_base": "500.00", "tax_amount": "80.00",
+                },
+                {"account_code": "2100", "credit": "580.00"},
+                {"account_code": "2200", "debit": "80.00"},
+            ],
+        )
+
+    def recorded(self, payload):
+        """ما في القاعدة للفترة نفسها التي أعادها التقرير — لا أرقامَ مكتوبة."""
+        return BookEntryLine.objects.filter(
+            entry__client_book__client=self.mine,
+            entry__entry_date__gte=datetime.date.fromisoformat(payload["from"]),
+            entry__entry_date__lte=datetime.date.fromisoformat(payload["to"]),
+        ).aggregate(base=Sum("tax_base"), tax=Sum("tax_amount"))
+
+    def test_the_tax_total_is_the_sum_of_the_recorded_tax_fields(self):
+        payload = self.get_report(self.mine, "vat")
+
+        recorded = self.recorded(payload)
+        self.assertEqual(payload["totals"]["tax"], "240.00")
+        self.assertEqual(payload["totals"]["taxable"], "1500.00")
+        self.assertEqual(Decimal(payload["totals"]["tax"]), recorded["tax"])
+        self.assertEqual(Decimal(payload["totals"]["taxable"]), recorded["base"])
+
+    def test_the_rows_split_the_tax_by_entry_kind(self):
+        payload = self.get_report(self.mine, "vat")
+
+        rows = {row["kind"]: row for row in payload["rows"]}
+        self.assertEqual(sorted(rows), sorted(ENTRY_KINDS))
+        self.assertEqual(rows["sales_invoice"]["taxable"], "1000.00")
+        self.assertEqual(rows["sales_invoice"]["tax"], "160.00")
+        self.assertEqual(rows["purchase_invoice"]["tax"], "80.00")
+        self.assertEqual(rows["expense"]["tax"], "0.00")
+
+    def test_the_live_entries_only_are_summed(self):
+        self.reverse_entry(self.mine, self.sale["id"])
+
+        payload = self.get_report(self.mine, "vat")
+
+        self.assertEqual(payload["totals"]["tax"], "80.00")
+        self.assertEqual(payload["totals"]["taxable"], "500.00")
+
+    def test_an_entry_outside_the_period_is_excluded(self):
+        self.add_entry(
+            self.mine, entry_date=LAST_YEAR_DAY,
+            lines=[
+                {"account_code": "1300", "debit": "116.00"},
+                {
+                    "account_code": "4100", "credit": "100.00",
+                    "tax_base": "100.00", "tax_amount": "16.00",
+                },
+                {"account_code": "2200", "credit": "16.00"},
+            ],
+        )
+
+        default = self.get_report(self.mine, "vat")
+        explicit = self.get_report(
+            self.mine, "vat",
+            params={
+                "from": datetime.date(LAST_YEAR_DAY.year, 1, 1).isoformat(),
+                "to": REPORT_TODAY.isoformat(),
+            },
+        )
+
+        self.assertEqual(default["totals"]["tax"], "240.00")
+        self.assertEqual(explicit["totals"]["tax"], "256.00")
+
+    def test_the_tax_is_masked_for_a_member_without_the_amounts_key(self):
+        self.as_user(self.accountant)
+
+        payload = self.get_report(self.mine, "vat")
+
+        self.assertIsNone(payload["totals"]["tax"])
+        self.assertIsNone(payload["totals"]["taxable"])
+        # والصفوفُ تبقى: مفتاحُ المبلغ مقنَّعٌ لا محذوف.
+        self.assertTrue(payload["rows"])
+        self.assertIsNone(payload["rows"][0]["tax"])
+
+    def test_a_simple_book_offers_the_vat_report_too(self):
+        other = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبونُ ض.ق.م البسيط", responsible=self.accountant,
+        )
+        self.create_book(
+            other, kind=BOOK_KIND_SIMPLE,
+            opened_on=datetime.date(THIS_YEAR - 1, 1, 5),
+        )
+
+        res = self.client.get(reports_url(other, "vat"), {}, **self.headers())
+
+        self.assertEqual(res.status_code, 200, res.content)
+        self.assertEqual(res.data["title"], "ض.ق.م للفترة")
+        self.assertEqual(res.data["totals"]["tax"], "0.00")
+
+
+class FiscalYearTest(BookReportsTestCase):
+    """السنةُ المالية للزبون — مصدرُ الفترة الافتراضية الوحيد (#288/ب-٢)."""
+
+    def setUp(self):
+        super().setUp()
+        self.create_book(
+            self.mine, kind=BOOK_KIND_DOUBLE,
+            opened_on=datetime.date(THIS_YEAR - 1, 1, 5),
+        )
+
+    def set_fiscal_year(self, value, *, expect=200):
+        res = self.client.post(
+            f"{BOOKS}{self.mine.pk}/settings/", {"fiscal_year_start": value},
+            format="json", **self.headers(),
+        )
+        self.assertEqual(res.status_code, expect, res.content)
+        return res.data
+
+    def test_the_default_period_starts_at_the_book_fiscal_year(self):
+        self.set_fiscal_year("07-01")
+
+        payload = self.get_report(self.mine, "trial_balance")
+
+        self.assertEqual(payload["from"], datetime.date(THIS_YEAR, 7, 1).isoformat())
+        self.assertEqual(payload["to"], REPORT_TODAY.isoformat())
+
+    def test_a_fiscal_year_that_has_not_started_yet_rolls_back_a_year(self):
+        self.set_fiscal_year("07-01")
+
+        payload = self.get_report(
+            self.mine, "trial_balance",
+            params={"to": datetime.date(THIS_YEAR, 6, 30).isoformat()},
+        )
+
+        self.assertEqual(
+            payload["from"], datetime.date(THIS_YEAR - 1, 7, 1).isoformat(),
+        )
+
+    def test_an_explicit_from_still_wins_over_the_fiscal_year(self):
+        self.set_fiscal_year("07-01")
+
+        payload = self.get_report(
+            self.mine, "trial_balance",
+            params={"from": datetime.date(THIS_YEAR, 3, 1).isoformat()},
+        )
+
+        self.assertEqual(payload["from"], datetime.date(THIS_YEAR, 3, 1).isoformat())
+
+
 class PeriodTest(DoubleBookTestCase):
     """الفترة: ما خارجها لا يدخل، والافتراضُ من بداية السنة إلى اليوم."""
 
@@ -1078,7 +1259,7 @@ class SimpleReportsTest(BookReportsTestCase):
                 self.assertEqual(payload["watermark"], WATERMARK)
 
     def test_a_double_report_on_a_simple_book_is_404(self):
-        for kind in DOUBLE_KINDS:
+        for kind in DOUBLE_ONLY:
             with self.subTest(kind=kind):
                 self.get_report(self.mine, kind, expect=404)
 

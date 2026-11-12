@@ -30,9 +30,9 @@
 **والقناعُ يطال الصفوفَ والمجاميع** — عضوٌ بلا `office.amounts.view` يصله `None`
 في كل مفتاحِ مبلغ، وتبقى البنيةُ والتسمياتُ والتواريخُ كما هي.
 
-**ولا `vat` في هذا الجزء.** نسبتُه تحتاج قراراً: لا نوعَ حسابٍ ضريبيٍّ في النماذج
-اليوم، واستنتاجُه من اسم حسابٍ في الشجرة مخترَعٌ لا قاعدة. تُترك لِتذكرةٍ تُقرّر
-مصدرَ النسبة أوّلاً.
+**ولا `vat` حيّاً في هذا الجدول.** نوعُه (#288/ب-٢) يجمع **الضريبةَ المسجَّلةَ على
+بنود الحركات** (`BookEntryLine.tax_base`/`tax_amount`) لا نسبةً تُضرب عند القراءة:
+النسبةُ تتغيّر، وإقرارُ شهرٍ مضى لا يتغيّر.
 """
 import datetime
 from decimal import Decimal
@@ -69,6 +69,7 @@ REPORT_TRIAL_BALANCE = "trial_balance"
 REPORT_PROFIT_LOSS = "profit_loss"
 REPORT_BALANCE_SHEET = "balance_sheet"
 REPORT_STATEMENT = "statement"
+REPORT_VAT = "vat"
 
 #: التسميةُ العربيةُ لكل تقرير — يقرؤها الفهرسُ وعنوانُ الحمولة (حقلٌ واحد).
 REPORT_LABELS: dict[str, str] = {
@@ -79,6 +80,7 @@ REPORT_LABELS: dict[str, str] = {
     REPORT_PROFIT_LOSS: "أرباح وخسائر",
     REPORT_BALANCE_SHEET: "ميزانية",
     REPORT_STATEMENT: "كشف حساب",
+    REPORT_VAT: "ض.ق.م للفترة",
 }
 
 #: معاملاتٌ لا يقوم التقريرُ بغيرها — يُرسَل للواجهة كي لا تخمّن.
@@ -87,12 +89,13 @@ REPORT_PARAMS: dict[str, tuple[str, ...]] = {
 }
 
 #: الأنواعُ المتاحةُ لكل نوع دفتر — البسيطُ لا يعطي ميزانَ مراجعة، والمزدوجُ لا
-#: يعطي قبضاً ودفعاً: التقريرُ يتبع معنى الدفتر لا ذوقَ القائمة.
+#: يعطي قبضاً ودفعاً: التقريرُ يتبع معنى الدفتر لا ذوقَ القائمة. **و`vat` للاثنين**
+#: (#288/ب-٢): ضريبةُ الفترة تُقرأ من البنود المسجَّلة لا من شجرةٍ بعينها.
 REPORTS_BY_BOOK_KIND: dict[str, tuple[str, ...]] = {
-    BOOK_KIND_SIMPLE: (REPORT_CASH, REPORT_INCOME, REPORT_RECEIVABLES),
+    BOOK_KIND_SIMPLE: (REPORT_CASH, REPORT_INCOME, REPORT_RECEIVABLES, REPORT_VAT),
     BOOK_KIND_DOUBLE: (
         REPORT_TRIAL_BALANCE, REPORT_PROFIT_LOSS, REPORT_BALANCE_SHEET,
-        REPORT_STATEMENT,
+        REPORT_STATEMENT, REPORT_VAT,
     ),
 }
 
@@ -156,6 +159,12 @@ REPORT_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("credit", "دائن", CELL_MONEY),
         ("balance", "الرصيد", CELL_MONEY),
     ),
+    REPORT_VAT: (
+        ("kind_label", "نوع الحركة", CELL_TEXT),
+        ("count", "عدد الحركات", CELL_COUNT),
+        ("taxable", "الأساس الخاضع", CELL_MONEY),
+        ("tax", "الضريبة", CELL_MONEY),
+    ),
 }
 
 #: `(مفتاحُ المجموع، تسميتُه)` — بترتيب العرض تحت الجدول.
@@ -202,6 +211,10 @@ REPORT_TOTALS: dict[str, tuple[tuple[str, str], ...]] = {
         ("net", "الصافي"),
         ("closing_balance", "رصيد ختامي"),
     ),
+    REPORT_VAT: (
+        ("taxable", "مجموع الأساس الخاضع"),
+        ("tax", "مجموع الضريبة"),
+    ),
 }
 
 #: ترجمةُ مفتاح المجموع المنطقيّ — لا `True`/`False` على ورقةٍ عربية.
@@ -216,12 +229,13 @@ RECEIVABLES_PERIOD_NOTE = (
 )
 
 #: مفاتيحُ المبالغ في حمولات التقارير — تُقنَّع كلُّها في الصفوف والمجاميع.
+#: و`taxable`/`tax` (#288/ب-٢) مبلغا تقرير ض.ق.م: أساسٌ خاضعٌ وقيمةُ ضريبة.
 REPORT_AMOUNT_KEYS: tuple[str, ...] = (
     "debit", "credit", "balance", "amount", "net",
     "debit_total", "credit_total",
     "opening_balance", "closing_balance",
     "revenue", "expense", "profit", "assets", "liabilities", "equity",
-    "liabilities_and_equity", "difference",
+    "liabilities_and_equity", "difference", "taxable", "tax",
 )
 
 #: أنواعُ الحساب المديّنةُ الطبع — والباقي دائنيّة. القاعدةُ واحدةٌ هنا.
@@ -289,17 +303,36 @@ def _parse_day(raw, field):
         ) from None
 
 
-def period_for(raw_from=None, raw_to=None, *, today=None):
-    """`(from, to)` من معاملَي الطلب — والافتراضُ من بداية السنة إلى اليوم.
+def fiscal_year_start(book, end):
+    """بدايةُ السنة المالية للدفتر التي تنتهي عند `end` أو تسبقه.
 
-    الفترةُ الافتراضيةُ **سنةٌ واحدة** (سنةُ نهاية الفترة، أي الجارية) لا تاريخُ
-    الدفتر كلُّه: عرضٌ افتراضيٌّ مضبوطٌ لا مسحُ عمر. وحدُّ العهد المزدوج **ليس
-    هنا**: تفرضه `_report_span` على تقارير المزدوج وحدها (والميزانيةُ تبدأ منه
-    دائماً)، فلا يُحمَّل هذا المساعدُ قاعدةً ليست له.
+    `fiscal_year_start` على الدفتر «شهر-يوم» (1/1 افتراضاً، #288/ب-٢). فإن وقعت
+    البدايةُ في سنة `end` نفسها **بعد** `end` فالسنةُ الماليةُ بدأت في السنة
+    السابقة — بدأت في تموز ونحن في حزيران. و`book=None` يعني 1/1: الدالةُ تُرى
+    وحدها في الاختبارات وفي نداءٍ بلا دفتر، فلا يلزمها حضورُ كائنٍ ليُعرَف الافتراض.
+    """
+    if book is None:
+        return datetime.date(end.year, 1, 1)
+    month, day = client_books.fiscal_year_start_parts(book.fiscal_year_start)
+    start = datetime.date(end.year, month, day)
+    return start if start <= end else datetime.date(end.year - 1, month, day)
+
+
+def period_for(raw_from=None, raw_to=None, *, book=None, today=None):
+    """`(from, to)` من معاملَي الطلب — والافتراضُ من بداية السنة المالية إلى اليوم.
+
+    الفترةُ الافتراضيةُ **سنةٌ ماليةٌ واحدة** (سنةُ نهاية الفترة، أي الجارية) لا
+    تاريخُ الدفتر كلُّه: عرضٌ افتراضيٌّ مضبوطٌ لا مسحُ عمر. وبدايتُها من
+    `fiscal_year_start` على الدفتر (#288/ب-٢) لا «1 كانون الثاني» المثبَّت — ولا
+    مصدرَ ثانٍ للفترة: هذه الدالةُ وحدها تحلّها، يقرؤها المسارُ المفردُ والمصنَّفُ
+    الكامل.
+
+    وحدُّ العهد المزدوج **ليس هنا**: تفرضه `_report_span` على تقارير المزدوج وحدها
+    (والميزانيةُ تبدأ منه دائماً)، فلا يُحمَّل هذا المساعدُ قاعدةً ليست له.
     """
     today = today or _today()
     end = _parse_day(raw_to, "to") or today
-    start = _parse_day(raw_from, "from") or datetime.date(end.year, 1, 1)
+    start = _parse_day(raw_from, "from") or fiscal_year_start(book, end)
     if start > end:
         raise ValidationError({"from": "بدايةُ الفترة بعد نهايتها — اعكس الطرفين."})
     return start, end
@@ -693,6 +726,47 @@ def _statement(book, span, *, account="", party="", **_):
 
 
 #: باني كل نوعٍ: `(book, span, **params) -> (rows, totals)`.
+def _vat(book, span, **_):
+    """ض.ق.م للفترة: **الضريبةُ المسجَّلةُ على بنود الحركات** مجموعاً بنوع الحركة.
+
+    **ولا نسبةَ حيّة**: العمودان `tax_base`/`tax_amount` كُتبا مع الحركة وقتَ
+    إدخالها وهما ما يُجمع هنا. ضربُ الأساس في نسبة الشركة اليوم كان يُعيد حسابَ
+    إقرار شهرٍ مضى بنسبةٍ لم تكن فيه.
+
+    والصفوفُ **لكل أنواع الحركة** كتقرير القبض/الدفع: صفٌّ يتقلّص يُخفي «لا حركةَ
+    بيعٍ هذا الشهر» ويُوهم بغياب البند. والعدُّ عدُّ حركاتٍ **لها ضريبةٌ مسجَّلة**
+    (أساسٌ أو قيمة) لا عددُ بنود.
+
+    **والحيّةُ وحدها**: حركةٌ عُكست وضرائبُها خارجَ المجموع (`_live_entries`)، فزوجٌ
+    مُلغى يعطي أصفاراً لا ضريبةً مضاعفة.
+    """
+    logged = _period_lines(book, span).exclude(tax_base=0, tax_amount=0)
+    found = {
+        row["entry__kind"]: row
+        for row in logged.values("entry__kind").annotate(
+            count=Count("entry_id", distinct=True),
+            taxable=Sum("tax_base"),
+            tax=Sum("tax_amount"),
+        ).order_by()
+    }
+    rows = []
+    taxable_total = tax_total = _ZERO
+    for kind, label in BOOK_ENTRY_KIND_CHOICES:
+        row = found.get(kind, {})
+        taxable = _zero(row.get("taxable"))
+        tax = _zero(row.get("tax"))
+        taxable_total += taxable
+        tax_total += tax
+        rows.append({
+            "kind": kind,
+            "kind_label": label,
+            "count": row.get("count", 0),
+            "taxable": _money(taxable),
+            "tax": _money(tax),
+        })
+    return rows, {"taxable": _money(taxable_total), "tax": _money(tax_total)}
+
+
 _BUILDERS = {
     REPORT_CASH: _cash,
     REPORT_INCOME: _profit_rows,
@@ -701,6 +775,7 @@ _BUILDERS = {
     REPORT_PROFIT_LOSS: _profit_rows,
     REPORT_BALANCE_SHEET: _balance_sheet,
     REPORT_STATEMENT: _statement,
+    REPORT_VAT: _vat,
 }
 
 
@@ -877,7 +952,9 @@ def report_payload(
     label = REPORT_LABELS.get(kind)
     if label is None:
         raise ValidationError({"kind": "نوع تقرير غير معروف."})
-    span, clipped, note = _report_span(book, kind, period_for(raw_from, raw_to))
+    span, clipped, note = _report_span(
+        book, kind, period_for(raw_from, raw_to, book=book),
+    )
     note = note or _PERIOD_NOTES.get(kind)
     masked = client_books.amounts_masked(book.tenant, user)
     try:

@@ -20,6 +20,7 @@
 import datetime
 from io import BytesIO
 
+from django.core.files.uploadedfile import SimpleUploadedFile
 from openpyxl import load_workbook
 
 from accounting_office.book_reports import WATERMARK
@@ -142,7 +143,10 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         res = self.export()
 
         book = load_workbook(BytesIO(res.content))
-        self.assertEqual(book.sheetnames, ["قبض ودفع", "إيرادات ومصاريف", "ذمم"])
+        self.assertEqual(
+            book.sheetnames,
+            ["قبض ودفع", "إيرادات ومصاريف", "ذمم", "ض.ق.م للفترة"],
+        )
         for sheet in book.worksheets:
             self.assertIn(WATERMARK, sheet_texts(sheet))
 
@@ -274,6 +278,45 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         self.assertFalse(ClientBookReport.objects.exists())
 
     # ── شروطٌ عامّة ───────────────────────────────────────────────────────
+    def test_a_finished_book_refuses_writes_and_keeps_exporting(self):
+        """«صدّر الدفتر كامل» بعد ترك الزبون (#288/ب-٢): قراءةٌ لا كتابة.
+
+        الخدمةُ الموقوفة تُخرج الدفتر من «الحيّ» فلا إدخالَ ولا استيراد — والملفُّ
+        يبقى: هو ما يُسلَّم للزبون عند فراقه.
+        """
+        service = self.mine.services.get(service__code="bookkeeping")
+        service.ends_on = datetime.date(THIS_YEAR - 1, 1, 4)
+        service.save(update_fields=["ends_on"])
+
+        entry = self.client.post(
+            f"{BOOKS}{self.mine.pk}/entries/",
+            {
+                "entry_date": DAY.isoformat(),
+                "kind": "expense",
+                "lines": [{"account_code": "1100", "credit": "5.00"}],
+            },
+            format="json",
+            **self.headers(),
+        )
+        upload = self.client.post(
+            f"{BOOKS}{self.mine.pk}/import/",
+            {"file": SimpleUploadedFile("tree.xlsx", b"not an xlsx at all")},
+            format="multipart",
+            **self.headers(),
+        )
+
+        self.assertEqual(entry.status_code, 400, entry.content)
+        self.assertIn("للقراءة فقط", str(entry.data))
+        self.assertEqual(upload.status_code, 400, upload.content)
+        self.assertIn("للقراءة فقط", str(upload.data))
+
+        res = self.export()
+
+        self.assertEqual(res.status_code, 200, res.content)
+        book = load_workbook(BytesIO(res.content))
+        self.assertEqual(book.sheetnames[-1], "ض.ق.م للفترة")
+        self.assertIn(WATERMARK, sheet_texts(book.active))
+
     def test_another_tenants_book_is_404_on_every_output(self):
         paths = (
             export_url(self.outside, "cash"),

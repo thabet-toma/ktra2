@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1095**
+عدد النقاط: **1098**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -83,12 +83,15 @@
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/reverse/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/import/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/import/template.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/kind/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/print/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/share/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/settings/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/apply-package/` | `OfficeClientViewSet` | `accounting_office/views.py` |

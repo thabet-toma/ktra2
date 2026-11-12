@@ -2953,14 +2953,25 @@ BOOK_ENTRY_KIND_PURCHASE_INVOICE = "purchase_invoice"
 BOOK_ENTRY_KIND_EXPENSE = "expense"
 BOOK_ENTRY_KIND_BANK_MOVEMENT = "bank_movement"
 BOOK_ENTRY_KIND_DAILY_REPORT = "daily_report"
+#: #288/ب-٢: قيدٌ يكتبه إنسانٌ بيده لا ورقةٌ وصلت — **يُقيَّد بدور** المدير/صاحب
+#: المكتب (`client_books.ENTRY_APPROVER_ROLES`)، والقيدُ العاديُّ يبقى بلا دور.
+BOOK_ENTRY_KIND_MANUAL = "manual"
+#: #288/ب-٢: رصيدُ زبونٍ قادمٍ من محاسبٍ آخر — حركةٌ واحدةٌ قبل أوّل حركة، ولا
+#: تُعاد ولا تُعكس بعدها (`client_books.opening_is_locked`).
+BOOK_ENTRY_KIND_OPENING = "opening"
 BOOK_ENTRY_KIND_CHOICES: list[tuple[str, str]] = [
     (BOOK_ENTRY_KIND_SALES_INVOICE, "فاتورة بيع"),
     (BOOK_ENTRY_KIND_PURCHASE_INVOICE, "فاتورة شراء"),
     (BOOK_ENTRY_KIND_EXPENSE, "مصروف"),
     (BOOK_ENTRY_KIND_BANK_MOVEMENT, "حركة بنك"),
     (BOOK_ENTRY_KIND_DAILY_REPORT, "تقرير يومي"),
+    (BOOK_ENTRY_KIND_MANUAL, "يدوي"),
+    (BOOK_ENTRY_KIND_OPENING, "رصيد افتتاحي"),
 ]
 BOOK_ENTRY_KIND_LABELS: dict[str, str] = dict(BOOK_ENTRY_KIND_CHOICES)
+
+#: بدايةُ السنة المالية الافتراضية للدفتر — «شهر-يوم» نصّاً لا تاريخاً بسنةٍ وهمية.
+FISCAL_YEAR_START_DEFAULT = "01-01"
 
 
 def _fill_tenant_from_entry(instance) -> None:
@@ -3088,6 +3099,13 @@ class ClientBook(models.Model):
     وجودُه مشتقٌّ من خدمة مسك الدفاتر لا من حقلٍ هنا، وإيقافُ الخدمة يجعله
     للقراءة وحدها. و`kind_changed_on` يسجّل تاريخَ الانتقال من البسيط إلى
     المزدوج — فحين يتغيّر النوع يبقى معروفاً **من أيّ يوم** صار مزدوجاً.
+
+    **و`fiscal_year_start` و`currency` (#288/ب-٢) صفتان للدفتر لا للشركة**:
+    المكتبُ يمسك دفاترَ منشآتٍ مختلفة السنواتِ والعملات. والأولى «شهر-يوم»
+    نصّاً (`07-01`) لا تاريخاً بسنةٍ وهمية تُقارَن بها الحركات، وتقرؤها الفترةُ
+    الافتراضيةُ للتقارير من مصدرها الواحد (`book_reports.period_for`). والثانيةُ
+    رمزُ ISO 4217 لقطعةٍ تُعرَض على الدفتر — لا تُحوَّل بها المبالغ ولا تُعيد
+    كتابةَ حركةٍ سابقة.
     """
 
     tenant = models.ForeignKey(
@@ -3108,6 +3126,13 @@ class ClientBook(models.Model):
     opened_on = models.DateField(verbose_name="يبدأ في")
     kind_changed_on = models.DateField(
         null=True, blank=True, verbose_name="تغيّر نوعه في",
+    )
+    fiscal_year_start = models.CharField(
+        max_length=5, default=FISCAL_YEAR_START_DEFAULT,
+        verbose_name="بداية السنة المالية",
+    )
+    currency = models.CharField(
+        max_length=3, blank=True, default="", verbose_name="العملة",
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="تاريخ الإنشاء")
 
@@ -3315,6 +3340,12 @@ class BookEntryLine(models.Model):
 
     `side_party` اسمُ الطرف الآخر كما ورد في الورقة («شركة كذا») — لا يُصطنع له
     حسابٌ في شجرة الزبون، ولا يُترك المبلغ بلا قول مَن قابلَه.
+
+    **و`tax_base`/`tax_amount` (#288/ب-٢) الضريبةُ المسجَّلةُ على البند** لا نسبةً
+    تُطبَّق عند القراءة: تقريرُ ض.ق.م للفترة يجمع هذين العمودين، فتغييرُ النسبة
+    اليوم لا يعيد كتابةَ إقرار شهرٍ مضى. والأساسُ عمودٌ ثالثٌ لا اشتقاقٌ من
+    المدين/الدائن: بندٌ معفًى وآخرُ خاضعٌ في الحركة نفسها يعطيان أساساً لا يساوي
+    أيَّ مبلغٍ في البند.
     """
 
     tenant = models.ForeignKey(
@@ -3340,6 +3371,13 @@ class BookEntryLine(models.Model):
     )
     credit = models.DecimalField(
         max_digits=14, decimal_places=2, default=0, verbose_name="دائن",
+    )
+    tax_base = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0,
+        verbose_name="الأساس الخاضع للضريبة",
+    )
+    tax_amount = models.DecimalField(
+        max_digits=14, decimal_places=2, default=0, verbose_name="قيمة الضريبة",
     )
     side_party = models.CharField(
         max_length=200, blank=True, default="", verbose_name="الطرف المقابل",
