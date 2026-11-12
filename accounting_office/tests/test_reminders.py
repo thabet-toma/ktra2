@@ -115,6 +115,10 @@ class RemindersTestCase(TestCase):
         )
         invalidate_module_cache(cls.tenant.pk)
         ready_office(cls.tenant, "IL")
+        # #292: التذكيرُ يُقاس بعدّه ومواعيده ونصِّه لا بحساب ضريبة الورقة — فبلا
+        # ضريبةٍ تبقى مبالغُ هذه الوحدة (400) كما هي. ونظيرُ المسار بالضريبة
+        # مفعّلةً في `test_fee_due_vat.py`، والمطابقةُ الحيّةُ هناك.
+        services.set_office_setting(cls.tenant, "office_licensed_dealer", False)
         cls.catalog = catalog(cls.tenant)
 
     # ── البناء ────────────────────────────────────────────────────────────

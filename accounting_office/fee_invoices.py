@@ -21,7 +21,10 @@
 3. **الإلغاءُ يعيد المسودّةَ مسودّةً** (`approved → draft`) فتُعتمد ثانيةً وتُصدر
    ورقةً جديدةً برقمٍ جديد؛ والصفُّ الملغى يبقى أثراً (`source_draft` FK لا
    `OneToOne`) — وإلا صار الشهرُ لا يُفاتر أبداً: مسودّةٌ معتمدةٌ بلا ورقة،
-   ولا فاتورةَ ثانيةً لمسودّةٍ واحدة، ولا مولّدَ يعيد المسودّة.
+   ولا فاتورةَ ثانيةً لمسودّةٍ واحدة، ولا مولّدَ يعيد المسودّة. **وعكسُ القيد
+   شرطُه**: ورقةٌ عليها تخصيصُ دفعةٍ أو شطبٌ حيّ لا تُلغى (409)، وغيرُ ذلك
+   يُرحَّل عكسُ قيدها (`office_journal.post_invoice_reversal_journal`) بتاريخ
+   الإلغاء — فالقيدُ لا يُحذف ولا يُعدَّل، والذمّةُ تعود كما كانت (#292).
 4. **«ليست فاتورة ضريبية» ثابتة**: `is_tax_invoice` خاصيّةٌ `False` في النموذج لا
    حقلاً، وسطرُ النفي يُصيَّر من `FEE_INVOICE_NOT_TAX_LINES` في كل ورقة — لا
    إعدادَ يُطفئه ولا فرعَ قالبٍ يحذفه.
@@ -63,6 +66,8 @@ from accounting_office.models import (
     FeeDraft,
     FeeInvoice,
     FeeInvoiceSequence,
+    FeePaymentAllocation,
+    FeeWriteOff,
     fee_invoice_credit_series,
     fee_invoice_number,
     fee_invoice_series,
@@ -383,20 +388,41 @@ def ensure_sequence(tenant, *, year) -> FeeInvoiceSequence:
 
 # ── الإلغاء: قبل الإرسال وحده، ويعيد المسودّةَ مسودّةً ────────────────────────
 class LiveCreditNoteConflict(Exception):
-    """إلغاءُ فاتورةٍ لها إشعارٌ دائنٌ حيّ — **تعارضٌ مع حالةٍ قائمة**.
+    """إلغاءُ فاتورةٍ عليها **مستندٌ حيٌّ** يمنع — **تعارضٌ مع حالةٍ قائمة**.
 
     ليس خطأَ مدخلات: الطلبُ صحيحٌ وحقولُه صحيحة، لكنّ صفّاً آخر قائماً يمنع —
-    فيُترجم **409** لا 400. وإلغاءُ الأصل يترك إشعاراً دائناً حيّاً يخصم ورقةً
-    لم تصدر، وهو ما لا يُقرأ في كشف الزبون.
+    فيُترجم **409** لا 400.
+
+    **والاسمُ على أوّل حالةٍ أمسكها (الإشعارُ الدائن)، والصنفُ صار الأصلَ**: الـview
+    يلتقط `LiveCreditNoteConflict` بعينه، والدفعةُ المخصَّصةُ/الشطبُ الحيّ يرثانه
+    (`LiveAllocationConflict`) — فلا نقطةُ التقاطٍ ثانية في `views.py` ولا فرعٌ
+    جديدٌ في الـAPI لكل حالةِ تعارضٍ تُكتشف.
+
+    وإلغاءُ الأصل يترك إشعاراً دائناً حيّاً يخصم ورقةً لم تصدر، وهو ما لا يُقرأ في
+    كشف الزبون.
     """
 
-    def __init__(self, numbers):
+    def __init__(self, numbers=(), *, message=None):
         self.numbers = list(numbers)
-        super().__init__(
-            "للفاتورة إشعارٌ دائنٌ حيّ ("
-            + "، ".join(self.numbers)
-            + "). ألغِ الإشعارَ الدائن أوّلًا ثم ألغِ الفاتورة."
-        )
+        if message is None:
+            message = (
+                "للفاتورة إشعارٌ دائنٌ حيّ ("
+                + "، ".join(self.numbers)
+                + "). ألغِ الإشعارَ الدائن أوّلًا ثم ألغِ الفاتورة."
+            )
+        super().__init__(message)
+
+
+class LiveAllocationConflict(LiveCreditNoteConflict):
+    """على مسودّة الورقة **تخصيصُ دفعةٍ حيّ أو شطبٌ حيّ** — 409 كتعارض الإشعار.
+
+    **ولا حذفَ صامتاً للتخصيص** (#292): الدفعةُ مالٌ قُبض وصفٌّ يُقرأ، وإلغاءُ
+    الفاتورة تحته يُخفيها من «اللي عليه» ومن الرصيد الدائن معاً ويقلب كشفَ الحساب
+    سالباً. فالرسالةُ تسمّي الدفعةَ/الشطبَ وتطلب عكسَه أوّلًا — والإلغاءُ لا يقع.
+    """
+
+    def __init__(self, message):
+        super().__init__(message=message)
 
 
 def _locked(invoice) -> FeeInvoice:
@@ -475,6 +501,48 @@ def _reopen_draft(invoice) -> None:
     ])
 
 
+def _live_settlements(invoice):
+    """تخصيصُ دفعةٍ حيّ أو شطبٌ حيّ على مسودّة الورقة — الأقدمُ أوّلًا.
+
+    **على المسودّة لا على الورقة**: التخصيصُ والشطبُ صفوفٌ على `FeeDraft` (مصدرُ
+    المستحقّ في `payments`)، والورقةُ تمرّ إلى مسودّتها بـ`source_draft`. وللتصحيح
+    (إشعارٍ دائنٍ أو تكميلية) مسودّةٌ فارغةٌ فلا تخصيصَ عليه ولا شطب.
+    """
+    if invoice.source_draft_id is None:
+        return [], []
+    allocations = list(
+        FeePaymentAllocation.objects
+        .filter(draft_id=invoice.source_draft_id)
+        .select_related("payment")
+        .order_by("payment__paid_at", "payment_id"),
+    )
+    write_offs = list(
+        FeeWriteOff.objects
+        .filter(draft_id=invoice.source_draft_id)
+        .order_by("created_at", "id"),
+    )
+    return allocations, write_offs
+
+
+def _settled_conflict_message(invoice, allocations, write_offs) -> str:
+    """رسالةُ 409 التي **تسمّي** الدفعةَ/الشطبَ — لا «تعذّر الإلغاء» مجهولةً.
+
+    أرقامُ الإشعارات تكفي للوصول إلى الدفعة في الشاشة، ومبلغُ كلٍّ منها يمنع
+    الالتباس بين دفعتين في اليوم نفسه.
+    """
+    parts = [
+        f"تخصيصُ دفعة {allocation.payment.receipt_number} "
+        f"بمبلغ {Decimal(allocation.amount):.2f}"
+        for allocation in allocations
+    ]
+    parts += [f"شطبٌ بمبلغ {Decimal(write_off.amount):.2f}" for write_off in write_offs]
+    return (
+        f"لا تُلغى الفاتورة {invoice.number} وعليها "
+        + " و".join(parts)
+        + " — اعكسِ المالَ أوّلًا، أو أصدِر إشعارًا دائنًا بدل الإلغاء."
+    )
+
+
 def cancel_invoice(invoice, *, actor, reason="") -> FeeInvoice:
     """`issued → cancelled` **قبل الإرسال وحده**، والصفُّ يبقى في التاريخ.
 
@@ -482,8 +550,14 @@ def cancel_invoice(invoice, *, actor, reason="") -> FeeInvoice:
     على قرارِ اعتمادٍ سابق، لا كتابةُ زبونٍ — محاسبٌ لا يعتمد لا يُلغي.
 
     **وقبل أيّ كتابة**: ورقةٌ خرجت لا تُلغى، وورقةٌ صدر لها إشعارٌ دائنٌ حيّ لا
-    تُلغى إمّا (`LiveCreditNoteConflict` ⇒ 409) — فلا يبقى تصحيحٌ دائنٌ على
-    أصلٍ ملغى.
+    تُلغى إمّا (`LiveCreditNoteConflict` ⇒ 409)، وورقةٌ عليها **تخصيصُ دفعةٍ أو
+    شطبٌ حيّ** لا تُلغى كذلك (`LiveAllocationConflict` ⇒ 409): مالُ الزبون صفٌّ
+    يُقرأ، ولا يُحذف صامتاً بضغطة إلغاء.
+
+    **والقيدُ يُعكس ولا يُحذف** (#292): بعد اجتياز الحواجز يُرحَّل قيدُ عكسٍ عبر
+    `office_journal.post_invoice_reversal_journal` **قبل** تعليم الصفّ ملغى —
+    وكلُّه في المعاملة نفسها، ففشلُ العكس (فترةٌ مقفلة، حسابٌ معطَّل) يُرجع
+    الإلغاءَ كلَّه: لا ورقةَ ملغاةً وذمّتُها قائمةٌ في الدفاتر.
     """
     fees._assert_approver(invoice.tenant, actor)
     with transaction.atomic():
@@ -509,6 +583,12 @@ def cancel_invoice(invoice, *, actor, reason="") -> FeeInvoice:
         )
         if live_notes:
             raise LiveCreditNoteConflict(live_notes)
+        allocations, write_offs = _live_settlements(invoice)
+        if allocations or write_offs:
+            raise LiveAllocationConflict(
+                _settled_conflict_message(invoice, allocations, write_offs),
+            )
+        office_journal.post_invoice_reversal_journal(invoice, actor=actor)
         invoice.cancelled_at = timezone.now()
         invoice.cancelled_by = actor if getattr(actor, "pk", None) else None
         invoice.cancel_reason = (reason or "").strip()[:300]
@@ -624,11 +704,16 @@ def _issue_correction(invoice, *, actor, kind, amount, reason, day=None) -> FeeI
             issued_by=actor if getattr(actor, "pk", None) else None,
             cancel_reason=(reason or "").strip()[:300],
         )
-        # #284/ب: **الإشعارُ الدائنُ وحدَه يُرحَّل**، عكساً لقيد فاتورته. والتكميليةُ
-        # لا — وهي مطالبةٌ إضافية لم يدخلها مالٌ بعد، وترحيلُها هنا يجعل ذمّةَ
-        # الدفاتر تسبق «اللي عليه» في المكتب بلا مصدرٍ يخصمها.
+        # #284/ب: **الإشعارُ الدائنُ يُرحَّل** عكساً لقيد فاتورته.
+        # #292: **والتكميليةُ كذلك — بقيد الفاتورة نفسِه** (`post_invoice_journal`):
+        # مطالبةٌ إضافيةٌ صادرةٌ كالأصل في بنودها (مدينٌ ذمّةٌ بالإجمالي، دائنٌ
+        # إيرادٌ بالصافي، دائنٌ ض.ق.م بالضريبة)، وكانت تبقى ورقةً مرقَّمةً بلا أثرٍ
+        # محاسبيّ: «اللي عليه» يطلبها وذمّةُ الدفاتر لا تعرفها. والمرجعُ
+        # `(office_fee_invoice, معرّفها)` فلا تكرار (`idempotent`).
         if kind == FEE_INVOICE_KIND_CREDIT_NOTE:
             office_journal.post_credit_note_journal(note, actor=actor)
+        else:
+            office_journal.post_invoice_journal(note, actor=actor)
         return note
 
 

@@ -5,12 +5,16 @@
 الجسرُ بينهما هنا وحده: كلُّ وحدةٍ تنادي دالّةً واحدةً بعد حفظ الصفّ، والـview لا
 يعرف شيئاً عن القيود، والحسابُ يُحلّ من شجرة الشركة لا من قائمةٍ في الكود.
 
-**وأربعةُ قيودٍ، لكلٍّ مرجعُه الخاصّ (idempotent على `(النوع، المعرّف)`):**
+**وخمسةُ قيودٍ، لكلٍّ مرجعُه الخاصّ (idempotent على `(النوع، المعرّف)`):**
 
     فاتورةٌ:  مدينٌ الذمّمُ المدينة        ÷ دائنٌ الإيراد + دائنٌ ض.ق.م المخرجات
     إشعارٌ:   مدينٌ الإيراد + مدينٌ الضريبة ÷ دائنٌ الذمّمُ المدينة
     دفعةٌ:    مدينٌ حسابُ طريقة الدفع      ÷ دائنٌ الذمّمُ المدينة
     شطبٌ:     مدينٌ حسابُ الشطب            ÷ دائنٌ الذمّمُ المدينة
+    إلغاءٌ:   عكسُ قيدِ المستندِ الملغى بالبنود نفسها معكوسةً (#292)
+
+و**التكميليةُ تُرحَّل بقيد الفاتورة نفسِه** (`post_invoice_journal`) لا بقيدٍ منفصل
+لها: هي مطالبةٌ صادرةٌ كالأصل في بنودها، وتفترق عنه في المرجع وحده.
 
 **ووسمُ الطرف على سطر الذمّم وحده** — `accounting/services.py` (`post_journal`)
 يرفض وسمَ طرفٍ على حسابٍ ليس ذمّته، لأن سطرَ صندوقٍ أو إيرادٍ موسومٍ بالطرف يُلغي
@@ -50,7 +54,7 @@ from accounting import api as accounting_api
 from accounting import services as accounting_services
 from accounting_office import services
 from accounting_office import settings_registry
-from accounting_office.models import OfficeClient
+from accounting_office.models import FEE_INVOICE_KIND_CREDIT_NOTE, OfficeClient
 from core.terminology import term as tenant_term
 
 #: مفاتيحُ الإعدادات — **السجلّ هو مصدرها**، وهذه أسماءُ القراءة منها.
@@ -76,6 +80,9 @@ REFERENCE_INVOICE = "office_fee_invoice"
 REFERENCE_CREDIT_NOTE = "office_fee_credit_note"
 REFERENCE_PAYMENT = "office_fee_payment"
 REFERENCE_WRITEOFF = "office_fee_writeoff"
+#: **عكسُ قيدِ مستندٍ أُلغي** — مرجعٌ ثالثٌ لمعرّف الورقة نفسِه، وإلا اصطدم
+#: بالقيد الأصليّ في `idempotent` فلم يُرحَّل عكسٌ أصلاً (#292).
+REFERENCE_INVOICE_CANCEL = "office_fee_invoice_cancel"
 
 
 #: حسابُ المدين لكل طريقة دفع — «بطاقة» تُقبض في البنك لا في الصندوق، والشيكُ
@@ -217,13 +224,20 @@ def _licensed_dealer(tenant) -> bool:
     return fee_invoices.office_is_licensed(tenant)
 
 
-def _tax_account(tenant, tax_total):
+def _tax_account(tenant, tax_total, *, enforce_licence=True):
     """حسابُ ض.ق.م المخرجات أو `None` — **سطرٌ يُزاد أو يُغفل**.
 
     `None` في حالتين لا ثالثة: مكتبٌ غيرُ مشتغلٍ مرخّص، أو ضريبةٌ صفر. فالقيدُ
     يبقى متوازناً في الحالين، وورقةٌ بلا سطر ضريبةٍ لا يُخترع لها سطرٌ في الدفاتر.
+
+    **و`enforce_licence=False` في العكس وحده**: الضريبةُ هناك **مُثبتةٌ على مستندٍ
+    صدر** (لقطةُ `tax_total`)، ومفتاحُ الترخيص قد يكون أُطفئ بعد الإصدار — وإسقاطُ
+    سطرها من العكس يترك مدينَ الإيراد وحدَه في مقابل دائن الذمّة بالإجمالي فلا
+    يتوازن القيدُ أصلاً. فالسطرُ يُعكس لأنّه كُتب، والترخيصُ يحكم الإصدارَ لا العكس.
     """
-    if _money(tax_total) <= ZERO or not _licensed_dealer(tenant):
+    if _money(tax_total) <= ZERO:
+        return None
+    if enforce_licence and not _licensed_dealer(tenant):
         return None
     return _account_by_code(
         tenant,
@@ -356,6 +370,95 @@ def post_credit_note_journal(note, *, actor):
         reference_type=REFERENCE_CREDIT_NOTE,
         reference_id=note.pk,
         description=f"إشعار دائن {note.number} — {client.name}",
+        lines_data=lines_data,
+        user=actor,
+        idempotent=True,
+    )
+
+
+# ── الإلغاء: عكسُ قيدِ المستند الصادر ────────────────────────────────────────
+def _document_reference_type(document) -> str:
+    """مرجعُ **قيد المستند نفسِه** — الإشعارُ الدائنُ على سلسلته، وغيرهما على الفواتير."""
+    return (
+        REFERENCE_CREDIT_NOTE
+        if document.kind == FEE_INVOICE_KIND_CREDIT_NOTE
+        else REFERENCE_INVOICE
+    )
+
+
+def post_invoice_reversal_journal(document, *, actor, day=None):
+    """قيدُ عكسِ مستندٍ صادرٍ أُلغي: **بنودُه نفسُها معكوسةً** (#292).
+
+    فاتورةٌ (أو تكميلية) أُلغيت ⇒ دائنٌ الذمّمُ المدينة بإجماليها بوسم الطرف،
+    مدينٌ الإيرادُ بصافيه وض.ق.م المخرجات بنصيبها. وإشعارٌ دائنٌ أُلغي ⇒ عكسُ
+    عكسِه: مدينٌ الذمّةُ، دائنٌ الإيرادُ والضريبة. فالذمّةُ تعود إلى ما كانت عليه
+    قبل المستند بالضبط، ولا يبقى على الزبون أثرُ ورقةٍ أُلغيت.
+
+    **والتاريخُ يومُ الإلغاء لا يومُ الإصدار**: العكسُ حركةٌ وقعت الآن، وإلحاقُه
+    بفترةٍ قد تكون مقفلةً كان يرفض الإلغاءَ بلا سببٍ يفهمه الموظّف. و`day` تُمرَّر
+    في الاختبار وحده.
+
+    **ولا حذفَ ولا تعديلَ لقيد**: `post_journal` لا يعرف الحذف، وقيدُ الأصل يبقى
+    مرحَّلاً بتاريخه — فالسجلُّ يقول «صدرت ثم أُلغيت» لا «لم تصدر».
+
+    **ولا عكسَ بلا أصل:** مكتبٌ أطفأ الترحيلَ وقتَ الإصدار لا قيدَ لورقته، فعكسٌ
+    يُكتب اليوم يُدائن ذمّاً لم تُدَن (رصيدٌ سالبٌ لا يُقرأ). والفحصُ بمرجع
+    المستند في `accounting` لا بتخمين — والإعدادُ المطفأُ يُصان كما في الإصدار.
+
+    تُعيد القيدَ (قائماً إن كان `idempotent`)، أو `None` حين يكون الترحيلُ مطفأً
+    أو لا قيدَ أصليّاً. والنداءُ الثاني لا يقع أصلاً: `cancel_invoice` يرفض الملغاة.
+    """
+    tenant = document.tenant
+    if not journaling_enabled(tenant):
+        return None
+    original = accounting_api.posted_journal_ids_by_reference(
+        _tenant_id(tenant), _document_reference_type(document), [document.pk],
+    )
+    if not original:
+        return None
+    total = _money(document.total)
+    if total <= ZERO:
+        return None
+    client = document.client
+    partner = partner_for(client)
+    receivable_account = _account(tenant, RECEIVABLE_ACCOUNT_KEY)
+    revenue_account = _account(tenant, REVENUE_ACCOUNT_KEY)
+    net = _money(document.net_total)
+    tax_total = _money(document.tax_total)
+    # الإشارةُ من نوع المستند: عكسُ الإشعار الدائن مدينٌ للذمّة، وعكسُ الفاتورة دائنٌ لها.
+    credit_note = document.kind == FEE_INVOICE_KIND_CREDIT_NOTE
+    label = "إشعار دائن" if credit_note else tenant_term(tenant, "doc.sales_invoice")
+    lines_data = [
+        {
+            "account": receivable_account.pk,
+            "debit": total if credit_note else ZERO,
+            "credit": ZERO if credit_note else total,
+            "partner": partner.pk,
+            "description": f"عكس ذمّة {client.name} — إلغاء {label} {document.number}",
+        },
+        {
+            "account": revenue_account.pk,
+            "debit": ZERO if credit_note else net,
+            "credit": net if credit_note else ZERO,
+            "partner": None,
+            "description": f"عكس إيراد — إلغاء {label} {document.number}",
+        },
+    ]
+    tax_account = _tax_account(tenant, tax_total, enforce_licence=False)
+    if tax_account is not None:
+        lines_data.append({
+            "account": tax_account.pk,
+            "debit": ZERO if credit_note else tax_total,
+            "credit": tax_total if credit_note else ZERO,
+            "partner": None,
+            "description": f"عكس ضريبة مخرجات — إلغاء {label} {document.number}",
+        })
+    return accounting_services.post_journal(
+        tenant_id=_tenant_id(tenant),
+        transaction_date=day or timezone.localdate(),
+        reference_type=REFERENCE_INVOICE_CANCEL,
+        reference_id=document.pk,
+        description=f"إلغاء {label} {document.number} — {client.name}",
         lines_data=lines_data,
         user=actor,
         idempotent=True,
