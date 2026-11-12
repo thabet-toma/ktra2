@@ -495,6 +495,25 @@ def role_default_permissions(role: str, tenant=None) -> frozenset:
     return frozenset(granted) & permission_keys(tenant)
 
 
+def office_role_keys() -> frozenset[str]:
+    """الأدوارُ التي تنتمي إلى مكتب المحاسبة — **مشتقّةٌ من `ROLE_DEFAULTS`**.
+
+    «له دورُ مكتب» يعني أن الدورَ يمنح مفتاحاً واحداً على الأقلّ من مفاتيح
+    المكتب (`OFFICE_PERMISSION_KEYS`)؛ والمديرُ يملكها كلَّها بـ«*». فالاشتقاقُ
+    هنا لا قائمةٌ ثانيةٌ في الموديول تفترق عن المصفوفة عند أوّل مفتاحٍ يُضاف.
+
+    ولذلك دورٌ جديدٌ يُمنح `office.*` يدخل الجدولَ تلقائياً، ودورٌ يُجرَّد منها
+    يخرج — بلا تعديلٍ في موضعٍ ثانٍ.
+    """
+    return frozenset(
+        role for role, granted in ROLE_DEFAULTS.items()
+        if granted == "*" or (
+            isinstance(granted, (set, frozenset))
+            and bool(granted & OFFICE_PERMISSION_KEYS)
+        )
+    )
+
+
 def user_ui_mode(user, tenant) -> str:
     """THA-110: وضع عرض الواجهة لهذا المستخدم في هذه الشركة.
 

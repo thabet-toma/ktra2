@@ -14,6 +14,7 @@ from accounting_office.views import (
     OfficeClientViewSet,
     OfficeContactViewSet,
     OfficeCustomRuleViewSet,
+    OfficeDashboardViewSet,
     OfficeDeadlineRuleViewSet,
     OfficeDocumentFileViewSet,
     OfficeDocumentItemViewSet,
@@ -58,6 +59,10 @@ router.register(
 )
 # #275: شاشةُ «اليوم» (تُشغّل التحديث اليوميّ أوّلاً) وأفعالُ الالتزامات والشغلات.
 router.register("today", OfficeTodayViewSet, basename="accounting-office-today")
+# #289: لوحةُ صاحب المكتب — قراءةٌ واحدة، **دورٌ لا مفتاح** (المحاسب 403).
+router.register(
+    "dashboard", OfficeDashboardViewSet, basename="accounting-office-dashboard",
+)
 # #281: المواعيد — حجزٌ وأفعالُه (تأكيد/تأجيل/إلغاء/«صار»)، بلا حذف ولا تعديلٍ
 # جزئيّ. مسارُها جمعُها لأن الفعل يقع على الموعد نفسه (`appointments/<pk>/confirm/`).
 router.register(

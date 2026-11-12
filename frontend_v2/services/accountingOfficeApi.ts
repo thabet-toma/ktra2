@@ -39,6 +39,7 @@ import type {
   ClientTaskRow,
   ClientServiceRow,
   ClientServicesPayload,
+  DashboardPayload,
   DeadlineRuleOverrideRow,
   DeadlineRuleRow,
   DocumentFileRow,
@@ -94,6 +95,11 @@ export type {
   DocumentProgress,
   DocumentRetentionRow,
   DocumentRowPayload,
+  DashboardPayload,
+  DashboardStaffRow,
+  DashboardThresholds,
+  DashboardWaiting,
+  DashboardWaitingGroup,
   EventKindChoice,
   ObligationBadge,
   ObligationRow,
@@ -418,6 +424,8 @@ export interface ClientSettingsPayload {
 export interface OfficeClientListFilters {
   q?: string;
   status?: 'active' | 'ended' | 'all';
+  /** #289: زبائنُ موظّفٍ واحد — كبسةُ صفّه في لوحة صاحب المكتب. */
+  responsible?: number;
 }
 
 export const listOfficeClients = (
@@ -428,6 +436,7 @@ export const listOfficeClients = (
     query: {
       q: filters.q?.trim() || undefined,
       status: filters.status ?? undefined,
+      responsible: filters.responsible ?? undefined,
     },
   });
 
@@ -455,9 +464,16 @@ export const reactivateOfficeClient = (id: number): Promise<OfficeClientRow> =>
 /**
  * تحويلُ الزبون لموظّفٍ آخر (#272) — يتطلّب `office.clients.assign` خادمياً،
  * ويُسجَّل الحدثُ في سجلّ النشاط (من ← إلى). والقراءةُ من `responsible_name`.
+ *
+ * **و`responsible` اسمُ الحقل** (#289) كاسم عمود النموذج؛ والخادمُ يقبل `user`
+ * القديم بعده كي لا ينكسر عميلٌ قائم. والموظفُ الجديد عضوٌ بدور مكتبٍ وإلا 400.
  */
 export const assignOfficeClient = (id: number, userId: number): Promise<OfficeClientRow> =>
-  apiPostObject<OfficeClientRow>(`${CLIENTS}${id}/assign/`, { user: userId }, tenantOpts());
+  apiPostObject<OfficeClientRow>(
+    `${CLIENTS}${id}/assign/`,
+    { responsible: userId },
+    tenantOpts(),
+  );
 
 /** أعضاء المكتب — المصدرُ الوحيد لمنتقي «حوّل» وقسم «الموظفون والأدوار». */
 export const listOfficeMembers = (): Promise<OfficeMemberRow[]> =>
@@ -691,6 +707,30 @@ export const getOfficeToday = (filter: TodayFilter = ''): Promise<TodayPayload> 
     ...tenantOpts(),
     query: { filter: filter || undefined },
   });
+
+// ── لوحة صاحب المكتب (#289) ─────────────────────────────────────────────
+//
+// **دورٌ لا مفتاح**: المحاسبُ يأخذ 403 من الخادم، والشاشةُ تُظهر رسالتَه كما هي
+// (`humanizeThrown`) — لا تُخفي الصفحةَ ولا تدّعي أنها لك.
+const DASHBOARD = `${BASE}dashboard/`;
+
+export const getOfficeDashboard = (): Promise<DashboardPayload> =>
+  apiGetObject<DashboardPayload>(DASHBOARD, tenantOpts());
+
+/** ردُّ «اعتمد الكل» — الشاشةُ تقرأ `approved` وحدَه، والباقي حمولةُ النقطة القائمة. */
+export interface ApproveAllFeeDraftsResult {
+  approved: number;
+  remaining: number;
+  drafts: unknown[];
+}
+
+/** «اعتمد الكل» على المسودّات المنتظرة — **النقطةُ القائمة** نفسُها لا نسخةً. */
+export const approveAllFeeDrafts = (note = ''): Promise<ApproveAllFeeDraftsResult> =>
+  apiPostObject<ApproveAllFeeDraftsResult>(
+    `${BASE}fees/drafts/approve-all/`,
+    note ? { note } : {},
+    tenantOpts(),
+  );
 
 export const submitObligation = (
   id: number,

@@ -169,6 +169,9 @@ export const VIEW_MODULES: Record<string, string> = {
   "employee-ops-hiring": "employee_ops",
   // ISSUE #271 — مكتب المحاسبة: نفس عقد employee_ops (404 خادمياً من
   // `require_module`)، وبلا ترخيص لا يُطلب chunk الشاشة.
+  // #289: لوحةُ صاحب المكتب — ترخيصُ الوحدة وحده؛ **الدورُ** (مالك) يحرسها في
+  // الخادم والموجّه، فلا مفتاحَ صلاحيةٍ لها كي لا يظهر رابطٌ يعده الخادمُ بـ403.
+  "office-dashboard": "accounting_office",
   "office-today": "accounting_office",
   "office-ready-to-send": "accounting_office",
   "office-clients": "accounting_office",

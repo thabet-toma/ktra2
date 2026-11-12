@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1098**
+عدد النقاط: **1099**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -120,6 +120,7 @@
 | `/api/accounting-office/contacts/{pk}/consent/` | `OfficeContactViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/custom-rules/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/custom-rules/{pk}/` | `OfficeCustomRuleViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/dashboard/` | `OfficeDashboardViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/clear-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/deadline-rules/keep-override/` | `OfficeDeadlineRuleViewSet` | `accounting_office/views.py` |

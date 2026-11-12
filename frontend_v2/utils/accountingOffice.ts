@@ -2274,3 +2274,92 @@ export function pendingEntryClientCount(
 ): number {
   return new Set(rows.map((row) => row.client_id)).size;
 }
+
+// ── لوحة صاحب المكتب (#289) ────────────────────────────────────────────────
+//
+// **كلُّ رقمٍ من الخادم**: `due_total` مجموعُ «اللي عليه» من الدالّة الواحدة،
+// و`late_total` و`red` محسوبان هناك — والواجهةُ ترسم ولا تعيد الحساب. والقناعُ
+// يصل بـ`due_total: null` فيُعرض «—» بـ`formatMoney(value, '—')`.
+
+/** مسار شاشة لوحة صاحب المكتب — مصدرٌ واحدٌ للموجّه والقائمة. */
+export const OFFICE_DASHBOARD_PATH = '/accounting-office/dashboard';
+
+/** صفُّ موظّفٍ في جدول اللوحة — `red` قرارُ الخادم لا شرطٌ هنا. */
+export interface DashboardStaffRow {
+  id: number;
+  name: string;
+  clients: number;
+  late: number;
+  missing_docs: number;
+  overdue_clients: number;
+  red: boolean;
+}
+
+/**
+ * مجموعةُ «بانتظارك»: `count` من الخادم، و`action` مفتاحٌ تربطه الشاشة بفعلها.
+ * المجموعةُ الفارغة لا تُرسَل أصلاً — الشاشةُ لا تعرض صفراً ثلاث مرّات.
+ */
+export interface DashboardWaitingGroup {
+  kind: string;
+  label: string;
+  count: number;
+  action: string;
+}
+
+export interface DashboardWaiting {
+  total: number;
+  groups: DashboardWaitingGroup[];
+}
+
+/** العتبتان كما تُقرآن من السجلّ — للعرض، والاحمرارُ محسوبٌ في الخادم. */
+export interface DashboardThresholds {
+  late_share_percent: number;
+  late_ratio: string;
+  office_average_late: string;
+}
+
+export interface DashboardPayload {
+  day: string;
+  /** مجموعُ «اللي عليه» — `null` لمن لا يملك `office.amounts.view`. */
+  due_total: string | null;
+  late_total: number;
+  staff: DashboardStaffRow[];
+  waiting: DashboardWaiting;
+  single_person: boolean;
+  thresholds: DashboardThresholds;
+}
+
+/** أفعالُ مجموعات «بانتظارك» — مفاتيحُ يرسلها الخادم، والشاشةُ تعرف ثلاثتها. */
+export const DASHBOARD_ACTION_APPROVE_ALL = 'approve_all';
+export const DASHBOARD_ACTION_OPEN_READY_TO_SEND = 'open_ready_to_send';
+export const DASHBOARD_ACTION_OPEN_DEADLINE_RULES = 'open_deadline_rules';
+
+/**
+ * شرحُ عتبة الاحمرار كما يراه صاحبُ المكتب — من أرقام الخادم وحدها.
+ *
+ * ولا رقمَ مكتوبٌ هنا: تغييرُ العتبة في الإعدادات يغيّر النصَّ معه، وإلا قرأ
+ * المكتبُ «20٪» وهو يعمل بـ5.
+ */
+export function dashboardThresholdHint(thresholds: DashboardThresholds): string {
+  return (
+    `الصفُّ يحمرّ حين يبلغ متأخّرُ الموظف ${thresholds.late_share_percent}٪ من زبائنه، `
+    + `أو ${thresholds.late_ratio}× متوسط المكتب (${thresholds.office_average_late}).`
+  );
+}
+
+/** اسمُ معامل العنوان الذي يقيّد قائمةَ الزبائن بمسؤولٍ واحد. */
+export const RESPONSIBLE_QUERY_PARAM = 'responsible';
+
+/** رابطُ قائمة الزبائن مقيَّدةً بموظّفٍ واحد — كبسةُ صفّه في اللوحة. */
+export function clientsOfResponsiblePath(responsibleId: number): string {
+  return `${OFFICE_CLIENTS_PATH}?${RESPONSIBLE_QUERY_PARAM}=${responsibleId}`;
+}
+
+/** معرّفُ المسؤول من نصّ العنوان — `null` للغياب أو لغير الرقم. */
+export function responsibleFromSearch(search: string): number | null {
+  const value = new URLSearchParams(search.startsWith('?') ? search : `?${search}`)
+    .get(RESPONSIBLE_QUERY_PARAM);
+  if (!value) return null;
+  const id = Number(value);
+  return Number.isInteger(id) && id > 0 ? id : null;
+}

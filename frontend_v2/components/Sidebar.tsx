@@ -19,7 +19,7 @@ import {
   Gauge, Radar, TableProperties, ShieldAlert, Wrench, Store, Sparkles, LayoutGrid,
   PlayCircle, Network, Fingerprint, CalendarCheck, Inbox, FileSignature, Layers,
   Briefcase as BriefcaseIcon, LifeBuoy, BadgeCheck, ScrollText, UserCog, HeartPulse,
-  Send,
+  Send, LayoutDashboard,
 } from 'lucide-react';
 import { useLocation, useNavigate } from "react-router-dom";
 import { openInNewTab } from "../utils/openInNewTab";
@@ -370,6 +370,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
     // ISSUE #271 — شاشتان لا تظهران في أيّ مصفوفةٍ يدوية أعلاه (بيانهما وحده
     // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
     // ISSUE #275 — «اليوم» أوّلُ شاشات المكتب: ما حان وقتُه من التزاماتٍ وشغلات.
+    // #289: لوحةُ صاحب المكتب — بندٌ بعد شاشتَي العمل، و`managerOnlyViews` أعلاه
+    // يخفيه عن غير المالك (كما يخفي «الرئيسية» و«دفاتر عملائي»).
+    "office-dashboard": { label: "لوحة المكتب", icon: <LayoutDashboard className="h-4 w-4" /> },
     "office-today": { label: "اليوم", icon: <CalendarCheck className="h-4 w-4" /> },
     // #280/ب — «جاهز للإرسال»: ما حان إرسالُه اليوم لزبائن المكتب.
     "office-ready-to-send": { label: "جاهز للإرسال", icon: <Send className="h-4 w-4" /> },
@@ -386,7 +389,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   });
   // «الرئيسية» و«دفاتر عملائي» كانتا مقصورتين على المدير بلا مدخل في كتالوج
   // الصلاحيات — القاعدة نفسها هنا كي لا تنقلب متاحةً للجميع بمجرّد دخولها البيان.
-  const shellSections = buildShellSections(shell, template, modules, can, user.role, ["dashboard", "client-books"], isManager);
+  const shellSections = buildShellSections(shell, template, modules, can, user.role, ["dashboard", "client-books", "office-dashboard"], isManager);
   // الإعدادات تظهر مرّةً: إن كانت مجموعةً في البيان (دفتر عميل) لا تتكرّر كزرٍّ
   // عامٍّ أسفل القائمة.
   const manifestCoversSettings = shellSections.some((g) => g.views.includes("settings"));

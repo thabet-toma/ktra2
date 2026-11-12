@@ -13,6 +13,7 @@ import {
   clientIdFromSearch,
   clientStatusBadgeClass,
   officeSizeOf,
+  responsibleFromSearch,
   showsOfficeAssignment,
 } from '../../utils/accountingOffice';
 import { humanizeThrown } from '../../utils/drfError';
@@ -62,6 +63,8 @@ export const OfficeClientsScreen: React.FC = () => {
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [status, setStatus] = useState<StatusFilter>('active');
   const selectedId = clientIdFromSearch(`?${searchParams.toString()}`);
+  // #289: القائمةُ قد تُفتح مقيَّدةً بموظّفٍ واحد — من كبسة صفّه في لوحة المكتب.
+  const responsible = responsibleFromSearch(`?${searchParams.toString()}`);
   const [adding, setAdding] = useState(false);
   const [newName, setNewName] = useState('');
   const [newFileNumber, setNewFileNumber] = useState('');
@@ -94,7 +97,7 @@ export const OfficeClientsScreen: React.FC = () => {
     let cancelled = false;
     setLoading(true);
     setError('');
-    listOfficeClients({ q: debouncedSearch, status })
+    listOfficeClients({ q: debouncedSearch, status, responsible: responsible ?? undefined })
       .then((rows) => {
         if (!cancelled) setClients(rows);
       })
@@ -107,7 +110,7 @@ export const OfficeClientsScreen: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, [debouncedSearch, status, settings?.first_run_required, refreshToken]);
+  }, [debouncedSearch, status, responsible, settings?.first_run_required, refreshToken]);
 
   const retryClients = useCallback(() => {
     setRefreshToken((token) => token + 1);
@@ -255,6 +258,17 @@ export const OfficeClientsScreen: React.FC = () => {
               </button>
             ))}
           </div>
+          {/* #289: القائمةُ مقيَّدةٌ بموظّفٍ واحد — من لوحة صاحب المكتب. الكبسةُ
+              تُزيل القيدَ وتبقى في القائمة نفسها (لا تعود إلى اللوحة). */}
+          {responsible !== null ? (
+            <button
+              type="button"
+              onClick={() => setSearchParams({})}
+              className="rounded-full border border-teal-200 bg-teal-50 px-2.5 py-1 text-[11px] font-semibold text-teal-800 hover:bg-teal-100 dark:border-teal-900 dark:bg-teal-950/40 dark:text-teal-300"
+            >
+              زبائن موظّفٍ واحد ✕
+            </button>
+          ) : null}
         </div>
       </header>
 
