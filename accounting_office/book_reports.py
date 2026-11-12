@@ -814,9 +814,10 @@ class _LineTax:
     """شكلُ السطر الذي تقرؤه `_recognised_input` **قبل أن يُحفظ السطر**.
 
     `paper_input_tax` تبنيها من الحساب والضريبة وحدهما: بنودُ الورقة تُولَّد
-    كقواميس ثم تمرّ بـ`_prepare_lines`، فلا كائنَ `BookEntryLine` بعد. ونسبةُ
-    السطر المولَّد غائبةٌ دائماً (`client_books._entry_line` لا يكتبها) فالنسبةُ
-    من الحساب — كالسطر المحفوظ نفسه.
+    كقواميس ثم تمرّ بـ`_prepare_lines`، فلا كائنَ `BookEntryLine` بعد. فنسبتُه
+    هنا غائبةٌ والنسبةُ من الحساب **وقتَ التوليد** — وهي نفسُها التي يكتبها
+    `client_books` على السطر الحامل للضريبة (`paper_input_rate`)، فالسطرُ المحفوظ
+    يحمل نسبةَ التوليد ويقرؤها `_recognised_input` منه لا من الحساب بعدها.
     """
 
     __slots__ = ("tax_amount", "vat_rate", "account")
@@ -825,6 +826,23 @@ class _LineTax:
         self.tax_amount = tax_amount
         self.vat_rate = vat_rate
         self.account = account
+
+
+def paper_input_rate(book, *, account, context=None) -> tuple[Decimal, bool]:
+    """`(نسبةُ الاعتراف، راجع؟)` لحسابٍ مدين وقتَ توليد حركةٍ من ورقة.
+
+    القاعدةُ نفسُها `book_rates.recognised_vat_rate` التي تقرؤها `_recognised_input`
+    — ومنها تُكتب النسبةُ على السطر المولَّد فتُجمَّد، ويُرفض التوليدُ حين تكون
+    «راجع» (`(0, True)`) فلا يُجمَّد قرارٌ لم يُتَّخذ. و`context` كما في
+    `paper_input_tax`.
+    """
+    from accounting_office import book_rates
+
+    system, overrides = context if context is not None else _vat_rate_context(book)
+    return book_rates.recognised_vat_rate(
+        _LineTax(tax_amount=_ZERO, vat_rate=None, account=account),
+        tenant=book.tenant, tax_system=system, overrides=overrides,
+    )
 
 
 def paper_input_tax(book, *, account, tax_amount, context=None) -> tuple[Decimal, Decimal]:

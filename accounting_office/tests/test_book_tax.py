@@ -33,10 +33,13 @@ from rest_framework.test import APITestCase
 
 from accounting_office import book_rates, book_reports, client_books, services
 from accounting_office.models import (
+    BOOK_ENTRY_KIND_PURCHASE_INVOICE,
     BOOK_KIND_DOUBLE,
+    BOOK_KIND_SIMPLE,
     RATE_KIND_DEPRECIATION,
     RATE_KIND_INCOME,
     RATE_KIND_VAT,
+    BookEntry,
     BookExpenseRate,
     BookExpenseRateChange,
     BookPeriodLock,
@@ -45,6 +48,10 @@ from accounting_office.models import (
     DeadlineRule,
     Obligation,
     PeriodTask,
+)
+from accounting_office.tests.test_book_entry_generation import (
+    BookEntryGenerationTestCase,
+    money,
 )
 from accounting_office.tests.test_client_books import (
     make_client,
@@ -1274,3 +1281,147 @@ class AnnualThresholdsTestCase(APITestCase):
         self.assertEqual(res.status_code, 200, res.content)
         self.assertTrue(res.data["annual_alerts"]["any_exceeded"])
         self.assertEqual(res.data["annual_alerts"]["year"], THIS_YEAR)
+
+
+class GeneratedLineRateTestCase(BookEntryGenerationTestCase):
+    """نسبةُ الخصم **تُجمَّد في السطر المولَّد** (#287/٢ — جولة التصليح الثانية).
+
+    القيدُ المولَّد يُقيِّد على `2200` المعترفَ به وقتَ التوليد ويزيد المصروفَ
+    بالباقي. لو بقي السطرُ بلا نسبةٍ لقرأ `book_rates.recognised_vat_rate`
+    **نسبةَ الحساب الآن**: تصنيفُ الحساب بنقرةٍ بعد التوليد يُفرّق تقريرَ ض.ق.م
+    وحسابَ مبلغ الالتزام عن الدفتر الذي لم يتغيّر، فيؤكّد المكتبُ رقماً لا يطابق
+    قيداً. وحسابٌ نسبتُه «راجع» لا يُجمَّد له قرارٌ لم يُتَّخذ.
+    """
+
+    FROM = datetime.date(THIS_YEAR, 1, 1)
+    TO = datetime.date(THIS_YEAR, 12, 31)
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        seed_platform_rates()
+
+    def account(self, client, code):
+        return ClientBookAccount.objects.get(client=client, code=code)
+
+    def vat_report(self, client):
+        res = self.client.get(
+            f"{BOOKS}{client.pk}/reports/vat/",
+            {"from": self.FROM.isoformat(), "to": self.TO.isoformat()},
+            **self.headers(),
+        )
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data["totals"]
+
+    def vat_from_book(self, client):
+        return book_reports.vat_from_book(
+            client.book, period_start=self.FROM, period_end=self.TO,
+        )
+
+    def purchase(self, client, *, tax="170", expect=201):
+        paper = self.paper(
+            amount="1000", tax=tax, party="مورد الأثاث", client=client,
+        )
+        return self.generate(
+            [paper], kind=BOOK_ENTRY_KIND_PURCHASE_INVOICE, client=client,
+            expect=expect,
+        )
+
+    def test_reclassifying_the_account_after_generation_does_not_move_the_vat(self):
+        """السيناريو ١: الدفترُ على 170 في `2200` فالتقريرُ والمبلغُ على 170 لا 113.33.
+
+        الحسابُ 100% وقتَ التوليد ⇒ `2200` مدينٌ 170 والمصروفُ 1000. ثم يُصنَّف
+        الحسابُ 2/3: السطرُ المحفوظ يحمل نسبةَ **التوليد** فيبقى «معترفٌ 170 وغيرُ
+        مخصومٍ صفر»، مطابقاً لِما في الدفتر.
+        """
+        services.set_office_setting(self.tenant, client_books.LINE_RATE_KEY, False)
+        entry = self.purchase(self.mine)
+        lines = self.lines_by_code(entry)
+        self.assertEqual(money(lines["2200"], "debit"), Decimal("170.00"))
+        self.assertEqual(money(lines["5200"], "debit"), Decimal("1000.00"))
+
+        client_books.set_account_rates(
+            self.account(self.mine, "5200"), tenant=self.tenant, vat_rate="66.6667",
+        )
+
+        report = self.vat_report(self.mine)
+        self.assertEqual(report["input_tax"], "170.00")
+        self.assertEqual(report["recognised_input"], "170.00")
+        self.assertEqual(report["non_deductible"], "0.00")
+        self.assertEqual(report["tax_due"], "-170.00")
+        amount = self.vat_from_book(self.mine)
+        self.assertEqual(amount["recognised_input"], "170.00")
+        self.assertEqual(amount["non_deductible"], "0.00")
+        self.assertEqual(amount["vat_due"], "-170.00")
+        self.assertEqual(amount["review_lines"], 0)
+
+    def test_the_rate_is_written_on_the_tax_carrying_line_without_the_override_setting(self):
+        """النسبةُ تُكتب على سطر الوعاء الحامل للضريبة، والإعدادُ مطفأٌ ولا سببَ بشريّ.
+
+        `book_line_rate_override` حارسُ تعديل **المستخدم**؛ هذه نسبةٌ كتبها النظام.
+        والسطرُ الآخرُ (`2200`، الذمم) بلا نسبة.
+        """
+        client_books.set_account_rates(
+            self.account(self.mine, "5200"), tenant=self.tenant, vat_rate="66.6667",
+        )
+
+        entry = self.purchase(self.mine)
+
+        lines = self.lines_by_code(entry)
+        self.assertEqual(lines["5200"]["vat_rate"], "66.6667")
+        self.assertTrue(lines["5200"]["vat_rate_reason"])
+        self.assertIsNone(lines["2200"]["vat_rate"])
+        self.assertIsNone(lines["2100"]["vat_rate"])
+
+    def test_the_same_freeze_holds_in_a_simple_book(self):
+        """البسيطُ: السطرُ الحاملُ للضريبة يُجمَّد بنسبته، والتقريرُ لا يتبع الحساب بعدها."""
+        simple = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبونٌ بسيط للنسبة", responsible=self.accountant,
+        )
+        self.create_book(simple, kind=BOOK_KIND_SIMPLE)
+        self.purchase(simple)
+
+        client_books.set_account_rates(
+            self.account(simple, "5200"), tenant=self.tenant, vat_rate="66.6667",
+        )
+
+        amount = self.vat_from_book(simple)
+        self.assertEqual(amount["recognised_input"], "170.00")
+        self.assertEqual(amount["non_deductible"], "0.00")
+        report = self.vat_report(simple)
+        self.assertEqual(report["recognised_input"], "170.00")
+        self.assertEqual(report["non_deductible"], "0.00")
+
+    def test_a_review_account_refuses_generation_and_names_the_account(self):
+        """السيناريو ٢: نسبةٌ «راجع» ⇒ 400 يسمّي الحسابَ ولا حركةَ تُحفظ.
+
+        بلا هذا تُقيَّد الضريبةُ كلُّها كلفةً بلا `2200` (يُعترف بصفرٍ)، ثم يؤكّد
+        المكتبُ النسبةَ فيخصم الإقرارُ ما قيّده الدفترُ مصروفاً.
+        """
+        client_books.set_account_rates(
+            self.account(self.mine, "5200"), tenant=self.tenant,
+            rate_category="dual_use",
+        )
+        account = self.account(self.mine, "5200")
+
+        refused = self.purchase(self.mine, expect=400)
+
+        message = str(refused)
+        self.assertIn(account.name, message)
+        self.assertIn(account.code, message)
+        self.assertIn("«راجع»", message)
+        self.assertIn("تأكيد نسبته أوّلاً", message)
+        self.assertFalse(BookEntry.objects.filter(client=self.mine).exists())
+
+    def test_a_review_account_without_tax_is_not_refused(self):
+        """لا ضريبةَ فلا قرارَ يُجمَّد: الرفضُ على ضريبةٍ تُقسم لا على الحساب نفسه."""
+        client_books.set_account_rates(
+            self.account(self.mine, "5200"), tenant=self.tenant,
+            rate_category="dual_use",
+        )
+
+        entry = self.purchase(self.mine, tax="0")
+
+        self.assertEqual(len(entry["lines"]), 2)
+        self.assertIsNone(self.lines_by_code(entry)["5200"]["vat_rate"])

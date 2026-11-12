@@ -807,8 +807,24 @@ def _prepare_lines(client, lines, *, allow_rate_override=False) -> list[dict]:
     return prepared
 
 
+#: مفتاحُ بندٍ **داخليٌّ** يحمل نسبةً كتبها النظام لا المستخدم (`_entry_line`).
+#: كائنٌ لا نصّ: لا يُنتجه JSON فلا يصل إليه الـAPI، فلا يُفتح به بابٌ حول
+#: `book_line_rate_override` — ذاك الإعدادُ حارسُ تعديل **المستخدم** وحده.
+_SYSTEM_VAT_RATE = object()
+
+#: سببُ النسبة التي يكتبها النظام — يُحفظ معها كي لا يبقى السطرُ بنسبةٍ بلا تفسير.
+SYSTEM_RATE_REASON = "نسبةُ الحساب وقتَ التوليد"
+
+
 def _line_rate(raw, *, where, allowed) -> tuple[Decimal | None, str]:
-    """نسبةُ السطر إن أُرسلت — بإعدادٍ مفعّلٍ وسببٍ مكتوب، وإلا `(None, "")`."""
+    """نسبةُ السطر إن أُرسلت — بإعدادٍ مفعّلٍ وسببٍ مكتوب، وإلا `(None, "")`.
+
+    **ونسبةُ النظام** (`_SYSTEM_VAT_RATE`، من مولّد الورق) تُكتب كما هي بسببها
+    الثابت ولا تخضع للإعداد: لم يخالف بها أحدٌ حسابَه، بل جُمّدت نسبتُه.
+    """
+    system_rate = raw.get(_SYSTEM_VAT_RATE)
+    if system_rate is not None:
+        return Decimal(system_rate).quantize(book_rates.RATE_QUANTUM), SYSTEM_RATE_REASON
     raw_rate = raw.get("vat_rate")
     reason = (raw.get("rate_reason") or raw.get("vat_rate_reason") or "").strip()
     if raw_rate in (None, ""):
@@ -1074,15 +1090,19 @@ DOCUMENT_VALUE_FIELDS: tuple[str, ...] = (
 
 
 def _entry_line(
-    account_code, *, debit=0, credit=0, tax_base=0, tax_amount=0,
+    account_code, *, debit=0, credit=0, tax_base=0, tax_amount=0, vat_rate=None,
 ) -> dict:
     """بندُ حركةٍ بالشكل الذي يقرؤه `_prepare_lines` — **كوداً لا كائناً**.
 
     الحسابُ يبقى كوداً كي تمرّ الحركةُ كلُّها من `_prepare_lines`: حارسُ «لا
     حسابَ بهذا الكود» ومعه قناعُ المبالغ في موضعٍ واحدٍ، كما في القيد اليدوي.
-    ولا نسبةَ على السطر هنا: مولّدُ الورق لا يكتب نسبةً أصلاً.
+
+    **و`vat_rate` نسبةُ الاعتراف التي يكتبها المولّدُ على السطر الحامل لضريبة
+    المدخلات** (نسبةُ الحساب وقتَ التوليد): تُحمل بمفتاحٍ داخليٍّ لا بمفتاح
+    `vat_rate` العاديّ، فلا تمرّ بحارس `book_line_rate_override` ولا تشترط سبباً
+    بشرياً. وغيابُها يعني أنّ السطر لا اعترافَ عليه (مخرجاتٌ أو بلا ضريبة).
     """
-    return {
+    line = {
         ACCOUNT_CODE_KEY: account_code,
         "debit": debit,
         "credit": credit,
@@ -1090,6 +1110,9 @@ def _entry_line(
         "tax_amount": tax_amount,
         "side_party": "",
     }
+    if vat_rate is not None:
+        line[_SYSTEM_VAT_RATE] = vat_rate
+    return line
 
 
 def _paper_totals(paper) -> tuple[Decimal, Decimal]:
@@ -1130,14 +1153,21 @@ def _assert_vat_account(book) -> None:
     })
 
 
-def _paper_tax_split(book, kind, tax, *, context=None) -> tuple[Decimal, Decimal]:
-    """`(المعترف به، غير المخصوم)` من ضريبة ورقةٍ — أو صفران لما ليس مدخلات.
+def _paper_tax_split(
+    book, kind, tax, *, context=None,
+) -> tuple[Decimal, Decimal, Decimal | None]:
+    """`(المعترف به، غير المخصوم، نسبةُ الاعتراف)` من ضريبة ورقةٍ.
 
     مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) لا تُخصم أصلاً: تُدفع كاملةً، فلا قسمةَ
-    لها. ومدخلاتُها (شراءٌ ومصروف) تُخصم بنسبة الحساب — والقاعدةُ في
-    `book_reports.paper_input_tax` وحدها، وليست نسخةً ثانية هنا.
+    لها ولا نسبة (`None`). ومدخلاتُها (شراءٌ ومصروف) تُخصم بنسبة الحساب — والقاعدةُ
+    في `book_reports.paper_input_tax`/`paper_input_rate` وحدهما، وليست نسخةً
+    ثانية هنا. **والنسبةُ هي ما يُكتب على السطر الحامل للضريبة** فتُجمَّد مع القيد.
+
+    **ونسبةٌ «راجع» تُرفض 400 تسمّي الحساب**: يُعترف بصفرٍ فتُقيَّد الضريبةُ كلُّها
+    كلفةً بلا `2200`، ثم يؤكّد المكتبُ النسبةَ فيخصم الإقرارُ ما قيّده الدفترُ
+    مصروفاً — قرارٌ لم يُتَّخذ لا يُجمَّد في قيد.
     """
-    none = (Decimal("0"), Decimal("0"))
+    none = (Decimal("0"), Decimal("0"), None)
     if not tax or kind in VAT_OUTPUT_KINDS:
         return none
     from accounting_office import book_reports
@@ -1149,13 +1179,25 @@ def _paper_tax_split(book, kind, tax, *, context=None) -> tuple[Decimal, Decimal
     if account is None:
         # لا حسابَ للسطر أصلاً — `_prepare_lines` يردّ 400 قبل أن يُكتب شيء،
         # فلا معنى لقسمةٍ هنا؛ ولا نزيد كلفةً على حسابٍ لا وجودَ له.
-        return tax, Decimal("0")
-    return book_reports.paper_input_tax(
+        return tax, Decimal("0"), None
+    rate, review = book_reports.paper_input_rate(
+        book, account=account, context=context,
+    )
+    if review:
+        raise ValidationError({
+            "documents": (
+                f"حساب «{account.name}» ({account.code}) تصنيفُه «راجع» — "
+                "يجب تأكيد نسبته أوّلاً (من لائحة النسب أو على الحساب نفسه) "
+                "ثم أعِد التوليد."
+            ),
+        })
+    recognised, non_deductible = book_reports.paper_input_tax(
         book, account=account, tax_amount=tax, context=context,
     )
+    return recognised, non_deductible, rate
 
 
-def _double_paper_lines(paper, kind, *, amount, tax, recognised) -> list[dict]:
+def _double_paper_lines(paper, kind, *, amount, tax, recognised, rate=None) -> list[dict]:
     """بنودُ ورقةٍ في الدفتر المزدوج — **والضريبةُ على سطر الوعاء لا على سطرها**.
 
     مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) دائنةٌ كالإيراد، فسطرُ الذمم/الصندوق
@@ -1176,6 +1218,9 @@ def _double_paper_lines(paper, kind, *, amount, tax, recognised) -> list[dict]:
     الخصوم**، فسطرُ ضريبةٍ على `2200` يجعل الإقرارَ صفراً أو سالباً. والضريبةُ
     **مرّةً واحدة**: مجموعُ `tax_amount` على السطور هو ضريبةُ الورقة، وتكرارُها
     على سطرين يُضاعف الإقرار.
+
+    **ونسبةُ الاعتراف (`rate`) تُكتب على سطر الوعاء في المدخلات** — السطرِ الحاملِ
+    للضريبة — فتُجمَّد مع القسمة: تصنيفُ الحساب بعد التوليد لا يُعيد حسابَ ما قُيِّد.
     """
     debit_code, credit_code = ENTRY_KIND_ACCOUNTS[kind]
     total = amount + tax
@@ -1196,6 +1241,7 @@ def _double_paper_lines(paper, kind, *, amount, tax, recognised) -> list[dict]:
             debit=amount + non_deductible,
             tax_base=amount,
             tax_amount=tax,
+            vat_rate=rate,
         )
         credit_line = _entry_line(credit_code, credit=total)
         if recognised:
@@ -1211,7 +1257,9 @@ def _double_paper_lines(paper, kind, *, amount, tax, recognised) -> list[dict]:
     return lines
 
 
-def _simple_paper_lines(kind, *, amount, tax, non_deductible=Decimal("0")) -> list[dict]:
+def _simple_paper_lines(
+    kind, *, amount, tax, non_deductible=Decimal("0"), rate=None,
+) -> list[dict]:
     """الدفترُ البسيط: سطرٌ على **حساب طبيعته** وسطرُ نقدٍ لما قُبض أو دُفع.
 
     البيعُ والتقريرُ اليومي دائنان على الإيراد (`4100`)، والشراءُ والمصروفُ مدينان
@@ -1244,6 +1292,9 @@ def _simple_paper_lines(kind, *, amount, tax, non_deductible=Decimal("0")) -> li
 
     **والفاتورتان بلا سطر نقد**: قد لا تكونان مدفوعتين، فنقدُهما حركةٌ مستقلّة.
 
+    **ونسبةُ الاعتراف (`rate`) على سطر الطبيعة في المدخلات** — الحاملِ للضريبة —
+    تُجمَّد معه كما في المزدوج (`_double_paper_lines`).
+
     **ولا طرفَ على سطر الحساب**: شجرةُ البسيط بلا حسابٍ ذمّي، فاسمُ طرفٍ على سطرٍ
     واحدٍ لا يعني ديناً — يُنشئ في `_receivables` ذمّةً وهمية على من دفع نقداً.
 
@@ -1263,6 +1314,7 @@ def _simple_paper_lines(kind, *, amount, tax, non_deductible=Decimal("0")) -> li
             debit=amount + non_deductible,
             tax_base=amount,
             tax_amount=tax,
+            vat_rate=rate,
         )
     total = amount + tax
     if kind == BOOK_ENTRY_KIND_DAILY_REPORT:
@@ -1288,6 +1340,12 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
     **وضريبةُ المدخلات تُقسم قسمين** (`_paper_tax_split`): المعترفُ به وحده على
     `2200` وغيرُ المخصوم كلفةً على سطر الطبيعة — فما يقوله تقريرُ ض.ق.م «غيرُ
     مخصوم» يظهر في حسابِه، لا رقماً معروضاً بلا أثر.
+
+    **ونسبةُ الحساب وقتَ التوليد تُكتب على السطر الحامل للضريبة** (مدخلاتٌ فقط)
+    فتُجمَّد مع القسمة: يقرؤها `book_rates.recognised_vat_rate` من السطر لا من
+    الحساب الآن، فتصنيفُ الحساب بعد التوليد لا يُفرّق الإقرارَ عن الدفتر. وهي
+    نسبةُ نظامٍ لا تعديلُ مستخدم — لا يحرسها `book_line_rate_override` ولا تشترط
+    سبباً بشرياً (`_entry_line`). **ونسبةُ «راجع» ترفض التوليدَ 400** تسمّي الحساب.
     """
     if kind not in ENTRY_KIND_ACCOUNTS:
         raise ValidationError({
@@ -1319,21 +1377,23 @@ def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
             if tax and not vat_checked:
                 _assert_vat_account(book)
                 vat_checked = True
-            recognised, _non_deductible = _paper_tax_split(
+            recognised, _non_deductible, rate = _paper_tax_split(
                 book, kind, tax, context=split_context,
             )
             lines.extend(
                 _double_paper_lines(
                     paper, kind, amount=amount, tax=tax, recognised=recognised,
+                    rate=rate,
                 ),
             )
         else:
-            _recognised, non_deductible = _paper_tax_split(
+            _recognised, non_deductible, rate = _paper_tax_split(
                 book, kind, tax, context=split_context,
             )
             lines.extend(
                 _simple_paper_lines(
                     kind, amount=amount, tax=tax, non_deductible=non_deductible,
+                    rate=rate,
                 ),
             )
     return lines
