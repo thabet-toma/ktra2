@@ -33,7 +33,9 @@
 **ولا `vat` حيّاً في هذا الجدول.** نوعُه (#288/ب-٢) يجمع **الضريبةَ المسجَّلةَ على
 بنود الحركات** (`BookEntryLine.tax_base`/`tax_amount`) لا نسبةً تُضرب عند القراءة:
 النسبةُ تتغيّر، وإقرارُ شهرٍ مضى لا يتغيّر. **وضريبتان لا ضريبة**: سطرُ الإيراد
-مخرجاتٌ وسطرُ مديّنة الطبع مدخلات، والمستحقُّ فرقُهما لا مجموعهما.
+مخرجاتٌ وسطرُ مديّنة الطبع مدخلات، والمستحقُّ المخرجاتُ ناقصَ **المدخلات المعترف
+بها** (`_recognised_input`) لا مجموعهما ولا المدخلاتِ كاملةً — وهو رقمُ
+`vat_from_book` نفسُه.
 """
 import datetime
 from decimal import Decimal
@@ -171,6 +173,8 @@ REPORT_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
         ("taxable", "الأساس الخاضع", CELL_MONEY),
         ("output_tax", "ضريبة المخرجات", CELL_MONEY),
         ("input_tax", "ضريبة المدخلات", CELL_MONEY),
+        ("recognised_input", "المدخلات المعترف بها", CELL_MONEY),
+        ("non_deductible", "غير المخصوم", CELL_MONEY),
         ("tax_due", "المستحقّ", CELL_MONEY),
     ),
 }
@@ -223,6 +227,8 @@ REPORT_TOTALS: dict[str, tuple[tuple[str, str], ...]] = {
         ("taxable", "مجموع الأساس الخاضع"),
         ("output_tax", "ضريبة المخرجات"),
         ("input_tax", "ضريبة المدخلات"),
+        ("recognised_input", "المدخلات المعترف بها"),
+        ("non_deductible", "غير المخصوم"),
         ("tax_due", "المستحقّ"),
     ),
 }
@@ -239,15 +245,16 @@ RECEIVABLES_PERIOD_NOTE = (
 )
 
 #: مفاتيحُ المبالغ في حمولات التقارير — تُقنَّع كلُّها في الصفوف والمجاميع.
-#: و`taxable`/`output_tax`/`input_tax`/`tax_due` (#288/ب-٢) مبالغُ تقرير ض.ق.م:
-#: أساسٌ خاضع، وضريبةُ المخرجات، وضريبةُ المدخلات، والمستحقُّ فرقُهما.
+#: و`taxable`/`output_tax`/`input_tax`/`recognised_input`/`non_deductible`/`tax_due`
+#: (#288/ب-٢) مبالغُ تقرير ض.ق.م: أساسٌ خاضع، وضريبةُ المخرجات، وضريبةُ المدخلات،
+#: والمعترفُ به منها، وغيرُ المخصوم، والمستحقُّ (المخرجات − المعترف به).
 REPORT_AMOUNT_KEYS: tuple[str, ...] = (
     "debit", "credit", "balance", "amount", "net",
     "debit_total", "credit_total",
     "opening_balance", "closing_balance",
     "revenue", "expense", "profit", "assets", "liabilities", "equity",
     "liabilities_and_equity", "difference", "taxable",
-    "output_tax", "input_tax", "tax_due",
+    "output_tax", "input_tax", "recognised_input", "non_deductible", "tax_due",
 )
 
 #: أنواعُ الحساب المديّنةُ الطبع — والباقي دائنيّة. القاعدةُ واحدةٌ هنا.
@@ -746,9 +753,8 @@ VAT_OUTPUT = "output"
 VAT_INPUT = "input"
 
 #: الحساباتُ التي لضريبتها حكمٌ — الإيرادُ مخرجاتٌ ومديّنةُ الطبع مدخلات.
-_VAT_ACCOUNT_TYPES: tuple[str, ...] = (
-    BOOK_ACCOUNT_TYPE_REVENUE, *sorted(_DEBIT_NATURED),
-)
+_VAT_INPUT_TYPES: tuple[str, ...] = tuple(sorted(_DEBIT_NATURED))
+_VAT_ACCOUNT_TYPES: tuple[str, ...] = (BOOK_ACCOUNT_TYPE_REVENUE, *_VAT_INPUT_TYPES)
 
 
 def _tax_bucket(account_type) -> str | None:
@@ -767,17 +773,59 @@ def _tax_bucket(account_type) -> str | None:
     return None
 
 
+#: مفتاحُ المدخلات المعترف بها في تجميع `_vat` — حقلٌ ثالثٌ بجانب المخرجات
+#: والمدخلات الكاملة، يُملأ سطراً سطراً لا بجمعٍ في القاعدة.
+_VAT_RECOGNISED = "recognised"
+
+
+def _vat_rate_context(book) -> tuple[str, dict]:
+    """نظامُ الزبون الضريبيّ ولائحةُ مكتبه — `(system, overrides)` مرّةً للحساب.
+
+    يقرؤها تقريرُ ض.ق.م (`_vat`) و`vat_from_book` معاً: ما يُعترف به من مدخلاتٍ
+    يُحسب بالنظام واللائحة نفسِهما في الاثنين.
+    """
+    from accounting_office import book_rates
+
+    system = services.resolve_setting(
+        book.tenant, services.TAX_SYSTEM_KEY, client=book.client,
+    )
+    return system, book_rates.office_override_map(book.tenant, system)
+
+
+def _recognised_input(line, *, tenant, system, overrides) -> tuple[Decimal, Decimal, bool]:
+    """`(الضريبة، المعترف به منها، راجع؟)` لسطر مدخلاتٍ — **القاعدةُ الوحيدة للطرح**.
+
+    المعترفُ به `الضريبة × نسبة السطر` (`book_rates.recognised_vat_rate`: نسبةُ
+    السطر إن كُتبت وإلا نسبةُ حسابه من اللائحة وإلا 100%) **مقرَّباً لهللةٍ على كل
+    سطرٍ** لا على المجموع. وتقريرُ ض.ق.م و`vat_from_book` يُنادياها معاً، فلا يخرج
+    للدفتر الواحد رقمان: مرّةً طُرحت المدخلاتُ كاملةً هنا والمعترفُ بها هناك فقال
+    التقريرُ «المستحقّ 0.00» والالتزامُ 56.67.
+    """
+    from accounting_office import book_rates
+
+    tax = line.tax_amount or _ZERO
+    rate, review = book_rates.recognised_vat_rate(
+        line, tenant=tenant, tax_system=system, overrides=overrides,
+    )
+    return tax, (tax * rate / Decimal("100")).quantize(_CENT), review
+
+
 def _vat(book, span, **_):
-    """ض.ق.م للفترة: **مخرجاتٌ ومدخلاتٌ منفصلتان، والمستحقُّ فرقُهما**.
+    """ض.ق.م للفترة: **مخرجاتٌ ومدخلاتٌ منفصلتان، والمستحقُّ = المخرجات − المدخلات المعترف بها**.
 
-    **ولا نسبةَ حيّة**: العمودان `tax_base`/`tax_amount` كُتبا مع الحركة وقتَ
-    إدخالها وهما ما يُجمع هنا. ضربُ الأساس في نسبة الشركة اليوم كان يُعيد حسابَ
-    إقرار شهرٍ مضى بنسبةٍ لم تكن فيه.
+    **ولا نسبةَ حيّةً للشركة**: العمودان `tax_base`/`tax_amount` كُتبا مع الحركة
+    وقتَ إدخالها وهما ما يُجمع هنا. ضربُ الأساس في نسبة الشركة اليوم كان يُعيد
+    حسابَ إقرار شهرٍ مضى بنسبةٍ لم تكن فيه. **أمّا نسبةُ الاعتراف بالمدخلات**
+    (`_recognised_input`) فتُقرأ لكل سطرٍ كما يقرؤها `vat_from_book`: المستحقُّ هنا
+    هو مبلغُ الالتزام نفسُه، و«غير المخصوم» هو الباقي الذي يبقى كلفةً.
 
-    **والفصلُ حكمُ الحساب لا نوعِ الحركة** (`_tax_bucket`): فاتورةُ بيعٍ ضريبتُها
-    على الإيراد مخرجات، ومرتجعُها (دائنٌ على الإيراد) يقلّها؛ وسطرُ مصروفٍ ضريبتُه
-    مدخلاتٌ تُخصم. وصفٌّ لكل نوع حركة كما في القبض/الدفع — صفٌّ يتقلّص يُخفي «لا
-    حركةَ بيعٍ هذا الشهر». والعدُّ عدُّ حركاتٍ **لها ضريبةٌ على سطرٍ ذي حكم**.
+    **والفصلُ حكمُ الحساب لا نوعِ الحركة** (`_tax_bucket`): ضريبةُ سطرِ الإيراد
+    مخرجات، وضريبةُ سطرِ المصروف/الأصل مدخلاتٌ تُخصم بنسبتها. والمجموعُ جمعُ
+    `tax_amount` كما سُجّلت (≥ 0، ولا منطقَ إشارةٍ في الكود): فمرتجعٌ يُسجَّل مدينَ
+    الإيراد لا يُنقص المخرجاتِ بنفسه، و**عكسُ** القيد الأصليّ (انظر أدناه) هو ما
+    يُخرج ضريبتَه من المجموع. وصفٌّ لكل نوع حركة كما في القبض/الدفع — صفٌّ يتقلّص
+    يُخفي «لا حركةَ بيعٍ هذا الشهر». والعدُّ عدُّ حركاتٍ **لها ضريبةٌ على سطرٍ ذي
+    حكم**.
 
     **والحيّةُ وحدها**: حركةٌ عُكست وضرائبُها خارجَ المجموع (`_live_entries`)، فزوجٌ
     مُلغى يعطي أصفاراً لا ضريبةً مضاعفة.
@@ -793,25 +841,41 @@ def _vat(book, span, **_):
             count=Count("entry_id", distinct=True),
         ).order_by()
     }
+    def blank() -> dict:
+        return {
+            "taxable": _ZERO, VAT_OUTPUT: _ZERO, VAT_INPUT: _ZERO,
+            _VAT_RECOGNISED: _ZERO,
+        }
+
     found: dict[str, dict] = {}
     for row in classified.values("entry__kind", "account__account_type").annotate(
         taxable=Sum("tax_base"), tax=Sum("tax_amount"),
     ).order_by():
-        current = found.setdefault(row["entry__kind"], {
-            "taxable": _ZERO, VAT_OUTPUT: _ZERO, VAT_INPUT: _ZERO,
-        })
+        current = found.setdefault(row["entry__kind"], blank())
         current["taxable"] += _zero(row["taxable"])
         current[_tax_bucket(row["account__account_type"])] += _zero(row["tax"])
+    #: المعترفُ به سطراً سطراً (نسبةُ كل سطرٍ وتقريبُه): مجموعُ الضريبة وحده يكفيه
+    #: التجميعُ في القاعدة، ونسبةُ السطر لا تُجمع.
+    system, overrides = _vat_rate_context(book)
+    for line in classified.filter(
+        account__account_type__in=_VAT_INPUT_TYPES,
+    ).select_related("account", "entry"):
+        _tax, recognised_line, _review = _recognised_input(
+            line, tenant=book.tenant, system=system, overrides=overrides,
+        )
+        found.setdefault(line.entry.kind, blank())[_VAT_RECOGNISED] += recognised_line
     rows = []
-    taxable_total = output_total = input_total = _ZERO
+    taxable_total = output_total = input_total = recognised_total = _ZERO
     for kind, label in BOOK_ENTRY_KIND_CHOICES:
         row = found.get(kind, {})
         taxable = _zero(row.get("taxable"))
         output = _zero(row.get(VAT_OUTPUT))
         input_tax = _zero(row.get(VAT_INPUT))
+        recognised = _zero(row.get(_VAT_RECOGNISED))
         taxable_total += taxable
         output_total += output
         input_total += input_tax
+        recognised_total += recognised
         rows.append({
             "kind": kind,
             "kind_label": label,
@@ -819,13 +883,17 @@ def _vat(book, span, **_):
             "taxable": _money(taxable),
             "output_tax": _money(output),
             "input_tax": _money(input_tax),
-            "tax_due": _money(output - input_tax),
+            "recognised_input": _money(recognised),
+            "non_deductible": _money(input_tax - recognised),
+            "tax_due": _money(output - recognised),
         })
     return rows, {
         "taxable": _money(taxable_total),
         "output_tax": _money(output_total),
         "input_tax": _money(input_total),
-        "tax_due": _money(output_total - input_total),
+        "recognised_input": _money(recognised_total),
+        "non_deductible": _money(input_total - recognised_total),
+        "tax_due": _money(output_total - recognised_total),
     }
 
 
@@ -1302,12 +1370,7 @@ def vat_from_book(book, *, period_start, period_end) -> dict:
     مع الحركة، والنسبةُ المعترف بها تقرأ **تصنيفَ الحساب** لا نسبةً عامّة — فتكرارُ
     حسابٍ صفريّ (بنودُ 100% وبنودُ 2/3 في الدفتر نفسه) يخرج صحيحاً.
     """
-    from accounting_office import book_rates
-
-    system = services.resolve_setting(
-        book.tenant, services.TAX_SYSTEM_KEY, client=book.client,
-    )
-    overrides = book_rates.office_override_map(book.tenant, system)
+    system, overrides = _vat_rate_context(book)
     lines = _live_lines(book).filter(
         entry__entry_date__gte=period_start,
         entry__entry_date__lte=period_end,
@@ -1326,12 +1389,12 @@ def vat_from_book(book, *, period_start, period_end) -> dict:
             continue
         if bucket != VAT_INPUT:
             continue
-        rate, review = book_rates.recognised_vat_rate(
-            line, tenant=book.tenant, tax_system=system, overrides=overrides,
+        _tax, recognised_line, review = _recognised_input(
+            line, tenant=book.tenant, system=system, overrides=overrides,
         )
         input_tax += tax
         review_lines += 1 if review else 0
-        recognised += (tax * rate / Decimal("100")).quantize(_CENT)
+        recognised += recognised_line
     return {
         "from": period_start.isoformat(),
         "to": period_end.isoformat(),

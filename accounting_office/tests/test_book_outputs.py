@@ -26,6 +26,7 @@
 import datetime
 from io import BytesIO
 
+from django.core.exceptions import ValidationError
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.utils import timezone
 from openpyxl import load_workbook
@@ -35,9 +36,12 @@ from accounting_office.book_reports import WATERMARK
 from accounting_office.models import (
     BOOK_KIND_DOUBLE,
     BOOK_KIND_SIMPLE,
+    DOCUMENT_STATUS_REQUIRED,
+    ClientBook,
     ClientBookReport,
     ClientContact,
     Contact,
+    DocumentChecklistItem,
     ReminderLog,
 )
 from accounting_office.tests.test_book_reports import (
@@ -47,6 +51,8 @@ from accounting_office.tests.test_book_reports import (
 )
 from accounting_office.tests.test_client_books import make_client
 from docshare.models import DOC_CLIENT_BOOK_REPORT, DocumentShare
+from tenants.letterhead import company_card
+from tenants.models import TenantSettings
 
 BASE = "/api/accounting-office/"
 BOOKS = f"{BASE}client-books/"
@@ -356,6 +362,41 @@ class SimpleBookOutputsTest(BookReportsTestCase):
         # والأرقامُ هي أرقامُ التقرير نفسِه.
         self.assertIn(">300<", html)
         self.assertNotIn("{%", html)
+
+    def test_the_company_logo_is_on_every_sheet_when_it_is_set(self):
+        """الشعارُ على **كل صفيحة**: عددُ `<img src=` يساوي عددَ الصفائح.
+
+        الاختبارُ السابقُ المسمّى «الشعار» كان يفحص اسمَ الشركة وحده فلا يسقط
+        بغياب الصورة — وبطاقةُ الشركة تحمل `logo_url` وصفيحةُ التقرير لم تكن
+        تصيّره بينما `share.html` في المجلد نفسه يصيّره.
+        """
+        logo = "https://res.cloudinary.com/demo/image/upload/ktra-logo.png"
+        TenantSettings.objects.filter(tenant=self.tenant).update(logo_url=logo)
+        name = company_card(self.tenant)["company_name_primary"]
+
+        whole = self.client.get(
+            whole_print_url(self.mine), period_params(), **self.headers(),
+        ).content.decode("utf-8")
+        single = self.client.get(
+            print_url(self.mine, "cash"), period_params(), **self.headers(),
+        ).content.decode("utf-8")
+
+        sheets = whole.count('class="sheet cb-sheet"')
+        self.assertEqual(sheets, 4)
+        self.assertEqual(whole.count("<img src="), sheets)
+        self.assertEqual(single.count("<img src="), 1)
+        for html in (whole, single):
+            self.assertIn(f'<img src="{logo}" alt="{name}"', html)
+        # والشعارُ داخل ترويسة الصفيحة لا خارجها.
+        head = single.split('class="cb-head"', 1)[1].split("</div>", 1)[0]
+        self.assertIn("<img src=", head)
+
+    def test_a_company_without_a_logo_prints_no_image(self):
+        html = self.client.get(
+            print_url(self.mine, "cash"), period_params(), **self.headers(),
+        ).content.decode("utf-8")
+
+        self.assertNotIn("<img", html)
 
     def test_the_whole_book_print_respects_the_amounts_mask(self):
         """القناعُ يسري على ورقة الطباعة كالملفّ: لا رقمَ لعضوٍ لا يراه."""
@@ -758,7 +799,184 @@ class BookReportReminderTest(BookReportsTestCase):
             period_start=report.period_from,
             period_end=report.period_to,
             created_by=self.owner,
+            subject={"client_book_report_id": report.pk},
         )
 
         self.assertEqual(self.report_items(day), [])
+
+    # ── الرابطُ الحيّ وحده يُعرض (جولةُ #288 الثانية/٣-أ) ─────────────────────
+    def test_a_revoked_link_stops_being_offered(self):
+        """بندٌ لرابطٍ أُبطل يبقى «أرسِله» بلا رابط — يخدع من يقرؤه."""
+        self.ready_contact()
+        self.share()
+        day = timezone.localdate()
+        self.assertEqual(len(self.report_items(day)), 1)
+
+        DocumentShare.objects.filter(
+            tenant=self.tenant, doc_type=DOC_CLIENT_BOOK_REPORT,
+        ).update(revoked_at=timezone.now())
+
+        self.assertEqual(self.report_items(day), [])
+
+    def test_an_expired_link_stops_being_offered(self):
+        self.ready_contact()
+        self.share()
+        day = timezone.localdate()
+        self.assertEqual(len(self.report_items(day)), 1)
+
+        DocumentShare.objects.filter(
+            tenant=self.tenant, doc_type=DOC_CLIENT_BOOK_REPORT,
+        ).update(expires_at=timezone.now() - datetime.timedelta(hours=1))
+
+        self.assertEqual(self.report_items(day), [])
+
+    # ── عدّادُ الرابط عدّادُه لا عدّادُ الأوراق (٣-ب) ──────────────────────────
+    #: يومٌ بعد نهاية الفترة المشتركة — فيحلّ بندُ الأوراق (يبدأ من نهاية فترته)
+    #: وبندُ الرابط (يبدأ من يوم إنشائه) معاً.
+    LATE_DAY = datetime.date(THIS_YEAR + 1, 1, 5)
+
+    def add_missing_paper(self):
+        """ورقةٌ ناقصةٌ على **الفترة نفسِها** التي يحملها التقريرُ المشارَك، وسقفُها 1.
+
+        سقفُ الأوراق الافتراضيُّ 3 فلا يستنفده إرسالٌ واحد؛ يُضبط 1 كي يكون
+        الإرسالُ الواحدُ كافياً لاستنفاده — وإلا مرّ اختبارُ تقاسُم السقف على
+        عدٍّ لا يبلغه.
+        """
+        services.set_office_setting(self.tenant, services.DOCUMENTS_REMINDER_MAX_KEY, 1)
+        return DocumentChecklistItem.objects.create(
+            tenant=self.tenant, client=self.mine, item_code="probe_0",
+            name="فاتورة مشتريات", cadence="monthly",
+            period_start=PERIOD_FROM, period_end=PERIOD_TO,
+            status=DOCUMENT_STATUS_REQUIRED,
+        )
+
+    def papers_items(self, day):
+        return [
+            item for item in self.items_of(day)
+            if item["reminder_type"] == "documents"
+            and item.get("client_book_report") is None
+        ]
+
+    def send_item(self, contact, *, report_id=None):
+        item = {
+            "client_id": self.mine.pk,
+            "reminder_type": "documents",
+            "period_start": PERIOD_FROM.isoformat(),
+            "period_end": PERIOD_TO.isoformat(),
+        }
+        if report_id is not None:
+            item["client_book_report_id"] = report_id
+        return services.mark_reminders_sent(
+            self.tenant, user=self.owner, contact_id=contact.pk,
+            body="نصّ", items=[item],
+        )
+
+    def test_sending_the_link_item_does_not_spend_the_papers_cap(self):
+        """بندُ الرابط وبندُ الأوراق يتشاركان (زبون، أوراق، من، إلى) — لا سقفاً."""
+        contact = self.ready_contact()
+        self.share()
+        self.add_missing_paper()
+        report = ClientBookReport.objects.get()
+        # الاثنان ظاهران قبل أيّ إرسال — وإلا مرّ الاختبارُ على مولّدٍ غائب.
+        self.assertEqual(len(self.report_items(self.LATE_DAY)), 1)
+        self.assertEqual(len(self.papers_items(self.LATE_DAY)), 1)
+
+        self.send_item(contact, report_id=report.pk)
+
+        self.assertEqual(self.report_items(self.LATE_DAY), [])
+        self.assertEqual(len(self.papers_items(self.LATE_DAY)), 1)
+
+    def test_sending_the_papers_item_does_not_spend_the_link_cap(self):
+        contact = self.ready_contact()
+        self.share()
+        self.add_missing_paper()
+        self.assertEqual(len(self.report_items(self.LATE_DAY)), 1)
+        self.assertEqual(len(self.papers_items(self.LATE_DAY)), 1)
+
+        self.send_item(contact)
+
+        self.assertEqual(self.papers_items(self.LATE_DAY), [])
+        self.assertEqual(len(self.report_items(self.LATE_DAY)), 1)
+
+    def test_the_link_row_carries_the_report_id_and_no_missing_papers(self):
+        """صفُّ السجلّ يحمل رقمَ التقرير، ولا يدّعي أوراقاً ناقصةً لم يُرسَل بشأنها."""
+        contact = self.ready_contact()
+        self.share()
+        self.add_missing_paper()
+        report = ClientBookReport.objects.get()
+
+        sent = self.send_item(contact, report_id=report.pk)[0]
+
+        self.assertEqual(sent.subject["client_book_report_id"], report.pk)
+        self.assertEqual(sent.subject["document_item_codes"], [])
+
+    def test_the_report_id_passes_the_http_serializer_into_the_log(self):
+        """المسارُ الحقيقيُّ: السيريالايزرُ لا يُسقط الرقمَ قبل أن يبلغ السجلّ."""
+        contact = self.ready_contact()
+        self.share()
+        report = ClientBookReport.objects.get()
+
+        res = self.client.post(
+            f"{BASE}ready-to-send/sent/",
+            {
+                "contact_id": contact.pk,
+                "body": "نصّ",
+                "items": [{
+                    "client_id": self.mine.pk,
+                    "reminder_type": "documents",
+                    "period_start": PERIOD_FROM.isoformat(),
+                    "period_end": PERIOD_TO.isoformat(),
+                    "client_book_report_id": report.pk,
+                }],
+            },
+            format="json", **self.headers(),
+        )
+
+        self.assertEqual(res.status_code, 201, res.content)
+        self.assertEqual(
+            res.data["rows"][0]["subject"]["client_book_report_id"], report.pk,
+        )
+        self.assertEqual(
+            ReminderLog.objects.get().subject["client_book_report_id"], report.pk,
+        )
+
+    def test_a_report_id_on_another_period_is_refused(self):
+        """تقريرُ الزبون نفسِه على فترةٍ أخرى لا يصحّ لبندٍ على هذه الفترة."""
+        contact = self.ready_contact()
+        self.share()
+        report = ClientBookReport.objects.get()
+        item = {
+            "client_id": self.mine.pk,
+            "reminder_type": "documents",
+            "period_start": PERIOD_FROM.isoformat(),
+            "period_end": (PERIOD_TO - datetime.timedelta(days=1)).isoformat(),
+            "client_book_report_id": report.pk,
+        }
+
+        with self.assertRaises(ValidationError) as caught:
+            services.mark_reminders_sent(
+                self.tenant, user=self.owner, contact_id=contact.pk,
+                body="نصّ", items=[item],
+            )
+
+        self.assertIn("client_book_report_id", caught.exception.message_dict)
+
+    def test_a_report_id_of_another_client_is_refused(self):
+        """الرقمُ يُتحقَّق أنه تقريرُ **هذا** الزبون في **هذا** المكتب — لا ثقةً بالطلب."""
+        contact = self.ready_contact()
+        other = make_client(
+            tenant=self.tenant, catalog=self.catalog,
+            name="زبونٌ آخر", responsible=self.accountant,
+        )
+        self.create_book(other, kind=BOOK_KIND_SIMPLE)
+        foreign = ClientBookReport.objects.create(
+            tenant=self.tenant, client_book=ClientBook.objects.get(client=other),
+            kind="cash", period_from=PERIOD_FROM, period_to=PERIOD_TO,
+        )
+
+        with self.assertRaises(ValidationError) as caught:
+            self.send_item(contact, report_id=foreign.pk)
+
+        self.assertIn("client_book_report_id", caught.exception.message_dict)
+        self.assertFalse(ReminderLog.objects.exists())
 

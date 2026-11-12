@@ -1051,7 +1051,7 @@ const MESSAGE_MERGED = {
   items: [DOCUMENT_ITEM, DEADLINE_ITEM],
 };
 
-test('مفاتيحُ الفعل أربعةٌ فقط: الزبون والنوع وطرفا الفترة', () => {
+test('مفاتيحُ الفعل أربعةٌ ومعرّفُ الرابط خامساً — لا تسميةَ ولا نصّ', () => {
   const keys = readyToSendItemKeys(MESSAGE_MERGED);
   assert.deepEqual(keys, [
     {
@@ -1059,19 +1059,64 @@ test('مفاتيحُ الفعل أربعةٌ فقط: الزبون والنوع �
       reminder_type: 'documents',
       period_start: '2026-10-01',
       period_end: '2026-10-31',
+      client_book_report_id: null,
     },
     {
       client_id: 3,
       reminder_type: 'deadline',
       period_start: '2026-11-01',
       period_end: '2026-11-30',
+      client_book_report_id: null,
     },
   ]);
-  // لا تُرسَل تسميةٌ ولا نصُّ بند: الخادم يعرف بندَه من الأربعة وحدها.
+  // لا تُرسَل تسميةٌ ولا نصُّ بند: الخادم يعرف بندَه من الأربعة ورقمِ الرابط وحدهما.
   assert.deepEqual(
     Object.keys(keys[0]),
-    ['client_id', 'reminder_type', 'period_start', 'period_end'],
+    [
+      'client_id',
+      'reminder_type',
+      'period_start',
+      'period_end',
+      'client_book_report_id',
+    ],
   );
+});
+
+test('بندُ رابط التقرير يُرسل رقمَه ليُعدَّ رابطاً لا ورقةً ناقصة', () => {
+  const linkItem = {
+    ...DOCUMENT_ITEM,
+    client_book_report: {
+      id: 57,
+      kind: 'cash',
+      title: 'دفتر الصندوق',
+      period_from: '2026-10-01',
+      period_to: '2026-10-31',
+      url: '',
+    },
+  };
+  // #288: بلا الرقم يحسب الخادمُ بندَ الرابط من بند «الأوراق» فيبقى معروضاً كلَّ يوم.
+  const keys = readyToSendItemKeys({
+    recipient: { contact_id: 11 },
+    items: [linkItem, { ...DOCUMENT_ITEM, client_book_report: null }],
+  });
+  assert.deepEqual(keys, [
+    {
+      client_id: 3,
+      reminder_type: 'documents',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+      client_book_report_id: 57,
+    },
+    {
+      client_id: 3,
+      reminder_type: 'documents',
+      period_start: '2026-10-01',
+      period_end: '2026-10-31',
+      client_book_report_id: null,
+    },
+  ]);
+  // حمولةٌ قديمةٌ بلا المفتاح لا تُرسل `undefined`: الغيابُ `null` صريحاً.
+  assert.equal(readyToSendItemKeys(MESSAGE_ONE)[0].client_book_report_id, null);
 });
 
 test('رقائقُ النوع: «الكل» أوّلاً ثم ما له رسائلُ اليوم بتسمية الخادم', () => {

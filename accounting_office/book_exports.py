@@ -23,6 +23,7 @@ import datetime
 from decimal import Decimal
 from io import BytesIO
 
+from django.db.models import Exists, OuterRef
 from django.utils import timezone
 from openpyxl import Workbook
 from openpyxl.styles import Font
@@ -330,14 +331,18 @@ def client_book_report_reminder_candidates(
     نوعه لا يُقدَّم عليه في `_reminder_message` لأن نصَّ «الأوراق» يتحدّث عن
     أوراقٍ ناقصةٍ ننتظرها من الزبون وهذه ورقةٌ تُسلَّم له.
 
-    **و«أُرسل؟» بطريقة النظام نفسِه**: `by_pair` يعدّ صفوفَ السجلّ الصادرة للمفتاح
-    (زبون، نوع، من، إلى)، والسقفُ واحد — فبندٌ أُرسل يختفي من نفسه. والمفتاحُ
-    **فترةُ التقرير المخزَّنة** (المحلولةُ في `create_report_link`)، فتقاريرُ
-    الدفتر الواحد على فتراتٍ مختلفة بنودٌ مستقلة.
+    **ولا بندَ لرابطٍ ميّت**: التقريرُ الذي لا مشاركةَ حيّةً له (أُبطلت أو انتهت
+    مدّتُها) لا يظهر — بندٌ «أرسِله» بلا رابطٍ يخدع من يقرؤه. والشرطُ
+    `_live_report_shares` نفسُه الذي يقرؤه مركِّبُ الروابط، في `Exists` واحد.
 
-    **وقيدٌ معلوم**: تقريران على الفترة نفسها يتقاسمان المفتاح، وبندُ «الأوراق»
-    لفترةٍ تطابق فترةَ التقرير تماماً (شهرٌ كاملٌ مثلاً) يستهلك السقفَ نفسَه —
-    وهو ثمنُ نوعٍ مشتركٍ لا نوعٍ سادس.
+    **و«أُرسل؟» بطريقة النظام نفسِه**: `by_pair` يعدّ صفوفَ السجلّ الصادرة للمفتاح
+    (زبون، نوع، من، إلى) والسقفُ واحد — فبندٌ أُرسل يختفي من نفسه. والمفتاحُ
+    **فترةُ التقرير المخزَّنة** (المحلولةُ في `create_report_link`)، فتقاريرُ
+    الدفتر الواحد على فتراتٍ مختلفة بنودٌ مستقلة. **وعدّادُه عدّادُه**: المفتاحُ
+    نفسُه مفتاحُ تذكير «الأوراق الناقصة»، فيُعدّ هنا صفوفُ التقرير نفسِه وحدها
+    (`subject["client_book_report_id"]`) ويستثنيها مولّدُ الأوراق — إرسالُ أحدهما
+    لا يستهلك سقفَ الآخر على فترةٍ مشتركة. وتقريران على الفترة نفسها بنوعين
+    مختلفين بندان مستقلان بالرقم لا بالمفتاح.
 
     **والرابطُ لا يُركَّب هنا** بل في `attach_client_book_report_links` بعد الحواجز
     ولمن يرى المبالغ — انظرها.
@@ -354,6 +359,9 @@ def client_book_report_reminder_candidates(
     reports = (
         ClientBookReport.objects
         .filter(tenant=tenant, client_book__client_id__in=client_ids)
+        .filter(Exists(
+            _live_report_shares(tenant).filter(doc_id=OuterRef("pk")),
+        ))
         .select_related("client_book__client")
         .order_by("created_at", "id")
     )
@@ -368,7 +376,9 @@ def client_book_report_reminder_candidates(
             (client.pk, REMINDER_DOCUMENTS, report.period_from, report.period_to), (),
         )
         count = sum(
-            1 for row in pairs if row["kind"] in services.REMINDER_COUNTED_KINDS
+            1 for row in pairs
+            if row["kind"] in services.REMINDER_COUNTED_KINDS
+            and services.reminder_row_report_id(row) == report.pk
         )
         #: البندُ ظاهرٌ من **يوم إنشاء الرابط**: من أنشأه أنشأه ليُرسَل الآن، لا
         #: يومَ نهاية الفترة التي يغطّيها (وقد تكون في المستقبل).
@@ -443,6 +453,25 @@ def client_book_report_text(report) -> str:
     return "\n".join(parts)
 
 
+def _live_report_shares(tenant):
+    """مشاركاتُ التقارير **الحيّة** في المكتب — الشرطُ الواحدُ لـ«حيّ».
+
+    `doc_type` التقرير، وغيرُ عامّةٍ (`is_public=False`)، ولم تُبطَل، ولم تنتهِ
+    مدّتُها. يقرؤها مولّدُ البند (`Exists` على صفّ التقرير) وقارئُ الروابط
+    (`_live_report_urls`) معاً: بندٌ يعدّ رابطاً حيّاً بشرطٍ وقارئٌ يجده بشرطٍ آخر
+    كان يُخرج «أرسِله» بلا رابط.
+    """
+    from docshare.models import DOC_CLIENT_BOOK_REPORT, DocumentShare
+
+    return DocumentShare.objects.filter(
+        tenant=tenant,
+        doc_type=DOC_CLIENT_BOOK_REPORT,
+        is_public=False,
+        revoked_at__isnull=True,
+        expires_at__gt=timezone.now(),
+    )
+
+
 def _live_report_urls(tenant, report_ids) -> dict[int, str]:
     """رابطُ التقرير الحيّ لكل صفٍّ في المجموعة — **قراءةٌ لا إنشاء** (#288/هـ).
 
@@ -451,21 +480,13 @@ def _live_report_urls(tenant, report_ids) -> dict[int, str]:
     يُنشئ روابطَ عامّة — إنشاءُ الرابط فعلٌ صريحٌ محروسٌ بمفتاحَي الكتابة والمبالغ.
     """
     from docshare import services as docshare_services
-    from docshare.models import DOC_CLIENT_BOOK_REPORT, DocumentShare
 
     wanted = {report_id for report_id in report_ids if report_id is not None}
     if not wanted:
         return {}
     live = (
-        DocumentShare.objects
-        .filter(
-            tenant=tenant,
-            doc_type=DOC_CLIENT_BOOK_REPORT,
-            doc_id__in=list(wanted),
-            is_public=False,
-            revoked_at__isnull=True,
-            expires_at__gt=timezone.now(),
-        )
+        _live_report_shares(tenant)
+        .filter(doc_id__in=list(wanted))
         .order_by("-created_at", "-id")
         .values_list("doc_id", "token")
     )

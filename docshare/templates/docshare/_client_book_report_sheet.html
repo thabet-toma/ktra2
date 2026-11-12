@@ -18,6 +18,7 @@
 {% endcomment %}
 
   <div class="cb-head">
+    {% if company.logo_url %}<img src="{{ company.logo_url }}" alt="{{ company.company_name_primary }}" class="cb-logo">{% endif %}
     <p class="cb-org">{{ company.company_name_primary }}</p>
     {% if company.phone %}<p class="cb-org-line">هاتف: {{ company.phone }}</p>{% endif %}
     {% if company.address %}<p class="cb-org-line">{{ company.address }}</p>{% endif %}

@@ -1835,6 +1835,8 @@ interface ReadyToSendKeySource {
     reminder_type: string;
     period_start: string;
     period_end: string;
+    /** #288: رقمُ تقرير الدفتر على بند رابطٍ — `null`/غيابٌ لما ليس رابطاً. */
+    client_book_report?: { id: number } | null;
   }[];
 }
 
@@ -1855,18 +1857,24 @@ export function readyToSendMessageKey(message: ReadyToSendKeySource): string {
 /**
  * بندُ الفعل: **المفتاحُ الحقيقيُّ للتذكير** — الزبون والنوع وطرفا الفترة.
  * لا تسميةَ ولا نصَّ فيه، والخادمُ يعيد حلَّ كلٍّ منها على زبائن العضو.
+ *
+ * و`client_book_report_id` (#288/هـ): رقمُ تقرير الدفتر على بند الرابط — يخرجه
+ * بندُ الرابط وحده و`null` لغيره. بلا هذا الرقم يستقبل الخادمُ بندَ الرابط مفتاحاً
+ * كأيّ بند «أوراق»، فيحسبه من عدّاد الأوراق ويبقى بندُ الرابط معروضاً كلَّ يوم.
  */
 export function readyToSendItemKeys(message: ReadyToSendKeySource): {
   client_id: number;
   reminder_type: string;
   period_start: string;
   period_end: string;
+  client_book_report_id: number | null;
 }[] {
   return message.items.map((item) => ({
     client_id: item.client_id,
     reminder_type: item.reminder_type,
     period_start: item.period_start,
     period_end: item.period_end,
+    client_book_report_id: item.client_book_report?.id ?? null,
   }));
 }
 

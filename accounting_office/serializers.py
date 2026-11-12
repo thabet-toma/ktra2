@@ -604,6 +604,11 @@ class ReadyToSendItemSerializer(serializers.Serializer):
     reminder_type = serializers.ChoiceField(choices=REMINDER_TYPE_CHOICES)
     period_start = serializers.DateField()
     period_end = serializers.DateField()
+    #: بندُ رابط تقرير الدفتر وحده (#288/هـ): رقمُ التقرير يفصل عدّادَه عن عدّاد
+    #: «الأوراق» على المفتاح نفسِه، والخدمةُ تتحقّق أنه تقريرُ هذا الزبون وفترته.
+    client_book_report_id = serializers.IntegerField(
+        min_value=1, required=False, allow_null=True,
+    )
 
 
 class ReadyToSendPayloadSerializer(serializers.Serializer):

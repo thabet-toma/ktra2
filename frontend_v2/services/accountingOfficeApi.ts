@@ -332,6 +332,11 @@ export interface ReadyToSendItem {
    * **`id` هو مفتاحُ صفّ البند**: ورقتان في يومٍ واحدٍ تتشاركان الفترة.
    */
   invoice: ReadyToSendInvoice | null;
+  /**
+   * #288/هـ: بندُ رابط تقرير الدفتر — `id` هو ما يُرسَل في `client_book_report_id`
+   * ليُعدّ الرابطُ رابطاً لا ورقةً ناقصة. `null` لبندٍ ليس رابطَ تقرير.
+   */
+  client_book_report: { id: number } | null;
   subject: { document_item_codes: string[] };
 }
 
@@ -380,6 +385,8 @@ export interface ReadyToSendItemKey {
   reminder_type: string;
   period_start: string;
   period_end: string;
+  /** #288/هـ: رقمُ تقرير الدفتر على بند الرابط وحده — `null` لغيره. */
+  client_book_report_id: number | null;
 }
 
 /** سطرُ سجلّ التذكيرات — **لا يُعدَّل ولا يُحذف**: التصحيحُ صفٌّ جديد. */
