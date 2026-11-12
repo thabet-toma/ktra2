@@ -41,6 +41,7 @@ from core.terminology import term
 from core.terminology import OFFICE_FEE_INVOICE_LABEL
 from docshare.documents._contract import (
     AUDIENCE_CUSTOMER,
+    AUDIENCE_OFFICE,
     TONE_DANGER,
     TONE_MUTED,
     TONE_OK,
@@ -580,6 +581,165 @@ def fee_invoice_doc_ids(tenant, user):
     ).values("pk")
 
 
+# ── النسخةُ الكاملة وبيانُ الأسماء (#290) ────────────────────────────────────
+#
+# **نوعان يخصّان المكتبَ نفسَه لا طرفاً من أطرافه**: نسخةُ بياناته الكاملة
+# (تسعُ أوراق) وبيانُ أسماء زبائنه للدائرة (م111، فلسطين وحدها). و`doc_id`
+# فيهما **معرّفُ المكتب**، لأن موضوعَ الوثيقة هو المكتب — فلا صفَّ موديلٍ ثانٍ
+# يُنشأ ويُهجَّر لهذه الحاجة، والقيدُ `(tenant, doc_type, doc_id)` نفسُه يمنع
+# خلطَ مكتبين: المُحمِّلُ يرفض `doc_id != tenant_id` فيصير مكتبٌ آخر **404**.
+#
+# **والبناءُ في `accounting_office.office_exports` وحده**: الجداولُ التسعةُ
+# تُقرأ من صفوف المكتب كما يقرؤها ملفُّ Excel — لا نسخةً ثانية من الجداول هنا،
+# وإلا اختلف الرابطُ عن الملفّ عند أوّل عمودٍ يُضاف.
+OFFICE_DATA_EXPORT_TITLE = "نسخة بيانات المكتب"
+OFFICE_CLIENT_NAMES_TITLE = "بيان أسماء زبائن المكتب"
+#: ملاحظةُ الورقتين — تقول ما هي وما ليست، فلا تُقدَّم لجهةٍ على أنها إقرار.
+OFFICE_DATA_EXPORT_NOTE = (
+    "نسخةٌ من بيانات المكتب كما هي في تاريخ التصدير — ليست مستنداً ضريبياً "
+    "ولا تُغني عن سجلّات المكتب الرسمية."
+)
+OFFICE_CLIENT_NAMES_NOTE = (
+    "بيانٌ بأسماء زبائن المكتب وعناوينهم وأرقام ملفاتهم الضريبية — للدائرة "
+    "الفلسطينية للضريبة (نموذج م111)."
+)
+
+
+def _office_exports():
+    """استيرادٌ كسول كـ`_book_reports`: الوحدة تجرّ خدماتِ المكتب ونماذجه."""
+    from accounting_office import office_exports
+
+    return office_exports
+
+
+def _office_of(tenant_id: int, doc_id: int):
+    """المكتبُ نفسُه مستنداً — و`None` لما ليس مكتبَه (404).
+
+    الشرطُ `doc_id == tenant_id` ليس تحسيناً بل الحارسَ: بلا هذا تمرّ
+    `GET /api/share/<token>` لمكتبٍ آخر بمجرّد تخمين `doc_id`.
+    """
+    from tenants.models import Tenant
+
+    if doc_id != tenant_id:
+        return None
+    return Tenant.objects.filter(pk=tenant_id).first()
+
+
+def load_office_data_export(tenant_id: int, doc_id: int):
+    return _office_of(tenant_id, doc_id)
+
+
+def load_office_client_names(tenant_id: int, doc_id: int):
+    return _office_of(tenant_id, doc_id)
+
+
+def _office_name(office) -> str:
+    """اسمُ المكتب كما في ترويسة مستنداته، لا اسمُه المسجَّل وحده."""
+    return company_card(office)["company_name_primary"] or office.CompanyName or ""
+
+
+def build_office_data_export(office) -> dict:
+    """حمولةُ العقد العامّ للنسخة — العلامةُ والاسمُ وعددُ صفوف كل ورقة.
+
+    الجداولُ نفسُها تُصيَّرها صفحةُ النوع (`page`)، وهذه الحمولةُ تخدم واجهةَ
+    JSON و`resolve_share` الذي يبنيها **دائماً** قبل أن يسأل عن `page`.
+    """
+    from django.utils import timezone
+
+    office_exports = _office_exports()
+    tables = office_exports.full_export_tables(office)
+    return payload(
+        kind="office_data_export",
+        title=OFFICE_DATA_EXPORT_TITLE,
+        number="",
+        date=timezone.localdate(),
+        status_label=_book_reports().WATERMARK,
+        status_tone=TONE_WARN,
+        party_title="المكتب",
+        party=_office_name(office),
+        currency=None,
+        meta_rows=[
+            meta("تاريخ التصدير", timezone.localdate(), VALUE_DATE),
+            meta("عدد الزبائن", next(
+                (
+                    table["count"] for table in tables
+                    if table["key"] == office_exports.SHEET_CLIENTS
+                ),
+                0,
+            )),
+        ],
+        show_lines=False,
+        show_line_prices=False,
+        notes=OFFICE_DATA_EXPORT_NOTE,
+    )
+
+
+def build_office_client_names(office) -> dict:
+    """حمولةُ العقد العامّ لبيان الأسماء — عددُ الزبائن واسمُ المكتب."""
+    from django.utils import timezone
+
+    office_exports = _office_exports()
+    return payload(
+        kind="office_client_names",
+        title=OFFICE_CLIENT_NAMES_TITLE,
+        number="",
+        date=timezone.localdate(),
+        # البيانُ سجلُّ الدائرة لا «نسخةَ عمل» — شارتُه محايدةٌ بلا تحذير.
+        status_label="لسجلّ الدائرة (م111)",
+        status_tone=TONE_MUTED,
+        party_title="المكتب",
+        party=_office_name(office),
+        currency=None,
+        meta_rows=[
+            meta("تاريخ التصدير", timezone.localdate(), VALUE_DATE),
+            meta("عدد الزبائن", len(office_exports.client_names_rows(office))),
+        ],
+        show_lines=False,
+        show_line_prices=False,
+        notes=OFFICE_CLIENT_NAMES_NOTE,
+    )
+
+
+def page_office_data_export(office, share) -> str:
+    """ورقةُ النسخة الكاملة — **الجداولُ التسعةُ نفسُها** بملخّصٍ عدديّ لكل ورقة."""
+    from django.utils import timezone
+
+    office_exports = _office_exports()
+    return render_to_string(
+        "docshare/office_data_export.html",
+        {
+            "company": company_card(share.tenant),
+            "title": OFFICE_DATA_EXPORT_TITLE,
+            "tables": office_exports.full_export_tables(office),
+            "watermark": _book_reports().WATERMARK,
+            "generated_on": timezone.localdate(),
+            "note": OFFICE_DATA_EXPORT_NOTE,
+        },
+    )
+
+
+def page_office_client_names(office, share) -> str:
+    """ورقةُ بيان الأسماء — جدولٌ واحدٌ يُقدَّم للدائرة، و«PDF» من حوار الطباعة."""
+    from django.utils import timezone
+
+    office_exports = _office_exports()
+    return render_to_string(
+        "docshare/office_client_names.html",
+        {
+            "company": company_card(share.tenant),
+            "title": OFFICE_CLIENT_NAMES_TITLE,
+            "rows": office_exports.client_names_rows(office),
+            "generated_on": timezone.localdate(),
+            "note": OFFICE_CLIENT_NAMES_NOTE,
+        },
+    )
+
+
+def _office_export_doc_ids(tenant, user):
+    """نطاقُ النوعين في سطح الإدارة: مكتبُ المالك وحده، وما عداه 404 لا 403."""
+    return _office_exports().owned_doc_ids(tenant, user)
+
+
 ACCOUNTING_DOC_TYPES = {
     "payment_notice": {
         "label": "إشعار دفع",
@@ -661,5 +821,36 @@ ACCOUNTING_DOC_TYPES = {
         "module": "accounting_office",
         #: **ونطاقٌ في سطح الإدارة**: `doc_id` فاتورةُ زبونٍ يراه العضو وحده.
         "scope": fee_invoice_doc_ids,
+    },
+    #: #290: نسخةُ بيانات المكتب الكاملة — ورقةٌ بجداولها التسعة.
+    "office_data_export": {
+        "label": "نسخة بيانات المكتب",
+        "loader": load_office_data_export,
+        "builder": build_office_data_export,
+        #: **أعلى مفتاحٍ في المكتب** لأن الملفَّ يحمل زبائنَ المكتب كلَّهم
+        #: ومبالغَهم: صلاحيةٌ أوسع من `office.clients.write` وحدها. والبابُ
+        #: المقصود `POST exports/full-link/`، وهو يزيد الدورَ ورؤيةَ المبالغ؛
+        #: فسطحُ المشاركة يبقى حدُّه الأدنى هذا، والنطاقُ أدناه يقيّده للمالك.
+        "permission": "office.clients.all",
+        #: **جمهورُ المكتب** لا الزبون: أسماءُ كل الزبائن ومبالغُهم ليست ورقةً
+        #: يجوز أن تُسلَّم لزبون.
+        "audience": AUDIENCE_OFFICE,
+        "decision": None,
+        "page": page_office_data_export,
+        "module": "accounting_office",
+        "scope": _office_export_doc_ids,
+    },
+    #: #290: بيانُ أسماء زبائن المكتب (م111) — فلسطينيّاً وحده، والحارسُ في
+    #: `office_exports.assert_client_names_available`.
+    "office_client_names": {
+        "label": "بيان أسماء زبائن المكتب",
+        "loader": load_office_client_names,
+        "builder": build_office_client_names,
+        "permission": "office.clients.all",
+        "audience": AUDIENCE_OFFICE,
+        "decision": None,
+        "page": page_office_client_names,
+        "module": "accounting_office",
+        "scope": _office_export_doc_ids,
     },
 }

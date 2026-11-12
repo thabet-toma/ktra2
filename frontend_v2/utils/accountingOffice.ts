@@ -13,6 +13,7 @@
  * وقناعُ المبلغ المخفيّ. صرفةٌ بلا React كي تُختبر بـ`node --test` في بوّابة
  * `npm test`.
  */
+import { formatNumber } from './formatNumber.ts';
 import { monthKeyLabel, monthKeyOf, monthKeyRange, shiftMonthKey } from './monthKey.ts';
 import { userRoleLabel } from './userRoleLabel.ts';
 
@@ -37,11 +38,19 @@ export const SETTINGS_GROUP_OFFICE = 'office';
 /** مجموعة «التذكيرات والنصوص» (#280/ب) — موضعُ النصوص وقائمةِ العطل. */
 export const SETTINGS_GROUP_REMINDERS = 'reminders';
 
+/** مجموعةُ «التشغيل والنسخ» (#290) — النسخةُ والبيانُ وإعداداتُ المرحلة. */
+export const SETTINGS_GROUP_OPERATIONS = 'operations';
+
 /** مجموعاتُ شاشة الإعدادات المعروفة — `?group=` خارجها يُتجاهَل. */
-export const OFFICE_SETTING_GROUPS = ['office', 'schedule', 'alerts', 'reminders'] as const;
+export const OFFICE_SETTING_GROUPS = [
+  'office', 'schedule', 'alerts', 'reminders', 'operations',
+] as const;
 
 /** مفتاحُ وجهة التنبيه الذي يفتح شاشة اللائحة (#277) — من الخادم في `opens`. */
 export const ALERT_OPENS_DEADLINE_RULES = 'deadline_rules';
+
+/** وجهةُ تنبيه «نسخة البيانات الشهرية» (#290): مجموعةُ «التشغيل والنسخ». */
+export const ALERT_OPENS_OPERATIONS = 'operations';
 
 /** اسم معامل العنوان الذي يحمل معرّف الزبون المفتوح. */
 export const CLIENT_QUERY_PARAM = 'client';
@@ -100,6 +109,12 @@ export interface SettingRow {
   differs_from_default?: boolean;
   can_reset?: boolean;
   client_customization_count?: number;
+  /**
+   * #290: إعدادٌ مقفلٌ بقرار مرحلة — يُعرض ويُرفض (الخادم يردّ 400 برسالته).
+   * يُرسِله السجلّ نفسه (`SettingDefinition.locked`)، فالواجهة تُطفئ ضابطه بلا
+   * قائمةِ مفاتيحٍ محلية تفترق عن الخادم يوم يُقفَل إعدادٌ أو يُفتَح.
+   */
+  locked?: boolean;
 }
 
 /**
@@ -196,6 +211,10 @@ export function alertTargetPath(
 ): string {
   if (alert.opens === ALERT_OPENS_DEADLINE_RULES) {
     return `${OFFICE_SETTINGS_PATH}?${SETTINGS_GROUP_PARAM}=${SETTINGS_GROUP_SCHEDULE}`;
+  }
+  // #290: تذكيرُ نسخة البيانات يفتح مجموعة «التشغيل والنسخ» — فعلُه هناك.
+  if (alert.opens === ALERT_OPENS_OPERATIONS) {
+    return `${OFFICE_SETTINGS_PATH}?${SETTINGS_GROUP_PARAM}=${SETTINGS_GROUP_OPERATIONS}`;
   }
   if (!alert.client) return '';
   const base = `${clientFilePath(alert.client.id)}&${CLIENT_TAB_PARAM}=${CLIENT_OBLIGATIONS_TAB}`;
@@ -1625,15 +1644,25 @@ export const OFFICE_READY_TO_SEND_PATH = '/accounting-office/ready-to-send';
 export const OFFICE_FEE_DRAFTS_PATH = '/accounting-office/fee-drafts';
 
 /**
- * مفاتيحُ إعداداتٍ **مقفلةٌ مطفأةً** في المرحلة الأولى (‏`LOCKED_SETTING_MESSAGES`
- * خادمياً): الخادمُ يردّ 400 على أيّ قيمةٍ أخرى، والشاشةُ تُقفل ضابطها كي لا
- * يجرّب الموظفُ حفظاً مصيرُه الرفض. القفلُ **عرضٌ لا إنفاذ** — الحكمُ للخادم.
+ * مفاتيحُ إعداداتٍ **مقفلةٌ مطفأةً** — القائمةُ التي تبقى للنداء النصّي وحده.
+ *
+ * #290: صار القفلُ **حقلَ السجلّ** (`SettingRow.locked` من الخادم)، والشاشةُ
+ * تمرّر الصفَّ فتُقرأ من الخادم. والقائمةُ باقيةٌ للنداء بالمفتاح نصّاً (اختبارُ
+ * الوحدة القائم)، فلا تُستعمل في الشاشة ولا تفترق عن الخادم في العرض.
  */
 export const OFFICE_LOCKED_SETTING_KEYS: readonly string[] = ['reminder_auto_send'];
 
-/** هل هذا الإعدادُ مقفلٌ مطفأً؟ (‏`reminder_auto_send` وحده اليوم.) */
-export function isLockedOfficeSetting(key: string): boolean {
-  return OFFICE_LOCKED_SETTING_KEYS.includes(key);
+/**
+ * هل هذا الإعدادُ مقفلٌ مطفأً؟
+ *
+ * يُقبل الصفُّ (**المصدرُ في الشاشة** — حقلُ `locked` من الخادم) أو المفتاحُ
+ * نصّاً (توافقُ النداء القديم). القفلُ **عرضٌ لا إنفاذ**: الحكمُ للخادم.
+ */
+export function isLockedOfficeSetting(
+  setting: string | Pick<SettingRow, 'key' | 'locked'>,
+): boolean {
+  if (typeof setting === 'string') return OFFICE_LOCKED_SETTING_KEYS.includes(setting);
+  return setting.locked === true;
 }
 
 /** قيمةُ رقاقة «الكل» — فارغةٌ كما في فلتر «اليوم»، فيبقى العنوانُ نظيفاً. */
@@ -2530,4 +2559,66 @@ export function responsibleFromSearch(search: string): number | null {
   if (!value) return null;
   const id = Number(value);
   return Number.isInteger(id) && id > 0 ? id : null;
+}
+
+// ── التشغيل والنسخ (#290) ────────────────────────────────────────────────────
+// التزامُ المكتب نفسه «من المنصة»: بندٌ يفرضه نظامُه الضريبيّ (بيانُ أسماء
+// الزبائن، م111). والخادم يرسل `days_left` و`is_late` مشتقَّين — الشاشةُ تعرض
+// ولا تحسب، وإلا اختلف التلوين بين جهازٍ وآخر بساعة browser.
+
+/** مصدرُ السطر كما يرسله الخادم — لائحةُ المنصّة لا إدخالُ المكتب. */
+export const SELF_OBLIGATION_SOURCE_PLATFORM = 'platform';
+
+/** حالةٌ منتظرة: الأفعالُ («قُدِّم»/«غير مطلوب») تظهر لها وحدها. */
+export const SELF_OBLIGATION_STATUS_PENDING = 'pending';
+
+export interface OfficeSelfObligationRow {
+  id: number;
+  rule_code: string;
+  name: string;
+  /** مفتاحُ المصدر (`platform`) وتسميتُه العربية — كلاهما من الخادم. */
+  source: string;
+  source_label: string;
+  period_start: string;
+  period_end: string;
+  due_on: string;
+  /** فرقُ أيامٍ من اليوم إلى الموعد — سالبٌ بعد فواته. يُحسب في الخادم. */
+  days_left: number;
+  is_late: boolean;
+  status: string;
+  status_label: string;
+  submitted_on: string | null;
+  note: string;
+  can_write?: boolean;
+}
+
+export interface OfficeSelfObligationsPayload {
+  rows: OfficeSelfObligationRow[];
+  total: number;
+  pending: number;
+  can_write: boolean;
+}
+
+/** صنفُ شارة الحالة — «بالانتظار» أصفر، «قُدِّم» أخضر، «غير مطلوب» رمادي. */
+export function selfObligationStatusClass(status: string): string {
+  if (status === 'submitted') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300';
+  }
+  if (status === 'not_required') {
+    return 'border-slate-200 bg-slate-50 text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  }
+  return 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300';
+}
+
+/**
+ * نصُّ المهلة تحت الموعد — **من `days_left`/`is_late` وحدها**، والفارغُ لبندٍ
+ * حُسم: «باقٍ 40 يوماً» فوق بندٍ مقدَّم ضجيجٌ لا معلومة.
+ */
+export function selfObligationDueText(
+  row: Pick<OfficeSelfObligationRow, 'days_left' | 'is_late' | 'status'>,
+): string {
+  if (row.status !== SELF_OBLIGATION_STATUS_PENDING) return '';
+  if (row.is_late) return `متأخّر ${formatNumber(Math.abs(row.days_left), { maxDecimals: 0 })} يوماً`;
+  if (row.days_left === 0) return 'موعدُه اليوم';
+  return `باقٍ ${formatNumber(row.days_left, { maxDecimals: 0 })} يوماً`;
 }

@@ -51,7 +51,11 @@ export type ShareDocType =
   // #288/ب-١: تقريرُ دفتر الزبون — ورقةُ جدولٍ يفتحها الزبونُ صاحبُ الدفتر ويطبعها
   // PDF من متصفحه. **لا يُنشَأ من نافذة المشاركة** (الخادم يردّ 400): بابُه نقطةُ
   // `client-books/<id>/reports/<kind>/share/` وحدها.
-  | "client_book_report";
+  | "client_book_report"
+  // #290: نوعان يخصّان المكتبَ نفسَه (نسخةُ بياناته وبيانُ أسماء زبائنه) —
+  // جمهورهما داخليّ، و`doc_id` فيهما معرّفُ المكتب، وبابُهما `exports/`.
+  | "office_data_export"
+  | "office_client_names";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

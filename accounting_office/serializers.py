@@ -1092,3 +1092,18 @@ class FeeStatementShareSerializer(serializers.Serializer):
     client = serializers.IntegerField(min_value=1)
     period_from = serializers.DateField(required=False)
     period_to = serializers.DateField(required=False)
+
+
+# ── التزامُ المكتب نفسه (#290) ───────────────────────────────────────────────
+class SelfObligationActionSerializer(serializers.Serializer):
+    """«قُدِّم» و«غير مطلوب»: تاريخُ التقديم وملاحظةُ الفعل — كلاهما اختياريّ.
+
+    **ولا مبلغَ هنا**: التزامُ المكتب نفسه لا مبلغَ له في هذا التسليم (لا
+    `computed_amount` ولا `amount`)، فالسجلُّ خارج حرّاس القناع بحكم تكوينه —
+    ولو أُضيف مبلغٌ يوماً دخل `AMOUNT_KEYS` قبل أن يُكتب.
+    """
+
+    submitted_on = serializers.DateField(required=False, allow_null=True)
+    note = serializers.CharField(
+        required=False, allow_blank=True, max_length=300,
+    )

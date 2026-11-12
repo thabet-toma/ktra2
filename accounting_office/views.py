@@ -43,7 +43,9 @@ from accounting_office import (
     deadlines,
     fee_invoices,
     fees,
+    office_exports,
     payments,
+    self_obligations,
     services,
 )
 from accounting_office.models import (
@@ -66,6 +68,7 @@ from accounting_office.models import (
     OfficeCustomRule,
     OfficeDocumentItem,
     OfficeHoliday,
+    OfficeSelfObligation,
     OfficeService,
     PeriodTask,
     ServicePackage,
@@ -135,6 +138,7 @@ from accounting_office.serializers import (
     RuleOverrideSerializer,
     ServicePackageWriteSerializer,
     SettingValueSerializer,
+    SelfObligationActionSerializer,
     TaskAssignSerializer,
     TaxCardWriteSerializer,
 )
@@ -3241,3 +3245,127 @@ class OfficeFeeLedgerViewSet(OfficeModuleViewSet):
             ),
             status=status.HTTP_201_CREATED,
         )
+
+
+# ── التشغيل والنسخ: تصديرُ بيانات المكتب وبيانُ الزبائن (#290) ───────────────
+#
+# **الحرّاسُ في الخدمة لا هنا**: `office_exports.assert_owner` تجمع الثلاثة
+# (الدورَ ومفتاحَ كل الزبائن ورؤيةَ المبالغ) وتُصدر **403** برسالةٍ تسمّي الناقص،
+# فأيّ بابٍ ثانٍ لهذه الملفات يعيد النداءَ نفسه ولا ينسى حارساً.
+class OfficeExportViewSet(OfficeModuleViewSet):
+    """تصديرُ نسخة المكتب كاملةً — Excel مباشرةً أو رابطُ PDF، وبيانُ الأسماء (م111).
+
+    **ولا قراءةَ هنا**: النقطتان `POST` لأن كليهما فعلُ إخراجٍ لا قراءةُ قائمة،
+    والتنزيلُ بايتاتٌ في ردّ `attachment`. والاسمُ من التاريخ لا من نصوصٍ عربية
+    (`Content-Disposition` بلا `filename*` يفقد محارفه في بعض المتصفحات).
+    """
+
+    serializer_class = serializers.Serializer
+
+    def get_object(self):
+        # نمطُ `OfficeSettingsViewSet`: لا كائنَ مفرد، و`OPTIONS` ينادي
+        # `get_object` فتسقط `GenericAPIView.get_queryset` بـ`AssertionError`.
+        raise NotFound("لا كائن مفرد لتصدير بيانات المكتب.")
+
+    @action(detail=False, methods=["post"], url_path="full")
+    def full(self, request):
+        """`POST exports/full/` — مصنَّفُ xlsx بتسع أوراقٍ، وفيه تاريخُ اليوم.
+
+        **ويُسكِت تذكيرَ شهره** بعد بناء الملف: النسخةُ صارت في يد صاحبها،
+        والتنبيهُ يبقى أثراً لا يعدّ ولا يلوّن.
+        """
+        office_exports.assert_owner(self.tenant, request.user)
+        today = timezone.localdate()
+        content = office_exports.full_export_bytes(self.tenant, request.user)
+        services.mark_data_export_alerts_seen(self.tenant, day=today)
+        return _xlsx_response(content, f"office-data-{today.isoformat()}")
+
+    @action(detail=False, methods=["post"], url_path="full-link")
+    def full_link(self, request):
+        """`POST exports/full-link/` — رابطُ PDF للنسخة الكاملة (بنمط التقارير)."""
+        office_exports.assert_owner(self.tenant, request.user)
+        try:
+            data = office_exports.create_full_export_link(
+                self.tenant, user=request.user, request=request,
+            )
+        except book_exports.ReportLinkDisabled as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(data, status=status.HTTP_201_CREATED)
+
+    @action(detail=False, methods=["post"], url_path="client-names")
+    def client_names(self, request):
+        """`POST exports/client-names/` — بيانُ أسماء زبائن المكتب (م111).
+
+        **مكتبُ `PS` وحده**: الشرطُ يُفحص في الخدمة فتردّ 400 برسالته، والحارسُ
+        المالكيّ قبلها فمن ليس مالكاً يأخذ 403 لا 400 (السببُ الأوّلُ أوضح).
+        """
+        office_exports.assert_owner(self.tenant, request.user)
+        try:
+            data = office_exports.create_client_names_link(
+                self.tenant, user=request.user, request=request,
+            )
+        except book_exports.ReportLinkDisabled as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(data, status=status.HTTP_201_CREATED)
+
+
+class OfficeSelfObligationViewSet(OfficeModuleViewSet):
+    """التزامُ المكتب نفسه «من المنصة» — قراءةٌ لكل عضوٍ، وكتابةٌ بالدور (#290).
+
+    **قراءةٌ بلا مفتاح**: موعدُ المكتب نفسه ليس سرّاً — كلُّ عضوٍ يرى ما على
+    المكتب من بيانٍ للدائرة. **والكتابةُ 403 لغيره**: الحكمُ في
+    `self_obligations._assert_writer` (دورٌ في `ENTRY_APPROVER_ROLES`).
+    """
+
+    serializer_class = SelfObligationActionSerializer
+
+    def get_object(self):
+        raise NotFound("لا كائن مفرد لالتزامات المكتب.")
+
+    def _row(self, pk):
+        row = (
+            OfficeSelfObligation.objects
+            .filter(tenant=self.tenant, pk=pk)
+            .first()
+        )
+        if row is None:
+            raise NotFound("التزامُ المكتب غير موجود.")
+        return row
+
+    def list(self, request, *args, **kwargs):
+        return Response(
+            self_obligations.self_obligations_payload(
+                self.tenant, user=request.user,
+            ),
+        )
+
+    @action(detail=True, methods=["post"], url_path="submit")
+    def submit(self, request, pk=None):
+        """«قُدِّم» — تاريخٌ وملاحظةٌ اختياريّان، والثاني 400 برسالته."""
+        row = self._row(pk)
+        serializer = SelfObligationActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = self_obligations.submit_self_obligation(
+            row,
+            actor=request.user,
+            submitted_on=serializer.validated_data.get("submitted_on"),
+            note=serializer.validated_data.get("note", ""),
+        )
+        return Response(self_obligations.self_obligation_row(updated))
+
+    @action(detail=True, methods=["post"], url_path="dismiss")
+    def dismiss(self, request, pk=None):
+        """«غير مطلوب» — إسقاطُ بندٍ لا يُقدَّم، بلا تاريخِ تقديم."""
+        row = self._row(pk)
+        serializer = SelfObligationActionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        updated = self_obligations.dismiss_self_obligation(
+            row,
+            actor=request.user,
+            note=serializer.validated_data.get("note", ""),
+        )
+        return Response(self_obligations.self_obligation_row(updated))

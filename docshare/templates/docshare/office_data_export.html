@@ -1,0 +1,104 @@
+{% extends "docshare/base.html" %}{% load docshare_fmt %}
+
+{% comment %}
+نسخةُ بيانات المكتب الكاملة (#290/أ) — ورقةٌ خادمية بلا JavaScript كسائر صفحات
+`docshare`، و«PDF» يُصنع من حوار الطباعة في المتصفح (نمط `printReport.ts`).
+
+**والجداولُ التسعة تصل جاهزةً من `accounting_office.office_exports`** — وهي
+نفسُها التي يكتبها ملفُّ Excel، فالأعمدةُ والصفوفُ والمجاميعُ من مصدرٍ واحد.
+**والقالبُ لا يعرف أنواعَ الخلايا إلا بحقلها** (`money`/`date`/`text`/`count`)،
+فإضافةُ عمودٍ إلى أيّ ورقةٍ لا تلمس هذا الملفّ.
+
+**والمقنَّعُ لا معنى له هنا** (البابُ للمالك وحده، ويرى مبالغه)، فالناقصُ يُعرض
+«—» لأنه غيابُ بياناتٍ لا حجبُ صلاحية.
+{% endcomment %}
+
+{% block page_title %}{{ title }}{% endblock %}
+
+{% block extra_style %}
+  .oe-head{border-bottom:2px solid var(--ink); padding-bottom:16px; margin-bottom:18px}
+  .oe-org{font-size:18px; font-weight:800; margin:0 0 2px}
+  .oe-org-line{font-size:12px; color:var(--muted); margin:1px 0}
+  .oe-title{font-size:21px; font-weight:800; margin:16px 0 4px}
+  .oe-mark{display:inline-block; border:1px dashed var(--warn); color:var(--warn);
+           border-radius:6px; padding:2px 10px; font-size:12px; font-weight:700;
+           margin-top:6px}
+  .oe-note{font-size:12.5px; color:var(--muted); margin:14px 0 6px}
+  .oe-sheet{margin:26px 0 0; page-break-inside:auto}
+  .oe-sheet h2{font-size:15px; font-weight:800; margin:0 0 2px;
+               border-inline-start:4px solid var(--brand); padding-inline-start:8px}
+  .oe-sum{font-size:11.5px; color:var(--muted); margin:0 0 8px;
+          padding-inline-start:12px}
+  .oe-table{width:100%; border-collapse:collapse; font-size:12px}
+  .oe-table th,.oe-table td{border:1px solid var(--line); padding:6px 8px;
+                            text-align:right; vertical-align:top}
+  .oe-table thead th{background:#f8fafc; font-size:11px; color:var(--muted);
+                     font-weight:700}
+  .oe-table td.num{font-variant-numeric:tabular-nums; white-space:nowrap}
+  .oe-totals{display:flex; flex-wrap:wrap; gap:14px; margin:8px 0 0;
+             border-top:1px solid var(--line); padding-top:6px}
+  .oe-total{font-size:12px; font-weight:700}
+  .oe-total span{color:var(--muted); font-weight:500; margin-inline-end:4px}
+  .oe-empty{border:1px solid var(--line); border-radius:10px; padding:12px 14px;
+            color:var(--muted); font-size:12.5px; text-align:center}
+  .oe-foot{margin-top:26px; padding-top:12px; border-top:1px solid var(--line);
+           font-size:11.5px; color:var(--muted); text-align:center}
+{% endblock %}
+
+{% block body %}
+<div class="bar no-print">
+  <button type="button" class="btn btn-primary" onclick="window.print()">
+    حفظ PDF / طباعة
+  </button>
+</div>
+
+<div class="sheet">
+  <div class="oe-head">
+    <p class="oe-org">{{ company.company_name_primary }}</p>
+    {% if company.phone %}<p class="oe-org-line">هاتف: {{ company.phone }}</p>{% endif %}
+    {% if company.address %}<p class="oe-org-line">{{ company.address }}</p>{% endif %}
+    <p class="oe-title">{{ title }}</p>
+    <span class="oe-mark">{{ watermark }}</span>
+    <p class="oe-note">تاريخ التصدير: {{ generated_on|gdate }}</p>
+    <p class="oe-note">{{ note }}</p>
+  </div>
+
+  {% for table in tables %}
+  <section class="oe-sheet">
+    <h2>{{ table.title }}</h2>
+    <p class="oe-sum">
+      {{ table.count }} صفاً
+      {% for total in table.totals %} · {{ total.label }}: {{ total.value|money }}{% endfor %}
+    </p>
+
+    {% if table.rows %}
+    <table class="oe-table">
+      <thead>
+        <tr>
+          {% for column in table.columns %}
+          <th{% if column.kind != 'text' %} class="num"{% endif %}>{{ column.label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in table.rows %}
+        <tr>
+          {% for cell in row %}
+          <td{% if cell.kind != 'text' %} class="num"{% endif %}>{% if cell.value is None %}—{% elif cell.kind == 'money' %}{{ cell.value|money }}{% elif cell.kind == 'date' %}{{ cell.value|gdate }}{% else %}{{ cell.value }}{% endif %}</td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="oe-empty">لا بياناتَ في هذه الورقة.</p>
+    {% endif %}
+  </section>
+  {% endfor %}
+
+  <div class="oe-foot">
+    {{ company.company_name_primary }}
+    <br>{{ watermark }} — {{ note }}
+  </div>
+</div>
+{% endblock %}

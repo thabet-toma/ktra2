@@ -33,7 +33,8 @@ from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
     DECISION_ACCEPTED, DECISION_REJECTED, DOC_CLIENT_BOOK_REPORT, DOC_FEE_INVOICE,
-    DOC_FEE_RECEIPT, DOC_FEE_STATEMENT, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
+    DOC_FEE_RECEIPT, DOC_FEE_STATEMENT, DOC_OFFICE_CLIENT_NAMES,
+    DOC_OFFICE_DATA_EXPORT, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
     DOC_STOCKTAKE_COUNT, DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
@@ -710,6 +711,22 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": (
                     "إشعار الدفع يُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type in (DOC_OFFICE_DATA_EXPORT, DOC_OFFICE_CLIENT_NAMES):
+            # #290: النوعان موضوعُهما **المكتبُ نفسُه** لا صفّاً من صفوفه
+            # (`doc_id` معرّفُه)، وبابُهما نقطتا التصدير (`exports/full-link/`
+            # و`exports/client-names/`) وهما تفرضان **ثلاثةَ شروطٍ معاً**: دوراً
+            # في `ENTRY_APPROVER_ROLES`، ومفتاح `office.clients.all`، ورؤيةَ
+            # المبالغ. وهذا البابُ يفحص صلاحيةَ النوع وحدها — فعضوٌ مُنح المفتاح
+            # دون الدور ولا يرى مبالغَ زملائه كان يتّخذ رابطاً عامّاً لنسخة
+            # بيانات المكتب كلّه بأسماء زبائنه ومبالغهم، متجاوزاً شرطَي الدور
+            # والمبالغ اللذين تحرسهما النقطةُ الشرعية.
+            return Response(
+                {"detail": (
+                    "نسخةُ بيانات المكتب وبيانُ أسماء زبائنه يُنشآن من مكتب "
+                    "المحاسبة — POST /api/accounting-office/exports/…"
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

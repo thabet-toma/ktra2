@@ -127,6 +127,11 @@ class AlertsTestCase(OfficeTestCase):
         cls.rule = DeadlineRule.objects.get(
             schedule__tax_system="IL", schedule__year=2026, code="il_vat_periodic",
         )
+        # #290: تذكيرُ نسخة البيانات شهريٌّ افتراضاً، فيضيف تنبيهاً لكل مستلِمٍ
+        # معتمِدٍ في كل تشغيل — وهذه الأصناف تعدّ تنبيهاتِ **التأخير** وحدها.
+        # يُطفأ هنا فيبقى القياسُ على ما يخصّه؛ ومولّدُه وموضعُه في
+        # `test_office_exports.MonthlyReminderTest`.
+        services.set_office_setting(cls.tenant, "data_export_reminder", "off")
 
     def make_alert_client(self, name, *, responsible=None):
         return office_client_without_periods(

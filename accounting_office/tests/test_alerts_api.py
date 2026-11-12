@@ -75,6 +75,10 @@ class AlertsApiTestCase(APITestCase):
         cls.rule = DeadlineRule.objects.get(
             schedule__tax_system="IL", schedule__year=2026, code="il_vat_periodic",
         )
+        # #290: تذكيرُ نسخة البيانات شهريٌّ افتراضاً — يُطفأ في هذا المكتب لأنّ
+        # هذه الأصناف تعدّ تنبيهاتِ التأخير وصفوفَ الجرس الناتجة عنها وحدها.
+        # مولّدُ التذكير وموضعُه في `test_office_exports.MonthlyReminderTest`.
+        services.set_office_setting(cls.tenant, "data_export_reminder", "off")
 
         # مكتبٌ ثانٍ مرخَّص — لعزل الكائنات المرجعية. وصاحبُ هذا المكتب **عضوٌ فيه
         # أيضاً** ومستلِمُ تنبيهاته، فلا يفصل بين الجرسين إلا شركةُ الصفّ.

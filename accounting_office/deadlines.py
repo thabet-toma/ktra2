@@ -341,3 +341,85 @@ def period_label(start: datetime.date, end: datetime.date) -> str:
         f"–{MONTH_LABELS[end.month - 1]} {end.year}"
     )
 
+
+# ── لائحةُ مواعيد المكتب نفسه (#290) ─────────────────────────────────────────
+#
+# **بياناتٌ لا قاعدةَ حساب**: `compute_deadline` أعلاه لا يقرأ هذه القائمة —
+# مواعيدُ الزبائن تُحسب من لائحة المنصّة (`DeadlineRule`)، وهذه التزاماتٌ على
+# **المكتب نفسه** يفرضها نظامُه الضريبيّ، فمصدرُها الكودُ لا صفوفُ منصّةٍ جديدة
+# ولا هجرةُ بيانات (قرارُ المالك في #290). والإضافةُ بندٌ هنا لا عمودٌ في القاعدة.
+#
+# **والموعدُ نصٌّ لا رقمان**: حرّاسُ هذا الملفّ يمنعان أيَّ ثابتٍ عدديٍّ خارج
+# أعداد التقويم (`test_deadlines.NoLegalDateInCodeTest`) — والحارسُ صادقٌ في
+# محلّه: رقمٌ محفورٌ في المحرّك يصير قاعدةً خفيّة. فالشهرُ واليومُ نصٌّ واحدٌ
+# يُقرأ في موضعٍ واحد، وموعدُه يشهد له `test_self_obligations` — لا تعليقٌ يُنسى.
+SELF_DEADLINE_CLIENT_NAMES = "client-names-report"
+#: «آذار 31» بصيغة `MM-DD` — تُركَّب في `self_deadline_due` وحدها.
+SELF_DEADLINE_DUE_MONTH_DAY = "03-31"
+#: إزاحةُ سنة الموعد: بندُ سنة `Y` موعدُه في `Y+1`.
+SELF_DEADLINE_NEXT_YEAR = 1
+
+
+@dataclasses.dataclass(frozen=True)
+class OfficeSelfDeadline:
+    """بندٌ في لائحة مواعيد المكتب نفسه — نصُّه ونظامُه وشهرُ موعده ويومُه."""
+
+    rule_code: str
+    name: str
+    tax_system: str
+    month_day: str
+
+
+OFFICE_SELF_DEADLINES: tuple[OfficeSelfDeadline, ...] = (
+    OfficeSelfDeadline(
+        rule_code=SELF_DEADLINE_CLIENT_NAMES,
+        name="أسماء زبائن المكتب وعناوينهم (م111)",
+        #: فلسطينيّاً وحده: النصُّ (م111 من تعليمات الدائرة) لا نظيرَ له في إسرائيل.
+        tax_system="PS",
+        month_day=SELF_DEADLINE_DUE_MONTH_DAY,
+    ),
+)
+
+
+def self_deadlines_for(tax_system) -> list[OfficeSelfDeadline]:
+    """بنودُ اللائحة المنطبقة على نظامٍ ضريبيّ — **نقيّة**: بلا استعلامٍ ولا ساعة."""
+    return [spec for spec in OFFICE_SELF_DEADLINES if spec.tax_system == tax_system]
+
+
+def self_deadline_due(spec: OfficeSelfDeadline, year: int) -> datetime.date:
+    """موعدُ بندٍ عن سنة `Y`: نصُّ الشهر/اليوم من اللائحة في السنة اللاحقة."""
+    return datetime.date.fromisoformat(
+        f"{year + SELF_DEADLINE_NEXT_YEAR}-{spec.month_day}",
+    )
+
+
+def self_deadline_year(spec: OfficeSelfDeadline, day: datetime.date) -> int:
+    """سنةُ الفترة الجارية: آخرُ سنةٍ **لم يفت موعدُها بعد**.
+
+    مكتبٌ يُفتح في كانون الثاني 2027 يرى بيانَ 2026 (موعدُه آخرُ آذار 2027) قبل
+    أن يفوته — والقاعدةُ مشتقّةٌ من الموعد نفسه لا من «سنةُ اليوم» وحدها، فتصحّ
+    لكل بندٍ يُضاف بمقاييسه.
+    """
+    previous = self_deadline_due(spec, day.year - SELF_DEADLINE_NEXT_YEAR)
+    if day <= previous:
+        return day.year - SELF_DEADLINE_NEXT_YEAR
+    return day.year
+
+
+def self_deadline_period(
+    spec: OfficeSelfDeadline, day: datetime.date,
+) -> tuple[datetime.date, datetime.date, datetime.date]:
+    """`(بداية الفترة، نهايتها، الموعد)` — سنةٌ ميلادية كاملة لسنة الموعد.
+
+    **والنهايةُ تُشتقّ من بداية السنة اللاحقة ناقصَ يوم** لا من رقمٍ ثانٍ:
+    «آخرُ يومٍ في السنة» ليس تاريخاً قانونياً يُكتب، بل حدُّ التقويم نفسه — ويبقى
+    هذا الملفّ بلا ثابتٍ عدديٍّ خارج أعداد التقويم (حرّاسُه أعلاه).
+    """
+    year = self_deadline_year(spec, day)
+    return (
+        datetime.date(year, 1, 1),
+        datetime.date(year + SELF_DEADLINE_NEXT_YEAR, 1, 1)
+        - datetime.timedelta(days=SELF_DEADLINE_NEXT_YEAR),
+        self_deadline_due(spec, year),
+    )
+
