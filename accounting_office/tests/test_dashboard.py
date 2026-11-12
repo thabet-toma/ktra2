@@ -12,6 +12,9 @@
 6. **«اعتمد الكل» من «بانتظارك» يعتمد المسودّات فعلاً** — لا يعدّها فقط.
 7. **التحويلُ `{responsible}`**: ينجح للمدير، ويُرفض لعضوٍ ليس بدور مكتب،
    ويُسجَّل حدثاً في سجلّ النشاط.
+8. **`late` عددُ الزبائن المتأخّرين لا الالتزامات**: زبونٌ واحدٌ بالتزامين من
+   عشرة لا يُحمرّ صفَّ مسؤوله، وثلاثةُ زبائن من عشرة يُحمرّونه؛ والمتوسطُ من
+   العدد نفسه، و`late_total` يبقى عددَ الالتزامات.
 """
 import datetime
 from decimal import Decimal
@@ -279,6 +282,65 @@ class RedRowTest(OfficeDashboardTestCase):
         self.assertIsNotNone(late_task)
         self.assertEqual(self.payload()["late_total"], 5)
         self.assertFalse(self.staff_row(self.payload(), self.colleague)["red"])
+
+
+class LateClientsNotObligationsTest(OfficeDashboardTestCase):
+    """`late` عددُ **الزبائن** المتأخّرين — والمقامُ نفسُه، لا عددُ الالتزامات.
+
+    فزبونٌ واحدٌ يتأخّر مرّتين في الفترة نفسها (ق.م والمقدّمات معاً على شغلةٍ
+    واحدة) يُعدّ **واحداً**؛ وعدُّه اثنين كان يُحمرّ صفَّ مسؤولِه بالعتبة
+    الافتراضية وحدَه — ويُلوم الشخصَ الخطأ إن حُوّلت الشغلةُ إلى غيره.
+    """
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.advances_rule = DeadlineRule.objects.get(
+            schedule__tax_system="IL", schedule__year=2026,
+            code="il_income_advances",
+        )
+        cls.pair_member = User.objects.create_user(username="dash_pair", password="x")
+        UserCompanyMembership.objects.create(
+            user=cls.pair_member, tenant=cls.tenant, role="accountant",
+        )
+        cls.pair_clients = [
+            office_client_without_periods(
+                cls.tenant, f"زبون مزدوج {index}", responsible=cls.pair_member,
+            )
+            for index in range(CLIENTS_PER_EMPLOYEE)
+        ]
+        # التزامان متأخّران لزبونٍ واحدٍ على شغلةٍ واحدة: قيدُ `PeriodTask`
+        # يمنع شغلتين لنفس (الخدمة × الفترة)، والفرادةُ في `Obligation` على
+        # (`client_service` × `rule_code` × `period_end`) فتسمح بسطرَي لائحة.
+        first = cls._late_obligation(cls.pair_clients[0])
+        add_obligation_row(
+            tenant=cls.tenant,
+            client=cls.pair_clients[0],
+            rule=cls.advances_rule,
+            actual=DAY - datetime.timedelta(days=3),
+            internal=DAY + datetime.timedelta(days=20),
+            task=first.task,
+        )
+
+    def test_two_late_obligations_for_one_client_of_ten_keep_the_row_plain(self):
+        payload = self.payload()
+        row = self.staff_row(payload, self.pair_member)
+        self.assertEqual(row["clients"], CLIENTS_PER_EMPLOYEE)
+        # الزبونُ الواحدُ متأخّرٌ مرّتين: لا يُحمرّ صفُّ مسؤوله بالعتبة الافتراضية.
+        self.assertFalse(row["red"], row)
+        self.assertEqual(row["late"], 1)
+        # المتوسطُ من العدد نفسه: (3 + 1 + 1) ÷ 3 — لا (3 + 1 + 2) ÷ 3.
+        self.assertEqual(payload["thresholds"]["office_average_late"], "1.67")
+        # `late_total` — حرفُ التذكرة — يبقى عددَ الالتزامات: 6 لا 5.
+        self.assertEqual(payload["late_total"], 6)
+
+    def test_three_late_clients_of_ten_turn_the_row_red(self):
+        for client in self.pair_clients[1:3]:
+            self._late_obligation(client)
+        row = self.staff_row(self.payload(), self.pair_member)
+        # ثلاثةُ زبائن متأخّرين من عشرة، والمكتبُ كله بثمانية التزاماتٍ حمراء.
+        self.assertEqual(row["late"], 3)
+        self.assertTrue(row["red"])
 
 
 class SinglePersonTest(OfficeDashboardTestCase):

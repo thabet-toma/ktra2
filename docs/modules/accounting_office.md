@@ -2457,7 +2457,7 @@ amount, method, method_label, cheque, note, allocations, due, credit, office}`.
 |---|---|
 | `due_total` | `payments.client_due_map` — مجموعُ `due` لكل زبونٍ يراه العضو. **لا صيغةَ مبلغٍ ثانية**، و`due` السالبُ (رصيدٌ دائن) يُجمَع كما هو |
 | `late_total` | التزاماتٌ تجاوزت موعدها الساريّ + شغلاتٌ تجاوزت موعدها الداخليّ — بشارة `services._badge_keys` نفسها التي تراها «اليوم» |
-| `staff[]` | صفُّ موظّفٍ: `clients` · `late` (التزاماتُه الحمراء) · `missing_docs` (التزاماتٌ ينقصها ورقة من `document_progress`) · `overdue_clients` (زبائنُ `due > 0`) · `red` |
+| `staff[]` | صفُّ موظّفٍ: `clients` · `late` (**زبائنُه المتأخّرون** لا التزاماتُهم — زبونٌ يتأخّر مرّتين يُعدّ واحداً، ومنسوبٌ إلى `client.responsible` كالمقام) · `missing_docs` (التزاماتٌ ينقصها ورقة من `document_progress`) · `overdue_clients` (زبائنُ `due > 0`) · `red` |
 | `waiting` | مسودّاتُ الأتعاب (`fees.pending_drafts`) + تصعيداتُ التذكير + تنبيهاتُ تغيّر اللائحة — من `services.visible_alerts` (الجرس نفسه) |
 | `single_person` | إعدادُ `office_size == "solo"` — **لا عددُ صفوف** |
 
@@ -2467,7 +2467,8 @@ amount, method, method_label, cheque, note, allocations, due, credit, office}`.
 - `dashboard_late_share_percent` (`KIND_INTEGER`، افتراض 20): نسبةُ المتأخّر من
   زبائن الموظف.
 - `dashboard_late_ratio` (`KIND_DECIMAL` — نوعُ إعدادٍ جديد، افتراض `"1.5"`):
-  مضاعفُ **متوسط المكتب**، والمتوسطُ = مجموعُ متأخّري الصفوف ÷ عددُ صفوف الجدول.
+  مضاعفُ **متوسط المكتب**، والمتوسطُ = مجموعُ الزبائن المتأخّرين في الصفوف ÷
+  عددُ صفوف الجدول.
 
 النسبةُ وحدها تظلم مكتباً كبيراً، والمضاعفُ وحده يظلم صغيراً، فاجتماعُهما بـ«أو»
 يُحمرّ الحالتين. والواجهةُ تقرأ العتبتين من الحمولة (`thresholds`) فتُظهر شرحَهما

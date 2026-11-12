@@ -275,12 +275,21 @@ def dashboard_payload(tenant, *, user, day: date | None = None) -> dict:
         clients_by_owner[owner_id] = clients_by_owner.get(owner_id, 0) + 1
         if row["pk"] in owing_ids:
             owing_by_owner[owner_id] = owing_by_owner.get(owner_id, 0) + 1
-    late_by_owner: dict[int, int] = {}
+    # **المتأخّرُ زبائنُ لا التزامات**: مجموعةُ الزبائن المتأخّرين لكل مسؤول —
+    # ومنسوبةٌ إلى `client.responsible_id` نفسِه الذي يُعدّ به المقامُ أدناه،
+    # وإلا نسبنا البسطَ إلى مسؤول الشغلة والمقامَ إلى مسؤول الزبون فافترقا.
+    # وزبونٌ يتأخّر مرّتين (شهرين، أو ق.م والمقدّمات معاً) يُعدّ واحداً: الالتزامُ
+    # وحدةُ عدٍّ في `late_total` وحده.
+    late_client_ids_by_owner: dict[int, set[int]] = {}
     for obligation, _keys in late_rows:
-        owner_id = _owner_id(obligation)
+        owner_id = obligation.client.responsible_id
         if owner_id is None:
             continue
-        late_by_owner[owner_id] = late_by_owner.get(owner_id, 0) + 1
+        late_client_ids_by_owner.setdefault(owner_id, set()).add(obligation.client_id)
+    late_clients_by_owner: dict[int, int] = {
+        owner_id: len(client_ids)
+        for owner_id, client_ids in late_client_ids_by_owner.items()
+    }
 
     share_percent, ratio = _thresholds(tenant)
     # **الجدولُ لمن له زبائن**: صفٌّ بصفر زبائنَ لا يوزّع شيئاً، وإدخالُه في
@@ -291,13 +300,13 @@ def dashboard_payload(tenant, *, user, day: date | None = None) -> dict:
     ]
     staff_users.sort(key=services.user_display_name)
     average = (
-        Decimal(sum(late_by_owner.get(row.pk, 0) for row in staff_users))
+        Decimal(sum(late_clients_by_owner.get(row.pk, 0) for row in staff_users))
         / Decimal(len(staff_users))
         if staff_users else Decimal("0.00")
     )
     staff = []
     for member in staff_users:
-        late = late_by_owner.get(member.pk, 0)
+        late = late_clients_by_owner.get(member.pk, 0)
         staff.append({
             "id": member.pk,
             "name": services.user_display_name(member),
