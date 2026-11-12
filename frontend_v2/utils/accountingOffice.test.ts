@@ -16,6 +16,8 @@ import {
   clientTabFromSearch,
   commonTaxSystem,
   directionLabelOf,
+  documentAmountDraft,
+  documentAmountsWrite,
   documentCellClass,
   documentCellGlyph,
   documentCellTone,
@@ -28,6 +30,8 @@ import {
   documentStatusChoicesFor,
   documentYearOptions,
   emptyDocumentCell,
+  generatableEntryKinds,
+  paperGenerationBlocker,
   entryDateForMonth,
   filterFeeDrafts,
   filterReadyToSendMessages,
@@ -805,6 +809,10 @@ function cellOf(overrides: Partial<DocumentCell> & Pick<DocumentCell, 'month'>):
     channel: '',
     channel_label: '',
     files_count: 0,
+    amount: null,
+    tax_amount: null,
+    vat_rate: null,
+    side_party: '',
     ...overrides,
   };
 }
@@ -1398,6 +1406,10 @@ test('الورقةُ السنوية تُعرض في شهر بدء فترتها �
     channel: '',
     channel_label: '',
     files_count: 0,
+    amount: null,
+    tax_amount: null,
+    vat_rate: null,
+    side_party: '',
     ...over,
   });
   const payload = {
@@ -1423,6 +1435,92 @@ test('تعدّدُ الأوراق في «إدخال الشهر» وحده', () =
   assert.equal(multipleDocumentsAllowed('document'), false);
   assert.equal(multipleDocumentsAllowed(null), false);
   assert.equal(multipleDocumentsAllowed(''), false);
+});
+
+// ── مبلغُ الورقة والتوليد منها (#286/ج) ─────────────────────────────────────
+
+test('مسوّدةُ مبلغ الورقة من قيمها — والمحجوبُ والفارغُ حقلٌ فارغ لا صفر', () => {
+  assert.deepEqual(
+    documentAmountDraft({
+      amount: '100.00',
+      tax_amount: '17.00',
+      vat_rate: '17.0000',
+      side_party: 'شركة الأمل',
+    }),
+    { amount: '100.00', tax_amount: '17.00', vat_rate: '17.0000', side_party: 'شركة الأمل' },
+  );
+  // مبلغٌ محجوب (`null`) أو ورقةٌ لم يُكتب مبلغها: لا «0» ولا «0.00».
+  const empty = { amount: '', tax_amount: '', vat_rate: '', side_party: '' };
+  assert.deepEqual(
+    documentAmountDraft({ amount: null, tax_amount: null, vat_rate: null, side_party: '' }),
+    empty,
+  );
+  assert.deepEqual(documentAmountDraft(null), empty);
+});
+
+test('نداءُ الحالة يحمل ما لمسه الموظف وحده — والغيابُ لا يمحو', () => {
+  const initial = documentAmountDraft({
+    amount: '100.00',
+    tax_amount: '17.00',
+    vat_rate: '17.0000',
+    side_party: 'شركة الأمل',
+  });
+
+  // لم يُلمس شيء: لا حقلَ يُرسَل، فيبقى ما قرأه الخادم.
+  assert.deepEqual(documentAmountsWrite(initial, initial), {});
+  // لمسَ المبلغَ وحده: الضريبةُ لم تُمح لأنها لم تُلمس.
+  assert.deepEqual(documentAmountsWrite(initial, { ...initial, amount: '120' }), {
+    amount: '120',
+  });
+  // المحوُ لا يقع بالغياب: `null` صريحٌ وحده يمحو.
+  assert.deepEqual(documentAmountsWrite(initial, { ...initial, tax_amount: '' }), {
+    tax_amount: null,
+  });
+  // الاسمُ يُفرَّغ بنصٍّ فارغ (كما يقرؤه الخادم) لا بـ`null`.
+  assert.deepEqual(documentAmountsWrite(initial, { ...initial, side_party: '   ' }), {
+    side_party: '',
+  });
+  // ورقةٌ بلا مبلغ: الفراغُ مساوٍ للفراغ فلا يُرسَل حقلٌ فارغ.
+  const blank = documentAmountDraft(null);
+  assert.deepEqual(documentAmountsWrite(blank, blank), {});
+});
+
+test('منتقي التوليد خمسةُ أنواعٍ — واليدويُّ والافتتاحيُّ ليسا منها', () => {
+  const choices = [
+    { value: 'sales_invoice', label: 'فاتورة بيع' },
+    { value: 'purchase_invoice', label: 'فاتورة شراء' },
+    { value: 'expense', label: 'مصروف' },
+    { value: 'bank_movement', label: 'حركة بنك' },
+    { value: 'daily_report', label: 'تقرير يومي' },
+    { value: 'manual', label: 'يدوي' },
+    { value: 'opening', label: 'رصيد افتتاحي' },
+  ];
+
+  const kinds = generatableEntryKinds(choices);
+
+  assert.deepEqual(
+    kinds.map((choice) => choice.value),
+    ['sales_invoice', 'purchase_invoice', 'expense', 'bank_movement', 'daily_report'],
+  );
+  // التسميةُ من الخادم لا من جدولٍ هنا، والترتيبُ ترتيبُه.
+  assert.equal(kinds[0].label, 'فاتورة بيع');
+  assert.deepEqual(generatableEntryKinds([]), []);
+});
+
+test('«ولّد البنود» يُعطَّل على ورقةٍ بلا مبلغ — ويسمّيها', () => {
+  const papers = [
+    { row_id: 1, name: 'فاتورة الكهرباء', amount: '100.00' },
+    { row_id: 2, name: 'إيصال الإنترنت', amount: null },
+  ];
+
+  // المختارةُ كلُّها بمبلغ: لا مانع.
+  assert.equal(paperGenerationBlocker(papers, [1]), '');
+  // ورقةٌ بلا مبلغ تُسمّى وحدها في السبب.
+  const reason = paperGenerationBlocker(papers, [1, 2]);
+  assert.match(reason, /إيصال الإنترنت/);
+  assert.doesNotMatch(reason, /فاتورة الكهرباء/);
+  // ولا اختيار: لا زرَّ ولا سبب.
+  assert.equal(paperGenerationBlocker(papers, []), '');
 });
 
 test('مسوّدةُ الحركة تُمسك أخطاءَ الخادم قبل الإرسال', () => {

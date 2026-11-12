@@ -18,15 +18,20 @@ import {
   downloadDocumentFile,
   getClientDocuments,
   getDocumentItems,
+  listBookEntries,
   listDocumentFiles,
   setClientDocumentChoice,
   setDocumentStatus,
   uploadDocumentFile,
+  type BookEntryRow,
   type ClientDocumentsPayload,
   type DocumentFileRow,
   type OfficeDocumentItemRow,
 } from '../../services/accountingOfficeApi';
 import {
+  bookedDocumentIds,
+  documentAmountDraft,
+  documentAmountsWrite,
   documentCellClass,
   documentCellGlyph,
   documentCellTitle,
@@ -38,10 +43,13 @@ import {
   documentStatusChoicesFor,
   documentYearOptions,
   shortIsoDate,
+  type DocumentAmountDraft,
+  type DocumentAmountFields,
 } from '../../utils/accountingOffice';
 import { todayIso } from '../../utils/formatDate';
 import { humanizeThrown } from '../../utils/drfError';
 import { useConfirm } from '../../contexts/ConfirmContext';
+import { usePermissions } from '../../contexts/PermissionsContext';
 import { useToast } from '../../contexts/ToastContext';
 import {
   OfficeCard,
@@ -53,6 +61,9 @@ import {
 /** حالةُ اللوح: أربعةُ أزرارٍ للحالة، وواحدُ سؤالٍ للقناة بعد «وصلت». */
 const RECEIVED_STATUSES = new Set(['received', 'partial']);
 
+/** مسوّدةُ مبلغٍ فارغة — لا صفرٌ مخترعٌ لورقةٍ لم يُكتب مبلغها. */
+const EMPTY_AMOUNTS: DocumentAmountDraft = documentAmountDraft(null);
+
 const EMPTY_UPLOAD = {
   document_type: '',
   issuer_registration: '',
@@ -60,6 +71,95 @@ const EMPTY_UPLOAD = {
   document_number: '',
   is_copy: true,
 };
+
+/** قيمُ الأوراق المعروفة في الحمولة — خاناتُ الأشهر والقائمةُ السنوية معاً. */
+function knownDocumentValues(
+  payload: ClientDocumentsPayload,
+): Record<number, DocumentAmountDraft> {
+  const known: Record<number, DocumentAmountDraft> = {};
+  payload.items.forEach((item) => {
+    item.cells.forEach((cell) => {
+      if (cell.row_id !== null) known[cell.row_id] = documentAmountDraft(cell);
+    });
+  });
+  payload.annual.forEach((row) => {
+    known[row.row_id] = documentAmountDraft(row);
+  });
+  return known;
+}
+
+/**
+ * حقولُ مبلغ الورقة الأربعة (#286/ج): المبلغُ والضريبةُ والنسبةُ والطرف.
+ *
+ * **والقاعدةُ في الخادم**: `amount + tax_amount` هما مصدرُ بنود الحركة، والنسبةُ
+ * وصفٌ للعرض. المبلغان محجوبان (`office.amounts.view`) فلا يُكتب ما لا يُرى —
+ * والخادمُ يردّ كتابتَهما 403 — بينما النسبةُ والطرفُ اسمٌ ونسبةٌ فيبقيان.
+ */
+const PaperAmountInputs: React.FC<{
+  draft: DocumentAmountDraft;
+  onChange: (key: keyof DocumentAmountDraft, value: string) => void;
+  /** ورقةٌ مُدخَلةٌ في حركةٍ حيّة — التصحيحُ بحركةٍ عكسية لا بتعديل الورقة. */
+  locked: boolean;
+  canSeeAmounts: boolean;
+}> = ({ draft, onChange, locked, canSeeAmounts }) => (
+  <div className="mt-2 grid gap-2 rounded-md bg-slate-50 p-2 dark:bg-slate-800 md:grid-cols-4">
+    <label className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+      المبلغ قبل الضريبة
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        inputMode="decimal"
+        value={canSeeAmounts ? draft.amount : ''}
+        placeholder={canSeeAmounts ? '' : '—'}
+        disabled={locked || !canSeeAmounts}
+        onChange={(event) => onChange('amount', event.target.value)}
+        className={`mt-1 w-full tabular-nums disabled:opacity-60 ${officeInputClass}`}
+        aria-label="مبلغ الورقة قبل الضريبة"
+      />
+    </label>
+    <label className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+      الضريبة
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        inputMode="decimal"
+        value={canSeeAmounts ? draft.tax_amount : ''}
+        placeholder={canSeeAmounts ? '' : '—'}
+        disabled={locked || !canSeeAmounts}
+        onChange={(event) => onChange('tax_amount', event.target.value)}
+        className={`mt-1 w-full tabular-nums disabled:opacity-60 ${officeInputClass}`}
+        aria-label="ضريبة الورقة"
+      />
+    </label>
+    <label className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+      النسبة ٪
+      <input
+        type="number"
+        step="0.01"
+        min="0"
+        max="100"
+        inputMode="decimal"
+        value={draft.vat_rate}
+        disabled={locked}
+        onChange={(event) => onChange('vat_rate', event.target.value)}
+        className={`mt-1 w-full tabular-nums disabled:opacity-60 ${officeInputClass}`}
+        aria-label="نسبة ض.ق.م على الورقة"
+      />
+    </label>
+    <label className="text-[10px] font-semibold text-slate-600 dark:text-slate-300">
+      الطرف المقابل
+      <input
+        value={draft.side_party}
+        disabled={locked}
+        onChange={(event) => onChange('side_party', event.target.value)}
+        className={`mt-1 w-full disabled:opacity-60 ${officeInputClass}`}
+        aria-label="الطرف المقابل على الورقة"
+      />
+    </label>
+  </div>
+);
 
 export const OfficeClientDocuments: React.FC<{
   clientId: number;
@@ -69,6 +169,9 @@ export const OfficeClientDocuments: React.FC<{
 }> = ({ clientId, canWrite, taxSystem }) => {
   const toast = useToast();
   const confirm = useConfirm();
+  // الحجبُ من الصلاحية لا من الزرّ: من لا يملك «يرى المبالغ» لا يكتبها (403).
+  const { can } = usePermissions();
+  const canSeeAmounts = can('office.amounts.view');
   const currentYear = Number(todayIso().slice(0, 4));
   const [year, setYear] = useState(currentYear);
   const [payload, setPayload] = useState<ClientDocumentsPayload | null>(null);
@@ -87,12 +190,30 @@ export const OfficeClientDocuments: React.FC<{
   const [customBusy, setCustomBusy] = useState(false);
   // سنويّة: صفٌّ وقناةٌ في انتظار الاختيار — كالحالة في الشبكة.
   const [annualPending, setAnnualPending] = useState<{ rowId: number; status: string } | null>(null);
+  // مبلغُ كل ورقة كما كتبه الموظف، وقيمُه الأولى للمقارنة: ما لم يُلمس لا يُرسَل.
+  const [valueBase, setValueBase] = useState<Record<number, DocumentAmountDraft>>({});
+  const [valueDrafts, setValueDrafts] = useState<Record<number, DocumentAmountDraft>>({});
+  // أوراقُ الحركات الحيّة — «مُدخَلة» تُشتقّ منها ولا عمودَ لها (د9).
+  const [booked, setBooked] = useState<ReadonlySet<number>>(() => new Set<number>());
 
   const load = useCallback(() => {
     setLoading(true);
     setError('');
-    getClientDocuments(clientId, year)
-      .then((next) => setPayload(next))
+    // الحركاتُ تُقرأ مع الأوراق: «مُدخَل» مشتقٌّ من رابط الورقة بحركتها، وفشلُ
+    // القراءة (زبونٌ بلا دفتر) لا يُسقط الأوراق — لا ورقةَ مُدخَلةً حينها.
+    Promise.all([
+      getClientDocuments(clientId, year),
+      listBookEntries(clientId).catch(() => [] as BookEntryRow[]),
+    ])
+      .then(([next, entries]) => {
+        const known = knownDocumentValues(next);
+        setPayload(next);
+        setBooked(bookedDocumentIds(entries));
+        // القيمُ الجديدةُ تُزرع للصفوف الجديدة وحدها: إعادةُ التحميل بعد رفع ملفّ
+        // لا تمحو مبلغاً نصفَ مكتوب.
+        setValueBase((current) => ({ ...known, ...current }));
+        setValueDrafts((current) => ({ ...known, ...current }));
+      })
       .catch((failure) => {
         setPayload(null);
         setError(humanizeThrown(failure, 'تعذّر تحميل أوراق الزبون.'));
@@ -103,6 +224,23 @@ export const OfficeClientDocuments: React.FC<{
   useEffect(() => {
     load();
   }, [load]);
+
+  /** القيمُ كما ردّها الخادم بعد الحفظ — تُعرض فوراً، وقيمُها الأولى تتجدّد. */
+  const remember = useCallback((rowId: number, fields: DocumentAmountFields) => {
+    const draft = documentAmountDraft(fields);
+    setValueBase((current) => ({ ...current, [rowId]: draft }));
+    setValueDrafts((current) => ({ ...current, [rowId]: draft }));
+  }, []);
+
+  const editValue = useCallback(
+    (rowId: number, key: keyof DocumentAmountDraft, value: string) => {
+      setValueDrafts((current) => ({
+        ...current,
+        [rowId]: { ...(current[rowId] ?? EMPTY_AMOUNTS), [key]: value },
+      }));
+    },
+    [],
+  );
 
   const gridRows = useMemo(
     () => (payload ? documentGridRows(payload) : []),
@@ -132,6 +270,12 @@ export const OfficeClientDocuments: React.FC<{
     return item && cell ? { item, cell } : null;
   }, [payload, selected]);
   const selectedRowId = selectedCell?.cell.row_id ?? null;
+  // حقولُ المبلغ تُفتح للواصل/الناقص: هي ما يُكتب على الورقة أوّلَ ما تصل.
+  const selectedTakesAmounts = Boolean(
+    selectedCell
+    && (RECEIVED_STATUSES.has(selectedCell.cell.status ?? '') || pendingStatus !== null),
+  );
+  const selectedEntered = selectedRowId !== null && booked.has(selectedRowId);
 
   const loadFiles = useCallback((rowId: number) => {
     setFilesLoading(true);
@@ -157,7 +301,16 @@ export const OfficeClientDocuments: React.FC<{
   const applyStatus = async (rowId: number, status: string, channel?: string) => {
     setSaving(true);
     try {
-      await setDocumentStatus(rowId, { status, channel });
+      // #286/ج: مبلغُ الورقة يُرسَل مع حالته في نداءٍ واحد — **الحقولُ التي
+      // لمسها الموظف وحدها**، فورقةٌ لم تُلمس لا يُمحى مبلغُها.
+      const values = RECEIVED_STATUSES.has(status)
+        ? documentAmountsWrite(
+          valueBase[rowId] ?? EMPTY_AMOUNTS,
+          valueDrafts[rowId] ?? EMPTY_AMOUNTS,
+        )
+        : {};
+      const saved = await setDocumentStatus(rowId, { status, channel, ...values });
+      remember(saved.row_id, saved);
       setPendingStatus(null);
       setAnnualPending(null);
       toast('حُفظت حالة الورقة', 'success');
@@ -472,6 +625,31 @@ export const OfficeClientDocuments: React.FC<{
               </div>
             ) : null}
 
+            {/* #286/ج: مبلغُ الورقة وضريبتُها — يُدخَل مع «وصلت» فيُبنى منه بندُ الحركة. */}
+            {canWrite && selectedTakesAmounts ? (
+              <div>
+                <PaperAmountInputs
+                  draft={valueDrafts[selectedRowId as number] ?? EMPTY_AMOUNTS}
+                  onChange={(key, value) => editValue(
+                    selectedRowId as number, key, value,
+                  )}
+                  locked={selectedEntered}
+                  canSeeAmounts={canSeeAmounts}
+                />
+                {selectedEntered ? (
+                  <p className="mt-1 text-[10px] font-medium text-amber-800 dark:text-amber-300">
+                    مُدخَلةٌ في حركةٍ حيّة — المبالغُ للقراءة وحدها، والتصحيحُ بحركةٍ عكسية.
+                  </p>
+                ) : null}
+                {!canSeeAmounts ? (
+                  <p className="mt-1 text-[10px] font-medium text-slate-500 dark:text-slate-400">
+                    المبلغُ والضريبةُ محجوبان: صلاحية «يرى المبالغ» غير ممنوحة لدورك —
+                    والنسبةُ والطرفُ يُكتبان.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             <div>
               <p className="text-[10.5px] font-semibold text-slate-500 dark:text-slate-400">
                 الملفات
@@ -639,6 +817,24 @@ export const OfficeClientDocuments: React.FC<{
                     ? ` — وصلت ${shortIsoDate(row.received_on)}${row.channel_label ? ` · ${row.channel_label}` : ''}`
                     : ''}
                 </p>
+                {/* #286/ج: الورقةُ السنوية تحمل مبلغها كذلك — والتوليدُ يقرؤه. */}
+                {canWrite
+                  && (RECEIVED_STATUSES.has(row.status)
+                    || (annualPending !== null && annualPending.rowId === row.row_id)) ? (
+                    <div>
+                      <PaperAmountInputs
+                        draft={valueDrafts[row.row_id] ?? EMPTY_AMOUNTS}
+                        onChange={(key, value) => editValue(row.row_id, key, value)}
+                        locked={booked.has(row.row_id)}
+                        canSeeAmounts={canSeeAmounts}
+                      />
+                      {booked.has(row.row_id) ? (
+                        <p className="mt-1 text-[10px] font-medium text-amber-800 dark:text-amber-300">
+                          مُدخَلةٌ في حركةٍ حيّة — المبالغُ للقراءة وحدها، والتصحيحُ بحركةٍ عكسية.
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
                 {row.files && row.files.length ? (
                   <ul className="mt-1.5 space-y-1">
                     {row.files.map((file) => (

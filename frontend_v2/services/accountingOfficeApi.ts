@@ -901,7 +901,19 @@ export const getClientDocuments = (
 /** تسجيلُ حالة ورقة — «وصلت» تحتاج `channel` وإلا 400 من الخادم. */
 export const setDocumentStatus = (
   rowId: number,
-  payload: { status: string; channel?: string },
+  payload: {
+    status: string;
+    channel?: string;
+    /**
+     * حقولُ مبلغ الورقة الأربعة (#286/ج) — **التي لمسها الموظفُ وحدها**
+     * (`documentAmountsWrite`): الخادمُ لا يُفرّغ بحقلٍ غائب، والمحوُ `null` صريح.
+     * وبلا `office.amounts.view` يردّ المبلغين 403.
+     */
+    amount?: string | null;
+    tax_amount?: string | null;
+    vat_rate?: string | null;
+    side_party?: string;
+  },
 ): Promise<DocumentRowPayload> =>
   apiPostObject<DocumentRowPayload>(
     `${DOCUMENTS}${rowId}/status/`, payload, tenantOpts(),
@@ -1255,6 +1267,29 @@ export const createBookEntry = (
 ): Promise<BookEntryRow> =>
   apiPostObject<BookEntryRow>(
     `${CLIENT_BOOKS}${clientId}/entries/`, payload, tenantOpts(),
+  );
+
+/**
+ * «ولّد البنود من الأوراق» (#286/ج) — `POST …/entries/from-documents/`.
+ *
+ * **ولا بندَ ولا حسابَ في الطلب**: الخادمُ يبني البنود من `amount + tax_amount`
+ * وخريطةِ الحسابات بحسب نوع الورقة، ويكتبها بـ`create_entry` وحدَه. الواجهةُ
+ * تجمع الاختيار (النوعُ والأوراقُ والتاريخُ والبيان) وتردّ ما وصل.
+ *
+ * و`entry_date` اختياريٌّ في الخادم (افتراضُه `period_end` لأوراق الشهر)،
+ * و`memo` فارغٌ لا يُرسَل.
+ */
+export const createBookEntryFromDocuments = (
+  clientId: number,
+  payload: {
+    kind: string;
+    documents: number[];
+    entry_date?: string;
+    memo?: string;
+  },
+): Promise<BookEntryRow> =>
+  apiPostObject<BookEntryRow>(
+    `${CLIENT_BOOKS}${clientId}/entries/from-documents/`, payload, tenantOpts(),
   );
 
 /** التصحيحُ بحركةٍ عكسية — الأصلُ يبقى، وأوراقُه تعود إلى «للإدخال». */

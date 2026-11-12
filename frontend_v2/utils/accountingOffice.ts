@@ -1240,8 +1240,25 @@ export interface DocumentFileRow {
   created_by_name: string;
 }
 
+/**
+ * حقولُ مبلغ الورقة الأربعة كما تخرج (#286/ج) — عقدُ
+ * `client_books.DOCUMENT_VALUE_FIELDS` / `document_values_payload`.
+ *
+ * **والمبلغان يُقنَّعان `null`** لمن لا يملك `office.amounts.view`، والنسبةُ
+ * والطرفُ يبقيان: نسبةٌ واسمٌ لا مال، وإخفاؤهما يترك الحارسَ بلا وجه. و`null`
+ * تعني «محجوبٌ عنك» أو «لم يُكتب» — والتفريقَ بمفتاح الشاشة (`usePermissions`).
+ */
+export interface DocumentAmountFields {
+  /** صافي الورقة قبل الضريبة — `null` لمحجوبٍ أو لورقةٍ بلا مبلغ. */
+  amount: string | null;
+  tax_amount: string | null;
+  /** النسبةُ كما وردت على الورقة — للعرض لا للحساب. */
+  vat_rate: string | null;
+  side_party: string;
+}
+
 /** خانةُ شهرٍ — `row_id === null` تعني «لا صفَّ لهذا البند في هذا الشهر». */
-export interface DocumentCell {
+export interface DocumentCell extends DocumentAmountFields {
   month: string;
   row_id: number | null;
   status: string | null;
@@ -1260,7 +1277,7 @@ export interface DocumentItemRow {
 }
 
 /** سطرُ ورقةٍ كاملاً — من فعل الحالة ومن القائمة السنوية. */
-export interface DocumentRowPayload {
+export interface DocumentRowPayload extends DocumentAmountFields {
   row_id: number;
   client_id: number;
   item_code: string;
@@ -1363,6 +1380,10 @@ export function emptyDocumentCell(month: string): DocumentCell {
     channel: '',
     channel_label: '',
     files_count: 0,
+    amount: null,
+    tax_amount: null,
+    vat_rate: null,
+    side_party: '',
   };
 }
 
@@ -1456,6 +1477,106 @@ export function documentStatusChoicesFor(
   }));
 }
 
+// ── مبلغُ الورقة (#286/ج) ───────────────────────────────────────────────────
+//
+// **الخادمُ يحكم والقاعدةُ في `client_books` وحدها**: `amount + tax_amount` هما
+// مصدرُ بنود الحركة، والحسابُ يتبع نوعَ الورقة لا ذوقَ من يُدخل. فما في هذا
+// القسم **جمعُ ما كتبه الموظف وإرسالُ ما لمسه وحده**: الخادمُ لا يُفرّغ بحقلٍ
+// غائب، وواجهةٌ ترسل الصفرَ مكان الفراغ تمحو قراءةً لم يقصدها أحد.
+
+/** مسوّدةُ مبلغ الورقة كما يكتبها الموظف — نصوصُ الحقول لا أرقامُها. */
+export interface DocumentAmountDraft {
+  amount: string;
+  tax_amount: string;
+  vat_rate: string;
+  side_party: string;
+}
+
+/** ما يُرسَل مع نداء الحالة: الحقولُ التي لمسها الموظف وحدها. */
+export type DocumentAmountWrite = Partial<{
+  amount: string | null;
+  tax_amount: string | null;
+  vat_rate: string | null;
+  side_party: string;
+}>;
+
+/** الحقولُ الأربعة بمفاتيح الخادم — ترتيبٌ واحدٌ للعرض والإرسال. */
+export const DOCUMENT_AMOUNT_KEYS = [
+  'amount', 'tax_amount', 'vat_rate', 'side_party',
+] as const;
+
+/** مسوّدةٌ من قيم الورقة: المحجوبُ والفارغُ حقلٌ فارغ، لا صفرٌ مخترع. */
+export function documentAmountDraft(
+  fields: DocumentAmountFields | null | undefined,
+): DocumentAmountDraft {
+  return {
+    amount: fields?.amount ?? '',
+    tax_amount: fields?.tax_amount ?? '',
+    vat_rate: fields?.vat_rate ?? '',
+    side_party: fields?.side_party ?? '',
+  };
+}
+
+/**
+ * حقولُ نداء الحالة: **ما تغيّر عن قيم الورقة وحدها**.
+ *
+ * الغيابُ لا يمحو (`set_document_amounts`): إرسالُ كل حقلٍ دائماً يمحو ما لم
+ * يلمسه الموظف، وإرسالُ الصفر مكان الفراغ يكتب مبلغاً لم يُقرأ. فالحقلُ
+ * المُفرَّغُ قصداً يُرسَل `null` صريحاً — وهو الطريقُ الوحيدُ للمحو — والاسمُ
+ * يُفرَّغ بنصٍّ فارغ لأن الخادمَ يقرؤه كذلك.
+ */
+export function documentAmountsWrite(
+  initial: DocumentAmountDraft,
+  draft: DocumentAmountDraft,
+): DocumentAmountWrite {
+  const payload: DocumentAmountWrite = {};
+  for (const key of DOCUMENT_AMOUNT_KEYS) {
+    const before = (initial[key] ?? '').trim();
+    const after = (draft[key] ?? '').trim();
+    if (before === after) continue;
+    if (key === 'side_party') {
+      payload.side_party = after;
+      continue;
+    }
+    payload[key] = after === '' ? null : after;
+  }
+  return payload;
+}
+
+/**
+ * الأنواعُ التي تُولَّد من ورق — الخمسة، **بتسميات الخادم وترتيبه**.
+ *
+ * `manual` و`opening` يُكتبان بيد إنسانٍ بدورٍ لا بمفتاح، و`generate_entry_lines`
+ * يردّهما 400 («بأيديهما»)؛ فإظهارهما في منتقي التوليد زرٌّ مصيرُه الرفض.
+ */
+const PAPERLESS_ENTRY_KINDS = new Set(['manual', 'opening']);
+
+export function generatableEntryKinds(
+  choices: readonly { value: string; label: string }[],
+): { value: string; label: string }[] {
+  return choices
+    .filter((choice) => !PAPERLESS_ENTRY_KINDS.has(choice.value))
+    .map((choice) => ({ value: choice.value, label: choice.label }));
+}
+
+/**
+ * سببُ تعطيل «ولّد البنود من الأوراق» — أو `''` حين لا مانعَ معروفاً.
+ *
+ * ورقةٌ بلا مبلغ يردّها الخادمُ 400 باسمها (`_paper_totals`)، فلا نُرسل ما نعلم
+ * أنه سيُردّ. يُقرأ من أوراق الشهر المختار وحدها: `null` هنا مبلغٌ لم يُكتب —
+ * فمن لا يرى المبالغ لا يصل إلى هذا النموذج أصلاً (`canSeeAmounts`).
+ */
+export function paperGenerationBlocker(
+  documents: readonly Pick<PendingDocument, 'row_id' | 'name' | 'amount'>[],
+  selected: readonly number[],
+): string {
+  const missing = documents.filter(
+    (document) => selected.includes(document.row_id) && !document.amount,
+  );
+  if (!missing.length) return '';
+  return `ورقة بلا مبلغ: ${missing.map((document) => document.name).join(' · ')} — اكتب مبلغها في تبويب «الأوراق» أوّلاً.`;
+}
+
 /** نصُّ «وصل 3/5» — `''` حين لا صفوفَ محسوبة (لا «0/0»). */
 export function documentDocsText(
   docs: DocumentProgress | null | undefined,
@@ -1509,17 +1630,9 @@ export function documentYearOptions(
 
 /** صنفُ رقاقة الحالة في دليل الألوان — نفس ألوان الخانة بلا موضعٍ خاصّ. */
 export function documentStatusChipClass(status: string): string {
-  return documentCellClass({
-    month: '',
-    row_id: 1,
-    status,
-    status_label: '',
-    received_on: null,
-    received_by_name: '',
-    channel: '',
-    channel_label: '',
-    files_count: 0,
-  });
+  // من `emptyDocumentCell` لا من كائنٍ مكتوبٍ بيده: خانةٌ تُضاف إليها حقولٌ
+  // جديدة (#286/ج) لا تُسقط دليلَ الألوان.
+  return documentCellClass({ ...emptyDocumentCell(''), row_id: 1, status });
 }
 
 
@@ -2154,7 +2267,7 @@ export interface PendingEntryPayload {
 }
 
 /** ورقةٌ واصلةٌ بلا إدخال — تُختار في نموذج الحركة. */
-export interface PendingDocument {
+export interface PendingDocument extends DocumentAmountFields {
   row_id: number;
   name: string;
   received_on: string | null;
@@ -2290,14 +2403,32 @@ export function pendingMonthDocuments(
       if (cell.row_id === null || booked.has(cell.row_id)) return;
       if (cell.status !== 'received') return;
       if (monthKeyOf(cell.month) !== key) return;
-      rows.push({ row_id: cell.row_id, name: item.name, received_on: cell.received_on });
+      rows.push({
+        row_id: cell.row_id,
+        name: item.name,
+        received_on: cell.received_on,
+        // #286/ج: مبلغُ الورقة يُقرأ من الخانة كما يُقرأ من السطر السنوي —
+        // وبلا هذا لا يعرف زرُّ التوليد ورقةً بلا مبلغ قبل أن يردّها الخادم 400.
+        amount: cell.amount,
+        tax_amount: cell.tax_amount,
+        vat_rate: cell.vat_rate,
+        side_party: cell.side_party,
+      });
     });
   });
   payload.annual.forEach((row) => {
     if (booked.has(row.row_id)) return;
     if (row.status !== 'received') return;
     if (monthKeyOf(row.period_start) !== key) return;
-    rows.push({ row_id: row.row_id, name: row.name, received_on: row.received_on });
+    rows.push({
+      row_id: row.row_id,
+      name: row.name,
+      received_on: row.received_on,
+      amount: row.amount,
+      tax_amount: row.tax_amount,
+      vat_rate: row.vat_rate,
+      side_party: row.side_party,
+    });
   });
   return rows;
 }
