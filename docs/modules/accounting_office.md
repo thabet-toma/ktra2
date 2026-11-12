@@ -498,6 +498,11 @@ tax_system_for(tenant, client) / office_is_licensed(tenant) / archived_rate(tena
 | `GET` | `client-books/<client_id>/entries/<id>/` | `OfficeClientBookViewSet` (`entry`) — حركةٌ واحدة، **قراءةً فقط**: `PUT`/`PATCH`/`DELETE` عليها 405 |
 | `POST` | `client-books/<client_id>/entries/<id>/reverse/` | `OfficeClientBookViewSet` (`reverse`) — حركةٌ عكسية؛ عكسُ العكس وثاني عكسٍ 400 |
 | `GET` | `client-books/pending-entry/` | `OfficeClientBookViewSet` (`pending_entry`) — «للإدخال»: أوراقٌ واصلةٌ بلا حركةٍ حيّة، بالزبون والشهر، **وللدفاتر القابلة للكتابة وحدها** |
+| `POST` | `exports/full/` | `OfficeExportViewSet` (`full`) — **ملفُّ xlsx** بتسع أوراق (زباين · بطاقات · خدمات · التزامات · أوراق · تذكيرات · فواتير · دفعات · دفاتر) من `office_exports.full_export_bytes`، **للمالك وحده** (دورُ `ENTRY_APPROVER_ROLES` + `office.clients.all` + `office.amounts.view`، وإلا **403** يسمّي الناقص)، ويُسكِت تنبيهَ شهره (#290) |
+| `POST` | `exports/full-link/` | `OfficeExportViewSet` (`full_link`) — `{url, expires_at}`: مشاركةُ PDF من نوع `office_data_export` للجداول التسعة نفسها، بنفس حارس المالك وبإعداد «رابط PDF للتقارير» (مطفأ ⇒ 400) (#290) |
+| `POST` | `exports/client-names/` | `OfficeExportViewSet` (`client_names`) — بيانُ أسماء زبائن المكتب وعناوينهم (م111) من نوع `office_client_names`، **لمكتبٍ نظامُه `PS` وحده** (وإلا 400) وبحارس المالك (#290) |
+| `GET` | `self-obligations/` | `OfficeSelfObligationViewSet` (`list`) — **التزاماتُ المكتب نفسه** (سجلٌّ مستقلّ، لا `Obligation` ولا زبون): `rule_code`/`name`/`due_on`/`days_left`/`is_late`/`status`، ومصدرُها «المنصة» (`source_label`)، و`can_write` قرارُ الخادم (#290) |
+| `POST` | `self-obligations/<id>/submit/` و`.../dismiss/` | `OfficeSelfObligationViewSet` (`submit` · `dismiss`) — `{submitted_on?, note?}`؛ الكتابةُ لدورِ `ENTRY_APPROVER_ROLES` وحدها (**403** لغيره)، والانتقالُ من «بالانتظار» مرّةً واحدة (#290) |
 | `POST` | `client-books/<client_id>/kind/` | `OfficeClientBookViewSet` (`kind`) — تغييرُ النوع (بسيط ← مزدوج من بداية سنة، د7) **ويُكمل الشجرة** |
 | `POST` | `client-books/<client_id>/settings/` | `OfficeClientBookViewSet` (`update_settings`) — السنةُ المالية (`fiscal_year_start` «شهر-يوم») والعملةُ (`currency` رمزُ ISO)، كلٌّ اختياريٌّ، بمفتاح الكتابة؛ والتقويمُ والعملةُ يُفحصان في الخدمة (400) — **والدفترُ المنتهي 400** (#288/ب-٢) |
 | `POST` | `client-books/<client_id>/import/` | `OfficeClientBookViewSet` (`import_file`, `multipart` بحقل `file`) — استيرادُ الشجرة والأرصدة من xlsx و`entry_date` اختياريّ (افتراضُه `opened_on`)؛ **يرفض غيرَ المتوازن بفرقٍ مسمّىً، والكودَ المكرَّر، وصفّاً فاسداً — بلا كتابةٍ جزئية**؛ والملفُّ بأرصدةٍ بدور المدير/صاحب المكتب، وشجرةٌ بلا أرصدةٍ بمفتاح الكتابة (#288/ب-٢) |
@@ -1719,6 +1724,16 @@ slot_day)` نفسه (مفتاحُ React مكرَّر، وإرسالُ أحدهم
 فهارس وستةُ قيود، ثم `RunPython` لزرع شجرة المنصّة بعكسٍ يحذف أكوادَه وحدها. بلا
 `RemoveField` ولا `DeleteModel` ولا `RunSQL`.
 
+## بنودُ الحركة من الورقة (#286 — الجزء ج)
+
+**القرارُ المحسوم (2026-11-11):** «توليدُ بنود الحركة من مبلغ الورقة وضريبتها وطرفها» — الموظّفُ يكتب ما على الورقة، والبرنامجُ يبني الحركة، والقيدُ اليدويُّ يبقى للتعديل.
+
+- **حقولُ الورقة الأربعة على `DocumentChecklistItem`:** `amount` (**صافٍ قبل الضريبة**) · `tax_amount` · `vat_rate` (وصفٌ للعرض لا للحساب، و`AMOUNT_KEYS` للعرض) · `side_party`. والإجماليُّ `amount + tax_amount` قاعدةٌ واحدة.
+- **`client_books.generate_entry_lines` + `ENTRY_KIND_ACCOUNTS`:** الحسابُ يتبع نوعَ الورقة لا ذوقَ المُدخل — بيع `1300`/`4100` · شراء `5200`/`2100` · مصروف `5100`/`1100` · بنك `1200`/`1100` · تقريرٌ يوميّ `1100`/`4100`. والضريبةُ على `2200` **مرّةً واحدة** بالطرف المقابل للاتجاه (دائنةٌ للبيع والتقرير، مدينةٌ للشراء والمصروف)، ولا سطرَ ضريبةٍ في الدفتر البسيط (سطرٌ واحدٌ بالإجمالي). والطرفُ على سطر الذمم (`1300`/`2100`) وإلا على سطر الوعاء.
+- **`create_entry_from_documents`:** أوراقُ شهرٍ واحد (وإلا **400**) وتاريخٌ افتراضاً `period_end`، والكتابةُ تبقى في `create_entry` وحدَه (القفلُ والترقيمُ والتوازنُ وتعليمُ «انأدخلت»). وورقةٌ بلا مبلغ، أو شجرةٌ بلا حساب `2200` وضريبةٌ موجبة، أو حركةُ بنكٍ بضريبة ⇒ **400** برسالتها.
+- **`set_document_amounts`:** الغيابُ لا يمحو و`null` الصريحُ يُفرّغ، والكتابةُ تحتاج `office.amounts.view` (**403**)، و**ورقةٌ مُدخَلةٌ في حركةٍ حيّة ترفض تعديلَ مبلغها** (التصحيحُ بحركة عكسية).
+- **الواجهة (`ج-٢`):** الأربعةُ في شاشة الأوراق تُرسَل بما لمسه الموظف وحده (`documentAmountsWrite`)، وزرُّ «ولّد البنود من الأوراق» في تبويب الدفتر يفتح الأنواعَ الخمسة (من `entry_kind_choices`) ويُظهر الحركةَ الناتجة. والقناعُ يُحسب مرّةً في `client_documents_payload(user=…)` ويُمرَّر للخانات؛ **والنداءُ بلا طالبٍ يُقنّع** (fail-closed).
+
 ## تقارير دفتر الزبون (#288 — الجزء أ: الخادم)
 
 **التقريرُ قراءةٌ محضة على ما في الدفتر.** سبعةُ أنواعٍ في
@@ -2473,6 +2488,16 @@ amount, method, method_label, cheque, note, allocations, due, credit, office}`.
 **والكلفةُ ثابتة**: مجموعاتُ الزبائن استعلامٌ واحدٌ بـ`values`، و«اللي عليه»
 استعلامان، والالتزاماتُ المنتظِرة استعلامٌ واحدٌ بـ`select_related`، والأوراقُ
 استعلامان، والتنبيهاتُ استعلامٌ لكل مجموعة — ولا استعلامَ داخل حلقة.
+
+## التشغيل والنسخ وبيان الزباين والتزامات المكتب نفسه (#290)
+
+**قرارُ المالك (2026-11-12):** التزامُ المكتب نفسه **سجلٌّ مستقلّ** — لا يصير المكتب زبوناً عند نفسه، ولا تُلمس `Obligation` ولا قوائمُ الزبائن والأوراق والأتعاب.
+
+- **`office_exports.py`:** تسعُ جداولَ ثابتةِ الأعمدة (زباين · بطاقات · خدمات · التزامات · أوراق · تذكيرات · فواتير · دفعات · دفاتر) بقراءةٍ محصورةٍ بالمكتب (`tenant=tenant` في كل استعلام)، وكاتبُ xlsx بنمط `book_exports`؛ و`assert_owner` (دورٌ + `office.clients.all` + رؤيةُ المبالغ ⇒ 403 يسمّي الناقص) — **المالك وحده يصدّر الكل**. ورابطُ PDF من نوعَي `docshare` (`office_data_export` و`office_client_names`) بـ`doc_id = tenant_id`، والمُحمِّلُ يرفض غيرَه، والبابُ العامُّ يرفض النوعين صراحةً.
+- **التذكيرُ الشهريّ:** إعداد `data_export_reminder` (`monthly`/`off`، افتراضُه شهريّ) يُولّد في `refresh_office` تنبيهَ `data_export_due` لكل مستلِمٍ بدورٍ معتمِد، بمفتاح `export:YYYY-MM` (فرادةُ `OfficeAlert` تكفل «مرّةً في الشهر»)؛ وأخذُ النسخة يُسكِت تنبيهَ شهره لكل المكتب.
+- **`self_obligations.py` + `deadlines.OFFICE_SELF_DEADLINES`:** لائحةٌ ثابتةٌ في الكود — الآن بندٌ واحد: «أسماء زبائن المكتب وعناوينهم (م111)» لِمكتبٍ `PS`، موعدُه **31 آذار من السنة اللاحقة**؛ الصفوفُ تُولَّد بـ`get_or_create` على `(tenant, rule_code, period_start)`، والحالاتُ `pending`/`submitted`/`not_required`، والكتابةُ لدورٍ معتمِدٍ وحده. والعنوانُ يُقرأ من طرف الزبون (`street_address` + `city`) لأن `OfficeClient` بلا حقل عنوان.
+- **مجموعةُ «التشغيل والنسخ»:** `official_invoicing` و`auto_send` **ظاهران مطفآن مقفلان** (`SettingDefinition.locked` + `LOCKED_SETTING_MESSAGES` ترفض أيّ قيمةٍ غيرِ المطفأة، 400)، و`data_export_reminder` مفتوح.
+- **الشاشة:** تبويبُ «التشغيل والنسخ» في `OfficeSettingsScreen` مع `OfficeOperationsSection.tsx` (زرُّ التصدير · رابطُ PDF · البيانُ لمكتب PS · قائمةُ التزامات المكتب) — الأزرارُ للمالك وحده مع إعلان سبب الحجب.
 
 ## الاعتماديات
 
