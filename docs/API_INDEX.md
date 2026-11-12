@@ -4,7 +4,7 @@
 > `python manage.py sync_docs`
 
 <!-- AUTO:api_index:START -->
-عدد النقاط: **1087**
+عدد النقاط: **1095**
 
 | المسار | الـView | الملف |
 |---|---|---|
@@ -82,9 +82,13 @@
 | `/api/accounting-office/client-books/{pk}/entries/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/entries/{entry_id}/reverse/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/kind/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/client-books/{pk}/reports/{kind}/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/reports/{kind}/export.xlsx` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/reports/{kind}/print/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/client-books/{pk}/reports/{kind}/share/` | `OfficeClientBookViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/` | `OfficeClientViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/clients/{pk}/apply-package/` | `OfficeClientViewSet` | `accounting_office/views.py` |
@@ -136,7 +140,11 @@
 | `/api/accounting-office/fees/invoices/{pk}/credit-note/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/invoices/{pk}/supplementary/` | `OfficeFeeInvoiceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/ledger/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/ledger/print/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/ledger/share/` | `OfficeFeeLedgerViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/payments/` | `OfficeFeePaymentViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/payments/{pk}/print/` | `OfficeFeePaymentViewSet` | `accounting_office/views.py` |
+| `/api/accounting-office/fees/payments/{pk}/share/` | `OfficeFeePaymentViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/service-prices/` | `OfficeFeeServicePriceViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/fees/subscriptions/` | `OfficeFeeSubscriptionViewSet` | `accounting_office/views.py` |
 | `/api/accounting-office/obligations/{pk}/amount/` | `OfficeObligationViewSet` | `accounting_office/views.py` |
