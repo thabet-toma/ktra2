@@ -16,6 +16,7 @@
   قيَمٌ يملكها المكتب.
 """
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from django.core.exceptions import ValidationError
@@ -24,6 +25,9 @@ KIND_CHOICE = "choice"
 KIND_BOOL = "bool"
 KIND_INTEGER = "integer"
 KIND_WEEKDAYS = "weekdays"
+#: #289: نسبةٌ عشريّة — «مضاعفُ متوسط المكتب» في لوحة صاحب المكتب. تُخزَّن نصّاً
+#: مُطبَّعاً (`"1.5"`) لأن `Decimal` ليس نوعاً في JSON، و`float` يفقد الخانتين.
+KIND_DECIMAL = "decimal"
 #: #277: قائمةُ مفاتيحَ من `choices` بلا تكرار — «أنواع الأحداث المفعّلة».
 KIND_MULTI_CHOICE = "multi_choice"
 #: #282/أ٢: نصٌّ حرّ قصير — «نصّ عنوان ورقة فاتورة الأتعاب». يُخزَّن كما كُتب
@@ -226,10 +230,11 @@ class SettingDefinition:
     group: str = GROUP_OFFICE
     note: str = ""
     #: حدٌّ أدنى للأنواع العددية — والسالبُ لا معنى له في «أيامٍ قبل الموعد» ولا
-    #: في «مدىً بالأشهر». `None` تعني «لا حدَّ زائداً على النوع».
-    min_value: int | None = None
+    #: في «مدىً بالأشهر». `None` تعني «لا حدَّ زائداً على النوع». و`Decimal` مقبولٌ
+    #: لأن `KIND_DECIMAL` (#289) يُقارَن بحدٍّ عشريّ لا صحيح.
+    min_value: Any = None
     #: حدٌّ أعلى للأنواع العددية — «ساعةُ الإرسال» تنتهي عند 23 ولا تعرف `None`.
-    max_value: int | None = None
+    max_value: Any = None
     #: حدُّ الطول للنصوص (`KIND_TEXT`) — العمودُ في القاعدة يحكم، والفحصُ هنا
     #: كي لا يُقتطع النصُّ بصمتٍ على MySQL.
     max_length: int | None = None
@@ -293,6 +298,40 @@ def _canonical_multi_choice(definition, value) -> list[str]:
     return [key for key in definition.choices if key in set(keys)]
 
 
+#: خانتان عشريتان — دقّةُ «مضاعفٍ» لا دقّةُ مبلغ، وتُخزَّن النسبةُ نصّاً.
+DECIMAL_QUANTUM = Decimal("0.01")
+
+
+def _canonical_decimal(definition, value) -> str:
+    """نسبةٌ عشريّةٌ مُطبَّعةٌ **نصّاً** — أو رفضٌ برسالةٍ تسمّي الإعداد.
+
+    التخزينُ نصّاً لا `float`: `1.5` بلا خانتين في JSON يُقرأ `1.5` اليوم و`1.4999…`
+    غداً في قاعدةٍ أخرى. والنصُّ هو ما يعيده `resolve_setting` ويرسمه الضابط.
+    """
+    # `bool` نوعٌ فرعيٌّ من `int` — `True` نسبةٌ من 100٪ لا من 1.
+    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+        raise ValidationError({"value": f"«{definition.label}» نسبةٌ عشريّة."})
+    try:
+        number = Decimal(str(value).strip())
+    except (InvalidOperation, ValueError):
+        raise ValidationError({
+            "value": f"«{definition.label}» نسبةٌ عشريّة.",
+        }) from None
+    if not number.is_finite():
+        raise ValidationError({"value": f"«{definition.label}» نسبةٌ عشريّة."})
+    number = number.quantize(DECIMAL_QUANTUM)
+    if definition.min_value is not None and number < Decimal(str(definition.min_value)):
+        raise ValidationError({
+            "value": f"«{definition.label}» لا يقلّ عن {definition.min_value}.",
+        })
+    if definition.max_value is not None and number > Decimal(str(definition.max_value)):
+        raise ValidationError({
+            "value": f"«{definition.label}» لا يزيد على {definition.max_value}.",
+        })
+    # `normalize` تُسقط الأصفارَ الزائدة: «1.50» تُقرأ «1.5» و«2.00» تُقرأ «2».
+    return format(number.normalize(), "f")
+
+
 def validate_value(definition: SettingDefinition, value):
     """يُعيد القيمة مُطبَّعةً، أو يرفع `ValidationError` — نقطة التحقّق الوحيدة."""
     if definition.kind == KIND_CHOICE:
@@ -326,6 +365,8 @@ def validate_value(definition: SettingDefinition, value):
         return _canonical_weekdays(value)
     if definition.kind == KIND_MULTI_CHOICE:
         return _canonical_multi_choice(definition, value)
+    if definition.kind == KIND_DECIMAL:
+        return _canonical_decimal(definition, value)
     if definition.kind == KIND_TEXT:
         if not isinstance(value, str):
             raise ValidationError({"value": f"«{definition.label}» نصّ."})
@@ -723,6 +764,45 @@ SETTINGS_REGISTRY: dict[str, SettingDefinition] = {
         note=(
             "مطفأً: لا يُنشأ رابطُ مشاركةٍ لتقرير دفتر زبون — ويبقى تصديرُ Excel "
             "وورقةُ الطباعة عاملين."
+        ),
+    ),
+    # ── لوحة صاحب المكتب (#289) ──
+    #
+    # **عتبتان لا واحدة، والصفُّ يحمرّ بتجاوز إحداهما** — لأن لكلٍّ سؤالاً مختلفاً:
+    # النسبةُ («كم من زبائني متأخّر؟») تظلم مكتباً كبيراً متأخّرُه كثيرٌ بالعدد
+    # وقليلٌ بالنسبة، والمضاعفُ («كم يزيد عن معدّل المكتب؟») يظلم مكتباً صغيراً
+    # معدّلُه منخفض. فاجتماعُهما بـ«أو» يُحمرّ الحالتين ولا يُخفي إحداهما.
+    #
+    # **والنسبةُ إعدادٌ لا ثابتٌ في الواجهة**: يضبطها المكتب، ولو كانت مكتوبةً في
+    # الشاشة لصارت قراراً خفيّاً لا يراه أحد.
+    "dashboard_late_share_percent": SettingDefinition(
+        key="dashboard_late_share_percent",
+        label="نسبةُ التأخير التي تُحمرّ صفّ الموظف (٪ من زبائنه)",
+        kind=KIND_INTEGER,
+        levels=(LEVEL_OFFICE,),
+        default=20,
+        # صفرٌ مباح: «أيُّ تأخّرٍ يُحمرّ» اختيارُ مكتبٍ صارم. وفوق 100 لا يُحمرّ شيء.
+        min_value=0,
+        max_value=100,
+        group=GROUP_OFFICE,
+        note=(
+            "صفُّ الموظف يحمرّ حين تبلغ نسبةُ المتأخّر من زبائنه هذه النسبة، "
+            "أو حين يبلغ متأخّرُه مضاعفَ متوسط المكتب."
+        ),
+    ),
+    "dashboard_late_ratio": SettingDefinition(
+        key="dashboard_late_ratio",
+        label="مضاعفُ متوسط المكتب الذي يُحمرّ صفّ الموظف",
+        kind=KIND_DECIMAL,
+        levels=(LEVEL_OFFICE,),
+        default="1.5",
+        # صفرٌ أو سالبٌ يجعل كلَّ صفٍّ أحمر — «مضاعفُ لا شيء» ليس عتبة.
+        min_value=Decimal("0.1"),
+        max_value=Decimal("100"),
+        group=GROUP_OFFICE,
+        note=(
+            "متوسطُ المكتب = مجموعُ المتأخّر ÷ عددُ الموظفين في الجدول؛ "
+            "وتجاوزُ 1.5 ضِعفَه يُحمرّ الصفَّ ولو لم تبلغ نسبتُه عتبتها."
         ),
     ),
     # ── الأتعاب (#282) ──

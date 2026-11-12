@@ -112,6 +112,8 @@ class RegistryShapeTest(SettingTestCase):
                 "office_journal_writeoff_account",
                 # #288/ب-١: رابطُ PDF للتقارير — يُطفأ فيبقى التصديرُ المباشر.
                 "office_report_pdf_link",
+                # #289: عتبتا احمرار صفّ الموظف في لوحة صاحب المكتب.
+                "dashboard_late_share_percent", "dashboard_late_ratio",
             },
         )
 
@@ -514,6 +516,8 @@ class SettingsApiTest(SettingTestCase):
                 "office_journal_writeoff_account",
                 # #288/ب-١: رابطُ PDF للتقارير.
                 "office_report_pdf_link",
+                # #289: عتبتا احمرار صفّ الموظف في اللوحة.
+                "dashboard_late_share_percent", "dashboard_late_ratio",
             },
         )
 

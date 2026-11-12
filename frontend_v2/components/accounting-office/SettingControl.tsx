@@ -217,6 +217,21 @@ export const SettingControl: React.FC<SettingControlProps> = ({
           />
         ) : null}
 
+        {/* #289: نسبةٌ عشريّة (`dashboard_late_ratio`) — تُرسَل **نصّاً** كما
+            كُتبت، والخادمُ يُطبّعها ويقارنها بحدّها. ولا تُحوَّل `Number` هنا كما
+            يفعل حقلُ `integer`: `Number('')` صفرٌ لا فراغ، فتُحفظ نسبةٌ لم يكتبها
+            أحد بدل أن يبقى الحقلُ فارغاً فيردّه الخادم. */}
+        {setting.kind === 'decimal' ? (
+          <input
+            type="number"
+            step="0.01"
+            value={asString(draft)}
+            disabled={disabled}
+            onChange={(event) => setDraft(event.target.value)}
+            className={`${officeInputClass} w-28 tabular-nums`}
+          />
+        ) : null}
+
         {/* #282/أ٢: نصٌّ حرّ قصير (`fee_invoice_title`). `maxLength` من السجلّ
             نفسه، فالعمودُ وحدُّه يحكمان — وتركُه فارغاً يعني «الافتراضيّ». */}
         {setting.kind === 'text' ? (

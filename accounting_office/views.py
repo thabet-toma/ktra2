@@ -37,6 +37,7 @@ from accounting_office import (
     book_exports,
     book_reports,
     client_books,
+    dashboard,
     deadlines,
     fee_invoices,
     fees,
@@ -330,6 +331,16 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         status_filter = (params.get("status") or "").strip()
         if status_filter in (OfficeClient.STATUS_ACTIVE, OfficeClient.STATUS_ENDED):
             queryset = queryset.filter(status=status_filter)
+        # #289: كبسةُ الموظف في لوحة صاحب المكتب تفتح **زبائنه هو** — الفلترةُ في
+        # الاستعلام لا في الواجهة، ومعرّفٌ غيرُ رقميّ 400 لا قائمةً كاملةً.
+        responsible = (params.get("responsible") or "").strip()
+        if responsible:
+            try:
+                queryset = queryset.filter(responsible_id=int(responsible))
+            except (TypeError, ValueError):
+                raise ValidationError({
+                    "responsible": "معرّف الموظف غير صالح.",
+                }) from None
         return queryset
 
     # ── الكتابة عبر الخدمات، لا عبر `serializer.save` ────────────────────
@@ -389,21 +400,29 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
     # ── الموظف المسؤول والتحويل ─────────────────────────────────────────
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):
-        """`{"user": <id>}` — تحويلُ الزبون، بمفتاحه وحده (`office.clients.assign`).
+        """`{"responsible": <id>}` — تحويلُ الزبون، بمفتاحه وحده (`office.clients.assign`).
 
         مفتاحٌ ثانٍ لا `office.clients.write`: من يكتب بيانات زبونٍ لا يسلبه من
         صاحبه بضغطةٍ في نموذج التعديل.
+
+        **و`user` مقبولٌ بعد `responsible`** (#289): الحقلُ في النموذج اسمُه
+        `responsible`، والقديمُ يبقى كي لا ينكسر عميلٌ قائم — و`responsible`
+        يُقدَّم دائماً حين يُرسَل الاثنان.
+
+        **والموظفُ الجديد عضوٌ بدور مكتب** (`services.assert_office_assignee`):
+        تحويلُ زبونٍ إلى عضوٍ لا يفتح الموديول يُخفيه عن كل عين.
         """
         require_perm(request, OFFICE_CLIENTS_ASSIGN_KEY, tenant=self.tenant)
         client = self.get_object()
-        user_id = request.data.get("user")
+        raw_id = request.data.get("responsible", request.data.get("user"))
         try:
-            user_id = int(user_id)
+            user_id = int(raw_id)
         except (TypeError, ValueError):
-            raise ValidationError({"user": "معرّف الموظف مطلوب."}) from None
+            raise ValidationError({"responsible": "معرّف الموظف مطلوب."}) from None
         target = get_user_model().objects.filter(pk=user_id, is_active=True).first()
         if target is None:
-            raise ValidationError({"user": "لا يوجد مستخدم مفعَّل بهذا المعرّف."})
+            raise ValidationError({"responsible": "لا يوجد مستخدم مفعَّل بهذا المعرّف."})
+        services.assert_office_assignee(self.tenant, target)
         client = services.assign_office_client(
             client, user=target, actor=request.user, request=request,
         )
@@ -1181,6 +1200,27 @@ class OfficeCustomRuleViewSet(OfficeModuleViewSet):
         if row is None:
             raise NotFound("التزامُ المكتب هذا غير موجود.")
         return row
+
+
+# ── لوحة صاحب المكتب (#289) ─────────────────────────────────────────────────
+class OfficeDashboardViewSet(OfficeModuleViewSet):
+    """لوحةُ صاحب المكتب (#289) — **دورٌ لا مفتاح**: المحاسبُ يأخذ 403 من الخادم.
+
+    والحمولةُ تُبنى في `accounting_office/dashboard.py` من مواضعها القائمة
+    (`payments.client_due_map` و`services._badge_keys` و`services.visible_alerts`)
+    فلا رقمَ يُحسب هنا ولا في الواجهة.
+    """
+
+    http_method_names = ["get", "head", "options"]
+    # الأفعالُ هنا بلا جسمٍ يُسلسَل؛ الصنفُ الفارغُ يلزم `SimpleMetadata` في OPTIONS
+    # (وإلا سقط `get_serializer` على `serializer_class` الغائب).
+    serializer_class = serializers.Serializer
+
+    def list(self, request, *args, **kwargs):
+        dashboard.assert_dashboard_owner(self.tenant, request.user)
+        return Response(dashboard.dashboard_payload(
+            self.tenant, user=request.user, day=timezone.localdate(),
+        ))
 
 
 # ── «اليوم» والالتزامات والشغلات (#275) ──────────────────────────────────────

@@ -88,6 +88,15 @@ SHELL_MANIFESTS: dict[str, dict] = {
                 "label_term": "nav.office_ready_to_send",
                 "views": ["office-ready-to-send"],
             },
+            # #289: لوحةُ صاحب المكتب بعد شاشتَي العمل الصباحيّتين — «اليوم»
+            # و«جاهز للإرسال» عملُ كلّ عضوٍ، واللوحةُ أرقامُ المالك وحده. والبيانُ
+            # عرضٌ لا تصريح: الدورُ (مالك) يحرسها في الموجّه (`managerOnlyViews`)
+            # والخادمُ يردّ غيرَه 403.
+            {
+                "id": "dashboard",
+                "label_term": "nav.office_dashboard",
+                "views": ["office-dashboard"],
+            },
             {"id": "clients", "label_term": "nav.office_clients", "views": ["office-clients"]},
             # #274: التقويم شاشةٌ مستقلّة عن قائمة الزبائن (تُقرأ من لائحة المواعيد
             # المحسوبة)، فمجموعتُها مستقلّة كما استقلّت «إعدادات المكتب» في #271.

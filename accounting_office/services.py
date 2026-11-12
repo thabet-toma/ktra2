@@ -186,7 +186,9 @@ from core.access import (
     OFFICE_CLIENTS_ALL_KEY,
     OFFICE_CLIENTS_WRITE_KEY,
     OFFICE_MANAGER_ROLE,
+    office_role_keys,
     user_has_perm,
+    user_tenant_role,
 )
 from core.activity import log_activity
 from tenants.models import UserCompanyMembership
@@ -275,6 +277,9 @@ PAYMENT_AMOUNT_KEYS: tuple[str, ...] = (
     "closing_balance",
     "balance",
     "movements",
+    # #289: مجموعُ «اللي عليه» في لوحة صاحب المكتب — مجموعُ `due` نفسه لا مبلغٌ
+    # ثانٍ، لكنه **مفتاحُ مبلغٍ في حمولة** فيُقنَّع كسائرها.
+    "due_total",
 )
 
 #: كلُّ مفاتيح المبالغ في الموديول — يقارنها الحارس بحقول `DecimalField`
@@ -915,6 +920,25 @@ def create_office_client(
         )
         TaxCard.objects.create(client=client, **card_fields)
     return client
+
+
+def assert_office_assignee(tenant, user) -> None:
+    """الموظفُ الجديد في التحويل: **عضوٌ في الشركة وله دورُ مكتب**.
+
+    العضويّةُ وحدها لا تكفي (#289): زبونٌ يُحوَّل إلى موظّفٍ لا يفتح الموديول
+    يصير صفّاً لا يراه أحد — ولا يظهر في جدول اللوحة، فيُنسى بلا أثر. و«دورُ
+    مكتب» يُشتقّ من `core.access` (`office_role_keys`) لا قائمةً ثانيةً هنا.
+
+    والرسالةُ بمفتاح `responsible` — اسمُ الحقل الذي يُرسله الـAPI.
+    """
+    _assert_member_of_tenant(tenant, user)
+    if user_tenant_role(user, tenant) not in office_role_keys():
+        raise ValidationError({
+            "responsible": (
+                "هذا المستخدم ليس عضواً بدور مكتبٍ في الشركة — "
+                "لا يُحوَّل إليه زبونٌ لا يراه."
+            ),
+        })
 
 
 def assign_office_client(client, *, user, actor=None, request=None) -> OfficeClient:
@@ -3636,7 +3660,8 @@ def _obligation_row(
 
     **و«ناقصه أوراق» (#278) شارةٌ إضافية**: تُضاف إلى مفاتيح التأخير المحسوبة ولا
     تُزاحمها — `docs` يمرّرها المنادي محسوبةً لصفوف الطلب كلها (استعلامان)،
-    ونداءُ الصفّ الواحد يحسبها لنفسه (`obligation_row`).
+    ونداءُ الصفّ الواحد يحسبها لنفسه (`obligation_row`). و`badge_keys` مفاتيحُ
+    التأخير التي حسبها المنادي مرّةً في مسحته فلا تُعاد للصفّ.
     """
     amount = None if obligation.amount is None else f"{obligation.amount:.2f}"
     keys = list(
@@ -3885,7 +3910,7 @@ def _live_override_alerts_q(tenant):
     return Q(kind=OFFICE_ALERT_KIND_OVERRIDE_PLATFORM_CHANGED) & condition
 
 
-def _visible_alerts(tenant, user, day=None):
+def visible_alerts(tenant, user, day=None):
     """تنبيهاتُ هذا المستخدم وحدها، **المعروضُ له وحده وبلا المحسوم**.
 
     **والرؤيةُ تتبع الزبون**: تنبيهُ زبونٍ لا يراه العضو لا يُعرض — وإلا بقي
@@ -3977,11 +4002,11 @@ def alerts_payload(tenant, *, user, day=None, limit=50) -> dict:
     """حمولةُ الجرس: `{"unseen": عددُ غير المرئيّ وغير المحسوم, "rows": [...]}`.
 
     **تنبيهاتُ هذا المستخدم وحده** (`recipient=user`) الأحدثُ أوّلاً، والمحسومُ
-    مستبعَدٌ عند القراءة (`_visible_alerts`). و`unseen` يُعدّ على المجموعة كلّها
+    مستبعَدٌ عند القراءة (`visible_alerts`). و`unseen` يُعدّ على المجموعة كلّها
     لا على الصفحة المعروضة، فالسقفُ لا يكذب على العدّاد. و`day` يومُ القياس
     (يُمرَّر من الـview) فتمديدُ التزامٍ يُسقط تنبيهَه بلا كتابة.
     """
-    queryset = _visible_alerts(tenant, user, day=day)
+    queryset = visible_alerts(tenant, user, day=day)
     unseen = queryset.filter(seen_at__isnull=True).count()
     rows = [
         alert_row(alert)
@@ -4007,14 +4032,14 @@ def mark_alert_seen(alert, *, user):
 def mark_all_alerts_seen(tenant, *, user, day=None) -> int:
     """«شفتهم كلهم» — **المعروضُ وحده**: عددُ ما كُتب له `seen_at`.
 
-    يمرّ بـ`_visible_alerts` نفسها، فلا يُكتب على تنبيهٍ محسوم: «رجّعها» بعدها
+    يمرّ بـ`visible_alerts` نفسها، فلا يُكتب على تنبيهٍ محسوم: «رجّعها» بعدها
     تُعيد تنبيهاً **غيرَ مقروء** ويُعدّه العدّاد. ولو كُتب على المحسوم لضحك
     العدّادُ على الحال: صفٌّ رجع إلى الجرس وهو «مقروء» بلا أن يراه أحد.
     """
     # المعرّفاتُ تُقرأ أولاً ثم تُكتب: `UPDATE … WHERE id IN (SELECT … FROM` الجدولِ
     # نفسِه يرفضه MySQL (خطأ 1093) ويقبله SQLite — فيمرّ الاختبارُ ويسقط الإنتاج.
     ids = list(
-        _visible_alerts(tenant, user, day=day)
+        visible_alerts(tenant, user, day=day)
         .filter(seen_at__isnull=True)
         .values_list("pk", flat=True),
     )

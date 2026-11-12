@@ -100,6 +100,8 @@ export type AppView =
     | "accounting-revenue-vouchers"
     | "document-coding"
     | "client-books"
+    // #289: لوحةُ صاحب المكتب — شاشةُ المالك وحدَه (الخادمُ يردّ غيره 403).
+    | "office-dashboard"
     | "office-today"
     | "office-ready-to-send"
     | "office-clients"
