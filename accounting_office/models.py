@@ -2736,6 +2736,13 @@ class DocumentChecklistItem(models.Model):
     **التوليدُ لا يُعيد الكتابة**: `get_or_create` على
     `(client, item_code, period_start)`، فتشغيلُ اليوم نفسه مرّتين لا يكتب صفاً،
     والقائمُ يبقى بما رآه الموظف ولو تغيّر الكتالوج.
+
+    **وحقولُ الورقة المالية (#286/ج)**: `amount` **صافي المبلغ قبل الضريبة**،
+    و`tax_amount` قيمةُ الضريبة — وإجماليُ الورقة `amount + tax_amount`، قاعدةٌ
+    واحدةٌ يقرؤها التوليدُ والاختبارات معاً. و`vat_rate` النسبةُ كما وردت على
+    الورقة (للعرض، لا للحساب: المبلغان هما المصدر)، و`side_party` اسمُ الطرف كما
+    ورد فيها. كلُّها اختياريةٌ: ورقةٌ في الدرج لم تُقرأ تبقى فارغة، والفراغُ يُرفض
+    وقتَ التوليد برسالته لا يُحفظ صفراً صامتاً.
     """
 
     tenant = models.ForeignKey(
@@ -2782,6 +2789,24 @@ class DocumentChecklistItem(models.Model):
         blank=True,
         default="",
         verbose_name="كيف وصلت",
+    )
+    #: #286/ج: صافي الورقة **قبل الضريبة** — وعليه تُبنى بنودُ الحركة.
+    amount = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True,
+        verbose_name="الصافي قبل الضريبة",
+    )
+    tax_amount = models.DecimalField(
+        max_digits=18, decimal_places=2, null=True, blank=True,
+        verbose_name="مبلغ الضريبة",
+    )
+    #: النسبةُ كما وردت على الورقة — **للعرض لا للحساب**: المبلغان مصدرُ البنود،
+    #: ونسبةُ السطر في الحركة تُقرأ من إعداد `book_line_rate_override`.
+    vat_rate = models.DecimalField(
+        max_digits=7, decimal_places=4, null=True, blank=True,
+        verbose_name="نسبة ض.ق.م على الورقة ٪",
+    )
+    side_party = models.CharField(
+        max_length=200, blank=True, default="", verbose_name="الطرف المقابل",
     )
     updated_by = models.ForeignKey(
         settings.AUTH_USER_MODEL,

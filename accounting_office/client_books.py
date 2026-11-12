@@ -35,10 +35,15 @@ from accounting_office.deadlines import MONTH_LABELS
 from accounting_office.models import (
     BOOK_ACCOUNT_TYPE_LABELS,
     BOOK_ACCOUNT_TYPE_CHOICES,
+    BOOK_ENTRY_KIND_BANK_MOVEMENT,
     BOOK_ENTRY_KIND_CHOICES,
+    BOOK_ENTRY_KIND_DAILY_REPORT,
+    BOOK_ENTRY_KIND_EXPENSE,
     BOOK_ENTRY_KIND_LABELS,
     BOOK_ENTRY_KIND_MANUAL,
     BOOK_ENTRY_KIND_OPENING,
+    BOOK_ENTRY_KIND_PURCHASE_INVOICE,
+    BOOK_ENTRY_KIND_SALES_INVOICE,
     BOOK_KIND_CHOICES,
     BOOK_KIND_DOUBLE,
     BOOK_KIND_LABELS,
@@ -605,19 +610,29 @@ def add_account(client, *, code, name, parent_code="", account_type):
 
 
 # ── الحركات: الترقيمُ المقفول (د3) والتصحيحُ العكسيّ (د4) ──────────────────
-def _assert_can_write_amounts(book, actor) -> None:
-    """من لا يرى المبالغ لا يكتبها — **403 لا 400**، كعقد الموديول.
+def _assert_tenant_can_write_amounts(tenant, actor) -> None:
+    """من لا يرى المبالغ لا يكتبها في هذه الشركة — **403 لا 400**.
 
-    الحركةُ مبلغٌ بيد من يكتبها: عضوٌ بلا `office.amounts.view` لا يكتب رقماً لا
-    يراه، ولا يصحّح بحركةٍ عكسية رقماً لا يقرؤه. و`actor=None` نداءٌ داخليّ.
-    و`PermissionDenied` تحوّلها DRF إلى 403 كما يفعل `reject_amount_writes` في
-    الـviews — 400 كان يقول «حمولتُك فاسدة» عن صلاحيةٍ ناقصة.
+    والقاعدةُ في موضعٍ واحدٍ يقرؤه الحركةُ ومبلغُ الورقة: الحركةُ ليست وحدها
+    مبلغاً، ومبلغُ الورقة يُولّد بنودَها فيصير مالاً في الدفتر. و`actor=None`
+    نداءٌ داخليّ. و`PermissionDenied` تحوّلها DRF إلى 403 كما يفعل
+    `reject_amount_writes` في الـviews — 400 كان يقول «حمولتُك فاسدة» عن صلاحيةٍ
+    ناقصة.
     """
-    if actor is None or services.can_see_amounts(book.tenant, actor):
+    if actor is None or services.can_see_amounts(tenant, actor):
         return
     raise PermissionDenied(
         "صلاحية «يرى المبالغ» غير ممنوحة لدورك — لا تكتب مبلغاً لا تراه.",
     )
+
+
+def _assert_can_write_amounts(book, actor) -> None:
+    """حارسُ المبلغ على دفترٍ — الحركةُ مبلغٌ بيد من يكتبها.
+
+    النصُّ والقاعدةُ في `_assert_tenant_can_write_amounts`، وهذا النداءُ يقرأ
+    شركةَ الدفتر: نداءٌ برمجيّ يمرّ بالحارس نفسِه الذي يمرّ به الـview.
+    """
+    _assert_tenant_can_write_amounts(book.tenant, actor)
 
 
 def kind_on(book, day) -> str:
@@ -991,6 +1006,344 @@ def reverse_entry(entry, *, memo="", entry_date=None, actor=None, day=None):
             lines=lines,
             memo=memo or f"عكس الحركة رقم {entry.number}",
             reverses=entry,
+            actor=actor,
+            day=day,
+        )
+
+
+# ── توليدُ بنود الحركة من الورقة (#286/ج) ───────────────────────────────────
+#
+# **القرارُ المحسوم (2026-11-11):** «توليدُ بنود الحركة من مبلغ الورقة وضريبتها
+# وطرفها»، والقيدُ اليدويُّ يبقى للتعديل. فالموظّفُ يكتب ما على الورقة — مبلغَها
+# وضريبتَها وطرفَها — لا حساباً ولا رقماً، والحركةُ تُبنى هنا ثم تمرّ من
+# `create_entry` وحدَه: القفلُ والترقيمُ والتوازنُ وتعليمُ «انأدخلت» في مسارٍ واحد.
+#
+# **والخريطةُ قرارٌ ثابتٌ لا اختيار**: الحسابُ يتبع نوعَ الورقة لا ذوقَ من يُدخل،
+# وإلا قُرئ دفترُ زبونٍ واحد على قاعدتين في شهرٍ واحد فلم يُقارَن بميزان سنته.
+ENTRY_KIND_ACCOUNTS: dict[str, tuple[str, str]] = {
+    BOOK_ENTRY_KIND_SALES_INVOICE: ("1300", "4100"),    # مدين المدينون · دائن إيرادات المبيعات
+    BOOK_ENTRY_KIND_PURCHASE_INVOICE: ("5200", "2100"), # مدين المشتريات · دائن الدائنون
+    BOOK_ENTRY_KIND_EXPENSE: ("5100", "1100"),          # مدين مصاريف عامة · دائن الصندوق
+    BOOK_ENTRY_KIND_BANK_MOVEMENT: ("1200", "1100"),    # مدين البنك · دائن الصندوق
+    BOOK_ENTRY_KIND_DAILY_REPORT: ("1100", "4100"),      # مدين الصندوق · دائن إيرادات المبيعات
+}
+
+#: كودُ حساب ض.ق.م في شجرة الزبون — **يُقرأ منها ولا يُصطنع له صفّ**.
+VAT_ACCOUNT_CODE = "2200"
+
+#: الحسابان الذمّيان: الطرفُ المقابل يُكتب على سطرهما — اسمُ من عليه المال.
+PARTY_ACCOUNT_CODES: frozenset[str] = frozenset({"1300", "2100"})
+
+#: أنواعٌ ضريبتُها **مخرجات** (دائنٌ للضريبة): بيعٌ وتقريرٌ يوميّ. والمشترياتُ
+#: والمصروفُ ضريبتُهما **مدخلات** (مدين) — والطرفُ المقابل للاتجاه يقرؤه هذا.
+VAT_OUTPUT_KINDS: frozenset[str] = frozenset({
+    BOOK_ENTRY_KIND_SALES_INVOICE, BOOK_ENTRY_KIND_DAILY_REPORT,
+})
+
+#: سببُ نسبة السطر حين تأتي من الورقة — بلا سببٍ يرفضها `_line_rate`.
+LINE_RATE_SOURCE_PAPER = "من الورقة"
+
+#: حقولُ مبلغ الورقة الأربعة (#286/ج) — ما يُكتب على الورقة قبل توليد بنودها.
+DOCUMENT_VALUE_FIELDS: tuple[str, ...] = (
+    "amount", "tax_amount", "vat_rate", "side_party",
+)
+
+
+def _entry_line(
+    account_code, *, debit=0, credit=0, tax_base=0, tax_amount=0, rate=None,
+) -> dict:
+    """بندُ حركةٍ بالشكل الذي يقرؤه `_prepare_lines` — **كوداً لا كائناً**.
+
+    الحسابُ يبقى كوداً كي تمرّ الحركةُ كلُّها من `_prepare_lines`: حارسُ «لا
+    حسابَ بهذا الكود» ومعه قناعُ المبالغ في موضعٍ واحدٍ، كما في القيد اليدوي.
+    """
+    line = {
+        ACCOUNT_CODE_KEY: account_code,
+        "debit": debit,
+        "credit": credit,
+        "tax_base": tax_base,
+        "tax_amount": tax_amount,
+        "side_party": "",
+    }
+    if rate is not None:
+        line["vat_rate"] = rate
+        line["rate_reason"] = LINE_RATE_SOURCE_PAPER
+    return line
+
+
+def _paper_totals(paper) -> tuple[Decimal, Decimal]:
+    """`(صافي، ضريبة)` من الورقة — **والمبلغُ الفارغ 400 يسمّي الورقة**.
+
+    والإجماليُّ `amount + tax_amount` قاعدةٌ واحدةٌ تقرؤها هنا وفي الاختبارات،
+    فلا يُجمع المبلغُ في موضعٍ ويُطرح في آخر.
+    """
+    if paper.amount is None:
+        raise ValidationError({
+            "documents": f"الورقة «{paper.name}» بلا مبلغ — اكتب مبلغها أوّلاً.",
+        })
+    amount = Decimal(paper.amount).quantize(Decimal("0.01"))
+    tax = Decimal(paper.tax_amount or 0).quantize(Decimal("0.01"))
+    if amount < 0 or tax < 0:
+        raise ValidationError({
+            "documents": f"الورقة «{paper.name}» بمبلغٍ سالب — صحّح مبلغها.",
+        })
+    return amount, tax
+
+
+def _assert_vat_account(book) -> None:
+    """حسابُ الضريبة موجودٌ في شجرة الزبون — وإلا 400 برسالته لا 500.
+
+    الشجرةُ قابلةٌ للتحرير (`add_account`) ودفترٌ بلا `2200` لا يولّد سطرَ ضريبةٍ
+    صامتاً: الرقمُ يقع على حسابٍ لا وجودَ له، و`_prepare_lines` وحدها لا تسمّي
+    الحلَّ (تُضيف الحسابَ أو تُدخل الحركة يدوياً).
+    """
+    if ClientBookAccount.objects.filter(
+        client=book.client, code=VAT_ACCOUNT_CODE,
+    ).exists():
+        return
+    raise ValidationError({
+        "documents": (
+            f"لا حسابَ ضريبة ({VAT_ACCOUNT_CODE}) في شجرة الزبون — "
+            "أضفه أو أدخل الحركة يدوياً."
+        ),
+    })
+
+
+def _double_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
+    """بنودُ ورقةٍ في الدفتر المزدوج — **والضريبةُ على طرفها المقابل**.
+
+    مخرجاتُ الضريبة (بيعٌ وتقريرٌ يوميّ) دائنةٌ كالإيراد، فسطرُ الذمم/الصندوق
+    يحمل الإجمالي مديناً؛ ومدخلاتُها (شراءٌ ومصروف) مدينةٌ كالمصروف، فيحمل سطرُ
+    الذمم/الصندوق الإجمالي دائناً. والضريبةُ **مرّةً واحدة**: سطرُها وحده يحمل
+    `tax_amount`، وسطرُ الوعاء يحمل `tax_base` — ومجموعُ ما على السطور هو ما
+    تقرؤه تقاريرُ #287، فتكرارُها على سطرين يُضاعف الإقرار.
+    """
+    debit_code, credit_code = ENTRY_KIND_ACCOUNTS[kind]
+    total = amount + tax
+    vat_line = None
+    if not tax:
+        debit_line = _entry_line(debit_code, debit=amount)
+        credit_line = _entry_line(credit_code, credit=amount)
+    elif kind in VAT_OUTPUT_KINDS:
+        debit_line = _entry_line(debit_code, debit=total)
+        credit_line = _entry_line(credit_code, credit=amount, tax_base=amount)
+        vat_line = _entry_line(
+            VAT_ACCOUNT_CODE, credit=tax, tax_amount=tax, rate=rate,
+        )
+    else:
+        debit_line = _entry_line(debit_code, debit=amount, tax_base=amount)
+        credit_line = _entry_line(credit_code, credit=total)
+        vat_line = _entry_line(
+            VAT_ACCOUNT_CODE, debit=tax, tax_amount=tax, rate=rate,
+        )
+    # الطرفُ على سطر الذمم إن كان أحد الطرفين ذمّياً، وإلا على سطر الإيراد/
+    # المصروف. **ولا يُكتب على سطر الضريبة**: «ضريبةٌ على شركة كذا» قولٌ لا معنى له.
+    side_line = credit_line if credit_code in PARTY_ACCOUNT_CODES else debit_line
+    side_line["side_party"] = (paper.side_party or "").strip()[:200]
+    other_line = debit_line if side_line is credit_line else credit_line
+    lines = [side_line, other_line]
+    if vat_line is not None:
+        lines.append(vat_line)
+    return lines
+
+
+def _simple_paper_lines(paper, kind, *, amount, tax, rate) -> list[dict]:
+    """الدفترُ البسيط سطرٌ واحدٌ **بإجماليه وضريبتُه عليه**.
+
+    ولا سطرَ ضريبةٍ هنا: لا أطرافَ في البسيط، وتفريقُ الإجمالي على حسابين يجعله
+    مزدوجاً باسمٍ آخر. وحسابُه الصندوق، والبنكُ لحركة البنك وحدها.
+    """
+    account_code = "1200" if kind == BOOK_ENTRY_KIND_BANK_MOVEMENT else "1100"
+    credit_kinds = (BOOK_ENTRY_KIND_EXPENSE, BOOK_ENTRY_KIND_PURCHASE_INVOICE)
+    total = amount + tax
+    direction = {"credit": total} if kind in credit_kinds else {"debit": total}
+    line = _entry_line(
+        account_code, tax_base=amount, tax_amount=tax, rate=rate, **direction,
+    )
+    line["side_party"] = (paper.side_party or "").strip()[:200]
+    return [line]
+
+
+def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:
+    """بنودُ الحركة من أوراقها — **بلا حسابٍ ولا رقمٍ من الموظّف** (#286/ج).
+
+    `papers` صفوفُ `DocumentChecklistItem` **مقروءةً تحت قفل** (يناديها المستدعي
+    بعد `_documents_for`)، فيومَ التوليد لا يقرأ إلا ما سُلّم له.
+
+    والنوعُ يقود: `manual` و`opening` ليسا من أنواع الورق — يُكتبان بيد إنسانٍ
+    بدورٍ لا بمفتاح، فيُرفضان هنا بدل أن يُولَّد لهما حكمٌ لم يُقصد.
+    """
+    if kind not in ENTRY_KIND_ACCOUNTS:
+        raise ValidationError({
+            "kind": (
+                "هذا النوع لا يُولَّد من الأوراق — القيدُ اليدويُّ والرصيدُ "
+                "الافتتاحيُّ يُكتبان بأيديهما."
+            ),
+        })
+    papers = list(papers)
+    if not papers:
+        raise ValidationError({"documents": "اختر ورقةً واحدة على الأقل."})
+    allow_rate = bool(
+        services.resolve_setting(book.tenant, LINE_RATE_KEY, client=book.client),
+    )
+    double = kind_on(book, entry_date) == BOOK_KIND_DOUBLE
+    vat_checked = False
+    lines: list[dict] = []
+    for paper in papers:
+        amount, tax = _paper_totals(paper)
+        if tax and kind == BOOK_ENTRY_KIND_BANK_MOVEMENT:
+            raise ValidationError({
+                "documents": "حركةُ بنكٍ بلا ضريبة — الضريبة على فاتورةٍ أو مصروف.",
+            })
+        # النسبةُ تصل السطر **إن كان الإعدادُ مفعّلاً وحدها**: الحسابُ هو مصدرُ
+        # النسبة في هذا الدفتر، ونسبةُ الورقة وصفٌ يُقرأ ما لم يُسمَح بخلافه.
+        rate = paper.vat_rate if (allow_rate and paper.vat_rate is not None) else None
+        if double:
+            if tax and not vat_checked:
+                _assert_vat_account(book)
+                vat_checked = True
+            lines.extend(
+                _double_paper_lines(paper, kind, amount=amount, tax=tax, rate=rate),
+            )
+        else:
+            lines.extend(
+                _simple_paper_lines(paper, kind, amount=amount, tax=tax, rate=rate),
+            )
+    return lines
+
+
+def _document_live_entry(row):
+    """الحركةُ الحيّةُ التي أُدخلت فيها الورقة — واحدةٌ على الأكثر (د9)."""
+    return _live_entries().filter(documents__document=row).first()
+
+
+def _document_amount_value(value, field):
+    """مبلغُ ورقةٍ من الـAPI — `None` يُفرّغ، والسالبُ 400 لا صفرٌ صامت."""
+    if value in (None, ""):
+        return None
+    try:
+        amount = Decimal(str(value)).quantize(Decimal("0.01"))
+    except (ArithmeticError, TypeError, ValueError):
+        raise ValidationError({field: "مبلغٌ غير رقميّ."}) from None
+    if amount < 0:
+        raise ValidationError({field: "مبلغٌ سالب — صحّح الورقة."})
+    return amount
+
+
+def _document_rate_value(value):
+    """نسبةُ الورقة كما تُكتب — بين 0 و100 كسطر الحركة."""
+    if value in (None, ""):
+        return None
+    try:
+        rate = Decimal(str(value))
+    except (ArithmeticError, TypeError, ValueError):
+        raise ValidationError({"vat_rate": "نسبةٌ غير رقميّة."}) from None
+    if not rate.is_finite() or rate < 0 or rate > 100:
+        raise ValidationError({"vat_rate": "النسبة بين 0 و100."})
+    return rate.quantize(book_rates.RATE_QUANTUM)
+
+
+def set_document_amounts(row, data, *, actor=None) -> DocumentChecklistItem:
+    """مبلغُ ورقةٍ وضريبتُها ونسبتُها وطرفُها — **الواردُ منها وحده**.
+
+    والغيابُ لا يُفرّغ: طلبٌ يغيّر الحالةَ وحدها لا يمحو مبلغَ ورقةٍ قُرئت،
+    كـ`update_settings`. و`None` الصريحُ يُفرّغ (تصحيحُ قراءةٍ خاطئة).
+
+    **وورقةٌ أُدخلت في حركةٍ حيّة لا تُعدَّل مبالغها**: حركتُها تحمل أرقامَها في
+    الدفتر، وتعديلُ الورقة بعدها يترك الدفترَ يقول غيرَ ما تقوله ورقته — والتصحيحُ
+    حركةٌ عكسية ثم إعادةُ إدخال. والطرفُ والنسبةُ وصفٌ لا يُغيَّر به رقم.
+    """
+    sent = {
+        key: value for key, value in (data or {}).items()
+        if key in DOCUMENT_VALUE_FIELDS
+    }
+    if not sent:
+        return row
+    if any(key in services.AMOUNT_KEYS for key in sent):
+        _assert_tenant_can_write_amounts(row.tenant, actor)
+        if _document_live_entry(row) is not None:
+            raise ValidationError({
+                "amount": (
+                    "ورقةٌ مُدخَلةٌ في حركةٍ حيّة — لا تُعدَّل مبالغها. "
+                    "التصحيحُ حركةٌ عكسية ثم إعادةُ الإدخال."
+                ),
+            })
+    fields = []
+    for key, value in sent.items():
+        if key in ("amount", "tax_amount"):
+            value = _document_amount_value(value, key)
+        elif key == "vat_rate":
+            value = _document_rate_value(value)
+        else:
+            value = (value or "").strip()[:200]
+        setattr(row, key, value)
+        fields.append(key)
+    row.updated_by = actor if getattr(actor, "pk", None) else None
+    row.save(update_fields=[*fields, "updated_by", "updated_at"])
+    return row
+
+
+def document_values_payload(row, *, masked) -> dict:
+    """حقولُ مبلغ الورقة كما تخرج — **والقناعُ قرارٌ جاهزٌ يُمرَّر**.
+
+    المبلغان يمرّان بـ`services.mask_amounts` (مفتاحاهما في `AMOUNT_KEYS`)،
+    والنسبةُ والطرفُ يبقيان: نسبةٌ واسمٌ لا مال، وإخفاؤهما يترك الحارسَ بلا وجه.
+    والفراغُ `None` لا `"0.00"`: ورقةٌ بلا مبلغٍ ليست ورقةً بمبلغ صفر.
+    """
+    payload = {
+        "amount": None if row.amount is None else _amount(row.amount),
+        "tax_amount": None if row.tax_amount is None else _amount(row.tax_amount),
+        "vat_rate": (
+            None if row.vat_rate is None
+            else str(Decimal(row.vat_rate).quantize(book_rates.RATE_QUANTUM))
+        ),
+        "side_party": row.side_party,
+    }
+    return services.mask_amounts(payload) if masked else payload
+
+
+def create_entry_from_documents(
+    book, *, kind, documents, entry_date=None, memo="", actor=None, day=None,
+):
+    """حركةٌ من أوراقٍ وصلت: التوليدُ هنا والكتابةُ في `create_entry` وحدَه.
+
+    **حركةٌ واحدةٌ لشهرٍ واحد**: الأوراقُ من أشهرٍ مختلفة تُرفض 400 — إدخالُ
+    الشهر شهراً هو ما يقارنه المحاسبُ بإقراره، وحركةٌ تجمع يناير وفبراير تُخرج
+    تاريخاً لا يطابق ورقةً واحدة. والتاريخُ افتراضاً `period_end` لذلك الشهر،
+    ويجوز صريحاً لمن يُدخل ورقةً متأخّرة.
+
+    والكتابةُ تبقى في `create_entry`: القفلُ والترقيمُ والتوازنُ وتعليمُ «انأدخلت»
+    تمرّ من مسارٍ واحد، فلا تفترق نسختان من قواعد الحركة.
+    """
+    assert_book_writable(book, day)
+    _assert_can_write_amounts(book, actor)
+    if kind not in ENTRY_KIND_ACCOUNTS:
+        raise ValidationError({
+            "kind": (
+                "هذا النوع لا يُولَّد من الأوراق — القيدُ اليدويُّ والرصيدُ "
+                "الافتتاحيُّ يُكتبان بأيديهما."
+            ),
+        })
+    _assert_entry_writer(book, kind, actor)
+    with transaction.atomic():
+        papers = _documents_for(book, documents)
+        if not papers:
+            raise ValidationError({"documents": "اختر ورقةً واحدة على الأقل."})
+        if len({paper.period_start for paper in papers}) > 1:
+            raise ValidationError({
+                "documents": "أوراقٌ من أشهرٍ مختلفة — إدخالُ شهرٍ شهراً.",
+            })
+        entry_date = entry_date or papers[0].period_end
+        lines = generate_entry_lines(
+            book, kind=kind, papers=papers, entry_date=entry_date,
+        )
+        return create_entry(
+            book,
+            entry_date=entry_date,
+            kind=kind,
+            lines=lines,
+            memo=memo,
+            documents=[paper.pk for paper in papers],
             actor=actor,
             day=day,
         )
