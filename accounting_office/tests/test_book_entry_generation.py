@@ -763,7 +763,8 @@ class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
 
     def test_the_cash_report_reads_exactly_the_cash_lines_of_each_entry(self):
         """**سطرُ النقد هو ما يقرؤه التقرير**: مجموعُ `1100` في الحركة الواحدة =
-        قبضُها/دفعُها في `cash`، والختامُ أرضيتُه + صافي الفترة."""
+        قبضُها/دفعُها في `cash`، والختامُ صافيَ الحركتين مجتمعين — أرضيةٌ ثابتةٌ
+        لا `opening + net`، فتلك معادلةٌ تحسبها `_cash` نفسُها فلا تسقط أبداً."""
         daily = self.simple_daily_report()
         expense = self.simple_expense()
 
@@ -777,11 +778,63 @@ class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
             self.sums_by_code(expense, "credit")[CASH_CODE],
             money(rows[BOOK_ENTRY_KIND_EXPENSE], "credit"),
         )
-        self.assertEqual(
-            money(payload["totals"], "closing_balance"),
-            money(payload["totals"], "opening_balance")
-            + money(payload["totals"], "net"),
-        )
+        # قيمٌ حرفيّة: 117 قبضاً و234 دفعاً ⇒ صافٍ −117 وختامٌ −117 على أرضيةٍ صفر.
+        self.assertEqual(payload["totals"]["opening_balance"], "0.00")
+        self.assertEqual(payload["totals"]["net"], "-117.00")
+        self.assertEqual(payload["totals"]["closing_balance"], "-117.00")
+
+    def test_a_simple_entry_with_tax_is_short_by_the_tax_on_purpose(self):
+        """**القيدُ البسيط بضريبةٍ ناقصُ طرفِه المقابل بمقدار الضريبة — عن قصد.**
+
+        الضريبةُ في البسيط بياناتٌ على سطر الطبيعة (`tax_base`/`tax_amount`) لا
+        سطرُ `2200`، وشجرةُ البسيط بلا `2200` أصلاً. فللتقرير اليومي مدينُه 117
+        (سطرُ `1100`) ودائنُه 100 (سطرُ الإيراد)، وللمصروف مدينُه 200 ودائنُه
+        234: والفرقُ في الحالين هو الضريبةُ نفسُها (17 و34) لا خطأُ جمع.
+
+        **ولا يُصلَح هذا بسطر ضريبةٍ أو بموازنة القيد البسيط**: سجلُّ البسيط
+        أحاديٌّ لا مزدوج، و`_assert_balanced` لا تسأله عن التوازن أصلاً، وسطرُ
+        `2200` هنا يُخرج `_profit_rows` و`vat_from_book` عن موضعهما. القصدُ
+        مثبَّتٌ هنا حتى لا «يُصلحه» أحدٌ لاحقاً.
+        """
+        daily = self.simple_daily_report()
+        expense = self.simple_expense()
+
+        self.assertEqual(daily["total_debit"], "117.00")
+        self.assertEqual(daily["total_credit"], "100.00")
+        self.assertEqual(expense["total_debit"], "200.00")
+        self.assertEqual(expense["total_credit"], "234.00")
+
+    def test_a_simple_daily_report_without_tax_reads_one_hundred_each_way(self):
+        """التقريرُ اليوميُّ بلا ضريبة (100 و0): سطرُ `1100` مدينٌ 100 والإيرادُ
+        100، وصافي `cash` 100 وختامُه 100 — ولا ضريبةَ تُخرج الطرفين."""
+        entry = self.simple_daily_report(amount="100", tax="0")
+
+        cash = self.lines_by_code(entry)[CASH_CODE]
+        self.assertEqual(money(cash, "debit"), Decimal("100.00"))
+
+        income = self.report(self.simple_client, "income")
+        self.assertEqual(income["totals"]["revenue"], "100.00")
+
+        payload = self.report(self.simple_client, "cash")
+        self.assertEqual(payload["totals"]["net"], "100.00")
+        self.assertEqual(payload["totals"]["closing_balance"], "100.00")
+
+        vat = self.vat(self.simple_client)
+        self.assertEqual(vat["sales_tax"], "0.00")
+
+    def test_a_simple_expense_without_tax_reads_two_hundred_out(self):
+        """المصروفُ بلا ضريبة (200 و0): سطرُ `1100` دائنٌ 200 والمصروفُ 200 في
+        الأرباح والخسائر، وصافي `cash` −200 — دفعٌ كاملٌ بلا ضريبةٍ تُخرجه."""
+        entry = self.simple_expense(amount="200", tax="0")
+
+        cash = self.lines_by_code(entry)[CASH_CODE]
+        self.assertEqual(money(cash, "credit"), Decimal("200.00"))
+
+        income = self.report(self.simple_client, "income")
+        self.assertEqual(income["totals"]["expense"], "200.00")
+
+        payload = self.report(self.simple_client, "cash")
+        self.assertEqual(payload["totals"]["net"], "-200.00")
 
 
 class PaperRateIsDisplayOnlyTest(BookEntryGenerationTestCase):
