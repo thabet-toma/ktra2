@@ -1067,6 +1067,38 @@ def reactivate_office_client(client, *, actor=None, request=None) -> OfficeClien
     return client
 
 
+def mark_client_delivered(
+    client, *, on=None, actor=None, request=None,
+) -> OfficeClient:
+    """«تم التسليم» — تاريخٌ يُكتب بفعلٍ صريح، وإعدادُ الحجب يمنعه ما دام رصيد.
+
+    **والحارسُ هنا لا في الـview**: كلُّ نداءٍ برمجيّ يمرّ به، والـview يترجمه
+    400 مسمّى. والرفضُ **لا يكتب تاريخاً**: صفٌّ يبقى `delivered_on = None`، ويُرفع
+    الحجبُ بالدفع الكامل لأن شرطَه `client_due.due > 0` من الدالّة الواحدة.
+
+    **والتسليمُ حدثٌ في السجلّ**: `delivered_on` يقول متى، وسطرُ النشاط يقول مَن
+    (كما الإنهاءُ والإعادة) — فلا حالةَ تتبدّل بلا أثر.
+    """
+    if client.delivered_on is not None:
+        return client
+    day = on or timezone.localdate()
+    if resolve_setting(client.tenant, DELIVERY_HOLD_UNPAID_KEY):
+        due = _payments_module().client_due(client.tenant, client)
+        if due.due > 0:
+            raise ValidationError({"delivered": DELIVERY_HOLD_MESSAGE})
+    with transaction.atomic():
+        client.delivered_on = day
+        client.save(update_fields=["delivered_on", "updated_at"])
+        _log_client_status(
+            client,
+            description="تعليم زبون مكتب «تم التسليم»",
+            metadata={"delivered_on": client.delivered_on.isoformat()},
+            actor=actor,
+            request=request,
+        )
+    return client
+
+
 # ── البطاقة الضريبية ─────────────────────────────────────────────────────
 _TAX_CARD_FIELDS = (
     "entity_type", "vat_classification", "annual_sales",
@@ -6352,6 +6384,15 @@ APPOINTMENT_REMINDER_DAYS_KEY = "appointment_reminder_days"
 PAYMENT_NOTICE_ATTACH_KEY = "payment_notice_attach"
 PAYMENT_NOTICE_FORMAT_KEY = "payment_notice_format"
 PAYMENT_NOTICE_GRAY_THRESHOLD_KEY = "payment_notice_gray_threshold"
+#: #283/ج: حجبُ التسليم حتى الدفع — إعدادُ مكتبٍ مطفأٌ افتراضاً، وعلامتُه الواحدة
+#: ورسالةُ رفضه. الثلاثةُ هنا لأن الحمولةَ (`payments.client_dues_payload`) والحارسَ
+#: (`mark_client_delivered`) يقرؤون نصّاً واحداً لا نسختين تفترقان.
+DELIVERY_HOLD_UNPAID_KEY = "delivery_hold_unpaid"
+DELIVERY_HELD_LABEL = "لم يُسلَّم بعد"
+DELIVERY_HOLD_MESSAGE = (
+    "الزبون عليه رصيد — «حجب التسليم حتى الدفع» مفعّل، "
+    "فلا يُعلَّم «تم التسليم» قبل سداد كامل رصيده."
+)
 #: والصيغتان مُشتقّتان من السجلّ — لا نسختان تفترقان عند إضافة صيغةٍ ثالثة.
 PAYMENT_NOTICE_FORMAT_PDF = settings_registry.PAYMENT_NOTICE_FORMAT_PDF
 PAYMENT_NOTICE_FORMAT_BOTH = settings_registry.PAYMENT_NOTICE_FORMAT_BOTH
@@ -6701,6 +6742,10 @@ class ReminderCandidate:
     #: واستحقاقُها ورابطُ ورقتها. `None` لبندٍ ليس فاتورة (أوراقٌ ومواعيد).
     #: ويُركَّب الرابطُ في `attach_invoice_links` بعد الحواجز كالإشعار.
     invoice: Any = None
+    #: #283/ج: كشفُ الشهر المركَّبُ على بند «اللي عليه» — نافذتُه أوّلاً، ثم أرقامُ
+    #: `payments.statement_payload` عند بناء الرسالة (لا قبل الحواجز). وبندٌ لا
+    #: كشفَ له يبقى `None`، ومفتاحُه في البند كسائر المفاتيح كي يقرأه القالبُ دائماً.
+    statement: Any = None
 
 
 #: الإعداداتُ التي تُقرأ لكل زبونٍ في مسحةٍ واحدةٍ (`resolve_settings_for_clients`) —
@@ -6995,6 +7040,30 @@ def _reminder_candidates(
         postponed_pairs=postponed,
         reminder_type=reminder_type,
     ))
+    # #283/ج: «اللي عليه» بعد الاستحقاق — خيطٌ لكل زبونٍ من استحقاق آخر ورقةٍ
+    # صادرة، ودرجتان (3 ثم 7) بسقف اثنتين من السجلّ. مولّدٌ رابعٌ يُرجع
+    # `ReminderCandidate` نفسه فيمرّ في الحواجز كلّها بلا محرّكٍ موازٍ.
+    candidates.extend(_payments_module().balance_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
+    # #283/ج: كشفُ أوّل الشهر — بندٌ لكل زبونٍ عليه رصيد. والدَّمجُ مع بندٍ آخر في
+    # اليوم نفسه يقع **بعد الحواجز** (`_with_monthly_statements`) كي لا يضيع
+    # الكشفُ مع بندٍ حجبه يومُ راحةٍ أو انتهى سقفُه.
+    candidates.extend(_payments_module().statement_reminder_candidates(
+        tenant, clients,
+        day=day,
+        settings_by_client=settings_by_client,
+        contacts=contacts,
+        by_pair=by_pair,
+        postponed_pairs=postponed,
+        reminder_type=reminder_type,
+    ))
     return candidates
 
 
@@ -7063,6 +7132,9 @@ def _reminder_item_payload(candidate) -> dict:
         # #282/أ٢: بندُ الفاتورة — نصوصٌ مصيغةٌ ورابطُ ورقتها (يُركَّب بعد
         # الحواجز كالإشعار)، وبلا فاتورةٍ يخرج `None` فيبقى شكلُ البند ثابتاً.
         "invoice": _fee_invoices_module().invoice_item(candidate.invoice),
+        # #283/ج: كشفُ الشهر — أرقامُه من `statement_payload` بعد الحواجز، و`None`
+        # لبندٍ ليس كشفاً فيبقى شكلُ البند ثابتاً على كلّ نوع.
+        "statement": candidate.statement,
         "subject": {"document_item_codes": list(candidate.missing_codes)},
     }
 
@@ -7121,6 +7193,11 @@ def _reminder_message(tenant, contact, candidates, *, bodies_by_type) -> dict:
         # ورابط، ولا رمزَ جديداً في قوالب المكتب.
         if candidate.invoice is not None:
             parts.append(_fee_invoices_module().invoice_text(candidate.invoice))
+        # #283/ج: سطرُ الكشف الشهريّ بعد الإشعار — أرقامٌ من الورقة نفسها.
+        if candidate.statement is not None:
+            parts.append(_payments_module().statement_reminder_text(
+                candidate.statement, language=contact.language,
+            ))
     body = "\n\n".join(parts)
     return {
         "recipient": {
@@ -7187,6 +7264,59 @@ def can_share_payment_notice(tenant, user) -> bool:
     return user_has_perm(user, tenant, OFFICE_CLIENTS_WRITE_KEY)
 
 
+def _with_monthly_statements(tenant, candidates, *, day):
+    """يُدخل الكشفَ الشهريّ في **بندٍ واحدٍ لكل زبون** — بعد الحواجز كلّها.
+
+    **والدمجُ قرارٌ لا صدفة**: كشفُ أوّل الشهر يخصّ الزبون نفسَه الذي قد يكون له
+    في اليوم نفسه بندُ فاتورةٍ أو أوراق؛ ورسالتان بمفتاحين لبندٍ واحد تُقرأان
+    إلحاحاً ويُرسَل الكشفُ مرّتين. فيُدمج نصُّه في أوّل بندٍ باقٍ للزبون،
+    و**بندُ «اللي عليه» يُقدَّم** لأن الكشفَ امتدادُ رسالة الفاتورة في الشهر نفسه.
+    وبلا بندٍ آخر يبقى الكشفُ بنداً مستقلاً بمفتاحه الشهريّ.
+
+    **والكلفةُ على قدر المرسَل**: أرقامُ الكشف (`statement_payload`) تُقرأ هنا
+    لبندٍ نجا من الحواجز وحده، لا لبندٍ حجبه يومُ راحةٍ أو انتهى سقفُه.
+    """
+    if not any(candidate.statement is not None for candidate in candidates):
+        return candidates
+    slots = list(candidates)
+    for index, candidate in enumerate(slots):
+        if candidate.statement is None:
+            continue
+        targets = [
+            position
+            for position, other in enumerate(slots)
+            if position != index and other.client.pk == candidate.client.pk
+        ]
+        if not targets:
+            continue
+        host = next(
+            (
+                position for position in targets
+                if slots[position].reminder_type == REMINDER_BALANCE
+            ),
+            targets[0],
+        )
+        slots[host] = replace(slots[host], statement=slots[index].statement)
+        slots[index] = None
+    payloads: dict[int, dict] = {}
+    rows = []
+    for candidate in slots:
+        if candidate is None:
+            continue
+        if candidate.statement is not None:
+            payloads.setdefault(
+                candidate.client.pk,
+                _payments_module().statement_reminder_payload(
+                    tenant, candidate.client, day=day,
+                ),
+            )
+            candidate = replace(
+                candidate, statement=payloads[candidate.client.pk],
+            )
+        rows.append(candidate)
+    return rows
+
+
 def ready_to_send_payload(
     tenant, *, user, day, reminder_type=None, assignee=None,
 ) -> dict:
@@ -7239,6 +7369,9 @@ def ready_to_send_payload(
     ]
     if not candidates:
         return payload
+    # #283/ج: الكشفُ الشهريّ يُدمج في بندٍ واحدٍ لكل زبون **بعد الحواجز** — فلا
+    # يُنشَأ كشفٌ لبندٍ حجبه يومُ راحةٍ، ولا يضيع كشفُ زبونٍ حُجِب بندُه الآخر.
+    candidates = _with_monthly_statements(tenant, candidates, day=day)
     # #285: الإشعارُ يُركَّب هنا — بين الحاجز الأخير وبناء الرسالة — فلا رابطَ
     # يُنشَأ (ولا حسابَ سطرٍ) لبندٍ خارج «جاهز للإرسال». ودفعةً واحدة بمفتاح
     # (زبون، تاريخ) لا بنداً بنداً، فلا عملَ مكرَّرٌ ولا استعلامَ لكلّ زبون.

@@ -188,6 +188,16 @@ export interface OfficeClientRow {
   /** الموظف المسؤول (#272) — للقراءة وحدها؛ التحويلُ لنقطته `assign/`. */
   responsible_id: number | null;
   responsible_name: string;
+  /**
+   * «اللي عليه» من الدالّة الواحدة (#283) — `string` بالخانتين، و`null` لعضوٍ لا
+   * يرى المبالغ. الخادمُ يرسلها في القائمة والتفصيل، وكانت هنا بلا نوع.
+   */
+  due?: string | null;
+  /**
+   * علامةُ حجب التسليم (#283/ج) — **مفتاحٌ غائبٌ حين لا حجب**: الإعدادُ مطفأً
+   * هو سلوكُ اليوم، فلا يظهر حقلٌ فارغ. `label` نصُّ الخادم («لم يُسلَّم بعد»).
+   */
+  delivery?: { label: string } | null;
   created_at: string;
   updated_at: string;
 }

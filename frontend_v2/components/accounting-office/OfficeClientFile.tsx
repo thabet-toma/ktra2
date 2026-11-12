@@ -1292,6 +1292,21 @@ export const OfficeClientFile: React.FC<{
                   ملف {client.tax_file_number}
                 </span>
               ) : null}
+              {/* #283/ج: «اللي عليه» وعلامةُ حجب التسليم بجانبه — كلاهما من
+                  `client_due` عبر الخادم؛ والعلامةُ تغيب حين لا رصيد أو الإعداد مطفأ. */}
+              {client.due !== undefined && client.due !== null && Number(client.due) > 0 ? (
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 font-medium tabular-nums text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                  عليه {formatOfficeAmount(client.due)}
+                </span>
+              ) : null}
+              {client.delivery ? (
+                <span
+                  data-testid="client-delivery-hold"
+                  className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 font-semibold text-amber-800 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-300"
+                >
+                  {client.delivery.label}
+                </span>
+              ) : null}
               {client.ended_on ? (
                 <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 font-medium text-slate-500 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-400">
                   منتهٍ بتاريخ {formatDateValue(client.ended_on)}

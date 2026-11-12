@@ -135,6 +135,19 @@ class ClientDueFieldsMixin(serializers.Serializer):
 
     due = serializers.SerializerMethodField()
     tax_note = serializers.SerializerMethodField()
+    #: #283/ج: علامةُ «لم يُسلَّم بعد» — تُقرأ من الحمولة نفسها. **وتُحذف من الردّ
+    #: حين لا حجب**: مفتاحٌ بقيمةٍ فارغة كان يغيّر شكلَ الردّ على كل مكتبٍ أطفأ
+    #: الإعداد، وقاعدةُ القسم أن المطفأ هو سلوكُ اليوم حرفاً.
+    delivery = serializers.SerializerMethodField()
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if data.get("delivery") is None:
+            data.pop("delivery", None)
+        return data
+
+    def get_delivery(self, obj):
+        return self._payload(obj).get("delivery")
 
     def _payload(self, obj):
         dues = self.context.get("client_dues")
@@ -171,7 +184,7 @@ class OfficeClientListSerializer(
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
-            "responsible_id", "responsible_name", "due", "tax_note",
+            "responsible_id", "responsible_name", "due", "tax_note", "delivery",
             "created_at", "updated_at",
         ]
         read_only_fields = fields
@@ -191,7 +204,7 @@ class OfficeClientSerializer(
         fields = [
             "id", "name", "tax_file_number", "status", "status_label",
             "ended_on", "notes", "tax_system", "tax_system_label",
-            "tax_card", "responsible_id", "responsible_name", "due", "tax_note",
+            "tax_card", "responsible_id", "responsible_name", "due", "tax_note", "delivery",
             "created_at", "updated_at",
         ]
         read_only_fields = [

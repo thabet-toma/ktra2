@@ -400,6 +400,19 @@ class OfficeClientViewSet(OfficeModuleViewSet, viewsets.ModelViewSet):
         )
         return Response(self.get_serializer(client).data)
 
+    @action(detail=True, methods=["post"], url_path="delivered")
+    def delivered(self, request, pk=None):
+        """«تم التسليم» — **400 مسمّى** حين «حجب التسليم حتى الدفع» مفعّلٌ ورصيدٌ قائم.
+
+        والحارسُ في `services.mark_client_delivered` نفسه (كلُّ نداءٍ يمرّ به)،
+        والـView يترجم `ValidationError` إلى 400 برسالته (أساسُ الموديول).
+        """
+        self.require_write()
+        client = services.mark_client_delivered(
+            self.get_object(), actor=request.user, request=request,
+        )
+        return Response(self.get_serializer(client).data)
+
     # ── الموظف المسؤول والتحويل ─────────────────────────────────────────
     @action(detail=True, methods=["post"], url_path="assign")
     def assign(self, request, pk=None):

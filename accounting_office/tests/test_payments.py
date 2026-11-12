@@ -1076,3 +1076,76 @@ class TaxNoteTest(PaymentsTestCase):
             status=status or Obligation.STATUS_PENDING,
             client_paid=client_paid,
         )
+
+
+# ── #283/ج: حجبُ التسليم حتى الدفع ───────────────────────────────────────────
+#
+# **إعدادُ مكتبٍ مطفأٌ افتراضاً**: مفعّلاً، الزبونُ الذي عليه رصيدٌ يُعلَن في حمولة
+# `due` و«لم يُسلَّم بعد» على صفّه، ويُرفض تعليمُ «تم التسليم» **400 مسمّى**؛
+# ويُرفَع الحجبُ بالدفع الكامل (200). ومطفأً **لا يتغيّر بايتٌ** في الحمولة.
+class DeliveryHoldTest(PaymentsTestCase):
+    SETTING = "delivery_hold_unpaid"
+
+    def client_with_balance(self, total="400.00"):
+        client = self.make_client()
+        self.make_draft(client, total)
+        return client
+
+    def due_row(self, client):
+        return payments.client_due_payload(self.tenant, client, user=self.owner)
+
+    def client_row(self, client):
+        res = self.client.get(f"{CLIENTS}{client.pk}/", **self.headers())
+        self.assertEqual(res.status_code, 200, res.content)
+        return res.data
+
+    def mark_delivered(self, client):
+        return self.client.post(
+            f"{CLIENTS}{client.pk}/delivered/", {}, format="json", **self.headers(),
+        )
+
+    def test_off_leaves_the_payload_exactly_as_it_was(self):
+        client = self.client_with_balance()
+
+        self.assertEqual(
+            set(self.due_row(client)),
+            {
+                "due", "invoices_total", "paid_total", "credit",
+                "unpaid_count", "tax_note",
+            },
+        )
+        self.assertNotIn("delivery", self.client_row(client))
+
+    def test_on_with_a_balance_names_it_and_refuses_the_delivery_mark(self):
+        client = self.client_with_balance()
+        services.set_office_setting(self.tenant, self.SETTING, True)
+
+        self.assertEqual(
+            self.due_row(client)["delivery"],
+            {"label": "لم يُسلَّم بعد"},
+        )
+        self.assertEqual(
+            self.client_row(client)["delivery"], {"label": "لم يُسلَّم بعد"},
+        )
+
+        res = self.mark_delivered(client)
+
+        self.assertEqual(res.status_code, 400, res.content)
+        self.assertIn("تسليم", str(res.data))
+        client.refresh_from_db()
+        self.assertIsNone(client.delivered_on)
+
+    def test_on_with_nothing_owed_allows_the_mark_and_drops_the_flag(self):
+        client = self.client_with_balance()
+        services.set_office_setting(self.tenant, self.SETTING, True)
+        self.payment_of(client, "400.00")
+
+        self.assertNotIn("delivery", self.due_row(client))
+        self.assertNotIn("delivery", self.client_row(client))
+
+        res = self.mark_delivered(client)
+
+        self.assertEqual(res.status_code, 200, res.content)
+        client.refresh_from_db()
+        self.assertIsNotNone(client.delivered_on)
+        self.assertEqual(res.data["id"], client.pk)

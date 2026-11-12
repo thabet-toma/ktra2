@@ -31,7 +31,7 @@ from django.test import TestCase
 from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 
-from accounting_office import fee_invoices, services
+from accounting_office import fee_invoices, payments, services
 from accounting_office.models import (
     CONSENT_CHANNEL_PAPER,
     CONSENT_CHANNEL_TALK,
@@ -1149,3 +1149,336 @@ class LogShapeTest(RemindersTestCase):
                     "period_end": JAN_END.isoformat(),
                 }],
             )
+
+
+# ── #283/ج: تذكيرُ «اللي عليه» بعد الاستحقاق والكشفُ الشهريّ ─────────────────
+#
+# **الاستحقاقُ المخزَّن هو استحقاقُ آخر فاتورةٍ صادرة** (`issued_at + 7`): لا
+# يومَ فتح الشاشة، ولا تاريخاً يُعاد حسابه في كل قراءة. والباقي من `client_due`
+# وحدها. والحدُّ الأقصى **مرّتان من السجلّ**: صفّا إرسالٍ يخنقان البند، و`undo`
+# يُعيده لأن العدَّ يستثني المُبطَل — لا عدّاداً مخزَّناً.
+
+#: فاتورةٌ صدرت في 31 كانون الثاني ⇒ استحقاقُها 7 شباط، ودرجاتُها +3 و+7.
+INVOICE_ISSUED = JAN_END
+DUE_ON = FEB_SEVENTH
+DUE_PLUS_TWO = datetime.date(2026, 2, 9)
+DUE_PLUS_FOUR = datetime.date(2026, 2, 11)
+DUE_PLUS_SEVEN = datetime.date(2026, 2, 14)
+DUE_PLUS_EIGHT = datetime.date(2026, 2, 15)
+#: يومٌ بعيد — يثبت أن الخنق من السجلّ لا من نافذةِ أيام.
+DUE_PLUS_THIRTY = datetime.date(2026, 3, 9)
+#: أوّلُ آذار 2026 (أحد) ويومُه الثاني — لقياس الكشف الشهريّ بتاريخٍ مُعطى.
+MAR_START = datetime.date(2026, 3, 1)
+MAR_SECOND = datetime.date(2026, 3, 2)
+#: استحقاقُ فاتورةٍ صدرت في أوّل آذار = 8 آذار — فلا بندَ بعد الاستحقاق يوم 1.
+MAR_ISSUED = MAR_START
+
+
+class BalanceHelpers:
+    """زبونٌ بفاتورةٍ صادرةٍ ورصيد — مشتركٌ بين تذكير الاستحقاق والكشف الشهريّ."""
+
+    def make_due_client(
+        self, total="400.00", *, name="زبون اللي عليه",
+        issued_on=INVOICE_ISSUED, year=2026, month=1,
+    ):
+        client = self.make_client(name)
+        contact = self.make_contact(phone="0599111222")
+        services.link_client_contact(client=client, contact=contact, is_primary=True)
+        draft = FeeDraft.objects.create(
+            tenant=self.tenant,
+            client=client,
+            year=year,
+            month=month,
+            subtotal=Decimal(total),
+            total=Decimal(total),
+            status=FeeDraft.STATUS_APPROVED,
+            approved_by=self.owner,
+            approved_at=timezone.now(),
+            generated_at=timezone.make_aware(datetime.datetime(year, month, 1, 9, 0)),
+        )
+        invoice = fee_invoices.issue_for_draft(draft, actor=self.owner, day=issued_on)
+        return client, contact, draft, invoice
+
+    def send_balance(self, client, contact, *, start, end, day):
+        rows = services.mark_reminders_sent(
+            self.tenant,
+            user=self.owner,
+            contact_id=contact.pk,
+            body="نصٌّ أُرسل",
+            items=[{
+                "client_id": client.pk,
+                "reminder_type": REMINDER_BALANCE,
+                "period_start": start.isoformat(),
+                "period_end": end.isoformat(),
+            }],
+        )
+        for row in rows:
+            at(row, day)
+        return rows
+
+    def settle_invoice_item(self, client, contact, invoice):
+        """يُخنق بندُ «فاتورة اليوم» بمفتاحه (الإصدار، الاستحقاق) فلا يبقى في القائمة."""
+        issued_on, due_on = fee_invoices.reminder_period(invoice)
+        return self.send_balance(
+            client, contact, start=issued_on, end=due_on, day=issued_on,
+        )
+
+    def client_items(self, client, day):
+        return [
+            item
+            for message in self.messages(day)
+            for item in message["items"]
+            if item["client_id"] == client.pk
+        ]
+
+    def client_body(self, client, day):
+        bodies = [
+            message["body"]
+            for message in self.messages(day)
+            for item in message["items"]
+            if item["client_id"] == client.pk
+        ]
+        self.assertEqual(len(bodies), 1, bodies)
+        return bodies[0]
+
+
+class BalanceDueReminderTest(BalanceHelpers, RemindersTestCase):
+    def test_the_second_day_after_the_stored_due_date_shows_nothing(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+
+        self.assertEqual(self.client_items(client, DUE_PLUS_TWO), [])
+
+    def test_the_third_day_shows_one_item_naming_the_rest(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+
+        items = self.client_items(client, FEB_TENTH)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual(items[0]["reminder_type"], REMINDER_BALANCE)
+        self.assertEqual(items[0]["period_start"], DUE_ON.isoformat())
+        self.assertEqual(items[0]["period_end"], DUE_ON.isoformat())
+        self.assertEqual((items[0]["step"], items[0]["max"]), (1, 2))
+        self.assertEqual(items[0]["due_date"], FEB_TENTH.isoformat())
+        body = self.client_body(client, FEB_TENTH)
+        # `{due_date}` تاريخُ الاستحقاق المخزَّن نفسه لا يومُ فتح الشاشة.
+        self.assertIn(DUE_ON.strftime("%d/%m/%Y"), body)
+        self.assertIn("عليك 400.00 من 400.00", body)
+
+    def test_the_day_after_sending_shows_nothing_a_second_time(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=FEB_TENTH)
+
+        self.assertEqual(self.client_items(client, DUE_PLUS_FOUR), [])
+
+    def test_the_seventh_day_is_the_second_and_last_item(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=FEB_TENTH)
+
+        items = self.client_items(client, DUE_PLUS_SEVEN)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual((items[0]["step"], items[0]["max"]), (2, 2))
+
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=DUE_PLUS_SEVEN)
+
+        self.assertEqual(self.client_items(client, DUE_PLUS_EIGHT), [])
+        self.assertEqual(self.client_items(client, DUE_PLUS_THIRTY), [])
+
+    def test_the_cap_is_counted_from_the_log_so_undo_brings_it_back(self):
+        """الحدُّ من السجلّ لا من عدّادٍ مخزَّن: إبطالُ الثاني يُعيد البندَ للثاني."""
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=FEB_TENTH)
+        second = self.send_balance(
+            client, contact, start=DUE_ON, end=DUE_ON, day=DUE_PLUS_SEVEN,
+        )[0]
+        self.assertEqual(self.client_items(client, DUE_PLUS_EIGHT), [])
+
+        services.undo_reminder_log(second, actor=self.owner)
+
+        items = self.client_items(client, DUE_PLUS_EIGHT)
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual((items[0]["step"], items[0]["max"]), (2, 2))
+
+    def test_dismissing_the_third_day_resets_the_timer_without_a_step(self):
+        """«شيل لهذه المرة» يُعيد المؤقّتَ ولا يُعدّ — ولا يعود البندُ غداً."""
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        rows = services.dismiss_reminders(
+            self.tenant,
+            user=self.owner,
+            items=[{
+                "client_id": client.pk,
+                "reminder_type": REMINDER_BALANCE,
+                "period_start": DUE_ON.isoformat(),
+                "period_end": DUE_ON.isoformat(),
+            }],
+            reason="وعد بالدفع",
+        )
+        for row in rows:
+            at(row, FEB_TENTH)
+
+        self.assertEqual(self.client_items(client, DUE_PLUS_FOUR), [])
+
+        items = self.client_items(client, DUE_PLUS_SEVEN)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual((items[0]["step"], items[0]["max"]), (1, 2))
+
+    def test_a_partial_payment_keeps_it_and_the_text_names_the_rest(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=FEB_TENTH)
+
+        payments.create_payment(
+            self.tenant,
+            client,
+            amount=Decimal("150.00"),
+            method="cash",
+            paid_at=DUE_PLUS_FOUR,
+            actor=self.owner,
+        )
+
+        items = self.client_items(client, DUE_PLUS_SEVEN)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual((items[0]["step"], items[0]["max"]), (2, 2))
+        self.assertIn("عليك 250.00 من 400.00", self.client_body(client, DUE_PLUS_SEVEN))
+
+    def test_a_full_payment_stops_it(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        self.send_balance(client, contact, start=DUE_ON, end=DUE_ON, day=FEB_TENTH)
+
+        payments.create_payment(
+            self.tenant,
+            client,
+            amount=Decimal("400.00"),
+            method="cash",
+            paid_at=DUE_PLUS_FOUR,
+            actor=self.owner,
+        )
+
+        self.assertEqual(self.client_items(client, DUE_PLUS_SEVEN), [])
+
+    def test_a_client_owing_nothing_gets_no_item(self):
+        client, contact, _draft, invoice = self.make_due_client()
+        self.settle_invoice_item(client, contact, invoice)
+        payments.create_payment(
+            self.tenant, client, amount=Decimal("400.00"), method="cash",
+            paid_at=DUE_PLUS_TWO, actor=self.owner,
+        )
+
+        self.assertEqual(self.client_items(client, FEB_TENTH), [])
+
+
+class MonthlyStatementTest(BalanceHelpers, RemindersTestCase):
+    def test_day_one_gives_each_client_with_a_balance_one_statement_item(self):
+        client, contact, _draft, invoice = self.make_due_client(
+            issued_on=datetime.date(2026, 2, 20), month=2,
+        )
+        self.settle_invoice_item(client, contact, invoice)
+
+        items = self.client_items(client, MAR_START)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertEqual(items[0]["reminder_type"], REMINDER_BALANCE)
+        self.assertEqual(items[0]["period_start"], MAR_START.isoformat())
+        self.assertEqual(items[0]["period_end"], datetime.date(2026, 3, 31).isoformat())
+        statement = items[0]["statement"]
+        self.assertEqual(statement["due"], "400.00")
+        self.assertEqual(statement["total"], "400.00")
+        self.assertEqual(statement["period"], "آذار 2026")
+        body = self.client_body(client, MAR_START)
+        self.assertIn("كشف", body)
+        self.assertIn("400.00", body)
+
+    def test_the_statement_is_not_offered_on_any_other_day(self):
+        client, contact, _draft, invoice = self.make_due_client(
+            issued_on=datetime.date(2026, 2, 20), month=2,
+        )
+        self.settle_invoice_item(client, contact, invoice)
+
+        items = self.client_items(client, MAR_SECOND)
+
+        self.assertEqual([item for item in items if item["statement"]], [])
+
+    def test_a_client_owing_nothing_is_not_listed(self):
+        client = self.make_client("زبونٌ بلا رصيد")
+        contact = self.make_contact()
+        services.link_client_contact(client=client, contact=contact, is_primary=True)
+
+        self.assertEqual(self.client_items(client, MAR_START), [])
+
+    def test_it_is_merged_into_the_invoice_message_one_item_not_two(self):
+        """يوم 1: كشفٌ + فاتورةٌ جديدة = **بندٌ واحد** يحمل النصّين."""
+        client, contact, _first, first_invoice = self.make_due_client(
+            issued_on=datetime.date(2026, 2, 20), month=2,
+        )
+        self.settle_invoice_item(client, contact, first_invoice)
+        march = FeeDraft.objects.create(
+            tenant=self.tenant,
+            client=client,
+            year=2026,
+            month=3,
+            subtotal=Decimal("200.00"),
+            total=Decimal("200.00"),
+            status=FeeDraft.STATUS_APPROVED,
+            approved_by=self.owner,
+            approved_at=timezone.now(),
+            generated_at=timezone.make_aware(datetime.datetime(2026, 3, 1, 9, 0)),
+        )
+        second_invoice = fee_invoices.issue_for_draft(
+            march, actor=self.owner, day=MAR_ISSUED,
+        )
+
+        items = self.client_items(client, MAR_START)
+
+        self.assertEqual(len(items), 1, items)
+        self.assertIsNotNone(items[0]["invoice"])
+        self.assertEqual(items[0]["invoice"]["number"], second_invoice.number)
+        self.assertIsNotNone(items[0]["statement"])
+        body = self.client_body(client, MAR_START)
+        self.assertIn(second_invoice.number, body)
+        self.assertIn("كشف", body)
+
+    def test_a_sent_merged_message_does_not_bring_the_statement_back(self):
+        """إرسالُ البند المدمج يُسجَّل بمفتاح الفاتورة — والكشفُ لا يعود بنداً ثانياً.
+
+        بلا قاعدة «زبونٌ أُرسل له شيءٌ اليوم لا يأخذ كشفاً» يعود الكشفُ مستقلاً
+        بعد خنق بند الفاتورة، فيُرسَل الكشفُ مرّتين في يومٍ واحد.
+        """
+        client, contact, _first, first_invoice = self.make_due_client(
+            issued_on=datetime.date(2026, 2, 20), month=2,
+        )
+        self.settle_invoice_item(client, contact, first_invoice)
+        march = FeeDraft.objects.create(
+            tenant=self.tenant,
+            client=client,
+            year=2026,
+            month=3,
+            subtotal=Decimal("200.00"),
+            total=Decimal("200.00"),
+            status=FeeDraft.STATUS_APPROVED,
+            approved_by=self.owner,
+            approved_at=timezone.now(),
+            generated_at=timezone.make_aware(datetime.datetime(2026, 3, 1, 9, 0)),
+        )
+        fee_invoices.issue_for_draft(march, actor=self.owner, day=MAR_ISSUED)
+        merged = self.client_items(client, MAR_START)[0]
+        self.send_balance(
+            client,
+            contact,
+            start=datetime.date.fromisoformat(merged["period_start"]),
+            end=datetime.date.fromisoformat(merged["period_end"]),
+            day=MAR_START,
+        )
+
+        self.assertEqual(
+            [item for item in self.client_items(client, MAR_START) if item["statement"]],
+            [],
+        )
