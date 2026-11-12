@@ -17,23 +17,17 @@
 `general` بلا بيان (`shell_manifest` تعيد `None`) — الشريط الحالي المكتوب
 يدوياً في `Sidebar.tsx` يبقى حرفياً بلا مسّ؛ فراغُ البيان هو آلية التراجع.
 
-شاشةٌ واحدة مذكورة أدناه لم تُبنَ بعد (`UNBUILT_VIEWS`) وتأتي في تذكرةٍ لاحقة:
-«المكتب» (`office-desk`، لوحة مكتب مكتب المحاسبة). الواجهة تسقط بها إلى
-`dashboard`. **«ترميز مستندات» (`document-coding`) بُنيت في issue #85** —
-`frontend_v2/components/accounting/DocumentCodingPage.tsx` فوق
-`POST vouchers/batch-save/` التي بنتها #84 خادمياً — وخرجت من هذه القائمة.
+ISSUE #291: لم يبقَ في البيان شاشةٌ مذكورةٌ بلا بناء. كانت `UNBUILT_VIEWS`
+تحمل «المكتب» (`office-desk`) وحدها، وهي شاشةُ بيان `accounting_firm` الذي
+حُذف مع طبقة المكتب القديمة — فحُذفت القائمة ومفتاح `unbuilt_views` من الحمولة.
 """
 import copy
 
-# شاشةٌ واحدة يذكرها البيان بلا شاشةٍ فعلية بعد — الواجهة تسقط بها إلى `dashboard`.
-UNBUILT_VIEWS: frozenset[str] = frozenset({"office-desk"})
-
-# ── مجموعاتٌ مشتركة بين بيانَي المكتب ─────────────────────────────────────
+# ── مجموعاتٌ مشتركة داخل بيان مكتب المحاسبة ───────────────────────────────
 #
-# «الخزينة» و«حسابات المكتب» و«التقارير» نفسُها في `accounting_firm` وفي
-# `accounting_office` (#271): مكتبُ المحاسبة هو هو. تُعرَّف **مرّةً واحدةً هنا**
-# ويقرؤها البيانان، فلا قائمتان تفترقان عند أول شاشةٍ تُضاف — والبيانُ الناتج
-# لكلٍّ منهما يبقى كما كان حرفاً بحرف.
+# «الخزينة» و«حسابات المكتب» و«التقارير» تُعرَّف **مرّةً واحدةً هنا** ويقرؤها
+# البيان، فلا قائمةٌ ثانيةٌ تفترق عنها عند أول شاشةٍ تُضاف. (كانت مشتركةً بين
+# بيانَي `accounting_firm` و`accounting_office`؛ حُذف بيانُ القديم في #291.)
 TREASURY_VIEWS: tuple[str, ...] = (
     "cash-boxes", "accounting-banks", "accounting-bank-reconciliation",
     "accounting-cheques", "accounting-expense-vouchers",
@@ -61,16 +55,16 @@ REPORT_VIEWS: tuple[str, ...] = (
 )
 
 SHELL_MANIFESTS: dict[str, dict] = {
-    # ISSUE #271 — بيانُ موديول مكتب المحاسبة (القالب الجديد).
+    # ISSUE #271 — بيانُ موديول مكتب المحاسبة، والبيانُ الحيّ الوحيد للمكاتب.
     #
-    # **بجانب** `accounting_firm` لا بديلاً عنه: القالب القديم وطبقة المكتب
-    # القديمة (`client-books`، `office-desk`) لم تُمسّا. والشاشاتُ المنقولة من
-    # بيانه منقولةٌ **من الثوابت المشتركة أعلاه** لا بنسخٍ نصّيّ: قائمةٌ ثانيةٌ
-    # تعني تعديلين عند كل شاشة تُضاف، وأحدهما يُنسى.
+    # ISSUE #291: كان **بجانب** `accounting_firm`؛ حُذف بيانُ القديم مع طبقة
+    # المكتب القديمة (`client-books`، `office-desk`) فبقي هذا وحده. ومجموعاتُه
+    # المشتركة (`TREASURY_VIEWS`/`OFFICE_ACCOUNTING_VIEWS`/`REPORT_VIEWS`) تقرأ
+    # الثوابت أعلاه لا نسخاً نصّيّة: قائمةٌ ثانيةٌ تعني تعديلين عند كل شاشة
+    # تُضاف، وأحدهما يُنسى.
     #
-    # المنقولة: «الخزينة» و«حسابات المكتب» و«التقارير». وغير المنقولة: مجموعة
-    # «الأتعاب» (تذكرة الأتعاب لاحقة)، و`client-books` و`office-desk` (طبقةُ
-    # المكتب القديمة — لهذا القالب بديله الخاص).
+    # ما لا مجموعةَ له هنا: «الأتعاب» (تذكرة الأتعاب لاحقة)، و`client-books`
+    # و`office-desk` (شاشاتُ طبقة المكتب القديمة — حُذفت معها).
     "accounting_office": {
         # شاشة البداية قائمةُ الزبائن: أولُ ما يفعله مكتبٌ جديد هو إدخال زبون.
         "start_view": "office-clients",
@@ -135,97 +129,6 @@ SHELL_MANIFESTS: dict[str, dict] = {
             },
         ],
     },
-    "accounting_firm": {
-        "start_view": "dashboard",
-        "first_action": {"view": "sales-invoices", "label_term": "doc.sales_invoice"},
-        "empty_state_term": "empty.shell",
-        "groups": [
-            {"id": "home", "label_term": "nav.home", "views": ["dashboard"]},
-            {"id": "clients", "label_term": "nav.clients", "views": ["client-books"]},
-            {
-                "id": "fees",
-                "label_term": "nav.fees",
-                "views": [
-                    "sales-invoices", "sales-quotations",
-                    "sales-return", "sales-customers", "sales-customer-payments",
-                    "sales-settings",
-                ],
-            },
-            {
-                "id": "treasury",
-                "label_term": "nav.treasury",
-                "views": list(TREASURY_VIEWS),
-            },
-            {
-                "id": "office-accounting",
-                "label_term": "nav.office_accounting",
-                "views": list(OFFICE_ACCOUNTING_VIEWS),
-            },
-            {
-                "id": "reports",
-                "label_term": "nav.reports",
-                "views": list(REPORT_VIEWS),
-            },
-            {"id": "office", "label_term": "nav.office", "views": ["office-desk"]},
-        ],
-    },
-    "client_book": {
-        "start_view": "dashboard",
-        "first_action": {"view": "document-coding", "label_term": "action.document_coding"},
-        "empty_state_term": "empty.shell",
-        "groups": [
-            {"id": "home", "label_term": "nav.home", "views": ["dashboard"]},
-            {
-                "id": "entry",
-                "label_term": "nav.entry",
-                # سندا المصروف والإيراد **هنا** لا في «الحسابات»: هما مادّةُ هذا
-                # القالب اليومية — رزمةُ الورق التي يفتح المحاسبُ الدفترَ من
-                # أجلها — لا فرعٌ من إدارة شجرة الحسابات. وكان سند الإيراد بلا
-                # شاشةٍ أصلاً فلم يكن له مكانٌ يُذكر فيه.
-                "views": [
-                    "document-coding", "accounting-expense-vouchers",
-                    "accounting-revenue-vouchers", "accounting-journal-entry",
-                ],
-            },
-            {
-                "id": "receipt-payment",
-                "label_term": "nav.receipt_payment",
-                "views": ["sales-customer-payments", "supplier-payments", "accounting-cheques"],
-            },
-            {
-                "id": "parties",
-                "label_term": "nav.parties",
-                "views": ["sales-customers", "supplier-management", "sql-partners"],
-            },
-            {
-                "id": "accounts",
-                "label_term": "nav.accounts",
-                "views": [
-                    "accounting-coa", "accounting-journals", "accounting-general-ledger",
-                    "accounting-trial-balance", "cash-boxes", "accounting-banks",
-                    "accounting-bank-reconciliation",
-                ],
-            },
-            {
-                # سببُ مسك الدفتر أصلاً: كم ربح، وكم عليه من ضريبة. كانت شاشة
-                # «الوضع المالي» تعرض الأربعة على شاشة البداية ثم لا يجد من
-                # غادرها طريقاً يعود به، ولا قائمةَ دخلٍ ولا ميزانيةً في الشريط
-                # كلّه — فبدا القالبُ دفترَ إدخالٍ بلا نتيجة.
-                "id": "results",
-                "label_term": "nav.results",
-                "views": [
-                    "dashboard", "accounting-income-statement",
-                    "accounting-balance-sheet", "reports",
-                ],
-            },
-            {
-                "id": "declarations",
-                "label_term": "nav.declarations",
-                "views": ["accounting-vat-report", "accounting-vat-statements", "accounting-fiscal-periods"],
-            },
-            {"id": "settings", "label_term": "nav.settings", "views": ["settings"]},
-        ],
-    },
 }
 
 
@@ -239,6 +142,4 @@ def shell_manifest(template_key: str | None) -> dict | None:
     base = SHELL_MANIFESTS.get(template_key or "")
     if base is None:
         return None
-    manifest = copy.deepcopy(base)
-    manifest["unbuilt_views"] = sorted(UNBUILT_VIEWS)
-    return manifest
+    return copy.deepcopy(base)

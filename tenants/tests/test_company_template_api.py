@@ -43,18 +43,18 @@ class GeneralTemplateApiTest(APITestCase):
         self.assertEqual(Account.objects.filter(tenant=tenant).count(), len(COA_DATA))
 
 
-class AccountingFirmTemplateApiTest(APITestCase):
+class AccountingOfficeTemplateApiTest(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(username="firm-owner", password="x")
         self.client.force_authenticate(user=self.user)
 
-    def test_accounting_firm_seeds_the_stated_tree_and_drops_commercial_accounts(self):
+    def test_accounting_office_seeds_the_stated_tree_and_drops_commercial_accounts(self):
         res = self.client.post(
-            URL, {"CompanyName": "مكتب المحاسبة", "template": "accounting_firm"},
+            URL, {"CompanyName": "مكتب المحاسبة", "template": "accounting_office"},
             format="json")
         self.assertEqual(res.status_code, 201, res.content)
         body = res.json()
-        self.assertEqual(body["template"], "accounting_firm")
+        self.assertEqual(body["template"], "accounting_office")
 
         tenant = Tenant.objects.get(pk=body["TenantID"])
         codes = set(Account.objects.filter(tenant=tenant).values_list("code", flat=True))
@@ -72,9 +72,9 @@ class AccountingFirmTemplateApiTest(APITestCase):
         fees_account = Account.objects.get(tenant=tenant, code="4102")
         self.assertEqual(fees_account.account_type, "Revenue")
 
-    def test_accounting_firm_seeds_only_its_seven_document_types(self):
+    def test_accounting_office_seeds_only_its_seven_document_types(self):
         res = self.client.post(
-            URL, {"CompanyName": "مكتب المحاسبة الثاني", "template": "accounting_firm"},
+            URL, {"CompanyName": "مكتب المحاسبة الثاني", "template": "accounting_office"},
             format="json")
         self.assertEqual(res.status_code, 201, res.content)
         tenant = Tenant.objects.get(pk=res.json()["TenantID"])

@@ -62,21 +62,13 @@ def _default_terms() -> dict[str, str]:
     return terms
 
 
-# ISSUE #48: الكلمتان محسومتان ولا تُفتحان — «فاتورة أتعاب» و«خدمة» بدل
-# «منتج» في المكتب. `client_book` بلا `doc.sales_invoice`: القناع الحيّ
-# (`tenants/company_templates.py`) يخفي فاتورة المبيعات عن هذا القالب أصلاً.
-TEMPLATE_TERM_OVERRIDES: dict[str, dict[str, str]] = {
-    "accounting_firm": {
-        "doc.sales_invoice": "فاتورة أتعاب",
-        "line.item": "خدمة",
-        # ISSUE #83: نصّ الحالة الفارغة لبيان الشريط.
-        "empty.shell": "لم تُصدر فاتورة أتعابٍ بعد — ابدأ من هنا.",
-    },
-    "client_book": {
-        "line.item": "خدمة",
-        "empty.shell": "لا مستندات مرمّزة بعد — ابدأ بترميز أول مستند.",
-    },
-}
+# ISSUE #291: كان هنا تجاوزان لقالبَي المكتب القديمين (`accounting_firm`:
+# «فاتورة أتعاب»/«خدمة»، و`client_book`: «خدمة») — حُذف القالبان مع طبقة المكتب
+# في `accountant_portal`، فلم يبقَ قالبٌ يتجاوز معجم البذرة التجارية. السِجلّ
+# يبقى فارغاً هنا لأنه نقطةُ الوصل التي يقرؤها `term()`/`terms_payload()`؛
+# واسمُ مستند الأتعاب في الموديول الجديد له ثابتُه المستقلّ تحت
+# (`OFFICE_FEE_INVOICE_LABEL`) ولا يُربط بمفتاح `doc.sales_invoice`.
+TEMPLATE_TERM_OVERRIDES: dict[str, dict[str, str]] = {}
 
 
 #: #282/أ٢/١: اسمُ مستند فاتورة الأتعاب الورقية — **ثابتٌ واحدٌ هنا** (وهذا

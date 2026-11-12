@@ -1612,7 +1612,7 @@ class ProductViewSet(InvalidatesStoreCacheMixin, CatalogWriteGuardMixin, viewset
 class ProductLookupViewSet(ProductViewSet):
     """ISSUE #88 — عقد `view=lookup` وحده، خارج بادئة `/api/inventory/`.
 
-    قناع قالب `accounting_firm`/`client_book` (`tenants/company_templates.py`
+    قناع قالب `accounting_office` (`tenants/company_templates.py`
     — `TEMPLATE_HIDDEN_PATH_PREFIXES`) يخفي بادئة `/api/inventory/` كاملةً
     بفحص بادئة المسار (`core/permissions.py` — `TemplateSurfacePermission`)،
     فمنتقي المستندات (فواتير المكتب — خدمات #78 — من بينها) لا يصله أبداً ولو

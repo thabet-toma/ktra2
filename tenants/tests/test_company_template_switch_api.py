@@ -42,16 +42,16 @@ class TemplateSwitchApiTestBase(APITestCase):
 
 
 class NoRowDeletedTest(TemplateSwitchApiTestBase):
-    """general → accounting_firm: صفر حسابٍ محذوف، صفر دفترٍ محذوف."""
+    """general → accounting_office: صفر حسابٍ محذوف، صفر دفترٍ محذوف."""
 
-    def test_switch_general_to_accounting_firm_deletes_nothing(self):
+    def test_switch_general_to_accounting_office_deletes_nothing(self):
         before_account_codes = set(
             Account.objects.filter(tenant=self.tenant).values_list("code", flat=True))
         before_book_types = set(
             TenantBook.objects.filter(tenant=self.tenant).values_list("document_type", flat=True))
         self.assertEqual(before_account_codes, {row[0] for row in COA_DATA})
 
-        res = self._switch("accounting_firm")
+        res = self._switch("accounting_office")
         self.assertEqual(res.status_code, 200, res.content)
 
         after_account_codes = set(
@@ -69,24 +69,24 @@ class NoRowDeletedTest(TemplateSwitchApiTestBase):
 
     def test_existing_account_is_not_renamed_by_the_new_seed(self):
         """4102 موجودٌ باسم general («مبيعات الخدمات») — التبديل لا يُعيد تسميته
-        على اسم accounting_firm («إيرادات الخدمات»): لا تعديل على الموجود."""
+        على اسم accounting_office («إيرادات الخدمات»): لا تعديل على الموجود."""
         before_name = Account.objects.get(tenant=self.tenant, code="4102").name
-        res = self._switch("accounting_firm")
+        res = self._switch("accounting_office")
         self.assertEqual(res.status_code, 200, res.content)
         after = Account.objects.get(tenant=self.tenant, code="4102")
         self.assertEqual(after.name, before_name)
 
     def test_no_account_is_deactivated_by_the_switch(self):
-        res = self._switch("accounting_firm")
+        res = self._switch("accounting_office")
         self.assertEqual(res.status_code, 200, res.content)
         self.assertFalse(
             Account.objects.filter(tenant=self.tenant, is_active=False).exists())
 
     def test_switching_back_to_general_restores_the_dropped_seed(self):
-        """شركةٌ وُلدت `accounting_firm` (لم تُزرع لها 1104/1201/2106/4101
+        """شركةٌ وُلدت `accounting_office` (لم تُزرع لها 1104/1201/2106/4101
         إطلاقاً) ثم تحوّلت إلى `general`: تلك الحسابات تُزرع الآن — لا رجوعاً
         عن حذف (لم يقع حذف)، بل زرعاً للناقص من بذرة الوجهة الجديدة."""
-        firm_tenant = create_company("مكتب وُلد مكتباً", self.manager, template="accounting_firm")
+        firm_tenant = create_company("مكتب وُلد مكتباً", self.manager, template="accounting_office")
         codes = set(Account.objects.filter(tenant=firm_tenant).values_list("code", flat=True))
         for dropped in ("1104", "1201", "2106", "4101"):
             self.assertNotIn(dropped, codes)
@@ -103,14 +103,14 @@ class NoRowDeletedTest(TemplateSwitchApiTestBase):
 
 class IdempotentSwitchTest(TemplateSwitchApiTestBase):
     def test_switching_to_the_same_target_twice_creates_nothing_the_second_time(self):
-        first = self._switch("accounting_firm")
+        first = self._switch("accounting_office")
         self.assertEqual(first.status_code, 200, first.content)
         self.assertTrue(first.json()["accounts_created"] or first.json()["book_types_created"])
 
         before_accounts = Account.objects.filter(tenant=self.tenant).count()
         before_books = TenantBook.objects.filter(tenant=self.tenant).count()
 
-        second = self._switch("accounting_firm")
+        second = self._switch("accounting_office")
         self.assertEqual(second.status_code, 200, second.content)
         self.assertEqual(second.json()["accounts_created"], [])
         self.assertEqual(second.json()["book_types_created"], [])
@@ -122,7 +122,7 @@ class TemplateSwitchAccessTest(TemplateSwitchApiTestBase):
     def test_non_manager_cannot_switch(self):
         staff = User.objects.create_user(username="tpl-switch-staff", password="x")
         UserCompanyMembership.objects.create(user=staff, tenant=self.tenant, role="staff")
-        res = self._switch("accounting_firm", user=staff)
+        res = self._switch("accounting_office", user=staff)
         self.assertIn(res.status_code, (403, 404))
 
     def test_unknown_template_key_is_rejected_in_arabic(self):
@@ -137,13 +137,13 @@ class TemplateSwitchAccessTest(TemplateSwitchApiTestBase):
 
 class TemplateSwitchAuditLogTest(TemplateSwitchApiTestBase):
     def test_switch_writes_an_audit_log_row(self):
-        res = self._switch("accounting_firm")
+        res = self._switch("accounting_office")
         self.assertEqual(res.status_code, 200, res.content)
         row = AccountingAuditLog.objects.filter(
             tenant=self.tenant, action="TEMPLATE_SWITCH").first()
         self.assertIsNotNone(row)
         self.assertEqual(row.user_id, self.manager.pk)
-        self.assertIn("accounting_firm", row.change_details)
+        self.assertIn("accounting_office", row.change_details)
 
 
 class TemplateSwitchMaskInvalidationTest(TemplateSwitchApiTestBase):
@@ -162,7 +162,7 @@ class TemplateSwitchMaskInvalidationTest(TemplateSwitchApiTestBase):
         res_before = self.client.get("/api/inventory/products/")
         self.assertNotEqual(res_before.status_code, 404, res_before.content)
 
-        switch = self._switch("accounting_firm")
+        switch = self._switch("accounting_office")
         self.assertEqual(switch.status_code, 200, switch.content)
 
         res_after = self.client.get("/api/inventory/products/")
@@ -208,6 +208,6 @@ class TemplateSwitchBalancesIntactTest(TemplateSwitchApiTestBase):
 
     def test_balances_are_byte_identical_after_switch(self):
         before = self._balance_snapshot()
-        res = self._switch("accounting_firm")
+        res = self._switch("accounting_office")
         self.assertEqual(res.status_code, 200, res.content)
         self.assertEqual(self._balance_snapshot(), before)

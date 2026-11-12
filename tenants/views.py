@@ -289,13 +289,9 @@ class TenantViewSet(viewsets.ModelViewSet):
         name = request.data.get("CompanyName")
         if not name:
             raise DRFValidationError({"CompanyName": "اسم الشركة مطلوب."})
-        from .company_templates import (
-            COMPANY_TEMPLATES, DEFAULT_TEMPLATE, assert_self_serve_template,
-        )
+        from .company_templates import DEFAULT_TEMPLATE, assert_self_serve_template
         from .services import create_company
         template = request.data.get("template") or DEFAULT_TEMPLATE
-        if template not in COMPANY_TEMPLATES:
-            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
         try:
             assert_self_serve_template(template)
         except ValueError as e:
@@ -581,7 +577,7 @@ class TenantViewSet(viewsets.ModelViewSet):
     def set_template(self, request, pk=None):
         """يبدّل قالب الشركة — القناع الحيّ يتبدّل فوراً، ولا يُنزَع أي مزروع.
 
-        body: {"template": "general" | "accounting_firm"}. مثل `set_store_slug`:
+        body: {"template": "general" | "accounting_office"}. مثل `set_store_slug`:
         نقطة كتابةٍ خاصّة لا `PATCH` عام — `template` يبقى للقراءة فقط في
         `TenantSerializer` لأن التبديل يحمل بذرةً وتحقّقاً لا يصحّان في مسلسلٍ
         عام. بصلاحية `admin.settings.manage` — نفس بوابة بقية إعدادات الشركة.
@@ -589,10 +585,8 @@ class TenantViewSet(viewsets.ModelViewSet):
         tenant = self.get_object()
         self._require_company_manager(request, tenant, "admin.settings.manage")
 
-        from .company_templates import COMPANY_TEMPLATES, assert_self_serve_template
+        from .company_templates import assert_self_serve_template
         template = request.data.get("template")
-        if template not in COMPANY_TEMPLATES:
-            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
         try:
             assert_self_serve_template(template)
         except ValueError as e:
@@ -624,49 +618,12 @@ class TenantViewSet(viewsets.ModelViewSet):
             return Response([])
         from .services import ensure_example_company_access
         ensure_example_company_access(user)
-        # ISSUE #52: الدفاتر المُدارة لا تظهر هنا — مبدّل الشركات العادي ليس
-        # مكانها، بل قائمة زبائن المكتب.
+        # ISSUE #52: الدفاتر المُدارة تبقى خارج المبدّل العادي — مبدّل الشركات
+        # ليس مكانها. (قائمةُ «دفاتر عملائي» التي كانت تعرضها حُذفت في #291.)
         qs = UserCompanyMembership.objects.filter(
             user=user, tenant__managed_by__isnull=True,
         ).select_related("tenant").order_by("tenant__CompanyName")
         return Response(UserCompanyMembershipSerializer(qs, many=True).data)
-
-    @action(detail=True, methods=["get", "post"], url_path="managed-books")
-    def managed_books(self, request, pk=None):
-        """ISSUE #52: مكتب المحاسبة يفتح دفتراً مُداراً لعميله.
-
-        GET: قائمة الدفاتر المُدارة التي يملكها هذا المكتب. POST: ينشئ دفتراً
-        جديداً بعد فحص حصّة الخطة `office.managed_books` — مدير المكتب فقط.
-        body (POST): {"CompanyName": "...", "template": "..."} (القالب اختياري).
-        """
-        office = self.get_object()
-        self._require_company_manager(request, office)
-
-        if request.method == "GET":
-            qs = Tenant.objects.filter(managed_by=office).order_by("CompanyName")
-            return Response(TenantSerializer(qs, many=True).data)
-
-        # T-PLANLIMITS: يُفحص **قبل** الإنشاء — الدفتر المُدار لا يُحذف بعدها.
-        enforce_limits(office, "office.managed_books")
-        name = request.data.get("CompanyName")
-        if not name:
-            raise DRFValidationError({"CompanyName": "اسم الدفتر مطلوب."})
-        from .company_templates import (
-            COMPANY_TEMPLATES, DEFAULT_BOOK_TEMPLATE, assert_book_template,
-        )
-        from .services import create_company
-        template = request.data.get("template") or DEFAULT_BOOK_TEMPLATE
-        if template not in COMPANY_TEMPLATES:
-            raise DRFValidationError({"template": f"قالب الشركة «{template}» غير معروف."})
-        try:
-            assert_book_template(template)
-        except ValueError as e:
-            raise DRFValidationError({"template": str(e)})
-        try:
-            tenant = create_company(name, request.user, template=template, managed_by=office)
-        except DjangoValidationError as e:
-            raise DRFValidationError({"detail": e.messages if hasattr(e, "messages") else str(e)})
-        return Response(TenantSerializer(tenant).data, status=status.HTTP_201_CREATED)
 
     @action(detail=False, methods=["post"], url_path="set-default")
     def set_default(self, request):

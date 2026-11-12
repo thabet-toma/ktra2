@@ -840,33 +840,6 @@ class DailyRatingsReviewFixesTest(TestCase):
         self.assertEqual(codes[:2], [200, 200], codes)
         self.assertEqual(codes[2], 429, "تزويرُ الترويسة اشترى دلواً جديداً للرابط العام")
 
-    # -- ع٨: اسمُ المستند بمعجمِ الشركة لا حرفياً ----------------------------
-    def test_activity_description_uses_the_company_own_document_vocabulary(self):
-        """كان «فاتورة مبيعات» مكتوباً حرفياً في جدولِ الأسماء.
-
-        فمكتبُ المحاسبة — الذي يسمّيها «فاتورة أتعاب» — كان يقرأ في سجلّ وكيله
-        معجمَ شركةٍ غيرِه. وهذا ما يحرسه `core/tests/test_terminology_guard.py`.
-        """
-        firm = Tenant.objects.create(
-            TenantID=6003, CompanyName="مكتب المحاسبة", template="accounting_firm",
-        )
-        Engagement.objects.create(
-            tenant=firm, employee=self.employee, status=Engagement.Status.ACTIVE,
-        )
-        ActivityLog.objects.create(
-            tenant=firm,
-            user=self.agent_user,
-            action="update",
-            entity_type="sales_invoice",
-            entity_label="#77",
-            # بلا وصفٍ مخزَّن: هذا هو الفرعُ الذي يُركَّب فيه الاسمُ من المعجم.
-            description="",
-        )
-
-        desc = get_my_books_tab_data(firm)["activity_log"][0]["description"]
-        self.assertIn("فاتورة أتعاب", desc)
-        self.assertNotIn("فاتورة مبيعات", desc)
-
     # -- ع٩: سطحُ الزبون خارج جذرِ السوبر أدمن -------------------------------
     def test_tenant_facing_routes_are_not_under_the_super_admin_root(self):
         """كانت نقاطُ م٧ السبعُ تحت `/api/platform/` — جذرٌ عقدُه أن لا أحدَ

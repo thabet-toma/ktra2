@@ -25,12 +25,29 @@ from tenants.services import create_company
 pytestmark = pytest.mark.django_db
 
 
-def _make_tenant(username, *, template="accounting_firm"):
+def _seed_office_services(tenant):
+    """الخدماتُ الخمس المربوطة بحسابات أتعابها (ISSUE #78).
+
+    ISSUE #291 حذف قالب المكتب القديم الذي كان يزرعها، فصار العقدُ نفسُه يُبنى
+    هنا: الحسابات `4103`-`4106` ما زالت في بذرة `accounting_office`، والقيدُ
+    عليها هو ما تُثبته اختبارات هذا الملف.
+    """
+    for sku, name_ar, account_code in ACCOUNTING_FIRM_SERVICES:
+        Product.objects.create(
+            tenant=tenant, sku=sku, name_ar=name_ar, is_service=True,
+            quantity_on_hand=0, avg_cost=0,
+            sale_account_override=Account.objects.get(tenant=tenant, code=account_code),
+        )
+
+
+def _make_tenant(username, *, template="accounting_office"):
     owner = User.objects.create_user(username=username, password="x")
     ils = Currency.objects.filter(Code="ILS").first() or Currency.objects.create(
         Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True)
     tenant = create_company(f"مكتب {username}", owner, template=template)
     tenant._test_currency = ils
+    if template == "accounting_office":
+        _seed_office_services(tenant)
     create_fiscal_year(tenant, 2026)
     return tenant
 
@@ -64,19 +81,6 @@ def _credit_by_account(journal):
 
 
 # ── الزرع: خمس خدمات مربوطة بحساباتها ────────────────────────────────────────
-
-def test_accounting_firm_template_seeds_five_linked_services():
-    tenant = _make_tenant("svcfee-seed")
-    services = Product.objects.filter(tenant=tenant, is_service=True)
-    assert services.count() == 5
-
-    by_sku = {p.sku: p for p in services}
-    assert set(by_sku) == {sku for sku, _name, _code in ACCOUNTING_FIRM_SERVICES}
-    for sku, _name, account_code in ACCOUNTING_FIRM_SERVICES:
-        product = by_sku[sku]
-        assert product.sale_account_override is not None
-        assert product.sale_account_override.code == account_code
-
 
 def test_general_template_seeds_no_services():
     tenant = _make_tenant("svcfee-general", template="general")

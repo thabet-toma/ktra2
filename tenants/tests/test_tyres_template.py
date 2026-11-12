@@ -105,11 +105,11 @@ def test_preview_count_matches_what_apply_actually_creates(creator, capsys):
     عن الأخرى صار الأمر يطبع رقماً كاذباً لمن يشغّله على الإنتاج قبل الكتابة —
     وهو الاستعمال الوحيد الذي بُني له. فيُشدّ الرقمان إلى بعضهما هنا.
 
-    تُختار شركةٌ بقالب `accounting_firm` عمداً: بذرتها تُسقط عشرات أكواد
+    تُختار شركةٌ بقالب `accounting_office` عمداً: بذرتها تُسقط عشرات أكواد
     `COA_DATA`، فالنقل إلى `tyres` يزرع فعلاً ولا يكون الرقمان صفرين متطابقين
     بالصدفة.
     """
-    tenant = create_company("شركة ناقصة الحسابات", creator, template="accounting_firm")
+    tenant = create_company("شركة ناقصة الحسابات", creator, template="accounting_office")
 
     call_command(
         "switch_company_template",

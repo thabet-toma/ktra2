@@ -1638,11 +1638,11 @@ def platform_company_usage(request, pk):
 
 # ── SA-9: إنشاء شركة لعميل من اللوحة ─────────────────────────────────────────
 
-# `client_book` خارج القائمة: دفتر العميل يولد من مكتب محاسبة (`managed_by`)
-# عبر مساره، لا من لوحة المنصة بلا مكتب.
 # ISSUE #271: `accounting_office` **داخل** القائمة — مكتبُ محاسبة يُنشئه سوبر
-# أدمن لعميلٍ صار مكتباً حقيقياً بنفسه، لا دفتراً تابعاً لمكتبٍ قائم.
-_CREATABLE_TEMPLATES = ('general', 'accounting_firm', 'tyres', 'accounting_office')
+# أدمن لعميلٍ صار مكتباً حقيقياً بنفسه.
+# ISSUE #291: خرجت من القائمة `accounting_firm` (القالب القديم) و`client_book`
+# مع طبقة المكتب القديمة — لم يبقَ فيها إلا القوالب الحيّة.
+_CREATABLE_TEMPLATES = ('general', 'tyres', 'accounting_office')
 MAX_TRIAL_DAYS = 90
 
 

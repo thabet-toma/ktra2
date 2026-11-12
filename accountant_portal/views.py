@@ -59,7 +59,6 @@ from accountant_portal.services import (
     get_portal_settings,
     period_readiness,
     portal_settings_payload,
-    practice_overview,
     prepare_tax_period,
     record_package_export,
     reopen_tax_period,
@@ -785,19 +784,6 @@ class ClientTrendView(TenantScopedView):
         except (TypeError, ValueError):
             months = 6
         return Response({"months": months, "series": client_monthly_trend(tenant=tenant, months=months)})
-
-
-class PracticeOverviewView(PortalAPIView):
-    """لوحة المكتب: كل الزبائن وأرقام الشهر ومواعيد التقديم في نداء واحد."""
-
-    permission_classes = [IsAuthenticated]
-
-    def get(self, request):
-        try:
-            request.user.accountant_profile
-        except AccountantProfile.DoesNotExist:
-            return _error("accountant_profile_required", "لا يوجد ملف محاسب.", HTTP_404_NOT_FOUND)
-        return Response(practice_overview(accountant=request.user))
 
 
 class ClientSummaryView(TenantScopedView):

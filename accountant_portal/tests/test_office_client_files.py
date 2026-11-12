@@ -286,30 +286,3 @@ class PracticeAndStatementsTest(ClientFileTest):
         self.assertEqual(response.status_code, 200, response.content)
         self.assertEqual(len(response.data["series"]), 6)
         self.assertTrue(all("month" in row and "profit" in row for row in response.data["series"]))
-
-    def test_practice_overview_lists_every_client_with_its_month_numbers(self):
-        response = self.client.get("/api/accountant/practice/overview/")
-
-        self.assertEqual(response.status_code, 200, response.content)
-        names = [row["company_name"] for row in response.data["clients"]]
-        self.assertIn("زبون المكتب", names)
-        self.assertEqual(response.data["totals"]["clients"], 1)
-        row = response.data["clients"][0]
-        for key in ("vat_due", "profit", "filing_due_date", "days_to_filing", "draft_documents"):
-            self.assertIn(key, row)
-
-    def test_practice_overview_never_leaks_another_offices_clients(self):
-        stranger = User.objects.create_user("practice-stranger", email="practice@example.com")
-        AccountantProfile.objects.create(
-            user=stranger,
-            professional_type="accountant",
-            tax_registration_number="TAX-PRACTICE-1",
-            business_address="جنين",
-            email_verified_at=timezone.now(),
-        )
-        self.client.force_authenticate(stranger)
-
-        response = self.client.get("/api/accountant/practice/overview/")
-
-        self.assertEqual(response.status_code, 200, response.content)
-        self.assertEqual(response.data["clients"], [])

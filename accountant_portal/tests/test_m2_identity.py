@@ -103,7 +103,7 @@ class AccountantProfileWithoutEmailVerificationTest(APITestCase):
 
 
 class AccountantSignupRouteClosedTest(APITestCase):
-    """ISSUE #60 — الباب المنفصل أُغلق على الخادم أيضاً: القالب `accounting_firm` حلّ محلّه."""
+    """ISSUE #60 — الباب المنفصل أُغلق على الخادم أيضاً: لا نقطة تسجيل محاسب مستقلة."""
 
     def test_signup_endpoint_no_longer_exists(self):
         response = self.client.post(

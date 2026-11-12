@@ -6,12 +6,15 @@
 هذه التذكرة. الحارس الآن يمشي على **شجرة الإنتاج كلّها**.
 
 **العبارات المراقَبة مُشتقّة لا مكتوبة يدوياً:** `_watched_phrases()` تقرأ
-`core.terminology` نفسها وتُبقي العبارات **المركّبة** (كلمتان فأكثر) **التي
-تحمل تجاوزاً فعلياً بين قالبٍ وآخر** — أي التي حرفيّتها خطأٌ وظيفي محتمل
-(نصٌّ يتجاهل قالب الشركة)، لا كل اسم مستند. اليوم هذا يساوي {"فاتورة مبيعات",
-"فاتورة أتعاب"} (`doc.sales_invoice`). بقية أنواع المستند (`سند قبض`، `عرض
-سعر`، …) قيمتها واحدة في كل قالب — كتابتها حرفياً أسلوب كودٍ لا خطأً وظيفياً،
-فحراستها مسحاً شاملاً توسيعٌ منفصل خارج نطاق هذه التذكرة.
+`core.terminology` نفسها وتُبقي العبارات **المركّبة** (كلمتان فأكثر) التي
+يسمّي بها نوعُ المستند الواحد **اسمين مختلفين** — أي التي حرفيّتها خطأٌ وظيفي
+محتمل (نصٌّ يتجاهل معجم الشركة). اليوم هذا يساوي {"فاتورة مبيعات", "فاتورة
+أتعاب"}: افتراضُ `doc.sales_invoice` في المعجم، واسمُ مستند الأتعاب في موديول
+المكتب (`OFFICE_FEE_INVOICE_LABEL`). قبل #291 كان الاشتقاق من
+`TEMPLATE_TERM_OVERRIDES`؛ ولمّا حُذف قالبا المكتب القديمان خلا السِجلّ، فصار
+الاشتقاق من الثابتين الحيّين — والمجموعة نفسها. بقية أنواع المستند (`سند قبض`،
+`عرض سعر`، …) قيمتها واحدة في كل قالب — كتابتها حرفياً أسلوب كودٍ لا خطأً
+وظيفياً، فحراستها مسحاً شاملاً توسيعٌ منفصل خارج نطاق هذه التذكرة.
 
 **الكلمات المفردة (`منتج`/`خدمة`) مستثناة عمداً**: كلمتان عاديتان تتكرران في
 سياقاتٍ لا علاقة لها بالمعجم («خدمة ما بعد البيع» في `Sidebar.tsx` مثال حيّ)
@@ -35,7 +38,7 @@ from pathlib import Path
 
 from django.test import SimpleTestCase
 
-from core.terminology import TEMPLATE_TERM_OVERRIDES, _default_terms
+from core.terminology import OFFICE_FEE_INVOICE_LABEL, _default_terms
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -51,18 +54,9 @@ EXCLUDED_FILE_RE = re.compile(r"(^|/)test_[^/]+\.py$|\.test\.tsx?$")
 
 
 def _watched_phrases() -> set[str]:
-    """عباراتٌ مركّبة (كلمتان فأكثر) من مفاتيح تحمل تجاوزاً فعلياً بالقالب."""
+    """عباراتٌ مركّبة (كلمتان فأكثر) يسمّي بها نوعُ المستند الواحد اسمين مختلفين."""
     defaults = _default_terms()
-    keys_with_overrides = {
-        key for overrides in TEMPLATE_TERM_OVERRIDES.values() for key in overrides
-    }
-    values = set()
-    for key in keys_with_overrides:
-        if key in defaults:
-            values.add(defaults[key])
-        for overrides in TEMPLATE_TERM_OVERRIDES.values():
-            if key in overrides:
-                values.add(overrides[key])
+    values = {defaults.get("doc.sales_invoice", ""), OFFICE_FEE_INVOICE_LABEL}
     return {v for v in values if v and len(v.split()) >= 2}
 
 
@@ -70,7 +64,7 @@ def _watched_phrases() -> set[str]:
 ALLOWLIST: dict[str, str] = {
     # مصدر المعجم نفسه — القيمة تُعرَّف هنا حرفياً لا نسخة عنها.
     "core/terminology.py":
-        "تعريف المعجم نفسه (DEFAULT_TERMS/TEMPLATE_TERM_OVERRIDES) — مصدرٌ لا نسخة.",
+        "تعريف المعجم نفسه (DEFAULT_TERMS/OFFICE_FEE_INVOICE_LABEL) — مصدرٌ لا نسخة.",
     "frontend_v2/utils/terms.ts":
         "تعريف المعجم على الواجهة (احتياطي أول رسمة قبل ردّ الخادم) — مصدرٌ لا نسخة.",
     "tenants/models.py":

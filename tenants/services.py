@@ -22,12 +22,6 @@ logger = logging.getLogger(__name__)
 # (شجرةً ودفاترَ وقناعَ مسارات)، والترخيصُ شأنُ `core.modules` — خلطُ الاثنين
 # يجعل القالب يحمل سياسة تسعير.
 _TEMPLATE_MODULE_LICENCES: dict[str, tuple[str, str]] = {
-    # ISSUE #87 — دفتر العميل بابُه مكتب محاسبة يدفع `office.managed_books`.
-    # النصُّ كما هو حرفياً منذ ذلك الحين: سجلُّ تراخيص الشركات القائمة يقرؤه إنسان.
-    'client_book': (
-        'accountant_portal',
-        'زُرعت تلقائياً مع قالب دفتر العميل — ISSUE #87',
-    ),
     # ISSUE #271 — الموديول الجديد كلّه خلف `require_module`.
     'accounting_office': (
         'accounting_office',
@@ -383,19 +377,13 @@ def create_company(
                 sale_account_override=account_map.get(account_code),
             )
 
-        # 4.8 ترخيصُ الوحدة التي **قالبُ الشركة هو منتجُها** (ISSUE #87، و#271).
-        # `client_book` لا يُفتح إلا مكتبُ محاسبةٍ يدفع حصّة `office.managed_books`،
-        # وشاشة بدايته («الوضع المالي»، `ClientBookFinancialPosition.tsx`) تستهلك
-        # نقاطاً تحت `guard_module_surface` فتردّ 404 بلا هذا الترخيص — كانت شاشة
-        # الإقلاع الوحيدة التي بُنيت لهذا القالب تفتح على عطل من أول يوم.
-        # و`accounting_office` (#271) قالبُ الموديول الجديد: كلُّ نقطةٍ تحت
+        # 4.8 ترخيصُ الوحدة التي **قالبُ الشركة هو منتجُها** (ISSUE #271).
+        # `accounting_office` قالبُ موديول المكتب: كلُّ نقطةٍ تحت
         # `/api/accounting-office/` تمرّ بـ`require_module`، فبلا هذا السطر تفتح
         # الشركة على 404 في القائمة وملف الزبون والإعدادات معاً.
-        # `accounting_firm` لا يُلمَس: لوحته (`practice/dashboard/`) هوياتيّة
-        # النطاق ولا تمرّ بهذا الحارس أصلاً (`accountant_portal/services.py` —
-        # `getPracticeDashboard` بلا `X-Tenant-Id` عمداً)، و`general` لا علاقة له
-        # بالوحدة إطلاقاً. **لا تُكرَّر هذه البذرة في `switch_company_template`** —
-        # نقطة الزرع واحدة (القرار 8 في #46)، وتبديل القالب لاحقاً لا يمنح تراخيص.
+        # `general` لا علاقة له بالوحدة إطلاقاً. **لا تُكرَّر هذه البذرة في
+        # `switch_company_template`** — نقطة الزرع واحدة (القرار 8 في #46)،
+        # وتبديل القالب لاحقاً لا يمنح تراخيص.
         licensed = _TEMPLATE_MODULE_LICENCES.get(template_config['key'])
         if licensed:
             licensed_module, plan_note = licensed

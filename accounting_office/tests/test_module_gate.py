@@ -154,7 +154,7 @@ class AccountingOfficeLicenceGateTest(APITestCase):
 
 
 class AccountingOfficeTemplateLicenceTest(APITestCase):
-    """القالب الجديد **هو** المنتج: يُرخّص الوحدة عند الإنشاء، والقديم لا يمسّه."""
+    """القالب **هو** المنتج: يُرخّص الوحدة عند الإنشاء، وغيره لا يمسّه."""
 
     @classmethod
     def setUpTestData(cls):
@@ -173,14 +173,16 @@ class AccountingOfficeTemplateLicenceTest(APITestCase):
             "قالب accounting_office لم يُرخّص وحدته عند الإنشاء.",
         )
 
-    def test_general_and_the_old_office_template_do_not_grant_the_licence(self):
+    def test_general_and_other_templates_do_not_grant_the_licence(self):
         general = create_company("شركة عامة", self.manager, template="general")
-        old_office = create_company("مكتب قديم", self.manager, template="accounting_firm")
+        # ISSUE #291: كان هنا القالب القديم `accounting_firm`؛ حُذف مع طبقة
+        # المكتب، فصار الشاهدُ على «قالبٍ آخر» هو `tyres`.
+        tyres = create_company("شركة إطارات", self.manager, template="tyres")
         invalidate_module_cache(general.pk)
-        invalidate_module_cache(old_office.pk)
+        invalidate_module_cache(tyres.pk)
 
         self.assertFalse(module_enabled(general, "accounting_office"))
-        self.assertFalse(module_enabled(old_office, "accounting_office"))
+        self.assertFalse(module_enabled(tyres, "accounting_office"))
         self.assertFalse(
             TenantModule.objects.filter(module_key="accounting_office").exclude(
                 tenant__template="accounting_office",

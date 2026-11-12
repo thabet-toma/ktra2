@@ -5,7 +5,7 @@
 `TemplateSurfacePermission` يفحص بادئة المسار لا معاملات الاستعلام). فمنتقي
 المستندات — الذي كان يجلب من `/api/inventory/products/?view=lookup`
 (`frontend_v2/services/inventoryApi.ts` — `listPickerProducts`) — يستحيل عليه
-الوصول إلى خدمات #78 (`4103`-`4106`) لشركة `accounting_firm`، ولو حمل الطلب
+الوصول إلى خدمات #78 (`4103`-`4106`) لشركة `accounting_office`، ولو حمل الطلب
 معاملاً يطلب عقداً ضيّقاً: القناع لا يرى المعامل أصلاً.
 
 الحلّ (القرار الأول في التذكرة): نقطةٌ مستقلة `/api/lookup/products/` خارج
@@ -30,11 +30,27 @@ LOOKUP_URL = "/api/lookup/products/"
 INVENTORY_PRODUCTS_URL = "/api/inventory/products/"
 
 
-def _make_tenant(username, *, template="accounting_firm"):
+def _seed_office_services(tenant):
+    """الخدماتُ الخمس المربوطة بحسابات أتعابها (ISSUE #78).
+
+    ISSUE #291 حذف قالب المكتب القديم الذي كان يزرعها، فصار العقدُ نفسُه يُبنى
+    هنا: الحسابات `4103`-`4106` ما زالت في بذرة `accounting_office`.
+    """
+    for sku, name_ar, account_code in ACCOUNTING_FIRM_SERVICES:
+        Product.objects.create(
+            tenant=tenant, sku=sku, name_ar=name_ar, is_service=True,
+            quantity_on_hand=0, avg_cost=0,
+            sale_account_override=Account.objects.get(tenant=tenant, code=account_code),
+        )
+
+
+def _make_tenant(username, *, template="accounting_office"):
     owner = User.objects.create_user(username=username, password="x")
     ils = Currency.objects.filter(Code="ILS").first() or Currency.objects.create(
         Code="ILS", Name="شيكل", Symbol="₪", IsBaseCurrency=True)
     tenant = create_company(f"مكتب {username}", owner, template=template)
+    if template == "accounting_office":
+        _seed_office_services(tenant)
     create_fiscal_year(tenant, 2026)
     return tenant, owner, ils
 
@@ -53,7 +69,7 @@ class ProductLookupEndpointTest(APITestCase):
         return {"HTTP_X_TENANT_ID": str((tenant or self.tenant).TenantID)}
 
     # ── معيار القبول 1: القناع يبقى يحجب شاشة الأصناف الكاملة ──
-    def test_inventory_products_endpoint_stays_masked_for_accounting_firm(self):
+    def test_inventory_products_endpoint_stays_masked_for_accounting_office(self):
         res = self.client.get(INVENTORY_PRODUCTS_URL, **self._auth())
         self.assertEqual(res.status_code, 404, res.content)
 
@@ -171,7 +187,7 @@ class ProductReferenceImageContractTest(APITestCase):
 
     @classmethod
     def setUpTestData(cls):
-        # قالب `general` لا `accounting_firm`: الأخير يُقنّع `/api/inventory/`
+        # قالب `general` لا `accounting_office`: الأخير يُقنّع `/api/inventory/`
         # كاملةً (وهو سببُ وجود نقطة المنتقي المستقلة أصلاً)، وجولةُ الكتابة
         # أدناه تمرّ من العقد الكامل هناك.
         cls.tenant, cls.owner, cls.ils = _make_tenant(

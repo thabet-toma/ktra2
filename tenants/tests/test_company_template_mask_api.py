@@ -9,14 +9,14 @@ from rest_framework.test import APITestCase
 from tenants.services import create_company
 
 
-class AccountingFirmMaskedApiTest(APITestCase):
-    """شركة `accounting_firm`: نقاط API المخزون واللوجستيات والمتجر تردّ 404."""
+class AccountingOfficeMaskedApiTest(APITestCase):
+    """شركة `accounting_office`: نقاط API المخزون واللوجستيات والمتجر تردّ 404."""
 
     @classmethod
     def setUpTestData(cls):
         cls.user = User.objects.create_user(username="firm-mask", password="x")
         cls.tenant = create_company(
-            "مكتب محاسبة مقنَّع", cls.user, template="accounting_firm")
+            "مكتب محاسبة مقنَّع", cls.user, template="accounting_office")
 
     def _auth(self):
         self.client.force_authenticate(user=self.user)
@@ -93,7 +93,7 @@ class AccountingFirmMaskedApiTest(APITestCase):
     def test_permissions_me_reports_the_template(self):
         res = self.client.get("/api/permissions/me/", **self._auth())
         self.assertEqual(res.status_code, 200, res.content)
-        self.assertEqual(res.json()["template"], "accounting_firm")
+        self.assertEqual(res.json()["template"], "accounting_office")
 
     def test_mask_holds_when_the_tenant_header_is_omitted(self):
         """حذف `X-Tenant-Id` لا يفتح المسار — هذا هو ثقب الـ`curl` بعينه.
