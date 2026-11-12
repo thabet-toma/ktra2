@@ -18,6 +18,7 @@ import mimetypes
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
 from django.db.models import Q
+from django.http import HttpResponse
 from django.utils import timezone
 from django.utils.dateparse import parse_date
 from rest_framework import serializers, status, viewsets
@@ -33,6 +34,7 @@ from rest_framework.response import Response
 
 from accounting_office import (
     appointments,
+    book_exports,
     book_reports,
     client_books,
     deadlines,
@@ -148,6 +150,23 @@ MODULE_KEY = "accounting_office"
 #: أقصى سنةٍ تُطلب في شبكة الأوراق — حمايةٌ من مسحٍ بلا حدّ لا قاعدةَ بيانات.
 DOCUMENT_YEAR_MIN = 2000
 DOCUMENT_YEAR_MAX = 2100
+
+#: نوعُ ملفّ Excel — ثابتٌ واحدٌ لتنزيلات المستخرجات (#288/ب-١).
+XLSX_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+)
+
+
+def _xlsx_response(content: bytes, stem: str) -> HttpResponse:
+    """تنزيلُ مصنَّفٍ — واسمُه ASCII فلا ترميزَ في ترويسة `Content-Disposition`.
+
+    الاسمُ من المعرّفات (`client-book-<client_id>-<kind>`) لا من النصوص العربية:
+    الترويسةُ بلا `filename*` تفقد محارفها في بعض المتصفحات، والقيمةُ التي يراها
+    المستخدم هي ما في شريط التنزيل.
+    """
+    response = HttpResponse(content, content_type=XLSX_CONTENT_TYPE)
+    response["Content-Disposition"] = f'attachment; filename="{stem}.xlsx"'
+    return response
 
 
 def parse_iso_date(raw, field):
@@ -2278,6 +2297,117 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
                 status=status.HTTP_409_CONFLICT,
             )
         return Response(payload)
+
+    # ── المستخرجات (#288/ب-١): ملفٌّ، وورقةُ طباعة، ورابطُ مشاركة ────────────
+    #
+    # **ولا حسابَ هنا** كالتقارير: `book_reports` تبني الحمولة و`book_exports`
+    # تُخرجها، والـview يمرّر الطلبَ ويردّ ما بُني. والعزلُ من `_book` نفسِه،
+    # والبابُ من `initial` (الترخيص) و`require_write` حيث ينبغي.
+    #
+    # **ونوعٌ غيرُ متاحٍ لهذا الدفتر 400 لا 404** — بخلاف `report`: الموردُ
+    # (الدفتر) موجود، والنوعُ المطلوبُ ليس من أنواعه؛ ورسالةُ الردّ تسمّي السبب
+    # بدل أن تُوهم بأن الدفترَ غيرُ موجود.
+    def _report_payload(self, request, book, kind):
+        """تقريرٌ محسوبٌ بالـAPI أو 400 — والقاعدةُ واحدةٌ للنقاط الثلاث."""
+        if not book_reports.is_report_available(book, kind):
+            raise ValidationError({
+                "kind": "هذا النوع من التقارير غير متاح لهذا الدفتر.",
+            })
+        return book_reports.report_payload(
+            book,
+            kind,
+            raw_from=request.query_params.get("from"),
+            raw_to=request.query_params.get("to"),
+            user=request.user,
+        )
+
+    def _report_or_conflict(self, request, book, kind):
+        """`(الحمولة، None)` أو `(None، ردُّ 409)` — المكسورُ يُقال بمجموعيه."""
+        try:
+            return self._report_payload(request, book, kind), None
+        except book_reports.ReportImbalance as exc:
+            return None, Response(
+                {"detail": str(exc), "totals": exc.totals},
+                status=status.HTTP_409_CONFLICT,
+            )
+
+    def export_report_xlsx(self, request, pk=None, kind=None):
+        """`GET …/reports/<kind>/export.xlsx` — تنزيلُ تقريرٍ واحدٍ ملفَّ Excel."""
+        book = self._book(pk)
+        payload, conflict = self._report_or_conflict(request, book, kind)
+        if conflict is not None:
+            return conflict
+        return _xlsx_response(
+            book_exports.excel_bytes(payload),
+            f"client-book-{book.client_id}-{kind}",
+        )
+
+    def export_book_xlsx(self, request, pk=None):
+        """`GET …/export.xlsx` (الدفتر كاملاً) — ورقةٌ لكل تقريرٍ متاحٍ لنوعه."""
+        book = self._book(pk)
+        period = book_reports.period_for(
+            request.query_params.get("from"), request.query_params.get("to"),
+        )
+        return _xlsx_response(
+            book_exports.whole_book_bytes(book, period, user=request.user),
+            f"client-book-{book.client_id}",
+        )
+
+    @action(detail=True, methods=["get"], url_path=r"reports/(?P<kind>[a-z_]+)/print")
+    def print_report(self, request, pk=None, kind=None):
+        """`GET …/reports/<kind>/print/` — ورقةُ التقرير للطباعة من المتصفح.
+
+        الصفحةُ نفسُها التي يصيِّرها الرابطُ العامّ (`docshare`) — لكن للطباعة
+        الفورية (`auto_print`) وبلا صفِّ مشاركة: من يطبع لا يُنشئ رابطاً.
+        """
+        book = self._book(pk)
+        payload, conflict = self._report_or_conflict(request, book, kind)
+        if conflict is not None:
+            return conflict
+        # استيرادٌ كسول: `docshare` يستورد نماذجَ المكتب في وحدة نوعه.
+        from docshare.documents.accounting_docs import render_client_book_report
+        from tenants.letterhead import company_card
+
+        html = render_client_book_report(
+            payload,
+            company=company_card(self.tenant),
+            auto_print=True,
+        )
+        return HttpResponse(html, content_type="text/html; charset=utf-8")
+
+    @action(detail=True, methods=["post"], url_path=r"reports/(?P<kind>[a-z_]+)/share")
+    def share_report(self, request, pk=None, kind=None):
+        """`POST …/reports/<kind>/share/` — `{url, expires_at}` لرابطٍ عامّ.
+
+        **والكتابةُ مفتاحُ هذا الفعل**: إنشاءُ رابطٍ عامٍّ توزيعُ مستندٍ لا قراءتُه
+        (نمط `can_share_payment_notice`)، فمن يقرأ التقارير ولا يكتب لا يمنح
+        زبوناً عنواناً يُفتح من العالم.
+        """
+        book = self._book(pk)
+        self.require_write()
+        if not book_reports.is_report_available(book, kind):
+            raise ValidationError({
+                "kind": "هذا النوع من التقارير غير متاح لهذا الدفتر.",
+            })
+        try:
+            data = book_exports.create_report_link(
+                book,
+                kind,
+                raw_from=request.data.get("from"),
+                raw_to=request.data.get("to"),
+                user=request.user,
+                request=request,
+            )
+        except book_reports.ReportImbalance as exc:
+            return Response(
+                {"detail": str(exc), "totals": exc.totals},
+                status=status.HTTP_409_CONFLICT,
+            )
+        except book_exports.ReportLinkDisabled as exc:
+            return Response(
+                {"detail": str(exc)}, status=status.HTTP_400_BAD_REQUEST,
+            )
+        return Response(data, status=status.HTTP_201_CREATED)
 
 
 # ── الأتعاب: الاشتراك والمسودّات والاعتماد (#282) ───────────────────────────

@@ -32,8 +32,8 @@ from core.throttles import ClientIpScopedThrottle
 from docshare import services
 from docshare.documents import DOC_TYPES, company_card
 from docshare.models import (
-    DECISION_ACCEPTED, DECISION_REJECTED, DOC_FEE_INVOICE, DOC_FEE_RECEIPT,
-    DOC_FEE_STATEMENT, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
+    DECISION_ACCEPTED, DECISION_REJECTED, DOC_CLIENT_BOOK_REPORT, DOC_FEE_INVOICE,
+    DOC_FEE_RECEIPT, DOC_FEE_STATEMENT, DOC_PAYMENT_NOTICE, DOC_PURCHASE_RFQ,
     DOC_STOCKTAKE_COUNT, DocumentShare,
 )
 from docshare.serializers import DocumentShareSerializer
@@ -710,6 +710,18 @@ class DocumentShareViewSet(TenantQuerySetMixin, viewsets.ReadOnlyModelViewSet):
             return Response(
                 {"detail": (
                     "إشعار الدفع يُنشأ من «جاهز للإرسال» في مكتب المحاسبة."
+                )},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if doc_type == DOC_CLIENT_BOOK_REPORT:
+            # #288/ب-١: تقريرُ دفتر الزبون يُشارَك من شاشة التقارير وحدها
+            # (`POST client-books/<id>/reports/<kind>/share/`)، فهي التي تحرس
+            # عزلَ الزبون ومفتاحَ الكتابة وإعدادَ «رابط PDF للتقارير». وهذا الباب
+            # يأخذ **أيّ** معرّف `ClientBookReport` (متسلسلٌ يُخمَّن) بصلاحية
+            # النوع وحدها — تجاوزاً لثلاثة حرّاس في موضعٍ واحد.
+            return Response(
+                {"detail": (
+                    "تقريرُ دفتر الزبون يُشارَك من شاشة التقارير في مكتب المحاسبة."
                 )},
                 status=status.HTTP_400_BAD_REQUEST,
             )

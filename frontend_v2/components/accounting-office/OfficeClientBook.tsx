@@ -44,6 +44,7 @@ import {
   officePrimaryButtonClass,
   officeSecondaryButtonClass,
 } from './OfficeUi';
+import { OfficeClientBookReports } from './OfficeClientBookReports';
 
 const statusOf = (failure: unknown): number | undefined =>
   (failure as { status?: number } | null)?.status;
@@ -927,6 +928,9 @@ export const OfficeClientBook: React.FC<{
           </div>
         )}
       </OfficeCard>
+
+      {/* #288/ب-١: مستخرجاتُ الدفتر — تقاريرُه وملفُّها وورقتُها ورابطُها. */}
+      <OfficeClientBookReports clientId={clientId} canShare={canWrite} />
     </div>
   );
 };

@@ -96,6 +96,117 @@ REPORTS_BY_BOOK_KIND: dict[str, tuple[str, ...]] = {
     ),
 }
 
+# ── الأعمدةُ والمجاميع كما تُعرَض (#288/ب-١) ────────────────────────────────
+#
+# **تعريفُ العمود الواحد هنا لا في المُخرِج ولا في القالب.** الأعمدةُ صفةُ
+# التقرير لا صفةُ الملفّ: نسخةٌ في `book_exports` وأخرى في قالب الطباعة تفترق
+# عند أوّل عمودٍ يُضاف، فيخرج ملفُّ Excel بعمودٍ لا تعرفه الورقة — والمستخرجُ
+# الذي يخالف الشاشة أسوأُ من غيابه. ومُخرِجا (ب) يقرآن هذا الجدولَ وحده.
+CELL_TEXT = "text"
+CELL_COUNT = "count"
+CELL_MONEY = "money"
+
+#: `(مفتاحُ الحمولة، التسمية، نوعُ الخليّة)` — بترتيب العرض.
+REPORT_COLUMNS: dict[str, tuple[tuple[str, str, str], ...]] = {
+    REPORT_CASH: (
+        ("kind_label", "نوع الحركة", CELL_TEXT),
+        ("count", "عدد الحركات", CELL_COUNT),
+        ("debit", "مدين", CELL_MONEY),
+        ("credit", "دائن", CELL_MONEY),
+        ("net", "الصافي", CELL_MONEY),
+    ),
+    REPORT_INCOME: (
+        ("account_code", "الكود", CELL_TEXT),
+        ("account_name", "الحساب", CELL_TEXT),
+        ("account_type_label", "النوع", CELL_TEXT),
+        ("amount", "المبلغ", CELL_MONEY),
+    ),
+    REPORT_RECEIVABLES: (
+        ("side_party", "الطرف", CELL_TEXT),
+        ("debit", "مدين", CELL_MONEY),
+        ("credit", "دائن", CELL_MONEY),
+        ("balance", "الرصيد", CELL_MONEY),
+    ),
+    REPORT_TRIAL_BALANCE: (
+        ("account_code", "الكود", CELL_TEXT),
+        ("account_name", "الحساب", CELL_TEXT),
+        ("debit", "مدين", CELL_MONEY),
+        ("credit", "دائن", CELL_MONEY),
+        ("balance", "الرصيد", CELL_MONEY),
+    ),
+    REPORT_PROFIT_LOSS: (
+        ("account_code", "الكود", CELL_TEXT),
+        ("account_name", "الحساب", CELL_TEXT),
+        ("account_type_label", "النوع", CELL_TEXT),
+        ("amount", "المبلغ", CELL_MONEY),
+    ),
+    REPORT_BALANCE_SHEET: (
+        ("account_code", "الكود", CELL_TEXT),
+        ("account_name", "الحساب", CELL_TEXT),
+        ("account_type_label", "النوع", CELL_TEXT),
+        ("balance", "الرصيد", CELL_MONEY),
+    ),
+    REPORT_STATEMENT: (
+        ("entry_date", "التاريخ", CELL_TEXT),
+        ("number", "الرقم", CELL_COUNT),
+        ("kind_label", "نوع الحركة", CELL_TEXT),
+        ("memo", "البيان", CELL_TEXT),
+        ("side_party", "الطرف", CELL_TEXT),
+        ("debit", "مدين", CELL_MONEY),
+        ("credit", "دائن", CELL_MONEY),
+        ("balance", "الرصيد", CELL_MONEY),
+    ),
+}
+
+#: `(مفتاحُ المجموع، تسميتُه)` — بترتيب العرض تحت الجدول.
+#: و`balanced` وحده ليس مبلغاً: قيمتُه تُترجَم إلى «نعم/لا».
+REPORT_TOTALS: dict[str, tuple[tuple[str, str], ...]] = {
+    REPORT_CASH: (
+        ("opening_balance", "رصيد افتتاحي"),
+        ("debit", "مجموع المدين"),
+        ("credit", "مجموع الدائن"),
+        ("net", "الصافي"),
+        ("closing_balance", "رصيد ختامي"),
+    ),
+    REPORT_INCOME: (
+        ("revenue", "إيرادات"),
+        ("expense", "مصاريف"),
+        ("profit", "الصافي"),
+    ),
+    REPORT_RECEIVABLES: (
+        ("debit_total", "مجموع المدين"),
+        ("credit_total", "مجموع الدائن"),
+    ),
+    REPORT_TRIAL_BALANCE: (
+        ("debit", "مجموع المدين"),
+        ("credit", "مجموع الدائن"),
+        ("balanced", "متوازن"),
+    ),
+    REPORT_PROFIT_LOSS: (
+        ("revenue", "إيرادات"),
+        ("expense", "مصاريف"),
+        ("profit", "الصافي"),
+    ),
+    REPORT_BALANCE_SHEET: (
+        ("assets", "الأصول"),
+        ("liabilities", "الخصوم"),
+        ("equity", "حقوق الملكية"),
+        ("profit", "ربح الفترة"),
+        ("liabilities_and_equity", "الخصوم وحقوق الملكية"),
+        ("difference", "الفرق"),
+    ),
+    REPORT_STATEMENT: (
+        ("opening_balance", "رصيد افتتاحي"),
+        ("debit", "مجموع المدين"),
+        ("credit", "مجموع الدائن"),
+        ("net", "الصافي"),
+        ("closing_balance", "رصيد ختامي"),
+    ),
+}
+
+#: ترجمةُ مفتاح المجموع المنطقيّ — لا `True`/`False` على ورقةٍ عربية.
+_BOOLEAN_LABELS: dict[bool, str] = {True: "نعم", False: "لا"}
+
 #: العلامةُ المائيةُ على كل استجابة — وهي ما يُطبع على المستخرج في الجزء (ب).
 WATERMARK = "نسخة عمل"
 
@@ -696,6 +807,62 @@ def reports_index_payload(book) -> dict:
         "book_kind_label": BOOK_KIND_LABELS.get(book.kind, book.kind),
         "watermark": WATERMARK,
         "reports": available_reports(book),
+    }
+
+
+def _cell(value, cell_kind) -> dict:
+    """خليّةُ جدول: القيمةُ ونوعُها وهل هي مقنَّعة.
+
+    **والنصُّ الغائبُ سلسلةٌ فارغة لا `None`**: Django يطبع `None` كلمةً على
+    الصفحة، و«None» في خليّة بيانٍ عيبٌ يُرى. والمبلغُ المقنَّعُ يبقى `None`
+    ومعه علامةٌ يعرض القالبُ عليها «—» — لا صفراً يكذب.
+    """
+    if cell_kind == CELL_MONEY:
+        return {"value": value, "kind": cell_kind, "masked": value is None}
+    return {"value": "" if value is None else value, "kind": cell_kind, "masked": False}
+
+
+def table_payload(payload) -> dict:
+    """التقريرُ جدولاً جاهزاً للإخراج — أعمدةً وصفوفاً ومجاميع، بلا رقمٍ جديد.
+
+    هذا **شكلُ العرض الواحد** لمُخرِجَي (ب): ملفُّ Excel وورقةُ الطباعة يقرآن
+    منه الأعمدةَ نفسها، فلا يفترق مستندان لنفس التقرير. والقيمةُ تخرج **خامّةً**
+    (نصُّ المبلغ كما أعطته `_money`) ومعه نوعُها: `book_exports` يحوّلها رقماً في
+    الخليّة، والقالبُ يُنسّقها بمرشّحه.
+
+    **والمقنَّعُ يُعلَن `masked`** ولا تُترك قيمتُه بلا علامة — انظر `_cell`.
+    """
+    kind = payload.get("kind")
+    columns = REPORT_COLUMNS.get(kind, ())
+    totals = payload.get("totals") or {}
+    return {
+        "kind": kind,
+        "title": payload.get("title", ""),
+        "client": payload.get("client", ""),
+        "from": payload.get("from", ""),
+        "to": payload.get("to", ""),
+        "watermark": payload.get("watermark") or WATERMARK,
+        "period_note": payload.get("period_note") or "",
+        "columns": [
+            {"key": key, "label": label, "kind": cell_kind}
+            for key, label, cell_kind in columns
+        ],
+        "rows": [
+            [_cell(row.get(key), cell_kind) for key, _label, cell_kind in columns]
+            for row in payload.get("rows") or []
+        ],
+        "totals": [
+            {
+                # `balanced` وحده منطقيٌّ لا مبلغ: يُترجَم «نعم/لا» ولا يُنسَّق.
+                "label": label,
+                "value": _BOOLEAN_LABELS[totals[key]]
+                if key == "balanced" else totals.get(key),
+                "kind": CELL_TEXT if key == "balanced" else CELL_MONEY,
+                "masked": key != "balanced" and totals.get(key) is None,
+            }
+            for key, label in REPORT_TOTALS.get(kind, ())
+            if key in totals
+        ],
     }
 
 

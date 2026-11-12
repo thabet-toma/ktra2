@@ -9,6 +9,7 @@
 import {
   apiDelete,
   apiGetForBlob,
+  apiGetForText,
   apiGetList,
   apiGetObject,
   apiPatchObject,
@@ -25,7 +26,11 @@ import type {
   ClientAppointmentsPayload,
   BookAccountRow,
   BookEntryRow,
+  BookReportPeriod,
   ClientBookChoicesPayload,
+  ClientBookReportKind,
+  ClientBookReportShare,
+  ClientBookReportsPayload,
   ClientBookRow,
   ClientDocumentsPayload,
   ClientEventsPayload,
@@ -66,7 +71,11 @@ export type {
   BookChoice,
   BookEntryLineRow,
   BookEntryRow,
+  BookReportPeriod,
   ClientBookChoicesPayload,
+  ClientBookReportKind,
+  ClientBookReportShare,
+  ClientBookReportsPayload,
   ClientBookRow,
   ClientDocumentsPayload,
   ClientEventRow,
@@ -1230,6 +1239,78 @@ export const changeClientBookKind = (
  */
 export const getPendingEntry = (): Promise<PendingEntryPayload> =>
   apiGetObject<PendingEntryPayload>(`${CLIENT_BOOKS}pending-entry/`, tenantOpts());
+
+// ── تقاريرُ دفتر الزبون ومستخرجاتها (#288/ب-١) ──────────────────────────────
+//
+// **ولا حسابَ في الواجهة**: الأنواعُ والأرقامُ والمجاميعُ من الخادم، وهذه الطبقةَ
+// تنقل الطلبَ وتردّ ما وصل. و«PDF» يُصنع من حوار الطباعة في المتصفح: الخادمُ
+// يُصيِّر الورقة، والواجهةُ تفتحها في نافذةٍ تطبع نفسها.
+
+/**
+ * فترةُ التقرير في استعلام — `from`/`to` فقط، وبلا `?` حين تخلو.
+ *
+ * `apiGetForBlob` لا يعرف `query` (بايتاتٌ لا JSON)، فالسلسلةُ تُبنى هنا بدل
+ * توسيع توقيعٍ مشتركٍ لنداءٍ واحد.
+ */
+const periodQuery = (period: BookReportPeriod): string => {
+  const query = new URLSearchParams();
+  if (period.from) query.set('from', period.from);
+  if (period.to) query.set('to', period.to);
+  const text = query.toString();
+  return text ? `?${text}` : '';
+};
+
+/** الأنواعُ المتاحةُ لنوع دفتر هذا الزبون — القاعدةُ في الخادم لا في الشاشة. */
+export const getClientBookReports = (
+  clientId: number,
+): Promise<ClientBookReportsPayload> =>
+  apiGetObject<ClientBookReportsPayload>(
+    `${CLIENT_BOOKS}${clientId}/reports/`, tenantOpts(),
+  );
+
+/** تقريرٌ واحدٌ ملفَّ Excel — بايتاتٌ تُنزَّل مباشرةً. */
+export const downloadClientBookReportXlsx = (
+  clientId: number,
+  kind: string,
+  period: BookReportPeriod,
+): Promise<Blob> =>
+  apiGetForBlob(
+    `${CLIENT_BOOKS}${clientId}/reports/${kind}/export.xlsx${periodQuery(period)}`,
+    tenantOpts(),
+  );
+
+/** الدفترُ كاملاً: مصنَّفٌ فيه ورقةٌ لكل تقريرٍ متاح. */
+export const downloadClientBookXlsx = (
+  clientId: number,
+  period: BookReportPeriod,
+): Promise<Blob> =>
+  apiGetForBlob(
+    `${CLIENT_BOOKS}${clientId}/export.xlsx${periodQuery(period)}`, tenantOpts(),
+  );
+
+/** ورقةُ التقرير HTML كما يصيِّرها الخادم — تُكتب في نافذةٍ تطبع نفسها. */
+export const getClientBookReportPrint = (
+  clientId: number,
+  kind: string,
+  period: BookReportPeriod,
+): Promise<string> =>
+  apiGetForText(
+    `${CLIENT_BOOKS}${clientId}/reports/${kind}/print/${periodQuery(period)}`,
+    tenantOpts(),
+  );
+
+/**
+ * رابطُ مشاركةٍ للتقرير — `POST` بمفتاح الكتابة، ويردّ 400 إن أُطفئ إعدادُ
+ * «رابط PDF للتقارير» برسالةٍ عربية من الخادم (`humanizeThrown` يعرضها).
+ */
+export const shareClientBookReport = (
+  clientId: number,
+  kind: string,
+  period: BookReportPeriod,
+): Promise<ClientBookReportShare> =>
+  apiPostObject<ClientBookReportShare>(
+    `${CLIENT_BOOKS}${clientId}/reports/${kind}/share/`, { ...period }, tenantOpts(),
+  );
 
 
 // ── المستندان (#283/ب): إشعارُ القبض وكشفُ الحساب ───────────────────────────

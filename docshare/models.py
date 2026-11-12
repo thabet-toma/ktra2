@@ -60,6 +60,9 @@ DOC_STOCKTAKE_COUNT = "stocktake_count"
 #: واحد («عليك» أحمر / «إلك» أخضر / الرماديُّ قريبٌ من الصفر). انظر
 #: `documents.accounting_docs`.
 DOC_PAYMENT_NOTICE = "payment_notice"
+#: #288/ب-١: تقريرُ دفترِ زبونٍ — ورقةٌ من جدول التقرير المحسوب، يفتحها الزبونُ
+#: صاحبُ الدفتر ويطبعها من متصفحه PDF. انظر `documents.accounting_docs`.
+DOC_CLIENT_BOOK_REPORT = "client_book_report"
 #: #283/ب: إشعارُ قبضٍ لدفعة أتعاب — رقمُه المخزَّن ومبلغُه وتخصيصاتُه وما بقي
 #: على الزبون. المصدرُ `accounting_office.FeePayment`، والبناءُ في
 #: `payments.receipt_payload` (لا نسخةَ ثانية في `docshare`).
@@ -89,6 +92,7 @@ DOC_TYPE_CHOICES = [
     (DOC_WARRANTY_CERTIFICATE, "شهادة كفالة"),
     (DOC_STOCKTAKE_COUNT, "رابط عدّ جرد"),
     (DOC_PAYMENT_NOTICE, "إشعار دفع"),
+    (DOC_CLIENT_BOOK_REPORT, "تقرير دفتر زبون"),
     (DOC_FEE_RECEIPT, "إشعار قبض"),
     (DOC_FEE_STATEMENT, "كشف حساب"),
     (DOC_FEE_INVOICE, OFFICE_FEE_INVOICE_LABEL),

@@ -27,6 +27,12 @@
 - **الإشعارُ عربيٌّ دائماً** ولو كانت لغةُ الجهة عبريّة: نصوصُه في
   `appointments` (`PAYMENT_NOTICE_TITLE` والتسميتان) بلا جدولِ لغات، ورسالةُ
   التذكير نفسها تُترجَم. ترجمةُ الإشعار تذكرةٌ لاحقة.
+
+**وثاني النوعين هنا `client_book_report`** (#288/ب-١): تقريرُ دفترِ زبونٍ على
+فترةٍ مخزَّنة — ورقتُه جدولُ التقرير نفسِه، و`doc_id` فيه صفُّ `ClientBookReport`
+لا مستنداً مالياً (التقريرُ يُحسَب عند الفتح كما يُحسَب الإشعارُ من التزامه).
+والأعمدةُ والمجاميعُ تُقرأ من `accounting_office.book_reports` — المصدرِ الذي
+يقرأ منه ملفُّ Excel — فلا يفترق مستندان لنفس التقرير.
 """
 from django.template.loader import render_to_string
 
@@ -38,6 +44,7 @@ from docshare.documents._contract import (
     TONE_DANGER,
     TONE_MUTED,
     TONE_OK,
+    TONE_WARN,
     VALUE_DATE,
     VALUE_MONEY,
     company_card,
@@ -184,6 +191,146 @@ def payment_notice_doc_ids(tenant, user):
     return Obligation.objects.filter(
         tenant=tenant,
         client_id__in=office_services.visible_clients(tenant, user).values("pk"),
+    ).values("pk")
+
+
+# ── تقريرُ دفتر الزبون (#288/ب-١) ───────────────────────────────────────────
+#
+# **`doc_id` هنا صفُّ `ClientBookReport`** لا مستنداً مالياً: التقريرُ نفسُه لا
+# يُخزَّن (قراءةٌ محضة في `accounting_office.book_reports`)، والصفُّ يقول أيُّ
+# تقريرٍ على أيّ فترة. فمنه تُشتقّ الحمولةُ عند كل فتح — كاشتقاق الإشعار من
+# التزامه، وبنفس الثمن المعلوم: تصحيحُ الدفتر يغيّر الرقمَ على رابطٍ قائم، وهو
+# المقصود — الورقةُ تُصادق على دفتر اليوم لا على لقطةٍ ماتت.
+#
+# **و`user=None` في `report_payload`**: هذه ورقةُ الزبون صاحبِ الدفتر لا شاشةُ
+# موظف. والقناعُ (`office.amounts.view`) قاعدةُ دورٍ داخليّ لا قاعدةُ نشرٍ: مَن
+# أنشأ الرابطَ من عضوٍ مقنَّعٍ يفتحه الزبونُ كاملاً. وأمّا **من يملك الإنشاء**
+# فمحروسٌ بمفتاح الكتابة في نقطة الـAPI (نمط `can_share_payment_notice`).
+
+
+def load_client_book_report(tenant_id: int, doc_id: int):
+    """صفُّ الرابط **بفلتر الشركة** — و`None` لما ليس لها أو لمكتبٍ آخر (404).
+
+    و`select_related` على الشركة والزبون: الحمولةُ تقرأ `book.client` واسمَه
+    و`book.tenant_id` في كل فتح، فتُقرأ مع الصفّ لا باستعلاماتٍ لاحقة.
+    """
+    from accounting_office.models import ClientBookReport
+
+    return (
+        ClientBookReport.objects
+        .select_related("tenant", "client_book__client")
+        .filter(pk=doc_id, tenant_id=tenant_id)
+        .first()
+    )
+
+
+def _book_reports():
+    """استيرادٌ كسول كـ`_appointments`: وحدةُ التقارير تجرّ خدماتِ المكتب ونماذجه."""
+    from accounting_office import book_reports
+
+    return book_reports
+
+
+def _report_of(report) -> tuple[dict | None, str]:
+    """(حمولةُ التقرير، رسالةُ الخلل) من مصدرها الواحد — **لا حسابَ ثانٍ هنا**."""
+    book_reports = _book_reports()
+    try:
+        return book_reports.report_payload(
+            report.client_book,
+            report.kind,
+            raw_from=report.period_from.isoformat(),
+            raw_to=report.period_to.isoformat(),
+            user=None,
+        ), ""
+    except book_reports.ReportImbalance as exc:
+        return None, str(exc)
+
+
+def render_client_book_report(
+    report_payload, *, company, problem: str = "", auto_print: bool = False,
+) -> str:
+    """ورقةُ التقرير المصيَّرة — يستعملها الرابطُ العامُّ ونقطةُ الطباعة معاً.
+
+    **والقالبُ لا يعرف نوعَ التقرير**: الأعمدةُ والصفوفُ والمجاميعُ تصل من
+    `book_reports.table_payload` — وهو المصدرُ الذي يقرأ منه ملفُّ Excel نفسُه.
+    و`auto_print` لنقطة الطباعة وحدها: صفحةُ الزبون تُفتح للقراءة ويضغط «اطبع»
+    إن أراد، ونافذةُ الطباعة تُفتح لتُطبع.
+    """
+    book_reports = _book_reports()
+    return render_to_string(
+        "docshare/client_book_report.html",
+        {
+            "company": company,
+            "table": book_reports.table_payload(report_payload)
+            if report_payload else None,
+            "problem": problem,
+            "watermark": book_reports.WATERMARK,
+            "auto_print": auto_print,
+        },
+    )
+
+
+def page_client_book_report(report, share) -> str:
+    """صفحةُ الرابط العامّ: التقريرُ على فترته المخزَّنة، والطباعةُ من المتصفح."""
+    report_payload, problem = _report_of(report)
+    return render_client_book_report(
+        report_payload, company=company_card(share.tenant), problem=problem,
+    )
+
+
+def build_client_book_report(report) -> dict:
+    """حمولةُ العقد العامّ لهذا النوع — عقدٌ كاملٌ وإن كان القالبُ لا يصيّرها.
+
+    `resolve_share` يبني الحمولةَ **دائماً** قبل أن يسأل عن `page`، فهذه الدالّةُ
+    لا ترمي: ميزانٌ اختلّ بعد إنشاء الرابط يُقال في `notes` ولا يُسقِط الصفحة
+    بـ500. والجدولُ الحقيقيُّ يصيَّره `page_client_book_report`.
+    """
+    data, problem = _report_of(report)
+    book_reports = _book_reports()
+    period_row = meta(
+        "الفترة",
+        f"{report.period_from.isoformat()} — {report.period_to.isoformat()}",
+    )
+    totals = (data or {}).get("totals") or {}
+    return payload(
+        kind="client_book_report",
+        title=(data or {}).get("title") or book_reports.REPORT_LABELS.get(
+            report.kind, report.kind,
+        ),
+        number="",
+        date=report.period_to,
+        # العلامةُ المائيةُ حالةُ الورقة: «نسخة عمل» — أوضحُ من شارةٍ فارغة.
+        status_label=book_reports.WATERMARK,
+        status_tone=TONE_WARN,
+        party_title="الزبون",
+        party=report.client_book.client.name,
+        currency=None,
+        meta_rows=[period_row, meta("ملاحظة", (data or {}).get("period_note"))],
+        show_lines=False,
+        totals_rows=[
+            total(label, totals[key])
+            for key, label in book_reports.REPORT_TOTALS.get(report.kind, ())
+            if key in totals and key != "balanced"
+        ],
+        notes=problem,
+    )
+
+
+def client_book_report_doc_ids(tenant, user):
+    """الصفوفُ التي يراها هذا العضو — **نطاقُ النوع في سطح الإدارة**.
+
+    حارسُ الرؤية في مكتب المحاسبة واحدٌ (`visible_clients`) كما في الإشعار:
+    صلاحيةُ `office.clients.write` تمنح كتابةَ زبائن المكتب لا رؤيةَ زبائن
+    الزملاء. وبلا هذا النطاق يقرأ عضوٌ روابطَ زملائه ويُبطلها بمعرّفاتٍ متسلسلة.
+    """
+    from accounting_office import services as office_services
+    from accounting_office.models import ClientBookReport
+
+    return ClientBookReport.objects.filter(
+        tenant=tenant,
+        client_book__client_id__in=(
+            office_services.visible_clients(tenant, user).values("pk")
+        ),
     ).values("pk")
 
 
@@ -451,6 +598,22 @@ ACCOUNTING_DOC_TYPES = {
         "module": "accounting_office",
         #: **ونطاقُه في سطح الإدارة** (#285/م٣): انظر `payment_notice_doc_ids`.
         "scope": payment_notice_doc_ids,
+    },
+    "client_book_report": {
+        "label": "تقرير دفتر زبون",
+        "loader": load_client_book_report,
+        "builder": build_client_book_report,
+        #: مفتاحُ الكتابة نفسُه الذي يحكم الإشعار: من يوزّع مستخرجَ زبونٍ برابطٍ
+        #: عامّ يفعل فعلاً كتابياً، لا قراءة. والـview يحرسه بـ`require_write`.
+        "permission": "office.clients.write",
+        #: جمهورُه **الزبون** صاحبُ الدفتر — لا مورّدٌ ولا موظفُ مستودع.
+        "audience": AUDIENCE_CUSTOMER,
+        "decision": None,
+        #: ورقته جدولُ التقرير، فلا يصيّرها القالبُ العامّ.
+        "page": page_client_book_report,
+        #: وحدةُ المكتب: ترخيصٌ مُطفأ ⇒ الرابطُ الحيّ **410** كما في الإشعار.
+        "module": "accounting_office",
+        "scope": client_book_report_doc_ids,
     },
     #: #283/ب: إشعارُ قبضِ دفعة — الرقمُ المخزَّن يُقرأ ولا يُولَّد عند العرض.
     "fee_receipt": {

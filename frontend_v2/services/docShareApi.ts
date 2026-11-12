@@ -47,7 +47,11 @@ export type ShareDocType =
   // مكتب المحاسبة وحده (`fees/payments/<id>/share/` و`fees/ledger/share/`)،
   // والبابُ العامّ يرفض نوعهما (`docshare/views.py`) فلا يُشارَكان بمعرّفٍ مخمَّن.
   | "fee_receipt"
-  | "fee_statement";
+  | "fee_statement"
+  // #288/ب-١: تقريرُ دفتر الزبون — ورقةُ جدولٍ يفتحها الزبونُ صاحبُ الدفتر ويطبعها
+  // PDF من متصفحه. **لا يُنشَأ من نافذة المشاركة** (الخادم يردّ 400): بابُه نقطةُ
+  // `client-books/<id>/reports/<kind>/share/` وحدها.
+  | "client_book_report";
 export type ShareDecision = "" | "accepted" | "rejected";
 
 export interface DocumentShare {

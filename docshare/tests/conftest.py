@@ -104,6 +104,7 @@ SAMPLE_FIXTURES = {
     "purchase_rfq": "purchase_rfq",
     "stocktake_count": "stocktake_count",
     "payment_notice": "payment_notice",
+    "client_book_report": "client_book_report",
     # #283/ب: مستندا الأتعاب — إشعارُ قبضٍ وكشفُ حسابٍ لفترة.
     "fee_receipt": "fee_receipt",
     "fee_statement": "fee_statement",
@@ -551,6 +552,38 @@ def make_payment_notice_obligation(env, office_tenant):
 @pytest.fixture
 def payment_notice(make_payment_notice_obligation):
     return make_payment_notice_obligation()
+
+
+@pytest.fixture
+def client_book_report(env, office_tenant):
+    """#288/ب-١: عيّنةُ `client_book_report` — دفترُ زبونٍ وصفُّ رابطٍ عليه.
+
+    `doc_id` هذا النوع **صفُّ `ClientBookReport`** لا مستنداً مالياً: التقريرُ
+    يُحسَب عند كل فتح (`accounting_office.book_reports`). فالعيّنةُ دفترٌ بسيطٌ
+    فارغ وصفُّ رابطٍ على فترةٍ مكتوبة — والباني يُنتج حمولةً بمجاميع صفرية، وهو
+    كلُّ ما تحتاجه قائمةُ السماح (ولا حركةَ ترحيلٍ واحدة تلزمها).
+    """
+    from accounting_office.models import (
+        BOOK_KIND_SIMPLE,
+        ClientBook,
+        ClientBookReport,
+        OfficeClient,
+    )
+
+    client = OfficeClient.objects.create(
+        tenant=env["tenant"], name="زبون دفتر المشاركة", responsible=env["owner"],
+    )
+    book = ClientBook.objects.create(
+        client=client, kind=BOOK_KIND_SIMPLE, opened_on=datetime.date(2026, 1, 1),
+    )
+    return ClientBookReport.objects.create(
+        tenant=env["tenant"],
+        client_book=book,
+        kind="cash",
+        period_from=datetime.date(2026, 1, 1),
+        period_to=datetime.date(2026, 12, 31),
+        created_by=env["owner"],
+    )
 
 
 # ── مستندا الأتعاب (#283/ب) ─────────────────────────────────────────────────

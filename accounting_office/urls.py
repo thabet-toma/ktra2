@@ -3,7 +3,7 @@
 `SimpleRouter` لا `DefaultRouter`: الأخير يولّد فهرساً على الجذر غير محروسٍ
 بـ`require_module` فيكشف وجود الوحدة لشركةٍ لم تشترها.
 """
-from django.urls import include, path
+from django.urls import include, path, re_path
 from rest_framework.routers import SimpleRouter
 
 from accounting_office.views import (
@@ -155,5 +155,19 @@ router.register(
 )
 
 urlpatterns = [
+    # #288/ب-١: مستخرجا Excel مُسجَّلان هنا لا بـ`@action` — الراوترُ يُلحق
+    # شرطةً أخيرةً بكل فعل، و`export.xlsx/` اسمُ ملفٍّ تفصله شرطةٌ عمّا قبله
+    # فيُقرأ مساراً لا ملفّاً. والـviewset نفسُه حارسُهما: الترخيصُ في `initial`
+    # والعزلُ في `_book`، فالمسارُ لا يفتح باباً ثانياً.
+    re_path(
+        r"^client-books/(?P<pk>[0-9]+)/reports/(?P<kind>[a-z_]+)/export\.xlsx$",
+        OfficeClientBookViewSet.as_view({"get": "export_report_xlsx"}),
+        name="accounting-office-client-book-report-xlsx",
+    ),
+    re_path(
+        r"^client-books/(?P<pk>[0-9]+)/export\.xlsx$",
+        OfficeClientBookViewSet.as_view({"get": "export_book_xlsx"}),
+        name="accounting-office-client-book-xlsx",
+    ),
     path("", include(router.urls)),
 ]

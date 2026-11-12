@@ -78,7 +78,7 @@ class RegistryShapeTest(SettingTestCase):
         و«الالتزامات التي تولّدها خدمة الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص»
         (#280)، و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب وإعدادُ
         اعتمادها التلقائيّ لـ#282، وتذكيرُ الموعد لـ#281، و**سبعةُ القيد التلقائي
-        في الدفاتر** لـ#284."""
+        في الدفاتر** لـ#284، و«رابط PDF للتقارير» لـ#288/ب-١."""
         self.assertEqual(
             set(settings_registry.SETTINGS_REGISTRY),
             {
@@ -110,6 +110,8 @@ class RegistryShapeTest(SettingTestCase):
                 "office_journal_bank_account", "office_journal_cheque_account",
                 "office_journal_receivable_account", "office_journal_revenue_account",
                 "office_journal_writeoff_account",
+                # #288/ب-١: رابطُ PDF للتقارير — يُطفأ فيبقى التصديرُ المباشر.
+                "office_report_pdf_link",
             },
         )
 
@@ -482,7 +484,7 @@ class SettingsApiTest(SettingTestCase):
         # أربعةُ #271، وأربعةُ «الضريبة ولائحة المواعيد» في #274، واثنانِ لـ#276،
         # و«بنودُ الرواتب» لـ#279، وعشرةُ «التذكيرات والنصوص» (#280)،
         # و«طريقةُ إدخال دفتر الزبون» لـ#286، وطريقةُ الأتعاب واعتمادُها لـ#282،
-        # وتذكيرُ الموعد لـ#281.
+        # وتذكيرُ الموعد لـ#281، و«رابط PDF للتقارير» لـ#288/ب-١.
         self.assertEqual(
             set(rows),
             {
@@ -510,6 +512,8 @@ class SettingsApiTest(SettingTestCase):
                 "office_journal_bank_account", "office_journal_cheque_account",
                 "office_journal_receivable_account", "office_journal_revenue_account",
                 "office_journal_writeoff_account",
+                # #288/ب-١: رابطُ PDF للتقارير.
+                "office_report_pdf_link",
             },
         )
 
