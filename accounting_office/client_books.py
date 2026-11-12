@@ -1031,6 +1031,10 @@ ENTRY_KIND_ACCOUNTS: dict[str, tuple[str, str]] = {
 #: كودُ حساب ض.ق.م في شجرة الزبون — **يُقرأ منها ولا يُصطنع له صفّ**.
 VAT_ACCOUNT_CODE = "2200"
 
+#: حسابُ الصندوق في شجرة البسيط — يُكتب عليه سطرُ النقد: مدينٌ قبضاً للتقرير
+#: اليومي ودائنٌ دفعاً للمصروف. وهو طرفُ `ENTRY_KIND_ACCOUNTS` لنوعيهما.
+CASH_ACCOUNT_CODE = "1100"
+
 #: الحسابان الذمّيان: الطرفُ المقابل يُكتب على سطرهما — اسمُ من عليه المال.
 PARTY_ACCOUNT_CODES: frozenset[str] = frozenset({"1300", "2100"})
 
@@ -1150,33 +1154,48 @@ def _double_paper_lines(paper, kind, *, amount, tax) -> list[dict]:
 
 
 def _simple_paper_lines(kind, *, amount, tax) -> list[dict]:
-    """الدفترُ البسيط سطرٌ واحدٌ على **حساب طبيعته** لا على الصندوق.
+    """الدفترُ البسيط: سطرٌ على **حساب طبيعته** وسطرُ نقدٍ لما قُبض أو دُفع.
 
     البيعُ والتقريرُ اليومي دائنان على الإيراد (`4100`)، والشراءُ والمصروفُ مدينان
     على مصروفهما (`5200`/`5100`) بصافيهما، والضريبةُ عليهما — لأن
     `book_reports._profit_rows` و`vat_from_book` يقرآن الدفترَ البسيط من حسابات
-    الإيراد والمصروف. وسطرٌ على الصندوق كان **يمحو الإيرادَ** من الأرباح والخسائر
-    ويقلب ذمّةَ الزبون في `_receivables` (مديناً `−117` لبيعٍ نُقد).
+    الإيراد والمصروف. وسطرٌ على الصندوق **بدل** سطر الحساب كان **يمحو الإيرادَ**
+    من الأرباح والخسائر ويقلب ذمّةَ الزبون في `_receivables` (مديناً `−117` لبيعٍ
+    نُقد).
 
-    **ولا طرفَ على السطر**: شجرةُ البسيط بلا حسابٍ ذمّي، فاسمُ طرفٍ على سطرٍ واحدٍ
-    لا يعني ديناً — يُنشئ في `_receivables` ذمّةً وهمية على من دفع نقداً.
+    **وسطرُ نقدٍ ثانٍ على `1100` بإجماليّ الورقة** (`amount + tax`): مدينٌ للتقرير
+    اليومي (قبض) ودائنٌ للمصروف (دفع) — لأن `book_reports._cash_lines` يقرأ
+    **الأصولَ وحدها**، فحركةٌ قبضت أو دفعت بلا سطرِ صندوق تُقرأ صفراً في تقرير
+    القبض والدفع. **ولا يجعله مزدوجاً**: `_assert_balanced` لا تسأل البسيط أصلاً،
+    فالتوازنُ بحسابين متقابلين تعريفُ المزدوج لا هذا السطر. وهو **بلا `tax_base`
+    ولا `tax_amount`** (ضريبةُ السطر صفر فيتخطّاه `vat_from_book`) **وبلا طرفٍ**
+    (فلا يدخل `_receivables`).
+
+    **والفاتورتان بلا سطر نقد**: قد لا تكونان مدفوعتين، فنقدُهما حركةٌ مستقلّة.
+
+    **ولا طرفَ على سطر الحساب**: شجرةُ البسيط بلا حسابٍ ذمّي، فاسمُ طرفٍ على سطرٍ
+    واحدٍ لا يعني ديناً — يُنشئ في `_receivables` ذمّةً وهمية على من دفع نقداً.
 
     وحركةُ البنك وحدها على البنك (`1200`) بإجماليها **بلا `tax_base`/`tax_amount`**:
     الضريبةُ عليها مرفوضةٌ أصلاً، فأساسٌ خاضعٌ عليها يُدخلها تقريرَ ض.ق.م بلا ضريبة.
-
-    ولا سطرَ ضريبةٍ هنا: لا أطرافَ في البسيط، وتفريقُ المبلغ على حسابين يجعله
-    مزدوجاً باسمٍ آخر.
     """
     debit_code, credit_code = ENTRY_KIND_ACCOUNTS[kind]
     if kind == BOOK_ENTRY_KIND_BANK_MOVEMENT:
         return [_entry_line(debit_code, debit=amount + tax)]
     if kind in VAT_OUTPUT_KINDS:
-        return [_entry_line(
+        natural = _entry_line(
             credit_code, credit=amount, tax_base=amount, tax_amount=tax,
-        )]
-    return [_entry_line(
-        debit_code, debit=amount, tax_base=amount, tax_amount=tax,
-    )]
+        )
+    else:
+        natural = _entry_line(
+            debit_code, debit=amount, tax_base=amount, tax_amount=tax,
+        )
+    total = amount + tax
+    if kind == BOOK_ENTRY_KIND_DAILY_REPORT:
+        return [natural, _entry_line(CASH_ACCOUNT_CODE, debit=total)]
+    if kind == BOOK_ENTRY_KIND_EXPENSE:
+        return [natural, _entry_line(CASH_ACCOUNT_CODE, credit=total)]
+    return [natural]
 
 
 def generate_entry_lines(book, *, kind, papers, entry_date) -> list[dict]:

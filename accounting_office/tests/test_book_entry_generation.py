@@ -13,9 +13,11 @@
   والمصاريف)، وتكرارُها على سطرين يضاعف الإقرار.
 - **ونسبةُ الورقة لا تُنسخ إلى السطر**: حقلُ السطر نسبةُ الخصم المعترف بها
   (`book_rates.recognised_vat_rate`) لا وصفَ الفاتورة — نسخُ 17٪ يخصم 17٪ وحدها.
-- **الدفترُ البسيط سطرٌ واحدٌ على حساب طبيعته** لا على الصندوق: إيرادٌ دائنٌ
-  للبيع والتقرير اليومي، ومشترياتٌ/مصروفٌ مدينان بالصافي — وسطرُ الصندوق يمحو
-  الإيرادَ ويقلب الذمّة في تقارير #288. وحركةُ البنك وحدها على البنك.
+- **الدفترُ البسيط: سطرٌ على حساب طبيعته** — إيرادٌ دائنٌ للبيع والتقرير اليومي،
+  ومشترياتٌ/مصروفٌ مدينان بالصافي — لأن `_profit_rows` و`vat_from_book` يقرآن
+  منها. **وسطرُ نقدٍ على `1100` بالإجمالي** للتقرير اليومي مديناً وللمصروف
+  دائناً: `cash` يقرأ الأصولَ وحدها، فسطرُ الحساب وحده يُخرجه صفراً. والفاتورتان
+  بلا سطر نقد (قد لا تكونان مدفوعتين)، وحركةُ البنك وحدها على البنك.
 - **الرفضُ برسالته**: ورقةٌ بلا مبلغ، وأوراقٌ من شهرين، وحركةُ بنكٍ بضريبة،
   وشجرةٌ بلا حساب ضريبة، وورقةٌ أُدخلت سابقاً أو لزبونٍ آخر.
 - **القناعُ والحارس**: بلا `office.amounts.view` لا توليدَ ولا كتابةَ مبلغِ ورقة
@@ -60,6 +62,9 @@ _, JAN_END = month_bounds(THIS_YEAR, 1)
 
 #: حسابُ الضريبة في شجرة الزبون — الكودُ الذي يُقرأ ولا يُصطنع له صفّ.
 VAT_CODE = "2200"
+
+#: حسابُ الصندوق في شجرة البسيط — سطرُ النقد الذي يقرؤه تقريرُ القبض والدفع.
+CASH_CODE = "1100"
 
 
 def money(line, key):
@@ -240,7 +245,7 @@ class DoubleBookGenerationTest(BookEntryGenerationTestCase):
 
 
 class SimpleBookGenerationTest(BookEntryGenerationTestCase):
-    """الدفترُ البسيط: طرفٌ واحدٌ على حساب طبيعته — لا على الصندوق."""
+    """الدفترُ البسيط: سطرُ حساب طبيعته، ونقدٌ على `1100` لما قُبض أو دُفع."""
 
     def setUp(self):
         super().setUp()
@@ -271,20 +276,27 @@ class SimpleBookGenerationTest(BookEntryGenerationTestCase):
         # ولا طرفَ على سطر البسيط: لا حسابَ ذمّي في شجرته، والبيعُ نقداً لا دَين.
         self.assertEqual(line["side_party"], "")
 
-    def test_an_expense_is_one_debit_line_on_the_expense_with_the_tax_on_it(self):
+    def test_an_expense_is_a_debit_on_the_expense_plus_a_cash_credit(self):
+        """المصروفُ مدينٌ على `5100` بالصافي وضريبته، ونقدُه دائنٌ على `1100`
+        بالإجمالي — `cash` يقرأ الأصولَ وحدها فلا يرى صرفاً بلا سطر صندوق."""
         row = self.paper(amount="200", tax="34", client=self.simple_client)
 
         entry = self.generate(
             [row], kind=BOOK_ENTRY_KIND_EXPENSE, client=self.simple_client,
         )
 
-        self.assertEqual(len(entry["lines"]), 1)
-        line = entry["lines"][0]
-        self.assertEqual(line["account_code"], "5100")
-        self.assertEqual(money(line, "debit"), Decimal("200.00"))
-        self.assertEqual(money(line, "credit"), Decimal("0.00"))
-        self.assertEqual(money(line, "tax_base"), Decimal("200.00"))
-        self.assertEqual(money(line, "tax_amount"), Decimal("34.00"))
+        self.assertEqual(len(entry["lines"]), 2)
+        lines = self.lines_by_code(entry)
+        self.assertEqual(money(lines["5100"], "debit"), Decimal("200.00"))
+        self.assertEqual(money(lines["5100"], "credit"), Decimal("0.00"))
+        self.assertEqual(money(lines["5100"], "tax_base"), Decimal("200.00"))
+        self.assertEqual(money(lines["5100"], "tax_amount"), Decimal("34.00"))
+        # الضريبةُ على سطر المصروف وحده: سطرُ النقد بالإجمالي وبلا ضريبةٍ ولا طرف.
+        self.assertEqual(money(lines[CASH_CODE], "debit"), Decimal("0.00"))
+        self.assertEqual(money(lines[CASH_CODE], "credit"), Decimal("234.00"))
+        self.assertEqual(money(lines[CASH_CODE], "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(lines[CASH_CODE], "tax_amount"), Decimal("0.00"))
+        self.assertEqual(lines[CASH_CODE]["side_party"], "")
 
     def test_a_bank_movement_stays_one_line_on_the_bank_without_tax(self):
         """حركةُ البنك وحدها على البنك: لا إيرادَ ولا مصروفَ فيها، والضريبةُ عليها
@@ -521,12 +533,14 @@ class GenerationPermissionTest(BookEntryGenerationTestCase):
 
 
 class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
-    """الضريبةُ المولَّدة تصل تقاريرَ #287: `vat_from_book` و`_profit_rows` و`_receivables`.
+    """الحركةُ المولَّدة تصل تقاريرَ #287/#288: `_cash` و`vat_from_book` و`_profit_rows` و`_receivables`.
 
     **الموضعُ لا المبلغ**: `vat_from_book` يقرأ `tax_amount` من **سطور الإيراد**
     (مبيعات) ومن **سطور الأصول والمصاريف** (مدخلات)، و`_profit_rows` يقرأ الإيرادَ
     والمصروف من حسابيهما. فسطرُ ضريبةٍ على `2200` (خصوم) أو على الصندوق يُخرج
     الإقرارَ صفراً أو سالباً — والموظّفُ يؤكّد ذلك الرقمَ التزاماً على الزبون.
+    **و`_cash` يقرأ الأصولَ وحدها**: حركةٌ قبضت أو دفعت بلا سطرِ `1100` تُقرأ صفراً
+    في تقرير القبض والدفع، وسطرُ النقد يُكتب بالإجمالي (`amount + tax`) بلا ضريبة.
     """
 
     SPAN_START = datetime.date(THIS_YEAR, 1, 1)
@@ -561,6 +575,20 @@ class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
         )
         return self.generate(
             [paper], kind=BOOK_ENTRY_KIND_SALES_INVOICE, client=self.simple_client,
+        )
+
+    def simple_expense(self, *, amount="200", tax="34"):
+        paper = self.paper(
+            amount=amount, tax=tax, code="income_tax", client=self.simple_client,
+        )
+        return self.generate(
+            [paper], kind=BOOK_ENTRY_KIND_EXPENSE, client=self.simple_client,
+        )
+
+    def simple_daily_report(self, *, amount="100", tax="17"):
+        paper = self.paper(amount=amount, tax=tax, client=self.simple_client)
+        return self.generate(
+            [paper], kind=BOOK_ENTRY_KIND_DAILY_REPORT, client=self.simple_client,
         )
 
     # ── المزدوج ──────────────────────────────────────────────────────────
@@ -653,6 +681,107 @@ class GeneratedEntryReportsTest(BookEntryGenerationTestCase):
         )
         self.assertEqual(payload["totals"]["debit_total"], "0.00")
         self.assertEqual(payload["totals"]["credit_total"], "0.00")
+
+    def test_a_simple_daily_report_reads_as_cash_and_still_as_revenue_and_vat(self):
+        """التقريرُ اليوميُّ قبضٌ نقديّ: سطرُ `1100` مدينٌ بالإجمالي (117).
+
+        سطرُ الإيراد وحده كان يُخرج `cash` صفراً (يقرأ الأصولَ وحدها)، والضريبةُ
+        تبقى على سطر الإيراد وحده فيقرؤها `vat_from_book` مرّةً واحدة، ولا طرفَ
+        على سطر النقد فلا ذمّةَ في `_receivables`.
+        """
+        entry = self.simple_daily_report()
+
+        cash = self.lines_by_code(entry)[CASH_CODE]
+        self.assertEqual(money(cash, "debit"), Decimal("117.00"))
+        self.assertEqual(money(cash, "credit"), Decimal("0.00"))
+        self.assertEqual(money(cash, "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(cash, "tax_amount"), Decimal("0.00"))
+        self.assertEqual(cash["side_party"], "")
+
+        payload = self.report(self.simple_client, "cash")
+        rows = {row["kind"]: row for row in payload["rows"]}
+        self.assertEqual(rows[BOOK_ENTRY_KIND_DAILY_REPORT]["count"], 1)
+        self.assertEqual(rows[BOOK_ENTRY_KIND_DAILY_REPORT]["debit"], "117.00")
+        self.assertEqual(rows[BOOK_ENTRY_KIND_DAILY_REPORT]["net"], "117.00")
+        self.assertEqual(payload["totals"]["net"], "117.00")
+        self.assertEqual(payload["totals"]["closing_balance"], "117.00")
+
+        income = self.report(self.simple_client, "income")
+        self.assertEqual(income["totals"]["revenue"], "100.00")
+        self.assertEqual(income["totals"]["expense"], "0.00")
+        vat = self.vat(self.simple_client)
+        self.assertEqual(vat["sales_tax"], "17.00")
+        self.assertEqual(vat["input_tax"], "0.00")
+        self.assertEqual(self.report(self.simple_client, "receivables")["rows"], [])
+
+    def test_a_simple_expense_reads_as_cash_out_and_still_as_expense_and_vat(self):
+        """المصروفُ دفعٌ نقديّ: سطرُ `1100` دائنٌ بالإجمالي (234)، والمصروفُ 200
+        في الأرباح والخسائر، وضريبتُه 34 مدخلات."""
+        entry = self.simple_expense()
+
+        cash = self.lines_by_code(entry)[CASH_CODE]
+        self.assertEqual(money(cash, "debit"), Decimal("0.00"))
+        self.assertEqual(money(cash, "credit"), Decimal("234.00"))
+        self.assertEqual(money(cash, "tax_base"), Decimal("0.00"))
+        self.assertEqual(money(cash, "tax_amount"), Decimal("0.00"))
+        self.assertEqual(cash["side_party"], "")
+
+        payload = self.report(self.simple_client, "cash")
+        rows = {row["kind"]: row for row in payload["rows"]}
+        self.assertEqual(rows[BOOK_ENTRY_KIND_EXPENSE]["count"], 1)
+        self.assertEqual(rows[BOOK_ENTRY_KIND_EXPENSE]["credit"], "234.00")
+        self.assertEqual(rows[BOOK_ENTRY_KIND_EXPENSE]["net"], "-234.00")
+        self.assertEqual(payload["totals"]["net"], "-234.00")
+        self.assertEqual(payload["totals"]["closing_balance"], "-234.00")
+
+        income = self.report(self.simple_client, "income")
+        self.assertEqual(income["totals"]["expense"], "200.00")
+        vat = self.vat(self.simple_client)
+        self.assertEqual(vat["sales_tax"], "0.00")
+        self.assertEqual(vat["input_tax"], "34.00")
+        self.assertEqual(self.report(self.simple_client, "receivables")["rows"], [])
+
+    def test_a_simple_credit_sale_writes_no_cash_line(self):
+        """الفاتورةُ قد لا تكون مدفوعة: لا سطرَ `1100` ولا قبضَ في `cash`.
+
+        سطرُ صندوقٍ على فاتورةٍ آجلة يُقبض بيعاً لم يُدفع، وسطرُ الإيراد وحده هو
+        الصحيح: النقدُ حركةٌ مستقلّةٌ حين يُدفع.
+        """
+        entry = self.simple_sale()
+
+        self.assertEqual(len(entry["lines"]), 1)
+        self.assertNotIn(CASH_CODE, self.lines_by_code(entry))
+        self.assertEqual(money(entry["lines"][0], "credit"), Decimal("100.00"))
+        self.assertEqual(money(entry["lines"][0], "tax_amount"), Decimal("17.00"))
+
+        payload = self.report(self.simple_client, "cash")
+        self.assertEqual(payload["totals"]["debit"], "0.00")
+        self.assertEqual(payload["totals"]["credit"], "0.00")
+        self.assertEqual(payload["totals"]["net"], "0.00")
+        self.assertEqual(payload["totals"]["closing_balance"], "0.00")
+        self.assertEqual({row["count"] for row in payload["rows"]}, {0})
+
+    def test_the_cash_report_reads_exactly_the_cash_lines_of_each_entry(self):
+        """**سطرُ النقد هو ما يقرؤه التقرير**: مجموعُ `1100` في الحركة الواحدة =
+        قبضُها/دفعُها في `cash`، والختامُ أرضيتُه + صافي الفترة."""
+        daily = self.simple_daily_report()
+        expense = self.simple_expense()
+
+        payload = self.report(self.simple_client, "cash")
+        rows = {row["kind"]: row for row in payload["rows"]}
+        self.assertEqual(
+            self.sums_by_code(daily, "debit")[CASH_CODE],
+            money(rows[BOOK_ENTRY_KIND_DAILY_REPORT], "debit"),
+        )
+        self.assertEqual(
+            self.sums_by_code(expense, "credit")[CASH_CODE],
+            money(rows[BOOK_ENTRY_KIND_EXPENSE], "credit"),
+        )
+        self.assertEqual(
+            money(payload["totals"], "closing_balance"),
+            money(payload["totals"], "opening_balance")
+            + money(payload["totals"], "net"),
+        )
 
 
 class PaperRateIsDisplayOnlyTest(BookEntryGenerationTestCase):
