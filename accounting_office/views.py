@@ -17,6 +17,7 @@ import mimetypes
 
 from django.contrib.auth import get_user_model
 from django.core.exceptions import ValidationError as DjangoValidationError
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse
 from django.utils import timezone
@@ -74,6 +75,7 @@ from accounting_office.serializers import (
     ApplyPackageSerializer,
     BookAccountRatesWriteSerializer,
     BookAccountWriteSerializer,
+    BookEntryFromDocumentsSerializer,
     BookEntryReverseSerializer,
     BookEntryWriteSerializer,
     BookImportWriteSerializer,
@@ -1555,24 +1557,48 @@ class OfficeDocumentViewSet(OfficeModuleViewSet):
 
     @action(detail=True, methods=["post"], url_path="status")
     def document_status(self, request, pk=None):
-        """`{status, channel?}` — «وصلت» و«وصلت ناقصة» بلا قناةٍ **400**.
+        """`{status, channel?}` + مبلغُ الورقة وضريبتُها — «وصلت» بلا قناةٍ **400**.
 
         الرؤيةُ أوّلاً (`get_object`) ثم المفتاح: ورقةُ غيرك 404، وقراءةُ عضوٍ
         بلا `office.clients.write` على ورقةٍ يراها 403.
+
+        **وحقولُ المبلغ الأربعة (#286/ج)** تُكتب إن أُرسلت وحدها: بلا
+        `office.amounts.view` **403**، وورقةٌ أُدخلت في حركةٍ حيّة ترفض تعديلَ
+        مبلغها **400**. والكتابتان في معاملةٍ واحدة كي لا يترك ردُّ 403 على
+        المبلغ حالةً مكتوبة.
         """
         row = self.get_object()
         self.require_write()
         serializer = DocumentStatusSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
-        services.set_document_status(
-            row,
-            status=serializer.validated_data["status"],
-            channel=serializer.validated_data.get("channel", ""),
-            actor=request.user,
-            day=timezone.localdate(),
-        )
+        data = dict(serializer.validated_data)
+        status_value = data.pop("status")
+        channel = data.pop("channel", "")
+        with transaction.atomic():
+            client_books.set_document_amounts(row, data, actor=request.user)
+            services.set_document_status(
+                row,
+                status=status_value,
+                channel=channel,
+                actor=request.user,
+                day=timezone.localdate(),
+            )
         row.refresh_from_db()
-        return Response(services.document_row_payload(row))
+        return Response(self._document_payload(row))
+
+    def _document_payload(self, row):
+        """سطرُ الورقة + حقولُ مبلغها — **والقناعُ على المبلغين**.
+
+        `services.document_row_payload` تبني سطرَ الحالة كما تقرؤه القوائمُ ولا
+        تعرف حقولَ #286/ج (تخرج من مسار الورقة هذا وحده)، فتُضاف بقناعها:
+        من لا يرى المبالغ يقرأ `null` ويقرأ الطرفَ والنسبة — الشكلُ لا يتغيّر.
+        """
+        payload = services.document_row_payload(row)
+        payload.update(client_books.document_values_payload(
+            row,
+            masked=client_books.amounts_masked(self.tenant, self.request.user),
+        ))
+        return payload
 
     @action(detail=True, methods=["get", "post"], url_path="files")
     def files(self, request, pk=None):
@@ -2429,6 +2455,27 @@ class OfficeClientBookViewSet(OfficeModuleViewSet):
             return int(raw)
         except (TypeError, ValueError):
             raise ValidationError({"year": "السنة بصيغة YYYY."}) from None
+
+    @action(detail=True, methods=["post"], url_path="entries/from-documents")
+    def entries_from_documents(self, request, pk=None):
+        """`POST …/entries/from-documents/` — بنودُ الحركة تُولَّد من الورقة (#286/ج).
+
+        **ولا حسابَ هنا**: `client_books` تولّد البنود ثم تكتب بـ`create_entry`
+        وحدَه، والـview يمرّر ويردّ. والزبونُ غيرُ المرئي **404** من `_book`،
+        والمبلغُ محجوبٌ عمّن لا يراه **403** من الخدمة، والورقةُ المُدخَلة أو
+        بلا مبلغ **400** برسالتها.
+        """
+        book = self._book(pk)
+        self.require_write()
+        serializer = BookEntryFromDocumentsSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        entry = client_books.create_entry_from_documents(
+            book, actor=request.user, **serializer.validated_data,
+        )
+        return Response(
+            client_books.entry_row(entry, masked=self._masked()),
+            status=status.HTTP_201_CREATED,
+        )
 
     @action(
         detail=True, methods=["get"],

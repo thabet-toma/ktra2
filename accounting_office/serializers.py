@@ -10,7 +10,7 @@
 """
 from rest_framework import serializers
 
-from accounting_office import payments, services
+from accounting_office import client_books, payments, services
 from accounting_office.models import (
     APPOINTMENT_KIND_CHOICES,
     BOOK_ACCOUNT_TYPE_CHOICES,
@@ -461,10 +461,27 @@ class ClientEventSerializer(serializers.Serializer):
 # **الحدودُ هنا شكلُ الطلب لا قيمتُه**: أسماءُ الحالات والقنوات وقيمُها تُقرأ في
 # الخدمة وحدها، فنداءٌ برمجيّ لا يمرّ بالمسلسِل يأخذ الرفضَ نفسه.
 class DocumentStatusSerializer(serializers.Serializer):
-    """`{status, channel?}` — والقناةُ تُلزم لمن وصلت في الخدمة لا هنا."""
+    """`{status, channel?}` — **ومعها مبلغُ الورقة وضريبتُها ونسبتُها وطرفُها**.
+
+    والقناةُ تُلزم لمن وصلت في الخدمة لا هنا. والأربعةُ اختياريةٌ (#286/ج): يُكتب
+    منها ما أُرسل وحده، فطلبٌ يغيّر الحالةَ لا يمحو مبلغَ ورقةٍ قُرئت — والقارئُ
+    للورقة يكتبها قبل أن تُولَّد بنودُ حركتها.
+    """
 
     status = serializers.CharField(max_length=20)
     channel = serializers.CharField(required=False, allow_blank=True, max_length=20)
+    amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True,
+    )
+    tax_amount = serializers.DecimalField(
+        max_digits=18, decimal_places=2, required=False, allow_null=True,
+    )
+    vat_rate = serializers.DecimalField(
+        max_digits=7, decimal_places=4, required=False, allow_null=True,
+    )
+    side_party = serializers.CharField(
+        required=False, allow_blank=True, max_length=200,
+    )
 
 
 class DefaultTrueBooleanField(serializers.BooleanField):
@@ -851,6 +868,27 @@ class BookEntryWriteSerializer(serializers.Serializer):
         max_length=100,
     )
     lines = BookEntryLineWriteSerializer(many=True)
+
+
+class BookEntryFromDocumentsSerializer(serializers.Serializer):
+    """حركةٌ تُولَّد من أوراقها: النوعُ والأوراقُ — **بلا بنودٍ ولا حساب** (#286/ج).
+
+    والخمسةُ وحدها: أنواعُ الورق التي لها خريطةُ حسابٍ في
+    `client_books.ENTRY_KIND_ACCOUNTS`. والقيدُ اليدويُّ والافتتاحيُّ يُكتبان
+    بـ`BookEntryWriteSerializer` بأيديهما، فيُرفضان هنا بدل أن يُولَّد لهما حكمٌ
+    لم يُقصد.
+    """
+
+    kind = serializers.ChoiceField(choices=list(client_books.ENTRY_KIND_ACCOUNTS))
+    #: الحدُّ يحرس `IN (…)` المقفول في الخدمة — كحدّ `BookEntryWriteSerializer`:
+    #: أوراقُ شهرِ زبونٍ واحدٍ عشراتٌ لا مئات.
+    documents = serializers.ListField(
+        child=serializers.IntegerField(), allow_empty=False, max_length=100,
+    )
+    entry_date = serializers.DateField(required=False, allow_null=True)
+    memo = serializers.CharField(
+        required=False, allow_blank=True, default="", max_length=300,
+    )
 
 
 class BookEntryReverseSerializer(serializers.Serializer):

@@ -53,6 +53,9 @@ APP_DIR = pathlib.Path(__file__).resolve().parent.parent
 #: نسبةُ ض.ق.م على الحساب/السطر، ونسبةُ ضريبة الدخل، ونسبةُ الإهلاك، ونسبتا
 #: لائحة المنصّة وتجاوز المكتب. قنعُها لا يخفي مالاً، وقيمةُ المبلغ المحسوب
 #: منها (`Obligation.computed_amount`) مسجَّلةٌ في `OBLIGATION_AMOUNT_KEYS`.
+#:
+#: `DocumentChecklistItem.vat_rate` (#286/ج): **نسبةٌ لا مبلغ** — النسبةُ كما وردت
+#: على الورقة، للعرض لا للحساب؛ ومبلغاها `amount`/`tax_amount` مسجَّلان.
 MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({
     "TaxThreshold.amount",
     "FeeInvoice.tax_percent",
@@ -62,6 +65,7 @@ MODEL_AMOUNT_EXEMPTIONS: frozenset[str] = frozenset({
     "ClientBookAccount.vat_rate",
     "ClientBookAccount.income_tax_rate",
     "ClientBookAccount.depreciation_rate",
+    "DocumentChecklistItem.vat_rate",
 })
 
 #: حقولُ نسبةٍ في **مُسلسِلات** الموديول — تُعفى من مسح المبالغ بالسبب نفسه
@@ -175,7 +179,11 @@ class AmountKeysGuardTest(SimpleTestCase):
             # #283: `paid_amount`/`remaining` على سطر المسودّة، و`amount` ثلاث
             # مرّات (التخصيصُ والدفعةُ والشطب) — مسجَّلةٌ في `PAYMENT_AMOUNT_KEYS`.
             [
-                "annual_sales", "suggested_price", "amount", "debit", "credit",
+                "annual_sales", "suggested_price", "amount", "amount",
+                # #286/ج: ضريبةُ الورقة على مُسلسِل الحالة — مبلغٌ مسجَّلٌ في
+                # `AMOUNT_KEYS`، ونسبتُها **نسبةٌ لا مبلغ**.
+                "tax_amount", "vat_rate",
+                "debit", "credit",
                 # #288/ب-٢: الأساسُ الخاضعُ وقيمةُ الضريبة على بند الحركة — مبلغان
                 # مسجَّلان في `BOOK_ENTRY_AMOUNT_KEYS` كالمدين والدائن.
                 "tax_base", "tax_amount",
@@ -243,6 +251,12 @@ class ModelAmountGuardTest(SimpleTestCase):
                 # #282: مبالغُ الأتعاب — الاشتراكُ وسعرُ الخدمة والإضافةُ والبندُ
                 # ومجموعا المسودّة، كلُّها مسجَّلةٌ لا مُعفاة.
                 "ClientServicePrice.amount",
+                # #286/ج: مبلغُ الورقة وضريبتُها — مسجَّلان لا مُعفَيان: يُقنَّعان
+                # في الردّ كما يُقنَّع كلُّ مبلغ. ونسبتُها `vat_rate` مُعفاةٌ لأنها
+                # **نسبةٌ لا مبلغ**، وتُسرد هنا كي لا يُعفى حقلٌ جديد بالاسم نفسه.
+                "DocumentChecklistItem.amount",
+                "DocumentChecklistItem.tax_amount",
+                "DocumentChecklistItem.vat_rate",
                 "FeeDraft.subtotal",
                 "FeeDraft.total",
                 "FeeDraftLine.amount",
