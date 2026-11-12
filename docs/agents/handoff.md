@@ -1,5 +1,36 @@
 # ملف التسليم
 
+## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-12 03:30 — أربعُ تذاكرَ مدموجة، النشرُ هو الخطوة)
+
+**الهدف:** `goal-e8d8b3d1-9118-43c6-93e3-5f0c07502bee` — إن ظهر disarmed فـ`update_goal action=resume`.
+
+**`newktra` = `09b6a43c`** (مدفوع). **الإنتاجُ لم يُنشَر بعد** — آخرُ منشورٍ هو `804afd5d` (`#285` + `#288/أ` + `#283/أ`).
+
+| التذكرة | الحالة | الشجرة/الالتزام |
+|---|---|---|
+| `#284/أ` القيدُ التلقائي | ✅ مدموجٌ (`ed7b738e`) — ينتظر النشر: هجرة `0015_office_client_partner` | `acct-284` على `f0c51c51` |
+| `#282/أ٢-١` فاتورةُ الأتعاب الورقية | ✅ مدموجٌ (`c5aa2e2a`) — ينتظر النشر: `0016_fee_invoices` + `docshare.0008` | `acct-282b` على `e0c061a5` |
+| `#283/ب` إشعارُ القبض وكشفُ الحساب | ✅ مدموجٌ (`b2c29bb2`) — ينتظر النشر: `0017_fee_statement` + `docshare.0009` | `acct-283b` على `a0c72850` |
+| `#288/ب-١` مستخرجاتُ الدفتر | ✅ مدموجٌ (`54cfe3c6`) — ينتظر النشر: `0018_client_book_report` + `docshare.0010` + `openpyxl` | `acct-288b` على `d7d7e4b0` |
+| `#282/أ٢-٢` شاشةُ المسودّات | ⏸ لم يبدأ | — |
+| `#288/ب-٢` القيدُ اليدوي والافتتاحية والاستيراد وض.ق.م | ⏸ لم يبدأ | — |
+| `#286/ج` بنودُ الحركة من الورقة | ⏸ لم يبدأ (قرارُ المالك في التوليد) | شجرةُ `acct-286c` جاهزة |
+| `#283/ج` تذكيرُ «اللي عليه» والكشفُ الشهري وحجبُ التسليم | ⏸ لم يبدأ | — |
+| `#287` · `#289` · `#290` · `#291` | ⏸ تنتظر | — |
+
+**أوّلُ عملٍ — النشر (بإجراء المهارة، وCI أخضر على `09b6a43c` شرطٌ):**
+1. `gh run list --branch newktra --limit 1` ⇒ أخضر (الفشلُ البيئيُّ المعروف وحده لا يوجد في CI لأنه لا يشغّل الماسحات على شجرات).
+2. على الخادم: `git fetch` ← `git merge origin/newktra` ← `git diff origin/newktra` **فارغ**.
+3. `venv/bin/pip install -r requirements.txt` (**`openpyxl` جديد**) ← `venv/bin/python manage.py check` و`makemigrations --check`.
+4. `venv/bin/python manage.py showmigrations accounting_office docshare` ⇒ المتوقّع `[ ]` لـ`0015`–`0018` و`0008`–`0010`؛ ومراجعةُ الهجرات: **كلُّها `CreateModel`/`AddField`/`AlterField`** (لا `RemoveField` ولا `DeleteModel` ولا `RunSQL`).
+5. **نسخةٌ احتياطية:** `mysqldump` ببيانات `.env` إلى `/root/backups/ktra-before-283b-<ts>.sql`.
+6. `venv/bin/python manage.py migrate` ← `npm run build` ثم `rsync -a --delete --exclude "/s/" --exclude "/media/" dist/ /var/www/ktra-pro.tech/` (الواجهة تغيّرت: تبويبُ الأتعاب وشاشةُ التقارير).
+7. `systemctl restart ktra.service` ← `is-active` و`NRestarts=0` ← ثلاثُ `curl` 200.
+8. `gh issue close 284` · `gh issue close 283` (الجزءان أ وب) · تعليقُ حالةٍ على `#282` (بقي أ٢/٢) و`#288` (بقي ب-٢).
+9. تحديثُ `acct-office-build.md` (نشرُ هذه الأربع) و`progress.md`.
+
+**دَينٌ تقنيّ مسجَّل (لا يُنسى):** `Greatest(remaining,0)` يُخفي تخصيصاً زائداً · مجموعتا `ledger` تتشاركان `page` · نسبةُ الضريبة غيرُ مؤرَّخة · لا عملةَ على `FeeDraft` · `vat` يحتاج مصدرَ نسبة · `Cheque` بلا فرادةٍ على `(tenant, cheque_number)` (**قرارُ مالك**) · إشعارُ القبض ببندٍ واحدٍ لكل زبونٍ في اليوم (فدفعتان في يومٍ تُطوى في بندٍ يذكر رقمَي الإشعار) · عضوٌ مقنَّعٌ يُنشئ رابطَ تقريرٍ يفتحه الزبونُ بالمبالغ كاملة (سلوكُ `payment_notice` نفسِه) · `requirements.local.txt` يحتاج سطر `openpyxl==3.1.5` · اختبارُ `after_sales/tests/test_shop_days_extension.py` هشٌّ بساعة الحائط · **درسٌ مكرَّر: لا `git add -A` في هذا المستودع** (ضمّ ملفات المالك مرّتين).
+
 ## ⏩ نقطة الاستئناف — ابدأ من هنا (2026-11-12 00:25 — توقّفٌ بطلب المالك للكومباكت)
 
 **الهدف:** `goal-e8d8b3d1-9118-43c6-93e3-5f0c07502bee` — إن ظهر disarmed فـ`update_goal action=resume`.
