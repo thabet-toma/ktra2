@@ -1,13 +1,30 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { Briefcase, LogOut, Scale, ShieldCheck, Users } from 'lucide-react';
+import { Briefcase, CreditCard, LogOut, Scale, ShieldCheck, Users } from 'lucide-react';
 
 import type { User } from '../../../types';
 import { AccountantProfilePage } from '../AccountantProfilePage';
 import { EngagementRevokedGuard } from '../EngagementRevokedGuard';
+import { PlanLimitReachedGuard } from '../../PlanLimitReachedGuard';
 import { OfficeClientFilePage } from './OfficeClientFilePage';
 import { OfficeClientsPage } from './OfficeClientsPage';
 
 type OfficeView = 'companies' | 'client' | 'profile';
+
+/**
+ * وجهةُ «خطّتي» من قشرة المكتب — المسارُ العامّ المستقلّ `/pricing`.
+ *
+ * **لماذا لا `/settings#my-plan`** (وجهةُ الحارس في التطبيق الرئيس): `App.tsx`
+ * تُرجع هذه القشرة **باكراً** لحساب المحاسب على كل مسارٍ داخليّ، فـ`/settings`
+ * لا تُصيَّر له إطلاقاً والمرساةُ لا تصل. و**لماذا لا `pushState`**: القشرةُ
+ * تقرأ المسارَ على `popstate` وحدَه، و`pushState` لا يُطلق حدثاً فلا يتغيّر
+ * المعروض — يتغيّر العنوانُ وحدَه. و`/pricing` مسارٌ مسجَّلٌ في `index.tsx`
+ * **خارج** شجرة المصادقة، فيُصيَّر لأيّ زائرٍ ولحساب المكتب كما يُصيَّر للزوّار؛
+ * وانتقالٌ كاملٌ إليه هو نفسُ نمط «العودة للوحة المنصة» في هذه القشرة.
+ */
+const PRICING_PATH = '/pricing';
+
+/** الخروجُ من القشرة إلى مسارٍ مسجَّلٍ خارجها — انتقالٌ كامل، لا `pushState`. */
+const openPricing = () => { window.location.assign(PRICING_PATH); };
 
 const NAV: { key: OfficeView; label: string; icon: React.ReactNode }[] = [
   { key: 'companies', label: 'شركاتي المرتبطة', icon: <Users className="h-5 w-5" /> },
@@ -35,6 +52,9 @@ const CLIENT_PATH = /^\/office\/clients\/(\d+)/;
  * #291: قُلّمت على بابين وشاشةٍ فرعية — «شركاتي المرتبطة» و«ملفي المهني» وملفّ
  * الزبون المالي الذي يُفتح من القائمة. لوحةُ المكتب والأجندة والبرامج والمهام
  * وإعدادات المكتب وسجلّ الزبائن الخارجي كلها حُذفت مع الطبقة القديمة.
+ *
+ * وفي رأسها بابُ «خطّتي»: يخرج من القشرة إلى `/pricing` المسجَّل خارجها، ونفسُ
+ * الوجهة يعطيها حارسُ حدّ الخطّة بزرِّه «عرض خطّتي» (211-P).
  */
 export const AccountantOfficeApp: React.FC<{
   user: User;
@@ -137,6 +157,13 @@ export const AccountantOfficeApp: React.FC<{
                 واجهة المحاسب القانوني — مستقلة عن أنظمة الشركات التجارية
               </p>
             </div>
+            <button
+              type="button"
+              onClick={openPricing}
+              className="inline-flex items-center gap-2 rounded-xl border border-indigo-300 px-4 py-2 text-sm font-black text-indigo-700 transition hover:bg-indigo-50 dark:border-indigo-700 dark:text-indigo-300 dark:hover:bg-slate-800"
+            >
+              <CreditCard className="h-4 w-4" /> خطّتي
+            </button>
             <nav className="flex flex-wrap gap-2 lg:hidden" aria-label="تنقّل المكتب">
               {NAV.map((item) => (
                 <button
@@ -167,6 +194,11 @@ export const AccountantOfficeApp: React.FC<{
 
           {/* إلغاء الشركة لارتباطنا أثناء العمل ⇒ حوار مانع وعودة لقائمة الشركات */}
           <EngagementRevokedGuard onReturn={() => { setClient(null); go('companies'); }} />
+
+          {/* 211-P: بلوغُ حدّ الخطّة ⇒ حوارٌ مانعٌ بوجهةٍ تعمل في هذه القشرة
+              (`/pricing` عبر `onViewPlan`)، لا حوارٍ يقود إلى `/settings#my-plan`
+              التي لا تُصيَّر لهذا الحساب أصلاً. */}
+          <PlanLimitReachedGuard onViewPlan={openPricing} />
         </div>
       </div>
     </div>

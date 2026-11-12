@@ -32,9 +32,9 @@ class PricingFrontendContractTest(TestCase):
         self.limit_guard_source = (
             frontend / "components" / "PlanLimitReachedGuard.tsx"
         ).read_text(encoding="utf-8")
-        self.office_settings_source = (
-            frontend / "components" / "accountant" / "office" / "OfficeSettingsPage.tsx"
-        ).read_text(encoding="utf-8")
+        # #291: `OfficeSettingsPage.tsx` حُذف مع الطبقة القديمة، فلا مصدرَ له يُقرأ
+        # هنا — وكلُّ تأكيدٍ كان موضوعُه ذلك الملفّ زال موضوعُه معه (انظر
+        # test_the_office_shell_escape_hatch_lands_somewhere_real).
         self.public_pricing_source = (repo_root / "core" / "public_pricing.py").read_text(encoding="utf-8")
         self.plans_source = (repo_root / "core" / "plans.py").read_text(encoding="utf-8")
         self.plan_usage_api_source = (
@@ -183,7 +183,7 @@ class PricingFrontendContractTest(TestCase):
         self.assertRegex(self.accountant_office_app_source, r"<PlanLimitReachedGuard[\s/>]")
 
     def test_the_office_shell_escape_hatch_lands_somewhere_real(self):
-        """زرُّ «عرض خطّتي» في قشرة المكتب يفتح شاشةً فيها البطاقةُ فعلاً.
+        """زرُّ «عرض خطّتي» في قشرة المكتب يفتح شاشةً مسجَّلةً تُصيَّر فعلاً.
 
         عطبان متراكبان جعلا الزرَّ بلا وجهةٍ لجمهور المكتب كلِّه:
 
@@ -198,6 +198,14 @@ class PricingFrontendContractTest(TestCase):
         المكتب بلا خطّةٍ ولا تفسير — وهو بعينه «toast بلا وجهة» الذي وُجدت 211-P
         لإزالته، عائداً من باب مراجعتي أنا حين أوجبتُ تركيبَ الحارس هنا بلا أن
         أتحقّق من وجود مقصدٍ له.
+
+        **#291:** شاشةُ إعدادات المكتب التي كانت تحمل البطاقة (`OfficeSettingsPage`)
+        حُذفت مع الطبقة القديمة — **زال موضوعُ** التأكيدين اللذين كانا يقرآنها هنا
+        (تركيب `<MyPlanCard>` و`id="my-plan"` فيها)، والبطاقةُ نفسُها يبقى حراستُها
+        مركَّبةً في `SettingsPage` بالتأكيد أعلاه. والوجهةُ صارت `/pricing`: مسارٌ
+        **مسجَّلٌ مستقلّ** في `index.tsx` خارج شجرة المصادقة، يُصيَّر لحساب المكتب
+        كما يُصيَّر للزوّار — والانتقالُ إليه كاملٌ (`window.location.assign`) لأنّ
+        `pushState` وحدَها لا تُبلّغ react-router ولا هذه القشرة.
         """
         self.assertIn(
             "onViewPlan", self.limit_guard_source,
@@ -207,14 +215,27 @@ class PricingFrontendContractTest(TestCase):
             self.accountant_office_app_source, r"<PlanLimitReachedGuard\s+onViewPlan=",
             "قشرةُ المكتب تركّب الحارسَ بلا وجهتها هي، فالزرُّ يقود إلى لوحة المكتب.",
         )
-        # **مركَّبةٌ لا مستوردة**: سطرُ الاستيراد وحدَه يُبقي الاسمَ في الملفّ،
-        # فتأكيدٌ على الاسم يبقى أخضرَ والمكوّنُ محذوفٌ من الشجرة — وهو تأكيدٌ
-        # لا يستطيع السقوطَ للسبب الذي يحمله اسمُه.
-        self.assertRegex(
-            self.office_settings_source, r"<MyPlanCard[\s/>]",
-            "إعداداتُ المكتب بلا «خطّتي» **مركَّبةً** — الوجهةُ موجودةٌ والشاشةُ فارغة.",
+        # الوجهةُ مسارٌ مسجَّلٌ فعلاً، لا نصٌّ في تعليق: ثابتٌ واحدٌ في القشرة
+        # يُثبت أنّ الحارسَ والبابَ الظاهر يقودان إلى المسار نفسِه، وسطرُ
+        # `index.tsx` يُثبت أنّ ذلك المسار مُسجَّلٌ — فلا سقوطَ إلى قشرةٍ لا
+        # تعرف المسار ولا 404.
+        self.assertIn(
+            "const PRICING_PATH = '/pricing';", self.accountant_office_app_source,
+            "قشرةُ المكتب بلا مسارِ أسعارٍ صريحٍ لوجهة «خطّتي».",
         )
-        self.assertIn('id="my-plan"', self.office_settings_source)
+        self.assertRegex(
+            self.index_source, r'path="/pricing"',
+            "وجهةُ «خطّتي» غيرُ مسجَّلةٍ مساراً مستقلاً في index.tsx.",
+        )
+        # وبابٌ ظاهرٌ في رأس القشرة إلى الوجهة نفسها — زرٌّ لا تعليق.
+        self.assertRegex(
+            self.accountant_office_app_source, r'<button\s+type="button"\s+onClick=\{openPricing\}',
+            "لا بابَ ظاهراً في رأس القشرة يقود إلى وجهة «خطّتي».",
+        )
+        self.assertRegex(
+            self.accountant_office_app_source, r"خطّتي\s*</button>",
+            "البابُ الظاهر لا يحمل نصَّ «خطّتي» — زرٌّ بلا اسمٍ لا يجده أحد.",
+        )
 
     def test_the_card_shows_the_plan_that_is_actually_enforced(self):
         """مفتاحُ الخطّة من حمولة الخادم لا من `SubscriptionPlan` على صفّ الشركة.
