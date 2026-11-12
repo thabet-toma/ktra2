@@ -364,14 +364,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   // بيان لهذا القالب (`general`)، فلا يستهلكها أحد.
   const manifestLinkMeta: Record<string, { label: string; icon: React.ReactNode }> = {
     dashboard: { label: "الرئيسية", icon: <Home className="h-4 w-4" /> },
-    "client-books": { label: "دفاتر عملائي", icon: <BookOpenCheck className="h-4 w-4" /> },
     "accounting-journal-entry": { label: "قيد اليومية", icon: <ArrowLeftRight className="h-4 w-4" /> },
     settings: { label: "الإعدادات", icon: <SettingsIcon className="h-4 w-4" /> },
     // ISSUE #271 — شاشتان لا تظهران في أيّ مصفوفةٍ يدوية أعلاه (بيانهما وحده
     // يرسمهما)، فتُعرَّف تسميتُهما وأيقونتُهما هنا.
     // ISSUE #275 — «اليوم» أوّلُ شاشات المكتب: ما حان وقتُه من التزاماتٍ وشغلات.
     // #289: لوحةُ صاحب المكتب — بندٌ بعد شاشتَي العمل، و`managerOnlyViews` أعلاه
-    // يخفيه عن غير المالك (كما يخفي «الرئيسية» و«دفاتر عملائي»).
+    // يخفيه عن غير المالك (كما يخفي «الرئيسية»).
     "office-dashboard": { label: "لوحة المكتب", icon: <LayoutDashboard className="h-4 w-4" /> },
     "office-today": { label: "اليوم", icon: <CalendarCheck className="h-4 w-4" /> },
     // #280/ب — «جاهز للإرسال»: ما حان إرسالُه اليوم لزبائن المكتب.
@@ -389,9 +388,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
   ] as { view: AppView; label: string; icon: React.ReactNode }[]).forEach((l) => {
     if (!manifestLinkMeta[String(l.view)]) manifestLinkMeta[String(l.view)] = { label: l.label, icon: l.icon };
   });
-  // «الرئيسية» و«دفاتر عملائي» كانتا مقصورتين على المدير بلا مدخل في كتالوج
+  // «الرئيسية» و«لوحة المكتب» كانتا مقصورتين على المدير بلا مدخل في كتالوج
   // الصلاحيات — القاعدة نفسها هنا كي لا تنقلب متاحةً للجميع بمجرّد دخولها البيان.
-  const shellSections = buildShellSections(shell, template, modules, can, user.role, ["dashboard", "client-books", "office-dashboard"], isManager);
+  const shellSections = buildShellSections(shell, template, modules, can, user.role, ["dashboard", "office-dashboard"], isManager);
   // الإعدادات تظهر مرّةً: إن كانت مجموعةً في البيان (دفتر عميل) لا تتكرّر كزرٍّ
   // عامٍّ أسفل القائمة.
   const manifestCoversSettings = shellSections.some((g) => g.views.includes("settings"));
@@ -721,20 +720,6 @@ export const Sidebar: React.FC<SidebarProps> = ({ user, activeView, setView }) =
             >
               <Home className="h-5 w-5 flex-shrink-0" />
               {showText && <span className="mr-3 text-right flex-1 font-semibold">الرئيسية</span>}
-            </button>
-          )}
-
-          {/* ISSUE #65: «دفاتر عملائي» — بابُ مكتب المحاسبة إلى دفاتر زبائنه.
-              فوق كل شيء لأنه أول ما يقصده صاحب المكتب، ومشروطٌ بقالب المكتب
-              وحده: فتح دفاترٍ لعملاء عملٌ مكتبيّ لا معنى له في شركةٍ تجارية. */}
-          {isManager && template === "accounting_firm" && (
-            <button
-              onClick={() => { setView("client-books"); if (isMobile) setIsMobileMenuOpen(false); }}
-              className={`flex items-center w-full p-3 rounded-lg transition-all ${isViewActive("client-books") ? "bg-[var(--color-primary)] text-white" : "text-[var(--color-text)] hover:bg-[var(--color-surface-2)]"}`}
-              title="دفاتر عملائي"
-            >
-              <BookOpenCheck className="h-5 w-5 flex-shrink-0" />
-              {showText && <span className="mr-3 text-right flex-1 font-semibold">دفاتر عملائي</span>}
             </button>
           )}
 

@@ -8,8 +8,8 @@ import {
 
 /* ── ISSUE #51 — القناع الحيّ: قالب الشركة يخفي شاشات كاملة ─────────────── */
 
-test('كل مفتاح في TEMPLATE_HIDDEN_VIEWS.accounting_firm موجود في خريطة الشاشات — لا مفاتيح ميتة', () => {
-  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_firm) {
+test('كل مفتاح في TEMPLATE_HIDDEN_VIEWS.accounting_office موجود في خريطة الشاشات — لا مفاتيح ميتة', () => {
+  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_office) {
     assert.ok(
       Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
       `مفتاح ميت: ${view} غير موجود في VIEW_PERMISSIONS`,
@@ -18,37 +18,37 @@ test('كل مفتاح في TEMPLATE_HIDDEN_VIEWS.accounting_firm موجود في
 });
 
 test('لا مفاتيح مكررة داخل قائمة القالب الواحد', () => {
-  const views = TEMPLATE_HIDDEN_VIEWS.accounting_firm;
+  const views = TEMPLATE_HIDDEN_VIEWS.accounting_office;
   assert.equal(new Set(views).size, views.length);
 });
 
-test('accounting_firm يخفي شاشات المخزون والاستيراد والمتجر وما بعد البيع والأجهزة الحساسة', () => {
+test('accounting_office يخفي شاشات المخزون والاستيراد والمتجر وما بعد البيع والأجهزة الحساسة', () => {
   for (const view of [
     'stock-levels', 'items-management', 'warehouses', 'stocktake',
     'deals-management', 'shipments-management', 'import-flow',
     'store-settings', 'after-sales', 'service-orders', 'sensitive-devices',
   ]) {
-    assert.equal(templateHidesView(view, 'accounting_firm'), true, view);
+    assert.equal(templateHidesView(view, 'accounting_office'), true, view);
   }
 });
 
-test('accounting_firm يخفي شاشات البضاعة الساكنة داخل مجموعة المبيعات', () => {
+test('accounting_office يخفي شاشات البضاعة الساكنة داخل مجموعة المبيعات', () => {
   // هذه الثلاث تعيش تحت «المبيعات» لا تحت «المخزون»، فبقيت ظاهرةً لمكتبٍ بلا
   // مخزون رغم أن القناع أخفى مجموعة المخزون كاملةً.
   for (const view of ['sales-delivery-notes', 'invoice-profits', 'reserved-stock']) {
-    assert.equal(templateHidesView(view, 'accounting_firm'), true, view);
+    assert.equal(templateHidesView(view, 'accounting_office'), true, view);
   }
 });
 
-test('accounting_firm يخفي شاشات المشتريات — تتّكئ على حسابات أسقطتها البذرة', () => {
+test('accounting_office يخفي شاشات المشتريات — تتّكئ على حسابات أسقطتها البذرة', () => {
   for (const view of [
     'purchase-invoices', 'purchase-receipts', 'purchase-return', 'purchase-settings',
   ]) {
-    assert.equal(templateHidesView(view, 'accounting_firm'), true, view);
+    assert.equal(templateHidesView(view, 'accounting_office'), true, view);
   }
 });
 
-test('accounting_firm لا يخفي ما تبقيه التذكرة — المبيعات والشركاء والمحاسبة والتقارير وسند الصرف', () => {
+test('accounting_office لا يخفي ما تبقيه التذكرة — المبيعات والشركاء والمحاسبة والتقارير وسند الصرف', () => {
   for (const view of [
     'sales-invoices', 'sales-customers', 'accounting-coa', 'accounting-journals',
     'accounting-cheques', 'sales-customer-payments', 'reports',
@@ -57,57 +57,21 @@ test('accounting_firm لا يخفي ما تبقيه التذكرة — المب�
     // issue #56 — سند المصروف مستندٌ محاسبيٌّ عام، يخدم مكتب المحاسبة أيضاً.
     'accounting-expense-vouchers',
   ]) {
-    assert.equal(templateHidesView(view, 'accounting_firm'), false, view);
+    assert.equal(templateHidesView(view, 'accounting_office'), false, view);
   }
 });
 
-/* ── ISSUE #81 — «دفتر عميل»: قناع accounting_firm + سطح البيع نفسه ────── */
+/* ── #291 — القالبُ الحيّ الوحيد للمكاتب؛ والقالبان القديمان خارج السِجلّ ── */
 
-test('كل مفتاح في TEMPLATE_HIDDEN_VIEWS.client_book موجود في خريطة الشاشات — لا مفاتيح ميتة', () => {
-  for (const view of TEMPLATE_HIDDEN_VIEWS.client_book) {
-    assert.ok(
-      Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
-      `مفتاح ميت: ${view} غير موجود في VIEW_PERMISSIONS`,
-    );
-  }
-});
-
-test('لا مفاتيح مكررة داخل قائمة client_book', () => {
-  const views = TEMPLATE_HIDDEN_VIEWS.client_book;
-  assert.equal(new Set(views).size, views.length);
-});
-
-test('client_book يخفي كل ما يخفيه accounting_firm', () => {
-  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_firm) {
-    assert.equal(templateHidesView(view, 'client_book'), true, view);
-  }
-});
-
-test('client_book يزيد فوق ذلك فواتير البيع وأوامر البيع وعروض الأسعار', () => {
-  for (const view of ['sales-invoices', 'sales-quotations', 'sales-orders']) {
-    assert.equal(templateHidesView(view, 'client_book'), true, view);
-  }
-});
-
-test('client_book لا يخفي سند القبض ولا سند الصرف ولا سند المصروف ولا المحاسبة', () => {
-  for (const view of [
-    'sales-customer-payments', 'supplier-payments', 'accounting-expense-vouchers',
-    'accounting-coa', 'accounting-journals', 'sales-customers',
-  ]) {
-    assert.equal(templateHidesView(view, 'client_book'), false, view);
-  }
-});
-
-test('accounting_firm لا يخفي فواتير البيع — الفرق الوحيد بينه وبين client_book', () => {
-  assert.equal(templateHidesView('sales-invoices', 'accounting_firm'), false);
-  assert.equal(templateHidesView('sales-invoices', 'client_book'), true);
+test('accounting_firm و client_book لم يعودا قالبين مخفيّين — حُذفا مع الطبقة القديمة', () => {
+  assert.equal(Object.prototype.hasOwnProperty.call(TEMPLATE_HIDDEN_VIEWS, 'accounting_firm'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(TEMPLATE_HIDDEN_VIEWS, 'client_book'), false);
+  assert.equal(templateHidesView('stock-levels', 'accounting_firm'), false);
+  assert.equal(templateHidesView('stock-levels', 'client_book'), false);
 });
 
 test('general: صفر تغيير — لا شاشة مخفية مهما كانت', () => {
-  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_firm) {
-    assert.equal(templateHidesView(view, 'general'), false, view);
-  }
-  for (const view of TEMPLATE_HIDDEN_VIEWS.client_book) {
+  for (const view of TEMPLATE_HIDDEN_VIEWS.accounting_office) {
     assert.equal(templateHidesView(view, 'general'), false, view);
   }
 });
@@ -145,13 +109,12 @@ test('ISSUE #62: كل شاشة كانت محكومة بالدور صار لها 
   }
 });
 
-/* «دفاتر عملائي» (`client-books`) وشاشات SQL الداخلية (`sql-products`
-   وأخواتها) بقيت على حارس الدور عمداً — رابطها في `Sidebar.tsx` نفسه محكوم
-   بالدور مباشرةً (`isManager` / `roles: [...]`) لا بـ`VIEW_PERMISSIONS`، فلا
-   قناتين مختلفتين هناك أصلاً. إضافة مفتاح هنا بلا تحريك ذلك الرابط كانت
-   ستفتح بابين متعارضين. */
-test('ISSUE #62: دفاتر العملاء وشاشات SQL خارج القائمة — رابطها في Sidebar محكوم بالدور مباشرةً لا بالصلاحية', () => {
-  for (const view of ['client-books', 'sql-products', 'sql-partners', 'sql-deals', 'sql-shipments']) {
+/* شاشات SQL الداخلية (`sql-products` وأخواتها) بقيت على حارس الدور عمداً —
+   رابطها في `Sidebar.tsx` نفسه محكوم بالدور مباشرةً (`roles: [...]`) لا
+   بـ`VIEW_PERMISSIONS`، فلا قناتين مختلفتين هناك أصلاً. إضافة مفتاح هنا بلا
+   تحريك ذلك الرابط كانت ستفتح بابين متعارضين. */
+test('ISSUE #62: شاشات SQL خارج القائمة — رابطها في Sidebar محكوم بالدور مباشرةً لا بالصلاحية', () => {
+  for (const view of ['sql-products', 'sql-partners', 'sql-deals', 'sql-shipments']) {
     assert.equal(
       Object.prototype.hasOwnProperty.call(VIEW_PERMISSIONS, view),
       false,

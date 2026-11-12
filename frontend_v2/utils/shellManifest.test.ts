@@ -21,13 +21,13 @@ const SAMPLE_SHELL: ShellManifest = {
 };
 
 // القاعدة الملزِمة للتذكرة #83: بيانٌ يذكر شاشةً يرفضها القناع الحيّ
-// (`TEMPLATE_HIDDEN_VIEWS` لـ`accounting_firm`) لا يُظهرها — `stock-movements`
+// (`TEMPLATE_HIDDEN_VIEWS` لـ`accounting_office`) لا يُظهرها — `stock-movements`
 // حالةٌ حقيقية من `core/shell_manifest.py` (مجموعة «التقارير») لا مصطنعة.
 test('يُقصي شاشةً مذكورة في البيان يرفضها قناع القالب', () => {
   const groups: ShellGroup[] = [
     { id: 'reports', label_term: 'nav.reports', views: ['reports', 'stock-movements'] },
   ];
-  const filtered = filterShellGroups(groups, 'accounting_firm');
+  const filtered = filterShellGroups(groups, 'accounting_office');
   assert.deepEqual(filtered[0].views, ['reports']);
 });
 
@@ -43,7 +43,7 @@ test('مجموعةٌ يُقصى كل ما فيها تُحذف كاملةً — �
     { id: 'ghost', label_term: 'nav.reports', views: ['stock-movements', 'items-management'] },
     { id: 'kept', label_term: 'nav.home', views: ['dashboard'] },
   ];
-  const filtered = filterShellGroups(groups, 'accounting_firm');
+  const filtered = filterShellGroups(groups, 'accounting_office');
   assert.deepEqual(filtered.map((g) => g.id), ['kept']);
 });
 
@@ -56,12 +56,12 @@ test('الوحدة المرخّصة المطفأة تُقصي شاشتها أي�
 });
 
 test('الشاشة غير المبنيّة تسقط إلى dashboard', () => {
-  assert.equal(resolveManifestView('office-desk', 'accounting_firm', ['office-desk']), 'dashboard');
-  assert.equal(resolveManifestView('document-coding', 'client_book', ['document-coding']), 'dashboard');
+  assert.equal(resolveManifestView('office-desk', 'accounting_office', ['office-desk']), 'dashboard');
+  assert.equal(resolveManifestView('document-coding', 'accounting_office', ['document-coding']), 'dashboard');
 });
 
 test('شاشةٌ مبنيّة وغير مقنَّعة تبقى كما هي', () => {
-  assert.equal(resolveManifestView('sales-invoices', 'accounting_firm', ['office-desk', 'document-coding']), 'sales-invoices');
+  assert.equal(resolveManifestView('sales-invoices', 'accounting_office', ['office-desk', 'document-coding']), 'sales-invoices');
 });
 
 // القاعدة الملزِمة للمراجعة: البيان يُرسَم فرعاً ثانياً في `Sidebar.tsx` عبر
@@ -71,7 +71,7 @@ test('قالبٌ ذو بيان: الأقسام الناتجة = مجموعات �
   const can = (key: string) => key !== 'accounting.report.view'; // يحجب «reports-only-managers» بالكامل
   const sections = buildShellSections(
     SAMPLE_SHELL,
-    'accounting_firm', // يقنّع stock-movements في مجموعة «fees»
+    'accounting_office', // يقنّع stock-movements في مجموعة «fees»
     {},
     can,
     'manager',

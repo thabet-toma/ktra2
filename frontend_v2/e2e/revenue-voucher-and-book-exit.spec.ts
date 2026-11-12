@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
 /**
- * بلاغُ المالك على «دفتر العميل» — ثلاثةُ عيوبٍ تُرى في المتصفّح وحده.
+ * بلاغُ المالك على «دفتر العميل» — عيبانِ يُريان في المتصفّح وحده.
  *
  * `tsc` لا يفحص خصائص JSX في هذا المستودع (لا `@types/react`)، فشاشةٌ جديدة
  * تُصرَّف نظيفةً وقد لا تُركَّب أصلاً. هذه الرحلة هي البرهان الوحيد على أن
@@ -11,8 +11,9 @@ import { expect, test, type Page } from '@playwright/test';
  *    يُكتب من الترميز الدفعي ثم لا يُرى في أي قائمة.
  * ٢. **وضع «حساب من الشجرة إلزاماً»**: خانةُ «أو اسم إيراد جديد» تختفي حين
  *    يُلزم الإعداد — فلا يكتب المستخدم فيها ثم يردّه الخادم.
- * ٣. **طريق الخروج من دفتر العميل**: زرٌّ أعلى مبدّل الشركات — وهو المكان
- *    الذي يبحث فيه المستخدم فعلاً، والدفتر نفسه ليس في القائمة.
+ *
+ * (العيبُ الثالث — طريق الخروج من دفتر العميل — سقط مع دفاتر العملاء المُدارة
+ * في #291، فحُذف اختباره.)
  *
  * `test.setTimeout` صريحة — تحميلٌ باردٌ لصفحة lazy.
  */
@@ -50,30 +51,19 @@ const VOUCHERS = [{
 const COMPANY = {
   TenantID: 1, CompanyName: 'مكتب المحاسبة', SubscriptionPlan: 'Pro',
   Status: 'Active', CreatedAt: '2026-01-01T00:00:00Z', import_enabled: false,
-  template: 'accounting_firm', managed_by: null,
+  template: 'accounting_office',
 };
 
-/** الدفتر المُدار — `managed_by` غير فارغ، وهو **ليس** في `my-companies`. */
-const BOOK = {
-  ...COMPANY, TenantID: 9, CompanyName: 'دفتر زبون الأفق',
-  template: 'client_book', managed_by: 1,
-};
-
-type Options = { entryMode?: 'free' | 'linked'; insideBook?: boolean };
+type Options = { entryMode?: 'free' | 'linked' };
 
 async function stub(page: Page, options: Options = {}) {
-  const { entryMode = 'free', insideBook = false } = options;
+  const { entryMode = 'free' } = options;
 
-  await page.addInitScript(([activeTenant, office]) => {
+  await page.addInitScript((activeTenant) => {
     localStorage.setItem('token', 'rev-e2e-token');
     localStorage.setItem('userId', 'rev-user');
     localStorage.setItem('tenantId', String(activeTenant));
-    if (office != null) {
-      // نفس المفتاح الذي يكتبه `enterManagedBook` — رحلةُ دخولٍ حقيقية.
-      sessionStorage.setItem('ktra_book_office', String(office));
-      sessionStorage.setItem('ktra_shell', 'platform');
-    }
-  }, [insideBook ? BOOK.TenantID : COMPANY.TenantID, insideBook ? COMPANY.TenantID : null] as const);
+  }, COMPANY.TenantID);
 
   await page.route('**/*', async (route) => {
     const request = route.request();
@@ -87,16 +77,14 @@ async function stub(page: Page, options: Options = {}) {
 
     if (path.endsWith('/hr/users/rev-user/')) return json(USER);
     if (path.endsWith('/tenants/companies/my-companies/')) {
-      // الدفتر مستثنى عمداً — هذا سببُ أن مبدّل الشركات لا يُخرج منه.
       return json([{
         id: 1, tenant: COMPANY, role: 'manager', is_default: true,
         created_at: '2026-01-01T00:00:00Z', can_access_import: false,
       }]);
     }
-    if (path.endsWith('/managed-books/')) return json([BOOK]);
     if (path.endsWith('/tenants/settings/current/')) {
       return json({
-        company_name_primary: insideBook ? BOOK.CompanyName : COMPANY.CompanyName,
+        company_name_primary: COMPANY.CompanyName,
         voucher_account_entry_mode: entryMode,
       });
     }
@@ -104,7 +92,7 @@ async function stub(page: Page, options: Options = {}) {
       return json({
         role: 'manager', is_manager: true,
         permissions: ['finance.revenue.create', 'finance.revenue.unpost'],
-        modules: {}, template: insideBook ? 'client_book' : 'accounting_firm',
+        modules: {}, template: 'accounting_office',
         terms: {}, shell: null, ui_mode: 'advanced',
       });
     }
@@ -151,20 +139,4 @@ test('وضع «حساب من الشجرة إلزاماً» يُخفي خانة �
   // حقل الشجرة يبقى؛ خانةُ الاسم الحرّ وحدها تختفي.
   await expect(page.getByText('حساب الإيراد — ماذا قُبض *')).toBeVisible();
   await expect(page.getByText('أو اسم إيراد جديد')).toHaveCount(0);
-});
-
-test('داخل دفتر العميل: طريقُ الخروج في مبدّل الشركات — حيث يبحث عنه المستخدم', async ({ page }) => {
-  test.setTimeout(90_000);
-  await stub(page, { insideBook: true });
-
-  await page.goto('/dashboard');
-  // الشريط الحالي (`ManagedBookBanner`) يبقى كما كان — لم يُمَسّ.
-  await expect(page.getByTestId('managed-book-banner')).toBeVisible({ timeout: 30_000 });
-
-  // والزرّ الجديد: يُفتح المبدّل فيكون الخروج أوّل ما تقع عليه العين. الدفتر
-  // نفسه ليس في القائمة، فبلا هذا الزرّ كان المبدّل بابَ خروجٍ بلا مخرج.
-  await page.getByRole('button', { name: /دفتر زبون الأفق|مكتب المحاسبة|اختر الشركة/ }).first().click();
-  const leave = page.getByTestId('switcher-leave-book');
-  await expect(leave).toBeVisible({ timeout: 15_000 });
-  await expect(leave).toContainText('اخرج من دفتر');
 });
